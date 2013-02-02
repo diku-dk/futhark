@@ -2,10 +2,12 @@
 module Main (main) where
 
 import Control.Applicative
+import Control.Monad
 import System.Environment (getArgs)
 
 import L0.AbSyn
 import L0.Parser (parseL0)
+import L0.TypeChecker
 
 -- To parse and prettyprint an input program located at ../DATA/filename.l0, run
 --  
@@ -33,10 +35,20 @@ main :: IO ()
 main = do args <- getArgs
           case args of
             ["-p", file] -> prettyprint file
-            _ -> error "Usage: -p <file>"
+            ["-t", file] -> typecheck file
+            _ -> error "Usage: <-p|-t> <file>"
 
 prettyprint :: FilePath -> IO ()
-prettyprint file = putStrLn =<< prettyPrint <$> parseL0 <$> readFile file
+prettyprint file = putStrLn =<< prettyPrint <$> parse file
+
+typecheck :: FilePath -> IO ()
+typecheck file = do prog <- parse file
+                    case checkProg prog of
+                      Left e -> error $ show e
+                      _      -> return ()
+
+parse :: FilePath -> IO (Prog Maybe)
+parse = return . parseL0 <=< readFile
 
 {-
   fun createLexerStream ( is : BasicIO.instream ) =

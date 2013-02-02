@@ -13,7 +13,9 @@ Executable l0c
 
   -- Packages needed in order to build this package.
   Build-depends: base >= 4,
-                 array >= 0.4
+                 array >= 0.4,
+                 containers >= 0.5,
+                 mtl >= 2.1
 
   Other-modules: L0.Parser,
                  L0.Lexer
