@@ -164,7 +164,7 @@ Exp  : intlit         { let INTLIT num pos = $1 in NumInt num pos }
      | Exp '>>' Exp   { ShiftR $1 $3 $2 }
      | Exp '<<' Exp   { ShiftL $1 $3 $2 }
      | Exp '&' Exp    { Band $1 $3 $2 }
-     | Exp '|' Exp    { Band $1 $3 $2 }
+     | Exp '|' Exp    { Bor $1 $3 $2 }
      | Exp '^' Exp    { Xor $1 $3 $2 }
 
      | Exp '=' Exp    { Equal $1 $3 $2 }
@@ -277,6 +277,6 @@ parseError :: [Token] -> a
 parseError [] = error "Parse error: End of file"
 parseError (tok:_) = error $ "Parse error at " ++ show (tokPos tok)
 
-parseL0 :: String -> Prog
+parseL0 :: String -> Prog Maybe
 parseL0 = l0 . alexScanTokens
 }
