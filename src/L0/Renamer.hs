@@ -53,11 +53,7 @@ renameBinding (s, t) = do
   return (s', t)
 
 renameExp :: Exp tf -> RenameM (Exp tf)
-renameExp (NumInt k pos) = return $ NumInt k pos
-renameExp (NumReal k pos) = return $ NumReal k pos
-renameExp (Log b pos) = return $ Log b pos
-renameExp (CharLit c pos) = return $ CharLit c pos
-renameExp (StringLit str pos) = return $ StringLit str pos
+renameExp (Literal val) = return $ Literal val
 renameExp (TupLit es ts pos) = do
   es' <- mapM renameExp es
   return $ TupLit es' ts pos

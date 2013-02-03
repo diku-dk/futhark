@@ -155,11 +155,9 @@ checkFun (fname, rettype, args, body, pos) = do
             return $ (pname, tp) : args'
 
 checkExp :: TypeBox tf => Exp tf -> TypeM (Type, Exp Identity)
-checkExp (NumInt k pos) = return (Int pos, NumInt k pos)
-checkExp (NumReal x pos) = return (Real pos, NumReal x pos)
-checkExp (Log b pos) = return (Bool pos, Log b pos)
-checkExp (CharLit c pos) = return (Char pos, CharLit c pos)
-checkExp (StringLit s pos) = return (Array (Char pos) Nothing pos, StringLit s pos)
+checkExp (Literal val) = do
+  (t, val') <- checkLiteral val
+  return (t, Literal val')
 checkExp (TupLit es t pos) = do
   (ets, es') <- unzip <$> mapM checkExp es
   t' <- t `unifyWithKnown` Tuple ets pos
@@ -363,6 +361,27 @@ checkExp (DoLoop loopvar boundexp body mergevars pos) = do
     case bnd of Nothing -> bad $ UnknownVariableError name pos
                 Just _  -> return ()
   return (bodyt, DoLoop loopvar boundexp' body' mergevars pos)
+
+checkLiteral :: TypeBox tf => Value tf -> TypeM (Type, Value Identity)
+checkLiteral (IntVal k pos) = return (Int pos, IntVal k pos)
+checkLiteral (RealVal x pos) = return (Real pos, RealVal x pos)
+checkLiteral (LogVal b pos) = return (Bool pos, LogVal b pos)
+checkLiteral (CharVal c pos) = return (Char pos, CharVal c pos)
+checkLiteral (StringVal s pos) = return (Array (Char pos) Nothing pos, StringVal s pos)
+checkLiteral (TupVal vals t pos) = do
+  (ts, vals') <- unzip <$> mapM checkLiteral vals
+  t' <- t `unifyWithKnown` Tuple ts pos
+  return (t', TupVal vals' (boxType t') pos)
+checkLiteral (ArrayVal vals t pos) = do
+  (ts, vals') <- unzip <$> mapM checkLiteral vals
+  -- Find the unified type of all subexpression types.
+  vt <- case ts of
+          [] -> bad $ TypeError pos "Empty array literal"
+          v:vts' -> foldM unifyKnownTypes v vts'
+  -- Unify that type with the one given for the array literal.
+  t' <- t `unifyWithKnown` Array vt Nothing pos
+  return (t', ArrayVal vals' (boxType t') pos)
+
 
 checkMonoBinOp :: TypeBox tf => (Exp Identity -> Exp Identity -> Pos -> Exp Identity)
                -> Type -> Exp tf -> Exp tf -> Pos -> TypeM (Type, Exp Identity)
