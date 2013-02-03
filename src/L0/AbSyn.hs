@@ -10,6 +10,7 @@ module L0.AbSyn
   , baseType
   , array
   , Value(..)
+  , ppValue
   , Exp(..)
   , expPos
   , ppExp
@@ -86,6 +87,26 @@ data Value = IntVal Int Pos
            | StringVal String Pos
            | TupVal [Value] Type Pos
            | ArrayVal [Value] Type Pos
+
+instance Eq Value where
+  IntVal x _ == IntVal y _ = x == y
+  RealVal x _ == RealVal y _ = x == y
+  LogVal a _ == LogVal b _ = a == b
+  CharVal a _ == CharVal b _ = a == b
+  StringVal s1 _ == StringVal s2 _ = s1 == s2
+  TupVal vs1 _ _ == TupVal vs2 _ _ = vs1 == vs2
+  ArrayVal vs1 _ _ == ArrayVal vs2 _ _ = vs1 == vs2
+  _ == _ = False
+
+instance Ord Value where
+  IntVal x _ <= IntVal y _ = x <= y
+  RealVal x _ <= RealVal y _ = x <= y
+  LogVal a _ <= LogVal b _ = a <= b
+  CharVal a _ <= CharVal b _ = a <= b
+  StringVal s1 _ <= StringVal s2 _ = s1 <= s2
+  TupVal vs1 _ _ <= TupVal vs2 _ _ = vs1 <= vs2
+  ArrayVal vs1 _ _ <= ArrayVal vs2 _ _ = vs1 <= vs2
+  _ <= _ = False
 
 -- | L0 Expression Language: literals + vars + int binops + array
 -- constructors + array combinators (SOAC) + if + function calls +
@@ -279,20 +300,20 @@ ppError (line,col) msg =
           "\nAT position " ++ show line ++ ":" ++ show col
 
 -- | Pretty printing a value.
-ppVal :: Int -> Value -> String
-ppVal _ (IntVal n _)      = show n
-ppVal _ (RealVal n _)     = show n
-ppVal _ (LogVal b _)      = show b
-ppVal _ (CharVal c _)     = show c
-ppVal _ (StringVal s _)   = show s
-ppVal d (ArrayVal vs _ _) =
-  " { " ++ intercalate ", " (map (ppVal d) vs) ++ " } "
-ppVal d (TupVal vs _ _)   =
-  " ( " ++ intercalate ", " (map (ppVal d) vs) ++ " ) "
+ppValue :: Int -> Value -> String
+ppValue _ (IntVal n _)      = show n
+ppValue _ (RealVal n _)     = show n
+ppValue _ (LogVal b _)      = show b
+ppValue _ (CharVal c _)     = show c
+ppValue _ (StringVal s _)   = show s
+ppValue d (ArrayVal vs _ _) =
+  " { " ++ intercalate ", " (map (ppValue d) vs) ++ " } "
+ppValue d (TupVal vs _ _)   =
+  " ( " ++ intercalate ", " (map (ppValue d) vs) ++ " ) "
 
 -- | Pretty printing an expression *)
 ppExp :: Int -> Exp tf -> String
-ppExp d (Literal val)     = ppVal d val
+ppExp d (Literal val)     = ppValue d val
 ppExp d (ArrayLit es _ _) =
   " { " ++ intercalate ", " (map (ppExp d) es) ++ " } "
 ppExp d (TupLit es _ _) =

@@ -15,7 +15,8 @@ Executable l0c
   Build-depends: base >= 4,
                  array >= 0.4,
                  containers >= 0.5,
-                 mtl >= 2.1
+                 mtl >= 2.1,
+                 either >= 3.0
 
   Other-modules: L0.Parser,
                  L0.Lexer
