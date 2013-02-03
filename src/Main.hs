@@ -8,6 +8,7 @@ import System.Environment (getArgs)
 import L0.AbSyn
 import L0.Parser (parseL0)
 import L0.TypeChecker
+import L0.Renamer
 
 -- To parse and prettyprint an input program located at ../DATA/filename.l0, run
 --  
@@ -36,7 +37,8 @@ main = do args <- getArgs
           case args of
             ["-p", file] -> prettyprint file
             ["-t", file] -> typecheck file
-            _ -> error "Usage: <-p|-t> <file>"
+            ["-r", file] -> rename file
+            _ -> error "Usage: <-p|-t|-r> <file>"
 
 prettyprint :: FilePath -> IO ()
 prettyprint file = putStrLn =<< prettyPrint <$> parse file
@@ -45,6 +47,13 @@ typecheck :: FilePath -> IO ()
 typecheck file = do prog <- parse file
                     case checkProg prog of
                       Left e -> error $ show e
+                      _      -> return ()
+
+rename :: FilePath -> IO ()
+rename file = do prog <- renameProg <$> parse file
+                 putStrLn $ prettyPrint prog
+                 case checkProg prog of
+                      Left e -> error $ "Type error after renaming:\n" ++ show e
                       _      -> return ()
 
 parse :: FilePath -> IO (Prog Maybe)
