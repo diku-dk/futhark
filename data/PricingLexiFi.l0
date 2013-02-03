@@ -1,4 +1,5 @@
-
+fun int grayCode(int x) =
+    (x >> 1) ^ x
 
 ////////////////////////////////////////
 /// Sobol Generator
@@ -15,10 +16,10 @@ fun int xorInds([int] indices, [int] dir_vs ) =
 fun [int] sobolIndI ( int bits_num, [[int]] dir_vs, int n ) =
     let bits    = iota   ( bits_num ) in
     let indices = filter ( testBit(grayCode(n)), bits )
-    in  map( xorInd(indices), dir_vs )  
+    in  map( xorInds(indices), dir_vs )  
 
 fun [real] sobolIndR( int bits_num, [[int]] dir_vs, int n ) = 
-    let divisor = 2 pow bits_num                   in
+    let divisor = 2.0 pow toReal (bits_num)        in
     let arri    = sobolIndI( bits_num, dir_vs, n ) in
         map( fn real (int x) => toReal(x) / divisor, arri )
 
@@ -134,7 +135,7 @@ fun [real] brownianBridgeDates (
     let rw = bb_data[2] in
 
 //  let gauss[ bi[0]-1 ] = sd[0] * gauss[0]  in
-    let bbrow = replicate(num_paths, 0)     in
+    let bbrow = replicate(num_dates, 0.0)     in
     let bbrow[ bi[0]-1 ] = sd[0] * gauss[0] in
 
     let gauss2 = 
@@ -157,7 +158,7 @@ fun [real] brownianBridgeDates (
         //   needs delayed arrays to be mapped nicely!
     in for i < num_dates-1 do     
             let ip1 = i+1 in
-            bbrow[num_dates-ip1] = bbrow[num_dates-ip1] - bbrow[(dates-ip1)-1] 
+            let bbrow[num_dates-ip1] = bbrow[num_dates-ip1] - bbrow[(num_dates-ip1)-1] in bbrow 
        merge bbrow
 
 // [num_dates,num_paths]
@@ -182,7 +183,7 @@ fun real zwop(real a, real b, int j) = a * b
 fun [real] fftmp(int num_paths, [[real]] md_c, [real] zi) = 
     map( fn real (int j) => 
             let x = zipWith(zwop, zi, md_c[j], iota(j+1))
-            in  reduce(op +, 0, x), 
+            in  reduce(op +, 0.0, x), 
          iota(num_paths) 
        )
 
@@ -194,7 +195,7 @@ fun [real] combineVs([real] n_row, [real] vol_row, [real] dr_row) =
     zipWith( op +, dr_row, zipWith( op *, n_row, vol_row ) ) 
 
 fun [[real]] mkPrices ([real] md_starts, [[real]] md_vols, [[real]] md_drifts, [[real]] noises) =
-    let e_rows = map( fn [real] (real x) => map(exp, x), 
+    let e_rows = map( fn [real] ([real] x) => map(exp, x), 
                       zipWith( combineVs, noises, md_vols, md_drifts ) 
                     )
         // If we use the scan(op *, e, {x1,..,xn}) = {e*x1, e*x1*x2,...,e*x1*x2*...xn}
@@ -214,7 +215,7 @@ fun [[real]] blackScholes(
                 [[real]] md_c,         //[num_paths, num_paths]
                 [[real]] md_vols,      //[num_paths, num_dates]
                 [[real]] md_drifts,    //[num_paths, num_dates]
-                [[real]] md_starts,    //[num_paths]
+                [real] md_starts,    //[num_paths]
                 [[real]] bb_arr        //[num_dates,num_paths]
            ) = 
     let noises = correlateDeltas(num_paths, md_c, bb_arr) 
@@ -224,28 +225,29 @@ fun [[real]] blackScholes(
 // MAIN
 ////////////////////////////////////////
 
-fun int main() = 
+fun real main() = 
     let (num_mc_it, num_dates, num_und, num_bits, dir_vs) = getHLdata    () in
     let (md_c, md_vols, md_drifts, md_st, md_dv, md_disc) = getModelData () in
-    let (bb_bi, bb_li, bb_ri, bb_sd, bb_lw, bb_rw)        = getBBdata    () in
+    let num_paths = 42 in // Troels: ???
+    let (bb_inds, bb_data)        = getBBdata    () in
 
     let sobol_mat = map ( sobolIndR(num_bits, dir_vs), map(op +(1), iota(num_mc_it)) ) in
     let gauss_mat = map ( ugaussian, sobol_mat )                                       in
     let bb_mat    = map ( brownianBridge( num_paths, num_dates, bb_inds, bb_data ), gauss_mat )    in
-    let bs_vect   = map ( blackScholes( num_paths, md_c, md_vols, md_drifts, md_starts ), bb_mat ) in
+    let bs_vect   = map ( blackScholes( num_paths, md_c, md_vols, md_drifts, md_st ), bb_mat ) in
     let payoffs   = map ( payoff2(md_disc), bs_vect ) in
-    let payoff    = reduce ( op +, 0, payoffs )       in
+    let payoff    = reduce ( op +, 0.0, payoffs )       in
             payoff / toReal(num_mc_it)
 
 ////////////////////////////////////////
 // PAYOFF FUNCTION
 ////////////////////////////////////////
 
-fun real payoff2 ([[real]] md_disc, [[real]] xss) =        
+fun real payoff2 ([real] md_disc, [[real]] xss) =        
 // invariant: length(xss) == 5, i.e., 5x3 matrix
     let divs    = { 1.0/3758.05, 1.0/11840.0, 1.0/1200.0 }             in
     let xss_div = map( fn [real] ([real] xs) => zipWith(op *, xs, divs), xss     ) in
-    let mins    = map( fn  real  ([real] xs) => reduce(MIN, xs[0], xs ), xss_div )
+    let mins    = map( MIN, xss_div )
     in  if( 1.0 <= mins[0] ) then trajInner(1150.0, 0, md_disc)
         else if( 1.0 <= mins[1] ) then trajInner(1300.0, 1, md_disc)
              else if( 1.0 <= mins[2] ) then trajInner(1450.0, 2, md_disc)
@@ -254,7 +256,7 @@ fun real payoff2 ([[real]] md_disc, [[real]] xss) =
                             else if( 0.75 < mins[4] ) then trajInner(1000.0, 4, md_disc)
                                  else trajInner(1000.0 * mins[4], 4, md_disc)
 
-fun real MIN([real] arr) = reduce( fn bool (real x, real y) => if(x<y) then x else y, arr[0], arr )
+fun real MIN([real] arr) = reduce( fn real (real x, real y) => if(x<y) then x else y, arr[0], arr )
 
 fun real trajInner(real amount, int ind, [real] disc) = amount * disc[ind]
 
