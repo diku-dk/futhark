@@ -79,19 +79,19 @@ array 0 t = t
 array n t = array (n-1) $ Array t Nothing (typePos t)
 
 -- | Every possible value in L0.
-data Value tf = IntVal Int Pos
-              | RealVal Double Pos
-              | LogVal Bool Pos
-              | CharVal Char Pos
-              | StringVal String Pos
-              | TupVal [Value tf] (tf Type) Pos
-              | ArrayVal [Value tf] (tf Type) Pos
+data Value = IntVal Int Pos
+           | RealVal Double Pos
+           | LogVal Bool Pos
+           | CharVal Char Pos
+           | StringVal String Pos
+           | TupVal [Value] Type Pos
+           | ArrayVal [Value] Type Pos
 
 -- | L0 Expression Language: literals + vars + int binops + array
 -- constructors + array combinators (SOAC) + if + function calls +
 -- let + tuples (literals & identifiers) TODO: please add float,
 -- double, long int, etc.
-data Exp tf = Literal (Value tf)
+data Exp tf = Literal Value
             | TupLit    [Exp tf] (tf Type) Pos -- Tuple and Arrays Literals
                                                   -- e.g., (1+3, (x, y+z))
                                                   -- 2nd argument is the tuple's type
@@ -279,7 +279,7 @@ ppError (line,col) msg =
           "\nAT position " ++ show line ++ ":" ++ show col
 
 -- | Pretty printing a value.
-ppVal :: Int -> Value tf -> String
+ppVal :: Int -> Value -> String
 ppVal _ (IntVal n _)      = show n
 ppVal _ (RealVal n _)     = show n
 ppVal _ (LogVal b _)      = show b

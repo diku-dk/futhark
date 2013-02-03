@@ -362,7 +362,7 @@ checkExp (DoLoop loopvar boundexp body mergevars pos) = do
                 Just _  -> return ()
   return (bodyt, DoLoop loopvar boundexp' body' mergevars pos)
 
-checkLiteral :: TypeBox tf => Value tf -> TypeM (Type, Value Identity)
+checkLiteral :: Value -> TypeM (Type, Value)
 checkLiteral (IntVal k pos) = return (Int pos, IntVal k pos)
 checkLiteral (RealVal x pos) = return (Real pos, RealVal x pos)
 checkLiteral (LogVal b pos) = return (Bool pos, LogVal b pos)
@@ -370,8 +370,8 @@ checkLiteral (CharVal c pos) = return (Char pos, CharVal c pos)
 checkLiteral (StringVal s pos) = return (Array (Char pos) Nothing pos, StringVal s pos)
 checkLiteral (TupVal vals t pos) = do
   (ts, vals') <- unzip <$> mapM checkLiteral vals
-  t' <- t `unifyWithKnown` Tuple ts pos
-  return (t', TupVal vals' (boxType t') pos)
+  t' <- t `unifyKnownTypes` Tuple ts pos
+  return (t', TupVal vals' t' pos)
 checkLiteral (ArrayVal vals t pos) = do
   (ts, vals') <- unzip <$> mapM checkLiteral vals
   -- Find the unified type of all subexpression types.
@@ -379,8 +379,8 @@ checkLiteral (ArrayVal vals t pos) = do
           [] -> bad $ TypeError pos "Empty array literal"
           v:vts' -> foldM unifyKnownTypes v vts'
   -- Unify that type with the one given for the array literal.
-  t' <- t `unifyWithKnown` Array vt Nothing pos
-  return (t', ArrayVal vals' (boxType t') pos)
+  t' <- t `unifyKnownTypes` Array vt Nothing pos
+  return (t', ArrayVal vals' t' pos)
 
 
 checkMonoBinOp :: TypeBox tf => (Exp Identity -> Exp Identity -> Pos -> Exp Identity)
