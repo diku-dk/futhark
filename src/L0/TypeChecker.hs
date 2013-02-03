@@ -1,6 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module L0.TypeChecker ( checkProg
-                      , TypeError(..)) where
+                      , TypeError(..))
+  where
 
 import Control.Applicative
 import Control.Monad.Identity
@@ -12,8 +13,8 @@ import qualified Data.Map as M
 
 import L0.AbSyn
 
-data TypeEnv = TypeEnv { env_vtable :: M.Map String Type
-                       , env_ftable :: M.Map String (Type, [Type]) }
+data TypeEnv = TypeEnv { envVtable :: M.Map String Type
+                       , envFtable :: M.Map String (Type, [Type]) }
 
 data TypeError = TypeError Pos String
                | UnifyError Type Type
@@ -24,7 +25,7 @@ data TypeError = TypeError Pos String
                | InvalidPatternError TupIdent Type
                | UnknownVariableError String Pos
                | UnknownFunctionError String Pos
-               | ParameterCountMismatch String Int Int
+               | ParameterCountMismatch String Pos Int Int
 
 instance Show TypeError where
   show (TypeError pos msg) =
@@ -53,8 +54,8 @@ instance Show TypeError where
     "Unknown variable " ++ name ++ " referenced at " ++ posStr pos ++ "."
   show (UnknownFunctionError fname pos) =
     "Unknown function " ++ fname ++ " called at " ++ posStr pos ++ "."
-  show (ParameterCountMismatch fname expected got) =
-    "Function " ++ fname ++ " expects " ++ show expected ++ " arguments, but got " ++ show got ++ "."
+  show (ParameterCountMismatch fname pos expected got) =
+    "In call of Function " ++ fname ++ " at position " ++ posStr pos ++ ": expecting " ++ show expected ++ " arguments, but got " ++ show got ++ "."
 
 class TypeBox tf where
   unboxType :: tf t -> Maybe t
@@ -79,7 +80,7 @@ bad = TypeM . lift . Left
 
 bindVar :: TypeEnv -> Binding -> TypeEnv
 bindVar env (name,tp) =
-  env { env_vtable = M.insert name tp $ env_vtable env }
+  env { envVtable = M.insert name tp $ envVtable env }
 
 bindVars :: TypeEnv -> [Binding] -> TypeEnv
 bindVars = foldl bindVar
@@ -98,13 +99,6 @@ unifyKnownTypes (Array t1 e pos) (Array t2 _ _) = do
   return $ Array t e pos
 unifyKnownTypes t1 t2 = bad $ UnifyError t1 t2
 
-unifyTypes :: TypeBox tf => tf Type -> tf Type -> TypeM (tf Type)
-unifyTypes t1 t2 = case (unboxType t1, unboxType t2) of
-                     (Just t1', Nothing) -> return $ boxType t1'
-                     (Nothing, Just t2') -> return $ boxType t2'
-                     (Nothing, Nothing) -> return t1
-                     (Just t1', Just t2') -> boxType <$> unifyKnownTypes t1' t2'
-
 unifyWithKnown :: TypeBox tf => tf Type -> Type -> TypeM Type
 unifyWithKnown t1 t2 = case unboxType t1 of
                          Nothing -> return t2
@@ -116,11 +110,15 @@ require ts (et,e)
   | et `elem` ts = return (et,e)
   | otherwise = bad $ TypeError (expPos e) $ "Expression type must be one of " ++ intercalate ", " (map ppType ts) ++ "."
 
-checkProg :: Prog Maybe -> Either TypeError (Prog Identity)
+elemType :: Type -> TypeM Type
+elemType (Array t _ _) = return t
+elemType t = bad $ TypeError (typePos t) $ "Type of expression is not array, but " ++ ppType t ++ "."
+
+checkProg :: TypeBox tf => Prog tf -> Either TypeError (Prog Identity)
 checkProg prog = do
   ftable <- buildFtable
-  let typeenv = TypeEnv { env_vtable = M.empty
-                        , env_ftable = ftable }
+  let typeenv = TypeEnv { envVtable = M.empty
+                        , envFtable = ftable}
   runTypeM typeenv $ mapM checkFun prog
   where
     -- To build the ftable we loop through the list of function
@@ -129,7 +127,7 @@ checkProg prog = do
     -- position information, in order to report both locations of
     -- duplicate function definitions.  The position information is
     -- removed at the end.
-    buildFtable = M.map rmPos <$> foldM expand M.empty prog
+    buildFtable = M.map rmPos <$> foldM expand builtins prog
     expand ftable (name,ret,args,_,pos)
       | Just (_,_,pos2) <- M.lookup name ftable =
         Left $ DupDefinitionError name pos pos2
@@ -137,8 +135,12 @@ checkProg prog = do
         let argtypes = map snd args -- Throw away argument names.
         in Right $ M.insert name (ret,argtypes,pos) ftable
     rmPos (ret,args,_) = (ret,args)
+    builtins = M.fromList [("toReal", (Real (0,0), [Int (0,0)], (0,0)))
+                          ,("sqrt", (Real (0,0), [Real (0,0)], (0,0)))
+                          ,("log", (Real (0,0), [Real (0,0)], (0,0)))
+                          ,("exp", (Real (0,0), [Real (0,0)], (0,0)))]
 
-checkFun :: FunDec Maybe -> TypeM (FunDec Identity)
+checkFun :: TypeBox tf => FunDec tf -> TypeM (FunDec Identity)
 checkFun (fname, rettype, args, body, pos) = do
   args' <- checkArgs
   (bodytype, body') <- local (`bindVars` args') $ checkExp body
@@ -152,7 +154,7 @@ checkFun (fname, rettype, args, body, pos) = do
           | otherwise =
             return $ (pname, tp) : args'
 
-checkExp :: Exp Maybe -> TypeM (Type, Exp Identity)
+checkExp :: TypeBox tf => Exp tf -> TypeM (Type, Exp Identity)
 checkExp (NumInt k pos) = return (Int pos, NumInt k pos)
 checkExp (NumReal x pos) = return (Real pos, NumReal x pos)
 checkExp (Log b pos) = return (Bool pos, Log b pos)
@@ -169,7 +171,7 @@ checkExp (ArrayLit es t pos) = do
           [] -> bad $ TypeError pos "Empty array literal"
           e:ets' -> foldM unifyKnownTypes e ets'
   -- Unify that type with the one given for the array literal.
-  t' <- t `unifyWithKnown` et
+  t' <- t `unifyWithKnown` Array et Nothing pos
   return (t', ArrayLit es' (boxType t') pos)
 checkExp (Plus e1 e2 t pos) = checkPolyBinOp Plus [Real pos, Int pos] e1 e2 t pos
 checkExp (Minus e1 e2 t pos) = checkPolyBinOp Minus [Real pos, Int pos] e1 e2 t pos
@@ -198,13 +200,13 @@ checkExp (If e1 e2 e3 t pos) = do
   bt <- unifyWithKnown t =<< unifyKnownTypes t2 t3
   return (bt, If e1' e2' e3' (boxType bt) pos)
 checkExp (Var name t pos) = do
-  bnd <- asks $ M.lookup name . env_vtable
+  bnd <- asks $ M.lookup name . envVtable
   case bnd of Nothing -> bad $ UnknownVariableError name pos
               Just vt -> do
                 t' <- t `unifyWithKnown` vt
                 return (t', Var name (boxType t') pos)
 checkExp (Apply fname args t pos) = do
-  bnd <- asks $ M.lookup fname . env_ftable
+  bnd <- asks $ M.lookup fname . envFtable
   case bnd of
     Nothing -> bad $ UnknownFunctionError fname pos
     Just (rettype, paramtypes) -> do
@@ -213,26 +215,28 @@ checkExp (Apply fname args t pos) = do
       if length argtypes == length paramtypes then do
         zipWithM_ unifyKnownTypes argtypes paramtypes
         return (rettype', Apply fname args' (boxType rettype') pos)
-      else bad $ ParameterCountMismatch fname (length paramtypes) (length argtypes)
+      else bad $ ParameterCountMismatch fname pos (length paramtypes) (length argtypes)
 checkExp (Let pat e Nothing Nothing body pos) = do
   (et, e') <- checkExp e
   bnds <- checkPattern pat et
   local (`bindVars` bnds) $ do
     (bt, body') <- checkExp body
     return (bt, Let pat e' Nothing Nothing body' pos)
-checkExp (Let (Id name namepos) e (Just idxes) (Just ve) body pos) = do
-  (et, e') <- checkExp e
-  when (arrayDims et < length idxes) $
-    bad $ TypeError pos $ show (length idxes) ++ " indices given, but type of expression at " ++ posStr (expPos e) ++ " has " ++ show (arrayDims et) ++ " dimensions."
-  (_, idxes') <- unzip <$> mapM (require [Int pos] <=< checkExp) idxes
-  (_, ve') <- require [baseType et] =<< checkExp ve
-  local (`bindVar` (name, et)) $ do
-    (bt, body') <- checkExp body
-    return (bt, Let (Id name namepos) e' (Just idxes') (Just ve') body' pos)
 checkExp (Let (TupId _ _) _ _ _ _ pos) =
   bad $ TypeError pos "Cannot use tuple pattern when using rebinding syntax"
+checkExp (Let (Id name namepos) e (Just idxes) (Just ve) body pos) = do
+  (et, e') <- checkExp e
+  case indexArray (length idxes) et of
+    Nothing -> bad $ TypeError pos $ show (length idxes) ++ " indices given, but type of expression at " ++ posStr (expPos e) ++ " has " ++ show (arrayDims et) ++ " dimensions."
+    Just elemt -> do
+      (_, idxes') <- unzip <$> mapM (require [Int pos] <=< checkExp) idxes
+      (_, ve') <- require [elemt] =<< checkExp ve
+      (bt, body') <- local (`bindVar` (name, et)) $ checkExp body
+      return (bt, Let (Id name namepos) e' (Just idxes') (Just ve') body' pos)
+checkExp (Let (Id _ _) _ _ _ _ pos) =
+  bad $ TypeError pos "Index or element part missing (I think this should never happen)."
 checkExp (Index name idxes intype restype pos) = do
-  bnd <- asks $ M.lookup name . env_vtable
+  bnd <- asks $ M.lookup name . envVtable
   case bnd of
     Nothing -> bad $ UnknownVariableError name pos
     Just vt -> do
@@ -248,11 +252,11 @@ checkExp (Index name idxes intype restype pos) = do
 checkExp (Iota e pos) = do
   (_, e') <- require [Int pos] =<< checkExp e
   return (Array (Int pos) Nothing pos, Iota e' pos)
-checkExp (Replicate countexp valexp elemtype pos) = do
+checkExp (Replicate countexp valexp outtype pos) = do
   (_, countexp') <- require [Int pos] =<< checkExp countexp
   (valtype, valexp') <- checkExp valexp
-  elemtype' <- elemtype `unifyWithKnown` valtype
-  return (elemtype', Replicate countexp' valexp' (boxType elemtype') pos)
+  outtype' <- outtype `unifyWithKnown` Array valtype Nothing pos
+  return (outtype', Replicate countexp' valexp' (boxType outtype') pos)
 checkExp (Reshape shapeexps arrexp intype restype pos) = do
   (_, shapeexps') <- unzip <$> mapM (require [Int pos] <=< checkExp) shapeexps
   (arrt, arrexp') <- checkExp arrexp
@@ -268,20 +272,113 @@ checkExp (Transpose arrexp intype outtype pos) = do
   intype' <- intype `unifyWithKnown` arrt
   outtype' <- outtype `unifyWithKnown` intype'
   return (outtype', Transpose arrexp' (boxType intype') (boxType outtype') pos)
+checkExp (Map fun arrexp intype outtype pos) = do
+  (arrt, arrexp') <- checkExp arrexp
+  intype' <- intype `unifyWithKnown` arrt
+  case intype' of
+    Array t e pos2 -> do
+      (fun', funret) <- checkLambda fun [t]
+      outtype' <- outtype `unifyWithKnown` Array funret e pos2
+      return (outtype', Map fun' arrexp' (boxType intype') (boxType outtype') pos)
+    _       -> bad $ TypeError (expPos arrexp) "Expression does not return an array."
+checkExp (Reduce fun startexp arrexp intype pos) = do
+  (acct, startexp') <- checkExp startexp
+  (arrt, arrexp') <- checkExp arrexp
+  intype' <- intype `unifyWithKnown` arrt
+  case intype' of
+    Array inelemt _ _ -> do
+      (fun', funret) <- checkLambda fun [acct, inelemt]
+      when (acct /= funret) $
+        bad $ TypeError pos $ "Accumulator is of type " ++ ppType acct ++ ", but reduce function returns type " ++ ppType funret ++ "."
+      return (funret, Reduce fun' startexp' arrexp' (boxType intype') pos)
+    _ -> bad $ TypeError (expPos arrexp) "Type of expression is not an array"
+checkExp (ZipWith fun arrexps intypes outtype pos) = do
+  (arrts, arrexps') <- unzip <$> mapM checkExp arrexps
+  intypes' <- case unboxType intypes of
+                Nothing -> return arrts
+                Just intypes' -> zipWithM unifyKnownTypes intypes' arrts
+  (fun', funret) <- checkLambda fun =<< mapM elemType intypes'
+  outtype' <- outtype `unifyWithKnown` Array funret Nothing pos
+  return (outtype',
+          ZipWith fun' arrexps' (boxType intypes') (boxType outtype') pos)
+checkExp (Scan fun startexp arrexp intype pos) = do
+  (startt, startexp') <- checkExp startexp
+  (arrt, arrexp') <- checkExp arrexp
+  intype' <- intype `unifyWithKnown` arrt
+  case intype' of
+    Array inelemt e pos2 -> do
+      (fun', funret) <- checkLambda fun [inelemt, inelemt]
+      when (startt /= funret) $
+        bad $ TypeError pos $ "Initial value is of type " ++ ppType startt ++ ", but scan function returns type " ++ ppType funret ++ "."
+      when (inelemt /= funret) $
+        bad $ TypeError pos $ "Array element value is of type " ++ ppType inelemt ++ ", but scan function returns type " ++ ppType funret ++ "."
+      return (Array funret e pos2, Scan fun' startexp' arrexp' (boxType intype') pos)
+    _ -> bad $ TypeError (expPos arrexp) "Type of expression is not an array."
+checkExp (Filter fun arrexp arrtype pos) = do
+  (arrexpt, arrexp') <- checkExp arrexp
+  arrtype' <- arrtype `unifyWithKnown` arrexpt
+  inelemt <- elemType arrtype'
+  (fun', funret) <- checkLambda fun [inelemt]
+  when (funret /= Bool pos) $
+    bad $ TypeError pos "Filter function does not return bool."
+  return (arrtype', Filter fun' arrexp' (boxType arrtype') pos)
+checkExp (Mapall fun arrexp intype outtype pos) = do
+  (arrt, arrexp') <- checkExp arrexp
+  intype' <- intype `unifyWithKnown` arrt
+  (fun', funret) <- checkLambda fun [baseType intype']
+  outtype' <- outtype `unifyWithKnown` array (arrayDims intype') funret
+  return (outtype', Mapall fun' arrexp' (boxType intype') (boxType outtype') pos)
+checkExp (Redomap redfun mapfun accexp arrexp inarr outarr pos) = do
+  (acct, accexp') <- checkExp accexp
+  (arrt, arrexp') <- checkExp arrexp
+  et <- elemType arrt
+  (mapfun', mapret) <- checkLambda mapfun [et]
+  (redfun', redret) <- checkLambda redfun [acct, mapret]
+  _ <- unifyKnownTypes redret acct
+  inarr' <- inarr `unifyWithKnown` Array et Nothing pos
+  outarr' <- outarr `unifyWithKnown` Array redret Nothing pos
+  return (redret, Redomap redfun' mapfun' accexp' arrexp' (boxType inarr') (boxType outarr') pos)
+checkExp (Split splitexp arrexp inarr pos) = do
+  (_, splitexp') <- require [Int pos] =<< checkExp splitexp
+  (arrt, arrexp') <- checkExp arrexp
+  inarr' <- inarr `unifyWithKnown` arrt
+  return (inarr', Split splitexp' arrexp' (boxType inarr') pos)
+checkExp (Concat arr1exp arr2exp inarr pos) = do
+  (arr1t, arr1exp') <- checkExp arr1exp
+  (arrt, arr2exp') <- require [arr1t] =<< checkExp arr2exp
+  inarr' <- inarr `unifyWithKnown` arrt
+  return (inarr', Concat arr1exp' arr2exp' (boxType inarr') pos)
+checkExp (Read t pos) =
+  return (t, Read t pos)
+checkExp (Write e t pos) = do
+  (et, e') <- checkExp e
+  t' <- t `unifyWithKnown` et
+  return (t', Write e' (boxType t') pos)
+checkExp (DoLoop loopvar boundexp body mergevars pos) = do
+  (_, boundexp') <- require [Int pos] =<< checkExp boundexp
+  (bodyt, body') <- local (`bindVar` (loopvar, Int pos)) $ checkExp body
+  forM_ mergevars $ \name -> do
+    -- Just check if they exist.
+    bnd <- asks $ M.lookup name . envVtable
+    case bnd of Nothing -> bad $ UnknownVariableError name pos
+                Just _  -> return ()
+  return (bodyt, DoLoop loopvar boundexp' body' mergevars pos)
 
-checkMonoBinOp :: (Exp Identity -> Exp Identity -> Pos -> Exp Identity)
-               -> Type -> Exp Maybe -> Exp Maybe -> Pos -> TypeM (Type, Exp Identity)
-checkMonoBinOp op t e1 e2 = checkPolyBinOp (\e1' e2' _ pos' -> op e1' e2' pos') [t] e1 e2 Nothing
+checkMonoBinOp :: TypeBox tf => (Exp Identity -> Exp Identity -> Pos -> Exp Identity)
+               -> Type -> Exp tf -> Exp tf -> Pos -> TypeM (Type, Exp Identity)
+checkMonoBinOp op t e1 e2 = checkPolyBinOp (\e1' e2' _ pos' -> op e1' e2' pos') [t] e1 e2 (boxType t)
 
-checkRelOp :: (Exp Identity -> Exp Identity -> Pos -> Exp Identity)
-           -> [Type] -> Exp Maybe -> Exp Maybe -> Pos -> TypeM (Type, Exp Identity)
+checkRelOp :: TypeBox tf => (Exp Identity -> Exp Identity -> Pos -> Exp Identity)
+           -> [Type] -> Exp tf -> Exp tf -> Pos -> TypeM (Type, Exp Identity)
 checkRelOp op tl e1 e2 pos = do
-  (_, e) <- checkPolyBinOp (\e1' e2' _ pos' -> op e1' e2' pos') tl e1 e2 Nothing pos
-  return (Bool pos, e)
+  (t1,e1') <- require tl =<< checkExp e1
+  (t2,e2') <- require tl =<< checkExp e2
+  _ <- unifyKnownTypes t1 t2
+  return (Bool pos, op e1' e2' pos)
 
 checkPolyBinOp :: TypeBox tf =>
                   (Exp Identity -> Exp Identity -> Identity Type -> Pos -> Exp Identity)
-               -> [Type] -> Exp Maybe -> Exp Maybe -> tf Type -> Pos -> TypeM (Type, Exp Identity)
+               -> [Type] -> Exp tf -> Exp tf -> tf Type -> Pos -> TypeM (Type, Exp Identity)
 checkPolyBinOp op tl e1 e2 t pos = do
   (t1,e1') <- require tl =<< checkExp e1
   (t2,e2') <- require tl =<< checkExp e2
@@ -298,6 +395,27 @@ checkPattern pat vt = map rmPos <$> execStateT (checkPattern' pat vt) []
         add name t pos = do
           bnd <- gets $ lookup name
           case bnd of
-            Nothing       -> modify $ ((name,(t,pos)):)
+            Nothing       -> modify ((name,(t,pos)):)
             Just (_,pos2) -> lift $ bad $ DupPatternError name pos pos2
         rmPos (name,(t,_)) = (name,t)
+
+checkLambda :: TypeBox tf => Lambda tf -> [Type] -> TypeM (Lambda Identity, Type)
+checkLambda (AnonymFun params body ret pos) args
+  | length params == length args = do
+  (_, ret', params', body', _) <- checkFun ("<anonymous>", ret, params, body, pos)
+  zipWithM_ unifyKnownTypes (map snd params') args
+  return (AnonymFun params body' ret' pos, ret')
+  | otherwise = bad $ TypeError pos $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
+checkLambda (CurryFun fname curryargexps curryargts rettype pos) args = do
+  bnd <- asks $ M.lookup fname . envFtable
+  case bnd of
+    Nothing -> bad $ UnknownFunctionError fname pos
+    Just (rt, paramtypes) -> do
+      when (length curryargexps + length args /= length paramtypes) $
+        bad $ ParameterCountMismatch fname pos (length paramtypes) (length curryargexps+length args)
+      rettype' <- rettype `unifyWithKnown` rt
+      (curryargexpts, curryargexps') <- unzip <$> mapM checkExp curryargexps
+      curryargts' <- case unboxType curryargts of
+                       Nothing -> return curryargexpts
+                       Just curryargts' -> zipWithM unifyKnownTypes curryargts' curryargexpts
+      return (CurryFun fname curryargexps' (boxType curryargts') (boxType rettype') pos, rettype')

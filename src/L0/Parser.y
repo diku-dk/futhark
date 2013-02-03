@@ -4,7 +4,6 @@ module L0.Parser(parseL0) where
 import L0.AbSyn
 import L0.Lexer
 
-
 }
 
 %name l0
@@ -95,7 +94,7 @@ import L0.Lexer
 
 %%
 
-Prog :	  FunDecs {- EOF -}   { $1 }
+Prog :	  FunDecs {- EOF -}   { builtinFuns ++ $1 }
 ;
 
 Ops : op '+'     { ("op +", $1) }
@@ -279,4 +278,13 @@ parseError (tok:_) = error $ "Parse error at " ++ show (tokPos tok)
 
 parseL0 :: String -> Prog Maybe
 parseL0 = l0 . alexScanTokens
+
+builtinFuns :: [FunDec Maybe]
+builtinFuns = [("op ^", (Int p), [("x", Int p), ("y", Int p)],
+                Xor (Var "x" Nothing p) (Var "y" Nothing p) p, p)
+              ,("op +", (Real p), [("x", Real p), ("y", Real p)],
+                Plus (Var "x" Nothing p) (Var "y" Nothing p) Nothing p, p)
+              ,("op *", (Real p), [("x", Real p), ("y", Real p)],
+                Times (Var "x" Nothing p) (Var "y" Nothing p) Nothing p, p)]
+  where p = (0,0)
 }

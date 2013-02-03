@@ -6,7 +6,9 @@ module L0.AbSyn
   , typePos
   , ppType
   , arrayDims
+  , indexArray
   , baseType
+  , array
   , Exp(..)
   , expPos
   , ppExp
@@ -62,9 +64,18 @@ arrayDims :: Type -> Int
 arrayDims (Array t _ _) = 1 + arrayDims t
 arrayDims _             = 0
 
+indexArray :: Int -> Type -> Maybe Type
+indexArray 0 t = Just t
+indexArray n (Array t _ _) = indexArray (n-1) t
+indexArray _ _ = Nothing
+
 baseType :: Type -> Type
 baseType (Array t _ _) = baseType t
 baseType t = t
+
+array :: Int -> Type -> Type
+array 0 t = t
+array n t = array (n-1) $ Array t Nothing (typePos t)
 
   -- | L0 Expression Language: literals + vars + int binops + array
   -- constructors + array combinators (SOAC) + if + function calls +
@@ -178,6 +189,7 @@ data Exp tf = NumInt    Int Pos  -- Constants
              -- 2nd arg is the type of the to-be-written expression *)
 
             | DoLoop String (Exp tf) (Exp tf) [String] Pos
+
 
 expPos :: Exp tf -> Pos
 expPos (NumInt _ pos) = pos
