@@ -9,6 +9,7 @@ module L0.AbSyn
   , indexArray
   , baseType
   , array
+  , Value(..)
   , Exp(..)
   , expPos
   , ppExp
@@ -77,15 +78,20 @@ array :: Int -> Type -> Type
 array 0 t = t
 array n t = array (n-1) $ Array t Nothing (typePos t)
 
-  -- | L0 Expression Language: literals + vars + int binops + array
-  -- constructors + array combinators (SOAC) + if + function calls +
-  -- let + tuples (literals & identifiers) TODO: please add float,
-  -- double, long int, etc.
-data Exp tf = NumInt    Int Pos  -- Constants
-            | NumReal   Double Pos
-            | Log       Bool Pos
-            | CharLit   Char Pos
-            | StringLit String Pos -- e.g., "Hello World!\n"
+-- | Every possible value in L0.
+data Value tf = IntVal Int Pos
+              | RealVal Double Pos
+              | LogVal Bool Pos
+              | CharVal Char Pos
+              | StringVal String Pos
+              | TupVal [Value tf] (tf Type) Pos
+              | ArrayVal [Value tf] (tf Type) Pos
+
+-- | L0 Expression Language: literals + vars + int binops + array
+-- constructors + array combinators (SOAC) + if + function calls +
+-- let + tuples (literals & identifiers) TODO: please add float,
+-- double, long int, etc.
+data Exp tf = Literal (Value tf)
             | TupLit    [Exp tf] (tf Type) Pos -- Tuple and Arrays Literals
                                                   -- e.g., (1+3, (x, y+z))
                                                   -- 2nd argument is the tuple's type
@@ -190,13 +196,15 @@ data Exp tf = NumInt    Int Pos  -- Constants
 
             | DoLoop String (Exp tf) (Exp tf) [String] Pos
 
-
 expPos :: Exp tf -> Pos
-expPos (NumInt _ pos) = pos
-expPos (NumReal _ pos) = pos
-expPos (Log _ pos) = pos
-expPos (CharLit _ pos) = pos
-expPos (StringLit _ pos) = pos
+expPos (Literal val) = valuePos val
+  where valuePos (IntVal _ pos) = pos
+        valuePos (RealVal _ pos) = pos
+        valuePos (CharVal _ pos) = pos
+        valuePos (StringVal _ pos) = pos
+        valuePos (LogVal _ pos) = pos
+        valuePos (TupVal _ _ pos) = pos
+        valuePos (ArrayVal _ _ pos) = pos
 expPos (TupLit _ _ pos) = pos
 expPos (ArrayLit _ _ pos) = pos
 expPos (Plus _ _ _ pos) = pos
@@ -270,13 +278,21 @@ ppError (line,col) msg =
   error $ "Prettyprinting error: " ++ msg ++
           "\nAT position " ++ show line ++ ":" ++ show col
 
--- pretty printing an expression *)
+-- | Pretty printing a value.
+ppVal :: Int -> Value tf -> String
+ppVal _ (IntVal n _)      = show n
+ppVal _ (RealVal n _)     = show n
+ppVal _ (LogVal b _)      = show b
+ppVal _ (CharVal c _)     = show c
+ppVal _ (StringVal s _)   = show s
+ppVal d (ArrayVal vs _ _) =
+  " { " ++ intercalate ", " (map (ppVal d) vs) ++ " } "
+ppVal d (TupVal vs _ _)   =
+  " ( " ++ intercalate ", " (map (ppVal d) vs) ++ " ) "
+
+-- | Pretty printing an expression *)
 ppExp :: Int -> Exp tf -> String
-ppExp _ (NumInt n _)     = show n
-ppExp _ (NumReal n _)     = show n
-ppExp _ (Log    b _)     = show b
-ppExp _ (CharLit c _)     = show c
-ppExp _ (StringLit s _)  = show s
+ppExp d (Literal val)     = ppVal d val
 ppExp d (ArrayLit es _ _) =
   " { " ++ intercalate ", " (map (ppExp d) es) ++ " } "
 ppExp d (TupLit es _ _) =

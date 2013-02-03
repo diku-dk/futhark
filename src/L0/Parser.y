@@ -141,12 +141,12 @@ TypeIds : Type id ',' TypeIds
         | Type id       { let ID name _ = $2 in [(name, $1)] }
 ;
 
-Exp  : intlit         { let INTLIT num pos = $1 in NumInt num pos }
-     | reallit        { let REALLIT num pos = $1 in NumReal num pos }
-     | charlit        { let CHARLIT char pos = $1 in CharLit char pos }
-     | stringlit      { let STRINGLIT s pos = $1 in StringLit s pos }
-     | true           { Log True $1 }
-     | false          { Log False $1 }
+Exp  : intlit         { let INTLIT num pos = $1 in Literal $ IntVal num pos }
+     | reallit        { let REALLIT num pos = $1 in Literal $ RealVal num pos }
+     | charlit        { let CHARLIT char pos = $1 in Literal $ CharVal char pos }
+     | stringlit      { let STRINGLIT s pos = $1 in Literal $ StringVal s pos }
+     | true           { Literal $ LogVal True $1 }
+     | false          { Literal $ LogVal False $1 }
      | id             { let ID name pos = $1 in Var name Nothing pos }
      | '{' Exps '}'   { ArrayLit $2 Nothing $1 }
      | TupleExp       { let (exps, pos) = $1 in TupLit exps Nothing pos }
