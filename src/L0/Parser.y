@@ -112,11 +112,13 @@ import L0.Lexer
 
 %%
 
-Prog :	  FunDecs {- EOF -}   { builtinFuns ++ $1 }
+Prog :	  FunDecs {- EOF -}   { $1 }
 ;
 
 Ops : op '+'     { ("op +", $1) }
     | op '*'     { ("op *", $1) }
+    | op '-'     { ("op -", $1) }
+    | op '/'     { ("op /", $1) }
     | op '='     { ("op =", $1) }
     | op '<'     { ("op <", $1) }
     | op '<='    { ("op <=", $1) }
@@ -169,24 +171,24 @@ Exp  : intlit         { let INTLIT num pos = $1 in Literal $ IntVal num pos }
      | '{' Exps '}'   { ArrayLit $2 Nothing $1 }
      | TupleExp       { let (exps, pos) = $1 in TupLit exps Nothing pos }
 
-     | Exp '+' Exp    { Plus  $1 $3 Nothing $2 }
-     | Exp '-' Exp    { Minus $1 $3 Nothing $2 }
-     | Exp '*' Exp    { Times $1 $3 Nothing $2 }
-     | Exp '/' Exp    { Divide $1 $3 Nothing $2 }
+     | Exp '+' Exp    { BinOp Plus $1 $3 Nothing $2 }
+     | Exp '-' Exp    { BinOp Minus $1 $3 Nothing $2 }
+     | Exp '*' Exp    { BinOp Times $1 $3 Nothing $2 }
+     | Exp '/' Exp    { BinOp Divide $1 $3 Nothing $2 }
      | '~' Exp        { Negate $2 Nothing $1 }
      | not Exp        { Not $2 $1 }
      | Exp '&&' Exp   { And $1 $3 $2 }
      | Exp '||' Exp   { Or $1 $3 $2 }
-     | Exp pow Exp    { Pow $1 $3 Nothing $2 }
-     | Exp '>>' Exp   { ShiftR $1 $3 $2 }
-     | Exp '<<' Exp   { ShiftL $1 $3 $2 }
-     | Exp '&' Exp    { Band $1 $3 $2 }
-     | Exp '|' Exp    { Bor $1 $3 $2 }
-     | Exp '^' Exp    { Xor $1 $3 $2 }
+     | Exp pow Exp    { BinOp Pow $1 $3 Nothing $2 }
+     | Exp '>>' Exp   { BinOp ShiftR $1 $3 Nothing $2 }
+     | Exp '<<' Exp   { BinOp ShiftL $1 $3 Nothing $2 }
+     | Exp '&' Exp    { BinOp Band $1 $3 Nothing $2 }
+     | Exp '|' Exp    { BinOp Bor $1 $3 Nothing $2 }
+     | Exp '^' Exp    { BinOp Xor $1 $3 Nothing $2 }
 
-     | Exp '=' Exp    { Equal $1 $3 $2 }
-     | Exp '<' Exp    { Less $1 $3 $2 }
-     | Exp '<=' Exp   { Leq  $1 $3 $2 }
+     | Exp '=' Exp    { BinOp Equal $1 $3 Nothing $2 }
+     | Exp '<' Exp    { BinOp Less $1 $3 Nothing $2 }
+     | Exp '<=' Exp   { BinOp Leq  $1 $3 Nothing $2 }
 
      | if Exp then Exp else Exp %prec ifprec
                       { If $2 $4 $6 Nothing $1 }
@@ -350,17 +352,4 @@ parseTuple = tupleValue . alexScanTokens
 
 parseArray :: String -> Value
 parseArray = arrayValue . alexScanTokens
-
-builtinFuns :: [FunDec Maybe]
-builtinFuns = [("op ^", (Int p), [("x", Int p), ("y", Int p)],
-                Xor (Var "x" Nothing p) (Var "y" Nothing p) p, p)
-              ,("op &", (Int p), [("x", Int p), ("y", Int p)],
-                Band (Var "x" Nothing p) (Var "y" Nothing p) p, p)
-              ,("op |", (Int p), [("x", Int p), ("y", Int p)],
-                Bor (Var "x" Nothing p) (Var "y" Nothing p) p, p)
-              ,("op >>", (Int p), [("x", Int p), ("y", Int p)],
-                ShiftR (Var "x" Nothing p) (Var "y" Nothing p) p, p)
-              ,("op <<", (Int p), [("x", Int p), ("y", Int p)],
-                ShiftL (Var "x" Nothing p) (Var "y" Nothing p) p, p)]
-  where p = (0,0)
 }

@@ -60,21 +60,12 @@ renameExp (TupLit es ts pos) = do
 renameExp (ArrayLit es ts pos) = do
   es' <- mapM renameExp es
   return $ ArrayLit es' ts pos
-renameExp (Plus e1 e2 t pos) = renameBinOp Plus e1 e2 t pos
-renameExp (Minus e1 e2 t pos) = renameBinOp Minus e1 e2 t pos
-renameExp (Pow e1 e2 t pos) = renameBinOp Pow e1 e2 t pos
-renameExp (Times e1 e2 t pos) = renameBinOp Times e1 e2 t pos
-renameExp (Divide e1 e2 t pos) = renameBinOp Divide e1 e2 t pos
-renameExp (ShiftR e1 e2 pos) = renameBinOpNoType ShiftR e1 e2 pos
-renameExp (ShiftL e1 e2 pos) = renameBinOpNoType ShiftL e1 e2 pos
-renameExp (Band e1 e2 pos) = renameBinOpNoType Band e1 e2 pos
-renameExp (Xor e1 e2 pos) = renameBinOpNoType Xor e1 e2 pos
-renameExp (Bor e1 e2 pos) = renameBinOpNoType Bor e1 e2 pos
+renameExp (BinOp op e1 e2 t pos) = do
+  e1' <- renameExp e1
+  e2' <- renameExp e2
+  return $ BinOp op e1' e2' t pos
 renameExp (And e1 e2 pos) = renameBinOpNoType And e1 e2 pos
 renameExp (Or e1 e2 pos) = renameBinOpNoType Or e1 e2 pos
-renameExp (Equal e1 e2 pos) = renameBinOpNoType Equal e1 e2 pos
-renameExp (Less e1 e2 pos) = renameBinOpNoType Less e1 e2 pos
-renameExp (Leq e1 e2 pos) = renameBinOpNoType Leq e1 e2 pos
 renameExp (Not e pos) = do
   e' <- renameExp e
   return $ Not e' pos
@@ -172,14 +163,6 @@ renameExp (DoLoop loopvar e body mergevars pos) = do
     body' <- renameExp body
     mergevars' <- mapM repl mergevars
     return $ DoLoop loopvar' e' body' mergevars' pos
-
-renameBinOp :: (Exp tf -> Exp tf -> tf Type -> Pos -> Exp tf)
-            -> Exp tf -> Exp tf -> tf Type -> Pos
-            -> RenameM (Exp tf)
-renameBinOp op e1 e2 t pos = do
-  e1' <- renameExp e1
-  e2' <- renameExp e2
-  return (op e1' e2' t pos)
 
 renameBinOpNoType :: (Exp tf -> Exp tf -> Pos -> Exp tf)
                   -> Exp tf -> Exp tf -> Pos
