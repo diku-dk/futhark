@@ -368,10 +368,9 @@ checkLiteral (RealVal x pos) = return (Real pos, RealVal x pos)
 checkLiteral (LogVal b pos) = return (Bool pos, LogVal b pos)
 checkLiteral (CharVal c pos) = return (Char pos, CharVal c pos)
 checkLiteral (StringVal s pos) = return (Array (Char pos) Nothing pos, StringVal s pos)
-checkLiteral (TupVal vals t pos) = do
+checkLiteral (TupVal vals pos) = do
   (ts, vals') <- unzip <$> mapM checkLiteral vals
-  t' <- t `unifyKnownTypes` Tuple ts pos
-  return (t', TupVal vals' t' pos)
+  return (Tuple ts pos, TupVal vals' pos)
 checkLiteral (ArrayVal vals t pos) = do
   (ts, vals') <- unzip <$> mapM checkLiteral vals
   -- Find the unified type of all subexpression types.
