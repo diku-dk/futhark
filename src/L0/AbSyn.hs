@@ -1,4 +1,6 @@
--- | This Is an Ever-Changing AnSyn for L0
+-- | This Is an Ever-Changing AnSyn for L0.  Some types, such as
+-- @Exp@, are parametrised by a functor for keeping type information.
+-- See "L0.TypeChecker" and the 'Exp' type for more information.
 module L0.AbSyn
   ( Pos
   , posStr
@@ -7,7 +9,7 @@ module L0.AbSyn
   , ppType
   , arrayDims
   , arrayShape
-  , indexArray
+  , peelArray
   , baseType
   , array
   , Value(..)
@@ -32,23 +34,22 @@ module L0.AbSyn
 
 import Data.List
 
---  exception Error of string*(int*int)
-
 -- | position: (line, column)
 type Pos = (Int,Int)
 
+-- | Convert a 'Pos' into a human-readable position description.
 posStr :: Pos -> String
 posStr (0,0) = "<builtin>"
 posStr (line,col) = show line ++ ":" ++ show col
 
-  -- | L0 Types: Int, Bool, Char, Tuple, multidim-regular Array
-  --  TODO: please add float, double, long int, etc.
+-- | L0 Types: Int, Bool, Char, Tuple, multidim-regular Array
+--  TODO: please add float, double, long int, etc.
 data Type = Int Pos
           | Bool Pos
           | Char Pos
           | Real Pos
           | Tuple [Type] Pos
-          | Array Type (Maybe (Exp Maybe)) Pos -- | 1st arg: array's type, 2nd arg: its length
+          | Array Type (Maybe (Exp Maybe)) Pos -- ^ 1st arg: array's type, 2nd arg: its length
 
 instance Eq Type where
   Int _ == Int _ = True
@@ -59,6 +60,7 @@ instance Eq Type where
   Array t1 _ _ == Array t2 _ _ = t1 == t2
   _ == _ = False
 
+-- | Return the position information associated with a type.
 typePos :: Type -> Pos
 typePos (Int pos) = pos
 typePos (Bool pos) = pos
@@ -67,29 +69,43 @@ typePos (Real pos) = pos
 typePos (Tuple _ pos) = pos
 typePos (Array _ _ pos) = pos
 
+-- | Return the dimensionality of a type.  For non-arrays, this is
+-- zero.  For a one-dimensional array it is one, for a two-dimensional
+-- it is two, and so forth.
 arrayDims :: Type -> Int
 arrayDims (Array t _ _) = 1 + arrayDims t
 arrayDims _             = 0
 
+-- | Return a list of the dimensions of an array (the shape, in other
+-- terms).  For non-arrays, this is the empty list.  A two-dimensional
+-- array with five rows and three columns would return the list @[5,
+-- 3]@.
 arrayShape :: Value -> [Int]
 arrayShape (ArrayVal [] _ _) = [0]
 arrayShape (ArrayVal (e:els) _ _) = length (e:els) : arrayShape e
 arrayShape _ = []
 
-indexArray :: Int -> Type -> Maybe Type
-indexArray 0 t = Just t
-indexArray n (Array t _ _) = indexArray (n-1) t
-indexArray _ _ = Nothing
+-- | @peelArray n t@ returns the type resulting from peeling the first
+-- @n@ array dimensions from @t@.  Returns @Nothing@ if @t@ has less
+-- than @n@ dimensions.
+peelArray :: Int -> Type -> Maybe Type
+peelArray 0 t = Just t
+peelArray n (Array t _ _) = peelArray (n-1) t
+peelArray _ _ = Nothing
 
+-- | Returns the bottommost type of an array.
 baseType :: Type -> Type
 baseType (Array t _ _) = baseType t
 baseType t = t
 
+-- | @array n t@ is the type of @n@-dimensional arrays having @t@ as
+-- the base type.
 array :: Int -> Type -> Type
 array 0 t = t
 array n t = array (n-1) $ Array t Nothing (typePos t)
 
--- | Every possible value in L0.
+-- | Every possible value in L0.  Values are fully evaluated and their
+-- type is always unambiguous.
 data Value = IntVal Int Pos
            | RealVal Double Pos
            | LogVal Bool Pos
@@ -118,6 +134,7 @@ instance Ord Value where
   ArrayVal vs1 _ _ <= ArrayVal vs2 _ _ = vs1 <= vs2
   _ <= _ = False
 
+-- | Return the type of a value.
 valueType :: Value -> Type
 valueType (IntVal _ pos) = Int pos
 valueType (RealVal _ pos) = Real pos
@@ -131,6 +148,15 @@ valueType (ArrayVal _ t pos) = Array t Nothing pos
 -- constructors + array combinators (SOAC) + if + function calls +
 -- let + tuples (literals & identifiers) TODO: please add float,
 -- double, long int, etc.
+--
+-- In a value of type @Exp tf@, all 'Type' values are kept as @tf
+-- Type@ values.  That is, @tf@ is a functor that is applied to
+-- 'Type'.  This allows us to encode whether or not the expression has
+-- been type-checked in the Haskell type of the expression.
+-- Specifically, the parser will produce expressions of type @Exp
+-- 'Maybe'@, and the type checker will convert these to @Exp
+-- 'Control.Monad.Identity.Identity'@, in which type information is
+-- always present.
 data Exp tf = Literal Value
             | TupLit    [Exp tf] (tf Type) Pos -- Tuple and Arrays Literals
                                                   -- e.g., (1+3, (x, y+z))
@@ -344,7 +370,7 @@ ppValue d (ArrayVal vs _ _) =
 ppValue d (TupVal vs _)   =
   " ( " ++ intercalate ", " (map (ppValue d) vs) ++ " ) "
 
--- | Pretty printing an expression *)
+-- | Pretty printing an expression
 ppExp :: Int -> Exp tf -> String
 ppExp d (Literal val)     = ppValue d val
 ppExp d (ArrayLit es _ _) =
@@ -400,7 +426,7 @@ ppExp d (DoLoop i n iter (v:ms) _) =
               "\n" ++ spaces(d+2) ++ ppExp d iter ++ "\n" ++ spaces(d+1) ++
               "merge " ++ intercalate ", " (v:ms)
 
-  -- Array Constructs *)
+-- | Array Constructs
 ppExp d (Iota e _)         = "iota ( " ++ ppExp d e ++ " ) "
 ppExp d (Replicate e el _ _) = "replicate ( " ++ ppExp d e ++ ", " ++ ppExp d el ++ " ) "
 
@@ -439,7 +465,7 @@ ppExp d (Write e _ _) = " write("  ++ ppExp d e  ++ ") "
 ppBinOp :: BinOp -> String
 ppBinOp op = " " ++ opStr op ++ " "
 
--- pretty printing a type *)
+-- | Pretty printing a type
 ppType :: Type -> String
 ppType (Int _) = " int "
 ppType (Bool _) = " bool "
@@ -450,7 +476,7 @@ ppType (Array tp  (Just l) _) = "[ " ++ ppType tp ++ ", " ++ ppExp 0 l ++ " ] "
 ppType (Tuple (tp:tps) _) = "( " ++ intercalate " * " (map ppType (tp:tps)) ++ " ) "
 ppType (Tuple [] pos) = ppError pos "Empty tuple"
 
--- pretty printing a tuple id *)
+-- | Pretty printing a tuple id
 ppTupId :: TupIdent -> String
 ppTupId (Id name _) = " " ++ name ++ " "
 ppTupId (TupId (a:lst) _) = " ( " ++ intercalate ", " (map ppTupId $ a:lst) ++ " ) "
@@ -468,10 +494,10 @@ ppLambda ( CurryFun fid [] _ _ _) = fid
 ppLambda ( CurryFun fid args _ ty pos) =
       ppExp 0 (Apply fid args ty pos)
 
--- pretty printing a function declaration *)
+-- | pretty printing a function declaration
 ppFun :: Int -> FunDec Maybe -> String
 ppFun d (name, ret_tp, args, body, _) =
-  let -- pretty printing a list of bindings separated by commas *)
+  let -- pretty printing a list of bindings separated by commas
       ppBd (argname, tp) = ppType tp ++ " " ++ argname
       pp_bindings = intercalate "," . map ppBd
 
@@ -479,6 +505,6 @@ ppFun d (name, ret_tp, args, body, _) =
      "( " ++ pp_bindings args ++ ") = \n" ++
      spaces (d+1) ++ ppExp (d+1) body
 
--- pretty printing a PROGRAM *)
+-- | Pretty printing a program.
 prettyPrint :: Prog Maybe -> String
 prettyPrint p = concatMap (ppFun 0) p ++ "\n"
