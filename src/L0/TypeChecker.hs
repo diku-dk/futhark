@@ -436,4 +436,5 @@ checkLambda (CurryFun fname curryargexps curryargts rettype pos) args = do
       curryargts' <- case unboxType curryargts of
                        Nothing -> return curryargexpts
                        Just curryargts' -> zipWithM unifyKnownTypes curryargts' curryargexpts
+      zipWithM_ unifyKnownTypes (curryargts'++args) paramtypes
       return (CurryFun fname curryargexps' (boxType curryargts') (boxType rettype') pos, rettype')
