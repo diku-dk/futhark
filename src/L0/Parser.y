@@ -352,11 +352,14 @@ parseArray :: String -> Value
 parseArray = arrayValue . alexScanTokens
 
 builtinFuns :: [FunDec Maybe]
-builtinFuns = [("op ^", (Int p), [("x", Int p), ("y", Int p)],
-                Xor (Var "x" Nothing p) (Var "y" Nothing p) p, p)
-              ,("op +", (Real p), [("x", Real p), ("y", Real p)],
-                Plus (Var "x" Nothing p) (Var "y" Nothing p) Nothing p, p)
-              ,("op *", (Real p), [("x", Real p), ("y", Real p)],
-                Times (Var "x" Nothing p) (Var "y" Nothing p) Nothing p, p)]
-  where p = (0,0)
+builtinFuns = [("op ^", (Int p1), [("x", Int p1), ("y", Int p1)],
+                Xor (Var "x" Nothing p1) (Var "y" Nothing p1) p1, p1)
+              ,("op +", (Real p2), [("x", Real p2), ("y", Real p2)],
+                Plus (Var "x" Nothing p2) (Var "y" Nothing p2) Nothing p2, p2)
+              ,("op *", (Real p2), [("x", Real p2), ("y", Real p2)],
+                Times (Var "x" Nothing p3) (Var "y" Nothing p3) Nothing p3, p3)]
+  where -- p = (0,0)
+        p1 = (40,40)
+        p2 = (41,41)
+        p3 = (42,42)
 }

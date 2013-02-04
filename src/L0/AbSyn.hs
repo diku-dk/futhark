@@ -6,6 +6,7 @@ module L0.AbSyn
   , typePos
   , ppType
   , arrayDims
+  , arrayShape
   , indexArray
   , baseType
   , array
@@ -66,6 +67,11 @@ typePos (Array _ _ pos) = pos
 arrayDims :: Type -> Int
 arrayDims (Array t _ _) = 1 + arrayDims t
 arrayDims _             = 0
+
+arrayShape :: Value -> [Int]
+arrayShape (ArrayVal [] _ _) = [0]
+arrayShape (ArrayVal (e:els) _ _) = length (e:els) : arrayShape e
+arrayShape _ = []
 
 indexArray :: Int -> Type -> Maybe Type
 indexArray 0 t = Just t
