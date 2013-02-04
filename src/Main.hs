@@ -49,7 +49,10 @@ typecheck :: FilePath -> IO ()
 typecheck file = do prog <- parse file
                     case checkProg prog of
                       Left e -> error $ show e
-                      _      -> return ()
+                      Right prog'  ->
+                        case checkProg prog' of
+                          Left e  -> error $ "Error during second type checking phase. This implies a bug in the type checker.\n" ++ show e
+                          Right _ -> return ()
 
 rename :: FilePath -> IO ()
 rename file = do prog <- renameProg <$> parse file
