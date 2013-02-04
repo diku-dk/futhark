@@ -228,13 +228,12 @@ fun [[real]] blackScholes(
 fun real main() = 
     let (num_mc_it, num_dates, num_und, num_bits, dir_vs) = getHLdata    () in
     let (md_c, md_vols, md_drifts, md_st, md_dv, md_disc) = getModelData () in
-    let num_paths = 42 in // Troels: ???
     let (bb_inds, bb_data)        = getBBdata    () in
 
-    let sobol_mat = map ( sobolIndR(num_bits, dir_vs), map(op +(1), iota(num_mc_it)) ) in
+    let sobol_mat = map ( sobolIndR(num_bits, dir_vs), map(fn int (int x) => x + 1, iota(num_mc_it)) ) in
     let gauss_mat = map ( ugaussian, sobol_mat )                                       in
-    let bb_mat    = map ( brownianBridge( num_paths, num_dates, bb_inds, bb_data ), gauss_mat )    in
-    let bs_vect   = map ( blackScholes( num_paths, md_c, md_vols, md_drifts, md_st ), bb_mat ) in
+    let bb_mat    = map ( brownianBridge( num_und, num_dates, bb_inds, bb_data ), gauss_mat )    in
+    let bs_vect   = map ( blackScholes( num_und, md_c, md_vols, md_drifts, md_st ), bb_mat ) in
     let payoffs   = map ( payoff2(md_disc), bs_vect ) in
     let payoff    = reduce ( op +, 0.0, payoffs )       in
             payoff / toReal(num_mc_it)
