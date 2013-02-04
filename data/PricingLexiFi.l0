@@ -133,11 +133,11 @@ fun [real] brownianBridgeDates (
     let rw = bb_data[2] in
 
 //  let gauss[ bi[0]-1 ] = sd[0] * gauss[0]  in
-    let bbrow = replicate(num_dates, 0.0)     in
+    let bbrow = replicate(num_dates, 0.0)   in
     let bbrow[ bi[0]-1 ] = sd[0] * gauss[0] in
 
-    let gauss2 = 
-        for i < num_dates-1 do  // use i+1 since i in 1 .. num_paths-1 
+    let bbrow = 
+        for i < num_dates-1 do  // use i+1 since i in 1 .. num_dates-1 
             let j  = li[i+1] - 1 in
             let k  = ri[i+1] - 1 in
             let l  = bi[i+1] - 1 in
@@ -146,7 +146,7 @@ fun [real] brownianBridgeDates (
             let zi = gauss [i+1] in
             let tmp= rw[i+1] * wk + sd[i+1] * zi in
 
-            let bbrow[ l ] = if(j + 1 = 0)   // if(j=~1) 
+            let bbrow[ l ] = if( (j + 1) = 0)   // if(j=~1) 
                              then tmp
                              else tmp + lw[i+1] * bbrow[j]
             in  bbrow
@@ -154,9 +154,10 @@ fun [real] brownianBridgeDates (
 
         // This can be written as map-reduce, but it 
         //   needs delayed arrays to be mapped nicely!
-    in for i < num_dates-1 do     
-            let ip1 = i+1 in
-            let bbrow[num_dates-ip1] = bbrow[num_dates-ip1] - bbrow[(num_dates-ip1)-1] in bbrow 
+    in for ii < num_dates-1 do
+            let i = num_dates - (ii+1) in
+            let bbrow[i] = bbrow[i] - bbrow[i-1] 
+            in  bbrow
        merge bbrow
 
 // [num_dates,num_paths]
@@ -231,9 +232,8 @@ fun real main() =
     let sobol_mat = map ( sobolIndR(num_bits, dir_vs), map(fn int (int x) => x + 1, iota(num_mc_it)) ) in
     let gauss_mat = map ( ugaussian, sobol_mat )                                       in
     let bb_mat    = map ( brownianBridge( num_und, num_dates, bb_inds, bb_data ), gauss_mat )    in
-    let x = write(bb_mat) in let q = write(33333333333333333) in
     let bs_mat    = map ( blackScholes( num_und, md_c, md_vols, md_drifts, md_st ), bb_mat ) in
-    let x = write(bs_mat) in
+    //let x = write(bs_mat) in
 
     let payoffs   = map ( payoff2(md_disc), bs_mat ) in
     let payoff    = reduce ( op +, 0.0, payoffs )       in
@@ -271,7 +271,7 @@ fun real trajInner(real amount, int ind, [real] disc) = amount * disc[ind]
 //              )
 fun (int * int * int * int * [[int]]) getHLdata() = 
         ( 
-            3,           // number of Monte-Carlo Iterations
+            1000,           // number of Monte-Carlo Iterations
             5,              // number of dates
             3,              // number of underlyings
             30,             // integer bit-length representation for Sobol
