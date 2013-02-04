@@ -123,21 +123,23 @@ evalExp (TupLit es _ pos) =
   TupVal <$> mapM evalExp es <*> pure pos
 evalExp (ArrayLit es (Identity t) pos) =
   ArrayVal <$> mapM evalExp es <*> pure t <*> pure pos
-evalExp (BinOp Plus e1 e2 (Identity (Int _)) pos) = evalIntBinOp IntVal (+) e1 e2 pos
-evalExp (BinOp Plus e1 e2 (Identity (Real _)) pos) = evalRealBinOp RealVal (+) e1 e2 pos
-evalExp (BinOp Minus e1 e2 (Identity (Int _)) pos) = evalIntBinOp IntVal (-) e1 e2 pos
-evalExp (BinOp Minus e1 e2 (Identity (Real _)) pos) = evalRealBinOp RealVal (-) e1 e2 pos
-evalExp (BinOp Pow e1 e2 (Identity (Int _)) pos) = evalIntBinOp IntVal (^) e1 e2 pos
-evalExp (BinOp Pow e1 e2 (Identity (Real _)) pos) = evalRealBinOp RealVal (**) e1 e2 pos
-evalExp (BinOp Times e1 e2 (Identity (Int _)) pos) = evalIntBinOp IntVal (*) e1 e2 pos
-evalExp (BinOp Times e1 e2 (Identity (Real _)) pos) = evalRealBinOp RealVal (*) e1 e2 pos
-evalExp (BinOp Divide e1 e2 (Identity (Int _)) pos) = evalIntBinOp IntVal div e1 e2 pos
-evalExp (BinOp Divide e1 e2 (Identity (Real _)) pos) = evalRealBinOp RealVal (/) e1 e2 pos
-evalExp (BinOp ShiftR e1 e2 _ pos) = evalIntBinOp IntVal shiftR e1 e2 pos
-evalExp (BinOp ShiftL e1 e2 _ pos) = evalIntBinOp IntVal shiftL e1 e2 pos
-evalExp (BinOp Band e1 e2 _ pos) = evalIntBinOp IntVal (.&.) e1 e2 pos
-evalExp (BinOp Xor e1 e2 _ pos) = evalIntBinOp IntVal xor e1 e2 pos
-evalExp (BinOp Bor e1 e2 _ pos) = evalIntBinOp IntVal (.|.) e1 e2 pos
+evalExp (BinOp Plus e1 e2 (Identity (Int _)) pos) = evalIntBinOp (+) e1 e2 pos
+evalExp (BinOp Plus e1 e2 (Identity (Real _)) pos) = evalRealBinOp (+) e1 e2 pos
+evalExp (BinOp Minus e1 e2 (Identity (Int _)) pos) = evalIntBinOp (-) e1 e2 pos
+evalExp (BinOp Minus e1 e2 (Identity (Real _)) pos) = evalRealBinOp (-) e1 e2 pos
+evalExp (BinOp Pow e1 e2 (Identity (Int _)) pos) = evalIntBinOp (^) e1 e2 pos
+evalExp (BinOp Pow e1 e2 (Identity (Real _)) pos) = evalRealBinOp (**) e1 e2 pos
+evalExp (BinOp Times e1 e2 (Identity (Int _)) pos) = evalIntBinOp (*) e1 e2 pos
+evalExp (BinOp Times e1 e2 (Identity (Real _)) pos) = evalRealBinOp (*) e1 e2 pos
+evalExp (BinOp Divide e1 e2 (Identity (Int _)) pos) = evalIntBinOp div e1 e2 pos
+evalExp (BinOp Divide e1 e2 (Identity (Real _)) pos) = evalRealBinOp (/) e1 e2 pos
+evalExp (BinOp ShiftR e1 e2 _ pos) = evalIntBinOp shiftR e1 e2 pos
+evalExp (BinOp ShiftL e1 e2 _ pos) = evalIntBinOp shiftL e1 e2 pos
+evalExp (BinOp Band e1 e2 _ pos) = evalIntBinOp (.&.) e1 e2 pos
+evalExp (BinOp Xor e1 e2 _ pos) = evalIntBinOp xor e1 e2 pos
+evalExp (BinOp Bor e1 e2 _ pos) = evalIntBinOp (.|.) e1 e2 pos
+evalExp (BinOp LogAnd e1 e2 _ pos) = evalBoolBinOp (&&) e1 e2 pos
+evalExp (BinOp LogOr e1 e2 _ pos) = evalBoolBinOp (||) e1 e2 pos
 evalExp (BinOp Equal e1 e2 _ pos) = do
   v1 <- evalExp e1
   v2 <- evalExp e2
@@ -347,24 +349,31 @@ evalExp (DoLoop loopvar boundexp body [mergevar] pos) = do
 evalExp (DoLoop {}) = fail "Sorry, that loop's just too crazy for now."
 
 evalIntBinOp :: (Applicative m, Monad m) =>
-                (a -> Pos -> Value) -> (Int -> Int -> a)
-             -> Exp Identity -> Exp Identity -> Pos -> L0M m Value
-evalIntBinOp con op e1 e2 pos = do
+                (Int -> Int -> Int) -> Exp Identity -> Exp Identity -> Pos -> L0M m Value
+evalIntBinOp op e1 e2 pos = do
   v1 <- evalExp e1
   v2 <- evalExp e2
   case (v1, v2) of
-    (IntVal x _, IntVal y _) -> return $ con (op x y) pos
+    (IntVal x _, IntVal y _) -> return $ IntVal (op x y) pos
     _                        -> bad $ TypeError pos "evalIntBinOp"
 
 evalRealBinOp :: (Applicative m, Monad m) =>
-                 (a -> Pos -> Value) -> (Double -> Double -> a)
-             -> Exp Identity -> Exp Identity -> Pos -> L0M m Value
-evalRealBinOp con op e1 e2 pos = do
+                 (Double -> Double -> Double) -> Exp Identity -> Exp Identity -> Pos -> L0M m Value
+evalRealBinOp op e1 e2 pos = do
   v1 <- evalExp e1
   v2 <- evalExp e2
   case (v1, v2) of
-    (RealVal x _, RealVal y _) -> return $ con (op x y) pos
+    (RealVal x _, RealVal y _) -> return $ RealVal (op x y) pos
     _                          -> bad $ TypeError pos $ "evalRealBinOp " ++ ppValue 0 v1 ++ " " ++ ppValue 0 v2
+
+evalBoolBinOp :: (Applicative m, Monad m) =>
+                 (Bool -> Bool -> Bool) -> Exp Identity -> Exp Identity -> Pos -> L0M m Value
+evalBoolBinOp op e1 e2 pos = do
+  v1 <- evalExp e1
+  v2 <- evalExp e2
+  case (v1, v2) of
+    (LogVal x _, LogVal y _) -> return $ LogVal (op x y) pos
+    _                        -> bad $ TypeError pos $ "evalBoolBinOp " ++ ppValue 0 v1 ++ " " ++ ppValue 0 v2
 
 evalPattern :: TupIdent -> Value -> Maybe [(String, Value)]
 evalPattern (Id name _) v = Just [(name, v)]

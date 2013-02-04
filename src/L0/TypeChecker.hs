@@ -25,7 +25,7 @@ data TypeError = TypeError Pos String
                | InvalidPatternError TupIdent Type
                | UnknownVariableError String Pos
                | UnknownFunctionError String Pos
-               | ParameterMismatch String Pos [Type] [Type]
+               | ParameterMismatch String Pos (Either Int [Type]) [Type]
 
 instance Show TypeError where
   show (TypeError pos msg) =
@@ -57,9 +57,12 @@ instance Show TypeError where
   show (ParameterMismatch fname pos expected got) =
     "In call of Function " ++ fname ++ " at position " ++ posStr pos ++
     ": expecting " ++ show nexpected ++ " argument(s) of type(s) " ++
-    intercalate ", " (map ppType expected) ++ ", but got " ++ show ngot ++
+     expected' ++ ", but got " ++ show ngot ++
     " arguments of types " ++ intercalate ", " (map ppType got) ++ "."
-    where nexpected = length expected
+    where (nexpected, expected') =
+            case expected of
+              Left i -> (i, "(polymorphic)")
+              Right ts -> (length ts, intercalate ", " $ map ppType ts)
           ngot = length got
 
 class TypeBox tf where
@@ -214,7 +217,7 @@ checkExp (Apply fname args t pos) = do
       if length argtypes == length paramtypes then do
         zipWithM_ unifyKnownTypes argtypes paramtypes
         return (rettype', Apply fname args' (boxType rettype') pos)
-      else bad $ ParameterMismatch fname pos paramtypes argtypes
+      else bad $ ParameterMismatch fname pos (Right paramtypes) argtypes
 checkExp (Let pat e Nothing Nothing body pos) = do
   (et, e') <- checkExp e
   bnds <- checkPattern pat et
@@ -456,7 +459,7 @@ checkLambda (CurryFun fname curryargexps curryargts rettype pos) args = do
     Just (rt, paramtypes) -> do
       when (length args' /= length paramtypes ||
             not (all (uncurry (==)) $ zip args' paramtypes)) $
-        bad $ ParameterMismatch fname pos paramtypes args'
+        bad $ ParameterMismatch fname pos (Right paramtypes) args'
       rettype' <- rettype `unifyWithKnown` rt
       zipWithM_ unifyKnownTypes (curryargts'++args) paramtypes
       return (CurryFun fname curryargexps' (boxType curryargts') (boxType rettype') pos, rettype')
@@ -470,9 +473,8 @@ checkPolyLambdaOp op curryargexps curryargts rettype args pos = do
                    Nothing          -> return curryargexpts
                    Just curryargts' -> zipWithM unifyKnownTypes curryargts' curryargexpts
   tp <- case curryargts' ++ args of
-          [Real _, Real _] -> return $ Real pos
-          [Int _, Int _] -> return $ Int pos
-          l -> bad $ ParameterMismatch fname pos [Real pos, Real pos] l
+          [t1, t2] | t1 == t2 -> return t1
+          l -> bad $ ParameterMismatch fname pos (Left 2) l
   (x,y,params) <- case curryargexps' of
                     [] -> return (Var "x" (boxType tp) pos,
                                   Var "y" (boxType tp) pos,
