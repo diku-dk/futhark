@@ -13,19 +13,42 @@ import qualified Data.Map as M
 
 import L0.AbSyn
 
+-- | A pair of a variable table and a function table.  Type checking
+-- happens with access to this environment.  The function table is
+-- only initialised at the very beginning, but the variable table will
+-- be extended during type-checking when let-expressions are
+-- encountered.
 data TypeEnv = TypeEnv { envVtable :: M.Map String Type
                        , envFtable :: M.Map String (Type, [Type]) }
 
+-- | Information about an error during type checking.  The 'Show'
+-- instance for this type produces a human-readable description.
 data TypeError = TypeError Pos String
+               -- ^ A general error happened at the given position and
+               -- for the given reason.
                | UnifyError Type Type
+               -- ^ Two types failed to unify.
                | ReturnTypeError Pos String Type Type
+               -- ^ The body of a function definition has a different
+               -- type than its declaration.
                | DupDefinitionError String Pos Pos
+               -- ^ Two functions have been defined with the same name.
                | DupParamError String String Pos
+               -- ^ Two function parameters share the same name.
                | DupPatternError String Pos Pos
+               -- ^ Two pattern variables share the same name.
                | InvalidPatternError TupIdent Type
+               -- ^ The pattern is not compatible with the type.
                | UnknownVariableError String Pos
+               -- ^ Unknown variable of the given name referenced at the given spot.
                | UnknownFunctionError String Pos
+               -- ^ Unknown function of the given name called at the given spot.
                | ParameterMismatch String Pos (Either Int [Type]) [Type]
+               -- ^ A known function was called with invalid
+               -- arguments.  The third argument is either the number
+               -- of parameters, or the specific types of parameters
+               -- accepted (sometimes, only the former can be
+               -- determined).
 
 instance Show TypeError where
   show (TypeError pos msg) =
@@ -65,6 +88,8 @@ instance Show TypeError where
               Right ts -> (length ts, intercalate ", " $ map ppType ts)
           ngot = length got
 
+-- | A type box provides a way to box a type, and possibly retrieve
+-- one.
 class TypeBox tf where
   unboxType :: tf t -> Maybe t
   boxType :: t -> tf t
@@ -77,6 +102,9 @@ instance TypeBox Identity where
   unboxType = Just . runIdentity
   boxType = Identity
 
+-- | The type checker runs in this monad.  Note that it has no mutable
+-- state, but merely keeps track of current bindings in a 'TypeEnv'.
+-- The 'Either' monad is used for error handling.
 newtype TypeM a = TypeM (ReaderT TypeEnv (Either TypeError) a)
   deriving (Monad, Functor, MonadReader TypeEnv)
 
@@ -93,6 +121,8 @@ bindVar env (name,tp) =
 bindVars :: TypeEnv -> [Binding] -> TypeEnv
 bindVars = foldl bindVar
 
+-- | Determine if two types are identical.  Causes a 'TypeError' if
+-- they fail to match, and otherwise returns one of them.
 unifyKnownTypes :: Type -> Type -> TypeM Type
 unifyKnownTypes (Int pos) (Int _) = return $ Int pos
 unifyKnownTypes (Char pos) (Char _) = return $ Char pos
@@ -107,11 +137,16 @@ unifyKnownTypes (Array t1 e pos) (Array t2 _ _) = do
   return $ Array t e pos
 unifyKnownTypes t1 t2 = bad $ UnifyError t1 t2
 
+-- | @unifyWithKnown t1 t2@ returns @t2@ if @t1@ contains no type, and
+-- otherwise tries to unify them with 'unifyKnownTypes'.
 unifyWithKnown :: TypeBox tf => tf Type -> Type -> TypeM Type
 unifyWithKnown t1 t2 = case unboxType t1 of
                          Nothing -> return t2
                          Just t1' -> unifyKnownTypes t2 t1'
 
+-- | @require ts (t, e)@ causes a 'TypeError' if @t@ does not unify
+-- with one of the types in @ts@.  Otherwise, simply returns @(t, e)@.
+-- This function is very useful in 'checkExp'.
 require :: [Type] -> (Type, Exp Identity) -> TypeM (Type, Exp Identity)
 require [] (_,e) = bad $ TypeError (expPos e) "Expression cannot have any type (probably a bug in the type checker)."
 require ts (et,e)
@@ -122,6 +157,9 @@ elemType :: Type -> TypeM Type
 elemType (Array t _ _) = return t
 elemType t = bad $ TypeError (typePos t) $ "Type of expression is not array, but " ++ ppType t ++ "."
 
+-- | Type check a program containing arbitrary type information,
+-- yielding either a type error or a program with complete type
+-- information.
 checkProg :: TypeBox tf => Prog tf -> Either TypeError (Prog Identity)
 checkProg prog = do
   ftable <- buildFtable
@@ -228,7 +266,7 @@ checkExp (Let (TupId _ _) _ _ _ _ pos) =
   bad $ TypeError pos "Cannot use tuple pattern when using rebinding syntax"
 checkExp (Let (Id name namepos) e (Just idxes) (Just ve) body pos) = do
   (et, e') <- checkExp e
-  case indexArray (length idxes) et of
+  case peelArray (length idxes) et of
     Nothing -> bad $ TypeError pos $ show (length idxes) ++ " indices given, but type of expression at " ++ posStr (expPos e) ++ " has " ++ show (arrayDims et) ++ " dimensions."
     Just elemt -> do
       (_, idxes') <- unzip <$> mapM (require [Int pos] <=< checkExp) idxes
