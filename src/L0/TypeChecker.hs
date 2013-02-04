@@ -25,7 +25,7 @@ data TypeError = TypeError Pos String
                | InvalidPatternError TupIdent Type
                | UnknownVariableError String Pos
                | UnknownFunctionError String Pos
-               | ParameterCountMismatch String Pos Int Int
+               | ParameterMismatch String Pos [Type] [Type]
 
 instance Show TypeError where
   show (TypeError pos msg) =
@@ -54,8 +54,13 @@ instance Show TypeError where
     "Unknown variable " ++ name ++ " referenced at " ++ posStr pos ++ "."
   show (UnknownFunctionError fname pos) =
     "Unknown function " ++ fname ++ " called at " ++ posStr pos ++ "."
-  show (ParameterCountMismatch fname pos expected got) =
-    "In call of Function " ++ fname ++ " at position " ++ posStr pos ++ ": expecting " ++ show expected ++ " arguments, but got " ++ show got ++ "."
+  show (ParameterMismatch fname pos expected got) =
+    "In call of Function " ++ fname ++ " at position " ++ posStr pos ++
+    ": expecting " ++ show nexpected ++ " arguments of types " ++
+    intercalate ", " (map ppType expected) ++ ", but got " ++ show ngot ++
+    " arguments of types " ++ intercalate ", " (map ppType expected) ++ "."
+    where nexpected = length expected
+          ngot = length got
 
 class TypeBox tf where
   unboxType :: tf t -> Maybe t
@@ -138,7 +143,8 @@ checkProg prog = do
     builtins = M.fromList [("toReal", (Real (0,0), [Int (0,0)], (0,0)))
                           ,("sqrt", (Real (0,0), [Real (0,0)], (0,0)))
                           ,("log", (Real (0,0), [Real (0,0)], (0,0)))
-                          ,("exp", (Real (0,0), [Real (0,0)], (0,0)))]
+                          ,("exp", (Real (0,0), [Real (0,0)], (0,0)))
+                          ,("op + real", (Real (0,0), [Real (0,0), Real (0,0)], (0,0)))]
 
 checkFun :: TypeBox tf => FunDec tf -> TypeM (FunDec Identity)
 checkFun (fname, rettype, args, body, pos) = do
@@ -213,7 +219,7 @@ checkExp (Apply fname args t pos) = do
       if length argtypes == length paramtypes then do
         zipWithM_ unifyKnownTypes argtypes paramtypes
         return (rettype', Apply fname args' (boxType rettype') pos)
-      else bad $ ParameterCountMismatch fname pos (length paramtypes) (length argtypes)
+      else bad $ ParameterMismatch fname pos paramtypes argtypes
 checkExp (Let pat e Nothing Nothing body pos) = do
   (et, e') <- checkExp e
   bnds <- checkPattern pat et
@@ -424,17 +430,56 @@ checkLambda (AnonymFun params body ret pos) args
   zipWithM_ unifyKnownTypes (map snd params') args
   return (AnonymFun params body' ret' pos, ret')
   | otherwise = bad $ TypeError pos $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
+checkLambda (CurryFun "op +" curryargexps curryargts rettype pos) args =
+  checkPolyLambdaOp "op +" Plus curryargexps curryargts rettype args pos
+checkLambda (CurryFun "op -" curryargexps curryargts rettype pos) args =
+  checkPolyLambdaOp "op -" Minus curryargexps curryargts rettype args pos
+checkLambda (CurryFun "op pow" curryargexps curryargts rettype pos) args =
+  checkPolyLambdaOp "op -" Pow curryargexps curryargts rettype args pos
+checkLambda (CurryFun "op *" curryargexps curryargts rettype pos) args =
+  checkPolyLambdaOp "op *" Times curryargexps curryargts rettype args pos
+checkLambda (CurryFun "op /" curryargexps curryargts rettype pos) args =
+  checkPolyLambdaOp "op /" Times curryargexps curryargts rettype args pos
 checkLambda (CurryFun fname curryargexps curryargts rettype pos) args = do
+  (curryargexpts, curryargexps') <- unzip <$> mapM checkExp curryargexps
+  curryargts' <- case unboxType curryargts of
+                   Nothing -> return curryargexpts
+                   Just curryargts' -> zipWithM unifyKnownTypes curryargts' curryargexpts
+  let args' = curryargts' ++ args
   bnd <- asks $ M.lookup fname . envFtable
   case bnd of
     Nothing -> bad $ UnknownFunctionError fname pos
     Just (rt, paramtypes) -> do
-      when (length curryargexps + length args /= length paramtypes) $
-        bad $ ParameterCountMismatch fname pos (length paramtypes) (length curryargexps+length args)
+      when (length args' /= length paramtypes ||
+            not (all (uncurry (==)) $ zip args' paramtypes)) $
+        bad $ ParameterMismatch fname pos paramtypes args'
       rettype' <- rettype `unifyWithKnown` rt
-      (curryargexpts, curryargexps') <- unzip <$> mapM checkExp curryargexps
-      curryargts' <- case unboxType curryargts of
-                       Nothing -> return curryargexpts
-                       Just curryargts' -> zipWithM unifyKnownTypes curryargts' curryargexpts
       zipWithM_ unifyKnownTypes (curryargts'++args) paramtypes
       return (CurryFun fname curryargexps' (boxType curryargts') (boxType rettype') pos, rettype')
+
+checkPolyLambdaOp :: (TypeBox tf) =>
+                     String
+                  -> (Exp Identity -> Exp Identity -> Identity Type -> Pos -> Exp Identity)
+                  -> [Exp tf] -> tf [Type] -> tf Type -> [Type] -> Pos
+                  -> TypeM (Lambda Identity, Type)
+checkPolyLambdaOp fname op curryargexps curryargts rettype args pos = do
+  (curryargexpts, curryargexps') <- unzip <$> mapM checkExp curryargexps
+  curryargts' <- case unboxType curryargts of
+                   Nothing          -> return curryargexpts
+                   Just curryargts' -> zipWithM unifyKnownTypes curryargts' curryargexpts
+  tp <- case curryargts' ++ args of
+          [Real _, Real _] -> return $ Real pos
+          [Int _, Int _] -> return $ Int pos
+          l -> bad $ ParameterMismatch fname pos [Real pos, Real pos] l
+  (x,y,params) <- case curryargexps' of
+                    [] -> return (Var "x" (boxType tp) pos,
+                                  Var "y" (boxType tp) pos,
+                                  [("x", tp), ("y", tp)])
+                    [e] -> return (e,
+                                   Var "y" (boxType tp) pos,
+                                   [("y", tp)])
+                    (e1:e2:_) -> return (e1, e2, [])
+  (fun, t) <- checkLambda (AnonymFun params (op x y (boxType tp) pos) tp pos)
+              $ curryargts' ++ args
+  t' <- rettype `unifyWithKnown` t
+  return (fun, t')
