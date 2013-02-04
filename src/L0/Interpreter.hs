@@ -106,11 +106,15 @@ runProg wop rop prog = do
     builtins = M.fromList [("toReal", builtin "toReal")
                           ,("sqrt", builtin "sqrt")
                           ,("log", builtin "log")
-                          ,("exp", builtin "exp")]
+                          ,("exp", builtin "exp")
+                          ,("op not", builtin "op not")
+                          ,("op ~", builtin "op ~")]
     builtin "toReal" [IntVal x pos] = return $ RealVal (fromIntegral x) pos
     builtin "sqrt" [RealVal x pos] = return $ RealVal (sqrt x) pos
     builtin "log" [RealVal x pos] = return $ RealVal (log x) pos
     builtin "exp" [RealVal x pos] = return $ RealVal (exp x) pos
+    builtin "op not" [LogVal b pos] = return $ LogVal (not b) pos
+    builtin "op ~" [RealVal b pos] = return $ RealVal (-b) pos
     builtin fname _ = bad $ TypeError (0,0) $ "Builtin " ++ fname
 
 evalExp :: (Applicative m, Monad m) => Exp Identity -> L0M m Value
@@ -119,26 +123,34 @@ evalExp (TupLit es _ pos) =
   TupVal <$> mapM evalExp es <*> pure pos
 evalExp (ArrayLit es (Identity t) pos) =
   ArrayVal <$> mapM evalExp es <*> pure t <*> pure pos
-evalExp (Plus e1 e2 (Identity (Int _)) pos) = evalIntBinOp IntVal (+) e1 e2 pos
-evalExp (Plus e1 e2 (Identity (Real _)) pos) = evalRealBinOp RealVal (+) e1 e2 pos
-evalExp (Plus _ _ _ pos) = bad $ TypeError pos "evalExp Plus"
-evalExp (Minus e1 e2 (Identity (Int _)) pos) = evalIntBinOp IntVal (-) e1 e2 pos
-evalExp (Minus e1 e2 (Identity (Real _)) pos) = evalRealBinOp RealVal (-) e1 e2 pos
-evalExp (Minus _ _ _ pos) = bad $ TypeError pos "evalExp Minus"
-evalExp (Pow e1 e2 (Identity (Int _)) pos) = evalIntBinOp IntVal (^) e1 e2 pos
-evalExp (Pow e1 e2 (Identity (Real _)) pos) = evalRealBinOp RealVal (**) e1 e2 pos
-evalExp (Pow _ _ _ pos) = bad $ TypeError pos "evalExp Pow"
-evalExp (Times e1 e2 (Identity (Int _)) pos) = evalIntBinOp IntVal (*) e1 e2 pos
-evalExp (Times e1 e2 (Identity (Real _)) pos) = evalRealBinOp RealVal (*) e1 e2 pos
-evalExp (Times _ _ _ pos) = bad $ TypeError pos "evalExp Times"
-evalExp (Divide e1 e2 (Identity (Int _)) pos) = evalIntBinOp IntVal div e1 e2 pos
-evalExp (Divide e1 e2 (Identity (Real _)) pos) = evalRealBinOp RealVal (/) e1 e2 pos
-evalExp (Divide _ _ _ pos) = bad $ TypeError pos "evalExp Divide"
-evalExp (ShiftR e1 e2 pos) = evalIntBinOp IntVal shiftR e1 e2 pos
-evalExp (ShiftL e1 e2 pos) = evalIntBinOp IntVal shiftL e1 e2 pos
-evalExp (Band e1 e2 pos) = evalIntBinOp IntVal (.&.) e1 e2 pos
-evalExp (Xor e1 e2 pos) = evalIntBinOp IntVal xor e1 e2 pos
-evalExp (Bor e1 e2 pos) = evalIntBinOp IntVal (.|.) e1 e2 pos
+evalExp (BinOp Plus e1 e2 (Identity (Int _)) pos) = evalIntBinOp IntVal (+) e1 e2 pos
+evalExp (BinOp Plus e1 e2 (Identity (Real _)) pos) = evalRealBinOp RealVal (+) e1 e2 pos
+evalExp (BinOp Minus e1 e2 (Identity (Int _)) pos) = evalIntBinOp IntVal (-) e1 e2 pos
+evalExp (BinOp Minus e1 e2 (Identity (Real _)) pos) = evalRealBinOp RealVal (-) e1 e2 pos
+evalExp (BinOp Pow e1 e2 (Identity (Int _)) pos) = evalIntBinOp IntVal (^) e1 e2 pos
+evalExp (BinOp Pow e1 e2 (Identity (Real _)) pos) = evalRealBinOp RealVal (**) e1 e2 pos
+evalExp (BinOp Times e1 e2 (Identity (Int _)) pos) = evalIntBinOp IntVal (*) e1 e2 pos
+evalExp (BinOp Times e1 e2 (Identity (Real _)) pos) = evalRealBinOp RealVal (*) e1 e2 pos
+evalExp (BinOp Divide e1 e2 (Identity (Int _)) pos) = evalIntBinOp IntVal div e1 e2 pos
+evalExp (BinOp Divide e1 e2 (Identity (Real _)) pos) = evalRealBinOp RealVal (/) e1 e2 pos
+evalExp (BinOp ShiftR e1 e2 _ pos) = evalIntBinOp IntVal shiftR e1 e2 pos
+evalExp (BinOp ShiftL e1 e2 _ pos) = evalIntBinOp IntVal shiftL e1 e2 pos
+evalExp (BinOp Band e1 e2 _ pos) = evalIntBinOp IntVal (.&.) e1 e2 pos
+evalExp (BinOp Xor e1 e2 _ pos) = evalIntBinOp IntVal xor e1 e2 pos
+evalExp (BinOp Bor e1 e2 _ pos) = evalIntBinOp IntVal (.|.) e1 e2 pos
+evalExp (BinOp Equal e1 e2 _ pos) = do
+  v1 <- evalExp e1
+  v2 <- evalExp e2
+  return $ LogVal (v1==v2) pos
+evalExp (BinOp Less e1 e2 _ pos) = do
+  v1 <- evalExp e1
+  v2 <- evalExp e2
+  return $ LogVal (v1<v2) pos
+evalExp (BinOp Leq e1 e2 _ pos) = do
+  v1 <- evalExp e1
+  v2 <- evalExp e2
+  return $ LogVal (v1<=v2) pos
+evalExp (BinOp _ _ _ _ pos) = bad $ TypeError pos "evalExp Binop"
 evalExp (And e1 e2 pos) = do
   v1 <- evalExp e1
   case v1 of LogVal True  _ -> evalExp e2
@@ -149,18 +161,6 @@ evalExp (Or e1 e2 pos) = do
   case v1 of LogVal True  _ -> return v1
              LogVal False _ -> evalExp e2
              _              -> bad $ TypeError pos "evalExp Or"
-evalExp (Equal e1 e2 pos) = do
-  v1 <- evalExp e1
-  v2 <- evalExp e2
-  return $ LogVal (v1==v2) pos
-evalExp (Less e1 e2 pos) = do
-  v1 <- evalExp e1
-  v2 <- evalExp e2
-  return $ LogVal (v1<v2) pos
-evalExp (Leq e1 e2 pos) = do
-  v1 <- evalExp e1
-  v2 <- evalExp e2
-  return $ LogVal (v1<=v2) pos
 evalExp (Not e pos) = do
   v <- evalExp e
   case v of LogVal b _   -> return $ LogVal (not b) pos
@@ -343,8 +343,7 @@ evalExp (DoLoop loopvar boundexp body [mergevar] pos) = do
     IntVal n _ -> foldM iteration mergeval [0..n-1]
     _ -> bad $ TypeError pos "evalExp DoLoop"
   where iteration val i =
-          binding [(mergevar, val), (loopvar, IntVal i pos)] $ do
-            evalExp body
+          binding [(mergevar, val), (loopvar, IntVal i pos)] $ evalExp body
 evalExp (DoLoop {}) = fail "Sorry, that loop's just too crazy for now."
 
 evalIntBinOp :: (Applicative m, Monad m) =>

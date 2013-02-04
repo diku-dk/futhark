@@ -56,9 +56,9 @@ instance Show TypeError where
     "Unknown function " ++ fname ++ " called at " ++ posStr pos ++ "."
   show (ParameterMismatch fname pos expected got) =
     "In call of Function " ++ fname ++ " at position " ++ posStr pos ++
-    ": expecting " ++ show nexpected ++ " arguments of types " ++
+    ": expecting " ++ show nexpected ++ " argument(s) of type(s) " ++
     intercalate ", " (map ppType expected) ++ ", but got " ++ show ngot ++
-    " arguments of types " ++ intercalate ", " (map ppType expected) ++ "."
+    " arguments of types " ++ intercalate ", " (map ppType got) ++ "."
     where nexpected = length expected
           ngot = length got
 
@@ -144,7 +144,8 @@ checkProg prog = do
                           ,("sqrt", (Real (0,0), [Real (0,0)], (0,0)))
                           ,("log", (Real (0,0), [Real (0,0)], (0,0)))
                           ,("exp", (Real (0,0), [Real (0,0)], (0,0)))
-                          ,("op + real", (Real (0,0), [Real (0,0), Real (0,0)], (0,0)))]
+                          ,("op not", (Bool (0,0), [Bool (0,0)], (0,0)))
+                          ,("op ~", (Real (0,0), [Real (0,0)], (0,0)))]
 
 checkFun :: TypeBox tf => FunDec tf -> TypeM (FunDec Identity)
 checkFun (fname, rettype, args, body, pos) = do
@@ -177,21 +178,15 @@ checkExp (ArrayLit es t pos) = do
   -- Unify that type with the one given for the array literal.
   t' <- t `unifyWithKnown` Array et Nothing pos
   return (t', ArrayLit es' (boxType t') pos)
-checkExp (Plus e1 e2 t pos) = checkPolyBinOp Plus [Real pos, Int pos] e1 e2 t pos
-checkExp (Minus e1 e2 t pos) = checkPolyBinOp Minus [Real pos, Int pos] e1 e2 t pos
-checkExp (Pow e1 e2 t pos) = checkPolyBinOp Pow [Real pos, Int pos] e1 e2 t pos
-checkExp (Times e1 e2 t pos) = checkPolyBinOp Times [Real pos, Int pos] e1 e2 t pos
-checkExp (Divide e1 e2 t pos) = checkPolyBinOp Divide [Real pos, Int pos] e1 e2 t pos
-checkExp (ShiftR e1 e2 pos) = checkMonoBinOp ShiftR (Int pos) e1 e2 pos
-checkExp (ShiftL e1 e2 pos) = checkMonoBinOp ShiftL (Int pos) e1 e2 pos
-checkExp (Band e1 e2 pos) = checkMonoBinOp Band (Int pos) e1 e2 pos
-checkExp (Xor e1 e2 pos) = checkMonoBinOp Xor (Int pos) e1 e2 pos
-checkExp (Bor e1 e2 pos) = checkMonoBinOp Bor (Int pos) e1 e2 pos
-checkExp (And e1 e2 pos) = checkMonoBinOp And (Bool pos) e1 e2 pos
-checkExp (Or e1 e2 pos) = checkMonoBinOp Or (Bool pos) e1 e2 pos
-checkExp (Equal e1 e2 pos) = checkRelOp Equal [Int pos, Real pos, Bool pos] e1 e2 pos
-checkExp (Less e1 e2 pos) = checkRelOp Less [Int pos, Real pos, Bool pos] e1 e2 pos
-checkExp (Leq e1 e2 pos) = checkRelOp Leq [Int pos, Real pos, Bool pos] e1 e2 pos
+checkExp (BinOp op e1 e2 t pos) = checkBinOp op e1 e2 t pos
+checkExp (And e1 e2 pos) = do
+  (_, e1') <- require [Bool pos] =<< checkExp e1
+  (_, e2') <- require [Bool pos] =<< checkExp e2
+  return (Bool pos, And e1' e2' pos)
+checkExp (Or e1 e2 pos) = do
+  (_, e1') <- require [Bool pos] =<< checkExp e1
+  (_, e2') <- require [Bool pos] =<< checkExp e2
+  return (Bool pos, Or e1' e2' pos)
 checkExp (Not e pos) = require [Bool pos] =<< checkExp e
 checkExp (Negate e t pos) = do
   (et,e') <- require [Int pos, Real pos] =<< checkExp e
@@ -387,27 +382,42 @@ checkLiteral (ArrayVal vals t pos) = do
   t' <- t `unifyKnownTypes` Array vt Nothing pos
   return (t', ArrayVal vals' t' pos)
 
+checkBinOp :: TypeBox tf => BinOp -> Exp tf -> Exp tf -> tf Type -> Pos
+           -> TypeM (Type, Exp Identity)
+checkBinOp Plus e1 e2 t pos = checkPolyBinOp Plus [Real pos, Int pos] e1 e2 t pos
+checkBinOp Minus e1 e2 t pos = checkPolyBinOp Minus [Real pos, Int pos] e1 e2 t pos
+checkBinOp Pow e1 e2 t pos = checkPolyBinOp Pow [Real pos, Int pos] e1 e2 t pos
+checkBinOp Times e1 e2 t pos = checkPolyBinOp Times [Real pos, Int pos] e1 e2 t pos
+checkBinOp Divide e1 e2 t pos = checkPolyBinOp Divide [Real pos, Int pos] e1 e2 t pos
+checkBinOp ShiftR e1 e2 t pos = checkPolyBinOp ShiftR [Int pos] e1 e2 t pos
+checkBinOp ShiftL e1 e2 t pos = checkPolyBinOp ShiftL [Int pos] e1 e2 t pos
+checkBinOp Band e1 e2 t pos = checkPolyBinOp Band [Int pos] e1 e2 t pos
+checkBinOp Xor e1 e2 t pos = checkPolyBinOp Xor [Int pos] e1 e2 t pos
+checkBinOp Bor e1 e2 t pos = checkPolyBinOp Bor [Int pos] e1 e2 t pos
+checkBinOp LogAnd e1 e2 t pos = checkPolyBinOp LogAnd [Bool pos] e1 e2 t pos
+checkBinOp LogOr e1 e2 t pos = checkPolyBinOp LogOr [Bool pos] e1 e2 t pos
+checkBinOp Equal e1 e2 t pos = checkRelOp Equal [Int pos, Real pos] e1 e2 t pos
+checkBinOp Less e1 e2 t pos = checkRelOp Less [Int pos, Real pos] e1 e2 t pos
+checkBinOp Leq e1 e2 t pos = checkRelOp Leq [Int pos, Real pos] e1 e2 t pos
 
-checkMonoBinOp :: TypeBox tf => (Exp Identity -> Exp Identity -> Pos -> Exp Identity)
-               -> Type -> Exp tf -> Exp tf -> Pos -> TypeM (Type, Exp Identity)
-checkMonoBinOp op t e1 e2 = checkPolyBinOp (\e1' e2' _ pos' -> op e1' e2' pos') [t] e1 e2 (boxType t)
-
-checkRelOp :: TypeBox tf => (Exp Identity -> Exp Identity -> Pos -> Exp Identity)
-           -> [Type] -> Exp tf -> Exp tf -> Pos -> TypeM (Type, Exp Identity)
-checkRelOp op tl e1 e2 pos = do
+checkRelOp :: TypeBox tf => BinOp
+           -> [Type] -> Exp tf -> Exp tf -> tf Type -> Pos -> TypeM (Type, Exp Identity)
+checkRelOp op tl e1 e2 t pos = do
   (t1,e1') <- require tl =<< checkExp e1
   (t2,e2') <- require tl =<< checkExp e2
   _ <- unifyKnownTypes t1 t2
-  return (Bool pos, op e1' e2' pos)
+  t' <- t `unifyWithKnown` Bool pos
+  return (Bool pos, BinOp op e1' e2' (boxType t') pos)
 
 checkPolyBinOp :: TypeBox tf =>
-                  (Exp Identity -> Exp Identity -> Identity Type -> Pos -> Exp Identity)
-               -> [Type] -> Exp tf -> Exp tf -> tf Type -> Pos -> TypeM (Type, Exp Identity)
+                  BinOp -> [Type] -> Exp tf -> Exp tf -> tf Type -> Pos
+               -> TypeM (Type, Exp Identity)
 checkPolyBinOp op tl e1 e2 t pos = do
-  (t1,e1') <- require tl =<< checkExp e1
-  (t2,e2') <- require tl =<< checkExp e2
-  t' <- (t `unifyWithKnown`) =<< unifyKnownTypes t1 t2
-  return (t', op e1' e2' (boxType t') pos)
+  (t1, e1') <- require tl =<< checkExp e1
+  (t2, e2') <- require tl =<< checkExp e2
+  t' <- unifyKnownTypes t1 t2
+  t'' <- t `unifyWithKnown` t'
+  return (t'', BinOp op e1' e2' (boxType t'') pos)
 
 checkPattern :: TupIdent -> Type -> TypeM [Binding]
 checkPattern pat vt = map rmPos <$> execStateT (checkPattern' pat vt) []
@@ -430,16 +440,10 @@ checkLambda (AnonymFun params body ret pos) args
   zipWithM_ unifyKnownTypes (map snd params') args
   return (AnonymFun params body' ret' pos, ret')
   | otherwise = bad $ TypeError pos $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
-checkLambda (CurryFun "op +" curryargexps curryargts rettype pos) args =
-  checkPolyLambdaOp "op +" Plus curryargexps curryargts rettype args pos
-checkLambda (CurryFun "op -" curryargexps curryargts rettype pos) args =
-  checkPolyLambdaOp "op -" Minus curryargexps curryargts rettype args pos
-checkLambda (CurryFun "op pow" curryargexps curryargts rettype pos) args =
-  checkPolyLambdaOp "op -" Pow curryargexps curryargts rettype args pos
-checkLambda (CurryFun "op *" curryargexps curryargts rettype pos) args =
-  checkPolyLambdaOp "op *" Times curryargexps curryargts rettype args pos
-checkLambda (CurryFun "op /" curryargexps curryargts rettype pos) args =
-  checkPolyLambdaOp "op /" Times curryargexps curryargts rettype args pos
+checkLambda (CurryFun opfun curryargexps curryargts rettype pos) args
+  | Just op <- lookup opfun ops =
+  checkPolyLambdaOp op curryargexps curryargts rettype args pos
+  where ops = map (\op -> ("op " ++ opStr op, op)) [minBound..maxBound]
 checkLambda (CurryFun fname curryargexps curryargts rettype pos) args = do
   (curryargexpts, curryargexps') <- unzip <$> mapM checkExp curryargexps
   curryargts' <- case unboxType curryargts of
@@ -458,11 +462,9 @@ checkLambda (CurryFun fname curryargexps curryargts rettype pos) args = do
       return (CurryFun fname curryargexps' (boxType curryargts') (boxType rettype') pos, rettype')
 
 checkPolyLambdaOp :: (TypeBox tf) =>
-                     String
-                  -> (Exp Identity -> Exp Identity -> Identity Type -> Pos -> Exp Identity)
-                  -> [Exp tf] -> tf [Type] -> tf Type -> [Type] -> Pos
+                     BinOp -> [Exp tf] -> tf [Type] -> tf Type -> [Type] -> Pos
                   -> TypeM (Lambda Identity, Type)
-checkPolyLambdaOp fname op curryargexps curryargts rettype args pos = do
+checkPolyLambdaOp op curryargexps curryargts rettype args pos = do
   (curryargexpts, curryargexps') <- unzip <$> mapM checkExp curryargexps
   curryargts' <- case unboxType curryargts of
                    Nothing          -> return curryargexpts
@@ -479,7 +481,8 @@ checkPolyLambdaOp fname op curryargexps curryargts rettype args pos = do
                                    Var "y" (boxType tp) pos,
                                    [("y", tp)])
                     (e1:e2:_) -> return (e1, e2, [])
-  (fun, t) <- checkLambda (AnonymFun params (op x y (boxType tp) pos) tp pos)
+  (fun, t) <- checkLambda (AnonymFun params (BinOp op x y (boxType tp) pos) tp pos)
               $ curryargts' ++ args
   t' <- rettype `unifyWithKnown` t
   return (fun, t')
+  where fname = "op" ++ ppBinOp op

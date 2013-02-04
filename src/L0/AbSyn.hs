@@ -16,6 +16,9 @@ module L0.AbSyn
   , Exp(..)
   , expPos
   , ppExp
+  , BinOp(..)
+  , opStr
+  , ppBinOp
   , Lambda(..)
   , TupIdent(..)
   , patPos
@@ -136,24 +139,10 @@ data Exp tf = Literal Value
                                                   -- 2nd arg is the array's type
                                                   -- 3rd arg is a list containing the
                                                   -- dimensions' lengths, e.g., [2,2]
-            -- Binary Ops for Numbers
-            | Plus   (Exp tf) (Exp tf) (tf Type) Pos
-            | Minus  (Exp tf) (Exp tf) (tf Type) Pos
-            | Pow    (Exp tf) (Exp tf) (tf Type) Pos
-            | Times  (Exp tf) (Exp tf) (tf Type) Pos
-            | Divide (Exp tf) (Exp tf) (tf Type) Pos
-            | ShiftR (Exp tf) (Exp tf) Pos
-            | ShiftL (Exp tf) (Exp tf) Pos
-            | Band   (Exp tf) (Exp tf) Pos
-            | Xor    (Exp tf) (Exp tf) Pos
-            | Bor    (Exp tf) (Exp tf) Pos
+            | BinOp BinOp (Exp tf) (Exp tf) (tf Type) Pos
             -- Binary Ops for Booleans
             | And    (Exp tf) (Exp tf) Pos
             | Or     (Exp tf) (Exp tf) Pos
-            -- Relational Ops for all basic types at least
-            | Equal  (Exp tf) (Exp tf) Pos     -- e.g., x = 3
-            | Less   (Exp tf) (Exp tf) Pos
-            | Leq    (Exp tf) (Exp tf) Pos
             -- Unary Ops: Not for bools and Negate for ints
             | Not    (Exp tf) Pos -- e.g., not True = False
             | Negate (Exp tf) (tf Type) Pos -- e.g., ~(~1) = 1
@@ -244,21 +233,9 @@ expPos (Literal val) = valuePos val
         valuePos (ArrayVal _ _ pos) = pos
 expPos (TupLit _ _ pos) = pos
 expPos (ArrayLit _ _ pos) = pos
-expPos (Plus _ _ _ pos) = pos
-expPos (Minus _ _ _ pos) = pos
-expPos (Pow _ _ _ pos) = pos
-expPos (Times _ _ _ pos) = pos
-expPos (Divide _ _ _ pos) = pos
-expPos (ShiftR _ _ pos) = pos
-expPos (ShiftL _ _ pos) = pos
-expPos (Band _ _ pos) = pos
-expPos (Xor _ _ pos) = pos
-expPos (Bor _ _ pos) = pos
+expPos (BinOp _ _ _ _ pos) = pos
 expPos (And _ _ pos) = pos
 expPos (Or _ _ pos) = pos
-expPos (Equal _ _ pos) = pos
-expPos (Less _ _ pos) = pos
-expPos (Leq _ _ pos) = pos
 expPos (Not _ pos) = pos
 expPos (Negate _ _ pos) = pos
 expPos (If _ _ _ _ pos) = pos
@@ -282,6 +259,46 @@ expPos (Concat _ _ _ pos) = pos
 expPos (Read _ pos) = pos
 expPos (Write _ _ pos) = pos
 expPos (DoLoop _ _ _ _ pos) = pos
+
+-- | Eagerly evaluated binary operators.  In particular, the
+-- short-circuited operators && and || are not here, although an
+-- eagerly evaluated variant is.
+data BinOp = Plus -- Binary Ops for Numbers
+           | Minus
+           | Pow
+           | Times
+           | Divide
+           | ShiftR
+           | ShiftL
+           | Band
+           | Xor
+           | Bor
+           | LogAnd
+           | LogOr
+           -- Relational Ops for all basic types at least
+           | Equal
+           | Less
+           | Leq
+             deriving (Enum, Bounded)
+
+-- ^ Print the operator, without whitespace, that corresponds to this
+-- @BinOp@.
+opStr :: BinOp -> String
+opStr Plus = "+"
+opStr Minus = "-"
+opStr Pow = "^"
+opStr Times = "*"
+opStr Divide = "/"
+opStr ShiftR = ">>"
+opStr ShiftL = "<<"
+opStr Band = "&"
+opStr Xor = "^"
+opStr Bor = "|"
+opStr LogAnd = "&&"
+opStr LogOr = "||"
+opStr Equal = "="
+opStr Less = "<"
+opStr Leq = "<="
 
 -- | Anonymous Function
 data Lambda tf = AnonymFun [(String,Type)] (Exp tf) Type Pos
@@ -336,25 +353,13 @@ ppExp d (TupLit es _ _) =
   " ( " ++ intercalate ", " (map (ppExp d) es) ++ " ) "
 ppExp _ (Var   var _ _)    = var
 
-ppExp d (Plus  e1 e2 _ _) = " ( " ++ ppExp d e1 ++ " + " ++ ppExp d e2 ++ " ) "
-ppExp d (Minus e1 e2 _ _) = " ( " ++ ppExp d e1 ++ " - " ++ ppExp d e2 ++ " ) "
-ppExp d (Pow   e1 e2 _ _) = " ( " ++ ppExp d e1 ++ " pow " ++ ppExp d e2 ++ " ) "
-ppExp d (Times e1 e2 _ _) = " ( " ++ ppExp d e1 ++ "," ++ ppExp d e2 ++ " ) "
-ppExp d (Divide e1 e2 _ _) = " ( " ++ ppExp d e1 ++ " / " ++ ppExp d e2 ++ " ) "
+ppExp d (BinOp op e1 e2 _ _) = " ( " ++ ppExp d e1 ++ ppBinOp op ++ ppExp d e2 ++ " ) "
 ppExp d (And   e1 e2 _  ) = " ( " ++ ppExp d e1 ++ " && " ++ ppExp d e2 ++ " ) "
 ppExp d (Or    e1 e2 _  ) = " ( " ++ ppExp d e1 ++ " || " ++ ppExp d e2 ++ " ) "
+
 ppExp d (Not   e _      ) = " ( " ++ "not " ++ ppExp d e ++ " ) "
 ppExp d (Negate e _ _   ) = " ( " ++ "~ " ++ ppExp d e ++   " ) "
 
-ppExp d (Band   e1 e2 _) = " ( " ++ ppExp d e1 ++ " & "  ++ ppExp d e2 ++ " ) "
-ppExp d (Bor    e1 e2 _) = " ( " ++ ppExp d e1 ++ " | "  ++ ppExp d e2 ++ " ) "
-ppExp d (Xor    e1 e2 _) = " ( " ++ ppExp d e1 ++ " ++ "  ++ ppExp d e2 ++ " ) "
-ppExp d (ShiftR e1 e2 _) = " ( " ++ ppExp d e1 ++ " >> " ++ ppExp d e2 ++ " ) "
-ppExp d (ShiftL e1 e2 _) = " ( " ++ ppExp d e1 ++ " << " ++ ppExp d e2 ++ " ) "
-
-ppExp d (Equal e1 e2 _)    = " ( " ++ ppExp d e1 ++ " = " ++ ppExp d e2 ++ " ) "
-ppExp d (Less  e1 e2 _)    = " ( " ++ ppExp d e1 ++ " < " ++ ppExp d e2 ++ " ) "
-ppExp d (Leq   e1 e2 _)    = " ( " ++ ppExp d e1 ++ " <= " ++ ppExp d e2 ++ " ) "
 ppExp d (If    e1 e2 e3 _ _)  =
   "\n" ++
   spaces (d+1) ++ "if( " ++ ppExp d e1 ++ " )\n" ++
@@ -430,6 +435,9 @@ ppExp d (Concat a1  a2 _ _) = " concat ( " ++ ppExp d a1 ++ ", " ++ ppExp d a2 +
 
 ppExp _ (Read t _) = " read("  ++ ppType t  ++ ") "
 ppExp d (Write e _ _) = " write("  ++ ppExp d e  ++ ") "
+
+ppBinOp :: BinOp -> String
+ppBinOp op = " " ++ opStr op ++ " "
 
 -- pretty printing a type *)
 ppType :: Type -> String
