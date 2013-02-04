@@ -1,10 +1,8 @@
-fun int grayCode(int x) =
-    (x >> 1) ^ x
+fun int grayCode(int x) = (x >> 1) ^ x
 
 ////////////////////////////////////////
 /// Sobol Generator
 ////////////////////////////////////////
-
 fun int index([int] arr, int i) = arr[i]
 
 fun bool testBit(int n, int ind) = 
@@ -215,7 +213,7 @@ fun [[real]] blackScholes(
                 [[real]] md_c,         //[num_paths, num_paths]
                 [[real]] md_vols,      //[num_paths, num_dates]
                 [[real]] md_drifts,    //[num_paths, num_dates]
-                [real] md_starts,    //[num_paths]
+                 [real]  md_starts,    //[num_paths]
                 [[real]] bb_arr        //[num_dates,num_paths]
            ) = 
     let noises = correlateDeltas(num_paths, md_c, bb_arr) 
@@ -233,8 +231,11 @@ fun real main() =
     let sobol_mat = map ( sobolIndR(num_bits, dir_vs), map(fn int (int x) => x + 1, iota(num_mc_it)) ) in
     let gauss_mat = map ( ugaussian, sobol_mat )                                       in
     let bb_mat    = map ( brownianBridge( num_und, num_dates, bb_inds, bb_data ), gauss_mat )    in
-    let bs_vect   = map ( blackScholes( num_und, md_c, md_vols, md_drifts, md_st ), bb_mat ) in
-    let payoffs   = map ( payoff2(md_disc), bs_vect ) in
+    let x = write(bb_mat) in let q = write(33333333333333333) in
+    let bs_mat    = map ( blackScholes( num_und, md_c, md_vols, md_drifts, md_st ), bb_mat ) in
+    let x = write(bs_mat) in
+
+    let payoffs   = map ( payoff2(md_disc), bs_mat ) in
     let payoff    = reduce ( op +, 0.0, payoffs )       in
             payoff / toReal(num_mc_it)
 
@@ -270,9 +271,9 @@ fun real trajInner(real amount, int ind, [real] disc) = amount * disc[ind]
 //              )
 fun (int * int * int * int * [[int]]) getHLdata() = 
         ( 
-            1000,           //number of Monte-Carlo Iterations
-            3,              // number of dates
-            5,              // number of underlyings
+            3,           // number of Monte-Carlo Iterations
+            5,              // number of dates
+            3,              // number of underlyings
             30,             // integer bit-length representation for Sobol
             getDirVs()      // direction vectors
         )
