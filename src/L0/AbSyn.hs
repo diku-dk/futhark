@@ -10,6 +10,7 @@ module L0.AbSyn
   , baseType
   , array
   , Value(..)
+  , valueType
   , ppValue
   , Exp(..)
   , expPos
@@ -85,7 +86,7 @@ data Value = IntVal Int Pos
            | LogVal Bool Pos
            | CharVal Char Pos
            | StringVal String Pos
-           | TupVal [Value] Type Pos
+           | TupVal [Value] Pos
            | ArrayVal [Value] Type Pos
 
 instance Eq Value where
@@ -94,7 +95,7 @@ instance Eq Value where
   LogVal a _ == LogVal b _ = a == b
   CharVal a _ == CharVal b _ = a == b
   StringVal s1 _ == StringVal s2 _ = s1 == s2
-  TupVal vs1 _ _ == TupVal vs2 _ _ = vs1 == vs2
+  TupVal vs1 _ == TupVal vs2 _ = vs1 == vs2
   ArrayVal vs1 _ _ == ArrayVal vs2 _ _ = vs1 == vs2
   _ == _ = False
 
@@ -104,9 +105,18 @@ instance Ord Value where
   LogVal a _ <= LogVal b _ = a <= b
   CharVal a _ <= CharVal b _ = a <= b
   StringVal s1 _ <= StringVal s2 _ = s1 <= s2
-  TupVal vs1 _ _ <= TupVal vs2 _ _ = vs1 <= vs2
+  TupVal vs1 _ <= TupVal vs2 _ = vs1 <= vs2
   ArrayVal vs1 _ _ <= ArrayVal vs2 _ _ = vs1 <= vs2
   _ <= _ = False
+
+valueType :: Value -> Type
+valueType (IntVal _ pos) = Int pos
+valueType (RealVal _ pos) = Real pos
+valueType (LogVal _ pos) = Bool pos
+valueType (CharVal _ pos) = Char pos
+valueType (StringVal _ pos) = Array (Char pos) Nothing pos
+valueType (TupVal vs pos) = Tuple (map valueType vs) pos
+valueType (ArrayVal _ t pos) = Array t Nothing pos
 
 -- | L0 Expression Language: literals + vars + int binops + array
 -- constructors + array combinators (SOAC) + if + function calls +
@@ -224,7 +234,7 @@ expPos (Literal val) = valuePos val
         valuePos (CharVal _ pos) = pos
         valuePos (StringVal _ pos) = pos
         valuePos (LogVal _ pos) = pos
-        valuePos (TupVal _ _ pos) = pos
+        valuePos (TupVal _ pos) = pos
         valuePos (ArrayVal _ _ pos) = pos
 expPos (TupLit _ _ pos) = pos
 expPos (ArrayLit _ _ pos) = pos
@@ -308,7 +318,7 @@ ppValue _ (CharVal c _)     = show c
 ppValue _ (StringVal s _)   = show s
 ppValue d (ArrayVal vs _ _) =
   " { " ++ intercalate ", " (map (ppValue d) vs) ++ " } "
-ppValue d (TupVal vs _ _)   =
+ppValue d (TupVal vs _)   =
   " ( " ++ intercalate ", " (map (ppValue d) vs) ++ " ) "
 
 -- | Pretty printing an expression *)

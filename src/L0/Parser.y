@@ -1,12 +1,30 @@
 {
-module L0.Parser(parseL0) where
+module L0.Parser( parseL0
+                , parseInt
+                , parseReal
+                , parseBool
+                , parseChar
+                , parseString
+                , parseArray
+                , parseTuple)
+  where
+
+import Control.Monad (foldM)
 
 import L0.AbSyn
 import L0.Lexer
 
 }
 
-%name l0
+%name prog Prog
+%name intValue IntValue
+%name realValue RealValue
+%name logValue LogValue
+%name charValue CharValue
+%name stringValue StringValue
+%name arrayValue ArrayValue
+%name tupleValue TupleValue
+
 %tokentype { Token }
 %error { parseError }
 
@@ -271,13 +289,67 @@ FunAbstr : id { let ID name pos = $1 in CurryFun name [] Nothing Nothing pos }
                { let (name,pos) = $1 in CurryFun name $3 Nothing Nothing pos }
          | fn Type '(' TypeIds ')' '=>' Exp { AnonymFun $4 $7 $2 $1 }
 
+Value : IntValue { $1 }
+      | RealValue { $1 }
+      | CharValue { $1 }
+      | StringValue { $1 }
+      | LogValue { $1 }
+      | ArrayValue { $1 }
+
+
+IntValue : intlit        { let INTLIT num pos = $1 in IntVal num pos }
+RealValue : reallit      { let REALLIT num pos = $1 in RealVal num pos }
+CharValue : charlit      { let CHARLIT char pos = $1 in CharVal char pos }
+StringValue : stringlit  { let STRINGLIT s pos = $1 in StringVal s pos }
+LogValue : true          { LogVal True $1 }
+        | false          { LogVal False $1 }
+ArrayValue :  '{' Values '}' { case combArrayTypes $ map valueType $2 of
+                                 Nothing -> error "Invalid array value"
+                                 Just ts -> ArrayVal $2 ts $1 }
+TupleValue : TupleVal        { let (vals, pos) = $1 in TupVal vals pos }
+
+Values : Value ',' Values { $1 : $3 }
+       | Value            { [$1] }
+
+Values2 : Value ',' Values { $1 : $3 }
+
+TupleVal : '(' Values2 ')' { ($2, $1) }
+
 {
+combArrayTypes :: [Type] -> Maybe Type
+combArrayTypes []     = Nothing
+combArrayTypes (v:vs) = foldM comb v vs
+  where comb x y
+          | x == y    = Just x
+          | otherwise = Nothing
+
 parseError :: [Token] -> a
 parseError [] = error "Parse error: End of file"
 parseError (tok:_) = error $ "Parse error at " ++ show (tokPos tok)
 
 parseL0 :: String -> Prog Maybe
-parseL0 = l0 . alexScanTokens
+parseL0 = prog . alexScanTokens
+
+parseInt :: String -> Value
+parseInt = intValue . alexScanTokens
+
+parseReal :: String -> Value
+parseReal = realValue . alexScanTokens
+
+parseBool :: String -> Value
+parseBool = logValue . alexScanTokens
+
+parseChar :: String -> Value
+parseChar = charValue . alexScanTokens
+
+parseString :: String -> Value
+parseString = stringValue . alexScanTokens
+
+parseTuple :: String -> Value
+parseTuple = tupleValue . alexScanTokens
+
+parseArray :: String -> Value
+parseArray = arrayValue . alexScanTokens
 
 builtinFuns :: [FunDec Maybe]
 builtinFuns = [("op ^", (Int p), [("x", Int p), ("y", Int p)],
