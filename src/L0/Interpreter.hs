@@ -279,7 +279,7 @@ evalExp (ZipWith fun arrexps _ (Identity outtype) pos) = do
                      Nothing -> return []
 
 -- scan * e {x1,..,xn} = {e*x1, e*x1*x2, ..., e*x1*x2*...*xn}
--- we can change this definition of scan
+-- we can change this definition of scan if deemed not suitable
 evalExp (Scan fun startexp arrexp _ pos) = do
   startval <- evalExp startexp
   vals <- arrToList =<< evalExp arrexp
