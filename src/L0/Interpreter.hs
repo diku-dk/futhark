@@ -277,11 +277,15 @@ evalExp (ZipWith fun arrexps _ (Identity outtype) pos) = do
                        ls' <- zipit tls
                        return $ el : ls'
                      Nothing -> return []
+
+-- scan * e {x1,..,xn} = {e*x1, e*x1*x2, ..., e*x1*x2*...*xn}
+-- we can change this definition of scan
 evalExp (Scan fun startexp arrexp _ pos) = do
   startval <- evalExp startexp
   vals <- arrToList =<< evalExp arrexp
   (acc, vals') <- foldM scanfun (startval, [startval]) vals
-  return $ ArrayVal (reverse vals') (valueType acc) pos
+  -- return $ ArrayVal (reverse vals') (valueType acc) pos
+  return $ ArrayVal (tail (reverse vals')) (valueType acc) pos
     where scanfun (acc, l) x = do
             acc' <- applyLambda fun [acc, x]
             return (acc', acc' : l)
