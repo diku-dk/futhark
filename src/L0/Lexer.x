@@ -11,7 +11,7 @@ import L0.AbSyn
 
 %wrapper "posn"
 
-@charlit = ($printable#['\\]|"\\"($printable|[0-9]+))
+@charlit = ($printable#['\\]|\\($printable|[0-9]+))
 
 tokens :-
 
