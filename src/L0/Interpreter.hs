@@ -341,8 +341,14 @@ evalExp (Read t pos) = do
                              Tuple {}           -> parseTuple
 evalExp (Write e _ _) = do
   v <- evalExp e
-  join $ asks envWriteOp <*> pure (ppValue 0 v)
+  join $ asks envWriteOp <*> pure (write v)
   return v
+  where write (CharVal c _) = [c]
+        write (ArrayVal vs _ _)
+          | Just s <- mapM char vs = s
+          where char (CharVal c _) = Just c
+                char _             = Nothing
+        write v = ppValue v
 evalExp (DoLoop loopvar boundexp body [mergevar] pos) = do
   bound <- evalExp boundexp
   mergeval <- lookupVar mergevar
@@ -369,7 +375,7 @@ evalRealBinOp op e1 e2 pos = do
   v2 <- evalExp e2
   case (v1, v2) of
     (RealVal x _, RealVal y _) -> return $ RealVal (op x y) pos
-    _                          -> bad $ TypeError pos $ "evalRealBinOp " ++ ppValue 0 v1 ++ " " ++ ppValue 0 v2
+    _                          -> bad $ TypeError pos $ "evalRealBinOp " ++ ppValue v1 ++ " " ++ ppValue v2
 
 evalBoolBinOp :: (Applicative m, Monad m) =>
                  (Bool -> Bool -> Bool) -> Exp Identity -> Exp Identity -> Pos -> L0M m Value
@@ -378,7 +384,7 @@ evalBoolBinOp op e1 e2 pos = do
   v2 <- evalExp e2
   case (v1, v2) of
     (LogVal x _, LogVal y _) -> return $ LogVal (op x y) pos
-    _                        -> bad $ TypeError pos $ "evalBoolBinOp " ++ ppValue 0 v1 ++ " " ++ ppValue 0 v2
+    _                        -> bad $ TypeError pos $ "evalBoolBinOp " ++ ppValue v1 ++ " " ++ ppValue v2
 
 evalPattern :: TupIdent -> Value -> Maybe [(String, Value)]
 evalPattern (Id name _) v = Just [(name, v)]
