@@ -110,7 +110,6 @@ data Value = IntVal Int Pos
            | RealVal Double Pos
            | LogVal Bool Pos
            | CharVal Char Pos
-           | StringVal String Pos
            | TupVal [Value] Pos
            | ArrayVal [Value] Type Pos
 
@@ -119,7 +118,6 @@ instance Eq Value where
   RealVal x _ == RealVal y _ = x == y
   LogVal a _ == LogVal b _ = a == b
   CharVal a _ == CharVal b _ = a == b
-  StringVal s1 _ == StringVal s2 _ = s1 == s2
   TupVal vs1 _ == TupVal vs2 _ = vs1 == vs2
   ArrayVal vs1 _ _ == ArrayVal vs2 _ _ = vs1 == vs2
   _ == _ = False
@@ -129,7 +127,6 @@ instance Ord Value where
   RealVal x _ <= RealVal y _ = x <= y
   LogVal a _ <= LogVal b _ = a <= b
   CharVal a _ <= CharVal b _ = a <= b
-  StringVal s1 _ <= StringVal s2 _ = s1 <= s2
   TupVal vs1 _ <= TupVal vs2 _ = vs1 <= vs2
   ArrayVal vs1 _ _ <= ArrayVal vs2 _ _ = vs1 <= vs2
   _ <= _ = False
@@ -140,7 +137,6 @@ valueType (IntVal _ pos) = Int pos
 valueType (RealVal _ pos) = Real pos
 valueType (LogVal _ pos) = Bool pos
 valueType (CharVal _ pos) = Char pos
-valueType (StringVal _ pos) = Array (Char pos) Nothing pos
 valueType (TupVal vs pos) = Tuple (map valueType vs) pos
 valueType (ArrayVal _ t pos) = Array t Nothing pos
 
@@ -253,7 +249,6 @@ expPos (Literal val) = valuePos val
   where valuePos (IntVal _ pos) = pos
         valuePos (RealVal _ pos) = pos
         valuePos (CharVal _ pos) = pos
-        valuePos (StringVal _ pos) = pos
         valuePos (LogVal _ pos) = pos
         valuePos (TupVal _ pos) = pos
         valuePos (ArrayVal _ _ pos) = pos
@@ -359,20 +354,22 @@ ppError (line,col) msg =
           "\nAT position " ++ show line ++ ":" ++ show col
 
 -- | Pretty printing a value.
-ppValue :: Int -> Value -> String
-ppValue _ (IntVal n _)      = show n
-ppValue _ (RealVal n _)     = show n
-ppValue _ (LogVal b _)      = show b
-ppValue _ (CharVal c _)     = show c
-ppValue _ (StringVal s _)   = show s
-ppValue d (ArrayVal vs _ _) =
-  " { " ++ intercalate ", " (map (ppValue d) vs) ++ " } "
-ppValue d (TupVal vs _)   =
-  " ( " ++ intercalate ", " (map (ppValue d) vs) ++ " ) "
+ppValue :: Value -> String
+ppValue (IntVal n _)      = show n
+ppValue (RealVal n _)     = show n
+ppValue (LogVal b _)      = show b
+ppValue (CharVal c _)     = show c
+ppValue (ArrayVal vs _ _)
+  | Just s <- mapM char vs = show s
+  | otherwise = " { " ++ intercalate ", " (map ppValue vs) ++ " } "
+    where char (CharVal c _) = Just c
+          char _             = Nothing
+ppValue (TupVal vs _)   =
+  " ( " ++ intercalate ", " (map ppValue vs) ++ " ) "
 
 -- | Pretty printing an expression
 ppExp :: Int -> Exp tf -> String
-ppExp d (Literal val)     = ppValue d val
+ppExp _ (Literal val)     = ppValue val
 ppExp d (ArrayLit es _ _) =
   " { " ++ intercalate ", " (map (ppExp d) es) ++ " } "
 ppExp d (TupLit es _ _) =

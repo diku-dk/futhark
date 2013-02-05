@@ -409,7 +409,6 @@ checkLiteral (IntVal k pos) = return (Int pos, IntVal k pos)
 checkLiteral (RealVal x pos) = return (Real pos, RealVal x pos)
 checkLiteral (LogVal b pos) = return (Bool pos, LogVal b pos)
 checkLiteral (CharVal c pos) = return (Char pos, CharVal c pos)
-checkLiteral (StringVal s pos) = return (Array (Char pos) Nothing pos, StringVal s pos)
 checkLiteral (TupVal vals pos) = do
   (ts, vals') <- unzip <$> mapM checkLiteral vals
   return (Tuple ts pos, TupVal vals' pos)

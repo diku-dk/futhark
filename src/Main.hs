@@ -69,7 +69,7 @@ interpret file = do
     Right prog' -> do
       res <- runProgIO prog'
       case res of Left err -> putStrLn $ "Interpreter error:\n" ++ show err
-                  Right v  -> putStrLn $ ppValue 0 v
+                  Right v  -> putStrLn $ ppValue v
 
 parse :: FilePath -> IO (Prog Maybe)
 parse = return . parseL0 <=< readFile
