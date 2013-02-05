@@ -215,7 +215,7 @@ evalExp (Iota e pos) = do
   v <- evalExp e
   case v of
     IntVal x _
-      | x >= 0    -> return $ ArrayVal (map (`IntVal` pos) [0..x]) (Int pos) pos
+      | x >= 0    -> return $ ArrayVal (map (`IntVal` pos) [0..x-1]) (Int pos) pos
       | otherwise -> bad $ NegativeIota pos x
     _ -> bad $ TypeError pos "evalExp Iota"
 evalExp (Replicate e1 e2 _ pos) = do
