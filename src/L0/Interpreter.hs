@@ -83,7 +83,7 @@ arrToList (ArrayVal l _ _) = return l
 arrToList _ = bad $ TypeError (0,0) "arrToList"
 
 runProgIO :: Prog Identity -> IO (Either InterpreterError Value)
-runProgIO = runProg putStr readLn
+runProgIO = runProg putStr getLine
 
 runProg :: (Applicative m, Monad m) => (String -> m ()) -> m String
         -> Prog Identity -> m (Either InterpreterError Value)
