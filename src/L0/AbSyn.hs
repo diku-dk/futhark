@@ -307,7 +307,7 @@ data BinOp = Plus -- Binary Ops for Numbers
 opStr :: BinOp -> String
 opStr Plus = "+"
 opStr Minus = "-"
-opStr Pow = "^"
+opStr Pow = "pow"
 opStr Times = "*"
 opStr Divide = "/"
 opStr ShiftR = ">>"
