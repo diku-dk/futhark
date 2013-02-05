@@ -492,7 +492,7 @@ ppLambda ( CurryFun fid args _ ty pos) =
       ppExp 0 (Apply fid args ty pos)
 
 -- | pretty printing a function declaration
-ppFun :: Int -> FunDec Maybe -> String
+ppFun :: Int -> FunDec tf -> String
 ppFun d (name, ret_tp, args, body, _) =
   let -- pretty printing a list of bindings separated by commas
       ppBd (argname, tp) = ppType tp ++ " " ++ argname
@@ -503,5 +503,5 @@ ppFun d (name, ret_tp, args, body, _) =
      spaces (d+1) ++ ppExp (d+1) body
 
 -- | Pretty printing a program.
-prettyPrint :: Prog Maybe -> String
+prettyPrint :: Prog tf -> String
 prettyPrint p = concatMap (ppFun 0) p ++ "\n"
