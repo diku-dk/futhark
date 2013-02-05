@@ -360,7 +360,7 @@ ppValue (RealVal n _)     = show n
 ppValue (LogVal b _)      = show b
 ppValue (CharVal c _)     = show c
 ppValue (ArrayVal vs _ _)
-  | Just s <- mapM char vs = show s
+  | Just (c:cs) <- mapM char vs = show $ c:cs
   | otherwise = " { " ++ intercalate ", " (map ppValue vs) ++ " } "
     where char (CharVal c _) = Just c
           char _             = Nothing
