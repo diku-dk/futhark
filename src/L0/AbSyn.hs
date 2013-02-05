@@ -110,7 +110,6 @@ data Value = IntVal Int Pos
            | RealVal Double Pos
            | LogVal Bool Pos
            | CharVal Char Pos
-           | StringVal String Pos
            | TupVal [Value] Pos
            | ArrayVal [Value] Type Pos
 
@@ -119,7 +118,6 @@ instance Eq Value where
   RealVal x _ == RealVal y _ = x == y
   LogVal a _ == LogVal b _ = a == b
   CharVal a _ == CharVal b _ = a == b
-  StringVal s1 _ == StringVal s2 _ = s1 == s2
   TupVal vs1 _ == TupVal vs2 _ = vs1 == vs2
   ArrayVal vs1 _ _ == ArrayVal vs2 _ _ = vs1 == vs2
   _ == _ = False
@@ -129,7 +127,6 @@ instance Ord Value where
   RealVal x _ <= RealVal y _ = x <= y
   LogVal a _ <= LogVal b _ = a <= b
   CharVal a _ <= CharVal b _ = a <= b
-  StringVal s1 _ <= StringVal s2 _ = s1 <= s2
   TupVal vs1 _ <= TupVal vs2 _ = vs1 <= vs2
   ArrayVal vs1 _ _ <= ArrayVal vs2 _ _ = vs1 <= vs2
   _ <= _ = False
@@ -140,7 +137,6 @@ valueType (IntVal _ pos) = Int pos
 valueType (RealVal _ pos) = Real pos
 valueType (LogVal _ pos) = Bool pos
 valueType (CharVal _ pos) = Char pos
-valueType (StringVal _ pos) = Array (Char pos) Nothing pos
 valueType (TupVal vs pos) = Tuple (map valueType vs) pos
 valueType (ArrayVal _ t pos) = Array t Nothing pos
 
@@ -175,11 +171,11 @@ data Exp tf = Literal Value
             | If     (Exp tf) (Exp tf) (Exp tf) (tf Type) Pos
             | Var    String (tf Type) Pos
             -- Function Call and Let Construct
-            | Apply  String [(Exp tf)] (tf Type) Pos
-            | Let    TupIdent (Exp tf) (Maybe [(Exp tf)]) (Maybe (Exp tf)) (Exp tf) Pos -- e.g., let (x, (y,z)) = (1, (2+4,5)) in  x + y + z
+            | Apply  String [Exp tf] (tf Type) Pos
+            | Let    TupIdent (Exp tf) (Maybe [Exp tf]) (Maybe (Exp tf)) (Exp tf) Pos -- e.g., let (x, (y,z)) = (1, (2+4,5)) in  x + y + z
                                                                     -- or,   let x = replicate(3, iota(3)) with [0,0] to 33
             -- Array Indexing and Array Constructors
-            | Index String [(Exp tf)] (tf Type) (tf Type) Pos
+            | Index String [Exp tf] (tf Type) (tf Type) Pos
              -- e.g., arr[3]; 3rd arg is the input-array element type
              -- 4th arg is the result type
             | Iota (Exp tf) Pos -- e.g., iota(n) = {0,1,..,n-1}
@@ -187,7 +183,7 @@ data Exp tf = Literal Value
             | Replicate (Exp tf) (Exp tf) (tf Type) Pos -- e.g., replicate(3,1) = {1, 1, 1}
                                                     -- Type is the output-array type
 
-            | Reshape [(Exp tf)] (Exp tf) (tf Type) (tf Type) Pos
+            | Reshape [Exp tf] (Exp tf) (tf Type) (tf Type) Pos
              -- 1st arg is the new shape, 2nd arg is the input array *)
              -- 3rd arg is the  input-array type *)
              -- 4th arg is the result-array type *)
@@ -209,7 +205,7 @@ data Exp tf = Literal Value
              -- e.g., reduce(op +, 0, {1,2,..,n}) = (0+1+2+..+n) *)
              -- 4th arg is the input-array type                  *)
 
-            | ZipWith (Lambda tf) [(Exp tf)] (tf [Type]) (tf Type) Pos
+            | ZipWith (Lambda tf) [Exp tf] (tf [Type]) (tf Type) Pos
              -- zipWith(plus, {1,2,3}, {4,5,6}) == {5, 7, 9}       *)
              -- 3rd arg is a list of the types of the input arrays *)
              -- 4th arg is the type of the result array            *)
@@ -253,7 +249,6 @@ expPos (Literal val) = valuePos val
   where valuePos (IntVal _ pos) = pos
         valuePos (RealVal _ pos) = pos
         valuePos (CharVal _ pos) = pos
-        valuePos (StringVal _ pos) = pos
         valuePos (LogVal _ pos) = pos
         valuePos (TupVal _ pos) = pos
         valuePos (ArrayVal _ _ pos) = pos
@@ -312,7 +307,7 @@ data BinOp = Plus -- Binary Ops for Numbers
 opStr :: BinOp -> String
 opStr Plus = "+"
 opStr Minus = "-"
-opStr Pow = "^"
+opStr Pow = "pow"
 opStr Times = "*"
 opStr Divide = "/"
 opStr ShiftR = ">>"
@@ -329,7 +324,7 @@ opStr Leq = "<="
 -- | Anonymous Function
 data Lambda tf = AnonymFun [(String,Type)] (Exp tf) Type Pos
                     -- fn int (bool x, char z) => if(x) then ord(z) else ord(z)+1 *)
-               | CurryFun String [(Exp tf)] (tf [Type]) (tf Type) Pos
+               | CurryFun String [Exp tf] (tf [Type]) (tf Type) Pos
                     -- op +(4) *)
 
 -- | Tuple Identifier, i.e., pattern matching
@@ -343,7 +338,7 @@ patPos (Id _ pos) = pos
 -- | Function Declarations
 type Binding = (String,Type)
 
-type FunDec tf = (String,Type,[Binding],(Exp tf),Pos)
+type FunDec tf = (String,Type,[Binding],Exp tf,Pos)
 
 type Prog tf = [FunDec tf]
 
@@ -359,20 +354,22 @@ ppError (line,col) msg =
           "\nAT position " ++ show line ++ ":" ++ show col
 
 -- | Pretty printing a value.
-ppValue :: Int -> Value -> String
-ppValue _ (IntVal n _)      = show n
-ppValue _ (RealVal n _)     = show n
-ppValue _ (LogVal b _)      = show b
-ppValue _ (CharVal c _)     = show c
-ppValue _ (StringVal s _)   = show s
-ppValue d (ArrayVal vs _ _) =
-  " { " ++ intercalate ", " (map (ppValue d) vs) ++ " } "
-ppValue d (TupVal vs _)   =
-  " ( " ++ intercalate ", " (map (ppValue d) vs) ++ " ) "
+ppValue :: Value -> String
+ppValue (IntVal n _)      = show n
+ppValue (RealVal n _)     = show n
+ppValue (LogVal b _)      = show b
+ppValue (CharVal c _)     = show c
+ppValue (ArrayVal vs _ _)
+  | Just (c:cs) <- mapM char vs = show $ c:cs
+  | otherwise = " { " ++ intercalate ", " (map ppValue vs) ++ " } "
+    where char (CharVal c _) = Just c
+          char _             = Nothing
+ppValue (TupVal vs _)   =
+  " ( " ++ intercalate ", " (map ppValue vs) ++ " ) "
 
 -- | Pretty printing an expression
 ppExp :: Int -> Exp tf -> String
-ppExp d (Literal val)     = ppValue d val
+ppExp _ (Literal val)     = ppValue val
 ppExp d (ArrayLit es _ _) =
   " { " ++ intercalate ", " (map (ppExp d) es) ++ " } "
 ppExp d (TupLit es _ _) =

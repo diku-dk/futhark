@@ -164,7 +164,8 @@ TypeIds : Type id ',' TypeIds
 Exp  : intlit         { let INTLIT num pos = $1 in Literal $ IntVal num pos }
      | reallit        { let REALLIT num pos = $1 in Literal $ RealVal num pos }
      | charlit        { let CHARLIT char pos = $1 in Literal $ CharVal char pos }
-     | stringlit      { let STRINGLIT s pos = $1 in Literal $ StringVal s pos }
+     | stringlit      { let STRINGLIT s pos = $1
+                        in Literal $ ArrayVal (map (`CharVal` pos) s) (Array (Char pos) Nothing pos) pos }
      | true           { Literal $ LogVal True $1 }
      | false          { Literal $ LogVal False $1 }
      | id             { let ID name pos = $1 in Var name Nothing pos }
@@ -302,7 +303,7 @@ Value : IntValue { $1 }
 IntValue : intlit        { let INTLIT num pos = $1 in IntVal num pos }
 RealValue : reallit      { let REALLIT num pos = $1 in RealVal num pos }
 CharValue : charlit      { let CHARLIT char pos = $1 in CharVal char pos }
-StringValue : stringlit  { let STRINGLIT s pos = $1 in StringVal s pos }
+StringValue : stringlit  { let STRINGLIT s pos = $1 in ArrayVal (map (`CharVal` pos) s) (Char pos) pos }
 LogValue : true          { LogVal True $1 }
         | false          { LogVal False $1 }
 ArrayValue :  '{' Values '}' { case combArrayTypes $ map valueType $2 of
