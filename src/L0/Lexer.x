@@ -46,7 +46,7 @@ tokens :-
     ([eE][\+\~]?[0-9]+)?     { \p -> flip REALLIT (toPos p) . readReal }
   [a-zA-Z] [a-zA-Z0-9_]* { keyword . toPos }
   "'" @charlit "'" { \p -> flip CHARLIT (toPos p) . read }
-  "\"" @charlit* "\"" { \p -> flip STRINGLIT (toPos p) . read }
+  \" @charlit* \" { \p -> flip STRINGLIT (toPos p) . read }
 
 {
 data Token = IF { tokPos :: Pos }
