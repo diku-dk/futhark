@@ -171,11 +171,11 @@ data Exp tf = Literal Value
             | If     (Exp tf) (Exp tf) (Exp tf) (tf Type) Pos
             | Var    String (tf Type) Pos
             -- Function Call and Let Construct
-            | Apply  String [(Exp tf)] (tf Type) Pos
-            | Let    TupIdent (Exp tf) (Maybe [(Exp tf)]) (Maybe (Exp tf)) (Exp tf) Pos -- e.g., let (x, (y,z)) = (1, (2+4,5)) in  x + y + z
+            | Apply  String [Exp tf] (tf Type) Pos
+            | Let    TupIdent (Exp tf) (Maybe [Exp tf]) (Maybe (Exp tf)) (Exp tf) Pos -- e.g., let (x, (y,z)) = (1, (2+4,5)) in  x + y + z
                                                                     -- or,   let x = replicate(3, iota(3)) with [0,0] to 33
             -- Array Indexing and Array Constructors
-            | Index String [(Exp tf)] (tf Type) (tf Type) Pos
+            | Index String [Exp tf] (tf Type) (tf Type) Pos
              -- e.g., arr[3]; 3rd arg is the input-array element type
              -- 4th arg is the result type
             | Iota (Exp tf) Pos -- e.g., iota(n) = {0,1,..,n-1}
@@ -183,7 +183,7 @@ data Exp tf = Literal Value
             | Replicate (Exp tf) (Exp tf) (tf Type) Pos -- e.g., replicate(3,1) = {1, 1, 1}
                                                     -- Type is the output-array type
 
-            | Reshape [(Exp tf)] (Exp tf) (tf Type) (tf Type) Pos
+            | Reshape [Exp tf] (Exp tf) (tf Type) (tf Type) Pos
              -- 1st arg is the new shape, 2nd arg is the input array *)
              -- 3rd arg is the  input-array type *)
              -- 4th arg is the result-array type *)
@@ -205,7 +205,7 @@ data Exp tf = Literal Value
              -- e.g., reduce(op +, 0, {1,2,..,n}) = (0+1+2+..+n) *)
              -- 4th arg is the input-array type                  *)
 
-            | ZipWith (Lambda tf) [(Exp tf)] (tf [Type]) (tf Type) Pos
+            | ZipWith (Lambda tf) [Exp tf] (tf [Type]) (tf Type) Pos
              -- zipWith(plus, {1,2,3}, {4,5,6}) == {5, 7, 9}       *)
              -- 3rd arg is a list of the types of the input arrays *)
              -- 4th arg is the type of the result array            *)
@@ -324,7 +324,7 @@ opStr Leq = "<="
 -- | Anonymous Function
 data Lambda tf = AnonymFun [(String,Type)] (Exp tf) Type Pos
                     -- fn int (bool x, char z) => if(x) then ord(z) else ord(z)+1 *)
-               | CurryFun String [(Exp tf)] (tf [Type]) (tf Type) Pos
+               | CurryFun String [Exp tf] (tf [Type]) (tf Type) Pos
                     -- op +(4) *)
 
 -- | Tuple Identifier, i.e., pattern matching
@@ -338,7 +338,7 @@ patPos (Id _ pos) = pos
 -- | Function Declarations
 type Binding = (String,Type)
 
-type FunDec tf = (String,Type,[Binding],(Exp tf),Pos)
+type FunDec tf = (String,Type,[Binding],Exp tf,Pos)
 
 type Prog tf = [FunDec tf]
 
