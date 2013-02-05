@@ -41,7 +41,7 @@ tokens :-
   "{"                      { ign $ LCURLY . toPos }
   "}"                      { ign $ RCURLY . toPos }
   ","                      { ign $ COMMA . toPos }
-  [0-9]+                   { \p -> flip INTLIT (toPos p) . read }
+  "~"? [0-9]+              { \p -> flip INTLIT (toPos p) . readInt }
   "~"? (([0-9]+("."[0-9]*)?|"."[0-9]+))
     ([eE][\+\~]?[0-9]+)?     { \p -> flip REALLIT (toPos p) . readReal }
   [a-zA-Z] [a-zA-Z0-9_]* { keyword . toPos }
@@ -167,6 +167,11 @@ ign g x _ = g x
 
 readReal :: String -> Double
 readReal = read . map subst
+  where subst '~' = '-'
+        subst c   = c
+
+readInt :: String -> Int
+readInt = read . map subst
   where subst '~' = '-'
         subst c   = c
 }
