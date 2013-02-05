@@ -1,0 +1,11 @@
+// Read an integer from the user, then compute that number of fibonacci numbers.
+fun [int] main() =
+    let s = write("Please enter a number: ") in
+    let n = read(int) in
+    let arr = iota(n) in
+    for i < n-2 do
+        let x = arr[i] in
+        let y = arr[i+1] in
+        let arr[i+2] = x + y
+        in arr
+    merge arr

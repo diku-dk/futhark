@@ -14,9 +14,11 @@ fun int xorInds([int] indices, [int] dir_vs ) =
 fun [int] sobolIndI ( int bits_num, [[int]] dir_vs, int n ) =
     let bits    = iota   ( bits_num ) in
     let indices = filter ( testBit(grayCode(n)), bits )
-    in  map( xorInds(indices), dir_vs )  
+    in let xxx = write(indices)
+    in map( xorInds(indices), dir_vs )
 
 fun [real] sobolIndR( int bits_num, [[int]] dir_vs, int n ) = 
+    let x = write(n) in
     let divisor = 2.0 pow toReal (bits_num)        in
     let arri    = sobolIndI( bits_num, dir_vs, n ) in
         map( fn real (int x) => toReal(x) / divisor, arri )
@@ -101,10 +103,14 @@ fun real tail(real r) =
                   2.04426310338993978564e~15
                 )
 
+//let cond = ( (dp < 0.0) && (0.0 - dp <= 0.425) ) || ( (0.0 <= dp) && (dp <= 0.425) ) in
+//let xx = write(dp) in let yy = write(cond) in
+
+
 fun real ugaussianEl( real p ) =
     let dp = p - 0.5 
     in  //if  ( fabs(dp) <= 0.425 )
-        if ( (dp < 0.0 && 0.0 - dp <= 0.425) || (0.0 <= dp && dp <= 0.425) ) 
+        if ( ( (dp < 0.0) && (0.0 - dp <= 0.425) ) || ( (0.0 <= dp) && (dp <= 0.425) ) ) 
         then smallcase(dp)
         else let pp = if(dp < 0.0) then dp + 0.5 else 0.5 - dp      in
              let r  = sqrt( ~ log(pp) )                             in
@@ -230,10 +236,12 @@ fun real main() =
     let (bb_inds, bb_data)        = getBBdata    () in
 
     let sobol_mat = map ( sobolIndR(num_bits, dir_vs), map(fn int (int x) => x + 1, iota(num_mc_it)) ) in
+    let x = write(sobol_mat) in
     let gauss_mat = map ( ugaussian, sobol_mat )                                       in
+    let x = write(gauss_mat) in
     let bb_mat    = map ( brownianBridge( num_und, num_dates, bb_inds, bb_data ), gauss_mat )    in
     let bs_mat    = map ( blackScholes( num_und, md_c, md_vols, md_drifts, md_st ), bb_mat ) in
-    //let x = write(bs_mat) in
+    let x = write(bs_mat) in
 
     let payoffs   = map ( payoff2(md_disc), bs_mat ) in
     let payoff    = reduce ( op +, 0.0, payoffs )       in
@@ -271,7 +279,7 @@ fun real trajInner(real amount, int ind, [real] disc) = amount * disc[ind]
 //              )
 fun (int * int * int * int * [[int]]) getHLdata() = 
         ( 
-            1000,           // number of Monte-Carlo Iterations
+            1,           // number of Monte-Carlo Iterations
             5,              // number of dates
             3,              // number of underlyings
             30,             // integer bit-length representation for Sobol

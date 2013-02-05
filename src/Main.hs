@@ -3,6 +3,7 @@ module Main (main) where
 
 import Control.Applicative
 import Control.Monad
+import Control.Monad.Identity (Identity)
 import System.Environment (getArgs)
 
 import L0.AbSyn
@@ -37,22 +38,24 @@ main :: IO ()
 main = do args <- getArgs
           case args of
             ["-p", file] -> prettyprint file
-            ["-t", file] -> typecheck file
+            ["-t", file] -> typecheck (const $ return ()) file
+            ["-tp", file] -> typecheck (putStrLn . prettyPrint) file
             ["-r", file] -> rename file
             ["-i", file] -> interpret file
-            _ -> error "Usage: <-p|-t|-r|-i> <file>"
+            _ -> error "Usage: <-p|-t|-tp|-r|-i> <file>"
 
 prettyprint :: FilePath -> IO ()
 prettyprint file = putStrLn =<< prettyPrint <$> parse file
 
-typecheck :: FilePath -> IO ()
-typecheck file = do prog <- parse file
-                    case checkProg prog of
-                      Left e -> error $ show e
-                      Right prog'  ->
-                        case checkProg prog' of
-                          Left e  -> error $ "Error during second type checking phase. This implies a bug in the type checker.\n" ++ show e
-                          Right _ -> return ()
+typecheck :: (Prog Identity -> IO ()) -> FilePath -> IO ()
+typecheck next file = do
+  prog <- parse file
+  case checkProg prog of
+    Left e -> error $ show e
+    Right prog'  ->
+      case checkProg prog' of
+        Left e  -> error $ "Error during second type checking phase. This implies a bug in the type checker.\n" ++ show e
+        Right _ -> next prog'
 
 rename :: FilePath -> IO ()
 rename file = do prog <- renameProg <$> parse file
@@ -69,7 +72,7 @@ interpret file = do
     Right prog' -> do
       res <- runProgIO prog'
       case res of Left err -> putStrLn $ "Interpreter error:\n" ++ show err
-                  Right v  -> putStrLn $ ppValue 0 v -- ++ (prettyPrint prog')
+                  Right v  -> putStrLn $ ppValue v -- ++ (prettyPrint prog')
 
 parse :: FilePath -> IO (Prog Maybe)
 parse = return . parseL0 <=< readFile
