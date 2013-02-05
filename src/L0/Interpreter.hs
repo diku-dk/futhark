@@ -285,9 +285,8 @@ evalExp (ZipWith fun arrexps _ (Identity outtype) pos) = do
 evalExp (Scan fun startexp arrexp _ pos) = do
   startval <- evalExp startexp
   vals <- arrToList =<< evalExp arrexp
-  (acc, vals') <- foldM scanfun (startval, [startval]) vals
-  -- return $ ArrayVal (reverse vals') (valueType acc) pos
-  return $ ArrayVal (tail (reverse vals')) (valueType acc) pos
+  (acc, vals') <- foldM scanfun (startval, []) vals
+  return $ ArrayVal (reverse vals') (valueType acc) pos
     where scanfun (acc, l) x = do
             acc' <- applyLambda fun [acc, x]
             return (acc', acc' : l)
