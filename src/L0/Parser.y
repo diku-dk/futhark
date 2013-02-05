@@ -242,17 +242,17 @@ Exp  : intlit         { let INTLIT num pos = $1 in Literal $ IntVal num pos }
 
      | '(' Exp ')' { $2 }
 
-     | let id '=' Exp in Exp
+     | let id '=' Exp in Exp %prec letprec
                       { let ID name pos = $2
                         in Let (Id name pos) $4 Nothing Nothing $6 $1 }
 
-     | let '(' TupIds ')' '=' Exp in Exp
+     | let '(' TupIds ')' '=' Exp in Exp %prec letprec
                       { Let (TupId $3 $1) $6 Nothing Nothing $8 $1 }
 
-     | let id '=' Exp with '[' Exps ']' '<-' Exp in Exp
+     | let id '=' Exp with '[' Exps ']' '<-' Exp in Exp %prec letprec
                       { let ID name pos = $2
                         in Let (Id name pos) $4 (Just $7) (Just $10) $12 $1 }
-     | let id '[' Exps ']' '=' Exp in Exp
+     | let id '[' Exps ']' '=' Exp in Exp %prec letprec
                       { let ID name pos = $2
                         in Let (Id name pos) (Var name Nothing pos) (Just $4) (Just $7) $9 $1 }
 
@@ -260,9 +260,12 @@ Exp  : intlit         { let INTLIT num pos = $1 in Literal $ IntVal num pos }
                       { let ID name pos = $1
                         in Index name $3 Nothing Nothing pos }
 
-     | for id '<' Exp do Exp merge Ids
+     | for id '<' Exp do Exp merge '(' Ids ')'
                       { let ID name _ = $2
-                        in DoLoop name $4 $6 $8 $1 }
+                        in DoLoop name $4 $6 $9 $1 }
+     | for id '<' Exp do Exp merge id
+                      {case ($2, $8) of
+                          (ID name _, ID mergename _) -> DoLoop name $4 $6 [mergename] $1 }
 
 Exps : Exp ',' Exps { $1 : $3 }
      | Exp          { [$1] }
