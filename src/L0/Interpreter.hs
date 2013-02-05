@@ -14,6 +14,8 @@ import Data.Bits
 import Data.List
 import qualified Data.Map as M
 
+import System.IO (hFlush, stdout)
+
 import L0.AbSyn
 import L0.Parser
 
@@ -83,7 +85,7 @@ arrToList (ArrayVal l _ _) = return l
 arrToList _ = bad $ TypeError (0,0) "arrToList"
 
 runProgIO :: Prog Identity -> IO (Either InterpreterError Value)
-runProgIO = runProg putStr getLine
+runProgIO = runProg putStr (hFlush stdout >> getLine)
 
 runProg :: (Applicative m, Monad m) => (String -> m ()) -> m String
         -> Prog Identity -> m (Either InterpreterError Value)
