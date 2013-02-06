@@ -5,6 +5,7 @@ module L0.AbSyn
   ( Pos
   , posStr
   , Type(..)
+  , TypeBox(..)
   , typePos
   , ppType
   , arrayDims
@@ -17,11 +18,14 @@ module L0.AbSyn
   , ppValue
   , Exp(..)
   , expPos
+  , expTypeInfo
+  , expType
   , ppExp
   , BinOp(..)
   , opStr
   , ppBinOp
   , Lambda(..)
+  , lambdaType
   , TupIdent(..)
   , patPos
   , ppTupId
@@ -32,6 +36,8 @@ module L0.AbSyn
   )
   where
 
+import Control.Applicative
+import Control.Monad.Identity
 import Data.List
 
 -- | position: (line, column)
@@ -49,7 +55,7 @@ data Type = Int Pos
           | Char Pos
           | Real Pos
           | Tuple [Type] Pos
-          | Array Type (Maybe (Exp Maybe)) Pos -- ^ 1st arg: array's type, 2nd arg: its length
+          | Array Type (Maybe (Exp Maybe)) Pos -- ^ 1st arg: array's element type, 2nd arg: its length
 
 instance Eq Type where
   Int _ == Int _ = True
@@ -76,14 +82,19 @@ arrayDims :: Type -> Int
 arrayDims (Array t _ _) = 1 + arrayDims t
 arrayDims _             = 0
 
--- | Return a list of the dimensions of an array (the shape, in other
--- terms).  For non-arrays, this is the empty list.  A two-dimensional
--- array with five rows and three columns would return the list @[5,
--- 3]@.
-arrayShape :: Value -> [Int]
-arrayShape (ArrayVal [] _ _) = [0]
-arrayShape (ArrayVal (e:els) _ _) = length (e:els) : arrayShape e
-arrayShape _ = []
+-- | A type box provides a way to box a type, and possibly retrieve
+-- one.
+class Functor tf => TypeBox tf where
+  unboxType :: tf t -> Maybe t
+  boxType :: t -> tf t
+
+instance TypeBox Maybe where
+  unboxType = id
+  boxType = Just
+
+instance TypeBox Identity where
+  unboxType = Just . runIdentity
+  boxType = Identity
 
 -- | @peelArray n t@ returns the type resulting from peeling the first
 -- @n@ array dimensions from @t@.  Returns @Nothing@ if @t@ has less
@@ -112,6 +123,7 @@ data Value = IntVal Int Pos
            | CharVal Char Pos
            | TupVal [Value] Pos
            | ArrayVal [Value] Type Pos
+             -- ^ The type is the element type, not the complete array type.
 
 instance Eq Value where
   IntVal x _ == IntVal y _ = x == y
@@ -140,6 +152,15 @@ valueType (CharVal _ pos) = Char pos
 valueType (TupVal vs pos) = Tuple (map valueType vs) pos
 valueType (ArrayVal _ t pos) = Array t Nothing pos
 
+-- | Return a list of the dimensions of an array (the shape, in other
+-- terms).  For non-arrays, this is the empty list.  A two-dimensional
+-- array with five rows and three columns would return the list @[5,
+-- 3]@.
+arrayShape :: Value -> [Int]
+arrayShape (ArrayVal [] _ _) = [0]
+arrayShape (ArrayVal (e:els) _ _) = length (e:els) : arrayShape e
+arrayShape _ = []
+
 -- | L0 Expression Language: literals + vars + int binops + array
 -- constructors + array combinators (SOAC) + if + function calls +
 -- let + tuples (literals & identifiers) TODO: please add float,
@@ -154,13 +175,12 @@ valueType (ArrayVal _ t pos) = Array t Nothing pos
 -- 'Control.Monad.Identity.Identity'@, in which type information is
 -- always present.
 data Exp tf = Literal Value
-            | TupLit    [Exp tf] (tf Type) Pos -- Tuple and Arrays Literals
-                                                  -- e.g., (1+3, (x, y+z))
-                                                  -- 2nd argument is the tuple's type
-            | ArrayLit  [Exp tf] (tf Type) Pos -- e.g., { {1+x, 3}, {2, 1+4} }
-                                                  -- 2nd arg is the array's type
-                                                  -- 3rd arg is a list containing the
-                                                  -- dimensions' lengths, e.g., [2,2]
+            | TupLit    [Exp tf] (tf Type) Pos
+            -- ^ Tuple literals, e.g., (1+3, (x, y+z)).  Second
+            -- argument is the tuple's type.
+            | ArrayLit  [Exp tf] (tf Type) Pos
+            -- ^ Array literals, e.g., { {1+x, 3}, {2, 1+4} }.  Second
+            -- arg is the array's type.
             | BinOp BinOp (Exp tf) (Exp tf) (tf Type) Pos
             -- Binary Ops for Booleans
             | And    (Exp tf) (Exp tf) Pos
@@ -281,6 +301,43 @@ expPos (Read _ pos) = pos
 expPos (Write _ _ pos) = pos
 expPos (DoLoop _ _ _ _ pos) = pos
 
+-- | Give the type of an expression.  This is dependent on type
+-- information being available, of course.
+expTypeInfo :: TypeBox tf => Exp tf -> tf Type
+expTypeInfo (Literal val) = boxType $ valueType val
+expTypeInfo (TupLit _ t _) = t
+expTypeInfo (ArrayLit _ t _) = t
+expTypeInfo (BinOp _ _ _ t _) = t
+expTypeInfo (And _ _ pos) = boxType $ Bool pos
+expTypeInfo (Or _ _ pos) = boxType $ Bool pos
+expTypeInfo (Not _ pos) = boxType $ Bool pos
+expTypeInfo (Negate _ t _) = t
+expTypeInfo (If _ _ _ t _) = t
+expTypeInfo (Var _ t _) = t
+expTypeInfo (Apply _ _ t _) = t
+expTypeInfo (Let _ _ _ _ body _) = expTypeInfo body
+expTypeInfo (Index _ _ _ t _) = t
+expTypeInfo (Iota _ pos) = boxType $ Array (Int pos) Nothing pos
+expTypeInfo (Replicate _ _ t _) = t
+expTypeInfo (Reshape _ _ _ t _) = t
+expTypeInfo (Transpose _ _ t _) = t
+expTypeInfo (Map _ _ _ t _) = t
+expTypeInfo (Reduce fun _ _ _ _) = lambdaType fun
+expTypeInfo (ZipWith _ _ _ t _) = t
+expTypeInfo (Scan fun _ _ _ _) = array 1 <$> lambdaType fun
+expTypeInfo (Filter _ _ t _) = t
+expTypeInfo (Mapall _ _ _ t _) = t
+expTypeInfo (Redomap _ _ _ _ _ t _) = t
+expTypeInfo (Split _ _ t _) = t
+expTypeInfo (Concat _ _ t _) = t
+expTypeInfo (Read t _) = boxType t
+expTypeInfo (Write _ t _) = t
+expTypeInfo (DoLoop _ _ body _ _) = expTypeInfo body
+
+-- | Given an expression with known types, return 
+expType :: Exp Identity -> Type
+expType = runIdentity . expTypeInfo
+
 -- | Eagerly evaluated binary operators.  In particular, the
 -- short-circuited operators && and || are not here, although an
 -- eagerly evaluated variant is.
@@ -326,6 +383,11 @@ data Lambda tf = AnonymFun [(String,Type)] (Exp tf) Type Pos
                     -- fn int (bool x, char z) => if(x) then ord(z) else ord(z)+1 *)
                | CurryFun String [Exp tf] (tf [Type]) (tf Type) Pos
                     -- op +(4) *)
+
+-- | The return type of a lambda function.
+lambdaType :: TypeBox tf => Lambda tf -> tf Type
+lambdaType (AnonymFun _ _ t _) = boxType t
+lambdaType (CurryFun _ _ _ t _) = t
 
 -- | Tuple Identifier, i.e., pattern matching
 data TupIdent = TupId [TupIdent] Pos
