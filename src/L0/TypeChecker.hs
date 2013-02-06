@@ -88,20 +88,6 @@ instance Show TypeError where
               Right ts -> (length ts, intercalate ", " $ map ppType ts)
           ngot = length got
 
--- | A type box provides a way to box a type, and possibly retrieve
--- one.
-class TypeBox tf where
-  unboxType :: tf t -> Maybe t
-  boxType :: t -> tf t
-
-instance TypeBox Maybe where
-  unboxType = id
-  boxType = Just
-
-instance TypeBox Identity where
-  unboxType = Just . runIdentity
-  boxType = Identity
-
 -- | The type checker runs in this monad.  Note that it has no mutable
 -- state, but merely keeps track of current bindings in a 'TypeEnv'.
 -- The 'Either' monad is used for error handling.
