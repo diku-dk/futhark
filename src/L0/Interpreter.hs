@@ -73,12 +73,12 @@ binding bnds = local (`bindVars` bnds)
 lookupVar :: Monad m => String -> L0M m Value
 lookupVar fname = do val <- asks $ M.lookup fname . envVtable
                      case val of Just val' -> return val'
-                                 Nothing   -> error "wtf"  -- bad $ TypeError (0,0)
+                                 Nothing   -> bad $ TypeError (0,0)
 
 lookupFun :: Monad m => String -> L0M m ([Value] -> L0M m Value)
 lookupFun fname = do fun <- asks $ M.lookup fname . envFtable
                      case fun of Just fun' -> return fun'
-                                 Nothing   -> error $ "fun " ++ fname -- bad $ TypeError (0,0)
+                                 Nothing   -> bad $ TypeError (0,0)
 
 arrToList :: Monad m => Value -> L0M m [Value]
 arrToList (ArrayVal l _ _) = return l
