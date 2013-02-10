@@ -73,12 +73,12 @@ binding bnds = local (`bindVars` bnds)
 lookupVar :: Monad m => String -> L0M m Value
 lookupVar fname = do val <- asks $ M.lookup fname . envVtable
                      case val of Just val' -> return val'
-                                 Nothing   -> bad $ TypeError (0,0)
+                                 Nothing   -> bad $ TypeError (0,0) "lookupVar"
 
 lookupFun :: Monad m => String -> L0M m ([Value] -> L0M m Value)
 lookupFun fname = do fun <- asks $ M.lookup fname . envFtable
                      case fun of Just fun' -> return fun'
-                                 Nothing   -> bad $ TypeError (0,0)
+                                 Nothing   -> bad $ TypeError (0,0) "lookupFun"
 
 arrToList :: Monad m => Value -> L0M m [Value]
 arrToList (ArrayVal l _ _) = return l
@@ -349,15 +349,19 @@ evalExp (Write e _ _) = do
           where char (CharVal c _) = Just c
                 char _             = Nothing
         write v = ppValue v
-evalExp (DoLoop loopvar boundexp body [mergevar] pos) = do
+evalExp (DoLoop loopvar boundexp body mergevars pos) = do
   bound <- evalExp boundexp
-  mergeval <- lookupVar mergevar
+  mergevals <- mapM lookupVar mergevars
   case bound of
-    IntVal n _ -> foldM iteration mergeval [0..n-1]
+    IntVal n _ -> do res <- foldM iteration mergevals [0..n-1]
+                     case res of [val] -> return val
+                                 vals  -> return $ TupVal vals pos
     _ -> bad $ TypeError pos "evalExp DoLoop"
-  where iteration val i =
-          binding [(mergevar, val), (loopvar, IntVal i pos)] $ evalExp body
-evalExp (DoLoop {}) = fail "Sorry, that loop's just too crazy for now."
+  where iteration vals i =
+          binding (zip mergevars vals++[(loopvar, IntVal i pos)]) $ do
+            bodyval <- evalExp body
+            case bodyval of TupVal vals' _ -> return vals'
+                            val -> return [val]
 
 evalIntBinOp :: (Applicative m, Monad m) =>
                 (Int -> Int -> Int) -> Exp Identity -> Exp Identity -> Pos -> L0M m Value
