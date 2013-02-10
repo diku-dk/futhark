@@ -12,6 +12,7 @@ module L0.AbSyn
   , arrayShape
   , peelArray
   , baseType
+  , basicType
   , array
   , Value(..)
   , valueType
@@ -108,6 +109,13 @@ peelArray _ _ = Nothing
 baseType :: Type -> Type
 baseType (Array t _ _) = baseType t
 baseType t = t
+
+-- | A type is a basic type if it is not an array and any component
+-- types are basic types.
+basicType :: Type -> Bool
+basicType (Array _ _ _) = False
+basicType (Tuple ts _) = all basicType ts
+basicType _ = True
 
 -- | @array n t@ is the type of @n@-dimensional arrays having @t@ as
 -- the base type.
