@@ -13,13 +13,22 @@ import qualified Data.Map as M
 
 import L0.AbSyn
 
+data VarBinding = VarBinding { bndType :: Type
+                             -- ^ The type of the variable.
+                             , bndMerge :: Bool
+                             -- ^ If true, the binding is a merge variable.
+                             }
+
+-- | A tuple of a return type and a list of argument types.
+type FunBinding = (Type, [Type])
+
 -- | A pair of a variable table and a function table.  Type checking
 -- happens with access to this environment.  The function table is
 -- only initialised at the very beginning, but the variable table will
 -- be extended during type-checking when let-expressions are
 -- encountered.
-data TypeEnv = TypeEnv { envVtable :: M.Map String Type
-                       , envFtable :: M.Map String (Type, [Type]) }
+data TypeEnv = TypeEnv { envVtable :: M.Map String VarBinding
+                       , envFtable :: M.Map String FunBinding }
 
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.
@@ -100,12 +109,35 @@ runTypeM env (TypeM m) = runReaderT m env
 bad :: TypeError -> TypeM a
 bad = TypeM . lift . Left
 
+-- | Bind a name as a common (non-merge) variable.
 bindVar :: TypeEnv -> Binding -> TypeEnv
 bindVar env (name,tp) =
-  env { envVtable = M.insert name tp $ envVtable env }
+  env { envVtable = M.insert name (VarBinding tp False) $ envVtable env }
 
 bindVars :: TypeEnv -> [Binding] -> TypeEnv
 bindVars = foldl bindVar
+
+binding :: [Binding] -> TypeM a -> TypeM a
+binding bnds = local (`bindVars` bnds)
+
+-- | Rebind variables as merge variables while evaluating a 'TypeM'
+-- action.
+merging :: [String] -> Pos -> TypeM a -> TypeM a
+merging [] _ m = m
+merging (k:ks) pos m = do
+  bnd <- lookupVar k pos
+  let mkmerge = M.insert k bnd { bndMerge = True }
+  local (\env -> env { envVtable = mkmerge $ envVtable env }) $
+        merging ks pos m
+
+lookupVar :: String -> Pos -> TypeM VarBinding
+lookupVar name pos = do
+  bnd <- asks $ M.lookup name . envVtable
+  case bnd of Nothing   -> bad $ UnknownVariableError name pos
+              Just bnd' -> return bnd'
+
+lookupVarType :: String -> Pos -> TypeM Type
+lookupVarType name pos = bndType <$> lookupVar name pos
 
 -- | Determine if two types are identical.  Causes a 'TypeError' if
 -- they fail to match, and otherwise returns one of them.
@@ -177,7 +209,7 @@ checkProg prog = do
 checkFun :: TypeBox tf => FunDec tf -> TypeM (FunDec Identity)
 checkFun (fname, rettype, args, body, pos) = do
   args' <- checkArgs
-  (bodytype, body') <- local (`bindVars` args') $ checkExp body
+  (bodytype, body') <- binding args' $ checkExp body
   if bodytype == rettype then
     return (fname, rettype, args, body', pos)
   else bad $ ReturnTypeError pos fname rettype bodytype
@@ -226,11 +258,9 @@ checkExp (If e1 e2 e3 t pos) = do
   bt <- unifyWithKnown t =<< unifyKnownTypes t2 t3
   return (bt, If e1' e2' e3' (boxType bt) pos)
 checkExp (Var name t pos) = do
-  bnd <- asks $ M.lookup name . envVtable
-  case bnd of Nothing -> bad $ UnknownVariableError name pos
-              Just vt -> do
-                t' <- t `unifyWithKnown` vt
-                return (t', Var name (boxType t') pos)
+  vt <- lookupVarType name pos
+  t' <- t `unifyWithKnown` vt
+  return (t', Var name (boxType t') pos)
 checkExp (Apply fname args t pos) = do
   bnd <- asks $ M.lookup fname . envFtable
   case bnd of
@@ -245,7 +275,7 @@ checkExp (Apply fname args t pos) = do
 checkExp (Let pat e Nothing Nothing body pos) = do
   (et, e') <- checkExp e
   bnds <- checkPattern pat et
-  local (`bindVars` bnds) $ do
+  binding bnds $ do
     (bt, body') <- checkExp body
     return (bt, Let pat e' Nothing Nothing body' pos)
 checkExp (Let (TupId _ _) _ _ _ _ pos) =
@@ -262,16 +292,13 @@ checkExp (Let (Id name namepos) e (Just idxes) (Just ve) body pos) = do
 checkExp (Let (Id _ _) _ _ _ _ pos) =
   bad $ TypeError pos "Index or element part missing (I think this should never happen)."
 checkExp (Index name idxes intype restype pos) = do
-  bnd <- asks $ M.lookup name . envVtable
-  case bnd of
-    Nothing -> bad $ UnknownVariableError name pos
-    Just vt -> do
-      when (arrayDims vt < length idxes) $
-        bad $ TypeError pos $ show (length idxes) ++ " indices given, but type of variable " ++ name ++ " has " ++ show (arrayDims vt) ++ " dimensions."
-      intype' <- intype `unifyWithKnown` baseType vt
-      restype' <- restype `unifyWithKnown` strip (length idxes) vt
-      (_, idxes') <- unzip <$> mapM (require [Int pos] <=< checkExp) idxes
-      return (restype', Index name idxes' (boxType intype') (boxType restype') pos)
+  vt <- lookupVarType name pos
+  when (arrayDims vt < length idxes) $
+    bad $ TypeError pos $ show (length idxes) ++ " indices given, but type of variable " ++ name ++ " has " ++ show (arrayDims vt) ++ " dimensions."
+  intype' <- intype `unifyWithKnown` baseType vt
+  restype' <- restype `unifyWithKnown` strip (length idxes) vt
+  (_, idxes') <- unzip <$> mapM (require [Int pos] <=< checkExp) idxes
+  return (restype', Index name idxes' (boxType intype') (boxType restype') pos)
   where strip 0 t = t
         strip n (Array t _ _) = strip (n-1) t
         strip _ t = t
@@ -382,13 +409,12 @@ checkExp (Write e t pos) = do
   return (t', Write e' (boxType t') pos)
 checkExp (DoLoop loopvar boundexp body mergevars pos) = do
   (_, boundexp') <- require [Int pos] =<< checkExp boundexp
-  (bodyt, body') <- local (`bindVar` (loopvar, Int pos)) $ checkExp body
-  forM_ mergevars $ \name -> do
-    -- Just check if they exist.
-    bnd <- asks $ M.lookup name . envVtable
-    case bnd of Nothing -> bad $ UnknownVariableError name pos
-                Just _  -> return ()
-  return (bodyt, DoLoop loopvar boundexp' body' mergevars pos)
+  merging mergevars pos $ binding [(loopvar, Int pos)] $ do
+    ts <- mapM (`lookupVarType` pos) mergevars
+    let bodytype = case ts of [t] -> t
+                              _   -> Tuple ts pos
+    (bodyt, body') <- require [bodytype] =<< checkExp body
+    return (bodyt, DoLoop loopvar boundexp' body' mergevars pos)
 
 checkLiteral :: Value -> TypeM (Type, Value)
 checkLiteral (IntVal k pos) = return (Int pos, IntVal k pos)
