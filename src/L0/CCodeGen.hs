@@ -55,31 +55,34 @@ expCType = typeToCType . expType
 compileFun :: FunDec Identity -> CompilerM C.Func
 compileFun (fname, rettype, args, body, _) = do
   body' <- compileBody body
-  return [C.cfun|$ty:(typeToCType rettype) $id:fname' ( $params:args' ) { $items:body' }|]
+  return [C.cfun|$ty:(typeToCType rettype) $id:fname' ( $params:args' ) { $stm:body' }|]
   where args' = map compileArg args
         fname' = "l0_" ++ fname
         compileArg (name, tp) = [C.cparam|$ty:(typeToCType tp) $id:name|]
 
-compileValue :: String -> Value -> CompilerM [C.BlockItem]
-compileValue place (IntVal k _) = return [C.BlockStm [C.cstm|$id:place = $int:k;|]]
-compileValue place (RealVal x _) = return [C.BlockStm [C.cstm|$id:place = $double:(toRational x);|]]
-compileValue place (LogVal b _) = return [C.BlockStm [C.cstm|$id:place = $int:b';|]]
+compileValue :: String -> Value -> CompilerM C.Stm
+compileValue place (IntVal k _) = return [C.cstm|$id:place = $int:k;|]
+compileValue place (RealVal x _) = return [C.cstm|$id:place = $double:(toRational x);|]
+compileValue place (LogVal b _) = return [C.cstm|$id:place = $int:b';|]
   where b' :: Int
         b' = if b then 1 else 0
-compileValue place (CharVal c _) = return [C.BlockStm [C.cstm|$id:place = $char:c;|]]
+compileValue place (CharVal c _) = return [C.cstm|$id:place = $char:c;|]
 
-compileExp :: String -> Exp Identity -> CompilerM [C.BlockItem]
+compileExp :: String -> Exp Identity -> CompilerM C.Stm
 compileExp place (Literal val) = compileValue place val
-compileExp place (Var name _ _) = return [C.BlockStm [C.cstm|$id:place = $id:name;|]]
+compileExp place (Var name _ _) = return [C.cstm|$id:place = $id:name;|]
 compileExp place (BinOp bop e1 e2 _ _) = do
   e1_dest <- new "binop_x1"
   e2_dest <- new "binop_x2"
   e1' <- compileExp e1_dest e1
   e2' <- compileExp e2_dest e2
-  let decls = [C.BlockDecl [C.cdecl|$ty:(expCType e1) $id:e1_dest;|]
-              ,C.BlockDecl [C.cdecl|$ty:(expCType e2) $id:e2_dest;|]]
-      bop' = C.BlockStm $ compileBinOp e1_dest e2_dest
-  return $ decls ++ e1' ++ e2' ++ [bop']
+  return [C.cstm|{
+               $ty:(expCType e1) $id:e1_dest;
+               $ty:(expCType e2) $id:e2_dest;
+               $stm:e1'
+               $stm:e2'
+               $stm:(compileBinOp e1_dest e2_dest)
+             }|]
   where compileBinOp x y =
           case bop of
             Plus -> [C.cstm|$id:place = $id:x + $id:y;|]
@@ -90,27 +93,33 @@ compileExp place (BinOp bop e1 e2 _ _) = do
 compileExp place (LetPat (Id name _) e body _) = do
   e' <- compileExp name e
   body' <- compileExp place body
-  return $ C.BlockDecl [C.cdecl|$ty:(expCType e) $id:name;|]
-           : e' ++ body'
+  return [C.cstm|{
+               $ty:(expCType e) $id:name;
+               $stm:e'
+               $stm:body'
+             }|]
 compileExp place (Write e (Identity t) _) = do
   e' <- compileExp place e
-  let pr = case t of Int  _ -> C.BlockStm [C.cstm|printf("%d", $id:place);|]
-                     Char _ -> C.BlockStm [C.cstm|printf("%c", $id:place);|]
-                     Bool _ -> C.BlockStm [C.cstm|printf($id:place && "true" || "false");|]
-                     Real _ -> C.BlockStm [C.cstm|printf("%lf", $id:place);|]
-                     _      -> C.BlockStm [C.cstm|printf("Can't print this yet.");|]
-  return $ e' ++ [pr]
+  let pr = case t of Int  _ -> [C.cstm|printf("%d", $id:place);|]
+                     Char _ -> [C.cstm|printf("%c", $id:place);|]
+                     Bool _ -> [C.cstm|printf($id:place && "true" || "false");|]
+                     Real _ -> [C.cstm|printf("%lf", $id:place);|]
+                     _      -> [C.cstm|printf("Can't print this yet.");|]
+  return [C.cstm|{$stm:e' $stm:pr}|]
 compileExp place e =
   return $ case expType e of
-             (Int _)  -> [C.BlockStm [C.cstm|$id:place = 0;|]]
-             (Bool _) -> [C.BlockStm [C.cstm|$id:place = 0;|]]
-             (Char _) -> [C.BlockStm [C.cstm|$id:place = 0;|]]
-             (Real _) -> [C.BlockStm [C.cstm|$id:place = 0.0;|]]
-             (Tuple _ _) -> [C.BlockStm [C.cstm|;|]]
-             (Array _ _ _) -> [C.BlockStm [C.cstm|id:place = 0;|]]
+             (Int _)  -> [C.cstm|$id:place = 0;|]
+             (Bool _) -> [C.cstm|$id:place = 0;|]
+             (Char _) -> [C.cstm|$id:place = 0;|]
+             (Real _) -> [C.cstm|$id:place = 0.0;|]
+             (Tuple _ _) -> [C.cstm|;|]
+             (Array _ _ _) -> [C.cstm|id:place = 0;|]
 
-compileBody :: Exp Identity -> CompilerM [C.BlockItem]
+compileBody :: Exp Identity -> CompilerM C.Stm
 compileBody body = do
   body' <- compileExp "retval" body
-  return $ C.BlockDecl [C.cdecl|$ty:bodytype retval;|] : body'
+  return [C.cstm|{
+               $ty:bodytype retval;
+               $stm:body'
+             }|]
   where bodytype = expCType body
