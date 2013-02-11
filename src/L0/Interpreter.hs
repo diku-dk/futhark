@@ -103,7 +103,7 @@ runProg wop rop prog = do
     -- We assume that the program already passed the type checker, so
     -- we don't check for duplicate definitions or anything.
     expand ftable (name,_,params,body,_) =
-        let fun args = binding (zip (map fst params) args) $ evalExp body
+        let fun args = binding (zip (map fst params) args) $ evalBody body
         in M.insert name fun ftable
     builtins = M.fromList [("toReal", builtin "toReal")
                           ,("sqrt", builtin "sqrt")
@@ -185,26 +185,7 @@ evalExp (Apply fname args _ _) = do
   fun <- lookupFun fname
   args' <- mapM evalExp args
   fun args'
-evalExp (Let pat e Nothing Nothing body pos) = do
-  v <- evalExp e
-  case evalPattern pat v of
-    Nothing   -> bad $ TypeError pos "evalExp Let pat"
-    Just bnds -> local (`bindVars` bnds) $ evalExp body
-evalExp (Let (Id name _) e (Just idxs) (Just ve) body pos) = do
-  v <- evalExp e
-  idxs' <- mapM evalExp idxs
-  vev <- evalExp ve
-  v' <- change v idxs' vev
-  binding [(name, v')] $ evalExp body
-  where change _ [] to = return to
-        change (ArrayVal vs t _) (IntVal i _:rest) to = 
-          case splitAt i vs of
-            (_, []) -> bad $ IndexOutOfBounds pos (length vs) i
-            (bef, x:aft) -> do
-              x' <- change x rest to
-              return $ ArrayVal (bef++x':aft) t pos
-        change _g _ _ = bad $ TypeError pos "evalExp Let Id"
-evalExp (Let _ _ _ _ _ pos) = bad $ TypeError pos "evalExp _"
+evalExp (ExpLet le) = evalLet le evalExp
 evalExp (Index name idxs _ _ pos) = do
   v <- lookupVar name
   idxs' <- mapM evalExp idxs
@@ -362,9 +343,35 @@ evalExp (DoLoop loopvar boundexp body mergevars pos) = do
     _ -> bad $ TypeError pos "evalExp DoLoop"
   where iteration vals i =
           binding (zip mergevars vals++[(loopvar, IntVal i pos)]) $ do
-            bodyval <- evalExp body
+            bodyval <- evalBody body
             case bodyval of TupVal vals' _ -> return vals'
                             val -> return [val]
+
+evalBody :: (Applicative m, Monad m) => Body Identity -> L0M m Value
+evalBody (Exp e) = evalExp e
+evalBody (BodyLet le) = evalLet le evalBody
+evalBody (LetWith name e idxs ve body pos) = do
+  v <- evalExp e
+  idxs' <- mapM evalExp idxs
+  vev <- evalExp ve
+  v' <- change v idxs' vev
+  binding [(name, v')] $ evalBody body
+  where change _ [] to = return to
+        change (ArrayVal vs t _) (IntVal i _:rest) to = 
+          case splitAt i vs of
+            (_, []) -> bad $ IndexOutOfBounds pos (length vs) i
+            (bef, x:aft) -> do
+              x' <- change x rest to
+              return $ ArrayVal (bef++x':aft) t pos
+        change _ _ _ = bad $ TypeError pos "evalExp Let Id"
+
+evalLet :: (Applicative m, Monad m) =>
+           LetExp Identity bt -> (bt Identity -> L0M m Value) -> L0M m Value
+evalLet (Let pat e body pos) eval = do
+  v <- evalExp e
+  case evalPattern pat v of
+    Nothing   -> bad $ TypeError pos "evalExp Let pat"
+    Just bnds -> local (`bindVars` bnds) $ eval body
 
 evalIntBinOp :: (Applicative m, Monad m) =>
                 (Int -> Int -> Int) -> Exp Identity -> Exp Identity -> Pos -> L0M m Value
@@ -402,7 +409,7 @@ evalPattern _ _ = Nothing
 
 applyLambda :: (Applicative m, Monad m) => Lambda Identity -> [Value] -> L0M m Value
 applyLambda (AnonymFun params body _ _) args =
-  binding (zip (map fst params) args) $ evalExp body
+  binding (zip (map fst params) args) $ evalBody body
 applyLambda (CurryFun name curryargs _ _ _) args = do
   curryargs' <- mapM evalExp curryargs
   fun <- lookupFun name
