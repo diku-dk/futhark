@@ -220,12 +220,12 @@ evalExp (Iota e pos) = do
       | x >= 0    -> return $ ArrayVal (map (`IntVal` pos) [0..x-1]) (Int pos) pos
       | otherwise -> bad $ NegativeIota pos x
     _ -> bad $ TypeError pos "evalExp Iota"
-evalExp (Replicate e1 e2 _ pos) = do
+evalExp (Replicate e1 e2 (Identity outtype) pos) = do
   v1 <- evalExp e1
   v2 <- evalExp e2
   case v1 of
     IntVal x _
-      | x >= 0    -> return $ ArrayVal (replicate x v2) (Int pos) pos
+      | x >= 0    -> return $ ArrayVal (replicate x v2) outtype pos
       | otherwise -> bad $ NegativeReplicate pos x
     _ -> bad $ TypeError pos "evalExp Replicate"
 evalExp (Reshape shapeexp arrexp _ (Identity outtype) pos) = do
