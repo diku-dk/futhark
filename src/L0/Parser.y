@@ -244,17 +244,17 @@ Exp  : intlit         { let INTLIT num pos = $1 in Literal $ IntVal num pos }
 
      | let id '=' Exp in Exp %prec letprec
                       { let ID name pos = $2
-                        in Let (Id name pos) $4 Nothing Nothing $6 $1 }
+                        in LetPat (Id name pos) $4 $6 $1 }
 
      | let '(' TupIds ')' '=' Exp in Exp %prec letprec
-                      { Let (TupId $3 $1) $6 Nothing Nothing $8 $1 }
+                      { LetPat (TupId $3 $1) $6 $8 $1 }
 
      | let id '=' Exp with '[' Exps ']' '<-' Exp in Exp %prec letprec
-                      { let ID name pos = $2
-                        in Let (Id name pos) $4 (Just $7) (Just $10) $12 $1 }
+                      { let ID name _ = $2
+                        in LetWith name $4 $7 $10 $12 $1 }
      | let id '[' Exps ']' '=' Exp in Exp %prec letprec
                       { let ID name pos = $2
-                        in Let (Id name pos) (Var name Nothing pos) (Just $4) (Just $7) $9 $1 }
+                        in LetWith name (Var name Nothing pos) $4 $7 $9 $1 }
 
      | id '[' Exps ']'
                       { let ID name pos = $1

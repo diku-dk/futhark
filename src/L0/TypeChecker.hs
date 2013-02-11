@@ -260,7 +260,7 @@ checkProg prog = do
 checkFun :: TypeBox tf => FunDec tf -> TypeM (FunDec Identity)
 checkFun (fname, rettype, args, body, pos) = do
   args' <- checkArgs
-  (bodytype, body') <- binding args' $ checkBody body
+  (bodytype, body') <- binding args' $ checkExp body
   if bodytype == rettype then
     return (fname, rettype, args, body', pos)
   else bad $ ReturnTypeError pos fname rettype bodytype
@@ -271,16 +271,21 @@ checkFun (fname, rettype, args, body, pos) = do
           | otherwise =
             return $ (pname, tp) : args'
 
+-- | Type-check an expression, but convert all merge variables to
+-- normal variables first.
+checkSubExp :: TypeBox tf => Exp tf -> TypeM (Type, Exp Identity)
+checkSubExp = unmerging . checkExp
+
 checkExp :: TypeBox tf => Exp tf -> TypeM (Type, Exp Identity)
 checkExp (Literal val) = do
   (t, val') <- checkLiteral val
   return (t, Literal val')
 checkExp (TupLit es t pos) = do
-  (ets, es') <- unzip <$> mapM checkExp es
+  (ets, es') <- unzip <$> mapM checkSubExp es
   t' <- t `unifyWithKnown` Tuple ets pos
   return (t', TupLit es' (boxType t') pos)
 checkExp (ArrayLit es t pos) = do
-  (ets, es') <- unzip <$> mapM checkExp es
+  (ets, es') <- unzip <$> mapM checkSubExp es
   -- Find the unified type of all subexpression types.
   et <- case ets of
           [] -> bad $ TypeError pos "Empty array literal"
@@ -290,20 +295,20 @@ checkExp (ArrayLit es t pos) = do
   return (t', ArrayLit es' (boxType t') pos)
 checkExp (BinOp op e1 e2 t pos) = checkBinOp op e1 e2 t pos
 checkExp (And e1 e2 pos) = do
-  (_, e1') <- require [Bool pos] =<< checkExp e1
-  (_, e2') <- require [Bool pos] =<< checkExp e2
+  (_, e1') <- require [Bool pos] =<< checkSubExp e1
+  (_, e2') <- require [Bool pos] =<< checkSubExp e2
   return (Bool pos, And e1' e2' pos)
 checkExp (Or e1 e2 pos) = do
-  (_, e1') <- require [Bool pos] =<< checkExp e1
-  (_, e2') <- require [Bool pos] =<< checkExp e2
+  (_, e1') <- require [Bool pos] =<< checkSubExp e1
+  (_, e2') <- require [Bool pos] =<< checkSubExp e2
   return (Bool pos, Or e1' e2' pos)
-checkExp (Not e pos) = require [Bool pos] =<< checkExp e
+checkExp (Not e pos) = require [Bool pos] =<< checkSubExp e
 checkExp (Negate e t pos) = do
-  (et,e') <- require [Int pos, Real pos] =<< checkExp e
+  (et,e') <- require [Int pos, Real pos] =<< checkSubExp e
   t' <- t `unifyWithKnown` et
   return (t', Negate e' (boxType t') pos)
 checkExp (If e1 e2 e3 t pos) = do
-  (_,e1') <- require [Bool pos] =<< checkExp e1
+  (_,e1') <- require [Bool pos] =<< checkSubExp e1
   (t2,e2') <- checkExp e2
   (t3,e3') <- checkExp e3
   bt <- unifyWithKnown t =<< unifyKnownTypes t2 t3
@@ -319,51 +324,77 @@ checkExp (Apply fname args t pos) = do
     Nothing -> bad $ UnknownFunctionError fname pos
     Just (rettype, paramtypes) -> do
       rettype' <- t `unifyWithKnown` rettype
-      (argtypes, args') <- unzip <$> mapM checkExp args
+      (argtypes, args') <- unzip <$> mapM checkSubExp args
       if length argtypes == length paramtypes then do
         zipWithM_ unifyKnownTypes argtypes paramtypes
         return (rettype', Apply fname args' (boxType rettype') pos)
       else bad $ ParameterMismatch fname pos (Right paramtypes) argtypes
-checkExp (ExpLet le) = do
-  (t, le') <- checkLet le checkExp
-  return (t, ExpLet le')
+checkExp (LetPat pat e body pos) = do
+  ((et, e'), srcmvars) <- collectSrcMergeVars $ checkSubExp e
+  bnds <- checkPattern pat et
+  mvs <- S.fromList <$> mergeVars
+  binding bnds $
+    if basicType et then do
+      (bt, body') <- checkExp body
+      return (bt, LetPat pat e' body' pos)
+    else do
+      ((bt, body'), destmvars) <- collectDestMergeVars $ checkExp body
+      let srcmvars'  = mvs `S.intersection` srcmvars
+          destmvars' = mvs `S.intersection` destmvars
+      case S.toList $ srcmvars' `S.intersection` destmvars' of
+        (v:_) -> bad $ MergeVarNonBasicIndexing v pos
+        _     -> return ()
+      tell $ TypeAcc srcmvars destmvars
+      return (bt, LetPat pat e' body' pos)
+checkExp (LetWith name e idxes ve body pos) = do
+  (et, e') <- checkSubExp e
+  -- We don't check whether name is a merge variable.  We might want
+  -- to change this.
+  tell $ TypeAcc S.empty (S.singleton name)
+  case peelArray (length idxes) et of
+    Nothing -> bad $ TypeError pos $ show (length idxes) ++ " indices given, but type of expression at " ++ posStr (posOf e) ++ " has " ++ show (arrayDims et) ++ " dimensions."
+    Just elemt -> do
+      (_, idxes') <- unzip <$> mapM (require [Int pos] <=< checkSubExp) idxes
+      (_, ve') <- require [elemt] =<< checkSubExp ve
+      (bt, body') <- local (`bindVar` (name, et)) $ checkExp body
+      return (bt, LetWith name e' idxes' ve' body' pos)
 checkExp (Index name idxes intype restype pos) = do
   vt <- lookupVarType name pos
   when (arrayDims vt < length idxes) $
     bad $ TypeError pos $ show (length idxes) ++ " indices given, but type of variable " ++ name ++ " has " ++ show (arrayDims vt) ++ " dimensions."
   intype' <- intype `unifyWithKnown` baseType vt
   restype' <- restype `unifyWithKnown` strip (length idxes) vt
-  (_, idxes') <- unzip <$> mapM (require [Int pos] <=< checkExp) idxes
+  (_, idxes') <- unzip <$> mapM (require [Int pos] <=< checkSubExp) idxes
   tell $ TypeAcc (S.singleton name) S.empty
   return (restype', Index name idxes' (boxType intype') (boxType restype') pos)
   where strip 0 t = t
         strip n (Array t _ _) = strip (n-1) t
         strip _ t = t
 checkExp (Iota e pos) = do
-  (_, e') <- require [Int pos] =<< checkExp e
+  (_, e') <- require [Int pos] =<< checkSubExp e
   return (Array (Int pos) Nothing pos, Iota e' pos)
 checkExp (Replicate countexp valexp outtype pos) = do
-  (_, countexp') <- require [Int pos] =<< checkExp countexp
-  (valtype, valexp') <- checkExp valexp
+  (_, countexp') <- require [Int pos] =<< checkSubExp countexp
+  (valtype, valexp') <- checkSubExp valexp
   outtype' <- outtype `unifyWithKnown` Array valtype Nothing pos
   return (outtype', Replicate countexp' valexp' (boxType outtype') pos)
 checkExp (Reshape shapeexps arrexp intype restype pos) = do
-  (_, shapeexps') <- unzip <$> mapM (require [Int pos] <=< checkExp) shapeexps
-  (arrt, arrexp') <- checkExp arrexp
+  (_, shapeexps') <- unzip <$> mapM (require [Int pos] <=< checkSubExp) shapeexps
+  (arrt, arrexp') <- checkSubExp arrexp
   intype' <- intype `unifyWithKnown` arrt
   restype' <- restype `unifyWithKnown` build (length shapeexps') (baseType intype')
   return (restype', Reshape shapeexps' arrexp' (boxType intype') (boxType restype') pos)
   where build 0 t = t
         build n t = build (n-1) (Array t Nothing (typePos t))
 checkExp (Transpose arrexp intype outtype pos) = do
-  (arrt, arrexp') <- checkExp arrexp
+  (arrt, arrexp') <- checkSubExp arrexp
   when (arrayDims arrt < 2) $
     bad $ TypeError pos "Argument to transpose does not have two dimensions."
   intype' <- intype `unifyWithKnown` arrt
   outtype' <- outtype `unifyWithKnown` intype'
   return (outtype', Transpose arrexp' (boxType intype') (boxType outtype') pos)
 checkExp (Map fun arrexp intype outtype pos) = do
-  (arrt, arrexp') <- checkExp arrexp
+  (arrt, arrexp') <- checkSubExp arrexp
   intype' <- intype `unifyWithKnown` arrt
   case intype' of
     Array t e pos2 -> do
@@ -372,8 +403,8 @@ checkExp (Map fun arrexp intype outtype pos) = do
       return (outtype', Map fun' arrexp' (boxType intype') (boxType outtype') pos)
     _       -> bad $ TypeError (posOf arrexp) "Expression does not return an array."
 checkExp (Reduce fun startexp arrexp intype pos) = do
-  (acct, startexp') <- checkExp startexp
-  (arrt, arrexp') <- checkExp arrexp
+  (acct, startexp') <- checkSubExp startexp
+  (arrt, arrexp') <- checkSubExp arrexp
   intype' <- intype `unifyWithKnown` arrt
   case intype' of
     Array inelemt _ _ -> do
@@ -383,7 +414,7 @@ checkExp (Reduce fun startexp arrexp intype pos) = do
       return (funret, Reduce fun' startexp' arrexp' (boxType intype') pos)
     _ -> bad $ TypeError (posOf arrexp) "Type of expression is not an array"
 checkExp (ZipWith fun arrexps intypes outtype pos) = do
-  (arrts, arrexps') <- unzip <$> mapM checkExp arrexps
+  (arrts, arrexps') <- unzip <$> mapM checkSubExp arrexps
   intypes' <- case unboxType intypes of
                 Nothing -> return arrts
                 Just intypes' -> zipWithM unifyKnownTypes intypes' arrts
@@ -392,8 +423,8 @@ checkExp (ZipWith fun arrexps intypes outtype pos) = do
   return (outtype',
           ZipWith fun' arrexps' (boxType intypes') (boxType outtype') pos)
 checkExp (Scan fun startexp arrexp intype pos) = do
-  (startt, startexp') <- checkExp startexp
-  (arrt, arrexp') <- checkExp arrexp
+  (startt, startexp') <- checkSubExp startexp
+  (arrt, arrexp') <- checkSubExp arrexp
   intype' <- intype `unifyWithKnown` arrt
   case intype' of
     Array inelemt e pos2 -> do
@@ -405,7 +436,7 @@ checkExp (Scan fun startexp arrexp intype pos) = do
       return (Array funret e pos2, Scan fun' startexp' arrexp' (boxType intype') pos)
     _ -> bad $ TypeError (posOf arrexp) "Type of expression is not an array."
 checkExp (Filter fun arrexp arrtype pos) = do
-  (arrexpt, arrexp') <- checkExp arrexp
+  (arrexpt, arrexp') <- checkSubExp arrexp
   arrtype' <- arrtype `unifyWithKnown` arrexpt
   inelemt <- elemType arrtype'
   (fun', funret) <- checkLambda fun [inelemt]
@@ -413,14 +444,14 @@ checkExp (Filter fun arrexp arrtype pos) = do
     bad $ TypeError pos "Filter function does not return bool."
   return (arrtype', Filter fun' arrexp' (boxType arrtype') pos)
 checkExp (Mapall fun arrexp intype outtype pos) = do
-  (arrt, arrexp') <- checkExp arrexp
+  (arrt, arrexp') <- checkSubExp arrexp
   intype' <- intype `unifyWithKnown` arrt
   (fun', funret) <- checkLambda fun [baseType intype']
   outtype' <- outtype `unifyWithKnown` array (arrayDims intype') funret
   return (outtype', Mapall fun' arrexp' (boxType intype') (boxType outtype') pos)
 checkExp (Redomap redfun mapfun accexp arrexp inarr outarr pos) = do
-  (acct, accexp') <- checkExp accexp
-  (arrt, arrexp') <- checkExp arrexp
+  (acct, accexp') <- checkSubExp accexp
+  (arrt, arrexp') <- checkSubExp arrexp
   et <- elemType arrt
   (mapfun', mapret) <- checkLambda mapfun [et]
   (redfun', redret) <- checkLambda redfun [acct, mapret]
@@ -429,69 +460,29 @@ checkExp (Redomap redfun mapfun accexp arrexp inarr outarr pos) = do
   outarr' <- outarr `unifyWithKnown` Array redret Nothing pos
   return (redret, Redomap redfun' mapfun' accexp' arrexp' (boxType inarr') (boxType outarr') pos)
 checkExp (Split splitexp arrexp inarr pos) = do
-  (_, splitexp') <- require [Int pos] =<< checkExp splitexp
-  (arrt, arrexp') <- checkExp arrexp
+  (_, splitexp') <- require [Int pos] =<< checkSubExp splitexp
+  (arrt, arrexp') <- checkSubExp arrexp
   inarr' <- inarr `unifyWithKnown` arrt
   return (inarr', Split splitexp' arrexp' (boxType inarr') pos)
 checkExp (Concat arr1exp arr2exp inarr pos) = do
-  (arr1t, arr1exp') <- checkExp arr1exp
-  (arrt, arr2exp') <- require [arr1t] =<< checkExp arr2exp
+  (arr1t, arr1exp') <- checkSubExp arr1exp
+  (arrt, arr2exp') <- require [arr1t] =<< checkSubExp arr2exp
   inarr' <- inarr `unifyWithKnown` arrt
   return (inarr', Concat arr1exp' arr2exp' (boxType inarr') pos)
 checkExp (Read t pos) =
   return (t, Read t pos)
 checkExp (Write e t pos) = do
-  (et, e') <- checkExp e
+  (et, e') <- checkSubExp e
   t' <- t `unifyWithKnown` et
   return (t', Write e' (boxType t') pos)
 checkExp (DoLoop loopvar boundexp body mergevars pos) = do
-  (_, boundexp') <- require [Int pos] =<< checkExp boundexp
+  (_, boundexp') <- require [Int pos] =<< checkSubExp boundexp
   merging mergevars pos $ binding [(loopvar, Int pos)] $ do
     ts <- mapM (`lookupVarType` pos) mergevars
     let bodytype = case ts of [t] -> t
                               _   -> Tuple ts pos
-    (bodyt, body') <- require [bodytype] =<< checkBody body
+    (bodyt, body') <- require [bodytype] =<< checkExp body
     return (bodyt, DoLoop loopvar boundexp' body' mergevars pos)
-
-checkLet :: TypeBox tf => LetExp tf et -> (et tf -> TypeM (Type, et Identity))
-         -> TypeM (Type, LetExp Identity et)
-checkLet (Let pat e body pos) check = do
-  ((et, e'), srcmvars) <- collectSrcMergeVars $ checkExp e
-  bnds <- checkPattern pat et
-  mvs <- S.fromList <$> mergeVars
-  binding bnds $
-    if basicType et then do
-      (bt, body') <- check body
-      return (bt, Let pat e' body' pos)
-    else do
-      ((bt, body'), destmvars) <- collectDestMergeVars $ check body
-      let srcmvars'  = mvs `S.intersection` srcmvars
-          destmvars' = mvs `S.intersection` destmvars
-      case S.toList $ srcmvars' `S.intersection` destmvars' of
-        (v:_) -> bad $ MergeVarNonBasicIndexing v pos
-        _     -> return ()
-      tell $ TypeAcc srcmvars destmvars
-      return (bt, Let pat e' body' pos)
-
-checkBody :: TypeBox tf => Body tf -> TypeM (Type, Body Identity)
-checkBody (Exp e) = do
-  (t, e') <- unmerging $ checkExp e
-  return (t, Exp e')
-checkBody (BodyLet le) = do
-  (t, le') <- checkLet le checkBody
-  return (t, BodyLet le')
-checkBody (LetWith name e idxes ve body pos) = do
-  (et, e') <- checkExp e
-  -- We don't check whether name is a merge variable.  We might want
-  -- to change this.
-  tell $ TypeAcc S.empty (S.singleton name)
-  case peelArray (length idxes) et of
-    Nothing -> bad $ TypeError pos $ show (length idxes) ++ " indices given, but type of expression at " ++ posStr (posOf e) ++ " has " ++ show (arrayDims et) ++ " dimensions."
-    Just elemt -> do
-      (_, idxes') <- unzip <$> mapM (require [Int pos] <=< checkExp) idxes
-      (_, ve') <- require [elemt] =<< checkExp ve
-      (bt, body') <- local (`bindVar` (name, et)) $ checkBody body
-      return (bt, LetWith name e' idxes' ve' body' pos)
 
 checkLiteral :: Value -> TypeM (Type, Value)
 checkLiteral (IntVal k pos) = return (Int pos, IntVal k pos)
@@ -532,8 +523,8 @@ checkBinOp Leq e1 e2 t pos = checkRelOp Leq [Int pos, Real pos] e1 e2 t pos
 checkRelOp :: TypeBox tf => BinOp
            -> [Type] -> Exp tf -> Exp tf -> tf Type -> Pos -> TypeM (Type, Exp Identity)
 checkRelOp op tl e1 e2 t pos = do
-  (t1,e1') <- require tl =<< checkExp e1
-  (t2,e2') <- require tl =<< checkExp e2
+  (t1,e1') <- require tl =<< checkSubExp e1
+  (t2,e2') <- require tl =<< checkSubExp e2
   _ <- unifyKnownTypes t1 t2
   t' <- t `unifyWithKnown` Bool pos
   return (Bool pos, BinOp op e1' e2' (boxType t') pos)
@@ -542,8 +533,8 @@ checkPolyBinOp :: TypeBox tf =>
                   BinOp -> [Type] -> Exp tf -> Exp tf -> tf Type -> Pos
                -> TypeM (Type, Exp Identity)
 checkPolyBinOp op tl e1 e2 t pos = do
-  (t1, e1') <- require tl =<< checkExp e1
-  (t2, e2') <- require tl =<< checkExp e2
+  (t1, e1') <- require tl =<< checkSubExp e1
+  (t2, e2') <- require tl =<< checkSubExp e2
   t' <- unifyKnownTypes t1 t2
   t'' <- t `unifyWithKnown` t'
   return (t'', BinOp op e1' e2' (boxType t'') pos)
@@ -576,7 +567,7 @@ checkLambda (CurryFun opfun curryargexps curryargts rettype pos) args
   checkPolyLambdaOp op curryargexps curryargts rettype args pos
   where ops = map (\op -> ("op " ++ opStr op, op)) [minBound..maxBound]
 checkLambda (CurryFun fname curryargexps curryargts rettype pos) args = do
-  (curryargexpts, curryargexps') <- unzip <$> mapM checkExp curryargexps
+  (curryargexpts, curryargexps') <- unzip <$> mapM checkSubExp curryargexps
   curryargts' <- case unboxType curryargts of
                    Nothing -> return curryargexpts
                    Just curryargts' -> zipWithM unifyKnownTypes curryargts' curryargexpts
@@ -596,7 +587,7 @@ checkPolyLambdaOp :: (TypeBox tf) =>
                      BinOp -> [Exp tf] -> tf [Type] -> tf Type -> [Type] -> Pos
                   -> TypeM (Lambda Identity, Type)
 checkPolyLambdaOp op curryargexps curryargts rettype args pos = do
-  (curryargexpts, curryargexps') <- unzip <$> mapM checkExp curryargexps
+  (curryargexpts, curryargexps') <- unzip <$> mapM checkSubExp curryargexps
   curryargts' <- case unboxType curryargts of
                    Nothing          -> return curryargexpts
                    Just curryargts' -> zipWithM unifyKnownTypes curryargts' curryargexpts
@@ -611,7 +602,7 @@ checkPolyLambdaOp op curryargexps curryargts rettype args pos = do
                                    Var "y" (boxType tp) pos,
                                    [("y", tp)])
                     (e1:e2:_) -> return (e1, e2, [])
-  (fun, t) <- checkLambda (AnonymFun params (Exp (BinOp op x y (boxType tp) pos)) tp pos)
+  (fun, t) <- checkLambda (AnonymFun params (BinOp op x y (boxType tp) pos) tp pos)
               $ curryargts' ++ args
   t' <- rettype `unifyWithKnown` t
   return (fun, t')

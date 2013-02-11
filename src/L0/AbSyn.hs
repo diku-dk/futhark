@@ -22,11 +22,6 @@ module L0.AbSyn
   , expTypeInfo
   , expType
   , ppExp
-  , Body(..)
-  , bodyTypeInfo
-  , bodyType
-  , ppBody
-  , LetExp(..)
   , BinOp(..)
   , opStr
   , ppBinOp
@@ -208,7 +203,8 @@ data Exp tf = Literal Value
             | Var    String (tf Type) Pos
             -- Function Call and Let Construct
             | Apply  String [Exp tf] (tf Type) Pos
-            | ExpLet (LetExp tf Exp)
+            | LetPat TupIdent (Exp tf) (Exp tf) Pos
+            | LetWith String (Exp tf) [Exp tf] (Exp tf) (Exp tf) Pos
             -- Array Indexing and Array Constructors
             | Index String [Exp tf] (tf Type) (tf Type) Pos
              -- e.g., arr[3]; 3rd arg is the input-array element type
@@ -276,13 +272,7 @@ data Exp tf = Literal Value
             | Write (Exp tf) (tf Type) Pos
              -- e.g., write(map(f, replicate(3,1))) writes array {f(1),f(1),f(1)} *)
              -- 2nd arg is the type of the to-be-written expression *)
-            | DoLoop String (Exp tf) (Body tf) [String] Pos
-
-data LetExp tf exp = Let TupIdent (Exp tf) (exp tf) Pos
-
-data Body tf = Exp (Exp tf)
-             | BodyLet (LetExp tf Body)
-             | LetWith String (Exp tf) [Exp tf] (Exp tf) (Body tf) Pos
+            | DoLoop String (Exp tf) (Exp tf) [String] Pos
 
 instance HasPosition (Exp tf) where
   posOf (Literal val) = valuePos val
@@ -302,7 +292,8 @@ instance HasPosition (Exp tf) where
   posOf (If _ _ _ _ pos) = pos
   posOf (Var _ _ pos) = pos
   posOf (Apply _ _ _ pos) = pos
-  posOf (ExpLet (Let _ _ _ pos)) = pos
+  posOf (LetPat _ _ _ pos) = pos
+  posOf (LetWith _ _ _ _ _ pos) = pos
   posOf (Index _ _ _ _ pos) = pos
   posOf (Iota _ pos) = pos
   posOf (Replicate _ _ _ pos) = pos
@@ -335,7 +326,8 @@ expTypeInfo (Negate _ t _) = t
 expTypeInfo (If _ _ _ t _) = t
 expTypeInfo (Var _ t _) = t
 expTypeInfo (Apply _ _ t _) = t
-expTypeInfo (ExpLet (Let _ _ body _)) = expTypeInfo body
+expTypeInfo (LetPat _ _ body _) = expTypeInfo body
+expTypeInfo (LetWith _ _ _ _ body _) = expTypeInfo body
 expTypeInfo (Index _ _ _ t _) = t
 expTypeInfo (Iota _ pos) = boxType $ Array (Int pos) Nothing pos
 expTypeInfo (Replicate _ _ t _) = t
@@ -352,27 +344,11 @@ expTypeInfo (Split _ _ t _) = t
 expTypeInfo (Concat _ _ t _) = t
 expTypeInfo (Read t _) = boxType t
 expTypeInfo (Write _ t _) = t
-expTypeInfo (DoLoop _ _ body _ _) = bodyTypeInfo body
+expTypeInfo (DoLoop _ _ body _ _) = expTypeInfo body
 
 -- | Given an expression with known types, return its type.
 expType :: Exp Identity -> Type
 expType = runIdentity . expTypeInfo
-
-instance HasPosition (Body tf) where
-  posOf (Exp e) = posOf e
-  posOf (BodyLet (Let _ _ _ pos)) = pos
-  posOf (LetWith _ _ _ _ _ pos) = pos
-
--- | Give the type of an expression.  This is dependent on type
--- information being available, of course.
-bodyTypeInfo :: TypeBox tf => Body tf -> tf Type
-bodyTypeInfo (Exp e) = expTypeInfo e
-bodyTypeInfo (BodyLet (Let _ _ e _)) = bodyTypeInfo e
-bodyTypeInfo (LetWith _ _ _ _ body _) = bodyTypeInfo body
-
--- | Given a body with known types, return its type.
-bodyType :: Body Identity -> Type
-bodyType = runIdentity . bodyTypeInfo
 
 -- | Eagerly evaluated binary operators.  In particular, the
 -- short-circuited operators && and || are not here, although an
@@ -415,7 +391,7 @@ opStr Less = "<"
 opStr Leq = "<="
 
 -- | Anonymous Function
-data Lambda tf = AnonymFun [(String,Type)] (Body tf) Type Pos
+data Lambda tf = AnonymFun [(String,Type)] (Exp tf) Type Pos
                     -- fn int (bool x, char z) => if(x) then ord(z) else ord(z)+1 *)
                | CurryFun String [Exp tf] (tf [Type]) (tf Type) Pos
                     -- op +(4) *)
@@ -436,7 +412,7 @@ patPos (Id _ pos) = pos
 -- | Function Declarations
 type Binding = (String,Type)
 
-type FunDec tf = (String,Type,[Binding],Body tf,Pos)
+type FunDec tf = (String,Type,[Binding],Exp tf,Pos)
 
 type Prog tf = [FunDec tf]
 
@@ -492,7 +468,22 @@ ppExp _ (Apply f [] _ _)    = f ++ "() "
 ppExp d (Apply f args _ _)  =
   f ++ "( " ++ intercalate ", " (map (ppExp d) args) ++ " ) "
 
-ppExp d (ExpLet le) = ppLet d le ppExp
+ppExp d (LetPat tupid e1 body _) =
+        "\n" ++ spaces (d+1) ++ "let " ++ ppTupId tupid ++ " = " ++ ppExp (d+2) e1 ++
+        " in  " ++ ppExp (d+2) body
+ppExp d (LetWith name e1 es el e2 _) =
+      let isassign = case e1 of
+                       Var id1 _ _ -> id1 == name
+                       _           -> False
+      in if isassign
+         then
+              "\n" ++ spaces(d+1) ++ "let " ++ name ++ "[ " ++
+              intercalate ", " (map (ppExp d) es) ++
+              "] = " ++ ppExp d el ++ " in  " ++ ppExp (d+2) e2
+         else
+              "\n" ++ spaces(d+1) ++ "let " ++ name ++ " = " ++ ppExp (d+2) e1 ++
+              " with [ " ++ intercalate ", " (map (ppExp d) es) ++
+              "] <- " ++ ppExp d el ++ " in  " ++ ppExp (d+2) e2
 
 ppExp d (Index name [e] _ _ _) = name ++ "[ " ++ ppExp d e ++ " ]"
 ppExp d (Index name (e:es) _ _ _) =
@@ -536,32 +527,10 @@ ppExp _ (Read t _) = " read("  ++ ppType t  ++ ") "
 ppExp d (Write e _ _) = " write("  ++ ppExp d e  ++ ") "
 ppExp d (DoLoop i n iter mvs _) =
               "\n" ++ spaces(d+1) ++ "for " ++ i ++ " < " ++ ppExp d n ++ " do " ++
-              "\n" ++ spaces(d+2) ++ ppBody d iter ++ "\n" ++ spaces(d+1) ++
+              "\n" ++ spaces(d+2) ++ ppExp d iter ++ "\n" ++ spaces(d+1) ++
               "merge " ++ mvs'
   where mvs' = case mvs of [v] -> show v
                            _   -> "( " ++ intercalate ", " mvs ++ " )"
-
-ppBody :: Int -> Body tf -> String
-ppBody d (LetWith name e1 es el e2 _) =
-      let isassign = case e1 of
-                       Var id1 _ _ -> id1 == name
-                       _           -> False
-      in if isassign
-         then
-              "\n" ++ spaces(d+1) ++ "let " ++ name ++ "[ " ++
-              intercalate ", " (map (ppExp d) es) ++
-              "] = " ++ ppExp d el ++ " in  " ++ ppBody (d+2) e2
-         else
-              "\n" ++ spaces(d+1) ++ "let " ++ name ++ " = " ++ ppExp (d+2) e1 ++
-              " with [ " ++ intercalate ", " (map (ppExp d) es) ++
-              "] <- " ++ ppExp d el ++ " in  " ++ ppBody (d+2) e2
-ppBody d (BodyLet le) = ppLet d le ppBody
-ppBody d (Exp e) = ppExp d e
-
-ppLet :: Int -> LetExp tf et -> (Int -> et tf -> String) -> String
-ppLet d (Let tupid e1 body _) pp =
-        "\n" ++ spaces (d+1) ++ "let " ++ ppTupId tupid ++ " = " ++ ppExp (d+2) e1 ++
-        " in  " ++ pp (d+2) body
 
 ppBinOp :: BinOp -> String
 ppBinOp op = " " ++ opStr op ++ " "
@@ -588,7 +557,7 @@ ppLambda :: Lambda tf -> String
 ppLambda ( AnonymFun (a:rest) body rtp _) =
       let pp_bd (arg, tp) = ppType tp ++ " " ++ arg
           strargs = pp_bd a ++ concatMap (\x -> ", " ++ pp_bd x) rest
-      in " fn " ++ ppType rtp ++ " ( " ++ strargs ++ " ) " ++ " => " ++ ppBody 0 body
+      in " fn " ++ ppType rtp ++ " ( " ++ strargs ++ " ) " ++ " => " ++ ppExp 0 body
 ppLambda (AnonymFun [] _ _ pos) =
       ppError pos "Anonymous function with zero params!"
 ppLambda ( CurryFun fid [] _ _ _) = fid
@@ -604,7 +573,7 @@ ppFun d (name, ret_tp, args, body, _) =
 
   in "\n\nfun " ++ ppType ret_tp ++ name ++
      "( " ++ pp_bindings args ++ ") = \n" ++
-     spaces (d+1) ++ ppBody (d+1) body
+     spaces (d+1) ++ ppExp (d+1) body
 
 -- | Pretty printing a program.
 prettyPrint :: Prog tf -> String
