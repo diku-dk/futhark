@@ -223,10 +223,13 @@ evalExp (Iota e pos) = do
 evalExp (Replicate e1 e2 (Identity outtype) pos) = do
   v1 <- evalExp e1
   v2 <- evalExp e2
-  case v1 of
-    IntVal x _
-      | x >= 0    -> return $ ArrayVal (replicate x v2) outtype pos
-      | otherwise -> bad $ NegativeReplicate pos x
+  case outtype of
+    Array et _ _ ->
+      case v1 of
+        IntVal x _
+          | x >= 0    -> return $ ArrayVal (replicate x v2) et pos
+          | otherwise -> bad $ NegativeReplicate pos x
+        _   -> bad $ TypeError pos "evalExp Replicate"
     _ -> bad $ TypeError pos "evalExp Replicate"
 evalExp (Reshape shapeexp arrexp _ (Identity outtype) pos) = do
   shape <- mapM (asInt <=< evalExp) shapeexp
