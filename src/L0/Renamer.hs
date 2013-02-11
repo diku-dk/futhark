@@ -2,7 +2,6 @@ module L0.Renamer
   ( renameProg )
   where
 
-import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Reader
 
@@ -43,7 +42,7 @@ renameFun :: FunDec tf -> RenameM (FunDec tf)
 renameFun (fname, ret, params, body, pos) =
   bind (map fst params) $ do
     params' <- mapM renameBinding params
-    body' <- renameBody body
+    body' <- renameExp body
     return (fname, ret, params', body', pos)
 
 renameBinding :: Binding -> RenameM Binding
@@ -82,7 +81,22 @@ renameExp (Var s t pos) = do
 renameExp (Apply fname args t pos) = do
   args' <- mapM renameExp args
   return $ Apply fname args' t pos
-renameExp (ExpLet le) = ExpLet <$> renameLet le renameExp
+renameExp (LetWith name e1 idxs ve body pos) = do
+  e1' <- renameExp e1
+  idxs' <- mapM renameExp idxs
+  ve' <- renameExp ve
+  bind [name] $ do
+    name' <- repl name
+    body' <- renameExp body
+    return (LetWith name' e1' idxs' ve' body' pos)
+renameExp (LetPat pat e body pos) = do
+  e1' <- renameExp e
+  bind (names pat) $ do
+    pat' <- renamePattern pat
+    body' <- renameExp body
+    return $ LetPat pat' e1' body' pos
+  where names (Id s _) = [s]
+        names (TupId pats _) = concatMap names pats
 renameExp (Index s idxs t1 t2 pos) = do
   s' <- repl s
   idxs' <- mapM renameExp idxs
@@ -150,31 +164,9 @@ renameExp (DoLoop loopvar e body mergevars pos) = do
   e' <- renameExp e
   bind [loopvar] $ do
     loopvar' <- repl loopvar
-    body' <- renameBody body
+    body' <- renameExp body
     mergevars' <- mapM repl mergevars
     return $ DoLoop loopvar' e' body' mergevars' pos
-
-renameBody :: Body tf -> RenameM (Body tf)
-renameBody (Exp e) = Exp <$> renameExp e
-renameBody (BodyLet le) = BodyLet <$> renameLet le renameBody
-renameBody (LetWith name e1 idxs ve body pos) = do
-  e1' <- renameExp e1
-  idxs' <- mapM renameExp idxs
-  ve' <- renameExp ve
-  bind [name] $ do
-    name' <- repl name
-    body' <- renameBody body
-    return (LetWith name' e1' idxs' ve' body' pos)
-
-renameLet :: LetExp tf bt -> (bt tf -> RenameM (bt tf)) -> RenameM (LetExp tf bt)
-renameLet (Let pat e body pos) rename = do
-  e1' <- renameExp e
-  bind (names pat) $ do
-    pat' <- renamePattern pat
-    body' <- rename body
-    return $ Let pat' e1' body' pos
-  where names (Id s _) = [s]
-        names (TupId pats _) = concatMap names pats
 
 renameBinOpNoType :: (Exp tf -> Exp tf -> Pos -> Exp tf)
                   -> Exp tf -> Exp tf -> Pos
@@ -188,7 +180,7 @@ renameLambda :: Lambda tf -> RenameM (Lambda tf)
 renameLambda (AnonymFun params body ret pos) =
   bind (map fst params) $ do
     params' <- mapM renameBinding params
-    body' <- renameBody body
+    body' <- renameExp body
     return (AnonymFun params' body' ret pos)
 renameLambda (CurryFun fname curryargexps curryargts rettype pos) = do
   curryargexps' <- mapM renameExp curryargexps
