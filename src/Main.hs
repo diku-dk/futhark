@@ -11,6 +11,7 @@ import L0.Parser (parseL0)
 import L0.TypeChecker
 import L0.Renamer
 import L0.Interpreter
+import L0.CCodeGen
 
 -- To parse and prettyprint an input program located at ../DATA/filename.l0, run
 --  
@@ -42,7 +43,8 @@ main = do args <- getArgs
             ["-tp", file] -> typecheck (putStrLn . prettyPrint) file
             ["-r", file] -> rename file
             ["-i", file] -> interpret file
-            _ -> error "Usage: <-p|-t|-tp|-r|-i> <file>"
+            ["-c", file] -> compile file
+            _ -> error "Usage: <-p|-t|-tp|-r|-i|-c> <file>"
 
 prettyprint :: FilePath -> IO ()
 prettyprint file = putStrLn =<< prettyPrint <$> parse file
@@ -73,6 +75,13 @@ interpret file = do
       res <- runProgIO prog'
       case res of Left err -> putStrLn $ "Interpreter error:\n" ++ show err
                   Right v  -> putStrLn $ ppValue v -- ++ (prettyPrint prog')
+
+compile :: FilePath -> IO ()
+compile file = do
+  prog <- parse file
+  case checkProg prog of
+    Left err    -> putStrLn $ "Typechecking error:\n" ++ show err
+    Right prog' -> putStr $ compileProg $ renameProg prog'
 
 parse :: FilePath -> IO (Prog Maybe)
 parse = return . parseL0 <=< readFile
