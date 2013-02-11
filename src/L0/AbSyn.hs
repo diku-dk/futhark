@@ -212,7 +212,7 @@ data Exp tf = Literal Value
             | Iota (Exp tf) Pos -- e.g., iota(n) = {0,1,..,n-1}
 
             | Replicate (Exp tf) (Exp tf) (tf Type) Pos -- e.g., replicate(3,1) = {1, 1, 1}
-                                                    -- Type is the output-array type
+                                                    -- Type is element type of output array
 
             | Reshape [Exp tf] (Exp tf) (tf Type) (tf Type) Pos
              -- 1st arg is the new shape, 2nd arg is the input array *)

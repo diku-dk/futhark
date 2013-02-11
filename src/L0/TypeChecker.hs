@@ -376,8 +376,9 @@ checkExp (Iota e pos) = do
 checkExp (Replicate countexp valexp outtype pos) = do
   (_, countexp') <- require [Int pos] =<< checkSubExp countexp
   (valtype, valexp') <- checkSubExp valexp
-  outtype' <- outtype `unifyWithKnown` Array valtype Nothing pos
-  return (outtype', Replicate countexp' valexp' (boxType outtype') pos)
+  outtype' <- outtype `unifyWithKnown` valtype
+  return (Array outtype' Nothing pos,
+          Replicate countexp' valexp' (boxType outtype') pos)
 checkExp (Reshape shapeexps arrexp intype restype pos) = do
   (_, shapeexps') <- unzip <$> mapM (require [Int pos] <=< checkSubExp) shapeexps
   (arrt, arrexp') <- checkSubExp arrexp
