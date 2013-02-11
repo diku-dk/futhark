@@ -7,15 +7,22 @@ import Control.Applicative
 import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
+import Control.Monad.Writer
 import Data.List
 
 import qualified Data.Map as M
+import qualified Data.Set as S
 
 import L0.AbSyn
 
+-- | Special property related to a variable binding.
+data BindingProp = MergeVar -- ^ A merge variable.
+                 | NormalVar -- ^ A normal variable.
+                   deriving (Eq)
+
 data VarBinding = VarBinding { bndType :: Type
                              -- ^ The type of the variable.
-                             , bndMerge :: Bool
+                             , bndProp :: BindingProp
                              -- ^ If true, the binding is a merge variable.
                              }
 
@@ -29,6 +36,18 @@ type FunBinding = (Type, [Type])
 -- encountered.
 data TypeEnv = TypeEnv { envVtable :: M.Map String VarBinding
                        , envFtable :: M.Map String FunBinding }
+
+-- | Accumulated information generated during type checking.
+data TypeAcc = TypeAcc { accSrcMergeVars :: S.Set String
+                       -- ^ The set of merge variables read from.
+                       , accDestMergeVars :: S.Set String
+                       -- ^ The set of merge variables written to.
+                       }
+
+instance Monoid TypeAcc where
+  (TypeAcc src1 dest1) `mappend` (TypeAcc src2 dest2) =
+    TypeAcc (src1 <> src2) (dest1 <> dest2)
+  mempty = TypeAcc mempty mempty
 
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.
@@ -58,6 +77,7 @@ data TypeError = TypeError Pos String
                -- of parameters, or the specific types of parameters
                -- accepted (sometimes, only the former can be
                -- determined).
+               | MergeVarNonBasicIndexing String Pos
 
 instance Show TypeError where
   show (TypeError pos msg) =
@@ -96,23 +116,26 @@ instance Show TypeError where
               Left i -> (i, "(polymorphic)")
               Right ts -> (length ts, intercalate ", " $ map ppType ts)
           ngot = length got
+  show (MergeVarNonBasicIndexing name pos) =
+    "Merge variable " ++ name ++ " indexed at " ++ posStr pos ++
+    " to non-base type, but also modified in body of let."
 
 -- | The type checker runs in this monad.  Note that it has no mutable
 -- state, but merely keeps track of current bindings in a 'TypeEnv'.
 -- The 'Either' monad is used for error handling.
-newtype TypeM a = TypeM (ReaderT TypeEnv (Either TypeError) a)
-  deriving (Monad, Functor, MonadReader TypeEnv)
+newtype TypeM a = TypeM (WriterT TypeAcc (ReaderT TypeEnv (Either TypeError)) a)
+  deriving (Monad, Functor, MonadReader TypeEnv, MonadWriter TypeAcc)
 
 runTypeM :: TypeEnv -> TypeM a -> Either TypeError a
-runTypeM env (TypeM m) = runReaderT m env
+runTypeM env (TypeM m) = runReaderT (fst <$> runWriterT m) env
 
 bad :: TypeError -> TypeM a
-bad = TypeM . lift . Left
+bad = TypeM . lift . lift . Left
 
 -- | Bind a name as a common (non-merge) variable.
 bindVar :: TypeEnv -> Binding -> TypeEnv
 bindVar env (name,tp) =
-  env { envVtable = M.insert name (VarBinding tp False) $ envVtable env }
+  env { envVtable = M.insert name (VarBinding tp NormalVar) $ envVtable env }
 
 bindVars :: TypeEnv -> [Binding] -> TypeEnv
 bindVars = foldl bindVar
@@ -120,15 +143,31 @@ bindVars = foldl bindVar
 binding :: [Binding] -> TypeM a -> TypeM a
 binding bnds = local (`bindVars` bnds)
 
+-- | 'unbinding names m' evaluates 'm' with the names in 'names'
+-- unbound.
+unbinding :: [String] -> TypeM a -> TypeM a
+unbinding bnds = local (`unbindVars` bnds)
+  where unbindVars = foldl unbindVar
+        unbindVar env name = env { envVtable = M.delete name $ envVtable env }
+
 -- | Rebind variables as merge variables while evaluating a 'TypeM'
 -- action.
 merging :: [String] -> Pos -> TypeM a -> TypeM a
 merging [] _ m = m
 merging (k:ks) pos m = do
   bnd <- lookupVar k pos
-  let mkmerge = M.insert k bnd { bndMerge = True }
+  let mkmerge = M.insert k bnd { bndProp = MergeVar }
   local (\env -> env { envVtable = mkmerge $ envVtable env }) $
         merging ks pos m
+
+unmerging :: TypeM a -> TypeM a
+unmerging = local unmerging'
+  where unmerging' tenv = tenv { envVtable = M.map unmerge $ envVtable tenv }
+        unmerge (VarBinding t _) = VarBinding t NormalVar
+
+-- | The list of merge variables currently in scope.
+mergeVars :: TypeM [String]
+mergeVars = asks $ map fst . filter ((==MergeVar) . bndProp . snd) . M.toList . envVtable
 
 lookupVar :: String -> Pos -> TypeM VarBinding
 lookupVar name pos = do
@@ -138,6 +177,18 @@ lookupVar name pos = do
 
 lookupVarType :: String -> Pos -> TypeM Type
 lookupVarType name pos = bndType <$> lookupVar name pos
+
+collectSrcMergeVars :: TypeM a -> TypeM (a, S.Set String)
+collectSrcMergeVars m = pass collect
+  where collect = do (x,acc) <- listen m
+                     return ((x, accSrcMergeVars acc),
+                             const $ acc { accSrcMergeVars = S.empty})
+
+collectDestMergeVars :: TypeM a -> TypeM (a, S.Set String)
+collectDestMergeVars m = pass collect
+  where collect = do (x,acc) <- listen m
+                     return ((x, accDestMergeVars acc),
+                             const $ acc { accDestMergeVars = S.empty})
 
 -- | Determine if two types are identical.  Causes a 'TypeError' if
 -- they fail to match, and otherwise returns one of them.
@@ -165,11 +216,11 @@ unifyWithKnown t1 t2 = case unboxType t1 of
 -- | @require ts (t, e)@ causes a 'TypeError' if @t@ does not unify
 -- with one of the types in @ts@.  Otherwise, simply returns @(t, e)@.
 -- This function is very useful in 'checkExp'.
-require :: [Type] -> (Type, Exp Identity) -> TypeM (Type, Exp Identity)
-require [] (_,e) = bad $ TypeError (expPos e) "Expression cannot have any type (probably a bug in the type checker)."
+require :: HasPosition v => [Type] -> (Type, v) -> TypeM (Type, v)
+require [] (_,e) = bad $ TypeError (posOf e) "Expression cannot have any type (probably a bug in the type checker)."
 require ts (et,e)
   | et `elem` ts = return (et,e)
-  | otherwise = bad $ TypeError (expPos e) $ "Expression type must be one of " ++ intercalate ", " (map ppType ts) ++ "."
+  | otherwise = bad $ TypeError (posOf e) $ "Expression type must be one of " ++ intercalate ", " (map ppType ts) ++ "."
 
 elemType :: Type -> TypeM Type
 elemType (Array t _ _) = return t
@@ -209,7 +260,7 @@ checkProg prog = do
 checkFun :: TypeBox tf => FunDec tf -> TypeM (FunDec Identity)
 checkFun (fname, rettype, args, body, pos) = do
   args' <- checkArgs
-  (bodytype, body') <- binding args' $ checkExp body
+  (bodytype, body') <- binding args' $ checkBody body
   if bodytype == rettype then
     return (fname, rettype, args, body', pos)
   else bad $ ReturnTypeError pos fname rettype bodytype
@@ -260,6 +311,7 @@ checkExp (If e1 e2 e3 t pos) = do
 checkExp (Var name t pos) = do
   vt <- lookupVarType name pos
   t' <- t `unifyWithKnown` vt
+  tell $ TypeAcc (S.singleton name) S.empty
   return (t', Var name (boxType t') pos)
 checkExp (Apply fname args t pos) = do
   bnd <- asks $ M.lookup fname . envFtable
@@ -272,25 +324,9 @@ checkExp (Apply fname args t pos) = do
         zipWithM_ unifyKnownTypes argtypes paramtypes
         return (rettype', Apply fname args' (boxType rettype') pos)
       else bad $ ParameterMismatch fname pos (Right paramtypes) argtypes
-checkExp (Let pat e Nothing Nothing body pos) = do
-  (et, e') <- checkExp e
-  bnds <- checkPattern pat et
-  binding bnds $ do
-    (bt, body') <- checkExp body
-    return (bt, Let pat e' Nothing Nothing body' pos)
-checkExp (Let (TupId _ _) _ _ _ _ pos) =
-  bad $ TypeError pos "Cannot use tuple pattern when using rebinding syntax"
-checkExp (Let (Id name namepos) e (Just idxes) (Just ve) body pos) = do
-  (et, e') <- checkExp e
-  case peelArray (length idxes) et of
-    Nothing -> bad $ TypeError pos $ show (length idxes) ++ " indices given, but type of expression at " ++ posStr (expPos e) ++ " has " ++ show (arrayDims et) ++ " dimensions."
-    Just elemt -> do
-      (_, idxes') <- unzip <$> mapM (require [Int pos] <=< checkExp) idxes
-      (_, ve') <- require [elemt] =<< checkExp ve
-      (bt, body') <- local (`bindVar` (name, et)) $ checkExp body
-      return (bt, Let (Id name namepos) e' (Just idxes') (Just ve') body' pos)
-checkExp (Let (Id _ _) _ _ _ _ pos) =
-  bad $ TypeError pos "Index or element part missing (I think this should never happen)."
+checkExp (ExpLet le) = do
+  (t, le') <- checkLet le checkExp
+  return (t, ExpLet le')
 checkExp (Index name idxes intype restype pos) = do
   vt <- lookupVarType name pos
   when (arrayDims vt < length idxes) $
@@ -298,6 +334,7 @@ checkExp (Index name idxes intype restype pos) = do
   intype' <- intype `unifyWithKnown` baseType vt
   restype' <- restype `unifyWithKnown` strip (length idxes) vt
   (_, idxes') <- unzip <$> mapM (require [Int pos] <=< checkExp) idxes
+  tell $ TypeAcc (S.singleton name) S.empty
   return (restype', Index name idxes' (boxType intype') (boxType restype') pos)
   where strip 0 t = t
         strip n (Array t _ _) = strip (n-1) t
@@ -333,7 +370,7 @@ checkExp (Map fun arrexp intype outtype pos) = do
       (fun', funret) <- checkLambda fun [t]
       outtype' <- outtype `unifyWithKnown` Array funret e pos2
       return (outtype', Map fun' arrexp' (boxType intype') (boxType outtype') pos)
-    _       -> bad $ TypeError (expPos arrexp) "Expression does not return an array."
+    _       -> bad $ TypeError (posOf arrexp) "Expression does not return an array."
 checkExp (Reduce fun startexp arrexp intype pos) = do
   (acct, startexp') <- checkExp startexp
   (arrt, arrexp') <- checkExp arrexp
@@ -344,7 +381,7 @@ checkExp (Reduce fun startexp arrexp intype pos) = do
       when (acct /= funret) $
         bad $ TypeError pos $ "Accumulator is of type " ++ ppType acct ++ ", but reduce function returns type " ++ ppType funret ++ "."
       return (funret, Reduce fun' startexp' arrexp' (boxType intype') pos)
-    _ -> bad $ TypeError (expPos arrexp) "Type of expression is not an array"
+    _ -> bad $ TypeError (posOf arrexp) "Type of expression is not an array"
 checkExp (ZipWith fun arrexps intypes outtype pos) = do
   (arrts, arrexps') <- unzip <$> mapM checkExp arrexps
   intypes' <- case unboxType intypes of
@@ -366,7 +403,7 @@ checkExp (Scan fun startexp arrexp intype pos) = do
       when (inelemt /= funret) $
         bad $ TypeError pos $ "Array element value is of type " ++ ppType inelemt ++ ", but scan function returns type " ++ ppType funret ++ "."
       return (Array funret e pos2, Scan fun' startexp' arrexp' (boxType intype') pos)
-    _ -> bad $ TypeError (expPos arrexp) "Type of expression is not an array."
+    _ -> bad $ TypeError (posOf arrexp) "Type of expression is not an array."
 checkExp (Filter fun arrexp arrtype pos) = do
   (arrexpt, arrexp') <- checkExp arrexp
   arrtype' <- arrtype `unifyWithKnown` arrexpt
@@ -413,8 +450,48 @@ checkExp (DoLoop loopvar boundexp body mergevars pos) = do
     ts <- mapM (`lookupVarType` pos) mergevars
     let bodytype = case ts of [t] -> t
                               _   -> Tuple ts pos
-    (bodyt, body') <- require [bodytype] =<< checkExp body
+    (bodyt, body') <- require [bodytype] =<< checkBody body
     return (bodyt, DoLoop loopvar boundexp' body' mergevars pos)
+
+checkLet :: TypeBox tf => LetExp tf et -> (et tf -> TypeM (Type, et Identity))
+         -> TypeM (Type, LetExp Identity et)
+checkLet (Let pat e body pos) check = do
+  ((et, e'), srcmvars) <- collectSrcMergeVars $ checkExp e
+  bnds <- checkPattern pat et
+  mvs <- S.fromList <$> mergeVars
+  binding bnds $
+    if basicType et then do
+      (bt, body') <- check body
+      return (bt, Let pat e' body' pos)
+    else do
+      ((bt, body'), destmvars) <- collectDestMergeVars $ check body
+      let srcmvars'  = mvs `S.intersection` srcmvars
+          destmvars' = mvs `S.intersection` destmvars
+      case S.toList $ srcmvars' `S.intersection` destmvars' of
+        (v:_) -> bad $ MergeVarNonBasicIndexing v pos
+        _     -> return ()
+      tell $ TypeAcc srcmvars destmvars
+      return (bt, Let pat e' body' pos)
+
+checkBody :: TypeBox tf => Body tf -> TypeM (Type, Body Identity)
+checkBody (Exp e) = do
+  (t, e') <- unmerging $ checkExp e
+  return (t, Exp e')
+checkBody (BodyLet le) = do
+  (t, le') <- checkLet le checkBody
+  return (t, BodyLet le')
+checkBody (LetWith name e idxes ve body pos) = do
+  (et, e') <- checkExp e
+  -- We don't check whether name is a merge variable.  We might want
+  -- to change this.
+  tell $ TypeAcc S.empty (S.singleton name)
+  case peelArray (length idxes) et of
+    Nothing -> bad $ TypeError pos $ show (length idxes) ++ " indices given, but type of expression at " ++ posStr (posOf e) ++ " has " ++ show (arrayDims et) ++ " dimensions."
+    Just elemt -> do
+      (_, idxes') <- unzip <$> mapM (require [Int pos] <=< checkExp) idxes
+      (_, ve') <- require [elemt] =<< checkExp ve
+      (bt, body') <- local (`bindVar` (name, et)) $ checkBody body
+      return (bt, LetWith name e' idxes' ve' body' pos)
 
 checkLiteral :: Value -> TypeM (Type, Value)
 checkLiteral (IntVal k pos) = return (Int pos, IntVal k pos)
@@ -488,7 +565,9 @@ checkPattern pat vt = map rmPos <$> execStateT (checkPattern' pat vt) []
 checkLambda :: TypeBox tf => Lambda tf -> [Type] -> TypeM (Lambda Identity, Type)
 checkLambda (AnonymFun params body ret pos) args
   | length params == length args = do
-  (_, ret', params', body', _) <- checkFun ("<anonymous>", ret, params, body, pos)
+  mvs <- mergeVars
+  (_, ret', params', body', _) <-
+    unbinding mvs $ checkFun ("<anonymous>", ret, params, body, pos)
   zipWithM_ unifyKnownTypes (map snd params') args
   return (AnonymFun params body' ret' pos, ret')
   | otherwise = bad $ TypeError pos $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
@@ -532,7 +611,7 @@ checkPolyLambdaOp op curryargexps curryargts rettype args pos = do
                                    Var "y" (boxType tp) pos,
                                    [("y", tp)])
                     (e1:e2:_) -> return (e1, e2, [])
-  (fun, t) <- checkLambda (AnonymFun params (BinOp op x y (boxType tp) pos) tp pos)
+  (fun, t) <- checkLambda (AnonymFun params (Exp (BinOp op x y (boxType tp) pos)) tp pos)
               $ curryargts' ++ args
   t' <- rettype `unifyWithKnown` t
   return (fun, t')
