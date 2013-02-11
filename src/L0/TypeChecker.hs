@@ -291,8 +291,8 @@ checkExp (ArrayLit es t pos) = do
           [] -> bad $ TypeError pos "Empty array literal"
           e:ets' -> foldM unifyKnownTypes e ets'
   -- Unify that type with the one given for the array literal.
-  t' <- t `unifyWithKnown` Array et Nothing pos
-  return (t', ArrayLit es' (boxType t') pos)
+  t' <- t `unifyWithKnown` et
+  return (Array t' Nothing pos, ArrayLit es' (boxType t') pos)
 checkExp (BinOp op e1 e2 t pos) = checkBinOp op e1 e2 t pos
 checkExp (And e1 e2 pos) = do
   (_, e1') <- require [Bool pos] =<< checkSubExp e1

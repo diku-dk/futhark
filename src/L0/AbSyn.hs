@@ -191,7 +191,7 @@ data Exp tf = Literal Value
             -- argument is the tuple's type.
             | ArrayLit  [Exp tf] (tf Type) Pos
             -- ^ Array literals, e.g., { {1+x, 3}, {2, 1+4} }.  Second
-            -- arg is the array's type.
+            -- arg is the element type of the array.
             | BinOp BinOp (Exp tf) (Exp tf) (tf Type) Pos
             -- Binary Ops for Booleans
             | And    (Exp tf) (Exp tf) Pos
@@ -317,7 +317,7 @@ instance HasPosition (Exp tf) where
 expTypeInfo :: TypeBox tf => Exp tf -> tf Type
 expTypeInfo (Literal val) = boxType $ valueType val
 expTypeInfo (TupLit _ t _) = t
-expTypeInfo (ArrayLit _ t _) = t
+expTypeInfo (ArrayLit _ t pos) = (\t' -> Array t' Nothing pos) <$> t
 expTypeInfo (BinOp _ _ _ t _) = t
 expTypeInfo (And _ _ pos) = boxType $ Bool pos
 expTypeInfo (Or _ _ pos) = boxType $ Bool pos
