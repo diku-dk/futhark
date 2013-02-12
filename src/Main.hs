@@ -70,17 +70,17 @@ interpret :: FilePath -> IO ()
 interpret file = do
   prog <- parse file
   case checkProg prog of
-    Left err    -> putStrLn $ "Typechecking error:\n" ++ show err
+    Left err    -> error $ "Typechecking error:\n" ++ show err
     Right prog' -> do
       res <- runProgIO prog'
-      case res of Left err -> putStrLn $ "Interpreter error:\n" ++ show err
+      case res of Left err -> error $ "Interpreter error:\n" ++ show err
                   Right v  -> putStrLn $ ppValue v -- ++ (prettyPrint prog')
 
 compile :: FilePath -> IO ()
 compile file = do
   prog <- parse file
   case checkProg prog of
-    Left err    -> putStrLn $ "Typechecking error:\n" ++ show err
+    Left err    -> error $ "Typechecking error:\n" ++ show err
     Right prog' -> putStr $ compileProg $ renameProg prog'
 
 parse :: FilePath -> IO (Prog Maybe)
