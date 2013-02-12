@@ -108,6 +108,16 @@ compileExp place (BinOp bop e1 e2 _ _) = do
             Times -> [C.cstm|$id:place = $id:x * $id:y;|]
             Divide -> [C.cstm|$id:place = $id:x / $id:y;|]
             Pow -> [C.cstm|$id:place = powl($id:x,$id:y);|]
+            ShiftR -> [C.cstm|$id:place = $id:x >> $id:y;|]
+            ShiftL -> [C.cstm|$id:place = $id:x << $id:y;|]
+            Band -> [C.cstm|$id:place = $id:x & $id:y;|]
+            Xor -> [C.cstm|$id:place = $id:x ^ $id:y;|]
+            Bor -> [C.cstm|$id:place = $id:x | $id:y;|]
+            LogAnd -> [C.cstm|$id:place = $id:x && $id:y;|]
+            LogOr -> [C.cstm|$id:place = $id:x || $id:y;|]
+            Equal -> [C.cstm|$id:place = $id:x == $id:y;|]
+            Less -> [C.cstm|$id:place = $id:x < $id:y;|]
+            Leq -> [C.cstm|$id:place = $id:x <= $id:y;|]
 compileExp place (LetPat pat e body _) = do
   val <- new "let_value"
   e' <- compileExp val e
