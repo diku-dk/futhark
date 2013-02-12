@@ -95,7 +95,7 @@ renameExp (LetPat pat e body pos) = do
     pat' <- renamePattern pat
     body' <- renameExp body
     return $ LetPat pat' e1' body' pos
-  where names (Id s _) = [s]
+  where names (Id s _ _) = [s]
         names (TupId pats _) = concatMap names pats
 renameExp (Index s idxs t1 t2 pos) = do
   s' <- repl s
@@ -186,10 +186,10 @@ renameLambda (CurryFun fname curryargexps curryargts rettype pos) = do
   curryargexps' <- mapM renameExp curryargexps
   return (CurryFun fname curryargexps' curryargts rettype pos)
 
-renamePattern :: TupIdent -> RenameM TupIdent
-renamePattern (Id s pos) = do
+renamePattern :: TupIdent tf -> RenameM (TupIdent tf)
+renamePattern (Id s t pos) = do
   s' <- repl s
-  return $ Id s' pos
+  return $ Id s' t pos
 renamePattern (TupId pats pos) = do
   pats' <- mapM renamePattern pats
   return $ TupId pats' pos

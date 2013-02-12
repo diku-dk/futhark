@@ -244,7 +244,7 @@ Exp  : intlit         { let INTLIT num pos = $1 in Literal $ IntVal num pos }
 
      | let id '=' Exp in Exp %prec letprec
                       { let ID name pos = $2
-                        in LetPat (Id name pos) $4 $6 $1 }
+                        in LetPat (Id name Nothing pos) $4 $6 $1 }
 
      | let '(' TupIds ')' '=' Exp in Exp %prec letprec
                       { LetPat (TupId $3 $1) $6 $8 $1 }
@@ -282,7 +282,7 @@ TupIds : TupId ',' TupId   { [$1, $3] }
        | TupId ',' TupIds  { $1 : $3 }
 ;
 
-TupId : id { let ID name pos = $1 in Id name pos }
+TupId : id { let ID name pos = $1 in Id name Nothing pos }
       | '(' TupIds ')' { TupId $2 $1 }
 
 FunAbstr : id { let ID name pos = $1 in CurryFun name [] Nothing Nothing pos }
