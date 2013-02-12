@@ -104,6 +104,9 @@ renameExp (Index s idxs t1 t2 pos) = do
 renameExp (Iota e pos) = do
   e' <- renameExp e
   return $ Iota e' pos
+renameExp (Size e pos) = do
+  e' <- renameExp e
+  return $ Size e' pos
 renameExp (Replicate e1 e2 t pos) = do
   e1' <- renameExp e1
   e2' <- renameExp e2

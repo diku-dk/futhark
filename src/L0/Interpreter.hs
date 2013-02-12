@@ -221,6 +221,11 @@ evalExp (Iota e pos) = do
       | x >= 0    -> return $ ArrayVal (map (`IntVal` pos) [0..x-1]) (Int pos) pos
       | otherwise -> bad $ NegativeIota pos x
     _ -> bad $ TypeError pos "evalExp Iota"
+evalExp (Size e pos) = do
+  v <- evalExp e
+  case v of
+    ArrayVal l _ _ -> return $ IntVal (length l) pos
+    _ -> bad $ TypeError pos "evalExp Size"
 evalExp (Replicate e1 e2 (Identity et) pos) = do
   v1 <- evalExp e1
   v2 <- evalExp e2
