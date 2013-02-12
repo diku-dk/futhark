@@ -251,6 +251,7 @@ checkProg prog = do
         in Right $ M.insert name (ret,argtypes,pos) ftable
     rmPos (ret,args,_) = (ret,args)
     builtins = M.fromList [("toReal", (Real (0,0), [Int (0,0)], (0,0)))
+                          ,("trunc", (Int (0,0), [Real (0,0)], (0,0)))
                           ,("sqrt", (Real (0,0), [Real (0,0)], (0,0)))
                           ,("log", (Real (0,0), [Real (0,0)], (0,0)))
                           ,("exp", (Real (0,0), [Real (0,0)], (0,0)))
