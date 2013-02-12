@@ -1,0 +1,56 @@
+fun (int*int*[real]*[real]*[real]*[[real]]*[[real]]*[[real]]*[[real]]) initGrid
+    (real s0, real alpha, real nu, real t, int numX, int numY, int numT) =
+    let logAlpha = log(alpha) in
+    let myTimeline = map(fn real (int i) => t * toReal(i) / (toReal(numT) - 1.0), iota(numT)) in
+    let (stdX, stdY) = (20.0 * alpha * s0 * sqrt(t),
+                        20.0 * nu    * s0 * sqrt(t)) in
+    let (dx, dy) = (stdX / toReal(numX), stdY / toReal(numY)) in
+    let (myXindex, myYindex) = (trunc(s0 / dx), numY / 2) in
+    let myX = map(fn real (int i) => toReal(i) * dx - toReal(myXindex) * dx + s0, iota(numX)) in
+    let myY = map(fn real (int i) => toReal(i) * dy - toReal(myYindex) * dy + logAlpha, iota(numY)) in
+    let xXy = replicate(numX,replicate(numY, 0.0)) in
+    let (myMuX, myVarX, myMuY, myVarY) = (xXy, xXy, xXy, xXy) in
+    (myXindex, myYindex, myX, myTimeline, myTimeline, myMuX, myVarX, myMuY, myVarY)
+
+fun ([[real]]*[[real]]) initOperator([real] x) =
+    let n = size(x) in
+    let dxu = x[1] - x[0] in
+    let dxl = 0.0 in
+    let Dxmid = map(fn [real] (int i) => let dxl = x[i] - x[i-1] in
+                                         let dxu = x[i+1] - x[i] in
+                                         {~dxu/dxl/(dxl+dxu),
+                                         (dxu/dxl - dxl/dxu)/(dxl+dxu),
+                                         dxl/dxu/(dxl+dxu)},
+                   map (op + (1), iota(n-2))) in
+    let Dxxmid = map(fn [real] (int i) => let dxl = x[i] - x[i-1] in
+                                          let dxu = x[i+1] - x[i] in
+                                          {2.0/dxl/(dxl+dxu),
+                                          ~2.0*(1.0/dxl + 1.0/dxu)/(dxl+dxu),
+                                          2.0/dxu/(dxl+dxu)},
+                    map (op + (1), iota(n-2))) in
+    let Dx = concat(concat({{0.0, ~1.0 / dxu, 1.0 / dxu}}, Dxmid), {{~1.0 / dxl, 1.0 / dxl, 0.0 }}) in
+    let Dxx = concat(concat({{0.0, 0.0, 0.0}}, Dxxmid), {{0.0, 0.0, 0.0 }}) in
+    (Dx, Dxx)
+
+fun real max(real x, real y) = if y < x then x else y
+
+fun [[real]] setPayoff(real strike, [real] myX, [real] myY) =
+    map(fn [real] (int i) => replicate(size(myY), max(myX[i]-strike,0.0)),
+        iota(size(myX)))
+
+fun real value(real s0, real strike, real t, real alpha, real nu, real beta) =
+    let (numX, numY, numT) = (256, 32, 64) in
+    let (myXindex, myYindex, myX, myY, myTimeline, myMuX, myVarX, myMuY, myVarY) =
+        initGrid(s0, alpha, nu, t, numX, numY, numT) in
+    let (myDx, myDxx) = initOperator(myX) in
+    let (myDy, myDyy) = initOperator(myY) in
+    let myResult = setPayoff(strike, myX, myY) in
+    // Complex stuff missing!
+    myResult[myXindex,myYindex]
+
+fun [real] main () =
+    let OUTER_LOOP_COUNT = 100 in
+    let (s0, strike, t, alpha, nu, beta) = (0.03, 0.03, 5.0, 0.2, 0.6, 0.6) in
+    let strikes = map(fn real (int i) => 0.001*toReal(i), iota(OUTER_LOOP_COUNT)) in
+    let res = map(fn real (real x) => value(s0, x, t, alpha, nu, beta), strikes) in
+    res
