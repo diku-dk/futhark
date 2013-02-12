@@ -218,6 +218,10 @@ compileExp place (Write e (Identity t) _) = do
                      Real _ -> [C.cstm|printf("%lf", $id:place);|]
                      _      -> [C.cstm|printf("Can't print this yet.");|]
   return [C.cstm|{$stm:e' $stm:pr}|]
+compileExp place (Read t _) = do
+  case t of Int _  -> return [C.cstm|scanf("%d", &$id:place);|]
+            Char _ -> return [C.cstm|scanf("%c", &$id:place);|]
+            Real _ -> return [C.cstm|scanf("%f", &$id:place);|]
 compileExp place e =
   return $ case expType e of
              (Int _)  -> [C.cstm|$id:place = 0;|]
