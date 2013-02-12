@@ -118,6 +118,45 @@ compileExp place (BinOp bop e1 e2 _ _) = do
             Equal -> [C.cstm|$id:place = $id:x == $id:y;|]
             Less -> [C.cstm|$id:place = $id:x < $id:y;|]
             Leq -> [C.cstm|$id:place = $id:x <= $id:y;|]
+compileExp place (And e1 e2 _) = do
+  e1' <- compileExp place e1
+  e2' <- compileExp place e2
+  return [C.cstm|{$stm:e1' if ($id:place) { $stm:e2' }}|]
+compileExp place (Or e1 e2 _) = do
+  e1' <- compileExp place e1
+  e2' <- compileExp place e2
+  return [C.cstm|{$stm:e1' if (!$id:place) { $stm:e2' }}|]
+compileExp place (Not e1 _) = do
+  e1' <- compileExp place e1
+  return [C.cstm|{$stm:e1' $id:place = !$id:place;}|]
+compileExp place (Negate e1 _ _) = do
+  e1' <- compileExp place e1
+  return [C.cstm|{$stm:e1' $id:place = -$id:place;}|]
+compileExp place (If cond e1 e2 _ _) = do
+  condvar <- new "if_cond"
+  cond' <- compileExp condvar cond
+  e1' <- compileExp place e1
+  e2' <- compileExp place e2
+  return [C.cstm|{
+               int $id:condvar;
+               $stm:cond'
+               if ($id:condvar) $stm:e1'
+               else $stm:e2'
+             }|]
+compileExp place (Apply fname args _ _) = do
+  (vars, args') <- liftM unzip . forM args $ \arg -> do
+                     var <- new "apply_arg"
+                     arg' <- compileExp var arg
+                     return (([C.cdecl|$ty:(expCType arg) $id:var;|],
+                              [C.cexp|$id:var|]),
+                             arg')
+  let (vardecls, varexps) = unzip vars
+  return [C.cstm|{
+               $decls:vardecls
+               $stms:args'
+               $id:place = $id:fname'($args:varexps);
+             }|]
+  where fname' = "l0_" ++ fname
 compileExp place (LetPat pat e body _) = do
   val <- new "let_value"
   e' <- compileExp val e
@@ -160,9 +199,11 @@ compilePattern pat vexp = runWriter $ compilePattern' pat vexp
 
 compileBody :: Exp Identity -> CompilerM C.Stm
 compileBody body = do
-  body' <- compileExp "retval" body
+  retval <- new "retval"
+  body' <- compileExp retval body
   return [C.cstm|{
-               $ty:bodytype retval;
+               $ty:bodytype $id:retval;
                $stm:body'
+               return $id:retval;
              }|]
   where bodytype = expCType body
