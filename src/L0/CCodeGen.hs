@@ -4,6 +4,7 @@ module L0.CCodeGen where
 import Control.Applicative
 import Control.Monad.Identity
 import Control.Monad.State
+import Control.Monad.Writer
 
 import Data.Loc
 import qualified Language.C.Syntax as C
@@ -46,11 +47,14 @@ typeToCType (Char _) = [C.cty|char|]
 typeToCType (Real _) = [C.cty|double|]
 typeToCType (Tuple ts _) = [C.cty|struct { $sdecls:members }|]
   where members = zipWith field ts [(0::Int)..]
-        field t i = [C.csdecl|$ty:(typeToCType t) $id:("elem" ++ show i);|]
+        field t i = [C.csdecl|$ty:(typeToCType t) $id:("elem_" ++ show i);|]
 typeToCType (Array t _ _) = [C.cty|$ty:(typeToCType t)*|]
 
 expCType :: Exp Identity -> C.Type
 expCType = typeToCType . expType
+
+valCType :: Value -> C.Type
+valCType = typeToCType . valueType
 
 compileFun :: FunDec Identity -> CompilerM C.Func
 compileFun (fname, rettype, args, body, _) = do
@@ -67,10 +71,24 @@ compileValue place (LogVal b _) = return [C.cstm|$id:place = $int:b';|]
   where b' :: Int
         b' = if b then 1 else 0
 compileValue place (CharVal c _) = return [C.cstm|$id:place = $char:c;|]
+compileValue place (TupVal vs _) = do
+  vs' <- forM (zip vs [(0::Int)..]) $ \(v, i) -> do
+           var <- new $ "TupVal_" ++ show i
+           v' <- compileValue var v
+           let field = "elem_" ++ show i
+           return [C.cstm|{$ty:(valCType v) $id:var; $stm:v'; $id:place.$id:field = $id:var;}|]
+  return [C.cstm|{$stms:vs'}|]
 
 compileExp :: String -> Exp Identity -> CompilerM C.Stm
 compileExp place (Literal val) = compileValue place val
 compileExp place (Var name _ _) = return [C.cstm|$id:place = $id:name;|]
+compileExp place (TupLit es _ _) = do
+  es' <- forM (zip es [(0::Int)..]) $ \(e, i) -> do
+           var <- new $ "TupVal_" ++ show i
+           e' <- compileExp var e
+           let field = "elem_" ++ show i
+           return [C.cstm|{$ty:(expCType e) $id:var; $stm:e'; $id:place.$id:field = $id:var;}|]
+  return [C.cstm|{$stms:es'}|]
 compileExp place (BinOp bop e1 e2 _ _) = do
   e1_dest <- new "binop_x1"
   e2_dest <- new "binop_x2"
@@ -90,12 +108,16 @@ compileExp place (BinOp bop e1 e2 _ _) = do
             Times -> [C.cstm|$id:place = $id:x * $id:y;|]
             Divide -> [C.cstm|$id:place = $id:x / $id:y;|]
             Pow -> [C.cstm|$id:place = powl($id:x,$id:y);|]
-compileExp place (LetPat (Id name _) e body _) = do
-  e' <- compileExp name e
+compileExp place (LetPat pat e body _) = do
+  val <- new "let_value"
+  e' <- compileExp val e
+  let (assignments,decls) = compilePattern pat [C.cexp|$id:val|]
   body' <- compileExp place body
   return [C.cstm|{
-               $ty:(expCType e) $id:name;
+               $decls:decls
+               $ty:(expCType e) $id:val;
                $stm:e'
+               $stm:assignments
                $stm:body'
              }|]
 compileExp place (Write e (Identity t) _) = do
@@ -114,6 +136,17 @@ compileExp place e =
              (Real _) -> [C.cstm|$id:place = 0.0;|]
              (Tuple _ _) -> [C.cstm|;|]
              (Array _ _ _) -> [C.cstm|id:place = 0;|]
+
+compilePattern :: TupIdent Identity -> C.Exp -> (C.Stm, [C.InitGroup])
+compilePattern pat vexp = runWriter $ compilePattern' pat vexp
+  where compilePattern' (Id name (Identity t) _) vexp' = do 
+          tell [[C.cdecl|$ty:(typeToCType t) $id:name;|]]
+          return [C.cstm|$id:name = $exp:vexp';|]
+        compilePattern' (TupId pats _) vexp' = do
+          pats' <- zipWithM prep pats [(0::Int)..]
+          return [C.cstm|{$stms:pats'}|]
+          where prep pat' i = compilePattern' pat' [C.cexp|$exp:vexp'.$id:field|]
+                  where field = "elem_" ++ show i
 
 compileBody :: Exp Identity -> CompilerM C.Stm
 compileBody body = do

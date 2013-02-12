@@ -389,8 +389,8 @@ evalBoolBinOp op e1 e2 pos = do
     (LogVal x _, LogVal y _) -> return $ LogVal (op x y) pos
     _                        -> bad $ TypeError pos $ "evalBoolBinOp " ++ ppValue v1 ++ " " ++ ppValue v2
 
-evalPattern :: TupIdent -> Value -> Maybe [(String, Value)]
-evalPattern (Id name _) v = Just [(name, v)]
+evalPattern :: TupIdent Identity -> Value -> Maybe [(String, Value)]
+evalPattern (Id name _ _) v = Just [(name, v)]
 evalPattern (TupId pats _) (TupVal vs _)
   | length pats == length vs =
     concat <$> zipWithM evalPattern pats vs

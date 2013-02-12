@@ -203,7 +203,7 @@ data Exp tf = Literal Value
             | Var    String (tf Type) Pos
             -- Function Call and Let Construct
             | Apply  String [Exp tf] (tf Type) Pos
-            | LetPat TupIdent (Exp tf) (Exp tf) Pos
+            | LetPat (TupIdent tf) (Exp tf) (Exp tf) Pos
             | LetWith String (Exp tf) [Exp tf] (Exp tf) (Exp tf) Pos
             -- Array Indexing and Array Constructors
             | Index String [Exp tf] (tf Type) (tf Type) Pos
@@ -402,12 +402,12 @@ lambdaType (AnonymFun _ _ t _) = boxType t
 lambdaType (CurryFun _ _ _ t _) = t
 
 -- | Tuple Identifier, i.e., pattern matching
-data TupIdent = TupId [TupIdent] Pos
-              | Id String Pos
+data TupIdent tf = TupId [TupIdent tf] Pos
+                 | Id String (tf Type) Pos
 
-patPos :: TupIdent -> Pos
+patPos :: TupIdent tf -> Pos
 patPos (TupId _ pos) = pos
-patPos (Id _ pos) = pos
+patPos (Id _ _ pos) = pos
 
 -- | Function Declarations
 type Binding = (String,Type)
@@ -547,8 +547,8 @@ ppType (Tuple (tp:tps) _) = "( " ++ intercalate " * " (map ppType (tp:tps)) ++ "
 ppType (Tuple [] pos) = ppError pos "Empty tuple"
 
 -- | Pretty printing a tuple id
-ppTupId :: TupIdent -> String
-ppTupId (Id name _) = " " ++ name ++ " "
+ppTupId :: TupIdent tf -> String
+ppTupId (Id name _ _) = " " ++ name ++ " "
 ppTupId (TupId (a:lst) _) = " ( " ++ intercalate ", " (map ppTupId $ a:lst) ++ " ) "
 ppTupId (TupId _ pos) = ppError pos "Tuple identifiers with less than two elements "
 

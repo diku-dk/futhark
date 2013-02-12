@@ -65,7 +65,7 @@ data TypeError = TypeError Pos String
                -- ^ Two function parameters share the same name.
                | DupPatternError String Pos Pos
                -- ^ Two pattern variables share the same name.
-               | InvalidPatternError TupIdent Type
+               | InvalidPatternError (TupIdent Maybe) Type
                -- ^ The pattern is not compatible with the type.
                | UnknownVariableError String Pos
                -- ^ Unknown variable of the given name referenced at the given spot.
@@ -331,12 +331,12 @@ checkExp (Apply fname args t pos) = do
       else bad $ ParameterMismatch fname pos (Right paramtypes) argtypes
 checkExp (LetPat pat e body pos) = do
   ((et, e'), srcmvars) <- collectSrcMergeVars $ checkSubExp e
-  bnds <- checkPattern pat et
+  (bnds, pat') <- checkPattern pat et
   mvs <- S.fromList <$> mergeVars
   binding bnds $
     if basicType et then do
       (bt, body') <- checkExp body
-      return (bt, LetPat pat e' body' pos)
+      return (bt, LetPat pat' e' body' pos)
     else do
       ((bt, body'), destmvars) <- collectDestMergeVars $ checkExp body
       let srcmvars'  = mvs `S.intersection` srcmvars
@@ -345,7 +345,7 @@ checkExp (LetPat pat e body pos) = do
         (v:_) -> bad $ MergeVarNonBasicIndexing v pos
         _     -> return ()
       tell $ TypeAcc srcmvars destmvars
-      return (bt, LetPat pat e' body' pos)
+      return (bt, LetPat pat' e' body' pos)
 checkExp (LetWith name e idxes ve body pos) = do
   (et, e') <- checkSubExp e
   -- We don't check whether name is a merge variable.  We might want
@@ -540,12 +540,20 @@ checkPolyBinOp op tl e1 e2 t pos = do
   t'' <- t `unifyWithKnown` t'
   return (t'', BinOp op e1' e2' (boxType t'') pos)
 
-checkPattern :: TupIdent -> Type -> TypeM [Binding]
-checkPattern pat vt = map rmPos <$> execStateT (checkPattern' pat vt) []
-  where checkPattern' (Id name pos) t = add name t pos
-        checkPattern' (TupId pats _) (Tuple ts _)
-          | length pats == length ts = zipWithM_ checkPattern' pats ts
-        checkPattern' _ _ = lift $ bad $ InvalidPatternError pat vt
+checkPattern :: TypeBox tf =>
+                TupIdent tf -> Type -> TypeM ([Binding], TupIdent Identity)
+checkPattern pat vt = do
+  (pat', bnds) <- runStateT (checkPattern' pat vt) []
+  return (map rmPos bnds, pat')
+  where checkPattern' (Id name namet pos) t = do
+          add name t pos
+          t' <- lift $ namet `unifyWithKnown` t
+          return $ Id name (boxType t') pos
+        checkPattern' (TupId pats pos) (Tuple ts _)
+          | length pats == length ts = do
+          pats' <- zipWithM checkPattern' pats ts
+          return $ TupId pats' pos
+        checkPattern' _ _ = lift $ bad $ InvalidPatternError errpat vt
 
         add name t pos = do
           bnd <- gets $ lookup name
@@ -553,6 +561,10 @@ checkPattern pat vt = map rmPos <$> execStateT (checkPattern' pat vt) []
             Nothing       -> modify ((name,(t,pos)):)
             Just (_,pos2) -> lift $ bad $ DupPatternError name pos pos2
         rmPos (name,(t,_)) = (name,t)
+        -- A pattern with known type box (Maybe) for error messages.
+        errpat = rmTypes pat
+        rmTypes (Id name _ pos) = Id name Nothing pos
+        rmTypes (TupId pats pos) = TupId (map rmTypes pats) pos
 
 checkLambda :: TypeBox tf => Lambda tf -> [Type] -> TypeM (Lambda Identity, Type)
 checkLambda (AnonymFun params body ret pos) args
