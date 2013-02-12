@@ -75,6 +75,7 @@ import L0.Lexer
       with            { WITH $$ }
       merge           { MERGE $$ }
       iota            { IOTA $$ }
+      size            { SIZE $$ }
       replicate       { REPLICATE $$ }
       map             { MAP $$ }
       reduce          { REDUCE $$ }
@@ -204,6 +205,8 @@ Exp  : intlit         { let INTLIT num pos = $1 in Literal $ IntVal num pos }
      | write '(' Exp ')' { Write $3 Nothing $1 }
 
      | iota '(' Exp ')' { Iota $3 $1 }
+
+     | size '(' Exp ')' { Size $3 $1 }
 
      | replicate '(' Exp ',' Exp ')' { Replicate $3 $5 Nothing $1 }
 

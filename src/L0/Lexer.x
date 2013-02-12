@@ -94,6 +94,7 @@ data Token = IF { tokPos :: Pos }
            | DO { tokPos :: Pos }
            | WITH { tokPos :: Pos }
            | MERGE { tokPos :: Pos }
+           | SIZE { tokPos :: Pos }
            | IOTA { tokPos :: Pos }
            | REPLICATE { tokPos :: Pos }
            | MAP { tokPos :: Pos }
@@ -146,6 +147,7 @@ keyword pos s =
     "pow"          -> POW   pos
 
     "iota"         -> IOTA      pos
+    "size"         -> SIZE      pos
     "replicate"    -> REPLICATE pos
     "reshape"      -> RESHAPE   pos
     "transpose"    -> TRANSPOSE pos

@@ -374,6 +374,11 @@ checkExp (Index name idxes intype restype pos) = do
 checkExp (Iota e pos) = do
   (_, e') <- require [Int pos] =<< checkSubExp e
   return (Array (Int pos) Nothing pos, Iota e' pos)
+checkExp (Size e pos) = do
+  (et, e') <- checkSubExp e
+  case et of
+    Array _ _ _ -> return (Int pos, Size e' pos)
+    _           -> bad $ TypeError pos "Argument to size must be array."
 checkExp (Replicate countexp valexp outtype pos) = do
   (_, countexp') <- require [Int pos] =<< checkSubExp countexp
   (valtype, valexp') <- checkSubExp valexp
@@ -616,8 +621,8 @@ checkPolyLambdaOp op curryargexps curryargts rettype args pos = do
                                    Var "y" (boxType tp) pos,
                                    [("y", tp)])
                     (e1:e2:_) -> return (e1, e2, [])
-  (fun, t) <- checkLambda (AnonymFun params (BinOp op x y (boxType tp) pos) tp pos)
-              $ curryargts' ++ args
+  let body = BinOp op x y (boxType tp) pos
+  (fun, t) <- checkLambda (AnonymFun params body tp pos) args
   t' <- rettype `unifyWithKnown` t
   return (fun, t')
   where fname = "op" ++ ppBinOp op

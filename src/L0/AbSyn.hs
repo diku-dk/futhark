@@ -210,7 +210,7 @@ data Exp tf = Literal Value
              -- e.g., arr[3]; 3rd arg is the input-array element type
              -- 4th arg is the result type
             | Iota (Exp tf) Pos -- e.g., iota(n) = {0,1,..,n-1}
-
+            | Size (Exp tf) Pos -- The number of elements in an array.
             | Replicate (Exp tf) (Exp tf) (tf Type) Pos -- e.g., replicate(3,1) = {1, 1, 1}
                                                     -- Type is element type of output array
 
@@ -296,6 +296,7 @@ instance HasPosition (Exp tf) where
   posOf (LetWith _ _ _ _ _ pos) = pos
   posOf (Index _ _ _ _ pos) = pos
   posOf (Iota _ pos) = pos
+  posOf (Size _ pos) = pos
   posOf (Replicate _ _ _ pos) = pos
   posOf (Reshape _ _ _ _ pos) = pos
   posOf (Transpose _ _ _ pos) = pos
@@ -330,6 +331,7 @@ expTypeInfo (LetPat _ _ body _) = expTypeInfo body
 expTypeInfo (LetWith _ _ _ _ body _) = expTypeInfo body
 expTypeInfo (Index _ _ _ t _) = t
 expTypeInfo (Iota _ pos) = boxType $ Array (Int pos) Nothing pos
+expTypeInfo (Size _ pos) = boxType $ Int pos
 expTypeInfo (Replicate _ _ t _) = t
 expTypeInfo (Reshape _ _ _ t _) = t
 expTypeInfo (Transpose _ _ t _) = t
@@ -492,6 +494,7 @@ ppExp _ (Index _ [] _ _ pos) = ppError pos "ppExp found empty index!"
 
 -- | Array Constructs
 ppExp d (Iota e _)         = "iota ( " ++ ppExp d e ++ " ) "
+ppExp d (Size e _)         = "size ( " ++ ppExp d e ++ " ) "
 ppExp d (Replicate e el _ _) = "replicate ( " ++ ppExp d e ++ ", " ++ ppExp d el ++ " ) "
 
 ppExp d (Transpose e _ _ _) = " transpose ( " ++ ppExp d e ++ " ) "
