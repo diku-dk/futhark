@@ -106,12 +106,14 @@ runProg wop rop prog = do
         let fun args = binding (zip (map fst params) args) $ evalExp body
         in M.insert name fun ftable
     builtins = M.fromList [("toReal", builtin "toReal")
+                          ,("trunc", builtin "trunc")
                           ,("sqrt", builtin "sqrt")
                           ,("log", builtin "log")
                           ,("exp", builtin "exp")
                           ,("op not", builtin "op not")
                           ,("op ~", builtin "op ~")]
     builtin "toReal" [IntVal x pos] = return $ RealVal (fromIntegral x) pos
+    builtin "trunc" [RealVal x pos] = return $ IntVal (truncate x) pos
     builtin "sqrt" [RealVal x pos] = return $ RealVal (sqrt x) pos
     builtin "log" [RealVal x pos] = return $ RealVal (log x) pos
     builtin "exp" [RealVal x pos] = return $ RealVal (exp x) pos
