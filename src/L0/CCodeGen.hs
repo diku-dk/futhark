@@ -14,23 +14,71 @@ import Text.PrettyPrint.Mainland
 
 import L0.AbSyn
 
-newtype CompilerM a = CompilerM (State Int a)
-  deriving (Functor, Applicative, Monad, MonadState Int)
+data CompilerState = CompilerState {
+    compTupleStructs :: [([Type], (C.Type, C.Definition))]
+  , compVarCounter :: Int
+  }
 
-runCompilerM :: CompilerM a -> a
-runCompilerM (CompilerM m) = evalState m 0
+newCompilerState :: CompilerState
+newCompilerState = CompilerState {
+                     compTupleStructs = []
+                   , compVarCounter = 0
+                   }
+
+-- | Return a list of struct definitions for the tuples seen during
+-- compilation.  The list is sorted according to dependencies, such
+-- that a struct at index N only depends on structs at positions >N.
+tupleDefinitions :: CompilerState -> [C.Definition]
+tupleDefinitions = reverse . map (snd . snd ) . compTupleStructs
+
+newtype CompilerM a = CompilerM (State CompilerState a)
+  deriving (Functor, Applicative, Monad, MonadState CompilerState)
+
+runCompilerM :: CompilerM a -> (a, CompilerState)
+runCompilerM (CompilerM m) = runState m newCompilerState
 
 -- | 'new s' returns a fresh variable name, with 's' prepended to it.
 new :: String -> CompilerM String
-new s = do i <- get
-           modify (+1)
-           return $ s ++ "_" ++ show i
+new str = do i <- gets compVarCounter
+             modify $ \s -> s { compVarCounter = i+1 }
+             return $ str ++ "_" ++ show i
+
+typeToCType :: Type -> CompilerM C.Type
+typeToCType (Int _) = return [C.cty|int|]
+typeToCType (Bool _) = return [C.cty|int|]
+typeToCType (Char _) = return [C.cty|char|]
+typeToCType (Real _) = return [C.cty|double|]
+typeToCType (Array t _ _) = do
+  ct <- typeToCType t
+  return [C.cty|$ty:ct*|]
+typeToCType (Tuple ts _) = do
+  ty <- gets $ lookup ts . compTupleStructs
+  case ty of
+    Just (cty, _) -> return cty
+    Nothing -> do
+      name <- new "tuple_type"
+      members <- zipWithM field ts [(0::Int)..]
+      let struct = [C.cedecl|struct $id:name { $sdecls:members };|]
+          stype  = [C.cty|struct $id:name|]
+      modify $ \s -> s { compTupleStructs = (ts, (stype,struct)) : compTupleStructs s }
+      return stype
+        where field t i = do
+                 ct <- typeToCType t
+                 return [C.csdecl|$ty:ct $id:("elem_" ++ show i);|]
+
+expCType :: Exp Identity -> CompilerM C.Type
+expCType = typeToCType . expType
+
+valCType :: Value -> CompilerM C.Type
+valCType = typeToCType . valueType
 
 compileProg :: Prog Identity -> String
 compileProg prog =
-  let funs = runCompilerM $ mapM compileFun prog
+  let (funs, endstate) = runCompilerM $ mapM compileFun prog
   in pretty 0 $ ppr [C.cunit|
 $esc:("#include <stdio.h>")
+
+$edecls:(tupleDefinitions endstate)
 
 $edecls:(map funcToDef funs)
 
@@ -40,29 +88,16 @@ int main() {
 |]
   where funcToDef func = C.FuncDef func $ fromLoc $ locOf func
 
-typeToCType :: Type -> C.Type
-typeToCType (Int _) = [C.cty|int|]
-typeToCType (Bool _) = [C.cty|int|]
-typeToCType (Char _) = [C.cty|char|]
-typeToCType (Real _) = [C.cty|double|]
-typeToCType (Tuple ts _) = [C.cty|struct { $sdecls:members }|]
-  where members = zipWith field ts [(0::Int)..]
-        field t i = [C.csdecl|$ty:(typeToCType t) $id:("elem_" ++ show i);|]
-typeToCType (Array t _ _) = [C.cty|$ty:(typeToCType t)*|]
-
-expCType :: Exp Identity -> C.Type
-expCType = typeToCType . expType
-
-valCType :: Value -> C.Type
-valCType = typeToCType . valueType
-
 compileFun :: FunDec Identity -> CompilerM C.Func
 compileFun (fname, rettype, args, body, _) = do
   body' <- compileBody body
-  return [C.cfun|$ty:(typeToCType rettype) $id:fname' ( $params:args' ) { $stm:body' }|]
-  where args' = map compileArg args
-        fname' = "l0_" ++ fname
-        compileArg (name, tp) = [C.cparam|$ty:(typeToCType tp) $id:name|]
+  args' <- mapM compileArg args
+  crettype <- typeToCType rettype
+  return [C.cfun|$ty:crettype $id:fname' ( $params:args' ) { $stm:body' }|]
+  where fname' = "l0_" ++ fname
+        compileArg (name, tp) = do
+          ctp <- typeToCType tp
+          return [C.cparam|$ty:ctp $id:name|]
 
 compileValue :: String -> Value -> CompilerM C.Stm
 compileValue place (IntVal k _) = return [C.cstm|$id:place = $int:k;|]
@@ -76,7 +111,8 @@ compileValue place (TupVal vs _) = do
            var <- new $ "TupVal_" ++ show i
            v' <- compileValue var v
            let field = "elem_" ++ show i
-           return [C.cstm|{$ty:(valCType v) $id:var; $stm:v'; $id:place.$id:field = $id:var;}|]
+           vt <- valCType v
+           return [C.cstm|{$ty:vt $id:var; $stm:v'; $id:place.$id:field = $id:var;}|]
   return [C.cstm|{$stms:vs'}|]
 
 compileExp :: String -> Exp Identity -> CompilerM C.Stm
@@ -87,16 +123,19 @@ compileExp place (TupLit es _ _) = do
            var <- new $ "TupVal_" ++ show i
            e' <- compileExp var e
            let field = "elem_" ++ show i
-           return [C.cstm|{$ty:(expCType e) $id:var; $stm:e'; $id:place.$id:field = $id:var;}|]
+           et <- expCType e
+           return [C.cstm|{$ty:et $id:var; $stm:e'; $id:place.$id:field = $id:var;}|]
   return [C.cstm|{$stms:es'}|]
 compileExp place (BinOp bop e1 e2 _ _) = do
   e1_dest <- new "binop_x1"
   e2_dest <- new "binop_x2"
   e1' <- compileExp e1_dest e1
   e2' <- compileExp e2_dest e2
+  e1t <- expCType e1
+  e2t <- expCType e2
   return [C.cstm|{
-               $ty:(expCType e1) $id:e1_dest;
-               $ty:(expCType e2) $id:e2_dest;
+               $ty:e1t $id:e1_dest;
+               $ty:e2t $id:e2_dest;
                $stm:e1'
                $stm:e2'
                $stm:(compileBinOp e1_dest e2_dest)
@@ -147,7 +186,8 @@ compileExp place (Apply fname args _ _) = do
   (vars, args') <- liftM unzip . forM args $ \arg -> do
                      var <- new "apply_arg"
                      arg' <- compileExp var arg
-                     return (([C.cdecl|$ty:(expCType arg) $id:var;|],
+                     argtype <- expCType arg
+                     return (([C.cdecl|$ty:argtype $id:var;|],
                               [C.cexp|$id:var|]),
                              arg')
   let (vardecls, varexps) = unzip vars
@@ -160,11 +200,12 @@ compileExp place (Apply fname args _ _) = do
 compileExp place (LetPat pat e body _) = do
   val <- new "let_value"
   e' <- compileExp val e
-  let (assignments,decls) = compilePattern pat [C.cexp|$id:val|]
+  (assignments,decls) <- compilePattern pat [C.cexp|$id:val|]
   body' <- compileExp place body
+  et <- expCType e
   return [C.cstm|{
                $decls:decls
-               $ty:(expCType e) $id:val;
+               $ty:et $id:val;
                $stm:e'
                $stm:assignments
                $stm:body'
@@ -186,10 +227,11 @@ compileExp place e =
              (Tuple _ _) -> [C.cstm|;|]
              (Array _ _ _) -> [C.cstm|id:place = 0;|]
 
-compilePattern :: TupIdent Identity -> C.Exp -> (C.Stm, [C.InitGroup])
-compilePattern pat vexp = runWriter $ compilePattern' pat vexp
-  where compilePattern' (Id name (Identity t) _) vexp' = do 
-          tell [[C.cdecl|$ty:(typeToCType t) $id:name;|]]
+compilePattern :: TupIdent Identity -> C.Exp -> CompilerM (C.Stm, [C.InitGroup])
+compilePattern pat vexp = runWriterT $ compilePattern' pat vexp
+  where compilePattern' (Id name (Identity t) _) vexp' = do
+          ct <- lift $ typeToCType t
+          tell [[C.cdecl|$ty:ct $id:name;|]]
           return [C.cstm|$id:name = $exp:vexp';|]
         compilePattern' (TupId pats _) vexp' = do
           pats' <- zipWithM prep pats [(0::Int)..]
@@ -201,9 +243,9 @@ compileBody :: Exp Identity -> CompilerM C.Stm
 compileBody body = do
   retval <- new "retval"
   body' <- compileExp retval body
+  bodytype <- expCType body
   return [C.cstm|{
                $ty:bodytype $id:retval;
                $stm:body'
                return $id:retval;
              }|]
-  where bodytype = expCType body
