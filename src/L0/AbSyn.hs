@@ -163,6 +163,14 @@ valueType (CharVal _ pos) = Char pos
 valueType (TupVal vs pos) = Tuple (map valueType vs) pos
 valueType (ArrayVal _ t pos) = Array t Nothing pos
 
+instance HasPosition Value where
+  posOf (IntVal _ pos) = pos
+  posOf (RealVal _ pos) = pos
+  posOf (CharVal _ pos) = pos
+  posOf (LogVal _ pos) = pos
+  posOf (TupVal _ pos) = pos
+  posOf (ArrayVal _ _ pos) = pos
+
 -- | Return a list of the dimensions of an array (the shape, in other
 -- terms).  For non-arrays, this is the empty list.  A two-dimensional
 -- array with five rows and three columns would return the list @[5,
@@ -241,6 +249,14 @@ data Exp tf = Literal Value
              -- 3rd arg is a list of the types of the input arrays *)
              -- 4th arg is the type of the result array            *)
 
+            | Zip [Exp tf] (tf [Type]) Pos
+            -- Normal zip supporting variable number of arguments.
+            -- 2nd arg is the types of the input arrays.
+
+            | Unzip (Exp tf) (tf [Type]) Pos
+            -- Unzip that can unzip tuples of arbitrary size.  2nd arg
+            -- is the element types of the resulting tuple.
+
             | Scan (Lambda tf) (Exp tf) (Exp tf) (tf Type) Pos
              -- scan(plus, 0, { 1, 2, 3 }) = { 0, 1, 3, 6 } *)
              -- 4th arg is the type of the input array      *)
@@ -275,13 +291,7 @@ data Exp tf = Literal Value
             | DoLoop String (Exp tf) (Exp tf) [String] Pos
 
 instance HasPosition (Exp tf) where
-  posOf (Literal val) = valuePos val
-    where valuePos (IntVal _ pos) = pos
-          valuePos (RealVal _ pos) = pos
-          valuePos (CharVal _ pos) = pos
-          valuePos (LogVal _ pos) = pos
-          valuePos (TupVal _ pos) = pos
-          valuePos (ArrayVal _ _ pos) = pos
+  posOf (Literal val) = posOf val
   posOf (TupLit _ _ pos) = pos
   posOf (ArrayLit _ _ pos) = pos
   posOf (BinOp _ _ _ _ pos) = pos
@@ -303,6 +313,8 @@ instance HasPosition (Exp tf) where
   posOf (Map _ _ _ _ pos) = pos
   posOf (Reduce _ _ _ _ pos) = pos
   posOf (ZipWith _ _ _ _ pos) = pos
+  posOf (Zip _ _ pos) = pos
+  posOf (Unzip _ _ pos) = pos
   posOf (Scan _ _ _ _ pos) = pos
   posOf (Filter _ _ _ pos) = pos
   posOf (Mapall _ _ _ _ pos) = pos
@@ -338,6 +350,8 @@ expTypeInfo (Transpose _ _ t _) = t
 expTypeInfo (Map _ _ _ t _) = t
 expTypeInfo (Reduce fun _ _ _ _) = lambdaType fun
 expTypeInfo (ZipWith _ _ _ t _) = t
+expTypeInfo (Zip _ ts pos) = (\ts' -> Array (Tuple ts' pos) Nothing pos) <$> ts
+expTypeInfo (Unzip _ ts pos) = (`Tuple` pos) <$> ts
 expTypeInfo (Scan fun _ _ _ _) = array 1 <$> lambdaType fun
 expTypeInfo (Filter _ _ t _) = t
 expTypeInfo (Mapall _ _ _ t _) = t
@@ -511,6 +525,11 @@ ppExp _ (ZipWith _ [] _ _ pos) =
 ppExp d (ZipWith fun (e:es) _ _ _) =
   " zipWith ( " ++ ppLambda fun ++ ", " ++ ppExp d e ++
   concatMap (\x -> ", " ++ ppExp d x) es ++ " ) "
+
+ppExp d (Zip es _ _) =
+  " zip ( " ++ intercalate "," (map (ppExp d) es) ++ " ) "
+
+ppExp d (Unzip e _ _) = " zip ( " ++ ppExp d e ++ " ) "
 
 ppExp d (Reduce fun el lst _ _) =
   " reduce ( " ++ ppLambda fun ++ ", " ++ ppExp d el ++ ", " ++ ppExp d lst ++ " ) "

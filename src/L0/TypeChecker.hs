@@ -429,6 +429,24 @@ checkExp (ZipWith fun arrexps intypes outtype pos) = do
   outtype' <- outtype `unifyWithKnown` Array funret Nothing pos
   return (outtype',
           ZipWith fun' arrexps' (boxType intypes') (boxType outtype') pos)
+checkExp (Zip arrexps intypes pos) = do
+  (arrts, arrexps') <- unzip <$> mapM checkSubExp arrexps
+  intypes' <- mapM elemType =<<
+              case unboxType intypes of
+                Nothing -> return arrts
+                Just intypes' -> zipWithM unifyKnownTypes intypes' arrts
+  let outtype = Array (Tuple intypes' pos) Nothing pos
+  return (outtype, Zip arrexps' (boxType intypes') pos)
+checkExp (Unzip e outtypes pos) = do
+  (et, e') <- checkSubExp e
+  case et of
+    Array (Tuple ts _) _ _ -> do
+      let ts' = map (\t -> Array t Nothing pos) ts
+      outtypes' <- case unboxType outtypes of
+                     Nothing -> return ts'
+                     Just outtypes' -> zipWithM unifyKnownTypes outtypes' ts'
+      return (Tuple outtypes' pos, Unzip e' (boxType outtypes') pos)
+    _ -> bad $ TypeError pos $ "Argument to unzip is not an array of tuples, but " ++ ppType et ++ "."
 checkExp (Scan fun startexp arrexp intype pos) = do
   (startt, startexp') <- checkSubExp startexp
   (arrt, arrexp') <- checkSubExp arrexp

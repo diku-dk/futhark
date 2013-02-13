@@ -104,6 +104,8 @@ data Token = IF { tokPos :: Pos }
            | READ { tokPos :: Pos }
            | WRITE { tokPos :: Pos }
            | ZIPWITH { tokPos :: Pos }
+           | ZIP { tokPos :: Pos }
+           | UNZIP { tokPos :: Pos }
            | SCAN { tokPos :: Pos }
            | SPLIT { tokPos :: Pos }
            | CONCAT { tokPos :: Pos }
@@ -156,6 +158,8 @@ keyword pos s =
     "read"         -> READ      pos
     "write"        -> WRITE     pos
     "zipWith"      -> ZIPWITH   pos
+    "zip"          -> ZIP       pos
+    "unzip"        -> UNZIP     pos
     "scan"         -> SCAN      pos
     "split"        -> SPLIT     pos
     "concat"       -> CONCAT    pos

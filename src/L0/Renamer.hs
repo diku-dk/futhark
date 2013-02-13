@@ -131,6 +131,12 @@ renameExp (ZipWith fun es t1 t2 pos) = do
   fun' <- renameLambda fun
   es' <- mapM renameExp es
   return $ ZipWith fun' es' t1 t2 pos
+renameExp (Zip es t pos) = do
+  es' <- mapM renameExp es
+  return $ Zip es' t pos
+renameExp (Unzip e ts pos) = do
+  e' <- renameExp e
+  return $ Unzip e' ts pos
 renameExp (Scan fun e1 e2 t pos) = do
   fun' <- renameLambda fun
   e1' <- renameExp e1

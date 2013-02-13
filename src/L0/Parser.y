@@ -84,6 +84,8 @@ import L0.Lexer
       read            { READ $$ }
       write           { WRITE $$ }
       zipWith         { ZIPWITH $$ }
+      zip             { ZIP $$ }
+      unzip           { UNZIP $$ }
       scan            { SCAN $$ }
       split           { SPLIT $$ }
       concat          { CONCAT $$ }
@@ -233,6 +235,12 @@ Exp  : intlit         { let INTLIT num pos = $1 in Literal $ IntVal num pos }
 
      | zipWith '(' FunAbstr ',' Exps ')'
                       { ZipWith $3 $5 Nothing Nothing $1 }
+
+     | zip '(' Exps2 ')'
+                      { Zip $3 Nothing $1 }
+
+     | unzip '(' Exp ')'
+                      { Unzip $3 Nothing $1 }
 
      | filter '(' FunAbstr ',' Exp ')'
                       { Filter $3 $5 Nothing $1 }

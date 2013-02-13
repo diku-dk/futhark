@@ -82,7 +82,11 @@ lookupFun fname = do fun <- asks $ M.lookup fname . envFtable
 
 arrToList :: Monad m => Value -> L0M m [Value]
 arrToList (ArrayVal l _ _) = return l
-arrToList _ = bad $ TypeError (0,0) "arrToList"
+arrToList v = bad $ TypeError (posOf v) "arrToList"
+
+tupToList :: Monad m => Value -> L0M m [Value]
+tupToList (TupVal l _) = return l
+tupToList v = bad $ TypeError (posOf v) "tupToList"
 
 runProgIO :: Prog Identity -> IO (Either InterpreterError Value)
 runProgIO = runProg putStr (hFlush stdout >> getLine)
@@ -285,7 +289,20 @@ evalExp (ZipWith fun arrexps _ (Identity outtype) pos) = do
                        ls' <- zipit tls
                        return $ el : ls'
                      Nothing -> return []
-
+evalExp (Zip arrexps (Identity outtype) pos) = do
+  arrs <- mapM (arrToList <=< evalExp) arrexps
+  ArrayVal <$> zipit arrs <*> pure (Tuple outtype pos) <*> pure pos
+  where split []     = Nothing
+        split (x:xs) = Just (x, xs)
+        zipit ls = case unzip <$> mapM split ls of
+                     Just (hds, tls) -> do
+                       let el = TupVal hds pos
+                       ls' <- zipit tls
+                       return $ el : ls'
+                     Nothing -> return []
+evalExp (Unzip e (Identity ts) pos) = do
+  arr <- mapM tupToList =<< arrToList =<< evalExp e
+  return $ TupVal (zipWith (\vs t -> ArrayVal vs t pos) (transpose arr) ts) pos
 -- scan * e {x1,..,xn} = {e*x1, e*x1*x2, ..., e*x1*x2*...*xn}
 -- we can change this definition of scan if deemed not suitable
 evalExp (Scan fun startexp arrexp _ pos) = do
