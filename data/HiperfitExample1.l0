@@ -13,7 +13,7 @@ fun (int*int*[real]*[real]*[real]*[[real]]*[[real]]*[[real]]*[[real]]) initGrid
     let logAlpha = log(alpha) in
     let myTimeline = map(fn real (int i) => t * toReal(i) / (toReal(numT) - 1.0), iota(numT)) in
     let (stdX, stdY) = (20.0 * alpha * s0 * sqrt(t),
-                        20.0 * nu    * s0 * sqrt(t)) in
+                        10.0 * nu         * sqrt(t)) in
     let (dx, dy) = (stdX / toReal(numX), stdY / toReal(numY)) in
     let (myXindex, myYindex) = (trunc(s0 / dx), numY / 2) in
     let myX = map(fn real (int i) => toReal(i) * dx - toReal(myXindex) * dx + s0, iota(numX)) in
@@ -160,7 +160,7 @@ fun real value(real s0, real strike, real t, real alpha, real nu, real beta) =
     let (myDx, myDxx) = initOperator(myX) in
     let (myDy, myDyy) = initOperator(myY) in
     let myResult = setPayoff(strike, myX, myY) in
-    let indices = map (fn int (int i) => numT-2-i,  iota(numT-1)) in
+    let indices = map(fn int (int i) => numT-2-i,  iota(numT-1)) in
     let (myResult, myMuX, myVarX, myMuY, myVarY) =
         for i < numT - 1 do
             let i = numT-2-i in
@@ -168,14 +168,14 @@ fun real value(real s0, real strike, real t, real alpha, real nu, real beta) =
                 updateParams(myX, myY, myTimeline, i, alpha, beta, nu) in
             let myResult = rollback(myX, myY, myTimeline, myResult,
                                     myMuX, myDx, myDxx, myVarX,
-                                    myMuY, myDy, myDyy, myVarY, i)
-            in (myResult, myMuX, myVarX, myMuY, myVarY)
+                                    myMuY, myDy, myDyy, myVarY, i) in
+            (myResult, myMuX, myVarX, myMuY, myVarY)
         merge (myResult, myMuX, myVarX, myMuY, myVarY) in
     myResult[myXindex,myYindex]
 
 fun [real] main () =
     let OUTER_LOOP_COUNT = 2 in
-    let (s0, strike, t, alpha, nu, beta) = (0.03, 0.03, 5.0, 0.2, 0.6, 0.6) in
+    let (s0, strike, t, alpha, nu, beta) = (0.03, 0.03, 5.0, 0.2, 0.6, 0.5) in
     let strikes = map(fn real (int i) => 0.001*toReal(i), iota(OUTER_LOOP_COUNT)) in
     let res = map(fn real (real x) => value(s0, x, t, alpha, nu, beta), strikes) in
     res
