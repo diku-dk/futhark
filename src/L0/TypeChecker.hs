@@ -433,11 +433,11 @@ checkExp (ZipWith fun arrexps intypes outtype pos) = do
           ZipWith fun' arrexps' (boxType intypes') (boxType outtype') pos)
 checkExp (Zip arrexps intypes pos) = do
   (arrts, arrexps') <- unzip <$> mapM checkSubExp arrexps
-  intypes' <- mapM elemType =<<
-              case unboxType intypes of
+  intypes' <- case unboxType intypes of
                 Nothing -> return arrts
                 Just intypes' -> zipWithM unifyKnownTypes intypes' arrts
-  let outtype = Array (Tuple intypes' pos) Nothing pos
+  inelemts <- mapM elemType intypes'
+  let outtype = Array (Tuple inelemts pos) Nothing pos
   return (outtype, Zip arrexps' (boxType intypes') pos)
 checkExp (Unzip e outtypes pos) = do
   (et, e') <- checkSubExp e
