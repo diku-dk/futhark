@@ -220,7 +220,9 @@ require :: HasPosition v => [Type] -> (Type, v) -> TypeM (Type, v)
 require [] (_,e) = bad $ TypeError (posOf e) "Expression cannot have any type (probably a bug in the type checker)."
 require ts (et,e)
   | et `elem` ts = return (et,e)
-  | otherwise = bad $ TypeError (posOf e) $ "Expression type must be one of " ++ intercalate ", " (map ppType ts) ++ "."
+  | otherwise =
+    bad $ TypeError (posOf e) $ "Expression type must be one of " ++
+          intercalate ", " (map ppType ts) ++ ", but is " ++ ppType et ++ "."
 
 elemType :: Type -> TypeM Type
 elemType (Array t _ _) = return t
