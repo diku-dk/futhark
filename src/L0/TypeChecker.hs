@@ -377,8 +377,8 @@ checkExp (Iota e pos) = do
 checkExp (Size e pos) = do
   (et, e') <- checkSubExp e
   case et of
-    Array _ _ _ -> return (Int pos, Size e' pos)
-    _           -> bad $ TypeError pos "Argument to size must be array."
+    Array {} -> return (Int pos, Size e' pos)
+    _        -> bad $ TypeError pos "Argument to size must be array."
 checkExp (Replicate countexp valexp outtype pos) = do
   (_, countexp') <- require [Int pos] =<< checkSubExp countexp
   (valtype, valexp') <- checkSubExp valexp

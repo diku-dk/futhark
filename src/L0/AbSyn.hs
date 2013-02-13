@@ -116,7 +116,7 @@ baseType t = t
 -- | A type is a basic type if it is not an array and any component
 -- types are basic types.
 basicType :: Type -> Bool
-basicType (Array _ _ _) = False
+basicType (Array {}) = False
 basicType (Tuple ts _) = all basicType ts
 basicType _ = True
 
