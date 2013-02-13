@@ -26,22 +26,26 @@ fun ([[real]]*[[real]]) initOperator([real] x) =
     let n = size(x) in
     let dxu = x[1] - x[0] in
     let dxl = 0.0 in
+    let Dxlow = {{0.0, ~1.0 / dxu, 1.0 / dxu}} in
+    let Dxxlow = {{0.0, 0.0, 0.0}} in
     let Dxmid = map(fn [real] (int i) => let dxl = x[i] - x[i-1] in
                                          let dxu = x[i+1] - x[i] in
                                          {~dxu/dxl/(dxl+dxu),
                                          (dxu/dxl - dxl/dxu)/(dxl+dxu),
                                          dxl/dxu/(dxl+dxu)},
                    map (op + (1), iota(n-2))) in
-    let dxl = x[n-2] - x[n-3] in
-    let dxu = x[n-1] - x[n-2] in
     let Dxxmid = map(fn [real] (int i) => let dxl = x[i] - x[i-1] in
                                           let dxu = x[i+1] - x[i] in
                                           {2.0/dxl/(dxl+dxu),
                                           ~2.0*(1.0/dxl + 1.0/dxu)/(dxl+dxu),
                                           2.0/dxu/(dxl+dxu)},
                     map (op + (1), iota(n-2))) in
-    let Dx = concat(concat({{0.0, ~1.0 / dxu, 1.0 / dxu}}, Dxmid), {{~1.0 / dxl, 1.0 / dxl, 0.0 }}) in
-    let Dxx = concat(concat({{0.0, 0.0, 0.0}}, Dxxmid), {{0.0, 0.0, 0.0 }}) in
+    let dxl = x[n-1] - x[n-2] in
+    let dxu = 0.0 in
+    let Dxhigh = {{~1.0 / dxl, 1.0 / dxl, 0.0 }} in
+    let Dxxhigh = {{0.0, 0.0, 0.0 }} in
+    let Dx = concat(concat(Dxlow, Dxmid), Dxhigh) in
+    let Dxx = concat(concat(Dxxlow, Dxxmid), Dxxhigh) in
     (Dx, Dxx)
 
 fun real max(real x, real y) = if y < x then x else y
