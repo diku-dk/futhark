@@ -215,8 +215,8 @@ evalExp (Index name idxs _ _ pos) = do
   idxs' <- mapM evalExp idxs
   foldM index v idxs'
   where index (ArrayVal vs _ _) (IntVal i _)
-          | i < length vs = return $ vs !! i
-          | otherwise     = bad $ IndexOutOfBounds pos (length vs) i
+          | i >= 0 && i < length vs = return $ vs !! i
+          | otherwise               = bad $ IndexOutOfBounds pos (length vs) i
         index _ _ = bad $ TypeError pos "evalExp Index"
 evalExp (Iota e pos) = do
   v <- evalExp e
