@@ -38,6 +38,18 @@ fun [[real]] setPayoff(real strike, [real] myX, [real] myY) =
     map(fn [real] (int i) => replicate(size(myY), max(myX[i]-strike,0.0)),
         iota(size(myX)))
 
+// Returns new myMuX, myVarX, myMuY, myVarY.
+fun ([[real]] * [[real]] * [[real]] * [[real]]) updateParams
+    ([real] myX, [real] myY, [real] myTimeline, int g, real alpha, real beta, real nu) =
+    unzip (map(fn ([real]*[real]*[real]*[real]) (real xi) =>
+           unzip (map (fn (real*real*real*real) (real yj) =>
+                  (0.0,
+                   exp(2.0*(beta*log(xi) + yj - 0.5*nu*nu*myTimeline[g])),
+                   0.0,
+                   nu * nu), myY)), myX))
+
+
+
 fun real value(real s0, real strike, real t, real alpha, real nu, real beta) =
     let (numX, numY, numT) = (256, 32, 64) in
     let (myXindex, myYindex, myX, myY, myTimeline, myMuX, myVarX, myMuY, myVarY) =
@@ -45,7 +57,12 @@ fun real value(real s0, real strike, real t, real alpha, real nu, real beta) =
     let (myDx, myDxx) = initOperator(myX) in
     let (myDy, myDyy) = initOperator(myY) in
     let myResult = setPayoff(strike, myX, myY) in
-    // Complex stuff missing!
+    let indices = map (fn int (int i) => numT-2-i,  iota(numT-1)) in
+//    let (myResult, myMuX, myVarX, myMuY, myVarY) =
+//        for j < numT - 1 do
+//          let i = numT-2-j in
+//          let my
+//        merge (myResult, myMuX, myVarX, myMuY, myVarY) in
     myResult[myXindex,myYindex]
 
 fun [real] main () =
