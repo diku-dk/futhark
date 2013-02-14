@@ -14,9 +14,10 @@ module L0.AbSyn
   , peelArray
   , baseType
   , basicType
-  , array
+  , arrayType
   , Value(..)
   , valueType
+  , arrayVal
   , ppValue
   , Exp(..)
   , expTypeInfo
@@ -39,6 +40,7 @@ module L0.AbSyn
 
 import Control.Applicative
 import Control.Monad.Identity
+import Data.Array
 import Data.List
 
 -- | position: (line, column)
@@ -122,9 +124,9 @@ basicType _ = True
 
 -- | @array n t@ is the type of @n@-dimensional arrays having @t@ as
 -- the base type.
-array :: Int -> Type -> Type
-array 0 t = t
-array n t = array (n-1) $ Array t Nothing (typePos t)
+arrayType :: Int -> Type -> Type
+arrayType 0 t = t
+arrayType n t = arrayType (n-1) $ Array t Nothing (typePos t)
 
 -- | Every possible value in L0.  Values are fully evaluated and their
 -- type is always unambiguous.
@@ -133,8 +135,9 @@ data Value = IntVal Int Pos
            | LogVal Bool Pos
            | CharVal Char Pos
            | TupVal [Value] Pos
-           | ArrayVal [Value] Type Pos
-             -- ^ The type is the element type, not the complete array type.
+           | ArrayVal (Array Int Value) Type Pos
+             -- ^ The type is the element type, not the complete array
+             -- type.  It is assumed that the array is 0-indexed.
 
 instance Eq Value where
   IntVal x _ == IntVal y _ = x == y
@@ -176,9 +179,14 @@ instance HasPosition Value where
 -- array with five rows and three columns would return the list @[5,
 -- 3]@.
 arrayShape :: Value -> [Int]
-arrayShape (ArrayVal [] _ _) = [0]
-arrayShape (ArrayVal (e:els) _ _) = length (e:els) : arrayShape e
+arrayShape (ArrayVal arr _ _) =
+  if size == 0 then [0] else size : arrayShape (arr ! 0)
+  where size = uncurry (-) $ bounds arr
 arrayShape _ = []
+
+-- | Construct an array value containing the given elements.
+arrayVal :: [Value] -> Type -> Pos -> Value
+arrayVal vs = ArrayVal $ listArray (0, length vs-1) vs
 
 -- | L0 Expression Language: literals + vars + int binops + array
 -- constructors + array combinators (SOAC) + if + function calls +
@@ -352,7 +360,7 @@ expTypeInfo (Reduce fun _ _ _ _) = lambdaType fun
 expTypeInfo (ZipWith _ _ _ t _) = t
 expTypeInfo (Zip _ ts pos) = (\ts' -> Array (Tuple ts' pos) Nothing pos) <$> ts
 expTypeInfo (Unzip _ ts pos) = (`Tuple` pos) <$> ts
-expTypeInfo (Scan fun _ _ _ _) = array 1 <$> lambdaType fun
+expTypeInfo (Scan fun _ _ _ _) = arrayType 1 <$> lambdaType fun
 expTypeInfo (Filter _ _ t _) = t
 expTypeInfo (Mapall _ _ _ t _) = t
 expTypeInfo (Redomap _ _ _ _ _ t _) = t
@@ -449,9 +457,9 @@ ppValue (IntVal n _)      = show n
 ppValue (RealVal n _)     = show n
 ppValue (LogVal b _)      = show b
 ppValue (CharVal c _)     = show c
-ppValue (ArrayVal vs _ _)
-  | Just (c:cs) <- mapM char vs = show $ c:cs
-  | otherwise = " { " ++ intercalate ", " (map ppValue vs) ++ " } "
+ppValue (ArrayVal arr _ _)
+  | Just (c:cs) <- mapM char (elems arr) = show $ c:cs
+  | otherwise = " { " ++ intercalate ", " (map ppValue $ elems arr) ++ " } "
     where char (CharVal c _) = Just c
           char _             = Nothing
 ppValue (TupVal vs _)   =

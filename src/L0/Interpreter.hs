@@ -10,6 +10,7 @@ import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.Trans.Either
 
+import Data.Array
 import Data.Bits
 import Data.List
 import qualified Data.Map as M
@@ -81,7 +82,7 @@ lookupFun fname = do fun <- asks $ M.lookup fname . envFtable
                                  Nothing   -> bad $ TypeError (0,0) "lookupFun"
 
 arrToList :: Monad m => Value -> L0M m [Value]
-arrToList (ArrayVal l _ _) = return l
+arrToList (ArrayVal l _ _) = return $ elems l
 arrToList v = bad $ TypeError (posOf v) "arrToList"
 
 tupToList :: Monad m => Value -> L0M m [Value]
@@ -130,7 +131,7 @@ evalExp (Literal val) = return val
 evalExp (TupLit es _ pos) =
   TupVal <$> mapM evalExp es <*> pure pos
 evalExp (ArrayLit es (Identity t) pos) =
-  ArrayVal <$> mapM evalExp es <*> pure t <*> pure pos
+  arrayVal <$> mapM evalExp es <*> pure t <*> pure pos
 evalExp (BinOp Plus e1 e2 (Identity (Int _)) pos) = evalIntBinOp (+) e1 e2 pos
 evalExp (BinOp Plus e1 e2 (Identity (Real _)) pos) = evalRealBinOp (+) e1 e2 pos
 evalExp (BinOp Minus e1 e2 (Identity (Int _)) pos) = evalIntBinOp (-) e1 e2 pos
@@ -203,39 +204,41 @@ evalExp (LetWith name e idxs ve body pos) = do
   v' <- change v idxs' vev
   binding [(name, v')] $ evalExp body
   where change _ [] to = return to
-        change (ArrayVal vs t _) (IntVal i _:rest) to = 
-          case splitAt i vs of
-            (_, []) -> bad $ IndexOutOfBounds pos (length vs) i
-            (bef, x:aft) -> do
-              x' <- change x rest to
-              return $ ArrayVal (bef++x':aft) t pos
-        change _g _ _ = bad $ TypeError pos "evalExp Let Id"
+        change (ArrayVal arr t _) (IntVal i _:rest) to
+          | i >= 0 && i <= upper = do
+            let x = arr ! i
+            x' <- change x rest to
+            return $ ArrayVal (arr // [(i, x')]) t pos
+          | otherwise = bad $ IndexOutOfBounds pos (upper+1) i
+          where upper = snd $ bounds arr
+        change _ _ _ = bad $ TypeError pos "evalExp Let Id"
 evalExp (Index name idxs _ _ pos) = do
   v <- lookupVar name
   idxs' <- mapM evalExp idxs
-  foldM index v idxs'
-  where index (ArrayVal vs _ _) (IntVal i _)
-          | i >= 0 && i < length vs = return $ vs !! i
-          | otherwise               = bad $ IndexOutOfBounds pos (length vs) i
-        index _ _ = bad $ TypeError pos "evalExp Index"
+  foldM idx v idxs'
+  where idx (ArrayVal arr _ _) (IntVal i _)
+          | i >= 0 && i <= upper = return $ arr ! i
+          | otherwise             = bad $ IndexOutOfBounds pos (upper+1) i
+          where upper = snd $ bounds arr
+        idx _ _ = bad $ TypeError pos "evalExp Index"
 evalExp (Iota e pos) = do
   v <- evalExp e
   case v of
     IntVal x _
-      | x >= 0    -> return $ ArrayVal (map (`IntVal` pos) [0..x-1]) (Int pos) pos
+      | x >= 0    -> return $ arrayVal (map (`IntVal` pos) [0..x-1]) (Int pos) pos
       | otherwise -> bad $ NegativeIota pos x
     _ -> bad $ TypeError pos "evalExp Iota"
 evalExp (Size e pos) = do
   v <- evalExp e
   case v of
-    ArrayVal l _ _ -> return $ IntVal (length l) pos
+    ArrayVal arr _ _ -> return $ IntVal (snd $ bounds arr) pos
     _ -> bad $ TypeError pos "evalExp Size"
 evalExp (Replicate e1 e2 (Identity et) pos) = do
   v1 <- evalExp e1
   v2 <- evalExp e2
   case v1 of
     IntVal x _
-      | x >= 0    -> return $ ArrayVal (replicate x v2) et pos
+      | x >= 0    -> return $ ArrayVal (listArray (0,x-1) $ repeat v2) et pos
       | otherwise -> bad $ NegativeReplicate pos x
     _   -> bad $ TypeError pos "evalExp Replicate"
 evalExp (Reshape shapeexp arrexp _ (Identity outtype) pos) = do
@@ -243,13 +246,13 @@ evalExp (Reshape shapeexp arrexp _ (Identity outtype) pos) = do
   arr <- evalExp arrexp
   let reshape (Array t _ _) (n:rest) vs
         | length vs `mod` n == 0 =
-          ArrayVal <$> mapM (reshape t rest) (chunk (length vs `div` n) vs)
+          arrayVal <$> (mapM (reshape t rest) (chunk (length vs `div` n) vs))
                    <*> pure t <*> pure pos
         | otherwise = bad $ InvalidArrayShape pos (arrayShape arr) shape
       reshape _ [] [v] = return v
       reshape _ _ _ = bad $ TypeError pos "evalExp Reshape reshape"
   reshape outtype shape $ flatten arr
-  where flatten (ArrayVal vs _ _) = concatMap flatten vs
+  where flatten (ArrayVal arr _ _) = concatMap flatten $ elems arr
         flatten t = [t]
         chunk _ [] = []
         chunk i l = let (a,b) = splitAt i l
@@ -259,28 +262,26 @@ evalExp (Reshape shapeexp arrexp _ (Identity outtype) pos) = do
 evalExp (Transpose arrexp _ _ pos) = do
   v <- evalExp arrexp
   case v of
-    ArrayVal els (Array et _ _) _ -> do
-      let arr el = ArrayVal el et pos
-      els' <- map arr <$> transpose <$> mapM elems els
-      return $ ArrayVal els' (Array et Nothing pos) pos
+    ArrayVal inarr (Array et _ _) _ -> do
+      let arr el = arrayVal el et pos
+      els' <- map arr <$> transpose <$> mapM arrToList (elems inarr)
+      return $ arrayVal els' (Array et Nothing pos) pos
     _ -> bad $ TypeError pos "evalExp Transpose"
-  where elems (ArrayVal els _ _) = return els
-        elems _ = bad $ TypeError pos "evalExp Transpose"
 evalExp (Map fun e _ (Identity outtype) pos) = do
-  elems <- arrToList =<< evalExp e
+  vs <- arrToList =<< evalExp e
   case outtype of
     (Array t _ _) -> do
-      elems' <- mapM (applyLambda fun . (:[])) elems
-      return $ ArrayVal elems' t pos
+      vs' <- mapM (applyLambda fun . (:[])) vs
+      return $ arrayVal vs' t pos
     _ -> bad $ TypeError pos "evalExp Map"
 evalExp (Reduce fun accexp arrexp _ _) = do
   startacc <- evalExp accexp
-  elems <- arrToList =<< evalExp arrexp
+  vs <- arrToList =<< evalExp arrexp
   let foldfun acc x = applyLambda fun [acc, x]
-  foldM foldfun startacc elems
+  foldM foldfun startacc vs
 evalExp (ZipWith fun arrexps _ (Identity outtype) pos) = do
   arrs <- mapM (arrToList <=< evalExp) arrexps
-  ArrayVal <$> zipit arrs <*> pure outtype <*> pure pos
+  arrayVal <$> zipit arrs <*> pure outtype <*> pure pos
   where split []     = Nothing
         split (x:xs) = Just (x, xs)
         zipit ls = case unzip <$> mapM split ls of
@@ -291,7 +292,7 @@ evalExp (ZipWith fun arrexps _ (Identity outtype) pos) = do
                      Nothing -> return []
 evalExp (Zip arrexps (Identity outtype) pos) = do
   arrs <- mapM (arrToList <=< evalExp) arrexps
-  ArrayVal <$> zipit arrs <*> pure (Tuple outtype pos) <*> pure pos
+  arrayVal <$> zipit arrs <*> pure (Tuple outtype pos) <*> pure pos
   where split []     = Nothing
         split (x:xs) = Just (x, xs)
         zipit ls = case unzip <$> mapM split ls of
@@ -302,51 +303,51 @@ evalExp (Zip arrexps (Identity outtype) pos) = do
                      Nothing -> return []
 evalExp (Unzip e (Identity ts) pos) = do
   arr <- mapM tupToList =<< arrToList =<< evalExp e
-  return $ TupVal (zipWith (\vs t -> ArrayVal vs t pos) (transpose arr) ts) pos
+  return $ TupVal (zipWith (\vs t -> arrayVal vs t pos) (transpose arr) ts) pos
 -- scan * e {x1,..,xn} = {e*x1, e*x1*x2, ..., e*x1*x2*...*xn}
 -- we can change this definition of scan if deemed not suitable
 evalExp (Scan fun startexp arrexp _ pos) = do
   startval <- evalExp startexp
   vals <- arrToList =<< evalExp arrexp
   (acc, vals') <- foldM scanfun (startval, []) vals
-  return $ ArrayVal (reverse vals') (valueType acc) pos
+  return $ arrayVal (reverse vals') (valueType acc) pos
     where scanfun (acc, l) x = do
             acc' <- applyLambda fun [acc, x]
             return (acc', acc' : l)
 evalExp (Filter fun arrexp (Identity outtype) pos) = do
-  elems <- filterM filt =<< arrToList =<< evalExp arrexp
-  return $ ArrayVal elems outtype pos
+  vs <- filterM filt =<< arrToList =<< evalExp arrexp
+  return $ arrayVal vs outtype pos
   where filt x = do res <- applyLambda fun [x]
                     case res of (LogVal True _) -> return True
                                 _               -> return False
 evalExp (Mapall fun arrexp _ (Identity outtype) pos) =
   mapall outtype =<< evalExp arrexp
-    where mapall t@(Array et _ _) (ArrayVal els _ _) = do
-            els' <- mapM (mapall et) els
-            return $ ArrayVal els' t pos
+    where mapall t@(Array et _ _) (ArrayVal arr _ _) = do
+            els' <- mapM (mapall et) $ elems arr
+            return $ arrayVal els' t pos
           mapall _ v = applyLambda fun [v]
 evalExp (Redomap redfun mapfun accexp arrexp _ _ _) = do
   startacc <- evalExp accexp
-  elems <- arrToList =<< evalExp arrexp
-  elems' <- mapM (applyLambda mapfun . (:[])) elems
+  vs <- arrToList =<< evalExp arrexp
+  vs' <- mapM (applyLambda mapfun . (:[])) vs
   let foldfun acc x = applyLambda redfun [acc, x]
-  foldM foldfun startacc elems'
+  foldM foldfun startacc vs'
 evalExp (Split splitexp arrexp (Identity intype) pos) = do
   split <- evalExp splitexp
-  elems <- arrToList =<< evalExp arrexp
+  vs <- arrToList =<< evalExp arrexp
   case split of
     IntVal i _
-      | i < length elems ->
-        let (bef,aft) = splitAt i elems
-        in return $ ArrayVal [ArrayVal bef intype pos,
-                              ArrayVal aft intype pos] outtype pos
-      | otherwise        -> bad $ IndexOutOfBounds pos (length elems) i
+      | i < length vs ->
+        let (bef,aft) = splitAt i vs
+        in return $ arrayVal [arrayVal bef intype pos, arrayVal aft intype pos]
+                             outtype pos
+      | otherwise        -> bad $ IndexOutOfBounds pos (length vs) i
     _ -> bad $ TypeError pos "evalExp Split"
   where outtype = Array intype Nothing pos
 evalExp (Concat arr1exp arr2exp (Identity intype) pos) = do
   elems1 <- arrToList =<< evalExp arr1exp
   elems2 <- arrToList =<< evalExp arr2exp
-  return $ ArrayVal (elems1 ++ elems2) intype pos
+  return $ arrayVal (elems1 ++ elems2) intype pos
 evalExp (Read t pos) = do
   s <- join $ asks envReadOp
   case check $ parsefun s of
@@ -367,8 +368,8 @@ evalExp (Write e _ _) = do
   join $ asks envWriteOp <*> pure (write v)
   return v
   where write (CharVal c _) = [c]
-        write (ArrayVal vs _ _)
-          | Just s <- mapM char vs = s
+        write (ArrayVal arr _ _)
+          | Just s <- mapM char $ elems arr = s
           where char (CharVal c _) = Just c
                 char _             = Nothing
         write v = ppValue v
