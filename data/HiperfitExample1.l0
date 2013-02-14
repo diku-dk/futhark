@@ -154,7 +154,7 @@ fun [[real]] rollback
     myResult
 
 fun real value(real s0, real strike, real t, real alpha, real nu, real beta) =
-    let (numX, numY, numT) = (256, 32, 4) in
+    let (numX, numY, numT) = (256, 32, 64) in
     let (myXindex, myYindex, myX, myY, myTimeline, myMuX, myVarX, myMuY, myVarY) =
         initGrid(s0, alpha, nu, t, numX, numY, numT) in
     let (myDx, myDxx) = initOperator(myX) in
