@@ -88,15 +88,16 @@ fun [[real]] explicitX
      [[real]] myResult, [[real]] myMuX, [[real]] myDx, [[real]] myDxx, [[real]] myVarX) =
     map(fn [real] (int j) =>
         map(fn real (int i) =>
-            let kl = 1 * (if i = 0 then 1 else 0) in
-            let ku = 2 - 1*(if i=numX-1 then 1 else 0) in
+            let kl = if i = 0 then 1 else 0 in
+            let ku = 2 - if i=numX-1 then 1 else 0 in
             reduce(op +, dtInv*myResult[i,j],
                    map(fn real (int k) =>
                        let k = k + kl in
                        0.5 * (myMuX[i,j]*myDx[i,k]+0.5*myVarX[i,j]*myDxx[i,k])
-                           * myResult[i+k-1,j], iota(ku-kl+1))),
-                   iota(numX)),
-            iota(numY))
+                           * myResult[i+k-1,j],
+                       iota(ku-kl+1))),
+            iota(numX)),
+        iota(numY))
 
 fun [[real]] explicitY
     (int numX, int numY, real dtInv,
@@ -120,11 +121,10 @@ fun [[real]] rollback
      [[real]] myMuY, [[real]] myDy, [[real]] myDyy, [[real]] myVarY, int g) =
     let (numX, numY) = (size(myX), size(myY)) in
     let numZ = maxInt(numX, numY) in
-    let dtInv = 1.0/myTimeline[g+1]-myTimeline[g] in
+    let dtInv = 1.0/(myTimeline[g+1]-myTimeline[g]) in
     let u = explicitX(numX, numY, dtInv, myResult, myMuX, myDx, myDxx, myVarX) in
     let v = explicitY(numX, numY, 0.0, myResult, myMuY, myDy, myDyy, myVarY) in
     let u = zipWith(fn [real] ([real] us, [real] vs) =>
-                    let foo = (size(us), size(vs)) in
                     zipWith (op+, us, vs),
                     u, transpose(v)) in
     let u = map(fn [real] (([real] * int) t) =>
@@ -174,7 +174,7 @@ fun real value(real s0, real strike, real t, real alpha, real nu, real beta) =
     myResult[myXindex,myYindex]
 
 fun [real] main () =
-    let OUTER_LOOP_COUNT = 2 in
+    let OUTER_LOOP_COUNT = 8 in
     let (s0, strike, t, alpha, nu, beta) = (0.03, 0.03, 5.0, 0.2, 0.6, 0.5) in
     let strikes = map(fn real (int i) => 0.001*toReal(i), iota(OUTER_LOOP_COUNT)) in
     let res = map(fn real (real x) => value(s0, x, t, alpha, nu, beta), strikes) in
