@@ -130,12 +130,12 @@ arrayType n t = arrayType (n-1) $ Array t Nothing (typePos t)
 
 -- | Every possible value in L0.  Values are fully evaluated and their
 -- type is always unambiguous.
-data Value = IntVal Int Pos
-           | RealVal Double Pos
-           | LogVal Bool Pos
-           | CharVal Char Pos
-           | TupVal [Value] Pos
-           | ArrayVal (Array Int Value) Type Pos
+data Value = IntVal !Int Pos
+           | RealVal !Double Pos
+           | LogVal !Bool Pos
+           | CharVal !Char Pos
+           | TupVal ![Value] Pos
+           | ArrayVal !(Array Int Value) Type Pos
              -- ^ The type is the element type, not the complete array
              -- type.  It is assumed that the array is 0-indexed.
 
