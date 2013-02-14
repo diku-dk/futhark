@@ -8,6 +8,7 @@ import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
+import Data.Array
 import Data.List
 
 import qualified Data.Map as M
@@ -474,7 +475,7 @@ checkExp (Mapall fun arrexp intype outtype pos) = do
   (arrt, arrexp') <- checkSubExp arrexp
   intype' <- intype `unifyWithKnown` arrt
   (fun', funret) <- checkLambda fun [baseType intype']
-  outtype' <- outtype `unifyWithKnown` array (arrayDims intype') funret
+  outtype' <- outtype `unifyWithKnown` arrayType (arrayDims intype') funret
   return (outtype', Mapall fun' arrexp' (boxType intype') (boxType outtype') pos)
 checkExp (Redomap redfun mapfun accexp arrexp inarr outarr pos) = do
   (acct, accexp') <- checkSubExp accexp
@@ -519,15 +520,15 @@ checkLiteral (CharVal c pos) = return (Char pos, CharVal c pos)
 checkLiteral (TupVal vals pos) = do
   (ts, vals') <- unzip <$> mapM checkLiteral vals
   return (Tuple ts pos, TupVal vals' pos)
-checkLiteral (ArrayVal vals t pos) = do
-  (ts, vals') <- unzip <$> mapM checkLiteral vals
+checkLiteral (ArrayVal arr t pos) = do
+  (ts, vals') <- unzip <$> mapM checkLiteral (elems arr)
   -- Find the unified type of all subexpression types.
   vt <- case ts of
           [] -> bad $ TypeError pos "Empty array literal"
           v:vts' -> foldM unifyKnownTypes v vts'
   -- Unify that type with the one given for the array literal.
   t' <- t `unifyKnownTypes` Array vt Nothing pos
-  return (t', ArrayVal vals' t' pos)
+  return (t', ArrayVal (listArray (bounds arr) vals') t' pos)
 
 checkBinOp :: TypeBox tf => BinOp -> Exp tf -> Exp tf -> tf Type -> Pos
            -> TypeM (Type, Exp Identity)

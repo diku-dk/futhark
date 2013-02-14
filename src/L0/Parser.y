@@ -10,6 +10,7 @@ module L0.Parser( parseL0
   where
 
 import Control.Monad (foldM)
+import Data.Array
 
 import L0.AbSyn
 import L0.Lexer
@@ -168,7 +169,7 @@ Exp  : intlit         { let INTLIT num pos = $1 in Literal $ IntVal num pos }
      | reallit        { let REALLIT num pos = $1 in Literal $ RealVal num pos }
      | charlit        { let CHARLIT char pos = $1 in Literal $ CharVal char pos }
      | stringlit      { let STRINGLIT s pos = $1
-                        in Literal $ ArrayVal (map (`CharVal` pos) s) (Array (Char pos) Nothing pos) pos }
+                        in Literal $ ArrayVal (arrayFromList $ map (`CharVal` pos) s) (Array (Char pos) Nothing pos) pos }
      | true           { Literal $ LogVal True $1 }
      | false          { Literal $ LogVal False $1 }
      | id             { let ID name pos = $1 in Var name Nothing pos }
@@ -317,12 +318,12 @@ Value : IntValue { $1 }
 IntValue : intlit        { let INTLIT num pos = $1 in IntVal num pos }
 RealValue : reallit      { let REALLIT num pos = $1 in RealVal num pos }
 CharValue : charlit      { let CHARLIT char pos = $1 in CharVal char pos }
-StringValue : stringlit  { let STRINGLIT s pos = $1 in ArrayVal (map (`CharVal` pos) s) (Char pos) pos }
+StringValue : stringlit  { let STRINGLIT s pos = $1 in ArrayVal (arrayFromList $ map (`CharVal` pos) s) (Char pos) pos }
 LogValue : true          { LogVal True $1 }
         | false          { LogVal False $1 }
 ArrayValue :  '{' Values '}' { case combArrayTypes $ map valueType $2 of
                                  Nothing -> error "Invalid array value"
-                                 Just ts -> ArrayVal $2 ts $1 }
+                                 Just ts -> ArrayVal (arrayFromList $2) ts $1 }
 TupleValue : TupleVal        { let (vals, pos) = $1 in TupVal vals pos }
 
 Values : Value ',' Values { $1 : $3 }
@@ -339,6 +340,9 @@ combArrayTypes (v:vs) = foldM comb v vs
   where comb x y
           | x == y    = Just x
           | otherwise = Nothing
+
+arrayFromList :: [a] -> Array Int a
+arrayFromList l = listArray (0, length l-1) l
 
 parseError :: [Token] -> a
 parseError [] = error "Parse error: End of file"
