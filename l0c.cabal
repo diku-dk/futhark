@@ -16,10 +16,10 @@ Executable l0c
                  array >= 0.4,
                  containers >= 0.5,
                  mtl >= 2.1,
-                 either >= 3.0,
-                 language-c-quote >= 0.4,
-                 mainland-pretty >= 0.2.5,
-                 srcloc >= 0.3
+                 either >= 3.0
+--                 language-c-quote >= 0.4,
+--                 mainland-pretty >= 0.2.5,
+--                 srcloc >= 0.3
 
   Other-modules: L0.Parser,
                  L0.Lexer
