@@ -12,6 +12,7 @@ import L0.AbSyn
 %wrapper "posn"
 
 @charlit = ($printable#['\\]|\\($printable|[0-9]+))
+@stringcharlit = ($printable#["\\]|\\($printable|[0-9]+))
 
 tokens :-
 
@@ -46,7 +47,7 @@ tokens :-
     ([eE][\+\~]?[0-9]+)?     { \p -> flip REALLIT (toPos p) . readReal }
   [a-zA-Z] [a-zA-Z0-9_]* { keyword . toPos }
   "'" @charlit "'" { \p -> flip CHARLIT (toPos p) . read }
-  \" @charlit* \" { \p -> flip STRINGLIT (toPos p) . read }
+  \" @stringcharlit* \" { \p -> flip STRINGLIT (toPos p) . read }
 
 {
 data Token = IF { tokPos :: Pos }
