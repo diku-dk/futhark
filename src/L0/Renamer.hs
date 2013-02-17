@@ -6,6 +6,7 @@ import Control.Monad.State
 import Control.Monad.Reader
 
 import qualified Data.Map as M
+import Data.Loc
 
 import L0.AbSyn
 
@@ -177,8 +178,8 @@ renameExp (DoLoop loopvar e body mergevars pos) = do
     mergevars' <- mapM repl mergevars
     return $ DoLoop loopvar' e' body' mergevars' pos
 
-renameBinOpNoType :: (Exp tf -> Exp tf -> Pos -> Exp tf)
-                  -> Exp tf -> Exp tf -> Pos
+renameBinOpNoType :: (Exp tf -> Exp tf -> Loc -> Exp tf)
+                  -> Exp tf -> Exp tf -> Loc
                   -> RenameM (Exp tf)
 renameBinOpNoType op e1 e2 pos = do
   e1' <- renameExp e1

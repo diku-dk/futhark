@@ -2,7 +2,6 @@
 module Main (main) where
 
 import Control.Applicative
-import Control.Monad
 import Control.Monad.Identity (Identity)
 import System.Environment (getArgs)
 
@@ -85,7 +84,7 @@ compile file = do
 -}
 
 parse :: FilePath -> IO (Prog Maybe)
-parse = return . parseL0 <=< readFile
+parse file = either fail return . parseL0 file =<< readFile file
 
 {-
   fun createLexerStream ( is : BasicIO.instream ) =

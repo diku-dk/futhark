@@ -13,6 +13,7 @@ import Control.Monad.Trans.Either
 import Data.Array
 import Data.Bits
 import Data.List
+import Data.Loc
 import qualified Data.Map as M
 
 import System.IO (hFlush, stdout)
@@ -21,30 +22,30 @@ import L0.AbSyn
 import L0.Parser
 
 data InterpreterError = MissingMainFunction
-                      | IndexOutOfBounds Pos Int Int
+                      | IndexOutOfBounds Loc Int Int
                       -- ^ First @Int@ is array size, second is attempted index.
-                      | NegativeIota Pos Int
-                      | NegativeReplicate Pos Int
-                      | ReadError Pos Type String
-                      | InvalidArrayShape Pos [Int] [Int]
+                      | NegativeIota Loc Int
+                      | NegativeReplicate Loc Int
+                      | ReadError Loc Type String
+                      | InvalidArrayShape Loc [Int] [Int]
                       -- ^ First @Int@ is old shape, second is attempted new shape.
-                      | TypeError Pos String
+                      | TypeError Loc String
 
 instance Show InterpreterError where
   show MissingMainFunction =
     "No main function defined."
   show (IndexOutOfBounds pos arrsz i) =
-    "Array index " ++ show i ++ " out of bounds of array size " ++ show arrsz ++ " at " ++ posStr pos ++ "."
+    "Array index " ++ show i ++ " out of bounds of array size " ++ show arrsz ++ " at " ++ locStr pos ++ "."
   show (NegativeIota pos n) =
-    "Argument " ++ show n ++ " to iota at " ++ posStr pos ++ " is negative."
+    "Argument " ++ show n ++ " to iota at " ++ locStr pos ++ " is negative."
   show (NegativeReplicate pos n) =
-    "Argument " ++ show n ++ " to replicate at " ++ posStr pos ++ " is negative."
+    "Argument " ++ show n ++ " to replicate at " ++ locStr pos ++ " is negative."
   show (TypeError pos s) =
-    "Type error at " ++ posStr pos ++ " in " ++ s ++ " during interpretation.  This implies a bug in the type checker."
+    "Type error at " ++ locStr pos ++ " in " ++ s ++ " during interpretation.  This implies a bug in the type checker."
   show (ReadError pos t s) =
-    "Read error while trying to read " ++ ppType t ++ " at " ++ posStr pos ++ ".  Input line was: " ++ s
+    "Read error while trying to read " ++ ppType t ++ " at " ++ locStr pos ++ ".  Input line was: " ++ s
   show (InvalidArrayShape pos shape newshape) =
-    "Invalid array reshaping at " ++ posStr pos ++ ", from " ++ show shape ++ " to " ++ show newshape
+    "Invalid array reshaping at " ++ locStr pos ++ ", from " ++ show shape ++ " to " ++ show newshape
 
 
 data L0Env m = L0Env { envVtable  :: M.Map String Value
@@ -74,20 +75,20 @@ binding bnds = local (`bindVars` bnds)
 lookupVar :: Monad m => String -> L0M m Value
 lookupVar fname = do val <- asks $ M.lookup fname . envVtable
                      case val of Just val' -> return val'
-                                 Nothing   -> bad $ TypeError (0,0) "lookupVar"
+                                 Nothing   -> bad $ TypeError noLoc "lookupVar"
 
 lookupFun :: Monad m => String -> L0M m ([Value] -> L0M m Value)
 lookupFun fname = do fun <- asks $ M.lookup fname . envFtable
                      case fun of Just fun' -> return fun'
-                                 Nothing   -> bad $ TypeError (0,0) "lookupFun"
+                                 Nothing   -> bad $ TypeError noLoc "lookupFun"
 
 arrToList :: Monad m => Value -> L0M m [Value]
 arrToList (ArrayVal l _ _) = return $ elems l
-arrToList v = bad $ TypeError (posOf v) "arrToList"
+arrToList v = bad $ TypeError (locOf v) "arrToList"
 
 tupToList :: Monad m => Value -> L0M m [Value]
 tupToList (TupVal l _) = return l
-tupToList v = bad $ TypeError (posOf v) "tupToList"
+tupToList v = bad $ TypeError (locOf v) "tupToList"
 
 runProgIO :: Prog Identity -> IO (Either InterpreterError Value)
 runProgIO = runProg putStr (hFlush stdout >> getLine)
@@ -124,7 +125,7 @@ runProg wop rop prog = do
     builtin "exp" [RealVal x pos] = return $ RealVal (exp x) pos
     builtin "op not" [LogVal b pos] = return $ LogVal (not b) pos
     builtin "op ~" [RealVal b pos] = return $ RealVal (-b) pos
-    builtin fname _ = bad $ TypeError (0,0) $ "Builtin " ++ fname
+    builtin fname _ = bad $ TypeError noLoc $ "Builtin " ++ fname
 
 evalExp :: (Applicative m, Monad m) => Exp Identity -> L0M m Value
 evalExp (Literal val) = return val
@@ -350,9 +351,9 @@ evalExp (Concat arr1exp arr2exp (Identity intype) pos) = do
   return $ arrayVal (elems1 ++ elems2) intype pos
 evalExp (Read t pos) = do
   s <- join $ asks envReadOp
-  case check $ parsefun s of
-    Nothing -> bad $ ReadError pos t s
-    Just v -> return v
+  case liftM check $ parsefun "input" s of
+    Right (Just v) -> return v
+    _ -> bad $ ReadError pos t s
   where check v
           | valueType v == t = Just v
           | otherwise        = Nothing
@@ -388,7 +389,7 @@ evalExp (DoLoop loopvar boundexp body mergevars pos) = do
                             val -> return [val]
 
 evalIntBinOp :: (Applicative m, Monad m) =>
-                (Int -> Int -> Int) -> Exp Identity -> Exp Identity -> Pos -> L0M m Value
+                (Int -> Int -> Int) -> Exp Identity -> Exp Identity -> Loc -> L0M m Value
 evalIntBinOp op e1 e2 pos = do
   v1 <- evalExp e1
   v2 <- evalExp e2
@@ -397,7 +398,7 @@ evalIntBinOp op e1 e2 pos = do
     _                        -> bad $ TypeError pos "evalIntBinOp"
 
 evalRealBinOp :: (Applicative m, Monad m) =>
-                 (Double -> Double -> Double) -> Exp Identity -> Exp Identity -> Pos -> L0M m Value
+                 (Double -> Double -> Double) -> Exp Identity -> Exp Identity -> Loc -> L0M m Value
 evalRealBinOp op e1 e2 pos = do
   v1 <- evalExp e1
   v2 <- evalExp e2
@@ -406,7 +407,7 @@ evalRealBinOp op e1 e2 pos = do
     _                          -> bad $ TypeError pos $ "evalRealBinOp " ++ ppValue v1 ++ " " ++ ppValue v2
 
 evalBoolBinOp :: (Applicative m, Monad m) =>
-                 (Bool -> Bool -> Bool) -> Exp Identity -> Exp Identity -> Pos -> L0M m Value
+                 (Bool -> Bool -> Bool) -> Exp Identity -> Exp Identity -> Loc -> L0M m Value
 evalBoolBinOp op e1 e2 pos = do
   v1 <- evalExp e1
   v2 <- evalExp e2
