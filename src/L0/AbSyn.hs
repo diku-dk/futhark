@@ -2,12 +2,9 @@
 -- @Exp@, are parametrised by a functor for keeping type information.
 -- See "L0.TypeChecker" and the 'Exp' type for more information.
 module L0.AbSyn
-  ( Pos
-  , posStr
-  , HasPosition(..)
+  ( locStr
   , Type(..)
   , TypeBox(..)
-  , typePos
   , ppType
   , arrayDims
   , arrayShape
@@ -29,7 +26,6 @@ module L0.AbSyn
   , Lambda(..)
   , lambdaType
   , TupIdent(..)
-  , patPos
   , ppTupId
   , Binding
   , FunDec
@@ -42,26 +38,20 @@ import Control.Applicative
 import Control.Monad.Identity
 import Data.Array
 import Data.List
+import Data.Loc
 
--- | position: (line, column)
-type Pos = (Int,Int)
-
--- | Convert a 'Pos' into a human-readable position description.
-posStr :: Pos -> String
-posStr (0,0) = "<builtin>"
-posStr (line,col) = show line ++ ":" ++ show col
-
-class HasPosition t where
-  posOf :: t -> Pos
+locStr :: Loc -> String
+locStr NoLoc = "uknown location"
+locStr (Loc (Pos _ _ line col) _) = "position " ++ show line ++ ":" ++ show col
 
 -- | L0 Types: Int, Bool, Char, Tuple, multidim-regular Array
 --  TODO: please add float, double, long int, etc.
-data Type = Int Pos
-          | Bool Pos
-          | Char Pos
-          | Real Pos
-          | Tuple [Type] Pos
-          | Array Type (Maybe (Exp Maybe)) Pos -- ^ 1st arg: array's element type, 2nd arg: its length
+data Type = Int Loc
+          | Bool Loc
+          | Char Loc
+          | Real Loc
+          | Tuple [Type] Loc
+          | Array Type (Maybe (Exp Maybe)) Loc -- ^ 1st arg: array's element type, 2nd arg: its length
 
 instance Eq Type where
   Int _ == Int _ = True
@@ -72,14 +62,13 @@ instance Eq Type where
   Array t1 _ _ == Array t2 _ _ = t1 == t2
   _ == _ = False
 
--- | Return the position information associated with a type.
-typePos :: Type -> Pos
-typePos (Int pos) = pos
-typePos (Bool pos) = pos
-typePos (Char pos) = pos
-typePos (Real pos) = pos
-typePos (Tuple _ pos) = pos
-typePos (Array _ _ pos) = pos
+instance Located Type where
+  locOf (Int loc) = loc
+  locOf (Bool loc) = loc
+  locOf (Char loc) = loc
+  locOf (Real loc) = loc
+  locOf (Tuple _ loc) = loc
+  locOf (Array _ _ loc) = loc
 
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
@@ -126,16 +115,16 @@ basicType _ = True
 -- the base type.
 arrayType :: Int -> Type -> Type
 arrayType 0 t = t
-arrayType n t = arrayType (n-1) $ Array t Nothing (typePos t)
+arrayType n t = arrayType (n-1) $ Array t Nothing (locOf t)
 
 -- | Every possible value in L0.  Values are fully evaluated and their
 -- type is always unambiguous.
-data Value = IntVal !Int Pos
-           | RealVal !Double Pos
-           | LogVal !Bool Pos
-           | CharVal !Char Pos
-           | TupVal ![Value] Pos
-           | ArrayVal !(Array Int Value) Type Pos
+data Value = IntVal !Int Loc
+           | RealVal !Double Loc
+           | LogVal !Bool Loc
+           | CharVal !Char Loc
+           | TupVal ![Value] Loc
+           | ArrayVal !(Array Int Value) Type Loc
              -- ^ The type is the element type, not the complete array
              -- type.  It is assumed that the array is 0-indexed.
 
@@ -166,13 +155,13 @@ valueType (CharVal _ pos) = Char pos
 valueType (TupVal vs pos) = Tuple (map valueType vs) pos
 valueType (ArrayVal _ t pos) = Array t Nothing pos
 
-instance HasPosition Value where
-  posOf (IntVal _ pos) = pos
-  posOf (RealVal _ pos) = pos
-  posOf (CharVal _ pos) = pos
-  posOf (LogVal _ pos) = pos
-  posOf (TupVal _ pos) = pos
-  posOf (ArrayVal _ _ pos) = pos
+instance Located Value where
+  locOf (IntVal _ pos) = pos
+  locOf (RealVal _ pos) = pos
+  locOf (CharVal _ pos) = pos
+  locOf (LogVal _ pos) = pos
+  locOf (TupVal _ pos) = pos
+  locOf (ArrayVal _ _ pos) = pos
 
 -- | Return a list of the dimensions of an array (the shape, in other
 -- terms).  For non-arrays, this is the empty list.  A two-dimensional
@@ -185,7 +174,7 @@ arrayShape (ArrayVal arr _ _) =
 arrayShape _ = []
 
 -- | Construct an array value containing the given elements.
-arrayVal :: [Value] -> Type -> Pos -> Value
+arrayVal :: [Value] -> Type -> Loc -> Value
 arrayVal vs = ArrayVal $ listArray (0, length vs-1) vs
 
 -- | L0 Expression Language: literals + vars + int binops + array
@@ -202,136 +191,136 @@ arrayVal vs = ArrayVal $ listArray (0, length vs-1) vs
 -- 'Control.Monad.Identity.Identity'@, in which type information is
 -- always present.
 data Exp tf = Literal Value
-            | TupLit    [Exp tf] (tf Type) Pos
+            | TupLit    [Exp tf] (tf Type) Loc
             -- ^ Tuple literals, e.g., (1+3, (x, y+z)).  Second
             -- argument is the tuple's type.
-            | ArrayLit  [Exp tf] (tf Type) Pos
+            | ArrayLit  [Exp tf] (tf Type) Loc
             -- ^ Array literals, e.g., { {1+x, 3}, {2, 1+4} }.  Second
             -- arg is the element type of the array.
-            | BinOp BinOp (Exp tf) (Exp tf) (tf Type) Pos
+            | BinOp BinOp (Exp tf) (Exp tf) (tf Type) Loc
             -- Binary Ops for Booleans
-            | And    (Exp tf) (Exp tf) Pos
-            | Or     (Exp tf) (Exp tf) Pos
+            | And    (Exp tf) (Exp tf) Loc
+            | Or     (Exp tf) (Exp tf) Loc
             -- Unary Ops: Not for bools and Negate for ints
-            | Not    (Exp tf) Pos -- e.g., not True = False
-            | Negate (Exp tf) (tf Type) Pos -- e.g., ~(~1) = 1
-            | If     (Exp tf) (Exp tf) (Exp tf) (tf Type) Pos
-            | Var    String (tf Type) Pos
+            | Not    (Exp tf) Loc -- e.g., not True = False
+            | Negate (Exp tf) (tf Type) Loc -- e.g., ~(~1) = 1
+            | If     (Exp tf) (Exp tf) (Exp tf) (tf Type) Loc
+            | Var    String (tf Type) Loc
             -- Function Call and Let Construct
-            | Apply  String [Exp tf] (tf Type) Pos
-            | LetPat (TupIdent tf) (Exp tf) (Exp tf) Pos
-            | LetWith String (Exp tf) [Exp tf] (Exp tf) (Exp tf) Pos
+            | Apply  String [Exp tf] (tf Type) Loc
+            | LetPat (TupIdent tf) (Exp tf) (Exp tf) Loc
+            | LetWith String (Exp tf) [Exp tf] (Exp tf) (Exp tf) Loc
             -- Array Indexing and Array Constructors
-            | Index String [Exp tf] (tf Type) (tf Type) Pos
+            | Index String [Exp tf] (tf Type) (tf Type) Loc
              -- e.g., arr[3]; 3rd arg is the input-array element type
              -- 4th arg is the result type
-            | Iota (Exp tf) Pos -- e.g., iota(n) = {0,1,..,n-1}
-            | Size (Exp tf) Pos -- The number of elements in an array.
-            | Replicate (Exp tf) (Exp tf) (tf Type) Pos -- e.g., replicate(3,1) = {1, 1, 1}
+            | Iota (Exp tf) Loc -- e.g., iota(n) = {0,1,..,n-1}
+            | Size (Exp tf) Loc -- The number of elements in an array.
+            | Replicate (Exp tf) (Exp tf) (tf Type) Loc -- e.g., replicate(3,1) = {1, 1, 1}
                                                     -- Type is element type of output array
 
-            | Reshape [Exp tf] (Exp tf) (tf Type) (tf Type) Pos
+            | Reshape [Exp tf] (Exp tf) (tf Type) (tf Type) Loc
              -- 1st arg is the new shape, 2nd arg is the input array *)
              -- 3rd arg is the  input-array type *)
              -- 4th arg is the result-array type *)
 
-            | Transpose (Exp tf) (tf Type) (tf Type) Pos
-             -- 1st arg is the (input) to-be-transPosed array *)
+            | Transpose (Exp tf) (tf Type) (tf Type) Loc
+             -- 1st arg is the (input) to-be-transLoced array *)
              -- 2nd argument is the  input-array type *)
              -- 3rd argument is the result-array type *)
 
             -- Second-Order Array Combinators
             -- accept curried and anonymous
             -- functions as (first) params
-            | Map (Lambda tf) (Exp tf) (tf Type) (tf Type) Pos
+            | Map (Lambda tf) (Exp tf) (tf Type) (tf Type) Loc
              -- e.g., map(op +(1), {1,2,..,n}) = {2,3,..,n+1} *)
              -- 3st arg is the input-array  type *)
              -- 4th arg is the output-array type *)
 
-            | Reduce (Lambda tf) (Exp tf) (Exp tf) (tf Type) Pos
+            | Reduce (Lambda tf) (Exp tf) (Exp tf) (tf Type) Loc
              -- e.g., reduce(op +, 0, {1,2,..,n}) = (0+1+2+..+n) *)
              -- 4th arg is the input-array type                  *)
 
-            | ZipWith (Lambda tf) [Exp tf] (tf [Type]) (tf Type) Pos
+            | ZipWith (Lambda tf) [Exp tf] (tf [Type]) (tf Type) Loc
              -- zipWith(plus, {1,2,3}, {4,5,6}) == {5, 7, 9}       *)
              -- 3rd arg is a list of the types of the input arrays *)
              -- 4th arg is the type of the result array            *)
 
-            | Zip [Exp tf] (tf [Type]) Pos
+            | Zip [Exp tf] (tf [Type]) Loc
             -- Normal zip supporting variable number of arguments.
             -- 2nd arg is the types of the input arrays.
 
-            | Unzip (Exp tf) (tf [Type]) Pos
+            | Unzip (Exp tf) (tf [Type]) Loc
             -- Unzip that can unzip tuples of arbitrary size.  2nd arg
             -- is the element types of the resulting tuple.
 
-            | Scan (Lambda tf) (Exp tf) (Exp tf) (tf Type) Pos
+            | Scan (Lambda tf) (Exp tf) (Exp tf) (tf Type) Loc
              -- scan(plus, 0, { 1, 2, 3 }) = { 0, 1, 3, 6 } *)
              -- 4th arg is the type of the input array      *)
 
-            | Filter (Lambda tf) (Exp tf) (tf Type) Pos
+            | Filter (Lambda tf) (Exp tf) (tf Type) Loc
              -- 3rd arg is the type of the input (and result) array *)
 
-            | Mapall (Lambda tf) (Exp tf) (tf Type) (tf Type) Pos
+            | Mapall (Lambda tf) (Exp tf) (tf Type) (tf Type) Loc
              -- e.g., mapall(op ~, {{1,~2}, {~3,4}}) = {{~1,2}, {3,~4}}                      *)
              -- 3rd and 4th args are the types of the input and result arrays, respectively. *)
 
-            | Redomap (Lambda tf) (Lambda tf) (Exp tf) (Exp tf) (tf Type) (tf Type) Pos
+            | Redomap (Lambda tf) (Lambda tf) (Exp tf) (Exp tf) (tf Type) (tf Type) Loc
              -- redomap(g, f, n, a) = reduce(g, n, map(f, a))    *)
              -- 5th arg is the type of the input  array *)
              -- 6th arg is the type of the result array *)
 
-            | Split (Exp tf) (Exp tf) (tf Type) Pos
+            | Split (Exp tf) (Exp tf) (tf Type) Loc
              -- split(2, { 1, 2, 3, 4 }) = {{1},{2, 3, 4}} *)
              -- 3rd arg is the type of the input array *)
 
-            | Concat (Exp tf) (Exp tf) (tf Type) Pos
+            | Concat (Exp tf) (Exp tf) (tf Type) Loc
              -- concat ({1},{2, 3, 4}) = {1, 2, 3, 4} *)
              -- 3rd arg is the type of the input array*)
 
             -- IO
-            | Read Type Pos
+            | Read Type Loc
              -- e.g., read(int); 1st arg is a basic-type, i.e., of the to-be-read element *)
 
-            | Write (Exp tf) (tf Type) Pos
+            | Write (Exp tf) (tf Type) Loc
              -- e.g., write(map(f, replicate(3,1))) writes array {f(1),f(1),f(1)} *)
              -- 2nd arg is the type of the to-be-written expression *)
-            | DoLoop String (Exp tf) (Exp tf) [String] Pos
+            | DoLoop String (Exp tf) (Exp tf) [String] Loc
 
-instance HasPosition (Exp tf) where
-  posOf (Literal val) = posOf val
-  posOf (TupLit _ _ pos) = pos
-  posOf (ArrayLit _ _ pos) = pos
-  posOf (BinOp _ _ _ _ pos) = pos
-  posOf (And _ _ pos) = pos
-  posOf (Or _ _ pos) = pos
-  posOf (Not _ pos) = pos
-  posOf (Negate _ _ pos) = pos
-  posOf (If _ _ _ _ pos) = pos
-  posOf (Var _ _ pos) = pos
-  posOf (Apply _ _ _ pos) = pos
-  posOf (LetPat _ _ _ pos) = pos
-  posOf (LetWith _ _ _ _ _ pos) = pos
-  posOf (Index _ _ _ _ pos) = pos
-  posOf (Iota _ pos) = pos
-  posOf (Size _ pos) = pos
-  posOf (Replicate _ _ _ pos) = pos
-  posOf (Reshape _ _ _ _ pos) = pos
-  posOf (Transpose _ _ _ pos) = pos
-  posOf (Map _ _ _ _ pos) = pos
-  posOf (Reduce _ _ _ _ pos) = pos
-  posOf (ZipWith _ _ _ _ pos) = pos
-  posOf (Zip _ _ pos) = pos
-  posOf (Unzip _ _ pos) = pos
-  posOf (Scan _ _ _ _ pos) = pos
-  posOf (Filter _ _ _ pos) = pos
-  posOf (Mapall _ _ _ _ pos) = pos
-  posOf (Redomap _ _ _ _ _ _ pos) = pos
-  posOf (Split _ _ _ pos) = pos
-  posOf (Concat _ _ _ pos) = pos
-  posOf (Read _ pos) = pos
-  posOf (Write _ _ pos) = pos
-  posOf (DoLoop _ _ _ _ pos) = pos
+instance Located (Exp tf) where
+  locOf (Literal val) = locOf val
+  locOf (TupLit _ _ pos) = pos
+  locOf (ArrayLit _ _ pos) = pos
+  locOf (BinOp _ _ _ _ pos) = pos
+  locOf (And _ _ pos) = pos
+  locOf (Or _ _ pos) = pos
+  locOf (Not _ pos) = pos
+  locOf (Negate _ _ pos) = pos
+  locOf (If _ _ _ _ pos) = pos
+  locOf (Var _ _ pos) = pos
+  locOf (Apply _ _ _ pos) = pos
+  locOf (LetPat _ _ _ pos) = pos
+  locOf (LetWith _ _ _ _ _ pos) = pos
+  locOf (Index _ _ _ _ pos) = pos
+  locOf (Iota _ pos) = pos
+  locOf (Size _ pos) = pos
+  locOf (Replicate _ _ _ pos) = pos
+  locOf (Reshape _ _ _ _ pos) = pos
+  locOf (Transpose _ _ _ pos) = pos
+  locOf (Map _ _ _ _ pos) = pos
+  locOf (Reduce _ _ _ _ pos) = pos
+  locOf (ZipWith _ _ _ _ pos) = pos
+  locOf (Zip _ _ pos) = pos
+  locOf (Unzip _ _ pos) = pos
+  locOf (Scan _ _ _ _ pos) = pos
+  locOf (Filter _ _ _ pos) = pos
+  locOf (Mapall _ _ _ _ pos) = pos
+  locOf (Redomap _ _ _ _ _ _ pos) = pos
+  locOf (Split _ _ _ pos) = pos
+  locOf (Concat _ _ _ pos) = pos
+  locOf (Read _ pos) = pos
+  locOf (Write _ _ pos) = pos
+  locOf (DoLoop _ _ _ _ pos) = pos
 
 -- | Give the type of an expression.  This is dependent on type
 -- information being available, of course.
@@ -415,9 +404,9 @@ opStr Less = "<"
 opStr Leq = "<="
 
 -- | Anonymous Function
-data Lambda tf = AnonymFun [(String,Type)] (Exp tf) Type Pos
+data Lambda tf = AnonymFun [(String,Type)] (Exp tf) Type Loc
                     -- fn int (bool x, char z) => if(x) then ord(z) else ord(z)+1 *)
-               | CurryFun String [Exp tf] (tf [Type]) (tf Type) Pos
+               | CurryFun String [Exp tf] (tf [Type]) (tf Type) Loc
                     -- op +(4) *)
 
 -- | The return type of a lambda function.
@@ -426,17 +415,17 @@ lambdaType (AnonymFun _ _ t _) = boxType t
 lambdaType (CurryFun _ _ _ t _) = t
 
 -- | Tuple Identifier, i.e., pattern matching
-data TupIdent tf = TupId [TupIdent tf] Pos
-                 | Id String (tf Type) Pos
+data TupIdent tf = TupId [TupIdent tf] Loc
+                 | Id String (tf Type) Loc
 
-patPos :: TupIdent tf -> Pos
-patPos (TupId _ pos) = pos
-patPos (Id _ _ pos) = pos
+instance Located (TupIdent tf) where
+  locOf (TupId _ loc) = loc
+  locOf (Id _ _ loc) = loc
 
 -- | Function Declarations
 type Binding = (String,Type)
 
-type FunDec tf = (String,Type,[Binding],Exp tf,Pos)
+type FunDec tf = (String,Type,[Binding],Exp tf,Loc)
 
 type Prog tf = [FunDec tf]
 
@@ -446,10 +435,13 @@ type Prog tf = [FunDec tf]
 spaces :: Int -> String
 spaces n = replicate n ' '
 
-ppError :: Pos -> String -> a
-ppError (line,col) msg =
+ppError :: Loc -> String -> a
+ppError (Loc (Pos _ _ line col) _) msg =
   error $ "Prettyprinting error: " ++ msg ++
-          "\nAT position " ++ show line ++ ":" ++ show col
+          "\nAt position " ++ show line ++ ":" ++ show col
+ppError NoLoc msg =
+  error $ "Prettyprinting error: " ++ msg ++
+          "\nAt unknown location."
 
 -- | Pretty printing a value.
 ppValue :: Value -> String
