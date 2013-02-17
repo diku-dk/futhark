@@ -42,7 +42,11 @@ import Data.Loc
 
 locStr :: Loc -> String
 locStr NoLoc = "uknown location"
-locStr (Loc (Pos _ _ line col) _) = "position " ++ show line ++ ":" ++ show col
+locStr (Loc (Pos file _ line1 col1) (Pos _ _ line2 col2)) =
+  -- Assume that both positions are in the same file (what would the
+  -- alternative mean?)
+  file ++ ":" ++ show line1 ++ ":" ++ show col1
+       ++ "-" ++ show line2 ++ ":" ++ show col2
 
 -- | L0 Types: Int, Bool, Char, Tuple, multidim-regular Array
 --  TODO: please add float, double, long int, etc.
