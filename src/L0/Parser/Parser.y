@@ -238,13 +238,13 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal $ IntVal num pos 
                       { Scan $3 $5 $7 Nothing $1 }
 
      | zipWith '(' FunAbstr ',' Exps ')'
-                      { ZipWith $3 $5 Nothing Nothing $1 }
+                      { ZipWith $3 $5 Nothing $1 }
 
      | zip '(' Exps2 ')'
-                      { Zip $3 Nothing $1 }
+                      { Zip $3 $1 }
 
      | unzip '(' Exp ')'
-                      { Unzip $3 Nothing $1 }
+                      { Unzip $3 [] $1 }
 
      | filter '(' FunAbstr ',' Exp ')'
                       { Filter $3 $5 Nothing $1 }
@@ -300,14 +300,14 @@ TupIds : TupId ',' TupId   { [$1, $3] }
 TupId : id { let L pos (ID name) = $1 in Id name Nothing pos }
       | '(' TupIds ')' { TupId $2 $1 }
 
-FunAbstr : id { let L pos (ID name) = $1 in CurryFun name [] Nothing Nothing pos }
-         | Ops { let (name,pos) = $1 in CurryFun name [] Nothing Nothing pos }
-         | id '(' ')' { let L pos (ID name) = $1 in CurryFun name [] Nothing Nothing pos }
-         | Ops '(' ')' { let (name,pos) = $1 in CurryFun name [] Nothing Nothing pos }
+FunAbstr : id { let L pos (ID name) = $1 in CurryFun name [] Nothing pos }
+         | Ops { let (name,pos) = $1 in CurryFun name [] Nothing pos }
+         | id '(' ')' { let L pos (ID name) = $1 in CurryFun name [] Nothing pos }
+         | Ops '(' ')' { let (name,pos) = $1 in CurryFun name [] Nothing pos }
          | id '(' Exps ')'
-               { let L pos (ID name) = $1 in CurryFun name $3 Nothing Nothing pos }
+               { let L pos (ID name) = $1 in CurryFun name $3 Nothing pos }
          | Ops '(' Exps ')'
-               { let (name,pos) = $1 in CurryFun name $3 Nothing Nothing pos }
+               { let (name,pos) = $1 in CurryFun name $3 Nothing pos }
          | fn Type '(' TypeIds ')' '=>' Exp { AnonymFun $4 $7 $2 $1 }
 
 Value : IntValue { $1 }

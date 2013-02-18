@@ -2,7 +2,6 @@
 module Main (main) where
 
 import Control.Applicative
-import Control.Monad.Identity (Identity)
 import System.Environment (getArgs)
 
 import L0.AbSyn
@@ -48,7 +47,7 @@ main = do args <- getArgs
 prettyprint :: FilePath -> IO ()
 prettyprint file = putStrLn =<< prettyPrint <$> parse file
 
-typecheck :: (Prog Identity -> IO ()) -> FilePath -> IO ()
+typecheck :: (Prog Type -> IO ()) -> FilePath -> IO ()
 typecheck next file = do
   prog <- parse file
   case checkProg prog of
@@ -83,7 +82,7 @@ compile file = do
     Right prog' -> putStr $ compileProg $ renameProg prog'
 -}
 
-parse :: FilePath -> IO (Prog Maybe)
+parse :: FilePath -> IO (Prog (Maybe Type))
 parse file = either fail return . parseL0 file =<< readFile file
 
 {-

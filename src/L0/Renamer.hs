@@ -128,13 +128,13 @@ renameExp (Reduce fun e1 e2 t pos) = do
   e1' <- renameExp e1
   e2' <- renameExp e2
   return $ Reduce fun' e1' e2' t pos
-renameExp (ZipWith fun es t1 t2 pos) = do
+renameExp (ZipWith fun es t pos) = do
   fun' <- renameLambda fun
   es' <- mapM renameExp es
-  return $ ZipWith fun' es' t1 t2 pos
-renameExp (Zip es t pos) = do
+  return $ ZipWith fun' es' t pos
+renameExp (Zip es pos) = do
   es' <- mapM renameExp es
-  return $ Zip es' t pos
+  return $ Zip es' pos
 renameExp (Unzip e ts pos) = do
   e' <- renameExp e
   return $ Unzip e' ts pos
@@ -192,9 +192,9 @@ renameLambda (AnonymFun params body ret pos) =
     params' <- mapM renameBinding params
     body' <- renameExp body
     return (AnonymFun params' body' ret pos)
-renameLambda (CurryFun fname curryargexps curryargts rettype pos) = do
+renameLambda (CurryFun fname curryargexps rettype pos) = do
   curryargexps' <- mapM renameExp curryargexps
-  return (CurryFun fname curryargexps' curryargts rettype pos)
+  return (CurryFun fname curryargexps' rettype pos)
 
 renamePattern :: TupIdent tf -> RenameM (TupIdent tf)
 renamePattern (Id s t pos) = do
