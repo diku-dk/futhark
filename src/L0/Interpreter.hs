@@ -6,7 +6,6 @@ module L0.Interpreter
 where
 
 import Control.Applicative
-import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.Trans.Either
 
@@ -90,11 +89,11 @@ tupToList :: Monad m => Value -> L0M m [Value]
 tupToList (TupVal l _) = return l
 tupToList v = bad $ TypeError (locOf v) "tupToList"
 
-runProgIO :: Prog Identity -> IO (Either InterpreterError Value)
+runProgIO :: Prog Type -> IO (Either InterpreterError Value)
 runProgIO = runProg putStr (hFlush stdout >> getLine)
 
 runProg :: (Applicative m, Monad m) => (String -> m ()) -> m String
-        -> Prog Identity -> m (Either InterpreterError Value)
+        -> Prog Type -> m (Either InterpreterError Value)
 runProg wop rop prog = do
   let ftable = foldl expand builtins prog
       l0env = L0Env { envVtable = M.empty
@@ -127,22 +126,22 @@ runProg wop rop prog = do
     builtin "op ~" [RealVal b pos] = return $ RealVal (-b) pos
     builtin fname _ = bad $ TypeError noLoc $ "Builtin " ++ fname
 
-evalExp :: (Applicative m, Monad m) => Exp Identity -> L0M m Value
+evalExp :: (Applicative m, Monad m) => Exp Type -> L0M m Value
 evalExp (Literal val) = return val
 evalExp (TupLit es _ pos) =
   TupVal <$> mapM evalExp es <*> pure pos
-evalExp (ArrayLit es (Identity t) pos) =
+evalExp (ArrayLit es t pos) =
   arrayVal <$> mapM evalExp es <*> pure t <*> pure pos
-evalExp (BinOp Plus e1 e2 (Identity (Int _)) pos) = evalIntBinOp (+) e1 e2 pos
-evalExp (BinOp Plus e1 e2 (Identity (Real _)) pos) = evalRealBinOp (+) e1 e2 pos
-evalExp (BinOp Minus e1 e2 (Identity (Int _)) pos) = evalIntBinOp (-) e1 e2 pos
-evalExp (BinOp Minus e1 e2 (Identity (Real _)) pos) = evalRealBinOp (-) e1 e2 pos
-evalExp (BinOp Pow e1 e2 (Identity (Int _)) pos) = evalIntBinOp (^) e1 e2 pos
-evalExp (BinOp Pow e1 e2 (Identity (Real _)) pos) = evalRealBinOp (**) e1 e2 pos
-evalExp (BinOp Times e1 e2 (Identity (Int _)) pos) = evalIntBinOp (*) e1 e2 pos
-evalExp (BinOp Times e1 e2 (Identity (Real _)) pos) = evalRealBinOp (*) e1 e2 pos
-evalExp (BinOp Divide e1 e2 (Identity (Int _)) pos) = evalIntBinOp div e1 e2 pos
-evalExp (BinOp Divide e1 e2 (Identity (Real _)) pos) = evalRealBinOp (/) e1 e2 pos
+evalExp (BinOp Plus e1 e2 (Int _) pos) = evalIntBinOp (+) e1 e2 pos
+evalExp (BinOp Plus e1 e2 (Real _) pos) = evalRealBinOp (+) e1 e2 pos
+evalExp (BinOp Minus e1 e2 (Int _) pos) = evalIntBinOp (-) e1 e2 pos
+evalExp (BinOp Minus e1 e2 (Real _) pos) = evalRealBinOp (-) e1 e2 pos
+evalExp (BinOp Pow e1 e2 (Int _) pos) = evalIntBinOp (^) e1 e2 pos
+evalExp (BinOp Pow e1 e2 (Real _) pos) = evalRealBinOp (**) e1 e2 pos
+evalExp (BinOp Times e1 e2 (Int _) pos) = evalIntBinOp (*) e1 e2 pos
+evalExp (BinOp Times e1 e2 (Real _) pos) = evalRealBinOp (*) e1 e2 pos
+evalExp (BinOp Divide e1 e2 (Int _) pos) = evalIntBinOp div e1 e2 pos
+evalExp (BinOp Divide e1 e2 (Real _) pos) = evalRealBinOp (/) e1 e2 pos
 evalExp (BinOp ShiftR e1 e2 _ pos) = evalIntBinOp shiftR e1 e2 pos
 evalExp (BinOp ShiftL e1 e2 _ pos) = evalIntBinOp shiftL e1 e2 pos
 evalExp (BinOp Band e1 e2 _ pos) = evalIntBinOp (.&.) e1 e2 pos
@@ -234,7 +233,7 @@ evalExp (Size e pos) = do
   case v of
     ArrayVal arr _ _ -> return $ IntVal (snd $ bounds arr) pos
     _ -> bad $ TypeError pos "evalExp Size"
-evalExp (Replicate e1 e2 (Identity et) pos) = do
+evalExp (Replicate e1 e2 et pos) = do
   v1 <- evalExp e1
   v2 <- evalExp e2
   case v1 of
@@ -242,7 +241,7 @@ evalExp (Replicate e1 e2 (Identity et) pos) = do
       | x >= 0    -> return $ ArrayVal (listArray (0,x-1) $ repeat v2) et pos
       | otherwise -> bad $ NegativeReplicate pos x
     _   -> bad $ TypeError pos "evalExp Replicate"
-evalExp (Reshape shapeexp arrexp _ (Identity outtype) pos) = do
+evalExp (Reshape shapeexp arrexp _ outtype pos) = do
   shape <- mapM (asInt <=< evalExp) shapeexp
   arr <- evalExp arrexp
   let reshape (Array t _ _) (n:rest) vs
@@ -268,7 +267,7 @@ evalExp (Transpose arrexp _ _ pos) = do
       els' <- map arr <$> transpose <$> mapM arrToList (elems inarr)
       return $ arrayVal els' (Array et Nothing pos) pos
     _ -> bad $ TypeError pos "evalExp Transpose"
-evalExp (Map fun e _ (Identity outtype) pos) = do
+evalExp (Map fun e _ outtype pos) = do
   vs <- arrToList =<< evalExp e
   case outtype of
     (Array t _ _) -> do
@@ -280,7 +279,7 @@ evalExp (Reduce fun accexp arrexp _ _) = do
   vs <- arrToList =<< evalExp arrexp
   let foldfun acc x = applyLambda fun [acc, x]
   foldM foldfun startacc vs
-evalExp (ZipWith fun arrexps _ (Identity outtype) pos) = do
+evalExp (ZipWith fun arrexps outtype pos) = do
   arrs <- mapM (arrToList <=< evalExp) arrexps
   arrayVal <$> zipit arrs <*> pure outtype <*> pure pos
   where split []     = Nothing
@@ -291,9 +290,9 @@ evalExp (ZipWith fun arrexps _ (Identity outtype) pos) = do
                        ls' <- zipit tls
                        return $ el : ls'
                      Nothing -> return []
-evalExp (Zip arrexps (Identity outtype) pos) = do
+evalExp (Zip arrexps pos) = do
   arrs <- mapM (arrToList <=< evalExp) arrexps
-  arrayVal <$> zipit arrs <*> pure (Tuple outtype pos) <*> pure pos
+  arrayVal <$> zipit arrs <*> pure (Tuple (map expType arrexps) pos) <*> pure pos
   where split []     = Nothing
         split (x:xs) = Just (x, xs)
         zipit ls = case unzip <$> mapM split ls of
@@ -302,7 +301,7 @@ evalExp (Zip arrexps (Identity outtype) pos) = do
                        ls' <- zipit tls
                        return $ el : ls'
                      Nothing -> return []
-evalExp (Unzip e (Identity ts) pos) = do
+evalExp (Unzip e ts pos) = do
   arr <- mapM tupToList =<< arrToList =<< evalExp e
   return $ TupVal (zipWith (\vs t -> arrayVal vs t pos) (transpose arr) ts) pos
 -- scan * e {x1,..,xn} = {e*x1, e*x1*x2, ..., e*x1*x2*...*xn}
@@ -315,13 +314,13 @@ evalExp (Scan fun startexp arrexp _ pos) = do
     where scanfun (acc, l) x = do
             acc' <- applyLambda fun [acc, x]
             return (acc', acc' : l)
-evalExp (Filter fun arrexp (Identity outtype) pos) = do
+evalExp (Filter fun arrexp outtype pos) = do
   vs <- filterM filt =<< arrToList =<< evalExp arrexp
   return $ arrayVal vs outtype pos
   where filt x = do res <- applyLambda fun [x]
                     case res of (LogVal True _) -> return True
                                 _               -> return False
-evalExp (Mapall fun arrexp _ (Identity outtype) pos) =
+evalExp (Mapall fun arrexp _ outtype pos) =
   mapall outtype =<< evalExp arrexp
     where mapall t@(Array et _ _) (ArrayVal arr _ _) = do
             els' <- mapM (mapall et) $ elems arr
@@ -333,7 +332,7 @@ evalExp (Redomap redfun mapfun accexp arrexp _ _ _) = do
   vs' <- mapM (applyLambda mapfun . (:[])) vs
   let foldfun acc x = applyLambda redfun [acc, x]
   foldM foldfun startacc vs'
-evalExp (Split splitexp arrexp (Identity intype) pos) = do
+evalExp (Split splitexp arrexp intype pos) = do
   split <- evalExp splitexp
   vs <- arrToList =<< evalExp arrexp
   case split of
@@ -345,7 +344,7 @@ evalExp (Split splitexp arrexp (Identity intype) pos) = do
       | otherwise        -> bad $ IndexOutOfBounds pos (length vs) i
     _ -> bad $ TypeError pos "evalExp Split"
   where outtype = Array intype Nothing pos
-evalExp (Concat arr1exp arr2exp (Identity intype) pos) = do
+evalExp (Concat arr1exp arr2exp intype pos) = do
   elems1 <- arrToList =<< evalExp arr1exp
   elems2 <- arrToList =<< evalExp arr2exp
   return $ arrayVal (elems1 ++ elems2) intype pos
@@ -389,7 +388,7 @@ evalExp (DoLoop loopvar boundexp body mergevars pos) = do
                             val -> return [val]
 
 evalIntBinOp :: (Applicative m, Monad m) =>
-                (Int -> Int -> Int) -> Exp Identity -> Exp Identity -> Loc -> L0M m Value
+                (Int -> Int -> Int) -> Exp Type -> Exp Type -> Loc -> L0M m Value
 evalIntBinOp op e1 e2 pos = do
   v1 <- evalExp e1
   v2 <- evalExp e2
@@ -398,7 +397,7 @@ evalIntBinOp op e1 e2 pos = do
     _                        -> bad $ TypeError pos "evalIntBinOp"
 
 evalRealBinOp :: (Applicative m, Monad m) =>
-                 (Double -> Double -> Double) -> Exp Identity -> Exp Identity -> Loc -> L0M m Value
+                 (Double -> Double -> Double) -> Exp Type -> Exp Type -> Loc -> L0M m Value
 evalRealBinOp op e1 e2 pos = do
   v1 <- evalExp e1
   v2 <- evalExp e2
@@ -407,7 +406,7 @@ evalRealBinOp op e1 e2 pos = do
     _                          -> bad $ TypeError pos $ "evalRealBinOp " ++ ppValue v1 ++ " " ++ ppValue v2
 
 evalBoolBinOp :: (Applicative m, Monad m) =>
-                 (Bool -> Bool -> Bool) -> Exp Identity -> Exp Identity -> Loc -> L0M m Value
+                 (Bool -> Bool -> Bool) -> Exp Type -> Exp Type -> Loc -> L0M m Value
 evalBoolBinOp op e1 e2 pos = do
   v1 <- evalExp e1
   v2 <- evalExp e2
@@ -415,17 +414,17 @@ evalBoolBinOp op e1 e2 pos = do
     (LogVal x _, LogVal y _) -> return $ LogVal (op x y) pos
     _                        -> bad $ TypeError pos $ "evalBoolBinOp " ++ ppValue v1 ++ " " ++ ppValue v2
 
-evalPattern :: TupIdent Identity -> Value -> Maybe [(String, Value)]
+evalPattern :: TupIdent Type -> Value -> Maybe [(String, Value)]
 evalPattern (Id name _ _) v = Just [(name, v)]
 evalPattern (TupId pats _) (TupVal vs _)
   | length pats == length vs =
     concat <$> zipWithM evalPattern pats vs
 evalPattern _ _ = Nothing
 
-applyLambda :: (Applicative m, Monad m) => Lambda Identity -> [Value] -> L0M m Value
+applyLambda :: (Applicative m, Monad m) => Lambda Type -> [Value] -> L0M m Value
 applyLambda (AnonymFun params body _ _) args =
   binding (zip (map fst params) args) $ evalExp body
-applyLambda (CurryFun name curryargs _ _ _) args = do
+applyLambda (CurryFun name curryargs _ _) args = do
   curryargs' <- mapM evalExp curryargs
   fun <- lookupFun name
   fun $ curryargs' ++ args

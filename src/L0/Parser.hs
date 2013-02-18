@@ -16,7 +16,7 @@ import L0.AbSyn
 import L0.Parser.Parser
 import L0.Parser.Lexer
 
-parseL0 :: FilePath -> String -> Either String (Prog Maybe)
+parseL0 :: FilePath -> String -> Either String (Prog (Maybe Type))
 parseL0 file = prog <=< alexScanTokens file
 
 parseInt :: FilePath -> String -> Either String Value

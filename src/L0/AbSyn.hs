@@ -1,5 +1,6 @@
+{-# LANGUAGE DeriveDataTypeable, FlexibleInstances #-}
 -- | This Is an Ever-Changing AnSyn for L0.  Some types, such as
--- @Exp@, are parametrised by a functor for keeping type information.
+-- @Exp@, are parametrised by type representation.
 -- See "L0.TypeChecker" and the 'Exp' type for more information.
 module L0.AbSyn
   ( locStr
@@ -17,7 +18,6 @@ module L0.AbSyn
   , arrayVal
   , ppValue
   , Exp(..)
-  , expTypeInfo
   , expType
   , ppExp
   , BinOp(..)
@@ -34,15 +34,14 @@ module L0.AbSyn
   )
   where
 
-import Control.Applicative
-import Control.Monad.Identity
 import Data.Array
+import Data.Data
 import Data.List
 import Data.Loc
 
 locStr :: Loc -> String
 locStr NoLoc = "uknown location"
-locStr (Loc (Pos file _ line1 col1) (Pos _ _ line2 col2)) =
+locStr (Loc (Pos file line1 col1 _) (Pos _ line2 col2 _)) =
   -- Assume that both positions are in the same file (what would the
   -- alternative mean?)
   file ++ ":" ++ show line1 ++ ":" ++ show col1
@@ -55,7 +54,8 @@ data Type = Int Loc
           | Char Loc
           | Real Loc
           | Tuple [Type] Loc
-          | Array Type (Maybe (Exp Maybe)) Loc -- ^ 1st arg: array's element type, 2nd arg: its length
+          | Array Type (Maybe (Exp (Maybe Type))) Loc -- ^ 1st arg: array's element type, 2nd arg: its length
+            deriving (Typeable, Data)
 
 instance Eq Type where
   Int _ == Int _ = True
@@ -83,17 +83,17 @@ arrayDims _             = 0
 
 -- | A type box provides a way to box a type, and possibly retrieve
 -- one.
-class Functor tf => TypeBox tf where
-  unboxType :: tf t -> Maybe t
-  boxType :: t -> tf t
+class TypeBox ty where
+  unboxType :: ty -> Maybe Type
+  boxType :: Type -> ty
 
-instance TypeBox Maybe where
+instance TypeBox (Maybe Type) where
   unboxType = id
   boxType = Just
 
-instance TypeBox Identity where
-  unboxType = Just . runIdentity
-  boxType = Identity
+instance TypeBox Type where
+  unboxType = Just
+  boxType = id
 
 -- | @peelArray n t@ returns the type resulting from peeling the first
 -- @n@ array dimensions from @t@.  Returns @Nothing@ if @t@ has less
@@ -131,6 +131,7 @@ data Value = IntVal !Int Loc
            | ArrayVal !(Array Int Value) Type Loc
              -- ^ The type is the element type, not the complete array
              -- type.  It is assumed that the array is 0-indexed.
+             deriving (Typeable, Data)
 
 instance Eq Value where
   IntVal x _ == IntVal y _ = x == y
@@ -186,49 +187,47 @@ arrayVal vs = ArrayVal $ listArray (0, length vs-1) vs
 -- let + tuples (literals & identifiers) TODO: please add float,
 -- double, long int, etc.
 --
--- In a value of type @Exp tf@, all 'Type' values are kept as @tf
--- Type@ values.  That is, @tf@ is a functor that is applied to
--- 'Type'.  This allows us to encode whether or not the expression has
--- been type-checked in the Haskell type of the expression.
+-- In a value of type @Exp tt@, all 'Type' values are kept as @tt@
+-- values.  -- This allows us to encode whether or not the expression
+-- has been type-checked in the Haskell type of the expression.
 -- Specifically, the parser will produce expressions of type @Exp
--- 'Maybe'@, and the type checker will convert these to @Exp
--- 'Control.Monad.Identity.Identity'@, in which type information is
--- always present.
-data Exp tf = Literal Value
-            | TupLit    [Exp tf] (tf Type) Loc
+-- 'Maybe Type'@, and the type checker will convert these to @Exp
+-- 'Type'@, in which type information is always present.
+data Exp ty = Literal Value
+            | TupLit    [Exp ty] ty Loc
             -- ^ Tuple literals, e.g., (1+3, (x, y+z)).  Second
             -- argument is the tuple's type.
-            | ArrayLit  [Exp tf] (tf Type) Loc
+            | ArrayLit  [Exp ty] ty Loc
             -- ^ Array literals, e.g., { {1+x, 3}, {2, 1+4} }.  Second
             -- arg is the element type of the array.
-            | BinOp BinOp (Exp tf) (Exp tf) (tf Type) Loc
+            | BinOp BinOp (Exp ty) (Exp ty) ty Loc
             -- Binary Ops for Booleans
-            | And    (Exp tf) (Exp tf) Loc
-            | Or     (Exp tf) (Exp tf) Loc
+            | And    (Exp ty) (Exp ty) Loc
+            | Or     (Exp ty) (Exp ty) Loc
             -- Unary Ops: Not for bools and Negate for ints
-            | Not    (Exp tf) Loc -- e.g., not True = False
-            | Negate (Exp tf) (tf Type) Loc -- e.g., ~(~1) = 1
-            | If     (Exp tf) (Exp tf) (Exp tf) (tf Type) Loc
-            | Var    String (tf Type) Loc
+            | Not    (Exp ty) Loc -- e.g., not True = False
+            | Negate (Exp ty) ty Loc -- e.g., ~(~1) = 1
+            | If     (Exp ty) (Exp ty) (Exp ty) ty Loc
+            | Var    String ty Loc
             -- Function Call and Let Construct
-            | Apply  String [Exp tf] (tf Type) Loc
-            | LetPat (TupIdent tf) (Exp tf) (Exp tf) Loc
-            | LetWith String (Exp tf) [Exp tf] (Exp tf) (Exp tf) Loc
+            | Apply  String [Exp ty] ty Loc
+            | LetPat (TupIdent ty) (Exp ty) (Exp ty) Loc
+            | LetWith String (Exp ty) [Exp ty] (Exp ty) (Exp ty) Loc
             -- Array Indexing and Array Constructors
-            | Index String [Exp tf] (tf Type) (tf Type) Loc
+            | Index String [Exp ty] ty ty Loc
              -- e.g., arr[3]; 3rd arg is the input-array element type
              -- 4th arg is the result type
-            | Iota (Exp tf) Loc -- e.g., iota(n) = {0,1,..,n-1}
-            | Size (Exp tf) Loc -- The number of elements in an array.
-            | Replicate (Exp tf) (Exp tf) (tf Type) Loc -- e.g., replicate(3,1) = {1, 1, 1}
+            | Iota (Exp ty) Loc -- e.g., iota(n) = {0,1,..,n-1}
+            | Size (Exp ty) Loc -- The number of elements in an array.
+            | Replicate (Exp ty) (Exp ty) ty Loc -- e.g., replicate(3,1) = {1, 1, 1}
                                                     -- Type is element type of output array
 
-            | Reshape [Exp tf] (Exp tf) (tf Type) (tf Type) Loc
+            | Reshape [Exp ty] (Exp ty) ty ty Loc
              -- 1st arg is the new shape, 2nd arg is the input array *)
              -- 3rd arg is the  input-array type *)
              -- 4th arg is the result-array type *)
 
-            | Transpose (Exp tf) (tf Type) (tf Type) Loc
+            | Transpose (Exp ty) ty ty Loc
              -- 1st arg is the (input) to-be-transLoced array *)
              -- 2nd argument is the  input-array type *)
              -- 3rd argument is the result-array type *)
@@ -236,49 +235,46 @@ data Exp tf = Literal Value
             -- Second-Order Array Combinators
             -- accept curried and anonymous
             -- functions as (first) params
-            | Map (Lambda tf) (Exp tf) (tf Type) (tf Type) Loc
+            | Map (Lambda ty) (Exp ty) ty ty Loc
              -- e.g., map(op +(1), {1,2,..,n}) = {2,3,..,n+1} *)
              -- 3st arg is the input-array  type *)
              -- 4th arg is the output-array type *)
 
-            | Reduce (Lambda tf) (Exp tf) (Exp tf) (tf Type) Loc
+            | Reduce (Lambda ty) (Exp ty) (Exp ty) ty Loc
              -- e.g., reduce(op +, 0, {1,2,..,n}) = (0+1+2+..+n) *)
              -- 4th arg is the input-array type                  *)
 
-            | ZipWith (Lambda tf) [Exp tf] (tf [Type]) (tf Type) Loc
+            | ZipWith (Lambda ty) [Exp ty] ty Loc
              -- zipWith(plus, {1,2,3}, {4,5,6}) == {5, 7, 9}       *)
-             -- 3rd arg is a list of the types of the input arrays *)
-             -- 4th arg is the type of the result array            *)
+             -- 3rd arg is the type of the result array            *)
 
-            | Zip [Exp tf] (tf [Type]) Loc
+            | Zip [Exp ty] Loc
             -- Normal zip supporting variable number of arguments.
-            -- 2nd arg is the types of the input arrays.
 
-            | Unzip (Exp tf) (tf [Type]) Loc
-            -- Unzip that can unzip tuples of arbitrary size.  2nd arg
-            -- is the element types of the resulting tuple.
+            | Unzip (Exp ty) [ty] Loc
+            -- Unzip that can unzip tuples of arbitrary size.
 
-            | Scan (Lambda tf) (Exp tf) (Exp tf) (tf Type) Loc
+            | Scan (Lambda ty) (Exp ty) (Exp ty) ty Loc
              -- scan(plus, 0, { 1, 2, 3 }) = { 0, 1, 3, 6 } *)
              -- 4th arg is the type of the input array      *)
 
-            | Filter (Lambda tf) (Exp tf) (tf Type) Loc
+            | Filter (Lambda ty) (Exp ty) ty Loc
              -- 3rd arg is the type of the input (and result) array *)
 
-            | Mapall (Lambda tf) (Exp tf) (tf Type) (tf Type) Loc
+            | Mapall (Lambda ty) (Exp ty) ty ty Loc
              -- e.g., mapall(op ~, {{1,~2}, {~3,4}}) = {{~1,2}, {3,~4}}                      *)
              -- 3rd and 4th args are the types of the input and result arrays, respectively. *)
 
-            | Redomap (Lambda tf) (Lambda tf) (Exp tf) (Exp tf) (tf Type) (tf Type) Loc
+            | Redomap (Lambda ty) (Lambda ty) (Exp ty) (Exp ty) ty ty Loc
              -- redomap(g, f, n, a) = reduce(g, n, map(f, a))    *)
              -- 5th arg is the type of the input  array *)
              -- 6th arg is the type of the result array *)
 
-            | Split (Exp tf) (Exp tf) (tf Type) Loc
+            | Split (Exp ty) (Exp ty) ty Loc
              -- split(2, { 1, 2, 3, 4 }) = {{1},{2, 3, 4}} *)
              -- 3rd arg is the type of the input array *)
 
-            | Concat (Exp tf) (Exp tf) (tf Type) Loc
+            | Concat (Exp ty) (Exp ty) ty Loc
              -- concat ({1},{2, 3, 4}) = {1, 2, 3, 4} *)
              -- 3rd arg is the type of the input array*)
 
@@ -286,12 +282,13 @@ data Exp tf = Literal Value
             | Read Type Loc
              -- e.g., read(int); 1st arg is a basic-type, i.e., of the to-be-read element *)
 
-            | Write (Exp tf) (tf Type) Loc
+            | Write (Exp ty) ty Loc
              -- e.g., write(map(f, replicate(3,1))) writes array {f(1),f(1),f(1)} *)
              -- 2nd arg is the type of the to-be-written expression *)
-            | DoLoop String (Exp tf) (Exp tf) [String] Loc
+            | DoLoop String (Exp ty) (Exp ty) [String] Loc
+              deriving (Typeable, Data)
 
-instance Located (Exp tf) where
+instance Located (Exp ty) where
   locOf (Literal val) = locOf val
   locOf (TupLit _ _ pos) = pos
   locOf (ArrayLit _ _ pos) = pos
@@ -313,8 +310,8 @@ instance Located (Exp tf) where
   locOf (Transpose _ _ _ pos) = pos
   locOf (Map _ _ _ _ pos) = pos
   locOf (Reduce _ _ _ _ pos) = pos
-  locOf (ZipWith _ _ _ _ pos) = pos
-  locOf (Zip _ _ pos) = pos
+  locOf (ZipWith _ _ _ pos) = pos
+  locOf (Zip _ pos) = pos
   locOf (Unzip _ _ pos) = pos
   locOf (Scan _ _ _ _ pos) = pos
   locOf (Filter _ _ _ pos) = pos
@@ -326,46 +323,41 @@ instance Located (Exp tf) where
   locOf (Write _ _ pos) = pos
   locOf (DoLoop _ _ _ _ pos) = pos
 
--- | Give the type of an expression.  This is dependent on type
--- information being available, of course.
-expTypeInfo :: TypeBox tf => Exp tf -> tf Type
-expTypeInfo (Literal val) = boxType $ valueType val
-expTypeInfo (TupLit _ t _) = t
-expTypeInfo (ArrayLit _ t pos) = (\t' -> Array t' Nothing pos) <$> t
-expTypeInfo (BinOp _ _ _ t _) = t
-expTypeInfo (And _ _ pos) = boxType $ Bool pos
-expTypeInfo (Or _ _ pos) = boxType $ Bool pos
-expTypeInfo (Not _ pos) = boxType $ Bool pos
-expTypeInfo (Negate _ t _) = t
-expTypeInfo (If _ _ _ t _) = t
-expTypeInfo (Var _ t _) = t
-expTypeInfo (Apply _ _ t _) = t
-expTypeInfo (LetPat _ _ body _) = expTypeInfo body
-expTypeInfo (LetWith _ _ _ _ body _) = expTypeInfo body
-expTypeInfo (Index _ _ _ t _) = t
-expTypeInfo (Iota _ pos) = boxType $ Array (Int pos) Nothing pos
-expTypeInfo (Size _ pos) = boxType $ Int pos
-expTypeInfo (Replicate _ _ t _) = t
-expTypeInfo (Reshape _ _ _ t _) = t
-expTypeInfo (Transpose _ _ t _) = t
-expTypeInfo (Map _ _ _ t _) = t
-expTypeInfo (Reduce fun _ _ _ _) = lambdaType fun
-expTypeInfo (ZipWith _ _ _ t _) = t
-expTypeInfo (Zip _ ts pos) = (\ts' -> Array (Tuple ts' pos) Nothing pos) <$> ts
-expTypeInfo (Unzip _ ts pos) = (`Tuple` pos) <$> ts
-expTypeInfo (Scan fun _ _ _ _) = arrayType 1 <$> lambdaType fun
-expTypeInfo (Filter _ _ t _) = t
-expTypeInfo (Mapall _ _ _ t _) = t
-expTypeInfo (Redomap _ _ _ _ _ t _) = t
-expTypeInfo (Split _ _ t _) = t
-expTypeInfo (Concat _ _ t _) = t
-expTypeInfo (Read t _) = boxType t
-expTypeInfo (Write _ t _) = t
-expTypeInfo (DoLoop _ _ body _ _) = expTypeInfo body
-
 -- | Given an expression with known types, return its type.
-expType :: Exp Identity -> Type
-expType = runIdentity . expTypeInfo
+expType :: Exp Type -> Type
+expType (Literal val) = valueType val
+expType (TupLit _ t _) = t
+expType (ArrayLit _ t pos) = Array t Nothing pos
+expType (BinOp _ _ _ t _) = t
+expType (And _ _ pos) = Bool pos
+expType (Or _ _ pos) = Bool pos
+expType (Not _ pos) = Bool pos
+expType (Negate _ t _) = t
+expType (If _ _ _ t _) = t
+expType (Var _ t _) = t
+expType (Apply _ _ t _) = t
+expType (LetPat _ _ body _) = expType body
+expType (LetWith _ _ _ _ body _) = expType body
+expType (Index _ _ _ t _) = t
+expType (Iota _ pos) = Array (Int pos) Nothing pos
+expType (Size _ pos) = Int pos
+expType (Replicate _ _ t _) = t
+expType (Reshape _ _ _ t _) = t
+expType (Transpose _ _ t _) = t
+expType (Map _ _ _ t _) = t
+expType (Reduce fun _ _ _ _) = lambdaType fun
+expType (ZipWith _ _ t _) = t
+expType (Zip es pos) = Tuple (map expType es) pos
+expType (Unzip _ ts pos) = Tuple ts pos
+expType (Scan fun _ _ _ _) = arrayType 1 $ lambdaType fun
+expType (Filter _ _ t _) = t
+expType (Mapall _ _ _ t _) = t
+expType (Redomap _ _ _ _ _ t _) = t
+expType (Split _ _ t _) = t
+expType (Concat _ _ t _) = t
+expType (Read t _) = boxType t
+expType (Write _ t _) = t
+expType (DoLoop _ _ body _ _) = expType body
 
 -- | Eagerly evaluated binary operators.  In particular, the
 -- short-circuited operators && and || are not here, although an
@@ -386,7 +378,7 @@ data BinOp = Plus -- Binary Ops for Numbers
            | Equal
            | Less
            | Leq
-             deriving (Enum, Bounded)
+             deriving (Enum, Bounded, Typeable, Data)
 
 -- ^ Print the operator, without whitespace, that corresponds to this
 -- @BinOp@.
@@ -408,31 +400,32 @@ opStr Less = "<"
 opStr Leq = "<="
 
 -- | Anonymous Function
-data Lambda tf = AnonymFun [(String,Type)] (Exp tf) Type Loc
+data Lambda ty = AnonymFun [(String,Type)] (Exp ty) Type Loc
                     -- fn int (bool x, char z) => if(x) then ord(z) else ord(z)+1 *)
-               | CurryFun String [Exp tf] (tf [Type]) (tf Type) Loc
+               | CurryFun String [Exp ty] ty Loc
                     -- op +(4) *)
+                 deriving (Typeable, Data)
 
 -- | The return type of a lambda function.
-lambdaType :: TypeBox tf => Lambda tf -> tf Type
-lambdaType (AnonymFun _ _ t _) = boxType t
-lambdaType (CurryFun _ _ _ t _) = t
+lambdaType :: Lambda Type -> Type
+lambdaType (AnonymFun _ _ t _) = t
+lambdaType (CurryFun _ _ t _) = t
 
 -- | Tuple Identifier, i.e., pattern matching
-data TupIdent tf = TupId [TupIdent tf] Loc
-                 | Id String (tf Type) Loc
+data TupIdent ty = TupId [TupIdent ty] Loc
+                 | Id String ty Loc
+                   deriving (Typeable, Data)
 
-instance Located (TupIdent tf) where
+instance Located (TupIdent ty) where
   locOf (TupId _ loc) = loc
   locOf (Id _ _ loc) = loc
 
 -- | Function Declarations
 type Binding = (String,Type)
 
-type FunDec tf = (String,Type,[Binding],Exp tf,Loc)
+type FunDec ty = (String,Type,[Binding],Exp ty,Loc)
 
-type Prog tf = [FunDec tf]
-
+type Prog ty = [FunDec ty]
 
 -- Pretty-Printing Functionality
 
@@ -440,12 +433,9 @@ spaces :: Int -> String
 spaces n = replicate n ' '
 
 ppError :: Loc -> String -> a
-ppError (Loc (Pos _ _ line col) _) msg =
+ppError loc msg =
   error $ "Prettyprinting error: " ++ msg ++
-          "\nAt position " ++ show line ++ ":" ++ show col
-ppError NoLoc msg =
-  error $ "Prettyprinting error: " ++ msg ++
-          "\nAt unknown location."
+          "\nAt " ++ locStr loc
 
 -- | Pretty printing a value.
 ppValue :: Value -> String
@@ -462,7 +452,7 @@ ppValue (TupVal vs _)   =
   " ( " ++ intercalate ", " (map ppValue vs) ++ " ) "
 
 -- | Pretty printing an expression
-ppExp :: Int -> Exp tf -> String
+ppExp :: Int -> Exp ty -> String
 ppExp _ (Literal val)     = ppValue val
 ppExp d (ArrayLit es _ _) =
   " { " ++ intercalate ", " (map (ppExp d) es) ++ " } "
@@ -524,13 +514,13 @@ ppExp d (Reshape (e:es) arr _ _ _) =
 
 ppExp d (Map fun e _ _ _) = " map ( " ++ ppLambda fun ++ ", " ++ ppExp d e ++ " ) "
 
-ppExp _ (ZipWith _ [] _ _ pos) =
+ppExp _ (ZipWith _ [] _ pos) =
   ppError pos "empty expression list for zipWith!"
-ppExp d (ZipWith fun (e:es) _ _ _) =
+ppExp d (ZipWith fun (e:es) _ _) =
   " zipWith ( " ++ ppLambda fun ++ ", " ++ ppExp d e ++
   concatMap (\x -> ", " ++ ppExp d x) es ++ " ) "
 
-ppExp d (Zip es _ _) =
+ppExp d (Zip es _) =
   " zip ( " ++ intercalate "," (map (ppExp d) es) ++ " ) "
 
 ppExp d (Unzip e _ _) = " zip ( " ++ ppExp d e ++ " ) "
@@ -573,25 +563,25 @@ ppType (Tuple (tp:tps) _) = "( " ++ intercalate " * " (map ppType (tp:tps)) ++ "
 ppType (Tuple [] pos) = ppError pos "Empty tuple"
 
 -- | Pretty printing a tuple id
-ppTupId :: TupIdent tf -> String
+ppTupId :: TupIdent ty -> String
 ppTupId (Id name _ _) = " " ++ name ++ " "
 ppTupId (TupId (a:lst) _) = " ( " ++ intercalate ", " (map ppTupId $ a:lst) ++ " ) "
 ppTupId (TupId _ pos) = ppError pos "Tuple identifiers with less than two elements "
 
 -- pretty printing Lambda, i.e., curried and unnamed functions *)
-ppLambda :: Lambda tf -> String
+ppLambda :: Lambda ty -> String
 ppLambda ( AnonymFun (a:rest) body rtp _) =
       let pp_bd (arg, tp) = ppType tp ++ " " ++ arg
           strargs = pp_bd a ++ concatMap (\x -> ", " ++ pp_bd x) rest
       in " fn " ++ ppType rtp ++ " ( " ++ strargs ++ " ) " ++ " => " ++ ppExp 0 body
 ppLambda (AnonymFun [] _ _ pos) =
       ppError pos "Anonymous function with zero params!"
-ppLambda ( CurryFun fid [] _ _ _) = fid
-ppLambda ( CurryFun fid args _ ty pos) =
+ppLambda ( CurryFun fid [] _ _) = fid
+ppLambda ( CurryFun fid args ty pos) =
       ppExp 0 (Apply fid args ty pos)
 
 -- | pretty printing a function declaration
-ppFun :: Int -> FunDec tf -> String
+ppFun :: Int -> FunDec ty -> String
 ppFun d (name, ret_tp, args, body, _) =
   let -- pretty printing a list of bindings separated by commas
       ppBd (argname, tp) = ppType tp ++ " " ++ argname
@@ -602,5 +592,5 @@ ppFun d (name, ret_tp, args, body, _) =
      spaces (d+1) ++ ppExp (d+1) body
 
 -- | Pretty printing a program.
-prettyPrint :: Prog tf -> String
+prettyPrint :: Prog ty -> String
 prettyPrint p = concatMap (ppFun 0) p ++ "\n"
