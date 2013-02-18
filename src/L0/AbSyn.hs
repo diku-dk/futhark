@@ -432,11 +432,6 @@ type Prog ty = [FunDec ty]
 spaces :: Int -> String
 spaces n = replicate n ' '
 
-ppError :: Loc -> String -> a
-ppError loc msg =
-  error $ "Prettyprinting error: " ++ msg ++
-          "\nAt " ++ locStr loc
-
 -- | Pretty printing a value.
 ppValue :: Value -> String
 ppValue (IntVal n _)      = show n
@@ -495,10 +490,8 @@ ppExp d (LetWith name e1 es el e2 _) =
               " with [ " ++ intercalate ", " (map (ppExp d) es) ++
               "] <- " ++ ppExp d el ++ " in  " ++ ppExp (d+2) e2
 
-ppExp d (Index name [e] _ _ _) = name ++ "[ " ++ ppExp d e ++ " ]"
-ppExp d (Index name (e:es) _ _ _) =
-  name ++ "[ " ++ ppExp d e ++ intercalate ", " (map (ppExp d) es) ++ " ]"
-ppExp _ (Index _ [] _ _ pos) = ppError pos "ppExp found empty index!"
+ppExp d (Index name es _ _ _) =
+  name ++ "[ " ++ intercalate ", " (map (ppExp d) es) ++ " ]"
 
 -- | Array Constructs
 ppExp d (Iota e _)         = "iota ( " ++ ppExp d e ++ " ) "
@@ -507,18 +500,15 @@ ppExp d (Replicate e el _ _) = "replicate ( " ++ ppExp d e ++ ", " ++ ppExp d el
 
 ppExp d (Transpose e _ _ _) = " transpose ( " ++ ppExp d e ++ " ) "
 
-ppExp _ (Reshape [] _ _ _ pos) = ppError pos "Empty new shape reshape!"
-ppExp d (Reshape (e:es) arr _ _ _) =
-  " reshape ( ( " ++ intercalate ", " (map (ppExp d) (e:es)) ++ " ), "  ++
+ppExp d (Reshape es arr _ _ _) =
+  " reshape ( ( " ++ intercalate ", " (map (ppExp d) es) ++ " ), "  ++
   ppExp d arr ++ " ) "
 
 ppExp d (Map fun e _ _ _) = " map ( " ++ ppLambda fun ++ ", " ++ ppExp d e ++ " ) "
 
-ppExp _ (ZipWith _ [] _ pos) =
-  ppError pos "empty expression list for zipWith!"
-ppExp d (ZipWith fun (e:es) _ _) =
-  " zipWith ( " ++ ppLambda fun ++ ", " ++ ppExp d e ++
-  concatMap (\x -> ", " ++ ppExp d x) es ++ " ) "
+ppExp d (ZipWith fun es _ _) =
+  " zipWith ( " ++ ppLambda fun ++ ", " ++
+                intercalate ", " (map (ppExp d) es) ++ " ) "
 
 ppExp d (Zip es _) =
   " zip ( " ++ intercalate "," (map (ppExp d) es) ++ " ) "
@@ -559,23 +549,19 @@ ppType (Char _) = " char "
 ppType (Real _) = " real "
 ppType (Array tp  Nothing _) = "[ " ++ ppType tp ++ " ] "
 ppType (Array tp  (Just l) _) = "[ " ++ ppType tp ++ ", " ++ ppExp 0 l ++ " ] "
-ppType (Tuple (tp:tps) _) = "( " ++ intercalate " * " (map ppType (tp:tps)) ++ " ) "
-ppType (Tuple [] pos) = ppError pos "Empty tuple"
+ppType (Tuple tps _) = "( " ++ intercalate " * " (map ppType tps) ++ " ) "
 
 -- | Pretty printing a tuple id
 ppTupId :: TupIdent ty -> String
 ppTupId (Id name _ _) = " " ++ name ++ " "
-ppTupId (TupId (a:lst) _) = " ( " ++ intercalate ", " (map ppTupId $ a:lst) ++ " ) "
-ppTupId (TupId _ pos) = ppError pos "Tuple identifiers with less than two elements "
+ppTupId (TupId pats _) = " ( " ++ intercalate ", " (map ppTupId pats) ++ " ) "
 
 -- pretty printing Lambda, i.e., curried and unnamed functions *)
 ppLambda :: Lambda ty -> String
-ppLambda ( AnonymFun (a:rest) body rtp _) =
+ppLambda ( AnonymFun params body rtp _) =
       let pp_bd (arg, tp) = ppType tp ++ " " ++ arg
-          strargs = pp_bd a ++ concatMap (\x -> ", " ++ pp_bd x) rest
+          strargs = intercalate ", " $ map pp_bd params
       in " fn " ++ ppType rtp ++ " ( " ++ strargs ++ " ) " ++ " => " ++ ppExp 0 body
-ppLambda (AnonymFun [] _ _ pos) =
-      ppError pos "Anonymous function with zero params!"
 ppLambda ( CurryFun fid [] _ _) = fid
 ppLambda ( CurryFun fid args ty pos) =
       ppExp 0 (Apply fid args ty pos)
