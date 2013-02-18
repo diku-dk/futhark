@@ -246,7 +246,7 @@ evalExp (Reshape shapeexp arrexp _ outtype pos) = do
   arr <- evalExp arrexp
   let reshape (Array t _ _) (n:rest) vs
         | length vs `mod` n == 0 =
-          arrayVal <$> (mapM (reshape t rest) (chunk (length vs `div` n) vs))
+          arrayVal <$> mapM (reshape t rest) (chunk (length vs `div` n) vs)
                    <*> pure t <*> pure pos
         | otherwise = bad $ InvalidArrayShape pos (arrayShape arr) shape
       reshape _ [] [v] = return v
