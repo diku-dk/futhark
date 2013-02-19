@@ -45,8 +45,7 @@ transformExp (Map fun e intype outtype loc)
   | intype == outtype = do
   (i, iv) <- newVar "i" (Int loc) loc
   (arr, arrv, arrlet) <- newLet e "arr"
-  let arrt = Array intype Nothing loc
-      index = Index arr [iv] arrt intype loc
+  let index = Index arr [iv] intype intype loc
   funcall <- transformLambda fun [index]
   let letbody = DoLoop i (Size arrv loc) loopbody [arr] loc
       loopbody = LetWith arr arrv [iv] funcall arrv loc
@@ -72,34 +71,42 @@ transformExp (Map fun e intype outtype loc)
       loopbody = LetWith outarr outarrv [iv] funcall outarrv loc
   return $ inarrlet $ nlet branch
 transformExp (Reduce fun accexp arrexp intype loc) = do
-  (arr, arrv, arrlet) <- newLet arrexp "arr"
-  (acc, accv, acclet) <- newLet accexp "acc"
-  (i,iv) <- newVar "i" (Int loc) loc
-  let index = Index arr [iv] intype intype loc
-  funcall <- transformLambda fun [index]
-  let loop = DoLoop i (Size arrv loc) loopbody [acc] loc
-      loopbody = LetWith acc accv [] funcall accv loc
-  return $ arrlet $ acclet loop
-transformExp (Scan fun accexp arrexp intype loc) = do
-  (arr, arrv, arrlet) <- newLet arrexp "arr"
-  (acc, accv, acclet) <- newLet accexp "acc"
-  (i,iv) <- newVar "i" (Int loc) loc
+  ((arr, arrv), (acc, accv), (i, iv), redlet) <- newReduction loc arrexp accexp
   let index = Index arr [iv] intype intype loc
   funcall <- transformLambda fun [accv, index]
-  let loop = DoLoop i (Size arrv loc) loopbody [acc, arr] loc
+  let loop = DoLoop i (Size arrv loc) loopbody [acc] loc
+      loopbody = LetWith acc accv [] funcall accv loc
+  return $ redlet loop
+transformExp e@(Scan fun accexp arrexp intype loc) = do
+  ((arr, arrv), (acc, accv), (i, iv), redlet) <- newReduction loc arrexp accexp
+  let index = Index arr [iv] intype intype loc
+  funcall <- transformLambda fun [accv, index]
+  let looplet = LetPat (TupId [Id arr (expType e) loc,
+                               Id acc (expType accexp) loc] loc)
+                loop arrv loc
+      loop = DoLoop i (Size arrv loc) loopbody [acc, arr] loc
       loopbody = LetWith arr arrv [iv] funcall (TupLit [accv, arrv] loc) loc
-  return $ arrlet $ acclet loop
+  return $ redlet looplet
 transformExp (Redomap redfun mapfun accexp arrexp intype _ loc) = do
-  (arr, arrv, arrlet) <- newLet arrexp "arr"
-  (acc, accv, acclet) <- newLet accexp "acc"
-  (i,iv) <- newVar "i" (Int loc) loc
+  ((arr, arrv), (acc, accv), (i, iv), redlet) <- newReduction loc arrexp accexp
   let index = Index arr [iv] intype intype loc
   mapfuncall <- transformLambda mapfun [index]
   redfuncall <- transformLambda redfun [accv, mapfuncall]
   let loop = DoLoop i (Size arrv loc) loopbody [acc, arr] loc
       loopbody = LetWith arr arrv [iv] redfuncall (TupLit [accv, arrv] loc) loc
-  return $ arrlet $ acclet loop
+  return $ redlet loop
 transformExp e = return e
+
+newReduction :: Loc -> Exp Type -> Exp Type
+             -> TransformM ((String, Exp Type),
+                            (String, Exp Type),
+                            (String, Exp Type),
+                            Exp Type -> Exp Type)
+newReduction loc arrexp accexp = do
+  (arr, arrv, arrlet) <- newLet arrexp "arr"
+  (acc, accv, acclet) <- newLet accexp "acc"
+  (i, iv) <- newVar "i" (Int loc) loc
+  return ((arr, arrv), (acc, accv), (i, iv), acclet . arrlet)
 
 newLet :: Exp Type -> String -> TransformM (String, Exp Type, Exp Type -> Exp Type)
 newLet e name = do
