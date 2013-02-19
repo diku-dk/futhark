@@ -237,7 +237,7 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal $ IntVal num pos 
                       { Scan $3 $5 $7 Nothing $1 }
 
      | zip '(' Exps2 ')'
-                      { Zip $3 $1 }
+                      { Zip (map (\x -> (x, Nothing)) $3) $1 }
 
      | unzip '(' Exp ')'
                       { Unzip $3 [] $1 }

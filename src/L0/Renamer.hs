@@ -85,10 +85,17 @@ renameExp (DoLoop loopvar e body mergevars pos) = do
     mergevars' <- mapM repl mergevars
     return $ DoLoop loopvar' e' body' mergevars' pos
 -- The above case may have to be extended if syntax nodes ever contain
--- anything but lambdas, expressions or lists of expressions.  Pay
--- particular attention to the fact that the latter has to be
--- specially handled.
-renameExp e = gmapM (mkM renameExp `extM` renameLambda `extM` mapM renameExp) e
+-- anything but lambdas, expressions, lists of expressions or lists of
+-- pairs of expression-types.  Pay particular attention to the fact
+-- that the latter has to be specially handled.
+renameExp e = gmapM (mkM renameExp
+                     `extM` renameLambda
+                     `extM` mapM renameExp
+                     `extM` mapM renameExpPair) e
+
+renameExpPair :: (Exp Type, Type) -> RenameM (Exp Type, Type)
+renameExpPair (e,t) = do e' <- renameExp e
+                         return (e',t)
 
 renameLambda :: Lambda Type -> RenameM (Lambda Type)
 renameLambda (AnonymFun params body ret pos) =

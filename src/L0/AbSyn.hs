@@ -244,11 +244,14 @@ data Exp ty = Literal Value
              -- e.g., reduce(op +, 0, {1,2,..,n}) = (0+1+2+..+n) *)
              -- 4th arg is the input-array element type          *)
 
-            | Zip [Exp ty] Loc
+            | Zip [(Exp ty, ty)] Loc
             -- Normal zip supporting variable number of arguments.
+            -- The type paired to each expression is the element type
+            -- of the array returned by that expression.
 
             | Unzip (Exp ty) [ty] Loc
-            -- Unzip that can unzip tuples of arbitrary size.
+            -- Unzip that can unzip tuples of arbitrary size.  The
+            -- types are the elements of the tuple.
 
             | Scan (Lambda ty) (Exp ty) (Exp ty) ty Loc
              -- scan(plus, 0, { 1, 2, 3 }) = { 1, 3, 6 }
@@ -341,8 +344,8 @@ expType (Reshape _ _ _ t _) = t
 expType (Transpose _ _ t _) = t
 expType (Map _ _ _ t pos) = Array t Nothing pos
 expType (Reduce fun _ _ _ _) = lambdaType fun
-expType (Zip es pos) = Tuple (map expType es) pos
-expType (Unzip _ ts pos) = Tuple ts pos
+expType (Zip es pos) = Array (Tuple (map snd es) pos) Nothing pos
+expType (Unzip _ ts pos) = Tuple (map (\t -> Array t Nothing pos) ts) pos
 expType (Scan fun _ _ _ _) = arrayType 1 $ lambdaType fun
 expType (Filter _ _ t _) = t
 expType (Mapall fun e _ _ _) = arrayType (arrayDims $ expType e) $ lambdaType fun
@@ -501,7 +504,7 @@ ppExp d (Reshape es arr _ _ _) =
 ppExp d (Map fun e _ _ _) = " map ( " ++ ppLambda fun ++ ", " ++ ppExp d e ++ " ) "
 
 ppExp d (Zip es _) =
-  " zip ( " ++ intercalate "," (map (ppExp d) es) ++ " ) "
+  " zip ( " ++ intercalate "," (map (ppExp d) $ map fst es) ++ " ) "
 
 ppExp d (Unzip e _ _) = " zip ( " ++ ppExp d e ++ " ) "
 

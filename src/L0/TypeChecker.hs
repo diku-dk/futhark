@@ -425,16 +425,17 @@ checkExp (Reduce fun startexp arrexp intype pos) = do
       return (funret, Reduce fun' startexp' arrexp' inelemt' pos)
     _ -> bad $ TypeError (locOf arrexp) "Type of expression is not an array"
 checkExp (Zip arrexps pos) = do
-  (arrts, arrexps') <- unzip <$> mapM checkSubExp arrexps
+  (arrts, arrexps') <- unzip <$> mapM checkSubExp (map fst arrexps)
   inelemts <- mapM elemType arrts
-  let outtype = Array (Tuple inelemts pos) Nothing pos
-  return (outtype, Zip arrexps' pos)
+  inelemts' <- zipWithM unifyWithKnown (map snd arrexps) inelemts
+  let outtype = Array (Tuple inelemts' pos) Nothing pos
+  return (outtype, Zip (zip arrexps' inelemts') pos)
 checkExp (Unzip e _ pos) = do
   (et, e') <- checkSubExp e
   case et of
     Array (Tuple ts _) _ _ -> do
       let outtypes = map (\t -> Array t Nothing pos) ts
-      return (Tuple outtypes pos, Unzip e' outtypes pos)
+      return (Tuple outtypes pos, Unzip e' ts pos)
     _ -> bad $ TypeError pos $ "Argument to unzip is not an array of tuples, but " ++ ppType et ++ "."
 checkExp (Scan fun startexp arrexp intype pos) = do
   (startt, startexp') <- checkSubExp startexp
