@@ -56,17 +56,16 @@ transformExp (Map fun e intype outtype loc)
   (inarr, inarrv, inarrlet) <- newLet e "inarr"
   (i, iv) <- newVar "i" (Int loc) loc
   (_, nv, nlet) <- newLet (Size inarrv loc) "n"
-  let inarrt = Array intype Nothing loc
-      outarrt = Array outtype Nothing loc
+  let outarrt = Array outtype Nothing loc
       zero = Literal $ IntVal 0 loc
-      index0 = Index inarr [zero] inarrt intype loc
-      index = Index inarr [iv] inarrt intype loc
+      index0 = Index inarr [zero] intype intype loc
+      index = Index inarr [iv] intype intype loc
   funcall0 <- transformLambda fun [index0]
   funcall <- transformLambda fun [index]
-  (outarr, outarrv, outarrlet) <- newLet (Replicate funcall0 nv outarrt loc) "outarr"
+  (outarr, outarrv, outarrlet) <- newLet (Replicate nv funcall0 outtype loc) "outarr"
   let branch = If (BinOp Less zero nv (Bool loc) loc)
                (outarrlet letbody)
-               (ArrayLit [] outtype loc) outarrt loc
+               (Literal (arrayVal [] outtype loc)) outarrt loc
       letbody = DoLoop i nv loopbody [outarr] loc
       loopbody = LetWith outarr outarrv [iv] funcall outarrv loc
   return $ inarrlet $ nlet branch
@@ -87,6 +86,14 @@ transformExp e@(Scan fun accexp arrexp intype loc) = do
       loop = DoLoop i (Size arrv loc) loopbody [acc, arr] loc
       loopbody = LetWith arr arrv [iv] funcall (TupLit [accv, arrv] loc) loc
   return $ redlet looplet
+transformExp (Mapall fun arrexp _ outtype loc) = transformExp =<< toMap arrexp
+  where toMap e = case expType e of
+                    Array et _ _ -> do
+                      (x,xv) <- newVar "x" et loc
+                      body <- toMap xv
+                      let ot = arrayType (arrayDims et) outtype
+                      return $ Map (AnonymFun [(x, et)] body ot loc) e et ot loc
+                    _ -> transformLambda fun [e]
 transformExp (Redomap redfun mapfun accexp arrexp intype _ loc) = do
   ((arr, arrv), (acc, accv), (i, iv), redlet) <- newReduction loc arrexp accexp
   let index = Index arr [iv] intype intype loc
