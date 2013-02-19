@@ -54,7 +54,6 @@ data Token = IF
            | TRANSPOSE
            | READ
            | WRITE
-           | ZIPWITH
            | ZIP
            | UNZIP
            | SCAN
