@@ -194,7 +194,7 @@ arrayVal vs = ArrayVal $ listArray (0, length vs-1) vs
 -- 'Maybe Type'@, and the type checker will convert these to @Exp
 -- 'Type'@, in which type information is always present.
 data Exp ty = Literal Value
-            | TupLit    [Exp ty] ty Loc
+            | TupLit    [Exp ty] Loc
             -- ^ Tuple literals, e.g., (1+3, (x, y+z)).  Second
             -- argument is the tuple's type.
             | ArrayLit  [Exp ty] ty Loc
@@ -256,7 +256,7 @@ data Exp ty = Literal Value
 
             | Scan (Lambda ty) (Exp ty) (Exp ty) ty Loc
              -- scan(plus, 0, { 1, 2, 3 }) = { 1, 3, 6 }
-             -- 4th arg is the type of the input array
+             -- 4th arg is the element type of the input array
 
             | Filter (Lambda ty) (Exp ty) ty Loc
              -- 3rd arg is the type of the input (and result) array *)
@@ -290,7 +290,7 @@ data Exp ty = Literal Value
 
 instance Located (Exp ty) where
   locOf (Literal val) = locOf val
-  locOf (TupLit _ _ pos) = pos
+  locOf (TupLit _ pos) = pos
   locOf (ArrayLit _ _ pos) = pos
   locOf (BinOp _ _ _ _ pos) = pos
   locOf (And _ _ pos) = pos
@@ -326,7 +326,7 @@ instance Located (Exp ty) where
 -- | Given an expression with known types, return its type.
 expType :: Exp Type -> Type
 expType (Literal val) = valueType val
-expType (TupLit _ t _) = t
+expType (TupLit es loc) = Tuple (map expType es) loc
 expType (ArrayLit _ t pos) = Array t Nothing pos
 expType (BinOp _ _ _ t _) = t
 expType (And _ _ pos) = Bool pos
@@ -451,7 +451,7 @@ ppExp :: Int -> Exp ty -> String
 ppExp _ (Literal val)     = ppValue val
 ppExp d (ArrayLit es _ _) =
   " { " ++ intercalate ", " (map (ppExp d) es) ++ " } "
-ppExp d (TupLit es _ _) =
+ppExp d (TupLit es _) =
   " ( " ++ intercalate ", " (map (ppExp d) es) ++ " ) "
 ppExp _ (Var   var _ _)    = var
 

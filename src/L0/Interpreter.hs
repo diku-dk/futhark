@@ -128,7 +128,7 @@ runProg wop rop prog = do
 
 evalExp :: (Applicative m, Monad m) => Exp Type -> L0M m Value
 evalExp (Literal val) = return val
-evalExp (TupLit es _ pos) =
+evalExp (TupLit es pos) =
   TupVal <$> mapM evalExp es <*> pure pos
 evalExp (ArrayLit es t pos) =
   arrayVal <$> mapM evalExp es <*> pure t <*> pure pos

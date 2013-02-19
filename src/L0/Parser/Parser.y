@@ -177,7 +177,7 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal $ IntVal num pos 
      | false          { Literal $ LogVal False $1 }
      | id             { let L pos (ID name) = $1 in Var name Nothing pos }
      | '{' Exps '}'   { ArrayLit $2 Nothing $1 }
-     | TupleExp       { let (exps, pos) = $1 in TupLit exps Nothing pos }
+     | TupleExp       { let (exps, pos) = $1 in TupLit exps pos }
 
      | Exp '+' Exp    { BinOp Plus $1 $3 Nothing $2 }
      | Exp '-' Exp    { BinOp Minus $1 $3 Nothing $2 }

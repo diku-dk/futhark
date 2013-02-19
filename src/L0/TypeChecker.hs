@@ -284,10 +284,10 @@ checkExp :: TypeBox tf => Exp tf -> TypeM (Type, Exp Type)
 checkExp (Literal val) = do
   (t, val') <- checkLiteral val
   return (t, Literal val')
-checkExp (TupLit es _ pos) = do
+checkExp (TupLit es pos) = do
   (ets, es') <- unzip <$> mapM checkSubExp es
   let t = Tuple ets pos
-  return (t, TupLit es' t pos)
+  return (t, TupLit es' pos)
 checkExp (ArrayLit es t pos) = do
   (ets, es') <- unzip <$> mapM checkSubExp es
   -- Find the unified type of all subexpression types.
@@ -444,14 +444,14 @@ checkExp (Unzip e _ pos) = do
 checkExp (Scan fun startexp arrexp intype pos) = do
   (startt, startexp') <- checkSubExp startexp
   (arrt, arrexp') <- checkSubExp arrexp
-  intype' <- intype `unifyWithKnown` arrt
-  case intype' of
+  case arrt of
     Array inelemt e pos2 -> do
-      (fun', funret) <- checkLambda fun [inelemt, inelemt]
+      intype' <- intype `unifyWithKnown` inelemt
+      (fun', funret) <- checkLambda fun [intype', intype']
       when (startt /= funret) $
         bad $ TypeError pos $ "Initial value is of type " ++ ppType startt ++ ", but scan function returns type " ++ ppType funret ++ "."
-      when (inelemt /= funret) $
-        bad $ TypeError pos $ "Array element value is of type " ++ ppType inelemt ++ ", but scan function returns type " ++ ppType funret ++ "."
+      when (intype' /= funret) $
+        bad $ TypeError pos $ "Array element value is of type " ++ ppType intype' ++ ", but scan function returns type " ++ ppType funret ++ "."
       return (Array funret e pos2, Scan fun' startexp' arrexp' intype' pos)
     _ -> bad $ TypeError (locOf arrexp) "Type of expression is not an array."
 checkExp (Filter fun arrexp arrtype pos) = do
