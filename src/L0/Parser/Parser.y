@@ -349,5 +349,5 @@ arrayFromList l = listArray (0, length l-1) l
 
 parseError :: [L Token] -> Either String a
 parseError [] = Left "Parse error: End of file"
-parseError (tok:_) = Left $ "Parse error at " ++ show (locOf tok)
+parseError (tok:_) = Left $ "Parse error at " ++ locStr (locOf tok)
 }
