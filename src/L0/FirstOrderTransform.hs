@@ -89,6 +89,16 @@ transformExp (Scan fun accexp arrexp intype loc) = do
   let loop = DoLoop i (Size arrv loc) loopbody [acc, arr] loc
       loopbody = LetWith arr arrv [iv] funcall (TupLit [accv, arrv] loc) loc
   return $ arrlet $ acclet loop
+transformExp (Redomap redfun mapfun accexp arrexp intype _ loc) = do
+  (arr, arrv, arrlet) <- newLet arrexp "arr"
+  (acc, accv, acclet) <- newLet accexp "acc"
+  (i,iv) <- newVar "i" (Int loc) loc
+  let index = Index arr [iv] intype intype loc
+  mapfuncall <- transformLambda mapfun [index]
+  redfuncall <- transformLambda redfun [accv, mapfuncall]
+  let loop = DoLoop i (Size arrv loc) loopbody [acc, arr] loc
+      loopbody = LetWith arr arrv [iv] redfuncall (TupLit [accv, arrv] loc) loc
+  return $ arrlet $ acclet loop
 transformExp e = return e
 
 newLet :: Exp Type -> String -> TransformM (String, Exp Type, Exp Type -> Exp Type)
