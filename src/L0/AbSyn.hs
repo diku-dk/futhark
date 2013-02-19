@@ -255,8 +255,8 @@ data Exp ty = Literal Value
             -- Unzip that can unzip tuples of arbitrary size.
 
             | Scan (Lambda ty) (Exp ty) (Exp ty) ty Loc
-             -- scan(plus, 0, { 1, 2, 3 }) = { 0, 1, 3, 6 } *)
-             -- 4th arg is the type of the input array      *)
+             -- scan(plus, 0, { 1, 2, 3 }) = { 1, 3, 6 }
+             -- 4th arg is the type of the input array
 
             | Filter (Lambda ty) (Exp ty) ty Loc
              -- 3rd arg is the type of the input (and result) array *)
