@@ -269,11 +269,8 @@ evalExp (Transpose arrexp _ _ pos) = do
     _ -> bad $ TypeError pos "evalExp Transpose"
 evalExp (Map fun e _ outtype pos) = do
   vs <- arrToList =<< evalExp e
-  case outtype of
-    (Array t _ _) -> do
-      vs' <- mapM (applyLambda fun . (:[])) vs
-      return $ arrayVal vs' t pos
-    _ -> bad $ TypeError pos "evalExp Map"
+  vs' <- mapM (applyLambda fun . (:[])) vs
+  return $ arrayVal vs' outtype pos
 evalExp (Reduce fun accexp arrexp _ _) = do
   startacc <- evalExp accexp
   vs <- arrToList =<< evalExp arrexp
