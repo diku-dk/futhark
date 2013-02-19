@@ -468,16 +468,16 @@ checkExp (Mapall fun arrexp intype outtype pos) = do
   (fun', funret) <- checkLambda fun [baseType intype']
   outtype' <- outtype `unifyWithKnown` arrayType (arrayDims intype') funret
   return (outtype', Mapall fun' arrexp' intype' outtype' pos)
-checkExp (Redomap redfun mapfun accexp arrexp inarr outarr pos) = do
+checkExp (Redomap redfun mapfun accexp arrexp intype outtype pos) = do
   (acct, accexp') <- checkSubExp accexp
   (arrt, arrexp') <- checkSubExp arrexp
   et <- elemType arrt
   (mapfun', mapret) <- checkLambda mapfun [et]
   (redfun', redret) <- checkLambda redfun [acct, mapret]
   _ <- unifyKnownTypes redret acct
-  inarr' <- inarr `unifyWithKnown` Array et Nothing pos
-  outarr' <- outarr `unifyWithKnown` Array redret Nothing pos
-  return (redret, Redomap redfun' mapfun' accexp' arrexp' inarr' outarr' pos)
+  intype' <- intype `unifyWithKnown` et
+  outtype' <- outtype `unifyWithKnown` redret
+  return (redret, Redomap redfun' mapfun' accexp' arrexp' intype' outtype' pos)
 checkExp (Split splitexp arrexp inarr pos) = do
   (_, splitexp') <- require [Int pos] =<< checkSubExp splitexp
   (arrt, arrexp') <- checkSubExp arrexp

@@ -267,8 +267,8 @@ data Exp ty = Literal Value
 
             | Redomap (Lambda ty) (Lambda ty) (Exp ty) (Exp ty) ty ty Loc
              -- redomap(g, f, n, a) = reduce(g, n, map(f, a))    *)
-             -- 5th arg is the type of the input  array *)
-             -- 6th arg is the type of the result array *)
+             -- 5th arg is the element type of the input  array *)
+             -- 6th arg is the element type of the result array *)
 
             | Split (Exp ty) (Exp ty) ty Loc
              -- split(2, { 1, 2, 3, 4 }) = {{1},{2, 3, 4}} *)
@@ -352,7 +352,7 @@ expType (Unzip _ ts pos) = Tuple ts pos
 expType (Scan fun _ _ _ _) = arrayType 1 $ lambdaType fun
 expType (Filter _ _ t _) = t
 expType (Mapall _ _ _ t _) = t
-expType (Redomap _ _ _ _ _ t _) = t
+expType (Redomap _ _ _ _ _ t loc) = Array t Nothing loc
 expType (Split _ _ t _) = t
 expType (Concat _ _ t _) = t
 expType (Read t _) = boxType t
