@@ -80,8 +80,8 @@ transformExp e@(Scan fun accexp arrexp intype loc) = do
   ((arr, arrv), (acc, accv), (i, iv), redlet) <- newReduction loc arrexp accexp
   let index = Index arr [iv] intype intype loc
   funcall <- transformLambda fun [accv, index]
-  let looplet = LetPat (TupId [Id arr (expType e) loc,
-                               Id acc (expType accexp) loc] loc)
+  let looplet = LetPat (TupId [Id acc (expType accexp) loc,
+                               Id arr (expType e) loc] loc)
                 loop arrv loc
       loop = DoLoop i (Size arrv loc) loopbody [acc, arr] loc
       loopbody = LetWith arr arrv [iv] funcall (TupLit [accv, arrv] loc) loc
