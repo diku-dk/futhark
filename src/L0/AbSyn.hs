@@ -535,7 +535,7 @@ ppExp d (DoLoop i n iter mvs _) =
               "\n" ++ spaces(d+1) ++ "for " ++ i ++ " < " ++ ppExp d n ++ " do " ++
               "\n" ++ spaces(d+2) ++ ppExp d iter ++ "\n" ++ spaces(d+1) ++
               "merge " ++ mvs'
-  where mvs' = case mvs of [v] -> show v
+  where mvs' = case mvs of [v] -> v
                            _   -> "( " ++ intercalate ", " mvs ++ " )"
 
 ppBinOp :: BinOp -> String
