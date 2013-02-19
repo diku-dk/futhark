@@ -3,26 +3,103 @@ module L0.FirstOrderTransform
   where
 
 import Control.Monad.State
-import Control.Monad.Identity
+
+import Data.Generics
+import Data.Loc
 
 import L0.AbSyn
 
 data TrState = TrState {
     stCounter :: Int
+  , newFunctions :: [FunDec Type]
   }
 
-newtype TransformM a = TransformM (State TrState a)
+newTrState :: TrState
+newTrState = TrState {
+               stCounter = 0
+             , newFunctions = []
+             }
+
+type TransformM = State TrState
+
+-- | Return a new, fresh name, with the given string being part of the
+-- name.
+new :: String -> TransformM String
+new k = do i <- gets stCounter
+           modify $ \s -> s { stCounter = i + 1 }
+           return $ k ++ "_" ++ show i
 
 runTransformM :: TransformM a -> a
-runTransformM (TransformM m) = evalState m (TrState 0)
+runTransformM m = evalState m newTrState
 
-transformProg :: Prog Identity -> Prog Identity
+transformProg :: Prog Type -> Prog Type
 transformProg = runTransformM . mapM transformFunDec
 
-transformFunDec :: FunDec Identity -> FunDec Identity
+transformFunDec :: FunDec Type -> TransformM (FunDec Type)
 transformFunDec (fname, rettype, params, body, loc) = do
-  body' <- transformExp body
+  body' <- everywhereM (mkM transformExp) body
   return (fname, rettype, params, body', loc)
 
-transformExp :: Exp Identity -> Exp Identity
-transformExp (Literal v) = return $ Literal v
+transformExp :: Exp Type -> TransformM (Exp Type)
+transformExp (Map fun e intype outtype loc)
+  | intype == outtype = do
+  (i, iv) <- newVar "i" (Int loc) loc
+  (arr, arrv, arrlet) <- newLet e "arr"
+  let arrt = Array intype Nothing loc
+      index = Index arr [iv] arrt intype loc
+  funcall <- transformLambda fun [index]
+  let letbody = DoLoop i (Size arrv loc) loopbody [arr] loc
+      loopbody = LetWith arr arrv [iv] funcall arrv loc
+  return $ arrlet letbody
+  | otherwise = do
+  -- We have to allocate a new array up front, as for-loops cannot
+  -- change the type of the array.
+  (inarr, inarrv, inarrlet) <- newLet e "inarr"
+  (i, iv) <- newVar "i" (Int loc) loc
+  (_, nv, nlet) <- newLet (Size inarrv loc) "n"
+  let inarrt = Array intype Nothing loc
+      outarrt = Array outtype Nothing loc
+      zero = Literal $ IntVal 0 loc
+      index0 = Index inarr [zero] inarrt intype loc
+      index = Index inarr [iv] inarrt intype loc
+  funcall0 <- transformLambda fun [index0]
+  funcall <- transformLambda fun [index]
+  (outarr, outarrv, outarrlet) <- newLet (Replicate funcall0 nv outarrt loc) "outarr"
+  let branch = If (BinOp Less zero nv (Bool loc) loc)
+               (outarrlet letbody)
+               (ArrayLit [] outtype loc) outarrt loc
+      letbody = DoLoop i nv loopbody [outarr] loc
+      loopbody = LetWith outarr outarrv [iv] funcall outarrv loc
+  return $ inarrlet $ nlet branch
+transformExp (Reduce fun accexp arrexp intype loc) = do
+  (arr, arrv, arrlet) <- newLet arrexp "arr"
+  (acc, accv, acclet) <- newLet accexp "acc"
+  (i,iv) <- newVar "i" (Int loc) loc
+  let index = Index arr [iv] intype intype loc
+  funcall <- transformLambda fun [index]
+  let loop = DoLoop i (Size arrv loc) loopbody [acc] loc
+      loopbody = LetWith acc accv [] funcall accv loc
+  return $ arrlet $ acclet loop
+transformExp e = return e
+
+newLet :: Exp Type -> String -> TransformM (String, Exp Type, Exp Type -> Exp Type)
+newLet e name = do
+  x <- new name
+  let xv = Var x (expType e) loc
+      xlet body = LetPat (Id x (expType e) loc) e body loc
+  return (x, xv, xlet)
+  where loc = locOf e
+
+newVar :: String -> Type -> Loc -> TransformM (String, Exp Type)
+newVar name tp loc = do
+  x <- new name
+  return (x, Var x tp loc)
+
+transformLambda :: Lambda Type -> [Exp Type] -> TransformM (Exp Type)
+transformLambda (AnonymFun params body _ loc) args = do
+  body' <- transformExp body
+  return $ foldl bind body' $ zip params args
+  where bind e ((pname, ptype), arg) = LetPat (Id pname ptype loc) arg e loc
+transformLambda (CurryFun fname curryargs rettype loc) args = do
+  curryargs' <- mapM transformExp curryargs
+  return $ Apply fname (curryargs'++args) rettype loc
