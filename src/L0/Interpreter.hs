@@ -277,8 +277,8 @@ evalExp (Reduce fun accexp arrexp _ _) = do
   let foldfun acc x = applyLambda fun [acc, x]
   foldM foldfun startacc vs
 evalExp (Zip arrexps pos) = do
-  arrs <- mapM (arrToList <=< evalExp) arrexps
-  arrayVal <$> zipit arrs <*> pure (Tuple (map expType arrexps) pos) <*> pure pos
+  arrs <- mapM (arrToList <=< evalExp) $ map fst arrexps
+  arrayVal <$> zipit arrs <*> pure (Tuple (map snd arrexps) pos) <*> pure pos
   where split []     = Nothing
         split (x:xs) = Just (x, xs)
         zipit ls = case unzip <$> mapM split ls of
