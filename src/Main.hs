@@ -39,7 +39,7 @@ main = do args <- getArgs
             ["-p", file] -> prettyprint file
             ["-t", file] -> typecheck (const $ return ()) file
             ["-tp", file] -> typecheck (putStrLn . prettyPrint) file
-            ["-r", file] -> rename file
+            ["-r", file] -> typecheck rename file
             ["-i", file] -> interpret file
 --            ["-c", file] -> compile file
             _ -> error "Usage: <-p|-t|-tp|-r|-i|-c> <file>"
@@ -57,10 +57,10 @@ typecheck next file = do
         Left e  -> error $ "Error during second type checking phase. This implies a bug in the type checker.\n" ++ show e
         Right _ -> next prog'
 
-rename :: FilePath -> IO ()
-rename file = do prog <- renameProg <$> parse file
-                 putStrLn $ prettyPrint prog
-                 case checkProg prog of
+rename :: Prog Type -> IO ()
+rename prog = do let prog' = renameProg prog
+                 putStrLn $ prettyPrint prog'
+                 case checkProg prog' of
                    Left e -> error $ "Type error after renaming:\n" ++ show e
                    _      -> return ()
 
