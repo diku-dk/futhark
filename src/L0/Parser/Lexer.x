@@ -89,7 +89,6 @@ keyword s =
     "reduce"       -> REDUCE
     "read"         -> READ
     "write"        -> WRITE
-    "zipWith"      -> ZIPWITH
     "zip"          -> ZIP
     "unzip"        -> UNZIP
     "scan"         -> SCAN

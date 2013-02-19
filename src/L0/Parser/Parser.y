@@ -87,7 +87,6 @@ import L0.Parser.Lexer
       transpose       { L $$ TRANSPOSE }
       read            { L $$ READ }
       write           { L $$ WRITE }
-      zipWith         { L $$ ZIPWITH }
       zip             { L $$ ZIP }
       unzip           { L $$ UNZIP }
       scan            { L $$ SCAN }
@@ -236,9 +235,6 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal $ IntVal num pos 
 
      | scan '(' FunAbstr ',' Exp ',' Exp ')'
                       { Scan $3 $5 $7 Nothing $1 }
-
-     | zipWith '(' FunAbstr ',' Exps ')'
-                      { ZipWith $3 $5 Nothing $1 }
 
      | zip '(' Exps2 ')'
                       { Zip $3 $1 }

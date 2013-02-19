@@ -244,10 +244,6 @@ data Exp ty = Literal Value
              -- e.g., reduce(op +, 0, {1,2,..,n}) = (0+1+2+..+n) *)
              -- 4th arg is the input-array element type          *)
 
-            | ZipWith (Lambda ty) [Exp ty] ty Loc
-             -- zipWith(plus, {1,2,3}, {4,5,6}) == {5, 7, 9}       *)
-             -- 3rd arg is the type of the result array            *)
-
             | Zip [Exp ty] Loc
             -- Normal zip supporting variable number of arguments.
 
@@ -310,7 +306,6 @@ instance Located (Exp ty) where
   locOf (Transpose _ _ _ pos) = pos
   locOf (Map _ _ _ _ pos) = pos
   locOf (Reduce _ _ _ _ pos) = pos
-  locOf (ZipWith _ _ _ pos) = pos
   locOf (Zip _ pos) = pos
   locOf (Unzip _ _ pos) = pos
   locOf (Scan _ _ _ _ pos) = pos
@@ -346,7 +341,6 @@ expType (Reshape _ _ _ t _) = t
 expType (Transpose _ _ t _) = t
 expType (Map _ _ _ t pos) = Array t Nothing pos
 expType (Reduce fun _ _ _ _) = lambdaType fun
-expType (ZipWith _ _ t _) = t
 expType (Zip es pos) = Tuple (map expType es) pos
 expType (Unzip _ ts pos) = Tuple ts pos
 expType (Scan fun _ _ _ _) = arrayType 1 $ lambdaType fun
@@ -505,10 +499,6 @@ ppExp d (Reshape es arr _ _ _) =
   ppExp d arr ++ " ) "
 
 ppExp d (Map fun e _ _ _) = " map ( " ++ ppLambda fun ++ ", " ++ ppExp d e ++ " ) "
-
-ppExp d (ZipWith fun es _ _) =
-  " zipWith ( " ++ ppLambda fun ++ ", " ++
-                intercalate ", " (map (ppExp d) es) ++ " ) "
 
 ppExp d (Zip es _) =
   " zip ( " ++ intercalate "," (map (ppExp d) es) ++ " ) "
