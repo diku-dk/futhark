@@ -366,7 +366,8 @@ checkExp (Index name idxes intype restype pos) = do
   vt <- lookupVarType name pos
   when (arrayDims vt < length idxes) $
     bad $ TypeError pos $ show (length idxes) ++ " indices given, but type of variable " ++ name ++ " has " ++ show (arrayDims vt) ++ " dimensions."
-  intype' <- intype `unifyWithKnown` baseType vt
+  vet <- elemType vt
+  intype' <- intype `unifyWithKnown` vet
   restype' <- restype `unifyWithKnown` strip (length idxes) vt
   (_, idxes') <- unzip <$> mapM (require [Int pos] <=< checkSubExp) idxes
   tell $ TypeAcc (S.singleton name) S.empty
@@ -405,12 +406,12 @@ checkExp (Transpose arrexp intype outtype pos) = do
   return (outtype', Transpose arrexp' intype' outtype' pos)
 checkExp (Map fun arrexp intype outtype pos) = do
   (arrt, arrexp') <- checkSubExp arrexp
-  intype' <- intype `unifyWithKnown` arrt
-  case intype' of
-    Array t e pos2 -> do
-      (fun', funret) <- checkLambda fun [t]
-      outtype' <- outtype `unifyWithKnown` Array funret e pos2
-      return (outtype', Map fun' arrexp' intype' outtype' pos)
+  case arrt of
+    Array et e _ -> do
+      (fun', funret) <- checkLambda fun [et]
+      intype' <- intype `unifyWithKnown` et
+      outtype' <- outtype `unifyWithKnown` funret
+      return (Array outtype' e pos, Map fun' arrexp' intype' outtype' pos)
     _       -> bad $ TypeError (locOf arrexp) "Expression does not return an array."
 checkExp (Reduce fun startexp arrexp intype pos) = do
   (acct, startexp') <- checkSubExp startexp
