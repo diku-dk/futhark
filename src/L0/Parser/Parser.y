@@ -171,7 +171,7 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal $ IntVal num pos 
      | reallit        { let L pos (REALLIT num) = $1 in Literal $ RealVal num pos }
      | charlit        { let L pos (CHARLIT char) = $1 in Literal $ CharVal char pos }
      | stringlit      { let L pos (STRINGLIT s) = $1
-                        in Literal $ ArrayVal (arrayFromList $ map (`CharVal` pos) s) (Array (Char pos) Nothing pos) pos }
+                        in Literal $ ArrayVal (arrayFromList $ map (`CharVal` pos) s) (Char pos) pos }
      | true           { Literal $ LogVal True $1 }
      | false          { Literal $ LogVal False $1 }
      | id             { let L pos (ID name) = $1 in Var name Nothing pos }
