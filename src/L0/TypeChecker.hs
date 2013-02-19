@@ -415,13 +415,13 @@ checkExp (Map fun arrexp intype outtype pos) = do
 checkExp (Reduce fun startexp arrexp intype pos) = do
   (acct, startexp') <- checkSubExp startexp
   (arrt, arrexp') <- checkSubExp arrexp
-  intype' <- intype `unifyWithKnown` arrt
-  case intype' of
+  case arrt of
     Array inelemt _ _ -> do
-      (fun', funret) <- checkLambda fun [acct, inelemt]
+      inelemt' <- intype `unifyWithKnown` inelemt
+      (fun', funret) <- checkLambda fun [acct, inelemt']
       when (acct /= funret) $
         bad $ TypeError pos $ "Accumulator is of type " ++ ppType acct ++ ", but reduce function returns type " ++ ppType funret ++ "."
-      return (funret, Reduce fun' startexp' arrexp' intype' pos)
+      return (funret, Reduce fun' startexp' arrexp' inelemt' pos)
     _ -> bad $ TypeError (locOf arrexp) "Type of expression is not an array"
 checkExp (ZipWith fun arrexps outtype pos) = do
   (arrts, arrexps') <- unzip <$> mapM checkSubExp arrexps
