@@ -9,6 +9,7 @@ import L0.Parser (parseL0)
 import L0.TypeChecker
 import L0.Renamer
 import L0.Interpreter
+import L0.FirstOrderTransform
 -- import L0.CCodeGen
 
 -- To parse and prettyprint an input program located at ../DATA/filename.l0, run
@@ -41,6 +42,7 @@ main = do args <- getArgs
             ["-tp", file] -> typecheck (putStrLn . prettyPrint) file
             ["-r", file] -> typecheck rename file
             ["-i", file] -> interpret file
+            ["-tr", file] -> typecheck (fotransform) file
 --            ["-c", file] -> compile file
             _ -> error "Usage: <-p|-t|-tp|-r|-i|-c> <file>"
 
@@ -56,6 +58,9 @@ typecheck next file = do
       case checkProg prog' of
         Left e  -> error $ "Error during second type checking phase. This implies a bug in the type checker.\n" ++ show e
         Right _ -> next prog'
+
+fotransform :: Prog Type -> IO ()
+fotransform = putStrLn . prettyPrint . transformProg
 
 rename :: Prog Type -> IO ()
 rename prog = do let prog' = renameProg prog
