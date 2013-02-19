@@ -60,7 +60,11 @@ typecheck next file = do
         Right _ -> next prog'
 
 fotransform :: Prog Type -> IO ()
-fotransform = putStrLn . prettyPrint . transformProg
+fotransform prog = let prog' = transformProg prog
+                   in case checkProg $ transformProg prog of
+                        Right prog'' -> putStrLn $ prettyPrint prog''
+                        Left e -> do putStrLn $ prettyPrint prog'
+                                     error $ "Type error after transformation:\n" ++ show e
 
 rename :: Prog Type -> IO ()
 rename prog = do let prog' = renameProg prog
