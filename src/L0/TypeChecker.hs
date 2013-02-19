@@ -459,10 +459,11 @@ checkExp (Filter fun arrexp arrtype pos) = do
   return (arrtype', Filter fun' arrexp' arrtype' pos)
 checkExp (Mapall fun arrexp intype outtype pos) = do
   (arrt, arrexp') <- checkSubExp arrexp
-  intype' <- intype `unifyWithKnown` arrt
+  intype' <- intype `unifyWithKnown` baseType arrt
   (fun', funret) <- checkLambda fun [baseType intype']
-  outtype' <- outtype `unifyWithKnown` arrayType (arrayDims intype') funret
-  return (outtype', Mapall fun' arrexp' intype' outtype' pos)
+  outtype' <- outtype `unifyWithKnown` funret
+  return (arrayType (arrayDims arrt) outtype',
+          Mapall fun' arrexp' intype' outtype' pos)
 checkExp (Redomap redfun mapfun accexp arrexp intype outtype pos) = do
   (acct, accexp') <- checkSubExp accexp
   (arrt, arrexp') <- checkSubExp arrexp
@@ -510,11 +511,12 @@ checkLiteral (ArrayVal arr t pos) = do
   (ts, vals') <- unzip <$> mapM checkLiteral (elems arr)
   -- Find the unified type of all subexpression types.
   vt <- case ts of
-          [] -> bad $ TypeError pos "Empty array literal"
+          [] -> return t -- Permit empty array values, as they always
+                         -- have a type.
           v:vts' -> foldM unifyKnownTypes v vts'
   -- Unify that type with the one given for the array literal.
-  t' <- t `unifyKnownTypes` Array vt Nothing pos
-  return (t', ArrayVal (listArray (bounds arr) vals') t' pos)
+  t' <- t `unifyKnownTypes` vt
+  return (Array vt Nothing pos, ArrayVal (listArray (bounds arr) vals') t' pos)
 
 checkBinOp :: TypeBox tf => BinOp -> Exp tf -> Exp tf -> tf -> Loc
            -> TypeM (Type, Exp Type)

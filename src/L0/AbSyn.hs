@@ -55,7 +55,7 @@ data Type = Int Loc
           | Real Loc
           | Tuple [Type] Loc
           | Array Type (Maybe (Exp (Maybe Type))) Loc -- ^ 1st arg: array's element type, 2nd arg: its length
-            deriving (Typeable, Data)
+            deriving (Show, Typeable, Data)
 
 instance Eq Type where
   Int _ == Int _ = True
@@ -83,7 +83,7 @@ arrayDims _             = 0
 
 -- | A type box provides a way to box a type, and possibly retrieve
 -- one.
-class TypeBox ty where
+class Show ty => TypeBox ty where
   unboxType :: ty -> Maybe Type
   boxType :: Type -> ty
 
@@ -131,7 +131,7 @@ data Value = IntVal !Int Loc
            | ArrayVal !(Array Int Value) Type Loc
              -- ^ The type is the element type, not the complete array
              -- type.  It is assumed that the array is 0-indexed.
-             deriving (Typeable, Data)
+             deriving (Show, Typeable, Data)
 
 instance Eq Value where
   IntVal x _ == IntVal y _ = x == y
@@ -258,8 +258,8 @@ data Exp ty = Literal Value
              -- 3rd arg is the type of the input (and result) array *)
 
             | Mapall (Lambda ty) (Exp ty) ty ty Loc
-             -- e.g., mapall(op ~, {{1,~2}, {~3,4}}) = {{~1,2}, {3,~4}}                      *)
-             -- 3rd and 4th args are the types of the input and result arrays, respectively. *)
+             -- e.g., mapall(op ~, {{1,~2}, {~3,4}}) = {{~1,2}, {3,~4}}
+             -- 3rd and 4th args are the base types of the input and result arrays, respectively.
 
             | Redomap (Lambda ty) (Lambda ty) (Exp ty) (Exp ty) ty ty Loc
              -- redomap(g, f, n, a) = reduce(g, n, map(f, a))    *)
@@ -282,7 +282,7 @@ data Exp ty = Literal Value
              -- e.g., write(map(f, replicate(3,1))) writes array {f(1),f(1),f(1)} *)
              -- 2nd arg is the type of the to-be-written expression *)
             | DoLoop String (Exp ty) (Exp ty) [String] Loc
-              deriving (Typeable, Data)
+              deriving (Show, Typeable, Data)
 
 instance Located (Exp ty) where
   locOf (Literal val) = locOf val
@@ -336,7 +336,7 @@ expType (LetWith _ _ _ _ body _) = expType body
 expType (Index _ _ _ t _) = t
 expType (Iota _ pos) = Array (Int pos) Nothing pos
 expType (Size _ pos) = Int pos
-expType (Replicate _ _ t _) = t
+expType (Replicate _ _ t pos) = Array t Nothing pos
 expType (Reshape _ _ _ t _) = t
 expType (Transpose _ _ t _) = t
 expType (Map _ _ _ t pos) = Array t Nothing pos
@@ -345,7 +345,7 @@ expType (Zip es pos) = Tuple (map expType es) pos
 expType (Unzip _ ts pos) = Tuple ts pos
 expType (Scan fun _ _ _ _) = arrayType 1 $ lambdaType fun
 expType (Filter _ _ t _) = t
-expType (Mapall _ _ _ t _) = t
+expType (Mapall fun e _ _ _) = arrayType (arrayDims $ expType e) $ lambdaType fun
 expType (Redomap _ _ _ _ _ t loc) = Array t Nothing loc
 expType (Split _ _ t _) = t
 expType (Concat _ _ t _) = t
@@ -372,7 +372,7 @@ data BinOp = Plus -- Binary Ops for Numbers
            | Equal
            | Less
            | Leq
-             deriving (Enum, Bounded, Typeable, Data)
+             deriving (Enum, Bounded, Typeable, Data, Show)
 
 -- ^ Print the operator, without whitespace, that corresponds to this
 -- @BinOp@.
@@ -398,7 +398,7 @@ data Lambda ty = AnonymFun [(String,Type)] (Exp ty) Type Loc
                     -- fn int (bool x, char z) => if(x) then ord(z) else ord(z)+1 *)
                | CurryFun String [Exp ty] ty Loc
                     -- op +(4) *)
-                 deriving (Typeable, Data)
+                 deriving (Typeable, Data, Show)
 
 -- | The return type of a lambda function.
 lambdaType :: Lambda Type -> Type
@@ -408,7 +408,7 @@ lambdaType (CurryFun _ _ t _) = t
 -- | Tuple Identifier, i.e., pattern matching
 data TupIdent ty = TupId [TupIdent ty] Loc
                  | Id String ty Loc
-                   deriving (Typeable, Data)
+                   deriving (Typeable, Data, Show)
 
 instance Located (TupIdent ty) where
   locOf (TupId _ loc) = loc
