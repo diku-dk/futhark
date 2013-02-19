@@ -242,7 +242,7 @@ data Exp ty = Literal Value
 
             | Reduce (Lambda ty) (Exp ty) (Exp ty) ty Loc
              -- e.g., reduce(op +, 0, {1,2,..,n}) = (0+1+2+..+n) *)
-             -- 4th arg is the input-array type                  *)
+             -- 4th arg is the input-array element type          *)
 
             | ZipWith (Lambda ty) [Exp ty] ty Loc
              -- zipWith(plus, {1,2,3}, {4,5,6}) == {5, 7, 9}       *)
