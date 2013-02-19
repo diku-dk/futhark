@@ -237,8 +237,8 @@ data Exp ty = Literal Value
             -- functions as (first) params
             | Map (Lambda ty) (Exp ty) ty ty Loc
              -- e.g., map(op +(1), {1,2,..,n}) = {2,3,..,n+1} *)
-             -- 3st arg is the input-array  type *)
-             -- 4th arg is the output-array type *)
+             -- 3st arg is the input-array element type *)
+             -- 4th arg is the output-array element type *)
 
             | Reduce (Lambda ty) (Exp ty) (Exp ty) ty Loc
              -- e.g., reduce(op +, 0, {1,2,..,n}) = (0+1+2+..+n) *)
@@ -344,7 +344,7 @@ expType (Size _ pos) = Int pos
 expType (Replicate _ _ t _) = t
 expType (Reshape _ _ _ t _) = t
 expType (Transpose _ _ t _) = t
-expType (Map _ _ _ t _) = t
+expType (Map _ _ _ t pos) = Array t Nothing pos
 expType (Reduce fun _ _ _ _) = lambdaType fun
 expType (ZipWith _ _ t _) = t
 expType (Zip es pos) = Tuple (map expType es) pos
