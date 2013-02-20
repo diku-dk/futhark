@@ -72,12 +72,12 @@ data TypeError = TypeError SrcLoc String
                -- ^ Unknown variable of the given name referenced at the given spot.
                | UnknownFunctionError String SrcLoc
                -- ^ Unknown function of the given name called at the given spot.
-               | ParameterMismatch String SrcLoc (Either Int [Type]) [Type]
-               -- ^ A known function was called with invalid
-               -- arguments.  The third argument is either the number
-               -- of parameters, or the specific types of parameters
-               -- accepted (sometimes, only the former can be
-               -- determined).
+               | ParameterMismatch (Maybe String) SrcLoc (Either Int [Type]) [Type]
+               -- ^ A function (possibly anonymous) was called with
+               -- invalid arguments.  The third argument is either the
+               -- number of parameters, or the specific types of
+               -- parameters accepted (sometimes, only the former can
+               -- be determined).
                | MergeVarNonBasicIndexing String SrcLoc
 
 instance Show TypeError where
@@ -108,7 +108,7 @@ instance Show TypeError where
   show (UnknownFunctionError fname pos) =
     "Unknown function " ++ fname ++ " called at " ++ locStr pos ++ "."
   show (ParameterMismatch fname pos expected got) =
-    "In call of Function " ++ fname ++ " at position " ++ locStr pos ++
+    "In call of " ++ fname' ++ " at position " ++ locStr pos ++
     ": expecting " ++ show nexpected ++ " argument(s) of type(s) " ++
      expected' ++ ", but got " ++ show ngot ++
     " arguments of types " ++ intercalate ", " (map ppType got) ++ "."
@@ -117,6 +117,7 @@ instance Show TypeError where
               Left i -> (i, "(polymorphic)")
               Right ts -> (length ts, intercalate ", " $ map ppType ts)
           ngot = length got
+          fname' = maybe "anonymous function" ("function "++) fname
   show (MergeVarNonBasicIndexing name pos) =
     "Merge variable " ++ name ++ " indexed at " ++ locStr pos ++
     " to non-base type, but also modified in body of let."
@@ -330,7 +331,7 @@ checkExp (Apply fname args t pos) = do
       if length argtypes == length paramtypes then do
         zipWithM_ unifyKnownTypes argtypes paramtypes
         return (rettype', Apply fname args' rettype' pos)
-      else bad $ ParameterMismatch fname pos (Right paramtypes) argtypes
+      else bad $ ParameterMismatch (Just fname) pos (Right paramtypes) argtypes
 checkExp (LetPat pat e body pos) = do
   ((et, e'), srcmvars) <- collectSrcMergeVars $ checkSubExp e
   (bnds, pat') <- checkPattern pat et
@@ -589,14 +590,27 @@ checkPattern pat vt = do
         rmTypes (TupId pats pos) = TupId (map rmTypes pats) pos
 
 checkLambda :: TypeBox ty => Lambda ty -> [Type] -> TypeM (Lambda Type, Type)
-checkLambda (AnonymFun params body ret pos) args
-  | length params == length args = do
+checkLambda (AnonymFun params body ret pos) args = do
   mvs <- mergeVars
   (_, ret', params', body', _) <-
     unbinding mvs $ checkFun ("<anonymous>", ret, params, body, pos)
-  zipWithM_ unifyKnownTypes (map identType params') args
-  return (AnonymFun params body' ret' pos, ret')
-  | otherwise = bad $ TypeError pos $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
+  case () of
+    _ | length params == length args -> do
+          zipWithM_ unifyKnownTypes (map identType params') args
+          return (AnonymFun params body' ret' pos, ret')
+      | [t@(Tuple args' _)] <- args,
+        args' == map identType params,
+        [Ident pname _ _] <- take 1 params ->
+          -- The function expects N parmeters, but the argument is a
+          -- single N-tuple whose types match the parameters.
+          -- Generate a shim to make it fit.  We cleverly reuse the
+          -- first parameter name, as it is guaranteed that it will
+          -- not shadow anything.
+          let tupparam = (Ident pname t pos)
+              tupfun = AnonymFun [tupparam] tuplet ret pos
+              tuplet = LetPat (TupId (map Id params) pos) (Var tupparam) body' pos
+          in checkLambda tupfun args
+      | otherwise -> bad $ TypeError pos $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
 checkLambda (CurryFun opfun curryargexps rettype pos) args
   | Just op <- lookup opfun ops =
   checkPolyLambdaOp op curryargexps rettype args pos
@@ -608,12 +622,27 @@ checkLambda (CurryFun fname curryargexps rettype pos) args = do
   case bnd of
     Nothing -> bad $ UnknownFunctionError fname pos
     Just (rt, paramtypes) -> do
-      when (length args' /= length paramtypes ||
-            not (all (uncurry (==)) $ zip args' paramtypes)) $
-        bad $ ParameterMismatch fname pos (Right paramtypes) args'
       rettype' <- rettype `unifyWithKnown` rt
-      zipWithM_ unifyKnownTypes (curryargexpts++args) paramtypes
-      return (CurryFun fname curryargexps' rettype' pos, rettype')
+      case () of
+        _ | [tupt@(Tuple ets _)] <- args,
+            ets == paramtypes ->
+              -- Same shimming as in the case for anonymous functions,
+              -- although we don't have to worry about name shadowing
+              -- here.
+              let tupparam = (Ident "x" tupt pos)
+                  tupfun = AnonymFun [tupparam] tuplet rettype' pos
+                  params = zipWith mkparam [0..] paramtypes
+                    where mkparam :: Int -> Type -> Ident Type
+                          mkparam i t = Ident ("param_" ++ show i) t pos
+                  tuplet = LetPat (TupId (map Id params) pos) (Var tupparam) body pos
+                  body = Apply fname (map Var params) rettype' pos
+              in checkLambda tupfun args
+          | length args' /= length paramtypes ||
+            not (all (uncurry (==)) $ zip args' paramtypes) ->
+              bad $ ParameterMismatch (Just fname) pos (Right paramtypes) args'
+          | otherwise -> do
+              zipWithM_ unifyKnownTypes (curryargexpts++args) paramtypes
+              return (CurryFun fname curryargexps' rettype' pos, rettype')
 
 checkPolyLambdaOp :: TypeBox ty => BinOp -> [Exp ty] -> ty -> [Type] -> SrcLoc
                   -> TypeM (Lambda Type, Type)
@@ -621,7 +650,8 @@ checkPolyLambdaOp op curryargexps rettype args pos = do
   (curryargexpts, curryargexps') <- unzip <$> mapM checkSubExp curryargexps
   tp <- case curryargexpts ++ args of
           [t1, t2] | t1 == t2 -> return t1
-          l -> bad $ ParameterMismatch fname pos (Left 2) l
+          [Tuple [t1,t2] _] | t1 == t2 -> return t1 -- For autoshimming.
+          l -> bad $ ParameterMismatch (Just fname) pos (Left 2) l
   (x,y,params) <- case curryargexps' of
                     [] -> return (Var (Ident "x" tp pos),
                                   Var (Ident "y" tp pos),
