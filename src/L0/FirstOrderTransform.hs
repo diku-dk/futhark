@@ -76,12 +76,11 @@ transformExp (Reduce fun accexp arrexp intype loc) = do
   let loop = DoLoop i (Size arrv loc) loopbody [acc] loc
       loopbody = LetWith acc accv [] funcall accv loc
   return $ redlet loop
-transformExp e@(Scan fun accexp arrexp intype loc) = do
+transformExp (Scan fun accexp arrexp intype loc) = do
   ((arr, arrv), (acc, accv), (i, iv), redlet) <- newReduction loc arrexp accexp
   let index = Index arr [iv] intype intype loc
   funcall <- transformLambda fun [accv, index]
-  let looplet = LetPat (TupId [Id acc (expType accexp) loc,
-                               Id arr (expType e) loc] loc)
+  let looplet = LetPat (TupId [Id acc, Id arr] loc)
                 loop arrv loc
       loop = DoLoop i (Size arrv loc) loopbody [acc, arr] loc
       loopbody = LetWith arr arrv [iv] funcall (TupLit [accv, arrv] loc) loc
@@ -92,7 +91,7 @@ transformExp (Mapall fun arrexp _ outtype loc) = transformExp =<< toMap arrexp
                       (x,xv) <- newVar "x" et loc
                       body <- toMap xv
                       let ot = arrayType (arrayDims et) outtype
-                      return $ Map (AnonymFun [(x, et)] body ot loc) e et ot loc
+                      return $ Map (AnonymFun [x] body ot loc) e et ot loc
                     _ -> transformLambda fun [e]
 transformExp (Redomap redfun mapfun accexp arrexp intype _ loc) = do
   ((arr, arrv), (acc, accv), (i, iv), redlet) <- newReduction loc arrexp accexp
@@ -105,9 +104,9 @@ transformExp (Redomap redfun mapfun accexp arrexp intype _ loc) = do
 transformExp e = return e
 
 newReduction :: Loc -> Exp Type -> Exp Type
-             -> TransformM ((String, Exp Type),
-                            (String, Exp Type),
-                            (String, Exp Type),
+             -> TransformM ((Ident Type, Exp Type),
+                            (Ident Type, Exp Type),
+                            (Ident Type, Exp Type),
                             Exp Type -> Exp Type)
 newReduction loc arrexp accexp = do
   (arr, arrv, arrlet) <- newLet arrexp "arr"
@@ -115,24 +114,23 @@ newReduction loc arrexp accexp = do
   (i, iv) <- newVar "i" (Int loc) loc
   return ((arr, arrv), (acc, accv), (i, iv), acclet . arrlet)
 
-newLet :: Exp Type -> String -> TransformM (String, Exp Type, Exp Type -> Exp Type)
+newLet :: Exp Type -> String -> TransformM (Ident Type, Exp Type, Exp Type -> Exp Type)
 newLet e name = do
-  x <- new name
-  let xv = Var x (expType e) loc
-      xlet body = LetPat (Id x (expType e) loc) e body loc
+  (x,xv) <- newVar name (expType e) loc
+  let xlet body = LetPat (Id x) e body loc
   return (x, xv, xlet)
   where loc = locOf e
 
-newVar :: String -> Type -> Loc -> TransformM (String, Exp Type)
+newVar :: String -> Type -> Loc -> TransformM (Ident Type, Exp Type)
 newVar name tp loc = do
   x <- new name
-  return (x, Var x tp loc)
+  return (Ident x tp loc, Var $ Ident x tp loc)
 
 transformLambda :: Lambda Type -> [Exp Type] -> TransformM (Exp Type)
 transformLambda (AnonymFun params body _ loc) args = do
   body' <- transformExp body
   return $ foldl bind body' $ zip params args
-  where bind e ((pname, ptype), arg) = LetPat (Id pname ptype loc) arg e loc
+  where bind e (Ident pname ptype _, arg) = LetPat (Id $ Ident pname ptype loc) arg e loc
 transformLambda (CurryFun fname curryargs rettype loc) args = do
   curryargs' <- mapM transformExp curryargs
   return $ Apply fname (curryargs'++args) rettype loc

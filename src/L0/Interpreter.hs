@@ -61,14 +61,14 @@ runL0M (L0M m) env = runEitherT (runReaderT m env)
 bad :: Monad m => InterpreterError -> L0M m a
 bad = L0M . lift . left
 
-bindVar :: L0Env m -> (String, Value) -> L0Env m
-bindVar env (name,val) =
+bindVar :: L0Env m -> (Ident Type, Value) -> L0Env m
+bindVar env (Ident name _ _,val) =
   env { envVtable = M.insert name val $ envVtable env }
 
-bindVars :: L0Env m -> [(String, Value)] -> L0Env m
+bindVars :: L0Env m -> [(Ident Type, Value)] -> L0Env m
 bindVars = foldl bindVar
 
-binding :: Monad m => [(String, Value)] -> L0M m a -> L0M m a
+binding :: Monad m => [(Ident Type, Value)] -> L0M m a -> L0M m a
 binding bnds = local (`bindVars` bnds)
 
 lookupVar :: Monad m => String -> L0M m Value
@@ -108,7 +108,7 @@ runProg wop rop prog = do
     -- We assume that the program already passed the type checker, so
     -- we don't check for duplicate definitions or anything.
     expand ftable (name,_,params,body,_) =
-        let fun args = binding (zip (map fst params) args) $ evalExp body
+        let fun args = binding (zip params args) $ evalExp body
         in M.insert name fun ftable
     builtins = M.fromList [("toReal", builtin "toReal")
                           ,("trunc", builtin "trunc")
@@ -186,7 +186,7 @@ evalExp (If e1 e2 e3 _ pos) = do
   case v of LogVal True _  -> evalExp e2
             LogVal False _ -> evalExp e3
             _              -> bad $ TypeError pos "evalExp If"
-evalExp (Var name _ _) =
+evalExp (Var (Ident name _ _)) =
   lookupVar name
 evalExp (Apply fname args _ _) = do
   fun <- lookupFun fname
@@ -212,7 +212,7 @@ evalExp (LetWith name e idxs ve body pos) = do
           | otherwise = bad $ IndexOutOfBounds pos (upper+1) i
           where upper = snd $ bounds arr
         change _ _ _ = bad $ TypeError pos "evalExp Let Id"
-evalExp (Index name idxs _ _ pos) = do
+evalExp (Index (Ident name _ _) idxs _ _ pos) = do
   v <- lookupVar name
   idxs' <- mapM evalExp idxs
   foldM idx v idxs'
@@ -277,7 +277,7 @@ evalExp (Reduce fun accexp arrexp _ _) = do
   let foldfun acc x = applyLambda fun [acc, x]
   foldM foldfun startacc vs
 evalExp (Zip arrexps pos) = do
-  arrs <- mapM (arrToList <=< evalExp) $ map fst arrexps
+  arrs <- mapM ((arrToList <=< evalExp) . fst) arrexps
   arrayVal <$> zipit arrs <*> pure (Tuple (map snd arrexps) pos) <*> pure pos
   where split []     = Nothing
         split (x:xs) = Just (x, xs)
@@ -361,7 +361,7 @@ evalExp (Write e _ _) = do
         write v = ppValue v
 evalExp (DoLoop loopvar boundexp body mergevars pos) = do
   bound <- evalExp boundexp
-  mergevals <- mapM lookupVar mergevars
+  mergevals <- mapM (lookupVar . identName) mergevars
   case bound of
     IntVal n _ -> do res <- foldM iteration mergevals [0..n-1]
                      case res of [val] -> return val
@@ -400,8 +400,8 @@ evalBoolBinOp op e1 e2 pos = do
     (LogVal x _, LogVal y _) -> return $ LogVal (op x y) pos
     _                        -> bad $ TypeError pos $ "evalBoolBinOp " ++ ppValue v1 ++ " " ++ ppValue v2
 
-evalPattern :: TupIdent Type -> Value -> Maybe [(String, Value)]
-evalPattern (Id name _ _) v = Just [(name, v)]
+evalPattern :: TupIdent Type -> Value -> Maybe [(Ident Type, Value)]
+evalPattern (Id ident) v = Just [(ident, v)]
 evalPattern (TupId pats _) (TupVal vs _)
   | length pats == length vs =
     concat <$> zipWithM evalPattern pats vs
@@ -409,7 +409,7 @@ evalPattern _ _ = Nothing
 
 applyLambda :: (Applicative m, Monad m) => Lambda Type -> [Value] -> L0M m Value
 applyLambda (AnonymFun params body _ _) args =
-  binding (zip (map fst params) args) $ evalExp body
+  binding (zip params args) $ evalExp body
 applyLambda (CurryFun name curryargs _ _) args = do
   curryargs' <- mapM evalExp curryargs
   fun <- lookupFun name

@@ -17,6 +17,7 @@ module L0.AbSyn
   , valueType
   , arrayVal
   , ppValue
+  , Ident(..)
   , Exp(..)
   , expType
   , ppExp
@@ -27,7 +28,6 @@ module L0.AbSyn
   , lambdaType
   , TupIdent(..)
   , ppTupId
-  , Binding
   , FunDec
   , Prog
   , prettyPrint
@@ -182,6 +182,18 @@ arrayShape _ = []
 arrayVal :: [Value] -> Type -> Loc -> Value
 arrayVal vs = ArrayVal $ listArray (0, length vs-1) vs
 
+-- | An identifier consists of its name and the type of the value
+-- bound to the identifier.
+data Ident ty = Ident {
+    identName :: String
+  , identType :: ty
+  , identLoc :: Loc
+  }
+                deriving (Typeable, Data, Show)
+
+instance Located (Ident ty) where
+  locOf = identLoc
+
 -- | L0 Expression Language: literals + vars + int binops + array
 -- constructors + array combinators (SOAC) + if + function calls +
 -- let + tuples (literals & identifiers) TODO: please add float,
@@ -208,13 +220,13 @@ data Exp ty = Literal Value
             | Not    (Exp ty) Loc -- e.g., not True = False
             | Negate (Exp ty) ty Loc -- e.g., ~(~1) = 1
             | If     (Exp ty) (Exp ty) (Exp ty) ty Loc
-            | Var    String ty Loc
+            | Var    (Ident ty)
             -- Function Call and Let Construct
             | Apply  String [Exp ty] ty Loc
             | LetPat (TupIdent ty) (Exp ty) (Exp ty) Loc
-            | LetWith String (Exp ty) [Exp ty] (Exp ty) (Exp ty) Loc
+            | LetWith (Ident ty) (Exp ty) [Exp ty] (Exp ty) (Exp ty) Loc
             -- Array Indexing and Array Constructors
-            | Index String [Exp ty] ty ty Loc
+            | Index (Ident ty) [Exp ty] ty ty Loc
              -- e.g., arr[3]; 3rd arg is the input-array element type
              -- 4th arg is the result type
             | Iota (Exp ty) Loc -- e.g., iota(n) = {0,1,..,n-1}
@@ -284,7 +296,7 @@ data Exp ty = Literal Value
             | Write (Exp ty) ty Loc
              -- e.g., write(map(f, replicate(3,1))) writes array {f(1),f(1),f(1)} *)
              -- 2nd arg is the type of the to-be-written expression *)
-            | DoLoop String (Exp ty) (Exp ty) [String] Loc
+            | DoLoop (Ident ty) (Exp ty) (Exp ty) [Ident ty] Loc
               deriving (Show, Typeable, Data)
 
 instance Located (Exp ty) where
@@ -297,7 +309,7 @@ instance Located (Exp ty) where
   locOf (Not _ pos) = pos
   locOf (Negate _ _ pos) = pos
   locOf (If _ _ _ _ pos) = pos
-  locOf (Var _ _ pos) = pos
+  locOf (Var ident) = locOf ident
   locOf (Apply _ _ _ pos) = pos
   locOf (LetPat _ _ _ pos) = pos
   locOf (LetWith _ _ _ _ _ pos) = pos
@@ -332,7 +344,7 @@ expType (Or _ _ pos) = Bool pos
 expType (Not _ pos) = Bool pos
 expType (Negate _ t _) = t
 expType (If _ _ _ t _) = t
-expType (Var _ t _) = t
+expType (Var ident) = identType ident
 expType (Apply _ _ t _) = t
 expType (LetPat _ _ body _) = expType body
 expType (LetWith _ _ _ _ body _) = expType body
@@ -397,7 +409,7 @@ opStr Less = "<"
 opStr Leq = "<="
 
 -- | Anonymous Function
-data Lambda ty = AnonymFun [(String,Type)] (Exp ty) Type Loc
+data Lambda ty = AnonymFun [Ident Type] (Exp ty) Type Loc
                     -- fn int (bool x, char z) => if(x) then ord(z) else ord(z)+1 *)
                | CurryFun String [Exp ty] ty Loc
                     -- op +(4) *)
@@ -410,17 +422,15 @@ lambdaType (CurryFun _ _ t _) = t
 
 -- | Tuple Identifier, i.e., pattern matching
 data TupIdent ty = TupId [TupIdent ty] Loc
-                 | Id String ty Loc
+                 | Id (Ident ty)
                    deriving (Typeable, Data, Show)
 
 instance Located (TupIdent ty) where
   locOf (TupId _ loc) = loc
-  locOf (Id _ _ loc) = loc
+  locOf (Id ident) = locOf ident
 
 -- | Function Declarations
-type Binding = (String,Type)
-
-type FunDec ty = (String,Type,[Binding],Exp ty,Loc)
+type FunDec ty = (String,Type,[Ident Type],Exp ty,Loc)
 
 type Prog ty = [FunDec ty]
 
@@ -450,7 +460,7 @@ ppExp d (ArrayLit es _ _) =
   " { " ++ intercalate ", " (map (ppExp d) es) ++ " } "
 ppExp d (TupLit es _) =
   " ( " ++ intercalate ", " (map (ppExp d) es) ++ " ) "
-ppExp _ (Var   var _ _)    = var
+ppExp _ (Var ident) = identName ident
 
 ppExp d (BinOp op e1 e2 _ _) = " ( " ++ ppExp d e1 ++ ppBinOp op ++ ppExp d e2 ++ " ) "
 ppExp d (And   e1 e2 _  ) = " ( " ++ ppExp d e1 ++ " && " ++ ppExp d e2 ++ " ) "
@@ -473,10 +483,10 @@ ppExp d (Apply f args _ _)  =
 ppExp d (LetPat tupid e1 body _) =
         "\n" ++ spaces (d+1) ++ "let " ++ ppTupId tupid ++ " = " ++ ppExp (d+2) e1 ++
         " in  " ++ ppExp (d+2) body
-ppExp d (LetWith name e1 es el e2 _) =
+ppExp d (LetWith (Ident name _ _) e1 es el e2 _) =
       let isassign = case e1 of
-                       Var id1 _ _ -> id1 == name
-                       _           -> False
+                       Var id1 -> identName id1 == name
+                       _       -> False
       in if isassign
          then
               "\n" ++ spaces(d+1) ++ "let " ++ name ++ "[ " ++
@@ -487,7 +497,7 @@ ppExp d (LetWith name e1 es el e2 _) =
               " with [ " ++ intercalate ", " (map (ppExp d) es) ++
               "] <- " ++ ppExp d el ++ " in  " ++ ppExp (d+2) e2
 
-ppExp d (Index name es _ _ _) =
+ppExp d (Index (Ident name _ _) es _ _ _) =
   name ++ "[ " ++ intercalate ", " (map (ppExp d) es) ++ " ]"
 
 -- | Array Constructs
@@ -504,7 +514,7 @@ ppExp d (Reshape es arr _ _ _) =
 ppExp d (Map fun e _ _ _) = " map ( " ++ ppLambda fun ++ ", " ++ ppExp d e ++ " ) "
 
 ppExp d (Zip es _) =
-  " zip ( " ++ intercalate "," (map (ppExp d) $ map fst es) ++ " ) "
+  " zip ( " ++ intercalate "," (map (ppExp d . fst) es) ++ " ) "
 
 ppExp d (Unzip e _ _) = " zip ( " ++ ppExp d e ++ " ) "
 
@@ -525,11 +535,11 @@ ppExp d (Concat a1  a2 _ _) = " concat ( " ++ ppExp d a1 ++ ", " ++ ppExp d a2 +
 ppExp _ (Read t _) = " read("  ++ ppType t  ++ ") "
 ppExp d (Write e _ _) = " write("  ++ ppExp d e  ++ ") "
 ppExp d (DoLoop i n iter mvs _) =
-              "\n" ++ spaces(d+1) ++ "for " ++ i ++ " < " ++ ppExp d n ++ " do " ++
+              "\n" ++ spaces(d+1) ++ "for " ++ identName i ++ " < " ++ ppExp d n ++ " do " ++
               "\n" ++ spaces(d+2) ++ ppExp d iter ++ "\n" ++ spaces(d+1) ++
               "merge " ++ mvs'
-  where mvs' = case mvs of [v] -> v
-                           _   -> "( " ++ intercalate ", " mvs ++ " )"
+  where mvs' = case mvs of [v] -> identName v
+                           _   -> "( " ++ intercalate ", " (map identName mvs) ++ " )"
 
 ppBinOp :: BinOp -> String
 ppBinOp op = " " ++ opStr op ++ " "
@@ -546,13 +556,13 @@ ppType (Tuple tps _) = "( " ++ intercalate " * " (map ppType tps) ++ " ) "
 
 -- | Pretty printing a tuple id
 ppTupId :: TupIdent ty -> String
-ppTupId (Id name _ _) = " " ++ name ++ " "
+ppTupId (Id ident) = " " ++ identName ident ++ " "
 ppTupId (TupId pats _) = " ( " ++ intercalate ", " (map ppTupId pats) ++ " ) "
 
 -- pretty printing Lambda, i.e., curried and unnamed functions *)
 ppLambda :: Lambda ty -> String
 ppLambda ( AnonymFun params body rtp _) =
-      let pp_bd (arg, tp) = ppType tp ++ " " ++ arg
+      let pp_bd (Ident arg tp _) = ppType tp ++ " " ++ arg
           strargs = intercalate ", " $ map pp_bd params
       in " fn " ++ ppType rtp ++ " ( " ++ strargs ++ " ) " ++ " => " ++ ppExp 0 body
 ppLambda ( CurryFun fid [] _ _) = fid
@@ -563,7 +573,7 @@ ppLambda ( CurryFun fid args ty pos) =
 ppFun :: Int -> FunDec ty -> String
 ppFun d (name, ret_tp, args, body, _) =
   let -- pretty printing a list of bindings separated by commas
-      ppBd (argname, tp) = ppType tp ++ " " ++ argname
+      ppBd (Ident argname tp _) = ppType tp ++ " " ++ argname
       pp_bindings = intercalate "," . map ppBd
 
   in "\n\nfun " ++ ppType ret_tp ++ name ++
