@@ -177,7 +177,7 @@ copyCtPropExp (LetPat pat e body pos) = do
  
 copyCtPropExp (DoLoop ind n body mergevars pos) = do
     (s1, n')   <- copyCtPropExp n
-    let mergenames = map (\ (Ident s _ _) -> s) mergevars
+    let mergenames = map identName mergevars
     bnds       <- mapM (\vnm -> asks $ M.lookup vnm . envVtable) mergenames
     let idbnds1 = zip bnds mergevars
     let idbnds  = filter ( \(x,_) -> isValidBnd     x ) idbnds1
