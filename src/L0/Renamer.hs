@@ -29,38 +29,34 @@ new s = do i <- get
            return $ s ++ "_" ++ show i
 
 -- | 'repl s' returns the new name of the variable 's'.
-repl :: String -> RenameM String
-repl s = do sub <- asks $ M.lookup s
-            case sub of Just s' -> return s'
-                        Nothing -> new s
+repl :: Ident ty -> RenameM (Ident ty)
+repl (Ident name tp loc) = do
+  name' <- maybe (new name) return =<< (asks $ M.lookup name)
+  return $ Ident name' tp loc
 
--- | 'repl ident' returns the replacement @Ident@ for 's'.
-repl' :: Ident ty -> RenameM (Ident ty)
-repl' (Ident name tp loc) = do name' <- repl name
-                               return $ Ident name' tp loc
-
-bind :: [String] -> RenameM a -> RenameM a
+bind :: [Ident ty] -> RenameM a -> RenameM a
 bind vars body = do
-  vars' <- mapM new vars
+  vars' <- mapM new varnames
   -- This works because Data.Map.union prefers elements from left
   -- operand.
-  local (M.fromList (zip vars vars') `M.union`) body
+  local (M.fromList (zip varnames vars') `M.union`) body
+  where varnames = map identName vars
 
 renameFun :: FunDec Type -> RenameM (FunDec Type)
 renameFun (fname, ret, params, body, pos) =
-  bind (map identName params) $ do
-    params' <- mapM repl' params
+  bind params $ do
+    params' <- mapM repl params
     body' <- renameExp body
     return (fname, ret, params', body', pos)
 
 renameExp :: Exp Type -> RenameM (Exp Type)
-renameExp (Var ident) = liftM Var $ repl' ident
+renameExp (Var ident) = liftM Var $ repl ident
 renameExp (LetWith ident e1 idxs ve body pos) = do
   e1' <- renameExp e1
   idxs' <- mapM renameExp idxs
   ve' <- renameExp ve
-  bind [identName ident] $ do
-    ident' <- repl' ident
+  bind [ident] $ do
+    ident' <- repl ident
     body' <- renameExp body
     return (LetWith ident' e1' idxs' ve' body' pos)
 renameExp (LetPat pat e body pos) = do
@@ -69,18 +65,18 @@ renameExp (LetPat pat e body pos) = do
     pat' <- renamePattern pat
     body' <- renameExp body
     return $ LetPat pat' e1' body' pos
-  where names (Id ident) = [identName ident]
+  where names (Id ident) = [ident]
         names (TupId pats _) = concatMap names pats
 renameExp (Index s idxs t1 t2 pos) = do
-  s' <- repl' s
+  s' <- repl s
   idxs' <- mapM renameExp idxs
   return $ Index s' idxs' t1 t2 pos
 renameExp (DoLoop loopvar e body mergevars pos) = do
   e' <- renameExp e
-  bind [identName loopvar] $ do
-    loopvar' <- repl' loopvar
+  bind [loopvar] $ do
+    loopvar' <- repl loopvar
     body' <- renameExp body
-    mergevars' <- mapM repl' mergevars
+    mergevars' <- mapM repl mergevars
     return $ DoLoop loopvar' e' body' mergevars' pos
 -- The above case may have to be extended if syntax nodes ever contain
 -- anything but lambdas, expressions, lists of expressions or lists of
@@ -97,8 +93,8 @@ renameExpPair (e,t) = do e' <- renameExp e
 
 renameLambda :: Lambda Type -> RenameM (Lambda Type)
 renameLambda (AnonymFun params body ret pos) =
-  bind (map identName params) $ do
-    params' <- mapM repl' params
+  bind params $ do
+    params' <- mapM repl params
     body' <- renameExp body
     return (AnonymFun params' body' ret pos)
 renameLambda (CurryFun fname curryargexps rettype pos) = do
@@ -107,7 +103,7 @@ renameLambda (CurryFun fname curryargexps rettype pos) = do
 
 renamePattern :: TupIdent Type -> RenameM (TupIdent Type)
 renamePattern (Id ident) = do
-  ident' <- repl' ident
+  ident' <- repl ident
   return $ Id ident'
 renamePattern (TupId pats pos) = do
   pats' <- mapM renamePattern pats
