@@ -39,9 +39,9 @@ import Data.Data
 import Data.List
 import Data.Loc
 
-locStr :: Loc -> String
-locStr NoLoc = "uknown location"
-locStr (Loc (Pos file line1 col1 _) (Pos _ line2 col2 _)) =
+locStr :: SrcLoc -> String
+locStr (SrcLoc NoLoc) = "uknown location"
+locStr (SrcLoc (Loc (Pos file line1 col1 _) (Pos _ line2 col2 _))) =
   -- Assume that both positions are in the same file (what would the
   -- alternative mean?)
   file ++ ":" ++ show line1 ++ ":" ++ show col1
@@ -49,30 +49,21 @@ locStr (Loc (Pos file line1 col1 _) (Pos _ line2 col2 _)) =
 
 -- | L0 Types: Int, Bool, Char, Tuple, multidim-regular Array
 --  TODO: please add float, double, long int, etc.
-data Type = Int Loc
-          | Bool Loc
-          | Char Loc
-          | Real Loc
-          | Tuple [Type] Loc
-          | Array Type (Maybe (Exp (Maybe Type))) Loc -- ^ 1st arg: array's element type, 2nd arg: its length
-            deriving (Show, Typeable, Data)
-
-instance Eq Type where
-  Int _ == Int _ = True
-  Bool _ == Bool _ = True
-  Char _ == Char _ = True
-  Real _ == Real _ = True
-  Tuple ts1 _ == Tuple ts2 _ = ts1 == ts2
-  Array t1 _ _ == Array t2 _ _ = t1 == t2
-  _ == _ = False
+data Type = Int SrcLoc
+          | Bool SrcLoc
+          | Char SrcLoc
+          | Real SrcLoc
+          | Tuple [Type] SrcLoc
+          | Array Type (Maybe (Exp (Maybe Type))) SrcLoc -- ^ 1st arg: array's element type, 2nd arg: its length
+            deriving (Eq, Ord, Show, Typeable, Data)
 
 instance Located Type where
-  locOf (Int loc) = loc
-  locOf (Bool loc) = loc
-  locOf (Char loc) = loc
-  locOf (Real loc) = loc
-  locOf (Tuple _ loc) = loc
-  locOf (Array _ _ loc) = loc
+  locOf (Int loc) = locOf loc
+  locOf (Bool loc) = locOf loc
+  locOf (Char loc) = locOf loc
+  locOf (Real loc) = locOf loc
+  locOf (Tuple _ loc) = locOf loc
+  locOf (Array _ _ loc) = locOf loc
 
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
@@ -119,37 +110,19 @@ basicType _ = True
 -- the base type.
 arrayType :: Int -> Type -> Type
 arrayType 0 t = t
-arrayType n t = arrayType (n-1) $ Array t Nothing (locOf t)
+arrayType n t = arrayType (n-1) $ Array t Nothing (srclocOf t)
 
 -- | Every possible value in L0.  Values are fully evaluated and their
 -- type is always unambiguous.
-data Value = IntVal !Int Loc
-           | RealVal !Double Loc
-           | LogVal !Bool Loc
-           | CharVal !Char Loc
-           | TupVal ![Value] Loc
-           | ArrayVal !(Array Int Value) Type Loc
+data Value = IntVal !Int SrcLoc
+           | RealVal !Double SrcLoc
+           | LogVal !Bool SrcLoc
+           | CharVal !Char SrcLoc
+           | TupVal ![Value] SrcLoc
+           | ArrayVal !(Array Int Value) Type SrcLoc
              -- ^ The type is the element type, not the complete array
              -- type.  It is assumed that the array is 0-indexed.
-             deriving (Show, Typeable, Data)
-
-instance Eq Value where
-  IntVal x _ == IntVal y _ = x == y
-  RealVal x _ == RealVal y _ = x == y
-  LogVal a _ == LogVal b _ = a == b
-  CharVal a _ == CharVal b _ = a == b
-  TupVal vs1 _ == TupVal vs2 _ = vs1 == vs2
-  ArrayVal vs1 _ _ == ArrayVal vs2 _ _ = vs1 == vs2
-  _ == _ = False
-
-instance Ord Value where
-  IntVal x _ <= IntVal y _ = x <= y
-  RealVal x _ <= RealVal y _ = x <= y
-  LogVal a _ <= LogVal b _ = a <= b
-  CharVal a _ <= CharVal b _ = a <= b
-  TupVal vs1 _ <= TupVal vs2 _ = vs1 <= vs2
-  ArrayVal vs1 _ _ <= ArrayVal vs2 _ _ = vs1 <= vs2
-  _ <= _ = False
+             deriving (Eq, Ord, Show, Typeable, Data)
 
 -- | Return the type of a value.
 valueType :: Value -> Type
@@ -161,12 +134,12 @@ valueType (TupVal vs pos) = Tuple (map valueType vs) pos
 valueType (ArrayVal _ t pos) = Array t Nothing pos
 
 instance Located Value where
-  locOf (IntVal _ pos) = pos
-  locOf (RealVal _ pos) = pos
-  locOf (CharVal _ pos) = pos
-  locOf (LogVal _ pos) = pos
-  locOf (TupVal _ pos) = pos
-  locOf (ArrayVal _ _ pos) = pos
+  locOf (IntVal _ pos) = locOf pos
+  locOf (RealVal _ pos) = locOf pos
+  locOf (CharVal _ pos) = locOf pos
+  locOf (LogVal _ pos) = locOf pos
+  locOf (TupVal _ pos) = locOf pos
+  locOf (ArrayVal _ _ pos) = locOf pos
 
 -- | Return a list of the dimensions of an array (the shape, in other
 -- terms).  For non-arrays, this is the empty list.  A two-dimensional
@@ -180,20 +153,19 @@ arrayShape (ArrayVal arr _ _) =
 arrayShape _ = []
 
 -- | Construct an array value containing the given elements.
-arrayVal :: [Value] -> Type -> Loc -> Value
+arrayVal :: [Value] -> Type -> SrcLoc -> Value
 arrayVal vs = ArrayVal $ listArray (0, length vs-1) vs
 
 -- | An identifier consists of its name and the type of the value
 -- bound to the identifier.
-data Ident ty = Ident {
-    identName :: String
-  , identType :: ty
-  , identLoc :: Loc
-  }
-                deriving (Typeable, Data, Show)
+data Ident ty = Ident { identName :: String
+                      , identType :: ty
+                      , identSrcLoc :: SrcLoc
+                      }
+                deriving (Eq, Ord, Typeable, Data, Show)
 
 instance Located (Ident ty) where
-  locOf = identLoc
+  locOf = locOf . identSrcLoc
 
 -- | L0 Expression Language: literals + vars + int binops + array
 -- constructors + array combinators (SOAC) + if + function calls +
@@ -207,132 +179,132 @@ instance Located (Ident ty) where
 -- 'Maybe Type'@, and the type checker will convert these to @Exp
 -- 'Type'@, in which type information is always present.
 data Exp ty = Literal Value
-            | TupLit    [Exp ty] Loc
+            | TupLit    [Exp ty] SrcLoc
             -- ^ Tuple literals, e.g., (1+3, (x, y+z)).  Second
             -- argument is the tuple's type.
-            | ArrayLit  [Exp ty] ty Loc
+            | ArrayLit  [Exp ty] ty SrcLoc
             -- ^ Array literals, e.g., { {1+x, 3}, {2, 1+4} }.  Second
             -- arg is the element type of the array.
-            | BinOp BinOp (Exp ty) (Exp ty) ty Loc
+            | BinOp BinOp (Exp ty) (Exp ty) ty SrcLoc
             -- Binary Ops for Booleans
-            | And    (Exp ty) (Exp ty) Loc
-            | Or     (Exp ty) (Exp ty) Loc
+            | And    (Exp ty) (Exp ty) SrcLoc
+            | Or     (Exp ty) (Exp ty) SrcLoc
             -- Unary Ops: Not for bools and Negate for ints
-            | Not    (Exp ty) Loc -- e.g., not True = False
-            | Negate (Exp ty) ty Loc -- e.g., ~(~1) = 1
-            | If     (Exp ty) (Exp ty) (Exp ty) ty Loc
+            | Not    (Exp ty) SrcLoc -- e.g., not True = False
+            | Negate (Exp ty) ty SrcLoc -- e.g., ~(~1) = 1
+            | If     (Exp ty) (Exp ty) (Exp ty) ty SrcLoc
             | Var    (Ident ty)
             -- Function Call and Let Construct
-            | Apply  String [Exp ty] ty Loc
-            | LetPat (TupIdent ty) (Exp ty) (Exp ty) Loc
-            | LetWith (Ident ty) (Exp ty) [Exp ty] (Exp ty) (Exp ty) Loc
+            | Apply  String [Exp ty] ty SrcLoc
+            | LetPat (TupIdent ty) (Exp ty) (Exp ty) SrcLoc
+            | LetWith (Ident ty) (Exp ty) [Exp ty] (Exp ty) (Exp ty) SrcLoc
             -- Array Indexing and Array Constructors
-            | Index (Ident ty) [Exp ty] ty ty Loc
+            | Index (Ident ty) [Exp ty] ty ty SrcLoc
              -- e.g., arr[3]; 3rd arg is the input-array element type
              -- 4th arg is the result type
-            | Iota (Exp ty) Loc -- e.g., iota(n) = {0,1,..,n-1}
-            | Size (Exp ty) Loc -- The number of elements in an array.
-            | Replicate (Exp ty) (Exp ty) ty Loc -- e.g., replicate(3,1) = {1, 1, 1}
+            | Iota (Exp ty) SrcLoc -- e.g., iota(n) = {0,1,..,n-1}
+            | Size (Exp ty) SrcLoc -- The number of elements in an array.
+            | Replicate (Exp ty) (Exp ty) ty SrcLoc -- e.g., replicate(3,1) = {1, 1, 1}
                                                     -- Type is element type of output array
 
-            | Reshape [Exp ty] (Exp ty) ty ty Loc
+            | Reshape [Exp ty] (Exp ty) ty ty SrcLoc
              -- 1st arg is the new shape, 2nd arg is the input array *)
              -- 3rd arg is the  input-array type *)
              -- 4th arg is the result-array type *)
 
-            | Transpose (Exp ty) ty ty Loc
-             -- 1st arg is the (input) to-be-transLoced array *)
+            | Transpose (Exp ty) ty ty SrcLoc
+             -- 1st arg is the (input) to-be-transSrcLoced array *)
              -- 2nd argument is the  input-array type *)
              -- 3rd argument is the result-array type *)
 
             -- Second-Order Array Combinators
             -- accept curried and anonymous
             -- functions as (first) params
-            | Map (Lambda ty) (Exp ty) ty ty Loc
+            | Map (Lambda ty) (Exp ty) ty ty SrcLoc
              -- e.g., map(op +(1), {1,2,..,n}) = {2,3,..,n+1} *)
              -- 3st arg is the input-array element type *)
              -- 4th arg is the output-array element type *)
 
-            | Reduce (Lambda ty) (Exp ty) (Exp ty) ty Loc
+            | Reduce (Lambda ty) (Exp ty) (Exp ty) ty SrcLoc
              -- e.g., reduce(op +, 0, {1,2,..,n}) = (0+1+2+..+n) *)
              -- 4th arg is the input-array element type          *)
 
-            | Zip [(Exp ty, ty)] Loc
+            | Zip [(Exp ty, ty)] SrcLoc
             -- Normal zip supporting variable number of arguments.
             -- The type paired to each expression is the element type
             -- of the array returned by that expression.
 
-            | Unzip (Exp ty) [ty] Loc
+            | Unzip (Exp ty) [ty] SrcLoc
             -- Unzip that can unzip tuples of arbitrary size.  The
             -- types are the elements of the tuple.
 
-            | Scan (Lambda ty) (Exp ty) (Exp ty) ty Loc
+            | Scan (Lambda ty) (Exp ty) (Exp ty) ty SrcLoc
              -- scan(plus, 0, { 1, 2, 3 }) = { 1, 3, 6 }
              -- 4th arg is the element type of the input array
 
-            | Filter (Lambda ty) (Exp ty) ty Loc
+            | Filter (Lambda ty) (Exp ty) ty SrcLoc
              -- 3rd arg is the type of the input (and result) array *)
 
-            | Mapall (Lambda ty) (Exp ty) ty ty Loc
+            | Mapall (Lambda ty) (Exp ty) ty ty SrcLoc
              -- e.g., mapall(op ~, {{1,~2}, {~3,4}}) = {{~1,2}, {3,~4}}
              -- 3rd and 4th args are the base types of the input and result arrays, respectively.
 
-            | Redomap (Lambda ty) (Lambda ty) (Exp ty) (Exp ty) ty ty Loc
+            | Redomap (Lambda ty) (Lambda ty) (Exp ty) (Exp ty) ty ty SrcLoc
              -- redomap(g, f, n, a) = reduce(g, n, map(f, a))    *)
              -- 5th arg is the element type of the input  array *)
              -- 6th arg is the element type of the result array *)
 
-            | Split (Exp ty) (Exp ty) ty Loc
+            | Split (Exp ty) (Exp ty) ty SrcLoc
              -- split(2, { 1, 2, 3, 4 }) = {{1},{2, 3, 4}} *)
              -- 3rd arg is the type of the input array *)
 
-            | Concat (Exp ty) (Exp ty) ty Loc
+            | Concat (Exp ty) (Exp ty) ty SrcLoc
              -- concat ({1},{2, 3, 4}) = {1, 2, 3, 4} *)
              -- 3rd arg is the type of the input array*)
 
             -- IO
-            | Read Type Loc
+            | Read Type SrcLoc
              -- e.g., read(int); 1st arg is a basic-type, i.e., of the to-be-read element *)
 
-            | Write (Exp ty) ty Loc
+            | Write (Exp ty) ty SrcLoc
              -- e.g., write(map(f, replicate(3,1))) writes array {f(1),f(1),f(1)} *)
              -- 2nd arg is the type of the to-be-written expression *)
-            | DoLoop (Ident ty) (Exp ty) (Exp ty) [Ident ty] Loc
-              deriving (Show, Typeable, Data)
+            | DoLoop (Ident ty) (Exp ty) (Exp ty) [Ident ty] SrcLoc
+              deriving (Eq, Ord, Show, Typeable, Data)
 
 instance Located (Exp ty) where
   locOf (Literal val) = locOf val
-  locOf (TupLit _ pos) = pos
-  locOf (ArrayLit _ _ pos) = pos
-  locOf (BinOp _ _ _ _ pos) = pos
-  locOf (And _ _ pos) = pos
-  locOf (Or _ _ pos) = pos
-  locOf (Not _ pos) = pos
-  locOf (Negate _ _ pos) = pos
-  locOf (If _ _ _ _ pos) = pos
+  locOf (TupLit _ pos) = locOf pos
+  locOf (ArrayLit _ _ pos) = locOf pos
+  locOf (BinOp _ _ _ _ pos) = locOf pos
+  locOf (And _ _ pos) = locOf pos
+  locOf (Or _ _ pos) = locOf pos
+  locOf (Not _ pos) = locOf pos
+  locOf (Negate _ _ pos) = locOf pos
+  locOf (If _ _ _ _ pos) = locOf pos
   locOf (Var ident) = locOf ident
-  locOf (Apply _ _ _ pos) = pos
-  locOf (LetPat _ _ _ pos) = pos
-  locOf (LetWith _ _ _ _ _ pos) = pos
-  locOf (Index _ _ _ _ pos) = pos
-  locOf (Iota _ pos) = pos
-  locOf (Size _ pos) = pos
-  locOf (Replicate _ _ _ pos) = pos
-  locOf (Reshape _ _ _ _ pos) = pos
-  locOf (Transpose _ _ _ pos) = pos
-  locOf (Map _ _ _ _ pos) = pos
-  locOf (Reduce _ _ _ _ pos) = pos
-  locOf (Zip _ pos) = pos
-  locOf (Unzip _ _ pos) = pos
-  locOf (Scan _ _ _ _ pos) = pos
-  locOf (Filter _ _ _ pos) = pos
-  locOf (Mapall _ _ _ _ pos) = pos
-  locOf (Redomap _ _ _ _ _ _ pos) = pos
-  locOf (Split _ _ _ pos) = pos
-  locOf (Concat _ _ _ pos) = pos
-  locOf (Read _ pos) = pos
-  locOf (Write _ _ pos) = pos
-  locOf (DoLoop _ _ _ _ pos) = pos
+  locOf (Apply _ _ _ pos) = locOf pos
+  locOf (LetPat _ _ _ pos) = locOf pos
+  locOf (LetWith _ _ _ _ _ pos) = locOf pos
+  locOf (Index _ _ _ _ pos) = locOf pos
+  locOf (Iota _ pos) = locOf pos
+  locOf (Size _ pos) = locOf pos
+  locOf (Replicate _ _ _ pos) = locOf pos
+  locOf (Reshape _ _ _ _ pos) = locOf pos
+  locOf (Transpose _ _ _ pos) = locOf pos
+  locOf (Map _ _ _ _ pos) = locOf pos
+  locOf (Reduce _ _ _ _ pos) = locOf pos
+  locOf (Zip _ pos) = locOf pos
+  locOf (Unzip _ _ pos) = locOf pos
+  locOf (Scan _ _ _ _ pos) = locOf pos
+  locOf (Filter _ _ _ pos) = locOf pos
+  locOf (Mapall _ _ _ _ pos) = locOf pos
+  locOf (Redomap _ _ _ _ _ _ pos) = locOf pos
+  locOf (Split _ _ _ pos) = locOf pos
+  locOf (Concat _ _ _ pos) = locOf pos
+  locOf (Read _ pos) = locOf pos
+  locOf (Write _ _ pos) = locOf pos
+  locOf (DoLoop _ _ _ _ pos) = locOf pos
 
 -- | Given an expression with known types, return its type.
 expType :: Exp Type -> Type
@@ -388,7 +360,7 @@ data BinOp = Plus -- Binary Ops for Numbers
            | Equal
            | Less
            | Leq
-             deriving (Enum, Bounded, Typeable, Data, Show)
+             deriving (Eq, Ord, Enum, Bounded, Typeable, Data, Show)
 
 -- ^ Print the operator, without whitespace, that corresponds to this
 -- @BinOp@.
@@ -410,11 +382,11 @@ opStr Less = "<"
 opStr Leq = "<="
 
 -- | Anonymous Function
-data Lambda ty = AnonymFun [Ident Type] (Exp ty) Type Loc
+data Lambda ty = AnonymFun [Ident Type] (Exp ty) Type SrcLoc
                     -- fn int (bool x, char z) => if(x) then ord(z) else ord(z)+1 *)
-               | CurryFun String [Exp ty] ty Loc
+               | CurryFun String [Exp ty] ty SrcLoc
                     -- op +(4) *)
-                 deriving (Typeable, Data, Show)
+                 deriving (Eq, Ord, Typeable, Data, Show)
 
 -- | The return type of a lambda function.
 lambdaType :: Lambda Type -> Type
@@ -422,16 +394,16 @@ lambdaType (AnonymFun _ _ t _) = t
 lambdaType (CurryFun _ _ t _) = t
 
 -- | Tuple Identifier, i.e., pattern matching
-data TupIdent ty = TupId [TupIdent ty] Loc
+data TupIdent ty = TupId [TupIdent ty] SrcLoc
                  | Id (Ident ty)
-                   deriving (Typeable, Data, Show)
+                   deriving (Eq, Ord, Typeable, Data, Show)
 
 instance Located (TupIdent ty) where
-  locOf (TupId _ loc) = loc
+  locOf (TupId _ loc) = locOf loc
   locOf (Id ident) = locOf ident
 
 -- | Function Declarations
-type FunDec ty = (String,Type,[Ident Type],Exp ty,Loc)
+type FunDec ty = (String,Type,[Ident Type],Exp ty,SrcLoc)
 
 type Prog ty = [FunDec ty]
 

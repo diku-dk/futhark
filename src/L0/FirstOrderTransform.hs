@@ -103,7 +103,7 @@ transformExp (Redomap redfun mapfun accexp arrexp intype _ loc) = do
   return $ redlet loop
 transformExp e = return e
 
-newReduction :: Loc -> Exp Type -> Exp Type
+newReduction :: SrcLoc -> Exp Type -> Exp Type
              -> TransformM ((Ident Type, Exp Type),
                             (Ident Type, Exp Type),
                             (Ident Type, Exp Type),
@@ -119,9 +119,9 @@ newLet e name = do
   (x,xv) <- newVar name (expType e) loc
   let xlet body = LetPat (Id x) e body loc
   return (x, xv, xlet)
-  where loc = locOf e
+  where loc = srclocOf e
 
-newVar :: String -> Type -> Loc -> TransformM (Ident Type, Exp Type)
+newVar :: String -> Type -> SrcLoc -> TransformM (Ident Type, Exp Type)
 newVar name tp loc = do
   x <- new name
   return (Ident x tp loc, Var $ Ident x tp loc)

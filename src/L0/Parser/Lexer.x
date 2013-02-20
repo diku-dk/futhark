@@ -3,9 +3,11 @@
 module L0.Parser.Lexer
   ( Token(..)
   , alexScanTokens
+  , L(..)
+  , unLoc
   ) where
 
-import Data.Loc
+import Data.Loc hiding (L, unLoc)
 
 import L0.AbSyn
 import L0.Parser.Tokens
@@ -162,7 +164,7 @@ alexScanTokens file str = go (alexStartPos,'\n',[],str)
                   let tok = L (loc pos pos') $ act (take len str) 
                   toks <- go inp'
                   return $ tok : toks
-        loc beg end = Loc (posnToPos beg) (posnToPos end)
+        loc beg end = SrcLoc $ Loc (posnToPos beg) (posnToPos end)
         posnToPos (AlexPn offset line col) = Pos file line col offset
 
 readReal :: String -> Double
@@ -174,4 +176,15 @@ readInt :: String -> Int
 readInt = read . map subst
   where subst '~' = '-'
         subst c   = c
+
+data L a = L SrcLoc a
+
+instance Eq a => Eq (L a) where
+  L _ x == L _ y = x == y
+
+instance Located (L a) where
+  locOf (L (SrcLoc loc) _) = loc
+
+unLoc :: L a -> a
+unLoc (L _ x) = x
 }
