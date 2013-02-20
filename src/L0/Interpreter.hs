@@ -231,7 +231,8 @@ evalExp (Iota e pos) = do
 evalExp (Size e pos) = do
   v <- evalExp e
   case v of
-    ArrayVal arr _ _ -> return $ IntVal (snd $ bounds arr) pos
+    ArrayVal arr _ _ -> let (lower, upper) = bounds arr
+                        in return $ IntVal (upper - lower + 1) pos
     _ -> bad $ TypeError pos "evalExp Size"
 evalExp (Replicate e1 e2 et pos) = do
   v1 <- evalExp e1

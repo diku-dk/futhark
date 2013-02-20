@@ -175,7 +175,7 @@ instance Located Value where
 arrayShape :: Value -> [Int]
 arrayShape (ArrayVal arr _ _) =
   if size == 0 then [0] else size : arrayShape (arr ! 0)
-  where size = upper - lower
+  where size = upper - lower + 1
         (lower, upper) = bounds arr
 arrayShape _ = []
 
