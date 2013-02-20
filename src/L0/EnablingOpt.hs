@@ -185,11 +185,11 @@ copyCtPropExp (DoLoop ind n body mergevars pos) = do
     let remkeys = map (\(_, (Ident s _ _) ) -> s) idbnds
     (s2, body')<- remBindings remkeys $ copyCtPropExp body
     let newloop = DoLoop ind n' body' mergevars pos
-    --(_, resloop) <- foldM (writeBackBnd pos) (False, newloop) toadd
+    (_, resloop) <- foldM (writeBackBnd pos) (False, newloop) toadd
     --(_, resloop) <- foldM (\y bnd -> writeBackBnd pos y bnd) (False, newloop) toadd
     --let ccc = (toadd !! 0)
     --(_, resloop1) <- writeBackBnd pos (False,newloop) (toadd !! 0)
-    return (s1 || s2, newloop)--newloop)--resloop1)
+    return (s1 || s2, resloop)--newloop)--resloop1)
 
 copyCtPropExp e@(Var (Ident vnm _ pos)) = do 
     -- let _ = trace ("In VarExp: "++ppExp 0 e) e
