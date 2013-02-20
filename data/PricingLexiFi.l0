@@ -177,28 +177,33 @@ fun [[real]] brownianBridge (
 /// Black-Scholes
 /////////////////////////////////
 
-fun real zwop(real a, real b, int j) = a * b
+fun real zwop((real * real * int) t) =
+    let (a, b, j) = t in a * b
 
 fun [real] fftmp(int num_paths, [[real]] md_c, [real] zi) = 
     map( fn real (int j) => 
-            let x = zipWith(zwop, zi, md_c[j], iota(j+1))
+            let x = map(zwop, zip(zi, md_c[j], iota(j+1)))
             in  reduce(op +, 0.0, x), 
          iota(num_paths) 
        )
 
 fun [[real]] correlateDeltas(int num_paths, [[real]] md_c, [[real]] zds) = 
     map( fftmp(num_paths, md_c), zds )
-    
 
-fun [real] combineVs([real] n_row, [real] vol_row, [real] dr_row) =
-    zipWith( op +, dr_row, zipWith( op *, n_row, vol_row ) ) 
+fun real realplus((real * real) t) = let (x,y) = t in x + y
+
+fun real realmult((real * real) t) = let (x,y) = t in x * y
+
+fun [real] combineVs(([real] * [real] * [real]) t) =
+    let (n_row, vol_row, dr_row) = t in
+    map( realplus, zip(dr_row, map( realmult, zip(n_row, vol_row ) )))
 
 fun [[real]] mkPrices ([real] md_starts, [[real]] md_vols, [[real]] md_drifts, [[real]] noises) =
     let e_rows = map( fn [real] ([real] x) => map(exp, x), 
-                      zipWith( combineVs, noises, md_vols, md_drifts ) 
+                      map(combineVs, zip(noises, md_vols, md_drifts))
                     )
         // If we use the scan(op *, e, {x1,..,xn}) = {e*x1, e*x1*x2,...,e*x1*x2*...xn}
-    in  scan( fn [real] ([real] x, [real] y) => zipWith(op *, x, y), md_starts, e_rows )
+    in  scan( fn [real] ([real] x, [real] y) => map(realmult, zip(x, y)), md_starts, e_rows )
 
         // If we use the scan(op *, e, {x1,..,xn}) = {e, e*x1, ..., e*..*xnm1}
     //  let tmp = scan( fn [real] ([real] x, [real] y) => zipWith(op *, x, y), md_starts, e_rows )
@@ -248,7 +253,7 @@ fun real main() =
 fun real payoff2 ([real] md_disc, [[real]] xss) =        
 // invariant: length(xss) == 5, i.e., 5x3 matrix
     let divs    = { 1.0/3758.05, 1.0/11840.0, 1.0/1200.0 }             in
-    let xss_div = map( fn [real] ([real] xs) => zipWith(op *, xs, divs), xss     ) in
+    let xss_div = map( fn [real] ([real] xs) => map(realmult, zip(xs, divs)), xss     ) in
     let mins    = map( MIN, xss_div )
     in  if( 1.0 <= mins[0] ) then trajInner(1150.0, 0, md_disc)
         else if( 1.0 <= mins[1] ) then trajInner(1300.0, 1, md_disc)

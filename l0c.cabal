@@ -16,13 +16,14 @@ Executable l0c
                  array >= 0.4,
                  containers >= 0.5,
                  mtl >= 2.1,
-                 either >= 3.0
+                 either >= 3.0,
+                 srcloc >= 0.3,
+                 syb >= 0.3
 --                 language-c-quote >= 0.4,
 --                 mainland-pretty >= 0.2.5,
---                 srcloc >= 0.3
 
-  Other-modules: L0.Parser,
-                 L0.Lexer
+  Other-modules: L0.Parser.Parser,
+                 L0.Parser.Lexer
 
   -- Directories other than the root containing source files.
   hs-source-dirs:      src

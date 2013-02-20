@@ -2,8 +2,6 @@
 module Main (main) where
 
 import Control.Applicative
-import Control.Monad
-import Control.Monad.Identity (Identity)
 import System.Environment (getArgs)
 
 import L0.AbSyn
@@ -12,6 +10,7 @@ import L0.TypeChecker
 import L0.Renamer
 import L0.Interpreter
 import L0.EnablingOpt
+import L0.FirstOrderTransform
 
 import Debug.Trace
 
@@ -42,11 +41,12 @@ import Debug.Trace
 main :: IO ()
 main = do args <- getArgs
           case args of
-            ["-p", file] -> prettyprint file
-            ["-t", file] -> typecheck (const $ return ()) file
-            ["-tp", file] -> typecheck (putStrLn . prettyPrint) file
-            ["-r", file] -> rename file
-            ["-i", file] -> interpret file
+            ["-p",   file] -> prettyprint file
+            ["-t",   file] -> typecheck (const $ return ()) file
+            ["-tp",  file] -> typecheck (putStrLn . prettyPrint) file
+            ["-r",   file] -> typecheck rename file
+            ["-i",   file] -> interpret file
+            ["-tr",  file] -> typecheck (fotransform) file
             ["-cos", file] -> testCosmin file
 --            ["-c", file] -> compile file
             _ -> error "Usage: <-p|-t|-tp|-r|-i|-c> <file>"
@@ -54,7 +54,7 @@ main = do args <- getArgs
 prettyprint :: FilePath -> IO ()
 prettyprint file = putStrLn =<< prettyPrint <$> parse file
 
-typecheck :: (Prog Identity -> IO ()) -> FilePath -> IO ()
+typecheck :: (Prog Type -> IO ()) -> FilePath -> IO ()
 typecheck next file = do
   prog <- parse file
   case checkProg prog of
@@ -64,10 +64,17 @@ typecheck next file = do
         Left e  -> error $ "Error during second type checking phase. This implies a bug in the type checker.\n" ++ show e
         Right _ -> next prog'
 
-rename :: FilePath -> IO ()
-rename file = do prog <- renameProg <$> parse file
-                 putStrLn $ prettyPrint prog
-                 case checkProg prog of
+fotransform :: Prog Type -> IO ()
+fotransform prog = let prog' = transformProg prog
+                   in case checkProg $ transformProg prog of
+                        Right prog'' -> putStrLn $ prettyPrint prog''
+                        Left e -> do putStrLn $ prettyPrint prog'
+                                     error $ "Type error after transformation:\n" ++ show e
+
+rename :: Prog Type -> IO ()
+rename prog = do let prog' = renameProg prog
+                 putStrLn $ prettyPrint prog'
+                 case checkProg prog' of
                    Left e -> error $ "Type error after renaming:\n" ++ show e
                    _      -> return ()
 
@@ -105,8 +112,8 @@ compile file = do
     Right prog' -> putStr $ compileProg $ renameProg prog'
 -}
 
-parse :: FilePath -> IO (Prog Maybe)
-parse = return . parseL0 <=< readFile
+parse :: FilePath -> IO (Prog (Maybe Type))
+parse file = either fail return . parseL0 file =<< readFile file
 
 {-
   fun createLexerStream ( is : BasicIO.instream ) =
