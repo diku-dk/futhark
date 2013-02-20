@@ -23,7 +23,7 @@ import qualified Data.Map as M
 
 import L0.AbSyn
 
-import Debug.Trace
+--import Debug.Trace
 
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.
@@ -85,11 +85,11 @@ data CtOrId tf  = Constant Value   tf Bool
 
                 | SymArr  (Exp tf) tf Bool
                 -- various other opportunities for copy
-                -- propagation, e.g., and indexed variable,
-                -- a iota array, a replicated array, etc.
-                -- I leave this one open, i.e., Exp tf,
+                -- propagation, for the moment: (i) an indexed variable,
+                -- (ii) an iota array, (iii) a replicated array, (iv) a TupLit, 
+                -- and (v) an ArrayLit.   I leave this one open, i.e., (Exp tf),
                 -- as I do not know exactly what we need here
-                -- To Cosmin: Clean it up in the end.
+                -- To Cosmin: Clean it up in the end, i.e., get rid of (Exp tf).
 
 data CPropEnv tf = CopyPropEnv {   
                         envVtable  :: M.Map String (CtOrId tf)
@@ -145,35 +145,6 @@ copyCtPropFun :: TypeBox tf => FunDec tf -> CPropM tf (Bool, FunDec tf)
 copyCtPropFun (fname, rettype, args, body, pos) = do
     (s, body') <- copyCtPropExp body 
     return (s, (fname, rettype, args, body', pos))
-    -- (s, body') <- binding args' $ copyCtPropExp body 
-    -- return (s, (fname, rettype, args, body', pos))
-    -- where
-    --    args' = map (\(pname,tp)->(pname, VarId pname (boxType tp) False)) args
-        -- assumes it has been already checked that param names 
-        -- are not duplicates.
-    
-
-writeBackBnd :: TypeBox tf => Loc -> (Bool,Exp tf) -> (Maybe (CtOrId tf),String) -> CPropM tf (Bool,(Exp tf))
-writeBackBnd pos (_,loop) (bnd,nm) = do
--- nm denotes a merged variable that is to be removed by propagation, 
--- hence needs to be written back, i.e., the result is: `let nm = bnd in loop'
-    case bnd of
-        Nothing -> badCPropM $ CopyCtPropError pos (" Broken invariant in writeBackBnd: " ++
-                                                      "merged-var binding is Nothing") --e
-        Just (Constant val tp b) -> 
-            if b then return ( False, (LetPat (Id nm tp pos) (Literal val)   loop pos) )
-            else badCPropM $ CopyCtPropError pos (" Broken invariant in writeBackBnd: " ++
-                                                    "write-back merged-var not removable") --e
-        Just (VarId    ii  tp b) -> 
-            if b then return ( False, (LetPat (Id nm tp pos) (Var ii tp pos) loop pos) )
-            else badCPropM $ CopyCtPropError pos (" Broken invariant in writeBackBnd: " ++
-                                                    "write-back merged-var not removable") --e
-        Just (SymArr   eee tp b) -> 
-            if b then return ( False, (LetPat (Id nm tp pos) eee loop pos) )
-            else badCPropM $ CopyCtPropError pos (" Broken invariant in writeBackBnd: " ++
-                                                    "write-back merged-var not removable") --e
-    
-
 
 --------------------------------------------------------------------
 --------------------------------------------------------------------
@@ -206,59 +177,61 @@ copyCtPropExp (LetPat pat e body pos) = do
  
 copyCtPropExp (DoLoop ind n body mergevars pos) = do
     (s1, n')   <- copyCtPropExp n
-    bnds       <- mapM (\vnm -> asks $ M.lookup vnm . envVtable) mergevars
+    let mergenames = map (\ (Ident s _ _) -> s) mergevars
+    bnds       <- mapM (\vnm -> asks $ M.lookup vnm . envVtable) mergenames
     let idbnds1 = zip bnds mergevars
     let idbnds  = filter ( \(x,_) -> isValidBnd     x ) idbnds1
     let toadd   = filter ( \(x,_) -> isRemovableBnd x ) idbnds 
-    let remkeys = map snd idbnds
+    let remkeys = map (\(_, (Ident s _ _) ) -> s) idbnds
     (s2, body')<- remBindings remkeys $ copyCtPropExp body
     let newloop = DoLoop ind n' body' mergevars pos
-    (_, resloop) <- foldM (\y bnd -> writeBackBnd pos y bnd) (False, newloop) toadd
+    --(_, resloop) <- foldM (writeBackBnd pos) (False, newloop) toadd
+    --(_, resloop) <- foldM (\y bnd -> writeBackBnd pos y bnd) (False, newloop) toadd
     --let ccc = (toadd !! 0)
     --(_, resloop1) <- writeBackBnd pos (False,newloop) (toadd !! 0)
-    return (s1 || s2, resloop)--newloop)--resloop1)
+    return (s1 || s2, newloop)--newloop)--resloop1)
 
-copyCtPropExp e@(Var vnm _ pos) = do 
+copyCtPropExp e@(Var (Ident vnm _ pos)) = do 
     -- let _ = trace ("In VarExp: "++ppExp 0 e) e
     bnd <- asks $ M.lookup vnm . envVtable
     case bnd of
         Nothing                 -> return (False, e)
         Just (Constant v   _ _) -> return (True,  Literal v     )
-        Just (VarId  id' tp1 _) -> return (True,  Var id' tp1 pos) -- or tp
+        Just (VarId  id' tp1 _) -> return (True,  Var (Ident id' tp1 pos)) -- or tp
         Just (SymArr e'    _ _) ->
             case e' of
                 Replicate _ _ _ _ -> return (False, e )
-                TupLit    _ _ _   -> return (False, e )
+                TupLit    _ _     -> return (False, e )
                 ArrayLit  _ _ _   -> return (False, e )
                 Index _ _ _ _ _   -> return (True,  e')
                 Iota  _ _         -> return (True,  e')
                 _                 -> return (False, e )
 
-copyCtPropExp eee@(Index vnm inds tp1 tp2 pos) = do 
+copyCtPropExp eee@(Index idd@(Ident vnm tp p) inds tp1 tp2 pos) = do 
   (ss1, inds')  <- unzip <$> mapM copyCtPropExp inds
   let ss  = foldl (||) False ss1
   bnd <- asks $ M.lookup vnm . envVtable 
   case bnd of
-    Nothing               -> return (ss,    Index vnm inds' tp1 tp2 pos)
-    Just (VarId  id' _ _) -> return (True,  Index id' inds' tp1 tp2 pos)
+    Nothing               -> return (ss,    Index idd inds' tp1 tp2 pos)
+    Just (VarId  id' _ _) -> return (True,  Index (Ident id' tp p) inds' tp1 tp2 pos)
     Just (Constant v _ _) -> 
       case v of
         ArrayVal _ _ _ ->
           let sh = arrayShape v 
           in case ctIndex inds' of
-               Nothing -> return (ss, Index vnm inds' tp1 tp2 pos)
+               Nothing -> return (ss, Index idd inds' tp1 tp2 pos)
                Just iis-> 
                  if (length iis == length sh)
                  then case getArrValInd v iis of
-                        Nothing -> return (ss, Index vnm inds' tp1 tp2 pos)
+                        Nothing -> return (ss, Index idd inds' tp1 tp2 pos)
                         Just el -> return (True, Literal el)
-                 else return (ss, Index vnm inds' tp1 tp2 pos)
+                 else return (ss, Index idd inds' tp1 tp2 pos)
         _ -> badCPropM $ TypeError pos  " indexing into a non-array value "
     Just (SymArr e' _ _) -> 
       case (e', inds') of 
         (Iota _ _, [ii]) -> return (True, ii)
         (Iota _ _, _)    -> badCPropM $ TypeError pos  " bad indexing in iota "
-        (Replicate _ vvv@(Var vv _ _) _ _, _:is') -> do
+        (Replicate _ vvv@(Var vv@(Ident _ _ _)) _ _, _:is') -> do
             (_, inner) <- if null is' then copyCtPropExp vvv
                                       else copyCtPropExp (Index vv is' tp1 tp2 pos) 
             return (True, inner)
@@ -269,28 +242,30 @@ copyCtPropExp eee@(Index vnm inds tp1 tp2 pos) = do
             if     (length is' == 0) then return (True, Iota n pos )
             else if(length is' == 1) then return (True, head is')
             else badCPropM $ TypeError pos  (" illegal indexing: " ++ ppExp 0 eee)
-        (ArrayLit _ _ _, _ ) ->
-          case ctIndex inds' of
-            Nothing  -> return (ss, Index vnm inds' tp1 tp2 pos)
-            Just iis -> case getArrLitInd e' iis of
-                          Nothing -> return (ss, Index vnm inds' tp1 tp2 pos)
-                          Just el -> return (True, el)
+        (Replicate _ _ _ _, _) -> 
+            return (ss, Index idd inds' tp1 tp2 pos)
+        (ArrayLit _ _ _   , _) ->
+            case ctIndex inds' of
+                Nothing  -> return (ss, Index idd inds' tp1 tp2 pos)
+                Just iis -> case getArrLitInd e' iis of
+                                Nothing -> return (ss, Index idd inds' tp1 tp2 pos)
+                                Just el -> return (True, el)
         (Index aa ais t1 t2 _,_) -> do
             (_, inner) <- copyCtPropExp( Index aa (ais ++ inds') t1 t2 pos ) 
             return (True, inner)
-        (TupLit   _ _ _, _   ) -> badCPropM $ TypeError pos  " indexing into a tuple "
+        (TupLit   _ _, _       ) -> badCPropM $ TypeError pos  " indexing into a tuple "
         _ -> badCPropM $ CopyCtPropError pos (" Unreachable case in copyCtPropExp of Index exp: " ++
-                                              " index-exp of "++vnm++" bound to "++ppExp 0 e' ) --e 
+                                              ppExp 0 eee++" is bound to "++ppExp 0 e' ) --e 
                                               --" index-exp of "++ppExp 0 eee++" bound to "++ppExp 0 e' ) --e
 
 
 copyCtPropExp (Literal v)       = do 
     return (False, Literal v)
 
-copyCtPropExp (TupLit els tp pos) = do 
+copyCtPropExp (TupLit els pos) = do 
     res <- mapM copyCtPropExp els
     let (bs, els') = unzip res
-    return (foldl (||) False bs, TupLit els' tp pos)
+    return (foldl (||) False bs, TupLit els' pos)
 
 copyCtPropExp (ArrayLit  els tp pos) = do 
     (bs, els') <- unzip <$> mapM copyCtPropExp els
@@ -382,11 +357,12 @@ copyCtPropExp (Reduce fname e1 e2 tp pos) = do
 --    (ss, es') <- copyCtPropExpList es
 --    return (ss, ZipWith fname es' tp1 tp2 pos)
 
-copyCtPropExp (Zip es tps pos) = do
+copyCtPropExp (Zip exptps pos) = do
+    let (es, tps) = unzip exptps
     (ss, es') <- copyCtPropExpList es
-    return (ss, Zip es' tps pos)
+    return (ss, Zip (zip es' tps) pos)
 
-copyCtPropExp (Unzip e  tps pos) = do
+copyCtPropExp (Unzip e tps pos)= do
     (s, e') <- copyCtPropExp e
     return (s, Unzip e' tps pos)
 
@@ -594,6 +570,27 @@ isValidBnd bnd = case bnd of
                     Nothing -> False
                     Just _  -> True
 
+writeBackBnd :: TypeBox tf => Loc -> (Bool,Exp tf) -> (Maybe (CtOrId tf), Ident tf) -> CPropM tf (Bool,Exp tf)
+writeBackBnd pos (_,loop) (bnd,ident) = do
+-- nm denotes a merged variable that is to be removed by propagation, 
+-- hence needs to be written back, i.e., the result is: `let nm = bnd in loop'
+    case bnd of
+        Nothing -> badCPropM $ CopyCtPropError pos (" Broken invariant in writeBackBnd: " ++
+                                                      "merged-var binding is Nothing") --e
+        Just (Constant val _ b) -> 
+            if b then return ( False, (LetPat (Id ident) (Literal val)   loop pos) )
+            else badCPropM $ CopyCtPropError pos (" Broken invariant in writeBackBnd: " ++
+                                                    "write-back merged-var not removable") --e
+        Just (VarId    ii  tp b) ->                        -- could use `ident' here
+            if b then return ( False, (LetPat (Id ident) (Var (Ident ii tp pos)) loop pos) )  
+            else badCPropM $ CopyCtPropError pos (" Broken invariant in writeBackBnd: " ++
+                                                    "write-back merged-var not removable") --e
+        Just (SymArr   eee _ b) -> 
+            if b then return ( False, (LetPat (Id ident) eee loop pos) )
+            else badCPropM $ CopyCtPropError pos (" Broken invariant in writeBackBnd: " ++
+                                                    "write-back merged-var not removable") --e
+
+
 ----------------------------------------------------
 ---- Helpers for Constant Folding                ---
 ----------------------------------------------------
@@ -632,80 +629,67 @@ isBasicTypeVal (TupVal    vs _) =
 
 isCtOrCopy :: TypeBox tf => Exp tf -> Bool
 isCtOrCopy (Literal  val   ) = isBasicTypeVal val
-isCtOrCopy (TupLit   ts _ _) = foldl (&&) True (map isCtOrCopy ts)
-isCtOrCopy (Var       _ _ _) = True
+isCtOrCopy (TupLit   ts _  ) = foldl (&&) True (map isCtOrCopy ts)
+isCtOrCopy (Var           _) = True
 isCtOrCopy (Iota        _ _) = True
 isCtOrCopy (Index _ _ _ _ _) = True
 isCtOrCopy _                 = False
 
 isRemovablePat  :: TypeBox tf => TupIdent tf -> Exp tf -> CPropM tf Bool 
-isRemovablePat (Id _ _ _) e = 
+isRemovablePat (Id _) e = 
  let s=case e of
-        Var     _ _ _     -> True
+        Var     _         -> True
         Index   _ _ _ _ _ -> True
         Iota    _ _       -> True
         Literal v         -> isBasicTypeVal v
-        TupLit  _ _ _     -> False
+        TupLit  _ _       -> False
         _                 -> False
  in return s
 
 isRemovablePat (TupId tups _) e = 
     case e of
-          Var     vnm _ _           -> do
+          Var (Ident vnm _ _)      -> do
               bnd <- asks $ M.lookup vnm . envVtable
               case bnd of
                   Just (Constant val@(TupVal ts   _) _ _) -> 
                       return ( isBasicTypeVal val && length ts == length tups )
-                  Just (SymArr   tup@(TupLit ts _ _) _ _) -> 
+                  Just (SymArr   tup@(TupLit ts _  ) _ _) -> 
                       return ( isCtOrCopy tup && length ts == length tups ) 
                   _ ->  return False
-          TupLit  _ _ _            -> return (isCtOrCopy     e  )
+          TupLit  _ _              -> return (isCtOrCopy     e  )
           Literal val@(TupVal _ _) -> return (isBasicTypeVal val)
           _ -> return False
 
 getPropBnds :: TypeBox tf => TupIdent tf -> Exp tf -> Bool -> CPropM tf [(String,CtOrId tf)]
-getPropBnds (Id var _ _) e to_rem = 
+getPropBnds ( Id (Ident var tp pos) ) e to_rem = 
   let r = case e of
-            Literal v          -> [(var, (Constant v (boxType (valueType v)) to_rem))]
-            Var      id1  tp _ -> [(var, (VarId  id1 tp to_rem))]
-            Index   _ _ _ tp _ -> [(var, (SymArr e   tp to_rem))]
-            TupLit     _  tp _ -> [(var, (SymArr e   tp to_rem))]
+            Literal v            -> [(var, (Constant v (boxType (valueType v)) to_rem))]
+            Var (Ident id1 tp1 _)-> [(var, (VarId  id1 tp1 to_rem))]
+            Index   _ _ _ _ _    -> [(var, (SymArr e   tp  to_rem))]
+            TupLit     _  _      -> [(var, (SymArr e   tp  to_rem))]
 
-            Iota           _ p -> let newtp = boxType (Array (Int p) Nothing p) -- (Just n) does not work Exp tf
-                                  in  [(var, SymArr e newtp to_rem)]
-            Replicate _ _ tp p -> 
-                case unboxType tp of
-                  Nothing -> [(var, (SymArr e tp to_rem))]
-                  Just tp1-> let newtp = boxType (Array tp1 Nothing p) -- (Just n) does not work Exp tf 
-                             in  [(var, SymArr e newtp to_rem)]
-            ArrayLit   es tp p -> 
-                case unboxType tp of
-                  Nothing -> [(var, SymArr e tp to_rem)]
-                  Just tp1-> let newtp = boxType (Array tp1  (Just (Literal (IntVal (length es) p))) p)
-                             in  [(var, SymArr e newtp to_rem)]
-
+            Iota           _ _   -> let newtp = boxType (Array (Int pos) Nothing pos) -- (Just n) does not work Exp tf
+                                    in  [(var, SymArr e newtp to_rem)]
+            Replicate _ _ _ _    -> [(var, SymArr e tp to_rem)] 
+            ArrayLit    _ _ _    -> [(var, SymArr e tp to_rem)]
             _ -> [] 
   in return r 
 getPropBnds pat@(TupId ids _) e to_rem = 
     case e of
-        TupLit  ts _ _  ->
+        TupLit  ts _          ->
             if( length ids == length ts )
             then do lst <- mapM  (\(x,y)->getPropBnds x y to_rem) (zip ids ts)
-                    res <- foldM (\x y -> return (x ++ y)) [] lst
-                    return res
-                    -- return ( foldl (++) [] (mapM (\(x,y)->getPropBnds x y to_rem) (zip ids ts)) )
+                    return (foldl (++) [] lst)
             else return []
         Literal (TupVal ts _) ->
             if( length ids == length ts )
             then do lst <- mapM (\(x,y)->getPropBnds x (Literal y) to_rem) (zip ids ts)
-                    res <- foldM (\x y -> return (x ++ y)) [] lst
-                    return res
-                    -- return ( foldl (++) [] (map (\(x,y)->getPropBnds x (Literal y) to_rem) (zip ids ts)) )
+                    return (foldl (++) [] lst)
             else return []
-        Var vnm   _ _ -> do 
+        Var (Ident vnm _ _)   -> do 
             bnd <- asks $ M.lookup vnm . envVtable
             case bnd of
-                Just (SymArr tup@(TupLit _ _ _) _ _) -> getPropBnds pat tup           to_rem
+                Just (SymArr tup@(TupLit   _ _) _ _) -> getPropBnds pat tup           to_rem
                 Just (Constant tup@(TupVal _ _) _ _) -> getPropBnds pat (Literal tup) to_rem 
                 _                                    -> return []
         _ -> return []
@@ -734,3 +718,4 @@ getArrLitInd (Literal arr@(ArrayVal _ _ _)) (i:is) =
         Nothing -> Nothing
         Just v  -> Just (Literal v) 
 getArrLitInd _ _ = Nothing 
+
