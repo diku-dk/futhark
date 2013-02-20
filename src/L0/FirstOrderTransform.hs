@@ -83,7 +83,7 @@ transformExp (Scan fun accexp arrexp intype loc) = do
   let looplet = LetPat (TupId [Id acc, Id arr] loc)
                 loop arrv loc
       loop = DoLoop i (Size arrv loc) loopbody [acc, arr] loc
-      loopbody = LetWith arr arrv [iv] funcall (TupLit [accv, arrv] loc) loc
+      loopbody = LetWith arr arrv [iv] funcall (TupLit [index, arrv] loc) loc
   return $ redlet looplet
 transformExp (Mapall fun arrexp _ outtype loc) = transformExp =<< toMap arrexp
   where toMap e = case expType e of
