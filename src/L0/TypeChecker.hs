@@ -52,40 +52,40 @@ instance Monoid TypeAcc where
 
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.
-data TypeError = TypeError Loc String
+data TypeError = TypeError SrcLoc String
                -- ^ A general error happened at the given position and
                -- for the given reason.
                | UnifyError Type Type
                -- ^ Two types failed to unify.
-               | ReturnTypeError Loc String Type Type
+               | ReturnTypeError SrcLoc String Type Type
                -- ^ The body of a function definition has a different
                -- type than its declaration.
-               | DupDefinitionError String Loc Loc
+               | DupDefinitionError String SrcLoc SrcLoc
                -- ^ Two functions have been defined with the same name.
-               | DupParamError String String Loc
+               | DupParamError String String SrcLoc
                -- ^ Two function parameters share the same name.
-               | DupPatternError String Loc Loc
+               | DupPatternError String SrcLoc SrcLoc
                -- ^ Two pattern variables share the same name.
                | InvalidPatternError (TupIdent (Maybe Type)) Type
                -- ^ The pattern is not compatible with the type.
-               | UnknownVariableError String Loc
+               | UnknownVariableError String SrcLoc
                -- ^ Unknown variable of the given name referenced at the given spot.
-               | UnknownFunctionError String Loc
+               | UnknownFunctionError String SrcLoc
                -- ^ Unknown function of the given name called at the given spot.
-               | ParameterMismatch String Loc (Either Int [Type]) [Type]
+               | ParameterMismatch String SrcLoc (Either Int [Type]) [Type]
                -- ^ A known function was called with invalid
                -- arguments.  The third argument is either the number
                -- of parameters, or the specific types of parameters
                -- accepted (sometimes, only the former can be
                -- determined).
-               | MergeVarNonBasicIndexing String Loc
+               | MergeVarNonBasicIndexing String SrcLoc
 
 instance Show TypeError where
   show (TypeError pos msg) =
     "Type error at " ++ locStr pos ++ ":\n" ++ msg
   show (UnifyError t1 t2) =
-    "Cannot unify type " ++ ppType t1 ++ " from " ++ locStr (locOf t1) ++
-    " with type " ++ ppType t2 ++ " from " ++ locStr (locOf t2)
+    "Cannot unify type " ++ ppType t1 ++ " from " ++ locStr (srclocOf t1) ++
+    " with type " ++ ppType t2 ++ " from " ++ locStr (srclocOf t2)
   show (ReturnTypeError pos fname rettype bodytype) =
     "Declaration of function " ++ fname ++ " at " ++ locStr pos ++
     " declares return type " ++ ppType rettype ++ ", but body has type " ++
@@ -101,8 +101,8 @@ instance Show TypeError where
     "Variable " ++ name ++ " bound twice in tuple pattern; at " ++
     locStr pos1 ++ " and " ++ locStr pos2 ++ "."
   show (InvalidPatternError pat t) =
-    "Pattern " ++ ppTupId pat ++ " at " ++ locStr (locOf pat) ++
-    " cannot match value of type " ++ ppType t ++ " at " ++ locStr (locOf t) ++ "."
+    "Pattern " ++ ppTupId pat ++ " at " ++ locStr (srclocOf pat) ++
+    " cannot match value of type " ++ ppType t ++ " at " ++ locStr (srclocOf t) ++ "."
   show (UnknownVariableError name pos) =
     "Unknown variable " ++ name ++ " referenced at " ++ locStr pos ++ "."
   show (UnknownFunctionError fname pos) =
@@ -153,7 +153,7 @@ unbinding bnds = local (`unbindVars` bnds)
 
 -- | Rebind variables as merge variables while evaluating a 'TypeM'
 -- action.
-merging :: [String] -> Loc -> TypeM a -> TypeM a
+merging :: [String] -> SrcLoc -> TypeM a -> TypeM a
 merging [] _ m = m
 merging (k:ks) pos m = do
   bnd <- lookupVar k pos
@@ -170,13 +170,13 @@ unmerging = local unmerging'
 mergeVars :: TypeM [String]
 mergeVars = asks $ map fst . filter ((==MergeVar) . bndProp . snd) . M.toList . envVtable
 
-lookupVar :: String -> Loc -> TypeM VarBinding
+lookupVar :: String -> SrcLoc -> TypeM VarBinding
 lookupVar name pos = do
   bnd <- asks $ M.lookup name . envVtable
   case bnd of Nothing   -> bad $ UnknownVariableError name pos
               Just bnd' -> return bnd'
 
-lookupVarType :: String -> Loc -> TypeM Type
+lookupVarType :: String -> SrcLoc -> TypeM Type
 lookupVarType name pos = bndType <$> lookupVar name pos
 
 collectSrcMergeVars :: TypeM a -> TypeM (a, S.Set String)
@@ -218,16 +218,16 @@ unifyWithKnown t1 t2 = case unboxType t1 of
 -- with one of the types in @ts@.  Otherwise, simply returns @(t, e)@.
 -- This function is very useful in 'checkExp'.
 require :: Located v => [Type] -> (Type, v) -> TypeM (Type, v)
-require [] (_,e) = bad $ TypeError (locOf e) "Expression cannot have any type (probably a bug in the type checker)."
+require [] (_,e) = bad $ TypeError (srclocOf e) "Expression cannot have any type (probably a bug in the type checker)."
 require ts (et,e)
   | et `elem` ts = return (et,e)
   | otherwise =
-    bad $ TypeError (locOf e) $ "Expression type must be one of " ++
+    bad $ TypeError (srclocOf e) $ "Expression type must be one of " ++
           intercalate ", " (map ppType ts) ++ ", but is " ++ ppType et ++ "."
 
 elemType :: Type -> TypeM Type
 elemType (Array t _ _) = return t
-elemType t = bad $ TypeError (locOf t) $ "Type of expression is not array, but " ++ ppType t ++ "."
+elemType t = bad $ TypeError (srclocOf t) $ "Type of expression is not array, but " ++ ppType t ++ "."
 
 -- | Type check a program containing arbitrary type information,
 -- yielding either a type error or a program with complete type
@@ -253,13 +253,13 @@ checkProg prog = do
         let argtypes = map identType args -- Throw away argument names.
         in Right $ M.insert name (ret,argtypes,pos) ftable
     rmLoc (ret,args,_) = (ret,args)
-    builtins = M.fromList [("toReal", (Real NoLoc, [Int NoLoc], NoLoc))
-                          ,("trunc", (Int NoLoc, [Real NoLoc], NoLoc))
-                          ,("sqrt", (Real NoLoc, [Real NoLoc], NoLoc))
-                          ,("log", (Real NoLoc, [Real NoLoc], NoLoc))
-                          ,("exp", (Real NoLoc, [Real NoLoc], NoLoc))
-                          ,("op not", (Bool NoLoc, [Bool NoLoc], NoLoc))
-                          ,("op ~", (Real NoLoc, [Real NoLoc], NoLoc))]
+    builtins = M.fromList [("toReal", (Real noLoc, [Int noLoc], noLoc))
+                          ,("trunc", (Int noLoc, [Real noLoc], noLoc))
+                          ,("sqrt", (Real noLoc, [Real noLoc], noLoc))
+                          ,("log", (Real noLoc, [Real noLoc], noLoc))
+                          ,("exp", (Real noLoc, [Real noLoc], noLoc))
+                          ,("op not", (Bool noLoc, [Bool noLoc], noLoc))
+                          ,("op ~", (Real noLoc, [Real noLoc], noLoc))]
 
 checkFun :: TypeBox tf => FunDec tf -> TypeM (FunDec Type)
 checkFun (fname, rettype, args, body, pos) = do
@@ -354,7 +354,7 @@ checkExp (LetWith (Ident name _ _) e idxes ve body pos) = do
   -- to change this.
   tell $ TypeAcc S.empty (S.singleton name)
   case peelArray (length idxes) et of
-    Nothing -> bad $ TypeError pos $ show (length idxes) ++ " indices given, but type of expression at " ++ locStr (locOf e) ++ " has " ++ show (arrayDims et) ++ " dimensions."
+    Nothing -> bad $ TypeError pos $ show (length idxes) ++ " indices given, but type of expression at " ++ locStr (srclocOf e) ++ " has " ++ show (arrayDims et) ++ " dimensions."
     Just elemt -> do
       (_, idxes') <- unzip <$> mapM (require [Int pos] <=< checkSubExp) idxes
       (_, ve') <- require [elemt] =<< checkSubExp ve
@@ -395,7 +395,7 @@ checkExp (Reshape shapeexps arrexp intype restype pos) = do
   restype' <- restype `unifyWithKnown` build (length shapeexps') (baseType intype')
   return (restype', Reshape shapeexps' arrexp' intype' restype' pos)
   where build 0 t = t
-        build n t = build (n-1) (Array t Nothing (locOf t))
+        build n t = build (n-1) (Array t Nothing (srclocOf t))
 checkExp (Transpose arrexp intype outtype pos) = do
   (arrt, arrexp') <- checkSubExp arrexp
   when (arrayDims arrt < 2) $
@@ -411,7 +411,7 @@ checkExp (Map fun arrexp intype outtype pos) = do
       intype' <- intype `unifyWithKnown` et
       outtype' <- outtype `unifyWithKnown` funret
       return (Array outtype' e pos, Map fun' arrexp' intype' outtype' pos)
-    _       -> bad $ TypeError (locOf arrexp) "Expression does not return an array."
+    _       -> bad $ TypeError (srclocOf arrexp) "Expression does not return an array."
 checkExp (Reduce fun startexp arrexp intype pos) = do
   (acct, startexp') <- checkSubExp startexp
   (arrt, arrexp') <- checkSubExp arrexp
@@ -422,7 +422,7 @@ checkExp (Reduce fun startexp arrexp intype pos) = do
       when (acct /= funret) $
         bad $ TypeError pos $ "Accumulator is of type " ++ ppType acct ++ ", but reduce function returns type " ++ ppType funret ++ "."
       return (funret, Reduce fun' startexp' arrexp' inelemt' pos)
-    _ -> bad $ TypeError (locOf arrexp) "Type of expression is not an array"
+    _ -> bad $ TypeError (srclocOf arrexp) "Type of expression is not an array"
 checkExp (Zip arrexps pos) = do
   (arrts, arrexps') <- unzip <$> mapM (checkSubExp . fst) arrexps
   inelemts <- mapM elemType arrts
@@ -448,7 +448,7 @@ checkExp (Scan fun startexp arrexp intype pos) = do
       when (intype' /= funret) $
         bad $ TypeError pos $ "Array element value is of type " ++ ppType intype' ++ ", but scan function returns type " ++ ppType funret ++ "."
       return (Array funret e pos2, Scan fun' startexp' arrexp' intype' pos)
-    _ -> bad $ TypeError (locOf arrexp) "Type of expression is not an array."
+    _ -> bad $ TypeError (srclocOf arrexp) "Type of expression is not an array."
 checkExp (Filter fun arrexp arrtype pos) = do
   (arrexpt, arrexp') <- checkSubExp arrexp
   arrtype' <- arrtype `unifyWithKnown` arrexpt
@@ -526,7 +526,7 @@ checkIdent (Ident name t pos) = do
   tell $ TypeAcc (S.singleton name) S.empty
   return (t', Ident name t' pos)
 
-checkBinOp :: TypeBox tf => BinOp -> Exp tf -> Exp tf -> tf -> Loc
+checkBinOp :: TypeBox tf => BinOp -> Exp tf -> Exp tf -> tf -> SrcLoc
            -> TypeM (Type, Exp Type)
 checkBinOp Plus e1 e2 t pos = checkPolyBinOp Plus [Real pos, Int pos] e1 e2 t pos
 checkBinOp Minus e1 e2 t pos = checkPolyBinOp Minus [Real pos, Int pos] e1 e2 t pos
@@ -545,7 +545,7 @@ checkBinOp Less e1 e2 t pos = checkRelOp Less [Int pos, Real pos] e1 e2 t pos
 checkBinOp Leq e1 e2 t pos = checkRelOp Leq [Int pos, Real pos] e1 e2 t pos
 
 checkRelOp :: TypeBox ty =>
-              BinOp -> [Type] -> Exp ty -> Exp ty -> ty -> Loc
+              BinOp -> [Type] -> Exp ty -> Exp ty -> ty -> SrcLoc
            -> TypeM (Type, Exp Type)
 checkRelOp op tl e1 e2 t pos = do
   (t1,e1') <- require tl =<< checkSubExp e1
@@ -554,7 +554,7 @@ checkRelOp op tl e1 e2 t pos = do
   t' <- t `unifyWithKnown` Bool pos
   return (Bool pos, BinOp op e1' e2' t' pos)
 
-checkPolyBinOp :: TypeBox ty => BinOp -> [Type] -> Exp ty -> Exp ty -> ty -> Loc
+checkPolyBinOp :: TypeBox ty => BinOp -> [Type] -> Exp ty -> Exp ty -> ty -> SrcLoc
                -> TypeM (Type, Exp Type)
 checkPolyBinOp op tl e1 e2 t pos = do
   (t1, e1') <- require tl =<< checkSubExp e1
@@ -615,7 +615,7 @@ checkLambda (CurryFun fname curryargexps rettype pos) args = do
       zipWithM_ unifyKnownTypes (curryargexpts++args) paramtypes
       return (CurryFun fname curryargexps' rettype' pos, rettype')
 
-checkPolyLambdaOp :: TypeBox ty => BinOp -> [Exp ty] -> ty -> [Type] -> Loc
+checkPolyLambdaOp :: TypeBox ty => BinOp -> [Exp ty] -> ty -> [Type] -> SrcLoc
                   -> TypeM (Lambda Type, Type)
 checkPolyLambdaOp op curryargexps rettype args pos = do
   (curryargexpts, curryargexps') <- unzip <$> mapM checkSubExp curryargexps

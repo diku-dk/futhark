@@ -12,7 +12,7 @@ module L0.Parser.Parser
 
 import Control.Monad (foldM)
 import Data.Array
-import Data.Loc
+import Data.Loc hiding (L, unLoc) -- Lexer has replacements.
 
 import L0.AbSyn
 import L0.Parser.Lexer
@@ -265,7 +265,7 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal $ IntVal num pos 
                       { LetWith $2 (Var $2) $4 $7 $9 $1 }
 
      | Id '[' Exps ']'
-                      { Index $1 $3 Nothing Nothing (locOf $1) }
+                      { Index $1 $3 Nothing Nothing (srclocOf $1) }
 
      | for Id '<' Exp do Exp merge '(' Ids ')'
                       { DoLoop $2 $4 $6 $9 $1 }
@@ -341,5 +341,5 @@ arrayFromList l = listArray (0, length l-1) l
 
 parseError :: [L Token] -> Either String a
 parseError [] = Left "Parse error: End of file"
-parseError (tok:_) = Left $ "Parse error at " ++ locStr (locOf tok)
+parseError (tok:_) = Left $ "Parse error at " ++ locStr (srclocOf tok)
 }

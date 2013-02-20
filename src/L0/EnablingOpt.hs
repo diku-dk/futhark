@@ -27,15 +27,15 @@ import L0.AbSyn
 
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.
-data EnablingOptError = EnablingOptError Loc String
+data EnablingOptError = EnablingOptError SrcLoc String
                -- ^ A general error happened at the given position and
                -- for the given reason.
-               | DupParamError String String Loc
+               | DupParamError String String SrcLoc
                -- ^ Two function parameters share the same name.
-               | CopyCtPropError Loc String 
+               | CopyCtPropError SrcLoc String 
                -- ^ Copy/Constant Propagation Error
-               | TypeError Loc String
-               | Div0Error Loc
+               | TypeError SrcLoc String
+               | Div0Error SrcLoc
 
 instance Show EnablingOptError where
     show (EnablingOptError pos msg) =
@@ -570,7 +570,7 @@ isValidBnd bnd = case bnd of
                     Nothing -> False
                     Just _  -> True
 
-writeBackBnd :: TypeBox tf => Loc -> (Bool,Exp tf) -> (Maybe (CtOrId tf), Ident tf) -> CPropM tf (Bool,Exp tf)
+writeBackBnd :: TypeBox tf => SrcLoc -> (Bool,Exp tf) -> (Maybe (CtOrId tf), Ident tf) -> CPropM tf (Bool,Exp tf)
 writeBackBnd pos (_,loop) (bnd,ident) = do
 -- nm denotes a merged variable that is to be removed by propagation, 
 -- hence needs to be written back, i.e., the result is: `let nm = bnd in loop'

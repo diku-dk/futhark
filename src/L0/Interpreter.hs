@@ -21,14 +21,14 @@ import L0.AbSyn
 import L0.Parser
 
 data InterpreterError = MissingMainFunction
-                      | IndexOutOfBounds Loc Int Int
+                      | IndexOutOfBounds SrcLoc Int Int
                       -- ^ First @Int@ is array size, second is attempted index.
-                      | NegativeIota Loc Int
-                      | NegativeReplicate Loc Int
-                      | ReadError Loc Type String
-                      | InvalidArrayShape Loc [Int] [Int]
+                      | NegativeIota SrcLoc Int
+                      | NegativeReplicate SrcLoc Int
+                      | ReadError SrcLoc Type String
+                      | InvalidArrayShape SrcLoc [Int] [Int]
                       -- ^ First @Int@ is old shape, second is attempted new shape.
-                      | TypeError Loc String
+                      | TypeError SrcLoc String
 
 instance Show InterpreterError where
   show MissingMainFunction =
@@ -83,11 +83,11 @@ lookupFun fname = do fun <- asks $ M.lookup fname . envFtable
 
 arrToList :: Monad m => Value -> L0M m [Value]
 arrToList (ArrayVal l _ _) = return $ elems l
-arrToList v = bad $ TypeError (locOf v) "arrToList"
+arrToList v = bad $ TypeError (srclocOf v) "arrToList"
 
 tupToList :: Monad m => Value -> L0M m [Value]
 tupToList (TupVal l _) = return l
-tupToList v = bad $ TypeError (locOf v) "tupToList"
+tupToList v = bad $ TypeError (srclocOf v) "tupToList"
 
 runProgIO :: Prog Type -> IO (Either InterpreterError Value)
 runProgIO = runProg putStr (hFlush stdout >> getLine)
@@ -375,7 +375,7 @@ evalExp (DoLoop loopvar boundexp body mergevars pos) = do
                             val -> return [val]
 
 evalIntBinOp :: (Applicative m, Monad m) =>
-                (Int -> Int -> Int) -> Exp Type -> Exp Type -> Loc -> L0M m Value
+                (Int -> Int -> Int) -> Exp Type -> Exp Type -> SrcLoc -> L0M m Value
 evalIntBinOp op e1 e2 pos = do
   v1 <- evalExp e1
   v2 <- evalExp e2
@@ -384,7 +384,7 @@ evalIntBinOp op e1 e2 pos = do
     _                        -> bad $ TypeError pos "evalIntBinOp"
 
 evalRealBinOp :: (Applicative m, Monad m) =>
-                 (Double -> Double -> Double) -> Exp Type -> Exp Type -> Loc -> L0M m Value
+                 (Double -> Double -> Double) -> Exp Type -> Exp Type -> SrcLoc -> L0M m Value
 evalRealBinOp op e1 e2 pos = do
   v1 <- evalExp e1
   v2 <- evalExp e2
@@ -393,7 +393,7 @@ evalRealBinOp op e1 e2 pos = do
     _                          -> bad $ TypeError pos $ "evalRealBinOp " ++ ppValue v1 ++ " " ++ ppValue v2
 
 evalBoolBinOp :: (Applicative m, Monad m) =>
-                 (Bool -> Bool -> Bool) -> Exp Type -> Exp Type -> Loc -> L0M m Value
+                 (Bool -> Bool -> Bool) -> Exp Type -> Exp Type -> SrcLoc -> L0M m Value
 evalBoolBinOp op e1 e2 pos = do
   v1 <- evalExp e1
   v2 <- evalExp e2
