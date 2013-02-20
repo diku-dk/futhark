@@ -11,6 +11,10 @@ import L0.Parser (parseL0)
 import L0.TypeChecker
 import L0.Renamer
 import L0.Interpreter
+import L0.EnablingOpt
+
+import Debug.Trace
+
 -- import L0.CCodeGen
 
 -- To parse and prettyprint an input program located at ../DATA/filename.l0, run
@@ -43,6 +47,7 @@ main = do args <- getArgs
             ["-tp", file] -> typecheck (putStrLn . prettyPrint) file
             ["-r", file] -> rename file
             ["-i", file] -> interpret file
+            ["-cos", file] -> testCosmin file
 --            ["-c", file] -> compile file
             _ -> error "Usage: <-p|-t|-tp|-r|-i|-c> <file>"
 
@@ -75,6 +80,22 @@ interpret file = do
       res <- runProgIO prog'
       case res of Left err -> error $ "Interpreter error:\n" ++ show err
                   Right v  -> putStrLn $ ppValue v -- ++ (prettyPrint prog')
+
+
+testCosmin :: FilePath -> IO ()
+testCosmin file = do
+  prog <- parse file
+  case checkProg prog of
+    Left err    -> error $ "Typechecking error:\n" ++ show err
+    Right prog' -> 
+      case enablingOpts prog' of
+        Left  err -> error $ "Enabling Optimization Error:\n" ++ show err
+        Right prog2 -> do
+          _   <- trace ("Opt Program: "++prettyPrint prog2++"\nResult:") (putStrLn "")
+          res <- runProgIO prog2
+          case res of Left err -> error $ "Interpreter error:\n" ++ show err
+                      Right v  -> putStrLn $ ppValue v -- ++ (prettyPrint prog')
+
 {-
 compile :: FilePath -> IO ()
 compile file = do
