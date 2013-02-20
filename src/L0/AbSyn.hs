@@ -74,7 +74,7 @@ arrayDims _             = 0
 
 -- | A type box provides a way to box a type, and possibly retrieve
 -- one.
-class Show ty => TypeBox ty where
+class (Eq ty, Ord ty, Show ty) => TypeBox ty where
   unboxType :: ty -> Maybe Type
   boxType :: Type -> ty
 
