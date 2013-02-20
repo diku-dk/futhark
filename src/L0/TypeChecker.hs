@@ -134,14 +134,14 @@ bad :: TypeError -> TypeM a
 bad = TypeM . lift . lift . Left
 
 -- | Bind a name as a common (non-merge) variable.
-bindVar :: TypeEnv -> Binding -> TypeEnv
-bindVar env (name,tp) =
+bindVar :: TypeEnv -> Ident Type -> TypeEnv
+bindVar env (Ident name tp _) =
   env { envVtable = M.insert name (VarBinding tp NormalVar) $ envVtable env }
 
-bindVars :: TypeEnv -> [Binding] -> TypeEnv
+bindVars :: TypeEnv -> [Ident Type] -> TypeEnv
 bindVars = foldl bindVar
 
-binding :: [Binding] -> TypeM a -> TypeM a
+binding :: [Ident Type] -> TypeM a -> TypeM a
 binding bnds = local (`bindVars` bnds)
 
 -- | 'unbinding names m' evaluates 'm' with the names in 'names'
@@ -250,7 +250,7 @@ checkProg prog = do
       | Just (_,_,pos2) <- M.lookup name ftable =
         Left $ DupDefinitionError name pos pos2
       | otherwise =
-        let argtypes = map snd args -- Throw away argument names.
+        let argtypes = map identType args -- Throw away argument names.
         in Right $ M.insert name (ret,argtypes,pos) ftable
     rmLoc (ret,args,_) = (ret,args)
     builtins = M.fromList [("toReal", (Real NoLoc, [Int NoLoc], NoLoc))
@@ -269,11 +269,11 @@ checkFun (fname, rettype, args, body, pos) = do
     return (fname, rettype, args, body', pos)
   else bad $ ReturnTypeError pos fname rettype bodytype
   where checkArgs = foldM expand [] args
-        expand args' (pname, tp)
-          | Just _ <- lookup pname args' =
+        expand args' ident@(Ident pname _ _)
+          | Just _ <- find ((==identName ident) . identName) args' =
             bad $ DupParamError fname pname pos
           | otherwise =
-            return $ (pname, tp) : args'
+            return $ ident : args'
 
 -- | Type-check an expression, but convert all merge variables to
 -- normal variables first.
@@ -317,11 +317,9 @@ checkExp (If e1 e2 e3 t pos) = do
   (t3,e3') <- checkExp e3
   bt <- unifyWithKnown t =<< unifyKnownTypes t2 t3
   return (bt, If e1' e2' e3' bt pos)
-checkExp (Var name t pos) = do
-  vt <- lookupVarType name pos
-  t' <- t `unifyWithKnown` vt
-  tell $ TypeAcc (S.singleton name) S.empty
-  return (t', Var name t' pos)
+checkExp (Var ident) = do
+  (t, ident') <- checkIdent ident
+  return (t, Var ident')
 checkExp (Apply fname args t pos) = do
   bnd <- asks $ M.lookup fname . envFtable
   case bnd of
@@ -350,7 +348,7 @@ checkExp (LetPat pat e body pos) = do
         _     -> return ()
       tell $ TypeAcc srcmvars destmvars
       return (bt, LetPat pat' e' body' pos)
-checkExp (LetWith name e idxes ve body pos) = do
+checkExp (LetWith (Ident name _ _) e idxes ve body pos) = do
   (et, e') <- checkSubExp e
   -- We don't check whether name is a merge variable.  We might want
   -- to change this.
@@ -360,18 +358,19 @@ checkExp (LetWith name e idxes ve body pos) = do
     Just elemt -> do
       (_, idxes') <- unzip <$> mapM (require [Int pos] <=< checkSubExp) idxes
       (_, ve') <- require [elemt] =<< checkSubExp ve
-      (bt, body') <- local (`bindVar` (name, et)) $ checkExp body
-      return (bt, LetWith name e' idxes' ve' body' pos)
-checkExp (Index name idxes intype restype pos) = do
-  vt <- lookupVarType name pos
+      (bt, body') <- local (`bindVar` Ident name et pos) $ checkExp body
+      return (bt, LetWith (Ident name et pos) e' idxes' ve' body' pos)
+checkExp (Index ident idxes intype restype pos) = do
+  ident' <- snd <$> checkIdent ident
+  vt <- lookupVarType (identName ident') pos
   when (arrayDims vt < length idxes) $
-    bad $ TypeError pos $ show (length idxes) ++ " indices given, but type of variable " ++ name ++ " has " ++ show (arrayDims vt) ++ " dimensions."
+    bad $ TypeError pos $ show (length idxes) ++ " indices given, but type of variable " ++ identName ident' ++ " has " ++ show (arrayDims vt) ++ " dimensions."
   vet <- elemType vt
   intype' <- intype `unifyWithKnown` vet
   restype' <- restype `unifyWithKnown` strip (length idxes) vt
   (_, idxes') <- unzip <$> mapM (require [Int pos] <=< checkSubExp) idxes
-  tell $ TypeAcc (S.singleton name) S.empty
-  return (restype', Index name idxes' intype' restype' pos)
+  tell $ TypeAcc (S.singleton $ identName ident') S.empty
+  return (restype', Index ident' idxes' intype' restype' pos)
   where strip 0 t = t
         strip n (Array t _ _) = strip (n-1) t
         strip _ t = t
@@ -425,7 +424,7 @@ checkExp (Reduce fun startexp arrexp intype pos) = do
       return (funret, Reduce fun' startexp' arrexp' inelemt' pos)
     _ -> bad $ TypeError (locOf arrexp) "Type of expression is not an array"
 checkExp (Zip arrexps pos) = do
-  (arrts, arrexps') <- unzip <$> mapM checkSubExp (map fst arrexps)
+  (arrts, arrexps') <- unzip <$> mapM (checkSubExp . fst) arrexps
   inelemts <- mapM elemType arrts
   inelemts' <- zipWithM unifyWithKnown (map snd arrexps) inelemts
   let outtype = Array (Tuple inelemts' pos) Nothing pos
@@ -491,14 +490,15 @@ checkExp (Write e t pos) = do
   (et, e') <- checkSubExp e
   t' <- t `unifyWithKnown` et
   return (t', Write e' t' pos)
-checkExp (DoLoop loopvar boundexp body mergevars pos) = do
+checkExp (DoLoop (Ident loopvar _ _) boundexp body mergevars pos) = do
+  (mergetypes, mergevars') <- unzip <$> mapM checkIdent mergevars
   (_, boundexp') <- require [Int pos] =<< checkSubExp boundexp
-  merging mergevars pos $ binding [(loopvar, Int pos)] $ do
-    ts <- mapM (`lookupVarType` pos) mergevars
-    let bodytype = case ts of [t] -> t
-                              _   -> Tuple ts pos
+  merging (map identName mergevars') pos $ binding [Ident loopvar (Int pos) pos] $ do
+    let bodytype = case mergetypes of
+                     [t] -> t
+                     _   -> Tuple mergetypes pos
     (bodyt, body') <- require [bodytype] =<< checkExp body
-    return (bodyt, DoLoop loopvar boundexp' body' mergevars pos)
+    return (bodyt, DoLoop (Ident loopvar (Int pos) pos) boundexp' body' mergevars' pos)
 
 checkLiteral :: Value -> TypeM (Type, Value)
 checkLiteral (IntVal k pos) = return (Int pos, IntVal k pos)
@@ -518,6 +518,13 @@ checkLiteral (ArrayVal arr t pos) = do
   -- Unify that type with the one given for the array literal.
   t' <- t `unifyKnownTypes` vt
   return (Array vt Nothing pos, ArrayVal (listArray (bounds arr) vals') t' pos)
+
+checkIdent :: TypeBox ty => Ident ty -> TypeM (Type, Ident Type)
+checkIdent (Ident name t pos) = do
+  vt <- lookupVarType name pos
+  t' <- t `unifyWithKnown` vt
+  tell $ TypeAcc (S.singleton name) S.empty
+  return (t', Ident name t' pos)
 
 checkBinOp :: TypeBox tf => BinOp -> Exp tf -> Exp tf -> tf -> Loc
            -> TypeM (Type, Exp Type)
@@ -557,14 +564,14 @@ checkPolyBinOp op tl e1 e2 t pos = do
   return (t'', BinOp op e1' e2' t'' pos)
 
 checkPattern :: TypeBox tf =>
-                TupIdent tf -> Type -> TypeM ([Binding], TupIdent Type)
+                TupIdent tf -> Type -> TypeM ([Ident Type], TupIdent Type)
 checkPattern pat vt = do
   (pat', bnds) <- runStateT (checkPattern' pat vt) []
-  return (map rmLoc bnds, pat')
-  where checkPattern' (Id name namet pos) t = do
+  return (bnds, pat')
+  where checkPattern' (Id (Ident name namet pos)) t = do
           add name t pos
           t' <- lift $ namet `unifyWithKnown` t
-          return $ Id name t' pos
+          return $ Id $ Ident name t' pos
         checkPattern' (TupId pats pos) (Tuple ts _)
           | length pats == length ts = do
           pats' <- zipWithM checkPattern' pats ts
@@ -572,14 +579,13 @@ checkPattern pat vt = do
         checkPattern' _ _ = lift $ bad $ InvalidPatternError errpat vt
 
         add name t pos = do
-          bnd <- gets $ lookup name
+          bnd <- gets $ find ((==name) . identName)
           case bnd of
-            Nothing       -> modify ((name,(t,pos)):)
-            Just (_,pos2) -> lift $ bad $ DupPatternError name pos pos2
-        rmLoc (name,(t,_)) = (name,t)
+            Nothing               -> modify (Ident name t pos:)
+            Just (Ident _ _ pos2) -> lift $ bad $ DupPatternError name pos pos2
         -- A pattern with known type box (Maybe) for error messages.
         errpat = rmTypes pat
-        rmTypes (Id name _ pos) = Id name Nothing pos
+        rmTypes (Id (Ident name _ pos)) = Id $ Ident name Nothing pos
         rmTypes (TupId pats pos) = TupId (map rmTypes pats) pos
 
 checkLambda :: TypeBox ty => Lambda ty -> [Type] -> TypeM (Lambda Type, Type)
@@ -588,7 +594,7 @@ checkLambda (AnonymFun params body ret pos) args
   mvs <- mergeVars
   (_, ret', params', body', _) <-
     unbinding mvs $ checkFun ("<anonymous>", ret, params, body, pos)
-  zipWithM_ unifyKnownTypes (map snd params') args
+  zipWithM_ unifyKnownTypes (map identType params') args
   return (AnonymFun params body' ret' pos, ret')
   | otherwise = bad $ TypeError pos $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
 checkLambda (CurryFun opfun curryargexps rettype pos) args
@@ -617,12 +623,12 @@ checkPolyLambdaOp op curryargexps rettype args pos = do
           [t1, t2] | t1 == t2 -> return t1
           l -> bad $ ParameterMismatch fname pos (Left 2) l
   (x,y,params) <- case curryargexps' of
-                    [] -> return (Var "x" tp pos,
-                                  Var "y" tp pos,
-                                  [("x", tp), ("y", tp)])
+                    [] -> return (Var (Ident "x" tp pos),
+                                  Var (Ident "y" tp pos),
+                                  [Ident "x" tp pos, Ident "y" tp pos])
                     [e] -> return (e,
-                                   Var "y" tp pos,
-                                   [("y", tp)])
+                                   Var (Ident "y" tp pos),
+                                   [Ident "y" tp pos])
                     (e1:e2:_) -> return (e1, e2, [])
   let body = BinOp op x y tp pos
   (fun, t) <- checkLambda (AnonymFun params body tp pos) args

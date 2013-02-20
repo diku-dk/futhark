@@ -163,8 +163,8 @@ Types : Type '*' Types { $1 : $3 }
 ;
 
 TypeIds : Type id ',' TypeIds
-                        { let L pos (ID name) = $2 in (name, $1) : $4 }
-        | Type id       { let L pos (ID name) = $2 in [(name, $1)] }
+                        { let L pos (ID name) = $2 in Ident name $1 pos : $4 }
+        | Type id       { let L pos (ID name) = $2 in [Ident name $1 pos] }
 ;
 
 Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal $ IntVal num pos }
@@ -174,7 +174,7 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal $ IntVal num pos 
                         in Literal $ ArrayVal (arrayFromList $ map (`CharVal` pos) s) (Char pos) pos }
      | true           { Literal $ LogVal True $1 }
      | false          { Literal $ LogVal False $1 }
-     | id             { let L pos (ID name) = $1 in Var name Nothing pos }
+     | Id             { Var $1 }
      | '{' Exps '}'   { ArrayLit $2 Nothing $1 }
      | TupleExp       { let (exps, pos) = $1 in TupLit exps pos }
 
@@ -253,30 +253,24 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal $ IntVal num pos 
 
      | '(' Exp ')' { $2 }
 
-     | let id '=' Exp in Exp %prec letprec
-                      { let L pos (ID name) = $2
-                        in LetPat (Id name Nothing pos) $4 $6 $1 }
+     | let Id '=' Exp in Exp %prec letprec
+                      { LetPat (Id $2) $4 $6 $1 }
 
      | let '(' TupIds ')' '=' Exp in Exp %prec letprec
                       { LetPat (TupId $3 $1) $6 $8 $1 }
 
-     | let id '=' Exp with '[' Exps ']' '<-' Exp in Exp %prec letprec
-                      { let ID name = unLoc $2
-                        in LetWith name $4 $7 $10 $12 $1 }
-     | let id '[' Exps ']' '=' Exp in Exp %prec letprec
-                      { let L pos (ID name) = $2
-                        in LetWith name (Var name Nothing pos) $4 $7 $9 $1 }
+     | let Id '=' Exp with '[' Exps ']' '<-' Exp in Exp %prec letprec
+                      { LetWith $2 $4 $7 $10 $12 $1 }
+     | let Id '[' Exps ']' '=' Exp in Exp %prec letprec
+                      { LetWith $2 (Var $2) $4 $7 $9 $1 }
 
-     | id '[' Exps ']'
-                      { let L pos (ID name) = $1
-                        in Index name $3 Nothing Nothing pos }
+     | Id '[' Exps ']'
+                      { Index $1 $3 Nothing Nothing (locOf $1) }
 
-     | for id '<' Exp do Exp merge '(' Ids ')'
-                      { let ID name = unLoc $2
-                        in DoLoop name $4 $6 $9 $1 }
-     | for id '<' Exp do Exp merge id
-                      {case ($2, $8) of
-                          (L _ (ID name), L _ (ID mergename)) -> DoLoop name $4 $6 [mergename] $1 }
+     | for Id '<' Exp do Exp merge '(' Ids ')'
+                      { DoLoop $2 $4 $6 $9 $1 }
+     | for Id '<' Exp do Exp merge Id
+                      { DoLoop $2 $4 $6 [$8] $1 }
 
 Exps : Exp ',' Exps { $1 : $3 }
      | Exp          { [$1] }
@@ -286,14 +280,16 @@ Exps2 : Exp ',' Exps2 { $1 : $3 }
 
 TupleExp : '(' Exps2 ')' { ($2, $1) }
 
-Ids : id { let ID name = unLoc $1 in [name] }
-    | id ',' Ids { let ID name = unLoc $1 in name : $3 }
+Id : id { let L loc (ID name) = $1 in Ident name Nothing loc }
+
+Ids : Id { [$1] }
+    | Id ',' Ids { $1 : $3 }
 
 TupIds : TupId ',' TupId   { [$1, $3] }
        | TupId ',' TupIds  { $1 : $3 }
 ;
 
-TupId : id { let L pos (ID name) = $1 in Id name Nothing pos }
+TupId : id { let L pos (ID name) = $1 in Id $ Ident name Nothing pos }
       | '(' TupIds ')' { TupId $2 $1 }
 
 FunAbstr : id { let L pos (ID name) = $1 in CurryFun name [] Nothing pos }
