@@ -5,6 +5,8 @@ module L0.Renamer
 import Control.Monad.State
 import Control.Monad.Reader
 
+import Data.Data
+import Data.Generics
 import qualified Data.Map as M
 
 import L0.AbSyn
@@ -12,8 +14,9 @@ import L0.AbSyn
 -- | Rename variables such that each is unique.  The semantics of the
 -- program are unaffected, under the assumption that the program was
 -- correct to begin with.  In particular, the renaming may make an
--- invalid program valid.
-renameProg :: Prog tf -> Prog tf
+-- invalid program valid.  To help enforce that this does not happen,
+-- only type-checked programs can be renamed.
+renameProg :: Prog Type -> Prog Type
 renameProg prog = runReader (evalStateT (mapM renameFun prog) 0) M.empty
 
 type RenameM = StateT Int (Reader (M.Map String String))
@@ -38,7 +41,7 @@ bind vars body = do
   -- operand.
   local (M.fromList (zip vars vars') `M.union`) body
 
-renameFun :: FunDec tf -> RenameM (FunDec tf)
+renameFun :: FunDec Type -> RenameM (FunDec Type)
 renameFun (fname, ret, params, body, pos) =
   bind (map fst params) $ do
     params' <- mapM renameBinding params
@@ -50,37 +53,10 @@ renameBinding (s, t) = do
   s' <- repl s
   return (s', t)
 
-renameExp :: Exp tf -> RenameM (Exp tf)
-renameExp (Literal val) = return $ Literal val
-renameExp (TupLit es ts pos) = do
-  es' <- mapM renameExp es
-  return $ TupLit es' ts pos
-renameExp (ArrayLit es ts pos) = do
-  es' <- mapM renameExp es
-  return $ ArrayLit es' ts pos
-renameExp (BinOp op e1 e2 t pos) = do
-  e1' <- renameExp e1
-  e2' <- renameExp e2
-  return $ BinOp op e1' e2' t pos
-renameExp (And e1 e2 pos) = renameBinOpNoType And e1 e2 pos
-renameExp (Or e1 e2 pos) = renameBinOpNoType Or e1 e2 pos
-renameExp (Not e pos) = do
-  e' <- renameExp e
-  return $ Not e' pos
-renameExp (Negate e t pos) = do
-  e' <- renameExp e
-  return $ Negate e' t pos
-renameExp (If e1 e2 e3 t pos) = do
-  e1' <- renameExp e1
-  e2' <- renameExp e2
-  e3' <- renameExp e3
-  return $ If e1' e2' e3' t pos
+renameExp :: Exp Type -> RenameM (Exp Type)
 renameExp (Var s t pos) = do
   s' <- repl s
   return $ Var s' t pos
-renameExp (Apply fname args t pos) = do
-  args' <- mapM renameExp args
-  return $ Apply fname args' t pos
 renameExp (LetWith name e1 idxs ve body pos) = do
   e1' <- renameExp e1
   idxs' <- mapM renameExp idxs
@@ -101,74 +77,6 @@ renameExp (Index s idxs t1 t2 pos) = do
   s' <- repl s
   idxs' <- mapM renameExp idxs
   return $ Index s' idxs' t1 t2 pos
-renameExp (Iota e pos) = do
-  e' <- renameExp e
-  return $ Iota e' pos
-renameExp (Size e pos) = do
-  e' <- renameExp e
-  return $ Size e' pos
-renameExp (Replicate e1 e2 t pos) = do
-  e1' <- renameExp e1
-  e2' <- renameExp e2
-  return $ Replicate e1' e2' t pos
-renameExp (Reshape es e t1 t2 pos) = do
-  es' <- mapM renameExp es
-  e' <- renameExp e
-  return $ Reshape es' e' t1 t2 pos
-renameExp (Transpose e t1 t2 pos) = do
-  e' <- renameExp e
-  return $ Transpose e' t1 t2 pos
-renameExp (Map fun e t1 t2 pos) = do
-  fun' <- renameLambda fun
-  e' <- renameExp e
-  return $ Map fun' e' t1 t2 pos
-renameExp (Reduce fun e1 e2 t pos) = do
-  fun' <- renameLambda fun
-  e1' <- renameExp e1
-  e2' <- renameExp e2
-  return $ Reduce fun' e1' e2' t pos
-renameExp (ZipWith fun es t1 t2 pos) = do
-  fun' <- renameLambda fun
-  es' <- mapM renameExp es
-  return $ ZipWith fun' es' t1 t2 pos
-renameExp (Zip es t pos) = do
-  es' <- mapM renameExp es
-  return $ Zip es' t pos
-renameExp (Unzip e ts pos) = do
-  e' <- renameExp e
-  return $ Unzip e' ts pos
-renameExp (Scan fun e1 e2 t pos) = do
-  fun' <- renameLambda fun
-  e1' <- renameExp e1
-  e2' <- renameExp e2
-  return $ Scan fun' e1' e2' t pos
-renameExp (Filter fun e t pos) = do
-  fun' <- renameLambda fun
-  e' <- renameExp e
-  return $ Filter fun' e' t pos
-renameExp (Mapall fun e t1 t2 pos) = do
-  fun' <- renameLambda fun
-  e' <- renameExp e
-  return $ Mapall fun' e' t1 t2 pos
-renameExp (Redomap fun1 fun2 e1 e2 t1 t2 pos) = do
-  fun1' <- renameLambda fun1
-  fun2' <- renameLambda fun2
-  e1' <- renameExp e1
-  e2' <- renameExp e2
-  return $ Redomap fun1' fun2' e1' e2' t1 t2 pos
-renameExp (Split e1 e2 t pos) = do
-  e1' <- renameExp e1
-  e2' <- renameExp e2
-  return $ Split e1' e2' t pos
-renameExp (Concat e1 e2 t pos) = do
-  e1' <- renameExp e1
-  e2' <- renameExp e2
-  return $ Concat e1' e2' t pos
-renameExp (Read t pos) =
-  return $ Read t pos
-renameExp (Write e t pos) = do
-  e' <- renameExp e
-  return $ Write e' t pos
 renameExp (DoLoop loopvar e body mergevars pos) = do
   e' <- renameExp e
   bind [loopvar] $ do
@@ -176,26 +84,30 @@ renameExp (DoLoop loopvar e body mergevars pos) = do
     body' <- renameExp body
     mergevars' <- mapM repl mergevars
     return $ DoLoop loopvar' e' body' mergevars' pos
+-- The above case may have to be extended if syntax nodes ever contain
+-- anything but lambdas, expressions, lists of expressions or lists of
+-- pairs of expression-types.  Pay particular attention to the fact
+-- that the latter has to be specially handled.
+renameExp e = gmapM (mkM renameExp
+                     `extM` renameLambda
+                     `extM` mapM renameExp
+                     `extM` mapM renameExpPair) e
 
-renameBinOpNoType :: (Exp tf -> Exp tf -> Pos -> Exp tf)
-                  -> Exp tf -> Exp tf -> Pos
-                  -> RenameM (Exp tf)
-renameBinOpNoType op e1 e2 pos = do
-  e1' <- renameExp e1
-  e2' <- renameExp e2
-  return (op e1' e2' pos)
+renameExpPair :: (Exp Type, Type) -> RenameM (Exp Type, Type)
+renameExpPair (e,t) = do e' <- renameExp e
+                         return (e',t)
 
-renameLambda :: Lambda tf -> RenameM (Lambda tf)
+renameLambda :: Lambda Type -> RenameM (Lambda Type)
 renameLambda (AnonymFun params body ret pos) =
   bind (map fst params) $ do
     params' <- mapM renameBinding params
     body' <- renameExp body
     return (AnonymFun params' body' ret pos)
-renameLambda (CurryFun fname curryargexps curryargts rettype pos) = do
+renameLambda (CurryFun fname curryargexps rettype pos) = do
   curryargexps' <- mapM renameExp curryargexps
-  return (CurryFun fname curryargexps' curryargts rettype pos)
+  return (CurryFun fname curryargexps' rettype pos)
 
-renamePattern :: TupIdent tf -> RenameM (TupIdent tf)
+renamePattern :: TupIdent Type -> RenameM (TupIdent Type)
 renamePattern (Id s t pos) = do
   s' <- repl s
   return $ Id s' t pos

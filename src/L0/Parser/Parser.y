@@ -1,105 +1,107 @@
 {
-module L0.Parser( parseL0
-                , parseInt
-                , parseReal
-                , parseBool
-                , parseChar
-                , parseString
-                , parseArray
-                , parseTuple)
+module L0.Parser.Parser
+  ( prog
+  , intValue
+  , realValue
+  , boolValue
+  , charValue
+  , stringValue
+  , arrayValue
+  , tupleValue)
   where
 
 import Control.Monad (foldM)
 import Data.Array
+import Data.Loc
 
 import L0.AbSyn
-import L0.Lexer
+import L0.Parser.Lexer
 
 }
 
 %name prog Prog
 %name intValue IntValue
 %name realValue RealValue
-%name logValue LogValue
+%name boolValue LogValue
 %name charValue CharValue
 %name stringValue StringValue
 %name arrayValue ArrayValue
 %name tupleValue TupleValue
 
-%tokentype { Token }
+%tokentype { L Token }
 %error { parseError }
+%monad { Either String } { >>= } { return }
 
 %token 
-      if              { IF $$ }
-      then            { THEN $$ }
-      else            { ELSE $$ }
-      let             { LET $$ }
-      in              { IN $$ }
-      int             { INT $$ }
-      bool            { BOOL $$ }
-      char            { CHAR $$ }
-      real            { REAL $$ }
+      if              { L $$ IF }
+      then            { L $$ THEN }
+      else            { L $$ ELSE }
+      let             { L $$ LET }
+      in              { L $$ IN }
+      int             { L $$ INT }
+      bool            { L $$ BOOL }
+      char            { L $$ CHAR }
+      real            { L $$ REAL }
 
-      id              { ID _ _ }
+      id              { L _ (ID _) }
 
-      intlit          { INTLIT _ _ }
-      reallit         { REALLIT _ _ }
-      stringlit       { STRINGLIT _ _ }
-      charlit         { CHARLIT _ _ }
+      intlit          { L _ (INTLIT _) }
+      reallit         { L _ (REALLIT _) }
+      stringlit       { L _ (STRINGLIT _) }
+      charlit         { L _ (CHARLIT _) }
 
-      '+'             { PLUS $$ }
-      '-'             { MINUS $$ }
-      '*'             { TIMES $$ }
-      '/'             { DIVIDE $$ }
-      '='             { EQU $$ }
-      '<'             { LTH $$ }
-      '<='            { LEQ $$ }
-      pow             { POW $$ }
-      '<<'            { SHIFTL $$ }
-      '>>'            { SHIFTR $$ }
-      '|'             { BOR $$ }
-      '&'             { BAND $$ }
-      '^'             { XOR $$ }
-      '('             { LPAR $$ }
-      ')'             { RPAR $$ }
-      '['             { LBRACKET $$ }
-      ']'             { RBRACKET $$ }
-      '{'             { LCURLY $$ }
-      '}'             { RCURLY $$ }
-      ','             { COMMA $$ }
-      fun             { FUN $$ }
-      fn              { FN $$ }
-      '=>'            { ARROW $$ }
-      '<-'            { SETTO $$ }
-      for             { FOR $$ }
-      do              { DO $$ }
-      with            { WITH $$ }
-      merge           { MERGE $$ }
-      iota            { IOTA $$ }
-      size            { SIZE $$ }
-      replicate       { REPLICATE $$ }
-      map             { MAP $$ }
-      reduce          { REDUCE $$ }
-      reshape         { RESHAPE $$ }
-      transpose       { TRANSPOSE $$ }
-      read            { READ $$ }
-      write           { WRITE $$ }
-      zipWith         { ZIPWITH $$ }
-      zip             { ZIP $$ }
-      unzip           { UNZIP $$ }
-      scan            { SCAN $$ }
-      split           { SPLIT $$ }
-      concat          { CONCAT $$ }
-      filter          { FILTER $$ }
-      mapall          { MAPALL $$ }
-      redomap         { REDOMAP $$ }
-      true            { TRUE $$ }
-      false           { FALSE $$ }
-      not             { NOT $$ }
-      '~'             { NEGATE $$ }
-      '&&'            { AND $$ }
-      '||'            { OR $$ }
-      op              { OP $$ }
+      '+'             { L $$ PLUS }
+      '-'             { L $$ MINUS }
+      '*'             { L $$ TIMES }
+      '/'             { L $$ DIVIDE }
+      '='             { L $$ EQU }
+      '<'             { L $$ LTH }
+      '<='            { L $$ LEQ }
+      pow             { L $$ POW }
+      '<<'            { L $$ SHIFTL }
+      '>>'            { L $$ SHIFTR }
+      '|'             { L $$ BOR }
+      '&'             { L $$ BAND }
+      '^'             { L $$ XOR }
+      '('             { L $$ LPAR }
+      ')'             { L $$ RPAR }
+      '['             { L $$ LBRACKET }
+      ']'             { L $$ RBRACKET }
+      '{'             { L $$ LCURLY }
+      '}'             { L $$ RCURLY }
+      ','             { L $$ COMMA }
+      fun             { L $$ FUN }
+      fn              { L $$ FN }
+      '=>'            { L $$ ARROW }
+      '<-'            { L $$ SETTO }
+      for             { L $$ FOR }
+      do              { L $$ DO }
+      with            { L $$ WITH }
+      merge           { L $$ MERGE }
+      iota            { L $$ IOTA }
+      size            { L $$ SIZE }
+      replicate       { L $$ REPLICATE }
+      map             { L $$ MAP }
+      reduce          { L $$ REDUCE }
+      reshape         { L $$ RESHAPE }
+      transpose       { L $$ TRANSPOSE }
+      read            { L $$ READ }
+      write           { L $$ WRITE }
+      zip             { L $$ ZIP }
+      unzip           { L $$ UNZIP }
+      scan            { L $$ SCAN }
+      split           { L $$ SPLIT }
+      concat          { L $$ CONCAT }
+      filter          { L $$ FILTER }
+      mapall          { L $$ MAPALL }
+      redomap         { L $$ REDOMAP }
+      true            { L $$ TRUE }
+      false           { L $$ FALSE }
+      not             { L $$ NOT }
+      '~'             { L $$ NEGATE }
+      '&&'            { L $$ AND }
+      '||'            { L $$ OR }
+      op              { L $$ OP }
 
 %nonassoc ifprec letprec
 %left '||'
@@ -142,9 +144,9 @@ FunDecs : fun Fun FunDecs   { $2 : $3 }
 ;
 
 Fun :     Type id '(' TypeIds ')' '=' Exp 
-			{ let ID name pos = $2 in (name, $1, $4, $7, pos) }
+			{ let L pos (ID name) = $2 in (name, $1, $4, $7, pos) }
         | Type id '(' ')' '=' Exp 
-			{ let ID name pos = $2 in (name, $1, [], $6, pos) }
+			{ let L pos (ID name) = $2 in (name, $1, [], $6, pos) }
 ;
 
 Type :	  int                    { Int   $1             }
@@ -161,20 +163,20 @@ Types : Type '*' Types { $1 : $3 }
 ;
 
 TypeIds : Type id ',' TypeIds
-                        { let ID name _ = $2 in (name, $1) : $4 }
-        | Type id       { let ID name _ = $2 in [(name, $1)] }
+                        { let L pos (ID name) = $2 in (name, $1) : $4 }
+        | Type id       { let L pos (ID name) = $2 in [(name, $1)] }
 ;
 
-Exp  : intlit         { let INTLIT num pos = $1 in Literal $ IntVal num pos }
-     | reallit        { let REALLIT num pos = $1 in Literal $ RealVal num pos }
-     | charlit        { let CHARLIT char pos = $1 in Literal $ CharVal char pos }
-     | stringlit      { let STRINGLIT s pos = $1
-                        in Literal $ ArrayVal (arrayFromList $ map (`CharVal` pos) s) (Array (Char pos) Nothing pos) pos }
+Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal $ IntVal num pos }
+     | reallit        { let L pos (REALLIT num) = $1 in Literal $ RealVal num pos }
+     | charlit        { let L pos (CHARLIT char) = $1 in Literal $ CharVal char pos }
+     | stringlit      { let L pos (STRINGLIT s) = $1
+                        in Literal $ ArrayVal (arrayFromList $ map (`CharVal` pos) s) (Char pos) pos }
      | true           { Literal $ LogVal True $1 }
      | false          { Literal $ LogVal False $1 }
-     | id             { let ID name pos = $1 in Var name Nothing pos }
+     | id             { let L pos (ID name) = $1 in Var name Nothing pos }
      | '{' Exps '}'   { ArrayLit $2 Nothing $1 }
-     | TupleExp       { let (exps, pos) = $1 in TupLit exps Nothing pos }
+     | TupleExp       { let (exps, pos) = $1 in TupLit exps pos }
 
      | Exp '+' Exp    { BinOp Plus $1 $3 Nothing $2 }
      | Exp '-' Exp    { BinOp Minus $1 $3 Nothing $2 }
@@ -199,9 +201,9 @@ Exp  : intlit         { let INTLIT num pos = $1 in Literal $ IntVal num pos }
                       { If $2 $4 $6 Nothing $1 }
 
      | id '(' Exps ')'
-                      { let ID name pos = $1
+                      { let L pos (ID name) = $1
                         in Apply name $3 Nothing pos }
-     | id '(' ')'     { let ID name pos = $1
+     | id '(' ')'     { let L pos (ID name) = $1
                         in Apply name [] Nothing pos }
 
      | read '(' Type ')' { Read $3 $1 }
@@ -234,14 +236,11 @@ Exp  : intlit         { let INTLIT num pos = $1 in Literal $ IntVal num pos }
      | scan '(' FunAbstr ',' Exp ',' Exp ')'
                       { Scan $3 $5 $7 Nothing $1 }
 
-     | zipWith '(' FunAbstr ',' Exps ')'
-                      { ZipWith $3 $5 Nothing Nothing $1 }
-
      | zip '(' Exps2 ')'
-                      { Zip $3 Nothing $1 }
+                      { Zip (map (\x -> (x, Nothing)) $3) $1 }
 
      | unzip '(' Exp ')'
-                      { Unzip $3 Nothing $1 }
+                      { Unzip $3 [] $1 }
 
      | filter '(' FunAbstr ',' Exp ')'
                       { Filter $3 $5 Nothing $1 }
@@ -255,29 +254,29 @@ Exp  : intlit         { let INTLIT num pos = $1 in Literal $ IntVal num pos }
      | '(' Exp ')' { $2 }
 
      | let id '=' Exp in Exp %prec letprec
-                      { let ID name pos = $2
+                      { let L pos (ID name) = $2
                         in LetPat (Id name Nothing pos) $4 $6 $1 }
 
      | let '(' TupIds ')' '=' Exp in Exp %prec letprec
                       { LetPat (TupId $3 $1) $6 $8 $1 }
 
      | let id '=' Exp with '[' Exps ']' '<-' Exp in Exp %prec letprec
-                      { let ID name _ = $2
+                      { let ID name = unLoc $2
                         in LetWith name $4 $7 $10 $12 $1 }
      | let id '[' Exps ']' '=' Exp in Exp %prec letprec
-                      { let ID name pos = $2
+                      { let L pos (ID name) = $2
                         in LetWith name (Var name Nothing pos) $4 $7 $9 $1 }
 
      | id '[' Exps ']'
-                      { let ID name pos = $1
+                      { let L pos (ID name) = $1
                         in Index name $3 Nothing Nothing pos }
 
      | for id '<' Exp do Exp merge '(' Ids ')'
-                      { let ID name _ = $2
+                      { let ID name = unLoc $2
                         in DoLoop name $4 $6 $9 $1 }
      | for id '<' Exp do Exp merge id
                       {case ($2, $8) of
-                          (ID name _, ID mergename _) -> DoLoop name $4 $6 [mergename] $1 }
+                          (L _ (ID name), L _ (ID mergename)) -> DoLoop name $4 $6 [mergename] $1 }
 
 Exps : Exp ',' Exps { $1 : $3 }
      | Exp          { [$1] }
@@ -287,24 +286,24 @@ Exps2 : Exp ',' Exps2 { $1 : $3 }
 
 TupleExp : '(' Exps2 ')' { ($2, $1) }
 
-Ids : id { let ID name pos = $1 in [name] }
-    | id ',' Ids { let ID name pos = $1 in name : $3 }
+Ids : id { let ID name = unLoc $1 in [name] }
+    | id ',' Ids { let ID name = unLoc $1 in name : $3 }
 
 TupIds : TupId ',' TupId   { [$1, $3] }
        | TupId ',' TupIds  { $1 : $3 }
 ;
 
-TupId : id { let ID name pos = $1 in Id name Nothing pos }
+TupId : id { let L pos (ID name) = $1 in Id name Nothing pos }
       | '(' TupIds ')' { TupId $2 $1 }
 
-FunAbstr : id { let ID name pos = $1 in CurryFun name [] Nothing Nothing pos }
-         | Ops { let (name,pos) = $1 in CurryFun name [] Nothing Nothing pos }
-         | id '(' ')' { let ID name pos = $1 in CurryFun name [] Nothing Nothing pos }
-         | Ops '(' ')' { let (name,pos) = $1 in CurryFun name [] Nothing Nothing pos }
+FunAbstr : id { let L pos (ID name) = $1 in CurryFun name [] Nothing pos }
+         | Ops { let (name,pos) = $1 in CurryFun name [] Nothing pos }
+         | id '(' ')' { let L pos (ID name) = $1 in CurryFun name [] Nothing pos }
+         | Ops '(' ')' { let (name,pos) = $1 in CurryFun name [] Nothing pos }
          | id '(' Exps ')'
-               { let ID name pos = $1 in CurryFun name $3 Nothing Nothing pos }
+               { let L pos (ID name) = $1 in CurryFun name $3 Nothing pos }
          | Ops '(' Exps ')'
-               { let (name,pos) = $1 in CurryFun name $3 Nothing Nothing pos }
+               { let (name,pos) = $1 in CurryFun name $3 Nothing pos }
          | fn Type '(' TypeIds ')' '=>' Exp { AnonymFun $4 $7 $2 $1 }
 
 Value : IntValue { $1 }
@@ -315,10 +314,10 @@ Value : IntValue { $1 }
       | ArrayValue { $1 }
 
 
-IntValue : intlit        { let INTLIT num pos = $1 in IntVal num pos }
-RealValue : reallit      { let REALLIT num pos = $1 in RealVal num pos }
-CharValue : charlit      { let CHARLIT char pos = $1 in CharVal char pos }
-StringValue : stringlit  { let STRINGLIT s pos = $1 in ArrayVal (arrayFromList $ map (`CharVal` pos) s) (Char pos) pos }
+IntValue : intlit        { let L pos (INTLIT num) = $1 in IntVal num pos }
+RealValue : reallit      { let L pos (REALLIT num) = $1 in RealVal num pos }
+CharValue : charlit      { let L pos (CHARLIT char) = $1 in CharVal char pos }
+StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in ArrayVal (arrayFromList $ map (`CharVal` pos) s) (Char pos) pos }
 LogValue : true          { LogVal True $1 }
         | false          { LogVal False $1 }
 ArrayValue :  '{' Values '}' { case combArrayTypes $ map valueType $2 of
@@ -344,31 +343,7 @@ combArrayTypes (v:vs) = foldM comb v vs
 arrayFromList :: [a] -> Array Int a
 arrayFromList l = listArray (0, length l-1) l
 
-parseError :: [Token] -> a
-parseError [] = error "Parse error: End of file"
-parseError (tok:_) = error $ "Parse error at " ++ show (tokPos tok)
-
-parseL0 :: String -> Prog Maybe
-parseL0 = prog . alexScanTokens
-
-parseInt :: String -> Value
-parseInt = intValue . alexScanTokens
-
-parseReal :: String -> Value
-parseReal = realValue . alexScanTokens
-
-parseBool :: String -> Value
-parseBool = logValue . alexScanTokens
-
-parseChar :: String -> Value
-parseChar = charValue . alexScanTokens
-
-parseString :: String -> Value
-parseString = stringValue . alexScanTokens
-
-parseTuple :: String -> Value
-parseTuple = tupleValue . alexScanTokens
-
-parseArray :: String -> Value
-parseArray = arrayValue . alexScanTokens
+parseError :: [L Token] -> Either String a
+parseError [] = Left "Parse error: End of file"
+parseError (tok:_) = Left $ "Parse error at " ++ locStr (locOf tok)
 }
