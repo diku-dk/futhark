@@ -22,8 +22,6 @@ import qualified Data.Map as M
 
 import L0.AbSyn
 
-import Debug.Trace
-
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.
 data EnablingOptError = EnablingOptError SrcLoc String
@@ -60,7 +58,6 @@ instance Show EnablingOptError where
 enablingOpts :: TypeBox tf => Prog tf -> Either EnablingOptError (Prog tf)
 enablingOpts prog = do
     (success, prog') <- copyCtProp prog
-    trace (prettyPrint prog') $ return ()
     if(success) 
     then enablingOpts prog'
     else return prog'
