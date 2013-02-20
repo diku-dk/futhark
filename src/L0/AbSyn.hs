@@ -175,7 +175,8 @@ instance Located Value where
 arrayShape :: Value -> [Int]
 arrayShape (ArrayVal arr _ _) =
   if size == 0 then [0] else size : arrayShape (arr ! 0)
-  where size = uncurry (-) $ bounds arr
+  where size = upper - lower
+        (lower, upper) = bounds arr
 arrayShape _ = []
 
 -- | Construct an array value containing the given elements.
