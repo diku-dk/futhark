@@ -23,6 +23,7 @@ fun [[int]] matmultImp(int N, [[int]] a, [[int]] b) =
                     in  res
                 merge res
             in let res[i,j] = partsum in res
+//          in let res' = res with [i,j] <- partsum in res'
         merge res
     merge res
 
