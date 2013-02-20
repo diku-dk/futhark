@@ -7,23 +7,22 @@ module L0.EnablingOpt ( copyCtProp
 
 import Control.Applicative
 import Control.Monad.Reader
+import Control.Monad.Writer
 
 --import Data.Either
 
 --import Control.Monad.State
 import Data.Array
---import Data.List
+import Data.List
 
 import Data.Bits
 import Data.Loc
 
 import qualified Data.Map as M
 
---import qualified Data.Set as S
-
 import L0.AbSyn
 
---import Debug.Trace
+import Debug.Trace
 
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.
@@ -61,6 +60,7 @@ instance Show EnablingOptError where
 enablingOpts :: TypeBox tf => Prog tf -> Either EnablingOptError (Prog tf)
 enablingOpts prog = do
     (success, prog') <- copyCtProp prog
+    trace (prettyPrint prog') $ return ()
     if(success) 
     then enablingOpts prog'
     else return prog'
@@ -95,17 +95,54 @@ data CPropEnv tf = CopyPropEnv {
                         envVtable  :: M.Map String (CtOrId tf)
                   }
 
-newtype CPropM tf a = CPropM (ReaderT (CPropEnv tf) (Either EnablingOptError) a)
-    deriving (MonadReader (CPropEnv tf), Monad, Applicative, Functor)
+data CPropRes tf = CPropRes {
+    resSuccess :: Bool
+  -- ^ Whether we have changed something.
+  , resNonRemovable :: [String]
+  -- ^ The set of variables used as merge variables.
+  }
+
+instance Monoid (CPropRes tf) where
+  CPropRes c1 m1 `mappend` CPropRes c2 m2 =
+    CPropRes (c1 || c2) (m1 `union` m2)
+  mempty = CPropRes False []
+
+newtype CPropM tf a = CPropM (WriterT (CPropRes tf) (ReaderT (CPropEnv tf) (Either EnablingOptError)) a)
+    deriving (MonadWriter (CPropRes tf),
+              MonadReader (CPropEnv tf), Monad, Applicative, Functor)
+
+-- | We changed part of the AST, and this is the result.  For
+-- convenience, use this instead of 'return'.
+changed :: a -> CPropM tf a
+changed x = do
+  tell $ CPropRes True []
+  return x
+
+-- | This name was used as a merge variable.
+nonRemovable :: String -> CPropM tf ()
+nonRemovable name = do
+  tell $ CPropRes False [name]
+
+-- | @collectNonRemovable mvars m@ executes the action @m@.  The
+-- intersection of @mvars@ and any variables used as merge variables
+-- while executing @m@ will also be returned, and removed from the
+-- writer result.  The latter property is only important if names are
+-- not unique.
+collectNonRemovable :: [String] -> CPropM tf a -> CPropM tf (a, [String])
+collectNonRemovable mvars m = pass collect
+  where collect = do
+          (x,res) <- listen m
+          return ((x, mvars `intersect` resNonRemovable res),
+                  const $ res { resNonRemovable = resNonRemovable res \\ mvars})
 
 -- | The enabling optimizations run in this monad.  Note that it has no mutable
 -- state, but merely keeps track of current bindings in a 'TypeEnv'.
 -- The 'Either' monad is used for error handling.
-runCPropM :: CPropM tf a -> CPropEnv tf -> Either EnablingOptError a
-runCPropM  (CPropM a) env = runReaderT a env
+runCPropM :: CPropM tf a -> CPropEnv tf -> Either EnablingOptError (a, CPropRes tf)
+runCPropM  (CPropM a) env = runReaderT (runWriterT a) env
 
 badCPropM :: EnablingOptError -> CPropM tf a
-badCPropM = CPropM . lift . Left
+badCPropM = CPropM . lift . lift . Left
 
 
 -- | Bind a name as a common (non-merge) variable.
@@ -138,13 +175,13 @@ copyCtProp prog = do
     let env = CopyPropEnv { envVtable = M.empty }
     -- res   <- runCPropM (mapM copyCtPropFun prog) env
     -- let (bs, rs) = unzip res
-    (bs, rs) <- unzip <$> runCPropM (mapM copyCtPropFun prog) env
-    return (foldl (||) False bs, rs)
+    (rs, res) <- runCPropM (mapM copyCtPropFun prog) env
+    return (resSuccess res, rs)
 
-copyCtPropFun :: TypeBox tf => FunDec tf -> CPropM tf (Bool, FunDec tf)
+copyCtPropFun :: TypeBox tf => FunDec tf -> CPropM tf (FunDec tf)
 copyCtPropFun (fname, rettype, args, body, pos) = do
-    (s, body') <- copyCtPropExp body 
-    return (s, (fname, rettype, args, body', pos))
+    body' <- copyCtPropExp body
+    return (fname, rettype, args, body', pos)
 
 --------------------------------------------------------------------
 --------------------------------------------------------------------
@@ -152,203 +189,195 @@ copyCtPropFun (fname, rettype, args, body, pos) = do
 --------------------------------------------------------------------
 --------------------------------------------------------------------
 
-copyCtPropExp :: TypeBox tf => Exp tf -> CPropM tf (Bool, (Exp tf))
+copyCtPropExp :: TypeBox tf => Exp tf -> CPropM tf (Exp tf)
 
 copyCtPropExp (LetWith nm e inds el body pos) = do
-    (s, e')        <- copyCtPropExp e 
-    (se,el')       <- copyCtPropExp el
-    (ss, inds')    <- unzip <$> mapM copyCtPropExp inds
-    (sbody, body') <- copyCtPropExp body
+    e'        <- copyCtPropExp e 
+    el'       <- copyCtPropExp el
+    inds'     <- mapM copyCtPropExp inds
+    body'     <- copyCtPropExp body
     -- propagating (nm,e[inds]) would be incorrect and  
     -- would defeat the in-place semantics of LetWith 
-    return ( s || se || foldl (||) False ss || sbody
-           , LetWith nm e' inds' el' body' pos     ) 
+    return $ LetWith nm e' inds' el' body' pos
 
 copyCtPropExp (LetPat pat e body pos) = do
-    (s1, e') <- copyCtPropExp e
+    e' <- copyCtPropExp e
     remv <- isRemovablePat pat e'
     bnds <- getPropBnds pat e' remv
-    (s2, body') <-  if null bnds   then copyCtPropExp body
-                    else binding bnds $ copyCtPropExp body
-    let (s3, e_res) = if remv then (True,body')
-                      else (False, LetPat pat e' body' pos)
-    return (s1 || s2 || s3, e_res)
+    (body', mvars) <-  collectNonRemovable (map fst bnds) $
+                       if null bnds then copyCtPropExp body
+                       else binding bnds $ copyCtPropExp body
+    if remv && null mvars then changed body'
+    else return $ LetPat pat e' body' pos
 
  
 copyCtPropExp (DoLoop ind n body mergevars pos) = do
-    (s1, n')   <- copyCtPropExp n
+    n'   <- copyCtPropExp n
     let mergenames = map identName mergevars
+    mapM_ nonRemovable mergenames
     bnds       <- mapM (\vnm -> asks $ M.lookup vnm . envVtable) mergenames
     let idbnds1 = zip bnds mergevars
     let idbnds  = filter ( \(x,_) -> isValidBnd     x ) idbnds1
-    let toadd   = filter ( \(x,_) -> isRemovableBnd x ) idbnds 
     let remkeys = map (\(_, (Ident s _ _) ) -> s) idbnds
-    (s2, body')<- remBindings remkeys $ copyCtPropExp body
+    body' <- remBindings remkeys $ copyCtPropExp body
     let newloop = DoLoop ind n' body' mergevars pos
-    (_, resloop) <- foldM (writeBackBnd pos) (False, newloop) toadd
     --(_, resloop) <- foldM (\y bnd -> writeBackBnd pos y bnd) (False, newloop) toadd
     --let ccc = (toadd !! 0)
     --(_, resloop1) <- writeBackBnd pos (False,newloop) (toadd !! 0)
-    return (s1 || s2, resloop)--newloop)--resloop1)
+    return newloop --newloop)--resloop1)
 
 copyCtPropExp e@(Var (Ident vnm _ pos)) = do 
     -- let _ = trace ("In VarExp: "++ppExp 0 e) e
     bnd <- asks $ M.lookup vnm . envVtable
     case bnd of
-        Nothing                 -> return (False, e)
-        Just (Constant v   _ _) -> return (True,  Literal v     )
-        Just (VarId  id' tp1 _) -> return (True,  Var (Ident id' tp1 pos)) -- or tp
+        Nothing                 -> return e
+        Just (Constant v   _ _) -> changed $ Literal v
+        Just (VarId  id' tp1 _) -> changed $ Var (Ident id' tp1 pos) -- or tp
         Just (SymArr e'    _ _) ->
             case e' of
-                Replicate _ _ _ _ -> return (False, e )
-                TupLit    _ _     -> return (False, e )
-                ArrayLit  _ _ _   -> return (False, e )
-                Index _ _ _ _ _   -> return (True,  e')
-                Iota  _ _         -> return (True,  e')
-                _                 -> return (False, e )
+                Replicate _ _ _ _ -> return e
+                TupLit    _ _     -> return e
+                ArrayLit  _ _ _   -> return e
+                Index _ _ _ _ _   -> changed e'
+                Iota  _ _         -> changed e'
+                _                 -> return e
 
 copyCtPropExp eee@(Index idd@(Ident vnm tp p) inds tp1 tp2 pos) = do 
-  (ss1, inds')  <- unzip <$> mapM copyCtPropExp inds
-  let ss  = foldl (||) False ss1
+  inds'  <- mapM copyCtPropExp inds
   bnd <- asks $ M.lookup vnm . envVtable 
   case bnd of
-    Nothing               -> return (ss,    Index idd inds' tp1 tp2 pos)
-    Just (VarId  id' _ _) -> return (True,  Index (Ident id' tp p) inds' tp1 tp2 pos)
+    Nothing               -> return $ Index idd inds' tp1 tp2 pos
+    Just (VarId  id' _ _) -> changed $ Index (Ident id' tp p) inds' tp1 tp2 pos
     Just (Constant v _ _) -> 
       case v of
         ArrayVal _ _ _ ->
           let sh = arrayShape v 
           in case ctIndex inds' of
-               Nothing -> return (ss, Index idd inds' tp1 tp2 pos)
+               Nothing -> return $ Index idd inds' tp1 tp2 pos
                Just iis-> 
                  if (length iis == length sh)
                  then case getArrValInd v iis of
-                        Nothing -> return (ss, Index idd inds' tp1 tp2 pos)
-                        Just el -> return (True, Literal el)
-                 else return (ss, Index idd inds' tp1 tp2 pos)
+                        Nothing -> return $ Index idd inds' tp1 tp2 pos
+                        Just el -> changed $ Literal el
+                 else return $ Index idd inds' tp1 tp2 pos
         _ -> badCPropM $ TypeError pos  " indexing into a non-array value "
     Just (SymArr e' _ _) -> 
       case (e', inds') of 
-        (Iota _ _, [ii]) -> return (True, ii)
+        (Iota _ _, [ii]) -> changed ii
         (Iota _ _, _)    -> badCPropM $ TypeError pos  " bad indexing in iota "
         (Replicate _ vvv@(Var vv@(Ident _ _ _)) _ _, _:is') -> do
-            (_, inner) <- if null is' then copyCtPropExp vvv
-                                      else copyCtPropExp (Index vv is' tp1 tp2 pos) 
-            return (True, inner)
+            inner <- if null is' then copyCtPropExp vvv
+                     else copyCtPropExp (Index vv is' tp1 tp2 pos) 
+            changed inner
         (Replicate _ (Index a ais _ _ _) _ _, _:is') -> do
-            (_, inner) <- copyCtPropExp (Index a (ais ++ is') tp1 tp2 pos)
-            return (True, inner)
+            inner <- copyCtPropExp (Index a (ais ++ is') tp1 tp2 pos)
+            changed inner
         (Replicate _ (Iota n _) _ _, _:is') -> do
-            if     (length is' == 0) then return (True, Iota n pos )
-            else if(length is' == 1) then return (True, head is')
+            if     (length is' == 0) then changed $ Iota n pos 
+            else if(length is' == 1) then changed $ head is'
             else badCPropM $ TypeError pos  (" illegal indexing: " ++ ppExp 0 eee)
         (Replicate _ _ _ _, _) -> 
-            return (ss, Index idd inds' tp1 tp2 pos)
+            return $ Index idd inds' tp1 tp2 pos
         (ArrayLit _ _ _   , _) ->
             case ctIndex inds' of
-                Nothing  -> return (ss, Index idd inds' tp1 tp2 pos)
+                Nothing  -> return $ Index idd inds' tp1 tp2 pos
                 Just iis -> case getArrLitInd e' iis of
-                                Nothing -> return (ss, Index idd inds' tp1 tp2 pos)
-                                Just el -> return (True, el)
+                                Nothing -> return $ Index idd inds' tp1 tp2 pos
+                                Just el -> changed el
         (Index aa ais t1 t2 _,_) -> do
-            (_, inner) <- copyCtPropExp( Index aa (ais ++ inds') t1 t2 pos ) 
-            return (True, inner)
+            inner <- copyCtPropExp( Index aa (ais ++ inds') t1 t2 pos ) 
+            changed inner
         (TupLit   _ _, _       ) -> badCPropM $ TypeError pos  " indexing into a tuple "
         _ -> badCPropM $ CopyCtPropError pos (" Unreachable case in copyCtPropExp of Index exp: " ++
                                               ppExp 0 eee++" is bound to "++ppExp 0 e' ) --e 
                                               --" index-exp of "++ppExp 0 eee++" bound to "++ppExp 0 e' ) --e
 
 
-copyCtPropExp (Literal v)       = do 
-    return (False, Literal v)
+copyCtPropExp (Literal v) =
+    return $ Literal v
 
 copyCtPropExp (TupLit els pos) = do 
-    res <- mapM copyCtPropExp els
-    let (bs, els') = unzip res
-    return (foldl (||) False bs, TupLit els' pos)
+    els' <- mapM copyCtPropExp els
+    return $ TupLit els' pos
 
 copyCtPropExp (ArrayLit  els tp pos) = do 
-    (bs, els') <- unzip <$> mapM copyCtPropExp els
-    return (foldl (||) False bs, ArrayLit els' tp pos)
+    els' <- mapM copyCtPropExp els
+    return $ ArrayLit els' tp pos
     
 copyCtPropExp (BinOp bop e1 e2 tp pos) = do 
-    (s1, e1')   <- copyCtPropExp e1
-    (s2, e2')   <- copyCtPropExp e2
-    (s3, res_e) <- ctFoldBinOp (BinOp bop e1' e2' tp pos)
-    return (s1 || s2 || s3, res_e)
+    e1'   <- copyCtPropExp e1
+    e2'   <- copyCtPropExp e2
+    ctFoldBinOp (BinOp bop e1' e2' tp pos)
 
 copyCtPropExp (And e1 e2 pos) = do 
-    (s1, e1')   <- copyCtPropExp e1
-    (s2, e2')   <- copyCtPropExp e2
-    (s, res_e)  <- ctFoldBinOp (And e1' e2' pos)
-    return (s || s1 || s2, res_e)
+    e1'   <- copyCtPropExp e1
+    e2'   <- copyCtPropExp e2
+    ctFoldBinOp (And e1' e2' pos)
 
 copyCtPropExp (Or e1 e2 pos) = do 
-    (s1, e1')   <- copyCtPropExp e1
-    (s2, e2')   <- copyCtPropExp e2
-    (s, res_e)  <- ctFoldBinOp (Or e1' e2' pos)
-    return (s || s1 || s2, res_e)
-
+    e1'   <- copyCtPropExp e1
+    e2'   <- copyCtPropExp e2
+    ctFoldBinOp $ Or e1' e2' pos
 
 copyCtPropExp (Negate e _ pos) = do 
-    (s, e')   <- copyCtPropExp e
+    e'   <- copyCtPropExp e
     if( isValue e' ) 
     then case e' of
-            Literal (IntVal  v _) -> return (True, Literal (IntVal  (0  -v) pos))
-            Literal (RealVal v _) -> return (True, Literal (RealVal (0.0-v) pos))
+            Literal (IntVal  v _) -> changed $ Literal (IntVal  (0  -v) pos)
+            Literal (RealVal v _) -> changed $ Literal (RealVal (0.0-v) pos)
             _ -> badCPropM $ TypeError pos  " ~ operands not of (the same) numeral type! "
-    else return (s, e')
+    else return e'
 
 copyCtPropExp (Not e pos) = do 
-    (s, e')   <- copyCtPropExp e
+    e'   <- copyCtPropExp e
     if( isValue e' ) 
     then case e' of
-            Literal (LogVal  v _) -> return (True, Literal (LogVal (not v) pos))
+            Literal (LogVal  v _) -> changed $ Literal (LogVal (not v) pos)
             _ -> badCPropM $ TypeError pos  " not operands not of (the same) numeral type! "    
-    else return (s, e')
+    else return e'
 
 copyCtPropExp (If e1 e2 e3 tp pos) = do 
-    (s1, e1')   <- copyCtPropExp e1
-    (s2, e2')   <- copyCtPropExp e2
-    (s3, e3')   <- copyCtPropExp e3
-    if      isCt1 e1' then return (True, e2')
-    else if isCt0 e1' then return (True, e3')
-    else return (s1 || s2 || s3, If e1' e2' e3' tp pos)
+    e1' <- copyCtPropExp e1
+    e2' <- copyCtPropExp e2
+    e3' <- copyCtPropExp e3
+    if      isCt1 e1' then changed e2'
+    else if isCt0 e1' then changed e3'
+    else return $ If e1' e2' e3' tp pos
 
 copyCtPropExp (Apply fname es tp pos) = do 
-    (ss,es') <- copyCtPropExpList es
-    return (ss, Apply fname es' tp pos)
+    es' <- copyCtPropExpList es
+    return $ Apply fname es' tp pos
 
 copyCtPropExp (Iota e pos) = do 
-    (s, e')   <- copyCtPropExp e
-    return (s, Iota e' pos)
+    e'   <- copyCtPropExp e
+    return $ Iota e' pos
 
 copyCtPropExp (Size e pos) = do 
-    (s, e')   <- copyCtPropExp e
-    return (s, Size e' pos)
+    e' <- copyCtPropExp e
+    return $ Size e' pos
 
 copyCtPropExp (Replicate e1 e2 tp pos) = do
-    (s1, e1')   <- copyCtPropExp e1
-    (s2, e2')   <- copyCtPropExp e2
-    return (s1 || s2, Replicate e1' e2' tp pos)
+    e1' <- copyCtPropExp e1
+    e2' <- copyCtPropExp e2
+    return $ Replicate e1' e2' tp pos
 
 copyCtPropExp (Reshape es e tp1 tp2 pos) = do
-    (ss, es') <- copyCtPropExpList es
-    (s,  e' ) <- copyCtPropExp e
-    return (s || ss, Reshape es' e' tp1 tp2 pos)
+    es' <- copyCtPropExpList es
+    e'  <- copyCtPropExp e
+    return $ Reshape es' e' tp1 tp2 pos
 
 copyCtPropExp (Transpose e tp1 tp2 pos) = do
-    (s,  e' ) <- copyCtPropExp e
-    return (s, Transpose e' tp1 tp2 pos)
+    e' <- copyCtPropExp e
+    return $ Transpose e' tp1 tp2 pos
 
 copyCtPropExp (Map fname e tp1 tp2 pos) = do
-    (s,  e' ) <- copyCtPropExp e
-    return (s, Map fname e' tp1 tp2 pos)
+    e' <- copyCtPropExp e
+    return $ Map fname e' tp1 tp2 pos
 
 copyCtPropExp (Reduce fname e1 e2 tp pos) = do
-    (s1, e1') <- copyCtPropExp e1
-    (s2, e2') <- copyCtPropExp e2
-    return (s1 || s2, Reduce fname e1' e2' tp pos)
+    e1' <- copyCtPropExp e1
+    e2' <- copyCtPropExp e2
+    return $ Reduce fname e1' e2' tp pos
 
 -------------------------------------------------------
 ------- ZipWith was replaced with map . zip!!!  -------
@@ -359,47 +388,47 @@ copyCtPropExp (Reduce fname e1 e2 tp pos) = do
 
 copyCtPropExp (Zip exptps pos) = do
     let (es, tps) = unzip exptps
-    (ss, es') <- copyCtPropExpList es
-    return (ss, Zip (zip es' tps) pos)
+    es' <- copyCtPropExpList es
+    return $ Zip (zip es' tps) pos
 
 copyCtPropExp (Unzip e tps pos)= do
-    (s, e') <- copyCtPropExp e
-    return (s, Unzip e' tps pos)
+    e' <- copyCtPropExp e
+    return $ Unzip e' tps pos
 
 copyCtPropExp (Scan fname e1 e2 tp pos) = do
-    (s1, e1') <- copyCtPropExp e1
-    (s2, e2') <- copyCtPropExp e2
-    return (s1 || s2, Scan fname e1' e2' tp pos)
+    e1' <- copyCtPropExp e1
+    e2' <- copyCtPropExp e2
+    return $ Scan fname e1' e2' tp pos
 
 copyCtPropExp (Filter fname e tp pos) = do
-    (s, e') <- copyCtPropExp e
-    return (s, Filter fname e' tp pos)
+    e' <- copyCtPropExp e
+    return $ Filter fname e' tp pos
 
 copyCtPropExp (Mapall fname e tp1 tp2 pos) = do
-    (s, e') <- copyCtPropExp e
-    return (s, Mapall fname e' tp1 tp2 pos)
+    e' <- copyCtPropExp e
+    return $ Mapall fname e' tp1 tp2 pos
 
 copyCtPropExp (Redomap f g e1 e2 tp1 tp2 pos) = do
-    (s1, e1') <- copyCtPropExp e1
-    (s2, e2') <- copyCtPropExp e2
-    return (s1 || s2, Redomap f g e1' e2' tp1 tp2 pos)
+    e1' <- copyCtPropExp e1
+    e2' <- copyCtPropExp e2
+    return $ Redomap f g e1' e2' tp1 tp2 pos
 
 copyCtPropExp (Split e1 e2 tp pos) = do
-    (s1, e1') <- copyCtPropExp e1
-    (s2, e2') <- copyCtPropExp e2
-    return (s1 || s2, Split e1' e2' tp pos)
+    e1' <- copyCtPropExp e1
+    e2' <- copyCtPropExp e2
+    return $ Split e1' e2' tp pos
 
 copyCtPropExp (Concat e1 e2 tp pos) = do
-    (s1, e1') <- copyCtPropExp e1
-    (s2, e2') <- copyCtPropExp e2
-    return (s1 || s2, Concat e1' e2' tp pos)
+    e1' <- copyCtPropExp e1
+    e2' <- copyCtPropExp e2
+    return $ Concat e1' e2' tp pos
 
 copyCtPropExp (Write e tp pos) = do
-    (s, e') <- copyCtPropExp e
-    return (s, Write e' tp pos)
+    e' <- copyCtPropExp e
+    return $ Write e' tp pos
 
-copyCtPropExp r@(Read _ _) = do
-    return (False, r)
+copyCtPropExp r@(Read _ _) =
+  return r
 
 
 
@@ -407,189 +436,159 @@ copyCtPropExp r@(Read _ _) = do
 --    return (False, e)
 
 
-copyCtPropExpList :: TypeBox tf => [Exp tf] -> CPropM tf (Bool, [Exp tf])
-copyCtPropExpList es = do
-    (ss, es') <- unzip <$> mapM copyCtPropExp es
-    return (foldl (||) False ss, es')
-
+copyCtPropExpList :: TypeBox tf => [Exp tf] -> CPropM tf [Exp tf]
+copyCtPropExpList es = mapM copyCtPropExp es
 
 ------------------------------------------------
 ---- Constant Folding                       ----
 ------------------------------------------------
 
-ctFoldBinOp :: TypeBox tf => Exp tf -> CPropM tf (Bool, (Exp tf))
+ctFoldBinOp :: TypeBox tf => Exp tf -> CPropM tf (Exp tf)
 ctFoldBinOp e@(BinOp Plus e1 e2 _ pos) = do
-    if isCt0 e1 then return (True,e2) else if isCt0 e2 then return (True,e1)
+    if isCt0 e1 then changed e2 else if isCt0 e2 then changed e1
     else if(isValue e1 && isValue e2)
          then case (e1, e2) of
-                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> return (True, Literal (IntVal  (v1+v2) pos))
-                (Literal (RealVal v1 _), Literal (RealVal v2 _)) -> return (True, Literal (RealVal (v1+v2) pos))
+                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> changed $ Literal (IntVal  (v1+v2) pos)
+                (Literal (RealVal v1 _), Literal (RealVal v2 _)) -> changed $ Literal (RealVal (v1+v2) pos)
                 _ -> badCPropM $ TypeError pos  " + operands not of (the same) numeral type! "
-         else return (False, e)
+         else return e
 ctFoldBinOp e@(BinOp Minus e1 e2 _ pos) = do
-    if isCt0 e2 then return (True,e1)
+    if isCt0 e2 then changed e1
     else if(isValue e1 && isValue e2)
          then case (e1, e2) of
-                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> return (True, Literal (IntVal  (v1-v2) pos))
-                (Literal (RealVal v1 _), Literal (RealVal v2 _)) -> return (True, Literal (RealVal (v1-v2) pos))
+                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> changed $ Literal (IntVal  (v1-v2) pos)
+                (Literal (RealVal v1 _), Literal (RealVal v2 _)) -> changed $ Literal (RealVal (v1-v2) pos)
                 _ -> badCPropM $ TypeError pos  " - operands not of (the same) numeral type! "
-         else return (False, e)
+         else return e
 ctFoldBinOp e@(BinOp Times e1 e2 _ pos) = do
-    if      isCt0 e1 then return (True,e1) else if isCt0 e2 then return (True,e2)
-    else if isCt1 e1 then return (True,e2) else if isCt1 e2 then return (True,e1)
+    if      isCt0 e1 then changed e1 else if isCt0 e2 then changed e2
+    else if isCt1 e1 then changed e2 else if isCt1 e2 then changed e1
     else if(isValue e1 && isValue e2)
          then case (e1, e2) of
-                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> return (True, Literal (IntVal  (v1*v2) pos))
-                (Literal (RealVal v1 _), Literal (RealVal v2 _)) -> return (True, Literal (RealVal (v1*v2) pos))
+                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> changed $ Literal (IntVal  (v1*v2) pos)
+                (Literal (RealVal v1 _), Literal (RealVal v2 _)) -> changed $ Literal (RealVal (v1*v2) pos)
                 _ -> badCPropM $ TypeError pos  " * operands not of (the same) numeral type! "
-         else return (False, e)
+         else return e
 ctFoldBinOp e@(BinOp Divide e1 e2 _ pos) = do
-    if      isCt0 e1 then return (True,e1) 
+    if      isCt0 e1 then changed e1
     else if isCt0 e2 then badCPropM $ Div0Error pos
-    else if isCt1 e2 then return (True,e1) 
+    else if isCt1 e2 then changed e1
     else if(isValue e1 && isValue e2)
          then case (e1, e2) of
-                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> return (True, Literal (IntVal  (div v1 v2) pos))
-                (Literal (RealVal v1 _), Literal (RealVal v2 _)) -> return (True, Literal (RealVal (v1 / v2)   pos))
+                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> changed $ Literal (IntVal  (div v1 v2) pos)
+                (Literal (RealVal v1 _), Literal (RealVal v2 _)) -> changed $ Literal (RealVal (v1 / v2)   pos)
                 _ -> badCPropM $ TypeError pos  " / operands not of (the same) numeral type! "
-         else return (False, e)
+         else return e
 ctFoldBinOp e@(BinOp Pow e1 e2 _ pos) = do
-    if      isCt0 e1 || isCt1 e1 || isCt1 e2 then return (True,e1) 
+    if      isCt0 e1 || isCt1 e1 || isCt1 e2 then changed e1
     else if isCt0 e2 then case e1 of
-                            Literal (IntVal  _ _) -> return (True, Literal (IntVal  1   pos))
-                            Literal (RealVal _ _) -> return (True, Literal (RealVal 1.0 pos))
+                            Literal (IntVal  _ _) -> changed $ Literal (IntVal  1   pos)
+                            Literal (RealVal _ _) -> changed $ Literal (RealVal 1.0 pos)
                             _ -> badCPropM $ TypeError pos  " pow operands not of (the same) numeral type! "
     else if(isValue e1 && isValue e2)
          then case (e1, e2) of
-                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> return (True, Literal (IntVal  (v1 ^v2) pos))
-                (Literal (RealVal v1 _), Literal (RealVal v2 _)) -> return (True, Literal (RealVal (v1**v2) pos))
+                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> changed $ Literal (IntVal  (v1 ^v2) pos)
+                (Literal (RealVal v1 _), Literal (RealVal v2 _)) -> changed $ Literal (RealVal (v1**v2) pos)
                 _ -> badCPropM $ TypeError pos  " pow operands not of (the same) numeral type! "
-         else return (False, e)
+         else return e
 ctFoldBinOp e@(BinOp ShiftL e1 e2 _ pos) = do
-    if      isCt0 e2 then return (True,e1) 
+    if      isCt0 e2 then changed e1
     else if(isValue e1 && isValue e2)
          then case (e1, e2) of
-                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> return (True, Literal (IntVal  (shiftL v1 v2) pos))
+                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> changed $ Literal (IntVal  (shiftL v1 v2) pos)
                 _ -> badCPropM $ TypeError pos  " << operands not of integer type! "
-         else return (False, e)
+         else return e
 ctFoldBinOp e@(BinOp ShiftR e1 e2 _ pos) = do
-    if      isCt0 e2 then return (True,e1) 
+    if      isCt0 e2 then changed e1
     else if(isValue e1 && isValue e2)
          then case (e1, e2) of
-                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> return (True, Literal (IntVal  (shiftR v1 v2) pos))
+                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> changed $ Literal (IntVal  (shiftR v1 v2) pos)
                 _ -> badCPropM $ TypeError pos  " >> operands not of integer type! "
-         else return (False, e)
+         else return e
 ctFoldBinOp e@(BinOp Band e1 e2 _ pos) = do
-    if      isCt0 e1 then return (True,e1) else if isCt0 e2 then return (True,e2)
-    else if isCt1 e1 then return (True,e2) else if isCt1 e2 then return (True,e1)
+    if      isCt0 e1 then changed e1 else if isCt0 e2 then changed e2
+    else if isCt1 e1 then changed e2 else if isCt1 e2 then changed e1
     else if(isValue e1 && isValue e2)
          then case (e1, e2) of
-                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> return (True, Literal (IntVal  (v1 .&. v2) pos))
+                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> changed $ Literal (IntVal  (v1 .&. v2) pos)
                 _ -> badCPropM $ TypeError pos  " & operands not of integer type! "
-         else return (False, e)
+         else return e
 ctFoldBinOp e@(BinOp Bor e1 e2 _ pos) = do
-    if      isCt0 e1 then return (True,e2) else if isCt0 e2 then return (True,e1)
-    else if isCt1 e1 then return (True,e1) else if isCt1 e2 then return (True,e2)
+    if      isCt0 e1 then changed e2 else if isCt0 e2 then changed e1
+    else if isCt1 e1 then changed e1 else if isCt1 e2 then changed e2
     else if(isValue e1 && isValue e2)
          then case (e1, e2) of
-                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> return (True, Literal (IntVal  (v1 .|. v2) pos))
+                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> changed $ Literal (IntVal  (v1 .|. v2) pos)
                 _ -> badCPropM $ TypeError pos  " | operands not of integer type! "
-         else return (False, e)
+         else return e
 ctFoldBinOp e@(BinOp Xor e1 e2 _ pos) = do
-    if      isCt0 e1 then return (True,e2) else if isCt0 e2 then return (True,e1)
+    if      isCt0 e1 then changed e2 else if isCt0 e2 then return e1
     else if(isValue e1 && isValue e2)
          then case (e1, e2) of
-                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> return (True, Literal (IntVal  (xor v1 v2) pos))
+                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> changed $ Literal (IntVal  (xor v1 v2) pos)
                 _ -> badCPropM $ TypeError pos  " ^ operands not of integer type! "
-         else return (False, e)
+         else return e
 ctFoldBinOp e@(And e1 e2 pos) = do
-    if      isCt0 e1 then return (True,e1) else if isCt0 e2 then return (True,e2)
-    else if isCt1 e1 then return (True,e2) else if isCt1 e2 then return (True,e1)
+    if      isCt0 e1 then changed e1 else if isCt0 e2 then changed e2
+    else if isCt1 e1 then changed e2 else if isCt1 e2 then changed e1
     else if(isValue e1 && isValue e2)
          then case (e1, e2) of
-                (Literal (LogVal  v1 _), Literal (LogVal  v2 _)) -> return (True, Literal (LogVal  (v1 && v2) pos))
+                (Literal (LogVal  v1 _), Literal (LogVal  v2 _)) -> changed $ Literal (LogVal  (v1 && v2) pos)
                 _ -> badCPropM $ TypeError pos  " && operands not of boolean type! "
-         else return (False, e)
+         else return e
 ctFoldBinOp e@(Or e1 e2 pos) = do
-    if      isCt0 e1 then return (True,e2) else if isCt0 e2 then return (True,e1)
-    else if isCt1 e1 then return (True,e1) else if isCt1 e2 then return (True,e2)
+    if      isCt0 e1 then changed e2 else if isCt0 e2 then changed e1
+    else if isCt1 e1 then changed e1 else if isCt1 e2 then changed e2
     else if(isValue e1 && isValue e2)
          then case (e1, e2) of
-                (Literal (LogVal  v1 _), Literal (LogVal  v2 _)) -> return (True, Literal (LogVal  (v1 || v2) pos))
+                (Literal (LogVal  v1 _), Literal (LogVal  v2 _)) -> changed $ Literal (LogVal  (v1 || v2) pos)
                 _ -> badCPropM $ TypeError pos  " || operands not of boolean type! "
-         else return (False, e)
+         else return e
 
 ctFoldBinOp e@(BinOp Equal e1 e2 _ pos) = do
     if(isValue e1 && isValue e2) then
       case (e1, e2) of
         -- for numerals we could build node e1-e2, simplify and test equality with 0 or 0.0!
-        (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> return (True, Literal (LogVal (v1==v2) pos))
-        (Literal (RealVal v1 _), Literal (RealVal v2 _)) -> return (True, Literal (LogVal (v1==v2) pos))
-        (Literal (LogVal  v1 _), Literal (LogVal  v2 _)) -> return (True, Literal (LogVal (v1==v2) pos))
-        (Literal (CharVal v1 _), Literal (CharVal v2 _)) -> return (True, Literal (LogVal (v1==v2) pos))
+        (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> changed $ Literal (LogVal (v1==v2) pos)
+        (Literal (RealVal v1 _), Literal (RealVal v2 _)) -> changed $ Literal (LogVal (v1==v2) pos)
+        (Literal (LogVal  v1 _), Literal (LogVal  v2 _)) -> changed $ Literal (LogVal (v1==v2) pos)
+        (Literal (CharVal v1 _), Literal (CharVal v2 _)) -> changed $ Literal (LogVal (v1==v2) pos)
         --(Literal (TupVal  v1 _), Literal (TupVal  v2 _)) -> return (True, Literal (LogVal (v1==v2) pos))
         _ -> badCPropM $ TypeError pos  " equal operands not of (the same) basic type! "
-    else return (False, e)
+    else return e
 ctFoldBinOp e@(BinOp Less e1 e2 _ pos) = do
     if(isValue e1 && isValue e2) then
       case (e1, e2) of
         -- for numerals we could build node e1-e2, simplify and compare with 0 or 0.0!
-        (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> return (True, Literal (LogVal (v1<v2) pos))
-        (Literal (RealVal v1 _), Literal (RealVal v2 _)) -> return (True, Literal (LogVal (v1<v2) pos))
-        (Literal (LogVal  v1 _), Literal (LogVal  v2 _)) -> return (True, Literal (LogVal (v1<v2) pos))
-        (Literal (CharVal v1 _), Literal (CharVal v2 _)) -> return (True, Literal (LogVal (v1<v2) pos))
+        (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> changed $ Literal (LogVal (v1<v2) pos)
+        (Literal (RealVal v1 _), Literal (RealVal v2 _)) -> changed $ Literal (LogVal (v1<v2) pos)
+        (Literal (LogVal  v1 _), Literal (LogVal  v2 _)) -> changed $ Literal (LogVal (v1<v2) pos)
+        (Literal (CharVal v1 _), Literal (CharVal v2 _)) -> changed $ Literal (LogVal (v1<v2) pos)
         --(Literal (TupVal  v1 _), Literal (TupVal  v2 _)) -> return (True, Literal (LogVal (v1<v2) pos))
         _ -> badCPropM $ TypeError pos  " less-than operands not of (the same) basic type! "
-    else return (False, e)
+    else return e
 ctFoldBinOp e@(BinOp Leq e1 e2 _ pos) = do
     if(isValue e1 && isValue e2) then
       case (e1, e2) of
         -- for numerals we could build node e1-e2, simplify and compare with 0 or 0.0!
-        (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> return (True, Literal (LogVal (v1<=v2) pos))
-        (Literal (RealVal v1 _), Literal (RealVal v2 _)) -> return (True, Literal (LogVal (v1<=v2) pos))
-        (Literal (LogVal  v1 _), Literal (LogVal  v2 _)) -> return (True, Literal (LogVal (v1<=v2) pos))
-        (Literal (CharVal v1 _), Literal (CharVal v2 _)) -> return (True, Literal (LogVal (v1<=v2) pos))
+        (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> changed $ Literal (LogVal (v1<=v2) pos)
+        (Literal (RealVal v1 _), Literal (RealVal v2 _)) -> changed $ Literal (LogVal (v1<=v2) pos)
+        (Literal (LogVal  v1 _), Literal (LogVal  v2 _)) -> changed $ Literal (LogVal (v1<=v2) pos)
+        (Literal (CharVal v1 _), Literal (CharVal v2 _)) -> changed $ Literal (LogVal (v1<=v2) pos)
         --(Literal (TupVal  v1 _), Literal (TupVal  v2 _)) -> return (True, Literal (LogVal (v1<=v2) pos))
         _ -> badCPropM $ TypeError pos  " less-than-or-equal operands not of (the same) basic type! "
-    else return (False, e)
-ctFoldBinOp e = return (False, e)
+    else return e
+ctFoldBinOp e = return e
 
 
 ----------------------------------------------------
 ---- Helpers for VTABLE bindings                 ---
 ----------------------------------------------------
 
-isRemovableBnd :: Maybe (CtOrId tf) -> Bool
-isRemovableBnd bnd = case bnd of
-                    Nothing             -> False
-                    Just (Constant _ _ b) -> b
-                    Just (VarId    _ _ b) -> b
-                    Just (SymArr   _ _ b) -> b
 isValidBnd :: Maybe (CtOrId tf) -> Bool
 isValidBnd bnd = case bnd of
                     Nothing -> False
                     Just _  -> True
-
-writeBackBnd :: TypeBox tf => SrcLoc -> (Bool,Exp tf) -> (Maybe (CtOrId tf), Ident tf) -> CPropM tf (Bool,Exp tf)
-writeBackBnd pos (_,loop) (bnd,ident) = do
--- nm denotes a merged variable that is to be removed by propagation, 
--- hence needs to be written back, i.e., the result is: `let nm = bnd in loop'
-    case bnd of
-        Nothing -> badCPropM $ CopyCtPropError pos (" Broken invariant in writeBackBnd: " ++
-                                                      "merged-var binding is Nothing") --e
-        Just (Constant val _ b) -> 
-            if b then return ( False, (LetPat (Id ident) (Literal val)   loop pos) )
-            else badCPropM $ CopyCtPropError pos (" Broken invariant in writeBackBnd: " ++
-                                                    "write-back merged-var not removable") --e
-        Just (VarId    ii  tp b) ->                        -- could use `ident' here
-            if b then return ( False, (LetPat (Id ident) (Var (Ident ii tp pos)) loop pos) )  
-            else badCPropM $ CopyCtPropError pos (" Broken invariant in writeBackBnd: " ++
-                                                    "write-back merged-var not removable") --e
-        Just (SymArr   eee _ b) -> 
-            if b then return ( False, (LetPat (Id ident) eee loop pos) )
-            else badCPropM $ CopyCtPropError pos (" Broken invariant in writeBackBnd: " ++
-                                                    "write-back merged-var not removable") --e
-
 
 ----------------------------------------------------
 ---- Helpers for Constant Folding                ---
