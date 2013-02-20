@@ -87,7 +87,7 @@ data CtOrId tf  = Constant Value   tf Bool
                 -- and (v) an ArrayLit.   I leave this one open, i.e., (Exp tf),
                 -- as I do not know exactly what we need here
                 -- To Cosmin: Clean it up in the end, i.e., get rid of (Exp tf).
-
+ 
 data CPropEnv tf = CopyPropEnv {   
                         envVtable  :: M.Map String (CtOrId tf)
                   }
@@ -198,7 +198,7 @@ copyCtPropExp (LetWith nm e inds el body pos) = do
     return $ LetWith nm e' inds' el' body' pos
 
 copyCtPropExp (LetPat pat e body pos) = do
-    e' <- copyCtPropExp e
+    e'   <- copyCtPropExp e
     remv <- isRemovablePat pat e'
     bnds <- getPropBnds pat e' remv
     (body', mvars) <-  collectNonRemovable (map fst bnds) $
@@ -209,19 +209,16 @@ copyCtPropExp (LetPat pat e body pos) = do
 
  
 copyCtPropExp (DoLoop ind n body mergevars pos) = do
-    n'   <- copyCtPropExp n
+    n'    <- copyCtPropExp n
     let mergenames = map identName mergevars
     mapM_ nonRemovable mergenames
-    bnds       <- mapM (\vnm -> asks $ M.lookup vnm . envVtable) mergenames
+    bnds  <- mapM (\vnm -> asks $ M.lookup vnm . envVtable) mergenames
     let idbnds1 = zip bnds mergevars
     let idbnds  = filter ( \(x,_) -> isValidBnd     x ) idbnds1
     let remkeys = map (\(_, (Ident s _ _) ) -> s) idbnds
     body' <- remBindings remkeys $ copyCtPropExp body
     let newloop = DoLoop ind n' body' mergevars pos
-    --(_, resloop) <- foldM (\y bnd -> writeBackBnd pos y bnd) (False, newloop) toadd
-    --let ccc = (toadd !! 0)
-    --(_, resloop1) <- writeBackBnd pos (False,newloop) (toadd !! 0)
-    return newloop --newloop)--resloop1)
+    return newloop 
 
 copyCtPropExp e@(Var (Ident vnm _ pos)) = do 
     -- let _ = trace ("In VarExp: "++ppExp 0 e) e
@@ -233,15 +230,15 @@ copyCtPropExp e@(Var (Ident vnm _ pos)) = do
         Just (SymArr e'    _ _) ->
             case e' of
                 Replicate _ _ _ _ -> return e
-                TupLit    _ _     -> return e
+                TupLit    _ _     -> if isCtOrCopy e then changed e' else return e
                 ArrayLit  _ _ _   -> return e
                 Index _ _ _ _ _   -> changed e'
                 Iota  _ _         -> changed e'
                 _                 -> return e
 
 copyCtPropExp eee@(Index idd@(Ident vnm tp p) inds tp1 tp2 pos) = do 
-  inds'  <- mapM copyCtPropExp inds
-  bnd <- asks $ M.lookup vnm . envVtable 
+  inds' <- mapM copyCtPropExp inds
+  bnd   <- asks $ M.lookup vnm . envVtable 
   case bnd of
     Nothing               -> return $ Index idd inds' tp1 tp2 pos
     Just (VarId  id' _ _) -> changed $ Index (Ident id' tp p) inds' tp1 tp2 pos
@@ -262,6 +259,21 @@ copyCtPropExp eee@(Index idd@(Ident vnm tp p) inds tp1 tp2 pos) = do
       case (e', inds') of 
         (Iota _ _, [ii]) -> changed ii
         (Iota _ _, _)    -> badCPropM $ TypeError pos  " bad indexing in iota "
+
+        (Index aa ais t1 t2 _,_) -> do
+            inner <- copyCtPropExp( Index aa (ais ++ inds') t1 t2 pos ) 
+            changed inner
+
+        (ArrayLit _ _ _   , _) ->
+            case ctIndex inds' of
+                Nothing  -> return $ Index idd inds' tp1 tp2 pos
+                Just iis -> case getArrLitInd e' iis of
+                                Nothing -> return $ Index idd inds' tp1 tp2 pos
+                                Just el -> changed el
+
+        (TupLit   _ _, _       ) -> badCPropM $ TypeError pos  " indexing into a tuple "
+
+
         (Replicate _ vvv@(Var vv@(Ident _ _ _)) _ _, _:is') -> do
             inner <- if null is' then copyCtPropExp vvv
                      else copyCtPropExp (Index vv is' tp1 tp2 pos) 
@@ -269,22 +281,32 @@ copyCtPropExp eee@(Index idd@(Ident vnm tp p) inds tp1 tp2 pos) = do
         (Replicate _ (Index a ais _ _ _) _ _, _:is') -> do
             inner <- copyCtPropExp (Index a (ais ++ is') tp1 tp2 pos)
             changed inner
+        (Replicate _ (Literal arr@(ArrayVal _ _ _)) _ _, _:is') -> do 
+            case ctIndex is' of
+                Nothing -> return $ Index idd inds' tp1 tp2 pos
+                Just iis-> case getArrValInd arr iis of 
+                               Nothing -> return $ Index idd inds' tp1 tp2 pos
+                               Just el -> changed $ Literal el
+        (Replicate _ val@(Literal _) _ _, _:is') -> do
+            if null is' then changed val
+            else badCPropM $ TypeError pos  " indexing into a basic type "
+
+        (Replicate _ arr@(ArrayLit _ _ _) _ _, _:is') -> do
+            case ctIndex is' of
+                Nothing -> return $ Index idd inds' tp1 tp2 pos
+                Just iis-> case getArrLitInd arr iis of 
+                               Nothing -> return $ Index idd inds' tp1 tp2 pos
+                               Just el -> changed el
+        (Replicate _ tup@(TupLit _ _) _ _, _:is') -> do
+            if null is' && isCtOrCopy tup then changed $ tup
+            else  badCPropM $ TypeError pos  " indexing into a tuple "
         (Replicate _ (Iota n _) _ _, _:is') -> do
             if     (length is' == 0) then changed $ Iota n pos 
             else if(length is' == 1) then changed $ head is'
             else badCPropM $ TypeError pos  (" illegal indexing: " ++ ppExp 0 eee)
         (Replicate _ _ _ _, _) -> 
             return $ Index idd inds' tp1 tp2 pos
-        (ArrayLit _ _ _   , _) ->
-            case ctIndex inds' of
-                Nothing  -> return $ Index idd inds' tp1 tp2 pos
-                Just iis -> case getArrLitInd e' iis of
-                                Nothing -> return $ Index idd inds' tp1 tp2 pos
-                                Just el -> changed el
-        (Index aa ais t1 t2 _,_) -> do
-            inner <- copyCtPropExp( Index aa (ais ++ inds') t1 t2 pos ) 
-            changed inner
-        (TupLit   _ _, _       ) -> badCPropM $ TypeError pos  " indexing into a tuple "
+
         _ -> badCPropM $ CopyCtPropError pos (" Unreachable case in copyCtPropExp of Index exp: " ++
                                               ppExp 0 eee++" is bound to "++ppExp 0 e' ) --e 
                                               --" index-exp of "++ppExp 0 eee++" bound to "++ppExp 0 e' ) --e
@@ -638,7 +660,7 @@ isRemovablePat (Id _) e =
         Index   _ _ _ _ _ -> True
         Iota    _ _       -> True
         Literal v         -> isBasicTypeVal v
-        TupLit  _ _       -> False
+        TupLit  _ _       -> isCtOrCopy e     -- False
         _                 -> False
  in return s
 
