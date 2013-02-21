@@ -450,14 +450,14 @@ checkExp (Scan fun startexp arrexp intype pos) = do
         bad $ TypeError pos $ "Array element value is of type " ++ ppType intype' ++ ", but scan function returns type " ++ ppType funret ++ "."
       return (Array funret e pos2, Scan fun' startexp' arrexp' intype' pos)
     _ -> bad $ TypeError (srclocOf arrexp) "Type of expression is not an array."
-checkExp (Filter fun arrexp arrtype pos) = do
+checkExp (Filter fun arrexp eltype pos) = do
   (arrexpt, arrexp') <- checkSubExp arrexp
-  arrtype' <- arrtype `unifyWithKnown` arrexpt
-  inelemt <- elemType arrtype'
+  inelemt <- elemType arrexpt
+  eltype' <- eltype `unifyWithKnown` inelemt
   (fun', funret) <- checkLambda fun [inelemt]
   when (funret /= Bool pos) $
     bad $ TypeError pos "Filter function does not return bool."
-  return (arrtype', Filter fun' arrexp' arrtype' pos)
+  return (Array eltype' Nothing pos, Filter fun' arrexp' eltype' pos)
 checkExp (Mapall fun arrexp intype outtype pos) = do
   (arrt, arrexp') <- checkSubExp arrexp
   intype' <- intype `unifyWithKnown` baseType arrt

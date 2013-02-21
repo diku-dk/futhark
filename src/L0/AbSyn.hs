@@ -243,7 +243,7 @@ data Exp ty = Literal Value
              -- 4th arg is the element type of the input array
 
             | Filter (Lambda ty) (Exp ty) ty SrcLoc
-             -- 3rd arg is the type of the input (and result) array *)
+             -- 3rd arg is the element type of the input (and result) array *)
 
             | Mapall (Lambda ty) (Exp ty) ty ty SrcLoc
              -- e.g., mapall(op ~, {{1,~2}, {~3,4}}) = {{~1,2}, {3,~4}}
@@ -332,7 +332,7 @@ expType (Reduce fun _ _ _ _) = lambdaType fun
 expType (Zip es pos) = Array (Tuple (map snd es) pos) Nothing pos
 expType (Unzip _ ts pos) = Tuple (map (\t -> Array t Nothing pos) ts) pos
 expType (Scan fun _ _ _ _) = arrayType 1 $ lambdaType fun
-expType (Filter _ _ t _) = t
+expType (Filter _ _ t loc) = Array t Nothing loc
 expType (Mapall fun e _ _ _) = arrayType (arrayDims $ expType e) $ lambdaType fun
 expType (Redomap _ _ _ _ _ t loc) = Array t Nothing loc
 expType (Split _ _ t _) = t
