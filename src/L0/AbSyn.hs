@@ -41,7 +41,7 @@ import Data.List
 import Data.Loc
 
 locStr :: SrcLoc -> String
-locStr (SrcLoc NoLoc) = "uknown location"
+locStr (SrcLoc NoLoc) = "unknown location"
 locStr (SrcLoc (Loc (Pos file line1 col1 _) (Pos _ line2 col2 _))) =
   -- Assume that both positions are in the same file (what would the
   -- alternative mean?)
