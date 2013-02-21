@@ -494,7 +494,7 @@ ppExp d (Map fun e _ _ _) = " map ( " ++ ppLambda fun ++ ", " ++ ppExp d e ++ " 
 ppExp d (Zip es _) =
   " zip ( " ++ intercalate "," (map (ppExp d . fst) es) ++ " ) "
 
-ppExp d (Unzip e _ _) = " zip ( " ++ ppExp d e ++ " ) "
+ppExp d (Unzip e _ _) = " unzip ( " ++ ppExp d e ++ " ) "
 
 ppExp d (Reduce fun el lst _ _) =
   " reduce ( " ++ ppLambda fun ++ ", " ++ ppExp d el ++ ", " ++ ppExp d lst ++ " ) "
