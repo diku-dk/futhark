@@ -99,6 +99,7 @@ keyword s =
     "mapall"       -> MAPALL
     "filter"       -> FILTER
     "redomap"      -> REDOMAP
+    "empty"        -> EMPTY
     _              -> ID s
 
 type Byte = Word8

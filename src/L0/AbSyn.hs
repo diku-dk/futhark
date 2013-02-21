@@ -16,6 +16,7 @@ module L0.AbSyn
   , Value(..)
   , valueType
   , arrayVal
+  , emptyArray
   , ppValue
   , Ident(..)
   , Exp(..)
@@ -155,6 +156,9 @@ arrayShape _ = []
 -- | Construct an array value containing the given elements.
 arrayVal :: [Value] -> Type -> SrcLoc -> Value
 arrayVal vs = ArrayVal $ listArray (0, length vs-1) vs
+
+emptyArray :: Type -> SrcLoc -> Value
+emptyArray elty loc = arrayVal [] elty loc
 
 -- | An identifier consists of its name and the type of the value
 -- bound to the identifier.
@@ -418,7 +422,8 @@ ppValue (IntVal n _)      = show n
 ppValue (RealVal n _)     = show n
 ppValue (LogVal b _)      = show b
 ppValue (CharVal c _)     = show c
-ppValue (ArrayVal arr _ _)
+ppValue (ArrayVal arr t _)
+  | [] <- elems arr = " empty (" ++ ppType t ++ " ) "
   | Just (c:cs) <- mapM char (elems arr) = show $ c:cs
   | otherwise = " { " ++ intercalate ", " (map ppValue $ elems arr) ++ " } "
     where char (CharVal c _) = Just c
