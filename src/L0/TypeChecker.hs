@@ -647,21 +647,19 @@ checkLambda (CurryFun fname curryargexps rettype pos) args = do
 checkPolyLambdaOp :: TypeBox ty => BinOp -> [Exp ty] -> ty -> [Type] -> SrcLoc
                   -> TypeM (Lambda Type, Type)
 checkPolyLambdaOp op curryargexps rettype args pos = do
-  (curryargexpts, curryargexps') <- unzip <$> mapM checkSubExp curryargexps
+  (curryargexpts, _) <- unzip <$> mapM checkSubExp curryargexps
   tp <- case curryargexpts ++ args of
           [t1, t2] | t1 == t2 -> return t1
           [Tuple [t1,t2] _] | t1 == t2 -> return t1 -- For autoshimming.
           l -> bad $ ParameterMismatch (Just fname) pos (Left 2) l
-  (x,y,params) <- case curryargexps' of
-                    [] -> return (Var (Ident "x" tp pos),
-                                  Var (Ident "y" tp pos),
+  (x,y,params) <- case curryargexps of
+                    [] -> return (Var (Ident "x" (boxType tp) pos),
+                                  Var (Ident "y" (boxType tp) pos),
                                   [Ident "x" tp pos, Ident "y" tp pos])
                     [e] -> return (e,
-                                   Var (Ident "y" tp pos),
+                                   Var (Ident "y" (boxType tp) pos),
                                    [Ident "y" tp pos])
                     (e1:e2:_) -> return (e1, e2, [])
-  let body = BinOp op x y tp pos
-  (fun, t) <- checkLambda (AnonymFun params body tp pos) args
-  t' <- rettype `unifyWithKnown` t
-  return (fun, t')
+  (bodytype, body) <- binding params $ checkBinOp op x y rettype pos
+  return (AnonymFun params body bodytype pos, bodytype)
   where fname = "op" ++ ppBinOp op
