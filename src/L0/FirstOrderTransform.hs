@@ -115,7 +115,7 @@ transformExp (Filter fun arrexp elty loc) = do
                      loc)
                  resv update (expType arrexp) loc
       update = LetWith res resv [BinOp Minus indexi (intval 1) int loc] indexin resv loc
-  return $ arrlet $ nlet $ checkempty $ ialet $ reslet $ loop
+  return $ arrlet $ nlet $ checkempty $ ialet $ reslet loop
   where int = Int loc
         bool = Bool loc
         intval x = Literal (IntVal x loc)
