@@ -72,14 +72,14 @@ binding :: Monad m => [(Ident Type, Value)] -> L0M m a -> L0M m a
 binding bnds = local (`bindVars` bnds)
 
 lookupVar :: Monad m => String -> L0M m Value
-lookupVar fname = do val <- asks $ M.lookup fname . envVtable
+lookupVar vname = do val <- asks $ M.lookup vname . envVtable
                      case val of Just val' -> return val'
-                                 Nothing   -> bad $ TypeError noLoc "lookupVar"
+                                 Nothing   -> bad $ TypeError noLoc $ "lookupVar " ++ vname
 
 lookupFun :: Monad m => String -> L0M m ([Value] -> L0M m Value)
 lookupFun fname = do fun <- asks $ M.lookup fname . envFtable
                      case fun of Just fun' -> return fun'
-                                 Nothing   -> bad $ TypeError noLoc "lookupFun"
+                                 Nothing   -> bad $ TypeError noLoc $ "lookupFun " ++ fname
 
 arrToList :: Monad m => Value -> L0M m [Value]
 arrToList (ArrayVal l _ _) = return $ elems l
