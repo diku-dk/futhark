@@ -64,3 +64,19 @@ not an array, and if a tuple, one that contains only basic types.
 
 2. Merge variables defined outside of an anonymous function are out of
 scope in the body of the function.
+
+Tuple arguments
+---------------
+
+In a SOAC, when the given function is to be invoked with N arguments
+of types t1...tN, but the function only takes a single argument of
+type (t1 * ... * tN) (that is, a tuple), L0 will automatically
+generate an anonymous unwrapping function in such a way that it still
+works.  This allows the following expression to type-check (and run):
+
+    map(op +, zip(as, bs))
+
+Without the above transformation, you would get an error, as 'op +' is
+a function that takes two arguments, but is passed a tuple by map.
+
+This eliminates the need for a dedicated zipWith construct.
