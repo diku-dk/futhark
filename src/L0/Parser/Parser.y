@@ -102,6 +102,7 @@ import L0.Parser.Lexer
       '&&'            { L $$ AND }
       '||'            { L $$ OR }
       op              { L $$ OP }
+      empty           { L $$ EMPTY }
 
 %nonassoc ifprec letprec
 %left '||'
@@ -175,6 +176,7 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal $ IntVal num pos 
      | true           { Literal $ LogVal True $1 }
      | false          { Literal $ LogVal False $1 }
      | Id             { Var $1 }
+     | empty '(' Type ')' { Literal $ ArrayVal (arrayFromList []) $3 $1 }
      | '{' Exps '}'   { ArrayLit $2 Nothing $1 }
      | TupleExp       { let (exps, pos) = $1 in TupLit exps pos }
 

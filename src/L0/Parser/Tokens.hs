@@ -69,4 +69,5 @@ data Token = IF
            | AND
            | OR
            | OP
+           | EMPTY
              deriving (Show, Eq)
