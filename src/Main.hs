@@ -84,7 +84,8 @@ interpret file = do
   case checkProg prog of
     Left err    -> error $ "Typechecking error:\n" ++ show err
     Right prog' -> do
-      res <- runProgIO prog'
+      let prog'' = renameProg prog'
+      res <- runProgIO prog''
       case res of Left err -> error $ "Interpreter error:\n" ++ show err
                   Right v  -> putStrLn $ ppValue v -- ++ (prettyPrint prog')
 
@@ -94,8 +95,9 @@ testCosmin file = do
   prog <- parse file
   case checkProg prog of
     Left err    -> error $ "Typechecking error:\n" ++ show err
-    Right prog' -> 
-      case enablingOpts prog' of
+    Right prog' -> do
+      let prog'' = renameProg prog'
+      case enablingOpts prog'' of
         Left  err -> error $ "Enabling Optimization Error:\n" ++ show err
         Right prog2 -> do
           _   <- trace ("Opt Program: "++prettyPrint prog2++"\nResult:") (putStrLn "")
