@@ -115,8 +115,6 @@ fun [[real]] explicitY
             iota(numY)),
         iota(numX))
 
-fun real realplus ((real * real) t) = let (x,y) = t in x + y
-
 fun [[real]] rollback
     ([real] myX, [real] myY, [real] myTimeline, [[real]] myResult,
      [[real]] myMuX, [[real]] myDx, [[real]] myDxx, [[real]] myVarX,
@@ -126,7 +124,7 @@ fun [[real]] rollback
     let dtInv = 1.0/(myTimeline[g+1]-myTimeline[g]) in
     let u = explicitX(numX, numY, dtInv, myResult, myMuX, myDx, myDxx, myVarX) in
     let v = explicitY(numX, numY, 0.0, myResult, myMuY, myDy, myDyy, myVarY) in
-    let u = map(fn [real] (([real] * [real]) t) => let (us, vs) = t in map(realplus, zip(us, vs)),
+    let u = map(fn [real] ([real] us, [real] vs) => map(op +, zip(us, vs)),
                 zip(u, transpose(v))) in
     let u = map(fn [real] (([real] * int) t) =>
                 let (uj, j) = t in
