@@ -661,5 +661,6 @@ checkPolyLambdaOp op curryargexps rettype args pos = do
                                    [Ident "y" tp pos])
                     (e1:e2:_) -> return (e1, e2, [])
   (bodytype, body) <- binding params $ checkBinOp op x y rettype pos
-  return (AnonymFun params body bodytype pos, bodytype)
+  (fun', rettype') <- checkLambda (AnonymFun params body bodytype pos) args
+  return (fun', rettype')
   where fname = "op" ++ ppBinOp op
