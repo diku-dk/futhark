@@ -389,14 +389,16 @@ copyCtPropExp (Transpose e tp1 tp2 pos) = do
     e' <- copyCtPropExp e
     return $ Transpose e' tp1 tp2 pos
 
-copyCtPropExp (Map fname e tp1 tp2 pos) = do
-    e' <- copyCtPropExp e
-    return $ Map fname e' tp1 tp2 pos
+copyCtPropExp (Map lam e tp1 tp2 pos) = do
+    e'   <- copyCtPropExp e
+    lam' <- copyCtPropLambda lam
+    return $ Map lam' e' tp1 tp2 pos
 
-copyCtPropExp (Reduce fname e1 e2 tp pos) = do
+copyCtPropExp (Reduce lam e1 e2 tp pos) = do
     e1' <- copyCtPropExp e1
     e2' <- copyCtPropExp e2
-    return $ Reduce fname e1' e2' tp pos
+    lam' <- copyCtPropLambda lam
+    return $ Reduce lam' e1' e2' tp pos
 
 -------------------------------------------------------
 ------- ZipWith was replaced with map . zip!!!  -------
@@ -414,23 +416,28 @@ copyCtPropExp (Unzip e tps pos)= do
     e' <- copyCtPropExp e
     return $ Unzip e' tps pos
 
-copyCtPropExp (Scan fname e1 e2 tp pos) = do
-    e1' <- copyCtPropExp e1
-    e2' <- copyCtPropExp e2
-    return $ Scan fname e1' e2' tp pos
+copyCtPropExp (Scan lam e1 e2 tp pos) = do
+    e1'  <- copyCtPropExp e1
+    e2'  <- copyCtPropExp e2
+    lam' <- copyCtPropLambda lam
+    return $ Scan lam' e1' e2' tp pos
 
-copyCtPropExp (Filter fname e tp pos) = do
-    e' <- copyCtPropExp e
-    return $ Filter fname e' tp pos
+copyCtPropExp (Filter lam e tp pos) = do
+    e'   <- copyCtPropExp e
+    lam' <- copyCtPropLambda lam
+    return $ Filter lam' e' tp pos
 
-copyCtPropExp (Mapall fname e tp1 tp2 pos) = do
-    e' <- copyCtPropExp e
-    return $ Mapall fname e' tp1 tp2 pos
+copyCtPropExp (Mapall lam e tp1 tp2 pos) = do
+    e'   <- copyCtPropExp e
+    lam' <- copyCtPropLambda lam
+    return $ Mapall lam' e' tp1 tp2 pos
 
-copyCtPropExp (Redomap f g e1 e2 tp1 tp2 pos) = do
-    e1' <- copyCtPropExp e1
-    e2' <- copyCtPropExp e2
-    return $ Redomap f g e1' e2' tp1 tp2 pos
+copyCtPropExp (Redomap lam1 lam2 e1 e2 tp1 tp2 pos) = do
+    e1'   <- copyCtPropExp e1
+    e2'   <- copyCtPropExp e2
+    lam1' <- copyCtPropLambda lam1
+    lam2' <- copyCtPropLambda lam2
+    return $ Redomap lam1' lam2' e1' e2' tp1 tp2 pos
 
 copyCtPropExp (Split e1 e2 tp pos) = do
     e1' <- copyCtPropExp e1
@@ -453,6 +460,24 @@ copyCtPropExp r@(Read _ _) =
 
 -- copyCtPropExp e = do
 --    return (False, e)
+
+
+
+-- data Lambda ty = AnonymFun [Ident Type] (Exp ty) Type SrcLoc
+--                    -- fn int (bool x, char z) => if(x) then ord(z) else ord(z)+1 *)
+--               | CurryFun String [Exp ty] ty SrcLoc
+--                    -- op +(4) *)
+--                 deriving (Eq, Ord, Typeable, Data, Show)
+
+copyCtPropLambda :: TypeBox tf => Lambda tf -> CPropM tf (Lambda tf)
+copyCtPropLambda (AnonymFun ids body tp pos) = do
+    body' <- copyCtPropExp body
+    return $ AnonymFun ids body' tp pos
+copyCtPropLambda (CurryFun fname params tp pos) = do
+    params' <- copyCtPropExpList params
+    return $ CurryFun fname params' tp pos
+
+    
 
 
 copyCtPropExpList :: TypeBox tf => [Exp tf] -> CPropM tf [Exp tf]
