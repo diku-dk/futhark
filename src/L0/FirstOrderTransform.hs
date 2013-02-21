@@ -85,6 +85,40 @@ transformExp (Scan fun accexp arrexp intype loc) = do
       loop = DoLoop i (Size arrv loc) loopbody [acc, arr] loc
       loopbody = LetWith arr arrv [iv] funcall (TupLit [index, arrv] loc) loc
   return $ redlet looplet
+transformExp (Filter fun arrexp elty loc) = do
+  (arr, arrv, arrlet) <- newLet arrexp "arr"
+  (_, nv, nlet) <- newLet (Size arrv loc) "n"
+  let checkempty nonempty = If (BinOp Equal nv (intval 0) bool loc)
+                            (Literal $ emptyArray elty loc) nonempty
+                            (expType arrexp) loc
+  (x, xv) <- newVar "x" elty loc
+  (i, iv) <- newVar "i" int loc
+  fun' <- transformLambda fun [xv]
+  let mape = Map (AnonymFun [x] branch int loc) arrv elty int loc
+      branch = If fun' (intval 1) (intval 0) int loc
+      indexin0 = Index arr [intval 0] elty elty loc
+      indexin = Index arr [iv] elty elty loc
+  plus <- do
+    (a,av) <- newVar "a" int loc
+    (b,bv) <- newVar "b" int loc
+    return $ AnonymFun [a, b] (BinOp Plus av bv int loc) int loc
+  (ia, _, ialet) <- newLet (Scan plus (intval 0) mape int loc) "ia"
+  let indexia ind = Index ia [ind] int int loc
+      indexiaend = indexia (BinOp Minus nv (intval 1) int loc)
+      indexi = indexia iv
+      indexim1 = indexia (BinOp Minus iv (intval 1) int loc)
+  (res, resv, reslet) <- newLet (Replicate indexiaend indexin0 elty loc) "res"
+  let loop = DoLoop i nv loopbody [res] loc
+      loopbody = If (Or (BinOp Equal iv (intval 0) bool loc)
+                        (And (BinOp Less (intval 0) iv bool loc)
+                             (BinOp Equal indexi indexim1 bool loc) loc)
+                     loc)
+                 resv update (expType arrexp) loc
+      update = LetWith res resv [BinOp Minus indexi (intval 1) int loc] indexin resv loc
+  return $ arrlet $ nlet $ checkempty $ ialet $ reslet $ loop
+  where int = Int loc
+        bool = Bool loc
+        intval x = Literal (IntVal x loc)
 transformExp (Mapall fun arrexp _ outtype loc) = transformExp =<< toMap arrexp
   where toMap e = case expType e of
                     Array et _ _ -> do
