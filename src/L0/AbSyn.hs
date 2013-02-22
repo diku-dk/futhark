@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveDataTypeable, FlexibleInstances #-}
+{-# LANGUAGE DeriveDataTypeable, FlexibleInstances, ScopedTypeVariables #-}
 -- | This Is an Ever-Changing AnSyn for L0.  Some types, such as
 -- @Exp@, are parametrised by type representation.
 -- See "L0.TypeChecker" and the 'Exp' type for more information.
@@ -31,6 +31,7 @@ module L0.AbSyn
   , ppTupId
   , FunDec
   , Prog
+  , progNames
   , prettyPrint
   )
   where
@@ -38,6 +39,7 @@ module L0.AbSyn
 import Data.Array
 import Data.Data
 import Data.List
+import Data.Generics
 import Data.Loc
 
 locStr :: SrcLoc -> String
@@ -75,7 +77,7 @@ arrayDims _             = 0
 
 -- | A type box provides a way to box a type, and possibly retrieve
 -- one.
-class (Eq ty, Ord ty, Show ty) => TypeBox ty where
+class (Eq ty, Ord ty, Show ty, Data ty, Typeable ty) => TypeBox ty where
   unboxType :: ty -> Maybe Type
   boxType :: Type -> ty
 
@@ -416,6 +418,12 @@ instance Located (TupIdent ty) where
 type FunDec ty = (String,Type,[Ident Type],Exp ty,SrcLoc)
 
 type Prog ty = [FunDec ty]
+
+-- | Return a list of all variable names mentioned in program.
+progNames :: forall ty.TypeBox ty => Prog ty -> [String]
+progNames = everything union (mkQ [] identName')
+  where identName' :: Ident ty -> [String]
+        identName' k = [identName k]
 
 -- Pretty-Printing Functionality
 
