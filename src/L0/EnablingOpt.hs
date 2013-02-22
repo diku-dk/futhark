@@ -449,6 +449,10 @@ copyCtPropExp (Concat e1 e2 tp pos) = do
     e2' <- copyCtPropExp e2
     return $ Concat e1' e2' tp pos
 
+copyCtPropExp (Copy e pos) = do
+    e' <- copyCtPropExp e
+    return $ Copy e' pos
+
 copyCtPropExp (Write e tp pos) = do
     e' <- copyCtPropExp e
     return $ Write e' tp pos
