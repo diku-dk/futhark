@@ -103,6 +103,7 @@ import L0.Parser.Lexer
       '||'            { L $$ OR }
       op              { L $$ OP }
       empty           { L $$ EMPTY }
+      copy            { L $$ COPY }
 
 %nonassoc ifprec letprec
 %left '||'
@@ -252,6 +253,8 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal $ IntVal num pos 
 
      | redomap '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
                       { Redomap $3 $5 $7 $9 Nothing Nothing $1 }
+
+     | copy '(' Exp ')' { Copy $3 $1 }
 
      | '(' Exp ')' { $2 }
 
