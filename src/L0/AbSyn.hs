@@ -266,6 +266,10 @@ data Exp ty = Literal Value
              -- concat ({1},{2, 3, 4}) = {1, 2, 3, 4} *)
              -- 3rd arg is the type of the input array*)
 
+            | Copy (Exp ty) SrcLoc
+            -- Copy the value return by the expression.  This only
+            -- makes a difference in do-loops with merge variables.
+
             -- IO
             | Read Type SrcLoc
              -- e.g., read(int); 1st arg is a basic-type, i.e., of the to-be-read element *)
@@ -306,6 +310,7 @@ instance Located (Exp ty) where
   locOf (Redomap _ _ _ _ _ _ pos) = locOf pos
   locOf (Split _ _ _ pos) = locOf pos
   locOf (Concat _ _ _ pos) = locOf pos
+  locOf (Copy _ pos) = locOf pos
   locOf (Read _ pos) = locOf pos
   locOf (Write _ _ pos) = locOf pos
   locOf (DoLoop _ _ _ _ pos) = locOf pos
@@ -341,6 +346,7 @@ expType (Mapall fun e _ _ _) = arrayType (arrayDims $ expType e) $ lambdaType fu
 expType (Redomap _ _ _ _ _ t loc) = Array t Nothing loc
 expType (Split _ _ t _) = t
 expType (Concat _ _ t _) = t
+expType (Copy e _) = expType e
 expType (Read t _) = boxType t
 expType (Write _ t _) = t
 expType (DoLoop _ _ body _ _) = expType body
@@ -513,6 +519,7 @@ ppExp d (Redomap id1 id2 el a _ _ _)
 
 ppExp d (Split  idx arr _ _) = " split ( " ++ ppExp d idx ++ ", " ++ ppExp d arr ++ " ) "
 ppExp d (Concat a1  a2 _ _) = " concat ( " ++ ppExp d a1 ++ ", " ++ ppExp d a2 ++ " ) "
+ppExp d (Copy e _) = " copy ( " ++ ppExp d e ++ " ) "
 
 ppExp _ (Read t _) = " read("  ++ ppType t  ++ ") "
 ppExp d (Write e _ _) = " write("  ++ ppExp d e  ++ ") "
