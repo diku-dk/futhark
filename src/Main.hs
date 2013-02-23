@@ -9,7 +9,7 @@ import L0.Parser (parseL0)
 import L0.TypeChecker
 import L0.Renamer
 import L0.Interpreter
-import L0.EnablingOpt
+import L0.EnablingOpts.EnablingOptDriver
 import L0.FirstOrderTransform
 
 import Debug.Trace
