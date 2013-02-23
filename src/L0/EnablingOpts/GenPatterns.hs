@@ -109,4 +109,3 @@ buildExpPattern f (Redomap lam1 lam2 e1 e2 tp1 tp2 pos) =
 buildLambda :: TypeBox tf => (Exp tf -> Exp tf) -> Lambda tf -> Lambda tf
 buildLambda f (AnonymFun tps body  tp pos) = AnonymFun tps     (f body  ) tp pos
 buildLambda f (CurryFun  nm params tp pos) = CurryFun  nm  (map f params) tp pos
-

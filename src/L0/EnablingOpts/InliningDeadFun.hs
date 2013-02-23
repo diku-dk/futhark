@@ -4,6 +4,7 @@ module L0.EnablingOpts.InliningDeadFun  (
                         CallGraph
                       , buildCG
                       , aggInlineDriver
+                      , deadFunElim
                     )
   where 
 
@@ -33,8 +34,7 @@ import L0.EnablingOpts.EnablingOptErrors
 -- | The Call Graph is just a Map from function names, i.e., the caller,
 -- to a list tuple: The first list contains (unique) function names that 
 -- may be called directly from the current function, i.e., ``apply'' callees.  
--- The second list contains (unique) function names that may be called
--- via SOACs.
+-- The second list contains (unique) function names that may be called via SOACs.
 type CallGraph = M.Map String ([String],[String])
 
 -- | The symbol table for functions
@@ -56,7 +56,6 @@ badCGM = CGM . lift . Left
 
 -- | @buildCG prog@ build the program's Call Graph. The representation
 -- is a hashtable that maps function names to a list of callee names.
--- The Call Graph disregards the functions called indirectly via SOACs.
 buildCG :: TypeBox tf => Prog tf -> Either EnablingOptError CallGraph
 buildCG prog = do
     env <- foldM expand env0 prog
@@ -76,7 +75,6 @@ buildCG prog = do
 -- @fname@, and recursively, with the contributions of the callees of @fname@.
 -- In particular, @buildCGfun M.empty "main"@ should construct the Call Graph
 -- of the whole program.
--- The Call Graph disregards the functions called indirectly via SOACs.
 buildCGfun :: TypeBox tf => CallGraph -> String -> CGM tf CallGraph
 buildCGfun cg fname  = do
   bnd <- asks $ M.lookup fname . envFtable
@@ -248,3 +246,32 @@ inlineInExp inlcallees e =
     buildExpPattern (inlineInExp inlcallees) e
 
 
+
+------------------------------------------------------------------
+------------------  Dead Function Elimination --------------------
+------------------------------------------------------------------
+-- | @aggInlineDriver prog@ performs aggressive inlining for all functions
+-- in @prog@ by repeatedly inlining the functions with empty-apply-callee set into
+-- other callers.   The functions called (indirectly) via SOACs are disregarded.
+deadFunElim :: TypeBox tf => Prog tf -> Either EnablingOptError (Prog tf)
+deadFunElim prog = do
+    env  <- foldM expand env0 prog
+    cg   <- runCGM (buildCGfun M.empty "main") env
+    let env'  = (M.filter (isFunInCallGraph cg) . envFtable) env
+    let prog' = M.elems env'
+    return prog'
+    where
+        env0 = CGEnv { envFtable = M.empty }
+
+        expand :: TypeBox tf => CGEnv tf -> FunDec tf -> Either EnablingOptError (CGEnv tf)
+        expand ftab f@(name,_,_,_,pos)
+            | Just (_,_,_,_,pos2) <- M.lookup name (envFtable ftab) =
+              Left $ DupDefinitionError name pos pos2
+            | otherwise = 
+                Right $ CGEnv { envFtable = M.insert name f (envFtable ftab) }
+
+        isFunInCallGraph :: TypeBox tf => CallGraph -> FunDec tf -> Bool
+        isFunInCallGraph cg (fnm,_,_,_,_) = 
+            case M.lookup fnm cg of
+                Nothing -> False
+                Just  _ -> True
