@@ -485,6 +485,9 @@ checkExp (Concat arr1exp arr2exp inarr pos) = do
   (arrt, arr2exp') <- require [arr1t] =<< checkSubExp arr2exp
   inarr' <- inarr `unifyWithKnown` arrt
   return (inarr', Concat arr1exp' arr2exp' inarr' pos)
+checkExp (Copy e pos) = do
+  ((t, e'), _) <- collectSrcMergeVars $ checkExp e
+  return (t, Copy e' pos)
 checkExp (Read t pos) =
   return (t, Read t pos)
 checkExp (Write e t pos) = do

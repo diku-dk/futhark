@@ -8,32 +8,18 @@ import Data.Generics
 import Data.Loc
 
 import L0.AbSyn
+import L0.FreshNames
 
-data TrState = TrState {
-    stCounter :: Int
-  , newFunctions :: [FunDec Type]
-  }
-
-newTrState :: TrState
-newTrState = TrState {
-               stCounter = 0
-             , newFunctions = []
-             }
-
-type TransformM = State TrState
+type TransformM = State NameSource
 
 -- | Return a new, fresh name, with the given string being part of the
 -- name.
 new :: String -> TransformM String
-new k = do i <- gets stCounter
-           modify $ \s -> s { stCounter = i + 1 }
-           return $ k ++ "_" ++ show i
-
-runTransformM :: TransformM a -> a
-runTransformM m = evalState m newTrState
+new = state . newName
 
 transformProg :: Prog Type -> Prog Type
-transformProg = runTransformM . mapM transformFunDec
+transformProg prog = runTransformM $ mapM transformFunDec prog
+  where runTransformM m = evalState m $ newNameSourceForProg prog
 
 transformFunDec :: FunDec Type -> TransformM (FunDec Type)
 transformFunDec (fname, rettype, params, body, loc) = do
