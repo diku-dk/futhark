@@ -64,7 +64,7 @@ fun [[int]] floydSbsImp(int N, [[int]] D) =
     let DT = transpose(D) in
     for i < N do
         for j < N do
-            let sumrow = map(op +, zip(D[i], DT[j])) in    
+            let sumrow = copy(map(op +, zip(D[i], DT[j]))) in    
             let minrow = reduce (MIN, 1200, sumrow)    in
             let minrow = MIN(D[i,j], minrow)        in
             let D[i,j] = minrow in D

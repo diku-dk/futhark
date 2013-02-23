@@ -10,6 +10,7 @@ import Data.Generics
 import qualified Data.Map as M
 
 import L0.AbSyn
+import L0.FreshNames
 
 -- | Rename variables such that each is unique.  The semantics of the
 -- program are unaffected, under the assumption that the program was
@@ -17,16 +18,14 @@ import L0.AbSyn
 -- invalid program valid.  To help enforce that this does not happen,
 -- only type-checked programs can be renamed.
 renameProg :: Prog Type -> Prog Type
-renameProg prog = runReader (evalStateT (mapM renameFun prog) 0) M.empty
+renameProg prog = runReader (evalStateT (mapM renameFun prog) (newNameSourceForProg prog)) M.empty
 
-type RenameM = StateT Int (Reader (M.Map String String))
+type RenameM = StateT NameSource (Reader (M.Map String String))
 
 -- | Return a fresh, unique name.  The @String@ is prepended to the
 -- name.
 new :: String -> RenameM String
-new s = do i <- get
-           modify (+1)
-           return $ s ++ "_" ++ show i
+new = state . newName
 
 -- | 'repl s' returns the new name of the variable 's'.
 repl :: Ident ty -> RenameM (Ident ty)
