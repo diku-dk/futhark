@@ -6,6 +6,7 @@ module L0.EnablingOpts.EnablingOptDriver (
                                   , CallGraph
                                   , buildCG
                                   , aggInlineDriver
+                                  , deadFunElim
                                   , EnablingOptError(..)
                             )
   where
@@ -26,9 +27,13 @@ import L0.EnablingOpts.EnablingOptErrors
 
 enablingOpts :: TypeBox tf => Prog tf -> Either EnablingOptError (Prog tf)
 enablingOpts prog = do
-    proginl <- aggInlineDriver prog
 
-    (success, progcp) <- copyCtProp proginl
+    proginline <- aggInlineDriver   prog
+
+    progdfelim <- deadFunElim       proginline
+
+    (success, progcp) <- copyCtProp progdfelim
+
     if(success) 
     then enablingOpts progcp
     else return progcp

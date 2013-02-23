@@ -725,4 +725,3 @@ getArrLitInd (Literal arr@(ArrayVal _ _ _)) (i:is) =
         Nothing -> Nothing
         Just v  -> Just (Literal v) 
 getArrLitInd _ _ = Nothing 
-
