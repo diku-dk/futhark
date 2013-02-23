@@ -433,10 +433,10 @@ spaces n = replicate n ' '
 -- | Pretty printing a value.
 ppValue :: Value -> String
 ppValue (IntVal n _)
-  | n < 0 = "~" : show (-n)
+  | n < 0 = '~' : show (-n)
   | otherwise = show n
 ppValue (RealVal n _)
-  | n < 0 = "~" : show (-n)
+  | n < 0 = '~' : show (-n)
   | otherwise = show n
 ppValue (LogVal b _)      = show b
 ppValue (CharVal c _)     = show c
