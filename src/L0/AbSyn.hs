@@ -13,6 +13,7 @@ module L0.AbSyn
   , baseType
   , basicType
   , arrayType
+  , blankValue
   , Value(..)
   , valueType
   , arrayVal
@@ -114,6 +115,17 @@ basicType _ = True
 arrayType :: Int -> Type -> Type
 arrayType 0 t = t
 arrayType n t = arrayType (n-1) $ Array t Nothing (srclocOf t)
+
+-- | A "blank" value of the given type - this is zero, or whatever is
+-- close to it.  Don't depend on this value, but use it for creating
+-- arrays to be populated by do-loops.
+blankValue :: Type -> Value
+blankValue (Int loc) = IntVal 0 loc
+blankValue (Real loc) = RealVal 0.0 loc
+blankValue (Bool loc) = LogVal False loc
+blankValue (Char loc) = CharVal '\0' loc
+blankValue (Tuple ts loc) = TupVal (map blankValue ts) loc
+blankValue (Array et _ loc) = arrayVal [blankValue et] et loc
 
 -- | Every possible value in L0.  Values are fully evaluated and their
 -- type is always unambiguous.
@@ -272,6 +284,11 @@ data Exp ty = Literal Value
             -- Copy the value return by the expression.  This only
             -- makes a difference in do-loops with merge variables.
 
+            | New Type SrcLoc
+            -- Return a new value of some well-defined initial value
+            -- (zero-ish).  This is sometimes useful for generated
+            -- code.
+
             -- IO
             | Read Type SrcLoc
              -- e.g., read(int); 1st arg is a basic-type, i.e., of the to-be-read element *)
@@ -313,6 +330,7 @@ instance Located (Exp ty) where
   locOf (Split _ _ _ pos) = locOf pos
   locOf (Concat _ _ _ pos) = locOf pos
   locOf (Copy _ pos) = locOf pos
+  locOf (New _ pos) = locOf pos
   locOf (Read _ pos) = locOf pos
   locOf (Write _ _ pos) = locOf pos
   locOf (DoLoop _ _ _ _ pos) = locOf pos
@@ -349,6 +367,7 @@ expType (Redomap _ _ _ _ _ t loc) = Array t Nothing loc
 expType (Split _ _ t _) = t
 expType (Concat _ _ t _) = t
 expType (Copy e _) = expType e
+expType (New t _) = t
 expType (Read t _) = boxType t
 expType (Write _ t _) = t
 expType (DoLoop _ _ body _ _) = expType body
@@ -528,6 +547,7 @@ ppExp d (Redomap id1 id2 el a _ _ _)
 ppExp d (Split  idx arr _ _) = " split ( " ++ ppExp d idx ++ ", " ++ ppExp d arr ++ " ) "
 ppExp d (Concat a1  a2 _ _) = " concat ( " ++ ppExp d a1 ++ ", " ++ ppExp d a2 ++ " ) "
 ppExp d (Copy e _) = " copy ( " ++ ppExp d e ++ " ) "
+ppExp _ (New t _) = " new ( " ++ ppType t ++ " ) "
 
 ppExp _ (Read t _) = " read("  ++ ppType t  ++ ") "
 ppExp d (Write e _ _) = " write("  ++ ppExp d e  ++ ") "

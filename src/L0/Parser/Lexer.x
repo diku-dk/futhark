@@ -101,6 +101,7 @@ keyword s =
     "redomap"      -> REDOMAP
     "empty"        -> EMPTY
     "copy"         -> COPY
+    "new"          -> NEW
     _              -> ID s
 
 type Byte = Word8

@@ -336,6 +336,7 @@ evalExp (Concat arr1exp arr2exp intype pos) = do
   elems2 <- arrToList =<< evalExp arr2exp
   return $ arrayVal (elems1 ++ elems2) intype pos
 evalExp (Copy e _) = evalExp e
+evalExp (New t _) = return $ blankValue t
 evalExp (Read t pos) = do
   s <- join $ asks envReadOp
   case liftM check $ parsefun "input" s of

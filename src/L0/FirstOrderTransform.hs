@@ -42,19 +42,11 @@ transformExp (Map fun e intype outtype loc)
   (inarr, inarrv, inarrlet) <- newLet e "inarr"
   (i, iv) <- newVar "i" (Int loc) loc
   (_, nv, nlet) <- newLet (Size inarrv loc) "n"
-  let outarrt = Array outtype Nothing loc
-      zero = Literal $ IntVal 0 loc
-      index0 = Index inarr [zero] intype intype loc
-      index = Index inarr [iv] intype intype loc
-  funcall0 <- transformLambda fun [index0]
-  funcall <- transformLambda fun [index]
-  (outarr, outarrv, outarrlet) <- newLet (Replicate nv funcall0 outtype loc) "outarr"
-  let branch = If (BinOp Less zero nv (Bool loc) loc)
-               (outarrlet letbody)
-               (Literal (arrayVal [] outtype loc)) outarrt loc
-      letbody = DoLoop i nv loopbody [outarr] loc
+  funcall <- transformLambda fun [Index inarr [iv] intype intype loc]
+  (outarr, outarrv, outarrlet) <- newLet (Replicate nv (New outtype loc) outtype loc) "outarr"
+  let letbody = DoLoop i nv loopbody [outarr] loc
       loopbody = LetWith outarr outarrv [iv] funcall outarrv loc
-  return $ inarrlet $ nlet branch
+  return $ inarrlet $ nlet $ outarrlet letbody
 transformExp (Reduce fun accexp arrexp intype loc) = do
   ((arr, arrv), (acc, accv), (i, iv), redlet) <- newReduction loc arrexp accexp
   let index = Index arr [iv] intype intype loc
@@ -74,15 +66,11 @@ transformExp (Scan fun accexp arrexp intype loc) = do
 transformExp (Filter fun arrexp elty loc) = do
   (arr, arrv, arrlet) <- newLet arrexp "arr"
   (_, nv, nlet) <- newLet (Size arrv loc) "n"
-  let checkempty nonempty = If (BinOp Equal nv (intval 0) bool loc)
-                            (Literal $ emptyArray elty loc) nonempty
-                            (expType arrexp) loc
   (x, xv) <- newVar "x" elty loc
   (i, iv) <- newVar "i" int loc
   fun' <- transformLambda fun [xv]
   let mape = Map (AnonymFun [x] branch int loc) arrv elty int loc
       branch = If fun' (intval 1) (intval 0) int loc
-      indexin0 = Index arr [intval 0] elty elty loc
       indexin = Index arr [iv] elty elty loc
   plus <- do
     (a,av) <- newVar "a" int loc
@@ -93,7 +81,7 @@ transformExp (Filter fun arrexp elty loc) = do
       indexiaend = indexia (BinOp Minus nv (intval 1) int loc)
       indexi = indexia iv
       indexim1 = indexia (BinOp Minus iv (intval 1) int loc)
-  (res, resv, reslet) <- newLet (Replicate indexiaend indexin0 elty loc) "res"
+  (res, resv, reslet) <- newLet (Replicate indexiaend (New elty loc) elty loc) "res"
   let loop = DoLoop i nv loopbody [res] loc
       loopbody = If (Or (BinOp Equal iv (intval 0) bool loc)
                         (And (BinOp Less (intval 0) iv bool loc)
@@ -101,7 +89,7 @@ transformExp (Filter fun arrexp elty loc) = do
                      loc)
                  resv update (expType arrexp) loc
       update = LetWith res resv [BinOp Minus indexi (intval 1) int loc] indexin resv loc
-  return $ arrlet $ nlet $ checkempty $ ialet $ reslet loop
+  return $ arrlet $ nlet $ ialet $ reslet loop
   where int = Int loc
         bool = Bool loc
         intval x = Literal (IntVal x loc)
