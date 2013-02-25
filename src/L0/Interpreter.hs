@@ -326,11 +326,9 @@ evalExp (Split splitexp arrexp intype pos) = do
     IntVal i _
       | i < length vs ->
         let (bef,aft) = splitAt i vs
-        in return $ arrayVal [arrayVal bef intype pos, arrayVal aft intype pos]
-                             outtype pos
+        in return $ TupVal [arrayVal bef intype pos, arrayVal aft intype pos] pos
       | otherwise        -> bad $ IndexOutOfBounds pos (length vs) i
     _ -> bad $ TypeError pos "evalExp Split"
-  where outtype = Array intype Nothing pos
 evalExp (Concat arr1exp arr2exp intype pos) = do
   elems1 <- arrToList =<< evalExp arr1exp
   elems2 <- arrToList =<< evalExp arr2exp
