@@ -417,6 +417,9 @@ copyCtPropExp (Write e tp pos) = do
     e' <- copyCtPropExp e
     return $ Write e' tp pos
 
+copyCtPropExp (New t pos) =
+    return $ New t pos
+
 copyCtPropExp r@(Read _ _) =
   return r
 
