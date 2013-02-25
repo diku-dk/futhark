@@ -475,11 +475,12 @@ checkExp (Redomap redfun mapfun accexp arrexp intype outtype pos) = do
   intype' <- intype `unifyWithKnown` et
   outtype' <- outtype `unifyWithKnown` redret
   return (redret, Redomap redfun' mapfun' accexp' arrexp' intype' outtype' pos)
-checkExp (Split splitexp arrexp inarr pos) = do
+checkExp (Split splitexp arrexp intype pos) = do
   (_, splitexp') <- require [Int pos] =<< checkSubExp splitexp
   (arrt, arrexp') <- checkSubExp arrexp
-  inarr' <- inarr `unifyWithKnown` arrt
-  return (inarr', Split splitexp' arrexp' inarr' pos)
+  et <- elemType arrt
+  intype' <- intype `unifyWithKnown` et
+  return (Tuple [arrt, arrt] pos, Split splitexp' arrexp' intype' pos)
 checkExp (Concat arr1exp arr2exp inarr pos) = do
   (arr1t, arr1exp') <- checkSubExp arr1exp
   (arrt, arr2exp') <- require [arr1t] =<< checkSubExp arr2exp

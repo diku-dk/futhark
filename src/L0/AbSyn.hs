@@ -273,8 +273,8 @@ data Exp ty = Literal Value
              -- 6th arg is the element type of the result array *)
 
             | Split (Exp ty) (Exp ty) ty SrcLoc
-             -- split(2, { 1, 2, 3, 4 }) = {{1},{2, 3, 4}} *)
-             -- 3rd arg is the type of the input array *)
+             -- split(1, { 1, 2, 3, 4 }) = ({1},{2, 3, 4}) *)
+             -- 3rd arg is the element type of the input array *)
 
             | Concat (Exp ty) (Exp ty) ty SrcLoc
              -- concat ({1},{2, 3, 4}) = {1, 2, 3, 4} *)
