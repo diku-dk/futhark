@@ -324,7 +324,7 @@ evalExp (Split splitexp arrexp intype pos) = do
   vs <- arrToList =<< evalExp arrexp
   case split of
     IntVal i _
-      | i < length vs ->
+      | i <= length vs ->
         let (bef,aft) = splitAt i vs
         in return $ TupVal [arrayVal bef intype pos, arrayVal aft intype pos] pos
       | otherwise        -> bad $ IndexOutOfBounds pos (length vs) i
