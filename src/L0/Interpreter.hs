@@ -371,7 +371,8 @@ evalExp (DoLoop loopvar boundexp body mergevars pos) = do
   where iteration vals i =
           binding (zip mergevars vals++[(loopvar, IntVal i pos)]) $ do
             bodyval <- evalExp body
-            case bodyval of TupVal vals' _ -> return vals'
+            case bodyval of TupVal vals' _
+                              | length mergevars > 1 -> return vals'
                             val -> return [val]
 
 evalIntBinOp :: (Applicative m, Monad m) =>
