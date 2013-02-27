@@ -5,12 +5,14 @@ module L0.TupleArrayTransform
 
 import Control.Applicative
 import Control.Monad.State
+import Control.Monad.Reader
 
 import Data.Array
 import Data.Data
 import Data.Generics
 import Data.List
 import Data.Loc
+import qualified Data.Map as M
 
 import L0.AbSyn
 import L0.FreshNames
@@ -22,12 +24,25 @@ data TransformState = TransformState {
     envNameSrc :: NameSource
   }
 
-type TransformM = State TransformState
+data TransformEnv = TransformEnv {
+    envVarSubst :: M.Map String [Ident Type]
+  }
+
+type TransformM = ReaderT TransformEnv (State TransformState)
+
+runTransformM :: TransformM a -> a
+runTransformM m = evalState (runReaderT m newEnv) newState
+  where newEnv = TransformEnv M.empty
+        newState = TransformState $ newNameSource []
 
 new :: String -> TransformM String
 new k = do (name, src) <- gets $ newName k . envNameSrc
            modify $ \s -> s { envNameSrc = src }
            return name
+
+substituting :: M.Map String [Ident Type] -> TransformM a -> TransformM a
+substituting substs =
+  local (\s -> s { envVarSubst = substs `M.union` envVarSubst s })
 
 transformType :: Type -> Type
 transformType (Array (Tuple elemts _) size loc) =
@@ -67,14 +82,15 @@ transformFun (fname,rettype,params,body,loc) = (fname, rettype', params', body',
   where rettype' = transformType rettype
         params' = map transformIdent params
         body' = runTransformM $ transformExp body
-        runTransformM = flip evalState newState
-        newState = TransformState $ newNameSource []
 
 transformExp :: Exp Type -> TransformM (Exp Type)
 transformExp (Literal val) =
   return $ Literal $ transformValue val
-transformExp (Var k) =
-  return $ Var $ transformIdent k
+transformExp (Var k) = do
+  substs <- asks $ M.lookup (identName k) . envVarSubst
+  case substs of
+    Nothing     -> return $ Var $ transformIdent k
+    Just subst' -> return $ TupLit (map Var subst') (srclocOf k)
 transformExp (TupLit es loc) = do
   es' <- mapM transformExp es
   return $ TupLit es' loc
@@ -107,8 +123,39 @@ transformExp (Index vname idxs intype outtype loc) = do
         vname' = transformIdent vname
 transformExp (DoLoop i bound body mergevars loc) = do
   bound' <- transformExp bound
+  (mergevars', substs, lets) <-
+    foldM procmvar ([], M.empty, id) $ map transformIdent mergevars
+  substituting substs $ do
+    body' <- transformExp body
+    return $ lets $ DoLoop i bound' body' mergevars' loc
+  where procmvar (mvars, substs, inner) mvar@(Ident name (Tuple ets _) _) = do
+          names <- map fst <$> mapM (newVar "mvar") ets
+          return (mvars ++ names,
+                  M.insert name names substs,
+                  \inner' -> inner $ LetPat (TupId (map Id names) loc) (Var mvar) inner' loc)
+        procmvar (mvars, substs, inner) mvar =
+          return (mvars ++ [mvar], substs, inner)
+transformExp (LetWith name srcexp idxs valexp body loc) = do
+  srcexp' <- transformExp srcexp
+  idxs' <- mapM transformExp idxs
   body' <- transformExp body
-  return $ DoLoop (transformIdent i) bound' body' (map transformIdent mergevars) loc
+  valexp' <- transformExp valexp
+  substs <- asks $ M.lookup (identName name') . envVarSubst
+  case (substs, expType srcexp', expType valexp') of
+    (Just substs', Tuple sts _, Tuple ets _) -> do
+      (srcs, srclet) <-
+        case srcexp of -- Intentional.
+          Var k | k == name -> return (substs', id)
+          _ -> do (srcs, _) <- unzip <$> mapM (newVar "letwith_src") sts
+                  return (srcs, \inner -> LetPat (TupId (map Id srcs) loc) (Copy srcexp' loc) inner loc)
+      (vals, valvs) <- unzip <$> mapM (newVar "letwith_val") ets
+      let comb olde (dest, srcv, valv) inner =
+            LetWith dest srcv idxs' valv (olde inner) loc
+          vallet inner = LetPat (TupId (map Id vals) loc) valexp' inner loc
+          letws = foldl comb id $ zip3 substs' (map Var srcs) valvs
+      return $ srclet $ vallet $ letws body'
+    _ -> return $ LetWith name' srcexp' idxs' valexp' body' loc
+  where name' = transformIdent name
 transformExp (Replicate ne ve ty loc) = do
   ne' <- transformExp ne
   ve' <- transformExp ve
@@ -122,22 +169,6 @@ transformExp (Replicate ne ve ty loc) = do
       return $ nlet $ tuplet $ TupLit (map arrexp vs) loc
     _ -> return $ Replicate ne' ve' ty' loc
   where ty' = transformType ty
-transformExp (LetWith name e idxs ve body loc) = do
-  e' <- transformExp e
-  idxs' <- mapM transformExp idxs
-  body' <- transformExp body
-  ve' <- transformExp ve
-  case (identType name', expType ve') of
-    (Tuple ets _, Tuple xts _) -> do
-      snames <- map fst <$> mapM (newVar "letwith_src") ets
-      vnames <- map fst <$> mapM (newVar "letwith_el") xts
-      let xlet inner = LetPat (TupId (map Id snames) loc) (Copy e' loc) inner loc
-          vlet inner = LetPat (TupId (map Id vnames) loc) ve' inner loc
-          comb olde (sname, vname) inner = LetWith sname (Var sname) idxs' (Var vname) (olde inner) loc
-      let lws = foldl comb id $ zip snames vnames
-      return $ xlet $ vlet $ lws $ LetWith name' (Var name') [] (TupLit (map Var snames) loc) body' loc
-    _ -> return $ LetWith name' e' idxs' ve' body' loc
-  where name' = transformIdent name
 transformExp (Size e loc) = do
   e' <- transformExp e
   case expType e' of
@@ -154,7 +185,7 @@ transformExp (Zip ((e,t):es) loc) = do
   es' <- mapM (transformExp . fst) es
   let ets = map transformType $ t : map snd es
   (name, namev) <- newVar "zip_array" (expType e')
-  names <- map fst <$> mapM (newVar "zip_array") (map expType es')
+  names <- map fst <$> mapM (newVar "zip_array" . expType) es'
   (size, sizev) <- newVar "zip_size" $ Int loc
   let combes olde (arre,vname) inner = LetPat (Id vname) arre (olde inner) loc
       lete = foldl combes id $ reverse $ zip (e':es') (name:names)
@@ -166,7 +197,7 @@ transformExp (Zip ((e,t):es) loc) = do
         (a, av) <- newVar "zip_a" $ identType vname
         (b, _) <- newVar "zip_b" $ identType vname
         return $ LetPat (TupId [Id a, Id b] loc) (Split sizev (Var vname) et loc) av loc
-  lete . letsizs . (\as -> TupLit as loc) <$> zipWithM split ets (name:names)
+  lete . letsizs . (`TupLit` loc) <$> zipWithM split ets (name:names)
 transformExp e = gmapM (mkM transformExp
                        `extM` (return . transformType)
                        `extM` mapM transformExp
@@ -193,11 +224,3 @@ newVar name tp = do
   x <- new name
   return (Ident x tp loc, Var $ Ident x tp loc)
   where loc = srclocOf tp
-
-testExp :: Exp Type
-testExp = Replicate (Literal $ IntVal 10 noLoc) (New (expType arrlit) noLoc) (expType (New (expType arrlit) noLoc)) noLoc -- LetPat (Id arrident) arrlit idx noLoc
-  where idx = Index arrident [Literal $ IntVal 0 noLoc] tuptype tuptype noLoc
-        arrident = Ident "a" (expType arrlit) noLoc
-        arrlit = ArrayLit [tuple 1 '1', tuple 2 '2'] tuptype noLoc
-        tuple i c = Literal $ TupVal [IntVal i noLoc, CharVal c noLoc] noLoc
-        tuptype = Tuple [Int noLoc, Char noLoc] noLoc
