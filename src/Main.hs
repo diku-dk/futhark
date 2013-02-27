@@ -16,28 +16,6 @@ import Debug.Trace
 
 -- import L0.CCodeGen
 
--- To parse and prettyprint an input program located at ../DATA/filename.l0, run
---  
---  $ l0c -p ../DATA/filename.l0
--- To interpret an input program located at ../DATA/filename.l0, run
---  
---  $ l0c -I ../DATA/filename.l0
--- 
---  To compile the same program with optimizations enabled, run
--- 
---  $ l0c -o ../DATA/filename.l0
--- 
---  To compile the same program without optimizations enabled, run
--- 
---  $ l0c -c ../DATA/filename.l0
--- 
---  or simply,
--- 
---  $ l0c ../DATA/filename.l0
--- 
--- Little of the above is implemented.  Your mileage will vary.
---
-
 main :: IO ()
 main = do args <- getArgs
           case args of
