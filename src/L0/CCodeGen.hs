@@ -6,7 +6,6 @@ import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Writer
 
-import Data.Loc
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.C as C
 
@@ -66,13 +65,13 @@ typeToCType (Tuple ts _) = do
                  ct <- typeToCType t
                  return [C.csdecl|$ty:ct $id:("elem_" ++ show i);|]
 
-expCType :: Exp Identity -> CompilerM C.Type
+expCType :: Exp Type -> CompilerM C.Type
 expCType = typeToCType . expType
 
 valCType :: Value -> CompilerM C.Type
 valCType = typeToCType . valueType
 
-compileProg :: Prog Identity -> String
+compileProg :: Prog Type -> String
 compileProg prog =
   let (funs, endstate) = runCompilerM $ mapM compileFun prog
   in pretty 0 $ ppr [C.cunit|
@@ -86,17 +85,20 @@ int main() {
   l0_main();
 }
 |]
-  where funcToDef func = C.FuncDef func $ fromLoc $ locOf func
+  where funcToDef func = C.FuncDef func loc
+          where loc = case func of
+                        C.OldFunc _ _ _ _ _ _ l -> l
+                        C.Func _ _ _ _ _ l      -> l
 
-compileFun :: FunDec Identity -> CompilerM C.Func
+compileFun :: FunDec Type -> CompilerM C.Func
 compileFun (fname, rettype, args, body, _) = do
   body' <- compileBody body
   args' <- mapM compileArg args
   crettype <- typeToCType rettype
   return [C.cfun|$ty:crettype $id:fname' ( $params:args' ) { $stm:body' }|]
   where fname' = "l0_" ++ fname
-        compileArg (name, tp) = do
-          ctp <- typeToCType tp
+        compileArg (Ident name t _) = do
+          ctp <- typeToCType t
           return [C.cparam|$ty:ctp $id:name|]
 
 compileValue :: String -> Value -> CompilerM C.Stm
@@ -115,10 +117,10 @@ compileValue place (TupVal vs _) = do
            return [C.cstm|{$ty:vt $id:var; $stm:v'; $id:place.$id:field = $id:var;}|]
   return [C.cstm|{$stms:vs'}|]
 
-compileExp :: String -> Exp Identity -> CompilerM C.Stm
+compileExp :: String -> Exp Type -> CompilerM C.Stm
 compileExp place (Literal val) = compileValue place val
-compileExp place (Var name _ _) = return [C.cstm|$id:place = $id:name;|]
-compileExp place (TupLit es _ _) = do
+compileExp place (Var (Ident name _ _)) = return [C.cstm|$id:place = $id:name;|]
+compileExp place (TupLit es _) = do
   es' <- forM (zip es [(0::Int)..]) $ \(e, i) -> do
            var <- new $ "TupVal_" ++ show i
            e' <- compileExp var e
@@ -210,7 +212,7 @@ compileExp place (LetPat pat e body _) = do
                $stm:assignments
                $stm:body'
              }|]
-compileExp place (Write e (Identity t) _) = do
+compileExp place (Write e t _) = do
   e' <- compileExp place e
   let pr = case t of Int  _ -> [C.cstm|printf("%d", $id:place);|]
                      Char _ -> [C.cstm|printf("%c", $id:place);|]
@@ -231,9 +233,9 @@ compileExp place e =
              (Tuple _ _) -> [C.cstm|;|]
              (Array _ _ _) -> [C.cstm|id:place = 0;|]
 
-compilePattern :: TupIdent Identity -> C.Exp -> CompilerM (C.Stm, [C.InitGroup])
+compilePattern :: TupIdent Type -> C.Exp -> CompilerM (C.Stm, [C.InitGroup])
 compilePattern pat vexp = runWriterT $ compilePattern' pat vexp
-  where compilePattern' (Id name (Identity t) _) vexp' = do
+  where compilePattern' (Id (Ident name t _)) vexp' = do
           ct <- lift $ typeToCType t
           tell [[C.cdecl|$ty:ct $id:name;|]]
           return [C.cstm|$id:name = $exp:vexp';|]
@@ -243,7 +245,7 @@ compilePattern pat vexp = runWriterT $ compilePattern' pat vexp
           where prep pat' i = compilePattern' pat' [C.cexp|$exp:vexp'.$id:field|]
                   where field = "elem_" ++ show i
 
-compileBody :: Exp Identity -> CompilerM C.Stm
+compileBody :: Exp Type -> CompilerM C.Stm
 compileBody body = do
   retval <- new "retval"
   body' <- compileExp retval body
