@@ -22,6 +22,7 @@ module L0.AbSyn
   , Ident(..)
   , Exp(..)
   , expType
+  , expToValue
   , ppExp
   , BinOp(..)
   , opStr
@@ -411,6 +412,17 @@ opStr LogOr = "||"
 opStr Equal = "="
 opStr Less = "<"
 opStr Leq = "<="
+
+-- | If possible, convert an expression to a value.  This is not a
+-- true constant propagator, but a quick way to convert array/tuple
+-- literal expressions into literal values instead.
+expToValue :: Exp Type -> Maybe Value
+expToValue (Literal val) = Just val
+expToValue (TupLit es loc) = do es' <- mapM expToValue es
+                                Just $ TupVal es' loc
+expToValue (ArrayLit es et loc) = do es' <- mapM expToValue es
+                                     Just $ arrayVal es' et loc
+expToValue _ = Nothing
 
 -- | Anonymous Function
 data Lambda ty = AnonymFun [Ident Type] (Exp ty) Type SrcLoc
