@@ -10,6 +10,7 @@ import Control.Monad.Writer
 import Data.Array
 import Data.List
 import Data.Loc
+import Data.Maybe
 
 import qualified Data.Map as M
 import qualified Data.Set as S
@@ -288,7 +289,8 @@ checkExp (Literal val) = do
 checkExp (TupLit es pos) = do
   (ets, es') <- unzip <$> mapM checkSubExp es
   let t = Tuple ets pos
-  return (t, TupLit es' pos)
+      res = TupLit es' pos
+  return (t, fromMaybe res (Literal <$> expToValue res))
 checkExp (ArrayLit es t pos) = do
   (ets, es') <- unzip <$> mapM checkSubExp es
   -- Find the unified type of all subexpression types.
@@ -297,7 +299,9 @@ checkExp (ArrayLit es t pos) = do
           e:ets' -> foldM unifyKnownTypes e ets'
   -- Unify that type with the one given for the array literal.
   t' <- t `unifyWithKnown` et
-  return (Array t' Nothing pos, ArrayLit es' t' pos)
+  let res = ArrayLit es' t' pos
+  return (Array t' Nothing pos,
+          fromMaybe res (Literal <$> expToValue res))
 checkExp (BinOp op e1 e2 t pos) = checkBinOp op e1 e2 t pos
 checkExp (And e1 e2 pos) = do
   (_, e1') <- require [Bool pos] =<< checkSubExp e1
