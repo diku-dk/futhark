@@ -5,6 +5,8 @@ import Control.Applicative
 import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Writer
+import qualified Data.Array as A
+import Data.List
 
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.C as C
@@ -14,21 +16,26 @@ import Text.PrettyPrint.Mainland
 import L0.AbSyn
 
 data CompilerState = CompilerState {
-    compTupleStructs :: [([Type], (C.Type, C.Definition))]
+    compTypeStructs :: [(Type, (C.Type, C.Definition))]
+  , compVarDefinitions :: [C.Definition]
+  , compInit :: [C.Stm]
   , compVarCounter :: Int
   }
 
 newCompilerState :: CompilerState
 newCompilerState = CompilerState {
-                     compTupleStructs = []
+                     compTypeStructs = []
+                   , compVarDefinitions = []
+                   , compInit = []
                    , compVarCounter = 0
                    }
 
--- | Return a list of struct definitions for the tuples seen during
--- compilation.  The list is sorted according to dependencies, such
--- that a struct at index N only depends on structs at positions >N.
-tupleDefinitions :: CompilerState -> [C.Definition]
-tupleDefinitions = reverse . map (snd . snd ) . compTupleStructs
+-- | Return a list of struct definitions for the tuples and arrays
+-- seen during compilation.  The list is sorted according to
+-- dependencies, such that a struct at index N only depends on structs
+-- at positions >N.
+typeDefinitions :: CompilerState -> [C.Definition]
+typeDefinitions = reverse . map (snd . snd) . compTypeStructs
 
 newtype CompilerM a = CompilerM (State CompilerState a)
   deriving (Functor, Applicative, Monad, MonadState CompilerState)
@@ -47,11 +54,8 @@ typeToCType (Int _) = return [C.cty|int|]
 typeToCType (Bool _) = return [C.cty|int|]
 typeToCType (Char _) = return [C.cty|char|]
 typeToCType (Real _) = return [C.cty|double|]
-typeToCType (Array t _ _) = do
-  ct <- typeToCType t
-  return [C.cty|$ty:ct*|]
-typeToCType (Tuple ts _) = do
-  ty <- gets $ lookup ts . compTupleStructs
+typeToCType t@(Tuple ts _) = do
+  ty <- gets $ lookup t . compTypeStructs
   case ty of
     Just (cty, _) -> return cty
     Nothing -> do
@@ -59,11 +63,25 @@ typeToCType (Tuple ts _) = do
       members <- zipWithM field ts [(0::Int)..]
       let struct = [C.cedecl|struct $id:name { $sdecls:members };|]
           stype  = [C.cty|struct $id:name|]
-      modify $ \s -> s { compTupleStructs = (ts, (stype,struct)) : compTupleStructs s }
+      modify $ \s -> s { compTypeStructs = (t, (stype,struct)) : compTypeStructs s }
       return stype
-        where field t i = do
-                 ct <- typeToCType t
+        where field et i = do
+                 ct <- typeToCType et
                  return [C.csdecl|$ty:ct $id:("elem_" ++ show i);|]
+typeToCType t@(Array _ _ _) = do
+  ty <- gets $ lookup t . compTypeStructs
+  case ty of
+    Just (cty, _) -> return cty
+    Nothing -> do
+      name <- new "array_type"
+      ct <- typeToCType $ baseType t
+      let ctp = [C.cty|$ty:ct*|]
+          lengthFields = map field [(0::Int)..arrayDims t]
+          struct = [C.cedecl|struct $id:name { $sdecls:lengthFields $ty:ctp array_data; };|]
+          stype  = [C.cty|struct $id:name|]
+      modify $ \s -> s { compTypeStructs = (t, (stype, struct)) : compTypeStructs s }
+      return stype
+        where field i = [C.csdecl|int $id:("dim_" ++ show i);|]
 
 expCType :: Exp Type -> CompilerM C.Type
 expCType = typeToCType . expType
@@ -71,18 +89,43 @@ expCType = typeToCType . expType
 valCType :: Value -> CompilerM C.Type
 valCType = typeToCType . valueType
 
+allocArray :: String -> [C.Exp] -> C.Type -> CompilerM C.Stm
+allocArray place shape basetype = do
+  return [C.cstm|{$stms:shapeassign
+                  $id:place.array_data = calloc($exp:sizeexp, sizeof($ty:basetype));}|]
+  where sizeexp = foldl mult [C.cexp|1|] shape
+        mult x y = [C.cexp|$exp:x * $exp:y|]
+        shapeassign = zipWith assign shape [0..]
+        assign :: C.Exp -> Int -> C.Stm
+        assign n i = [C.cstm|$id:place.$id:("dim_" ++ show i) = $exp:n;|]
+
+indexArray :: String -> [C.Exp] -> C.Exp
+indexArray place indexes =
+  let sizes = map (foldl mult [C.cexp|1|]) $ tails $ map field $ take (length indexes-1) [1..]
+      field :: Int -> C.Exp
+      field i = [C.cexp|$id:place.$id:("dim_" ++ show i)|]
+      mult x y = [C.cexp|$exp:x * $exp:y|]
+      add x y = [C.cexp|$exp:x + $exp:y|]
+      index = foldl add [C.cexp|0|] $ zipWith mult sizes indexes
+  in [C.cexp|$id:place.array_data[$exp:index]|]
+
 compileProg :: Prog Type -> String
 compileProg prog =
   let (funs, endstate) = runCompilerM $ mapM compileFun prog
   in pretty 0 $ ppr [C.cunit|
 $esc:("#include <stdio.h>")
+$esc:("#include <stdlib.h>")
 
-$edecls:(tupleDefinitions endstate)
+$edecls:(typeDefinitions endstate)
+
+$edecls:(compVarDefinitions endstate)
 
 $edecls:(map funcToDef funs)
 
 int main() {
+  $stms:(compInit endstate)
   l0_main();
+  return 0;
 }
 |]
   where funcToDef func = C.FuncDef func loc
@@ -95,7 +138,7 @@ compileFun (fname, rettype, args, body, _) = do
   body' <- compileBody body
   args' <- mapM compileArg args
   crettype <- typeToCType rettype
-  return [C.cfun|$ty:crettype $id:fname' ( $params:args' ) { $stm:body' }|]
+  return [C.cfun|static $ty:crettype $id:fname' ( $params:args' ) { $stm:body' }|]
   where fname' = "l0_" ++ fname
         compileArg (Ident name t _) = do
           ctp <- typeToCType t
@@ -116,6 +159,29 @@ compileValue place (TupVal vs _) = do
            vt <- valCType v
            return [C.cstm|{$ty:vt $id:var; $stm:v'; $id:place.$id:field = $id:var;}|]
   return [C.cstm|{$stms:vs'}|]
+compileValue place v@(ArrayVal _ et _) = do
+  name <- new "ArrayVal"
+  ct <- typeToCType $ valueType v
+  cbt <- typeToCType $ baseType et
+  let asexp n = [C.cexp|$int:n|]
+  alloc <- allocArray name (map asexp $ arrayShape v) cbt
+  i <- new "i"
+  initstms <- elemInit name i v
+  let def = [C.cedecl|$ty:ct $id:name;|]
+      initstm = [C.cstm|{int $id:i = 0; $stm:alloc; $stms:initstms}|]
+  modify $ \s -> s { compInit = initstm : compInit s
+                   , compVarDefinitions = def : compVarDefinitions s }
+  return [C.cstm|$id:place = $id:name;|]
+  where elemInit name i (ArrayVal arr _ _) = do
+          stms <- concat <$> mapM (elemInit name i) (A.elems arr)
+          return [[C.cstm|{$stm:stm; $id:i++;}|] | stm <- stms]
+        elemInit name i elv = do
+          vplace <- new "arrelem"
+          vstm <- compileValue vplace elv
+          cty <- typeToCType $ valueType elv
+          return [[C.cstm|{$ty:cty $id:vplace;
+                           $stm:vstm;
+                           $id:name.array_data[$id:i] = $id:vplace;}|]]
 
 compileExp :: String -> Exp Type -> CompilerM C.Stm
 compileExp place (Literal val) = compileValue place val
@@ -212,6 +278,16 @@ compileExp place (LetPat pat e body _) = do
                $stm:assignments
                $stm:body'
              }|]
+compileExp place (Index vname idxs _ _ _) = do
+  idxvars <- mapM (new . ("index_"++) . show) [0..length idxs-1]
+  idxs' <- zipWithM compileExp idxvars idxs
+  let vardecls = [[C.cdecl|int $id:var;|] | var <- idxvars]
+      index = indexArray (identName vname) [[C.cexp|$id:var|] | var <- idxvars]
+  return [C.cstm|{
+               $decls:vardecls
+               $stms:idxs'
+               $id:place = $exp:index;
+             }|]
 compileExp place (Write e t _) = do
   e' <- compileExp place e
   let pr = case t of Int  _ -> [C.cstm|printf("%d", $id:place);|]
@@ -224,6 +300,7 @@ compileExp place (Read t _) = do
   case t of Int _  -> return [C.cstm|scanf("%d", &$id:place);|]
             Char _ -> return [C.cstm|scanf("%c", &$id:place);|]
             Real _ -> return [C.cstm|scanf("%f", &$id:place);|]
+            _      -> return [C.cstm|{fprintf(stderr, "Cannot read that yet.\n"); exit(1);}|]
 compileExp place e =
   return $ case expType e of
              (Int _)  -> [C.cstm|$id:place = 0;|]
@@ -231,7 +308,7 @@ compileExp place e =
              (Char _) -> [C.cstm|$id:place = 0;|]
              (Real _) -> [C.cstm|$id:place = 0.0;|]
              (Tuple _ _) -> [C.cstm|;|]
-             (Array _ _ _) -> [C.cstm|id:place = 0;|]
+             (Array _ _ _) -> [C.cstm|$id:place = 0;|]
 
 compilePattern :: TupIdent Type -> C.Exp -> CompilerM (C.Stm, [C.InitGroup])
 compilePattern pat vexp = runWriterT $ compilePattern' pat vexp
