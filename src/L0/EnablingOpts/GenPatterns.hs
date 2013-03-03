@@ -6,6 +6,9 @@ module L0.EnablingOpts.GenPatterns (
                     )
   where
 
+import Data.Data
+import Data.Generics
+
 import L0.AbSyn
  
  
@@ -63,50 +66,13 @@ getLambdaExps (CurryFun  _ params _ _) = params
 ------------- buildExpPattern   ---------------
 -----------------------------------------------
 buildExpPattern :: TypeBox tf => (Exp tf -> Exp tf) -> Exp tf -> Exp tf
+buildExpPattern f e = gmapT (mkT f
+                             `extT` buildLambda f
+                             `extT` map f
+                             `extT` map (buildExpPair f)) e
 
-buildExpPattern _ e@(Read  _ _)     = e
-buildExpPattern _ e@(New  _ _)      = e
-buildExpPattern _ e@(Literal _)     = e
-buildExpPattern _ e@(Var     _)     = e
-buildExpPattern f (Write  e tp pos) = Write  (f e) tp pos 
-buildExpPattern f (Negate e tp pos) = Negate (f e) tp pos
-buildExpPattern f (Not    e    pos) = Not    (f e)    pos
-buildExpPattern f (Copy   e    pos) = Copy   (f e)    pos
-
-buildExpPattern f (TupLit       els      pos) = TupLit    (map f els)      pos
-buildExpPattern f (ArrayLit     els   tp pos) = ArrayLit  (map f els)   tp pos
-buildExpPattern f (Apply     nm els   tp pos) = Apply nm  (map f els)   tp pos
-buildExpPattern f (BinOp    bop e1 e2 tp pos) = BinOp bop (f e1) (f e2) tp pos
-buildExpPattern f (And          e1 e2    pos) = And       (f e1) (f e2)    pos
-buildExpPattern f (Or           e1 e2    pos) = Or        (f e1) (f e2)    pos
-buildExpPattern f (If        e1 e2 e3 tp pos) = If (f e1) (f e2) (f e3) tp pos
-
-buildExpPattern f (LetWith ii e inds el body pos) = LetWith ii (f e) (map f inds) (f el) (f body) pos
-buildExpPattern f (LetPat  ii e         body pos) = LetPat  ii (f e) (f body) pos
-buildExpPattern f (DoLoop  i  n body merges  pos) = DoLoop  i  (f n) (f body) merges  pos
-buildExpPattern f (Index nm inds tp1 tp2     pos) = Index nm (map f inds) tp1 tp2     pos 
-
-buildExpPattern f (Iota      e          pos)  = Iota (f e) pos
-buildExpPattern f (Size      e          pos)  = Size (f e) pos
-buildExpPattern f (Transpose e  tp1 tp2 pos)  = Transpose (f e) tp1 tp2 pos
-buildExpPattern f (Unzip     e      tps pos)  = Unzip (f e) tps pos
-buildExpPattern f (Zip       exptps     pos)  = 
-    let (exps,tps) = unzip exptps 
-        exptps'    = zip (map f exps) tps
-    in  Zip exptps' pos
-buildExpPattern f (Replicate e1 e2      pos)  = Replicate (f e1) (f e2) pos
-buildExpPattern f (Reshape es e tp1 tp2 pos)  = Reshape (map f es) (f e) tp1 tp2 pos
-buildExpPattern f (Map    lam e tp1 tp2 pos)  = Map    (buildLambda f lam) (f e) tp1 tp2 pos
-buildExpPattern f (Mapall lam e tp1 tp2 pos)  = Mapall (buildLambda f lam) (f e) tp1 tp2 pos
-buildExpPattern f (Reduce lam e1 e2 tp  pos)  = Reduce (buildLambda f lam) (f e1) (f e2) tp pos
-buildExpPattern f (Scan   lam e1 e2 tp  pos)  = Scan   (buildLambda f lam) (f e1) (f e2) tp pos
-buildExpPattern f (Filter lam e     tp  pos)  = Filter (buildLambda f lam) (f e) tp pos
-buildExpPattern f (Split      e1 e2 tp  pos)  = Split  (f e1) (f e2) tp pos
-buildExpPattern f (Concat     e1 e2 tp  pos)  = Concat (f e1) (f e2) tp pos
-
-buildExpPattern f (Redomap lam1 lam2 e1 e2 tp1 tp2 pos) = 
-    let (lam1',lam2') = (buildLambda f lam1, buildLambda f lam2)  
-    in  Redomap lam1' lam2' (f e1) (f e2) tp1 tp2 pos 
+buildExpPair :: TypeBox tf => (Exp tf -> Exp tf) -> (Exp tf, tf) -> (Exp tf, tf)
+buildExpPair f (e,t) = (f e,t)
 
 buildLambda :: TypeBox tf => (Exp tf -> Exp tf) -> Lambda tf -> Lambda tf
 buildLambda f (AnonymFun tps body  tp pos) = AnonymFun tps     (f body  ) tp pos
