@@ -12,6 +12,8 @@ import Control.Monad.Writer
 --import Data.Either
 
 --import Control.Monad.State
+import Data.Data
+import Data.Generics
 import Data.Array
 import Data.List
 
@@ -271,34 +273,22 @@ copyCtPropExp eee@(Index idd@(Ident vnm tp p) inds tp1 tp2 pos) = do
                                               ppExp 0 eee++" is bound to "++ppExp 0 e' ) --e 
                                               --" index-exp of "++ppExp 0 eee++" bound to "++ppExp 0 e' ) --e
 
-
-copyCtPropExp (Literal v) =
-    return $ Literal v
-
-copyCtPropExp (TupLit els pos) = do 
-    els' <- mapM copyCtPropExp els
-    return $ TupLit els' pos
-
-copyCtPropExp (ArrayLit  els tp pos) = do 
-    els' <- mapM copyCtPropExp els
-    return $ ArrayLit els' tp pos
-    
-copyCtPropExp (BinOp bop e1 e2 tp pos) = do 
+copyCtPropExp (BinOp bop e1 e2 tp pos) = do
     e1'   <- copyCtPropExp e1
     e2'   <- copyCtPropExp e2
     ctFoldBinOp (BinOp bop e1' e2' tp pos)
 
-copyCtPropExp (And e1 e2 pos) = do 
+copyCtPropExp (And e1 e2 pos) = do
     e1'   <- copyCtPropExp e1
     e2'   <- copyCtPropExp e2
     ctFoldBinOp (And e1' e2' pos)
 
-copyCtPropExp (Or e1 e2 pos) = do 
+copyCtPropExp (Or e1 e2 pos) = do
     e1'   <- copyCtPropExp e1
     e2'   <- copyCtPropExp e2
     ctFoldBinOp $ Or e1' e2' pos
 
-copyCtPropExp (Negate e tp pos) = do 
+copyCtPropExp (Negate e tp pos) = do
     e'   <- copyCtPropExp e
     if( isValue e' ) 
     then case e' of
@@ -323,112 +313,15 @@ copyCtPropExp (If e1 e2 e3 tp pos) = do
     else if isCt0 e1' then changed e3'
     else return $ If e1' e2' e3' tp pos
 
-copyCtPropExp (Apply fname es tp pos) = do 
-    es' <- copyCtPropExpList es
-    return $ Apply fname es' tp pos
+copyCtPropExp e = gmapM (mkM copyCtPropExp
+                         `extM` copyCtPropLambda
+                         `extM` mapM copyCtPropExp
+                         `extM` mapM copyCtPropExpPair) e
 
-copyCtPropExp (Iota e pos) = do 
-    e'   <- copyCtPropExp e
-    return $ Iota e' pos
-
-copyCtPropExp (Size e pos) = do 
-    e' <- copyCtPropExp e
-    return $ Size e' pos
-
-copyCtPropExp (Replicate e1 e2 pos) = do
-    e1' <- copyCtPropExp e1
-    e2' <- copyCtPropExp e2
-    return $ Replicate e1' e2' pos
-
-copyCtPropExp (Reshape es e tp1 tp2 pos) = do
-    es' <- copyCtPropExpList es
-    e'  <- copyCtPropExp e
-    return $ Reshape es' e' tp1 tp2 pos
-
-copyCtPropExp (Transpose e tp1 tp2 pos) = do
-    e' <- copyCtPropExp e
-    return $ Transpose e' tp1 tp2 pos
-
-copyCtPropExp (Map lam e tp1 tp2 pos) = do
-    e'   <- copyCtPropExp e
-    lam' <- copyCtPropLambda lam
-    return $ Map lam' e' tp1 tp2 pos
-
-copyCtPropExp (Reduce lam e1 e2 tp pos) = do
-    e1' <- copyCtPropExp e1
-    e2' <- copyCtPropExp e2
-    lam' <- copyCtPropLambda lam
-    return $ Reduce lam' e1' e2' tp pos
-
--------------------------------------------------------
-------- ZipWith was replaced with map . zip!!!  -------
--------------------------------------------------------
---copyCtPropExp (ZipWith fname es tp1 tp2 pos) = do
---    (ss, es') <- copyCtPropExpList es
---    return (ss, ZipWith fname es' tp1 tp2 pos)
-
-copyCtPropExp (Zip exptps pos) = do
-    let (es, tps) = unzip exptps
-    es' <- copyCtPropExpList es
-    return $ Zip (zip es' tps) pos
-
-copyCtPropExp (Unzip e tps pos)= do
-    e' <- copyCtPropExp e
-    return $ Unzip e' tps pos
-
-copyCtPropExp (Scan lam e1 e2 tp pos) = do
-    e1'  <- copyCtPropExp e1
-    e2'  <- copyCtPropExp e2
-    lam' <- copyCtPropLambda lam
-    return $ Scan lam' e1' e2' tp pos
-
-copyCtPropExp (Filter lam e tp pos) = do
-    e'   <- copyCtPropExp e
-    lam' <- copyCtPropLambda lam
-    return $ Filter lam' e' tp pos
-
-copyCtPropExp (Mapall lam e tp1 tp2 pos) = do
-    e'   <- copyCtPropExp e
-    lam' <- copyCtPropLambda lam
-    return $ Mapall lam' e' tp1 tp2 pos
-
-copyCtPropExp (Redomap lam1 lam2 e1 e2 tp1 tp2 pos) = do
-    e1'   <- copyCtPropExp e1
-    e2'   <- copyCtPropExp e2
-    lam1' <- copyCtPropLambda lam1
-    lam2' <- copyCtPropLambda lam2
-    return $ Redomap lam1' lam2' e1' e2' tp1 tp2 pos
-
-copyCtPropExp (Split e1 e2 tp pos) = do
-    e1' <- copyCtPropExp e1
-    e2' <- copyCtPropExp e2
-    return $ Split e1' e2' tp pos
-
-copyCtPropExp (Concat e1 e2 tp pos) = do
-    e1' <- copyCtPropExp e1
-    e2' <- copyCtPropExp e2
-    return $ Concat e1' e2' tp pos
-
-copyCtPropExp (Copy e pos) = do
-    e' <- copyCtPropExp e
-    return $ Copy e' pos
-
-copyCtPropExp (Write e tp pos) = do
-    e' <- copyCtPropExp e
-    return $ Write e' tp pos
-
-copyCtPropExp (New t pos) =
-    return $ New t pos
-
-copyCtPropExp r@(Read _ _) =
-  return r
-
-
-
--- copyCtPropExp e = do
---    return (False, e)
-
-
+copyCtPropExpPair :: TypeBox tf => (Exp tf, tf) -> CPropM tf (Exp tf, tf)
+copyCtPropExpPair (e, t) = do
+  e' <- copyCtPropExp e
+  return (e', t)
 
 -- data Lambda ty = AnonymFun [Ident Type] (Exp ty) Type SrcLoc
 --                    -- fn int (bool x, char z) => if(x) then ord(z) else ord(z)+1 *)
