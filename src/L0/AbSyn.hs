@@ -223,8 +223,7 @@ data Exp ty = Literal Value
              -- 4th arg is the result type
             | Iota (Exp ty) SrcLoc -- e.g., iota(n) = {0,1,..,n-1}
             | Size (Exp ty) SrcLoc -- The number of elements in an array.
-            | Replicate (Exp ty) (Exp ty) ty SrcLoc -- e.g., replicate(3,1) = {1, 1, 1}
-                                                    -- Type is element type of output array
+            | Replicate (Exp ty) (Exp ty) SrcLoc -- e.g., replicate(3,1) = {1, 1, 1}
 
             | Reshape [Exp ty] (Exp ty) ty ty SrcLoc
              -- 1st arg is the new shape, 2nd arg is the input array *)
@@ -317,7 +316,7 @@ instance Located (Exp ty) where
   locOf (Index _ _ _ _ pos) = locOf pos
   locOf (Iota _ pos) = locOf pos
   locOf (Size _ pos) = locOf pos
-  locOf (Replicate _ _ _ pos) = locOf pos
+  locOf (Replicate _ _ pos) = locOf pos
   locOf (Reshape _ _ _ _ pos) = locOf pos
   locOf (Transpose _ _ _ pos) = locOf pos
   locOf (Map _ _ _ _ pos) = locOf pos
@@ -354,7 +353,7 @@ expType (LetWith _ _ _ _ body _) = expType body
 expType (Index _ _ _ t _) = t
 expType (Iota _ pos) = Array (Int pos) Nothing pos
 expType (Size _ pos) = Int pos
-expType (Replicate _ _ t pos) = Array t Nothing pos
+expType (Replicate _ e pos) = Array (expType e) Nothing pos
 expType (Reshape _ _ _ t _) = t
 expType (Transpose _ _ t _) = t
 expType (Map _ _ _ t pos) = Array t Nothing pos
@@ -530,7 +529,7 @@ ppExp d (Index (Ident name _ _) es _ _ _) =
 -- | Array Constructs
 ppExp d (Iota e _)         = "iota ( " ++ ppExp d e ++ " ) "
 ppExp d (Size e _)         = "size ( " ++ ppExp d e ++ " ) "
-ppExp d (Replicate e el _ _) = "replicate ( " ++ ppExp d e ++ ", " ++ ppExp d el ++ " ) "
+ppExp d (Replicate e el _) = "replicate ( " ++ ppExp d e ++ ", " ++ ppExp d el ++ " ) "
 
 ppExp d (Transpose e _ _ _) = " transpose ( " ++ ppExp d e ++ " ) "
 

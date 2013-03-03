@@ -189,7 +189,7 @@ copyCtPropExp e@(Var (Ident vnm _ pos)) = do
         Just (VarId  id' tp1 _) -> changed $ Var (Ident id' tp1 pos) -- or tp
         Just (SymArr e'    _ _) ->
             case e' of
-                Replicate _ _ _ _ -> return e
+                Replicate _ _ _   -> return e
                 TupLit    _ _     -> if isCtOrCopy e then changed e' else return e
                 ArrayLit  _ _ _   -> return e
                 Index _ _ _ _ _   -> changed e'
@@ -234,37 +234,37 @@ copyCtPropExp eee@(Index idd@(Ident vnm tp p) inds tp1 tp2 pos) = do
         (TupLit   _ _, _       ) -> badCPropM $ TypeError pos  " indexing into a tuple "
 
 
-        (Replicate _ vvv@(Var vv@(Ident _ _ _)) _ _, _:is') -> do
+        (Replicate _ vvv@(Var vv@(Ident _ _ _)) _, _:is') -> do
             inner <- if null is' then copyCtPropExp vvv
                      else copyCtPropExp (Index vv is' tp1 tp2 pos) 
             changed inner
-        (Replicate _ (Index a ais _ _ _) _ _, _:is') -> do
+        (Replicate _ (Index a ais _ _ _) _, _:is') -> do
             inner <- copyCtPropExp (Index a (ais ++ is') tp1 tp2 pos)
             changed inner
-        (Replicate _ (Literal arr@(ArrayVal _ _ _)) _ _, _:is') -> do 
+        (Replicate _ (Literal arr@(ArrayVal _ _ _)) _, _:is') -> do 
             case ctIndex is' of
                 Nothing -> return $ Index idd inds' tp1 tp2 pos
                 Just iis-> case getArrValInd arr iis of 
                                Nothing -> return $ Index idd inds' tp1 tp2 pos
                                Just el -> changed $ Literal el
-        (Replicate _ val@(Literal _) _ _, _:is') -> do
+        (Replicate _ val@(Literal _) _, _:is') -> do
             if null is' then changed val
             else badCPropM $ TypeError pos  " indexing into a basic type "
 
-        (Replicate _ arr@(ArrayLit _ _ _) _ _, _:is') -> do
+        (Replicate _ arr@(ArrayLit _ _ _) _, _:is') -> do
             case ctIndex is' of
                 Nothing -> return $ Index idd inds' tp1 tp2 pos
                 Just iis-> case getArrLitInd arr iis of 
                                Nothing -> return $ Index idd inds' tp1 tp2 pos
                                Just el -> changed el
-        (Replicate _ tup@(TupLit _ _) _ _, _:is') -> do
+        (Replicate _ tup@(TupLit _ _) _, _:is') -> do
             if null is' && isCtOrCopy tup then changed $ tup
             else  badCPropM $ TypeError pos  " indexing into a tuple "
-        (Replicate _ (Iota n _) _ _, _:is') -> do
+        (Replicate _ (Iota n _) _, _:is') -> do
             if     (length is' == 0) then changed $ Iota n pos 
             else if(length is' == 1) then changed $ head is'
             else badCPropM $ TypeError pos  (" illegal indexing: " ++ ppExp 0 eee)
-        (Replicate _ _ _ _, _) -> 
+        (Replicate _ _ _, _) -> 
             return $ Index idd inds' tp1 tp2 pos
 
         _ -> badCPropM $ CopyCtPropError pos (" Unreachable case in copyCtPropExp of Index exp: " ++
@@ -335,10 +335,10 @@ copyCtPropExp (Size e pos) = do
     e' <- copyCtPropExp e
     return $ Size e' pos
 
-copyCtPropExp (Replicate e1 e2 tp pos) = do
+copyCtPropExp (Replicate e1 e2 pos) = do
     e1' <- copyCtPropExp e1
     e2' <- copyCtPropExp e2
-    return $ Replicate e1' e2' tp pos
+    return $ Replicate e1' e2' pos
 
 copyCtPropExp (Reshape es e tp1 tp2 pos) = do
     es' <- copyCtPropExpList es
@@ -680,7 +680,7 @@ getPropBnds ( Id (Ident var tp pos) ) e to_rem =
 
             Iota           _ _   -> let newtp = boxType (Array (Int pos) Nothing pos) -- (Just n) does not work Exp tf
                                     in  [(var, SymArr e newtp to_rem)]
-            Replicate _ _ _ _    -> [(var, SymArr e tp to_rem)] 
+            Replicate _ _ _      -> [(var, SymArr e tp to_rem)] 
             ArrayLit    _ _ _    -> [(var, SymArr e tp to_rem)]
             _ -> [] 
   in return r 

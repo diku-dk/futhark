@@ -42,7 +42,7 @@ foldlPattern f _ ne (Size      e _    )    = f ne e
 foldlPattern f _ ne (Transpose e _ _ _)    = f ne e
 foldlPattern f _ ne (Unzip     e   _ _)    = f ne e
 foldlPattern f _ ne (Zip exptps _)         = foldl f ne (fst (unzip exptps))
-foldlPattern f _ ne (Replicate e1 e2 _ _)  = foldl f ne [e1, e2]
+foldlPattern f _ ne (Replicate e1 e2 _)  = foldl f ne [e1, e2]
 foldlPattern f _ ne (Reshape es e _ _ _)   = foldl f ne (e:es)
 foldlPattern f doLam ne (Map lam e _ _ _)      = foldl f (doLam ne lam) (e:getLambdaExps lam)
 foldlPattern f doLam ne (Mapall lam e _ _ _)   = foldl f (doLam ne lam) (e:getLambdaExps lam)
@@ -94,7 +94,7 @@ buildExpPattern f (Zip       exptps     pos)  =
     let (exps,tps) = unzip exptps 
         exptps'    = zip (map f exps) tps
     in  Zip exptps' pos
-buildExpPattern f (Replicate e1 e2  tp  pos)  = Replicate (f e1) (f e2) tp pos
+buildExpPattern f (Replicate e1 e2      pos)  = Replicate (f e1) (f e2) pos
 buildExpPattern f (Reshape es e tp1 tp2 pos)  = Reshape (map f es) (f e) tp1 tp2 pos
 buildExpPattern f (Map    lam e tp1 tp2 pos)  = Map    (buildLambda f lam) (f e) tp1 tp2 pos
 buildExpPattern f (Mapall lam e tp1 tp2 pos)  = Mapall (buildLambda f lam) (f e) tp1 tp2 pos

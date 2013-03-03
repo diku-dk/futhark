@@ -217,7 +217,7 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal $ IntVal num pos 
 
      | size '(' Exp ')' { Size $3 $1 }
 
-     | replicate '(' Exp ',' Exp ')' { Replicate $3 $5 Nothing $1 }
+     | replicate '(' Exp ',' Exp ')' { Replicate $3 $5 $1 }
 
      | reshape '(' '(' Exps ')' ',' Exp ')'
                       { Reshape $4 $7 Nothing Nothing $1 }

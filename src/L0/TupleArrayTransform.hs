@@ -156,19 +156,18 @@ transformExp (LetWith name srcexp idxs valexp body loc) = do
       return $ srclet $ vallet $ letws body'
     _ -> return $ LetWith name' srcexp' idxs' valexp' body' loc
   where name' = transformIdent name
-transformExp (Replicate ne ve ty loc) = do
+transformExp (Replicate ne ve loc) = do
   ne' <- transformExp ne
   ve' <- transformExp ve
-  case ty' of
+  case expType ve' of
     Tuple ets _ -> do
       (n, nv) <- newVar "n" (Int loc)
       (names, vs) <- unzip <$> mapM (newVar "rep_tuple") ets
-      let arrexp v = Replicate nv v (expType v) loc
+      let arrexp v = Replicate nv v loc
           nlet body = LetPat (Id n) ne' body loc
           tuplet body = LetPat (TupId (map Id names) loc) ve' body loc
       return $ nlet $ tuplet $ TupLit (map arrexp vs) loc
-    _ -> return $ Replicate ne' ve' ty' loc
-  where ty' = transformType ty
+    _ -> return $ Replicate ne' ve' loc
 transformExp (Size e loc) = do
   e' <- transformExp e
   case expType e' of

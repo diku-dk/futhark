@@ -387,12 +387,11 @@ checkExp (Size e pos) = do
   case et of
     Array {} -> return (Int pos, Size e' pos)
     _        -> bad $ TypeError pos "Argument to size must be array."
-checkExp (Replicate countexp valexp outtype pos) = do
+checkExp (Replicate countexp valexp pos) = do
   (_, countexp') <- require [Int pos] =<< checkSubExp countexp
   (valtype, valexp') <- checkSubExp valexp
-  outtype' <- outtype `unifyWithKnown` valtype
-  return (Array outtype' Nothing pos,
-          Replicate countexp' valexp' outtype' pos)
+  return (Array valtype Nothing pos,
+          Replicate countexp' valexp' pos)
 checkExp (Reshape shapeexps arrexp intype restype pos) = do
   (_, shapeexps') <- unzip <$> mapM (require [Int pos] <=< checkSubExp) shapeexps
   (arrt, arrexp') <- checkSubExp arrexp
