@@ -62,10 +62,9 @@ interpret file = do
   case checkProg prog of
     Left err    -> error $ "Typechecking error:\n" ++ show err
     Right prog' -> do
-      let prog'' = renameProg prog'
       res <- runProgIO prog''
       case res of Left err -> error $ "Interpreter error:\n" ++ show err
-                  Right v  -> putStrLn $ ppValue v -- ++ (prettyPrint prog')
+                  Right v  -> return ()
 
 
 testCosmin :: FilePath -> IO ()
