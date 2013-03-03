@@ -76,12 +76,10 @@ typeToCType t@(Array _ _ _) = do
       name <- new "array_type"
       ct <- typeToCType $ baseType t
       let ctp = [C.cty|$ty:ct*|]
-          lengthFields = map field [(0::Int)..arrayDims t]
-          struct = [C.cedecl|struct $id:name { $sdecls:lengthFields $ty:ctp array_data; };|]
+          struct = [C.cedecl|struct $id:name { int dims[$int:(arrayDims t)]; $ty:ctp data; };|]
           stype  = [C.cty|struct $id:name|]
       modify $ \s -> s { compTypeStructs = (t, (stype, struct)) : compTypeStructs s }
       return stype
-        where field i = [C.csdecl|int $id:("dim_" ++ show i);|]
 
 expCType :: Exp Type -> CompilerM C.Type
 expCType = typeToCType . expType
@@ -89,25 +87,25 @@ expCType = typeToCType . expType
 valCType :: Value -> CompilerM C.Type
 valCType = typeToCType . valueType
 
-allocArray :: String -> [C.Exp] -> C.Type -> CompilerM C.Stm
-allocArray place shape basetype = do
-  return [C.cstm|{$stms:shapeassign
-                  $id:place.array_data = calloc($exp:sizeexp, sizeof($ty:basetype));}|]
+allocArray :: String -> [C.Exp] -> C.Type -> C.Stm
+allocArray place shape basetype =
+  [C.cstm|{$stms:shapeassign
+           $id:place.data = calloc($exp:sizeexp, sizeof($ty:basetype));}|]
   where sizeexp = foldl mult [C.cexp|1|] shape
         mult x y = [C.cexp|$exp:x * $exp:y|]
         shapeassign = zipWith assign shape [0..]
         assign :: C.Exp -> Int -> C.Stm
-        assign n i = [C.cstm|$id:place.$id:("dim_" ++ show i) = $exp:n;|]
+        assign n i = [C.cstm|$id:place.dims[$int:i] = $exp:n;|]
 
 indexArray :: String -> [C.Exp] -> C.Exp
 indexArray place indexes =
   let sizes = map (foldl mult [C.cexp|1|]) $ tails $ map field $ take (length indexes-1) [1..]
       field :: Int -> C.Exp
-      field i = [C.cexp|$id:place.$id:("dim_" ++ show i)|]
+      field i = [C.cexp|$id:place.dims[$int:i]|]
       mult x y = [C.cexp|$exp:x * $exp:y|]
       add x y = [C.cexp|$exp:x + $exp:y|]
       index = foldl add [C.cexp|0|] $ zipWith mult sizes indexes
-  in [C.cexp|$id:place.array_data[$exp:index]|]
+  in [C.cexp|$id:place.data[$exp:index]|]
 
 compileProg :: Prog Type -> String
 compileProg prog =
@@ -164,7 +162,7 @@ compileValue place v@(ArrayVal _ et _) = do
   ct <- typeToCType $ valueType v
   cbt <- typeToCType $ baseType et
   let asexp n = [C.cexp|$int:n|]
-  alloc <- allocArray name (map asexp $ arrayShape v) cbt
+      alloc = allocArray name (map asexp $ arrayShape v) cbt
   i <- new "i"
   initstms <- elemInit name i v
   let def = [C.cedecl|$ty:ct $id:name;|]
@@ -174,14 +172,14 @@ compileValue place v@(ArrayVal _ et _) = do
   return [C.cstm|$id:place = $id:name;|]
   where elemInit name i (ArrayVal arr _ _) = do
           stms <- concat <$> mapM (elemInit name i) (A.elems arr)
-          return [[C.cstm|{$stm:stm; $id:i++;}|] | stm <- stms]
+          return [[C.cstm|{$stm:stm}|] | stm <- stms]
         elemInit name i elv = do
           vplace <- new "arrelem"
           vstm <- compileValue vplace elv
           cty <- typeToCType $ valueType elv
           return [[C.cstm|{$ty:cty $id:vplace;
                            $stm:vstm;
-                           $id:name.array_data[$id:i] = $id:vplace;}|]]
+                           $id:name.data[$id:i++] = $id:vplace;}|]]
 
 compileExp :: String -> Exp Type -> CompilerM C.Stm
 compileExp place (Literal val) = compileValue place val
@@ -288,6 +286,42 @@ compileExp place (Index vname idxs _ _ _) = do
                $stms:idxs'
                $id:place = $exp:index;
              }|]
+compileExp place (Iota ne _) = do
+  size <- new "iota_size"
+  i <- new "iota_i"
+  ne' <- compileExp size ne
+  let alloc = allocArray place [[C.cexp|$id:size|]] [C.cty|int|]
+  return [C.cstm|{
+           int $id:size, $id:i;
+           $stm:ne'
+           $stm:alloc
+           $id:place.dims[0] = $id:size;
+           for ($id:i = 0; $id:i < $id:size; $id:i++) {
+             $id:place.data[$id:i] = $id:i;
+           }}|]
+compileExp place (Size e _) = do
+  dest <- new "size_value"
+  et <- typeToCType $ expType e
+  e' <- compileExp dest e
+  return [C.cstm|{$ty:et $id:dest; $stm:e' $id:place = $id:dest.dims[0];}|]
+compileExp place (Replicate ne ve _ _) = do
+  size <- new "replicate_size"
+  i <- new "replicate_i"
+  v <- new "replicate_v"
+  ne' <- compileExp size ne
+  ve' <- compileExp v ve
+  vt <- typeToCType $ expType ve
+  let alloc = allocArray place [[C.cexp|$id:size|]] vt
+  return [C.cstm|{
+           int $id:size, $id:i;
+           $ty:vt $id:v;
+           $stm:ne'
+           $stm:ve'
+           $stm:alloc
+           $id:place.dims[0] = $id:size;
+           for ($id:i = 0; $id:i < $id:size; $id:i++) {
+             $id:place.data[$id:i] = $id:v;
+           }}|]
 compileExp place (Write e t _) = do
   e' <- compileExp place e
   let pr = case t of Int  _ -> [C.cstm|printf("%d", $id:place);|]
@@ -301,14 +335,6 @@ compileExp place (Read t _) = do
             Char _ -> return [C.cstm|scanf("%c", &$id:place);|]
             Real _ -> return [C.cstm|scanf("%f", &$id:place);|]
             _      -> return [C.cstm|{fprintf(stderr, "Cannot read that yet.\n"); exit(1);}|]
-compileExp place e =
-  return $ case expType e of
-             (Int _)  -> [C.cstm|$id:place = 0;|]
-             (Bool _) -> [C.cstm|$id:place = 0;|]
-             (Char _) -> [C.cstm|$id:place = 0;|]
-             (Real _) -> [C.cstm|$id:place = 0.0;|]
-             (Tuple _ _) -> [C.cstm|;|]
-             (Array _ _ _) -> [C.cstm|$id:place = 0;|]
 
 compilePattern :: TupIdent Type -> C.Exp -> CompilerM (C.Stm, [C.InitGroup])
 compilePattern pat vexp = runWriterT $ compilePattern' pat vexp
