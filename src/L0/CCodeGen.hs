@@ -304,7 +304,7 @@ compileExp place (Size e _) = do
   et <- typeToCType $ expType e
   e' <- compileExp dest e
   return [C.cstm|{$ty:et $id:dest; $stm:e' $id:place = $id:dest.dims[0];}|]
-compileExp place (Replicate ne ve _ _) = do
+compileExp place (Replicate ne ve _) = do
   size <- new "replicate_size"
   i <- new "replicate_i"
   v <- new "replicate_v"

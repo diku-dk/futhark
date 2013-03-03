@@ -234,12 +234,12 @@ evalExp (Size e pos) = do
     ArrayVal arr _ _ -> let (lower, upper) = bounds arr
                         in return $ IntVal (upper - lower + 1) pos
     _ -> bad $ TypeError pos "evalExp Size"
-evalExp (Replicate e1 e2 et pos) = do
+evalExp (Replicate e1 e2 pos) = do
   v1 <- evalExp e1
   v2 <- evalExp e2
   case v1 of
     IntVal x _
-      | x >= 0    -> return $ ArrayVal (listArray (0,x-1) $ repeat v2) et pos
+      | x >= 0    -> return $ ArrayVal (listArray (0,x-1) $ repeat v2) (valueType v2) pos
       | otherwise -> bad $ NegativeReplicate pos x
     _   -> bad $ TypeError pos "evalExp Replicate"
 evalExp (Reshape shapeexp arrexp _ outtype pos) = do
