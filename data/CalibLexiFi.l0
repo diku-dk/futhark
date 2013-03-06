@@ -86,8 +86,8 @@ rootFinding_Brent(int fid, [(real*real)] scalesbbi, real lb, real ub, real tol, 
      
     if(0.0 <= fa*fb) 
     then 
-        if(0.0 <= a) then ( 0.0, 0,  infinity() )
-                     else ( 0.0, 0, ~infinity() ) 
+        if(0.0 <= a) then ( 0.0, 0,  infinity() )  // root not bracketed above
+                     else ( 0.0, 0, ~infinity() )  // root not bracketed below
     else 
     let (fa, fb) = if( abs(fa) < abs(fb) ) then (fb, fa)
                                            else (fa, fb) in
@@ -213,22 +213,242 @@ fun int main_test_math() =
 ///// DATA MODULE
 ////////////////////////////////////////////////////////////////
 
+/////////////////////////////////////////////////////////////////////
+// FILTERED VERSION:
 // RESULT is of shape:
 // ((matrity_in_year*swap_frequency*swap_term_in_year) * volatility)
-//fun [( (int*int*int)*real )] getSwaptionQuotes() =
+//fun [( (real*real*real)*real )] getSwaptionQuotes() =
+//    {
+//        ( (1.0,  6.0, 1.0 ), 1.052   ), 
+//        ( (10.0, 6.0, 1.0 ), 0.2496  ),
+//        ( (30.0, 6.0, 1.0 ), 0.23465 ), 
+//        ( (1.0,  6.0, 10.0), 0.41765 ),
+//        ( (10.0, 6.0, 10.0), 0.2775  ),
+//        ( (30.0, 6.0, 10.0), 0.22    ),
+//        ( (1.0,  6.0, 25.0), 0.38115 ), 
+//        ( (10.0, 6.0, 25.0), 0.26055 ),
+//        ( (30.0, 6.0, 25.0), 0.1686  ),
+//        ( (30.0, 6.0, 30.0), 0.16355 )   
+//    }
+
+/////////////////////////////////////////////////////////////////////
+// RESULT is of shape:
+// ((matrity_in_year*swap_frequency*swap_term_in_year) * volatility)
 fun [( (real*real*real)*real )] getSwaptionQuotes() =
     {
-        ( (1.0,  6.0, 1.0 ), 1.052   ), 
-        ( (10.0, 6.0, 1.0 ), 0.2496  ),
-        ( (30.0, 6.0, 1.0 ), 0.23465 ), 
-        ( (1.0,  6.0, 10.0), 0.41765 ),
-        ( (10.0, 6.0, 10.0), 0.2775  ),
-        ( (30.0, 6.0, 10.0), 0.22    ),
-        ( (1.0,  6.0, 25.0), 0.38115 ), 
-        ( (10.0, 6.0, 25.0), 0.26055 ),
-        ( (30.0, 6.0, 25.0), 0.1686  ),
-        ( (30.0, 6.0, 30.0), 0.16355 )   
+        ((1.0, 6.0, 1.0), 1.052),
+        ((2.0, 6.0, 1.0), 0.81485),
+        ((3.0, 6.0, 1.0), 0.6165),
+        ((4.0, 6.0, 1.0), 0.46995),
+        ((5.0, 6.0, 1.0), 0.38295),
+        ((6.0, 6.0, 1.0), 0.3325),
+        ((7.0, 6.0, 1.0), 0.3016),
+        ((8.0, 6.0, 1.0), 0.2815),
+        ((9.0, 6.0, 1.0), 0.26435),
+        ((10.0,6.0, 1.0), 0.2496),
+        ((15.0,6.0, 1.0), 0.2516),
+        ((20.0,6.0, 1.0), 0.28835),
+        ((25.0,6.0, 1.0), 0.27155),
+        ((30.0,6.0, 1.0), 0.23465),
+
+        ((1.0, 6.0, 2.0), 0.61445),
+        ((2.0, 6.0, 2.0), 0.54805),
+        ((3.0, 6.0, 2.0), 0.46795),
+        ((4.0, 6.0, 2.0), 0.3919),
+        ((5.0, 6.0, 2.0), 0.3434),
+        ((6.0, 6.0, 2.0), 0.3083),
+        ((7.0, 6.0, 2.0), 0.28655),
+        ((8.0, 6.0, 2.0), 0.2697),
+        ((9.0, 6.0, 2.0), 0.25775),
+        ((10.0,6.0, 2.0), 0.2443),
+        ((15.0,6.0, 2.0), 0.26495),
+        ((20.0,6.0, 2.0), 0.28195),
+        ((25.0,6.0, 2.0), 0.26845),
+        ((30.0,6.0, 2.0), 0.20995),
+
+        ((1.0, 6.0, 3.0), 0.5835),
+        ((2.0, 6.0, 3.0), 0.49255),
+        ((3.0, 6.0, 3.0), 0.42825),
+        ((4.0, 6.0, 3.0), 0.3695),
+        ((5.0, 6.0, 3.0), 0.329),
+        ((6.0, 6.0, 3.0), 0.3022),
+        ((7.0, 6.0, 3.0), 0.28165),
+        ((8.0, 6.0, 3.0), 0.26615),
+        ((9.0, 6.0, 3.0), 0.25485),
+        ((10.0,6.0, 3.0), 0.24375),
+        ((15.0,6.0, 3.0), 0.2718),
+        ((20.0,6.0, 3.0), 0.28135),
+        ((25.0,6.0, 3.0), 0.26865),
+        ((30.0,6.0, 3.0), 0.2131),
+
+        ((1.0, 6.0, 4.0), 0.5415),
+        ((2.0, 6.0, 4.0), 0.46235),
+        ((3.0, 6.0, 4.0), 0.403),
+        ((4.0, 6.0, 4.0), 0.3559),
+        ((5.0, 6.0, 4.0), 0.3232),
+        ((6.0, 6.0, 4.0), 0.29675),
+        ((7.0, 6.0, 4.0), 0.27715),
+        ((8.0, 6.0, 4.0), 0.26385),
+        ((9.0, 6.0, 4.0), 0.254),
+        ((10.0,6.0, 4.0), 0.2454),
+        ((15.0,6.0, 4.0), 0.27845),
+        ((20.0,6.0, 4.0), 0.2821),
+        ((25.0,6.0, 4.0), 0.2678),
+        ((30.0,6.0, 4.0), 0.2131),
+
+        ((1.0, 6.0, 5.0), 0.517),
+        ((2.0, 6.0, 5.0), 0.446),
+        ((3.0, 6.0, 5.0), 0.3903),
+        ((4.0, 6.0, 5.0), 0.34755),
+        ((5.0, 6.0, 5.0), 0.3166),
+        ((6.0, 6.0, 5.0), 0.29305),
+        ((7.0, 6.0, 5.0), 0.2745),
+        ((8.0, 6.0, 5.0), 0.2639),
+        ((9.0, 6.0, 5.0), 0.2534),
+        ((10.0, 6.0, 5.0), 0.2499),
+        ((15.0, 6.0, 5.0), 0.28315),
+        ((20.0, 6.0, 5.0), 0.2825),
+        ((25.0, 6.0, 5.0), 0.277),
+        ((30.0, 6.0, 5.0), 0.21175),
+
+        ((1.0, 6.0, 6.0), 0.478),
+        ((2.0, 6.0, 6.0), 0.42105),
+        ((3.0, 6.0, 6.0), 0.37715),
+        ((4.0, 6.0, 6.0), 0.3378),
+        ((5.0, 6.0, 6.0), 0.311),
+        ((6.0, 6.0, 6.0), 0.2895),
+        ((7.0, 6.0, 6.0), 0.2745),
+        ((8.0, 6.0, 6.0), 0.264),
+        ((9.0, 6.0, 6.0), 0.2573),
+        ((10.0, 6.0, 6.0), 0.25475),
+        ((15.0, 6.0, 6.0), 0.28815),
+        ((20.0, 6.0, 6.0), 0.28195),
+        ((25.0, 6.0, 6.0), 0.26015),
+        ((30.0, 6.0, 6.0), 0.2097),
+
+        ((1.0, 6.0, 7.0), 0.452),
+        ((2.0, 6.0, 7.0), 0.4074),
+        ((3.0, 6.0, 7.0), 0.368),
+        ((4.0, 6.0, 7.0), 0.3307),
+        ((5.0, 6.0, 7.0), 0.30645),
+        ((6.0, 6.0, 7.0), 0.2877),
+        ((7.0, 6.0, 7.0), 0.27475),
+        ((8.0, 6.0, 7.0), 0.2664),
+        ((9.0, 6.0, 7.0), 0.26155),
+        ((10.0, 6.0, 7.0), 0.26035),
+        ((15.0, 6.0, 7.0), 0.292),
+        ((20.0, 6.0, 7.0), 0.2825),
+        ((25.0, 6.0, 7.0), 0.25685),
+        ((30.0, 6.0, 7.0), 0.2081),
+
+        ((1.0, 6.0, 8.0), 0.43395),
+        ((2.0, 6.0, 8.0), 0.39445),
+        ((3.0, 6.0, 8.0), 0.35885),
+        ((4.0, 6.0, 8.0), 0.3281),
+        ((5.0, 6.0, 8.0), 0.30395),
+        ((6.0, 6.0, 8.0), 0.28745),
+        ((7.0, 6.0, 8.0), 0.2767),
+        ((8.0, 6.0, 8.0), 0.27065),
+        ((9.0, 6.0, 8.0), 0.26625),
+        ((10.0, 6.0, 8.0), 0.26625),
+        ((15.0, 6.0, 8.0), 0.2921),
+        ((20.0, 6.0, 8.0), 0.2814),
+        ((25.0, 6.0, 8.0), 0.25265),
+        ((30.0, 6.0, 8.0), 0.2083),
+
+        ((1.0, 6.0, 9.0), 0.42285),
+        ((2.0, 6.0, 9.0), 0.3857),
+        ((3.0, 6.0, 9.0), 0.3521),
+        ((4.0, 6.0, 9.0), 0.3239),
+        ((5.0, 6.0, 9.0), 0.30285),
+        ((6.0, 6.0, 9.0), 0.2895),
+        ((7.0, 6.0, 9.0), 0.2799),
+        ((8.0, 6.0, 9.0), 0.27485),
+        ((9.0, 6.0, 9.0), 0.2712),
+        ((10.0, 6.0, 9.0), 0.27205),
+        ((15.0, 6.0, 9.0), 0.29205),
+        ((20.0, 6.0, 9.0), 0.27855),
+        ((25.0, 6.0, 9.0), 0.24945),
+        ((30.0, 6.0, 9.0), 0.219),
+
+        ((1.0, 6.0, 10.0), 0.41765),
+        ((2.0, 6.0, 10.0), 0.38095),
+        ((3.0, 6.0, 10.0), 0.34795),
+        ((4.0, 6.0, 10.0), 0.3217),
+        ((5.0, 6.0, 10.0), 0.30365),
+        ((6.0, 6.0, 10.0), 0.2916),
+        ((7.0, 6.0, 10.0), 0.2842),
+        ((8.0, 6.0, 10.0), 0.27985),
+        ((9.0, 6.0, 10.0), 0.2769),
+        ((10.0, 6.0, 10.0), 0.2775),
+        ((15.0, 6.0, 10.0), 0.306),
+        ((20.0, 6.0, 10.0), 0.2763),
+        ((25.0, 6.0, 10.0), 0.2458),
+        ((30.0, 6.0, 10.0), 0.22),
+
+        ((1.0, 6.0, 15.0), 0.37905),
+        ((2.0, 6.0, 15.0), 0.35465),
+        ((3.0, 6.0, 15.0), 0.33505),
+        ((4.0, 6.0, 15.0), 0.31725),
+        ((5.0, 6.0, 15.0), 0.3008),
+        ((6.0, 6.0, 15.0), 0.29075),
+        ((7.0, 6.0, 15.0), 0.28365),
+        ((8.0, 6.0, 15.0), 0.2787),
+        ((9.0, 6.0, 15.0), 0.27385),
+        ((10.0, 6.0, 15.0), 0.2709),
+        ((15.0, 6.0, 15.0), 0.2689),
+        ((20.0, 6.0, 15.0), 0.24225),
+        ((25.0, 6.0, 15.0), 0.2096),
+        ((30.0, 6.0, 15.0), 0.18285),
+
+        ((1.0, 6.0, 20.0), 0.37975),
+        ((2.0, 6.0, 20.0), 0.3605),
+        ((3.0, 6.0, 20.0), 0.3407),
+        ((4.0, 6.0, 20.0), 0.321),
+        ((5.0, 6.0, 20.0), 0.3063),
+        ((6.0, 6.0, 20.0), 0.29315),
+        ((7.0, 6.0, 20.0), 0.28395),
+        ((8.0, 6.0, 20.0), 0.2777),
+        ((9.0, 6.0, 20.0), 0.27205),
+        ((10.0, 6.0, 20.0), 0.26675),
+        ((15.0, 6.0, 20.0), 0.24875),
+        ((20.0, 6.0, 20.0), 0.21735),
+        ((25.0, 6.0, 20.0), 0.1939),
+        ((30.0, 6.0, 20.0), 0.17205),
+
+        ((1.0, 6.0, 25.0), 0.38115),
+        ((2.0, 6.0, 25.0), 0.3627),
+        ((3.0, 6.0, 25.0), 0.34425),
+        ((4.0, 6.0, 25.0), 0.3222),
+        ((5.0, 6.0, 25.0), 0.3084),
+        ((6.0, 6.0, 25.0), 0.2941),
+        ((7.0, 6.0, 25.0), 0.28285),
+        ((8.0, 6.0, 25.0), 0.2751),
+        ((9.0, 6.0, 25.0), 0.2663),
+        ((10.0, 6.0, 25.0), 0.26055),
+        ((15.0, 6.0, 25.0), 0.2338),
+        ((20.0, 6.0, 25.0), 0.20735),
+        ((25.0, 6.0, 25.0), 0.1823),
+        ((30.0, 6.0, 25.0), 0.1686),
+
+        ((1.0, 6.0, 30.0), 0.38285),
+        ((2.0, 6.0, 30.0), 0.3633),
+        ((3.0, 6.0, 30.0), 0.34125),
+        ((4.0, 6.0, 30.0), 0.3188),
+        ((5.0, 6.0, 30.0), 0.30305),
+        ((6.0, 6.0, 30.0), 0.2888),
+        ((7.0, 6.0, 30.0), 0.2748),
+        ((8.0, 6.0, 30.0), 0.26725),
+        ((9.0, 6.0, 30.0), 0.25985),
+        ((10.0, 6.0, 30.0), 0.25165),
+        ((15.0, 6.0, 30.0), 0.2267),
+        ((20.0, 6.0, 30.0), 0.1989),
+        ((25.0, 6.0, 30.0), 0.18115),
+        ((30.0, 6.0, 30.0), 0.16355)
     }
+
+
+
 
 ////////////////////////////////////////////////////////////////
 ///// G2PP Module
@@ -480,9 +700,9 @@ fun int main_g2pp_header() =
     let black_price_res = black_price(today(), swaption, vol) * 10000.0 in
 
     let tmp = write("\n\nTesting Black Price: ") in
-    let tmp =   if( equal(black_price_res, 654.142965) )
+    let tmp =   if( equal(black_price_res, 654.1429648454) )
                 then write(" SUCCESS! ") 
-                else write(" fails! ") in
+                else write(" FAILS! ") in
     let tmp = write(black_price_res)   in
     let tmp = write("\n\n")            in
 
@@ -619,9 +839,9 @@ pricer_of_swaption( real                       today,
                         let h1  = ( (yhat_x - muy) / sigmay_rhoxycs ) - t2*( x - mux ) in
 
                         let tmps= map(  fn real ( (real*real*real) bbit1cstscale ) => 
-                                            let (bbi, t1_cst, scale) = bbit1cstscale in
-                                            let h2 = h1 + bbi * sigmay_rhoxycs in
-                                                t1_cst * exp(scale*x) * uGaussian_P(~h2)
+                                            let (bbii, t1_csti, scalei) = bbit1cstscale in
+                                            let h2 = h1 + bbii * sigmay_rhoxycs in
+                                                t1_csti * exp(scalei*x) * uGaussian_P(~h2)
                                         , zip(bbi, t1_cst, scale)
                                      ) in
                         let accum = reduce(op +, 0.0, tmps) in
@@ -629,8 +849,6 @@ pricer_of_swaption( real                       today,
                         ///////////////////////////////////////////
                         // END   function integrand(x) inlined 
                         ///////////////////////////////////////////
-//                        in let tmp = write(" ( ") in let tmp = write(t1) in let tmp = write(" ") 
-//                        in let tmp = write(accum) in let tmp = write(" ) ") 
 
                         in w_quad * integrand_res
 
@@ -698,7 +916,6 @@ fun real exactYhat( int n_schedi,
               // since if the previous `ups' is in a map-reduce pattern!
               let scales  = map(  fn real ( (real*real) baiaici) =>
                                     let (bai,aici) = baiaici in
-                                    let baix       = bai * x in
                                             aici * exp( ~bai * x )
                                   , zip(bai, aici)
                                )        in
@@ -708,9 +925,15 @@ fun real exactYhat( int n_schedi,
               let (root, iteration, error) = 
                     rootFinding_Brent(1, zip(scales, bbi), root_lb, root_ub, 1.0e~4, 1000) in
                 
-              if(  iteration < 1000 ) then root
-              else if( error < 0.0  ) then y0 - 1.0
-                                      else y1 + 1.0 
+              if      ( error = ~infinity() ) then y0 - 1.0
+              else if ( error =  infinity() ) then y1 + 1.0
+              else                                 root 
+
+////////////////////////////////////////////////////////////////
+//              // WRONG: caused serious bugs...
+//              if(  iteration < 1000 ) then root
+//              else if( error < 0.0  ) then y0 - 1.0
+//                                      else y1 + 1.0 
 
 
 //////////////////////////////////////////////////////
@@ -736,7 +959,7 @@ fun int main_pricer_of_swaption() =
     let price1   = 1.0e4*pricer_of_swaption(today(), swaption, genome) in
     
     let tmp = write("Pricer_of_swaption test: ") in
-    let tmp =   if( equal(price1, 657.822) )
+    let tmp =   if( equal(price1, 657.82158867845) )
                 then write(" SUCCESS! ") 
                 else let tmp = write(" FAILS! should be: ") in let tmp = write(657.822) in write(" is ") in
     let tmp = write(price1)    in
@@ -749,7 +972,7 @@ fun int main_pricer_of_swaption() =
     let price2   = 1.0e4*pricer_of_swaption(today(), swaption, genome) in
 
     let tmp = write("Pricer_of_swaption test: ") in
-    let tmp =   if( equal(price2, 1902.976) )
+    let tmp =   if( equal(price2, 1902.97628191498) )
                 then write(" SUCCESS! ") 
                 else let tmp = write(" FAILS! should be: ") in let tmp = write(1902.976) in write(" is ") in
     let tmp = write(price2)    in
@@ -762,9 +985,9 @@ fun int main_pricer_of_swaption() =
     let price3   = 1.0e4*pricer_of_swaption(today(), swaption, genome) in
 
     let tmp = write("Pricer_of_swaption test: ") in
-    let tmp =   if( equal(price3, 1840.76) )
+    let tmp =   if( equal(price3, 1840.859126408099) )
                 then write(" SUCCESS! ") 
-                else let tmp = write(" FAILS! should be: ") in let tmp = write(1840.76) in write(" is ") in
+                else let tmp = write(" FAILS! should be: ") in let tmp = write(1840.859126408099) in write(" is ") in
     let tmp = write(price3)    in
     let tmp = write("\n\n")    in
 
@@ -800,7 +1023,7 @@ fun int main_pricer_of_swaption() =
 //////////////////////////////////////////////////////
 
 
-fun int main() = //_applic() = 
+fun int main() =   //_applic() = 
     let genome = (0.02453, 0.98376, ~0.82400, 0.11830, 0.02398) in 
     let prices = map( fn real ( ((real*real*real) * real) swapquote ) =>
                         let (swaption, quote) = swapquote                                in
@@ -809,11 +1032,11 @@ fun int main() = //_applic() =
 
                         // printing
                         let (mat_year, swap_freq, term_year) = swaption              in
-                        let tmp = write("\n")                                        in
-                        let tmp = write(trunc( mat_year)) in let tmp = write("Y")    in
-                        let tmp = write(trunc(term_year)) in let tmp = write("Y")    in
-                        let tmp = write(" Swaption Calibrated Price: ") in let tmp = write(10000.0*g2pp_price) in
-                        let tmp = write(" Market Price: ") in let tmp = write(10000.0*market_price) in
+//                        let tmp = write("\n")                                        in
+//                        let tmp = write(trunc( mat_year)) in let tmp = write("Y")    in
+//                        let tmp = write(trunc(term_year)) in let tmp = write("Y")    in
+//                        let tmp = write(" Swaption Calibrated Price: ") in let tmp = write(10000.0*g2pp_price) in
+//                        let tmp = write(" Market Price: ") in let tmp = write(10000.0*market_price) in
                                 
                                 //(g2pp_price, market_price)
                         let res = (g2pp_price - market_price) / market_price
@@ -940,7 +1163,7 @@ fun real max_date () = 168307199.0
 fun real min_date () = 3600.0
 
 // Date.of_string("2012-01-01")
-fun real today    () = toReal( date_of_gregorian( (2012, 1, 1, 0, 0) ) )
+fun real today    () = toReal( date_of_gregorian( (2012, 1, 1, 12, 0) ) )
 
 
 ////// Previous, approximate implementation ////////
@@ -960,6 +1183,7 @@ fun real today    () = toReal( date_of_gregorian( (2012, 1, 1, 0, 0) ) )
 //assert "%.6f" % days_between(max_date,min_date) == "116877.499306"
 //assert "%.6f" % act_365(max_date,min_date) == "320.212327"
 fun int main_dates() = 
+    let tmp = write("Today: ") in let tmp = write(trunc(today())) in let tmp = write("\n") in
     let tmp = write("add_months(min_date,1)==48240")            in
     let tmp = add_months(min_date(), 1.0)                       in
     let bbb = if( equal(tmp, 48240.0) ) then write("SUCCESS ")
