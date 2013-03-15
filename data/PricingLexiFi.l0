@@ -238,7 +238,9 @@ fun real main() =
 
     let payoffs   = map ( payoff2(md_disc), bs_mat ) in
     let payoff    = reduce ( op +, 0.0, payoffs )       in
-            payoff / toReal(num_mc_it)
+    let result = write(payoff / toReal(num_mc_it)) in
+    let nl = write('\n') in
+    result
 
 ////////////////////////////////////////
 // PAYOFF FUNCTION
