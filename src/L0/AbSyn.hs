@@ -13,6 +13,7 @@ module L0.AbSyn
   , baseType
   , basicType
   , arrayType
+  , stripArray
   , blankValue
   , Value(..)
   , valueType
@@ -116,6 +117,14 @@ basicType _ = True
 arrayType :: Int -> Type -> Type
 arrayType 0 t = t
 arrayType n t = arrayType (n-1) $ Array t Nothing (srclocOf t)
+
+-- | @stripArray n t@ removes the @n@ outermost layers of the array.
+-- Essentially, it is the type of indexing an array of type @t@ with
+-- @n@ indexes.
+stripArray :: Int -> Type -> Type
+stripArray 0 t = t
+stripArray n (Array t _ _) = stripArray (n-1) t
+stripArray _ t = t
 
 -- | A "blank" value of the given type - this is zero, or whatever is
 -- close to it.  Don't depend on this value, but use it for creating

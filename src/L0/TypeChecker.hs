@@ -372,13 +372,10 @@ checkExp (Index ident idxes intype restype pos) = do
     bad $ TypeError pos $ show (length idxes) ++ " indices given, but type of variable " ++ identName ident' ++ " has " ++ show (arrayDims vt) ++ " dimensions."
   vet <- elemType vt
   intype' <- intype `unifyWithKnown` vet
-  restype' <- restype `unifyWithKnown` strip (length idxes) vt
+  restype' <- restype `unifyWithKnown` stripArray (length idxes) vt
   (_, idxes') <- unzip <$> mapM (require [Int pos] <=< checkSubExp) idxes
   tell $ TypeAcc (S.singleton $ identName ident') S.empty
   return (restype', Index ident' idxes' intype' restype' pos)
-  where strip 0 t = t
-        strip n (Array t _ _) = strip (n-1) t
-        strip _ t = t
 checkExp (Iota e pos) = do
   (_, e') <- require [Int pos] =<< checkSubExp e
   return (Array (Int pos) Nothing pos, Iota e' pos)
