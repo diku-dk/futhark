@@ -197,6 +197,38 @@ transformExp (Zip ((e,t):es) loc) = do
         (b, _) <- newVar "zip_b" $ identType vname
         return $ LetPat (TupId [Id a, Id b] loc) (Split sizev (Var vname) et loc) av loc
   lete . letsizs . (`TupLit` loc) <$> zipWithM split ets (name:names)
+transformExp (Split nexp arrexp eltype loc) = do
+  nexp' <- transformExp nexp
+  arrexp' <- transformExp arrexp
+  case expType arrexp' of
+    Tuple ets _ -> do
+      (n, nv) <- newVar "split_n" $ expType nexp'
+      names <- map fst <$> mapM (newVar "split_tup") ets
+      partnames <- forM ets $ \et -> do
+                     a <- fst <$> newVar "split_a" et
+                     b <- fst <$> newVar "split_b" et
+                     return (a, b)
+      let letn body = LetPat (Id n) nexp' body loc
+          letarr body = LetPat (TupId (map Id names) loc) arrexp' body loc
+          combsplit olde (arr, (a,b), et) inner =
+            olde $ LetPat (TupId [Id a, Id b] loc) (Split nv (Var arr) et loc) inner loc
+          letsplits = foldl combsplit id $ zip3 names partnames ets
+          res = TupLit [TupLit (map (Var . fst) partnames) loc,
+                        TupLit (map (Var . snd) partnames) loc] loc
+      return $ letn $ letarr $ letsplits res
+    _ -> return $ Split nexp' arrexp' (transformType eltype) loc
+transformExp (Concat x y eltype loc) = do
+  x' <- transformExp x
+  y' <- transformExp y
+  case transformType eltype of -- Both x and y have same type.
+    Tuple ets _ -> do
+      xnames <- map fst <$> mapM (newVar "concat_tup_x") ets
+      ynames <- map fst <$> mapM (newVar "concat_tup_y") ets
+      let letx body = LetPat (TupId (map Id xnames) loc) x' body loc
+          lety body = LetPat (TupId (map Id ynames) loc) y' body loc
+          conc et (xarr, yarr) = Concat (Var xarr) (Var yarr) et loc
+      return $ letx $ lety $ TupLit (zipWith conc ets $ zip xnames ynames) loc
+    eltype' -> return $ Concat x' y' eltype' loc
 transformExp e = gmapM (mkM transformExp
                        `extM` (return . transformType)
                        `extM` mapM transformExp
