@@ -490,8 +490,6 @@ checkExp (Concat arr1exp arr2exp intype pos) = do
 checkExp (Copy e pos) = do
   ((t, e'), _) <- collectSrcMergeVars $ checkExp e
   return (t, Copy e' pos)
-checkExp (New t pos) =
-  return (t, New t pos)
 checkExp (Read t pos) =
   return (t, Read t pos)
 checkExp (Write e t pos) = do
