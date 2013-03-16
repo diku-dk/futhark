@@ -287,7 +287,7 @@ data Exp ty = Literal Value
 
             | Concat (Exp ty) (Exp ty) ty SrcLoc
              -- concat ({1},{2, 3, 4}) = {1, 2, 3, 4} *)
-             -- 3rd arg is the type of the input array*)
+             -- 3rd arg is the element type of the input array*)
 
             | Copy (Exp ty) SrcLoc
             -- Copy the value return by the expression.  This only
@@ -373,8 +373,8 @@ expType (Scan fun _ _ _ _) = arrayType 1 $ lambdaType fun
 expType (Filter _ _ t loc) = Array t Nothing loc
 expType (Mapall fun e _ _ _) = arrayType (arrayDims $ expType e) $ lambdaType fun
 expType (Redomap _ _ _ _ _ t loc) = Array t Nothing loc
-expType (Split _ _ t pos) = Tuple [Array t Nothing pos, Array t Nothing pos] pos
-expType (Concat _ _ t _) = t
+expType (Split _ _ t pos) = Tuple [Array t Nothing pos, Array t Nothing pos] $ srclocOf t
+expType (Concat _ _ t _) = Array t Nothing $ srclocOf t
 expType (Copy e _) = expType e
 expType (New t _) = t
 expType (Read t _) = boxType t

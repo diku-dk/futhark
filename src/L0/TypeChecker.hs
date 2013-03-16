@@ -481,11 +481,12 @@ checkExp (Split splitexp arrexp intype pos) = do
   et <- elemType arrt
   intype' <- intype `unifyWithKnown` et
   return (Tuple [arrt, arrt] pos, Split splitexp' arrexp' intype' pos)
-checkExp (Concat arr1exp arr2exp inarr pos) = do
+checkExp (Concat arr1exp arr2exp intype pos) = do
   (arr1t, arr1exp') <- checkSubExp arr1exp
   (arrt, arr2exp') <- require [arr1t] =<< checkSubExp arr2exp
-  inarr' <- inarr `unifyWithKnown` arrt
-  return (inarr', Concat arr1exp' arr2exp' inarr' pos)
+  et <- elemType arrt
+  intype' <- intype `unifyWithKnown` et
+  return (arrt, Concat arr1exp' arr2exp' intype' pos)
 checkExp (Copy e pos) = do
   ((t, e'), _) <- collectSrcMergeVars $ checkExp e
   return (t, Copy e' pos)
