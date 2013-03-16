@@ -43,7 +43,7 @@ transformExp (Map fun e intype outtype loc)
   (i, iv) <- newVar "i" (Int loc) loc
   (_, nv, nlet) <- newLet (Size inarrv loc) "n"
   funcall <- transformLambda fun [Index inarr [iv] intype intype loc]
-  (outarr, outarrv, outarrlet) <- newLet (Replicate nv (New outtype loc) loc) "outarr"
+  (outarr, outarrv, outarrlet) <- newLet (Replicate nv (Literal $ blankValue outtype) loc) "outarr"
   let letbody = DoLoop i nv loopbody [outarr] loc
       loopbody = LetWith outarr outarrv [iv] funcall outarrv loc
   return $ inarrlet $ nlet $ outarrlet letbody
@@ -81,7 +81,7 @@ transformExp (Filter fun arrexp elty loc) = do
       indexiaend = indexia (BinOp Minus nv (intval 1) int loc)
       indexi = indexia iv
       indexim1 = indexia (BinOp Minus iv (intval 1) int loc)
-  (res, resv, reslet) <- newLet (Replicate indexiaend (New elty loc) loc) "res"
+  (res, resv, reslet) <- newLet (Replicate indexiaend (Literal $ blankValue elty) loc) "res"
   let loop = DoLoop i nv loopbody [res] loc
       loopbody = If (Or (BinOp Equal iv (intval 0) bool loc)
                         (And (BinOp Less (intval 0) iv bool loc)

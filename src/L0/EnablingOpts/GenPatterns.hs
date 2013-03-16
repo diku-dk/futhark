@@ -22,7 +22,6 @@ foldlPattern _ _ ne (Read _ _)    = ne
 foldlPattern _ _ ne (Literal _)   = ne
 foldlPattern _ _ ne (Var     _)   = ne
 foldlPattern f _ ne (Write e _ _) = f ne e
-foldlPattern _ _ ne (New _ _)    = ne
 foldlPattern f _ ne (Negate e _ _)= f ne e
 foldlPattern f _ ne (Not    e _  )= f ne e
 foldlPattern f _ ne (Copy   e _  )= f ne e
