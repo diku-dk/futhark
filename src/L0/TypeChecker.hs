@@ -412,7 +412,7 @@ checkExp (Map fun arrexp intype outtype pos) = do
       intype' <- intype `unifyWithKnown` et
       outtype' <- outtype `unifyWithKnown` funret
       return (Array outtype' e pos, Map fun' arrexp' intype' outtype' pos)
-    _       -> bad $ TypeError (srclocOf arrexp) "Expression does not return an array."
+    _       -> bad $ TypeError (srclocOf arrexp) "Mapee expression does not return an array."
 checkExp (Reduce fun startexp arrexp intype pos) = do
   (acct, startexp') <- checkSubExp startexp
   (arrt, arrexp') <- checkSubExp arrexp
