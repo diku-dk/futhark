@@ -71,5 +71,4 @@ data Token = IF
            | OP
            | EMPTY
            | COPY
-           | NEW
              deriving (Show, Eq)

@@ -372,13 +372,10 @@ checkExp (Index ident idxes intype restype pos) = do
     bad $ TypeError pos $ show (length idxes) ++ " indices given, but type of variable " ++ identName ident' ++ " has " ++ show (arrayDims vt) ++ " dimensions."
   vet <- elemType vt
   intype' <- intype `unifyWithKnown` vet
-  restype' <- restype `unifyWithKnown` strip (length idxes) vt
+  restype' <- restype `unifyWithKnown` stripArray (length idxes) vt
   (_, idxes') <- unzip <$> mapM (require [Int pos] <=< checkSubExp) idxes
   tell $ TypeAcc (S.singleton $ identName ident') S.empty
   return (restype', Index ident' idxes' intype' restype' pos)
-  where strip 0 t = t
-        strip n (Array t _ _) = strip (n-1) t
-        strip _ t = t
 checkExp (Iota e pos) = do
   (_, e') <- require [Int pos] =<< checkSubExp e
   return (Array (Int pos) Nothing pos, Iota e' pos)
@@ -415,7 +412,7 @@ checkExp (Map fun arrexp intype outtype pos) = do
       intype' <- intype `unifyWithKnown` et
       outtype' <- outtype `unifyWithKnown` funret
       return (Array outtype' e pos, Map fun' arrexp' intype' outtype' pos)
-    _       -> bad $ TypeError (srclocOf arrexp) "Expression does not return an array."
+    _       -> bad $ TypeError (srclocOf arrexp) "Mapee expression does not return an array."
 checkExp (Reduce fun startexp arrexp intype pos) = do
   (acct, startexp') <- checkSubExp startexp
   (arrt, arrexp') <- checkSubExp arrexp
@@ -484,16 +481,15 @@ checkExp (Split splitexp arrexp intype pos) = do
   et <- elemType arrt
   intype' <- intype `unifyWithKnown` et
   return (Tuple [arrt, arrt] pos, Split splitexp' arrexp' intype' pos)
-checkExp (Concat arr1exp arr2exp inarr pos) = do
+checkExp (Concat arr1exp arr2exp intype pos) = do
   (arr1t, arr1exp') <- checkSubExp arr1exp
   (arrt, arr2exp') <- require [arr1t] =<< checkSubExp arr2exp
-  inarr' <- inarr `unifyWithKnown` arrt
-  return (inarr', Concat arr1exp' arr2exp' inarr' pos)
+  et <- elemType arrt
+  intype' <- intype `unifyWithKnown` et
+  return (arrt, Concat arr1exp' arr2exp' intype' pos)
 checkExp (Copy e pos) = do
   ((t, e'), _) <- collectSrcMergeVars $ checkExp e
   return (t, Copy e' pos)
-checkExp (New t pos) =
-  return (t, New t pos)
 checkExp (Read t pos) =
   return (t, Read t pos)
 checkExp (Write e t pos) = do
