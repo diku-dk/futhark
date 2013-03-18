@@ -7,7 +7,7 @@ import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Reader
 
-import Data.Array
+import qualified Data.Array as A
 import Data.Data
 import Data.Generics
 import Data.List
@@ -60,10 +60,12 @@ transformType t = t -- All other types are fine.
 transformValue :: Value -> Value
 transformValue (ArrayVal arr et loc) =
   case transformType et of
-    Tuple ets _ -> TupVal (zipWith asarray ets $ transpose arrayvalues) loc
+    Tuple ets _
+      | [] <- A.elems arr -> TupVal [ arrayVal [] et' loc | et' <- ets ] loc
+      | otherwise         ->  TupVal (zipWith asarray ets $ transpose arrayvalues) loc
     et'         -> ArrayVal arr et' loc
   where asarray t vs = transformValue $ arrayVal vs t loc
-        arrayvalues = map (tupleValues . transformValue) $ elems arr
+        arrayvalues = map (tupleValues . transformValue) $ A.elems arr
         tupleValues (TupVal vs _) = vs
         tupleValues _ = error "L0.TupleArrayTransform.transformValue: Element of tuple array is not tuple."
         -- Above should never happen in well-typed program.
@@ -94,6 +96,11 @@ transformExp (Var k) = do
 transformExp (TupLit es loc) = do
   es' <- mapM transformExp es
   return $ TupLit es' loc
+transformExp (ArrayLit [] intype loc) =
+  return $ case transformType intype of
+             Tuple ets _ ->
+               TupLit [ ArrayLit [] et loc | et <- ets ] loc
+             et' -> ArrayLit [] et' loc
 transformExp (ArrayLit es intype loc) = do
   es' <- mapM transformExp es
   case transformType intype of
