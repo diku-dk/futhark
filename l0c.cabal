@@ -18,9 +18,9 @@ Executable l0c
                  mtl >= 2.1,
                  either >= 3.0,
                  srcloc >= 0.4,
-                 syb >= 0.3
---                 language-c-quote >= 0.4,
---                 mainland-pretty >= 0.2.5,
+                 syb >= 0.3,
+                 language-c-quote >= 0.4,
+                 mainland-pretty >= 0.2.5
 
   Other-modules: L0.Parser.Parser,
                  L0.Parser.Lexer

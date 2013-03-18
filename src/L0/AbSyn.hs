@@ -13,6 +13,7 @@ module L0.AbSyn
   , baseType
   , basicType
   , arrayType
+  , stripArray
   , blankValue
   , Value(..)
   , valueType
@@ -116,6 +117,14 @@ basicType _ = True
 arrayType :: Int -> Type -> Type
 arrayType 0 t = t
 arrayType n t = arrayType (n-1) $ Array t Nothing (srclocOf t)
+
+-- | @stripArray n t@ removes the @n@ outermost layers of the array.
+-- Essentially, it is the type of indexing an array of type @t@ with
+-- @n@ indexes.
+stripArray :: Int -> Type -> Type
+stripArray 0 t = t
+stripArray n (Array t _ _) = stripArray (n-1) t
+stripArray _ t = t
 
 -- | A "blank" value of the given type - this is zero, or whatever is
 -- close to it.  Don't depend on this value, but use it for creating
@@ -278,16 +287,11 @@ data Exp ty = Literal Value
 
             | Concat (Exp ty) (Exp ty) ty SrcLoc
              -- concat ({1},{2, 3, 4}) = {1, 2, 3, 4} *)
-             -- 3rd arg is the type of the input array*)
+             -- 3rd arg is the element type of the input array*)
 
             | Copy (Exp ty) SrcLoc
             -- Copy the value return by the expression.  This only
             -- makes a difference in do-loops with merge variables.
-
-            | New Type SrcLoc
-            -- Return a new value of some well-defined initial value
-            -- (zero-ish).  This is sometimes useful for generated
-            -- code.
 
             -- IO
             | Read Type SrcLoc
@@ -330,7 +334,6 @@ instance Located (Exp ty) where
   locOf (Split _ _ _ pos) = locOf pos
   locOf (Concat _ _ _ pos) = locOf pos
   locOf (Copy _ pos) = locOf pos
-  locOf (New _ pos) = locOf pos
   locOf (Read _ pos) = locOf pos
   locOf (Write _ _ pos) = locOf pos
   locOf (DoLoop _ _ _ _ pos) = locOf pos
@@ -364,10 +367,9 @@ expType (Scan fun _ _ _ _) = arrayType 1 $ lambdaType fun
 expType (Filter _ _ t loc) = Array t Nothing loc
 expType (Mapall fun e _ _ _) = arrayType (arrayDims $ expType e) $ lambdaType fun
 expType (Redomap _ _ _ _ _ t loc) = Array t Nothing loc
-expType (Split _ _ t _) = t
-expType (Concat _ _ t _) = t
+expType (Split _ _ t pos) = Tuple [Array t Nothing pos, Array t Nothing pos] $ srclocOf t
+expType (Concat _ _ t _) = Array t Nothing $ srclocOf t
 expType (Copy e _) = expType e
-expType (New t _) = t
 expType (Read t _) = boxType t
 expType (Write _ t _) = t
 expType (DoLoop _ _ body _ _) = expType body
@@ -558,7 +560,6 @@ ppExp d (Redomap id1 id2 el a _ _ _)
 ppExp d (Split  idx arr _ _) = " split ( " ++ ppExp d idx ++ ", " ++ ppExp d arr ++ " ) "
 ppExp d (Concat a1  a2 _ _) = " concat ( " ++ ppExp d a1 ++ ", " ++ ppExp d a2 ++ " ) "
 ppExp d (Copy e _) = " copy ( " ++ ppExp d e ++ " ) "
-ppExp _ (New t _) = " new ( " ++ ppType t ++ " ) "
 
 ppExp _ (Read t _) = " read("  ++ ppType t  ++ ") "
 ppExp d (Write e _ _) = " write("  ++ ppExp d e  ++ ") "

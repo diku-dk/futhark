@@ -104,7 +104,6 @@ import L0.Parser.Lexer
       op              { L $$ OP }
       empty           { L $$ EMPTY }
       copy            { L $$ COPY }
-      new             { L $$ NEW }
 
 %nonassoc ifprec letprec
 %left '||'
@@ -256,8 +255,6 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal $ IntVal num pos 
                       { Redomap $3 $5 $7 $9 Nothing Nothing $1 }
 
      | copy '(' Exp ')' { Copy $3 $1 }
-
-     | new '(' Type ')' { New $3 $1 }
 
      | '(' Exp ')' { $2 }
 
