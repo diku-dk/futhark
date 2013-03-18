@@ -1,5 +1,5 @@
 {-# LANGUAGE QuasiQuotes, GeneralizedNewtypeDeriving #-}
-module L0.CCodeGen where
+module L0.CCodeGen (compileProg) where
 
 import Control.Applicative
 import Control.Monad.Identity
@@ -121,10 +121,6 @@ allocArray place shape basetype =
         shapeassign = zipWith assign shape [0..]
         assign :: C.Exp -> Int -> C.Stm
         assign n i = [C.cstm|$exp:place.dims[$int:i] = $exp:n;|]
-
--- | Return an expression giving the array size in elements.
-arraySizeExp :: C.Exp -> Type -> C.Exp
-arraySizeExp place t = arraySliceSizeExp place t 0
 
 -- | @arraySliceCopyStm to from t slice@ is a @memcpy()@ statement copying
 -- a slice of the array @from@ to the memory pointed at by @to@.
