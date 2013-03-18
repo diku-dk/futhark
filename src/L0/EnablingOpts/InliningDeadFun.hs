@@ -31,11 +31,13 @@ import L0.EnablingOpts.EnablingOptErrors
 ------------------------------------------------------------------------------
 ------------------------------------------------------------------------------
 
--- | The Call Graph is just a Map from function names, i.e., the caller,
--- to a list tuple: The first list contains (unique) function names that 
--- may be called directly from the current function, i.e., ``apply'' callees.  
--- The second list contains (unique) function names that may be called via SOACs.
-type CallGraph = M.Map String ([String],[String])
+-- | The Call Graph is just a Map from a function name, i.e., the caller,
+-- to a three-element tuple: The first element is a list that contains the 
+-- (unique) function names that may be called directly from the current function, 
+-- i.e., ``apply'' callees. The second element is a list that contains the (unique) 
+-- function names that may be called via SOACs. The third element is a boolean
+-- that specifies whether the current function, i.e., the caller, contains IO ops.
+type CallGraph = M.Map String ([String],[String],Bool)
 
 -- | The symbol table for functions
 data CGEnv tf = CGEnv {   
@@ -85,19 +87,46 @@ buildCGfun cg fname  = do
       then
         case M.lookup caller cg of
           Just _  -> return cg
-          Nothing -> do let callees@(fs, soacs) = buildCGexp ([],[]) body
+          Nothing -> do let callees@(fs, soacs, has_io_loc) = buildCGexp ([],[], False) body
+
+                        -- at this point caller is only known whether it has `local' IO. 
                         let cg' = M.insert caller callees cg
-                        foldM buildCGfun cg' (union fs soacs) 
+
+                        -- recursively build the callees
+                        let fs_soacs = union fs soacs
+                        cg'' <- foldM buildCGfun cg' fs_soacs
+
+                        -- if any of the callees have IO then the caller has IO
+                        callees_io  <-  mapM (\ fnm -> 
+                                                let res = M.lookup fnm cg''
+                                                in  case res of 
+                                                      Just (_,_,fnm_has_io) -> return fnm_has_io
+                                                      Nothing -> badCGM $ TypeError pos  (" in buildCGfun lookup for function " ++ 
+                                                                                          fnm ++ " not in call graph! Caller: " ++ caller)
+                                             ) fs_soacs
+                        let has_io_glob = foldl (||) False callees_io
+                        if( has_io_glob == has_io_loc ) 
+                        then return cg''
+                        else do return $ M.update (\ (x,y,_)->Just (x,y,has_io_glob) ) caller cg'' 
+                                            
       else  badCGM $ TypeError pos  (" in buildCGfun lookup for fundec of " ++ 
                                      fname ++ " resulted in " ++ caller)
+  where
+    
              
     
-buildCGexp :: TypeBox tf => ([String],[String]) -> Exp tf -> ([String],[String]) 
+buildCGexp :: TypeBox tf => ([String],[String],Bool) -> Exp tf -> ([String],[String],Bool) 
 
-buildCGexp callees@(fs, soacfs) (Apply fname args _ _)  =
+buildCGexp callees@(fs, soacfs, has_io) (Apply fname args _ _)  =
     if isBuiltInFun fname || elem fname fs
     then foldl buildCGexp callees args
-    else foldl buildCGexp (fname:fs, soacfs) args   
+    else foldl buildCGexp (fname:fs, soacfs, has_io) args   
+
+buildCGexp(fs, soacfs, _) (Read  _ _  ) = (fs, soacfs, True)
+buildCGexp callees        (Write e _ _) = 
+    let (fs', soacfs', _) = buildCGexp callees e
+    in  (fs', soacfs', True)
+
 
 buildCGexp callees e = 
     foldlPattern buildCGexp addLamFun callees e
@@ -105,11 +134,11 @@ buildCGexp callees e =
 isBuiltInFun :: String -> Bool
 isBuiltInFun fn = elem fn ["toReal", "trunc", "sqrt", "log", "exp"]
 
-addLamFun :: TypeBox tf => ([String],[String]) -> Lambda tf -> ([String],[String])
-addLamFun callees    (AnonymFun _ _ _ _) = callees
-addLamFun (fs,soacs) (CurryFun nm _ _ _) =
+addLamFun :: TypeBox tf => ([String],[String],Bool) -> Lambda tf -> ([String],[String],Bool)
+addLamFun callees           (AnonymFun _ _ _ _) = callees
+addLamFun (fs,soacs,has_io) (CurryFun nm _ _ _) =
     if isBuiltInFun nm || elem nm fs
-    then (fs,soacs) else (fs,nm:soacs)
+    then (fs,soacs,has_io) else (fs,nm:soacs,has_io)
 
 ------------------------------------------------------------------
 ------------------------------------------------------------------
@@ -179,8 +208,8 @@ aggInlining cg = do
          -- iterate to a fix point. At this point it is guaranteed
          -- that `work' is not empty, hence there are functions to
          -- be inlined in each caller function (from `work').
-    else do let cg'  = M.map ( \(callees,l) -> ( (\\) callees inlcand, l ) ) cg
-            let work'= map ( \(x,(y,_)) -> (x,y) ) work
+    else do let cg'  = M.map ( \(callees,l,has_io) -> ( (\\) callees inlcand, l,has_io ) ) cg
+            let work'= map ( \(x,(y,_,_)) -> (x,y) ) work
             newfuns  <- mapM processfun work'
             let newfunnms  = fst (unzip work')
             remBindingsFtab  newfunnms $ 
@@ -205,12 +234,12 @@ aggInlining cg = do
             
         getInlineOps :: [String] -> CallGraph -> CallGraph
         getInlineOps inlcand callgr = 
-            (  M.filter (\(callees,_) -> not (null callees))   . 
-               M.map ( \(callees,l) -> (intersect inlcand callees,l) )
+            (  M.filter (\(callees,_,_) -> not (null callees))   . 
+               M.map ( \(callees,l,hio) -> (intersect inlcand callees,l,hio) )
             )  callgr
 
-        funHasNoCalls :: ([String],[String]) -> Bool
-        funHasNoCalls (callees,_) = null callees 
+        funHasNoCalls :: ([String],[String],Bool) -> Bool
+        funHasNoCalls (callees,_,_) = null callees 
 
 
 -- | @doInlineInCaller caller inlcallees@ inlines in @calleer@ the functions
