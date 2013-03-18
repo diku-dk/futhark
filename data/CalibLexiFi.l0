@@ -1032,11 +1032,11 @@ fun int main() =   //_applic() =
 
                         // printing
                         let (mat_year, swap_freq, term_year) = swaption              in
-//                        let tmp = write("\n")                                        in
-//                        let tmp = write(trunc( mat_year)) in let tmp = write("Y")    in
-//                        let tmp = write(trunc(term_year)) in let tmp = write("Y")    in
-//                        let tmp = write(" Swaption Calibrated Price: ") in let tmp = write(10000.0*g2pp_price) in
-//                        let tmp = write(" Market Price: ") in let tmp = write(10000.0*market_price) in
+                        let tmp = write("\n")                                        in
+                        let tmp = write(trunc( mat_year)) in let tmp = write("Y")    in
+                        let tmp = write(trunc(term_year)) in let tmp = write("Y")    in
+                        let tmp = write(" Swaption Calibrated Price: ") in let tmp = write(10000.0*g2pp_price) in
+                        let tmp = write(" Market Price: ") in let tmp = write(10000.0*market_price) in
                                 
                                 //(g2pp_price, market_price)
                         let res = (g2pp_price - market_price) / market_price
