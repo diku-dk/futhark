@@ -73,12 +73,18 @@ testCosmin file = do
   case checkProg prog of
     Left err    -> error $ "Typechecking error:\n" ++ show err
     Right prog' -> do
-      let prog'' = renameProg prog'
-      case enablingOpts prog'' of
+      --let prog'' = renameProg prog'
+      case enablingOpts prog' of
         Left  err -> error $ "Enabling Optimization Error:\n" ++ show err
         Right prog2 -> do
           _   <- trace ("Opt Program: "++prettyPrint prog2++"\nResult:") (putStrLn "")
-          res <- runProgIO prog2
+
+          let prog3 = 
+                case checkProg prog of
+                  Left err    -> error $ "Typechecking error after enabling opts:\n" ++ show err
+                  Right prog3'-> prog3'
+
+          res <- runProgIO prog3
           case res of Left err -> error $ "Interpreter error:\n" ++ show err
                       Right v  -> putStrLn $ ppValue v -- ++ (prettyPrint prog')
 
