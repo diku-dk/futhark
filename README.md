@@ -6,6 +6,8 @@ The L-zero Language.
 Installation
 ==========
 
+You will need GHC 7.6 to compile `l0c`, due to a bug in GHC 7.4.
+
 Just run `cabal install` and an executable by the name of `l0c` will be
 installed in your Cabal bin directory, most likely $HOME/.cabal/bin.
 
