@@ -18,7 +18,7 @@ import L0.Interpreter
 import L0.EnablingOpts.EnablingOptDriver
 import qualified L0.FirstOrderTransform as FOT
 import qualified L0.TupleArrayTransform as TAT
--- import L0.CCodeGen
+import L0.CCodeGen
 
 type L0CM = ErrorT String (Writer String)
 
@@ -47,9 +47,9 @@ commandLineOptions =
   [ Option "V" ["verbose"]
     (NoArg $ \opts -> opts { l0verbose = True })
     "Display verbose output on standard error."
---  , Option "c" ["compile"]
---    (NoArg $ \opts -> opts { l0action = putStrLn . compileProg })
---    "Translate program into C and write it on standard output."
+  , Option "c" ["compile"]
+    (NoArg $ \opts -> opts { l0action = putStrLn . compileProg })
+    "Translate program into C and write it on standard output."
   , Option "p" ["print"]
     (NoArg $ \opts -> opts { l0action = putStrLn . prettyPrint })
     "Prettyprint the program on standard output (default action)."
