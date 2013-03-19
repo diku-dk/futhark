@@ -260,8 +260,7 @@ checkProg prog = do
                           ,("sqrt", (Real noLoc, [Real noLoc], noLoc))
                           ,("log", (Real noLoc, [Real noLoc], noLoc))
                           ,("exp", (Real noLoc, [Real noLoc], noLoc))
-                          ,("op not", (Bool noLoc, [Bool noLoc], noLoc))
-                          ,("op ~", (Real noLoc, [Real noLoc], noLoc))]
+                          ,("op not", (Bool noLoc, [Bool noLoc], noLoc))]
 
 checkFun :: TypeBox tf => FunDec tf -> TypeM (FunDec Type)
 checkFun (fname, rettype, args, body, pos) = do
@@ -616,10 +615,17 @@ checkLambda (AnonymFun params body ret pos) args = do
               tuplet = LetPat (TupId (map Id params) pos) (Var tupparam) body' pos
           in checkLambda tupfun args
       | otherwise -> bad $ TypeError pos $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
+
+checkLambda (CurryFun "op ~" [] rettype pos) [arg] = do
+  rettype' <- rettype `unifyWithKnown` arg
+  checkLambda (AnonymFun [var] (Negate (Var var) arg pos) rettype' pos) [arg]
+  where var = Ident "x" arg pos
+
 checkLambda (CurryFun opfun curryargexps rettype pos) args
   | Just op <- lookup opfun ops =
   checkPolyLambdaOp op curryargexps rettype args pos
   where ops = map (\op -> ("op " ++ opStr op, op)) [minBound..maxBound]
+
 checkLambda (CurryFun fname curryargexps rettype pos) args = do
   (curryargexpts, curryargexps') <- unzip <$> mapM checkSubExp curryargexps
   let args' = curryargexpts ++ args
