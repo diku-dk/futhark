@@ -187,7 +187,9 @@ copyCtPropExp e@(Var (Ident vnm _ pos)) = do
     bnd <- asks $ M.lookup vnm . envVtable
     case bnd of
         Nothing                 -> return e
-        Just (Constant v   _ _) -> changed $ Literal v
+        Just (Constant v   _ _) -> if isBasicTypeVal v 
+                                   then changed $ Literal v 
+                                   else return e
         Just (VarId  id' tp1 _) -> changed $ Var (Ident id' tp1 pos) -- or tp
         Just (SymArr e'    _ _) ->
             case e' of
@@ -202,7 +204,7 @@ copyCtPropExp eee@(Index idd@(Ident vnm tp p) inds tp1 tp2 pos) = do
   inds' <- mapM copyCtPropExp inds
   bnd   <- asks $ M.lookup vnm . envVtable 
   case bnd of
-    Nothing               -> return $ Index idd inds' tp1 tp2 pos
+    Nothing               -> return  $ Index idd inds' tp1 tp2 pos
     Just (VarId  id' _ _) -> changed $ Index (Ident id' tp p) inds' tp1 tp2 pos
     Just (Constant v _ _) -> 
       case v of
@@ -222,8 +224,10 @@ copyCtPropExp eee@(Index idd@(Ident vnm tp p) inds tp1 tp2 pos) = do
         (Iota _ _, [ii]) -> changed ii
         (Iota _ _, _)    -> badCPropM $ TypeError pos  " bad indexing in iota "
 
-        (Index aa ais t1 t2 _,_) -> do
-            inner <- copyCtPropExp( Index aa (ais ++ inds') t1 t2 pos ) 
+        (Index aa ais t1 _ _,_) -> do
+            -- the array element type is the same as the one of the big array, i.e., t1
+            -- the result type is the same as eee's, i.e., tp2
+            inner <- copyCtPropExp( Index aa (ais ++ inds') t1 tp2 pos ) 
             changed inner
 
         (ArrayLit _ _ _   , _) ->
