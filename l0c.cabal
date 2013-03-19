@@ -16,7 +16,6 @@ Executable l0c
                  array >= 0.4,
                  containers >= 0.5,
                  mtl >= 2.1,
-                 either >= 3.0,
                  srcloc >= 0.4,
                  syb >= 0.3
 --                 language-c-quote >= 0.4,
