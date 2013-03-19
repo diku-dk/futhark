@@ -7,7 +7,7 @@ where
 
 import Control.Applicative
 import Control.Monad.Reader
-import Control.Monad.Trans.Either
+import Control.Monad.Error
 
 import Data.Array
 import Data.Bits
@@ -46,20 +46,22 @@ instance Show InterpreterError where
   show (InvalidArrayShape pos shape newshape) =
     "Invalid array reshaping at " ++ locStr pos ++ ", from " ++ show shape ++ " to " ++ show newshape
 
+instance Error InterpreterError where
+  strMsg = TypeError noLoc
 
 data L0Env m = L0Env { envVtable  :: M.Map String Value
                      , envFtable  :: M.Map String ([Value] -> L0M m Value)
                      , envWriteOp :: String -> L0M m ()
                      , envReadOp  :: L0M m String }
 
-newtype L0M m a = L0M (ReaderT (L0Env m) (EitherT InterpreterError m) a)
+newtype L0M m a = L0M (ReaderT (L0Env m) (ErrorT InterpreterError m) a)
   deriving (MonadReader (L0Env m), Monad, Applicative, Functor)
 
 runL0M :: L0M m a -> L0Env m -> m (Either InterpreterError a)
-runL0M (L0M m) env = runEitherT (runReaderT m env)
+runL0M (L0M m) env = runErrorT (runReaderT m env)
 
 bad :: Monad m => InterpreterError -> L0M m a
-bad = L0M . lift . left
+bad = L0M . throwError
 
 bindVar :: L0Env m -> (Ident Type, Value) -> L0Env m
 bindVar env (Ident name _ _,val) =

@@ -4,7 +4,7 @@ module Main (main) where
 import Control.Monad
 import Control.Monad.Trans
 import Control.Monad.Writer.Strict (Writer, runWriter, tell)
-import Control.Monad.Trans.Either
+import Control.Monad.Error
 import System.Console.GetOpt
 import System.Environment (getArgs, getProgName)
 import System.Exit (exitWith, ExitCode(..))
@@ -20,7 +20,7 @@ import qualified L0.FirstOrderTransform as FOT
 import qualified L0.TupleArrayTransform as TAT
 -- import L0.CCodeGen
 
-type L0CM = EitherT String (Writer String)
+type L0CM = ErrorT String (Writer String)
 
 data Pass = Pass {
     passName :: String
@@ -116,7 +116,7 @@ eotransform :: String -> [String] -> L0Option
 eotransform =
   passoption "Perform simple enabling optimisations."
   Pass { passName = "enabling optimations"
-       , passOp = either (left . show) right . enablingOpts
+       , passOp = either (throwError . show) return . enablingOpts
        }
 
 main :: IO ()
@@ -140,7 +140,7 @@ main = do args <- getArgs
 
 l0c :: L0Config -> FilePath -> String -> (String, Either String (Prog Type))
 l0c config filename srccode =
-  case runWriter (runEitherT l0c') of
+  case runWriter (runErrorT l0c') of
     (Left err, msgs) -> (msgs, Left err)
     (Right prog, msgs) -> (msgs, Right prog)
   where l0c' :: L0CM (Prog Type)
@@ -151,19 +151,20 @@ l0c config filename srccode =
         comb prev pass prog = do
           prog' <- prev prog
           when (l0verbose config) $ tell $ "Running " ++ passName pass ++ ".\n"
-          res <- lift $ runEitherT $ passOp pass prog'
+          res <- lift $ runErrorT $ passOp pass prog'
           case res of
             Left err ->
-              left $ "Error during pass '" ++ passName pass ++ "':" ++ err
+              throwError $ "Error during pass '" ++ passName pass ++ "':" ++ err
             Right prog'' ->
               case checkProg prog'' of
                 Left err ->
-                  left $ "Type error after pass '" ++
+                  throwError $ "Type error after pass '" ++
                   passName pass ++ "':\n" ++ show err ++
                   if l0verbose config
                   then "\nErroneous program is:\n" ++ prettyPrint prog''
                   else ""
                 Right prog''' -> return prog'''
 
-canFail :: (Monad m, Show err) => Either err a -> EitherT String m a
-canFail = hoistEither . either (Left . show) Right
+canFail :: Show err => Either err a -> L0CM a
+canFail (Left err) = throwError $ show err
+canFail (Right v)  = return v
