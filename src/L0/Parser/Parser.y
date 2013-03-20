@@ -264,12 +264,12 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal $ IntVal num pos 
      | let '(' TupIds ')' '=' Exp in Exp %prec letprec
                       { LetPat (TupId $3 $1) $6 $8 $1 }
 
-     | let Id '=' Exp with '[' Exps ']' '<-' Exp in Exp %prec letprec
+     | let Id '=' Id with '[' Exps ']' '<-' Exp in Exp %prec letprec
                       { LetWith $2 $4 $7 $10 $12 $1 }
      | let Id '[' Exps ']' '=' Exp in Exp %prec letprec
-                      { LetWith $2 (Var $2) $4 $7 $9 $1 }
+                      { LetWith $2 $2 $4 $7 $9 $1 }
      | let Id '[' ']' '=' Exp in Exp %prec letprec
-                      { LetWith $2 (Var $2) [] $6 $8 $1 }
+                      { LetWith $2 $2 [] $6 $8 $1 }
 
      | Id '[' Exps ']'
                       { Index $1 $3 Nothing Nothing (srclocOf $1) }

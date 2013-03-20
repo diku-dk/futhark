@@ -650,12 +650,11 @@ compileExp place (Concat xarr yarr _ _) = do
                $stm:copyy
              }|]
 
-compileExp place (LetWith name e idxs ve body _) = do
+compileExp place (LetWith name src idxs ve body _) = do
   name' <- new $ identName name
-  src <- new $ "letwith_src"
-  e' <- compileExp (varExp src) e
-  etype <- typeToCType $ expType e
-  basetype <- typeToCType $ baseType $ expType e
+  src' <- lookupVar $ identName src
+  etype <- typeToCType $ identType src
+  basetype <- typeToCType $ baseType $ identType src
   idxvars <- mapM (const $ new "letwith_index") [1..length idxs]
   let idxexps = map varExp idxvars
   idxs' <- zipWithM compileExp idxexps idxs
@@ -664,31 +663,29 @@ compileExp place (LetWith name e idxs ve body _) = do
   ve' <- compileExpInPlace (varExp el) ve
   let idxdecls = [[C.cdecl|int $id:idxvar;|] | idxvar <- idxvars]
       (alloc, copy) =
-        case expType e of
+        case identType src of
           Array _ _ _ ->
             ([C.cstm|{
                    $stm:(allocArray (varExp name')
-                         (arrayShapeExp (varExp src) (expType e)) basetype)
-                   memcpy($id:name'.dims, $id:src.dims, sizeof($id:src.dims));
+                         (arrayShapeExp src' (identType src)) basetype)
+                   memcpy($id:name'.dims, $exp:src'.dims, sizeof($exp:src'.dims));
                    }|],
-             arraySliceCopyStm [C.cexp|$id:name'.data|]
-             (varExp src) (expType e) 0)
-          _ -> ([C.cstm|;|], [C.cstm|$id:name' = $id:src;|])
+             arraySliceCopyStm [C.cexp|$id:name'.data|] src' (identType src) 0)
+          _ -> ([C.cstm|;|], [C.cstm|$id:name' = $exp:src';|])
       (elempre, elempost) =
         case expType ve of
-          Array _ _ _ -> (indexArrayElemStm (varExp el) (varExp name') (expType e) idxexps,
+          Array _ _ _ -> (indexArrayElemStm (varExp el) (varExp name') (identType src) idxexps,
                           [C.cstm|;|])
           _ -> ([C.cstm|;|],
-                case expType e of
+                case identType src of
                   Array _ _ _ ->
-                    [C.cstm|$exp:(indexArrayExp (varExp name') (expType e) idxexps) = $id:el;|]
+                    [C.cstm|$exp:(indexArrayExp (varExp name') (identType src) idxexps) = $id:el;|]
                   _ -> [C.cstm|$id:name' = $id:el;|])
   body' <- binding [(identName name, varExp name')] $ compileExp place body
   return [C.cstm|{
-               $ty:etype $id:name', $id:src;
+               $ty:etype $id:name';
                $ty:elty $id:el;
                $decls:idxdecls
-               $stm:e'
                $stm:alloc
                $stm:copy
                $stms:idxs'

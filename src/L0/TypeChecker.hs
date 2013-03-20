@@ -352,18 +352,20 @@ checkExp (LetPat pat e body pos) = do
         _     -> return ()
       tell $ TypeAcc srcmvars destmvars
       return (bt, LetPat pat' e' body' pos)
-checkExp (LetWith (Ident name _ _) e idxes ve body pos) = do
-  (et, e') <- checkSubExp e
-  -- We don't check whether name is a merge variable.  We might want
+checkExp (LetWith (Ident dest destt destpos) src idxes ve body pos) = do
+  (srct, src') <- checkIdent src
+  -- We don't check whether src is a merge variable.  We might want
   -- to change this.
-  tell $ TypeAcc S.empty (S.singleton name)
-  case peelArray (length idxes) et of
-    Nothing -> bad $ TypeError pos $ show (length idxes) ++ " indices given, but type of expression at " ++ locStr (srclocOf e) ++ " has " ++ show (arrayDims et) ++ " dimensions."
+  destt' <- destt `unifyWithKnown` srct
+  let dest' = Ident dest destt' destpos
+  tell $ TypeAcc S.empty (S.singleton $ identName src')
+  case peelArray (length idxes) srct of
+    Nothing -> bad $ TypeError pos $ show (length idxes) ++ " indices given, but type of expression at " ++ locStr (srclocOf src) ++ " has " ++ show (arrayDims srct) ++ " dimensions."
     Just elemt -> do
       (_, idxes') <- unzip <$> mapM (require [Int pos] <=< checkSubExp) idxes
       (_, ve') <- require [elemt] =<< checkSubExp ve
-      (bt, body') <- local (`bindVar` Ident name et pos) $ checkExp body
-      return (bt, LetWith (Ident name et pos) e' idxes' ve' body' pos)
+      (bt, body') <- local (`bindVar` dest') $ checkExp body
+      return (bt, LetWith dest' src' idxes' ve' body' pos)
 checkExp (Index ident idxes intype restype pos) = do
   ident' <- snd <$> checkIdent ident
   vt <- lookupVarType (identName ident') pos

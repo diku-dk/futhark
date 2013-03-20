@@ -150,14 +150,13 @@ copyCtPropFun (fname, rettype, args, body, pos) = do
 
 copyCtPropExp :: TypeBox tf => Exp tf -> CPropM tf (Exp tf)
 
-copyCtPropExp (LetWith nm e inds el body pos) = do
-    e'        <- copyCtPropExp e 
+copyCtPropExp (LetWith nm src inds el body pos) = do
     el'       <- copyCtPropExp el
     inds'     <- mapM copyCtPropExp inds
     body'     <- copyCtPropExp body
     -- propagating (nm,e[inds]) would be incorrect and  
     -- would defeat the in-place semantics of LetWith 
-    return $ LetWith nm e' inds' el' body' pos
+    return $ LetWith nm src inds' el' body' pos
 
 copyCtPropExp (LetPat pat e body pos) = do
     e'   <- copyCtPropExp e

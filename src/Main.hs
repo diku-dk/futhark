@@ -133,9 +133,9 @@ main = do args <- getArgs
                 Right prog -> l0action config prog
             (_, _, errs) -> do
               prog <- getProgName
-              mapM_ putStr errs
-              putStr "\n"
-              putStr $ usageInfo (prog ++ " [options] <file>") commandLineOptions
+              mapM_ (hPutStr stderr) errs
+              hPutStr stderr "\n"
+              hPutStr stderr $ usageInfo (prog ++ " [options] <file>") commandLineOptions
               exitWith $ ExitFailure 1
 
 l0c :: L0Config -> FilePath -> String -> (String, Either String (Prog Type))

@@ -145,19 +145,18 @@ deadCodeElimExp (LetPat pat e body pos) = do
             return $ LetPat pat e' body' pos
 
 
-deadCodeElimExp (LetWith nm e inds el body pos) = do
+deadCodeElimExp (LetWith nm src inds el body pos) = do
     (body', noref) <- collectRes [identName nm] $ binding [(identName nm, 0)] $ deadCodeElimExp body
 
     cg  <- asks $ callGraph
     
-    let torem = noref && not ( foldl (||) False ( map (hasIO cg) (e:el:inds) ) ) 
+    let torem = noref && not ( foldl (||) False ( map (hasIO cg) (el:inds) ) ) 
     if torem 
     then changed $ return body'
     else do
-            e'    <- deadCodeElimExp e
             inds' <- mapM deadCodeElimExp inds
             el'   <- deadCodeElimExp el
-            return $ LetWith nm e' inds' el' body' pos
+            return $ LetWith nm src inds' el' body' pos
     
 
 deadCodeElimExp e@(Var (Ident vnm _ pos)) = do 
