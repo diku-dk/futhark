@@ -154,10 +154,16 @@ deadCodeElimExp (LetWith nm src inds el body pos) = do
     if torem 
     then changed $ return body'
     else do
-            inds' <- mapM deadCodeElimExp inds
-            el'   <- deadCodeElimExp el
-            return $ LetWith nm src inds' el' body' pos
-    
+            let srcnm = identName src
+            bnd   <- asks $ M.lookup srcnm . envVtable
+            case bnd of
+                Nothing -> badCPropM $ TypeError pos  ("Var "++srcnm++" not in vtable!")
+                Just _  -> do
+                    _ <- tell $ DCElimRes False (M.fromList [(srcnm, 1)])
+                    inds' <- mapM deadCodeElimExp inds
+                    el'   <- deadCodeElimExp el
+                    return $ LetWith nm src inds' el' body' pos
+
 
 deadCodeElimExp e@(Var (Ident vnm _ pos)) = do 
     bnd <- asks $ M.lookup vnm . envVtable
