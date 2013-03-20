@@ -583,7 +583,7 @@ compileExp place e@(Transpose arrexp _ _ _) = do
                 _              -> error "One-dimensional array in transpose; should have been caught by type checker"
       indexfrom = indexArrayExp (varExp arr) (expType arrexp) [varExp i, varExp j]
       indexto   = indexArrayExp place (expType e) [varExp j, varExp i]
-      copy = arraySliceCopyStm [C.cexp|&$exp:indexto|] [C.cexp|&$exp:indexfrom|] (expType arrexp) 2
+      size = arraySliceSizeExp (varExp arr) (expType arrexp) 2
   return [C.cstm|{
                $ty:intype $id:arr;
                int $id:i, $id:j;
@@ -591,7 +591,7 @@ compileExp place e@(Transpose arrexp _ _ _) = do
                $stm:alloc
                for ($id:i = 0; $id:i < $id:arr.dims[0]; $id:i++) {
                  for ($id:j = 0; $id:j < $id:arr.dims[1]; $id:j++) {
-                   $stm:copy
+                   memcpy(&$exp:indexto, &$exp:indexfrom, $exp:size * sizeof($id:arr.data[0]));
                  }
                }
              }|]
