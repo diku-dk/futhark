@@ -225,7 +225,7 @@ data Exp ty = Literal Value
             -- Function Call and Let Construct
             | Apply  String [Exp ty] ty SrcLoc
             | LetPat (TupIdent ty) (Exp ty) (Exp ty) SrcLoc
-            | LetWith (Ident ty) (Exp ty) [Exp ty] (Exp ty) (Exp ty) SrcLoc
+            | LetWith (Ident ty) (Ident ty) [Exp ty] (Exp ty) (Exp ty) SrcLoc
             -- Array Indexing and Array Constructors
             | Index (Ident ty) [Exp ty] ty ty SrcLoc
              -- e.g., arr[3]; 3rd arg is the input-array element type
@@ -512,19 +512,15 @@ ppExp d (Apply f args _ _)  =
 ppExp d (LetPat tupid e1 body _) =
         "\n" ++ spaces (d+1) ++ "let " ++ ppTupId tupid ++ " = " ++ ppExp (d+2) e1 ++
         " in  " ++ ppExp (d+2) body
-ppExp d (LetWith (Ident name _ _) e1 es el e2 _) =
-      let isassign = case e1 of
-                       Var id1 -> identName id1 == name
-                       _       -> False
-      in if isassign
-         then
-              "\n" ++ spaces(d+1) ++ "let " ++ name ++ "[ " ++
-              intercalate ", " (map (ppExp d) es) ++
-              "] = " ++ ppExp d el ++ " in  " ++ ppExp (d+2) e2
-         else
-              "\n" ++ spaces(d+1) ++ "let " ++ name ++ " = " ++ ppExp (d+2) e1 ++
-              " with [ " ++ intercalate ", " (map (ppExp d) es) ++
-              "] <- " ++ ppExp d el ++ " in  " ++ ppExp (d+2) e2
+ppExp d (LetWith (Ident dest _ _) (Ident src _ _) es el e2 _)
+  | dest == src =
+    "\n" ++ spaces(d+1) ++ "let " ++ dest ++ "[ " ++
+    intercalate ", " (map (ppExp d) es) ++
+    "] = " ++ ppExp d el ++ " in  " ++ ppExp (d+2) e2
+  | otherwise =
+    "\n" ++ spaces(d+1) ++ "let " ++ dest ++ " = " ++ src ++
+    " with [ " ++ intercalate ", " (map (ppExp d) es) ++
+    "] <- " ++ ppExp d el ++ " in  " ++ ppExp (d+2) e2
 
 ppExp d (Index (Ident name _ _) es _ _ _) =
   name ++ "[ " ++ intercalate ", " (map (ppExp d) es) ++ " ]"

@@ -142,27 +142,23 @@ transformExp (DoLoop i bound body mergevars loc) = do
                   \inner' -> inner $ LetPat (TupId (map Id names) loc) (Var mvar) inner' loc)
         procmvar (mvars, substs, inner) mvar =
           return (mvars ++ [mvar], substs, inner)
-transformExp (LetWith name srcexp idxs valexp body loc) = do
-  srcexp' <- transformExp srcexp
+transformExp (LetWith name src idxs valexp body loc) = do
   idxs' <- mapM transformExp idxs
   body' <- transformExp body
   valexp' <- transformExp valexp
-  substs <- asks $ M.lookup (identName name') . envVarSubst
-  case (substs, expType srcexp', expType valexp') of
-    (Just substs', Tuple sts _, Tuple ets _) -> do
-      (srcs, srclet) <-
-        case srcexp of -- Intentional.
-          Var k | k == name -> return (substs', id)
-          _ -> do (srcs, _) <- unzip <$> mapM (newVar "letwith_src") sts
-                  return (srcs, \inner -> LetPat (TupId (map Id srcs) loc) (Copy srcexp' loc) inner loc)
+  substs <- asks $ M.lookup (identName src) . envVarSubst
+  case (substs, expType valexp') of
+    (Just substs', Tuple ets _) -> do
       (vals, valvs) <- unzip <$> mapM (newVar "letwith_val") ets
-      let comb olde (dest, srcv, valv) inner =
-            LetWith dest srcv idxs' valv (olde inner) loc
+      let comb olde (srcv, valv) inner =
+            LetWith srcv srcv idxs' valv (olde inner) loc
           vallet inner = LetPat (TupId (map Id vals) loc) valexp' inner loc
-          letws = foldl comb id $ zip3 substs' (map Var srcs) valvs
-      return $ srclet $ vallet $ letws body'
-    _ -> return $ LetWith name' srcexp' idxs' valexp' body' loc
+          letws = foldl comb id $ zip substs' valvs
+          namelet inner = LetPat (Id name') (TupLit (map Var substs') loc) inner loc
+      return $ vallet $ letws $ namelet body'
+    _ -> return $ LetWith name' src' idxs' valexp' body' loc
   where name' = transformIdent name
+        src' = transformIdent src
 transformExp (Replicate ne ve loc) = do
   ne' <- transformExp ne
   ve' <- transformExp ve

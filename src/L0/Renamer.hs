@@ -50,14 +50,14 @@ renameFun (fname, ret, params, body, pos) =
 
 renameExp :: Exp Type -> RenameM (Exp Type)
 renameExp (Var ident) = liftM Var $ repl ident
-renameExp (LetWith ident e1 idxs ve body pos) = do
-  e1' <- renameExp e1
+renameExp (LetWith dest src idxs ve body pos) = do
+  src' <- repl src
   idxs' <- mapM renameExp idxs
   ve' <- renameExp ve
-  bind [ident] $ do
-    ident' <- repl ident
+  bind [dest] $ do
+    dest' <- repl dest
     body' <- renameExp body
-    return (LetWith ident' e1' idxs' ve' body' pos)
+    return (LetWith dest' src' idxs' ve' body' pos)
 renameExp (LetPat pat e body pos) = do
   e1' <- renameExp e
   bind (names pat) $ do
