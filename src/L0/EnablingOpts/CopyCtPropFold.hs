@@ -151,6 +151,7 @@ copyCtPropFun (fname, rettype, args, body, pos) = do
 copyCtPropExp :: TypeBox tf => Exp tf -> CPropM tf (Exp tf)
 
 copyCtPropExp (LetWith nm src inds el body pos) = do
+    nonRemovable $ identName src
     el'       <- copyCtPropExp el
     inds'     <- mapM copyCtPropExp inds
     body'     <- copyCtPropExp body
