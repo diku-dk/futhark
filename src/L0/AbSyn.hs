@@ -83,14 +83,17 @@ arrayDims _             = 0
 class (Eq ty, Ord ty, Show ty, Data ty, Typeable ty) => TypeBox ty where
   unboxType :: ty -> Maybe Type
   boxType :: Type -> ty
+  getExpType :: Exp ty -> ty
 
 instance TypeBox (Maybe Type) where
   unboxType = id
   boxType = Just
+  getExpType _ = Nothing
 
 instance TypeBox Type where
   unboxType = Just
   boxType = id
+  getExpType = expType
 
 -- | @peelArray n t@ returns the type resulting from peeling the first
 -- @n@ array dimensions from @t@.  Returns @Nothing@ if @t@ has less
