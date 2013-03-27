@@ -1,0 +1,25 @@
+fun int main() = 
+//    let y = replicate(3,3) in 33 //y[0]
+    let a = read(int)      in
+    let y = let zz = 2*a in replicate(zz,a) in 
+
+    let res = for i < let x1 = 2*y[2*a-a-a] in 2*x1 do
+        let z = (let y[0] = 
+                    (let x = 5*a-7 in a*x - 3*a*y[let q = x/3 in q-a]) 
+                    in a* reduce( op +, a+reduce( op +, 0, map(op +(1), y) ), let qq = 2*a in map(fn int (int q) => qq+q, y) )
+                    //in a * reduce(op +, a, y) 
+                ) 
+        in z*a 
+    merge a
+    in res*2
+
+
+
+
+
+
+
+// let x = 5*a-7     in
+// let y = a*x - 3*a in
+// let z = a*y       in
+//   z * a

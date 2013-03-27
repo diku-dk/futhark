@@ -1,0 +1,9 @@
+fun int tupfun( (int*(real*int)) x, (int*(real*int)) y ) = 
+    let (x0, (x1,x2)) = x in
+    let (y0, (y1,y2)) = y in
+    33
+
+fun int main() = 
+    let x = ( read(int), ( read(real), read(int) ) ) in
+    let y = ( read(int), ( read(real), read(int) ) ) in
+    write(tupfun(x,y))
