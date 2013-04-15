@@ -136,7 +136,7 @@ fun [real] brownianBridgeDates (
     let bbrow = replicate(num_dates, 0.0)   in
     let bbrow[ bi[0]-1 ] = sd[0] * gauss[0] in
 
-    let bbrow = 
+    let (bbrow=bbrow) =
         for i < num_dates-1 do  // use i+1 since i in 1 .. num_dates-1 
             let j  = li[i+1] - 1 in
             let k  = ri[i+1] - 1 in
@@ -150,15 +150,15 @@ fun [real] brownianBridgeDates (
                              then tmp
                              else tmp + lw[i+1] * bbrow[j]
             in  bbrow
-        merge bbrow
 
         // This can be written as map-reduce, but it 
         //   needs delayed arrays to be mapped nicely!
-    in for ii < num_dates-1 do
+    in let (bbrow=bbrow) =
+        for ii < num_dates-1 do
             let i = num_dates - (ii+1) in
             let bbrow[i] = bbrow[i] - bbrow[i-1] 
             in  bbrow
-       merge bbrow
+       in bbrow
 
 // [num_dates,num_paths]
 fun [[real]] brownianBridge ( 
