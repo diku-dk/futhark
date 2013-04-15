@@ -44,7 +44,6 @@ data Token = IF
            | FOR
            | DO
            | WITH
-           | MERGE
            | SIZE
            | IOTA
            | REPLICATE

@@ -67,7 +67,6 @@ keyword s =
     "let"          -> LET
     "in"           -> IN
     "with"         -> WITH
-    "merge"        -> MERGE
     "int"          -> INT
     "real"         -> REAL
     "bool"         -> BOOL

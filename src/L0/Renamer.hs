@@ -70,13 +70,17 @@ renameExp (Index s idxs t1 t2 pos) = do
   s' <- repl s
   idxs' <- mapM renameExp idxs
   return $ Index s' idxs' t1 t2 pos
-renameExp (DoLoop loopvar e body mergevars pos) = do
+renameExp (DoLoop merges loopvar e loopbody letbody pos) = do
   e' <- renameExp e
-  bind [loopvar] $ do
-    loopvar' <- repl loopvar
-    body' <- renameExp body
+  let (mergevars, mergeexps) = unzip merges
+  mergeexps' <- mapM renameExp mergeexps
+  bind mergevars $ do
     mergevars' <- mapM repl mergevars
-    return $ DoLoop loopvar' e' body' mergevars' pos
+    letbody' <- renameExp letbody
+    bind [loopvar] $ do
+      loopvar'  <- repl loopvar
+      loopbody' <- renameExp loopbody
+      return $ DoLoop (zip mergevars' mergeexps') loopvar' e' loopbody' letbody' pos
 -- The above case may have to be extended if syntax nodes ever contain
 -- anything but lambdas, expressions, lists of expressions or lists of
 -- pairs of expression-types.  Pay particular attention to the fact

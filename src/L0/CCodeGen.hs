@@ -91,7 +91,7 @@ typeToCType t@(Tuple ts _) = do
       return stype
         where field et i = do
                  ct <- typeToCType et
-                 return [C.csdecl|$ty:ct $id:("elem_" ++ show i);|]
+                 return [C.csdecl|$ty:ct $id:(tupleField i);|]
 typeToCType t@(Array _ _ _) = do
   ty <- gets $ lookup t . compTypeStructs
   case ty of
@@ -110,6 +110,12 @@ expCType = typeToCType . expType
 
 valCType :: Value -> CompilerM C.Type
 valCType = typeToCType . valueType
+
+tupleField :: Int -> String
+tupleField i = "elem_" ++ show i
+
+tupleFieldExp :: C.Exp -> Int -> C.Exp
+tupleFieldExp e i = [C.cexp|$exp:e.$id:(tupleField i)|]
 
 -- | The size is in elements.
 allocArray :: C.Exp -> [C.Exp] -> C.Type -> C.Stm
@@ -185,7 +191,7 @@ printStm place (Bool _) = return [C.cstm|printf($exp:place && "true" || "false")
 printStm place (Real _) = return [C.cstm|printf("%lf", $exp:place);|]
 printStm place (Tuple ets _) = do
   prints <- forM (zip [(0::Int)..] ets) $ \(i, et) ->
-              printStm [C.cexp|$exp:place.$id:("elem_"++show i)|] et
+              printStm [C.cexp|$exp:place.$id:(tupleField i)|] et
   let prints' = intercalate [[C.cstm|{putchar(','); putchar(' ');}|]] $ map (:[]) prints
   return [C.cstm|{
                putchar('(');
@@ -306,7 +312,7 @@ compileValue place (TupVal vs _) = do
   vs' <- forM (zip vs [(0::Int)..]) $ \(v, i) -> do
            var <- new $ "TupVal_" ++ show i
            v' <- compileValue (varExp var) v
-           let field = "elem_" ++ show i
+           let field = tupleField i
            vt <- valCType v
            return [C.cstm|{$ty:vt $id:var; $stm:v'; $exp:place.$id:field = $id:var;}|]
   return [C.cstm|{$stms:vs'}|]
@@ -348,7 +354,7 @@ compileExp place (TupLit es _) = do
   es' <- forM (zip es [(0::Int)..]) $ \(e, i) -> do
            var <- new $ "TupVal_" ++ show i
            e' <- compileExp (varExp var) e
-           let field = "elem_" ++ show i
+           let field = tupleField i
            et <- expCType e
            return [C.cstm|{$ty:et $id:var; $stm:e'; $exp:place.$id:field = $id:var;}|]
   return [C.cstm|{$stms:es'}|]
@@ -603,6 +609,8 @@ compileExp place (Split posexp arrexp _ _) = do
   posexp' <- compileExp (varExp pos) posexp
   arrt <- typeToCType $ expType arrexp
   let splitexp = indexArrayExp (varExp arr) (expType arrexp) [varExp pos]
+      place0 = tupleFieldExp place 0
+      place1 = tupleFieldExp place 1
   return [C.cstm|{
                $ty:arrt $id:arr;
                int $id:pos;
@@ -611,12 +619,12 @@ compileExp place (Split posexp arrexp _ _) = do
                if ($id:pos < 0 || $id:pos > $id:arr.dims[0]) {
                  error(1, "Split out of bounds.\n");
                }
-               memcpy($exp:place.elem_0.dims, $id:arr.dims, sizeof($id:arr.dims));
-               memcpy($exp:place.elem_1.dims, $id:arr.dims, sizeof($id:arr.dims));
-               $exp:place.elem_0.data = $id:arr.data;
-               $exp:place.elem_0.dims[0] = $id:pos;
-               $exp:place.elem_1.data = &$exp:splitexp;
-               $exp:place.elem_1.dims[0] -= $id:pos;
+               memcpy($exp:place0.dims, $id:arr.dims, sizeof($id:arr.dims));
+               memcpy($exp:place1.dims, $id:arr.dims, sizeof($id:arr.dims));
+               $exp:place0.data = $id:arr.data;
+               $exp:place0.dims[0] = $id:pos;
+               $exp:place1.data = &$exp:splitexp;
+               $exp:place1.dims[0] -= $id:pos;
              }|]
 
 compileExp place (Concat xarr yarr _ _) = do
@@ -696,26 +704,32 @@ compileExp place (LetWith name src idxs ve body _) = do
                $stm:body'
              }|]
 
-compileExp place (DoLoop loopvar boundexp body mergevars _) = do
+compileExp place (DoLoop merges loopvar boundexp loopbody letbody _) = do
   loopvar' <- new $ identName loopvar
   bound <- new "loop_bound"
+  mergevar <- new $ "loop_mergevar"
+  mergetype <- typeToCType $ expType loopbody
   boundexp' <- compileExp (varExp bound) boundexp
-  mergevars' <- mapM (lookupVar . identName) mergevars
-  let (places, copystms) =
-        case mergevars' of
-          [mergevar] -> ([place], [[C.cstm|$exp:place = $exp:mergevar;|]])
-          _ -> unzip [ (part, [C.cstm|$exp:part = $exp:mergevar;|]) |
-                       (mergevar, i) <- zip mergevars' [(0::Int)..],
-                       let part = [C.cexp|$exp:place.$id:("elem_"++show i)|]]
-  body' <- binding ((identName loopvar, varExp loopvar') :
-                    zip (map identName mergevars) places) $ compileExp place body
+  (initstms, mapping) <-
+    case merges of
+      [(var, e)] -> do e' <- compileExp (varExp mergevar) e
+                       return ([e'], [(identName var, varExp mergevar)])
+      _ -> liftM unzip . forM (zip merges [0..]) $ \((var, e), i) -> do
+             let field = tupleFieldExp (varExp mergevar) i
+             e' <- compileExp field e
+             return (e', (identName var, field))
+  loopbody' <- binding ((identName loopvar, varExp loopvar') : mapping) $
+               compileExp (varExp mergevar) loopbody
+  letbody' <- binding mapping $ compileExp place letbody
   return [C.cstm|{
                int $id:bound, $id:loopvar';
+               $ty:mergetype $id:mergevar;
                $stm:boundexp'
-               $stms:copystms
+               $stms:initstms
                for ($id:loopvar' = 0; $id:loopvar' < $id:bound; $id:loopvar'++) {
-                 $stm:body'
+                 $stm:loopbody'
                }
+               $stm:letbody'
              }|]
 
 compileExp place (Copy e _) = do
@@ -836,7 +850,7 @@ compilePattern pat vexp = flatten <$> runWriterT (compilePattern' pat vexp)
           pats' <- zipWithM prep pats [(0::Int)..]
           return [C.cstm|{$stms:pats'}|]
           where prep pat' i = compilePattern' pat' [C.cexp|$exp:vexp'.$id:field|]
-                  where field = "elem_" ++ show i
+                  where field = tupleField i
 
 compileBody :: Exp Type -> CompilerM C.Stm
 compileBody body = do
