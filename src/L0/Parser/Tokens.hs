@@ -7,6 +7,7 @@ data Token = IF
            | THEN
            | ELSE
            | LET
+           | LOOP
            | IN
            | INT
            | BOOL

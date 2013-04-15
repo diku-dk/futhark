@@ -37,6 +37,7 @@ import L0.Parser.Lexer
       then            { L $$ THEN }
       else            { L $$ ELSE }
       let             { L $$ LET }
+      loop            { L $$ LOOP }
       in              { L $$ IN }
       int             { L $$ INT }
       bool            { L $$ BOOL }
@@ -273,13 +274,14 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal $ IntVal num pos 
      | Id '[' Exps ']'
                       { Index $1 $3 Nothing Nothing (srclocOf $1) }
 
-     | let '(' MergeVars ')' '=' for Id '<' Exp do Exp in Exp %prec letprec
+     | loop '(' MergeVars ')' '=' for Id '<' Exp do Exp in Exp %prec letprec
                       { DoLoop $3 $7 $9 $11 $13 $1 }
 
 MergeVars : MergeVar { [$1] }
           | MergeVar ',' MergeVars { $1 : $3 }
 
 MergeVar : Id '=' Exp { ($1, $3) }
+         | Id { ($1, Var $1) }
 
 Exps : Exp ',' Exps { $1 : $3 }
      | Exp          { [$1] }
