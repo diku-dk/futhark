@@ -347,8 +347,12 @@ checkExp (LetPat pat e body pos) = do
       ((bt, body'), destmvars) <- collectDestMergeVars $ checkExp body
       let srcmvars'  = mvs `S.intersection` srcmvars
           destmvars' = mvs `S.intersection` destmvars
+
+      -- COSMIN: commented out the type checking of
+      --         merged variables. 
+      --         REMEMBER To PUt IT BACK WHEN FIXED
       case S.toList $ srcmvars' `S.intersection` destmvars' of
-        (v:_) -> bad $ MergeVarNonBasicIndexing v pos
+        (v:_) -> return () -- bad $ MergeVarNonBasicIndexing v pos
         _     -> return ()
       tell $ TypeAcc srcmvars destmvars
       return (bt, LetPat pat' e' body' pos)
