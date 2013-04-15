@@ -25,6 +25,7 @@ module L0.AbSyn
   , expType
   , expToValue
   , ppExp
+  , isBuiltInFun
   , BinOp(..)
   , opStr
   , ppBinOp
@@ -44,6 +45,9 @@ import Data.Data
 import Data.List
 import Data.Generics
 import Data.Loc
+
+isBuiltInFun :: String -> Bool
+isBuiltInFun fnm = elem fnm ["toReal", "trunc", "sqrt", "log", "exp"]
 
 locStr :: SrcLoc -> String
 locStr (SrcLoc NoLoc) = "unknown location"

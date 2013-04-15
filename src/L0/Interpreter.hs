@@ -2,6 +2,7 @@
 module L0.Interpreter
   ( runProg
   , runProgIO
+  , runFun
   , InterpreterError(..) )
 where
 
@@ -89,7 +90,8 @@ arrToList v = bad $ TypeError (srclocOf v) "arrToList"
 
 tupToList :: Monad m => Value -> L0M m [Value]
 tupToList (TupVal l _) = return l
-tupToList v = bad $ TypeError (srclocOf v) "tupToList"
+tupToList v = bad $ TypeError (srclocOf v) "tupToList"    
+
 
 runProgIO :: Prog Type -> IO (Either InterpreterError Value)
 runProgIO = runProg putStr (hFlush stdout >> getLine)
@@ -112,21 +114,61 @@ runProg wop rop prog = do
     expand ftable (name,_,params,body,_) =
         let fun args = binding (zip params args) $ evalExp body
         in M.insert name fun ftable
-    builtins = M.fromList [("toReal", builtin "toReal")
-                          ,("trunc", builtin "trunc")
-                          ,("sqrt", builtin "sqrt")
-                          ,("log", builtin "log")
-                          ,("exp", builtin "exp")
-                          ,("op not", builtin "op not")
-                          ,("op ~", builtin "op ~")]
-    builtin "toReal" [IntVal x pos] = return $ RealVal (fromIntegral x) pos
-    builtin "trunc" [RealVal x pos] = return $ IntVal (truncate x) pos
-    builtin "sqrt" [RealVal x pos] = return $ RealVal (sqrt x) pos
-    builtin "log" [RealVal x pos] = return $ RealVal (log x) pos
-    builtin "exp" [RealVal x pos] = return $ RealVal (exp x) pos
-    builtin "op not" [LogVal b pos] = return $ LogVal (not b) pos
-    builtin "op ~" [RealVal b pos] = return $ RealVal (-b) pos
-    builtin fname _ = bad $ TypeError noLoc $ "Builtin " ++ fname
+
+
+--------------------------------------------------
+------- Interpreting an arbitrary function -------
+--------------------------------------------------
+
+runFun :: String -> [Value] -> Prog Type -> Maybe (Either InterpreterError Value)
+runFun fname aargs prog = do
+    let wop = const Nothing
+    let rop = Nothing
+    let ftable = foldl expand builtins prog
+        l0env = L0Env { envVtable  = M.empty
+                      , envFtable  = ftable
+                      , envWriteOp = L0M . lift . lift . wop
+                      , envReadOp  = L0M $ lift $ lift rop }
+        runfun  = case M.lookup fname ftable of
+                    Nothing -> bad MissingMainFunction
+                    Just curfun -> curfun aargs
+    runL0M runfun l0env
+  where
+    expand ftable (name,_,params,body,_) =
+        let fun args = binding (zip params args) $ evalExp body
+        in M.insert name fun ftable
+
+
+--------------------------------------------
+--------------------------------------------
+------------- BUILTIN FUNCTIONS ------------
+--------------------------------------------
+--------------------------------------------
+
+builtins :: (Applicative m, Monad m) => M.Map String ([Value] -> L0M m Value)
+builtins = M.fromList [("toReal", builtin "toReal")
+                      ,("trunc", builtin "trunc")
+                      ,("sqrt", builtin "sqrt")
+                      ,("log", builtin "log")
+                      ,("exp", builtin "exp")
+                      ,("op not", builtin "op not")
+                      ,("op ~", builtin "op ~")]
+
+builtin :: (Applicative m, Monad m) => String -> [Value] -> L0M m Value
+builtin "toReal" [IntVal x pos] = return $ RealVal (fromIntegral x) pos
+builtin "trunc" [RealVal x pos] = return $ IntVal (truncate x) pos
+builtin "sqrt" [RealVal x pos] = return $ RealVal (sqrt x) pos
+builtin "log" [RealVal x pos] = return $ RealVal (log x) pos
+builtin "exp" [RealVal x pos] = return $ RealVal (exp x) pos
+builtin "op not" [LogVal b pos] = return $ LogVal (not b) pos
+builtin "op ~" [RealVal b pos] = return $ RealVal (-b) pos
+builtin fname _ = bad $ TypeError noLoc $ "Builtin " ++ fname
+
+--------------------------------------------
+--------------------------------------------
+--------------------------------------------
+--------------------------------------------
+
 
 evalExp :: (Applicative m, Monad m) => Exp Type -> L0M m Value
 evalExp (Literal val) = return val
