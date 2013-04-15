@@ -3,10 +3,9 @@ fun [int] main() =
     let s = write("Please enter a number: ") in
     let n = read(int) in
     let arr = iota(n) in
-    let res = for i < n-2 do
-                let x = arr[i] in
-                let y = arr[i+1] in
-                let arr[i+2] = x + y
-                in arr
-              merge arr
-    in write(res)
+    loop (arr) = for i < n-2 do
+                   let x = arr[i] in
+                   let y = arr[i+1] in
+                   let arr[i+2] = x + y
+                   in arr
+    in write(arr)

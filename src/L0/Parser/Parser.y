@@ -37,6 +37,7 @@ import L0.Parser.Lexer
       then            { L $$ THEN }
       else            { L $$ ELSE }
       let             { L $$ LET }
+      loop            { L $$ LOOP }
       in              { L $$ IN }
       int             { L $$ INT }
       bool            { L $$ BOOL }
@@ -77,7 +78,6 @@ import L0.Parser.Lexer
       for             { L $$ FOR }
       do              { L $$ DO }
       with            { L $$ WITH }
-      merge           { L $$ MERGE }
       iota            { L $$ IOTA }
       size            { L $$ SIZE }
       replicate       { L $$ REPLICATE }
@@ -274,10 +274,14 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal $ IntVal num pos 
      | Id '[' Exps ']'
                       { Index $1 $3 Nothing Nothing (srclocOf $1) }
 
-     | for Id '<' Exp do Exp merge '(' Ids ')'
-                      { DoLoop $2 $4 $6 $9 $1 }
-     | for Id '<' Exp do Exp merge Id
-                      { DoLoop $2 $4 $6 [$8] $1 }
+     | loop '(' MergeVars ')' '=' for Id '<' Exp do Exp in Exp %prec letprec
+                      { DoLoop $3 $7 $9 $11 $13 $1 }
+
+MergeVars : MergeVar { [$1] }
+          | MergeVar ',' MergeVars { $1 : $3 }
+
+MergeVar : Id '=' Exp { ($1, $3) }
+         | Id { ($1, Var $1) }
 
 Exps : Exp ',' Exps { $1 : $3 }
      | Exp          { [$1] }
@@ -288,9 +292,6 @@ Exps2 : Exp ',' Exps2 { $1 : $3 }
 TupleExp : '(' Exps2 ')' { ($2, $1) }
 
 Id : id { let L loc (ID name) = $1 in Ident name Nothing loc }
-
-Ids : Id { [$1] }
-    | Id ',' Ids { $1 : $3 }
 
 TupIds : TupId ',' TupId   { [$1, $3] }
        | TupId ',' TupIds  { $1 : $3 }

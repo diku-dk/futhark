@@ -7,6 +7,7 @@ data Token = IF
            | THEN
            | ELSE
            | LET
+           | LOOP
            | IN
            | INT
            | BOOL
@@ -44,7 +45,6 @@ data Token = IF
            | FOR
            | DO
            | WITH
-           | MERGE
            | SIZE
            | IOTA
            | REPLICATE

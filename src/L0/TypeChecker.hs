@@ -146,22 +146,21 @@ bindVars = foldl bindVar
 binding :: [Ident Type] -> TypeM a -> TypeM a
 binding bnds = local (`bindVars` bnds)
 
+-- | Bind a name as a merge variable.
+mergeVar :: TypeEnv -> Ident Type -> TypeEnv
+mergeVar env (Ident name tp _) =
+  env { envVtable = M.insert name (VarBinding tp MergeVar) $ envVtable env }
+
+merging :: [Ident Type] -> TypeM a -> TypeM a
+merging bnds = local (`merging'` bnds)
+  where merging' = foldl mergeVar
+
 -- | 'unbinding names m' evaluates 'm' with the names in 'names'
 -- unbound.
 unbinding :: [String] -> TypeM a -> TypeM a
 unbinding bnds = local (`unbindVars` bnds)
   where unbindVars = foldl unbindVar
         unbindVar env name = env { envVtable = M.delete name $ envVtable env }
-
--- | Rebind variables as merge variables while evaluating a 'TypeM'
--- action.
-merging :: [String] -> SrcLoc -> TypeM a -> TypeM a
-merging [] _ m = m
-merging (k:ks) pos m = do
-  bnd <- lookupVar k pos
-  let mkmerge = M.insert k bnd { bndProp = MergeVar }
-  local (\env -> env { envVtable = mkmerge $ envVtable env }) $
-        merging ks pos m
 
 unmerging :: TypeM a -> TypeM a
 unmerging = local unmerging'
@@ -501,15 +500,22 @@ checkExp (Write e t pos) = do
   (et, e') <- checkSubExp e
   t' <- t `unifyWithKnown` et
   return (t', Write e' t' pos)
-checkExp (DoLoop (Ident loopvar _ _) boundexp body mergevars pos) = do
-  (mergetypes, mergevars') <- unzip <$> mapM checkIdent mergevars
+checkExp (DoLoop merges (Ident loopvar _ _) boundexp loopbody letbody pos) = do
+  merges' <- forM merges $ \(var, e) -> do
+               (t, e') <- checkExp e
+               t' <- identType var `unifyWithKnown` t
+               return (var { identType = t' }, e')
+  let mergevars = map fst merges'
   (_, boundexp') <- require [Int pos] =<< checkSubExp boundexp
-  merging (map identName mergevars') pos $ binding [Ident loopvar (Int pos) pos] $ do
-    let bodytype = case mergetypes of
-                     [t] -> t
-                     _   -> Tuple mergetypes pos
-    (bodyt, body') <- require [bodytype] =<< checkExp body
-    return (bodyt, DoLoop (Ident loopvar (Int pos) pos) boundexp' body' mergevars' pos)
+  loopbody' <- merging mergevars $
+                 binding [Ident loopvar (Int pos) pos] $ do
+                   let bodytype = case map identType mergevars of
+                                    [t]        -> t
+                                    mergetypes -> Tuple mergetypes pos
+                   snd <$> (require [bodytype] =<< checkExp loopbody)
+  binding mergevars $ do
+    (letbodyt, letbody') <- checkExp letbody
+    return (letbodyt, DoLoop merges' (Ident loopvar (Int pos) pos) boundexp' loopbody' letbody' pos)
 
 checkLiteral :: Value -> TypeM (Type, Value)
 checkLiteral (IntVal k pos) = return (Int pos, IntVal k pos)

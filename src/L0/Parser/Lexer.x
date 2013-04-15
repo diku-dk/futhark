@@ -65,9 +65,9 @@ keyword s =
     "then"         -> THEN
     "else"         -> ELSE
     "let"          -> LET
+    "loop"         -> LOOP
     "in"           -> IN
     "with"         -> WITH
-    "merge"        -> MERGE
     "int"          -> INT
     "real"         -> REAL
     "bool"         -> BOOL
