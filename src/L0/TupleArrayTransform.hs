@@ -40,10 +40,6 @@ new k = do (name, src) <- gets $ newName k . envNameSrc
            modify $ \s -> s { envNameSrc = src }
            return name
 
-substituting :: M.Map String [Ident Type] -> TransformM a -> TransformM a
-substituting substs =
-  local (\s -> s { envVarSubst = substs `M.union` envVarSubst s })
-
 transformType :: Type -> Type
 transformType (Array (Tuple elemts _) size loc) =
   Tuple (map (transformType . arraytype) elemts) loc
@@ -128,20 +124,14 @@ transformExp (Index vname idxs intype outtype loc) = do
   where intype' = transformType intype
         outtype' = transformType outtype
         vname' = transformIdent vname
-transformExp (DoLoop i bound body mergevars loc) = do
+transformExp (DoLoop merges i bound loopbody letbody loc) = do
   bound' <- transformExp bound
-  (mergevars', substs, lets) <-
-    foldM procmvar ([], M.empty, id) $ map transformIdent mergevars
-  substituting substs $ do
-    body' <- transformExp body
-    return $ lets $ DoLoop i bound' body' mergevars' loc
-  where procmvar (mvars, substs, inner) mvar@(Ident name (Tuple ets _) _) = do
-          names <- map fst <$> mapM (newVar "mvar") ets
-          return (mvars ++ names,
-                  M.insert name names substs,
-                  \inner' -> inner $ LetPat (TupId (map Id names) loc) (Var mvar) inner' loc)
-        procmvar (mvars, substs, inner) mvar =
-          return (mvars ++ [mvar], substs, inner)
+  merges' <- forM merges $ \(var, e) -> do
+               e'   <- transformExp e
+               return (transformIdent var, e')
+  loopbody' <- transformExp loopbody
+  letbody' <- transformExp letbody
+  return $ DoLoop merges' i bound' loopbody' letbody' loc
 transformExp (LetWith name src idxs valexp body loc) = do
   idxs' <- mapM transformExp idxs
   body' <- transformExp body
