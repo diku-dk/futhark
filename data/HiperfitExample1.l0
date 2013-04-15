@@ -69,17 +69,17 @@ fun ([real]*[real]) tridag
     let bet = 1.0/b[0] in
     let (u, uu) = (replicate(n,0.0), replicate(n,0.0)) in
     let u[0] = r[0] * bet in
-    let (u=u, uu=uu, bet=bet) =
+    loop (u, uu, bet) =
       for j < n-1 do
         let j = j + 1 in
         let uu[j] = c[j-1]*bet in
         let bet = 1.0/(b[j] - a[j] * uu[j]) in
         let u[j] = (r[j] - a[j]*u[j-1]) * bet in
         (u, uu, bet) in
-    let (u=u) = for j < n - 1 do
-              let j = n - 2 - j in
-              let u[j] = u[j] - uu[j+1]*u[j+1] in
-              u
+    loop (u) = for j < n - 1 do
+                 let j = n - 2 - j in
+                 let u[j] = u[j] - uu[j+1]*u[j+1] in
+                 u
     in (u, uu)
 
 fun [[real]] explicitX
@@ -134,7 +134,7 @@ fun [[real]] rollback
                                          iota(numX))) in
                 let (uj, yy) = tridag(a,b,c,uj,numX) in uj,
             zip(u, iota(numY))) in
-    let (myResult=myResult) =
+    loop (myResult) =
       for i < numX do
        let (a,b,c) = unzip(map(fn (real*real*real) (int j) =>
                                  (~0.5*(myMuY[i,j]*myDy[j,0]+0.5*myVarY[i,j]*myDyy[j,0]),
@@ -142,9 +142,9 @@ fun [[real]] rollback
                                   ~0.5*(myMuY[i,j]*myDy[j,2]+0.5*myVarY[i,j]*myDyy[j,2])),
                                   iota(numY))) in
        let y = replicate(numY, 0.0) in
-       let (y=y) = for j < numY do
-                   let y[j] = dtInv * u[j,i] - 0.5*v[i,j] in
-                   y in
+       loop (y) = for j < numY do
+                    let y[j] = dtInv * u[j,i] - 0.5*v[i,j] in
+                    y in
        let (ri, yy) = tridag(a,b,c,y,numY) in
        let myResult[i] = ri in myResult
     in myResult
@@ -157,7 +157,7 @@ fun real value(real s0, real strike, real t, real alpha, real nu, real beta) =
     let (myDy, myDyy) = initOperator(myY) in
     let myResult = setPayoff(strike, myX, myY) in
     let indices = map(fn int (int i) => numT-2-i,  iota(numT-1)) in
-    let (myResult=myResult, myMuX=myMuX, myVarX=myVarX, myMuY=myMuY, myVarY=myVarY) =
+    loop (myResult, myMuX, myVarX, myMuY, myVarY) =
         for i < numT - 1 do
             let i = numT-2-i in
             let (myMuX, myVarX, myMuY, myVarY) =

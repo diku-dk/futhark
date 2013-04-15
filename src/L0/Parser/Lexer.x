@@ -65,6 +65,7 @@ keyword s =
     "then"         -> THEN
     "else"         -> ELSE
     "let"          -> LET
+    "loop"         -> LOOP
     "in"           -> IN
     "with"         -> WITH
     "int"          -> INT
