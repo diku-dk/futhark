@@ -7,9 +7,14 @@ module L0.FreshNames
 
 import L0.AbSyn
 
+import Data.Char (isDigit)
 import qualified Data.Set as S
 
 data NameSource = NameSource Int (S.Set String)
+
+-- | Chop off terminating underscore followed by numbers.
+baseName :: String -> String
+baseName = reverse . dropWhile (=='_') . dropWhile isDigit . reverse
 
 -- | Create a new 'NameSource' that will never produce any of the
 -- names in the given list.
@@ -24,7 +29,7 @@ newNameSourceForProg = newNameSource . progNames
 -- | Produce a fresh name, using the given string as a template.
 newName :: String -> NameSource -> (String, NameSource)
 newName s (NameSource counter skip) =
-  let s' = s ++ "_" ++ show counter
+  let s' = baseName s ++ "_" ++ show counter
   in if s' `S.member` skip then newName s newsrc
      else (s', newsrc)
   where newsrc = NameSource (counter+1) skip
