@@ -1,13 +1,3 @@
-fun int putint (int x) =
-    let x = write (x) in
-    let foo = write("\n") in
-    x
-
-fun real putreal(real x) =
-    let x = write (x) in
-    let foo = write("\n") in
-    x
-
 fun (int*int*[real]*[real]*[real]*[[real]]*[[real]]*[[real]]*[[real]]) initGrid
     (real s0, real alpha, real nu, real t, int numX, int numY, int numT) =
     let logAlpha = log(alpha) in
@@ -173,4 +163,4 @@ fun [real] main () =
     let (s0, strike, t, alpha, nu, beta) = (0.03, 0.03, 5.0, 0.2, 0.6, 0.5) in
     let strikes = map(fn real (int i) => 0.001*toReal(i), iota(OUTER_LOOP_COUNT)) in
     let res = map(fn real (real x) => value(s0, x, t, alpha, nu, beta), strikes) in
-    write(res)
+    res

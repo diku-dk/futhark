@@ -237,10 +237,8 @@ fun real main() =
     //let x = write(bs_mat) in
 
     let payoffs   = map ( payoff2(md_disc), bs_mat ) in
-    let payoff    = reduce ( op +, 0.0, payoffs )       in
-    let result = write(payoff / toReal(num_mc_it)) in
-    let nl = write('\n') in
-    result
+    let payoff    = trace(reduce ( op +, 0.0, payoffs ))       in
+    payoff / toReal(num_mc_it)
 
 ////////////////////////////////////////
 // PAYOFF FUNCTION

@@ -1,13 +1,14 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, ScopedTypeVariables #-}
 module L0.Interpreter
-  ( runProg
-  , runProgIO
-  , runFun
+  ( runFun
+  , runFunNoTrace
+  , Trace
   , InterpreterError(..) )
 where
 
 import Control.Applicative
 import Control.Monad.Reader
+import Control.Monad.Writer
 import Control.Monad.Error
 
 import Data.Array
@@ -16,12 +17,11 @@ import Data.List
 import Data.Loc
 import qualified Data.Map as M
 
-import System.IO (hFlush, stdout)
-
 import L0.AbSyn
-import L0.Parser
+-- import L0.Parser
 
-data InterpreterError = MissingMainFunction
+data InterpreterError = MissingEntryPoint String
+                      | InvalidEntryPointArguments String [Type] [Type]
                       | IndexOutOfBounds SrcLoc Int Int
                       -- ^ First @Int@ is array size, second is attempted index.
                       | NegativeIota SrcLoc Int
@@ -32,8 +32,13 @@ data InterpreterError = MissingMainFunction
                       | TypeError SrcLoc String
 
 instance Show InterpreterError where
-  show MissingMainFunction =
-    "No main function defined."
+  show (MissingEntryPoint fname) =
+    "Program entry point '" ++ fname ++ "' not defined."
+  show (InvalidEntryPointArguments fname expected got) =
+    "Entry point '" ++ fname ++ "' expected argument(s) of type " ++
+    intercalate ", " (map ppType expected) ++
+    " but got argument(s) of type " ++
+    intercalate ", " (map ppType got) ++ "."
   show (IndexOutOfBounds pos arrsz i) =
     "Array index " ++ show i ++ " out of bounds of array size " ++ show arrsz ++ " at " ++ locStr pos ++ "."
   show (NegativeIota pos n) =
@@ -50,90 +55,77 @@ instance Show InterpreterError where
 instance Error InterpreterError where
   strMsg = TypeError noLoc
 
-data L0Env m = L0Env { envVtable  :: M.Map String Value
-                     , envFtable  :: M.Map String ([Value] -> L0M m Value)
-                     , envWriteOp :: String -> L0M m ()
-                     , envReadOp  :: L0M m String }
+data L0Env = L0Env { envVtable  :: M.Map String Value
+                   , envFtable  :: M.Map String ([Value] -> L0M Value)
+                   }
 
-newtype L0M m a = L0M (ReaderT (L0Env m) (ErrorT InterpreterError m) a)
-  deriving (MonadReader (L0Env m), Monad, Applicative, Functor)
+type Trace = [(SrcLoc, String)]
 
-runL0M :: L0M m a -> L0Env m -> m (Either InterpreterError a)
-runL0M (L0M m) env = runErrorT (runReaderT m env)
+newtype L0M a = L0M (ReaderT L0Env
+                     (ErrorT InterpreterError
+                      (Writer Trace)) a)
+  deriving (MonadReader L0Env, MonadWriter Trace, Monad, Applicative, Functor)
 
-bad :: Monad m => InterpreterError -> L0M m a
+runL0M :: L0M a -> L0Env -> (Either InterpreterError a, Trace)
+runL0M (L0M m) env = runWriter $ runErrorT $ runReaderT m env
+
+bad :: InterpreterError -> L0M a
 bad = L0M . throwError
 
-bindVar :: L0Env m -> (Ident Type, Value) -> L0Env m
+bindVar :: L0Env -> (Ident Type, Value) -> L0Env
 bindVar env (Ident name _ _,val) =
   env { envVtable = M.insert name val $ envVtable env }
 
-bindVars :: L0Env m -> [(Ident Type, Value)] -> L0Env m
+bindVars :: L0Env -> [(Ident Type, Value)] -> L0Env
 bindVars = foldl bindVar
 
-binding :: Monad m => [(Ident Type, Value)] -> L0M m a -> L0M m a
+binding :: [(Ident Type, Value)] -> L0M a -> L0M a
 binding bnds = local (`bindVars` bnds)
 
-lookupVar :: Monad m => String -> L0M m Value
+lookupVar :: String -> L0M Value
 lookupVar vname = do val <- asks $ M.lookup vname . envVtable
                      case val of Just val' -> return val'
                                  Nothing   -> bad $ TypeError noLoc $ "lookupVar " ++ vname
 
-lookupFun :: Monad m => String -> L0M m ([Value] -> L0M m Value)
+lookupFun :: String -> L0M ([Value] -> L0M Value)
 lookupFun fname = do fun <- asks $ M.lookup fname . envFtable
                      case fun of Just fun' -> return fun'
                                  Nothing   -> bad $ TypeError noLoc $ "lookupFun " ++ fname
 
-arrToList :: Monad m => Value -> L0M m [Value]
+arrToList :: Value -> L0M [Value]
 arrToList (ArrayVal l _ _) = return $ elems l
 arrToList v = bad $ TypeError (srclocOf v) "arrToList"
 
-tupToList :: Monad m => Value -> L0M m [Value]
+tupToList :: Value -> L0M [Value]
 tupToList (TupVal l _) = return l
-tupToList v = bad $ TypeError (srclocOf v) "tupToList"    
-
-
-runProgIO :: Prog Type -> IO (Either InterpreterError Value)
-runProgIO = runProg putStr (hFlush stdout >> getLine)
-
-runProg :: (Applicative m, Monad m) => (String -> m ()) -> m String
-        -> Prog Type -> m (Either InterpreterError Value)
-runProg wop rop prog = do
-  let ftable = foldl expand builtins prog
-      l0env = L0Env { envVtable = M.empty
-                    , envFtable = ftable
-                    , envWriteOp = L0M . lift . lift . wop
-                    , envReadOp = L0M $ lift $ lift rop }
-      runmain = case M.lookup "main" ftable of
-                  Nothing -> bad MissingMainFunction
-                  Just mainfun -> mainfun []
-  runL0M runmain l0env
-  where
-    -- We assume that the program already passed the type checker, so
-    -- we don't check for duplicate definitions or anything.
-    expand ftable (name,_,params,body,_) =
-        let fun args = binding (zip params args) $ evalExp body
-        in M.insert name fun ftable
-
+tupToList v = bad $ TypeError (srclocOf v) "tupToList"
 
 --------------------------------------------------
 ------- Interpreting an arbitrary function -------
 --------------------------------------------------
 
-runFun :: String -> [Value] -> Prog Type -> Maybe (Either InterpreterError Value)
-runFun fname aargs prog = do
-    let wop = const Nothing
-    let rop = Nothing
-    let ftable = foldl expand builtins prog
-        l0env = L0Env { envVtable  = M.empty
-                      , envFtable  = ftable
-                      , envWriteOp = L0M . lift . lift . wop
-                      , envReadOp  = L0M $ lift $ lift rop }
-        runfun  = case M.lookup fname ftable of
-                    Nothing -> bad MissingMainFunction
-                    Just curfun -> curfun aargs
-    runL0M runfun l0env
+runFunNoTrace :: String -> [Value] -> Prog Type -> Either InterpreterError Value
+runFunNoTrace = ((.) . (.) . (.)) fst runFun -- I admit this is just for fun.
+
+runFun :: String -> [Value] -> Prog Type -> (Either InterpreterError Value, Trace)
+runFun fname mainargs prog = do
+  let ftable = foldl expand builtins prog
+      l0env = L0Env { envVtable = M.empty
+                    , envFtable = ftable
+                    }
+      runmain = case funDecByName fname prog of
+                  Nothing -> bad $ MissingEntryPoint fname
+                  Just (_,rettype,fparams,_,_)
+                    | map valueType mainargs == map identType fparams ->
+                      evalExp (Apply fname (map Literal mainargs) rettype noLoc)
+                    | otherwise ->
+                      bad $ InvalidEntryPointArguments fname
+                            (map identType fparams)
+                            (map valueType mainargs)
+  runL0M runmain l0env
   where
+    -- We assume that the program already passed the type checker, so
+    -- we don't check for duplicate definitions or anything.
     expand ftable (name,_,params,body,_) =
         let fun args = binding (zip params args) $ evalExp body
         in M.insert name fun ftable
@@ -145,7 +137,7 @@ runFun fname aargs prog = do
 --------------------------------------------
 --------------------------------------------
 
-builtins :: (Applicative m, Monad m) => M.Map String ([Value] -> L0M m Value)
+builtins :: M.Map String ([Value] -> L0M Value)
 builtins = M.fromList [("toReal", builtin "toReal")
                       ,("trunc", builtin "trunc")
                       ,("sqrt", builtin "sqrt")
@@ -154,7 +146,7 @@ builtins = M.fromList [("toReal", builtin "toReal")
                       ,("op not", builtin "op not")
                       ,("op ~", builtin "op ~")]
 
-builtin :: (Applicative m, Monad m) => String -> [Value] -> L0M m Value
+builtin :: String -> [Value] -> L0M Value
 builtin "toReal" [IntVal x pos] = return $ RealVal (fromIntegral x) pos
 builtin "trunc" [RealVal x pos] = return $ IntVal (truncate x) pos
 builtin "sqrt" [RealVal x pos] = return $ RealVal (sqrt x) pos
@@ -170,7 +162,7 @@ builtin fname _ = bad $ TypeError noLoc $ "Builtin " ++ fname
 --------------------------------------------
 
 
-evalExp :: (Applicative m, Monad m) => Exp Type -> L0M m Value
+evalExp :: Exp Type -> L0M Value
 evalExp (Literal val) = return val
 evalExp (TupLit es pos) =
   TupVal <$> mapM evalExp es <*> pure pos
@@ -232,6 +224,10 @@ evalExp (If e1 e2 e3 _ pos) = do
             _              -> bad $ TypeError pos "evalExp If"
 evalExp (Var (Ident name _ _)) =
   lookupVar name
+evalExp (Apply "trace" [arg] _ loc) = do
+  arg' <- evalExp arg
+  tell [(loc, ppValue arg')]
+  return arg'
 evalExp (Apply fname args _ _) = do
   fun <- lookupFun fname
   args' <- mapM evalExp args
@@ -378,6 +374,7 @@ evalExp (Concat arr1exp arr2exp intype pos) = do
   elems2 <- arrToList =<< evalExp arr2exp
   return $ arrayVal (elems1 ++ elems2) intype pos
 evalExp (Copy e _) = evalExp e
+{-
 evalExp (Read t pos) = do
   s <- join $ asks envReadOp
   case liftM check $ parsefun "input" s of
@@ -403,6 +400,7 @@ evalExp (Write e _ _) = do
           where char (CharVal c _) = Just c
                 char _             = Nothing
         write v = ppValue v
+-}
 evalExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody pos) = do
   bound <- evalExp boundexp
   mergestart <- evalExp mergeexp
@@ -414,8 +412,7 @@ evalExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody pos) = do
           binding [(loopvar, IntVal i pos)] $
             evalExp $ LetPat mergepat (Literal mergeval) loopbody pos
 
-evalIntBinOp :: (Applicative m, Monad m) =>
-                (Int -> Int -> Int) -> Exp Type -> Exp Type -> SrcLoc -> L0M m Value
+evalIntBinOp :: (Int -> Int -> Int) -> Exp Type -> Exp Type -> SrcLoc -> L0M Value
 evalIntBinOp op e1 e2 pos = do
   v1 <- evalExp e1
   v2 <- evalExp e2
@@ -423,8 +420,7 @@ evalIntBinOp op e1 e2 pos = do
     (IntVal x _, IntVal y _) -> return $ IntVal (op x y) pos
     _                        -> bad $ TypeError pos "evalIntBinOp"
 
-evalRealBinOp :: (Applicative m, Monad m) =>
-                 (Double -> Double -> Double) -> Exp Type -> Exp Type -> SrcLoc -> L0M m Value
+evalRealBinOp :: (Double -> Double -> Double) -> Exp Type -> Exp Type -> SrcLoc -> L0M Value
 evalRealBinOp op e1 e2 pos = do
   v1 <- evalExp e1
   v2 <- evalExp e2
@@ -432,8 +428,7 @@ evalRealBinOp op e1 e2 pos = do
     (RealVal x _, RealVal y _) -> return $ RealVal (op x y) pos
     _                          -> bad $ TypeError pos $ "evalRealBinOp " ++ ppValue v1 ++ " " ++ ppValue v2
 
-evalBoolBinOp :: (Applicative m, Monad m) =>
-                 (Bool -> Bool -> Bool) -> Exp Type -> Exp Type -> SrcLoc -> L0M m Value
+evalBoolBinOp :: (Bool -> Bool -> Bool) -> Exp Type -> Exp Type -> SrcLoc -> L0M Value
 evalBoolBinOp op e1 e2 pos = do
   v1 <- evalExp e1
   v2 <- evalExp e2
@@ -448,7 +443,7 @@ evalPattern (TupId pats _) (TupVal vs _)
     concat <$> zipWithM evalPattern pats vs
 evalPattern _ _ = Nothing
 
-applyLambda :: (Applicative m, Monad m) => Lambda Type -> [Value] -> L0M m Value
+applyLambda :: Lambda Type -> [Value] -> L0M Value
 applyLambda (AnonymFun params body _ _) args =
   binding (zip params args) $ evalExp body
 applyLambda (CurryFun name curryargs _ _) args = do

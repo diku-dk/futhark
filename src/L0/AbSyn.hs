@@ -35,6 +35,7 @@ module L0.AbSyn
   , ppTupId
   , FunDec
   , Prog
+  , funDecByName
   , progNames
   , prettyPrint
   )
@@ -300,13 +301,6 @@ data Exp ty = Literal Value
             -- Copy the value return by the expression.  This only
             -- makes a difference in do-loops with merge variables.
 
-            -- IO
-            | Read Type SrcLoc
-             -- e.g., read(int); 1st arg is a basic-type, i.e., of the to-be-read element *)
-
-            | Write (Exp ty) ty SrcLoc
-             -- e.g., write(map(f, replicate(3,1))) writes array {f(1),f(1),f(1)} *)
-             -- 2nd arg is the type of the to-be-written expression *)
             | DoLoop
               (TupIdent ty) -- ^ Merge variable pattern
               (Exp ty) -- ^ Initial values of merge variables.
@@ -349,8 +343,6 @@ instance Located (Exp ty) where
   locOf (Split _ _ _ pos) = locOf pos
   locOf (Concat _ _ _ pos) = locOf pos
   locOf (Copy _ pos) = locOf pos
-  locOf (Read _ pos) = locOf pos
-  locOf (Write _ _ pos) = locOf pos
   locOf (DoLoop _ _ _ _ _ _ pos) = locOf pos
 
 -- | Given an expression with known types, return its type.
@@ -385,8 +377,6 @@ expType (Redomap _ _ _ _ _ t loc) = Array t Nothing loc
 expType (Split _ _ t pos) = Tuple [Array t Nothing pos, Array t Nothing pos] $ srclocOf t
 expType (Concat _ _ t _) = Array t Nothing $ srclocOf t
 expType (Copy e _) = expType e
-expType (Read t _) = boxType t
-expType (Write _ t _) = t
 expType (DoLoop _ _ _ _ _ body _) = expType body
 
 -- | Eagerly evaluated binary operators.  In particular, the
@@ -471,6 +461,9 @@ progNames :: forall ty.TypeBox ty => Prog ty -> [String]
 progNames = everything union (mkQ [] identName')
   where identName' :: Ident ty -> [String]
         identName' k = [identName k]
+
+funDecByName :: String -> Prog ty -> Maybe (FunDec ty)
+funDecByName fname = find (\(fname',_,_,_,_) -> fname == fname')
 
 -- Pretty-Printing Functionality
 
@@ -574,8 +567,6 @@ ppExp d (Split  idx arr _ _) = " split ( " ++ ppExp d idx ++ ", " ++ ppExp d arr
 ppExp d (Concat a1  a2 _ _) = " concat ( " ++ ppExp d a1 ++ ", " ++ ppExp d a2 ++ " ) "
 ppExp d (Copy e _) = " copy ( " ++ ppExp d e ++ " ) "
 
-ppExp _ (Read t _) = " read("  ++ ppType t  ++ ") "
-ppExp d (Write e _ _) = " write("  ++ ppExp d e  ++ ") "
 ppExp d (DoLoop mvpat mvexp i n loopbody letbody _) =
   "\n" ++ spaces d ++ "loop (" ++ ppTupId mvpat ++ " = " ++ ppExp d mvexp ++
     ") = " ++ "for " ++ identName i ++ " < " ++ ppExp d n ++ " do\n" ++

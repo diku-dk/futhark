@@ -85,8 +85,6 @@ import L0.Parser.Lexer
       reduce          { L $$ REDUCE }
       reshape         { L $$ RESHAPE }
       transpose       { L $$ TRANSPOSE }
-      read            { L $$ READ }
-      write           { L $$ WRITE }
       zip             { L $$ ZIP }
       unzip           { L $$ UNZIP }
       scan            { L $$ SCAN }
@@ -208,9 +206,6 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal $ IntVal num pos 
                         in Apply name $3 Nothing pos }
      | id '(' ')'     { let L pos (ID name) = $1
                         in Apply name [] Nothing pos }
-
-     | read '(' Type ')' { Read $3 $1 }
-     | write '(' Exp ')' { Write $3 Nothing $1 }
 
      | iota '(' Exp ')' { Iota $3 $1 }
 

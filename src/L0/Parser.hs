@@ -7,6 +7,7 @@ module L0.Parser
   , parseString
   , parseArray
   , parseTuple
+  , parseValue
   )
   where
 
@@ -39,3 +40,13 @@ parseTuple file = tupleValue <=< alexScanTokens file
 
 parseArray :: FilePath -> String -> Either String Value
 parseArray file = arrayValue <=< alexScanTokens file
+
+parseValue :: FilePath -> String -> Either String Value
+parseValue file s = msum $ map (\f -> f file s)
+                    [parseInt,
+                     parseReal,
+                     parseBool,
+                     parseChar,
+                     parseString,
+                     parseArray,
+                     parseTuple]
