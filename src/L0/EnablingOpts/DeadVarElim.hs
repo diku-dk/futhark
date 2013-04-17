@@ -173,19 +173,18 @@ deadCodeElimExp (Index s idxs t1 t2 pos) = do
             idxs' <- mapM deadCodeElimExp idxs
             return $ Index s idxs' t1 t2 pos
 
-deadCodeElimExp (DoLoop idexps idd n loopbdy letbdy pos) = do
-    let (ids, exps) = unzip idexps
-    let idnms       = map identName ids
+deadCodeElimExp (DoLoop mergepat mergeexp idd n loopbdy letbdy pos) = do
+    let idnms = getBnds mergepat
     (letbdy',noref) <- collectRes idnms $ binding idnms $ deadCodeElimExp letbdy
     cg              <- asks $ callGraph
     -- `hasIO' test might give O(N^n) complexity if loop-nest of high degree
     -- the alternative is to return the 
     if noref && not (hasIO cg loopbdy)
     then changed $ return letbdy'
-    else do exps'   <- mapM deadCodeElimExp exps
+    else do mergeexp'   <- deadCodeElimExp mergeexp
             n'      <- deadCodeElimExp n
             loopbdy'<- binding ( (identName idd) : idnms) $ deadCodeElimExp loopbdy
-            return $ DoLoop (zip ids exps') idd n' loopbdy' letbdy' pos
+            return $ DoLoop mergepat mergeexp' idd n' loopbdy' letbdy' pos
 
 
 
