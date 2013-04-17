@@ -9,12 +9,11 @@ fun (int*int) main() =
     let z  = replicate(n+n, y) in   // [[[Int,n],n],m+n]
     let q  = z[n-2]            in   // [[Int,n],n]
 
-    let (q,res) = 
+    loop (m,x) = 
         for i < n-1 do
             let x[i] = (m*1)            in
             let m    = m + x[i+1]       in
             let m    = m + z[n-1,n-2,i] in
                 (m, x)
-        merge (m,x)
-
-    in (m, m + res[n/2])
+    in let qq = m*(2-1) in 
+        (qq, m + x[n/2])
