@@ -48,7 +48,7 @@ import Data.Generics
 import Data.Loc
 
 isBuiltInFun :: String -> Bool
-isBuiltInFun fnm = elem fnm ["toReal", "trunc", "sqrt", "log", "exp"]
+isBuiltInFun fnm = elem fnm ["toReal", "trunc", "sqrt", "log", "exp", "trace"]
 
 locStr :: SrcLoc -> String
 locStr (SrcLoc NoLoc) = "unknown location"

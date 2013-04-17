@@ -13,12 +13,12 @@ import Data.Data
 import Data.Generics
 
 import qualified Data.Set as S
-import qualified Data.Map as M
+--import qualified Data.Map as M
 
 import L0.AbSyn
  
-import L0.EnablingOpts.GenPatterns
-import L0.EnablingOpts.InliningDeadFun
+--import L0.EnablingOpts.GenPatterns
+--import L0.EnablingOpts.InliningDeadFun
 import L0.EnablingOpts.EnablingOptErrors
 
 
@@ -30,7 +30,6 @@ import L0.EnablingOpts.EnablingOptErrors
 
 data DCElimEnv tf = DCElimEnv {   
                         envVtable  :: S.Set String
-                      , callGraph  :: CallGraph
                   }
 
 -----------------------------------------------------
@@ -101,8 +100,7 @@ binding bnds = local (`bindVars` bnds)
 -- TypeBox tf => 
 deadCodeElim :: TypeBox tf => Prog tf -> Either EnablingOptError (Bool, Prog tf)
 deadCodeElim prog = do
-    cg <- buildCG prog
-    let env = DCElimEnv { envVtable = S.empty, callGraph = cg }
+    let env = DCElimEnv { envVtable = S.empty }
     (rs, res) <- runDCElimM (mapM deadCodeElimFun prog) env
     return (resSuccess res, rs)
 
@@ -125,8 +123,7 @@ deadCodeElimExp (LetPat pat e body pos) = do
     let ids = getBnds pat
     (body', noref) <- collectRes ids $ binding ids $ deadCodeElimExp body
 
-    cg  <- asks $ callGraph
-    let torem = noref && not (hasIO cg e)
+    let torem = noref 
     if torem 
     then changed $ return body'
     else do
@@ -136,11 +133,8 @@ deadCodeElimExp (LetPat pat e body pos) = do
 
 deadCodeElimExp (LetWith nm src inds el body pos) = do
     (body', noref) <- collectRes [identName nm] $ binding [identName nm] $ deadCodeElimExp body
-
-    cg  <- asks $ callGraph
     
-    let torem = noref && not ( foldl (||) False ( map (hasIO cg) (el:inds) ) ) 
-    if torem 
+    if noref 
     then changed $ return body'
     else do
             let srcnm = identName src
@@ -176,10 +170,7 @@ deadCodeElimExp (Index s idxs t1 t2 pos) = do
 deadCodeElimExp (DoLoop mergepat mergeexp idd n loopbdy letbdy pos) = do
     let idnms = getBnds mergepat
     (letbdy',noref) <- collectRes idnms $ binding idnms $ deadCodeElimExp letbdy
-    cg              <- asks $ callGraph
-    -- `hasIO' test might give O(N^n) complexity if loop-nest of high degree
-    -- the alternative is to return the 
-    if noref && not (hasIO cg loopbdy)
+    if noref 
     then changed $ return letbdy'
     else do mergeexp'   <- deadCodeElimExp mergeexp
             n'      <- deadCodeElimExp n
@@ -219,37 +210,3 @@ getBnds :: TypeBox tf => TupIdent tf -> [String]
 getBnds ( Id (Ident var _ _) ) = [var]
 getBnds ( TupId ids _ ) = foldl (++) [] (map getBnds ids)
 
-hasIO :: TypeBox tf => CallGraph -> Exp tf -> Bool
-hasIO _  (Read  _ _    ) = True
-hasIO _  (Write _ _ _  ) = True
-hasIO cg (Apply f _ _ _) = 
-  if isBuiltInFun f
-  then False
-  else 
-    case M.lookup f cg of
-        Just (_,_,has_io) -> has_io
-        Nothing           -> error $ "In hasIO, DeadVarElims: Function "++f++" not in call graph!"
-    
-hasIO call_graph cur_exp =
-    let (_, has_io) = foldlPattern combine doLam (call_graph, False) cur_exp
-    in  has_io
-
-    where
-        combine :: TypeBox tf => (CallGraph, Bool) -> Exp tf -> (CallGraph, Bool)
-        combine (cg, has_io) e = (cg, has_io || hasIO cg e)
-
-        doLam :: TypeBox tf => (CallGraph, Bool) -> Lambda tf -> (CallGraph, Bool)
-        doLam (cg, hio) (AnonymFun _    _ _ _) = (cg, hio)
-        doLam (cg, hio) (CurryFun fname _ _ _) = 
-          if isBuiltInFun fname
-          then (cg, hio)
-          else
-            case M.lookup fname cg of
-                Just (_,_,has_io') -> (cg, hio || has_io')
-                Nothing            -> error $ "In hasIO, DeadVarElims: Function "++fname++" not in call graph!" 
-                                      --(cg, True)
-
-
---foldlPattern :: TypeBox tf =>   (a -> Exp tf    -> a) -> 
---                                (a -> Lambda tf -> a) -> 
---                                a -> Exp tf -> a
