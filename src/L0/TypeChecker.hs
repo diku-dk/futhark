@@ -500,22 +500,16 @@ checkExp (Write e t pos) = do
   (et, e') <- checkSubExp e
   t' <- t `unifyWithKnown` et
   return (t', Write e' t' pos)
-checkExp (DoLoop merges (Ident loopvar _ _) boundexp loopbody letbody pos) = do
-  merges' <- forM merges $ \(var, e) -> do
-               (t, e') <- checkExp e
-               t' <- identType var `unifyWithKnown` t
-               return (var { identType = t' }, e')
-  let mergevars = map fst merges'
+checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _) boundexp loopbody letbody pos) = do
+  (mergetype, mergeexp') <- checkExp mergeexp
+  (bnds, mergepat') <- checkPattern mergepat mergetype
   (_, boundexp') <- require [Int pos] =<< checkSubExp boundexp
-  loopbody' <- merging mergevars $
-                 binding [Ident loopvar (Int pos) pos] $ do
-                   let bodytype = case map identType mergevars of
-                                    [t]        -> t
-                                    mergetypes -> Tuple mergetypes pos
-                   snd <$> (require [bodytype] =<< checkExp loopbody)
-  binding mergevars $ do
+  loopbody' <- merging bnds $
+                 binding [Ident loopvar (Int pos) pos] $
+                   snd <$> (require [mergetype] =<< checkExp loopbody)
+  binding bnds $ do
     (letbodyt, letbody') <- checkExp letbody
-    return (letbodyt, DoLoop merges' (Ident loopvar (Int pos) pos) boundexp' loopbody' letbody' pos)
+    return (letbodyt, DoLoop mergepat' mergeexp' (Ident loopvar (Int pos) pos) boundexp' loopbody' letbody' pos)
 
 checkLiteral :: Value -> TypeM (Type, Value)
 checkLiteral (IntVal k pos) = return (Int pos, IntVal k pos)

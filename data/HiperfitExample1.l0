@@ -69,7 +69,7 @@ fun ([real]*[real]) tridag
     let bet = 1.0/b[0] in
     let (u, uu) = (replicate(n,0.0), replicate(n,0.0)) in
     let u[0] = r[0] * bet in
-    loop (u, uu, bet) =
+    loop ((u, uu, bet)) =
       for j < n-1 do
         let j = j + 1 in
         let uu[j] = c[j-1]*bet in
@@ -157,7 +157,7 @@ fun real value(real s0, real strike, real t, real alpha, real nu, real beta) =
     let (myDy, myDyy) = initOperator(myY) in
     let myResult = setPayoff(strike, myX, myY) in
     let indices = map(fn int (int i) => numT-2-i,  iota(numT-1)) in
-    loop (myResult, myMuX, myVarX, myMuY, myVarY) =
+    loop ((myResult, myMuX, myVarX, myMuY, myVarY)) =
         for i < numT - 1 do
             let i = numT-2-i in
             let (myMuX, myVarX, myMuY, myVarY) =
@@ -165,8 +165,8 @@ fun real value(real s0, real strike, real t, real alpha, real nu, real beta) =
             let myResult = rollback(myX, myY, myTimeline, myResult,
                                     myMuX, myDx, myDxx, myVarX,
                                     myMuY, myDy, myDyy, myVarY, i) in
-            (myResult, myMuX, myVarX, myMuY, myVarY)
-    in myResult[myXindex,myYindex]
+            (myResult, myMuX, myVarX, myMuY, myVarY) in
+    myResult[myXindex,myYindex]
 
 fun [real] main () =
     let OUTER_LOOP_COUNT = 8 in

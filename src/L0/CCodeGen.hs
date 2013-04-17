@@ -5,7 +5,6 @@ import Control.Applicative
 import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Reader
-import Control.Monad.Writer
 import qualified Data.Array as A
 import qualified Data.Map as M
 import Data.List
@@ -494,14 +493,12 @@ compileExp place (Apply fname args _ _) = do
 compileExp place (LetPat pat e body _) = do
   val <- new "let_value"
   e' <- compileExp (varExp val) e
-  (assignments, decls, bindings) <- compilePattern pat (varExp val)
+  let bindings = compilePattern pat (varExp val)
   body' <- binding bindings $ compileExp place body
   et <- expCType e
   return [C.cstm|{
-               $decls:decls
                $ty:et $id:val;
                $stm:e'
-               $stm:assignments
                $stm:body'
              }|]
 
@@ -639,10 +636,11 @@ compileExp place (Concat xarr yarr _ _) = do
                 (xrows:rest, yrows:_) ->
                   allocArray place ([C.cexp|$exp:xrows+$exp:yrows|]:rest) bt'
                 _ -> error "Zero-dimensional array in concat."
+      xsize = arraySliceSizeExp (varExp x) (expType xarr) 0
       copyx = arraySliceCopyStm
               [C.cexp|$exp:place.data|] (varExp x) (expType xarr) 0
       copyy = arraySliceCopyStm
-              [C.cexp|$exp:place.data+$id:x.dims[0]|] (varExp y) (expType yarr) 0
+              [C.cexp|$exp:place.data+$exp:xsize|] (varExp y) (expType yarr) 0
   return [C.cstm|{
                $ty:arrt $id:x, $id:y;
                $stm:xarr'
@@ -652,8 +650,6 @@ compileExp place (Concat xarr yarr _ _) = do
                  error(1, "Arguments to concat differ in size.");
                }
                $stm:alloc
-               memcpy($exp:place.dims, $id:x.dims, sizeof($id:x.dims));
-               $exp:place.dims[0] += $id:y.dims[0];
                $stm:copyx
                $stm:copyy
              }|]
@@ -704,30 +700,27 @@ compileExp place (LetWith name src idxs ve body _) = do
                $stm:body'
              }|]
 
-compileExp place (DoLoop merges loopvar boundexp loopbody letbody _) = do
+compileExp place (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody _) = do
   loopvar' <- new $ identName loopvar
   bound <- new "loop_bound"
-  mergevar <- new $ "loop_mergevar"
+  mergevarR <- new $ "loop_mergevar_read"
+  mergevarW <- new $ "loop_mergevar_write"
+  let bindings = compilePattern mergepat (varExp mergevarR)
+  mergeexp' <- compileExp (varExp mergevarR) mergeexp
   mergetype <- typeToCType $ expType loopbody
   boundexp' <- compileExp (varExp bound) boundexp
-  (initstms, mapping) <-
-    case merges of
-      [(var, e)] -> do e' <- compileExp (varExp mergevar) e
-                       return ([e'], [(identName var, varExp mergevar)])
-      _ -> liftM unzip . forM (zip merges [0..]) $ \((var, e), i) -> do
-             let field = tupleFieldExp (varExp mergevar) i
-             e' <- compileExp field e
-             return (e', (identName var, field))
-  loopbody' <- binding ((identName loopvar, varExp loopvar') : mapping) $
-               compileExp (varExp mergevar) loopbody
-  letbody' <- binding mapping $ compileExp place letbody
+  loopbody' <- binding ((identName loopvar, varExp loopvar') : bindings) $
+               compileExp (varExp mergevarW) loopbody
+  letbody' <- binding bindings $ compileExp place letbody
   return [C.cstm|{
                int $id:bound, $id:loopvar';
-               $ty:mergetype $id:mergevar;
+               $ty:mergetype $id:mergevarR;
+               $ty:mergetype $id:mergevarW;
+               $stm:mergeexp'
                $stm:boundexp'
-               $stms:initstms
                for ($id:loopvar' = 0; $id:loopvar' < $id:bound; $id:loopvar'++) {
                  $stm:loopbody'
+                 $id:mergevarR = $id:mergevarW;
                }
                $stm:letbody'
              }|]
@@ -838,17 +831,12 @@ compileExpInPlace place e
 compileExpInPlace place e = compileExp place e
 
 compilePattern :: TupIdent Type -> C.Exp
-               -> CompilerM (C.Stm, [C.InitGroup], [(String, C.Exp)])
-compilePattern pat vexp = flatten <$> runWriterT (compilePattern' pat vexp)
-  where flatten (a, (b, c)) = (a, b, c)
-        compilePattern' (Id (Ident name t _)) vexp' = do
-          ct <- lift $ typeToCType t
-          name' <- lift $ new name
-          tell ([[C.cdecl|$ty:ct $id:name';|]], [(name, varExp name')])
-          return [C.cstm|$id:name' = $exp:vexp';|]
+               -> [(String, C.Exp)]
+compilePattern pat vexp = compilePattern' pat vexp
+  where compilePattern' (Id var) vexp' = do
+          [(identName var, vexp')]
         compilePattern' (TupId pats _) vexp' = do
-          pats' <- zipWithM prep pats [(0::Int)..]
-          return [C.cstm|{$stms:pats'}|]
+          concat $ zipWith prep pats [(0::Int)..]
           where prep pat' i = compilePattern' pat' [C.cexp|$exp:vexp'.$id:field|]
                   where field = tupleField i
 
