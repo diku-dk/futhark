@@ -577,7 +577,7 @@ ppExp d (DoLoop mvs i n loopbody letbody _) =
   let ppMVar (v, e) = identName v ++ " = " ++ ppExp 0 e
   in "\n" ++ spaces (d+1) ++ "loop (" ++ intercalate ", " (map ppMVar mvs) ++
        ") = " ++ "for " ++ identName i ++ " < " ++ ppExp d n ++ " do " ++
-       "\n" ++ spaces(d+2) ++ ppExp d loopbody ++ "\n" ++ spaces(d+1) ++
+       spaces(d+2) ++ ppExp (d+2) loopbody ++ "\n" ++ spaces(d+1) ++
        "in " ++ ppExp (d+1) letbody
 ppBinOp :: BinOp -> String
 ppBinOp op = " " ++ opStr op ++ " "
