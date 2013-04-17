@@ -123,15 +123,15 @@ tupleNormExp (LetPat pat e body _) = do
 
 
 
-tupleNormExp (DoLoop idexps idd n loopbdy letbdy pos) = do
-    let (ids, exps) = unzip idexps
-    exps' <- mapM tupleNormExp exps
+tupleNormExp (DoLoop mergepat mergeexp idd n loopbdy letbdy pos) = do
+    (mergepat', bnds) <- mkFullPattern mergepat
+    mergeexp' <- tupleNormExp mergeexp
     n'    <- tupleNormExp n    
 
-    loopbdy' <- tupleNormAbstrFun ids loopbdy pos
-    letbdy'  <- tupleNormAbstrFun ids  letbdy pos
+    loopbdy' <- binding bnds $ tupleNormExp loopbdy
+    letbdy'  <- binding bnds $ tupleNormExp letbdy
 
-    return $ DoLoop (zip ids exps') idd n' loopbdy' letbdy' pos
+    return $ DoLoop mergepat' mergeexp' idd n' loopbdy' letbdy' pos
        
 ---------------------------------------------------------------
 -- OLD AND UGLY VERSION OF DO-LOOP

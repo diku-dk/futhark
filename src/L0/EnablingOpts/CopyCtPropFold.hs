@@ -181,13 +181,12 @@ copyCtPropExp (LetPat pat e body pos) = do
     else return $ LetPat pat e' body' pos
 
 
-copyCtPropExp (DoLoop idexps idd n loopbdy letbdy pos) = do
-    let (ids, inis) = unzip idexps
-    inis'    <- mapM copyCtPropExp inis
+copyCtPropExp (DoLoop mergepat mergeexp idd n loopbdy letbdy pos) = do
+    mergeexp'    <- copyCtPropExp mergeexp
     n'       <- copyCtPropExp n
     loopbdy' <- copyCtPropExp loopbdy
     letbdy'  <- copyCtPropExp letbdy
-    return $ DoLoop (zip ids inis') idd n' loopbdy' letbdy' pos
+    return $ DoLoop mergepat mergeexp' idd n' loopbdy' letbdy' pos
     
 {- 
 copyCtPropExp (DoLoop ind n body mergevars pos) = do

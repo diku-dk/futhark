@@ -168,13 +168,12 @@ letNormExp (LetWith nm src inds el body pos) = do
 --    return $ AnonymFun params body'' ret pos
 
 --letNormExp (DoLoop ind n body mergevars pos) = do
-letNormExp (DoLoop idexps idd n loopbdy letbdy pos) = do
+letNormExp (DoLoop mergepat mergeexp idd n loopbdy letbdy pos) = do
     -- the potential bindings from the loop-count 
     -- expression are handled in the outer-loop scope
     n'  <-  subLetoNormExp "tmp_ub" n
 
-    let (ids, exps) = unzip idexps
-    exps' <- mapM (subLetoNormExp "tmp_ini") exps
+    mergeexp' <- subLetoNormExp "tmp_ini" mergeexp
     
     -- a do-loop creates a scope, hence we need to treat the
     -- the binding at this level, similar to a let-construct
@@ -187,7 +186,7 @@ letNormExp (DoLoop idexps idd n loopbdy letbdy pos) = do
     let letbdy'' = makeLetExp pos letres' letbdy'
 
     -- finally return the new loop
-    return $ DoLoop (zip ids exps') idd n' loopbdy'' letbdy'' pos
+    return $ DoLoop mergepat mergeexp' idd n' loopbdy'' letbdy'' pos
     --makeVarExpSubst "tmp_loop" pos (DoLoop ind n' body'' mergevars pos)
     
 ------------------------------------
@@ -498,8 +497,8 @@ combinePats rp@(ReguPat y pos) e body =
             LetWith x1 x0 inds el (combinePats rp e_x body) pos_x
 
         -- let y = (loop (...) for i < N do loopbody in letbody) in body
-        DoLoop idexps idd n loopbdy letbdy pos_x ->
-            DoLoop idexps idd n loopbdy (combinePats rp letbdy body) pos_x
+        DoLoop mergepat mergeexp idd n loopbdy letbdy pos_x ->
+            DoLoop mergepat mergeexp idd n loopbdy (combinePats rp letbdy body) pos_x
 
         -- not a let bindings
         _ -> LetPat y e body pos
@@ -515,8 +514,8 @@ combinePats wp@(WithPat y1 y0 inds pos) el body =
             LetWith x1 x0 inds_x el_x (combinePats wp e_x body) pos_x
 
         -- let y1 = y0 with [inds] <- (loop (...) = for i < N do loopbdy in letbdy) in body
-        DoLoop idexps idd n loopbdy letbdy pos_x ->
-            DoLoop idexps idd n loopbdy (combinePats wp letbdy body) pos_x
+        DoLoop mergepat mergeexp idd n loopbdy letbdy pos_x ->
+            DoLoop mergepat mergeexp idd n loopbdy (combinePats wp letbdy body) pos_x
         
         -- not a let bindings
         _ -> LetWith y1 y0 inds el body pos    
