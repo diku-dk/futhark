@@ -11,13 +11,14 @@ import System.Exit (exitWith, ExitCode(..))
 import System.IO
 
 import L0.AbSyn
-import L0.Parser (parseL0)
+import L0.Parser (parseL0, parseValue)
 import L0.TypeChecker
 import L0.Renamer
 import L0.Interpreter
-import L0.EnablingOpts.EnablingOptDriver
+-- import L0.EnablingOpts.EnablingOptDriver
 import qualified L0.FirstOrderTransform as FOT
 import qualified L0.TupleArrayTransform as TAT
+import L0.Untrace
 import L0.CCodeGen
 
 type L0CM = ErrorT String (Writer String)
@@ -58,18 +59,31 @@ commandLineOptions =
     "Run the program via an interpreter."
   , tracepass [] ["trace"]
   , rename "r" ["rename"]
+  , uttransform "u" ["untrace"]
   , fotransform "f" ["first-order-transform"]
   , tatransform "t" ["tuple-of-arrays-transform"]
-  , eotransform "e" ["enabling-optimisations"]
+--  , eotransform "e" ["enabling-optimisations"]
   ]
 
 interpret :: Prog Type -> IO ()
-interpret prog = do
-  res <- runProgIO prog
-  case res of
-    Left err -> do hPutStrLn stderr $ "Interpreter error:\n" ++ show err
-                   exitWith $ ExitFailure 2
-    Right _  -> return ()
+interpret prog =
+  case funDecByName "main" prog of
+    Nothing -> do hPutStrLn stderr "Interpreter error: no main function."
+                  exitWith $ ExitFailure 2
+    Just (_,_,fparams,_,_) -> do
+      args <- forM fparams $ \_ -> do
+                line <- getLine
+                case parseValue "<stdin>" line of
+                  Left e -> do hPutStrLn stderr $ "Read error: " ++ e
+                               exitWith $ ExitFailure 2
+                  Right v -> return v
+      let (res, trace) = runFun "main" args prog
+      forM_ trace $ \(loc, what) ->
+        putStrLn $ locStr loc ++ ": " ++ what
+      case res of
+        Left err -> do hPutStrLn stderr $ "Interpreter error:\n" ++ show err
+                       exitWith $ ExitFailure 2
+        Right val  -> putStrLn $ "Result of evaluation: " ++ ppValue val
 
 tracepass :: String -> [String] -> L0Option
 tracepass short long =
@@ -112,13 +126,21 @@ tatransform =
        , passOp = return . TAT.transformProg
        }
 
+uttransform :: String -> [String] -> L0Option
+uttransform =
+  passoption "Remove debugging annotations from program."
+  Pass { passName = "debugging annotation removal"
+       , passOp = return . untraceProg
+       }
 
+{-
 eotransform :: String -> [String] -> L0Option
 eotransform =
   passoption "Perform simple enabling optimisations."
   Pass { passName = "enabling optimations"
        , passOp = either (throwError . show) return . enablingOpts
        }
+-}
 
 main :: IO ()
 main = do args <- getArgs

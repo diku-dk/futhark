@@ -52,8 +52,6 @@ data Token = IF
            | REDUCE
            | RESHAPE
            | TRANSPOSE
-           | READ
-           | WRITE
            | ZIP
            | UNZIP
            | SCAN

@@ -89,8 +89,6 @@ keyword s =
     "transpose"    -> TRANSPOSE
     "map"          -> MAP
     "reduce"       -> REDUCE
-    "read"         -> READ
-    "write"        -> WRITE
     "zip"          -> ZIP
     "unzip"        -> UNZIP
     "scan"         -> SCAN

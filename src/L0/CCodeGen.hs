@@ -116,6 +116,11 @@ tupleField i = "elem_" ++ show i
 tupleFieldExp :: C.Exp -> Int -> C.Exp
 tupleFieldExp e i = [C.cexp|$exp:e.$id:(tupleField i)|]
 
+-- | @funName f@ is the name of the C function corresponding to
+-- the L0 function @f@.
+funName :: String -> String
+funName = ("l0_"++)
+
 -- | The size is in elements.
 allocArray :: C.Exp -> [C.Exp] -> C.Type -> C.Stm
 allocArray place shape basetype =
@@ -220,10 +225,43 @@ printStm place t@(Array et _ _) = do
                putchar('}');
              }|]
 
+readStm :: C.Exp -> Type -> CompilerM C.Stm
+readStm place (Int _) =
+  return [C.cstm|scanf("%d", &$exp:place);|]
+readStm place (Char _) =
+  return [C.cstm|scanf("%c", &$exp:place);|]
+readStm place (Real _) =
+  return [C.cstm|scanf("%f", &$exp:place);|]
+readStm _ t =
+  return [C.cstm|{
+               fprintf(stderr, "Cannot read %s yet.\n", $string:(ppType t));
+               exit(1);
+             }|]
+
+mainCall :: FunDec Type -> CompilerM C.Stm
+mainCall (fname,rettype,params,_,_) = do
+  crettype <- typeToCType rettype
+  ret <- new "main_ret"
+  printRes <- printStm (varExp ret) rettype
+  (args, decls, stms) <- liftM unzip3 . forM paramtypes $ \paramtype -> do
+    name <- new "main_arg"
+    cparamtype <- typeToCType paramtype
+    stm <- readStm (varExp name) paramtype
+    return (varExp name, [C.cdecl|$ty:cparamtype $id:name;|], stm)
+  return [C.cstm|{
+               $decls:decls
+               $ty:crettype $id:ret;
+               $stms:stms
+               $id:ret = $id:(funName fname)($args:args);
+               $stm:printRes
+             }|]
+  where paramtypes = map identType params
+
+-- | Compile L0 program to a C program.  Always uses the function
+-- named "main" as entry point, so make sure it is defined.
 compileProg :: Prog Type -> String
 compileProg prog =
-  let (funs, endstate) = runCompilerM $ mapM compileFun prog
-      (prototypes, definitions) = unzip funs
+  let ((prototypes, definitions, main), endstate) = runCompilerM $ compileProg'
   in pretty 0 $ ppr [C.cunit|
 $esc:("#include <stdio.h>")
 $esc:("#include <stdlib.h>")
@@ -236,23 +274,23 @@ $edecls:(compVarDefinitions endstate)
 
 $edecls:prototypes
 
-double l0_toReal(int x) {
+double $id:(funName "toReal")(int x) {
   return x;
 }
 
-int l0_trunc(double x) {
+int $id:(funName "trunc")(double x) {
   return x;
 }
 
-double l0_log(double x) {
+double $id:(funName "log")(double x) {
   return log(x);
 }
 
-double l0_sqrt(double x) {
+double $id:(funName "sqrt")(double x) {
   return sqrt(x);
 }
 
-double l0_exp(double x) {
+double $id:(funName "exp")(double x) {
   return exp(x);
 }
 
@@ -266,12 +304,18 @@ $edecls:(map funcToDef definitions)
 
 int main() {
   $stms:(compInit endstate)
-  l0_main();
+  $stm:main;
   return 0;
 }
 
 |]
-  where funcToDef func = C.FuncDef func loc
+  where compileProg' = do
+          (prototypes, definitions) <- unzip <$> mapM compileFun prog
+          main <- case funDecByName "main" prog of
+                    Nothing -> error "L0.CCodeGen.compileProg: No main function"
+                    Just func -> mainCall func
+          return (prototypes, definitions, main)
+        funcToDef func = C.FuncDef func loc
           where loc = case func of
                         C.OldFunc _ _ _ _ _ _ l -> l
                         C.Func _ _ _ _ _ l      -> l
@@ -283,10 +327,9 @@ compileFun (fname, rettype, args, body, _) = do
   (argexps, args') <- unzip <$> mapM compileArg args
   body' <- binding (zip (map identName args) $ argexps) $ compileBody body
   crettype <- typeToCType rettype
-  return ([C.cedecl|static $ty:crettype $id:fname' ( $params:args' );|],
-          [C.cfun|static $ty:crettype $id:fname' ( $params:args' ) { $stm:body' }|])
-  where fname' = "l0_" ++ fname
-        compileArg (Ident name t _) = do
+  return ([C.cedecl|static $ty:crettype $id:(funName fname)( $params:args' );|],
+          [C.cfun|static $ty:crettype $id:(funName fname)( $params:args' ) { $stm:body' }|])
+  where compileArg (Ident name t _) = do
           name' <- new name
           ctp <- typeToCType t
           return (varExp name', [C.cparam|$ty:ctp $id:name'|])
@@ -486,9 +529,8 @@ compileExp place (Apply fname args _ _) = do
   return [C.cstm|{
                $decls:vardecls
                $stms:args'
-               $exp:place = $id:fname'($args:varexps);
+               $exp:place = $id:(funName fname)($args:varexps);
              }|]
-  where fname' = "l0_" ++ fname
 
 compileExp place (LetPat pat e body _) = do
   val <- new "let_value"
@@ -739,17 +781,6 @@ compileExp place (Copy e _) = do
                $exp:place = $id:val;
                $stm:copy
              }|]
-
-compileExp place (Write e _ _) = do
-  e' <- compileExp place e
-  stm <- printStm place $ expType e
-  return [C.cstm|{$stm:e' $stm:stm}|]
-
-compileExp place (Read t _) = do
-  case t of Int _  -> return [C.cstm|scanf("%d", &$exp:place);|]
-            Char _ -> return [C.cstm|scanf("%c", &$exp:place);|]
-            Real _ -> return [C.cstm|scanf("%f", &$exp:place);|]
-            _      -> return [C.cstm|{fprintf(stderr, "Cannot read that yet.\n"); exit(1);}|]
 
 compileExp _ (Zip _ _) = error "Zip encountered during code generation."
 compileExp _ (Unzip _ _ _) = error "Unzip encountered during code generation."

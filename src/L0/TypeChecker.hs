@@ -323,6 +323,13 @@ checkExp (If e1 e2 e3 t pos) = do
 checkExp (Var ident) = do
   (t, ident') <- checkIdent ident
   return (t, Var ident')
+checkExp (Apply "trace" args t pos) =
+  case args of
+    [e] -> do
+      (et,e') <- checkExp e
+      t' <- t `unifyWithKnown` et
+      return (t', Apply "trace" [e'] t' pos)
+    _ -> bad $ TypeError pos "Trace function takes a single parameter"
 checkExp (Apply fname args t pos) = do
   bnd <- asks $ M.lookup fname . envFtable
   case bnd of
@@ -494,12 +501,6 @@ checkExp (Concat arr1exp arr2exp intype pos) = do
 checkExp (Copy e pos) = do
   ((t, e'), _) <- collectSrcMergeVars $ checkExp e
   return (t, Copy e' pos)
-checkExp (Read t pos) =
-  return (t, Read t pos)
-checkExp (Write e t pos) = do
-  (et, e') <- checkSubExp e
-  t' <- t `unifyWithKnown` et
-  return (t', Write e' t' pos)
 checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _) boundexp loopbody letbody pos) = do
   (mergetype, mergeexp') <- checkExp mergeexp
   (bnds, mergepat') <- checkPattern mergepat mergetype
