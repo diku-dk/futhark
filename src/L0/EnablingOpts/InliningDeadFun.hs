@@ -7,7 +7,7 @@ module L0.EnablingOpts.InliningDeadFun  (
                       , deadFunElim
                     )
   where 
-
+  
 import Control.Applicative
 import Control.Monad.Reader
  
@@ -131,8 +131,9 @@ buildCGexp callees        (Write e _ _) =
 buildCGexp callees e = 
     foldlPattern buildCGexp addLamFun callees e
 
-isBuiltInFun :: String -> Bool
-isBuiltInFun fn = elem fn ["toReal", "trunc", "sqrt", "log", "exp"]
+-- Promoted to AbSyn
+--isBuiltInFun :: String -> Bool
+--isBuiltInFun fn = elem fn ["toReal", "trunc", "sqrt", "log", "exp"]
 
 addLamFun :: TypeBox tf => ([String],[String],Bool) -> Lambda tf -> ([String],[String],Bool)
 addLamFun callees           (AnonymFun _ _ _ _) = callees
