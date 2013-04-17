@@ -403,20 +403,16 @@ evalExp (Write e _ _) = do
           where char (CharVal c _) = Just c
                 char _             = Nothing
         write v = ppValue v
-evalExp (DoLoop merges loopvar boundexp loopbody letbody pos) = do
+evalExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody pos) = do
   bound <- evalExp boundexp
-  mergevals <- mapM (evalExp . snd) merges
+  mergestart <- evalExp mergeexp
   case bound of
-    IntVal n _ -> do mergevals' <- foldM iteration mergevals [0..n-1]
-                     binding (zip mergevars mergevals') $ evalExp letbody
+    IntVal n _ -> do loopresult <- foldM iteration mergestart [0..n-1]
+                     evalExp $ LetPat mergepat (Literal loopresult) letbody pos
     _ -> bad $ TypeError pos "evalExp DoLoop"
-  where iteration vals i =
-          binding (zip mergevars vals++[(loopvar, IntVal i pos)]) $ do
-            bodyval <- evalExp loopbody
-            case bodyval of TupVal vals' _
-                              | length mergevars > 1 -> return vals'
-                            val -> return [val]
-        mergevars = map fst merges
+  where iteration mergeval i =
+          binding [(loopvar, IntVal i pos)] $
+            evalExp $ LetPat mergepat (Literal mergeval) loopbody pos
 
 evalIntBinOp :: (Applicative m, Monad m) =>
                 (Int -> Int -> Int) -> Exp Type -> Exp Type -> SrcLoc -> L0M m Value

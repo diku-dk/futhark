@@ -33,7 +33,7 @@ transformExp (Map fun e intype outtype loc)
   (arr, arrv, arrlet) <- newLet e "arr"
   let index = Index arr [iv] intype intype loc
   funcall <- transformLambda fun [index]
-  let letbody = DoLoop [(arr, arrv)] i (Size arrv loc) loopbody arrv loc
+  let letbody = DoLoop (Id arr) arrv i (Size arrv loc) loopbody arrv loc
       loopbody = LetWith arr arr [iv] funcall arrv loc
   return $ arrlet letbody
   | otherwise = do
@@ -52,21 +52,21 @@ transformExp (Map fun e intype outtype loc)
   let branch = If (BinOp Less zero nv (Bool loc) loc)
                (outarrlet letbody)
                (Literal (arrayVal [] outtype loc)) outarrt loc
-      letbody = DoLoop [(outarr, outarrv)] i nv loopbody outarrv loc
+      letbody = DoLoop (Id outarr) outarrv i nv loopbody outarrv loc
       loopbody = LetWith outarr outarr [iv] funcall outarrv loc
   return $ inarrlet $ nlet branch
 transformExp (Reduce fun accexp arrexp intype loc) = do
   ((arr, arrv), (acc, accv), (i, iv), redlet) <- newReduction loc arrexp accexp
   let index = Index arr [iv] intype intype loc
   funcall <- transformLambda fun [accv, index]
-  let loop = DoLoop [(acc, accv)] i (Size arrv loc) loopbody accv loc
+  let loop = DoLoop (Id acc) accv i (Size arrv loc) loopbody accv loc
       loopbody = LetWith acc acc [] funcall accv loc
   return $ redlet loop
 transformExp (Scan fun accexp arrexp intype loc) = do
   ((arr, arrv), (acc, accv), (i, iv), redlet) <- newReduction loc arrexp accexp
   let index = Index arr [iv] intype intype loc
   funcall <- transformLambda fun [accv, index]
-  let loop = DoLoop [(acc, accv), (arr, arrv)] i (Size arrv loc) loopbody arrv loc
+  let loop = DoLoop (TupId [Id acc, Id arr] loc) (TupLit [accv, arrv] loc) i (Size arrv loc) loopbody arrv loc
       loopbody = LetWith arr arr [iv] funcall (TupLit [index, arrv] loc) loc
   return $ redlet loop
 transformExp (Filter fun arrexp elty loc) = do
@@ -93,7 +93,7 @@ transformExp (Filter fun arrexp elty loc) = do
       indexi = indexia iv
       indexim1 = indexia (BinOp Minus iv (intval 1) int loc)
   (res, resv, reslet) <- newLet (Replicate indexiaend indexin0 loc) "res"
-  let loop = DoLoop [(res, resv)] i nv loopbody resv loc
+  let loop = DoLoop (Id res) resv i nv loopbody resv loc
       loopbody = If (Or (BinOp Equal iv (intval 0) bool loc)
                         (And (BinOp Less (intval 0) iv bool loc)
                              (BinOp Equal indexi indexim1 bool loc) loc)
@@ -117,7 +117,7 @@ transformExp (Redomap redfun mapfun accexp arrexp intype _ loc) = do
   let index = Index arr [iv] intype intype loc
   mapfuncall <- transformLambda mapfun [index]
   redfuncall <- transformLambda redfun [accv, mapfuncall]
-  let loop = DoLoop [(acc, accv), (arr, arrv)] i (Size arrv loc) loopbody accv loc
+  let loop = DoLoop (TupId [Id acc, Id arr] loc) (TupLit [accv, arrv] loc) i (Size arrv loc) loopbody accv loc
       loopbody = LetWith arr arr [iv] redfuncall (TupLit [accv, arrv] loc) loc
   return $ redlet loop
 transformExp e = return e

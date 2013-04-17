@@ -60,27 +60,24 @@ renameExp (LetWith dest src idxs ve body pos) = do
     return (LetWith dest' src' idxs' ve' body' pos)
 renameExp (LetPat pat e body pos) = do
   e1' <- renameExp e
-  bind (names pat) $ do
+  bind (patternNames pat) $ do
     pat' <- renamePattern pat
     body' <- renameExp body
     return $ LetPat pat' e1' body' pos
-  where names (Id ident) = [ident]
-        names (TupId pats _) = concatMap names pats
 renameExp (Index s idxs t1 t2 pos) = do
   s' <- repl s
   idxs' <- mapM renameExp idxs
   return $ Index s' idxs' t1 t2 pos
-renameExp (DoLoop merges loopvar e loopbody letbody pos) = do
+renameExp (DoLoop mergepat mergeexp loopvar e loopbody letbody pos) = do
   e' <- renameExp e
-  let (mergevars, mergeexps) = unzip merges
-  mergeexps' <- mapM renameExp mergeexps
-  bind mergevars $ do
-    mergevars' <- mapM repl mergevars
+  mergeexp' <- renameExp mergeexp
+  bind (patternNames mergepat) $ do
+    mergepat' <- renamePattern mergepat
     letbody' <- renameExp letbody
     bind [loopvar] $ do
       loopvar'  <- repl loopvar
       loopbody' <- renameExp loopbody
-      return $ DoLoop (zip mergevars' mergeexps') loopvar' e' loopbody' letbody' pos
+      return $ DoLoop mergepat' mergeexp' loopvar' e' loopbody' letbody' pos
 -- The above case may have to be extended if syntax nodes ever contain
 -- anything but lambdas, expressions, lists of expressions or lists of
 -- pairs of expression-types.  Pay particular attention to the fact
@@ -111,3 +108,7 @@ renamePattern (Id ident) = do
 renamePattern (TupId pats pos) = do
   pats' <- mapM renamePattern pats
   return $ TupId pats' pos
+
+patternNames :: TupIdent Type -> [Ident Type]
+patternNames (Id ident) = [ident]
+patternNames (TupId pats _) = concatMap patternNames pats

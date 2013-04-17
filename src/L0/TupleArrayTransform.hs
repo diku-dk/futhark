@@ -40,6 +40,10 @@ new k = do (name, src) <- gets $ newName k . envNameSrc
            modify $ \s -> s { envNameSrc = src }
            return name
 
+substituting :: M.Map String [Ident Type] -> TransformM a -> TransformM a
+substituting substs =
+  local (\s -> s { envVarSubst = substs `M.union` envVarSubst s })
+
 transformType :: Type -> Type
 transformType (Array (Tuple elemts _) size loc) =
   Tuple (map (transformType . arraytype) elemts) loc
@@ -124,31 +128,29 @@ transformExp (Index vname idxs intype outtype loc) = do
   where intype' = transformType intype
         outtype' = transformType outtype
         vname' = transformIdent vname
-transformExp (DoLoop merges i bound loopbody letbody loc) = do
+transformExp (DoLoop mergepat mergeexp i bound loopbody letbody loc) = do
   bound' <- transformExp bound
-  merges' <- forM merges $ \(var, e) -> do
-               e'   <- transformExp e
-               return (transformIdent var, e')
+  let mergepat' = transformPat mergepat
+  mergeexp' <- transformExp mergeexp
   loopbody' <- transformExp loopbody
   letbody' <- transformExp letbody
-  return $ DoLoop merges' i bound' loopbody' letbody' loc
-transformExp (LetWith name src idxs valexp body loc) = do
+  return $ DoLoop mergepat' mergeexp' i bound' loopbody' letbody' loc
+transformExp (LetWith name src idxs ve body loc) = do
   idxs' <- mapM transformExp idxs
   body' <- transformExp body
-  valexp' <- transformExp valexp
-  substs <- asks $ M.lookup (identName src) . envVarSubst
-  case (substs, expType valexp') of
-    (Just substs', Tuple ets _) -> do
-      (vals, valvs) <- unzip <$> mapM (newVar "letwith_val") ets
-      let comb olde (srcv, valv) inner =
-            LetWith srcv srcv idxs' valv (olde inner) loc
-          vallet inner = LetPat (TupId (map Id vals) loc) valexp' inner loc
-          letws = foldl comb id $ zip substs' valvs
-          namelet inner = LetPat (Id name') (TupLit (map Var substs') loc) inner loc
-      return $ vallet $ letws $ namelet body'
-    _ -> return $ LetWith name' src' idxs' valexp' body' loc
+  ve' <- transformExp ve
+  case (identType name', expType ve') of
+    (Tuple ets _, Tuple xts _) -> do
+      snames <- map fst <$> mapM (newVar "letwith_src") ets
+      vnames <- map fst <$> mapM (newVar "letwith_el") xts
+      let xlet inner = LetPat (TupId (map Id snames) loc) (Var src') inner loc
+          vlet inner = LetPat (TupId (map Id vnames) loc) ve' inner loc
+          comb olde (sname, vname) inner = LetWith sname sname idxs' (Var vname) (olde inner) loc
+      let lws = foldl comb id $ zip snames vnames
+      transformExp $ xlet $ vlet $ lws $ LetPat (Id name') (TupLit (map Var snames) loc) body' loc
+    _ -> return $ LetWith name' src idxs' ve' body' loc
   where name' = transformIdent name
-        src' = transformIdent src
+        src'  = transformIdent src
 transformExp (Replicate ne ve loc) = do
   ne' <- transformExp ne
   ve' <- transformExp ve

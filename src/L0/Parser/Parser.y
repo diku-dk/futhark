@@ -274,14 +274,10 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal $ IntVal num pos 
      | Id '[' Exps ']'
                       { Index $1 $3 Nothing Nothing (srclocOf $1) }
 
-     | loop '(' MergeVars ')' '=' for Id '<' Exp do Exp in Exp %prec letprec
-                      { DoLoop $3 $7 $9 $11 $13 $1 }
-
-MergeVars : MergeVar { [$1] }
-          | MergeVar ',' MergeVars { $1 : $3 }
-
-MergeVar : Id '=' Exp { ($1, $3) }
-         | Id { ($1, Var $1) }
+     | loop '(' TupId ')' '=' for Id '<' Exp do Exp in Exp %prec letprec
+                      { DoLoop $3 (tupIdExp $3) $7 $9 $11 $13 $1 }
+     | loop '(' TupId '=' Exp ')' '=' for Id '<' Exp do Exp in Exp %prec letprec
+                      { DoLoop $3 $5 $9 $11 $13 $15 $1 }
 
 Exps : Exp ',' Exps { $1 : $3 }
      | Exp          { [$1] }
@@ -346,6 +342,10 @@ combArrayTypes (v:vs) = foldM comb v vs
 
 arrayFromList :: [a] -> Array Int a
 arrayFromList l = listArray (0, length l-1) l
+
+tupIdExp :: TupIdent ty -> Exp ty
+tupIdExp (Id ident) = Var ident
+tupIdExp (TupId pats loc) = TupLit (map tupIdExp pats) loc
 
 parseError :: [L Token] -> Either String a
 parseError [] = Left "Parse error: End of file"

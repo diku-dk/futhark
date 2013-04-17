@@ -307,7 +307,9 @@ data Exp ty = Literal Value
             | Write (Exp ty) ty SrcLoc
              -- e.g., write(map(f, replicate(3,1))) writes array {f(1),f(1),f(1)} *)
              -- 2nd arg is the type of the to-be-written expression *)
-            | DoLoop [(Ident ty, Exp ty)] -- ^ Bound merge variables.
+            | DoLoop
+              (TupIdent ty) -- ^ Merge variable pattern
+              (Exp ty) -- ^ Initial values of merge variables.
               (Ident ty) -- ^ Iterator.
               (Exp ty) -- ^ Upper bound.
               (Exp ty) -- ^ Loop body.
@@ -349,7 +351,7 @@ instance Located (Exp ty) where
   locOf (Copy _ pos) = locOf pos
   locOf (Read _ pos) = locOf pos
   locOf (Write _ _ pos) = locOf pos
-  locOf (DoLoop _ _ _ _ _ pos) = locOf pos
+  locOf (DoLoop _ _ _ _ _ _ pos) = locOf pos
 
 -- | Given an expression with known types, return its type.
 expType :: Exp Type -> Type
@@ -385,7 +387,7 @@ expType (Concat _ _ t _) = Array t Nothing $ srclocOf t
 expType (Copy e _) = expType e
 expType (Read t _) = boxType t
 expType (Write _ t _) = t
-expType (DoLoop _ _ _ _ body _) = expType body
+expType (DoLoop _ _ _ _ _ body _) = expType body
 
 -- | Eagerly evaluated binary operators.  In particular, the
 -- short-circuited operators && and || are not here, although an
@@ -574,12 +576,11 @@ ppExp d (Copy e _) = " copy ( " ++ ppExp d e ++ " ) "
 
 ppExp _ (Read t _) = " read("  ++ ppType t  ++ ") "
 ppExp d (Write e _ _) = " write("  ++ ppExp d e  ++ ") "
-ppExp d (DoLoop mvs i n loopbody letbody _) =
-  let ppMVar (v, e) = identName v ++ " = " ++ ppExp d e
-  in "\n" ++ spaces d ++ "loop (" ++ intercalate ", " (map ppMVar mvs) ++
-       ") = " ++ "for " ++ identName i ++ " < " ++ ppExp d n ++ " do " ++
-       "\n" ++ spaces(d+1) ++ ppExp (d+1) loopbody ++ "\n" ++ spaces d ++
-       "in " ++ ppExp d letbody
+ppExp d (DoLoop mvpat mvexp i n loopbody letbody _) =
+  "\n" ++ spaces d ++ "loop (" ++ ppTupId mvpat ++ " = " ++ ppExp d mvexp ++
+    ") = " ++ "for " ++ identName i ++ " < " ++ ppExp d n ++ " do\n" ++
+    spaces (d+1) ++ ppExp (d+1) loopbody ++ "\n" ++ spaces d ++
+    "in " ++ ppExp d letbody
 ppBinOp :: BinOp -> String
 ppBinOp op = " " ++ opStr op ++ " "
 
