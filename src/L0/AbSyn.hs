@@ -473,7 +473,7 @@ progNames = everything union (mkQ [] identName')
 -- Pretty-Printing Functionality
 
 spaces :: Int -> String
-spaces n = replicate n ' '
+spaces n = replicate (n*2) ' '
 
 tildes :: String -> String
 tildes = map tilde
@@ -482,10 +482,10 @@ tildes = map tilde
 
 -- | Pretty printing a value.
 ppValue :: Value -> String
-ppValue (IntVal n _) = tildes $ show n
-ppValue (RealVal n _) = tildes $ show n
-ppValue (LogVal b _)      = show b
-ppValue (CharVal c _)     = show c
+ppValue (IntVal n _)  = (tildes $ show n) ++ " "
+ppValue (RealVal n _) = (tildes $ show n) ++ " "
+ppValue (LogVal b _)  = (show b) ++ " "
+ppValue (CharVal c _) = (show c) ++ " "
 ppValue (ArrayVal arr t _)
   | [] <- elems arr = " empty (" ++ ppType t ++ " ) "
   | Just (c:cs) <- mapM char (elems arr) = show $ c:cs
@@ -502,7 +502,7 @@ ppExp d (ArrayLit es _ _) =
   " { " ++ intercalate ", " (map (ppExp d) es) ++ " } "
 ppExp d (TupLit es _) =
   " ( " ++ intercalate ", " (map (ppExp d) es) ++ " ) "
-ppExp _ (Var ident) = identName ident
+ppExp _ (Var ident) = identName ident ++ " "
 
 ppExp d (BinOp op e1 e2 _ _) = " ( " ++ ppExp d e1 ++ ppBinOp op ++ ppExp d e2 ++ " ) "
 ppExp d (And   e1 e2 _  ) = " ( " ++ ppExp d e1 ++ " && " ++ ppExp d e2 ++ " ) "
@@ -513,9 +513,9 @@ ppExp d (Negate e _ _   ) = " ( " ++ "~ " ++ ppExp d e ++   " ) "
 
 ppExp d (If    e1 e2 e3 _ _)  =
   "\n" ++
-  spaces (d+1) ++ "if( " ++ ppExp d e1 ++ " )\n" ++
-  spaces (d+2) ++ "then " ++ ppExp (d+2) e2 ++ "\n" ++
-  spaces (d+2) ++ "else " ++ ppExp (d+2) e3 ++ "\n" ++
+  spaces (d+1) ++ "if( "  ++ ppExp (d+2) e1 ++ " )\n" ++
+  spaces (d+1) ++ "then " ++ ppExp (d+2) e2 ++ "\n" ++
+  spaces (d+1) ++ "else " ++ ppExp (d+2) e3 ++ "\n" ++
   spaces d
 
 ppExp _ (Apply f [] _ _)    = f ++ "() "
@@ -523,20 +523,20 @@ ppExp d (Apply f args _ _)  =
   f ++ "( " ++ intercalate ", " (map (ppExp d) args) ++ " ) "
 
 ppExp d (LetPat tupid e1 body _) =
-        "\n" ++ spaces (d+1) ++ "let " ++ ppTupId tupid ++ " = " ++ ppExp (d+2) e1 ++
-        " in  " ++ ppExp (d+2) body
+        "\n" ++ spaces d ++ "let " ++ ppTupId tupid ++ " = " ++ ppExp d e1 ++
+        "in  " ++ ppExp d body
 ppExp d (LetWith (Ident dest _ _) (Ident src _ _) es el e2 _)
   | dest == src =
-    "\n" ++ spaces(d+1) ++ "let " ++ dest ++ "[ " ++
+    "\n" ++ spaces d ++ "let " ++ dest ++ "[ " ++
     intercalate ", " (map (ppExp d) es) ++
-    "] = " ++ ppExp d el ++ " in  " ++ ppExp (d+2) e2
+    "] = " ++ ppExp d el ++ "in  " ++ ppExp d e2
   | otherwise =
-    "\n" ++ spaces(d+1) ++ "let " ++ dest ++ " = " ++ src ++
+    "\n" ++ spaces d ++ "let " ++ dest ++ " = " ++ src ++
     " with [ " ++ intercalate ", " (map (ppExp d) es) ++
-    "] <- " ++ ppExp d el ++ " in  " ++ ppExp (d+2) e2
+    "] <- " ++ ppExp d el ++ "in  " ++ ppExp d e2
 
 ppExp d (Index (Ident name _ _) es _ _ _) =
-  name ++ "[ " ++ intercalate ", " (map (ppExp d) es) ++ " ]"
+  name ++ "[ " ++ intercalate ", " (map (ppExp d) es) ++ " ] "
 
 -- | Array Constructs
 ppExp d (Iota e _)         = "iota ( " ++ ppExp d e ++ " ) "
@@ -549,23 +549,24 @@ ppExp d (Reshape es arr _ _ _) =
   " reshape ( ( " ++ intercalate ", " (map (ppExp d) es) ++ " ), "  ++
   ppExp d arr ++ " ) "
 
-ppExp d (Map fun e _ _ _) = " map ( " ++ ppLambda fun ++ ", " ++ ppExp d e ++ " ) "
+ppExp d (Map fun e _ _ _) = " map ( " ++ ppLambda (d+1) fun ++ ", " ++ ppExp (d+1) e ++ " ) "
 
 ppExp d (Zip es _) =
-  " zip ( " ++ intercalate "," (map (ppExp d . fst) es) ++ " ) "
+  " zip ( " ++ intercalate ", " (map (ppExp d . fst) es) ++ " ) "
 
 ppExp d (Unzip e _ _) = " unzip ( " ++ ppExp d e ++ " ) "
 
 ppExp d (Reduce fun el lst _ _) =
-  " reduce ( " ++ ppLambda fun ++ ", " ++ ppExp d el ++ ", " ++ ppExp d lst ++ " ) "
+  " reduce ( " ++ ppLambda (d+1) fun ++ ", " ++ ppExp (d+1) el ++ ", " ++ ppExp (d+1) lst ++ " ) "
 ppExp d (Scan  fun el lst _ _) =
-  " scan ( " ++ ppLambda fun ++ ", " ++ ppExp d el ++ ", " ++ ppExp d lst ++ " ) "
+  " scan ( " ++ ppLambda (d+1) fun ++ ", " ++ ppExp (d+1) el ++ ", " ++ ppExp (d+1) lst ++ " ) "
 ppExp d (Filter fun a _ _) =
-  " filter ( " ++ ppLambda fun ++ ", " ++ ppExp d a ++ " ) "
+  " filter ( " ++ ppLambda (d+1) fun ++ ", " ++ ppExp (d+1) a ++ " ) "
 ppExp d (Mapall fun a _ _ _)
-          = " mapall ( " ++ ppLambda fun ++ ", " ++ ppExp d a ++ " ) "
+          = " mapall ( " ++ ppLambda (d+1) fun ++ ", " ++ ppExp (d+1) a ++ " ) "
 ppExp d (Redomap id1 id2 el a _ _ _)
-          = " redomap ( " ++ ppLambda id1 ++ ", " ++ ppLambda id2 ++ ", " ++ ppExp d el ++ ", " ++ ppExp d a ++ " ) "
+          = " redomap ( " ++ ppLambda (d+1) id1 ++ ", " ++ ppLambda (d+1) id2 ++ 
+            ", " ++ ppExp (d+1) el ++ ", " ++ ppExp (d+1) a ++ " ) "
 
 ppExp d (Split  idx arr _ _) = " split ( " ++ ppExp d idx ++ ", " ++ ppExp d arr ++ " ) "
 ppExp d (Concat a1  a2 _ _) = " concat ( " ++ ppExp d a1 ++ ", " ++ ppExp d a2 ++ " ) "
@@ -574,11 +575,11 @@ ppExp d (Copy e _) = " copy ( " ++ ppExp d e ++ " ) "
 ppExp _ (Read t _) = " read("  ++ ppType t  ++ ") "
 ppExp d (Write e _ _) = " write("  ++ ppExp d e  ++ ") "
 ppExp d (DoLoop mvs i n loopbody letbody _) =
-  let ppMVar (v, e) = identName v ++ " = " ++ ppExp 0 e
-  in "\n" ++ spaces (d+1) ++ "loop (" ++ intercalate ", " (map ppMVar mvs) ++
+  let ppMVar (v, e) = identName v ++ " = " ++ ppExp d e
+  in "\n" ++ spaces d ++ "loop (" ++ intercalate ", " (map ppMVar mvs) ++
        ") = " ++ "for " ++ identName i ++ " < " ++ ppExp d n ++ " do " ++
-       spaces(d+2) ++ ppExp (d+2) loopbody ++ "\n" ++ spaces(d+1) ++
-       "in " ++ ppExp (d+1) letbody
+       "\n" ++ spaces(d+1) ++ ppExp (d+1) loopbody ++ "\n" ++ spaces d ++
+       "in " ++ ppExp d letbody
 ppBinOp :: BinOp -> String
 ppBinOp op = " " ++ opStr op ++ " "
 
@@ -597,14 +598,23 @@ ppTupId :: TupIdent ty -> String
 ppTupId (Id ident) = " " ++ identName ident ++ " "
 ppTupId (TupId pats _) = " ( " ++ intercalate ", " (map ppTupId pats) ++ " ) "
 
+--        "\n" ++ spaces d ++ "let " ++ ppTupId tupid ++ " = " ++ ppExp d e1 ++
+--        " in  " ++ ppExp d body
+
+
+
 -- pretty printing Lambda, i.e., curried and unnamed functions *)
-ppLambda :: Lambda ty -> String
-ppLambda ( AnonymFun params body rtp _) =
+ppLambda :: Int -> Lambda ty -> String
+ppLambda d ( AnonymFun params body rtp _) =
       let pp_bd (Ident arg tp _) = ppType tp ++ " " ++ arg
           strargs = intercalate ", " $ map pp_bd params
-      in " fn " ++ ppType rtp ++ " ( " ++ strargs ++ " ) " ++ " => " ++ ppExp 0 body
-ppLambda ( CurryFun fid [] _ _) = fid
-ppLambda ( CurryFun fid args ty pos) =
+      in "\n" ++ spaces d ++ "fn " ++ ppType rtp ++ " ( " ++ strargs ++ 
+         " ) " ++ " => " ++ ppExp (d+1) body ++ "\n" ++ spaces d
+--      let pp_bd (Ident arg tp _) = ppType tp ++ " " ++ arg
+--          strargs = intercalate ", " $ map pp_bd params
+--      in " fn " ++ ppType rtp ++ " ( " ++ strargs ++ " ) " ++ " => " ++ ppExp 0 body
+ppLambda _ ( CurryFun fid []   _  _  ) = fid
+ppLambda _ ( CurryFun fid args ty pos) =
       ppExp 0 (Apply fid args ty pos)
 
 -- | pretty printing a function declaration

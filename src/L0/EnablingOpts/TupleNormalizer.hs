@@ -8,9 +8,9 @@ import Control.Applicative
 import Control.Monad.Reader
 --import Control.Monad.Writer
 
-
---import Data.Data
---import Data.Generics
+ 
+import Data.Data
+import Data.Generics
 
 --import qualified Data.Set as S
 import qualified Data.Map as M
@@ -23,44 +23,36 @@ import L0.FreshNames
 --import L0.EnablingOpts.GenPatterns
 import L0.EnablingOpts.EnablingOptErrors
 
+--import Debug.Trace
 
 -----------------------------------------------------------------
 -----------------------------------------------------------------
----- This file implements Program Normalization:             ----
+---- This file implements Tuple Normalization:               ----
 ----    1. x : (tp1 * (tp2*tp3)) replaced with (x1,(x2,x3))  ----
-----    2. array and tuple literal normalization, i.e.,      ----
-----          literals contains a series of variables only   ----
-----    3. let y = (let x = exp1 in exp2) in body ->         ----
-----       let x = exp1 in let y = exp2 in body              ----
-----    4. function calls separated from expressions,i.e.,   ----
-----             let y = f(x) + g(z) + exp in body           ----
-----         is replaced by:                                 ----
-----             let t1 = f(x) in let t2 = g(z) in           ----
-----             let y = t1 + t2 + exp in body               ----
 -----------------------------------------------------------------
 -----------------------------------------------------------------
 
-data NormEnv tf = NormEnv {   
+data TupNormEnv tf = TupNormEnv {   
                         envVtable  :: M.Map String (TupIdent tf)
-                  }
+                     }
 
 
-newtype NormM tf a = NormM (StateT NameSource (ReaderT (NormEnv tf) (Either EnablingOptError)) a)
+newtype TupNormM tf a = TupNormM (StateT NameSource (ReaderT (TupNormEnv tf) (Either EnablingOptError)) a)
     deriving (  MonadState NameSource, 
-                MonadReader (NormEnv tf),
+                MonadReader (TupNormEnv tf),
                 Monad, Applicative, Functor )
 
 
 -- | Bind a name as a common (non-merge) variable.
 -- TypeBox tf => 
-bindVar :: NormEnv tf -> (String, TupIdent tf) -> NormEnv tf
+bindVar :: TupNormEnv tf -> (String, TupIdent tf) -> TupNormEnv tf
 bindVar env (name,val) =
   env { envVtable = M.insert name val $ envVtable env }
 
-bindVars :: NormEnv tf -> [(String, TupIdent tf)] -> NormEnv tf
+bindVars :: TupNormEnv tf -> [(String, TupIdent tf)] -> TupNormEnv tf
 bindVars = foldl bindVar
 
-binding :: [(String, TupIdent tf)] -> NormM tf a -> NormM tf a
+binding :: [(String, TupIdent tf)] -> TupNormM tf a -> TupNormM tf a
 binding bnds = local (`bindVars` bnds)
 
 
@@ -68,16 +60,16 @@ binding bnds = local (`bindVars` bnds)
 -- state refers to the fresh-names engine. The reader hides
 -- the vtable that associates variable names with/to-be-substituted-for tuples pattern.
 -- The 'Either' monad is used for error handling.
-runNormM :: TypeBox tf => Prog tf -> NormM tf a -> NormEnv tf -> Either EnablingOptError a
-runNormM prog (NormM a) env = 
+runNormM :: TypeBox tf => Prog tf -> TupNormM tf a -> TupNormEnv tf -> Either EnablingOptError a
+runNormM prog (TupNormM a) env = 
     runReaderT (evalStateT a (newNameSourceForProg prog)) env
 
-badNormM :: EnablingOptError -> NormM tf a
-badNormM = NormM . lift . lift . Left
+badTupNormM :: EnablingOptError -> TupNormM tf a
+badTupNormM = TupNormM . lift . lift . Left
 
 -- | Return a fresh, unique name.  The @String@ is prepended to the
 -- name.
-new :: TypeBox tf => String -> NormM tf String
+new :: TypeBox tf => String -> TupNormM tf String
 new = state . newName
 
 
@@ -85,9 +77,10 @@ new = state . newName
 --- Tuple Normalizer Entry Point: normalizes tuples@pgm level ---
 -----------------------------------------------------------------
 
-tupleNormProg :: TypeBox tf => Prog tf -> Either EnablingOptError (Prog tf)
+--tupleNormProg :: TypeBox tf => Prog tf -> Either EnablingOptError (Prog tf)
+tupleNormProg :: Prog Type -> Either EnablingOptError (Prog Type)
 tupleNormProg prog = do
-    let env = NormEnv { envVtable = M.empty }
+    let env = TupNormEnv { envVtable = M.empty }
     prog' <- runNormM prog (mapM tupleNormFun prog) env
     return prog'
 
@@ -102,8 +95,266 @@ tupleNormProg prog = do
 -----------------------------------------------------------------
 -----------------------------------------------------------------
 
-tupleNormFun :: TypeBox tf => FunDec tf -> NormM tf (FunDec tf)
+--tupleNormFun :: TypeBox tf => FunDec tf -> TupNormM tf (FunDec tf)
+tupleNormFun :: FunDec Type -> TupNormM Type (FunDec Type)
 tupleNormFun (fname, rettype, args, body, pos) = do
+    --body' <- trace ("in function: "++fname++"\n") (tupleNormAbstrFun args body pos)
+    body' <- tupleNormAbstrFun args body pos
+    return (fname, rettype, args, body', pos)
+
+-----------------------------------------------------------------
+-----------------------------------------------------------------
+---- Normalizing an expression                               ----
+-----------------------------------------------------------------
+-----------------------------------------------------------------
+
+tupleNormExp :: Exp Type -> TupNormM Type (Exp Type)
+--tupleNormExp :: TypeBox tf => Exp tf -> TupNormM tf (Exp tf)
+
+-----------------------------
+---- LetPat/With/Do-Loop ----
+-----------------------------
+
+tupleNormExp (LetPat pat e body _) = do
+    e'    <- tupleNormExp  e
+    (pat', bnds) <- mkFullPattern pat
+    body' <- binding bnds $ tupleNormExp  body 
+    (distribPatExp pat' e' body') 
+
+
+
+tupleNormExp (DoLoop idexps idd n loopbdy letbdy pos) = do
+    let (ids, exps) = unzip idexps
+    exps' <- mapM tupleNormExp exps
+    n'    <- tupleNormExp n    
+
+    loopbdy' <- tupleNormAbstrFun ids loopbdy pos
+    letbdy'  <- tupleNormAbstrFun ids  letbdy pos
+
+    return $ DoLoop (zip ids exps') idd n' loopbdy' letbdy' pos
+       
+---------------------------------------------------------------
+-- OLD AND UGLY VERSION OF DO-LOOP
+---------------------------------------------------------------
+--tupleNormExp (DoLoop ind n body mergevars pos) = do
+    --n'    <- tupleNormExp n
+    --body' <- tupleNormExp body
+    --bools <- mapM checkNotSubst mergevars
+    --if foldl (&&) True bools
+    --then return $ DoLoop ind n' body' mergevars pos
+    --else badTupNormM $ EnablingOptError pos "Error in tupleNormExp for DoLoop see above!"
+    --
+    --where
+    --    checkNotSubst :: Ident Type -> TupNormM Type Bool
+    --    checkNotSubst idd = do
+    --        bnd <- asks $ M.lookup (identName idd) . envVtable
+    --        case bnd of
+    --            Nothing-> return True 
+    --            Just _ -> badTupNormM $ EnablingOptError pos ("tupleNormExp Implementation Shortcoming: "
+    --                                                          ++" a merged var cannot have a tuple type")
+
+tupleNormExp (LetWith nm src inds el body pos) = do
+    bnd <- asks $ M.lookup (identName src) . envVtable
+    case bnd of
+        Nothing  -> do  inds' <- mapM tupleNormExp inds
+                        el'   <- tupleNormExp el
+                        body' <- tupleNormExp body
+                        return $ LetWith nm src inds' el' body' pos
+        Just _   -> badTupNormM $ EnablingOptError pos ("In tupleNormExp of LetWith, broken invariant: "
+                                                        ++" source array var has a TupId binding! ")
+
+-------------------------------------------------------
+--- Var/Index ...
+-------------------------------------------------------
+
+tupleNormExp e@(Var (Ident vnm _ pos)) = do 
+    bnd <- asks $ M.lookup vnm . envVtable
+    case bnd of
+        Nothing  -> return e
+        Just pat -> mkTuplitFromPat pat
+    where
+        mkTuplitFromPat :: TupIdent Type -> TupNormM Type (Exp Type)
+        mkTuplitFromPat (Id idd) = do
+            let idd'= Ident { identName = identName idd, 
+                              identType = identType idd, 
+                              identSrcLoc = pos
+                            }
+            return $ Var idd' 
+        mkTuplitFromPat (TupId tupids _) = do 
+            exps <- mapM mkTuplitFromPat tupids
+            return $ TupLit exps pos 
+
+tupleNormExp (Index idd inds tp1 tp2 pos) = do 
+    bnd <- asks $ M.lookup (identName idd) . envVtable
+    case bnd of
+        Nothing  -> do  inds' <- mapM tupleNormExp inds
+                        return $ Index idd inds' tp1 tp2 pos
+        Just _   -> badTupNormM $ EnablingOptError pos ("In tupleNormExp of Index, broken invariant: "
+                                                        ++" indexed var has a TupId binding! ")
+-------------------------------------------------------
+-------------------------------------------------------
+---- Pattern Match The Rest of the Implementation! ----
+----          NOT USED !!!!!                       ----
+-------------------------------------------------------        
+-------------------------------------------------------
+
+
+--
+--tupleNormExp (Apply fnm params tp pos) = do
+--    params' <- mapM tupleNormExp params
+--    return $ Apply fnm params' tp pos
+
+
+tupleNormExp e = gmapM ( mkM tupleNormExp
+                          `extM` tupleNormLambda
+                          `extM` mapM tupleNormExp
+                          `extM` mapM tupleNormExpPair ) e
+
+
+tupleNormExpPair :: (Exp Type, Type) -> TupNormM Type (Exp Type, Type)
+tupleNormExpPair (e,t) = do e' <- tupleNormExp e
+                            return (e',t)
+
+tupleNormLambda :: Lambda Type -> TupNormM Type (Lambda Type)
+tupleNormLambda (AnonymFun params body ret pos) = do  
+    body' <- tupleNormAbstrFun params body pos
+    return $ AnonymFun params body' ret pos
+
+tupleNormLambda (CurryFun fname exps rettype pos) = do
+    exps'  <- mapM tupleNormExp exps
+    return $ CurryFun fname exps' rettype pos 
+
+
+--tupleNormExp e = do
+--    return e
+
+
+
+-----------------------------------------------------------------
+-----------------------------------------------------------------
+---- HELPER FUNCTIONS                                        ----
+-----------------------------------------------------------------
+-----------------------------------------------------------------
+distribPatExp :: TupIdent Type -> Exp Type -> Exp Type -> TupNormM Type (Exp Type)
+
+distribPatExp pat@(Id idd) e body = do
+    return $ LetPat pat e body (identSrcLoc idd)
+
+distribPatExp pat@(TupId idlst pos) e body =
+    case e of
+        TupLit es epos ->
+            -- sanity check!
+            if not (length idlst == length es)
+            then badTupNormM $ EnablingOptError pos ("In distribPatExp, broken invariant: the "
+                                                     ++" lengths of TupleLit and TupId differ! exp: "
+                                                     ++ppExp 0 e++" tupid: "++ppTupId pat )
+            else if length idlst == 1
+                 then distribPatExp (head idlst) (head es) body
+                 else do body' <- distribPatExp (TupId (tail idlst) pos) (TupLit (tail es) epos) body
+                         distribPatExp (head idlst) (head es) body'
+        _ -> return $ LetPat pat e body pos
+
+
+--------------------
+--- from a potentially partially instantiated tuple id, it creates
+---    a fully instantiated tuple id, and adds the corresponding
+---    (new) bindings to the symbol table.
+--------------------
+mkFullPattern :: TupIdent Type -> TupNormM Type (TupIdent Type, [(String, TupIdent Type)])
+
+mkFullPattern pat@(Id ident) = do
+    let (nm, tp) = (identName ident, identType ident)
+    case tp of
+        (Tuple _ _) -> 
+            do  pat' <- mkPatFromType (identSrcLoc ident) nm tp
+                return (pat', [(nm, pat')])
+        _           -> return (pat, [])
+
+mkFullPattern (TupId idlst pos) = do
+    reslst <- mapM mkFullPattern idlst
+    let (tupids, bndlsts) = unzip reslst
+    let bnds = foldl (++) [] bndlsts
+    return $ (TupId tupids pos, bnds)
+
+-----------------------
+-- given a (tuple) type, creates a fully instantiated TupIdent 
+-----------------------
+mkPatFromType :: SrcLoc -> String -> Type -> TupNormM Type (TupIdent Type)
+
+mkPatFromType pos nm tp = do
+    case tp of
+        Tuple tps _ -> do   tupids <- mapM (mkPatFromType pos nm) tps
+                            return $ TupId tupids pos
+
+        _           -> do   tmp_nm <- new nm 
+                            let idd = Ident { identName = tmp_nm
+                                            , identType = tp
+                                            , identSrcLoc = pos  }
+                            return $ Id idd
+
+
+--------------------------------------------------
+---- Helper for function declaration / lambda ----
+--------------------------------------------------
+tupleNormAbstrFun :: [Ident Type] -> Exp Type -> SrcLoc -> TupNormM Type (Exp Type)
+tupleNormAbstrFun args body pos = do
+    let tups = filter isTuple args
+    let vars = map (\x -> Var x) tups
+    resms <- mapM (mkFullPattern . (\x -> Id x)) tups
+    let (pats, bndlst)  = unzip resms 
+    let bnds = foldl (++) [] bndlst
+    body'  <- binding bnds $ tupleNormExp body
+    body'' <- mergePatterns (reverse pats) (reverse vars) body'
+    return body''
+
+    where    
+        mergePatterns :: [TupIdent Type] -> [Exp Type] -> Exp Type -> TupNormM Type (Exp Type)
+        mergePatterns [] [] bdy = return bdy
+        mergePatterns [] _  _   = 
+            badTupNormM $ EnablingOptError pos
+                                           ("in TupleNormalizer.hs, mergePatterns: "
+                                            ++" lengths of tups and exps don't agree!")
+        mergePatterns _  [] _   = 
+            badTupNormM $ EnablingOptError pos 
+                                           ("in TupleNormalizer.hs, mergePatterns: "
+                                            ++" lengths of tups and exps don't agree!")
+        mergePatterns (pat:pats) (e:es) bdy = do
+            mergePatterns pats es (LetPat pat e bdy pos)
+
+
+isTuple :: Ident Type -> Bool
+isTuple x = case identType x of 
+              Tuple _ _ -> True
+              _         -> False
+
+ 
+------------------
+---- NOT USED ----
+------------------
+
+
+------------------------
+--- whether the pattern is fully instanciated w.r.t. its type
+------------------------
+{-
+isFullTuple :: TupIdent Type -> Bool
+
+isFullTuple (Id ident) =
+    case identType ident of
+        Tuple _ _ -> False
+        _         -> True
+
+isFullTuple (TupId idlst _) = 
+    foldl (&&) True (map isFullTuple idlst)
+-}
+
+
+-------------------
+--- old version ---
+-------------------
+{-
+tupleNormAbstrFunOld :: [Ident Type] -> Exp Type -> SrcLoc -> TupNormM Type (Exp Type)
+tupleNormAbstrFunOld args body pos = do
     let tups    = filter isTuple args
     let nms     = map identName tups
     (ok, bnds) <- procTups tups body []
@@ -112,7 +363,7 @@ tupleNormFun (fname, rettype, args, body, pos) = do
     then do -- required pattern match already done
             -- add the vtable bindings and normalize body
             body' <- binding (zip nms bnds) $ tupleNormExp body 
-            return (fname, rettype, args, body', pos)
+            return body'
     else do -- add the vtable bindings, normalize body
             tups' <- mapM makeTupId tups
             let bnds' = zip nms tups'
@@ -121,7 +372,7 @@ tupleNormFun (fname, rettype, args, body, pos) = do
             -- on top of the normalized body
             let pats = zip tups tups' 
             let body'' = addPatterns pos pats body'
-            return (fname, rettype, args, body'', pos)
+            return body''
 
     where
         addPatterns :: TypeBox ty => SrcLoc -> [(Ident Type,TupIdent ty)] -> Exp ty -> Exp ty
@@ -135,21 +386,21 @@ tupleNormFun (fname, rettype, args, body, pos) = do
             in  LetPat tupid (Var idd') (addPatterns p1 pats bdy) p1
 
 
-        makeTupId :: TypeBox ty => Ident Type -> NormM ty (TupIdent ty)
+        makeTupId :: TypeBox ty => Ident Type -> TupNormM ty (TupIdent ty)
         makeTupId ident = do
             case tp of
                 Tuple tps _ -> do
                     tupids <- mapM makeTupIdFromType tps
                     let res = TupId tupids pp
                     return res
-                _ ->badNormM $ TypeError pp 
-                                 ( "Id: " ++ nm ++ 
-                                   " not a tuple: " ++ ppType tp )
+                _ ->badTupNormM $ TypeError pp 
+                                    ( "Id: " ++ nm ++ 
+                                      " not a tuple: " ++ ppType tp )
              
             where
                 (nm, tp, pp) = (identName ident, identType ident, identSrcLoc ident)
 
-                makeTupIdFromType :: TypeBox ty => Type -> NormM ty (TupIdent ty)
+                makeTupIdFromType :: TypeBox ty => Type -> TupNormM ty (TupIdent ty)
                 makeTupIdFromType ttpp = 
                     case ttpp of
                         Tuple tps _ ->  do
@@ -165,43 +416,35 @@ tupleNormFun (fname, rettype, args, body, pos) = do
                         Tuple _ _ -> True
                         _         -> False
 
-        completeTup :: TypeBox ty => (Type, TupIdent ty) -> NormM ty Bool
-        completeTup (tp, tup) = do  -- whether is a complete tuple pattern.
-            case tup of
-                Id _ -> 
-                    case tp of
-                        Tuple _ _ -> return False -- id abstracts a tuple
-                        _         -> return True  -- ok, id is not a tuple
-
-                TupId tupids _ -> 
-                    case tp of
-                        Tuple tps _ -> 
-                            if (length tupids) == (length tps)
-                            then do bools <- mapM completeTup (zip tps tupids)
-                                    return $ foldl (&&) True bools                                  
-                            else badNormM $ TypeError pos ("TupIdent: " ++ ppTupId tup ++
-                                                           " length doesn't match type: " ++ ppType tp)
-                        _     -> badNormM $ TypeError pos ("TupIdent: " ++ ppTupId tup ++
-                                                           " does not match type: "++ppType tp)
  
-        procTups :: TypeBox ty => [Ident Type] -> Exp ty -> [TupIdent ty] -> NormM ty (Bool,[TupIdent ty])
+        procTups :: TypeBox ty => [Ident Type] -> Exp ty -> [TupIdent ty] -> TupNormM ty (Bool,[TupIdent ty])
         procTups []     _   lst = return (True, reverse lst) 
         procTups (i:is) bdy lst = do
             case bdy of
                 LetPat tupids (Var idd) bdy' _ -> do
-                    is_complete <- completeTup ((identType i), tupids)
+                    is_complete <- matchesTupleType ((identType i), tupids)
                     if  identName idd == identName i && is_complete
                     then procTups is bdy' (tupids:lst)
                     else return (False, lst)
                 _ ->     return (False, lst)
 
+        matchesTupleType :: TypeBox ty => (Type, TupIdent ty) -> TupNormM ty Bool
+        matchesTupleType (tp, tup) = do  -- whether is a complete tuple pattern.
+            case tup of
+                Id _ -> 
+                    case tp of
+                        Tuple _ _ -> return False -- id abstracts a tuple
+                        _         -> return True  -- ok, id is not a tuple
+        
+                TupId tupids _ -> 
+                    case tp of
+                        Tuple tps _ -> 
+                            if (length tupids) == (length tps)
+                            then do bools <- mapM matchesTupleType (zip tps tupids)
+                                    return $ foldl (&&) True bools                                  
+                            else badTupNormM $ TypeError pos ("TupIdent: " ++ ppTupId tup ++
+                                                              " length doesn't match type: " ++ ppType tp)
+                        _     -> badTupNormM $ TypeError pos ("TupIdent: " ++ ppTupId tup ++
+                                                              " does not match type: "++ppType tp)
+-}
 
------------------------------------------------------------------
------------------------------------------------------------------
----- Normalizing an expression                               ----
------------------------------------------------------------------
------------------------------------------------------------------
-
-tupleNormExp :: TypeBox tf => Exp tf -> NormM tf (Exp tf)
-tupleNormExp e = do
-    return e

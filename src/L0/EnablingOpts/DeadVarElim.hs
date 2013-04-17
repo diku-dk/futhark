@@ -33,18 +33,23 @@ data DCElimEnv tf = DCElimEnv {
                       , callGraph  :: CallGraph
                   }
 
+-----------------------------------------------------
+-- might want to add `has_io' part of the result  
+-- to keep complexity to O(N)
+-----------------------------------------------------
 data DCElimRes tf = DCElimRes {
     resSuccess :: Bool
   -- ^ Whether we have changed something.
   , resMap     :: S.Set String
   -- ^ The hashtable recording the uses
+  --, has_io     :: Bool
   }
 
 
 instance Monoid (DCElimRes tf) where
   DCElimRes s1 m1 `mappend` DCElimRes s2 m2 =
-    DCElimRes (s1 || s2) (S.union m1 m2)   
-  mempty = DCElimRes False S.empty
+    DCElimRes (s1 || s2) (S.union m1 m2) --(io1 || io2)
+  mempty = DCElimRes False S.empty -- False
 
 newtype DCElimM tf a = DCElimM (WriterT (DCElimRes tf) (ReaderT (DCElimEnv tf) (Either EnablingOptError)) a)
     deriving (MonadWriter (DCElimRes tf),
@@ -168,13 +173,19 @@ deadCodeElimExp (Index s idxs t1 t2 pos) = do
             idxs' <- mapM deadCodeElimExp idxs
             return $ Index s idxs' t1 t2 pos
 
-
-deadCodeElimExp (DoLoop ind n body mergevars pos) = do
-    n'    <- deadCodeElimExp n
-    body' <- binding [identName ind] $ deadCodeElimExp body
-    let mergenms = map identName mergevars
-    _ <- tell $ DCElimRes False (S.fromList mergenms)
-    return $ DoLoop ind n' body' mergevars pos
+deadCodeElimExp (DoLoop idexps idd n loopbdy letbdy pos) = do
+    let (ids, exps) = unzip idexps
+    let idnms       = map identName ids
+    (letbdy',noref) <- collectRes idnms $ binding idnms $ deadCodeElimExp letbdy
+    cg              <- asks $ callGraph
+    -- `hasIO' test might give O(N^n) complexity if loop-nest of high degree
+    -- the alternative is to return the 
+    if noref && not (hasIO cg loopbdy)
+    then changed $ return letbdy'
+    else do exps'   <- mapM deadCodeElimExp exps
+            n'      <- deadCodeElimExp n
+            loopbdy'<- binding ( (identName idd) : idnms) $ deadCodeElimExp loopbdy
+            return $ DoLoop (zip ids exps') idd n' loopbdy' letbdy' pos
 
 
 
@@ -213,6 +224,9 @@ hasIO :: TypeBox tf => CallGraph -> Exp tf -> Bool
 hasIO _  (Read  _ _    ) = True
 hasIO _  (Write _ _ _  ) = True
 hasIO cg (Apply f _ _ _) = 
+  if isBuiltInFun f
+  then False
+  else 
     case M.lookup f cg of
         Just (_,_,has_io) -> has_io
         Nothing           -> error $ "In hasIO, DeadVarElims: Function "++f++" not in call graph!"
@@ -228,6 +242,9 @@ hasIO call_graph cur_exp =
         doLam :: TypeBox tf => (CallGraph, Bool) -> Lambda tf -> (CallGraph, Bool)
         doLam (cg, hio) (AnonymFun _    _ _ _) = (cg, hio)
         doLam (cg, hio) (CurryFun fname _ _ _) = 
+          if isBuiltInFun fname
+          then (cg, hio)
+          else
             case M.lookup fname cg of
                 Just (_,_,has_io') -> (cg, hio || has_io')
                 Nothing            -> error $ "In hasIO, DeadVarElims: Function "++fname++" not in call graph!" 

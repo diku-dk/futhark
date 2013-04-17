@@ -34,9 +34,11 @@ foldlPattern f _ ne (Or  e1 e2 _)      = foldl f ne [e1, e2]
 foldlPattern f _ ne (If e1 e2 e3 _ _)  = foldl f ne [e1, e2, e3]
 foldlPattern f _ ne (Apply _ es _ _)   = foldl f ne es
 
+foldlPattern f _ ne (DoLoop idexps _ n lbody letexp _)  = 
+    let (_, inis) = unzip idexps
+    in  foldl f ne (inis ++ (n : lbody : letexp : []))
 foldlPattern f _ ne (LetWith _ _ inds el body _) = foldl f ne (el : body : inds)
 foldlPattern f _ ne (LetPat  _ e body _)   = foldl f ne [e, body]
-foldlPattern f _ ne (DoLoop _ n body _ _)  = foldl f ne [n, body]
 foldlPattern f _ ne (Index _ inds _ _ _ )  = foldl f ne inds
 
 foldlPattern f _ ne (Iota      e _    )    = f ne e

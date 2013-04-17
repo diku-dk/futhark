@@ -5,7 +5,7 @@ module L0.EnablingOpts.EnablingOptErrors ( EnablingOptError(..) )
   
 import Data.Loc
 import L0.AbSyn
-
+ 
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.
 data EnablingOptError = EnablingOptError SrcLoc String

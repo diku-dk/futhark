@@ -11,8 +11,7 @@ import Control.Monad.Writer
 --import Data.Data
 --import Data.Generics
 
-import qualified Data.Map  as M
---import qualified Data.List as L
+import qualified Data.List as L
 
 import L0.AbSyn
 import Data.Loc
@@ -22,34 +21,35 @@ import L0.FreshNames
 --import L0.EnablingOpts.GenPatterns
 import L0.EnablingOpts.EnablingOptErrors
 
+--import Debug.Trace
 
 -----------------------------------------------------------------
 -----------------------------------------------------------------
 ---- This file implements Program Normalization:             ----
-----    1. x : (tp1 * (tp2*tp3)) replaced with (x1,(x2,x3))  ----
-----    2. array and tuple literal normalization, i.e.,      ----
+----    1. array and tuple literal normalization, i.e.,      ----
 ----          literals contains a series of variables only   ----
-----    3. let y = (let x = exp1 in exp2) in body ->         ----
+----    2. let y = (let x = exp1 in exp2) in body ->         ----
 ----       let x = exp1 in let y = exp2 in body              ----
-----    4. function calls separated from expressions,i.e.,   ----
+----    3. function calls separated from expressions,i.e.,   ----
 ----             let y = f(x) + g(z) + exp in body           ----
 ----         is replaced by:                                 ----
 ----             let t1 = f(x) in let t2 = g(z) in           ----
 ----             let y = t1 + t2 + exp in body               ----
+----    4. Same for array constructors and combinators       ----
 -----------------------------------------------------------------
 -----------------------------------------------------------------
 
 data LetNormRes tf = LetNormRes {
     resSuccess :: Bool
   -- ^ Whether we have changed something.
-  , resMap     :: M.Map String (Exp tf)
+  , resMap     :: [(String, Exp tf)]
   -- ^ The hashtable recording the uses
   }
 
 instance Monoid (LetNormRes tf) where
   LetNormRes s1 m1 `mappend` LetNormRes s2 m2 =
-    LetNormRes (s1 || s2) (M.union m1 m2)   
-  mempty = LetNormRes False M.empty
+    LetNormRes (s1 || s2) (m1 ++ m2) 
+  mempty = LetNormRes False []
 
 
 newtype LetNormM tf a = LetNormM (StateT NameSource (WriterT (LetNormRes tf) (Either EnablingOptError)) a)
@@ -74,18 +74,18 @@ collectRes m = pass collect
       let (x', res_map') = case x of
             LetPat pat (Var idd) body pos -> 
                 let nm = identName idd
-                in  case M.lookup nm res_map of
-                      Just mexp -> (LetPat pat mexp body pos, M.delete nm res_map)
+                in  case L.lookup nm res_map of
+                      Just mexp -> (LetPat pat mexp body pos, L.deleteBy (\ (x1,_) (x2,_) -> x1==x2) (nm,mexp) res_map)
                       Nothing   -> (x, res_map)
             _ -> (x, res_map)
 
-      return ( (x', M.toList res_map'), const $ LetNormRes{ resSuccess = suc, resMap = M.empty } )
-
---changed :: a -> LetNormM tf a
---changed x = do
---  tell $ LetNormRes True M.empty
---  return x
-
+      return ( (x', res_map'), const $ LetNormRes{ resSuccess = suc, resMap = [] } )
+{-
+changed :: a -> LetNormM tf a
+changed x = do
+  tell $ LetNormRes True []
+  return x
+-}
 -----------------------------
 -----------------------------
 
@@ -98,8 +98,10 @@ runLetNormM :: TypeBox tf => Prog tf -> LetNormM tf a -> Either EnablingOptError
 runLetNormM prog (LetNormM a) = 
     runWriterT (evalStateT a (newNameSourceForProg prog))
 
+{-
 badLetNormM :: EnablingOptError -> LetNormM tf a
 badLetNormM = LetNormM . lift . lift . Left
+-}
 
 -- | Return a fresh, unique name.  The @String@ is prepended to the
 -- name.
@@ -144,35 +146,50 @@ letNormExp :: TypeBox tf => Exp tf -> LetNormM tf (Exp tf)
 
 letNormExp (LetPat pat e body pos) = do
     (body', bodyres') <- collectRes $ letNormExp body
-    body'' <- makeLetExp pos bodyres' body'
+    let body'' = makeLetExp pos bodyres' body'
 
     (e', eres')    <- collectRes $ letNormExp e 
     let res = combinePats (ReguPat pat pos) e' body'' 
-    makeLetExp pos eres' res
+    return $ makeLetExp pos eres' res
 
 
 letNormExp (LetWith nm src inds el body pos) = do
     (body', bodyres') <- collectRes $ letNormExp body
-    body'' <- makeLetExp pos bodyres' body'
+    let body'' = makeLetExp pos bodyres' body'
 
     (el', eres')    <- collectRes $ letNormExp el 
     let res = combinePats (WithPat nm src inds pos) el' body'' 
-    makeLetExp pos eres' res
+    return $ makeLetExp pos eres' res
 
 
-letNormExp (DoLoop ind n body mergevars pos) = do
+--letNormLambda (AnonymFun params body ret pos) = do
+--    (body', newbnds) <- collectRes $ letNormExp body
+--    let body'' = addPatterns pos newbnds body'
+--    return $ AnonymFun params body'' ret pos
+
+--letNormExp (DoLoop ind n body mergevars pos) = do
+letNormExp (DoLoop idexps idd n loopbdy letbdy pos) = do
     -- the potential bindings from the loop-count 
     -- expression are handled in the outer-loop scope
-    n''  <-  subLetoNormExp "tmp_lind" n
+    n'  <-  subLetoNormExp "tmp_ub" n
+
+    let (ids, exps) = unzip idexps
+    exps' <- mapM (subLetoNormExp "tmp_ini") exps
     
     -- a do-loop creates a scope, hence we need to treat the
     -- the binding at this level, similar to a let-construct
-    (body', bodyres') <- collectRes $ letNormExp body
-    body'' <- makeLetExp pos bodyres' body'
+    (loopbdy', loopres') <- collectRes $ letNormExp loopbdy
+    let loopbdy'' = makeLetExp pos loopres' loopbdy'
+    --(body', bodyres') <- collectRes $ letNormExp body
+    --let body'' = makeLetExp pos bodyres' body'
+
+    (letbdy', letres') <- collectRes $ letNormExp letbdy
+    let letbdy'' = makeLetExp pos letres' letbdy'
 
     -- finally return the new loop
-    return $ DoLoop ind n'' body'' mergevars pos
-
+    return $ DoLoop (zip ids exps') idd n' loopbdy'' letbdy'' pos
+    --makeVarExpSubst "tmp_loop" pos (DoLoop ind n' body'' mergevars pos)
+    
 ------------------------------------
 ---- expression-free constructs ----
 ------------------------------------
@@ -188,10 +205,12 @@ letNormExp e@(Var     _) = do return e
 
 letNormExp (TupLit exps pos) = do
     exps' <- mapM (subLetoNormExp "tmp_lit") exps
+    -- exps' <- mapM (subsNormExp pos "tmp_lit") exps
     return $ TupLit exps' pos
 
 letNormExp (ArrayLit exps tp pos) = do
     exps' <- mapM (subLetoNormExp "tmp_lit") exps
+    -- exps' <- mapM (subsNormExp pos "tmp_lit") exps
     return $ ArrayLit exps' tp pos
 
 letNormExp (Index s idx t1 t2 pos) = do
@@ -269,7 +288,6 @@ letNormExp (Iota e pos) = do
     makeVarExpSubst "tmp_iota" pos (Iota e' pos)
 
 letNormExp (Size arr pos) = do
-    -- normalized arr param & get it outside replicate
     arr' <- letNormExp arr >>= makeVarExpSubst "tmp_arr" pos
     makeVarExpSubst "tmp_size" pos (Size arr' pos)
 
@@ -388,12 +406,16 @@ letNormLambda (AnonymFun params body ret pos) = do
 letNormLambda (CurryFun fname exps rettype pos) = do
     exps'  <- mapM (subLetoNormExp "tmp_arg") exps
     return $ CurryFun fname exps' rettype pos 
-
+ 
 ---------------------------
 ---------------------------
 ---- Helper Functions -----
 ---------------------------
 ---------------------------
+{-
+subsNormExp :: TypeBox tf => SrcLoc -> String -> Exp tf -> LetNormM tf (Exp tf)
+subsNormExp pos str ee = letNormExp ee >>= makeVarExpSubst str pos
+-}
 
 subLetoNormExp :: TypeBox tf => String -> Exp tf -> LetNormM tf (Exp tf)
 subLetoNormExp str ee = letNormExp ee >>= subsLetExp str 
@@ -403,6 +425,7 @@ subLetoNormExp str ee = letNormExp ee >>= subsLetExp str
             case e of
                 (LetPat      _ _ _ pos) -> makeVarExpSubst s pos e
                 (LetWith _ _ _ _ _ pos) -> makeVarExpSubst s pos e
+                (If        _ _ _ _ pos) -> makeVarExpSubst s pos e
                 _                       -> do return e
 
 makeVarExpSubst :: TypeBox ty => String -> SrcLoc -> Exp ty -> LetNormM ty (Exp ty)
@@ -418,23 +441,27 @@ makeVarExpSubst str pos e = case e of
                           identType = getExpType e, 
                           identSrcLoc = pos
                         }
-        _ <- tell $ LetNormRes True (M.insert tmp_nm e M.empty)
+        _ <- tell $ LetNormRes True [(tmp_nm, e)]
         return $ Var idd
     
 
-makeLetExp :: TypeBox tf => SrcLoc -> [(String, Exp tf)] -> Exp tf -> LetNormM tf (Exp tf)
-makeLetExp _   []           body = return body
+
+-------------------------------------------------------------------
+---- makeLetExp SEMANTICALLY EQUIVALENT with addPatterns ????? ----
+-------------------------------------------------------------------
+
+makeLetExp :: TypeBox tf => SrcLoc -> [(String, Exp tf)] -> Exp tf -> Exp tf -- LetNormM tf (Exp tf)
+makeLetExp _   []           body = body
 
 -- Preconditions: lst contains normalized bindings, 
 --                   i.e., the exp in lst are normalized
 --                and body is normalized as well.
-makeLetExp pos l@((vnm,ee):lll) body = do
+makeLetExp pos l@((vnm,ee):lll) body =
     case body of
         (LetPat pat1 (Var id1) b1 p1) -> 
             if vnm == identName id1 && not (isLetPatWith ee) 
-            then do
-                    b1' <- makeLetExp pos lll b1
-                    return $ combinePats (ReguPat pat1 p1) ee b1'
+            then let b1' = makeLetExp pos lll b1
+                 in  combinePats (ReguPat pat1 p1) ee b1'
                     -- return $ LetPat pat1 ee b1' p1
             else commonCase l body
         _ -> commonCase l body
@@ -444,15 +471,15 @@ makeLetExp pos l@((vnm,ee):lll) body = do
             LetWith _ _ _ _ _ _ -> True
             _                   -> False
 
-        commonCase :: TypeBox ty => [(String, Exp ty)] -> Exp ty -> LetNormM ty (Exp ty)
-        commonCase []          bdy = do return bdy
-        commonCase ((nm,e):ll) bdy = do
-            bdy' <- makeLetExp pos ll bdy
-            let idd = Ident { identName   = nm, 
+        commonCase :: TypeBox ty => [(String, Exp ty)] -> Exp ty -> Exp ty -- LetNormM ty (Exp ty)
+        commonCase []          bdy = bdy
+        commonCase ((nm,e):ll) bdy = 
+            let bdy' = makeLetExp pos ll bdy
+                idd = Ident { identName   = nm, 
                               identType   = getExpType e, 
                               identSrcLoc = pos
                             }
-            return $ combinePats (ReguPat (Id idd) pos) e bdy'
+            in combinePats (ReguPat (Id idd) pos) e bdy'
             -- letNormExp (LetPat (Id idd) e bdy' pos)
 
 
@@ -470,6 +497,10 @@ combinePats rp@(ReguPat y pos) e body =
         LetWith x1 x0 inds el e_x pos_x ->
             LetWith x1 x0 inds el (combinePats rp e_x body) pos_x
 
+        -- let y = (loop (...) for i < N do loopbody in letbody) in body
+        DoLoop idexps idd n loopbdy letbdy pos_x ->
+            DoLoop idexps idd n loopbdy (combinePats rp letbdy body) pos_x
+
         -- not a let bindings
         _ -> LetPat y e body pos
 
@@ -483,17 +514,24 @@ combinePats wp@(WithPat y1 y0 inds pos) el body =
         LetWith x1 x0 inds_x el_x e_x pos_x ->
             LetWith x1 x0 inds_x el_x (combinePats wp e_x body) pos_x
 
+        -- let y1 = y0 with [inds] <- (loop (...) = for i < N do loopbdy in letbdy) in body
+        DoLoop idexps idd n loopbdy letbdy pos_x ->
+            DoLoop idexps idd n loopbdy (combinePats wp letbdy body) pos_x
+        
         -- not a let bindings
         _ -> LetWith y1 y0 inds el body pos    
 
-
 addPatterns :: TypeBox tf => SrcLoc -> [(String, Exp tf)] -> Exp tf -> Exp tf
-addPatterns _   []         bdy = bdy
-addPatterns pos (pat:pats) bdy = 
-    let (nm, e) = pat
-        idd = Ident { identName = nm, 
-                      identType = getExpType e, 
-                      identSrcLoc = pos
-                    }
-    in  LetPat (Id idd) e (addPatterns pos pats bdy) pos
+addPatterns = makeLetExp
+--addPatterns :: TypeBox tf => SrcLoc -> [(String, Exp tf)] -> Exp tf -> Exp tf
+--addPatterns _   []         bdy = bdy
+--addPatterns pos (pat:pats) bdy = 
+--    let (nm, e) = pat
+--        idd = Ident { identName = nm, 
+--                      identType = getExpType e, 
+--                      identSrcLoc = pos
+--                    }
+--        rpat = ReguPat (Id idd) pos
+--    in  combinePats rpat e (addPatterns pos pats bdy)
+-------    in  LetPat (Id idd) e (addPatterns pos pats bdy) pos
 
