@@ -96,7 +96,7 @@ rootFinding_Brent(int fid, [(real*real)] scalesbbi, real lb, real ub, real tol, 
     let it        = 0       in
     let d         = 0.0     in
 
-    loop (a,b,c,d,fa,fb,fc,mflag,it) = 
+    loop ((a,b,c,d,fa,fb,fc,mflag,it)) = 
         for i < iter_max do
 
             if( fb=0.0 || abs(b-a)<tol ) 
