@@ -140,8 +140,8 @@ rootFinding_Brent(int fid, [(real*real)] scalesbbi, real lb, real ub, real tol, 
                 // reporting non-convergence!
                 let dummy = 
                     if(i = iter_max-1) 
-                    then let w = write("# ERROR: Brent method not converged, error: ") in
-                         let w = write(fb) in 0
+                    then let w = trace("# ERROR: Brent method not converged, error: ") in
+                         let w = trace(fb) in 0
                     else 0
 
                 in (a,b,c,d,fa,fb,fc,mflag,i)
@@ -182,26 +182,26 @@ fun bool equal(real x1, real x2) =
 
 fun int main_test_math() = 
     // Rootfinder.brent (-4.) (4./.3.) (fun x -> (x+.3.)*.(x-.1.)**2.) 1e-4 == -3
-    let tmp = write("# Brent test: ") in
+    let tmp = trace("# Brent test: ") in
     let (root, it, error) = rootFinding_Brent(33, {(0.0,0.0)}, ~4.0, 4.0/3.0, 0.0, 0) in
-    let tmp =   if( equal(root, ~3.0) ) then write(" success!") 
-                                        else write(" fails!") in
+    let tmp =   if( equal(root, ~3.0) ) then trace(" success!") 
+                                        else trace(" fails!") in
 
     // erf 0. == 0. ;; 100. *. erf (1./.sqrt 2.)
-    let tmp = write("Erf test: ") in
+    let tmp = trace("Erf test: ") in
     let tmp =   if( equal(erf(0.0), 0.0) && equal( toReal(trunc(100.0*erf(1.0/sqrt(2.0)))), 68.0 ) )
-                then write(" success!") 
-                else write(" fails!") in
+                then trace(" success!") 
+                else trace(" fails!") in
     
     // ugaussian_P 0. ;; ugaussian_P 1. +. ugaussian_P (-1.)
-    let tmp = write("Gaussian test: ") in
+    let tmp = trace("Gaussian test: ") in
     let tmp =   if( equal(uGaussian_P(0.0),0.5) && equal(uGaussian_P(~1.0)+uGaussian_P(1.0),1.0) )
-                then write(" success!") 
-                else write(" fails!") in
+                then trace(" success!") 
+                else trace(" fails!") in
         33
 
     
-  //let tmp = write(equal(brent( a=-4, b=4/3, eval=lambda x: (x+3)*(x-1)**2 )[0], -3)
+  //let tmp = trace(equal(brent( a=-4, b=4/3, eval=lambda x: (x+3)*(x-1)**2 )[0], -3)
   // erf 0. == 0. ;; 100. *. erf (1./.sqrt 2.)
   //print "# Erf test:", equal(erf(0),0) and equal(int(100*erf(1/N.sqrt(2))),68)
   // ugaussian_P 0. ;; ugaussian_P 1. +. ugaussian_P (-1.)
@@ -630,35 +630,35 @@ fun int main_g2pp_header() =
     let res_bigmx = bigmx((0.02, 0.02, 0.0, 0.01, 0.04), today, tmat, s, t) in 
     let res_bigmy = bigmy((0.02, 0.02, 0.0, 0.01, 0.04), today, tmat, s, t) in 
 
-    let tmp = write("b_fun test: ") in
+    let tmp = trace("b_fun test: ") in
     let tmp =   if( equal(res_b_fun, 0.30490117) )
-                then write(" SUCCESS! ") 
-                else write(" fails! ") in
-    let tmp = write(res_b_fun)    in
-    let tmp = write("\n\n")       in
+                then trace(" SUCCESS! ") 
+                else trace(" fails! ") in
+    let tmp = trace(res_b_fun)    in
+    let tmp = trace("\n\n")       in
 
-    let tmp = write("bigv test: ")      in
+    let tmp = trace("bigv test: ")      in
     let (tmp1, tmp2, tmp3) = res_bigv   in
     let tmp =   if( equal(tmp1, 7.8288965347e~4) && equal(tmp2, 1.107549139) && equal(tmp3, 1.107549139)  )
-                then write(" SUCCESS! ") 
-                else write(" fails! ") in
-    let tmp = write(res_bigv)    in
-    let tmp = write("\n\n")       in
+                then trace(" SUCCESS! ") 
+                else trace(" fails! ") in
+    let tmp = trace(res_bigv)    in
+    let tmp = trace("\n\n")       in
 
-    let tmp = write("bigmx test: ") in
+    let tmp = trace("bigmx test: ") in
     let tmp =   if( equal(res_bigmx, ~0.2356067470979) )
-                then write(" SUCCESS! ") 
-                else write(" fails! ") in
-    let tmp = write(res_bigmx)    in
-    let tmp = write("\n\n")       in
+                then trace(" SUCCESS! ") 
+                else trace(" fails! ") in
+    let tmp = trace(res_bigmx)    in
+    let tmp = trace("\n\n")       in
 
 
-    let tmp = write("bigmy test: ") in
+    let tmp = trace("bigmy test: ") in
     let tmp =   if( equal(res_bigmy, ~0.01472542169362) )
-                then write(" SUCCESS! ") 
-                else write(" fails! ") in
-    let tmp = write(res_bigmy)    in
-    let tmp = write("\n\n")       in
+                then trace(" SUCCESS! ") 
+                else trace(" fails! ") in
+    let tmp = trace(res_bigmy)    in
+    let tmp = trace("\n\n")       in
 
     //////////////////////////////////
     // testing extended_swaption_of_swaption
@@ -680,13 +680,13 @@ fun int main_g2pp_header() =
                                     zip(swap_schedule, res_swap_schd) 
                             ) 
                           ) in
-    let tmp = write("Testing extended_swaption_of_swaption: ")          in
+    let tmp = trace("Testing extended_swaption_of_swaption: ")          in
     let tmp =   if(mat_ok && strike_ok && sched_ok) 
-                then write("SUCCESS! ")
-                else write("FAILS! ") in
-    let tmp = write("\n\tmaturity: ") in let tmp = write(res_mat      ) in 
-    let tmp = write("\n\tstrike: ")   in let tmp = write(res_strike   ) in 
-    let tmp = write("\n\tswapsched: ")in let tmp = write(res_swap_schd) in 
+                then trace("SUCCESS! ")
+                else trace("FAILS! ") in
+    let tmp = trace("\n\tmaturity: ") in let tmp = trace(res_mat      ) in 
+    let tmp = trace("\n\tstrike: ")   in let tmp = trace(res_strike   ) in 
+    let tmp = trace("\n\tswapsched: ")in let tmp = trace(res_swap_schd) in 
 
     //////////////////////////////////
     // testing black_price
@@ -699,12 +699,12 @@ fun int main_g2pp_header() =
     let swaption = (10.0, 6.0, 4.0) in
     let black_price_res = black_price(today(), swaption, vol) * 10000.0 in
 
-    let tmp = write("\n\nTesting Black Price: ") in
+    let tmp = trace("\n\nTesting Black Price: ") in
     let tmp =   if( equal(black_price_res, 654.1429648454) )
-                then write(" SUCCESS! ") 
-                else write(" FAILS! ") in
-    let tmp = write(black_price_res)   in
-    let tmp = write("\n\n")            in
+                then trace(" SUCCESS! ") 
+                else trace(" FAILS! ") in
+    let tmp = trace(black_price_res)   in
+    let tmp = trace("\n\n")            in
 
 
         33
@@ -958,12 +958,12 @@ fun int main_pricer_of_swaption() =
 
     let price1   = 1.0e4*pricer_of_swaption(today(), swaption, genome) in
     
-    let tmp = write("Pricer_of_swaption test: ") in
+    let tmp = trace("Pricer_of_swaption test: ") in
     let tmp =   if( equal(price1, 657.82158867845) )
-                then write(" SUCCESS! ") 
-                else let tmp = write(" FAILS! should be: ") in let tmp = write(657.822) in write(" is ") in
-    let tmp = write(price1)    in
-    let tmp = write("\n\n")    in
+                then trace(" SUCCESS! ") 
+                else let tmp = trace(" FAILS! should be: ") in let tmp = trace(657.822) in trace(" is ") in
+    let tmp = trace(price1)    in
+    let tmp = trace("\n\n")    in
 
 
     // (maturity, frequency, term) = swaption
@@ -971,12 +971,12 @@ fun int main_pricer_of_swaption() =
 
     let price2   = 1.0e4*pricer_of_swaption(today(), swaption, genome) in
 
-    let tmp = write("Pricer_of_swaption test: ") in
+    let tmp = trace("Pricer_of_swaption test: ") in
     let tmp =   if( equal(price2, 1902.97628191498) )
-                then write(" SUCCESS! ") 
-                else let tmp = write(" FAILS! should be: ") in let tmp = write(1902.976) in write(" is ") in
-    let tmp = write(price2)    in
-    let tmp = write("\n\n")    in
+                then trace(" SUCCESS! ") 
+                else let tmp = trace(" FAILS! should be: ") in let tmp = trace(1902.976) in trace(" is ") in
+    let tmp = trace(price2)    in
+    let tmp = trace("\n\n")    in
 
 
     // (maturity, frequency, term) = swaption
@@ -984,12 +984,12 @@ fun int main_pricer_of_swaption() =
 
     let price3   = 1.0e4*pricer_of_swaption(today(), swaption, genome) in
 
-    let tmp = write("Pricer_of_swaption test: ") in
+    let tmp = trace("Pricer_of_swaption test: ") in
     let tmp =   if( equal(price3, 1840.859126408099) )
-                then write(" SUCCESS! ") 
-                else let tmp = write(" FAILS! should be: ") in let tmp = write(1840.859126408099) in write(" is ") in
-    let tmp = write(price3)    in
-    let tmp = write("\n\n")    in
+                then trace(" SUCCESS! ") 
+                else let tmp = trace(" FAILS! should be: ") in let tmp = trace(1840.859126408099) in trace(" is ") in
+    let tmp = trace(price3)    in
+    let tmp = trace("\n\n")    in
 
 
         33
@@ -1023,7 +1023,7 @@ fun int main_pricer_of_swaption() =
 //////////////////////////////////////////////////////
 
 
-fun int main() =   //_applic() = 
+fun real main() =   //_applic() = 
     let genome = (0.02453, 0.98376, ~0.82400, 0.11830, 0.02398) in 
     let prices = map( fn real ( ((real*real*real) * real) swapquote ) => 
                         let (swaption, quote) = swapquote                                in
@@ -1032,11 +1032,11 @@ fun int main() =   //_applic() =
 
                         // printing
                         let (mat_year, swap_freq, term_year) = swaption              in
-                        //let tmp = write("\n")                                        in
-                        //let tmp = write(trunc( mat_year)) in let tmp = write("Y")    in
-                        //let tmp = write(trunc(term_year)) in let tmp = write("Y")    in
-                        //let tmp = write(" Swaption Calibrated Price: ") in let tmp = write(10000.0*g2pp_price) in
-                        //let tmp = write(" Market Price: ") in let tmp = write(10000.0*market_price) in
+                        //let tmp = trace("\n")                                        in
+                        //let tmp = trace(trunc( mat_year)) in let tmp = trace("Y")    in
+                        //let tmp = trace(trunc(term_year)) in let tmp = trace("Y")    in
+                        //let tmp = trace(" Swaption Calibrated Price: ") in let tmp = trace(10000.0*g2pp_price) in
+                        //let tmp = trace(" Market Price: ") in let tmp = trace(10000.0*market_price) in
                                 
                                 //(g2pp_price, market_price)
                         let res = (g2pp_price - market_price) / market_price
@@ -1050,11 +1050,11 @@ fun int main() =   //_applic() =
     let rms    = 100.0 * sqrt ( rms / toReal(numswapts) ) in
 
     // printing the error!
-    let tmp    = write("\n\nComputed RMS is: ") in 
-    let tmp    = write(rms)                     in 
-    let tmp    = write("\n\n END \n\n")         in
+    let tmp    = trace("\n\nComputed RMS is: ") in 
+    let tmp    = trace(rms)                     in 
+    let tmp    = trace("\n\n END \n\n")         in
 
-                33
+                rms
 
 
 
@@ -1183,42 +1183,42 @@ fun real today    () = toReal( date_of_gregorian( (2012, 1, 1, 12, 0) ) )
 //assert "%.6f" % days_between(max_date,min_date) == "116877.499306"
 //assert "%.6f" % act_365(max_date,min_date) == "320.212327"
 fun int main_dates() = 
-    let tmp = write("Today: ") in let tmp = write(trunc(today())) in let tmp = write("\n") in
-    let tmp = write("add_months(min_date,1)==48240")            in
+    let tmp = trace("Today: ") in let tmp = trace(trunc(today())) in let tmp = trace("\n") in
+    let tmp = trace("add_months(min_date,1)==48240")            in
     let tmp = add_months(min_date(), 1.0)                       in
-    let bbb = if( equal(tmp, 48240.0) ) then write("SUCCESS ")
-                                        else write("FAILS ")    in
-    let bbb = write(tmp) in let bbb = write("\n")               in
+    let bbb = if( equal(tmp, 48240.0) ) then trace("SUCCESS ")
+                                        else trace("FAILS ")    in
+    let bbb = trace(tmp) in let bbb = trace("\n")               in
 //
-    let tmp = write("add_months(min_date,2)==90000")            in
+    let tmp = trace("add_months(min_date,2)==90000")            in
     let tmp = add_months(min_date(), 2.0)                       in
-    let bbb = if( equal(tmp, 90000.0) ) then write("SUCCESS ")
-                                        else write("FAILS ")    in
-    let bbb = write(tmp) in let bbb = write("\n")               in
+    let bbb = if( equal(tmp, 90000.0) ) then trace("SUCCESS ")
+                                        else trace("FAILS ")    in
+    let bbb = trace(tmp) in let bbb = trace("\n")               in
 //
-    let tmp = write("add_years(min_date,1)==530640")            in
+    let tmp = trace("add_years(min_date,1)==530640")            in
     let tmp = add_years(min_date(), 1.0)                        in
-    let bbb = if( equal(tmp, 530640.0) )then write("SUCCESS ")
-                                        else write("FAILS ")    in
-    let bbb = write(tmp) in let bbb = write("\n")               in
+    let bbb = if( equal(tmp, 530640.0) )then trace("SUCCESS ")
+                                        else trace("FAILS ")    in
+    let bbb = trace(tmp) in let bbb = trace("\n")               in
 //
-    let tmp = write("add_years(min_date,5)==2634480")           in
+    let tmp = trace("add_years(min_date,5)==2634480")           in
     let tmp = add_years(min_date(), 5.0)                        in
-    let bbb = if( equal(tmp, 2634480.0) )then write("SUCCESS ")
-                                         else write("FAILS ")   in
-    let bbb = write(tmp) in let bbb = write("\n")               in
+    let bbb = if( equal(tmp, 2634480.0) )then trace("SUCCESS ")
+                                         else trace("FAILS ")   in
+    let bbb = trace(tmp) in let bbb = trace("\n")               in
 //
-    let tmp = write("days_between(max_date(),min_date()) == 116877.499306") in
+    let tmp = trace("days_between(max_date(),min_date()) == 116877.499306") in
     let tmp = days_between( max_date(), min_date() )                        in
-    let bbb = if( equal(tmp, 116877.499305555) )then write("SUCCESS ")
-                                             else write("FAILS ")           in
-    let bbb = write(tmp) in let bbb = write("\n")                           in
+    let bbb = if( equal(tmp, 116877.499305555) )then trace("SUCCESS ")
+                                             else trace("FAILS ")           in
+    let bbb = trace(tmp) in let bbb = trace("\n")                           in
 //
-    let tmp = write("act_365(max_date,min_date) == 320.212327")   in
+    let tmp = trace("act_365(max_date,min_date) == 320.212327")   in
     let tmp = date_act_365(max_date(), min_date())                in
-    let bbb = if( equal(tmp, 320.2123268645) ) then write("SUCCESS ")
-                                           else write("FAILS ")   in
-    let bbb = write(tmp) in let bbb = write("\n")                 in
+    let bbb = if( equal(tmp, 320.2123268645) ) then trace("SUCCESS ")
+                                           else trace("FAILS ")   in
+    let bbb = trace(tmp) in let bbb = trace("\n")                 in
             
             33
 
