@@ -5,14 +5,12 @@ module L0.TupleArrayTransform
 
 import Control.Applicative
 import Control.Monad.State
-import Control.Monad.Reader
 
 import qualified Data.Array as A
 import Data.Data
 import Data.Generics
 import Data.List
 import Data.Loc
-import qualified Data.Map as M
 
 import L0.AbSyn
 import L0.FreshNames
@@ -24,25 +22,16 @@ data TransformState = TransformState {
     envNameSrc :: NameSource
   }
 
-data TransformEnv = TransformEnv {
-    envVarSubst :: M.Map String [Ident Type]
-  }
-
-type TransformM = ReaderT TransformEnv (State TransformState)
+type TransformM = State TransformState
 
 runTransformM :: TransformM a -> a
-runTransformM m = evalState (runReaderT m newEnv) newState
-  where newEnv = TransformEnv M.empty
-        newState = TransformState $ newNameSource []
+runTransformM m = evalState m newState
+  where newState = TransformState $ newNameSource []
 
 new :: String -> TransformM String
 new k = do (name, src) <- gets $ newName k . envNameSrc
            modify $ \s -> s { envNameSrc = src }
            return name
-
-substituting :: M.Map String [Ident Type] -> TransformM a -> TransformM a
-substituting substs =
-  local (\s -> s { envVarSubst = substs `M.union` envVarSubst s })
 
 transformType :: Type -> Type
 transformType (Array (Tuple elemts _) size loc) =
@@ -89,10 +78,7 @@ transformExp :: Exp Type -> TransformM (Exp Type)
 transformExp (Literal val) =
   return $ Literal $ transformValue val
 transformExp (Var k) = do
-  substs <- asks $ M.lookup (identName k) . envVarSubst
-  case substs of
-    Nothing     -> return $ Var $ transformIdent k
-    Just subst' -> return $ TupLit (map Var subst') (srclocOf k)
+  return $ Var $ transformIdent k
 transformExp (TupLit es loc) = do
   es' <- mapM transformExp es
   return $ TupLit es' loc
