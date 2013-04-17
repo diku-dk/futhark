@@ -25,7 +25,6 @@ import L0.AbSyn
  
 import L0.EnablingOpts.EnablingOptErrors
 import qualified L0.Interpreter as Interp
-import L0.EnablingOpts.InliningDeadFun
 
 --import Debug.Trace
 -----------------------------------------------------------------
@@ -55,8 +54,7 @@ data CtOrId tf  = Constant Value   tf Bool
  
 data CPropEnv tf = CopyPropEnv {   
                         envVtable  :: M.Map String (CtOrId tf),
-                        program    :: Prog tf,
-                        call_graph :: CallGraph
+                        program    :: Prog tf
                   }
 
 data CPropRes tf = CPropRes {
@@ -125,25 +123,11 @@ bindVars = foldl bindVar
 binding :: [(String, CtOrId tf)] -> CPropM tf a -> CPropM tf a
 binding bnds = local (`bindVars` bnds)
 
--- | Remove the binding for a name.
--- TypeBox tf =>
-{- 
-remVar :: CPropEnv tf -> String -> CPropEnv tf
-remVar env name = env { envVtable = M.delete name $ envVtable env }
-
-remVars :: CPropEnv tf -> [String] -> CPropEnv tf
-remVars = foldl remVar
-
-remBindings :: [String] -> CPropM tf a -> CPropM tf a
-remBindings keys = local (`remVars` keys)
--}
 -- | Applies Copy/Constant Propagation and Folding to an Entire Program.
 -- TypeBox tf => 
 copyCtProp :: Prog Type -> Either EnablingOptError (Bool, Prog Type)
 copyCtProp prog = do
-    -- buildCG :: TypeBox tf => Prog tf -> Either EnablingOptError CallGraph
-    cg <- buildCG prog
-    let env = CopyPropEnv { envVtable = M.empty, program = prog, call_graph = cg }
+    let env = CopyPropEnv { envVtable = M.empty, program = prog }
     -- res   <- runCPropM (mapM copyCtPropFun prog) env
     -- let (bs, rs) = unzip res
     (rs, res) <- runCPropM (mapM copyCtPropFun prog) env
@@ -188,24 +172,6 @@ copyCtPropExp (DoLoop mergepat mergeexp idd n loopbdy letbdy pos) = do
     letbdy'  <- copyCtPropExp letbdy
     return $ DoLoop mergepat mergeexp' idd n' loopbdy' letbdy' pos
     
-{- 
-copyCtPropExp (DoLoop ind n body mergevars pos) = do
-    n'    <- copyCtPropExp n
-    let mergenames = map identName mergevars
-    mapM_ nonRemovable mergenames
-    bnds  <- mapM (\vnm -> asks $ M.lookup vnm . envVtable) mergenames
-    let idbnds1 = zip bnds mergevars
-    let idbnds  = filter ( \(x,_) -> isValidBnd     x ) idbnds1
-    let remkeys = map (\(_, (Ident s _ _) ) -> s) idbnds
-    body' <- remBindings remkeys $ copyCtPropExp body
-    let newloop = DoLoop ind n' body' mergevars pos
-    return newloop 
-    where
-        isValidBnd :: Maybe (CtOrId tf) -> Bool
-        isValidBnd bnd = case bnd of
-                            Nothing -> False
-                            Just _  -> True
--}
 
 copyCtPropExp e@(Var (Ident vnm _ pos)) = do 
     -- let _ = trace ("In VarExp: "++ppExp 0 e) e
@@ -369,18 +335,15 @@ copyCtPropExp (Size e pos) = do
 --- If all params are values and function is free of IO ---
 ---    then evaluate the function call                  ---
 -----------------------------------------------------------
+
 copyCtPropExp (Apply fname args tp pos) = do
     args' <- mapM copyCtPropExp args
-    cg    <- asks $ call_graph
-    let has_io = case M.lookup fname cg of
-                   Just (_,_,o) -> o
-                   Nothing-> False
     (all_are_vals, vals) <- allArgsAreValues args' 
-    res <- if all_are_vals && (not has_io)
+    res <- if all_are_vals 
            then do prg <- asks $ program
-                   let vv = Interp.runFun fname vals  prg
+                   let vv = Interp.runFunNoTrace fname vals  prg
                    case vv of 
-                       Just (Right v) -> changed $ Literal v
+                       (Right v) -> changed $ Literal v
                        _ -> badCPropM $ EnablingOptError pos (" Interpreting fun " ++ 
                                                               fname ++ " yields error!")
            else do return $ Apply fname args' tp pos
@@ -402,6 +365,7 @@ copyCtPropExp (Apply fname args tp pos) = do
                                            else return (False, []    )
                                   _ -> do return (False, [])
                 _         -> do return (False, [])
+
 ------------------------------
 --- Pattern Match the Rest ---
 ------------------------------

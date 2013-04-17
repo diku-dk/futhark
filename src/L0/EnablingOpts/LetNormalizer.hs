@@ -194,7 +194,6 @@ letNormExp (DoLoop mergepat mergeexp idd n loopbdy letbdy pos) = do
 ------------------------------------
 
 letNormExp e@(Literal _) = do return e
-letNormExp e@(Read  _ _) = do return e
 letNormExp e@(Var     _) = do return e
 
 -------------------------------------
@@ -219,10 +218,6 @@ letNormExp (Index s idx t1 t2 pos) = do
 -----------------------
 --- unary operators ---
 -----------------------
-
-letNormExp (Write e tp pos) = do
-    e' <- subLetoNormExp "tmp_write" e
-    return $ Write e' tp pos
 
 letNormExp (Negate e tp pos) = do
     e' <- subLetoNormExp "tmp_neg" e

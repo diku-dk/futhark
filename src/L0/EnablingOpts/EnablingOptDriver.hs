@@ -23,7 +23,6 @@ import L0.EnablingOpts.DeadVarElim
 import L0.EnablingOpts.TupleNormalizer
 import L0.EnablingOpts.LetNormalizer
 import L0.EnablingOpts.EnablingOptErrors
---import L0.EnablingOpts.FixCopyProp
 
 import Debug.Trace
 

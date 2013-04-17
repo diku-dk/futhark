@@ -15,7 +15,7 @@ import L0.Parser (parseL0, parseValue)
 import L0.TypeChecker
 import L0.Renamer
 import L0.Interpreter
--- import L0.EnablingOpts.EnablingOptDriver
+import L0.EnablingOpts.EnablingOptDriver
 import qualified L0.FirstOrderTransform as FOT
 import qualified L0.TupleArrayTransform as TAT
 import L0.Untrace
@@ -59,10 +59,10 @@ commandLineOptions =
     "Run the program via an interpreter."
   , tracepass [] ["trace"]
   , rename "r" ["rename"]
-  , uttransform "u" ["untrace"]
+  , uttransform "u" ["untrace"] 
   , fotransform "f" ["first-order-transform"]
   , tatransform "t" ["tuple-of-arrays-transform"]
---  , eotransform "e" ["enabling-optimisations"]
+  , eotransform "e" ["enabling-optimisations"]
   ]
 
 interpret :: Prog Type -> IO ()
@@ -133,14 +133,14 @@ uttransform =
        , passOp = return . untraceProg
        }
 
-{-
+
 eotransform :: String -> [String] -> L0Option
 eotransform =
   passoption "Perform simple enabling optimisations."
   Pass { passName = "enabling optimations"
        , passOp = either (throwError . show) return . enablingOpts
        }
--}
+
 
 main :: IO ()
 main = do args <- getArgs
