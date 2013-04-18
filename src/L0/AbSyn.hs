@@ -583,7 +583,7 @@ ppType (Char _) = " char "
 ppType (Real _) = " real "
 ppType (Array tp  Nothing _) = "[ " ++ ppType tp ++ " ] "
 ppType (Array tp  (Just l) _) = "[ " ++ ppType tp ++ ", " ++ ppExp 0 l ++ " ] "
-ppType (Tuple tps _) = "( " ++ intercalate " * " (map ppType tps) ++ " ) "
+ppType (Tuple tps _) = "( " ++ intercalate ", " (map ppType tps) ++ " ) "
 
 -- | Pretty printing a tuple id
 ppTupId :: TupIdent ty -> String

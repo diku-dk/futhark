@@ -158,8 +158,8 @@ Type :	  int                    { Int   $1             }
         | '[' Type ',' Exp ']' { Array $2 (Just $4) $1 }
 ;
 
-Types : Type '*' Types { $1 : $3 }
-      | Type '*' Type  { [$1, $3] }
+Types : Type ',' Types { $1 : $3 }
+      | Type ',' Type  { [$1, $3] }
 ;
 
 TypeIds : Type id ',' TypeIds

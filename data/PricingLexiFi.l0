@@ -270,7 +270,7 @@ fun real trajInner(real amount, int ind, [real] disc) = amount * disc[ind]
 // Result is:   (   #Monte-Carlo Iters, #dates, #underlyings, 
 //                  integer bit-len for Sobol, direction vectors
 //              )
-fun (int * int * int * int * [[int]]) getHLdata() = 
+fun (int, int, int, int, [[int]]) getHLdata() = 
         ( 
             1000,           // number of Monte-Carlo Iterations
             5,              // number of dates
@@ -282,7 +282,7 @@ fun (int * int * int * int * [[int]]) getHLdata() =
 
 // the market/model data
 //     md_c     md_vols    md_drifts  md_starts md_detval md_disc        
-fun ([[real]] * [[real]] * [[real]] * [real] * [real] * [real]) getModelData() = 
+fun ([[real]], [[real]], [[real]], [real], [real], [real]) getModelData() = 
         (
             
             {   // md_c                 [num_paths, num_paths]
@@ -317,7 +317,7 @@ fun ([[real]] * [[real]] * [[real]] * [real] * [real] * [real]) getModelData() =
         )
 
 // Brownian-Bridge metadata
-fun ( [[int]] * [[real]] ) getBBdata() = 
+fun ( [[int]], [[real]] ) getBBdata() = 
         (   // indirect accessing
             {   { 5, 2, 1, 3, 4 },      // bi
                 { 0, 0, 0, 2, 3 },      // li
