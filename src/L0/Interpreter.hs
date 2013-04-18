@@ -21,7 +21,7 @@ import L0.AbSyn
 -- import L0.Parser
 
 data InterpreterError = MissingEntryPoint String
-                      | InvalidEntryPointArguments String [Type] [Type]
+                      | InvalidFunctionArguments String (Maybe [Type]) [Type]
                       | IndexOutOfBounds SrcLoc Int Int
                       -- ^ First @Int@ is array size, second is attempted index.
                       | NegativeIota SrcLoc Int
@@ -34,8 +34,11 @@ data InterpreterError = MissingEntryPoint String
 instance Show InterpreterError where
   show (MissingEntryPoint fname) =
     "Program entry point '" ++ fname ++ "' not defined."
-  show (InvalidEntryPointArguments fname expected got) =
-    "Entry point '" ++ fname ++ "' expected argument(s) of type " ++
+  show (InvalidFunctionArguments fname Nothing got) =
+    "Function '" ++ fname ++ "' did not expect argument(s) of type " ++
+    intercalate ", " (map ppType got) ++ "."
+  show (InvalidFunctionArguments fname (Just expected) got) =
+    "Function '" ++ fname ++ "' expected argument(s) of type " ++
     intercalate ", " (map ppType expected) ++
     " but got argument(s) of type " ++
     intercalate ", " (map ppType got) ++ "."
@@ -113,22 +116,25 @@ runFun fname mainargs prog = do
       l0env = L0Env { envVtable = M.empty
                     , envFtable = ftable
                     }
-      runmain = case funDecByName fname prog of
-                  Nothing -> bad $ MissingEntryPoint fname
-                  Just (_,rettype,fparams,_,_)
+      runmain = case (funDecByName fname prog, M.lookup fname ftable) of
+                  (Nothing, Nothing) -> bad $ MissingEntryPoint fname
+                  (Just (_,rettype,fparams,_,_), _)
                     | map valueType mainargs == map identType fparams ->
                       evalExp (Apply fname (map Literal mainargs) rettype noLoc)
                     | otherwise ->
-                      bad $ InvalidEntryPointArguments fname
-                            (map identType fparams)
+                      bad $ InvalidFunctionArguments fname
+                            (Just (map identType fparams))
                             (map valueType mainargs)
+                  (_ , Just fun) -> -- It's a builtin function, it'll
+                                    -- do its own error checking.
+                    fun mainargs
   runL0M runmain l0env
   where
     -- We assume that the program already passed the type checker, so
-    -- we don't check for duplicate definitions or anything.
+    -- we don't check for duplicate definitions.
     expand ftable (name,_,params,body,_) =
-        let fun args = binding (zip params args) $ evalExp body
-        in M.insert name fun ftable
+      let fun args = binding (zip params args) $ evalExp body
+      in M.insert name fun ftable
 
 
 --------------------------------------------
@@ -154,7 +160,7 @@ builtin "log" [RealVal x pos] = return $ RealVal (log x) pos
 builtin "exp" [RealVal x pos] = return $ RealVal (exp x) pos
 builtin "op not" [LogVal b pos] = return $ LogVal (not b) pos
 builtin "op ~" [RealVal b pos] = return $ RealVal (-b) pos
-builtin fname _ = bad $ TypeError noLoc $ "Builtin " ++ fname
+builtin fname args = bad $ InvalidFunctionArguments fname Nothing $ map valueType args
 
 --------------------------------------------
 --------------------------------------------
