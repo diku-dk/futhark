@@ -58,10 +58,10 @@ fun real erf(real x) =
 // otherwise follows the real implementation
 ////////////////////////////////////////////////////////////////////////
 
-fun real to_solve(int fid, [(real*real)] scalesbbi, real yhat) = 
+fun real to_solve(int fid, [(real,real)] scalesbbi, real yhat) = 
     if(fid = 33) then (yhat+3.0)*(yhat-1.0)*(yhat-1.0)
     else
-        let tmps = map( fn real ( (real*real) scalesbbi ) =>
+        let tmps = map( fn real ( (real,real) scalesbbi ) =>
                             let (scales, bbi) = scalesbbi in
                                 scales * exp(~bbi*yhat)
                         , scalesbbi
@@ -73,8 +73,8 @@ fun real to_solve(int fid, [(real*real)] scalesbbi, real yhat) =
 /////////////////////////////////////////////////////////
 
 
-fun (real*int*real) 
-rootFinding_Brent(int fid, [(real*real)] scalesbbi, real lb, real ub, real tol, int iter_max) =
+fun (real,int,real) 
+rootFinding_Brent(int fid, [(real,real)] scalesbbi, real lb, real ub, real tol, int iter_max) =
     let tol      = if(tol     <= 0.0) then 1.0e~9  else tol    in
     let iter_max = if(iter_max <= 0 ) then 10000 else iter_max in
     let (a,b)    = (lb,ub)                                     in
@@ -157,7 +157,7 @@ rootFinding_Brent(int fid, [(real*real)] scalesbbi, real lb, real ub, real tol, 
 //-------------------------------------------------------------------------
 // Gaussian Quadrature with Hermite linear expansion: cmulative distribution function of Normal distribution
 
-fun ([real]*[real]) gauss_hermite_coefficients() = 
+fun ([real],[real]) gauss_hermite_coefficients() = 
     (
         // coefficients
         {  
@@ -217,7 +217,7 @@ fun int main_test_math() =
 // FILTERED VERSION:
 // RESULT is of shape:
 // ((matrity_in_year*swap_frequency*swap_term_in_year) * volatility)
-//fun [( (real*real*real)*real )] getSwaptionQuotes() =
+//fun [( (real,real,real)*real )] getSwaptionQuotes() =
 //    {
 //        ( (1.0,  6.0, 1.0 ), 1.052   ), 
 //        ( (10.0, 6.0, 1.0 ), 0.2496  ),
@@ -234,7 +234,7 @@ fun int main_test_math() =
 /////////////////////////////////////////////////////////////////////
 // RESULT is of shape:
 // ((matrity_in_year*swap_frequency*swap_term_in_year) * volatility)
-fun [( (real*real*real)*real )] getSwaptionQuotes() =
+fun [( (real,real,real),real )] getSwaptionQuotes() =
     {
         ((1.0, 6.0, 1.0), 1.052),
         ((2.0, 6.0, 1.0), 0.81485),
@@ -456,7 +456,7 @@ fun [( (real*real*real)*real )] getSwaptionQuotes() =
 
 fun real zc(real t) = exp(~r() * date_act_365(t, today()))
 
-fun (real*real*real) accumSched( (real*real*real) xx, (real*real*real) yy ) = 
+fun (real,real,real) accumSched( (real,real,real) xx, (real,real,real) yy ) = 
     let (x,d1,d2) = xx in let (y,tf,tp) = yy in
         ( x + zc(tp) * date_act_365(tp, tf), MIN(d1,tf), MAX(d2,tp) )
 
@@ -469,12 +469,12 @@ fun (real*real*real) accumSched( (real*real*real) xx, (real*real*real) yy ) =
 ////    the range of time stamps of for each swap term : [(real,real)]
 ////    the strike price 
 ///////////////////////////////////////////
-fun (real*[(real*real)]*real) 
-extended_swaption_of_swaption((real*real*real) swaption)  =  // swaption = (sw_mat, freq, sw_ty)
+fun (real,[(real,real)],real) 
+extended_swaption_of_swaption((real,real,real) swaption)  =  // swaption = (sw_mat, freq, sw_ty)
     let (sw_mat, freq, sw_ty) = swaption          in
     let maturity   = add_years( today(), sw_mat ) in
     let nschedule  = trunc(12.0 * sw_ty / freq)   in
-    let swap_sched = map( fn (real*real)(int i) => 
+    let swap_sched = map( fn (real,real)(int i) => 
                                 let a = add_months(maturity, (toReal(i)*freq)) in
                                     (a, add_months(a,freq))
                           , iota(nschedule)
@@ -504,7 +504,7 @@ fun real t_fun(real sigma, real x, real tau) =
 // the result is V in Brigo and Mercurio's book page 148.
 //     \var(\int_t^T [x(u)+y(u)]du)
 ///////////////////////////////////////////////////////////////////
-fun (real*real*real) bigv( (real*real*real*real*real) genome, real tau) =
+fun (real,real,real) bigv( (real,real,real,real,real) genome, real tau) =
     let (g_a, g_b, g_rho, g_nu, g_sigma) = genome in
 
     // sanity check; this check should be hoisted higher up
@@ -529,7 +529,7 @@ fun (real*real*real) bigv( (real*real*real*real*real) genome, real tau) =
 // the result is: x drift term in tmat-forward measure
 ///////////////////////////////////////////////////////////////////
 
-fun real bigmx( (real*real*real*real*real) genome,  
+fun real bigmx( (real,real,real,real,real) genome,  
                 real today, real tmat, real s, real t
               ) = 
     let (a, b, rho, nu, sigma) = genome   in
@@ -561,7 +561,7 @@ fun real bigmx( (real*real*real*real*real) genome,
 // the result is: y drift term in tmat-forward measure
 ///////////////////////////////////////////////////////////////////
 
-fun real bigmy( (real*real*real*real*real) genome,  
+fun real bigmy( (real,real,real,real,real) genome,  
                 real today, real tmat, real s, real t
               ) = 
     let (a, b, rho, nu, sigma) = genome   in
@@ -590,7 +590,7 @@ fun real bigmy( (real*real*real*real*real) genome,
 // the result is: the swaption's price
 ///////////////////////////////////////////////////////////////////
 
-fun real black_price(real today, (real*real*real) swaption, real vol ) =
+fun real black_price(real today, (real,real,real) swaption, real vol ) =
     let (maturity, swap_sched, strike) = 
                         extended_swaption_of_swaption( swaption ) in
 
@@ -675,7 +675,7 @@ fun int main_g2pp_header() =
     let mat_ok    = equal(maturity, res_mat   ) in
     let strike_ok = equal(strike,   res_strike) in
     let sched_ok  = reduce( op &&, True, 
-                            map(    fn bool(((real*real)*(real*real)) z) => 
+                            map(    fn bool(((real,real),(real,real)) z) => 
                                         let ((x1,x2),(y1,y2)) = z in equal(x1,y1) && equal(x2,y2), 
                                     zip(swap_schedule, res_swap_schd) 
                             ) 
@@ -747,8 +747,8 @@ fun int main_g2pp_header() =
 
 fun real 
 pricer_of_swaption( real                       today, 
-                    (real*real*real)           swaption, 
-                    (real*real*real*real*real) genome
+                    (real,real,real)           swaption, 
+                    (real,real,real,real,real) genome
                   ) =
     let swaption = extended_swaption_of_swaption(swaption) in
     let (maturity, schedulei, strike) = swaption           in
@@ -785,7 +785,7 @@ pricer_of_swaption( real                       today,
     let (scheduleix, scheduleiy) = unzip(schedulei) in
 //
     let (bai, bbi, aici, log_aici, t1_cst, scale) = unzip (
-            map(fn (real*real*real*real*real*real) ((real*real) dc) =>
+            map(fn (real,real,real,real,real,real) ((real,real) dc) =>
                     let (end_date, ci) = dc                                   in
 
                   // Begin Brigo and Mercurio: defined top p. 148
@@ -825,7 +825,7 @@ pricer_of_swaption( real                       today,
     let (x_quads, w_quads) = gauss_hermite_coefficients()      in
 
     let tmps = map(
-                    fn real ( (real*real) quad ) =>
+                    fn real ( (real,real) quad ) =>
                         let (x_quad, w_quad) = quad       in
                         let x = sqrt2sigmax*x_quad + mux  in
 
@@ -838,7 +838,7 @@ pricer_of_swaption( real                       today,
                         let yhat_x = f + df*(x - mux)     in
                         let h1  = ( (yhat_x - muy) / sigmay_rhoxycs ) - t2*( x - mux ) in
 
-                        let tmps= map(  fn real ( (real*real*real) bbit1cstscale ) => 
+                        let tmps= map(  fn real ( (real,real,real) bbit1cstscale ) => 
                                             let (bbii, t1_csti, scalei) = bbit1cstscale in
                                             let h2 = h1 + bbii * sigmay_rhoxycs in
                                                 t1_csti * exp(scalei*x) * uGaussian_P(~h2)
@@ -862,15 +862,15 @@ pricer_of_swaption( real                       today,
 // Root finder
 //////////////////////////
 fun real exactYhat( int n_schedi,
-                    (real*real*real*real*real*real*real*real) scals, 
-                    [(real*real*real*real)] babaicis, 
+                    (real,real,real,real,real,real,real,real) scals, 
+                    [(real,real,real,real)] babaicis, 
                     real x
                   ) =
     // ugaussian_Pinv(k)=1.0e~4 
     let k=~3.71901648545568                                   in
 
  
-    let uplos = map(  fn (real*real) ((real*real*real*real) babaici) =>
+    let uplos = map(  fn (real,real) ((real,real,real,real) babaici) =>
                         let (bai,bbi,aici,log_aici) = babaici in
                         let baix                    = bai * x in
                             (   aici * exp( ~baix ), 
@@ -878,7 +878,7 @@ fun real exactYhat( int n_schedi,
                             )
                       , babaicis
                    )                                          in
-//    let (up, lo) = reduce( fn (real*real) ((real*real) a, (real*real) b) =>
+//    let (up, lo) = reduce( fn (real,real) ((real,real) a, (real,real) b) =>
 //                                let (a1, a2) = a in let (b1, b2) = b in
 //                                    ( a1 + b1 , MAX(a2, b2) )
 //                         )
@@ -914,7 +914,7 @@ fun real exactYhat( int n_schedi,
               // `scales' is the same as `ups', however, if this branch
               // is not oftenly taken, it might make sense to duplicate computation, 
               // since if the previous `ups' is in a map-reduce pattern!
-              let scales  = map(  fn real ( (real*real) baiaici) =>
+              let scales  = map(  fn real ( (real,real) baiaici) =>
                                     let (bai,aici) = baiaici in
                                             aici * exp( ~bai * x )
                                   , zip(bai, aici)
@@ -1005,7 +1005,7 @@ fun int main_pricer_of_swaption() =
 //    let yhat_x = f + df*(x - mux)     in
 //    let h1  = ( (yhat_x - muy) / sigmay_rhoxycs ) - t2*( x - mux )
 //
-//    let tmps= map(  fn real ( (real*real*real) bbit1cstscale ) => 
+//    let tmps= map(  fn real ( (real,real,real) bbit1cstscale ) => 
 //                        let (bbi, t1_cst, scale) = bbit1cstscale in
 //                        let h2 = h1 + bbi * sigmay_rhoxycs in
 //                            t1_cst * exp(scale*x) * uGaussian_P(~h2)
@@ -1025,7 +1025,7 @@ fun int main_pricer_of_swaption() =
 
 fun real main() =   //_applic() = 
     let genome = (0.02453, 0.98376, ~0.82400, 0.11830, 0.02398) in 
-    let prices = map( fn real ( ((real*real*real) * real) swapquote ) => 
+    let prices = map( fn real ( ((real,real,real) , real) swapquote ) => 
                         let (swaption, quote) = swapquote                                in
                         let g2pp_price   = pricer_of_swaption(today(), swaption, genome) in
                         let market_price = black_price       (today(), swaption, quote ) in
@@ -1072,7 +1072,7 @@ fun real minutes_in_day  () = 24.0*60.0
 
 
 //                           year*month*day*hour*mins
-fun int date_of_gregorian( (int*int*int*int*int) date) =
+fun int date_of_gregorian( (int,int,int,int,int) date) =
     let (year, month, day, hour, mins) = date in
     let ym = 
         if(month = 1 || month = 2) 
@@ -1087,7 +1087,7 @@ fun int date_of_gregorian( (int*int*int*int*int) date) =
             in tmp * minutes_in_dayI() + hour * 60 + mins
 
 
-fun (int*int*int*int*int) 
+fun (int,int,int,int,int) 
 gregorian_of_date ( int minutes_since_epoch ) =
     let jul = minutes_since_epoch / minutes_in_dayI() in
     let l = jul + 68569 + 2444238 in
