@@ -50,7 +50,7 @@ import Data.Generics
 import Data.Loc
 
 isBuiltInFun :: String -> Bool
-isBuiltInFun fnm = elem fnm ["toReal", "trunc", "sqrt", "log", "exp", "trace"]
+isBuiltInFun fnm = fnm `elem` ["toReal", "trunc", "sqrt", "log", "exp", "trace"]
 
 locStr :: SrcLoc -> String
 locStr (SrcLoc NoLoc) = "unknown location"
@@ -502,10 +502,10 @@ tildes = map tilde
 
 -- | Pretty printing a value.
 ppValue :: Value -> String
-ppValue (IntVal n _)  = (tildes $ show n) ++ " "
-ppValue (RealVal n _) = (tildes $ show n) ++ " "
-ppValue (LogVal b _)  = (show b) ++ " "
-ppValue (CharVal c _) = (show c) ++ " "
+ppValue (IntVal n _)  = tildes (show n) ++ " "
+ppValue (RealVal n _) = tildes (show n) ++ " "
+ppValue (LogVal b _)  = show b ++ " "
+ppValue (CharVal c _) = show c ++ " "
 ppValue v@(ArrayVal arr t _)
   | [] <- elems arr = " empty (" ++ ppType t ++ " ) "
   | s <- arrayString v = show s
