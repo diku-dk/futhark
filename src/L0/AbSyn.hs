@@ -508,7 +508,7 @@ ppValue (LogVal b _)  = show b ++ " "
 ppValue (CharVal c _) = show c ++ " "
 ppValue v@(ArrayVal arr t _)
   | [] <- elems arr = " empty (" ++ ppType t ++ " ) "
-  | s <- arrayString v = show s
+  | Just s <- arrayString v = show s
   | otherwise = " { " ++ intercalate ", " (map ppValue $ elems arr) ++ " } "
 ppValue (TupVal vs _)   =
   " ( " ++ intercalate ", " (map ppValue vs) ++ " ) "
