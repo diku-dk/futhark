@@ -164,7 +164,7 @@ indexArrayExp place t indexes =
   in [C.cexp|$exp:place.data[$exp:index]|]
 
 -- | @indexArrayElemStm place from t idxs@ produces a statement that
--- stores the value at @t[idxs]@ in @place@.  In contrast to
+-- stores the value at @from[idxs]@ in @place@.  In contrast to
 -- 'indexArrayExp', this function takes care of creating proper size
 -- information if the result is an array itself.
 indexArrayElemStm :: C.Exp -> C.Exp -> Type -> [C.Exp] -> C.Stm
@@ -713,16 +713,13 @@ compileExp place (LetWith name src idxs ve body _) = do
   elty <- typeToCType $ expType ve
   ve' <- compileExpInPlace (varExp el) ve
   let idxdecls = [[C.cdecl|int $id:idxvar;|] | idxvar <- idxvars]
-      (alloc, copy) =
+      mknamearr =
         case identType src of
           Array _ _ _ ->
-            ([C.cstm|{
-                   $stm:(allocArray (varExp name')
-                         (arrayShapeExp src' (identType src)) basetype)
-                   memcpy($id:name'.dims, $exp:src'.dims, sizeof($exp:src'.dims));
-                   }|],
-             arraySliceCopyStm [C.cexp|$id:name'.data|] src' (identType src) 0)
-          _ -> ([C.cstm|;|], [C.cstm|$id:name' = $exp:src';|])
+            let alloc = allocArray (varExp name') (arrayShapeExp src' (identType src)) basetype
+                copy = arraySliceCopyStm [C.cexp|$id:name'.data|] src' (identType src) 0
+            in [C.cstm|{$stm:alloc $stm:copy}|]
+          _ -> [C.cstm|$id:name' = $exp:src';|]
       (elempre, elempost) =
         case expType ve of
           Array _ _ _ -> (indexArrayElemStm (varExp el) (varExp name') (identType src) idxexps,
@@ -737,8 +734,7 @@ compileExp place (LetWith name src idxs ve body _) = do
                $ty:etype $id:name';
                $ty:elty $id:el;
                $decls:idxdecls
-               $stm:alloc
-               $stm:copy
+               $stm:mknamearr
                $stms:idxs'
                $stm:(boundsCheckStm (varExp name') idxexps)
                $stm:elempre
