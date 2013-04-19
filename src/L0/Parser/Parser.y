@@ -55,6 +55,7 @@ import L0.Parser.Lexer
       '-'             { L $$ MINUS }
       '*'             { L $$ TIMES }
       '/'             { L $$ DIVIDE }
+      '%'             { L $$ MOD }
       '='             { L $$ EQU }
       '<'             { L $$ LTH }
       '<='            { L $$ LEQ }
@@ -112,7 +113,7 @@ import L0.Parser.Lexer
 %left '<<' '>>'
 %left '+' '-'
 
-%left '*' '/'
+%left '*' '/' '%'
 %left pow
 %nonassoc not '~'
 
@@ -125,6 +126,7 @@ Ops : op '+'     { ("op +", $1) }
     | op '*'     { ("op *", $1) }
     | op '-'     { ("op -", $1) }
     | op '/'     { ("op /", $1) }
+    | op '%'     { ("op %", $1) }
     | op '='     { ("op =", $1) }
     | op '<'     { ("op <", $1) }
     | op '<='    { ("op <=", $1) }
@@ -183,6 +185,7 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal $ IntVal num pos 
      | Exp '-' Exp    { BinOp Minus $1 $3 Nothing $2 }
      | Exp '*' Exp    { BinOp Times $1 $3 Nothing $2 }
      | Exp '/' Exp    { BinOp Divide $1 $3 Nothing $2 }
+     | Exp '%' Exp    { BinOp Mod $1 $3 Nothing $2 }
      | '~' Exp        { Negate $2 Nothing $1 }
      | not Exp        { Not $2 $1 }
      | Exp '&&' Exp   { And $1 $3 $2 }

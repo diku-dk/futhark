@@ -183,6 +183,7 @@ evalExp (BinOp Pow e1 e2 (Real _) pos) = evalRealBinOp (**) e1 e2 pos
 evalExp (BinOp Times e1 e2 (Int _) pos) = evalIntBinOp (*) e1 e2 pos
 evalExp (BinOp Times e1 e2 (Real _) pos) = evalRealBinOp (*) e1 e2 pos
 evalExp (BinOp Divide e1 e2 (Int _) pos) = evalIntBinOp div e1 e2 pos
+evalExp (BinOp Mod e1 e2 (Int _) pos) = evalIntBinOp mod e1 e2 pos
 evalExp (BinOp Divide e1 e2 (Real _) pos) = evalRealBinOp (/) e1 e2 pos
 evalExp (BinOp ShiftR e1 e2 _ pos) = evalIntBinOp shiftR e1 e2 pos
 evalExp (BinOp ShiftL e1 e2 _ pos) = evalIntBinOp shiftL e1 e2 pos

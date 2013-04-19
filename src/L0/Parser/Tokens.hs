@@ -22,6 +22,7 @@ data Token = IF
            | MINUS
            | TIMES
            | DIVIDE
+           | MOD
            | EQU
            | LTH
            | LEQ
