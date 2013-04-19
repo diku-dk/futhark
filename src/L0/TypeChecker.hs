@@ -309,7 +309,9 @@ checkExp (Or e1 e2 pos) = do
   (_, e1') <- require [Bool pos] =<< checkSubExp e1
   (_, e2') <- require [Bool pos] =<< checkSubExp e2
   return (Bool pos, Or e1' e2' pos)
-checkExp (Not e pos) = require [Bool pos] =<< checkSubExp e
+checkExp (Not e pos) = do
+  (t, e') <- require [Bool pos] =<< checkSubExp e
+  return (t, Not e' pos)
 checkExp (Negate e t pos) = do
   (et,e') <- require [Int pos, Real pos] =<< checkSubExp e
   t' <- t `unifyWithKnown` et
