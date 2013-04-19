@@ -440,6 +440,13 @@ ctFoldBinOp e@(BinOp Divide e1 e2 _ pos) = do
                 (Literal (RealVal v1 _), Literal (RealVal v2 _)) -> changed $ Literal (RealVal (v1 / v2)   pos)
                 _ -> badCPropM $ TypeError pos  " / operands not of (the same) numeral type! "
          else return e
+ctFoldBinOp e@(BinOp Mod e1 e2 _ pos) = do
+    if isCt0 e2 then badCPropM $ Div0Error pos
+    else if(isValue e1 && isValue e2)
+         then case (e1, e2) of
+                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> changed $ Literal (IntVal  (v1 `mod` v2) pos)
+                _ -> badCPropM $ TypeError pos  " % operands not of integer type! "
+         else return e
 ctFoldBinOp e@(BinOp Pow e1 e2 _ pos) = do
     if      isCt0 e1 || isCt1 e1 || isCt1 e2 then changed e1
     else if isCt0 e2 then case e1 of

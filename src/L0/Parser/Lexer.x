@@ -37,6 +37,7 @@ tokens :-
   "~"                      { const NEGATE }
   "*"                      { const TIMES }
   "/"                      { const DIVIDE }
+  "%"                      { const MOD }
   "="                      { const EQU }
   "<"                      { const LTH }
   "&"                      { const BAND }
@@ -158,7 +159,8 @@ alexScanTokens file str = go (alexStartPos,'\n',[],str)
   where go inp@(pos,_,_,str) =
           case alexScan inp 0 of
                 AlexEOF -> return []
-                AlexError _ -> Left "lexical error"
+                AlexError ((AlexPn _ line column),_,_,_) -> Left $ "lexical error at line" ++ (show line) ++ ", column" ++ (show column) ++ "."
+
                 AlexSkip  inp' len     -> go inp'
                 AlexToken inp'@(pos',_,_,_) len act -> do
                   let tok = L (loc pos pos') $ act (take len str) 

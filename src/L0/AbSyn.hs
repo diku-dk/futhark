@@ -387,6 +387,7 @@ data BinOp = Plus -- Binary Ops for Numbers
            | Pow
            | Times
            | Divide
+           | Mod
            | ShiftR
            | ShiftL
            | Band
@@ -408,6 +409,7 @@ opStr Minus = "-"
 opStr Pow = "pow"
 opStr Times = "*"
 opStr Divide = "/"
+opStr Mod = "%"
 opStr ShiftR = ">>"
 opStr ShiftL = "<<"
 opStr Band = "&"

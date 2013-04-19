@@ -477,6 +477,7 @@ compileExp place (BinOp bop e1 e2 _ _) = do
             Minus -> [C.cstm|$exp:place = $id:x - $id:y;|]
             Times -> [C.cstm|$exp:place = $id:x * $id:y;|]
             Divide -> [C.cstm|$exp:place = $id:x / $id:y;|]
+            Mod -> [C.cstm|$exp:place = $id:x % $id:y;|]
             Pow -> [C.cstm|$exp:place = powl($id:x,$id:y);|]
             ShiftR -> [C.cstm|$exp:place = $id:x >> $id:y;|]
             ShiftL -> [C.cstm|$exp:place = $id:x << $id:y;|]
