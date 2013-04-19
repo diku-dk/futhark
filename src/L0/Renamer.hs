@@ -30,7 +30,7 @@ new = state . newName
 -- | 'repl s' returns the new name of the variable 's'.
 repl :: Ident ty -> RenameM (Ident ty)
 repl (Ident name tp loc) = do
-  name' <- maybe (new name) return =<< (asks $ M.lookup name)
+  name' <- maybe (new name) return =<< asks (M.lookup name)
   return $ Ident name' tp loc
 
 bind :: [Ident ty] -> RenameM a -> RenameM a

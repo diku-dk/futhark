@@ -77,7 +77,7 @@ transformFun (fname,rettype,params,body,loc) = (fname, rettype', params', body',
 transformExp :: Exp Type -> TransformM (Exp Type)
 transformExp (Literal val) =
   return $ Literal $ transformValue val
-transformExp (Var k) = do
+transformExp (Var k) =
   return $ Var $ transformIdent k
 transformExp (TupLit es loc) = do
   es' <- mapM transformExp es
