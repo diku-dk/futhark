@@ -367,16 +367,17 @@ compileValue place v@(ArrayVal _ et _) = do
   let asinit n = [C.cinit|$int:n|]
       dims = map asinit $ arrayShape v
       arrdef = [C.cedecl|$ty:ct $id:val = { $inits:dims, NULL };|]
-      (defs, initstm) =
-        case elemInit v of
-          [] -> ([arrdef], [C.cstm|;|])
-          elems -> ([case arrayString $ flattenArray v of
-                       Just s -> [C.cedecl|$ty:cbt $id:dt[] = $string:s;|]
-                       Nothing -> [C.cedecl|$ty:cbt $id:dt[] = { $inits:elems };|],
-                     arrdef],
-                   [C.cstm|$id:val.data = $id:dt;|])
-  modify $ \s -> s { compInit = initstm : compInit s
-                   , compVarDefinitions = defs ++ compVarDefinitions s }
+  case elemInit v of
+    [] -> modify $ \s -> s { compVarDefinitions = arrdef : compVarDefinitions s }
+    elems -> let elemdef = case arrayString $ flattenArray v of
+                      Just s -> [C.cedecl|$ty:cbt $id:dt[] = $string:s;|]
+                      Nothing -> [C.cedecl|$ty:cbt $id:dt[] = { $inits:elems };|]
+                 initstm = [C.cstm|$id:val.data = $id:dt;|]
+             in modify $ \s -> s {
+                                 compInit = initstm : compInit s
+                               , compVarDefinitions = arrdef : elemdef :
+                                                      compVarDefinitions s
+                               }
   return [C.cstm|$exp:place = $id:val;|]
   where elemInit (ArrayVal arr _ _) = concatMap elemInit $ A.elems arr
         elemInit (IntVal x _) = [[C.cinit|$int:x|]]
