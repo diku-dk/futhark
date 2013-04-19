@@ -60,7 +60,7 @@ transformExp (Reduce fun accexp arrexp intype loc) = do
   let index = Index arr [iv] intype intype loc
   funcall <- transformLambda fun [accv, index]
   let loop = DoLoop (Id acc) accv i (Size arrv loc) loopbody accv loc
-      loopbody = LetWith acc acc [] funcall accv loc
+      loopbody = LetPat (Id acc) funcall accv loc
   return $ redlet loop
 transformExp (Scan fun accexp arrexp intype loc) = do
   ((arr, arrv), (acc, accv), (i, iv), redlet) <- newReduction loc arrexp accexp
