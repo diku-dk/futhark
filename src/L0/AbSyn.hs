@@ -19,6 +19,8 @@ module L0.AbSyn
   , valueType
   , arrayVal
   , emptyArray
+  , arrayString
+  , flattenArray
   , ppValue
   , Ident(..)
   , Exp(..)
@@ -179,8 +181,10 @@ instance Located Value where
 -- array with five rows and three columns would return the list @[5,
 -- 3]@.
 arrayShape :: Value -> [Int]
-arrayShape (ArrayVal arr _ _) =
-  if size == 0 then [0] else size : arrayShape (arr ! 0)
+arrayShape (ArrayVal arr t _) =
+  case elems arr of
+    [] -> 0 : replicate (arrayDims t) 0
+    (v:_) -> size : arrayShape v
   where size = upper - lower + 1
         (lower, upper) = bounds arr
 arrayShape _ = []
@@ -191,6 +195,25 @@ arrayVal vs = ArrayVal $ listArray (0, length vs-1) vs
 
 emptyArray :: Type -> SrcLoc -> Value
 emptyArray = arrayVal []
+
+-- | If the given value is a nonempty array containing only
+-- characters, return the corresponding 'String', otherwise return
+-- 'Nothing'.
+arrayString :: Value -> Maybe String
+arrayString (ArrayVal arr _ _)
+  | c:cs <- elems arr = mapM asChar $ c:cs
+  where asChar (CharVal c _) = Just c
+        asChar _ = Nothing
+arrayString _ = Nothing
+
+-- | Given an N-dimensional array, return a one-dimensional array
+-- with the same elements.
+flattenArray :: Value -> Value
+flattenArray (ArrayVal arr t pos) =
+  arrayVal (concatMap flatten $ elems arr) (baseType t) pos
+    where flatten (ArrayVal arr' _ _) = concatMap flatten $ elems arr'
+          flatten v = [v]
+flattenArray v = v
 
 -- | An identifier consists of its name and the type of the value
 -- bound to the identifier.
@@ -483,12 +506,10 @@ ppValue (IntVal n _)  = (tildes $ show n) ++ " "
 ppValue (RealVal n _) = (tildes $ show n) ++ " "
 ppValue (LogVal b _)  = (show b) ++ " "
 ppValue (CharVal c _) = (show c) ++ " "
-ppValue (ArrayVal arr t _)
+ppValue v@(ArrayVal arr t _)
   | [] <- elems arr = " empty (" ++ ppType t ++ " ) "
-  | Just (c:cs) <- mapM char (elems arr) = show $ c:cs
+  | s <- arrayString v = show s
   | otherwise = " { " ++ intercalate ", " (map ppValue $ elems arr) ++ " } "
-    where char (CharVal c _) = Just c
-          char _             = Nothing
 ppValue (TupVal vs _)   =
   " ( " ++ intercalate ", " (map ppValue vs) ++ " ) "
 
