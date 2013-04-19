@@ -107,9 +107,6 @@ typeToCType t@(Array _ _ _) = do
 expCType :: Exp Type -> CompilerM C.Type
 expCType = typeToCType . expType
 
-valCType :: Value -> CompilerM C.Type
-valCType = typeToCType . valueType
-
 tupleField :: Int -> String
 tupleField i = "elem_" ++ show i
 
@@ -169,15 +166,15 @@ indexArrayExp place t indexes =
 -- information if the result is an array itself.
 indexArrayElemStm :: C.Exp -> C.Exp -> Type -> [C.Exp] -> C.Stm
 indexArrayElemStm place from t idxs =
-  case stripArray (length idxs) t of
-    Array _ _ _ ->
-      [C.cstm|{
-            memcpy(&$exp:place.dims,
-                   $exp:from.dims+$int:(length idxs),
-                   sizeof($exp:from.dims)-$int:(length idxs));
-            $exp:place.data = &$exp:index;
-          }|]
-    _ -> [C.cstm|$exp:place = $exp:index;|]
+  case drop (length idxs) $ arrayShapeExp from t of
+    [] -> [C.cstm|$exp:place = $exp:index;|]
+    dims ->
+      let dimstms = [ [C.cstm|$exp:place.dims[$int:i] = $exp:dim;|] |
+                      (i, dim) <- zip [(0::Int)..] dims ]
+      in [C.cstm|{
+               $stms:dimstms
+               $exp:place.data = &$exp:index;
+             }|]
   where index = indexArrayExp from t idxs
 
 boundsCheckStm :: C.Exp -> [C.Exp] -> C.Stm
@@ -351,12 +348,8 @@ compileValue place (CharVal c _) =
   return [C.cstm|$exp:place = $char:c;|]
 
 compileValue place (TupVal vs _) = do
-  vs' <- forM (zip vs [(0::Int)..]) $ \(v, i) -> do
-           var <- new $ "TupVal_" ++ show i
-           v' <- compileValue (varExp var) v
-           let field = tupleField i
-           vt <- valCType v
-           return [C.cstm|{$ty:vt $id:var; $stm:v'; $exp:place.$id:field = $id:var;}|]
+  vs' <- forM (zip vs [(0::Int)..]) $ \(v, i) ->
+           compileValue (tupleFieldExp place i) v
   return [C.cstm|{$stms:vs'}|]
 
 compileValue place v@(ArrayVal _ et _) = do
