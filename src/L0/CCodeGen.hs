@@ -361,27 +361,30 @@ compileValue place (TupVal vs _) = do
 
 compileValue place v@(ArrayVal _ et _) = do
   val <- new "ArrayVal"
+  dt <- new "ArrayData"
   ct <- typeToCType $ valueType v
   cbt <- typeToCType $ baseType et
-  let asexp n = [C.cexp|$int:n|]
-      alloc = allocArray (varExp val) (map asexp $ arrayShape v) cbt
-  i <- new "i"
-  initstms <- elemInit val i v
-  let def = [C.cedecl|$ty:ct $id:val;|]
-      initstm = [C.cstm|{int $id:i = 0; $stm:alloc; $stms:initstms}|]
+  let asinit n = [C.cinit|$int:n|]
+      dims = map asinit $ arrayShape v
+      arrdef = [C.cedecl|$ty:ct $id:val = { $inits:dims, NULL };|]
+      (defs, initstm) =
+        case elemInit v of
+          [] -> ([arrdef], [C.cstm|;|])
+          elems -> ([case arrayString $ flattenArray v of
+                       Just s -> [C.cedecl|$ty:cbt $id:dt[] = $string:s;|]
+                       Nothing -> [C.cedecl|$ty:cbt $id:dt[] = { $inits:elems };|],
+                     arrdef],
+                   [C.cstm|$id:val.data = $id:dt;|])
   modify $ \s -> s { compInit = initstm : compInit s
-                   , compVarDefinitions = def : compVarDefinitions s }
+                   , compVarDefinitions = defs ++ compVarDefinitions s }
   return [C.cstm|$exp:place = $id:val;|]
-  where elemInit name i (ArrayVal arr _ _) = do
-          stms <- concat <$> mapM (elemInit name i) (A.elems arr)
-          return [[C.cstm|{$stm:stm}|] | stm <- stms]
-        elemInit name i elv = do
-          vplace <- new "arrelem"
-          vstm <- compileValue (varExp vplace) elv
-          cty <- typeToCType $ valueType elv
-          return [[C.cstm|{$ty:cty $id:vplace;
-                           $stm:vstm;
-                           $id:name.data[$id:i++] = $id:vplace;}|]]
+  where elemInit (ArrayVal arr _ _) = concatMap elemInit $ A.elems arr
+        elemInit (IntVal x _) = [[C.cinit|$int:x|]]
+        elemInit (RealVal x _) = [[C.cinit|$double:(toRational x)|]]
+        elemInit (CharVal c _) = [[C.cinit|$char:c|]]
+        elemInit (LogVal True _) = [[C.cinit|1|]]
+        elemInit (LogVal False _) = [[C.cinit|0|]]
+        elemInit (TupVal _ _) = error "Array-of-tuples encountered in code generator."
 
 compileExp :: C.Exp -> Exp Type -> CompilerM C.Stm
 
