@@ -29,6 +29,7 @@ data InterpreterError = MissingEntryPoint String
                       | ReadError SrcLoc Type String
                       | InvalidArrayShape SrcLoc [Int] [Int]
                       -- ^ First @Int@ is old shape, second is attempted new shape.
+                      | ZipError SrcLoc [Int]
                       | TypeError SrcLoc String
 
 instance Show InterpreterError where
@@ -54,6 +55,9 @@ instance Show InterpreterError where
     "Read error while trying to read " ++ ppType t ++ " at " ++ locStr pos ++ ".  Input line was: " ++ s
   show (InvalidArrayShape pos shape newshape) =
     "Invalid array reshaping at " ++ locStr pos ++ ", from " ++ show shape ++ " to " ++ show newshape
+  show (ZipError pos lengths) =
+    "Array arguments to zip must have same length, but arguments at " ++
+    locStr pos ++ " have lenghts " ++ intercalate ", " (map show lengths) ++ "."
 
 instance Error InterpreterError where
   strMsg = TypeError noLoc
@@ -326,15 +330,17 @@ evalExp (Reduce fun accexp arrexp _ _) = do
   foldM foldfun startacc vs
 evalExp (Zip arrexps pos) = do
   arrs <- mapM ((arrToList <=< evalExp) . fst) arrexps
+  let zipit ls
+        | all null ls = return []
+        | otherwise = case unzip <$> mapM split ls of
+                        Just (hds, tls) -> do
+                          let el = TupVal hds pos
+                          ls' <- zipit tls
+                          return $ el : ls'
+                        Nothing -> bad $ ZipError pos (map length arrs)
   arrayVal <$> zipit arrs <*> pure (Tuple (map snd arrexps) Unique pos) <*> pure pos
   where split []     = Nothing
         split (x:xs) = Just (x, xs)
-        zipit ls = case unzip <$> mapM split ls of
-                     Just (hds, tls) -> do
-                       let el = TupVal hds pos
-                       ls' <- zipit tls
-                       return $ el : ls'
-                     Nothing -> return []
 evalExp (Unzip e ts pos) = do
   arr <- mapM tupToList =<< arrToList =<< evalExp e
   return $ TupVal (zipWith (\vs t -> arrayVal vs t pos) (transpose arr) ts) pos
