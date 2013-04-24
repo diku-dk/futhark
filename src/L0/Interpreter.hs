@@ -387,33 +387,6 @@ evalExp (Concat arr1exp arr2exp intype pos) = do
   elems2 <- arrToList =<< evalExp arr2exp
   return $ arrayVal (elems1 ++ elems2) intype pos
 evalExp (Copy e _) = evalExp e
-{-
-evalExp (Read t pos) = do
-  s <- join $ asks envReadOp
-  case liftM check $ parsefun "input" s of
-    Right (Just v) -> return v
-    _ -> bad $ ReadError pos t s
-  where check v
-          | valueType v == t = Just v
-          | otherwise        = Nothing
-        parsefun = case t of Int  _             -> parseInt
-                             Real _             -> parseReal
-                             Bool _             -> parseBool
-                             Char _             -> parseChar
-                             Array (Char _) _ _ -> parseString
-                             Array {}           -> parseArray
-                             Tuple {}           -> parseTuple
-evalExp (Write e _ _) = do
-  v <- evalExp e
-  join $ asks envWriteOp <*> pure (write v)
-  return v
-  where write (CharVal c _) = [c]
-        write (ArrayVal arr _ _)
-          | Just s <- mapM char $ elems arr = s
-          where char (CharVal c _) = Just c
-                char _             = Nothing
-        write v = ppValue v
--}
 evalExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody pos) = do
   bound <- evalExp boundexp
   mergestart <- evalExp mergeexp
