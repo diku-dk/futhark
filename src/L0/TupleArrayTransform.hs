@@ -158,26 +158,8 @@ transformExp (Size e loc) = do
       return $ LetPat (TupId (map Id $ name : names) loc) e' (Size namev loc) loc
     _ -> return $ Size e' loc
 transformExp (Unzip e _ _) = transformExp e
-transformExp (Zip ((e,t):es) loc) = do
-  -- Zip is not quite an identity, as we need to truncate the arrays
-  -- to the length of the shortest one.
-  e' <- transformExp e
-  es' <- mapM (transformExp . fst) es
-  let ets = map transformType $ t : map snd es
-  (name, namev) <- newVar "zip_array" (expType e')
-  names <- map fst <$> mapM (newVar "zip_array" . expType) es'
-  (size, sizev) <- newVar "zip_size" $ Int loc
-  let combes olde (arre,vname) inner = LetPat (Id vname) arre (olde inner) loc
-      lete = foldl combes id $ reverse $ zip (e':es') (name:names)
-      test vname = BinOp Less sizev (Size (Var vname) loc) (Bool loc) loc
-      branch vname = If (test vname) sizev (Size (Var vname) loc) (Int loc) loc
-      combsiz olde vname inner = olde $ LetPat (Id size) (branch vname) inner loc
-      letsizs = foldl combsiz (\inner -> LetPat (Id size) (Size namev loc) inner loc) names
-      split et vname = do
-        (a, av) <- newVar "zip_a" $ identType vname
-        (b, _) <- newVar "zip_b" $ identType vname
-        return $ LetPat (TupId [Id a, Id b] loc) (Split sizev (Var vname) et loc) av loc
-  lete . letsizs . (`TupLit` loc) <$> zipWithM split ets (name:names)
+transformExp (Zip es loc) =
+  TupLit <$> mapM (transformExp . fst) es <*> pure loc
 transformExp (Split nexp arrexp eltype loc) = do
   nexp' <- transformExp nexp
   arrexp' <- transformExp arrexp
