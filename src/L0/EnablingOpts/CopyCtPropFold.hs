@@ -628,7 +628,7 @@ getPropBnds ( Id (Ident var tp pos) ) e to_rem =
             Index   _ _ _ _ _    -> [(var, (SymArr e   tp  to_rem))]
             TupLit     _  _      -> [(var, (SymArr e   tp  to_rem))]
 
-            Iota           _ _   -> let newtp = boxType (Array (Int pos) Nothing pos) -- (Just n) does not work Exp tf
+            Iota           _ _   -> let newtp = boxType (Array (Int pos) Nothing Nonunique pos) -- (Just n) does not work Exp tf
                                     in  [(var, SymArr e newtp to_rem)]
             Replicate _ _ _      -> [(var, SymArr e tp to_rem)] 
             ArrayLit    _ _ _    -> [(var, SymArr e tp to_rem)]

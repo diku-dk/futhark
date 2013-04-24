@@ -4,7 +4,10 @@
 -- See "L0.TypeChecker" and the 'Exp' type for more information.
 module L0.AbSyn
   ( locStr
+  , Uniqueness(..)
   , Type(..)
+  , subtypeOf
+  , similarTo
   , TypeBox(..)
   , ppType
   , arrayDims
@@ -48,6 +51,7 @@ import Data.Data
 import Data.List
 import Data.Generics
 import Data.Loc
+import Data.Monoid
 
 isBuiltInFun :: String -> Bool
 isBuiltInFun fnm = fnm `elem` ["toReal", "trunc", "sqrt", "log", "exp", "trace"]
@@ -60,14 +64,23 @@ locStr (SrcLoc (Loc (Pos file line1 col1 _) (Pos _ line2 col2 _))) =
   file ++ ":" ++ show line1 ++ ":" ++ show col1
        ++ "-" ++ show line2 ++ ":" ++ show col2
 
+data Uniqueness = Unique | Nonunique
+                  deriving (Eq, Ord, Show, Typeable, Data)
+
+instance Monoid Uniqueness where
+  mempty = Unique
+  _ `mappend` Nonunique = Nonunique
+  Nonunique `mappend` _ = Nonunique
+  u `mappend` _         = u
+
 -- | L0 Types: Int, Bool, Char, Tuple, multidim-regular Array
 --  TODO: please add float, double, long int, etc.
 data Type = Int SrcLoc
           | Bool SrcLoc
           | Char SrcLoc
           | Real SrcLoc
-          | Tuple [Type] SrcLoc
-          | Array Type (Maybe (Exp (Maybe Type))) SrcLoc -- ^ 1st arg: array's element type, 2nd arg: its length
+          | Tuple [Type] Uniqueness SrcLoc
+          | Array Type (Maybe (Exp (Maybe Type))) Uniqueness SrcLoc -- ^ 1st arg: array's element type, 2nd arg: its length
             deriving (Eq, Ord, Show, Typeable, Data)
 
 instance Located Type where
@@ -75,15 +88,34 @@ instance Located Type where
   locOf (Bool loc) = locOf loc
   locOf (Char loc) = locOf loc
   locOf (Real loc) = locOf loc
-  locOf (Tuple _ loc) = locOf loc
-  locOf (Array _ _ loc) = locOf loc
+  locOf (Tuple _ _ loc) = locOf loc
+  locOf (Array _ _ _ loc) = locOf loc
 
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
 -- it is two, and so forth.
 arrayDims :: Type -> Int
-arrayDims (Array t _ _) = 1 + arrayDims t
-arrayDims _             = 0
+arrayDims (Array t _ _ _) = 1 + arrayDims t
+arrayDims _               = 0
+
+-- | @x `subuniqueOf` y@ is true if @x@ is not less unique than @y@.
+subuniqueOf :: Uniqueness -> Uniqueness -> Bool
+subuniqueOf Nonunique Unique = False
+subuniqueOf _ _ = True
+
+-- | @x `subtypeOf` y@ is true if @x@ is a subtype of @y@ (or equal to
+-- @y@), meaning @x@ is valid whenever @y@ is.
+subtypeOf :: Type -> Type -> Bool
+subtypeOf (Tuple ts1 u1 _) (Tuple ts2 u2 _) =
+  u1 `subuniqueOf` u2 && all id (zipWith subtypeOf ts1 ts2)
+subtypeOf (Array t1 _ u1 _) (Array t2 _ u2 _) =
+  u1 `subuniqueOf` u2 && t1 `subtypeOf` t2
+subtypeOf t1 t2 = t1 == t2
+
+-- | @x `similar` y@ is true if @x@ and @y@ are the same type,
+-- ignoring uniqueness.
+similarTo :: Type -> Type -> Bool
+similarTo t1 t2 = t1 `subtypeOf` t2 || t2 `subtypeOf` t1
 
 -- | A type box provides a way to box a type, and possibly retrieve
 -- one.
@@ -107,34 +139,38 @@ instance TypeBox Type where
 -- than @n@ dimensions.
 peelArray :: Int -> Type -> Maybe Type
 peelArray 0 t = Just t
-peelArray n (Array t _ _) = peelArray (n-1) t
+peelArray n (Array t _ _ _) = peelArray (n-1) t
 peelArray _ _ = Nothing
 
 -- | Returns the bottommost type of an array.
 baseType :: Type -> Type
-baseType (Array t _ _) = baseType t
+baseType (Array t _ _ _) = baseType t
 baseType t = t
 
 -- | A type is a basic type if it is not an array and any component
 -- types are basic types.
 basicType :: Type -> Bool
 basicType (Array {}) = False
-basicType (Tuple ts _) = all basicType ts
+basicType (Tuple ts _ _) = all basicType ts
 basicType _ = True
 
 -- | @array n t@ is the type of @n@-dimensional arrays having @t@ as
 -- the base type.
-arrayType :: Int -> Type -> Type
-arrayType 0 t = t
-arrayType n t = arrayType (n-1) $ Array t Nothing (srclocOf t)
+arrayType :: Int -> Type -> Uniqueness -> Type
+arrayType 0 t _ = t
+arrayType n t u = arrayType (n-1) (Array t Nothing u (srclocOf t)) u
 
 -- | @stripArray n t@ removes the @n@ outermost layers of the array.
 -- Essentially, it is the type of indexing an array of type @t@ with
 -- @n@ indexes.
 stripArray :: Int -> Type -> Type
 stripArray 0 t = t
-stripArray n (Array t _ _) = stripArray (n-1) t
+stripArray n (Array t _ _ _) = stripArray (n-1) t
 stripArray _ t = t
+
+unique :: Type -> Type
+unique (Array et dims _ loc) = Array et dims Unique loc
+unique t = t
 
 -- | A "blank" value of the given type - this is zero, or whatever is
 -- close to it.  Don't depend on this value, but use it for creating
@@ -144,8 +180,8 @@ blankValue (Int loc) = IntVal 0 loc
 blankValue (Real loc) = RealVal 0.0 loc
 blankValue (Bool loc) = LogVal False loc
 blankValue (Char loc) = CharVal '\0' loc
-blankValue (Tuple ts loc) = TupVal (map blankValue ts) loc
-blankValue (Array et _ loc) = arrayVal [blankValue et] et loc
+blankValue (Tuple ts _ loc) = TupVal (map blankValue ts) loc
+blankValue (Array et _ _ loc) = arrayVal [blankValue et] et loc
 
 -- | Every possible value in L0.  Values are fully evaluated and their
 -- type is always unambiguous.
@@ -165,8 +201,8 @@ valueType (IntVal _ pos) = Int pos
 valueType (RealVal _ pos) = Real pos
 valueType (LogVal _ pos) = Bool pos
 valueType (CharVal _ pos) = Char pos
-valueType (TupVal vs pos) = Tuple (map valueType vs) pos
-valueType (ArrayVal _ t pos) = Array t Nothing pos
+valueType (TupVal vs pos) = Tuple (map valueType vs) Nonunique pos
+valueType (ArrayVal _ t pos) = Array t Nothing Nonunique pos
 
 instance Located Value where
   locOf (IntVal _ pos) = locOf pos
@@ -265,10 +301,8 @@ data Exp ty = Literal Value
             | Size (Exp ty) SrcLoc -- The number of elements in an array.
             | Replicate (Exp ty) (Exp ty) SrcLoc -- e.g., replicate(3,1) = {1, 1, 1}
 
-            | Reshape [Exp ty] (Exp ty) ty ty SrcLoc
+            | Reshape [Exp ty] (Exp ty) SrcLoc
              -- 1st arg is the new shape, 2nd arg is the input array *)
-             -- 3rd arg is the  input-array type *)
-             -- 4th arg is the result-array type *)
 
             | Transpose (Exp ty) ty ty SrcLoc
              -- 1st arg is the (input) to-be-transSrcLoced array *)
@@ -353,7 +387,7 @@ instance Located (Exp ty) where
   locOf (Iota _ pos) = locOf pos
   locOf (Size _ pos) = locOf pos
   locOf (Replicate _ _ pos) = locOf pos
-  locOf (Reshape _ _ _ _ pos) = locOf pos
+  locOf (Reshape _ _ pos) = locOf pos
   locOf (Transpose _ _ _ pos) = locOf pos
   locOf (Map _ _ _ _ pos) = locOf pos
   locOf (Reduce _ _ _ _ pos) = locOf pos
@@ -371,8 +405,8 @@ instance Located (Exp ty) where
 -- | Given an expression with known types, return its type.
 expType :: Exp Type -> Type
 expType (Literal val) = valueType val
-expType (TupLit es loc) = Tuple (map expType es) loc
-expType (ArrayLit _ t pos) = Array t Nothing pos
+expType (TupLit es loc) = Tuple (map expType es) Nonunique loc
+expType (ArrayLit _ t _) = arrayType 1 t Nonunique
 expType (BinOp _ _ _ t _) = t
 expType (And _ _ pos) = Bool pos
 expType (Or _ _ pos) = Bool pos
@@ -384,22 +418,24 @@ expType (Apply _ _ t _) = t
 expType (LetPat _ _ body _) = expType body
 expType (LetWith _ _ _ _ body _) = expType body
 expType (Index _ _ _ t _) = t
-expType (Iota _ pos) = Array (Int pos) Nothing pos
+expType (Iota _ pos) = arrayType 1 (Int pos) Unique
 expType (Size _ pos) = Int pos
-expType (Replicate _ e pos) = Array (expType e) Nothing pos
-expType (Reshape _ _ _ t _) = t
+expType (Replicate _ e _) = arrayType 1 (expType e) Unique
+expType (Reshape shape e _) = build (length shape) (baseType $ expType e)
+  where build 0 t = t
+        build n t = build (n-1) (Array t Nothing Nonunique (srclocOf t))
 expType (Transpose _ _ t _) = t
-expType (Map _ _ _ t pos) = Array t Nothing pos
+expType (Map _ _ _ t _) = arrayType 1 t Unique
 expType (Reduce fun _ _ _ _) = lambdaType fun
-expType (Zip es pos) = Array (Tuple (map snd es) pos) Nothing pos
-expType (Unzip _ ts pos) = Tuple (map (\t -> Array t Nothing pos) ts) pos
-expType (Scan fun _ _ _ _) = arrayType 1 $ lambdaType fun
-expType (Filter _ _ t loc) = Array t Nothing loc
-expType (Mapall fun e _ _ _) = arrayType (arrayDims $ expType e) $ lambdaType fun
-expType (Redomap _ _ _ _ _ t loc) = Array t Nothing loc
-expType (Split _ _ t pos) = Tuple [Array t Nothing pos, Array t Nothing pos] $ srclocOf t
-expType (Concat _ _ t _) = Array t Nothing $ srclocOf t
-expType (Copy e _) = expType e
+expType (Zip es pos) = arrayType 1 (Tuple (map snd es) Unique pos) Unique
+expType (Unzip _ ts pos) = Tuple (map (flip (arrayType 1) Unique) ts) Unique pos
+expType (Scan fun _ _ _ _) = arrayType 1 (lambdaType fun) Unique
+expType (Filter _ _ t _) = arrayType 1 t Unique
+expType (Mapall fun e _ _ _) = arrayType (arrayDims $ expType e) (lambdaType fun) Unique
+expType (Redomap _ _ _ _ _ t _) = arrayType 1 t Unique
+expType (Split _ _ t pos) = Tuple [arrayType 1 t Nonunique, arrayType 1 t Nonunique] Nonunique pos
+expType (Concat _ _ t _) = arrayType 1 t Unique
+expType (Copy e _) = unique $ expType e
 expType (DoLoop _ _ _ _ _ body _) = expType body
 
 -- | Eagerly evaluated binary operators.  In particular, the
@@ -563,7 +599,7 @@ ppExp d (Replicate e el _) = "replicate ( " ++ ppExp d e ++ ", " ++ ppExp d el +
 
 ppExp d (Transpose e _ _ _) = " transpose ( " ++ ppExp d e ++ " ) "
 
-ppExp d (Reshape es arr _ _ _) =
+ppExp d (Reshape es arr _) =
   " reshape ( ( " ++ intercalate ", " (map (ppExp d) es) ++ " ), "  ++
   ppExp d arr ++ " ) "
 
@@ -598,15 +634,19 @@ ppExp d (DoLoop mvpat mvexp i n loopbody letbody _) =
 ppBinOp :: BinOp -> String
 ppBinOp op = " " ++ opStr op ++ " "
 
+ppUniqueness :: Uniqueness -> String
+ppUniqueness Unique = "*"
+ppUniqueness Nonunique = ""
+
 -- | Pretty printing a type
 ppType :: Type -> String
-ppType (Int _) = " int "
-ppType (Bool _) = " bool "
-ppType (Char _) = " char "
-ppType (Real _) = " real "
-ppType (Array tp  Nothing _) = "[ " ++ ppType tp ++ " ] "
-ppType (Array tp  (Just l) _) = "[ " ++ ppType tp ++ ", " ++ ppExp 0 l ++ " ] "
-ppType (Tuple tps _) = "( " ++ intercalate ", " (map ppType tps) ++ " ) "
+ppType (Int {}) = " int "
+ppType (Bool {}) = " bool "
+ppType (Char {}) = " char "
+ppType (Real {}) = " real "
+ppType (Array tp  Nothing u _) = ppUniqueness u ++ "[ " ++ ppType tp ++ " ] "
+ppType (Array tp  (Just l) u _) = ppUniqueness u ++ "[ " ++ ppType tp ++ ", " ++ ppExp 0 l ++ " ] "
+ppType (Tuple tps u _) = ppUniqueness u ++ "( " ++ intercalate ", " (map ppType tps) ++ " ) "
 
 -- | Pretty printing a tuple id
 ppTupId :: TupIdent ty -> String

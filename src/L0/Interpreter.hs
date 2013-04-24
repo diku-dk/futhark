@@ -289,17 +289,17 @@ evalExp (Replicate e1 e2 pos) = do
       | x >= 0    -> return $ ArrayVal (listArray (0,x-1) $ repeat v2) (valueType v2) pos
       | otherwise -> bad $ NegativeReplicate pos x
     _   -> bad $ TypeError pos "evalExp Replicate"
-evalExp (Reshape shapeexp arrexp _ outtype pos) = do
+evalExp e@(Reshape shapeexp arrexp pos) = do
   shape <- mapM (asInt <=< evalExp) shapeexp
   arr <- evalExp arrexp
-  let reshape (Array t _ _) (n:rest) vs
+  let reshape (Array t _ _ _) (n:rest) vs
         | length vs `mod` n == 0 =
           arrayVal <$> mapM (reshape t rest) (chunk (length vs `div` n) vs)
                    <*> pure t <*> pure pos
         | otherwise = bad $ InvalidArrayShape pos (arrayShape arr) shape
       reshape _ [] [v] = return v
       reshape _ _ _ = bad $ TypeError pos "evalExp Reshape reshape"
-  reshape outtype shape $ flatten arr
+  reshape (expType e) shape $ flatten arr
   where flatten (ArrayVal arr _ _) = concatMap flatten $ elems arr
         flatten t = [t]
         chunk _ [] = []
@@ -310,10 +310,10 @@ evalExp (Reshape shapeexp arrexp _ outtype pos) = do
 evalExp (Transpose arrexp _ _ pos) = do
   v <- evalExp arrexp
   case v of
-    ArrayVal inarr (Array et _ _) _ -> do
+    ArrayVal inarr t@(Array et _ _ _) _ -> do
       let arr el = arrayVal el et pos
       els' <- map arr <$> transpose <$> mapM arrToList (elems inarr)
-      return $ arrayVal els' (Array et Nothing pos) pos
+      return $ arrayVal els' t pos
     _ -> bad $ TypeError pos "evalExp Transpose"
 evalExp (Map fun e _ outtype pos) = do
   vs <- arrToList =<< evalExp e
@@ -326,7 +326,7 @@ evalExp (Reduce fun accexp arrexp _ _) = do
   foldM foldfun startacc vs
 evalExp (Zip arrexps pos) = do
   arrs <- mapM ((arrToList <=< evalExp) . fst) arrexps
-  arrayVal <$> zipit arrs <*> pure (Tuple (map snd arrexps) pos) <*> pure pos
+  arrayVal <$> zipit arrs <*> pure (Tuple (map snd arrexps) Unique pos) <*> pure pos
   where split []     = Nothing
         split (x:xs) = Just (x, xs)
         zipit ls = case unzip <$> mapM split ls of
@@ -356,7 +356,7 @@ evalExp (Filter fun arrexp outtype pos) = do
                                 _               -> return False
 evalExp (Mapall fun arrexp _ outtype pos) =
   mapall outtype =<< evalExp arrexp
-    where mapall t@(Array et _ _) (ArrayVal arr _ _) = do
+    where mapall t@(Array et _ _ _) (ArrayVal arr _ _) = do
             els' <- mapM (mapall et) $ elems arr
             return $ arrayVal els' t pos
           mapall _ v = applyLambda fun [v]

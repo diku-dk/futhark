@@ -291,10 +291,10 @@ letNormExp (Replicate n arr pos) = do
     arr'  <- (letNormExp arr >>= makeVarExpSubst "tmp_arr" pos)
     makeVarExpSubst "tmp_repl" pos (Replicate n' arr' pos)
 
-letNormExp (Reshape dims arr tp1 tp2 pos) = do
+letNormExp (Reshape dims arr pos) = do
     dims' <- mapM (subLetoNormExp "tmp_dim") dims
     arr'  <- letNormExp arr >>= makeVarExpSubst "tmp_arr" pos
-    makeVarExpSubst "tmp_resh" pos (Reshape dims' arr' tp1 tp2 pos)
+    makeVarExpSubst "tmp_resh" pos (Reshape dims' arr' pos)
 
 letNormExp (Transpose arr tp1 tp2 pos) = do
     -- normalized arr param & get it outside replicate
