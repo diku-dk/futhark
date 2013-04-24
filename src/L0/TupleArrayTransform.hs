@@ -34,22 +34,22 @@ new k = do (name, src) <- gets $ newName k . envNameSrc
            return name
 
 transformType :: Type -> Type
-transformType (Array (Tuple elemts _) size loc) =
-  Tuple (map (transformType . arraytype) elemts) loc
-  where arraytype t = Array t size loc
-transformType (Array elemt size loc) =
+transformType (Array (Tuple elemts _ _) size u loc) =
+  Tuple (map (transformType . arraytype) elemts) u loc
+  where arraytype t = Array t size u loc
+transformType (Array elemt size u loc) =
   case elemt' of
-    Tuple elemts _ -> Tuple (map (transformType . arraytype) elemts) loc
-    _ -> Array elemt' size loc
+    Tuple elemts _ _ -> Tuple (map (transformType . arraytype) elemts) u loc
+    _ -> Array elemt' size u loc
   where elemt' = transformType elemt
-        arraytype t = transformType $ Array t size loc
-transformType (Tuple elemts loc) = Tuple (map transformType elemts) loc
+        arraytype t = transformType $ Array t size Nonunique loc
+transformType (Tuple elemts u loc) = Tuple (map transformType elemts) u loc
 transformType t = t -- All other types are fine.
 
 transformValue :: Value -> Value
 transformValue (ArrayVal arr et loc) =
   case transformType et of
-    Tuple ets _
+    Tuple ets _ _
       | [] <- A.elems arr -> TupVal [ arrayVal [] et' loc | et' <- ets ] loc
       | otherwise         ->  TupVal (zipWith asarray ets $ transpose arrayvalues) loc
     et'         -> ArrayVal arr et' loc
@@ -84,13 +84,13 @@ transformExp (TupLit es loc) = do
   return $ TupLit es' loc
 transformExp (ArrayLit [] intype loc) =
   return $ case transformType intype of
-             Tuple ets _ ->
+             Tuple ets _ _ ->
                TupLit [ ArrayLit [] et loc | et <- ets ] loc
              et' -> ArrayLit [] et' loc
 transformExp (ArrayLit es intype loc) = do
   es' <- mapM transformExp es
   case transformType intype of
-    Tuple ets _ -> do
+    Tuple ets _ _ -> do
       (e, bindings) <- foldM comb (id, replicate (length ets) []) es'
       e <$> tuparrexp (map reverse bindings) ets
         where comb (acce, bindings) e = do
@@ -105,7 +105,7 @@ transformExp (Index vname idxs intype outtype loc) = do
   case (identType vname', intype', outtype') of
     -- If the input type is a tuple, then the output type is
     -- necessarily also.
-    (Tuple ets _, Tuple its _, Tuple ots _) -> do
+    (Tuple ets _ _, Tuple its _ _, Tuple ots _ _) -> do
       -- Create names for the elements of the tuple.
       names <- map fst <$> mapM (newVar "index_tup") ets
       let indexing = TupLit (zipWith (\name (it,ot) -> Index name idxs' it ot loc) names (zip its ots)) loc
@@ -126,7 +126,7 @@ transformExp (LetWith name src idxs ve body loc) = do
   body' <- transformExp body
   ve' <- transformExp ve
   case (identType name', expType ve') of
-    (Tuple ets _, Tuple xts _) -> do
+    (Tuple ets _ _, Tuple xts _ _) -> do
       snames <- map fst <$> mapM (newVar "letwith_src") ets
       vnames <- map fst <$> mapM (newVar "letwith_el") xts
       let xlet inner = LetPat (TupId (map Id snames) loc) (Var src') inner loc
@@ -141,7 +141,7 @@ transformExp (Replicate ne ve loc) = do
   ne' <- transformExp ne
   ve' <- transformExp ve
   case expType ve' of
-    Tuple ets _ -> do
+    Tuple ets _ _ -> do
       (n, nv) <- newVar "n" (Int loc)
       (names, vs) <- unzip <$> mapM (newVar "rep_tuple") ets
       let arrexp v = Replicate nv v loc
@@ -152,7 +152,7 @@ transformExp (Replicate ne ve loc) = do
 transformExp (Size e loc) = do
   e' <- transformExp e
   case expType e' of
-    Tuple (et:ets) _ -> do
+    Tuple (et:ets) _ _ -> do
       (name, namev) <- newVar "size_tup" et
       names <- map fst <$> mapM (newVar "size_tup") ets
       return $ LetPat (TupId (map Id $ name : names) loc) e' (Size namev loc) loc
@@ -182,7 +182,7 @@ transformExp (Split nexp arrexp eltype loc) = do
   nexp' <- transformExp nexp
   arrexp' <- transformExp arrexp
   case expType arrexp' of
-    Tuple ets _ -> do
+    Tuple ets _ _ -> do
       (n, nv) <- newVar "split_n" $ expType nexp'
       names <- map fst <$> mapM (newVar "split_tup") ets
       partnames <- forM ets $ \et -> do
@@ -202,7 +202,7 @@ transformExp (Concat x y eltype loc) = do
   x' <- transformExp x
   y' <- transformExp y
   case transformType eltype of -- Both x and y have same type.
-    Tuple ets _ -> do
+    Tuple ets _ _ -> do
       xnames <- map fst <$> mapM (newVar "concat_tup_x") ets
       ynames <- map fst <$> mapM (newVar "concat_tup_y") ets
       let letx body = LetPat (TupId (map Id xnames) loc) x' body loc

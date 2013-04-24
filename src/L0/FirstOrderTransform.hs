@@ -42,7 +42,7 @@ transformExp (Map fun e intype outtype loc)
   (inarr, inarrv, inarrlet) <- newLet e "inarr"
   (i, iv) <- newVar "i" (Int loc) loc
   (_, nv, nlet) <- newLet (Size inarrv loc) "n"
-  let outarrt = Array outtype Nothing loc
+  let outarrt = Array outtype Nothing Nonunique loc
       zero = Literal $ IntVal 0 loc
       index0 = Index inarr [zero] intype intype loc
       index = Index inarr [iv] intype intype loc
@@ -106,10 +106,10 @@ transformExp (Filter fun arrexp elty loc) = do
         intval x = Literal (IntVal x loc)
 transformExp (Mapall fun arrexp _ outtype loc) = transformExp =<< toMap arrexp
   where toMap e = case expType e of
-                    Array et _ _ -> do
+                    Array et _ _ _ -> do
                       (x,xv) <- newVar "x" et loc
                       body <- toMap xv
-                      let ot = arrayType (arrayDims et) outtype
+                      let ot = arrayType (arrayDims et) outtype Nonunique
                       return $ Map (AnonymFun [x] body ot loc) e et ot loc
                     _ -> transformLambda fun [e]
 transformExp (Redomap redfun mapfun accexp arrexp intype _ loc) = do

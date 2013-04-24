@@ -265,7 +265,7 @@ mkFullPattern :: TupIdent Type -> TupNormM Type (TupIdent Type, [(String, TupIde
 mkFullPattern pat@(Id ident) = do
     let (nm, tp) = (identName ident, identType ident)
     case tp of
-        (Tuple _ _) -> 
+        Tuple {} -> 
             do  pat' <- mkPatFromType (identSrcLoc ident) nm tp
                 return (pat', [(nm, pat')])
         _           -> return (pat, [])
@@ -283,14 +283,14 @@ mkPatFromType :: SrcLoc -> String -> Type -> TupNormM Type (TupIdent Type)
 
 mkPatFromType pos nm tp = do
     case tp of
-        Tuple tps _ -> do   tupids <- mapM (mkPatFromType pos nm) tps
-                            return $ TupId tupids pos
+        Tuple tps _ _ -> do   tupids <- mapM (mkPatFromType pos nm) tps
+                              return $ TupId tupids pos
 
-        _           -> do   tmp_nm <- new nm 
-                            let idd = Ident { identName = tmp_nm
-                                            , identType = tp
-                                            , identSrcLoc = pos  }
-                            return $ Id idd
+        _             -> do   tmp_nm <- new nm 
+                              let idd = Ident { identName = tmp_nm
+                                              , identType = tp
+                                              , identSrcLoc = pos  }
+                              return $ Id idd
 
 
 --------------------------------------------------
@@ -323,9 +323,9 @@ tupleNormAbstrFun args body pos = do
 
 
 isTuple :: Ident Type -> Bool
-isTuple x = case identType x of 
-              Tuple _ _ -> True
-              _         -> False
+isTuple x = case identType x of
+              Tuple {} -> True
+              _        -> False
 
  
 ------------------

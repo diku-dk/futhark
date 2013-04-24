@@ -77,7 +77,7 @@ typeToCType (Int _) = return [C.cty|int|]
 typeToCType (Bool _) = return [C.cty|int|]
 typeToCType (Char _) = return [C.cty|char|]
 typeToCType (Real _) = return [C.cty|double|]
-typeToCType t@(Tuple ts _) = do
+typeToCType t@(Tuple ts _ _) = do
   ty <- gets $ lookup t . compTypeStructs
   case ty of
     Just (cty, _) -> return cty
@@ -91,7 +91,7 @@ typeToCType t@(Tuple ts _) = do
         where field et i = do
                  ct <- typeToCType et
                  return [C.csdecl|$ty:ct $id:(tupleField i);|]
-typeToCType t@(Array _ _ _) = do
+typeToCType t@(Array {}) = do
   ty <- gets $ lookup t . compTypeStructs
   case ty of
     Just (cty, _) -> return cty
@@ -190,7 +190,7 @@ printStm place (Int _)  = return [C.cstm|printf("%d", $exp:place);|]
 printStm place (Char _) = return [C.cstm|printf("%c", $exp:place);|]
 printStm place (Bool _) = return [C.cstm|printf($exp:place && "true" || "false");|]
 printStm place (Real _) = return [C.cstm|printf("%lf", $exp:place);|]
-printStm place (Tuple ets _) = do
+printStm place (Tuple ets _ _) = do
   prints <- forM (zip [(0::Int)..] ets) $ \(i, et) ->
               printStm [C.cexp|$exp:place.$id:(tupleField i)|] et
   let prints' = intercalate [[C.cstm|{putchar(','); putchar(' ');}|]] $ map (:[]) prints
@@ -199,9 +199,9 @@ printStm place (Tuple ets _) = do
                $stms:prints'
                putchar(')');
              }|]
-printStm place (Array (Char _) _ _) =
+printStm place (Array (Char _) _ _ _) =
   return [C.cstm|printf("%s", $exp:place.data);|]
-printStm place t@(Array et _ _) = do
+printStm place t@(Array et _ _ _) = do
   i <- new "print_i"
   v <- new "print_elem"
   et' <- typeToCType et
@@ -408,7 +408,7 @@ compileExp place (ArrayLit (e:es) _ _) = do
   es' <- mapM (compileExpInPlace $ varExp name) es
   i <- new "ArrayLit_i"
   case expType e of
-    Array _ _ _ -> do
+    Array {} -> do
       eldims <- new "ArrayLit_eldims"
       elsize <- new "ArrayLit_elsize"
       datap <- new "ArrayLit_datap"
@@ -597,10 +597,10 @@ compileExp place (Replicate ne ve pos) = do
       vlet body = LetPat (Id vident) ve body pos
   compileExp place $ nlet $ vlet $ Replicate (Var nident) (Var vident) pos
 
-compileExp place (Reshape shapeexps arrexp intype _ _) = do
+compileExp place (Reshape shapeexps arrexp _) = do
   shapevars <- mapM (new . ("shape_"++) . show) [0..length shapeexps-1]
   arr <- new "reshape_arr"
-  intype' <- typeToCType intype
+  intype' <- typeToCType $ expType arrexp
   shapeexps' <- zipWithM compileExp (map varExp shapevars) shapeexps
   arrexp' <- compileExp (varExp arr) arrexp
   let vardecls = [[C.cdecl|int $id:var;|] | var <- shapevars]
@@ -708,18 +708,18 @@ compileExp place (LetWith name src idxs ve body _) = do
   let idxdecls = [[C.cdecl|int $id:idxvar;|] | idxvar <- idxvars]
       mknamearr =
         case identType src of
-          Array _ _ _ ->
+          Array {} ->
             let alloc = allocArray (varExp name') (arrayShapeExp src' (identType src)) basetype
                 copy = arraySliceCopyStm [C.cexp|$id:name'.data|] src' (identType src) 0
             in [C.cstm|{$stm:alloc $stm:copy}|]
           _ -> [C.cstm|$id:name' = $exp:src';|]
       (elempre, elempost) =
         case expType ve of
-          Array _ _ _ -> (indexArrayElemStm (varExp el) (varExp name') (identType src) idxexps,
-                          [C.cstm|;|])
+          Array {} -> (indexArrayElemStm (varExp el) (varExp name') (identType src) idxexps,
+                       [C.cstm|;|])
           _ -> ([C.cstm|;|],
                 case identType src of
-                  Array _ _ _ ->
+                  Array {} ->
                     [C.cstm|$exp:(indexArrayExp (varExp name') (identType src) idxexps) = $id:el;|]
                   _ -> [C.cstm|$id:name' = $id:el;|])
   body' <- binding [(identName name, varExp name')] $ compileExp place body
@@ -766,7 +766,7 @@ compileExp place (Copy e _) = do
   e' <- compileExp (varExp val) e
   t <- typeToCType $ expType e
   let copy = case expType e of
-               Array _ _ _ -> arraySliceCopyStm [C.cexp|$exp:place.data|]
+               Array {} -> arraySliceCopyStm [C.cexp|$exp:place.data|]
                                 (varExp val) (expType e) 0
                _ -> [C.cstm|;|]
   return [C.cstm|{
@@ -810,7 +810,7 @@ compileExpInPlace place e@(Replicate ne ve _) = do
   vt <- typeToCType $ expType ve
   let (vsetup, vpost) =
         case expType ve of
-          Array _ _ _ ->
+          Array {} ->
             ([C.cstm|{
                    memcpy($id:v.dims, &$exp:place.dims[1],
                           sizeof($exp:place.dims)-sizeof($exp:place.dims[0]));
@@ -838,7 +838,7 @@ compileExpInPlace place e@(Replicate ne ve _) = do
                 }}|]
 
 compileExpInPlace place e
-  | t@(Array _ _ _) <- expType e = do
+  | t@(Array {}) <- expType e = do
     tmpplace <- new "inplace"
     e' <- compileExp (varExp tmpplace) e
     let copy = arraySliceCopyStm [C.cexp|$exp:place.data|] (varExp tmpplace) t 0

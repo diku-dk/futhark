@@ -151,13 +151,16 @@ Fun :     Type id '(' TypeIds ')' '=' Exp
 			{ let L pos (ID name) = $2 in (name, $1, [], $6, pos) }
 ;
 
+Uniqueness : '*' { Unique }
+           |     { Nonunique }
+
 Type :	  int                    { Int   $1             }
         | real                   { Real  $1             }
         | bool                   { Bool  $1             }
         | char                   { Char  $1             }
-        | '(' Types ')'        { Tuple $2 $1       }
-        | '[' Type ']' { Array $2 Nothing $1 }
-        | '[' Type ',' Exp ']' { Array $2 (Just $4) $1 }
+        | Uniqueness '(' Types ')'        { Tuple $3 $1 $2 }
+        | Uniqueness '[' Type ']' { Array $3 Nothing $1 $2 }
+        | Uniqueness '[' Type ',' Exp ']' { Array $3 (Just $5) $1 $2 }
 ;
 
 Types : Type ',' Types { $1 : $3 }
@@ -217,7 +220,7 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal $ IntVal num pos 
      | replicate '(' Exp ',' Exp ')' { Replicate $3 $5 $1 }
 
      | reshape '(' '(' Exps ')' ',' Exp ')'
-                      { Reshape $4 $7 Nothing Nothing $1 }
+                      { Reshape $4 $7 $1 }
 
      | transpose '(' Exp ')'
                       { Transpose $3 Nothing Nothing $1 }
