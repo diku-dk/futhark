@@ -103,7 +103,7 @@ subuniqueOf :: Uniqueness -> Uniqueness -> Bool
 subuniqueOf Nonunique Unique = False
 subuniqueOf _ _ = True
 
--- | @x `subtypeOf` y@ is true if @x@ is a subtype of @y@ (or equal to
+-- | @x \`subtypeOf\` y@ is true if @x@ is a subtype of @y@ (or equal to
 -- @y@), meaning @x@ is valid whenever @y@ is.
 subtypeOf :: Type -> Type -> Bool
 subtypeOf (Tuple ts1 u1 _) (Tuple ts2 u2 _) =
@@ -112,7 +112,7 @@ subtypeOf (Array t1 _ u1 _) (Array t2 _ u2 _) =
   u1 `subuniqueOf` u2 && t1 `subtypeOf` t2
 subtypeOf t1 t2 = t1 == t2
 
--- | @x `similar` y@ is true if @x@ and @y@ are the same type,
+-- | @x \`similarTo\` y@ is true if @x@ and @y@ are the same type,
 -- ignoring uniqueness.
 similarTo :: Type -> Type -> Bool
 similarTo t1 t2 = t1 `subtypeOf` t2 || t2 `subtypeOf` t1
@@ -292,79 +292,88 @@ data Exp ty = Literal Value
             -- Function Call and Let Construct
             | Apply  String [Exp ty] ty SrcLoc
             | LetPat (TupIdent ty) (Exp ty) (Exp ty) SrcLoc
+
             | LetWith (Ident ty) (Ident ty) [Exp ty] (Exp ty) (Exp ty) SrcLoc
-            -- Array Indexing and Array Constructors
+            -- ^ Array Indexing and Array Constructors
+
             | Index (Ident ty) [Exp ty] ty ty SrcLoc
-             -- e.g., arr[3]; 3rd arg is the input-array element type
-             -- 4th arg is the result type
-            | Iota (Exp ty) SrcLoc -- e.g., iota(n) = {0,1,..,n-1}
-            | Size (Exp ty) SrcLoc -- The number of elements in an array.
-            | Replicate (Exp ty) (Exp ty) SrcLoc -- e.g., replicate(3,1) = {1, 1, 1}
+             -- ^ 3rd arg is the input-array element type 4th arg is
+             -- the result type
+
+            | Iota (Exp ty) SrcLoc
+            -- ^ @iota(n) = {0,1,..,n-1@
+
+            | Size (Exp ty) SrcLoc
+            -- ^ The number of elements in an array.
+
+            | Replicate (Exp ty) (Exp ty) SrcLoc
+            -- ^ @replicate(3,1) = {1, 1, 1}@
 
             | Reshape [Exp ty] (Exp ty) SrcLoc
-             -- 1st arg is the new shape, 2nd arg is the input array *)
+             -- ^ 1st arg is the new shape, 2nd arg is the input array *)
 
             | Transpose (Exp ty) ty ty SrcLoc
-             -- 1st arg is the (input) to-be-transSrcLoced array *)
-             -- 2nd argument is the  input-array type *)
-             -- 3rd argument is the result-array type *)
+             -- ^ 1st arg is the (input) to-be-transSrcLoced array.
+             -- 2nd argument is the input-array type.
+             -- 3rd argument is the result-array type.
 
             -- Second-Order Array Combinators
             -- accept curried and anonymous
             -- functions as (first) params
             | Map (Lambda ty) (Exp ty) ty ty SrcLoc
-             -- e.g., map(op +(1), {1,2,..,n}) = {2,3,..,n+1} *)
-             -- 3st arg is the input-array element type *)
-             -- 4th arg is the output-array element type *)
+             -- @map(op +(1), {1,2,..,n}) = {2,3,..,n+1}@
+             -- 3st arg is the input-array element type
+             -- 4th arg is the output-array element type
 
             | Reduce (Lambda ty) (Exp ty) (Exp ty) ty SrcLoc
-             -- e.g., reduce(op +, 0, {1,2,..,n}) = (0+1+2+..+n) *)
-             -- 4th arg is the input-array element type          *)
+             -- @reduce(op +, 0, {1,2,..,n}) = (0+1+2+..+n)@
+             -- 4th arg is the input-array element type
 
             | Zip [(Exp ty, ty)] SrcLoc
-            -- Normal zip supporting variable number of arguments.
+            -- ^ Normal zip supporting variable number of arguments.
             -- The type paired to each expression is the element type
             -- of the array returned by that expression.
 
             | Unzip (Exp ty) [ty] SrcLoc
-            -- Unzip that can unzip tuples of arbitrary size.  The
+            -- ^ Unzip that can unzip tuples of arbitrary size.  The
             -- types are the elements of the tuple.
 
             | Scan (Lambda ty) (Exp ty) (Exp ty) ty SrcLoc
-             -- scan(plus, 0, { 1, 2, 3 }) = { 1, 3, 6 }
+             -- ^ @scan(plus, 0, { 1, 2, 3 }) = { 1, 3, 6 }@.
              -- 4th arg is the element type of the input array
 
             | Filter (Lambda ty) (Exp ty) ty SrcLoc
-             -- 3rd arg is the element type of the input (and result) array *)
+             -- ^ 3rd arg is the element type of the input (and
+             -- result) array
 
             | Mapall (Lambda ty) (Exp ty) ty ty SrcLoc
-             -- e.g., mapall(op ~, {{1,~2}, {~3,4}}) = {{~1,2}, {3,~4}}
+             -- ^ @mapall(op ~, {{1,~2}, {~3,4}}) = {{~1,2}, {3,~4}}@.
              -- 3rd and 4th args are the base types of the input and result arrays, respectively.
 
             | Redomap (Lambda ty) (Lambda ty) (Exp ty) (Exp ty) ty ty SrcLoc
-             -- redomap(g, f, n, a) = reduce(g, n, map(f, a))    *)
-             -- 5th arg is the element type of the input  array *)
-             -- 6th arg is the element type of the result array *)
+             -- ^ @redomap(g, f, n, a) = reduce(g, n, map(f, a))@.
+             -- 5th arg is the element type of the input  array.
+             -- 6th arg is the element type of the result array
 
             | Split (Exp ty) (Exp ty) ty SrcLoc
-             -- split(1, { 1, 2, 3, 4 }) = ({1},{2, 3, 4}) *)
-             -- 3rd arg is the element type of the input array *)
+             -- ^ @split(1, { 1, 2, 3, 4 }) = ({1},{2, 3, 4})@.
+             -- 3rd arg is the element type of the input array
 
             | Concat (Exp ty) (Exp ty) ty SrcLoc
-             -- concat ({1},{2, 3, 4}) = {1, 2, 3, 4} *)
+             -- ^ @concat ({1},{2, 3, 4}) = {1, 2, 3, 4}@.
              -- 3rd arg is the element type of the input array*)
 
             | Copy (Exp ty) SrcLoc
-            -- Copy the value return by the expression.  This only
+            -- ^ Copy the value return by the expression.  This only
             -- makes a difference in do-loops with merge variables.
 
             | DoLoop
-              (TupIdent ty) -- ^ Merge variable pattern
-              (Exp ty) -- ^ Initial values of merge variables.
-              (Ident ty) -- ^ Iterator.
-              (Exp ty) -- ^ Upper bound.
-              (Exp ty) -- ^ Loop body.
-              (Exp ty) -- ^ Let-body.
+              (TupIdent ty) -- Merge variable pattern
+              (Exp ty) -- Initial values of merge variables.
+              (Ident ty) -- Iterator.
+              (Exp ty) -- Upper bound.
+              (Exp ty) -- Loop body.
+              (Exp ty) -- Let-body.
               SrcLoc
               
               deriving (Eq, Ord, Show, Typeable, Data)
@@ -433,7 +442,7 @@ expType (Scan fun _ _ _ _) = arrayType 1 (lambdaType fun) Unique
 expType (Filter _ _ t _) = arrayType 1 t Unique
 expType (Mapall fun e _ _ _) = arrayType (arrayDims $ expType e) (lambdaType fun) Unique
 expType (Redomap _ _ _ _ _ t _) = arrayType 1 t Unique
-expType (Split _ _ t pos) = Tuple [arrayType 1 t Nonunique, arrayType 1 t Nonunique] Nonunique pos
+expType (Split _ _ t pos) = Tuple [arrayType 1 t Nonunique, arrayType 1 t Nonunique] Unique pos
 expType (Concat _ _ t _) = arrayType 1 t Unique
 expType (Copy e _) = unique $ expType e
 expType (DoLoop _ _ _ _ _ body _) = expType body
@@ -515,6 +524,7 @@ instance Located (TupIdent ty) where
 -- | Function Declarations
 type FunDec ty = (String,Type,[Ident Type],Exp ty,SrcLoc)
 
+-- | An entire L0 program.
 type Prog ty = [FunDec ty]
 
 -- | Return a list of all variable names mentioned in program.
@@ -523,6 +533,7 @@ progNames = everything union (mkQ [] identName')
   where identName' :: Ident ty -> [String]
         identName' k = [identName k]
 
+-- | Find the function of the given name in the L0 program.
 funDecByName :: String -> Prog ty -> Maybe (FunDec ty)
 funDecByName fname = find (\(fname',_,_,_,_) -> fname == fname')
 
