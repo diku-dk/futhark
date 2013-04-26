@@ -4,11 +4,11 @@ import L0.AbSyn
 
 import Data.Loc
 
-realConst :: Double -> SrcLoc -> Exp Type
-realConst v s = Literal $ RealVal v s
-
 intConst :: Int -> SrcLoc -> Exp Type
 intConst v s = Literal $ IntVal v s
+
+realConst :: Double -> SrcLoc -> Exp Type
+realConst v s = Literal $ RealVal v s
 
 zero :: SrcLoc -> Exp Type
 zero s = intConst 0 s
@@ -35,7 +35,7 @@ binopLambda op t s =
   in
     AnonymFun [x,y] (BinOp op (Var x) (Var y) t s) t s
 
-normalize :: (Exp Type) -> (Exp Type)
+normalize :: Exp Type -> Exp Type
 normalize (Literal v) = Literal v
 normalize (BinOp Minus x y t s) =
   -- x - y = x + (-1) * y
