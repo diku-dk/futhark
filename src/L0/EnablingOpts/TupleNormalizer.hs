@@ -327,7 +327,7 @@ isTuple x = case identType x of
               Tuple {} -> True
               _        -> False
 
- 
+  
 ------------------
 ---- NOT USED ----
 ------------------

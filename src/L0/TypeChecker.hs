@@ -270,6 +270,12 @@ checkExp (Apply "trace" args t pos) =
       t' <- t `unifyWithKnown` expType e'
       return $ Apply "trace" [e'] t' pos
     _ -> bad $ TypeError pos "Trace function takes a single parameter"
+checkExp (Apply "assertZip" args t pos) = do
+  args' <- mapM checkExp args
+  let argtps = map expType args'
+  _ <- mapM soac2ElemType argtps
+  t' <- t `unifyWithKnown` (Bool pos) --(Tuple argtps Unique pos)
+  return $ Apply "assertZip" args' t' pos
 checkExp (Apply fname args t pos) = do
   bnd <- asks $ M.lookup fname . envFtable
   case bnd of
@@ -423,6 +429,128 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _) boundexp loopbody letbody
   binding bnds $ do
     letbody' <- checkExp letbody
     return $ DoLoop mergepat' mergeexp' (Ident loopvar (Int pos) pos) boundexp' loopbody' letbody' pos
+
+----------------------------------------------
+---- BEGIN Cosmin added SOAC2 combinators ----
+----------------------------------------------
+checkExp (Map2 fun arrexp intype outtype pos) = do
+  arrexp' <- mapM checkExp arrexp
+  ineltps <- mapM (soac2ElemType . expType) arrexp'
+  let ineltp = if length ineltps == 1 then head ineltps
+               else Tuple ineltps Unique pos
+  fun'    <- checkLambda fun [ineltp]
+  intype' <- intype `unifyWithKnown` ineltp
+  outtype'<- outtype `unifyWithKnown` lambdaType fun'
+  return $ Map2 fun' arrexp' intype' outtype' pos
+
+checkExp (Reduce2 fun startexp arrexp intype pos) = do
+  startexp' <- checkExp startexp
+  arrexp'   <- mapM checkExp arrexp
+  ineltps   <- mapM (soac2ElemType . expType) arrexp'
+  let ineltp = if length ineltps == 1 then head ineltps
+               else Tuple ineltps Unique pos
+  intype' <- intype `unifyWithKnown` ineltp
+  fun'    <- checkLambda fun [expType startexp', intype']
+  when (expType startexp' /= lambdaType fun') $
+        bad $ TypeError pos $ "Accumulator is of type " ++ ppType (expType startexp') ++ 
+                              ", but reduce function returns type " ++ ppType (lambdaType fun') ++ "."
+  return $ Reduce2 fun' startexp' arrexp' intype' pos
+
+checkExp (Scan2 fun startexp arrexp intype pos) = do
+  startexp' <- checkExp startexp
+  arrexp'   <- mapM checkExp arrexp
+
+  --inelemt   <- soac2ElemType $ expType arrexp'
+  ineltps   <- mapM (soac2ElemType . expType) arrexp'
+  let inelemt = if length ineltps == 1 then head ineltps
+                else Tuple ineltps Unique pos
+  intype'   <- intype `unifyWithKnown` inelemt
+  fun'      <- checkLambda fun [intype', intype']
+  when (expType startexp' /= lambdaType fun') $
+    bad $ TypeError pos $ "Initial value is of type " ++ ppType (expType startexp') ++ 
+                          ", but scan function returns type " ++ ppType (lambdaType fun') ++ "."
+  when (intype' /= lambdaType fun') $
+    bad $ TypeError pos $ "Array element value is of type " ++ ppType intype' ++ 
+                          ", but scan function returns type " ++ ppType (lambdaType fun') ++ "."
+  return $ Scan2 fun' startexp' arrexp' intype' pos
+
+checkExp (Filter2 fun arrexp eltype pos) = do
+  arrexp' <- mapM checkExp arrexp
+  --inelemt <- soac2ElemType $ expType arrexp'
+  ineltps   <- mapM (soac2ElemType . expType) arrexp'
+  let inelemt = if length ineltps == 1 then head ineltps
+                else Tuple ineltps Unique pos
+  eltype' <- eltype `unifyWithKnown` inelemt
+  fun' <- checkLambda fun [inelemt]
+  when (lambdaType fun' /= Bool pos) $
+    bad $ TypeError pos "Filter function does not return bool."
+  return $ Filter2 fun' arrexp' eltype' pos
+
+checkExp (Mapall2 fun arrexp intype outtype pos) = do
+  arrexp' <- mapM checkExp arrexp
+  let arrtps = map expType arrexp'
+
+  _ <- mapM soac2ElemType arrtps
+  let mindim = foldl (\x y -> min x y) 
+                     (arrayDims (head arrtps)) 
+                     (map arrayDims (tail arrtps))
+  let ineltps= map (\x -> stripArray mindim x) arrtps
+  let ineltp = if length ineltps == 1 then head ineltps
+               else Tuple ineltps Unique pos 
+
+  intype' <- intype `unifyWithKnown` ineltp
+  fun' <- checkLambda fun [intype']
+  outtype' <- outtype `unifyWithKnown` lambdaType fun'
+  return $ Mapall2 fun' arrexp' intype' outtype' pos
+
+
+checkExp (Redomap2 redfun mapfun accexp arrexp intype outtype pos) = do
+  accexp' <- checkExp accexp
+  arrexp' <- mapM checkExp arrexp
+  ets <- mapM (soac2ElemType . expType) arrexp'
+  let et = if length ets == 1 then head ets
+           else Tuple ets Unique pos
+  mapfun' <- checkLambda mapfun [et]
+  redfun' <- checkLambda redfun [expType accexp', lambdaType mapfun']
+  _ <- unifyKnownTypes (lambdaType redfun') (expType accexp')
+  intype' <- intype `unifyWithKnown` et
+  outtype' <- outtype `unifyWithKnown` lambdaType redfun'
+  return $ Redomap2 redfun' mapfun' accexp' arrexp' intype' outtype' pos
+
+---------------------
+--- SOAC2 HELPERS ---
+---------------------
+soac2ElemType :: Type -> TypeM Type
+soac2ElemType tp@(Array _ _ _ _) = 
+    getTupArrElemType tp
+soac2ElemType (Tuple tps u pos ) = do
+    tps' <- mapM getTupArrElemType tps
+    return $ Tuple tps' u pos
+soac2ElemType tp = 
+    bad $ TypeError (SrcLoc (locOf tp)) 
+                    ("In TypeChecker, soac2ElemType: "
+                     ++" input type not a tuple/array: "++ppType tp)
+
+getTupArrElemType :: Type -> TypeM Type
+getTupArrElemType tp =
+    case tp of
+        Array eltp _ _ pos -> 
+            if hasInnerTuple eltp 
+            then bad $ TypeError pos ("In TypeChecker, soac2, getTupArrElemType: "
+                                      ++"array elem type has an inner tuple: "++ppType eltp)
+            else return eltp
+        _ -> bad $ TypeError (SrcLoc (locOf tp))  
+                             ("In TypeChecker, soac2, getTupArrElemType: "
+                              ++" input type not an array: "++ppType tp)
+    where
+        hasInnerTuple :: Type -> Bool
+        hasInnerTuple (Tuple {}       ) = True
+        hasInnerTuple (Array etp _ _ _) = hasInnerTuple etp
+        hasInnerTuple _                 = False
+
+--------------------------------------
+---- END Cosmin SOAC2 combinators ----
+--------------------------------------
 
 checkLiteral :: Value -> TypeM Value
 checkLiteral (IntVal k pos) = return $ IntVal k pos

@@ -335,6 +335,16 @@ copyCtPropExp (Size e pos) = do
 --- If all params are values and function is free of IO ---
 ---    then evaluate the function call                  ---
 -----------------------------------------------------------
+ 
+-- trace and assertZip are not executed at compile time
+-- even if their arguments are values because they 
+-- exhibit side effects!
+copyCtPropExp (Apply "trace" args tp pos) = do
+    args' <- mapM copyCtPropExp args
+    return $ Apply "trace" args' tp pos
+copyCtPropExp (Apply "assertZip" args tp pos) = do
+    args' <- mapM copyCtPropExp args
+    return $ Apply "assertZip" args' tp pos
 
 copyCtPropExp (Apply fname args tp pos) = do
     args' <- mapM copyCtPropExp args
