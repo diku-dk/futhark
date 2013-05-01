@@ -353,7 +353,7 @@ data Exp ty = Literal Value
             | Redomap (Lambda ty) (Lambda ty) (Exp ty) (Exp ty) ty ty SrcLoc
              -- ^ @redomap(g, f, n, a) = reduce(g, n, map(f, a))@.
              -- 5th arg is the element type of the input  array.
-             -- 6th arg is the element type of the result array
+             -- 6th arg is the result type == the element type of the reduced array
 
             | Split (Exp ty) (Exp ty) ty SrcLoc
              -- ^ @split(1, { 1, 2, 3, 4 }) = ({1},{2, 3, 4})@.
@@ -375,6 +375,29 @@ data Exp ty = Literal Value
               (Exp ty) -- Loop body.
               (Exp ty) -- Let-body.
               SrcLoc
+
+            -----------------------------------------------------
+            -- Second-Order Array Combinators
+            -- with support for n-ary multi-dim 
+            -- arrays of BASIC type (i.e., no tuples inside)
+            -- accept curried and anonymous
+            -- functions as (first) params
+            -----------------------------------------------------
+            | Map2 (Lambda ty) [Exp ty] ty ty SrcLoc
+             -- @map(op +(1), {1,2,..,n}) = {2,3,..,n+1}@
+             -- 2nd arg is either a tuple of multi-dim arrays 
+             --   of basic type, or a multi-dim array of basic type.
+             -- 3st arg is the  input-array element type
+             --   (either a tuple or an array)
+             -- 4th arg is the output-array element type
+             --   (either a tuple or an array)
+
+            | Reduce2 (Lambda ty) (Exp ty) [Exp ty] ty SrcLoc
+            | Scan2   (Lambda ty) (Exp ty) [Exp ty] ty SrcLoc
+            | Filter2 (Lambda ty) [Exp ty]          ty SrcLoc
+            | Mapall2 (Lambda ty) [Exp ty]       ty ty SrcLoc
+            | Redomap2(Lambda ty) (Lambda ty) (Exp ty) [Exp ty] ty ty SrcLoc
+
               
               deriving (Eq, Ord, Show, Typeable, Data)
 
@@ -410,6 +433,15 @@ instance Located (Exp ty) where
   locOf (Concat _ _ _ pos) = locOf pos
   locOf (Copy _ pos) = locOf pos
   locOf (DoLoop _ _ _ _ _ _ pos) = locOf pos
+  -- locOf for soac2 (Cosmin)
+  locOf (Map2 _ _ _ _ pos) = locOf pos
+  locOf (Reduce2 _ _ _ _ pos) = locOf pos
+  locOf (Scan2 _ _ _ _ pos) = locOf pos
+  locOf (Filter2 _ _ _ pos) = locOf pos
+  locOf (Mapall2 _ _ _ _ pos) = locOf pos
+  locOf (Redomap2 _ _ _ _ _ _ pos) = locOf pos
+
+
 
 -- | Given an expression with known types, return its type.
 expType :: Exp Type -> Type
@@ -441,11 +473,31 @@ expType (Unzip _ ts pos) = Tuple (map (flip (arrayType 1) Unique) ts) Unique pos
 expType (Scan fun _ _ _ _) = arrayType 1 (lambdaType fun) Unique
 expType (Filter _ _ t _) = arrayType 1 t Unique
 expType (Mapall fun e _ _ _) = arrayType (arrayDims $ expType e) (lambdaType fun) Unique
-expType (Redomap _ _ _ _ _ t _) = arrayType 1 t Unique
+expType (Redomap redfun _ _ _ _ _ _) = lambdaType redfun -- arrayType 1 t Unique
 expType (Split _ _ t pos) = Tuple [arrayType 1 t Nonunique, arrayType 1 t Nonunique] Unique pos
 expType (Concat _ _ t _) = arrayType 1 t Unique
 expType (Copy e _) = unique $ expType e
 expType (DoLoop _ _ _ _ _ body _) = expType body
+--- Begin SOAC2: (Cosmin) ---
+expType (Map2 _ _ _ (Tuple tps u _) pos) = Tuple (map (\x -> arrayType 1 x Unique) tps) u pos
+expType (Map2 _ _ _ tp _) = arrayType 1 tp Unique
+expType (Reduce2 fun _ _ _ _) = lambdaType fun
+expType (Scan2 _ _ _ (Tuple tps u _) pos) = Tuple (map (\x -> arrayType 1 x Unique) tps) u pos
+expType (Scan2 _ _ _ tp _) = arrayType 1 tp Unique
+expType (Filter2 _ _ (Tuple tps u _) pos) = Tuple (map (\x -> arrayType 1 x Unique) tps) u pos
+expType (Filter2 _ _ tp _) = arrayType 1 tp Unique
+expType (Redomap2 redfun _ _ _ _ _ _) = lambdaType redfun
+expType (Mapall2 fun es _ _ _) = 
+    let etps  = map expType es 
+        inpdim= foldl (\x y -> min x y) 
+                      (arrayDims (head etps)) 
+                      (map arrayDims (tail etps))
+        fnrtp = lambdaType fun 
+    in case fnrtp of
+        (Tuple tps u p) -> Tuple (map (\x -> arrayType inpdim x Unique) tps) u p
+        _ -> arrayType inpdim fnrtp Unique
+--- End SOAC2: (Cosmin) ---
+
 
 -- | Eagerly evaluated binary operators.  In particular, the
 -- short-circuited operators && and || are not here, although an
@@ -561,7 +613,7 @@ ppValue (TupVal vs _)   =
   " ( " ++ intercalate ", " (map ppValue vs) ++ " ) "
 
 -- | Pretty printing an expression
-ppExp :: Int -> Exp ty -> String
+ppExp :: TypeBox ty => Int -> Exp ty -> String
 ppExp _ (Literal val)     = ppValue val
 ppExp d (ArrayLit es _ _) =
   " { " ++ intercalate ", " (map (ppExp d) es) ++ " } "
@@ -642,6 +694,46 @@ ppExp d (DoLoop mvpat mvexp i n loopbody letbody _) =
     ") = " ++ "for " ++ identName i ++ " < " ++ ppExp d n ++ " do\n" ++
     spaces (d+1) ++ ppExp (d+1) loopbody ++ "\n" ++ spaces d ++
     "in " ++ ppExp d letbody
+--- Cosmin added ppExp for soac2
+ppExp d (Map2 fun lst _ elrtp _) = 
+    let (pref, suff)  = case unboxType elrtp of
+                            Just (Tuple {}) -> (" unzip ( ", " ) ")
+                            _ -> ("","")
+        mid = if length lst == 1 then ppExp (d+1) (head lst) 
+              else "zip ( " ++ intercalate ", " (map (ppExp (d+1) ) lst) ++ " ) " 
+    in pref ++ " map ( " ++ ppLambda (d+1) fun ++ ", " ++ mid ++ suff ++ " ) "
+--
+ppExp d (Reduce2 fun el [arr] _ _) =
+  " reduce ( " ++ ppLambda (d+1) fun ++ ", " ++ ppExp (d+1) el ++ ", " ++ ppExp (d+1) arr ++ " ) "
+ppExp d (Reduce2 fun el arrs _ _) =
+    " reduce ( " ++ ppLambda (d+1) fun ++ ", " ++ ppExp (d+1) el ++ ", zip ( " ++ 
+    intercalate ", " (map (ppExp (d+1)) arrs) ++ " ) ) "
+--
+ppExp d (Scan2  fun el lst eltp _) =
+    let (pref, suff)  = case unboxType eltp of
+                            Just (Tuple {}) -> (" unzip ( ", " ) ")
+                            _ -> ("","")
+        mid = if length lst == 1 then  ppExp (d+1) (head lst)
+              else "zip ( " ++ intercalate ", " (map (ppExp (d+1) ) lst) ++ " ) "
+    in pref ++ " scan ( " ++ ppLambda (d+1) fun ++ ", " ++ ppExp (d+1) el ++ ", " ++ mid ++ suff ++ " ) "
+--
+ppExp d (Filter2 fun [a] _ _) =
+  " filter ( " ++ ppLambda (d+1) fun ++ ", " ++ ppExp (d+1) a ++ " ) "
+ppExp d (Filter2 fun els _ _) =
+    " unzip ( filter ( " ++ ppLambda (d+1) fun ++ ", " ++ 
+    " zip ( " ++ intercalate ", " (map (ppExp (d+1)) els) ++ " ) ) ) "
+--
+ppExp d (Redomap2 id1 id2 el [a] _ _ _)
+          = " redomap ( " ++ ppLambda (d+1) id1 ++ ", " ++ ppLambda (d+1) id2 ++ 
+            ", " ++ ppExp (d+1) el ++ ", " ++ ppExp (d+1) a ++ " ) "
+ppExp d (Redomap2 id1 id2 el els _ _ _)
+          = " redomap ( " ++ ppLambda (d+1) id1 ++ ", " ++ ppLambda (d+1) id2 ++ 
+            ", " ++ ppExp (d+1) el ++ ", zip ( " ++ intercalate ", " (map (ppExp (d+1)) els) ++ " ) ) "
+--
+ppExp d (Mapall2 fun lst _ _ _) = 
+    " mapall2 ( " ++ ppLambda (d+1) fun ++ intercalate ", " (map (ppExp (d+1)) lst) ++ " ) "
+--- Cosmin end ppExp for soac2
+
 ppBinOp :: BinOp -> String
 ppBinOp op = " " ++ opStr op ++ " "
 
@@ -670,7 +762,7 @@ ppTupId (TupId pats _) = " ( " ++ intercalate ", " (map ppTupId pats) ++ " ) "
 
 
 -- pretty printing Lambda, i.e., curried and unnamed functions *)
-ppLambda :: Int -> Lambda ty -> String
+ppLambda :: TypeBox ty => Int -> Lambda ty -> String
 ppLambda d ( AnonymFun params body rtp _) =
       let pp_bd (Ident arg tp _) = ppType tp ++ " " ++ arg
           strargs = intercalate ", " $ map pp_bd params
@@ -684,7 +776,7 @@ ppLambda _ ( CurryFun fid args ty pos) =
       ppExp 0 (Apply fid args ty pos)
 
 -- | pretty printing a function declaration
-ppFun :: Int -> FunDec ty -> String
+ppFun ::  TypeBox ty => Int -> FunDec ty -> String
 ppFun d (name, ret_tp, args, body, _) =
   let -- pretty printing a list of bindings separated by commas
       ppBd (Ident argname tp _) = ppType tp ++ " " ++ argname
@@ -695,5 +787,5 @@ ppFun d (name, ret_tp, args, body, _) =
      spaces (d+1) ++ ppExp (d+1) body
 
 -- | Pretty printing a program.
-prettyPrint :: Prog ty -> String
+prettyPrint ::  TypeBox ty => Prog ty -> String
 prettyPrint p = concatMap (ppFun 0) p ++ "\n"

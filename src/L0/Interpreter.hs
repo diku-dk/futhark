@@ -239,6 +239,20 @@ evalExp (Apply "trace" [arg] _ loc) = do
   arg' <- evalExp arg
   tell [(loc, ppValue arg')]
   return arg'
+evalExp (Apply "assertZip" args _ loc) = do
+  args' <- mapM evalExp args
+  szs   <- mapM getArrSize args'
+  let val = TupVal args' loc
+  let all_eq = ( foldl (&&) True . map (== (head szs)) ) szs
+  if not all_eq
+  then bad $ TypeError loc ("assertZip failed! args: " ++ ppValue val)
+  else do return $ LogVal True loc -- val 
+          
+  where
+    getArrSize :: Value -> L0M Int
+    getArrSize aa@(ArrayVal _ _ _) = return $ head (arrayShape aa)
+    getArrSize v = bad $ TypeError (SrcLoc (locOf v)) 
+                                   "one of assertZip args not an array val!"
 evalExp (Apply fname args _ _) = do
   fun <- lookupFun fname
   args' <- mapM evalExp args
@@ -397,6 +411,57 @@ evalExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody pos) = do
   where iteration mergeval i =
           binding [(loopvar, IntVal i pos)] $
             evalExp $ LetPat mergepat (Literal mergeval) loopbody pos
+
+----------------------------
+--- Begin SOAC2 (Cosmin) ---
+----------------------------
+
+evalExp (Map2 fun es intype outtype pos) = do
+    let e' = if length es == 1 then head es
+             else Zip (map (\x -> (x, expType x)) es) pos 
+    let e_map = Map fun e' intype outtype pos
+    let res = case outtype of
+                Tuple ts _ _ -> Unzip e_map ts pos
+                _ -> e_map
+    evalExp res
+
+evalExp (Scan2 fun startexp arrs tp pos) = do
+    let arr' = if length arrs == 1 then head arrs
+               else Zip (map (\x -> (x, expType x)) arrs) pos 
+    let e_scan = Scan fun startexp arr' tp pos
+    let res = case tp of
+                Tuple ts _ _ -> Unzip e_scan ts pos
+                _ -> e_scan
+    evalExp res
+
+evalExp (Filter2 fun arrs tp pos) = do
+    res <- if length arrs == 1 
+           then return $ Filter fun (head arrs) tp pos
+           else do let e_zip = Zip (map (\x -> (x, expType x)) arrs) pos
+                   let e_filt= Filter fun e_zip tp pos
+                   case tp of
+                     Tuple ts _ _ -> return $ Unzip e_filt ts pos
+                     _ -> bad $ TypeError pos ("evalExp Filter2: elem type not a tuple!"++
+                                               " array list: "++ intercalate ", " (map (ppExp 0) arrs) )
+    evalExp res
+
+evalExp (Reduce2 fun accexp arrs tp pos) = do
+    let arr' = if length arrs == 1 then head arrs
+               else Zip (map (\x -> (x, expType x)) arrs) pos 
+    evalExp $ Reduce fun accexp arr' tp pos
+
+evalExp (Redomap2 redfun mapfun accexp arrs intp outtp pos) = do
+    let arr' = if length arrs == 1 then head arrs
+               else Zip (map (\x -> (x, expType x)) arrs) pos 
+    evalExp $ Redomap redfun mapfun accexp arr' intp outtp pos
+
+evalExp (Mapall2 _ _ _ _ pos) =
+    bad $ TypeError pos ("evalExp Mapall2: not implemented yet!!!")
+ 
+----------------------------
+--- End   SOAC2 (Cosmin) ---
+----------------------------
+
 
 evalIntBinOp :: (Int -> Int -> Int) -> Exp Type -> Exp Type -> SrcLoc -> L0M Value
 evalIntBinOp op e1 e2 pos = do
