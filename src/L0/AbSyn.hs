@@ -8,7 +8,10 @@ module L0.AbSyn
   , Type(..)
   , subtypeOf
   , similarTo
+  , uniqueness
+  , unique
   , TypeBox(..)
+  , Typed(..)
   , ppType
   , arrayDims
   , arrayShape
@@ -19,7 +22,6 @@ module L0.AbSyn
   , stripArray
   , blankValue
   , Value(..)
-  , valueType
   , arrayVal
   , emptyArray
   , arrayString
@@ -27,7 +29,6 @@ module L0.AbSyn
   , ppValue
   , Ident(..)
   , Exp(..)
-  , expType
   , expToValue
   , ppExp
   , isBuiltInFun
@@ -35,7 +36,6 @@ module L0.AbSyn
   , opStr
   , ppBinOp
   , Lambda(..)
-  , lambdaType
   , TupIdent(..)
   , ppTupId
   , FunDec
@@ -47,9 +47,9 @@ module L0.AbSyn
   where
 
 import Data.Array
-import Data.Data
+import Data.Data hiding (typeOf)
 import Data.List
-import Data.Generics
+import Data.Generics hiding (typeOf)
 import Data.Loc
 import Data.Monoid
 
@@ -117,6 +117,17 @@ subtypeOf t1 t2 = t1 == t2
 similarTo :: Type -> Type -> Bool
 similarTo t1 t2 = t1 `subtypeOf` t2 || t2 `subtypeOf` t1
 
+-- | Return the uniqueness of a type.
+uniqueness :: Typed a => a -> Uniqueness
+uniqueness = uniqueness' . typeOf
+  where uniqueness' (Array _ _ u _) = u
+        uniqueness' (Tuple _ u _) = u
+        uniqueness' _ = Nonunique
+
+-- | @unique t@ is 'True' if the type of the argument is unique.
+unique :: Typed a => a -> Bool
+unique = (==Unique) . uniqueness
+
 -- | A type box provides a way to box a type, and possibly retrieve
 -- one.
 class (Eq ty, Ord ty, Show ty, Data ty, Typeable ty) => TypeBox ty where
@@ -132,7 +143,14 @@ instance TypeBox (Maybe Type) where
 instance TypeBox Type where
   unboxType = Just
   boxType = id
-  getExpType = expType
+  getExpType = typeOf
+
+-- | A typed value is one from which we can retrieve a type.
+class Typed v where
+  typeOf :: v -> Type
+
+instance Typed Type where
+  typeOf = id
 
 -- | @peelArray n t@ returns the type resulting from peeling the first
 -- @n@ array dimensions from @t@.  Returns @Nothing@ if @t@ has less
@@ -168,9 +186,9 @@ stripArray 0 t = t
 stripArray n (Array t _ _ _) = stripArray (n-1) t
 stripArray _ t = t
 
-unique :: Type -> Type
-unique (Array et dims _ loc) = Array et dims Unique loc
-unique t = t
+singular :: Type -> Type
+singular (Array et dims _ loc) = Array et dims Unique loc
+singular t = t
 
 -- | A "blank" value of the given type - this is zero, or whatever is
 -- close to it.  Don't depend on this value, but use it for creating
@@ -195,14 +213,13 @@ data Value = IntVal !Int SrcLoc
              -- type.  It is assumed that the array is 0-indexed.
              deriving (Eq, Ord, Show, Typeable, Data)
 
--- | Return the type of a value.
-valueType :: Value -> Type
-valueType (IntVal _ pos) = Int pos
-valueType (RealVal _ pos) = Real pos
-valueType (LogVal _ pos) = Bool pos
-valueType (CharVal _ pos) = Char pos
-valueType (TupVal vs pos) = Tuple (map valueType vs) Nonunique pos
-valueType (ArrayVal _ t pos) = Array t Nothing Nonunique pos
+instance Typed Value where
+  typeOf (IntVal _ pos) = Int pos
+  typeOf (RealVal _ pos) = Real pos
+  typeOf (LogVal _ pos) = Bool pos
+  typeOf (CharVal _ pos) = Char pos
+  typeOf (TupVal vs pos) = Tuple (map typeOf vs) Nonunique pos
+  typeOf (ArrayVal _ t pos) = Array t Nothing Nonunique pos
 
 instance Located Value where
   locOf (IntVal _ pos) = locOf pos
@@ -262,6 +279,9 @@ data Ident ty = Ident { identName :: String
 instance Located (Ident ty) where
   locOf = locOf . identSrcLoc
 
+instance Typed (Ident Type) where
+  typeOf = identType
+
 -- | L0 Expression Language: literals + vars + int binops + array
 -- constructors + array combinators (SOAC) + if + function calls +
 -- let + tuples (literals & identifiers) TODO: please add float,
@@ -312,10 +332,8 @@ data Exp ty = Literal Value
             | Reshape [Exp ty] (Exp ty) SrcLoc
              -- ^ 1st arg is the new shape, 2nd arg is the input array *)
 
-            | Transpose (Exp ty) ty ty SrcLoc
+            | Transpose (Exp ty) SrcLoc
              -- ^ 1st arg is the (input) to-be-transSrcLoced array.
-             -- 2nd argument is the input-array type.
-             -- 3rd argument is the result-array type.
 
             -- Second-Order Array Combinators
             -- accept curried and anonymous
@@ -397,7 +415,7 @@ instance Located (Exp ty) where
   locOf (Size _ pos) = locOf pos
   locOf (Replicate _ _ pos) = locOf pos
   locOf (Reshape _ _ pos) = locOf pos
-  locOf (Transpose _ _ _ pos) = locOf pos
+  locOf (Transpose _ pos) = locOf pos
   locOf (Map _ _ _ _ pos) = locOf pos
   locOf (Reduce _ _ _ _ pos) = locOf pos
   locOf (Zip _ pos) = locOf pos
@@ -411,41 +429,43 @@ instance Located (Exp ty) where
   locOf (Copy _ pos) = locOf pos
   locOf (DoLoop _ _ _ _ _ _ pos) = locOf pos
 
--- | Given an expression with known types, return its type.
-expType :: Exp Type -> Type
-expType (Literal val) = valueType val
-expType (TupLit es loc) = Tuple (map expType es) Nonunique loc
-expType (ArrayLit _ t _) = arrayType 1 t Nonunique
-expType (BinOp _ _ _ t _) = t
-expType (And _ _ pos) = Bool pos
-expType (Or _ _ pos) = Bool pos
-expType (Not _ pos) = Bool pos
-expType (Negate _ t _) = t
-expType (If _ _ _ t _) = t
-expType (Var ident) = identType ident
-expType (Apply _ _ t _) = t
-expType (LetPat _ _ body _) = expType body
-expType (LetWith _ _ _ _ body _) = expType body
-expType (Index _ _ _ t _) = t
-expType (Iota _ pos) = arrayType 1 (Int pos) Unique
-expType (Size _ pos) = Int pos
-expType (Replicate _ e _) = arrayType 1 (expType e) Unique
-expType (Reshape shape e _) = build (length shape) (baseType $ expType e)
-  where build 0 t = t
-        build n t = build (n-1) (Array t Nothing Nonunique (srclocOf t))
-expType (Transpose _ _ t _) = t
-expType (Map _ _ _ t _) = arrayType 1 t Unique
-expType (Reduce fun _ _ _ _) = lambdaType fun
-expType (Zip es pos) = arrayType 1 (Tuple (map snd es) Unique pos) Unique
-expType (Unzip _ ts pos) = Tuple (map (flip (arrayType 1) Unique) ts) Unique pos
-expType (Scan fun _ _ _ _) = arrayType 1 (lambdaType fun) Unique
-expType (Filter _ _ t _) = arrayType 1 t Unique
-expType (Mapall fun e _ _ _) = arrayType (arrayDims $ expType e) (lambdaType fun) Unique
-expType (Redomap _ _ _ _ _ t _) = arrayType 1 t Unique
-expType (Split _ _ t pos) = Tuple [arrayType 1 t Nonunique, arrayType 1 t Nonunique] Unique pos
-expType (Concat _ _ t _) = arrayType 1 t Unique
-expType (Copy e _) = unique $ expType e
-expType (DoLoop _ _ _ _ _ body _) = expType body
+instance Typed (Exp Type) where
+  typeOf (Literal val) = typeOf val
+  typeOf (TupLit es loc) = Tuple (map typeOf es) (mconcat $ map uniqueness es) loc
+  typeOf (ArrayLit es t _) = arrayType 1 t $ mconcat $ map uniqueness es
+  typeOf (BinOp _ _ _ t _) = t
+  typeOf (And _ _ pos) = Bool pos
+  typeOf (Or _ _ pos) = Bool pos
+  typeOf (Not _ pos) = Bool pos
+  typeOf (Negate _ t _) = t
+  typeOf (If _ _ _ t _) = t
+  typeOf (Var ident) = identType ident
+  typeOf (Apply _ _ t _) = t
+  typeOf (LetPat _ _ body _) = typeOf body
+  typeOf (LetWith _ _ _ _ body _) = typeOf body
+  typeOf (Index _ _ _ t _) = t
+  typeOf (Iota _ pos) = arrayType 1 (Int pos) Unique
+  typeOf (Size _ pos) = Int pos
+  typeOf (Replicate _ e _) = arrayType 1 (typeOf e) Unique
+  typeOf (Reshape shape e _) = build (length shape) (baseType $ typeOf e)
+    where build 0 t = t
+          build n t = build (n-1) (Array t Nothing Nonunique (srclocOf t))
+  typeOf (Transpose e _) = typeOf e
+  typeOf (Map _ a _ t _) = arrayType 1 t u
+    where u | unique t, unique a = Unique
+            | otherwise = Nonunique
+  typeOf (Reduce fun _ _ _ _) = typeOf fun
+  typeOf (Zip es pos) = arrayType 1 (Tuple (map snd es) Unique pos) Nonunique
+  typeOf (Unzip _ ts pos) = Tuple (map (flip (arrayType 1) Unique) ts) Nonunique pos
+  typeOf (Scan fun e arr _ _) =
+    arrayType 1 (typeOf fun) (uniqueness fun <> uniqueness e <> uniqueness arr)
+  typeOf (Filter _ _ t _) = arrayType 1 t Nonunique
+  typeOf (Mapall fun e _ _ _) = arrayType (arrayDims $ typeOf e) (typeOf fun) Nonunique
+  typeOf (Redomap _ _ _ _ _ t _) = arrayType 1 t Nonunique
+  typeOf (Split _ _ t pos) = Tuple [arrayType 1 t Nonunique, arrayType 1 t Nonunique] Unique pos
+  typeOf (Concat _ _ t _) = arrayType 1 t Nonunique
+  typeOf (Copy e _) = singular $ typeOf e
+  typeOf (DoLoop _ _ _ _ _ body _) = typeOf body
 
 -- | Eagerly evaluated binary operators.  In particular, the
 -- short-circuited operators && and || are not here, although an
@@ -507,10 +527,9 @@ data Lambda ty = AnonymFun [Ident Type] (Exp ty) Type SrcLoc
                     -- op +(4) *)
                  deriving (Eq, Ord, Typeable, Data, Show)
 
--- | The return type of a lambda function.
-lambdaType :: Lambda Type -> Type
-lambdaType (AnonymFun _ _ t _) = t
-lambdaType (CurryFun _ _ t _) = t
+instance Typed (Lambda Type) where
+  typeOf (AnonymFun _ _ t _) = t
+  typeOf (CurryFun _ _ t _) = t
 
 -- | Tuple Identifier, i.e., pattern matching
 data TupIdent ty = TupId [TupIdent ty] SrcLoc
@@ -588,7 +607,7 @@ ppExp d (Apply f args _ _)  =
   f ++ "( " ++ intercalate ", " (map (ppExp d) args) ++ " ) "
 
 ppExp d (LetPat tupid e1 body _) =
-        "\n" ++ spaces d ++ "let " ++ ppTupId tupid ++ " = " ++ ppExp d e1 ++
+        "\n" ++ spaces d ++ "let " ++ ppTupId tupid ++ " = " ++ ppExp (d+2) e1 ++
         "in  " ++ ppExp d body
 ppExp d (LetWith (Ident dest _ _) (Ident src _ _) es el e2 _)
   | dest == src =
@@ -608,7 +627,7 @@ ppExp d (Iota e _)         = "iota ( " ++ ppExp d e ++ " ) "
 ppExp d (Size e _)         = "size ( " ++ ppExp d e ++ " ) "
 ppExp d (Replicate e el _) = "replicate ( " ++ ppExp d e ++ ", " ++ ppExp d el ++ " ) "
 
-ppExp d (Transpose e _ _ _) = " transpose ( " ++ ppExp d e ++ " ) "
+ppExp d (Transpose e _) = " transpose ( " ++ ppExp d e ++ " ) "
 
 ppExp d (Reshape es arr _) =
   " reshape ( ( " ++ intercalate ", " (map (ppExp d) es) ++ " ), "  ++

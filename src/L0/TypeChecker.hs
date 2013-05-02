@@ -5,27 +5,19 @@ module L0.TypeChecker ( checkProg
 
 import Control.Applicative
 import Control.Monad.Reader
+import Control.Monad.Writer
 import Control.Monad.State
 import Data.Array
 import Data.List
 import Data.Loc
 import Data.Maybe
-import Data.Monoid
+import qualified Data.Traversable as T
+-- import Data.Monoid
 
 import qualified Data.Map as M
+import qualified Data.Set as S
 
 import L0.AbSyn
-
--- | A tuple of a return type and a list of argument types.
-type FunBinding = (Type, [Type])
-
--- | A pair of a variable table and a function table.  Type checking
--- happens with access to this environment.  The function table is
--- only initialised at the very beginning, but the variable table will
--- be extended during type-checking when let-expressions are
--- encountered.
-data TypeEnv = TypeEnv { envVtable :: M.Map String Type
-                       , envFtable :: M.Map String FunBinding }
 
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.
@@ -55,6 +47,10 @@ data TypeError = TypeError SrcLoc String
                -- number of parameters, or the specific types of
                -- parameters accepted (sometimes, only the former can
                -- be determined).
+               | UseAfterConsume String SrcLoc SrcLoc
+               -- ^ A variable was attempted used after being
+               -- consumed.  The last location is the point of
+               -- consumption.
 
 instance Show TypeError where
   show (TypeError pos msg) =
@@ -94,35 +90,168 @@ instance Show TypeError where
               Right ts -> (length ts, intercalate ", " $ map ppType ts)
           ngot = length got
           fname' = maybe "anonymous function" ("function "++) fname
+  show (UseAfterConsume name rloc wloc) =
+    "Varible " ++ name ++ " used at " ++ locStr rloc ++
+    ", but it was consumed at " ++ locStr wloc ++ ".  (Possibly through aliasing)"
+
+-- | A tuple of a return type and a list of argument types.
+type FunBinding = (Type, [Type])
+
+-- | A set of variables aliased by the value returned by a
+-- variable.
+type Aliases = S.Set String
+
+-- | A pair of a variable table and a function table.  Type checking
+-- happens with access to this environment.  The function table is
+-- only initialised at the very beginning, but the variable table will
+-- be extended during type-checking when let-expressions are
+-- encountered.
+data TypeEnv = TypeEnv { envVtable :: M.Map String Type
+                       , envFtable :: M.Map String FunBinding
+                       , envAliases :: M.Map String Aliases
+                       -- ^ Invariant: every variable must alias
+                       -- itself.
+                       , envConsumed :: M.Map String SrcLoc
+                       }
+
+data Usage = Observed SrcLoc
+           | Consumed SrcLoc
+             deriving (Eq, Ord, Show)
+
+combineUsages :: String -> Usage -> Usage -> Either TypeError Usage
+combineUsages _ (Observed loc) (Observed _) = Right $ Observed loc
+combineUsages name (Consumed wloc) (Observed rloc) =
+  Left $ UseAfterConsume name rloc wloc
+combineUsages name (Observed rloc) (Consumed wloc) =
+  Left $ UseAfterConsume name rloc wloc
+combineUsages name (Consumed loc1) (Consumed loc2) =
+  Left $ UseAfterConsume name (max loc1 loc2) (min loc1 loc2)
+
+checkUsages :: M.Map String [Usage] -> Either TypeError (M.Map String [Usage])
+checkUsages = T.sequence . M.mapWithKey comb
+  where comb _    []     = Right []
+        comb name (u:us) = (:[]) <$> foldM (combineUsages name) u us
+
+-- | The 'VarUsage' data structure is used to keep track of which
+-- variables have been referenced inside an expression, as well as
+-- which variables the resulting expression may possibly alias.
+data VarUsage = VarUsage {
+    usageOccurences :: M.Map String [Usage]
+  , usageAliasing :: Aliases
+  }
+
+instance Monoid VarUsage where
+  mempty = VarUsage M.empty S.empty
+  VarUsage m1 s1 `mappend` VarUsage m2 s2 =
+    VarUsage (M.unionWith (++) m1 m2) (s1 `mappend` s2)
 
 -- | The type checker runs in this monad.  Note that it has no mutable
 -- state, but merely keeps track of current bindings in a 'TypeEnv'.
 -- The 'Either' monad is used for error handling.
-newtype TypeM a = TypeM (ReaderT TypeEnv (Either TypeError) a)
-  deriving (Monad, Functor, MonadReader TypeEnv)
+newtype TypeM a = TypeM (WriterT VarUsage (ReaderT TypeEnv (Either TypeError)) a)
+  deriving (Monad, Functor, MonadReader TypeEnv, MonadWriter VarUsage)
 
 runTypeM :: TypeEnv -> TypeM a -> Either TypeError a
-runTypeM env (TypeM m) = runReaderT m env
+runTypeM env (TypeM m) = fst <$> runReaderT (runWriterT m) env
 
 bad :: TypeError -> TypeM a
-bad = TypeM . lift . Left
+bad = TypeM . lift . lift . Left
 
--- | Bind a name as a common (non-merge) variable.
-bindVar :: TypeEnv -> Ident Type -> TypeEnv
-bindVar env (Ident name tp _) =
-  env { envVtable = M.insert name tp $ envVtable env }
+liftEither :: Either TypeError a -> TypeM a
+liftEither = either bad return
 
-bindVars :: TypeEnv -> [Ident Type] -> TypeEnv
-bindVars = foldl bindVar
+-- | Proclaim that we have made read-only use of the given variable!
+observe :: Ident Type -> TypeM ()
+observe (Ident name t loc) =
+  tell $ mempty { usageOccurences = M.singleton name [Observed loc]
+                , usageAliasing = if basicType t then S.empty
+                                  else S.singleton name }
+
+-- | Proclaim that we have written to the given variable.
+consume :: SrcLoc -> String -> TypeM ()
+consume loc name = do
+  als <- aliases name
+  tell $ mempty { usageOccurences =
+                    M.fromList [ (name', [Consumed loc])
+                                 | name' <- S.toList als ] }
+
+-- | Proclaim that we have written to the given variable, and mark
+-- accesses to it and all of its aliases as invalid inside the given
+-- computation.
+consuming :: SrcLoc -> String -> TypeM a -> TypeM a
+consuming loc name m = do
+  consume loc name
+  local consume' m
+  where consume' env =
+          env { envConsumed = M.insert name loc $ envConsumed env }
+
+-- | Retrieve the variables referenced inside a computation.
+collectUsages :: [String] -> TypeM a -> TypeM (a, M.Map String [Usage])
+collectUsages names m = pass $ do
+  (x, usage) <- listen m
+  let (relevant, rest) = split $ usageOccurences usage
+  return ((x, relevant), const $ usage { usageOccurences = rest})
+    where split = M.partitionWithKey $ const . (`elem` names)
+
+removeObservations :: TypeM a -> TypeM a
+removeObservations =
+  censor $ \usage -> usage { usageOccurences = remove usage }
+    where remove = M.map (filter isConsumption) . usageOccurences
+          isConsumption (Consumed _) = True
+          isConsumption _            = False
+
+collectAliases :: TypeM a -> TypeM (a, Aliases)
+collectAliases m = pass $ do
+  (x, usage) <- listen m
+  return ((x, usageAliasing usage),
+          const $ usage { usageAliasing = S.empty })
+
+alternative :: TypeM a -> TypeM b -> TypeM (a,b)
+alternative m1 m2 = pass $ do
+  (x, VarUsage occurs1 als1) <- listen m1
+  (y, VarUsage occurs2 als2) <- listen m2
+  occurs1' <- liftEither $ checkUsages occurs1
+  occurs2' <- liftEither $ checkUsages occurs2
+  let usage = VarUsage (M.unionWith max occurs1' occurs2') (als1 `mappend` als2)
+  return ((x, y), const usage)
+
+aliasing :: String -> Aliases -> TypeM a -> TypeM a
+aliasing name als tm = do
+  als' <- S.unions <$> mapM aliases (S.toList als)
+  let name' = S.singleton name
+      -- Edges from name to als' and to itself.
+      outedges = M.insert name name' . M.insert name als'
+      -- Edges from everything in als' to name:
+      inedges m =  foldl (\m' v -> M.insert v name' m') m $ S.toList als'
+  local (\env -> env { envAliases = inedges $ outedges $ envAliases env }) tm
+
+aliases :: String -> TypeM Aliases
+aliases name = asks $ fromMaybe S.empty . M.lookup name . envAliases
 
 binding :: [Ident Type] -> TypeM a -> TypeM a
-binding bnds = local (`bindVars` bnds)
+binding bnds = check bnds . local (`bindVars` bnds)
+  where bindVars = foldl bindVar
+
+        -- Since the type checker does not require unique names,
+        -- we need to remove any existing information about
+        -- variables of the same name.
+        bindVar env (Ident name tp _) =
+          env { envVtable = M.insert name tp $ envVtable env
+              , envConsumed = M.delete name $ envConsumed env }
+
+        check vars m = do
+          (a, usages) <- collectUsages (map identName vars) m
+          void $ liftEither $ checkUsages usages
+          return a
 
 lookupVar :: String -> SrcLoc -> TypeM Type
 lookupVar name pos = do
   bnd <- asks $ M.lookup name . envVtable
-  case bnd of Nothing   -> bad $ UnknownVariableError name pos
-              Just bnd' -> return bnd'
+  consumed <- asks $ M.lookup name . envConsumed
+  case (bnd, consumed) of
+    (_, Just wloc)    -> bad $ UseAfterConsume name pos wloc
+    (Nothing, _)      -> bad $ UnknownVariableError name pos
+    (Just t, Nothing) -> return t
 
 -- | Determine if two types are identical, ignoring uniqueness.
 -- Causes a 'TypeError' if they fail to match, and otherwise returns
@@ -154,19 +283,14 @@ unifyWithKnown t1 t2 = case unboxType t1 of
 require :: [Type] -> Exp Type -> TypeM (Exp Type)
 require [] e = bad $ TypeError (srclocOf e) "Expression cannot have any type (probably a bug in the type checker)."
 require ts e
-  | any (expType e `similarTo`) ts = return e
+  | any (typeOf e `similarTo`) ts = return e
   | otherwise =
     bad $ TypeError (srclocOf e) $ "Expression type must be one of " ++
-          intercalate ", " (map ppType ts) ++ ", but is " ++ ppType (expType e) ++ "."
+          intercalate ", " (map ppType ts) ++ ", but is " ++ ppType (typeOf e) ++ "."
 
 elemType :: Type -> TypeM Type
 elemType (Array t _ _ _) = return t
 elemType t = bad $ TypeError (srclocOf t) $ "Type of expression is not array, but " ++ ppType t ++ "."
-
-uniqueness :: Type -> Uniqueness
-uniqueness (Array _ _ u _) = u
-uniqueness (Tuple _ u _) = u
-uniqueness _ = Nonunique
 
 propagateUniqueness :: Type -> Type
 propagateUniqueness (Array et dim Nonunique loc) =
@@ -182,7 +306,10 @@ checkProg :: TypeBox tf => Prog tf -> Either TypeError (Prog Type)
 checkProg prog = do
   ftable <- buildFtable
   let typeenv = TypeEnv { envVtable = M.empty
-                        , envFtable = ftable}
+                        , envFtable = ftable
+                        , envAliases = M.empty
+                        , envConsumed = M.empty
+                        }
   runTypeM typeenv $ mapM checkFun prog
   where
     -- To build the ftable we loop through the list of function
@@ -211,9 +338,9 @@ checkFun (fname, rettype, args, body, pos) = do
   args' <- checkArgs
   body' <- binding args' $ checkExp body
   let rettype' = propagateUniqueness rettype
-  if expType body' `subtypeOf` rettype' then
+  if typeOf body' `subtypeOf` rettype' then
     return (fname, rettype', args, body', pos)
-  else bad $ ReturnTypeError pos fname rettype' $ expType body'
+  else bad $ ReturnTypeError pos fname rettype' $ typeOf body'
   where checkArgs = foldM expand [] args
         expand args' ident@(Ident pname _ _)
           | Just _ <- find ((==identName ident) . identName) args' =
@@ -222,84 +349,114 @@ checkFun (fname, rettype, args, body, pos) = do
             return $ ident : args'
 
 checkExp :: TypeBox tf => Exp tf -> TypeM (Exp Type)
-checkExp (Literal val) =
+checkExp e = do
+  (e', als) <- collectAliases $ checkExp' e
+  unless (basicType $ typeOf e') $
+    tell $ mempty { usageAliasing = als }
+  return e'
+
+-- | Never call checkExp' directly!  Call checkExp!
+checkExp' :: TypeBox tf => Exp tf -> TypeM (Exp Type)
+
+checkExp' (Literal val) =
   Literal <$> checkLiteral val
-checkExp (TupLit es pos) = do
+
+checkExp' (TupLit es pos) = do
   es' <- mapM checkExp es
   let res = TupLit es' pos
   return $ fromMaybe res (Literal <$> expToValue res)
-checkExp (ArrayLit es t pos) = do
+
+checkExp' (ArrayLit es t pos) = do
   es' <- mapM checkExp es
   -- Find the unified type of all subexpression types.
-  et <- case map expType es' of
+  et <- case map typeOf es' of
           [] -> bad $ TypeError pos "Empty array literal"
           e:ets' -> foldM unifyKnownTypes e ets'
   -- Unify that type with the one given for the array literal.
   t' <- t `unifyWithKnown` et
   let res = ArrayLit es' t' pos
   return $ fromMaybe res (Literal <$> expToValue res)
-checkExp (BinOp op e1 e2 t pos) = checkBinOp op e1 e2 t pos
-checkExp (And e1 e2 pos) = do
+
+checkExp' (BinOp op e1 e2 t pos) = checkBinOp op e1 e2 t pos
+
+checkExp' (And e1 e2 pos) = do
   e1' <- require [Bool pos] =<< checkExp e1
   e2' <- require [Bool pos] =<< checkExp e2
   return $ And e1' e2' pos
-checkExp (Or e1 e2 pos) = do
+
+checkExp' (Or e1 e2 pos) = do
   e1' <- require [Bool pos] =<< checkExp e1
   e2' <- require [Bool pos] =<< checkExp e2
   return $ Or e1' e2' pos
-checkExp (Not e pos) = do
+
+checkExp' (Not e pos) = do
   e' <- require [Bool pos] =<< checkExp e
   return $ Not e' pos
-checkExp (Negate e t pos) = do
+
+checkExp' (Negate e t pos) = do
   e' <- require [Int pos, Real pos] =<< checkExp e
-  t' <- t `unifyWithKnown` expType e'
+  t' <- t `unifyWithKnown` typeOf e'
   return $ Negate e' t' pos
-checkExp (If e1 e2 e3 t pos) = do
+
+checkExp' (If e1 e2 e3 t pos) = do
   e1' <- require [Bool pos] =<< checkExp e1
-  e2' <- checkExp e2
-  e3' <- checkExp e3
-  bt <- unifyWithKnown t =<< unifyKnownTypes (expType e2') (expType e3')
+  (e2', e3') <- checkExp e2 `alternative` checkExp e3
+  bt <- unifyWithKnown t =<< unifyKnownTypes (typeOf e2') (typeOf e3')
   return $ If e1' e2' e3' bt pos
-checkExp (Var ident) = do
+
+checkExp' (Var ident) = do
   ident' <- checkIdent ident
+  observe ident'
   return $ Var ident'
-checkExp (Apply "trace" args t pos) =
+
+checkExp' (Apply "trace" args t pos) =
   case args of
     [e] -> do
       e' <- checkExp e
-      t' <- t `unifyWithKnown` expType e'
+      t' <- t `unifyWithKnown` typeOf e'
       return $ Apply "trace" [e'] t' pos
     _ -> bad $ TypeError pos "Trace function takes a single parameter"
-checkExp (Apply fname args t pos) = do
+
+checkExp' (Apply fname args t pos) = do
   bnd <- asks $ M.lookup fname . envFtable
   case bnd of
     Nothing -> bad $ UnknownFunctionError fname pos
     Just (rettype, paramtypes) -> do
       rettype' <- t `unifyWithKnown` rettype
-      args' <- mapM checkExp args
-      let wrong = bad $ ParameterMismatch (Just fname) pos (Right paramtypes) (map expType args')
-      if validApply paramtypes (map expType args') then
-          return $ Apply fname args' rettype' pos
-      else wrong
-checkExp (LetPat pat e body pos) = do
-  e' <- checkExp e
-  (bnds, pat') <- checkPattern pat (expType e')
-  binding bnds $ do
+      args' <- forM (zip args $ cycle paramtypes) $ \(arg, paramt) ->
+                 if unique paramt then do
+                   (arg', als) <- collectAliases $ checkExp arg
+                   mapM_ (consume pos) $ S.toList als
+                   return arg'
+                 else checkExp arg
+      checkApply (Just fname) paramtypes (map typeOf args') pos
+      return $ Apply fname args' rettype' pos
+
+checkExp' (LetPat pat e body pos) = do
+  (e', als) <- collectAliases $ removeObservations $ checkExp e
+  (bnds, pat') <- checkPattern pat (typeOf e')
+  let aliasing' = foldl (\m var -> m . aliasing var als) id $ map identName bnds
+  binding bnds $ aliasing' $ do
     body' <- checkExp body
     return $ LetPat pat' e' body' pos
-checkExp (LetWith (Ident dest destt destpos) src idxes ve body pos) = do
+
+checkExp' (LetWith (Ident dest destt destpos) src idxes ve body pos) = do
   src' <- checkIdent src
   destt' <- destt `unifyWithKnown` identType src'
+  unless (unique $ typeOf src') $
+    bad $ TypeError pos "Source is not unique"
   let dest' = Ident dest destt' destpos
   case peelArray (length idxes) (identType src') of
     Nothing -> bad $ TypeError pos $ show (length idxes) ++ " indices given, but type of expression at " ++ locStr (srclocOf src) ++ " has " ++ show (arrayDims $ identType src') ++ " dimensions."
     Just elemt -> do
+      (ve', _) <- collectAliases $ require [elemt] =<< checkExp ve
       idxes' <- mapM (require [Int pos] <=< checkExp) idxes
-      ve' <- require [elemt] =<< checkExp ve
-      body' <- local (`bindVar` dest') $ checkExp body
+      body' <- consuming pos (identName src') $ binding [dest'] $ checkExp body
       return $ LetWith dest' src' idxes' ve' body' pos
-checkExp (Index ident idxes intype restype pos) = do
+
+checkExp' (Index ident idxes intype restype pos) = do
   ident' <- checkIdent ident
+  observe ident'
   vt <- lookupVar (identName ident') pos
   when (arrayDims vt < length idxes) $
     bad $ TypeError pos $ show (length idxes) ++ " indices given, but type of variable " ++ identName ident' ++ " has " ++ show (arrayDims vt) ++ " dimensions."
@@ -308,119 +465,136 @@ checkExp (Index ident idxes intype restype pos) = do
   restype' <- restype `unifyWithKnown` stripArray (length idxes) vt
   idxes' <- mapM (require [Int pos] <=< checkExp) idxes
   return $ Index ident' idxes' intype' restype' pos
-checkExp (Iota e pos) = do
+
+checkExp' (Iota e pos) = do
   e' <- require [Int pos] =<< checkExp e
   return $ Iota e' pos
-checkExp (Size e pos) = do
+
+checkExp' (Size e pos) = do
   e' <- checkExp e
-  case expType e' of
+  case typeOf e' of
     Array {} -> return $ Size e' pos
     _        -> bad $ TypeError pos "Argument to size must be array."
-checkExp (Replicate countexp valexp pos) = do
+
+checkExp' (Replicate countexp valexp pos) = do
   countexp' <- require [Int pos] =<< checkExp countexp
   valexp' <- checkExp valexp
   return $ Replicate countexp' valexp' pos
-checkExp (Reshape shapeexps arrexp pos) = do
+
+checkExp' (Reshape shapeexps arrexp pos) = do
   shapeexps' <- mapM (require [Int pos] <=< checkExp) shapeexps
   arrexp' <- checkExp arrexp
   return (Reshape shapeexps' arrexp' pos)
-checkExp (Transpose arrexp intype outtype pos) = do
+
+checkExp' (Transpose arrexp pos) = do
   arrexp' <- checkExp arrexp
-  when (arrayDims (expType arrexp') < 2) $
+  when (arrayDims (typeOf arrexp') < 2) $
     bad $ TypeError pos "Argument to transpose does not have two dimensions."
-  intype' <- intype `unifyWithKnown` expType arrexp'
-  outtype' <- outtype `unifyWithKnown` intype'
-  return $ Transpose arrexp' intype' outtype' pos
-checkExp (Map fun arrexp intype outtype pos) = do
+  return $ Transpose arrexp' pos
+
+checkExp' (Map fun arrexp intype outtype pos) = do
   arrexp' <- checkExp arrexp
-  case expType arrexp' of
+  case typeOf arrexp' of
     Array et _ _ _ -> do
       fun' <- checkLambda fun [et]
       intype' <- intype `unifyWithKnown` et
-      outtype' <- outtype `unifyWithKnown` lambdaType fun'
+      outtype' <- outtype `unifyWithKnown` typeOf fun'
       return (Map fun' arrexp' intype' outtype' pos)
     _       -> bad $ TypeError (srclocOf arrexp) "Mapee expression does not return an array."
-checkExp (Reduce fun startexp arrexp intype pos) = do
+
+checkExp' (Reduce fun startexp arrexp intype pos) = do
   startexp' <- checkExp startexp
   arrexp' <- checkExp arrexp
-  case expType arrexp' of
+  case typeOf arrexp' of
     Array inelemt _ _ _ -> do
       inelemt' <- intype `unifyWithKnown` inelemt
-      fun' <- checkLambda fun [expType startexp', inelemt']
-      when (expType startexp' /= lambdaType fun') $
-        bad $ TypeError pos $ "Accumulator is of type " ++ ppType (expType startexp') ++ ", but reduce function returns type " ++ ppType (lambdaType fun') ++ "."
+      fun' <- checkLambda fun [typeOf startexp', inelemt']
+      when (typeOf startexp' /= typeOf fun') $
+        bad $ TypeError pos $ "Accumulator is of type " ++ ppType (typeOf startexp') ++ ", but reduce function returns type " ++ ppType (typeOf fun') ++ "."
       return $ Reduce fun' startexp' arrexp' inelemt' pos
     _ -> bad $ TypeError (srclocOf arrexp) "Type of expression is not an array"
-checkExp (Zip arrexps pos) = do
+
+checkExp' (Zip arrexps pos) = do
   arrexps' <- mapM (checkExp . fst) arrexps
-  inelemts <- mapM (elemType . expType) arrexps'
+  inelemts <- mapM (elemType . typeOf) arrexps'
   inelemts' <- zipWithM unifyWithKnown (map snd arrexps) inelemts
   return $ Zip (zip arrexps' inelemts') pos
-checkExp (Unzip e _ pos) = do
+
+checkExp' (Unzip e _ pos) = do
   e' <- checkExp e
-  case expType e' of
+  case typeOf e' of
     Array (Tuple ts _ _) _ _ _ -> return $ Unzip e' ts pos
     et -> bad $ TypeError pos $ "Argument to unzip is not an array of tuples, but " ++ ppType et ++ "."
-checkExp (Scan fun startexp arrexp intype pos) = do
+
+checkExp' (Scan fun startexp arrexp intype pos) = do
   startexp' <- checkExp startexp
   arrexp' <- checkExp arrexp
-  case expType arrexp' of
+  case typeOf arrexp' of
     Array inelemt _ _ _ -> do
       intype' <- intype `unifyWithKnown` inelemt
       fun' <- checkLambda fun [intype', intype']
-      when (expType startexp' /= lambdaType fun') $
-        bad $ TypeError pos $ "Initial value is of type " ++ ppType (expType startexp') ++ ", but scan function returns type " ++ ppType (lambdaType fun') ++ "."
-      when (intype' /= lambdaType fun') $
-        bad $ TypeError pos $ "Array element value is of type " ++ ppType intype' ++ ", but scan function returns type " ++ ppType (lambdaType fun') ++ "."
+      when (typeOf startexp' /= typeOf fun') $
+        bad $ TypeError pos $ "Initial value is of type " ++ ppType (typeOf startexp') ++ ", but scan function returns type " ++ ppType (typeOf fun') ++ "."
+      when (intype' /= typeOf fun') $
+        bad $ TypeError pos $ "Array element value is of type " ++ ppType intype' ++ ", but scan function returns type " ++ ppType (typeOf fun') ++ "."
       return $ Scan fun' startexp' arrexp' intype' pos
     _ -> bad $ TypeError (srclocOf arrexp) "Type of expression is not an array."
-checkExp (Filter fun arrexp eltype pos) = do
+
+checkExp' (Filter fun arrexp eltype pos) = do
   arrexp' <- checkExp arrexp
-  inelemt <- elemType $ expType arrexp'
+  inelemt <- elemType $ typeOf arrexp'
   eltype' <- eltype `unifyWithKnown` inelemt
   fun' <- checkLambda fun [inelemt]
-  when (lambdaType fun' /= Bool pos) $
+  when (typeOf fun' /= Bool pos) $
     bad $ TypeError pos "Filter function does not return bool."
   return $ Filter fun' arrexp' eltype' pos
-checkExp (Mapall fun arrexp intype outtype pos) = do
+
+checkExp' (Mapall fun arrexp intype outtype pos) = do
   arrexp' <- checkExp arrexp
-  intype' <- intype `unifyWithKnown` baseType (expType arrexp')
+  intype' <- intype `unifyWithKnown` baseType (typeOf arrexp')
   fun' <- checkLambda fun [baseType intype']
-  outtype' <- outtype `unifyWithKnown` lambdaType fun'
+  outtype' <- outtype `unifyWithKnown` typeOf fun'
   return $ Mapall fun' arrexp' intype' outtype' pos
-checkExp (Redomap redfun mapfun accexp arrexp intype outtype pos) = do
+
+checkExp' (Redomap redfun mapfun accexp arrexp intype outtype pos) = do
   accexp' <- checkExp accexp
   arrexp' <- checkExp arrexp
-  et <- elemType $ expType arrexp'
+  et <- elemType $ typeOf arrexp'
   mapfun' <- checkLambda mapfun [et]
-  redfun' <- checkLambda redfun [expType accexp', lambdaType mapfun']
-  _ <- unifyKnownTypes (lambdaType redfun') (expType accexp')
+  redfun' <- checkLambda redfun [typeOf accexp', typeOf mapfun']
+  _ <- unifyKnownTypes (typeOf redfun') (typeOf accexp')
   intype' <- intype `unifyWithKnown` et
-  outtype' <- outtype `unifyWithKnown` lambdaType redfun'
+  outtype' <- outtype `unifyWithKnown` typeOf redfun'
   return $ Redomap redfun' mapfun' accexp' arrexp' intype' outtype' pos
-checkExp (Split splitexp arrexp intype pos) = do
+
+checkExp' (Split splitexp arrexp intype pos) = do
   splitexp' <- require [Int pos] =<< checkExp splitexp
   arrexp' <- checkExp arrexp
-  et <- elemType $ expType arrexp'
+  et <- elemType $ typeOf arrexp'
   intype' <- intype `unifyWithKnown` et
   return $ Split splitexp' arrexp' intype' pos
-checkExp (Concat arr1exp arr2exp intype pos) = do
+
+checkExp' (Concat arr1exp arr2exp intype pos) = do
   arr1exp' <- checkExp arr1exp
-  arr2exp' <- require [expType arr1exp'] =<< checkExp arr2exp
-  et <- elemType $ expType arr2exp'
+  arr2exp' <- require [typeOf arr1exp'] =<< checkExp arr2exp
+  et <- elemType $ typeOf arr2exp'
   intype' <- intype `unifyWithKnown` et
   return $ Concat arr1exp' arr2exp' intype' pos
-checkExp (Copy e pos) = do
-  e' <- checkExp e
+
+checkExp' (Copy e pos) = do
+  (e', _) <- collectAliases $ checkExp e
   return $ Copy e' pos
-checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _) boundexp loopbody letbody pos) = do
-  mergeexp' <- checkExp mergeexp
-  let mergetype = expType mergeexp'
+
+checkExp' (DoLoop mergepat mergeexp (Ident loopvar _ _)
+          boundexp loopbody letbody pos) = do
+  (mergeexp', als) <- collectAliases $ removeObservations $ checkExp mergeexp
+  let mergetype = typeOf mergeexp'
   (bnds, mergepat') <- checkPattern mergepat mergetype
+  let aliasing' = foldl (\m var -> m . aliasing var als) id $ map identName bnds
   boundexp' <- require [Int pos] =<< checkExp boundexp
-  loopbody' <- binding (bnds++[Ident loopvar (Int pos) pos]) $
+  loopbody' <- binding (bnds++[Ident loopvar (Int pos) pos]) $ aliasing' $
                  require [mergetype] =<< checkExp loopbody
-  binding bnds $ do
+  binding bnds $ aliasing' $ do
     letbody' <- checkExp letbody
     return $ DoLoop mergepat' mergeexp' (Ident loopvar (Int pos) pos) boundexp' loopbody' letbody' pos
 
@@ -435,7 +609,7 @@ checkLiteral (TupVal vals pos) = do
 checkLiteral (ArrayVal arr t pos) = do
   vals' <- mapM checkLiteral (elems arr)
   -- Find the unified type of all subexpression types.
-  vt <- case map valueType vals' of
+  vt <- case map typeOf vals' of
           [] -> return t -- Permit empty array values, as they always
                          -- have a type.
           v:vts' -> foldM unifyKnownTypes v vts'
@@ -474,7 +648,7 @@ checkRelOp :: TypeBox ty =>
 checkRelOp op tl e1 e2 t pos = do
   e1' <- require tl =<< checkExp e1
   e2' <- require tl =<< checkExp e2
-  _ <- unifyKnownTypes (expType e1') (expType e2')
+  _ <- unifyKnownTypes (typeOf e1') (typeOf e2')
   t' <- t `unifyWithKnown` Bool pos
   return $ BinOp op e1' e2' t' pos
 
@@ -483,7 +657,7 @@ checkPolyBinOp :: TypeBox ty => BinOp -> [Type] -> Exp ty -> Exp ty -> ty -> Src
 checkPolyBinOp op tl e1 e2 t pos = do
   e1' <- require tl =<< checkExp e1
   e2' <- require tl =<< checkExp e2
-  t' <- unifyKnownTypes (expType e1') (expType e2')
+  t' <- unifyKnownTypes (typeOf e1') (typeOf e2')
   t'' <- t `unifyWithKnown` t'
   return $ BinOp op e1' e2' t'' pos
 
@@ -555,7 +729,7 @@ checkLambda (CurryFun opfun curryargexps rettype pos) args
 
 checkLambda (CurryFun fname curryargexps rettype pos) args = do
   curryargexps' <- mapM checkExp curryargexps
-  let curryargexpts = map expType curryargexps'
+  let curryargexpts = map typeOf curryargexps'
   bnd <- asks $ M.lookup fname . envFtable
   case bnd of
     Nothing -> bad $ UnknownFunctionError fname pos
@@ -576,13 +750,13 @@ checkLambda (CurryFun fname curryargexps rettype pos) args = do
                   body = Apply fname (map Var params) rettype' pos
               in checkLambda tupfun args
           | otherwise -> do
-              checkApply Nothing  paramtypes (curryargexpts++args) pos
+              checkApply Nothing paramtypes (curryargexpts++args) pos
               return $ CurryFun fname curryargexps' rettype' pos
 
 checkPolyLambdaOp :: TypeBox ty => BinOp -> [Exp ty] -> ty -> [Type] -> SrcLoc
                   -> TypeM (Lambda Type)
 checkPolyLambdaOp op curryargexps rettype args pos = do
-  curryargexpts <- map expType <$> mapM checkExp curryargexps
+  curryargexpts <- map typeOf <$> mapM checkExp curryargexps
   tp <- case curryargexpts ++ args of
           [t1, t2] | t1 == t2 -> return t1
           [Tuple [t1,t2] _ _] | t1 == t2 -> return t1 -- For autoshimming.
@@ -596,5 +770,5 @@ checkPolyLambdaOp op curryargexps rettype args pos = do
                                    [Ident "y" tp pos])
                     (e1:e2:_) -> return (e1, e2, [])
   body <- binding params $ checkBinOp op x y rettype pos
-  checkLambda (AnonymFun params body (expType body) pos) args
+  checkLambda (AnonymFun params body (typeOf body) pos) args
   where fname = "op" ++ ppBinOp op
