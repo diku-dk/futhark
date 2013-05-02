@@ -123,12 +123,12 @@ runFun fname mainargs prog = do
       runmain = case (funDecByName fname prog, M.lookup fname ftable) of
                   (Nothing, Nothing) -> bad $ MissingEntryPoint fname
                   (Just (_,rettype,fparams,_,_), _)
-                    | map valueType mainargs == map identType fparams ->
+                    | map typeOf mainargs == map identType fparams ->
                       evalExp (Apply fname (map Literal mainargs) rettype noLoc)
                     | otherwise ->
                       bad $ InvalidFunctionArguments fname
                             (Just (map identType fparams))
-                            (map valueType mainargs)
+                            (map typeOf mainargs)
                   (_ , Just fun) -> -- It's a builtin function, it'll
                                     -- do its own error checking.
                     fun mainargs
@@ -164,7 +164,7 @@ builtin "log" [RealVal x pos] = return $ RealVal (log x) pos
 builtin "exp" [RealVal x pos] = return $ RealVal (exp x) pos
 builtin "op not" [LogVal b pos] = return $ LogVal (not b) pos
 builtin "op ~" [RealVal b pos] = return $ RealVal (-b) pos
-builtin fname args = bad $ InvalidFunctionArguments fname Nothing $ map valueType args
+builtin fname args = bad $ InvalidFunctionArguments fname Nothing $ map typeOf args
 
 --------------------------------------------
 --------------------------------------------
@@ -290,7 +290,7 @@ evalExp (Replicate e1 e2 pos) = do
   v2 <- evalExp e2
   case v1 of
     IntVal x _
-      | x >= 0    -> return $ ArrayVal (listArray (0,x-1) $ repeat v2) (valueType v2) pos
+      | x >= 0    -> return $ ArrayVal (listArray (0,x-1) $ repeat v2) (typeOf v2) pos
       | otherwise -> bad $ NegativeReplicate pos x
     _   -> bad $ TypeError pos "evalExp Replicate"
 evalExp e@(Reshape shapeexp arrexp pos) = do
@@ -303,7 +303,7 @@ evalExp e@(Reshape shapeexp arrexp pos) = do
         | otherwise = bad $ InvalidArrayShape pos (arrayShape arr) shape
       reshape _ [] [v] = return v
       reshape _ _ _ = bad $ TypeError pos "evalExp Reshape reshape"
-  reshape (expType e) shape $ flatten arr
+  reshape (typeOf e) shape $ flatten arr
   where flatten (ArrayVal arr _ _) = concatMap flatten $ elems arr
         flatten t = [t]
         chunk _ [] = []
@@ -311,7 +311,7 @@ evalExp e@(Reshape shapeexp arrexp pos) = do
                     in a : chunk i b
         asInt (IntVal x _) = return x
         asInt _ = bad $ TypeError pos "evalExp Reshape int"
-evalExp (Transpose arrexp _ _ pos) = do
+evalExp (Transpose arrexp pos) = do
   v <- evalExp arrexp
   case v of
     ArrayVal inarr t@(Array et _ _ _) _ -> do
@@ -350,7 +350,7 @@ evalExp (Scan fun startexp arrexp _ pos) = do
   startval <- evalExp startexp
   vals <- arrToList =<< evalExp arrexp
   (acc, vals') <- foldM scanfun (startval, []) vals
-  return $ arrayVal (reverse vals') (valueType acc) pos
+  return $ arrayVal (reverse vals') (typeOf acc) pos
     where scanfun (acc, l) x = do
             acc' <- applyLambda fun [acc, x]
             return (acc', acc' : l)
