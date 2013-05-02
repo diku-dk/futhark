@@ -12,7 +12,7 @@ import Data.List
 import Data.Loc
 import Data.Maybe
 import qualified Data.Traversable as T
--- import Data.Monoid
+import Debug.Trace
 
 import qualified Data.Map as M
 import qualified Data.Set as S
@@ -97,9 +97,28 @@ instance Show TypeError where
 -- | A tuple of a return type and a list of argument types.
 type FunBinding = (Type, [Type])
 
--- | A set of variables aliased by the value returned by a
--- variable.
-type Aliases = S.Set String
+-- | Information about the aliasing of the value returned by an expression.
+data Aliases = VarAlias (S.Set String)
+             -- ^ May alias these variables.
+             | TupleAlias [Aliases]
+             -- ^ Aliasing information for specific components of a
+             -- tuple.
+
+instance Monoid Aliases where
+  mempty = VarAlias mempty
+  VarAlias s1 `mappend` VarAlias s2 =
+    VarAlias $ s1 `mappend` s2
+  TupleAlias ass1 `mappend` TupleAlias ass2 =
+    TupleAlias $ zipWith mappend ass1 ass2
+  TupleAlias ass `mappend` as =
+    TupleAlias (map (mappend as) ass)
+  as `mappend` TupleAlias ass =
+    TupleAlias (map (mappend as) ass)
+
+-- | All the variables represented in this aliasing.
+aliased :: Aliases -> [String]
+aliased (VarAlias names) = S.toList names
+aliased (TupleAlias ass) = concatMap aliased ass
 
 -- | A pair of a variable table and a function table.  Type checking
 -- happens with access to this environment.  The function table is
@@ -141,7 +160,7 @@ data VarUsage = VarUsage {
   }
 
 instance Monoid VarUsage where
-  mempty = VarUsage M.empty S.empty
+  mempty = VarUsage mempty mempty
   VarUsage m1 s1 `mappend` VarUsage m2 s2 =
     VarUsage (M.unionWith (++) m1 m2) (s1 `mappend` s2)
 
@@ -162,10 +181,12 @@ liftEither = either bad return
 
 -- | Proclaim that we have made read-only use of the given variable!
 observe :: Ident Type -> TypeM ()
-observe (Ident name t loc) =
+observe (Ident name _ loc) =
   tell $ mempty { usageOccurences = M.singleton name [Observed loc]
-                , usageAliasing = if basicType t then S.empty
-                                  else S.singleton name }
+                , usageAliasing = VarAlias (S.singleton name) }
+
+alias :: Aliases -> TypeM ()
+alias al = tell $ mempty { usageAliasing = al }
 
 -- | Proclaim that we have written to the given variable.
 consume :: SrcLoc -> String -> TypeM ()
@@ -173,7 +194,7 @@ consume loc name = do
   als <- aliases name
   tell $ mempty { usageOccurences =
                     M.fromList [ (name', [Consumed loc])
-                                 | name' <- S.toList als ] }
+                                 | name' <- aliased als ] }
 
 -- | Proclaim that we have written to the given variable, and mark
 -- accesses to it and all of its aliases as invalid inside the given
@@ -204,7 +225,7 @@ collectAliases :: TypeM a -> TypeM (a, Aliases)
 collectAliases m = pass $ do
   (x, usage) <- listen m
   return ((x, usageAliasing usage),
-          const $ usage { usageAliasing = S.empty })
+          const $ usage { usageAliasing = mempty })
 
 alternative :: TypeM a -> TypeM b -> TypeM (a,b)
 alternative m1 m2 = pass $ do
@@ -217,16 +238,16 @@ alternative m1 m2 = pass $ do
 
 aliasing :: String -> Aliases -> TypeM a -> TypeM a
 aliasing name als tm = do
-  als' <- S.unions <$> mapM aliases (S.toList als)
-  let name' = S.singleton name
+  als' <- mconcat <$> mapM aliases (aliased als)
+  let name' = VarAlias $ S.singleton name
       -- Edges from name to als' and to itself.
       outedges = M.insert name name' . M.insert name als'
       -- Edges from everything in als' to name:
-      inedges m =  foldl (\m' v -> M.insert v name' m') m $ S.toList als'
+      inedges m =  foldl (\m' v -> M.insert v name' m') m $ aliased als'
   local (\env -> env { envAliases = inedges $ outedges $ envAliases env }) tm
 
 aliases :: String -> TypeM Aliases
-aliases name = asks $ fromMaybe S.empty . M.lookup name . envAliases
+aliases name = asks $ fromMaybe mempty . M.lookup name . envAliases
 
 binding :: [Ident Type] -> TypeM a -> TypeM a
 binding bnds = check bnds . local (`bindVars` bnds)
@@ -277,8 +298,8 @@ unifyWithKnown t1 t2 = case unboxType t1 of
                          Nothing -> return t2
                          Just t1' -> unifyKnownTypes t2 t1'
 
--- | @require ts (t, e)@ causes a 'TypeError' if @t@ does not unify
--- with one of the types in @ts@.  Otherwise, simply returns @(t, e)@.
+-- | @require ts e@ causes a 'TypeError' if @typeOf e@ does not unify
+-- with one of the types in @ts@.  Otherwise, simply returns @e@.
 -- This function is very useful in 'checkExp'.
 require :: [Type] -> Exp Type -> TypeM (Exp Type)
 require [] e = bad $ TypeError (srclocOf e) "Expression cannot have any type (probably a bug in the type checker)."
@@ -338,7 +359,8 @@ checkFun (fname, rettype, args, body, pos) = do
   args' <- checkArgs
   body' <- binding args' $ checkExp body
   let rettype' = propagateUniqueness rettype
-  if typeOf body' `subtypeOf` rettype' then
+      bodytype = propagateUniqueness $ typeOf body'
+  if bodytype `subtypeOf` rettype' then
     return (fname, rettype', args, body', pos)
   else bad $ ReturnTypeError pos fname rettype' $ typeOf body'
   where checkArgs = foldM expand [] args
@@ -362,9 +384,12 @@ checkExp' (Literal val) =
   Literal <$> checkLiteral val
 
 checkExp' (TupLit es pos) = do
-  es' <- mapM checkExp es
+  (es', als) <- unzip <$> mapM (collectAliases . checkExp) es
   let res = TupLit es' pos
+  alias $ foldl extend (TupleAlias []) als
   return $ fromMaybe res (Literal <$> expToValue res)
+    where extend (TupleAlias alss) als = TupleAlias $ alss ++ [als]
+          extend als1 als2             = TupleAlias [als1, als2]
 
 checkExp' (ArrayLit es t pos) = do
   es' <- mapM checkExp es
@@ -426,7 +451,7 @@ checkExp' (Apply fname args t pos) = do
       args' <- forM (zip args $ cycle paramtypes) $ \(arg, paramt) ->
                  if unique paramt then do
                    (arg', als) <- collectAliases $ checkExp arg
-                   mapM_ (consume pos) $ S.toList als
+                   mapM_ (consume pos) $ aliased als
                    return arg'
                  else checkExp arg
       checkApply (Just fname) paramtypes (map typeOf args') pos
@@ -434,9 +459,8 @@ checkExp' (Apply fname args t pos) = do
 
 checkExp' (LetPat pat e body pos) = do
   (e', als) <- collectAliases $ removeObservations $ checkExp e
-  (bnds, pat') <- checkPattern pat (typeOf e')
-  let aliasing' = foldl (\m var -> m . aliasing var als) id $ map identName bnds
-  binding bnds $ aliasing' $ do
+  (scope, pat') <- checkPattern pat (typeOf e') als
+  scope $ do
     body' <- checkExp body
     return $ LetPat pat' e' body' pos
 
@@ -589,12 +613,11 @@ checkExp' (DoLoop mergepat mergeexp (Ident loopvar _ _)
           boundexp loopbody letbody pos) = do
   (mergeexp', als) <- collectAliases $ removeObservations $ checkExp mergeexp
   let mergetype = typeOf mergeexp'
-  (bnds, mergepat') <- checkPattern mergepat mergetype
-  let aliasing' = foldl (\m var -> m . aliasing var als) id $ map identName bnds
+  (scope, mergepat') <- checkPattern mergepat mergetype als
   boundexp' <- require [Int pos] =<< checkExp boundexp
-  loopbody' <- binding (bnds++[Ident loopvar (Int pos) pos]) $ aliasing' $
+  loopbody' <- scope $ binding [Ident loopvar (Int pos) pos] $
                  require [mergetype] =<< checkExp loopbody
-  binding bnds $ aliasing' $ do
+  scope $ do
     letbody' <- checkExp letbody
     return $ DoLoop mergepat' mergeexp' (Ident loopvar (Int pos) pos) boundexp' loopbody' letbody' pos
 
@@ -662,28 +685,35 @@ checkPolyBinOp op tl e1 e2 t pos = do
   return $ BinOp op e1' e2' t'' pos
 
 checkPattern :: TypeBox tf =>
-                TupIdent tf -> Type -> TypeM ([Ident Type], TupIdent Type)
-checkPattern pat vt = do
-  (pat', bnds) <- runStateT (checkPattern' pat vt) []
-  return (bnds, pat')
-  where checkPattern' (Id (Ident name namet pos)) t = do
-          add name t pos
+                TupIdent tf -> Type -> Aliases
+             -> TypeM (TypeM a -> TypeM a, TupIdent Type)
+checkPattern pat vt als = do
+  (pat', (scope, _)) <- runStateT (checkPattern' pat vt als) (id, [])
+  return (scope, pat')
+  where checkPattern' (Id (Ident name namet pos)) t a = do
           t' <- lift $ namet `unifyWithKnown` t
+          add (Ident name t' pos) a
           return $ Id $ Ident name t' pos
-        checkPattern' (TupId pats pos) (Tuple ts _ _)
+        checkPattern' (TupId pats pos) (Tuple ts _ _) a
           | length pats == length ts = do
-          pats' <- zipWithM checkPattern' pats ts
+          pats' <- sequence $ zipWith3 checkPattern' pats ts ass
           return $ TupId pats' pos
-        checkPattern' _ _ = lift $ bad $ InvalidPatternError errpat vt
+          where ass = case a of TupleAlias ass' -> ass' ++ repeat a
+                                _               -> repeat a
+        checkPattern' _ _ _ = lift $ bad $ InvalidPatternError errpat vt
 
-        add name t pos = do
-          bnd <- gets $ find ((==name) . identName)
+        add ident a = do
+          bnd <- gets $ find (==ident) . snd
           case bnd of
-            Nothing               -> modify (Ident name t pos:)
-            Just (Ident _ _ pos2) -> lift $ bad $ DupPatternError name pos pos2
+            Nothing ->
+              modify $ \(scope, names) ->
+                (binding [ident] . aliasing (identName ident) a . scope,
+                 ident : names)
+            Just (Ident name _ pos2) ->
+              lift $ bad $ DupPatternError name (srclocOf ident) pos2
         -- A pattern with known type box (Maybe) for error messages.
         errpat = rmTypes pat
-        rmTypes (Id (Ident name _ pos)) = Id $ Ident name Nothing pos
+        rmTypes (Id (Ident name t pos)) = Id $ Ident name (unboxType t) pos
         rmTypes (TupId pats pos) = TupId (map rmTypes pats) pos
 
 validApply :: [Type] -> [Type] -> Bool
