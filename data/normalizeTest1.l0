@@ -1,4 +1,4 @@
-fun int tupfun( (int*(real*int)) x, (int*(real*int)) y ) = 
+fun int tupfun( (int,(real,int)) x, (int,(real,int)) y ) = 
     let (x1, x2) = x in
     let (y1, y2) = y in
         x1 + y1
@@ -6,7 +6,5 @@ fun int tupfun( (int*(real*int)) x, (int*(real*int)) y ) =
     //let (y0, (y1,y2)) = y in
     //33
 
-fun int main() = 
-    let x = ( read(int), ( read(real), read(int) ) ) in
-    let y = ( read(int)*2, ( read(real)+4.0, read(int)+1 ) ) in
-    write(tupfun(x,y))
+fun int main((int, (real, int)) x, (int, (real, int)) y) = 
+    tupfun(x,y)

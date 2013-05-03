@@ -1,6 +1,6 @@
 fun int getInt() = 10
 
-fun int myfun( (int*int*(int*int)) x ) = 
+fun int myfun( (int,int,(int,int)) x ) = 
     let (a,b,(c,d)) = x in a + b + c + d
 
 fun int main() = 
