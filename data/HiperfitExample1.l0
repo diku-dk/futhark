@@ -41,8 +41,8 @@ fun ([[real]],[[real]]) initOperator([real] x) =
 fun real max(real x, real y) = if y < x then x else y
 fun int maxInt(int x, int y) = if y < x then x else y
 
-fun [[real]] setPayoff(real strike, [real] myX, [real] myY) =
-    map(fn [real] (real xi) => replicate(size(myY), max(xi-strike,0.0)), myX)
+fun *[[real]] setPayoff(real strike, [real] myX, [real] myY) =
+    map(fn *[real] (real xi) => replicate(size(myY), max(xi-strike,0.0)), myX)
 
 // Returns new myMuX, myVarX, myMuY, myVarY.
 fun ([[real]] , [[real]] , [[real]] , [[real]]) updateParams
@@ -105,7 +105,7 @@ fun [[real]] explicitY
         iota(numX))
 
 fun [[real]] rollback
-    ([real] myX, [real] myY, [real] myTimeline, [[real]] myResult,
+    ([real] myX, [real] myY, [real] myTimeline, *[[real]] myResult,
      [[real]] myMuX, [[real]] myDx, [[real]] myDxx, [[real]] myVarX,
      [[real]] myMuY, [[real]] myDy, [[real]] myDyy, [[real]] myVarY, int g) =
     let (numX, numY) = (size(myX), size(myY)) in

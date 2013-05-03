@@ -223,7 +223,7 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal $ IntVal num pos 
                       { Reshape $4 $7 $1 }
 
      | transpose '(' Exp ')'
-                      { Transpose $3 Nothing Nothing $1 }
+                      { Transpose $3 $1 }
 
      | split '(' Exp ',' Exp ')'
                       { Split $3 $5 Nothing $1 }
@@ -321,7 +321,7 @@ CharValue : charlit      { let L pos (CHARLIT char) = $1 in CharVal char pos }
 StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in ArrayVal (arrayFromList $ map (`CharVal` pos) s) (Char pos) pos }
 LogValue : true          { LogVal True $1 }
         | false          { LogVal False $1 }
-ArrayValue :  '{' Values '}' { case combArrayTypes $ map valueType $2 of
+ArrayValue :  '{' Values '}' { case combArrayTypes $ map typeOf $2 of
                                  Nothing -> error "Invalid array value"
                                  Just ts -> ArrayVal (arrayFromList $2) ts $1 }
 TupleValue : TupleVal        { let (vals, pos) = $1 in TupVal vals pos }

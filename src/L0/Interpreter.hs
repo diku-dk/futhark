@@ -123,12 +123,12 @@ runFun fname mainargs prog = do
       runmain = case (funDecByName fname prog, M.lookup fname ftable) of
                   (Nothing, Nothing) -> bad $ MissingEntryPoint fname
                   (Just (_,rettype,fparams,_,_), _)
-                    | map valueType mainargs == map identType fparams ->
+                    | map typeOf mainargs == map identType fparams ->
                       evalExp (Apply fname (map Literal mainargs) rettype noLoc)
                     | otherwise ->
                       bad $ InvalidFunctionArguments fname
                             (Just (map identType fparams))
-                            (map valueType mainargs)
+                            (map typeOf mainargs)
                   (_ , Just fun) -> -- It's a builtin function, it'll
                                     -- do its own error checking.
                     fun mainargs
@@ -164,7 +164,7 @@ builtin "log" [RealVal x pos] = return $ RealVal (log x) pos
 builtin "exp" [RealVal x pos] = return $ RealVal (exp x) pos
 builtin "op not" [LogVal b pos] = return $ LogVal (not b) pos
 builtin "op ~" [RealVal b pos] = return $ RealVal (-b) pos
-builtin fname args = bad $ InvalidFunctionArguments fname Nothing $ map valueType args
+builtin fname args = bad $ InvalidFunctionArguments fname Nothing $ map typeOf args
 
 --------------------------------------------
 --------------------------------------------
@@ -242,16 +242,15 @@ evalExp (Apply "trace" [arg] _ loc) = do
 evalExp (Apply "assertZip" args _ loc) = do
   args' <- mapM evalExp args
   szs   <- mapM getArrSize args'
-  let val = TupVal args' loc
-  let all_eq = ( foldl (&&) True . map (== (head szs)) ) szs
-  if not all_eq
-  then bad $ TypeError loc ("assertZip failed! args: " ++ ppValue val)
-  else do return $ LogVal True loc -- val 
-          
+  case szs of
+    n:ns | not $ all (==n) ns ->
+      bad $ TypeError loc $
+            "assertZip failed! args: " ++ intercalate ", " (map ppValue args')
+    _ -> return $ LogVal True loc
   where
     getArrSize :: Value -> L0M Int
-    getArrSize aa@(ArrayVal _ _ _) = return $ head (arrayShape aa)
-    getArrSize v = bad $ TypeError (SrcLoc (locOf v)) 
+    getArrSize aa@(ArrayVal {}) = return $ head (arrayShape aa)
+    getArrSize v = bad $ TypeError (SrcLoc (locOf v))
                                    "one of assertZip args not an array val!"
 evalExp (Apply fname args _ _) = do
   fun <- lookupFun fname
@@ -304,7 +303,7 @@ evalExp (Replicate e1 e2 pos) = do
   v2 <- evalExp e2
   case v1 of
     IntVal x _
-      | x >= 0    -> return $ ArrayVal (listArray (0,x-1) $ repeat v2) (valueType v2) pos
+      | x >= 0    -> return $ ArrayVal (listArray (0,x-1) $ repeat v2) (typeOf v2) pos
       | otherwise -> bad $ NegativeReplicate pos x
     _   -> bad $ TypeError pos "evalExp Replicate"
 evalExp e@(Reshape shapeexp arrexp pos) = do
@@ -317,7 +316,7 @@ evalExp e@(Reshape shapeexp arrexp pos) = do
         | otherwise = bad $ InvalidArrayShape pos (arrayShape arr) shape
       reshape _ [] [v] = return v
       reshape _ _ _ = bad $ TypeError pos "evalExp Reshape reshape"
-  reshape (expType e) shape $ flatten arr
+  reshape (typeOf e) shape $ flatten arr
   where flatten (ArrayVal arr _ _) = concatMap flatten $ elems arr
         flatten t = [t]
         chunk _ [] = []
@@ -325,7 +324,7 @@ evalExp e@(Reshape shapeexp arrexp pos) = do
                     in a : chunk i b
         asInt (IntVal x _) = return x
         asInt _ = bad $ TypeError pos "evalExp Reshape int"
-evalExp (Transpose arrexp _ _ pos) = do
+evalExp (Transpose arrexp pos) = do
   v <- evalExp arrexp
   case v of
     ArrayVal inarr t@(Array et _ _ _) _ -> do
@@ -364,7 +363,7 @@ evalExp (Scan fun startexp arrexp _ pos) = do
   startval <- evalExp startexp
   vals <- arrToList =<< evalExp arrexp
   (acc, vals') <- foldM scanfun (startval, []) vals
-  return $ arrayVal (reverse vals') (valueType acc) pos
+  return $ arrayVal (reverse vals') (typeOf acc) pos
     where scanfun (acc, l) x = do
             acc' <- applyLambda fun [acc, x]
             return (acc', acc' : l)
@@ -418,7 +417,7 @@ evalExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody pos) = do
 
 evalExp (Map2 fun es intype outtype pos) = do
     let e' = if length es == 1 then head es
-             else Zip (map (\x -> (x, expType x)) es) pos 
+             else Zip (map (\x -> (x, typeOf x)) es) pos
     let e_map = Map fun e' intype outtype pos
     let res = case outtype of
                 Tuple ts _ _ -> Unzip e_map ts pos
@@ -427,7 +426,7 @@ evalExp (Map2 fun es intype outtype pos) = do
 
 evalExp (Scan2 fun startexp arrs tp pos) = do
     let arr' = if length arrs == 1 then head arrs
-               else Zip (map (\x -> (x, expType x)) arrs) pos 
+               else Zip (map (\x -> (x, typeOf x)) arrs) pos
     let e_scan = Scan fun startexp arr' tp pos
     let res = case tp of
                 Tuple ts _ _ -> Unzip e_scan ts pos
@@ -435,9 +434,9 @@ evalExp (Scan2 fun startexp arrs tp pos) = do
     evalExp res
 
 evalExp (Filter2 fun arrs tp pos) = do
-    res <- if length arrs == 1 
+    res <- if length arrs == 1
            then return $ Filter fun (head arrs) tp pos
-           else do let e_zip = Zip (map (\x -> (x, expType x)) arrs) pos
+           else do let e_zip = Zip (map (\x -> (x, typeOf x)) arrs) pos
                    let e_filt= Filter fun e_zip tp pos
                    case tp of
                      Tuple ts _ _ -> return $ Unzip e_filt ts pos
@@ -447,17 +446,17 @@ evalExp (Filter2 fun arrs tp pos) = do
 
 evalExp (Reduce2 fun accexp arrs tp pos) = do
     let arr' = if length arrs == 1 then head arrs
-               else Zip (map (\x -> (x, expType x)) arrs) pos 
+               else Zip (map (\x -> (x, typeOf x)) arrs) pos
     evalExp $ Reduce fun accexp arr' tp pos
 
 evalExp (Redomap2 redfun mapfun accexp arrs intp outtp pos) = do
     let arr' = if length arrs == 1 then head arrs
-               else Zip (map (\x -> (x, expType x)) arrs) pos 
+               else Zip (map (\x -> (x, typeOf x)) arrs) pos
     evalExp $ Redomap redfun mapfun accexp arr' intp outtp pos
 
 evalExp (Mapall2 _ _ _ _ pos) =
-    bad $ TypeError pos ("evalExp Mapall2: not implemented yet!!!")
- 
+    bad $ TypeError pos "evalExp Mapall2: not implemented yet!!!"
+
 ----------------------------
 --- End   SOAC2 (Cosmin) ---
 ----------------------------

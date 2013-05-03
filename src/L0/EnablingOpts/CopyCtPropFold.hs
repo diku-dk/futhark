@@ -12,8 +12,7 @@ import Control.Monad.Writer
 --import Data.Either
 
 --import Control.Monad.State
-import Data.Data
-import Data.Generics
+import Data.Generics hiding (typeOf)
 import Data.Array
 import Data.List
 
@@ -633,7 +632,7 @@ isRemovablePat (TupId tups _) e =
 getPropBnds :: TypeBox tf => TupIdent tf -> Exp tf -> Bool -> CPropM tf [(String,CtOrId tf)]
 getPropBnds ( Id (Ident var tp pos) ) e to_rem = 
   let r = case e of
-            Literal v            -> [(var, (Constant v (boxType (valueType v)) to_rem))]
+            Literal v            -> [(var, (Constant v (boxType (typeOf v)) to_rem))]
             Var (Ident id1 tp1 _)-> [(var, (VarId  id1 tp1 to_rem))]
             Index   _ _ _ _ _    -> [(var, (SymArr e   tp  to_rem))]
             TupLit     _  _      -> [(var, (SymArr e   tp  to_rem))]

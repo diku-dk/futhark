@@ -7,8 +7,8 @@ import Control.Applicative
 import Control.Monad.State
 
 import qualified Data.Array as A
-import Data.Data
-import Data.Generics
+import Data.Data hiding (typeOf)
+import Data.Generics hiding (typeOf)
 import Data.List
 import Data.Loc
 
@@ -125,7 +125,7 @@ transformExp (LetWith name src idxs ve body loc) = do
   idxs' <- mapM transformExp idxs
   body' <- transformExp body
   ve' <- transformExp ve
-  case (identType name', expType ve') of
+  case (identType name', typeOf ve') of
     (Tuple ets _ _, Tuple xts _ _) -> do
       snames <- map fst <$> mapM (newVar "letwith_src") ets
       vnames <- map fst <$> mapM (newVar "letwith_el") xts
@@ -140,7 +140,7 @@ transformExp (LetWith name src idxs ve body loc) = do
 transformExp (Replicate ne ve loc) = do
   ne' <- transformExp ne
   ve' <- transformExp ve
-  case expType ve' of
+  case typeOf ve' of
     Tuple ets _ _ -> do
       (n, nv) <- newVar "n" (Int loc)
       (names, vs) <- unzip <$> mapM (newVar "rep_tuple") ets
@@ -151,7 +151,7 @@ transformExp (Replicate ne ve loc) = do
     _ -> return $ Replicate ne' ve' loc
 transformExp (Size e loc) = do
   e' <- transformExp e
-  case expType e' of
+  case typeOf e' of
     Tuple (et:ets) _ _ -> do
       (name, namev) <- newVar "size_tup" et
       names <- map fst <$> mapM (newVar "size_tup") ets
@@ -163,9 +163,9 @@ transformExp (Zip es loc) =
 transformExp (Split nexp arrexp eltype loc) = do
   nexp' <- transformExp nexp
   arrexp' <- transformExp arrexp
-  case expType arrexp' of
+  case typeOf arrexp' of
     Tuple ets _ _ -> do
-      (n, nv) <- newVar "split_n" $ expType nexp'
+      (n, nv) <- newVar "split_n" $ typeOf nexp'
       names <- map fst <$> mapM (newVar "split_tup") ets
       partnames <- forM ets $ \et -> do
                      a <- fst <$> newVar "split_a" et

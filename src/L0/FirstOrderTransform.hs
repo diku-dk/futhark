@@ -4,7 +4,7 @@ module L0.FirstOrderTransform
 
 import Control.Monad.State
 
-import Data.Generics
+import Data.Generics hiding (typeOf)
 import Data.Loc
 
 import L0.AbSyn
@@ -74,7 +74,7 @@ transformExp (Filter fun arrexp elty loc) = do
   (_, nv, nlet) <- newLet (Size arrv loc) "n"
   let checkempty nonempty = If (BinOp Equal nv (intval 0) bool loc)
                             (Literal $ emptyArray elty loc) nonempty
-                            (expType arrexp) loc
+                            (typeOf arrexp) loc
   (x, xv) <- newVar "x" elty loc
   (i, iv) <- newVar "i" int loc
   fun' <- transformLambda fun [xv]
@@ -98,14 +98,14 @@ transformExp (Filter fun arrexp elty loc) = do
                         (And (BinOp Less (intval 0) iv bool loc)
                              (BinOp Equal indexi indexim1 bool loc) loc)
                      loc)
-                 resv update (expType arrexp) loc
+                 resv update (typeOf arrexp) loc
       update = LetWith res res [BinOp Minus indexi (intval 1) int loc] indexin resv loc
   return $ arrlet $ nlet $ checkempty $ ialet $ reslet loop
   where int = Int loc
         bool = Bool loc
         intval x = Literal (IntVal x loc)
 transformExp (Mapall fun arrexp _ outtype loc) = transformExp =<< toMap arrexp
-  where toMap e = case expType e of
+  where toMap e = case typeOf e of
                     Array et _ _ _ -> do
                       (x,xv) <- newVar "x" et loc
                       body <- toMap xv
@@ -135,7 +135,7 @@ newReduction loc arrexp accexp = do
 
 newLet :: Exp Type -> String -> TransformM (Ident Type, Exp Type, Exp Type -> Exp Type)
 newLet e name = do
-  (x,xv) <- newVar name (expType e) loc
+  (x,xv) <- newVar name (typeOf e) loc
   let xlet body = LetPat (Id x) e body loc
   return (x, xv, xlet)
   where loc = srclocOf e

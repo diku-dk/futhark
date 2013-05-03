@@ -1,0 +1,1 @@
+fun int addtwo ([int] a) = reduce(op *, 1, a)
