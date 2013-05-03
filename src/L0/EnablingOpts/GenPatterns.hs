@@ -55,7 +55,17 @@ foldlPattern f doLam ne (Redomap lam1 lam2 e1 e2 _ _ _) =
             (e1:e2: getLambdaExps lam1 ++ getLambdaExps lam2 )
 foldlPattern f _ ne (Split e1 e2 _ _)      = foldl f ne [e1, e2]
 foldlPattern f _ ne (Concat e1 e2 _ _)     = foldl f ne [e1, e2]
+-- soac2 implem (Cosmin) --
+foldlPattern f doLam ne (Map2 lam e _ _ _)      = foldl f (doLam ne lam) (e++getLambdaExps lam)
+foldlPattern f doLam ne (Mapall2 lam e _ _ _)   = foldl f (doLam ne lam) (e++getLambdaExps lam)
+foldlPattern f doLam ne (Reduce2 lam e1 e2 _ _) = foldl f (doLam ne lam) (e1:e2++getLambdaExps lam)
+foldlPattern f doLam ne (Scan2 lam e1 e2 _ _)   = foldl f (doLam ne lam) (e1:e2++getLambdaExps lam)
+foldlPattern f doLam ne (Filter2 lam e _ _)     = foldl f (doLam ne lam) (e++getLambdaExps lam)
+foldlPattern f doLam ne (Redomap2 lam1 lam2 e1 e2 _ _ _) = 
+    foldl   f (doLam (doLam ne lam1) lam2)  
+            (e1 : e2 ++ getLambdaExps lam1 ++ getLambdaExps lam2 )
 
+ 
 getLambdaExps :: TypeBox tf => Lambda tf -> [Exp tf]
 getLambdaExps (AnonymFun _ body   _ _) = [body]
 getLambdaExps (CurryFun  _ params _ _) = params

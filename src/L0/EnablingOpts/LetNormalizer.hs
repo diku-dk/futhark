@@ -368,6 +368,45 @@ letNormExp (Redomap lam1 lam2 ne arr tp1 tp2 pos) = do
     arr'  <- letNormExp arr >>= makeVarExpSubst "tmp_arr" pos
     makeVarExpSubst "tmp_red" pos (Redomap lam1' lam2' ne' arr' tp1 tp2 pos)
 
+
+------------------------
+---- SOAC2 (Cosmin) ----
+------------------------
+
+letNormExp (Map2 lam arr tp1 tp2 pos) = do
+    lam'  <- letNormLambda lam
+    arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
+    makeVarExpSubst "tmp_map2" pos (Map2 lam' arr' tp1 tp2 pos)
+
+letNormExp (Mapall2 lam arr tp1 tp2 pos) = do
+    lam'  <- letNormLambda lam
+    arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
+    makeVarExpSubst "tmp_mapall2" pos (Mapall2 lam' arr' tp1 tp2 pos)
+
+letNormExp (Filter2 lam arr tp pos) = do
+    lam'  <- letNormLambda lam
+    arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
+    makeVarExpSubst "tmp_filt2" pos (Filter2 lam' arr' tp pos)
+
+letNormExp (Reduce2 lam ne arr tp pos) = do
+    lam'  <- letNormLambda lam
+    ne'   <- subLetoNormExp "tmp_arg" ne
+    arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
+    makeVarExpSubst "tmp_red2" pos (Reduce2 lam' ne' arr' tp pos)
+
+letNormExp (Scan2 lam ne arr tp pos) = do
+    lam'  <- letNormLambda lam
+    ne'   <- subLetoNormExp "tmp_arg" ne
+    arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
+    makeVarExpSubst "tmp_scan2" pos (Scan2 lam' ne' arr' tp pos)
+
+letNormExp (Redomap2 lam1 lam2 ne arr tp1 tp2 pos) = do
+    lam1' <- letNormLambda lam1
+    lam2' <- letNormLambda lam2
+    ne'   <- subLetoNormExp "tmp_arg" ne
+    arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
+    makeVarExpSubst "tmp_redomap2" pos (Redomap2 lam1' lam2' ne' arr' tp1 tp2 pos)
+
 -------------------------------------------------------
 -------------------------------------------------------
 ---- Pattern Match The Rest of the Implementation! ----
@@ -437,8 +476,9 @@ makeVarExpSubst str pos e = case e of
                         }
         _ <- tell $ LetNormRes True [(tmp_nm, e)]
         return $ Var idd
-    
 
+letNormOmakeVarExpSubst :: TypeBox ty => String -> SrcLoc -> Exp ty -> LetNormM ty (Exp ty)
+letNormOmakeVarExpSubst str pos arr = letNormExp arr >>= makeVarExpSubst str pos
 
 -------------------------------------------------------------------
 ---- makeLetExp SEMANTICALLY EQUIVALENT with addPatterns ????? ----
