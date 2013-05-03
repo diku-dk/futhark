@@ -118,13 +118,25 @@ deadCodeElimFun (fname, rettype, args, body, pos) = do
 
 deadCodeElimExp :: TypeBox tf => Exp tf -> DCElimM tf (Exp tf)
 
-
+-----------------------------------------------------------------------------
+-- 'trace' and 'assertZip' exhibit side effects and should not be removed!
+deadCodeElimExp (LetPat pat (Apply "trace" args tp p) body pos) = do
+    let ids = getBnds pat
+    args' <- mapM deadCodeElimExp args
+    body' <- binding ids $ deadCodeElimExp body
+    return $ LetPat pat (Apply "trace" args' tp p) body' pos
+deadCodeElimExp (LetPat pat (Apply "assertZip" args tp p) body pos) = do
+    let ids = getBnds pat
+    args' <- mapM deadCodeElimExp args
+    body' <- binding ids $ deadCodeElimExp body
+    return $ LetPat pat (Apply "trace" args' tp p) body' pos
+-----------------------------------------------------------------------------
+ 
 deadCodeElimExp (LetPat pat e body pos) = do
     let ids = getBnds pat
     (body', noref) <- collectRes ids $ binding ids $ deadCodeElimExp body
 
-    let torem = noref 
-    if torem 
+    if noref 
     then changed $ return body'
     else do
             e' <- deadCodeElimExp e

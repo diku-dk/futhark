@@ -24,6 +24,8 @@ import L0.EnablingOpts.TupleNormalizer
 import L0.EnablingOpts.LetNormalizer
 import L0.EnablingOpts.EnablingOptErrors
 
+import L0.EnablingOpts.ArrTup2TupArr
+
 import Debug.Trace
 
 --------------------------------------------------------------
@@ -48,7 +50,10 @@ enablingOpts prog = do
 
     prog_enopt <- normCopyDeadOpts prog_ntup
 
-    return prog_enopt
+    prog_l0 <- arr2tupProg prog_enopt
+    
+    return prog_l0
+    --return prog_enopt
 
 --    if(succs)
 --    then enablingOpts outprog
