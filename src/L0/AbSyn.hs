@@ -493,7 +493,7 @@ instance Typed (Exp Type) where
     arrayType 1 (typeOf fun) (uniqueness fun <> uniqueness e <> uniqueness arr)
   typeOf (Filter _ _ t _) = arrayType 1 t Nonunique
   typeOf (Mapall fun e _ _ _) = arrayType (arrayDims $ typeOf e) (typeOf fun) Nonunique
-  typeOf (Redomap _ _ _ _ _ t _) = arrayType 1 t Nonunique
+  typeOf (Redomap _ _ _ _ _ t _) = t
   typeOf (Split _ _ t pos) = Tuple [arrayType 1 t Nonunique, arrayType 1 t Nonunique] Unique pos
   typeOf (Concat _ _ t _) = arrayType 1 t Nonunique
   typeOf (Copy e _) = singular $ typeOf e
