@@ -186,6 +186,13 @@ arr2tupExp (TupLit tups pos) = do
 arr2tupExp (ArrayLit els tp pos) = do
     let tp' = toTupArrType tp
     els'   <- mapM arr2tupExp els
+    case tp' of
+        Tuple tps' _ _ -> do
+            lstlst <- foldM concatTups (replicate (length tps') []) els'
+            let tuparrs  = map (\(x,y)->ArrayLit x y pos) (zip lstlst tps')
+            return $ TupLit tuparrs pos
+        _ -> return $ ArrayLit els' tp' pos
+{-
     case (tp', head els') of
         (Tuple tps' _ _, TupLit tupels _) -> do 
             lstlst <- foldM concatTups (map (\x -> [x]) tupels) (tail els')
@@ -195,6 +202,7 @@ arr2tupExp (ArrayLit els tp pos) = do
             badArr2TupM $ EnablingOptError pos ("In arr2tupExp of ArrayLit: "++ppExp 0 (head els')
                                                 ++" element of Tuple Type NOT a Tuple Literal!!! ")
         _ -> return $ ArrayLit els' tp' pos
+-}
     where
         concatTups :: [[Exp Type]] -> Exp Type -> Arr2TupM [[Exp Type]]
         concatTups acc e = case e of
@@ -204,6 +212,12 @@ arr2tupExp (ArrayLit els tp pos) = do
                                                          ++" two tuple elems of different length! ")
                 else do let res = zipWith (\ x y -> x ++ [y]) acc tups
                         return res
+            Literal (TupVal tups _) ->
+                if length acc /= length tups
+                then badArr2TupM $ EnablingOptError pos ("In concatTups/arr2tupExp of ArrayLit: "
+                                                         ++" two tuple elems of different length! ")
+                else do let res = zipWith (\ x y -> x ++ [Literal y]) acc tups
+                        return res                
             _ -> badArr2TupM $ EnablingOptError pos ("In concatTups/arr2tupExp of ArrayLit: "
                                                      ++" element NOT of Tuple Type! ")
 
@@ -377,7 +391,9 @@ arr2tupExp (Split n arr tp pos) = do
     arr' <- arr2tupExp arr
     case (typeOf arr', arr') of
         (Tuple {}, TupLit tups plit) -> do
-            let reps = map (\x -> Split n' x tp' pos) tups
+            reps <- mapM (\x -> do eltp <- elemType $ typeOf x
+                                   return $ Split n' x eltp pos) 
+                         tups
             return $ TupLit reps plit
         (Tuple {}, _) -> 
             badArr2TupM $ EnablingOptError pos ("In arr2tupExp of Split, broken invariant: "
@@ -393,7 +409,9 @@ arr2tupExp (Concat arr1 arr2 tp pos) = do
             if (typeOf arr1' /= typeOf arr2')
             then badArr2TupM $ EnablingOptError pos ("In arr2tupExp of Concat, broken invariant: "
                                                      ++" tuple types of arrays do not match! ")
-            else do let reps = map (\(x,y) -> Concat x y (typeOf x) pos) (zip tups1 tups2)
+            else do reps <- mapM (\(x,y) -> do eltp <- elemType $ typeOf x 
+                                               return $ Concat x y eltp pos) 
+                                 (zip tups1 tups2)
                     return $ TupLit reps plit1
         (Tuple {}, _, _) -> 
             badArr2TupM $ EnablingOptError pos ("In arr2tupExp of Concat, broken invariant: "
@@ -658,7 +676,12 @@ mkFullPattern pat = do
                 Tuple tps _ _ -> do
                     idents <- mapM (mkIdFromType pos nm) tps 
                     return $ ( idents, [(nm, idents)] )
-                _             -> return ([ident], [])
+                tp -> do if tp == identType ident
+                         then return ([ident], [])
+                         else badArr2TupM $ EnablingOptError pos 
+                                                ("in ArrTup2TupArr.hs, processIdent, non-tuple type "
+                                                 ++" does not match original ident type!")
+                --_             -> return ([ident], [])
 
 
 mkIdFromType :: SrcLoc -> String -> Type ->
@@ -789,6 +812,14 @@ tupArrToLstArr arr = do
 isArrayType :: Type -> Bool
 isArrayType (Array {}) = True
 isArrayType _          = False
+
+
+elemType :: Type -> Arr2TupM Type
+elemType (Array t _ _ _) = return t
+elemType t = badArr2TupM $ EnablingOptError 
+                            (srclocOf t) 
+                            ("In ArrTup2TupArr, elemType, Type of "++
+                             "expression is not array, but " ++ ppType t ++ ".")
 
 ----------------------------------------------------
 --- flattenTups: builds a flat tuple encompassing---
