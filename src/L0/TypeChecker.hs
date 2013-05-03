@@ -50,6 +50,9 @@ data TypeError = TypeError SrcLoc String
                -- ^ A variable was attempted used after being
                -- consumed.  The last location is the point of
                -- consumption.
+               | IndexingError Int Int SrcLoc
+               -- ^ Too many indices provided.  The first integer is
+               -- the expected number of indices.
 
 instance Show TypeError where
   show (TypeError pos msg) =
@@ -92,6 +95,8 @@ instance Show TypeError where
   show (UseAfterConsume name rloc wloc) =
     "Varible " ++ name ++ " used at " ++ locStr rloc ++
     ", but it was consumed at " ++ locStr wloc ++ ".  (Possibly through aliasing)"
+  show (IndexingError dims got pos) =
+    show got ++ " indices given, but type of expression at " ++ locStr pos ++ " has " ++ show dims ++ " dimensions."
 
 -- | A tuple of a return type and a list of argument types.
 type FunBinding = (Type, [Type])
@@ -472,25 +477,27 @@ checkExp' (LetPat pat e body pos) = do
 
 checkExp' (LetWith (Ident dest destt destpos) src idxes ve body pos) = do
   src' <- checkIdent src
+  idxes' <- mapM (require [Int pos] <=< checkExp) idxes
   destt' <- destt `unifyWithKnown` identType src'
+  let dest' = Ident dest destt' destpos
+
   unless (unique $ typeOf src') $
     bad $ TypeError pos "Source is not unique"
-  let dest' = Ident dest destt' destpos
+
   case peelArray (length idxes) (identType src') of
-    Nothing -> bad $ TypeError pos $ show (length idxes) ++ " indices given, but type of expression at " ++ locStr (srclocOf src) ++ " has " ++ show (arrayDims $ identType src') ++ " dimensions."
-    Just elemt -> do
-      (ve', dataflow) <- collectDataflow $ require [elemt] =<< checkExp ve
-      idxes' <- mapM (require [Int pos] <=< checkExp) idxes
-      (scope, _) <- checkBinding (Id dest') destt' dataflow
-      body' <- consuming pos (identName src') $ scope $ checkExp body
-      return $ LetWith dest' src' idxes' ve' body' pos
+    Nothing -> bad $ IndexingError (length idxes) (arrayDims $ identType src') (srclocOf src)
+    Just elemt ->
+      sequentially (require [elemt] =<< checkExp ve) $ \ve' -> do
+        (scope, _) <- checkBinding (Id dest') destt' mempty
+        body' <- consuming pos (identName src') $ scope $ checkExp body
+        return $ LetWith dest' src' idxes' ve' body' pos
 
 checkExp' (Index ident idxes intype restype pos) = do
   ident' <- checkIdent ident
   observe ident'
   vt <- lookupVar (identName ident') pos
   when (arrayDims vt < length idxes) $
-    bad $ TypeError pos $ show (length idxes) ++ " indices given, but type of variable " ++ identName ident' ++ " has " ++ show (arrayDims vt) ++ " dimensions."
+    bad $ IndexingError (length idxes) (arrayDims vt) pos
   vet <- elemType vt
   intype' <- intype `unifyWithKnown` vet
   restype' <- restype `unifyWithKnown` stripArray (length idxes) vt
@@ -698,20 +705,22 @@ checkPolyBinOp op tl e1 e2 t pos = do
   t'' <- t `unifyWithKnown` t'
   return $ BinOp op e1' e2' t'' pos
 
+sequentially :: TypeM a -> (a -> TypeM b) -> TypeM b
+sequentially m1 m2 = do
+  (a, m1flow) <- collectDataflow m1
+  (b, m2flow) <- collectDataflow $ m2 a
+  tell Dataflow {
+           usageAliasing = usageAliasing m1flow <> usageAliasing m2flow
+         , usageOccurences = usageOccurences m1flow `seqUsages` usageOccurences m2flow
+         }
+  return b
+
 checkBinding :: TypeBox tf =>
                 TupIdent tf -> Type -> Dataflow
              -> TypeM (TypeM a -> TypeM a, TupIdent Type)
 checkBinding pat vt dflow = do
   (pat', (scope, _)) <- runStateT (checkBinding' pat vt (usageAliasing dflow)) (id, [])
-  let -- Remove all occurences for names shadowed by the new bindings.
-      scope' m = do
-        (x, mdflow) <- collectDataflow $ scope m
-        tell Dataflow {
-                   usageAliasing = usageAliasing dflow <> usageAliasing mdflow
-                 , usageOccurences = usageOccurences dflow `seqUsages` usageOccurences mdflow
-                 }
-        return x
-  return (scope', pat')
+  return (\m -> sequentially (tell dflow) (const $ scope m), pat')
   where checkBinding' (Id (Ident name namet pos)) t a = do
           t' <- lift $ namet `unifyWithKnown` t
           add (Ident name t' pos) a
