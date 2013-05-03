@@ -1,0 +1,1 @@
+fun [[real]] addtwo ([[int]] a) = mapall(toReal, a)

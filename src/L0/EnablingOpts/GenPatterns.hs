@@ -40,7 +40,7 @@ foldlPattern f _ ne (Index _ inds _ _ _ )  = foldl f ne inds
 
 foldlPattern f _ ne (Iota      e _    )    = f ne e
 foldlPattern f _ ne (Size      e _    )    = f ne e
-foldlPattern f _ ne (Transpose e _ _ _)    = f ne e
+foldlPattern f _ ne (Transpose e _    )    = f ne e
 foldlPattern f _ ne (Unzip     e   _ _)    = f ne e
 foldlPattern f _ ne (Zip exptps _)         = foldl f ne (fst (unzip exptps))
 foldlPattern f _ ne (Replicate e1 e2 _)  = foldl f ne [e1, e2]

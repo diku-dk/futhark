@@ -2,8 +2,6 @@
 fun [int] main(int n) =
     let arr = iota(n) in
     loop (arr) = for i < n-2 do
-                   let x = arr[i] in
-                   let y = arr[i+1] in
-                   let arr[i+2] = x + y
+                   let arr[i+2] = arr[i] + arr[i+1]
                    in arr
     in arr

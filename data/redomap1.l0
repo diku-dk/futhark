@@ -1,0 +1,1 @@
+fun real addtwo ([int] a) = redomap(op *, toReal, 1.0, a)

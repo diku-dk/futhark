@@ -9,8 +9,7 @@ import Control.Monad.Reader
 --import Control.Monad.Writer
 
  
-import Data.Data
-import Data.Generics
+import Data.Generics hiding (typeOf)
 
 --import qualified Data.Set as S
 import qualified Data.Map as M
@@ -318,7 +317,7 @@ arr2tupExp (Redomap lam1 lam2 ne arr tp1 tp2 pos) = do
 
 arr2tupExp (Size arr pos) = do
     arr' <- arr2tupExp arr
-    case (expType arr', arr') of
+    case (typeOf arr', arr') of
         -- just return the size of the first element
         (Tuple {}, TupLit (fsttup:_) _) -> return $ Size fsttup pos
         (Tuple {}, _) ->  
@@ -329,7 +328,7 @@ arr2tupExp (Size arr pos) = do
 arr2tupExp (Replicate n arr pos) = do
     n'   <- arr2tupExp n
     arr' <- arr2tupExp arr
-    case (expType arr', arr') of
+    case (typeOf arr', arr') of
         (Tuple {}, TupLit tups plit) -> do
             let reps = map (\x -> Replicate n' x pos) tups
             return $ TupLit reps plit
@@ -338,22 +337,21 @@ arr2tupExp (Replicate n arr pos) = do
                                                 ++" arg of tuple type NOT a tuple literal! ")
         _ -> return $ Replicate n' arr' pos
 
-arr2tupExp (Transpose arr tp1 tp2 pos) = do
-    let (tp1', tp2') = (toTupArrType tp1, toTupArrType tp2)
+arr2tupExp (Transpose arr pos) = do
     arr' <- arr2tupExp arr
-    case (expType arr', arr') of
+    case (typeOf arr', arr') of
         (Tuple {}, TupLit tups plit) -> do
-            let reps = map (\x -> Transpose x tp1' tp2' pos) tups
+            let reps = map (\x -> Transpose x pos) tups
             return $ TupLit reps plit
         (Tuple {}, _) -> 
             badArr2TupM $ EnablingOptError pos ("In arr2tupExp of Transpose, broken invariant: "
                                                 ++" arg of tuple type NOT a tuple literal! ")
-        _ -> return $ Transpose arr' tp1' tp2' pos
+        _ -> return $ Transpose arr' pos
 
 arr2tupExp (Reshape newsz arr pos) = do
     newsz' <- mapM arr2tupExp newsz
     arr'   <- arr2tupExp arr
-    case (expType arr', arr') of
+    case (typeOf arr', arr') of
         (Tuple {}, TupLit tups plit) -> do
             let reps = map (\x -> Reshape newsz' x pos) tups
             return $ TupLit reps plit
@@ -364,7 +362,7 @@ arr2tupExp (Reshape newsz arr pos) = do
 
 arr2tupExp (Copy arr pos) = do
     arr' <- arr2tupExp arr
-    case (expType arr', arr') of
+    case (typeOf arr', arr') of
         (Tuple {}, TupLit tups plit) -> do
             let reps = map (\x -> Copy x pos) tups
             return $ TupLit reps plit
@@ -377,7 +375,7 @@ arr2tupExp (Split n arr tp pos) = do
     let tp' = toTupArrType tp
     n'   <- arr2tupExp n
     arr' <- arr2tupExp arr
-    case (expType arr', arr') of
+    case (typeOf arr', arr') of
         (Tuple {}, TupLit tups plit) -> do
             let reps = map (\x -> Split n' x tp' pos) tups
             return $ TupLit reps plit
@@ -390,12 +388,12 @@ arr2tupExp (Concat arr1 arr2 tp pos) = do
     let tp' = toTupArrType tp
     arr1' <- arr2tupExp arr1
     arr2' <- arr2tupExp arr2
-    case (expType arr1', arr1', arr2') of
+    case (typeOf arr1', arr1', arr2') of
         (Tuple {}, TupLit tups1 plit1, TupLit tups2 _) -> 
-            if (expType arr1' /= expType arr2')
+            if (typeOf arr1' /= typeOf arr2')
             then badArr2TupM $ EnablingOptError pos ("In arr2tupExp of Concat, broken invariant: "
                                                      ++" tuple types of arrays do not match! ")
-            else do let reps = map (\(x,y) -> Concat x y (expType x) pos) (zip tups1 tups2)
+            else do let reps = map (\(x,y) -> Concat x y (typeOf x) pos) (zip tups1 tups2)
                     return $ TupLit reps plit1
         (Tuple {}, _, _) -> 
             badArr2TupM $ EnablingOptError pos ("In arr2tupExp of Concat, broken invariant: "
@@ -453,7 +451,7 @@ arr2tupExp (Redomap2 _ _ _ _ _ _ pos) =
 -- ToDo: modify copy propagation and dead-code elimination to 
 --       do NOT remove the assertZip statement!!!
 arr2tupExp (LetPat pat z@(Zip els pzip) body pos) = do
-    let tp = toTupArrType $ expType z
+    let tp = toTupArrType $ typeOf z
     els' <- (mapM arr2tupExp . map fst) els
     arrs <- case tp of
         Tuple{} -> return $ ( foldl (++) [] . map tupFlatten ) els'  
@@ -512,7 +510,7 @@ arr2tupExp (LetWith dst src inds el body pos) = do
     inds' <- mapM arr2tupExp inds
 
     bnd   <- asks $ M.lookup (identName src) . tupVtable
-    let tpelm = toTupArrType $ expType el 
+    let tpelm = toTupArrType $ typeOf el 
     case (tpelm, bnd) of
         (Tuple elm_tps _ _, Just ids_src) -> do
             -- compute new ids for el (assuming that its translation is a TupLit)
@@ -549,7 +547,7 @@ arr2tupExp (LetWith dst src inds el body pos) = do
 
 arr2tupExp (Apply "trace" [arg] _ pos) = do
     arg' <- arr2tupExp arg
-    let tp' = expType arg'
+    let tp' = typeOf arg'
     return $ Apply "trace" [arg'] tp' pos
 
 arr2tupExp (Apply fnm args rtp pos) = do
@@ -773,7 +771,7 @@ distribLetWithExp ids_src ids_dst inds ids_elm body pos =
 
 tupArrToLstArr :: Exp Type -> Arr2TupM [Exp Type]
 tupArrToLstArr (TupLit lst pos) = do
-    let lsttps = map expType lst
+    let lsttps = map typeOf lst
     let bools  = zipWith (&&) (map isArrayType lsttps) (map (\x -> not (invalidType x)) lsttps)
     if foldl (&&) True bools
     then return lst
@@ -781,7 +779,7 @@ tupArrToLstArr (TupLit lst pos) = do
                                         ("In ArrTup2TupArr, tupArrToLstArr, broken invariant: "
                                          ++"tuplit elems either not arrays or contain tuples! ")
 tupArrToLstArr arr = do 
-    let tp = expType arr 
+    let tp = typeOf arr 
     if isArrayType tp && (not (invalidType tp))
     then return [arr]
     else badArr2TupM $ EnablingOptError (SrcLoc (locOf arr)) 
