@@ -447,7 +447,7 @@ instance Typed (Exp Type) where
   typeOf (Iota _ pos) = arrayType 1 (Int pos) Unique
   typeOf (Size _ pos) = Int pos
   typeOf (Replicate _ e _) = arrayType 1 (typeOf e) u
-    where u | basicType $ typeOf e = Unique
+    where u | unique (typeOf e) || basicType (typeOf e) = Unique
             | otherwise = Nonunique
   typeOf (Reshape shape e _) = build (length shape) (baseType $ typeOf e)
     where build 0 t = t
