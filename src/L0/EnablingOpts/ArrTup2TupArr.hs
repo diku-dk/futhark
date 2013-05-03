@@ -192,7 +192,7 @@ arr2tupExp (ArrayLit els tp pos) = do
             let tuparrs = map (\(x,y)->ArrayLit x y pos) (zip lstlst tps')
             return $ TupLit tuparrs pos
         (Tuple {}, _) ->
-            badArr2TupM $ EnablingOptError pos ("In arr2tupExp of ArrayLit: "
+            badArr2TupM $ EnablingOptError pos ("In arr2tupExp of ArrayLit: "++ppExp 0 (head els')
                                                 ++" element of Tuple Type NOT a Tuple Literal!!! ")
         _ -> return $ ArrayLit els' tp' pos
     where
