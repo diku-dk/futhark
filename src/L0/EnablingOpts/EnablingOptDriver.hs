@@ -44,16 +44,13 @@ enablingOpts prog = do
 
     prog_ntup     <- tupleNormProg   prog_rn
 
-    --(_, prog_nlet)<- letNormProg     prog_ntup
-    --(_,prog_cp)   <- copyCtProp      prog_nlet
-    --(_, prog_dce) <- deadCodeElim    prog_cp
+    prog_enopt1 <- normCopyDeadOpts prog_ntup
+    prog_enopt2 <- normCopyDeadOpts prog_enopt1
 
-    prog_enopt <- normCopyDeadOpts prog_ntup
-
-    prog_l0 <- arr2tupProg prog_enopt
+    prog_flat <- arr2tupProg prog_enopt2
+    prog_l0   <- normCopyDeadOpts prog_flat
     
     return prog_l0
-    --return prog_enopt
 
 --    if(succs)
 --    then enablingOpts outprog
@@ -61,16 +58,10 @@ enablingOpts prog = do
 
 normCopyDeadOpts :: Prog Type -> Either EnablingOptError (Prog Type)
 normCopyDeadOpts prog = do
-    (_, prog_nlet1) <- letNormProg     prog
-    (_,prog_cp1)    <- copyCtProp      prog_nlet1
-    --(_, prog_dce1)  <- trace (prettyPrint prog_cp1) (deadCodeElim prog_cp1)
-    (_, prog_dce1)  <- deadCodeElim    prog_cp1
+    (_, prog_nlet) <- letNormProg     prog
+    (_,prog_cp)    <- copyCtProp      prog_nlet
+    --(_, prog_dce)  <- trace (prettyPrint prog_cp1) (deadCodeElim prog_cp1)
+    (_, prog_dce)  <- deadCodeElim    prog_cp
 
-    (_, prog_nlet2) <- letNormProg     prog_dce1
-    (_,prog_cp2)    <- copyCtProp      prog_nlet2
-    --(_, prog_dce2)  <- trace (prettyPrint prog_cp2) (deadCodeElim prog_cp2)
-    (_, prog_dce2)  <- deadCodeElim    prog_cp2
-
-    return prog_dce2    
-    
+    return prog_dce
 
