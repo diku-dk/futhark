@@ -6,7 +6,7 @@
 testdir=$(dirname "$0")
 
 # Command to run the L0 compiler.
-l0c="l0c -f"
+l0c="l0c"
 
 tests() {
     echo $testdir/uniqueness*l0
