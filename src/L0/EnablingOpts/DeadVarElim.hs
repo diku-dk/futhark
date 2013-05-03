@@ -129,7 +129,7 @@ deadCodeElimExp (LetPat pat (Apply "assertZip" args tp p) body pos) = do
     let ids = getBnds pat
     args' <- mapM deadCodeElimExp args
     body' <- binding ids $ deadCodeElimExp body
-    return $ LetPat pat (Apply "trace" args' tp p) body' pos
+    return $ LetPat pat (Apply "assertZip" args' tp p) body' pos
 -----------------------------------------------------------------------------
  
 deadCodeElimExp (LetPat pat e body pos) = do

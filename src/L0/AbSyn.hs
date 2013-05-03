@@ -54,7 +54,7 @@ import Data.Loc
 import Data.Monoid
 
 isBuiltInFun :: String -> Bool
-isBuiltInFun fnm = fnm `elem` ["toReal", "trunc", "sqrt", "log", "exp", "trace"]
+isBuiltInFun fnm = fnm `elem` ["toReal", "trunc", "sqrt", "log", "exp", "trace", "assertZip"]
 
 locStr :: SrcLoc -> String
 locStr (SrcLoc NoLoc) = "unknown location"
