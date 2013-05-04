@@ -52,7 +52,8 @@ data TypeError = TypeError SrcLoc String
                -- consumption.
                | IndexingError Int Int SrcLoc
                -- ^ Too many indices provided.  The first integer is
-               -- the expected number of indices.
+               -- the number of dimensions in the array being
+               -- indexed.
 
 instance Show TypeError where
   show (TypeError pos msg) =
@@ -96,7 +97,7 @@ instance Show TypeError where
     "Varible " ++ name ++ " used at " ++ locStr rloc ++
     ", but it was consumed at " ++ locStr wloc ++ ".  (Possibly through aliasing)"
   show (IndexingError dims got pos) =
-    show got ++ " indices given, but type of expression at " ++ locStr pos ++ " has " ++ show dims ++ " dimensions."
+    show got ++ " indices given, but type of expression at " ++ locStr pos ++ " has " ++ show dims ++ " dimension(s)."
 
 -- | A tuple of a return type and a list of argument types.
 type FunBinding = (Type, [Type])
@@ -492,7 +493,7 @@ checkExp' (LetWith (Ident dest destt destpos) src idxes ve body pos) = do
     bad $ TypeError pos "Source is not unique"
 
   case peelArray (length idxes) (identType src') of
-    Nothing -> bad $ IndexingError (length idxes) (arrayDims $ identType src') (srclocOf src)
+    Nothing -> bad $ IndexingError (arrayDims $ identType src') (length idxes) (srclocOf src)
     Just elemt ->
       sequentially (require [elemt] =<< checkExp ve) $ \ve' -> do
         (scope, _) <- checkBinding (Id dest') destt' mempty
@@ -504,7 +505,7 @@ checkExp' (Index ident idxes intype restype pos) = do
   observe ident'
   vt <- lookupVar (identName ident') pos
   when (arrayDims vt < length idxes) $
-    bad $ IndexingError (length idxes) (arrayDims vt) pos
+    bad $ IndexingError (arrayDims vt) (length idxes) pos
   vet <- elemType vt
   intype' <- intype `unifyWithKnown` vet
   restype' <- restype `unifyWithKnown` stripArray (length idxes) vt
