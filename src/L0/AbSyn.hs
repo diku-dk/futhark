@@ -509,7 +509,7 @@ instance Typed (Exp Type) where
   typeOf (Redomap2 redfun _ _ _ _ _ _) = typeOf redfun
   typeOf (Mapall2 fun es _ _ _) = 
       let etps  = map typeOf es 
-          inpdim= foldl (\x y -> min x y) 
+          inpdim= foldl min 
                         (arrayDims (head etps)) 
                         (map arrayDims (tail etps))
           fnrtp = typeOf fun 
