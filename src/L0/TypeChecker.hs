@@ -488,7 +488,7 @@ checkExp' (LetWith (Ident dest destt destpos) src idxes ve body pos) = do
   destt' <- destt `unifyWithKnown` identType src'
   let dest' = Ident dest destt' destpos
 
-  unless (unique $ typeOf src') $
+  unless (unique src' || basicType (typeOf src')) $
     bad $ TypeError pos "Source is not unique"
 
   case peelArray (length idxes) (identType src') of
