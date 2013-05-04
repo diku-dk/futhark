@@ -117,8 +117,8 @@ transformExp (Redomap redfun mapfun accexp arrexp intype _ loc) = do
   let index = Index arr [iv] intype intype loc
   mapfuncall <- transformLambda mapfun [index]
   redfuncall <- transformLambda redfun [accv, mapfuncall]
-  let loop = DoLoop (TupId [Id acc, Id arr] loc) (TupLit [accv, arrv] loc) i (Size arrv loc) loopbody accv loc
-      loopbody = LetWith arr arr [iv] redfuncall (TupLit [accv, arrv] loc) loc
+  let loop = DoLoop (Id acc) accv i (Size arrv loc) loopbody accv loc
+      loopbody = LetWith acc acc [] redfuncall accv loc
   return $ redlet loop
 transformExp e = return e
 
@@ -135,15 +135,24 @@ newReduction loc arrexp accexp = do
 
 newLet :: Exp Type -> String -> TransformM (Ident Type, Exp Type, Exp Type -> Exp Type)
 newLet e name = do
-  (x,xv) <- newVar name (typeOf e) loc
-  let xlet body = LetPat (Id x) e body loc
+  let e' = maybeCopy e
+  (x,xv) <- newVar name (typeOf e') loc
+  let xlet body = LetPat (Id x) e' body loc
   return (x, xv, xlet)
   where loc = srclocOf e
+
 
 newVar :: String -> Type -> SrcLoc -> TransformM (Ident Type, Exp Type)
 newVar name tp loc = do
   x <- new name
   return (Ident x tp loc, Var $ Ident x tp loc)
+
+-- | @maybeCopy e@ returns a copy expression containing @e@ if @e@ is
+-- not unique or a basic type, otherwise just returns @e@ itself.
+maybeCopy :: Exp Type -> Exp Type
+maybeCopy e
+  | unique e || basicType (typeOf e)  = e
+  | otherwise = Copy e $ srclocOf e
 
 transformLambda :: Lambda Type -> [Exp Type] -> TransformM (Exp Type)
 transformLambda (AnonymFun params body _ loc) args = do
