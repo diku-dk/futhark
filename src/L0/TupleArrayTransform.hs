@@ -108,7 +108,9 @@ transformExp (Index vname idxs intype outtype loc) = do
     (Tuple ets _ _, Tuple its _ _, Tuple ots _ _) -> do
       -- Create names for the elements of the tuple.
       names <- map fst <$> mapM (newVar "index_tup") ets
-      let indexing = TupLit (zipWith (\name (it,ot) -> Index name idxs' it ot loc) names (zip its ots)) loc
+      indexes' <- forM (zip3 names its ots) $ \(name, it, ot) ->
+                    transformExp $ Index name idxs' it ot loc
+      let indexing = TupLit indexes' loc
       return $ LetPat (TupId (map Id names) loc) (Var vname') indexing loc
     _ -> return $ Index vname' idxs' intype' outtype' loc
   where intype' = transformType intype
@@ -147,7 +149,8 @@ transformExp (Replicate ne ve loc) = do
       let arrexp v = Replicate nv v loc
           nlet body = LetPat (Id n) ne' body loc
           tuplet body = LetPat (TupId (map Id names) loc) ve' body loc
-      return $ nlet $ tuplet $ TupLit (map arrexp vs) loc
+      arrexps' <- mapM (transformExp . arrexp) vs
+      return $ nlet $ tuplet $ TupLit arrexps' loc
     _ -> return $ Replicate ne' ve' loc
 transformExp (Size e loc) = do
   e' <- transformExp e
