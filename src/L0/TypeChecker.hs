@@ -643,8 +643,7 @@ checkExp' (DoLoop mergepat mergeexp (Ident loopvar _ _)
   boundexp' <- require [Int pos] =<< checkExp boundexp
   (_, dataflow) <- checkloop firstscope
   (secondscope, _) <- checkBinding mergepat mergetype dataflow
-  (loopbody', dataflow') <- checkloop secondscope
-  tell dataflow'
+  (loopbody', _) <- checkloop secondscope
   secondscope $ do
     letbody' <- checkExp letbody
     return $ DoLoop mergepat' mergeexp' (Ident loopvar (Int pos) pos) boundexp' loopbody' letbody' pos
