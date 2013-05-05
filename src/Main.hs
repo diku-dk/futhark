@@ -31,6 +31,7 @@ data Pass = Pass {
 data L0Config = L0Config {
     l0pipeline :: [Pass]
   , l0action :: Prog Type -> IO ()
+  , l0checkAliases :: Bool
   , l0verbose :: Bool
 }
 
@@ -38,6 +39,7 @@ newL0Config :: L0Config
 newL0Config = L0Config {
                 l0pipeline = []
               , l0action = putStrLn . prettyPrint
+              , l0checkAliases = True
               , l0verbose = False
               }
 
@@ -48,6 +50,9 @@ commandLineOptions =
   [ Option "V" ["verbose"]
     (NoArg $ \opts -> opts { l0verbose = True })
     "Display verbose output on standard error."
+  , Option [] ["inhibit-uniqueness-checking"]
+    (NoArg $ \opts -> opts { l0checkAliases = False })
+    "Don't check that uniqueness constraints are being upheld."
   , Option "c" ["compile"]
     (NoArg $ \opts -> opts { l0action = putStrLn . compileProg })
     "Translate program into C and write it on standard output."
@@ -154,21 +159,28 @@ main = do args <- getArgs
                 Left err -> do hPutStrLn stderr err
                                exitWith $ ExitFailure 2
                 Right prog -> l0action config prog
-            (_, _, errs) -> do
-              prog <- getProgName
-              mapM_ (hPutStr stderr) errs
-              hPutStr stderr "\n"
-              hPutStr stderr $ usageInfo (prog ++ " [options] <file>") commandLineOptions
-              exitWith $ ExitFailure 1
+            (_, _, errs) -> usage errs
+
+usage :: [String] -> IO ()
+usage errs = do
+  prog <- getProgName
+  mapM_ (hPutStr stderr) errs
+  hPutStr stderr "\n"
+  hPutStr stderr $ usageInfo (prog ++ " [options] <file>") commandLineOptions
+  exitWith $ ExitFailure 1
 
 l0c :: L0Config -> FilePath -> String -> (String, Either String (Prog Type))
 l0c config filename srccode =
   case runWriter (runErrorT l0c') of
     (Left err, msgs) -> (msgs, Left err)
     (Right prog, msgs) -> (msgs, Right prog)
-  where l0c' :: L0CM (Prog Type)
+  where checkProg' :: TypeBox tf => Prog tf -> Either TypeError (Prog Type)
+        checkProg'
+          | l0checkAliases config = checkProg
+          | otherwise             = checkProgNoUniqueness
+        l0c' :: L0CM (Prog Type)
         l0c' = canFail (parseL0 filename srccode) >>=
-               canFail . checkProg >>=
+               canFail . checkProg' >>=
                pipeline
         pipeline = foldl comb return $ l0pipeline config
         comb prev pass prog = do
@@ -179,7 +191,7 @@ l0c config filename srccode =
             Left err ->
               throwError $ "Error during pass '" ++ passName pass ++ "':" ++ err
             Right prog'' ->
-              case checkProg prog'' of
+              case checkProg' prog'' of
                 Left err ->
                   throwError $ "Type error after pass '" ++
                   passName pass ++ "':\n" ++ show err ++
