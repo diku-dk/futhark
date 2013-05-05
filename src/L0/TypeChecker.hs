@@ -1,5 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module L0.TypeChecker ( checkProg
+                      , checkProgNoUniqueness
                       , TypeError(..))
   where
 
@@ -136,6 +137,7 @@ data TypeEnv = TypeEnv { envVtable :: M.Map String Type
                        -- ^ Invariant: every variable must alias
                        -- itself.
                        , envConsumed :: M.Map String SrcLoc
+                       , envCheckOccurences :: Bool
                        }
 
 data Usage = Observed SrcLoc
@@ -239,12 +241,18 @@ collectDataflow m = pass $ do
   (x, dataflow) <- listen m
   return ((x, dataflow), const mempty)
 
+checkOccurences :: Usages -> TypeM Usages
+checkOccurences us = do
+  check <- asks envCheckOccurences
+  if check then liftEither $ checkUsages us
+  else return us
+
 alternative :: TypeM a -> TypeM b -> TypeM (a,b)
 alternative m1 m2 = pass $ do
   (x, Dataflow occurs1 als1) <- listen m1
   (y, Dataflow occurs2 als2) <- listen m2
-  occurs1' <- liftEither $ checkUsages occurs1
-  occurs2' <- liftEither $ checkUsages occurs2
+  occurs1' <- checkOccurences occurs1
+  occurs2' <- checkOccurences occurs2
   let usage = Dataflow (M.unionWith max occurs1' occurs2') (als1 `mappend` als2)
   return ((x, y), const usage)
 
@@ -274,17 +282,18 @@ binding bnds = check bnds . local (`bindVars` bnds)
 
         check vars m = do
           (a, usages) <- collectOccurences (map identName vars) m
-          void $ liftEither $ checkUsages usages
+          void $ checkOccurences usages
           return a
 
 lookupVar :: String -> SrcLoc -> TypeM Type
 lookupVar name pos = do
   bnd <- asks $ M.lookup name . envVtable
   consumed <- asks $ M.lookup name . envConsumed
-  case (bnd, consumed) of
-    (_, Just wloc)    -> bad $ UseAfterConsume name pos wloc
-    (Nothing, _)      -> bad $ UnknownVariableError name pos
-    (Just t, Nothing) -> return t
+  check <- asks envCheckOccurences
+  case (bnd, consumed, check) of
+    (_, Just wloc, True) -> bad $ UseAfterConsume name pos wloc
+    (Nothing, _, _)      -> bad $ UnknownVariableError name pos
+    (Just t, _, _)       -> return t
 
 -- | Determine if two types are identical, ignoring uniqueness.
 -- Causes a 'TypeError' if they fail to match, and otherwise returns
@@ -336,12 +345,21 @@ propagateUniqueness t = t
 -- yielding either a type error or a program with complete type
 -- information.
 checkProg :: TypeBox tf => Prog tf -> Either TypeError (Prog Type)
-checkProg prog = do
+checkProg = checkProg' True
+
+-- | As 'checkProg', but don't check whether uniqueness constraints
+-- are being upheld.  The uniqueness of types must still be correct.
+checkProgNoUniqueness :: TypeBox tf => Prog tf -> Either TypeError (Prog Type)
+checkProgNoUniqueness = checkProg' False
+
+checkProg' :: TypeBox tf => Bool -> Prog tf -> Either TypeError (Prog Type)
+checkProg' checkoccurs prog = do
   ftable <- buildFtable
   let typeenv = TypeEnv { envVtable = M.empty
                         , envFtable = ftable
                         , envAliases = M.empty
                         , envConsumed = M.empty
+                        , envCheckOccurences = checkoccurs
                         }
   runTypeM typeenv $ mapM checkFun prog
   where
