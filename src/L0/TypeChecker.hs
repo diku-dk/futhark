@@ -122,6 +122,12 @@ instance Monoid Aliases where
   as `mappend` TupleAlias ass =
     TupleAlias (map (mappend as) ass)
 
+-- | Remove a variable from the alias set (presumably because it has
+-- gone out of scope).
+unalias :: String -> Aliases -> Aliases
+unalias name (VarAlias names) = VarAlias $ name `S.delete` names
+unalias name (TupleAlias alss) = TupleAlias $ map (unalias name) alss
+
 -- | All the variables represented in this aliasing.  Guaranteed not
 -- to contain duplicates.
 aliased :: Aliases -> [String]
@@ -173,7 +179,7 @@ seqUsages = M.unionWith comb
 data Dataflow = Dataflow {
     usageOccurences :: Usages
   , usageAliasing :: Aliases
-  }
+  } deriving (Show)
 
 instance Monoid Dataflow where
   mempty = Dataflow mempty mempty
@@ -220,14 +226,6 @@ consuming loc name m = do
   local consume' m
   where consume' env =
           env { envConsumed = M.insert name loc $ envConsumed env }
-
--- | Retrieve the variables referenced inside a computation.
-collectOccurences :: [String] -> TypeM a -> TypeM (a, M.Map String [Usage])
-collectOccurences names m = pass $ do
-  (x, usage) <- listen m
-  let (relevant, rest) = split $ usageOccurences usage
-  return ((x, relevant), const $ usage { usageOccurences = rest})
-    where split = M.partitionWithKey $ const . (`elem` names)
 
 collectAliases :: TypeM a -> TypeM (a, Aliases)
 collectAliases m = pass $ do
@@ -285,10 +283,24 @@ binding bnds = check bnds . local (`bindVars` bnds)
           env { envVtable = M.insert name tp $ envVtable env
               , envConsumed = M.delete name $ envConsumed env }
 
+        -- Check whether the bound variables have been used correctly
+        -- within their scope.
         check vars m = do
           (a, usages) <- collectOccurences (map identName vars) m
           void $ checkOccurences usages
           return a
+
+        -- Collect and remove all occurences in @names@.  Also remove
+        -- these names from aliasing information, since they are now
+        -- out of scope.
+        collectOccurences names m = pass $ do
+          (x, usage) <- listen m
+          let (relevant, rest) = split $ usageOccurences usage
+              newaliases = foldr unalias (usageAliasing usage) names
+          return ((x, relevant),
+                  const $ usage { usageOccurences = rest
+                                , usageAliasing = newaliases })
+          where split = M.partitionWithKey $ const . (`elem` names)
 
 lookupVar :: String -> SrcLoc -> TypeM Type
 lookupVar name pos = do
