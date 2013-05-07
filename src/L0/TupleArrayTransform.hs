@@ -158,7 +158,8 @@ transformExp (Size e loc) = do
     Tuple (et:ets) _ _ -> do
       (name, namev) <- newVar "size_tup" et
       names <- map fst <$> mapM (newVar "size_tup") ets
-      return $ LetPat (TupId (map Id $ name : names) loc) e' (Size namev loc) loc
+      size <- transformExp $ Size namev loc
+      return $ LetPat (TupId (map Id $ name : names) loc) e' size loc
     _ -> return $ Size e' loc
 transformExp (Unzip e _ _) = transformExp e
 transformExp (Zip es loc) =
@@ -186,15 +187,18 @@ transformExp (Split nexp arrexp eltype loc) = do
 transformExp (Concat x y eltype loc) = do
   x' <- transformExp x
   y' <- transformExp y
-  case transformType eltype of -- Both x and y have same type.
+  case transformType $ typeOf x' of -- Both x and y have same type.
     Tuple ets _ _ -> do
+      let arrelemts = map (stripArray 1) ets
       xnames <- map fst <$> mapM (newVar "concat_tup_x") ets
       ynames <- map fst <$> mapM (newVar "concat_tup_y") ets
       let letx body = LetPat (TupId (map Id xnames) loc) x' body loc
           lety body = LetPat (TupId (map Id ynames) loc) y' body loc
-          conc et (xarr, yarr) = Concat (Var xarr) (Var yarr) et loc
-      return $ letx $ lety $ TupLit (zipWith conc ets $ zip xnames ynames) loc
-    eltype' -> return $ Concat x' y' eltype' loc
+          conc et (xarr, yarr) = transformExp $
+            Concat (Var xarr) (Var yarr) et loc
+      concs <- zipWithM conc arrelemts $ zip xnames ynames
+      return $ letx $ lety $ TupLit concs loc
+    _ -> return $ Concat x' y' (transformType eltype) loc
 transformExp e = gmapM (mkM transformExp
                        `extM` (return . transformType)
                        `extM` mapM transformExp
