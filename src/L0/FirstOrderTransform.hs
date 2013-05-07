@@ -27,18 +27,13 @@ transformFunDec (fname, rettype, params, body, loc) = do
   return (fname, rettype, params, body', loc)
 
 transformExp :: Exp Type -> TransformM (Exp Type)
-transformExp (Map fun e intype outtype loc)
-  | intype == outtype = do
-  (i, iv) <- newVar "i" (Int loc) loc
-  (arr, arrv, arrlet) <- newLet e "arr"
-  let index = Index arr [iv] intype intype loc
-  funcall <- transformLambda fun [index]
-  let letbody = DoLoop (Id arr) arrv i (Size arrv loc) loopbody arrv loc
-      loopbody = LetWith arr arr [iv] funcall arrv loc
-  return $ arrlet letbody
-  | otherwise = do
-  -- We have to allocate a new array up front, as for-loops cannot
-  -- change the type of the array.
+transformExp (Map fun e intype outtype loc) = do
+  -- We have to allocate a new array up front.  This is a bit tricky,
+  -- as in case the new array is an array-of-arrays, we need to
+  -- compute the first element in order to get the proper size.  We
+  -- evaluate the function on the first element of the array and use
+  -- that to construct the array for the rest.  If the input array is
+  -- empty, we simply return an empty output array.
   (inarr, inarrv, inarrlet) <- newLet e "inarr"
   (i, iv) <- newVar "i" (Int loc) loc
   (_, nv, nlet) <- newLet (Size inarrv loc) "n"
