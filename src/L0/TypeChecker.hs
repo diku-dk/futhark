@@ -109,6 +109,7 @@ data Aliases = VarAlias (S.Set String)
              | TupleAlias [Aliases]
              -- ^ Aliasing information for specific components of a
              -- tuple.
+               deriving (Show)
 
 instance Monoid Aliases where
   mempty = VarAlias mempty
@@ -121,10 +122,11 @@ instance Monoid Aliases where
   as `mappend` TupleAlias ass =
     TupleAlias (map (mappend as) ass)
 
--- | All the variables represented in this aliasing.
+-- | All the variables represented in this aliasing.  Guaranteed not
+-- to contain duplicates.
 aliased :: Aliases -> [String]
 aliased (VarAlias names) = S.toList names
-aliased (TupleAlias ass) = concatMap aliased ass
+aliased (TupleAlias ass) = nub $ concatMap aliased ass
 
 -- | A pair of a variable table and a function table.  Type checking
 -- happens with access to this environment.  The function table is
@@ -134,8 +136,6 @@ aliased (TupleAlias ass) = concatMap aliased ass
 data TypeEnv = TypeEnv { envVtable :: M.Map String Type
                        , envFtable :: M.Map String FunBinding
                        , envAliases :: M.Map String Aliases
-                       -- ^ Invariant: every variable must alias
-                       -- itself.
                        , envConsumed :: M.Map String SrcLoc
                        , envCheckOccurences :: Bool
                        }
@@ -178,7 +178,7 @@ data Dataflow = Dataflow {
 instance Monoid Dataflow where
   mempty = Dataflow mempty mempty
   Dataflow m1 s1 `mappend` Dataflow m2 s2 =
-    Dataflow (M.unionWith (++) m1 m2) (s1 `mappend` s2)
+    Dataflow (M.unionWith (++) m1 m2) (s1 <> s2)
 
 -- | The type checker runs in this monad.  Note that it has no mutable
 -- state, but merely keeps track of current bindings in a 'TypeEnv'.
@@ -197,27 +197,26 @@ liftEither = either bad return
 
 -- | Proclaim that we have made read-only use of the given variable!
 observe :: Ident Type -> TypeM ()
-observe (Ident name _ loc) =
+observe (Ident name _ loc) = do
+  als <- aliases name
   tell $ mempty { usageOccurences = M.singleton name [Observed loc]
-                , usageAliasing = VarAlias (S.singleton name) }
+                , usageAliasing = als }
 
 alias :: Aliases -> TypeM ()
 alias al = tell $ mempty { usageAliasing = al }
 
 -- | Proclaim that we have written to the given variable.
-consume :: SrcLoc -> String -> TypeM ()
-consume loc name = do
-  als <- aliases name
-  tell $ mempty { usageOccurences =
-                    M.fromList [ (name', [Consumed loc])
-                                 | name' <- aliased als ] }
+consume :: SrcLoc -> Aliases -> TypeM ()
+consume loc als =
+  let occurs = M.fromList [ (name, [Consumed loc]) | name <- aliased als ]
+  in tell $ mempty { usageOccurences = occurs }
 
 -- | Proclaim that we have written to the given variable, and mark
 -- accesses to it and all of its aliases as invalid inside the given
 -- computation.
 consuming :: SrcLoc -> String -> TypeM a -> TypeM a
 consuming loc name m = do
-  consume loc name
+  consume loc =<< aliases name
   local consume' m
   where consume' env =
           env { envConsumed = M.insert name loc $ envConsumed env }
@@ -253,21 +252,27 @@ alternative m1 m2 = pass $ do
   (y, Dataflow occurs2 als2) <- listen m2
   occurs1' <- checkOccurences occurs1
   occurs2' <- checkOccurences occurs2
-  let usage = Dataflow (M.unionWith max occurs1' occurs2') (als1 `mappend` als2)
+  let usage = Dataflow (M.unionWith max occurs1' occurs2') (als1 <> als2)
   return ((x, y), const usage)
 
 aliasing :: String -> Aliases -> TypeM a -> TypeM a
 aliasing name als tm = do
-  als' <- mconcat <$> mapM aliases (aliased als)
-  let name' = VarAlias $ S.singleton name
-      -- Edges from name to als' and to itself.
-      outedges = M.insert name name' . M.insert name als'
+  als' <- transitive als -- Checkme: 'transitive' might not be necessary.
+  let name' = VarAlias (S.singleton name)
+      outedges = M.insert name als'
       -- Edges from everything in als' to name:
-      inedges m =  foldl (\m' v -> M.insert v name' m') m $ aliased als'
+      inedges m =  foldl (\m' v -> M.insertWith (<>) v name' m') m $ aliased als'
   local (\env -> env { envAliases = inedges $ outedges $ envAliases env }) tm
+  where transitive (VarAlias names) =
+          mconcat <$> mapM aliases (S.toList names)
+        transitive (TupleAlias names) =
+          TupleAlias <$> mapM transitive names
 
 aliases :: String -> TypeM Aliases
-aliases name = asks $ fromMaybe mempty . M.lookup name . envAliases
+aliases name = asks $ maybe name' reflexive . M.lookup name . envAliases
+  where name' = VarAlias $ S.singleton name
+        reflexive als | VarAlias _ <- als = als <> name'
+                      | otherwise         = als
 
 binding :: [Ident Type] -> TypeM a -> TypeM a
 binding bnds = check bnds . local (`bindVars` bnds)
@@ -488,7 +493,7 @@ checkExp' (Apply fname args t pos) = do
       args' <- forM (zip args $ cycle paramtypes) $ \(arg, paramt) ->
                  if unique paramt then do
                    (arg', dflow) <- collectDataflow $ checkExp arg
-                   mapM_ (consume pos) $ aliased $ usageAliasing dflow
+                   consume (srclocOf arg) $ usageAliasing dflow
                    return arg'
                  else checkExp arg
       checkApply (Just fname) paramtypes (map typeOf args') pos
