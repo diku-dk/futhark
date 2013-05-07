@@ -1,1 +1,1 @@
-fun [int] addtwo ([int] a) = map(op + (2), a)
+fun [int] main([int] a) = map(op + (2), a)

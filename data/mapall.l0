@@ -1,1 +1,1 @@
-fun [[real]] addtwo ([[int]] a) = mapall(toReal, a)
+fun [[real]] main([[int]] a) = mapall(toReal, a)
