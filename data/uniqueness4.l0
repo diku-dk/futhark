@@ -1,0 +1,10 @@
+// This test inspired by code often created by
+// arrays-of-tuples-to-tuple-of-arrays transformation.
+
+fun ( [  real  ] , [  real  ]  ) main(int n) =
+  loop (looparr = (replicate(n,0.0), replicate(n,0.0))) = for i < n  do
+    let (a, b) = looparr in
+    let a[ i ] = 0.0 in
+    let b[ i ] = 0.0 in
+    (a, b)
+  in looparr
