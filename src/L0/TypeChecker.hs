@@ -532,7 +532,7 @@ checkExp' (LetWith (Ident dest destt destpos) src idxes ve body pos) = do
     Just elemt ->
       sequentially (require [elemt] =<< checkExp ve) $ \ve' -> do
         (scope, _) <- checkBinding (Id dest') destt' mempty
-        body' <- consuming pos (identName src') $ scope $ checkExp body
+        body' <- consuming (srclocOf src) (identName src') $ scope $ checkExp body
         return $ LetWith dest' src' idxes' ve' body' pos
 
 checkExp' (Index ident idxes intype restype pos) = do
