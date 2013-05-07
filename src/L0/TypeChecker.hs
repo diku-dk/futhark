@@ -231,7 +231,9 @@ collectAliases :: TypeM a -> TypeM (a, Aliases)
 collectAliases m = pass $ do
   (x, usage) <- listen m
   return ((x, usageAliasing usage),
-          const $ usage { usageAliasing = mempty })
+          const $ usage { usageAliasing = blank $ usageAliasing usage })
+  where blank (VarAlias _) = VarAlias S.empty
+        blank (TupleAlias alss) = TupleAlias $ map blank alss
 
 collectDataflow :: TypeM a -> TypeM (a, Dataflow)
 collectDataflow m = pass $ do
