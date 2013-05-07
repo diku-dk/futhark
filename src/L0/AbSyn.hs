@@ -186,8 +186,10 @@ stripArray 0 t = t
 stripArray n (Array t _ _ _) = stripArray (n-1) t
 stripArray _ t = t
 
+-- | Change the types uniqueness attribute to represent a "deep copy".
 singular :: Type -> Type
 singular (Array et dims _ loc) = Array et dims Unique loc
+singular (Tuple ets _ loc) = Tuple (map singular ets) Unique loc
 singular t = t
 
 -- | A "blank" value of the given type - this is zero, or whatever is
