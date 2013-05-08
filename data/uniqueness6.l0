@@ -1,0 +1,6 @@
+fun [  int  ] main( [  int  ]  arr) =
+  let  newarr  =
+       (let notused  = arr in
+        replicate(size(arr) , 0)) in
+  let newarr[0] = 0 in
+  arr
