@@ -172,6 +172,9 @@ basicType (Array {}) = False
 basicType (Tuple ts _ _) = all basicType ts
 basicType _ = True
 
+uniqueOrBasic :: Typed t => t -> Bool
+uniqueOrBasic x = basicType (typeOf x) || unique x
+
 -- | @array n t@ is the type of @n@-dimensional arrays having @t@ as
 -- the base type.
 arrayType :: Int -> Type -> Uniqueness -> Type
@@ -186,11 +189,11 @@ stripArray 0 t = t
 stripArray n (Array t _ _ _) = stripArray (n-1) t
 stripArray _ t = t
 
--- | Change the types uniqueness attribute to represent a "deep copy".
-singular :: Type -> Type
-singular (Array et dims _ loc) = Array et dims Unique loc
-singular (Tuple ets _ loc) = Tuple (map singular ets) Unique loc
-singular t = t
+withUniqueness :: Type -> Uniqueness -> Type
+withUniqueness (Array et dims _ loc) u = Array et dims u loc
+withUniqueness (Tuple ets _ loc) u =
+  Tuple (map (`withUniqueness` u) ets) u loc
+withUniqueness t _ = t
 
 -- | A "blank" value of the given type - this is zero, or whatever is
 -- close to it.  Don't depend on this value, but use it for creating
@@ -479,14 +482,14 @@ instance Typed (Exp Type) where
   typeOf (Iota _ pos) = arrayType 1 (Int pos) Unique
   typeOf (Size _ pos) = Int pos
   typeOf (Replicate _ e _) = arrayType 1 (typeOf e) u
-    where u | unique (typeOf e) || basicType (typeOf e) = Unique
+    where u | uniqueOrBasic e = Unique
             | otherwise = Nonunique
   typeOf (Reshape shape e _) = build (length shape) (baseType $ typeOf e)
     where build 0 t = t
           build n t = build (n-1) (Array t Nothing Nonunique (srclocOf t))
   typeOf (Transpose e _) = typeOf e
   typeOf (Map _ a _ t _) = arrayType 1 t u
-    where u | unique t, unique a = Unique
+    where u | uniqueOrBasic t, unique a = Unique
             | otherwise = Nonunique
   typeOf (Reduce fun _ _ _ _) = typeOf fun
   typeOf (Zip es pos) = arrayType 1 (Tuple (map snd es) Unique pos) Nonunique
@@ -498,7 +501,7 @@ instance Typed (Exp Type) where
   typeOf (Redomap _ _ _ _ _ t _) = t
   typeOf (Split _ _ t pos) = Tuple [arrayType 1 t Nonunique, arrayType 1 t Nonunique] Unique pos
   typeOf (Concat _ _ t _) = arrayType 1 t Nonunique
-  typeOf (Copy e _) = singular $ typeOf e
+  typeOf (Copy e _) = typeOf e `withUniqueness` Unique
   typeOf (DoLoop _ _ _ _ _ body _) = typeOf body
 --- Begin SOAC2: (Cosmin) ---
   typeOf (Map2 _ _ _ (Tuple tps u _) pos) = Tuple (map (\x -> arrayType 1 x Unique) tps) u pos
