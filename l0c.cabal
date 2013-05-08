@@ -33,3 +33,5 @@ Executable l0c
   Default-Language:   Haskell2010
 
   Ghc-Options:        -Wall
+
+  Ghc-Prof-Options:   -prof -auto-all -rtsopts
