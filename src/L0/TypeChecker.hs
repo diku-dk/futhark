@@ -875,7 +875,7 @@ sequentially m1 m2 = do
   (a, m1flow) <- collectDataflow m1
   (b, m2flow) <- collectDataflow $ m2 a
   tell Dataflow {
-           usageAliasing = usageAliasing m1flow <> usageAliasing m2flow
+           usageAliasing = usageAliasing m2flow
          , usageOccurences = usageOccurences m1flow `seqUsages` usageOccurences m2flow
          }
   return b
