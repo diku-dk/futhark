@@ -27,7 +27,7 @@ transformFunDec (fname, rettype, params, body, loc) = do
   return (fname, rettype, params, body', loc)
 
 transformExp :: Exp Type -> TransformM (Exp Type)
-transformExp (Map fun e intype outtype loc) = do
+transformExp mape@(Map fun e intype outtype loc) = do
   -- We have to allocate a new array up front.  This is a bit tricky,
   -- as in case the new array is an array-of-arrays, we need to
   -- compute the first element in order to get the proper size.  We
@@ -37,8 +37,7 @@ transformExp (Map fun e intype outtype loc) = do
   (inarr, inarrv, inarrlet) <- newLet e "inarr"
   (i, iv) <- newVar "i" (Int loc) loc
   (_, nv, nlet) <- newLet (Size inarrv loc) "n"
-  let outarrt = Array outtype Nothing Nonunique loc
-      zero = Literal $ IntVal 0 loc
+  let zero = Literal $ IntVal 0 loc
       index0 = Index inarr [zero] intype intype loc
       index = Index inarr [iv] intype intype loc
   funcall0 <- transformLambda fun [index0]
@@ -46,7 +45,8 @@ transformExp (Map fun e intype outtype loc) = do
   (outarr, outarrv, outarrlet) <- newLet (Replicate nv funcall0 loc) "outarr"
   let branch = If (BinOp Less zero nv (Bool loc) loc)
                (outarrlet letbody)
-               (Literal (arrayVal [] outtype loc)) outarrt loc
+               (maybeCopy $ Literal (arrayVal [] outtype loc))
+               (typeOf mape) loc
       letbody = DoLoop (Id outarr) outarrv i nv loopbody outarrv loc
       loopbody = LetWith outarr outarr [iv] funcall outarrv loc
   return $ inarrlet $ nlet branch
