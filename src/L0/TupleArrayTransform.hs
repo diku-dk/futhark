@@ -47,18 +47,18 @@ transformType (Tuple elemts u loc) = Tuple (map transformType elemts) u loc
 transformType t = t -- All other types are fine.
 
 transformValue :: Value -> Value
-transformValue (ArrayVal arr et loc) =
+transformValue (ArrayVal arr et) =
   case transformType et of
     Tuple ets _ _
-      | [] <- A.elems arr -> TupVal [ arrayVal [] et' loc | et' <- ets ] loc
-      | otherwise         ->  TupVal (zipWith asarray ets $ transpose arrayvalues) loc
-    et'         -> ArrayVal arr et' loc
-  where asarray t vs = transformValue $ arrayVal vs t loc
+      | [] <- A.elems arr -> TupVal [ arrayVal [] et' | et' <- ets ]
+      | otherwise         ->  TupVal (zipWith asarray ets $ transpose arrayvalues)
+    et'         -> ArrayVal arr et'
+  where asarray t vs = transformValue $ arrayVal vs t
         arrayvalues = map (tupleValues . transformValue) $ A.elems arr
-        tupleValues (TupVal vs _) = vs
+        tupleValues (TupVal vs) = vs
         tupleValues _ = error "L0.TupleArrayTransform.transformValue: Element of tuple array is not tuple."
         -- Above should never happen in well-typed program.
-transformValue (TupVal vs loc) = TupVal (map transformValue vs) loc
+transformValue (TupVal vs) = TupVal (map transformValue vs)
 transformValue v = v
 
 transformPat :: TupIdent Type -> TupIdent Type
@@ -75,8 +75,8 @@ transformFun (fname,rettype,params,body,loc) = (fname, rettype', params', body',
         body' = runTransformM $ transformExp body
 
 transformExp :: Exp Type -> TransformM (Exp Type)
-transformExp (Literal val) =
-  return $ Literal $ transformValue val
+transformExp (Literal val loc) =
+  return $ Literal (transformValue val) loc
 transformExp (Var k) =
   return $ Var $ transformIdent k
 transformExp (TupLit es loc) = do

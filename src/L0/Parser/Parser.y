@@ -172,15 +172,15 @@ TypeIds : Type id ',' TypeIds
         | Type id       { let L pos (ID name) = $2 in [Ident name $1 pos] }
 ;
 
-Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal $ IntVal num pos }
-     | reallit        { let L pos (REALLIT num) = $1 in Literal $ RealVal num pos }
-     | charlit        { let L pos (CHARLIT char) = $1 in Literal $ CharVal char pos }
+Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal (IntVal num) pos }
+     | reallit        { let L pos (REALLIT num) = $1 in Literal (RealVal num) pos }
+     | charlit        { let L pos (CHARLIT char) = $1 in Literal (CharVal char) pos }
      | stringlit      { let L pos (STRINGLIT s) = $1
-                        in Literal $ ArrayVal (arrayFromList $ map (`CharVal` pos) s) (Char pos) pos }
-     | true           { Literal $ LogVal True $1 }
-     | false          { Literal $ LogVal False $1 }
+                        in Literal (ArrayVal (arrayFromList $ map CharVal s) (Char pos)) pos }
+     | true           { Literal (LogVal True) $1 }
+     | false          { Literal (LogVal False) $1 }
      | Id             { Var $1 }
-     | empty '(' Type ')' { Literal $ ArrayVal (arrayFromList []) $3 $1 }
+     | empty '(' Type ')' { Literal (ArrayVal (arrayFromList []) $3) $1 }
      | '{' Exps '}'   { ArrayLit $2 Nothing $1 }
      | TupleExp       { let (exps, pos) = $1 in TupLit exps pos }
 
@@ -315,23 +315,21 @@ Value : IntValue { $1 }
       | ArrayValue { $1 }
 
 
-IntValue : intlit        { let L pos (INTLIT num) = $1 in IntVal num pos }
-RealValue : reallit      { let L pos (REALLIT num) = $1 in RealVal num pos }
-CharValue : charlit      { let L pos (CHARLIT char) = $1 in CharVal char pos }
-StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in ArrayVal (arrayFromList $ map (`CharVal` pos) s) (Char pos) pos }
-LogValue : true          { LogVal True $1 }
-        | false          { LogVal False $1 }
+IntValue : intlit        { let L pos (INTLIT num) = $1 in IntVal num }
+RealValue : reallit      { let L pos (REALLIT num) = $1 in RealVal num }
+CharValue : charlit      { let L pos (CHARLIT char) = $1 in CharVal char }
+StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in ArrayVal (arrayFromList $ map CharVal s) (Char pos) }
+LogValue : true          { LogVal True }
+        | false          { LogVal False }
 ArrayValue :  '{' Values '}' { case combArrayTypes $ map typeOf $2 of
                                  Nothing -> error "Invalid array value"
-                                 Just ts -> ArrayVal (arrayFromList $2) ts $1 }
-TupleValue : TupleVal        { let (vals, pos) = $1 in TupVal vals pos }
+                                 Just ts -> ArrayVal (arrayFromList $2) ts }
+TupleValue : '(' Values2 ')'        { TupVal $2 }
 
 Values : Value ',' Values { $1 : $3 }
        | Value            { [$1] }
 
 Values2 : Value ',' Values { $1 : $3 }
-
-TupleVal : '(' Values2 ')' { ($2, $1) }
 
 {
 combArrayTypes :: [Type] -> Maybe Type

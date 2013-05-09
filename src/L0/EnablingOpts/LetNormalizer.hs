@@ -193,8 +193,8 @@ letNormExp (DoLoop mergepat mergeexp idd n loopbdy letbdy pos) = do
 ---- expression-free constructs ----
 ------------------------------------
 
-letNormExp e@(Literal _) = do return e
-letNormExp e@(Var     _) = do return e
+letNormExp e@(Literal _ _) = return e
+letNormExp e@(Var     _)   = return e
 
 -------------------------------------
 ---- expression-list constructs: ----

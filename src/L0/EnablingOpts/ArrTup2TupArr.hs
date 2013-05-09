@@ -122,42 +122,42 @@ arr2tupFun (fname, rettype, args, body, pos) = do
 ---- Normalizing a Value    ----
 --------------------------------
 
-arr2tupVal :: Value -> Arr2TupM Value
+arr2tupVal :: SrcLoc -> Value -> Arr2TupM Value
 
-arr2tupVal (TupVal tups pos) = do
-    tups' <- mapM arr2tupVal tups
-    let tupes = map (\x -> Literal x) tups' 
-    tup_res <- foldM flattenTups (Literal (TupVal [] pos)) tupes
+arr2tupVal loc (TupVal tups) = do
+    tups' <- mapM (arr2tupVal loc) tups
+    let tupes = map (\x -> Literal x loc) tups' 
+    tup_res <- foldM flattenTups (Literal (TupVal []) loc) tupes
     case tup_res of
-        Literal v@(TupVal {}) -> do return v
-        _ ->  badArr2TupM $ EnablingOptError pos ("In arr2tupVal of TupVal: flattening a TupVal"
+        Literal v@(TupVal {}) _ -> return v
+        _ ->  badArr2TupM $ EnablingOptError loc ("In arr2tupVal of TupVal: flattening a TupVal"
                                                   ++" does not result in a TupVal!!! ")
 
-arr2tupVal (ArrayVal els tp pos) = do
+arr2tupVal loc (ArrayVal els tp) = do
     let tp' = toTupArrType tp
-    els'   <- mapM arr2tupVal (A.elems els)
+    els'   <- mapM (arr2tupVal loc) (A.elems els)
     case (tp', head els') of
-        (Tuple tps' _ _, TupVal tupels _) -> do 
+        (Tuple tps' _ _, TupVal tupels) -> do 
             lstlst <- foldM concatTups (map (\x -> [x]) tupels) (tail els')
-            let tuparrs = map (\(x,y)->ArrayVal (A.listArray (0,(length els')-1) x) y pos) (zip lstlst tps')
-            return $ TupVal tuparrs pos
+            let tuparrs = map (\(x,y)->ArrayVal (A.listArray (0,(length els')-1) x) y) (zip lstlst tps')
+            return $ TupVal tuparrs
         (Tuple {}, _) ->
-            badArr2TupM $ EnablingOptError pos ("In arr2tupVal of ArrayVal: "
+            badArr2TupM $ EnablingOptError loc ("In arr2tupVal of ArrayVal: "
                                                 ++" element of Tuple Type NOT a Tuple Value!!! ")
-        _ -> return $ ArrayVal (A.listArray (0,(length els')-1) els') tp' pos   
+        _ -> return $ ArrayVal (A.listArray (0,(length els')-1) els') tp'
     where
         concatTups :: [[Value]] -> Value -> Arr2TupM [[Value]]
         concatTups acc e = case e of
-            TupVal tups _ -> 
+            TupVal tups ->
                 if length acc /= length tups
-                then badArr2TupM $ EnablingOptError pos ("In concatTups/arr2tupVal of ArrayVal: "
+                then badArr2TupM $ EnablingOptError loc ("In concatTups/arr2tupVal of ArrayVal: "
                                                          ++" two tuple elems of different length! ")
                 else do let res = zipWith (\ x y -> x ++ [y]) acc tups
                         return res
-            _ -> badArr2TupM $ EnablingOptError pos ("In concatTups/arr2tupVal of ArrayVal: "
+            _ -> badArr2TupM $ EnablingOptError loc ("In concatTups/arr2tupVal of ArrayVal: "
                                                      ++" element NOT of Tuple Type! ")
 
-arr2tupVal v = do return v
+arr2tupVal _ v = return v
 
 -----------------------------------------------------------------
 -----------------------------------------------------------------
@@ -174,13 +174,13 @@ arr2tupExp :: Exp Type -> Arr2TupM (Exp Type)
 -----------------------------------------
 -----------------------------------------
 
-arr2tupExp (Literal v) = do 
-    v' <- arr2tupVal v
-    return $ Literal v'
+arr2tupExp (Literal v loc) = do 
+    v' <- arr2tupVal loc v
+    return $ Literal v' loc
 
 arr2tupExp (TupLit tups pos) = do
     tups'   <- mapM arr2tupExp tups
-    tup_res <- foldM flattenTups (Literal (TupVal [] pos)) tups'
+    tup_res <- foldM flattenTups (Literal (TupVal []) pos) tups'
     return $ tup_res -- trace (ppExp 0 tup_res) tup_res    
 
 arr2tupExp (ArrayLit els tp pos) = do
@@ -212,11 +212,11 @@ arr2tupExp (ArrayLit els tp pos) = do
                                                          ++" two tuple elems of different length! ")
                 else do let res = zipWith (\ x y -> x ++ [y]) acc tups
                         return res
-            Literal (TupVal tups _) ->
+            Literal (TupVal tups) _ ->
                 if length acc /= length tups
                 then badArr2TupM $ EnablingOptError pos ("In concatTups/arr2tupExp of ArrayLit: "
                                                          ++" two tuple elems of different length! ")
-                else do let res = zipWith (\ x y -> x ++ [Literal y]) acc tups
+                else do let res = zipWith (\ x y -> x ++ [Literal y pos]) acc tups
                         return res                
             _ -> badArr2TupM $ EnablingOptError pos ("In concatTups/arr2tupExp of ArrayLit: "
                                                      ++" element NOT of Tuple Type! ")
@@ -839,25 +839,25 @@ flattenTups :: Exp Type -> Exp Type -> Arr2TupM (Exp Type)
 flattenTups (TupLit tups1 pos) (TupLit tups2 _) = do
     return $ TupLit (tups1++tups2) pos
 
-flattenTups (TupLit tups1 pos) (Literal (TupVal tupsv2 _)) = do
-    let tups2 = map (\x -> Literal x) tupsv2
+flattenTups (TupLit tups1 pos) (Literal (TupVal tupsv2) _) = do
+    let tups2 = map (\x -> Literal x pos) tupsv2
     return $ TupLit (tups1++tups2) pos
 
-flattenTups (Literal (TupVal tupsv1 pos)) (TupLit tups2 _) = do
-    let tups1 = map (\x -> Literal x) tupsv1
+flattenTups (Literal (TupVal tupsv1) pos) (TupLit tups2 _) = do
+    let tups1 = map (\x -> Literal x pos) tupsv1
     return $ TupLit (tups1++tups2) pos
 
-flattenTups (Literal (TupVal tups1 pos)) (Literal (TupVal tups2 _)) = do
-    return $ Literal $ TupVal (tups1++tups2) pos
+flattenTups (Literal (TupVal tups1) loc) (Literal (TupVal tups2) _) = do
+    return $ Literal (TupVal (tups1++tups2)) loc
 
 flattenTups (TupLit tups1 pos) e = do
     return $ TupLit (tups1++[e]) pos
 
-flattenTups (Literal (TupVal tups1 pos)) (Literal v) = do
-    return $ Literal $ TupVal (tups1++[v]) pos
+flattenTups (Literal (TupVal tups1) pos) (Literal v _) = do
+    return $ Literal (TupVal (tups1++[v])) pos
 
-flattenTups (Literal (TupVal tupsv1 pos)) e = do
-    let tups1 = map (\x -> Literal x) tupsv1
+flattenTups (Literal (TupVal tupsv1) pos) e = do
+    let tups1 = map (\x -> Literal x pos) tupsv1
     return $ TupLit (tups1++[e]) pos
 
 flattenTups arg1 _ = 

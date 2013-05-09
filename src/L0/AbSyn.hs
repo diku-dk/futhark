@@ -199,47 +199,39 @@ withUniqueness t _ = t
 -- close to it.  Don't depend on this value, but use it for creating
 -- arrays to be populated by do-loops.
 blankValue :: Type -> Value
-blankValue (Int loc) = IntVal 0 loc
-blankValue (Real loc) = RealVal 0.0 loc
-blankValue (Bool loc) = LogVal False loc
-blankValue (Char loc) = CharVal '\0' loc
-blankValue (Tuple ts _ loc) = TupVal (map blankValue ts) loc
-blankValue (Array et _ _ loc) = arrayVal [blankValue et] et loc
+blankValue (Int _) = IntVal 0
+blankValue (Real _) = RealVal 0.0
+blankValue (Bool _) = LogVal False
+blankValue (Char _) = CharVal '\0'
+blankValue (Tuple ts _ _) = TupVal (map blankValue ts)
+blankValue (Array et _ _ _) = arrayVal [blankValue et] et
 
 -- | Every possible value in L0.  Values are fully evaluated and their
 -- type is always unambiguous.
-data Value = IntVal !Int SrcLoc
-           | RealVal !Double SrcLoc
-           | LogVal !Bool SrcLoc
-           | CharVal !Char SrcLoc
-           | TupVal ![Value] SrcLoc
-           | ArrayVal !(Array Int Value) Type SrcLoc
+data Value = IntVal !Int
+           | RealVal !Double
+           | LogVal !Bool
+           | CharVal !Char
+           | TupVal ![Value]
+           | ArrayVal !(Array Int Value) Type
              -- ^ The type is the element type, not the complete array
              -- type.  It is assumed that the array is 0-indexed.
              deriving (Eq, Ord, Show, Typeable, Data)
 
 instance Typed Value where
-  typeOf (IntVal _ pos) = Int pos
-  typeOf (RealVal _ pos) = Real pos
-  typeOf (LogVal _ pos) = Bool pos
-  typeOf (CharVal _ pos) = Char pos
-  typeOf (TupVal vs pos) = Tuple (map typeOf vs) Nonunique pos
-  typeOf (ArrayVal _ t pos) = Array t Nothing Nonunique pos
-
-instance Located Value where
-  locOf (IntVal _ pos) = locOf pos
-  locOf (RealVal _ pos) = locOf pos
-  locOf (CharVal _ pos) = locOf pos
-  locOf (LogVal _ pos) = locOf pos
-  locOf (TupVal _ pos) = locOf pos
-  locOf (ArrayVal _ _ pos) = locOf pos
+  typeOf (IntVal _) = Int noLoc
+  typeOf (RealVal _) = Real noLoc
+  typeOf (LogVal _) = Bool noLoc
+  typeOf (CharVal _) = Char noLoc
+  typeOf (TupVal vs) = Tuple (map typeOf vs) Nonunique noLoc
+  typeOf (ArrayVal _ t) = Array t Nothing Nonunique noLoc
 
 -- | Return a list of the dimensions of an array (the shape, in other
 -- terms).  For non-arrays, this is the empty list.  A two-dimensional
 -- array with five rows and three columns would return the list @[5,
 -- 3]@.
 arrayShape :: Value -> [Int]
-arrayShape (ArrayVal arr t _) =
+arrayShape (ArrayVal arr t) =
   case elems arr of
     [] -> 0 : replicate (arrayDims t) 0
     (v:_) -> size : arrayShape v
@@ -248,28 +240,28 @@ arrayShape (ArrayVal arr t _) =
 arrayShape _ = []
 
 -- | Construct an array value containing the given elements.
-arrayVal :: [Value] -> Type -> SrcLoc -> Value
+arrayVal :: [Value] -> Type -> Value
 arrayVal vs = ArrayVal $ listArray (0, length vs-1) vs
 
-emptyArray :: Type -> SrcLoc -> Value
+emptyArray :: Type -> Value
 emptyArray = arrayVal []
 
 -- | If the given value is a nonempty array containing only
 -- characters, return the corresponding 'String', otherwise return
 -- 'Nothing'.
 arrayString :: Value -> Maybe String
-arrayString (ArrayVal arr _ _)
+arrayString (ArrayVal arr _)
   | c:cs <- elems arr = mapM asChar $ c:cs
-  where asChar (CharVal c _) = Just c
+  where asChar (CharVal c) = Just c
         asChar _ = Nothing
 arrayString _ = Nothing
 
 -- | Given an N-dimensional array, return a one-dimensional array
 -- with the same elements.
 flattenArray :: Value -> Value
-flattenArray (ArrayVal arr t pos) =
-  arrayVal (concatMap flatten $ elems arr) (baseType t) pos
-    where flatten (ArrayVal arr' _ _) = concatMap flatten $ elems arr'
+flattenArray (ArrayVal arr t) =
+  arrayVal (concatMap flatten $ elems arr) (baseType t)
+    where flatten (ArrayVal arr' _) = concatMap flatten $ elems arr'
           flatten v = [v]
 flattenArray v = v
 
@@ -298,7 +290,7 @@ instance Typed (Ident Type) where
 -- Specifically, the parser will produce expressions of type @Exp
 -- 'Maybe Type'@, and the type checker will convert these to @Exp
 -- 'Type'@, in which type information is always present.
-data Exp ty = Literal Value
+data Exp ty = Literal Value SrcLoc
             | TupLit    [Exp ty] SrcLoc
             -- ^ Tuple literals, e.g., (1+3, (x, y+z)).  Second
             -- argument is the tuple's type.
@@ -425,7 +417,7 @@ data Exp ty = Literal Value
               deriving (Eq, Ord, Show, Typeable, Data)
 
 instance Located (Exp ty) where
-  locOf (Literal val) = locOf val
+  locOf (Literal _ loc) = locOf loc
   locOf (TupLit _ pos) = locOf pos
   locOf (ArrayLit _ _ pos) = locOf pos
   locOf (BinOp _ _ _ _ pos) = locOf pos
@@ -465,7 +457,7 @@ instance Located (Exp ty) where
   locOf (Redomap2 _ _ _ _ _ _ pos) = locOf pos
 
 instance Typed (Exp Type) where
-  typeOf (Literal val) = typeOf val
+  typeOf (Literal val _) = typeOf val
   typeOf (TupLit es loc) = Tuple (map typeOf es) (mconcat $ map uniqueness es) loc
   typeOf (ArrayLit es t _) = arrayType 1 t $ mconcat $ map uniqueness es
   typeOf (BinOp _ _ _ t _) = t
@@ -569,11 +561,11 @@ opStr Leq = "<="
 -- true constant propagator, but a quick way to convert array/tuple
 -- literal expressions into literal values instead.
 expToValue :: Exp Type -> Maybe Value
-expToValue (Literal val) = Just val
-expToValue (TupLit es loc) = do es' <- mapM expToValue es
-                                Just $ TupVal es' loc
-expToValue (ArrayLit es et loc) = do es' <- mapM expToValue es
-                                     Just $ arrayVal es' et loc
+expToValue (Literal val _) = Just val
+expToValue (TupLit es _) = do es' <- mapM expToValue es
+                              Just $ TupVal es'
+expToValue (ArrayLit es et _) = do es' <- mapM expToValue es
+                                   Just $ arrayVal es' et
 expToValue _ = Nothing
 
 -- | Anonymous Function
@@ -624,20 +616,20 @@ tildes = map tilde
 
 -- | Pretty printing a value.
 ppValue :: Value -> String
-ppValue (IntVal n _)  = tildes (show n) ++ " "
-ppValue (RealVal n _) = tildes (show n) ++ " "
-ppValue (LogVal b _)  = show b ++ " "
-ppValue (CharVal c _) = show c ++ " "
-ppValue v@(ArrayVal arr t _)
+ppValue (IntVal n)  = tildes (show n) ++ " "
+ppValue (RealVal n) = tildes (show n) ++ " "
+ppValue (LogVal b)  = show b ++ " "
+ppValue (CharVal c) = show c ++ " "
+ppValue v@(ArrayVal arr t)
   | [] <- elems arr = " empty (" ++ ppType t ++ " ) "
   | Just s <- arrayString v = show s
   | otherwise = " { " ++ intercalate ", " (map ppValue $ elems arr) ++ " } "
-ppValue (TupVal vs _)   =
+ppValue (TupVal vs)   =
   " ( " ++ intercalate ", " (map ppValue vs) ++ " ) "
 
 -- | Pretty printing an expression
 ppExp :: TypeBox ty => Int -> Exp ty -> String
-ppExp _ (Literal val)     = ppValue val
+ppExp _ (Literal val _)     = ppValue val
 ppExp d (ArrayLit es _ _) =
   " { " ++ intercalate ", " (map (ppExp d) es) ++ " } "
 ppExp d (TupLit es _) =

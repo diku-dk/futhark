@@ -178,7 +178,7 @@ copyCtPropExp e@(Var (Ident vnm _ pos)) = do
     case bnd of
         Nothing                 -> return e
         Just (Constant v   _ _) -> if isBasicTypeVal v 
-                                   then changed $ Literal v 
+                                   then changed $ Literal v pos
                                    else return e
         Just (VarId  id' tp1 _) -> changed $ Var (Ident id' tp1 pos) -- or tp
         Just (SymArr e'    _ _) ->
@@ -200,7 +200,7 @@ copyCtPropExp eee@(Index idd@(Ident vnm tp p) inds tp1 tp2 pos) = do
     Just (VarId  id' _ _) -> changed $ Index (Ident id' tp p) inds' tp1 tp2 pos
     Just (Constant v _ _) -> 
       case v of
-        ArrayVal _ _ _ ->
+        ArrayVal _ _ ->
           let sh = arrayShape v 
           in case ctIndex inds' of
                Nothing -> return $ Index idd inds' tp1 tp2 pos
@@ -208,7 +208,7 @@ copyCtPropExp eee@(Index idd@(Ident vnm tp p) inds tp1 tp2 pos) = do
                  if (length iis == length sh)
                  then case getArrValInd v iis of
                         Nothing -> return $ Index idd inds' tp1 tp2 pos
-                        Just el -> changed $ Literal el
+                        Just el -> changed $ Literal el pos
                  else return $ Index idd inds' tp1 tp2 pos
         _ -> badCPropM $ TypeError pos  " indexing into a non-array value "
     Just (SymArr e' _ _) -> 
@@ -241,13 +241,13 @@ copyCtPropExp eee@(Index idd@(Ident vnm tp p) inds tp1 tp2 pos) = do
         (Replicate _ (Index a ais _ _ _) _, _:is') -> do
             inner <- copyCtPropExp (Index a (ais ++ is') tp1 tp2 pos)
             changed inner
-        (Replicate _ (Literal arr@(ArrayVal _ _ _)) _, _:is') -> do 
+        (Replicate _ (Literal arr@(ArrayVal _ _) _) _, _:is') -> do 
             case ctIndex is' of
                 Nothing -> return $ Index idd inds' tp1 tp2 pos
                 Just iis-> case getArrValInd arr iis of 
                                Nothing -> return $ Index idd inds' tp1 tp2 pos
-                               Just el -> changed $ Literal el
-        (Replicate _ val@(Literal _) _, _:is') -> do
+                               Just el -> changed $ Literal el pos
+        (Replicate _ val@(Literal _ _) _, _:is') -> do
             if null is' then changed val
             else badCPropM $ TypeError pos  " indexing into a basic type "
 
@@ -290,8 +290,8 @@ copyCtPropExp (Negate e tp pos) = do
     e'   <- copyCtPropExp e
     if( isValue e' ) 
     then case e' of
-            Literal (IntVal  v _) -> changed $ Literal (IntVal  (0  -v) pos)
-            Literal (RealVal v _) -> changed $ Literal (RealVal (0.0-v) pos)
+            Literal (IntVal  v) _ -> changed $ Literal (IntVal  (0  -v)) pos
+            Literal (RealVal v) _ -> changed $ Literal (RealVal (0.0-v)) pos
             _ -> badCPropM $ TypeError pos  " ~ operands not of (the same) numeral type! "
     else return $ Negate e' tp pos
 
@@ -299,7 +299,7 @@ copyCtPropExp (Not e pos) = do
     e'   <- copyCtPropExp e
     if( isValue e' ) 
     then case e' of
-            Literal (LogVal  v _) -> changed $ Literal (LogVal (not v) pos)
+            Literal (LogVal  v) _ -> changed $ Literal (LogVal (not v)) pos
             _ -> badCPropM $ TypeError pos  " not operands not of (the same) numeral type! "    
     else return $ Not e' pos
 
@@ -322,12 +322,12 @@ copyCtPropExp (Size e pos) = do
             vv <- asks $ M.lookup (identName idd) . envVtable
             case vv of
                 Just (SymArr (ArrayLit   els _ _) _ _) -> 
-                    changed $ Literal (IntVal (length els) pos) 
-                Just (Constant (ArrayVal arr _ _) _ _) -> 
-                    changed $ Literal (IntVal (length (elems arr)) pos)
+                    changed $ Literal (IntVal (length els)) pos 
+                Just (Constant (ArrayVal arr _) _ _) -> 
+                    changed $ Literal (IntVal (length (elems arr))) pos
                 _ -> return $ Size e' pos
         ArrayLit els _ _ ->  do
-            changed $ Literal (IntVal (length els) pos)
+            changed $ Literal (IntVal (length els)) pos
         _ ->  do return $ Size e' pos
 
 -----------------------------------------------------------
@@ -352,7 +352,7 @@ copyCtPropExp (Apply fname args tp pos) = do
            then do prg <- asks $ program
                    let vv = Interp.runFunNoTrace fname vals  prg
                    case vv of 
-                       (Right v) -> changed $ Literal v
+                       (Right v) -> changed $ Literal v pos
                        _ -> badCPropM $ EnablingOptError pos (" Interpreting fun " ++ 
                                                               fname ++ " yields error!")
            else do return $ Apply fname args' tp pos
@@ -363,9 +363,9 @@ copyCtPropExp (Apply fname args tp pos) = do
         allArgsAreValues []     = do return (True, [])
         allArgsAreValues (a:as) = 
             case a of
-                Literal v -> do (res, vals) <- allArgsAreValues as
-                                if res then do return (True,  v:vals)
-                                       else do return (False, []    )
+                Literal v _ -> do (res, vals) <- allArgsAreValues as
+                                  if res then do return (True,  v:vals)
+                                         else do return (False, []    )
                 Var idd   -> do vv <- asks $ M.lookup (identName idd) . envVtable
                                 case vv of
                                   Just (Constant v _ _) -> do
@@ -418,16 +418,16 @@ ctFoldBinOp e@(BinOp Plus e1 e2 _ pos) = do
     if isCt0 e1 then changed e2 else if isCt0 e2 then changed e1
     else if(isValue e1 && isValue e2)
          then case (e1, e2) of
-                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> changed $ Literal (IntVal  (v1+v2) pos)
-                (Literal (RealVal v1 _), Literal (RealVal v2 _)) -> changed $ Literal (RealVal (v1+v2) pos)
+                (Literal (IntVal  v1) _, Literal (IntVal  v2) _) -> changed $ Literal (IntVal  (v1+v2)) pos
+                (Literal (RealVal v1) _, Literal (RealVal v2) _) -> changed $ Literal (RealVal (v1+v2)) pos
                 _ -> badCPropM $ TypeError pos  " + operands not of (the same) numeral type! "
          else return e
 ctFoldBinOp e@(BinOp Minus e1 e2 _ pos) = do
     if isCt0 e2 then changed e1
     else if(isValue e1 && isValue e2)
          then case (e1, e2) of
-                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> changed $ Literal (IntVal  (v1-v2) pos)
-                (Literal (RealVal v1 _), Literal (RealVal v2 _)) -> changed $ Literal (RealVal (v1-v2) pos)
+                (Literal (IntVal  v1) _, Literal (IntVal  v2) _) -> changed $ Literal (IntVal  (v1-v2)) pos
+                (Literal (RealVal v1) _, Literal (RealVal v2) _) -> changed $ Literal (RealVal (v1-v2)) pos
                 _ -> badCPropM $ TypeError pos  " - operands not of (the same) numeral type! "
          else return e
 ctFoldBinOp e@(BinOp Times e1 e2 _ pos) = do
@@ -435,8 +435,8 @@ ctFoldBinOp e@(BinOp Times e1 e2 _ pos) = do
     else if isCt1 e1 then changed e2 else if isCt1 e2 then changed e1
     else if(isValue e1 && isValue e2)
          then case (e1, e2) of
-                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> changed $ Literal (IntVal  (v1*v2) pos)
-                (Literal (RealVal v1 _), Literal (RealVal v2 _)) -> changed $ Literal (RealVal (v1*v2) pos)
+                (Literal (IntVal  v1) _, Literal (IntVal  v2) _) -> changed $ Literal (IntVal  (v1*v2)) pos
+                (Literal (RealVal v1) _, Literal (RealVal v2) _) -> changed $ Literal (RealVal (v1*v2)) pos
                 _ -> badCPropM $ TypeError pos  " * operands not of (the same) numeral type! "
          else return e
 ctFoldBinOp e@(BinOp Divide e1 e2 _ pos) = do
@@ -445,41 +445,41 @@ ctFoldBinOp e@(BinOp Divide e1 e2 _ pos) = do
     else if isCt1 e2 then changed e1
     else if(isValue e1 && isValue e2)
          then case (e1, e2) of
-                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> changed $ Literal (IntVal  (div v1 v2) pos)
-                (Literal (RealVal v1 _), Literal (RealVal v2 _)) -> changed $ Literal (RealVal (v1 / v2)   pos)
+                (Literal (IntVal  v1) _, Literal (IntVal  v2) _) -> changed $ Literal (IntVal  (div v1 v2)) pos
+                (Literal (RealVal v1) _, Literal (RealVal v2) _) -> changed $ Literal (RealVal (v1 / v2)) pos
                 _ -> badCPropM $ TypeError pos  " / operands not of (the same) numeral type! "
          else return e
 ctFoldBinOp e@(BinOp Mod e1 e2 _ pos) = do
     if isCt0 e2 then badCPropM $ Div0Error pos
     else if(isValue e1 && isValue e2)
          then case (e1, e2) of
-                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> changed $ Literal (IntVal  (v1 `mod` v2) pos)
+                (Literal (IntVal  v1) _, Literal (IntVal  v2) _) -> changed $ Literal (IntVal  (v1 `mod` v2)) pos
                 _ -> badCPropM $ TypeError pos  " % operands not of integer type! "
          else return e
 ctFoldBinOp e@(BinOp Pow e1 e2 _ pos) = do
     if      isCt0 e1 || isCt1 e1 || isCt1 e2 then changed e1
     else if isCt0 e2 then case e1 of
-                            Literal (IntVal  _ _) -> changed $ Literal (IntVal  1   pos)
-                            Literal (RealVal _ _) -> changed $ Literal (RealVal 1.0 pos)
+                            Literal (IntVal  _) _ -> changed $ Literal (IntVal  1) pos
+                            Literal (RealVal _) _ -> changed $ Literal (RealVal 1.0) pos
                             _ -> badCPropM $ TypeError pos  " pow operands not of (the same) numeral type! "
     else if(isValue e1 && isValue e2)
          then case (e1, e2) of
-                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> changed $ Literal (IntVal  (v1 ^v2) pos)
-                (Literal (RealVal v1 _), Literal (RealVal v2 _)) -> changed $ Literal (RealVal (v1**v2) pos)
+                (Literal (IntVal v1) _, Literal (IntVal v2) _) -> changed $ Literal (IntVal  (v1 ^v2)) pos
+                (Literal (RealVal v1) _, Literal (RealVal v2) _) -> changed $ Literal (RealVal (v1**v2)) pos
                 _ -> badCPropM $ TypeError pos  " pow operands not of (the same) numeral type! "
          else return e
 ctFoldBinOp e@(BinOp ShiftL e1 e2 _ pos) = do
     if      isCt0 e2 then changed e1
     else if(isValue e1 && isValue e2)
          then case (e1, e2) of
-                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> changed $ Literal (IntVal  (shiftL v1 v2) pos)
+                (Literal (IntVal v1) _, Literal (IntVal v2) _) -> changed $ Literal (IntVal  (shiftL v1 v2)) pos
                 _ -> badCPropM $ TypeError pos  " << operands not of integer type! "
          else return e
 ctFoldBinOp e@(BinOp ShiftR e1 e2 _ pos) = do
     if      isCt0 e2 then changed e1
     else if(isValue e1 && isValue e2)
          then case (e1, e2) of
-                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> changed $ Literal (IntVal  (shiftR v1 v2) pos)
+                (Literal (IntVal v1) _, Literal (IntVal v2) _) -> changed $ Literal (IntVal  (shiftR v1 v2)) pos
                 _ -> badCPropM $ TypeError pos  " >> operands not of integer type! "
          else return e
 ctFoldBinOp e@(BinOp Band e1 e2 _ pos) = do
@@ -487,7 +487,7 @@ ctFoldBinOp e@(BinOp Band e1 e2 _ pos) = do
     else if isCt1 e1 then changed e2 else if isCt1 e2 then changed e1
     else if(isValue e1 && isValue e2)
          then case (e1, e2) of
-                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> changed $ Literal (IntVal  (v1 .&. v2) pos)
+                (Literal (IntVal  v1) _, Literal (IntVal v2) _) -> changed $ Literal (IntVal  (v1 .&. v2)) pos
                 _ -> badCPropM $ TypeError pos  " & operands not of integer type! "
          else return e
 ctFoldBinOp e@(BinOp Bor e1 e2 _ pos) = do
@@ -495,14 +495,14 @@ ctFoldBinOp e@(BinOp Bor e1 e2 _ pos) = do
     else if isCt1 e1 then changed e1 else if isCt1 e2 then changed e2
     else if(isValue e1 && isValue e2)
          then case (e1, e2) of
-                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> changed $ Literal (IntVal  (v1 .|. v2) pos)
+                (Literal (IntVal v1) _, Literal (IntVal v2) _) -> changed $ Literal (IntVal  (v1 .|. v2)) pos
                 _ -> badCPropM $ TypeError pos  " | operands not of integer type! "
          else return e
 ctFoldBinOp e@(BinOp Xor e1 e2 _ pos) = do
     if      isCt0 e1 then changed e2 else if isCt0 e2 then return e1
     else if(isValue e1 && isValue e2)
          then case (e1, e2) of
-                (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> changed $ Literal (IntVal  (xor v1 v2) pos)
+                (Literal (IntVal v1) _, Literal (IntVal v2) _) -> changed $ Literal (IntVal  (xor v1 v2)) pos
                 _ -> badCPropM $ TypeError pos  " ^ operands not of integer type! "
          else return e
 ctFoldBinOp e@(And e1 e2 pos) = do
@@ -510,7 +510,7 @@ ctFoldBinOp e@(And e1 e2 pos) = do
     else if isCt1 e1 then changed e2 else if isCt1 e2 then changed e1
     else if(isValue e1 && isValue e2)
          then case (e1, e2) of
-                (Literal (LogVal  v1 _), Literal (LogVal  v2 _)) -> changed $ Literal (LogVal  (v1 && v2) pos)
+                (Literal (LogVal  v1) _, Literal (LogVal  v2) _) -> changed $ Literal (LogVal  (v1 && v2)) pos
                 _ -> badCPropM $ TypeError pos  " && operands not of boolean type! "
          else return e
 ctFoldBinOp e@(Or e1 e2 pos) = do
@@ -518,7 +518,7 @@ ctFoldBinOp e@(Or e1 e2 pos) = do
     else if isCt1 e1 then changed e1 else if isCt1 e2 then changed e2
     else if(isValue e1 && isValue e2)
          then case (e1, e2) of
-                (Literal (LogVal  v1 _), Literal (LogVal  v2 _)) -> changed $ Literal (LogVal  (v1 || v2) pos)
+                (Literal (LogVal  v1) _, Literal (LogVal  v2) _) -> changed $ Literal (LogVal  (v1 || v2)) pos
                 _ -> badCPropM $ TypeError pos  " || operands not of boolean type! "
          else return e
 
@@ -526,10 +526,10 @@ ctFoldBinOp e@(BinOp Equal e1 e2 _ pos) = do
     if(isValue e1 && isValue e2) then
       case (e1, e2) of
         -- for numerals we could build node e1-e2, simplify and test equality with 0 or 0.0!
-        (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> changed $ Literal (LogVal (v1==v2) pos)
-        (Literal (RealVal v1 _), Literal (RealVal v2 _)) -> changed $ Literal (LogVal (v1==v2) pos)
-        (Literal (LogVal  v1 _), Literal (LogVal  v2 _)) -> changed $ Literal (LogVal (v1==v2) pos)
-        (Literal (CharVal v1 _), Literal (CharVal v2 _)) -> changed $ Literal (LogVal (v1==v2) pos)
+        (Literal (IntVal  v1) _, Literal (IntVal  v2) _) -> changed $ Literal (LogVal (v1==v2)) pos
+        (Literal (RealVal v1) _, Literal (RealVal v2) _) -> changed $ Literal (LogVal (v1==v2)) pos
+        (Literal (LogVal  v1) _, Literal (LogVal  v2) _) -> changed $ Literal (LogVal (v1==v2)) pos
+        (Literal (CharVal v1) _, Literal (CharVal v2) _) -> changed $ Literal (LogVal (v1==v2)) pos
         --(Literal (TupVal  v1 _), Literal (TupVal  v2 _)) -> return (True, Literal (LogVal (v1==v2) pos))
         _ -> badCPropM $ TypeError pos  " equal operands not of (the same) basic type! "
     else return e
@@ -537,10 +537,10 @@ ctFoldBinOp e@(BinOp Less e1 e2 _ pos) = do
     if(isValue e1 && isValue e2) then
       case (e1, e2) of
         -- for numerals we could build node e1-e2, simplify and compare with 0 or 0.0!
-        (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> changed $ Literal (LogVal (v1<v2) pos)
-        (Literal (RealVal v1 _), Literal (RealVal v2 _)) -> changed $ Literal (LogVal (v1<v2) pos)
-        (Literal (LogVal  v1 _), Literal (LogVal  v2 _)) -> changed $ Literal (LogVal (v1<v2) pos)
-        (Literal (CharVal v1 _), Literal (CharVal v2 _)) -> changed $ Literal (LogVal (v1<v2) pos)
+        (Literal (IntVal  v1) _, Literal (IntVal  v2) _) -> changed $ Literal (LogVal (v1<v2)) pos
+        (Literal (RealVal v1) _, Literal (RealVal v2) _) -> changed $ Literal (LogVal (v1<v2)) pos
+        (Literal (LogVal  v1) _, Literal (LogVal  v2) _) -> changed $ Literal (LogVal (v1<v2)) pos
+        (Literal (CharVal v1) _, Literal (CharVal v2) _) -> changed $ Literal (LogVal (v1<v2)) pos
         --(Literal (TupVal  v1 _), Literal (TupVal  v2 _)) -> return (True, Literal (LogVal (v1<v2) pos))
         _ -> badCPropM $ TypeError pos  " less-than operands not of (the same) basic type! "
     else return e
@@ -548,11 +548,11 @@ ctFoldBinOp e@(BinOp Leq e1 e2 _ pos) = do
     if(isValue e1 && isValue e2) then
       case (e1, e2) of
         -- for numerals we could build node e1-e2, simplify and compare with 0 or 0.0!
-        (Literal (IntVal  v1 _), Literal (IntVal  v2 _)) -> changed $ Literal (LogVal (v1<=v2) pos)
-        (Literal (RealVal v1 _), Literal (RealVal v2 _)) -> changed $ Literal (LogVal (v1<=v2) pos)
-        (Literal (LogVal  v1 _), Literal (LogVal  v2 _)) -> changed $ Literal (LogVal (v1<=v2) pos)
-        (Literal (CharVal v1 _), Literal (CharVal v2 _)) -> changed $ Literal (LogVal (v1<=v2) pos)
-        --(Literal (TupVal  v1 _), Literal (TupVal  v2 _)) -> return (True, Literal (LogVal (v1<=v2) pos))
+        (Literal (IntVal  v1 ) _, Literal (IntVal  v2 ) _) -> changed $ Literal (LogVal (v1<=v2)) pos
+        (Literal (RealVal v1 ) _, Literal (RealVal v2 ) _) -> changed $ Literal (LogVal (v1<=v2)) pos
+        (Literal (LogVal  v1 ) _, Literal (LogVal  v2 ) _) -> changed $ Literal (LogVal (v1<=v2)) pos
+        (Literal (CharVal v1 ) _, Literal (CharVal v2 ) _) -> changed $ Literal (LogVal (v1<=v2)) pos
+        --(Literal (TupVal  v1 ) _, Literal (TupVal  v2 ) _) -> return (True, Literal (LogVal (v1<=v2)) pos)
         _ -> badCPropM $ TypeError pos  " less-than-or-equal operands not of (the same) basic type! "
     else return e
 ctFoldBinOp e = return e
@@ -566,20 +566,20 @@ ctFoldBinOp e = return e
 
 isValue :: TypeBox tf => Exp tf -> Bool
 isValue e = case e of
-              Literal _ -> True
-              _         -> False 
+              Literal _ _ -> True
+              _           -> False
 
 isCt1 :: TypeBox tf => Exp tf -> Bool
 isCt1 e = case e of
-            Literal (IntVal  one _)  -> (one == 1  )
-            Literal (RealVal one _)  -> (one == 1.0)
-            Literal (LogVal True _)  -> True
-            _                        -> False
+            Literal (IntVal  one) _ -> one == 1
+            Literal (RealVal one) _ -> one == 1.0
+            Literal (LogVal True) _ -> True
+            _                       -> False
 isCt0 :: TypeBox tf => Exp tf -> Bool
 isCt0 e = case e of
-            Literal (IntVal  zr   _) -> (zr == 0  )
-            Literal (RealVal zr   _) -> (zr == 0.0)
-            Literal (LogVal False _) -> True
+            Literal (IntVal  zr) _   -> zr == 0
+            Literal (RealVal zr) _   -> zr == 0.0
+            Literal (LogVal False) _ -> True
             _                        -> False
 
 ----------------------------------------------------
@@ -587,16 +587,10 @@ isCt0 e = case e of
 ----------------------------------------------------
 
 isBasicTypeVal :: Value -> Bool
-isBasicTypeVal (IntVal     _ _) = True
-isBasicTypeVal (RealVal    _ _) = True
-isBasicTypeVal (LogVal     _ _) = True
-isBasicTypeVal (CharVal    _ _) = True
-isBasicTypeVal (ArrayVal _ _ _) = False
-isBasicTypeVal (TupVal    vs _) = 
-    foldl (&&) True (map isBasicTypeVal vs)
+isBasicTypeVal = basicType . typeOf
 
 isCtOrCopy :: TypeBox tf => Exp tf -> Bool
-isCtOrCopy (Literal  val   ) = isBasicTypeVal val
+isCtOrCopy (Literal  val _ ) = isBasicTypeVal val
 isCtOrCopy (TupLit   ts _  ) = foldl (&&) True (map isCtOrCopy ts)
 isCtOrCopy (Var           _) = True
 isCtOrCopy (Iota        _ _) = True
@@ -608,7 +602,7 @@ isRemovablePat (Id _) e =
  let s=case e of
         Var     _         -> True
         Index   _ _ _ _ _ -> True
-        Literal v         -> isBasicTypeVal v
+        Literal v _       -> isBasicTypeVal v
         TupLit  _ _       -> isCtOrCopy e     -- False
 --      DO NOT INLINE IOTA
         Iota    _ _       -> True
@@ -620,19 +614,19 @@ isRemovablePat (TupId tups _) e =
           Var (Ident vnm _ _)      -> do
               bnd <- asks $ M.lookup vnm . envVtable
               case bnd of
-                  Just (Constant val@(TupVal ts   _) _ _) -> 
+                  Just (Constant val@(TupVal ts) _ _) ->
                       return ( isBasicTypeVal val && length ts == length tups )
                   Just (SymArr   tup@(TupLit ts _  ) _ _) -> 
                       return ( isCtOrCopy tup && length ts == length tups ) 
                   _ ->  return False
           TupLit  _ _              -> return (isCtOrCopy     e  )
-          Literal val@(TupVal _ _) -> return (isBasicTypeVal val)
+          Literal val@(TupVal _) _ -> return (isBasicTypeVal val)
           _ -> return False
 
 getPropBnds :: TypeBox tf => TupIdent tf -> Exp tf -> Bool -> CPropM tf [(String,CtOrId tf)]
 getPropBnds ( Id (Ident var tp pos) ) e to_rem = 
   let r = case e of
-            Literal v            -> [(var, (Constant v (boxType (typeOf v)) to_rem))]
+            Literal v _          -> [(var, (Constant v (boxType (typeOf v)) to_rem))]
             Var (Ident id1 tp1 _)-> [(var, (VarId  id1 tp1 to_rem))]
             Index   _ _ _ _ _    -> [(var, (SymArr e   tp  to_rem))]
             TupLit     _  _      -> [(var, (SymArr e   tp  to_rem))]
@@ -650,16 +644,16 @@ getPropBnds pat@(TupId ids _) e to_rem =
             then do lst <- mapM  (\(x,y)->getPropBnds x y to_rem) (zip ids ts)
                     return (foldl (++) [] lst)
             else return []
-        Literal (TupVal ts _) ->
+        Literal (TupVal ts) loc ->
             if( length ids == length ts )
-            then do lst <- mapM (\(x,y)->getPropBnds x (Literal y) to_rem) (zip ids ts)
+            then do lst <- mapM (\(x,y)->getPropBnds x (Literal y loc) to_rem) (zip ids ts)
                     return (foldl (++) [] lst)
             else return []
-        Var (Ident vnm _ _)   -> do 
+        Var (Ident vnm _ loc)   -> do 
             bnd <- asks $ M.lookup vnm . envVtable
             case bnd of
-                Just (SymArr tup@(TupLit   _ _) _ _) -> getPropBnds pat tup           to_rem
-                Just (Constant tup@(TupVal _ _) _ _) -> getPropBnds pat (Literal tup) to_rem 
+                Just (SymArr tup@(TupLit   _ _) _ _) -> getPropBnds pat tup               to_rem
+                Just (Constant tup@(TupVal _) _ _)   -> getPropBnds pat (Literal tup loc) to_rem 
                 _                                    -> return []
         _ -> return []
 
@@ -667,7 +661,7 @@ ctIndex :: TypeBox tf => [Exp tf] -> Maybe [Int]
 ctIndex []     = Just []
 ctIndex (i:is) = 
   case i of
-    Literal (IntVal ii _) ->  
+    Literal (IntVal ii) _ ->
       let x = ctIndex is in
       case x of
         Nothing -> Nothing
@@ -676,14 +670,14 @@ ctIndex (i:is) =
 
 getArrValInd :: Value -> [Int] -> Maybe Value
 getArrValInd v [] = if isBasicTypeVal v then Just v else Nothing 
-getArrValInd (ArrayVal arr _ _) (i:is) = getArrValInd (arr ! i) is
+getArrValInd (ArrayVal arr _) (i:is) = getArrValInd (arr ! i) is
 getArrValInd _ _ = Nothing 
 
 getArrLitInd :: TypeBox tf => Exp tf -> [Int] -> Maybe (Exp tf)
 getArrLitInd e [] = if isCtOrCopy e then Just e else Nothing 
 getArrLitInd (ArrayLit els _ _) (i:is) = getArrLitInd (els !! i) is
-getArrLitInd (Literal arr@(ArrayVal _ _ _)) (i:is) = 
+getArrLitInd (Literal arr@(ArrayVal _ _) loc) (i:is) = 
     case getArrValInd arr (i:is) of
         Nothing -> Nothing
-        Just v  -> Just (Literal v) 
+        Just v  -> Just (Literal v loc)
 getArrLitInd _ _ = Nothing 

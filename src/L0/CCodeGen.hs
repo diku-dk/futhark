@@ -333,26 +333,26 @@ compileFun (fname, rettype, args, body, _) = do
 
 compileValue :: C.Exp -> Value -> CompilerM C.Stm
 
-compileValue place (IntVal k _) =
+compileValue place (IntVal k) =
   return [C.cstm|$exp:place = $int:k;|]
 
-compileValue place (RealVal x _) =
+compileValue place (RealVal x) =
   return [C.cstm|$exp:place = $double:(toRational x);|]
 
-compileValue place (LogVal b _) =
+compileValue place (LogVal b) =
   return [C.cstm|$exp:place = $int:b';|]
   where b' :: Int
         b' = if b then 1 else 0
 
-compileValue place (CharVal c _) =
+compileValue place (CharVal c) =
   return [C.cstm|$exp:place = $char:c;|]
 
-compileValue place (TupVal vs _) = do
+compileValue place (TupVal vs) = do
   vs' <- forM (zip vs [(0::Int)..]) $ \(v, i) ->
            compileValue (tupleFieldExp place i) v
   return [C.cstm|{$stms:vs'}|]
 
-compileValue place v@(ArrayVal _ et _) = do
+compileValue place v@(ArrayVal _ et) = do
   val <- new "ArrayVal"
   dt <- new "ArrayData"
   ct <- typeToCType $ typeOf v
@@ -372,17 +372,17 @@ compileValue place v@(ArrayVal _ et _) = do
                                                       compVarDefinitions s
                                }
   return [C.cstm|$exp:place = $id:val;|]
-  where elemInit (ArrayVal arr _ _) = concatMap elemInit $ A.elems arr
-        elemInit (IntVal x _) = [[C.cinit|$int:x|]]
-        elemInit (RealVal x _) = [[C.cinit|$double:(toRational x)|]]
-        elemInit (CharVal c _) = [[C.cinit|$char:c|]]
-        elemInit (LogVal True _) = [[C.cinit|1|]]
-        elemInit (LogVal False _) = [[C.cinit|0|]]
-        elemInit (TupVal _ _) = error "Array-of-tuples encountered in code generator."
+  where elemInit (ArrayVal arr _) = concatMap elemInit $ A.elems arr
+        elemInit (IntVal x) = [[C.cinit|$int:x|]]
+        elemInit (RealVal x) = [[C.cinit|$double:(toRational x)|]]
+        elemInit (CharVal c) = [[C.cinit|$char:c|]]
+        elemInit (LogVal True) = [[C.cinit|1|]]
+        elemInit (LogVal False) = [[C.cinit|0|]]
+        elemInit (TupVal _) = error "Array-of-tuples encountered in code generator."
 
 compileExp :: C.Exp -> Exp Type -> CompilerM C.Stm
 
-compileExp place (Literal val) =
+compileExp place (Literal val _) =
   compileValue place val
 
 compileExp place (Var (Ident name _ _)) = do
