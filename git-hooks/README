@@ -1,0 +1,5 @@
+These are hooks to make it more pleasant to work with Git.
+
+You should symlink (or copy) each of the hooks in this directory into
+your .git/hooks/ directory.  Doing this automatically would constitute
+a security risk, so you'll have to do it manually.
