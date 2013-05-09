@@ -154,13 +154,13 @@ Fun :     Type id '(' TypeIds ')' '=' Exp
 Uniqueness : '*' { Unique }
            |     { Nonunique }
 
-Type :	  int                    { Int   $1    }
-        | real                   { Real  $1    }
-        | bool                   { Bool  $1    }
-        | char                   { Char  $1    }
-        | '(' Types ')'          { Tuple $2 $1 }
-        | Uniqueness '[' Type ']' { Array $3 Nothing $1 $2 }
-        | Uniqueness '[' Type ',' Exp ']' { Array $3 (Just $5) $1 $2 }
+Type :	  int                    { Int      }
+        | real                   { Real     }
+        | bool                   { Bool     }
+        | char                   { Char     }
+        | '(' Types ')'          { Tuple $2 }
+        | Uniqueness '[' Type ']' { Array $3 Nothing $1 }
+        | Uniqueness '[' Type ',' Exp ']' { Array $3 (Just $5) $1 }
 ;
 
 Types : Type ',' Types { $1 : $3 }
@@ -176,7 +176,7 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal (IntVal num) pos 
      | reallit        { let L pos (REALLIT num) = $1 in Literal (RealVal num) pos }
      | charlit        { let L pos (CHARLIT char) = $1 in Literal (CharVal char) pos }
      | stringlit      { let L pos (STRINGLIT s) = $1
-                        in Literal (ArrayVal (arrayFromList $ map CharVal s) (Char pos)) pos }
+                        in Literal (ArrayVal (arrayFromList $ map CharVal s) Char) pos }
      | true           { Literal (LogVal True) $1 }
      | false          { Literal (LogVal False) $1 }
      | Id             { Var $1 }
@@ -318,7 +318,7 @@ Value : IntValue { $1 }
 IntValue : intlit        { let L pos (INTLIT num) = $1 in IntVal num }
 RealValue : reallit      { let L pos (REALLIT num) = $1 in RealVal num }
 CharValue : charlit      { let L pos (CHARLIT char) = $1 in CharVal char }
-StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in ArrayVal (arrayFromList $ map CharVal s) (Char pos) }
+StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in ArrayVal (arrayFromList $ map CharVal s) Char }
 LogValue : true          { LogVal True }
         | false          { LogVal False }
 ArrayValue :  '{' Values '}' { case combArrayTypes $ map typeOf $2 of

@@ -75,28 +75,20 @@ instance Monoid Uniqueness where
 
 -- | L0 Types: Int, Bool, Char, Tuple, multidim-regular Array
 --  TODO: please add float, double, long int, etc.
-data Type = Int SrcLoc
-          | Bool SrcLoc
-          | Char SrcLoc
-          | Real SrcLoc
-          | Tuple [Type] SrcLoc
-          | Array Type (Maybe (Exp (Maybe Type))) Uniqueness SrcLoc -- ^ 1st arg: array's element type, 2nd arg: its length
+data Type = Int
+          | Bool
+          | Char
+          | Real
+          | Tuple [Type]
+          | Array Type (Maybe (Exp (Maybe Type))) Uniqueness -- ^ 1st arg: array's element type, 2nd arg: its length
             deriving (Eq, Ord, Show, Typeable, Data)
-
-instance Located Type where
-  locOf (Int loc) = locOf loc
-  locOf (Bool loc) = locOf loc
-  locOf (Char loc) = locOf loc
-  locOf (Real loc) = locOf loc
-  locOf (Tuple _ loc) = locOf loc
-  locOf (Array _ _ _ loc) = locOf loc
 
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
 -- it is two, and so forth.
 arrayDims :: Type -> Int
-arrayDims (Array t _ _ _) = 1 + arrayDims t
-arrayDims _               = 0
+arrayDims (Array t _ _) = 1 + arrayDims t
+arrayDims _             = 0
 
 -- | @x `subuniqueOf` y@ is true if @x@ is not less unique than @y@.
 subuniqueOf :: Uniqueness -> Uniqueness -> Bool
@@ -106,9 +98,9 @@ subuniqueOf _ _ = True
 -- | @x \`subtypeOf\` y@ is true if @x@ is a subtype of @y@ (or equal to
 -- @y@), meaning @x@ is valid whenever @y@ is.
 subtypeOf :: Type -> Type -> Bool
-subtypeOf (Array t1 _ u1 _) (Array t2 _ u2 _) =
+subtypeOf (Array t1 _ u1) (Array t2 _ u2) =
   u1 `subuniqueOf` u2 && t1 `subtypeOf` t2
-subtypeOf (Tuple ts1 _) (Tuple ts2 _) =
+subtypeOf (Tuple ts1) (Tuple ts2) =
   and $ zipWith subtypeOf ts1 ts2
 subtypeOf t1 t2 = t1 == t2
 
@@ -120,7 +112,7 @@ similarTo t1 t2 = t1 `subtypeOf` t2 || t2 `subtypeOf` t1
 -- | Return the uniqueness of a type.
 uniqueness :: Typed a => a -> Uniqueness
 uniqueness = uniqueness' . typeOf
-  where uniqueness' (Array _ _ u _) = u
+  where uniqueness' (Array _ _ u) = u
         uniqueness' _ = Nonunique
 
 -- | @unique t@ is 'True' if the type of the argument is unique.
@@ -156,19 +148,19 @@ instance Typed Type where
 -- than @n@ dimensions.
 peelArray :: Int -> Type -> Maybe Type
 peelArray 0 t = Just t
-peelArray n (Array t _ _ _) = peelArray (n-1) t
+peelArray n (Array t _ _) = peelArray (n-1) t
 peelArray _ _ = Nothing
 
 -- | Returns the bottommost type of an array.
 baseType :: Type -> Type
-baseType (Array t _ _ _) = baseType t
+baseType (Array t _ _) = baseType t
 baseType t = t
 
 -- | A type is a basic type if it is not an array and any component
 -- types are basic types.
 basicType :: Type -> Bool
 basicType (Array {}) = False
-basicType (Tuple ts _) = all basicType ts
+basicType (Tuple ts) = all basicType ts
 basicType _ = True
 
 uniqueOrBasic :: Typed t => t -> Bool
@@ -178,31 +170,31 @@ uniqueOrBasic x = basicType (typeOf x) || unique x
 -- the base type.
 arrayType :: Int -> Type -> Uniqueness -> Type
 arrayType 0 t _ = t
-arrayType n t u = arrayType (n-1) (Array t Nothing u (srclocOf t)) u
+arrayType n t u = arrayType (n-1) (Array t Nothing u) u
 
 -- | @stripArray n t@ removes the @n@ outermost layers of the array.
 -- Essentially, it is the type of indexing an array of type @t@ with
 -- @n@ indexes.
 stripArray :: Int -> Type -> Type
 stripArray 0 t = t
-stripArray n (Array t _ _ _) = stripArray (n-1) t
+stripArray n (Array t _ _) = stripArray (n-1) t
 stripArray _ t = t
 
 withUniqueness :: Type -> Uniqueness -> Type
-withUniqueness (Array et dims _ loc) u = Array et dims u loc
-withUniqueness (Tuple ets loc) u = Tuple (map (`withUniqueness` u) ets) loc
+withUniqueness (Array et dims _) u = Array et dims u
+withUniqueness (Tuple ets) u = Tuple $ map (`withUniqueness` u) ets
 withUniqueness t _ = t
 
 -- | A "blank" value of the given type - this is zero, or whatever is
 -- close to it.  Don't depend on this value, but use it for creating
 -- arrays to be populated by do-loops.
 blankValue :: Type -> Value
-blankValue (Int _) = IntVal 0
-blankValue (Real _) = RealVal 0.0
-blankValue (Bool _) = LogVal False
-blankValue (Char _) = CharVal '\0'
-blankValue (Tuple ts _) = TupVal (map blankValue ts)
-blankValue (Array et _ _ _) = arrayVal [blankValue et] et
+blankValue Int = IntVal 0
+blankValue Real = RealVal 0.0
+blankValue Bool = LogVal False
+blankValue Char = CharVal '\0'
+blankValue (Tuple ts) = TupVal (map blankValue ts)
+blankValue (Array et _ _) = arrayVal [blankValue et] et
 
 -- | Every possible value in L0.  Values are fully evaluated and their
 -- type is always unambiguous.
@@ -217,12 +209,12 @@ data Value = IntVal !Int
              deriving (Eq, Ord, Show, Typeable, Data)
 
 instance Typed Value where
-  typeOf (IntVal _) = Int noLoc
-  typeOf (RealVal _) = Real noLoc
-  typeOf (LogVal _) = Bool noLoc
-  typeOf (CharVal _) = Char noLoc
-  typeOf (TupVal vs) = Tuple (map typeOf vs) noLoc
-  typeOf (ArrayVal _ t) = Array t Nothing Nonunique noLoc
+  typeOf (IntVal _) = Int
+  typeOf (RealVal _) = Real
+  typeOf (LogVal _) = Bool
+  typeOf (CharVal _) = Char
+  typeOf (TupVal vs) = Tuple (map typeOf vs)
+  typeOf (ArrayVal _ t) = Array t Nothing Nonunique
 
 -- | Return a list of the dimensions of an array (the shape, in other
 -- terms).  For non-arrays, this is the empty list.  A two-dimensional
@@ -456,12 +448,12 @@ instance Located (Exp ty) where
 
 instance Typed (Exp Type) where
   typeOf (Literal val _) = typeOf val
-  typeOf (TupLit es loc) = Tuple (map typeOf es) loc
+  typeOf (TupLit es _) = Tuple $ map typeOf es
   typeOf (ArrayLit es t _) = arrayType 1 t $ mconcat $ map uniqueness es
   typeOf (BinOp _ _ _ t _) = t
-  typeOf (And _ _ pos) = Bool pos
-  typeOf (Or _ _ pos) = Bool pos
-  typeOf (Not _ pos) = Bool pos
+  typeOf (And {}) = Bool
+  typeOf (Or {}) = Bool
+  typeOf (Not _ _) = Bool
   typeOf (Negate _ t _) = t
   typeOf (If _ _ _ t _) = t
   typeOf (Var ident) = identType ident
@@ -469,37 +461,37 @@ instance Typed (Exp Type) where
   typeOf (LetPat _ _ body _) = typeOf body
   typeOf (LetWith _ _ _ _ body _) = typeOf body
   typeOf (Index _ _ _ t _) = t
-  typeOf (Iota _ pos) = arrayType 1 (Int pos) Unique
-  typeOf (Size _ pos) = Int pos
+  typeOf (Iota _ _) = arrayType 1 Int Unique
+  typeOf (Size _ _) = Int
   typeOf (Replicate _ e _) = arrayType 1 (typeOf e) u
     where u | uniqueOrBasic e = Unique
             | otherwise = Nonunique
   typeOf (Reshape shape e _) = build (length shape) (baseType $ typeOf e)
     where build 0 t = t
-          build n t = build (n-1) (Array t Nothing Nonunique (srclocOf t))
+          build n t = build (n-1) (Array t Nothing Nonunique)
   typeOf (Transpose e _) = typeOf e
   typeOf (Map _ a _ t _) = arrayType 1 t u
     where u | uniqueOrBasic t, unique a = Unique
             | otherwise = Nonunique
   typeOf (Reduce fun _ _ _ _) = typeOf fun
-  typeOf (Zip es pos) = arrayType 1 (Tuple (map snd es) pos) Nonunique
-  typeOf (Unzip _ ts pos) = Tuple (map (flip (arrayType 1) Unique) ts) pos
+  typeOf (Zip es _) = arrayType 1 (Tuple $ map snd es) Nonunique
+  typeOf (Unzip _ ts _) = Tuple $ map (flip (arrayType 1) Unique) ts
   typeOf (Scan fun e arr _ _) =
     arrayType 1 (typeOf fun) (uniqueness fun <> uniqueness e <> uniqueness arr)
   typeOf (Filter _ _ t _) = arrayType 1 t Nonunique
   typeOf (Mapall fun e _ _ _) = arrayType (arrayDims $ typeOf e) (typeOf fun) Nonunique
   typeOf (Redomap _ _ _ _ _ t _) = t
-  typeOf (Split _ _ t pos) = Tuple [arrayType 1 t Nonunique, arrayType 1 t Nonunique] pos
+  typeOf (Split _ _ t _) = Tuple [arrayType 1 t Nonunique, arrayType 1 t Nonunique]
   typeOf (Concat _ _ t _) = arrayType 1 t Nonunique
   typeOf (Copy e _) = typeOf e `withUniqueness` Unique
   typeOf (DoLoop _ _ _ _ _ body _) = typeOf body
 --- Begin SOAC2: (Cosmin) ---
-  typeOf (Map2 _ _ _ (Tuple tps _) pos) = Tuple (map (\x -> arrayType 1 x Unique) tps) pos
+  typeOf (Map2 _ _ _ (Tuple tps) _) = Tuple $ map (\x -> arrayType 1 x Unique) tps
   typeOf (Map2 _ _ _ tp _) = arrayType 1 tp Unique
   typeOf (Reduce2 fun _ _ _ _) = typeOf fun
-  typeOf (Scan2 _ _ _ (Tuple tps _) pos) = Tuple (map (\x -> arrayType 1 x Unique) tps) pos
+  typeOf (Scan2 _ _ _ (Tuple tps) _) = Tuple $ map (\x -> arrayType 1 x Unique) tps
   typeOf (Scan2 _ _ _ tp _) = arrayType 1 tp Unique
-  typeOf (Filter2 _ _ (Tuple tps _) pos) = Tuple (map (\x -> arrayType 1 x Unique) tps) pos
+  typeOf (Filter2 _ _ (Tuple tps) _) = Tuple $ map (\x -> arrayType 1 x Unique) tps
   typeOf (Filter2 _ _ tp _) = arrayType 1 tp Unique
   typeOf (Redomap2 redfun _ _ _ _ _ _) = typeOf redfun
   typeOf (Mapall2 fun es _ _ _) = 
@@ -509,7 +501,7 @@ instance Typed (Exp Type) where
                         (map arrayDims (tail etps))
           fnrtp = typeOf fun 
       in case fnrtp of
-          (Tuple tps p) -> Tuple (map (\x -> arrayType inpdim x Unique) tps) p
+          Tuple tps -> Tuple $ map (\x -> arrayType inpdim x Unique) tps
           _ -> arrayType inpdim fnrtp Unique
 --- End SOAC2: (Cosmin) ---
 
@@ -756,13 +748,13 @@ ppUniqueness Nonunique = ""
 
 -- | Pretty printing a type
 ppType :: Type -> String
-ppType (Int {}) = " int "
-ppType (Bool {}) = " bool "
-ppType (Char {}) = " char "
-ppType (Real {}) = " real "
-ppType (Array tp  Nothing u _) = ppUniqueness u ++ "[ " ++ ppType tp ++ " ] "
-ppType (Array tp  (Just l) u _) = ppUniqueness u ++ "[ " ++ ppType tp ++ ", " ++ ppExp 0 l ++ " ] "
-ppType (Tuple tps _) = "( " ++ intercalate ", " (map ppType tps) ++ " ) "
+ppType Int = " int "
+ppType Bool = " bool "
+ppType Char = " char "
+ppType Real = " real "
+ppType (Array tp  Nothing u) = ppUniqueness u ++ "[ " ++ ppType tp ++ " ] "
+ppType (Array tp  (Just l) u) = ppUniqueness u ++ "[ " ++ ppType tp ++ ", " ++ ppExp 0 l ++ " ] "
+ppType (Tuple tps) = "( " ++ intercalate ", " (map ppType tps) ++ " ) "
 
 -- | Pretty printing a tuple id
 ppTupId :: TupIdent ty -> String

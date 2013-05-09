@@ -35,7 +35,7 @@ transformExp mape@(Map fun e intype outtype loc) = do
   -- that to construct the array for the rest.  If the input array is
   -- empty, we simply return an empty output array.
   (inarr, inarrv, inarrlet) <- newLet e "inarr"
-  (i, iv) <- newVar "i" (Int loc) loc
+  (i, iv) <- newVar "i" Int loc
   (_, nv, nlet) <- newLet (Size inarrv loc) "n"
   let zero = Literal (IntVal 0) loc
       index0 = Index inarr [zero] intype intype loc
@@ -43,7 +43,7 @@ transformExp mape@(Map fun e intype outtype loc) = do
   funcall0 <- transformLambda fun [index0]
   funcall <- transformLambda fun [index]
   (outarr, outarrv, outarrlet) <- newLet (Replicate nv funcall0 loc) "outarr"
-  let branch = If (BinOp Less zero nv (Bool loc) loc)
+  let branch = If (BinOp Less zero nv Bool loc)
                (outarrlet letbody)
                (maybeCopy $ Literal (arrayVal [] outtype) loc)
                (typeOf mape) loc
@@ -67,41 +67,39 @@ transformExp (Scan fun accexp arrexp intype loc) = do
 transformExp (Filter fun arrexp elty loc) = do
   (arr, arrv, arrlet) <- newLet arrexp "arr"
   (_, nv, nlet) <- newLet (Size arrv loc) "n"
-  let checkempty nonempty = If (BinOp Equal nv (intval 0) bool loc)
+  let checkempty nonempty = If (BinOp Equal nv (intval 0) Bool loc)
                             (Literal (emptyArray elty) loc) nonempty
                             (typeOf arrexp) loc
   (x, xv) <- newVar "x" elty loc
-  (i, iv) <- newVar "i" int loc
+  (i, iv) <- newVar "i" Int loc
   fun' <- transformLambda fun [xv]
-  let branch = If fun' (intval 1) (intval 0) int loc
+  let branch = If fun' (intval 1) (intval 0) Int loc
       indexin0 = Index arr [intval 0] elty elty loc
       indexin = Index arr [iv] elty elty loc
-  mape <- transformExp $ Map (AnonymFun [x] branch int loc) arrv elty int loc
+  mape <- transformExp $ Map (AnonymFun [x] branch Int loc) arrv elty Int loc
   plus <- do
-    (a,av) <- newVar "a" int loc
-    (b,bv) <- newVar "b" int loc
-    return $ AnonymFun [a, b] (BinOp Plus av bv int loc) int loc
-  scan <- transformExp $ Scan plus (intval 0) mape int loc
+    (a,av) <- newVar "a" Int loc
+    (b,bv) <- newVar "b" Int loc
+    return $ AnonymFun [a, b] (BinOp Plus av bv Int loc) Int loc
+  scan <- transformExp $ Scan plus (intval 0) mape Int loc
   (ia, _, ialet) <- newLet scan "ia"
-  let indexia ind = Index ia [ind] int int loc
-      indexiaend = indexia (BinOp Minus nv (intval 1) int loc)
+  let indexia ind = Index ia [ind] Int Int loc
+      indexiaend = indexia (BinOp Minus nv (intval 1) Int loc)
       indexi = indexia iv
-      indexim1 = indexia (BinOp Minus iv (intval 1) int loc)
+      indexim1 = indexia (BinOp Minus iv (intval 1) Int loc)
   (res, resv, reslet) <- newLet (Replicate indexiaend indexin0 loc) "res"
   let loop = DoLoop (Id res) resv i nv loopbody resv loc
-      loopbody = If (Or (BinOp Equal iv (intval 0) bool loc)
-                        (And (BinOp Less (intval 0) iv bool loc)
-                             (BinOp Equal indexi indexim1 bool loc) loc)
+      loopbody = If (Or (BinOp Equal iv (intval 0) Bool loc)
+                        (And (BinOp Less (intval 0) iv Bool loc)
+                             (BinOp Equal indexi indexim1 Bool loc) loc)
                      loc)
                  resv update (typeOf arrexp) loc
-      update = LetWith res res [BinOp Minus indexi (intval 1) int loc] indexin resv loc
+      update = LetWith res res [BinOp Minus indexi (intval 1) Int loc] indexin resv loc
   return $ arrlet $ nlet $ checkempty $ ialet $ reslet loop
-  where int = Int loc
-        bool = Bool loc
-        intval x = Literal (IntVal x) loc
+  where intval x = Literal (IntVal x) loc
 transformExp (Mapall fun arrexp _ outtype loc) = transformExp =<< toMap arrexp
   where toMap e = case typeOf e of
-                    Array et _ _ _ -> do
+                    Array et _ _ -> do
                       (x,xv) <- newVar "x" et loc
                       body <- toMap xv
                       let ot = arrayType (arrayDims et) outtype Nonunique
@@ -125,7 +123,7 @@ newReduction :: SrcLoc -> Exp Type -> Exp Type
 newReduction loc arrexp accexp = do
   (arr, arrv, arrlet) <- newLet arrexp "arr"
   (acc, accv, acclet) <- newLet accexp "acc"
-  (i, iv) <- newVar "i" (Int loc) loc
+  (i, iv) <- newVar "i" Int loc
   return ((arr, arrv), (acc, accv), (i, iv), acclet . arrlet)
 
 newLet :: Exp Type -> String -> TransformM (Ident Type, Exp Type, Exp Type -> Exp Type)
