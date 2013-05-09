@@ -262,7 +262,7 @@ copyCtPropExp eee@(Index idd@(Ident vnm tp p) inds tp1 tp2 pos) = do
             else  badCPropM $ TypeError pos  " indexing into a tuple "
         (Replicate _ (Iota n _) _, _:is')
           | [] <- is'  -> changed $ Iota n pos
-          | [_] <- is' -> changed $ head is'
+          | [x] <- is' -> changed x
           | otherwise -> badCPropM $ TypeError pos  (" illegal indexing: " ++ ppExp 0 eee)
         (Replicate {}, _) ->
             return $ Index idd inds' tp1 tp2 pos

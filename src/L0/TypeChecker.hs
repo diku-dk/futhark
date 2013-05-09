@@ -725,8 +725,7 @@ checkExp' (DoLoop mergepat mergeexp (Ident loopvar _ _)
 checkExp' (Map2 fun arrexp intype outtype pos) = do
   arrexp' <- mapM checkExp arrexp
   ineltps <- mapM (soac2ElemType pos . typeOf) arrexp'
-  let ineltp = if length ineltps == 1 then head ineltps
-               else Tuple ineltps
+  ineltp  <- soac2ArgType pos "Map2" ineltps
   fun'    <- checkLambda fun [ineltp]
   intype' <- checkAnnotation pos "input element" intype ineltp
   outtype'<- checkAnnotation pos "output element" outtype $ typeOf fun'
@@ -736,8 +735,7 @@ checkExp' (Reduce2 fun startexp arrexp intype pos) = do
   startexp' <- checkExp startexp
   arrexp'   <- mapM checkExp arrexp
   ineltps   <- mapM (soac2ElemType pos . typeOf) arrexp'
-  let ineltp = if length ineltps == 1 then head ineltps
-               else Tuple ineltps
+  ineltp    <- soac2ArgType pos "Reduce2" ineltps
   intype' <- checkAnnotation pos "input element" intype ineltp
   fun'    <- checkLambda fun [typeOf startexp', intype']
   when (typeOf startexp' /= typeOf fun') $
@@ -751,8 +749,7 @@ checkExp' (Scan2 fun startexp arrexp intype pos) = do
 
   --inelemt   <- soac2ElemType $ typeOf arrexp'
   ineltps   <- mapM (soac2ElemType pos . typeOf) arrexp'
-  let inelemt = if length ineltps == 1 then head ineltps
-                else Tuple ineltps
+  inelemt   <- soac2ArgType pos "Scan2" ineltps
   intype'   <- checkAnnotation pos "element" intype inelemt
   fun'      <- checkLambda fun [intype', intype']
   when (typeOf startexp' /= typeOf fun') $
@@ -767,8 +764,7 @@ checkExp' (Filter2 fun arrexp eltype pos) = do
   arrexp' <- mapM checkExp arrexp
   --inelemt <- soac2ElemType $ typeOf arrexp'
   ineltps   <- mapM (soac2ElemType pos . typeOf) arrexp'
-  let inelemt = if length ineltps == 1 then head ineltps
-                else Tuple ineltps
+  inelemt <- soac2ArgType pos "Filter2" ineltps
   eltype' <- checkAnnotation pos "element" eltype inelemt
   fun' <- checkLambda fun [inelemt]
   when (typeOf fun' /= Bool) $
@@ -780,12 +776,11 @@ checkExp' (Mapall2 fun arrexp intype outtype pos) = do
   let arrtps = map typeOf arrexp'
 
   _ <- mapM (soac2ElemType pos) arrtps
-  let mindim = foldl min
-                     (arrayDims (head arrtps))
-                     (map arrayDims (tail arrtps))
-  let ineltps= map (stripArray mindim) arrtps
-  let ineltp = if length ineltps == 1 then head ineltps
-               else Tuple ineltps
+  ineltp <- case arrtps of
+              []   -> bad $ TypeError pos "Empty tuple given to Mapall2"
+              [t]  -> return $ baseType t
+              t:ts -> let mindim = foldl min (arrayDims t) $ map arrayDims ts
+                      in return $ Tuple $ map (stripArray mindim) $ t:ts
 
   intype' <- checkAnnotation pos "input element" intype ineltp
   fun' <- checkLambda fun [intype']
@@ -796,8 +791,7 @@ checkExp' (Redomap2 redfun mapfun accexp arrexp intype outtype pos) = do
   accexp' <- checkExp accexp
   arrexp' <- mapM checkExp arrexp
   ets <- mapM (soac2ElemType pos . typeOf) arrexp'
-  let et = if length ets == 1 then head ets
-           else Tuple ets
+  et <- soac2ArgType pos "Redomap2" ets
   mapfun' <- checkLambda mapfun [et]
   redfun' <- checkLambda redfun [typeOf accexp', typeOf mapfun']
   _ <- require [typeOf redfun'] accexp'
@@ -808,6 +802,12 @@ checkExp' (Redomap2 redfun mapfun accexp arrexp intype outtype pos) = do
 ---------------------
 --- SOAC2 HELPERS ---
 ---------------------
+
+soac2ArgType :: SrcLoc -> String -> [Type] -> TypeM Type
+soac2ArgType loc op [] = bad $ TypeError loc $ "Empty tuple given to " ++ op
+soac2ArgType _ _ [et] = return et
+soac2ArgType _ _ ets = return $ Tuple ets
+
 soac2ElemType :: SrcLoc -> Type -> TypeM Type
 soac2ElemType loc tp@(Array {}) =
     getTupArrElemType loc tp

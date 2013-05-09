@@ -241,16 +241,17 @@ distribPatExp pat@(Id idd) e body =
 
 distribPatExp pat@(TupId idlst pos) e body =
     case e of
-        TupLit es epos
+        TupLit (e':es) epos
             -- sanity check!
-          | length idlst /= length es ->
-            badTupNormM $ EnablingOptError pos ("In distribPatExp, broken invariant: the "
-                                                ++" lengths of TupleLit and TupId differ! exp: "
-                                                ++ppExp 0 e++" tupid: "++ppTupId pat )
-          | length idlst == 1 ->
-            distribPatExp (head idlst) (head es) body
-          | otherwise -> do body' <- distribPatExp (TupId (tail idlst) pos) (TupLit (tail es) epos) body
-                            distribPatExp (head idlst) (head es) body'
+          | length idlst /= length (e':es) ->
+            badTupNormM $ EnablingOptError pos ("In ArrTup2TupArr, distribPatExp, broken invariant: "
+                                                ++" the lengths of TupleLit and TupId differ! exp: "
+                                                    ++ppExp 0 e++" tupid: "++ppTupId pat )
+          | [ident] <- idlst ->
+            distribPatExp ident e' body
+          | ident:idlst' <- idlst -> do
+             body' <- distribPatExp (TupId idlst' pos) (TupLit es epos) body
+             distribPatExp ident e' body'
         _ -> return $ LetPat pat e body pos
 
 
