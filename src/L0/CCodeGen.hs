@@ -75,19 +75,19 @@ varExp k = [C.cexp|$id:k|]
 -- | True if both types map to the same runtime representation.  This
 -- is the case if they are identical modulo uniqueness.
 sameRepresentation :: Type -> Type -> Bool
-sameRepresentation (Tuple ets1 _) (Tuple ets2 _)
+sameRepresentation (Tuple ets1) (Tuple ets2)
   | length ets1 == length ets2 =
     and $ zipWith sameRepresentation ets1 ets2
-sameRepresentation (Array et1 _ _ _) (Array et2 _ _ _) =
+sameRepresentation (Array et1 _ _) (Array et2 _ _) =
   sameRepresentation et1 et2
 sameRepresentation t1 t2 = t1 == t2
 
 typeToCType :: Type -> CompilerM C.Type
-typeToCType (Int _) = return [C.cty|int|]
-typeToCType (Bool _) = return [C.cty|int|]
-typeToCType (Char _) = return [C.cty|char|]
-typeToCType (Real _) = return [C.cty|double|]
-typeToCType t@(Tuple ts _) = do
+typeToCType Int = return [C.cty|int|]
+typeToCType Bool = return [C.cty|int|]
+typeToCType Char = return [C.cty|char|]
+typeToCType Real = return [C.cty|double|]
+typeToCType t@(Tuple ts) = do
   ty <- gets $ find (sameRepresentation t . fst) . compTypeStructs
   case ty of
     Just (_, (cty, _)) -> return cty
@@ -196,11 +196,11 @@ boundsCheckStm place idxs = [C.cstm|{$stms:(zipWith check idxs [0..])}|]
 
 -- | Return a statement printing the given value.
 printStm :: C.Exp -> Type -> CompilerM C.Stm
-printStm place (Int _)  = return [C.cstm|printf("%d", $exp:place);|]
-printStm place (Char _) = return [C.cstm|printf("%c", $exp:place);|]
-printStm place (Bool _) = return [C.cstm|printf($exp:place && "true" || "false");|]
-printStm place (Real _) = return [C.cstm|printf("%lf", $exp:place);|]
-printStm place (Tuple ets _) = do
+printStm place Int  = return [C.cstm|printf("%d", $exp:place);|]
+printStm place Char = return [C.cstm|printf("%c", $exp:place);|]
+printStm place Bool = return [C.cstm|printf($exp:place && "true" || "false");|]
+printStm place Real = return [C.cstm|printf("%lf", $exp:place);|]
+printStm place (Tuple ets) = do
   prints <- forM (zip [(0::Int)..] ets) $ \(i, et) ->
               printStm [C.cexp|$exp:place.$id:(tupleField i)|] et
   let prints' = intercalate [[C.cstm|{putchar(','); putchar(' ');}|]] $ map (:[]) prints
@@ -209,9 +209,9 @@ printStm place (Tuple ets _) = do
                $stms:prints'
                putchar(')');
              }|]
-printStm place (Array (Char _) _ _ _) =
+printStm place (Array Char _ _) =
   return [C.cstm|printf("%s", $exp:place.data);|]
-printStm place t@(Array et _ _ _) = do
+printStm place t@(Array et _ _) = do
   i <- new "print_i"
   v <- new "print_elem"
   et' <- typeToCType et
@@ -233,11 +233,11 @@ printStm place t@(Array et _ _ _) = do
              }|]
 
 readStm :: C.Exp -> Type -> CompilerM C.Stm
-readStm place (Int _) =
+readStm place Int =
   return [C.cstm|scanf("%d", &$exp:place);|]
-readStm place (Char _) =
+readStm place Char =
   return [C.cstm|scanf("%c", &$exp:place);|]
-readStm place (Real _) =
+readStm place Real =
   return [C.cstm|scanf("%f", &$exp:place);|]
 readStm _ t =
   return [C.cstm|{
@@ -583,7 +583,7 @@ compileExp place e@(Iota (Var v) _) = do
 
 compileExp place (Iota ne pos) = do
   size <- new "iota_size"
-  let ident = Ident size (Int pos) pos
+  let ident = Ident size Int pos
   compileExp place $ LetPat (Id ident) ne (Iota (Var ident) pos) pos
 
 compileExp place e@(Replicate (Var nv) (Var vv) _) = do
@@ -601,7 +601,7 @@ compileExp place e@(Replicate (Var nv) (Var vv) _) = do
 compileExp place (Replicate ne ve pos) = do
   nv <- new "replicate_n"
   vv <- new "replicate_v"
-  let nident = Ident nv (Int pos) pos
+  let nident = Ident nv Int pos
       vident = Ident vv (typeOf ve) pos
       nlet body = LetPat (Id nident) ne body pos
       vlet body = LetPat (Id vident) ve body pos

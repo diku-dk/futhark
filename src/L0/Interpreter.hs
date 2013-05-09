@@ -178,17 +178,17 @@ evalExp (TupLit es _) =
   TupVal <$> mapM evalExp es
 evalExp (ArrayLit es t _) =
   arrayVal <$> mapM evalExp es <*> pure t
-evalExp (BinOp Plus e1 e2 (Int _) pos) = evalIntBinOp (+) e1 e2 pos
-evalExp (BinOp Plus e1 e2 (Real _) pos) = evalRealBinOp (+) e1 e2 pos
-evalExp (BinOp Minus e1 e2 (Int _) pos) = evalIntBinOp (-) e1 e2 pos
-evalExp (BinOp Minus e1 e2 (Real _) pos) = evalRealBinOp (-) e1 e2 pos
-evalExp (BinOp Pow e1 e2 (Int _) pos) = evalIntBinOp (^) e1 e2 pos
-evalExp (BinOp Pow e1 e2 (Real _) pos) = evalRealBinOp (**) e1 e2 pos
-evalExp (BinOp Times e1 e2 (Int _) pos) = evalIntBinOp (*) e1 e2 pos
-evalExp (BinOp Times e1 e2 (Real _) pos) = evalRealBinOp (*) e1 e2 pos
-evalExp (BinOp Divide e1 e2 (Int _) pos) = evalIntBinOp div e1 e2 pos
-evalExp (BinOp Mod e1 e2 (Int _) pos) = evalIntBinOp mod e1 e2 pos
-evalExp (BinOp Divide e1 e2 (Real _) pos) = evalRealBinOp (/) e1 e2 pos
+evalExp (BinOp Plus e1 e2 Int pos) = evalIntBinOp (+) e1 e2 pos
+evalExp (BinOp Plus e1 e2 Real pos) = evalRealBinOp (+) e1 e2 pos
+evalExp (BinOp Minus e1 e2 Int pos) = evalIntBinOp (-) e1 e2 pos
+evalExp (BinOp Minus e1 e2 Real pos) = evalRealBinOp (-) e1 e2 pos
+evalExp (BinOp Pow e1 e2 Int pos) = evalIntBinOp (^) e1 e2 pos
+evalExp (BinOp Pow e1 e2 Real pos) = evalRealBinOp (**) e1 e2 pos
+evalExp (BinOp Times e1 e2 Int pos) = evalIntBinOp (*) e1 e2 pos
+evalExp (BinOp Times e1 e2 Real pos) = evalRealBinOp (*) e1 e2 pos
+evalExp (BinOp Divide e1 e2 Int pos) = evalIntBinOp div e1 e2 pos
+evalExp (BinOp Mod e1 e2 Int pos) = evalIntBinOp mod e1 e2 pos
+evalExp (BinOp Divide e1 e2 Real pos) = evalRealBinOp (/) e1 e2 pos
 evalExp (BinOp ShiftR e1 e2 _ pos) = evalIntBinOp shiftR e1 e2 pos
 evalExp (BinOp ShiftL e1 e2 _ pos) = evalIntBinOp shiftL e1 e2 pos
 evalExp (BinOp Band e1 e2 _ pos) = evalIntBinOp (.&.) e1 e2 pos
@@ -288,7 +288,7 @@ evalExp (Iota e pos) = do
   v <- evalExp e
   case v of
     IntVal x
-      | x >= 0    -> return $ arrayVal (map IntVal [0..x-1]) (Int pos)
+      | x >= 0    -> return $ arrayVal (map IntVal [0..x-1]) Int
       | otherwise -> bad $ NegativeIota pos x
     _ -> bad $ TypeError pos "evalExp Iota"
 evalExp (Size e pos) = do
@@ -308,7 +308,7 @@ evalExp (Replicate e1 e2 pos) = do
 evalExp e@(Reshape shapeexp arrexp pos) = do
   shape <- mapM (asInt <=< evalExp) shapeexp
   arr <- evalExp arrexp
-  let reshape (Array t _ _ _) (n:rest) vs
+  let reshape (Array t _ _) (n:rest) vs
         | length vs `mod` n == 0 =
           arrayVal <$> mapM (reshape t rest) (chunk (length vs `div` n) vs)
                    <*> pure t
@@ -326,7 +326,7 @@ evalExp e@(Reshape shapeexp arrexp pos) = do
 evalExp (Transpose arrexp pos) = do
   v <- evalExp arrexp
   case v of
-    ArrayVal inarr t@(Array et _ _ _) -> do
+    ArrayVal inarr t@(Array et _ _) -> do
       let arr el = arrayVal el et
       els' <- map arr <$> transpose <$> mapM (arrToList pos) (elems inarr)
       return $ arrayVal els' t
@@ -349,7 +349,7 @@ evalExp (Zip arrexps pos) = do
                           ls' <- zipit tls
                           return $ TupVal hds : ls'
                         Nothing -> bad $ ZipError pos (map length arrs)
-  arrayVal <$> zipit arrs <*> pure (Tuple (map snd arrexps) pos)
+  arrayVal <$> zipit arrs <*> pure (Tuple $ map snd arrexps)
   where split []     = Nothing
         split (x:xs) = Just (x, xs)
 evalExp (Unzip e ts pos) = do
@@ -373,7 +373,7 @@ evalExp (Filter fun arrexp outtype pos) = do
                                 _             -> return False
 evalExp (Mapall fun arrexp _ outtype _) =
   mapall outtype =<< evalExp arrexp
-    where mapall t@(Array et _ _ _) (ArrayVal arr _) = do
+    where mapall t@(Array et _ _) (ArrayVal arr _) = do
             els' <- mapM (mapall et) $ elems arr
             return $ arrayVal els' t
           mapall _ v = applyLambda fun [v]
@@ -418,7 +418,7 @@ evalExp (Map2 fun es intype outtype pos) = do
              else Zip (map (\x -> (x, typeOf x)) es) pos
     let e_map = Map fun e' intype outtype pos
     let res = case outtype of
-                Tuple ts _ -> Unzip e_map ts pos
+                Tuple ts -> Unzip e_map ts pos
                 _ -> e_map
     evalExp res
 
@@ -427,7 +427,7 @@ evalExp (Scan2 fun startexp arrs tp pos) = do
                else Zip (map (\x -> (x, typeOf x)) arrs) pos
     let e_scan = Scan fun startexp arr' tp pos
     let res = case tp of
-                Tuple ts _ -> Unzip e_scan ts pos
+                Tuple ts -> Unzip e_scan ts pos
                 _ -> e_scan
     evalExp res
 
@@ -437,7 +437,7 @@ evalExp (Filter2 fun arrs tp pos) = do
            else do let e_zip = Zip (map (\x -> (x, typeOf x)) arrs) pos
                    let e_filt= Filter fun e_zip tp pos
                    case tp of
-                     Tuple ts _ -> return $ Unzip e_filt ts pos
+                     Tuple ts -> return $ Unzip e_filt ts pos
                      _ -> bad $ TypeError pos ("evalExp Filter2: elem type not a tuple!"++
                                                " array list: "++ intercalate ", " (map (ppExp 0) arrs) )
     evalExp res
