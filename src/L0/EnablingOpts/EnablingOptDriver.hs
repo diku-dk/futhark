@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, ScopedTypeVariables #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 module L0.EnablingOpts.EnablingOptDriver ( 
                                     enablingOpts
@@ -48,9 +48,7 @@ enablingOpts prog = do
     prog_enopt2 <- normCopyDeadOpts prog_enopt1
 
     prog_flat <- arr2tupProg prog_enopt2
-    prog_l0   <- normCopyDeadOpts prog_flat
-    
-    return prog_l0
+    normCopyDeadOpts prog_flat
 
 --    if(succs)
 --    then enablingOpts outprog
