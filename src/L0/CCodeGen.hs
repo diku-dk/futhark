@@ -92,9 +92,13 @@ typeToCType t@(Tuple ts _ _) = do
                  ct <- typeToCType et
                  return [C.csdecl|$ty:ct $id:(tupleField i);|]
 typeToCType t@(Array {}) = do
-  ty <- gets $ lookup t . compTypeStructs
+  let -- Compare array types ignoring uniqueness.
+      proper (Array et1 _ _ _) (Array et2 _ _ _) =
+        proper et1 et2
+      proper t1 t2 = t1 == t2
+  ty <- gets $ find (proper t . fst) . compTypeStructs
   case ty of
-    Just (cty, _) -> return cty
+    Just (_, (cty, _)) -> return cty
     Nothing -> do
       ct <- typeToCType $ baseType t
       name <- new "array_type"
