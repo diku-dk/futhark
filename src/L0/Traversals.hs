@@ -30,7 +30,7 @@ foldlPattern f _ ne (If e1 e2 e3 _ _)  = foldl f ne [e1, e2, e3]
 foldlPattern f _ ne (Apply _ es _ _)   = foldl f ne es
 
 foldlPattern f _ ne (DoLoop _ mergeexp _ n lbody letexp _) =
-    foldl f ne (mergeexp : (n : lbody : letexp : []))
+    foldl f ne (mergeexp : [n,lbody,letexp])
 foldlPattern f _ ne (LetWith _ _ inds el body _) = foldl f ne (el : body : inds)
 foldlPattern f _ ne (LetPat  _ e body _)   = foldl f ne [e, body]
 foldlPattern f _ ne (Index _ inds _ _ _ )  = foldl f ne inds
@@ -71,10 +71,10 @@ getLambdaExps (CurryFun  _ params _ _) = params
 ------------- buildExpPattern   ---------------
 -----------------------------------------------
 buildExpPattern :: TypeBox tf => (Exp tf -> Exp tf) -> Exp tf -> Exp tf
-buildExpPattern f e = gmapT (mkT f
-                             `extT` buildLambda f
-                             `extT` map f
-                             `extT` map (buildExpPair f)) e
+buildExpPattern f = gmapT (mkT f
+                           `extT` buildLambda f
+                           `extT` map f
+                           `extT` map (buildExpPair f))
 
 buildExpPair :: TypeBox tf => (Exp tf -> Exp tf) -> (Exp tf, tf) -> (Exp tf, tf)
 buildExpPair f (e,t) = (f e,t)
