@@ -249,7 +249,7 @@ evalExp (Apply "assertZip" args _ loc) = do
     _ -> return $ LogVal True
   where
     getArrSize :: Value -> L0M Int
-    getArrSize aa@(ArrayVal {}) = return $ head (arrayShape aa)
+    getArrSize aa@(ArrayVal {}) = return $ arraySize aa
     getArrSize _ = bad $ TypeError loc "one of assertZip args not an array val!"
 evalExp (Apply fname args _ _) = do
   fun <- lookupFun fname
@@ -291,12 +291,9 @@ evalExp (Iota e pos) = do
       | x >= 0    -> return $ arrayVal (map IntVal [0..x-1]) Int
       | otherwise -> bad $ NegativeIota pos x
     _ -> bad $ TypeError pos "evalExp Iota"
-evalExp (Size e pos) = do
+evalExp (Size e _) = do
   v <- evalExp e
-  case v of
-    ArrayVal arr _ -> let (lower, upper) = bounds arr
-                      in return $ IntVal (upper - lower + 1)
-    _ -> bad $ TypeError pos "evalExp Size"
+  return $ IntVal $ arraySize v
 evalExp (Replicate e1 e2 pos) = do
   v1 <- evalExp e1
   v2 <- evalExp e2
@@ -414,8 +411,8 @@ evalExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody pos) = do
 ----------------------------
 
 evalExp (Map2 fun es intype outtype pos) = do
-    let e' = if length es == 1 then head es
-             else Zip (map (\x -> (x, typeOf x)) es) pos
+    let e' = case es of [e] -> e
+                        _   ->  Zip (map (\x -> (x, typeOf x)) es) pos
     let e_map = Map fun e' intype outtype pos
     let res = case outtype of
                 Tuple ts -> Unzip e_map ts pos
@@ -423,8 +420,8 @@ evalExp (Map2 fun es intype outtype pos) = do
     evalExp res
 
 evalExp (Scan2 fun startexp arrs tp pos) = do
-    let arr' = if length arrs == 1 then head arrs
-               else Zip (map (\x -> (x, typeOf x)) arrs) pos
+    let arr' = case arrs of [arr] -> arr
+                            _     -> Zip (map (\x -> (x, typeOf x)) arrs) pos
     let e_scan = Scan fun startexp arr' tp pos
     let res = case tp of
                 Tuple ts -> Unzip e_scan ts pos
@@ -432,24 +429,24 @@ evalExp (Scan2 fun startexp arrs tp pos) = do
     evalExp res
 
 evalExp (Filter2 fun arrs tp pos) = do
-    res <- if length arrs == 1
-           then return $ Filter fun (head arrs) tp pos
-           else do let e_zip = Zip (map (\x -> (x, typeOf x)) arrs) pos
-                   let e_filt= Filter fun e_zip tp pos
-                   case tp of
-                     Tuple ts -> return $ Unzip e_filt ts pos
-                     _ -> bad $ TypeError pos ("evalExp Filter2: elem type not a tuple!"++
-                                               " array list: "++ intercalate ", " (map (ppExp 0) arrs) )
+    res <- case arrs of
+             [arr] -> return $ Filter fun arr tp pos
+             _ ->  do let e_zip = Zip (map (\x -> (x, typeOf x)) arrs) pos
+                      let e_filt= Filter fun e_zip tp pos
+                      case tp of
+                        Tuple ts -> return $ Unzip e_filt ts pos
+                        _ -> bad $ TypeError pos ("evalExp Filter2: elem type not a tuple!"++
+                                                  " array list: "++ intercalate ", " (map (ppExp 0) arrs) )
     evalExp res
 
 evalExp (Reduce2 fun accexp arrs tp pos) = do
-    let arr' = if length arrs == 1 then head arrs
-               else Zip (map (\x -> (x, typeOf x)) arrs) pos
+    let arr' = case arrs of [arr] -> arr
+                            _     ->  Zip (map (\x -> (x, typeOf x)) arrs) pos
     evalExp $ Reduce fun accexp arr' tp pos
 
 evalExp (Redomap2 redfun mapfun accexp arrs intp outtp pos) = do
-    let arr' = if length arrs == 1 then head arrs
-               else Zip (map (\x -> (x, typeOf x)) arrs) pos
+    let arr' = case arrs of [arr] -> arr
+                            _     -> Zip (map (\x -> (x, typeOf x)) arrs) pos
     evalExp $ Redomap redfun mapfun accexp arr' intp outtp pos
 
 evalExp (Mapall2 _ _ _ _ pos) =

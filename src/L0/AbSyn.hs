@@ -15,6 +15,7 @@ module L0.AbSyn
   , ppType
   , arrayDims
   , arrayShape
+  , arraySize
   , peelArray
   , baseType
   , basicType
@@ -216,7 +217,7 @@ instance Typed Value where
   typeOf (TupVal vs) = Tuple (map typeOf vs)
   typeOf (ArrayVal _ t) = Array t Nothing Nonunique
 
--- | Return a list of the dimensions of an array (the shape, in other
+-- | Return a list of the sizes of an array (the shape, in other
 -- terms).  For non-arrays, this is the empty list.  A two-dimensional
 -- array with five rows and three columns would return the list @[5,
 -- 3]@.
@@ -228,6 +229,13 @@ arrayShape (ArrayVal arr t) =
   where size = upper - lower + 1
         (lower, upper) = bounds arr
 arrayShape _ = []
+
+-- | Return the size of the first dimension of an array, or zero for
+-- non-arrays.
+arraySize :: Value -> Int
+arraySize t = case arrayShape t of
+                []  -> 0
+                n:_ -> n
 
 -- | Construct an array value containing the given elements.
 arrayVal :: [Value] -> Type -> Value
@@ -494,12 +502,13 @@ instance Typed (Exp Type) where
   typeOf (Filter2 _ _ (Tuple tps) _) = Tuple $ map (\x -> arrayType 1 x Unique) tps
   typeOf (Filter2 _ _ tp _) = arrayType 1 tp Unique
   typeOf (Redomap2 redfun _ _ _ _ _ _) = typeOf redfun
-  typeOf (Mapall2 fun es _ _ _) = 
-      let etps  = map typeOf es 
-          inpdim= foldl min 
-                        (arrayDims (head etps)) 
-                        (map arrayDims (tail etps))
-          fnrtp = typeOf fun 
+  typeOf (Mapall2 fun es _ _ _) =
+      let inpdim= case map typeOf es of
+                    et:etps -> foldl min
+                               (arrayDims et)
+                               (map arrayDims etps)
+                    _       -> 0
+          fnrtp = typeOf fun
       in case fnrtp of
           Tuple tps -> Tuple $ map (\x -> arrayType inpdim x Unique) tps
           _ -> arrayType inpdim fnrtp Unique
@@ -704,8 +713,9 @@ ppExp d (Map2 fun lst _ elrtp _) =
     let (pref, suff)  = case unboxType elrtp of
                             Just (Tuple {}) -> (" unzip ( ", " ) ")
                             _ -> ("","")
-        mid = if length lst == 1 then ppExp (d+1) (head lst) 
-              else "zip ( " ++ intercalate ", " (map (ppExp (d+1) ) lst) ++ " ) " 
+        mid = case lst of
+                [x] -> ppExp (d+1) x
+                _ -> "zip ( " ++ intercalate ", " (map (ppExp (d+1) ) lst) ++ " ) "
     in pref ++ " map ( " ++ ppLambda (d+1) fun ++ ", " ++ mid ++ suff ++ " ) "
 --
 ppExp d (Reduce2 fun el [arr] _ _) =
@@ -718,8 +728,8 @@ ppExp d (Scan2  fun el lst eltp _) =
     let (pref, suff)  = case unboxType eltp of
                             Just (Tuple {}) -> (" unzip ( ", " ) ")
                             _ -> ("","")
-        mid = if length lst == 1 then  ppExp (d+1) (head lst)
-              else "zip ( " ++ intercalate ", " (map (ppExp (d+1) ) lst) ++ " ) "
+        mid = case lst of [x] -> ppExp (d+1) x
+                          _ ->  "zip ( " ++ intercalate ", " (map (ppExp (d+1) ) lst) ++ " ) "
     in pref ++ " scan ( " ++ ppLambda (d+1) fun ++ ", " ++ ppExp (d+1) el ++ ", " ++ mid ++ suff ++ " ) "
 --
 ppExp d (Filter2 fun [a] _ _) =

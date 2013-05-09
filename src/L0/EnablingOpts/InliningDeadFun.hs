@@ -240,9 +240,9 @@ inlineInExp inlcallees (Apply fname aargs rtp pos) =
     let aargs' = map (inlineInExp inlcallees) aargs
     in  case filter (\(nm,_,_,_,_)->fname==nm) inlcallees of
             [] -> Apply fname aargs' rtp pos
-            cs -> let (_,_,fargs,body,_) = head cs
-                      revbnds = reverse (zip fargs aargs)
-                  in  foldl (addArgBnd pos) body revbnds
+            (_,_,fargs,body,_):_ ->
+              let revbnds = reverse (zip fargs aargs)
+              in  foldl (addArgBnd pos) body revbnds
     where
         addArgBnd :: TypeBox tf => SrcLoc -> Exp tf -> (Ident Type, Exp tf) -> Exp tf
         addArgBnd ppos body (farg, aarg) = 

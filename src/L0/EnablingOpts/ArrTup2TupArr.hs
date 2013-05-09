@@ -135,9 +135,9 @@ arr2tupVal loc (TupVal tups) = do
 arr2tupVal loc (ArrayVal els tp) = do
     let tp' = toTupArrType tp
     els'   <- mapM (arr2tupVal loc) (A.elems els)
-    case (tp', head els') of
-        (Tuple tps', TupVal tupels) -> do
-            lstlst <- foldM concatTups (map (:[]) tupels) (tail els')
+    case (tp', els') of
+        (Tuple tps', TupVal tupels:tupels_rest) -> do
+            lstlst <- foldM concatTups (map (:[]) tupels) tupels_rest
             let tuparrs = map (\(x,y)->ArrayVal (A.listArray (0,length els'-1) x) y) (zip lstlst tps')
             return $ TupVal tuparrs
         (Tuple {}, _) ->
@@ -229,10 +229,9 @@ arr2tupExp e@(Var (Ident vnm _ pos)) = do
     bnd <- asks $ M.lookup vnm . tupVtable
     case bnd of
         Nothing  -> return e
-        Just ids -> do  let vars = map mkVarFromIdent ids 
-                        if length vars == 1 
-                        then return $ head vars
-                        else return $ TupLit vars pos 
+        Just ids -> case map mkVarFromIdent ids of
+                      [v]  -> return v
+                      vars -> return $ TupLit vars pos
     where
         mkVarFromIdent idd = 
             Var Ident { identName = identName idd 
@@ -250,9 +249,9 @@ arr2tupExp (Index idd inds tp1 tp2 pos) = do
                        --     common subexpression elimination to clean it up!
                        -- should we also check that tp2' is consistent with the result?
                        indlst <- mapM (mkIndexFromIdent inds') ids
-                       if length ids == 1
-                       then return $ head indlst
-                       else return $ TupLit indlst pos
+                       case indlst of
+                         [ind] -> return ind
+                         _     -> return $ TupLit indlst pos
     where
         mkIndexFromIdent :: [Exp Type] -> Ident Type -> Arr2TupM (Exp Type)
         mkIndexFromIdent newind iddd = 
@@ -747,17 +746,17 @@ distribPatExp pat@(Id idd) e body =
 
 distribPatExp pat@(TupId idlst pos) e body =
     case e of
-        TupLit es epos
+        TupLit (e':es) epos
             -- sanity check!
-          | length idlst /= length es ->
+          | length idlst /= length (e':es) ->
             badArr2TupM $ EnablingOptError pos ("In ArrTup2TupArr, distribPatExp, broken invariant: "
                                                 ++" the lengths of TupleLit and TupId differ! exp: "
                                                     ++ppExp 0 e++" tupid: "++ppTupId pat )
-          | length idlst == 1 ->
-            distribPatExp (head idlst) (head es) body
-          | otherwise -> do
-             body' <- distribPatExp (TupId (tail idlst) pos) (TupLit (tail es) epos) body
-             distribPatExp (head idlst) (head es) body'
+          | [ident] <- idlst ->
+            distribPatExp ident e' body
+          | ident:idlst' <- idlst -> do
+             body' <- distribPatExp (TupId idlst' pos) (TupLit es epos) body
+             distribPatExp ident e' body'
         _ -> return $ LetPat pat e body pos
 
 
@@ -772,15 +771,15 @@ distribLetWithExp :: [Ident Type] -> [Ident Type] ->
 distribLetWithExp [src] [dst] inds [elm] body pos =
     return $ LetWith src dst inds (Var elm) body pos --(identSrcLoc src)
 
-distribLetWithExp ids_src ids_dst inds ids_elm body pos =
-    -- sanity check
-    let (sz1, sz2, sz3) = (length ids_src, length ids_dst, length ids_elm)
-    in if sz1 > 0 && sz1 == sz2 && sz2 == sz3
-       then do body' <- distribLetWithExp (tail ids_src) (tail ids_dst) inds (tail ids_elm) body pos
-               distribLetWithExp [head ids_src] [head ids_dst] inds [head ids_elm] body' pos
-       else badArr2TupM $ EnablingOptError pos 
-                                           ("In ArrTup2TupArr, distribLetWithExp, broken invariant: "
-                                            ++" the lengths of TupIds of src, dst and elms differ! ")
+distribLetWithExp (src:ids_src) (dst:ids_dst) inds (elm:ids_elm) body pos
+  | length ids_src == length ids_dst, length ids_dst == length ids_elm = do
+  body' <- distribLetWithExp ids_src ids_dst inds ids_elm body pos
+  distribLetWithExp [src] [dst] inds [elm] body' pos
+
+distribLetWithExp _ _ _ _ _ pos =
+  badArr2TupM $ EnablingOptError pos
+                ("In ArrTup2TupArr, distribLetWithExp, broken invariant: "
+                 ++" the lengths of TupIds of src, dst and elms differ! ")
 
 ----------------------------------------------------
 --- tupArrToLstArr: transforms a flattened tuple ---
