@@ -136,7 +136,7 @@ arr2tupVal loc (ArrayVal els tp) = do
     let tp' = toTupArrType tp
     els'   <- mapM (arr2tupVal loc) (A.elems els)
     case (tp', head els') of
-        (Tuple tps' _ _, TupVal tupels) -> do 
+        (Tuple tps' _, TupVal tupels) -> do
             lstlst <- foldM concatTups (map (:[]) tupels) (tail els')
             let tuparrs = map (\(x,y)->ArrayVal (A.listArray (0,length els'-1) x) y) (zip lstlst tps')
             return $ TupVal tuparrs
@@ -185,7 +185,7 @@ arr2tupExp (ArrayLit els tp pos) = do
     let tp' = toTupArrType tp
     els'   <- mapM arr2tupExp els
     case tp' of
-        Tuple tps' _ _ -> do
+        Tuple tps' _ -> do
             lstlst <- foldM concatTups (replicate (length tps') []) els'
             let tuparrs  = map (\(x,y)->ArrayLit x y pos) (zip lstlst tps')
             return $ TupLit tuparrs pos
@@ -528,7 +528,7 @@ arr2tupExp (LetWith dst src inds el body pos) = do
     bnd   <- asks $ M.lookup (identName src) . tupVtable
     let tpelm = toTupArrType $ typeOf el 
     case (tpelm, bnd) of
-        (Tuple elm_tps _ _, Just ids_src) -> do
+        (Tuple elm_tps _, Just ids_src) -> do
             -- compute new ids for el (assuming that its translation is a TupLit)
             ids_elm   <- mapM (mkIdFromType pos "tmp_el") elm_tps
             let pat_elm = TupId (map Id ids_elm) pos
@@ -622,16 +622,16 @@ toTupArrType :: Type -> Type
 toTupArrType (Array tp sz u1 pos1) = 
     let tp' = toTupArrType tp
     in  case tp' of
-            Tuple tps u2 pos2 -> Tuple (map (\x -> Array x sz u2 pos2) tps) u1 pos1
+            Tuple tps pos2 -> Tuple (map (\x -> Array x sz u1 pos2) tps) pos1
             _ -> Array tp' sz u1 pos1
-toTupArrType (Tuple tps u pos) = 
+toTupArrType (Tuple tps pos) =
     let tps' = concatMap (tpLift . toTupArrType) tps
-    in  Tuple tps' u pos
+    in  Tuple tps' pos
 
     where 
         tpLift :: Type -> [Type]
-        tpLift (Tuple ts _ _) = ts
-        tpLift tp             = [tp] 
+        tpLift (Tuple ts _) = ts
+        tpLift tp           = [tp]
 toTupArrType tp = tp
 
 
@@ -671,7 +671,7 @@ mkFullPattern pat = do
         processIdent ident = do
             let (nm, pos) = (identName ident, identSrcLoc ident)
             case toTupArrType (identType ident) of
-                Tuple tps _ _ -> do
+                Tuple tps _ -> do
                     idents <- mapM (mkIdFromType pos nm) tps 
                     return ( idents, [(nm, idents)] )
                 tp -> if tp == identType ident

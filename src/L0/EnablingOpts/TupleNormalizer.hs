@@ -279,7 +279,7 @@ mkFullPattern (TupId idlst pos) = do
 -----------------------
 mkPatFromType :: SrcLoc -> String -> Type -> TupNormM Type (TupIdent Type)
 
-mkPatFromType pos nm (Tuple tps _ _) = do
+mkPatFromType pos nm (Tuple tps _) = do
   tupids <- mapM (mkPatFromType pos nm) tps
   return $ TupId tupids pos
 mkPatFromType pos nm tp = do

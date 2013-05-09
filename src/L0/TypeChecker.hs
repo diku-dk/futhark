@@ -322,10 +322,10 @@ unifyKnownTypes (Int pos) (Int _) = return $ Int pos
 unifyKnownTypes (Char pos) (Char _) = return $ Char pos
 unifyKnownTypes (Bool pos) (Bool _) = return $ Bool pos
 unifyKnownTypes (Real pos) (Real _) = return $ Real pos
-unifyKnownTypes (Tuple ts1 u1 pos) (Tuple ts2 u2 _)
+unifyKnownTypes (Tuple ts1 pos) (Tuple ts2 _)
   | length ts1 == length ts2 = do
   ts <- zipWithM unifyKnownTypes ts1 ts2
-  return $ Tuple ts (u1 <> u2) pos
+  return $ Tuple ts pos
 unifyKnownTypes (Array t1 e u1 pos) (Array t2 _ u2 _) = do
   t <- unifyKnownTypes t1 t2
   return $ Array t e (u1 <> u2) pos
@@ -356,8 +356,6 @@ elemType t = bad $ TypeError (srclocOf t) $ "Type of expression is not array, bu
 propagateUniqueness :: Type -> Type
 propagateUniqueness (Array et dim Nonunique loc) =
   Array et dim (uniqueness et) loc
-propagateUniqueness (Tuple ts Nonunique loc) =
-  Tuple ts (fromMaybe Nonunique $ find (==Unique) $ map uniqueness ts) loc
 propagateUniqueness t = t
 
 -- | Type check a program containing arbitrary type information,
@@ -606,7 +604,7 @@ checkExp' (Zip arrexps pos) = do
 checkExp' (Unzip e _ pos) = do
   e' <- checkExp e
   case typeOf e' of
-    Array (Tuple ts _ _) _ _ _ -> return $ Unzip e' ts pos
+    Array (Tuple ts _) _ _ _ -> return $ Unzip e' ts pos
     et -> bad $ TypeError pos $ "Argument to unzip is not an array of tuples, but " ++ ppType et ++ "."
 
 checkExp' (Scan fun startexp arrexp intype pos) = do
@@ -693,7 +691,7 @@ checkExp' (Map2 fun arrexp intype outtype pos) = do
   arrexp' <- mapM checkExp arrexp
   ineltps <- mapM (soac2ElemType . typeOf) arrexp'
   let ineltp = if length ineltps == 1 then head ineltps
-               else Tuple ineltps Unique pos
+               else Tuple ineltps pos
   fun'    <- checkLambda fun [ineltp]
   intype' <- intype `unifyWithKnown` ineltp
   outtype'<- outtype `unifyWithKnown` typeOf fun'
@@ -704,7 +702,7 @@ checkExp' (Reduce2 fun startexp arrexp intype pos) = do
   arrexp'   <- mapM checkExp arrexp
   ineltps   <- mapM (soac2ElemType . typeOf) arrexp'
   let ineltp = if length ineltps == 1 then head ineltps
-               else Tuple ineltps Unique pos
+               else Tuple ineltps pos
   intype' <- intype `unifyWithKnown` ineltp
   fun'    <- checkLambda fun [typeOf startexp', intype']
   when (typeOf startexp' /= typeOf fun') $
@@ -719,7 +717,7 @@ checkExp' (Scan2 fun startexp arrexp intype pos) = do
   --inelemt   <- soac2ElemType $ typeOf arrexp'
   ineltps   <- mapM (soac2ElemType . typeOf) arrexp'
   let inelemt = if length ineltps == 1 then head ineltps
-                else Tuple ineltps Unique pos
+                else Tuple ineltps pos
   intype'   <- intype `unifyWithKnown` inelemt
   fun'      <- checkLambda fun [intype', intype']
   when (typeOf startexp' /= typeOf fun') $
@@ -735,7 +733,7 @@ checkExp' (Filter2 fun arrexp eltype pos) = do
   --inelemt <- soac2ElemType $ typeOf arrexp'
   ineltps   <- mapM (soac2ElemType . typeOf) arrexp'
   let inelemt = if length ineltps == 1 then head ineltps
-                else Tuple ineltps Unique pos
+                else Tuple ineltps pos
   eltype' <- eltype `unifyWithKnown` inelemt
   fun' <- checkLambda fun [inelemt]
   when (typeOf fun' /= Bool pos) $
@@ -752,7 +750,7 @@ checkExp' (Mapall2 fun arrexp intype outtype pos) = do
                      (map arrayDims (tail arrtps))
   let ineltps= map (stripArray mindim) arrtps
   let ineltp = if length ineltps == 1 then head ineltps
-               else Tuple ineltps Unique pos
+               else Tuple ineltps pos
 
   intype' <- intype `unifyWithKnown` ineltp
   fun' <- checkLambda fun [intype']
@@ -764,7 +762,7 @@ checkExp' (Redomap2 redfun mapfun accexp arrexp intype outtype pos) = do
   arrexp' <- mapM checkExp arrexp
   ets <- mapM (soac2ElemType . typeOf) arrexp'
   let et = if length ets == 1 then head ets
-           else Tuple ets Unique pos
+           else Tuple ets pos
   mapfun' <- checkLambda mapfun [et]
   redfun' <- checkLambda redfun [typeOf accexp', typeOf mapfun']
   _ <- unifyKnownTypes (typeOf redfun') (typeOf accexp')
@@ -778,9 +776,9 @@ checkExp' (Redomap2 redfun mapfun accexp arrexp intype outtype pos) = do
 soac2ElemType :: Type -> TypeM Type
 soac2ElemType tp@(Array {}) =
     getTupArrElemType tp
-soac2ElemType (Tuple tps u pos ) = do
+soac2ElemType (Tuple tps pos ) = do
     tps' <- mapM getTupArrElemType tps
-    return $ Tuple tps' u pos
+    return $ Tuple tps' pos
 soac2ElemType tp =
     bad $ TypeError (SrcLoc (locOf tp))
                     ("In TypeChecker, soac2ElemType: "
@@ -890,7 +888,7 @@ checkBinding pat vt dflow = do
           t' <- lift $ namet `unifyWithKnown` t
           add (Ident name t' pos) a
           return $ Id $ Ident name t' pos
-        checkBinding' (TupId pats pos) (Tuple ts _ _) a
+        checkBinding' (TupId pats pos) (Tuple ts _) a
           | length pats == length ts = do
           pats' <- sequence $ zipWith3 checkBinding' pats ts ass
           return $ TupId pats' pos
@@ -929,7 +927,7 @@ checkLambda (AnonymFun params body ret pos) args = do
     _ | length params' == length args -> do
           checkApply Nothing (map identType params') args pos
           return $ AnonymFun params body' ret' pos
-      | [t@(Tuple args' _ _)] <- args,
+      | [t@(Tuple args' _)] <- args,
         validApply (map identType params) args',
         [Ident pname _ _] <- take 1 params ->
           -- The function expects N parmeters, but the argument is a
@@ -962,7 +960,7 @@ checkLambda (CurryFun fname curryargexps rettype pos) args = do
     Just (rt, paramtypes) -> do
       rettype' <- rettype `unifyWithKnown` rt
       case () of
-        _ | [tupt@(Tuple ets _ _)] <- args,
+        _ | [tupt@(Tuple ets _)] <- args,
             validApply ets paramtypes ->
               -- Same shimming as in the case for anonymous functions,
               -- although we don't have to worry about name shadowing
@@ -985,7 +983,7 @@ checkPolyLambdaOp op curryargexps rettype args pos = do
   curryargexpts <- map typeOf <$> mapM checkExp curryargexps
   tp <- case curryargexpts ++ args of
           [t1, t2] | t1 == t2 -> return t1
-          [Tuple [t1,t2] _ _] | t1 == t2 -> return t1 -- For autoshimming.
+          [Tuple [t1,t2] _] | t1 == t2 -> return t1 -- For autoshimming.
           l -> bad $ ParameterMismatch (Just fname) pos (Left 2) l
   (x,y,params) <- case curryargexps of
                     [] -> return (Var (Ident "x" (boxType tp) pos),

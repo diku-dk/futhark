@@ -349,7 +349,7 @@ evalExp (Zip arrexps pos) = do
                           ls' <- zipit tls
                           return $ TupVal hds : ls'
                         Nothing -> bad $ ZipError pos (map length arrs)
-  arrayVal <$> zipit arrs <*> pure (Tuple (map snd arrexps) Unique pos)
+  arrayVal <$> zipit arrs <*> pure (Tuple (map snd arrexps) pos)
   where split []     = Nothing
         split (x:xs) = Just (x, xs)
 evalExp (Unzip e ts pos) = do
@@ -418,7 +418,7 @@ evalExp (Map2 fun es intype outtype pos) = do
              else Zip (map (\x -> (x, typeOf x)) es) pos
     let e_map = Map fun e' intype outtype pos
     let res = case outtype of
-                Tuple ts _ _ -> Unzip e_map ts pos
+                Tuple ts _ -> Unzip e_map ts pos
                 _ -> e_map
     evalExp res
 
@@ -427,7 +427,7 @@ evalExp (Scan2 fun startexp arrs tp pos) = do
                else Zip (map (\x -> (x, typeOf x)) arrs) pos
     let e_scan = Scan fun startexp arr' tp pos
     let res = case tp of
-                Tuple ts _ _ -> Unzip e_scan ts pos
+                Tuple ts _ -> Unzip e_scan ts pos
                 _ -> e_scan
     evalExp res
 
@@ -437,7 +437,7 @@ evalExp (Filter2 fun arrs tp pos) = do
            else do let e_zip = Zip (map (\x -> (x, typeOf x)) arrs) pos
                    let e_filt= Filter fun e_zip tp pos
                    case tp of
-                     Tuple ts _ _ -> return $ Unzip e_filt ts pos
+                     Tuple ts _ -> return $ Unzip e_filt ts pos
                      _ -> bad $ TypeError pos ("evalExp Filter2: elem type not a tuple!"++
                                                " array list: "++ intercalate ", " (map (ppExp 0) arrs) )
     evalExp res
