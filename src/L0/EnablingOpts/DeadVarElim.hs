@@ -17,7 +17,7 @@ import qualified Data.Set as S
 
 import L0.AbSyn
  
---import L0.EnablingOpts.GenPatterns
+--import L0.Traversals
 --import L0.EnablingOpts.InliningDeadFun
 import L0.EnablingOpts.EnablingOptErrors
 
