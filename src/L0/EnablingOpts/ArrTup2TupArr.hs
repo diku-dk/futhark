@@ -20,7 +20,7 @@ import Data.Loc
  
 import L0.FreshNames
 
---import L0.EnablingOpts.GenPatterns
+--import L0.Traversals
 import L0.EnablingOpts.EnablingOptErrors
 
 import Debug.Trace
