@@ -7,7 +7,8 @@ module L0.EnablingOpts.InliningDeadFun  (
                       , deadFunElim
                     )
   where 
-  
+
+import Control.Arrow
 import Control.Applicative
 import Control.Monad.Reader
  
@@ -50,7 +51,7 @@ newtype CGM tf a = CGM (ReaderT (CGEnv tf) (Either EnablingOptError) a)
 -- | Building the call grah runs in this monad.  There is no
 -- mutable state.
 runCGM :: CGM tf a -> CGEnv tf -> Either EnablingOptError a
-runCGM  (CGM a) env = runReaderT a env
+runCGM  (CGM a) = runReaderT a
 
 badCGM :: EnablingOptError -> CGM tf a
 badCGM = CGM . lift . Left
@@ -69,9 +70,9 @@ buildCG prog = do
         expand ftab f@(name,_,_,_,pos)
             | Just (_,_,_,_,pos2) <- M.lookup name (envFtable ftab) =
               Left $ DupDefinitionError name pos pos2
-            | otherwise = 
-                Right $ CGEnv { envFtable = M.insert name f (envFtable ftab) }
-                
+            | otherwise =
+                Right CGEnv { envFtable = M.insert name f (envFtable ftab) }
+
 
 -- | @buildCG cg fname@ updates Call Graph @cg@ with the contributions of function 
 -- @fname@, and recursively, with the contributions of the callees of @fname@.
@@ -83,7 +84,7 @@ buildCGfun cg fname  = do
   case bnd of
     Nothing -> badCGM $ FunctionNotInFtab fname
     Just (caller,_,_,body,pos) -> 
-      if(caller == fname) 
+      if caller == fname
       then
         case M.lookup caller cg of
           Just _  -> return cg
@@ -93,9 +94,8 @@ buildCGfun cg fname  = do
                         let cg' = M.insert caller callees cg
 
                         -- recursively build the callees
-                        let fs_soacs = union fs soacs
-                        cg'' <- foldM buildCGfun cg' fs_soacs
-                        return cg''
+                        let fs_soacs = fs `union` soacs
+                        foldM buildCGfun cg' fs_soacs
                                             
       else  badCGM $ TypeError pos  (" in buildCGfun lookup for fundec of " ++ 
                                      fname ++ " resulted in " ++ caller)
@@ -119,7 +119,7 @@ buildCGexp callees e =
 --isBuiltInFun fn = elem fn ["toReal", "trunc", "sqrt", "log", "exp"]
 
 addLamFun :: TypeBox tf => ([String],[String]) -> Lambda tf -> ([String],[String])
-addLamFun callees           (AnonymFun _ _ _ _) = callees
+addLamFun callees           (AnonymFun {}) = callees
 addLamFun (fs,soacs) (CurryFun nm _ _ _) =
     if isBuiltInFun nm || elem nm fs
     then (fs,soacs) else (fs,nm:soacs)
@@ -143,7 +143,7 @@ aggInlineDriver prog = do
             | Just (_,_,_,_,pos2) <- M.lookup name (envFtable ftab) =
               Left $ DupDefinitionError name pos pos2
             | otherwise = 
-                Right $ CGEnv { envFtable = M.insert name f (envFtable ftab) }
+                Right CGEnv { envFtable = M.insert name f (envFtable ftab) }
 
 
 -- | Bind a name as a common (non-merge) variable.
@@ -183,8 +183,7 @@ aggInlining cg = do
     if null work 
          -- a fix point has been reached, hence gather the program
          -- from the hashtable and return it.
-    then do funs <- asks $ M.elems . envFtable
-            return funs
+    then asks $ M.elems . envFtable
 
          -- Remove the to-be-inlined functions from the Call Graph,
          -- and then, for each caller that exhibits to-be-inlined callees
@@ -217,10 +216,9 @@ aggInlining cg = do
                 Just ff -> return ff
             
         getInlineOps :: [String] -> CallGraph -> CallGraph
-        getInlineOps inlcand callgr = 
-            (  M.filter (\(callees,_) -> not (null callees))   . 
-               M.map ( \(callees,l) -> (intersect inlcand callees,l) )
-            )  callgr
+        getInlineOps inlcand =
+            M.filter (\(callees,_) -> not (null callees)) .
+            M.map (first $ intersect inlcand)
 
         funHasNoCalls :: ([String],[String]) -> Bool
         funHasNoCalls (callees,_) = null callees 
@@ -281,7 +279,7 @@ deadFunElim prog = do
             | Just (_,_,_,_,pos2) <- M.lookup name (envFtable ftab) =
               Left $ DupDefinitionError name pos pos2
             | otherwise = 
-                Right $ CGEnv { envFtable = M.insert name f (envFtable ftab) }
+                Right CGEnv { envFtable = M.insert name f (envFtable ftab) }
 
         isFunInCallGraph :: TypeBox tf => CallGraph -> FunDec tf -> Bool
         isFunInCallGraph cg (fnm,_,_,_,_) = 
