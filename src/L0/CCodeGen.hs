@@ -72,15 +72,25 @@ new k = do (name, src) <- gets $ newName k . compNameSrc
 varExp :: String -> C.Exp
 varExp k = [C.cexp|$id:k|]
 
+-- | True if both types map to the same runtime representation.  This
+-- is the case if they are identical modulo uniqueness.
+sameRepresentation :: Type -> Type -> Bool
+sameRepresentation (Tuple ets1 _) (Tuple ets2 _)
+  | length ets1 == length ets2 =
+    and $ zipWith sameRepresentation ets1 ets2
+sameRepresentation (Array et1 _ _ _) (Array et2 _ _ _) =
+  sameRepresentation et1 et2
+sameRepresentation t1 t2 = t1 == t2
+
 typeToCType :: Type -> CompilerM C.Type
 typeToCType (Int _) = return [C.cty|int|]
 typeToCType (Bool _) = return [C.cty|int|]
 typeToCType (Char _) = return [C.cty|char|]
 typeToCType (Real _) = return [C.cty|double|]
 typeToCType t@(Tuple ts _) = do
-  ty <- gets $ lookup t . compTypeStructs
+  ty <- gets $ find (sameRepresentation t . fst) . compTypeStructs
   case ty of
-    Just (cty, _) -> return cty
+    Just (_, (cty, _)) -> return cty
     Nothing -> do
       members <- zipWithM field ts [(0::Int)..]
       name <- new "tuple_type"
@@ -92,11 +102,7 @@ typeToCType t@(Tuple ts _) = do
                  ct <- typeToCType et
                  return [C.csdecl|$ty:ct $id:(tupleField i);|]
 typeToCType t@(Array {}) = do
-  let -- Compare array types ignoring uniqueness.
-      proper (Array et1 _ _ _) (Array et2 _ _ _) =
-        proper et1 et2
-      proper t1 t2 = t1 == t2
-  ty <- gets $ find (proper t . fst) . compTypeStructs
+  ty <- gets $ find (sameRepresentation t . fst) . compTypeStructs
   case ty of
     Just (_, (cty, _)) -> return cty
     Nothing -> do
