@@ -61,8 +61,8 @@ binding bnds = local (`bindVars` bnds)
 -- the vtable that associates variable names with/to-be-substituted-for tuples pattern.
 -- The 'Either' monad is used for error handling.
 runNormM :: TypeBox tf => Prog tf -> TupNormM tf a -> TupNormEnv tf -> Either EnablingOptError a
-runNormM prog (TupNormM a) env = 
-    runReaderT (evalStateT a (newNameSourceForProg prog)) env
+runNormM prog (TupNormM a) =
+    runReaderT (evalStateT a (newNameSourceForProg prog))
 
 badTupNormM :: EnablingOptError -> TupNormM tf a
 badTupNormM = TupNormM . lift . lift . Left
@@ -81,8 +81,7 @@ new = state . newName
 tupleNormProg :: Prog Type -> Either EnablingOptError (Prog Type)
 tupleNormProg prog = do
     let env = TupNormEnv { envVtable = M.empty }
-    prog' <- runNormM prog (mapM tupleNormFun prog) env
-    return prog'
+    runNormM prog (mapM tupleNormFun prog) env
 
 
 -----------------------------------------------------------------
@@ -119,7 +118,7 @@ tupleNormExp (LetPat pat e body _) = do
     e'    <- tupleNormExp  e
     (pat', bnds) <- mkFullPattern pat
     body' <- binding bnds $ tupleNormExp  body 
-    (distribPatExp pat' e' body') 
+    distribPatExp pat' e' body'
 
 
 
@@ -237,21 +236,21 @@ tupleNormLambda (CurryFun fname exps rettype pos) = do
 -----------------------------------------------------------------
 distribPatExp :: TupIdent Type -> Exp Type -> Exp Type -> TupNormM Type (Exp Type)
 
-distribPatExp pat@(Id idd) e body = do
+distribPatExp pat@(Id idd) e body =
     return $ LetPat pat e body (identSrcLoc idd)
 
 distribPatExp pat@(TupId idlst pos) e body =
     case e of
-        TupLit es epos ->
+        TupLit es epos
             -- sanity check!
-            if not (length idlst == length es)
-            then badTupNormM $ EnablingOptError pos ("In distribPatExp, broken invariant: the "
-                                                     ++" lengths of TupleLit and TupId differ! exp: "
-                                                     ++ppExp 0 e++" tupid: "++ppTupId pat )
-            else if length idlst == 1
-                 then distribPatExp (head idlst) (head es) body
-                 else do body' <- distribPatExp (TupId (tail idlst) pos) (TupLit (tail es) epos) body
-                         distribPatExp (head idlst) (head es) body'
+          | length idlst /= length es ->
+            badTupNormM $ EnablingOptError pos ("In distribPatExp, broken invariant: the "
+                                                ++" lengths of TupleLit and TupId differ! exp: "
+                                                ++ppExp 0 e++" tupid: "++ppTupId pat )
+          | length idlst == 1 ->
+            distribPatExp (head idlst) (head es) body
+          | otherwise -> do body' <- distribPatExp (TupId (tail idlst) pos) (TupLit (tail es) epos) body
+                            distribPatExp (head idlst) (head es) body'
         _ -> return $ LetPat pat e body pos
 
 
@@ -273,24 +272,21 @@ mkFullPattern pat@(Id ident) = do
 mkFullPattern (TupId idlst pos) = do
     reslst <- mapM mkFullPattern idlst
     let (tupids, bndlsts) = unzip reslst
-    let bnds = foldl (++) [] bndlsts
-    return $ (TupId tupids pos, bnds)
+    return (TupId tupids pos, concat bndlsts)
 
 -----------------------
 -- given a (tuple) type, creates a fully instantiated TupIdent 
 -----------------------
 mkPatFromType :: SrcLoc -> String -> Type -> TupNormM Type (TupIdent Type)
 
+mkPatFromType pos nm (Tuple tps _ _) = do
+  tupids <- mapM (mkPatFromType pos nm) tps
+  return $ TupId tupids pos
 mkPatFromType pos nm tp = do
-    case tp of
-        Tuple tps _ _ -> do   tupids <- mapM (mkPatFromType pos nm) tps
-                              return $ TupId tupids pos
-
-        _             -> do   tmp_nm <- new nm 
-                              let idd = Ident { identName = tmp_nm
-                                              , identType = tp
-                                              , identSrcLoc = pos  }
-                              return $ Id idd
+  tmp_nm <- new nm
+  return $ Id Ident { identName = tmp_nm
+                    , identType = tp
+                    , identSrcLoc = pos  }
 
 
 --------------------------------------------------
@@ -299,13 +295,12 @@ mkPatFromType pos nm tp = do
 tupleNormAbstrFun :: [Ident Type] -> Exp Type -> SrcLoc -> TupNormM Type (Exp Type)
 tupleNormAbstrFun args body pos = do
     let tups = filter isTuple args
-    let vars = map (\x -> Var x) tups
-    resms <- mapM (mkFullPattern . (\x -> Id x)) tups
+    let vars = map Var tups
+    resms <- mapM (mkFullPattern . Id) tups
     let (pats, bndlst)  = unzip resms 
-    let bnds = foldl (++) [] bndlst
+    let bnds = concat bndlst
     body'  <- binding bnds $ tupleNormExp body
-    body'' <- mergePatterns (reverse pats) (reverse vars) body'
-    return body''
+    mergePatterns (reverse pats) (reverse vars) body'
 
     where    
         mergePatterns :: [TupIdent Type] -> [Exp Type] -> Exp Type -> TupNormM Type (Exp Type)
@@ -318,7 +313,7 @@ tupleNormAbstrFun args body pos = do
             badTupNormM $ EnablingOptError pos 
                                            ("in TupleNormalizer.hs, mergePatterns: "
                                             ++" lengths of tups and exps don't agree!")
-        mergePatterns (pat:pats) (e:es) bdy = do
+        mergePatterns (pat:pats) (e:es) bdy =
             mergePatterns pats es (LetPat pat e bdy pos)
 
 
