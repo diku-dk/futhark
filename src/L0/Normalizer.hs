@@ -11,10 +11,10 @@ realConst :: Double -> SrcLoc -> Exp Type
 realConst v s = Literal $ RealVal v s
 
 zero :: SrcLoc -> Exp Type
-zero s = intConst 0 s
+zero = intConst 0
 
 one :: SrcLoc -> Exp Type
-one s = intConst 1 s
+one = intConst 1
 
 negOne :: SrcLoc -> Type -> Exp Type
 negOne s (Int _) = intConst (-1) s
@@ -22,7 +22,7 @@ negOne s (Real _) = realConst (-1.0) s
 negOne _ _ = error "Partial functions are baaad."
 
 singleton :: Exp Type -> Type -> SrcLoc -> Exp Type
-singleton x t s = ArrayLit [x] t s
+singleton x = ArrayLit [x]
 
 -- don't know what to do about maybe types when declaring built-ins, so run
 -- this after the typechecker has put in types.
