@@ -47,7 +47,7 @@ data DCElimRes tf = DCElimRes {
 
 instance Monoid (DCElimRes tf) where
   DCElimRes s1 m1 `mappend` DCElimRes s2 m2 =
-    DCElimRes (s1 || s2) (S.union m1 m2) --(io1 || io2)
+    DCElimRes (s1 || s2) (m1 `S.union` m2) --(io1 || io2)
   mempty = DCElimRes False S.empty -- False
 
 newtype DCElimM tf a = DCElimM (WriterT (DCElimRes tf) (ReaderT (DCElimEnv tf) (Either EnablingOptError)) a)
@@ -58,7 +58,7 @@ newtype DCElimM tf a = DCElimM (WriterT (DCElimRes tf) (ReaderT (DCElimEnv tf) (
 -- state, but merely keeps track of current bindings in a 'TypeEnv'.
 -- The 'Either' monad is used for error handling.
 runDCElimM :: DCElimM tf a -> DCElimEnv tf -> Either EnablingOptError (a, DCElimRes tf)
-runDCElimM  (DCElimM a) env = runReaderT (runWriterT a) env
+runDCElimM  (DCElimM a) = runReaderT (runWriterT a)
 
 badDCElimM :: EnablingOptError -> DCElimM tf a
 badDCElimM = DCElimM . lift . lift . Left
@@ -67,14 +67,13 @@ badDCElimM = DCElimM . lift . lift . Left
 
 collectRes :: [String] -> DCElimM tf a -> DCElimM tf (a, Bool)
 collectRes mvars m = pass collect
-  where wasNotUsed hashtab vnm = do
+  where wasNotUsed hashtab vnm =
           return $ not (S.member vnm hashtab)
 
         collect = do
           (x,res) <- listen m
           tmps    <- mapM (wasNotUsed (resMap res)) mvars
-          let unused = foldl (&&) True tmps
-          return ( (x, unused), const $ res )
+          return ( (x, and tmps), const res )
 
 changed :: DCElimM tf a -> DCElimM tf a
 changed m = pass collect
@@ -186,7 +185,7 @@ deadCodeElimExp (DoLoop mergepat mergeexp idd n loopbdy letbdy pos) = do
     then changed $ return letbdy'
     else do mergeexp'   <- deadCodeElimExp mergeexp
             n'      <- deadCodeElimExp n
-            loopbdy'<- binding ( (identName idd) : idnms) $ deadCodeElimExp loopbdy
+            loopbdy'<- binding ( identName idd : idnms) $ deadCodeElimExp loopbdy
             return $ DoLoop mergepat mergeexp' idd n' loopbdy' letbdy' pos
 
 
@@ -220,5 +219,4 @@ deadCodeElimLambda (CurryFun fname curryargexps rettype pos) = do
 
 getBnds :: TypeBox tf => TupIdent tf -> [String]
 getBnds ( Id (Ident var _ _) ) = [var]
-getBnds ( TupId ids _ ) = foldl (++) [] (map getBnds ids)
-
+getBnds ( TupId ids _ ) = concatMap getBnds ids
