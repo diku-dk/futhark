@@ -108,6 +108,8 @@ subuniqueOf _ _ = True
 subtypeOf :: Type -> Type -> Bool
 subtypeOf (Array t1 _ u1 _) (Array t2 _ u2 _) =
   u1 `subuniqueOf` u2 && t1 `subtypeOf` t2
+subtypeOf (Tuple ts1 _) (Tuple ts2 _) =
+  and $ zipWith subtypeOf ts1 ts2
 subtypeOf t1 t2 = t1 == t2
 
 -- | @x \`similarTo\` y@ is true if @x@ and @y@ are the same type,
@@ -188,6 +190,7 @@ stripArray _ t = t
 
 withUniqueness :: Type -> Uniqueness -> Type
 withUniqueness (Array et dims _ loc) u = Array et dims u loc
+withUniqueness (Tuple ets loc) u = Tuple (map (`withUniqueness` u) ets) loc
 withUniqueness t _ = t
 
 -- | A "blank" value of the given type - this is zero, or whatever is
