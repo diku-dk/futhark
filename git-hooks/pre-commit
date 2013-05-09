@@ -34,8 +34,10 @@ fi
 
 # Run hlint on changed files.
 for file in $(git diff-index --name-only HEAD | egrep '\.l?hsc?$'); do
-    if ! hlint -i "Reduce duplication" "$file"; then
-        fail
+    if [ $file != src/L0/CCodeGen.hs ]; then # This one cannot be parsed by hlint.
+        if ! hlint -i "Reduce duplication" "$file"; then
+            fail
+        fi
     fi
 done
 
