@@ -154,11 +154,11 @@ Fun :     Type id '(' TypeIds ')' '=' Exp
 Uniqueness : '*' { Unique }
            |     { Nonunique }
 
-Type :	  int                    { Int   $1             }
-        | real                   { Real  $1             }
-        | bool                   { Bool  $1             }
-        | char                   { Char  $1             }
-        | Uniqueness '(' Types ')'        { Tuple $3 $1 $2 }
+Type :	  int                    { Int   $1    }
+        | real                   { Real  $1    }
+        | bool                   { Bool  $1    }
+        | char                   { Char  $1    }
+        | '(' Types ')'          { Tuple $2 $1 }
         | Uniqueness '[' Type ']' { Array $3 Nothing $1 $2 }
         | Uniqueness '[' Type ',' Exp ']' { Array $3 (Just $5) $1 $2 }
 ;

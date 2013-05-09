@@ -77,7 +77,7 @@ typeToCType (Int _) = return [C.cty|int|]
 typeToCType (Bool _) = return [C.cty|int|]
 typeToCType (Char _) = return [C.cty|char|]
 typeToCType (Real _) = return [C.cty|double|]
-typeToCType t@(Tuple ts _ _) = do
+typeToCType t@(Tuple ts _) = do
   ty <- gets $ lookup t . compTypeStructs
   case ty of
     Just (cty, _) -> return cty
@@ -194,7 +194,7 @@ printStm place (Int _)  = return [C.cstm|printf("%d", $exp:place);|]
 printStm place (Char _) = return [C.cstm|printf("%c", $exp:place);|]
 printStm place (Bool _) = return [C.cstm|printf($exp:place && "true" || "false");|]
 printStm place (Real _) = return [C.cstm|printf("%lf", $exp:place);|]
-printStm place (Tuple ets _ _) = do
+printStm place (Tuple ets _) = do
   prints <- forM (zip [(0::Int)..] ets) $ \(i, et) ->
               printStm [C.cexp|$exp:place.$id:(tupleField i)|] et
   let prints' = intercalate [[C.cstm|{putchar(','); putchar(' ');}|]] $ map (:[]) prints
