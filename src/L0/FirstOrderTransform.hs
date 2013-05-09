@@ -37,7 +37,7 @@ transformExp mape@(Map fun e intype outtype loc) = do
   (inarr, inarrv, inarrlet) <- newLet e "inarr"
   (i, iv) <- newVar "i" (Int loc) loc
   (_, nv, nlet) <- newLet (Size inarrv loc) "n"
-  let zero = Literal $ IntVal 0 loc
+  let zero = Literal (IntVal 0) loc
       index0 = Index inarr [zero] intype intype loc
       index = Index inarr [iv] intype intype loc
   funcall0 <- transformLambda fun [index0]
@@ -45,7 +45,7 @@ transformExp mape@(Map fun e intype outtype loc) = do
   (outarr, outarrv, outarrlet) <- newLet (Replicate nv funcall0 loc) "outarr"
   let branch = If (BinOp Less zero nv (Bool loc) loc)
                (outarrlet letbody)
-               (maybeCopy $ Literal (arrayVal [] outtype loc))
+               (maybeCopy $ Literal (arrayVal [] outtype) loc)
                (typeOf mape) loc
       letbody = DoLoop (Id outarr) outarrv i nv loopbody outarrv loc
       loopbody = LetWith outarr outarr [iv] funcall outarrv loc
@@ -68,7 +68,7 @@ transformExp (Filter fun arrexp elty loc) = do
   (arr, arrv, arrlet) <- newLet arrexp "arr"
   (_, nv, nlet) <- newLet (Size arrv loc) "n"
   let checkempty nonempty = If (BinOp Equal nv (intval 0) bool loc)
-                            (Literal $ emptyArray elty loc) nonempty
+                            (Literal (emptyArray elty) loc) nonempty
                             (typeOf arrexp) loc
   (x, xv) <- newVar "x" elty loc
   (i, iv) <- newVar "i" int loc
@@ -98,7 +98,7 @@ transformExp (Filter fun arrexp elty loc) = do
   return $ arrlet $ nlet $ checkempty $ ialet $ reslet loop
   where int = Int loc
         bool = Bool loc
-        intval x = Literal (IntVal x loc)
+        intval x = Literal (IntVal x) loc
 transformExp (Mapall fun arrexp _ outtype loc) = transformExp =<< toMap arrexp
   where toMap e = case typeOf e of
                     Array et _ _ _ -> do

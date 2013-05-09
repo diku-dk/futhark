@@ -190,7 +190,7 @@ instance Monoid Dataflow where
 -- state, but merely keeps track of current bindings in a 'TypeEnv'.
 -- The 'Either' monad is used for error handling.
 newtype TypeM a = TypeM (WriterT Dataflow (ReaderT TypeEnv (Either TypeError)) a)
-  deriving (Monad, Functor, MonadReader TypeEnv, MonadWriter Dataflow)
+  deriving (Monad, Functor, Applicative, MonadReader TypeEnv, MonadWriter Dataflow)
 
 runTypeM :: TypeEnv -> TypeM a -> Either TypeError a
 runTypeM env (TypeM m) = fst <$> runReaderT (runWriterT m) env
@@ -429,14 +429,14 @@ checkExp e = do
 -- | Never call checkExp' directly!  Call checkExp!
 checkExp' :: TypeBox tf => Exp tf -> TypeM (Exp Type)
 
-checkExp' (Literal val) =
-  Literal <$> checkLiteral val
+checkExp' (Literal val pos) =
+  Literal <$> checkLiteral val <*> pure pos
 
 checkExp' (TupLit es pos) = do
   (es', als) <- unzip <$> mapM (collectAliases . checkExp) es
   let res = TupLit es' pos
   alias $ foldl extend (TupleAlias []) als
-  return $ fromMaybe res (Literal <$> expToValue res)
+  return $ fromMaybe res (Literal <$> expToValue res <*> pure pos)
     where extend (TupleAlias alss) als = TupleAlias $ alss ++ [als]
           extend als1 als2             = TupleAlias [als1, als2]
 
@@ -449,7 +449,7 @@ checkExp' (ArrayLit es t pos) = do
   -- Unify that type with the one given for the array literal.
   t' <- t `unifyWithKnown` et
   let res = ArrayLit es' t' pos
-  return $ fromMaybe res (Literal <$> expToValue res)
+  return $ fromMaybe res (Literal <$> expToValue res <*> pure pos)
 
 checkExp' (BinOp op e1 e2 t pos) = checkBinOp op e1 e2 t pos
 
@@ -808,14 +808,14 @@ getTupArrElemType tp =
 --------------------------------------
 
 checkLiteral :: Value -> TypeM Value
-checkLiteral (IntVal k pos) = return $ IntVal k pos
-checkLiteral (RealVal x pos) = return $ RealVal x pos
-checkLiteral (LogVal b pos) = return $ LogVal b pos
-checkLiteral (CharVal c pos) = return $ CharVal c pos
-checkLiteral (TupVal vals pos) = do
+checkLiteral (IntVal k) = return $ IntVal k
+checkLiteral (RealVal x) = return $ RealVal x
+checkLiteral (LogVal b) = return $ LogVal b
+checkLiteral (CharVal c) = return $ CharVal c
+checkLiteral (TupVal vals) = do
   vals' <- mapM checkLiteral vals
-  return $ TupVal vals' pos
-checkLiteral (ArrayVal arr t pos) = do
+  return $ TupVal vals'
+checkLiteral (ArrayVal arr t) = do
   vals' <- mapM checkLiteral (elems arr)
   -- Find the unified type of all subexpression types.
   vt <- case map typeOf vals' of
@@ -824,7 +824,7 @@ checkLiteral (ArrayVal arr t pos) = do
           v:vts' -> foldM unifyKnownTypes v vts'
   -- Unify that type with the one given for the array literal.
   t' <- t `unifyKnownTypes` vt
-  return $ ArrayVal (listArray (bounds arr) vals') t' pos
+  return $ ArrayVal (listArray (bounds arr) vals') t'
 
 checkIdent :: TypeBox ty => Ident ty -> TypeM (Ident Type)
 checkIdent (Ident name t pos) = do
