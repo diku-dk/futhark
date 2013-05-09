@@ -79,7 +79,7 @@ collectRes m = pass collect
                       Nothing   -> (x, res_map)
             _ -> (x, res_map)
 
-      return ( (x', res_map'), const $ LetNormRes{ resSuccess = suc, resMap = [] } )
+      return ( (x', res_map'), const LetNormRes { resSuccess = suc, resMap = [] } )
 {-
 changed :: a -> LetNormM tf a
 changed x = do
@@ -234,17 +234,17 @@ letNormExp (Not e pos) = do
 letNormExp (BinOp bop e1 e2 tp pos) = do
     e1' <- subLetoNormExp "tmp_bop" e1
     e2' <- subLetoNormExp "tmp_bop" e2
-    return $ (BinOp bop e1' e2' tp pos)
+    return $ BinOp bop e1' e2' tp pos
 
 letNormExp (And e1 e2 pos) = do
     e1' <- subLetoNormExp "tmp_and" e1
     e2' <- subLetoNormExp "tmp_and" e2
-    return $ (And e1' e2' pos)
+    return $ And e1' e2' pos
 
 letNormExp (Or e1 e2 pos) = do
     e1' <- subLetoNormExp "tmp_and" e1
     e2' <- subLetoNormExp "tmp_and" e2
-    return $ (Or e1' e2' pos)
+    return $ Or e1' e2' pos
 
 ---------------------------
 ---- If construct      ----
@@ -288,7 +288,7 @@ letNormExp (Size arr pos) = do
 letNormExp (Replicate n arr pos) = do
     n'    <- subLetoNormExp "tmp_arg" n
     -- normalized arr & get it outside replicate
-    arr'  <- (letNormExp arr >>= makeVarExpSubst "tmp_arr" pos)
+    arr'  <- letNormExp arr >>= makeVarExpSubst "tmp_arr" pos
     makeVarExpSubst "tmp_repl" pos (Replicate n' arr' pos)
 
 letNormExp (Reshape dims arr pos) = do
@@ -459,14 +459,14 @@ subLetoNormExp str ee = letNormExp ee >>= subsLetExp str
                 (LetPat      _ _ _ pos) -> makeVarExpSubst s pos e
                 (LetWith _ _ _ _ _ pos) -> makeVarExpSubst s pos e
                 (If        _ _ _ _ pos) -> makeVarExpSubst s pos e
-                _                       -> do return e
+                _                       -> return e
 
 makeVarExpSubst :: TypeBox ty => String -> SrcLoc -> Exp ty -> LetNormM ty (Exp ty)
 -- Precondition: e is normalized!
 makeVarExpSubst str pos e = case e of
     -- do not substitute a var or an indexed var
-    Var   _         -> do return e
-    Index _ _ _ _ _ -> do return e
+    Var   {} -> return e
+    Index {} -> return e
     -- perform substitution for all other expression
     _               -> do
         tmp_nm <- new str
@@ -501,9 +501,9 @@ makeLetExp pos l@((vnm,ee):lll) body =
         _ -> commonCase l body
     where
         isLetPatWith e = case e of
-            LetPat  _ _ _ _     -> True
-            LetWith _ _ _ _ _ _ -> True
-            _                   -> False
+            LetPat  {} -> True
+            LetWith {} -> True
+            _          -> False
 
         commonCase :: TypeBox ty => [(String, Exp ty)] -> Exp ty -> Exp ty -- LetNormM ty (Exp ty)
         commonCase []          bdy = bdy
