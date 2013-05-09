@@ -1,0 +1,47 @@
+#!/bin/sh
+#
+# l0c pre-commit hook for quality-checking the commit.
+#
+# This hook checks the following:
+#
+#   * Trailing whitespace.
+#   * Runs hlint.
+#   * Tries to compile l0c.
+#
+# It also yells at you to run the test suite, although it doesn't do
+# it by itself.
+
+initial=c508f9f531929f6bed868243334417ef6c840cb4 # Hash of initial commit.
+
+fail() {
+    echo "Aborting commit due to verification errors."
+    echo "If you disagree, use git commit --no-verify."
+    # Put back any removed files.
+    git stash pop -q
+    exit 1
+}
+
+echo Quality-checking commit...
+echo
+
+# Remove any changes not in the index.
+git stash -q --keep-index
+
+# Find files with trailing whitespace
+if git diff-index --check HEAD | egrep -v '^[+-]'; then
+    fail
+fi
+
+# Run hlint on changed files.
+for file in $(git diff-index --name-only HEAD | egrep '\.l?hsc?$'); do
+    if ! hlint -i "Reduce duplication" "$file"; then
+        fail
+    fi
+done
+
+if ! cabal build; then
+    fail
+fi
+
+# Put back any removed files.
+git stash pop -q
