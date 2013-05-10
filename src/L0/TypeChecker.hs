@@ -705,13 +705,15 @@ checkExp' (Copy e pos) = do
 -- introduces is also checked.
 checkExp' (DoLoop mergepat mergeexp (Ident loopvar _ _)
           boundexp loopbody letbody pos) = do
-  (mergeexp', mergeflow) <- collectDataflow $ checkExp mergeexp
+  ((boundexp', mergeexp'), mergeflow) <-
+    collectDataflow $ do boundexp' <- require [Int] =<< checkExp boundexp
+                         mergeexp' <- checkExp mergeexp
+                         return (boundexp', mergeexp')
   let mergetype = typeOf mergeexp'
       checkloop scope = collectDataflow $
                         scope $ binding [Ident loopvar Int pos] $
                         require [mergetype] =<< checkExp loopbody
   (firstscope, mergepat') <- checkBinding mergepat mergeexp' mergeflow
-  boundexp' <- require [Int] =<< checkExp boundexp
   (_, dataflow) <- checkloop firstscope
   (secondscope, _) <- checkBinding mergepat mergeexp' dataflow
   (loopbody', _) <- checkloop secondscope
