@@ -26,7 +26,7 @@ type TransformM = State TransformState
 
 runTransformM :: TransformM a -> a
 runTransformM m = evalState m newState
-  where newState = TransformState $ newNameSource []
+  where newState = TransformState blankNameSource
 
 new :: String -> TransformM String
 new k = do (name, src) <- gets $ newName k . envNameSrc

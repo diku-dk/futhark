@@ -1,11 +1,16 @@
+{-# LANGUAGE FlexibleInstances, ScopedTypeVariables #-}
 module L0.Traversals
   ( foldlPattern
   , buildExpPattern
+  , progNames
   )
   where
 
 import Data.Data
-import Data.Generics
+import qualified Data.Set as S
+import Data.Generics hiding (typeOf)
+import Data.List
+import Data.Monoid
 
 import L0.AbSyn
 
@@ -82,3 +87,17 @@ buildExpPair f (e,t) = (f e,t)
 buildLambda :: TypeBox tf => (Exp tf -> Exp tf) -> Lambda tf -> Lambda tf
 buildLambda f (AnonymFun tps body  tp pos) = AnonymFun tps     (f body  ) tp pos
 buildLambda f (CurryFun  nm params tp pos) = CurryFun  nm  (map f params) tp pos
+
+-- | Return the set of all variable names bound in program.
+progNames :: forall ty.TypeBox ty => Prog ty -> S.Set String
+progNames = mconcat . map funNames
+  where one = S.singleton
+        funNames (_, _, params, body, _) =
+          mconcat (map (one . identName) params) <> expNames body
+
+        expNames (LetPat pat e body _) =
+          patNames pat <> expNames e <> expNames body
+        expNames e = mconcat $ gmapQ (mkQ mempty expNames) e
+
+        patNames (Id ident) = one $ identName ident
+        patNames (TupId pats _) = mconcat $ map patNames pats

@@ -42,7 +42,6 @@ module L0.AbSyn
   , FunDec
   , Prog
   , funDecByName
-  , progNames
   , prettyPrint
   )
   where
@@ -50,7 +49,6 @@ module L0.AbSyn
 import Data.Array
 import Data.Data hiding (typeOf)
 import Data.List
-import Data.Generics hiding (typeOf)
 import Data.Loc
 import Data.Monoid
 
@@ -592,12 +590,6 @@ type FunDec ty = (String,Type,[Ident Type],Exp ty,SrcLoc)
 
 -- | An entire L0 program.
 type Prog ty = [FunDec ty]
-
--- | Return a list of all variable names mentioned in program.
-progNames :: forall ty.TypeBox ty => Prog ty -> [String]
-progNames = everything union (mkQ [] identName')
-  where identName' :: Ident ty -> [String]
-        identName' k = [identName k]
 
 -- | Find the function of the given name in the L0 program.
 funDecByName :: String -> Prog ty -> Maybe (FunDec ty)

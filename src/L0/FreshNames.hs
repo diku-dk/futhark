@@ -1,6 +1,6 @@
 -- | This module provides facilities for generating unique names.
 --
--- >>> let src = newNameSource []
+-- >>> let src = newNameSource mempty
 -- >>> let (name, src') = newName "foo" src
 -- >>> name
 -- "foo_0"
@@ -9,12 +9,14 @@
 -- "bar_1"
 module L0.FreshNames
   ( NameSource
+  , blankNameSource
   , newNameSource
   , newNameSourceForProg
   , newName
   ) where
 
 import L0.AbSyn
+import L0.Traversals
 
 import Data.Char (isDigit)
 import qualified Data.Set as S
@@ -29,10 +31,14 @@ data NameSource = NameSource Int (S.Set String)
 baseName :: String -> String
 baseName = reverse . dropWhile (=='_') . dropWhile isDigit . reverse
 
+-- | A blank name source.
+blankNameSource :: NameSource
+blankNameSource = NameSource 0 S.empty
+
 -- | Create a new 'NameSource' that will never produce any of the
--- names in the given list.
-newNameSource :: [String] -> NameSource
-newNameSource = NameSource 0 . S.fromList
+-- names in the given set.
+newNameSource :: S.Set String -> NameSource
+newNameSource = NameSource 0
 
 -- | Create a new 'NameSource' that will never produce any of the
 -- names used as variables in the given program.
