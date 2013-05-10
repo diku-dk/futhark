@@ -29,7 +29,7 @@ import L0.EnablingOpts.EnablingOptErrors
 -----------------------------------------------------------------
 
 data DCElimEnv tf = DCElimEnv {   
-                        envVtable  :: S.Set String
+                        envVtable  :: S.Set Name
                   }
 
 -----------------------------------------------------
@@ -39,7 +39,7 @@ data DCElimEnv tf = DCElimEnv {
 data DCElimRes tf = DCElimRes {
     resSuccess :: Bool
   -- ^ Whether we have changed something.
-  , resMap     :: S.Set String
+  , resMap     :: S.Set Name
   -- ^ The hashtable recording the uses
   --, has_io     :: Bool
   }
@@ -65,7 +65,7 @@ badDCElimM = DCElimM . lift . lift . Left
 
 
 
-collectRes :: [String] -> DCElimM tf a -> DCElimM tf (a, Bool)
+collectRes :: [Name] -> DCElimM tf a -> DCElimM tf (a, Bool)
 collectRes mvars m = pass collect
   where wasNotUsed hashtab vnm =
           return $ not (S.member vnm hashtab)
@@ -84,14 +84,14 @@ changed m = pass collect
 
 -- | Bind a name as a common (non-merge) variable.
 -- TypeBox tf => 
-bindVar :: DCElimEnv tf -> String -> DCElimEnv tf
+bindVar :: DCElimEnv tf -> Name -> DCElimEnv tf
 bindVar env name =
   env { envVtable = S.insert name $ envVtable env }
 
-bindVars :: DCElimEnv tf -> [String] -> DCElimEnv tf
+bindVars :: DCElimEnv tf -> [Name] -> DCElimEnv tf
 bindVars = foldl bindVar
 
-binding :: [String] -> DCElimM tf a -> DCElimM tf a
+binding :: [Name] -> DCElimM tf a -> DCElimM tf a
 binding bnds = local (`bindVars` bnds)
 
 
@@ -119,16 +119,18 @@ deadCodeElimExp :: TypeBox tf => Exp tf -> DCElimM tf (Exp tf)
 
 -----------------------------------------------------------------------------
 -- 'trace' and 'assertZip' exhibit side effects and should not be removed!
-deadCodeElimExp (LetPat pat (Apply "trace" args tp p) body pos) = do
+deadCodeElimExp (LetPat pat (Apply fname args tp p) body pos)
+  | "trace" <- nameToString fname = do
     let ids = getBnds pat
     args' <- mapM deadCodeElimExp args
     body' <- binding ids $ deadCodeElimExp body
-    return $ LetPat pat (Apply "trace" args' tp p) body' pos
-deadCodeElimExp (LetPat pat (Apply "assertZip" args tp p) body pos) = do
+    return $ LetPat pat (Apply fname args' tp p) body' pos
+deadCodeElimExp (LetPat pat (Apply fname args tp p) body pos)
+  | "assertZip" <- nameToString fname = do
     let ids = getBnds pat
     args' <- mapM deadCodeElimExp args
     body' <- binding ids $ deadCodeElimExp body
-    return $ LetPat pat (Apply "assertZip" args' tp p) body' pos
+    return $ LetPat pat (Apply fname args' tp p) body' pos
 -----------------------------------------------------------------------------
  
 deadCodeElimExp (LetPat pat e body pos) = do
@@ -151,7 +153,7 @@ deadCodeElimExp (LetWith nm src inds el body pos) = do
             let srcnm = identName src
             in_vtab <- asks $ S.member srcnm . envVtable
             if not in_vtab
-            then badDCElimM $ TypeError pos  ("Var "++srcnm++" not in vtable!")
+            then badDCElimM $ VarNotInFtab pos srcnm
             else do
                     _ <- tell $ DCElimRes False (S.insert srcnm S.empty)
                     inds' <- mapM deadCodeElimExp inds
@@ -162,7 +164,7 @@ deadCodeElimExp (LetWith nm src inds el body pos) = do
 deadCodeElimExp e@(Var (Ident vnm _ pos)) = do 
     in_vtab <- asks $ S.member vnm . envVtable
     if not in_vtab
-    then badDCElimM $ TypeError pos  ("Var "++vnm ++" not in vtable!")
+    then badDCElimM $ VarNotInFtab pos vnm
     else do
             _ <- tell $ DCElimRes False (S.insert vnm S.empty)
             return e
@@ -172,7 +174,7 @@ deadCodeElimExp (Index s idxs t1 t2 pos) = do
     let vnm = identName s
     in_vtab <- asks $ S.member vnm . envVtable
     if not in_vtab
-    then badDCElimM $ TypeError pos  ("Var "++vnm ++" not in vtable!")
+    then badDCElimM $ VarNotInFtab pos vnm
     else do
             _ <- tell $ DCElimRes False (S.insert vnm S.empty)
             idxs' <- mapM deadCodeElimExp idxs
@@ -217,6 +219,6 @@ deadCodeElimLambda (CurryFun fname curryargexps rettype pos) = do
 --    return e
 
 
-getBnds :: TypeBox tf => TupIdent tf -> [String]
+getBnds :: TypeBox tf => TupIdent tf -> [Name]
 getBnds ( Id (Ident var _ _) ) = [var]
 getBnds ( TupId ids _ ) = concatMap getBnds ids

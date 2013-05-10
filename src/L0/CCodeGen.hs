@@ -8,6 +8,7 @@ import Control.Monad.Reader
 import qualified Data.Array as A
 import qualified Data.Map as M
 import Data.List
+import qualified Data.Text as T
 
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.C as C
@@ -33,7 +34,7 @@ newCompilerState prog = CompilerState {
                         }
 
 data CompilerEnv = CompilerEnv {
-    envVarMap :: M.Map String C.Exp
+    envVarMap :: M.Map T.Text C.Exp
   }
 
 newCompilerEnv :: CompilerEnv
@@ -52,21 +53,25 @@ newtype CompilerM a = CompilerM (ReaderT CompilerEnv (State CompilerState) a)
   deriving (Functor, Applicative, Monad,
             MonadState CompilerState, MonadReader CompilerEnv)
 
-binding :: [(String, C.Exp)] -> CompilerM a -> CompilerM a
+binding :: [(T.Text, C.Exp)] -> CompilerM a -> CompilerM a
 binding kvs = local (flip (foldl add) kvs)
   where add env (k, v) = env { envVarMap = M.insert k v $ envVarMap env }
 
-lookupVar :: String -> CompilerM C.Exp
+lookupVar :: T.Text -> CompilerM C.Exp
 lookupVar k = do v <- asks $ M.lookup k . envVarMap
                  case v of
-                   Nothing -> error $ "Uknown variable " ++ k ++ " in code generator."
+                   Nothing -> error $ "Uknown variable " ++ nameToString k ++ " in code generator."
                    Just v' -> return v'
 
 -- | 'new s' returns a fresh variable name, with 's' prepended to it.
 new :: String -> CompilerM String
-new k = do (name, src) <- gets $ newName k . compNameSrc
-           modify $ \s -> s { compNameSrc = src }
-           return name
+new = liftM nameToString  . newAsName
+
+-- | As 'new', but returns a 'Name' instead of a 'String'.
+newAsName :: String -> CompilerM Name
+newAsName k = do (name, src) <- gets $ newName (nameFromString k) . compNameSrc
+                 modify $ \s -> s { compNameSrc = src }
+                 return name
 
 -- | Turn a name into a C expression consisting of just that name.
 varExp :: String -> C.Exp
@@ -125,8 +130,8 @@ tupleFieldExp e i = [C.cexp|$exp:e.$id:(tupleField i)|]
 
 -- | @funName f@ is the name of the C function corresponding to
 -- the L0 function @f@.
-funName :: String -> String
-funName = ("l0_"++)
+funName :: Name -> String
+funName = ("l0_"++) . nameToString
 
 -- | The size is in elements.
 allocArray :: C.Exp -> [C.Exp] -> C.Type -> C.Stm
@@ -269,6 +274,7 @@ mainCall (fname,rettype,params,_,_) = do
 compileProg :: Prog Type -> String
 compileProg prog =
   let ((prototypes, definitions, main), endstate) = runCompilerM $ compileProg'
+      funName' = funName . nameFromString
   in pretty 0 $ ppr [C.cunit|
 $esc:("#include <stdio.h>")
 $esc:("#include <stdlib.h>")
@@ -281,23 +287,23 @@ $edecls:(compVarDefinitions endstate)
 
 $edecls:prototypes
 
-double $id:(funName "toReal")(int x) {
+double $id:(funName' "toReal")(int x) {
   return x;
 }
 
-int $id:(funName "trunc")(double x) {
+int $id:(funName' "trunc")(double x) {
   return x;
 }
 
-double $id:(funName "log")(double x) {
+double $id:(funName' "log")(double x) {
   return log(x);
 }
 
-double $id:(funName "sqrt")(double x) {
+double $id:(funName' "sqrt")(double x) {
   return sqrt(x);
 }
 
-double $id:(funName "exp")(double x) {
+double $id:(funName' "exp")(double x) {
   return exp(x);
 }
 
@@ -318,7 +324,7 @@ int main() {
 |]
   where compileProg' = do
           (prototypes, definitions) <- unzip <$> mapM compileFun prog
-          main <- case funDecByName "main" prog of
+          main <- case funDecByName (nameFromString "main") prog of
                     Nothing -> error "L0.CCodeGen.compileProg: No main function"
                     Just func -> mainCall func
           return (prototypes, definitions, main)
@@ -337,7 +343,7 @@ compileFun (fname, rettype, args, body, _) = do
   return ([C.cedecl|static $ty:crettype $id:(funName fname)( $params:args' );|],
           [C.cfun|static $ty:crettype $id:(funName fname)( $params:args' ) { $stm:body' }|])
   where compileArg (Ident name t _) = do
-          name' <- new name
+          name' <- new $ nameToString name
           ctp <- typeToCType t
           return (varExp name', [C.cparam|$ty:ctp $id:name'|])
 
@@ -582,7 +588,7 @@ compileExp place e@(Iota (Var v) _) = do
              }|]
 
 compileExp place (Iota ne pos) = do
-  size <- new "iota_size"
+  size <- newAsName "iota_size"
   let ident = Ident size Int pos
   compileExp place $ LetPat (Id ident) ne (Iota (Var ident) pos) pos
 
@@ -599,8 +605,8 @@ compileExp place e@(Replicate (Var nv) (Var vv) _) = do
              }|]
 
 compileExp place (Replicate ne ve pos) = do
-  nv <- new "replicate_n"
-  vv <- new "replicate_v"
+  nv <- newAsName "replicate_n"
+  vv <- newAsName "replicate_v"
   let nident = Ident nv Int pos
       vident = Ident vv (typeOf ve) pos
       nlet body = LetPat (Id nident) ne body pos
@@ -705,7 +711,7 @@ compileExp place (Concat xarr yarr _ _) = do
              }|]
 
 compileExp place (LetWith name src idxs ve body _) = do
-  name' <- new $ identName name
+  name' <- new $ nameToString $ identName name
   src' <- lookupVar $ identName src
   etype <- typeToCType $ identType src
   basetype <- typeToCType $ baseType $ identType src
@@ -747,7 +753,7 @@ compileExp place (LetWith name src idxs ve body _) = do
              }|]
 
 compileExp place (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody _) = do
-  loopvar' <- new $ identName loopvar
+  loopvar' <- new $ nameToString $ identName loopvar
   bound <- new "loop_bound"
   mergevarR <- new $ "loop_mergevar_read"
   mergevarW <- new $ "loop_mergevar_write"
@@ -872,7 +878,7 @@ compileExpInPlace place e
 compileExpInPlace place e = compileExp place e
 
 compilePattern :: TupIdent Type -> C.Exp
-               -> [(String, C.Exp)]
+               -> [(Name, C.Exp)]
 compilePattern pat vexp = compilePattern' pat vexp
   where compilePattern' (Id var) vexp' = do
           [(identName var, vexp')]

@@ -52,7 +52,7 @@ data Arr2TupEnv = Arr2TupEnv {
                     -- the flat tuple it becomes after transf.
                     -- with the above example `res' is associated
                     -- with `[res1, res2, res3, res4]' vars
-                    tupVtable  :: M.Map String [Ident Type] --(TupIdent Type)
+                    tupVtable  :: M.Map Name [Ident Type] --(TupIdent Type)
                   }
 
 
@@ -63,14 +63,14 @@ newtype Arr2TupM a = Arr2TupM (StateT NameSource (ReaderT Arr2TupEnv (Either Ena
 
 
 -- | Bind a name as a common (non-merge) variable.
-bindVar :: Arr2TupEnv -> (String, [Ident Type]) -> Arr2TupEnv
+bindVar :: Arr2TupEnv -> (Name, [Ident Type]) -> Arr2TupEnv
 bindVar env (name,val) =
   env { tupVtable = M.insert name val $ tupVtable env }
 
-bindVars :: Arr2TupEnv -> [(String, [Ident Type])] -> Arr2TupEnv
+bindVars :: Arr2TupEnv -> [(Name, [Ident Type])] -> Arr2TupEnv
 bindVars = foldl bindVar
 
-binding :: [(String, [Ident Type])] -> Arr2TupM a -> Arr2TupM a
+binding :: [(Name, [Ident Type])] -> Arr2TupM a -> Arr2TupM a
 binding bnds = local (`bindVars` bnds)
 
 
@@ -85,9 +85,9 @@ runNormM prog (Arr2TupM a) =
 badArr2TupM :: EnablingOptError -> Arr2TupM a
 badArr2TupM = Arr2TupM . lift . lift . Left
 
--- | Return a fresh, unique name.  The @String@ is prepended to the
+-- | Return a fresh, unique name.  The @Name@ is prepended to the
 -- name.
-new :: String -> Arr2TupM String
+new :: Name -> Arr2TupM Name
 new = state . newName
 
 
@@ -479,12 +479,12 @@ arr2tupExp (LetPat pat z@(Zip els pzip) body pos) = do
 
     -- `assertZip' results in a Boolean value
     -- (pat_assert, _) <- mkFullPattern pat
-    tmp_nm <- new "assrt" 
+    tmp_nm <- new $ nameFromString "assrt"
     let pat_id = Ident { identName = tmp_nm
                        , identType = Bool
                        , identSrcLoc = pzip  
                        }
-    let e_assert = Apply "assertZip" arrs Bool pzip -- tp pzip
+    let e_assert = Apply (nameFromString "assertZip") arrs Bool pzip -- tp pzip
 
     return $ LetPat (Id pat_id) e_assert res pos
     where 
@@ -529,7 +529,7 @@ arr2tupExp (LetWith dst src inds el body pos) = do
     case (tpelm, bnd) of
         (Tuple elm_tps, Just ids_src) -> do
             -- compute new ids for el (assuming that its translation is a TupLit)
-            ids_elm <- mapM (mkIdFromType pos "tmp_el") elm_tps
+            ids_elm <- mapM (mkIdFromType pos $ nameFromString "tmp_el") elm_tps
             let pat_elm = TupId (map Id ids_elm) pos
 
             -- the assumption is pat_src is already bound in vtable!!!
@@ -560,10 +560,11 @@ arr2tupExp (LetWith dst src inds el body pos) = do
 ---- Apply and If ----
 ----------------------
 
-arr2tupExp (Apply "trace" [arg] _ pos) = do
+arr2tupExp (Apply fname [arg] _ pos)
+  | "trace" <- nameToString fname = do
     arg' <- arr2tupExp arg
     let tp' = typeOf arg'
-    return $ Apply "trace" [arg'] tp' pos
+    return $ Apply fname [arg'] tp' pos
 
 arr2tupExp (Apply fnm args rtp pos) = do
     let rtp' = toTupArrType rtp
@@ -657,7 +658,7 @@ mkTupIdent p  idents = TupId (map Id idents) p
 ---    a fully instantiated tuple id, i.e., the new bindings are to
 ---    be added to the symbol table.
 --------------------
-mkFullPattern :: TupIdent Type -> Arr2TupM (TupIdent Type, [(String, [Ident Type])])
+mkFullPattern :: TupIdent Type -> Arr2TupM (TupIdent Type, [(Name, [Ident Type])])
 mkFullPattern pat = do
     let (pos, ids) = flattenPat pat
     (ids2, bnds2) <- unzip <$> mapM processIdent ids
@@ -666,7 +667,7 @@ mkFullPattern pat = do
     return ( mkTupIdent pos idsnew, bnds )
 
     where
-        processIdent :: Ident Type -> Arr2TupM ([Ident Type], [(String, [Ident Type])])
+        processIdent :: Ident Type -> Arr2TupM ([Ident Type], [(Name, [Ident Type])])
         processIdent ident = do
             let (nm, pos) = (identName ident, identSrcLoc ident)
             case toTupArrType (identType ident) of
@@ -681,7 +682,7 @@ mkFullPattern pat = do
                 --_             -> return ([ident], [])
 
 
-mkIdFromType :: SrcLoc -> String -> Type ->
+mkIdFromType :: SrcLoc -> Name -> Type ->
                 Arr2TupM (Ident Type)
 mkIdFromType pos nm t =
     if invalidType t 

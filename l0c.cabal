@@ -19,7 +19,8 @@ Executable l0c
                  srcloc >= 0.4,
                  syb >= 0.3,
                  language-c-quote >= 0.7.1,
-                 mainland-pretty >= 0.2.5
+                 mainland-pretty >= 0.2.5,
+                 text
 
   Other-modules: L0.Parser.Parser,
                  L0.Parser.Lexer

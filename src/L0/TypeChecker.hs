@@ -29,28 +29,28 @@ data TypeError = TypeError SrcLoc String
                | UnexpectedType (Exp Type) [Type]
                -- ^ Expression of type was not one of the expected
                -- types.
-               | ReturnTypeError SrcLoc String Type Type
+               | ReturnTypeError SrcLoc Name Type Type
                -- ^ The body of a function definition has a different
                -- type than its declaration.
-               | DupDefinitionError String SrcLoc SrcLoc
+               | DupDefinitionError Name SrcLoc SrcLoc
                -- ^ Two functions have been defined with the same name.
-               | DupParamError String String SrcLoc
+               | DupParamError Name Name SrcLoc
                -- ^ Two function parameters share the same name.
-               | DupPatternError String SrcLoc SrcLoc
+               | DupPatternError Name SrcLoc SrcLoc
                -- ^ Two pattern variables share the same name.
                | InvalidPatternError (TupIdent (Maybe Type)) (Exp Type)
                -- ^ The pattern is not compatible with the type.
-               | UnknownVariableError String SrcLoc
+               | UnknownVariableError Name SrcLoc
                -- ^ Unknown variable of the given name referenced at the given spot.
-               | UnknownFunctionError String SrcLoc
+               | UnknownFunctionError Name SrcLoc
                -- ^ Unknown function of the given name called at the given spot.
-               | ParameterMismatch (Maybe String) SrcLoc (Either Int [Type]) [Type]
+               | ParameterMismatch (Maybe Name) SrcLoc (Either Int [Type]) [Type]
                -- ^ A function (possibly anonymous) was called with
                -- invalid arguments.  The third argument is either the
                -- number of parameters, or the specific types of
                -- parameters accepted (sometimes, only the former can
                -- be determined).
-               | UseAfterConsume String SrcLoc SrcLoc
+               | UseAfterConsume Name SrcLoc SrcLoc
                -- ^ A variable was attempted used after being
                -- consumed.  The last location is the point of
                -- consumption.
@@ -78,26 +78,26 @@ instance Show TypeError where
     "Type of expression at " ++ locStr (srclocOf e) ++
     " must be one of " ++ intercalate ", " (map ppType ts) ++ "."
   show (ReturnTypeError pos fname rettype bodytype) =
-    "Declaration of function " ++ fname ++ " at " ++ locStr pos ++
+    "Declaration of function " ++ nameToString fname ++ " at " ++ locStr pos ++
     " declares return type " ++ ppType rettype ++ ", but body has type " ++
     ppType bodytype
   show (DupDefinitionError name pos1 pos2) =
-    "Duplicate definition of function " ++ name ++ ".  Defined at " ++
+    "Duplicate definition of function " ++ nameToString name ++ ".  Defined at " ++
     locStr pos1 ++ " and " ++ locStr pos2 ++ "."
   show (DupParamError funname paramname pos) =
-    "Parameter " ++ paramname ++
+    "Parameter " ++ nameToString paramname ++
     " mentioned multiple times in argument list of function " ++
-    funname ++ " at " ++ locStr pos ++ "."
+    nameToString funname ++ " at " ++ locStr pos ++ "."
   show (DupPatternError name pos1 pos2) =
-    "Variable " ++ name ++ " bound twice in tuple pattern; at " ++
+    "Variable " ++ nameToString name ++ " bound twice in tuple pattern; at " ++
     locStr pos1 ++ " and " ++ locStr pos2 ++ "."
   show (InvalidPatternError pat e) =
     "Pattern " ++ ppTupId pat ++ " at " ++ locStr (srclocOf pat) ++
     " cannot match value of type " ++ ppType (typeOf e) ++ " at " ++ locStr (srclocOf e) ++ "."
   show (UnknownVariableError name pos) =
-    "Unknown variable " ++ name ++ " referenced at " ++ locStr pos ++ "."
+    "Unknown variable " ++ nameToString name ++ " referenced at " ++ locStr pos ++ "."
   show (UnknownFunctionError fname pos) =
-    "Unknown function " ++ fname ++ " called at " ++ locStr pos ++ "."
+    "Unknown function " ++ nameToString fname ++ " called at " ++ locStr pos ++ "."
   show (ParameterMismatch fname pos expected got) =
     "In call of " ++ fname' ++ " at position " ++ locStr pos ++
     ": expecting " ++ show nexpected ++ " argument(s) of type(s) " ++
@@ -108,9 +108,9 @@ instance Show TypeError where
               Left i -> (i, "(polymorphic)")
               Right ts -> (length ts, intercalate ", " $ map ppType ts)
           ngot = length got
-          fname' = maybe "anonymous function" ("function "++) fname
+          fname' = maybe "anonymous function" (("function "++) . nameToString) fname
   show (UseAfterConsume name rloc wloc) =
-    "Varible " ++ name ++ " used at " ++ locStr rloc ++
+    "Varible " ++ nameToString name ++ " used at " ++ locStr rloc ++
     ", but it was consumed at " ++ locStr wloc ++ ".  (Possibly through aliasing)"
   show (IndexingError dims got pos) =
     show got ++ " indices given, but type of expression at " ++ locStr pos ++
@@ -124,7 +124,7 @@ instance Show TypeError where
 type FunBinding = (Type, [Type])
 
 -- | Information about the aliasing of the value returned by an expression.
-data Aliases = VarAlias (S.Set String)
+data Aliases = VarAlias (S.Set Name)
              -- ^ May alias these variables.
              | TupleAlias [Aliases]
              -- ^ Aliasing information for specific components of a
@@ -144,13 +144,13 @@ instance Monoid Aliases where
 
 -- | Remove a variable from the alias set (presumably because it has
 -- gone out of scope).
-unalias :: String -> Aliases -> Aliases
+unalias :: Name -> Aliases -> Aliases
 unalias name (VarAlias names) = VarAlias $ name `S.delete` names
 unalias name (TupleAlias alss) = TupleAlias $ map (unalias name) alss
 
 -- | All the variables represented in this aliasing.  Guaranteed not
 -- to contain duplicates.
-aliased :: Aliases -> [String]
+aliased :: Aliases -> [Name]
 aliased (VarAlias names) = S.toList names
 aliased (TupleAlias ass) = nub $ concatMap aliased ass
 
@@ -159,10 +159,10 @@ aliased (TupleAlias ass) = nub $ concatMap aliased ass
 -- only initialised at the very beginning, but the variable table will
 -- be extended during type-checking when let-expressions are
 -- encountered.
-data TypeEnv = TypeEnv { envVtable :: M.Map String Type
-                       , envFtable :: M.Map String FunBinding
-                       , envAliases :: M.Map String Aliases
-                       , envConsumed :: M.Map String SrcLoc
+data TypeEnv = TypeEnv { envVtable :: M.Map Name Type
+                       , envFtable :: M.Map Name FunBinding
+                       , envAliases :: M.Map Name Aliases
+                       , envConsumed :: M.Map Name SrcLoc
                        , envCheckOccurences :: Bool
                        }
 
@@ -170,9 +170,9 @@ data Usage = Observed SrcLoc
            | Consumed SrcLoc
              deriving (Eq, Ord, Show)
 
-type Usages = M.Map String [Usage]
+type Usages = M.Map Name [Usage]
 
-combineUsages :: String -> Usage -> Usage -> Either TypeError Usage
+combineUsages :: Name -> Usage -> Usage -> Either TypeError Usage
 combineUsages _ (Observed loc) (Observed _) = Right $ Observed loc
 combineUsages name (Consumed wloc) (Observed rloc) =
   Left $ UseAfterConsume name rloc wloc
@@ -240,7 +240,7 @@ consume loc als =
 -- | Proclaim that we have written to the given variable, and mark
 -- accesses to it and all of its aliases as invalid inside the given
 -- computation.
-consuming :: SrcLoc -> String -> TypeM a -> TypeM a
+consuming :: SrcLoc -> Name -> TypeM a -> TypeM a
 consuming loc name m = do
   consume loc =<< aliases name
   local consume' m
@@ -275,7 +275,7 @@ alternative m1 m2 = pass $ do
   let usage = Dataflow (M.unionWith max occurs1' occurs2') (als1 <> als2)
   return ((x, y), const usage)
 
-aliasing :: String -> Aliases -> TypeM a -> TypeM a
+aliasing :: Name -> Aliases -> TypeM a -> TypeM a
 aliasing name als tm = do
   als' <- transitive als -- Checkme: 'transitive' might not be necessary.
   let name' = VarAlias (S.singleton name)
@@ -288,7 +288,7 @@ aliasing name als tm = do
         transitive (TupleAlias names) =
           TupleAlias <$> mapM transitive names
 
-aliases :: String -> TypeM Aliases
+aliases :: Name -> TypeM Aliases
 aliases name = asks $ maybe name' reflexive . M.lookup name . envAliases
   where name' = VarAlias $ S.singleton name
         reflexive als | VarAlias _ <- als = als <> name'
@@ -324,7 +324,7 @@ binding bnds = check bnds . local (`bindVars` bnds)
                                 , usageAliasing = newaliases })
           where split = M.partitionWithKey $ const . (`elem` names)
 
-lookupVar :: String -> SrcLoc -> TypeM Type
+lookupVar :: Name -> SrcLoc -> TypeM Type
 lookupVar name pos = do
   bnd <- asks $ M.lookup name . envVtable
   consumed <- asks $ M.lookup name . envConsumed
@@ -421,7 +421,8 @@ checkProg' checkoccurs prog = do
         let argtypes = map (propagateUniqueness . identType) args -- Throw away argument names.
         in Right $ M.insert name (propagateUniqueness ret,argtypes,pos) ftable
     rmLoc (ret,args,_) = (ret,args)
-    builtins = M.fromList [("toReal", (Real, [Int], noLoc))
+    builtins = M.mapKeys nameFromString $
+               M.fromList [("toReal", (Real, [Int], noLoc))
                           ,("trunc", (Int, [Real], noLoc))
                           ,("sqrt", (Real, [Real], noLoc))
                           ,("log", (Real, [Real], noLoc))
@@ -516,20 +517,22 @@ checkExp' (Var ident) = do
   observe ident'
   return $ Var ident'
 
-checkExp' (Apply "trace" args t pos) =
+checkExp' (Apply fname args t pos)
+  | "trace" <- nameToString fname =
   case args of
     [e] -> do
       e' <- checkExp e
       t' <- checkAnnotation pos "return" t $ typeOf e'
-      return $ Apply "trace" [e'] t' pos
+      return $ Apply fname [e'] t' pos
     _ -> bad $ TypeError pos "Trace function takes a single parameter"
 
-checkExp' (Apply "assertZip" args t pos) = do
+checkExp' (Apply fname args t pos)
+  | "assertZip" <- nameToString fname = do
   args' <- mapM checkExp args
   let argtps = map typeOf args'
   _ <- mapM (soac2ElemType pos) argtps
   t' <- checkAnnotation pos "return" t Bool
-  return $ Apply "assertZip" args' t' pos
+  return $ Apply fname args' t' pos
 
 checkExp' (Apply fname args t pos) = do
   bnd <- asks $ M.lookup fname . envFtable
@@ -919,7 +922,7 @@ checkBinding pat e dflow = do
     runStateT (checkBinding' pat (typeOf e) (usageAliasing dflow)) (id, [])
   return (\m -> sequentially (tell dflow) (const $ scope m), pat')
   where checkBinding' (Id (Ident name namet pos)) t a = do
-          t' <- lift $ checkAnnotation (srclocOf pat) name namet t
+          t' <- lift $ checkAnnotation (srclocOf pat) (nameToString name) namet t
           add (Ident name t' pos) a
           return $ Id $ Ident name t' pos
         checkBinding' (TupId pats pos) (Tuple ts) a
@@ -948,7 +951,7 @@ validApply :: [Type] -> [Type] -> Bool
 validApply expected got =
   length got == length expected && all id (zipWith subtypeOf got expected)
 
-checkApply :: Maybe String -> [Type] -> [Type] -> SrcLoc -> TypeM ()
+checkApply :: Maybe Name -> [Type] -> [Type] -> SrcLoc -> TypeM ()
 checkApply fname expected got loc =
   unless (validApply expected got) $
   bad $ ParameterMismatch fname loc (Right expected) got
@@ -956,7 +959,7 @@ checkApply fname expected got loc =
 checkLambda :: TypeBox ty => Lambda ty -> [Type] -> TypeM (Lambda Type)
 checkLambda (AnonymFun params body ret pos) args = do
   (_, ret', params', body', _) <-
-    checkFun ("<anonymous>", ret, params, body, pos)
+    checkFun (nameFromString "<anonymous>", ret, params, body, pos)
   case () of
     _ | length params' == length args -> do
           checkApply Nothing (map identType params') args pos
@@ -975,13 +978,14 @@ checkLambda (AnonymFun params body ret pos) args = do
           in checkLambda tupfun args
       | otherwise -> bad $ TypeError pos $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
-checkLambda (CurryFun "op ~" [] rettype pos) [arg] = do
+checkLambda (CurryFun fname [] rettype pos) [arg]
+  | "op ~" <- nameToString fname = do
   rettype' <- checkAnnotation pos "return" rettype arg
   checkLambda (AnonymFun [var] (Negate (Var var) arg pos) rettype' pos) [arg]
-  where var = Ident "x" arg pos
+  where var = Ident (nameFromString "x") arg pos
 
 checkLambda (CurryFun opfun curryargexps rettype pos) args
-  | Just op <- lookup opfun ops =
+  | Just op <- lookup (nameToString opfun) ops =
   checkPolyLambdaOp op curryargexps rettype args pos
   where ops = map (\op -> ("op " ++ opStr op, op)) [minBound..maxBound]
 
@@ -999,11 +1003,11 @@ checkLambda (CurryFun fname curryargexps rettype pos) args = do
               -- Same shimming as in the case for anonymous functions,
               -- although we don't have to worry about name shadowing
               -- here.
-              let tupparam = (Ident "x" tupt pos)
+              let tupparam = Ident (nameFromString "x") tupt pos
                   tupfun = AnonymFun [tupparam] tuplet rettype' pos
                   params = zipWith mkparam [0..] paramtypes
                     where mkparam :: Int -> Type -> Ident Type
-                          mkparam i t = Ident ("param_" ++ show i) t pos
+                          mkparam i t = Ident (nameFromString $ "param_" ++ show i) t pos
                   tuplet = LetPat (TupId (map Id params) pos) (Var tupparam) body pos
                   body = Apply fname (map Var params) rettype' pos
               in checkLambda tupfun args
@@ -1020,13 +1024,15 @@ checkPolyLambdaOp op curryargexps rettype args pos = do
           [Tuple [t1,t2]] | t1 == t2 -> return t1 -- For autoshimming.
           l -> bad $ ParameterMismatch (Just fname) pos (Left 2) l
   (x,y,params) <- case curryargexps of
-                    [] -> return (Var (Ident "x" (boxType tp) pos),
-                                  Var (Ident "y" (boxType tp) pos),
-                                  [Ident "x" tp pos, Ident "y" tp pos])
+                    [] -> return (Var $ xident (boxType tp),
+                                  Var $ yident (boxType tp),
+                                  [xident tp, yident tp])
                     [e] -> return (e,
-                                   Var (Ident "y" (boxType tp) pos),
-                                   [Ident "y" tp pos])
+                                   Var $ yident $ boxType tp,
+                                   [yident tp])
                     (e1:e2:_) -> return (e1, e2, [])
   body <- binding params $ checkBinOp op x y rettype pos
   checkLambda (AnonymFun params body (typeOf body) pos) args
-  where fname = "op" ++ ppBinOp op
+  where fname = nameFromString $ "op" ++ ppBinOp op
+        xident t = Ident (nameFromString "x") t pos
+        yident t = Ident (nameFromString "y") t pos

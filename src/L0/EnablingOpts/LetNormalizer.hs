@@ -42,7 +42,7 @@ import L0.EnablingOpts.EnablingOptErrors
 data LetNormRes tf = LetNormRes {
     resSuccess :: Bool
   -- ^ Whether we have changed something.
-  , resMap     :: [(String, Exp tf)]
+  , resMap     :: [(Name, Exp tf)]
   -- ^ The hashtable recording the uses
   }
 
@@ -63,7 +63,7 @@ newtype LetNormM tf a = LetNormM (StateT NameSource (WriterT (LetNormRes tf) (Ei
 -----------------------------
 
 --collectRes :: Exp tf -> LetNormM tf a -> LetNormM tf (a, [(String, Exp tf)])
-collectRes :: LetNormM tf (Exp tf) -> LetNormM tf (Exp tf, [(String, Exp tf)])
+collectRes :: LetNormM tf (Exp tf) -> LetNormM tf (Exp tf, [(Name, Exp tf)])
 collectRes m = pass collect
   where 
     collect = do
@@ -106,7 +106,7 @@ badLetNormM = LetNormM . lift . lift . Left
 -- | Return a fresh, unique name.  The @String@ is prepended to the
 -- name.
 new :: TypeBox tf => String -> LetNormM tf String
-new = state . newName
+new = liftM nameToString . state . newName . nameFromString
 
 
 letNormProg :: TypeBox tf => Prog tf -> Either EnablingOptError (Bool, Prog tf)
@@ -470,11 +470,11 @@ makeVarExpSubst str pos e = case e of
     -- perform substitution for all other expression
     _               -> do
         tmp_nm <- new str
-        let idd = Ident { identName = tmp_nm, 
+        let idd = Ident { identName = nameFromString tmp_nm,
                           identType = getExpType e, 
                           identSrcLoc = pos
                         }
-        _ <- tell $ LetNormRes True [(tmp_nm, e)]
+        _ <- tell $ LetNormRes True [(nameFromString tmp_nm, e)]
         return $ Var idd
 
 letNormOmakeVarExpSubst :: TypeBox ty => String -> SrcLoc -> Exp ty -> LetNormM ty (Exp ty)
@@ -484,7 +484,7 @@ letNormOmakeVarExpSubst str pos arr = letNormExp arr >>= makeVarExpSubst str pos
 ---- makeLetExp SEMANTICALLY EQUIVALENT with addPatterns ????? ----
 -------------------------------------------------------------------
 
-makeLetExp :: TypeBox tf => SrcLoc -> [(String, Exp tf)] -> Exp tf -> Exp tf -- LetNormM tf (Exp tf)
+makeLetExp :: TypeBox tf => SrcLoc -> [(Name, Exp tf)] -> Exp tf -> Exp tf -- LetNormM tf (Exp tf)
 makeLetExp _   []           body = body
 
 -- Preconditions: lst contains normalized bindings, 
@@ -493,7 +493,7 @@ makeLetExp _   []           body = body
 makeLetExp pos l@((vnm,ee):lll) body =
     case body of
         (LetPat pat1 (Var id1) b1 p1) -> 
-            if vnm == identName id1 && not (isLetPatWith ee) 
+            if vnm == identName id1 && not (isLetPatWith ee)
             then let b1' = makeLetExp pos lll b1
                  in  combinePats (ReguPat pat1 p1) ee b1'
                     -- return $ LetPat pat1 ee b1' p1
@@ -505,11 +505,11 @@ makeLetExp pos l@((vnm,ee):lll) body =
             LetWith {} -> True
             _          -> False
 
-        commonCase :: TypeBox ty => [(String, Exp ty)] -> Exp ty -> Exp ty -- LetNormM ty (Exp ty)
+        commonCase :: TypeBox ty => [(Name, Exp ty)] -> Exp ty -> Exp ty -- LetNormM ty (Exp ty)
         commonCase []          bdy = bdy
         commonCase ((nm,e):ll) bdy = 
             let bdy' = makeLetExp pos ll bdy
-                idd = Ident { identName   = nm, 
+                idd = Ident { identName   = nm,
                               identType   = getExpType e, 
                               identSrcLoc = pos
                             }
@@ -555,7 +555,7 @@ combinePats wp@(WithPat y1 y0 inds pos) el body =
         -- not a let bindings
         _ -> LetWith y1 y0 inds el body pos    
 
-addPatterns :: TypeBox tf => SrcLoc -> [(String, Exp tf)] -> Exp tf -> Exp tf
+addPatterns :: TypeBox tf => SrcLoc -> [(Name, Exp tf)] -> Exp tf -> Exp tf
 addPatterns = makeLetExp
 --addPatterns :: TypeBox tf => SrcLoc -> [(String, Exp tf)] -> Exp tf -> Exp tf
 --addPatterns _   []         bdy = bdy

@@ -4,6 +4,10 @@
 -- See "L0.TypeChecker" and the 'Exp' type for more information.
 module L0.AbSyn
   ( locStr
+  , Name
+  , nameToString
+  , nameFromString
+  , defaultEntryPoint
   , Uniqueness(..)
   , Type(..)
   , subtypeOf
@@ -51,9 +55,28 @@ import Data.Data hiding (typeOf)
 import Data.List
 import Data.Loc
 import Data.Monoid
+import qualified Data.Text as T
 
-isBuiltInFun :: String -> Bool
-isBuiltInFun fnm = fnm `elem` ["toReal", "trunc", "sqrt", "log", "exp", "trace", "assertZip"]
+-- | The abstract (not really) type representing names in the L0
+-- compiler.  'String's, being lists of characters, are very slow,
+-- while 'T.Text's are based on byte-arrays.
+type Name = T.Text
+
+-- | Convert a name to the corresponding list of characters.
+nameToString :: Name -> String
+nameToString = T.unpack
+
+-- | Convert a list of characters to the corresponding name.
+nameFromString :: String -> Name
+nameFromString = T.pack
+
+-- | The name of the default program entry point (main).
+defaultEntryPoint :: Name
+defaultEntryPoint = nameFromString "main"
+
+isBuiltInFun :: Name -> Bool
+isBuiltInFun fnm = fnm `elem` builtins
+  where builtins = map nameFromString ["toReal", "trunc", "sqrt", "log", "exp", "trace", "assertZip"]
 
 locStr :: SrcLoc -> String
 locStr (SrcLoc NoLoc) = "unknown location"
@@ -263,7 +286,7 @@ flattenArray v = v
 
 -- | An identifier consists of its name and the type of the value
 -- bound to the identifier.
-data Ident ty = Ident { identName :: String
+data Ident ty = Ident { identName :: Name
                       , identType :: ty
                       , identSrcLoc :: SrcLoc
                       }
@@ -303,7 +326,7 @@ data Exp ty = Literal Value SrcLoc
             | If     (Exp ty) (Exp ty) (Exp ty) ty SrcLoc
             | Var    (Ident ty)
             -- Function Call and Let Construct
-            | Apply  String [Exp ty] ty SrcLoc
+            | Apply  Name [Exp ty] ty SrcLoc
             | LetPat (TupIdent ty) (Exp ty) (Exp ty) SrcLoc
 
             | LetWith (Ident ty) (Ident ty) [Exp ty] (Exp ty) (Exp ty) SrcLoc
@@ -568,7 +591,7 @@ expToValue _ = Nothing
 -- | Anonymous Function
 data Lambda ty = AnonymFun [Ident Type] (Exp ty) Type SrcLoc
                     -- fn int (bool x, char z) => if(x) then ord(z) else ord(z)+1 *)
-               | CurryFun String [Exp ty] ty SrcLoc
+               | CurryFun Name [Exp ty] ty SrcLoc
                     -- op +(4) *)
                  deriving (Eq, Ord, Typeable, Data, Show)
 
@@ -586,13 +609,13 @@ instance Located (TupIdent ty) where
   locOf (Id ident) = locOf ident
 
 -- | Function Declarations
-type FunDec ty = (String,Type,[Ident Type],Exp ty,SrcLoc)
+type FunDec ty = (Name,Type,[Ident Type],Exp ty,SrcLoc)
 
 -- | An entire L0 program.
 type Prog ty = [FunDec ty]
 
 -- | Find the function of the given name in the L0 program.
-funDecByName :: String -> Prog ty -> Maybe (FunDec ty)
+funDecByName :: Name -> Prog ty -> Maybe (FunDec ty)
 funDecByName fname = find (\(fname',_,_,_,_) -> fname == fname')
 
 -- Pretty-Printing Functionality
@@ -625,7 +648,7 @@ ppExp d (ArrayLit es _ _) =
   " { " ++ intercalate ", " (map (ppExp d) es) ++ " } "
 ppExp d (TupLit es _) =
   " ( " ++ intercalate ", " (map (ppExp d) es) ++ " ) "
-ppExp _ (Var ident) = identName ident ++ " "
+ppExp _ (Var ident) = nameToString (identName ident) ++ " "
 
 ppExp d (BinOp op e1 e2 _ _) = " ( " ++ ppExp d e1 ++ ppBinOp op ++ ppExp d e2 ++ " ) "
 ppExp d (And   e1 e2 _  ) = " ( " ++ ppExp d e1 ++ " && " ++ ppExp d e2 ++ " ) "
@@ -641,25 +664,25 @@ ppExp d (If    e1 e2 e3 _ _)  =
   spaces (d+1) ++ "else " ++ ppExp (d+2) e3 ++ "\n" ++
   spaces d
 
-ppExp _ (Apply f [] _ _)    = f ++ "() "
+ppExp _ (Apply f [] _ _)    = nameToString f ++ "() "
 ppExp d (Apply f args _ _)  =
-  f ++ "( " ++ intercalate ", " (map (ppExp d) args) ++ " ) "
+  nameToString f ++ "( " ++ intercalate ", " (map (ppExp d) args) ++ " ) "
 
 ppExp d (LetPat tupid e1 body _) =
         "\n" ++ spaces d ++ "let " ++ ppTupId tupid ++ " = " ++ ppExp (d+2) e1 ++
         "in  " ++ ppExp d body
 ppExp d (LetWith (Ident dest _ _) (Ident src _ _) es el e2 _)
   | dest == src =
-    "\n" ++ spaces d ++ "let " ++ dest ++ "[ " ++
+    "\n" ++ spaces d ++ "let " ++ nameToString dest ++ "[ " ++
     intercalate ", " (map (ppExp d) es) ++
     "] = " ++ ppExp d el ++ "in  " ++ ppExp d e2
   | otherwise =
-    "\n" ++ spaces d ++ "let " ++ dest ++ " = " ++ src ++
+    "\n" ++ spaces d ++ "let " ++ nameToString dest ++ " = " ++ nameToString src ++
     " with [ " ++ intercalate ", " (map (ppExp d) es) ++
     "] <- " ++ ppExp d el ++ "in  " ++ ppExp d e2
 
 ppExp d (Index (Ident name _ _) es _ _ _) =
-  name ++ "[ " ++ intercalate ", " (map (ppExp d) es) ++ " ] "
+  nameToString name ++ "[ " ++ intercalate ", " (map (ppExp d) es) ++ " ] "
 
 -- | Array Constructs
 ppExp d (Iota e _)         = "iota ( " ++ ppExp d e ++ " ) "
@@ -697,7 +720,7 @@ ppExp d (Copy e _) = " copy ( " ++ ppExp d e ++ " ) "
 
 ppExp d (DoLoop mvpat mvexp i n loopbody letbody _) =
   "\n" ++ spaces d ++ "loop (" ++ ppTupId mvpat ++ " = " ++ ppExp d mvexp ++
-    ") = " ++ "for " ++ identName i ++ " < " ++ ppExp d n ++ " do\n" ++
+    ") = " ++ "for " ++ nameToString (identName i) ++ " < " ++ ppExp d n ++ " do\n" ++
     spaces (d+1) ++ ppExp (d+1) loopbody ++ "\n" ++ spaces d ++
     "in " ++ ppExp d letbody
 --- Cosmin added ppExp for soac2
@@ -760,7 +783,7 @@ ppType (Tuple tps) = "( " ++ intercalate ", " (map ppType tps) ++ " ) "
 
 -- | Pretty printing a tuple id
 ppTupId :: TupIdent ty -> String
-ppTupId (Id ident) = " " ++ identName ident ++ " "
+ppTupId (Id ident) = " " ++ nameToString (identName ident) ++ " "
 ppTupId (TupId pats _) = " ( " ++ intercalate ", " (map ppTupId pats) ++ " ) "
 
 --        "\n" ++ spaces d ++ "let " ++ ppTupId tupid ++ " = " ++ ppExp d e1 ++
@@ -771,14 +794,14 @@ ppTupId (TupId pats _) = " ( " ++ intercalate ", " (map ppTupId pats) ++ " ) "
 -- pretty printing Lambda, i.e., curried and unnamed functions *)
 ppLambda :: TypeBox ty => Int -> Lambda ty -> String
 ppLambda d ( AnonymFun params body rtp _) =
-      let pp_bd (Ident arg tp _) = ppType tp ++ " " ++ arg
+      let pp_bd (Ident arg tp _) = ppType tp ++ " " ++ nameToString arg
           strargs = intercalate ", " $ map pp_bd params
       in "\n" ++ spaces d ++ "fn " ++ ppType rtp ++ " ( " ++ strargs ++ 
          " ) " ++ " => " ++ ppExp (d+1) body ++ "\n" ++ spaces d
 --      let pp_bd (Ident arg tp _) = ppType tp ++ " " ++ arg
 --          strargs = intercalate ", " $ map pp_bd params
 --      in " fn " ++ ppType rtp ++ " ( " ++ strargs ++ " ) " ++ " => " ++ ppExp 0 body
-ppLambda _ ( CurryFun fid []   _  _  ) = fid
+ppLambda _ ( CurryFun fid []   _  _  ) = nameToString fid
 ppLambda _ ( CurryFun fid args ty pos) =
       ppExp 0 (Apply fid args ty pos)
 
@@ -786,10 +809,10 @@ ppLambda _ ( CurryFun fid args ty pos) =
 ppFun ::  TypeBox ty => Int -> FunDec ty -> String
 ppFun d (name, ret_tp, args, body, _) =
   let -- pretty printing a list of bindings separated by commas
-      ppBd (Ident argname tp _) = ppType tp ++ " " ++ argname
+      ppBd (Ident argname tp _) = ppType tp ++ " " ++ nameToString argname
       pp_bindings = intercalate "," . map ppBd
 
-  in "\n\nfun " ++ ppType ret_tp ++ name ++
+  in "\n\nfun " ++ ppType ret_tp ++ nameToString name ++
      "( " ++ pp_bindings args ++ ") = \n" ++
      spaces (d+1) ++ ppExp (d+1) body
 

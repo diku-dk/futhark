@@ -72,7 +72,7 @@ commandLineOptions =
 
 interpret :: Prog Type -> IO ()
 interpret prog =
-  case funDecByName "main" prog of
+  case funDecByName defaultEntryPoint prog of
     Nothing -> do hPutStrLn stderr "Interpreter error: no main function."
                   exitWith $ ExitFailure 2
     Just (_,_,fparams,_,_) -> do
@@ -82,7 +82,7 @@ interpret prog =
                   Left e -> do hPutStrLn stderr $ "Read error: " ++ e
                                exitWith $ ExitFailure 2
                   Right v -> return v
-      let (res, trace) = runFun "main" args prog
+      let (res, trace) = runFun defaultEntryPoint args prog
       forM_ trace $ \(loc, what) ->
         putStrLn $ locStr loc ++ ": " ++ what
       case res of

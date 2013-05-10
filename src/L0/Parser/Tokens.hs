@@ -3,6 +3,8 @@ module L0.Parser.Tokens
   )
   where
 
+import L0.AbSyn (Name)
+
 data Token = IF
            | THEN
            | ELSE
@@ -13,7 +15,7 @@ data Token = IF
            | BOOL
            | CHAR
            | REAL
-           | ID { idName :: String }
+           | ID { idName :: Name }
            | STRINGLIT { stringLit :: String }
            | INTLIT { intLit :: Int }
            | REALLIT { realLit :: Double }

@@ -11,22 +11,23 @@ import L0.AbSyn
 data EnablingOptError = EnablingOptError SrcLoc String
                -- ^ A general error happened at the given position and
                -- for the given reason.
-               | DupParamError String String SrcLoc
+               | DupParamError Name Name SrcLoc
                -- ^ Two function parameters share the same name.
                | CopyCtPropError SrcLoc String 
                -- ^ Copy/Constant Propagation Error
                | TypeError SrcLoc String
                | Div0Error SrcLoc
-               | DupDefinitionError String SrcLoc SrcLoc
-               | FunctionNotInFtab  String
+               | DupDefinitionError Name SrcLoc SrcLoc
+               | FunctionNotInFtab  Name
+               | VarNotInFtab SrcLoc Name
 
 instance Show EnablingOptError where
     show (EnablingOptError pos msg) =
         "Enabling Optimization Error at " ++ locStr pos ++ ":\n" ++ msg
     show (DupParamError funname paramname pos) =
-        "Parameter " ++ paramname ++
+        "Parameter " ++ nameToString paramname ++
         " mentioned multiple times in argument list of function " ++
-        funname ++ " at " ++ locStr pos ++ "."
+        nameToString funname ++ " at " ++ locStr pos ++ "."
     show (CopyCtPropError pos msg ) = --ee
         "Copy or Constant Folding and Propagation Implementation Error " ++ 
         msg ++ " at " ++ locStr pos -- ++ ppExp 0 ee 
@@ -37,8 +38,9 @@ instance Show EnablingOptError where
         "Division by zero Error detected during copy/constant propagation and folding at line: " 
         ++ locStr pos 
     show (DupDefinitionError name pos1 pos2) =
-        "Duplicate definition of function " ++ name ++ ".  Defined at " ++
+        "Duplicate definition of function " ++ nameToString name ++ ".  Defined at " ++
         locStr pos1 ++ " and " ++ locStr pos2 ++ "."
     show (FunctionNotInFtab fname) = 
-        "Function " ++ fname ++ " not found in Function Symbol Table"
-
+        "Function " ++ nameToString fname ++ " not found in Function Symbol Table"
+    show (VarNotInFtab pos name) =
+        "Variable " ++ nameToString name ++ " not found in symbol table at " ++ locStr pos ++ "."
