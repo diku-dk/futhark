@@ -20,11 +20,11 @@ import L0.FreshNames
 renameProg :: Prog Type -> Prog Type
 renameProg prog = runReader (evalStateT (mapM renameFun prog) (newNameSourceForProg prog)) M.empty
 
-type RenameM = StateT NameSource (Reader (M.Map String String))
+type RenameM = StateT NameSource (Reader (M.Map Name Name))
 
--- | Return a fresh, unique name.  The @String@ is prepended to the
+-- | Return a fresh, unique name.  The @Name@ is prepended to the
 -- name.
-new :: String -> RenameM String
+new :: Name -> RenameM Name
 new = state . newName
 
 -- | 'repl s' returns the new name of the variable 's'.

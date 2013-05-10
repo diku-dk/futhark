@@ -17,6 +17,8 @@ module L0.FreshNames
 
 import L0.AbSyn
 import L0.Traversals
+import qualified Data.Text as T
+import Data.Monoid
 
 import Data.Char (isDigit)
 import qualified Data.Set as S
@@ -25,11 +27,11 @@ import qualified Data.Set as S
 -- no repeating entries.  In practice, when asked for a name, the name
 -- source will return the name along with a new name source, which
 -- should then be used in place of the original.
-data NameSource = NameSource Int (S.Set String)
+data NameSource = NameSource Int (S.Set T.Text)
 
 -- | Chop off terminating underscore followed by numbers.
-baseName :: String -> String
-baseName = reverse . dropWhile (=='_') . dropWhile isDigit . reverse
+baseName :: T.Text -> T.Text
+baseName = T.dropWhileEnd (=='_') . T.dropWhileEnd isDigit
 
 -- | A blank name source.
 blankNameSource :: NameSource
@@ -37,7 +39,7 @@ blankNameSource = NameSource 0 S.empty
 
 -- | Create a new 'NameSource' that will never produce any of the
 -- names in the given set.
-newNameSource :: S.Set String -> NameSource
+newNameSource :: S.Set T.Text -> NameSource
 newNameSource = NameSource 0
 
 -- | Create a new 'NameSource' that will never produce any of the
@@ -45,10 +47,10 @@ newNameSource = NameSource 0
 newNameSourceForProg :: TypeBox ty => Prog ty -> NameSource
 newNameSourceForProg = newNameSource . progNames
 
--- | Produce a fresh name, using the given string as a template.
-newName :: String -> NameSource -> (String, NameSource)
+-- | Produce a fresh name, using the given name as a template.
+newName :: T.Text -> NameSource -> (T.Text, NameSource)
 newName s (NameSource counter skip) =
-  let s' = baseName s ++ "_" ++ show counter
+  let s' = baseName s <> T.pack ('_' : show counter)
   in if s' `S.member` skip then newName s newsrc
      else (s', newsrc)
   where newsrc = NameSource (counter+1) skip

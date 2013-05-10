@@ -28,8 +28,8 @@ runTransformM :: TransformM a -> a
 runTransformM m = evalState m newState
   where newState = TransformState blankNameSource
 
-new :: String -> TransformM String
-new k = do (name, src) <- gets $ newName k . envNameSrc
+new :: String -> TransformM Name
+new k = do (name, src) <- gets $ newName (nameFromString k) . envNameSrc
            modify $ \s -> s { envNameSrc = src }
            return name
 

@@ -100,7 +100,7 @@ keyword s =
     "redomap"      -> REDOMAP
     "empty"        -> EMPTY
     "copy"         -> COPY
-    _              -> ID s
+    _              -> ID $ nameFromString s
 
 type Byte = Word8
 

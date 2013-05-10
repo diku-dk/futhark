@@ -38,11 +38,11 @@ import L0.EnablingOpts.EnablingOptErrors
 -- i.e., ``apply'' callees. The second element is a list that contains the (unique) 
 -- function names that may be called via SOACs. The third element is a boolean
 -- that specifies whether the current function, i.e., the caller, contains IO ops.
-type CallGraph = M.Map String ([String],[String])
+type CallGraph = M.Map Name ([Name],[Name])
 
 -- | The symbol table for functions
 data CGEnv tf = CGEnv {   
-                    envFtable  :: M.Map String (FunDec tf)
+                    envFtable  :: M.Map Name (FunDec tf)
                }
 
 newtype CGM tf a = CGM (ReaderT (CGEnv tf) (Either EnablingOptError) a)
@@ -62,7 +62,7 @@ badCGM = CGM . lift . Left
 buildCG :: TypeBox tf => Prog tf -> Either EnablingOptError CallGraph
 buildCG prog = do
     env <- foldM expand env0 prog
-    runCGM (buildCGfun M.empty "main") env
+    runCGM (buildCGfun M.empty defaultEntryPoint) env
 
     where
         env0 = CGEnv { envFtable = M.empty }
@@ -76,9 +76,9 @@ buildCG prog = do
 
 -- | @buildCG cg fname@ updates Call Graph @cg@ with the contributions of function 
 -- @fname@, and recursively, with the contributions of the callees of @fname@.
--- In particular, @buildCGfun M.empty "main"@ should construct the Call Graph
+-- In particular, @buildCGfun M.empty defaultEntryPoint@ should construct the Call Graph
 -- of the whole program.
-buildCGfun :: TypeBox tf => CallGraph -> String -> CGM tf CallGraph
+buildCGfun :: TypeBox tf => CallGraph -> Name -> CGM tf CallGraph
 buildCGfun cg fname  = do
   bnd <- asks $ M.lookup fname . envFtable
   case bnd of
@@ -98,12 +98,13 @@ buildCGfun cg fname  = do
                         foldM buildCGfun cg' fs_soacs
                                             
       else  badCGM $ TypeError pos  (" in buildCGfun lookup for fundec of " ++ 
-                                     fname ++ " resulted in " ++ caller)
+                                     nameToString fname ++ " resulted in " ++
+                                     nameToString caller)
   where
     
              
     
-buildCGexp :: TypeBox tf => ([String],[String]) -> Exp tf -> ([String],[String]) 
+buildCGexp :: TypeBox tf => ([Name],[Name]) -> Exp tf -> ([Name],[Name])
 
 buildCGexp callees@(fs, soacfs) (Apply fname args _ _)  =
     if isBuiltInFun fname || elem fname fs
@@ -118,7 +119,7 @@ buildCGexp callees e =
 --isBuiltInFun :: String -> Bool
 --isBuiltInFun fn = elem fn ["toReal", "trunc", "sqrt", "log", "exp"]
 
-addLamFun :: TypeBox tf => ([String],[String]) -> Lambda tf -> ([String],[String])
+addLamFun :: TypeBox tf => ([Name],[Name]) -> Lambda tf -> ([Name],[Name])
 addLamFun callees           (AnonymFun {}) = callees
 addLamFun (fs,soacs) (CurryFun nm _ _ _) =
     if isBuiltInFun nm || elem nm fs
@@ -134,7 +135,7 @@ addLamFun (fs,soacs) (CurryFun nm _ _ _) =
 aggInlineDriver :: TypeBox tf => Prog tf -> Either EnablingOptError (Prog tf)
 aggInlineDriver prog = do
     env <- foldM expand env0 prog
-    cg  <- runCGM (buildCGfun M.empty "main") env
+    cg  <- runCGM (buildCGfun M.empty defaultEntryPoint) env
     runCGM (aggInlining cg) env
     where
         env0 = CGEnv { envFtable = M.empty }
@@ -148,25 +149,25 @@ aggInlineDriver prog = do
 
 -- | Bind a name as a common (non-merge) variable.
 -- TypeBox tf => 
-bindVarFtab :: CGEnv tf -> (String, FunDec tf) -> CGEnv tf
+bindVarFtab :: CGEnv tf -> (Name, FunDec tf) -> CGEnv tf
 bindVarFtab env (name,val) =
   env { envFtable = M.insert name val $ envFtable env }
 
-bindVarsFtab :: CGEnv tf -> [(String, FunDec tf)] -> CGEnv tf
+bindVarsFtab :: CGEnv tf -> [(Name, FunDec tf)] -> CGEnv tf
 bindVarsFtab = foldl bindVarFtab
 
-bindingFtab :: [(String, FunDec tf)] -> CGM tf a -> CGM tf a
+bindingFtab :: [(Name, FunDec tf)] -> CGM tf a -> CGM tf a
 bindingFtab bnds = local (`bindVarsFtab` bnds)
 
 -- | Remove the binding for a name.
 -- TypeBox tf => 
-remVarFtab :: CGEnv tf -> String -> CGEnv tf
+remVarFtab :: CGEnv tf -> Name -> CGEnv tf
 remVarFtab env name = env { envFtable = M.delete name $ envFtable env }
 
-remVarsFtab :: CGEnv tf -> [String] -> CGEnv tf
+remVarsFtab :: CGEnv tf -> [Name] -> CGEnv tf
 remVarsFtab = foldl remVarFtab
 
-remBindingsFtab :: [String] -> CGM tf a -> CGM tf a
+remBindingsFtab :: [Name] -> CGM tf a -> CGM tf a
 remBindingsFtab keys = local (`remVarsFtab` keys)
 
 
@@ -199,7 +200,7 @@ aggInlining cg = do
                 bindingFtab (zip newfunnms newfuns) $  
                 aggInlining cg'
     where
-        processfun :: TypeBox tf => (String, [String]) -> CGM tf (FunDec tf)
+        processfun :: TypeBox tf => (Name, [Name]) -> CGM tf (FunDec tf)
         processfun (fname, inlcallees) = do
             f  <- asks $ M.lookup fname . envFtable
             case f of
@@ -208,19 +209,19 @@ aggInlining cg = do
                     tobeinl <- mapM getFromFtable inlcallees  
                     return $ doInlineInCaller ff tobeinl 
 
-        getFromFtable :: TypeBox tf => String -> CGM tf (FunDec tf)
+        getFromFtable :: TypeBox tf => Name -> CGM tf (FunDec tf)
         getFromFtable fname = do 
             f <- asks $ M.lookup fname . envFtable
             case f of
                 Nothing -> badCGM $ FunctionNotInFtab fname
                 Just ff -> return ff
             
-        getInlineOps :: [String] -> CallGraph -> CallGraph
+        getInlineOps :: [Name] -> CallGraph -> CallGraph
         getInlineOps inlcand =
             M.filter (\(callees,_) -> not (null callees)) .
             M.map (first $ intersect inlcand)
 
-        funHasNoCalls :: ([String],[String]) -> Bool
+        funHasNoCalls :: ([Name],[Name]) -> Bool
         funHasNoCalls (callees,_) = null callees 
 
 
@@ -267,7 +268,7 @@ inlineInExp inlcallees e =
 deadFunElim :: TypeBox tf => Prog tf -> Either EnablingOptError (Prog tf)
 deadFunElim prog = do
     env  <- foldM expand env0 prog
-    cg   <- runCGM (buildCGfun M.empty "main") env
+    cg   <- runCGM (buildCGfun M.empty defaultEntryPoint) env
     let env'  = (M.filter (isFunInCallGraph cg) . envFtable) env
     let prog' = M.elems env'
     return prog'

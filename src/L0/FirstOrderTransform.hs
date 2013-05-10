@@ -14,8 +14,8 @@ type TransformM = State NameSource
 
 -- | Return a new, fresh name, with the given string being part of the
 -- name.
-new :: String -> TransformM String
-new = state . newName
+new :: String -> TransformM Name
+new = state . newName . nameFromString
 
 transformProg :: Prog Type -> Prog Type
 transformProg prog = runTransformM $ mapM transformFunDec prog

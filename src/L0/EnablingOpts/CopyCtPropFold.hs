@@ -40,7 +40,7 @@ import qualified L0.Interpreter as Interp
 data CtOrId tf  = Constant Value   tf Bool
                 -- value for constant propagation
 
-                | VarId    String  tf Bool
+                | VarId    Name  tf Bool
                 -- Variable id for copy propagation
 
                 | SymArr  (Exp tf) tf Bool
@@ -52,14 +52,14 @@ data CtOrId tf  = Constant Value   tf Bool
                 -- To Cosmin: Clean it up in the end, i.e., get rid of (Exp tf).
  
 data CPropEnv tf = CopyPropEnv {   
-                        envVtable  :: M.Map String (CtOrId tf),
+                        envVtable  :: M.Map Name (CtOrId tf),
                         program    :: Prog tf
                   }
 
 data CPropRes tf = CPropRes {
     resSuccess :: Bool
   -- ^ Whether we have changed something.
-  , resNonRemovable :: [String]
+  , resNonRemovable :: [Name]
   -- ^ The set of variables used as merge variables.
   }
 
@@ -82,7 +82,7 @@ changed x = do
 
 
 -- | This name was used as a merge variable.
-nonRemovable :: String -> CPropM tf ()
+nonRemovable :: Name -> CPropM tf ()
 nonRemovable name =
   tell $ CPropRes False [name]
 
@@ -92,7 +92,7 @@ nonRemovable name =
 -- while executing @m@ will also be returned, and removed from the
 -- writer result.  The latter property is only important if names are
 -- not unique.
-collectNonRemovable :: [String] -> CPropM tf a -> CPropM tf (a, [String])
+collectNonRemovable :: [Name] -> CPropM tf a -> CPropM tf (a, [Name])
 collectNonRemovable mvars m = pass collect
   where collect = do
           (x,res) <- listen m
@@ -112,14 +112,14 @@ badCPropM = CPropM . lift . lift . Left
 
 -- | Bind a name as a common (non-merge) variable.
 -- TypeBox tf => 
-bindVar :: CPropEnv tf -> (String, CtOrId tf) -> CPropEnv tf
+bindVar :: CPropEnv tf -> (Name, CtOrId tf) -> CPropEnv tf
 bindVar env (name,val) =
   env { envVtable = M.insert name val $ envVtable env }
 
-bindVars :: CPropEnv tf -> [(String, CtOrId tf)] -> CPropEnv tf
+bindVars :: CPropEnv tf -> [(Name, CtOrId tf)] -> CPropEnv tf
 bindVars = foldl bindVar
 
-binding :: [(String, CtOrId tf)] -> CPropM tf a -> CPropM tf a
+binding :: [(Name, CtOrId tf)] -> CPropM tf a -> CPropM tf a
 binding bnds = local (`bindVars` bnds)
 
 -- | Applies Copy/Constant Propagation and Folding to an Entire Program.
@@ -338,12 +338,14 @@ copyCtPropExp (Size e pos) = do
 -- trace and assertZip are not executed at compile time
 -- even if their arguments are values because they 
 -- exhibit side effects!
-copyCtPropExp (Apply "trace" args tp pos) = do
+copyCtPropExp (Apply fname args tp pos)
+  | "trace" <- nameToString fname = do
     args' <- mapM copyCtPropExp args
-    return $ Apply "trace" args' tp pos
-copyCtPropExp (Apply "assertZip" args tp pos) = do
+    return $ Apply fname args' tp pos
+copyCtPropExp (Apply fname args tp pos)
+  | "assertZip" <- nameToString fname = do
     args' <- mapM copyCtPropExp args
-    return $ Apply "assertZip" args' tp pos
+    return $ Apply fname args' tp pos
 
 copyCtPropExp (Apply fname args tp pos) = do
     args' <- mapM copyCtPropExp args
@@ -354,7 +356,7 @@ copyCtPropExp (Apply fname args tp pos) = do
             case vv of
               (Right v) -> changed $ Literal v pos
               _ -> badCPropM $ EnablingOptError pos (" Interpreting fun " ++
-                                                              fname ++ " yields error!")
+                                                     nameToString fname ++ " yields error!")
     else return $ Apply fname args' tp pos
 
     where 
@@ -635,7 +637,7 @@ isRemovablePat (TupId tups _) e =
           Literal val@(TupVal _) _ -> return (isBasicTypeVal val)
           _ -> return False
 
-getPropBnds :: TypeBox tf => TupIdent tf -> Exp tf -> Bool -> CPropM tf [(String,CtOrId tf)]
+getPropBnds :: TypeBox tf => TupIdent tf -> Exp tf -> Bool -> CPropM tf [(Name,CtOrId tf)]
 getPropBnds ( Id (Ident var tp pos) ) e to_rem = 
   let r = case e of
             Literal v _          -> [(var, Constant v (boxType (typeOf v)) to_rem)]

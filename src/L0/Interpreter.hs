@@ -20,8 +20,8 @@ import qualified Data.Map as M
 import L0.AbSyn
 -- import L0.Parser
 
-data InterpreterError = MissingEntryPoint String
-                      | InvalidFunctionArguments String (Maybe [Type]) [Type]
+data InterpreterError = MissingEntryPoint Name
+                      | InvalidFunctionArguments Name (Maybe [Type]) [Type]
                       | IndexOutOfBounds SrcLoc Int Int
                       -- ^ First @Int@ is array size, second is attempted index.
                       | NegativeIota SrcLoc Int
@@ -34,12 +34,12 @@ data InterpreterError = MissingEntryPoint String
 
 instance Show InterpreterError where
   show (MissingEntryPoint fname) =
-    "Program entry point '" ++ fname ++ "' not defined."
+    "Program entry point '" ++ nameToString fname ++ "' not defined."
   show (InvalidFunctionArguments fname Nothing got) =
-    "Function '" ++ fname ++ "' did not expect argument(s) of type " ++
+    "Function '" ++ nameToString fname ++ "' did not expect argument(s) of type " ++
     intercalate ", " (map ppType got) ++ "."
   show (InvalidFunctionArguments fname (Just expected) got) =
-    "Function '" ++ fname ++ "' expected argument(s) of type " ++
+    "Function '" ++ nameToString fname ++ "' expected argument(s) of type " ++
     intercalate ", " (map ppType expected) ++
     " but got argument(s) of type " ++
     intercalate ", " (map ppType got) ++ "."
@@ -62,8 +62,8 @@ instance Show InterpreterError where
 instance Error InterpreterError where
   strMsg = TypeError noLoc
 
-data L0Env = L0Env { envVtable  :: M.Map String Value
-                   , envFtable  :: M.Map String ([Value] -> L0M Value)
+data L0Env = L0Env { envVtable  :: M.Map Name Value
+                   , envFtable  :: M.Map Name ([Value] -> L0M Value)
                    }
 
 type Trace = [(SrcLoc, String)]
@@ -89,15 +89,17 @@ bindVars = foldl bindVar
 binding :: [(Ident Type, Value)] -> L0M a -> L0M a
 binding bnds = local (`bindVars` bnds)
 
-lookupVar :: String -> L0M Value
-lookupVar vname = do val <- asks $ M.lookup vname . envVtable
-                     case val of Just val' -> return val'
-                                 Nothing   -> bad $ TypeError noLoc $ "lookupVar " ++ vname
+lookupVar :: Name -> L0M Value
+lookupVar vname = do
+  val <- asks $ M.lookup vname . envVtable
+  case val of Just val' -> return val'
+              Nothing   -> bad $ TypeError noLoc $ "lookupVar " ++ nameToString vname
 
-lookupFun :: String -> L0M ([Value] -> L0M Value)
-lookupFun fname = do fun <- asks $ M.lookup fname . envFtable
-                     case fun of Just fun' -> return fun'
-                                 Nothing   -> bad $ TypeError noLoc $ "lookupFun " ++ fname
+lookupFun :: Name -> L0M ([Value] -> L0M Value)
+lookupFun fname = do
+  fun <- asks $ M.lookup fname . envFtable
+  case fun of Just fun' -> return fun'
+              Nothing   -> bad $ TypeError noLoc $ "lookupFun " ++ nameToString fname
 
 arrToList :: SrcLoc -> Value -> L0M [Value]
 arrToList _ (ArrayVal l _) = return $ elems l
@@ -111,10 +113,10 @@ tupToList loc _ = bad $ TypeError loc "tupToList"
 ------- Interpreting an arbitrary function -------
 --------------------------------------------------
 
-runFunNoTrace :: String -> [Value] -> Prog Type -> Either InterpreterError Value
+runFunNoTrace :: Name -> [Value] -> Prog Type -> Either InterpreterError Value
 runFunNoTrace = ((.) . (.) . (.)) fst runFun -- I admit this is just for fun.
 
-runFun :: String -> [Value] -> Prog Type -> (Either InterpreterError Value, Trace)
+runFun :: Name -> [Value] -> Prog Type -> (Either InterpreterError Value, Trace)
 runFun fname mainargs prog = do
   let ftable = foldl expand builtins prog
       l0env = L0Env { envVtable = M.empty
@@ -147,8 +149,9 @@ runFun fname mainargs prog = do
 --------------------------------------------
 --------------------------------------------
 
-builtins :: M.Map String ([Value] -> L0M Value)
-builtins = M.fromList [("toReal", builtin "toReal")
+builtins :: M.Map Name ([Value] -> L0M Value)
+builtins = M.mapKeys nameFromString $
+           M.fromList [("toReal", builtin "toReal")
                       ,("trunc", builtin "trunc")
                       ,("sqrt", builtin "sqrt")
                       ,("log", builtin "log")
@@ -164,7 +167,7 @@ builtin "log" [RealVal x] = return $ RealVal (log x)
 builtin "exp" [RealVal x] = return $ RealVal (exp x)
 builtin "op not" [LogVal b] = return $ LogVal (not b)
 builtin "op ~" [RealVal b] = return $ RealVal (-b)
-builtin fname args = bad $ InvalidFunctionArguments fname Nothing $ map typeOf args
+builtin fname args = bad $ InvalidFunctionArguments (nameFromString fname) Nothing $ map typeOf args
 
 --------------------------------------------
 --------------------------------------------
@@ -235,11 +238,13 @@ evalExp (If e1 e2 e3 _ pos) = do
             _            -> bad $ TypeError pos "evalExp If"
 evalExp (Var (Ident name _ _)) =
   lookupVar name
-evalExp (Apply "trace" [arg] _ loc) = do
+evalExp (Apply fname [arg] _ loc)
+  | "trace" <- nameToString fname = do
   arg' <- evalExp arg
   tell [(loc, ppValue arg')]
   return arg'
-evalExp (Apply "assertZip" args _ loc) = do
+evalExp (Apply fname args _ loc)
+  | "assertZip" <- nameToString fname = do
   args' <- mapM evalExp args
   szs   <- mapM getArrSize args'
   case szs of

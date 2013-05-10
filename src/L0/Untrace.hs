@@ -19,7 +19,8 @@ untraceFun (fname, ret, params, body, pos) =
   (fname, ret, params, untraceExp body, pos)
 
 untraceExp :: Exp Type -> Exp Type
-untraceExp (Apply "trace" [e] _ _) = e
+untraceExp (Apply fname [e] _ _)
+  | "trace" <- nameToString fname = e
 untraceExp e = gmapT (mkT untraceExp
                      `extT` untraceLambda
                      `extT` map untraceExp

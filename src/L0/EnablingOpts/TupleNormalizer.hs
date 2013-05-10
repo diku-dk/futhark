@@ -33,7 +33,7 @@ import L0.EnablingOpts.EnablingOptErrors
 -----------------------------------------------------------------
 
 data TupNormEnv tf = TupNormEnv {   
-                        envVtable  :: M.Map String (TupIdent tf)
+                        envVtable  :: M.Map Name (TupIdent tf)
                      }
 
 
@@ -45,14 +45,14 @@ newtype TupNormM tf a = TupNormM (StateT NameSource (ReaderT (TupNormEnv tf) (Ei
 
 -- | Bind a name as a common (non-merge) variable.
 -- TypeBox tf => 
-bindVar :: TupNormEnv tf -> (String, TupIdent tf) -> TupNormEnv tf
+bindVar :: TupNormEnv tf -> (Name, TupIdent tf) -> TupNormEnv tf
 bindVar env (name,val) =
   env { envVtable = M.insert name val $ envVtable env }
 
-bindVars :: TupNormEnv tf -> [(String, TupIdent tf)] -> TupNormEnv tf
+bindVars :: TupNormEnv tf -> [(Name, TupIdent tf)] -> TupNormEnv tf
 bindVars = foldl bindVar
 
-binding :: [(String, TupIdent tf)] -> TupNormM tf a -> TupNormM tf a
+binding :: [(Name, TupIdent tf)] -> TupNormM tf a -> TupNormM tf a
 binding bnds = local (`bindVars` bnds)
 
 
@@ -67,9 +67,9 @@ runNormM prog (TupNormM a) =
 badTupNormM :: EnablingOptError -> TupNormM tf a
 badTupNormM = TupNormM . lift . lift . Left
 
--- | Return a fresh, unique name.  The @String@ is prepended to the
+-- | Return a fresh, unique name.  The @Name@ is prepended to the
 -- name.
-new :: TypeBox tf => String -> TupNormM tf String
+new :: TypeBox tf => Name -> TupNormM tf Name
 new = state . newName
 
 
@@ -260,7 +260,7 @@ distribPatExp pat@(TupId idlst pos) e body =
 ---    a fully instantiated tuple id, and adds the corresponding
 ---    (new) bindings to the symbol table.
 --------------------
-mkFullPattern :: TupIdent Type -> TupNormM Type (TupIdent Type, [(String, TupIdent Type)])
+mkFullPattern :: TupIdent Type -> TupNormM Type (TupIdent Type, [(Name, TupIdent Type)])
 
 mkFullPattern pat@(Id ident) = do
     let (nm, tp) = (identName ident, identType ident)
@@ -278,7 +278,7 @@ mkFullPattern (TupId idlst pos) = do
 -----------------------
 -- given a (tuple) type, creates a fully instantiated TupIdent 
 -----------------------
-mkPatFromType :: SrcLoc -> String -> Type -> TupNormM Type (TupIdent Type)
+mkPatFromType :: SrcLoc -> Name -> Type -> TupNormM Type (TupIdent Type)
 
 mkPatFromType pos nm (Tuple tps) = do
   tupids <- mapM (mkPatFromType pos nm) tps

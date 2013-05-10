@@ -89,7 +89,7 @@ buildLambda f (AnonymFun tps body  tp pos) = AnonymFun tps     (f body  ) tp pos
 buildLambda f (CurryFun  nm params tp pos) = CurryFun  nm  (map f params) tp pos
 
 -- | Return the set of all variable names bound in program.
-progNames :: forall ty.TypeBox ty => Prog ty -> S.Set String
+progNames :: forall ty.TypeBox ty => Prog ty -> S.Set Name
 progNames = mconcat . map funNames
   where one = S.singleton
         funNames (_, _, params, body, _) =

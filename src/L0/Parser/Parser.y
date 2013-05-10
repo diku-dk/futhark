@@ -122,24 +122,24 @@ import L0.Parser.Lexer
 Prog :	  FunDecs {- EOF -}   { $1 }
 ;
 
-Ops : op '+'     { ("op +", $1) }
-    | op '*'     { ("op *", $1) }
-    | op '-'     { ("op -", $1) }
-    | op '/'     { ("op /", $1) }
-    | op '%'     { ("op %", $1) }
-    | op '='     { ("op =", $1) }
-    | op '<'     { ("op <", $1) }
-    | op '<='    { ("op <=", $1) }
-    | op '&&'    { ("op &&", $1) }
-    | op '||'    { ("op ||", $1) }
-    | op not     { ("op not", $1) }
-    | op '~'     { ("op ~",$1) }
-    | op pow     { ("op pow", $1) }
-    | op '^'     { ("op ^", $1) }
-    | op '&'     { ("op &", $1) }
-    | op '|'     { ("op |", $1) }
-    | op '>>'    { ("op >>", $1) }
-    | op '<<'    { ("op <<", $1) }
+Ops : op '+'     { (nameFromString "op +", $1) }
+    | op '*'     { (nameFromString "op *", $1) }
+    | op '-'     { (nameFromString "op -", $1) }
+    | op '/'     { (nameFromString "op /", $1) }
+    | op '%'     { (nameFromString "op %", $1) }
+    | op '='     { (nameFromString "op =", $1) }
+    | op '<'     { (nameFromString "op <", $1) }
+    | op '<='    { (nameFromString "op <=", $1) }
+    | op '&&'    { (nameFromString "op &&", $1) }
+    | op '||'    { (nameFromString "op ||", $1) }
+    | op not     { (nameFromString "op not", $1) }
+    | op '~'     { (nameFromString "op ~",$1) }
+    | op pow     { (nameFromString "op pow", $1) }
+    | op '^'     { (nameFromString "op ^", $1) }
+    | op '&'     { (nameFromString "op &", $1) }
+    | op '|'     { (nameFromString "op |", $1) }
+    | op '>>'    { (nameFromString "op >>", $1) }
+    | op '<<'    { (nameFromString "op <<", $1) }
 
 FunDecs : fun Fun FunDecs   { $2 : $3 }
         | fun Fun           { [$2] }

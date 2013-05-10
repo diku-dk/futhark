@@ -6,7 +6,7 @@
 testdir=$(dirname "$0")
 
 # Command to run the L0 compiler.
-l0c="l0c -ftre"
+l0c="l0c -frtre"
 
 tests() {
     echo $testdir/*l0
