@@ -2,34 +2,30 @@ module L0.Untrace
   ( untraceProg )
   where
 
-import Data.Data
-import Data.Generics
-
 import L0.AbSyn
+import L0.Traversals
 
 -- | Remove all special debugging function calls from the program.
 -- This is necessary for most optimisation modules to work properly,
 -- as the debugging functions are special-cased only in the type
 -- checker and interpreter.
-untraceProg :: Prog Type -> Prog Type
+untraceProg :: Prog ty -> Prog ty
 untraceProg = map untraceFun
 
-untraceFun :: FunDec Type -> FunDec Type
+untraceFun :: FunDec ty -> FunDec ty
 untraceFun (fname, ret, params, body, pos) =
   (fname, ret, params, untraceExp body, pos)
 
-untraceExp :: Exp Type -> Exp Type
+untraceExp :: Exp ty -> Exp ty
 untraceExp (Apply fname [e] _ _)
   | "trace" <- nameToString fname = e
-untraceExp e = gmapT (mkT untraceExp
-                     `extT` untraceLambda
-                     `extT` map untraceExp
-                     `extT` map untraceExpPair) e
+untraceExp e = mapExp untrace e
+  where untrace = identityMapper {
+                    mapOnExp = return . untraceExp
+                  , mapOnLambda = return . untraceLambda
+                  }
 
-untraceExpPair :: (Exp Type, Type) -> (Exp Type, Type)
-untraceExpPair (e,t) = (untraceExp e,t)
-
-untraceLambda :: Lambda Type -> Lambda Type
+untraceLambda :: Lambda ty -> Lambda ty
 untraceLambda (AnonymFun params body ret pos) =
   AnonymFun params (untraceExp body) ret pos
 untraceLambda (CurryFun fname curryargexps rettype pos) =

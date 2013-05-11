@@ -17,7 +17,6 @@ Executable l0c
                  containers >= 0.5,
                  mtl >= 2.1,
                  srcloc >= 0.4,
-                 syb >= 0.3,
                  language-c-quote >= 0.7.1,
                  mainland-pretty >= 0.2.5,
                  text

@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveDataTypeable, FlexibleInstances, ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleInstances #-}
 -- | This Is an Ever-Changing AnSyn for L0.  Some types, such as
 -- @Exp@, are parametrised by type representation.
 -- See "L0.TypeChecker" and the 'Exp' type for more information.
@@ -51,7 +51,6 @@ module L0.AbSyn
   where
 
 import Data.Array
-import Data.Data hiding (typeOf)
 import Data.List
 import Data.Loc
 import Data.Monoid
@@ -87,7 +86,7 @@ locStr (SrcLoc (Loc (Pos file line1 col1 _) (Pos _ line2 col2 _))) =
        ++ "-" ++ show line2 ++ ":" ++ show col2
 
 data Uniqueness = Unique | Nonunique
-                  deriving (Eq, Ord, Show, Typeable, Data)
+                  deriving (Eq, Ord, Show)
 
 instance Monoid Uniqueness where
   mempty = Unique
@@ -103,7 +102,7 @@ data Type = Int
           | Real
           | Tuple [Type]
           | Array Type (Maybe (Exp (Maybe Type))) Uniqueness -- ^ 1st arg: array's element type, 2nd arg: its length
-            deriving (Eq, Ord, Show, Typeable, Data)
+            deriving (Eq, Ord, Show)
 
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
@@ -143,7 +142,7 @@ unique = (==Unique) . uniqueness
 
 -- | A type box provides a way to box a type, and possibly retrieve
 -- one.
-class (Eq ty, Ord ty, Show ty, Data ty, Typeable ty) => TypeBox ty where
+class (Eq ty, Ord ty, Show ty) => TypeBox ty where
   unboxType :: ty -> Maybe Type
   boxType :: Type -> ty
   getExpType :: Exp ty -> ty
@@ -228,7 +227,7 @@ data Value = IntVal !Int
            | ArrayVal !(Array Int Value) Type
              -- ^ The type is the element type, not the complete array
              -- type.  It is assumed that the array is 0-indexed.
-             deriving (Eq, Ord, Show, Typeable, Data)
+             deriving (Eq, Ord, Show)
 
 instance Typed Value where
   typeOf (IntVal _) = Int
@@ -290,7 +289,7 @@ data Ident ty = Ident { identName :: Name
                       , identType :: ty
                       , identSrcLoc :: SrcLoc
                       }
-                deriving (Eq, Ord, Typeable, Data, Show)
+                deriving (Eq, Ord, Show)
 
 instance Located (Ident ty) where
   locOf = locOf . identSrcLoc
@@ -433,7 +432,7 @@ data Exp ty = Literal Value SrcLoc
             | Redomap2(Lambda ty) (Lambda ty) (Exp ty) [Exp ty] ty ty SrcLoc
 
               
-              deriving (Eq, Ord, Show, Typeable, Data)
+              deriving (Eq, Ord, Show)
 
 instance Located (Exp ty) where
   locOf (Literal _ loc) = locOf loc
@@ -555,7 +554,7 @@ data BinOp = Plus -- Binary Ops for Numbers
            | Equal
            | Less
            | Leq
-             deriving (Eq, Ord, Enum, Bounded, Typeable, Data, Show)
+             deriving (Eq, Ord, Enum, Bounded, Show)
 
 -- ^ Print the operator, without whitespace, that corresponds to this
 -- @BinOp@.
@@ -593,7 +592,7 @@ data Lambda ty = AnonymFun [Ident Type] (Exp ty) Type SrcLoc
                     -- fn int (bool x, char z) => if(x) then ord(z) else ord(z)+1 *)
                | CurryFun Name [Exp ty] ty SrcLoc
                     -- op +(4) *)
-                 deriving (Eq, Ord, Typeable, Data, Show)
+                 deriving (Eq, Ord, Show)
 
 instance Typed (Lambda Type) where
   typeOf (AnonymFun _ _ t _) = t
@@ -602,7 +601,7 @@ instance Typed (Lambda Type) where
 -- | Tuple Identifier, i.e., pattern matching
 data TupIdent ty = TupId [TupIdent ty] SrcLoc
                  | Id (Ident ty)
-                   deriving (Eq, Ord, Typeable, Data, Show)
+                   deriving (Eq, Ord, Show)
 
 instance Located (TupIdent ty) where
   locOf (TupId _ loc) = locOf loc

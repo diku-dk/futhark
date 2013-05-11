@@ -5,19 +5,18 @@ module L0.Renamer
 import Control.Monad.State
 import Control.Monad.Reader
 
-import Data.Data
-import Data.Generics
 import qualified Data.Map as M
 
 import L0.AbSyn
 import L0.FreshNames
+import L0.Traversals
 
 -- | Rename variables such that each is unique.  The semantics of the
 -- program are unaffected, under the assumption that the program was
 -- correct to begin with.  In particular, the renaming may make an
 -- invalid program valid.  To help enforce that this does not happen,
 -- only type-checked programs can be renamed.
-renameProg :: Prog Type -> Prog Type
+renameProg :: TypeBox ty => Prog ty -> Prog ty
 renameProg prog = runReader (evalStateT (mapM renameFun prog) (newNameSourceForProg prog)) M.empty
 
 type RenameM = StateT NameSource (Reader (M.Map Name Name))
@@ -41,15 +40,14 @@ bind vars body = do
   local (M.fromList (zip varnames vars') `M.union`) body
   where varnames = map identName vars
 
-renameFun :: FunDec Type -> RenameM (FunDec Type)
+renameFun :: FunDec ty -> RenameM (FunDec ty)
 renameFun (fname, ret, params, body, pos) =
   bind params $ do
     params' <- mapM repl params
     body' <- renameExp body
     return (fname, ret, params', body', pos)
 
-renameExp :: Exp Type -> RenameM (Exp Type)
-renameExp (Var ident) = liftM Var $ repl ident
+renameExp :: Exp ty -> RenameM (Exp ty)
 renameExp (LetWith dest src idxs ve body pos) = do
   src' <- repl src
   idxs' <- mapM renameExp idxs
@@ -78,20 +76,17 @@ renameExp (DoLoop mergepat mergeexp loopvar e loopbody letbody pos) = do
       loopvar'  <- repl loopvar
       loopbody' <- renameExp loopbody
       return $ DoLoop mergepat' mergeexp' loopvar' e' loopbody' letbody' pos
--- The above case may have to be extended if syntax nodes ever contain
--- anything but lambdas, expressions, lists of expressions or lists of
--- pairs of expression-types.  Pay particular attention to the fact
--- that the latter has to be specially handled.
-renameExp e = gmapM (mkM renameExp
-                     `extM` renameLambda
-                     `extM` mapM renameExp
-                     `extM` mapM renameExpPair) e
+renameExp e = mapExpM rename e
 
-renameExpPair :: (Exp Type, Type) -> RenameM (Exp Type, Type)
-renameExpPair (e,t) = do e' <- renameExp e
-                         return (e',t)
+rename :: Mapper ty RenameM
+rename = identityMapper {
+           mapOnExp = renameExp
+         , mapOnPattern = renamePattern
+         , mapOnIdent = repl
+         , mapOnLambda = renameLambda
+         }
 
-renameLambda :: Lambda Type -> RenameM (Lambda Type)
+renameLambda :: Lambda ty -> RenameM (Lambda ty)
 renameLambda (AnonymFun params body ret pos) =
   bind params $ do
     params' <- mapM repl params
@@ -101,7 +96,7 @@ renameLambda (CurryFun fname curryargexps rettype pos) = do
   curryargexps' <- mapM renameExp curryargexps
   return (CurryFun fname curryargexps' rettype pos)
 
-renamePattern :: TupIdent Type -> RenameM (TupIdent Type)
+renamePattern :: TupIdent ty -> RenameM (TupIdent ty)
 renamePattern (Id ident) = do
   ident' <- repl ident
   return $ Id ident'
@@ -109,6 +104,6 @@ renamePattern (TupId pats pos) = do
   pats' <- mapM renamePattern pats
   return $ TupId pats' pos
 
-patternNames :: TupIdent Type -> [Ident Type]
+patternNames :: TupIdent ty -> [Ident ty]
 patternNames (Id ident) = [ident]
 patternNames (TupId pats _) = concatMap patternNames pats

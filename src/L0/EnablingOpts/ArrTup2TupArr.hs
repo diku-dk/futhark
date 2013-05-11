@@ -8,13 +8,11 @@ import Control.Applicative
 import Control.Monad.Reader
 --import Control.Monad.Writer
 
- 
-import Data.Generics hiding (typeOf)
-
 --import qualified Data.Set as S
 import qualified Data.Map as M
 
 import L0.AbSyn
+import L0.Traversals
 import Data.Array as A
 import Data.Loc
  
@@ -586,15 +584,11 @@ arr2tupExp (If cond e_then e_else rtp pos) = do
 -------------------------------------------------------
 
 
-arr2tupExp e = gmapM ( mkM arr2tupExp
-                          `extM` arr2tupLambda
-                          `extM` mapM arr2tupExp
-                          `extM` mapM arr2tupExpPair ) e
-
-
-arr2tupExpPair :: (Exp Type, Type) -> Arr2TupM (Exp Type, Type)
-arr2tupExpPair (e,t) = do e' <- arr2tupExp e
-                          return (e', toTupArrType t)
+arr2tupExp e = mapExpM mapper e
+  where mapper = identityMapper {
+                   mapOnExp = arr2tupExp
+                 , mapOnLambda = arr2tupLambda
+                 }
 
 arr2tupLambda :: Lambda Type -> Arr2TupM (Lambda Type)
 arr2tupLambda (AnonymFun params body rettype pos) = do  
