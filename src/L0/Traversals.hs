@@ -271,7 +271,8 @@ progNames = execWriter . mapM funNames
 
         lambdaNames (AnonymFun params body _ _) =
           mapM_ one params >> expNames body
-        lambdaNames _ = return ()
+        lambdaNames (CurryFun _ exps _ _) =
+          mapM_ expNames exps
 
         patNames (Id ident)     = one ident
         patNames (TupId pats _) = mapM_ patNames pats
