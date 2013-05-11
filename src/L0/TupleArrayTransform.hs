@@ -7,12 +7,11 @@ import Control.Applicative
 import Control.Monad.State
 
 import qualified Data.Array as A
-import Data.Data hiding (typeOf)
-import Data.Generics hiding (typeOf)
 import Data.List
 import Data.Loc
 
 import L0.AbSyn
+import L0.Traversals
 import L0.FreshNames
 
 transformProg :: Prog Type -> Prog Type
@@ -75,10 +74,6 @@ transformFun (fname,rettype,params,body,loc) = (fname, rettype', params', body',
         body' = runTransformM $ transformExp body
 
 transformExp :: Exp Type -> TransformM (Exp Type)
-transformExp (Literal val loc) =
-  return $ Literal (transformValue val) loc
-transformExp (Var k) =
-  return $ Var $ transformIdent k
 transformExp (TupLit es loc) = do
   es' <- mapM transformExp es
   return $ TupLit es' loc
@@ -199,12 +194,15 @@ transformExp (Concat x y eltype loc) = do
       concs <- zipWithM conc arrelemts $ zip xnames ynames
       return $ letx $ lety $ TupLit concs loc
     _ -> return $ Concat x' y' (transformType eltype) loc
-transformExp e = gmapM (mkM transformExp
-                       `extM` (return . transformType)
-                       `extM` mapM transformExp
-                       `extM` transformLambda
-                       `extM` (return . transformPat)
-                       `extM` mapM transformExpPair) e
+transformExp e = mapExpM transform e
+  where transform = Mapper {
+                      mapOnExp = transformExp
+                    , mapOnType = return . transformType
+                    , mapOnLambda = transformLambda
+                    , mapOnPattern = return . transformPat
+                    , mapOnIdent = return . transformIdent
+                    , mapOnValue = return . transformValue
+                    }
 
 transformLambda :: Lambda Type -> TransformM (Lambda Type)
 transformLambda (AnonymFun params body rettype loc) = do
@@ -215,10 +213,6 @@ transformLambda (AnonymFun params body rettype loc) = do
 transformLambda (CurryFun fname curryargs rettype loc) = do
   curryargs' <- mapM transformExp curryargs
   return $ CurryFun fname curryargs' (transformType rettype) loc
-
-transformExpPair :: (Exp Type, Type) -> TransformM (Exp Type, Type)
-transformExpPair (e,t) = do e' <- transformExp e
-                            return (e',transformType t)
 
 newVar :: SrcLoc -> String -> Type -> TransformM (Ident Type, Exp Type)
 newVar loc name tp = do

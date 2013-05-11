@@ -7,10 +7,6 @@ import Control.Monad.State
 import Control.Applicative
 import Control.Monad.Writer
 
-
---import Data.Data
---import Data.Generics
-
 import qualified Data.List as L
 
 import L0.AbSyn

@@ -12,7 +12,6 @@ import Control.Monad.Writer
 --import Data.Either
 
 --import Control.Monad.State
-import Data.Generics hiding (typeOf)
 import Data.Array
 import Data.List
 
@@ -21,6 +20,7 @@ import Data.Bits
 import qualified Data.Map as M
 
 import L0.AbSyn
+import L0.Traversals
  
 import L0.EnablingOpts.EnablingOptErrors
 import qualified L0.Interpreter as Interp
@@ -380,15 +380,11 @@ copyCtPropExp (Apply fname args tp pos) = do
 --- Pattern Match the Rest ---
 ------------------------------
 
-copyCtPropExp e = gmapM (mkM copyCtPropExp
-                         `extM` copyCtPropLambda
-                         `extM` mapM copyCtPropExp
-                         `extM` mapM copyCtPropExpPair) e
-
-copyCtPropExpPair :: (Exp Type, Type) -> CPropM Type (Exp Type, Type)
-copyCtPropExpPair (e, t) = do
-  e' <- copyCtPropExp e
-  return (e', t)
+copyCtPropExp e = mapExpM mapper e
+  where mapper = identityMapper {
+                   mapOnExp = copyCtPropExp
+                 , mapOnLambda = copyCtPropLambda
+                 }
 
 -- data Lambda ty = AnonymFun [Ident Type] (Exp ty) Type SrcLoc
 --                    -- fn int (bool x, char z) => if(x) then ord(z) else ord(z)+1 *)

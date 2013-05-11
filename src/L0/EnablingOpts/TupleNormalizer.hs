@@ -9,13 +9,11 @@ import Control.Monad.Reader
 --import Control.Monad.Writer
 
  
-import Data.Data
-import Data.Generics
-
 --import qualified Data.Set as S
 import qualified Data.Map as M
 
 import L0.AbSyn
+import L0.Traversals
 import Data.Loc
  
 import L0.FreshNames
@@ -204,15 +202,11 @@ tupleNormExp (Index idd inds tp1 tp2 pos) = do
 --    return $ Apply fnm params' tp pos
 
 
-tupleNormExp e = gmapM ( mkM tupleNormExp
-                          `extM` tupleNormLambda
-                          `extM` mapM tupleNormExp
-                          `extM` mapM tupleNormExpPair ) e
-
-
-tupleNormExpPair :: (Exp Type, Type) -> TupNormM Type (Exp Type, Type)
-tupleNormExpPair (e,t) = do e' <- tupleNormExp e
-                            return (e',t)
+tupleNormExp e = mapExpM tupleNorm e
+  where tupleNorm = identityMapper {
+                      mapOnExp = tupleNormExp
+                    , mapOnLambda = tupleNormLambda
+                    }
 
 tupleNormLambda :: Lambda Type -> TupNormM Type (Lambda Type)
 tupleNormLambda (AnonymFun params body ret pos) = do  

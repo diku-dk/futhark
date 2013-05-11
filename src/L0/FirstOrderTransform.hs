@@ -4,10 +4,10 @@ module L0.FirstOrderTransform
 
 import Control.Monad.State
 
-import Data.Generics hiding (typeOf)
 import Data.Loc
 
 import L0.AbSyn
+import L0.Traversals
 import L0.FreshNames
 
 type TransformM = State NameSource
@@ -23,7 +23,7 @@ transformProg prog = runTransformM $ mapM transformFunDec prog
 
 transformFunDec :: FunDec Type -> TransformM (FunDec Type)
 transformFunDec (fname, rettype, params, body, loc) = do
-  body' <- everywhereM (mkM transformExp) body
+  body' <- transformExp body
   return (fname, rettype, params, body', loc)
 
 transformExp :: Exp Type -> TransformM (Exp Type)
@@ -113,7 +113,10 @@ transformExp (Redomap redfun mapfun accexp arrexp intype _ loc) = do
   let loop = DoLoop (Id acc) accv i (Size arrv loc) loopbody accv loc
       loopbody = LetWith acc acc [] redfuncall accv loc
   return $ redlet loop
-transformExp e = return e
+transformExp e = mapExpM transform e
+  where transform = identityMapper {
+                      mapOnExp = transformExp
+                    }
 
 newReduction :: SrcLoc -> Exp Type -> Exp Type
              -> TransformM ((Ident Type, Exp Type),
@@ -128,7 +131,7 @@ newReduction loc arrexp accexp = do
 
 newLet :: Exp Type -> String -> TransformM (Ident Type, Exp Type, Exp Type -> Exp Type)
 newLet e name = do
-  let e' = maybeCopy e
+  e' <- liftM maybeCopy $ transformExp e
   (x,xv) <- newVar name (typeOf e') loc
   let xlet body = LetPat (Id x) e' body loc
   return (x, xv, xlet)

@@ -9,14 +9,12 @@ import Control.Applicative
 import Control.Monad.Reader
 import Control.Monad.Writer
 
-import Data.Data
-import Data.Generics
-
 import qualified Data.Set as S
 --import qualified Data.Map as M
 
 import L0.AbSyn
- 
+import L0.Traversals
+
 --import L0.Traversals
 --import L0.EnablingOpts.InliningDeadFun
 import L0.EnablingOpts.EnablingOptErrors
@@ -192,18 +190,11 @@ deadCodeElimExp (DoLoop mergepat mergeexp idd n loopbdy letbdy pos) = do
 
 
 
--- The above case may have to be extended if syntax nodes ever contain
--- anything but lambdas, expressions, lists of expressions or lists of
--- pairs of expression-types.  Pay particular attention to the fact
--- that the latter has to be specially handled.
-deadCodeElimExp e = gmapM (mkM deadCodeElimExp
-                            `extM` deadCodeElimLambda
-                            `extM` mapM deadCodeElimExp
-                            `extM` mapM deadCodeElimExpPair) e
-
-deadCodeElimExpPair :: TypeBox tf => (Exp tf, tf) -> DCElimM tf (Exp tf, tf)
-deadCodeElimExpPair (e,t) = do e' <- deadCodeElimExp e
-                               return (e',t)
+deadCodeElimExp e = mapExpM mapper e
+  where mapper = identityMapper {
+                   mapOnExp = deadCodeElimExp
+                 , mapOnLambda = deadCodeElimLambda
+                 }
 
 deadCodeElimLambda :: TypeBox tf => Lambda tf -> DCElimM tf (Lambda tf)
 deadCodeElimLambda (AnonymFun params body ret pos) = do
