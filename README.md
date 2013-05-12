@@ -1,10 +1,10 @@
 L0Language
 ==========
 
-The L-zero Language.
+The L-zero Language.  See doc/l0.tex for a language tutorial.
 
 Installation
-==========
+============
 
 You will need GHC 7.6 to compile `l0c`, due to a bug in GHC 7.4.
 
@@ -14,71 +14,38 @@ installed in your Cabal bin directory, most likely $HOME/.cabal/bin.
 Otherwise, just run `cabal configure`, followed by `cabal build`, and
 the executable can be found in `dist/build/l0c/l0c`.
 
-L0 semantics
-============
+Usage
+=====
 
-For now, just look at the example programs in the `data/` directory.
+L0C requires you to manually specify every pass you want performed,
+with the exception of the initial parsing and type checking.  The
+general format of usage is as follows:
 
-Do-loops
---------
+    l0c [options] <file>
 
-The following semantics were based on an idea by Cosmin and
-implemented by Troels.  They are pretty much what is currently in the
-compiler.
+Where `<file>` is an .l0 file (say, one of the example programs from
+the `data/` directory) and the options which passes and final action
+to perform.  If no options are given, the default action is to
+pretty-print (`-p`) the program after type-checking.  It is also
+possible to instruct `l0c` to interpret the program, by using the `-i`
+option.  If the `-c` flag is given, the program will be compiled to C
+and printed on standard output.  Note, however, that for the C code
+generator to work, you must manually run the first-order transform
+(with `-f`) and the tuple-array transform (`-t`).  In total, the
+command for compiling a program is:
 
-The semantics of a do-loop is:
+    l0c -f -t -c <program.0> > program.c
 
-    for i < N do
-        Exp
-    merge (v1,..,vn)
+The order of passes (`-f` then `-t`) is significant.  Run `l0c` with
+no arguments to see a list of possible passes.
 
-where the result of `Exp` is of the same type with that of `(v1,..,vn)` is
-equivalent to
+When executing a program, L0 will start by reading (from standard
+input) the arguments to the main() function.  Each argument must be
+provided on a single line and be in L0 syntax.  For example, if asked
+to interpret the following program, L0 will read two integers from
+standard input.
 
-        doloopfun( N, 0, (v1,..,vn) )
-    where
-        doloopfun( i, N, (v1,..,vn) ) =
-           if(i = N) then (v1,..,vn)
-           else doloopfun(i+1, N, Exp)
+    fun int main(int x, int y) = x + y
 
-`v1...vn` must be in lexical scope at the loop.  Inside the body of the
-loop, they are known as _merge variables_, and have special
-restrictions.
-
-The semantics of the let-with construct:
-
-    let x1 = x0 with [ind] <- exp_elem in exp_res
-
-is that `x1` is a deep copy of `x0` but with the element at `index
-ind` updated to `exp_elem`.  In the above construct, we say that `x1`
-is used as _destination_, and `x0` is used as _source_.  If x1 and x0
-are the same name, we say that the let-with is _reflexive_. Let-withs
-where the destination is a merge variable are intended to be in-place.
-
-If used without a good understanding what the (current) compiler does
-for you, let-with may introduce severe overhead.  The following rules
-apply:
-
-1. For every expression `let x0 = e in body`, where `e` contains a
-merge variable that is used as destination in a reflexive let-with in
-body, `e` must yield a _basic type_.  A basic type is a type that is
-not an array, and if a tuple, one that contains only basic types.
-
-2. Merge variables defined outside of an anonymous function are out of
-scope in the body of the function.
-
-Tuple arguments
----------------
-
-In a SOAC, when the given function is to be invoked with N arguments
-of types t1...tN, but the function only takes a single argument of
-type (t1 * ... * tN) (that is, a tuple), L0 will automatically
-generate an anonymous unwrapping function in such a way that it still
-works.  This allows the following expression to type-check (and run):
-
-    map(op +, zip(as, bs))
-
-Without the above transformation, you would get an error, as 'op +' is
-a function that takes two arguments, but is passed a tuple by map.
-
-This eliminates the need for a dedicated zipWith construct.
+When the program finishes, the return value of main() will be printed
+on standard output.

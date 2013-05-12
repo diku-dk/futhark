@@ -1,0 +1,364 @@
+\documentclass[oneside]{memoir}
+\usepackage{alltt}
+
+\title{The L0 Programming Language}
+\date{\today}
+\author{Troels Henriksen (athas@sigkill.dk)}
+
+\counterwithout{section}{chapter}
+
+\newcommand\boolt[0]{\texttt{bool}}
+\newcommand\realt[0]{\texttt{real}}
+\newcommand\chart[0]{\texttt{char}}
+\newcommand\intt[0]{\texttt{int}}
+\renewcommand\tilde[0]{{\raise.17ex\hbox{$\scriptstyle\sim$}}}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+This document has been prepared as an informal overview of the L0
+language.  In time, we hope to develop it into a formal specification,
+with accompanying proofs of correctness, but for now, words will have
+to suffice where formulae would be ideal.
+
+L0 is an eagerly evaluated, purely functional language with built-in
+arrays and second-order array combinators, which is intended for use
+as an \emph{intermediate language} (sometimes called a \emph{core
+  language}) with a focus towards efficient execution on vector
+hardware (GPUs).  While L0 is not designed to be a pleasant
+programming experience for humans, it does have a textual syntax to
+facilitate the writing of benchmark programs.
+
+Section \ref{sec:l0-overview} gives a cursory tour of the L0 language.
+
+Section \ref{sec:l0-reference} proceeds with a syntax-oriented
+description of every language construct in L0.
+
+Section \ref{sec:l0-uniqueness-types} describes the \emph{uniqueness
+  types} of L0; a type system feature that permits in-place
+modification of arrays as long as it can be proven that referential
+transparency is upheld.
+
+\section{Language overview}
+\label{sec:l0-overview}
+
+The syntax of L0 is heavily inspired by Haskell and Standard ML.  An
+identifier stats with an letter, followed by any number of letters,
+digits and underscores.  Numeric constants use the same notation as
+Haskell, except that we use \texttt{~} for unary minus.  String and
+character literals literals use Haskell syntax (which is very similar
+to C), including all escape characters.  Comments are indicated with
+\texttt{//} and span to end of line.
+
+An L0 program consists of a sequence of \emph{function definitions},
+of the following form.
+
+\begin{alltt}
+  fun \textit{return-type} \textit{name}(\textit{params...}) = \textit{body}
+\end{alltt}
+
+A function must declare both its return type and the types of all
+parameters.  All functions (except for inline anonymous functions; see
+below) are defined globally.  L0 does not use type inference.
+Symbolic constants are not supported, although 0-ary functions can be
+defined.  As a concrete example, here is the recursive definition of
+the factorial function in L0.
+\begin{alltt}
+  fun int fact(int n) =
+  if n = 0 then 1
+           else n * fact(n-1)
+\end{alltt}
+Indentation has no syntactical significance in L0, but recommended for
+readability.
+
+The syntax for tuple types is identical to that of Haskell, so
+\texttt{(int, real)} is a tuple an integer and a floating-point
+number.  Single-element tuples are not valid.  Arrays are written as
+the element type surrounded by brackets, meaning that \texttt{[int]}
+is a one-dimensional array of integers, and \texttt{[[[(int, real)]]]}
+is a three-dimensional array of tuples of integers and floats.  An
+array is written as a sequence of elements enclosed by braces.
+\begin{alltt}
+  \{1, 2, 3\}       // Array of type [int].
+  \{\{1\}, \{2\}, \{3\}\} // Array of type [[int]].
+\end{alltt}
+All arrays must be \emph{regular} (often termed \emph{full}) - for
+example, all rows of a two-dimensional array must have the same number
+of elements.
+\begin{alltt}
+  \{\{1, 2\}, \{3\}\} // This is an error.
+\end{alltt}
+Arrays are indexed using common \texttt{a[i1, i2, i3...]}
+Fortran-style notation.  An indexing is said to be \textit{full} if
+the number of given indexes is equal to the dimensionality of the
+array.
+
+A \texttt{let}-expression can be used to refer to the result of a
+subexpression:
+\begin{alltt}
+  let z = x + y in ...
+\end{alltt}
+Only a single binding is permitted for each \texttt{let}.
+
+Two-way \texttt{if-then-else} is the only branching construct in L0.
+Pattern matching is supported in a limited way for taking apart
+tuples, but this can only be done in \texttt{let}-bindings, and not
+directly in a function argument list.  Specifically, the following
+function definition is not valid.
+\begin{alltt}
+  fun int sumpair((int x, int y)) = x + y // WRONG!
+\end{alltt}
+Instead, we must use a let-binding explicitly, as follows.
+\begin{alltt}
+  fun int sumpair((int, int) t) =
+    let (x,y) = t in x + y
+\end{alltt}
+Pattern-matching in a binding is the only way to access the components
+of a tuple.
+
+Function calls are written as the function name followed by the
+arguments enclosed in parentheses.  The built-in second-order array
+combinators (\emph{SOAC}s) are written much like a function call,
+except that one or more of a SOACs arguments may be a \emph{function
+  reference}.  A function reference is an anonymous function
+(``lambda'') or the name of some function, possibly with curried
+arguments.  As an example, let us consider the following function for
+adding two integers.
+\begin{alltt}
+fun int sum(int x, int y) = x + y
+\end{alltt}
+We may use this in conjunction with the \texttt{map} SOAC to add two
+to every element of an array \texttt{a}.
+\begin{alltt}
+map(sum (2), a)
+\end{alltt}
+This is semantically equivalent to
+\begin{alltt}
+map(fn int (int x) => sum(2, x), a)
+\end{alltt}
+which also demonstrates the syntax for anonymous functions.  Note that
+while some language constructs look like functions (\texttt{size}, for
+example), they are not, and cannot be used as a function reference.
+
+An operator can be used as the function argument of a SOAC by
+prefixing it with \texttt{op}.  For example, to negate every number in
+the array \texttt{a}, we would write \texttt{map(op ~, a)}.  This can
+also be combined with currying: \texttt{map(op + (2), a)}.
+
+Except for the arithmetic operators, which accept both \realt{}s
+and \intt{}s, every construct if L0 is fully monomorphic.  Every
+user-defined function must be first-order; higher-order arguments can
+only be used in direct calls of SOACs.
+
+L0 has a built-in syntax for expressing certain tail-recursive
+functions.  Consider the following tail-recursive formulation of a
+function for computing the Fibonacci numbers.
+\begin{alltt}
+  fun int fib(int n) = fibhelper(1,1,n)
+
+  fun int fibhelper(int x, int y, int n) =
+    if n = 1 then x else fibhelper(y, x+y, n-1)
+\end{alltt}
+We can rewrite this using the \texttt{loop} construct.
+\begin{alltt}
+  fun int fib(int n) =
+    loop ((x, y) = (1,1)) = for i < n do
+                              (y, x+y)
+    in x
+\end{alltt}
+The semantics of this is precisely as in the tail-recursive function
+formulation.  In general, a loop
+\begin{alltt}
+  loop (\emph{pat} = \emph{initial}) = for \emph{i} < \emph{bound} do \emph{loopbody}
+  in \emph{body}
+\end{alltt}
+has the following semantics:
+
+\begin{enumerate}
+  \item Bind \textit{pat} to the initial values given in \textit{initial}.
+  \item While $\textit{i} < \textit{bound}$, evaluate \textit{loopbody},
+    rebinding \textit{pat} to be the value returned by the body.
+  \item Evaluate \textit{body} with \textit{pat} bound to its final
+    value.
+\end{enumerate}
+The purpose of \texttt{loop} is partially to render some sequential
+computations slightly more convenient, as well as for expression loop
+optimisations in the compiler.  Semantically, it is completely
+equivalent to the corresponding tail-recursive function.
+
+General modification of array elements is done using the
+\emph{let-with} construct.  In its most general form, it looks as
+follows.
+\begin{alltt}
+  let \textit{dest} = \textit{src} with [\textit{indexes}] <- \textit{value}
+  in \textit{body}
+\end{alltt}
+This evaluates \textit{body} with \textit{dest} bound to the value of
+\textit{src}, except that the element(s) at the position given by
+\textit{indexes} take on the new value \textit{value}.\footnote{Yes,
+  this is the \emph{third} binding construct in the language, ignoring
+  function abstraction!}  The given indexes need not be complete, but
+in that case, \textit{value} must be an array of the proper size.  As
+an example, here's how we could replace an entire row of an
+$n\times3$ array.
+\begin{alltt}
+  let b = a with [3] <- {1,2,3} in b
+\end{alltt}
+Whenever $\textit{dest} = \textit{src}$, we can write
+\begin{alltt}
+  let \textit{dest}[\textit{indexes}] = \textit{value} in \textit{body}
+\end{alltt}
+as a shortcut.  Let-with has some unusual restrictions to permit
+in-place modification of the \textit{src} array, as described in
+section \ref{sec:l0-uniqueness-types}.
+
+\section{Language reference}
+\label{sec:l0-reference}
+
+The builtin types in L0 are \intt{}, \realt{}, \boolt{} and \chart{}, as
+well as their combination in tuples and arrays.
+
+The following list describes every syntactical language construct in
+the language.
+
+\begin{description}
+  \item[\textit{constant}]\hfill\\
+    Evaluates to itself.
+
+  \item[\textit{var}]\hfill\\
+    Evaluates to its value in the environment.
+
+  \item[\texttt{x \textit{arithop} y}] \hfill\\
+    Evaluate the binary operator on its operands, which must both be of either type \intt{} or \realt.  The following operators are supported: \texttt{+}, \texttt{*}, \texttt{-}, \texttt{/}, \texttt{\%}, \texttt{=}, \texttt{<}, \texttt{<=}, \texttt{pow}.
+
+  \item[\texttt{x \textit{logop} y}] \hfill\\
+    Evaluate the binary operator on its operands, which must both be of type \intt.  The following operators are supported: \texttt{\^}, \texttt{\&}, \texttt{|}, \texttt{>>}, \texttt{<<}.
+
+  \item[\texttt{x \&\& y}]\hfill\\
+    Short-circuiting conjunction, both operands must be of type \boolt.
+
+  \item[\texttt{x || y}]\hfill\\
+    Short-circuiting disjunction, both operands mus tbe of type \boolt.
+
+  \item[\texttt{not x}]\hfill\\
+    Logical negation of \texttt{x}, which must be of type \boolt.
+
+  \item[\texttt{\tilde x}]\hfill\\
+    Numerical negation of \texttt{x}, which must be of type \realt{} or \intt.
+
+  \item[\texttt{a[i]}]\hfill\\
+    Return the element at the given position in the array.  The index
+    may be a comma-separated list of indexes.
+
+  \item[\texttt{map(f, a)}]\hfill\\
+    Apply \texttt{f} to every element of \texttt{a} and return the resulting array.
+
+  \item[\texttt{reduce(f, x, a)}]\hfill\\
+    Left-reduction with \texttt{f} across the elements of \texttt{a}, with \texttt{x} as the initial value.  \texttt{f} must be associative, as the evaluation order is not otherwise specified.
+
+  \item[\texttt{scan(f, x, a)}]\hfill\\
+    Inclusive prefix-scan.
+
+  \item[\texttt{filter(f, a)}]\hfill\\
+    Remove all those elements of \texttt{a} that do not satisfy the predicate \texttt{f}.
+
+  \item[\texttt{mapall(f, a)}]\hfill\\
+    Apply \texttt{f} to every \emph{basic} element of \texttt{a}, returnin an array of the same shape.
+
+  \item[\texttt{redomap(g, f, x, a)}]\hfill\\
+    Equivalent to \texttt{reduce(g, n, map(f, a))}.
+
+  \item[\texttt{iota(n)}]\hfill\\
+    An array of the integers from $0$ to \texttt{n}.
+
+  \item[\texttt{replicate(n, a)}]\hfill\\
+    An array consisting of \texttt{n} copies of \texttt{a}.
+
+  \item[\texttt{size(a)}]\hfill\\
+    The number of rows in the given array.
+
+  \item[\texttt{split(n, a)}]\hfill\\
+    Partitions the given array into disjoint two arrays \texttt{a[$0\ldots{}n$]}, \texttt{a[$n+1\ldots{}$]}.
+
+  \item[\texttt{concat(a, b)}]\hfill\\
+    Concatenate the rows/elements of one array with another.  The shape of the two arrays must be identical in all but the first dimensionel.
+
+  \item[\texttt{copy(x)}]\hfill\\
+    Return a deep copy of the argument.  Semantically, this is just the identiti function, bit it has special semantics related to uniqueness types as described in section \ref{sec:l0-uniqueness-types}.
+
+  \item[\texttt{reshape((dim$_{0}$, \ldots, dim$_{0}$), a)}]\hfill\\
+    Reshape the elements of the given array into the specified shape.  The number of elements in \texttt{a} must be equal to $\texttt{dim}_{0}\times\ldots\times\texttt{dim}_{n}$.
+
+  \item[\texttt{transpose(a)}]\hfill\\
+    Return the transpose of \texttt{a}.
+
+  \item[\texttt{let pat = e in body}]\hfill\\
+    While evaluating \texttt{body}, bind the names mentioned in \texttt{pat} to the components in the corresponding positions of the value of \texttt{e}.
+
+  \item[\texttt{let dest = src with [index] <- v in body}] \hfill \\
+    Evaluate \texttt{body} with \texttt{dest} bound to the value of
+    \texttt{src}, except that the element(s) at the position given by
+    the index take on the value of \texttt{v}.  The given index need
+    not be complete, but in that case, the value of \texttt{v} must be
+    an array of the proper size.
+
+  \item{\texttt{if c then a else b}}\hfill\\
+    If \texttt{c} evaluates to \texttt{True}, evaluate \texttt{a},
+    else evaluate \texttt{b}.
+
+  \item{\texttt{loop (pat = initial) = for i < bound do loopbody in body}}
+    \begin{enumerate}
+    \item Bind \texttt{pat} to the initial values given in \texttt{initial}.
+    \item While $\texttt{i} < \texttt{bound}$, evaluate \texttt{loopbody},
+      rebinding \texttt{pat} to be the value returned by the body.
+    \item Evaluate \texttt{body} with \texttt{pat} bound to its final
+      value.
+    \end{enumerate}
+
+\end{description}
+
+\subsection{Tuple shimming}
+
+In a SOAC, if the given function expects $n$ arguments of types
+\texttt{t$_{1}$,\ldots,{}t$_{N}$}, but the SOAC will call the function
+with a single argument of type \texttt{(t$_{1}$*\ldots{}*t$_{N}$)}
+(that is, a tuple), the L0 compiler will automatically generate an
+anonymous unwrapping function in such a way that it still works.  This
+allows the following expression to type-check (and run):
+
+\begin{alltt}
+  map(op +, zip(as, bs))
+\end{alltt}
+
+Without the above transformation, you would get an error, as
+\texttt{op +} is a function that takes two arguments, but is passed a
+tuple by \texttt{map}.
+
+This eliminates the need for a dedicated \texttt{zipWith} construct.
+
+\subsection{Arrays of tuples}
+
+Arrays of tuples are in a sense merely syntactic sugar for tuples of
+arrays.  The type \texttt{[(int, real)]} is transformed to
+\texttt{([int], [real])} during the compilation process, and all code
+interacting with arrays of tuples is likewise transformed.  In most
+cases, this is fully transparent, but there are edge cases where the
+transformation is not trivially an isomorphism.
+
+Consider the type \texttt{[([int], [real])]}, which is transformed
+into \texttt{([[int]], [[real]])}.  These two types are not
+isomorphic, as the latter has more stringent demands as to the
+fullness of arrays.  For example, \texttt{{({1}, {1.0}), ([2,3],
+    {2.0})}} is a value of the former, but the corresponding
+transformed value, \texttt{({{1}, {2, 3}}, {{1.0}, {2.0}})} is not a
+full array.  Hence, when determining whether a program generates full
+arrays, we must hence look at the \textit{transformed} values - in a
+sence, the fullness requirement ``transcends'' the tuples.
+
+\section{Uniqueness types}
+\label{sec:l0-uniqueness-types}
+
+\end{document}
