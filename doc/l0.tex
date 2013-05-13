@@ -5,12 +5,15 @@
 \date{\today}
 \author{Troels Henriksen (athas@sigkill.dk)}
 
+% Remove chapter numbering, as we only use one chapter in this
+% document.
 \counterwithout{section}{chapter}
 
 \newcommand\boolt[0]{\texttt{bool}}
 \newcommand\realt[0]{\texttt{real}}
 \newcommand\chart[0]{\texttt{char}}
 \newcommand\intt[0]{\texttt{int}}
+\newcommand\aliases[1]{\textrm{aliases}(#1)}
 \renewcommand\tilde[0]{{\raise.17ex\hbox{$\scriptstyle\sim$}}}
 
 \begin{document}
@@ -68,8 +71,8 @@ defined.  As a concrete example, here is the recursive definition of
 the factorial function in L0.
 \begin{alltt}
   fun int fact(int n) =
-  if n = 0 then 1
-           else n * fact(n-1)
+    if n = 0 then 1
+             else n * fact(n-1)
 \end{alltt}
 Indentation has no syntactical significance in L0, but recommended for
 readability.
@@ -232,10 +235,15 @@ the language.
     Evaluates to its value in the environment.
 
   \item[\texttt{x \textit{arithop} y}] \hfill\\
-    Evaluate the binary operator on its operands, which must both be of either type \intt{} or \realt.  The following operators are supported: \texttt{+}, \texttt{*}, \texttt{-}, \texttt{/}, \texttt{\%}, \texttt{=}, \texttt{<}, \texttt{<=}, \texttt{pow}.
+    Evaluate the binary operator on its operands, which must both be
+    of either type \intt{} or \realt.  The following operators are
+    supported: \texttt{+}, \texttt{*}, \texttt{-}, \texttt{/},
+    \texttt{\%}, \texttt{=}, \texttt{<}, \texttt{<=}, \texttt{pow}.
 
   \item[\texttt{x \textit{logop} y}] \hfill\\
-    Evaluate the binary operator on its operands, which must both be of type \intt.  The following operators are supported: \texttt{\^}, \texttt{\&}, \texttt{|}, \texttt{>>}, \texttt{<<}.
+    Evaluate the binary operator on its operands, which must both be
+    of type \intt.  The following operators are supported:
+    \texttt{\^}, \texttt{\&}, \texttt{|}, \texttt{>>}, \texttt{<<}.
 
   \item[\texttt{x \&\& y}]\hfill\\
     Short-circuiting conjunction, both operands must be of type \boolt.
@@ -257,7 +265,9 @@ the language.
     Apply \texttt{f} to every element of \texttt{a} and return the resulting array.
 
   \item[\texttt{reduce(f, x, a)}]\hfill\\
-    Left-reduction with \texttt{f} across the elements of \texttt{a}, with \texttt{x} as the initial value.  \texttt{f} must be associative, as the evaluation order is not otherwise specified.
+    Left-reduction with \texttt{f} across the elements of \texttt{a},
+    with \texttt{x} as the initial value.  \texttt{f} must be
+    associative, as the evaluation order is not otherwise specified.
 
   \item[\texttt{scan(f, x, a)}]\hfill\\
     Inclusive prefix-scan.
@@ -266,7 +276,8 @@ the language.
     Remove all those elements of \texttt{a} that do not satisfy the predicate \texttt{f}.
 
   \item[\texttt{mapall(f, a)}]\hfill\\
-    Apply \texttt{f} to every \emph{basic} element of \texttt{a}, returnin an array of the same shape.
+    Apply \texttt{f} to every \emph{basic} element of \texttt{a},
+    returnin an array of the same shape.
 
   \item[\texttt{redomap(g, f, x, a)}]\hfill\\
     Equivalent to \texttt{reduce(g, n, map(f, a))}.
@@ -281,22 +292,32 @@ the language.
     The number of rows in the given array.
 
   \item[\texttt{split(n, a)}]\hfill\\
-    Partitions the given array into disjoint two arrays \texttt{a[$0\ldots{}n$]}, \texttt{a[$n+1\ldots{}$]}.
+    Partitions the given array into two disjoint arrays
+    \texttt{a[$0\ldots{}n$]}, \texttt{a[$n+1\ldots{}$]}, as a tuple.
 
   \item[\texttt{concat(a, b)}]\hfill\\
-    Concatenate the rows/elements of one array with another.  The shape of the two arrays must be identical in all but the first dimensionel.
+    Concatenate the rows/elements of one array with another.  The
+    shape of the two arrays must be identical in all but the first
+    dimensionel.
 
   \item[\texttt{copy(x)}]\hfill\\
-    Return a deep copy of the argument.  Semantically, this is just the identiti function, bit it has special semantics related to uniqueness types as described in section \ref{sec:l0-uniqueness-types}.
+    Return a deep copy of the argument.  Semantically, this is just
+    the identiti function, bit it has special semantics related to
+    uniqueness types as described in section
+    \ref{sec:l0-uniqueness-types}.
 
   \item[\texttt{reshape((dim$_{0}$, \ldots, dim$_{0}$), a)}]\hfill\\
-    Reshape the elements of the given array into the specified shape.  The number of elements in \texttt{a} must be equal to $\texttt{dim}_{0}\times\ldots\times\texttt{dim}_{n}$.
+    Reshape the elements of the given array into the specified shape.
+    The number of elements in \texttt{a} must be equal to
+    $\texttt{dim}_{0}\times\ldots\times\texttt{dim}_{n}$.
 
   \item[\texttt{transpose(a)}]\hfill\\
     Return the transpose of \texttt{a}.
 
   \item[\texttt{let pat = e in body}]\hfill\\
-    While evaluating \texttt{body}, bind the names mentioned in \texttt{pat} to the components in the corresponding positions of the value of \texttt{e}.
+    While evaluating \texttt{body}, bind the names mentioned in
+    \texttt{pat} to the components in the corresponding positions of
+    the value of \texttt{e}.
 
   \item[\texttt{let dest = src with [index] <- v in body}] \hfill \\
     Evaluate \texttt{body} with \texttt{dest} bound to the value of
@@ -323,8 +344,8 @@ the language.
 \subsection{Tuple shimming}
 
 In a SOAC, if the given function expects $n$ arguments of types
-\texttt{t$_{1}$,\ldots,{}t$_{N}$}, but the SOAC will call the function
-with a single argument of type \texttt{(t$_{1}$*\ldots{}*t$_{N}$)}
+\texttt{t$_{1}$,\ldots,{}t$_{n}$}, but the SOAC will call the function
+with a single argument of type \texttt{(t$_{1}$*\ldots{}*t$_{n}$)}
 (that is, a tuple), the L0 compiler will automatically generate an
 anonymous unwrapping function in such a way that it still works.  This
 allows the following expression to type-check (and run):
@@ -360,5 +381,103 @@ sence, the fullness requirement ``transcends'' the tuples.
 
 \section{Uniqueness types}
 \label{sec:l0-uniqueness-types}
+
+The L0 type system supports the notion of \emph{uniqueness types},
+inspired by the programming language Clean, which provide a way to
+statically check the number of references to a given array.  The
+benefit of this is that if it can be statically proven that an array
+only has a single reference, we can safely update it in-place without
+violating referential transparency.  A non-unique variable can only be
+\textit{observed} - that is, we read its value.  A unique variable can
+also be \textit{consumed}, meaning that it becomes inaccessible
+afterwards.
+
+If the type of an array is preceded by a single asterisk, this denotes
+that the array is unique - that it has only a single reference.  The
+source operand to a let-with \textit{must} be unique.  If it is not,
+it is reported as a type error.  Let-with and function calls are the
+only places in which variable consumption can happen.  As a first
+example, let us consider a function that replaces the value at a given
+position in an integer array.
+
+\begin{alltt}
+  fun *[int] replace(*[int] arr, int i, int x) =
+    let arr[i] = x in arr
+\end{alltt}
+
+The type of this function expresses the fact that it consumes its
+array argument, and also returns a unique array.  This permits
+composition - \texttt{replace(replace(a, i1, x), i2, y)} is a valid
+application.  Defining \texttt{replace} as
+\begin{alltt}
+  fun [int] replace2(*[int] arr, int i, int x) =
+    let arr[i] = x in arr
+\end{alltt}
+would still be type correct (a unique array can be used anywhere a
+nonunique is expected), but the composition
+\texttt{replace2(replace2(a, i1, x), i2, y)} would no longer be well
+typed.
+
+Checking that uniqueness invariants are being upheld is far subtler
+than normal type checking.  In particular, detailed sharing analysis
+has to be performed, in order to ensure that after an array $a$ is
+modified, it becomes an error to use any value that may refer to
+(parts of) the old value of the array.  In the following, let
+$\aliases{e}$ denote the variables that may alias $e$, where $e$ is an
+arbitrary expression (although most often a variable).  Whenever we
+consume a variable $a$, we mark as inaccessible all of its aliases.
+
+\begin{alltt}
+  let b = a in               // Now \(\texttt{b}\in\aliases{\texttt{a}}\).
+  let c = a with [i] <- x in // \(\forall{}v\in\aliases{\texttt{a}}\Rightarrow\textrm{Mark \(v\) as consumed.}\)
+  b                          // Error, because \(\texttt{b}\in\aliases{\texttt{a}}\)!
+\end{alltt}
+
+The details of how sharing is determined is described in further
+detail in section \ref{subsec:l0-sharing}.  For now, assume that the
+alias-sets are given, and let us take a closer look at the
+interactions between observing and consuming variables.
+
+A key principle is that of \textit{sequence points}, that lexically
+delimit the uses of variables.  As an exampe, assume that we
+are given a function \texttt{f} of type \texttt{*[int] -> int}.  That
+is, \texttt{f} consumes an array and returns an integer.  The expression
+\begin{alltt}
+  f(a) + a[i]
+\end{alltt}
+is invalid because a consumption and observation of the same variable
+happens within the same \textit{sequence}.  It is valid for a sequence
+to contain multiple observations of the same variable, but if a given
+variable is consumed, that must be the only occurence of the variable
+(and any of its aliases) within the sequence.  Binding constructs
+(lets, let-withs and loops) create sequence points that delimit
+sequences.  If we rewrite the expression to cordon the consumption
+into its own sequence, all will be well.
+\begin{alltt}
+  let c = a[i] // Since a[i] is of primitive type,
+               // c does not alias a.
+  in f(a) + c
+\end{alltt}
+
+The reason for this rule is to enable simpler code generation, as any
+necessary order of operations is evident in the code.  It does require
+a certain amount of care when doing program transformations, as for
+example copy propagation may result in invalid programs.
+
+In the previous examples, function arguments that were consumed were
+all simple variables, making it easy to describe what was being
+consumed.  But in general, we might have an expression
+\begin{alltt}
+  replace(e, i, x)
+\end{alltt}
+where \texttt{e} is some arbitrary expression.  In this case, we mark
+as consumed all variables in $\aliases{\texttt{e}}$.
+
+At this point I realise that the simplified explanation is not
+adequate, and that I should have started out with describing sharing.
+Oh well.  Time to do it over again.
+
+\subsection{Sharing analysis}
+\label{subsec:l0-sharing}
 
 \end{document}
