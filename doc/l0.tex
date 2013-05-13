@@ -1,5 +1,6 @@
 \documentclass[oneside]{memoir}
 \usepackage{alltt}
+\usepackage{amsmath}
 
 \title{The L0 Programming Language}
 \date{\today}
@@ -51,10 +52,10 @@ transparency is upheld.
 The syntax of L0 is heavily inspired by Haskell and Standard ML.  An
 identifier stats with an letter, followed by any number of letters,
 digits and underscores.  Numeric constants use the same notation as
-Haskell, except that we use \texttt{~} for unary minus.  String and
-character literals literals use Haskell syntax (which is very similar
-to C), including all escape characters.  Comments are indicated with
-\texttt{//} and span to end of line.
+Haskell, except that we use tilde (\tilde{}) for unary minus.  String
+and character literals literals use Haskell syntax (which is very
+similar to C), including all escape characters.  Comments are
+indicated with \texttt{//} and span to end of line.
 
 An L0 program consists of a sequence of \emph{function definitions},
 of the following form.
@@ -78,7 +79,7 @@ Indentation has no syntactical significance in L0, but recommended for
 readability.
 
 The syntax for tuple types is identical to that of Haskell, so
-\texttt{(int, real)} is a tuple an integer and a floating-point
+\texttt{(int, real)} is a pair of an integer and a floating-point
 number.  Single-element tuples are not valid.  Arrays are written as
 the element type surrounded by brackets, meaning that \texttt{[int]}
 is a one-dimensional array of integers, and \texttt{[[[(int, real)]]]}
@@ -112,7 +113,7 @@ tuples, but this can only be done in \texttt{let}-bindings, and not
 directly in a function argument list.  Specifically, the following
 function definition is not valid.
 \begin{alltt}
-  fun int sumpair((int x, int y)) = x + y // WRONG!
+  fun int sumpair((int, int) (x, y)) = x + y // WRONG!
 \end{alltt}
 Instead, we must use a let-binding explicitly, as follows.
 \begin{alltt}
@@ -148,11 +149,11 @@ example), they are not, and cannot be used as a function reference.
 
 An operator can be used as the function argument of a SOAC by
 prefixing it with \texttt{op}.  For example, to negate every number in
-the array \texttt{a}, we would write \texttt{map(op ~, a)}.  This can
-also be combined with currying: \texttt{map(op + (2), a)}.
+the array \texttt{a}, we would write \texttt{map(op \tilde{}, a)}.
+This can also be combined with currying: \texttt{map(op + (2), a)}.
 
 Except for the arithmetic operators, which accept both \realt{}s
-and \intt{}s, every construct if L0 is fully monomorphic.  Every
+and \intt{}s, every construct is L0 is fully monomorphic.  Every
 user-defined function must be first-order; higher-order arguments can
 only be used in direct calls of SOACs.
 
@@ -187,8 +188,8 @@ has the following semantics:
   \item Evaluate \textit{body} with \textit{pat} bound to its final
     value.
 \end{enumerate}
-The purpose of \texttt{loop} is partially to render some sequential
-computations slightly more convenient, as well as for expression loop
+The purpose of \texttt{loop} is partly to render some sequential
+computations slightly more convenient, partly to express certain loop
 optimisations in the compiler.  Semantically, it is completely
 equivalent to the corresponding tail-recursive function.
 
@@ -234,108 +235,109 @@ the language.
   \item[\textit{var}]\hfill\\
     Evaluates to its value in the environment.
 
-  \item[\texttt{x \textit{arithop} y}] \hfill\\
+  \item[\texttt{\textit{x} \textbf{arithop} \textit{y}}] \hfill\\
     Evaluate the binary operator on its operands, which must both be
     of either type \intt{} or \realt.  The following operators are
     supported: \texttt{+}, \texttt{*}, \texttt{-}, \texttt{/},
     \texttt{\%}, \texttt{=}, \texttt{<}, \texttt{<=}, \texttt{pow}.
 
-  \item[\texttt{x \textit{logop} y}] \hfill\\
+  \item[\texttt{\textit{x} \textbf{bitop} \textit{y}}] \hfill\\
     Evaluate the binary operator on its operands, which must both be
     of type \intt.  The following operators are supported:
     \texttt{\^}, \texttt{\&}, \texttt{|}, \texttt{>>}, \texttt{<<}.
 
-  \item[\texttt{x \&\& y}]\hfill\\
+  \item[\texttt{\textit{x} \&\& \textit{y}}]\hfill\\
     Short-circuiting conjunction, both operands must be of type \boolt.
 
-  \item[\texttt{x || y}]\hfill\\
+  \item[\texttt{\textit{x} || \textit{y}}]\hfill\\
     Short-circuiting disjunction, both operands mus tbe of type \boolt.
 
-  \item[\texttt{not x}]\hfill\\
-    Logical negation of \texttt{x}, which must be of type \boolt.
+  \item[\texttt{not \textit{x}}]\hfill\\
+    Logical negation of \textit{x}, which must be of type \boolt.
 
-  \item[\texttt{\tilde x}]\hfill\\
-    Numerical negation of \texttt{x}, which must be of type \realt{} or \intt.
+  \item[\texttt{\tilde \textit{x}}]\hfill\\
+    Numerical negation of \textit{x}, which must be of type \realt{} or \intt.
 
   \item[\texttt{a[i]}]\hfill\\
     Return the element at the given position in the array.  The index
     may be a comma-separated list of indexes.
 
-  \item[\texttt{map(f, a)}]\hfill\\
-    Apply \texttt{f} to every element of \texttt{a} and return the resulting array.
+  \item[\texttt{map(\textit{f}, \textit{a})}]\hfill\\
+    Apply \textit{f} to every element of \textit{a} and return the resulting array.
 
-  \item[\texttt{reduce(f, x, a)}]\hfill\\
-    Left-reduction with \texttt{f} across the elements of \texttt{a},
-    with \texttt{x} as the initial value.  \texttt{f} must be
+  \item[\texttt{reduce(\textit{f}, \textit{x}, \textit{a})}]\hfill\\
+    Left-reduction with \textit{f} across the elements of \textit{a},
+    with \textit{x} as the initial value.  \textit{f} must be
     associative, as the evaluation order is not otherwise specified.
 
-  \item[\texttt{scan(f, x, a)}]\hfill\\
+  \item[\texttt{scan(\textit{f}, \textit{x}, \textit{a})}]\hfill\\
     Inclusive prefix-scan.
 
-  \item[\texttt{filter(f, a)}]\hfill\\
-    Remove all those elements of \texttt{a} that do not satisfy the predicate \texttt{f}.
+  \item[\texttt{filter(\textit{f}, \textit{a})}]\hfill\\
+    Remove all those elements of \textit{a} that do not satisfy the
+    predicate \textit{f}.
 
-  \item[\texttt{mapall(f, a)}]\hfill\\
-    Apply \texttt{f} to every \emph{basic} element of \texttt{a},
+  \item[\texttt{mapall(\textit{f}, \textit{a})}]\hfill\\
+    Apply \textit{f} to every \emph{basic} element of \textit{a},
     returnin an array of the same shape.
 
-  \item[\texttt{redomap(g, f, x, a)}]\hfill\\
-    Equivalent to \texttt{reduce(g, n, map(f, a))}.
+  \item[\texttt{redomap(\textit{g}, \textit{f}, \textit{x}, \textit{a})}]\hfill\\
+    Equivalent to \texttt{reduce(\textit{g}, \textit{n}, map(\textit{f}, \textit{a}))}.
 
-  \item[\texttt{iota(n)}]\hfill\\
-    An array of the integers from $0$ to \texttt{n}.
+  \item[\texttt{iota(\textit{n})}]\hfill\\
+    An array of the integers from $0$ to \textit{n}.
 
-  \item[\texttt{replicate(n, a)}]\hfill\\
-    An array consisting of \texttt{n} copies of \texttt{a}.
+  \item[\texttt{replicate(\textit{n}, \textit{a})}]\hfill\\
+    An array consisting of \textit{n} copies of \textit{a}.
 
-  \item[\texttt{size(a)}]\hfill\\
+  \item[\texttt{size(\textit{a})}]\hfill\\
     The number of rows in the given array.
 
-  \item[\texttt{split(n, a)}]\hfill\\
+  \item[\texttt{split(\textit{n}, \textit{a})}]\hfill\\
     Partitions the given array into two disjoint arrays
-    \texttt{a[$0\ldots{}n$]}, \texttt{a[$n+1\ldots{}$]}, as a tuple.
+    \texttt{\textit{a}[$0\ldots{}n$]}, \texttt{\textit{a}[$n+1\ldots{}$]}, as a tuple.
 
-  \item[\texttt{concat(a, b)}]\hfill\\
+  \item[\texttt{concat(\textit{a}, \textit{b})}]\hfill\\
     Concatenate the rows/elements of one array with another.  The
     shape of the two arrays must be identical in all but the first
     dimensionel.
 
-  \item[\texttt{copy(x)}]\hfill\\
+  \item[\texttt{copy(\textit{x})}]\hfill\\
     Return a deep copy of the argument.  Semantically, this is just
     the identiti function, bit it has special semantics related to
     uniqueness types as described in section
     \ref{sec:l0-uniqueness-types}.
 
-  \item[\texttt{reshape((dim$_{0}$, \ldots, dim$_{0}$), a)}]\hfill\\
+  \item[\texttt{reshape((\textit{dim}$_{1}$, \ldots, \textit{dim}$_{n}$), a)}]\hfill\\
     Reshape the elements of the given array into the specified shape.
-    The number of elements in \texttt{a} must be equal to
-    $\texttt{dim}_{0}\times\ldots\times\texttt{dim}_{n}$.
+    The number of elements in \textit{a} must be equal to
+    $\texttt{dim}_{1}\times\ldots\times\texttt{dim}_{n}$.
 
-  \item[\texttt{transpose(a)}]\hfill\\
-    Return the transpose of \texttt{a}.
+  \item[\texttt{\textit{transpose}(a)}]\hfill\\
+    Return the transpose of \textit{a}.
 
-  \item[\texttt{let pat = e in body}]\hfill\\
-    While evaluating \texttt{body}, bind the names mentioned in
-    \texttt{pat} to the components in the corresponding positions of
-    the value of \texttt{e}.
+  \item[\texttt{let \textit{pat} = \textit{e} in \textit{body}}]\hfill\\
+    While evaluating \textit{body}, bind the names mentioned in
+    \textit{pat} to the components in the corresponding positions of
+    the value of \textit{e}.
 
-  \item[\texttt{let dest = src with [index] <- v in body}] \hfill \\
-    Evaluate \texttt{body} with \texttt{dest} bound to the value of
-    \texttt{src}, except that the element(s) at the position given by
-    the index take on the value of \texttt{v}.  The given index need
-    not be complete, but in that case, the value of \texttt{v} must be
+  \item[\texttt{let \textit{dest} = \textit{src} with [\textit{index}] <- \textit{v} in \textit{body}}] \hfill \\
+    Evaluate \textit{body} with \textit{dest} bound to the value of
+    \textit{src}, except that the element(s) at the position given by
+    the index take on the value of \textit{v}.  The given index need
+    not be complete, but in that case, the value of \textit{v} must be
     an array of the proper size.
 
-  \item{\texttt{if c then a else b}}\hfill\\
-    If \texttt{c} evaluates to \texttt{True}, evaluate \texttt{a},
-    else evaluate \texttt{b}.
+  \item{\texttt{if \textit{c} then \textit{a} else \textit{b}}}\hfill\\
+    If \textit{c} evaluates to \textit{True}, evaluate \textit{a},
+    else evaluate \textit{b}.
 
-  \item{\texttt{loop (pat = initial) = for i < bound do loopbody in body}}
+  \item{\texttt{loop (\textit{pat} = \textit{initial}) = for \textit{i} < \textit{bound} do \textit{loopbody} in \textit{body}}}
     \begin{enumerate}
-    \item Bind \texttt{pat} to the initial values given in \texttt{initial}.
-    \item While $\texttt{i} < \texttt{bound}$, evaluate \texttt{loopbody},
-      rebinding \texttt{pat} to be the value returned by the body.
-    \item Evaluate \texttt{body} with \texttt{pat} bound to its final
+    \item Bind \textit{pat} to the initial values given in \textit{initial}.
+    \item While $\textit{i} < \textit{bound}$, evaluate \textit{loopbody},
+      rebinding \textit{pat} to be the value returned by the body.
+    \item Evaluate \textit{body} with \textit{pat} bound to its final
       value.
     \end{enumerate}
 
@@ -392,7 +394,84 @@ violating referential transparency.  A non-unique variable can only be
 also be \textit{consumed}, meaning that it becomes inaccessible
 afterwards.
 
-If the type of an array is preceded by a single asterisk, this denotes
+Uniqueness typing depends critically on being able to determine
+sharing between different variables, so we will start out describing
+the sharing analysis performed by the L0 compiler.
+
+\subsection{Sharing analysis}
+\label{subsec:l0-sharing}
+
+Whenever the memory regions for two values overlap, we say that they
+are \textit{aliased}, or that \textit{sharing} is present.  As an
+example, if you have a two-dimensional array \texttt{a} and extract
+its first row as the one-dimensional array \texttt{b}, we say that
+\texttt{a} and \texttt{b} are aliased.  While the L0 compiler may do a
+deep copy if it wishes, it is not required, and this operation thus
+holds the potential for sharing memory.  Sharing analysis is
+necessarily conservative, and merely imposes an upper bound on the
+amount of sharing happening at runtime.  The sharing analysis in L0
+has been carefully designed to make the bound as tight as possible,
+but still easily computable.
+
+In L0, the only values that can have any sharing are arrays -
+everything else is considered ``primitive''.  Tuples are special, in
+that they are not considered to have any identity beyond their
+elements.  Therefore, when we store sharing information for a tuple,
+we do it for each of its elements, rather than the tuple value as a
+whole.
+
+To be precise, sharing information for an expression $e$, written
+$\aliases{e}$, can take one of two forms:
+
+\begin{enumerate}
+\item $l$, where $l$ is a subset of the variables in scope at $e$.
+  This means that $e$ may share data with some of the variables in
+  $l$.
+
+\item $\langle s_{1}, \ldots, s_{n} \rangle$, which requires that the
+  type of $e$ is a tuple $(e_{1}, \ldots, s_{n})$, and denotes that
+  $\aliases{e_{i}} = s_{i}$.
+\end{enumerate}
+
+We need a way to combine sharing information.  The typical case is for
+computing sharing information for the expression \texttt{if c then e1
+  else e2}.  Define the associative, commutative operation $s_{1}
+\oplus s_{2}$ by the following equation.
+
+\begin{align*}
+  l_{1} \oplus l_{2} &= l_{1} \cup l_{2} \\
+  l \oplus \langle s_{1}, \ldots, s_{n} \rangle &= \langle l \oplus s_1, \ldots, l \oplus s_n \rangle \\
+   \langle s_{1}, \ldots, s_{n} \rangle \oplus l &= \langle l \oplus s_1, \ldots, l \oplus s_n \rangle \\
+  \langle s_{1}, \ldots, s_{n} \rangle \oplus \langle s_{n+1}, \ldots, s_{2n} \rangle &= \langle s_{1} \oplus s_{n+1}, \ldots, s_{n} \oplus s_{2n} \rangle \\
+\end{align*}
+
+Now $\aliases{\texttt{if c then e1 else e2}} = \aliases{\texttt{e1}}
+\oplus \aliases{\texttt{e2}}$.  Note that $(\oplus, \emptyset)$
+constitutes a monoid - this is exploited in the L0 compiler.  We will
+often treat sharing information as a set and write things such as
+$\forall v\in\aliases{e}.p$ -- in this case, the set elements are all
+variables mentioned anywhere in the sharing information.
+
+Aliasing is reflexive -- if $v\in\aliases{e}$, then $\exists
+v'\in\aliases{e}\Rightarrow v\in\aliases{v}$.  Aliasing is mostly
+intuitive, but here's a few definitions describing how sharing is
+propagated by various expressions.
+
+\begin{align*}
+  \aliases{\texttt{copy(\textit{e})}} &= \emptyset \\
+  \aliases{\texttt{if \textit{c} then ${e}_{1}$ else ${e}_{2}$}} &= \aliases{e_{1}} \oplus \aliases{e_{2}} \\
+  \aliases{\textit{f}(e_{1}, \ldots, e_{n})} &= \aliases{e_{1}} \cup \ldots \cup \aliases{e_{n}}
+\end{align*}
+
+Pay particular attention to the case for function application - the
+sharing analysis is here very conservative, and assumes that the
+return value aliases the set of all aliases of its arguments.  This is
+a clear candidate for further improvement in the future.
+
+\subsection{Tracking uniqueness}
+\label{subsec:l0-tracking-uniqueness}
+
+If the type of an array is preceded by a single asterisk, it denotes
 that the array is unique - that it has only a single reference.  The
 source operand to a let-with \textit{must} be unique.  If it is not,
 it is reported as a type error.  Let-with and function calls are the
@@ -422,10 +501,8 @@ Checking that uniqueness invariants are being upheld is far subtler
 than normal type checking.  In particular, detailed sharing analysis
 has to be performed, in order to ensure that after an array $a$ is
 modified, it becomes an error to use any value that may refer to
-(parts of) the old value of the array.  In the following, let
-$\aliases{e}$ denote the variables that may alias $e$, where $e$ is an
-arbitrary expression (although most often a variable).  Whenever we
-consume a variable $a$, we mark as inaccessible all of its aliases.
+(parts of) the old value of the array.  Whenever we consume a variable
+$a$, we mark as inaccessible all of its aliases.
 
 \begin{alltt}
   let b = a in               // Now \(\texttt{b}\in\aliases{\texttt{a}}\).
@@ -433,15 +510,10 @@ consume a variable $a$, we mark as inaccessible all of its aliases.
   b                          // Error, because \(\texttt{b}\in\aliases{\texttt{a}}\)!
 \end{alltt}
 
-The details of how sharing is determined is described in further
-detail in section \ref{subsec:l0-sharing}.  For now, assume that the
-alias-sets are given, and let us take a closer look at the
-interactions between observing and consuming variables.
-
 A key principle is that of \textit{sequence points}, that lexically
-delimit the uses of variables.  As an exampe, assume that we
-are given a function \texttt{f} of type \texttt{*[int] -> int}.  That
-is, \texttt{f} consumes an array and returns an integer.  The expression
+delimit the uses of variables.  As an exampe, assume that we are given
+a function \texttt{f} of type \texttt{*[int] -> int}.  That is,
+\texttt{f} consumes an array and returns an integer.  The expression
 \begin{alltt}
   f(a) + a[i]
 \end{alltt}
@@ -472,12 +544,5 @@ consumed.  But in general, we might have an expression
 \end{alltt}
 where \texttt{e} is some arbitrary expression.  In this case, we mark
 as consumed all variables in $\aliases{\texttt{e}}$.
-
-At this point I realise that the simplified explanation is not
-adequate, and that I should have started out with describing sharing.
-Oh well.  Time to do it over again.
-
-\subsection{Sharing analysis}
-\label{subsec:l0-sharing}
 
 \end{document}
