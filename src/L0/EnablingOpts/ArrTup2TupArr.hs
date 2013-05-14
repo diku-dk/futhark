@@ -399,15 +399,11 @@ arr2tupExp (Concat arr1 arr2 tp pos) = do
     let tp' = toTupArrType tp
     arr1' <- arr2tupExp arr1
     arr2' <- arr2tupExp arr2
-    case (typeOf arr1', arr1', arr2') of
-        (Tuple {}, TupLit tups1 plit1, TupLit tups2 _) -> 
-            if typeOf arr1' /= typeOf arr2'
-            then badArr2TupM $ EnablingOptError pos ("In arr2tupExp of Concat, broken invariant: "
-                                                     ++" tuple types of arrays do not match! ")
-            else do reps <- mapM (\(x,y) -> do eltp <- elemType pos $ typeOf x
-                                               return $ Concat x y eltp pos) 
-                                 (zip tups1 tups2)
-                    return $ TupLit reps plit1
+    case (tp', arr1', arr2') of   -- typeOf arr1'
+        (Tuple tps, TupLit tups1 plit1, TupLit tups2 _) -> 
+            do  reps <- mapM (\(x,y,eltp) -> do return $ Concat x y eltp pos) 
+                             (zip3 tups1 tups2 tps)
+                return $ TupLit reps plit1
         (Tuple {}, _, _) -> 
             badArr2TupM $ EnablingOptError pos ("In arr2tupExp of Concat, broken invariant: "
                                                 ++" arg of tuple type NOT a tuple literal! ")
