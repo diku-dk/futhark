@@ -449,15 +449,16 @@ Now $\aliases{\texttt{if c then e1 else e2}} = \aliases{\texttt{e1}}
 \oplus \aliases{\texttt{e2}}$.  Note that $(\oplus, \emptyset)$
 constitutes a monoid - this is exploited in the L0 compiler.  We will
 often treat sharing information as a set and write things such as
-$\forall v\in\aliases{e}.p$ -- in this case, the set elements are all
-variables mentioned anywhere in the sharing information.
+$\forall v\in\aliases{e}.p$ -- in these cases, the set elements are
+all variables mentioned anywhere in the sharing information.
 
 Aliasing is reflexive -- if $v\in\aliases{e}$, then $\exists
 v'\in\aliases{e}\Rightarrow v\in\aliases{v}$.  Aliasing is mostly
-intuitive, but here's a few definitions describing how sharing is
+intuitive, but here's a few rules describing how sharing is
 propagated by various expressions.
 
 \begin{align*}
+  \aliases{\texttt{\textit{e}}} &= \emptyset & (\text{Whenever $e$ has a basic type}) \\
   \aliases{\texttt{copy(\textit{e})}} &= \emptyset \\
   \aliases{\texttt{if \textit{c} then ${e}_{1}$ else ${e}_{2}$}} &= \aliases{e_{1}} \oplus \aliases{e_{2}} \\
   \aliases{\textit{f}(e_{1}, \ldots, e_{n})} &= \aliases{e_{1}} \cup \ldots \cup \aliases{e_{n}}
@@ -519,9 +520,9 @@ a function \texttt{f} of type \texttt{*[int] -> int}.  That is,
 \end{alltt}
 is invalid because a consumption and observation of the same variable
 happens within the same \textit{sequence}.  It is valid for a sequence
-to contain multiple observations of the same variable, but if a given
+to contain multiple observations of the same variable, but if a
 variable is consumed, that must be the only occurence of the variable
-(and any of its aliases) within the sequence.  Binding constructs
+(or any of its aliases) within the sequence.  Binding constructs
 (lets, let-withs and loops) create sequence points that delimit
 sequences.  If we rewrite the expression to cordon the consumption
 into its own sequence, all will be well.
@@ -544,5 +545,34 @@ consumed.  But in general, we might have an expression
 \end{alltt}
 where \texttt{e} is some arbitrary expression.  In this case, we mark
 as consumed all variables in $\aliases{\texttt{e}}$.
+
+Constant, literal arrays are not considered unique, as the compiler
+may put them in read-only memory and return the same reference every
+time they are accessed.  For example, the following program is
+invalid.
+\begin{alltt}
+  fun [int] fibs(int i, int x) =
+    let a = \{1, 1, 2, 3, 5, 8, 13\} in
+    let a[i] = x in a
+\end{alltt}
+Since \texttt{a} is not unique, its use in the let-with is a type
+error.  However, we can use \texttt{copy} to create a unique duplicate
+of the array.
+\begin{alltt}
+  fun [int] fibs(int i, int x) =
+    let a = copy(\{1, 1, 2, 3, 5, 8, 13\}) in
+    let a[i] = x in a
+\end{alltt}
+
+If we have a function such as
+\begin{alltt}
+  fun int f(*[int] a, int x) = x
+\end{alltt}
+then it is not valid to curry it in such a way that we provide values
+for the consumed parameters.  For example, \texttt{map(f (a), b)}
+would be an error.  The reason for this is that \texttt{t} may be
+called an unbounded number of times during the mapping, but \texttt{a}
+can only be consumed once.
+
 
 \end{document}
