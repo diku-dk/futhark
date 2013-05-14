@@ -291,16 +291,11 @@ alternative m1 m2 = pass $ do
 
 aliasing :: Name -> Aliases -> TypeM a -> TypeM a
 aliasing name als tm = do
-  als' <- transitive als -- Checkme: 'transitive' might not be necessary.
   let name' = varAlias [name]
-      outedges = M.insert name als'
-      -- Edges from everything in als' to name:
-      inedges m =  foldl (\m' v -> M.insertWith (<>) v name' m') m $ aliased als'
+      outedges = M.insert name als
+      -- Edges from everything in als to name:
+      inedges m =  foldl (\m' v -> M.insertWith (<>) v name' m') m $ aliased als
   local (\env -> env { envAliases = inedges $ outedges $ envAliases env }) tm
-  where transitive (VarAlias names) =
-          mconcat <$> mapM aliases (S.toList names)
-        transitive (TupleAlias names) =
-          TupleAlias <$> mapM transitive names
 
 aliases :: Name -> TypeM Aliases
 aliases name = asks $ maybe name' reflexive . M.lookup name . envAliases
