@@ -323,7 +323,7 @@ letNormExp (Concat arr1 arr2 tp pos) = do
 
 letNormExp (Copy arr pos) = do
     arr' <- letNormExp arr >>= makeVarExpSubst "tmp_arr" pos
-    makeVarExpSubst "tmp_copy" pos (Size arr' pos)
+    makeVarExpSubst "tmp_copy" pos (Copy arr' pos)
 
 
 -----------------------------------------------
