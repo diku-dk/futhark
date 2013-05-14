@@ -714,7 +714,6 @@ compileExp place (LetWith name src idxs ve body _) = do
   name' <- new $ nameToString $ identName name
   src' <- lookupVar $ identName src
   etype <- typeToCType $ identType src
-  basetype <- typeToCType $ baseType $ identType src
   idxvars <- mapM (const $ new "letwith_index") [1..length idxs]
   let idxexps = map varExp idxvars
   idxs' <- zipWithM compileExp idxexps idxs
@@ -722,13 +721,6 @@ compileExp place (LetWith name src idxs ve body _) = do
   elty <- typeToCType $ typeOf ve
   ve' <- compileExpInPlace (varExp el) ve
   let idxdecls = [[C.cdecl|int $id:idxvar;|] | idxvar <- idxvars]
-      mknamearr =
-        case identType src of
-          Array {} ->
-            let alloc = allocArray (varExp name') (arrayShapeExp src' (identType src)) basetype
-                copy = arraySliceCopyStm [C.cexp|$id:name'.data|] src' (identType src) 0
-            in [C.cstm|{$stm:alloc $stm:copy}|]
-          _ -> [C.cstm|$id:name' = $exp:src';|]
       (elempre, elempost) =
         case typeOf ve of
           Array {} -> (indexArrayElemStm (varExp el) (varExp name') (identType src) idxexps,
@@ -743,7 +735,7 @@ compileExp place (LetWith name src idxs ve body _) = do
                $ty:etype $id:name';
                $ty:elty $id:el;
                $decls:idxdecls
-               $stm:mknamearr
+               $id:name' = $exp:src';
                $stms:idxs'
                $stm:(boundsCheckStm (varExp name') idxexps)
                $stm:elempre
