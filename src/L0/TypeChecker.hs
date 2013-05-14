@@ -64,6 +64,8 @@ data TypeError = TypeError SrcLoc String
                -- role of the type.  The last type is the new derivation.
                | CurriedConsumption Name SrcLoc
                -- ^ A function is being curried with an argument to be consumed.
+               | BadLetWithValue SrcLoc
+               -- ^ The new value for an array slice in let-with is aliased to the source.
 
 instance Show TypeError where
   show (TypeError pos msg) =
@@ -124,6 +126,9 @@ instance Show TypeError where
   show (CurriedConsumption fname loc) =
     "Function " ++ nameToString fname ++
     " curried over a consuming parameter at " ++ locStr loc ++ "."
+  show (BadLetWithValue loc) =
+    "New value for elements in let-with shares data with source array at " ++
+    locStr loc ++ ".  This is illegal, as it prevents in-place modification."
 
 -- | A tuple of a return type and a list of argument types.
 type FunBinding = (Type, [Type])
@@ -597,7 +602,9 @@ checkExp' (LetWith (Ident dest destt destpos) src idxes ve body pos) = do
   case peelArray (length idxes) (identType src') of
     Nothing -> bad $ IndexingError (arrayDims $ identType src') (length idxes) (srclocOf src)
     Just elemt ->
-      sequentially (require [elemt] =<< checkExp ve) $ \ve' -> do
+      sequentially (require [elemt] =<< checkExp ve) $ \ve' dflow -> do
+        when (identName src `elem` aliased (usageAliasing dflow)) $
+          bad $ BadLetWithValue pos
         (scope, _) <- checkBinding (Id dest') (Var src') mempty
         body' <- consuming (srclocOf src) (identName src') $ scope $ checkExp body
         return $ LetWith dest' src' idxes' ve' body' pos
@@ -933,10 +940,10 @@ checkPolyBinOp op tl e1 e2 t pos = do
   t'' <- checkAnnotation pos "result" t t'
   return $ BinOp op e1' e2' t'' pos
 
-sequentially :: TypeM a -> (a -> TypeM b) -> TypeM b
+sequentially :: TypeM a -> (a -> Dataflow -> TypeM b) -> TypeM b
 sequentially m1 m2 = do
   (a, m1flow) <- collectDataflow m1
-  (b, m2flow) <- collectDataflow $ m2 a
+  (b, m2flow) <- collectDataflow $ m2 a m1flow
   tell Dataflow {
            usageAliasing = usageAliasing m2flow
          , usageOccurences = usageOccurences m1flow `seqUsages` usageOccurences m2flow
@@ -949,7 +956,7 @@ checkBinding :: TypeBox tf =>
 checkBinding pat e dflow = do
   (pat', (scope, _)) <-
     runStateT (checkBinding' pat (typeOf e) (usageAliasing dflow)) (id, [])
-  return (\m -> sequentially (tell dflow) (const $ scope m), pat')
+  return (\m -> sequentially (tell dflow) (const . const $ scope m), pat')
   where checkBinding' (Id (Ident name namet pos)) t a = do
           t' <- lift $ checkAnnotation (srclocOf pat) (nameToString name) namet t
           add (Ident name t' pos) a
