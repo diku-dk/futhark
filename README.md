@@ -49,3 +49,8 @@ standard input.
 
 When the program finishes, the return value of main() will be printed
 on standard output.
+
+Testing
+=======
+
+Run the `data/runtests.sh` script to check how well we're doing.
