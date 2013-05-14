@@ -147,7 +147,8 @@ fun real value(real s0, real strike, real t, real alpha, real nu, real beta) =
     let (myDy, myDyy) = initOperator(myY) in
     let myResult = setPayoff(strike, myX, myY) in
     let indices = map(fn int (int i) => numT-2-i,  iota(numT-1)) in
-    loop ((myResult, myMuX, myVarX, myMuY, myVarY)) =
+    //loop ((myResult, myMuX, myVarX, myMuY, myVarY)) =
+    loop (myResult) =
         for i < numT - 1 do
             let i = numT-2-i in
             let (myMuX, myVarX, myMuY, myVarY) =
@@ -156,7 +157,8 @@ fun real value(real s0, real strike, real t, real alpha, real nu, real beta) =
             let myResult = rollback(myX, myY, myTimeline, copy(myResult),
                                     myMuX, myDx, myDxx, myVarX,
                                     myMuY, myDy, myDyy, myVarY, i) in
-            (myResult, myMuX, myVarX, myMuY, myVarY) in
+            //(myResult, myMuX, myVarX, myMuY, myVarY) in
+            myResult in
     myResult[myXindex,myYindex]
 
 fun [real] main () =
