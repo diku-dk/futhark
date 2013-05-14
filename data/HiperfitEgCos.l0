@@ -123,34 +123,36 @@ fun [[real]] rollback
     let v = explicitY(numX, numY, 0.0, myResult, myMuY, myDy, myDyy, myVarY) in
     let u = map(fn [real] ([real] us, [real] vs) => map(op +, zip(us, vs)),
                 zip(u, transpose(v))) in
-    let u = map(fn [real] (([real], int) t) =>
-                let (uj, j) = t in
-                let (a,b,c) = unzip(map(fn (real,real,real) (int i) =>
-                                        let (dx0,  dx1,  dx2 ) = myDx [i] in
-                                        let (dxx0, dxx1, dxx2) = myDxx[i] in
-                                        (~0.5*(myMuX[i,j]*dx0 + 0.5*myVarX[i,j]*dxx0),
-                                         dtInv - 0.5*(myMuX[i,j]*dx1 + 0.5*myVarX[i,j]*dxx1),
-                                         ~0.5*(myMuX[i,j]*dx2+0.5*myVarX[i,j]*dxx2)),
-                                         iota(numX))) in
+    let u = map(fn [real] (([real],[(real,real,real)],[(real,real,real)],[real],[real]) t) =>
+                let (uj, myDx, myDxx, myMuX, myVarX) = t in
+                let (a,b,c) = unzip(map(fn (real,real,real) (((real,real,real),(real,real,real),real,real) tt) =>
+                                        let (myDx, myDxx, myMuX, myVarX) = tt in
+                                        let (dx0,  dx1,  dx2 ) = myDx  in
+                                        let (dxx0, dxx1, dxx2) = myDxx in
+                                        (~0.5*(myMuX*dx0 + 0.5*myVarX*dxx0),
+                                         dtInv - 0.5*(myMuX*dx1 + 0.5*myVarX*dxx1),
+                                         ~0.5*(myMuX*dx2+0.5*myVarX*dxx2))
+                                    , zip(myDx, myDxx, myMuX, myVarX) )) in
                 let (uj, yy) = tridag(a,b,c,uj,numX) in uj,
-            zip(u, iota(numY))) in
+            zip(u, replicate(numY, myDx), replicate(numY, myDxx), transpose(myMuX), transpose(myVarX))) in
     let myResult = 
-            map(fn [real] (([real],[real],int) t) =>
-                let (ui, vi, i) = t in
-                let (a,b,c) = unzip(map(fn (real,real,real) (int j) =>
-                                        let (dy0,  dy1,  dy2 ) = myDy [j] in     
-                                        let (dyy0, dyy1, dyy2) = myDyy[j] in
-                                        (~0.5*(myMuY[i,j]*dy0+0.5*myVarY[i,j]*dyy0),
-                                         dtInv - 0.5*(myMuY[i,j]*dy1+0.5*myVarY[i,j]*dyy1),
-                                         ~0.5*(myMuY[i,j]*dy2+0.5*myVarY[i,j]*dyy2))
-                                    , iota(numY))) in
+            map(fn [real] (([real],[real],[(real,real,real)],[(real,real,real)],[real],[real]) t) =>
+                let (ui, vi, myDy, myDyy, myMuY, myVarY) = t in
+                let (a,b,c) = unzip(map(fn (real,real,real) (((real,real,real),(real,real,real),real,real) tt) =>
+                                        let (myDy, myDyy, myMuY, myVarY) = tt in
+                                        let (dy0,  dy1,  dy2 ) = myDy  in     
+                                        let (dyy0, dyy1, dyy2) = myDyy in
+                                        (~0.5*(myMuY*dy0+0.5*myVarY*dyy0),
+                                         dtInv - 0.5*(myMuY*dy1+0.5*myVarY*dyy1),
+                                         ~0.5*(myMuY*dy2+0.5*myVarY*dyy2))
+                                    , zip(myDy, myDyy, myMuY, myVarY))) in
                 let y = map(fn real ((real,real) uv) =>
                             let (u,v) = uv in 
                             dtInv * u - 0.5 * v
                         , zip(ui,vi)) in
                 let (ri, yy) = tridag(a,b,c,y,numY) in
                     ri 
-            , zip(transpose(u), v, iota(numX))) 
+            , zip(transpose(u), v, replicate(numX, myDy), replicate(numX, myDyy), myMuY, myVarY)) 
     in myResult
 
 fun real value(real s0, real strike, real t, real alpha, real nu, real beta) =
