@@ -62,6 +62,8 @@ data TypeError = TypeError SrcLoc String
                -- ^ One of the type annotations fails to match with the
                -- derived type.  The string is a description of the
                -- role of the type.  The last type is the new derivation.
+               | CurriedConsumption Name SrcLoc
+               -- ^ A function is being curried with an argument to be consumed.
 
 instance Show TypeError where
   show (TypeError pos msg) =
@@ -119,6 +121,9 @@ instance Show TypeError where
     "Annotation of \"" ++ desc ++ "\" type of expression at " ++
     locStr loc ++ " is " ++ ppType expected ++
     ", but derived to be " ++ ppType got ++ "."
+  show (CurriedConsumption fname loc) =
+    "Function " ++ nameToString fname ++
+    " curried over a consuming parameter at " ++ locStr loc ++ "."
 
 -- | A tuple of a return type and a list of argument types.
 type FunBinding = (Type, [Type])
@@ -1036,6 +1041,9 @@ checkLambda (CurryFun fname curryargexps rettype pos) args = do
                   body = Apply fname (map Var params) rettype' pos
               in checkLambda tupfun args
           | otherwise -> do
+              case find (unique . snd) $ zip curryargexps paramtypes of
+                Just (e, _) -> bad $ CurriedConsumption fname $ srclocOf e
+                _           -> return ()
               checkApply Nothing paramtypes (curryargexpts++args) pos
               return $ CurryFun fname curryargexps' rettype' pos
 
