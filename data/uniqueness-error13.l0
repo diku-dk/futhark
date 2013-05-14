@@ -1,0 +1,9 @@
+// This test checks whether attempts to use an array being modified is
+// properly caught.
+
+fun int main() =
+    let n = 10 in
+    let a = replicate(n,iota(n)) in
+    let i = 0 in
+    let a[i] = map(op + (1), a[i]) in // Bad, because it aliases a.
+    0
