@@ -189,7 +189,7 @@ l0c config filename srccode =
           res <- lift $ runErrorT $ passOp pass prog'
           case res of
             Left err ->
-              throwError $ "Error during pass '" ++ passName pass ++ "':" ++ err
+              throwError $ "Error during pass '" ++ passName pass ++ "':\n" ++ err
             Right prog'' ->
               case checkProg' prog'' of
                 Left err ->
