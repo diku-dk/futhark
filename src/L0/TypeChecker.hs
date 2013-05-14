@@ -534,20 +534,34 @@ checkExp' (Apply fname args t pos)
   t' <- checkAnnotation pos "return" t Bool
   return $ Apply fname args' t' pos
 
-checkExp' (Apply fname args t pos) = do
+checkExp' (Apply fname args rettype pos) = do
   bnd <- asks $ M.lookup fname . envFtable
   case bnd of
     Nothing -> bad $ UnknownFunctionError fname pos
-    Just (rettype, paramtypes) -> do
-      rettype' <- checkAnnotation pos "return" t rettype
-      args' <- forM (zip args $ cycle paramtypes) $ \(arg, paramt) ->
-                 if unique paramt then do
-                   (arg', dflow) <- collectDataflow $ checkExp arg
-                   consume (srclocOf arg) $ usageAliasing dflow
-                   return arg'
-                 else checkExp arg
+    Just (ftype, paramtypes) -> do
+      rettype' <- checkAnnotation pos "return" rettype ftype
+      args' <- forM (zip args $ cycle paramtypes) $ \(arg, paramt) -> do
+                 (arg', dflow) <- collectDataflow $ checkExp arg
+                 occurs1 <- checkOccurences $ usageOccurences dflow
+                 alias $ VarAlias $ S.fromList $ aliased $ usageAliasing dflow
+                 let occurs2 = consumeArg (srclocOf arg) paramt $ usageAliasing dflow
+                 tell $ mempty { usageOccurences = M.unionWith max occurs1 occurs2 }
+                 return arg'
       checkApply (Just fname) paramtypes (map typeOf args') pos
       return $ Apply fname args' rettype' pos
+  where -- Check if an argument of the given type consumes anything.
+        consumes (Array _ _ Unique) = True
+        consumes (Tuple ets) = any consumes ets
+        consumes _ = False
+
+        -- Create usage information, given argument type and aliasing
+        -- information.
+        consumeArg loc (Tuple ets) (TupleAlias alss) =
+          mconcat $ zipWith (consumeArg loc) ets alss
+        consumeArg loc t als
+          | consumes t =
+            mconcat $ map (`M.singleton` [Consumed loc]) $ aliased als
+          | otherwise = mempty
 
 checkExp' (LetPat pat e body pos) = do
   (e', dataflow) <- collectDataflow $ checkExp e
