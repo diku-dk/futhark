@@ -154,6 +154,10 @@ aliased :: Aliases -> [Name]
 aliased (VarAlias names) = S.toList names
 aliased (TupleAlias ass) = nub $ concatMap aliased ass
 
+-- | Create an aliasing set given a list of names.
+varAlias :: [Name] -> Aliases
+varAlias = VarAlias . S.fromList
+
 -- | A pair of a variable table and a function table.  Type checking
 -- happens with access to this environment.  The function table is
 -- only initialised at the very beginning, but the variable table will
@@ -278,7 +282,7 @@ alternative m1 m2 = pass $ do
 aliasing :: Name -> Aliases -> TypeM a -> TypeM a
 aliasing name als tm = do
   als' <- transitive als -- Checkme: 'transitive' might not be necessary.
-  let name' = VarAlias (S.singleton name)
+  let name' = varAlias [name]
       outedges = M.insert name als'
       -- Edges from everything in als' to name:
       inedges m =  foldl (\m' v -> M.insertWith (<>) v name' m') m $ aliased als'
@@ -290,7 +294,7 @@ aliasing name als tm = do
 
 aliases :: Name -> TypeM Aliases
 aliases name = asks $ maybe name' reflexive . M.lookup name . envAliases
-  where name' = VarAlias $ S.singleton name
+  where name' = varAlias [name]
         reflexive als | VarAlias _ <- als = als <> name'
                       | otherwise         = als
 
@@ -540,13 +544,19 @@ checkExp' (Apply fname args rettype pos) = do
     Nothing -> bad $ UnknownFunctionError fname pos
     Just (ftype, paramtypes) -> do
       rettype' <- checkAnnotation pos "return" rettype ftype
+
       args' <- forM (zip args $ cycle paramtypes) $ \(arg, paramt) -> do
                  (arg', dflow) <- collectDataflow $ checkExp arg
                  occurs1 <- checkOccurences $ usageOccurences dflow
-                 alias $ VarAlias $ S.fromList $ aliased $ usageAliasing dflow
+
                  let occurs2 = consumeArg (srclocOf arg) paramt $ usageAliasing dflow
-                 tell $ mempty { usageOccurences = M.unionWith max occurs1 occurs2 }
+                     als = varAlias $ aliased $ usageAliasing dflow
+
+                 tell $ mempty
+                        { usageAliasing = als
+                        , usageOccurences = M.unionWith max occurs1 occurs2 }
                  return arg'
+
       checkApply (Just fname) paramtypes (map typeOf args') pos
       return $ Apply fname args' rettype' pos
   where -- Check if an argument of the given type consumes anything.
