@@ -576,3 +576,56 @@ can only be consumed once.
 
 
 \end{document}
+
+% Some very quick thoughts:
+
+% -- snipets examples for loops with let-with construct, e.g., from
+% our benchmarks
+
+% -- show explicitly the equivalence between loop and the recursive
+% function
+
+% -- Uniqueness: requires more work. need to think more on this.
+
+%     -- But I would start by introducing aliasing/sharing (very)
+%     informally and then giving the uniqueness semantics from the
+%     user's perspective.  (Because the discussion gives the feeling
+%     the semantics is actually given by the implementation.)  It is
+%     not so clear to me what it means when the return type of a
+%     function is declared unique.  E.g., `replace(replace(a, i1, x),
+%     i2, y)' makes sense but feels like an implementation hack
+%     because the slightly modified program below is illegal (and the
+%     explanation might give the feeling that it is legal)
+
+%                     let a0 = replace(a, i1, x) in
+%                     let b   = a0 in
+%                     let a1 = replace(a0, i2, y) in
+%                     f(a1, b)
+
+%     I would assume the informal semantics of the
+%     unique return type is something like: "on any
+%     execution path following the call, it cannot
+%     exist a variable defined before the call which
+%     aliases the returned expression AND which is
+%     used after the call.  The unique types mainly
+%     allow a modular implementation, i.e.,
+%     intraprocedural analysis. E.g., for the unique
+%     result type, the alias for a0 at the first call
+%     site is empty, and becomes {b} at the second
+%     call site. It follows that an error is
+%     discovered at last line since the unique formal
+%     argument of replace requires that no variables
+%     aliased with the actual-arg expression can be
+%     used after the call."
+
+%     Not sure that I like the uniqueness for constant array literals,
+%     but that is less important.
+
+%     -- After the consistent informal/semantics section you give the
+%     complete story: try to synthesize the full implementation (i
+%     don't think you can separate aliasing from unique types as the
+%     unique types are mainly a device to simplify aliasing analysis
+%     in our case).  So why not give a case-base analysis of how the
+%     aliasing info is built.  Then maybe you manage to formalize it,
+%     i.e., proof that the check is a sufficient condition for the
+%     defined semantics to hold.
