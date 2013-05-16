@@ -280,7 +280,8 @@ the language.
   \item[\texttt{\textit{x} \textbf{bitop} \textit{y}}] \hfill\\
     Evaluate the binary operator on its operands, which must both be
     of type \intt.  The following operators are supported:
-    \texttt{\^}, \texttt{\&}, \texttt{|}, \texttt{>>}, \texttt{<<}.
+    \texttt{\^}, \texttt{\&}, \texttt{|}, \texttt{>>}, \texttt{<<},
+        i.e., bitwise xor, and, or, and shift right and left.  
 
   \item[\texttt{\textit{x} \&\& \textit{y}}]\hfill\\
     Short-circuiting conjunction, both operands must be of type \boolt.
@@ -309,6 +310,15 @@ the language.
   \item[\texttt{scan(\textit{f}, \textit{x}, \textit{a})}]\hfill\\
     Inclusive prefix-scan.
 
+  \item[\texttt{zip($a_1, \ldots, a_n$)}]\hfill\\
+    Zips together the elements of the outer dimensions of arrays $a_1, \ldots, a_n$.
+    Static or runtime check is required to check that the sizes of
+    the outermost dimension of arrays $a_1, \ldots, a_n$ are the same.
+    If this invariant does not hold program execution stops with an error.
+  \item[\texttt{unzip($a$)}]\hfill\\
+    If \texttt{TYPEOF(}$a$\texttt{)} is $[(t_1, \ldots, t_n)]$ then
+    the result is a tuple of $n$ arrays, i.e., $([t_1], \ldots, [t_n])$,
+    otherwise error.  
   \item[\texttt{filter(\textit{f}, \textit{a})}]\hfill\\
     Remove all those elements of \textit{a} that do not satisfy the
     predicate \textit{f}.
@@ -410,12 +420,13 @@ transformation is not trivially an isomorphism.
 Consider the type \texttt{[([int], [real])]}, which is transformed
 into \texttt{([[int]], [[real]])}.  These two types are not
 isomorphic, as the latter has more stringent demands as to the
-fullness of arrays.  For example, \texttt{{({1}, {1.0}), ([2,3],
-    {2.0})}} is a value of the former, but the corresponding
-transformed value, \texttt{({{1}, {2, 3}}, {{1.0}, {2.0}})} is not a
+fullness of arrays.  For example, \texttt{\{(\{1\}, \{1.0\}), (\{2,3\},
+    \{2.0\})\}} is a value of the former, but the first element of
+the corresponding transformed tuple 
+\texttt{(\{\{1\}, \{2, 3\}\}, \{\{1.0\}, \{2.0\}\})} is not a
 full array.  Hence, when determining whether a program generates full
 arrays, we must hence look at the \textit{transformed} values - in a
-sence, the fullness requirement ``transcends'' the tuples.
+sense, the fullness requirement ``transcends'' the tuples.
 
 \section{Uniqueness types}
 \label{sec:l0-uniqueness-types}
