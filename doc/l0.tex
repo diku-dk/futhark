@@ -125,7 +125,7 @@ of a tuple.
 
 Function calls are written as the function name followed by the
 arguments enclosed in parentheses.  The built-in second-order array
-combinators (\emph{SOAC}s), such as {\tt map}, {\tt reduce}, {\tt scan}, etc., 
+combinators (\emph{SOAC}s), such as \texttt{map}, \texttt{reduce}, \texttt{scan}, etc., 
 are written much like a function call,
 except that one or more of a SOACs arguments may be a \emph{function
   reference}.  A function reference is an anonymous function
@@ -192,7 +192,18 @@ has the following semantics:
 The purpose of \texttt{loop} is partly to render some sequential
 computations slightly more convenient, partly to express certain loop
 optimisations in the compiler.  Semantically, it is completely
-equivalent to the corresponding tail-recursive function.
+equivalent to the call to its corresponding tail-recursive 
+function below:
+\begin{alltt}
+    let {\em pat} = tailrec(0, \emph{bound}, \emph{initial}, \emph{loopinv\_vars}) in \emph{body}
+  WHERE
+    fun TYPEOF(\emph{loopbody}) tailrec (int \emph{bound}, int {\em i}, 
+                                  TYPEOF(\emph{loopbody}) \emph{pat}, 
+                                  TYPEOF(\emph{loopinv_vars}) \emph{ro\_vars}) =
+        if (\emph{i} < \emph{bound}) 
+        then \emph{pat}
+        else tailrec(\emph{bound}, {\em i}+1, \emph{loopbody}, \emph{ro\_vars})
+\end{alltt}
 
 General modification of array elements is done using the
 \emph{let-with} construct.  In its most general form, it looks as
@@ -210,7 +221,7 @@ in that case, \textit{value} must be an array of the proper size.  As
 an example, here's how we could replace an entire row of an
 $n\times3$ array.
 \begin{alltt}
-  let b = a with [3] <- {1,2,3} in b
+  let b = a with [3] <- \{1,2,3\} in b
 \end{alltt}
 Whenever $\textit{dest} = \textit{src}$, we can write
 \begin{alltt}
@@ -219,6 +230,30 @@ Whenever $\textit{dest} = \textit{src}$, we can write
 as a shortcut.  Let-with has some unusual restrictions to permit
 in-place modification of the \textit{src} array, as described in
 section \ref{sec:l0-uniqueness-types}.
+
+For example, the loop given below implements the ``imperative'' version of
+matrix multiplication of two $M\times M$ matrices.
+%
+Note that array invariants, such as index within bounds for both 
+read and write accesses and the full array property, are to be verified 
+either statically or at runtime (whenever a static result cannot be inferred).
+
+\begin{alltt}
+fun *[[int]] matmultImp(int N, [[int]] a, [[int]] b) =
+    let res = replicate(N, iota(N)) in
+    loop (res) = for i < N do
+        loop (res) = for j < N do
+            let partsum = 
+                let res = 0 in
+                loop (res) = for k < N do
+                    let res = res + a[i,k] * b[k,j]
+                    in  res
+                in res
+            in let res[i,j] = partsum in res
+        in res
+    in res
+\end{alltt}
+
 
 \section{Language reference}
 \label{sec:l0-reference}
