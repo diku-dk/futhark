@@ -443,13 +443,11 @@ data Exp ty = Literal Value SrcLoc
             -- accept curried and anonymous
             -- functions as (first) params
             -----------------------------------------------------
-            | Map2 (Lambda ty) [Exp ty] ty ty SrcLoc
+            | Map2 (Lambda ty) [Exp ty] ty SrcLoc
              -- @map(op +(1), {1,2,..,n}) = {2,3,..,n+1}@
              -- 2nd arg is either a tuple of multi-dim arrays 
              --   of basic type, or a multi-dim array of basic type.
-             -- 3st arg is the  input-array element type
-             --   (either a tuple or an array)
-             -- 4th arg is the output-array element type
+             -- 3st arg is the  input-array row type
              --   (either a tuple or an array)
 
             | Reduce2 (Lambda ty) (Exp ty) [Exp ty] ty SrcLoc
@@ -494,7 +492,7 @@ instance Located (Exp ty) where
   locOf (Copy _ pos) = locOf pos
   locOf (DoLoop _ _ _ _ _ _ pos) = locOf pos
   -- locOf for soac2 (Cosmin)
-  locOf (Map2 _ _ _ _ pos) = locOf pos
+  locOf (Map2 _ _ _ pos) = locOf pos
   locOf (Reduce2 _ _ _ _ pos) = locOf pos
   locOf (Scan2 _ _ _ _ pos) = locOf pos
   locOf (Filter2 _ _ _ pos) = locOf pos
@@ -542,8 +540,13 @@ instance Typed (Exp Type) where
   typeOf (Copy e _) = typeOf e `withUniqueness` Unique
   typeOf (DoLoop _ _ _ _ _ body _) = typeOf body
 --- Begin SOAC2: (Cosmin) ---
-  typeOf (Map2 _ _ _ (Elem (Tuple tps)) _) = Elem $ Tuple $ map (\x -> arrayType 1 x Unique) tps
-  typeOf (Map2 _ _ _ tp _) = arrayType 1 tp Unique
+  typeOf (Map2 f _ _ _) = 
+    let ftp = typeOf f in
+    case ftp of
+        Elem (Tuple tps) -> Elem $ Tuple $ map (\x -> arrayType 1 x (uniqueProp x)) tps
+        _ -> arrayType 1 ftp (uniqueProp ftp)
+  --typeOf (Map2 _ _ _ (Elem (Tuple tps)) _) = Elem $ Tuple $ map (\x -> arrayType 1 x Unique) tps
+  --typeOf (Map2 _ _ _ tp _) = arrayType 1 tp Unique
   typeOf (Reduce2 fun _ _ _ _) = typeOf fun
   typeOf (Scan2 _ _ _ (Elem (Tuple tps)) _) = Elem $ Tuple $ map (\x -> arrayType 1 x Unique) tps
   typeOf (Scan2 _ _ _ tp _) = arrayType 1 tp Unique
@@ -560,6 +563,9 @@ instance Typed (Exp Type) where
       in case fnrtp of
           Elem (Tuple tps) -> Elem $ Tuple $ map (\x -> arrayType inpdim x Unique) tps
           _ -> arrayType inpdim fnrtp Unique
+
+uniqueProp :: Typed t => t -> Uniqueness
+uniqueProp tp = if uniqueOrBasic tp then Unique else Nonunique
 --- End SOAC2: (Cosmin) ---
 
 -- | Eagerly evaluated binary operators.  In particular, the
@@ -751,14 +757,19 @@ ppExp d (DoLoop mvpat mvexp i n loopbody letbody _) =
     spaces (d+1) ++ ppExp (d+1) loopbody ++ "\n" ++ spaces d ++
     "in " ++ ppExp d letbody
 --- Cosmin added ppExp for soac2
-ppExp d (Map2 fun lst _ elrtp _) = 
-    let (pref, suff)  = case unboxType elrtp of
-                            Just (Elem (Tuple {})) -> (" unzip ( ", " ) ")
+ppExp d (Map2 fun lst _ _) = 
+    let (pref, suff)  = case unboxType (mbTypeOf fun) of
+                            Just(Elem (Tuple {})) -> (" unzip ( ", " ) ")
                             _ -> ("","")
         mid = case lst of
                 [x] -> ppExp (d+1) x
                 _ -> "zip ( " ++ intercalate ", " (map (ppExp (d+1) ) lst) ++ " ) "
     in pref ++ " map ( " ++ ppLambda (d+1) fun ++ ", " ++ mid ++ suff ++ " ) "
+    where
+        mbTypeOf :: TypeBox ty => Lambda ty -> ty
+        mbTypeOf (AnonymFun _ _ t _) = boxType t
+        mbTypeOf (CurryFun _ _ t _)  = t
+
 --
 ppExp d (Reduce2 fun el [arr] _ _) =
   " reduce ( " ++ ppLambda (d+1) fun ++ ", " ++ ppExp (d+1) el ++ ", " ++ ppExp (d+1) arr ++ " ) "

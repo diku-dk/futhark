@@ -369,10 +369,10 @@ letNormExp (Redomap lam1 lam2 ne arr tp1 tp2 pos) = do
 ---- SOAC2 (Cosmin) ----
 ------------------------
 
-letNormExp (Map2 lam arr tp1 tp2 pos) = do
+letNormExp (Map2 lam arr tp1 pos) = do  -- tp2 
     lam'  <- letNormLambda lam
     arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
-    makeVarExpSubst "tmp_map2" pos (Map2 lam' arr' tp1 tp2 pos)
+    makeVarExpSubst "tmp_map2" pos (Map2 lam' arr' tp1 pos) -- tp2 
 
 letNormExp (Mapall2 lam arr tp1 tp2 pos) = do
     lam'  <- letNormLambda lam
