@@ -84,7 +84,7 @@ interpret prog =
                   Right v -> return v
       let (res, trace) = runFun defaultEntryPoint args prog
       forM_ trace $ \(loc, what) ->
-        putStrLn $ locStr loc ++ ": " ++ what
+        hPutStrLn stderr $ locStr loc ++ ": " ++ what
       case res of
         Left err -> do hPutStrLn stderr $ "Interpreter error:\n" ++ show err
                        exitWith $ ExitFailure 2
