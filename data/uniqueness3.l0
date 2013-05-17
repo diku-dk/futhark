@@ -1,4 +1,5 @@
-fun ([real],[real]) main(int n) =
+fun ([real],[real]) main() =
+  let n = 2 in
   let arrs = (replicate(n, 0.0), replicate(n, 0.0)) in
   let (arr1, arr2) = arrs in
   let arr1[0] = 1.0 in

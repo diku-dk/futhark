@@ -16,19 +16,36 @@ tests() {
 #    echo $testdir/CalibLexiFi.l0
 }
 
-for test in $(tests); do
+# You can control exactly which tests to run by passing their names as
+# arguments on the command line.
+if [ $# -gt 0 ]; then
+    tests=$*
+else
+    tests=$(tests)
+fi
+
+for test in $tests; do
     infile=$(echo "$test" | sed 's/l0$/in/')
     outfile=$(echo "$test" | sed 's/l0$/out/')
+    if ! [ -f "$test" ]; then
+        echo "$test not found."
+        exit 1
+    fi
     if [ -f "$infile" ]; then
         # There is an .in-file, so we assume the test program must be correct.
         if [ -f "$outfile" ]; then
             # There is even an .out-file, so it must have some expected output.
-            echo "Testing $test (expecting execution)."
-            echo "cannot test output yet."
+            testoutfile=$(echo "$test" | sed 's/l0$/testout/')
+            echo "Testing $test (expecting correct execution)."
+            if cat "$infile" | $l0c -iu "$test" > "$testoutfile"; then
+                if ! cmp -s "$outfile" "$testoutfile"; then
+                    echo "$testoutfile and $outfile do not match."
+                fi
+            fi
         else
             # No output file, so just check whether it is type-correct.
             echo "Testing $test (expecting type-correctness)."
-            $l0c "$test" < "$infile" > /dev/null;
+            $l0c "$test" < "$infile" > /dev/null
         fi
     else
         # No .in-file, so this is a negative test that must result in
