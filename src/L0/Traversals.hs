@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleInstances, RankNTypes #-}
 -----------------------------------------------------------------------------
 -- |
 --
@@ -20,6 +19,9 @@
 -- A traversal of the L0 syntax tree is expressed as a tuple of
 -- functions expressing the operations to be performed on the various
 -- types of nodes.
+--
+-- The "L0.Renamer" and "L0.Untrace" modules are simple examples of
+-- how to use this facility.
 --
 -----------------------------------------------------------------------------
 module L0.Traversals
@@ -58,7 +60,9 @@ import qualified Data.Set as S
 
 import L0.AbSyn
 
--- | Express a mapping operation on a syntax tree.
+-- | Express a monad mapping operation on a syntax node.  Each element
+-- of this structure expresses the operation to be performed on a
+-- given child.
 data Mapper ty m = Mapper {
     mapOnExp :: Exp ty -> m (Exp ty)
   , mapOnType :: ty -> m ty
@@ -68,6 +72,7 @@ data Mapper ty m = Mapper {
   , mapOnValue :: Value -> m Value
   }
 
+-- | A mapper that simply returns the tree verbatim.
 identityMapper :: Monad m => Mapper ty m
 identityMapper = Mapper {
                    mapOnExp = return
@@ -78,6 +83,10 @@ identityMapper = Mapper {
                  , mapOnValue = return
                  }
 
+-- | Map a monadic action across the immediate children of an
+-- expression.  Importantly, the 'mapOnExp' action is not invoked for
+-- the expression itself, and the mapping does not descend recursively
+-- into subexpressions.  The mapping is done left-to-right.
 mapExpM :: (Applicative m, Monad m) => Mapper ty m -> Exp ty -> m (Exp ty)
 mapExpM tv (Var ident) =
   pure Var <*> mapOnIdent tv ident
@@ -192,9 +201,11 @@ mapExpM tv (Redomap2 redfun mapfun accexp arrexps intype outtype loc) =
        mapOnExp tv accexp <*> mapM (mapOnExp tv) arrexps <*>
        mapOnType tv intype <*> mapOnType tv outtype <*> pure loc
 
+-- | Like 'mapExp', but in the 'Identity' monad.
 mapExp :: Mapper ty Identity -> Exp ty -> Exp ty
 mapExp m = runIdentity . mapExpM m
 
+-- | Reification of a left-reduction across a syntax tree.
 data Folder ty a m = Folder {
     foldOnExp :: a -> Exp ty -> m a
   , foldOnType :: a -> ty -> m a
@@ -204,6 +215,7 @@ data Folder ty a m = Folder {
   , foldOnValue :: a -> Value -> m a
   }
 
+-- | A folding operation where the accumulator is returned verbatim.
 identityFolder :: Monad m => Folder ty a m
 identityFolder = Folder {
                    foldOnExp = const . return
@@ -214,6 +226,10 @@ identityFolder = Folder {
                  , foldOnValue = const . return
                  }
 
+-- | Perform a left-reduction across the immediate children of an
+-- expression.  Importantly, the 'foldOnExp' action is not invoked for
+-- the expression itself, and the reduction does not descend recursively
+-- into subexpressions.  The reduction is done left-to-right.
 foldExpM :: (Monad m, Functor m) => Folder ty a m -> a -> Exp ty -> m a
 foldExpM f x e = execStateT (mapExpM m e) x
   where m = Mapper {
@@ -229,9 +245,13 @@ foldExpM f x e = execStateT (mapExpM m e) x
           put =<< lift (op f v k)
           return k
 
+-- | As 'foldExpM', but in the 'Identity' monad.
 foldExp :: Folder ty a Identity -> a -> Exp ty -> a
 foldExp m x = runIdentity . foldExpM m x
 
+-- | Express a monad expression on a syntax node.  Each element of
+-- this structure expresses the action to be performed on a given
+-- child.
 data Walker ty m = Walker {
     walkOnExp :: Exp ty -> m ()
   , walkOnType :: ty -> m ()
@@ -241,6 +261,7 @@ data Walker ty m = Walker {
   , walkOnValue :: Value -> m ()
   }
 
+-- | A no-op traversal.
 identityWalker :: Monad m => Walker ty m
 identityWalker = Walker {
                    walkOnExp = const $ return ()
@@ -251,6 +272,11 @@ identityWalker = Walker {
                  , walkOnValue = const $ return ()
                  }
 
+-- | Perform a monadic action on each of the immediate children of an
+-- expression.  Importantly, the 'walkOnExp' action is not invoked for
+-- the expression itself, and the traversal does not descend
+-- recursively into subexpressions.  The traversal is done
+-- left-to-right.
 walkExpM :: (Monad m, Applicative m) => Walker ty m -> Exp ty -> m ()
 walkExpM f = void . mapExpM m
   where m = Mapper {
@@ -263,6 +289,8 @@ walkExpM f = void . mapExpM m
             }
         wrap op k = op f k >> return k
 
+-- | Common case of 'foldExp', where only 'Exp's and 'Lambda's are
+-- taken into account.
 foldlPattern :: TypeBox tf => (a -> Exp tf    -> a) ->
                               (a -> Lambda tf -> a) ->
                               a -> Exp tf -> a
@@ -275,6 +303,8 @@ foldlPattern expf lamf = foldExp m
         getLambdaExps (AnonymFun _ body   _ _) = [body]
         getLambdaExps (CurryFun  _ params _ _) = params
 
+-- | Common case of 'mapExp', where only 'Exp's are taken into
+-- account.
 buildExpPattern :: TypeBox tf => (Exp tf -> Exp tf) -> Exp tf -> Exp tf
 buildExpPattern f = mapExp f'
   where f' = identityMapper {
@@ -285,8 +315,8 @@ buildExpPattern f = mapExp f'
         buildLambda (AnonymFun tps body  tp pos) = AnonymFun tps     (f body  ) tp pos
         buildLambda (CurryFun  nm params tp pos) = CurryFun  nm  (map f params) tp pos
 
--- | Return the set of all variable names bound in program.
-progNames :: forall ty.TypeBox ty => Prog ty -> S.Set Name
+-- | Return the set of all variable names bound in a program.
+progNames :: TypeBox ty => Prog ty -> S.Set Name
 progNames = execWriter . mapM funNames
   where names = identityWalker {
                   walkOnExp = expNames
