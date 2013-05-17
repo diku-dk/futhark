@@ -275,7 +275,7 @@ instance Typed Value where
 -- 3]@.
 arrayShape :: Value -> [Int]
 arrayShape (ArrayVal arr _)
-  | v:_ <- elems arr = snd (bounds arr) : arrayShape v
+  | v:_ <- elems arr = snd (bounds arr) + 1 : arrayShape v
 arrayShape _ = []
 
 -- | Return the size of the first dimension of an array, or zero for
