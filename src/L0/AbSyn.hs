@@ -9,6 +9,9 @@ module L0.AbSyn
   , nameFromString
   , defaultEntryPoint
   , Uniqueness(..)
+  , DimSize
+  , ArraySize
+  , ElemType(..)
   , Type(..)
   , subtypeOf
   , similarTo
@@ -21,9 +24,10 @@ module L0.AbSyn
   , arrayShape
   , arraySize
   , peelArray
-  , baseType
+  , elemType
   , basicType
   , arrayType
+  , arrayOf
   , stripArray
   , blankValue
   , Value(..)
@@ -94,22 +98,33 @@ instance Monoid Uniqueness where
   Nonunique `mappend` _ = Nonunique
   u `mappend` _         = u
 
+-- | Don't use this for anything.
+type DimSize = Exp (Maybe Type)
+
+type ArraySize = [Maybe DimSize]
+
+data ElemType = Int
+              | Bool
+              | Char
+              | Real
+              | Tuple [Type]
+                deriving (Eq, Ord, Show)
+
 -- | L0 Types: Int, Bool, Char, Tuple, multidim-regular Array
 --  TODO: please add float, double, long int, etc.
-data Type = Int
-          | Bool
-          | Char
-          | Real
-          | Tuple [Type]
-          | Array Type (Maybe (Exp (Maybe Type))) Uniqueness -- ^ 1st arg: array's element type, 2nd arg: its length
+data Type = Elem ElemType
+          | Array ElemType ArraySize Uniqueness
+            -- ^ 1st arg: array's element type, 2nd arg: length of
+            -- first dimension and lengths of remaining dimensions, if
+            -- any.
             deriving (Eq, Ord, Show)
 
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
 -- it is two, and so forth.
 arrayDims :: Type -> Int
-arrayDims (Array t _ _) = 1 + arrayDims t
-arrayDims _             = 0
+arrayDims (Array _ ds _) = length ds
+arrayDims _              = 0
 
 -- | @x `subuniqueOf` y@ is true if @x@ is not less unique than @y@.
 subuniqueOf :: Uniqueness -> Uniqueness -> Bool
@@ -119,9 +134,9 @@ subuniqueOf _ _ = True
 -- | @x \`subtypeOf\` y@ is true if @x@ is a subtype of @y@ (or equal to
 -- @y@), meaning @x@ is valid whenever @y@ is.
 subtypeOf :: Type -> Type -> Bool
-subtypeOf (Array t1 _ u1) (Array t2 _ u2) =
-  u1 `subuniqueOf` u2 && t1 `subtypeOf` t2
-subtypeOf (Tuple ts1) (Tuple ts2) =
+subtypeOf (Array t1 dims1 u1) (Array t2 dims2 u2) =
+  u1 `subuniqueOf` u2 && Elem t1 `subtypeOf` Elem t2 && dims1 == dims2
+subtypeOf (Elem (Tuple ts1)) (Elem (Tuple ts2)) =
   and $ zipWith subtypeOf ts1 ts2
 subtypeOf t1 t2 = t1 == t2
 
@@ -169,53 +184,67 @@ instance Typed Type where
 -- than @n@ dimensions.
 peelArray :: Int -> Type -> Maybe Type
 peelArray 0 t = Just t
-peelArray n (Array t _ _) = peelArray (n-1) t
+peelArray 1 (Array et [_] _) = Just $ Elem et
+peelArray n (Array et (_:ds) u) =
+  peelArray (n-1) $ Array et ds u
 peelArray _ _ = Nothing
 
--- | Returns the bottommost type of an array.
-baseType :: Type -> Type
-baseType (Array t _ _) = baseType t
-baseType t = t
+-- | Returns the bottommost type of an array.  For @[[int]]@, this
+-- would be @int@.
+elemType :: Type -> ElemType
+elemType (Array t _ _) = t
+elemType (Elem t) = t
 
 -- | A type is a basic type if it is not an array and any component
 -- types are basic types.
 basicType :: Type -> Bool
 basicType (Array {}) = False
-basicType (Tuple ts) = all basicType ts
+basicType (Elem (Tuple ts)) = all basicType ts
 basicType _ = True
 
 uniqueOrBasic :: Typed t => t -> Bool
 uniqueOrBasic x = basicType (typeOf x) || unique x
 
 -- | @array n t@ is the type of @n@-dimensional arrays having @t@ as
--- the base type.
+-- the base type.  If @t@ is itself an m-dimensional array, the result
+-- is an @n+m@-dimensional array with the same base type as @t@
 arrayType :: Int -> Type -> Uniqueness -> Type
 arrayType 0 t _ = t
-arrayType n t u = arrayType (n-1) (Array t Nothing u) u
+arrayType n t u = arrayOf t ds u
+  where ds = replicate n Nothing
+
+arrayOf :: Type -> ArraySize -> Uniqueness -> Type
+arrayOf (Array et size1 _) size2 u =
+  Array et (size2 ++ size1) u
+arrayOf (Elem et) size u = Array et size u
 
 -- | @stripArray n t@ removes the @n@ outermost layers of the array.
 -- Essentially, it is the type of indexing an array of type @t@ with
 -- @n@ indexes.
 stripArray :: Int -> Type -> Type
-stripArray 0 t = t
-stripArray n (Array t _ _) = stripArray (n-1) t
+stripArray n (Array et ds u)
+  | n < length ds = Array et (drop n ds) u
+  | otherwise     = Elem et
 stripArray _ t = t
 
 withUniqueness :: Type -> Uniqueness -> Type
 withUniqueness (Array et dims _) u = Array et dims u
-withUniqueness (Tuple ets) u = Tuple $ map (`withUniqueness` u) ets
+withUniqueness (Elem (Tuple ets)) u =
+  Elem $ Tuple $ map (`withUniqueness` u) ets
 withUniqueness t _ = t
 
 -- | A "blank" value of the given type - this is zero, or whatever is
 -- close to it.  Don't depend on this value, but use it for creating
 -- arrays to be populated by do-loops.
 blankValue :: Type -> Value
-blankValue Int = IntVal 0
-blankValue Real = RealVal 0.0
-blankValue Bool = LogVal False
-blankValue Char = CharVal '\0'
-blankValue (Tuple ts) = TupVal (map blankValue ts)
-blankValue (Array et _ _) = arrayVal [blankValue et] et
+blankValue (Elem Int) = IntVal 0
+blankValue (Elem Real) = RealVal 0.0
+blankValue (Elem Bool) = LogVal False
+blankValue (Elem Char) = CharVal '\0'
+blankValue (Elem (Tuple ts)) = TupVal (map blankValue ts)
+blankValue (Array et (_:ds) u) = arrayVal [] rt
+  where rt = Array et ds u
+blankValue (Array et _ _) = arrayVal [] $ Elem et
 
 -- | Every possible value in L0.  Values are fully evaluated and their
 -- type is always unambiguous.
@@ -225,29 +254,28 @@ data Value = IntVal !Int
            | CharVal !Char
            | TupVal ![Value]
            | ArrayVal !(Array Int Value) Type
-             -- ^ The type is the element type, not the complete array
-             -- type.  It is assumed that the array is 0-indexed.
+             -- ^ It is assumed that the array is 0-indexed.  The type
+             -- is the row type.
              deriving (Eq, Ord, Show)
 
 instance Typed Value where
-  typeOf (IntVal _) = Int
-  typeOf (RealVal _) = Real
-  typeOf (LogVal _) = Bool
-  typeOf (CharVal _) = Char
-  typeOf (TupVal vs) = Tuple (map typeOf vs)
-  typeOf (ArrayVal _ t) = Array t Nothing Nonunique
+  typeOf (IntVal _) = Elem Int
+  typeOf (RealVal _) = Elem Real
+  typeOf (LogVal _) = Elem Bool
+  typeOf (CharVal _) = Elem Char
+  typeOf (TupVal vs) = Elem $ Tuple (map typeOf vs)
+  typeOf (ArrayVal _ (Elem et)) =
+    Array et [Nothing] Nonunique
+  typeOf (ArrayVal _ (Array et ds _)) =
+    Array et (Nothing:ds) Nonunique
 
 -- | Return a list of the sizes of an array (the shape, in other
 -- terms).  For non-arrays, this is the empty list.  A two-dimensional
 -- array with five rows and three columns would return the list @[5,
 -- 3]@.
 arrayShape :: Value -> [Int]
-arrayShape (ArrayVal arr t) =
-  case elems arr of
-    [] -> 0 : replicate (arrayDims t) 0
-    (v:_) -> size : arrayShape v
-  where size = upper - lower + 1
-        (lower, upper) = bounds arr
+arrayShape (ArrayVal arr _)
+  | v:_ <- elems arr = snd (bounds arr) : arrayShape v
 arrayShape _ = []
 
 -- | Return the size of the first dimension of an array, or zero for
@@ -277,8 +305,8 @@ arrayString _ = Nothing
 -- | Given an N-dimensional array, return a one-dimensional array
 -- with the same elements.
 flattenArray :: Value -> Value
-flattenArray (ArrayVal arr t) =
-  arrayVal (concatMap flatten $ elems arr) (baseType t)
+flattenArray (ArrayVal arr et) =
+  arrayVal (concatMap flatten $ elems arr) et
     where flatten (ArrayVal arr' _) = concatMap flatten $ elems arr'
           flatten v = [v]
 flattenArray v = v
@@ -314,7 +342,8 @@ data Exp ty = Literal Value SrcLoc
             -- argument is the tuple's type.
             | ArrayLit  [Exp ty] ty SrcLoc
             -- ^ Array literals, e.g., { {1+x, 3}, {2, 1+4} }.  Second
-            -- arg is the element type of the array.
+            -- arg is the type of of the rows of the array (not the
+            -- element type).
             | BinOp BinOp (Exp ty) (Exp ty) ty SrcLoc
             -- Binary Ops for Booleans
             | And    (Exp ty) (Exp ty) SrcLoc
@@ -353,10 +382,9 @@ data Exp ty = Literal Value SrcLoc
             -- Second-Order Array Combinators
             -- accept curried and anonymous
             -- functions as (first) params
-            | Map (Lambda ty) (Exp ty) ty ty SrcLoc
+            | Map (Lambda ty) (Exp ty) ty SrcLoc
              -- @map(op +(1), {1,2,..,n}) = {2,3,..,n+1}@
-             -- 3st arg is the input-array element type
-             -- 4th arg is the output-array element type
+             -- 3st arg is the input-array row type
 
             | Reduce (Lambda ty) (Exp ty) (Exp ty) ty SrcLoc
              -- @reduce(op +, 0, {1,2,..,n}) = (0+1+2+..+n)@
@@ -376,7 +404,7 @@ data Exp ty = Literal Value SrcLoc
              -- 4th arg is the element type of the input array
 
             | Filter (Lambda ty) (Exp ty) ty SrcLoc
-             -- ^ 3rd arg is the element type of the input (and
+             -- ^ 3rd arg is the row type of the input (and
              -- result) array
 
             | Mapall (Lambda ty) (Exp ty) ty ty SrcLoc
@@ -385,16 +413,15 @@ data Exp ty = Literal Value SrcLoc
 
             | Redomap (Lambda ty) (Lambda ty) (Exp ty) (Exp ty) ty ty SrcLoc
              -- ^ @redomap(g, f, n, a) = reduce(g, n, map(f, a))@.
-             -- 5th arg is the element type of the input  array.
-             -- 6th arg is the result type == the element type of the reduced array
+             -- 5th arg is the row type of the input  array.
+             -- 6th arg is the result type == the row type of the reduced array
 
             | Split (Exp ty) (Exp ty) ty SrcLoc
              -- ^ @split(1, { 1, 2, 3, 4 }) = ({1},{2, 3, 4})@.
              -- 3rd arg is the element type of the input array
 
-            | Concat (Exp ty) (Exp ty) ty SrcLoc
+            | Concat (Exp ty) (Exp ty) SrcLoc
              -- ^ @concat ({1},{2, 3, 4}) = {1, 2, 3, 4}@.
-             -- 3rd arg is the element type of the input array*)
 
             | Copy (Exp ty) SrcLoc
             -- ^ Copy the value return by the expression.  This only
@@ -454,7 +481,7 @@ instance Located (Exp ty) where
   locOf (Replicate _ _ pos) = locOf pos
   locOf (Reshape _ _ pos) = locOf pos
   locOf (Transpose _ pos) = locOf pos
-  locOf (Map _ _ _ _ pos) = locOf pos
+  locOf (Map _ _ _ pos) = locOf pos
   locOf (Reduce _ _ _ _ pos) = locOf pos
   locOf (Zip _ pos) = locOf pos
   locOf (Unzip _ _ pos) = locOf pos
@@ -463,7 +490,7 @@ instance Located (Exp ty) where
   locOf (Mapall _ _ _ _ pos) = locOf pos
   locOf (Redomap _ _ _ _ _ _ pos) = locOf pos
   locOf (Split _ _ _ pos) = locOf pos
-  locOf (Concat _ _ _ pos) = locOf pos
+  locOf (Concat _ _ pos) = locOf pos
   locOf (Copy _ pos) = locOf pos
   locOf (DoLoop _ _ _ _ _ _ pos) = locOf pos
   -- locOf for soac2 (Cosmin)
@@ -476,12 +503,12 @@ instance Located (Exp ty) where
 
 instance Typed (Exp Type) where
   typeOf (Literal val _) = typeOf val
-  typeOf (TupLit es _) = Tuple $ map typeOf es
+  typeOf (TupLit es _) = Elem $ Tuple $ map typeOf es
   typeOf (ArrayLit es t _) = arrayType 1 t $ mconcat $ map uniqueness es
   typeOf (BinOp _ _ _ t _) = t
-  typeOf (And {}) = Bool
-  typeOf (Or {}) = Bool
-  typeOf (Not _ _) = Bool
+  typeOf (And {}) = Elem Bool
+  typeOf (Or {}) = Elem Bool
+  typeOf (Not _ _) = Elem Bool
   typeOf (Negate _ t _) = t
   typeOf (If _ _ _ t _) = t
   typeOf (Var ident) = identType ident
@@ -489,37 +516,38 @@ instance Typed (Exp Type) where
   typeOf (LetPat _ _ body _) = typeOf body
   typeOf (LetWith _ _ _ _ body _) = typeOf body
   typeOf (Index _ _ _ t _) = t
-  typeOf (Iota _ _) = arrayType 1 Int Unique
-  typeOf (Size _ _) = Int
+  typeOf (Iota _ _) = arrayType 1 (Elem Int) Unique
+  typeOf (Size _ _) = Elem Int
   typeOf (Replicate _ e _) = arrayType 1 (typeOf e) u
     where u | uniqueOrBasic e = Unique
             | otherwise = Nonunique
-  typeOf (Reshape shape e _) = build (length shape) (baseType $ typeOf e)
-    where build 0 t = t
-          build n t = build (n-1) (Array t Nothing Nonunique)
+  typeOf (Reshape shape e _) = build (length shape) (elemType $ typeOf e)
+    where build 0 t = Elem t
+          build n t = Array t (replicate n Nothing) Nonunique
   typeOf (Transpose e _) = typeOf e
-  typeOf (Map _ a _ t _) = arrayType 1 t u
-    where u | uniqueOrBasic t, unique a = Unique
+  typeOf (Map f _ _ _) = arrayType 1 (typeOf f) u
+    where u | uniqueOrBasic (typeOf f) = Unique
             | otherwise = Nonunique
   typeOf (Reduce fun _ _ _ _) = typeOf fun
-  typeOf (Zip es _) = arrayType 1 (Tuple $ map snd es) Nonunique
-  typeOf (Unzip _ ts _) = Tuple $ map (flip (arrayType 1) Unique) ts
+  typeOf (Zip es _) = arrayType 1 (Elem $ Tuple $ map snd es) Nonunique
+  typeOf (Unzip _ ts _) = Elem $ Tuple $ map (flip (arrayType 1) Unique) ts
   typeOf (Scan fun e arr _ _) =
     arrayType 1 (typeOf fun) (uniqueness fun <> uniqueness e <> uniqueness arr)
   typeOf (Filter _ _ t _) = arrayType 1 t Nonunique
   typeOf (Mapall fun e _ _ _) = arrayType (arrayDims $ typeOf e) (typeOf fun) Nonunique
   typeOf (Redomap _ _ _ _ _ t _) = t
-  typeOf (Split _ _ t _) = Tuple [arrayType 1 t Nonunique, arrayType 1 t Nonunique]
-  typeOf (Concat _ _ t _) = arrayType 1 t Nonunique
+  typeOf (Split _ _ t _) = Elem $ Tuple [arrayType 1 t Nonunique, arrayType 1 t Nonunique]
+  typeOf (Concat x y _) = typeOf x `withUniqueness` u
+    where u = uniqueness (typeOf x) <> uniqueness (typeOf y)
   typeOf (Copy e _) = typeOf e `withUniqueness` Unique
   typeOf (DoLoop _ _ _ _ _ body _) = typeOf body
 --- Begin SOAC2: (Cosmin) ---
-  typeOf (Map2 _ _ _ (Tuple tps) _) = Tuple $ map (\x -> arrayType 1 x Unique) tps
+  typeOf (Map2 _ _ _ (Elem (Tuple tps)) _) = Elem $ Tuple $ map (\x -> arrayType 1 x Unique) tps
   typeOf (Map2 _ _ _ tp _) = arrayType 1 tp Unique
   typeOf (Reduce2 fun _ _ _ _) = typeOf fun
-  typeOf (Scan2 _ _ _ (Tuple tps) _) = Tuple $ map (\x -> arrayType 1 x Unique) tps
+  typeOf (Scan2 _ _ _ (Elem (Tuple tps)) _) = Elem $ Tuple $ map (\x -> arrayType 1 x Unique) tps
   typeOf (Scan2 _ _ _ tp _) = arrayType 1 tp Unique
-  typeOf (Filter2 _ _ (Tuple tps) _) = Tuple $ map (\x -> arrayType 1 x Unique) tps
+  typeOf (Filter2 _ _ (Elem (Tuple tps)) _) = Elem $ Tuple $ map (\x -> arrayType 1 x Unique) tps
   typeOf (Filter2 _ _ tp _) = arrayType 1 tp Unique
   typeOf (Redomap2 redfun _ _ _ _ _ _) = typeOf redfun
   typeOf (Mapall2 fun es _ _ _) =
@@ -530,7 +558,7 @@ instance Typed (Exp Type) where
                     _       -> 0
           fnrtp = typeOf fun
       in case fnrtp of
-          Tuple tps -> Tuple $ map (\x -> arrayType inpdim x Unique) tps
+          Elem (Tuple tps) -> Elem $ Tuple $ map (\x -> arrayType inpdim x Unique) tps
           _ -> arrayType inpdim fnrtp Unique
 --- End SOAC2: (Cosmin) ---
 
@@ -583,8 +611,8 @@ expToValue :: Exp Type -> Maybe Value
 expToValue (Literal val _) = Just val
 expToValue (TupLit es _) = do es' <- mapM expToValue es
                               Just $ TupVal es'
-expToValue (ArrayLit es et _) = do es' <- mapM expToValue es
-                                   Just $ arrayVal es' et
+expToValue (ArrayLit es t _) = do es' <- mapM expToValue es
+                                  Just $ arrayVal es' t
 expToValue _ = Nothing
 
 -- | Anonymous Function
@@ -633,8 +661,8 @@ ppValue (IntVal n)  = tildes (show n) ++ " "
 ppValue (RealVal n) = tildes (show n) ++ " "
 ppValue (LogVal b)  = show b ++ " "
 ppValue (CharVal c) = show c ++ " "
-ppValue v@(ArrayVal arr t)
-  | [] <- elems arr = " empty (" ++ ppType t ++ " ) "
+ppValue v@(ArrayVal arr _)
+  | [] <- elems arr = " empty (" ++ ppType (stripArray 1 $ typeOf v) ++ " ) "
   | Just s <- arrayString v = show s
   | otherwise = " { " ++ intercalate ", " (map ppValue $ elems arr) ++ " } "
 ppValue (TupVal vs)   =
@@ -694,7 +722,7 @@ ppExp d (Reshape es arr _) =
   " reshape ( ( " ++ intercalate ", " (map (ppExp d) es) ++ " ), "  ++
   ppExp d arr ++ " ) "
 
-ppExp d (Map fun e _ _ _) = " map ( " ++ ppLambda (d+1) fun ++ ", " ++ ppExp (d+1) e ++ " ) "
+ppExp d (Map fun e _ _) = " map ( " ++ ppLambda (d+1) fun ++ ", " ++ ppExp (d+1) e ++ " ) "
 
 ppExp d (Zip es _) =
   " zip ( " ++ intercalate ", " (map (ppExp d . fst) es) ++ " ) "
@@ -714,7 +742,7 @@ ppExp d (Redomap id1 id2 el a _ _ _)
             ", " ++ ppExp (d+1) el ++ ", " ++ ppExp (d+1) a ++ " ) "
 
 ppExp d (Split  idx arr _ _) = " split ( " ++ ppExp d idx ++ ", " ++ ppExp d arr ++ " ) "
-ppExp d (Concat a1  a2 _ _) = " concat ( " ++ ppExp d a1 ++ ", " ++ ppExp d a2 ++ " ) "
+ppExp d (Concat a1 a2 _) = " concat ( " ++ ppExp d a1 ++ ", " ++ ppExp d a2 ++ " ) "
 ppExp d (Copy e _) = " copy ( " ++ ppExp d e ++ " ) "
 
 ppExp d (DoLoop mvpat mvexp i n loopbody letbody _) =
@@ -725,7 +753,7 @@ ppExp d (DoLoop mvpat mvexp i n loopbody letbody _) =
 --- Cosmin added ppExp for soac2
 ppExp d (Map2 fun lst _ elrtp _) = 
     let (pref, suff)  = case unboxType elrtp of
-                            Just (Tuple {}) -> (" unzip ( ", " ) ")
+                            Just (Elem (Tuple {})) -> (" unzip ( ", " ) ")
                             _ -> ("","")
         mid = case lst of
                 [x] -> ppExp (d+1) x
@@ -740,7 +768,7 @@ ppExp d (Reduce2 fun el arrs _ _) =
 --
 ppExp d (Scan2  fun el lst eltp _) =
     let (pref, suff)  = case unboxType eltp of
-                            Just (Tuple {}) -> (" unzip ( ", " ) ")
+                            Just (Elem (Tuple {})) -> (" unzip ( ", " ) ")
                             _ -> ("","")
         mid = case lst of [x] -> ppExp (d+1) x
                           _ ->  "zip ( " ++ intercalate ", " (map (ppExp (d+1) ) lst) ++ " ) "
@@ -772,13 +800,15 @@ ppUniqueness Nonunique = ""
 
 -- | Pretty printing a type
 ppType :: Type -> String
-ppType Int = " int "
-ppType Bool = " bool "
-ppType Char = " char "
-ppType Real = " real "
-ppType (Array tp  Nothing u) = ppUniqueness u ++ "[ " ++ ppType tp ++ " ] "
-ppType (Array tp  (Just l) u) = ppUniqueness u ++ "[ " ++ ppType tp ++ ", " ++ ppExp 0 l ++ " ] "
-ppType (Tuple tps) = "( " ++ intercalate ", " (map ppType tps) ++ " ) "
+ppType (Elem Int) = " int "
+ppType (Elem Bool) = " bool "
+ppType (Elem Char) = " char "
+ppType (Elem Real) = " real "
+ppType (Array tp ds u) = ppUniqueness u ++ foldl f pptp ds
+  where f s Nothing  = "[ " ++ s ++ " ]"
+        f s (Just e) = "[ " ++ s ++ ", " ++ ppExp 0 e ++ " ]"
+        pptp = ppType $ Elem tp
+ppType (Elem (Tuple tps)) = "( " ++ intercalate ", " (map ppType tps) ++ " ) "
 
 -- | Pretty printing a tuple id
 ppTupId :: TupIdent ty -> String

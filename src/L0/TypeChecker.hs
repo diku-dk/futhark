@@ -74,7 +74,7 @@ instance Show TypeError where
     "Cannot unify type " ++ ppType (typeOf e1) ++
     " of expression at " ++ locStr (srclocOf e1) ++
     " with type " ++ ppType (typeOf e2) ++
-    " of expression at " ++ locStr (srclocOf e1)
+    " of expression at " ++ locStr (srclocOf e2)
   show (UnexpectedType e []) =
     "Type of expression at " ++ locStr (srclocOf e) ++
     " cannot have any type - possibly a bug in the type checker."
@@ -352,18 +352,23 @@ unifyExpTypes e1 e2 =
   maybe (bad $ UnifyError e1 e2) return $
   unifyKnownTypes (typeOf e1) (typeOf e2)
 
-unifyKnownTypes :: Type -> Type -> Maybe Type
-unifyKnownTypes Int Int = Just Int
-unifyKnownTypes Char Char = Just Char
-unifyKnownTypes Bool Bool = Just Bool
-unifyKnownTypes Real Real = Just Real
-unifyKnownTypes (Tuple ts1) (Tuple ts2)
+unifyElemTypes :: ElemType -> ElemType -> Maybe ElemType
+unifyElemTypes Int Int = Just Int
+unifyElemTypes Char Char = Just Char
+unifyElemTypes Bool Bool = Just Bool
+unifyElemTypes Real Real = Just Real
+unifyElemTypes (Tuple ts1) (Tuple ts2)
   | length ts1 == length ts2 = do
   ts <- zipWithM unifyKnownTypes ts1 ts2
   Just $ Tuple ts
-unifyKnownTypes (Array t1 e u1) (Array t2 _ u2) = do
-  t <- unifyKnownTypes t1 t2
-  Just $ Array t e (u1 <> u2)
+unifyElemTypes _ _ = Nothing
+
+unifyKnownTypes :: Type -> Type -> Maybe Type
+unifyKnownTypes (Elem t1) (Elem t2) = Elem <$> t1 `unifyElemTypes` t2
+unifyKnownTypes (Array t1 ds1 u1) (Array t2 ds2 u2)
+  | length ds1 == length ds2 = do
+  t <- unifyElemTypes t1 t2
+  Just $ Array t ds1 (u1 <> u2)
 unifyKnownTypes _ _ = Nothing
 
 -- | @checkAnnotation loc s t1 t2@ returns @t2@ if @t1@ contains no
@@ -385,15 +390,9 @@ require ts e
   | any (typeOf e `similarTo`) ts = return e
   | otherwise = bad $ UnexpectedType e ts
 
-elemType :: Exp Type -> TypeM Type
-elemType e = elemType' $ typeOf e
-  where elemType' (Array t _ _) = return t
-        elemType' t = bad $ TypeError (srclocOf e) $ "Type of expression is not array, but " ++ ppType t ++ "."
-
-propagateUniqueness :: Type -> Type
-propagateUniqueness (Array et dim Nonunique) =
-  Array et dim (uniqueness et)
-propagateUniqueness t = t
+rowType :: Exp Type -> TypeM Type
+rowType e = maybe wrong return $ peelArray 1 $ typeOf e
+  where wrong = bad $ TypeError (srclocOf e) $ "Type of expression is not array, but " ++ ppType (typeOf e) ++ "."
 
 -- | Type check a program containing arbitrary type information,
 -- yielding either a type error or a program with complete type
@@ -428,26 +427,24 @@ checkProg' checkoccurs prog = do
       | Just (_,_,pos2) <- M.lookup name ftable =
         Left $ DupDefinitionError name pos pos2
       | otherwise =
-        let argtypes = map (propagateUniqueness . identType) args -- Throw away argument names.
-        in Right $ M.insert name (propagateUniqueness ret,argtypes,pos) ftable
+        let argtypes = map identType args -- Throw away argument names.
+        in Right $ M.insert name (ret,argtypes,pos) ftable
     rmLoc (ret,args,_) = (ret,args)
     builtins = M.mapKeys nameFromString $
-               M.fromList [("toReal", (Real, [Int], noLoc))
-                          ,("trunc", (Int, [Real], noLoc))
-                          ,("sqrt", (Real, [Real], noLoc))
-                          ,("log", (Real, [Real], noLoc))
-                          ,("exp", (Real, [Real], noLoc))
-                          ,("op not", (Bool, [Bool], noLoc))]
+               M.fromList [("toReal", (Elem Real, [Elem Int], noLoc))
+                          ,("trunc", (Elem Int, [Elem Real], noLoc))
+                          ,("sqrt", (Elem Real, [Elem Real], noLoc))
+                          ,("log", (Elem Real, [Elem Real], noLoc))
+                          ,("exp", (Elem Real, [Elem Real], noLoc))
+                          ,("op not", (Elem Bool, [Elem Bool], noLoc))]
 
 checkFun :: TypeBox tf => FunDec tf -> TypeM (FunDec Type)
 checkFun (fname, rettype, args, body, pos) = do
   args' <- checkArgs
   body' <- binding args' $ checkExp body
-  let rettype' = propagateUniqueness rettype
-      bodytype = propagateUniqueness $ typeOf body'
-  if bodytype `subtypeOf` rettype' then
-    return (fname, rettype', args, body', pos)
-  else bad $ ReturnTypeError pos fname rettype' $ typeOf body'
+  if typeOf body' `subtypeOf` rettype then
+    return (fname, rettype, args, body', pos)
+  else bad $ ReturnTypeError pos fname rettype $ typeOf body'
   where checkArgs = foldM expand [] args
         expand args' ident@(Ident pname _ _)
           | Just _ <- find ((==identName ident) . identName) args' =
@@ -498,26 +495,26 @@ checkExp' (ArrayLit es t loc) = do
 checkExp' (BinOp op e1 e2 t pos) = checkBinOp op e1 e2 t pos
 
 checkExp' (And e1 e2 pos) = do
-  e1' <- require [Bool] =<< checkExp e1
-  e2' <- require [Bool] =<< checkExp e2
+  e1' <- require [Elem Bool] =<< checkExp e1
+  e2' <- require [Elem Bool] =<< checkExp e2
   return $ And e1' e2' pos
 
 checkExp' (Or e1 e2 pos) = do
-  e1' <- require [Bool] =<< checkExp e1
-  e2' <- require [Bool] =<< checkExp e2
+  e1' <- require [Elem Bool] =<< checkExp e1
+  e2' <- require [Elem Bool] =<< checkExp e2
   return $ Or e1' e2' pos
 
 checkExp' (Not e pos) = do
-  e' <- require [Bool] =<< checkExp e
+  e' <- require [Elem Bool] =<< checkExp e
   return $ Not e' pos
 
 checkExp' (Negate e t pos) = do
-  e' <- require [Int, Real] =<< checkExp e
+  e' <- require [Elem Int, Elem Real] =<< checkExp e
   t' <- checkAnnotation pos "result" t $ typeOf e'
   return $ Negate e' t' pos
 
 checkExp' (If e1 e2 e3 t pos) = do
-  e1' <- require [Bool] =<< checkExp e1
+  e1' <- require [Elem Bool] =<< checkExp e1
   (e2', e3') <- checkExp e2 `alternative` checkExp e3
   bt <- checkAnnotation pos "result" t =<< unifyExpTypes e2' e3'
   return $ If e1' e2' e3' bt pos
@@ -541,7 +538,7 @@ checkExp' (Apply fname args t pos)
   args' <- mapM checkExp args
   let argtps = map typeOf args'
   _ <- mapM (soac2ElemType pos) argtps
-  t' <- checkAnnotation pos "return" t Bool
+  t' <- checkAnnotation pos "return" t $ Elem Bool
   return $ Apply fname args' t' pos
 
 checkExp' (Apply fname args rettype pos) = do
@@ -567,12 +564,12 @@ checkExp' (Apply fname args rettype pos) = do
       return $ Apply fname args' rettype' pos
   where -- Check if an argument of the given type consumes anything.
         consumes (Array _ _ Unique) = True
-        consumes (Tuple ets) = any consumes ets
+        consumes (Elem (Tuple ets)) = any consumes ets
         consumes _ = False
 
         -- Create usage information, given argument type and aliasing
         -- information.
-        consumeArg loc (Tuple ets) (TupleAlias alss) =
+        consumeArg loc (Elem (Tuple ets)) (TupleAlias alss) =
           mconcat $ zipWith (consumeArg loc) ets alss
         consumeArg loc t als
           | consumes t =
@@ -588,7 +585,7 @@ checkExp' (LetPat pat e body pos) = do
 
 checkExp' (LetWith (Ident dest destt destpos) src idxes ve body pos) = do
   src' <- checkIdent src
-  idxes' <- mapM (require [Int] <=< checkExp) idxes
+  idxes' <- mapM (require [Elem Int] <=< checkExp) idxes
   destt' <- checkAnnotation pos "source" destt $ identType src'
   let dest' = Ident dest destt' destpos
 
@@ -609,16 +606,17 @@ checkExp' (Index ident idxes intype restype pos) = do
   ident' <- checkIdent ident
   observe ident'
   vt <- lookupVar (identName ident') pos
-  when (arrayDims vt < length idxes) $
-    bad $ IndexingError (arrayDims vt) (length idxes) pos
-  vet <- elemType $ Var ident'
-  intype' <- checkAnnotation pos "array" intype vet
-  restype' <- checkAnnotation pos "result" restype $ stripArray (length idxes) vt
-  idxes' <- mapM (require [Int] <=< checkExp) idxes
-  return $ Index ident' idxes' intype' restype' pos
+  case peelArray (length idxes) vt of
+    Nothing -> bad $ IndexingError (arrayDims vt) (length idxes) pos
+    Just et -> do
+      vet <- rowType $ Var ident'
+      intype' <- checkAnnotation pos "array" intype vet
+      restype' <- checkAnnotation pos "result" restype et
+      idxes' <- mapM (require [Elem Int] <=< checkExp) idxes
+      return $ Index ident' idxes' intype' restype' pos
 
 checkExp' (Iota e pos) = do
-  e' <- require [Int] =<< checkExp e
+  e' <- require [Elem Int] =<< checkExp e
   return $ Iota e' pos
 
 checkExp' (Size e pos) = do
@@ -628,12 +626,12 @@ checkExp' (Size e pos) = do
     _        -> bad $ TypeError pos "Argument to size must be array."
 
 checkExp' (Replicate countexp valexp pos) = do
-  countexp' <- require [Int] =<< checkExp countexp
+  countexp' <- require [Elem Int] =<< checkExp countexp
   valexp' <- checkExp valexp
   return $ Replicate countexp' valexp' pos
 
 checkExp' (Reshape shapeexps arrexp pos) = do
-  shapeexps' <- mapM (require [Int] <=< checkExp) shapeexps
+  shapeexps' <- mapM (require [Elem Int] <=< checkExp) shapeexps
   arrexp' <- checkExp arrexp
   return (Reshape shapeexps' arrexp' pos)
 
@@ -643,21 +641,20 @@ checkExp' (Transpose arrexp pos) = do
     bad $ TypeError pos "Argument to transpose does not have two dimensions."
   return $ Transpose arrexp' pos
 
-checkExp' (Map fun arrexp intype outtype pos) = do
+checkExp' (Map fun arrexp intype pos) = do
   arrexp' <- checkExp arrexp
-  case typeOf arrexp' of
-    Array et _ _ -> do
+  case peelArray 1 $ typeOf arrexp' of
+    Just et -> do
       fun' <- checkLambda fun [et]
       intype' <- checkAnnotation pos "input element" intype et
-      outtype' <- checkAnnotation pos "output element" outtype $ typeOf fun'
-      return (Map fun' arrexp' intype' outtype' pos)
+      return (Map fun' arrexp' intype' pos)
     _       -> bad $ TypeError (srclocOf arrexp) "Mapee expression does not return an array."
 
 checkExp' (Reduce fun startexp arrexp intype pos) = do
   startexp' <- checkExp startexp
   arrexp' <- checkExp arrexp
-  case typeOf arrexp' of
-    Array inelemt _ _ -> do
+  case peelArray 1 $ typeOf arrexp' of
+    Just inelemt -> do
       inelemt' <- checkAnnotation pos "input element" intype inelemt
       fun' <- checkLambda fun [typeOf startexp', inelemt']
       when (typeOf startexp' /= typeOf fun') $
@@ -667,21 +664,21 @@ checkExp' (Reduce fun startexp arrexp intype pos) = do
 
 checkExp' (Zip arrexps pos) = do
   arrexps' <- mapM (checkExp . fst) arrexps
-  inelemts <- mapM elemType arrexps'
+  inelemts <- mapM rowType arrexps'
   inelemts' <- zipWithM (checkAnnotation pos "operand element") (map snd arrexps) inelemts
   return $ Zip (zip arrexps' inelemts') pos
 
 checkExp' (Unzip e _ pos) = do
   e' <- checkExp e
-  case typeOf e' of
-    Array (Tuple ts) _ _ -> return $ Unzip e' ts pos
-    et -> bad $ TypeError pos $ "Argument to unzip is not an array of tuples, but " ++ ppType et ++ "."
+  case peelArray 1 $ typeOf e' of
+    Just (Elem (Tuple ts)) -> return $ Unzip e' ts pos
+    _ -> bad $ TypeError pos $ "Argument to unzip is not an array of tuples, but " ++ ppType (typeOf e') ++ "."
 
 checkExp' (Scan fun startexp arrexp intype pos) = do
   startexp' <- checkExp startexp
   arrexp' <- checkExp arrexp
-  case typeOf arrexp' of
-    Array inelemt _ _ -> do
+  case peelArray 1 $ typeOf arrexp' of
+    Just inelemt -> do
       intype' <- checkAnnotation pos "element" intype inelemt
       fun' <- checkLambda fun [intype', intype']
       when (typeOf startexp' /= typeOf fun') $
@@ -693,24 +690,24 @@ checkExp' (Scan fun startexp arrexp intype pos) = do
 
 checkExp' (Filter fun arrexp eltype pos) = do
   arrexp' <- checkExp arrexp
-  inelemt <- elemType arrexp'
+  inelemt <- rowType arrexp'
   eltype' <- checkAnnotation pos "element" eltype inelemt
   fun' <- checkLambda fun [inelemt]
-  when (typeOf fun' /= Bool) $
+  when (typeOf fun' /= Elem Bool) $
     bad $ TypeError pos "Filter function does not return bool."
   return $ Filter fun' arrexp' eltype' pos
 
 checkExp' (Mapall fun arrexp intype outtype pos) = do
   arrexp' <- checkExp arrexp
-  intype' <- checkAnnotation pos "input element" intype $ baseType $ typeOf arrexp'
-  fun' <- checkLambda fun [baseType intype']
+  intype' <- checkAnnotation pos "input element" intype $ Elem $ elemType $ typeOf arrexp'
+  fun' <- checkLambda fun [Elem $ elemType intype']
   outtype' <- checkAnnotation pos "output element" outtype (typeOf fun')
   return $ Mapall fun' arrexp' intype' outtype' pos
 
 checkExp' (Redomap redfun mapfun accexp arrexp intype outtype pos) = do
   accexp' <- checkExp accexp
   arrexp' <- checkExp arrexp
-  et <- elemType arrexp'
+  et <- rowType arrexp'
   mapfun' <- checkLambda mapfun [et]
   redfun' <- checkLambda redfun [typeOf accexp', typeOf mapfun']
   _ <- require [typeOf redfun'] accexp'
@@ -719,18 +716,17 @@ checkExp' (Redomap redfun mapfun accexp arrexp intype outtype pos) = do
   return $ Redomap redfun' mapfun' accexp' arrexp' intype' outtype' pos
 
 checkExp' (Split splitexp arrexp intype pos) = do
-  splitexp' <- require [Int] =<< checkExp splitexp
+  splitexp' <- require [Elem Int] =<< checkExp splitexp
   arrexp' <- checkExp arrexp
-  et <- elemType arrexp'
+  et <- rowType arrexp'
   intype' <- checkAnnotation pos "element" intype et
   return $ Split splitexp' arrexp' intype' pos
 
-checkExp' (Concat arr1exp arr2exp intype pos) = do
+checkExp' (Concat arr1exp arr2exp pos) = do
   arr1exp' <- checkExp arr1exp
   arr2exp' <- require [typeOf arr1exp'] =<< checkExp arr2exp
-  et <- elemType arr2exp'
-  intype' <- checkAnnotation pos "element" intype et
-  return $ Concat arr1exp' arr2exp' intype' pos
+  _ <- rowType arr2exp' -- Just check that it's an array.
+  return $ Concat arr1exp' arr2exp' pos
 
 checkExp' (Copy e pos) = do
   (e', _) <- collectAliases $ checkExp e
@@ -741,12 +737,12 @@ checkExp' (Copy e pos) = do
 checkExp' (DoLoop mergepat mergeexp (Ident loopvar _ _)
           boundexp loopbody letbody pos) = do
   ((boundexp', mergeexp'), mergeflow) <-
-    collectDataflow $ do boundexp' <- require [Int] =<< checkExp boundexp
+    collectDataflow $ do boundexp' <- require [Elem Int] =<< checkExp boundexp
                          mergeexp' <- checkExp mergeexp
                          return (boundexp', mergeexp')
   let mergetype = typeOf mergeexp'
       checkloop scope = collectDataflow $
-                        scope $ binding [Ident loopvar Int pos] $
+                        scope $ binding [Ident loopvar (Elem Int) pos] $
                         require [mergetype] =<< checkExp loopbody
   (firstscope, mergepat') <- checkBinding mergepat mergeexp' mergeflow
   (_, dataflow) <- checkloop firstscope
@@ -754,7 +750,7 @@ checkExp' (DoLoop mergepat mergeexp (Ident loopvar _ _)
   (loopbody', _) <- checkloop secondscope
   secondscope $ do
     letbody' <- checkExp letbody
-    return $ DoLoop mergepat' mergeexp' (Ident loopvar Int pos) boundexp' loopbody' letbody' pos
+    return $ DoLoop mergepat' mergeexp' (Ident loopvar (Elem Int) pos) boundexp' loopbody' letbody' pos
 
 ----------------------------------------------
 ---- BEGIN Cosmin added SOAC2 combinators ----
@@ -804,7 +800,7 @@ checkExp' (Filter2 fun arrexp eltype pos) = do
   inelemt <- soac2ArgType pos "Filter2" ineltps
   eltype' <- checkAnnotation pos "element" eltype inelemt
   fun' <- checkLambda fun [inelemt]
-  when (typeOf fun' /= Bool) $
+  when (typeOf fun' /= Elem Bool) $
     bad $ TypeError pos "Filter function does not return bool."
   return $ Filter2 fun' arrexp' eltype' pos
 
@@ -815,11 +811,13 @@ checkExp' (Mapall2 fun arrexp intype outtype pos) = do
   _ <- mapM (soac2ElemType pos) arrtps
   ineltp <- case arrtps of
               []   -> bad $ TypeError pos "Empty tuple given to Mapall2"
-              [t]  -> return $ baseType t
+              [t]  -> return $ elemType t
               t:ts -> let mindim = foldl min (arrayDims t) $ map arrayDims ts
-                      in return $ Tuple $ map (stripArray mindim) $ t:ts
+                      in case mapM (peelArray mindim) $ t:ts of
+                           Nothing  -> bad $ TypeError pos "mindim wrong in Mapall2"
+                           Just ts' -> return $ Tuple ts'
 
-  intype' <- checkAnnotation pos "input element" intype ineltp
+  intype' <- checkAnnotation pos "input element" intype $ Elem ineltp
   fun' <- checkLambda fun [intype']
   outtype' <- checkAnnotation pos "result element" outtype (typeOf fun')
   return $ Mapall2 fun' arrexp' intype' outtype' pos
@@ -843,14 +841,14 @@ checkExp' (Redomap2 redfun mapfun accexp arrexp intype outtype pos) = do
 soac2ArgType :: SrcLoc -> String -> [Type] -> TypeM Type
 soac2ArgType loc op [] = bad $ TypeError loc $ "Empty tuple given to " ++ op
 soac2ArgType _ _ [et] = return et
-soac2ArgType _ _ ets = return $ Tuple ets
+soac2ArgType _ _ ets = return $ Elem $ Tuple ets
 
 soac2ElemType :: SrcLoc -> Type -> TypeM Type
 soac2ElemType loc tp@(Array {}) =
     getTupArrElemType loc tp
-soac2ElemType loc (Tuple tps) = do
+soac2ElemType loc (Elem (Tuple tps)) = do
     tps' <- mapM (getTupArrElemType loc) tps
-    return $ Tuple tps'
+    return $ Elem $ Tuple tps'
 soac2ElemType loc tp =
     bad $ TypeError loc
                     ("In TypeChecker, soac2ElemType: "
@@ -858,8 +856,8 @@ soac2ElemType loc tp =
 
 getTupArrElemType :: SrcLoc -> Type -> TypeM Type
 getTupArrElemType loc tp =
-    case tp of
-        Array eltp _ _ ->
+    case peelArray 1 tp of
+        Just eltp ->
             if hasInnerTuple eltp
             then bad $ TypeError loc ("In TypeChecker, soac2, getTupArrElemType: "
                                       ++"array elem type has an inner tuple: "++ppType eltp)
@@ -869,9 +867,9 @@ getTupArrElemType loc tp =
                               ++" input type not an array: "++ppType tp)
     where
         hasInnerTuple :: Type -> Bool
-        hasInnerTuple (Tuple {}     ) = True
-        hasInnerTuple (Array etp _ _) = hasInnerTuple etp
-        hasInnerTuple _               = False
+        hasInnerTuple (Elem (Tuple {})) = True
+        hasInnerTuple (Array etp _ _)   = hasInnerTuple $ Elem etp
+        hasInnerTuple _                 = False
 
 --------------------------------------
 ---- END Cosmin SOAC2 combinators ----
@@ -885,12 +883,12 @@ checkLiteral _ (CharVal c) = return $ CharVal c
 checkLiteral loc (TupVal vals) = do
   vals' <- mapM (checkLiteral loc) vals
   return $ TupVal vals'
-checkLiteral loc (ArrayVal arr t) = do
+checkLiteral loc (ArrayVal arr rt) = do
   vals <- mapM (checkLiteral loc) (elems arr)
-  case find ((/=t) . typeOf) vals of
-    Just wrong -> bad $ TypeError loc $ ppValue wrong ++ " is not of expected type " ++ ppType t ++ "."
+  case find ((/=rt) . typeOf) vals of
+    Just wrong -> bad $ TypeError loc $ ppValue wrong ++ " is not of expected type " ++ ppType rt ++ "."
     _          -> return ()
-  return $ ArrayVal (listArray (bounds arr) vals) t
+  return $ ArrayVal (listArray (bounds arr) vals) rt
 
 checkIdent :: TypeBox ty => Ident ty -> TypeM (Ident Type)
 checkIdent (Ident name t pos) = do
@@ -918,20 +916,20 @@ checkBinOp Less e1 e2 t pos = checkRelOp Less [Int, Real] e1 e2 t pos
 checkBinOp Leq e1 e2 t pos = checkRelOp Leq [Int, Real] e1 e2 t pos
 
 checkRelOp :: TypeBox ty =>
-              BinOp -> [Type] -> Exp ty -> Exp ty -> ty -> SrcLoc
+              BinOp -> [ElemType] -> Exp ty -> Exp ty -> ty -> SrcLoc
            -> TypeM (Exp Type)
 checkRelOp op tl e1 e2 t pos = do
-  e1' <- require tl =<< checkExp e1
-  e2' <- require tl =<< checkExp e2
+  e1' <- require (map Elem tl) =<< checkExp e1
+  e2' <- require (map Elem tl) =<< checkExp e2
   _ <- unifyExpTypes e1' e2'
-  t' <- checkAnnotation pos "result" t Bool
+  t' <- checkAnnotation pos "result" t $ Elem Bool
   return $ BinOp op e1' e2' t' pos
 
-checkPolyBinOp :: TypeBox ty => BinOp -> [Type] -> Exp ty -> Exp ty -> ty -> SrcLoc
+checkPolyBinOp :: TypeBox ty => BinOp -> [ElemType] -> Exp ty -> Exp ty -> ty -> SrcLoc
                -> TypeM (Exp Type)
 checkPolyBinOp op tl e1 e2 t pos = do
-  e1' <- require tl =<< checkExp e1
-  e2' <- require tl =<< checkExp e2
+  e1' <- require (map Elem tl) =<< checkExp e1
+  e2' <- require (map Elem tl) =<< checkExp e2
   t' <- unifyExpTypes e1' e2'
   t'' <- checkAnnotation pos "result" t t'
   return $ BinOp op e1' e2' t'' pos
@@ -957,7 +955,7 @@ checkBinding pat e dflow = do
           t' <- lift $ checkAnnotation (srclocOf pat) (nameToString name) namet t
           add (Ident name t' pos) a
           return $ Id $ Ident name t' pos
-        checkBinding' (TupId pats pos) (Tuple ts) a
+        checkBinding' (TupId pats pos) (Elem (Tuple ts)) a
           | length pats == length ts = do
           pats' <- sequence $ zipWith3 checkBinding' pats ts ass
           return $ TupId pats' pos
@@ -996,7 +994,7 @@ checkLambda (AnonymFun params body ret pos) args = do
     _ | length params' == length args -> do
           checkApply Nothing (map identType params') args pos
           return $ AnonymFun params body' ret' pos
-      | [t@(Tuple args')] <- args,
+      | [t@(Elem (Tuple args'))] <- args,
         validApply (map identType params) args',
         [Ident pname _ _] <- take 1 params ->
           -- The function expects N parmeters, but the argument is a
@@ -1030,7 +1028,7 @@ checkLambda (CurryFun fname curryargexps rettype pos) args = do
     Just (rt, paramtypes) -> do
       rettype' <- checkAnnotation pos "return" rettype rt
       case () of
-        _ | [tupt@(Tuple ets)] <- args,
+        _ | [tupt@(Elem (Tuple ets))] <- args,
             validApply ets paramtypes ->
               -- Same shimming as in the case for anonymous functions,
               -- although we don't have to worry about name shadowing
@@ -1056,7 +1054,7 @@ checkPolyLambdaOp op curryargexps rettype args pos = do
   curryargexpts <- map typeOf <$> mapM checkExp curryargexps
   tp <- case curryargexpts ++ args of
           [t1, t2] | t1 == t2 -> return t1
-          [Tuple [t1,t2]] | t1 == t2 -> return t1 -- For autoshimming.
+          [Elem (Tuple [t1,t2])] | t1 == t2 -> return t1 -- For autoshimming.
           l -> bad $ ParameterMismatch (Just fname) pos (Left 2) l
   (x,y,params) <- case curryargexps of
                     [] -> return (Var $ xident (boxType tp),

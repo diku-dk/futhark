@@ -154,14 +154,24 @@ Fun :     Type id '(' TypeIds ')' '=' Exp
 Uniqueness : '*' { Unique }
            |     { Nonunique }
 
-Type :	  int                    { Int      }
-        | real                   { Real     }
-        | bool                   { Bool     }
-        | char                   { Char     }
-        | '(' Types ')'          { Tuple $2 }
-        | Uniqueness '[' Type ']' { Array $3 Nothing $1 }
-        | Uniqueness '[' Type ',' Exp ']' { Array $3 (Just $5) $1 }
+Type :	  ElemType { Elem $1 }
+        | Uniqueness '[' InnerType ']' { let (ds, et) = $3
+                                         in Array et (Nothing:ds) $1 }
+        | Uniqueness '[' InnerType ',' Exp ']' { let (ds, et) = $3
+                                                 in Array et (Just $5:ds) $1 }
 ;
+
+InnerType : ElemType { ([], $1) }
+          | '[' InnerType ']' { let (ds, et) = $2
+                                in (Nothing:ds, et) }
+          | '[' InnerType ',' Exp ']' { let (ds, et) = $2
+                                        in (Just $4:ds, et) }
+
+ElemType : int           { Int }
+         | real          { Real }
+         | bool          { Bool }
+         | char          { Char }
+         | '(' Types ')' { Tuple $2 }
 
 Types : Type ',' Types { $1 : $3 }
       | Type ',' Type  { [$1, $3] }
@@ -176,11 +186,11 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal (IntVal num) pos 
      | reallit        { let L pos (REALLIT num) = $1 in Literal (RealVal num) pos }
      | charlit        { let L pos (CHARLIT char) = $1 in Literal (CharVal char) pos }
      | stringlit      { let L pos (STRINGLIT s) = $1
-                        in Literal (ArrayVal (arrayFromList $ map CharVal s) Char) pos }
+                        in Literal (ArrayVal (arrayFromList $ map CharVal s) $ Elem Char) pos }
      | true           { Literal (LogVal True) $1 }
      | false          { Literal (LogVal False) $1 }
      | Id             { Var $1 }
-     | empty '(' Type ')' { Literal (ArrayVal (arrayFromList []) $3) $1 }
+     | empty '(' Type ')' { Literal (emptyArray $3) $1 }
      | '{' Exps '}'   { ArrayLit $2 Nothing $1 }
      | TupleExp       { let (exps, pos) = $1 in TupLit exps pos }
 
@@ -229,13 +239,13 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal (IntVal num) pos 
                       { Split $3 $5 Nothing $1 }
 
      | concat '(' Exp ',' Exp ')'
-                      { Concat $3 $5 Nothing $1 }
+                      { Concat $3 $5 $1 }
 
      | reduce '(' FunAbstr ',' Exp ',' Exp ')'
                       { Reduce $3 $5 $7 Nothing $1 }
 
      | map '(' FunAbstr ',' Exp ')'
-                      { Map $3 $5 Nothing Nothing $1 }
+                      { Map $3 $5 Nothing $1 }
 
      | scan '(' FunAbstr ',' Exp ',' Exp ')'
                       { Scan $3 $5 $7 Nothing $1 }
@@ -318,13 +328,13 @@ Value : IntValue { $1 }
 IntValue : intlit        { let L pos (INTLIT num) = $1 in IntVal num }
 RealValue : reallit      { let L pos (REALLIT num) = $1 in RealVal num }
 CharValue : charlit      { let L pos (CHARLIT char) = $1 in CharVal char }
-StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in ArrayVal (arrayFromList $ map CharVal s) Char }
+StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in ArrayVal (arrayFromList $ map CharVal s) $ Elem Char }
 LogValue : true          { LogVal True }
         | false          { LogVal False }
 ArrayValue :  '{' Values '}' { case combArrayTypes $ map typeOf $2 of
                                  Nothing -> error "Invalid array value"
                                  Just ts -> ArrayVal (arrayFromList $2) ts }
-TupleValue : '(' Values2 ')'        { TupVal $2 }
+TupleValue : '(' Values2 ')' { TupVal $2 }
 
 Values : Value ',' Values { $1 : $3 }
        | Value            { [$1] }

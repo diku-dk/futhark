@@ -316,10 +316,10 @@ letNormExp (Split n arr tp pos) = do
     arr'  <- letNormExp arr >>= makeVarExpSubst "tmp_arr" pos
     makeVarExpSubst "tmp_split" pos (Split n' arr' tp pos)
 
-letNormExp (Concat arr1 arr2 tp pos) = do
+letNormExp (Concat arr1 arr2 pos) = do
     arr1' <- letNormExp arr1 >>= makeVarExpSubst "tmp_arr" pos
     arr2' <- letNormExp arr2 >>= makeVarExpSubst "tmp_arr" pos
-    makeVarExpSubst "tmp_conc" pos (Concat arr1' arr2' tp pos)
+    makeVarExpSubst "tmp_conc" pos (Concat arr1' arr2' pos)
 
 letNormExp (Copy arr pos) = do
     arr' <- letNormExp arr >>= makeVarExpSubst "tmp_arr" pos
@@ -330,10 +330,10 @@ letNormExp (Copy arr pos) = do
 ---- Map/Filter/Mapall/Reduce/Scan/Redomap ----
 -----------------------------------------------
 
-letNormExp (Map lam arr tp1 tp2 pos) = do
+letNormExp (Map lam arr tp1 pos) = do
     lam'  <- letNormLambda lam
     arr'  <- letNormExp arr >>= makeVarExpSubst "tmp_arr" pos
-    makeVarExpSubst "tmp_map" pos (Map lam' arr' tp1 tp2 pos)
+    makeVarExpSubst "tmp_map" pos (Map lam' arr' tp1 pos)
 
 letNormExp (Mapall lam arr tp1 tp2 pos) = do
     lam'  <- letNormLambda lam

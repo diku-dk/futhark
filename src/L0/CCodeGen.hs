@@ -80,19 +80,19 @@ varExp k = [C.cexp|$id:k|]
 -- | True if both types map to the same runtime representation.  This
 -- is the case if they are identical modulo uniqueness.
 sameRepresentation :: Type -> Type -> Bool
-sameRepresentation (Tuple ets1) (Tuple ets2)
+sameRepresentation (Elem (Tuple ets1)) (Elem (Tuple ets2))
   | length ets1 == length ets2 =
     and $ zipWith sameRepresentation ets1 ets2
 sameRepresentation (Array et1 _ _) (Array et2 _ _) =
-  sameRepresentation et1 et2
+  sameRepresentation (Elem et1) (Elem et2)
 sameRepresentation t1 t2 = t1 == t2
 
 typeToCType :: Type -> CompilerM C.Type
-typeToCType Int = return [C.cty|int|]
-typeToCType Bool = return [C.cty|int|]
-typeToCType Char = return [C.cty|char|]
-typeToCType Real = return [C.cty|double|]
-typeToCType t@(Tuple ts) = do
+typeToCType (Elem Int) = return [C.cty|int|]
+typeToCType (Elem Bool) = return [C.cty|int|]
+typeToCType (Elem Char) = return [C.cty|char|]
+typeToCType (Elem Real) = return [C.cty|double|]
+typeToCType t@(Elem (Tuple ts)) = do
   ty <- gets $ find (sameRepresentation t . fst) . compTypeStructs
   case ty of
     Just (_, (cty, _)) -> return cty
@@ -111,7 +111,7 @@ typeToCType t@(Array {}) = do
   case ty of
     Just (_, (cty, _)) -> return cty
     Nothing -> do
-      ct <- typeToCType $ baseType t
+      ct <- typeToCType $ Elem $ elemType t
       name <- new "array_type"
       let ctp = [C.cty|$ty:ct*|]
           struct = [C.cedecl|struct $id:name { int dims[$int:(arrayDims t)]; $ty:ctp data; };|]
@@ -201,11 +201,11 @@ boundsCheckStm place idxs = [C.cstm|{$stms:(zipWith check idxs [0..])}|]
 
 -- | Return a statement printing the given value.
 printStm :: C.Exp -> Type -> CompilerM C.Stm
-printStm place Int  = return [C.cstm|printf("%d", $exp:place);|]
-printStm place Char = return [C.cstm|printf("%c", $exp:place);|]
-printStm place Bool = return [C.cstm|printf($exp:place && "true" || "false");|]
-printStm place Real = return [C.cstm|printf("%lf", $exp:place);|]
-printStm place (Tuple ets) = do
+printStm place (Elem Int)  = return [C.cstm|printf("%d", $exp:place);|]
+printStm place (Elem Char) = return [C.cstm|printf("%c", $exp:place);|]
+printStm place (Elem Bool) = return [C.cstm|printf($exp:place && "true" || "false");|]
+printStm place (Elem Real) = return [C.cstm|printf("%lf", $exp:place);|]
+printStm place (Elem (Tuple ets)) = do
   prints <- forM (zip [(0::Int)..] ets) $ \(i, et) ->
               printStm [C.cexp|$exp:place.$id:(tupleField i)|] et
   let prints' = intercalate [[C.cstm|{putchar(','); putchar(' ');}|]] $ map (:[]) prints
@@ -219,8 +219,8 @@ printStm place (Array Char _ _) =
 printStm place t@(Array et _ _) = do
   i <- new "print_i"
   v <- new "print_elem"
-  et' <- typeToCType et
-  stm <- printStm (varExp v) et
+  et' <- typeToCType $ Elem et
+  stm <- printStm (varExp v) $ Elem et
   let indexi = indexArrayElemStm (varExp v) place t [varExp i]
   return [C.cstm|{
                int $id:i;
@@ -238,11 +238,11 @@ printStm place t@(Array et _ _) = do
              }|]
 
 readStm :: C.Exp -> Type -> CompilerM C.Stm
-readStm place Int =
+readStm place (Elem Int) =
   return [C.cstm|scanf("%d", &$exp:place);|]
-readStm place Char =
+readStm place (Elem Char) =
   return [C.cstm|scanf("%c", &$exp:place);|]
-readStm place Real =
+readStm place (Elem Real) =
   return [C.cstm|scanf("%f", &$exp:place);|]
 readStm _ t =
   return [C.cstm|{
@@ -368,11 +368,11 @@ compileValue place (TupVal vs) = do
            compileValue (tupleFieldExp place i) v
   return [C.cstm|{$stms:vs'}|]
 
-compileValue place v@(ArrayVal _ et) = do
+compileValue place v@(ArrayVal _ rt) = do
   val <- new "ArrayVal"
   dt <- new "ArrayData"
   ct <- typeToCType $ typeOf v
-  cbt <- typeToCType $ baseType et
+  cbt <- typeToCType rt
   let asinit n = [C.cinit|$int:n|]
       dims = map asinit $ arrayShape v
       arrdef = [C.cedecl|$ty:ct $id:val = { $inits:dims, NULL };|]
@@ -419,7 +419,7 @@ compileExp place a@(ArrayLit [] _ _) =
 compileExp place (ArrayLit (e:es) _ _) = do
   name <- new "ArrayLit_elem"
   et <- typeToCType $ typeOf e
-  bt <- typeToCType $ baseType $ typeOf e
+  bt <- typeToCType $ Elem $ elemType $ typeOf e
   e' <- compileExp (varExp name) e
   es' <- mapM (compileExpInPlace $ varExp name) es
   i <- new "ArrayLit_i"
@@ -589,12 +589,12 @@ compileExp place e@(Iota (Var v) _) = do
 
 compileExp place (Iota ne pos) = do
   size <- newAsName "iota_size"
-  let ident = Ident size Int pos
+  let ident = Ident size (Elem Int) pos
   compileExp place $ LetPat (Id ident) ne (Iota (Var ident) pos) pos
 
 compileExp place e@(Replicate (Var nv) (Var vv) _) = do
   e' <- compileExpInPlace place e
-  bt <- typeToCType $ baseType $ identType vv
+  bt <- typeToCType $ Elem $ elemType $ identType vv
   nv' <- lookupVar $ identName nv
   vv' <- lookupVar $ identName vv
   let dims = nv' : arrayShapeExp vv' (identType vv)
@@ -607,7 +607,7 @@ compileExp place e@(Replicate (Var nv) (Var vv) _) = do
 compileExp place (Replicate ne ve pos) = do
   nv <- newAsName "replicate_n"
   vv <- newAsName "replicate_v"
-  let nident = Ident nv Int pos
+  let nident = Ident nv (Elem Int) pos
       vident = Ident vv (typeOf ve) pos
       nlet body = LetPat (Id nident) ne body pos
       vlet body = LetPat (Id vident) ve body pos
@@ -635,7 +635,7 @@ compileExp place e@(Transpose arrexp _) = do
   i <- new "transpose_i"
   j <- new "transpose_j"
   intype <- typeToCType $ typeOf arrexp
-  basetype <- typeToCType $ baseType $ typeOf arrexp
+  basetype <- typeToCType $ Elem $ elemType $ typeOf arrexp
   arrexp' <- compileExp (varExp arr) arrexp
   let alloc = case arrayShapeExp (varExp arr) (typeOf arrexp) of
                 rows:cols:more -> allocArray place (cols:rows:more) basetype
@@ -680,13 +680,13 @@ compileExp place (Split posexp arrexp _ _) = do
                $exp:place1.dims[0] -= $id:pos;
              }|]
 
-compileExp place (Concat xarr yarr _ _) = do
+compileExp place (Concat xarr yarr _) = do
   x <- new "concat_x"
   y <- new "concat_y"
   xarr' <- compileExp (varExp x) xarr
   yarr' <- compileExp (varExp y) yarr
   arrt <- typeToCType $ typeOf xarr
-  bt' <- typeToCType $ baseType $ typeOf xarr
+  bt' <- typeToCType $ Elem $ elemType $ typeOf xarr
   let alloc = case (arrayShapeExp (varExp x) (typeOf xarr),
                     arrayShapeExp (varExp y) (typeOf yarr)) of
                 (xrows:rest, yrows:_) ->
@@ -786,7 +786,7 @@ compileExp place (Copy e _) = do
 
 compileExp _ (Zip _ _) = error "Zip encountered during code generation."
 compileExp _ (Unzip _ _ _) = error "Unzip encountered during code generation."
-compileExp _ (Map _ _ _ _ _) = soacError
+compileExp _ (Map _ _ _ _) = soacError
 compileExp _ (Reduce _ _ _ _ _) = soacError
 compileExp _ (Scan _ _ _ _ _) = soacError
 compileExp _ (Filter _ _ _ _) = soacError

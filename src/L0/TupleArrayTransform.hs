@@ -32,27 +32,30 @@ new k = do (name, src) <- gets $ newName (nameFromString k) . envNameSrc
            modify $ \s -> s { envNameSrc = src }
            return name
 
+transformElemType :: ElemType -> ElemType
+transformElemType (Tuple elemts) = Tuple (map transformType elemts)
+transformElemType t = t
+
 transformType :: Type -> Type
 transformType (Array (Tuple elemts) size u) =
-  Tuple (map (transformType . arraytype) elemts)
-  where arraytype t = Array t size u
+  Elem $ Tuple (map (transformType . arr) elemts)
+  where arr t = arrayOf t size u
 transformType (Array elemt size u) =
-  case elemt' of
-    Tuple elemts -> Tuple (map (transformType . arraytype) elemts)
-    _ -> Array elemt' size u
-  where elemt' = transformType elemt
-        arraytype t = transformType $ Array t size Nonunique
-transformType (Tuple elemts) = Tuple (map transformType elemts)
-transformType t = t -- All other types are fine.
+  case transformElemType elemt of
+    Tuple elemts -> Elem $ Tuple (map (transformType . arr) elemts)
+    elemt' -> Array elemt' size u
+  where arr t = arrayOf t size u
+transformType (Elem et) = Elem $ transformElemType et
 
 transformValue :: Value -> Value
-transformValue (ArrayVal arr et) =
-  case transformType et of
-    Tuple ets
-      | [] <- A.elems arr -> TupVal [ arrayVal [] et' | et' <- ets ]
-      | otherwise         ->  TupVal (zipWith asarray ets $ transpose arrayvalues)
-    et'         -> ArrayVal arr et'
-  where asarray t vs = transformValue $ arrayVal vs t
+transformValue (ArrayVal arr rt) =
+  case transformType rt of
+    Elem (Tuple ts)
+      | [] <- A.elems arr -> TupVal $ map emptyOf ts
+      | otherwise         -> TupVal (zipWith asarray ts $ transpose arrayvalues)
+    rt' -> ArrayVal arr rt'
+  where emptyOf t = blankValue $ arrayType 1 t Nonunique
+        asarray t vs = transformValue $ arrayVal vs t
         arrayvalues = map (tupleValues . transformValue) $ A.elems arr
         tupleValues (TupVal vs) = vs
         tupleValues _ = error "L0.TupleArrayTransform.transformValue: Element of tuple array is not tuple."
@@ -79,13 +82,13 @@ transformExp (TupLit es loc) = do
   return $ TupLit es' loc
 transformExp (ArrayLit [] intype loc) =
   return $ case transformType intype of
-             Tuple ets ->
+             Elem (Tuple ets) ->
                TupLit [ ArrayLit [] et loc | et <- ets ] loc
              et' -> ArrayLit [] et' loc
 transformExp (ArrayLit es intype loc) = do
   es' <- mapM transformExp es
   case transformType intype of
-    Tuple ets -> do
+    Elem (Tuple ets) -> do
       (e, bindings) <- foldM comb (id, replicate (length ets) []) es'
       e <$> tuparrexp (map reverse bindings) ets
         where comb (acce, bindings) e = do
@@ -100,7 +103,7 @@ transformExp (Index vname idxs intype outtype loc) = do
   case (identType vname', intype', outtype') of
     -- If the input type is a tuple, then the output type is
     -- necessarily also.
-    (Tuple ets, Tuple its, Tuple ots) -> do
+    (Elem (Tuple ets), Elem (Tuple its), Elem (Tuple ots)) -> do
       -- Create names for the elements of the tuple.
       names <- map fst <$> mapM (newVar loc "index_tup") ets
       indexes' <- forM (zip3 names its ots) $ \(name, it, ot) ->
@@ -123,7 +126,7 @@ transformExp (LetWith name src idxs ve body loc) = do
   body' <- transformExp body
   ve' <- transformExp ve
   case (identType name', typeOf ve') of
-    (Tuple ets, Tuple xts) -> do
+    (Elem (Tuple ets), Elem (Tuple xts)) -> do
       snames <- map fst <$> mapM (newVar loc "letwith_src") ets
       vnames <- map fst <$> mapM (newVar loc "letwith_el") xts
       let xlet inner = LetPat (TupId (map Id snames) loc) (Var src') inner loc
@@ -138,8 +141,8 @@ transformExp (Replicate ne ve loc) = do
   ne' <- transformExp ne
   ve' <- transformExp ve
   case typeOf ve' of
-    Tuple ets -> do
-      (n, nv) <- newVar loc "n" Int
+    Elem (Tuple ets) -> do
+      (n, nv) <- newVar loc "n" $ Elem Int
       (names, vs) <- unzip <$> mapM (newVar loc "rep_tuple") ets
       let arrexp v = Replicate nv v loc
           nlet body = LetPat (Id n) ne' body loc
@@ -150,7 +153,7 @@ transformExp (Replicate ne ve loc) = do
 transformExp (Size e loc) = do
   e' <- transformExp e
   case typeOf e' of
-    Tuple (et:ets) -> do
+    Elem (Tuple (et:ets)) -> do
       (name, namev) <- newVar loc "size_tup" et
       names <- map fst <$> mapM (newVar loc "size_tup") ets
       size <- transformExp $ Size namev loc
@@ -163,7 +166,7 @@ transformExp (Split nexp arrexp eltype loc) = do
   nexp' <- transformExp nexp
   arrexp' <- transformExp arrexp
   case typeOf arrexp' of
-    Tuple ets -> do
+    Elem (Tuple ets) -> do
       (n, nv) <- newVar loc "split_n" $ typeOf nexp'
       names <- map fst <$> mapM (newVar loc "split_tup") ets
       partnames <- forM ets $ \et -> do
@@ -179,21 +182,20 @@ transformExp (Split nexp arrexp eltype loc) = do
                         TupLit (map (Var . snd) partnames) loc] loc
       return $ letn $ letarr $ letsplits res
     _ -> return $ Split nexp' arrexp' (transformType eltype) loc
-transformExp (Concat x y eltype loc) = do
+transformExp (Concat x y loc) = do
   x' <- transformExp x
   y' <- transformExp y
-  case transformType $ typeOf x' of -- Both x and y have same type.
-    Tuple ets -> do
-      let arrelemts = map (stripArray 1) ets
+  case typeOf x' of -- Both x and y have same type.
+    Elem (Tuple ets) -> do
       xnames <- map fst <$> mapM (newVar loc "concat_tup_x") ets
       ynames <- map fst <$> mapM (newVar loc "concat_tup_y") ets
       let letx body = LetPat (TupId (map Id xnames) loc) x' body loc
           lety body = LetPat (TupId (map Id ynames) loc) y' body loc
-          conc et (xarr, yarr) = transformExp $
-            Concat (Var xarr) (Var yarr) et loc
-      concs <- zipWithM conc arrelemts $ zip xnames ynames
+          conc xarr yarr = transformExp $
+            Concat (Var xarr) (Var yarr) loc
+      concs <- zipWithM conc xnames ynames
       return $ letx $ lety $ TupLit concs loc
-    _ -> return $ Concat x' y' (transformType eltype) loc
+    _ -> return $ Concat x' y' loc
 transformExp e = mapExpM transform e
   where transform = Mapper {
                       mapOnExp = transformExp
