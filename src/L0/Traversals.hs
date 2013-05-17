@@ -1,17 +1,50 @@
-{-# LANGUAGE FlexibleInstances, ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleInstances, RankNTypes #-}
+-----------------------------------------------------------------------------
+-- |
+--
+-- Functions for generic traversals across L0 syntax trees.  The
+-- motivation for this module came from dissatisfaction with rewriting
+-- the same trivial tree recursions for every module.  A possible
+-- alternative would be to use normal "Scrap your
+-- boilerplate"-techniques, but these are rejected for two reasons:
+--
+--    * They are too slow.
+--
+--    * More importantly, they do not tell you whether you have missed
+--      some cases.
+--
+-- Instead, this module defines various traversals of the L0 syntax
+-- tree.  The implementation is rather tedious, but the interface is
+-- easy to use.
+--
+-- A traversal of the L0 syntax tree is expressed as a tuple of
+-- functions expressing the operations to be performed on the various
+-- types of nodes.
+--
+-----------------------------------------------------------------------------
 module L0.Traversals
-  ( Mapper(..)
+  (
+  -- * Mapping
+    Mapper(..)
   , identityMapper
   , mapExpM
   , mapExp
+
+  -- * Folding
   , Folder(..)
   , foldExpM
   , foldExp
+
+  -- * Walking
   , Walker(..)
   , identityWalker
   , walkExpM
+
+  -- * Simple wrappers
   , foldlPattern
   , buildExpPattern
+
+  -- * Specific traversals
   , progNames
   )
   where
@@ -25,6 +58,7 @@ import qualified Data.Set as S
 
 import L0.AbSyn
 
+-- | Express a mapping operation on a syntax tree.
 data Mapper ty m = Mapper {
     mapOnExp :: Exp ty -> m (Exp ty)
   , mapOnType :: ty -> m ty
@@ -94,9 +128,9 @@ mapExpM tv (Reshape shape arrexp loc) =
        mapOnExp tv arrexp <*> pure loc
 mapExpM tv (Transpose e loc) =
   pure Transpose <*> mapOnExp tv e <*> pure loc
-mapExpM tv (Map fun e int outt loc) =
+mapExpM tv (Map fun e int loc) =
   pure Map <*> mapOnLambda tv fun <*> mapOnExp tv e <*>
-       mapOnType tv int <*> mapOnType tv outt <*> pure loc
+       mapOnType tv int <*> pure loc
 mapExpM tv (Reduce fun startexp arrexp int loc) =
   pure Reduce <*> mapOnLambda tv fun <*>
        mapOnExp tv startexp <*> mapOnExp tv arrexp <*>
@@ -126,9 +160,8 @@ mapExpM tv (Redomap redfun mapfun accexp arrexp intype outtype loc) =
 mapExpM tv (Split nexp arrexp t loc) =
   pure Split <*> mapOnExp tv nexp <*> mapOnExp tv arrexp <*>
        mapOnType tv t <*> pure loc
-mapExpM tv (Concat x y t loc) =
-  pure Concat <*> mapOnExp tv x <*> mapOnExp tv y <*>
-       mapOnType tv t <*> pure loc
+mapExpM tv (Concat x y loc) =
+  pure Concat <*> mapOnExp tv x <*> mapOnExp tv y <*> pure loc
 mapExpM tv (Copy e loc) =
   pure Copy <*> mapOnExp tv e <*> pure loc
 mapExpM tv (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody loc) =
