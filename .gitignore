@@ -6,3 +6,8 @@
 dist
 
 data/*testout
+
+*.aux
+*.log
+*.prof
+*.o
