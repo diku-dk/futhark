@@ -323,6 +323,7 @@ Value : IntValue { $1 }
       | StringValue { $1 }
       | LogValue { $1 }
       | ArrayValue { $1 }
+      | TupleValue { $1 }
 
 
 IntValue : intlit        { let L pos (INTLIT num) = $1 in IntVal num }
