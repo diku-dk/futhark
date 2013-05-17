@@ -416,11 +416,11 @@ evalExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody pos) = do
 --- Begin SOAC2 (Cosmin) ---
 ----------------------------
 
-evalExp (Map2 fun es intype outtype pos) = do
+evalExp (Map2 fun es intype pos) = do
     let e' = case es of [e] -> e
                         _   ->  Zip (map (\x -> (x, typeOf x)) es) pos
     let e_map = Map fun e' intype pos
-    let res = case outtype of
+    let res = case typeOf fun of
                 Elem (Tuple ts) -> Unzip e_map ts pos
                 _ -> e_map
     evalExp res

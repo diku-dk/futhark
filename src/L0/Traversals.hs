@@ -168,9 +168,9 @@ mapExpM tv (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody loc) =
   pure DoLoop <*> mapOnPattern tv mergepat <*> mapOnExp tv mergeexp <*>
        mapOnIdent tv loopvar <*> mapOnExp tv boundexp <*>
        mapOnExp tv loopbody <*> mapOnExp tv letbody <*> pure loc
-mapExpM tv (Map2 fun arrexps intype outtype loc) =
+mapExpM tv (Map2 fun arrexps intype loc) = -- outtype 
   pure Map2 <*> mapOnLambda tv fun <*> mapM (mapOnExp tv) arrexps <*>
-       mapOnType tv intype <*> mapOnType tv outtype <*> pure loc
+       mapOnType tv intype  <*> pure loc -- <*> mapOnType tv outtype
 mapExpM tv (Reduce2 fun startexp arrexps intype loc) =
   pure Reduce2 <*> mapOnLambda tv fun <*>
        mapOnExp tv startexp <*> mapM (mapOnExp tv) arrexps <*>

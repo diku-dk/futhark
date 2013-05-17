@@ -755,14 +755,14 @@ checkExp' (DoLoop mergepat mergeexp (Ident loopvar _ _)
 ----------------------------------------------
 ---- BEGIN Cosmin added SOAC2 combinators ----
 ----------------------------------------------
-checkExp' (Map2 fun arrexp intype outtype pos) = do
+checkExp' (Map2 fun arrexp intype pos) = do    -- outtype 
   arrexp' <- mapM checkExp arrexp
   ineltps <- mapM (soac2ElemType pos . typeOf) arrexp'
   ineltp  <- soac2ArgType pos "Map2" ineltps
   fun'    <- checkLambda fun [ineltp]
   intype' <- checkAnnotation pos "input element" intype ineltp
-  outtype'<- checkAnnotation pos "output element" outtype $ typeOf fun'
-  return $ Map2 fun' arrexp' intype' outtype' pos
+  -- outtype'<- checkAnnotation pos "output element" outtype $ typeOf fun'
+  return $ Map2 fun' arrexp' intype' pos -- outtype' 
 
 checkExp' (Reduce2 fun startexp arrexp intype pos) = do
   startexp' <- checkExp startexp
