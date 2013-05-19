@@ -1,3 +1,5 @@
+// Test that simple function argument consumption works.
+
 fun int f(*[int] a) = a[0]
 
 fun int main() =
