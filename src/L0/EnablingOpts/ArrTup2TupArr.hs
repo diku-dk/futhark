@@ -21,7 +21,7 @@ import L0.FreshNames
 --import L0.Traversals
 import L0.EnablingOpts.EnablingOptErrors
 
-import Debug.Trace
+--import Debug.Trace
 
 -----------------------------------------------------------------
 -----------------------------------------------------------------
@@ -562,6 +562,11 @@ arr2tupExp (Apply fname [arg] _ pos)
     arg' <- arr2tupExp arg
     let tp' = typeOf arg'
     return $ Apply fname [arg'] tp' pos
+
+arr2tupExp (Apply fname _ _ pos)
+  | "assertZip" <- nameToString fname = 
+    badArr2TupM $ EnablingOptError pos ("In arr2tupExp of Apply, function name "
+                                        ++"is assertZip -- broken Invariant! ")
 
 arr2tupExp (Apply fnm args rtp pos) = do
     rtp' <- toTupArrType pos rtp
