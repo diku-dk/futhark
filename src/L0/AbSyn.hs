@@ -628,6 +628,10 @@ data Lambda ty = AnonymFun [Ident Type] (Exp ty) Type SrcLoc
                     -- op +(4) *)
                  deriving (Eq, Ord, Show)
 
+instance Located (Lambda ty) where
+  locOf (AnonymFun _ _ _ loc) = locOf loc
+  locOf (CurryFun  _ _ _ loc) = locOf loc
+
 instance Typed (Lambda Type) where
   typeOf (AnonymFun _ _ t _) = t
   typeOf (CurryFun _ _ t _) = t
