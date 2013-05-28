@@ -275,7 +275,7 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal (IntVal num) pos 
                       { Filter $3 $5 Nothing $1 }
 
      | filter2 '(' FunAbstr ',' Exps ')'
-                      { Filter2 $3 $5 Nothing $1 }
+                      { Filter2 $3 $5 $1 }
 
      | mapall '(' FunAbstr ',' Exp ')'
                       { Mapall $3 $5 $1 }
@@ -284,10 +284,10 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal (IntVal num) pos 
                       { Mapall2 $3 $5 $1 }
 
      | redomap '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
-                      { Redomap $3 $5 $7 $9 Nothing Nothing $1 }
+                      { Redomap $3 $5 $7 $9 Nothing $1 }
 
      | redomap2 '(' FunAbstr ',' FunAbstr ',' Exp ',' Exps ')'
-                      { Redomap2 $3 $5 $7 $9 Nothing Nothing $1 }
+                      { Redomap2 $3 $5 $7 $9 Nothing $1 }
 
      | copy '(' Exp ')' { Copy $3 $1 }
 

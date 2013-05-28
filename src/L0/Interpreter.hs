@@ -109,6 +109,20 @@ tupToList :: SrcLoc -> Value -> L0M [Value]
 tupToList _ (TupVal l) = return l
 tupToList loc _ = bad $ TypeError loc "tupToList"
 
+untuple :: Value -> [Value]
+untuple (TupVal vs) = vs
+untuple v           = [v]
+
+tuple :: [Value] -> Value
+tuple [v] = v
+tuple vs = TupVal vs
+
+arrays :: Type -> [Value] -> Value
+arrays (Elem (Tuple ts)) v =
+  TupVal $ zipWith arrayVal (arrays' (map untuple v)) ts
+  where arrays' = foldr (zipWith (:)) (replicate (length ts) [])
+arrays rowtype vs = arrayVal vs rowtype
+
 --------------------------------------------------
 ------- Interpreting an arbitrary function -------
 --------------------------------------------------
@@ -176,11 +190,15 @@ builtin fname args = bad $ InvalidFunctionArguments (nameFromString fname) Nothi
 
 
 evalExp :: Exp Type -> L0M Value
+
 evalExp (Literal val _) = return val
+
 evalExp (TupLit es _) =
   TupVal <$> mapM evalExp es
+
 evalExp (ArrayLit es rt _) =
   arrayVal <$> mapM evalExp es <*> pure rt
+
 evalExp (BinOp Plus e1 e2 (Elem Int) pos) = evalIntBinOp (+) e1 e2 pos
 evalExp (BinOp Plus e1 e2 (Elem Real) pos) = evalRealBinOp (+) e1 e2 pos
 evalExp (BinOp Minus e1 e2 (Elem Int) pos) = evalIntBinOp (-) e1 e2 pos
@@ -199,50 +217,62 @@ evalExp (BinOp Xor e1 e2 _ pos) = evalIntBinOp xor e1 e2 pos
 evalExp (BinOp Bor e1 e2 _ pos) = evalIntBinOp (.|.) e1 e2 pos
 evalExp (BinOp LogAnd e1 e2 _ pos) = evalBoolBinOp (&&) e1 e2 pos
 evalExp (BinOp LogOr e1 e2 _ pos) = evalBoolBinOp (||) e1 e2 pos
+
 evalExp (BinOp Equal e1 e2 _ _) = do
   v1 <- evalExp e1
   v2 <- evalExp e2
   return $ LogVal (v1==v2)
+
 evalExp (BinOp Less e1 e2 _ _) = do
   v1 <- evalExp e1
   v2 <- evalExp e2
   return $ LogVal (v1<v2)
+
 evalExp (BinOp Leq e1 e2 _ _) = do
   v1 <- evalExp e1
   v2 <- evalExp e2
   return $ LogVal (v1<=v2)
+
 evalExp (BinOp _ _ _ _ pos) = bad $ TypeError pos "evalExp Binop"
+
 evalExp (And e1 e2 pos) = do
   v1 <- evalExp e1
   case v1 of LogVal True  -> evalExp e2
              LogVal False -> return v1
              _            -> bad $ TypeError pos "evalExp And"
+
 evalExp (Or e1 e2 pos) = do
   v1 <- evalExp e1
   case v1 of LogVal True  -> return v1
              LogVal False -> evalExp e2
              _            -> bad $ TypeError pos "evalExp Or"
+
 evalExp (Not e pos) = do
   v <- evalExp e
   case v of LogVal b -> return $ LogVal (not b)
             _        -> bad $ TypeError pos "evalExp Not"
+
 evalExp (Negate e _ pos) = do
   v <- evalExp e
   case v of IntVal x  -> return $ IntVal (-x)
             RealVal x -> return $ RealVal (-x)
             _         -> bad $ TypeError pos "evalExp Negate"
+
 evalExp (If e1 e2 e3 _ pos) = do
   v <- evalExp e1
   case v of LogVal True  -> evalExp e2
             LogVal False -> evalExp e3
             _            -> bad $ TypeError pos "evalExp If"
+
 evalExp (Var (Ident name _ _)) =
   lookupVar name
+
 evalExp (Apply fname [arg] _ loc)
   | "trace" <- nameToString fname = do
   arg' <- evalExp arg
   tell [(loc, ppValue arg')]
   return arg'
+
 evalExp (Apply fname args _ loc)
   | "assertZip" <- nameToString fname = do
   args' <- mapM evalExp args
@@ -256,15 +286,18 @@ evalExp (Apply fname args _ loc)
     getArrSize :: Value -> L0M Int
     getArrSize aa@(ArrayVal {}) = return $ arraySize aa
     getArrSize _ = bad $ TypeError loc "one of assertZip args not an array val!"
+
 evalExp (Apply fname args _ _) = do
   fun <- lookupFun fname
   args' <- mapM evalExp args
   fun args'
+
 evalExp (LetPat pat e body pos) = do
   v <- evalExp e
   case evalPattern pat v of
     Nothing   -> bad $ TypeError pos "evalExp Let pat"
     Just bnds -> local (`bindVars` bnds) $ evalExp body
+
 evalExp (LetWith name src idxs ve body pos) = do
   v <- lookupVar $ identName src
   idxs' <- mapM evalExp idxs
@@ -280,6 +313,7 @@ evalExp (LetWith name src idxs ve body pos) = do
           | otherwise = bad $ IndexOutOfBounds pos (upper+1) i
           where upper = snd $ bounds arr
         change _ _ _ = bad $ TypeError pos "evalExp Let Id"
+
 evalExp (Index (Ident name _ _) idxs _ pos) = do
   v <- lookupVar name
   idxs' <- mapM evalExp idxs
@@ -289,6 +323,7 @@ evalExp (Index (Ident name _ _) idxs _ pos) = do
           | otherwise             = bad $ IndexOutOfBounds pos (upper+1) i
           where upper = snd $ bounds arr
         idx _ _ = bad $ TypeError pos "evalExp Index"
+
 evalExp (Iota e pos) = do
   v <- evalExp e
   case v of
@@ -296,9 +331,11 @@ evalExp (Iota e pos) = do
       | x >= 0    -> return $ arrayVal (map IntVal [0..x-1]) $ Elem Int
       | otherwise -> bad $ NegativeIota pos x
     _ -> bad $ TypeError pos "evalExp Iota"
+
 evalExp (Size e _) = do
   v <- evalExp e
   return $ IntVal $ arraySize v
+
 evalExp (Replicate e1 e2 pos) = do
   v1 <- evalExp e1
   v2 <- evalExp e2
@@ -307,6 +344,7 @@ evalExp (Replicate e1 e2 pos) = do
       | x >= 0    -> return $ ArrayVal (listArray (0,x-1) $ repeat v2) $ typeOf v2
       | otherwise -> bad $ NegativeReplicate pos x
     _   -> bad $ TypeError pos "evalExp Replicate"
+
 evalExp re@(Reshape shapeexp arrexp pos) = do
   shape <- mapM (asInt <=< evalExp) shapeexp
   arr <- evalExp arrexp
@@ -326,6 +364,7 @@ evalExp re@(Reshape shapeexp arrexp pos) = do
                     in a : chunk i b
         asInt (IntVal x) = return x
         asInt _ = bad $ TypeError pos "evalExp Reshape int"
+
 evalExp (Transpose arrexp pos) = do
   v <- evalExp arrexp
   case v of
@@ -334,15 +373,18 @@ evalExp (Transpose arrexp pos) = do
       els' <- map arr <$> transpose <$> mapM (arrToList pos) (elems inarr)
       return $ arrayVal els' et
     _ -> bad $ TypeError pos "evalExp Transpose"
+
 evalExp (Map fun e _ pos) = do
   vs <- arrToList pos =<< evalExp e
   vs' <- mapM (applyLambda fun . (:[])) vs
   return $ arrayVal vs' $ typeOf fun
+
 evalExp (Reduce fun accexp arrexp _ loc) = do
   startacc <- evalExp accexp
   vs <- arrToList loc =<< evalExp arrexp
   let foldfun acc x = applyLambda fun [acc, x]
   foldM foldfun startacc vs
+
 evalExp (Zip arrexps pos) = do
   arrs <- mapM ((arrToList pos <=< evalExp) . fst) arrexps
   let zipit ls
@@ -355,9 +397,11 @@ evalExp (Zip arrexps pos) = do
   arrayVal <$> zipit arrs <*> pure (Elem $ Tuple $ map snd arrexps)
   where split []     = Nothing
         split (x:xs) = Just (x, xs)
+
 evalExp (Unzip e ts pos) = do
   arr <- mapM (tupToList pos) =<< arrToList pos =<< evalExp e
   return $ TupVal (zipWith arrayVal (transpose arr) ts)
+
 -- scan * e {x1,..,xn} = {e*x1, e*x1*x2, ..., e*x1*x2*...*xn}
 -- we can change this definition of scan if deemed not suitable
 evalExp (Scan fun startexp arrexp _ pos) = do
@@ -368,24 +412,28 @@ evalExp (Scan fun startexp arrexp _ pos) = do
     where scanfun (acc, l) x = do
             acc' <- applyLambda fun [acc, x]
             return (acc', acc' : l)
-evalExp (Filter fun arrexp outtype pos) = do
+
+evalExp (Filter fun arrexp _ pos) = do
   vs <- filterM filt =<< arrToList pos =<< evalExp arrexp
-  return $ arrayVal vs outtype
+  return $ arrayVal vs $ typeOf fun
   where filt x = do res <- applyLambda fun [x]
                     case res of (LogVal True) -> return True
                                 _             -> return False
+
 evalExp (Mapall fun arrexp _) =
   mapall =<< evalExp arrexp
     where mapall (ArrayVal arr et) = do
             els' <- mapM mapall $ elems arr
             return $ arrayVal els' et
           mapall v = applyLambda fun [v]
-evalExp (Redomap redfun mapfun accexp arrexp _ _ pos) = do
+
+evalExp (Redomap redfun mapfun accexp arrexp _ pos) = do
   startacc <- evalExp accexp
   vs <- arrToList pos =<< evalExp arrexp
   vs' <- mapM (applyLambda mapfun . (:[])) vs
   let foldfun acc x = applyLambda redfun [acc, x]
   foldM foldfun startacc vs'
+
 evalExp (Split splitexp arrexp intype pos) = do
   split <- evalExp splitexp
   vs <- arrToList pos =<< evalExp arrexp
@@ -396,11 +444,14 @@ evalExp (Split splitexp arrexp intype pos) = do
         in return $ TupVal [arrayVal bef intype, arrayVal aft intype]
       | otherwise        -> bad $ IndexOutOfBounds pos (length vs) i
     _ -> bad $ TypeError pos "evalExp Split"
+
 evalExp (Concat arr1exp arr2exp pos) = do
   elems1 <- arrToList pos =<< evalExp arr1exp
   elems2 <- arrToList pos =<< evalExp arr2exp
   return $ arrayVal (elems1 ++ elems2) $ stripArray 1 $ typeOf arr1exp
+
 evalExp (Copy e _) = evalExp e
+
 evalExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody pos) = do
   bound <- evalExp boundexp
   mergestart <- evalExp mergeexp
@@ -412,56 +463,50 @@ evalExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody pos) = do
           binding [(loopvar, IntVal i)] $
             evalExp $ LetPat mergepat (Literal mergeval pos) loopbody pos
 
-----------------------------
---- Begin SOAC2 (Cosmin) ---
-----------------------------
+evalExp (Map2 fun arrexps _ loc) = do
+  vss <- mapM (arrToList loc <=< evalExp) arrexps
+  vs' <- mapM (applyLambda fun) $ transpose vss
+  return $ arrays (typeOf fun) vs'
 
-evalExp (Map2 fun es intype pos) = do
-    let e' = case es of [e] -> e
-                        _   ->  Zip (map (\x -> (x, typeOf x)) es) pos
-    let e_map = Map fun e' intype pos
-    let res = case typeOf fun of
-                Elem (Tuple ts) -> Unzip e_map ts pos
-                _ -> e_map
-    evalExp res
+evalExp (Reduce2 fun accexp arrexps _ loc) = do
+  startacc <- evalExp accexp
+  vss <- mapM (arrToList loc <=< evalExp) arrexps
+  let foldfun acc x = applyLambda fun $ untuple acc ++ x
+  foldM foldfun startacc (transpose vss)
 
-evalExp (Scan2 fun startexp arrs tp pos) = do
-    let arr' = case arrs of [arr] -> arr
-                            _     -> Zip (map (\x -> (x, typeOf x)) arrs) pos
-    let e_scan = Scan fun startexp arr' tp pos
-    let res = case tp of
-                Elem (Tuple ts) -> Unzip e_scan ts pos
-                _ -> e_scan
-    evalExp res
+evalExp (Scan2 fun startexp arrexps _ loc) = do
+  startval <- evalExp startexp
+  vss <- mapM (arrToList loc <=< evalExp) arrexps
+  (acc, vals') <- foldM scanfun (startval, []) $ transpose vss
+  return $ arrays (typeOf acc) $ reverse vals'
+    where scanfun (acc, l) x = do
+            acc' <- applyLambda fun $ untuple acc ++ x
+            return (acc', acc' : l)
 
-evalExp (Filter2 fun arrs tp pos) = do
-    res <- case arrs of
-             [arr] -> return $ Filter fun arr tp pos
-             _ ->  do let e_zip = Zip (map (\x -> (x, typeOf x)) arrs) pos
-                      let e_filt= Filter fun e_zip tp pos
-                      case tp of
-                        Elem (Tuple ts) -> return $ Unzip e_filt ts pos
-                        _ -> bad $ TypeError pos ("evalExp Filter2: elem type not a tuple!"++
-                                                  " array list: "++ intercalate ", " (map (ppExp 0) arrs) )
-    evalExp res
+evalExp e@(Filter2 fun arrexp loc) = do
+  vss <- mapM (arrToList loc <=< evalExp) arrexp
+  vss' <- filterM filt $ transpose vss
+  return $ arrays (typeOf e) $ map tuple vss'
+  where filt x = do res <- applyLambda fun x
+                    case res of (LogVal True) -> return True
+                                _             -> return False
 
-evalExp (Reduce2 fun accexp arrs tp pos) = do
-    let arr' = case arrs of [arr] -> arr
-                            _     ->  Zip (map (\x -> (x, typeOf x)) arrs) pos
-    evalExp $ Reduce fun accexp arr' tp pos
+evalExp (Mapall2 fun arrexp loc) = do
+  vs <- mapall (map typeOf arrexp) =<< mapM evalExp arrexp
+  case vs of [v] -> return v
+             _   -> return $ TupVal vs
+  where mapall ts@(Array {}:_) vs = do
+          vss <- mapM (arrToList loc) vs
+          els' <- mapM (mapall $ map (stripArray 1) ts) $ transpose vss
+          return $ zipWith arrayVal (transpose els') ts
+        mapall _ vs = untuple <$> applyLambda fun vs
 
-evalExp (Redomap2 redfun mapfun accexp arrs intp outtp pos) = do
-    let arr' = case arrs of [arr] -> arr
-                            _     -> Zip (map (\x -> (x, typeOf x)) arrs) pos
-    evalExp $ Redomap redfun mapfun accexp arr' intp outtp pos
-
-evalExp (Mapall2 _ _ pos) =
-    bad $ TypeError pos "evalExp Mapall2: not implemented yet!!!"
-
-----------------------------
---- End   SOAC2 (Cosmin) ---
-----------------------------
-
+evalExp (Redomap2 redfun mapfun accexp arrexps _ loc) = do
+  startacc <- evalExp accexp
+  vss <- mapM (arrToList loc <=< evalExp) arrexps
+  vs' <- mapM (applyLambda mapfun) $ transpose vss
+  let foldfun acc x = applyLambda redfun $ untuple acc ++ untuple x
+  foldM foldfun startacc vs'
 
 evalIntBinOp :: (Int -> Int -> Int) -> Exp Type -> Exp Type -> SrcLoc -> L0M Value
 evalIntBinOp op e1 e2 loc = do

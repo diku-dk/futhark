@@ -686,21 +686,21 @@ checkExp' (Scan fun startexp arrexp intype pos) = do
       return $ Scan fun' startexp' arrexp' intype' pos
     _ -> bad $ TypeError (srclocOf arrexp) "Type of expression is not an array."
 
-checkExp' (Filter fun arrexp eltype pos) = do
+checkExp' (Filter fun arrexp rowtype pos) = do
   arrexp' <- checkExp arrexp
   inelemt <- rowTypeM arrexp'
-  eltype' <- checkAnnotation pos "element" eltype inelemt
+  rowtype' <- checkAnnotation pos "row" rowtype inelemt
   fun' <- checkLambda fun [inelemt]
   when (typeOf fun' /= Elem Bool) $
     bad $ TypeError pos "Filter function does not return bool."
-  return $ Filter fun' arrexp' eltype' pos
+  return $ Filter fun' arrexp' rowtype' pos
 
 checkExp' (Mapall fun arrexp pos) = do
   arrexp' <- checkExp arrexp
   fun' <- checkLambda fun [Elem $ elemType $ typeOf arrexp']
   return $ Mapall fun' arrexp' pos
 
-checkExp' (Redomap redfun mapfun accexp arrexp intype outtype pos) = do
+checkExp' (Redomap redfun mapfun accexp arrexp intype pos) = do
   accexp' <- checkExp accexp
   arrexp' <- checkExp arrexp
   et <- rowTypeM arrexp'
@@ -708,8 +708,7 @@ checkExp' (Redomap redfun mapfun accexp arrexp intype outtype pos) = do
   redfun' <- checkLambda redfun [typeOf accexp', typeOf mapfun']
   _ <- require [typeOf redfun'] accexp'
   intype' <- checkAnnotation pos "input element" intype et
-  outtype' <- checkAnnotation pos "result" outtype (typeOf redfun')
-  return $ Redomap redfun' mapfun' accexp' arrexp' intype' outtype' pos
+  return $ Redomap redfun' mapfun' accexp' arrexp' intype' pos
 
 checkExp' (Split splitexp arrexp intype pos) = do
   splitexp' <- require [Elem Int] =<< checkExp splitexp
@@ -757,8 +756,7 @@ checkExp' (Map2 fun arrexp intype pos) = do
   ineltp  <- soac2ArgType pos "Map2" ineltps
   fun'    <- checkLambda fun ineltps
   intype' <- checkAnnotation pos "input element" intype ineltp
-  -- outtype'<- checkAnnotation pos "output element" outtype $ typeOf fun'
-  return $ Map2 fun' arrexp' intype' pos -- outtype' 
+  return $ Map2 fun' arrexp' intype' pos
 
 checkExp' (Reduce2 fun startexp arrexp intype pos) = do
   startexp' <- checkExp startexp
@@ -791,16 +789,13 @@ checkExp' (Scan2 fun startexp arrexp intype pos) = do
                           ", but scan function returns type " ++ ppType (typeOf fun') ++ "."
   return $ Scan2 fun' startexp' arrexp' intype' pos
 
-checkExp' (Filter2 fun arrexp eltype pos) = do
+checkExp' (Filter2 fun arrexp pos) = do
   arrexp' <- mapM checkExp arrexp
-  --inelemt <- soac2ElemType $ typeOf arrexp'
   ineltps   <- mapM (soac2ElemType pos . typeOf) arrexp'
-  inelemt <- soac2ArgType pos "Filter2" ineltps
-  eltype' <- checkAnnotation pos "element" eltype inelemt
   fun' <- checkLambda fun ineltps
   when (typeOf fun' /= Elem Bool) $
     bad $ TypeError pos "Filter function does not return bool."
-  return $ Filter2 fun' arrexp' eltype' pos
+  return $ Filter2 fun' arrexp' pos
 
 checkExp' (Mapall2 fun arrexp pos) = do
   arrexp' <- mapM checkExp arrexp
@@ -818,7 +813,7 @@ checkExp' (Mapall2 fun arrexp pos) = do
   fun' <- checkLambda fun ineltps
   return $ Mapall2 fun' arrexp' pos
 
-checkExp' (Redomap2 redfun mapfun accexp arrexp intype outtype pos) = do
+checkExp' (Redomap2 redfun mapfun accexp arrexp intype pos) = do
   accexp' <- checkExp accexp
   arrexp' <- mapM checkExp arrexp
   ets <- mapM (soac2ElemType pos . typeOf) arrexp'
@@ -833,8 +828,7 @@ checkExp' (Redomap2 redfun mapfun accexp arrexp intype outtype pos) = do
                t               -> acct ++ [t]
   _ <- require [typeOf redfun'] accexp'
   intype' <- checkAnnotation pos "input element" intype et
-  outtype' <- checkAnnotation pos "result" outtype (typeOf redfun')
-  return $ Redomap2 redfun' mapfun' accexp' arrexp' intype' outtype' pos
+  return $ Redomap2 redfun' mapfun' accexp' arrexp' intype' pos
 
 ---------------------
 --- SOAC2 HELPERS ---

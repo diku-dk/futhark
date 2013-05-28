@@ -161,10 +161,10 @@ mapExpM tv (Filter fun arrexp t loc) =
        mapOnType tv t <*> pure loc
 mapExpM tv (Mapall fun arrexp loc) =
   pure Mapall <*> mapOnLambda tv fun <*> mapOnExp tv arrexp <*> pure loc
-mapExpM tv (Redomap redfun mapfun accexp arrexp intype outtype loc) =
+mapExpM tv (Redomap redfun mapfun accexp arrexp intype loc) =
   pure Redomap <*> mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
-       mapOnExp tv accexp <*>mapOnExp tv arrexp <*>
-       mapOnType tv intype <*> mapOnType tv outtype <*> pure loc
+       mapOnExp tv accexp <*> mapOnExp tv arrexp <*>
+       mapOnType tv intype <*> pure loc
 mapExpM tv (Split nexp arrexp t loc) =
   pure Split <*> mapOnExp tv nexp <*> mapOnExp tv arrexp <*>
        mapOnType tv t <*> pure loc
@@ -187,17 +187,16 @@ mapExpM tv (Scan2 fun startexp arrexps intype loc) =
   pure Scan2 <*> mapOnLambda tv fun <*>
        mapOnExp tv startexp <*> mapM (mapOnExp tv) arrexps <*>
        mapOnType tv intype <*> pure loc
-mapExpM tv (Filter2 fun arrexps eltype loc) =
+mapExpM tv (Filter2 fun arrexps loc) =
   pure Filter2 <*> mapOnLambda tv fun <*>
-       mapM (mapOnExp tv) arrexps <*>
-       mapOnType tv eltype <*> pure loc
+       mapM (mapOnExp tv) arrexps <*> pure loc
 mapExpM tv (Mapall2 fun arrexps loc) =
   pure Mapall2 <*> mapOnLambda tv fun <*>
        mapM (mapOnExp tv) arrexps <*> pure loc
-mapExpM tv (Redomap2 redfun mapfun accexp arrexps intype outtype loc) =
+mapExpM tv (Redomap2 redfun mapfun accexp arrexps intype loc) =
   pure Redomap2 <*> mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
        mapOnExp tv accexp <*> mapM (mapOnExp tv) arrexps <*>
-       mapOnType tv intype <*> mapOnType tv outtype <*> pure loc
+       mapOnType tv intype <*> pure loc
 
 -- | Like 'mapExp', but in the 'Identity' monad.
 mapExp :: Mapper ty Identity -> Exp ty -> Exp ty

@@ -411,16 +411,16 @@ data Exp ty = Literal Value SrcLoc
              -- 4th arg is the element type of the input array
 
             | Filter (Lambda ty) (Exp ty) ty SrcLoc
-             -- ^ 3rd arg is the row type of the input (and
-             -- result) array
+            -- ^ 3rd arg is the row type of the input (and
+            -- result) array
+
 
             | Mapall (Lambda ty) (Exp ty) SrcLoc
              -- ^ @mapall(op ~, {{1,~2}, {~3,4}}) = {{~1,2}, {3,~4}}@.
 
-            | Redomap (Lambda ty) (Lambda ty) (Exp ty) (Exp ty) ty ty SrcLoc
+            | Redomap (Lambda ty) (Lambda ty) (Exp ty) (Exp ty) ty SrcLoc
              -- ^ @redomap(g, f, n, a) = reduce(g, n, map(f, a))@.
              -- 5th arg is the row type of the input  array.
-             -- 6th arg is the result type == the row type of the reduced array
 
             | Split (Exp ty) (Exp ty) ty SrcLoc
              -- ^ @split(1, { 1, 2, 3, 4 }) = ({1},{2, 3, 4})@.
@@ -458,9 +458,9 @@ data Exp ty = Literal Value SrcLoc
 
             | Reduce2 (Lambda ty) (Exp ty) [Exp ty] ty SrcLoc
             | Scan2   (Lambda ty) (Exp ty) [Exp ty] ty SrcLoc
-            | Filter2 (Lambda ty) [Exp ty]          ty SrcLoc
+            | Filter2 (Lambda ty) [Exp ty]          SrcLoc
             | Mapall2 (Lambda ty) [Exp ty]          SrcLoc
-            | Redomap2(Lambda ty) (Lambda ty) (Exp ty) [Exp ty] ty ty SrcLoc
+            | Redomap2(Lambda ty) (Lambda ty) (Exp ty) [Exp ty] ty SrcLoc
 
               
               deriving (Eq, Ord, Show)
@@ -492,7 +492,7 @@ instance Located (Exp ty) where
   locOf (Scan _ _ _ _ pos) = locOf pos
   locOf (Filter _ _ _ pos) = locOf pos
   locOf (Mapall _ _ pos) = locOf pos
-  locOf (Redomap _ _ _ _ _ _ pos) = locOf pos
+  locOf (Redomap _ _ _ _ _ pos) = locOf pos
   locOf (Split _ _ _ pos) = locOf pos
   locOf (Concat _ _ pos) = locOf pos
   locOf (Copy _ pos) = locOf pos
@@ -501,9 +501,9 @@ instance Located (Exp ty) where
   locOf (Map2 _ _ _ pos) = locOf pos
   locOf (Reduce2 _ _ _ _ pos) = locOf pos
   locOf (Scan2 _ _ _ _ pos) = locOf pos
-  locOf (Filter2 _ _ _ pos) = locOf pos
+  locOf (Filter2 _ _ pos) = locOf pos
   locOf (Mapall2 _ _ pos) = locOf pos
-  locOf (Redomap2 _ _ _ _ _ _ pos) = locOf pos
+  locOf (Redomap2 _ _ _ _ _ pos) = locOf pos
 
 instance Typed (Exp Type) where
   typeOf (Literal val _) = typeOf val
@@ -537,9 +537,9 @@ instance Typed (Exp Type) where
   typeOf (Unzip _ ts _) = Elem $ Tuple $ map (flip (arrayType 1) Unique) ts
   typeOf (Scan fun e arr _ _) =
     arrayType 1 (typeOf fun) (uniqueness fun <> uniqueness e <> uniqueness arr)
-  typeOf (Filter _ _ t _) = arrayType 1 t Nonunique
+  typeOf (Filter _ arr _ _) = typeOf arr
   typeOf (Mapall fun e _) = arrayType (arrayDims $ typeOf e) (typeOf fun) Nonunique
-  typeOf (Redomap _ _ _ _ _ t _) = t
+  typeOf (Redomap redfun _ _ _ _ _) = typeOf redfun
   typeOf (Split _ _ t _) = Elem $ Tuple [arrayType 1 t Nonunique, arrayType 1 t Nonunique]
   typeOf (Concat x y _) = typeOf x `withUniqueness` u
     where u = uniqueness (typeOf x) <> uniqueness (typeOf y)
@@ -556,9 +556,11 @@ instance Typed (Exp Type) where
   typeOf (Reduce2 fun _ _ _ _) = typeOf fun
   typeOf (Scan2 _ _ _ (Elem (Tuple tps)) _) = Elem $ Tuple $ map (\x -> arrayType 1 x Unique) tps
   typeOf (Scan2 _ _ _ tp _) = arrayType 1 tp Unique
-  typeOf (Filter2 _ _ (Elem (Tuple tps)) _) = Elem $ Tuple $ map (\x -> arrayType 1 x Unique) tps
-  typeOf (Filter2 _ _ tp _) = arrayType 1 tp Unique
-  typeOf (Redomap2 redfun _ _ _ _ _ _) = typeOf redfun
+  typeOf (Filter2 _ arrs _) =
+    case map typeOf arrs of
+      [t] -> t
+      tps -> Elem $ Tuple tps
+  typeOf (Redomap2 redfun _ _ _ _ _) = typeOf redfun
   typeOf (Mapall2 fun es _) =
       let inpdim= case map typeOf es of
                     et:etps -> foldl min
@@ -753,7 +755,7 @@ ppExp d (Filter fun a _ _) =
   " filter ( " ++ ppLambda (d+1) fun ++ ", " ++ ppExp (d+1) a ++ " ) "
 ppExp d (Mapall fun a _)
           = " mapall ( " ++ ppLambda (d+1) fun ++ ", " ++ ppExp (d+1) a ++ " ) "
-ppExp d (Redomap id1 id2 el a _ _ _)
+ppExp d (Redomap id1 id2 el a _ _)
           = " redomap ( " ++ ppLambda (d+1) id1 ++ ", " ++ ppLambda (d+1) id2 ++ 
             ", " ++ ppExp (d+1) el ++ ", " ++ ppExp (d+1) a ++ " ) "
 
@@ -780,11 +782,11 @@ ppExp d (Scan2  fun el lst _ _) =
     " scan2 ( " ++ ppLambda (d+1) fun ++ ", " ++ ppExp (d+1) el ++ ", " ++
     intercalate ", " (map (ppExp (d+1)) lst) ++ " ) "
 --
-ppExp d (Filter2 fun els _ _) =
+ppExp d (Filter2 fun els _) =
     " filter2 ( " ++ ppLambda (d+1) fun ++ ", " ++
     intercalate ", " (map (ppExp (d+1)) els) ++ " ) "
 --
-ppExp d (Redomap2 id1 id2 el els _ _ _)
+ppExp d (Redomap2 id1 id2 el els _ _)
           = " redomap2 ( " ++ ppLambda (d+1) id1 ++ ", " ++ ppLambda (d+1) id2 ++ 
             ", " ++ ppExp (d+1) el ++ intercalate ", " (map (ppExp (d+1)) els) ++ " ) "
 --
