@@ -414,9 +414,8 @@ data Exp ty = Literal Value SrcLoc
              -- ^ 3rd arg is the row type of the input (and
              -- result) array
 
-            | Mapall (Lambda ty) (Exp ty) ty ty SrcLoc
+            | Mapall (Lambda ty) (Exp ty) SrcLoc
              -- ^ @mapall(op ~, {{1,~2}, {~3,4}}) = {{~1,2}, {3,~4}}@.
-             -- 3rd and 4th args are the base types of the input and result arrays, respectively.
 
             | Redomap (Lambda ty) (Lambda ty) (Exp ty) (Exp ty) ty ty SrcLoc
              -- ^ @redomap(g, f, n, a) = reduce(g, n, map(f, a))@.
@@ -460,7 +459,7 @@ data Exp ty = Literal Value SrcLoc
             | Reduce2 (Lambda ty) (Exp ty) [Exp ty] ty SrcLoc
             | Scan2   (Lambda ty) (Exp ty) [Exp ty] ty SrcLoc
             | Filter2 (Lambda ty) [Exp ty]          ty SrcLoc
-            | Mapall2 (Lambda ty) [Exp ty]       ty ty SrcLoc
+            | Mapall2 (Lambda ty) [Exp ty]          SrcLoc
             | Redomap2(Lambda ty) (Lambda ty) (Exp ty) [Exp ty] ty ty SrcLoc
 
               
@@ -492,7 +491,7 @@ instance Located (Exp ty) where
   locOf (Unzip _ _ pos) = locOf pos
   locOf (Scan _ _ _ _ pos) = locOf pos
   locOf (Filter _ _ _ pos) = locOf pos
-  locOf (Mapall _ _ _ _ pos) = locOf pos
+  locOf (Mapall _ _ pos) = locOf pos
   locOf (Redomap _ _ _ _ _ _ pos) = locOf pos
   locOf (Split _ _ _ pos) = locOf pos
   locOf (Concat _ _ pos) = locOf pos
@@ -503,7 +502,7 @@ instance Located (Exp ty) where
   locOf (Reduce2 _ _ _ _ pos) = locOf pos
   locOf (Scan2 _ _ _ _ pos) = locOf pos
   locOf (Filter2 _ _ _ pos) = locOf pos
-  locOf (Mapall2 _ _ _ _ pos) = locOf pos
+  locOf (Mapall2 _ _ pos) = locOf pos
   locOf (Redomap2 _ _ _ _ _ _ pos) = locOf pos
 
 instance Typed (Exp Type) where
@@ -539,7 +538,7 @@ instance Typed (Exp Type) where
   typeOf (Scan fun e arr _ _) =
     arrayType 1 (typeOf fun) (uniqueness fun <> uniqueness e <> uniqueness arr)
   typeOf (Filter _ _ t _) = arrayType 1 t Nonunique
-  typeOf (Mapall fun e _ _ _) = arrayType (arrayDims $ typeOf e) (typeOf fun) Nonunique
+  typeOf (Mapall fun e _) = arrayType (arrayDims $ typeOf e) (typeOf fun) Nonunique
   typeOf (Redomap _ _ _ _ _ t _) = t
   typeOf (Split _ _ t _) = Elem $ Tuple [arrayType 1 t Nonunique, arrayType 1 t Nonunique]
   typeOf (Concat x y _) = typeOf x `withUniqueness` u
@@ -560,7 +559,7 @@ instance Typed (Exp Type) where
   typeOf (Filter2 _ _ (Elem (Tuple tps)) _) = Elem $ Tuple $ map (\x -> arrayType 1 x Unique) tps
   typeOf (Filter2 _ _ tp _) = arrayType 1 tp Unique
   typeOf (Redomap2 redfun _ _ _ _ _ _) = typeOf redfun
-  typeOf (Mapall2 fun es _ _ _) =
+  typeOf (Mapall2 fun es _) =
       let inpdim= case map typeOf es of
                     et:etps -> foldl min
                                (arrayDims et)
@@ -752,7 +751,7 @@ ppExp d (Scan  fun el lst _ _) =
   " scan ( " ++ ppLambda (d+1) fun ++ ", " ++ ppExp (d+1) el ++ ", " ++ ppExp (d+1) lst ++ " ) "
 ppExp d (Filter fun a _ _) =
   " filter ( " ++ ppLambda (d+1) fun ++ ", " ++ ppExp (d+1) a ++ " ) "
-ppExp d (Mapall fun a _ _ _)
+ppExp d (Mapall fun a _)
           = " mapall ( " ++ ppLambda (d+1) fun ++ ", " ++ ppExp (d+1) a ++ " ) "
 ppExp d (Redomap id1 id2 el a _ _ _)
           = " redomap ( " ++ ppLambda (d+1) id1 ++ ", " ++ ppLambda (d+1) id2 ++ 
@@ -809,7 +808,7 @@ ppExp d (Redomap2 id1 id2 el els _ _ _)
           = " redomap ( " ++ ppLambda (d+1) id1 ++ ", " ++ ppLambda (d+1) id2 ++ 
             ", " ++ ppExp (d+1) el ++ ", zip ( " ++ intercalate ", " (map (ppExp (d+1)) els) ++ " ) ) "
 --
-ppExp d (Mapall2 fun lst _ _ _) = 
+ppExp d (Mapall2 fun lst _) = 
     " mapall2 ( " ++ ppLambda (d+1) fun ++ ", " ++
     intercalate ", " (map (ppExp (d+1)) lst) ++ " ) "
 --- Cosmin end ppExp for soac2

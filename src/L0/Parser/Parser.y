@@ -260,7 +260,7 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal (IntVal num) pos 
                       { Filter $3 $5 Nothing $1 }
 
      | mapall '(' FunAbstr ',' Exp ')'
-                      { Mapall $3 $5 Nothing Nothing $1 }
+                      { Mapall $3 $5 $1 }
 
      | redomap '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
                       { Redomap $3 $5 $7 $9 Nothing Nothing $1 }

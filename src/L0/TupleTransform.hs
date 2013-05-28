@@ -332,12 +332,11 @@ transformExp (Filter lam arr tp pfilt) = do
   tupArrToListArr arr' $ \arrs ->
     return $ Filter2 lam' arrs (transformType tp) pfilt
 
-transformExp (Mapall lam arr tp1 tp2 pmap) = do
+transformExp (Mapall lam arr pmap) = do
   lam' <- transformLambda lam
   arr' <- transformExp    arr
   tupArrToListArr arr' $ \arrs ->
-    return $ Mapall2 lam' arrs
-             (transformType tp1) (transformType tp2) pmap
+    return $ Mapall2 lam' arrs pmap
 
 transformExp (Redomap lam1 lam2 ne arr tp1 tp2 pos) = do
   lam1' <- transformLambda lam1

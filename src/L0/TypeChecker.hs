@@ -695,12 +695,10 @@ checkExp' (Filter fun arrexp eltype pos) = do
     bad $ TypeError pos "Filter function does not return bool."
   return $ Filter fun' arrexp' eltype' pos
 
-checkExp' (Mapall fun arrexp intype outtype pos) = do
+checkExp' (Mapall fun arrexp pos) = do
   arrexp' <- checkExp arrexp
-  intype' <- checkAnnotation pos "input element" intype $ Elem $ elemType $ typeOf arrexp'
-  fun' <- checkLambda fun [Elem $ elemType intype']
-  outtype' <- checkAnnotation pos "output element" outtype (typeOf fun')
-  return $ Mapall fun' arrexp' intype' outtype' pos
+  fun' <- checkLambda fun [Elem $ elemType $ typeOf arrexp']
+  return $ Mapall fun' arrexp' pos
 
 checkExp' (Redomap redfun mapfun accexp arrexp intype outtype pos) = do
   accexp' <- checkExp accexp
@@ -802,23 +800,21 @@ checkExp' (Filter2 fun arrexp eltype pos) = do
     bad $ TypeError pos "Filter function does not return bool."
   return $ Filter2 fun' arrexp' eltype' pos
 
-checkExp' (Mapall2 fun arrexp intype outtype pos) = do
+checkExp' (Mapall2 fun arrexp pos) = do
   arrexp' <- mapM checkExp arrexp
   let arrtps = map typeOf arrexp'
 
-  intypes <- mapM (soac2ElemType pos) arrtps
-  ineltp <- case arrtps of
-              []   -> bad $ TypeError pos "Empty tuple given to Mapall2"
-              [t]  -> return $ elemType t
-              t:ts -> let mindim = foldl min (arrayDims t) $ map arrayDims ts
-                      in case mapM (peelArray mindim) $ t:ts of
-                           Nothing  -> bad $ TypeError pos "mindim wrong in Mapall2"
-                           Just ts' -> return $ Tuple ts'
+  _ <- mapM (soac2ElemType pos) arrtps
+  ineltps <- case arrtps of
+               []   -> bad $ TypeError pos "Empty tuple given to Mapall2"
+               [t]  -> return [Elem $ elemType t]
+               t:ts -> let mindim = foldl min (arrayDims t) $ map arrayDims ts
+                       in case mapM (peelArray mindim) $ t:ts of
+                            Nothing  -> bad $ TypeError pos "mindim wrong in Mapall2"
+                            Just ts' -> return ts'
 
-  intype' <- checkAnnotation pos "input element" intype $ Elem ineltp
-  fun' <- checkLambda fun intypes
-  outtype' <- checkAnnotation pos "result element" outtype (typeOf fun')
-  return $ Mapall2 fun' arrexp' intype' outtype' pos
+  fun' <- checkLambda fun ineltps
+  return $ Mapall2 fun' arrexp' pos
 
 checkExp' (Redomap2 redfun mapfun accexp arrexp intype outtype pos) = do
   accexp' <- checkExp accexp
