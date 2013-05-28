@@ -25,6 +25,7 @@ module L0.AbSyn
   , arraySize
   , peelArray
   , elemType
+  , rowType
   , basicType
   , arrayType
   , arrayOf
@@ -195,6 +196,13 @@ elemType :: Type -> ElemType
 elemType (Array t _ _) = t
 elemType (Elem t) = t
 
+-- | Return the immediate row-type of an array.  For @[[int]]@, this
+-- would be @[int]@.
+rowType :: Type -> Type
+rowType (Array et (_:_:dims) u) = Array et dims u
+rowType (Array et _ _) = Elem et
+rowType (Elem et) = Elem et
+
 -- | A type is a basic type if it is not an array and any component
 -- types are basic types.
 basicType :: Type -> Bool
@@ -360,9 +368,8 @@ data Exp ty = Literal Value SrcLoc
             | LetWith (Ident ty) (Ident ty) [Exp ty] (Exp ty) (Exp ty) SrcLoc
             -- ^ Array Indexing and Array Constructors
 
-            | Index (Ident ty) [Exp ty] ty ty SrcLoc
-             -- ^ 3rd arg is the input-array element type 4th arg is
-             -- the result type
+            | Index (Ident ty) [Exp ty] ty SrcLoc
+             -- ^ 3rd arg is the result type
 
             | Iota (Exp ty) SrcLoc
             -- ^ @iota(n) = {0,1,..,n-1@
@@ -473,7 +480,7 @@ instance Located (Exp ty) where
   locOf (Apply _ _ _ pos) = locOf pos
   locOf (LetPat _ _ _ pos) = locOf pos
   locOf (LetWith _ _ _ _ _ pos) = locOf pos
-  locOf (Index _ _ _ _ pos) = locOf pos
+  locOf (Index _ _ _ pos) = locOf pos
   locOf (Iota _ pos) = locOf pos
   locOf (Size _ pos) = locOf pos
   locOf (Replicate _ _ pos) = locOf pos
@@ -513,7 +520,7 @@ instance Typed (Exp Type) where
   typeOf (Apply _ _ t _) = t
   typeOf (LetPat _ _ body _) = typeOf body
   typeOf (LetWith _ _ _ _ body _) = typeOf body
-  typeOf (Index _ _ _ t _) = t
+  typeOf (Index _ _ t _) = t
   typeOf (Iota _ _) = arrayType 1 (Elem Int) Unique
   typeOf (Size _ _) = Elem Int
   typeOf (Replicate _ e _) = arrayType 1 (typeOf e) u
@@ -718,7 +725,7 @@ ppExp d (LetWith (Ident dest _ _) (Ident src _ _) es el e2 _)
     " with [ " ++ intercalate ", " (map (ppExp d) es) ++
     "] <- " ++ ppExp d el ++ "in  " ++ ppExp d e2
 
-ppExp d (Index (Ident name _ _) es _ _ _) =
+ppExp d (Index (Ident name _ _) es _ _) =
   nameToString name ++ "[ " ++ intercalate ", " (map (ppExp d) es) ++ " ] "
 
 -- | Array Constructs

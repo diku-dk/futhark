@@ -390,8 +390,8 @@ require ts e
   | any (typeOf e `similarTo`) ts = return e
   | otherwise = bad $ UnexpectedType e ts
 
-rowType :: Exp Type -> TypeM Type
-rowType e = maybe wrong return $ peelArray 1 $ typeOf e
+rowTypeM :: Exp Type -> TypeM Type
+rowTypeM e = maybe wrong return $ peelArray 1 $ typeOf e
   where wrong = bad $ TypeError (srclocOf e) $ "Type of expression is not array, but " ++ ppType (typeOf e) ++ "."
 
 -- | Type check a program containing arbitrary type information,
@@ -602,18 +602,16 @@ checkExp' (LetWith (Ident dest destt destpos) src idxes ve body pos) = do
         body' <- consuming (srclocOf src) (identName src') $ scope $ checkExp body
         return $ LetWith dest' src' idxes' ve' body' pos
 
-checkExp' (Index ident idxes intype restype pos) = do
+checkExp' (Index ident idxes restype pos) = do
   ident' <- checkIdent ident
   observe ident'
   vt <- lookupVar (identName ident') pos
   case peelArray (length idxes) vt of
     Nothing -> bad $ IndexingError (arrayDims vt) (length idxes) pos
     Just et -> do
-      vet <- rowType $ Var ident'
-      intype' <- checkAnnotation pos "array" intype vet
-      restype' <- checkAnnotation pos "result" restype et
+      restype' <- checkAnnotation pos "indexing result" restype et
       idxes' <- mapM (require [Elem Int] <=< checkExp) idxes
-      return $ Index ident' idxes' intype' restype' pos
+      return $ Index ident' idxes' restype' pos
 
 checkExp' (Iota e pos) = do
   e' <- require [Elem Int] =<< checkExp e
@@ -664,7 +662,7 @@ checkExp' (Reduce fun startexp arrexp intype pos) = do
 
 checkExp' (Zip arrexps pos) = do
   arrexps' <- mapM (checkExp . fst) arrexps
-  inelemts <- mapM rowType arrexps'
+  inelemts <- mapM rowTypeM arrexps'
   inelemts' <- zipWithM (checkAnnotation pos "operand element") (map snd arrexps) inelemts
   return $ Zip (zip arrexps' inelemts') pos
 
@@ -690,7 +688,7 @@ checkExp' (Scan fun startexp arrexp intype pos) = do
 
 checkExp' (Filter fun arrexp eltype pos) = do
   arrexp' <- checkExp arrexp
-  inelemt <- rowType arrexp'
+  inelemt <- rowTypeM arrexp'
   eltype' <- checkAnnotation pos "element" eltype inelemt
   fun' <- checkLambda fun [inelemt]
   when (typeOf fun' /= Elem Bool) $
@@ -707,7 +705,7 @@ checkExp' (Mapall fun arrexp intype outtype pos) = do
 checkExp' (Redomap redfun mapfun accexp arrexp intype outtype pos) = do
   accexp' <- checkExp accexp
   arrexp' <- checkExp arrexp
-  et <- rowType arrexp'
+  et <- rowTypeM arrexp'
   mapfun' <- checkLambda mapfun [et]
   redfun' <- checkLambda redfun [typeOf accexp', typeOf mapfun']
   _ <- require [typeOf redfun'] accexp'
@@ -718,14 +716,14 @@ checkExp' (Redomap redfun mapfun accexp arrexp intype outtype pos) = do
 checkExp' (Split splitexp arrexp intype pos) = do
   splitexp' <- require [Elem Int] =<< checkExp splitexp
   arrexp' <- checkExp arrexp
-  et <- rowType arrexp'
+  et <- rowTypeM arrexp'
   intype' <- checkAnnotation pos "element" intype et
   return $ Split splitexp' arrexp' intype' pos
 
 checkExp' (Concat arr1exp arr2exp pos) = do
   arr1exp' <- checkExp arr1exp
   arr2exp' <- require [typeOf arr1exp'] =<< checkExp arr2exp
-  _ <- rowType arr2exp' -- Just check that it's an array.
+  _ <- rowTypeM arr2exp' -- Just check that it's an array.
   return $ Concat arr1exp' arr2exp' pos
 
 checkExp' (Copy e pos) = do
@@ -755,7 +753,7 @@ checkExp' (DoLoop mergepat mergeexp (Ident loopvar _ _)
 ----------------------------------------------
 ---- BEGIN Cosmin added SOAC2 combinators ----
 ----------------------------------------------
-checkExp' (Map2 fun arrexp intype pos) = do    -- outtype 
+checkExp' (Map2 fun arrexp intype pos) = do
   arrexp' <- mapM checkExp arrexp
   ineltps <- mapM (soac2ElemType pos . typeOf) arrexp'
   ineltp  <- soac2ArgType pos "Map2" ineltps
@@ -893,7 +891,7 @@ checkLiteral loc (ArrayVal arr rt) = do
 checkIdent :: TypeBox ty => Ident ty -> TypeM (Ident Type)
 checkIdent (Ident name t pos) = do
   vt <- lookupVar name pos
-  t' <- checkAnnotation pos "variable" t vt
+  t' <- checkAnnotation pos ("variable " ++ nameToString name) t vt
   return $ Ident name t' pos
 
 checkBinOp :: TypeBox tf => BinOp -> Exp tf -> Exp tf -> tf -> SrcLoc

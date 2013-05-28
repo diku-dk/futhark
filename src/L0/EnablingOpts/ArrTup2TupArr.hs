@@ -237,11 +237,11 @@ arr2tupExp e@(Var (Ident vnm _ pos)) = do
                       , identSrcLoc = pos
                       }
             
-arr2tupExp (Index idd inds tp1 tp2 pos) = do
+arr2tupExp (Index idd inds tp2 pos) = do
     inds' <- mapM arr2tupExp inds
     bnd   <- asks $ M.lookup (identName idd) . tupVtable
     case bnd of
-        Nothing  -> return $ Index idd inds' tp1 tp2 pos
+        Nothing  -> return $ Index idd inds' tp2 pos
         Just ids -> do -- idd might have been an array of tuples:
                        -- note that the indexing code is duplicated; I expect
                        --     common subexpression elimination to clean it up!
@@ -255,9 +255,9 @@ arr2tupExp (Index idd inds tp1 tp2 pos) = do
         mkIndexFromIdent newind iddd = 
             let (idnm, idtp) = ( identName iddd, identType iddd)
                 iddd' = Ident { identName = idnm, identType   = idtp, identSrcLoc = pos }
-                (idtp1, idtp2) = ( peelArray 1 idtp, peelArray (length newind) idtp ) 
-            in case (idtp1, idtp2) of
-                (Just t1, Just t2) -> return $ Index iddd' newind t1 t2 pos
+                idtp2 = ( peelArray (length newind) idtp )
+            in case idtp2 of
+                Just t2 -> return $ Index iddd' newind t2 pos
                 _ -> badArr2TupM $ EnablingOptError pos "In arr2tupExp of Index, array peeling failed) "
 
 ---------------------------------------

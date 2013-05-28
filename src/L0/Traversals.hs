@@ -122,10 +122,10 @@ mapExpM tv (LetWith dest src idxexps vexp body loc) =
   pure LetWith <*> mapOnIdent tv dest <*> mapOnIdent tv src <*>
          mapM (mapOnExp tv) idxexps <*> mapOnExp tv vexp <*>
          mapOnExp tv body <*> pure loc
-mapExpM tv (Index arr idxexps int outt loc) =
+mapExpM tv (Index arr idxexps outt loc) =
   pure Index <*> mapOnIdent tv arr <*>
          mapM (mapOnExp tv) idxexps <*>
-         mapOnType tv int <*> mapOnType tv outt <*> pure loc
+         mapOnType tv outt <*> pure loc
 mapExpM tv (Iota nexp loc) =
   pure Iota <*> mapOnExp tv nexp <*> pure loc
 mapExpM tv (Size e loc) =

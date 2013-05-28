@@ -1,12 +1,15 @@
-module L0.TupleArrayTransform
+module L0.TupleTransform
   ( transformProg
   , transformType )
   where
 
 import Control.Applicative
 import Control.Monad.State
+import Control.Monad.Reader
+import Control.Monad.Writer
 
 import qualified Data.Array as A
+import qualified Data.Map as M
 import Data.List
 import Data.Loc
 
@@ -21,38 +24,57 @@ data TransformState = TransformState {
     envNameSrc :: NameSource
   }
 
-type TransformM = State TransformState
+data TransformEnv = TransformEnv {
+    envSubsts :: M.Map Name [Ident Type]
+  }
+
+type TransformM = ReaderT TransformEnv (State TransformState)
 
 runTransformM :: TransformM a -> a
-runTransformM m = evalState m newState
+runTransformM m = evalState (runReaderT m newEnv) newState
   where newState = TransformState blankNameSource
+        newEnv = TransformEnv M.empty
 
 new :: String -> TransformM Name
 new k = do (name, src) <- gets $ newName (nameFromString k) . envNameSrc
            modify $ \s -> s { envNameSrc = src }
            return name
 
+flattenTypes :: [Type] -> [Type]
+flattenTypes = concatMap flatten
+  where flatten (Elem (Tuple ts)) = ts
+        flatten t                 = [t]
+
 transformElemType :: ElemType -> ElemType
-transformElemType (Tuple elemts) = Tuple (map transformType elemts)
+transformElemType (Tuple elemts) =
+  Tuple $ flattenTypes $ map transformType elemts
 transformElemType t = t
 
 transformType :: Type -> Type
 transformType (Array (Tuple elemts) size u) =
-  Elem $ Tuple (map (transformType . arr) elemts)
+  Elem $ Tuple $ flattenTypes (map (transformType . arr) elemts)
   where arr t = arrayOf t size u
 transformType (Array elemt size u) =
   case transformElemType elemt of
-    Tuple elemts -> Elem $ Tuple (map (transformType . arr) elemts)
+    Tuple elemts ->
+      Elem $ Tuple $ flattenTypes (map (transformType . arr) elemts)
     elemt' -> Array elemt' size u
   where arr t = arrayOf t size u
 transformType (Elem et) = Elem $ transformElemType et
+
+flattenValues :: [Value] -> [Value]
+flattenValues = concatMap flatten
+  where flatten (TupVal vs) = vs
+        flatten v           = [v]
 
 transformValue :: Value -> Value
 transformValue (ArrayVal arr rt) =
   case transformType rt of
     Elem (Tuple ts)
-      | [] <- A.elems arr -> TupVal $ map emptyOf ts
-      | otherwise         -> TupVal (zipWith asarray ts $ transpose arrayvalues)
+      | [] <- A.elems arr ->
+        TupVal $ flattenValues $ map emptyOf ts
+      | otherwise         ->
+        TupVal $ flattenValues $ zipWith asarray ts $ transpose arrayvalues
     rt' -> ArrayVal arr rt'
   where emptyOf t = blankValue $ arrayType 1 t Nonunique
         asarray t vs = transformValue $ arrayVal vs t
@@ -60,31 +82,83 @@ transformValue (ArrayVal arr rt) =
         tupleValues (TupVal vs) = vs
         tupleValues _ = error "L0.TupleArrayTransform.transformValue: Element of tuple array is not tuple."
         -- Above should never happen in well-typed program.
-transformValue (TupVal vs) = TupVal (map transformValue vs)
+transformValue (TupVal vs) = TupVal $ flattenValues $ map transformValue vs
 transformValue v = v
-
-transformPat :: TupIdent Type -> TupIdent Type
-transformPat (TupId pats loc) = TupId (map transformPat pats) loc
-transformPat (Id k) = Id $ transformIdent k
 
 transformIdent :: Ident Type -> Ident Type
 transformIdent (Ident name t loc) = Ident name (transformType t) loc
 
 transformFun :: FunDec Type -> FunDec Type
-transformFun (fname,rettype,params,body,loc) = (fname, rettype', params', body', loc)
+transformFun (fname,rettype,params,body,loc) =
+  runTransformM $ binding params $ \params' -> do
+    body' <- transformExp body
+    return (fname, rettype', params', body', loc)
   where rettype' = transformType rettype
-        params' = map transformIdent params
-        body' = runTransformM $ transformExp body
+
+binding :: [Ident Type] -> ([Ident Type] -> TransformM a) -> TransformM a
+binding params m = do
+  (params', substs) <-
+    runWriterT $ concat <$> mapM (transformParam . transformIdent) params
+  let bind env = env { envSubsts = M.union substs $
+                                   foldr (M.delete . identName) (envSubsts env)
+                                   params
+                     }
+  local bind $ m params'
+  where
+    transformParam param =
+      case typeOf param of
+        Elem (Tuple ts) -> do
+          -- We know from transformIdent that none of the element
+          -- types are themselves tuples.
+          names <- mapM (liftM fst . lift . newVar (srclocOf param) "tuple_param") ts
+          tell $ M.singleton (identName param) names
+          return names
+        _ -> return [param]
+
+flattenExps :: [Exp Type] -> [Exp Type]
+flattenExps = concatMap flatten
+  where flatten (TupLit es _) = es
+        flatten e             = [e]
 
 transformExp :: Exp Type -> TransformM (Exp Type)
+
+transformExp (Var var) = do
+  subst <- asks $ M.lookup (identName var) . envSubsts
+  case subst of
+    Nothing -> return $ Var $ transformIdent var
+    Just vs -> return $ TupLit (map Var vs) $ srclocOf var
+
+transformExp (Index vname idxs outtype loc) = do
+  idxs' <- mapM transformExp idxs
+  subst <- asks $ M.lookup (identName vname) . envSubsts
+  case subst of
+    Just vs -> do
+      let index v = Index v idxs'
+                    (stripArray (length idxs') $ typeOf v) loc
+      return $ TupLit (map index vs) loc
+    _ -> return $ Index vname' idxs' outtype' loc
+  where outtype' = transformType outtype
+        vname' = transformIdent vname
+
 transformExp (TupLit es loc) = do
-  es' <- mapM transformExp es
-  return $ TupLit es' loc
+  (wrap, es') <-
+    foldM comb (id, []) =<< flattenExps <$> mapM transformExp es
+  return $ wrap $ TupLit (reverse es') loc
+  where
+    comb (wrap, es') e =
+      case typeOf e of
+        Elem (Tuple ts) -> do
+          (names, namevs) <- unzip <$> mapM (newVar loc "tuplit_elem") ts
+          return (\body -> wrap $ LetPat (TupId (map Id names) loc) e body loc,
+                  reverse namevs ++ es')
+        _ -> return (wrap, e:es')
+
 transformExp (ArrayLit [] intype loc) =
   return $ case transformType intype of
              Elem (Tuple ets) ->
                TupLit [ ArrayLit [] et loc | et <- ets ] loc
              et' -> ArrayLit [] et' loc
+
 transformExp (ArrayLit es intype loc) = do
   es' <- mapM transformExp es
   case transformType intype of
@@ -92,35 +166,36 @@ transformExp (ArrayLit es intype loc) = do
       (e, bindings) <- foldM comb (id, replicate (length ets) []) es'
       e <$> tuparrexp (map reverse bindings) ets
         where comb (acce, bindings) e = do
-                names <- map fst <$> mapM (newVar loc "array_tup") ets
+                names <- mapM (liftM fst . newVar loc "array_tup") ets
                 return (\body -> acce $ LetPat (TupId (map Id names) loc) e body loc
                        ,zipWith (:) names bindings)
               tuparrexp bindings ts = transformExp $ TupLit (zipWith arrexp ts bindings) loc
               arrexp t names = ArrayLit (map Var names) t loc
     et' -> return $ ArrayLit es' et' loc
-transformExp (Index vname idxs intype outtype loc) = do
-  idxs' <- mapM transformExp idxs
-  case (identType vname', intype', outtype') of
-    -- If the input type is a tuple, then the output type is
-    -- necessarily also.
-    (Elem (Tuple ets), Elem (Tuple its), Elem (Tuple ots)) -> do
-      -- Create names for the elements of the tuple.
-      names <- map fst <$> mapM (newVar loc "index_tup") ets
-      indexes' <- forM (zip3 names its ots) $ \(name, it, ot) ->
-                    transformExp $ Index name idxs' it ot loc
-      let indexing = TupLit indexes' loc
-      return $ LetPat (TupId (map Id names) loc) (Var vname') indexing loc
-    _ -> return $ Index vname' idxs' intype' outtype' loc
-  where intype' = transformType intype
-        outtype' = transformType outtype
-        vname' = transformIdent vname
+
+transformExp (Apply fname argexps rettype loc) = do
+  (argexps', bindings) <- foldM comb ([], id) argexps
+  return $ bindings $ Apply fname (reverse argexps') rettype' loc
+    where rettype' = transformType rettype
+          comb (argexps', bindings) arg = do
+            arg' <- transformExp arg
+            case typeOf arg' of
+              Elem (Tuple ets) -> do
+                (names, namevs) <- unzip <$> mapM (newVar loc "array_tup") ets
+                return (reverse namevs ++ argexps',
+                        \body ->
+                          bindings $
+                          LetPat (TupId (map Id names) loc) arg' body loc)
+              _ -> return (arg' : argexps', bindings)
+
 transformExp (DoLoop mergepat mergeexp i bound loopbody letbody loc) = do
   bound' <- transformExp bound
-  let mergepat' = transformPat mergepat
   mergeexp' <- transformExp mergeexp
-  loopbody' <- transformExp loopbody
-  letbody' <- transformExp letbody
-  return $ DoLoop mergepat' mergeexp' i bound' loopbody' letbody' loc
+  withPattern mergepat $ \mergepat' -> do
+    loopbody' <- transformExp loopbody
+    letbody' <- transformExp letbody
+    return $ DoLoop mergepat' mergeexp' i bound' loopbody' letbody' loc
+
 transformExp (LetWith name src idxs ve body loc) = do
   idxs' <- mapM transformExp idxs
   body' <- transformExp body
@@ -137,6 +212,7 @@ transformExp (LetWith name src idxs ve body loc) = do
     _ -> return $ LetWith name' src idxs' ve' body' loc
   where name' = transformIdent name
         src'  = transformIdent src
+
 transformExp (Replicate ne ve loc) = do
   ne' <- transformExp ne
   ve' <- transformExp ve
@@ -150,6 +226,7 @@ transformExp (Replicate ne ve loc) = do
       arrexps' <- mapM (transformExp . arrexp) vs
       return $ nlet $ tuplet $ TupLit arrexps' loc
     _ -> return $ Replicate ne' ve' loc
+
 transformExp (Size e loc) = do
   e' <- transformExp e
   case typeOf e' of
@@ -159,9 +236,12 @@ transformExp (Size e loc) = do
       size <- transformExp $ Size namev loc
       return $ LetPat (TupId (map Id $ name : names) loc) e' size loc
     _ -> return $ Size e' loc
+
 transformExp (Unzip e _ _) = transformExp e
+
 transformExp (Zip es loc) =
-  TupLit <$> mapM (transformExp . fst) es <*> pure loc
+  transformExp =<< TupLit <$> mapM (transformExp . fst) es <*> pure loc
+
 transformExp (Split nexp arrexp eltype loc) = do
   nexp' <- transformExp nexp
   arrexp' <- transformExp arrexp
@@ -182,6 +262,7 @@ transformExp (Split nexp arrexp eltype loc) = do
                         TupLit (map (Var . snd) partnames) loc] loc
       return $ letn $ letarr $ letsplits res
     _ -> return $ Split nexp' arrexp' (transformType eltype) loc
+
 transformExp (Concat x y loc) = do
   x' <- transformExp x
   y' <- transformExp y
@@ -196,25 +277,98 @@ transformExp (Concat x y loc) = do
       concs <- zipWithM conc xnames ynames
       return $ letx $ lety $ TupLit concs loc
     _ -> return $ Concat x' y' loc
+
+transformExp (LetPat pat e body loc) = do
+  e' <- transformExp e
+  withPattern pat $ \pat' -> do
+    body' <- transformExp body
+    return $ LetPat pat' e' body' loc
+
+transformExp (Map lam arr tp pmap) = do
+  lam' <- transformLambda lam
+  arr' <- transformExp arr
+  tupArrToListArr arr' $ \arrs ->
+    return $ Map2 lam' arrs (transformType tp) pmap
+
+transformExp (Reduce lam ne arr tp pos) = do
+  lam' <- transformLambda lam
+  arr' <- transformExp    arr
+  ne'  <- transformExp    ne
+  tupArrToListArr arr' $ \arrs ->
+    return $ Reduce2 lam' ne' arrs (transformType tp) pos
+
+transformExp (Scan lam ne arr tp pscan) = do
+  lam' <- transformLambda lam
+  arr' <- transformExp    arr
+  ne'  <- transformExp    ne
+  tupArrToListArr arr' $ \arrs ->
+    return $ Scan2 lam' ne' arrs (transformType tp) pscan
+
+transformExp (Filter lam arr tp pfilt) = do
+  lam' <- transformLambda lam
+  arr' <- transformExp    arr
+  tupArrToListArr arr' $ \arrs ->
+    return $ Filter2 lam' arrs (transformType tp) pfilt
+
+transformExp (Mapall lam arr tp1 tp2 pmap) = do
+  lam' <- transformLambda lam
+  arr' <- transformExp    arr
+  tupArrToListArr arr' $ \arrs ->
+    return $ Mapall2 lam' arrs
+             (transformType tp1) (transformType tp2) pmap
+
+transformExp (Redomap lam1 lam2 ne arr tp1 tp2 pos) = do
+  lam1' <- transformLambda lam1
+  lam2' <- transformLambda lam2
+  arr'  <- transformExp    arr
+  ne'   <- transformExp    ne
+  tupArrToListArr arr' $ \arrs ->
+    return $ Redomap2 lam1' lam2' ne' arrs
+             (transformType tp1) (transformType tp2) pos
+
 transformExp e = mapExpM transform e
   where transform = Mapper {
                       mapOnExp = transformExp
                     , mapOnType = return . transformType
                     , mapOnLambda = transformLambda
-                    , mapOnPattern = return . transformPat
+                    , mapOnPattern = return -- Not used.
                     , mapOnIdent = return . transformIdent
                     , mapOnValue = return . transformValue
                     }
 
+tupArrToListArr :: Exp Type -> ([Exp Type] -> TransformM (Exp Type))
+                -> TransformM (Exp Type)
+tupArrToListArr e m = do
+  e' <- transformExp e
+  case typeOf e of
+    Elem (Tuple ts) -> do
+      (names, namevs) <-
+        unzip <$> mapM (newVar loc "tup_arr_elem") ts
+      LetPat (TupId (map Id names) loc) e' <$> m namevs <*> pure loc
+    _ -> m [e']
+  where loc = srclocOf e
+
 transformLambda :: Lambda Type -> TransformM (Lambda Type)
-transformLambda (AnonymFun params body rettype loc) = do
-  body' <- transformExp body
-  return $ AnonymFun params' body' rettype' loc
+transformLambda (AnonymFun params body rettype loc) =
+  binding params $ \params' -> do
+    body' <- transformExp body
+    return $ AnonymFun params' body' rettype' loc
   where rettype' = transformType rettype
-        params' = map transformIdent params
 transformLambda (CurryFun fname curryargs rettype loc) = do
   curryargs' <- mapM transformExp curryargs
   return $ CurryFun fname curryargs' (transformType rettype) loc
+
+flattenPattern :: TupIdent Type -> [Ident Type]
+flattenPattern (TupId pats _) = concatMap flattenPattern pats
+flattenPattern (Id ident)     = [ident]
+
+withPattern :: TupIdent Type -> (TupIdent Type -> TransformM a) -> TransformM a
+withPattern pat m =
+  binding (flattenPattern pat) $ \idents ->
+    let pat' = case idents of
+                 [ident] -> Id ident
+                 _       -> TupId (map Id idents) $ srclocOf pat
+    in m pat'
 
 newVar :: SrcLoc -> String -> Type -> TransformM (Ident Type, Exp Type)
 newVar loc name tp = do

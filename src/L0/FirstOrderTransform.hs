@@ -38,8 +38,8 @@ transformExp mape@(Map fun e intype loc) = do
   (i, iv) <- newVar "i" (Elem Int) loc
   (_, nv, nlet) <- newLet (Size inarrv loc) "n"
   let zero = Literal (IntVal 0) loc
-      index0 = Index inarr [zero] intype intype loc
-      index = Index inarr [iv] intype intype loc
+      index0 = Index inarr [zero] intype loc
+      index = Index inarr [iv] intype loc
   funcall0 <- transformLambda fun [index0]
   funcall <- transformLambda fun [index]
   (outarr, outarrv, outarrlet) <- newLet (Replicate nv funcall0 loc) "outarr"
@@ -52,14 +52,14 @@ transformExp mape@(Map fun e intype loc) = do
   return $ inarrlet $ nlet branch
 transformExp (Reduce fun accexp arrexp intype loc) = do
   ((arr, arrv), (acc, accv), (i, iv), redlet) <- newReduction loc arrexp accexp
-  let index = Index arr [iv] intype intype loc
+  let index = Index arr [iv] intype loc
   funcall <- transformLambda fun [accv, index]
   let loop = DoLoop (Id acc) accv i (Size arrv loc) loopbody accv loc
       loopbody = LetPat (Id acc) funcall accv loc
   return $ redlet loop
 transformExp (Scan fun accexp arrexp intype loc) = do
   ((arr, arrv), (acc, accv), (i, iv), redlet) <- newReduction loc arrexp accexp
-  let index = Index arr [iv] intype intype loc
+  let index = Index arr [iv] intype loc
   funcall <- transformLambda fun [accv, index]
   let loop = DoLoop (TupId [Id acc, Id arr] loc) (TupLit [accv, arrv] loc) i (Size arrv loc) loopbody arrv loc
       loopbody = LetWith arr arr [iv] funcall (TupLit [index, arrv] loc) loc
@@ -74,8 +74,8 @@ transformExp (Filter fun arrexp elty loc) = do
   (i, iv) <- newVar "i" (Elem Int) loc
   fun' <- transformLambda fun [xv]
   let branch = If fun' (intval 1) (intval 0) (Elem Int) loc
-      indexin0 = Index arr [intval 0] elty elty loc
-      indexin = Index arr [iv] elty elty loc
+      indexin0 = Index arr [intval 0] elty loc
+      indexin = Index arr [iv] elty loc
   mape <- transformExp $ Map (AnonymFun [x] branch (Elem Int) loc) arrv elty loc
   plus <- do
     (a,av) <- newVar "a" (Elem Int) loc
@@ -83,7 +83,7 @@ transformExp (Filter fun arrexp elty loc) = do
     return $ AnonymFun [a, b] (BinOp Plus av bv (Elem Int) loc) (Elem Int) loc
   scan <- transformExp $ Scan plus (intval 0) mape (Elem Int) loc
   (ia, _, ialet) <- newLet scan "ia"
-  let indexia ind = Index ia [ind] (Elem Int) (Elem Int) loc
+  let indexia ind = Index ia [ind] (Elem Int) loc
       indexiaend = indexia (BinOp Minus nv (intval 1) (Elem Int) loc)
       indexi = indexia iv
       indexim1 = indexia (BinOp Minus iv (intval 1) (Elem Int) loc)
@@ -107,7 +107,7 @@ transformExp (Mapall fun arrexp _ outtype loc) = transformExp =<< toMap arrexp
                     _ -> transformLambda fun [e]
 transformExp (Redomap redfun mapfun accexp arrexp intype _ loc) = do
   ((arr, arrv), (acc, accv), (i, iv), redlet) <- newReduction loc arrexp accexp
-  let index = Index arr [iv] intype intype loc
+  let index = Index arr [iv] intype loc
   mapfuncall <- transformLambda mapfun [index]
   redfuncall <- transformLambda redfun [accv, mapfuncall]
   let loop = DoLoop (Id acc) accv i (Size arrv loc) loopbody accv loc

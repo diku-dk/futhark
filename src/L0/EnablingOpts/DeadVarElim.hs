@@ -168,7 +168,7 @@ deadCodeElimExp e@(Var (Ident vnm _ pos)) = do
             return e
 
 
-deadCodeElimExp (Index s idxs t1 t2 pos) = do
+deadCodeElimExp (Index s idxs t2 pos) = do
     let vnm = identName s
     in_vtab <- asks $ S.member vnm . envVtable
     if not in_vtab
@@ -176,7 +176,7 @@ deadCodeElimExp (Index s idxs t1 t2 pos) = do
     else do
             _ <- tell $ DCElimRes False (S.insert vnm S.empty)
             idxs' <- mapM deadCodeElimExp idxs
-            return $ Index s idxs' t1 t2 pos
+            return $ Index s idxs' t2 pos
 
 deadCodeElimExp (DoLoop mergepat mergeexp idd n loopbdy letbdy pos) = do
     let idnms = getBnds mergepat

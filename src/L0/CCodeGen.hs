@@ -558,7 +558,7 @@ compileExp place (LetPat pat e body _) = do
                $stm:body'
              }|]
 
-compileExp place (Index var idxs _ _ _) = do
+compileExp place (Index var idxs _ _) = do
   arr <- lookupVar $ identName var
   idxvars <- mapM (new . ("index_"++) . show) [0..length idxs-1]
   idxs' <- zipWithM compileExp (map varExp idxvars) idxs

@@ -62,10 +62,10 @@ renameExp (LetPat pat e body pos) = do
     pat' <- renamePattern pat
     body' <- renameExp body
     return $ LetPat pat' e1' body' pos
-renameExp (Index s idxs t1 t2 pos) = do
+renameExp (Index s idxs t2 pos) = do
   s' <- repl s
   idxs' <- mapM renameExp idxs
-  return $ Index s' idxs' t1 t2 pos
+  return $ Index s' idxs' t2 pos
 renameExp (DoLoop mergepat mergeexp loopvar e loopbody letbody pos) = do
   e' <- renameExp e
   mergeexp' <- renameExp mergeexp

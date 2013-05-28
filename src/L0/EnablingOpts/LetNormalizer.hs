@@ -207,9 +207,9 @@ letNormExp (ArrayLit exps tp pos) = do
     -- exps' <- mapM (subsNormExp pos "tmp_lit") exps
     return $ ArrayLit exps' tp pos
 
-letNormExp (Index s idx t1 t2 pos) = do
+letNormExp (Index s idx t2 pos) = do
     idx' <- mapM (subLetoNormExp "tmp_ind") idx
-    return $ Index s idx' t1 t2 pos
+    return $ Index s idx' t2 pos
 
 -----------------------
 --- unary operators ---
