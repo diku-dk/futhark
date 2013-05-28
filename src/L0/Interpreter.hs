@@ -280,7 +280,7 @@ evalExp (LetWith name src idxs ve body pos) = do
           | otherwise = bad $ IndexOutOfBounds pos (upper+1) i
           where upper = snd $ bounds arr
         change _ _ _ = bad $ TypeError pos "evalExp Let Id"
-evalExp (Index (Ident name _ _) idxs _ _ pos) = do
+evalExp (Index (Ident name _ _) idxs _ pos) = do
   v <- lookupVar name
   idxs' <- mapM evalExp idxs
   foldM idx v idxs'

@@ -24,7 +24,7 @@ import L0.EnablingOpts.TupleNormalizer
 import L0.EnablingOpts.LetNormalizer
 import L0.EnablingOpts.EnablingOptErrors
 
-import L0.EnablingOpts.ArrTup2TupArr
+import qualified L0.TupleTransform as TT
 
 import Debug.Trace
 
@@ -47,8 +47,7 @@ enablingOpts prog = do
     prog_enopt1 <- normCopyDeadOpts prog_ntup
     prog_enopt2 <- normCopyDeadOpts prog_enopt1
     prog_deadf2 <- deadFunElim     prog_enopt2
-    prog_flat   <- arr2tupProg prog_deadf2
-    normCopyDeadOpts prog_flat
+    normCopyDeadOpts $ TT.transformProg prog_deadf2
 
 --    if(succs)
 --    then enablingOpts outprog

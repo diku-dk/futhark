@@ -181,11 +181,11 @@ tupleNormExp e@(Var (Ident vnm _ pos)) = do
             exps <- mapM mkTuplitFromPat tupids
             return $ TupLit exps pos 
 
-tupleNormExp (Index idd inds tp1 tp2 pos) = do 
+tupleNormExp (Index idd inds tp2 pos) = do
     bnd <- asks $ M.lookup (identName idd) . envVtable
     case bnd of
         Nothing  -> do  inds' <- mapM tupleNormExp inds
-                        return $ Index idd inds' tp1 tp2 pos
+                        return $ Index idd inds' tp2 pos
         Just _   -> badTupNormM $ EnablingOptError pos ("In tupleNormExp of Index, broken invariant: "
                                                         ++" indexed var has a TupId binding! ")
 -------------------------------------------------------

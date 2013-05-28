@@ -283,7 +283,7 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal (IntVal num) pos 
                       { LetWith $2 $2 [] $6 $8 $1 }
 
      | Id '[' Exps ']'
-                      { Index $1 $3 Nothing Nothing (srclocOf $1) }
+                      { Index $1 $3 Nothing (srclocOf $1) }
 
      | loop '(' TupId ')' '=' for Id '<' Exp do Exp in Exp %prec letprec
                       { DoLoop $3 (tupIdExp $3) $7 $9 $11 $13 $1 }

@@ -17,7 +17,7 @@ import L0.Renamer
 import L0.Interpreter
 import L0.EnablingOpts.EnablingOptDriver
 import qualified L0.FirstOrderTransform as FOT
-import qualified L0.TupleArrayTransform as TAT
+import qualified L0.TupleTransform as TT
 import L0.Untrace
 import L0.CCodeGen
 
@@ -126,9 +126,9 @@ fotransform =
 
 tatransform :: String -> [String] -> L0Option
 tatransform =
-  passoption "Transform arrays of tuples to tuples of arrays."
-  Pass { passName = "tuple-of-arrays transform"
-       , passOp = return . TAT.transformProg
+  passoption "Transform most uses of tuples away"
+  Pass { passName = "tuple-transform"
+       , passOp = return . TT.transformProg
        }
 
 uttransform :: String -> [String] -> L0Option
