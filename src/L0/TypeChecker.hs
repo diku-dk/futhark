@@ -757,7 +757,7 @@ checkExp' (Map2 fun arrexp intype pos) = do
   arrexp' <- mapM checkExp arrexp
   ineltps <- mapM (soac2ElemType pos . typeOf) arrexp'
   ineltp  <- soac2ArgType pos "Map2" ineltps
-  fun'    <- checkLambda fun [ineltp]
+  fun'    <- checkLambda fun ineltps
   intype' <- checkAnnotation pos "input element" intype ineltp
   -- outtype'<- checkAnnotation pos "output element" outtype $ typeOf fun'
   return $ Map2 fun' arrexp' intype' pos -- outtype' 
@@ -768,7 +768,7 @@ checkExp' (Reduce2 fun startexp arrexp intype pos) = do
   ineltps   <- mapM (soac2ElemType pos . typeOf) arrexp'
   ineltp    <- soac2ArgType pos "Reduce2" ineltps
   intype' <- checkAnnotation pos "input element" intype ineltp
-  fun'    <- checkLambda fun [typeOf startexp', intype']
+  fun'    <- checkLambda fun (typeOf startexp' : ineltps)
   when (typeOf startexp' /= typeOf fun') $
         bad $ TypeError pos $ "Accumulator is of type " ++ ppType (typeOf startexp') ++
                               ", but reduce function returns type " ++ ppType (typeOf fun') ++ "."
@@ -782,7 +782,7 @@ checkExp' (Scan2 fun startexp arrexp intype pos) = do
   ineltps   <- mapM (soac2ElemType pos . typeOf) arrexp'
   inelemt   <- soac2ArgType pos "Scan2" ineltps
   intype'   <- checkAnnotation pos "element" intype inelemt
-  fun'      <- checkLambda fun [intype', intype']
+  fun'      <- checkLambda fun (ineltps ++ ineltps)
   when (typeOf startexp' /= typeOf fun') $
     bad $ TypeError pos $ "Initial value is of type " ++ ppType (typeOf startexp') ++
                           ", but scan function returns type " ++ ppType (typeOf fun') ++ "."
@@ -797,7 +797,7 @@ checkExp' (Filter2 fun arrexp eltype pos) = do
   ineltps   <- mapM (soac2ElemType pos . typeOf) arrexp'
   inelemt <- soac2ArgType pos "Filter2" ineltps
   eltype' <- checkAnnotation pos "element" eltype inelemt
-  fun' <- checkLambda fun [inelemt]
+  fun' <- checkLambda fun ineltps
   when (typeOf fun' /= Elem Bool) $
     bad $ TypeError pos "Filter function does not return bool."
   return $ Filter2 fun' arrexp' eltype' pos
@@ -806,7 +806,7 @@ checkExp' (Mapall2 fun arrexp intype outtype pos) = do
   arrexp' <- mapM checkExp arrexp
   let arrtps = map typeOf arrexp'
 
-  _ <- mapM (soac2ElemType pos) arrtps
+  intypes <- mapM (soac2ElemType pos) arrtps
   ineltp <- case arrtps of
               []   -> bad $ TypeError pos "Empty tuple given to Mapall2"
               [t]  -> return $ elemType t
@@ -816,7 +816,7 @@ checkExp' (Mapall2 fun arrexp intype outtype pos) = do
                            Just ts' -> return $ Tuple ts'
 
   intype' <- checkAnnotation pos "input element" intype $ Elem ineltp
-  fun' <- checkLambda fun [intype']
+  fun' <- checkLambda fun intypes
   outtype' <- checkAnnotation pos "result element" outtype (typeOf fun')
   return $ Mapall2 fun' arrexp' intype' outtype' pos
 
@@ -825,8 +825,11 @@ checkExp' (Redomap2 redfun mapfun accexp arrexp intype outtype pos) = do
   arrexp' <- mapM checkExp arrexp
   ets <- mapM (soac2ElemType pos . typeOf) arrexp'
   et <- soac2ArgType pos "Redomap2" ets
-  mapfun' <- checkLambda mapfun [et]
-  redfun' <- checkLambda redfun [typeOf accexp', typeOf mapfun']
+  mapfun' <- checkLambda mapfun ets
+  redfun' <- checkLambda redfun $
+             case typeOf mapfun' of
+               Elem (Tuple ts) -> typeOf accexp' : ts
+               t               -> [typeOf accexp', t]
   _ <- require [typeOf redfun'] accexp'
   intype' <- checkAnnotation pos "input element" intype et
   outtype' <- checkAnnotation pos "result" outtype (typeOf redfun')
