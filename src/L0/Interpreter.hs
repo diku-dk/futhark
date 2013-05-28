@@ -374,7 +374,7 @@ evalExp (Filter fun arrexp outtype pos) = do
   where filt x = do res <- applyLambda fun [x]
                     case res of (LogVal True) -> return True
                                 _             -> return False
-evalExp (Mapall fun arrexp _ _ _) =
+evalExp (Mapall fun arrexp _) =
   mapall =<< evalExp arrexp
     where mapall (ArrayVal arr et) = do
             els' <- mapM mapall $ elems arr
@@ -455,7 +455,7 @@ evalExp (Redomap2 redfun mapfun accexp arrs intp outtp pos) = do
                             _     -> Zip (map (\x -> (x, typeOf x)) arrs) pos
     evalExp $ Redomap redfun mapfun accexp arr' intp outtp pos
 
-evalExp (Mapall2 _ _ _ _ pos) =
+evalExp (Mapall2 _ _ pos) =
     bad $ TypeError pos "evalExp Mapall2: not implemented yet!!!"
 
 ----------------------------

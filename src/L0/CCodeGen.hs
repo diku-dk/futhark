@@ -790,13 +790,13 @@ compileExp _ (Map _ _ _ _) = soacError
 compileExp _ (Reduce _ _ _ _ _) = soacError
 compileExp _ (Scan _ _ _ _ _) = soacError
 compileExp _ (Filter _ _ _ _) = soacError
-compileExp _ (Mapall _ _ _ _ _) = soacError
+compileExp _ (Mapall _ _ _) = soacError
 compileExp _ (Redomap _ _ _ _ _ _ _) = soacError
 compileExp _ (Map2 _ _ _ _ ) = soacError
 compileExp _ (Reduce2 _ _ _ _ _) = soacError
 compileExp _ (Scan2 _ _ _ _ _) = soacError
 compileExp _ (Filter2 _ _ _ _) = soacError
-compileExp _ (Mapall2 _ _ _ _ _) = soacError
+compileExp _ (Mapall2 _ _ _) = soacError
 compileExp _ (Redomap2 _ _ _ _ _ _ _) = soacError
 
 compileExpInPlace :: C.Exp -> Exp Type -> CompilerM C.Stm

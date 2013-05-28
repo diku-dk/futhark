@@ -97,12 +97,12 @@ transformExp (Filter fun arrexp elty loc) = do
       update = LetWith res res [BinOp Minus indexi (intval 1) (Elem Int) loc] indexin resv loc
   return $ arrlet $ nlet $ checkempty $ ialet $ reslet loop
   where intval x = Literal (IntVal x) loc
-transformExp (Mapall fun arrexp _ outtype loc) = transformExp =<< toMap arrexp
+transformExp (Mapall fun arrexp loc) = transformExp =<< toMap arrexp
   where toMap e = case peelArray 1 $ typeOf e of
                     Just et -> do
                       (x,xv) <- newVar "x" et loc
                       body <- toMap xv
-                      let ot = arrayType (arrayDims et) outtype Nonunique
+                      let ot = arrayType (arrayDims et) (typeOf fun) Nonunique
                       return $ Map (AnonymFun [x] body ot loc) e et loc
                     _ -> transformLambda fun [e]
 transformExp (Redomap redfun mapfun accexp arrexp intype _ loc) = do
