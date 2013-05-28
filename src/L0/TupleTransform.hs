@@ -1,3 +1,25 @@
+-- |
+--
+-- This module implements a transformation on L0 programs that
+-- simplifies various uses of tuples.  The input program must be
+-- uniquely named (as by the "L0.Renamer" module).  The output program
+-- has the following properties:
+--
+--    * No function accepts a tuple as an argument.  Instead, they
+--    have been rewritten to accept the tuple components explicitly.
+--
+--    * All tuples are flat - that is, their components are not
+--    tuples.  @(t1,(t2,t3))@ is rewritten to @(t1,t2,t3)@.
+--
+--    * There are no arrays of tuples.  @[(t1,t2)]@ is rewritten to
+--    @([t1], [t2])@.
+--
+--    * All bindings are full.  @let v = (x,y)@ is rewritten to @let
+--    (v_1, v_2) = (x,y)@.  Combined with the first property, this
+--    implies that no variable is ever bound to a tuple.
+--
+--    * SOACs are converted to their tuple versions.
+--
 module L0.TupleTransform
   ( transformProg
   , transformType )
