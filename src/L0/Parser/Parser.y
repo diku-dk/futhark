@@ -83,17 +83,23 @@ import L0.Parser.Lexer
       size            { L $$ SIZE }
       replicate       { L $$ REPLICATE }
       map             { L $$ MAP }
+      map2            { L $$ MAP2 }
       reduce          { L $$ REDUCE }
+      reduce2         { L $$ REDUCE2 }
       reshape         { L $$ RESHAPE }
       transpose       { L $$ TRANSPOSE }
       zip             { L $$ ZIP }
       unzip           { L $$ UNZIP }
       scan            { L $$ SCAN }
+      scan2           { L $$ SCAN2 }
       split           { L $$ SPLIT }
       concat          { L $$ CONCAT }
       filter          { L $$ FILTER }
+      filter2         { L $$ FILTER2 }
       mapall          { L $$ MAPALL }
+      mapall2         { L $$ MAPALL2 }
       redomap         { L $$ REDOMAP }
+      redomap2        { L $$ REDOMAP2 }
       true            { L $$ TRUE }
       false           { L $$ FALSE }
       not             { L $$ NOT }
@@ -244,11 +250,20 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal (IntVal num) pos 
      | reduce '(' FunAbstr ',' Exp ',' Exp ')'
                       { Reduce $3 $5 $7 Nothing $1 }
 
+     | reduce2 '(' FunAbstr ',' Exp ',' Exps ')'
+                      { Reduce2 $3 $5 $7 Nothing $1 }
+
      | map '(' FunAbstr ',' Exp ')'
                       { Map $3 $5 Nothing $1 }
 
+     | map2 '(' FunAbstr ',' Exps ')'
+                      { Map2 $3 $5 Nothing $1 }
+
      | scan '(' FunAbstr ',' Exp ',' Exp ')'
                       { Scan $3 $5 $7 Nothing $1 }
+
+     | scan2 '(' FunAbstr ',' Exp ',' Exps ')'
+                      { Scan2 $3 $5 $7 Nothing $1 }
 
      | zip '(' Exps2 ')'
                       { Zip (map (\x -> (x, Nothing)) $3) $1 }
@@ -259,11 +274,20 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal (IntVal num) pos 
      | filter '(' FunAbstr ',' Exp ')'
                       { Filter $3 $5 Nothing $1 }
 
+     | filter2 '(' FunAbstr ',' Exps ')'
+                      { Filter2 $3 $5 Nothing $1 }
+
      | mapall '(' FunAbstr ',' Exp ')'
                       { Mapall $3 $5 $1 }
 
+     | mapall2 '(' FunAbstr ',' Exps ')'
+                      { Mapall2 $3 $5 $1 }
+
      | redomap '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
                       { Redomap $3 $5 $7 $9 Nothing Nothing $1 }
+
+     | redomap2 '(' FunAbstr ',' FunAbstr ',' Exp ',' Exps ')'
+                      { Redomap2 $3 $5 $7 $9 Nothing Nothing $1 }
 
      | copy '(' Exp ')' { Copy $3 $1 }
 

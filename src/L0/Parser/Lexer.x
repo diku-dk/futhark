@@ -98,6 +98,12 @@ keyword s =
     "mapall"       -> MAPALL
     "filter"       -> FILTER
     "redomap"      -> REDOMAP
+    "map2"         -> MAP2
+    "reduce2"      -> REDUCE2
+    "scan2"        -> SCAN2
+    "filter2"      -> FILTER2
+    "mapall2"      -> MAPALL2
+    "redomap2"     -> REDOMAP2
     "empty"        -> EMPTY
     "copy"         -> COPY
     _              -> ID $ nameFromString s

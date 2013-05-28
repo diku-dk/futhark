@@ -767,46 +767,26 @@ ppExp d (DoLoop mvpat mvexp i n loopbody letbody _) =
     spaces (d+1) ++ ppExp (d+1) loopbody ++ "\n" ++ spaces d ++
     "in " ++ ppExp d letbody
 --- Cosmin added ppExp for soac2
-ppExp d (Map2 fun lst _ _) = 
-    let (pref, suff)  = case unboxType (mbTypeOf fun) of
-                            Just(Elem (Tuple {})) -> (" unzip ( ", " ) ")
-                            _ -> ("","")
-        mid = case lst of
-                [x] -> ppExp (d+1) x
-                _ -> "zip ( " ++ intercalate ", " (map (ppExp (d+1) ) lst) ++ " ) "
-    in pref ++ " map ( " ++ ppLambda (d+1) fun ++ ", " ++ mid ++ suff ++ " ) "
-    where
-        mbTypeOf :: TypeBox ty => Lambda ty -> ty
-        mbTypeOf (AnonymFun _ _ t _) = boxType t
-        mbTypeOf (CurryFun _ _ t _)  = t
+ppExp d (Map2 fun lst _ _) =
+    " map2 ( " ++ ppLambda (d+1) fun ++ ", " ++
+    intercalate ", " (map (ppExp (d+1)) lst) ++ " ) "
 
 --
-ppExp d (Reduce2 fun el [arr] _ _) =
-  " reduce ( " ++ ppLambda (d+1) fun ++ ", " ++ ppExp (d+1) el ++ ", " ++ ppExp (d+1) arr ++ " ) "
 ppExp d (Reduce2 fun el arrs _ _) =
-    " reduce ( " ++ ppLambda (d+1) fun ++ ", " ++ ppExp (d+1) el ++ ", zip ( " ++ 
-    intercalate ", " (map (ppExp (d+1)) arrs) ++ " ) ) "
+    " reduce2 ( " ++ ppLambda (d+1) fun ++ ", " ++ ppExp (d+1) el ++ ", " ++
+    intercalate ", " (map (ppExp (d+1)) arrs) ++ " ) "
 --
-ppExp d (Scan2  fun el lst eltp _) =
-    let (pref, suff)  = case unboxType eltp of
-                            Just (Elem (Tuple {})) -> (" unzip ( ", " ) ")
-                            _ -> ("","")
-        mid = case lst of [x] -> ppExp (d+1) x
-                          _ ->  "zip ( " ++ intercalate ", " (map (ppExp (d+1) ) lst) ++ " ) "
-    in pref ++ " scan ( " ++ ppLambda (d+1) fun ++ ", " ++ ppExp (d+1) el ++ ", " ++ mid ++ suff ++ " ) "
+ppExp d (Scan2  fun el lst _ _) =
+    " scan2 ( " ++ ppLambda (d+1) fun ++ ", " ++ ppExp (d+1) el ++ ", " ++
+    intercalate ", " (map (ppExp (d+1)) lst) ++ " ) "
 --
-ppExp d (Filter2 fun [a] _ _) =
-  " filter ( " ++ ppLambda (d+1) fun ++ ", " ++ ppExp (d+1) a ++ " ) "
 ppExp d (Filter2 fun els _ _) =
-    " unzip ( filter ( " ++ ppLambda (d+1) fun ++ ", " ++ 
-    " zip ( " ++ intercalate ", " (map (ppExp (d+1)) els) ++ " ) ) ) "
+    " filter2 ( " ++ ppLambda (d+1) fun ++ ", " ++
+    intercalate ", " (map (ppExp (d+1)) els) ++ " ) "
 --
-ppExp d (Redomap2 id1 id2 el [a] _ _ _)
-          = " redomap ( " ++ ppLambda (d+1) id1 ++ ", " ++ ppLambda (d+1) id2 ++ 
-            ", " ++ ppExp (d+1) el ++ ", " ++ ppExp (d+1) a ++ " ) "
 ppExp d (Redomap2 id1 id2 el els _ _ _)
-          = " redomap ( " ++ ppLambda (d+1) id1 ++ ", " ++ ppLambda (d+1) id2 ++ 
-            ", " ++ ppExp (d+1) el ++ ", zip ( " ++ intercalate ", " (map (ppExp (d+1)) els) ++ " ) ) "
+          = " redomap2 ( " ++ ppLambda (d+1) id1 ++ ", " ++ ppLambda (d+1) id2 ++ 
+            ", " ++ ppExp (d+1) el ++ intercalate ", " (map (ppExp (d+1)) els) ++ " ) "
 --
 ppExp d (Mapall2 fun lst _) = 
     " mapall2 ( " ++ ppLambda (d+1) fun ++ ", " ++
