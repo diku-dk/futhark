@@ -80,7 +80,7 @@ instance Show TypeError where
     " cannot have any type - possibly a bug in the type checker."
   show (UnexpectedType e ts) =
     "Type of expression at " ++ locStr (srclocOf e) ++
-    " must be one of " ++ intercalate ", " (map ppType ts) ++ ", but is" ++
+    " must be one of " ++ intercalate ", " (map ppType ts) ++ ", but is " ++
     ppType (typeOf e) ++ "."
   show (ReturnTypeError pos fname rettype bodytype) =
     "Declaration of function " ++ nameToString fname ++ " at " ++ locStr pos ++
