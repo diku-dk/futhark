@@ -810,7 +810,8 @@ ppExp d (Redomap2 id1 id2 el els _ _ _)
             ", " ++ ppExp (d+1) el ++ ", zip ( " ++ intercalate ", " (map (ppExp (d+1)) els) ++ " ) ) "
 --
 ppExp d (Mapall2 fun lst _ _ _) = 
-    " mapall2 ( " ++ ppLambda (d+1) fun ++ intercalate ", " (map (ppExp (d+1)) lst) ++ " ) "
+    " mapall2 ( " ++ ppLambda (d+1) fun ++ ", " ++
+    intercalate ", " (map (ppExp (d+1)) lst) ++ " ) "
 --- Cosmin end ppExp for soac2
 
 ppBinOp :: BinOp -> String
