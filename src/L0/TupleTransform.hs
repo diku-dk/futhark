@@ -324,11 +324,11 @@ transformExp (Scan lam ne arr tp pscan) = do
   tupArrToListArr arr' $ \arrs ->
     return $ Scan2 lam' ne' arrs (transformType tp) pscan
 
-transformExp (Filter lam arr tp pfilt) = do
+transformExp (Filter lam arr _ loc) = do
   lam' <- transformLambda lam
   arr' <- transformExp    arr
   tupArrToListArr arr' $ \arrs ->
-    return $ Filter2 lam' arrs (transformType tp) pfilt
+    return $ Filter2 lam' arrs loc
 
 transformExp (Mapall lam arr pmap) = do
   lam' <- transformLambda lam
@@ -336,14 +336,13 @@ transformExp (Mapall lam arr pmap) = do
   tupArrToListArr arr' $ \arrs ->
     return $ Mapall2 lam' arrs pmap
 
-transformExp (Redomap lam1 lam2 ne arr tp1 tp2 pos) = do
+transformExp (Redomap lam1 lam2 ne arr tp1 pos) = do
   lam1' <- transformLambda lam1
   lam2' <- transformLambda lam2
   arr'  <- transformExp    arr
   ne'   <- transformExp    ne
   tupArrToListArr arr' $ \arrs ->
-    return $ Redomap2 lam1' lam2' ne' arrs
-             (transformType tp1) (transformType tp2) pos
+    return $ Redomap2 lam1' lam2' ne' arrs (transformType tp1) pos
 
 transformExp e = mapExpM transform e
   where transform = Mapper {

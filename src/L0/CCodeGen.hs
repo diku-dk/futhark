@@ -784,20 +784,20 @@ compileExp place (Copy e _) = do
                $stm:copy
              }|]
 
-compileExp _ (Zip _ _) = error "Zip encountered during code generation."
-compileExp _ (Unzip _ _ _) = error "Unzip encountered during code generation."
-compileExp _ (Map _ _ _ _) = soacError
-compileExp _ (Reduce _ _ _ _ _) = soacError
-compileExp _ (Scan _ _ _ _ _) = soacError
-compileExp _ (Filter _ _ _ _) = soacError
-compileExp _ (Mapall _ _ _) = soacError
-compileExp _ (Redomap _ _ _ _ _ _ _) = soacError
-compileExp _ (Map2 _ _ _ _ ) = soacError
-compileExp _ (Reduce2 _ _ _ _ _) = soacError
-compileExp _ (Scan2 _ _ _ _ _) = soacError
-compileExp _ (Filter2 _ _ _ _) = soacError
-compileExp _ (Mapall2 _ _ _) = soacError
-compileExp _ (Redomap2 _ _ _ _ _ _ _) = soacError
+compileExp _ (Zip {}) = error "Zip encountered during code generation."
+compileExp _ (Unzip {}) = error "Unzip encountered during code generation."
+compileExp _ (Map {}) = soacError
+compileExp _ (Reduce {}) = soacError
+compileExp _ (Scan {}) = soacError
+compileExp _ (Filter {}) = soacError
+compileExp _ (Mapall {}) = soacError
+compileExp _ (Redomap {}) = soacError
+compileExp _ (Map2 {}) = soacError
+compileExp _ (Reduce2 {}) = soacError
+compileExp _ (Scan2 {}) = soacError
+compileExp _ (Filter2 {}) = soacError
+compileExp _ (Mapall2 {}) = soacError
+compileExp _ (Redomap2 {}) = soacError
 
 compileExpInPlace :: C.Exp -> Exp Type -> CompilerM C.Stm
 

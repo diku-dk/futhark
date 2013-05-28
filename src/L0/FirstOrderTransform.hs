@@ -64,19 +64,19 @@ transformExp (Scan fun accexp arrexp intype loc) = do
   let loop = DoLoop (TupId [Id acc, Id arr] loc) (TupLit [accv, arrv] loc) i (Size arrv loc) loopbody arrv loc
       loopbody = LetWith arr arr [iv] funcall (TupLit [index, arrv] loc) loc
   return $ redlet loop
-transformExp (Filter fun arrexp elty loc) = do
+transformExp (Filter fun arrexp rowtype loc) = do
   (arr, arrv, arrlet) <- newLet arrexp "arr"
   (_, nv, nlet) <- newLet (Size arrv loc) "n"
   let checkempty nonempty = If (BinOp Equal nv (intval 0) (Elem Bool) loc)
-                            (Literal (emptyArray elty) loc) nonempty
+                            (Literal (emptyArray rowtype) loc) nonempty
                             (typeOf arrexp) loc
-  (x, xv) <- newVar "x" elty loc
+  (x, xv) <- newVar "x" rowtype loc
   (i, iv) <- newVar "i" (Elem Int) loc
   fun' <- transformLambda fun [xv]
   let branch = If fun' (intval 1) (intval 0) (Elem Int) loc
-      indexin0 = Index arr [intval 0] elty loc
-      indexin = Index arr [iv] elty loc
-  mape <- transformExp $ Map (AnonymFun [x] branch (Elem Int) loc) arrv elty loc
+      indexin0 = Index arr [intval 0] rowtype loc
+      indexin = Index arr [iv] rowtype loc
+  mape <- transformExp $ Map (AnonymFun [x] branch (Elem Int) loc) arrv rowtype loc
   plus <- do
     (a,av) <- newVar "a" (Elem Int) loc
     (b,bv) <- newVar "b" (Elem Int) loc
@@ -105,9 +105,9 @@ transformExp (Mapall fun arrexp loc) = transformExp =<< toMap arrexp
                       let ot = arrayType (arrayDims et) (typeOf fun) Nonunique
                       return $ Map (AnonymFun [x] body ot loc) e et loc
                     _ -> transformLambda fun [e]
-transformExp (Redomap redfun mapfun accexp arrexp intype _ loc) = do
+transformExp (Redomap redfun mapfun accexp arrexp _ loc) = do
   ((arr, arrv), (acc, accv), (i, iv), redlet) <- newReduction loc arrexp accexp
-  let index = Index arr [iv] intype loc
+  let index = Index arr [iv] (stripArray 1 $ typeOf arrexp) loc
   mapfuncall <- transformLambda mapfun [index]
   redfuncall <- transformLambda redfun [accv, mapfuncall]
   let loop = DoLoop (Id acc) accv i (Size arrv loc) loopbody accv loc
