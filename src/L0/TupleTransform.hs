@@ -40,7 +40,10 @@ import L0.Traversals
 import L0.FreshNames
 
 transformProg :: Prog Type -> Prog Type
-transformProg = map transformFun
+transformProg prog = runTransformM $ mapM transformFun prog
+  where runTransformM m = evalState (runReaderT m newEnv) newState
+        newState = TransformState $ newNameSourceForProg prog
+        newEnv = TransformEnv M.empty
 
 data TransformState = TransformState {
     envNameSrc :: NameSource
@@ -51,11 +54,6 @@ data TransformEnv = TransformEnv {
   }
 
 type TransformM = ReaderT TransformEnv (State TransformState)
-
-runTransformM :: TransformM a -> a
-runTransformM m = evalState (runReaderT m newEnv) newState
-  where newState = TransformState blankNameSource
-        newEnv = TransformEnv M.empty
 
 new :: String -> TransformM Name
 new k = do (name, src) <- gets $ newName (nameFromString k) . envNameSrc
@@ -110,9 +108,9 @@ transformValue v = v
 transformIdent :: Ident Type -> Ident Type
 transformIdent (Ident name t loc) = Ident name (transformType t) loc
 
-transformFun :: FunDec Type -> FunDec Type
+transformFun :: FunDec Type -> TransformM (FunDec Type)
 transformFun (fname,rettype,params,body,loc) =
-  runTransformM $ binding params $ \params' -> do
+  binding params $ \params' -> do
     body' <- transformExp body
     return (fname, rettype', params', body', loc)
   where rettype' = transformType rettype
