@@ -766,7 +766,9 @@ checkExp' (Reduce2 fun startexp arrexp intype pos) = do
   ineltps   <- mapM (soac2ElemType pos . typeOf) arrexp'
   ineltp    <- soac2ArgType pos "Reduce2" ineltps
   intype' <- checkAnnotation pos "input element" intype ineltp
-  fun'    <- checkLambda fun (typeOf startexp' : ineltps)
+  fun'    <- checkLambda fun $ case typeOf startexp' of
+                                 Elem (Tuple ts) -> ts ++ ineltps
+                                 t               -> t : ineltps
   when (typeOf startexp' /= typeOf fun') $
         bad $ TypeError pos $ "Accumulator is of type " ++ ppType (typeOf startexp') ++
                               ", but reduce function returns type " ++ ppType (typeOf fun') ++ "."
@@ -822,10 +824,13 @@ checkExp' (Redomap2 redfun mapfun accexp arrexp intype outtype pos) = do
   ets <- mapM (soac2ElemType pos . typeOf) arrexp'
   et <- soac2ArgType pos "Redomap2" ets
   mapfun' <- checkLambda mapfun ets
+  let acct = case typeOf accexp' of
+               Elem (Tuple ts) -> ts
+               t               -> [t]
   redfun' <- checkLambda redfun $
              case typeOf mapfun' of
-               Elem (Tuple ts) -> typeOf accexp' : ts
-               t               -> [typeOf accexp', t]
+               Elem (Tuple ts) -> acct ++ ts
+               t               -> acct ++ [t]
   _ <- require [typeOf redfun'] accexp'
   intype' <- checkAnnotation pos "input element" intype et
   outtype' <- checkAnnotation pos "result" outtype (typeOf redfun')
