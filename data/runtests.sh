@@ -6,7 +6,19 @@
 testdir=$(dirname "$0")
 
 # Command to run the L0 compiler.
-l0c="l0c -ftre"
+l0c="l0c -frute"
+
+while true; do
+    case $1 in
+        -t) echo Only type-checking;
+            onlytypecheck=true;
+            shift
+            ;;
+        -*) echo "Unknown option $1."; exit 1;;
+        --) break ;;
+        *) break;;
+    esac
+done
 
 tests() {
     echo $testdir/*l0
@@ -33,7 +45,7 @@ for test in $tests; do
     fi
     if [ -f "$infile" ]; then
         # There is an .in-file, so we assume the test program must be correct.
-        if [ -f "$outfile" ]; then
+        if [ -f "$outfile" -a ! "$onlytypecheck" ]; then
             # There is even an .out-file, so it must have some expected output.
             testoutfile=$(echo "$test" | sed 's/l0$/testout/')
             echo "Testing $test (expecting correct execution)."
