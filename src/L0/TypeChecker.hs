@@ -18,6 +18,7 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 
 import L0.AbSyn
+import L0.Traversals
 
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.
@@ -66,6 +67,7 @@ data TypeError = TypeError SrcLoc String
                -- ^ A function is being curried with an argument to be consumed.
                | BadLetWithValue SrcLoc
                -- ^ The new value for an array slice in let-with is aliased to the source.
+               | FreeConsumption Name SrcLoc
 
 instance Show TypeError where
   show (TypeError pos msg) =
@@ -130,6 +132,9 @@ instance Show TypeError where
   show (BadLetWithValue loc) =
     "New value for elements in let-with shares data with source array at " ++
     locStr loc ++ ".  This is illegal, as it prevents in-place modification."
+  show (FreeConsumption name loc) =
+    "Variable " ++ nameToString name ++ " consumed at " ++
+    locStr loc ++ ", but is free inside loop body."
 
 -- | A tuple of a return type and a list of argument types.
 type FunBinding = (Type, [Type])
@@ -220,6 +225,14 @@ instance Monoid Dataflow where
   mempty = Dataflow mempty mempty
   Dataflow m1 s1 `mappend` Dataflow m2 s2 =
     Dataflow (M.unionWith (++) m1 m2) (s1 <> s2)
+
+consumptions :: Dataflow -> M.Map Name [SrcLoc]
+consumptions (Dataflow occurs _) = M.mapMaybe f occurs
+  where f l = case concatMap isConsumption l of
+                [] -> Nothing
+                l' -> Just l'
+        isConsumption (Consumed loc) = [loc]
+        isConsumption _              = []
 
 -- | The type checker runs in this monad.  Note that it has no mutable
 -- state, but merely keeps track of current bindings in a 'TypeEnv'.
@@ -742,10 +755,18 @@ checkExp' (DoLoop mergepat mergeexp (Ident loopvar _ _)
   (firstscope, mergepat') <- checkBinding mergepat mergeexp' mergeflow
   (_, dataflow) <- checkloop firstscope
   (secondscope, _) <- checkBinding mergepat mergeexp' dataflow
-  (loopbody', _) <- checkloop secondscope
+  (loopbody', secondflow) <- checkloop secondscope
+
+  checkoccurs <- asks envCheckOccurences
+  when checkoccurs $ do
+    case M.toList $ free (patNames mergepat) secondflow of
+      (v,loc:_):_ -> bad $ FreeConsumption v loc
+      _ -> return ()
+
   secondscope $ do
     letbody' <- checkExp letbody
     return $ DoLoop mergepat' mergeexp' (Ident loopvar (Elem Int) pos) boundexp' loopbody' letbody' pos
+  where free names = M.filterWithKey (\x _ -> not $ x `S.member` names) . consumptions
 
 ----------------------------------------------
 ---- BEGIN Cosmin added SOAC2 combinators ----
