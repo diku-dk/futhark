@@ -16,16 +16,11 @@ initial=c508f9f531929f6bed868243334417ef6c840cb4 # Hash of initial commit.
 fail() {
     echo "Aborting commit due to verification errors."
     echo "If you disagree, use git commit --no-verify."
-    # Put back any removed files.
-    git stash pop -q
     exit 1
 }
 
 echo Quality-checking commit...
 echo
-
-# Remove any changes not in the index.
-git stash -q --keep-index
 
 # Find files with trailing whitespace
 if git diff-index --check HEAD | egrep -v '^[+-]'; then
@@ -44,6 +39,3 @@ done
 if ! cabal build; then
     fail
 fi
-
-# Put back any removed files.
-git stash pop -q
