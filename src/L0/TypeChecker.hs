@@ -778,7 +778,7 @@ checkExp' (DoLoop mergepat mergeexp (Ident loopvar _ _)
   (loopbody', secondflow) <- checkloop secondscope
 
   checkoccurs <- asks envCheckOccurences
-  when checkoccurs $ do
+  when checkoccurs $
     case M.toList $ free (patNames mergepat) secondflow of
       (v,loc:_):_ -> bad $ FreeConsumption v loc
       _ -> return ()
