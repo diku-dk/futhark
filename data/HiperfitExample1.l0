@@ -72,10 +72,10 @@ fun ([real],[real]) tridag
                  u
     in (u, uu)
 
-fun [[real]] explicitX
+fun *[[real]] explicitX
     (int numX, int numY, real dtInv,
      [[real]] myResult, [[real]] myMuX, [[real]] myDx, [[real]] myDxx, [[real]] myVarX) =
-    map(fn [real] (int j) =>
+    map(fn *[real] (int j) =>
         map(fn real (int i) =>
             let kl = if i = 0 then 1 else 0 in
             let ku = 2 - if i=numX-1 then 1 else 0 in
@@ -88,10 +88,10 @@ fun [[real]] explicitX
             iota(numX)),
         iota(numY))
 
-fun [[real]] explicitY
+fun *[[real]] explicitY
     (int numX, int numY, real dtInv,
      [[real]] myResult, [[real]] myMuY, [[real]] myDy, [[real]] myDyy, [[real]] myVarY) =
-    map(fn [real] (int i) =>
+    map(fn *[real] (int i) =>
         map(fn real (int j) =>
             let ll = 1 * (if j = 0 then 1 else 0) in
             let lu = 2 - 1*(if j=numY-1 then 1 else 0) in
@@ -104,7 +104,7 @@ fun [[real]] explicitY
             iota(numY)),
         iota(numX))
 
-fun [[real]] rollback
+fun *[[real]] rollback
     ([real] myX, [real] myY, [real] myTimeline, *[[real]] myResult,
      [[real]] myMuX, [[real]] myDx, [[real]] myDxx, [[real]] myVarX,
      [[real]] myMuY, [[real]] myDy, [[real]] myDyy, [[real]] myVarY, int g) =
@@ -153,8 +153,7 @@ fun real value(real s0, real strike, real t, real alpha, real nu, real beta) =
             let i = numT-2-i in
             let (myMuX, myVarX, myMuY, myVarY) =
                 updateParams(myX, myY, myTimeline, i, alpha, beta, nu) in
-            // Copy of myResult is necessary, as l0c thinks it aliases myX, myY and their aliases.
-            let myResult = rollback(myX, myY, myTimeline, copy(myResult),
+            let myResult = rollback(myX, myY, myTimeline, myResult,
                                     myMuX, myDx, myDxx, myVarX,
                                     myMuY, myDy, myDyy, myVarY, i) in
             //(myResult, myMuX, myVarX, myMuY, myVarY) in
