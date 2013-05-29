@@ -48,6 +48,7 @@ module L0.Traversals
 
   -- * Specific traversals
   , progNames
+  , patNames
   )
   where
 
@@ -318,7 +319,7 @@ progNames = execWriter . mapM funNames
   where names = identityWalker {
                   walkOnExp = expNames
                 , walkOnLambda = lambdaNames
-                , walkOnPattern = patNames
+                , walkOnPattern = tell . patNames
                 }
 
         one = tell . S.singleton . identName
@@ -334,5 +335,6 @@ progNames = execWriter . mapM funNames
         lambdaNames (CurryFun _ exps _ _) =
           mapM_ expNames exps
 
-        patNames (Id ident)     = one ident
-        patNames (TupId pats _) = mapM_ patNames pats
+patNames :: TupIdent ty -> S.Set Name
+patNames (Id ident)     = S.singleton $ identName ident
+patNames (TupId pats _) = mconcat $ map patNames pats
