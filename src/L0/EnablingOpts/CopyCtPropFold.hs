@@ -633,7 +633,7 @@ isRemovablePat (TupId tups _) e =
           _ -> return False
 
 getPropBnds :: TypeBox tf => TupIdent tf -> Exp tf -> Bool -> CPropM tf [(Name,CtOrId tf)]
-getPropBnds ( Id (Ident var tp pos) ) e to_rem = 
+getPropBnds ( Id (Ident var tp _) ) e to_rem =
   let r = case e of
             Literal v _          -> [(var, Constant v (boxType (typeOf v)) to_rem)]
             Var (Ident id1 tp1 _)-> [(var, VarId  id1 tp1 to_rem)]
