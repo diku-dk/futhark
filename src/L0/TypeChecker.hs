@@ -68,6 +68,7 @@ data TypeError = TypeError SrcLoc String
                | BadLetWithValue SrcLoc
                -- ^ The new value for an array slice in let-with is aliased to the source.
                | FreeConsumption Name SrcLoc
+               | ReturnAliased Name Name SrcLoc
 
 instance Show TypeError where
   show (TypeError pos msg) =
@@ -135,6 +136,9 @@ instance Show TypeError where
   show (FreeConsumption name loc) =
     "Variable " ++ nameToString name ++ " consumed at " ++
     locStr loc ++ ", but is free inside loop body."
+  show (ReturnAliased fname name loc) =
+    "Unique return value of function " ++ nameToString fname ++ " at " ++
+    locStr loc ++ " is aliased to " ++ nameToString name ++ ", which is not consumed."
 
 -- | A tuple of a return type and a list of argument types.
 type FunBinding = (Type, [Type])
@@ -452,18 +456,30 @@ checkProg' checkoccurs prog = do
                           ,("op not", (Elem Bool, [Elem Bool], noLoc))]
 
 checkFun :: TypeBox tf => FunDec tf -> TypeM (FunDec Type)
-checkFun (fname, rettype, args, body, pos) = do
+checkFun (fname, rettype, args, body, loc) = do
   args' <- checkArgs
-  body' <- binding args' $ checkExp body
+  (body', dataflow) <-
+    collectDataflow $ binding args' $ checkExp body
+  when (unique rettype) $ checkReturnAlias dataflow
   if typeOf body' `subtypeOf` rettype then
-    return (fname, rettype, args, body', pos)
-  else bad $ ReturnTypeError pos fname rettype $ typeOf body'
+    return (fname, rettype, args, body', loc)
+  else bad $ ReturnTypeError loc fname rettype $ typeOf body'
   where checkArgs = foldM expand [] args
+
         expand args' ident@(Ident pname _ _)
           | Just _ <- find ((==identName ident) . identName) args' =
-            bad $ DupParamError fname pname pos
+            bad $ DupParamError fname pname loc
           | otherwise =
             return $ ident : args'
+
+        -- | Check that the unique return value does not alias a
+        -- non-consumed parameter.
+        checkReturnAlias dataflow =
+          forM_ args $ \arg ->
+            when (not (unique $ typeOf arg) &&
+                  identName arg `elem` als) $
+              bad $ ReturnAliased fname (identName arg) loc
+            where als = aliased (usageAliasing dataflow)
 
 checkExp :: TypeBox tf => Exp tf -> TypeM (Exp Type)
 checkExp e = do
@@ -566,7 +582,11 @@ checkExp' (Apply fname args rettype pos) = do
                  occurs1 <- checkOccurences $ usageOccurences dflow
 
                  let occurs2 = consumeArg (srclocOf arg) paramt $ usageAliasing dflow
-                     als = varAlias $ aliased $ usageAliasing dflow
+                     als
+                       -- If the return type is unique, we assume that
+                       -- the value does not alias the parameters.
+                       | unique ftype = mempty
+                       | otherwise = varAlias $ aliased $ usageAliasing dflow
 
                  tell $ mempty
                         { usageAliasing = als
