@@ -18,7 +18,6 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 
 import L0.AbSyn
-import L0.Traversals
 
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.
@@ -229,14 +228,6 @@ instance Monoid Dataflow where
   mempty = Dataflow mempty mempty
   Dataflow m1 s1 `mappend` Dataflow m2 s2 =
     Dataflow (M.unionWith (++) m1 m2) (s1 <> s2)
-
-consumptions :: Dataflow -> M.Map Name [SrcLoc]
-consumptions (Dataflow occurs _) = M.mapMaybe f occurs
-  where f l = case concatMap isConsumption l of
-                [] -> Nothing
-                l' -> Just l'
-        isConsumption (Consumed loc) = [loc]
-        isConsumption _              = []
 
 -- | The type checker runs in this monad.  Note that it has no mutable
 -- state, but merely keeps track of current bindings in a 'TypeEnv'.
@@ -772,21 +763,21 @@ checkExp' (DoLoop mergepat mergeexp (Ident loopvar _ _)
       checkloop scope = collectDataflow $
                         scope $ binding [Ident loopvar (Elem Int) pos] $
                         require [mergetype] =<< checkExp loopbody
+
+  -- We need to check the loop body three times to ensure we have full
+  -- aliasing information, and detect any usage collisions.
   (firstscope, mergepat') <- checkBinding mergepat mergeexp' mergeflow
   (_, dataflow) <- checkloop firstscope
+
   (secondscope, _) <- checkBinding mergepat mergeexp' dataflow
-  (loopbody', secondflow) <- checkloop secondscope
+  (_, secondflow) <- checkloop secondscope
 
-  checkoccurs <- asks envCheckOccurences
-  when checkoccurs $
-    case M.toList $ free (patNames mergepat) secondflow of
-      (v,loc:_):_ -> bad $ FreeConsumption v loc
-      _ -> return ()
+  (thirdscope, _) <- checkBinding mergepat mergeexp' secondflow
+  (loopbody'', _) <- checkloop thirdscope
 
-  secondscope $ do
+  thirdscope $ do
     letbody' <- checkExp letbody
-    return $ DoLoop mergepat' mergeexp' (Ident loopvar (Elem Int) pos) boundexp' loopbody' letbody' pos
-  where free names = M.filterWithKey (\x _ -> not $ x `S.member` names) . consumptions
+    return $ DoLoop mergepat' mergeexp' (Ident loopvar (Elem Int) pos) boundexp' loopbody'' letbody' pos
 
 ----------------------------------------------
 ---- BEGIN Cosmin added SOAC2 combinators ----
