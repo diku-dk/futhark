@@ -68,6 +68,7 @@ data TypeError = TypeError SrcLoc String
                -- ^ The new value for an array slice in let-with is aliased to the source.
                | FreeConsumption Name SrcLoc
                | ReturnAliased Name Name SrcLoc
+               | UniqueReturnAliased Name SrcLoc
 
 instance Show TypeError where
   show (TypeError pos msg) =
@@ -138,6 +139,10 @@ instance Show TypeError where
   show (ReturnAliased fname name loc) =
     "Unique return value of function " ++ nameToString fname ++ " at " ++
     locStr loc ++ " is aliased to " ++ nameToString name ++ ", which is not consumed."
+  show (UniqueReturnAliased fname loc) =
+    "A unique tuple element of return value of function " ++
+    nameToString fname ++ " at " ++ locStr loc ++
+    " is aliased to some other tuple component."
 
 -- | A tuple of a return type and a list of argument types.
 type FunBinding = (Type, [Type])
@@ -169,9 +174,9 @@ unalias name (TupleAlias alss) = TupleAlias $ map (unalias name) alss
 
 -- | All the variables represented in this aliasing.  Guaranteed not
 -- to contain duplicates.
-aliased :: Aliases -> [Name]
-aliased (VarAlias names) = S.toList names
-aliased (TupleAlias ass) = nub $ concatMap aliased ass
+aliased :: Aliases -> S.Set Name
+aliased (VarAlias names) = names
+aliased (TupleAlias ass) = mconcat $ map aliased ass
 
 -- | Create an aliasing set given a list of names.
 varAlias :: [Name] -> Aliases
@@ -257,7 +262,8 @@ alias al = tell $ mempty { usageAliasing = al }
 -- | Proclaim that we have written to the given variable.
 consume :: SrcLoc -> Aliases -> TypeM ()
 consume loc als =
-  let occurs = M.fromList [ (name, [Consumed loc]) | name <- aliased als ]
+  let occurs = M.fromList [ (name, [Consumed loc])
+                            | name <- S.toList $ aliased als ]
   in tell $ mempty { usageOccurences = occurs }
 
 -- | Proclaim that we have written to the given variable, and mark
@@ -303,7 +309,7 @@ aliasing name als tm = do
   let name' = varAlias [name]
       outedges = M.insert name als
       -- Edges from everything in als to name:
-      inedges m =  foldl (\m' v -> M.insertWith (<>) v name' m') m $ aliased als
+      inedges m =  S.foldl (\m' v -> M.insertWith (<>) v name' m') m $ aliased als
   local (\env -> env { envAliases = inedges $ outedges $ envAliases env }) tm
 
 aliases :: Name -> TypeM Aliases
@@ -451,7 +457,7 @@ checkFun (fname, rettype, args, body, loc) = do
   args' <- checkArgs
   (body', dataflow) <-
     collectDataflow $ binding args' $ checkExp body
-  when (unique rettype) $ checkReturnAlias dataflow
+  checkReturnAlias $ usageAliasing dataflow
   if typeOf body' `subtypeOf` rettype then
     return (fname, rettype, args, body', loc)
   else bad $ ReturnTypeError loc fname rettype $ typeOf body'
@@ -463,14 +469,35 @@ checkFun (fname, rettype, args, body, loc) = do
           | otherwise =
             return $ ident : args'
 
-        -- | Check that the unique return value does not alias a
-        -- non-consumed parameter.
-        checkReturnAlias dataflow =
+        notAliasingParam names =
           forM_ args $ \arg ->
             when (not (unique $ typeOf arg) &&
-                  identName arg `elem` als) $
+                  identName arg `S.member` names) $
               bad $ ReturnAliased fname (identName arg) loc
-            where als = aliased (usageAliasing dataflow)
+
+        -- | Check that unique return values do not alias a
+        -- non-consumed parameter.
+        checkReturnAlias =
+          foldM_ checkReturnAlias' S.empty . returnAliasing rettype
+
+        checkReturnAlias' seen (Unique, names)
+          | any (`S.member` S.map snd seen) $ S.toList names =
+            bad $ UniqueReturnAliased fname loc
+          | otherwise = do
+            notAliasingParam names
+            return $ seen `S.union` tag Unique names
+        checkReturnAlias' seen (Nonunique, names)
+          | any (`S.member` seen) $ S.toList $ tag Unique names =
+            bad $ UniqueReturnAliased fname loc
+          | otherwise = return $ seen `S.union` tag Nonunique names
+
+        tag u = S.map $ \name -> (u, name)
+
+        returnAliasing :: Type -> Aliases -> [(Uniqueness, S.Set Name)]
+        returnAliasing (Elem (Tuple ets)) (TupleAlias alss) =
+          concat $ zipWith returnAliasing ets alss
+        returnAliasing t als = [(uniqueness t, aliased als)]
+
 
 checkExp :: TypeBox tf => Exp tf -> TypeM (Exp Type)
 checkExp e = do
@@ -573,11 +600,9 @@ checkExp' (Apply fname args rettype pos) = do
                  occurs1 <- checkOccurences $ usageOccurences dflow
 
                  let occurs2 = consumeArg (srclocOf arg) paramt $ usageAliasing dflow
-                     als
-                       -- If the return type is unique, we assume that
-                       -- the value does not alias the parameters.
-                       | unique ftype = mempty
-                       | otherwise = varAlias $ aliased $ usageAliasing dflow
+                     als = maskAliasing rettype' $
+                           VarAlias $ aliased $ usageAliasing dflow
+
 
                  tell $ mempty
                         { usageAliasing = als
@@ -597,8 +622,21 @@ checkExp' (Apply fname args rettype pos) = do
           mconcat $ zipWith (consumeArg loc) ets alss
         consumeArg loc t als
           | consumes t =
-            mconcat $ map (`M.singleton` [Consumed loc]) $ aliased als
+            mconcat $ map (`M.singleton` [Consumed loc]) $
+                    S.toList $ aliased als
           | otherwise = mempty
+
+        -- If the return type is unique, we assume that the value does
+        -- not alias the parameters.
+        maskAliasing (Elem (Tuple ets)) als =
+          TupleAlias [ if unique et then mempty
+                       else maskAliasing et als'
+                       | (als', et) <- zip alss' ets ]
+            where alss' = case als of (TupleAlias alss) -> alss
+                                      _                 -> repeat als
+        maskAliasing t als
+          | unique t = mempty
+          | otherwise = als
 
 checkExp' (LetPat pat e body pos) = do
   (e', dataflow) <- collectDataflow $ checkExp e
@@ -620,7 +658,7 @@ checkExp' (LetWith (Ident dest destt destpos) src idxes ve body pos) = do
     Nothing -> bad $ IndexingError (arrayDims $ identType src') (length idxes) (srclocOf src)
     Just elemt ->
       sequentially (require [elemt] =<< checkExp ve) $ \ve' dflow -> do
-        when (identName src `elem` aliased (usageAliasing dflow)) $
+        when (identName src `S.member` aliased (usageAliasing dflow)) $
           bad $ BadLetWithValue pos
         (scope, _) <- checkBinding (Id dest') (Var src') mempty
         body' <- consuming (srclocOf src) (identName src') $ scope $ checkExp body
