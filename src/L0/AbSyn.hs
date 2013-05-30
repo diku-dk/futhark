@@ -720,7 +720,7 @@ ppExp d (LetWith (Ident dest _ _) (Ident src _ _) es el e2 _)
   | dest == src =
     "\n" ++ spaces d ++ "let " ++ nameToString dest ++ "[ " ++
     intercalate ", " (map (ppExp d) es) ++
-    "] = " ++ ppExp d el ++ "in  " ++ ppExp d e2
+    "] = " ++ ppExp (d+2) el ++ "in  " ++ ppExp d e2
   | otherwise =
     "\n" ++ spaces d ++ "let " ++ nameToString dest ++ " = " ++ nameToString src ++
     " with [ " ++ intercalate ", " (map (ppExp d) es) ++
