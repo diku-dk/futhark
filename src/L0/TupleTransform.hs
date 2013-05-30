@@ -218,7 +218,6 @@ transformExp (DoLoop mergepat mergeexp i bound loopbody letbody loc) = do
 
 transformExp (LetWith name src idxs ve body loc) = do
   idxs' <- mapM transformExp idxs
-  body' <- transformExp body
   ve' <- transformExp ve
   case (identType name', typeOf ve') of
     (Elem (Tuple ets), Elem (Tuple xts)) -> do
@@ -228,8 +227,10 @@ transformExp (LetWith name src idxs ve body loc) = do
           vlet inner = LetPat (TupId (map Id vnames) loc) ve' inner loc
           comb olde (sname, vname) inner = LetWith sname sname idxs' (Var vname) (olde inner) loc
       let lws = foldl comb id $ zip snames vnames
-      transformExp $ xlet $ vlet $ lws $ LetPat (Id name') (TupLit (map Var snames) loc) body' loc
-    _ -> return $ LetWith name' src idxs' ve' body' loc
+      transformExp $ xlet $ vlet $ lws $ LetPat (Id name') (TupLit (map Var snames) loc) body loc
+    _ -> do
+      body' <- transformExp body
+      return $ LetWith name' src idxs' ve' body' loc
   where name' = transformIdent name
         src'  = transformIdent src
 
