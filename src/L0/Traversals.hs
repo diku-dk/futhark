@@ -36,6 +36,7 @@ module L0.Traversals
   , Folder(..)
   , foldExpM
   , foldExp
+  , identityFolder
 
   -- * Walking
   , Walker(..)
