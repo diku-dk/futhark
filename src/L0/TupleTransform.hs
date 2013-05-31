@@ -260,8 +260,13 @@ transformExp (Size e loc) = do
 
 transformExp (Unzip e _ _) = transformExp e
 
-transformExp (Zip es loc) =
-  transformExp =<< TupLit <$> mapM (transformExp . fst) es <*> pure loc
+transformExp (Zip es loc) = do
+  es' <- mapM (transformExp . fst) es
+  (names, namevs) <- unzip <$> mapM (newVar loc "zip_elem" . typeOf) es'
+  let binder body = LetPat (TupId (map Id names) loc) (TupLit es' loc) body loc
+      azip = Apply (nameFromString "assertZip") namevs (Elem Bool) loc
+  (dead, _) <- newVar loc "dead" (Elem Bool)
+  transformExp $ binder $ LetPat (Id dead) azip (TupLit namevs loc) loc
 
 transformExp (Split nexp arrexp eltype loc) = do
   nexp' <- transformExp nexp
