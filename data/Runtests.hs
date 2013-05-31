@@ -36,7 +36,7 @@ failureTest :: FilePath -> IO TestResult
 failureTest f = do
   (code, _, err) <- readProcessWithExitCode "l0c" [l0flags, f] ""
   case code of
-    ExitSuccess -> return $ Failure "expected failure\n"
+    ExitSuccess -> return $ Failure "Expected failure\n"
     ExitFailure 1 -> return $ Failure err
     ExitFailure _ -> return Success
 
@@ -66,15 +66,16 @@ catching m = m `catch` save
   where save :: SomeException -> IO TestResult
         save e = return $ Failure $ show e
 
-doTest :: Test -> IO TestResult
-doTest (TypeFailure f) = catching $ failureTest f
-doTest (TypeCheck f) = catching $ compileTest f
-doTest (Run f inputf outputf) = catching $ executeTest f inputf outputf
+doTest :: Bool -> Test -> IO TestResult
+doTest _ (TypeFailure f) = catching $ failureTest f
+doTest _ (TypeCheck f) = catching $ compileTest f
+doTest True (Run f inputf outputf) = catching $ executeTest f inputf outputf
+doTest False (Run f _ _) = catching $ compileTest f
 
-runTest :: MVar (FilePath, Test) -> MVar (FilePath, TestResult) -> IO ()
-runTest testmvar resmvar = forever $ do
+runTest :: Bool -> MVar (FilePath, Test) -> MVar (FilePath, TestResult) -> IO ()
+runTest run testmvar resmvar = forever $ do
   (file, test) <- takeMVar testmvar
-  res <- doTest test
+  res <- doTest run test
   putMVar resmvar (file, res)
 
 makeTest :: FilePath -> IO Test
@@ -85,14 +86,14 @@ makeTest f = do
   outexists <- doesFileExist outfile
   return $ case (inexists, outexists) of
              (True, True)  -> Run f infile outfile
-             (True, False) -> TypeCheck f
-             _             -> TypeFailure f
+             (True, False)    -> TypeCheck f
+             _                   -> TypeFailure f
 
-runTests :: [FilePath] -> IO ()
-runTests files = do
+runTests :: Bool -> [FilePath] -> IO ()
+runTests run files = do
   testmvar <- newEmptyMVar
   resmvar <- newEmptyMVar
-  replicateM_ concurrency $ forkIO $ runTest testmvar resmvar
+  replicateM_ concurrency $ forkIO $ runTest run testmvar resmvar
   _ <- forkIO $ forM_ files $ \file -> do
          test <- makeTest file
          putMVar testmvar (file, test)
@@ -107,10 +108,14 @@ runTests files = do
             case res of
               Success   -> return ()
               Failure s -> do clearLine
-                              putStr (file ++ ":\n" ++ s)
+                              putStrLn (file ++ ":\n" ++ s)
             getResults $ file `S.delete` remaining
   getResults $ S.fromList files
   putStrLn ""
 
 main :: IO ()
-main = runTests =<< getArgs
+main = do
+  args <- getArgs
+  case args of
+    "-t" : args' -> runTests False args'
+    _            -> runTests True args
