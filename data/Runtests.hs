@@ -99,7 +99,7 @@ runTests run files = do
          putMVar testmvar (file, test)
   let getResults remaining =
         case S.toList remaining of
-          []      -> return ()
+          []      -> clearLine
           first:_ -> do
             clearLine
             putStr $ "\rWaiting for " ++ first ++ ", " ++ show (S.size remaining) ++ " to go.\r"
@@ -111,7 +111,6 @@ runTests run files = do
                               putStrLn (file ++ ":\n" ++ s)
             getResults $ file `S.delete` remaining
   getResults $ S.fromList files
-  putStrLn ""
 
 main :: IO ()
 main = do
