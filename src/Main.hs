@@ -10,16 +10,15 @@ import System.Environment (getArgs, getProgName)
 import System.Exit (exitWith, ExitCode(..))
 import System.IO
 
-import L0.AbSyn
-import L0.Parser (parseL0, parseValue)
-import L0.TypeChecker
-import L0.Renamer
-import L0.Interpreter
-import L0.EnablingOpts.EnablingOptDriver
-import qualified L0.FirstOrderTransform as FOT
-import qualified L0.TupleTransform as TT
-import L0.Untrace
-import L0.CCodeGen
+import Language.L0
+import L0C.TypeChecker
+import L0C.Renamer
+import L0C.Interpreter
+import L0C.EnablingOpts.EnablingOptDriver
+import qualified L0C.FirstOrderTransform as FOT
+import qualified L0C.TupleTransform as TT
+import L0C.Untrace
+import L0C.CCodeGen
 
 type L0CM = ErrorT String (Writer String)
 

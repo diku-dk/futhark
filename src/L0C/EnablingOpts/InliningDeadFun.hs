@@ -1,6 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, ScopedTypeVariables #-}
 
-module L0.EnablingOpts.InliningDeadFun  ( 
+module L0C.EnablingOpts.InliningDeadFun  (
                         CallGraph
                       , buildCG
                       , aggInlineDriver
@@ -20,10 +20,9 @@ import Data.Loc
 
 import qualified Data.Map as M
 
-import L0.AbSyn
+import Language.L0
 
-import L0.Traversals
-import L0.EnablingOpts.EnablingOptErrors
+import L0C.EnablingOpts.EnablingOptErrors
 
 
 ------------------------------------------------------------------------------

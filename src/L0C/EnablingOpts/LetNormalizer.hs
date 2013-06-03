@@ -1,6 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, ScopedTypeVariables #-}
 
-module L0.EnablingOpts.LetNormalizer ( letNormProg )
+module L0C.EnablingOpts.LetNormalizer ( letNormProg )
   where
  
 import Control.Monad.State
@@ -9,13 +9,13 @@ import Control.Monad.Writer
 
 import qualified Data.List as L
 
-import L0.AbSyn
+import Language.L0
 import Data.Loc
  
-import L0.FreshNames
+import L0C.FreshNames
 
 --import L0.Traversals
-import L0.EnablingOpts.EnablingOptErrors
+import L0C.EnablingOpts.EnablingOptErrors
 
 --import Debug.Trace
 

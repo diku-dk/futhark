@@ -1,6 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, ScopedTypeVariables #-}
 
-module L0.EnablingOpts.CopyCtPropFold ( 
+module L0C.EnablingOpts.CopyCtPropFold (
                                 copyCtProp
                             )
   where
@@ -19,11 +19,10 @@ import Data.Bits
 
 import qualified Data.Map as M
 
-import L0.AbSyn
-import L0.Traversals
- 
-import L0.EnablingOpts.EnablingOptErrors
-import qualified L0.Interpreter as Interp
+import Language.L0
+
+import L0C.EnablingOpts.EnablingOptErrors
+import qualified L0C.Interpreter as Interp
 
 --import Debug.Trace
 -----------------------------------------------------------------

@@ -1,4 +1,4 @@
-module L0.Renamer
+module L0C.Renamer
   ( renameProg )
   where
 
@@ -7,16 +7,16 @@ import Control.Monad.Reader
 
 import qualified Data.Map as M
 
-import L0.AbSyn
-import L0.FreshNames
-import L0.Traversals
+import Language.L0.Syntax
+import Language.L0.Traversals
+import L0C.FreshNames
 
 -- | Rename variables such that each is unique.  The semantics of the
 -- program are unaffected, under the assumption that the program was
 -- correct to begin with.  In particular, the renaming may make an
 -- invalid program valid.  To help enforce that this does not happen,
 -- only type-checked programs can be renamed.
-renameProg :: TypeBox ty => Prog ty -> Prog ty
+renameProg :: Prog ty -> Prog ty
 renameProg prog = runReader (evalStateT (mapM renameFun prog) (newNameSourceForProg prog)) M.empty
 
 type RenameM = StateT NameSource (Reader (M.Map Name Name))
