@@ -182,57 +182,105 @@ aliased (TupleAlias ass) = mconcat $ map aliased ass
 varAlias :: [Name] -> Aliases
 varAlias = VarAlias . S.fromList
 
+substituteAliases :: Aliases -> M.Map Name (S.Set Name) -> Aliases
+substituteAliases (VarAlias names) m =
+  VarAlias $ let substs = names `S.intersection` S.fromList (M.keys m)
+             in (names S.\\ substs) `S.union`
+                  S.unions (mapMaybe (`M.lookup` m) $ S.toList substs)
+substituteAliases (TupleAlias alss) m =
+  TupleAlias $ map (`substituteAliases` m) alss
+
+data Binding = Bound Type Aliases
+             | Consumed SrcLoc
+
 -- | A pair of a variable table and a function table.  Type checking
 -- happens with access to this environment.  The function table is
 -- only initialised at the very beginning, but the variable table will
 -- be extended during type-checking when let-expressions are
 -- encountered.
-data TypeEnv = TypeEnv { envVtable :: M.Map Name Type
+data TypeEnv = TypeEnv { envVtable :: M.Map Name Binding
                        , envFtable :: M.Map Name FunBinding
-                       , envAliases :: M.Map Name Aliases
-                       , envConsumed :: M.Map Name SrcLoc
                        , envCheckOccurences :: Bool
                        }
 
-data Usage = Observed SrcLoc
-           | Consumed SrcLoc
+data Usage = Consume SrcLoc
+           | Observe SrcLoc
              deriving (Eq, Ord, Show)
 
-type Usages = M.Map Name [Usage]
+data Occurence = Occurence { observed :: S.Set Name
+                           , consumed :: S.Set Name
+                           , location :: SrcLoc
+                           }
+             deriving (Eq, Ord, Show)
 
-combineUsages :: Name -> Usage -> Usage -> Either TypeError Usage
-combineUsages _ (Observed loc) (Observed _) = Right $ Observed loc
-combineUsages name (Consumed wloc) (Observed rloc) =
+instance Located Occurence where
+  locOf = locOf . location
+
+observation :: S.Set Name -> SrcLoc -> Occurence
+observation = flip Occurence S.empty
+
+consumption :: S.Set Name -> SrcLoc -> Occurence
+consumption = Occurence S.empty
+
+nullOccurence :: Occurence -> Bool
+nullOccurence occ = S.null (observed occ) && S.null (consumed occ)
+
+type Occurences = [Occurence]
+
+type UsageMap = M.Map Name [Usage]
+
+usageMap :: Occurences -> UsageMap
+usageMap = foldl comb M.empty
+  where comb m (Occurence obs cons loc) =
+          let m' = S.foldl (ins $ Observe loc) m obs
+          in S.foldl (ins $ Consume loc) m' cons
+        ins v m k = M.insertWith (++) k [v] m
+
+combineOccurences :: Name -> Usage -> Usage -> Either TypeError Usage
+combineOccurences _ (Observe loc) (Observe _) = Right $ Observe loc
+combineOccurences name (Consume wloc) (Observe rloc) =
   Left $ UseAfterConsume name rloc wloc
-combineUsages name (Observed rloc) (Consumed wloc) =
+combineOccurences name (Observe rloc) (Consume wloc) =
   Left $ UseAfterConsume name rloc wloc
-combineUsages name (Consumed loc1) (Consumed loc2) =
+combineOccurences name (Consume loc1) (Consume loc2) =
   Left $ UseAfterConsume name (max loc1 loc2) (min loc1 loc2)
 
-checkUsages :: Usages -> Either TypeError Usages
-checkUsages = T.sequence . M.mapWithKey comb
+checkOccurences :: Occurences -> Either TypeError ()
+checkOccurences = void . T.sequence . M.mapWithKey comb . usageMap
   where comb _    []     = Right []
-        comb name (u:us) = (:[]) <$> foldM (combineUsages name) u us
+        comb name (u:us) = (:[]) <$> foldM (combineOccurences name) u us
 
-seqUsages :: Usages -> Usages -> Usages
-seqUsages = M.unionWith comb
-  where comb pre post
-          | Consumed noLoc `elem` post =
-            filter (not . (==Observed noLoc)) pre ++ post
-          | otherwise = pre ++ post
+allConsumed :: Occurences -> S.Set Name
+allConsumed = S.unions . map consumed
+
+seqOccurences :: Occurences -> Occurences -> Occurences
+seqOccurences occurs1 occurs2 =
+  filter (not . nullOccurence) $ map filt occurs1 ++ occurs2
+  where filt occ =
+          occ { observed = observed occ S.\\ postcons }
+        postcons = allConsumed occurs2
+
+altOccurences :: Occurences -> Occurences -> Occurences
+altOccurences occurs1 occurs2 =
+  filter (not . nullOccurence) $ map filt occurs1 ++ occurs2
+  where filt occ =
+          occ { consumed = consumed occ S.\\ postcons
+              , observed = observed occ S.\\ postcons }
+        postcons = allConsumed occurs2
+
 
 -- | The 'VarUsage' data structure is used to keep track of which
 -- variables have been referenced inside an expression, as well as
 -- which variables the resulting expression may possibly alias.
 data Dataflow = Dataflow {
-    usageOccurences :: Usages
+    usageOccurences :: Occurences
   , usageAliasing :: Aliases
   } deriving (Show)
 
 instance Monoid Dataflow where
   mempty = Dataflow mempty mempty
-  Dataflow m1 s1 `mappend` Dataflow m2 s2 =
-    Dataflow (M.unionWith (++) m1 m2) (s1 <> s2)
+  Dataflow o1 s1 `mappend` Dataflow o2 s2 =
+    Dataflow (o1 ++ o2) (s1 <> s2)
 
 -- | The type checker runs in this monad.  Note that it has no mutable
 -- state, but merely keeps track of current bindings in a 'TypeEnv'.
@@ -253,28 +301,26 @@ liftEither = either bad return
 observe :: Ident Type -> TypeM ()
 observe (Ident name _ loc) = do
   als <- aliases name
-  tell $ mempty { usageOccurences = M.singleton name [Observed loc]
+  tell $ mempty { usageOccurences = [observation (aliased als) loc]
                 , usageAliasing = als }
-
-alias :: Aliases -> TypeM ()
-alias al = tell $ mempty { usageAliasing = al }
 
 -- | Proclaim that we have written to the given variable.
 consume :: SrcLoc -> Aliases -> TypeM ()
 consume loc als =
-  let occurs = M.fromList [ (name, [Consumed loc])
-                            | name <- S.toList $ aliased als ]
-  in tell $ mempty { usageOccurences = occurs }
+  tell $ mempty { usageOccurences = [consumption (aliased als) loc] }
+
+alias :: Aliases -> TypeM ()
+alias al = tell $ mempty { usageAliasing = al }
 
 -- | Proclaim that we have written to the given variable, and mark
 -- accesses to it and all of its aliases as invalid inside the given
 -- computation.
-consuming :: SrcLoc -> Name -> TypeM a -> TypeM a
-consuming loc name m = do
+consuming :: Ident Type -> TypeM a -> TypeM a
+consuming (Ident name _ loc) m = do
   consume loc =<< aliases name
   local consume' m
   where consume' env =
-          env { envConsumed = M.insert name loc $ envConsumed env }
+          env { envVtable = M.insert name (Consumed loc) $ envVtable env }
 
 collectAliases :: TypeM a -> TypeM (a, Aliases)
 collectAliases m = pass $ do
@@ -289,74 +335,83 @@ collectDataflow m = pass $ do
   (x, dataflow) <- listen m
   return ((x, dataflow), const mempty)
 
-checkOccurences :: Usages -> TypeM Usages
-checkOccurences us = do
+maybeCheckOccurences :: Occurences -> TypeM ()
+maybeCheckOccurences us = do
   check <- asks envCheckOccurences
-  if check then liftEither $ checkUsages us
-  else return us
+  when check $ liftEither $ checkOccurences us
 
 alternative :: TypeM a -> TypeM b -> TypeM (a,b)
 alternative m1 m2 = pass $ do
   (x, Dataflow occurs1 als1) <- listen m1
   (y, Dataflow occurs2 als2) <- listen m2
-  occurs1' <- checkOccurences occurs1
-  occurs2' <- checkOccurences occurs2
-  let usage = Dataflow (M.unionWith max occurs1' occurs2') (als1 <> als2)
+  maybeCheckOccurences occurs1
+  maybeCheckOccurences occurs2
+  let usage = Dataflow (occurs1 `altOccurences` occurs2) (als1 <> als2)
   return ((x, y), const usage)
 
-aliasing :: Name -> Aliases -> TypeM a -> TypeM a
-aliasing name als tm = do
-  let name' = varAlias [name]
-      outedges = M.insert name als
-      -- Edges from everything in als to name:
-      inedges m =  S.foldl (\m' v -> M.insertWith (<>) v name' m') m $ aliased als
-  local (\env -> env { envAliases = inedges $ outedges $ envAliases env }) tm
-
 aliases :: Name -> TypeM Aliases
-aliases name = asks $ maybe name' reflexive . M.lookup name . envAliases
+aliases name = asks $ maybe name' reflexive . M.lookup name . envVtable
   where name' = varAlias [name]
-        reflexive als | VarAlias _ <- als = als <> name'
-                      | otherwise         = als
+        reflexive (Consumed _) = mempty
+        reflexive (Bound _ als)
+          | VarAlias _ <- als = als <> name'
+          | otherwise         = als
 
-binding :: [Ident Type] -> TypeM a -> TypeM a
-binding bnds = check bnds . local (`bindVars` bnds)
+binding' :: [Ident Type] -> TypeM a -> TypeM a
+binding' = binding . (`zip` repeat mempty)
+
+binding :: [(Ident Type, Aliases)] -> TypeM a -> TypeM a
+binding bnds = check . local (`bindVars` bnds)
   where bindVars = foldl bindVar
 
-        -- Since the type checker does not require unique names,
-        -- we need to remove any existing information about
-        -- variables of the same name.
-        bindVar env (Ident name tp _) =
-          env { envVtable = M.insert name tp $ envVtable env
-              , envConsumed = M.delete name $ envConsumed env }
+        bindVar env (Ident name tp _, als) =
+          let name' = varAlias [name]
+              inedges = aliased als
+              update k (Bound tp' als')
+                | k `S.member` inedges = Bound tp' $ als'' <> name'
+                | otherwise            = Bound tp' als''
+                where als'' = unalias name als'
+              update _ b = b
+          in env { envVtable = M.insert name (Bound tp als) $
+                               M.mapWithKey update $
+                               envVtable env }
 
         -- Check whether the bound variables have been used correctly
         -- within their scope.
-        check vars m = do
-          (a, usages) <- collectOccurences (map identName vars) m
-          void $ checkOccurences usages
+        check m = do
+          (a, usages) <- collectOccurences m
+          maybeCheckOccurences usages
           return a
 
-        -- Collect and remove all occurences in @names@.  Also remove
+        -- Collect and remove all occurences in @bnds@.  Also remove
         -- these names from aliasing information, since they are now
-        -- out of scope.
-        collectOccurences names m = pass $ do
+        -- out of scope.  We have to be careful to handle aliasing
+        -- properly, however.
+        collectOccurences :: TypeM a -> TypeM (a, Occurences)
+        collectOccurences m = pass $ do
           (x, usage) <- listen m
           let (relevant, rest) = split $ usageOccurences usage
-              newaliases = foldr unalias (usageAliasing usage) names
+              substs = M.fromList [ (identName k, aliased als) | (k, als) <- bnds ]
+              newaliases = usageAliasing usage `substituteAliases` substs
           return ((x, relevant),
                   const $ usage { usageOccurences = rest
                                 , usageAliasing = newaliases })
-          where split = M.partitionWithKey $ const . (`elem` names)
+          where split :: Occurences -> (Occurences, Occurences)
+                split = unzip .
+                        map (\occ ->
+                             let (obs1, obs2) = S.partition (`elem` names) $ observed occ
+                                 (con1, con2) = S.partition (`elem` names) $ consumed occ
+                             in (occ { observed = obs1, consumed = con1 },
+                                 occ { observed = obs2, consumed = con2 }))
+                names = map (identName . fst) bnds
 
 lookupVar :: Name -> SrcLoc -> TypeM Type
 lookupVar name pos = do
   bnd <- asks $ M.lookup name . envVtable
-  consumed <- asks $ M.lookup name . envConsumed
-  check <- asks envCheckOccurences
-  case (bnd, consumed, check) of
-    (_, Just wloc, True) -> bad $ UseAfterConsume name pos wloc
-    (Nothing, _, _)      -> bad $ UnknownVariableError name pos
-    (Just t, _, _)       -> return t
+  case bnd of
+    Nothing              -> bad $ UnknownVariableError name pos
+    Just (Bound t _)     -> return t
+    Just (Consumed wloc) -> bad $ UseAfterConsume name pos wloc
 
 -- | Determine if two types are identical, ignoring uniqueness.
 -- Causes a 'TypeError' if they fail to match, and otherwise returns
@@ -424,19 +479,18 @@ checkProg' checkoccurs prog = do
   ftable <- buildFtable
   let typeenv = TypeEnv { envVtable = M.empty
                         , envFtable = ftable
-                        , envAliases = M.empty
-                        , envConsumed = M.empty
                         , envCheckOccurences = checkoccurs
                         }
-  runTypeM typeenv $ mapM checkFun prog
+  runTypeM typeenv $ mapM checkFun prog'
   where
+    prog' = prog
     -- To build the ftable we loop through the list of function
     -- definitions.  In addition to the normal ftable information
     -- (name, return type, argument types), we also keep track of
     -- position information, in order to report both locations of
     -- duplicate function definitions.  The position information is
     -- removed at the end.
-    buildFtable = M.map rmLoc <$> foldM expand builtins prog
+    buildFtable = M.map rmLoc <$> foldM expand builtins prog'
     expand ftable (name,ret,args,_,pos)
       | Just (_,_,pos2) <- M.lookup name ftable =
         Left $ DupDefinitionError name pos pos2
@@ -456,11 +510,13 @@ checkFun :: TypeBox tf => FunDec tf -> TypeM (FunDec Type)
 checkFun (fname, rettype, args, body, loc) = do
   args' <- checkArgs
   (body', dataflow) <-
-    collectDataflow $ binding args' $ checkExp body
+    collectDataflow $ binding' args' $ checkExp body
   checkReturnAlias $ usageAliasing dataflow
+
   if typeOf body' `subtypeOf` rettype then
     return (fname, rettype, args, body', loc)
   else bad $ ReturnTypeError loc fname rettype $ typeOf body'
+
   where checkArgs = foldM expand [] args
 
         expand args' ident@(Ident pname _ _)
@@ -597,16 +653,16 @@ checkExp' (Apply fname args rettype pos) = do
 
       args' <- forM (zip args $ cycle paramtypes) $ \(arg, paramt) -> do
                  (arg', dflow) <- collectDataflow $ checkExp arg
-                 occurs1 <- checkOccurences $ usageOccurences dflow
+                 maybeCheckOccurences $ usageOccurences dflow
 
-                 let occurs2 = consumeArg (srclocOf arg) paramt $ usageAliasing dflow
+                 let occurs = consumeArg (srclocOf arg) paramt $ usageAliasing dflow
                      als = maskAliasing rettype' $
                            VarAlias $ aliased $ usageAliasing dflow
 
-
                  tell $ mempty
                         { usageAliasing = als
-                        , usageOccurences = M.unionWith max occurs1 occurs2 }
+                        , usageOccurences = usageOccurences dflow
+                                            `seqOccurences` occurs }
                  return arg'
 
       checkApply (Just fname) paramtypes (map typeOf args') pos
@@ -619,24 +675,10 @@ checkExp' (Apply fname args rettype pos) = do
         -- Create usage information, given argument type and aliasing
         -- information.
         consumeArg loc (Elem (Tuple ets)) (TupleAlias alss) =
-          mconcat $ zipWith (consumeArg loc) ets alss
+          concat $ zipWith (consumeArg loc) ets alss
         consumeArg loc t als
-          | consumes t =
-            mconcat $ map (`M.singleton` [Consumed loc]) $
-                    S.toList $ aliased als
-          | otherwise = mempty
-
-        -- If the return type is unique, we assume that the value does
-        -- not alias the parameters.
-        maskAliasing (Elem (Tuple ets)) als =
-          TupleAlias [ if unique et then mempty
-                       else maskAliasing et als'
-                       | (als', et) <- zip alss' ets ]
-            where alss' = case als of (TupleAlias alss) -> alss
-                                      _                 -> repeat als
-        maskAliasing t als
-          | unique t = mempty
-          | otherwise = als
+          | consumes t = [consumption (aliased als) loc]
+          | otherwise = []
 
 checkExp' (LetPat pat e body pos) = do
   (e', dataflow) <- collectDataflow $ checkExp e
@@ -652,7 +694,7 @@ checkExp' (LetWith (Ident dest destt destpos) src idxes ve body pos) = do
   let dest' = Ident dest destt' destpos
 
   unless (unique src' || basicType (typeOf src')) $
-    bad $ TypeError pos "Source is not unique"
+    bad $ TypeError pos $ "Source '" ++ nameToString (identName src) ++ "' is not unique"
 
   case peelArray (length idxes) (identType src') of
     Nothing -> bad $ IndexingError (arrayDims $ identType src') (length idxes) (srclocOf src)
@@ -661,7 +703,7 @@ checkExp' (LetWith (Ident dest destt destpos) src idxes ve body pos) = do
         when (identName src `S.member` aliased (usageAliasing dflow)) $
           bad $ BadLetWithValue pos
         (scope, _) <- checkBinding (Id dest') (Var src') mempty
-        body' <- consuming (srclocOf src) (identName src') $ scope $ checkExp body
+        body' <- consuming src' $ scope $ checkExp body
         return $ LetWith dest' src' idxes' ve' body' pos
 
 checkExp' (Index ident idxes restype pos) = do
@@ -798,24 +840,27 @@ checkExp' (DoLoop mergepat mergeexp (Ident loopvar _ _)
                          mergeexp' <- checkExp mergeexp
                          return (boundexp', mergeexp')
   let mergetype = typeOf mergeexp'
+      ibind = (Ident loopvar (Elem Int) pos, mempty)
       checkloop scope = collectDataflow $
-                        scope $ binding [Ident loopvar (Elem Int) pos] $
+                        scope $ binding [ibind] $
                         require [mergetype] =<< checkExp loopbody
 
   -- We need to check the loop body three times to ensure we have full
   -- aliasing information, and detect any usage collisions.
   (firstscope, mergepat') <- checkBinding mergepat mergeexp' mergeflow
-  (_, dataflow) <- checkloop firstscope
+  (loopbody', dataflow) <- checkloop firstscope
 
-  (secondscope, _) <- checkBinding mergepat mergeexp' dataflow
-  (_, secondflow) <- checkloop secondscope
+  (secondscope, _) <-
+    checkBinding mergepat loopbody'
+    dataflow { usageAliasing = maskAliasing (typeOf loopbody')
+                               $ usageAliasing dataflow}
+  (loopbody'', _) <- checkloop secondscope
 
-  (thirdscope, _) <- checkBinding mergepat mergeexp' secondflow
-  (loopbody'', _) <- checkloop thirdscope
-
-  thirdscope $ do
+  secondscope $ do
     letbody' <- checkExp letbody
     return $ DoLoop mergepat' mergeexp' (Ident loopvar (Elem Int) pos) boundexp' loopbody'' letbody' pos
+
+
 
 ----------------------------------------------
 ---- BEGIN Cosmin added SOAC2 combinators ----
@@ -1006,7 +1051,7 @@ sequentially m1 m2 = do
   (b, m2flow) <- collectDataflow $ m2 a m1flow
   tell Dataflow {
            usageAliasing = usageAliasing m2flow
-         , usageOccurences = usageOccurences m1flow `seqUsages` usageOccurences m2flow
+         , usageOccurences = usageOccurences m1flow `seqOccurences` usageOccurences m2flow
          }
   return b
 
@@ -1033,9 +1078,8 @@ checkBinding pat e dflow = do
           bnd <- gets $ find (==ident) . snd
           case bnd of
             Nothing ->
-              modify $ \(scope, names) ->
-                (binding [ident] . aliasing (identName ident) a . scope,
-                 ident : names)
+              modify $ \(scope, names) -> (binding [(ident, a)] . scope,
+                                           ident : names)
             Just (Ident name _ pos2) ->
               lift $ bad $ DupPatternError name (srclocOf ident) pos2
         -- A pattern with known type box (Maybe) for error messages.
@@ -1051,6 +1095,19 @@ checkApply :: Maybe Name -> [Type] -> [Type] -> SrcLoc -> TypeM ()
 checkApply fname expected got loc =
   unless (validApply expected got) $
   bad $ ParameterMismatch fname loc (Right expected) got
+
+-- | If the return type is unique, we assume that the value does not
+-- alias the parameters.
+maskAliasing :: Type -> Aliases -> Aliases
+maskAliasing (Elem (Tuple ets)) als =
+  TupleAlias [ if unique et then mempty
+               else maskAliasing et als'
+               | (als', et) <- zip alss' ets ]
+    where alss' = case als of (TupleAlias alss) -> alss
+                              _                 -> repeat als
+maskAliasing t als
+  | unique t = mempty
+  | otherwise = als
 
 checkLambda :: TypeBox ty => Lambda ty -> [Type] -> TypeM (Lambda Type)
 checkLambda (AnonymFun params body ret pos) args = do
@@ -1130,7 +1187,7 @@ checkPolyLambdaOp op curryargexps rettype args pos = do
                                    Var $ yident $ boxType tp,
                                    [yident tp])
                     (e1:e2:_) -> return (e1, e2, [])
-  body <- binding params $ checkBinOp op x y rettype pos
+  body <- binding' params $ checkBinOp op x y rettype pos
   checkLambda (AnonymFun params body (typeOf body) pos) args
   where fname = nameFromString $ "op" ++ ppBinOp op
         xident t = Ident (nameFromString "x") t pos
