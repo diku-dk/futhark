@@ -1,5 +1,5 @@
 {
-module L0.Parser.Parser
+module Language.L0.Parser.Parser
   ( prog
   , intValue
   , realValue
@@ -14,8 +14,9 @@ import Control.Monad (foldM)
 import Data.Array
 import Data.Loc hiding (L, unLoc) -- Lexer has replacements.
 
-import L0.AbSyn
-import L0.Parser.Lexer
+import Language.L0.Syntax
+import Language.L0.Attributes
+import Language.L0.Parser.Lexer
 
 }
 

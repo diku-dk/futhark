@@ -1,6 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
-module L0.EnablingOpts.EnablingOptDriver ( 
+module L0C.EnablingOpts.EnablingOptDriver (
                                     enablingOpts
                                   , copyCtProp
                                   , CallGraph
@@ -14,17 +14,17 @@ module L0.EnablingOpts.EnablingOptDriver (
  
 --import Data.Either
  
-import L0.AbSyn
-import L0.Renamer
+import Language.L0
+import L0C.Renamer
 
-import L0.EnablingOpts.InliningDeadFun
-import L0.EnablingOpts.CopyCtPropFold
-import L0.EnablingOpts.DeadVarElim
-import L0.EnablingOpts.TupleNormalizer
-import L0.EnablingOpts.LetNormalizer
-import L0.EnablingOpts.EnablingOptErrors
+import L0C.EnablingOpts.InliningDeadFun
+import L0C.EnablingOpts.CopyCtPropFold
+import L0C.EnablingOpts.DeadVarElim
+import L0C.EnablingOpts.TupleNormalizer
+import L0C.EnablingOpts.LetNormalizer
+import L0C.EnablingOpts.EnablingOptErrors
 
-import qualified L0.TupleTransform as TT
+import qualified L0C.TupleTransform as TT
 
 import Debug.Trace
 

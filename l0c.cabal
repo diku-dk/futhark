@@ -21,8 +21,10 @@ Executable l0c
                  mainland-pretty >= 0.2.5,
                  text
 
-  Other-modules: L0.Parser.Parser,
-                 L0.Parser.Lexer
+  -- We have to mention these explicitly, or alex and happy won't be
+  -- run to generate them.
+  Other-modules: Language.L0.Parser.Parser,
+                 Language.L0.Parser.Lexer
 
   -- Directories other than the root containing source files.
   hs-source-dirs:      src

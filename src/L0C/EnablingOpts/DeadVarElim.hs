@@ -1,6 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, ScopedTypeVariables #-}
 
-module L0.EnablingOpts.DeadVarElim ( 
+module L0C.EnablingOpts.DeadVarElim (
                                 deadCodeElim
                             )
   where
@@ -12,12 +12,10 @@ import Control.Monad.Writer
 import qualified Data.Set as S
 --import qualified Data.Map as M
 
-import L0.AbSyn
-import L0.Traversals
+import Language.L0
 
---import L0.Traversals
 --import L0.EnablingOpts.InliningDeadFun
-import L0.EnablingOpts.EnablingOptErrors
+import L0C.EnablingOpts.EnablingOptErrors
 
 
 -----------------------------------------------------------------

@@ -7,7 +7,7 @@
 -- >>> let (name2, src'') = newName "bar" src'
 -- >>>> name2
 -- "bar_1"
-module L0.FreshNames
+module L0C.FreshNames
   ( NameSource
   , blankNameSource
   , newNameSource
@@ -15,8 +15,8 @@ module L0.FreshNames
   , newName
   ) where
 
-import L0.AbSyn
-import L0.Traversals
+import Language.L0.Syntax
+import Language.L0.Traversals
 import qualified Data.Text as T
 import Data.Monoid
 
@@ -44,7 +44,7 @@ newNameSource = NameSource 0
 
 -- | Create a new 'NameSource' that will never produce any of the
 -- names used as variables in the given program.
-newNameSourceForProg :: TypeBox ty => Prog ty -> NameSource
+newNameSourceForProg :: Prog ty -> NameSource
 newNameSourceForProg = newNameSource . progNames
 
 -- | Produce a fresh name, using the given name as a template.
