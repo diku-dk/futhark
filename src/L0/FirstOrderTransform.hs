@@ -27,6 +27,7 @@ transformFunDec (fname, rettype, params, body, loc) = do
   return (fname, rettype, params, body', loc)
 
 transformExp :: Exp Type -> TransformM (Exp Type)
+
 transformExp mape@(Map fun e intype loc) = do
   -- We have to allocate a new array up front.  This is a bit tricky,
   -- as in case the new array is an array-of-arrays, we need to
@@ -50,6 +51,7 @@ transformExp mape@(Map fun e intype loc) = do
       letbody = DoLoop (Id outarr) outarrv i nv loopbody outarrv loc
       loopbody = LetWith outarr outarr [iv] funcall outarrv loc
   return $ inarrlet $ nlet branch
+
 transformExp (Reduce fun accexp arrexp intype loc) = do
   ((arr, arrv), (acc, accv), (i, iv), redlet) <- newReduction loc arrexp accexp
   let index = Index arr [iv] intype loc
@@ -57,6 +59,7 @@ transformExp (Reduce fun accexp arrexp intype loc) = do
   let loop = DoLoop (Id acc) accv i (Size arrv loc) loopbody accv loc
       loopbody = LetPat (Id acc) funcall accv loc
   return $ redlet loop
+
 transformExp (Scan fun accexp arrexp intype loc) = do
   ((arr, arrv), (acc, accv), (i, iv), redlet) <- newReduction loc arrexp accexp
   let index = Index arr [iv] intype loc
@@ -64,6 +67,7 @@ transformExp (Scan fun accexp arrexp intype loc) = do
   let loop = DoLoop (TupId [Id acc, Id arr] loc) (TupLit [accv, arrv] loc) i (Size arrv loc) loopbody arrv loc
       loopbody = LetWith arr arr [iv] funcall (TupLit [index, arrv] loc) loc
   return $ redlet loop
+
 transformExp (Filter fun arrexp rowtype loc) = do
   (arr, arrv, arrlet) <- newLet arrexp "arr"
   (_, nv, nlet) <- newLet (Size arrv loc) "n"
@@ -93,10 +97,11 @@ transformExp (Filter fun arrexp rowtype loc) = do
                         (And (BinOp Less (intval 0) iv (Elem Bool) loc)
                              (BinOp Equal indexi indexim1 (Elem Bool) loc) loc)
                      loc)
-                 resv update (typeOf arrexp) loc
+                 resv update (typeOf resv) loc
       update = LetWith res res [BinOp Minus indexi (intval 1) (Elem Int) loc] indexin resv loc
   return $ arrlet $ nlet $ checkempty $ ialet $ reslet loop
   where intval x = Literal (IntVal x) loc
+
 transformExp (Mapall fun arrexp loc) = transformExp =<< toMap arrexp
   where toMap e = case peelArray 1 $ typeOf e of
                     Just et -> do
@@ -105,6 +110,7 @@ transformExp (Mapall fun arrexp loc) = transformExp =<< toMap arrexp
                       let ot = arrayType (arrayDims et) (typeOf fun) Nonunique
                       return $ Map (AnonymFun [x] body ot loc) e et loc
                     _ -> transformLambda fun [e]
+
 transformExp (Redomap redfun mapfun accexp arrexp _ loc) = do
   ((arr, arrv), (acc, accv), (i, iv), redlet) <- newReduction loc arrexp accexp
   let index = Index arr [iv] (stripArray 1 $ typeOf arrexp) loc
@@ -113,6 +119,7 @@ transformExp (Redomap redfun mapfun accexp arrexp _ loc) = do
   let loop = DoLoop (Id acc) accv i (Size arrv loc) loopbody accv loc
       loopbody = LetWith acc acc [] redfuncall accv loc
   return $ redlet loop
+
 transformExp e = mapExpM transform e
   where transform = identityMapper {
                       mapOnExp = transformExp
