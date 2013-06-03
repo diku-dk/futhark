@@ -4,8 +4,8 @@
 -- Functions for generic traversals across L0 syntax trees.  The
 -- motivation for this module came from dissatisfaction with rewriting
 -- the same trivial tree recursions for every module.  A possible
--- alternative would be to use normal "Scrap your
--- boilerplate"-techniques, but these are rejected for two reasons:
+-- alternative would be to use normal \"Scrap your
+-- boilerplate\"-techniques, but these are rejected for two reasons:
 --
 --    * They are too slow.
 --
