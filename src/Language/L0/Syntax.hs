@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleInstances #-}
--- | This Is an Ever-Changing AnSyn for L0.  Some types, such as
--- @Exp@, are parametrised by type representation.
--- See "L0.TypeChecker" and the 'Exp' type for more information.
+-- | This Is an ever-changing abstract syntax for L0.  Some types,
+-- such as @Exp@, are parametrised by type representation.  See
+-- "L0C.TypeChecker" and the 'Exp' type for more information.
 module Language.L0.Syntax
   (
 
