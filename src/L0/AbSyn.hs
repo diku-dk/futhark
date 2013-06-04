@@ -788,7 +788,7 @@ ppExp d (Filter2 fun els _) =
 --
 ppExp d (Redomap2 id1 id2 el els _ _)
           = " redomap2 ( " ++ ppLambda (d+1) id1 ++ ", " ++ ppLambda (d+1) id2 ++ 
-            ", " ++ ppExp (d+1) el ++ intercalate ", " (map (ppExp (d+1)) els) ++ " ) "
+            ", " ++ ppExp (d+1) el ++ ", " ++ intercalate ", " (map (ppExp (d+1)) els) ++ " ) "
 --
 ppExp d (Mapall2 fun lst _) = 
     " mapall2 ( " ++ ppLambda (d+1) fun ++ ", " ++
