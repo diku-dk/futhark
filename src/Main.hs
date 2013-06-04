@@ -16,6 +16,7 @@ import L0.TypeChecker
 import L0.Renamer
 import L0.Interpreter
 import L0.EnablingOpts.EnablingOptDriver
+import L0.HOTrans.HOTransDriver
 import qualified L0.FirstOrderTransform as FOT
 import qualified L0.TupleTransform as TT
 import L0.Untrace
@@ -68,6 +69,7 @@ commandLineOptions =
   , fotransform "f" ["first-order-transform"]
   , tatransform "t" ["tuple-of-arrays-transform"]
   , eotransform "e" ["enabling-optimisations"]
+  , hotransform "h" ["higher-order-optimizations"]
   ]
 
 interpret :: Prog Type -> IO ()
@@ -144,6 +146,13 @@ eotransform =
   passoption "Perform simple enabling optimisations."
   Pass { passName = "enabling optimations"
        , passOp = either (throwError . show) return . enablingOpts
+       }
+
+hotransform :: String -> [String] -> L0Option
+hotransform =
+  passoption "Perform higher-order transformation, i.e., fusion."
+  Pass { passName = "higer-order optimations"
+       , passOp = either (throwError . show) return . highOrdTransf 
        }
 
 
