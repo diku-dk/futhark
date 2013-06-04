@@ -5,6 +5,7 @@ module L0.EnablingOpts.InliningDeadFun  (
                       , buildCG
                       , aggInlineDriver
                       , deadFunElim
+                      , mkUnnamedLamPrg
                     )
   where 
 
@@ -25,6 +26,52 @@ import L0.AbSyn
 import L0.Traversals
 import L0.EnablingOpts.EnablingOptErrors
 
+
+------------------------------------------------------------------------------
+------------------------------------------------------------------------------
+----  Simple Transformation to replace soac's curried with unnamed lambda 
+------------------------------------------------------------------------------
+------------------------------------------------------------------------------
+
+mkUnnamedLamPrg :: Prog Type -> Prog Type
+mkUnnamedLamPrg prog = 
+    let fnms = map (\(nm,_,_,_,_)->nm) prog
+        ftab = M.fromList $ zip fnms prog
+    in  map (mkUnnamedLamFun ftab) prog
+
+mkUnnamedLamFun :: M.Map Name (FunDec Type) -> FunDec Type -> FunDec Type
+mkUnnamedLamFun ftab (fnm,rtp,idds,body,pos) = 
+    let body' = mkUnnamedLamExp ftab body
+    in  (fnm,rtp,idds,body',pos)
+
+mkUnnamedLamExp :: M.Map Name (FunDec Type) -> Exp Type -> Exp Type
+mkUnnamedLamExp ftab (Mapall lam arrr pos) = 
+    Mapall (mkUnnamedLamLam ftab lam) (mkUnnamedLamExp ftab arrr) pos
+mkUnnamedLamExp ftab (Map lam arrr eltp pos) = 
+    Map    (mkUnnamedLamLam ftab lam) (mkUnnamedLamExp ftab arrr) eltp pos
+mkUnnamedLamExp ftab (Filter lam arrr eltp pos) = 
+    Filter (mkUnnamedLamLam ftab lam) (mkUnnamedLamExp ftab arrr) eltp pos
+mkUnnamedLamExp ftab (Reduce lam ne arrr eltp pos) = 
+    Reduce (mkUnnamedLamLam ftab lam) (mkUnnamedLamExp ftab ne) (mkUnnamedLamExp ftab arrr) eltp pos
+mkUnnamedLamExp ftab (Scan lam ne arrr eltp pos) = 
+    Scan   (mkUnnamedLamLam ftab lam) (mkUnnamedLamExp ftab ne) (mkUnnamedLamExp ftab arrr) eltp pos
+mkUnnamedLamExp ftab (Redomap lam1 lam2 ne arrr eltp pos) = 
+    Redomap (mkUnnamedLamLam ftab lam1) (mkUnnamedLamLam ftab lam2) 
+            (mkUnnamedLamExp ftab ne  ) (mkUnnamedLamExp ftab arrr) eltp pos
+
+mkUnnamedLamExp ftab e = buildExpPattern (mkUnnamedLamExp ftab) e
+
+mkUnnamedLamLam ::  M.Map Name (FunDec Type) -> Lambda Type -> Lambda Type
+mkUnnamedLamLam ftab (AnonymFun ids body  tp pos) = 
+    AnonymFun ids (mkUnnamedLamExp ftab body) tp pos
+mkUnnamedLamLam ftab (CurryFun  nm params tp pos) = 
+    case M.lookup nm ftab of
+        Nothing                      -> 
+            CurryFun nm (map (mkUnnamedLamExp ftab) params) tp pos
+        Just (fnm,_,idds,_,_) -> 
+            let idds' = drop (length params) idds  
+                args  = params ++ (map (\x->Var x) idds')
+            in  AnonymFun idds' (Apply fnm args tp pos) tp pos
 
 ------------------------------------------------------------------------------
 ------------------------------------------------------------------------------
