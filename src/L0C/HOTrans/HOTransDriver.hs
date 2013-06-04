@@ -1,6 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
-module L0.HOTrans.HOTransDriver ( 
+module L0C.HOTrans.HOTransDriver( 
                                     highOrdTransf
                                 )
   where
@@ -8,12 +8,13 @@ module L0.HOTrans.HOTransDriver (
  
 --import Data.Either
  
-import L0.AbSyn
+--import L0.AbSyn
 --import L0.Renamer
 
-import L0.EnablingOpts.EnablingOptDriver
+import Language.L0
+import L0C.EnablingOpts.EnablingOptDriver
 
-import L0.HOTrans.Fusion
+import L0C.HOTrans.Fusion
 
 --------------------------------------------------------------
 ---- HigherOrderTransformation Driver

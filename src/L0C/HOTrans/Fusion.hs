@@ -1,6 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, ScopedTypeVariables #-}
 
-module L0.HOTrans.Fusion ( fuseProg )
+module L0C.HOTrans.Fusion ( fuseProg )
   where
  
 import Control.Monad.State
@@ -18,10 +18,10 @@ import qualified Data.List as L
 import qualified Data.Map  as M
 import qualified Data.Set  as S
 
-import L0.AbSyn
-import L0.FreshNames
-import L0.Traversals
-import L0.EnablingOpts.EnablingOptErrors
+import Language.L0
+--import Language.L0.Traversals
+import L0C.FreshNames
+import L0C.EnablingOpts.EnablingOptErrors
 
 import Debug.Trace
 
