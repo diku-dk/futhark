@@ -7,6 +7,7 @@ module L0.EnablingOpts.EnablingOptDriver (
                                   , buildCG
                                   , aggInlineDriver
                                   , deadFunElim
+                                  , normCopyDeadOpts
                                   , EnablingOptError(..)
                             )
   where
@@ -26,7 +27,9 @@ import L0.EnablingOpts.EnablingOptErrors
 
 import qualified L0.TupleTransform as TT
 
-import Debug.Trace
+--import L0.HOTrans.Fusion
+
+--import Debug.Trace
 
 --------------------------------------------------------------
 ---- Enabling Optimization Driver
@@ -36,7 +39,7 @@ import Debug.Trace
 enablingOpts :: Prog Type -> Either EnablingOptError (Prog Type)
 enablingOpts prog = do
 
-    prog_inl      <- aggInlineDriver prog
+    prog_inl      <- aggInlineDriver $ mkUnnamedLamPrg prog
 
     prog_dfe      <- deadFunElim     prog_inl
 
@@ -46,8 +49,10 @@ enablingOpts prog = do
 
     prog_enopt1 <- normCopyDeadOpts prog_ntup
     prog_enopt2 <- normCopyDeadOpts prog_enopt1
-    prog_deadf2 <- deadFunElim     prog_enopt2
-    normCopyDeadOpts $ TT.transformProg prog_deadf2
+    prog_deadf2 <- deadFunElim      prog_enopt2
+    prog_flat_opt <- normCopyDeadOpts $ TT.transformProg prog_deadf2
+
+    tupleNormProg   prog_flat_opt >>= normCopyDeadOpts
 
 --    if(succs)
 --    then enablingOpts outprog
