@@ -1,5 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, ScopedTypeVariables #-}
-module L0.Interpreter
+module L0C.Interpreter
   ( runFun
   , runFunNoTrace
   , Trace
@@ -17,8 +17,7 @@ import Data.List
 import Data.Loc
 import qualified Data.Map as M
 
-import L0.AbSyn
--- import L0.Parser
+import Language.L0
 
 data InterpreterError = MissingEntryPoint Name
                       | InvalidFunctionArguments Name (Maybe [Type]) [Type]

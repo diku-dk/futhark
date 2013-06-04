@@ -1,10 +1,10 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, ScopedTypeVariables #-}
 
-module L0.EnablingOpts.EnablingOptErrors ( EnablingOptError(..) )
+module L0C.EnablingOpts.EnablingOptErrors ( EnablingOptError(..) )
   where
   
 import Data.Loc
-import L0.AbSyn
+import Language.L0
  
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.

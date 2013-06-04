@@ -4,8 +4,8 @@
 -- Functions for generic traversals across L0 syntax trees.  The
 -- motivation for this module came from dissatisfaction with rewriting
 -- the same trivial tree recursions for every module.  A possible
--- alternative would be to use normal "Scrap your
--- boilerplate"-techniques, but these are rejected for two reasons:
+-- alternative would be to use normal \"Scrap your
+-- boilerplate\"-techniques, but these are rejected for two reasons:
 --
 --    * They are too slow.
 --
@@ -20,11 +20,11 @@
 -- functions expressing the operations to be performed on the various
 -- types of nodes.
 --
--- The "L0.Renamer" and "L0.Untrace" modules are simple examples of
+-- The "L0C.Renamer" and "L0C.Untrace" modules are simple examples of
 -- how to use this facility.
 --
 -----------------------------------------------------------------------------
-module L0.Traversals
+module Language.L0.Traversals
   (
   -- * Mapping
     Mapper(..)
@@ -60,7 +60,7 @@ import Control.Monad.Writer
 import Control.Monad.State
 import qualified Data.Set as S
 
-import L0.AbSyn
+import Language.L0.Syntax
 
 -- | Express a monad mapping operation on a syntax node.  Each element
 -- of this structure expresses the operation to be performed on a
@@ -290,9 +290,9 @@ walkExpM f = void . mapExpM m
 
 -- | Common case of 'foldExp', where only 'Exp's and 'Lambda's are
 -- taken into account.
-foldlPattern :: TypeBox tf => (a -> Exp tf    -> a) ->
-                              (a -> Lambda tf -> a) ->
-                              a -> Exp tf -> a
+foldlPattern :: (a -> Exp tf    -> a) ->
+                (a -> Lambda tf -> a) ->
+                  a -> Exp tf -> a
 foldlPattern expf lamf = foldExp m
   where m = identityFolder {
               foldOnExp = \x -> return . expf x
@@ -304,7 +304,7 @@ foldlPattern expf lamf = foldExp m
 
 -- | Common case of 'mapExp', where only 'Exp's are taken into
 -- account.
-buildExpPattern :: TypeBox tf => (Exp tf -> Exp tf) -> Exp tf -> Exp tf
+buildExpPattern :: (Exp tf -> Exp tf) -> Exp tf -> Exp tf
 buildExpPattern f = mapExp f'
   where f' = identityMapper {
                mapOnExp = return . f
@@ -315,7 +315,7 @@ buildExpPattern f = mapExp f'
         buildLambda (CurryFun  nm params tp pos) = CurryFun  nm  (map f params) tp pos
 
 -- | Return the set of all variable names bound in a program.
-progNames :: TypeBox ty => Prog ty -> S.Set Name
+progNames :: Prog ty -> S.Set Name
 progNames = execWriter . mapM funNames
   where names = identityWalker {
                   walkOnExp = expNames

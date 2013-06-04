@@ -1,9 +1,9 @@
-module L0.Parser.Tokens
+module Language.L0.Parser.Tokens
   ( Token(..)
   )
   where
 
-import L0.AbSyn (Name)
+import Language.L0.Syntax (Name)
 
 data Token = IF
            | THEN

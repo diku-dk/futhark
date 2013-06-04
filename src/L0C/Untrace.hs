@@ -1,9 +1,8 @@
-module L0.Untrace
+module L0C.Untrace
   ( untraceProg )
   where
 
-import L0.AbSyn
-import L0.Traversals
+import Language.L0
 
 -- | Remove all special debugging function calls from the program.
 -- This is necessary for most optimisation modules to work properly,

@@ -1,7 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-module L0.TypeChecker ( checkProg
-                      , checkProgNoUniqueness
-                      , TypeError(..))
+module L0C.TypeChecker ( checkProg
+                       , checkProgNoUniqueness
+                       , TypeError(..))
   where
 
 import Control.Applicative
@@ -17,7 +17,7 @@ import qualified Data.Traversable as T
 import qualified Data.Map as M
 import qualified Data.Set as S
 
-import L0.AbSyn
+import Language.L0
 
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.

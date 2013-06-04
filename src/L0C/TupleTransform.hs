@@ -20,7 +20,7 @@
 --
 --    * SOACs are converted to their tuple versions.
 --
-module L0.TupleTransform
+module L0C.TupleTransform
   ( transformProg
   , transformType )
   where
@@ -35,9 +35,8 @@ import qualified Data.Map as M
 import Data.List
 import Data.Loc
 
-import L0.AbSyn
-import L0.Traversals
-import L0.FreshNames
+import Language.L0
+import L0C.FreshNames
 
 transformProg :: Prog Type -> Prog Type
 transformProg prog = runTransformM $ mapM transformFun prog

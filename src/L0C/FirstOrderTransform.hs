@@ -1,4 +1,4 @@
-module L0.FirstOrderTransform
+module L0C.FirstOrderTransform
   ( transformProg )
   where
 
@@ -6,9 +6,8 @@ import Control.Monad.State
 
 import Data.Loc
 
-import L0.AbSyn
-import L0.Traversals
-import L0.FreshNames
+import Language.L0
+import L0C.FreshNames
 
 type TransformM = State NameSource
 
