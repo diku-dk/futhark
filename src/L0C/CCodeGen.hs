@@ -1,5 +1,5 @@
 {-# LANGUAGE QuasiQuotes, GeneralizedNewtypeDeriving #-}
-module L0.CCodeGen (compileProg) where
+module L0C.CCodeGen (compileProg) where
 
 import Control.Applicative
 import Control.Monad.Identity
@@ -15,8 +15,8 @@ import qualified Language.C.Quote.C as C
 
 import Text.PrettyPrint.Mainland
 
-import L0.AbSyn
-import L0.FreshNames
+import Language.L0
+import L0C.FreshNames
 
 data CompilerState = CompilerState {
     compTypeStructs :: [(Type, (C.Type, C.Definition))]

@@ -1,5 +1,5 @@
 -- | Interface to the L0 parser.
-module L0.Parser
+module Language.L0.Parser
   ( parseL0
   , parseInt
   , parseReal
@@ -14,9 +14,9 @@ module L0.Parser
 
 import Control.Monad
 
-import L0.AbSyn
-import L0.Parser.Parser
-import L0.Parser.Lexer
+import Language.L0.Syntax
+import Language.L0.Parser.Parser
+import Language.L0.Parser.Lexer
 
 -- | Parse an entire L0 program from the given 'String', using the
 -- 'FilePath' as the source name for error messages.

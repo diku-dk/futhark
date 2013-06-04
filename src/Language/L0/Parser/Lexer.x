@@ -1,6 +1,6 @@
 {
 {-# OPTIONS_GHC -w #-}
-module L0.Parser.Lexer
+module Language.L0.Parser.Lexer
   ( Token(..)
   , alexScanTokens
   , L(..)
@@ -9,8 +9,8 @@ module L0.Parser.Lexer
 
 import Data.Loc hiding (L, unLoc)
 
-import L0.AbSyn
-import L0.Parser.Tokens
+import Language.L0.Syntax
+import Language.L0.Parser.Tokens
 
 import Data.Word (Word8)
 

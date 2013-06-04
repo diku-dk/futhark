@@ -1,6 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, ScopedTypeVariables #-}
 
-module L0.EnablingOpts.TupleNormalizer ( tupleNormProg )
+module L0C.EnablingOpts.TupleNormalizer ( tupleNormProg )
   where
  
 import Control.Monad.State
@@ -12,14 +12,13 @@ import Control.Monad.Reader
 --import qualified Data.Set as S
 import qualified Data.Map as M
 
-import L0.AbSyn
-import L0.Traversals
+import Language.L0
 import Data.Loc
  
-import L0.FreshNames
+import L0C.FreshNames
 
 --import L0.Traversals
-import L0.EnablingOpts.EnablingOptErrors
+import L0C.EnablingOpts.EnablingOptErrors
 
 --import Debug.Trace
 
