@@ -6,7 +6,8 @@
 testdir=$(dirname "$0")
 
 # Command to run the L0 compiler.
-l0c="l0c -frute"
+#l0c="l0c -frute"
+l0c="l0c -ei"
 
 while true; do
     case $1 in
