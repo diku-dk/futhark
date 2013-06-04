@@ -15,6 +15,7 @@ import L0C.TypeChecker
 import L0C.Renamer
 import L0C.Interpreter
 import L0C.EnablingOpts.EnablingOptDriver
+import L0C.HOTrans.HOTransDriver
 import qualified L0C.FirstOrderTransform as FOT
 import qualified L0C.TupleTransform as TT
 import L0C.Untrace
