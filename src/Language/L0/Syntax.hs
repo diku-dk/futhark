@@ -4,9 +4,8 @@
 -- "L0C.TypeChecker" and the 'Exp' type for more information.
 module Language.L0.Syntax
   (
-
    -- * Names
-   Name
+   Name(..)
   , nameToString
   , nameFromString
 
@@ -21,16 +20,16 @@ module Language.L0.Syntax
   , Value(..)
 
   -- * Abstract syntax tree
-  , Ident(..)
-  , Exp(..)
+  , IdentBase(..)
+  , ExpBase(..)
   , BinOp(..)
   , opStr
-  , Lambda(..)
-  , TupIdent(..)
+  , LambdaBase(..)
+  , TupIdentBase(..)
 
   -- * Definitions
-  , FunDec
-  , Prog
+  , FunDecBase
+  , ProgBase(..)
 
   -- * Special identifiers
   , defaultEntryPoint
@@ -47,15 +46,16 @@ import qualified Data.Text as T
 -- | The abstract (not really) type representing names in the L0
 -- compiler.  'String's, being lists of characters, are very slow,
 -- while 'T.Text's are based on byte-arrays.
-type Name = T.Text
+newtype Name = Name T.Text
+  deriving (Show, Eq, Ord)
 
 -- | Convert a name to the corresponding list of characters.
 nameToString :: Name -> String
-nameToString = T.unpack
+nameToString (Name t) = T.unpack t
 
 -- | Convert a list of characters to the corresponding name.
 nameFromString :: String -> Name
-nameFromString = T.pack
+nameFromString = Name . T.pack
 
 data Uniqueness = Unique | Nonunique
                   deriving (Eq, Ord, Show)
@@ -67,7 +67,7 @@ instance Monoid Uniqueness where
   u `mappend` _         = u
 
 -- | Don't use this for anything.
-type DimSize = Exp (Maybe Type)
+type DimSize = ExpBase () Name
 
 type ArraySize = [Maybe DimSize]
 
@@ -101,13 +101,19 @@ data Value = IntVal !Int
 
 -- | An identifier consists of its name and the type of the value
 -- bound to the identifier.
-data Ident ty = Ident { identName :: Name
-                      , identType :: ty
-                      , identSrcLoc :: SrcLoc
-                      }
-                deriving (Eq, Ord, Show)
+data IdentBase ty vn = Ident { identName :: vn
+                             , identType :: ty
+                             , identSrcLoc :: SrcLoc
+                             }
+                deriving (Show)
 
-instance Located (Ident ty) where
+instance Eq vn => Eq (IdentBase ty vn) where
+  x == y = identName x == identName y
+
+instance Ord vn => Ord (IdentBase ty vn) where
+  x `compare` y = identName x `compare` identName y
+
+instance Located (IdentBase ty vn) where
   locOf = locOf . identSrcLoc
 
 -- | L0 Expression Language: literals + vars + int binops + array
@@ -121,102 +127,103 @@ instance Located (Ident ty) where
 -- Specifically, the parser will produce expressions of type @Exp
 -- 'Maybe Type'@, and the type checker will convert these to @Exp
 -- 'Type'@, in which type information is always present.
-data Exp ty = Literal Value SrcLoc
-            | TupLit    [Exp ty] SrcLoc
+data ExpBase ty vn =
+              Literal Value SrcLoc
+            | TupLit    [ExpBase ty vn] SrcLoc
             -- ^ Tuple literals, e.g., (1+3, (x, y+z)).  Second
             -- argument is the tuple's type.
-            | ArrayLit  [Exp ty] ty SrcLoc
+            | ArrayLit  [ExpBase ty vn] ty SrcLoc
             -- ^ Array literals, e.g., { {1+x, 3}, {2, 1+4} }.  Second
             -- arg is the type of of the rows of the array (not the
             -- element type).
-            | BinOp BinOp (Exp ty) (Exp ty) ty SrcLoc
+            | BinOp BinOp (ExpBase ty vn) (ExpBase ty vn) ty SrcLoc
             -- Binary Ops for Booleans
-            | And    (Exp ty) (Exp ty) SrcLoc
-            | Or     (Exp ty) (Exp ty) SrcLoc
+            | And    (ExpBase ty vn) (ExpBase ty vn) SrcLoc
+            | Or     (ExpBase ty vn) (ExpBase ty vn) SrcLoc
             -- Unary Ops: Not for bools and Negate for ints
-            | Not    (Exp ty) SrcLoc -- e.g., not True = False
-            | Negate (Exp ty) ty SrcLoc -- e.g., ~(~1) = 1
-            | If     (Exp ty) (Exp ty) (Exp ty) ty SrcLoc
-            | Var    (Ident ty)
+            | Not    (ExpBase ty vn) SrcLoc -- e.g., not True = False
+            | Negate (ExpBase ty vn) ty SrcLoc -- e.g., ~(~1) = 1
+            | If     (ExpBase ty vn) (ExpBase ty vn) (ExpBase ty vn) ty SrcLoc
+            | Var    (IdentBase ty vn)
             -- Function Call and Let Construct
-            | Apply  Name [Exp ty] ty SrcLoc
-            | LetPat (TupIdent ty) (Exp ty) (Exp ty) SrcLoc
+            | Apply  Name [ExpBase ty vn] ty SrcLoc
+            | LetPat (TupIdentBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
 
-            | LetWith (Ident ty) (Ident ty) [Exp ty] (Exp ty) (Exp ty) SrcLoc
+            | LetWith (IdentBase ty vn) (IdentBase ty vn) [ExpBase ty vn] (ExpBase ty vn) (ExpBase ty vn) SrcLoc
             -- ^ Array Indexing and Array Constructors
 
-            | Index (Ident ty) [Exp ty] ty SrcLoc
+            | Index (IdentBase ty vn) [ExpBase ty vn] ty SrcLoc
              -- ^ 3rd arg is the result type
 
-            | Iota (Exp ty) SrcLoc
+            | Iota (ExpBase ty vn) SrcLoc
             -- ^ @iota(n) = {0,1,..,n-1@
 
-            | Size (Exp ty) SrcLoc
+            | Size (ExpBase ty vn) SrcLoc
             -- ^ The number of elements in an array.
 
-            | Replicate (Exp ty) (Exp ty) SrcLoc
+            | Replicate (ExpBase ty vn) (ExpBase ty vn) SrcLoc
             -- ^ @replicate(3,1) = {1, 1, 1}@
 
-            | Reshape [Exp ty] (Exp ty) SrcLoc
+            | Reshape [ExpBase ty vn] (ExpBase ty vn) SrcLoc
              -- ^ 1st arg is the new shape, 2nd arg is the input array *)
 
-            | Transpose (Exp ty) SrcLoc
+            | Transpose (ExpBase ty vn) SrcLoc
              -- ^ 1st arg is the (input) to-be-transSrcLoced array.
 
             -- Second-Order Array Combinators
             -- accept curried and anonymous
             -- functions as (first) params
-            | Map (Lambda ty) (Exp ty) ty SrcLoc
+            | Map (LambdaBase ty vn) (ExpBase ty vn) ty SrcLoc
              -- @map(op +(1), {1,2,..,n}) = {2,3,..,n+1}@
              -- 3st arg is the input-array row type
 
-            | Reduce (Lambda ty) (Exp ty) (Exp ty) ty SrcLoc
+            | Reduce (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) ty SrcLoc
              -- @reduce(op +, 0, {1,2,..,n}) = (0+1+2+..+n)@
              -- 4th arg is the input-array element type
 
-            | Zip [(Exp ty, ty)] SrcLoc
+            | Zip [(ExpBase ty vn, ty)] SrcLoc
             -- ^ Normal zip supporting variable number of arguments.
             -- The type paired to each expression is the element type
             -- of the array returned by that expression.
 
-            | Unzip (Exp ty) [ty] SrcLoc
+            | Unzip (ExpBase ty vn) [ty] SrcLoc
             -- ^ Unzip that can unzip tuples of arbitrary size.  The
             -- types are the elements of the tuple.
 
-            | Scan (Lambda ty) (Exp ty) (Exp ty) ty SrcLoc
+            | Scan (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) ty SrcLoc
              -- ^ @scan(plus, 0, { 1, 2, 3 }) = { 1, 3, 6 }@.
              -- 4th arg is the element type of the input array
 
-            | Filter (Lambda ty) (Exp ty) ty SrcLoc
+            | Filter (LambdaBase ty vn) (ExpBase ty vn) ty SrcLoc
             -- ^ 3rd arg is the row type of the input (and
             -- result) array
 
 
-            | Mapall (Lambda ty) (Exp ty) SrcLoc
+            | Mapall (LambdaBase ty vn) (ExpBase ty vn) SrcLoc
              -- ^ @mapall(op ~, {{1,~2}, {~3,4}}) = {{~1,2}, {3,~4}}@.
 
-            | Redomap (Lambda ty) (Lambda ty) (Exp ty) (Exp ty) ty SrcLoc
+            | Redomap (LambdaBase ty vn) (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) ty SrcLoc
              -- ^ @redomap(g, f, n, a) = reduce(g, n, map(f, a))@.
              -- 5th arg is the row type of the input  array.
 
-            | Split (Exp ty) (Exp ty) ty SrcLoc
+            | Split (ExpBase ty vn) (ExpBase ty vn) ty SrcLoc
              -- ^ @split(1, { 1, 2, 3, 4 }) = ({1},{2, 3, 4})@.
              -- 3rd arg is the element type of the input array
 
-            | Concat (Exp ty) (Exp ty) SrcLoc
+            | Concat (ExpBase ty vn) (ExpBase ty vn) SrcLoc
              -- ^ @concat ({1},{2, 3, 4}) = {1, 2, 3, 4}@.
 
-            | Copy (Exp ty) SrcLoc
+            | Copy (ExpBase ty vn) SrcLoc
             -- ^ Copy the value return by the expression.  This only
             -- makes a difference in do-loops with merge variables.
 
             | DoLoop
-              (TupIdent ty) -- Merge variable pattern
-              (Exp ty) -- Initial values of merge variables.
-              (Ident ty) -- Iterator.
-              (Exp ty) -- Upper bound.
-              (Exp ty) -- Loop body.
-              (Exp ty) -- Let-body.
+              (TupIdentBase ty vn) -- Merge variable pattern
+              (ExpBase ty vn) -- Initial values of merge variables.
+              (IdentBase ty vn) -- Iterator.
+              (ExpBase ty vn) -- Upper bound.
+              (ExpBase ty vn) -- Loop body.
+              (ExpBase ty vn) -- Let-body.
               SrcLoc
 
             -----------------------------------------------------
@@ -226,22 +233,22 @@ data Exp ty = Literal Value SrcLoc
             -- accept curried and anonymous
             -- functions as (first) params
             -----------------------------------------------------
-            | Map2 (Lambda ty) [Exp ty] ty SrcLoc
+            | Map2 (LambdaBase ty vn) [ExpBase ty vn] ty SrcLoc
              -- @map(op +(1), {1,2,..,n}) = {2,3,..,n+1}@
              -- 2nd arg is either a tuple of multi-dim arrays 
              --   of basic type, or a multi-dim array of basic type.
              -- 3st arg is the  input-array row type
              --   (either a tuple or an array)
 
-            | Reduce2 (Lambda ty) (Exp ty) [Exp ty] ty SrcLoc
-            | Scan2   (Lambda ty) (Exp ty) [Exp ty] ty SrcLoc
-            | Filter2 (Lambda ty) [Exp ty]          SrcLoc
-            | Mapall2 (Lambda ty) [Exp ty]          SrcLoc
-            | Redomap2(Lambda ty) (Lambda ty) (Exp ty) [Exp ty] ty SrcLoc
+            | Reduce2 (LambdaBase ty vn) (ExpBase ty vn) [ExpBase ty vn] ty SrcLoc
+            | Scan2   (LambdaBase ty vn) (ExpBase ty vn) [ExpBase ty vn] ty SrcLoc
+            | Filter2 (LambdaBase ty vn) [ExpBase ty vn]          SrcLoc
+            | Mapall2 (LambdaBase ty vn) [ExpBase ty vn]          SrcLoc
+            | Redomap2(LambdaBase ty vn) (LambdaBase ty vn) (ExpBase ty vn) [ExpBase ty vn] ty SrcLoc
 
               deriving (Eq, Ord, Show)
 
-instance Located (Exp ty) where
+instance Located (ExpBase ty vn) where
   locOf (Literal _ loc) = locOf loc
   locOf (TupLit _ pos) = locOf pos
   locOf (ArrayLit _ _ pos) = locOf pos
@@ -324,30 +331,34 @@ opStr Less = "<"
 opStr Leq = "<="
 
 -- | Anonymous Function
-data Lambda ty = AnonymFun [Ident Type] (Exp ty) Type SrcLoc
-                    -- fn int (bool x, char z) => if(x) then ord(z) else ord(z)+1 *)
-               | CurryFun Name [Exp ty] ty SrcLoc
-                    -- op +(4) *)
-                 deriving (Eq, Ord, Show)
+data LambdaBase ty vn = AnonymFun [IdentBase Type vn] (ExpBase ty vn) Type SrcLoc
+                      -- ^ @fn int (bool x, char z) => if(x) then ord(z) else ord(z)+1 *)@
+                      | CurryFun Name [ExpBase ty vn] ty SrcLoc -- ^ @op +(4)@
+                        deriving (Eq, Ord, Show)
 
-instance Located (Lambda ty) where
+instance Located (LambdaBase ty vn) where
   locOf (AnonymFun _ _ _ loc) = locOf loc
   locOf (CurryFun  _ _ _ loc) = locOf loc
 
--- | Tuple Identifier, i.e., pattern matching
-data TupIdent ty = TupId [TupIdent ty] SrcLoc
-                 | Id (Ident ty)
-                   deriving (Eq, Ord, Show)
+-- | Tuple IdentBaseifier, i.e., pattern matching
+data TupIdentBase ty vn = TupId [TupIdentBase ty vn] SrcLoc
+                        | Id (IdentBase ty vn)
+                          deriving (Eq, Ord, Show)
 
-instance Located (TupIdent ty) where
+instance Located (TupIdentBase ty vn) where
   locOf (TupId _ loc) = locOf loc
   locOf (Id ident) = locOf ident
 
 -- | Function Declarations
-type FunDec ty = (Name,Type,[Ident Type],Exp ty,SrcLoc)
+type FunDecBase ty vn = (Name,
+                         Type,
+                         [IdentBase Type vn],
+                         ExpBase ty vn,
+                         SrcLoc)
 
 -- | An entire L0 program.
-type Prog ty = [FunDec ty]
+newtype ProgBase ty vn = Prog { progFunctions :: [FunDecBase ty vn] }
+  deriving (Show)
 
 -- | The name of the default program entry point (main).
 defaultEntryPoint :: Name

@@ -12,7 +12,7 @@ import Control.Monad.Writer
 import qualified Data.Set as S
 --import qualified Data.Map as M
 
-import Language.L0
+import L0C.L0
 
 --import L0.EnablingOpts.InliningDeadFun
 import L0C.EnablingOpts.EnablingOptErrors
@@ -24,44 +24,42 @@ import L0C.EnablingOpts.EnablingOptErrors
 -----------------------------------------------------------------
 -----------------------------------------------------------------
 
-data DCElimEnv tf = DCElimEnv {   
-                        envVtable  :: S.Set Name
-                  }
+data DCElimEnv = DCElimEnv { envVtable :: S.Set VName }
 
 -----------------------------------------------------
 -- might want to add `has_io' part of the result  
 -- to keep complexity to O(N)
 -----------------------------------------------------
-data DCElimRes tf = DCElimRes {
+data DCElimRes = DCElimRes {
     resSuccess :: Bool
   -- ^ Whether we have changed something.
-  , resMap     :: S.Set Name
+  , resMap     :: S.Set VName
   -- ^ The hashtable recording the uses
   --, has_io     :: Bool
   }
 
 
-instance Monoid (DCElimRes tf) where
+instance Monoid DCElimRes where
   DCElimRes s1 m1 `mappend` DCElimRes s2 m2 =
     DCElimRes (s1 || s2) (m1 `S.union` m2) --(io1 || io2)
   mempty = DCElimRes False S.empty -- False
 
-newtype DCElimM tf a = DCElimM (WriterT (DCElimRes tf) (ReaderT (DCElimEnv tf) (Either EnablingOptError)) a)
-    deriving (MonadWriter (DCElimRes tf),
-              MonadReader (DCElimEnv tf), Monad, Applicative, Functor)
+newtype DCElimM a = DCElimM (WriterT DCElimRes (ReaderT DCElimEnv (Either EnablingOptError)) a)
+    deriving (MonadWriter DCElimRes,
+              MonadReader DCElimEnv, Monad, Applicative, Functor)
 
 -- | The enabling optimizations run in this monad.  Note that it has no mutable
 -- state, but merely keeps track of current bindings in a 'TypeEnv'.
 -- The 'Either' monad is used for error handling.
-runDCElimM :: DCElimM tf a -> DCElimEnv tf -> Either EnablingOptError (a, DCElimRes tf)
+runDCElimM :: DCElimM a -> DCElimEnv -> Either EnablingOptError (a, DCElimRes)
 runDCElimM  (DCElimM a) = runReaderT (runWriterT a)
 
-badDCElimM :: EnablingOptError -> DCElimM tf a
+badDCElimM :: EnablingOptError -> DCElimM a
 badDCElimM = DCElimM . lift . lift . Left
 
 
 
-collectRes :: [Name] -> DCElimM tf a -> DCElimM tf (a, Bool)
+collectRes :: [VName] -> DCElimM a -> DCElimM (a, Bool)
 collectRes mvars m = pass collect
   where wasNotUsed hashtab vnm =
           return $ not (S.member vnm hashtab)
@@ -71,7 +69,7 @@ collectRes mvars m = pass collect
           tmps    <- mapM (wasNotUsed (resMap res)) mvars
           return ( (x, and tmps), const res )
 
-changed :: DCElimM tf a -> DCElimM tf a
+changed :: DCElimM a -> DCElimM a
 changed m = pass collect
     where
      collect = do
@@ -79,27 +77,25 @@ changed m = pass collect
         return (x, const $ res { resSuccess = True })
 
 -- | Bind a name as a common (non-merge) variable.
--- TypeBox tf => 
-bindVar :: DCElimEnv tf -> Name -> DCElimEnv tf
+bindVar :: DCElimEnv -> VName -> DCElimEnv
 bindVar env name =
   env { envVtable = S.insert name $ envVtable env }
 
-bindVars :: DCElimEnv tf -> [Name] -> DCElimEnv tf
+bindVars :: DCElimEnv -> [VName] -> DCElimEnv
 bindVars = foldl bindVar
 
-binding :: [Name] -> DCElimM tf a -> DCElimM tf a
+binding :: [VName] -> DCElimM a -> DCElimM a
 binding bnds = local (`bindVars` bnds)
 
 
 -- | Applies Dead-Code Elimination to an Entire Program.
--- TypeBox tf => 
-deadCodeElim :: TypeBox tf => Prog tf -> Either EnablingOptError (Bool, Prog tf)
+deadCodeElim :: Prog -> Either EnablingOptError (Bool, Prog)
 deadCodeElim prog = do
     let env = DCElimEnv { envVtable = S.empty }
-    (rs, res) <- runDCElimM (mapM deadCodeElimFun prog) env
-    return (resSuccess res, rs)
+    (rs, res) <- runDCElimM (mapM deadCodeElimFun $ progFunctions prog) env
+    return (resSuccess res, Prog rs)
 
-deadCodeElimFun :: TypeBox tf => FunDec tf -> DCElimM tf (FunDec tf)
+deadCodeElimFun :: FunDec -> DCElimM FunDec
 deadCodeElimFun (fname, rettype, args, body, pos) = do
     let ids = map identName args
     body' <- binding ids $ deadCodeElimExp body
@@ -111,7 +107,7 @@ deadCodeElimFun (fname, rettype, args, body, pos) = do
 --------------------------------------------------------------------
 --------------------------------------------------------------------
 
-deadCodeElimExp :: TypeBox tf => Exp tf -> DCElimM tf (Exp tf)
+deadCodeElimExp :: Exp -> DCElimM Exp
 
 -----------------------------------------------------------------------------
 -- 'trace' and 'assertZip' exhibit side effects and should not be removed!
@@ -194,7 +190,7 @@ deadCodeElimExp e = mapExpM mapper e
                  , mapOnLambda = deadCodeElimLambda
                  }
 
-deadCodeElimLambda :: TypeBox tf => Lambda tf -> DCElimM tf (Lambda tf)
+deadCodeElimLambda :: Lambda -> DCElimM Lambda
 deadCodeElimLambda (AnonymFun params body ret pos) = do
     let ids  = map identName params
     body' <- binding ids $ deadCodeElimExp body
@@ -208,6 +204,6 @@ deadCodeElimLambda (CurryFun fname curryargexps rettype pos) = do
 --    return e
 
 
-getBnds :: TypeBox tf => TupIdent tf -> [Name]
+getBnds :: TupIdent -> [VName]
 getBnds ( Id (Ident var _ _) ) = [var]
 getBnds ( TupId ids _ ) = concatMap getBnds ids

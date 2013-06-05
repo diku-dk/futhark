@@ -4,28 +4,28 @@ module L0C.EnablingOpts.EnablingOptErrors ( EnablingOptError(..) )
   where
   
 import Data.Loc
-import Language.L0
+import L0C.L0
  
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.
 data EnablingOptError = EnablingOptError SrcLoc String
-               -- ^ A general error happened at the given position and
-               -- for the given reason.
-               | DupParamError Name Name SrcLoc
-               -- ^ Two function parameters share the same name.
-               | CopyCtPropError SrcLoc String 
-               -- ^ Copy/Constant Propagation Error
-               | TypeError SrcLoc String
-               | Div0Error SrcLoc
-               | DupDefinitionError Name SrcLoc SrcLoc
-               | FunctionNotInFtab  Name
-               | VarNotInFtab SrcLoc Name
+                      -- ^ A general error happened at the given position and
+                      -- for the given reason.
+                      | DupParamError Name VName SrcLoc
+                      -- ^ Two function parameters share the same name.
+                      | CopyCtPropError SrcLoc String
+                      -- ^ Copy/Constant Propagation Error
+                      | TypeError SrcLoc String
+                      | Div0Error SrcLoc
+                      | DupDefinitionError Name SrcLoc SrcLoc
+                      | FunctionNotInFtab  Name
+                      | VarNotInFtab SrcLoc VName
 
 instance Show EnablingOptError where
     show (EnablingOptError pos msg) =
         "Enabling Optimization Error at " ++ locStr pos ++ ":\n" ++ msg
     show (DupParamError funname paramname pos) =
-        "Parameter " ++ nameToString paramname ++
+        "Parameter " ++ textual paramname ++
         " mentioned multiple times in argument list of function " ++
         nameToString funname ++ " at " ++ locStr pos ++ "."
     show (CopyCtPropError pos msg ) = --ee
@@ -43,4 +43,4 @@ instance Show EnablingOptError where
     show (FunctionNotInFtab fname) = 
         "Function " ++ nameToString fname ++ " not found in Function Symbol Table"
     show (VarNotInFtab pos name) =
-        "Variable " ++ nameToString name ++ " not found in symbol table at " ++ locStr pos ++ "."
+        "Variable " ++ textual name ++ " not found in symbol table at " ++ locStr pos ++ "."
