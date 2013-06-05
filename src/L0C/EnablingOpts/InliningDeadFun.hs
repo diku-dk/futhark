@@ -32,18 +32,18 @@ import L0C.EnablingOpts.EnablingOptErrors
 ------------------------------------------------------------------------------
 ------------------------------------------------------------------------------
 
-mkUnnamedLamPrg :: Prog Type -> Prog Type
-mkUnnamedLamPrg prog = 
-    let fnms = map (\(nm,_,_,_,_)->nm) prog
-        ftab = M.fromList $ zip fnms prog
-    in  map (mkUnnamedLamFun ftab) prog
+mkUnnamedLamPrg :: Prog -> Prog
+mkUnnamedLamPrg prog =
+    let fnms = map (\(nm,_,_,_,_)->nm) $ progFunctions prog
+        ftab = M.fromList $ zip fnms $ progFunctions prog
+    in  Prog $ map (mkUnnamedLamFun ftab) $ progFunctions prog
 
-mkUnnamedLamFun :: M.Map Name (FunDec Type) -> FunDec Type -> FunDec Type
+mkUnnamedLamFun :: M.Map Name FunDec -> FunDec -> FunDec
 mkUnnamedLamFun ftab (fnm,rtp,idds,body,pos) = 
     let body' = mkUnnamedLamExp ftab body
     in  (fnm,rtp,idds,body',pos)
 
-mkUnnamedLamExp :: M.Map Name (FunDec Type) -> Exp Type -> Exp Type
+mkUnnamedLamExp :: M.Map Name FunDec -> Exp -> Exp
 mkUnnamedLamExp ftab (Mapall lam arrr pos) = 
     Mapall (mkUnnamedLamLam ftab lam) (mkUnnamedLamExp ftab arrr) pos
 mkUnnamedLamExp ftab (Map lam arrr eltp pos) = 
@@ -60,7 +60,7 @@ mkUnnamedLamExp ftab (Redomap lam1 lam2 ne arrr eltp pos) =
 
 mkUnnamedLamExp ftab e = buildExpPattern (mkUnnamedLamExp ftab) e
 
-mkUnnamedLamLam ::  M.Map Name (FunDec Type) -> Lambda Type -> Lambda Type
+mkUnnamedLamLam ::  M.Map Name FunDec -> Lambda -> Lambda
 mkUnnamedLamLam ftab (AnonymFun ids body  tp pos) = 
     AnonymFun ids (mkUnnamedLamExp ftab body) tp pos
 mkUnnamedLamLam ftab (CurryFun  nm params tp pos) = 
@@ -69,7 +69,7 @@ mkUnnamedLamLam ftab (CurryFun  nm params tp pos) =
             CurryFun nm (map (mkUnnamedLamExp ftab) params) tp pos
         Just (fnm,_,idds,_,_) -> 
             let idds' = drop (length params) idds  
-                args  = params ++ (map (\x->Var x) idds')
+                args  = params ++ map Var idds'
             in  AnonymFun idds' (Apply fnm args tp pos) tp pos
 
 ------------------------------------------------------------------------------

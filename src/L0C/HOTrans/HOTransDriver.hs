@@ -11,7 +11,7 @@ module L0C.HOTrans.HOTransDriver(
 --import L0.AbSyn
 --import L0.Renamer
 
-import Language.L0
+import L0C.L0
 import L0C.EnablingOpts.EnablingOptDriver
 
 import L0C.HOTrans.Fusion
@@ -21,7 +21,7 @@ import L0C.HOTrans.Fusion
 --------------------------------------------------------------
 
 --enablingOpts :: TypeBox tf => Prog tf -> Either EnablingOptError (Prog tf)
-highOrdTransf :: Prog Type -> Either EnablingOptError (Prog Type)
+highOrdTransf :: Prog -> Either EnablingOptError Prog
 highOrdTransf prog = do
     
 {-
