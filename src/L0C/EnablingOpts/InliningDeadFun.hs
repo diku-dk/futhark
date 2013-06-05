@@ -21,7 +21,7 @@ import Data.Loc
 
 import qualified Data.Map as M
 
-import Language.L0
+import L0C.L0
 
 import L0C.EnablingOpts.EnablingOptErrors
 
@@ -87,32 +87,30 @@ mkUnnamedLamLam ftab (CurryFun  nm params tp pos) =
 type CallGraph = M.Map Name ([Name],[Name])
 
 -- | The symbol table for functions
-data CGEnv tf = CGEnv {   
-                    envFtable  :: M.Map Name (FunDec tf)
-               }
+data CGEnv = CGEnv { envFtable  :: M.Map Name FunDec }
 
-newtype CGM tf a = CGM (ReaderT (CGEnv tf) (Either EnablingOptError) a)
-    deriving (MonadReader (CGEnv tf), Monad, Applicative, Functor)
+newtype CGM a = CGM (ReaderT CGEnv (Either EnablingOptError) a)
+    deriving (MonadReader CGEnv, Monad, Applicative, Functor)
 
 -- | Building the call grah runs in this monad.  There is no
 -- mutable state.
-runCGM :: CGM tf a -> CGEnv tf -> Either EnablingOptError a
+runCGM :: CGM a -> CGEnv -> Either EnablingOptError a
 runCGM  (CGM a) = runReaderT a
 
-badCGM :: EnablingOptError -> CGM tf a
+badCGM :: EnablingOptError -> CGM a
 badCGM = CGM . lift . Left
 
 
 -- | @buildCG prog@ build the program's Call Graph. The representation
 -- is a hashtable that maps function names to a list of callee names.
-buildCG :: TypeBox tf => Prog tf -> Either EnablingOptError CallGraph
+buildCG :: Prog -> Either EnablingOptError CallGraph
 buildCG prog = do
-    env <- foldM expand env0 prog
+    env <- foldM expand env0 (progFunctions prog)
     runCGM (buildCGfun M.empty defaultEntryPoint) env
 
     where
         env0 = CGEnv { envFtable = M.empty }
-        expand :: TypeBox tf => CGEnv tf -> FunDec tf -> Either EnablingOptError (CGEnv tf)
+        expand :: CGEnv -> FunDec -> Either EnablingOptError CGEnv
         expand ftab f@(name,_,_,_,pos)
             | Just (_,_,_,_,pos2) <- M.lookup name (envFtable ftab) =
               Left $ DupDefinitionError name pos pos2
@@ -124,7 +122,7 @@ buildCG prog = do
 -- @fname@, and recursively, with the contributions of the callees of @fname@.
 -- In particular, @buildCGfun M.empty defaultEntryPoint@ should construct the Call Graph
 -- of the whole program.
-buildCGfun :: TypeBox tf => CallGraph -> Name -> CGM tf CallGraph
+buildCGfun :: CallGraph -> Name -> CGM CallGraph
 buildCGfun cg fname  = do
   bnd <- asks $ M.lookup fname . envFtable
   case bnd of
@@ -150,7 +148,7 @@ buildCGfun cg fname  = do
     
              
     
-buildCGexp :: TypeBox tf => ([Name],[Name]) -> Exp tf -> ([Name],[Name])
+buildCGexp :: ([Name],[Name]) -> Exp -> ([Name],[Name])
 
 buildCGexp callees@(fs, soacfs) (Apply fname args _ _)  =
     if isBuiltInFun fname || elem fname fs
@@ -165,8 +163,8 @@ buildCGexp callees e =
 --isBuiltInFun :: String -> Bool
 --isBuiltInFun fn = elem fn ["toReal", "trunc", "sqrt", "log", "exp"]
 
-addLamFun :: TypeBox tf => ([Name],[Name]) -> Lambda tf -> ([Name],[Name])
-addLamFun callees           (AnonymFun {}) = callees
+addLamFun :: ([Name],[Name]) -> Lambda -> ([Name],[Name])
+addLamFun callees (AnonymFun {}) = callees
 addLamFun (fs,soacs) (CurryFun nm _ _ _) =
     if isBuiltInFun nm || elem nm fs
     then (fs,soacs) else (fs,nm:soacs)
@@ -178,14 +176,14 @@ addLamFun (fs,soacs) (CurryFun nm _ _ _) =
 -- | @aggInlineDriver prog@ performs aggressive inlining for all functions
 -- in @prog@ by repeatedly inlining the functions with empty-apply-callee set into
 -- other callers.   The functions called (indirectly) via SOACs are disregarded.
-aggInlineDriver :: TypeBox tf => Prog tf -> Either EnablingOptError (Prog tf)
+aggInlineDriver :: Prog -> Either EnablingOptError Prog
 aggInlineDriver prog = do
-    env <- foldM expand env0 prog
+    env <- foldM expand env0 $ progFunctions prog
     cg  <- runCGM (buildCGfun M.empty defaultEntryPoint) env
     runCGM (aggInlining cg) env
     where
         env0 = CGEnv { envFtable = M.empty }
-        expand :: TypeBox tf => CGEnv tf -> FunDec tf -> Either EnablingOptError (CGEnv tf)
+        expand :: CGEnv -> FunDec -> Either EnablingOptError CGEnv
         expand ftab f@(name,_,_,_,pos)
             | Just (_,_,_,_,pos2) <- M.lookup name (envFtable ftab) =
               Left $ DupDefinitionError name pos pos2
@@ -194,31 +192,29 @@ aggInlineDriver prog = do
 
 
 -- | Bind a name as a common (non-merge) variable.
--- TypeBox tf => 
-bindVarFtab :: CGEnv tf -> (Name, FunDec tf) -> CGEnv tf
+bindVarFtab :: CGEnv -> (Name, FunDec) -> CGEnv
 bindVarFtab env (name,val) =
   env { envFtable = M.insert name val $ envFtable env }
 
-bindVarsFtab :: CGEnv tf -> [(Name, FunDec tf)] -> CGEnv tf
+bindVarsFtab :: CGEnv -> [(Name, FunDec)] -> CGEnv
 bindVarsFtab = foldl bindVarFtab
 
-bindingFtab :: [(Name, FunDec tf)] -> CGM tf a -> CGM tf a
+bindingFtab :: [(Name, FunDec)] -> CGM a -> CGM a
 bindingFtab bnds = local (`bindVarsFtab` bnds)
 
 -- | Remove the binding for a name.
--- TypeBox tf => 
-remVarFtab :: CGEnv tf -> Name -> CGEnv tf
+remVarFtab :: CGEnv -> Name -> CGEnv
 remVarFtab env name = env { envFtable = M.delete name $ envFtable env }
 
-remVarsFtab :: CGEnv tf -> [Name] -> CGEnv tf
+remVarsFtab :: CGEnv -> [Name] -> CGEnv
 remVarsFtab = foldl remVarFtab
 
-remBindingsFtab :: [Name] -> CGM tf a -> CGM tf a
+remBindingsFtab :: [Name] -> CGM a -> CGM a
 remBindingsFtab keys = local (`remVarsFtab` keys)
 
 
 
-aggInlining :: TypeBox tf => CallGraph -> CGM tf (Prog tf)
+aggInlining :: CallGraph -> CGM Prog
 aggInlining cg = do
     let inlcand    = M.keys (M.filter funHasNoCalls cg)
     let inlinf     = getInlineOps inlcand cg
@@ -230,7 +226,7 @@ aggInlining cg = do
     if null work 
          -- a fix point has been reached, hence gather the program
          -- from the hashtable and return it.
-    then asks $ M.elems . envFtable
+    then Prog <$> asks (M.elems . envFtable)
 
          -- Remove the to-be-inlined functions from the Call Graph,
          -- and then, for each caller that exhibits to-be-inlined callees
@@ -246,7 +242,7 @@ aggInlining cg = do
                 bindingFtab (zip newfunnms newfuns) $  
                 aggInlining cg'
     where
-        processfun :: TypeBox tf => (Name, [Name]) -> CGM tf (FunDec tf)
+        processfun :: (Name, [Name]) -> CGM FunDec
         processfun (fname, inlcallees) = do
             f  <- asks $ M.lookup fname . envFtable
             case f of
@@ -255,7 +251,7 @@ aggInlining cg = do
                     tobeinl <- mapM getFromFtable inlcallees  
                     return $ doInlineInCaller ff tobeinl 
 
-        getFromFtable :: TypeBox tf => Name -> CGM tf (FunDec tf)
+        getFromFtable :: Name -> CGM FunDec
         getFromFtable fname = do 
             f <- asks $ M.lookup fname . envFtable
             case f of
@@ -277,12 +273,12 @@ aggInlining cg = do
 -- not call any other functions. Further extensions that transform a
 -- tail-recursive function to a do or while loop, should do the transformation
 -- first and then do the inlining.
-doInlineInCaller :: TypeBox tf => FunDec tf ->  [FunDec tf] -> FunDec tf
+doInlineInCaller :: FunDec ->  [FunDec] -> FunDec
 doInlineInCaller (name,rtp,args,body,pos) inlcallees = 
     let body' = inlineInExp inlcallees body 
     in (name, rtp, args, body',pos)
 
-inlineInExp :: TypeBox tf => [FunDec tf] -> Exp tf -> Exp tf
+inlineInExp :: [FunDec] -> Exp -> Exp
 inlineInExp inlcallees (Apply fname aargs rtp pos) = 
     let aargs' = map (inlineInExp inlcallees) aargs
     in  case filter (\(nm,_,_,_,_)->fname==nm) inlcallees of
@@ -291,7 +287,7 @@ inlineInExp inlcallees (Apply fname aargs rtp pos) =
               let revbnds = reverse (zip fargs aargs)
               in  foldl (addArgBnd pos) body revbnds
     where
-        addArgBnd :: TypeBox tf => SrcLoc -> Exp tf -> (Ident Type, Exp tf) -> Exp tf
+        addArgBnd :: SrcLoc -> Exp -> (Ident, Exp) -> Exp
         addArgBnd ppos body (farg, aarg) = 
             let fargutp = boxType (identType farg)
                 fargnm  = identName   farg
@@ -311,24 +307,24 @@ inlineInExp inlcallees e =
 -- | @deadFunElim prog@ removes the functions that are unreachable from
 -- the main function from the program.
 -- The functions called (indirectly) via SOACs are obviously considered.
-deadFunElim :: TypeBox tf => Prog tf -> Either EnablingOptError (Prog tf)
+deadFunElim :: Prog -> Either EnablingOptError Prog
 deadFunElim prog = do
-    env  <- foldM expand env0 prog
+    env  <- foldM expand env0 $ progFunctions prog
     cg   <- runCGM (buildCGfun M.empty defaultEntryPoint) env
     let env'  = (M.filter (isFunInCallGraph cg) . envFtable) env
     let prog' = M.elems env'
-    return prog'
+    return $ Prog prog'
     where
         env0 = CGEnv { envFtable = M.empty }
 
-        expand :: TypeBox tf => CGEnv tf -> FunDec tf -> Either EnablingOptError (CGEnv tf)
+        expand :: CGEnv -> FunDec -> Either EnablingOptError CGEnv
         expand ftab f@(name,_,_,_,pos)
             | Just (_,_,_,_,pos2) <- M.lookup name (envFtable ftab) =
               Left $ DupDefinitionError name pos pos2
             | otherwise = 
                 Right CGEnv { envFtable = M.insert name f (envFtable ftab) }
 
-        isFunInCallGraph :: TypeBox tf => CallGraph -> FunDec tf -> Bool
+        isFunInCallGraph :: CallGraph -> FunDec -> Bool
         isFunInCallGraph cg (fnm,_,_,_,_) = 
             case M.lookup fnm cg of
                 Nothing -> False

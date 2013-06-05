@@ -126,7 +126,8 @@ import Language.L0.Parser.Lexer
 
 %%
 
-Prog :	  FunDecs {- EOF -}   { $1 }
+Prog :: { UncheckedProg }
+     :   FunDecs {- EOF -}   { Prog $1 }
 ;
 
 Ops : op '+'     { (nameFromString "op +", $1) }
@@ -153,15 +154,15 @@ FunDecs : fun Fun FunDecs   { $2 : $3 }
 ;
 
 Fun :     Type id '(' TypeIds ')' '=' Exp 
-			{ let L pos (ID name) = $2 in (name, $1, $4, $7, pos) }
+                        { let L pos (ID name) = $2 in (name, $1, $4, $7, pos) }
         | Type id '(' ')' '=' Exp 
-			{ let L pos (ID name) = $2 in (name, $1, [], $6, pos) }
+                        { let L pos (ID name) = $2 in (name, $1, [], $6, pos) }
 ;
 
 Uniqueness : '*' { Unique }
            |     { Nonunique }
 
-Type :	  ElemType { Elem $1 }
+Type :    ElemType { Elem $1 }
         | Uniqueness '[' InnerType ']' { let (ds, et) = $3
                                          in Array et (Nothing:ds) $1 }
         | Uniqueness '[' InnerType ',' Exp ']' { let (ds, et) = $3
@@ -198,37 +199,37 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal (IntVal num) pos 
      | false          { Literal (LogVal False) $1 }
      | Id             { Var $1 }
      | empty '(' Type ')' { Literal (emptyArray $3) $1 }
-     | '{' Exps '}'   { ArrayLit $2 Nothing $1 }
+     | '{' Exps '}'   { ArrayLit $2 () $1 }
      | TupleExp       { let (exps, pos) = $1 in TupLit exps pos }
 
-     | Exp '+' Exp    { BinOp Plus $1 $3 Nothing $2 }
-     | Exp '-' Exp    { BinOp Minus $1 $3 Nothing $2 }
-     | Exp '*' Exp    { BinOp Times $1 $3 Nothing $2 }
-     | Exp '/' Exp    { BinOp Divide $1 $3 Nothing $2 }
-     | Exp '%' Exp    { BinOp Mod $1 $3 Nothing $2 }
-     | '~' Exp        { Negate $2 Nothing $1 }
+     | Exp '+' Exp    { BinOp Plus $1 $3 () $2 }
+     | Exp '-' Exp    { BinOp Minus $1 $3 () $2 }
+     | Exp '*' Exp    { BinOp Times $1 $3 () $2 }
+     | Exp '/' Exp    { BinOp Divide $1 $3 () $2 }
+     | Exp '%' Exp    { BinOp Mod $1 $3 () $2 }
+     | '~' Exp        { Negate $2 () $1 }
      | not Exp        { Not $2 $1 }
      | Exp '&&' Exp   { And $1 $3 $2 }
      | Exp '||' Exp   { Or $1 $3 $2 }
-     | Exp pow Exp    { BinOp Pow $1 $3 Nothing $2 }
-     | Exp '>>' Exp   { BinOp ShiftR $1 $3 Nothing $2 }
-     | Exp '<<' Exp   { BinOp ShiftL $1 $3 Nothing $2 }
-     | Exp '&' Exp    { BinOp Band $1 $3 Nothing $2 }
-     | Exp '|' Exp    { BinOp Bor $1 $3 Nothing $2 }
-     | Exp '^' Exp    { BinOp Xor $1 $3 Nothing $2 }
+     | Exp pow Exp    { BinOp Pow $1 $3 () $2 }
+     | Exp '>>' Exp   { BinOp ShiftR $1 $3 () $2 }
+     | Exp '<<' Exp   { BinOp ShiftL $1 $3 () $2 }
+     | Exp '&' Exp    { BinOp Band $1 $3 () $2 }
+     | Exp '|' Exp    { BinOp Bor $1 $3 () $2 }
+     | Exp '^' Exp    { BinOp Xor $1 $3 () $2 }
 
-     | Exp '=' Exp    { BinOp Equal $1 $3 Nothing $2 }
-     | Exp '<' Exp    { BinOp Less $1 $3 Nothing $2 }
-     | Exp '<=' Exp   { BinOp Leq  $1 $3 Nothing $2 }
+     | Exp '=' Exp    { BinOp Equal $1 $3 () $2 }
+     | Exp '<' Exp    { BinOp Less $1 $3 () $2 }
+     | Exp '<=' Exp   { BinOp Leq  $1 $3 () $2 }
 
      | if Exp then Exp else Exp %prec ifprec
-                      { If $2 $4 $6 Nothing $1 }
+                      { If $2 $4 $6 () $1 }
 
      | id '(' Exps ')'
                       { let L pos (ID name) = $1
-                        in Apply name $3 Nothing pos }
+                        in Apply name $3 () pos }
      | id '(' ')'     { let L pos (ID name) = $1
-                        in Apply name [] Nothing pos }
+                        in Apply name [] () pos }
 
      | iota '(' Exp ')' { Iota $3 $1 }
 
@@ -243,37 +244,37 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal (IntVal num) pos 
                       { Transpose $3 $1 }
 
      | split '(' Exp ',' Exp ')'
-                      { Split $3 $5 Nothing $1 }
+                      { Split $3 $5 () $1 }
 
      | concat '(' Exp ',' Exp ')'
                       { Concat $3 $5 $1 }
 
      | reduce '(' FunAbstr ',' Exp ',' Exp ')'
-                      { Reduce $3 $5 $7 Nothing $1 }
+                      { Reduce $3 $5 $7 () $1 }
 
      | reduce2 '(' FunAbstr ',' Exp ',' Exps ')'
-                      { Reduce2 $3 $5 $7 Nothing $1 }
+                      { Reduce2 $3 $5 $7 () $1 }
 
      | map '(' FunAbstr ',' Exp ')'
-                      { Map $3 $5 Nothing $1 }
+                      { Map $3 $5 () $1 }
 
      | map2 '(' FunAbstr ',' Exps ')'
-                      { Map2 $3 $5 Nothing $1 }
+                      { Map2 $3 $5 () $1 }
 
      | scan '(' FunAbstr ',' Exp ',' Exp ')'
-                      { Scan $3 $5 $7 Nothing $1 }
+                      { Scan $3 $5 $7 () $1 }
 
      | scan2 '(' FunAbstr ',' Exp ',' Exps ')'
-                      { Scan2 $3 $5 $7 Nothing $1 }
+                      { Scan2 $3 $5 $7 () $1 }
 
      | zip '(' Exps2 ')'
-                      { Zip (map (\x -> (x, Nothing)) $3) $1 }
+                      { Zip (map (\x -> (x, ())) $3) $1 }
 
      | unzip '(' Exp ')'
                       { Unzip $3 [] $1 }
 
      | filter '(' FunAbstr ',' Exp ')'
-                      { Filter $3 $5 Nothing $1 }
+                      { Filter $3 $5 () $1 }
 
      | filter2 '(' FunAbstr ',' Exps ')'
                       { Filter2 $3 $5 $1 }
@@ -285,10 +286,10 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal (IntVal num) pos 
                       { Mapall2 $3 $5 $1 }
 
      | redomap '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
-                      { Redomap $3 $5 $7 $9 Nothing $1 }
+                      { Redomap $3 $5 $7 $9 () $1 }
 
      | redomap2 '(' FunAbstr ',' FunAbstr ',' Exp ',' Exps ')'
-                      { Redomap2 $3 $5 $7 $9 Nothing $1 }
+                      { Redomap2 $3 $5 $7 $9 () $1 }
 
      | copy '(' Exp ')' { Copy $3 $1 }
 
@@ -308,7 +309,7 @@ Exp  : intlit         { let L pos (INTLIT num) = $1 in Literal (IntVal num) pos 
                       { LetWith $2 $2 [] $6 $8 $1 }
 
      | Id '[' Exps ']'
-                      { Index $1 $3 Nothing (srclocOf $1) }
+                      { Index $1 $3 () (srclocOf $1) }
 
      | loop '(' TupId ')' '=' for Id '<' Exp do Exp in Exp %prec letprec
                       { DoLoop $3 (tupIdExp $3) $7 $9 $11 $13 $1 }
@@ -323,23 +324,23 @@ Exps2 : Exp ',' Exps2 { $1 : $3 }
 
 TupleExp : '(' Exps2 ')' { ($2, $1) }
 
-Id : id { let L loc (ID name) = $1 in Ident name Nothing loc }
+Id : id { let L loc (ID name) = $1 in Ident name () loc }
 
 TupIds : TupId ',' TupId   { [$1, $3] }
        | TupId ',' TupIds  { $1 : $3 }
 ;
 
-TupId : id { let L pos (ID name) = $1 in Id $ Ident name Nothing pos }
+TupId : id { let L pos (ID name) = $1 in Id $ Ident name () pos }
       | '(' TupIds ')' { TupId $2 $1 }
 
-FunAbstr : id { let L pos (ID name) = $1 in CurryFun name [] Nothing pos }
-         | Ops { let (name,pos) = $1 in CurryFun name [] Nothing pos }
-         | id '(' ')' { let L pos (ID name) = $1 in CurryFun name [] Nothing pos }
-         | Ops '(' ')' { let (name,pos) = $1 in CurryFun name [] Nothing pos }
+FunAbstr : id { let L pos (ID name) = $1 in CurryFun name [] () pos }
+         | Ops { let (name,pos) = $1 in CurryFun name [] () pos }
+         | id '(' ')' { let L pos (ID name) = $1 in CurryFun name [] () pos }
+         | Ops '(' ')' { let (name,pos) = $1 in CurryFun name [] () pos }
          | id '(' Exps ')'
-               { let L pos (ID name) = $1 in CurryFun name $3 Nothing pos }
+               { let L pos (ID name) = $1 in CurryFun name $3 () pos }
          | Ops '(' Exps ')'
-               { let (name,pos) = $1 in CurryFun name $3 Nothing pos }
+               { let (name,pos) = $1 in CurryFun name $3 () pos }
          | fn Type '(' TypeIds ')' '=>' Exp { AnonymFun $4 $7 $2 $1 }
 
 Value : IntValue { $1 }
@@ -378,7 +379,7 @@ combArrayTypes (v:vs) = foldM comb v vs
 arrayFromList :: [a] -> Array Int a
 arrayFromList l = listArray (0, length l-1) l
 
-tupIdExp :: TupIdent ty -> Exp ty
+tupIdExp :: UncheckedTupIdent -> UncheckedExp
 tupIdExp (Id ident) = Var ident
 tupIdExp (TupId pats loc) = TupLit (map tupIdExp pats) loc
 
