@@ -8,6 +8,7 @@ module L0C.EnablingOpts.EnablingOptDriver (
                                   , aggInlineDriver
                                   , deadFunElim
                                   , normCopyDeadOpts
+                                  , normCopyOneLambda
                                   , EnablingOptError(..)
                             )
   where
@@ -17,6 +18,7 @@ module L0C.EnablingOpts.EnablingOptDriver (
  
 import L0C.L0
 import L0C.Renamer
+import L0C.FreshNames
 
 import L0C.EnablingOpts.InliningDeadFun
 import L0C.EnablingOpts.CopyCtPropFold
@@ -47,7 +49,7 @@ enablingOpts prog = do
     prog_deadf2 <- deadFunElim      prog_enopt2
     prog_flat_opt <- normCopyDeadOpts $ TT.transformProg prog_deadf2
 
-    tupleNormProg   prog_flat_opt >>= normCopyDeadOpts
+    tupleNormProg   prog_flat_opt >>= tupleNormProg >>= normCopyDeadOpts
 
 --    if(succs)
 --    then enablingOpts outprog
@@ -61,3 +63,9 @@ normCopyDeadOpts prog = do
 
     return prog_dce
 
+normCopyOneLambda :: Prog -> VNameSource -> Lambda -> 
+                     Either EnablingOptError (VNameSource, Lambda)
+normCopyOneLambda prog nmsrc lam = do
+    (nmsrc', lam') <- letNormOneLambda    nmsrc lam
+    lam''          <- copyCtPropOneLambda prog  lam'
+    return (nmsrc', lam'')

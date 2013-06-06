@@ -2,6 +2,7 @@
 
 module L0C.EnablingOpts.CopyCtPropFold (
                                 copyCtProp
+                              , copyCtPropOneLambda
                             )
   where
  
@@ -36,6 +37,7 @@ import qualified L0C.Interpreter as Interp
 --   the third param (Bool) indicates if the -- 
 --   binding is to be removed from program   --
 -----------------------------------------------
+
 data CtOrId  = Constant Value Type Bool
              -- value for constant propagation
 
@@ -45,7 +47,7 @@ data CtOrId  = Constant Value Type Bool
              | SymArr Exp Type Bool
              -- various other opportunities for copy
              -- propagation, for the moment: (i) an indexed variable,
-             -- (ii) an iota array, (iii) a replicated array, (iv) a TupLit,
+             -- (ii) a iota array, (iii) a replicated array, (iv) a TupLit,
              -- and (v) an ArrayLit.   I leave this one open, i.e., Exp,
              -- as I do not know exactly what we need here
              -- To Cosmin: Clean it up in the end, i.e., get rid of Exp.
@@ -54,6 +56,7 @@ data CPropEnv = CopyPropEnv {
     envVtable  :: M.Map VName CtOrId,
     program    :: Prog
   }
+
 
 data CPropRes = CPropRes {
     resSuccess :: Bool
@@ -134,6 +137,17 @@ copyCtPropFun :: FunDec -> CPropM FunDec
 copyCtPropFun (fname, rettype, args, body, pos) = do
     body' <- copyCtPropExp body
     return (fname, rettype, args, body', pos)
+
+
+-----------------------------------------------------------------
+---- Run on Lambda Only!
+-----------------------------------------------------------------
+
+copyCtPropOneLambda :: Prog -> Lambda -> Either EnablingOptError Lambda
+copyCtPropOneLambda prog lam = do
+    let env = CopyPropEnv { envVtable = M.empty, program = prog }
+    (res, _) <- runCPropM (copyCtPropLambda lam) env
+    return res
 
 --------------------------------------------------------------------
 --------------------------------------------------------------------
