@@ -343,6 +343,7 @@ progNames = execWriter . mapM funNames . progFunctions
         lambdaNames (CurryFun _ exps _ _) =
           mapM_ expNames exps
 
+-- | The set of names bound in the given pattern.
 patNames :: Ord vn => TupIdentBase ty vn -> S.Set vn
 patNames (Id ident)     = S.singleton $ identName ident
 patNames (TupId pats _) = mconcat $ map patNames pats
