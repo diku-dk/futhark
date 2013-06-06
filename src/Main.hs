@@ -10,7 +10,8 @@ import System.Environment (getArgs, getProgName)
 import System.Exit (exitWith, ExitCode(..))
 import System.IO
 
-import Language.L0
+import Language.L0.Parser
+import L0C.L0
 import L0C.TypeChecker
 import L0C.Renamer
 import L0C.Interpreter
@@ -25,12 +26,12 @@ type L0CM = ErrorT String (Writer String)
 
 data Pass = Pass {
     passName :: String
-  , passOp :: Prog Type -> L0CM (Prog Type)
+  , passOp :: Prog -> L0CM Prog
   }
 
 data L0Config = L0Config {
     l0pipeline :: [Pass]
-  , l0action :: Prog Type -> IO ()
+  , l0action :: Prog -> IO ()
   , l0checkAliases :: Bool
   , l0verbose :: Bool
 }
@@ -71,7 +72,7 @@ commandLineOptions =
   , hotransform "h" ["higher-order-optimizations"]
   ]
 
-interpret :: Prog Type -> IO ()
+interpret :: Prog -> IO ()
 interpret prog =
   case funDecByName defaultEntryPoint prog of
     Nothing -> do hPutStrLn stderr "Interpreter error: no main function."
@@ -80,7 +81,7 @@ interpret prog =
       args <- forM fparams $ \_ -> do
                 line <- getLine
                 case parseValue "<stdin>" line of
-                  Left e -> do hPutStrLn stderr $ "Read error: " ++ e
+                  Left e -> do hPutStrLn stderr $ "Read error: " ++ show e
                                exitWith $ ExitFailure 2
                   Right v -> return v
       let (res, trace) = runFun defaultEntryPoint args prog
@@ -177,19 +178,21 @@ usage errs = do
   hPutStr stderr $ usageInfo (prog ++ " [options] <file>") commandLineOptions
   exitWith $ ExitFailure 1
 
-l0c :: L0Config -> FilePath -> String -> (String, Either String (Prog Type))
+typeCheck :: (TypeBox ty, VarName vn) =>
+             L0Config -> ProgBase ty vn
+          -> Either (TypeError vn) (ProgBase Type vn)
+typeCheck config
+  | l0checkAliases config = checkProg
+  | otherwise             = checkProgNoUniqueness
+
+l0c :: L0Config -> FilePath -> String -> (String, Either String Prog)
 l0c config filename srccode =
   case runWriter (runErrorT l0c') of
     (Left err, msgs) -> (msgs, Left err)
     (Right prog, msgs) -> (msgs, Right prog)
-  where checkProg' :: TypeBox tf => Prog tf -> Either TypeError (Prog Type)
-        checkProg'
-          | l0checkAliases config = checkProg
-          | otherwise             = checkProgNoUniqueness
-        l0c' :: L0CM (Prog Type)
-        l0c' = canFail (parseL0 filename srccode) >>=
-               canFail . checkProg' >>=
-               pipeline
+  where l0c' = canFail (parseL0 filename srccode) >>=
+               canFail . typeCheck config >>=
+               pipeline . tagProg
         pipeline = foldl comb return $ l0pipeline config
         comb prev pass prog = do
           prog' <- prev prog
@@ -199,7 +202,7 @@ l0c config filename srccode =
             Left err ->
               throwError $ "Error during pass '" ++ passName pass ++ "':\n" ++ err
             Right prog'' ->
-              case checkProg' prog'' of
+              case typeCheck config prog'' of
                 Left err ->
                   throwError $ "Type error after pass '" ++
                   passName pass ++ "':\n" ++ show err ++

@@ -16,7 +16,7 @@ module L0C.EnablingOpts.EnablingOptDriver (
  
 --import Data.Either
  
-import Language.L0
+import L0C.L0
 import L0C.Renamer
 import L0C.FreshNames
 
@@ -29,16 +29,11 @@ import L0C.EnablingOpts.EnablingOptErrors
 
 import qualified L0C.TupleTransform as TT
 
---import L0.HOTrans.Fusion
-
---import Debug.Trace
-
 --------------------------------------------------------------
 ---- Enabling Optimization Driver
 --------------------------------------------------------------
 
---enablingOpts :: TypeBox tf => Prog tf -> Either EnablingOptError (Prog tf)
-enablingOpts :: Prog Type -> Either EnablingOptError (Prog Type)
+enablingOpts :: Prog -> Either EnablingOptError Prog
 enablingOpts prog = do
 
     prog_inl      <- aggInlineDriver $ mkUnnamedLamPrg prog
@@ -60,17 +55,16 @@ enablingOpts prog = do
 --    then enablingOpts outprog
 --    else return       outprog
 
-normCopyDeadOpts :: Prog Type -> Either EnablingOptError (Prog Type)
+normCopyDeadOpts :: Prog -> Either EnablingOptError Prog
 normCopyDeadOpts prog = do
     (_, prog_nlet) <- letNormProg     prog
     (_,prog_cp)    <- copyCtProp      prog_nlet
-    --(_, prog_dce)  <- trace (prettyPrint prog_cp1) (deadCodeElim prog_cp1)
     (_, prog_dce)  <- deadCodeElim    prog_cp
 
     return prog_dce
 
-normCopyOneLambda :: Prog Type -> NameSource -> Lambda Type -> 
-                     Either EnablingOptError (NameSource, Lambda Type)
+normCopyOneLambda :: Prog -> VNameSource -> Lambda -> 
+                     Either EnablingOptError (VNameSource, Lambda)
 normCopyOneLambda prog nmsrc lam = do
     (nmsrc', lam') <- letNormOneLambda    nmsrc lam
     lam''          <- copyCtPropOneLambda prog  lam'

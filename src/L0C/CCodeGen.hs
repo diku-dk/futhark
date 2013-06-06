@@ -8,24 +8,22 @@ import Control.Monad.Reader
 import qualified Data.Array as A
 import qualified Data.Map as M
 import Data.List
-import qualified Data.Text as T
-
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.C as C
 
 import Text.PrettyPrint.Mainland
 
-import Language.L0
+import L0C.L0
 import L0C.FreshNames
 
 data CompilerState = CompilerState {
     compTypeStructs :: [(Type, (C.Type, C.Definition))]
   , compVarDefinitions :: [C.Definition]
   , compInit :: [C.Stm]
-  , compNameSrc :: NameSource
+  , compNameSrc :: VNameSource
   }
 
-newCompilerState :: Prog Type -> CompilerState
+newCompilerState :: Prog -> CompilerState
 newCompilerState prog = CompilerState {
                           compTypeStructs = []
                         , compVarDefinitions = []
@@ -34,7 +32,7 @@ newCompilerState prog = CompilerState {
                         }
 
 data CompilerEnv = CompilerEnv {
-    envVarMap :: M.Map T.Text C.Exp
+    envVarMap :: M.Map VName C.Exp
   }
 
 newCompilerEnv :: CompilerEnv
@@ -53,23 +51,23 @@ newtype CompilerM a = CompilerM (ReaderT CompilerEnv (State CompilerState) a)
   deriving (Functor, Applicative, Monad,
             MonadState CompilerState, MonadReader CompilerEnv)
 
-binding :: [(T.Text, C.Exp)] -> CompilerM a -> CompilerM a
+binding :: [(VName, C.Exp)] -> CompilerM a -> CompilerM a
 binding kvs = local (flip (foldl add) kvs)
   where add env (k, v) = env { envVarMap = M.insert k v $ envVarMap env }
 
-lookupVar :: T.Text -> CompilerM C.Exp
+lookupVar :: VName -> CompilerM C.Exp
 lookupVar k = do v <- asks $ M.lookup k . envVarMap
                  case v of
-                   Nothing -> error $ "Uknown variable " ++ nameToString k ++ " in code generator."
+                   Nothing -> error $ "Uknown variable " ++ textual k ++ " in code generator."
                    Just v' -> return v'
 
 -- | 'new s' returns a fresh variable name, with 's' prepended to it.
 new :: String -> CompilerM String
-new = liftM nameToString  . newAsName
+new = liftM textual  . newAsName
 
 -- | As 'new', but returns a 'Name' instead of a 'String'.
-newAsName :: String -> CompilerM Name
-newAsName k = do (name, src) <- gets $ newName (nameFromString k) . compNameSrc
+newAsName :: String -> CompilerM VName
+newAsName k = do (name, src) <- gets $ newVName k . compNameSrc
                  modify $ \s -> s { compNameSrc = src }
                  return name
 
@@ -119,7 +117,7 @@ typeToCType t@(Array {}) = do
       modify $ \s -> s { compTypeStructs = (t, (stype, struct)) : compTypeStructs s }
       return stype
 
-expCType :: Exp Type -> CompilerM C.Type
+expCType :: Exp -> CompilerM C.Type
 expCType = typeToCType . typeOf
 
 tupleField :: Int -> String
@@ -250,7 +248,7 @@ readStm _ t =
                exit(1);
              }|]
 
-mainCall :: FunDec Type -> CompilerM C.Stm
+mainCall :: FunDec -> CompilerM C.Stm
 mainCall (fname,rettype,params,_,_) = do
   crettype <- typeToCType rettype
   ret <- new "main_ret"
@@ -271,7 +269,7 @@ mainCall (fname,rettype,params,_,_) = do
 
 -- | Compile L0 program to a C program.  Always uses the function
 -- named "main" as entry point, so make sure it is defined.
-compileProg :: Prog Type -> String
+compileProg :: Prog -> String
 compileProg prog =
   let ((prototypes, definitions, main), endstate) = runCompilerM $ compileProg'
       funName' = funName . nameFromString
@@ -323,7 +321,7 @@ int main() {
 
 |]
   where compileProg' = do
-          (prototypes, definitions) <- unzip <$> mapM compileFun prog
+          (prototypes, definitions) <- unzip <$> mapM compileFun (progFunctions prog)
           main <- case funDecByName (nameFromString "main") prog of
                     Nothing -> error "L0.CCodeGen.compileProg: No main function"
                     Just func -> mainCall func
@@ -335,7 +333,7 @@ int main() {
         runCompilerM (CompilerM m) =
           runState (runReaderT m newCompilerEnv) $ newCompilerState prog
 
-compileFun :: FunDec Type -> CompilerM (C.Definition, C.Func)
+compileFun :: FunDec -> CompilerM (C.Definition, C.Func)
 compileFun (fname, rettype, args, body, _) = do
   (argexps, args') <- unzip <$> mapM compileArg args
   body' <- binding (zip (map identName args) $ argexps) $ compileBody body
@@ -343,7 +341,7 @@ compileFun (fname, rettype, args, body, _) = do
   return ([C.cedecl|static $ty:crettype $id:(funName fname)( $params:args' );|],
           [C.cfun|static $ty:crettype $id:(funName fname)( $params:args' ) { $stm:body' }|])
   where compileArg (Ident name t _) = do
-          name' <- new $ nameToString name
+          name' <- new $ textual name
           ctp <- typeToCType t
           return (varExp name', [C.cparam|$ty:ctp $id:name'|])
 
@@ -396,7 +394,7 @@ compileValue place v@(ArrayVal _ rt) = do
         elemInit (LogVal False) = [[C.cinit|0|]]
         elemInit (TupVal _) = error "Array-of-tuples encountered in code generator."
 
-compileExp :: C.Exp -> Exp Type -> CompilerM C.Stm
+compileExp :: C.Exp -> Exp -> CompilerM C.Stm
 
 compileExp place (Literal val _) =
   compileValue place val
@@ -711,7 +709,7 @@ compileExp place (Concat xarr yarr _) = do
              }|]
 
 compileExp place (LetWith name src idxs ve body _) = do
-  name' <- new $ nameToString $ identName name
+  name' <- new $ textual $ identName name
   src' <- lookupVar $ identName src
   etype <- typeToCType $ identType src
   idxvars <- mapM (const $ new "letwith_index") [1..length idxs]
@@ -745,7 +743,7 @@ compileExp place (LetWith name src idxs ve body _) = do
              }|]
 
 compileExp place (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody _) = do
-  loopvar' <- new $ nameToString $ identName loopvar
+  loopvar' <- new $ textual $ identName loopvar
   bound <- new "loop_bound"
   mergevarR <- new $ "loop_mergevar_read"
   mergevarW <- new $ "loop_mergevar_write"
@@ -799,7 +797,7 @@ compileExp _ (Filter2 {}) = soacError
 compileExp _ (Mapall2 {}) = soacError
 compileExp _ (Redomap2 {}) = soacError
 
-compileExpInPlace :: C.Exp -> Exp Type -> CompilerM C.Stm
+compileExpInPlace :: C.Exp -> Exp -> CompilerM C.Stm
 
 compileExpInPlace place (Iota ne _) = do
   size <- new "iota_size"
@@ -869,8 +867,7 @@ compileExpInPlace place e
 
 compileExpInPlace place e = compileExp place e
 
-compilePattern :: TupIdent Type -> C.Exp
-               -> [(Name, C.Exp)]
+compilePattern :: TupIdent -> C.Exp -> [(VName, C.Exp)]
 compilePattern pat vexp = compilePattern' pat vexp
   where compilePattern' (Id var) vexp' = do
           [(identName var, vexp')]
@@ -879,7 +876,7 @@ compilePattern pat vexp = compilePattern' pat vexp
           where prep pat' i = compilePattern' pat' [C.cexp|$exp:vexp'.$id:field|]
                   where field = tupleField i
 
-compileBody :: Exp Type -> CompilerM C.Stm
+compileBody :: Exp -> CompilerM C.Stm
 compileBody body = do
   retval <- new "retval"
   body' <- compileExp (varExp retval) body

@@ -8,6 +8,7 @@ import Control.Applicative
 import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.State
+import Control.Monad.RWS
 import Data.Array
 import Data.List
 import Data.Loc
@@ -17,60 +18,61 @@ import qualified Data.Traversable as T
 import qualified Data.Map as M
 import qualified Data.Set as S
 
-import Language.L0
+import L0C.L0
+import L0C.Renamer (tagProg', untagProg, untagExp, untagPattern)
+import L0C.FreshNames
 
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.
-data TypeError = TypeError SrcLoc String
-               -- ^ A general error happened at the given position and
-               -- for the given reason.
-               | UnifyError (Exp Type) (Exp Type)
-               -- ^ Types of two expressions failed to unify.
-               | UnexpectedType (Exp Type) [Type]
-               -- ^ Expression of type was not one of the expected
-               -- types.
-               | ReturnTypeError SrcLoc Name Type Type
-               -- ^ The body of a function definition has a different
-               -- type than its declaration.
-               | DupDefinitionError Name SrcLoc SrcLoc
-               -- ^ Two functions have been defined with the same name.
-               | DupParamError Name Name SrcLoc
-               -- ^ Two function parameters share the same name.
-               | DupPatternError Name SrcLoc SrcLoc
-               -- ^ Two pattern variables share the same name.
-               | InvalidPatternError (TupIdent (Maybe Type)) (Exp Type)
-               -- ^ The pattern is not compatible with the type.
-               | UnknownVariableError Name SrcLoc
-               -- ^ Unknown variable of the given name referenced at the given spot.
-               | UnknownFunctionError Name SrcLoc
-               -- ^ Unknown function of the given name called at the given spot.
-               | ParameterMismatch (Maybe Name) SrcLoc (Either Int [Type]) [Type]
-               -- ^ A function (possibly anonymous) was called with
-               -- invalid arguments.  The third argument is either the
-               -- number of parameters, or the specific types of
-               -- parameters accepted (sometimes, only the former can
-               -- be determined).
-               | UseAfterConsume Name SrcLoc SrcLoc
-               -- ^ A variable was attempted used after being
-               -- consumed.  The last location is the point of
-               -- consumption.
-               | IndexingError Int Int SrcLoc
-               -- ^ Too many indices provided.  The first integer is
-               -- the number of dimensions in the array being
-               -- indexed.
-               | BadAnnotation SrcLoc String Type Type
-               -- ^ One of the type annotations fails to match with the
-               -- derived type.  The string is a description of the
-               -- role of the type.  The last type is the new derivation.
-               | CurriedConsumption Name SrcLoc
-               -- ^ A function is being curried with an argument to be consumed.
-               | BadLetWithValue SrcLoc
-               -- ^ The new value for an array slice in let-with is aliased to the source.
-               | FreeConsumption Name SrcLoc
-               | ReturnAliased Name Name SrcLoc
-               | UniqueReturnAliased Name SrcLoc
+data TypeError vn = TypeError SrcLoc String
+                  -- ^ A general error happened at the given position and
+                  -- for the given reason.
+                  | UnifyError (ExpBase Type vn) (ExpBase Type vn)
+                  -- ^ Types of two expressions failed to unify.
+                  | UnexpectedType (ExpBase Type vn) [Type]
+                  -- ^ Expression of type was not one of the expected
+                  -- types.
+                  | ReturnTypeError SrcLoc Name Type Type
+                  -- ^ The body of a function definition has a different
+                  -- type than its declaration.
+                  | DupDefinitionError Name SrcLoc SrcLoc
+                  -- ^ Two functions have been defined with the same name.
+                  | DupParamError Name vn SrcLoc
+                  -- ^ Two function parameters share the same name.
+                  | DupPatternError vn SrcLoc SrcLoc
+                  -- ^ Two pattern variables share the same name.
+                  | InvalidPatternError (TupIdentBase () vn) (ExpBase Type vn)
+                  -- ^ The pattern is not compatible with the type.
+                  | UnknownVariableError vn SrcLoc
+                  -- ^ Unknown variable of the given name referenced at the given spot.
+                  | UnknownFunctionError Name SrcLoc
+                  -- ^ Unknown function of the given name called at the given spot.
+                  | ParameterMismatch (Maybe Name) SrcLoc (Either Int [Type]) [Type]
+                  -- ^ A function (possibly anonymous) was called with
+                  -- invalid arguments.  The third argument is either the
+                  -- number of parameters, or the specific types of
+                  -- parameters accepted (sometimes, only the former can
+                  -- be determined).
+                  | UseAfterConsume vn SrcLoc SrcLoc
+                  -- ^ A variable was attempted used after being
+                  -- consumed.  The last location is the point of
+                  -- consumption.
+                  | IndexingError Int Int SrcLoc
+                  -- ^ Too many indices provided.  The first integer is
+                  -- the number of dimensions in the array being
+                  -- indexed.
+                  | BadAnnotation SrcLoc String Type Type
+                  -- ^ One of the type annotations fails to match with the
+                  -- derived type.  The string is a description of the
+                  -- role of the type.  The last type is the new derivation.
+                  | CurriedConsumption Name SrcLoc
+                  -- ^ A function is being curried with an argument to be consumed.
+                  | BadLetWithValue SrcLoc
+                  -- ^ The new value for an array slice in let-with is aliased to the source.
+                  | ReturnAliased Name vn SrcLoc
+                  | UniqueReturnAliased Name SrcLoc
 
-instance Show TypeError where
+instance VarName vn => Show (TypeError vn) where
   show (TypeError pos msg) =
     "Type error at " ++ locStr pos ++ ":\n" ++ msg
   show (UnifyError e1 e2) =
@@ -93,17 +95,17 @@ instance Show TypeError where
     "Duplicate definition of function " ++ nameToString name ++ ".  Defined at " ++
     locStr pos1 ++ " and " ++ locStr pos2 ++ "."
   show (DupParamError funname paramname pos) =
-    "Parameter " ++ nameToString paramname ++
+    "Parameter " ++ textual paramname ++
     " mentioned multiple times in argument list of function " ++
     nameToString funname ++ " at " ++ locStr pos ++ "."
   show (DupPatternError name pos1 pos2) =
-    "Variable " ++ nameToString name ++ " bound twice in tuple pattern; at " ++
+    "Variable " ++ textual name ++ " bound twice in tuple pattern; at " ++
     locStr pos1 ++ " and " ++ locStr pos2 ++ "."
   show (InvalidPatternError pat e) =
     "Pattern " ++ ppTupId pat ++ " at " ++ locStr (srclocOf pat) ++
     " cannot match value of type " ++ ppType (typeOf e) ++ " at " ++ locStr (srclocOf e) ++ "."
   show (UnknownVariableError name pos) =
-    "Unknown variable " ++ nameToString name ++ " referenced at " ++ locStr pos ++ "."
+    "Unknown variable " ++ textual name ++ " referenced at " ++ locStr pos ++ "."
   show (UnknownFunctionError fname pos) =
     "Unknown function " ++ nameToString fname ++ " called at " ++ locStr pos ++ "."
   show (ParameterMismatch fname pos expected got) =
@@ -118,7 +120,7 @@ instance Show TypeError where
           ngot = length got
           fname' = maybe "anonymous function" (("function "++) . nameToString) fname
   show (UseAfterConsume name rloc wloc) =
-    "Varible " ++ nameToString name ++ " used at " ++ locStr rloc ++
+    "Variable " ++ textual name ++ " used at " ++ locStr rloc ++
     ", but it was consumed at " ++ locStr wloc ++ ".  (Possibly through aliasing)"
   show (IndexingError dims got pos) =
     show got ++ " indices given, but type of expression at " ++ locStr pos ++
@@ -133,29 +135,33 @@ instance Show TypeError where
   show (BadLetWithValue loc) =
     "New value for elements in let-with shares data with source array at " ++
     locStr loc ++ ".  This is illegal, as it prevents in-place modification."
-  show (FreeConsumption name loc) =
-    "Variable " ++ nameToString name ++ " consumed at " ++
-    locStr loc ++ ", but is free inside loop body."
   show (ReturnAliased fname name loc) =
     "Unique return value of function " ++ nameToString fname ++ " at " ++
-    locStr loc ++ " is aliased to " ++ nameToString name ++ ", which is not consumed."
+    locStr loc ++ " is aliased to " ++ textual name ++ ", which is not consumed."
   show (UniqueReturnAliased fname loc) =
     "A unique tuple element of return value of function " ++
     nameToString fname ++ " at " ++ locStr loc ++
     " is aliased to some other tuple component."
 
--- | A tuple of a return type and a list of argument types.
-type FunBinding = (Type, [Type])
+type TaggedIdent ty vn = IdentBase ty (ID vn)
+
+type TaggedExp ty vn = ExpBase ty (ID vn)
+
+type TaggedLambda ty vn = LambdaBase ty (ID vn)
+
+type TaggedTupIdent ty vn = TupIdentBase ty (ID vn)
+
+type TaggedFunDec ty vn = FunDecBase ty (ID vn)
 
 -- | Information about the aliasing of the value returned by an expression.
-data Aliases = VarAlias (S.Set Name)
-             -- ^ May alias these variables.
-             | TupleAlias [Aliases]
-             -- ^ Aliasing information for specific components of a
-             -- tuple.
-               deriving (Show)
+data Aliases vn = VarAlias (S.Set (ID vn))
+                  -- ^ May alias these variables.
+                | TupleAlias [Aliases vn]
+                  -- ^ Aliasing information for specific components of a
+                  -- tuple.
+                  deriving (Show)
 
-instance Monoid Aliases where
+instance Monoid (Aliases vn) where
   mempty = VarAlias mempty
   VarAlias s1 `mappend` VarAlias s2 =
     VarAlias $ s1 `mappend` s2
@@ -168,21 +174,21 @@ instance Monoid Aliases where
 
 -- | Remove a variable from the alias set (presumably because it has
 -- gone out of scope).
-unalias :: Name -> Aliases -> Aliases
+unalias :: ID vn -> Aliases vn -> Aliases vn
 unalias name (VarAlias names) = VarAlias $ name `S.delete` names
 unalias name (TupleAlias alss) = TupleAlias $ map (unalias name) alss
 
 -- | All the variables represented in this aliasing.  Guaranteed not
 -- to contain duplicates.
-aliased :: Aliases -> S.Set Name
+aliased :: Aliases vn -> S.Set (ID vn)
 aliased (VarAlias names) = names
 aliased (TupleAlias ass) = mconcat $ map aliased ass
 
 -- | Create an aliasing set given a list of names.
-varAlias :: [Name] -> Aliases
+varAlias :: [ID vn] -> Aliases vn
 varAlias = VarAlias . S.fromList
 
-substituteAliases :: Aliases -> M.Map Name (S.Set Name) -> Aliases
+substituteAliases :: Aliases vn -> M.Map (ID vn) (S.Set (ID vn)) -> Aliases vn
 substituteAliases (VarAlias names) m =
   VarAlias $ let substs = names `S.intersection` S.fromList (M.keys m)
              in (names S.\\ substs) `S.union`
@@ -190,77 +196,70 @@ substituteAliases (VarAlias names) m =
 substituteAliases (TupleAlias alss) m =
   TupleAlias $ map (`substituteAliases` m) alss
 
-data Binding = Bound Type Aliases
-             | Consumed SrcLoc
+-- | A tuple of a return type and a list of argument types.
+type FunBinding = (Type, [Type])
 
--- | A pair of a variable table and a function table.  Type checking
--- happens with access to this environment.  The function table is
--- only initialised at the very beginning, but the variable table will
--- be extended during type-checking when let-expressions are
--- encountered.
-data TypeEnv = TypeEnv { envVtable :: M.Map Name Binding
-                       , envFtable :: M.Map Name FunBinding
-                       , envCheckOccurences :: Bool
-                       }
+data Binding vn = Bound Type (Aliases vn)
+                | Consumed SrcLoc
 
 data Usage = Consume SrcLoc
            | Observe SrcLoc
              deriving (Eq, Ord, Show)
 
-data Occurence = Occurence { observed :: S.Set Name
-                           , consumed :: S.Set Name
-                           , location :: SrcLoc
-                           }
+data Occurence vn = Occurence { observed :: S.Set (ID vn)
+                              , consumed :: S.Set (ID vn)
+                              , location :: SrcLoc
+                              }
              deriving (Eq, Ord, Show)
 
-instance Located Occurence where
+instance Located (Occurence vn) where
   locOf = locOf . location
 
-observation :: S.Set Name -> SrcLoc -> Occurence
+observation :: S.Set (ID vn) -> SrcLoc -> Occurence vn
 observation = flip Occurence S.empty
 
-consumption :: S.Set Name -> SrcLoc -> Occurence
+consumption :: S.Set (ID vn) -> SrcLoc -> Occurence vn
 consumption = Occurence S.empty
 
-nullOccurence :: Occurence -> Bool
+nullOccurence :: Occurence vn -> Bool
 nullOccurence occ = S.null (observed occ) && S.null (consumed occ)
 
-type Occurences = [Occurence]
+type Occurences vn = [Occurence vn]
 
-type UsageMap = M.Map Name [Usage]
+type UsageMap vn = M.Map (ID vn) [Usage]
 
-usageMap :: Occurences -> UsageMap
+usageMap :: Occurences vn -> UsageMap vn
 usageMap = foldl comb M.empty
   where comb m (Occurence obs cons loc) =
           let m' = S.foldl (ins $ Observe loc) m obs
           in S.foldl (ins $ Consume loc) m' cons
         ins v m k = M.insertWith (++) k [v] m
 
-combineOccurences :: Name -> Usage -> Usage -> Either TypeError Usage
+combineOccurences :: ID vn -> Usage -> Usage -> Either (TypeError vn) Usage
 combineOccurences _ (Observe loc) (Observe _) = Right $ Observe loc
 combineOccurences name (Consume wloc) (Observe rloc) =
-  Left $ UseAfterConsume name rloc wloc
+  Left $ UseAfterConsume (baseName name) rloc wloc
 combineOccurences name (Observe rloc) (Consume wloc) =
-  Left $ UseAfterConsume name rloc wloc
+  Left $ UseAfterConsume (baseName name) rloc wloc
 combineOccurences name (Consume loc1) (Consume loc2) =
-  Left $ UseAfterConsume name (max loc1 loc2) (min loc1 loc2)
+  Left $ UseAfterConsume (baseName name) (max loc1 loc2) (min loc1 loc2)
 
-checkOccurences :: Occurences -> Either TypeError ()
+checkOccurences :: Occurences vn -> Either (TypeError vn) ()
 checkOccurences = void . T.sequence . M.mapWithKey comb . usageMap
   where comb _    []     = Right []
         comb name (u:us) = (:[]) <$> foldM (combineOccurences name) u us
 
-allConsumed :: Occurences -> S.Set Name
+allConsumed :: Occurences vn -> S.Set (ID vn)
 allConsumed = S.unions . map consumed
 
-seqOccurences :: Occurences -> Occurences -> Occurences
+seqOccurences :: Occurences vn -> Occurences vn -> Occurences vn
 seqOccurences occurs1 occurs2 =
   filter (not . nullOccurence) $ map filt occurs1 ++ occurs2
   where filt occ =
           occ { observed = observed occ S.\\ postcons }
         postcons = allConsumed occurs2
 
-altOccurences :: Occurences -> Occurences -> Occurences
+altOccurences :: Occurences vn -> Occurences vn -> Occurences vn
 altOccurences occurs1 occurs2 =
   filter (not . nullOccurence) $ map filt occurs1 ++ occurs2
   where filt occ =
@@ -272,57 +271,84 @@ altOccurences occurs1 occurs2 =
 -- | The 'VarUsage' data structure is used to keep track of which
 -- variables have been referenced inside an expression, as well as
 -- which variables the resulting expression may possibly alias.
-data Dataflow = Dataflow {
-    usageOccurences :: Occurences
-  , usageAliasing :: Aliases
+data Dataflow vn = Dataflow {
+    usageOccurences :: Occurences vn
+  , usageAliasing :: Aliases vn
   } deriving (Show)
 
-instance Monoid Dataflow where
+instance Monoid (Dataflow vn) where
   mempty = Dataflow mempty mempty
   Dataflow o1 s1 `mappend` Dataflow o2 s2 =
     Dataflow (o1 ++ o2) (s1 <> s2)
 
--- | The type checker runs in this monad.  Note that it has no mutable
--- state, but merely keeps track of current bindings in a 'TypeEnv'.
--- The 'Either' monad is used for error handling.
-newtype TypeM a = TypeM (WriterT Dataflow (ReaderT TypeEnv (Either TypeError)) a)
-  deriving (Monad, Functor, Applicative, MonadReader TypeEnv, MonadWriter Dataflow)
+-- | A pair of a variable table and a function table.  Type checking
+-- happens with access to this environment.  The function table is
+-- only initialised at the very beginning, but the variable table will
+-- be extended during type-checking when let-expressions are
+-- encountered.
+data TypeEnv vn = TypeEnv { envVtable :: M.Map (ID vn) (Binding vn)
+                          , envFtable :: M.Map Name FunBinding
+                          , envCheckOccurences :: Bool
+                          }
 
-runTypeM :: TypeEnv -> TypeM a -> Either TypeError a
-runTypeM env (TypeM m) = fst <$> runReaderT (runWriterT m) env
+-- | The type checker runs in this monad.  The 'Either' monad is used
+-- for error handling.
+newtype TypeM vn a = TypeM (RWST
+                            (TypeEnv vn)            -- Reader
+                            (Dataflow vn)           -- Writer
+                            (NameSource (ID vn))    -- State
+                            (Either (TypeError vn)) -- Inner monad
+                            a)
+  deriving (Monad, Functor, Applicative,
+            MonadReader (TypeEnv vn),
+            MonadWriter (Dataflow vn),
+            MonadState (NameSource (ID vn)))
 
-bad :: TypeError -> TypeM a
-bad = TypeM . lift . lift . Left
+runTypeM :: TypeEnv vn -> NameSource (ID vn) -> TypeM vn a
+         -> Either (TypeError vn) a
+runTypeM env src (TypeM m) = fst <$> evalRWST m env src
 
-liftEither :: Either TypeError a -> TypeM a
+bad :: TypeError vn -> TypeM vn a
+bad = TypeM . lift . Left
+
+liftEither :: Either (TypeError vn) a -> TypeM vn a
 liftEither = either bad return
 
+-- | Return a fresh, unique name.  The @VName@ is prepended to the
+-- name.
+new :: VarName vn => String -> TypeM vn (ID vn)
+new k = state $ newName $ varName k Nothing
+
+newIdent :: VarName vn =>
+            String -> Type -> SrcLoc -> TypeM vn (TaggedIdent Type vn)
+newIdent k t loc = Ident <$> new k <*> pure t <*> pure loc
+
 -- | Proclaim that we have made read-only use of the given variable!
-observe :: Ident Type -> TypeM ()
+observe :: TaggedIdent Type vn -> TypeM vn ()
 observe (Ident name _ loc) = do
   als <- aliases name
   tell $ mempty { usageOccurences = [observation (aliased als) loc]
                 , usageAliasing = als }
 
 -- | Proclaim that we have written to the given variable.
-consume :: SrcLoc -> Aliases -> TypeM ()
+consume :: SrcLoc -> Aliases vn -> TypeM vn ()
 consume loc als =
   tell $ mempty { usageOccurences = [consumption (aliased als) loc] }
 
-alias :: Aliases -> TypeM ()
+alias :: Aliases vn -> TypeM vn ()
 alias al = tell $ mempty { usageAliasing = al }
 
 -- | Proclaim that we have written to the given variable, and mark
 -- accesses to it and all of its aliases as invalid inside the given
 -- computation.
-consuming :: Ident Type -> TypeM a -> TypeM a
+consuming :: TaggedIdent Type vn -> TypeM vn a -> TypeM vn a
 consuming (Ident name _ loc) m = do
   consume loc =<< aliases name
   local consume' m
   where consume' env =
           env { envVtable = M.insert name (Consumed loc) $ envVtable env }
 
-collectAliases :: TypeM a -> TypeM (a, Aliases)
+collectAliases :: TypeM vn a -> TypeM vn (a, Aliases vn)
 collectAliases m = pass $ do
   (x, usage) <- listen m
   return ((x, usageAliasing usage),
@@ -330,17 +356,17 @@ collectAliases m = pass $ do
   where blank (VarAlias _) = VarAlias S.empty
         blank (TupleAlias alss) = TupleAlias $ map blank alss
 
-collectDataflow :: TypeM a -> TypeM (a, Dataflow)
+collectDataflow :: TypeM vn a -> TypeM vn (a, Dataflow vn)
 collectDataflow m = pass $ do
   (x, dataflow) <- listen m
   return ((x, dataflow), const mempty)
 
-maybeCheckOccurences :: Occurences -> TypeM ()
+maybeCheckOccurences :: Occurences vn -> TypeM vn ()
 maybeCheckOccurences us = do
   check <- asks envCheckOccurences
   when check $ liftEither $ checkOccurences us
 
-alternative :: TypeM a -> TypeM b -> TypeM (a,b)
+alternative :: TypeM vn a -> TypeM vn b -> TypeM vn (a,b)
 alternative m1 m2 = pass $ do
   (x, Dataflow occurs1 als1) <- listen m1
   (y, Dataflow occurs2 als2) <- listen m2
@@ -349,7 +375,7 @@ alternative m1 m2 = pass $ do
   let usage = Dataflow (occurs1 `altOccurences` occurs2) (als1 <> als2)
   return ((x, y), const usage)
 
-aliases :: Name -> TypeM Aliases
+aliases :: ID vn -> TypeM vn (Aliases vn)
 aliases name = asks $ maybe name' reflexive . M.lookup name . envVtable
   where name' = varAlias [name]
         reflexive (Consumed _) = mempty
@@ -357,10 +383,10 @@ aliases name = asks $ maybe name' reflexive . M.lookup name . envVtable
           | VarAlias _ <- als = als <> name'
           | otherwise         = als
 
-binding' :: [Ident Type] -> TypeM a -> TypeM a
+binding' :: [TaggedIdent Type vn] -> TypeM vn a -> TypeM vn a
 binding' = binding . (`zip` repeat mempty)
 
-binding :: [(Ident Type, Aliases)] -> TypeM a -> TypeM a
+binding :: [(TaggedIdent Type vn, Aliases vn)] -> TypeM vn a -> TypeM vn a
 binding bnds = check . local (`bindVars` bnds)
   where bindVars = foldl bindVar
 
@@ -387,7 +413,6 @@ binding bnds = check . local (`bindVars` bnds)
         -- these names from aliasing information, since they are now
         -- out of scope.  We have to be careful to handle aliasing
         -- properly, however.
-        collectOccurences :: TypeM a -> TypeM (a, Occurences)
         collectOccurences m = pass $ do
           (x, usage) <- listen m
           let (relevant, rest) = split $ usageOccurences usage
@@ -396,8 +421,7 @@ binding bnds = check . local (`bindVars` bnds)
           return ((x, relevant),
                   const $ usage { usageOccurences = rest
                                 , usageAliasing = newaliases })
-          where split :: Occurences -> (Occurences, Occurences)
-                split = unzip .
+          where split = unzip .
                         map (\occ ->
                              let (obs1, obs2) = S.partition (`elem` names) $ observed occ
                                  (con1, con2) = S.partition (`elem` names) $ consumed occ
@@ -405,20 +429,20 @@ binding bnds = check . local (`bindVars` bnds)
                                  occ { observed = obs2, consumed = con2 }))
                 names = map (identName . fst) bnds
 
-lookupVar :: Name -> SrcLoc -> TypeM Type
+lookupVar :: ID vn -> SrcLoc -> TypeM vn Type
 lookupVar name pos = do
   bnd <- asks $ M.lookup name . envVtable
   case bnd of
-    Nothing              -> bad $ UnknownVariableError name pos
+    Nothing              -> bad $ UnknownVariableError (baseName name) pos
     Just (Bound t _)     -> return t
-    Just (Consumed wloc) -> bad $ UseAfterConsume name pos wloc
+    Just (Consumed wloc) -> bad $ UseAfterConsume (baseName name) pos wloc
 
 -- | Determine if two types are identical, ignoring uniqueness.
--- Causes a 'TypeError' if they fail to match, and otherwise returns
+-- Causes a '(TypeError vn)' if they fail to match, and otherwise returns
 -- one of them.
-unifyExpTypes :: Exp Type -> Exp Type -> TypeM Type
+unifyExpTypes :: VarName vn => TaggedExp Type vn -> TaggedExp Type vn -> TypeM vn Type
 unifyExpTypes e1 e2 =
-  maybe (bad $ UnifyError e1 e2) return $
+  maybe (bad $ UnifyError (untagExp e1) (untagExp e2)) return $
   unifyKnownTypes (typeOf e1) (typeOf e2)
 
 unifyElemTypes :: ElemType -> ElemType -> Maybe ElemType
@@ -443,7 +467,8 @@ unifyKnownTypes _ _ = Nothing
 -- | @checkAnnotation loc s t1 t2@ returns @t2@ if @t1@ contains no
 -- type, and otherwise tries to unify them with 'unifyKnownTypes'.  If
 -- this fails, a 'BadAnnotation' is raised.
-checkAnnotation :: TypeBox tf => SrcLoc -> String -> tf -> Type -> TypeM Type
+checkAnnotation :: TypeBox tf =>
+                   SrcLoc -> String -> tf -> Type -> TypeM vn Type
 checkAnnotation loc desc t1 t2 =
   case unboxType t1 of
     Nothing -> return t2
@@ -451,46 +476,50 @@ checkAnnotation loc desc t1 t2 =
                   Nothing -> bad $ BadAnnotation loc desc t1' t2
                   Just t  -> return t
 
--- | @require ts e@ causes a 'TypeError' if @typeOf e@ does not unify
+-- | @require ts e@ causes a '(TypeError vn)' if @typeOf e@ does not unify
 -- with one of the types in @ts@.  Otherwise, simply returns @e@.
 -- This function is very useful in 'checkExp'.
-require :: [Type] -> Exp Type -> TypeM (Exp Type)
+require :: VarName vn => [Type] -> TaggedExp Type vn -> TypeM vn (TaggedExp Type vn)
 require ts e
   | any (typeOf e `similarTo`) ts = return e
-  | otherwise = bad $ UnexpectedType e ts
+  | otherwise = bad $ UnexpectedType (untagExp e) ts
 
-rowTypeM :: Exp Type -> TypeM Type
+rowTypeM :: TaggedExp Type vn -> TypeM vn Type
 rowTypeM e = maybe wrong return $ peelArray 1 $ typeOf e
   where wrong = bad $ TypeError (srclocOf e) $ "Type of expression is not array, but " ++ ppType (typeOf e) ++ "."
 
 -- | Type check a program containing arbitrary type information,
 -- yielding either a type error or a program with complete type
 -- information.
-checkProg :: TypeBox tf => Prog tf -> Either TypeError (Prog Type)
+checkProg :: (TypeBox tf, VarName vn) =>
+             ProgBase tf vn -> Either (TypeError vn) (ProgBase Type vn)
 checkProg = checkProg' True
 
 -- | As 'checkProg', but don't check whether uniqueness constraints
 -- are being upheld.  The uniqueness of types must still be correct.
-checkProgNoUniqueness :: TypeBox tf => Prog tf -> Either TypeError (Prog Type)
+checkProgNoUniqueness :: (VarName vn, TypeBox tf) =>
+                         ProgBase tf vn -> Either (TypeError vn) (ProgBase Type vn)
 checkProgNoUniqueness = checkProg' False
 
-checkProg' :: TypeBox tf => Bool -> Prog tf -> Either TypeError (Prog Type)
+checkProg' :: (VarName vn, TypeBox ty) =>
+              Bool -> ProgBase ty vn -> Either (TypeError vn) (ProgBase Type vn)
 checkProg' checkoccurs prog = do
   ftable <- buildFtable
   let typeenv = TypeEnv { envVtable = M.empty
                         , envFtable = ftable
                         , envCheckOccurences = checkoccurs
                         }
-  runTypeM typeenv $ mapM checkFun prog'
+  liftM (untagProg . Prog) $
+        runTypeM typeenv src $ mapM checkFun $ progFunctions prog'
   where
-    prog' = prog
+    (prog', src) = tagProg' prog
     -- To build the ftable we loop through the list of function
     -- definitions.  In addition to the normal ftable information
     -- (name, return type, argument types), we also keep track of
     -- position information, in order to report both locations of
     -- duplicate function definitions.  The position information is
     -- removed at the end.
-    buildFtable = M.map rmLoc <$> foldM expand builtins prog'
+    buildFtable = M.map rmLoc <$> foldM expand builtins (progFunctions prog')
     expand ftable (name,ret,args,_,pos)
       | Just (_,_,pos2) <- M.lookup name ftable =
         Left $ DupDefinitionError name pos pos2
@@ -506,11 +535,12 @@ checkProg' checkoccurs prog = do
                           ,("exp", (Elem Real, [Elem Real], noLoc))
                           ,("op not", (Elem Bool, [Elem Bool], noLoc))]
 
-checkFun :: TypeBox tf => FunDec tf -> TypeM (FunDec Type)
+checkFun :: (TypeBox tf, VarName vn) => TaggedFunDec tf vn -> TypeM vn (TaggedFunDec Type vn)
 checkFun (fname, rettype, args, body, loc) = do
   args' <- checkArgs
   (body', dataflow) <-
     collectDataflow $ binding' args' $ checkExp body
+
   checkReturnAlias $ usageAliasing dataflow
 
   if typeOf body' `subtypeOf` rettype then
@@ -521,7 +551,7 @@ checkFun (fname, rettype, args, body, loc) = do
 
         expand args' ident@(Ident pname _ _)
           | Just _ <- find ((==identName ident) . identName) args' =
-            bad $ DupParamError fname pname loc
+            bad $ DupParamError fname (baseName pname) loc
           | otherwise =
             return $ ident : args'
 
@@ -529,7 +559,7 @@ checkFun (fname, rettype, args, body, loc) = do
           forM_ args $ \arg ->
             when (not (unique $ typeOf arg) &&
                   identName arg `S.member` names) $
-              bad $ ReturnAliased fname (identName arg) loc
+              bad $ ReturnAliased fname (baseName $ identName arg) loc
 
         -- | Check that unique return values do not alias a
         -- non-consumed parameter.
@@ -549,13 +579,13 @@ checkFun (fname, rettype, args, body, loc) = do
 
         tag u = S.map $ \name -> (u, name)
 
-        returnAliasing :: Type -> Aliases -> [(Uniqueness, S.Set Name)]
+        returnAliasing :: Type -> Aliases vn -> [(Uniqueness, S.Set (ID vn))]
         returnAliasing (Elem (Tuple ets)) (TupleAlias alss) =
           concat $ zipWith returnAliasing ets alss
         returnAliasing t als = [(uniqueness t, aliased als)]
 
 
-checkExp :: TypeBox tf => Exp tf -> TypeM (Exp Type)
+checkExp :: (TypeBox tf, VarName vn) => TaggedExp tf vn -> TypeM vn (TaggedExp Type vn)
 checkExp e = do
   (e', als) <- collectAliases $ checkExp' e
   unless (basicType $ typeOf e') $
@@ -563,7 +593,7 @@ checkExp e = do
   return e'
 
 -- | Never call checkExp' directly!  Call checkExp!
-checkExp' :: TypeBox tf => Exp tf -> TypeM (Exp Type)
+checkExp' :: (TypeBox tf, VarName vn) => TaggedExp tf vn -> TypeM vn (TaggedExp Type vn)
 
 checkExp' (Literal val pos) =
   Literal <$> checkLiteral pos val <*> pure pos
@@ -586,7 +616,7 @@ checkExp' (ArrayLit es t loc) = do
                   | Just elemt' <- elemt `unifyKnownTypes` typeOf eleme =
                     return elemt'
                   | otherwise =
-                    bad $ TypeError loc $ ppExp 0 eleme ++ " is not of expected type " ++ ppType elemt ++ "."
+                    bad $ TypeError loc $ ppExp eleme ++ " is not of expected type " ++ ppType elemt ++ "."
             in foldM check (typeOf e) es''
 
   -- Unify that type with the one given for the array literal.
@@ -694,7 +724,7 @@ checkExp' (LetWith (Ident dest destt destpos) src idxes ve body pos) = do
   let dest' = Ident dest destt' destpos
 
   unless (unique src' || basicType (typeOf src')) $
-    bad $ TypeError pos $ "Source '" ++ nameToString (identName src) ++ "' is not unique"
+    bad $ TypeError pos $ "Source '" ++ textual (identName src) ++ "' is not unique"
 
   case peelArray (length idxes) (identType src') of
     Nothing -> bad $ IndexingError (arrayDims $ identType src') (length idxes) (srclocOf src)
@@ -949,12 +979,12 @@ checkExp' (Redomap2 redfun mapfun accexp arrexp intype pos) = do
 --- SOAC2 HELPERS ---
 ---------------------
 
-soac2ArgType :: SrcLoc -> String -> [Type] -> TypeM Type
+soac2ArgType :: SrcLoc -> String -> [Type] -> TypeM vn Type
 soac2ArgType loc op [] = bad $ TypeError loc $ "Empty tuple given to " ++ op
 soac2ArgType _ _ [et] = return et
 soac2ArgType _ _ ets = return $ Elem $ Tuple ets
 
-soac2ElemType :: SrcLoc -> Type -> TypeM Type
+soac2ElemType :: SrcLoc -> Type -> TypeM vn Type
 soac2ElemType loc tp@(Array {}) =
     getTupArrElemType loc tp
 soac2ElemType loc (Elem (Tuple tps)) = do
@@ -965,7 +995,7 @@ soac2ElemType loc tp =
                     ("In TypeChecker, soac2ElemType: "
                      ++" input type not a tuple/array: "++ppType tp)
 
-getTupArrElemType :: SrcLoc -> Type -> TypeM Type
+getTupArrElemType :: SrcLoc -> Type -> TypeM vn Type
 getTupArrElemType loc tp =
     case peelArray 1 tp of
         Just eltp ->
@@ -986,7 +1016,7 @@ getTupArrElemType loc tp =
 ---- END Cosmin SOAC2 combinators ----
 --------------------------------------
 
-checkLiteral :: SrcLoc -> Value -> TypeM Value
+checkLiteral :: SrcLoc -> Value -> TypeM vn Value
 checkLiteral _ (IntVal k) = return $ IntVal k
 checkLiteral _ (RealVal x) = return $ RealVal x
 checkLiteral _ (LogVal b) = return $ LogVal b
@@ -1001,14 +1031,15 @@ checkLiteral loc (ArrayVal arr rt) = do
     _          -> return ()
   return $ ArrayVal (listArray (bounds arr) vals) rt
 
-checkIdent :: TypeBox ty => Ident ty -> TypeM (Ident Type)
+checkIdent :: (TypeBox ty, VarName vn) => TaggedIdent ty vn -> TypeM vn (TaggedIdent Type vn)
 checkIdent (Ident name t pos) = do
   vt <- lookupVar name pos
-  t' <- checkAnnotation pos ("variable " ++ nameToString name) t vt
+  t' <- checkAnnotation pos ("variable " ++ textual (baseName name)) t vt
   return $ Ident name t' pos
 
-checkBinOp :: TypeBox tf => BinOp -> Exp tf -> Exp tf -> tf -> SrcLoc
-           -> TypeM (Exp Type)
+checkBinOp :: (TypeBox tf, VarName vn) =>
+              BinOp -> TaggedExp tf vn -> TaggedExp tf vn -> tf -> SrcLoc
+           -> TypeM vn (TaggedExp Type vn)
 checkBinOp Plus e1 e2 t pos = checkPolyBinOp Plus [Real, Int] e1 e2 t pos
 checkBinOp Minus e1 e2 t pos = checkPolyBinOp Minus [Real, Int] e1 e2 t pos
 checkBinOp Pow e1 e2 t pos = checkPolyBinOp Pow [Real, Int] e1 e2 t pos
@@ -1026,9 +1057,11 @@ checkBinOp Equal e1 e2 t pos = checkRelOp Equal [Int, Real] e1 e2 t pos
 checkBinOp Less e1 e2 t pos = checkRelOp Less [Int, Real] e1 e2 t pos
 checkBinOp Leq e1 e2 t pos = checkRelOp Leq [Int, Real] e1 e2 t pos
 
-checkRelOp :: TypeBox ty =>
-              BinOp -> [ElemType] -> Exp ty -> Exp ty -> ty -> SrcLoc
-           -> TypeM (Exp Type)
+checkRelOp :: (TypeBox ty, VarName vn) =>
+              BinOp -> [ElemType]
+           -> TaggedExp ty vn -> TaggedExp ty vn
+           -> ty -> SrcLoc
+           -> TypeM vn (TaggedExp Type vn)
 checkRelOp op tl e1 e2 t pos = do
   e1' <- require (map Elem tl) =<< checkExp e1
   e2' <- require (map Elem tl) =<< checkExp e2
@@ -1036,8 +1069,10 @@ checkRelOp op tl e1 e2 t pos = do
   t' <- checkAnnotation pos "result" t $ Elem Bool
   return $ BinOp op e1' e2' t' pos
 
-checkPolyBinOp :: TypeBox ty => BinOp -> [ElemType] -> Exp ty -> Exp ty -> ty -> SrcLoc
-               -> TypeM (Exp Type)
+checkPolyBinOp :: (TypeBox ty, VarName vn) =>
+                  BinOp -> [ElemType]
+               -> TaggedExp ty vn -> TaggedExp ty vn -> ty -> SrcLoc
+               -> TypeM vn (TaggedExp Type vn)
 checkPolyBinOp op tl e1 e2 t pos = do
   e1' <- require (map Elem tl) =<< checkExp e1
   e2' <- require (map Elem tl) =<< checkExp e2
@@ -1045,7 +1080,7 @@ checkPolyBinOp op tl e1 e2 t pos = do
   t'' <- checkAnnotation pos "result" t t'
   return $ BinOp op e1' e2' t'' pos
 
-sequentially :: TypeM a -> (a -> Dataflow -> TypeM b) -> TypeM b
+sequentially :: TypeM vn a -> (a -> Dataflow vn -> TypeM vn b) -> TypeM vn b
 sequentially m1 m2 = do
   (a, m1flow) <- collectDataflow m1
   (b, m2flow) <- collectDataflow $ m2 a m1flow
@@ -1055,15 +1090,17 @@ sequentially m1 m2 = do
          }
   return b
 
-checkBinding :: TypeBox tf =>
-                TupIdent tf -> Exp Type -> Dataflow
-             -> TypeM (TypeM a -> TypeM a, TupIdent Type)
+checkBinding :: (VarName vn, TypeBox tf) =>
+                TaggedTupIdent tf vn -> TaggedExp Type vn -> Dataflow vn
+             -> TypeM vn (TypeM vn a -> TypeM vn a, TaggedTupIdent Type vn)
 checkBinding pat e dflow = do
   (pat', (scope, _)) <-
     runStateT (checkBinding' pat (typeOf e) (usageAliasing dflow)) (id, [])
   return (\m -> sequentially (tell dflow) (const . const $ scope m), pat')
   where checkBinding' (Id (Ident name namet pos)) t a = do
-          t' <- lift $ checkAnnotation (srclocOf pat) (nameToString name) namet t
+          t' <- lift $
+                checkAnnotation (srclocOf pat)
+                ("binding of variable " ++ textual (baseName name)) namet t
           add (Ident name t' pos) a
           return $ Id $ Ident name t' pos
         checkBinding' (TupId pats pos) (Elem (Tuple ts)) a
@@ -1072,7 +1109,8 @@ checkBinding pat e dflow = do
           return $ TupId pats' pos
           where ass = case a of TupleAlias ass' -> ass' ++ repeat a
                                 _               -> repeat a
-        checkBinding' _ _ _ = lift $ bad $ InvalidPatternError errpat e
+        checkBinding' _ _ _ =
+          lift $ bad $ InvalidPatternError (untagPattern errpat) (untagExp e)
 
         add ident a = do
           bnd <- gets $ find (==ident) . snd
@@ -1081,24 +1119,24 @@ checkBinding pat e dflow = do
               modify $ \(scope, names) -> (binding [(ident, a)] . scope,
                                            ident : names)
             Just (Ident name _ pos2) ->
-              lift $ bad $ DupPatternError name (srclocOf ident) pos2
-        -- A pattern with known type box (Maybe) for error messages.
+              lift $ bad $ DupPatternError (baseName name) (srclocOf ident) pos2
+        -- A pattern with known type box (unit) for error messages.
         errpat = rmTypes pat
-        rmTypes (Id (Ident name t pos)) = Id $ Ident name (unboxType t) pos
+        rmTypes (Id (Ident name _ pos)) = Id $ Ident name () pos
         rmTypes (TupId pats pos) = TupId (map rmTypes pats) pos
 
 validApply :: [Type] -> [Type] -> Bool
 validApply expected got =
   length got == length expected && all id (zipWith subtypeOf got expected)
 
-checkApply :: Maybe Name -> [Type] -> [Type] -> SrcLoc -> TypeM ()
+checkApply :: Maybe Name -> [Type] -> [Type] -> SrcLoc -> TypeM vn ()
 checkApply fname expected got loc =
   unless (validApply expected got) $
   bad $ ParameterMismatch fname loc (Right expected) got
 
 -- | If the return type is unique, we assume that the value does not
 -- alias the parameters.
-maskAliasing :: Type -> Aliases -> Aliases
+maskAliasing :: Type -> Aliases vn -> Aliases vn
 maskAliasing (Elem (Tuple ets)) als =
   TupleAlias [ if unique et then mempty
                else maskAliasing et als'
@@ -1109,7 +1147,8 @@ maskAliasing t als
   | unique t = mempty
   | otherwise = als
 
-checkLambda :: TypeBox ty => Lambda ty -> [Type] -> TypeM (Lambda Type)
+checkLambda :: (TypeBox ty, VarName vn) =>
+               TaggedLambda ty vn -> [Type] -> TypeM vn (TaggedLambda Type vn)
 checkLambda (AnonymFun params body ret pos) args = do
   (_, ret', params', body', _) <-
     checkFun (nameFromString "<anonymous>", ret, params, body, pos)
@@ -1134,8 +1173,8 @@ checkLambda (AnonymFun params body ret pos) args = do
 checkLambda (CurryFun fname [] rettype pos) [arg]
   | "op ~" <- nameToString fname = do
   rettype' <- checkAnnotation pos "return" rettype arg
+  var <- newIdent "x" arg pos
   checkLambda (AnonymFun [var] (Negate (Var var) arg pos) rettype' pos) [arg]
-  where var = Ident (nameFromString "x") arg pos
 
 checkLambda (CurryFun opfun curryargexps rettype pos) args
   | Just op <- lookup (nameToString opfun) ops =
@@ -1152,18 +1191,17 @@ checkLambda (CurryFun fname curryargexps rettype pos) args = do
       rettype' <- checkAnnotation pos "return" rettype rt
       case () of
         _ | [tupt@(Elem (Tuple ets))] <- args,
-            validApply ets paramtypes ->
+            validApply ets paramtypes -> do
               -- Same shimming as in the case for anonymous functions,
               -- although we don't have to worry about name shadowing
               -- here.
-              let tupparam = Ident (nameFromString "x") tupt pos
+              let mkparam i t = newIdent ("param_" ++ show i) t pos
+              params <- zipWithM mkparam [(0::Int)..] paramtypes
+              tupparam <- newIdent "x" tupt pos
+              let tuplet = LetPat (TupId (map Id params) pos) (Var tupparam) body pos
                   tupfun = AnonymFun [tupparam] tuplet rettype' pos
-                  params = zipWith mkparam [0..] paramtypes
-                    where mkparam :: Int -> Type -> Ident Type
-                          mkparam i t = Ident (nameFromString $ "param_" ++ show i) t pos
-                  tuplet = LetPat (TupId (map Id params) pos) (Var tupparam) body pos
                   body = Apply fname (map Var params) rettype' pos
-              in checkLambda tupfun args
+              checkLambda tupfun args
           | otherwise -> do
               case find (unique . snd) $ zip curryargexps paramtypes of
                 Just (e, _) -> bad $ CurriedConsumption fname $ srclocOf e
@@ -1171,14 +1209,19 @@ checkLambda (CurryFun fname curryargexps rettype pos) args = do
               checkApply Nothing paramtypes (curryargexpts++args) pos
               return $ CurryFun fname curryargexps' rettype' pos
 
-checkPolyLambdaOp :: TypeBox ty => BinOp -> [Exp ty] -> ty -> [Type] -> SrcLoc
-                  -> TypeM (Lambda Type)
+checkPolyLambdaOp :: (TypeBox ty, VarName vn) =>
+                     BinOp -> [TaggedExp ty vn] -> ty -> [Type] -> SrcLoc
+                  -> TypeM vn (TaggedLambda Type vn)
 checkPolyLambdaOp op curryargexps rettype args pos = do
   curryargexpts <- map typeOf <$> mapM checkExp curryargexps
   tp <- case curryargexpts ++ args of
           [t1, t2] | t1 == t2 -> return t1
           [Elem (Tuple [t1,t2])] | t1 == t2 -> return t1 -- For autoshimming.
           l -> bad $ ParameterMismatch (Just fname) pos (Left 2) l
+  xname <- new "x"
+  yname <- new "y"
+  let xident t = Ident xname t pos
+      yident t = Ident yname t pos
   (x,y,params) <- case curryargexps of
                     [] -> return (Var $ xident (boxType tp),
                                   Var $ yident (boxType tp),
@@ -1189,6 +1232,4 @@ checkPolyLambdaOp op curryargexps rettype args pos = do
                     (e1:e2:_) -> return (e1, e2, [])
   body <- binding' params $ checkBinOp op x y rettype pos
   checkLambda (AnonymFun params body (typeOf body) pos) args
-  where fname = nameFromString $ "op" ++ ppBinOp op
-        xident t = Ident (nameFromString "x") t pos
-        yident t = Ident (nameFromString "y") t pos
+  where fname = nameFromString $ "op " ++ opStr op
