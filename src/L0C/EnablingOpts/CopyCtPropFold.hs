@@ -2,6 +2,7 @@
 
 module L0C.EnablingOpts.CopyCtPropFold (
                                 copyCtProp
+                              , copyCtPropOneLambda
                             )
   where
  
@@ -45,7 +46,7 @@ data CtOrId tf  = Constant Value   tf Bool
                 | SymArr  (Exp tf) tf Bool
                 -- various other opportunities for copy
                 -- propagation, for the moment: (i) an indexed variable,
-                -- (ii) an iota array, (iii) a replicated array, (iv) a TupLit, 
+                -- (ii) a iota array, (iii) a replicated array, (iv) a TupLit, 
                 -- and (v) an ArrayLit.   I leave this one open, i.e., (Exp tf),
                 -- as I do not know exactly what we need here
                 -- To Cosmin: Clean it up in the end, i.e., get rid of (Exp tf).
@@ -135,6 +136,17 @@ copyCtPropFun :: FunDec Type -> CPropM Type (FunDec Type)
 copyCtPropFun (fname, rettype, args, body, pos) = do
     body' <- copyCtPropExp body
     return (fname, rettype, args, body', pos)
+
+
+-----------------------------------------------------------------
+---- Run on Lambda Only!
+-----------------------------------------------------------------
+
+copyCtPropOneLambda :: Prog Type -> Lambda Type -> Either EnablingOptError (Lambda Type)
+copyCtPropOneLambda prog lam = do
+    let env = CopyPropEnv { envVtable = M.empty, program = prog }
+    (res, _) <- runCPropM (copyCtPropLambda lam) env
+    return res
 
 --------------------------------------------------------------------
 --------------------------------------------------------------------

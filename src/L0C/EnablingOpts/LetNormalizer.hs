@@ -1,6 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, ScopedTypeVariables #-}
 
-module L0C.EnablingOpts.LetNormalizer ( letNormProg )
+module L0C.EnablingOpts.LetNormalizer ( letNormProg, letNormOneLambda )
   where
  
 import Control.Monad.State
@@ -110,6 +110,26 @@ letNormProg prog = do
     (prog', res) <- runLetNormM prog (mapM letNormFun prog)
     return (resSuccess res, prog')
 
+
+-----------------------------------------------------------------
+---- Run on Lambda Only!
+-----------------------------------------------------------------
+
+runLamLetNormM :: NameSource -> LetNormM Type a -> Either EnablingOptError (a, LetNormRes Type)
+runLamLetNormM nmsrc (LetNormM a) = 
+    runWriterT (evalStateT a nmsrc)
+
+letNormOneLambda :: NameSource -> Lambda Type ->
+                    Either EnablingOptError (NameSource, Lambda Type)
+letNormOneLambda nmsrc lam = do
+    (res, _) <- runLamLetNormM nmsrc (letNormLambdaAlone lam)
+    return res
+
+letNormLambdaAlone :: Lambda Type -> LetNormM Type (NameSource, Lambda Type)
+letNormLambdaAlone lam = do
+    lam'   <- letNormLambda lam
+    nmsrc' <- get
+    return (nmsrc', lam')
 
 -----------------------------------------------------------------
 -----------------------------------------------------------------
