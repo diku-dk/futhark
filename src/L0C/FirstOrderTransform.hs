@@ -6,26 +6,27 @@ import Control.Monad.State
 
 import Data.Loc
 
-import Language.L0
+import L0C.L0
 import L0C.FreshNames
 
-type TransformM = State NameSource
+type TransformM = State VNameSource
 
 -- | Return a new, fresh name, with the given string being part of the
 -- name.
-new :: String -> TransformM Name
-new = state . newName . nameFromString
+new :: String -> TransformM VName
+new = state . newVName
 
-transformProg :: Prog Type -> Prog Type
-transformProg prog = runTransformM $ mapM transformFunDec prog
+transformProg :: Prog -> Prog
+transformProg prog =
+  Prog $ runTransformM $ mapM transformFunDec $ progFunctions prog
   where runTransformM m = evalState m $ newNameSourceForProg prog
 
-transformFunDec :: FunDec Type -> TransformM (FunDec Type)
+transformFunDec :: FunDec -> TransformM FunDec
 transformFunDec (fname, rettype, params, body, loc) = do
   body' <- transformExp body
   return (fname, rettype, params, body', loc)
 
-transformExp :: Exp Type -> TransformM (Exp Type)
+transformExp :: Exp -> TransformM Exp
 
 transformExp mape@(Map fun e intype loc) = do
   -- We have to allocate a new array up front.  This is a bit tricky,
@@ -124,18 +125,18 @@ transformExp e = mapExpM transform e
                       mapOnExp = transformExp
                     }
 
-newReduction :: SrcLoc -> Exp Type -> Exp Type
-             -> TransformM ((Ident Type, Exp Type),
-                            (Ident Type, Exp Type),
-                            (Ident Type, Exp Type),
-                            Exp Type -> Exp Type)
+newReduction :: SrcLoc -> Exp -> Exp
+             -> TransformM ((Ident, Exp),
+                            (Ident, Exp),
+                            (Ident, Exp),
+                            Exp -> Exp)
 newReduction loc arrexp accexp = do
   (arr, arrv, arrlet) <- newLet arrexp "arr"
   (acc, accv, acclet) <- newLet accexp "acc"
   (i, iv) <- newVar "i" (Elem Int) loc
   return ((arr, arrv), (acc, accv), (i, iv), acclet . arrlet)
 
-newLet :: Exp Type -> String -> TransformM (Ident Type, Exp Type, Exp Type -> Exp Type)
+newLet :: Exp -> String -> TransformM (Ident, Exp, Exp -> Exp)
 newLet e name = do
   e' <- liftM maybeCopy $ transformExp e
   (x,xv) <- newVar name (typeOf e') loc
@@ -144,19 +145,19 @@ newLet e name = do
   where loc = srclocOf e
 
 
-newVar :: String -> Type -> SrcLoc -> TransformM (Ident Type, Exp Type)
+newVar :: String -> Type -> SrcLoc -> TransformM (Ident, Exp)
 newVar name tp loc = do
   x <- new name
   return (Ident x tp loc, Var $ Ident x tp loc)
 
 -- | @maybeCopy e@ returns a copy expression containing @e@ if @e@ is
 -- not unique or a basic type, otherwise just returns @e@ itself.
-maybeCopy :: Exp Type -> Exp Type
+maybeCopy :: Exp -> Exp
 maybeCopy e
   | unique e || basicType (typeOf e)  = e
   | otherwise = Copy e $ srclocOf e
 
-transformLambda :: Lambda Type -> [Exp Type] -> TransformM (Exp Type)
+transformLambda :: Lambda -> [Exp] -> TransformM Exp
 transformLambda (AnonymFun params body _ loc) args = do
   body' <- transformExp body
   return $ foldl bind body' $ zip params args

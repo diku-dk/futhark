@@ -20,7 +20,7 @@ import Data.Bits
 
 import qualified Data.Map as M
 
-import Language.L0
+import L0C.L0
 
 import L0C.EnablingOpts.EnablingOptErrors
 import qualified L0C.Interpreter as Interp
@@ -37,52 +37,55 @@ import qualified L0C.Interpreter as Interp
 --   the third param (Bool) indicates if the -- 
 --   binding is to be removed from program   --
 -----------------------------------------------
-data CtOrId tf  = Constant Value   tf Bool
-                -- value for constant propagation
 
-                | VarId    Name  tf Bool
-                -- Variable id for copy propagation
+data CtOrId  = Constant Value Type Bool
+             -- value for constant propagation
 
-                | SymArr  (Exp tf) tf Bool
-                -- various other opportunities for copy
-                -- propagation, for the moment: (i) an indexed variable,
-                -- (ii) a iota array, (iii) a replicated array, (iv) a TupLit, 
-                -- and (v) an ArrayLit.   I leave this one open, i.e., (Exp tf),
-                -- as I do not know exactly what we need here
-                -- To Cosmin: Clean it up in the end, i.e., get rid of (Exp tf).
- 
-data CPropEnv tf = CopyPropEnv {   
-                        envVtable  :: M.Map Name (CtOrId tf),
-                        program    :: Prog tf
-                  }
+             | VarId VName Type Bool
+             -- Variable id for copy propagation
 
-data CPropRes tf = CPropRes {
+             | SymArr Exp Type Bool
+             -- various other opportunities for copy
+             -- propagation, for the moment: (i) an indexed variable,
+             -- (ii) a iota array, (iii) a replicated array, (iv) a TupLit,
+             -- and (v) an ArrayLit.   I leave this one open, i.e., Exp,
+             -- as I do not know exactly what we need here
+             -- To Cosmin: Clean it up in the end, i.e., get rid of Exp.
+
+data CPropEnv = CopyPropEnv {
+    envVtable  :: M.Map VName CtOrId,
+    program    :: Prog
+  }
+
+
+data CPropRes = CPropRes {
     resSuccess :: Bool
   -- ^ Whether we have changed something.
-  , resNonRemovable :: [Name]
+  , resNonRemovable :: [VName]
   -- ^ The set of variables used as merge variables.
   }
 
 
-instance Monoid (CPropRes tf) where
+instance Monoid CPropRes where
   CPropRes c1 m1 `mappend` CPropRes c2 m2 =
     CPropRes (c1 || c2) (m1 `union` m2)
   mempty = CPropRes False []
 
-newtype CPropM tf a = CPropM (WriterT (CPropRes tf) (ReaderT (CPropEnv tf) (Either EnablingOptError)) a)
-    deriving (MonadWriter (CPropRes tf),
-              MonadReader (CPropEnv tf), Monad, Applicative, Functor)
+newtype CPropM a = CPropM (WriterT CPropRes (ReaderT CPropEnv (Either EnablingOptError)) a)
+    deriving (MonadWriter CPropRes,
+              MonadReader CPropEnv,
+              Monad, Applicative, Functor)
 
 -- | We changed part of the AST, and this is the result.  For
 -- convenience, use this instead of 'return'.
-changed :: a -> CPropM tf a
+changed :: a -> CPropM a
 changed x = do
   tell $ CPropRes True []
   return x
 
 
 -- | This name was used as a merge variable.
-nonRemovable :: Name -> CPropM tf ()
+nonRemovable :: VName -> CPropM ()
 nonRemovable name =
   tell $ CPropRes False [name]
 
@@ -92,7 +95,7 @@ nonRemovable name =
 -- while executing @m@ will also be returned, and removed from the
 -- writer result.  The latter property is only important if names are
 -- not unique.
-collectNonRemovable :: [Name] -> CPropM tf a -> CPropM tf (a, [Name])
+collectNonRemovable :: [VName] -> CPropM a -> CPropM (a, [VName])
 collectNonRemovable mvars m = pass collect
   where collect = do
           (x,res) <- listen m
@@ -103,36 +106,34 @@ collectNonRemovable mvars m = pass collect
 -- | The enabling optimizations run in this monad.  Note that it has no mutable
 -- state, but merely keeps track of current bindings in a 'TypeEnv'.
 -- The 'Either' monad is used for error handling.
-runCPropM :: CPropM tf a -> CPropEnv tf -> Either EnablingOptError (a, CPropRes tf)
+runCPropM :: CPropM a -> CPropEnv -> Either EnablingOptError (a, CPropRes)
 runCPropM  (CPropM a) = runReaderT (runWriterT a)
 
-badCPropM :: EnablingOptError -> CPropM tf a
+badCPropM :: EnablingOptError -> CPropM a
 badCPropM = CPropM . lift . lift . Left
 
 
 -- | Bind a name as a common (non-merge) variable.
--- TypeBox tf => 
-bindVar :: CPropEnv tf -> (Name, CtOrId tf) -> CPropEnv tf
+bindVar :: CPropEnv -> (VName, CtOrId) -> CPropEnv
 bindVar env (name,val) =
   env { envVtable = M.insert name val $ envVtable env }
 
-bindVars :: CPropEnv tf -> [(Name, CtOrId tf)] -> CPropEnv tf
+bindVars :: CPropEnv -> [(VName, CtOrId)] -> CPropEnv
 bindVars = foldl bindVar
 
-binding :: [(Name, CtOrId tf)] -> CPropM tf a -> CPropM tf a
+binding :: [(VName, CtOrId)] -> CPropM a -> CPropM a
 binding bnds = local (`bindVars` bnds)
 
 -- | Applies Copy/Constant Propagation and Folding to an Entire Program.
--- TypeBox tf => 
-copyCtProp :: Prog Type -> Either EnablingOptError (Bool, Prog Type)
+copyCtProp :: Prog -> Either EnablingOptError (Bool, Prog)
 copyCtProp prog = do
     let env = CopyPropEnv { envVtable = M.empty, program = prog }
     -- res   <- runCPropM (mapM copyCtPropFun prog) env
     -- let (bs, rs) = unzip res
-    (rs, res) <- runCPropM (mapM copyCtPropFun prog) env
-    return (resSuccess res, rs)
+    (rs, res) <- runCPropM (mapM copyCtPropFun $ progFunctions prog) env
+    return (resSuccess res, Prog rs)
 
-copyCtPropFun :: FunDec Type -> CPropM Type (FunDec Type)
+copyCtPropFun :: FunDec -> CPropM FunDec
 copyCtPropFun (fname, rettype, args, body, pos) = do
     body' <- copyCtPropExp body
     return (fname, rettype, args, body', pos)
@@ -142,7 +143,7 @@ copyCtPropFun (fname, rettype, args, body, pos) = do
 ---- Run on Lambda Only!
 -----------------------------------------------------------------
 
-copyCtPropOneLambda :: Prog Type -> Lambda Type -> Either EnablingOptError (Lambda Type)
+copyCtPropOneLambda :: Prog -> Lambda -> Either EnablingOptError Lambda
 copyCtPropOneLambda prog lam = do
     let env = CopyPropEnv { envVtable = M.empty, program = prog }
     (res, _) <- runCPropM (copyCtPropLambda lam) env
@@ -154,7 +155,7 @@ copyCtPropOneLambda prog lam = do
 --------------------------------------------------------------------
 --------------------------------------------------------------------
 
-copyCtPropExp :: Exp Type -> CPropM Type (Exp Type)
+copyCtPropExp :: Exp -> CPropM Exp
 
 copyCtPropExp (LetWith nm src inds el body pos) = do
     nonRemovable $ identName src
@@ -273,12 +274,12 @@ copyCtPropExp eee@(Index idd@(Ident vnm tp p) inds tp2 pos) = do
         (Replicate _ (Iota n _) _, _:is')
           | [] <- is'  -> changed $ Iota n pos
           | [x] <- is' -> changed x
-          | otherwise -> badCPropM $ TypeError pos  (" illegal indexing: " ++ ppExp 0 eee)
+          | otherwise -> badCPropM $ TypeError pos  (" illegal indexing: " ++ ppExp eee)
         (Replicate {}, _) ->
             return $ Index idd inds' tp2 pos
 
         _ -> badCPropM $ CopyCtPropError pos (" Unreachable case in copyCtPropExp of Index exp: " ++
-                                              ppExp 0 eee++" is bound to "++ppExp 0 e' ) --e 
+                                              ppExp eee++" is bound to "++ppExp e' )
                                               --" index-exp of "++ppExp 0 eee++" bound to "++ppExp 0 e' ) --e
 
 copyCtPropExp (BinOp bop e1 e2 tp pos) = do
@@ -370,7 +371,7 @@ copyCtPropExp (Apply fname args tp pos) = do
     else return $ Apply fname args' tp pos
 
     where 
-        allArgsAreValues :: [Exp Type] -> CPropM Type (Bool, [Value])
+        allArgsAreValues :: [Exp] -> CPropM (Bool, [Value])
         allArgsAreValues []     = return (True, [])
         allArgsAreValues (a:as) =
             case a of
@@ -402,7 +403,7 @@ copyCtPropExp e = mapExpM mapper e
 --                    -- op +(4) *)
 --                 deriving (Eq, Ord, Typeable, Data, Show)
 
-copyCtPropLambda :: Lambda Type -> CPropM Type (Lambda Type)
+copyCtPropLambda :: Lambda -> CPropM Lambda
 copyCtPropLambda (AnonymFun ids body tp pos) = do
     body' <- copyCtPropExp body
     return $ AnonymFun ids body' tp pos
@@ -413,14 +414,14 @@ copyCtPropLambda (CurryFun fname params tp pos) = do
     
 
 
-copyCtPropExpList :: [Exp Type] -> CPropM Type [Exp Type]
+copyCtPropExpList :: [Exp] -> CPropM [Exp]
 copyCtPropExpList = mapM copyCtPropExp
 
 ------------------------------------------------
 ---- Constant Folding                       ----
 ------------------------------------------------
 
-ctFoldBinOp :: Exp Type -> CPropM Type (Exp Type)
+ctFoldBinOp :: Exp -> CPropM Exp
 ctFoldBinOp e@(BinOp Plus e1 e2 _ pos)
   | isCt0 e1 = changed e2
   | isCt0 e2 = changed e1
@@ -584,18 +585,18 @@ ctFoldBinOp e = return e
 ----------------------------------------------------
 
 
-isValue :: TypeBox tf => Exp tf -> Bool
+isValue :: Exp -> Bool
 isValue e = case e of
               Literal _ _ -> True
               _           -> False
 
-isCt1 :: TypeBox tf => Exp tf -> Bool
+isCt1 :: Exp -> Bool
 isCt1 e = case e of
             Literal (IntVal  one) _ -> one == 1
             Literal (RealVal one) _ -> one == 1.0
             Literal (LogVal True) _ -> True
             _                       -> False
-isCt0 :: TypeBox tf => Exp tf -> Bool
+isCt0 :: Exp -> Bool
 isCt0 e = case e of
             Literal (IntVal  zr) _   -> zr == 0
             Literal (RealVal zr) _   -> zr == 0.0
@@ -609,7 +610,7 @@ isCt0 e = case e of
 isBasicTypeVal :: Value -> Bool
 isBasicTypeVal = basicType . typeOf
 
-isCtOrCopy :: TypeBox tf => Exp tf -> Bool
+isCtOrCopy :: Exp -> Bool
 isCtOrCopy (Literal  val _ ) = isBasicTypeVal val
 isCtOrCopy (TupLit   ts _  ) = all isCtOrCopy ts
 isCtOrCopy (Var           _) = True
@@ -617,7 +618,7 @@ isCtOrCopy (Iota        _ _) = True
 isCtOrCopy (Index {}       ) = True
 isCtOrCopy _                 = False
 
-isRemovablePat  :: TypeBox tf => TupIdent tf -> Exp tf -> CPropM tf Bool 
+isRemovablePat  :: TupIdent -> Exp -> CPropM Bool
 isRemovablePat (Id _) e = 
  let s=case e of
         Var     _         -> True
@@ -643,7 +644,7 @@ isRemovablePat (TupId tups _) e =
           Literal val@(TupVal _) _ -> return (isBasicTypeVal val)
           _ -> return False
 
-getPropBnds :: TypeBox tf => TupIdent tf -> Exp tf -> Bool -> CPropM tf [(Name,CtOrId tf)]
+getPropBnds :: TupIdent -> Exp -> Bool -> CPropM [(VName, CtOrId)]
 getPropBnds ( Id (Ident var tp _) ) e to_rem =
   let r = case e of
             Literal v _          -> [(var, Constant v (boxType (typeOf v)) to_rem)]
@@ -651,7 +652,7 @@ getPropBnds ( Id (Ident var tp _) ) e to_rem =
             Index   {}           -> [(var, SymArr e   tp  to_rem)]
             TupLit  {}           -> [(var, SymArr e   tp  to_rem)]
 
-            Iota {}              -> let newtp = boxType (Array Int [Nothing] Nonunique) -- (Just n) does not work Exp tf
+            Iota {}              -> let newtp = boxType (Array Int [Nothing] Nonunique) -- (Just n) does not work Exp
                                     in  [(var, SymArr e newtp to_rem)]
             Replicate {}      -> [(var, SymArr e tp to_rem)]
             ArrayLit  {}      -> [(var, SymArr e tp to_rem)]
@@ -675,7 +676,7 @@ getPropBnds pat@(TupId ids _) e to_rem =
                 _                                    -> return []
         _ -> return []
 
-ctIndex :: TypeBox tf => [Exp tf] -> Maybe [Int]
+ctIndex :: [Exp] -> Maybe [Int]
 ctIndex []     = Just []
 ctIndex (i:is) = 
   case i of
@@ -691,7 +692,7 @@ getArrValInd v [] = if isBasicTypeVal v then Just v else Nothing
 getArrValInd (ArrayVal arr _) (i:is) = getArrValInd (arr ! i) is
 getArrValInd _ _ = Nothing 
 
-getArrLitInd :: TypeBox tf => Exp tf -> [Int] -> Maybe (Exp tf)
+getArrLitInd :: Exp -> [Int] -> Maybe Exp
 getArrLitInd e [] = if isCtOrCopy e then Just e else Nothing 
 getArrLitInd (ArrayLit els _ _) (i:is) = getArrLitInd (els !! i) is
 getArrLitInd (Literal arr@(ArrayVal _ _) loc) (i:is) = 

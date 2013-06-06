@@ -17,7 +17,7 @@ import Data.List
 import Data.Loc
 import qualified Data.Map as M
 
-import Language.L0
+import L0C.L0
 
 data InterpreterError = MissingEntryPoint Name
                       | InvalidFunctionArguments Name (Maybe [Type]) [Type]
@@ -61,7 +61,7 @@ instance Show InterpreterError where
 instance Error InterpreterError where
   strMsg = TypeError noLoc
 
-data L0Env = L0Env { envVtable  :: M.Map Name Value
+data L0Env = L0Env { envVtable  :: M.Map VName Value
                    , envFtable  :: M.Map Name ([Value] -> L0M Value)
                    }
 
@@ -78,27 +78,27 @@ runL0M (L0M m) env = runWriter $ runErrorT $ runReaderT m env
 bad :: InterpreterError -> L0M a
 bad = L0M . throwError
 
-bindVar :: L0Env -> (Ident Type, Value) -> L0Env
+bindVar :: L0Env -> (Ident, Value) -> L0Env
 bindVar env (Ident name _ _,val) =
   env { envVtable = M.insert name val $ envVtable env }
 
-bindVars :: L0Env -> [(Ident Type, Value)] -> L0Env
+bindVars :: L0Env -> [(Ident, Value)] -> L0Env
 bindVars = foldl bindVar
 
-binding :: [(Ident Type, Value)] -> L0M a -> L0M a
+binding :: [(Ident, Value)] -> L0M a -> L0M a
 binding bnds = local (`bindVars` bnds)
 
-lookupVar :: Name -> L0M Value
+lookupVar :: VName -> L0M Value
 lookupVar vname = do
   val <- asks $ M.lookup vname . envVtable
   case val of Just val' -> return val'
-              Nothing   -> bad $ TypeError noLoc $ "lookupVar " ++ nameToString vname
+              Nothing   -> bad $ TypeError noLoc $ "lookupVar " ++ textual vname
 
 lookupFun :: Name -> L0M ([Value] -> L0M Value)
 lookupFun fname = do
   fun <- asks $ M.lookup fname . envFtable
   case fun of Just fun' -> return fun'
-              Nothing   -> bad $ TypeError noLoc $ "lookupFun " ++ nameToString fname
+              Nothing   -> bad $ TypeError noLoc $ "lookupFun " ++ textual fname
 
 arrToList :: SrcLoc -> Value -> L0M [Value]
 arrToList _ (ArrayVal l _) = return $ elems l
@@ -126,12 +126,12 @@ arrays rowtype vs = arrayVal vs rowtype
 ------- Interpreting an arbitrary function -------
 --------------------------------------------------
 
-runFunNoTrace :: Name -> [Value] -> Prog Type -> Either InterpreterError Value
+runFunNoTrace :: Name -> [Value] -> Prog -> Either InterpreterError Value
 runFunNoTrace = ((.) . (.) . (.)) fst runFun -- I admit this is just for fun.
 
-runFun :: Name -> [Value] -> Prog Type -> (Either InterpreterError Value, Trace)
+runFun :: Name -> [Value] -> Prog -> (Either InterpreterError Value, Trace)
 runFun fname mainargs prog = do
-  let ftable = foldl expand builtins prog
+  let ftable = foldl expand builtins $ progFunctions prog
       l0env = L0Env { envVtable = M.empty
                     , envFtable = ftable
                     }
@@ -188,7 +188,7 @@ builtin fname args = bad $ InvalidFunctionArguments (nameFromString fname) Nothi
 --------------------------------------------
 
 
-evalExp :: Exp Type -> L0M Value
+evalExp :: Exp -> L0M Value
 
 evalExp (Literal val _) = return val
 
@@ -507,7 +507,7 @@ evalExp (Redomap2 redfun mapfun accexp arrexps _ loc) = do
   let foldfun acc x = applyLambda redfun $ untuple acc ++ untuple x
   foldM foldfun startacc vs'
 
-evalIntBinOp :: (Int -> Int -> Int) -> Exp Type -> Exp Type -> SrcLoc -> L0M Value
+evalIntBinOp :: (Int -> Int -> Int) -> Exp -> Exp -> SrcLoc -> L0M Value
 evalIntBinOp op e1 e2 loc = do
   v1 <- evalExp e1
   v2 <- evalExp e2
@@ -515,7 +515,7 @@ evalIntBinOp op e1 e2 loc = do
     (IntVal x, IntVal y) -> return $ IntVal (op x y)
     _                    -> bad $ TypeError loc "evalIntBinOp"
 
-evalRealBinOp :: (Double -> Double -> Double) -> Exp Type -> Exp Type -> SrcLoc -> L0M Value
+evalRealBinOp :: (Double -> Double -> Double) -> Exp -> Exp -> SrcLoc -> L0M Value
 evalRealBinOp op e1 e2 loc = do
   v1 <- evalExp e1
   v2 <- evalExp e2
@@ -523,7 +523,7 @@ evalRealBinOp op e1 e2 loc = do
     (RealVal x, RealVal y) -> return $ RealVal (op x y)
     _                      -> bad $ TypeError loc $ "evalRealBinOp " ++ ppValue v1 ++ " " ++ ppValue v2
 
-evalBoolBinOp :: (Bool -> Bool -> Bool) -> Exp Type -> Exp Type -> SrcLoc -> L0M Value
+evalBoolBinOp :: (Bool -> Bool -> Bool) -> Exp -> Exp -> SrcLoc -> L0M Value
 evalBoolBinOp op e1 e2 loc = do
   v1 <- evalExp e1
   v2 <- evalExp e2
@@ -531,14 +531,14 @@ evalBoolBinOp op e1 e2 loc = do
     (LogVal x, LogVal y) -> return $ LogVal (op x y)
     _                    -> bad $ TypeError loc $ "evalBoolBinOp " ++ ppValue v1 ++ " " ++ ppValue v2
 
-evalPattern :: TupIdent Type -> Value -> Maybe [(Ident Type, Value)]
+evalPattern :: TupIdent -> Value -> Maybe [(Ident, Value)]
 evalPattern (Id ident) v = Just [(ident, v)]
 evalPattern (TupId pats _) (TupVal vs)
   | length pats == length vs =
     concat <$> zipWithM evalPattern pats vs
 evalPattern _ _ = Nothing
 
-applyLambda :: Lambda Type -> [Value] -> L0M Value
+applyLambda :: Lambda -> [Value] -> L0M Value
 applyLambda (AnonymFun params body _ _) args =
   binding (zip params args) $ evalExp body
 applyLambda (CurryFun name curryargs _ _) args = do

@@ -27,7 +27,8 @@
 module Language.L0.Traversals
   (
   -- * Mapping
-    Mapper(..)
+    MapperBase(..)
+  , Mapper
   , identityMapper
   , mapExpM
   , mapExp
@@ -65,17 +66,21 @@ import Language.L0.Syntax
 -- | Express a monad mapping operation on a syntax node.  Each element
 -- of this structure expresses the operation to be performed on a
 -- given child.
-data Mapper ty m = Mapper {
-    mapOnExp :: Exp ty -> m (Exp ty)
-  , mapOnType :: ty -> m ty
-  , mapOnLambda :: Lambda ty -> m (Lambda ty)
-  , mapOnPattern :: TupIdent ty -> m (TupIdent ty)
-  , mapOnIdent :: Ident ty -> m (Ident ty)
+data MapperBase tyf tyt vnf vnt m = Mapper {
+    mapOnExp :: ExpBase tyf vnf -> m (ExpBase tyt vnt)
+  , mapOnType :: tyf -> m tyt
+  , mapOnLambda :: LambdaBase tyf vnf -> m (LambdaBase tyt vnt)
+  , mapOnPattern :: TupIdentBase tyf vnf -> m (TupIdentBase tyt vnt)
+  , mapOnIdent :: IdentBase tyf vnf -> m (IdentBase tyt vnt)
   , mapOnValue :: Value -> m Value
   }
 
+-- | A special case of 'MapperBase' when the name- and type
+-- representation does not change.
+type Mapper ty vn m = MapperBase ty ty vn vn m
+
 -- | A mapper that simply returns the tree verbatim.
-identityMapper :: Monad m => Mapper ty m
+identityMapper :: Monad m => Mapper ty vn m
 identityMapper = Mapper {
                    mapOnExp = return
                  , mapOnType = return
@@ -89,7 +94,7 @@ identityMapper = Mapper {
 -- expression.  Importantly, the 'mapOnExp' action is not invoked for
 -- the expression itself, and the mapping does not descend recursively
 -- into subexpressions.  The mapping is done left-to-right.
-mapExpM :: (Applicative m, Monad m) => Mapper ty m -> Exp ty -> m (Exp ty)
+mapExpM :: (Applicative m, Monad m) => MapperBase tyf tyt vnf vnt m -> ExpBase tyf vnf -> m (ExpBase tyt vnt)
 mapExpM tv (Var ident) =
   pure Var <*> mapOnIdent tv ident
 mapExpM tv (Literal val loc) =
@@ -201,21 +206,21 @@ mapExpM tv (Redomap2 redfun mapfun accexp arrexps intype loc) =
        mapOnType tv intype <*> pure loc
 
 -- | Like 'mapExp', but in the 'Identity' monad.
-mapExp :: Mapper ty Identity -> Exp ty -> Exp ty
+mapExp :: Mapper ty vn Identity -> ExpBase ty vn -> ExpBase ty vn
 mapExp m = runIdentity . mapExpM m
 
 -- | Reification of a left-reduction across a syntax tree.
-data Folder ty a m = Folder {
-    foldOnExp :: a -> Exp ty -> m a
+data Folder ty vn a m = Folder {
+    foldOnExp :: a -> ExpBase ty vn -> m a
   , foldOnType :: a -> ty -> m a
-  , foldOnLambda :: a -> Lambda ty -> m a
-  , foldOnPattern :: a -> TupIdent ty -> m a
-  , foldOnIdent :: a -> Ident ty -> m a
+  , foldOnLambda :: a -> LambdaBase ty vn -> m a
+  , foldOnPattern :: a -> TupIdentBase ty vn -> m a
+  , foldOnIdent :: a -> IdentBase ty vn -> m a
   , foldOnValue :: a -> Value -> m a
   }
 
 -- | A folding operation where the accumulator is returned verbatim.
-identityFolder :: Monad m => Folder ty a m
+identityFolder :: Monad m => Folder ty vn a m
 identityFolder = Folder {
                    foldOnExp = const . return
                  , foldOnType = const . return
@@ -229,7 +234,7 @@ identityFolder = Folder {
 -- expression.  Importantly, the 'foldOnExp' action is not invoked for
 -- the expression itself, and the reduction does not descend recursively
 -- into subexpressions.  The reduction is done left-to-right.
-foldExpM :: (Monad m, Functor m) => Folder ty a m -> a -> Exp ty -> m a
+foldExpM :: (Monad m, Functor m) => Folder ty vn a m -> a -> ExpBase ty vn -> m a
 foldExpM f x e = execStateT (mapExpM m e) x
   where m = Mapper {
               mapOnExp = wrap foldOnExp
@@ -245,23 +250,23 @@ foldExpM f x e = execStateT (mapExpM m e) x
           return k
 
 -- | As 'foldExpM', but in the 'Identity' monad.
-foldExp :: Folder ty a Identity -> a -> Exp ty -> a
+foldExp :: Folder ty vn a Identity -> a -> ExpBase ty vn -> a
 foldExp m x = runIdentity . foldExpM m x
 
 -- | Express a monad expression on a syntax node.  Each element of
 -- this structure expresses the action to be performed on a given
 -- child.
-data Walker ty m = Walker {
-    walkOnExp :: Exp ty -> m ()
+data Walker ty vn m = Walker {
+    walkOnExp :: ExpBase ty vn -> m ()
   , walkOnType :: ty -> m ()
-  , walkOnLambda :: Lambda ty -> m ()
-  , walkOnPattern :: TupIdent ty -> m ()
-  , walkOnIdent :: Ident ty -> m ()
+  , walkOnLambda :: LambdaBase ty vn -> m ()
+  , walkOnPattern :: TupIdentBase ty vn -> m ()
+  , walkOnIdent :: IdentBase ty vn -> m ()
   , walkOnValue :: Value -> m ()
   }
 
 -- | A no-op traversal.
-identityWalker :: Monad m => Walker ty m
+identityWalker :: Monad m => Walker ty vn m
 identityWalker = Walker {
                    walkOnExp = const $ return ()
                  , walkOnType = const $ return ()
@@ -276,7 +281,7 @@ identityWalker = Walker {
 -- the expression itself, and the traversal does not descend
 -- recursively into subexpressions.  The traversal is done
 -- left-to-right.
-walkExpM :: (Monad m, Applicative m) => Walker ty m -> Exp ty -> m ()
+walkExpM :: (Monad m, Applicative m) => Walker ty vn m -> ExpBase ty vn -> m ()
 walkExpM f = void . mapExpM m
   where m = Mapper {
               mapOnExp = wrap walkOnExp
@@ -290,9 +295,9 @@ walkExpM f = void . mapExpM m
 
 -- | Common case of 'foldExp', where only 'Exp's and 'Lambda's are
 -- taken into account.
-foldlPattern :: (a -> Exp tf    -> a) ->
-                (a -> Lambda tf -> a) ->
-                  a -> Exp tf -> a
+foldlPattern :: (a -> ExpBase ty vn    -> a) ->
+                (a -> LambdaBase ty vn -> a) ->
+                  a -> ExpBase ty vn -> a
 foldlPattern expf lamf = foldExp m
   where m = identityFolder {
               foldOnExp = \x -> return . expf x
@@ -304,7 +309,7 @@ foldlPattern expf lamf = foldExp m
 
 -- | Common case of 'mapExp', where only 'Exp's are taken into
 -- account.
-buildExpPattern :: (Exp tf -> Exp tf) -> Exp tf -> Exp tf
+buildExpPattern :: (ExpBase ty vn -> ExpBase ty vn) -> ExpBase ty vn -> ExpBase ty vn
 buildExpPattern f = mapExp f'
   where f' = identityMapper {
                mapOnExp = return . f
@@ -315,8 +320,8 @@ buildExpPattern f = mapExp f'
         buildLambda (CurryFun  nm params tp pos) = CurryFun  nm  (map f params) tp pos
 
 -- | Return the set of all variable names bound in a program.
-progNames :: Prog ty -> S.Set Name
-progNames = execWriter . mapM funNames
+progNames :: Ord vn => ProgBase ty vn -> S.Set vn
+progNames = execWriter . mapM funNames . progFunctions
   where names = identityWalker {
                   walkOnExp = expNames
                 , walkOnLambda = lambdaNames
@@ -329,6 +334,8 @@ progNames = execWriter . mapM funNames
 
         expNames e@(LetWith dest _ _ _ _ _) =
           one dest >> walkExpM names e
+        expNames e@(DoLoop _ _ i _ _ _ _) =
+          one i >> walkExpM names e
         expNames e = walkExpM names e
 
         lambdaNames (AnonymFun params body _ _) =
@@ -336,6 +343,6 @@ progNames = execWriter . mapM funNames
         lambdaNames (CurryFun _ exps _ _) =
           mapM_ expNames exps
 
-patNames :: TupIdent ty -> S.Set Name
+patNames :: Ord vn => TupIdentBase ty vn -> S.Set vn
 patNames (Id ident)     = S.singleton $ identName ident
 patNames (TupId pats _) = mconcat $ map patNames pats

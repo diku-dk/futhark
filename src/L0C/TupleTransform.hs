@@ -35,27 +35,28 @@ import qualified Data.Map as M
 import Data.List
 import Data.Loc
 
-import Language.L0
+import L0C.L0
 import L0C.FreshNames
 
-transformProg :: Prog Type -> Prog Type
-transformProg prog = runTransformM $ mapM transformFun prog
+transformProg :: Prog -> Prog
+transformProg prog =
+  Prog $ runTransformM $ mapM transformFun $ progFunctions prog
   where runTransformM m = evalState (runReaderT m newEnv) newState
         newState = TransformState $ newNameSourceForProg prog
         newEnv = TransformEnv M.empty
 
 data TransformState = TransformState {
-    envNameSrc :: NameSource
+    envNameSrc :: VNameSource
   }
 
 data TransformEnv = TransformEnv {
-    envSubsts :: M.Map Name [Ident Type]
+    envSubsts :: M.Map VName [Ident]
   }
 
 type TransformM = ReaderT TransformEnv (State TransformState)
 
-new :: String -> TransformM Name
-new k = do (name, src) <- gets $ newName (nameFromString k) . envNameSrc
+new :: String -> TransformM VName
+new k = do (name, src) <- gets $ newVName k . envNameSrc
            modify $ \s -> s { envNameSrc = src }
            return name
 
@@ -104,17 +105,17 @@ transformValue (ArrayVal arr rt) =
 transformValue (TupVal vs) = TupVal $ flattenValues $ map transformValue vs
 transformValue v = v
 
-transformIdent :: Ident Type -> Ident Type
+transformIdent :: Ident -> Ident
 transformIdent (Ident name t loc) = Ident name (transformType t) loc
 
-transformFun :: FunDec Type -> TransformM (FunDec Type)
+transformFun :: FunDec -> TransformM FunDec
 transformFun (fname,rettype,params,body,loc) =
   binding params $ \params' -> do
     body' <- transformExp body
     return (fname, rettype', params', body', loc)
   where rettype' = transformType rettype
 
-binding :: [Ident Type] -> ([Ident Type] -> TransformM a) -> TransformM a
+binding :: [Ident] -> ([Ident] -> TransformM a) -> TransformM a
 binding params m = do
   (params', substs) <-
     runWriterT $ concat <$> mapM (transformParam . transformIdent) params
@@ -134,12 +135,12 @@ binding params m = do
           return names
         _ -> return [param]
 
-flattenExps :: [Exp Type] -> [Exp Type]
+flattenExps :: [Exp] -> [Exp]
 flattenExps = concatMap flatten
   where flatten (TupLit es _) = es
         flatten e             = [e]
 
-transformExp :: Exp Type -> TransformM (Exp Type)
+transformExp :: Exp -> TransformM Exp
 
 transformExp (Var var) = do
   subst <- asks $ M.lookup (identName var) . envSubsts
@@ -359,8 +360,8 @@ transformExp e = mapExpM transform e
                     , mapOnValue = return . transformValue
                     }
 
-tupArrToListArr :: Exp Type -> ([Exp Type] -> TransformM (Exp Type))
-                -> TransformM (Exp Type)
+tupArrToListArr :: Exp -> ([Exp] -> TransformM Exp)
+                -> TransformM Exp
 tupArrToListArr e m = do
   e' <- transformExp e
   case typeOf e of
@@ -371,7 +372,7 @@ tupArrToListArr e m = do
     _ -> m [e']
   where loc = srclocOf e
 
-transformLambda :: Lambda Type -> TransformM (Lambda Type)
+transformLambda :: Lambda -> TransformM Lambda
 transformLambda (AnonymFun params body rettype loc) =
   binding params $ \params' -> do
     body' <- transformExp body
@@ -381,11 +382,11 @@ transformLambda (CurryFun fname curryargs rettype loc) = do
   curryargs' <- mapM transformExp curryargs
   return $ CurryFun fname curryargs' (transformType rettype) loc
 
-flattenPattern :: TupIdent Type -> [Ident Type]
+flattenPattern :: TupIdent -> [Ident]
 flattenPattern (TupId pats _) = concatMap flattenPattern pats
 flattenPattern (Id ident)     = [ident]
 
-withPattern :: TupIdent Type -> (TupIdent Type -> TransformM a) -> TransformM a
+withPattern :: TupIdent -> (TupIdent -> TransformM a) -> TransformM a
 withPattern pat m =
   binding (flattenPattern pat) $ \idents ->
     let pat' = case idents of
@@ -393,7 +394,7 @@ withPattern pat m =
                  _       -> TupId (map Id idents) $ srclocOf pat
     in m pat'
 
-newVar :: SrcLoc -> String -> Type -> TransformM (Ident Type, Exp Type)
+newVar :: SrcLoc -> String -> Type -> TransformM (Ident, Exp)
 newVar loc name tp = do
   x <- new name
   return (Ident x tp loc, Var $ Ident x tp loc)

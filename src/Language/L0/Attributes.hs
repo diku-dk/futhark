@@ -24,6 +24,14 @@ module Language.L0.Attributes
   , flattenArray
   , expToValue
   , funDecByName
+
+  -- * Type aliases
+  , UncheckedIdent
+  , UncheckedExp
+  , UncheckedLambda
+  , UncheckedTupIdent
+  , UncheckedFunDec
+  , UncheckedProg
   )
   where
 
@@ -83,17 +91,14 @@ unique = (==Unique) . uniqueness
 class (Eq ty, Ord ty, Show ty) => TypeBox ty where
   unboxType :: ty -> Maybe Type
   boxType :: Type -> ty
-  getExpType :: Exp ty -> ty
 
-instance TypeBox (Maybe Type) where
-  unboxType = id
-  boxType = Just
-  getExpType _ = Nothing
+instance TypeBox () where
+  unboxType = const Nothing
+  boxType = const ()
 
 instance TypeBox Type where
   unboxType = Just
   boxType = id
-  getExpType = typeOf
 
 -- | A typed value is one from which we can retrieve a type.
 class Typed v where
@@ -229,10 +234,10 @@ flattenArray (ArrayVal arr et) =
           flatten v = [v]
 flattenArray v = v
 
-instance Typed (Ident Type) where
+instance Typed (IdentBase Type vn) where
   typeOf = identType
 
-instance Typed (Exp Type) where
+instance Typed (ExpBase Type vn) where
   typeOf (Literal val _) = typeOf val
   typeOf (TupLit es _) = Elem $ Tuple $ map typeOf es
   typeOf (ArrayLit es t _) = arrayType 1 t $ mconcat $ map uniqueness es
@@ -306,7 +311,7 @@ uniqueProp tp = if uniqueOrBasic tp then Unique else Nonunique
 -- | If possible, convert an expression to a value.  This is not a
 -- true constant propagator, but a quick way to convert array/tuple
 -- literal expressions into literal values instead.
-expToValue :: Exp Type -> Maybe Value
+expToValue :: ExpBase Type vn -> Maybe Value
 expToValue (Literal val _) = Just val
 expToValue (TupLit es _) = do es' <- mapM expToValue es
                               Just $ TupVal es'
@@ -314,10 +319,22 @@ expToValue (ArrayLit es t _) = do es' <- mapM expToValue es
                                   Just $ arrayVal es' t
 expToValue _ = Nothing
 
-instance Typed (Lambda Type) where
+instance Typed (LambdaBase Type vn) where
   typeOf (AnonymFun _ _ t _) = t
   typeOf (CurryFun _ _ t _) = t
 
 -- | Find the function of the given name in the L0 program.
-funDecByName :: Name -> Prog ty -> Maybe (FunDec ty)
-funDecByName fname = find (\(fname',_,_,_,_) -> fname == fname')
+funDecByName :: Name -> ProgBase ty vn -> Maybe (FunDecBase ty vn)
+funDecByName fname = find (\(fname',_,_,_,_) -> fname == fname') . progFunctions
+
+type UncheckedIdent = IdentBase () Name
+
+type UncheckedExp = ExpBase () Name
+
+type UncheckedLambda = LambdaBase () Name
+
+type UncheckedTupIdent = TupIdentBase () Name
+
+type UncheckedFunDec = FunDecBase () Name
+
+type UncheckedProg = ProgBase () Name
