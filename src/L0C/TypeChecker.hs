@@ -1,4 +1,10 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+-- | The type checker checks whether the program is type-consistent.
+-- Whether type annotations are already present is irrelevant, but if
+-- they are, the type checker will signal an error if they are wrong.
+-- The program does not need to have any particular properties for the
+-- type checker to function; in particular it does not need unique
+-- names.
 module L0C.TypeChecker ( checkProg
                        , checkProgNoUniqueness
                        , TypeError(..))
@@ -70,7 +76,12 @@ data TypeError vn = TypeError SrcLoc String
                   | BadLetWithValue SrcLoc
                   -- ^ The new value for an array slice in let-with is aliased to the source.
                   | ReturnAliased Name vn SrcLoc
+                  -- ^ The unique return value of the function aliases
+                  -- one of the function parameters.
                   | UniqueReturnAliased Name SrcLoc
+                  -- ^ A unique element of the tuple returned by the
+                  -- function aliases some other element of the tuple.
+
 
 instance VarName vn => Show (TypeError vn) where
   show (TypeError pos msg) =
