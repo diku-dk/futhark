@@ -1,4 +1,15 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, ScopedTypeVariables #-}
+-- | A nonoptimising interpreter for L0.  It makes no assumptions of
+-- the form of the input program, and in particular permits shadowing.
+-- This interpreter should be considered the primary benchmark for
+-- judging the correctness of a program, but note that it is not by
+-- itself sufficient.  The interpreter does not perform in-place
+-- updates like the native code generator, and bugs related to
+-- uniqueness will therefore not be detected.  Of course, the type
+-- checker should catch such error.
+--
+-- To run an L0 program, you would normally run the interpreter as
+-- @'runFun' 'defaultEntryPoint' args prog@.
 module L0C.Interpreter
   ( runFun
   , runFunNoTrace
@@ -19,17 +30,23 @@ import qualified Data.Map as M
 
 import L0C.L0
 
+-- | An error happened during execution, and this is why.
 data InterpreterError = MissingEntryPoint Name
+                      -- ^ The specified start function does not exist.
                       | InvalidFunctionArguments Name (Maybe [Type]) [Type]
+                      -- ^ The arguments given to a function were mistyped.
                       | IndexOutOfBounds SrcLoc Int Int
                       -- ^ First @Int@ is array size, second is attempted index.
                       | NegativeIota SrcLoc Int
+                      -- ^ Called @iota(n)@ where @n@ was negative.
                       | NegativeReplicate SrcLoc Int
-                      | ReadError SrcLoc Type String
+                      -- ^ Called @replicate(n, x)@ where @n@ was negative.
                       | InvalidArrayShape SrcLoc [Int] [Int]
                       -- ^ First @Int@ is old shape, second is attempted new shape.
                       | ZipError SrcLoc [Int]
+                      -- ^ The arguments to @zip@ were of different lengths.
                       | TypeError SrcLoc String
+                      -- ^ Some value was of an unexpected type.
 
 instance Show InterpreterError where
   show (MissingEntryPoint fname) =
@@ -50,8 +67,6 @@ instance Show InterpreterError where
     "Argument " ++ show n ++ " to replicate at " ++ locStr pos ++ " is negative."
   show (TypeError pos s) =
     "Type error at " ++ locStr pos ++ " in " ++ s ++ " during interpretation.  This implies a bug in the type checker."
-  show (ReadError pos t s) =
-    "Read error while trying to read " ++ ppType t ++ " at " ++ locStr pos ++ ".  Input line was: " ++ s
   show (InvalidArrayShape pos shape newshape) =
     "Invalid array reshaping at " ++ locStr pos ++ ", from " ++ show shape ++ " to " ++ show newshape
   show (ZipError pos lengths) =
@@ -65,6 +80,8 @@ data L0Env = L0Env { envVtable  :: M.Map VName Value
                    , envFtable  :: M.Map Name ([Value] -> L0M Value)
                    }
 
+-- | A list of places where @trace@ was called, alongside the
+-- prettyprinted value that was passed to it.
 type Trace = [(SrcLoc, String)]
 
 newtype L0M a = L0M (ReaderT L0Env
@@ -126,9 +143,16 @@ arrays rowtype vs = arrayVal vs rowtype
 ------- Interpreting an arbitrary function -------
 --------------------------------------------------
 
-runFunNoTrace :: Name -> [Value] -> Prog -> Either InterpreterError Value
-runFunNoTrace = ((.) . (.) . (.)) fst runFun -- I admit this is just for fun.
-
+-- |  @funFun name args prog@ invokes the @name@ function of program
+-- @prog@, with the parameters bound in order to the values in @args@.
+-- Returns either an error or the return value of @fun@.
+-- Additionally, a list of all calls to the special built-in function
+-- @trace@ is always returned.  This is useful for debugging.
+--
+-- Note that if 'prog' is not type-correct, you cannot be sure that
+-- you'll get an error from the interpreter - it may just as well
+-- silently return a wrong value.  You are, however, guaranteed that
+-- the initial call to 'prog' is properly checked.
 runFun :: Name -> [Value] -> Prog -> (Either InterpreterError Value, Trace)
 runFun fname mainargs prog = do
   let ftable = foldl expand builtins $ progFunctions prog
@@ -155,6 +179,9 @@ runFun fname mainargs prog = do
       let fun args = binding (zip params args) $ evalExp body
       in M.insert name fun ftable
 
+-- | As 'runFun', but throws away the trace.
+runFunNoTrace :: Name -> [Value] -> Prog -> Either InterpreterError Value
+runFunNoTrace = ((.) . (.) . (.)) fst runFun -- I admit this is just for fun.
 
 --------------------------------------------
 --------------------------------------------
