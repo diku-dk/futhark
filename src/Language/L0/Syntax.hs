@@ -1,7 +1,8 @@
 {-# LANGUAGE FlexibleInstances #-}
 -- | This Is an ever-changing abstract syntax for L0.  Some types,
--- such as @Exp@, are parametrised by type representation.  See
--- "L0C.TypeChecker" and the 'Exp' type for more information.
+-- such as @Exp@, are parametrised by type and name representation.
+-- See the @doc/@ subdirectory in the L0 repository for a language
+-- reference, or this module may be a little hard to understand.
 module Language.L0.Syntax
   (
    -- * Names
@@ -57,7 +58,10 @@ nameToString (Name t) = T.unpack t
 nameFromString :: String -> Name
 nameFromString = Name . T.pack
 
-data Uniqueness = Unique | Nonunique
+-- | The uniqueness attribute of a type.  This essentially indicates
+-- whether or not in-place modifications are acceptable.
+data Uniqueness = Unique    -- ^ At most one outer reference.
+                | Nonunique -- ^ Any number of references.
                   deriving (Eq, Ord, Show)
 
 instance Monoid Uniqueness where
@@ -69,8 +73,12 @@ instance Monoid Uniqueness where
 -- | Don't use this for anything.
 type DimSize = ExpBase () Name
 
+-- | The size of an array type is a list of its dimension sizes.  If
+-- 'Nothing', that dimension is of a (statically) unknown size.
 type ArraySize = [Maybe DimSize]
 
+-- | Types that can be elements of arrays.  TODO: please add float,
+-- double, long int, etc.
 data ElemType = Int
               | Bool
               | Char
@@ -78,8 +86,7 @@ data ElemType = Int
               | Tuple [Type]
                 deriving (Eq, Ord, Show)
 
--- | L0 Types: Int, Bool, Char, Tuple, multidim-regular Array
---  TODO: please add float, double, long int, etc.
+-- | An L0 type is either an array or an element type.
 data Type = Elem ElemType
           | Array ElemType ArraySize Uniqueness
             -- ^ 1st arg: array's element type, 2nd arg: length of
@@ -310,8 +317,8 @@ data BinOp = Plus -- Binary Ops for Numbers
            | Leq
              deriving (Eq, Ord, Enum, Bounded, Show)
 
--- ^ Print the operator, without whitespace, that corresponds to this
--- @BinOp@.
+-- | The Operator, without whitespace, that corresponds to this
+-- @BinOp@.  For example, @opStr Plus@ gives @"+"@.
 opStr :: BinOp -> String
 opStr Plus = "+"
 opStr Minus = "-"
