@@ -62,7 +62,7 @@ new k = do (name, src) <- gets $ newVName k . envNameSrc
 
 flattenTypes :: [Type] -> [Type]
 flattenTypes = concatMap flatten
-  where flatten (Elem (Tuple ts)) = ts
+  where flatten (Elem (Tuple ts)) = flattenTypes ts
         flatten t                 = [t]
 
 transformElemType :: ElemType -> ElemType
