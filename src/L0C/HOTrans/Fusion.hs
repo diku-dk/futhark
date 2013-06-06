@@ -19,15 +19,15 @@ import qualified Data.Map  as M
 import qualified Data.Set  as S
 
 import Language.L0
---import Language.L0.Traversals
 import L0C.FreshNames
-import L0C.EnablingOpts.EnablingOptErrors
+import L0C.EnablingOpts.EnablingOptDriver
 
 import Debug.Trace
 
 data FusionGEnv = FusionGEnv {   
                     envVtable  :: S.Set Name -- M.Map Name (TupIdent tf)
-                  , fusedRes   :: FusedRes --M.Map Name (FunDec Type)  
+                  , fusedRes   :: FusedRes --M.Map Name (FunDec Type) 
+                  , program    :: Prog Type 
                   }
 
 
@@ -35,6 +35,12 @@ newtype FusionGM a = FusionGM (StateT NameSource (ReaderT FusionGEnv (Either Ena
     deriving (  MonadState NameSource, 
                 MonadReader FusionGEnv,
                 Monad, Applicative, Functor )
+
+
+------------------------------------------------------------------------
+--- Monadic Helpers: bind/new/runOptimPass, etc                      ---
+------------------------------------------------------------------------
+
 
 -- | Bind a name as a common (non-merge) variable.
 -- TypeBox tf => 
@@ -72,6 +78,35 @@ badFusionGM = FusionGM . lift . lift . Left
 -- name.
 new :: Name -> FusionGM Name
 new = state . newName
+
+------------------------------------------------------------------------
+--- Fusion Entry Points: gather the to-be-fused kernels@pgm level    ---
+---    and fuse them in a second pass!                               ---
+------------------------------------------------------------------------
+
+fuseProg :: Prog Type -> Either EnablingOptError (Bool, Prog Type) -- (M.Map Name FusedRes)
+fuseProg prog = do
+    let env = FusionGEnv { envVtable = S.empty, fusedRes = mkFreshFusionRes, program = prog }
+    ks0 <- runFusionGatherM prog (mapM fusionGatherFun prog) env
+    -- let ks' = map ( \kers -> (M.toList . filter (\k -> )) (M.toList kernels k) ) ks
+    let ks    = map ( \funres -> cleanFusionResult funres ) ks0
+    let succc = ( foldl (||) False . map (\x-> rsucc x) )   ks
+    if not succc
+    then do return (False, prog)
+    else do prog' <- runFusionGatherM prog (mapM fuseInFun (zip ks prog)) env
+            return (True, prog')
+
+
+fusionGatherFun :: FunDec Type -> FusionGM FusedRes
+fusionGatherFun (_, _, _, body, _) = do
+    --body' <- trace ("in function: "++fname++"\n") (tupleNormAbstrFun args body pos)
+    fusionGatherExp mkFreshFusionRes body
+
+fuseInFun :: (FusedRes, FunDec Type) -> FusionGM (FunDec Type)
+fuseInFun (res, (fnm, rtp, idds, body, pos)) = do
+    body' <- bindRes res $ fuseInExp body
+    return (fnm, rtp, idds, body', pos)
+
 
 ---------------------------------------------------
 ---------------------------------------------------
@@ -479,7 +514,7 @@ fuse2SOACs inp1 lam1 out1 inp2 lam2 = do
                                           (SrcLoc (locOf body)) 
                                           ("In Fusion.hs, fuse2SOACs, foldM's lambda1 "
                                            ++" broken invariant: param index not in Map!")
-                      else return $ (head args:idds, mkCopies (head args) (tail args) body)
+                      else return $ (idds++[(head args)], mkCopies (head args) (tail args) body)
                     ) ([],bdy2) [0..(length out1)-1]
 
     let call_idd = if length ids_out1 == 1 then Id (head ids_out1)
@@ -495,25 +530,6 @@ fuse2SOACs inp1 lam1 out1 inp2 lam2 = do
 
     return $ (AnonymFun par' bdy2''' rtp2 pos2, inp_res')
     
-{-
-    -- Build the resulting lambda body and its param:
-    --   If the parameter is semantically a tuple, make
-    --   a new param and add a first stmt:
-    --   fn ret_type (arg_type new_par) = 
-    --      let (x1,..,xn) = new_par in bdy2'' 
-    (lam_res_par, bdy2''') <- 
-          if length par == 1 
-          then return (head par, bdy2'')
-          else do lam_par_nm <- new (nameFromString "lam_arg")
-                  let lam_par_tp = Elem (Tuple (map identType par))
-                  let lam_par_id = Ident lam_par_nm lam_par_tp pos2
-                  let tup_id = TupId (map (\x->Id x) par) pos2
-                  let bdy_res = LetPat tup_id (Var lam_par_id) bdy2'' pos2
-                  return (lam_par_id, bdy_res)
-
-
-    return $ (AnonymFun [lam_res_par] bdy2''' rtp2 pos2, inp_res)
--}    
     where
         -- | @arrs@ are the input arrays of a SOAC call
         --   @idds@ are the args (ids) of the SOAC's unnamed function
@@ -589,7 +605,7 @@ fuse2SOACs inp1 lam1 out1 inp2 lam2 = do
                                                 Nothing -> m
                                                 Just i  -> case M.lookup i m of
                                                             Nothing    -> M.insert i (identName idd, [par] ) m
-                                                            Just (_,ps)-> M.insert i (identName idd, par:ps) m
+                                                            Just (_,ps)-> M.insert i (identName idd, ps++[par]) m
                                     _       -> m    
                            )   M.empty (zip inp_arr2 inp_par2)
             -- add the unused vars from out_arr1
@@ -604,28 +620,6 @@ fuse2SOACs inp1 lam1 out1 inp2 lam2 = do
                             )
                             m2 [0..(length out_anm)-1] 
             return m3    
-           
-------------------------------------------------------------------------
---- Fusion Gather Entry Point: gathers to-be-fused kernels@pgm level ---
-------------------------------------------------------------------------
-
-fuseProg :: Prog Type -> Either EnablingOptError (Bool, Prog Type) -- (M.Map Name FusedRes)
-fuseProg prog = do
-    let env = FusionGEnv { envVtable = S.empty, fusedRes = mkFreshFusionRes }
-    case runFusionGatherM prog (mapM fusionGatherFun prog) env of
-        Left  a  -> Left a
-        Right ks -> do  --ks' <- trace (concatMap printRes ks) (return ks)
-                        let succc = foldl (||) False (map (\x-> rsucc x) ks)
-                        if succc
-                        then case runFusionGatherM prog (mapM fuseInFun (zip ks prog)) env of
-                                Left a      -> Left a
-                                Right prog' -> Right (True, prog')
-                        else Right (False, prog)
-
-fusionGatherFun :: FunDec Type -> FusionGM FusedRes
-fusionGatherFun (_, _, _, body, _) = do
-    --body' <- trace ("in function: "++fname++"\n") (tupleNormAbstrFun args body pos)
-    fusionGatherExp mkFreshFusionRes body
 
 ------------------------------------------------------------------------
 ------------------------------------------------------------------------
@@ -830,32 +824,9 @@ fusionGatherLam (u_set,fres) (AnonymFun idds body _ pos) = do
     let new_res' = new_res { unfusable = unfus }
     -- merge new_res with fres'
     return $ (u_set `S.union` unfus, mergeFusionRes new_res' fres)
-{-
-    let new_res' = FusedRes  (rsucc new_res || rsucc fres)
-                             (outArr new_res  `M.union`  outArr fres)
-                             (inpArr new_res  `M.union`  inpArr fres)
-                             (unfus      `S.union`    unfusable fres)
-                             (zips    new_res `M.union` zips    fres)
-                             (M.unionWith (++) (inzips new_res) (inzips fres) )
-                             (kernels new_res `M.union` kernels fres)
-    return $ (u_set `S.union` unfus, new_res')  
--}
 fusionGatherLam (u_set1, fres) (CurryFun _ args _ pos) = do
     (u_set2, fres') <- getUnfusableSet pos fres args
     return (u_set1 `S.union` u_set2, fres')
-{-    
-    let null_res = mkFreshFusionRes
-    new_res <- foldM fusionGatherExp null_res args
-    if not (M.null (outArr  new_res)) || not (M.null (inpArr new_res)) || 
-       not (M.null (kernels new_res)) || not (M.null (zips   new_res)) || (rsucc new_res)
-    then badFusionGM $ EnablingOptError pos 
-                        ("In Fusion.hs, fusionGatherLam of CurryFun, "
-                         ++"broken invariant: unnormalized program!")
-    else return $ ( u_set `S.union` unfusable new_res, 
-                    fres { unfusable = unfusable fres `S.union` unfusable new_res }
-                  )
--}
-    --foldM fusionGatherExp fres args
 
 
 getUnfusableSet :: SrcLoc -> FusedRes -> [Exp Type] -> FusionGM (S.Set Name, FusedRes)
@@ -879,20 +850,11 @@ getUnfusableSet pos fres args = do
 -------------------------------------------------------------
 -------------------------------------------------------------
 
-fuseInFun :: (FusedRes, FunDec Type) -> FusionGM (FunDec Type)
-fuseInFun (res, (fnm, rtp, idds, body, pos)) = do
-    body' <- bindRes res $ fuseInExp body
-    return (fnm, rtp, idds, body', pos)
-
 fuseInExp :: Exp Type -> FusionGM (Exp Type)
 
 ----------------------------------------------
 --- Let-Pattern: most important construct
 ----------------------------------------------
-    
--- bnd <- asks $ M.lookup (identName src) . envVtable
--- body' <- binding bnds $ tupleNormExp  body 
-
 
 fuseInExp (LetPat pat soac@(Map2 {}) body pos) = do
     body' <- fuseInExp body
@@ -1013,10 +975,23 @@ replaceSOAC pat soac = do
                         then badFusionGM $ EnablingOptError pos 
                                             ("In Fusion.hs, replaceSOAC, "
                                              ++" pat does not match kernel's pat: "++ppTupId pat)
-                        else if L.null (fused_vars ker) 
-                             then fuseInExp soac
-                             else return new_soac
-
+                        else if L.null $ fused_vars ker
+                             then badFusionGM $ EnablingOptError pos 
+                                                 ("In Fusion.hs, replaceSOAC, unfused kernel "
+                                                  ++"still in result: "++ppTupId pat)
+                             -- then fuseInExp soac
+                             else do -- return new_soac
+                                     lam   <- getLamSOAC new_soac
+                                     nmsrc <- get
+                                     prog  <- asks $ program
+                                     case normCopyOneLambda prog nmsrc lam of
+                                        Left err             -> badFusionGM err
+                                        Right (nmsrc', lam') -> do
+                                            put nmsrc'
+                                            (_, nfres) <- fusionGatherLam (S.empty, mkFreshFusionRes) lam'
+                                            let nfres' =  cleanFusionResult nfres
+                                            lam''      <- bindRes nfres' $ fuseInLambda lam'
+                                            updateLamSOAC lam'' new_soac
 
 ---------------------------------------------------
 ---------------------------------------------------
@@ -1057,6 +1032,17 @@ getLamSOAC ee = badFusionGM $ EnablingOptError
                                 (SrcLoc (locOf ee)) 
                                 ("In Fusion.hs, getLamSOAC, broken invariant: "
                                  ++" argument not a SOAC! "++ppExp 0 ee)
+
+updateLamSOAC :: Lambda Type -> Exp Type -> FusionGM (Exp Type)
+updateLamSOAC lam (Map2          _    arrs eltp pos) = return $ Map2          lam    arrs eltp pos
+updateLamSOAC lam (Reduce2       _ ne arrs eltp pos) = return $ Reduce2       lam ne arrs eltp pos
+updateLamSOAC lam (Filter2       _    arrs      pos) = return $ Filter2       lam    arrs      pos
+updateLamSOAC lam (Mapall2       _    arrs      pos) = return $ Mapall2       lam    arrs      pos
+updateLamSOAC lam (Redomap2 lam1 _ ne arrs eltp pos) = return $ Redomap2 lam1 lam ne arrs eltp pos
+updateLamSOAC _ ee = badFusionGM $ EnablingOptError 
+                                    (SrcLoc (locOf ee)) 
+                                    ("In Fusion.hs, updateLamSOAC, broken invariant: "
+                                     ++" argument not a SOAC! "++ppExp 0 ee)
 
 -- | Returns the input arrays used in a SOAC.
 --     If exp is not a SOAC then error.
@@ -1105,56 +1091,7 @@ getIdentArr (ee:_) =
                     (SrcLoc (locOf ee)) 
                     ("In Fusion.hs, getIdentArr, broken invariant: "
                      ++" argument not a (indexed) variable! "++ppExp 0 ee)
- 
--- | This function was implementing a VERY DIRTY TRICK,
---   Thank you Troels for FIXING normalizing the tuples inside a fun dec.
---   FIXED -- FUNCTION NOT NEEDED!!!!!! 
---    (To Troels: NEVER do smth like this, i.e., 
---       do what the priest says not what the priest does.
---     TO FIX the dirty trick we need to allow TupIdent in
---       the definition of functions. This would also fix 
---       Tuple Normalization nicely.)
---    A SOAC's lambda is supposed to receive one argument, i.e.,
---      @length lam_args == 1@, which maybe a tuple. If a tuple,
---      then the ``expanded'' version of the tuple *MUST* be created
---      in the first stmt of lambda's body, by tuple-normalization
---      property!
---   Returns: the normalized list of idents corresponding to `lam_args'
---            together with the part of lambda's body that uses them 
---            (i.e., without the first stmt if lam_args is a tuple)
-{-
-getLamNormIdsAndBody :: [Ident Type] -> Exp Type -> FusionGM ([Ident Type], Exp Type)
-getLamNormIdsAndBody lam_args lam_body = 
-    if not (length lam_args == 1)
-    then badFusionGM $ EnablingOptError (SrcLoc (locOf lam_body)) 
-                        ("In Fusion.hs, getLamNormIdsAndBody, SOAC's "
-                         ++" lambda receives more than one argument!")
-    else do let lam_arg = head lam_args
-            case typeOf lam_arg of
-              Elem Tuple{} -> case lam_body of
-                LetPat idds tup body' _ -> do
-                  let invar_verified = case tup of
-                        Var idd -> (identName idd == identName lam_arg)
-                        _       -> False 
-                  if invar_verified then return (getIdents idds, body')
-                  else badFusionGM $ EnablingOptError (SrcLoc (locOf lam_body))
-                                      ("In Fusion.hs, getLamNormIdsAndBody, first "
-                                       ++" stmt does not normalize the lambda's arg!")
-                _ -> badFusionGM $ EnablingOptError (SrcLoc (locOf lam_body))
-                               ("In Fusion.hs, getLamNormIdsAndBody, first "
-                                ++" stmt does not normalize the lambda's arg!")
-              _       -> do return (lam_args, lam_body)
--}
 
-{-
-mkSOACfromLam :: Exp Type -> Exp Type -> Lambda Type -> [Exp Type] -> FusionGM (Exp Type)
-mkSOACfromLam (Map2 _ _ _ _) (Map2 _ _ rtp pos) res_lam res_inp = 
-    return $ Map2 res_lam res_inp rtp pos
-mkSOACfromLam soac1 soac2 _ _ = 
-    badFusionGM $ EnablingOptError (SrcLoc (locOf soac2))
-                   ("In Fusion.hs, mkSOACfromLam, UNSUPPORTED SOAC "
-                    ++" combination: "++ppExp 0 soac1++" "++ppExp 0 soac2)
--}
 
 mapall2Map :: Exp Type -> FusionGM (Exp Type)
 mapall2Map soac@(Mapall2 lam arrs pos) = do
@@ -1200,6 +1137,15 @@ reduce2Redomap eee =
     badFusionGM $ EnablingOptError (SrcLoc (locOf eee))
                    ("In Fusion.hs, reduce2Redomap: argument not a reduce2: " 
                     ++ ppExp 0 eee)
+
+
+cleanFusionResult :: FusedRes -> FusedRes
+cleanFusionResult fres = 
+    let newks = M.filter ( \ker -> not (null (fused_vars ker)) )              (kernels fres)
+        newoa = M.filter ( \knm -> M.member knm newks          )              (outArr  fres)
+        newia = M.map    ( \knms-> S.filter (\knm->M.member knm newks) knms)  (inpArr  fres)
+    in fres { outArr = newoa, inpArr = newia, kernels = newks } 
+
 
 --------------
 --- Errors ---
