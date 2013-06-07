@@ -520,6 +520,7 @@ checkProg' checkoccurs prog = do
                         , envFtable = ftable
                         , envCheckOccurences = checkoccurs
                         }
+
   liftM (untagProg . Prog) $
         runTypeM typeenv src $ mapM checkFun $ progFunctions prog'
   where
@@ -680,46 +681,22 @@ checkExp' (Apply fname args t pos)
 checkExp' (Apply fname args t pos)
   | "assertZip" <- nameToString fname = do
   args' <- mapM checkExp args
-  let argtps = map typeOf args'
-  _ <- mapM (soac2ElemType pos) argtps
+  mapM_ rowTypeM args'
   t' <- checkAnnotation pos "return" t $ Elem Bool
   return $ Apply fname args' t' pos
 
-checkExp' (Apply fname args rettype pos) = do
+checkExp' (Apply fname args rettype loc) = do
   bnd <- asks $ M.lookup fname . envFtable
   case bnd of
-    Nothing -> bad $ UnknownFunctionError fname pos
+    Nothing -> bad $ UnknownFunctionError fname loc
     Just (ftype, paramtypes) -> do
-      rettype' <- checkAnnotation pos "return" rettype ftype
+      rettype' <- checkAnnotation loc "return" rettype ftype
 
-      args' <- forM (zip args $ cycle paramtypes) $ \(arg, paramt) -> do
-                 (arg', dflow) <- collectDataflow $ checkExp arg
-                 maybeCheckOccurences $ usageOccurences dflow
+      (args', argflows) <- unzip <$> mapM checkArg args
 
-                 let occurs = consumeArg (srclocOf arg) paramt $ usageAliasing dflow
-                     als = maskAliasing rettype' $
-                           VarAlias $ aliased $ usageAliasing dflow
+      checkFuncall (Just fname) loc paramtypes rettype' argflows
 
-                 tell $ mempty
-                        { usageAliasing = als
-                        , usageOccurences = usageOccurences dflow
-                                            `seqOccurences` occurs }
-                 return arg'
-
-      checkApply (Just fname) paramtypes (map typeOf args') pos
-      return $ Apply fname args' rettype' pos
-  where -- Check if an argument of the given type consumes anything.
-        consumes (Array _ _ Unique) = True
-        consumes (Elem (Tuple ets)) = any consumes ets
-        consumes _ = False
-
-        -- Create usage information, given argument type and aliasing
-        -- information.
-        consumeArg loc (Elem (Tuple ets)) (TupleAlias alss) =
-          concat $ zipWith (consumeArg loc) ets alss
-        consumeArg loc t als
-          | consumes t = [consumption (aliased als) loc]
-          | otherwise = []
+      return $ Apply fname args' rettype' loc
 
 checkExp' (LetPat pat e body pos) = do
   (e', dataflow) <- collectDataflow $ checkExp e
@@ -784,27 +761,6 @@ checkExp' (Transpose arrexp pos) = do
     bad $ TypeError pos "Argument to transpose does not have two dimensions."
   return $ Transpose arrexp' pos
 
-checkExp' (Map fun arrexp intype pos) = do
-  arrexp' <- checkExp arrexp
-  case peelArray 1 $ typeOf arrexp' of
-    Just et -> do
-      fun' <- checkLambda fun [et]
-      intype' <- checkAnnotation pos "input element" intype et
-      return (Map fun' arrexp' intype' pos)
-    _       -> bad $ TypeError (srclocOf arrexp) "Mapee expression does not return an array."
-
-checkExp' (Reduce fun startexp arrexp intype pos) = do
-  startexp' <- checkExp startexp
-  arrexp' <- checkExp arrexp
-  case peelArray 1 $ typeOf arrexp' of
-    Just inelemt -> do
-      inelemt' <- checkAnnotation pos "input element" intype inelemt
-      fun' <- checkLambda fun [typeOf startexp', inelemt']
-      when (typeOf startexp' /= typeOf fun') $
-        bad $ TypeError pos $ "Accumulator is of type " ++ ppType (typeOf startexp') ++ ", but reduce function returns type " ++ ppType (typeOf fun') ++ "."
-      return $ Reduce fun' startexp' arrexp' inelemt' pos
-    _ -> bad $ TypeError (srclocOf arrexp) "Type of expression is not an array"
-
 checkExp' (Zip arrexps pos) = do
   arrexps' <- mapM (checkExp . fst) arrexps
   inelemts <- mapM rowTypeM arrexps'
@@ -817,42 +773,55 @@ checkExp' (Unzip e _ pos) = do
     Just (Elem (Tuple ts)) -> return $ Unzip e' ts pos
     _ -> bad $ TypeError pos $ "Argument to unzip is not an array of tuples, but " ++ ppType (typeOf e') ++ "."
 
+checkExp' (Map fun arrexp intype pos) = do
+  (arrexp', arg@(rt, _, _)) <- checkSOACArrayArg arrexp
+  fun' <- checkLambda fun [arg]
+  intype' <- checkAnnotation pos "input element" intype rt
+  return (Map fun' arrexp' intype' pos)
+
+checkExp' (Reduce fun startexp arrexp intype pos) = do
+  (startexp', startarg) <- checkArg startexp
+  (arrexp', arrarg@(inrowt, _, _)) <- checkSOACArrayArg arrexp
+  inrowt' <- checkAnnotation pos "input element" intype inrowt
+  fun' <- checkLambda fun [startarg, arrarg]
+  when (typeOf startexp' /= typeOf fun') $
+    bad $ TypeError pos $ "Accumulator is of type " ++ ppType (typeOf startexp') ++ ", but reduce function returns type " ++ ppType (typeOf fun') ++ "."
+  return $ Reduce fun' startexp' arrexp' inrowt' pos
+
 checkExp' (Scan fun startexp arrexp intype pos) = do
-  startexp' <- checkExp startexp
-  arrexp' <- checkExp arrexp
-  case peelArray 1 $ typeOf arrexp' of
-    Just inelemt -> do
-      intype' <- checkAnnotation pos "element" intype inelemt
-      fun' <- checkLambda fun [intype', intype']
-      when (typeOf startexp' /= typeOf fun') $
-        bad $ TypeError pos $ "Initial value is of type " ++ ppType (typeOf startexp') ++ ", but scan function returns type " ++ ppType (typeOf fun') ++ "."
-      when (intype' /= typeOf fun') $
-        bad $ TypeError pos $ "Array element value is of type " ++ ppType intype' ++ ", but scan function returns type " ++ ppType (typeOf fun') ++ "."
-      return $ Scan fun' startexp' arrexp' intype' pos
-    _ -> bad $ TypeError (srclocOf arrexp) "Type of expression is not an array."
+  (startexp', startarg) <- checkArg startexp
+  (arrexp', arrarg@(inrowt, _, _)) <- checkSOACArrayArg arrexp
+  intype' <- checkAnnotation pos "element" intype inrowt
+  fun' <- checkLambda fun [startarg, arrarg]
+  when (typeOf startexp' /= typeOf fun') $
+    bad $ TypeError pos $ "Initial value is of type " ++ ppType (typeOf startexp') ++ ", but scan function returns type " ++ ppType (typeOf fun') ++ "."
+  when (intype' /= typeOf fun') $
+    bad $ TypeError pos $ "Array element value is of type " ++ ppType intype' ++ ", but scan function returns type " ++ ppType (typeOf fun') ++ "."
+  return $ Scan fun' startexp' arrexp' intype' pos
 
 checkExp' (Filter fun arrexp rowtype pos) = do
-  arrexp' <- checkExp arrexp
-  inelemt <- rowTypeM arrexp'
-  rowtype' <- checkAnnotation pos "row" rowtype inelemt
-  fun' <- checkLambda fun [inelemt]
+  (arrexp', arrarg@(rowelemt, _, _)) <- checkSOACArrayArg arrexp
+  rowtype' <- checkAnnotation pos "row" rowtype rowelemt
+  fun' <- checkLambda fun [arrarg]
   when (typeOf fun' /= Elem Bool) $
     bad $ TypeError pos "Filter function does not return bool."
   return $ Filter fun' arrexp' rowtype' pos
 
 checkExp' (Mapall fun arrexp pos) = do
-  arrexp' <- checkExp arrexp
-  fun' <- checkLambda fun [Elem $ elemType $ typeOf arrexp']
+  (arrexp', (_, dflow, argloc)) <- checkSOACArrayArg arrexp
+  let arg = (Elem $ elemType $ typeOf arrexp',
+             dflow { usageAliasing = mempty },
+             argloc)
+  fun' <- checkLambda fun [arg]
   return $ Mapall fun' arrexp' pos
 
 checkExp' (Redomap redfun mapfun accexp arrexp intype pos) = do
-  accexp' <- checkExp accexp
-  arrexp' <- checkExp arrexp
-  et <- rowTypeM arrexp'
-  mapfun' <- checkLambda mapfun [et]
-  redfun' <- checkLambda redfun [typeOf accexp', typeOf mapfun']
+  (accexp', accarg) <- checkArg accexp
+  (arrexp', arrarg@(rt, _, _)) <- checkSOACArrayArg arrexp
+  (mapfun', maparg) <- checkLambdaArg mapfun [arrarg]
+  redfun' <- checkLambda redfun [accarg, maparg]
   _ <- require [typeOf redfun'] accexp'
-  intype' <- checkAnnotation pos "input element" intype et
+  intype' <- checkAnnotation pos "input element" intype rt
   return $ Redomap redfun' mapfun' accexp' arrexp' intype' pos
 
 checkExp' (Split splitexp arrexp intype pos) = do
@@ -902,130 +871,113 @@ checkExp' (DoLoop mergepat mergeexp (Ident loopvar _ _)
     return $ DoLoop mergepat' mergeexp' (Ident loopvar (Elem Int) pos) boundexp' loopbody'' letbody' pos
 
 
-
 ----------------------------------------------
 ---- BEGIN Cosmin added SOAC2 combinators ----
 ----------------------------------------------
-checkExp' (Map2 fun arrexp intype pos) = do
-  arrexp' <- mapM checkExp arrexp
-  ineltps <- mapM (soac2ElemType pos . typeOf) arrexp'
-  ineltp  <- soac2ArgType pos "Map2" ineltps
-  fun'    <- checkLambda fun ineltps
+checkExp' (Map2 fun arrexps intype pos) = do
+  (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
+  ineltp  <- soac2ArgType pos "Map2" $ map argType arrargs
+  fun'    <- checkLambda fun arrargs
   intype' <- checkAnnotation pos "input element" intype ineltp
-  return $ Map2 fun' arrexp' intype' pos
+  return $ Map2 fun' arrexps' intype' pos
 
 checkExp' (Reduce2 fun startexp arrexp intype pos) = do
-  startexp' <- checkExp startexp
-  arrexp'   <- mapM checkExp arrexp
-  ineltps   <- mapM (soac2ElemType pos . typeOf) arrexp'
-  ineltp    <- soac2ArgType pos "Reduce2" ineltps
+  (startexp', startarg) <- checkArg startexp
+  (arrexp', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexp
+  ineltp  <- soac2ArgType pos "Reduce2" $ map argType arrargs
   intype' <- checkAnnotation pos "input element" intype ineltp
-  fun'    <- checkLambda fun $ case typeOf startexp' of
-                                 Elem (Tuple ts) -> ts ++ ineltps
-                                 t               -> t : ineltps
+  startarg' <- splitTupleArg startarg
+  fun'    <- checkLambda fun $ startarg' ++ arrargs
   when (typeOf startexp' /= typeOf fun') $
         bad $ TypeError pos $ "Accumulator is of type " ++ ppType (typeOf startexp') ++
                               ", but reduce function returns type " ++ ppType (typeOf fun') ++ "."
   return $ Reduce2 fun' startexp' arrexp' intype' pos
 
-checkExp' (Scan2 fun startexp arrexp intype pos) = do
-  startexp' <- checkExp startexp
-  arrexp'   <- mapM checkExp arrexp
-
-  --inelemt   <- soac2ElemType $ typeOf arrexp'
-  ineltps   <- mapM (soac2ElemType pos . typeOf) arrexp'
-  inelemt   <- soac2ArgType pos "Scan2" ineltps
+checkExp' (Scan2 fun startexp arrexps intype pos) = do
+  (startexp', startarg) <- checkArg startexp
+  startarg' <- splitTupleArg startarg
+  (arrexps', arrargs)   <- unzip <$> mapM checkSOACArrayArg arrexps
+  inelemt   <- soac2ArgType pos "Scan2" $ map argType arrargs
   intype'   <- checkAnnotation pos "element" intype inelemt
-  fun'      <- checkLambda fun (ineltps ++ ineltps)
+  fun'      <- checkLambda fun $ startarg' ++ startarg'
   when (typeOf startexp' /= typeOf fun') $
     bad $ TypeError pos $ "Initial value is of type " ++ ppType (typeOf startexp') ++
                           ", but scan function returns type " ++ ppType (typeOf fun') ++ "."
   when (intype' /= typeOf fun') $
     bad $ TypeError pos $ "Array element value is of type " ++ ppType intype' ++
                           ", but scan function returns type " ++ ppType (typeOf fun') ++ "."
-  return $ Scan2 fun' startexp' arrexp' intype' pos
+  return $ Scan2 fun' startexp' arrexps' intype' pos
 
-checkExp' (Filter2 fun arrexp pos) = do
-  arrexp' <- mapM checkExp arrexp
-  ineltps   <- mapM (soac2ElemType pos . typeOf) arrexp'
-  fun' <- checkLambda fun ineltps
+checkExp' (Filter2 fun arrexps pos) = do
+  (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
+  fun'     <- checkLambda fun arrargs
   when (typeOf fun' /= Elem Bool) $
     bad $ TypeError pos "Filter function does not return bool."
-  return $ Filter2 fun' arrexp' pos
+  return $ Filter2 fun' arrexps' pos
 
-checkExp' (Mapall2 fun arrexp pos) = do
-  arrexp' <- mapM checkExp arrexp
-  let arrtps = map typeOf arrexp'
+checkExp' (Mapall2 fun arrexps pos) = do
+  (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
 
-  _ <- mapM (soac2ElemType pos) arrtps
-  ineltps <- case arrtps of
-               []   -> bad $ TypeError pos "Empty tuple given to Mapall2"
-               [t]  -> return [Elem $ elemType t]
-               t:ts -> let mindim = foldl min (arrayDims t) $ map arrayDims ts
-                       in case mapM (peelArray mindim) $ t:ts of
-                            Nothing  -> bad $ TypeError pos "mindim wrong in Mapall2"
-                            Just ts' -> return ts'
+  arrargs' <-
+    case arrargs of
+      []   -> bad $ TypeError pos "Empty tuple given to Mapall2"
+      a:as ->
+        let mindim = foldl min (arrayDims $ argType a) $
+                     map (arrayDims . argType) as
+        in forM (a:as) $ \(t, dflow, argloc) ->
+             case peelArray mindim t of
+               Nothing -> bad $ TypeError argloc "Array of smaller rank than others in mapall2"
+               Just t' -> return (t', dflow { usageAliasing = mempty }, argloc)
 
-  fun' <- checkLambda fun ineltps
-  return $ Mapall2 fun' arrexp' pos
+  fun' <- checkLambda fun arrargs'
+  return $ Mapall2 fun' arrexps' pos
 
-checkExp' (Redomap2 redfun mapfun accexp arrexp intype pos) = do
-  accexp' <- checkExp accexp
-  arrexp' <- mapM checkExp arrexp
-  ets <- mapM (soac2ElemType pos . typeOf) arrexp'
-  et <- soac2ArgType pos "Redomap2" ets
-  mapfun' <- checkLambda mapfun ets
-  let acct = case typeOf accexp' of
-               Elem (Tuple ts) -> ts
-               t               -> [t]
-  redfun' <- checkLambda redfun $
-             case typeOf mapfun' of
-               Elem (Tuple ts) -> acct ++ ts
-               t               -> acct ++ [t]
+checkExp' (Redomap2 redfun mapfun accexp arrexps intype pos) = do
+  (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
+  (mapfun', maparg) <- checkLambdaArg mapfun arrargs
+
+  (accexp', accarg) <- checkArg accexp
+  accarg' <- splitTupleArg accarg
+  maparg' <- splitTupleArg maparg
+  redfun' <- checkLambda redfun $ accarg' ++ maparg'
   _ <- require [typeOf redfun'] accexp'
-  intype' <- checkAnnotation pos "input element" intype et
-  return $ Redomap2 redfun' mapfun' accexp' arrexp' intype' pos
 
----------------------
---- SOAC2 HELPERS ---
----------------------
+  et <- soac2ArgType pos "Redomap2" $ map argType arrargs
+  intype' <- checkAnnotation pos "input element" intype et
+  return $ Redomap2 redfun' mapfun' accexp' arrexps' intype' pos
+
+soacArrayArg :: Arg vn -> TypeM vn (Arg vn)
+soacArrayArg (t, dflow, argloc) =
+  case peelArray 1 t of
+    Nothing -> bad $ TypeError argloc "SOAC argument is not an array"
+    Just rt ->
+      let dflow' | basicType rt = dflow { usageAliasing = mempty }
+                 | otherwise    = dflow
+      in return (rt, dflow', argloc)
+
+checkSOACArrayArg :: (TypeBox tf, VarName vn) =>
+                     TaggedExp tf vn -> TypeM vn (TaggedExp Type vn, Arg vn)
+checkSOACArrayArg e = do
+  (e', arg) <- checkArg e
+  arg' <- soacArrayArg arg
+  return (e', arg')
+
+splitTupleArg :: VarName vn => Arg vn -> TypeM vn [Arg vn]
+splitTupleArg (Elem (Tuple ts), dflow, loc) = do
+  maybeCheckOccurences $ usageOccurences dflow
+  liftM concat . mapM splitTupleArg $
+        case usageAliasing dflow of
+          TupleAlias alss ->
+            [ (t, mempty { usageAliasing = als }, loc)
+                | (t, als) <- zip ts alss ]
+          als -> [ (t, mempty { usageAliasing = als }, loc)
+                     | t <- ts ]
+splitTupleArg arg = return [arg]
 
 soac2ArgType :: SrcLoc -> String -> [Type] -> TypeM vn Type
 soac2ArgType loc op [] = bad $ TypeError loc $ "Empty tuple given to " ++ op
 soac2ArgType _ _ [et] = return et
 soac2ArgType _ _ ets = return $ Elem $ Tuple ets
-
-soac2ElemType :: SrcLoc -> Type -> TypeM vn Type
-soac2ElemType loc tp@(Array {}) =
-    getTupArrElemType loc tp
-soac2ElemType loc (Elem (Tuple tps)) = do
-    tps' <- mapM (getTupArrElemType loc) tps
-    return $ Elem $ Tuple tps'
-soac2ElemType loc tp =
-    bad $ TypeError loc
-                    ("In TypeChecker, soac2ElemType: "
-                     ++" input type not a tuple/array: "++ppType tp)
-
-getTupArrElemType :: SrcLoc -> Type -> TypeM vn Type
-getTupArrElemType loc tp =
-    case peelArray 1 tp of
-        Just eltp ->
-            if hasInnerTuple eltp
-            then bad $ TypeError loc ("In TypeChecker, soac2, getTupArrElemType: "
-                                      ++"array elem type has an inner tuple: "++ppType eltp)
-            else return eltp
-        _ -> bad $ TypeError loc
-                             ("In TypeChecker, soac2, getTupArrElemType: "
-                              ++" input type not an array: "++ppType tp)
-    where
-        hasInnerTuple :: Type -> Bool
-        hasInnerTuple (Elem (Tuple {})) = True
-        hasInnerTuple (Array etp _ _)   = hasInnerTuple $ Elem etp
-        hasInnerTuple _                 = False
-
---------------------------------------
----- END Cosmin SOAC2 combinators ----
---------------------------------------
 
 checkLiteral :: SrcLoc -> Value -> TypeM vn Value
 checkLiteral _ (IntVal k) = return $ IntVal k
@@ -1140,10 +1092,51 @@ validApply :: [Type] -> [Type] -> Bool
 validApply expected got =
   length got == length expected && all id (zipWith subtypeOf got expected)
 
-checkApply :: Maybe Name -> [Type] -> [Type] -> SrcLoc -> TypeM vn ()
-checkApply fname expected got loc =
-  unless (validApply expected got) $
-  bad $ ParameterMismatch fname loc (Right expected) got
+type Arg vn = (Type, Dataflow vn, SrcLoc)
+
+argType :: Arg vn -> Type
+argType (t, _, _) = t
+
+checkArg :: (TypeBox tf, VarName vn) =>
+            TaggedExp tf vn -> TypeM vn (TaggedExp Type vn, Arg vn)
+checkArg arg = do (arg', dflow) <- collectDataflow $ checkExp arg
+                  return (arg', (typeOf arg', dflow, srclocOf arg'))
+
+checkLambdaArg :: (TypeBox ty, VarName vn) =>
+               TaggedLambda ty vn -> [Arg vn] -> TypeM vn (TaggedLambda Type vn, Arg vn)
+checkLambdaArg lam args = do
+  (lam', dflow) <- collectDataflow $ checkLambda lam args
+  return (lam', (typeOf lam', dflow, srclocOf lam'))
+
+checkFuncall :: VarName vn =>
+                Maybe Name -> SrcLoc -> [Type] -> Type -> [Arg vn] -> TypeM vn ()
+checkFuncall fname loc paramtypes rettype args = do
+  let argts = [ t | (t, _, _) <- args ]
+
+  unless (validApply paramtypes argts) $
+    bad $ ParameterMismatch fname loc (Right paramtypes) argts
+
+  forM_ (zip paramtypes args) $ \(paramt, (_, dflow, argloc)) -> do
+    maybeCheckOccurences $ usageOccurences dflow
+    let occurs = consumeArg argloc paramt $ usageAliasing dflow
+        als = maskAliasing rettype $
+              VarAlias $ aliased $ usageAliasing dflow
+    tell $ mempty
+           { usageAliasing = als
+           , usageOccurences = usageOccurences dflow
+                               `seqOccurences` occurs }
+  where -- Check if an argument of the given type consumes anything.
+        consumes (Array _ _ Unique) = True
+        consumes (Elem (Tuple ets)) = any consumes ets
+        consumes _ = False
+
+        -- Create usage information, given argument type and aliasing
+        -- information.
+        consumeArg argloc (Elem (Tuple ets)) (TupleAlias alss) =
+          concat $ zipWith (consumeArg argloc) ets alss
+        consumeArg argloc t als
+          | consumes t = [consumption (aliased als) argloc]
+          | otherwise = []
 
 -- | If the return type is unique, we assume that the value does not
 -- alias the parameters.
@@ -1159,33 +1152,30 @@ maskAliasing t als
   | otherwise = als
 
 checkLambda :: (TypeBox ty, VarName vn) =>
-               TaggedLambda ty vn -> [Type] -> TypeM vn (TaggedLambda Type vn)
+               TaggedLambda ty vn -> [Arg vn] -> TypeM vn (TaggedLambda Type vn)
 checkLambda (AnonymFun params body ret pos) args = do
   (_, ret', params', body', _) <-
     checkFun (nameFromString "<anonymous>", ret, params, body, pos)
   case () of
     _ | length params' == length args -> do
-          checkApply Nothing (map identType params') args pos
+          checkFuncall Nothing pos (map identType params') ret' args
           return $ AnonymFun params body' ret' pos
-      | [t@(Elem (Tuple args'))] <- args,
-        validApply (map identType params) args',
-        [Ident pname _ _] <- take 1 params ->
+      | [(Elem (Tuple ets), _, _)] <- args,
+        validApply (map identType params) ets -> do
           -- The function expects N parmeters, but the argument is a
           -- single N-tuple whose types match the parameters.
-          -- Generate a shim to make it fit.  We cleverly reuse the
-          -- first parameter name, as it is guaranteed that it will
-          -- not shadow anything.
-          let tupparam = (Ident pname t pos)
-              tupfun = AnonymFun [tupparam] tuplet ret pos
+          -- Generate a shim to make it fit.
+          tupparam <- newIdent "tup_shim" (Elem (Tuple $ map identType params)) pos
+          let tupfun = AnonymFun [tupparam] tuplet ret pos
               tuplet = LetPat (TupId (map Id params) pos) (Var tupparam) body' pos
-          in checkLambda tupfun args
+          checkLambda tupfun args
       | otherwise -> bad $ TypeError pos $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
-checkLambda (CurryFun fname [] rettype pos) [arg]
+checkLambda (CurryFun fname [] rettype pos) [arg@(argt, _, _)]
   | "op ~" <- nameToString fname = do
-  rettype' <- checkAnnotation pos "return" rettype arg
-  var <- newIdent "x" arg pos
-  checkLambda (AnonymFun [var] (Negate (Var var) arg pos) rettype' pos) [arg]
+  rettype' <- checkAnnotation pos "return" rettype argt
+  var <- newIdent "x" argt pos
+  checkLambda (AnonymFun [var] (Negate (Var var) argt pos) rettype' pos) [arg]
 
 checkLambda (CurryFun opfun curryargexps rettype pos) args
   | Just op <- lookup (nameToString opfun) ops =
@@ -1193,15 +1183,14 @@ checkLambda (CurryFun opfun curryargexps rettype pos) args
   where ops = map (\op -> ("op " ++ opStr op, op)) [minBound..maxBound]
 
 checkLambda (CurryFun fname curryargexps rettype pos) args = do
-  curryargexps' <- mapM checkExp curryargexps
-  let curryargexpts = map typeOf curryargexps'
+  (curryargexps', curryargs) <- unzip <$> mapM checkArg curryargexps
   bnd <- asks $ M.lookup fname . envFtable
   case bnd of
     Nothing -> bad $ UnknownFunctionError fname pos
     Just (rt, paramtypes) -> do
       rettype' <- checkAnnotation pos "return" rettype rt
       case () of
-        _ | [tupt@(Elem (Tuple ets))] <- args,
+        _ | [(tupt@(Elem (Tuple ets)), _, _)] <- args,
             validApply ets paramtypes -> do
               -- Same shimming as in the case for anonymous functions,
               -- although we don't have to worry about name shadowing
@@ -1217,15 +1206,16 @@ checkLambda (CurryFun fname curryargexps rettype pos) args = do
               case find (unique . snd) $ zip curryargexps paramtypes of
                 Just (e, _) -> bad $ CurriedConsumption fname $ srclocOf e
                 _           -> return ()
-              checkApply Nothing paramtypes (curryargexpts++args) pos
+              checkFuncall Nothing pos paramtypes rt (curryargs++args)
               return $ CurryFun fname curryargexps' rettype' pos
 
 checkPolyLambdaOp :: (TypeBox ty, VarName vn) =>
-                     BinOp -> [TaggedExp ty vn] -> ty -> [Type] -> SrcLoc
+                     BinOp -> [TaggedExp ty vn] -> ty -> [Arg vn] -> SrcLoc
                   -> TypeM vn (TaggedLambda Type vn)
 checkPolyLambdaOp op curryargexps rettype args pos = do
   curryargexpts <- map typeOf <$> mapM checkExp curryargexps
-  tp <- case curryargexpts ++ args of
+  let argts = [ argt | (argt, _, _) <- args ]
+  tp <- case curryargexpts ++ argts of
           [t1, t2] | t1 == t2 -> return t1
           [Elem (Tuple [t1,t2])] | t1 == t2 -> return t1 -- For autoshimming.
           l -> bad $ ParameterMismatch (Just fname) pos (Left 2) l
