@@ -1,4 +1,10 @@
 {-# LANGUAGE QuasiQuotes, GeneralizedNewtypeDeriving #-}
+-- | C code generator.  This module can convert a well-typed L0
+-- program to an equivalent C program.  It is assumed that the L0
+-- program does not contain any arrays of tuples (use
+-- "L0C.TupleTransform") or SOACs (use "L0C.FirstOrderTransform").
+-- The C code is strictly sequential and leaks memory like a sieve, so
+-- it's not very useful yet.
 module L0C.CCodeGen (compileProg) where
 
 import Control.Applicative

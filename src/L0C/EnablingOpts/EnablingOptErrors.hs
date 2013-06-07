@@ -1,12 +1,12 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, ScopedTypeVariables #-}
-
+-- | Common error definition for all the enabling optimisation submodules.
 module L0C.EnablingOpts.EnablingOptErrors ( EnablingOptError(..) )
   where
   
 import Data.Loc
 import L0C.L0
  
--- | Information about an error during type checking.  The 'Show'
+-- | Information about an error during enabling optimisations.  The 'Show'
 -- instance for this type produces a human-readable description.
 data EnablingOptError = EnablingOptError SrcLoc String
                       -- ^ A general error happened at the given position and
