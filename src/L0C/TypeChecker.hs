@@ -63,7 +63,7 @@ data TypeError vn = TypeError SrcLoc String
                   -- ^ A variable was attempted used after being
                   -- consumed.  The last location is the point of
                   -- consumption.
-                  | IndexingError Int Int SrcLoc
+                  | IndexingError vn Int Int SrcLoc
                   -- ^ Too many indices provided.  The first integer is
                   -- the number of dimensions in the array being
                   -- indexed.
@@ -133,8 +133,9 @@ instance VarName vn => Show (TypeError vn) where
   show (UseAfterConsume name rloc wloc) =
     "Variable " ++ textual name ++ " used at " ++ locStr rloc ++
     ", but it was consumed at " ++ locStr wloc ++ ".  (Possibly through aliasing)"
-  show (IndexingError dims got pos) =
-    show got ++ " indices given, but type of expression at " ++ locStr pos ++
+  show (IndexingError name dims got pos) =
+    show got ++ " indices given at " ++ locStr pos ++
+    ", but type of variable " ++ textual name ++
     " has " ++ show dims ++ " dimension(s)."
   show (BadAnnotation loc desc expected got) =
     "Annotation of \"" ++ desc ++ "\" type of expression at " ++
@@ -715,7 +716,8 @@ checkExp' (LetWith (Ident dest destt destpos) src idxes ve body pos) = do
     bad $ TypeError pos $ "Source '" ++ textual (baseName $ identName src) ++ "' is not unique"
 
   case peelArray (length idxes) (identType src') of
-    Nothing -> bad $ IndexingError (arrayDims $ identType src') (length idxes) (srclocOf src)
+    Nothing -> bad $ IndexingError (baseName $ identName src)
+                     (arrayDims $ identType src') (length idxes) (srclocOf src)
     Just elemt ->
       sequentially (require [elemt] =<< checkExp ve) $ \ve' dflow -> do
         when (identName src `S.member` aliased (usageAliasing dflow)) $
@@ -729,7 +731,8 @@ checkExp' (Index ident idxes restype pos) = do
   observe ident'
   vt <- lookupVar (identName ident') pos
   case peelArray (length idxes) vt of
-    Nothing -> bad $ IndexingError (arrayDims vt) (length idxes) pos
+    Nothing -> bad $ IndexingError (baseName $ identName ident)
+                     (arrayDims vt) (length idxes) pos
     Just et -> do
       restype' <- checkAnnotation pos "indexing result" restype et
       idxes' <- mapM (require [Elem Int] <=< checkExp) idxes
