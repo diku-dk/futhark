@@ -22,6 +22,7 @@ import Language.L0.Attributes
 import Language.L0.Parser.Parser
 import Language.L0.Parser.Lexer
 
+-- | A parse error.  Use 'show' to get a human-readable description.
 data ParseError = ParseError String
 
 instance Show ParseError where

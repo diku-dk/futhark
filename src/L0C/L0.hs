@@ -14,6 +14,9 @@ module L0C.L0
   , VName
 
   -- * Type aliases
+  --
+  -- | These types contain full type information and use tagged
+  -- 'VName's for efficient symbol tables.
   , Ident
   , Exp
   , Lambda
@@ -40,8 +43,11 @@ import Language.L0.Traversals
 newtype ID vn = ID (vn, Int)
   deriving (Show)
 
+-- | Alias for a tagged 'Name'.  This is used as the name
+-- representation in most the compiler.
 type VName = ID Name
 
+-- | Return the name contained in the 'ID'.
 baseName :: ID vn -> vn
 baseName (ID (vn, _)) = vn
 
@@ -54,10 +60,13 @@ instance Ord (ID vn) where
 instance Pretty vn => Pretty (ID vn) where
   ppr (ID (vn, i)) = ppr vn <> text "_" <> text (show i)
 
+-- | A type that can be used for representing variable names.  These
+-- must support tagging, as well as conversion to a textual format.
 class (Ord vn, Show vn, Pretty vn) => VarName vn where
   -- | Set the numeric tag associated with this name.
   setID :: vn -> Int -> vn
-  -- | Identity-preserving prettyprinting of a name.
+  -- | Identity-preserving prettyprinting of a name.  This means that
+  -- if and only if @x == y@, @textual x == textual y@.
   textual :: vn -> String
   -- | Create a name based on a string and a numeric tag.
   varName :: String -> Maybe Int -> vn
@@ -77,14 +86,20 @@ instance VarName Name where
 stripSuffix :: T.Text -> T.Text
 stripSuffix = T.dropWhileEnd (=='_') . T.dropWhileEnd isDigit
 
+-- | An identifier with type information.
 type Ident = IdentBase Type VName
 
+-- | An expression with type information.
 type Exp = ExpBase Type VName
 
+-- | A lambda with type information.
 type Lambda = LambdaBase Type VName
 
+-- | A pattern with type information.
 type TupIdent = TupIdentBase Type VName
 
+-- | An function declaration with type information.
 type FunDec = FunDecBase Type VName
 
+-- | An L0 program with type information.
 type Prog = ProgBase Type VName

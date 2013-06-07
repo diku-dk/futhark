@@ -155,7 +155,8 @@ hotransform =
        , passOp = either (throwError . show) return . highOrdTransf 
        }
 
-
+-- | Entry point.  Non-interactive, except when reading interpreter
+-- input from standard input.
 main :: IO ()
 main = do args <- getArgs
           case getOpt RequireOrder commandLineOptions args of
