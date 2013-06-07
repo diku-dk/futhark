@@ -1,3 +1,8 @@
+-- | Debugging L0 programs is done by inserting calls to special
+-- functions (currently only @trace@).  These are specially handled in
+-- the type checker and interpreter, but not necessarily by other
+-- transformations, so it may be necessary to remove them before
+-- running optimisation passes.
 module L0C.Untrace
   ( untraceProg )
   where
@@ -5,9 +10,6 @@ module L0C.Untrace
 import L0C.L0
 
 -- | Remove all special debugging function calls from the program.
--- This is necessary for most optimisation modules to work properly,
--- as the debugging functions are special-cased only in the type
--- checker and interpreter.
 untraceProg :: ProgBase ty vn -> ProgBase ty vn
 untraceProg = Prog . map untraceFun . progFunctions
 
