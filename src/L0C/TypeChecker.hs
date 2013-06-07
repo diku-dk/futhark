@@ -712,7 +712,7 @@ checkExp' (LetWith (Ident dest destt destpos) src idxes ve body pos) = do
   let dest' = Ident dest destt' destpos
 
   unless (unique src' || basicType (typeOf src')) $
-    bad $ TypeError pos $ "Source '" ++ textual (identName src) ++ "' is not unique"
+    bad $ TypeError pos $ "Source '" ++ textual (baseName $ identName src) ++ "' is not unique"
 
   case peelArray (length idxes) (identType src') of
     Nothing -> bad $ IndexingError (arrayDims $ identType src') (length idxes) (srclocOf src)
