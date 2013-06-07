@@ -1,31 +1,48 @@
 {-# LANGUAGE FlexibleInstances #-}
+-- | This module provides various simple ways to query and manipulate
+-- fundamental L0 terms, such as types and values.  The intent is to
+-- keep "L0.Language.Syntax" simple, and put whatever embellishments
+-- we need here.
 module Language.L0.Attributes
   ( locStr
-  , subtypeOf
-  , similarTo
-  , uniqueness
-  , unique
   , TypeBox(..)
   , Typed(..)
-  , arrayDims
-  , arrayShape
-  , arraySize
-  , peelArray
-  , elemType
-  , rowType
-  , basicType
-  , arrayType
-  , arrayOf
-  , stripArray
-  , blankValue
-  , arrayVal
-  , emptyArray
-  , arrayString
-  , flattenArray
   , expToValue
   , funDecByName
 
+  -- * Queries on types
+  , basicType
+  , uniqueness
+  , unique
+  , subtypeOf
+  , similarTo
+
+  -- * Operations on types
+  , stripArray
+  , peelArray
+  , arrayOf
+  , arrayType
+  , elemType
+  , rowType
+
+  -- Queries on values
+  , arrayDims
+  , arrayShape
+  , arraySize
+  , arrayString
+
+
+  -- * Operations on values
+  , blankValue
+  , arrayVal
+  , emptyArray
+  , flattenArray
+
   -- * Type aliases
+
+  -- | Values of these types are produces by the parser.  They use
+  -- unadorned names and have no type information, apart from that
+  -- which is syntactically required.
   , UncheckedIdent
   , UncheckedExp
   , UncheckedLambda
@@ -42,6 +59,8 @@ import Data.Monoid
 
 import Language.L0.Syntax
 
+-- | A human-readable location string, of the form
+-- @filename:lineno:columnno@.
 locStr :: SrcLoc -> String
 locStr (SrcLoc NoLoc) = "unknown location"
 locStr (SrcLoc (Loc (Pos file line1 col1 _) (Pos _ line2 col2 _))) =
@@ -89,7 +108,9 @@ unique = (==Unique) . uniqueness
 -- | A type box provides a way to box a type, and possibly retrieve
 -- one.
 class (Eq ty, Ord ty, Show ty) => TypeBox ty where
+  -- | Try to retrieve a type from the type box.
   unboxType :: ty -> Maybe Type
+  -- | Put a type in the box.
   boxType :: Type -> ty
 
 instance TypeBox () where
@@ -100,8 +121,9 @@ instance TypeBox Type where
   unboxType = Just
   boxType = id
 
--- | A typed value is one from which we can retrieve a type.
+-- | A typed value is one that represents an L0 term with an L0 type.
 class Typed v where
+  -- | The type of the term.
   typeOf :: v -> Type
 
 instance Typed Type where
@@ -140,18 +162,26 @@ basicType _ = True
 uniqueOrBasic :: Typed t => t -> Bool
 uniqueOrBasic x = basicType (typeOf x) || unique x
 
--- | @array n t@ is the type of @n@-dimensional arrays having @t@ as
--- the base type.  If @t@ is itself an m-dimensional array, the result
--- is an @n+m@-dimensional array with the same base type as @t@
-arrayType :: Int -> Type -> Uniqueness -> Type
-arrayType 0 t _ = t
-arrayType n t u = arrayOf t ds u
-  where ds = replicate n Nothing
-
+-- | @arrayOf t s u@ constructs an array type.  The convenience
+-- compared to using the 'Array' constructor directly is that @t@ can
+-- itself be an array.  If @t@ is an @n@-dimensional array, and @s@ is
+-- a list of length @n@, the resulting type is of an @n+m@ dimensions.
+-- The uniqueness of the new array will be @u@, no matter the
+-- uniqueness of @t@.
 arrayOf :: Type -> ArraySize -> Uniqueness -> Type
 arrayOf (Array et size1 _) size2 u =
   Array et (size2 ++ size1) u
 arrayOf (Elem et) size u = Array et size u
+
+-- | @array n t@ is the type of @n@-dimensional arrays having @t@ as
+-- the base type.  If @t@ is itself an m-dimensional array, the result
+-- is an @n+m@-dimensional array with the same base type as @t@.  If
+-- you need to specify size information for the array, use 'arrayOf'
+-- instead.
+arrayType :: Int -> Type -> Uniqueness -> Type
+arrayType 0 t _ = t
+arrayType n t u = arrayOf t ds u
+  where ds = replicate n Nothing
 
 -- | @stripArray n t@ removes the @n@ outermost layers of the array.
 -- Essentially, it is the type of indexing an array of type @t@ with
@@ -212,6 +242,7 @@ arraySize t = case arrayShape t of
 arrayVal :: [Value] -> Type -> Value
 arrayVal vs = ArrayVal $ listArray (0, length vs-1) vs
 
+-- | An empty array with the given row type.
 emptyArray :: Type -> Value
 emptyArray = arrayVal []
 
@@ -327,14 +358,20 @@ instance Typed (LambdaBase Type vn) where
 funDecByName :: Name -> ProgBase ty vn -> Maybe (FunDecBase ty vn)
 funDecByName fname = find (\(fname',_,_,_,_) -> fname == fname') . progFunctions
 
+-- | An identifier with no type annotations.
 type UncheckedIdent = IdentBase () Name
 
+-- | An expression with no type annotations.
 type UncheckedExp = ExpBase () Name
 
+-- | A lambda with no type annotations.
 type UncheckedLambda = LambdaBase () Name
 
+-- | A pattern with no type annotations.
 type UncheckedTupIdent = TupIdentBase () Name
 
+-- | A function declaration with no type annotations.
 type UncheckedFunDec = FunDecBase () Name
 
+-- | An L0 program with no type annotations.
 type UncheckedProg = ProgBase () Name
