@@ -106,7 +106,7 @@ instance (Eq vn, Pretty vn) => Pretty (ExpBase ty vn) where
   pprPrec _ (Copy e _) = text "copy" <> parens (ppr e)
   pprPrec _ (DoLoop pat initexp i bound loopbody letbody _) =
     text "loop" <+> parens (ppr pat <+> equals <+> ppr initexp) <+>
-    equals <+> text "for" <+> ppr i <+> langle <+> ppr bound <+> text "do" </>
+    equals <+> text "for" <+> ppr i <+> text "<" <+> ppr bound <+> text "do" </>
     indent 2 (ppr loopbody) <+> text "in" </>
     ppr letbody
   pprPrec _ (Map2 lam as _ _) = ppSOAC "map2" [lam] as
