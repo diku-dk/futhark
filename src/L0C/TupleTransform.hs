@@ -38,6 +38,7 @@ import Data.Loc
 import L0C.L0
 import L0C.FreshNames
 
+-- | Perform the tuple transformation on an entire program.
 transformProg :: Prog -> Prog
 transformProg prog =
   Prog $ runTransformM $ mapM transformFun $ progFunctions prog
@@ -70,6 +71,12 @@ transformElemType (Tuple elemts) =
   Tuple $ flattenTypes $ map transformType elemts
 transformElemType t = t
 
+-- | Perform the tuple transformation on a single type.
+--
+-- Example:
+--
+-- >>> transformType $ Elem $ Tuple [Elem $ Tuple [Elem Int, Elem Real], Elem Char]
+-- Elem (Tuple [Elem Int,Elem Int,Elem Real,Elem Real,Elem Char])
 transformType :: Type -> Type
 transformType (Array (Tuple elemts) size u) =
   Elem $ Tuple $ flattenTypes (map (transformType . arr) elemts)
