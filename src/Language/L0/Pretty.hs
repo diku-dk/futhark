@@ -111,7 +111,7 @@ instance (Eq vn, Pretty vn) => Pretty (ExpBase ty vn) where
     ppr letbody
   pprPrec _ (Map2 lam as _ _) = ppSOAC "map2" [lam] as
   pprPrec _ (Mapall2 lam as _) = ppSOAC "mapall2" [lam] as
-  pprPrec _ (Reduce2 lam e as _ _) = ppSOAC "reduce" [lam] $ e:as
+  pprPrec _ (Reduce2 lam e as _ _) = ppSOAC "reduce2" [lam] $ e:as
   pprPrec _ (Redomap2 redlam maplam e as _ _) =
     ppSOAC "redomap2" [redlam, maplam] $ e:as
   pprPrec _ (Scan2 lam e as _ _) = ppSOAC "scan2" [lam] $ e:as
