@@ -181,9 +181,11 @@ transformExp filtere@(Filter2 fun arrexps loc) =
       let branch = If fun' (intval 1) (intval 0) (Elem Int) loc
           indexin0 = index arr $ intval 0
           indexin = index arr iv
+          rowtype = case rowtypes of [t] -> t
+                                     _   -> Elem $ Tuple rowtypes
       mape <- transformExp $
               Map2 (AnonymFun xs branch (Elem Int) loc) (map Var arr)
-              (Elem $ Tuple rowtypes) loc
+              rowtype loc
       plus <- do
         (a,av) <- newVar loc "a" (Elem Int)
         (b,bv) <- newVar loc "b" (Elem Int)
@@ -194,8 +196,10 @@ transformExp filtere@(Filter2 fun arrexps loc) =
             indexiaend = indexia (sub1 nv)
             indexi = indexia iv
             indexim1 = indexia (sub1 iv)
-        newResultArray indexiaend (TupLit indexin0 loc) $ \res resv -> do
-          update <- letwith res (sub1 indexi) (TupLit indexin loc) resv
+            tup es = case es of [e] -> e
+                                _   -> TupLit es loc
+        newResultArray indexiaend (tup indexin0) $ \res resv -> do
+          update <- letwith res (sub1 indexi) (tup indexin) resv
           let loop = DoLoop (pattern res loc) resv i nv loopbody resv loc
               loopbody = If (Or (BinOp Equal iv (intval 0) (Elem Bool) loc)
                                 (And (BinOp Less (intval 0) iv (Elem Bool) loc)
