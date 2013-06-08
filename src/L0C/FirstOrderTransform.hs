@@ -156,9 +156,10 @@ transformExp (Reduce2 fun accexp arrexps _ loc) =
     return loop
 
 transformExp (Scan2 fun accexp arrexps _ loc) =
-  newReduction2 loc arrexps accexp $ \(arr, arrv) (acc, accv) (i, iv) -> do
+  newReduction2 loc arrexps accexp $ \(arr, arrv) (acc, _) (i, iv) -> do
     funcall <- transformLambda fun $ map Var acc ++ index arr iv
-    loopbody <- letwith arr iv funcall (TupLit (accv:map Var arr) loc)
+    loopbody <- letwith arr iv funcall $
+                TupLit (index arr iv++map Var arr) loc
     let looppat = case pattern acc loc of
                     Id k         -> TupId (Id k : map Id arr) loc
                     TupId pats _ -> TupId (pats ++ map Id arr) loc
