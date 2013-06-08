@@ -87,8 +87,8 @@ sameRepresentation :: Type -> Type -> Bool
 sameRepresentation (Elem (Tuple ets1)) (Elem (Tuple ets2))
   | length ets1 == length ets2 =
     and $ zipWith sameRepresentation ets1 ets2
-sameRepresentation (Array et1 _ _) (Array et2 _ _) =
-  sameRepresentation (Elem et1) (Elem et2)
+sameRepresentation (Array et1 ds1 _) (Array et2 ds2 _) =
+  length ds1 == length ds2 && sameRepresentation (Elem et1) (Elem et2)
 sameRepresentation t1 t2 = t1 == t2
 
 typeToCType :: Type -> CompilerM C.Type
