@@ -184,12 +184,6 @@ instance Monoid (Aliases vn) where
   as `mappend` TupleAlias ass =
     TupleAlias (map (mappend as) ass)
 
--- | Remove a variable from the alias set (presumably because it has
--- gone out of scope).
-unalias :: ID vn -> Aliases vn -> Aliases vn
-unalias name (VarAlias names) = VarAlias $ name `S.delete` names
-unalias name (TupleAlias alss) = TupleAlias $ map (unalias name) alss
-
 -- | All the variables represented in this aliasing.  Guaranteed not
 -- to contain duplicates.
 aliased :: Aliases vn -> S.Set (ID vn)
@@ -199,14 +193,6 @@ aliased (TupleAlias ass) = mconcat $ map aliased ass
 -- | Create an aliasing set given a list of names.
 varAlias :: [ID vn] -> Aliases vn
 varAlias = VarAlias . S.fromList
-
-substituteAliases :: Aliases vn -> M.Map (ID vn) (S.Set (ID vn)) -> Aliases vn
-substituteAliases (VarAlias names) m =
-  VarAlias $ let substs = names `S.intersection` S.fromList (M.keys m)
-             in (names S.\\ substs) `S.union`
-                  S.unions (mapMaybe (`M.lookup` m) $ S.toList substs)
-substituteAliases (TupleAlias alss) m =
-  TupleAlias $ map (`substituteAliases` m) alss
 
 -- | A tuple of a return type and a list of argument types.
 type FunBinding = (Type, [Type])
@@ -406,9 +392,8 @@ binding bnds = check . local (`bindVars` bnds)
           let name' = varAlias [name]
               inedges = aliased als
               update k (Bound tp' als')
-                | k `S.member` inedges = Bound tp' $ als'' <> name'
-                | otherwise            = Bound tp' als''
-                where als'' = unalias name als'
+                | k `S.member` inedges = Bound tp' $ als' <> name'
+                | otherwise            = Bound tp' als'
               update _ b = b
           in env { envVtable = M.insert name (Bound tp als) $
                                M.mapWithKey update $
@@ -423,16 +408,12 @@ binding bnds = check . local (`bindVars` bnds)
 
         -- Collect and remove all occurences in @bnds@.  Also remove
         -- these names from aliasing information, since they are now
-        -- out of scope.  We have to be careful to handle aliasing
-        -- properly, however.
+        -- out of scope.  This relies on the fact that no variables
+        -- shadow any other.
         collectOccurences m = pass $ do
           (x, usage) <- listen m
           let (relevant, rest) = split $ usageOccurences usage
-              substs = M.fromList [ (identName k, aliased als) | (k, als) <- bnds ]
-              newaliases = usageAliasing usage `substituteAliases` substs
-          return ((x, relevant),
-                  const $ usage { usageOccurences = rest
-                                , usageAliasing = newaliases })
+          return ((x, relevant), const $ usage { usageOccurences = rest })
           where split = unzip .
                         map (\occ ->
                              let (obs1, obs2) = S.partition (`elem` names) $ observed occ
