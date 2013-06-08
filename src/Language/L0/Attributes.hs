@@ -207,6 +207,7 @@ blankValue (Elem Real) = RealVal 0.0
 blankValue (Elem Bool) = LogVal False
 blankValue (Elem Char) = CharVal '\0'
 blankValue (Elem (Tuple ts)) = TupVal (map blankValue ts)
+blankValue (Array et [_] _) = arrayVal [] $ Elem et
 blankValue (Array et (_:ds) u) = arrayVal [] rt
   where rt = Array et ds u
 blankValue (Array et _ _) = arrayVal [] $ Elem et
