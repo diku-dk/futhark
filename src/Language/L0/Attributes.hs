@@ -226,10 +226,12 @@ instance Typed Value where
 -- | Return a list of the sizes of an array (the shape, in other
 -- terms).  For non-arrays, this is the empty list.  A two-dimensional
 -- array with five rows and three columns would return the list @[5,
--- 3]@.
+-- 3]@.  If an array has @n@ dimensions, the result is always a list
+-- of @n@ elements.
 arrayShape :: Value -> [Int]
-arrayShape (ArrayVal arr _)
+arrayShape (ArrayVal arr rt)
   | v:_ <- elems arr = snd (bounds arr) + 1 : arrayShape v
+  | otherwise = replicate (1 + arrayDims rt) 0
 arrayShape _ = []
 
 -- | Return the size of the first dimension of an array, or zero for
