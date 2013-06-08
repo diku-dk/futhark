@@ -24,6 +24,11 @@ tildes = map tilde
   where tilde '-' = '~'
         tilde c   = c
 
+-- | The document @'apply' ds@ separates @ds@ with commas and encloses them with
+-- parentheses.
+apply :: [Doc] -> Doc
+apply = encloseSep lparen rparen comma . map align
+
 instance Pretty Name where
   ppr (Name t) = fromText t
 
@@ -32,7 +37,7 @@ instance Pretty Value where
   ppr (CharVal c) = text $ show c
   ppr (LogVal b) = text $ show b
   ppr (RealVal x) = text $ tildes $ show x
-  ppr (TupVal vs) = tuple $ map ppr vs
+  ppr (TupVal vs) = apply $ map ppr vs
   ppr v@(ArrayVal a t)
     | Just s <- arrayString v = text $ show s
     | [] <- elems a = text "empty" <> parens (ppr t)
@@ -43,7 +48,7 @@ instance Pretty ElemType where
   ppr Char = text "char"
   ppr Bool = text "bool"
   ppr Real = text "real"
-  ppr (Tuple ets) = tuple $ map ppr ets
+  ppr (Tuple ets) = apply $ map ppr ets
 
 instance Pretty Type where
   ppr (Elem et) = ppr et
@@ -60,7 +65,7 @@ instance (Eq vn, Pretty vn) => Pretty (ExpBase ty vn) where
   ppr = pprPrec 0
   pprPrec _ (Var v) = ppr v
   pprPrec _ (Literal v _) = ppr v
-  pprPrec _ (TupLit es _) = tuple $ map ppr es
+  pprPrec _ (TupLit es _) = apply $ map ppr es
   pprPrec _ (ArrayLit es _ _) = braces $ commasep $ map ppr es
   pprPrec p (BinOp bop x y _ _) = ppBinOp p bop x y
   pprPrec p (And x y _) = ppBinOp p LogAnd x y
@@ -71,8 +76,8 @@ instance (Eq vn, Pretty vn) => Pretty (ExpBase ty vn) where
                              text "then" <+> align (ppr t) </>
                              text "else" <+> align (ppr f)
   pprPrec _ (Apply fname args _ _) = text (nameToString fname) <>
-                                     tuple (map (align . ppr) args)
-  pprPrec _ (LetPat pat e body _) = text "let" <+> align (ppr pat) <+>
+                                     apply (map (align . ppr) args)
+  pprPrec _ (LetPat pat e body _) = text "let" <+/> align (ppr pat)) <+>
                                     equals <+> align (ppr e) <+> text "in" </>
                                     ppr body
   pprPrec _ (LetWith dest src idxs ve body _)
@@ -88,9 +93,9 @@ instance (Eq vn, Pretty vn) => Pretty (ExpBase ty vn) where
   pprPrec _ (Iota e _) = text "iota" <> parens (ppr e)
   pprPrec _ (Size e _) = text "size" <> parens (ppr e)
   pprPrec _ (Replicate ne ve _) =
-    text "replicate" <> tuple [ppr ne, ppr ve]
+    text "replicate" <> apply [ppr ne, align (ppr ve)]
   pprPrec _ (Reshape shape e _) =
-    text "replicate" <> tuple [tuple (map ppr shape), ppr e]
+    text "replicate" <> apply [apply (map ppr shape), ppr e]
   pprPrec _ (Transpose e _) = text "transpose" <> parens (ppr e)
   pprPrec _ (Map lam a _ _) = ppSOAC "map" [lam] [a]
   pprPrec _ (Mapall lam a _) = ppSOAC "mapall" [lam] [a]
@@ -99,10 +104,10 @@ instance (Eq vn, Pretty vn) => Pretty (ExpBase ty vn) where
     ppSOAC "redomap" [redlam, maplam] [e, a]
   pprPrec _ (Scan lam e a _ _) = ppSOAC "scan" [lam] [e, a]
   pprPrec _ (Filter lam a _ _) = ppSOAC "filter" [lam] [a]
-  pprPrec _ (Zip es _) = text "zip" <> tuple (map (ppr . fst) es)
+  pprPrec _ (Zip es _) = text "zip" <> apply (map (ppr . fst) es)
   pprPrec _ (Unzip e _ _) = text "unzip" <> parens (ppr e)
-  pprPrec _ (Split e a _ _) = text "split" <> tuple [ppr e, ppr a]
-  pprPrec _ (Concat x y _) = text "concat" <> tuple [ppr x, ppr y]
+  pprPrec _ (Split e a _ _) = text "split" <> apply [ppr e, ppr a]
+  pprPrec _ (Concat x y _) = text "concat" <> apply [ppr x, ppr y]
   pprPrec _ (Copy e _) = text "copy" <> parens (ppr e)
   pprPrec _ (DoLoop pat initexp i bound loopbody letbody _) =
     text "loop" <+> parens (ppr pat <+> equals <+> ppr initexp) <+>
@@ -119,15 +124,15 @@ instance (Eq vn, Pretty vn) => Pretty (ExpBase ty vn) where
 
 instance (Eq vn, Pretty vn) => Pretty (TupIdentBase ty vn) where
   ppr (Id ident) = ppr ident
-  ppr (TupId pats _) = tuple $ map ppr pats
+  ppr (TupId pats _) = apply $ map ppr pats
 
 instance (Eq vn, Pretty vn) => Pretty (LambdaBase ty vn) where
   ppr (CurryFun fname [] _ _) = text $ nameToString fname
   ppr (CurryFun fname curryargs _ _) =
-    text (nameToString fname) <+> tuple (map ppr curryargs)
+    text (nameToString fname) <+> apply (map ppr curryargs)
   ppr (AnonymFun params body rettype _) =
     text "fn" <+> ppr rettype <+>
-    tuple (map ppParam params) <+>
+    apply (map ppParam params) <+>
     text "=>" <+> ppr body
 
 instance (Eq vn, Pretty vn) => Pretty (ProgBase ty vn) where
@@ -135,7 +140,7 @@ instance (Eq vn, Pretty vn) => Pretty (ProgBase ty vn) where
     where ppFun (name, rettype, args, body, _) =
             text "fun" <+> ppr rettype <+>
             text (nameToString name) <//>
-            tuple (map ppParam args) <+>
+            apply (map ppParam args) <+>
             equals </> indent 2 (ppr body)
 
 ppParam :: (Eq vn, Pretty ty, Pretty vn) => IdentBase ty vn -> Doc
@@ -164,7 +169,7 @@ ppBinOp p bop x y = parensIf (p > precedence bop) $
         precedence Pow = 6
 
 ppSOAC :: (Eq vn, Pretty vn) => String -> [LambdaBase ty vn] -> [ExpBase ty vn] -> Doc
-ppSOAC name [] es = text name <> tuple (map ppr es)
+ppSOAC name [] es = text name <> apply (map ppr es)
 ppSOAC name (fun:funs) es =
   text name <> parens (foldl ppfun (ppr fun) funs <> comma <//> commasep (map ppr es))
   where ppfun s fun' = s <//> comma <> ppr fun'
