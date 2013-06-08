@@ -376,7 +376,7 @@ compileValue place v@(ArrayVal _ rt) = do
   val <- new "ArrayVal"
   dt <- new "ArrayData"
   ct <- typeToCType $ typeOf v
-  cbt <- typeToCType rt
+  cbt <- typeToCType $ Elem $ elemType rt
   let asinit n = [C.cinit|$int:n|]
       dims = map asinit $ arrayShape v
       arrdef = [C.cedecl|$ty:ct $id:val = { $inits:dims, NULL };|]
