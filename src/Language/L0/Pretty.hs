@@ -78,7 +78,7 @@ instance (Eq vn, Pretty vn) => Pretty (ExpBase ty vn) where
   pprPrec _ (LetWith dest src idxs ve body _)
     | dest == src =
       text "let" <+> ppr dest <+> list (map ppr idxs) <+>
-      equals <+> ppr ve <+>
+      equals <+> align (ppr ve) <+>
       text "in" </> ppr body
     | otherwise =
       text "let" <+> ppr dest <+> equals <+> ppr src <+>
