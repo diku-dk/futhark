@@ -184,6 +184,12 @@ instance Monoid (Aliases vn) where
   as `mappend` TupleAlias ass =
     TupleAlias (map (mappend as) ass)
 
+-- | Remove a variable from the alias set (presumably because it has
+-- gone out of scope).
+unalias :: ID vn -> Aliases vn -> Aliases vn
+unalias name (VarAlias names) = VarAlias $ name `S.delete` names
+unalias name (TupleAlias alss) = TupleAlias $ map (unalias name) alss
+
 -- | All the variables represented in this aliasing.  Guaranteed not
 -- to contain duplicates.
 aliased :: Aliases vn -> S.Set (ID vn)
@@ -413,7 +419,9 @@ binding bnds = check . local (`bindVars` bnds)
         collectOccurences m = pass $ do
           (x, usage) <- listen m
           let (relevant, rest) = split $ usageOccurences usage
-          return ((x, relevant), const $ usage { usageOccurences = rest })
+              newaliases = foldr unalias (usageAliasing usage) names
+          return ((x, relevant), const $ usage { usageOccurences = rest
+                                               , usageAliasing = newaliases })
           where split = unzip .
                         map (\occ ->
                              let (obs1, obs2) = S.partition (`elem` names) $ observed occ
