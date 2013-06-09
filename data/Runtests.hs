@@ -7,6 +7,7 @@ import Control.Exception
 import Control.Monad
 
 import qualified Data.Set as S
+import Data.Char (isSpace)
 
 import System.Directory
 import System.Environment
@@ -16,7 +17,7 @@ import System.IO
 import System.Process
 
 l0flags :: String
-l0flags = "-frute"
+l0flags = "-utfe"
 
 -- | Number of concurrent l0c instances to run.
 concurrency :: Int
@@ -54,12 +55,15 @@ executeTest f inputf outputf = do
   expectedOutput <- readFile outputf
   case code of
     ExitSuccess
-      | output == expectedOutput -> return Success
+      | output `compareOutput` expectedOutput -> return Success
       | otherwise -> do
         writeFile expectedOutputf output
         return $ Failure $ outputf ++ " and " ++ expectedOutputf ++ " do not match."
     ExitFailure _ -> return $ Failure err
   where expectedOutputf = outputf `replaceExtension` "testout"
+
+compareOutput :: String -> String -> Bool
+compareOutput x y = filter (not . isSpace) x == filter (not . isSpace) y
 
 catching :: IO TestResult -> IO TestResult
 catching m = m `catch` save
