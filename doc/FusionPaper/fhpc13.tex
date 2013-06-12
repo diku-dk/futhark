@@ -198,7 +198,7 @@ a {\em functional} language, dubbed $\mathcal{L}_0$, supporting %with support fo
 the size of each dimension is constant at runtime:\\
 It is {\em functional} because we would rather invest compiler effort
 in exploiting high-level program invariants rather than in proving them.
-The common example in this sense is parallelism: {\tt map-reduce} 
+The common example here is parallelism: {\tt map-reduce} 
 constructs are inherently parallel, while Fortran-style \texttt{do} 
 loops require sophisticated analysis to decide parallelism. 
 Furthermore, such techniques~\cite{Blume94RangeTest,SUIF,CosPLDI} %there is solid evidence that such 
@@ -211,7 +211,7 @@ It is {\em nested} because our suite exhibits several layers of
 parallelism that cannot be exploited by flat parallelism in the style of 
 {\sc repa}~\cite{REPA}, e.g., several innermost {\tt scan} or 
 {\tt reduce} operations and at least one (semantically)
-sequential loop per benchmark.  
+sequential loop per benchmark.\\
 %
 Finally, it is {\em regular} because our suite does not require irregular 
 arrays in the sense of {\sc nesl}~\cite{BlellochCACM96NESL}, and 
@@ -229,7 +229,7 @@ and loop {\tt distribution}.
 %
 It follows that loops are necessary in the intermediate representation,
 regardless of whether they are provided as a language construct or are
-derived from tail-recursive functions. 
+derived via a code transformation from tail-recursive functions. 
 
 Finally, an indirect consequence of having to deal with sequential (dependent) 
 %, which semantically update an unknown array index at a time, 
@@ -242,8 +242,8 @@ enables a (optimized) cost model that the user likely assumes, while
 preserving the functional semantics. 
 %allows both a functional semantics and the cost model that the user likely assumes.
 
-Section~\ref{sec:Prelim} provides a brief overview of the $\mathcal{L}_0$ language
-and of the enabling optimizations for fusion.
+Section~\ref{sec:Prelim} provides an overview of the $\mathcal{L}_0$ language % brief 
+and of the enabling optimizations that set the stage for fusion. %'s application.% transformation.
 
 %\footnote{
 %The reasons are that our current benchmark does not require irregular arrays in 
