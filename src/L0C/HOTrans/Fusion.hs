@@ -25,8 +25,9 @@ import L0C.EnablingOpts.EnablingOptDriver
 
 import Debug.Trace
 
-data FusionGEnv = FusionGEnv {   
-                    envVtable  :: S.Set VName -- M.Map VName (TupIdent tf)
+data FusionGEnv = FusionGEnv {
+                    soacs      :: M.Map VName ([VName], Exp)
+                  , arrsInScope:: S.Set VName -- M.Map VName (TupIdent tf)
                   , fusedRes   :: FusedRes --M.Map VName (FunDec Type)
                   , program    :: Prog 
                   }
@@ -43,11 +44,10 @@ newtype FusionGM a = FusionGM (StateT VNameSource (ReaderT FusionGEnv (Either En
 ------------------------------------------------------------------------
 
 
--- | Bind a name as a common (non-merge) variable.
--- TypeBox tf => 
+-- | Binds an array name to the set of used-array vars
 bindVar :: FusionGEnv -> VName -> FusionGEnv
 bindVar env name =
-  env { envVtable = S.insert name $ envVtable env }
+  env { arrsInScope = S.insert name $ arrsInScope env }
 
 bindVars :: FusionGEnv -> [VName] -> FusionGEnv
 bindVars = foldl bindVar
@@ -61,6 +61,22 @@ binding pat = local (`bindVars` (map identName (filter (\x->case identType x of
                                 )
                     )
 
+-- | Binds an array name to the set of soac-produced vars
+bindPatVar :: ([VName],Exp) -> FusionGEnv -> VName -> FusionGEnv
+bindPatVar soac env nm = env { soacs       = M.insert nm soac $ soacs env
+                             , arrsInScope = S.insert nm      $ arrsInScope env 
+                             }
+
+bindPatVars :: ([VName], Exp) -> FusionGEnv -> [VName] -> FusionGEnv
+bindPatVars soac = foldl (bindPatVar soac)
+
+bindPat :: TupIdent -> Exp -> FusionGM a -> FusionGM a
+bindPat pat soac = do
+    let nms = map identName $ getIdents pat
+    let xxx = bindPatVars (nms, soac)
+    local ( `xxx` nms )    
+
+-- | Binds the fusion result to the environment.
 bindRes :: FusedRes -> FusionGM a -> FusionGM a
 bindRes rrr = local (\x -> x { fusedRes = rrr })
 
@@ -87,7 +103,7 @@ new = state . newVName
 
 fuseProg :: Prog -> Either EnablingOptError (Bool, Prog) -- (M.Map VName FusedRes)
 fuseProg prog = do
-    let env = FusionGEnv { envVtable = S.empty, fusedRes = mkFreshFusionRes, program = prog }
+    let env = FusionGEnv { soacs = M.empty, arrsInScope = S.empty, fusedRes = mkFreshFusionRes, program = prog }
     let funs= progFunctions prog
     ks0 <- runFusionGatherM prog (mapM fusionGatherFun funs) env
     -- let ks' = map ( \kers -> (M.toList . filter (\k -> )) (M.toList kernels k) ) ks
@@ -164,7 +180,7 @@ data FusedRes = FusedRes {
   --      are not located on disjoint control-flow branches, or
   --(iii) are used in the lambda expression of SOACs
 
-  , zips       :: M.Map VName (S.Set Exp)
+  , zips       :: M.Map VName (Int, S.Set Exp)
   -- ^ a map between the name of the boolean variable
   -- that holds the result of an assertZip function call
   -- AND the expression represention of the corresponding 
@@ -187,17 +203,6 @@ isOmapKer ker =
         Map2    {} -> True
         Mapall2 {} -> True
         _          -> False
-
-isCompatibleKer :: Exp -> FusedKer -> Bool
-isCompatibleKer (Mapall2 {}) ker = isOmapKer   ker
-isCompatibleKer (Map2    {}) ker = isOmapKer   ker
-isCompatibleKer (Filter2 {}) ker = 
-    let (_, soac) = fsoac ker
-    in  case soac of
-            Reduce2 {} -> True
-            Filter2 {} -> True
-            _          -> False
-isCompatibleKer _ _ = False 
 
 
 isInpArrInResModKers :: FusedRes -> S.Set VName -> VName -> Bool
@@ -223,10 +228,21 @@ printRes res =
                                         in  "\nlet " ++ ppTupId tupid ++
                                             " = "  ++ ppExp soac
                              ) all_kers
-        zips_str = concatMap (\(bv,as)->"\n"++textual bv++" = assertZip( "++
-                                        L.intercalate ", " (map (ppExp) (S.toList as)) ++ ") "
+        zips_str = concatMap (\(bv,(i,as))->let str = getBuiltinFunName i
+                                            in "\n"++textual bv++" = "++str++"( "++
+                                                L.intercalate ", " (map (ppExp) (S.toList as)) ++ ") "
                              ) (M.toList (zips res))
     in kers_str ++ "\n" ++ zips_str
+
+-- | extend the set of names to include all the names
+--     produced via SOACs (by querring the vtable's soac)
+expandSoacInpArr :: [VName] -> FusionGM [VName]
+expandSoacInpArr nms = do
+    foldM (\y nm -> do bnd <- asks $ M.lookup nm . soacs
+                       case bnd of
+                        Nothing     -> return (y++[nm])
+                        Just (nns,_)-> return (y++nns )
+          ) [] nms
 
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -234,7 +250,9 @@ printRes res =
 addNewKer :: FusedRes -> (TupIdent, Exp) -> FusionGM FusedRes
 addNewKer res (idd, soac) = do
     (inp_idds, other_idds) <- getInpArrSOAC soac >>= getIdentArr
-    let (inp_nms,other_nms) = (map identName inp_idds, map identName other_idds)
+    let (inp_nms0,other_nms0) = (map identName inp_idds, map identName other_idds)
+    inp_nms   <- expandSoacInpArr   inp_nms0
+    other_nms <- expandSoacInpArr other_nms0
 
     let used_inps = filter (isInpArrInResModKers res S.empty) inp_nms
     let ufs' =  (unfusable res)      `S.union` 
@@ -250,10 +268,8 @@ addNewKer res (idd, soac) = do
                     (outArr res) out_nms 
 
     let is' = foldl (\x arr -> M.insertWith' (\a b -> a `S.union` b) arr (S.singleton nm_ker) x) 
-                            (inpArr res) inp_nms
+                            (inpArr res) inp_nms0
 
---    let is' = foldl (\x arr -> M.adjust (\y -> S.insert nm_ker y) arr x) 
---                    (inpArr res) inp_nms
     return $ FusedRes (rsucc res) os' is' ufs' (zips res) (inzips res) 
                       (M.insert nm_ker new_ker (kernels res)) 
 
@@ -266,7 +282,9 @@ greedyFuse is_repl lam_used_nms res (idd, soac) = do
     -- E.g., with `map2(f, a, b[i])', `a' belongs to `inp_idds' and
     --        `b' belongs to `other_idds' 
     (inp_idds, other_idds) <- getInpArrSOAC soac >>= getIdentArr
-    let (inp_nms,other_nms) = (map identName inp_idds, map identName other_idds)
+    let (inp_nms0,other_nms0) = (map identName inp_idds, map identName other_idds)
+    inp_nms   <- expandSoacInpArr   inp_nms0
+    other_nms <- expandSoacInpArr other_nms0
     
     let out_idds     = getIdents idd
     let out_nms      = map identName out_idds
@@ -276,19 +294,43 @@ greedyFuse is_repl lam_used_nms res (idd, soac) = do
     let not_unfusable  = is_repl || ( ( foldl (&&) True . map (notUnfusable res) ) out_nms ) 
     let to_fuse_knmSet = getKersWithInpArrs res out_nms
     let to_fuse_knms   = S.toList to_fuse_knmSet
-    let to_fuse_kers   = concatMap (\x -> case M.lookup x (kernels res) of
-                                            Nothing -> []
-                                            Just ker-> if isCompatibleKer soac ker
-                                                       then [ker] else [] 
-                                   ) to_fuse_knms
+    to_fuse_kers <- mapM (\x-> case M.lookup x (kernels res) of
+                                Nothing -> badFusionGM $ EnablingOptError (SrcLoc (locOf soac))
+                                                          ("In Fusion.hs, greedyFuse, comp of to_fuse_kers: "
+                                                           ++ "kernel name not found in kernels field!")
+                                Just ker-> return ker
+                         ) to_fuse_knms
+
+    -- all kernels has to be compatible for fusion, e.g., if
+    -- the kernel is a map, and the current soac is a filter, 
+    -- then they cannot be fused
+    ok_kers_compat <- foldM (\b ker -> do b1 <- isCompatibleKer (out_nms,soac) ker
+                                          return (b1 && b)
+                            ) True to_fuse_kers
+
     -- check whether fusing @soac@ will violate any in-place update 
     --    restriction, e.g., would move an input array past its in-place update.
     let all_used_names = foldl (\y x -> S.insert x y) lam_used_nms (inp_nms++other_nms)
     let kers_cap = map (\k-> S.intersection (inplace k) all_used_names) to_fuse_kers
     let ok_inplace = foldl (&&) True (map (\s -> S.null s) kers_cap)  
 
+    -- If @soac@ is a Filter2, then check that none of its out idds 
+    --    are used in a size call. 
+    let ok_sz=case soac of
+                Filter2{} -> 
+                     let bs = map (\x->case M.lookup x (inzips res) of
+                                    Nothing  -> True
+                                    Just znms-> foldl (\acc znm -> 
+                                                          case M.lookup znm (zips res) of
+                                                            Nothing   -> acc -- error
+                                                            Just (i,_)-> acc && not (getBuiltinFunName i == "size")
+                                                      ) True znms
+                                  ) out_nms
+                     in foldl (&&) True bs
+                _ -> True
+
     -- compute whether @soac@ is fusable or not
-    let is_fusable = not_unfusable && not (null to_fuse_kers) && ok_inplace
+    let is_fusable = not_unfusable && not (null to_fuse_kers) && ok_inplace && ok_kers_compat && ok_sz
 
     -- DEBUG STMT (delete it!)
     --to_fuse_kers' <- trace ("ker: "++ppTupId idd++" fusable?: "++show is_fusable++" to_fuse_kers_num: "++show (length to_fuse_kers) ++ " inpArrs keys: " ++ concatMap nameToString (M.keys (inpArr res))) (return to_fuse_kers)
@@ -311,7 +353,7 @@ greedyFuse is_repl lam_used_nms res (idd, soac) = do
             let os' = foldl (\x arr -> M.insert arr nm_ker x) 
                             (outArr res) out_nms 
             let is' = foldl (\x arr -> M.insertWith' (\a b -> a `S.union` b) arr (S.singleton nm_ker) x) 
-                            (inpArr res) inp_nms
+                            (inpArr res) inp_nms0
             return $ FusedRes (rsucc res) os' is' ufs' (zips res) (inzips res) 
                               (M.insert nm_ker new_ker (kernels res)) 
      else do -- ... fuse current soac into to_fuse_kers ...
@@ -364,11 +406,13 @@ greedyFuse is_repl lam_used_nms res (idd, soac) = do
             
             --     (iii) update the zips Map, i.e., perform the substitution
             --           with the best candidate
+            _ <- trace (ppExp inp_rep) (return Nothing)
+            _ <- trace (ppTupId idd) (return Nothing)
             let zips''= foldl (\mm (nm,bnms) -> 
                                     foldl (\m bnm -> 
                                             case M.lookup bnm m of
-                                                Nothing   -> m --error
-                                                Just arrs -> M.insert bnm (substCand inp_rep nm arrs) m 
+                                                Nothing         -> m --error
+                                                Just (fnm,arrs) -> M.insert bnm (fnm, substCand inp_rep nm arrs) m 
                                           ) mm bnms 
                               ) (zips res) (zip out_nms zip_nms)
 
@@ -399,7 +443,6 @@ greedyFuse is_repl lam_used_nms res (idd, soac) = do
                              ) [] (reverse $ S.toList arrs)
             in S.fromList rres
 
-            
 fuseSOACwithKer :: ([Ident], Exp) -> FusedKer -> FusionGM FusedKer
 fuseSOACwithKer (out_ids1, soac1) ker = do
   let (out_ids2, soac2) = fsoac ker
@@ -427,7 +470,9 @@ fuseSOACwithKer (out_ids1, soac1) ker = do
 
             (res_soac, res_inp) <-
               case (soac2,soac1) of
-                -- the fusions that are semantically map fusions:
+                ----------------------------------------------------
+                -- The Fusions that are semantically map fusions:
+                ----------------------------------------------------
                 (Mapall2   _ _ pos, Mapall2 {}) -> do
                   (res_lam, new_inp) <- fuse2SOACs inp1_arr lam1 out_ids1 inp2_arr lam2
                   return (Mapall2 res_lam new_inp pos, new_inp)
@@ -437,6 +482,23 @@ fuseSOACwithKer (out_ids1, soac1) ker = do
                 (Redomap2 lam21 _ ne _ _ pos, Map2 {})-> do
                   (res_lam, new_inp) <- fuse2SOACs inp1_arr lam1 out_ids1 inp2_arr lam2
                   return (Redomap2 lam21 res_lam ne new_inp (mkElType new_inp) pos, new_inp)
+
+                ----------------------------------------------------
+                -- The Fusions that are semantically filter fusions:
+                ----------------------------------------------------
+                (Reduce2 _ ne _ eltp pos, Filter2 _ _ _) -> do
+                  (res_lam, new_inp) <- fuseRedFilt inp1_arr lam1 out_ids1 inp2_arr lam2
+                  return (Reduce2 res_lam ne new_inp eltp pos, new_inp)
+                (Redomap2 lam21 _ ne _ eltp pos, Filter2 _ _ _) -> do
+                  (res_lam, new_inp) <- fuseMapFilt inp1_arr lam1 ne inp2_arr lam2
+                  return (Redomap2 lam21 res_lam ne new_inp eltp pos, new_inp)
+                (Filter2 _ _ pos, Filter2 _ _ pos1) -> do
+                  (res_lam, new_inp) <- fuseMapFilt inp1_arr lam1 (Literal (LogVal False) pos1) inp2_arr lam2
+                  return (Filter2 res_lam new_inp pos, new_inp)
+
+                ----------------------------------------------------
+                -- Unfusable: should not have reached here!!!
+                ----------------------------------------------------
                 _ -> badFusionGM $ EnablingOptError (SrcLoc (locOf soac1))
                                     ("In Fusion.hs, fuseSOACwithKer: fusion not supported " 
                                      ++ "(soac2,soac1): (" ++ ppExp soac2++", "++ppExp soac1)
@@ -459,171 +521,7 @@ fuseSOACwithKer (out_ids1, soac1) ker = do
             then stripArray 1 (typeOf $ head arrs)
             else Elem $ Tuple $ map (stripArray 1) (map typeOf arrs)
 
-            
--- | Params:
---    @inp1@ is the input of the (first) to-be-fused SOAC
---    @lam1@ is the function of the (first) to-be-fused SOAC
---    @out1@ are the result arrays (identifiers) of the first SOAC.
---    @inp2@ is the input to the second SOAC.
---    @lam2@ is the function of the second SOAC.
---   Result: the anonymous function of the result SOAC, tupled with
---           the input of the result SOAC. 
---           (The output of the result SOAC == the one of the second SOAC)
-fuse2SOACs :: [Exp] -> Lambda -> [Ident]
-           -> [Exp] -> Lambda
-           -> FusionGM (Lambda, [Exp])
-fuse2SOACs inp1 lam1 out1 inp2 lam2 = do
-          -- inp2 (AnonymFun lam_args2 body2 rtp2 pos2) = do
-    let rtp2 = typeOf lam2
-    let pos2 = SrcLoc (locOf lam2)
-    -- A SOAC's lambda is supposed to receive one argument, which 
-    --   maybe a tuple. In this case we need to find the ``expanded''
-    --   version of the tuple, which ``must'' be created in
-    --   the first stmt of body2, i.e., by property of tuple normalization.
-    (ids2, bdy2) <- case lam2 of
-                        AnonymFun lam_args2 body2 _ _ ->
-                            return (lam_args2, body2) 
-                            -- getLamNormIdsAndBody lam_args2 body2
-                        CurryFun fnm aargs rtp pos -> do
-                            pnms <- mapM new $ replicate (length inp2) "lam_arg"
-                            let new_ids = map (\(nm,tp) -> Ident nm tp pos)
-                                              ( zip pnms (map (stripArray 1 . typeOf) inp2) )
-                            let tuplit = map (\x->Var x) new_ids  -- TupLit ... pos
-                            let call2  = Apply fnm (aargs++tuplit) rtp pos
-                            return (new_ids, call2) 
 
-    -- get Map that bridge the out_arrays of SOAC1 
-    -- with the input_lambda_parameters of SOAC2 
-    let out_m1 = map identName out1
-    out_m2 <- buildOutMaps out1 ids2 inp2 
-
-    -- compute: (inp2 \\ out1, ids2 \\ out1)
-    let inp_par2 = 
-         filter (\(x,_)-> case x of
-                            Var idd -> not $ elem (identName idd) out_m1  -- M.member 
-                            _       -> True
-                )   (zip inp2 ids2)
-    let (inp2', par2') = unzip inp_par2
-    let inp_res = inp1 ++ inp2'
-
-    -- Construct the body of the resulting lambda!
-    (ids_out1, bdy2') <- 
-              foldM (\(idds,body) i -> do
-                      let args = case M.lookup i out_m2 of
-                                  Nothing   -> []
-                                  Just (_,y)-> y
-                      if null args 
-                      then badFusionGM $ EnablingOptError 
-                                          (SrcLoc (locOf body)) 
-                                          ("In Fusion.hs, fuse2SOACs, foldM's lambda1 "
-                                           ++" broken invariant: param index not in Map!")
-                      else return $ (idds++[(head args)], mkCopies (head args) (tail args) body)
-                    ) ([],bdy2) [0..(length out1)-1]
-
-    let call_idd = if length ids_out1 == 1 then Id (head ids_out1)
-                   else TupId (map (\x->Id x) ids_out1) (SrcLoc (locOf lam1))
-
-    -- Build the call to the first SOAC function
-    (par1, call1) <- buildCall (map (stripArray 1 . typeOf) inp1) lam1
-    let bdy2'' = LetPat call_idd call1 bdy2' (SrcLoc (locOf lam1))
-    let par = par1 ++ par2'
-
-    -- remove duplicate inputs
-    (inp_res', par', bdy2''') <- removeDupInps inp_res par bdy2''
-
-    return $ (AnonymFun par' bdy2''' rtp2 pos2, inp_res')
-    
-    where
-        -- | @arrs@ are the input arrays of a SOAC call
-        --   @idds@ are the args (ids) of the SOAC's unnamed function
-        --   @lam_bdy@ is the body of the lambda function.
-        --   Result: eliminates the duplicate input arrays (and lambda args),
-        --           by inserting copy statement in the body of the lambda.
-        --   E.g., originally: map(\(a,b,c) -> body,              x[i], y, x[i])
-        --         results in: map(\(b,c)   -> let a = b in body,       y, x[i])
-        removeDupInps :: [Exp] -> [Ident] -> Exp -> FusionGM ([Exp], [Ident], Exp)
-        removeDupInps [] [] lam_bdy = return ([], [], lam_bdy)
-        removeDupInps [] _  lam_bdy = badFusionGM $ EnablingOptError (SrcLoc (locOf lam_bdy)) 
-                                                     ("In Fusion.hs, removeDupInps, arr inps "
-                                                      ++" AND lam pars size do not match!")
-        removeDupInps _  [] lam_bdy = badFusionGM $ EnablingOptError (SrcLoc (locOf lam_bdy)) 
-                                                     ("In Fusion.hs, removeDupInps, arr inps "
-                                                      ++" AND lam pars size do not match!")
-        removeDupInps (arr:arrs) (idd:idds) lam_bdy = do
-            case L.elemIndex arr arrs of
-                Nothing -> do (rec_arr, rec_idds, rec_bdy) <- removeDupInps arrs idds lam_bdy
-                              return (arr:rec_arr, idd:rec_idds, rec_bdy)
-                Just ind-> do -- eliminate the current so you can advance!
-                              let rec_bdy = LetPat (Id idd) (Var (idds !! ind)) lam_bdy (identSrcLoc idd)
-                              removeDupInps arrs idds rec_bdy
-        
-
-
-        -- | @mkCopies x [y,z,t] body@ results in
-        --   @let y = x in let z = x in let t = x in body
-        mkCopies :: Ident -> [Ident] -> Exp -> Exp
-        mkCopies idd idds body = 
-            foldl (\ bbdy ii -> LetPat (Id ii) (Var idd) bbdy (identSrcLoc idd) )
-                  body idds
- 
-        -- | Recieves a list of types @tps@, which should match
-        --     the lambda's parameters, and a lambda expression.
-        --   Returns a list of identifiers, corresponding to
-        --     the `expanded' argument of lambda, and the lambda call. 
-        buildCall :: [Type] -> Lambda -> FusionGM ([Ident], Exp)
-        buildCall tps (AnonymFun lam_args bdy _ pos)    = do
-            let (ids, bdy') = (lam_args, bdy) -- getLamNormIdsAndBody lam_args bdy
-            let bres = foldl (&&) True (zipWith (==)  tps (map identType ids))
-            if bres then return (ids, bdy')
-            else badFusionGM $ EnablingOptError pos
-                                ("In Fusion.hs, buildCall, types do NOT match! ")
-        buildCall tps (CurryFun fnm aargs rtp pos) = do
-            ids <- mapM (\ tp -> do new_nm <- new "tmp"
-                                    return $ Ident new_nm tp pos
-                        ) tps
-            -- let tup = TupLit (map (\x -> Var x) ids) pos
-            let new_vars = map (\x -> Var x) ids
-            return (ids, Apply fnm (aargs++new_vars) rtp pos) -- [tup]
-            
-        -- | @out_arr1@ are the array result of a (first) SOAC (call)
-        --   @inp_par2@ are the (expanded lambda) param of another (second) SOAC, 
-        --              which is to be fused with the first SOAC.
-        --   @inp_arr2@ are the input arrays of the second SOAC.
-        --   The result is a Map that ASSOCIATES:
-        --     (i) the position in which vars of @inp_par2@ appear in @out_arr1@ 
-        --    (ii) with a tuple formed by (1) the corresponding 
-        --            element in the @out_arr1@ and (2) the set of vars in 
-        --            @inp_par2@, i.e., lambda args, which correspond to (1).
-        -- E.g., let (x1,x2,x3) = map(f, a1, a2)
-        --       let res        = map(fn type (a,b,c,d) => ..., x3, x1, y1, x1)
-        --    Result is: { 1 -> ("x1", ["b","d"]), 2 -> ("",["new_tmp"], 3 -> ("x3", ["a"])} 
-        buildOutMaps :: [Ident] -> [Ident] -> [Exp] ->
-                        FusionGM (M.Map Int (VName, [Ident]))
-        buildOutMaps out_arr1 inp_par2 inp_arr2 = do
-            -- let inp_pnm = map identName inp_par2
-            let out_anm = map identName out_arr1
-            let m2 = foldl (\ m (arr, par) -> 
-                                case arr of
-                                    Var idd -> case L.elemIndex (identName idd) out_anm of 
-                                                Nothing -> m
-                                                Just i  -> case M.lookup i m of
-                                                            Nothing    -> M.insert i (identName idd, [par] ) m
-                                                            Just (_,ps)-> M.insert i (identName idd, ps++[par]) m
-                                    _       -> m    
-                           )   M.empty (zip inp_arr2 inp_par2)
-            -- add the unused vars from out_arr1
-            m3 <- foldM  (\ m i -> 
-                              case M.lookup i m2 of
-                                Nothing   -> do new_nm <- new "tmp"
-                                                let ppp    = out_arr1 !! i
-                                                let new_tp = stripArray 1 (identType ppp) 
-                                                let new_id = Ident new_nm new_tp (identSrcLoc ppp)
-                                                -- CHECKME: Empty name?  This will definitely cause trouble.
-                                                return $ M.insert i (varName "" Nothing, [new_id]) m
-                                Just(_,_)-> return m
-                            )
-                            m2 [0..(length out_anm)-1] 
-            return m3    
 
 ------------------------------------------------------------------------
 ------------------------------------------------------------------------
@@ -656,36 +554,37 @@ fusionGatherExp :: FusedRes -> Exp -> FusionGM FusedRes
 
 
 fusionGatherExp fres (LetPat pat soac@(Map2 lam _ _ _) body _) = do
-    bres  <- binding pat $ fusionGatherExp fres body
+    bres  <- bindPat pat soac $ fusionGatherExp fres body   -- binding pat $ 
     (used_lam, blres) <- fusionGatherLam (S.empty, bres) lam
     greedyFuse False used_lam blres (pat, soac)
 
 fusionGatherExp fres (LetPat pat soac@(Mapall2 lam _ _) body _) = do
     -- will be transformed in greedyFuse as a map2 if needed.
-    bres <- binding pat $ fusionGatherExp fres body    
+    bres <- bindPat pat soac $ fusionGatherExp fres body    
     (used_lam, lres) <- fusionGatherLam (S.empty, bres) lam
     greedyFuse False used_lam lres (pat, soac)
 
-fusionGatherExp fres (LetPat pat (Replicate n el pos) body _) = do
-    bres <- binding pat $ fusionGatherExp fres body
+fusionGatherExp fres (LetPat pat soac@(Replicate n el pos) body _) = do
+    bres <- bindPat pat soac $ fusionGatherExp fres body
     -- Implemented inplace: gets the variables in `n` and `el`
     (used_set, bres')<- getUnfusableSet pos bres [n,el] 
     repl_idnm <- new "repl_x"
     let repl_id = Ident repl_idnm (Elem Int) pos
     let repl_lam = AnonymFun [repl_id] el (typeOf el) pos
-    let soac = Map2 repl_lam [Iota n pos] (typeOf el) pos
-    greedyFuse True used_set bres' (pat, soac)
+    let soac_repl= Map2 repl_lam [Iota n pos] (typeOf el) pos
+    greedyFuse True used_set bres' (pat, soac_repl)
 
-fusionGatherExp fres (LetPat pat (Filter2 lam arrs _) body _) = do
-    -- PLEASE, ADD implementation
-    bres  <- binding pat $ fusionGatherExp fres body
-    bres' <- foldM fusionGatherExp bres arrs
-    (_, lres) <- fusionGatherLam (S.empty, bres') lam
-    return lres
+fusionGatherExp fres (LetPat pat soac@(Filter2 lam _ _) body _) = do
+    bres  <- bindPat pat soac $ fusionGatherExp fres body
+    (used_lam, blres) <- fusionGatherLam (S.empty, bres) lam
+    greedyFuse False used_lam blres (pat, soac)
+    --bres' <- foldM fusionGatherExp bres arrs
+    --(_, lres) <- fusionGatherLam (S.empty, bres') lam
+    --return lres
 
 fusionGatherExp fres (LetPat pat soac@(Reduce2 lam ne _ _ _) body _) = do
     -- a reduce always starts a new kernel
-    bres  <- binding pat $ fusionGatherExp fres body
+    bres  <- bindPat pat soac $ fusionGatherExp fres body
     bres' <- fusionGatherExp bres  ne
     (_, blres) <- fusionGatherLam (S.empty, bres') lam
     addNewKer blres (pat, soac)
@@ -693,7 +592,7 @@ fusionGatherExp fres (LetPat pat soac@(Reduce2 lam ne _ _ _) body _) = do
 fusionGatherExp fres (LetPat pat soac@(Redomap2 lam_red lam_map ne _ _ _) body _) = do
     -- a redomap always starts a new kernel
     (_, lres)  <- foldM fusionGatherLam (S.empty, fres) [lam_red, lam_map]
-    bres  <- binding pat $ fusionGatherExp lres body
+    bres  <- bindPat pat soac $ fusionGatherExp lres body -- binding pat $ 
     bres' <- fusionGatherExp bres ne
     addNewKer bres' (pat, soac)
 
@@ -716,7 +615,24 @@ fusionGatherExp fres (LetPat pat (Apply fname zip_args _ _) body _)
                                     Nothing -> M.insert x [nm]     m
                                     Just lst-> M.insert x (nm:lst) m
                         ) (inzips bres) (S.toList iddnms)
-    return $ bres { zips   = M.insert nm (S.fromList zip_args) (zips bres), inzips = inzips' }
+    let i = getBuiltinFunIdent "assertZip"
+    return $ bres { zips   = M.insert nm (i, S.fromList zip_args) (zips bres), inzips = inzips' }
+
+fusionGatherExp fres (LetPat pat (Size arr _) body _) = do
+    -- Fix implementation such that if the arg of size is not from a map, then it is parsed,
+    -- i.e., if the argument is coming from a filter then it should inhibit fusion!
+    bres  <- fusionGatherExp fres body
+    let nm = identName $ head $ getIdents pat
+    (inzips',bres') <- 
+        case arr of
+            Var idd -> case M.lookup (identName idd) (inzips bres) of
+                        Nothing -> return ( M.insert (identName idd) [nm]     (inzips bres), bres )
+                        Just lst-> return ( M.insert (identName idd) (nm:lst) (inzips bres), bres )
+            _       -> do new_res <- fusionGatherExp bres arr
+                          return (inzips bres, new_res)
+    let i  = getBuiltinFunIdent "size"
+    return $ bres' { zips   = M.insert nm (i, S.singleton arr) (zips bres'), inzips = inzips' }
+
 
 fusionGatherExp fres (LetPat pat e body _) = do
     let pat_vars = map (\x->Var x) (getIdents pat)
@@ -738,8 +654,10 @@ fusionGatherExp fres (Index idd inds _ _) = do
     foldM fusionGatherExp fres ((Var idd) : inds)
 
 fusionGatherExp fres (LetWith id1 id0 inds elm body _) = do 
+    bres  <- binding (Id id1) $ fusionGatherExp fres body
+
     let pat_vars = map (\x->Var x) [id0, id1]
-    fres' <- foldM fusionGatherExp fres ( body : elm : inds ++ pat_vars)
+    fres' <- foldM fusionGatherExp bres (elm : inds ++ pat_vars)
     let (ker_nms, kers) = unzip $ M.toList $ kernels fres'
 
     -- Now add the aliases of id0 (itself included) to the `inplace' field 
@@ -753,11 +671,13 @@ fusionGatherExp fres (LetWith id1 id0 inds elm body _) = do
     return $ fres' { kernels = new_kernels }
 
 fusionGatherExp fres (DoLoop merge_pat ini_val _ ub loop_body let_body _) = do
+    letbres <- binding merge_pat $ fusionGatherExp fres let_body
+
     let pat_vars = map (\x->Var x) (getIdents merge_pat)
-    fres' <- foldM fusionGatherExp fres (let_body:ini_val:ub:pat_vars)
+    fres' <- foldM fusionGatherExp letbres (ini_val:ub:pat_vars)
 
     let null_res = mkFreshFusionRes
-    new_res <- fusionGatherExp null_res loop_body
+    new_res <- binding merge_pat $ fusionGatherExp null_res loop_body
     -- make the inpArr unfusable, so that they 
     -- cannot be fused from outside the loop:
     let (inp_arrs, _) = unzip $ M.toList $ inpArr new_res
@@ -765,6 +685,9 @@ fusionGatherExp fres (DoLoop merge_pat ini_val _ ub loop_body let_body _) = do
     let new_res' = new_res { unfusable = foldl (\r x -> S.insert x r) (unfusable new_res) inp_arrs }
     -- merge new_res with fres'
     return $ mergeFusionRes new_res' fres'
+
+
+-- bnds <- asks $ arrsInScope
 
 fusionGatherExp fres (If cond e_then e_else _ _) = do
     let null_res = mkFreshFusionRes
@@ -797,6 +720,10 @@ fusionGatherExp _ (Apply fname _ _ pos)
   | "assertZip" <- nameToString fname = 
     badFusionGM $ EnablingOptError pos
                   ("In Fusion.hs, assertZip found outside a let binding! ")
+fusionGatherExp _ (Apply fname _ _ pos)
+  | "size" <- nameToString fname = 
+    badFusionGM $ EnablingOptError pos
+                  ("In Fusion.hs, size found outside a let binding! ")
 
 
 -----------------------------------
@@ -820,7 +747,7 @@ fusionGatherLam (u_set,fres) (AnonymFun idds body _ pos) = do
     -- make the inpArr unfusable, so that they 
     -- cannot be fused from outside the lambda:
     let (inp_arrs, _) = unzip $ M.toList $ inpArr new_res
-    bnds <- asks $ envVtable
+    bnds <- asks $ arrsInScope
     let unfus' = (unfusable new_res) `S.union` (S.fromList inp_arrs)
     -- foldl (\r x -> S.insert x r) (unfusable new_res) inp_arrs 
     let unfus  = unfus' `S.intersection` bnds
@@ -900,10 +827,35 @@ fuseInExp (LetPat pat (Apply fname _ rtp p1) body pos)
         Nothing -> badFusionGM $ EnablingOptError pos
                                    ("In Fusion.hs, fuseInExp LetPat of assertZip, "
                                     ++" assertZip not in Res: "++textual nm)
-        Just ss -> do let arrs = S.toList ss
-                      if length arrs > 1
-                      then return $ LetPat pat (Apply fname arrs rtp p1) body' pos
-                      else return $ body' -- i.e., assertZip eliminated
+        Just (i,ss)-> do let arrs = S.toList ss
+                         let fnm  = getBuiltinFunName i
+                         _ <- if fnm == "assertZip" 
+                              then return Nothing
+                              else badFusionGM $ EnablingOptError pos
+                                                  ("In Fusion.hs, fuseInExp LetPat of assertZip, "
+                                                   ++" builtin funname not assertZip: "++fnm)
+                         if length arrs > 1
+                         then return $ LetPat pat (Apply fname arrs rtp p1) body' pos
+                         else return $ body' -- i.e., assertZip eliminated
+
+fuseInExp (LetPat pat (Size _ p1) body pos) = do
+    body' <- fuseInExp body
+    fres  <- asks $ fusedRes
+    let nm = identName $ head $ getIdents pat
+    case M.lookup nm (zips fres) of
+        Nothing -> badFusionGM $ EnablingOptError pos
+                                   ("In Fusion.hs, fuseInExp LetPat of size, "
+                                    ++" size not in Res: "++textual nm)
+        Just (i,ss)-> do let arrs = S.toList ss
+                         let fnm  = getBuiltinFunName i
+                         _ <- if fnm == "size" && length arrs == 1
+                              then return Nothing
+                              else badFusionGM $ EnablingOptError pos
+                                                  ("In Fusion.hs, fuseInExp LetPat of size, "
+                                                   ++" builtin funname not size: "++fnm)
+                         case (head arrs) of
+                            Iota n_exp _ -> return $ LetPat pat n_exp body' pos -- size eliminated
+                            _            -> return $ LetPat pat (Size (head arrs) p1) body' pos
 
 fuseInExp (LetPat pat e body pos) = do
     body' <- fuseInExp body
@@ -1164,4 +1116,290 @@ errorIllegalFus :: String -> SrcLoc -> FusionGM Exp
 errorIllegalFus soac_name pos =  
     badFusionGM $ EnablingOptError pos
                   ("In Fusion.hs, soac "++soac_name++" appears illegaly in pgm!")
+
+
+getBuiltinFunName  :: Int -> String
+getBuiltinFunName i = case i of
+                        1 -> "assertZip"
+                        2 -> "size"
+                        _ -> "unknownBuiltInFun"  
+getBuiltinFunIdent :: String -> Int
+getBuiltinFunIdent "assertZip" = 1
+getBuiltinFunIdent "size"      = 2
+getBuiltinFunIdent _           = 33
+
+--------------------------------------------
+--------------------------------------------
+--- FUSING 2 COMPATIBLE SOACs:           ---
+--------------------------------------------
+--------------------------------------------
+
+
+-- | Assumption: the order and number of elements matches between 
+--       the input to the Reduce and the input to Filter,
+--       i.e., already checked in @isCompatibleKer@
+fuseRedFilt :: [Exp] -> Lambda -> [Ident]
+                -> [Exp] -> Lambda
+                -> FusionGM (Lambda, [Exp])
+fuseRedFilt inp1 lam1 _ inp2 lam2 = do
+    let rtp2 = typeOf lam2
+    let pos2 = (SrcLoc (locOf lam2))
+    let pos1 = (SrcLoc (locOf lam1))
+    (par1, call1) <- buildCall (map (stripArray 1 . typeOf) inp1) lam1
+    (ids2, bdy2 ) <- getUnmdParsAndBody inp2 lam2
+
+    let n   = length inp2
+    let nd2 = n `div` 2
+    (ids21, ids22) <- if n `mod` 2 == 0 && nd2 == length par1 && n == length ids2  
+                      then return (take nd2 ids2, drop nd2 ids2)
+                      else badFusionGM $ EnablingOptError pos2
+                                          ("In Fusion.hs, fuseRedFilt: uneven lambda params " 
+                                           ++ "of lam2 (lam1): " ++ show n ++ " " ++ show (length par1))
+    
+    let then_pat = TupId  (map (\x->Id  x) ids22) pos2
+    let then_var = TupLit (map (\x->Var x) par1 ) pos1
+    let then_exp = LetPat then_pat then_var  bdy2 pos2
+    let else_exp = TupLit (map (\x->Var x) ids21) pos2
+    let res_body = If call1 then_exp else_exp rtp2 pos1
+    return (AnonymFun (ids21++par1) res_body rtp2 pos2, inp1)
+    
+
+-- | Assumption: the order and number of elements matches 
+--       between the map and the reduce, 
+--       i.e., already checked in @isCompatibleKer@.
+fuseMapFilt :: [Exp] -> Lambda -> Exp
+                -> [Exp] -> Lambda
+                -> FusionGM (Lambda, [Exp])
+fuseMapFilt inp1 lam1 ne inp2 lam2 = do
+    let rtp2 = typeOf lam2
+    let pos2 = (SrcLoc (locOf lam2))
+    let pos1 = (SrcLoc (locOf lam1))
+    (par1, call1) <- buildCall (map (stripArray 1 . typeOf) inp1) lam1
+    (ids2, bdy2 ) <- getUnmdParsAndBody inp2 lam2
+
+    _ <- if length ids2 == length par1 && length par1 == length inp1 && length inp2 == length inp1
+         then return Nothing
+         else badFusionGM $ EnablingOptError pos2
+                             ("In Fusion.hs, fuse2Filter: num of params of " 
+                              ++ "lam2, lam1 and inp1 do not agree: " ++ show (length ids2) 
+                              ++ " " ++ show (length par1) ++ " " ++ show (length inp1))
+    
+    let then_pat = TupId  (map (\x->Id  x) ids2) pos2
+    let then_var = TupLit (map (\x->Var x) par1) pos1
+    let then_exp = LetPat then_pat then_var bdy2 pos2
+    let res_body = If call1 then_exp ne rtp2 pos1
+    return (AnonymFun par1 res_body rtp2 pos2, inp1)
+    
+{-
+-- | Assumption: the order and number of elements matches between the two filters,
+--     i.e., already checked in @isCompatibleKer@
+fuse2Filter :: [Exp] -> Lambda -> [Ident]
+                -> [Exp] -> Lambda
+                -> FusionGM (Lambda, [Exp])
+fuse2Filter inp1 lam1 _ inp2 lam2 = do
+    let pos2 = (SrcLoc (locOf lam2))
+    let pos1 = (SrcLoc (locOf lam1))
+    (par1, call1) <- buildCall (map (stripArray 1 . typeOf) inp1) lam1
+    (ids2, bdy2 ) <- getUnmdParsAndBody inp2 lam2
+    _ <- if length ids2 == length par1 && length par1 == length inp1 && length inp2 == length inp1
+         then return 1
+         else badFusionGM $ EnablingOptError pos2
+                             ("In Fusion.hs, fuse2Filter: num of params of " 
+                              ++ "lam2, lam1 and inp1 do not agree: " ++ show (length ids2) 
+                              ++ " " ++ show (length par1) ++ " " ++ show (length inp1))
+    let then_pat = TupId  (map (\x->Id  x) ids2) pos2
+    let then_var = TupLit (map (\x->Var x) par1) pos1
+    let then_exp = LetPat then_pat then_var  bdy2 pos2
+    let res_body = If call1 then_exp (Literal (LogVal False) pos1) (Elem Bool) pos1
+    return (AnonymFun par1 res_body (Elem Bool) pos2, inp1)
+-}
+
+----------------------------------------------------------------------------------            
+-- | Params:
+--    @inp1@ is the input of the (first) to-be-fused SOAC
+--    @lam1@ is the function of the (first) to-be-fused SOAC
+--    @out1@ are the result arrays (identifiers) of the first SOAC.
+--    @inp2@ is the input to the second SOAC.
+--    @lam2@ is the function of the second SOAC.
+--   Result: the anonymous function of the result SOAC, tupled with
+--           the input of the result SOAC. 
+--           (The output of the result SOAC == the one of the second SOAC)
+----------------------------------------------------------------------------------
+fuse2SOACs :: [Exp] -> Lambda -> [Ident]
+           -> [Exp] -> Lambda
+           -> FusionGM (Lambda, [Exp])
+fuse2SOACs inp1 lam1 out1 inp2 lam2 = do
+          -- inp2 (AnonymFun lam_args2 body2 rtp2 pos2) = do
+    let rtp2 = typeOf lam2
+    let pos2 = SrcLoc (locOf lam2)
+    -- SOAC's lambda have been normalized, hence they accept an 
+    --   arbitrary number of non-tuple arguments.
+    (ids2, bdy2) <- getUnmdParsAndBody inp2 lam2
+
+    -- get Map that bridge the out_arrays of SOAC1 
+    -- with the input_lambda_parameters of SOAC2 
+    let out_m1 = map identName out1
+    out_m2 <- buildOutMaps out1 ids2 inp2 
+
+    -- compute: (inp2 \\ out1, ids2 \\ out1)
+    let inp_par2 = 
+         filter (\(x,_)-> case x of
+                            Var idd -> not $ elem (identName idd) out_m1  -- M.member 
+                            _       -> True
+                )   (zip inp2 ids2)
+    let (inp2', par2') = unzip inp_par2
+    let inp_res = inp1 ++ inp2'
+
+    -- Construct the body of the resulting lambda!
+    (ids_out1, bdy2') <- 
+              foldM (\(idds,body) i -> do
+                      let args = case M.lookup i out_m2 of
+                                  Nothing   -> []
+                                  Just (_,y)-> y
+                      if null args 
+                      then badFusionGM $ EnablingOptError 
+                                          (SrcLoc (locOf body)) 
+                                          ("In Fusion.hs, fuse2SOACs, foldM's lambda1 "
+                                           ++" broken invariant: param index not in Map!")
+                      else return $ (idds++[(head args)], mkCopies (head args) (tail args) body)
+                    ) ([],bdy2) [0..(length out1)-1]
+
+    let call_idd = if length ids_out1 == 1 then Id (head ids_out1)
+                   else TupId (map (\x->Id x) ids_out1) (SrcLoc (locOf lam1))
+
+    -- Build the call to the first SOAC function
+    (par1, call1) <- buildCall (map (stripArray 1 . typeOf) inp1) lam1
+    let bdy2'' = LetPat call_idd call1 bdy2' (SrcLoc (locOf lam1))
+    let par = par1 ++ par2'
+
+    -- remove duplicate inputs
+    (inp_res', par', bdy2''') <- removeDupInps inp_res par bdy2''
+
+    return $ (AnonymFun par' bdy2''' rtp2 pos2, inp_res')
+    
+    where
+        -- | @arrs@ are the input arrays of a SOAC call
+        --   @idds@ are the args (ids) of the SOAC's unnamed function
+        --   @lam_bdy@ is the body of the lambda function.
+        --   Result: eliminates the duplicate input arrays (and lambda args),
+        --           by inserting copy statement in the body of the lambda.
+        --   E.g., originally: map(\(a,b,c) -> body,              x[i], y, x[i])
+        --         results in: map(\(b,c)   -> let a = b in body,       y, x[i])
+        removeDupInps :: [Exp] -> [Ident] -> Exp -> FusionGM ([Exp], [Ident], Exp)
+        removeDupInps [] [] lam_bdy = return ([], [], lam_bdy)
+        removeDupInps [] _  lam_bdy = badFusionGM $ EnablingOptError (SrcLoc (locOf lam_bdy)) 
+                                                     ("In Fusion.hs, removeDupInps, arr inps "
+                                                      ++" AND lam pars size do not match!")
+        removeDupInps _  [] lam_bdy = badFusionGM $ EnablingOptError (SrcLoc (locOf lam_bdy)) 
+                                                     ("In Fusion.hs, removeDupInps, arr inps "
+                                                      ++" AND lam pars size do not match!")
+        removeDupInps (arr:arrs) (idd:idds) lam_bdy = do
+            case L.elemIndex arr arrs of
+                Nothing -> do (rec_arr, rec_idds, rec_bdy) <- removeDupInps arrs idds lam_bdy
+                              return (arr:rec_arr, idd:rec_idds, rec_bdy)
+                Just ind-> do -- eliminate the current so you can advance!
+                              let rec_bdy = LetPat (Id idd) (Var (idds !! ind)) lam_bdy (identSrcLoc idd)
+                              removeDupInps arrs idds rec_bdy
+        
+
+
+        -- | @mkCopies x [y,z,t] body@ results in
+        --   @let y = x in let z = x in let t = x in body
+        mkCopies :: Ident -> [Ident] -> Exp -> Exp
+        mkCopies idd idds body = 
+            foldl (\ bbdy ii -> LetPat (Id ii) (Var idd) bbdy (identSrcLoc idd) )
+                  body idds
+             
+        -- | @out_arr1@ are the array result of a (first) SOAC (call)
+        --   @inp_par2@ are the (expanded lambda) param of another (second) SOAC, 
+        --              which is to be fused with the first SOAC.
+        --   @inp_arr2@ are the input arrays of the second SOAC.
+        --   The result is a Map that ASSOCIATES:
+        --     (i) the position in which vars of @inp_par2@ appear in @out_arr1@ 
+        --    (ii) with a tuple formed by (1) the corresponding 
+        --            element in the @out_arr1@ and (2) the set of vars in 
+        --            @inp_par2@, i.e., lambda args, which correspond to (1).
+        -- E.g., let (x1,x2,x3) = map(f, a1, a2)
+        --       let res        = map(fn type (a,b,c,d) => ..., x3, x1, y1, x1)
+        --    Result is: { 1 -> ("x1", ["b","d"]), 2 -> ("",["new_tmp"], 3 -> ("x3", ["a"])} 
+        buildOutMaps :: [Ident] -> [Ident] -> [Exp] ->
+                        FusionGM (M.Map Int (VName, [Ident]))
+        buildOutMaps out_arr1 inp_par2 inp_arr2 = do
+            -- let inp_pnm = map identName inp_par2
+            let out_anm = map identName out_arr1
+            let m2 = foldl (\ m (arr, par) -> 
+                                case arr of
+                                    Var idd -> case L.elemIndex (identName idd) out_anm of 
+                                                Nothing -> m
+                                                Just i  -> case M.lookup i m of
+                                                            Nothing    -> M.insert i (identName idd, [par] ) m
+                                                            Just (_,ps)-> M.insert i (identName idd, ps++[par]) m
+                                    _       -> m    
+                           )   M.empty (zip inp_arr2 inp_par2)
+            -- add the unused vars from out_arr1
+            m3 <- foldM  (\ m i -> 
+                              case M.lookup i m2 of
+                                Nothing   -> do new_nm <- new "tmp"
+                                                let ppp    = out_arr1 !! i
+                                                let new_tp = stripArray 1 (identType ppp) 
+                                                let new_id = Ident new_nm new_tp (identSrcLoc ppp)
+                                                -- CHECKME: Empty name?  This will definitely cause trouble.
+                                                return $ M.insert i (varName "" Nothing, [new_id]) m
+                                Just(_,_)-> return m
+                            )
+                            m2 [0..(length out_anm)-1] 
+            return m3    
+
+
+
+-- | Recieves a list of types @tps@, which should match
+--     the lambda's parameters, and a lambda expression.
+--   Returns a list of identifiers, corresponding to
+--     the `expanded' argument of lambda, and the lambda call. 
+buildCall :: [Type] -> Lambda -> FusionGM ([Ident], Exp)
+buildCall tps (AnonymFun lam_args bdy _ pos)    = do
+    let (ids, bdy') = (lam_args, bdy) -- getLamNormIdsAndBody lam_args bdy
+    let bres = foldl (&&) True (zipWith (==)  tps (map identType ids))
+    if bres then return (ids, bdy')
+    else badFusionGM $ EnablingOptError pos
+                        ("In Fusion.hs, buildCall, types do NOT match! ")
+buildCall tps (CurryFun fnm aargs rtp pos) = do
+    ids <- mapM (\ tp -> do new_nm <- new "tmp"
+                            return $ Ident new_nm tp pos
+                ) tps
+    -- let tup = TupLit (map (\x -> Var x) ids) pos
+    let new_vars = map (\x -> Var x) ids
+    return (ids, Apply fnm (aargs++new_vars) rtp pos) -- [tup]
+
+
+getUnmdParsAndBody :: [Exp] -> Lambda -> FusionGM ([Ident], Exp)
+getUnmdParsAndBody inpp lamm = do
+    case lamm of
+        AnonymFun lam_args2 body2 _ _ -> return (lam_args2, body2) 
+        CurryFun fnm aargs rtp pos -> do
+            pnms <- mapM new $ replicate (length inpp) "lam_arg"
+            let new_ids = map (\(nm,tp) -> Ident nm tp pos)
+                              ( zip pnms (map (stripArray 1 . typeOf) inpp) )
+            let tuplit = map (\x->Var x) new_ids  -- TupLit ... pos
+            let call2  = Apply fnm (aargs++tuplit) rtp pos
+            return (new_ids, call2) 
+
+isCompatibleKer :: ([VName], Exp) -> FusedKer -> FusionGM Bool
+isCompatibleKer (_,       Mapall2 {}) ker = return $ isOmapKer   ker
+isCompatibleKer (_,       Map2    {}) ker = return $ isOmapKer   ker
+isCompatibleKer (out_nms, Filter2 {}) ker = do
+    let (_, soac) = fsoac ker
+    let ok = case soac of
+                Reduce2 {} -> True
+                Redomap2{} -> True
+                Filter2 {} -> True
+                _          -> False
+    if not ok
+    then do return False
+    else do -- check that the input-array  set of soac is included
+            --         in the output-array set of soac_filt
+            (inp_idds2, other_idds2) <- getInpArrSOAC soac >>= getIdentArr
+            let inp_lst = map identName inp_idds2
+            return $ (L.null other_idds2) && inp_lst == out_nms -- inp_set `S.isSubsetOf` S.fromList out_nms 
+isCompatibleKer _ _ = return False 
 
