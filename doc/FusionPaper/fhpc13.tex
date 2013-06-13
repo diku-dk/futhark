@@ -51,7 +51,8 @@
 }
 
 \DefineVerbatimEnvironment{colorcode}%
-        {Verbatim}{fontsize=\scriptsize,commandchars=\\\{\}}
+        {Verbatim}{fontsize=\small,commandchars=\\\{\}}   % \normalsize
+        %{Verbatim}{fontsize=\scriptsize,commandchars=\\\{\}}
 
 
 \definecolor{DikuRed}{RGB}{130,50,32}
@@ -289,12 +290,218 @@ For Troels:
 \section{Fusing Once}
 \label{sec:FusingOnce}
 
+\begin{figure}[bt]
+%\hrule ~
+\vbox{
+\begin{minipage}{0.48\columnwidth}
+\begin{colorcode}
+import qualified Data.Map 
+                 as M
+import qualified Data.Set 
+                 as S
+data FusedKer = FusedKer \{ 
+ soacStmt :: ([Ident], Exp)
+--^the fused SOAC stmt,eg,
+--(z,w)=map2( f(a,b), x,y )
+
+,inp     :: S.Set Ident
+--^ the input arrays used   
+--in SOAC stmt,i.e.,\{x,y\}.
+
+,inplace :: S.Set VName
+--^Aliasing set of vars
+--used in in-place updates
+--that reach this kernel.
+
+,fused_vars :: [Ident]
+--^not null iff at least a 
+--fusion has been performed
+\}
+\end{colorcode}
+\end{minipage}
+\hfill
+\begin{minipage}{0.48\columnwidth}
+\begin{colorcode}
+data FusionRes = FusionRes\{
+ outArr :: M.Map Name Name
+--^maps an array to the name
+--of the kernel producing it 
+
+,inpArr :: M.Map  Name 
+                (S.Set Name)
+--^maps an array to the 
+--names of kernels using it  
+
+,unfused :: S.Set Name
+--^Unfusable arrays. Used:
+--1.otherwise than input to 
+--  SOAC kernels (including
+--  lambda bodies), or 
+--2.as input to two kernels 
+--  not located on disjoint 
+--  control-flow (branches)
+
+,kers ::M.Map Name FusedKer
+--^maps kernel name to data
+\}
+\end{colorcode}
+\end{minipage}
+%\begin{center}
+%\includegraphics[height=12ex]{figures/MemCoalesce}
+%\end{center}
+} 
+%\vspace{-1ex}
+\caption{Data Structures for Fusion Metadata.}
+\label{fig:fusionDS}
+\end{figure}
+
+
+\begin{figure}[bt]
+%\hrule ~
+\vbox{
+\begin{colorcode}
+tryFuseSOAC:: S.Set Name     ->         FusionRes -> 
+             -- ^vars \mymath{\in} SOAC's lamba,   ^current result  
+              ([Ident], Exp) -> FusionM FusionRes
+             -- ^SOAC stmt,      ^result after fusion
+tryFuseSOAC lam_vars res (out_ids, soac) = do   
+  inp_ids <- getInpArrsSOAC soac
+  --^e.g., [x,y] \mymath{\Leftarrow} map2(f, x, y)  
+  inp_nms <- expandSOACsInpArr \$ map identName inp_ids
+  --^e.g., [x,y] \mymath{\Leftarrow} map2(g, x) {\em if} let (x,y) = map2(f,a) 
+  let out_nms = map identName out_idds
+    
+  -- \emp{Conditions for fusion:}
+  --(1) \emphh{none of out_nms belongs to the unfusable set}
+  let cond1=L.all (\\x->not\$ S.member x\$ unfused res) out_nms 
+
+  --(2) \emphh{\mymath{\exists} some kernels that use some of out_ids as inputs} 
+  let to_fuse_knms = getKersWithInpArrs res out_nms
+  to_fuse_kers <- mapM (\\x-> case M.lookup x (kers res) of
+                              Nothing -> fusionErrorM ...
+                              Just ker-> return ker
+                       ) to_fuse_knms
+  --(3) \emphh{all kernels have to be compatible for fusion}, 
+  --    e.g., map2 o filter2 not supported
+  let all_compat = L.all (isCompatibleKer out_nms soac) 
+                         to_fuse_kers
+  --(4) \emphh{fusion cannot move a use of an input array}
+  --    \emphh{past its in-place update}
+  let all_used=foldl (\\y x->S.insert x y) lam_vars inp_nms
+  let kers_cap=map (\\k->S.intersection (inplace k) all_used) 
+                   to_fuse_kers
+  let ok_inplace = L.all (map S.null kers_cap)  
+
+  let all4_ok = cond1 && not \$ null to_fuse_kers && 
+                all_compat && ok_inplace
+  -- \emp{Update Unfusable Set} \emphh{with the input-array names that}
+  -- \emphh{appear as input arrays in kernels \mymath{\notin} to_fuse_kers},
+  -- since those are input to at least 2 distinct kernels.
+  let mod_kers=if is_fusable then to_fuse_knms else []
+  let in2_kers=filter (inpArrInRes res mod_kers) inp_nms
+  let unfused'=S.union (unfused res) (S.fromList in2_kers)
+  let res' = res \{ unfused = unfused' \}
+
+  if not all4_ok then startNewKernel res' (out_ids,soac)
+             -- ^adds a fresh kernel to the result, and    
+             -- updates the outArr and inpArr fields
+  else do fused_kers <- mapM (fuseSOACInKer out_ids soac) 
+                             to_fuse_kers
+          -- ^fuses current soac with all to_fuse_kers
+          updateFusionRes res' fused_kers to_fuse_knms
+          -- ^updates out/inpArr \& kers fields of result
+\end{colorcode}
+} \vspace{-2ex}
+\caption{ Conservative Fusion of a {\sc soac} Algorithm }
+\label{fig:TransfEg}
+\end{figure}
+
+%inpArrInResModKers
+
 \section{Fusion Structural-Analysis Algorithm}
 \label{sec:FusionPrg}
 
 \section{Limitations and Possible Extensions}
 \label{sec:Discuss}
 
+\begin{figure}[bt]
+%\hrule ~
+\vbox{
+\begin{colorcode}
+// \emp{Interchanging Scan With Inner Maps (ISWIM) Example}:
+transpose :: [[\mymath{\alpha}]] \mymath{\rightarrow} [[\mymath{\alpha}]]
+b = transpose(a) \mymath{\Rightarrow} a[i\mymath{\myindx{1}},i\mymath{\myindx{2}}] \emphh{\mymath{\equiv}} b[i\mymath{\myindx{2}},i\mymath{\myindx{1}}]
+
+scan2( fn [real] ([real] x, [real] y) => map2(op +, x, y), 
+     , \{0.0,..,0.0\}, a )   \emphh{\mymath{\equiv}}
+transpose( map2 (fn [real] ([real] x)=>scan2(op +,0.0,x)
+                , transpose(a) )
+
+// \emp{Generalization for Transpose}: 
+transpose :: (\mymath{{\tt Int}}, \mymath{{\tt Int}}, [\mymath{\myindx{1}}[\mymath{\myindx{..q}}\mymath{\alpha}]]) \mymath{\rightarrow} [\mymath{\myindx{1}}[\mymath{\myindx{..q}}\mymath{\alpha}]]
+b=transpose(k,n,a) \mymath{\Rightarrow} a[i\mymath{\myindx{1}},..,i\mymath{\myindx{k}},i\mymath{\myindx{k+1}},..,i\mymath{\myindx{k+n}},..,i\mymath{\myindx{q}}] \emphh{\mymath{\equiv}}
+                      b[i\mymath{\myindx{1}},..,i\mymath{\myindx{k+1}},..,i\mymath{\myindx{k+n}},i\mymath{\myindx{k}},..,i\mymath{\myindx{q}}] 
+// \emp{Generalization for Nested Maps}:
+map2\mymath{\myindu{1}}(f, a\mymath{\myindx{1}},.., a\mymath{\myindx{k}}) \emphh{\mymath{\equiv}} map2(g, a\mymath{\myindx{1}},.., a\mymath{\myindx{k}})
+map2\mymath{\myindu{n}}(f, a\mymath{\myindx{1}},.., a\mymath{\myindx{k}}) \emphh{\mymath{\equiv}} 
+map2(fn ([\mymath{\beta\myindx{1}}],..,[\mymath{\beta\myindx{t}}]) ([\mymath{\alpha\myindx{1}}] x\mymath{\myindx{1}},..,[\mymath{\alpha\myindx{k}}] x\mymath{\myindx{k}}) => 
+        map2\mymath{\myindu{n-1}}(f, x\mymath{\myindx{1}},.., x\mymath{\myindx{k}})
+    , a\mymath{\myindx{1}},.., a\mymath{\myindx{k}} )
+
+// \emp{Fusing Across Transpose (Similar for Reshape/Flatten)}:
+let x=map2\mymath{\myindu{n}}(f,a) in let y=transpose(1,n-k,x) in map2\mymath{\myindu{n}}(g,y)
+        \emphh{\mymath{\equiv}}
+map2\mymath{\myindu{n}}(g o f, transpose(1,n-k,a) ) 
+// \emphh{i.e., the map2 produced by ISWIM may be further fused.}
+\end{colorcode}
+} \vspace{-2ex}
+\caption{Interchange Scan With Inner Maps ({\sc iswim}) Transform.}
+\label{fig:TransfEg}
+\end{figure}
+
+\begin{figure}[bt]
+%\hrule ~
+\vbox{
+\begin{colorcode}
+// \emp{Arbitrary-Nested-Level Generalization of ISWIM}:
+\emp{scan2}( fn ( [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{1}}]],    .., [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{k}}]] ) 
+          ( [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{1}}]] x\mymath{\myindu{1}\myindx{1}}, .., [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{k}}]] x\mymath{\myindu{1}\myindx{k}},
+            [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{1}}]] x\mymath{\myindu{2}\myindx{1}}, .., [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{k}}]] x\mymath{\myindu{2}\myindx{k}} ) => 
+                \emphh{map2}\mymath{\myindu{n}}(\mymath{\oplus}, x\mymath{\myindu{1}\myindx{1}},.., x\mymath{\myindu{1}\myindx{k}}, x\mymath{\myindu{2}\myindx{1}},.., x\mymath{\myindu{2}\myindx{k}}) 
+     , (ne\mymath{\myindx{1}}, ..., ne\mymath{\myindx{k}}), a\mymath{\myindx{1}}, ..., a\mymath{\myindx{k}} 
+     )             \emphh{\mymath{\equiv}} 
+// replicate dim n of neutral elems so map2 sizes match
+let (re\mymath{\myindx{1}},..,re\mymath{\myindx{k}} ) = map\mymath{\myindu{n}}( replicate(1), ne\mymath{\myindx{1}},.., ne\mymath{\myindx{k}} )
+let ( y\mymath{\myindx{1}},.., y\mymath{\myindx{k}} ) =
+  \emphh{map2} (fn ( [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{1}}]],    .., [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{k}}]] ) 
+           ( [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{1}}]] x\mymath{\myindx{1}}, .., [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{k}}]] x\mymath{\myindx{k}} ) =>
+          \emphh{map2}\mymath{\myindu{n-1}}( fn ([\mymath{\myindx{1}}[\mymath{\myindx{..n-1}}\mymath{\alpha\myindx{1}}]],  .., [\mymath{\myindx{1}}[\mymath{\myindx{..n-1}}\mymath{\alpha\myindx{k}}]] )  
+                      ([\mymath{\myindx{1}}[\mymath{\myindx{..n-1}}\mymath{\alpha\myindx{1}}]] e\mymath{\myindx{1}},..,[\mymath{\myindx{1}}[\mymath{\myindx{..n-1}}\mymath{\alpha\myindx{k}}]] e\mymath{\myindx{k}}, 
+                       [\mymath{\myindx{1}}[\mymath{\myindx{..n-1}}\mymath{\alpha\myindx{1}}]] x\mymath{\myindx{1}},..,[\mymath{\myindx{1}}[\mymath{\myindx{..n-1}}\mymath{\alpha\myindx{k}}]] x\mymath{\myindx{k}})
+            => \emp{scan2}(\mymath{\oplus},(re_1[0],..,re_k[0]),x_1,..,x_k)
+                 , re\mymath{\myindx{1}}, ..., re\mymath{\myindx{k}}, x\mymath{\myindx{1}}, .., x\mymath{\myindx{k}} )
+       , transpose(1,n,a\mymath{\myindx{1}}), .., transpose(1,n,a\mymath{\myindx{k}}) )
+in (transpose(n, q\mymath{\myindx{1}}-n, y\mymath{\myindx{1}}), ..., transpose(n, q\mymath{\myindx{k}}-n, y\mymath{\myindx{k}}))
+// ^ transpose back the result; q\mymath{\myindx{t}}-n is the dimension of \mymath{\alpha\myindx{t}}
+
+// \emp{A Well-Known Transformation: Reduce Flattening}
+y = redomap2\mymath{\myindu{n}} ( \mymath{\oplus} 
+               , fn (\mymath{\alpha\myindx{1}},..,\mymath{\alpha\myindx{k}}) ([\mymath{\alpha\myindx{1}}] x\mymath{\myindx{1}},..,[\mymath{\alpha\myindx{k}}] x\mymath{\myindx{k}}) => 
+                     reduce(\mymath{\oplus}, (e\mymath{\myindx{1}},..,e\mymath{\myindx{k}}), x\mymath{\myindx{1}},..,x\mymath{\myindx{k}})
+               , (e\mymath{\myindx{1}},..,e\mymath{\myindx{k}}), a\mymath{\myindx{1}},..,a\mymath{\myindx{k}} )
+        \emphh{\mymath{\equiv}}
+reduce2(\mymath{\oplus}, (e\mymath{\myindx{1}},..,e\mymath{\myindx{k}}), flatten(n, a\mymath{\myindx{1}}),.., flatten(n, a\mymath{\myindx{k}}))
+// ^ flatten(n,a) flattens the first n dims of array a;
+// ^ redomap2\mymath{\myindu{n}} is similar to map2\mymath{\myindu{n}}
+\end{colorcode}
+} \vspace{-2ex}
+\caption{{\sc iswim}'s Formalization \& Reduce Flattening Transform.}
+\label{fig:TransfGen}
+\end{figure}
+
+%  ([\mymath{\alpha\myindx{1}}] x\mymath{\myindx{1}},..,[\mymath{\alpha\myindx{k}}] x\mymath{\myindx{k}})
+
+% Note that transpose(i+n, q-n, transpose(i, n, a)) == a
 
 \section{Related Work}
 \label{sec:RelWork}
