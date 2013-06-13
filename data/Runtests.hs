@@ -101,20 +101,27 @@ runTests run files = do
   _ <- forkIO $ forM_ files $ \file -> do
          test <- makeTest file
          putMVar testmvar (file, test)
-  let getResults remaining =
+  let getResults :: S.Set FilePath -> Int -> Int -> IO (Int,Int)
+      getResults remaining failed passed =
         case S.toList remaining of
-          []      -> clearLine
+          []      -> clearLine >> return (failed, passed)
           first:_ -> do
             clearLine
-            putStr $ "\rWaiting for " ++ first ++ ", " ++ show (S.size remaining) ++ " to go.\r"
+            putStr $ "\rWaiting for " ++ first ++ " (" ++
+                   show failed ++ " failed ," ++
+                   show passed ++ " passed ," ++
+                   show (S.size remaining) ++ " to go.)\r"
             hFlush stdout
             (file, res) <- takeMVar resmvar
+            let next = getResults $ file `S.delete` remaining
             case res of
-              Success   -> return ()
+              Success -> next failed (passed+1)
               Failure s -> do clearLine
                               putStrLn (file ++ ":\n" ++ s)
-            getResults $ file `S.delete` remaining
-  getResults $ S.fromList files
+                              next (failed+1) passed
+
+  (failed, passed) <- getResults (S.fromList files) 0 0
+  putStrLn $ show failed ++ " failed, " ++ show passed ++ " passed."
 
 main :: IO ()
 main = do
