@@ -608,7 +608,7 @@ isCt0 e = case e of
 ----------------------------------------------------
 
 isBasicTypeVal :: Value -> Bool
-isBasicTypeVal = basicType . typeOf
+isBasicTypeVal = basicType . valueType
 
 isCtOrCopy :: Exp -> Bool
 isCtOrCopy (Literal  val _ ) = isBasicTypeVal val
@@ -647,12 +647,12 @@ isRemovablePat (TupId tups _) e =
 getPropBnds :: TupIdent -> Exp -> Bool -> CPropM [(VName, CtOrId)]
 getPropBnds ( Id (Ident var tp _) ) e to_rem =
   let r = case e of
-            Literal v _          -> [(var, Constant v (boxType (typeOf v)) to_rem)]
+            Literal v _          -> [(var, Constant v (fromDecl $ valueType v) to_rem)]
             Var (Ident id1 tp1 _)-> [(var, VarId  id1 tp1 to_rem)]
             Index   {}           -> [(var, SymArr e   tp  to_rem)]
             TupLit  {}           -> [(var, SymArr e   tp  to_rem)]
 
-            Iota {}              -> let newtp = boxType (Array Int [Nothing] Nonunique) -- (Just n) does not work Exp
+            Iota {}              -> let newtp = Array Int [Nothing] Nonunique mempty
                                     in  [(var, SymArr e newtp to_rem)]
             Replicate {}      -> [(var, SymArr e tp to_rem)]
             ArrayLit  {}      -> [(var, SymArr e tp to_rem)]

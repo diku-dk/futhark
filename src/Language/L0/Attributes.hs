@@ -6,16 +6,27 @@
 module Language.L0.Attributes
   ( locStr
   , TypeBox(..)
-  , Typed(..)
-  , expToValue
   , funDecByName
+
+  -- * Parameter handling
+  , toParam
+  , fromParam
+
+  -- * Queries on expressions
+  , expToValue
+  , expTails
+  , typeOf
 
   -- * Queries on types
   , basicType
   , uniqueness
   , unique
+  , aliases
   , subtypeOf
   , similarTo
+  , returnType
+  , lambdaType
+  , lambdaReturnType
 
   -- * Operations on types
   , stripArray
@@ -24,13 +35,29 @@ module Language.L0.Attributes
   , arrayType
   , elemType
   , rowType
+  , toDecl
+  , toElemDecl
+  , fromDecl
+  , fromElemDecl
+  , setAliases
+  , setElemAliases
+  , addAliases
+  , addElemAliases
 
-  -- Queries on values
+  -- ** Removing and adding names
+  --
+  -- $names
+  , addNames
+  , addElemNames
+  , removeNames
+  , removeElemNames
+
+  -- * Queries on values
   , arrayDims
   , arrayShape
   , arraySize
   , arrayString
-
+  , valueType
 
   -- * Operations on values
   , blankValue
@@ -43,6 +70,8 @@ module Language.L0.Attributes
   -- | Values of these types are produces by the parser.  They use
   -- unadorned names and have no type information, apart from that
   -- which is syntactically required.
+  , NoInfo(..)
+  , UncheckedType
   , UncheckedIdent
   , UncheckedExp
   , UncheckedLambda
@@ -52,10 +81,13 @@ module Language.L0.Attributes
   )
   where
 
+import Control.Applicative
+
 import Data.Array
 import Data.List
 import Data.Loc
 import Data.Monoid
+import qualified Data.Set as S
 
 import Language.L0.Syntax
 
@@ -72,9 +104,9 @@ locStr (SrcLoc (Loc (Pos file line1 col1 _) (Pos _ line2 col2 _))) =
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
 -- it is two, and so forth.
-arrayDims :: Type -> Int
-arrayDims (Array _ ds _) = length ds
-arrayDims _              = 0
+arrayDims :: TypeBase vn as -> Int
+arrayDims (Array _ ds _ _) = length ds
+arrayDims _                = 0
 
 -- | @x `subuniqueOf` y@ is true if @x@ is not less unique than @y@.
 subuniqueOf :: Uniqueness -> Uniqueness -> Bool
@@ -83,84 +115,162 @@ subuniqueOf _ _ = True
 
 -- | @x \`subtypeOf\` y@ is true if @x@ is a subtype of @y@ (or equal to
 -- @y@), meaning @x@ is valid whenever @y@ is.
-subtypeOf :: Type -> Type -> Bool
-subtypeOf (Array t1 dims1 u1) (Array t2 dims2 u2) =
-  u1 `subuniqueOf` u2 && Elem t1 `subtypeOf` Elem t2 && dims1 == dims2
+subtypeOf :: TypeBase vn as1 -> TypeBase vn as2 -> Bool
+subtypeOf (Array t1 dims1 u1 _) (Array t2 dims2 u2 _) =
+  u1 `subuniqueOf` u2
+       && Elem t1 `subtypeOf` Elem t2
+       && length dims1 == length dims2
 subtypeOf (Elem (Tuple ts1)) (Elem (Tuple ts2)) =
   and $ zipWith subtypeOf ts1 ts2
-subtypeOf t1 t2 = t1 == t2
+subtypeOf (Elem Int) (Elem Int) = True
+subtypeOf (Elem Char) (Elem Char) = True
+subtypeOf (Elem Real) (Elem Real) = True
+subtypeOf (Elem Bool) (Elem Bool) = True
+subtypeOf _ _ = False
 
 -- | @x \`similarTo\` y@ is true if @x@ and @y@ are the same type,
 -- ignoring uniqueness.
-similarTo :: Type -> Type -> Bool
+similarTo :: TypeBase vn as -> TypeBase vn as -> Bool
 similarTo t1 t2 = t1 `subtypeOf` t2 || t2 `subtypeOf` t1
 
 -- | Return the uniqueness of a type.
-uniqueness :: Typed a => a -> Uniqueness
-uniqueness = uniqueness' . typeOf
-  where uniqueness' (Array _ _ u) = u
-        uniqueness' _ = Nonunique
+uniqueness :: TypeBase vn as -> Uniqueness
+uniqueness (Array _ _ u _) = u
+uniqueness _ = Nonunique
 
 -- | @unique t@ is 'True' if the type of the argument is unique.
-unique :: Typed a => a -> Bool
+unique :: TypeBase vn as -> Bool
 unique = (==Unique) . uniqueness
 
--- | A type box provides a way to box a type, and possibly retrieve
--- one.
-class (Eq ty, Ord ty, Show ty) => TypeBox ty where
+-- | Return the set of all variables mentioned in the aliasing of a
+-- type.
+aliases :: Monoid (as vn) => TypeBase as vn -> as vn
+aliases (Array _ _ _ als) = als
+aliases (Elem (Tuple et)) = mconcat $ map aliases et
+aliases (Elem _)          = mempty
+
+-- | Remove aliasing information from a type.
+toDecl :: TypeBase as vn -> DeclTypeBase vn
+toDecl (Array et sz u _) = Array (toElemDecl et) sz u NoInfo
+toDecl (Elem et) = Elem $ toElemDecl et
+
+-- | Remove aliasing information from an element type.
+toElemDecl :: ElemTypeBase as vn -> ElemTypeBase NoInfo vn
+toElemDecl (Tuple ts) = Tuple $ map toDecl ts
+toElemDecl t          = t `setElemAliases` NoInfo
+
+-- | Replace no aliasing with an empty alias set.
+fromDecl :: DeclTypeBase vn -> TypeBase Names vn
+fromDecl (Array et sz u _) = Array et sz u S.empty
+fromDecl (Elem et) = Elem $ fromElemDecl et
+
+-- | Replace no aliasing with an empty alias set.
+fromElemDecl :: ElemTypeBase NoInfo vn -> ElemTypeBase Names vn
+fromElemDecl (Tuple ts) = Tuple $ map fromDecl ts
+fromElemDecl t          = t `setElemAliases` S.empty
+
+-- | A type box provides a way to box a 'CompTypeBase', and possibly
+-- retrieve one, if the box is not empty.  This can be used to write
+-- function on L0 terms that are polymorphic in the type annotations,
+-- yet can still inspect types if they are present.
+class TypeBox ty where
   -- | Try to retrieve a type from the type box.
-  unboxType :: ty -> Maybe Type
+  unboxType :: ty vn -> Maybe (CompTypeBase vn)
   -- | Put a type in the box.
-  boxType :: Type -> ty
+  boxType :: CompTypeBase vn -> ty vn
+  -- | Apply a mapping action to the type contained in the box.
+  mapType :: Applicative f =>
+             (CompTypeBase vn -> f (CompTypeBase vn')) -> ty vn -> f (ty vn')
 
-instance TypeBox () where
+instance TypeBox NoInfo where
   unboxType = const Nothing
-  boxType = const ()
+  boxType = const NoInfo
+  mapType = const . const (pure NoInfo)
 
-instance TypeBox Type where
+instance TypeBox CompTypeBase where
   unboxType = Just
   boxType = id
+  mapType = ($)
 
--- | A typed value is one that represents an L0 term with an L0 type.
-class Typed v where
-  -- | The type of the term.
-  typeOf :: v -> Type
-
-instance Typed Type where
-  typeOf = id
+instance TypeBox DeclTypeBase where
+  unboxType = Just . fromDecl
+  boxType = toDecl
+  mapType f x = toDecl <$> f (fromDecl x)
 
 -- | @peelArray n t@ returns the type resulting from peeling the first
 -- @n@ array dimensions from @t@.  Returns @Nothing@ if @t@ has less
 -- than @n@ dimensions.
-peelArray :: Int -> Type -> Maybe Type
+peelArray :: Int -> TypeBase as vn -> Maybe (TypeBase as vn)
 peelArray 0 t = Just t
-peelArray 1 (Array et [_] _) = Just $ Elem et
-peelArray n (Array et (_:ds) u) =
-  peelArray (n-1) $ Array et ds u
+peelArray 1 (Array et [_] _ als) = Just $ Elem et `setAliases` als
+peelArray n (Array et (_:ds) u als) =
+  peelArray (n-1) $ Array et ds u als
 peelArray _ _ = Nothing
 
 -- | Returns the bottommost type of an array.  For @[[int]]@, this
 -- would be @int@.
-elemType :: Type -> ElemType
-elemType (Array t _ _) = t
+elemType :: TypeBase vn as -> ElemTypeBase vn as
+elemType (Array t _ _ als) = t `setElemAliases` als
 elemType (Elem t) = t
 
 -- | Return the immediate row-type of an array.  For @[[int]]@, this
 -- would be @[int]@.
-rowType :: Type -> Type
-rowType (Array et (_:_:dims) u) = Array et dims u
-rowType (Array et _ _) = Elem et
+rowType :: TypeBase vn as -> TypeBase vn as
+rowType (Array et (_:_:dims) u als) = Array et dims u als
+rowType (Array et _ _ als) = Elem et `setAliases` als
 rowType (Elem et) = Elem et
 
 -- | A type is a basic type if it is not an array and any component
 -- types are basic types.
-basicType :: Type -> Bool
+basicType :: TypeBase vn as -> Bool
 basicType (Array {}) = False
 basicType (Elem (Tuple ts)) = all basicType ts
 basicType _ = True
 
-uniqueOrBasic :: Typed t => t -> Bool
-uniqueOrBasic x = basicType (typeOf x) || unique x
+uniqueOrBasic :: TypeBase vn as -> Bool
+uniqueOrBasic x = basicType x || unique x
+
+-- $names
+--
+-- The element type annotation of 'ArrayVal' values is a 'TypeBase'
+-- with '()' for variable names.  This means that when we construct
+-- 'ArrayVal's based on a type with a more common name representation,
+-- we need to remove the names and replace them with '()'s.  Since the
+-- only place names appear in types is in the array size annotations,
+-- and those can always be replaced with 'Nothing', we can simply put
+-- that in, instead of the original expression (if any).
+
+-- | Remove names from a type - this involves removing all size
+-- annotations from arrays, as well as all aliasing.
+removeNames :: TypeBase as vn -> TypeBase NoInfo ()
+removeNames (Array et sizes u _) =
+  Array (removeElemNames et) (map (const Nothing) sizes) u NoInfo
+removeNames (Elem et) = Elem $ removeElemNames et
+
+-- | Remove names from an element type, as in 'removeNames'.
+removeElemNames :: ElemTypeBase as vn -> ElemTypeBase NoInfo ()
+removeElemNames (Tuple ets) = Tuple $ map removeNames ets
+removeElemNames Int  = Int
+removeElemNames Bool = Bool
+removeElemNames Char = Char
+removeElemNames Real = Real
+
+-- | Add names to a type - this replaces array sizes with 'Nothing',
+-- although they probably are already, if you're using this.
+addNames :: TypeBase NoInfo () -> TypeBase NoInfo vn
+addNames (Array et sizes u _) =
+  Array (addElemNames et) (map (const Nothing) sizes) u NoInfo
+addNames (Elem et) = Elem $ addElemNames et
+
+-- | Add names to an element type - this replaces array sizes with
+-- 'Nothing', although they probably are already, if you're using
+-- this.
+addElemNames :: ElemTypeBase NoInfo () -> ElemTypeBase NoInfo vn
+addElemNames (Tuple ets) = Tuple $ map addNames ets
+addElemNames Int  = Int
+addElemNames Bool = Bool
+addElemNames Char = Char
+addElemNames Real = Real
 
 -- | @arrayOf t s u@ constructs an array type.  The convenience
 -- compared to using the 'Array' constructor directly is that @t@ can
@@ -168,17 +278,20 @@ uniqueOrBasic x = basicType (typeOf x) || unique x
 -- a list of length @n@, the resulting type is of an @n+m@ dimensions.
 -- The uniqueness of the new array will be @u@, no matter the
 -- uniqueness of @t@.
-arrayOf :: Type -> ArraySize -> Uniqueness -> Type
-arrayOf (Array et size1 _) size2 u =
-  Array et (size2 ++ size1) u
-arrayOf (Elem et) size u = Array et size u
+arrayOf :: Monoid (as vn) =>
+           TypeBase as vn -> ArraySize vn -> Uniqueness -> TypeBase as vn
+arrayOf (Array et size1 _ als) size2 u =
+  Array et (size2 ++ size1) u als
+arrayOf (Elem et) size u =
+  Array (et `setElemAliases` NoInfo) size u $ aliases $ Elem et
 
 -- | @array n t@ is the type of @n@-dimensional arrays having @t@ as
 -- the base type.  If @t@ is itself an m-dimensional array, the result
 -- is an @n+m@-dimensional array with the same base type as @t@.  If
 -- you need to specify size information for the array, use 'arrayOf'
 -- instead.
-arrayType :: Int -> Type -> Uniqueness -> Type
+arrayType :: Monoid (as vn) =>
+             Int -> TypeBase as vn -> Uniqueness -> TypeBase as vn
 arrayType 0 t _ = t
 arrayType n t u = arrayOf t ds u
   where ds = replicate n Nothing
@@ -186,42 +299,68 @@ arrayType n t u = arrayOf t ds u
 -- | @stripArray n t@ removes the @n@ outermost layers of the array.
 -- Essentially, it is the type of indexing an array of type @t@ with
 -- @n@ indexes.
-stripArray :: Int -> Type -> Type
-stripArray n (Array et ds u)
-  | n < length ds = Array et (drop n ds) u
-  | otherwise     = Elem et
+stripArray :: Int -> TypeBase vn as -> TypeBase vn as
+stripArray n (Array et ds u als)
+  | n < length ds = Array et (drop n ds) u als
+  | otherwise     = Elem et `setAliases` als
 stripArray _ t = t
 
-withUniqueness :: Type -> Uniqueness -> Type
-withUniqueness (Array et dims _) u = Array et dims u
+withUniqueness :: TypeBase as vn -> Uniqueness -> TypeBase as vn
+withUniqueness (Array et dims _ als) u = Array et dims u als
 withUniqueness (Elem (Tuple ets)) u =
   Elem $ Tuple $ map (`withUniqueness` u) ets
 withUniqueness t _ = t
 
+-- | @t \`setAliases\` als@ returns @t@, but with @als@ substituted for
+-- any already present aliasing.
+setAliases :: TypeBase asf vn -> ast vn -> TypeBase ast vn
+setAliases t = addAliases t . const
+
+-- | @t \`setElemAliases\` als@ returns @t@, but with @als@ substituted for
+-- any already present aliasing.
+setElemAliases :: ElemTypeBase asf vn -> ast vn -> ElemTypeBase ast vn
+setElemAliases t = addElemAliases t . const
+
+-- | @t \`addAliases\` f@ returns @t@, but with any already present
+-- aliasing replaced by @f@ applied to that aliasing.
+addAliases :: TypeBase asf vn -> (asf vn -> ast vn) -> TypeBase ast vn
+addAliases (Array et dims u als) f = Array et dims u $ f als
+addAliases (Elem et) f = Elem $ et `addElemAliases` f
+
+-- | @t \`addAliases\` f@ returns @t@, but with any already present
+-- aliasing replaced by @f@ applied to that aliasing.
+addElemAliases :: ElemTypeBase asf vn -> (asf vn -> ast vn) -> ElemTypeBase ast vn
+addElemAliases (Tuple ets) f = Tuple $ map (`addAliases` f) ets
+addElemAliases Int  _ = Int
+addElemAliases Real _ = Real
+addElemAliases Bool _ = Bool
+addElemAliases Char _ = Char
+
 -- | A "blank" value of the given type - this is zero, or whatever is
 -- close to it.  Don't depend on this value, but use it for creating
 -- arrays to be populated by do-loops.
-blankValue :: Type -> Value
+blankValue :: TypeBase as vn -> Value
 blankValue (Elem Int) = IntVal 0
 blankValue (Elem Real) = RealVal 0.0
 blankValue (Elem Bool) = LogVal False
 blankValue (Elem Char) = CharVal '\0'
 blankValue (Elem (Tuple ts)) = TupVal (map blankValue ts)
-blankValue (Array et [_] _) = arrayVal [] $ Elem et
-blankValue (Array et (_:ds) u) = arrayVal [] rt
-  where rt = Array et ds u
-blankValue (Array et _ _) = arrayVal [] $ Elem et
+blankValue (Array et [_] _ _) = arrayVal [] $ Elem et
+blankValue (Array et (_:ds) u as) = arrayVal [] rt
+  where rt = Array et ds u as
+blankValue (Array et _ _ _) = arrayVal [] $ Elem et
 
-instance Typed Value where
-  typeOf (IntVal _) = Elem Int
-  typeOf (RealVal _) = Elem Real
-  typeOf (LogVal _) = Elem Bool
-  typeOf (CharVal _) = Elem Char
-  typeOf (TupVal vs) = Elem $ Tuple (map typeOf vs)
-  typeOf (ArrayVal _ (Elem et)) =
-    Array et [Nothing] Nonunique
-  typeOf (ArrayVal _ (Array et ds _)) =
-    Array et (Nothing:ds) Nonunique
+-- | The type of an L0 value.
+valueType :: Value -> DeclTypeBase vn
+valueType (IntVal _) = Elem Int
+valueType (RealVal _) = Elem Real
+valueType (LogVal _) = Elem Bool
+valueType (CharVal _) = Elem Char
+valueType (TupVal vs) = Elem $ Tuple (map valueType vs)
+valueType (ArrayVal _ (Elem et)) =
+  Array (addElemNames et) [Nothing] Nonunique NoInfo
+valueType (ArrayVal _ (Array et ds _ _)) =
+  Array (addElemNames et) (Nothing:replicate (length ds) Nothing) Nonunique NoInfo
 
 -- | Return a list of the sizes of an array (the shape, in other
 -- terms).  For non-arrays, this is the empty list.  A two-dimensional
@@ -242,11 +381,11 @@ arraySize t = case arrayShape t of
                 n:_ -> n
 
 -- | Construct an array value containing the given elements.
-arrayVal :: [Value] -> Type -> Value
-arrayVal vs = ArrayVal $ listArray (0, length vs-1) vs
+arrayVal :: [Value] -> TypeBase as vn -> Value
+arrayVal vs = ArrayVal (listArray (0, length vs-1) vs) . removeNames . toDecl
 
 -- | An empty array with the given row type.
-emptyArray :: Type -> Value
+emptyArray :: TypeBase as vn -> Value
 emptyArray = arrayVal []
 
 -- | If the given value is a nonempty array containing only
@@ -268,84 +407,94 @@ flattenArray (ArrayVal arr et) =
           flatten v = [v]
 flattenArray v = v
 
-instance Typed (IdentBase Type vn) where
-  typeOf = identType
+-- | The type of an L0 term.  The aliasing will refer to itself, if
+-- the term is a non-tuple-typed variable.
+typeOf :: Ord vn => ExpBase CompTypeBase vn -> CompTypeBase vn
+typeOf (Literal val _) = fromDecl $ valueType val
+typeOf (TupLit es _) = Elem $ Tuple $ map typeOf es
+typeOf (ArrayLit es t _) =
+  arrayType 1 t $ mconcat $ map (uniqueness . typeOf) es
+typeOf (BinOp _ _ _ t _) = t
+typeOf (And {}) = Elem Bool
+typeOf (Or {}) = Elem Bool
+typeOf (Not _ _) = Elem Bool
+typeOf (Negate _ t _) = t
+typeOf (If _ _ _ t _) = t
+typeOf (Var ident) =
+  case identType ident of
+    Elem (Tuple ets) -> Elem $ Tuple ets
+    t                -> t `setAliases` S.insert (identName ident) (aliases t)
+typeOf (Apply _ _ t _) = t
+typeOf (LetPat _ _ body _) = typeOf body
+typeOf (LetWith _ _ _ _ body _) = typeOf body
+typeOf (Index _ _ t _) = t
+typeOf (Iota _ _) = arrayType 1 (Elem Int) Unique
+typeOf (Size _ _) = Elem Int
+typeOf (Replicate _ e _) = arrayType 1 (typeOf e) u
+  where u | uniqueOrBasic (typeOf e) = Unique
+          | otherwise = Nonunique
+typeOf (Reshape shape e _) = build (length shape) (elemType $ typeOf e)
+  where build 0 t = Elem t
+        build n t =
+          Array (t `setElemAliases` NoInfo) (replicate n Nothing) Nonunique $
+          case typeOf e of Array _ _ _ als -> als
+                           _               -> S.empty -- Type error.
+typeOf (Transpose e _) = typeOf e
+typeOf (Map f arr _ _) = arrayType 1 et $ uniqueProp et
+  where et = lambdaType f [rowType $ typeOf arr]
+typeOf (Reduce fun start arr _ _) =
+  lambdaType fun [typeOf start, rowType (typeOf arr)]
+typeOf (Zip es _) = arrayType 1 (Elem $ Tuple $ map snd es) Nonunique
+typeOf (Unzip _ ts _) = Elem $ Tuple $ map (flip (arrayType 1) Unique) ts
+typeOf (Scan fun start arr _ _) =
+  arrayType 1 et $ uniqueness et
+    where et = lambdaType fun [typeOf start, rowType $ typeOf arr]
+typeOf (Filter _ arr _ _) = typeOf arr
+typeOf (Mapall fun e _) =
+  arrayType (arrayDims $ typeOf e) et Nonunique
+    where et = lambdaType fun [Elem $ elemType $ typeOf e]
+typeOf (Redomap redfun mapfun start arr rt loc) =
+  lambdaType redfun [typeOf start, rowType $ typeOf $ Map mapfun arr rt loc]
+typeOf (Split _ _ t _) =
+  Elem $ Tuple [arrayType 1 t Nonunique, arrayType 1 t Nonunique]
+typeOf (Concat x y _) = typeOf x `withUniqueness` u
+  where u = uniqueness (typeOf x) <> uniqueness (typeOf y)
+typeOf (Copy e _) = typeOf e `withUniqueness` Unique `setAliases` S.empty
+typeOf (DoLoop _ _ _ _ _ body _) = typeOf body
+typeOf (Map2 f arrs _ _) =
+  case lambdaType f $ map typeOf arrs of
+    Elem (Tuple tps) ->
+      Elem $ Tuple $ map (\x -> arrayType 1 x (uniqueProp x)) tps
+    ftp -> arrayType 1 ftp (uniqueProp ftp)
+typeOf (Reduce2 fun acc arrs _ _) =
+  lambdaType fun $ typeOf acc : map typeOf arrs
+typeOf (Scan2 _ _ _ (Elem (Tuple tps)) _) =
+  Elem $ Tuple $ map (\x -> arrayType 1 x Unique) tps
+typeOf (Scan2 _ _ _ tp _) = arrayType 1 tp Unique
+typeOf (Filter2 _ arrs _) =
+  case map typeOf arrs of
+    [t] -> t
+    tps -> Elem $ Tuple tps
+typeOf (Redomap2 redfun mapfun start arrs rt loc) =
+  lambdaType redfun [typeOf start, typeOf (Map2 mapfun arrs rt loc)]
+typeOf (Mapall2 fun es _) =
+    let inpdim= case map typeOf es of
+                  et:etps -> foldl min
+                             (arrayDims et)
+                             (map arrayDims etps)
+                  _       -> 0
+        fnrtp = lambdaType fun $ map (Elem . elemType . typeOf) es
+    in case fnrtp of
+        Elem (Tuple tps) -> Elem $ Tuple $ map (\x -> arrayType inpdim x Unique) tps
+        _ -> arrayType inpdim fnrtp Unique
 
-instance Typed (ExpBase Type vn) where
-  typeOf (Literal val _) = typeOf val
-  typeOf (TupLit es _) = Elem $ Tuple $ map typeOf es
-  typeOf (ArrayLit es t _) = arrayType 1 t $ mconcat $ map uniqueness es
-  typeOf (BinOp _ _ _ t _) = t
-  typeOf (And {}) = Elem Bool
-  typeOf (Or {}) = Elem Bool
-  typeOf (Not _ _) = Elem Bool
-  typeOf (Negate _ t _) = t
-  typeOf (If _ _ _ t _) = t
-  typeOf (Var ident) = identType ident
-  typeOf (Apply _ _ t _) = t
-  typeOf (LetPat _ _ body _) = typeOf body
-  typeOf (LetWith _ _ _ _ body _) = typeOf body
-  typeOf (Index _ _ t _) = t
-  typeOf (Iota _ _) = arrayType 1 (Elem Int) Unique
-  typeOf (Size _ _) = Elem Int
-  typeOf (Replicate _ e _) = arrayType 1 (typeOf e) u
-    where u | uniqueOrBasic e = Unique
-            | otherwise = Nonunique
-  typeOf (Reshape shape e _) = build (length shape) (elemType $ typeOf e)
-    where build 0 t = Elem t
-          build n t = Array t (replicate n Nothing) Nonunique
-  typeOf (Transpose e _) = typeOf e
-  typeOf (Map f _ _ _) = arrayType 1 (typeOf f) u
-    where u | uniqueOrBasic (typeOf f) = Unique
-            | otherwise = Nonunique
-  typeOf (Reduce fun _ _ _ _) = typeOf fun
-  typeOf (Zip es _) = arrayType 1 (Elem $ Tuple $ map snd es) Nonunique
-  typeOf (Unzip _ ts _) = Elem $ Tuple $ map (flip (arrayType 1) Unique) ts
-  typeOf (Scan fun e arr _ _) =
-    arrayType 1 (typeOf fun) (uniqueness fun <> uniqueness e <> uniqueness arr)
-  typeOf (Filter _ arr _ _) = typeOf arr
-  typeOf (Mapall fun e _) = arrayType (arrayDims $ typeOf e) (typeOf fun) Nonunique
-  typeOf (Redomap redfun _ _ _ _ _) = typeOf redfun
-  typeOf (Split _ _ t _) = Elem $ Tuple [arrayType 1 t Nonunique, arrayType 1 t Nonunique]
-  typeOf (Concat x y _) = typeOf x `withUniqueness` u
-    where u = uniqueness (typeOf x) <> uniqueness (typeOf y)
-  typeOf (Copy e _) = typeOf e `withUniqueness` Unique
-  typeOf (DoLoop _ _ _ _ _ body _) = typeOf body
---- Begin SOAC2: (Cosmin) ---
-  typeOf (Map2 f _ _ _) =
-    let ftp = typeOf f in
-    case ftp of
-        Elem (Tuple tps) -> Elem $ Tuple $ map (\x -> arrayType 1 x (uniqueProp x)) tps
-        _ -> arrayType 1 ftp (uniqueProp ftp)
-  --typeOf (Map2 _ _ _ (Elem (Tuple tps)) _) = Elem $ Tuple $ map (\x -> arrayType 1 x Unique) tps
-  --typeOf (Map2 _ _ _ tp _) = arrayType 1 tp Unique
-  typeOf (Reduce2 fun _ _ _ _) = typeOf fun
-  typeOf (Scan2 _ _ _ (Elem (Tuple tps)) _) = Elem $ Tuple $ map (\x -> arrayType 1 x Unique) tps
-  typeOf (Scan2 _ _ _ tp _) = arrayType 1 tp Unique
-  typeOf (Filter2 _ arrs _) =
-    case map typeOf arrs of
-      [t] -> t
-      tps -> Elem $ Tuple tps
-  typeOf (Redomap2 redfun _ _ _ _ _) = typeOf redfun
-  typeOf (Mapall2 fun es _) =
-      let inpdim= case map typeOf es of
-                    et:etps -> foldl min
-                               (arrayDims et)
-                               (map arrayDims etps)
-                    _       -> 0
-          fnrtp = typeOf fun
-      in case fnrtp of
-          Elem (Tuple tps) -> Elem $ Tuple $ map (\x -> arrayType inpdim x Unique) tps
-          _ -> arrayType inpdim fnrtp Unique
-
-uniqueProp :: Typed t => t -> Uniqueness
+uniqueProp :: TypeBase vn as -> Uniqueness
 uniqueProp tp = if uniqueOrBasic tp then Unique else Nonunique
---- End SOAC2: (Cosmin) ---
 
 -- | If possible, convert an expression to a value.  This is not a
 -- true constant propagator, but a quick way to convert array/tuple
 -- literal expressions into literal values instead.
-expToValue :: ExpBase Type vn -> Maybe Value
+expToValue :: ExpBase (TypeBase as) vn -> Maybe Value
 expToValue (Literal val _) = Just val
 expToValue (TupLit es _) = do es' <- mapM expToValue es
                               Just $ TupVal es'
@@ -353,28 +502,65 @@ expToValue (ArrayLit es t _) = do es' <- mapM expToValue es
                                   Just $ arrayVal es' t
 expToValue _ = Nothing
 
-instance Typed (LambdaBase Type vn) where
-  typeOf (AnonymFun _ _ t _) = t
-  typeOf (CurryFun _ _ t _) = t
+-- | The result of applying the arguments of the given types to the
+-- given lambda function.
+lambdaType :: Ord vn =>
+              LambdaBase CompTypeBase vn -> [CompTypeBase vn] -> CompTypeBase vn
+lambdaType = returnType . lambdaReturnType
+
+-- | The result of applying the arguments of the given types to a
+-- function with the given return type.
+returnType :: Ord vn => DeclTypeBase vn -> [CompTypeBase vn] -> CompTypeBase vn
+returnType (Array et sz Nonunique NoInfo) args = Array et sz Nonunique als
+  where als = mconcat $ map aliases args
+returnType (Array et sz Unique NoInfo) _ = Array et sz Unique mempty
+returnType (Elem (Tuple ets)) args =
+  Elem $ Tuple $ map (`returnType` args) ets
+returnType (Elem t) _ = Elem t `setAliases` S.empty
+
+-- | The specified return type of a lambda.
+lambdaReturnType :: LambdaBase CompTypeBase vn -> DeclTypeBase vn
+lambdaReturnType (AnonymFun _ _ t _) = t
+lambdaReturnType (CurryFun _ _ t _)  = toDecl t
 
 -- | Find the function of the given name in the L0 program.
 funDecByName :: Name -> ProgBase ty vn -> Maybe (FunDecBase ty vn)
 funDecByName fname = find (\(fname',_,_,_,_) -> fname == fname') . progFunctions
 
+-- | Return those subexpressions where evaluation of the expression
+-- would stop.
+expTails :: ExpBase ty vn -> [ExpBase ty vn]
+expTails (LetPat _ _ body _) = expTails body
+expTails (LetWith _ _ _ _ body _) = expTails body
+expTails (DoLoop _ _ _ _ _ body _) = expTails body
+expTails (If _ t f _ _) = expTails t ++ expTails f
+expTails e = [e]
+
+-- | Convert an identifier to a 'ParamBase'.
+toParam :: IdentBase (TypeBase as) vn -> ParamBase vn
+toParam (Ident name t loc) = Ident name (toDecl t) loc
+
+-- | Convert a 'ParamBase' to an identifier.
+fromParam :: ParamBase vn -> IdentBase CompTypeBase vn
+fromParam (Ident name t loc) = Ident name (fromDecl t) loc
+
+-- | A type with no aliasing information.
+type UncheckedType = TypeBase NoInfo Name
+
 -- | An identifier with no type annotations.
-type UncheckedIdent = IdentBase () Name
+type UncheckedIdent = IdentBase NoInfo Name
 
 -- | An expression with no type annotations.
-type UncheckedExp = ExpBase () Name
+type UncheckedExp = ExpBase NoInfo Name
 
 -- | A lambda with no type annotations.
-type UncheckedLambda = LambdaBase () Name
+type UncheckedLambda = LambdaBase NoInfo Name
 
 -- | A pattern with no type annotations.
-type UncheckedTupIdent = TupIdentBase () Name
+type UncheckedTupIdent = TupIdentBase NoInfo Name
 
 -- | A function declaration with no type annotations.
-type UncheckedFunDec = FunDecBase () Name
+type UncheckedFunDec = FunDecBase NoInfo Name
 
 -- | An L0 program with no type annotations.
-type UncheckedProg = ProgBase () Name
+type UncheckedProg = ProgBase NoInfo Name

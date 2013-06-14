@@ -68,7 +68,7 @@ import Language.L0.Syntax
 -- given child.
 data MapperBase tyf tyt vnf vnt m = Mapper {
     mapOnExp :: ExpBase tyf vnf -> m (ExpBase tyt vnt)
-  , mapOnType :: tyf -> m tyt
+  , mapOnType :: tyf vnf -> m (tyt vnt)
   , mapOnLambda :: LambdaBase tyf vnf -> m (LambdaBase tyt vnt)
   , mapOnPattern :: TupIdentBase tyf vnf -> m (TupIdentBase tyt vnt)
   , mapOnIdent :: IdentBase tyf vnf -> m (IdentBase tyt vnt)
@@ -212,7 +212,7 @@ mapExp m = runIdentity . mapExpM m
 -- | Reification of a left-reduction across a syntax tree.
 data Folder ty vn a m = Folder {
     foldOnExp :: a -> ExpBase ty vn -> m a
-  , foldOnType :: a -> ty -> m a
+  , foldOnType :: a -> ty vn -> m a
   , foldOnLambda :: a -> LambdaBase ty vn -> m a
   , foldOnPattern :: a -> TupIdentBase ty vn -> m a
   , foldOnIdent :: a -> IdentBase ty vn -> m a
@@ -258,7 +258,7 @@ foldExp m x = runIdentity . foldExpM m x
 -- child.
 data Walker ty vn m = Walker {
     walkOnExp :: ExpBase ty vn -> m ()
-  , walkOnType :: ty -> m ()
+  , walkOnType :: ty vn -> m ()
   , walkOnLambda :: LambdaBase ty vn -> m ()
   , walkOnPattern :: TupIdentBase ty vn -> m ()
   , walkOnIdent :: IdentBase ty vn -> m ()
