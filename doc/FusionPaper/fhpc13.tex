@@ -72,6 +72,7 @@
 \hyphenation{re-le-vant}
 \hyphenation{asso-ci-a-ti-vi-ty}
 
+\renewcommand\tilde[0]{{\raise.17ex\hbox{$\scriptstyle\sim$}}}
 
 %%%%%%%%%%%%%%%%%%%%%%%
 % comments
@@ -283,6 +284,149 @@ For Troels:
     \item[5.] Demonstration of how code looks like after tuple-of-array transformation,
                 i.e., that would be the input for fusion.
 \end{itemize}
+
+L0 is a mostly-monomorphic, statically typed, strictly evaluated,
+purely functional language.  Although some built-in higher-order
+functions provide polymorphism, user-defined functions are
+monomorphic, and their return- and parameter types must be specified
+explicitly.
+
+The syntax of the first-order fragment of L0 can be seen in figure
+\ref{fig:fo-syntax}.  Common arithmetic operators such as {\tt +} and
+{\tt /} are supported in the usual way.  Note that they are
+polymorphic in the sense that they accept both integers and
+floating-points, although both operands must be of the same type.
+Pattern matching is supported in a limited way as the only way of
+decomposing tuple values, but there is no {\tt case} construct.
+
+There are two slightly complicated constructs in the first-order part
+of L0.  The first is the let-with construct for updating parts of
+arrays:
+
+\begin{colorcode}
+let b = a with [i] <- v in body
+\end{colorcode}
+
+This will evaluate {\tt body} with {\tt b} bound to the value of {\tt
+  a}, except that the element at position {\tt i} will be updated to
+the value of {\tt v}.  If {\tt a[i]} is itself an array (that is, if
+{\tt a} has more than one dimension), {\tt v} must be an array of the
+same size as the slice it is replacing.  We will write {\tt let a[i] =
+  v in body} when the variable to be bound has the same name as the
+source variable.  In section \ref{sec:in-place}, we will describe our
+method for doing array updates {\em in-place}, that is without copying
+the source array, without losing referential transparency.
+
+The other unusual construct is the {\tt do-loop}.  It is fundamentally
+syntactical sugar for a certain form of tail-recursive functions that
+makes it easier to express loop optimisations.  Consider the following
+loop.
+
+\begin{colorcode}
+loop (x = a) = for i < n do
+                 g(x)
+in body
+\end{colorcode}
+
+If we assume that the type of {\tt x} is {\tt t}, then the above loop
+is equivalent to the following.
+
+\begin{colorcode}
+// New function.
+fun t f(int i, int n, t x) =
+  if i < n then f(i+1, n, g(x)) else x
+
+let x = f(0, n, a)
+in body
+\end{colorcode}
+
+\begin{figure}[bt]
+\begin{tabular}{lrll}
+$t$ & $::=$ & {\tt int} & (Integers) \\
+& $|$ & {\tt real} & (Floats) \\
+& $|$ & {\tt bool} & (Booleans) \\
+& $|$ & {\tt char} & (Characters) \\
+& $|$ & {\tt ($t_{1}$, \ldots, $t_{n}$)} & (Tuples) \\
+& $|$ & {\tt [$t$]} & (Arrays) \\
+\\
+$v$ & $::=$ & $k$ & (Integer)\\
+& $|$ & $x$ & (Decimal number) \\
+& $|$ & $b$ & (Boolean)\\
+& $|$ & $c$ & (Character)\\
+& $|$ & $(v_{1},\ldots,v_{n})$ & (Tuple) \\
+& $|$ & $\{v_{1},\ldots,v_{n}\}$ & (Array) \\
+\\
+$p$ & $::=$ & $\alpha$ & (Name pattern)\\
+& $|$ & {\tt ($p_{1}$, \ldots, $p_{n}$)} & (Tuple pattern) \\
+\\
+$e$ & $::=$ & $v$ & (Constant)\\
+& $|$ & $\alpha$ & (Variable)\\
+& $|$ & {\tt ($e_{1}$,\ldots,$e_{n}$)} & (Tuple expression) \\
+& $|$ & {\tt \{$e_{1}$,\ldots,$e_{n}$\}} & (Array expression) \\
+& $|$ & $e_{1} \odot{} e_{2}$ & (Binary operator) \\
+& $|$ & {\tt \tilde{} $e$} & (Numerical negation) \\
+& $|$ & {\tt not $e$} & (Logical negation) \\
+& $|$ & {\tt if $e_{1}$ then $e_{2}$ else $e_{3}$} & (Branching) \\
+& $|$ & {\tt $\alpha$[$e_{1}$, \ldots, $e_{n}$]} & (Indexing) \\
+& $|$ & {\tt $f$($e_{1}$, \ldots, $e_{n}$)} & (Function call) \\
+& $|$ & {\tt let $p$ = $e_{1}$ in $e_{2}$} & (Pattern binding) \\
+& $|$ & {\tt zip($e_{1}$, \ldots, $e_{n}$)} & (Zipping) \\
+& $|$ & {\tt unzip($e$)} & (Unzipping) \\
+& $|$ & {\tt iota($e$)} & (Range) \\
+& $|$ & {\tt replicate($e_{n}$, $e_{v}$)} & (Replication) \\
+& $|$ & {\tt let $\alpha$ = $\beta$ with} & (In-place update) \\
+&     & {\tt \ \ [$e_{1}$,\ldots,$e_{n}$] <- $e_{v}$} \\
+&     & {\tt in $e_{b}$} \\
+& $|$ & {\tt loop ($p$ = $e_{1}$) =} & (Loop) \\
+&     & {\tt \ \ for $\alpha$ < $e_{2}$ do $e_{3}$} \\
+&     & {\tt in $e_{4}$} \\
+\end{tabular}
+\\
+\begin{tabular}{lrll}
+$fun$ & $::=$ & {\tt fun $t$ $f$($t_{1}$ $\alpha_{1}$,\ldots $t_{n}$ $\alpha_{n}$) = $e$} \\
+\\
+$prog$ & $::=$ & $\epsilon$ \\
+       & $|$   & $fun$ $prog$
+\end{tabular}
+\caption{L0 syntax}
+\label{fig:fo-syntax}
+\end{figure}
+
+\subsection{Second-order array combinators}
+\label{sec:soacs}
+
+\begin{figure}[bt]
+\begin{tabular}{lrll}
+$l$ & $::=$ & {\tt fn $t$ ($t_{1}$ $\alpha_{1}$, \ldots, $t_{n}$ $\alpha_{n}$)} & (Anonymous function) \\
+&     & {\tt => $e$} \\
+& $|$ & {\tt $f$ ($e_{1}$, \ldots, $e_{n}$)} & (Curried function) \\
+\\
+$e$ & $::=$ & {\tt map($l$, $e$)} \\
+    & $|$ & {\tt mapall($l$, $e$)} \\
+    & $|$ & {\tt filter($l$, $e$)} \\
+    & $|$ & {\tt reduce($l$, $x$, $e$)} \\
+    & $|$ & {\tt scan($l$, $x$, $e$)} \\
+    & $|$ & {\tt redomap($l_{r}$, $l_{m}$, $x$, $e$)} \\
+\end{tabular}
+\caption{Second-order array combinators}
+\label{fig:soacs}
+\end{figure}
+
+\begin{figure}[bt]
+\begin{tabular}{lrll}
+$e$ & $::=$ & {\tt map2($l$, $e_{1}$, \ldots, $e_{n}$)} \\
+    & $|$ & {\tt mapall2($l$, $e_{1}$, \ldots, $e_{n}$)} \\
+    & $|$ & {\tt filter2($l$, $e_{1}$, \ldots, $e_{n}$)} \\
+    & $|$ & {\tt reduce2($l$, $x$, $e_{1}$, \ldots, $e_{n}$)} \\
+    & $|$ & {\tt scan2($l$, $x$, $e_{1}$, \ldots, $e_{n}$)} \\
+    & $|$ & {\tt redomap2($l_{r}$, $l_{m}$, $x$, $e_{1}$, \ldots, $e_{n}$)} \\
+\end{tabular}
+\caption{Second-order tuple-array combinators}
+\label{fig:tuple-soacs}
+\end{figure}
+
+\subsection{Safe in-place updates}
+\label{sec:in-place}
 
 \section{Fusion via Structural Analysis}
 
