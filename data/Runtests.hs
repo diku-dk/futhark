@@ -17,7 +17,7 @@ import System.IO
 import System.Process
 
 l0flags :: String
-l0flags = "-utfe"
+l0flags = "-utehf"
 
 -- | Number of concurrent l0c instances to run.
 concurrency :: Int
@@ -108,8 +108,8 @@ runTests run files = do
           first:_ -> do
             clearLine
             putStr $ "\rWaiting for " ++ first ++ " (" ++
-                   show failed ++ " failed ," ++
-                   show passed ++ " passed ," ++
+                   show failed ++ " failed, " ++
+                   show passed ++ " passed, " ++
                    show (S.size remaining) ++ " to go.)\r"
             hFlush stdout
             (file, res) <- takeMVar resmvar
