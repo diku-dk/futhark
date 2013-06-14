@@ -23,7 +23,7 @@ import L0C.L0
 import L0C.FreshNames
 
 data CompilerState = CompilerState {
-    compTypeStructs :: [(Type, (C.Type, C.Definition))]
+    compTypeStructs :: [(DeclType, (C.Type, C.Definition))]
   , compVarDefinitions :: [C.Definition]
   , compInit :: [C.Stm]
   , compNameSrc :: VNameSource
@@ -83,21 +83,21 @@ varExp k = [C.cexp|$id:k|]
 
 -- | True if both types map to the same runtime representation.  This
 -- is the case if they are identical modulo uniqueness.
-sameRepresentation :: Type -> Type -> Bool
+sameRepresentation :: Eq (als VName) => GenType als -> GenType als -> Bool
 sameRepresentation (Elem (Tuple ets1)) (Elem (Tuple ets2))
   | length ets1 == length ets2 =
     and $ zipWith sameRepresentation ets1 ets2
-sameRepresentation (Array et1 ds1 _) (Array et2 ds2 _) =
+sameRepresentation (Array et1 ds1 _ _) (Array et2 ds2 _ _) =
   length ds1 == length ds2 && sameRepresentation (Elem et1) (Elem et2)
 sameRepresentation t1 t2 = t1 == t2
 
-typeToCType :: Type -> CompilerM C.Type
+typeToCType :: GenType als -> CompilerM C.Type
 typeToCType (Elem Int) = return [C.cty|int|]
 typeToCType (Elem Bool) = return [C.cty|int|]
 typeToCType (Elem Char) = return [C.cty|char|]
 typeToCType (Elem Real) = return [C.cty|double|]
 typeToCType t@(Elem (Tuple ts)) = do
-  ty <- gets $ find (sameRepresentation t . fst) . compTypeStructs
+  ty <- gets $ find (sameRepresentation (toDecl t) . fst) . compTypeStructs
   case ty of
     Just (_, (cty, _)) -> return cty
     Nothing -> do
@@ -105,13 +105,13 @@ typeToCType t@(Elem (Tuple ts)) = do
       name <- new "tuple_type"
       let struct = [C.cedecl|struct $id:name { $sdecls:members };|]
           stype  = [C.cty|struct $id:name|]
-      modify $ \s -> s { compTypeStructs = (t, (stype,struct)) : compTypeStructs s }
+      modify $ \s -> s { compTypeStructs = (toDecl t, (stype,struct)) : compTypeStructs s }
       return stype
         where field et i = do
                  ct <- typeToCType et
                  return [C.csdecl|$ty:ct $id:(tupleField i);|]
 typeToCType t@(Array {}) = do
-  ty <- gets $ find (sameRepresentation t . fst) . compTypeStructs
+  ty <- gets $ find (sameRepresentation (toDecl t) . fst) . compTypeStructs
   case ty of
     Just (_, (cty, _)) -> return cty
     Nothing -> do
@@ -120,7 +120,7 @@ typeToCType t@(Array {}) = do
       let ctp = [C.cty|$ty:ct*|]
           struct = [C.cedecl|struct $id:name { int dims[$int:(arrayDims t)]; $ty:ctp data; };|]
           stype  = [C.cty|struct $id:name|]
-      modify $ \s -> s { compTypeStructs = (t, (stype, struct)) : compTypeStructs s }
+      modify $ \s -> s { compTypeStructs = (toDecl t, (stype, struct)) : compTypeStructs s }
       return stype
 
 expCType :: Exp -> CompilerM C.Type
@@ -164,12 +164,12 @@ arraySliceSizeExp place t slice =
   where comb y i = [C.cexp|$exp:place.dims[$int:i] * $exp:y|]
 
 -- | Return an list of expressions giving the array shape in elements.
-arrayShapeExp :: C.Exp -> Type -> [C.Exp]
+arrayShapeExp :: C.Exp -> GenType als -> [C.Exp]
 arrayShapeExp place t =
   map comb [0..arrayDims t-1]
   where comb i = [C.cexp|$exp:place.dims[$int:i]|]
 
-indexArrayExp :: C.Exp -> Type -> [C.Exp] -> C.Exp
+indexArrayExp :: C.Exp -> GenType als -> [C.Exp] -> C.Exp
 indexArrayExp place t indexes =
   let sizes = map (foldl mult [C.cexp|1|]) $ tails $ map field [1..arrayDims t - 1]
       field :: Int -> C.Exp
@@ -183,7 +183,7 @@ indexArrayExp place t indexes =
 -- stores the value at @from[idxs]@ in @place@.  In contrast to
 -- 'indexArrayExp', this function takes care of creating proper size
 -- information if the result is an array itself.
-indexArrayElemStm :: C.Exp -> C.Exp -> Type -> [C.Exp] -> C.Stm
+indexArrayElemStm :: C.Exp -> C.Exp -> GenType als -> [C.Exp] -> C.Stm
 indexArrayElemStm place from t idxs =
   case drop (length idxs) $ arrayShapeExp from t of
     [] -> [C.cstm|$exp:place = $exp:index;|]
@@ -204,7 +204,7 @@ boundsCheckStm place idxs = [C.cstm|{$stms:(zipWith check idxs [0..])}|]
                           }|]
 
 -- | Return a statement printing the given value.
-printStm :: C.Exp -> Type -> CompilerM C.Stm
+printStm :: C.Exp -> GenType als -> CompilerM C.Stm
 printStm place (Elem Int)  = return [C.cstm|printf("%d", $exp:place);|]
 printStm place (Elem Char) = return [C.cstm|printf("%c", $exp:place);|]
 printStm place (Elem Bool) = return [C.cstm|printf($exp:place && "true" || "false");|]
@@ -218,9 +218,9 @@ printStm place (Elem (Tuple ets)) = do
                $stms:prints'
                putchar(')');
              }|]
-printStm place (Array Char _ _) =
+printStm place (Array Char _ _ _) =
   return [C.cstm|printf("%s", $exp:place.data);|]
-printStm place t@(Array et _ _) = do
+printStm place t@(Array et _ _ _) = do
   i <- new "print_i"
   v <- new "print_elem"
   et' <- typeToCType $ Elem et
@@ -241,7 +241,7 @@ printStm place t@(Array et _ _) = do
                putchar('}');
              }|]
 
-readStm :: C.Exp -> Type -> CompilerM C.Stm
+readStm :: C.Exp -> GenType als -> CompilerM C.Stm
 readStm place (Elem Int) =
   return [C.cstm|scanf("%d", &$exp:place);|]
 readStm place (Elem Char) =
@@ -375,8 +375,8 @@ compileValue place (TupVal vs) = do
 compileValue place v@(ArrayVal _ rt) = do
   val <- new "ArrayVal"
   dt <- new "ArrayData"
-  ct <- typeToCType $ typeOf v
-  cbt <- typeToCType $ Elem $ elemType rt
+  ct <- typeToCType $ valueType v
+  cbt <- typeToCType $ addNames $ Elem $ elemType rt
   let asinit n = [C.cinit|$int:n|]
       dims = map asinit $ arrayShape v
       arrdef = [C.cedecl|$ty:ct $id:val = { $inits:dims, NULL };|]
