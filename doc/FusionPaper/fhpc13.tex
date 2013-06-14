@@ -284,10 +284,101 @@ For Troels:
                 i.e., that would be the input for fusion.
 \end{itemize}
 
-\section{Fusion: Motivation and Intuitive Solution}
+\section{Fusion via Structural Analysis}
+
+
+\subsection{Motivation and Intuitive Solution}
 \label{sec:Intuition}
 
-\section{Fusing Once}
+\begin{figure}[bt]
+%\hrule ~
+\vbox{
+\begin{minipage}{0.46\columnwidth}
+%\begin{colorcode}
+%CC Uncoalesced Layout
+%DOALL i = 1, N
+%  DO j = 1, M
+%    ... ARR(\mymath{\sigma}(j), i) ...
+%  ENDDO
+%ENDDOALL
+%\end{colorcode}
+\begin{center}
+\includegraphics[height=30ex]{Figures/T1T2} \\\vspace{2ex}
+\includegraphics[height=30ex]{Figures/T1T2Fuse2}
+\end{center}
+\end{minipage}
+\hfill
+\begin{minipage}{0.46\columnwidth}
+\begin{center}
+\includegraphics[height=30ex]{Figures/T1T2Fuse1} \\\vspace{2ex}
+\includegraphics[height=30ex]{Figures/T1T2Fuse3}
+\end{center}
+\end{minipage}
+%\begin{center}
+%\includegraphics[height=12ex]{figures/MemCoalesce}
+%\end{center}
+} %\vspace{-1.5ex}
+\caption{Fusion By T2 Transformation on the Dependency Graph}
+\label{fig:T1T2}
+\end{figure}
+
+
+\begin{figure}[bt]
+%\hrule ~
+\vbox{
+\begin{minipage}{0.48\columnwidth}
+\begin{colorcode}
+// \emp{Case 1:} don't fuse if it
+//moves an array use across 
+//its in-place update point
+let \emphh{x}   = map2(f, \emp{a}) in
+let \emp{a}[1]= 3.33       in
+let y   = map2(g, \emp{x}) in ...
+
+// \emp{Case 3:} not all SOAC
+//combinations are fusable
+let \emp{x} = filter2(c\mymath{\myindx{1}}, a) in
+let \emp{y} = filter2(c\mymath{\myindx{1}}, b) in
+let z = map2   (f,\emp{x,y}) in...
+
+// \emp{Case 5:} don't fuse if \emp{x}
+//used outside SOAC inputs
+let \emphh{x} = map2(f, arr)  in
+let y = map2(g(\emp{x}), \emphh{x}) in
+\end{colorcode}
+\end{minipage}
+\hfill
+\begin{minipage}{0.48\columnwidth}
+\begin{colorcode}
+// \emp{Case 2:} don't fuse from 
+//outside in a loop (or \mymath{\lambda})
+let \emphh{x} = map2(f, arr)   in
+\emp{loop}(arr) = for i < N do
+  map2(op +, arr, \emp{x})
+
+// \emp{Case 4:} don't fuse in 2
+//kernels sharing a CF path
+let \emphh{x} = map2(f, arr) in
+let y = map2(g, \emp{x})   in
+let z = map2(h, \emp{x})   in ...
+
+// \emp{Case 6:} x \& y used exactly
+//once but still don't fuse
+let (x,y) = map2(f, a)   in
+let u = reduce2(op +,0,x)in
+let v = reduce2(op *,1,y)...
+\end{colorcode}
+\end{minipage}
+%\begin{center}
+%\includegraphics[height=12ex]{figures/MemCoalesce}
+%\end{center}
+} 
+%\vspace{-1ex}
+\caption{Don't Fuse Cases: Illegal or Duplicates Computation}
+\label{fig:dontFuse}
+\end{figure}
+
+\subsection{Fusing One SOAC}
 \label{sec:FusingOnce}
 
 \begin{figure}[bt]
@@ -308,7 +399,7 @@ data FusedKer = FusedKer \{
 --^ the input arrays used   
 --in SOAC stmt,i.e.,\{x,y\}.
 
-,inplace :: S.Set VName
+,inplace :: S.Set Name
 --^Aliasing set of vars
 --used in in-place updates
 --that reach this kernel.
@@ -373,11 +464,11 @@ tryFuseSOAC lam_vars res (out_ids, soac) = do
     
   -- \emp{Conditions for fusion:}
   --(1) \emphh{none of out_nms belongs to the unfusable set}
-  let cond1=L.all (\\x->not\$ S.member x\$ unfused res) out_nms 
+  let cond1=L.all (\mymath{\backslash}x->not\$ S.member x\$ unfused res) out_nms 
 
   --(2) \emphh{\mymath{\exists} some kernels that use some of out_ids as inputs} 
   let to_fuse_knms = getKersWithInpArrs res out_nms
-  to_fuse_kers <- mapM (\\x-> case M.lookup x (kers res) of
+  to_fuse_kers <- mapM (\mymath{\backslash}x-> case M.lookup x (kers res) of
                               Nothing -> fusionErrorM ...
                               Just ker-> return ker
                        ) to_fuse_knms
@@ -387,8 +478,8 @@ tryFuseSOAC lam_vars res (out_ids, soac) = do
                          to_fuse_kers
   --(4) \emphh{fusion cannot move a use of an input array}
   --    \emphh{past its in-place update}
-  let all_used=foldl (\\y x->S.insert x y) lam_vars inp_nms
-  let kers_cap=map (\\k->S.intersection (inplace k) all_used) 
+  let all_used=foldl (\mymath{\backslash}y x->S.insert x y) lam_vars inp_nms
+  let kers_cap=map (\mymath{\backslash}k->S.intersection (inplace k) all_used) 
                    to_fuse_kers
   let ok_inplace = L.all (map S.null kers_cap)  
 
@@ -417,9 +508,142 @@ tryFuseSOAC lam_vars res (out_ids, soac) = do
 \end{figure}
 
 %inpArrInResModKers
+%
+%addNewKer :: FusionRes -> ([Ident], Exp) -> FusionGM FusionRes
+%addNewKer res (out_ids, soac) = do
+%  inp_ids <- getInpArrsSOAC soac
+%  inp_nms <- expandSoacInpArr \$ map identName inp_ids
+%  let used_inps = filter (isInpArrInResModKers res S.empty) inp_nms
+%  let unfused'  = (unfused res) `S.union` S.fromList used_inps
+%
+%  let new_ker = FusedKer (out_ids,soac) (S.fromList inp_ids) S.empty []    
+%  nm_ker  <- freshName "ker"
+%  
+%  let os' = foldl (\mymath{\backslash}x arr -> M.insert arr nm_ker x) 
+%                  (outArr res) (map identName out_ids)
+%
+%  let is' = foldl (\mymath{\backslash}x arr -> M.insertWith' S.union arr 
+%                                (S.singleton nm_ker) x) 
+%                  (inpArr res) inp_nms
+%  return $ FusionRes os' is' unfused'  
+%                     (M.insert nm_ker new_ker (kers res)) 
+%
 
-\section{Fusion Structural-Analysis Algorithm}
-\label{sec:FusionPrg}
+\begin{figure}[bt]
+%\hrule ~
+\vbox{
+\begin{minipage}{0.48\columnwidth}
+\begin{colorcode}
+//\emp{map2 o map2 \mymath{\Rightarrow} map2}  
+let (x1, x2) = map2(f, a1)
+in  map2(g, x1, y)   
+    \emphh{\mymath{\equiv}}
+map2(fn \mymath{\beta} (\mymath{\alpha\myindx{1}} a1\mymath{\myindx{i}}, \mymath{\alpha\myindx{2}} y\mymath{\myindx{i}})
+  =>let (x1\mymath{\myindx{i}}, x2\mymath{\myindx{i}}) = f(a1\mymath{\myindx{i}})
+    in  g(x1\mymath{\myindx{i}}, y\mymath{\myindx{i}})
+, a1, y )
+
+//\emp{reduce2 o map2\mymath{\Rightarrow}redomap2}
+let (x1, x2) = map2(f, a1)
+in  reduce2(\mymath{\oplus},(e\mymath{\myindx{1}},e\mymath{\myindx{2}}),x1,y)   
+    \emphh{\mymath{\equiv}}
+redomap2(\mymath{\oplus}
+, fn (\mymath{\beta\myindx{1}},\mymath{\beta\myindx{2}}) ( \mymath{\beta\myindx{1}} e\mymath{\myindx{1}}, \mymath{\beta\myindx{2}} e\mymath{\myindx{2}}
+             , \mymath{\alpha\myindx{1}} a1\mymath{\myindx{i}},\mymath{\alpha\myindx{2}} y\mymath{\myindx{i}})
+   => let (x1\mymath{\myindx{i}}, x2\mymath{\myindx{i}}) = f(a1\mymath{\myindx{i}})
+      in  \mymath{\oplus}(e\mymath{\myindx{1}},e\mymath{\myindx{2}},x1\mymath{\myindx{i}},y\mymath{\myindx{i}})
+, (e\mymath{\myindx{1}}, e\mymath{\myindx{2}}), a1, y )
+
+//\emp{redomap2 o map2\mymath{\Rightarrow}redomap2}
+let (x1, x2) = map2(f, a1)
+in  redomap2(\mymath{\oplus}, g, e, x1, y)
+    \emphh{\mymath{\equiv}}
+redomap2(\mymath{\oplus}
+, fn \mymath{\beta} (\mymath{\beta} e, \mymath{\alpha\myindx{1}} a1\mymath{\myindx{i}}, \mymath{\alpha\myindx{2}} y\mymath{\myindx{i}})
+   => let (x1\mymath{\myindx{i}}, x2\mymath{\myindx{i}}) = f(a1\mymath{\myindx{i}})
+      in  g(e, x1\mymath{\myindx{i}}, y\mymath{\myindx{i}})
+, e, a1, y )
+
+// \emp{replicate can be fused}
+//\emp{without restrictions}
+let x = replicate(N,a)in 
+let y = map2(f, x, b) in
+let z = map2(g, x, c) in 
+let x[i] = ...
+    \emphh{\mymath{\equiv}}
+let x = replicate(N, a) in 
+let y = map2( fn \mymath{\beta\myindx{1}} (\mymath{\alpha\myindx{1}} b\mymath{\myindx{i}}) 
+              => f(a,b\mymath{\myindx{i}}), b)
+let z = map2( fn \mymath{\beta\myindx{2}} (\mymath{\alpha\myindx{2}} c\mymath{\myindx{i}}) 
+              => g(a,c\mymath{\myindx{i}}), c)
+in let x[i] = ...   
+\end{colorcode}
+\end{minipage}
+\hfill
+\begin{minipage}{0.48\columnwidth}
+\begin{colorcode}
+//\emp{filter2 o filter2\mymath{\Rightarrow}filter2}
+//\emp{{\em{}IFF} consumer's input set}
+//\emp{  \mymath{\equiv} producer's output set}
+let (x1,x2)=filter2(c\mymath{\myindx{1}},a1,a2)
+in  filter2(c\mymath{\myindx{2}}, x1, x2)   
+    \emphh{\mymath{\equiv}}
+filter2(
+  fn bool (\mymath{\alpha\myindx{1}} a1\mymath{\myindx{i}},\mymath{\alpha\myindx{2}} a2\mymath{\myindx{i}})=> 
+      if   c\mymath{\myindx{1}}(a1\mymath{\myindx{i}}, a2\mymath{\myindx{i}}) 
+      then c\mymath{\myindx{2}}(a1\mymath{\myindx{i}}, a2\mymath{\myindx{i}}) 
+      else false 
+, a1, a2 )
+
+
+
+
+//\emp{reduce2 o filter2\mymath{\Rightarrow}redomap2}
+//\emp{{\em{}IFF} consumer's input set}
+//\emp{  \mymath{\subseteq} producer's output set}
+let (x1,x2)=filter2(c, a1, a2)
+in  reduce2(\mymath{\oplus}, e, x1)
+    \emphh{\mymath{\equiv}}
+redomap2(\mymath{\oplus}
+, fn \mymath{\beta} (\mymath{\beta} e, \mymath{\alpha\myindx{1}} a1\mymath{\myindx{i}}, \mymath{\alpha\myindx{2}} a2\mymath{\myindx{i}})
+   => if c(a1\mymath{\myindx{i}}, a2\mymath{\myindx{i}})
+      then \mymath{\oplus}(e, a1\mymath{\myindx{i}}) else e
+, e, a1, a2 )
+
+
+
+
+//\emp{redomap2 o filter2\mymath{\Rightarrow}redomap2}
+//\emp{{\em{}IFF} consumer's input set}
+//\emp{  \mymath{\subseteq} producer's output set}
+let (x1,x2)=filter2(c, a1, a2)
+in  redomap2(\mymath{\oplus}, g, e, x1)
+    \emphh{\mymath{\equiv}}
+redomap2(\mymath{\oplus}
+, fn \mymath{\beta} (\mymath{\beta} e, \mymath{\alpha\myindx{1}} a1\mymath{\myindx{i}}, \mymath{\alpha\myindx{2}} a2\mymath{\myindx{i}})
+   => if c(a1\mymath{\myindx{i}}, a2\mymath{\myindx{i}})
+      then g(e, a1\mymath{\myindx{i}}) else e
+, e, a1, a2 )
+\end{colorcode}
+\end{minipage}
+%\begin{center}
+%\includegraphics[height=12ex]{figures/MemCoalesce}
+%\end{center}
+} 
+%\vspace{-1ex}
+\caption{Compositional Algebra For Fusion}
+\label{fig:CompatFuse}
+\end{figure}
+
+
+
+%\subsection{Fusion Structural-Analysis Algorithm}
+\subsection{Building the Fused Kernels at Program Level}
+\label{sec:bwdPass}
+
+\subsection{Replacing the Fused Kernels \& Fusion Driver}
+\label{sec:fwdPass}
+
 
 \section{Limitations and Possible Extensions}
 \label{sec:Discuss}
@@ -470,23 +694,24 @@ map2\mymath{\myindu{n}}(g o f, transpose(1,n-k,a) )
                 \emphh{map2}\mymath{\myindu{n}}(\mymath{\oplus}, x\mymath{\myindu{1}\myindx{1}},.., x\mymath{\myindu{1}\myindx{k}}, x\mymath{\myindu{2}\myindx{1}},.., x\mymath{\myindu{2}\myindx{k}}) 
      , (ne\mymath{\myindx{1}}, ..., ne\mymath{\myindx{k}}), a\mymath{\myindx{1}}, ..., a\mymath{\myindx{k}} 
      )             \emphh{\mymath{\equiv}} 
-// replicate dim n of neutral elems so map2 sizes match
-let (re\mymath{\myindx{1}},..,re\mymath{\myindx{k}} ) = map\mymath{\myindu{n}}( replicate(1), ne\mymath{\myindx{1}},.., ne\mymath{\myindx{k}} )
+let (.., re\mymath{\myindx{t}}, ..) = (.., map\mymath{\myindu{n}}( replicate(1), ne\mymath{\myindx{t}} ), ..)
+// ^replicate dim n of neutral elems so map2 sizes match
 let ( y\mymath{\myindx{1}},.., y\mymath{\myindx{k}} ) =
   \emphh{map2} (fn ( [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{1}}]],    .., [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{k}}]] ) 
            ( [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{1}}]] x\mymath{\myindx{1}}, .., [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{k}}]] x\mymath{\myindx{k}} ) =>
           \emphh{map2}\mymath{\myindu{n-1}}( fn ([\mymath{\myindx{1}}[\mymath{\myindx{..n-1}}\mymath{\alpha\myindx{1}}]],  .., [\mymath{\myindx{1}}[\mymath{\myindx{..n-1}}\mymath{\alpha\myindx{k}}]] )  
                       ([\mymath{\myindx{1}}[\mymath{\myindx{..n-1}}\mymath{\alpha\myindx{1}}]] e\mymath{\myindx{1}},..,[\mymath{\myindx{1}}[\mymath{\myindx{..n-1}}\mymath{\alpha\myindx{k}}]] e\mymath{\myindx{k}}, 
                        [\mymath{\myindx{1}}[\mymath{\myindx{..n-1}}\mymath{\alpha\myindx{1}}]] x\mymath{\myindx{1}},..,[\mymath{\myindx{1}}[\mymath{\myindx{..n-1}}\mymath{\alpha\myindx{k}}]] x\mymath{\myindx{k}})
-            => \emp{scan2}(\mymath{\oplus},(re_1[0],..,re_k[0]),x_1,..,x_k)
+                     =>\emp{scan2}(\mymath{\oplus},(e\mymath{\myindx{1}}[0],..,e\mymath{\myindx{k}}[0]),x\mymath{\myindx{1}},..,x\mymath{\myindx{k}})
                  , re\mymath{\myindx{1}}, ..., re\mymath{\myindx{k}}, x\mymath{\myindx{1}}, .., x\mymath{\myindx{k}} )
        , transpose(1,n,a\mymath{\myindx{1}}), .., transpose(1,n,a\mymath{\myindx{k}}) )
 in (transpose(n, q\mymath{\myindx{1}}-n, y\mymath{\myindx{1}}), ..., transpose(n, q\mymath{\myindx{k}}-n, y\mymath{\myindx{k}}))
-// ^ transpose back the result; q\mymath{\myindx{t}}-n is the dimension of \mymath{\alpha\myindx{t}}
+// ^transpose back the result; q\mymath{\myindx{t}}-n is the dimension of \mymath{\alpha\myindx{t}}
 
 // \emp{A Well-Known Transformation: Reduce Flattening}
 y = redomap2\mymath{\myindu{n}} ( \mymath{\oplus} 
-               , fn (\mymath{\alpha\myindx{1}},..,\mymath{\alpha\myindx{k}}) ([\mymath{\alpha\myindx{1}}] x\mymath{\myindx{1}},..,[\mymath{\alpha\myindx{k}}] x\mymath{\myindx{k}}) => 
+               , fn (\mymath{\alpha\myindx{1}},..,\mymath{\alpha\myindx{k}}) ( \mymath{\alpha\myindx{1}} e\mymath{\myindx{1}},..,  \mymath{\alpha\myindx{k}} e\mymath{\myindx{k}},
+                                [\mymath{\alpha\myindx{1}}] x\mymath{\myindx{1}},..,[\mymath{\alpha\myindx{k}}] x\mymath{\myindx{k}} ) => 
                      reduce(\mymath{\oplus}, (e\mymath{\myindx{1}},..,e\mymath{\myindx{k}}), x\mymath{\myindx{1}},..,x\mymath{\myindx{k}})
                , (e\mymath{\myindx{1}},..,e\mymath{\myindx{k}}), a\mymath{\myindx{1}},..,a\mymath{\myindx{k}} )
         \emphh{\mymath{\equiv}}
@@ -498,6 +723,8 @@ reduce2(\mymath{\oplus}, (e\mymath{\myindx{1}},..,e\mymath{\myindx{k}}), flatten
 \caption{{\sc iswim}'s Formalization \& Reduce Flattening Transform.}
 \label{fig:TransfGen}
 \end{figure}
+
+%let (re\mymath{\myindx{1}},..,re\mymath{\myindx{k}} ) = map\mymath{\myindu{n}}( replicate(1), ne\mymath{\myindx{1}},.., ne\mymath{\myindx{k}} )
 
 %  ([\mymath{\alpha\myindx{1}}] x\mymath{\myindx{1}},..,[\mymath{\alpha\myindx{k}}] x\mymath{\myindx{k}})
 
