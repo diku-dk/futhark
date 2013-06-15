@@ -403,14 +403,16 @@ $prog$ & $::=$ & $\epsilon$ \\
 Most array operations in \LO{} are done through built-in second-order
 array combinators (SOACs).  The available SOACs can be seen in Figure
 \ref{fig:soacs}, along with our syntax for anonymous and curried
-functions.  As \LO{} is first-order, these anonymous functions are only
-syntactically permitted in SOAC invocations.
+functions.  As \LO{} is first-order, these anonymous functions are
+only syntactically permitted in SOAC invocations.  The parentheses may
+be omitted when currying if no curried arguments are given.
 
 \begin{figure}[bt]
 \begin{tabular}{lrll}
 $l$ & $::=$ & {\tt fn $t$ ($t_{1}$ $\alpha_{1}$, \ldots, $t_{n}$ $\alpha_{n}$)} & (Anonymous function) \\
 &     & {\tt => $e$} \\
 & $|$ & {\tt $f$ ($e_{1}$, \ldots, $e_{n}$)} & (Curried function) \\
+& $|$ & {\tt op $\odot$ ($e_{1}$, \ldots, $e_{n}$)} & (Curried operator) \\
 \\
 $e$ & $::=$ & {\tt map($l$, $e$)} \\
 %    & $|$ & {\tt mapall($l$, $e$)} \\
@@ -488,7 +490,8 @@ semantics are as follows.
 For simplicity, the above semantics always describe the return value
 as a tuple.  In practice, if the result would be a one-element tuple
 (which is not permitted in \LO), the result is just the element by
-itself.
+itself.  The array-arguments to a tuple-SOAC must all be of the same
+length.
 
 \begin{figure}[bt]
 \begin{tabular}{lrll}
@@ -502,6 +505,47 @@ $e$ & $::=$ & {\tt map2($l$, $e_{1}$, \ldots, $e_{n}$)} \\
 \caption{Second-order tuple-array combinators}
 \label{fig:tuple-soacs}
 \end{figure}
+
+As an example, consider the following (contrived) program for
+computing the dot product of an array and its inverse.
+
+\begin{colorcode}
+fun real main([real] a) =
+  reduce(op +, 0.0,
+         map(op *,
+             map(fn (real,real) (real x) => (x,~x),
+                 a)))
+\end{colorcode}
+Now we perform the tuple-transformation.  Note that the return value
+of the first {\tt map2} is taken apart in a tuple pattern, so that it
+can be passed piecewise to the next {\tt map2}.
+\begin{colorcode}
+fun real main([real] a_3) =
+  let (tup_arr_elem_14, tup_arr_elem_15) =
+    map2(fn (real, real) (real x_13) =>
+         (x_13,~x_13), a_3) in
+  let tmp_map2_0 =
+    map2(fn real (real tuple_param_16,
+                  real tuple_param_17) =>
+         tuple_param_16 * tuple_param_17,
+         tup_arr_elem_14, tup_arr_elem_15) in
+  let tmp_red2_4 =
+    reduce2(fn real (real x_11, real y_12) =>
+            x_11 + y_12, 0.0, tmp_map2_0) in
+  tmp_red2_4
+\end{colorcode}
+And finally, after fusion.
+\begin{colorcode}
+fun real main([real] a_3) =
+  let tmp_red2_4 =
+    redomap2(fn real (real x_11, real y_12) => x_11 + y_12,
+             fn real (real x_13) =>
+             let (tuple_param_16, tuple_param_17) =
+               (x_13, ~x_13) in
+             let tmp_lam_2 = x_13 * tuple_param_17 in
+             tmp_lam_2, 0.0, a_3) in
+  tmp_red2_4
+\end{colorcode}
 
 \subsection{Safe in-place updates}
 \label{sec:in-place}
