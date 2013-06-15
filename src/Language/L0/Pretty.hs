@@ -43,16 +43,16 @@ instance Pretty Value where
     | [] <- elems a = text "empty" <> parens (ppr t)
     | otherwise     = braces $ commasep $ map ppr $ elems a
 
-instance Pretty ElemType where
+instance (Eq vn, Pretty vn) => Pretty (ElemTypeBase as vn) where
   ppr Int = text "int"
   ppr Char = text "char"
   ppr Bool = text "bool"
   ppr Real = text "real"
   ppr (Tuple ets) = apply $ map ppr ets
 
-instance Pretty Type where
+instance (Eq vn, Pretty vn) => Pretty (TypeBase as vn) where
   ppr (Elem et) = ppr et
-  ppr (Array et ds u) = u' <> foldl f (ppr et) ds
+  ppr (Array et ds u _) = u' <> foldl f (ppr et) ds
     where f s Nothing = brackets s
           f s (Just e) = brackets $ s <> comma <> ppr e
           u' | Unique <- u = star
@@ -143,7 +143,7 @@ instance (Eq vn, Pretty vn) => Pretty (ProgBase ty vn) where
             apply (map ppParam args) <+>
             equals </> indent 2 (ppr body)
 
-ppParam :: (Eq vn, Pretty ty, Pretty vn) => IdentBase ty vn -> Doc
+ppParam :: (Eq vn, Pretty (ty vn), Pretty vn) => IdentBase ty vn -> Doc
 ppParam param = ppr (identType param) <+> ppr param
 
 ppBinOp :: (Eq vn, Pretty vn) => Int -> BinOp -> ExpBase ty vn -> ExpBase ty vn -> Doc
@@ -182,7 +182,7 @@ ppValue :: Value -> String
 ppValue = render80
 
 -- | Prettyprint a type, wrapped to 80 characters.
-ppType :: Type -> String
+ppType :: (Eq vn, Pretty vn) => TypeBase as vn -> String
 ppType = render80
 
 -- | Prettyprint an expression, wrapped to 80 characters.

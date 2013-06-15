@@ -601,7 +601,7 @@ fusionGatherExp fres (LetPat pat soac@(Replicate n el pos) body _) = do
     (used_set, bres')<- getUnfusableSet pos bres [n,el] 
     repl_idnm <- new "repl_x"
     let repl_id = Ident repl_idnm (Elem Int) pos
-    let repl_lam = AnonymFun [repl_id] el (typeOf el) pos
+    let repl_lam = AnonymFun [toParam repl_id] el (toDecl $ typeOf el) pos
     let soac_repl= Map2 repl_lam [Iota n pos] (typeOf el) pos
     greedyFuse True used_set bres' (pat, soac_repl)
 
@@ -782,7 +782,7 @@ fusionGatherExp fres e = do
 fusionGatherLam :: (S.Set VName, FusedRes) -> Lambda -> FusionGM (S.Set VName, FusedRes)
 fusionGatherLam (u_set,fres) (AnonymFun idds body _ pos) = do
     let null_res = mkFreshFusionRes
-    new_res <- binding (TupId (map (\x->Id x) idds) pos) $ fusionGatherExp null_res body
+    new_res <- binding (TupId (map (Id . fromParam) idds) pos) $ fusionGatherExp null_res body
     -- make the inpArr unfusable, so that they 
     -- cannot be fused from outside the lambda:
     let inp_arrs = S.fromList $ M.keys (inpArr new_res) -- unzip $ M.toList $ inpArr new_res
@@ -1078,8 +1078,8 @@ getIdentArr []             = return ([],[])
 getIdentArr ((Var idd):es) = do
     (vs, os) <- getIdentArr es 
     case identType idd of
-        Array _ _ _ -> return (idd:vs, os)
-        _           -> -- return (vs, os)
+        Array _ _ _ _ -> return (idd:vs, os)
+        _             -> -- return (vs, os)
             badFusionGM $ EnablingOptError 
                             (identSrcLoc idd) 
                             ("In Fusion.hs, getIdentArr, broken invariant: "
@@ -1087,8 +1087,8 @@ getIdentArr ((Var idd):es) = do
 getIdentArr ((Index idd _ _ _):es) = do
     (vs, os) <- getIdentArr es 
     case identType idd of
-        Array _ _ _ -> return (vs, idd:os)
-        _           -> -- return (vs, os)
+        Array _ _ _ _ -> return (vs, idd:os)
+        _             -> -- return (vs, os)
             badFusionGM $ EnablingOptError 
                             (identSrcLoc idd) 
                             ("In Fusion.hs, getIdentArr, broken invariant: "
@@ -1121,7 +1121,8 @@ mapall2Map soac@(Mapall2 lam arrs pos) = do
                                 badFusionGM $ EnablingOptError pos
                                    ("In Fusion.hs, mapall2Map: invalid mapall return type: " 
                                     ++ ppType rtp)
-            let new_lam = AnonymFun lam_ids (Mapall2 lam (map Var lam_ids) pos) lam_rtp pos
+            let new_lam = AnonymFun (map toParam lam_ids)
+                          (Mapall2 lam (map Var lam_ids) pos) (toDecl lam_rtp) pos
             return $ Map2 new_lam  arrs map_eltp pos
         _ ->return $ Map2 lam      arrs map_eltp pos
 mapall2Map eee = 
@@ -1139,7 +1140,7 @@ reduce2Redomap (Reduce2 lam ne arrs eltp pos) = do
     let lam_body= if length lam_ids == 1
                   then Var (head lam_ids)
                   else TupLit (map Var lam_ids) pos
-    let map_lam = AnonymFun lam_ids lam_body eltp pos
+    let map_lam = AnonymFun (map toParam lam_ids) lam_body (toDecl eltp) pos
     return $ Redomap2 lam map_lam ne arrs eltp pos
 reduce2Redomap eee = 
     badFusionGM $ EnablingOptError (SrcLoc (locOf eee))
@@ -1194,7 +1195,7 @@ fuseRedFilt :: [Exp] -> Lambda -> [Ident]
                 -> [Exp] -> Lambda
                 -> FusionGM (Lambda, [Exp])
 fuseRedFilt inp1 lam1 _ inp2 lam2 = do
-    let rtp2 = typeOf lam2
+    let rtp2 = lambdaReturnType lam2
     let pos2 = (SrcLoc (locOf lam2))
     let pos1 = (SrcLoc (locOf lam1))
     (par1, call1) <- buildCall (map (stripArray 1 . typeOf) inp1) lam1
@@ -1212,8 +1213,8 @@ fuseRedFilt inp1 lam1 _ inp2 lam2 = do
     let then_var = TupLit (map (\x->Var x) par1 ) pos1
     let then_exp = LetPat then_pat then_var  bdy2 pos2
     let else_exp = TupLit (map (\x->Var x) ids21) pos2
-    let res_body = If call1 then_exp else_exp rtp2 pos1
-    return (AnonymFun (ids21++par1) res_body rtp2 pos2, inp1)
+    let res_body = If call1 then_exp else_exp (fromDecl rtp2) pos1
+    return (AnonymFun (map toParam $ ids21++par1) res_body rtp2 pos2, inp1)
     
 
 -- | Assumption: the order and number of elements matches 
@@ -1223,7 +1224,7 @@ fuseMapFilt :: [Exp] -> Lambda -> Exp
                 -> [Exp] -> Lambda
                 -> FusionGM (Lambda, [Exp])
 fuseMapFilt inp1 lam1 ne inp2 lam2 = do
-    let rtp2 = typeOf lam2
+    let rtp2 = lambdaReturnType lam2
     let pos2 = (SrcLoc (locOf lam2))
     let pos1 = (SrcLoc (locOf lam1))
     (par1, call1) <- buildCall (map (stripArray 1 . typeOf) inp1) lam1
@@ -1239,8 +1240,8 @@ fuseMapFilt inp1 lam1 ne inp2 lam2 = do
     let then_pat = TupId  (map (\x->Id  x) ids2) pos2
     let then_var = TupLit (map (\x->Var x) par1) pos1
     let then_exp = LetPat then_pat then_var bdy2 pos2
-    let res_body = If call1 then_exp ne rtp2 pos1
-    return (AnonymFun par1 res_body rtp2 pos2, inp1)
+    let res_body = If call1 then_exp ne (fromDecl rtp2) pos1
+    return (AnonymFun (map toParam par1) res_body rtp2 pos2, inp1)
     
 {-
 -- | Assumption: the order and number of elements matches between the two filters,
@@ -1282,7 +1283,7 @@ fuse2SOACs :: [Exp] -> Lambda -> [Ident]
            -> FusionGM (Lambda, [Exp])
 fuse2SOACs inp1 lam1 out1 inp2 lam2 = do
           -- inp2 (AnonymFun lam_args2 body2 rtp2 pos2) = do
-    let rtp2 = typeOf lam2
+    let rtp2 = lambdaReturnType lam2
     let pos2 = SrcLoc (locOf lam2)
     -- SOAC's lambda have been normalized, hence they accept an 
     --   arbitrary number of non-tuple arguments.
@@ -1327,7 +1328,7 @@ fuse2SOACs inp1 lam1 out1 inp2 lam2 = do
     -- remove duplicate inputs
     (inp_res', par', bdy2''') <- removeDupInps inp_res par bdy2''
 
-    return $ (AnonymFun par' bdy2''' rtp2 pos2, inp_res')
+    return (AnonymFun (map toParam par') bdy2''' rtp2 pos2, inp_res')
     
     where
         -- | @arrs@ are the input arrays of a SOAC call
@@ -1411,8 +1412,8 @@ fuse2SOACs inp1 lam1 out1 inp2 lam2 = do
 buildCall :: [Type] -> Lambda -> FusionGM ([Ident], Exp)
 buildCall tps (AnonymFun lam_args bdy _ pos)    = do
     let (ids, bdy') = (lam_args, bdy) -- getLamNormIdsAndBody lam_args bdy
-    let bres = foldl (&&) True (zipWith (==)  tps (map identType ids))
-    if bres then return (ids, bdy')
+    let bres = and $ zipWith subtypeOf tps $ map (identType . fromParam) ids
+    if bres then return (map fromParam ids, bdy')
     else badFusionGM $ EnablingOptError pos
                         ("In Fusion.hs, buildCall, types do NOT match! ")
 buildCall tps (CurryFun fnm aargs rtp pos) = do
@@ -1427,7 +1428,7 @@ buildCall tps (CurryFun fnm aargs rtp pos) = do
 getUnmdParsAndBody :: [Exp] -> Lambda -> FusionGM ([Ident], Exp)
 getUnmdParsAndBody inpp lamm = do
     case lamm of
-        AnonymFun lam_args2 body2 _ _ -> return (lam_args2, body2) 
+        AnonymFun lam_args2 body2 _ _ -> return (map fromParam lam_args2, body2)
         CurryFun fnm aargs rtp pos -> do
             pnms <- mapM new $ replicate (length inpp) "lam_arg"
             let new_ids = map (\(nm,tp) -> Ident nm tp pos)

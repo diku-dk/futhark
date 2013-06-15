@@ -61,12 +61,13 @@ new k = do (name, src) <- gets $ newVName k . envNameSrc
            modify $ \s -> s { envNameSrc = src }
            return name
 
-flattenTypes :: [Type] -> [Type]
+flattenTypes :: [TypeBase als VName] -> [TypeBase als VName]
 flattenTypes = concatMap flatten
   where flatten (Elem (Tuple ts)) = flattenTypes ts
         flatten t                 = [t]
 
-transformElemType :: ElemType -> ElemType
+transformElemType :: Monoid (als VName) =>
+                     ElemTypeBase als VName -> ElemTypeBase als VName
 transformElemType (Tuple elemts) =
   Tuple $ flattenTypes $ map transformType elemts
 transformElemType t = t
@@ -77,15 +78,16 @@ transformElemType t = t
 --
 -- >>> transformType $ Elem $ Tuple [Elem $ Tuple [Elem Int, Elem Real], Elem Char]
 -- Elem (Tuple [Elem Int,Elem Int,Elem Real,Elem Real,Elem Char])
-transformType :: Type -> Type
-transformType (Array (Tuple elemts) size u) =
+transformType :: Monoid (als VName) => TypeBase als VName -> TypeBase als VName
+transformType (Array (Tuple elemts) size u als) =
   Elem $ Tuple $ flattenTypes (map (transformType . arr) elemts)
-  where arr t = arrayOf t size u
-transformType (Array elemt size u) =
-  case transformElemType elemt of
+  where arr t = arrayOf t size u `setAliases` als
+transformType (Array elemt size u als) =
+  case transformElemType $ elemt `setElemAliases` als of
     Tuple elemts ->
-      Elem $ Tuple $ flattenTypes (map (transformType . arr) elemts)
-    elemt' -> Array elemt' size u
+      Elem (Tuple $ flattenTypes (map (transformType . arr) elemts))
+             `setAliases` als
+    elemt' -> arrayOf (Elem elemt') size u `setAliases` als
   where arr t = arrayOf t size u
 transformType (Elem et) = Elem $ transformElemType et
 
@@ -96,13 +98,13 @@ flattenValues = concatMap flatten
 
 transformValue :: Value -> Value
 transformValue (ArrayVal arr rt) =
-  case transformType rt of
+  case transformType $ addNames rt of
     Elem (Tuple ts)
       | [] <- A.elems arr ->
         TupVal $ flattenValues $ map emptyOf ts
       | otherwise         ->
         TupVal $ flattenValues $ zipWith asarray ts $ transpose arrayvalues
-    rt' -> ArrayVal arr rt'
+    rt' -> ArrayVal arr $ removeNames rt'
   where emptyOf t = blankValue $ arrayType 1 t Nonunique
         asarray t vs = transformValue $ arrayVal vs t
         arrayvalues = map (tupleValues . transformValue) $ A.elems arr
@@ -117,9 +119,9 @@ transformIdent (Ident name t loc) = Ident name (transformType t) loc
 
 transformFun :: FunDec -> TransformM FunDec
 transformFun (fname,rettype,params,body,loc) =
-  binding params $ \params' -> do
+  binding (map fromParam params) $ \params' -> do
     body' <- transformExp body
-    return (fname, rettype', params', body', loc)
+    return (fname, rettype', map toParam params', body', loc)
   where rettype' = transformType rettype
 
 binding :: [Ident] -> ([Ident] -> TransformM a) -> TransformM a
@@ -133,7 +135,7 @@ binding params m = do
   local bind $ m params'
   where
     transformParam param =
-      case typeOf param of
+      case identType param of
         Elem (Tuple ts) -> do
           -- We know from transformIdent that none of the element
           -- types are themselves tuples.
@@ -161,7 +163,7 @@ transformExp (Index vname idxs outtype loc) = do
   case subst of
     Just vs -> do
       let index v = Index v idxs'
-                    (stripArray (length idxs') $ typeOf v) loc
+                    (stripArray (length idxs') $ identType v) loc
       return $ TupLit (map index vs) loc
     _ -> return $ Index vname' idxs' outtype' loc
   where outtype' = transformType outtype
@@ -381,10 +383,10 @@ tupArrToListArr e m = do
 
 transformLambda :: Lambda -> TransformM Lambda
 transformLambda (AnonymFun params body rettype loc) =
-  binding params $ \params' -> do
+  binding (map fromParam params) $ \params' -> do
     body' <- transformExp body
-    return $ AnonymFun params' body' rettype' loc
-  where rettype' = transformType rettype
+    return $ AnonymFun (map toParam params') body' rettype' loc
+  where rettype' = toDecl $ transformType rettype
 transformLambda (CurryFun fname curryargs rettype loc) = do
   curryargs' <- mapM transformExp curryargs
   return $ CurryFun fname curryargs' (transformType rettype) loc

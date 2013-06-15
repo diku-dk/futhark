@@ -90,11 +90,12 @@ transformExp (Filter fun arrexp rowtype loc) =
           indexin0 = Index arr [intval 0] rowtype loc
           indexin = Index arr [iv] rowtype loc
       mape <- transformExp $
-              Map (AnonymFun [x] branch (Elem Int) loc) arrv rowtype loc
+              Map (AnonymFun [toParam x] branch (Elem Int) loc) arrv rowtype loc
       plus <- do
         (a,av) <- newVar loc "a" (Elem Int)
         (b,bv) <- newVar loc "b" (Elem Int)
-        return $ AnonymFun [a, b] (BinOp Plus av bv (Elem Int) loc) (Elem Int) loc
+        return $ AnonymFun [toParam a, toParam b]
+                 (BinOp Plus av bv (Elem Int) loc) (Elem Int) loc
       scan <- transformExp $ Scan plus (intval 0) mape (Elem Int) loc
       newLet "ia" scan $ \ia _ -> do
         let indexia ind = Index ia [ind] (Elem Int) loc
@@ -118,8 +119,8 @@ transformExp (Mapall fun arrexp loc) = transformExp =<< toMap arrexp
                     Just et -> do
                       (x,xv) <- newVar loc "x" et
                       body <- toMap xv
-                      let ot = arrayType (arrayDims et) (typeOf fun) Nonunique
-                      return $ Map (AnonymFun [x] body ot loc) e et loc
+                      let ot = arrayType (arrayDims et) (lambdaReturnType fun) Nonunique
+                      return $ Map (AnonymFun [toParam x] body ot loc) e et loc
                     _ -> transformLambda fun [e]
 
 transformExp (Redomap redfun mapfun accexp arrexp _ loc) =
@@ -175,7 +176,7 @@ transformExp filtere@(Filter2 fun arrexps loc) =
             If (BinOp Equal nv (intval 0) (Elem Bool) loc)
             (Literal (blankValue $ typeOf filtere) loc) nonempty
             (typeOf filtere) loc
-          rowtypes = map (rowType . typeOf) arr
+          rowtypes = map (rowType . identType) arr
       (xs, _) <- unzip <$> mapM (newVar loc "x") rowtypes
       (i, iv) <- newVar loc "i" $ Elem Int
       fun' <- transformLambda fun $ map Var xs
@@ -185,12 +186,12 @@ transformExp filtere@(Filter2 fun arrexps loc) =
           rowtype = case rowtypes of [t] -> t
                                      _   -> Elem $ Tuple rowtypes
       mape <- transformExp $
-              Map2 (AnonymFun xs branch (Elem Int) loc) (map Var arr)
+              Map2 (AnonymFun (map toParam xs) branch (Elem Int) loc) (map Var arr)
               rowtype loc
       plus <- do
         (a,av) <- newVar loc "a" (Elem Int)
         (b,bv) <- newVar loc "b" (Elem Int)
-        return $ AnonymFun [a, b] (BinOp Plus av bv (Elem Int) loc) (Elem Int) loc
+        return $ AnonymFun [toParam a, toParam b] (BinOp Plus av bv (Elem Int) loc) (Elem Int) loc
       scan <- transformExp $ Scan2 plus (intval 0) [mape] (Elem Int) loc
       newLet "ia" scan $ \ia _ -> do
         let indexia ind = Index ia [ind] (Elem Int) loc
@@ -217,7 +218,8 @@ transformExp (Mapall2 fun arrexps loc) = transformExp =<< toMap arrexps
             Just rts -> do
               (xs,_) <- unzip <$> mapM (newVar loc "x") rts
               body <- toMap $ map Var xs
-              return $ Map2 (AnonymFun xs body (typeOf body) loc) es (Elem $ Tuple rts) loc
+              return $ Map2 (AnonymFun (map toParam xs) body (toDecl $ typeOf body) loc)
+                       es (Elem $ Tuple rts) loc
             _ -> transformLambda fun es
 
 transformExp (Redomap2 redfun mapfun accexp arrexps _ loc) =
@@ -290,7 +292,7 @@ newVar loc name tp = do
 -- not unique or a basic type, otherwise just returns @e@ itself.
 maybeCopy :: Exp -> Exp
 maybeCopy e
-  | unique e || basicType (typeOf e)  = e
+  | unique (typeOf e) || basicType (typeOf e)  = e
   | otherwise = Copy e $ srclocOf e
 
 index :: [Ident] -> Exp -> [Exp]
@@ -335,7 +337,7 @@ size (k:_) = Size (Var k) $ srclocOf k
 transformLambda :: Lambda -> [Exp] -> TransformM Exp
 transformLambda (AnonymFun params body _ loc) args = do
   body' <- transformExp body
-  return $ foldl bind body' $ zip params args
+  return $ foldl bind body' $ zip (map fromParam params) args
   where bind e (Ident pname ptype _, arg) = LetPat (Id $ Ident pname ptype loc) arg e loc
 transformLambda (CurryFun fname curryargs rettype loc) args = do
   curryargs' <- mapM transformExp curryargs

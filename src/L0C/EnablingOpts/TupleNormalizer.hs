@@ -282,9 +282,9 @@ mkPatFromType pos nm tp = do
 --------------------------------------------------
 ---- Helper for function declaration / lambda ----
 --------------------------------------------------
-tupleNormAbstrFun :: [Ident] -> Exp -> SrcLoc -> TupNormM Exp
+tupleNormAbstrFun :: [Parameter] -> Exp -> SrcLoc -> TupNormM Exp
 tupleNormAbstrFun args body pos = do
-    let tups = filter isTuple args
+    let tups = filter isTuple $ map fromParam args
     let vars = map Var tups
     resms <- mapM (mkFullPattern . Id) tups
     let (pats, bndlst)  = unzip resms 
