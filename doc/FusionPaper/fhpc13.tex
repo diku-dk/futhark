@@ -73,6 +73,7 @@
 \hyphenation{asso-ci-a-ti-vi-ty}
 
 \renewcommand\tilde[0]{{\raise.17ex\hbox{$\scriptstyle\sim$}}}
+\newcommand{\LO}{$\mathcal{L}_0$}
 
 %%%%%%%%%%%%%%%%%%%%%%%
 % comments
@@ -285,22 +286,26 @@ For Troels:
                 i.e., that would be the input for fusion.
 \end{itemize}
 
-L0 is a mostly-monomorphic, statically typed, strictly evaluated,
+\LO{} is a mostly-monomorphic, statically typed, strictly evaluated,
 purely functional language.  Although some built-in higher-order
 functions provide polymorphism, user-defined functions are
 monomorphic, and their return- and parameter types must be specified
-explicitly.
+explicitly.  In order to save space, we will not cover the typing
+rules in detail, as they are quite trivial.  The only exception is our
+notion of {\em uniqueness types}, which is given a cursory treatment
+in section \ref{sec:in-place}.
 
-The syntax of the first-order fragment of L0 can be seen in figure
+The syntax of the first-order fragment of \LO{} can be seen in figure
 \ref{fig:fo-syntax}.  Common arithmetic operators such as {\tt +} and
 {\tt /} are supported in the usual way.  Note that they are
 polymorphic in the sense that they accept both integers and
 floating-points, although both operands must be of the same type.
 Pattern matching is supported in a limited way as the only way of
-decomposing tuple values, but there is no {\tt case} construct.
+decomposing tuple values, but there is no {\tt case} construct.  Note
+that we use braces to denote arrays, not sets.
 
 There are two slightly complicated constructs in the first-order part
-of L0.  The first is the let-with construct for updating parts of
+of \LO{}.  The first is the let-with construct for updating parts of
 arrays:
 
 \begin{colorcode}
@@ -388,12 +393,18 @@ $fun$ & $::=$ & {\tt fun $t$ $f$($t_{1}$ $\alpha_{1}$,\ldots $t_{n}$ $\alpha_{n}
 $prog$ & $::=$ & $\epsilon$ \\
        & $|$   & $fun$ $prog$
 \end{tabular}
-\caption{L0 syntax}
+\caption{\LO{} syntax}
 \label{fig:fo-syntax}
 \end{figure}
 
 \subsection{Second-order array combinators}
 \label{sec:soacs}
+
+Most array operations in \LO{} are done through built-in second-order
+array combinators (SOACs).  The available SOACs can be seen in Figure
+\ref{fig:soacs}, along with our syntax for anonymous and curried
+functions.  As \LO{} is first-order, these anonymous functions are only
+syntactically permitted in SOAC invocations.
 
 \begin{figure}[bt]
 \begin{tabular}{lrll}
@@ -402,7 +413,7 @@ $l$ & $::=$ & {\tt fn $t$ ($t_{1}$ $\alpha_{1}$, \ldots, $t_{n}$ $\alpha_{n}$)} 
 & $|$ & {\tt $f$ ($e_{1}$, \ldots, $e_{n}$)} & (Curried function) \\
 \\
 $e$ & $::=$ & {\tt map($l$, $e$)} \\
-    & $|$ & {\tt mapall($l$, $e$)} \\
+%    & $|$ & {\tt mapall($l$, $e$)} \\
     & $|$ & {\tt filter($l$, $e$)} \\
     & $|$ & {\tt reduce($l$, $x$, $e$)} \\
     & $|$ & {\tt scan($l$, $x$, $e$)} \\
@@ -412,10 +423,77 @@ $e$ & $::=$ & {\tt map($l$, $e$)} \\
 \label{fig:soacs}
 \end{figure}
 
+The semantics of the SOACs are identical to the similarly-named
+higher-order functions found in many functional languages, but
+reproduced here for completeness.
+\begin{align*}
+\text{\tt map($f$,$a$)} \rightarrow& \text{\tt\{$f$($a$[0]), \ldots, $f$($a$[n])\}} \\
+% \text{\tt mapall($l$, $e$)} \rightarrow& \text{} \\
+\text{\tt filter($f$,a)} \rightarrow&  \text{\tt\{$a$[i] | $f$($a$[i]) = {\tt True }\}} \\
+\text{\tt reduce($f$,$x$,$a$)} \rightarrow& \text{\tt $f$($f$(\ldots $f$($x$,$v$[0]), $v$[1]), $v$[n])} \\
+\text{\tt scan($f$,$x$,a)} \rightarrow& \text{\tt\{$f$($x$,$a$[0]), $f$($f$($x$,$a$[0]),$v$[1]),\ldots\}} \\
+\text{\tt redomap($f_{r}$,$f_{m}$,$x$,$v$)} \rightarrow& \text{\tt reduce($l_{r}$, $x$, map($l_{m}$, $v$))} \\
+\end{align*}
+In particular, note that {\tt reduce} is a left-fold, and that {\tt
+  scan} is an inclusive prefix scan.
+
+One of the first steps in the \LO{} compilation pipeline is to
+transform the use of tuples in the program.  Notably, the
+tuple-transformation flattens all tuples (ie. {\tt (x,(y,z))} becomes
+{\tt (x,y,z)}), and converts arrays of tuples to tuples of arrays.
+Arrays of tuples are in a sense merely syntactic sugar for tuples of
+arrays; the type {\tt [(int, real)]} is transformed to {\tt ([int],
+  [real])} during the compilation process, and all code interacting
+with arrays of tuples is likewise transformed.  In most cases, this is
+fully transparent, but there are edge cases where the transformation
+is not an isomorphism.
+
+Consider the type {\tt [([int], [real])]}, which is transformed to
+{\tt([[int]], [[real]])}.  These two types are not isomorphic, as the
+latter has more stringent demands to the fullness of arrays.  For
+example, {\tt\{(\{1\}, \{1.0\}), (\{2,3\}, \{2.0\})\}} is a value of
+the former, but the first element of the corresponding transformed
+tuple {\tt(\{\{1\}, \{2, 3\}\}, \{\{1.0\}, \{2.0\}\})} is not a full
+array.  Hence, when determining whether a program generates full
+arrays, we must look at the \textit{transformed} values - in a sense,
+the fullness requirement ``transcends'' the tuples.
+
+After tuple-transformation, the previously described SOACs are no
+longer usable, as they each accept only a single input array.  Hence,
+we introduce matching tuple-SOACs, that any number of input arrays,
+and whose return value is likewise a tuple if applicable.  Their
+syntax can be seen in figure \ref{fig:tuple-soacs}, and their
+semantics are as follows.
+
+\begin{description}
+  \item[{\tt map2($f$,$e_{1}$,\ldots,$e_{n}$)} $\rightarrow$]\hfill\\
+    {\tt unzip(map($f$, zip($e_{1}$, \ldots, $e_{n}$)))}
+
+%  \item[{\tt mapall2($l$, $e_{1}$, \ldots, $e_{n}$)} $\rightarrow$]
+%    {\tt unzip(}
+
+  \item[{\tt filter2($l$, $e_{1}$, \ldots, $e_{n}$)} $\rightarrow$]\hfill\\
+    {\tt unzip(filter($f$, zip($e_{1}$, \ldots, $e_{n}$)))}
+
+  \item[{\tt reduce2($l$, $x$, $e_{1}$, \ldots, $e_{n}$)} $\rightarrow$]\hfill\\
+    {\tt reduce($l$, $x$, zip($e_{1}$, \ldots, $e_{n}$))}
+
+  \item[{\tt scan2($f$, $x$, $e_{1}$, \ldots, $e_{n}$)}]\hfill\\
+    {\tt unzip(scan($f$, $x$, zip($e_{1}$, \ldots, $e_{n}$)))}
+
+  \item[{\tt redomap2($l_{r}$, $l_{m}$, $x$, $e_{1}$, \ldots, $e_{n}$)}]\hfill\\
+    {\tt reduce($l_{r}$, $x$, map($l_{m}$, zip($e_{1}$, \ldots, $e_{n}$)))}
+\end{description}
+
+For simplicity, the above semantics always describe the return value
+as a tuple.  In practice, if the result would be a one-element tuple
+(which is not permitted in \LO), the result is just the element by
+itself.
+
 \begin{figure}[bt]
 \begin{tabular}{lrll}
 $e$ & $::=$ & {\tt map2($l$, $e_{1}$, \ldots, $e_{n}$)} \\
-    & $|$ & {\tt mapall2($l$, $e_{1}$, \ldots, $e_{n}$)} \\
+%    & $|$ & {\tt mapall2($l$, $e_{1}$, \ldots, $e_{n}$)} \\
     & $|$ & {\tt filter2($l$, $e_{1}$, \ldots, $e_{n}$)} \\
     & $|$ & {\tt reduce2($l$, $x$, $e_{1}$, \ldots, $e_{n}$)} \\
     & $|$ & {\tt scan2($l$, $x$, $e_{1}$, \ldots, $e_{n}$)} \\
