@@ -106,13 +106,40 @@ fuseProg prog = do
     let env = FusionGEnv { soacs = M.empty, arrsInScope = S.empty, fusedRes = mkFreshFusionRes, program = prog }
     let funs= progFunctions prog
     ks0 <- runFusionGatherM prog (mapM fusionGatherFun funs) env
-    -- let ks' = map ( \kers -> (M.toList . filter (\k -> )) (M.toList kernels k) ) ks
     let ks    = map ( \funres -> cleanFusionResult funres ) ks0
-    let succc = ( foldl (||) False . map (\x-> rsucc x) )   ks
+    -- let succc = ( foldl (||) False . map (\x-> rsucc x) )   ks
+    let succc = L.any (\x-> rsucc x) ks
     if not succc
     then do return (False, prog)
     else do funs' <- runFusionGatherM prog (mapM fuseInFun (zip ks funs)) env
             return (True, Prog funs')
+{-- INCORRECT -- some things are left unfused!!!
+            ks'   <- runFusionGatherM prog (mapM fuseInKerResLams ks)      env 
+            funs' <- runFusionGatherM prog (mapM fuseInFun (zip ks' funs)) env
+            return (True, Prog funs')
+    where 
+        fuseInKerResLams :: FusedRes -> FusionGM FusedRes
+        fuseInKerResLams res = do
+            kernels' <- bindRes res $ 
+                           mapM (\(knm,ker) -> do let (oid, soac) = fsoac ker
+                                                  soac' <- oneStepLam soac
+                                                  return $ (knm, ker { fsoac = (oid, soac') })
+                                ) (M.toList $ kernels res) 
+            return $ res { kernels = M.fromList kernels' }
+        oneStepLam :: Exp -> FusionGM Exp
+        oneStepLam fused_soac = do
+            lam  <- getLamSOAC fused_soac
+            lam' <- fuseInLambda lam
+            nmsrc <- get
+            case normCopyOneLambda prog nmsrc lam' of
+                Left err             -> badFusionGM err
+                Right (nmsrc', lam'') -> do
+                    put nmsrc'
+                    (_, nfres) <- fusionGatherLam (S.empty, mkFreshFusionRes) lam''
+                    let nfres' =  cleanFusionResult nfres
+                    lam'''     <- bindRes nfres' $ fuseInLambda lam''
+                    updateLamSOAC lam''' fused_soac
+--}
 
 
 fusionGatherFun :: FunDec -> FusionGM FusedRes
@@ -311,8 +338,12 @@ greedyFuse is_repl lam_used_nms res (idd, soac) = do
     -- check whether fusing @soac@ will violate any in-place update 
     --    restriction, e.g., would move an input array past its in-place update.
     let all_used_names = foldl (\y x -> S.insert x y) lam_used_nms (inp_nms++other_nms)
-    let kers_cap = map (\k-> S.intersection (inplace k) all_used_names) to_fuse_kers
-    let ok_inplace = foldl (&&) True (map (\s -> S.null s) kers_cap)  
+
+    --let kers_cap = map (\k-> S.intersection (inplace k) all_used_names) to_fuse_kers
+    --let ok_inplace = L.all S.null kers_cap -- foldl (&&) True (map (\s -> S.null s) kers_cap)  
+    -- Replace with:
+    let ok_inplace = L.all (\ker-> not $ L.any (\x->S.member x $ inplace ker) (S.toList all_used_names)) to_fuse_kers
+
 
     -- If @soac@ is a Filter2, then check that none of its out idds 
     --    are used in a size call. 
@@ -406,8 +437,8 @@ greedyFuse is_repl lam_used_nms res (idd, soac) = do
             
             --     (iii) update the zips Map, i.e., perform the substitution
             --           with the best candidate
-            _ <- trace (ppExp inp_rep) (return Nothing)
-            _ <- trace (ppTupId idd) (return Nothing)
+            --_ <- trace (ppExp inp_rep) (return Nothing)
+            --_ <- trace (ppTupId idd) (return Nothing)
             let zips''= foldl (\mm (nm,bnms) -> 
                                     foldl (\m bnm -> 
                                             case M.lookup bnm m of
@@ -420,7 +451,7 @@ greedyFuse is_repl lam_used_nms res (idd, soac) = do
             return $ FusedRes True (outArr res) inpArr' ufs' zips'' inzips'' kernels'
     where 
         notUnfusable :: FusedRes -> VName -> Bool
-        notUnfusable ress nm = not (S.member nm (unfusable ress))
+        notUnfusable ress nm = not $ S.member nm $ unfusable ress
 
         getBestInpArr :: [Exp] -> FusionGM Exp
         getBestInpArr arrs = do
@@ -663,7 +694,7 @@ fusionGatherExp fres (LetWith id1 id0 inds elm body _) = do
     -- Now add the aliases of id0 (itself included) to the `inplace' field 
     --     of any existent kernel. ToDo: extend the list to contain the 
     --     whole set of aliases (not available now!)
-    let inplace_aliases = map identName [id0] 
+    let inplace_aliases = map identName [identName id0] 
     let kers' = map (\ k -> let inplace' = foldl (\x y->S.insert y x) (inplace k) inplace_aliases
                             in  k { inplace = inplace' }
                     ) kers
@@ -684,7 +715,7 @@ fusionGatherExp fres (DoLoop merge_pat ini_val _ ub loop_body let_body _) = do
     -- let unfus = (unfusable new_res) `S.union` (S.fromList inp_arrs)
     let new_res' = new_res { unfusable = foldl (\r x -> S.insert x r) (unfusable new_res) inp_arrs }
     -- merge new_res with fres'
-    return $ mergeFusionRes new_res' fres'
+    return $ unionFusionRes new_res' fres'
 
 
 -- bnds <- asks $ arrsInScope
@@ -693,8 +724,16 @@ fusionGatherExp fres (If cond e_then e_else _ _) = do
     let null_res = mkFreshFusionRes
     then_res <- fusionGatherExp null_res e_then
     else_res <- fusionGatherExp null_res e_else
+    let both_res = unionFusionRes then_res else_res
     fres'    <- fusionGatherExp fres cond
-    return $ mergeFusionRes fres' (mergeFusionRes then_res else_res)
+    mergeFusionRes fres' both_res
+
+------WRONG IMPLEM
+--    let null_res = mkFreshFusionRes
+--    then_res <- fusionGatherExp null_res e_then
+--    else_res <- fusionGatherExp null_res e_else
+--    fres'    <- fusionGatherExp fres cond
+--    return $ unionFusionRes fres' (unionFusionRes then_res else_res)
     
 -----------------------------------------------------------------------------------
 --- Errors: all SOACs, both the regular ones (because they cannot appear in prg)---
@@ -746,15 +785,15 @@ fusionGatherLam (u_set,fres) (AnonymFun idds body _ pos) = do
     new_res <- binding (TupId (map (\x->Id x) idds) pos) $ fusionGatherExp null_res body
     -- make the inpArr unfusable, so that they 
     -- cannot be fused from outside the lambda:
-    let (inp_arrs, _) = unzip $ M.toList $ inpArr new_res
-    bnds <- asks $ arrsInScope
-    let unfus' = (unfusable new_res) `S.union` (S.fromList inp_arrs)
+    let inp_arrs = S.fromList $ M.keys (inpArr new_res) -- unzip $ M.toList $ inpArr new_res
+    let unfus' = (unfusable new_res) `S.union` inp_arrs
     -- foldl (\r x -> S.insert x r) (unfusable new_res) inp_arrs 
+    bnds <- asks $ arrsInScope
     let unfus  = unfus' `S.intersection` bnds
     -- merge fres with new_res'
     let new_res' = new_res { unfusable = unfus }
     -- merge new_res with fres'
-    return $ (u_set `S.union` unfus, mergeFusionRes new_res' fres)
+    return $ (u_set `S.union` unfus, unionFusionRes new_res' fres)
 fusionGatherLam (u_set1, fres) (CurryFun _ args _ pos) = do
     (u_set2, fres') <- getUnfusableSet pos fres args
     return (u_set1 `S.union` u_set2, fres')
@@ -937,6 +976,7 @@ replaceSOAC pat soac = do
                                                   ++"still in result: "++ppTupId pat)
                              -- then fuseInExp soac
                              else do -- return new_soac
+                                     -- TRY MOVE THIS TO OUTER LEVEL!!!
                                      lam   <- getLamSOAC new_soac
                                      nmsrc <- get
                                      prog  <- asks $ program
@@ -948,7 +988,6 @@ replaceSOAC pat soac = do
                                             let nfres' =  cleanFusionResult nfres
                                             lam''      <- bindRes nfres' $ fuseInLambda lam'
                                             updateLamSOAC lam'' new_soac
-
 ---------------------------------------------------
 ---------------------------------------------------
 ---- HELPERS
@@ -962,8 +1001,8 @@ mkFreshFusionRes =
     FusedRes { rsucc     = False,   outArr = M.empty, inpArr  = M.empty, 
                unfusable = S.empty, zips   = M.empty, inzips  = M.empty, kernels = M.empty }
 
-mergeFusionRes :: FusedRes -> FusedRes -> FusedRes
-mergeFusionRes res1 res2 = 
+unionFusionRes :: FusedRes -> FusedRes -> FusedRes
+unionFusionRes res1 res2 = 
     FusedRes  (rsucc     res1       ||      rsucc     res2)
               (outArr    res1    `M.union`  outArr    res2)
               (M.unionWith S.union (inpArr res1) (inpArr res2) )
@@ -972,6 +1011,19 @@ mergeFusionRes res1 res2 =
               (M.unionWith (++) (inzips res1) (inzips res2) )
               (kernels   res1    `M.union`  kernels   res2)
 
+mergeFusionRes :: FusedRes -> FusedRes -> FusionGM FusedRes
+mergeFusionRes res1 res2 = do
+    let ufus_mres = unfusable res1 `S.union` unfusable res2
+    inp_both     <- expandSoacInpArr $ M.keys $ inpArr res1 `M.intersection` inpArr res2
+    let m_unfus   = foldl (\s x -> S.insert x s) ufus_mres inp_both
+    return $ FusedRes  (rsucc     res1       ||      rsucc     res2)
+                       (outArr    res1    `M.union`  outArr    res2)
+                       (M.unionWith S.union (inpArr res1) (inpArr res2) )
+                       m_unfus
+                       (zips      res1    `M.union`  zips      res2)
+                       (M.unionWith (++) (inzips res1) (inzips res2) )
+                       (kernels   res1    `M.union`  kernels   res2)
+ 
      
 -- | Returns the list of identifiers of a pattern.
 getIdents :: TupIdent -> [Ident]
