@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, ScopedTypeVariables #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 -- | A nonoptimising interpreter for L0.  It makes no assumptions of
 -- the form of the input program, and in particular permits shadowing.
 -- This interpreter should be considered the primary benchmark for
@@ -33,7 +33,7 @@ import L0C.L0
 -- | An error happened during execution, and this is why.
 data InterpreterError = MissingEntryPoint Name
                       -- ^ The specified start function does not exist.
-                      | InvalidFunctionArguments Name (Maybe [Type]) [Type]
+                      | InvalidFunctionArguments Name (Maybe [DeclType]) [Type]
                       -- ^ The arguments given to a function were mistyped.
                       | IndexOutOfBounds SrcLoc Int Int
                       -- ^ First @Int@ is array size, second is attempted index.
@@ -159,24 +159,26 @@ runFun fname mainargs prog = do
       l0env = L0Env { envVtable = M.empty
                     , envFtable = ftable
                     }
-      runmain = case (funDecByName fname prog, M.lookup fname ftable) of
-                  (Nothing, Nothing) -> bad $ MissingEntryPoint fname
-                  (Just (_,rettype,fparams,_,_), _)
-                    | map typeOf mainargs == map identType fparams ->
-                      evalExp (Apply fname (map (`Literal` noLoc) mainargs) rettype noLoc)
-                    | otherwise ->
-                      bad $ InvalidFunctionArguments fname
-                            (Just (map identType fparams))
-                            (map typeOf mainargs)
-                  (_ , Just fun) -> -- It's a builtin function, it'll
-                                    -- do its own error checking.
-                    fun mainargs
+      runmain =
+        case (funDecByName fname prog, M.lookup fname ftable) of
+          (Nothing, Nothing) -> bad $ MissingEntryPoint fname
+          (Just (_,rettype,fparams,_,_), _)
+            | map (toDecl . valueType) mainargs == map identType fparams ->
+              evalExp (Apply fname (map (`Literal` noLoc) mainargs)
+                       (fromDecl rettype) noLoc)
+            | otherwise ->
+              bad $ InvalidFunctionArguments fname
+                    (Just (map identType fparams))
+                    (map (fromDecl . valueType) mainargs)
+          (_ , Just fun) -> -- It's a builtin function, it'll
+                            -- do its own error checking.
+            fun mainargs
   runL0M runmain l0env
   where
     -- We assume that the program already passed the type checker, so
     -- we don't check for duplicate definitions.
     expand ftable (name,_,params,body,_) =
-      let fun args = binding (zip params args) $ evalExp body
+      let fun args = binding (zip (map fromParam params) args) $ evalExp body
       in M.insert name fun ftable
 
 -- | As 'runFun', but throws away the trace.
@@ -207,7 +209,9 @@ builtin "log" [RealVal x] = return $ RealVal (log x)
 builtin "exp" [RealVal x] = return $ RealVal (exp x)
 builtin "op not" [LogVal b] = return $ LogVal (not b)
 builtin "op ~" [RealVal b] = return $ RealVal (-b)
-builtin fname args = bad $ InvalidFunctionArguments (nameFromString fname) Nothing $ map typeOf args
+builtin fname args =
+  bad $ InvalidFunctionArguments (nameFromString fname) Nothing $
+        map (fromDecl . valueType) args
 
 --------------------------------------------
 --------------------------------------------
@@ -367,7 +371,7 @@ evalExp (Replicate e1 e2 pos) = do
   v2 <- evalExp e2
   case v1 of
     IntVal x
-      | x >= 0    -> return $ ArrayVal (listArray (0,x-1) $ repeat v2) $ typeOf v2
+      | x >= 0    -> return $ ArrayVal (listArray (0,x-1) $ repeat v2) $ valueType v2
       | otherwise -> bad $ NegativeReplicate pos x
     _   -> bad $ TypeError pos "evalExp Replicate"
 
@@ -403,7 +407,7 @@ evalExp (Transpose arrexp pos) = do
 evalExp (Map fun e _ pos) = do
   vs <- arrToList pos =<< evalExp e
   vs' <- mapM (applyLambda fun . (:[])) vs
-  return $ arrayVal vs' $ typeOf fun
+  return $ arrayVal vs' $ lambdaReturnType fun
 
 evalExp (Reduce fun accexp arrexp _ loc) = do
   startacc <- evalExp accexp
@@ -434,14 +438,14 @@ evalExp (Scan fun startexp arrexp _ pos) = do
   startval <- evalExp startexp
   vals <- arrToList pos =<< evalExp arrexp
   (acc, vals') <- foldM scanfun (startval, []) vals
-  return $ arrayVal (reverse vals') $ typeOf acc
+  return $ arrayVal (reverse vals') $ valueType acc
     where scanfun (acc, l) x = do
             acc' <- applyLambda fun [acc, x]
             return (acc', acc' : l)
 
 evalExp (Filter fun arrexp _ pos) = do
   vs <- filterM filt =<< arrToList pos =<< evalExp arrexp
-  return $ arrayVal vs $ typeOf fun
+  return $ arrayVal vs $ lambdaReturnType fun
   where filt x = do res <- applyLambda fun [x]
                     case res of (LogVal True) -> return True
                                 _             -> return False
@@ -492,7 +496,7 @@ evalExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody pos) = do
 evalExp (Map2 fun arrexps _ loc) = do
   vss <- mapM (arrToList loc <=< evalExp) arrexps
   vs' <- mapM (applyLambda fun) $ transpose vss
-  return $ arrays (typeOf fun) vs'
+  return $ arrays (fromDecl $ lambdaReturnType fun) vs'
 
 evalExp (Reduce2 fun accexp arrexps _ loc) = do
   startacc <- evalExp accexp
@@ -504,7 +508,7 @@ evalExp (Scan2 fun startexp arrexps _ loc) = do
   startval <- evalExp startexp
   vss <- mapM (arrToList loc <=< evalExp) arrexps
   (acc, vals') <- foldM scanfun (startval, []) $ transpose vss
-  return $ arrays (typeOf acc) $ reverse vals'
+  return $ arrays (fromDecl $ valueType acc) $ reverse vals'
     where scanfun (acc, l) x = do
             acc' <- applyLambda fun $ untuple acc ++ x
             return (acc', acc' : l)
@@ -567,7 +571,7 @@ evalPattern _ _ = Nothing
 
 applyLambda :: Lambda -> [Value] -> L0M Value
 applyLambda (AnonymFun params body _ _) args =
-  binding (zip params args) $ evalExp body
+  binding (zip (map fromParam params) args) $ evalExp body
 applyLambda (CurryFun name curryargs _ _) args = do
   curryargs' <- mapM evalExp curryargs
   fun <- lookupFun name

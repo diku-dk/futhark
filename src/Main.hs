@@ -181,7 +181,7 @@ usage errs = do
 
 typeCheck :: (TypeBox ty, VarName vn) =>
              L0Config -> ProgBase ty vn
-          -> Either (TypeError vn) (ProgBase Type vn)
+          -> Either (TypeError vn) (ProgBase CompTypeBase vn)
 typeCheck config
   | l0checkAliases config = checkProg
   | otherwise             = checkProgNoUniqueness

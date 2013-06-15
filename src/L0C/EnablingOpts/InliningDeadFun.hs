@@ -69,8 +69,8 @@ mkUnnamedLamLam ftab (CurryFun  nm params tp pos) =
             CurryFun nm (map (mkUnnamedLamExp ftab) params) tp pos
         Just (fnm,_,idds,_,_) -> 
             let idds' = drop (length params) idds  
-                args  = params ++ map Var idds'
-            in  AnonymFun idds' (Apply fnm args tp pos) tp pos
+                args  = params ++ map (Var . fromParam) idds'
+            in  AnonymFun idds' (Apply fnm args tp pos) (toDecl tp) pos
 
 ------------------------------------------------------------------------------
 ------------------------------------------------------------------------------
@@ -284,7 +284,7 @@ inlineInExp inlcallees (Apply fname aargs rtp pos) =
     in  case filter (\(nm,_,_,_,_)->fname==nm) inlcallees of
             [] -> Apply fname aargs' rtp pos
             (_,_,fargs,body,_):_ ->
-              let revbnds = reverse (zip fargs aargs)
+              let revbnds = reverse (zip (map fromParam fargs) aargs)
               in  foldl (addArgBnd pos) body revbnds
     where
         addArgBnd :: SrcLoc -> Exp -> (Ident, Exp) -> Exp
