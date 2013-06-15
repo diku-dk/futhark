@@ -197,26 +197,26 @@ The answer to the first question has been %, not surprisingly,
 a {\em functional} language, dubbed $\mathcal{L}_0$, supporting %with support for 
 \texttt{map-reduce} {\em nested} parallelism on {\em regular} arrays, i.e., 
 the size of each dimension is constant at runtime:\\
-It is {\em functional} because we would rather invest compiler effort
-in exploiting high-level program invariants rather than in proving them.
-The common example here is parallelism: {\tt map-reduce} 
-constructs are inherently parallel, while Fortran-style \texttt{do} 
-loops require sophisticated analysis to decide parallelism. 
-Furthermore, such techniques~\cite{Blume94RangeTest,SUIF,CosPLDI} %there is solid evidence that such 
-have not yet been integrated in the repertoire of commercial compilers,
-likely due to ``heroic effort'' concerns, albeit
- (i) their effectiveness was demonstrated on comprehensive suites, and
-(ii) some of them were developed more than a decade ago.
+It is {\em regular} because our suite does not require irregular 
+arrays in the sense of {\sc nesl} or {\sc dph}~\cite{BlellochCACM96NESL,Chak06DPH}, 
+and regular arrays are more amenable to compiler optimizations.
 %
 It is {\em nested} because our suite exhibits several layers of 
 parallelism that cannot be exploited by flat parallelism in the style of 
 {\sc repa}~\cite{REPA}, e.g., several innermost {\tt scan} or 
 {\tt reduce} operations and at least one (semantically)
-sequential loop per benchmark.\\
+sequential loop per benchmark.
 %
-Finally, it is {\em regular} because our suite does not require irregular 
-arrays in the sense of {\sc nesl}~\cite{BlellochCACM96NESL}, and 
-regular arrays are more amenable to compiler optimizations.
+Finally, it is {\em functional} because we would rather invest compiler effort
+in exploiting high-level program invariants rather than in proving them.
+The common example here is parallelism: {\tt map-reduce} 
+constructs are inherently parallel, while Fortran-style \texttt{do} 
+loops require sophisticated analysis to decide parallelism. 
+Furthermore, such analyses~\cite{Blume94RangeTest,SUIF,CosPLDI} %there is solid evidence that such 
+have not yet been integrated in the repertoire of commercial compilers,
+likely due to ``heroic effort'' concerns, albeit
+ (i) their effectiveness was demonstrated on comprehensive suites, and
+(ii) some of them were developed more than a decade ago.
 
 Perhaps less expectedly, the answer to the second question seems to be 
 that a common ground needs to be found between functional and imperative
@@ -230,7 +230,7 @@ and loop {\tt distribution}.
 %
 It follows that loops are necessary in the intermediate representation,
 regardless of whether they are provided as a language construct or are
-derived via a code transformation from tail-recursive functions. 
+derived from tail-recursive functions via a code transformation. 
 
 Finally, an indirect consequence of having to deal with sequential (dependent) 
 %, which semantically update an unknown array index at a time, 
@@ -451,14 +451,25 @@ data FusionRes = FusionRes\{
 %\hrule ~
 \vbox{
 \begin{colorcode}
-tryFuseSOAC:: S.Set Name     ->         FusionRes -> 
+data \emphh{FusionEnv} = FusionEnv \{
+    \emphh{soacsEnv} :: M.Map Name ([Name], Exp)
+    --^ maps array names to their producing SOAC stmt
+  , \emphh{varsEnv}  :: S.Set Name 
+    --^ set of in-scope variables at current prog point
+\}
+newtype \emp{FusionM} a = FusionM (StateT NameSrc 
+               (ReaderT FusionEnv (Either FusionErr)) a)
+  deriving ( MonadState  NameSrc, MonadReader \emphh{FusionEnv},
+             Monad, Applicative, Functor )
+
+\emp{tryFuseSOAC}:: S.Set Name     ->         FusionRes -> 
              -- ^vars \mymath{\in} SOAC's lamba,   ^current result  
-              ([Ident], Exp) -> FusionM FusionRes
+              ([Ident], Exp) -> \emp{FusionM} FusionRes
              -- ^SOAC stmt,      ^result after fusion
-tryFuseSOAC lam_vars res (out_ids, soac) = do   
+\emp{tryFuseSOAC} lam_vars res (out_ids, soac) = do   
   inp_ids <- getInpArrsSOAC soac
   --^e.g., [x,y] \mymath{\Leftarrow} map2(f, x, y)  
-  inp_nms <- expandSOACsInpArr \$ map identName inp_ids
+  inp_nms <- \emphh{expandSOACsInpArr} \$ map identName inp_ids
   --^e.g., [x,y] \mymath{\Leftarrow} map2(g, x) {\em if} let (x,y) = map2(f,a) 
   let out_nms = map identName out_idds
     
@@ -479,9 +490,8 @@ tryFuseSOAC lam_vars res (out_ids, soac) = do
   --(4) \emphh{fusion cannot move a use of an input array}
   --    \emphh{past its in-place update}
   let all_used=foldl (\mymath{\backslash}y x->S.insert x y) lam_vars inp_nms
-  let kers_cap=map (\mymath{\backslash}k->S.intersection (inplace k) all_used) 
-                   to_fuse_kers
-  let ok_inplace = L.all (map S.null kers_cap)  
+  let ok_inplace = L.all S.null \$ 
+    map (S.intersection all_used . inplace) to_fuse_kers 
 
   let all4_ok = cond1 && not \$ null to_fuse_kers && 
                 all_compat && ok_inplace
@@ -503,9 +513,11 @@ tryFuseSOAC lam_vars res (out_ids, soac) = do
           -- ^updates out/inpArr \& kers fields of result
 \end{colorcode}
 } \vspace{-2ex}
-\caption{ Conservative Fusion of a {\sc soac} Algorithm }
-\label{fig:TransfEg}
+\caption{ Conservative Fusion of a {\sc soac} }
+\label{fig:FuseOnce}
 \end{figure}
+
+% map (\mymath{\backslash}k->S.intersection (inplace k) all_used) to_fuse_kers
 
 %inpArrInResModKers
 %
@@ -543,6 +555,7 @@ map2(fn \mymath{\beta} (\mymath{\alpha\myindx{1}} a1\mymath{\myindx{i}}, \mymath
     in  g(x1\mymath{\myindx{i}}, y\mymath{\myindx{i}})
 , a1, y )
 
+
 //\emp{reduce2 o map2\mymath{\Rightarrow}redomap2}
 let (x1, x2) = map2(f, a1)
 in  reduce2(\mymath{\oplus},(e\mymath{\myindx{1}},e\mymath{\myindx{2}}),x1,y)   
@@ -554,6 +567,7 @@ redomap2(\mymath{\oplus}
       in  \mymath{\oplus}(e\mymath{\myindx{1}},e\mymath{\myindx{2}},x1\mymath{\myindx{i}},y\mymath{\myindx{i}})
 , (e\mymath{\myindx{1}}, e\mymath{\myindx{2}}), a1, y )
 
+
 //\emp{redomap2 o map2\mymath{\Rightarrow}redomap2}
 let (x1, x2) = map2(f, a1)
 in  redomap2(\mymath{\oplus}, g, e, x1, y)
@@ -563,6 +577,7 @@ redomap2(\mymath{\oplus}
    => let (x1\mymath{\myindx{i}}, x2\mymath{\myindx{i}}) = f(a1\mymath{\myindx{i}})
       in  g(e, x1\mymath{\myindx{i}}, y\mymath{\myindx{i}})
 , e, a1, y )
+
 
 // \emp{replicate can be fused}
 //\emp{without restrictions}
@@ -583,8 +598,8 @@ in let x[i] = ...
 \begin{minipage}{0.48\columnwidth}
 \begin{colorcode}
 //\emp{filter2 o filter2\mymath{\Rightarrow}filter2}
-//\emp{{\em{}IFF} consumer's input set}
-//\emp{  \mymath{\equiv} producer's output set}
+//\emp{{\em{}IFF} consumer's input list}
+//\emp{  \mymath{\equiv} producer's output list}
 let (x1,x2)=filter2(c\mymath{\myindx{1}},a1,a2)
 in  filter2(c\mymath{\myindx{2}}, x1, x2)   
     \emphh{\mymath{\equiv}}
@@ -595,8 +610,15 @@ filter2(
       else false 
 , a1, a2 )
 
-
-
+//\emp{reduce2 o filter2\mymath{\Rightarrow}redomap2}
+//\emp{{\em{}IFF} consumer's input list}
+//\emp{  \mymath{\equiv} producer's output list}
+let x = filter2(c, a)
+in  reduce2(\mymath{\oplus}, e, x)
+    \emphh{\mymath{\equiv}}
+reduce2(fn \mymath{\beta} (\mymath{\beta} e, \mymath{\beta} a\mymath{\myindx{i}}) =>
+  if c(a\mymath{\myindx{i}}) then \mymath{\oplus}(e,a\mymath{\myindx{i}}) else e
+, e, a )
 
 //\emp{reduce2 o filter2\mymath{\Rightarrow}redomap2}
 //\emp{{\em{}IFF} consumer's input set}
@@ -609,9 +631,6 @@ redomap2(\mymath{\oplus}
    => if c(a1\mymath{\myindx{i}}, a2\mymath{\myindx{i}})
       then \mymath{\oplus}(e, a1\mymath{\myindx{i}}) else e
 , e, a1, a2 )
-
-
-
 
 //\emp{redomap2 o filter2\mymath{\Rightarrow}redomap2}
 //\emp{{\em{}IFF} consumer's input set}
@@ -640,6 +659,90 @@ redomap2(\mymath{\oplus}
 %\subsection{Fusion Structural-Analysis Algorithm}
 \subsection{Building the Fused Kernels at Program Level}
 \label{sec:bwdPass}
+
+\begin{figure}[bt]
+%\hrule ~
+\vbox{
+\begin{colorcode}
+\emp{fusionGather :: FusionRes -> Exp -> FusionM FusionRes}
+-----------------
+-- Let Pattern --
+fusionGather r (LetPat pat soac@(Map2 \mymath{\lambda} _ _ _) bdy _)=do
+  r' <- \emphh{bindBothEnvs} pat soac \$ fusionGather r bdy    
+  (lam_vars, r'') <- fusionGatherLam r' lam
+  tryFuseSOAC lam_vars r'' (pat, soac)
+-- ^similar for Reduce2, Filter2, Redomap2. 
+-- ^Replicate has a specialized implem (not shown) 
+
+fusionGather r (LetPat pat (Scan2 \mymath{\lambda} ne arr _ _) bdy _)=do
+  r'        <- \emphh{bindVarsEnv} pat \$ fusionGather r bdy
+  (_, r'')  <- fusionGatherLam r' \mymath{\lambda}
+  foldM fusionGatherExp r'' (ne : arr)
+
+fusionGather r (LetPat pat e body _) = do
+    r' <- \emphh{bindVarsEnv} pat \$ fusionGather r body
+    fusionGather r' e
+
+fusionGather _ (Map2 \{\}) = errorIllegal ...
+
+------------------------------------------------
+-- Variable, Index, If, Loop, In-Place Update --
+fusionGather r (Var idd) = do
+  -- {\em If} array {\em then} add it to the unfusable set
+  case identType idd of
+    Array\{\} -> return \$ r \{ unfused = 
+                   S.insert (identName idd) (unfused r) \}
+    _       -> return \$ r
+
+fusionGather r (Index idd indices _ _) = do 
+  foldM fusionGather r ((Var idd) : indices)
+
+fusionGather r (If e_cond e_then e_else _ _) = do
+  t_r <- fusionGather mkNullRes e_then
+  e_r <- fusionGather mkNullRes e_else
+  c_r <- fusionGather r         e_cond
+  return \$ \emp{mergeFusionRes} c_r (\emp{unionFusionRes} t_r e_r)
+  -- mergeFusionRes \mymath{\equiv} semantically unions^ results, 
+  --   but promotes the \mymath{\cap} of inpArr keys to unfused set
+
+fusionGather r (LetWith id1 id0 inds elm bdy \emp{alias} _) = do 
+    r'  <- \emphh{bindVarsEnv} [id1] \$ fusionGather r bdy
+    -- Add the aliases set of id0 (included)
+    -- to the `inplace' field of any kernel:
+    let kers = M.map (\mymath{\backslash}k->k\{(inplace k) `S.union` \emp{alias}\}) 
+                     (kernels r')
+    foldM fusionGather (r' \{ kernels = kers \}) 
+                       (elm : (Var id0) : inds)
+
+fusionGatherLam r (AnonymFun idds body _ pos) = do
+    r' <- \emphh{bindVarsEnv} idds \$ fusionGather mkNullRes body
+    let inps = S.fromList \$ M.keys \$ inpArr new_res
+    let unfus  = (unfused r') `S.union` inps
+    -- ^make the inpArr of the \mymath{\lambda}-body result unfusable
+    --  so that they cannot be fused from outside \mymath{\lambda} 
+    bnds <- asks \$ varsEnv
+    let unfus' = unfus `S.intersection` bnds
+    -- ^filter out \mymath{\lambda}'s local vars
+    return \$ (unfus', \emp{unionFusionRes} r (r'\{unfused=unfus'\}))
+
+\end{colorcode}
+} \vspace{-2ex}
+\caption{ Constructing Fused Kernels at Function Level}
+\label{fig:FusionGather}
+\end{figure}
+
+%fusionGather r (DoLoop arr_id ini _ ub bdy1 bdy2 _) = do
+%    r'  <- \emphh{bindVarsEnv} arr_id \$ fusionGather r bdy2
+%    r'' <- foldM fusionGather r' [ini,ub]
+%    l_r <- \emphh{bindVarsEnv} arr_id \$ fusionGather mkNullRes bdy1
+%    let inps = S.fromList \$ M.keys (inpArr l_r)
+%    let l_r' = l_r\{unfused= (unfused l_r) `S.union` inps\} 
+%    -- ^make the inpArr of the loop-body result unfusable
+%    return \$ \emp{unionFusionRes} r'' l_r'
+
+%tryFuseSOAC:: S.Set Name -> FusionRes -> ([Ident], Exp)-> FusionM FusionRes
+%  , fusedRes   :: FusedRes
+
 
 \subsection{Replacing the Fused Kernels \& Fusion Driver}
 \label{sec:fwdPass}
