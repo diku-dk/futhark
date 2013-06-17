@@ -740,23 +740,25 @@ complexity of the transformation.
 \label{fig:T1T2}
 \end{figure}
 
-Figure~\ref{fig:T1T2} depicts the intuitive idea that lays the
-foundation of the fusion analysis.   The top-left figure shows
-the {\em dependency graph} of a simple program, where the arrows
-point from the consumer to the producer. The program is a basic
-block, i.e., no branches or loops, in which (array) variables 
-are used only as input or output to {\sc soac} calls.   
+Figure~\ref{fig:T1T2} depicts the intuitive idea on which
+our fusion analysis is based.   The top-left figure shows
+the dependency graph of a simple program, where an 
+arrow points from the consumer to the producer. 
+%
+For simplicity, array variables are used only as input or 
+output to {\sc soac} calls and the control flow is trivial,
+i.e., a basic block. 
 
 The main point is that all {\sc soac}s that appear inside the box
 labeled \emp{\em Kernel 3} can be fused without duplicating any
-computation despite the fact that several of the fused variables
-are used in different {\sc soac}s. For example  
-Despite the fact that several variables are used in different {\sc soac}s
-all
-
-belonging to kernel $3$, One can observe that several array variables
-are used in different {\sc soac}s, e.g.,  
- 
+computation despite the fact that several of the to-be-fused variables
+are used in different {\sc soac}s, e.g., {\tt y1} is used to
+compute both {\tt (z1,z2)} and {\tt res}. We achieve this means of
+{\em {\tt T$_2$} reduction on the dependency graph}:
+The rightmost child of the root {\sc soac} has only one incoming edge, 
+hence it can be fused (reduced). This is achieved by (i) replacing in the
+root {\sc soac} the child's output arrays of the child's input array,
+and inserting a call  
 
 
 \begin{figure}[bt]
