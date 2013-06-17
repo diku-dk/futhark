@@ -92,7 +92,7 @@
 %\copyrightdata{978-1-4503-1577-7/12/09}
 
 
-\title{A Structural-Analysis Algorithm for Fusion}
+\title{A Structural-Analysis Approach To Fusion}
 \subtitle{$\mathcal{L}_0$ Status Report}
 %\subtitle{Subtitle Text, if any}
 
@@ -228,7 +228,7 @@ a combination of {\tt map}, {\tt reduce}, and {\tt scan} operations,
 the optimization opportunities, e.g., enhancing the degree of parallelism 
 and reducing  the memory time and space overheads, seem solvable via a 
 combination of {\tt fusion}, {\tt transposition}, loop {\tt interchange} 
-and loop {\tt distribution}.
+and {\tt distribution}~\cite{OptCompModernArch}.
 %
 It follows that loops are necessary in the intermediate representation,
 regardless of whether they are provided as a language construct or are
@@ -550,7 +550,109 @@ fun real main([real] a_3) =
 \subsection{Safe in-place updates}
 \label{sec:in-place}
 
-\section{Fusion via Structural Analysis}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Fusion: A Structural-Analysis Transformation}
+
+The fusion transformation, presented in this section, assumes a
+{\em normalized} program, i.e., by running the enabling
+transformations introduced in Section~\ref{sec:Prelim}.   
+%In essence, this means that:
+Main properties are:
+\begin{itemize}
+    \item no tuple type can appear in an array or tuple type, i.e., flat tuples,
+    \item {\tt unzip} has been eliminated, {\tt zip} has been
+            replaced with {\tt assertZip}, which verifies either 
+            statically or at runtime that the outer size of {\tt zip}'s 
+            input matches, and finally, the original {\sc soac}s ({\tt map})
+            have been replaced with their tuple-of-array version ({\tt map2}),
+    \item tuple expressions can appear only as the final result of 
+            a function, {\sc soac}, or {\tt if} expression, and similarly 
+            for the tuple pattern of a let binding, e.g., a formal argument
+            cannot be a tuple,
+    \item %consecutive {\tt let} expressions are at the same nesting level, e.g., 
+            $e_1$ cannot be a {\tt let} expression when used 
+            in {\tt let~$p$~=~$e_1$~in~$e_2$},
+    \item each {\tt if} is binded to a corresponding {\tt let} expression, and an 
+            {\tt if}'s condition cannot be in itself an {\tt if} expression, e.g.,
+            {\tt a~+~if(~if~c$_1$~then~$e_1$~else~$e_2$~)~then~$e_3$~else~$e_4$} $\rightarrow$
+            {\tt let~c$_2$~=~if~c$_1$~then~$e_1$~else~$e_2$~in}\\ 
+            {\tt let~b~~=~if~c$_2$~then~$e_3$~else~$e_4$~in~a+b}  
+            %e.g., {\tt let~x~=~if~cond~then $e_1$~else~$e_2$}, 
+            %and also {\tt cond} cannot be an {\tt if} expression,
+            %cannot appear in the condition of another {\tt if},
+    \item function calls, including {\sc soac}s, have their own let binding,
+            e.g., {\tt reduce2(f,a)~+~x} $\Rightarrow$
+            {\tt let~y~=~reduce2(f,e,a)~in~y+x},
+    \item all actual arguments are vars, 
+            e.g., {\tt f(a+b)}$\Rightarrow${\tt let~x=a+b~in~f(x)}.
+\end{itemize}
+
+
+\begin{figure}[bt]
+%\hrule ~
+\vbox{
+\begin{center}
+\includegraphics[height=17ex]{Figures/CFG_T12}
+\end{center}
+}
+\caption{T$_1$-T$_2$ Transformation For Testing CFG Reducibility}
+\label{fig:T1T2}
+\end{figure}
+
+Structural analysis is rooted in the T$_1$-T$_2$ transformation~\cite{T12}
+depicted in Figure~\ref{fig:T1T2}.
+If repeated application of T$_1$ and T$_2$ to a control-flow graph ({\sc cfg}) 
+results in one point, then the {\sc cfg} is said to be reducible, i.e.,
+the code can be re-written using only regular (while) {\tt loop}s, 
+{\tt if} and {\tt goto}-free statements (with function calls).
+
+Data-flow optimizations on reducible {\sc cfg}s can be modeled via equations 
+that are applied at each T$_1$/T$_2$ reduction, and consequently only one
+{\sc cfg} pass is required instead of a fixed-point iteration.
+%
+In practice, if the {\sc cfg} is known to be reducible, then 
+analysis can be conveniently performed source to source: 
+%In practice, a reducible {\sc cfg} enables convenient source-to-source transformations: 
+data-flow equations are associated directly with the
+language constructs and dictate, for example, how the analysis result is
+initialized at statement level, composed between consecutive statements,
+merged across branches, aggregated across loops, and translated across 
+call sites.  (An example of such non-trivial 
+analysis is the summarization~\cite{HybAn} of array references into 
+read-write, write-first and read-only set expressions, used in the context 
+of array-{\sc ssa} and autoparallelization.)
+ 
+Since $\mathcal{L}_0$ guarantees a reducible {\sc cfg}, %at function level,
+fusion is implemented as an intra-procedural\footnote{
+The current version of the $\mathcal{L}_0$ compiler 
+relies on aggressive inlining and does not support
+(yet) inter-procedural analysis.
+}
+source-to-source transformation: a bottom-up traversal of the 
+abstract-syntax tree (\textsc{AbSyn}) builds the ``fusion kernels'' 
+and a second pass substitutes them in the \textsc{AbSyn} and 
+cleans up the code.    Such an approach is not uncommon. 
+
+{\em What is less common} is that the data-flow equations 
+themselves model $T_2$-like reducibility of the data-dependency graph.
+The remaining of this section is organized as follows:
+Section~\ref{sec:Intuition} gives the gist of the technique,
+and shows several don't-fuse cases, which would
+either lead to illegal programs or to duplicated computation.
+%
+Section~\ref{sec:FusingOnce} introduces the data structure
+that stores the result of the first pass, and discusses the rules 
+for processing one {\sc soac} node, including the compositional
+algebra under which {\sc soac}s are fused. 
+Section~\ref{sec:bwdPass} discusses the data-flow rules of
+the first pass for the rest of \textsc{AbSyn} nodes.
+Finally, Section~\ref{sec:fwdPass} describes the second
+pass and remarks on the asymptotical 
+complexity of the transformation.
+
 
 
 \subsection{Motivation and Intuitive Solution}
@@ -560,14 +662,6 @@ fun real main([real] a_3) =
 %\hrule ~
 \vbox{
 \begin{minipage}{0.46\columnwidth}
-%\begin{colorcode}
-%CC Uncoalesced Layout
-%DOALL i = 1, N
-%  DO j = 1, M
-%    ... ARR(\mymath{\sigma}(j), i) ...
-%  ENDDO
-%ENDDOALL
-%\end{colorcode}
 \begin{center}
 \includegraphics[height=30ex]{Figures/T1T2} \\\vspace{2ex}
 \includegraphics[height=30ex]{Figures/T1T2Fuse2}
@@ -580,13 +674,28 @@ fun real main([real] a_3) =
 \includegraphics[height=30ex]{Figures/T1T2Fuse3}
 \end{center}
 \end{minipage}
-%\begin{center}
-%\includegraphics[height=12ex]{figures/MemCoalesce}
-%\end{center}
-} %\vspace{-1.5ex}
+}
 \caption{Fusion By T2 Transformation on the Dependency Graph}
 \label{fig:T1T2}
 \end{figure}
+
+Figure~\ref{fig:T1T2} depicts the intuitive idea that lays the
+foundation of the fusion analysis.   The top-left figure shows
+the {\em dependency graph} of a simple program, where the arrows
+point from the consumer to the producer. The program is a basic
+block, i.e., no branches or loops, in which (array) variables 
+are used only as input or output to {\sc soac} calls.   
+
+The main point is that all {\sc soac}s that appear inside the box
+labeled \emp{\em Kernel 3} can be fused without duplicating any
+computation despite the fact that several of the fused variables
+are used in different {\sc soac}s. For example  
+Despite the fact that several variables are used in different {\sc soac}s
+all
+
+belonging to kernel $3$, One can observe that several array variables
+are used in different {\sc soac}s, e.g.,  
+ 
 
 
 \begin{figure}[bt]
@@ -599,18 +708,19 @@ fun real main([real] a_3) =
 //its in-place update point
 let \emphh{x}   = map2(f, \emp{a}) in
 let \emp{a}[1]= 3.33       in
-let y   = map2(g, \emp{x}) in ...
+let y   = map2(g, \emp{x}) in ..
 
 // \emp{Case 3:} not all SOAC
 //combinations are fusable
 let \emp{x} = filter2(c\mymath{\myindx{1}}, a) in
 let \emp{y} = filter2(c\mymath{\myindx{1}}, b) in
-let z = map2   (f,\emp{x,y}) in...
+let z = map2   (f,\emp{x,y}) in..
 
 // \emp{Case 5:} don't fuse if \emp{x}
 //used outside SOAC inputs
-let \emphh{x} = map2(f, arr)  in
-let y = map2(g(\emp{x}), \emphh{x}) in
+let \emphh{x} = map2(f, arr) in
+let y = map2(g, \emphh{x})   in
+    x[i] + y[i]
 \end{colorcode}
 \end{minipage}
 \hfill
@@ -625,14 +735,15 @@ let \emphh{x} = map2(f, arr)   in
 // \emp{Case 4:} don't fuse in 2
 //kernels sharing a CF path
 let \emphh{x} = map2(f, arr) in
-let y = map2(g, \emp{x})   in
-let z = map2(h, \emp{x})   in ...
+let y = if c then map2(g, \emp{x}) 
+             else .. in
+let z = map2(h, \emp{x})   in ..
 
 // \emp{Case 6:} x \& y used exactly
 //once but still don't fuse
 let (x,y) = map2(f, a)   in
 let u = reduce2(op +,0,x)in
-let v = reduce2(op *,1,y)...
+let v = reduce2(op *,1,y)..
 \end{colorcode}
 \end{minipage}
 %\begin{center}
@@ -1017,6 +1128,15 @@ fusionGatherLam r (AnonymFun idds body _ pos) = do
 \section{Limitations and Possible Extensions}
 \label{sec:Discuss}
 
+\begin{itemize}
+    \item Discuss algorithm complexity
+    \item Discuss semantics of {\tt zip} w.r.t. fusion. Show examples that
+            demonstrate that both cases are fusable.
+    \item Discuss hindrances to fusion and how they can be resolved,
+            i.e., split, transpose, reshape, flatten, etc. 
+\end{itemize}
+
+
 \begin{figure}[bt]
 %\hrule ~
 \vbox{
@@ -1136,322 +1256,7 @@ Performance Computing for Financial Information Technology'
 
 \bibliographystyle{abbrvnat}
 \softraggedright
-%\bibliography{FHPC12}
+\bibliography{fhpc13}
 
-\begin{thebibliography}{49}
-\providecommand{\natexlab}[1]{#1}
-\providecommand{\url}[1]{\texttt{#1}}
-\expandafter\ifx\csname urlstyle\endcsname\relax
-  \providecommand{\doi}[1]{doi: #1}\else
-  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
-
-\bibitem[Allen and Kennedy(2002)]{OptCompModernArch}
-R.~Allen and K.~Kennedy.
-\newblock \emph{{O}ptimizing {C}ompilers for {M}odern {A}rchitectures}.
-\newblock Morgan Kaufmann, 2002.
-\newblock ISBN 1-55860-286-0.
-
-\bibitem[Amini et~al.(2011)Amini, Coelho, Irigoin, and
-  Keryell]{IrigoinHostAccelOptim}
-M.~Amini, F.~Coelho, F.~Irigoin, and R.~Keryell.
-\newblock Static {C}ompilation {A}nalysis for {H}ost-{A}ccelerator
-  {C}ommunication {O}ptimization.
-\newblock In \emph{Int. Work. Lang. and Compilers for Par. Computing (LCPC)},
-  2011.
-
-\bibitem[Armstrong and Eigenmann(2008)]{GamessDif}
-B.~Armstrong and R.~Eigenmann.
-\newblock Application of {A}utomatic {P}arallelization to {M}odern {C}hallenges
-  of {S}cientific {C}omputing {I}ndustries.
-\newblock In \emph{Int. Conf. Parallel Proc. (ICPP)}, pages 279--286, 2008.
-
-\bibitem[Augustsson et~al.(2008)Augustsson, Mansell, and
-  Sittampalam]{Augustsson08Paradise}
-L.~Augustsson, H.~Mansell, and G.~Sittampalam.
-\newblock Paradise: {A} {T}wo-{S}tage {DSL} {E}mbedded in {Haskell}.
-\newblock In \emph{Int. Conf. on Funct. Prog. (ICFP)}, pages 225--228, 2008.
-
-\bibitem[Baskaran et~al.(2010)Baskaran, Ramanujam, and
-  Sadayappan]{SadayappanCtoCUDA}
-M.~M. Baskaran, J.~Ramanujam, and P.~Sadayappan.
-\newblock Automatic {C}-to-{CUDA} {C}ode {G}eneration for {A}ffine {P}rograms.
-\newblock In \emph{Int. Conf. on Compiler Construction (CC)}, pages 244--263,
-  2010.
-
-\bibitem[Bird(1987)]{BirdListTh}
-R.~S. Bird.
-\newblock An {I}ntroduction to the {T}heory of {L}ists.
-\newblock In \emph{NATO Inst. on Logic of Progr. and Calculi of Discrete
-  Design}, pages 5--42, 1987.
-
-\bibitem[Black and Scholes(1973)]{black1973pricing}
-F.~Black and M.~Scholes.
-\newblock The {P}ricing of {O}ptions and {C}orporate {L}iabilities.
-\newblock \emph{The Journal of Political Economy}, pages 637--654, 1973.
-
-\bibitem[Blelloch(1996)]{BlellochCACM96NESL}
-G.~Blelloch.
-\newblock Programming {P}arallel {A}lgorithms.
-\newblock \emph{Communications of the {ACM} (CACM)}, 39\penalty0 (3):\penalty0
-  85--97, 1996.
-
-\bibitem[Blume and Eigenmann(1994)]{Blume94RangeTest}
-W.~Blume and R.~Eigenmann.
-\newblock The {R}ange {T}est: {A} {D}ependence {T}est for {S}ymbolic,
-  {N}on-{L}inear {E}xpressions.
-\newblock In \emph{Procs. Int. Conf. on Supercomp}, pages 528--537, 1994.
-
-\bibitem[Bratley and Fox(1988)]{Sobol}
-P.~Bratley and B.~L. Fox.
-\newblock Algorithm 659 {I}mplementing {S}obol's {Q}uasirandom {S}equence
-  {G}enerator.
-\newblock \emph{ACM Trans. on Math. Software (TOMS)}, 14(1):\penalty0 88--100,
-  1988.
-
-\bibitem[Chakravarty et~al.(2007)Chakravarty, Leshchinskiy, Jones, Keller, and
-  Marlow]{Chak06DPH}
-M.~Chakravarty, R.~Leshchinskiy, S.~P. Jones, G.~Keller, and S.~Marlow.
-\newblock Data parallel {H}askell: A status report.
-\newblock In \emph{Int. Work. on Declarative Aspects of Multicore Prog.
-  (DAMP)}, pages 10--18, 2007.
-
-\bibitem[Chakravarty et~al.(2011)Chakravarty, Keller, Lee, McDonell, and
-  Grover]{ArrayAccelerate}
-M.~M. Chakravarty, G.~Keller, S.~Lee, T.~L. McDonell, and V.~Grover.
-\newblock Accelerating {H}askell {A}rray {C}odes with {M}ulticore {GPUs}.
-\newblock In \emph{Int. Work. on Declarative Aspects of Multicore Prog.
-  (DAMP)}, pages 3--14, 2011.
-
-\bibitem[Cole(1993)]{ColeNearHom}
-M.~Cole.
-\newblock Parallel {P}rogramming, {L}ist {H}omomorphisms and the {M}aximum
-  {S}egment {S}um {P}roblem.
-\newblock In \emph{Procs. of Parco 93}, 1993.
-
-\bibitem[Dang et~al.(2002)Dang, Yu, and Rauchwerger]{R-LRPD}
-F.~Dang, H.~Yu, and L.~Rauchwerger.
-\newblock The {R-LRPD} {T}est: {S}peculative {P}arallelization of {P}artially
-  {P}arallel {L}oops.
-\newblock In \emph{Int. Par. and Distr. Processing Symp. (PDPS)}, pages 20--29,
-  2002.
-
-\bibitem[Dubach et~al.(2012)Dubach, Cheng, Rabbah, Bacon, and Fink]{Lime}
-C.~Dubach, P.~Cheng, R.~Rabbah, D.~F. Bacon, and S.~J. Fink.
-\newblock Compiling a {H}igh-{L}evel {L}anguage for {GPU}s.
-\newblock In \emph{Int. Conf. Prg. Lang. Design and Implem. (PLDI)}, pages
-  1--12, 2012.
-
-\bibitem[Feautrier(1991)]{FeautrierDataflow}
-P.~Feautrier.
-\newblock {D}ataflow {A}nalysis of {A}rray and {S}calar {R}eferences.
-\newblock \emph{Int. Journal of Par. Prog}, 20(1):\penalty0 23--54, 1991.
-
-\bibitem[Gibbons(1996)]{ThirdLHTh}
-J.~Gibbons.
-\newblock The {T}hird {H}omomorphism {T}heorem.
-\newblock \emph{Journal of Functional Programming (JFP)}, 6\penalty0
-  (4):\penalty0 657--665, 1996.
-
-\bibitem[Glasserman(2004)]{glasserman2004monte}
-P.~Glasserman.
-\newblock \emph{Monte Carlo {M}ethods in {F}inancial {E}ngineering}.
-\newblock Springer, New York, 2004.
-\newblock ISBN 0387004513.
-
-\bibitem[Gorlatch(1996{\natexlab{a}})]{Gorlatch:AntiUnif}
-S.~Gorlatch.
-\newblock Systematic {E}xtraction and {I}mplementation of
-  {D}ivide-and-{C}onquer {P}arallelism.
-\newblock In \emph{PLILP'96}, pages 274--288, 1996{\natexlab{a}}.
-
-\bibitem[Gorlatch(1996{\natexlab{b}})]{GorlatchDistrHom}
-S.~Gorlatch.
-\newblock Systematic {E}fficient {P}arallelization of {S}can and {O}ther {L}ist
-  {H}omomorphisms.
-\newblock In \emph{Ann. European Conf. on Par. Proc. LNCS 1124}, pages
-  401--408. Springer-Verlag, 1996{\natexlab{b}}.
-
-\bibitem[Hall et~al.(2005)Hall, Amarasinghe, Murphy, Liao, and Lam]{SUIF}
-M.~W. Hall, S.~P. Amarasinghe, B.~R. Murphy, S.-W. Liao, and M.~S. Lam.
-\newblock Interprocedural {P}arallelization {A}nalysis in {SUIF}.
-\newblock \emph{Trans. on Prog. Lang. and Sys. (TOPLAS)}, 27(4):\penalty0
-  662--731, 2005.
-
-\bibitem[Hammond and Michaelson(2000)]{HammondMichaelson00}
-K.~Hammond and G.~Michaelson, editors.
-\newblock \emph{{Research Directions in Parallel Functional Programming}}.
-\newblock Springer, London, 2000.
-
-\bibitem[Hu et~al.(1999)Hu, Takeichi, and Iwasaki]{HuDiffusion}
-Z.~Hu, M.~Takeichi, and H.~Iwasaki.
-\newblock Diffusion: {C}alculating {E}fficient {P}arallel {P}rograms.
-\newblock In \emph{Int. Work. Partial Eval. and Semantics-Based Prg. Manip.
-  (PEPM)}, pages 85--94, 1999.
-
-\bibitem[Hughes(1989)]{Hughes89Why}
-J.~Hughes.
-\newblock Why {F}unctional {P}rogramming {M}atters.
-\newblock \emph{The Computer Journal}, 32\penalty0 (2):\penalty0 98--107, 1989.
-
-\bibitem[Hull(2009)]{hull2009options}
-J.~Hull.
-\newblock \emph{Options, {F}utures {A}nd {O}ther {D}erivatives}.
-\newblock Prentice Hall, 2009.
-
-\bibitem[Joshi(2010)]{joshi2010graphical}
-M.~Joshi.
-\newblock Graphical {A}sian {O}ptions.
-\newblock \emph{Wilmott J.}, 2\penalty0 (2):\penalty0 97--107, 2010.
-
-\bibitem[Lee et~al.(2010)Lee, Yau, Giles, Doucet, and
-  Holmes]{GilesLee2010utility}
-A.~Lee, C.~Yau, M.~Giles, A.~Doucet, and C.~Holmes.
-\newblock On the {U}tility of {G}raphics {C}ards to {P}erform {M}assively
-  {P}arallel {S}imulation of {A}dvanced {M}onte {C}arlo {M}ethods.
-\newblock \emph{J. Comp. Graph. Stat}, 19\penalty0 (4):\penalty0 769--789,
-  2010.
-
-\bibitem[Lee et~al.(2009)Lee, Min, and Eigenmann]{EigenmannOpenMPtoGPU}
-S.~Lee, S.-J. Min, and R.~Eigenmann.
-\newblock Open{MP} to {GPGPU}: a {C}ompiler {F}ramework for {A}utomatic
-  {T}ranslation and {O}ptimization.
-\newblock In \emph{Int. Symp. Princ. and Practice of Par. Prog. (PPoPP)}, pages
-  101--110, 2009.
-
-\bibitem[Lin and Padua(2000)]{PaduaStackArr}
-Y.~Lin and D.~Padua.
-\newblock Analysis of {I}rregular {S}ingle-{I}ndexed {A}rrays and its
-  {A}pplications in {C}ompiler {O}ptimizations.
-\newblock In \emph{Procs. Int. Conf. on Compiler Construction}, pages 202--218,
-  2000.
-
-\bibitem[Loogen et~al.(2005)Loogen, Ortega-Mall\'{e}n, and
-  {Pe\~{n}a-Mar\'{\i}}]{Eden}
-R.~Loogen, Y.~Ortega-Mall\'{e}n, and R.~{Pe\~{n}a-Mar\'{\i}}.
-\newblock {Parallel Functional Programming in Eden}.
-\newblock \emph{J. of Funct. Prog. (JFP)}, 15\penalty0 (3):\penalty0 431--475,
-  2005.
-
-\bibitem[Lu and Mellor-Crummey.(1998)]{ExtRed}
-B.~Lu and J.~Mellor-Crummey.
-\newblock Compiler {O}ptimization of {I}mplicit {R}eductions for {D}istributed
-  {M}emory {M}ultiprocessors.
-\newblock In \emph{Int. Par. Proc. Symp. (IPPS)}, 1998.
-
-\bibitem[Mainland and Morrisett(2010)]{Nikola}
-G.~Mainland and G.~Morrisett.
-\newblock {Nikola: Embedding Compiled {GPU} Functions in {H}askell}.
-\newblock In \emph{Int. Symp. on Haskell}, pages 67--78, 2010.
-
-\bibitem[Marlow et~al.(2011)Marlow, Newton, and
-  Peyton~Jones]{MarlowHS11ParMonad}
-S.~Marlow, R.~Newton, and S.~Peyton~Jones.
-\newblock {A Monad for Deterministic Parallelism}.
-\newblock In \emph{Int. Symp. on Haskell}, pages 71--82, 2011.
-
-\bibitem[Moon and Hall(1999)]{Moon99PredArrDataFlow}
-S.~Moon and M.~W. Hall.
-\newblock Evaluation of {P}redicated {A}rray {D}ata-{F}low {A}nalysis for
-  {A}utomatic {P}arallelization.
-\newblock In \emph{Int. Symp. Princ. and Practice of Par. Prog. (PPoPP)}, pages
-  84--95, 1999.
-
-\bibitem[Morita et~al.(2007)Morita, Morihata, Matsuzaki, Hu, and
-  Takeichi]{MoritaWeakInv}
-K.~Morita, A.~Morihata, K.~Matsuzaki, Z.~Hu, and M.~Takeichi.
-\newblock Automatic {I}nversion {G}enerates {D}ivide-and-{C}onquer {P}arallel
-  {P}rograms.
-\newblock In \emph{Int. Conf. Prog. Lang. Design and Impl. (PLDI)}, pages
-  146--155, 2007.
-
-\bibitem[Nord and Laure(2011)]{NordParCo11}
-F.~Nord and E.~Laure.
-\newblock Monte {C}arlo {O}ption {P}ricing with {G}raphics {P}rocessing
-  {U}nits.
-\newblock In \emph{Int. Conf. ParCo}, 2011.
-
-\bibitem[Oancea and Rauchwerger(2012)]{CosPLDI}
-C.~E. Oancea and L.~Rauchwerger.
-\newblock Logical {I}nference {T}echniques for {L}oop {P}arallelization.
-\newblock In \emph{Int. Conf. Prog. Lang. Design and Impl. (PLDI)}, 2012.
-
-\bibitem[Oancea et~al.(2009)Oancea, Mycroft, and Harris]{OanceaSpLIP}
-C.~E. Oancea, A.~Mycroft, and T.~Harris.
-\newblock A {L}ightweight, {I}n-{P}lace {M}odel for {S}oftware {T}hread-{L}evel
-  {S}peculation.
-\newblock In \emph{Int. Symp. on Par. Alg. Arch. (SPAA)}, pages 223--232, 2009.
-
-\bibitem[Paek et~al.(2002)Paek, Hoeflinger, and Padua]{LMAD}
-Y.~Paek, J.~Hoeflinger, and D.~Padua.
-\newblock Efficient and {P}recise {A}rray {A}ccess {A}nalysis.
-\newblock \emph{Trans. on Prog. Lang. and Sys. (TOPLAS)}, 24(1):\penalty0
-  65--109, 2002.
-
-\bibitem[{Peyton Jones} et~al.(2000){Peyton Jones}, Eber, and Seward]{SPJ00}
-S.~{Peyton Jones}, J.-M. Eber, and J.~Seward.
-\newblock Composing {C}ontracts: an {A}dventure in {F}inancial {E}ngineering
-  (functional pearl).
-\newblock In \emph{Int. Conf. on Funct. Prog. (ICFP)}, pages 280--292, 2000.
-
-\bibitem[Pouchet and et~al.(2012)]{PolyhedralOpt}
-L.~Pouchet and et~al.
-\newblock Loop {T}ransformations: {C}onvexity, {P}runing and {O}ptimization.
-\newblock In \emph{Int. Conf. Princ. of Prog. Lang. (POPL)}, 2012.
-
-\bibitem[Pugh and Wonnacott(1998)]{Pugh98NonlinPresb}
-W.~Pugh and D.~Wonnacott.
-\newblock Constraint-{B}ased {A}rray {D}ependence {A}nalysis.
-\newblock \emph{Trans. on Prog. Lang. and Sys.}, 20(3):\penalty0 635--678,
-  1998.
-
-\bibitem[Rus et~al.(2003)Rus, Hoeflinger, and Rauchwerger]{HybAn}
-S.~Rus, J.~Hoeflinger, and L.~Rauchwerger.
-\newblock Hybrid {A}nalysis: {S}tatic \& {D}ynamic {M}emory {R}eference
-  {A}nalysis.
-\newblock \emph{Int. Journal of Par. Prog}, 31(3):\penalty0 251--283, 2003.
-
-\bibitem[Ryoo et~al.(2008)Ryoo, Rodrigues, Baghsorkhi, Stone, Kirk, and
-  Hwu]{PrinciplesMemGPU}
-S.~Ryoo, C.~I. Rodrigues, S.~S. Baghsorkhi, S.~S. Stone, D.~B. Kirk, and
-  W.-m.~W. Hwu.
-\newblock Optimization {P}rinciples and {A}pplication {P}erformance
-  {E}valuation of a {M}ultithreaded {GPU} {U}sing {CUDA}.
-\newblock In \emph{Int. Symp. Princ. and Practice of Par. Prog. (PPoPP)}, pages
-  73--82, 2008.
-
-\bibitem[Strout(2003)]{StroutPhD}
-M.~M. Strout.
-\newblock \emph{Performance transformations for irregular applications}.
-\newblock PhD thesis, 2003.
-\newblock AAI3094622.
-
-\bibitem[Trinder et~al.(1996)Trinder, Hammond, {Mattson Jr.}, Partridge, and
-  {Peyton Jones}]{GpH}
-P.~Trinder, K.~Hammond, J.~{Mattson Jr.}, A.~Partridge, and S.~{Peyton Jones}.
-\newblock {GUM: a Portable Parallel Implementation of Haskell}.
-\newblock In \emph{Int. Conf. Prg. Lang. Design and Implem. (PLDI)}, pages
-  78--88, 1996.
-
-\bibitem[Ueng et~al.(2008)Ueng, Lathara, Baghsorkhi, and Hwu]{CudaLite}
-S.-Z. Ueng, M.~Lathara, S.~S. Baghsorkhi, and W.-M.~W. Hwu.
-\newblock {CUDA}-{L}ite: {R}educing {GPU} {P}rogramming {C}omplexity.
-\newblock In \emph{Int. Work. Lang. and Compilers for Par. Computing (LCPC)},
-  pages 1--15, 2008.
-
-\bibitem[Wichura(1988)]{wichura1988algorithm}
-M.~Wichura.
-\newblock Algorithm {AS} 241: {T}he percentage points of the {N}ormal
-  distribution.
-\newblock \emph{Journal of the Royal Statistical Society. Series C (Applied
-  Statistics)}, 37\penalty0 (3):\penalty0 477--484, 1988.
-
-\bibitem[Yang et~al.(2010)Yang, Xiang, Kong, and Zhou]{YangMemOptim}
-Y.~Yang, P.~Xiang, J.~Kong, and H.~Zhou.
-\newblock A {GPGPU} {C}ompiler for {M}emory {O}ptimization and {P}arallelism
-  {M}anagement.
-\newblock In \emph{Int. Conf. Prog. Lang. Design and Implem. (PLDI)}, pages
-  86--97, 2010.
-
-\end{thebibliography}
 
 \end{document}
