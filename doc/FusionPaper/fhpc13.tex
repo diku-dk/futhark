@@ -327,7 +327,7 @@ source variable.  In section \ref{sec:in-place}, we will describe our
 method for doing array updates {\em in-place}, that is without copying
 the source array, without losing referential transparency.
 
-The other unusual construct is the {\tt do-loop}.  It is fundamentally
+The other unusual construct is the {\tt do}-loop.  It is fundamentally
 syntactical sugar for a certain form of tail-recursive functions, in
 order to make it easier to express loop optimisations and certain
 sequential loops.
@@ -430,13 +430,12 @@ be omitted when currying if no curried arguments are given.
 
 \begin{figure}[bt]
 \begin{tabular}{lrll}
-$l$ & $::=$ & {\tt fn $t$ ($t_{1}$ {\bf id}, \ldots, $t_{n}$ {\bf id})} & (Anonymous function) \\
+$l$ & $::=$ & {\tt fn $t$ ($t_{1}$ {\bf id}$_{1}$, \ldots, $t_{n}$ {\bf id}$_{n}$)} & (Anonymous function) \\
 &     & {\tt => $e$} \\
 & $|$ & {\tt {\bf id} ($e_{1}$, \ldots, $e_{n}$)} & (Curried function) \\
 & $|$ & {\tt op $\odot$ ($e_{1}$, \ldots, $e_{n}$)} & (Curried operator) \\
 \\
 $e$ & $::=$ & {\tt map($l$, $e$)} \\
-%    & $|$ & {\tt mapall($l$, $e$)} \\
     & $|$ & {\tt filter($l$, $e$)} \\
     & $|$ & {\tt reduce($l$, $x$, $e$)} \\
     & $|$ & {\tt scan($l$, $x$, $e$)} \\
@@ -461,7 +460,7 @@ Haskell-inspired notation.
   $\rightarrow$ {\tt\{$a$[i] | $f$($a$[i]) = {\tt True }\}}
 
 \item[{\tt reduce($f$,$x$,$a$)}]\hfill\\
-  $:: (\beta\rightarrow\alpha\rightarrow\beta)\rightarrow\beta\rightarrow[\alpha]\rightarrow\beta$\\
+  $:: (\alpha\rightarrow\alpha\rightarrow\alpha)\rightarrow\alpha\rightarrow[\alpha]\rightarrow\alpha$\\
   $\rightarrow$ {\tt $f$($f$(\ldots $f$($x$,$v$[0]), $v$[1]), $v$[n])}
 
 \item[{\tt scan($f$,$x$,a)}]\hfill\\
@@ -472,8 +471,7 @@ Haskell-inspired notation.
   $:: (\gamma\rightarrow\beta\rightarrow\gamma)\rightarrow(\alpha\rightarrow\beta)\rightarrow\gamma\rightarrow[\alpha]\rightarrow\gamma$\\
   $\rightarrow$ \text{\tt reduce($l_{r}$, $x$, map($l_{m}$, $v$))} \\
 \end{description}
-In particular, note that {\tt reduce} is a left-fold, and that {\tt
-  scan} is an inclusive prefix scan.
+In particular, note that {\tt scan} is an inclusive prefix scan.
 
 The semantics of {\tt redomap}:\\
             \text{\tt redomap($\oplus$,$g$,$x$,$v$)} $\rightarrow$
@@ -496,28 +494,118 @@ to extract the components.  This permits us to write {\tt map(op +,
   map(fn int ((int, int) a) => let (x,y) = a in x+y,
       zip(xs,ys))
 \end{colorcode}
+We will make use of this shortcut in this paper.
 
 \subsection{Safe in-place updates}
 \label{sec:in-place}
 
-Uniqueness types...
+When writing sequential loops, it is often very convenient to update
+the elements of an array in-place.  However, in order to perform such
+an update without violating referential transparency, we must be able
+to guarantee that no other arrays share data with the array.  To
+perform this check, \LO{} uses an extension to the type system in the
+form of {\em uniqueness attributes} inspired by
+Clean~\cite{clean-uniqueness-types} and Rust~\cite{rust}, as well as
+aliasing analysis.  We extend the syntax for array types to permit a
+prefix asterisk, as seen in figure \ref{fig:uniqueness-types},
+denoting a unique array.
+
+\begin{figure}[bt]
+\begin{tabular}{lrll}
+$t$ & $::=$ & {\tt *[$t$]} & (Unique array) \\
+\end{tabular}
+\caption{Uniqueness attributes}
+\label{fig:uniqueness-types}
+\end{figure}
+
+The semantics of uniqueness attributes are as follows.  Inside a
+function, a parameter having type {\tt *$\alpha$} means that neither
+the argument value nor any of its aliases are going to be used after
+the function returns, implying that the function body can modify the
+argument freely.  Furthermore, if the return type is unique, its value
+must not alias any non-unique arguments.  The intuition is that the
+function can be considered to have exclusive access to its unique
+argument, and a caller to have exclusive access to a unique return
+value.
+
+In a function call, a parameter having type {\tt *$\beta$} means that
+whatever argument is passed must be modifiable (that is, it must not
+be aliased with a non-modifiable function argument), and neither it
+nor any of its aliases may be used in any way after the function call.
+We say that it has been {\em consumed}.
+
+As a concrete example, a loop that uses in-place modification to add
+{\tt k} to every element of an integer array can be written like this.
+
+\begin{colorcode}
+loop (a) = for i < n do
+             let b = a with [i] <- a[i]+k in b
+\end{colorcode}
+
+For clarity, the result of the in-place modification is given a
+distinct name from the input array, but this is not required.  The
+equivalent tail-recursive function, with uniqueness attributes, is as
+follows.
+
+\begin{colorcode}
+fun *[int] f(int i, int n, *[int] a, int k) =
+  if i >= n then a
+            else let b = a with [i] = a[i] + k in
+                 f(i+1, n, b, k)
+\end{colorcode}
+
+After an array has been used on the right-hand side of a let-with, we
+mark it and all of its aliases as consumed, and it may not be used
+afterwards.
+
+Our aliasing analysis is rather conservative.  In particular, we
+assume that if a function returns a non-unique array, that array may
+alias any of the function arguments.  We also do not detect aliasing
+at a finer granularity than whole arrays --- after {\tt let a = b[0]},
+{\tt a} aliases all of {\tt b}, not just its first row.
 
 \subsection{Compiler pipeline}
 \label{sec:enabling-optimisations}
-One of the first steps in the \LO{} compilation pipeline is to
-transform the use of tuples in the program.  Notably, the
-tuple-transformation flattens all tuples (i.e, {\tt (x,(y,z))} becomes
-{\tt (x,y,z)}), and converts arrays of tuples to tuples of arrays.
-Arrays of tuples are in a sense merely syntactic sugar for tuples of
-arrays; the type {\tt [(int, real)]} is transformed to {\tt ([int],
-  [real])} during the compilation process, and all code interacting
-with arrays of tuples is likewise transformed.  In most cases, this is
-fully transparent, but there are edge cases where the transformation
-is not an isomorphism.
+
+The compilation pipeline in the current \LO{} compiler is outlined on
+figure \ref{fig:l0cpipeline}.  Type checking is done on the original
+program, to ensure that any error messages refer to the names written
+by the programmer, but all subsequent stages consume and produce
+programs in which names are distinct.  To begin with, we run a
+transformation that converts most uses of tuples to a simpler form,
+described in more detail in section \ref{sec:tuple-transformation}.
+After this comes let- and tuple-normalisation, where the program is
+transformed in such a way that the only direct operands to functions,
+SOACs and operators are variables, and that every tuple-pattern is
+fully expanded to cover all elements of the tuple value to be matched.
+One notable property of the resulting program is that no variable is
+ever bound to a tuple.
+
+The enabling optimisations loop consists of
+\begin{enumerate}
+\item inlining as much as possible,
+\item performing copy- and constant-propagation, and
+\item removing dead code,
+\end{enumerate}
+which is repeated until a fixed point is reached.  After loop fusion,
+the enabling optimisations stage is repeated, as fusion will often
+produce code amenable to copy propagation.
+
+\subsubsection{Tuple transformation}
+\label{sec:tuple-transformation}
+
+The tuple-transformation stage flattens all tuples (i.e, {\tt
+  (x,(y,z))} becomes {\tt (x,y,z)}), and converts arrays of tuples to
+tuples of arrays.  Arrays of tuples are in a sense merely syntactic
+sugar for tuples of arrays; the type {\tt [(int, real)]} is
+transformed to {\tt ([int], [real])} during the compilation process,
+and all code interacting with arrays of tuples is likewise
+transformed.  In most cases, this is fully transparent, but there are
+edge cases where the transformation is not an isomorphism.
 
 \begin{figure}[bt]
 \begin{center}
-\includegraphics[width=0.6\columnwidth]{Figures/pipeline}
+\includegraphics[width=0.7\columnwidth]{Figures/pipeline}
 \end{center}
 \caption{Compiler pipeline}
 \label{fig:l0cpipeline}
@@ -534,47 +622,41 @@ arrays, we must look at the \textit{transformed} values - in a sense,
 the fullness requirement ``transcends'' the tuples.  Also, after
 tuple-transformation, {\tt zip} and {\tt unzip} disappear.
 
-After enabling-optimisations, the previously described SOACs are no
+After tuple transformation, the previously described SOACs are no
 longer usable, as they each accept only a single input array.  Hence,
 we introduce matching tuple-SOACs, that any number of input arrays,
 and whose return value is likewise a tuple if applicable.  Their
 syntax can be seen in figure \ref{fig:tuple-soacs}, and their
 semantics are as follows.
+\begin{align*}
+  \text{\tt map2} &:: (\alpha_{1}\rightarrow\ldots\rightarrow\alpha_{n})\rightarrow(\beta_{1},\ldots,\beta_{m}))\\
+&\rightarrow[\alpha_{1}]\rightarrow\ldots\rightarrow[\alpha_{n}]\rightarrow([\beta_{1}],\ldots,[\beta_{m}]))
+\end{align*}
+\begin{align*}
+  \text{\tt map2($f$,$e_{1}$,\ldots,$e_{n}$)} & \equiv \text{\tt unzip(map($f'$, zip($e_{1}$, \ldots, $e_{n}$)))}
+\end{align*}
+\begin{align*}
+  \text{\tt reduce2} &::(\alpha_{1}\rightarrow\ldots\rightarrow\alpha_{n}\rightarrow\alpha_{1}\rightarrow\ldots\rightarrow\alpha_{n}\rightarrow(\alpha_{1},\ldots\alpha_{n}))\\
+& \rightarrow(\alpha_{1},\ldots,\alpha_{n})\rightarrow[\alpha_{1}]\rightarrow\ldots\rightarrow[\alpha_{n}]\rightarrow([\alpha_{1}],\ldots,[\alpha_{n}])
+\end{align*}
+\begin{align*}
+  \text{\tt reduce2($f$,$x$,$e_{1}$,\ldots,$e_{n}$)} &\equiv \text{\tt reduce($f'$,$x$,zip($e_{1}$,\ldots,$e_{n}$))}
+\end{align*}
 
-\begin{description}
-  \item[{\tt map2($f$,$e_{1}$,\ldots,$e_{n}$)} $\rightarrow$]\hfill\\
-    {\tt unzip(map($f$, zip($e_{1}$, \ldots, $e_{n}$)))}
-
-%  \item[{\tt mapall2($l$, $e_{1}$, \ldots, $e_{n}$)} $\rightarrow$]
-%    {\tt unzip(}
-
-  \item[{\tt filter2($l$, $e_{1}$, \ldots, $e_{n}$)} $\rightarrow$]\hfill\\
-    {\tt unzip(filter($f$, zip($e_{1}$, \ldots, $e_{n}$)))}
-
-  \item[{\tt reduce2($l$, $x$, $e_{1}$, \ldots, $e_{n}$)} $\rightarrow$]\hfill\\
-    {\tt reduce($l$, $x$, zip($e_{1}$, \ldots, $e_{n}$))}
-
-  \item[{\tt scan2($f$, $x$, $e_{1}$, \ldots, $e_{n}$)}]\hfill\\
-    {\tt unzip(scan($f$, $x$, zip($e_{1}$, \ldots, $e_{n}$)))}
-
-  \item[{\tt redomap2($l_{r}$, $l_{m}$, $x$, $e_{1}$, \ldots, $e_{n}$)}]\hfill\\
-    {\tt reduce($l_{r}$, $x$, map($l_{m}$, zip($e_{1}$, \ldots, $e_{n}$)))}
-\end{description}
-
-For simplicity, the above semantics always describe the return value
-as a tuple.  In practice, if the result would be a one-element tuple
-(which is not permitted in \LO), the result is just the element by
-itself.  The array-arguments to a tuple-SOAC must all be of the same
-length.
+The remaining SOACs are similar.  $f'$ refers to $f$ rewritten to to
+accept tuple elements as distinct arguments.  For simplicity, the
+above semantics always describe the return value as a tuple.  In
+practice, if this would be a one-element tuple (which is not permitted
+in \LO), we use the element by itself.  The array-arguments to a
+tuple-SOAC must all be of the same length.
 
 \begin{figure}[bt]
 \begin{tabular}{lrll}
 $e$ & $::=$ & {\tt map2($l$, $e_{1}$, \ldots, $e_{n}$)} \\
-%    & $|$ & {\tt mapall2($l$, $e_{1}$, \ldots, $e_{n}$)} \\
     & $|$ & {\tt filter2($l$, $e_{1}$, \ldots, $e_{n}$)} \\
-    & $|$ & {\tt reduce2($l$, $x$, $e_{1}$, \ldots, $e_{n}$)} \\
-    & $|$ & {\tt scan2($l$, $x$, $e_{1}$, \ldots, $e_{n}$)} \\
-    & $|$ & {\tt redomap2($l_{r}$, $l_{m}$, $x$, $e_{1}$, \ldots, $e_{n}$)} \\
+    & $|$ & {\tt reduce2($l$, $x_{1}$, \ldots, $x_{n}$, $e_{1}$, \ldots, $e_{n}$)} \\
+    & $|$ & {\tt scan2($l$, $x_{1}$, \ldots, $x_{n}$, $e_{1}$, \ldots, $e_{n}$)} \\
+    & $|$ & {\tt redomap2($l_{r}$, $l_{m}$, $x_{1}$, \ldots, $x_{n}$, $e_{1}$, \ldots, $e_{n}$)} \\
 \end{tabular}
 \caption{Second-order tuple-array combinators}
 \label{fig:tuple-soacs}
@@ -617,10 +699,6 @@ fun real main([real] a) =
              0.0, a) in
   tmp_red2
 \end{colorcode}
-
-\subsection{Safe in-place updates}
-\label{sec:in-place}
-
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

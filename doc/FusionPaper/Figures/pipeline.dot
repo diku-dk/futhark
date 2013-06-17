@@ -3,8 +3,8 @@ digraph G
         rankdir = TD;
         compound=true;
         penwidth=2;
-        node [fontname="Times Roman", shape=rectangle, fontsize=40, nodesep=0, ranksep=0, penwidth=2]
-        edge [color=black, fontname="Times Roman", weight=1.2, penwidth=2]
+        node [fontname="Times Roman", shape=rectangle, fontsize=40, penwidth=2]
+        edge [color=black, fontname="Times Roman", weight=100, penwidth=2, arrowsize=2]
 
         Typechecker []
         Renamer []
@@ -12,13 +12,16 @@ digraph G
         Output [label="Code generator"]
         TupleTransform [label="Tuple transform"]
         Normalisation [label="Tuple and\nlet normalisation"]
+        EnablingOpts [label="Enabling optimisations", style=filled]
 
         {rank=same; Fusion Normalisation}
-        {rank=same; Output TupleTransform}
+        {rank=same; Output Renamer}
+        {rank=same; TupleTransform EnablingOpts}
 
         subgraph clusterEnabling {
                 Inlining []
                 rank="same"
+                style=filled
                 Inlining
                 DeadCodeRemoval [label="Dead code removal"]
                 ConstProp [label="Constant and\ncopy propagation"]
@@ -35,8 +38,6 @@ digraph G
 
 
 
-        Typechecker->Renamer->TupleTransform->Normalisation
-        Normalisation->Inlining
-        Loop->Fusion
-        Fusion->Output
+        Typechecker->Renamer->TupleTransform->Normalisation->Inlining
+        Loop->Fusion->EnablingOpts->Output
 }
