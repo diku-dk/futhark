@@ -505,10 +505,11 @@ the elements of an array in-place.  However, in order to perform such
 an update without violating referential transparency, we must be able
 to guarantee that no other arrays share data with the array.  To
 perform this check, \LO{} uses an extension to the type system in the
-form of {\em uniqueness attributes} inspired by Clean and Rust, as
-well as aliasing analysis.  We extend the syntax for array types to
-permit a prefix asterisk, as seen in figure
-\ref{fig:uniqueness-types}, denoting a unique array.
+form of {\em uniqueness attributes} inspired by
+Clean~\cite{clean-uniqueness-types} and Rust~\cite{rust}, as well as
+aliasing analysis.  We extend the syntax for array types to permit a
+prefix asterisk, as seen in figure \ref{fig:uniqueness-types},
+denoting a unique array.
 
 \begin{figure}[bt]
 \begin{tabular}{lrll}
