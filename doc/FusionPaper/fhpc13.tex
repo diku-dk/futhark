@@ -500,7 +500,61 @@ to extract the components.  This permits us to write {\tt map(op +,
 \subsection{Safe in-place updates}
 \label{sec:in-place}
 
-Uniqueness types...
+When writing sequential loops, it is often very convenient to update
+the elements of an array in-place.  However, in order to perform such
+an update without violating referential transparency, we must be able
+to guarantee that no other arrays share data with the array.  To
+perform this check, \LO{} uses an extension to the type system in the
+form of {\em uniqueness attributes} inspired by Clean and Rust, as
+well as aliasing analysis.  We extend the syntax for array types to
+permit a prefix asterisk, as seen in figure
+\ref{fig:uniqueness-types}, denoting a unique array.
+
+\begin{figure}[bt]
+\begin{tabular}{lrll}
+$t$ & $::=$ & {\tt *[$t$]} & (Unique array) \\
+\end{tabular}
+\caption{Uniqueness attributes}
+\label{fig:uniqueness-types}
+\end{figure}
+
+The semantics of uniqueness attributes are as follows.  Inside a
+function, a parameter having type {\tt *$\alpha$} means that neither
+the argument value nor any of its aliases are going to be used after
+the function returns, implying that the function body can modify the
+argument freely.  Furthermore, if the return type is unique, its value
+must not alias any non-unique arguments.
+
+In a function call, a parameter having type {\tt *$\beta$} means that
+whatever argument is passed must be modifiable (that is, it must not
+be aliased with a non-modifiable function argument), and neither it
+nor any of its aliases may be used in any way after the function call.
+
+As a concrete example, a loop that uses in-place modification to add
+{\tt k} to every element of an integer array can be written like this.
+
+\begin{colorcode}
+loop (a) = for i < n do
+             let b = a with [i] <- a[i]+k in b
+\end{colorcode}
+
+For clarity, the result of the in-place modification is given a
+distinct name from the input array, but this is not required.  The
+equivalent tail-recursive function, with uniqueness attributes, is as
+follows.
+
+\begin{colorcode}
+fun *[int] f(int i, int n, *[int] a, int k) =
+  if i >= n then a
+            else let b = a with [i] = a[i] + k in
+                 f(i+1, n, b, k)
+\end{colorcode}
+
+Our aliasing analysis is rather conservative.  In particular, we
+assume that if a function returns a non-unique array, that array may
+alias any of the function arguments.  We also do not detect aliasing
+at a finer granularity than whole arrays --- after {\tt let a = b[0]},
+{\tt a} aliases all of {\tt b}, not just its first row.
 
 \subsection{Compiler pipeline}
 \label{sec:enabling-optimisations}
