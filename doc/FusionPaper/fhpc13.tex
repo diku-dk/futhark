@@ -304,6 +304,11 @@ Pattern matching is supported in a limited way as the only way of
 decomposing tuple values, but there is no {\tt case} construct.  Note
 that we use braces to denote arrays, not sets.
 
+{\tt zip} and {\tt unzip} behave as usual, ie. {\tt
+  zip({1,2,3},{4,5,6})} $=$ {\tt \{{(1,4),(2,5),(3,6)}\}}.  It
+is an error if the arrays given to {\tt zip} are not of the exact same
+size.
+
 There are two slightly complicated constructs in the first-order part
 of \LO{}.  The first is the let-with construct for updating parts of
 arrays:
@@ -323,27 +328,38 @@ method for doing array updates {\em in-place}, that is without copying
 the source array, without losing referential transparency.
 
 The other unusual construct is the {\tt do-loop}.  It is fundamentally
-syntactical sugar for a certain form of tail-recursive functions that
-makes it easier to express loop optimisations.  Consider the following
-loop.
+syntactical sugar for a certain form of tail-recursive functions, in
+order to make it easier to express loop optimisations and certain
+sequential loops.
 
+For example, denoting by {\tt t} the type of {\tt x}, the loop below
+has the semantics of a call to the recursive function on the
+right-hand side:
+
+\hfill\\
+\begin{minipage}{0.35\columnwidth}
 \begin{colorcode}
-loop (x = a) = for i < n do
-                 g(x)
+loop (x = a) =
+  for i < n do g(x)
 in body
 \end{colorcode}
-
-If we assume that the type of {\tt x} is {\tt t}, then the above loop
-is equivalent to the following.
-
+\end{minipage}
+\begin{minipage}{0.05\columnwidth}
+$\Rightarrow$
+\end{minipage}
+\begin{minipage}{0.6\columnwidth}
 \begin{colorcode}
 // New function.
 fun t f(int i, int n, t x) =
-  if i < n then f(i+1, n, g(x)) else x
+  if i < n
+    then f(i+1, n, g(x))
+    else x
 
-let x = f(0, n, a)
+// Loop replaced by this.
+let x = f(i, n, a)
 in body
 \end{colorcode}
+\end{minipage}
 
 \begin{figure}[bt]
 \begin{tabular}{lrll}
@@ -361,24 +377,28 @@ $v$ & $::=$ & $k$ & (Integer)\\
 & $|$ & $(v_{1},\ldots,v_{n})$ & (Tuple) \\
 & $|$ & $\{v_{1},\ldots,v_{n}\}$ & (Array) \\
 \\
-$p$ & $::=$ & $\alpha$ & (Name pattern)\\
+$p$ & $::=$ & {\tt {\bf id}} & (Name pattern)\\
 & $|$ & {\tt ($p_{1}$, \ldots, $p_{n}$)} & (Tuple pattern) \\
 \\
 $e$ & $::=$ & $v$ & (Constant)\\
-& $|$ & $\alpha$ & (Variable)\\
+& $|$ & ${\bf id}$ & (Variable)\\
 & $|$ & {\tt ($e_{1}$,\ldots,$e_{n}$)} & (Tuple expression) \\
 & $|$ & {\tt \{$e_{1}$,\ldots,$e_{n}$\}} & (Array expression) \\
 & $|$ & $e_{1} \odot{} e_{2}$ & (Binary operator) \\
-& $|$ & {\tt \tilde{} $e$} & (Numerical negation) \\
+& $|$ & {\tt \tilde{} $e$} & (Prefix minus) \\
 & $|$ & {\tt not $e$} & (Logical negation) \\
 & $|$ & {\tt if $e_{1}$ then $e_{2}$ else $e_{3}$} & (Branching) \\
-& $|$ & {\tt $\alpha$[$e_{1}$, \ldots, $e_{n}$]} & (Indexing) \\
-& $|$ & {\tt $f$($e_{1}$, \ldots, $e_{n}$)} & (Function call) \\
+& $|$ & {\tt {\bf id}[$e_{1}$, \ldots, $e_{n}$]} & (Indexing) \\
+& $|$ & {\tt {\bf id}($e_{1}$, \ldots, $e_{n}$)} & (Function call) \\
 & $|$ & {\tt let $p$ = $e_{1}$ in $e_{2}$} & (Pattern binding) \\
 & $|$ & {\tt zip($e_{1}$, \ldots, $e_{n}$)} & (Zipping) \\
 & $|$ & {\tt unzip($e$)} & (Unzipping) \\
 & $|$ & {\tt iota($e$)} & (Range) \\
 & $|$ & {\tt replicate($e_{n}$, $e_{v}$)} & (Replication) \\
+& $|$ & {\tt size($e$)} & (Array length) \\
+& $|$ & {\tt transpose($e$)} & (Transposition) \\
+& $|$ & {\tt split($e_{1}$, $e_{2}$)} & (Split $e_{2}$ at index $e_{1}$) \\
+& $|$ & {\tt concat($e_{1}$, $e_{2}$)} & (Concatenation) \\
 & $|$ & {\tt let $\alpha$ = $\beta$ with} & (In-place update) \\
 &     & {\tt \ \ [$e_{1}$,\ldots,$e_{n}$] <- $e_{v}$} \\
 &     & {\tt in $e_{b}$} \\
@@ -388,7 +408,7 @@ $e$ & $::=$ & $v$ & (Constant)\\
 \end{tabular}
 \\
 \begin{tabular}{lrll}
-$fun$ & $::=$ & {\tt fun $t$ $f$($t_{1}$ $\alpha_{1}$,\ldots $t_{n}$ $\alpha_{n}$) = $e$} \\
+$fun$ & $::=$ & {\tt fun $t$ {\bf id}($t_{1}$ {\bf id}$_{1}$,\ldots $t_{n}$ {\bf id}$_{n}$) = $e$} \\
 \\
 $prog$ & $::=$ & $\epsilon$ \\
        & $|$   & $fun$ $prog$
@@ -409,9 +429,9 @@ be omitted when currying if no curried arguments are given.
 
 \begin{figure}[bt]
 \begin{tabular}{lrll}
-$l$ & $::=$ & {\tt fn $t$ ($t_{1}$ $\alpha_{1}$, \ldots, $t_{n}$ $\alpha_{n}$)} & (Anonymous function) \\
+$l$ & $::=$ & {\tt fn $t$ ($t_{1}$ {\bf id}, \ldots, $t_{n}$ {\bf id})} & (Anonymous function) \\
 &     & {\tt => $e$} \\
-& $|$ & {\tt $f$ ($e_{1}$, \ldots, $e_{n}$)} & (Curried function) \\
+& $|$ & {\tt {\bf id} ($e_{1}$, \ldots, $e_{n}$)} & (Curried function) \\
 & $|$ & {\tt op $\odot$ ($e_{1}$, \ldots, $e_{n}$)} & (Curried operator) \\
 \\
 $e$ & $::=$ & {\tt map($l$, $e$)} \\
@@ -427,18 +447,62 @@ $e$ & $::=$ & {\tt map($l$, $e$)} \\
 
 The semantics of the SOACs are identical to the similarly-named
 higher-order functions found in many functional languages, but
-reproduced here for completeness.
-\begin{align*}
-\text{\tt map($f$,$a$)} \rightarrow& \text{\tt\{$f$($a$[0]), \ldots, $f$($a$[n])\}} \\
-% \text{\tt mapall($l$, $e$)} \rightarrow& \text{} \\
-\text{\tt filter($f$,a)} \rightarrow&  \text{\tt\{$a$[i] | $f$($a$[i]) = {\tt True }\}} \\
-\text{\tt reduce($f$,$x$,$a$)} \rightarrow& \text{\tt $f$($f$(\ldots $f$($x$,$v$[0]), $v$[1]), $v$[n])} \\
-\text{\tt scan($f$,$x$,a)} \rightarrow& \text{\tt\{$f$($x$,$a$[0]), $f$($f$($x$,$a$[0]),$v$[1]),\ldots\}} \\
-\text{\tt redomap($f_{r}$,$f_{m}$,$x$,$v$)} \rightarrow& \text{\tt reduce($l_{r}$, $x$, map($l_{m}$, $v$))} \\
-\end{align*}
+reproduced here for completeness.  Note the types given are not \LO{}
+types, as the SOACs cannot be typed in LO{} itself, but a
+Haskell-inspired notation.
+\begin{description}
+\item[\tt map($f$,$a$)]\hfill\\
+  $:: (\alpha\rightarrow\beta)\rightarrow[\alpha]\rightarrow[\beta]$\\
+  $\rightarrow$ {\tt\{$f$($a$[0]), \ldots, $f$($a$[n])\}}
+
+\item[{\tt filter($f$,a)}]\hfill\\
+  $:: (\alpha\rightarrow{\tt bool})\rightarrow[\alpha]\rightarrow[\alpha]$\\
+  $\rightarrow$ {\tt\{$a$[i] | $f$($a$[i]) = {\tt True }\}}
+
+\item[{\tt reduce($f$,$x$,$a$)}]\hfill\\
+  $:: (\beta\rightarrow\alpha\rightarrow\beta)\rightarrow\beta\rightarrow[\alpha]\rightarrow\beta$\\
+  $\rightarrow$ {\tt $f$($f$(\ldots $f$($x$,$v$[0]), $v$[1]), $v$[n])}
+
+\item[{\tt scan($f$,$x$,a)}]\hfill\\
+  $:: (\alpha\rightarrow\alpha\rightarrow\alpha)\rightarrow\alpha\rightarrow[\alpha]\rightarrow[\alpha]$\\
+  $\rightarrow$ {\tt\{$f$($x$,$a$[0]), $f$($f$($x$,$a$[0]),$v$[1]),\ldots\}}
+
+\item[{\tt redomap($f_{r}$,$f_{m}$,$x$,$v$)}]\hfill\\
+  $:: (\gamma\rightarrow\beta\rightarrow\gamma)\rightarrow(\alpha\rightarrow\beta)\rightarrow\gamma\rightarrow[\alpha]\rightarrow\gamma$\\
+  $\rightarrow$ \text{\tt reduce($l_{r}$, $x$, map($l_{m}$, $v$))} \\
+\end{description}
 In particular, note that {\tt reduce} is a left-fold, and that {\tt
   scan} is an inclusive prefix scan.
 
+The semantics of {\tt redomap}:\\
+            \text{\tt redomap($\oplus$,$g$,$x$,$v$)} $\rightarrow$
+\text{\tt foldl($g$, $x$, $v$)}
+
+Redomap is complicated for Reasons. (FIXME)
+
+\subsubsection{Tuple shimming}
+\label{sec:shimming}
+
+As a notational convenience, \LO{} will automatically unwrap tuples
+passed to functions in SOACs.  Precisely, if a function expects
+arguments $(t_{1},\ldots,t_{n})$, and is called with a single argument
+of type $(t_{1},\ldots,t_{n})$ (that is, a tuple containing the exact
+same types as expected by the function), \LO{} will automatically
+rewrite the function to expect a tuple, and insert the code necessary
+to extract the components.  This permits us to write {\tt map(op +,
+  zip(xs,ys))}, rather than the following more cumbersome code.
+\begin{colorcode}
+  map(fn int ((int, int) a) => let (x,y) = a in x+y,
+      zip(xs,ys))
+\end{colorcode}
+
+\subsection{Safe in-place updates}
+\label{sec:in-place}
+
+Uniqueness types...
+
+\subsection{Enabling optimisations}
+\label{sec:enabling-optimisations}
 One of the first steps in the \LO{} compilation pipeline is to
 transform the use of tuples in the program.  Notably, the
 tuple-transformation flattens all tuples (ie. {\tt (x,(y,z))} becomes
@@ -458,9 +522,10 @@ the former, but the first element of the corresponding transformed
 tuple {\tt(\{\{1\}, \{2, 3\}\}, \{\{1.0\}, \{2.0\}\})} is not a full
 array.  Hence, when determining whether a program generates full
 arrays, we must look at the \textit{transformed} values - in a sense,
-the fullness requirement ``transcends'' the tuples.
+the fullness requirement ``transcends'' the tuples.  Also, after
+tuple-transformation, {\tt zip} and {\tt unzip} disappear.
 
-After tuple-transformation, the previously described SOACs are no
+After enabling-optimisations, the previously described SOACs are no
 longer usable, as they each accept only a single input array.  Hence,
 we introduce matching tuple-SOACs, that any number of input arrays,
 and whose return value is likewise a tuple if applicable.  Their
@@ -520,31 +585,28 @@ Now we perform the tuple-transformation.  Note that the return value
 of the first {\tt map2} is taken apart in a tuple pattern, so that it
 can be passed piecewise to the next {\tt map2}.
 \begin{colorcode}
-fun real main([real] a_3) =
-  let (tup_arr_elem_14, tup_arr_elem_15) =
-    map2(fn (real, real) (real x_13) =>
-         (x_13,~x_13), a_3) in
-  let tmp_map2_0 =
-    map2(fn real (real tuple_param_16,
-                  real tuple_param_17) =>
-         tuple_param_16 * tuple_param_17,
-         tup_arr_elem_14, tup_arr_elem_15) in
-  let tmp_red2_4 =
-    reduce2(fn real (real x_11, real y_12) =>
-            x_11 + y_12, 0.0, tmp_map2_0) in
-  tmp_red2_4
+fun real main([real] a) =
+  let (e1, e2) =
+    map2(fn (real, real) (real x) =>
+         (x,~x), a) in
+  let tmp_map2 =
+    map2(fn real (real x, real y) => x * y,
+         e1, e2) in
+  let tmp_red2 =
+    reduce2(fn real (real x, real y) =>
+            x + y, 0.0, tmp_map2) in
+  tmp_red2
 \end{colorcode}
 And finally, after fusion.
 \begin{colorcode}
-fun real main([real] a_3) =
-  let tmp_red2_4 =
-    redomap2(fn real (real x_11, real y_12) => x_11 + y_12,
-             fn real (real x_13) =>
-             let (tuple_param_16, tuple_param_17) =
-               (x_13, ~x_13) in
-             let tmp_lam_2 = x_13 * tuple_param_17 in
-             tmp_lam_2, 0.0, a_3) in
-  tmp_red2_4
+fun real main([real] a) =
+  let tmp_red2 =
+    redomap2(fn real (real x, real y) => x + y,
+             fn real (real x) =>
+               let y = ~x in
+               let z = x * y in z,
+             0.0, a) in
+  tmp_red2
 \end{colorcode}
 
 \subsection{Safe in-place updates}
@@ -652,7 +714,6 @@ the first pass for the rest of \textsc{AbSyn} nodes.
 Finally, Section~\ref{sec:fwdPass} describes the second
 pass and remarks on the asymptotical 
 complexity of the transformation.
-
 
 
 \subsection{Motivation and Intuitive Solution}

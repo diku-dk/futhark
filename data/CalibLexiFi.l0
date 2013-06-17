@@ -753,6 +753,8 @@ pricer_of_swaption( real                       today,
     let swaption = extended_swaption_of_swaption(swaption) in
     let (maturity, schedulei, strike) = swaption           in
 
+    // COSMIN: TODO: add schedulei as parameter for map!!!!!
+    // COSMIN: PERFECT EXAMPLE FOR THE PAPER!!!!!
     let n_schedi = size(schedulei)                         in
     let ci = map(   fn real (int i) =>
                         let (d_beg,d_end) = schedulei[i]   in 
