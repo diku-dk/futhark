@@ -559,20 +559,46 @@ at a finer granularity than whole arrays --- after {\tt let a = b[0]},
 
 \subsection{Compiler pipeline}
 \label{sec:enabling-optimisations}
-One of the first steps in the \LO{} compilation pipeline is to
-transform the use of tuples in the program.  Notably, the
-tuple-transformation flattens all tuples (i.e, {\tt (x,(y,z))} becomes
-{\tt (x,y,z)}), and converts arrays of tuples to tuples of arrays.
-Arrays of tuples are in a sense merely syntactic sugar for tuples of
-arrays; the type {\tt [(int, real)]} is transformed to {\tt ([int],
-  [real])} during the compilation process, and all code interacting
-with arrays of tuples is likewise transformed.  In most cases, this is
-fully transparent, but there are edge cases where the transformation
-is not an isomorphism.
+
+The compilation pipeline in the current \LO{} compiler is outlined on
+figure \ref{fig:l0cpipeline}.  Type checking is done on the original
+program, to ensure that any error messages refer to the names written
+by the programmer, but all subsequent stages consume and produce
+programs in which names are distinct.  To begin with, we run a
+transformation that converts most uses of tuples to a simpler form,
+described in more detail in section \ref{sec:tuple-transformation}.
+After this comes let- and tuple-normalisation, where the program is
+transformed in such a way that the only direct operands to functions,
+SOACs and operators are variables, and that every tuple-pattern is
+fully expanded to cover all elements of the tuple value to be matched.
+One notable property of the resulting program is that no variable is
+ever bound to a tuple.
+
+The enabling optimisations loop consists of
+\begin{enumerate}
+\item inlining as much as possible,
+\item performing copy- and constant-propagation, and
+\item removing dead code,
+\end{enumerate}
+which is repeated until a fixed point is reached.  After loop fusion,
+the enabling optimisations stage is repeated, as fusion will often
+produce code amenable to copy propagation.
+
+\subsubsection{Tuple transformation}
+\label{sec:tuple-transformation}
+
+The tuple-transformation stage flattens all tuples (i.e, {\tt
+  (x,(y,z))} becomes {\tt (x,y,z)}), and converts arrays of tuples to
+tuples of arrays.  Arrays of tuples are in a sense merely syntactic
+sugar for tuples of arrays; the type {\tt [(int, real)]} is
+transformed to {\tt ([int], [real])} during the compilation process,
+and all code interacting with arrays of tuples is likewise
+transformed.  In most cases, this is fully transparent, but there are
+edge cases where the transformation is not an isomorphism.
 
 \begin{figure}[bt]
 \begin{center}
-\includegraphics[width=0.6\columnwidth]{Figures/pipeline}
+\includegraphics[width=0.7\columnwidth]{Figures/pipeline}
 \end{center}
 \caption{Compiler pipeline}
 \label{fig:l0cpipeline}
@@ -589,7 +615,7 @@ arrays, we must look at the \textit{transformed} values - in a sense,
 the fullness requirement ``transcends'' the tuples.  Also, after
 tuple-transformation, {\tt zip} and {\tt unzip} disappear.
 
-After enabling-optimisations, the previously described SOACs are no
+After tuple transformation, the previously described SOACs are no
 longer usable, as they each accept only a single input array.  Hence,
 we introduce matching tuple-SOACs, that any number of input arrays,
 and whose return value is likewise a tuple if applicable.  Their
