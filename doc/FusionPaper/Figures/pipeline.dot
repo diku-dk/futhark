@@ -1,0 +1,42 @@
+digraph G
+{
+        rankdir = TD;
+        compound=true;
+        penwidth=2;
+        node [fontname="Times Roman", shape=rectangle, fontsize=40, nodesep=0, ranksep=0, penwidth=2]
+        edge [color=black, fontname="Times Roman", weight=1.2, penwidth=2]
+
+        Typechecker []
+        Renamer []
+        Fusion []
+        Output [label="Code generator"]
+        TupleTransform [label="Tuple transform"]
+        Normalisation [label="Tuple and\nlet normalisation"]
+
+        {rank=same; Fusion Normalisation}
+        {rank=same; Output TupleTransform}
+
+        subgraph clusterEnabling {
+                Inlining []
+                rank="same"
+                Inlining
+                DeadCodeRemoval [label="Dead code removal"]
+                ConstProp [label="Constant and\ncopy propagation"]
+                Loop [label="Loop?"]
+                {rank=same; Inlining Loop}
+                {rank=same; ConstProp DeadCodeRemoval}
+                Inlining->ConstProp->DeadCodeRemoval->Loop
+                Loop->Inlining[style=dashed]
+                label="Enabling optimisations"
+                labelloc=b
+                fontname="Times Roman"
+                fontsize=40
+        }
+
+
+
+        Typechecker->Renamer->TupleTransform->Normalisation
+        Normalisation->Inlining
+        Loop->Fusion
+        Fusion->Output
+}
