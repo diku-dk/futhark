@@ -304,7 +304,7 @@ Pattern matching is supported in a limited way as the only way of
 decomposing tuple values, but there is no {\tt case} construct.  Note
 that we use braces to denote arrays, not sets.
 
-{\tt zip} and {\tt unzip} behave as usual, ie. {\tt
+{\tt zip} and {\tt unzip} behave as usual, i.e, {\tt
   zip({1,2,3},{4,5,6})} $=$ {\tt \{{(1,4),(2,5),(3,6)}\}}.  It
 is an error if the arrays given to {\tt zip} are not of the exact same
 size.
@@ -332,15 +332,16 @@ syntactical sugar for a certain form of tail-recursive functions, in
 order to make it easier to express loop optimisations and certain
 sequential loops.
 
-For example, denoting by {\tt t} the type of {\tt x}, the loop below
-has the semantics of a call to the recursive function on the
-right-hand side:
+For example, denoting by {\tt t} the type of {\tt x}, the loop in
+figure \ref{fig:loop-recursion} has the semantics of a call to the
+recursive function on the right-hand side.
 
-\hfill\\
+\begin{figure}
 \begin{minipage}{0.35\columnwidth}
 \begin{colorcode}
 loop (x = a) =
-  for i < n do g(x)
+  for i < n do
+    g(x)
 in body
 \end{colorcode}
 \end{minipage}
@@ -349,17 +350,17 @@ $\Rightarrow$
 \end{minipage}
 \begin{minipage}{0.6\columnwidth}
 \begin{colorcode}
-// New function.
 fun t f(int i, int n, t x) =
-  if i < n
-    then f(i+1, n, g(x))
-    else x
+  if i >= n then x
+     else f(i+1, n, g(x))
 
-// Loop replaced by this.
 let x = f(i, n, a)
 in body
 \end{colorcode}
 \end{minipage}
+\caption{Loop to recursive function}
+\label{fig:loop-recursion}
+\end{figure}
 
 \begin{figure}[bt]
 \begin{tabular}{lrll}
@@ -501,11 +502,11 @@ to extract the components.  This permits us to write {\tt map(op +,
 
 Uniqueness types...
 
-\subsection{Enabling optimisations}
+\subsection{Compiler pipeline}
 \label{sec:enabling-optimisations}
 One of the first steps in the \LO{} compilation pipeline is to
 transform the use of tuples in the program.  Notably, the
-tuple-transformation flattens all tuples (ie. {\tt (x,(y,z))} becomes
+tuple-transformation flattens all tuples (i.e, {\tt (x,(y,z))} becomes
 {\tt (x,y,z)}), and converts arrays of tuples to tuples of arrays.
 Arrays of tuples are in a sense merely syntactic sugar for tuples of
 arrays; the type {\tt [(int, real)]} is transformed to {\tt ([int],
@@ -513,6 +514,14 @@ arrays; the type {\tt [(int, real)]} is transformed to {\tt ([int],
 with arrays of tuples is likewise transformed.  In most cases, this is
 fully transparent, but there are edge cases where the transformation
 is not an isomorphism.
+
+\begin{figure}[bt]
+\begin{center}
+\includegraphics[width=0.6\columnwidth]{Figures/pipeline}
+\end{center}
+\caption{Compiler pipeline}
+\label{fig:l0cpipeline}
+\end{figure}
 
 Consider the type {\tt [([int], [real])]}, which is transformed to
 {\tt([[int]], [[real]])}.  These two types are not isomorphic, as the
