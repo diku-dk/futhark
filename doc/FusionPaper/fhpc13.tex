@@ -93,7 +93,7 @@
 
 
 \title{A Structural-Analysis Approach To Fusion}
-\subtitle{$\mathcal{L}_0$ Status Report}
+\subtitle{\LO{} Status Report}
 %\subtitle{Subtitle Text, if any}
 
 %%%%%%%%%%%%%%%%%%%
@@ -144,9 +144,9 @@ that enables fusion even in some cases when the producer is used
 in different consumers {\em and} without duplicating computation.  
 
 We report an implementation of the fusion algorithm for a 
-{\em functional}-core language, named $\mathcal{L}_0$, which is intended 
+{\em functional}-core language, named \LO{}, which is intended 
 to support {\em nested} parallelism across {\em regular} 
-multi-dimensional arrays.  We succinctly describe $\mathcal{L}_0$'s
+multi-dimensional arrays.  We succinctly describe \LO's
 semantics and the compiler infrastructure on which the fusion
 transformation relies.
 
@@ -196,7 +196,7 @@ with two main objectives in mind:
 \end{itemize}
 
 The answer to the first question has been %, not surprisingly, 
-a {\em functional} language, dubbed $\mathcal{L}_0$, supporting %with support for 
+a {\em functional} language, dubbed \LO{}, supporting %with support for 
 \texttt{map-reduce} {\em nested} parallelism on {\em regular} arrays, i.e., 
 the size of each dimension is constant at runtime:\\
 It is {\em regular} because our suite does not require irregular 
@@ -236,7 +236,7 @@ derived from tail-recursive functions via a code transformation.
 
 Finally, an indirect consequence of having to deal with sequential (dependent) 
 %, which semantically update an unknown array index at a time, 
-loops is that $\mathcal{L}_0$ provides support for ``in-place updates'' of 
+loops is that \LO{} provides support for ``in-place updates'' of 
 array elements. The semantics is the functional one, i.e., %the result is a
 deep copy of the original array but with the corresponding element replaced,
 \texttt{intersected} with the imperative one, i.e., if aliasing may prevent 
@@ -245,7 +245,7 @@ enables a (optimized) cost model that the user likely assumes, while
 preserving the functional semantics. 
 %allows both a functional semantics and the cost model that the user likely assumes.
 
-Section~\ref{sec:Prelim} provides an overview of the $\mathcal{L}_0$ language % brief 
+Section~\ref{sec:Prelim} provides an overview of the \LO{} language % brief 
 and of the enabling optimizations that set the stage for fusion. %'s application.% transformation.
 
 %\footnote{
@@ -696,9 +696,9 @@ analysis is the summarization~\cite{HybAn} of array references into
 read-write, write-first and read-only set expressions, used in the context 
 of array-{\sc ssa} and autoparallelization.)
  
-Since $\mathcal{L}_0$ guarantees a reducible {\sc cfg}, %at function level,
+Since \LO{} guarantees a reducible {\sc cfg}, %at function level,
 fusion is implemented as an intra-procedural\footnote{
-The current version of the $\mathcal{L}_0$ compiler 
+The current version of the \LO{} compiler 
 relies on aggressive inlining and does not support
 (yet) inter-procedural analysis.
 }
@@ -760,14 +760,35 @@ i.e., a basic block.
 
 The main point is that all {\sc soac}s that appear inside the box
 labeled \emp{\em Kernel 3} can be fused without duplicating any
-computation despite the fact that several of the to-be-fused variables
-are used in different {\sc soac}s, e.g., {\tt y1} is used to
-compute both {\tt (z1,z2)} and {\tt res}. We achieve this means of
-{\em {\tt T$_2$} reduction on the dependency graph}:
-The rightmost child of the root {\sc soac} has only one incoming edge, 
-hence it can be fused (reduced). This is achieved by (i) replacing in the
-root {\sc soac} the child's output arrays of the child's input array,
-and inserting a call  
+computation, despite the fact that several of the to-be-fused 
+arrays are used in different {\sc soac}s, e.g., {\tt y1} is used to
+compute both {\tt (z1,z2)} and {\tt res}. Similarly, we note
+that not all input arrays of a {\sc soac} are produced by one other
+{\sc soac}, e.g., the {\tt q}s requires both {\tt y}s and {\tt z}s arrays.   
+We achieve this by means of {\em {\tt T$_2$} reduction on the dependency graph}:
+
+The rightmost child of the root {\sc soac}, i.e., {\tt res}, 
+has only one incoming edge, 
+hence it can be fused (reduced). This is achieved  (i) by replacing in
+the root {\sc soac} the child's output with the child's input arrays, 
+(ii) by inserting in the root's lambda a call to the child's lambda,
+to compute the per-element output of the child, %% intermediate, 
+and, finally, (iii) by removing the duplicate input arrays of the result.
+The latter is accomplished by replacing in the result's lambda
+the definition of all but one of the lambda's arguments corresponding to 
+the same input array, with copy statements in the lambda's body.  
+
+The top-right part of Figure~\ref{fig:T1T2} shows in blue the (optimized) 
+result of the first fusion, where the copy statements have been eliminated 
+by copy propagation.   In the new graph, the leftmost child of the root, 
+i.e., the one computing {\tt (z1,z2)}, has only one incoming edge 
+and can be fused.  The resulted graph, shown in the bottom-right Figure
+can be fused again resulting in the bottom-left graph of Figure~\ref{fig:T1T2}.
+At this point no further {\tt T}$_2$ reduction is possible because
+the {\sc soac} computing {\tt x1} has two incoming edges. 
+%
+{\em When no {\tt T}$_2$ reduction is possible a new kernel is started}, 
+e.g., \emp{\em Kernel 1}.
 
 
 \begin{figure}[bt]
@@ -782,40 +803,40 @@ let \emphh{x}   = map2(f, \emp{a}) in
 let \emp{a}[1]= 3.33       in
 let y   = map2(g, \emp{x}) in ..
 
-// \emp{Case 3:} not all SOAC
-//combinations are fusable
-let \emp{x} = filter2(c\mymath{\myindx{1}}, a) in
-let \emp{y} = filter2(c\mymath{\myindx{1}}, b) in
-let z = map2   (f,\emp{x,y}) in..
-
-// \emp{Case 5:} don't fuse if \emp{x}
-//used outside SOAC inputs
-let \emphh{x} = map2(f, arr) in
-let y = map2(g, \emphh{x})   in
-    x[i] + y[i]
-\end{colorcode}
-\end{minipage}
-\hfill
-\begin{minipage}{0.48\columnwidth}
-\begin{colorcode}
-// \emp{Case 2:} don't fuse from 
+// \emp{Case 3:} don't fuse from 
 //outside in a loop (or \mymath{\lambda})
 let \emphh{x} = map2(f, arr)   in
 \emp{loop}(arr) = for i < N do
   map2(op +, arr, \emp{x})
 
+// \emp{Case 5:} don't fuse if \emp{x}
+//used outside SOAC inputs
+let \emphh{x} = map2(f, arr) in
+let y = map2(g, \emphh{x})   in
+    \emp{x}[i] + y[i]
+\end{colorcode}
+\end{minipage}
+\hfill
+\begin{minipage}{0.48\columnwidth}
+\begin{colorcode}
+// \emp{Case 2:} not all SOAC
+//combinations are fusable
+let \emp{x} = filter2(c\mymath{\myindx{1}}, a) in
+let \emp{y} = filter2(c\mymath{\myindx{1}}, b) in
+let z = map2   (f,\emp{x,y}) in..
+
 // \emp{Case 4:} don't fuse in 2
 //kernels sharing a CF path
-let \emphh{x} = map2(f, arr) in
-let y = if c then map2(g, \emp{x}) 
-             else .. in
-let z = map2(h, \emp{x})   in ..
+let \emphh{x} = map2(f, arr)  in
+let y = if c then map2(g\mymath{\myindx{1}},\emphh{x}) 
+             else map2(g\mymath{\myindx{2}},\emphh{x})
+in let z = map2(h, \emp{x}) in ..
 
 // \emp{Case 6:} x \& y used exactly
 //once but still don't fuse
-let (x,y) = map2(f, a)   in
-let u = reduce2(op +,0,x)in
-let v = reduce2(op *,1,y)..
+let (\emphh{x},\emphh{y}) = map2(f, a)   in
+let u = reduce2(op +,0,\emp{x})in
+let v = reduce2(op *,1,\emp{y})..
 \end{colorcode}
 \end{minipage}
 %\begin{center}
@@ -827,6 +848,39 @@ let v = reduce2(op *,1,y)..
 \label{fig:dontFuse}
 \end{figure}
 
+Having presented the intuitive idea, we look next at six cases,
+depicted in Figure~\ref{fig:dontFuse}, where fusion is disallowed because
+it would result either in incorrect programs or in duplicated computation:
+\begin{itemize}
+    \item [1.] A {\sc soac} {\tt s} cannot be fused across the 
+                ``in-place update'' of an array {\tt a} if {\tt s} uses any 
+                variable in the alias set of {\tt a}.  Otherwise, fusion would
+                violate \LO's semantics because an alias of {\tt a} is used on 
+                an execution path following {\tt a}'s in-place update.
+    \item [2.] Not all combinations of {\sc soac}s are fusable. For example,
+                a {\tt map} whose input arrays are produced by two {\tt filter} 
+                operations can be fused as a loop, but this is not useful
+                due to the sequential nature of the resulted loop, i.e., it 
+                uses two induction variables without closed-form solutions.
+    \item [3.] Fusing across a loop (or a {\sc soac}'s lambda) would 
+                duplicate computation and potentially change the  
+                time complexity of the program, because the loop-invariant
+                computation of the producer would be redundantly executed 
+                loop-count times. 
+    \item [4.] If a {\sc soac}-produced array {\tt x} is consumed by two other
+                {\sc soac}s at two program points located on the same execution 
+                path $p$ then the fused program would compute {\tt x} twice on $p$. 
+                However, if the two program points are located on disjoint execution 
+                paths then fusion is allowed. For example, if the {\tt map2} computing 
+                {\tt z} is removed, then fusing the {\tt x} producer in the 
+                {\tt then} and {\tt else} branches does not duplicate computation.
+    \item [5.] If a {\sc soac}-produced array {\tt x} is used other than input to   
+                another {\sc soac} then fusing {\tt x} is still disallowed in our 
+                implementation.   A future extension might handle the cases exhibiting
+                ``negligible'' overhead, e.g., substituting {\tt x[i]} with {\tt f(arr[i])} 
+                would allow fusion between the producers of {\tt x} and {\tt y} at the cost 
+                of an extra call to {\tt f}.
+\end{itemize}
 \subsection{Fusing One SOAC}
 \label{sec:FusingOnce}
 
