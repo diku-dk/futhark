@@ -3,11 +3,21 @@
 \#*\#
 .#*
 
+# Ignore cabal build directory.
 dist
 
+# Ignore result of test suite.
 data/*testout
 
+# Ignore side-effects of compilation.
 *.aux
 *.log
+*.bbl
+*.blg
+*.out
 *.prof
 *.o
+*.hi
+
+# Ignore core dumps.
+core
