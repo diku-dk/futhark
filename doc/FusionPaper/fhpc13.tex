@@ -796,10 +796,9 @@ Section~\ref{sec:FusingOnce} introduces the data structure
 that stores the result of the first pass, and discusses the rules 
 for processing one {\sc soac} node, including the compositional
 algebra under which {\sc soac}s are fused. 
-Section~\ref{sec:bwdPass} discusses the data-flow rules of
-the first pass for the rest of \textsc{AbSyn} nodes.
-Finally, Section~\ref{sec:fwdPass} describes the second
-pass and remarks on the asymptotical 
+Finally, Section~\ref{sec:bwdPass} discusses the data-flow rules of
+the first pass for the rest of \textsc{AbSyn} nodes, briefly 
+describes the second pass and remarks on the asymptotical 
 complexity of the transformation.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -1287,17 +1286,17 @@ redomap2(\mymath{\oplus}
 \begin{minipage}{0.48\columnwidth}
 \begin{colorcode}
 //\emp{filter2 o filter2\mymath{\Rightarrow}filter2}
-//\emp{{\em{}IFF} consumer's input list}
-//\emp{  \mymath{\equiv} producer's output list}
+//\emp{{\em{}IFF} consumer's input set}
+//\emp{  \mymath{\subseteq} producer's output set}
 let (x1,x2)=filter2(c\mymath{\myindx{1}},a1,a2)
-in  filter2(c\mymath{\myindx{2}}, x1, x2)   
+in  let y = filter2(c\mymath{\myindx{2}}, x1) ..
     \emphh{\mymath{\equiv}}
-filter2(
+let (y, dead) = filter2(
   fn bool (\mymath{\alpha\myindx{1}} a1\mymath{\myindx{i}},\mymath{\alpha\myindx{2}} a2\mymath{\myindx{i}})=> 
       if   c\mymath{\myindx{1}}(a1\mymath{\myindx{i}}, a2\mymath{\myindx{i}}) 
-      then c\mymath{\myindx{2}}(a1\mymath{\myindx{i}}, a2\mymath{\myindx{i}}) 
+      then c\mymath{\myindx{2}}(a1\mymath{\myindx{i}}) 
       else false 
-, a1, a2 )
+, a1, a2 ) ..
 
 //\emp{reduce2 o filter2\mymath{\Rightarrow}redomap2}
 //\emp{{\em{}IFF} consumer's input list}
@@ -1343,6 +1342,10 @@ redomap2(\mymath{\oplus}
 \label{fig:CompatFuse}
 \end{figure}
 
+%//\emp{{\em{}IFF} consumer's input list}
+%//\emp{  \mymath{\equiv} producer's output list}
+
+
 Finally, if any of the four fusion conditions are not met, 
 then a new kernel is created by {\tt mkNewKernel}.
 Otherwise, if {\tt all4\_ok} holds, then the current {\sc soac}
@@ -1361,23 +1364,21 @@ with a {\tt map2}, {\tt reduce2}, or {\tt redomap2} kernel, and produces
 a {\tt map2}, {\tt redomap2} and {\tt redomap2} kernel, respectively.
 Note that {\sc s}$_c$ does not have to produce all of the kernel's input arrays.
 
-If {\sc s}$_c$ is a {\tt filter2} then it can be fused with a {\tt filter2} kernel,
-producing another {\tt filter2} kernel if and only if the output arrays
-of {\sc s}$_c$ match exactly, including the ordering, the input arrays of the kernel. 
-Otherwise, even if the kernel's input arrays set equals the result of {\sc s}$_c$,
-but the order differs, the composition cannot be written as a {\tt filter2} because 
-its type $((\alpha\rightarrow{\tt Bool}),[\alpha])\rightarrow[\alpha]$  % the {\tt filter2}'s
-would not be satisfied.   Finally, if {\sc s}$_c$ is a {\tt filter2} then it can be
-fused with a {\tt reduce2} or a {\tt redomap2} when the {\sc s}$_c$'s result array set
-is a superset of the kernel's input array set. 
+If {\sc s}$_c$ is a {\tt filter2} then, with the current algebra, it can be fused
+with a {\tt filter2}, {\tt reduce2} or {\tt redomap2} kernel, but only when
+{\sc s}$_c$'s result-array set is a superset of the kernel input-array set. 
+In the case of a {\tt filter2} kernel, the result arrays might need to 
+be extended with fresh (dead) variables, and the order of the input/output
+arrays might need adjustment to satisfy the typing rule of {\tt filter2}.
+
 % Note that the resulted {\sc soac} does not duplicate computation.
 
 One can observe that {\tt redomap2}, which we introduced in the \textsc{AbSyn}
 but is not part of \LO{}, is instrumental in enhancing the composibility 
-degree of the fusion algebra, while preserving an 
-inherently-parallel fusion result. For example, a {\tt reduce2}
-can be fused with a number of (partial) {\tt map2}s, producing a {\tt redomap2},
-then with a {\tt filter2}, then again with {\tt map2}s, and so on. 
+degree of the fusion algebra, while preserving the parallel semantics
+of the fusion's result. For example, a {\tt reduce2}
+can be fused with a {\tt filter2}, then with a number of (partial) {\tt map2}s, 
+then again with a {\tt filter2}, and so on. 
   
 
 %\subsection{Fusion Structural-Analysis Algorithm}
@@ -1389,26 +1390,6 @@ then with a {\tt filter2}, then again with {\tt map2}s, and so on.
 \vbox{
 \begin{colorcode}
 \emp{fusionGather :: FusionRes -> Exp -> FusionM FusionRes}
------------------
--- Let Pattern --
-fusionGather r (LetPat pat soac@(Map2 \mymath{\lambda} _ _ _) bdy _)=do
-  r' <- \emphh{bindBothEnvs} pat soac \$ fusionGather r bdy    
-  (lam_vars, r'') <- fusionGatherLam r' lam
-  tryFuseSOAC lam_vars r'' (pat, soac)
--- ^similar for Reduce2, Filter2, Redomap2. 
--- ^Replicate has a specialized implem (not shown) 
-
-fusionGather r (LetPat pat (Scan2 \mymath{\lambda} ne arr _ _) bdy _)=do
-  r'        <- \emphh{bindVarsEnv} pat \$ fusionGather r bdy
-  (_, r'')  <- fusionGatherLam r' \mymath{\lambda}
-  foldM fusionGatherExp r'' (ne : arr)
-
-fusionGather r (LetPat pat e body _) = do
-    r' <- \emphh{bindVarsEnv} pat \$ fusionGather r body
-    fusionGather r' e
-
-fusionGather _ (Map2 \{\}) = errorIllegal ...
-
 ------------------------------------------------
 -- Variable, Index, If, Loop, In-Place Update --
 fusionGather r (Var idd) = do
@@ -1448,7 +1429,21 @@ fusionGatherLam r (AnonymFun idds body _ pos) = do
     let unfus' = unfus `S.intersection` bnds
     -- ^filter out \mymath{\lambda}'s local vars
     return \$ (unfus', \emp{unionFusionRes} r (r'\{unfusable=unfus'\}))
+-----------------
+-- Let Pattern --
+fusionGather r (LetPat pat soac@(Map2 \mymath{\lambda} _ _ _) bdy _)=do
+  r' <- \emphh{bindBothEnvs} pat soac \$ fusionGather r bdy    
+  (lam_vars, r'') <- fusionGatherLam r' lam
+  \emp{tryFuseSOAC} lam_vars r'' (pat, soac)
+-- ^similar for Reduce2, Filter2, Redomap2. 
+-- ^Replicate has a specialized implem (not shown) 
 
+fusionGather r (LetPat pat e body _) = do
+    r' <- \emphh{bindVarsEnv} pat \$ fusionGather r body
+    fusionGather r' e
+-- ^scan2 is unfusable, hence is similar to this 
+
+fusionGather _ (Map2 \{\}) = errorIllegal ...
 \end{colorcode}
 } \vspace{-2ex}
 \caption{ Constructing Fused Kernels at Function Level}
@@ -1467,6 +1462,24 @@ fusionGatherLam r (AnonymFun idds body _ pos) = do
 %tryFuseSOAC:: S.Set Name -> FusionRes -> ([Ident], Exp)-> FusionM FusionRes
 %  , fusedRes   :: FusedRes
 
+
+Figure~\ref{fig:FusionGather} summarizes the most-relevant data-flow rules
+for fusion that are implemented by function {\tt fusionGather}, which receives
+as arguments the current data-flow result, denoted {\tt r}, and an expression
+and computes the new result.  If the expression is:
+\begin{itemize}
+    \item an array variable, {\tt Var idd}, then the variable's 
+            name is added to the unfusable set of the result,
+            %; the reason is that all expressions other than {\sc soac}
+            %statements are allowed to fall through to this case
+            %via {\tt fusionGather} recursion 
+            since it corresponds to an array used other than as 
+            input to a {\sc soac}, i.e., \emp{Case 5} in Figure~\ref{fig:dontFuse},
+    \item  an indexed-array expression adds the array name to the 
+            unfusable set and recursively process the expressions corresponding
+            to the array indices,
+    \item  an if-then-else 
+\end{itemize}
 
 \subsection{Replacing the Fused Kernels \& Fusion Driver}
 \label{sec:fwdPass}
