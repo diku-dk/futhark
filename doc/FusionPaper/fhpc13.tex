@@ -456,33 +456,56 @@ Haskell-inspired notation.
 & \equiv \text{\tt\{$f$($a$[0]), \ldots, $f$($a$[n])\}}
 \end{align*}
 \begin{align*}
-\text{\tt filter($f$,a)}
+\text{\tt filter}
 & :: (\alpha\rightarrow{\tt bool})\rightarrow[\alpha]\rightarrow[\alpha] \\
-& \equiv \text{\tt\{$a$[i] | $f$($a$[i]) = {\tt True }\}}
+\text{\tt filter($f$,a)} & \equiv \text{\tt\{$a$[i] | $f$($a$[i]) = {\tt True }\}}
 \end{align*}
 \begin{align*}
-\text{\tt reduce($f$,$x$,$a$)}
+\text{\tt reduce}
 & :: (\alpha\rightarrow\alpha\rightarrow\alpha)\rightarrow\alpha\rightarrow[\alpha]\rightarrow\alpha \\
-& \equiv \text{\tt $f$($f$(\ldots $f$($x$,$v$[0]), $v$[1]), $v$[n])}
+\text{\tt reduce($f$,$x$,$a$)} & \equiv \text{\tt $f$($f$(\ldots $f$($x$,$v$[0]), $v$[1]), $v$[n])}
 \end{align*}
 \begin{align*}
-\text{\tt scan($f$,$x$,a)}
+\text{\tt scan}
 & :: (\alpha\rightarrow\alpha\rightarrow\alpha)\rightarrow\alpha\rightarrow[\alpha]\rightarrow[\alpha] \\
-& \equiv \text{\tt\{$f$($x$,$a$[0]), $f$($f$($x$,$a$[0]),$v$[1]),\ldots\}}
+\text{\tt scan($f$,$x$,a)} & \equiv \text{\tt\{$f$($x$,$a$[0]), $f$($f$($x$,$a$[0]),$v$[1]),\ldots\}}
 \end{align*}
+
+In particular, note that {\tt scan} is an inclusive prefix scan.  {\tt
+  redomap} is a special case -- it is not part of the external \LO{}
+language, but used internally for fusing {\tt reduce} and {\tt map}.
+Its semantics is as follows.
 \begin{align*}
-\text{\tt redomap($f_{r}$,$f_{m}$,$x$,$v$)}
+\text{\tt redomap}
 & :: (\alpha\rightarrow\alpha\rightarrow\alpha)\rightarrow(\alpha\rightarrow\beta\rightarrow\alpha)\\
 & \quad\rightarrow\alpha\rightarrow[\beta]\rightarrow\alpha \\
-& \equiv \text{\tt reduce($l_{r}$, $x$, map($l_{m}$, $v$))}
+\text{\tt redomap($f$,$g$,$x$,$v$)} & \equiv \text{\tt foldl($g$, $x$, $v$)}
 \end{align*}
-In particular, note that {\tt scan} is an inclusive prefix scan.
+Note that the runtime semantics is a left-fold, not a normal \LO{}
+\texttt{reduce}.  The justification for {\tt redomap} is as follows;
+using a Haskell-like syntax.
 
-The semantics of {\tt redomap}:\\
-            \text{\tt redomap($\oplus$,$g$,$x$,$v$)} $\rightarrow$
-\text{\tt foldl($g$, $x$, $v$)}
-
-Redomap is complicated for Reasons. (FIXME)
+{\tt (red $\odot$ e) . (map f)} can be formally transformed, via the
+list homomorphism ({\sc lh}) promotion lemma~\cite{BirdListTh}, to an
+equivalent form:  \\
+${\tt red}\mbox{ }\odot\mbox{ }{\tt e}\mbox{ }.\mbox{ }{\tt map}\mbox{
+}{\tt f}\mbox{ }\emphh{\equiv}$ $\mbox{ }{\tt red}\mbox{ }\odot\mbox{
+}{\tt e}\mbox{ }.\mbox{ }{\tt pmap}_{p} \mbox{ }$ $(\emp{{\tt red} \mbox{
+  }\odot\mbox{ }{\tt e}\mbox{ }.\mbox{ }{\tt map}\mbox{ }{\tt f}})$\\
+where the original list is distributed to $p$ parallel processors,
+each of which execute the original map-reduce computation sequentially
+and, at the end, reduce in parallel the per-processor result.  Hence
+the {\em inner} map-reduce can be
+rewritten as a left-fold:\\
+${\tt red}\mbox{ }\odot\mbox{ }{\tt e}\mbox{ }.\mbox{ }{\tt map}\mbox{
+}{\tt f}\mbox{ }\emphh{\equiv}$ $\mbox{ }{\tt red}\mbox{ }\odot\mbox{
+}{\tt e}\mbox{ }.\mbox{ }{\tt pmap}_{p} \mbox{ }$ $(\emp{{\tt foldl}\mbox{
+  }{\tt g}\mbox{ }{\tt e}})$\\
+It follows that in order to be generate parallel code for {\tt (red
+  $\odot$ e) . (map f)} we need to remember either $\odot$ and {\tt f}
+or $\odot$ and {\tt g}. We chose the latter, i.e., {\tt
+  redomap($\odot$, g, e)}, because it allows a richer compositional
+algebra for fusion.
 
 \subsubsection{Tuple shimming}
 \label{sec:shimming}
@@ -596,7 +619,7 @@ The enabling optimisations loop consists of
 which is repeated until a fixed point is reached.  We also plan to add
 common-subexpression-elimination and loop hoisting.  After loop
 fusion, the enabling optimisations stage is repeated, as fusion will
-often produce code amenable to copy propagation.  By the time the
+often produce code amenable to copy-propagation.  By the time the
 program enters the enabling optimisations loop, and for the rest of
 the compilation pipeline, the following properties hold for the
 program:
