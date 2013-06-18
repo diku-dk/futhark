@@ -730,17 +730,6 @@ fun real main([real] a) =
             x + y, 0.0, tmp_map2) in
   tmp_red2
 \end{colorcode}
-And finally, after fusion.
-\begin{colorcode}
-fun real main([real] a) =
-  let tmp_red2 =
-    redomap2(fn real (real x, real y) => x + y,
-             fn real (real x) =>
-               let y = ~x in
-               let z = x * y in z,
-             0.0, a) in
-  tmp_red2
-\end{colorcode}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
