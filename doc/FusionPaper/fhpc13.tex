@@ -1508,13 +1508,16 @@ and computes the new result.  If the expression is:
             This prevents fusion in a loop/lambda from outside it, i.e., 
                 \emp{Case 3} in Figure~\ref{fig:dontFuse}.
           A loop expression is similarly treated. 
-    \item  the let-binding of a {\sc soac} statement then both environment 
-            variables are updated with the new bindings, the body of the {\sc soac} 
-            lambda is processed, and {\tt tryFuseSOAC}, described in 
-            Section~\ref{sec:FusingOnce} 
-            will attempt to fuse if possible the current {\sc soac}. 
+    \item  the let-binding of a {\tt map2}, {\tt reduce2}, {\tt redomap2} or {\tt filter2} 
+            statement, then (i) both environment variables, i.e., {\tt soacsEnv} and {\tt varsEnv}, 
+            are updated with the new bindings, (ii) the body of the {\sc soac} 
+            lambda is processed, and (iii) {\tt tryFuseSOAC} 
+            (see Section~\ref{sec:FusingOnce}) either fuses the {\sc soac} 
+            or creates a new kernel. 
             %Note that the {\sc soac}'s input arrays will  
-    \item finally, 
+    \item an arbitrary let-binding then the {\tt varsEnv} environment variable is
+            updated with the new binding and the body of the {\tt let} and the
+            binding are recursively processed.
             
              
              
