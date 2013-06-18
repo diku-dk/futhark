@@ -802,7 +802,7 @@ Finally, Section~\ref{sec:fwdPass} describes the second
 pass and remarks on the asymptotical 
 complexity of the transformation.
 
-
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Motivation and Intuitive Solution}
 \label{sec:Intuition}
 
@@ -838,21 +838,25 @@ i.e., a basic block.
 
 The main point is that all {\sc soac}s that appear inside the box
 labeled \emp{\em Kernel 3} can be fused without duplicating any
-computation, despite the fact that several of the to-be-fused 
+computation, even if several of the to-be-fused 
 arrays are used in different {\sc soac}s, e.g., {\tt y1} is used to
-compute both {\tt (z1,z2)} and {\tt res}. Similarly, we note
-that not all input arrays of a {\sc soac} are produced by one other
-{\sc soac}, e.g., the {\tt q}s requires both {\tt y}s and {\tt z}s arrays.   
-We achieve this by means of {\em {\tt T$_2$} reduction on the dependency graph}:
+compute both {\tt (z1,z2)} and {\tt res}\footnote{
+Note also that (i) not all input arrays of a {\sc soac} need to be produced
+by the same {\sc soac}, e.g., the {\tt q}s requires both {\tt y}s and 
+{\tt z}s arrays, and (ii) some input might be produced other than 
+by a {\sc soac}, e.g, \emp{\em Kernel 3} is still fusable even if 
+we add an arbitrary array as an extra parameter to the root {\tt res=map2(..)}. 
+}. 
+This is accomplished by means of {\em {\tt T$_2$} reduction on the dependency graph}:
 
 The rightmost child of the root {\sc soac}, i.e., {\tt res}, 
 has only one incoming edge, 
 hence it can be fused (reduced). This is achieved  (i) by replacing in
 the root {\sc soac} the child's output with the child's input arrays, 
 (ii) by inserting in the root's lambda a call to the child's lambda,
-to compute the per-element output of the child, %% intermediate, 
+which computes the per-element output of the child, %% intermediate, 
 and, finally, (iii) by removing the duplicate input arrays of the result.
-The latter is accomplished by replacing in the result's lambda
+The latter is implemented by replacing in the result's lambda
 the definition of all but one of the lambda's arguments corresponding to 
 the same input array, with copy statements in the lambda's body.  
 
@@ -883,13 +887,13 @@ let y   = map2(g, \emp{x}) in ..
 
 // \emp{Case 3:} don't fuse from 
 //outside in a loop (or \mymath{\lambda})
-let \emphh{x} = map2(f, arr)   in
+let \emphh{x} = map2(f, a)   in
 \emp{loop}(arr) = for i < N do
   map2(op +, arr, \emp{x})
 
 // \emp{Case 5:} don't fuse if \emp{x}
 //used outside SOAC inputs
-let \emphh{x} = map2(f, arr) in
+let \emphh{x} = map2(f, a) in
 let y = map2(g, \emphh{x})   in
     \emp{x}[i] + y[i]
 \end{colorcode}
@@ -953,12 +957,31 @@ it would result either in incorrect programs or in duplicated computation:
                 {\tt z} is removed, then fusing the {\tt x} producer in the 
                 {\tt then} and {\tt else} branches does not duplicate computation.
     \item [5.] If a {\sc soac}-produced array {\tt x} is used other than input to   
-                another {\sc soac} then fusing {\tt x} is still disallowed in our 
-                implementation.   A future extension might handle the cases exhibiting
-                ``negligible'' overhead, e.g., substituting {\tt x[i]} with {\tt f(arr[i])} 
-                would allow fusion between the producers of {\tt x} and {\tt y} at the cost 
-                of an extra call to {\tt f}.
+                another {\sc soac} then fusing {\tt x} is disallowed in our 
+                implementation.   A future extension might handle the ``negligible-overhead'' 
+                cases, e.g., substituting {\tt x[i]} with {\tt f(arr[i])} 
+                would allow the fusion of {\tt x} at the cost of computing {\tt f(arr[i])} (twice).
+    \item [6.] Finally, fusing two arrays produced by the same {\sc soac} each in another
+                {\sc soac} still duplicates computation. This case can sometimes
+                be optimized by ``horizontally'' merging the {\sc soac} consumer,
+                e.g., the two {\tt reduce2}s are merged in {\tt reduce2(g,0,1, x,y)},
+                where {\tt g(e$_1$,e$_2$,x$_i$,y$_i$)~$\equiv$~(e$_1$+x$_i$, e$_2$*y$_i$)}.
 \end{itemize}
+
+We conclude this section with two remarks: {\em First}, the data-dependency  % in practice
+graph ({\sc ddg}) does not have to be built since a bottom-up traversal of the program, 
+i.e., backwards analysis, is guaranteed to encounter the statements\footnote{
+Fusion assumes a normalized program, i.e., seen as a set of functions 
+whose bodies are composed from blocks of let-statements, {\tt if}s and {\tt loop}s.
+} in an order that satisfies the {\sc ddg}.
+{\em Second}, the intuition is not complete, as it does not solve the 
+issues described in the ``don't fuse'' cases, e.g., violation of the ``in-place update'' 
+semantics, handling fusion across loops and branches, etc. 
+%
+The next two sections present in detail the backward-analysis pass.
+  
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Fusing One SOAC}
 \label{sec:FusingOnce}
 
@@ -971,21 +994,21 @@ import qualified Data.Map
                  as M
 import qualified Data.Set 
                  as S
-data FusedKer = FusedKer \{ 
- soacStmt :: ([Ident], Exp)
+data \emp{FusedKer} = \emp{FusedKer} \{ 
+ \emphh{soacStmt} :: ([Ident], Exp)
 --^the fused SOAC stmt,eg,
 --(z,w)=map2( f(a,b), x,y )
 
-,inp     :: S.Set Ident
+,\emphh{inp}     :: S.Set Ident
 --^ the input arrays used   
 --in SOAC stmt,i.e.,\{x,y\}.
 
-,inplace :: S.Set Name
+,\emphh{inplace} :: S.Set Name
 --^Aliasing set of vars
 --used in in-place updates
 --that reach this kernel.
 
-,fused_vars :: [Ident]
+,\emphh{fused_vars} :: [Ident]
 --^not null iff at least a 
 --fusion has been performed
 \}
@@ -994,17 +1017,17 @@ data FusedKer = FusedKer \{
 \hfill
 \begin{minipage}{0.48\columnwidth}
 \begin{colorcode}
-data FusionRes = FusionRes\{
- outArr :: M.Map Name Name
+data \emp{FusionRes} = \emp{FusionRes}\{
+ \emphh{outArr} :: M.Map Name Name
 --^maps an array to the name
 --of the kernel producing it 
 
-,inpArr :: M.Map  Name 
+,\emphh{inpArr} :: M.Map  Name 
                 (S.Set Name)
 --^maps an array to the 
 --names of kernels using it  
 
-,unfused :: S.Set Name
+,\emphh{unfusable} :: S.Set Name
 --^Unfusable arrays. Used:
 --1.otherwise than input to 
 --  SOAC kernels (including
@@ -1013,20 +1036,58 @@ data FusionRes = FusionRes\{
 --  not located on disjoint 
 --  control-flow (branches)
 
-,kers ::M.Map Name FusedKer
+,\emphh{kers} ::M.Map Name FusedKer
 --^maps kernel name to data
 \}
 \end{colorcode}
 \end{minipage}
-%\begin{center}
-%\includegraphics[height=12ex]{figures/MemCoalesce}
-%\end{center}
 } 
-%\vspace{-1ex}
 \caption{Data Structures for Fusion Metadata.}
 \label{fig:fusionDS}
 \end{figure}
 
+%\enlargethispage{\baselineskip}
+
+Figure~\ref{fig:fusionDS} shows the representation of the data-flow result
+computed during the bottom-up analysis pass, i.e., synthesized attribute.  
+A fused kernel, \emp{\tt FusedKer}, consists of:
+\begin{itemize}
+    \item the {\sc soac} statement, {\tt soacStmt}, which pairs up
+            the output arrays produced by the fused {\sc soac} 
+            with the {\sc soac}'s \textsc{AbSyn} expression 
+            ({\tt Ident} records a variable's name, type and position), 
+    \item the set of input arrays, {\tt inp}, of the fused {\sc soac},
+    \item a set of variable names, {\tt inplace}, which is
+            the union of the alias sets of all arrays that may have 
+            been ``consumed\footnote{
+                An array is consumed either (i) when it is the 
+                source of an in-place update or (ii) when it is passed 
+                to a function call as a parameter of unique type. 
+            }''
+            on any execution path between the currently-analyzed program 
+            point to the one where the fused {\sc soac} was called; e.g.,
+            \emp{Case 1} in Figure~\ref{fig:dontFuse}, {\tt a}
+            belongs to the {\tt inplace} set of the kernel associated
+            with output {\tt y}, when analysis reaches 
+            the definition of {\tt x},
+    \item a set of array variables, {\tt fused\_vars}, that have been 
+            fused in the construction of the current kernel;
+            if {\tt fused\_vars $=\emptyset$} then no fusion has
+            yet taken place, and {\tt soacStmt} is in the program.       
+\end{itemize}
+
+The analysis result is implemented by the \emp{\tt FusionRes} structure: 
+\begin{itemize}
+    \item {\tt outArr} maps an array name to the kernel (name) producing it, 
+    \item {\tt inpArr} maps an array name {\tt x} to the set of kernels (names) 
+            whose corresponding {\sc soac}s receive {\tt x} as an input array,
+    \item a set of array names that the analysis up to the current 
+            program point have discovered to be {\tt unfusable}, because
+            of one of the \emp{cases 3 to 6} in Figure~\ref{fig:dontFuse},
+            e.g., arrays used other than {\sc soac} input or
+            in two different kernels that share an execution path, etc., and
+    \item {\tt kers} maps a kernel name to its associated \emp{\tt FusedKer} data.
+\end{itemize}
 
 \begin{figure}[bt]
 %\hrule ~
@@ -1056,7 +1117,7 @@ newtype \emp{FusionM} a = FusionM (StateT NameSrc
     
   -- \emp{Conditions for fusion:}
   --(1) \emphh{none of out_nms belongs to the unfusable set}
-  let cond1=L.all (\mymath{\backslash}x->not\$ S.member x\$ unfused res) out_nms 
+  let cond1=L.all(\mymath{\backslash}x->not\$S.member x\$unfusable res) out_nms 
 
   --(2) \emphh{\mymath{\exists} some kernels that use some of out_ids as inputs} 
   let to_fuse_knms = getKersWithInpArrs res out_nms
@@ -1081,10 +1142,10 @@ newtype \emp{FusionM} a = FusionM (StateT NameSrc
   -- since those are input to at least 2 distinct kernels.
   let mod_kers=if is_fusable then to_fuse_knms else []
   let in2_kers=filter (inpArrInRes res mod_kers) inp_nms
-  let unfused'=S.union (unfused res) (S.fromList in2_kers)
-  let res' = res \{ unfused = unfused' \}
+  let unfus'=S.union (unfusable res) (S.fromList in2_kers)
+  let res' = res \{ unfusable = unfus' \}
 
-  if not all4_ok then startNewKernel res' (out_ids,soac)
+  if not all4_ok then mkNewKernel res' (out_ids,soac)
              -- ^adds a fresh kernel to the result, and    
              -- updates the outArr and inpArr fields
   else do fused_kers <- mapM (fuseSOACInKer out_ids soac) 
@@ -1094,39 +1155,101 @@ newtype \emp{FusionM} a = FusionM (StateT NameSrc
           -- ^updates out/inpArr \& kers fields of result
 \end{colorcode}
 } \vspace{-2ex}
-\caption{ Conservative Fusion of a {\sc soac} }
+\caption{ Pseudo-code for Conservatively Fusing one {\sc soac} }
 \label{fig:FuseOnce}
 \end{figure}
 
-% map (\mymath{\backslash}k->S.intersection (inplace k) all_used) to_fuse_kers
 
-%inpArrInResModKers
+Figure~\ref{fig:FuseOnce} shows % the monadic types used in our implementation and 
+the Haskell pseudo-code that implements the most important 
+analysis step: the one that gives the data-flow rules for processing 
+a {\sc soac} statement, \emp{\tt tryFuseSOAC}. 
 %
-%addNewKer :: FusionRes -> ([Ident], Exp) -> FusionGM FusionRes
-%addNewKer res (out_ids, soac) = do
-%  inp_ids <- getInpArrsSOAC soac
-%  inp_nms <- expandSoacInpArr \$ map identName inp_ids
-%  let used_inps = filter (isInpArrInResModKers res S.empty) inp_nms
-%  let unfused'  = (unfused res) `S.union` S.fromList used_inps
+The analysis uses an environment, \emphh{\tt FusionEnv}, that records the set 
+of array variables visible at the current program point, {\tt varsEnv}, and a 
+map binding array names to the {\sc soac} statement producing it, {\tt soacsEnv}. 
+The environment is computed during the top-down \textsc{AbSyn} traversal, 
+i.e., an inherited attribute.
 %
-%  let new_ker = FusedKer (out_ids,soac) (S.fromList inp_ids) S.empty []    
-%  nm_ker  <- freshName "ker"
-%  
-%  let os' = foldl (\mymath{\backslash}x arr -> M.insert arr nm_ker x) 
-%                  (outArr res) (map identName out_ids)
-%
-%  let is' = foldl (\mymath{\backslash}x arr -> M.insertWith' S.union arr 
-%                                (S.singleton nm_ker) x) 
-%                  (inpArr res) inp_nms
-%  return $ FusionRes os' is' unfused'  
-%                     (M.insert nm_ker new_ker (kers res)) 
-%
+The computation takes place in the \emp{\tt FusionM} monad that is a
+composition of (i) the {\tt Reader} monad, for maintaining the environment,
+(ii) the {\tt State} monad, for fresh-names generation, and (iii) the 
+{\tt Either} monad, for error handling.
+
+Function \emp{\tt tryFuseSOAC} receives as arguments (i) the set of variables
+that are visible in the current scope and are used in the current-{\sc soac}'s
+lambda, {\tt lam\_vars}, (ii) the current data-flow result, {\tt res}, and
+(iii) the output arrays and the expression of the to-be-processed 
+{\sc soac} statement, {\tt (out\_ids,soac)}.  
+
+There are four conditions, {\tt all4\_ok}, that have to be met for the 
+current {\sc soac}, denoted {\sc s}$_c$, to be fused with at least one kernel: %existent
+\begin{itemize}
+    \item [1.] None of {\tt soac}'s output-array names, {\tt out\_nms}, 
+                belong to the result's {\tt unfusable} set.
+    \item [2.] There exists some kernels, {\tt to\_fuse\_kers}, found by look-ups
+                in the result's {\tt inpArr}, whose input arrays belong to {\tt out\_nms}.
+                If the previous condition is met then it is guaranteed (see Section~\ref{sec:bwdPass}) 
+                that all {\tt to\_fuse\_kers} are located on disjoint execution paths,
+                and that none of them are in a loop or lambda 
+                that does not contain {\sc s}$_c$, 
+                i.e., \emp{Cases 2 to 6} of Figure~\ref{fig:dontFuse} do not happen.
+    \item [3.] All kernels in {\tt to\_fuse\_kers} are compatible with 
+                    {\sc s}$_c$ under the algebra depicted 
+                    in Figure~\ref{fig:CompatFuse} and reviewed later. 
+               Otherwise, if only some kernels are compatible, then computation
+                will be duplicated since {\sc s}$_c$ cannot be removed
+                from the program.
+    \item [4.] None of {\sc s}$_c$'s variables, including the
+                ones used in its lambda and as input arrays, belong to the 
+                {\tt inplace} set of any kernels in {\tt to\_fuse\_kers}.
+                Otherwise, \emp{Case 1} of Figure~\ref{fig:dontFuse} may apply.
+\end{itemize}
+
+The next step is to update the {\tt unfusable} set of the data-flow result.
+At this stage the variables used in the current {\sc soac} ({\sc s}$_c$) lambda
+have been already made unfusable. It remains to check whether any input
+array\footnote{
+A normalized program guarantees that the input arrays of a {\sc soac}
+are variables rather than arbitrary expressions, hence we need not scan them.
+} of {\sc s}$_c$, i.e., {\tt inp\_nms}, is also used in an 
+existing kernel. If so, then it is used in at least two kernels that may
+share an execution path, and hence it is unfusable. There are two things 
+to be noted here:
+{\em First}, if an array in the input set of {\sc s}$_c$
+was produced by another {\sc soac}, {\sc s}$_2$, then {\tt inp\_nms} is
+extended with all output arrays of {\sc s}$_2$; otherwise \emp{Case 6} 
+of Figure~\ref{fig:dontFuse} may apply. This is achieved by
+{\tt expandSOACsInpArr} via looks-ups in \emphh{soacsEnv}. 
+
+{\em Second}, an input array, {\tt a}, does {\em not} become unfusable if
+{\sc s}$_c$ can be fused {\em and} {\tt a} is used only as input 
+to the kernels with which {\sc s}$_c$ will be fused. In this case {\tt a}
+would still be used only in kernels located on disjoint execution paths
+(This is implemented by filtering modulo kernels 
+{\tt mod\_kers} in the  definition of {\tt in2\_kers}.)
+
 
 \begin{figure}[bt]
 %\hrule ~
 \vbox{
 \begin{minipage}{0.48\columnwidth}
 \begin{colorcode}
+// \emp{replicate can be fused}
+//\emp{without restrictions}
+let x = replicate(N,a)in 
+let y = map2(f, x, b) in
+let z = map2(g, x, c) in 
+let x[i] = ...
+    \emphh{\mymath{\equiv}}
+let x = replicate(N, a) in 
+let y = map2( fn \mymath{\beta\myindx{1}} (\mymath{\alpha\myindx{1}} b\mymath{\myindx{i}}) 
+              => f(a,b\mymath{\myindx{i}}), b)
+let z = map2( fn \mymath{\beta\myindx{2}} (\mymath{\alpha\myindx{2}} c\mymath{\myindx{i}}) 
+              => g(a,c\mymath{\myindx{i}}), c)
+in let x[i] = ...   
+
+
 //\emp{map2 o map2 \mymath{\Rightarrow} map2}  
 let (x1, x2) = map2(f, a1)
 in  map2(g, x1, y)   
@@ -1139,7 +1262,7 @@ map2(fn \mymath{\beta} (\mymath{\alpha\myindx{1}} a1\mymath{\myindx{i}}, \mymath
 
 //\emp{reduce2 o map2\mymath{\Rightarrow}redomap2}
 let (x1, x2) = map2(f, a1)
-in  reduce2(\mymath{\oplus},(e\mymath{\myindx{1}},e\mymath{\myindx{2}}),x1,y)   
+in  reduce2(\mymath{\oplus},e\mymath{\myindx{1}},e\mymath{\myindx{2}}, x1,y)   
     \emphh{\mymath{\equiv}}
 redomap2(\mymath{\oplus}
 , fn (\mymath{\beta\myindx{1}},\mymath{\beta\myindx{2}}) ( \mymath{\beta\myindx{1}} e\mymath{\myindx{1}}, \mymath{\beta\myindx{2}} e\mymath{\myindx{2}}
@@ -1158,21 +1281,6 @@ redomap2(\mymath{\oplus}
    => let (x1\mymath{\myindx{i}}, x2\mymath{\myindx{i}}) = f(a1\mymath{\myindx{i}})
       in  g(e, x1\mymath{\myindx{i}}, y\mymath{\myindx{i}})
 , e, a1, y )
-
-
-// \emp{replicate can be fused}
-//\emp{without restrictions}
-let x = replicate(N,a)in 
-let y = map2(f, x, b) in
-let z = map2(g, x, c) in 
-let x[i] = ...
-    \emphh{\mymath{\equiv}}
-let x = replicate(N, a) in 
-let y = map2( fn \mymath{\beta\myindx{1}} (\mymath{\alpha\myindx{1}} b\mymath{\myindx{i}}) 
-              => f(a,b\mymath{\myindx{i}}), b)
-let z = map2( fn \mymath{\beta\myindx{2}} (\mymath{\alpha\myindx{2}} c\mymath{\myindx{i}}) 
-              => g(a,c\mymath{\myindx{i}}), c)
-in let x[i] = ...   
 \end{colorcode}
 \end{minipage}
 \hfill
@@ -1235,10 +1343,45 @@ redomap2(\mymath{\oplus}
 \label{fig:CompatFuse}
 \end{figure}
 
+Finally, if any of the four fusion conditions are not met, 
+then a new kernel is created by {\tt mkNewKernel}.
+Otherwise, if {\tt all4\_ok} holds, then the current {\sc soac}
+is fused with each of the kernels in {\tt to\_fuse\_kers}.
+%
+The algebra under which fusion is performed is depicted in Figure~\ref{fig:CompatFuse}:
+{\tt scan2} is unfusable and {\tt reduce2} and {\tt redomap2} always 
+start a new kernel.  Since {\tt replicate} is semantically a {\tt map2} 
+with a constant function, it can always be fused without duplicating
+computation, even inside loops and {\sc soac}'s lambdas, except for the 
+cases when it violates the in-place semantics, i.e., \emp{Case 1} of 
+Figure~\ref{fig:dontFuse}.
+%
+If the current {\sc soac}, {\sc s}$_c$, is a {\tt map2} then it can be fused 
+with a {\tt map2}, {\tt reduce2}, or {\tt redomap2} kernel, and produces 
+a {\tt map2}, {\tt redomap2} and {\tt redomap2} kernel, respectively.
+Note that {\sc s}$_c$ does not have to produce all of the kernel's input arrays.
 
+If {\sc s}$_c$ is a {\tt filter2} then it can be fused with a {\tt filter2} kernel,
+producing another {\tt filter2} kernel if and only if the output arrays
+of {\sc s}$_c$ match exactly, including the ordering, the input arrays of the kernel. 
+Otherwise, even if the kernel's input arrays set equals the result of {\sc s}$_c$,
+but the order differs, the composition cannot be written as a {\tt filter2} because 
+its type $((\alpha\rightarrow{\tt Bool}),[\alpha])\rightarrow[\alpha]$  % the {\tt filter2}'s
+would not be satisfied.   Finally, if {\sc s}$_c$ is a {\tt filter2} then it can be
+fused with a {\tt reduce2} or a {\tt redomap2} when the {\sc s}$_c$'s result array set
+is a superset of the kernel's input array set. 
+% Note that the resulted {\sc soac} does not duplicate computation.
+
+One can observe that {\tt redomap2}, which we introduced in the \textsc{AbSyn}
+but is not part of \LO{}, is instrumental in enhancing the composibility 
+degree of the fusion algebra, while preserving an 
+inherently-parallel fusion result. For example, a {\tt reduce2}
+can be fused with a number of (partial) {\tt map2}s, producing a {\tt redomap2},
+then with a {\tt filter2}, then again with {\tt map2}s, and so on. 
+  
 
 %\subsection{Fusion Structural-Analysis Algorithm}
-\subsection{Building the Fused Kernels at Program Level}
+\subsection{Remaining~Data-Flow~Rules, Second~Pass \& Complexity}
 \label{sec:bwdPass}
 
 \begin{figure}[bt]
@@ -1271,8 +1414,8 @@ fusionGather _ (Map2 \{\}) = errorIllegal ...
 fusionGather r (Var idd) = do
   -- {\em If} array {\em then} add it to the unfusable set
   case identType idd of
-    Array\{\} -> return \$ r \{ unfused = 
-                   S.insert (identName idd) (unfused r) \}
+    Array\{\} -> return \$ r \{ unfusable = 
+                   S.insert (identName idd) (unfusable r) \}
     _       -> return \$ r
 
 fusionGather r (Index idd indices _ _) = do 
@@ -1284,7 +1427,7 @@ fusionGather r (If e_cond e_then e_else _ _) = do
   c_r <- fusionGather r         e_cond
   return \$ \emp{mergeFusionRes} c_r (\emp{unionFusionRes} t_r e_r)
   -- mergeFusionRes \mymath{\equiv} semantically unions^ results, 
-  --   but promotes the \mymath{\cap} of inpArr keys to unfused set
+  --   but promotes the \mymath{\cap} of inpArr keys to unfusable set
 
 fusionGather r (LetWith id1 id0 inds elm bdy \emp{alias} _) = do 
     r'  <- \emphh{bindVarsEnv} [id1] \$ fusionGather r bdy
@@ -1298,13 +1441,13 @@ fusionGather r (LetWith id1 id0 inds elm bdy \emp{alias} _) = do
 fusionGatherLam r (AnonymFun idds body _ pos) = do
     r' <- \emphh{bindVarsEnv} idds \$ fusionGather mkNullRes body
     let inps = S.fromList \$ M.keys \$ inpArr new_res
-    let unfus  = (unfused r') `S.union` inps
+    let unfus  = (unfusable r') `S.union` inps
     -- ^make the inpArr of the \mymath{\lambda}-body result unfusable
     --  so that they cannot be fused from outside \mymath{\lambda} 
     bnds <- asks \$ varsEnv
     let unfus' = unfus `S.intersection` bnds
     -- ^filter out \mymath{\lambda}'s local vars
-    return \$ (unfus', \emp{unionFusionRes} r (r'\{unfused=unfus'\}))
+    return \$ (unfus', \emp{unionFusionRes} r (r'\{unfusable=unfus'\}))
 
 \end{colorcode}
 } \vspace{-2ex}
@@ -1317,7 +1460,7 @@ fusionGatherLam r (AnonymFun idds body _ pos) = do
 %    r'' <- foldM fusionGather r' [ini,ub]
 %    l_r <- \emphh{bindVarsEnv} arr_id \$ fusionGather mkNullRes bdy1
 %    let inps = S.fromList \$ M.keys (inpArr l_r)
-%    let l_r' = l_r\{unfused= (unfused l_r) `S.union` inps\} 
+%    let l_r' = l_r\{unfusable= (unfusable l_r) `S.union` inps\} 
 %    -- ^make the inpArr of the loop-body result unfusable
 %    return \$ \emp{unionFusionRes} r'' l_r'
 
@@ -1445,7 +1588,6 @@ Discuss fusion in REPA, DPH, Accelerate, Haskell, Obsidian, etc.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-\enlargethispage{\baselineskip}
 %\vspace*{-1ex}
 \acks
 %\vspace*{-1ex}
