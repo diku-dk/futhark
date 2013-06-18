@@ -1414,9 +1414,9 @@ fusionGather r (Index idd indices _ _) = do
   foldM fusionGather r ((Var idd) : indices)
 
 fusionGather r (If e_cond e_then e_else _ _) = do
+  c_r <- fusionGather r         e_cond
   t_r <- fusionGather mkNullRes e_then
   e_r <- fusionGather mkNullRes e_else
-  c_r <- fusionGather r         e_cond
   return \$ \emp{mergeFusionRes} c_r (\emp{unionFusionRes} t_r e_r)
   -- mergeFusionRes \mymath{\equiv} semantically unions^ results, 
   --   but promotes the \mymath{\cap} of inpArr keys to unfusable set
@@ -1432,7 +1432,7 @@ fusionGather r (LetWith id1 id0 inds elm bdy \emp{alias} _) = do
 
 fusionGatherLam r (AnonymFun idds body _ pos) = do
     r' <- \emphh{bindVarsEnv} idds \$ fusionGather mkNullRes body
-    let inps = S.fromList \$ M.keys \$ inpArr new_res
+    let inps = S.fromList \$ M.keys \$ inpArr r'
     let unfus  = (unfusable r') `S.union` inps
     -- ^make the inpArr of the \mymath{\lambda}-body result unfusable
     --  so that they cannot be fused from outside \mymath{\lambda} 
@@ -1486,10 +1486,48 @@ and computes the new result.  If the expression is:
             %via {\tt fusionGather} recursion 
             since it corresponds to an array used other than as 
             input to a {\sc soac}, i.e., \emp{Case 5} in Figure~\ref{fig:dontFuse},
-    \item  an indexed-array expression adds the array name to the 
-            unfusable set and recursively process the expressions corresponding
-            to the array indices,
-    \item  an if-then-else 
+    \item  an indexed-array expression then the array name is added to the 
+            unfusable set and the expressions corresponding to the array indices
+                are processed recursively,
+    \item  an if-then-else then {\tt r} is updated with the contribution
+            of the {\tt if} condition, i.e., {\tt c$_r$}. Next, the data-flow results of
+            the {\tt then} and {\tt else} sub-expressions are computed independently 
+            starting from a (fresh) null result, because no fusion is 
+            possible either across branches or with the kernels obtained from the
+            expression following the {\tt if} (visibility issues). 
+            The data-flow equation for the {\tt if} is that (i) we take the (semantic) 
+                union of the results of the two branches, denoted {\tt b$_r$}, i.e., because 
+                the kernels are necessarily on disjoint paths, and also (ii)
+                the semantic union between {\tt b$_r$} and {\tt c$_r$}, except that 
+                the intersection between the {\tt inpArr} key set of {\tt c$_r$} and 
+                {\tt b$_r$} becomes unfusable, i.e., the arrays in the intersection set
+                may be used by two kernels on one execution path. 
+            This solves both issues of \emp{Case 4} in Figure~\ref{fig:dontFuse}.
+    \item an in-place update expression then (i) the new binding is added to the
+            {\tt varsEnv} set of in-scope variables, (ii) the {\tt inplace}
+            field of each kernel in the current result is updated with the
+            alias set of the consumed variable, and (iii) the contribution of
+            sub-expressions are added to the data-flow result. This solves
+                \emp{Case 1} of Figure~\ref{fig:dontFuse}.
+    \item a lambda then (i) the data-flow result for the lambda's body, {\tt r'},
+                is computed from a null result because any of the arrays defined inside
+                the lambda are not visible outside, hence cannot be fused in any of the
+                {\tt r'} kernels, and (ii) the input-array set of {\tt r'}, i.e., the keys of 
+                {\tt inpArr}, becomes unfusable in the data-flow result 
+                (after being filtered of the variables that are invisible in the outer scope). 
+            This prevents fusion in a loop/lambda from outside it, i.e., 
+                \emp{Case 3} in Figure~\ref{fig:dontFuse}.
+          A loop expression is similarly treated. 
+    \item  the let-binding of a {\sc soac} statement then both environment 
+            variables are updated with the new bindings, the body of the {\sc soac} 
+            lambda is processed, and {\tt tryFuseSOAC}, described in 
+            Section~\ref{sec:FusingOnce} 
+            will attempt to fuse if possible the current {\sc soac}. 
+            %Note that the {\sc soac}'s input arrays will  
+    \item finally, 
+            
+             
+             
 \end{itemize}
 
 \subsection{Replacing the Fused Kernels \& Fusion Driver}
