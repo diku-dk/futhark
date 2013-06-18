@@ -588,8 +588,9 @@ variable is ever bound to a tuple.
 
 The enabling optimisations loop consists of
 \begin{enumerate}
-\item inlining as much as possible,
-\item performing copy- and constant-propagation, and
+\item aggressive inlining by creating a call-graph for the program,
+  then inlining any non-recursive function,
+\item performing copy-propagation and constant-folding, and
 \item removing dead code,
 \end{enumerate}
 which is repeated until a fixed point is reached.  We also plan to add
