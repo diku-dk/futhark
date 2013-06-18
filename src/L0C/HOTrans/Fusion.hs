@@ -694,7 +694,7 @@ fusionGatherExp fres (LetWith id1 id0 inds elm body _) = do
     -- Now add the aliases of id0 (itself included) to the `inplace' field 
     --     of any existent kernel. ToDo: extend the list to contain the 
     --     whole set of aliases (not available now!)
-    let inplace_aliases = map identName [identName id0] 
+    let inplace_aliases = S.toList $ aliases $ typeOf $ Var id0
     let kers' = map (\ k -> let inplace' = foldl (\x y->S.insert y x) (inplace k) inplace_aliases
                             in  k { inplace = inplace' }
                     ) kers
