@@ -1409,7 +1409,7 @@ number of (partial) {\tt map2}s, then again with a {\tt filter2}, and so on.
   
 
 %\subsection{Fusion Structural-Analysis Algorithm}
-\subsection{Remaining~Data-Flow~Rules And Second~Analysis~Pass}
+\subsection{Remaining~Data-Flow~Rules And Second-Analysis Pass}
 \label{sec:bwdPass}
 
 \begin{figure}[bt]
@@ -1547,6 +1547,20 @@ expression.   If the expression is:
             and {\tt e} are processed recursively; {\tt scan2} is processed
             in a similar fashion since it is not part of the fusion algebra. 
 \end{itemize}
+
+
+The result of the first (bottom-up) analysis pass has thus been summarized
+at each function level. The next step is to filter out the kernels that have 
+not been fused, i.e., {\tt fused\_vars$=\emptyset$}, from the result.
+The second analysis pass then replaces in the program the {\sc soac} 
+statements whose output arrays are keys in {\tt outArr} with the fused 
+{\sc soac} of their associated kernel.  Since successful fusion may have 
+created opportunities for fusion at an inner level, each lambda 
+corresponding to a fused {\sc soac} is (i) first cleaned-up by running the
+enabling optimizations, and (ii) then the two passes are re-run on the
+lambda's body.   Finally, at the very end, dead-code elimination is
+applied to eliminate from the program the fused {\sc soac}s. 
+ 
 
 %\subsection{Replacing the Fused Kernels \& Fusion Driver}
 %\label{sec:fwdPass}
