@@ -293,7 +293,7 @@ monomorphic, and their return- and parameter types must be specified
 explicitly.  In order to save space, we will not cover the typing
 rules in detail, as they are quite trivial.  The only exception is our
 notion of {\em uniqueness types}, which is given a cursory treatment
-in section \ref{sec:in-place}.
+in Section~\ref{sec:in-place}.
 
 The syntax of the first-order fragment of \LO{} can be seen in figure
 \ref{fig:fo-syntax}.  Common arithmetic operators such as {\tt +} and
@@ -323,7 +323,7 @@ the value of {\tt v}.  If {\tt a[i]} is itself an array (that is, if
 {\tt a} has more than one dimension), {\tt v} must be an array of the
 same size as the slice it is replacing.  We will write {\tt let a[i] =
   v in body} when the variable to be bound has the same name as the
-source variable.  In section \ref{sec:in-place}, we will describe our
+source variable.  In Section~\ref{sec:in-place}, we will describe our
 method for doing array updates {\em in-place}, that is without copying
 the source array, without losing referential transparency.
 
@@ -333,7 +333,7 @@ order to make it easier to express loop optimisations and certain
 sequential loops.
 
 For example, denoting by {\tt t} the type of {\tt x}, the loop in
-figure \ref{fig:loop-recursion} has the semantics of a call to the
+Figure~\ref{fig:loop-recursion} has the semantics of a call to the
 recursive function on the right-hand side.
 
 \begin{figure}
@@ -422,10 +422,10 @@ $prog$ & $::=$ & $\epsilon$ \\
 \label{sec:soacs}
 
 Most array operations in \LO{} are done through built-in second-order
-array combinators (SOACs).  The available SOACs can be seen in Figure
+array combinators ({\sc soac}s).  The available {\sc soac}s can be seen in Figure
 \ref{fig:soacs}, along with our syntax for anonymous and curried
 functions.  As \LO{} is first-order, these anonymous functions are
-only syntactically permitted in SOAC invocations.  The parentheses may
+only syntactically permitted in {\sc soac} invocations.  The parentheses may
 be omitted when currying if no curried arguments are given.
 
 \begin{figure}[bt]
@@ -445,32 +445,37 @@ $e$ & $::=$ & {\tt map($l$, $e$)} \\
 \label{fig:soacs}
 \end{figure}
 
-The semantics of the SOACs are identical to the similarly-named
+The semantics of the {\sc soac}s are identical to the similarly-named
 higher-order functions found in many functional languages, but
 reproduced here for completeness.  Note the types given are not \LO{}
-types, as the SOACs cannot be typed in LO{} itself, but a
+types, as the {\sc soac}s cannot be typed in LO{} itself, but a
 Haskell-inspired notation.
-\begin{description}
-\item[\tt map($f$,$a$)]\hfill\\
-  $:: (\alpha\rightarrow\beta)\rightarrow[\alpha]\rightarrow[\beta]$\\
-  $\rightarrow$ {\tt\{$f$($a$[0]), \ldots, $f$($a$[n])\}}
-
-\item[{\tt filter($f$,a)}]\hfill\\
-  $:: (\alpha\rightarrow{\tt bool})\rightarrow[\alpha]\rightarrow[\alpha]$\\
-  $\rightarrow$ {\tt\{$a$[i] | $f$($a$[i]) = {\tt True }\}}
-
-\item[{\tt reduce($f$,$x$,$a$)}]\hfill\\
-  $:: (\alpha\rightarrow\alpha\rightarrow\alpha)\rightarrow\alpha\rightarrow[\alpha]\rightarrow\alpha$\\
-  $\rightarrow$ {\tt $f$($f$(\ldots $f$($x$,$v$[0]), $v$[1]), $v$[n])}
-
-\item[{\tt scan($f$,$x$,a)}]\hfill\\
-  $:: (\alpha\rightarrow\alpha\rightarrow\alpha)\rightarrow\alpha\rightarrow[\alpha]\rightarrow[\alpha]$\\
-  $\rightarrow$ {\tt\{$f$($x$,$a$[0]), $f$($f$($x$,$a$[0]),$v$[1]),\ldots\}}
-
-\item[{\tt redomap($f_{r}$,$f_{m}$,$x$,$v$)}]\hfill\\
-  $:: (\gamma\rightarrow\beta\rightarrow\gamma)\rightarrow(\alpha\rightarrow\beta)\rightarrow\gamma\rightarrow[\alpha]\rightarrow\gamma$\\
-  $\rightarrow$ \text{\tt reduce($l_{r}$, $x$, map($l_{m}$, $v$))} \\
-\end{description}
+\begin{align*}
+\text{\tt map($f$,$a$)}
+& :: (\alpha\rightarrow\beta)\rightarrow[\alpha]\rightarrow[\beta] \\
+& \equiv \text{\tt\{$f$($a$[0]), \ldots, $f$($a$[n])\}}
+\end{align*}
+\begin{align*}
+\text{\tt filter($f$,a)}
+& :: (\alpha\rightarrow{\tt bool})\rightarrow[\alpha]\rightarrow[\alpha] \\
+& \equiv \text{\tt\{$a$[i] | $f$($a$[i]) = {\tt True }\}}
+\end{align*}
+\begin{align*}
+\text{\tt reduce($f$,$x$,$a$)}
+& :: (\alpha\rightarrow\alpha\rightarrow\alpha)\rightarrow\alpha\rightarrow[\alpha]\rightarrow\alpha \\
+& \equiv \text{\tt $f$($f$(\ldots $f$($x$,$v$[0]), $v$[1]), $v$[n])}
+\end{align*}
+\begin{align*}
+\text{\tt scan($f$,$x$,a)}
+& :: (\alpha\rightarrow\alpha\rightarrow\alpha)\rightarrow\alpha\rightarrow[\alpha]\rightarrow[\alpha] \\
+& \equiv \text{\tt\{$f$($x$,$a$[0]), $f$($f$($x$,$a$[0]),$v$[1]),\ldots\}}
+\end{align*}
+\begin{align*}
+\text{\tt redomap($f_{r}$,$f_{m}$,$x$,$v$)}
+& :: (\alpha\rightarrow\alpha\rightarrow\alpha)\rightarrow(\alpha\rightarrow\beta\rightarrow\alpha)\\
+& \quad\rightarrow\alpha\rightarrow[\beta]\rightarrow\alpha \\
+& \equiv \text{\tt reduce($l_{r}$, $x$, map($l_{m}$, $v$))}
+\end{align*}
 In particular, note that {\tt scan} is an inclusive prefix scan.
 
 The semantics of {\tt redomap}:\\
@@ -483,7 +488,7 @@ Redomap is complicated for Reasons. (FIXME)
 \label{sec:shimming}
 
 As a notational convenience, \LO{} will automatically unwrap tuples
-passed to functions in SOACs.  Precisely, if a function expects
+passed to functions in {\sc soac}s.  Precisely, if a function expects
 arguments $(t_{1},\ldots,t_{n})$, and is called with a single argument
 of type $(t_{1},\ldots,t_{n})$ (that is, a tuple containing the exact
 same types as expected by the function), \LO{} will automatically
@@ -507,7 +512,7 @@ perform this check, \LO{} uses an extension to the type system in the
 form of {\em uniqueness attributes} inspired by
 Clean~\cite{clean-uniqueness-types} and Rust~\cite{rust}, as well as
 aliasing analysis.  We extend the syntax for array types to permit a
-prefix asterisk, as seen in figure \ref{fig:uniqueness-types},
+prefix asterisk, as seen in Figure~\ref{fig:uniqueness-types},
 denoting a unique array.
 
 \begin{figure}[bt]
@@ -565,21 +570,21 @@ at a finer granularity than whole arrays --- after {\tt let a = b[0]},
 {\tt a} aliases all of {\tt b}, not just its first row.
 
 \subsection{Compiler pipeline}
-\label{sec:enabling-optimisations}
+\label{sec:compiler-pipeline}
 
 The compilation pipeline in the current \LO{} compiler is outlined on
-figure \ref{fig:l0cpipeline}.  Type checking is done on the original
+Figure~\ref{fig:l0cpipeline}.  Type checking is done on the original
 program, to ensure that any error messages refer to the names written
 by the programmer, but all subsequent stages consume and produce
 programs in which names are distinct.  To begin with, we run a
 transformation that converts most uses of tuples to a simpler form,
-described in more detail in section \ref{sec:tuple-transformation}.
+described in more detail in Section~\ref{sec:tuple-transformation}.
 After this comes let- and tuple-normalisation, where the program is
 transformed in such a way that the only direct operands to functions,
-SOACs and operators are variables, and that every tuple-pattern is
-fully expanded to cover all elements of the tuple value to be matched.
-One notable property of the resulting program is that no variable is
-ever bound to a tuple.
+{\sc soac}s and operators are variables, and that every tuple-pattern
+is fully expanded to cover all elements of the tuple value to be
+matched.  One notable property of the resulting program is that no
+variable is ever bound to a tuple.
 
 The enabling optimisations loop consists of
 \begin{enumerate}
@@ -587,17 +592,53 @@ The enabling optimisations loop consists of
 \item performing copy- and constant-propagation, and
 \item removing dead code,
 \end{enumerate}
-which is repeated until a fixed point is reached.  After loop fusion,
-the enabling optimisations stage is repeated, as fusion will often
-produce code amenable to copy propagation.
+which is repeated until a fixed point is reached.  We also plan to add
+common-subexpression-elimination and loop hoisting.  After loop
+fusion, the enabling optimisations stage is repeated, as fusion will
+often produce code amenable to copy propagation.  By the time the
+program enters the enabling optimisations loop, and for the rest of
+the compilation pipeline, the following properties hold for the
+program:
+
+\begin{itemize}
+\item No tuple type can appear in an array or tuple type, i.e., flat tuples,
+\item {\tt unzip} has been eliminated, {\tt zip} has been
+  replaced with {\tt assertZip}, which verifies either
+  statically or at runtime that the outer size of {\tt zip}'s
+  input matches, and finally, the original {\sc soac}s ({\tt map})
+  have been replaced with their tuple-of-array version ({\tt map2}),
+\item tuple expressions can appear only as the final result of
+  a function, {\sc soac}, or {\tt if} expression, and similarly
+  for the tuple pattern of a let binding, e.g., a formal argument
+  cannot be a tuple,
+\item %consecutive {\tt let} expressions are at the same nesting level, e.g.,
+  $e_1$ cannot be a {\tt let} expression when used 
+  in {\tt let~$p$~=~$e_1$~in~$e_2$},
+\item each {\tt if} is bound to a corresponding {\tt let} expression, and an
+  {\tt if}'s condition cannot be in itself an {\tt if} expression, e.g.,
+  {\tt a~+~if(~if~c$_1$~then~$e_1$~else~$e_2$~)~then~$e_3$~else~$e_4$} $\rightarrow$
+  {\tt let~c$_2$~=~if~c$_1$~then~$e_1$~else~$e_2$~in}\\
+  {\tt let~b~~=~if~c$_2$~then~$e_3$~else~$e_4$~in~a+b}
+  % e.g., {\tt let~x~=~if~cond~then $e_1$~else~$e_2$},
+  % and also {\tt cond} cannot be an {\tt if} expression,
+  % cannot appear in the condition of another {\tt if},
+\item function calls, including {\sc soac}s, have their own let binding,
+  e.g., {\tt reduce2(f,a)~+~x} $\Rightarrow$
+  {\tt let~y~=~reduce2(f,e,a)~in~y+x},
+\item all actual arguments are vars,
+  e.g., {\tt f(a+b)}$\Rightarrow${\tt let~x=a+b~in~f(x)}.
+\end{itemize}
+
+The first three properties are ensured by the tuple transformation
+step, while the latter three are due to normalisation.
 
 \subsubsection{Tuple transformation}
 \label{sec:tuple-transformation}
 
-The tuple-transformation stage flattens all tuples (i.e, {\tt
-  (x,(y,z))} becomes {\tt (x,y,z)}), and converts arrays of tuples to
-tuples of arrays.  Arrays of tuples are in a sense merely syntactic
-sugar for tuples of arrays; the type {\tt [(int, real)]} is
+As mentioned above, the tuple-transformation stage flattens all tuples
+(i.e, {\tt (x,(y,z))} becomes {\tt (x,y,z)}), and converts arrays of
+tuples to tuples of arrays.  Arrays of tuples are in a sense merely
+syntactic sugar for tuples of arrays; the type {\tt [(int, real)]} is
 transformed to {\tt ([int], [real])} during the compilation process,
 and all code interacting with arrays of tuples is likewise
 transformed.  In most cases, this is fully transparent, but there are
@@ -622,12 +663,12 @@ arrays, we must look at the \textit{transformed} values - in a sense,
 the fullness requirement ``transcends'' the tuples.  Also, after
 tuple-transformation, {\tt zip} and {\tt unzip} disappear.
 
-After tuple transformation, the previously described SOACs are no
-longer usable, as they each accept only a single input array.  Hence,
-we introduce matching tuple-SOACs, that any number of input arrays,
-and whose return value is likewise a tuple if applicable.  Their
-syntax can be seen in figure \ref{fig:tuple-soacs}, and their
-semantics are as follows.
+After tuple transformation, the previously described {\sc soac}s are
+no longer usable, as they each accept only a single input array.
+Hence, we introduce matching tuple-{\sc soac}s, that any number of
+input arrays, and whose return value is likewise a tuple if
+applicable.  Their syntax can be seen in
+Figure~\ref{fig:tuple-soacs}, and their semantics are as follows.
 \begin{align*}
   \text{\tt map2} &:: (\alpha_{1}\rightarrow\ldots\rightarrow\alpha_{n})\rightarrow(\beta_{1},\ldots,\beta_{m}))\\
 &\rightarrow[\alpha_{1}]\rightarrow\ldots\rightarrow[\alpha_{n}]\rightarrow([\beta_{1}],\ldots,[\beta_{m}]))
@@ -643,12 +684,12 @@ semantics are as follows.
   \text{\tt reduce2($f$,$x$,$e_{1}$,\ldots,$e_{n}$)} &\equiv \text{\tt reduce($f'$,$x$,zip($e_{1}$,\ldots,$e_{n}$))}
 \end{align*}
 
-The remaining SOACs are similar.  $f'$ refers to $f$ rewritten to to
+The remaining {\sc soac}s are similar.  $f'$ refers to $f$ rewritten to to
 accept tuple elements as distinct arguments.  For simplicity, the
 above semantics always describe the return value as a tuple.  In
 practice, if this would be a one-element tuple (which is not permitted
 in \LO), we use the element by itself.  The array-arguments to a
-tuple-SOAC must all be of the same length.
+tuple-{\sc soac} must all be of the same length.
 
 \begin{figure}[bt]
 \begin{tabular}{lrll}
@@ -705,40 +746,10 @@ fun real main([real] a) =
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Fusion: A Structural-Analysis Transformation}
 
-The fusion transformation, presented in this section, assumes a
-{\em normalized} program, i.e., by running the enabling
-transformations introduced in Section~\ref{sec:Prelim}.   
-%In essence, this means that:
-Main properties are:
-\begin{itemize}
-    \item no tuple type can appear in an array or tuple type, i.e., flat tuples,
-    \item {\tt unzip} has been eliminated, {\tt zip} has been
-            replaced with {\tt assertZip}, which verifies either 
-            statically or at runtime that the outer size of {\tt zip}'s 
-            input matches, and finally, the original {\sc soac}s ({\tt map})
-            have been replaced with their tuple-of-array version ({\tt map2}),
-    \item tuple expressions can appear only as the final result of 
-            a function, {\sc soac}, or {\tt if} expression, and similarly 
-            for the tuple pattern of a let binding, e.g., a formal argument
-            cannot be a tuple,
-    \item %consecutive {\tt let} expressions are at the same nesting level, e.g., 
-            $e_1$ cannot be a {\tt let} expression when used 
-            in {\tt let~$p$~=~$e_1$~in~$e_2$},
-    \item each {\tt if} is binded to a corresponding {\tt let} expression, and an 
-            {\tt if}'s condition cannot be in itself an {\tt if} expression, e.g.,
-            {\tt a~+~if(~if~c$_1$~then~$e_1$~else~$e_2$~)~then~$e_3$~else~$e_4$} $\rightarrow$
-            {\tt let~c$_2$~=~if~c$_1$~then~$e_1$~else~$e_2$~in}\\ 
-            {\tt let~b~~=~if~c$_2$~then~$e_3$~else~$e_4$~in~a+b}  
-            %e.g., {\tt let~x~=~if~cond~then $e_1$~else~$e_2$}, 
-            %and also {\tt cond} cannot be an {\tt if} expression,
-            %cannot appear in the condition of another {\tt if},
-    \item function calls, including {\sc soac}s, have their own let binding,
-            e.g., {\tt reduce2(f,a)~+~x} $\Rightarrow$
-            {\tt let~y~=~reduce2(f,e,a)~in~y+x},
-    \item all actual arguments are vars, 
-            e.g., {\tt f(a+b)}$\Rightarrow${\tt let~x=a+b~in~f(x)}.
-\end{itemize}
-
+The fusion transformation, presented in this section, assumes a {\em
+  normalized} program, i.e., by running the transformations introduced
+in Section~\ref{sec:Prelim} to obtain the properties listed in
+Section~\ref{sec:compiler-pipeline}
 
 \begin{figure}[bt]
 %\hrule ~
