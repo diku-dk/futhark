@@ -1804,6 +1804,15 @@ of the computation, and would be unable to cope with limitations in
 the presence of in-place array updates, and whether the result of an
 array operation is used multiple times.
 
+Accelerate~\cite{mcdonell2013optimising} uses an elaboration of the
+delayed arrays representation from Repa, and in particular manages to
+avoid duplicating work.  All array operations have a uniform
+representation as constructors for delayed arrays, on which fusion is
+performed by tree contraction.  Accelerate supports multiple arrays as
+input to the same array operation (using a {\tt zipWith} construct),
+although it's unclear how it's handled if the output of an array
+operation is used as input to multiple other array operations.
+
 Discuss fusion in REPA, DPH, Accelerate, Haskell, Obsidian, etc.
 
 \section{Conclusions and Future Work}
