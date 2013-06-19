@@ -1787,6 +1787,14 @@ function, which is forbidden in \LO{}.  We have found that this
 greatly simplifies analysis, and allows it to be fully
 intraprocedural.
 
+The Repa~\cite{keller2010regular} approach to fusion is based on a
+delayed representation of arrays, which models an array as a function
+from index to value.  With this representation, fusion happens
+automatically through function composition, although this can cause
+duplication of work in many cases.  To counteract this, Repa lets the
+user to {\em force} an array, by which it is converted from the
+delayed representation to a traditional sequence of values.
+
 Discuss fusion in REPA, DPH, Accelerate, Haskell, Obsidian, etc.
 
 \section{Conclusions and Future Work}
