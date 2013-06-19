@@ -1590,8 +1590,20 @@ removes the {\sc soac}s that have been already fused.
 
 
 
-\section{Fusion Hindrances \& Possible Extensions}
+\section{Discussion \& Possible Extensions \& Statistics}
 \label{sec:Discuss}
+
+This section is structured as follows:
+Section~\ref{sec:inhibitors} discusses how to
+solve certain cases where fusion is inhibited due to calls
+to some of the built in functions such as {\tt size}, {\tt split}, etc.
+Section~\ref{sec:extensions} presents two other code transformations
+aimed at optimizing uses of {\tt scan2} and {\tt reduce2}.
+Section~\ref{sec:results} shows fusion-related statistics
+from five benchmarks, which were gathered by compiler instrumentation.
+
+\subsection{Fusion Hindrances}
+\label{sec:inhibitors}
 
 We have seen that the structural analysis presented in the previous section
 may allow fusion even when a variable is used as (an) input (array) to several
@@ -1624,18 +1636,8 @@ with the kernels that use, for example, the argument of {\tt size}
 as input, and by performing the necessary translations, e.g., 
 {\tt size(x) $\Rightarrow$ size(a)}, at the time when {\tt x} is fused.
 
-%We have extended our fusion analysis to overcome such cases by 
-%associating calls to {\tt size} (and {\tt assertZip}) with the 
-%kernels who use the argument of {\tt size} as input, and by
-%performing the translation {\tt size(x) $\Rightarrow$ size(a)} 
-%at the time when {\tt x} is fused.
-
-\begin{itemize}
-    \item Discuss hindrances for fusion: {\tt assertZip}, {\tt size} 
-    \item Discuss hindrances to fusion and how they can be resolved,
-            i.e., split, transpose, reshape, flatten, etc. 
-\end{itemize}
-
+\subsection{Possible Extensions: \textsc{Iswim}/\textsc{Irwim} and \textsc{RedFlat}}
+\label{sec:extensions}
 
 \begin{figure}[bt]
 %\hrule ~
@@ -1650,17 +1652,17 @@ scan2( fn [real] ([real] x, [real] y) => map2(op +, x, y),
 transpose( map2 (fn [real] ([real] x)=>scan2(op +,0.0,x)
                 , transpose(a) )
 
-// \emp{Generalization for Transpose}: 
-transpose :: (\mymath{{\tt Int}}, \mymath{{\tt Int}}, [\mymath{\myindx{1}}[\mymath{\myindx{..q}}\mymath{\alpha}]]) \mymath{\rightarrow} [\mymath{\myindx{1}}[\mymath{\myindx{..q}}\mymath{\alpha}]]
-b=transpose(k,n,a) \mymath{\Rightarrow} a[i\mymath{\myindx{1}},..,i\mymath{\myindx{k}},i\mymath{\myindx{k+1}},..,i\mymath{\myindx{k+n}},..,i\mymath{\myindx{q}}] \emphh{\mymath{\equiv}}
-                      b[i\mymath{\myindx{1}},..,i\mymath{\myindx{k+1}},..,i\mymath{\myindx{k+n}},i\mymath{\myindx{k}},..,i\mymath{\myindx{q}}] 
-
-// \emp{Generalization for Nested Map2s (similar for redomap2)}
+// \emp{Generalization for Nested Map2 (similar for reduce2)}
 map2\mymath{\myindu{1}}(f, a\mymath{\myindx{1}},.., a\mymath{\myindx{k}}) \emphh{\mymath{\equiv}} map2(g, a\mymath{\myindx{1}},.., a\mymath{\myindx{k}})
 map2\mymath{\myindu{n}}(f, a\mymath{\myindx{1}},.., a\mymath{\myindx{k}}) \emphh{\mymath{\equiv}} 
 map2(fn ([\mymath{\beta\myindx{1}}],..,[\mymath{\beta\myindx{t}}]) ([\mymath{\alpha\myindx{1}}] x\mymath{\myindx{1}},..,[\mymath{\alpha\myindx{k}}] x\mymath{\myindx{k}}) => 
         map2\mymath{\myindu{n-1}}(f, x\mymath{\myindx{1}},.., x\mymath{\myindx{k}})
     , a\mymath{\myindx{1}},.., a\mymath{\myindx{k}} )
+
+// \emp{Generalization for Transpose}: 
+transpose :: (\mymath{{\tt Int}}, \mymath{{\tt Int}}, [\mymath{\myindx{1}}[\mymath{\myindx{..q}}\mymath{\alpha}]]) \mymath{\rightarrow} [\mymath{\myindx{1}}[\mymath{\myindx{..q}}\mymath{\alpha}]]
+b=transpose(k,n,a) \mymath{\Rightarrow} a[i\mymath{\myindx{1}},..,i\mymath{\myindx{k}},i\mymath{\myindx{k+1}},..,i\mymath{\myindx{k+n}},..,i\mymath{\myindx{q}}] \emphh{\mymath{\equiv}}
+                      b[i\mymath{\myindx{1}},..,i\mymath{\myindx{k+1}},..,i\mymath{\myindx{k+n}},i\mymath{\myindx{k}},..,i\mymath{\myindx{q}}] 
 
 // \emp{Fusing Across Transpose (Similar for Reshape/Flatten)}:
 let x=map2\mymath{\myindu{n}}(f,a) in let y=transpose(1,n-k,x) in map2\mymath{\myindu{n}}(g,y)
@@ -1673,19 +1675,62 @@ map2\mymath{\myindu{n}}(g o f, transpose(1,n-k,a) )
 \label{fig:TransfEg}
 \end{figure}
 
+The fusion algebra for {\tt reduce2} and {\tt scan2} is relatively poor,
+for example {\tt scan2} is not fused at all, while {\tt reduce2} just
+starts a new kernel that, under fusion, becomes {\tt redomap2}.
+This section presents three high-level transformations, named
+\textsc{Iswim}, \textsc{Irwim} and \textsc{RedFlat}, that have 
+{\tt scan2} and {\tt reduce2} as principal actors, and may either
+enable fusion or be enabled by fusion or both.
+
+The top part of Figure~\ref{fig:TransfEg} shows the intuitive idea
+behind \textsc{Iswim}: a {\tt scan} operation on a matrix in which
+the binary associative operator is {\tt (zipWith $\odot$)} has the
+same semantics as transposing the matrix, mapping each of the rows,
+i.e., former columns, with {\tt (scan $\odot$)} and transposing back
+the result. A similar result can be derived for {\tt reduce}.
+
+In principal, this transformation interchanges the {\tt scan}/{\tt reduce}
+with the inner {\tt map}, hence \textsc{Iswim}/\textsc{Irwim}, to the result
+that the transformed code can be executed as a segmented scan~\cite{segScan},
+i.e., exploiting both level of parallelism, rather than choosing between
+the parallel {\tt scan} and the parallel {\tt map}. Furthermore, pushing
+the least parallel construct, i.e., {\tt scan}, at the innermost position 
+might reveal a deeper {\tt map}-nest, e.g., if the original {\tt scan} was 
+inner to a {\tt map}, thus increasing significantly the depth-one 
+parallelism degree.   
+Furthermore, if the created {\tt map} nest exhibits enough parallelism, 
+then the {\tt scan} can be executed sequentially rather than in parallel. %(otherwise parallel execution).
+
+The middle part of Figure~\ref{fig:TransfEg} shows several useful 
+extensions to our algebra: {\tt map2$^n$}, defined inductively, is
+simply a $n$-level perfect nest of {\tt map2}s.   The {\tt transpose} 
+operator receives as arguments the dimension (number) to be transposed, {\tt k}, 
+the new position of that dimension, {\tt n}, and the multidimensional array.
+The index-changing result is that all dimensions between {\tt k+1} and {\tt n}
+are shifted left by~$1$.   
+
+The bottom part of Figure~\ref{fig:TransfEg} shows that fusion can operate 
+across {\tt transpose} via a transformation similar to the one discussed
+in Section~\ref{sec:inhibitors}. One can observe that \textsc{Iswim} is
+both (i) a fusion enabler, i.e., interchanging the {\tt scan} with the {\tt map}
+may create fusion opportunities, and (ii) a beneficiary from fusion,
+i.e., the perfect map nest may be created by fusion. 
+
+
 \begin{figure}[bt]
 %\hrule ~
 \vbox{
 \begin{colorcode}
 // \emp{Arbitrary-Nested-Level Generalization of ISWIM}
-// \emp{similar for Interchange Reduce with Inner Maps(IRWIM)}
+// \emp{similarly Interchange Reduce with Inner Maps (IRWIM)}
 \emp{scan2}( fn ( [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{1}}]],    .., [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{k}}]] ) 
           ( [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{1}}]] x\mymath{\myindu{1}\myindx{1}}, .., [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{k}}]] x\mymath{\myindu{1}\myindx{k}},
             [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{1}}]] x\mymath{\myindu{2}\myindx{1}}, .., [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{k}}]] x\mymath{\myindu{2}\myindx{k}} ) => 
                 \emphh{map2}\mymath{\myindu{n}}(\mymath{\oplus}, x\mymath{\myindu{1}\myindx{1}},.., x\mymath{\myindu{1}\myindx{k}}, x\mymath{\myindu{2}\myindx{1}},.., x\mymath{\myindu{2}\myindx{k}}) 
      , (ne\mymath{\myindx{1}}, ..., ne\mymath{\myindx{k}}), a\mymath{\myindx{1}}, ..., a\mymath{\myindx{k}} 
      )             \emphh{\mymath{\equiv}} 
-let (.., re\mymath{\myindx{t}}, ..) = (.., map\mymath{\myindu{n}}( replicate(1), ne\mymath{\myindx{t}} ), ..)
+let (.., re\mymath{\myindx{t}}, ..) = (.., map\mymath{\myindu{n}}( replicate(s), ne\mymath{\myindx{t}} ), ..)
 // replicate dim n of neutral elems so map2 sizes match
 let ( y\mymath{\myindx{1}},.., y\mymath{\myindx{k}} ) =
   \emphh{map2} (fn ( [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{1}}]],    .., [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{k}}]] ) 
@@ -1693,34 +1738,61 @@ let ( y\mymath{\myindx{1}},.., y\mymath{\myindx{k}} ) =
           \emphh{map2}\mymath{\myindu{n-1}}( fn ([\mymath{\myindx{1}}[\mymath{\myindx{..n-1}}\mymath{\alpha\myindx{1}}]],  .., [\mymath{\myindx{1}}[\mymath{\myindx{..n-1}}\mymath{\alpha\myindx{k}}]] )  
                       ([\mymath{\myindx{1}}[\mymath{\myindx{..n-1}}\mymath{\alpha\myindx{1}}]] e\mymath{\myindx{1}},..,[\mymath{\myindx{1}}[\mymath{\myindx{..n-1}}\mymath{\alpha\myindx{k}}]] e\mymath{\myindx{k}}, 
                        [\mymath{\myindx{1}}[\mymath{\myindx{..n-1}}\mymath{\alpha\myindx{1}}]] x\mymath{\myindx{1}},..,[\mymath{\myindx{1}}[\mymath{\myindx{..n-1}}\mymath{\alpha\myindx{k}}]] x\mymath{\myindx{k}})
-                     =>\emp{scan2}(\mymath{\oplus},(e\mymath{\myindx{1}}[0],..,e\mymath{\myindx{k}}[0]),x\mymath{\myindx{1}},..,x\mymath{\myindx{k}})
+                     =>\emp{scan2}(\mymath{\oplus}, e\mymath{\myindx{1}}[0],..,e\mymath{\myindx{k}}[0], x\mymath{\myindx{1}},..,x\mymath{\myindx{k}})
                  , re\mymath{\myindx{1}}, ..., re\mymath{\myindx{k}}, x\mymath{\myindx{1}}, .., x\mymath{\myindx{k}} )
        , transpose(1,n,a\mymath{\myindx{1}}), .., transpose(1,n,a\mymath{\myindx{k}}) )
 in (transpose(n, q\mymath{\myindx{1}}-n, y\mymath{\myindx{1}}), ..., transpose(n, q\mymath{\myindx{k}}-n, y\mymath{\myindx{k}}))
 // transpose back the result; q\mymath{\myindx{t}}-n is the dimension of \mymath{\alpha\myindx{t}}
 
-// \emp{A Well-Known Transformation: Reduce Flattening}
+// \emp{Reduce Flattening Transformation (RedFlat)}
 y = redomap2\mymath{\myindu{n}} ( \mymath{\oplus} 
                , fn (\mymath{\alpha\myindx{1}},..,\mymath{\alpha\myindx{k}}) ( \mymath{\alpha\myindx{1}} e\mymath{\myindx{1}},..,  \mymath{\alpha\myindx{k}} e\mymath{\myindx{k}},
                                 [\mymath{\alpha\myindx{1}}] x\mymath{\myindx{1}},..,[\mymath{\alpha\myindx{k}}] x\mymath{\myindx{k}} ) => 
-                     reduce(\mymath{\oplus}, (e\mymath{\myindx{1}},..,e\mymath{\myindx{k}}), x\mymath{\myindx{1}},..,x\mymath{\myindx{k}})
-               , (e\mymath{\myindx{1}},..,e\mymath{\myindx{k}}), a\mymath{\myindx{1}},..,a\mymath{\myindx{k}} )
+                     reduce(\mymath{\oplus}, e\mymath{\myindx{1}},..,e\mymath{\myindx{k}}, x\mymath{\myindx{1}},..,x\mymath{\myindx{k}})
+               , e\mymath{\myindx{1}},..,e\mymath{\myindx{k}}, a\mymath{\myindx{1}},..,a\mymath{\myindx{k}} )
         \emphh{\mymath{\equiv}}
 reduce2(\mymath{\oplus}, (e\mymath{\myindx{1}},..,e\mymath{\myindx{k}}), flatten(n, a\mymath{\myindx{1}}),.., flatten(n, a\mymath{\myindx{k}}))
 // flatten(n,a) flattens the first n dims of array a;
 \end{colorcode}
 } \vspace{-2ex}
-\caption{{\sc iswim}'s Formalization \& Reduce Flattening Transform.}
+\caption{\textsc{Iswim} Formalization \& Reduce Flattening Transform.}
 \label{fig:TransfGen}
 \end{figure}
 
-%let (re\mymath{\myindx{1}},..,re\mymath{\myindx{k}} ) = map\mymath{\myindu{n}}( replicate(1), ne\mymath{\myindx{1}},.., ne\mymath{\myindx{k}} )
+The top part of Figure~\ref{fig:TransfGen} shows the generalization
+for \textsc{Iswim} (\textsc{Irwim}) for a depth-{\tt n} map nest.   
+The differences are that (i) an extra {\tt n$^{th}$} dimension is 
+created for each neutral element, in order to match the input-array 
+sizes for the {\tt map},  and (ii) the two-ways use of the generalized 
+{\tt transpose} for bringing the first dimension to position {\tt n}
+and back again. We remark that the extra {\tt replicate} can be compiled
+away by a refinement of the copy-propagation transformation 
+(this refinement is already supported by our compiler).
 
-%  ([\mymath{\alpha\myindx{1}}] x\mymath{\myindx{1}},..,[\mymath{\alpha\myindx{k}}] x\mymath{\myindx{k}})
+The second transformation, named \textsc{RedFlat} and depicted in the 
+bottom-part of Figure~\ref{fig:TransfGen}, relies on the well-known equivalence:
+\begin{colorcode}
+let x = map2(fn [real] ([[real]] x))  \emphh{\mymath{\equiv}}
+              => reduce2(op +, 0.0, x)   reduce2( op +, 
+            , a) in                               0.0,
+reduce2(op +, 0.0, x)                      flatten(2, a))
+\end{colorcode}
+\noindent which says that a map that reduces each of the input-array 
+elements, followed by a reduce with the same operator (and neutral element)
+has the semantics of reducing the original array in which the first two 
+dimensions have been flattened. 
+Similarly to \textsc{Iswim}, \textsc{RedFlat} both enables and is enabled 
+by fusion. We plan to extend the fusion analysis to incorporate both 
+transformations.
 
-% Note that transpose(i+n, q-n, transpose(i, n, a)) == a
-
-
+We remark that all transformations presented in this paper, i.e., fusion, 
+\textsc{Iswim}/\textsc{Irwim}, \textsc{RedFlat}, are the result of the
+rich algebra exposed by the second-order array combinators, and they require
+a difficult implementation in an imperative context.   For example, 
+\textsc{Iswim} interchanges an inner parallel loop ({\tt map}) outwards across
+a sequential loop ({\tt reduce}). The fact that the inner loop is parallel
+is not in general sufficient to guarantee correctness, albeit a parallel 
+loop can always be interchanged inwards.  
 
 \subsection{Fusion Statistics}
 \label{sec:results}
