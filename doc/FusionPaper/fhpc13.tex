@@ -627,18 +627,18 @@ variable is ever bound to a tuple.
 
 The enabling optimisations loop consists of
 \begin{enumerate}
-\item aggressive inlining by creating a call-graph for the program,
-  then inlining any non-recursive function,
-\item performing copy-propagation and constant-folding, and
-\item removing dead code,
+\item aggressive inlining, i.e., building the program call-graph
+  and inlining its leafs to a fix point (inlines all non-recursive functions),
+    %then inlining any non-recursive function,
+\item performing copy/constant propagation and constant folding,
+\item dead code and function elimination,
 \end{enumerate}
 which is repeated until a fixed point is reached.  We also plan to add
-common-subexpression-elimination and loop hoisting.  After loop
+common-subexpression elimination and loop hoisting.  After loop
 fusion, the enabling optimisations stage is repeated, as fusion will
 often produce code amenable to copy-propagation.  By the time the
 program enters the enabling optimisations loop, and for the rest of
-the compilation pipeline, the following properties hold for the
-program:
+the compilation pipeline, the following program properties hold:
 
 \begin{itemize}
 \item No tuple type can appear in an array or tuple type, i.e., flat tuples,
@@ -705,10 +705,13 @@ tuple-transformation, {\tt zip} and {\tt unzip} disappear.
 
 After tuple transformation, the previously described {\sc soac}s are
 no longer usable, as they each accept only a single input array.
-Hence, we introduce matching tuple-{\sc soac}s, that any number of
-input arrays, and whose return value is likewise a tuple if
-applicable.  Their syntax can be seen in
-Figure~\ref{fig:tuple-soacs}, and their semantics are as follows.
+Hence, we introduce matching tuple-{\sc soac}s, which accept as input
+an arbitrary number of arrays, and likewise their result is
+a tuple.
+%any number of input arrays, and whose return value is likewise a tuple if
+%applicable.  
+Their syntax is depicted in Figure~\ref{fig:tuple-soacs}, 
+and their semantics is: % as below:
 \begin{align*}
   \text{\tt map2} &:: (\alpha_{1}\rightarrow\ldots\rightarrow\alpha_{n})\rightarrow(\beta_{1},\ldots,\beta_{m}))\\
 &\rightarrow[\alpha_{1}]\rightarrow\ldots\rightarrow[\alpha_{n}]\rightarrow([\beta_{1}],\ldots,[\beta_{m}]))
@@ -723,13 +726,15 @@ Figure~\ref{fig:tuple-soacs}, and their semantics are as follows.
 \begin{align*}
   \text{\tt reduce2($f$,$x$,$e_{1}$,\ldots,$e_{n}$)} &\equiv \text{\tt reduce($f'$,$x$,zip($e_{1}$,\ldots,$e_{n}$))}
 \end{align*}
-
-The remaining {\sc soac}s are similar.  $f'$ refers to $f$ rewritten to to
-accept tuple elements as distinct arguments.  For simplicity, the
+\noindent where $f'$ has the tuple-transformed body of $f$ and the arguments
+of $f$ have been rewritten such that an original argument of tuple type is
+expanded into distinct arguments.
+%to accept tuple elements as distinct arguments.
+The remaining {\sc soac}s are similar.    For simplicity, the
 above semantics always describe the return value as a tuple.  In
 practice, if this would be a one-element tuple (which is not permitted
 in \LO), we use the element by itself.  The array-arguments to a
-tuple-{\sc soac} must all be of the same length.
+tuple-{\sc soac} must all have the same length.
 
 \begin{figure}[bt]
 \begin{tabular}{lrll}
