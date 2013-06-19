@@ -1793,7 +1793,9 @@ from index to value.  With this representation, fusion happens
 automatically through function composition, although this can cause
 duplication of work in many cases.  To counteract this, Repa lets the
 user to {\em force} an array, by which it is converted from the
-delayed representation to a traditional sequence of values.
+delayed representation to a traditional sequence of values.  The pull
+arrays of Obsidian~\cite{claessen2012expressive} use a similar
+mechanism.
 
 Data-Parallel Haskell (DPH) ~\cite{chakravarty2007data} makes use of
 rewrite rules to perform fusion, including expressing array operations
@@ -1802,7 +1804,9 @@ been shown to be easily fusable.  While DPH obtains good results,
 rewrite rules are quite limited -- they are an inherently local view
 of the computation, and would be unable to cope with limitations in
 the presence of in-place array updates, and whether the result of an
-array operation is used multiple times.
+array operation is used multiple times.  The Glasgow Haskell Compiler
+itself also bases its list fusion on rewrite
+rules~\cite{jones2001playing}.
 
 Accelerate~\cite{mcdonell2013optimising} uses an elaboration of the
 delayed arrays representation from Repa, and in particular manages to
