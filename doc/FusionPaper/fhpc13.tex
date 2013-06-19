@@ -914,8 +914,8 @@ The top-right part of Figure~\ref{fig:T1T2} shows in blue the (optimized)
 result of the first fusion, where the copy statements have been eliminated 
 by copy propagation.   In the new graph, the leftmost child of the root, 
 i.e., the one computing {\tt (z1,z2)}, has only one incoming edge 
-and can be fused.  The resulted graph, shown in the bottom-right Figure
-can be fused again resulting in the bottom-left graph of Figure~\ref{fig:T1T2}.
+and can be fused.  The resulted graph, shown in the bottom-left Figure
+can be fused again resulting in the bottom-right graph of Figure~\ref{fig:T1T2}.
 At this point no further {\tt T}$_2$ reduction is possible because
 the {\sc soac} computing {\tt x1} has two incoming edges. 
 %
@@ -1580,8 +1580,9 @@ statements whose output arrays are keys in {\tt outArr} with the fused
 created opportunities for fusion at an inner level, each lambda 
 corresponding to a fused {\sc soac} is (i) first cleaned-up by running the
 enabling optimizations, and (ii) then the two passes are re-run on the
-lambda's body.   Finally, at the very end, dead-code elimination is
-applied to eliminate from the program the fused {\sc soac}s. 
+lambda's body.   Finally, at the very end, the enabling optimizations
+are applied to clean up the whole program, e.g., dead-code elimination 
+removes the {\sc soac}s that have been already fused. 
  
 
 %\subsection{Replacing the Fused Kernels \& Fusion Driver}
@@ -1589,13 +1590,48 @@ applied to eliminate from the program the fused {\sc soac}s.
 
 
 
-\section{Limitations and Possible Extensions}
+\section{Fusion Hindrances \& Possible Extensions}
 \label{sec:Discuss}
 
+We have seen that the structural analysis presented in the previous section
+may allow fusion even when a variable is used as (an) input (array) to several
+second-order array combinators ({\sc soac}), such as {\tt map2}, {\tt reduce2}.
+However, often enough, fusion is impeded by a {\sc soac} input array being
+used as argument to built-in functions such as {\tt split}, {\tt transpose},
+{\tt size}, {\tt assertZip}s\footnote{
+{\tt assertZip} checks that all (array) arguments have the same outer size 
+and is produced by the array-of-tuple transformation when a {\tt zip} is
+eliminated.
+}, etc.   For example,
+\begin{colorcode}
+let \emphh{x} = map2(f, a)      in    let n = size(a)/2      in
+let n = size(\emp{x})/2       in    let (a\mymath{\myindx{1}},a\mymath{\myindx{2}})=split(n,a) in 
+let (\emphh{x\mymath{\myindx{1}}},\emphh{x\mymath{\myindx{2}}})=split(n,\emp{x})  in \mymath{\Rightarrow} let \emphh{x\mymath{\myindx{1}}} = map2(f, a\mymath{\myindx{1}})   in
+let y = reduce2(g,\emphh{x\mymath{\myindx{1}}},\emphh{x\mymath{\myindx{2}}})..    let \emphh{x\mymath{\myindx{2}}} = map2(f, a\mymath{\myindx{2}})   in
+                              let y = reduce2(g,\emphh{x\mymath{\myindx{1}}},\emphh{x\mymath{\myindx{2}}})..
+\end{colorcode}
+the use of {\tt x} in {\tt size} and {\tt split} in the righthand-side code 
+would inhibit fusion.
+The code on the left side suggests that a possible solution is to propagate 
+the inhibitors as far up in the program as possible, e.g., {\tt a} and {\tt x} 
+are the input and result of a {\tt map2}, therefore they must have the same 
+(outermost) size. Now {\tt x$_1$} and {\tt x$_2$} can be fused inside the 
+{\tt map2} producer of {\tt y}.
+
+To overcome such cases, we have extended our analysis to associate
+call statements of inhibitor functions (for now {\tt size} and {\tt assertZip})
+with the kernels that use, for example, the argument of {\tt size} 
+as input, and by performing the necessary translations, e.g., 
+{\tt size(x) $\Rightarrow$ size(a)}, at the time when {\tt x} is fused.
+
+%We have extended our fusion analysis to overcome such cases by 
+%associating calls to {\tt size} (and {\tt assertZip}) with the 
+%kernels who use the argument of {\tt size} as input, and by
+%performing the translation {\tt size(x) $\Rightarrow$ size(a)} 
+%at the time when {\tt x} is fused.
+
 \begin{itemize}
-    \item Discuss algorithm complexity
-    \item Discuss semantics of {\tt zip} w.r.t. fusion. Show examples that
-            demonstrate that both cases are fusable.
+    \item Discuss hindrances for fusion: {\tt assertZip}, {\tt size} 
     \item Discuss hindrances to fusion and how they can be resolved,
             i.e., split, transpose, reshape, flatten, etc. 
 \end{itemize}
@@ -1618,7 +1654,8 @@ transpose( map2 (fn [real] ([real] x)=>scan2(op +,0.0,x)
 transpose :: (\mymath{{\tt Int}}, \mymath{{\tt Int}}, [\mymath{\myindx{1}}[\mymath{\myindx{..q}}\mymath{\alpha}]]) \mymath{\rightarrow} [\mymath{\myindx{1}}[\mymath{\myindx{..q}}\mymath{\alpha}]]
 b=transpose(k,n,a) \mymath{\Rightarrow} a[i\mymath{\myindx{1}},..,i\mymath{\myindx{k}},i\mymath{\myindx{k+1}},..,i\mymath{\myindx{k+n}},..,i\mymath{\myindx{q}}] \emphh{\mymath{\equiv}}
                       b[i\mymath{\myindx{1}},..,i\mymath{\myindx{k+1}},..,i\mymath{\myindx{k+n}},i\mymath{\myindx{k}},..,i\mymath{\myindx{q}}] 
-// \emp{Generalization for Nested Maps}:
+
+// \emp{Generalization for Nested Map2s (similar for redomap2)}
 map2\mymath{\myindu{1}}(f, a\mymath{\myindx{1}},.., a\mymath{\myindx{k}}) \emphh{\mymath{\equiv}} map2(g, a\mymath{\myindx{1}},.., a\mymath{\myindx{k}})
 map2\mymath{\myindu{n}}(f, a\mymath{\myindx{1}},.., a\mymath{\myindx{k}}) \emphh{\mymath{\equiv}} 
 map2(fn ([\mymath{\beta\myindx{1}}],..,[\mymath{\beta\myindx{t}}]) ([\mymath{\alpha\myindx{1}}] x\mymath{\myindx{1}},..,[\mymath{\alpha\myindx{k}}] x\mymath{\myindx{k}}) => 
@@ -1640,7 +1677,8 @@ map2\mymath{\myindu{n}}(g o f, transpose(1,n-k,a) )
 %\hrule ~
 \vbox{
 \begin{colorcode}
-// \emp{Arbitrary-Nested-Level Generalization of ISWIM}:
+// \emp{Arbitrary-Nested-Level Generalization of ISWIM}
+// \emp{similar for Interchange Reduce with Inner Maps(IRWIM)}
 \emp{scan2}( fn ( [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{1}}]],    .., [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{k}}]] ) 
           ( [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{1}}]] x\mymath{\myindu{1}\myindx{1}}, .., [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{k}}]] x\mymath{\myindu{1}\myindx{k}},
             [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{1}}]] x\mymath{\myindu{2}\myindx{1}}, .., [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{k}}]] x\mymath{\myindu{2}\myindx{k}} ) => 
@@ -1648,7 +1686,7 @@ map2\mymath{\myindu{n}}(g o f, transpose(1,n-k,a) )
      , (ne\mymath{\myindx{1}}, ..., ne\mymath{\myindx{k}}), a\mymath{\myindx{1}}, ..., a\mymath{\myindx{k}} 
      )             \emphh{\mymath{\equiv}} 
 let (.., re\mymath{\myindx{t}}, ..) = (.., map\mymath{\myindu{n}}( replicate(1), ne\mymath{\myindx{t}} ), ..)
-// ^replicate dim n of neutral elems so map2 sizes match
+// replicate dim n of neutral elems so map2 sizes match
 let ( y\mymath{\myindx{1}},.., y\mymath{\myindx{k}} ) =
   \emphh{map2} (fn ( [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{1}}]],    .., [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{k}}]] ) 
            ( [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{1}}]] x\mymath{\myindx{1}}, .., [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{k}}]] x\mymath{\myindx{k}} ) =>
@@ -1659,7 +1697,7 @@ let ( y\mymath{\myindx{1}},.., y\mymath{\myindx{k}} ) =
                  , re\mymath{\myindx{1}}, ..., re\mymath{\myindx{k}}, x\mymath{\myindx{1}}, .., x\mymath{\myindx{k}} )
        , transpose(1,n,a\mymath{\myindx{1}}), .., transpose(1,n,a\mymath{\myindx{k}}) )
 in (transpose(n, q\mymath{\myindx{1}}-n, y\mymath{\myindx{1}}), ..., transpose(n, q\mymath{\myindx{k}}-n, y\mymath{\myindx{k}}))
-// ^transpose back the result; q\mymath{\myindx{t}}-n is the dimension of \mymath{\alpha\myindx{t}}
+// transpose back the result; q\mymath{\myindx{t}}-n is the dimension of \mymath{\alpha\myindx{t}}
 
 // \emp{A Well-Known Transformation: Reduce Flattening}
 y = redomap2\mymath{\myindu{n}} ( \mymath{\oplus} 
@@ -1669,8 +1707,7 @@ y = redomap2\mymath{\myindu{n}} ( \mymath{\oplus}
                , (e\mymath{\myindx{1}},..,e\mymath{\myindx{k}}), a\mymath{\myindx{1}},..,a\mymath{\myindx{k}} )
         \emphh{\mymath{\equiv}}
 reduce2(\mymath{\oplus}, (e\mymath{\myindx{1}},..,e\mymath{\myindx{k}}), flatten(n, a\mymath{\myindx{1}}),.., flatten(n, a\mymath{\myindx{k}}))
-// ^ flatten(n,a) flattens the first n dims of array a;
-// ^ redomap2\mymath{\myindu{n}} is similar to map2\mymath{\myindu{n}}
+// flatten(n,a) flattens the first n dims of array a;
 \end{colorcode}
 } \vspace{-2ex}
 \caption{{\sc iswim}'s Formalization \& Reduce Flattening Transform.}
