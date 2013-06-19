@@ -1886,7 +1886,12 @@ size, once for the data), doesn't seem they can handle the difficult
 case where the output of an array operation is used as input to two
 other array operations.
 
-Discuss fusion in REPA, DPH, Accelerate, Haskell, Obsidian, etc.
+NESL has been extended with a GPU backend~\cite{bergstrom2012nested},
+for which the authors note that fusion is critical to the performance
+of the flattened program.  Their approach is to use a form of
+copy-propagation on the intermediary code, and lift the resulting
+functions to work on entire arrays.  Their approach only works for
+what we would term {\tt map $\circ$ map} fusion, however.
 
 \section{Conclusions and Future Work}
 \label{sec:Concl}
