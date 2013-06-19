@@ -292,47 +292,61 @@ For Troels:
 purely functional language.  Although some built-in higher-order
 functions provide polymorphism, user-defined functions are
 monomorphic, and their return- and parameter types must be specified
-explicitly.  In order to save space, we will not cover the typing
+explicitly.  For brevity, we will not cover the typing
 rules in detail, as they are quite trivial.  The only exception is our
 notion of {\em uniqueness types}, which is given a cursory treatment
 in Section~\ref{sec:in-place}.
 
-The syntax of the first-order fragment of \LO{} can be seen in figure
-\ref{fig:fo-syntax}.  Common arithmetic operators such as {\tt +} and
+The syntax of the first-order fragment of \LO{} can be seen in Figure~\ref{fig:fo-syntax}.  
+Common arithmetic operators such as {\tt +} and
 {\tt /} are supported in the usual way.  Note that they are
 polymorphic in the sense that they accept both integers and
 floating-points, although both operands must be of the same type.
 Pattern matching is supported in a limited way as the only way of
-decomposing tuple values, but there is no {\tt case} construct.  Note
-that we use braces to denote arrays, not sets.
+decomposing tuple values, but there is no {\tt case} construct.  
+Note that braces denote arrays, not sets.
 
 {\tt zip} and {\tt unzip} behave as usual, i.e, {\tt
-  zip({1,2,3},{4,5,6})} $=$ {\tt \{{(1,4),(2,5),(3,6)}\}}.  It
-is an error if the arrays given to {\tt zip} are not of the exact same
-size.
+  zip(\{1,2,3\},\{4,5,6\})} $=$ {\tt \{{(1,4),(2,5),(3,6)}\}}, but the
+semantics of {\tt zip} requires that the input arrays have outermost
+dimensions of equal sizes. Otherwise a compile or runtime error is signalled.
+%It is an error if the arrays given to {\tt zip} are not of the exact same size.
 
-There are two slightly complicated constructs in the first-order part
+There are two non-standard constructs in the first-order part  % slightly complicated
 of \LO{}.  The first is the let-with construct for updating parts of
 arrays:
 
 \begin{colorcode}
-let b = a with [i] <- v in body
+let b = a with [i\mymath{\myindx{1}},..,i\mymath{\myindx{k}}] <- v in body
 \end{colorcode}
 
-This will evaluate {\tt body} with {\tt b} bound to the value of {\tt
-  a}, except that the element at position {\tt i} will be updated to
-the value of {\tt v}.  If {\tt a[i]} is itself an array (that is, if
-{\tt a} has more than one dimension), {\tt v} must be an array of the
-same size as the slice it is replacing.  We will write {\tt let a[i] =
-  v in body} when the variable to be bound has the same name as the
-source variable.  In Section~\ref{sec:in-place}, we will describe our
-method for doing array updates {\em in-place}, that is without copying
-the source array, without losing referential transparency.
+The above evaluates {\tt body} with {\tt b} bound to the value of {\tt a}, 
+except that the element at position {\tt (i$_1$,..,i$_k$)} is updated to
+the value of {\tt v}.  If {\tt a[i$_1$,..,i$_k$]} is itself an array,
+i.e., if {\tt a} has more than {\tt k} dimensions, {\tt v} must be 
+%(that is, if {\tt a} has more than {\tt k} dimensions), {\tt v} must be 
+an array of the same size as the slice it is replacing.  We write 
+{\tt let~a[i$_1$,..,i$_k$]~=~v~in~body} when the 
+source and destination array share the same name.
+%variable to be bound has the same name as the source variable.  
+%
+Section~\ref{sec:in-place} describes our method for doing array updates 
+{\em in-place} without losing referential transparency. This allows a 
+cost model in which the update takes time proportional to the total 
+size of {\tt v}, rather~than~{\tt a}.
 
-The other unusual construct is the {\tt do}-loop.  It is fundamentally
-syntactical sugar for a certain form of tail-recursive functions, in
-order to make it easier to express loop optimisations and certain
-sequential loops.
+The other non-standard construct is the {\tt do}-loop:  
+It is fundamentally syntactical sugar for a certain form of 
+tail-recursive function, and is used by the user to express
+certain sequential computation that would be awkward to write
+functionally, and by the compiler in lower-level optimisations,
+such as loop interchange, distribution.  
+
+%The other unusual construct is the {\tt do}-loop:  
+%It is fundamentally
+%syntactical sugar for a certain form of tail-recursive function, 
+%in order to make it easier to express loop optimisations and certain
+%sequential loops.
 
 For example, denoting by {\tt t} the type of {\tt x}, the loop in
 Figure~\ref{fig:loop-recursion} has the semantics of a call to the
@@ -447,11 +461,11 @@ $e$ & $::=$ & {\tt map($l$, $e$)} \\
 \label{fig:soacs}
 \end{figure}
 
-The semantics of the {\sc soac}s are identical to the similarly-named
-higher-order functions found in many functional languages, but
-reproduced here for completeness.  Note the types given are not \LO{}
-types, as the {\sc soac}s cannot be typed in LO{} itself, but a
-Haskell-inspired notation.
+The semantics of the {\sc soac}s is identical to the similarly-named
+higher-order functions found in many functional languages, but we
+reproduce it here for completeness.  Note the types given are not \LO{}
+types, but a Haskell-inspired notation, since the {\sc soac}s cannot be 
+typed in \LO{} itself.
 \begin{align*}
 \text{\tt map($f$,$a$)}
 & :: (\alpha\rightarrow\beta)\rightarrow[\alpha]\rightarrow[\beta] \\
@@ -484,7 +498,7 @@ Its semantics is as follows.
 \text{\tt redomap($f$,$g$,$x$,$v$)} & \equiv \text{\tt foldl($g$, $x$, $v$)}
 \end{align*}
 Note that the runtime semantics is a left-fold, not a normal \LO{}
-\texttt{reduce}.  The justification for {\tt redomap} is as follows;
+\texttt{reduce}.  The rationale behind {\tt redomap} is as follows;
 using a Haskell-like syntax.
 
 {\tt (red $\odot$ e) . (map f)} can be formally transformed, via the
