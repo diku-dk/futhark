@@ -95,7 +95,7 @@
 
 
 \title{A Structural-Analysis Approach To Fusion}
-\subtitle{\LO{} Status Report}
+%\subtitle{\LO{} Status Report}
 %\subtitle{Subtitle Text, if any}
 
 %%%%%%%%%%%%%%%%%%%
@@ -1602,8 +1602,11 @@ This section is structured as follows:
 Section~\ref{sec:inhibitors} discusses how to
 solve certain cases where fusion is inhibited due to calls
 to some of the built in functions such as {\tt size}, {\tt split}, etc.
-Section~\ref{sec:extensions} presents two other code transformations
-aimed at optimizing uses of {\tt scan2} and {\tt reduce2}.
+Section~\ref{sec:extensions} presents two code transformations that
+are aimed at optimizing uses of {\tt scan2} and {\tt reduce2}. 
+Since these transformations both enables and are enabled by fusion,
+we plan to encompass them in our fusion analysis implementation in the
+near future.
 Section~\ref{sec:results} shows fusion-related statistics
 from five benchmarks, which were gathered by compiler instrumentation.
 
@@ -1704,7 +1707,7 @@ the least parallel construct, i.e., {\tt scan}, at the innermost position
 might reveal a deeper {\tt map}-nest, e.g., if the original {\tt scan} was 
 inner to a {\tt map}, thus increasing significantly the depth-one 
 parallelism degree.   
-Furthermore, if the created {\tt map} nest exhibits enough parallelism, 
+Finally, if the created {\tt map} nest exhibits enough parallelism, 
 then the {\tt scan} can be executed sequentially rather than in parallel. %(otherwise parallel execution).
 
 The middle part of Figure~\ref{fig:TransfEg} shows several useful 
@@ -1771,8 +1774,8 @@ created for each neutral element, in order to match the input-array
 sizes for the {\tt map},  and (ii) the two-ways use of the generalized 
 {\tt transpose} for bringing the first dimension to position {\tt n}
 and back again. We remark that the extra {\tt replicate} can be compiled
-away by a refinement of the copy-propagation transformation 
-(this refinement is already supported by our compiler).
+away by fusion coupled with a refinement of the copy-propagation 
+transformation (both supported by current compiler).
 
 The second transformation, named \textsc{RedFlat} and depicted in the 
 bottom-part of Figure~\ref{fig:TransfGen}, relies on the well-known equivalence:
@@ -1796,40 +1799,49 @@ rich algebra exposed by the second-order array combinators, and they require
 a difficult implementation in an imperative context.   For example, 
 \textsc{Iswim} interchanges an inner parallel loop ({\tt map}) outwards across
 a sequential loop ({\tt reduce}). The fact that the inner loop is parallel
-is not in general sufficient to guarantee correctness, albeit a parallel 
-loop can always be interchanged inwards.  
+is not in general sufficient to guarantee the correctness of loop interchange, 
+albeit a parallel loop can always be interchanged inwards.  
 
 \subsection{Fusion Statistics}
 \label{sec:results}
 
-We instrumented the \LO{} compiler to keep track of how often it fused
-two SOACs.  The results are reproduced on Figure~\ref{fig:fusion}.  We
-count as ``interesting'' those fusions in which the number of tuple
+Since the \LO{} language is currently interpreted, we cannot measure directly
+at this point the effectiveness of our implementation of fusion analysis, 
+which comprises about $700$ lines of Haskell code. 
+%
+We have instrumented the \LO{} compiler to keep track of how often 
+and what types of {\sc soac} it successfully fuses.
+The results are reproduced in Figure~\ref{fig:fusion}.  
+We count as ``interesting'' those fusions in which the number of tuple
 elements produced by the producer is less than what is used by the
-consumer.  The test programs were as follows.
+consumer.  The test programs are:
 
 \begin{description}
-\item[P0:] PricingLexiFi
-\item[P1:] CalibLexiFi
-\item[P2:] HiperfitEgCos
-\item[P3:] BabyBear
-\item[P4:] Matrix multiplication
-\item[P5:] MSSP
+%\begin{itemize}
+\item[P0:] a real-world pricing kernel for financial derivatives~\cite{PricingFHPC}, %PricingLexiFi
+\item[P1:] a real-world market calibration kernel that computes some of the parameters of \textbf{P0},%CalibLexiFi
+\item[P2:] stochastic volatility calibration via Crank-Nicolson finite differences solver~\cite{} %HiperfitEgCos
+\item[P3:] %BabyBear
+\item[P4:] %Matrix multiplication
+\item[P5:] %MSSP
+%\end{itemize}
 \end{description}
 
 \begin{figure}
 \begin{center}
 \begin{tabular}{l|c|c|c|c|c|c}
-& P0 & P1 & P2 & P3 & P4 & P5 \\\hline\hline
+Fusion Statistics & P0 & P1 & P2 & P3 & P4 & P5 \\\hline
+Lines Of Code          & 283 & 859 & 182 & 29 & 21 & 22\\\hline\hline
 {\tt map} $\circ$ {\tt map}          & 10 & 1  & 8  & 5 & 3  &   \\\hline
 {\tt map} $\circ$ {\tt replicate}    &    &    & 12 & 2 & 2  &   \\\hline
 {\tt redomap} $\circ$ {\tt filter}   & 1  &    &    &   &    &   \\\hline
 {\tt redomap} $\circ$ {\tt map}      & 5  &    &    &   &    &   \\\hline
 {\tt reduce} $\circ$ {\tt map}       & 6  & 12 &    & 2 & 1  & 1 \\\hline
 {\tt reduce} $\circ$ {\tt replicate} &    & 3  &    &   &    &   \\\hline\hline
-Interesting            &    & 1  & 1  &   &    &   \\
+Interesting            &    & 1  & 1  &   &    &   
 \end{tabular}
 \end{center}
+\vspace{-2ex}
 \caption{Fusion results}
 \label{fig:fusion}
 \end{figure}
