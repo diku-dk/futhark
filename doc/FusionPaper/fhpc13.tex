@@ -378,6 +378,11 @@ in body
 \label{fig:loop-recursion}
 \end{figure}
 
+This was inspired by Single Assignment C~\cite{grelck2006sac}, which
+also uses loops with semantics that essentially desugar into
+tail-recursive functions (although SaC loops also have significant
+performance repercussions).
+
 \begin{figure}[bt]
 \begin{tabular}{lrll}
 $t$ & $::=$ & {\tt int} & (Integers) \\
@@ -1834,11 +1839,11 @@ Interesting            &    & 1  & 1  &   &    &   \\
 \section{Related Work}
 \label{sec:RelWork}
 
-Our uniqueness attributes are superficially similar to the ``owning
+Our uniqueness attributes have some similarities the the ``owning
 pointers'' found in the impure language Rust~\cite{rust}, although
 there are deep differences.  In Rust, owning pointers are used to
 manage memory -- when an owning pointer goes out of scope, the memory
-it points at is deallocated -- while we use uniqueness attributes to
+it points to is deallocated -- while we use uniqueness attributes to
 handle side effects.  Additionally, we allow function calls to consume
 arrays passed to a parameter of unique type, whereas in Rust this
 causes a deep copy of the object referenced by the owning pointer.
@@ -1865,7 +1870,29 @@ from index to value.  With this representation, fusion happens
 automatically through function composition, although this can cause
 duplication of work in many cases.  To counteract this, Repa lets the
 user to {\em force} an array, by which it is converted from the
-delayed representation to a traditional sequence of values.
+delayed representation to a traditional sequence of values.  The pull
+arrays of Obsidian~\cite{claessen2012expressive} use a similar
+mechanism.
+
+Data-Parallel Haskell (DPH) ~\cite{chakravarty2007data} makes use of
+rewrite rules to perform fusion, including expressing array operations
+in terms of streams~\cite{coutts2007rewriting}, which have previously
+been shown to be easily fusable.  While DPH obtains good results,
+rewrite rules are quite limited -- they are an inherently local view
+of the computation, and would be unable to cope with limitations in
+the presence of in-place array updates, and whether the result of an
+array operation is used multiple times.  The Glasgow Haskell Compiler
+itself also bases its list fusion on rewrite
+rules~\cite{jones2001playing}.
+
+Accelerate~\cite{mcdonell2013optimising} uses an elaboration of the
+delayed arrays representation from Repa, and in particular manages to
+avoid duplicating work.  All array operations have a uniform
+representation as constructors for delayed arrays, on which fusion is
+performed by tree contraction.  Accelerate supports multiple arrays as
+input to the same array operation (using a {\tt zipWith} construct),
+although it's unclear how it's handled if the output of an array
+operation is used as input to multiple other array operations.
 
 Discuss fusion in REPA, DPH, Accelerate, Haskell, Obsidian, etc.
 
