@@ -1568,40 +1568,6 @@ applied to eliminate from the program the fused {\sc soac}s.
 %\label{sec:fwdPass}
 
 
-\section{Fusion results}
-\label{sec:results}
-
-We instrumented the \LO{} compiler to keep track of how often it fused
-two SOACs.  The results are reproduced on Figure~\ref{fig:fusion}.  We
-count as ``interesting'' those fusions in which the number of tuple
-elements produced by the producer is less than what is used by the
-consumer.  The test programs were as follows.
-
-\begin{description}
-\item[P0:] PricingLexiFi
-\item[P1:] CalibLexiFi
-\item[P2:] HiperfitEgCos
-\item[P3:] BabyBear
-\item[P4:] Matrix multiplication
-\item[P5:] MSSP
-\end{description}
-
-\begin{figure}
-\begin{center}
-\begin{tabular}{l|c|c|c|c|c|c}
-& P0 & P1 & P2 & P3 & P4 & P5 \\\hline\hline
-{\tt map} $\circ$ {\tt map}          & 10 & 1  & 8  & 5 & 3  &   \\\hline
-{\tt map} $\circ$ {\tt replicate}    &    &    & 12 & 2 & 2  &   \\\hline
-{\tt redomap} $\circ$ {\tt filter}   & 1  &    &    &   &    &   \\\hline
-{\tt redomap} $\circ$ {\tt map}      & 5  &    &    &   &    &   \\\hline
-{\tt reduce} $\circ$ {\tt map}       & 6  & 12 &    & 2 & 1  & 1 \\\hline
-{\tt reduce} $\circ$ {\tt replicate} &    & 3  &    &   &    &   \\\hline\hline
-Interesting            &    & 1  & 1  &   &    &   \\
-\end{tabular}
-\end{center}
-\caption{Fusion results}
-\label{fig:fusion}
-\end{figure}
 
 \section{Limitations and Possible Extensions}
 \label{sec:Discuss}
@@ -1696,6 +1662,45 @@ reduce2(\mymath{\oplus}, (e\mymath{\myindx{1}},..,e\mymath{\myindx{k}}), flatten
 %  ([\mymath{\alpha\myindx{1}}] x\mymath{\myindx{1}},..,[\mymath{\alpha\myindx{k}}] x\mymath{\myindx{k}})
 
 % Note that transpose(i+n, q-n, transpose(i, n, a)) == a
+
+
+
+\subsection{Fusion Statistics}
+\label{sec:results}
+
+We instrumented the \LO{} compiler to keep track of how often it fused
+two SOACs.  The results are reproduced on Figure~\ref{fig:fusion}.  We
+count as ``interesting'' those fusions in which the number of tuple
+elements produced by the producer is less than what is used by the
+consumer.  The test programs were as follows.
+
+\begin{description}
+\item[P0:] PricingLexiFi
+\item[P1:] CalibLexiFi
+\item[P2:] HiperfitEgCos
+\item[P3:] BabyBear
+\item[P4:] Matrix multiplication
+\item[P5:] MSSP
+\end{description}
+
+\begin{figure}
+\begin{center}
+\begin{tabular}{l|c|c|c|c|c|c}
+& P0 & P1 & P2 & P3 & P4 & P5 \\\hline\hline
+{\tt map} $\circ$ {\tt map}          & 10 & 1  & 8  & 5 & 3  &   \\\hline
+{\tt map} $\circ$ {\tt replicate}    &    &    & 12 & 2 & 2  &   \\\hline
+{\tt redomap} $\circ$ {\tt filter}   & 1  &    &    &   &    &   \\\hline
+{\tt redomap} $\circ$ {\tt map}      & 5  &    &    &   &    &   \\\hline
+{\tt reduce} $\circ$ {\tt map}       & 6  & 12 &    & 2 & 1  & 1 \\\hline
+{\tt reduce} $\circ$ {\tt replicate} &    & 3  &    &   &    &   \\\hline\hline
+Interesting            &    & 1  & 1  &   &    &   \\
+\end{tabular}
+\end{center}
+\caption{Fusion results}
+\label{fig:fusion}
+\end{figure}
+
+
 
 \section{Related Work}
 \label{sec:RelWork}
