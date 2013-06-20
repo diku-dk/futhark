@@ -1,5 +1,2 @@
-fun int f(int acc, (int, int) v) =
-    let (x,y) = v in acc+x*y
-
 fun int main([int] a, [int] b) =
-    reduce(f, 0, zip(a,b))
+    reduce(op+, 0, map(op*, zip(a,b)))
