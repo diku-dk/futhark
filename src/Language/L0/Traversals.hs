@@ -186,13 +186,13 @@ mapExpM tv (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody loc) =
 mapExpM tv (Map2 fun arrexps intype loc) = -- outtype 
   pure Map2 <*> mapOnLambda tv fun <*> mapM (mapOnExp tv) arrexps <*>
        mapOnType tv intype  <*> pure loc -- <*> mapOnType tv outtype
-mapExpM tv (Reduce2 fun startexp arrexps intype loc) =
+mapExpM tv (Reduce2 fun startexps arrexps intype loc) =
   pure Reduce2 <*> mapOnLambda tv fun <*>
-       mapOnExp tv startexp <*> mapM (mapOnExp tv) arrexps <*>
+       mapM (mapOnExp tv) startexps <*> mapM (mapOnExp tv) arrexps <*>
        mapOnType tv intype <*> pure loc
-mapExpM tv (Scan2 fun startexp arrexps intype loc) =
+mapExpM tv (Scan2 fun startexps arrexps intype loc) =
   pure Scan2 <*> mapOnLambda tv fun <*>
-       mapOnExp tv startexp <*> mapM (mapOnExp tv) arrexps <*>
+       mapM (mapOnExp tv) startexps <*> mapM (mapOnExp tv) arrexps <*>
        mapOnType tv intype <*> pure loc
 mapExpM tv (Filter2 fun arrexps loc) =
   pure Filter2 <*> mapOnLambda tv fun <*>
@@ -200,9 +200,9 @@ mapExpM tv (Filter2 fun arrexps loc) =
 mapExpM tv (Mapall2 fun arrexps loc) =
   pure Mapall2 <*> mapOnLambda tv fun <*>
        mapM (mapOnExp tv) arrexps <*> pure loc
-mapExpM tv (Redomap2 redfun mapfun accexp arrexps intype loc) =
+mapExpM tv (Redomap2 redfun mapfun accexps arrexps intype loc) =
   pure Redomap2 <*> mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
-       mapOnExp tv accexp <*> mapM (mapOnExp tv) arrexps <*>
+       mapM (mapOnExp tv) accexps <*> mapM (mapOnExp tv) arrexps <*>
        mapOnType tv intype <*> pure loc
 
 -- | Like 'mapExp', but in the 'Identity' monad.

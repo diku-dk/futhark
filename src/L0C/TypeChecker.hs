@@ -734,12 +734,14 @@ checkExp (Map fun arrexp intype pos) = do
 checkExp (Reduce fun startexp arrexp intype pos) = do
   (startexp', startarg) <- checkArg startexp
   (arrexp', arrarg@(inrowt, _, _)) <- checkSOACArrayArg arrexp
-  inrowt' <- checkAnnotation pos "input element" intype inrowt
+  intype' <- checkAnnotation pos "element" intype inrowt
   fun' <- checkLambda fun [startarg, arrarg]
   let redtype = lambdaType fun' [typeOf startexp', typeOf arrexp']
   unless (redtype `subtypeOf` typeOf startexp') $
-    bad $ TypeError pos $ "Accumulator is of type " ++ ppType (typeOf startexp') ++ ", but reduce function returns type " ++ ppType redtype ++ "."
-  return $ Reduce fun' startexp' arrexp' inrowt' pos
+    bad $ TypeError pos $ "Initial value is of type " ++ ppType (typeOf startexp') ++ ", but scan function returns type " ++ ppType redtype ++ "."
+  unless (redtype `subtypeOf` intype') $
+    bad $ TypeError pos $ "Array element value is of type " ++ ppType intype' ++ ", but scan function returns type " ++ ppType redtype ++ "."
+  return $ Reduce fun' startexp' arrexp' intype' pos
 
 checkExp (Scan fun startexp arrexp intype pos) = do
   (startexp', startarg) <- checkArg startexp
@@ -840,34 +842,34 @@ checkExp (Map2 fun arrexps intype pos) = do
   intype' <- checkAnnotation pos "input element" intype ineltp
   return $ Map2 fun' arrexps' intype' pos
 
-checkExp (Reduce2 fun startexp arrexps intype pos) = do
-  (startexp', startarg) <- checkArg startexp
+checkExp (Reduce2 fun startexps arrexps intype pos) = do
+  (startexps', startargs) <- unzip <$> mapM checkArg startexps
+  startt <- soac2ArgType pos "Reduce2" $ map typeOf startexps'
   (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
   ineltp  <- soac2ArgType pos "Reduce2" $ map argType arrargs
   intype' <- checkAnnotation pos "input element" intype ineltp
-  startarg' <- splitTupleArg startarg
-  fun'    <- checkLambda fun $ startarg' ++ arrargs
-  let funret = lambdaType fun' $ map argType $ startarg' ++ arrargs
-  unless (funret `subtypeOf` typeOf startexp') $
-    bad $ TypeError pos $ "Accumulator is of type " ++ ppType (typeOf startexp') ++
+  fun'    <- checkLambda fun $ startargs ++ arrargs
+  let funret = lambdaType fun' $ map argType $ startargs ++ arrargs
+  unless (funret `subtypeOf` startt) $
+    bad $ TypeError pos $ "Accumulator is of type " ++ ppType startt ++
                           ", but reduce function returns type " ++ ppType funret ++ "."
-  return $ Reduce2 fun' startexp' arrexps' intype' pos
+  return $ Reduce2 fun' startexps' arrexps' intype' pos
 
-checkExp (Scan2 fun startexp arrexps intype pos) = do
-  (startexp', startarg) <- checkArg startexp
-  startarg' <- splitTupleArg startarg
+checkExp (Scan2 fun startexps arrexps intype pos) = do
+  (startexps', startargs) <- unzip <$> mapM checkArg startexps
+  startt <- soac2ArgType pos "Scan2" $ map typeOf startexps'
   (arrexps', arrargs)   <- unzip <$> mapM checkSOACArrayArg arrexps
   inelemt   <- soac2ArgType pos "Scan2" $ map argType arrargs
   intype'   <- checkAnnotation pos "element" intype inelemt
-  fun'      <- checkLambda fun $ startarg' ++ startarg'
-  let funret = lambdaType fun' $ map argType $ startarg' ++ startarg'
-  unless (funret `subtypeOf` typeOf startexp') $
-    bad $ TypeError pos $ "Initial value is of type " ++ ppType (typeOf startexp') ++
+  fun'      <- checkLambda fun $ startargs ++ startargs
+  let funret = lambdaType fun' $ map argType $ startargs ++ startargs
+  unless (funret `subtypeOf` startt) $
+    bad $ TypeError pos $ "Initial value is of type " ++ ppType startt ++
                           ", but scan function returns type " ++ ppType funret ++ "."
   unless (funret `subtypeOf` intype') $
     bad $ TypeError pos $ "Array element value is of type " ++ ppType intype' ++
                           ", but scan function returns type " ++ ppType funret ++ "."
-  return $ Scan2 fun' startexp' arrexps' intype' pos
+  return $ Scan2 fun' startexps' arrexps' intype' pos
 
 checkExp (Filter2 fun arrexps pos) = do
   (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
@@ -894,20 +896,22 @@ checkExp (Mapall2 fun arrexps pos) = do
   fun' <- checkLambda fun arrargs'
   return $ Mapall2 fun' arrexps' pos
 
-checkExp (Redomap2 redfun mapfun accexp arrexps intype pos) = do
+checkExp (Redomap2 redfun mapfun accexps arrexps intype pos) = do
   (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
   (mapfun', maparg) <- checkLambdaArg mapfun arrargs
 
-  (accexp', accarg) <- checkArg accexp
-  accarg' <- splitTupleArg accarg
+  (accexps', accargs) <- unzip <$> mapM checkArg accexps
+  acct <- soac2ArgType pos "Redomap2" $ map typeOf accexps'
   maparg' <- splitTupleArg maparg
-  redfun' <- checkLambda redfun $ accarg' ++ maparg'
-  let redret = lambdaType redfun' $ map argType $ accarg' ++ maparg'
-  _ <- require [redret] accexp'
+  redfun' <- checkLambda redfun $ accargs ++ maparg'
+  let redret = lambdaType redfun' $ map argType $ accargs ++ maparg'
+  unless (redret `subtypeOf` acct) $
+    bad $ TypeError pos $ "Initial value is of type " ++ ppType acct ++
+                          ", but redomap2 reduction returns type " ++ ppType redret ++ "."
 
   et <- soac2ArgType pos "Redomap2" $ map argType arrargs
   intype' <- checkAnnotation pos "input element" intype et
-  return $ Redomap2 redfun' mapfun' accexp' arrexps' intype' pos
+  return $ Redomap2 redfun' mapfun' accexps' arrexps' intype' pos
 
 soacArrayArg :: VarName vn => Arg vn -> TypeM vn (Arg vn)
 soacArrayArg (t, dflow, argloc) =
