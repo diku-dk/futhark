@@ -467,7 +467,7 @@ typeOf (Map2 f arrs _ _) =
       Elem $ Tuple $ map (\x -> arrayType 1 x (uniqueProp x)) tps
     ftp -> arrayType 1 ftp (uniqueProp ftp)
 typeOf (Reduce2 fun acc arrs _ _) =
-  lambdaType fun $ typeOf acc : map typeOf arrs
+  lambdaType fun $ map typeOf acc ++ map typeOf arrs
 typeOf (Scan2 _ _ _ (Elem (Tuple tps)) _) =
   Elem $ Tuple $ map (\x -> arrayType 1 x Unique) tps
 typeOf (Scan2 _ _ _ tp _) = arrayType 1 tp Unique
@@ -476,7 +476,9 @@ typeOf (Filter2 _ arrs _) =
     [t] -> t
     tps -> Elem $ Tuple tps
 typeOf (Redomap2 redfun mapfun start arrs rt loc) =
-  lambdaType redfun [typeOf start, typeOf (Map2 mapfun arrs rt loc)]
+  lambdaType redfun $ map typeOf start ++ case typeOf (Map2 mapfun arrs rt loc) of
+                                            Elem (Tuple ts) -> ts
+                                            t               -> [t]
 typeOf (Mapall2 fun es _) =
     let inpdim= case map typeOf es of
                   et:etps -> foldl min

@@ -1,5 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, ScopedTypeVariables #-}
-
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module L0C.HOTrans.Fusion ( fuseProg )
   where
  
@@ -22,8 +21,6 @@ import qualified Data.Set  as S
 import L0C.L0
 import L0C.FreshNames
 import L0C.EnablingOpts.EnablingOptDriver
-
-import Debug.Trace
 
 data FusionGEnv = FusionGEnv {
                     soacs      :: M.Map VName ([VName], Exp)
@@ -245,22 +242,6 @@ getKersWithInpArrs ress nms =
                         Just ns -> s `S.union` ns
           ) S.empty nms
 
-printRes :: FusedRes -> String
-printRes res = 
-    let (_  , all_kers) = unzip $ M.toList (kernels res)
-        kers_str = concatMap (\ ker -> -- if null (fused_vars ker)
-                                       -- then ""
-                                       -- else 
-                                        let (tupid, soac) = fsoac ker
-                                        in  "\nlet " ++ ppTupId tupid ++
-                                            " = "  ++ ppExp soac
-                             ) all_kers
-        zips_str = concatMap (\(bv,(i,as))->let str = getBuiltinFunName i
-                                            in "\n"++textual bv++" = "++str++"( "++
-                                                L.intercalate ", " (map (ppExp) (S.toList as)) ++ ") "
-                             ) (M.toList (zips res))
-    in kers_str ++ "\n" ++ zips_str
-
 -- | extend the set of names to include all the names
 --     produced via SOACs (by querring the vtable's soac)
 expandSoacInpArr :: [VName] -> FusionGM [VName]
@@ -426,11 +407,11 @@ greedyFuse is_repl lam_used_nms res (idd, soac) = do
                           ) ([], inzips res) (reverse out_nms) 
             let inzips'' = case inp_rep of
                             Var x -> case M.lookup (identName x) inzips' of
-                                        Nothing -> M.insert (identName x) 
-                                                            (foldl (++) [] zip_nms) 
+                                        Nothing -> M.insert (identName x)
+                                                            (concat zip_nms)
                                                             inzips'
-                                        Just l  -> M.insert (identName x) 
-                                                            (S.toList $ S.fromList $ (foldl (++) [] zip_nms)++l)
+                                        Just l  -> M.insert (identName x)
+                                                            (L.nub $ concat zip_nms++l)
                                                             inzips'
                             _     -> inzips'
 
@@ -462,7 +443,7 @@ greedyFuse is_repl lam_used_nms res (idd, soac) = do
                                             _      -> return x
                                Index{}-> return b
                                _     -> badFusionGM $ EnablingOptError (SrcLoc (locOf b))
-                                                        ("In Fusion.hs, getBestInpArr error!")
+                                                        "In Fusion.hs, getBestInpArr error!"
                   ) (head arrs) (tail arrs)
 
         substCand :: Exp -> VName -> S.Set Exp -> S.Set Exp
@@ -520,9 +501,9 @@ fuseSOACwithKer (out_ids1, soac1) ker = do
                 (Reduce2 _ ne _ eltp pos, Filter2 _ _ _) -> do
                   (res_lam, new_inp) <- fuseRedFilt inp1_arr lam1 out_ids1 inp2_arr lam2
                   return (Reduce2 res_lam ne new_inp eltp pos, new_inp)
-                (Redomap2 lam21 _ ne _ eltp pos, Filter2 _ _ _) -> do
-                  (res_lam, new_inp) <- fuseMapFilt inp1_arr lam1 ne inp2_arr lam2
-                  return (Redomap2 lam21 res_lam ne new_inp eltp pos, new_inp)
+                (Redomap2 lam21 _ nes _ eltp pos, Filter2 _ _ _) -> do
+                  (res_lam, new_inp) <- fuseMapFilt inp1_arr lam1 (tuplit nes pos) inp2_arr lam2
+                  return (Redomap2 lam21 res_lam nes new_inp eltp pos, new_inp)
                 (Filter2 _ _ pos, Filter2 _ _ pos1) -> do
                   (res_lam, new_inp) <- fuseMapFilt inp1_arr lam1 (Literal (LogVal False) pos1) inp2_arr lam2
                   return (Filter2 res_lam new_inp pos, new_inp)
@@ -613,25 +594,25 @@ fusionGatherExp fres (LetPat pat soac@(Filter2 lam _ _) body _) = do
     --(_, lres) <- fusionGatherLam (S.empty, bres') lam
     --return lres
 
-fusionGatherExp fres (LetPat pat soac@(Reduce2 lam ne _ _ _) body _) = do
+fusionGatherExp fres (LetPat pat soac@(Reduce2 lam nes _ _ loc) body _) = do
     -- a reduce always starts a new kernel
     bres  <- bindPat pat soac $ fusionGatherExp fres body
-    bres' <- fusionGatherExp bres  ne
+    bres' <- fusionGatherExp bres $ tuplit nes loc
     (_, blres) <- fusionGatherLam (S.empty, bres') lam
     addNewKer blres (pat, soac)
 
-fusionGatherExp fres (LetPat pat soac@(Redomap2 lam_red lam_map ne _ _ _) body _) = do
+fusionGatherExp fres (LetPat pat soac@(Redomap2 lam_red lam_map ne _ _ loc) body _) = do
     -- a redomap always starts a new kernel
     (_, lres)  <- foldM fusionGatherLam (S.empty, fres) [lam_red, lam_map]
     bres  <- bindPat pat soac $ fusionGatherExp lres body -- binding pat $ 
-    bres' <- fusionGatherExp bres ne
+    bres' <- fusionGatherExp bres $ tuplit ne loc
     addNewKer bres' (pat, soac)
 
-fusionGatherExp fres (LetPat pat (Scan2 lam ne arrs _ _) body _) = do
+fusionGatherExp fres (LetPat pat (Scan2 lam nes arrs _ _) body _) = do
     -- NOT FUSABLE
     (_, lres)  <- fusionGatherLam (S.empty, fres) lam
     bres  <- binding pat $ fusionGatherExp lres body
-    foldM fusionGatherExp bres (ne:arrs)
+    foldM fusionGatherExp bres (nes++arrs)
 
 fusionGatherExp fres (LetPat pat (Apply fname zip_args _ _) body _) 
   | "assertZip" <- nameToString fname = do
@@ -1139,7 +1120,7 @@ reduce2Redomap (Reduce2 lam ne arrs eltp pos) = do
     let lam_ids = map (\(nm,tp,p)-> Ident nm tp p) (zip3 lam_nms lam_tps lam_pos)
     let lam_body= if length lam_ids == 1
                   then Var (head lam_ids)
-                  else TupLit (map Var lam_ids) pos
+                  else tuplit (map Var lam_ids) pos
     let map_lam = AnonymFun (map toParam lam_ids) lam_body (toDecl eltp) pos
     return $ Redomap2 lam map_lam ne arrs eltp pos
 reduce2Redomap eee = 
@@ -1209,10 +1190,10 @@ fuseRedFilt inp1 lam1 _ inp2 lam2 = do
                                           ("In Fusion.hs, fuseRedFilt: uneven lambda params " 
                                            ++ "of lam2 (lam1): " ++ show n ++ " " ++ show (length par1))
     
-    let then_pat = TupId  (map (\x->Id  x) ids22) pos2
-    let then_var = TupLit (map (\x->Var x) par1 ) pos1
+    let then_pat = tuppat (map Id ids22) pos2
+    let then_var = tuplit (map Var par1 ) pos1
     let then_exp = LetPat then_pat then_var  bdy2 pos2
-    let else_exp = TupLit (map (\x->Var x) ids21) pos2
+    let else_exp = tuplit (map Var ids21) pos2
     let res_body = If call1 then_exp else_exp (fromDecl rtp2) pos1
     return (AnonymFun (map toParam $ ids21++par1) res_body rtp2 pos2, inp1)
     
@@ -1236,9 +1217,9 @@ fuseMapFilt inp1 lam1 ne inp2 lam2 = do
                              ("In Fusion.hs, fuse2Filter: num of params of " 
                               ++ "lam2, lam1 and inp1 do not agree: " ++ show (length ids2) 
                               ++ " " ++ show (length par1) ++ " " ++ show (length inp1))
-    
-    let then_pat = TupId  (map (\x->Id  x) ids2) pos2
-    let then_var = TupLit (map (\x->Var x) par1) pos1
+
+    let then_pat = tuppat (map Id ids2) pos2
+    let then_var = tuplit (map Var par1) pos1
     let then_exp = LetPat then_pat then_var bdy2 pos2
     let res_body = If call1 then_exp ne (fromDecl rtp2) pos1
     return (AnonymFun (map toParam par1) res_body rtp2 pos2, inp1)
@@ -1421,7 +1402,7 @@ buildCall tps (CurryFun fnm aargs rtp pos) = do
                             return $ Ident new_nm tp pos
                 ) tps
     -- let tup = TupLit (map (\x -> Var x) ids) pos
-    let new_vars = map (\x -> Var x) ids
+    let new_vars = map Var ids
     return (ids, Apply fnm (aargs++new_vars) rtp pos) -- [tup]
 
 
@@ -1433,8 +1414,8 @@ getUnmdParsAndBody inpp lamm = do
             pnms <- mapM new $ replicate (length inpp) "lam_arg"
             let new_ids = map (\(nm,tp) -> Ident nm tp pos)
                               ( zip pnms (map (stripArray 1 . typeOf) inpp) )
-            let tuplit = map (\x->Var x) new_ids  -- TupLit ... pos
-            let call2  = Apply fnm (aargs++tuplit) rtp pos
+            let es = map Var new_ids
+            let call2  = Apply fnm (aargs++es) rtp pos
             return (new_ids, call2) 
 
 isCompatibleKer :: ([VName], Exp) -> FusedKer -> FusionGM Bool
@@ -1456,3 +1437,10 @@ isCompatibleKer (out_nms, Filter2 {}) ker = do
             return $ (L.null other_idds2) && inp_lst == out_nms -- inp_set `S.isSubsetOf` S.fromList out_nms 
 isCompatibleKer _ _ = return False 
 
+tuplit :: [Exp] -> SrcLoc -> Exp
+tuplit [e] _ = e
+tuplit e loc = TupLit e loc
+
+tuppat :: [TupIdent] -> SrcLoc -> TupIdent
+tuppat [p] _ = p
+tuppat pats loc = TupId pats loc

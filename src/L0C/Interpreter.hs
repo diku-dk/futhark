@@ -498,16 +498,16 @@ evalExp (Map2 fun arrexps _ loc) = do
   vs' <- mapM (applyLambda fun) $ transpose vss
   return $ arrays (fromDecl $ lambdaReturnType fun) vs'
 
-evalExp (Reduce2 fun accexp arrexps _ loc) = do
-  startacc <- evalExp accexp
+evalExp (Reduce2 fun accexps arrexps _ loc) = do
+  startaccs <- mapM evalExp accexps
   vss <- mapM (arrToList loc <=< evalExp) arrexps
   let foldfun acc x = applyLambda fun $ untuple acc ++ x
-  foldM foldfun startacc (transpose vss)
+  foldM foldfun (tuple startaccs) (transpose vss)
 
-evalExp (Scan2 fun startexp arrexps _ loc) = do
-  startval <- evalExp startexp
+evalExp (Scan2 fun startexps arrexps _ loc) = do
+  startvals <- mapM evalExp startexps
   vss <- mapM (arrToList loc <=< evalExp) arrexps
-  (acc, vals') <- foldM scanfun (startval, []) $ transpose vss
+  (acc, vals') <- foldM scanfun (tuple startvals, []) $ transpose vss
   return $ arrays (fromDecl $ valueType acc) $ reverse vals'
     where scanfun (acc, l) x = do
             acc' <- applyLambda fun $ untuple acc ++ x
@@ -532,11 +532,11 @@ evalExp (Mapall2 fun arrexp loc) = do
         mapall _ vs = untuple <$> applyLambda fun vs
 
 evalExp (Redomap2 redfun mapfun accexp arrexps _ loc) = do
-  startacc <- evalExp accexp
+  startaccs <- mapM evalExp accexp
   vss <- mapM (arrToList loc <=< evalExp) arrexps
   vs' <- mapM (applyLambda mapfun) $ transpose vss
   let foldfun acc x = applyLambda redfun $ untuple acc ++ untuple x
-  foldM foldfun startacc vs'
+  foldM foldfun (tuple startaccs) vs'
 
 evalIntBinOp :: (Int -> Int -> Int) -> Exp -> Exp -> SrcLoc -> L0M Value
 evalIntBinOp op e1 e2 loc = do

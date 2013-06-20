@@ -322,33 +322,35 @@ transformExp (LetPat pat e body loc) = do
 transformExp (Map lam arr tp pmap) = do
   lam' <- transformLambda lam
   arr' <- transformExp arr
-  tupArrToListArr arr' $ \arrs ->
+  tupToExpList arr' $ \arrs ->
     return $ Map2 lam' arrs (transformType tp) pmap
 
 transformExp (Reduce lam ne arr tp pos) = do
   lam' <- transformLambda lam
   arr' <- transformExp    arr
   ne'  <- transformExp    ne
-  tupArrToListArr arr' $ \arrs ->
-    return $ Reduce2 lam' ne' arrs (transformType tp) pos
+  tupToExpList arr' $ \arrs ->
+    tupToExpList ne' $ \nes ->
+      return $ Reduce2 lam' nes arrs (transformType tp) pos
 
 transformExp (Scan lam ne arr tp pscan) = do
   lam' <- transformLambda lam
   arr' <- transformExp    arr
   ne'  <- transformExp    ne
-  tupArrToListArr arr' $ \arrs ->
-    return $ Scan2 lam' ne' arrs (transformType tp) pscan
+  tupToExpList arr' $ \arrs ->
+    tupToExpList ne' $ \nes ->
+      return $ Scan2 lam' nes arrs (transformType tp) pscan
 
 transformExp (Filter lam arr _ loc) = do
   lam' <- transformLambda lam
   arr' <- transformExp    arr
-  tupArrToListArr arr' $ \arrs ->
+  tupToExpList arr' $ \arrs ->
     return $ Filter2 lam' arrs loc
 
 transformExp (Mapall lam arr pmap) = do
   lam' <- transformLambda lam
   arr' <- transformExp    arr
-  tupArrToListArr arr' $ \arrs ->
+  tupToExpList arr' $ \arrs ->
     return $ Mapall2 lam' arrs pmap
 
 transformExp (Redomap lam1 lam2 ne arr tp1 pos) = do
@@ -356,8 +358,9 @@ transformExp (Redomap lam1 lam2 ne arr tp1 pos) = do
   lam2' <- transformLambda lam2
   arr'  <- transformExp    arr
   ne'   <- transformExp    ne
-  tupArrToListArr arr' $ \arrs ->
-    return $ Redomap2 lam1' lam2' ne' arrs (transformType tp1) pos
+  tupToExpList arr' $ \arrs ->
+    tupToExpList ne' $ \nes ->
+      return $ Redomap2 lam1' lam2' nes arrs (transformType tp1) pos
 
 transformExp e = mapExpM transform e
   where transform = Mapper {
@@ -369,9 +372,9 @@ transformExp e = mapExpM transform e
                     , mapOnValue = return . transformValue
                     }
 
-tupArrToListArr :: Exp -> ([Exp] -> TransformM Exp)
+tupToExpList :: Exp -> ([Exp] -> TransformM Exp)
                 -> TransformM Exp
-tupArrToListArr e m = do
+tupToExpList e m = do
   e' <- transformExp e
   case typeOf e of
     Elem (Tuple ts) -> do

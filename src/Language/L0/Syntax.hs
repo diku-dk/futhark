@@ -282,11 +282,11 @@ data ExpBase ty vn =
              -- 3st arg is the  input-array row type
              --   (either a tuple or an array)
 
-            | Reduce2 (LambdaBase ty vn) (ExpBase ty vn) [ExpBase ty vn] (ty vn) SrcLoc
-            | Scan2   (LambdaBase ty vn) (ExpBase ty vn) [ExpBase ty vn] (ty vn) SrcLoc
+            | Reduce2 (LambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] (ty vn) SrcLoc
+            | Scan2   (LambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] (ty vn) SrcLoc
             | Filter2 (LambdaBase ty vn) [ExpBase ty vn]          SrcLoc
             | Mapall2 (LambdaBase ty vn) [ExpBase ty vn]          SrcLoc
-            | Redomap2(LambdaBase ty vn) (LambdaBase ty vn) (ExpBase ty vn) [ExpBase ty vn] (ty vn) SrcLoc
+            | Redomap2(LambdaBase ty vn) (LambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] (ty vn) SrcLoc
 
               deriving (Eq, Ord, Show)
 

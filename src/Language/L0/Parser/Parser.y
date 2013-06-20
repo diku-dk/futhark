@@ -256,8 +256,8 @@ Exp  :: { UncheckedExp }
      | reduce '(' FunAbstr ',' Exp ',' Exp ')'
                       { Reduce $3 $5 $7 NoInfo $1 }
 
-     | reduce2 '(' FunAbstr ',' Exp ',' Exps ')'
-                      { Reduce2 $3 $5 $7 NoInfo $1 }
+     | reduce2 '(' FunAbstr ',' DExps ')'
+                      { Reduce2 $3 (fst $5) (snd $5) NoInfo $1 }
 
      | map '(' FunAbstr ',' Exp ')'
                       { Map $3 $5 NoInfo $1 }
@@ -268,8 +268,8 @@ Exp  :: { UncheckedExp }
      | scan '(' FunAbstr ',' Exp ',' Exp ')'
                       { Scan $3 $5 $7 NoInfo $1 }
 
-     | scan2 '(' FunAbstr ',' Exp ',' Exps ')'
-                      { Scan2 $3 $5 $7 NoInfo $1 }
+     | scan2 '(' FunAbstr ',' DExps ')'
+                      { Scan2 $3 (fst $5) (snd $5) NoInfo $1 }
 
      | zip '(' Exps2 ')'
                       { Zip (map (\x -> (x, NoInfo)) $3) $1 }
@@ -292,8 +292,8 @@ Exp  :: { UncheckedExp }
      | redomap '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
                       { Redomap $3 $5 $7 $9 NoInfo $1 }
 
-     | redomap2 '(' FunAbstr ',' FunAbstr ',' Exp ',' Exps ')'
-                      { Redomap2 $3 $5 $7 $9 NoInfo $1 }
+     | redomap2 '(' FunAbstr ',' FunAbstr ',' DExps ')'
+                      { Redomap2 $3 $5 (fst $7) (snd $7) NoInfo $1 }
 
      | copy '(' Exp ')' { Copy $3 $1 }
 
@@ -325,6 +325,12 @@ Exps : Exp ',' Exps { $1 : $3 }
 
 Exps2 : Exp ',' Exps2 { $1 : $3 }
       | Exp ',' Exp   { [$1, $3] }
+
+DExps : Exp ',' Exp ',' DExps { let (as, bs) = $5
+                                in ($1:$3:reverse(drop 1 $ reverse as),
+                                    take 1 (reverse as)++bs)
+                              }
+      | Exp ',' Exp { ([$1], [$3]) }
 
 TupleExp : '(' Exps2 ')' { ($2, $1) }
 

@@ -192,7 +192,7 @@ transformExp filtere@(Filter2 fun arrexps loc) =
         (a,av) <- newVar loc "a" (Elem Int)
         (b,bv) <- newVar loc "b" (Elem Int)
         return $ AnonymFun [toParam a, toParam b] (BinOp Plus av bv (Elem Int) loc) (Elem Int) loc
-      scan <- transformExp $ Scan2 plus (intval 0) [mape] (Elem Int) loc
+      scan <- transformExp $ Scan2 plus [intval 0] [mape] (Elem Int) loc
       newLet "ia" scan $ \ia _ -> do
         let indexia ind = Index ia [ind] (Elem Int) loc
             indexiaend = indexia (sub1 nv)
@@ -222,8 +222,8 @@ transformExp (Mapall2 fun arrexps loc) = transformExp =<< toMap arrexps
                        es (Elem $ Tuple rts) loc
             _ -> transformLambda fun es
 
-transformExp (Redomap2 redfun mapfun accexp arrexps _ loc) =
-  newReduction2 loc arrexps accexp $ \(arr, _) (acc, accv) (i, iv) -> do
+transformExp (Redomap2 redfun mapfun accexps arrexps _ loc) =
+  newReduction2 loc arrexps accexps $ \(arr, _) (acc, accv) (i, iv) -> do
     mapfuncall <- transformLambda mapfun $ index arr iv
     let loop loopbody = DoLoop (pattern acc loc) accv i (size arr) loopbody accv loc
     case typeOf mapfuncall of
@@ -250,20 +250,23 @@ newReduction loc arrexp accexp body =
       (i, iv) <- newVar loc "i" (Elem Int)
       body (arr, arrv) (acc, accv) (i, iv)
 
-newReduction2 :: SrcLoc -> [Exp] -> Exp
+newReduction2 :: SrcLoc -> [Exp] -> [Exp]
              -> (([Ident], Exp) -> ([Ident], Exp) -> (Ident, Exp) -> TransformM Exp)
              -> TransformM Exp
-newReduction2 loc arrexps accexp body = do
+newReduction2 loc arrexps accexps body = do
   (i, iv) <- newVar loc "i" (Elem Int)
   newLets "arr" arrexps $ \arr arrv ->
-    case typeOf accexp of
-      Elem (Tuple ets) -> do
+    case accexps of
+      [e] -> do
+        let t = typeOf e
+        (acc, accv) <- newVar loc "acc" t
+        let binder inner = LetPat (Id acc) e inner loc
+        binder <$> body (arr, arrv) ([acc], accv) (i, iv)
+      es -> do
+        let ets = map typeOf es
         (names, namevs) <- unzip <$> mapM (newVar loc "acc") ets
-        let binder inner = LetPat (TupId (map Id names) loc) accexp inner loc
+        let binder inner = LetPat (TupId (map Id names) loc) (TupLit accexps loc) inner loc
         binder <$> body (arr, arrv) (names, TupLit namevs loc) (i, iv)
-      t -> do (acc, accv) <- newVar loc "acc" t
-              let binder inner = LetPat (Id acc) accexp inner loc
-              binder <$> body (arr, arrv) ([acc], accv) (i, iv)
 
 newLet :: String -> Exp -> (Ident -> Exp -> TransformM Exp)
        -> TransformM Exp

@@ -400,24 +400,24 @@ letNormExp (Filter2 lam arr pos) = do
     arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
     makeVarExpSubst "tmp_filt2" pos (Filter2 lam' arr' pos)
 
-letNormExp (Reduce2 lam ne arr tp pos) = do
+letNormExp (Reduce2 lam nes arr tp pos) = do
     lam'  <- letNormLambda lam
-    ne'   <- subLetoNormExp "tmp_arg" ne
+    nes'  <- mapM (subLetoNormExp "tmp_arg") nes
     arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
-    makeVarExpSubst "tmp_red2" pos (Reduce2 lam' ne' arr' tp pos)
+    makeVarExpSubst "tmp_red2" pos (Reduce2 lam' nes' arr' tp pos)
 
-letNormExp (Scan2 lam ne arr tp pos) = do
+letNormExp (Scan2 lam nes arr tp pos) = do
     lam'  <- letNormLambda lam
-    ne'   <- subLetoNormExp "tmp_arg" ne
+    nes'  <- mapM (subLetoNormExp "tmp_arg") nes
     arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
-    makeVarExpSubst "tmp_scan2" pos (Scan2 lam' ne' arr' tp pos)
+    makeVarExpSubst "tmp_scan2" pos (Scan2 lam' nes' arr' tp pos)
 
-letNormExp (Redomap2 lam1 lam2 ne arr tp1 pos) = do
+letNormExp (Redomap2 lam1 lam2 nes arr tp1 pos) = do
     lam1' <- letNormLambda lam1
     lam2' <- letNormLambda lam2
-    ne'   <- subLetoNormExp "tmp_arg" ne
+    nes'  <- mapM (subLetoNormExp "tmp_arg") nes
     arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
-    makeVarExpSubst "tmp_redomap2" pos (Redomap2 lam1' lam2' ne' arr' tp1 pos)
+    makeVarExpSubst "tmp_redomap2" pos (Redomap2 lam1' lam2' nes' arr' tp1 pos)
 
 -------------------------------------------------------
 -------------------------------------------------------
