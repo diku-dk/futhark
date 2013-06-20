@@ -94,7 +94,7 @@
 %\copyrightdata{978-1-4503-1577-7/12/09}
 
 
-\title{A Structural-Analysis Approach To Fusion}
+\title{A T2 Graph-Reduction Approach To Fusion}
 %\subtitle{\LO{} Status Report}
 %\subtitle{Subtitle Text, if any}
 
@@ -150,7 +150,9 @@ We report an implementation of the fusion algorithm for a
 to support {\em nested} parallelism across {\em regular} 
 multi-dimensional arrays.  We succinctly describe \LO's
 semantics and the compiler infrastructure on which the fusion
-transformation relies.
+transformation relies, and present compiler-generated 
+statistics related to the success of fusion analysis on a set 
+of six benchmarks. 
 
 \end{abstract}
 
@@ -169,22 +171,14 @@ fusion, autoparallelization, functional language
 \section{Introduction}
 \label{sec:Introduction}
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%% HL Introduction: financial motivation + GPU motivation %%%
-%%% + our generic-pricing case study + short description   %%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-%The motivation for the $\mathcal{L}_0$ language steams from
-%one of the goals of the {\sc hiperfit} project
-
 One of the main goals of the {\sc hiperfit} project has been to
 develop the infrastructure necessary to write real-world, big-data 
 financial applications in a hardware-independent language that can 
-be efficiently executed on massively parallel hardware, e.g., {\sc gpgpu}.  % various 
+be efficiently executed on massively parallel hardware, e.g., {\sc gpgpu}.  
 
-In this sense we have examined several such computational kernels~\cite{PricingFHPC}, 
+In this sense we have examined several such computational kernels~\cite{LexiFiPricing}, 
 originally implemented in languages such as OCaml, Python, C++, C
-and measuring in the range of hundreds/thousands lines of compact code, 
+and measuring in the range of hundreds of lines of compact code, 
 with two main objectives in mind: 
 \begin{itemize}
     \item[1.] What should be a suitable core language that, on the
@@ -207,7 +201,7 @@ and regular arrays are more amenable to compiler optimizations.
 %
 It is {\em nested} because our suite exhibits several layers of 
 parallelism that cannot be exploited by flat parallelism in the style of 
-{\sc repa}~\cite{REPA}, e.g., several innermost {\tt scan} or 
+{\sc repa}~\cite{keller2010regular}, e.g., several innermost {\tt scan} or 
 {\tt reduce} operations and at least one (semantically)
 sequential loop per benchmark.
 %
@@ -216,7 +210,7 @@ in exploiting high-level program invariants rather than in proving them.
 The common example here is parallelism: {\tt map-reduce} 
 constructs are inherently parallel, while Fortran-style \texttt{do} 
 loops require sophisticated analysis to decide parallelism. 
-Furthermore, such analyses~\cite{Blume94RangeTest,SUIF,CosPLDI} %there is solid evidence that such 
+Furthermore, such analyses~\cite{Blume94RangeTest,SUIF,CosPLDI,SummaryMonot} 
 have not yet been integrated in the repertoire of commercial compilers,
 likely due to ``heroic effort'' concerns, albeit
  (i) their effectiveness was demonstrated on comprehensive suites, and
@@ -237,31 +231,108 @@ regardless of whether they are provided as a language construct or are
 derived from tail-recursive functions via a code transformation. 
 
 Finally, an indirect consequence of having to deal with sequential (dependent) 
-%, which semantically update an unknown array index at a time, 
 loops is that \LO{} provides support for ``in-place updates'' of 
 array elements. The semantics is the functional one, i.e., %the result is a
 deep copy of the original array but with the corresponding element replaced,
 \texttt{intersected} with the imperative one, i.e., if aliasing may prevent 
-an in-place implementation a compile-time error is signaled.   The approach
-enables a (optimized) cost model that the user likely assumes, while 
-preserving the functional semantics. 
-%allows both a functional semantics and the cost model that the user likely assumes.
-
+an in-place implementation a compile-time error is signaled.   This approach
+enables the intuitive (optimized) cost model that the user likely assumes, 
+while preserving the functional semantics. 
+%
 Section~\ref{sec:Prelim} provides an overview of the \LO{} language % brief 
-and of the enabling optimizations that set the stage for fusion. %'s application.% transformation.
-
-%\footnote{
-%The reasons are that our current benchmark does not require irregular arrays in 
-%the sense of {\sc nesl}~\cite{BlellochCACM96NESL}, and regular arrays are more
-%amenable to compiler optimizations.
-%}    
-%L$0$ is a first-order functional core-language intended to support nested 
-%parallelism across regular multi-dimensional arrays, 
-%%%, i.e., sizes of each array dimension match,
-%by means of the typical set of second-order array combinators such
-%as \texttt{map}, \texttt{reduce}, \texttt{scan}, \texttt{filter}, \texttt{zip}, etc.
+and of the enabling optimizations that set the stage for fusion. 
 
 
+\subsection{Fusion and Principal Contributions}
+\label{subsec:introfusion}
+
+%Fusion is a code transformation that merges the producer
+%of a list (array) and its consumer by combining the functions 
+%that are used to process the elements of the list.
+%
+%For example, 
+The simplest form of fusion is the one that
+relies on the invariant that mapping each element   % that states 
+of a list by a function {\tt f}, and then mapping each element 
+of the result with a function {\tt g} is the same as
+mapping each element of the original list with the 
+composition of {\tt g} with {\tt f}. In Haskell-like notation
+this can be written as: \\ {\tt map g . map f $\equiv$ map (g . f)},
+where the semantics of {\tt map} is  
+{\tt map f [a$_1$,..,a$_n$] = [f a$_1$,..,f a$_n$]}.
+%
+One can already observe that fusion may significantly optimise 
+computation since it may replace some of the global-memory
+accesses with local memory accesses, e.g., if the element type
+is a basic type.
+%
+
+Furthermore, defining {\tt reduce} as: 
+{\tt reduce $\oplus$ e [a$_1$,..,a$_n$] $\equiv$ e$\oplus$a$_1$$\oplus$...$\oplus$a$_n$},
+it is possible to fuse a {\tt reduce} with a {\tt map} as
+{\tt reduce~$\oplus$~e~.~map~f~$\equiv$~reduce~$\oplus$~e~.~map~(\emp{reduce~$\oplus$~e .~map~f}) . split$_P$},
+i.e., the list is distributed between $P$ processors, each processor executes \emp{sequentially} 
+its chunk, and at the end the result is reduced (in parallel) across processors~\cite{BirdListTh}.
+One may observe that this fusion may asymptotically improve the space requirement, e.g.,
+if the input array is the iteration space. 
+%
+Another observation is that both {\tt map} and {\tt reduce} have well-known 
+efficient parallel implementations and that fusion preserves parallelism. 
+
+While in a functional language the (richer) semantics of operators
+such as {\tt map}, {\tt reduce} makes fusion easy to understand and to implement 
+by the compiler, this is not the case in an imperative context.
+For example, fusing two   % even in the absence of destructive updates,  
+parallel loops requires to prove that the set of array indices 
+written by iteration $i$ of the producer loop, denoted $W_i$, is a 
+superset of the set of indices read by the consumer loop, denoted $R_i$, and also
+that $W_i \cap R_j = \emptyset, \forall i \neq j$.
+%
+This analysis quickly requires ``heroic effort'' when the loops' 
+body exhibits non-trivial control flow, e.g., loop nests.
+
+Current fusion work in the functional context takes two main directions:
+One approach is to perform fusion aggressively, i.e., even when it duplicates
+computation, and to provide the user with primitives that inhibit 
+fusion~\cite{keller2010regular,claessen2012expressive}.
+The other approach performs fusion conservatively by means of rewrite 
+rules or skeletons~\cite{jones2001playing,chakravarty2007data,bergstrom2012nested}.
+Since the latter relies tightly on the inline engine, e.g., to create exploitable 
+patterns, these approaches typically do not fuse an array that is used multiple times.
+%(in combinators such as {\tt map}).
+
+Main contributions of this paper are:
+\begin{itemize}
+    \item A structural analysis technique
+            that succeeds to conservatively fuse, 
+            i.e., without duplicating computation, 
+            even when an array has multiple uses, {\em if} 
+            the dependency graph of the producer-consumer 
+            array combinators is reducible 
+            (via T$_2$ reduction). 
+    \item A compositional algebra for fusion that
+            includes the {\tt map}, {\tt reduce}, and {\tt filter} combinators.
+            These are presented in Section~\ref{sec:fusion}. 
+    \item An analysis refinement that enables fusion across
+            (otherwise) ``inhibitor'' built-in functions such
+            as {\tt size}, {\tt split}, {\tt transpose}. 
+    \item Two other transformations (not implemented yet) that enable 
+            and are enabled by fusion and that optimize the use of 
+            {\tt scan} and {\tt reduce}. For example, \textsc{Iswim}
+            interchanges the outer-{\tt scan} with an inner {\tt map} 
+            nest, and thus enhances the (exploitable) parallelism 
+            degree of the program.
+    \item Statistics related to the success of fusion analysis 
+            on a set of six benchmarks. 
+            These are discussed in Section~\ref{sec:Discuss}.
+\end{itemize}
+   
+Finally, Section~\ref{sec:RelWork} compares with related work and
+Section~\ref{sec:Concl} concludes the paper.
+
+%\begin{colorcode}
+%map f . map g \mymath{\equiv} map (f . g)
+%\end{colorcode} 
 
 
 
@@ -337,9 +408,6 @@ such as loop interchange, distribution.
 %in order to make it easier to express loop optimisations and certain
 %sequential loops.
 
-For example, denoting by {\tt t} the type of {\tt x}, the loop in
-Figure~\ref{fig:loop-recursion} has the semantics of a call to the
-recursive function on the right-hand side.
 
 \begin{figure}
 \begin{minipage}{0.35\columnwidth}
@@ -367,10 +435,14 @@ in body
 \label{fig:loop-recursion}
 \end{figure}
 
+For example, denoting by {\tt t} the type of {\tt x}, the loop in
+Figure~\ref{fig:loop-recursion} has the semantics of a call to the
+tail-recursive function on the right-hand side.
+%
 This was inspired by Single Assignment C~\cite{grelck2006sac}, which
 also uses loops with semantics that essentially desugar into
-tail-recursive functions (although SaC loops also have significant
-performance repercussions).
+tail-recursive functions.
+%(although SaC loops also have significant performance repercussions).
 
 \begin{figure}[bt]
 \begin{tabular}{lrll}
@@ -431,7 +503,7 @@ $prog$ & $::=$ & $\epsilon$ \\
 \subsection{Second-order array combinators}
 \label{sec:soacs}
 
-Most array operations in \LO{} are done through built-in second-order
+Most array operations in \LO{} are achieved through built-in second-order
 array combinators ({\sc soac}s).  The available {\sc soac}s can be seen in Figure
 \ref{fig:soacs}, along with our syntax for anonymous and curried
 functions.  As \LO{} is first-order, these anonymous functions are
@@ -489,12 +561,12 @@ Its semantics is as follows.
 \text{\tt redomap}
 & :: (\alpha\rightarrow\alpha\rightarrow\alpha)\rightarrow(\alpha\rightarrow\beta\rightarrow\alpha)\\
 & \quad\rightarrow\alpha\rightarrow[\beta]\rightarrow\alpha \\
-\text{\tt redomap($f$,$g$,$x$,$v$)} & \equiv \text{\tt foldl($g$, $x$, $v$)}
+\text{\tt redomap($\odot$,$g$,$x$,$v$)} & \equiv \text{\tt foldl($g$, $x$, $v$)}
 \end{align*}
 Note that the runtime semantics is a left-fold, not a normal \LO{}
-\texttt{reduce}.  The rationale behind {\tt redomap} is as follows;
-using a Haskell-like syntax.
-
+\texttt{reduce}.  We use a Haskell-like syntax to explain the rationale 
+behind {\tt redomap}:
+%
 {\tt (red $\odot$ e) . (map f)} can be formally transformed, via the
 list homomorphism ({\sc lh}) promotion lemma~\cite{BirdListTh}, to an
 equivalent form:  \\
@@ -511,11 +583,13 @@ ${\tt red}\mbox{ }\odot\mbox{ }{\tt e}\mbox{ }.\mbox{ }{\tt map}\mbox{
 }{\tt f}\mbox{ }\emphh{\equiv}$ $\mbox{ }{\tt red}\mbox{ }\odot\mbox{
 }{\tt e}\mbox{ }.\mbox{ }{\tt pmap}_{p} \mbox{ }$ $(\emp{{\tt foldl}\mbox{
   }{\tt g}\mbox{ }{\tt e}})$\\
-It follows that in order to be generate parallel code for {\tt (red
-  $\odot$ e) . (map f)} we need to remember either $\odot$ and {\tt f}
-or $\odot$ and {\tt g}. We chose the latter, i.e., {\tt
-  redomap($\odot$, g, e)}, because it allows a richer compositional
-algebra for fusion.
+It follows that in order to be generate parallel code for \\ 
+{\tt (red $\odot$ e) . (map f)} we need to record either $\odot$ and {\tt f},
+or $\odot$ and {\tt g}. We chose the latter, i.e., {\tt redomap($\odot$, g, e)}, 
+because it allows a richer compositional algebra for fusion.
+(In particular, it  allows to fuse {\tt reduce $\circ$ map $\circ$ filter}
+into a {\tt redomap} without duplicating computation, see 
+Figure~\ref{fig:CompatFuse} in Section~\ref{fig:fusionDS}).
 
 \subsubsection{Tuple shimming}
 \label{sec:shimming}
@@ -540,12 +614,13 @@ We will make use of this shortcut in this paper.
 When writing sequential loops, it is often very convenient to update
 the elements of an array in-place.  However, in order to perform such
 an update without violating referential transparency, we must be able
-to guarantee that no other arrays share data with the array.  To
+to guarantee that no other array that is used on any execution
+path following the update shares data with the updated array.  To
 perform this check, \LO{} uses an extension to the type system in the
 form of {\em uniqueness attributes} inspired by
 Clean~\cite{clean-uniqueness-types} and Rust~\cite{rust}, as well as
 aliasing analysis.  We extend the syntax for array types to permit a
-prefix asterisk, as seen in Figure~\ref{fig:uniqueness-types},
+prefix asterisk, as in Figure~\ref{fig:uniqueness-types},
 denoting a unique array.
 
 \begin{figure}[bt]
@@ -606,7 +681,7 @@ at a finer granularity than whole arrays --- after {\tt let a = b[0]},
 \subsection{Compiler pipeline}
 \label{sec:compiler-pipeline}
 
-The compilation pipeline in the current \LO{} compiler is outlined on
+The compilation pipeline in the current \LO{} compiler is outlined in
 Figure~\ref{fig:l0cpipeline}.  Type checking is done on the original
 program, to ensure that any error messages refer to the names written
 by the programmer, but all subsequent stages consume and produce
@@ -620,7 +695,7 @@ is fully expanded to cover all elements of the tuple value to be
 matched.  One notable property of the resulting program is that no
 variable is ever bound to a tuple.
 
-The enabling optimisations loop consists of
+The enabling optimisations loop consists of:
 \begin{enumerate}
 \item aggressive inlining, i.e., building the program call-graph
   and inlining its leafs to a fix point (inlines all non-recursive functions),
@@ -774,6 +849,7 @@ fun real main([real] a) =
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Fusion: A Structural-Analysis Transformation}
+\label{sec:fusion}
 
 The fusion transformation, presented in this section, assumes a {\em
   normalized} program, i.e., by running the transformations introduced
@@ -791,7 +867,7 @@ Section~\ref{sec:compiler-pipeline}
 \label{fig:T1T2}
 \end{figure}
 
-Structural analysis is rooted in the T$_1$-T$_2$ transformation~\cite{T12}
+Structural analysis is rooted in the T$_1$-T$_2$ transformation~\cite{red_dragon}
 depicted in Figure~\ref{fig:T1T2}.
 If repeated application of T$_1$ and T$_2$ to a control-flow graph ({\sc cfg}) 
 results in one point, then the {\sc cfg} is said to be reducible, i.e.,
@@ -834,8 +910,8 @@ either lead to illegal programs or to duplicated computation.
 %
 Section~\ref{sec:FusingOnce} introduces the data structure
 that stores the result of the first pass, and discusses the rules 
-for processing one {\sc soac} node, including the compositional
-algebra under which {\sc soac}s are fused. 
+for processing one second-order array combinator ({\sc soac}) node, 
+including the compositional algebra under which {\sc soac}s are fused. 
 Finally, Section~\ref{sec:bwdPass} describes the data-flow rules of
 the first pass for the rest of \textsc{AbSyn} nodes, and briefly 
 discusses the second pass of the analysis.
@@ -1007,7 +1083,7 @@ it would result either in incorrect programs or in duplicated computation:
                 would allow the fusion of {\tt x} at the cost of computing {\tt f(arr[i])} (twice).
     \item [6.] Finally, fusing two arrays produced by the same {\sc soac} each in another
                 {\sc soac} still duplicates computation. This case can sometimes
-                be optimized by ``horizontally'' merging the {\sc soac} consumer,
+                be optimized by horizontally fusing the {\sc soac} consumers,
                 e.g., the two {\tt reduce2}s are merged in {\tt reduce2(g,0,1, x,y)},
                 where {\tt g(e$_1$,e$_2$,x$_i$,y$_i$)~$\equiv$~(e$_1$+x$_i$, e$_2$*y$_i$)}.
 \end{itemize}
@@ -1228,11 +1304,11 @@ lambda, {\tt lam\_vars}, (ii) the current data-flow result, {\tt res}, and
 There are four conditions, {\tt all4\_ok}, that have to be met for the 
 current {\sc soac}, denoted {\sc s}$_c$, to be fused with at least one kernel: %existent
 \begin{itemize}
-    \item [1.] None of {\tt soac}'s output-array names, {\tt out\_nms}, 
+    \item [1.] None of {\sc s}$_c$'s output-array names, {\tt out\_nms}, 
                 belong to the result's {\tt unfusable} set.
     \item [2.] There exists some kernels, {\tt to\_fuse\_kers}, found by look-ups
                 in the result's {\tt inpArr}, whose input arrays belong to {\tt out\_nms}.
-                If the previous condition is met then it is guaranteed (see Section~\ref{sec:bwdPass}) 
+                If both conditions are met then it is guaranteed (see Section~\ref{sec:bwdPass}) 
                 that all {\tt to\_fuse\_kers} are located on disjoint execution paths,
                 and that none of them are in a loop or lambda 
                 that does not contain {\sc s}$_c$, 
@@ -1423,6 +1499,8 @@ while preserving the parallel semantics of the fusion's result.
 For example, a {\tt reduce2} can be fused with a {\tt filter2}, then with a 
 number of (partial) {\tt map2}s, then again with a {\tt filter2}, and so on. 
   
+$\mbox{ }$\\
+
 
 %\subsection{Fusion Structural-Analysis Algorithm}
 \subsection{Remaining~Data-Flow~Rules And Second-Analysis Pass}
@@ -1531,7 +1609,7 @@ expression.   If the expression is:
                 the kernels are necessarily on disjoint paths, and also (ii)
                 the semantic union between {\tt b$_r$} and {\tt c$_r$}, except that 
                 the intersection between the {\tt inpArr} key set of {\tt c$_r$} and 
-                {\tt b$_r$} becomes unfusable, i.e., the arrays in the intersection set
+                {\tt b$_r$} becomes {\em unfusable}, i.e., the arrays in the intersection set
                 may be used by two kernels on one execution path. 
             This solves both issues of \emp{Case 4} in Figure~\ref{fig:dontFuse}.
     \item an in-place update expression then (i) the new binding is added to the
@@ -1597,7 +1675,7 @@ Since these transformations both enables and are enabled by fusion,
 we plan to encompass them in our fusion analysis implementation in the
 near future.
 Section~\ref{sec:results} shows fusion-related statistics
-from five benchmarks, which were gathered by compiler instrumentation.
+from six benchmarks, which were gathered by compiler instrumentation.
 
 \subsection{Fusion Hindrances}
 \label{sec:inhibitors}
@@ -1619,9 +1697,9 @@ let (\emphh{x\mymath{\myindx{1}}},\emphh{x\mymath{\myindx{2}}})=split(n,\emp{x})
 let y = reduce2(g,\emphh{x\mymath{\myindx{1}}},\emphh{x\mymath{\myindx{2}}})..    let \emphh{x\mymath{\myindx{2}}} = map2(f, a\mymath{\myindx{2}})   in
                               let y = reduce2(g,\emphh{x\mymath{\myindx{1}}},\emphh{x\mymath{\myindx{2}}})..
 \end{colorcode}
-the use of {\tt x} in {\tt size} and {\tt split} in the righthand-side code 
+the use of {\tt x} in {\tt size} and {\tt split} in the lefthand-side code 
 would inhibit fusion.
-The code on the left side suggests that a possible solution is to propagate 
+The code on the right side suggests that a possible solution is to propagate 
 the inhibitors as far up in the program as possible, e.g., {\tt a} and {\tt x} 
 are the input and result of a {\tt map2}, therefore they must have the same 
 (outermost) size. Now {\tt x$_1$} and {\tt x$_2$} can be fused inside the 
@@ -1632,6 +1710,63 @@ call statements of inhibitor functions (for now {\tt size} and {\tt assertZip})
 with the kernels that use, for example, the argument of {\tt size} 
 as input, and by performing the necessary translations, e.g., 
 {\tt size(x) $\Rightarrow$ size(a)}, at the time when {\tt x} is fused.
+
+
+\begin{figure}[bt]
+%\hrule ~
+\vbox{
+\begin{colorcode}
+// \emp{FLAT-PARALLELISM MATRIX MULTIPLICATION}
+fun   int   redplus1( [int]  a) = \emp{reduce}(op +, 0, a)
+fun  [int]  redplus2([[int]] a) = \emp{map}   (redplus1, a)
+
+fun  [int]  mul1( [int]  a, [int]  b)=\emp{map}(op *,zip(a,b))
+fun [[int]] mul2([[int]] a,[[int]] b)=\emp{map}(mul1,zip(a,b))
+
+fun [[int]] replin(int N, [int] a) = \emp{replicate}(N, a)
+
+fun [[int]] matmultFun(int N, [[int]] x, [[int]] y ) =
+    let yt  = \emp{replicate}( N, transpose(b) ) in
+    let ar  = \emp{map}      ( replin(N),    x ) in
+    let abr = \emp{map}      (mul2, zip(ar, yt)) in
+        map(redplus2, abr) 
+
+// \emp{MATRIX MULTIPLICATION AFTER FUSION}
+fun [[int]] matmultFun(int N, [[int]] x, [[int]] y ) =
+  let yt = transpose(y) in
+  let d1 = assertZip(x, iota(N)) in
+  let res= 
+    \emphh{map2}(fn [int] ([int] a) =>
+           let d2 = assertZip(yt, iota(N)) in
+           let t1 = 
+             \emphh{map2}(fn int ([int] t2) => 
+                    let d3 = assertZip(t2, a) in
+                    let t3 = 
+                      \emphh{redomap2}(fn int (int u, int v ) 
+                                    => u + v
+                              ,fn int(int e,int t4,int t5) 
+                                  => let p = t4 * t5 
+                                     in e + p
+                              ,0, a, t2) 
+                    in t3
+                 , yt) 
+           in t1
+        , x) 
+  in res
+\end{colorcode}
+} \vspace{-2ex}
+\caption{ Matrix Multiplication Before and After Fusion }
+\label{fig:MatMult}
+\end{figure}
+
+Figure~\ref{fig:MatMult} demonstrates the application of our analysis to
+a matrix multiplication implementation~\cite{keller2010regular} that uses 
+flat-parallelism. One can observe that 
+(i)   the obtained code resembles the common implementation, 
+        i.e., a {\tt reduce $\circ$ map} inside two nested {\tt map}s,
+(ii)  that all {\tt replicate}s have been eliminated by fusion, and
+(iii) that the {\tt assertZip}s have been moved as to not hinder fusion.
+
 
 \subsection{Possible Extensions: \textsc{Iswim}/\textsc{Irwim} and \textsc{RedFlat}}
 \label{sec:extensions}
@@ -1727,7 +1862,7 @@ i.e., the perfect map nest may be created by fusion.
                 \emphh{map2}\mymath{\myindu{n}}(\mymath{\oplus}, x\mymath{\myindu{1}\myindx{1}},.., x\mymath{\myindu{1}\myindx{k}}, x\mymath{\myindu{2}\myindx{1}},.., x\mymath{\myindu{2}\myindx{k}}) 
      , (ne\mymath{\myindx{1}}, ..., ne\mymath{\myindx{k}}), a\mymath{\myindx{1}}, ..., a\mymath{\myindx{k}} 
      )             \emphh{\mymath{\equiv}} 
-let (.., re\mymath{\myindx{t}}, ..) = (.., map\mymath{\myindu{n}}( replicate(s), ne\mymath{\myindx{t}} ), ..)
+let (.., re\mymath{\myindx{t}}, ..) = (.., map\mymath{\myindu{n}}( replicate(1), ne\mymath{\myindx{t}} ), ..)
 // replicate dim n of neutral elems so map2 sizes match
 let ( y\mymath{\myindx{1}},.., y\mymath{\myindx{k}} ) =
   \emphh{map2} (fn ( [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{1}}]],    .., [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{k}}]] ) 
@@ -1758,9 +1893,9 @@ reduce2(\mymath{\oplus}, (e\mymath{\myindx{1}},..,e\mymath{\myindx{k}}), flatten
 
 The top part of Figure~\ref{fig:TransfGen} shows the generalization
 for \textsc{Iswim} (\textsc{Irwim}) for a depth-{\tt n} map nest.   
-The differences are that (i) an extra {\tt n$^{th}$} dimension is 
+The differences are (i) that an extra {\tt n$^{th}$} dimension is 
 created for each neutral element, in order to match the input-array 
-sizes for the {\tt map},  and (ii) the two-ways use of the generalized 
+sizes for the {\tt map},  and (ii) the two-way use of the generalized 
 {\tt transpose} for bringing the first dimension to position {\tt n}
 and back again. We remark that the extra {\tt replicate} can be compiled
 away by fusion coupled with a refinement of the copy-propagation 
@@ -1769,8 +1904,8 @@ transformation (both supported by current compiler).
 The second transformation, named \textsc{RedFlat} and depicted in the 
 bottom-part of Figure~\ref{fig:TransfGen}, relies on the well-known equivalence:
 \begin{colorcode}
-let x = map2(fn [real] ([[real]] x))  \emphh{\mymath{\equiv}}
-              => reduce2(op +, 0.0, x)   reduce2( op +, 
+let x = map2(fn real ([real] x))      \emphh{\mymath{\equiv}}
+              => reduce2(op +,0.0,x)     reduce2( op +, 
             , a) in                               0.0,
 reduce2(op +, 0.0, x)                      flatten(2, a))
 \end{colorcode}
@@ -1791,7 +1926,7 @@ a sequential loop ({\tt reduce}). The fact that the inner loop is parallel
 is not in general sufficient to guarantee the correctness of loop interchange, 
 albeit a parallel loop can always be interchanged inwards.  
 
-\subsection{Fusion Statistics}
+\subsection{Fusion-Analysis Statistics}
 \label{sec:results}
 
 Since the \LO{} language is currently interpreted, we cannot measure directly
@@ -1807,12 +1942,18 @@ consumer.  The test programs are:
 
 \begin{description}
 %\begin{itemize}
-\item[P0:] a real-world pricing kernel for financial derivatives~\cite{PricingFHPC}, %PricingLexiFi
-\item[P1:] a real-world market calibration kernel that computes some of the parameters of \textbf{P0},%CalibLexiFi
-\item[P2:] stochastic volatility calibration via Crank-Nicolson finite differences solver~\cite{} %HiperfitEgCos
-\item[P3:] %BabyBear
-\item[P4:] %Matrix multiplication
-\item[P5:] %MSSP
+\item[P0:] a real-world pricing kernel for financial 
+                derivatives~\cite{LexiFiPricing}, %PricingLexiFi
+\item[P1:] a real-world market calibration kernel that 
+                computes some of the parameters of \textbf{P0},%CalibLexiFi
+\item[P2:] a real-world kernel for stochastic volatility calibration via 
+                Crank-Nicolson finite differences solver~\cite{munkIntro}, %HiperfitEgCos
+\item[P3:] a flat-parallelism, array-based implementation of 
+                the shortest-path algorithm (whose shape resembles matrix multiplication),
+\item[P4:] the flat-parallelism implementation of matrix multiplication shown 
+            in Figure~\ref{fig:MatMult}, i.e., similar to the one 
+            of {\sc repa}~\cite{keller2010regular}, %Matrix multiplication
+\item[P5:] an implementation of the maximal~segment~sum~problem~{\sc mssp}. %MSSP
 %\end{itemize}
 \end{description}
 
@@ -1820,14 +1961,14 @@ consumer.  The test programs are:
 \begin{center}
 \begin{tabular}{l|c|c|c|c|c|c}
 Fusion Statistics & P0 & P1 & P2 & P3 & P4 & P5 \\\hline
-Lines Of Code          & 283 & 859 & 182 & 29 & 21 & 22\\\hline\hline
+Lines Of Code          & 283 & 859 & 182 & 23 & 19 & 22\\\hline\hline
 {\tt map} $\circ$ {\tt map}          & 10 & 1  & 8  & 5 & 3  &   \\\hline
 {\tt map} $\circ$ {\tt replicate}    &    &    & 12 & 2 & 2  &   \\\hline
 {\tt redomap} $\circ$ {\tt filter}   & 1  &    &    &   &    &   \\\hline
 {\tt redomap} $\circ$ {\tt map}      & 5  &    &    &   &    &   \\\hline
 {\tt reduce} $\circ$ {\tt map}       & 6  & 12 &    & 2 & 1  & 1 \\\hline
 {\tt reduce} $\circ$ {\tt replicate} &    & 3  &    &   &    &   \\\hline\hline
-Interesting            &    & 1  & 1  &   &    &   
+Interesting            &    & 1  & 1  &   &    &   \\\hline
 \end{tabular}
 \end{center}
 \vspace{-2ex}
@@ -1835,12 +1976,33 @@ Interesting            &    & 1  & 1  &   &    &
 \label{fig:fusion}
 \end{figure}
 
+The results indicate that the {\tt (redo)map $\circ$ map} reductions 
+are the most common, and that there are a significant number of reductions 
+involving {\tt replicate}.  The reason for the latter case is that
+{\tt replicate} is often used to match either the array sizes, as in 
+the case of the flat-parallelism style matrix multiplication, or the 
+result type of a reduce. Our aggressive fusion of {\tt replicate}
+eliminates these inefficiencies, e.g., it transforms the flat-parallel
+matrix multiplication to the typical three-level nest of 
+two {\tt map}s and a {\tt redomap}.
 
+There is only one {\tt redomap $\circ$ filter} reduction, appearing 
+in the Sobol random-number generator, albeit an important one:
+It would increase the parallelism degree by a factor of $32$, i.e., the size 
+of the input array, and would also allow efficient computation on {\sc gpgpu},
+i.e., a segmented reduce of a power-of-two size requires only 
+local {\sc gpgpu} barriers, rather than multiple execution of a 
+{\sc gpgpu} kernel. 
+
+Finally, benchmark P0 presents a case where the application of 
+\textsc{Iswim} would have a significant impact: \textsc{Iswim} would provide 
+an extra dimension of exploitable parallelism of size $365$ 
+on a data set that starves for additional parallelism.
 
 \section{Related Work}
 \label{sec:RelWork}
 
-Our uniqueness attributes have some similarities the the ``owning
+Our uniqueness attributes have some similarities to the ``owning
 pointers'' found in the impure language Rust~\cite{rust}, although
 there are deep differences.  In Rust, owning pointers are used to
 manage memory -- when an owning pointer goes out of scope, the memory
@@ -1894,7 +2056,7 @@ representation as constructors for delayed arrays, on which fusion is
 performed by tree contraction.  Accelerate supports multiple arrays as
 input to the same array operation (using a {\tt zipWith} construct).
 Although arrays are usually used at least twice (once for getting the
-size, once for the data), doesn't seem they can handle the difficult
+size, once for the data), it does not seem that they can handle the difficult
 case where the output of an array operation is used as input to two
 other array operations.
 
@@ -1908,7 +2070,35 @@ what we would term {\tt map $\circ$ map} fusion, however.
 \section{Conclusions and Future Work}
 \label{sec:Concl}
 
+Previous work on fusion has taken two main directions:
+{\em either} fusion is performed aggressively, 
+%potentially duplicating computation, 
+and the programmer is provided primitives to inhibit fusion, 
+e.g., forcing array to materialize, {\em or} fusion is 
+performed via rewriting rules.  The latter approach 
+relies tightly on the inliner engine and its applicability 
+is limited to the case when each fused array is consumed 
+by one array combinator. 
 
+This paper has presented a program-level, structural-analysis 
+approach to fusion that handles the difficult case in which 
+an array produced by a second-order array combinator ({\sc soac}), 
+such as {\tt map}, is consumed by several other {\sc soac}s
+(if the {\sc soac} producer-consumer dependency graph
+is reducible.)   This essentially allows fusion to operates
+across {\tt zip}/{\tt unzip}. 
+
+Furthermore, we have shown
+a compositional algebra for fusion that includes 
+array combinators, such as {\tt map}, {\tt reduce}, 
+{\tt filter}, and {\tt redomap}, and other built-in
+functions that would otherwise hinder fusion applicability,
+such as {\tt size}, {\tt split}, {\tt transpose}, etc.
+
+Finally, we have discussed two transformation, \textsc{Iswim}
+and \textsc{RedFlat}, that optimize some important uses
+of {\tt scan} and {\tt reduce}, and that can both enable and 
+be enabled by fusion.
 
 %%%%%%%%%%%%%%%%%%%%%%%%
 %%% END MAIN ARTICLE %%%
