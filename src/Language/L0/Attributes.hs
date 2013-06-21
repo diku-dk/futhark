@@ -14,7 +14,7 @@ module Language.L0.Attributes
 
   -- * Queries on expressions
   , expToValue
-  , expTails
+  , mapTails
   , typeOf
 
   -- * Queries on types
@@ -529,14 +529,18 @@ lambdaReturnType (CurryFun _ _ t _)  = toDecl t
 funDecByName :: Name -> ProgBase ty vn -> Maybe (FunDecBase ty vn)
 funDecByName fname = find (\(fname',_,_,_,_) -> fname == fname') . progFunctions
 
--- | Return those subexpressions where evaluation of the expression
+-- | Change those subexpressions where evaluation of the expression
 -- would stop.
-expTails :: ExpBase ty vn -> [ExpBase ty vn]
-expTails (LetPat _ _ body _) = expTails body
-expTails (LetWith _ _ _ _ body _) = expTails body
-expTails (DoLoop _ _ _ _ _ body _) = expTails body
-expTails (If _ t f _ _) = expTails t ++ expTails f
-expTails e = [e]
+mapTails :: (ExpBase ty vn -> (ExpBase ty vn)) -> ExpBase ty vn -> ExpBase ty vn
+mapTails f (LetPat pat e body loc) =
+  LetPat pat e (mapTails f body) loc
+mapTails f (LetWith dest src idxs ve body loc) =
+  LetWith dest src idxs ve (mapTails f body) loc
+mapTails f (DoLoop pat me i bound loopbody body loc) =
+  DoLoop pat me i bound loopbody (mapTails f body) loc
+mapTails f (If c te fe t loc) =
+  If c (mapTails f te) (mapTails f fe) t loc
+mapTails f e = f e
 
 -- | Convert an identifier to a 'ParamBase'.
 toParam :: IdentBase (TypeBase as) vn -> ParamBase vn
