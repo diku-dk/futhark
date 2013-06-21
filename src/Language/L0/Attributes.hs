@@ -445,7 +445,8 @@ typeOf (Map f arr _ _) = arrayType 1 et $ uniqueProp et
 typeOf (Reduce fun start arr _ _) =
   lambdaType fun [typeOf start, rowType (typeOf arr)]
 typeOf (Zip es _) = arrayType 1 (Elem $ Tuple $ map snd es) Nonunique
-typeOf (Unzip _ ts _) = Elem $ Tuple $ map (flip (arrayType 1) Unique) ts
+typeOf (Unzip _ ts _) =
+  Elem $ Tuple $ map (\t -> arrayType 1 t $ uniqueProp t) ts
 typeOf (Scan fun start arr _ _) =
   arrayType 1 et $ uniqueness et
     where et = lambdaType fun [typeOf start, rowType $ typeOf arr]
