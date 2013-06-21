@@ -51,6 +51,7 @@ module Language.L0.Traversals
   -- * Specific traversals
   , progNames
   , patNames
+  , freeInExp
   )
   where
 
@@ -58,6 +59,7 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.Writer
+import Control.Monad.Reader
 import Control.Monad.State
 import qualified Data.Set as S
 
@@ -347,3 +349,37 @@ progNames = execWriter . mapM funNames . progFunctions
 patNames :: Ord vn => TupIdentBase ty vn -> S.Set vn
 patNames (Id ident)     = S.singleton $ identName ident
 patNames (TupId pats _) = mconcat $ map patNames pats
+
+-- | Return the set of identifiers that are free in the given
+-- expression.
+freeInExp :: Ord vn => ExpBase ty vn -> S.Set (IdentBase ty vn)
+freeInExp = execWriter . flip runReaderT S.empty . expFree
+  where names = identityWalker {
+                  walkOnExp = expFree
+                , walkOnLambda = lambdaFree
+                , walkOnIdent = identFree
+                }
+
+        identFree ident = do
+          bound <- asks $ S.member (identName ident)
+          unless bound $ tell $ S.singleton ident
+
+        expFree (LetPat pat e body _) = do
+          expFree e
+          local (`S.union` patNames pat) $ expFree body
+        expFree (LetWith dest src idxs ve body _) = do
+          identFree src
+          mapM_ expFree idxs
+          expFree ve
+          local (S.insert $ identName dest) $ expFree body
+        expFree (DoLoop pat mergeexp i boundexp loopbody letbody _) = do
+          expFree mergeexp
+          expFree boundexp
+          local (`S.union` (identName i `S.insert` patNames pat)) $ do
+            expFree loopbody
+            expFree letbody
+        expFree e = walkExpM names e
+
+        lambdaFree (AnonymFun params body _ _) =
+          local (`S.union` S.fromList (map identName params)) $ expFree body
+        lambdaFree (CurryFun _ exps _ _) = mapM_ expFree exps
