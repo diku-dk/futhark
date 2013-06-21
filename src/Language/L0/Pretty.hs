@@ -87,7 +87,7 @@ instance (Eq vn, Pretty vn) => Pretty (ExpBase ty vn) where
       text "in" </> ppr body
     | otherwise =
       text "let" <+> ppr dest <+> equals <+> ppr src <+>
-      text "with" <+> list (map ppr idxs) <+> text "<-" <+> ppr ve <+>
+      text "with" <+> list (map ppr idxs) <+> text "<-" <+> align (ppr ve) <+>
       text "in" </> ppr body
   pprPrec _ (Index v idxs _ _) = ppr v <> list (map ppr idxs)
   pprPrec _ (Iota e _) = text "iota" <> parens (ppr e)
