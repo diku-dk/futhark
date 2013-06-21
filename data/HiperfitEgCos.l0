@@ -49,9 +49,9 @@ fun *[[real]] setPayoff(real strike, [real] myX, [real] myY) =
     map(fn *[real] (real xi) => replicate(size(myY), max(xi-strike,0.0)), myX)
 
 // Returns new myMuX, myVarX, myMuY, myVarY.
-fun ([[real]] , [[real]] , [[real]] , [[real]]) updateParams
+fun (*[[real]] , *[[real]] , *[[real]] , *[[real]]) updateParams
     ([real] myX, [real] myY, [real] myTimeline, int g, real alpha, real beta, real nu) =
-    unzip (map(fn ([real],[real],[real],[real]) (real xi) =>
+    unzip (map(fn (*[real],*[real],*[real],*[real]) (real xi) =>
            unzip (map (fn (real,real,real,real) (real yj) =>
                   (0.0,
                    exp(2.0*(beta*log(xi) + yj - 0.5*nu*nu*myTimeline[g])),
