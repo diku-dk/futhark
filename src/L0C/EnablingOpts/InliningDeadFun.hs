@@ -44,8 +44,6 @@ mkUnnamedLamFun ftab (fnm,rtp,idds,body,pos) =
     in  (fnm,rtp,idds,body',pos)
 
 mkUnnamedLamExp :: M.Map Name FunDec -> Exp -> Exp
-mkUnnamedLamExp ftab (Mapall lam arrr pos) = 
-    Mapall (mkUnnamedLamLam ftab lam) (mkUnnamedLamExp ftab arrr) pos
 mkUnnamedLamExp ftab (Map lam arrr eltp pos) = 
     Map    (mkUnnamedLamLam ftab lam) (mkUnnamedLamExp ftab arrr) eltp pos
 mkUnnamedLamExp ftab (Filter lam arrr eltp pos) = 
@@ -57,8 +55,6 @@ mkUnnamedLamExp ftab (Scan lam ne arrr eltp pos) =
 mkUnnamedLamExp ftab (Redomap lam1 lam2 ne arrr eltp pos) = 
     Redomap (mkUnnamedLamLam ftab lam1) (mkUnnamedLamLam ftab lam2) 
             (mkUnnamedLamExp ftab ne  ) (mkUnnamedLamExp ftab arrr) eltp pos
-mkUnnamedLamExp ftab (Mapall2 lam arrs pos) =
-    Mapall2 (mkUnnamedLamLam ftab lam) (map (mkUnnamedLamExp ftab) arrs) pos
 mkUnnamedLamExp ftab (Map2 lam arrs eltp pos) =
     Map2    (mkUnnamedLamLam ftab lam) (map (mkUnnamedLamExp ftab) arrs) eltp pos
 mkUnnamedLamExp ftab (Filter2 lam arrs pos) =

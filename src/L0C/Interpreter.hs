@@ -450,13 +450,6 @@ evalExp (Filter fun arrexp _ pos) = do
                     case res of (LogVal True) -> return True
                                 _             -> return False
 
-evalExp (Mapall fun arrexp _) =
-  mapall =<< evalExp arrexp
-    where mapall (ArrayVal arr et) = do
-            els' <- mapM mapall $ elems arr
-            return $ arrayVal els' et
-          mapall v = applyLambda fun [v]
-
 evalExp (Redomap redfun mapfun accexp arrexp _ pos) = do
   startacc <- evalExp accexp
   vs <- arrToList pos =<< evalExp arrexp
@@ -520,16 +513,6 @@ evalExp e@(Filter2 fun arrexp loc) = do
   where filt x = do res <- applyLambda fun x
                     case res of (LogVal True) -> return True
                                 _             -> return False
-
-evalExp (Mapall2 fun arrexp loc) = do
-  vs <- mapall (map typeOf arrexp) =<< mapM evalExp arrexp
-  case vs of [v] -> return v
-             _   -> return $ TupVal vs
-  where mapall ts@(Array {}:_) vs = do
-          vss <- mapM (arrToList loc) vs
-          els' <- mapM (mapall $ map (stripArray 1) ts) $ transpose vss
-          return $ zipWith arrayVal (transpose els') ts
-        mapall _ vs = untuple <$> applyLambda fun vs
 
 evalExp (Redomap2 redfun mapfun accexp arrexps _ loc) = do
   startaccs <- mapM evalExp accexp

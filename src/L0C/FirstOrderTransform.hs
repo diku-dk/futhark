@@ -118,15 +118,6 @@ transformExp (Filter fun arrexp rowtype loc) =
           return $ checkempty loop
         where intval x = Literal (IntVal x) loc
 
-transformExp (Mapall fun arrexp loc) = transformExp =<< toMap arrexp
-  where toMap e = case peelArray 1 $ typeOf e of
-                    Just et -> do
-                      (x,xv) <- newVar loc "x" et
-                      body <- toMap xv
-                      let ot = arrayType (arrayDims et) (lambdaReturnType fun) Nonunique
-                      return $ Map (AnonymFun [toParam x] body ot loc) e et loc
-                    _ -> transformLambda fun [e]
-
 transformExp (Redomap redfun mapfun accexp arrexp _ loc) =
   newReduction loc arrexp accexp $ \(arr, arrv) (acc, accv) (i, iv) -> do
     let indexi = Index arr [iv] (stripArray 1 $ typeOf arrexp) loc
@@ -219,16 +210,6 @@ transformExp filtere@(Filter2 fun arrexps loc) =
           return $ checkempty loop
   where intval x = Literal (IntVal x) loc
         sub1 e = BinOp Minus e (intval 1) (Elem Int) loc
-
-transformExp (Mapall2 fun arrexps loc) = transformExp =<< toMap arrexps
-  where toMap es =
-          case mapM (peelArray 1 . typeOf) es of
-            Just rts -> do
-              (xs,_) <- unzip <$> mapM (newVar loc "x") rts
-              body <- toMap $ map Var xs
-              return $ Map2 (AnonymFun (map toParam xs) body (toDecl $ typeOf body) loc)
-                       es (Elem $ Tuple rts) loc
-            _ -> transformLambda fun es
 
 transformExp (Redomap2 redfun mapfun accexps arrexps _ loc) =
   newReduction2 loc arrexps accexps $ \(arr, _) (acc, accv) (i, iv) -> do

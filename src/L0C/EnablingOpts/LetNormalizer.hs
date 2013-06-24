@@ -343,18 +343,13 @@ letNormExp (Copy arr pos) = do
 
 
 -----------------------------------------------
----- Map/Filter/Mapall/Reduce/Scan/Redomap ----
+---- Map/Filter/Reduce/Scan/Redomap ----
 -----------------------------------------------
 
 letNormExp (Map lam arr tp1 pos) = do
     lam'  <- letNormLambda lam
     arr'  <- letNormExp arr >>= makeVarExpSubst "tmp_arr" pos
     makeVarExpSubst "tmp_map" pos (Map lam' arr' tp1 pos)
-
-letNormExp (Mapall lam arr pos) = do
-    lam'  <- letNormLambda lam
-    arr'  <- letNormExp arr >>= makeVarExpSubst "tmp_arr" pos
-    makeVarExpSubst "tmp_map" pos (Mapall lam' arr' pos)
 
 letNormExp (Filter lam arr tp pos) = do
     lam'  <- letNormLambda lam
@@ -389,11 +384,6 @@ letNormExp (Map2 lam arr tp1 pos) = do  -- tp2
     lam'  <- letNormLambda lam
     arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
     makeVarExpSubst "tmp_map2" pos (Map2 lam' arr' tp1 pos) -- tp2 
-
-letNormExp (Mapall2 lam arr pos) = do
-    lam'  <- letNormLambda lam
-    arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
-    makeVarExpSubst "tmp_mapall2" pos (Mapall2 lam' arr' pos)
 
 letNormExp (Filter2 lam arr pos) = do
     lam'  <- letNormLambda lam

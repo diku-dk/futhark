@@ -453,9 +453,6 @@ typeOf (Scan fun start arr _ _) =
   arrayType 1 et $ uniqueness et
     where et = lambdaType fun [typeOf start, rowType $ typeOf arr]
 typeOf (Filter _ arr _ _) = typeOf arr
-typeOf (Mapall fun e _) =
-  arrayType (arrayDims $ typeOf e) et Nonunique
-    where et = lambdaType fun [Elem $ elemType $ typeOf e]
 typeOf (Redomap redfun mapfun start arr rt loc) =
   lambdaType redfun [typeOf start, rowType $ typeOf $ Map mapfun arr rt loc]
 typeOf (Split _ _ t _) =
@@ -482,16 +479,6 @@ typeOf (Redomap2 redfun mapfun start arrs rt loc) =
   lambdaType redfun $ map typeOf start ++ case typeOf (Map2 mapfun arrs rt loc) of
                                             Elem (Tuple ts) -> ts
                                             t               -> [t]
-typeOf (Mapall2 fun es _) =
-    let inpdim= case map typeOf es of
-                  et:etps -> foldl min
-                             (arrayDims et)
-                             (map arrayDims etps)
-                  _       -> 0
-        fnrtp = lambdaType fun $ map (Elem . elemType . typeOf) es
-    in case fnrtp of
-        Elem (Tuple tps) -> Elem $ Tuple $ map (\x -> arrayType inpdim x Unique) tps
-        _ -> arrayType inpdim fnrtp Unique
 
 uniqueProp :: TypeBase vn as -> Uniqueness
 uniqueProp tp = if uniqueOrBasic tp then Unique else Nonunique

@@ -768,12 +768,6 @@ checkExp (Filter fun arrexp rowtype pos) = do
     bad $ TypeError pos "Filter function does not return bool."
   return $ Filter fun' arrexp' rowtype' pos
 
-checkExp (Mapall fun arrexp pos) = do
-  (arrexp', (_, dflow, argloc)) <- checkSOACArrayArg arrexp
-  let arg = (Elem $ elemType $ typeOf arrexp', dflow, argloc)
-  fun' <- checkLambda fun [arg]
-  return $ Mapall fun' arrexp' pos
-
 checkExp (Redomap redfun mapfun accexp arrexp intype pos) = do
   (accexp', accarg) <- checkArg accexp
   (arrexp', arrarg@(rt, _, _)) <- checkSOACArrayArg arrexp
@@ -948,23 +942,6 @@ checkExp (Filter2 fun arrexps pos) = do
   when (funret /= Elem Bool) $
     bad $ TypeError pos "Filter function does not return bool."
   return $ Filter2 fun' arrexps' pos
-
-checkExp (Mapall2 fun arrexps pos) = do
-  (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
-
-  arrargs' <-
-    case arrargs of
-      []   -> bad $ TypeError pos "Empty tuple given to Mapall2"
-      a:as ->
-        let mindim = foldl min (arrayDims $ argType a) $
-                     map (arrayDims . argType) as
-        in forM (a:as) $ \(t, dflow, argloc) ->
-             case peelArray mindim t of
-               Nothing -> bad $ TypeError argloc "Array of smaller rank than others in mapall2"
-               Just t' -> return (t', dflow, argloc)
-
-  fun' <- checkLambda fun arrargs'
-  return $ Mapall2 fun' arrexps' pos
 
 checkExp (Redomap2 redfun mapfun accexps arrexps intype pos) = do
   (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps

@@ -1,2 +1,0 @@
-fun [[(real,real)]] main([[(int, int)]] a) =
-  mapall(fn (real, real) (int x, int y) => (toReal(x),toReal(y)), a)

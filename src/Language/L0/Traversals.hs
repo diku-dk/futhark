@@ -168,8 +168,6 @@ mapExpM tv (Scan fun startexp arrexp t loc) =
 mapExpM tv (Filter fun arrexp t loc) =
   pure Filter <*> mapOnLambda tv fun <*> mapOnExp tv arrexp <*>
        mapOnType tv t <*> pure loc
-mapExpM tv (Mapall fun arrexp loc) =
-  pure Mapall <*> mapOnLambda tv fun <*> mapOnExp tv arrexp <*> pure loc
 mapExpM tv (Redomap redfun mapfun accexp arrexp intype loc) =
   pure Redomap <*> mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
        mapOnExp tv accexp <*> mapOnExp tv arrexp <*>
@@ -198,9 +196,6 @@ mapExpM tv (Scan2 fun startexps arrexps intype loc) =
        mapOnType tv intype <*> pure loc
 mapExpM tv (Filter2 fun arrexps loc) =
   pure Filter2 <*> mapOnLambda tv fun <*>
-       mapM (mapOnExp tv) arrexps <*> pure loc
-mapExpM tv (Mapall2 fun arrexps loc) =
-  pure Mapall2 <*> mapOnLambda tv fun <*>
        mapM (mapOnExp tv) arrexps <*> pure loc
 mapExpM tv (Redomap2 redfun mapfun accexps arrexps intype loc) =
   pure Redomap2 <*> mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
