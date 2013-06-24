@@ -293,9 +293,9 @@ letNormExp (Iota e pos) = do
     e' <- subLetoNormExp "tmp_arg" e
     makeVarExpSubst "tmp_iota" pos (Iota e' pos)
 
-letNormExp (Size arr pos) = do
+letNormExp (Shape arr pos) = do
     arr' <- letNormExp arr >>= makeVarExpSubst "tmp_arr" pos
-    makeVarExpSubst "tmp_size" pos (Size arr' pos)
+    makeVarExpSubst "tmp_shape" pos (Shape arr' pos)
 
 letNormExp (Replicate n arr pos) = do
     n'    <- subLetoNormExp "tmp_arg" n

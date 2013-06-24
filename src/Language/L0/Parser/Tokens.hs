@@ -48,7 +48,7 @@ data Token = IF
            | FOR
            | DO
            | WITH
-           | SIZE
+           | SHAPE
            | IOTA
            | REPLICATE
            | MAP

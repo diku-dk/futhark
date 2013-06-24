@@ -362,9 +362,9 @@ evalExp (Iota e pos) = do
       | otherwise -> bad $ NegativeIota pos x
     _ -> bad $ TypeError pos "evalExp Iota"
 
-evalExp (Size e _) = do
+evalExp (Shape e _) = do
   v <- evalExp e
-  return $ IntVal $ arraySize v
+  return $ tuple $ map IntVal $ arrayShape v
 
 evalExp (Replicate e1 e2 pos) = do
   v1 <- evalExp e1

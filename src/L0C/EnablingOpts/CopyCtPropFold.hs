@@ -324,22 +324,21 @@ copyCtPropExp (If e1 e2 e3 tp pos) = do
 
 -----------------------------------------------------------
 --- If expression is an array literal than replace it   ---
----    with the array's size                            ---
+---    with the array's shape
 -----------------------------------------------------------
-copyCtPropExp (Size e pos) = do 
+copyCtPropExp (Shape e pos) = do
     e' <- copyCtPropExp e
     case e' of
-        Var idd -> do
-            vv <- asks $ M.lookup (identName idd) . envVtable
-            case vv of
-                Just (SymArr (ArrayLit   els _ _) _ _) -> 
-                    changed $ Literal (IntVal (length els)) pos 
-                Just (Constant (ArrayVal arr _) _ _) -> 
-                    changed $ Literal (IntVal (length (elems arr))) pos
-                _ -> return $ Size e' pos
-        ArrayLit els _ _ ->
-            changed $ Literal (IntVal (length els)) pos
-        _ ->  return $ Size e' pos
+        Var idd -> do vv <- asks $ M.lookup (identName idd) . envVtable
+                      case vv of Just (Constant a _ _) -> literal a
+                                 _ -> return $ Shape e' pos
+        Literal a _ -> literal a
+        _ ->  return $ Shape e' pos
+    where literal a =
+            changed $ Literal (case arrayShape a of
+                                 [n] -> IntVal n
+                                 ns -> TupVal $ map IntVal ns)
+                              pos
 
 -----------------------------------------------------------
 --- If all params are values and function is free of IO ---

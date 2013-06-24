@@ -145,7 +145,7 @@ This is semantically equivalent to
 map(fn int (int x) => sum(2, x), a)
 \end{alltt}
 which also demonstrates the syntax for anonymous functions.  Note that
-while some language constructs look like functions (\texttt{size}, for
+while some language constructs look like functions (\texttt{shape}, for
 example), they are not, and cannot be used as a function reference.
 
 An operator can be used as the function argument of a SOAC by
@@ -336,8 +336,9 @@ the language.
   \item[\texttt{replicate(\textit{n}, \textit{a})}]\hfill\\
     An array consisting of \textit{n} copies of \textit{a}.
 
-  \item[\texttt{size(\textit{a})}]\hfill\\
-    The number of rows in the given array.
+  \item[\texttt{shape(\textit{a})}]\hfill\\
+    A tuple giving the shape of the array.  If \texttt{a} is
+    one-dimensional, the result is just a plain integer.
 
   \item[\texttt{split(\textit{n}, \textit{a})}]\hfill\\
     Partitions the given array into two disjoint arrays

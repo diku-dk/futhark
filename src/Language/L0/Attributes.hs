@@ -429,7 +429,9 @@ typeOf (LetPat _ _ body _) = typeOf body
 typeOf (LetWith _ _ _ _ body _) = typeOf body
 typeOf (Index _ _ t _) = t
 typeOf (Iota _ _) = arrayType 1 (Elem Int) Unique
-typeOf (Size _ _) = Elem Int
+typeOf (Shape e _) = case arrayDims $ typeOf e of
+                       1 -> Elem Int
+                       n -> Elem $ Tuple (replicate n $ Elem Int)
 typeOf (Replicate _ e _) = arrayType 1 (typeOf e) u
   where u | uniqueOrBasic (typeOf e) = Unique
           | otherwise = Nonunique
