@@ -122,6 +122,8 @@ runTests run files = do
 
   (failed, passed) <- getResults (S.fromList files) 0 0
   putStrLn $ show failed ++ " failed, " ++ show passed ++ " passed."
+  exitWith $ case failed of 0 -> ExitSuccess
+                            _ -> ExitFailure 1
 
 main :: IO ()
 main = do
