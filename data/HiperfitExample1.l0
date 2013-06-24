@@ -13,7 +13,7 @@ fun (int,int,[real],[real],[real],[[real]],[[real]],[[real]],[[real]]) initGrid
     (myXindex, myYindex, myX, myY, myTimeline, myMuX, myVarX, myMuY, myVarY)
 
 fun ([[real]],[[real]]) initOperator([real] x) =
-    let n = size(x) in
+    let n = shape(x) in
     let dxu = x[1] - x[0] in
     let dxl = 0.0 in
     let Dxlow = {{0.0, ~1.0 / dxu, 1.0 / dxu}} in
@@ -42,7 +42,7 @@ fun real max(real x, real y) = if y < x then x else y
 fun int maxInt(int x, int y) = if y < x then x else y
 
 fun *[[real]] setPayoff(real strike, [real] myX, [real] myY) =
-    map(fn *[real] (real xi) => replicate(size(myY), max(xi-strike,0.0)), myX)
+    map(fn *[real] (real xi) => replicate(shape(myY), max(xi-strike,0.0)), myX)
 
 // Returns new myMuX, myVarX, myMuY, myVarY.
 fun ([[real]] , [[real]] , [[real]] , [[real]]) updateParams
@@ -108,7 +108,7 @@ fun *[[real]] rollback
     ([real] myX, [real] myY, [real] myTimeline, *[[real]] myResult,
      [[real]] myMuX, [[real]] myDx, [[real]] myDxx, [[real]] myVarX,
      [[real]] myMuY, [[real]] myDy, [[real]] myDyy, [[real]] myVarY, int g) =
-    let (numX, numY) = (size(myX), size(myY)) in
+    let (numX, numY) = (shape(myX), shape(myY)) in
     let numZ = maxInt(numX, numY) in
     let dtInv = 1.0/(myTimeline[g+1]-myTimeline[g]) in
     let u = explicitX(numX, numY, dtInv, myResult, myMuX, myDx, myDxx, myVarX) in

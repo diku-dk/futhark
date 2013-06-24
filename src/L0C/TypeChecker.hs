@@ -696,11 +696,11 @@ checkExp (Iota e pos) = do
   e' <- require [Elem Int] =<< checkExp e
   return $ Iota e' pos
 
-checkExp (Size e pos) = do
+checkExp (Shape e pos) = do
   e' <- checkExp e
   case typeOf e' of
-    Array {} -> return $ Size e' pos
-    _        -> bad $ TypeError pos "Argument to size must be array."
+    Array {} -> return $ Shape e' pos
+    _        -> bad $ TypeError pos "Argument to shape must be array."
 
 checkExp (Replicate countexp valexp pos) = do
   countexp' <- require [Elem Int] =<< checkExp countexp

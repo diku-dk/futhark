@@ -1,5 +1,5 @@
 fun *[int] computefibs(*[int] arr) =
-    let n = size(arr) in
+    let n = shape(arr) in
     let arr[0] = 0 in
     let arr[1] = 1 in
     loop (arr) = for i < n-2 do

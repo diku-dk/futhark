@@ -335,7 +335,7 @@ greedyFuse is_repl lam_used_nms res (idd, soac) = do
                                     Just znms-> foldl (\acc znm -> 
                                                           case M.lookup znm (zips res) of
                                                             Nothing   -> acc -- error
-                                                            Just (i,_)-> acc && not (getBuiltinFunName i == "size")
+                                                            Just (i,_)-> acc && not (getBuiltinFunName i == "shape")
                                                       ) True znms
                                   ) out_nms
                      in foldl (&&) True bs
@@ -630,7 +630,7 @@ fusionGatherExp fres (LetPat pat (Apply fname zip_args _ _) body _)
     let i = getBuiltinFunIdent "assertZip"
     return $ bres { zips   = M.insert nm (i, S.fromList zip_args) (zips bres), inzips = inzips' }
 
-fusionGatherExp fres (LetPat pat (Size arr _) body _) = do
+fusionGatherExp fres (LetPat pat (Shape arr _) body _) = do
     -- Fix implementation such that if the arg of size is not from a map, then it is parsed,
     -- i.e., if the argument is coming from a filter then it should inhibit fusion!
     bres  <- fusionGatherExp fres body
@@ -642,7 +642,7 @@ fusionGatherExp fres (LetPat pat (Size arr _) body _) = do
                         Just lst-> return ( M.insert (identName idd) (nm:lst) (inzips bres), bres )
             _       -> do new_res <- fusionGatherExp bres arr
                           return (inzips bres, new_res)
-    let i  = getBuiltinFunIdent "size"
+    let i  = getBuiltinFunIdent "shape"
     return $ bres' { zips   = M.insert nm (i, S.singleton arr) (zips bres'), inzips = inzips' }
 
 
@@ -858,24 +858,24 @@ fuseInExp (LetPat pat (Apply fname _ rtp p1) body pos)
                          then return $ LetPat pat (Apply fname arrs rtp p1) body' pos
                          else return $ body' -- i.e., assertZip eliminated
 
-fuseInExp (LetPat pat (Size _ p1) body pos) = do
+fuseInExp (LetPat pat (Shape _ p1) body pos) = do
     body' <- fuseInExp body
     fres  <- asks $ fusedRes
     let nm = identName $ head $ getIdents pat
     case M.lookup nm (zips fres) of
         Nothing -> badFusionGM $ EnablingOptError pos
-                                   ("In Fusion.hs, fuseInExp LetPat of size, "
-                                    ++" size not in Res: "++textual nm)
+                                   ("In Fusion.hs, fuseInExp LetPat of shape, "
+                                    ++" shape not in Res: "++textual nm)
         Just (i,ss)-> do let arrs = S.toList ss
                          let fnm  = getBuiltinFunName i
-                         _ <- if fnm == "size" && length arrs == 1
+                         _ <- if fnm == "shape" && length arrs == 1
                               then return Nothing
                               else badFusionGM $ EnablingOptError pos
-                                                  ("In Fusion.hs, fuseInExp LetPat of size, "
-                                                   ++" builtin funname not size: "++fnm)
+                                                  ("In Fusion.hs, fuseInExp LetPat of shape, "
+                                                   ++" builtin funname not shape: "++fnm)
                          case (head arrs) of
-                            Iota n_exp _ -> return $ LetPat pat n_exp body' pos -- size eliminated
-                            _            -> return $ LetPat pat (Size (head arrs) p1) body' pos
+                            Iota n_exp _ -> return $ LetPat pat n_exp body' pos -- shape eliminated
+                            _            -> return $ LetPat pat (Shape (head arrs) p1) body' pos
 
 fuseInExp (LetPat pat e body pos) = do
     body' <- fuseInExp body
@@ -1155,11 +1155,11 @@ errorIllegalFus soac_name pos =
 getBuiltinFunName  :: Int -> String
 getBuiltinFunName i = case i of
                         1 -> "assertZip"
-                        2 -> "size"
+                        2 -> "shape"
                         _ -> "unknownBuiltInFun"  
 getBuiltinFunIdent :: String -> Int
 getBuiltinFunIdent "assertZip" = 1
-getBuiltinFunIdent "size"      = 2
+getBuiltinFunIdent "shape"     = 2
 getBuiltinFunIdent _           = 33
 
 --------------------------------------------

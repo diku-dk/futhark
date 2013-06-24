@@ -46,7 +46,8 @@ transformExp :: Exp -> TransformM Exp
 transformExp mape@(Map fun e intype loc) =
   newLet "inarr" e $ \inarr inarrv -> do
     (i, iv) <- newVar loc "i" (Elem Int)
-    newLet "n" (Size inarrv loc) $ \_ nv -> do
+    rs <- rows inarrv loc
+    newLet "n" rs $ \_ nv -> do
       let zero = Literal (IntVal 0) loc
           index0 = Index inarr [zero] intype loc
           indexi = Index inarr [iv] intype loc
@@ -65,7 +66,8 @@ transformExp (Reduce fun accexp arrexp intype loc) =
   newReduction loc arrexp accexp $ \(arr, arrv) (acc, accv) (i, iv) -> do
     let indexi = Index arr [iv] intype loc
     funcall <- transformLambda fun [accv, indexi]
-    let loop = DoLoop (Id acc) accv i (Size arrv loc) loopbody accv loc
+    rs <- rows arrv loc
+    let loop = DoLoop (Id acc) accv i rs loopbody accv loc
         loopbody = LetPat (Id acc) funcall accv loc
     return loop
 
@@ -73,13 +75,15 @@ transformExp (Scan fun accexp arrexp intype loc) =
   newReduction loc arrexp accexp $ \(arr, arrv) (acc, accv) (i, iv) -> do
     let indexi = Index arr [iv] intype loc
     funcall <- transformLambda fun [accv, indexi]
-    let loop = DoLoop (TupId [Id acc, Id arr] loc) (TupLit [accv, arrv] loc) i (Size arrv loc) loopbody arrv loc
+    rs <- rows arrv loc
+    let loop = DoLoop (TupId [Id acc, Id arr] loc) (TupLit [accv, arrv] loc) i rs loopbody arrv loc
         loopbody = LetWith arr arr [iv] funcall (TupLit [indexi, arrv] loc) loc
     return loop
 
 transformExp (Filter fun arrexp rowtype loc) =
-  newLet "arr" arrexp $ \arr arrv ->
-    newLet "n" (Size arrv loc) $ \_ nv -> do
+  newLet "arr" arrexp $ \arr arrv -> do
+    rs <- rows arrv loc
+    newLet "n" rs $ \_ nv -> do
       let checkempty nonempty = If (BinOp Equal nv (intval 0) (Elem Bool) loc)
                                 (Literal (emptyArray rowtype) loc) nonempty
                                 (typeOf arrexp) loc
@@ -128,7 +132,8 @@ transformExp (Redomap redfun mapfun accexp arrexp _ loc) =
     let indexi = Index arr [iv] (stripArray 1 $ typeOf arrexp) loc
     mapfuncall <- transformLambda mapfun [indexi]
     redfuncall <- transformLambda redfun [accv, mapfuncall]
-    let loop = DoLoop (Id acc) accv i (Size arrv loc) loopbody accv loc
+    rs <- rows arrv loc
+    let loop = DoLoop (Id acc) accv i rs loopbody accv loc
         loopbody = LetWith acc acc [] redfuncall accv loc
     return loop
 
@@ -136,7 +141,8 @@ transformExp mape@(Map2 fun arrs _ loc) = do
   let zero = Literal (IntVal 0) loc
   newLets "inarr" arrs $ \inarrs _ -> do
     (i, iv) <- newVar loc "i" (Elem Int)
-    newLet "n" (size inarrs) $ \_ nv -> do
+    sz <- size inarrs
+    newLet "n" sz $ \_ nv -> do
       funcall0 <- transformLambda fun $ index inarrs zero
       funcall <- transformLambda fun $ index inarrs iv
       newResultArray nv funcall0 $ \outarr outarrv -> do
@@ -152,7 +158,8 @@ transformExp mape@(Map2 fun arrs _ loc) = do
 transformExp (Reduce2 fun accexp arrexps _ loc) =
   newReduction2 loc arrexps accexp $ \(arr, _) (acc, accv) (i, iv) -> do
     funcall <- transformLambda fun $ map Var acc ++ index arr iv
-    let loop = DoLoop (pattern acc loc) accv i (size arr)
+    sz <- size arr
+    let loop = DoLoop (pattern acc loc) accv i sz
                funcall accv loc
     return loop
 
@@ -161,17 +168,18 @@ transformExp (Scan2 fun accexp arrexps _ loc) =
     funcall <- transformLambda fun $ map Var acc ++ index arr iv
     loopbody <- letwith arr iv funcall $
                 TupLit (index arr iv++map Var arr) loc
+    sz <- size arr
     let looppat = case pattern acc loc of
                     Id k         -> TupId (Id k : map Id arr) loc
                     TupId pats _ -> TupId (pats ++ map Id arr) loc
         loop = DoLoop looppat (TupLit (map Var $ acc ++ arr) loc)
-               i (size arr)
-               loopbody arrv loc
+               i sz loopbody arrv loc
     return loop
 
 transformExp filtere@(Filter2 fun arrexps loc) =
-  newLets "arr" arrexps $ \arr _ ->
-    newLet "n" (size arr) $ \_ nv -> do
+  newLets "arr" arrexps $ \arr _ -> do
+    sz <- size arr
+    newLet "n" sz $ \_ nv -> do
       let checkempty nonempty =
             If (BinOp Equal nv (intval 0) (Elem Bool) loc)
             (Literal (blankValue $ typeOf filtere) loc) nonempty
@@ -225,7 +233,8 @@ transformExp (Mapall2 fun arrexps loc) = transformExp =<< toMap arrexps
 transformExp (Redomap2 redfun mapfun accexps arrexps _ loc) =
   newReduction2 loc arrexps accexps $ \(arr, _) (acc, accv) (i, iv) -> do
     mapfuncall <- transformLambda mapfun $ index arr iv
-    let loop loopbody = DoLoop (pattern acc loc) accv i (size arr) loopbody accv loc
+    sz <- size arr
+    let loop loopbody = DoLoop (pattern acc loc) accv i sz loopbody accv loc
     case typeOf mapfuncall of
       Elem (Tuple ts) -> do
         names <- mapM (liftM fst . newVar loc "mapres") ts
@@ -333,9 +342,19 @@ pattern :: [Ident] -> SrcLoc -> TupIdent
 pattern [k] _ = Id k
 pattern ks loc = TupId (map Id ks) loc
 
-size :: [Ident] -> Exp
-size [] = Literal (IntVal 0) noLoc
-size (k:_) = Size (Var k) $ srclocOf k
+rows :: Exp -> SrcLoc -> TransformM Exp
+rows e loc = do
+  (rs, rsv) <- newVar loc "rows" $ Elem Int
+  case arrayDims $ typeOf e of
+    1 -> return $ LetPat (Id rs) (Shape e loc) rsv loc
+    n -> do
+      names <- replicateM (n-1) $
+               liftM fst . newVar loc "dim" $ Elem Int
+      return $ LetPat (TupId (map Id $ rs:names) loc) (Shape e loc) rsv loc
+
+size :: [Ident] -> TransformM Exp
+size [] = return $ Literal (IntVal 0) noLoc
+size (k:_) = rows (Var k) $ srclocOf k
 
 transformLambda :: Lambda -> [Exp] -> TransformM Exp
 transformLambda (AnonymFun params body _ loc) args = do

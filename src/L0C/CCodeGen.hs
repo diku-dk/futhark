@@ -576,11 +576,13 @@ compileExp place (Index var idxs _ _) = do
                $stm:index
              }|]
 
-compileExp place (Size e _) = do
-  dest <- new "size_value"
+compileExp place (Shape e _) = do
+  dest <- new "shape_value"
   et <- typeToCType $ typeOf e
   e' <- compileExp (varExp dest) e
-  return [C.cstm|{$ty:et $id:dest; $stm:e' $exp:place = $id:dest.dims[0];}|]
+  let stms = [[C.cstm|$exp:place.$id:(tupleField i) = $exp:s;|] |
+              (i, s) <- zip [0..] $ arrayShapeExp (varExp dest) $ typeOf e]
+  return [C.cstm|{$ty:et $id:dest; $stm:e' $stms:stms}|]
 
 compileExp place e@(Iota (Var v) _) = do
   e' <- compileExpInPlace place e

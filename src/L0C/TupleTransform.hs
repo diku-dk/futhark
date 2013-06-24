@@ -257,15 +257,15 @@ transformExp (Replicate ne ve loc) = do
       return $ nlet $ tuplet $ TupLit arrexps' loc
     _ -> return $ Replicate ne' ve' loc
 
-transformExp (Size e loc) = do
+transformExp (Shape e loc) = do
   e' <- transformExp e
   case typeOf e' of
     Elem (Tuple (et:ets)) -> do
       (name, namev) <- newVar loc "size_tup" et
       names <- map fst <$> mapM (newVar loc "size_tup") ets
-      size <- transformExp $ Size namev loc
+      size <- transformExp $ Shape namev loc
       return $ LetPat (TupId (map Id $ name : names) loc) e' size loc
-    _ -> return $ Size e' loc
+    _ -> return $ Shape e' loc
 
 transformExp (Unzip e _ _) = transformExp e
 
