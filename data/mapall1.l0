@@ -1,1 +1,0 @@
-fun [[real]] main([[int]] a) = mapall(toReal, a)

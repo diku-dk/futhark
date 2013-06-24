@@ -98,7 +98,6 @@ instance (Eq vn, Pretty vn) => Pretty (ExpBase ty vn) where
     text "replicate" <> apply [apply (map ppr shape), ppr e]
   pprPrec _ (Transpose e _) = text "transpose" <> parens (ppr e)
   pprPrec _ (Map lam a _ _) = ppSOAC "map" [lam] [a]
-  pprPrec _ (Mapall lam a _) = ppSOAC "mapall" [lam] [a]
   pprPrec _ (Reduce lam e a _ _) = ppSOAC "reduce" [lam] [e, a]
   pprPrec _ (Redomap redlam maplam e a _ _) =
     ppSOAC "redomap" [redlam, maplam] [e, a]
@@ -115,7 +114,6 @@ instance (Eq vn, Pretty vn) => Pretty (ExpBase ty vn) where
     indent 2 (ppr loopbody) <+> text "in" </>
     ppr letbody
   pprPrec _ (Map2 lam as _ _) = ppSOAC "map2" [lam] as
-  pprPrec _ (Mapall2 lam as _) = ppSOAC "mapall2" [lam] as
   pprPrec _ (Reduce2 lam es as _ _) = ppSOAC "reduce2" [lam] $ es++as
   pprPrec _ (Redomap2 redlam maplam es as _ _) =
     ppSOAC "redomap2" [redlam, maplam] $ es++as

@@ -97,8 +97,6 @@ import Language.L0.Parser.Lexer
       concat          { L $$ CONCAT }
       filter          { L $$ FILTER }
       filter2         { L $$ FILTER2 }
-      mapall          { L $$ MAPALL }
-      mapall2         { L $$ MAPALL2 }
       redomap         { L $$ REDOMAP }
       redomap2        { L $$ REDOMAP2 }
       true            { L $$ TRUE }
@@ -282,12 +280,6 @@ Exp  :: { UncheckedExp }
 
      | filter2 '(' FunAbstr ',' Exps ')'
                       { Filter2 $3 $5 $1 }
-
-     | mapall '(' FunAbstr ',' Exp ')'
-                      { Mapall $3 $5 $1 }
-
-     | mapall2 '(' FunAbstr ',' Exps ')'
-                      { Mapall2 $3 $5 $1 }
 
      | redomap '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
                       { Redomap $3 $5 $7 $9 NoInfo $1 }

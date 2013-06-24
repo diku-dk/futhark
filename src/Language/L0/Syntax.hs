@@ -243,9 +243,6 @@ data ExpBase ty vn =
             -- result) array
 
 
-            | Mapall (LambdaBase ty vn) (ExpBase ty vn) SrcLoc
-             -- ^ @mapall(op ~, {{1,~2}, {~3,4}}) = {{~1,2}, {3,~4}}@.
-
             | Redomap (LambdaBase ty vn) (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
              -- ^ @redomap(g, f, n, a) = reduce(g, n, map(f, a))@.
              -- 5th arg is the row type of the input  array.
@@ -287,7 +284,6 @@ data ExpBase ty vn =
             | Reduce2 (LambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] (ty vn) SrcLoc
             | Scan2   (LambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] (ty vn) SrcLoc
             | Filter2 (LambdaBase ty vn) [ExpBase ty vn]          SrcLoc
-            | Mapall2 (LambdaBase ty vn) [ExpBase ty vn]          SrcLoc
             | Redomap2(LambdaBase ty vn) (LambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] (ty vn) SrcLoc
 
               deriving (Eq, Ord, Show)
@@ -318,7 +314,6 @@ instance Located (ExpBase ty vn) where
   locOf (Unzip _ _ pos) = locOf pos
   locOf (Scan _ _ _ _ pos) = locOf pos
   locOf (Filter _ _ _ pos) = locOf pos
-  locOf (Mapall _ _ pos) = locOf pos
   locOf (Redomap _ _ _ _ _ pos) = locOf pos
   locOf (Split _ _ _ pos) = locOf pos
   locOf (Concat _ _ pos) = locOf pos
@@ -329,7 +324,6 @@ instance Located (ExpBase ty vn) where
   locOf (Reduce2 _ _ _ _ pos) = locOf pos
   locOf (Scan2 _ _ _ _ pos) = locOf pos
   locOf (Filter2 _ _ pos) = locOf pos
-  locOf (Mapall2 _ _ pos) = locOf pos
   locOf (Redomap2 _ _ _ _ _ pos) = locOf pos
 
 -- | Eagerly evaluated binary operators.  In particular, the

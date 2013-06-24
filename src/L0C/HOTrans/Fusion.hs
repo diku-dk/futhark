@@ -225,7 +225,6 @@ isOmapKer ker =
         Reduce2 {} -> True
         Redomap2{} -> True
         Map2    {} -> True
-        Mapall2 {} -> True
         _          -> False
 
 
@@ -462,13 +461,6 @@ fuseSOACwithKer (out_ids1, soac1) ker = do
   case (soac2, soac1) of
       -- first get rid of the cases that can be solved by
       -- a bit of soac rewriting.
-    (Map2   {}, Mapall2{}) -> do
-      soac1' <- mapall2Map soac1
-      fuseSOACwithKer (out_ids1, soac1') ker
-    (Mapall2{}, Map2   {}) -> do
-      soac2' <- mapall2Map soac2
-      let ker'   = ker { fsoac = (out_ids2, soac2') }
-      fuseSOACwithKer (out_ids1, soac1) ker'
     (Reduce2{}, Map2   {}) -> do
       soac2' <- reduce2Redomap soac2
       let ker'   = ker { fsoac = (out_ids2, soac2') }
@@ -485,9 +477,6 @@ fuseSOACwithKer (out_ids1, soac1) ker = do
                 ----------------------------------------------------
                 -- The Fusions that are semantically map fusions:
                 ----------------------------------------------------
-                (Mapall2   _ _ pos, Mapall2 {}) -> do
-                  (res_lam, new_inp) <- fuse2SOACs inp1_arr lam1 out_ids1 inp2_arr lam2
-                  return (Mapall2 res_lam new_inp pos, new_inp)
                 (Map2      _ _ _ pos, Map2    {}) -> do
                   (res_lam, new_inp) <- fuse2SOACs inp1_arr lam1 out_ids1 inp2_arr lam2
                   return (Map2    res_lam new_inp (mkElType new_inp) pos, new_inp)
@@ -569,12 +558,6 @@ fusionGatherExp fres (LetPat pat soac@(Map2 lam _ _ _) body _) = do
     bres  <- bindPat pat soac $ fusionGatherExp fres body   -- binding pat $ 
     (used_lam, blres) <- fusionGatherLam (S.empty, bres) lam
     greedyFuse False used_lam blres (pat, soac)
-
-fusionGatherExp fres (LetPat pat soac@(Mapall2 lam _ _) body _) = do
-    -- will be transformed in greedyFuse as a map2 if needed.
-    bres <- bindPat pat soac $ fusionGatherExp fres body    
-    (used_lam, lres) <- fusionGatherLam (S.empty, bres) lam
-    greedyFuse False used_lam lres (pat, soac)
 
 fusionGatherExp fres (LetPat pat soac@(Replicate n el pos) body _) = do
     bres <- bindPat pat soac $ fusionGatherExp fres body
@@ -726,14 +709,12 @@ fusionGatherExp _ (Map      _ _ _     pos) = errorIllegal "map"     pos
 fusionGatherExp _ (Reduce   _ _ _ _   pos) = errorIllegal "reduce"  pos
 fusionGatherExp _ (Scan     _ _ _ _   pos) = errorIllegal "scan"    pos
 fusionGatherExp _ (Filter   _ _ _     pos) = errorIllegal "filter"  pos
-fusionGatherExp _ (Mapall   _ _       pos) = errorIllegal "mapall"  pos
 fusionGatherExp _ (Redomap  _ _ _ _ _ pos) = errorIllegal "redomap"  pos
 
 fusionGatherExp _ (Map2     _ _ _     pos) = errorIllegal "map2"    pos
 fusionGatherExp _ (Reduce2  _ _ _ _   pos) = errorIllegal "reduce2" pos
 fusionGatherExp _ (Scan2    _ _ _ _   pos) = errorIllegal "scan2"   pos
 fusionGatherExp _ (Filter2  _ _       pos) = errorIllegal "filter2" pos
-fusionGatherExp _ (Mapall2  _ _       pos) = errorIllegal "mapall2" pos
 fusionGatherExp _ (Redomap2 _ _ _ _ _ pos) = errorIllegal "redomap2" pos
 
 fusionGatherExp _ (Apply fname _ _ pos)
@@ -808,11 +789,6 @@ fuseInExp :: Exp -> FusionGM Exp
 ----------------------------------------------
 
 fuseInExp (LetPat pat soac@(Map2 {}) body pos) = do
-    body' <- fuseInExp body
-    soac' <- replaceSOAC pat soac
-    return $ LetPat pat soac' body' pos
-
-fuseInExp (LetPat pat soac@(Mapall2 {}) body pos) = do
     body' <- fuseInExp body
     soac' <- replaceSOAC pat soac
     return $ LetPat pat soac' body' pos
@@ -893,14 +869,12 @@ fuseInExp (Map      _ _ _     pos) = errorIllegalFus "map"     pos
 fuseInExp (Reduce   _ _ _ _   pos) = errorIllegalFus "reduce"  pos
 fuseInExp (Scan     _ _ _ _   pos) = errorIllegalFus "scan"    pos
 fuseInExp (Filter   _ _ _     pos) = errorIllegalFus "filter"  pos
-fuseInExp (Mapall   _ _       pos) = errorIllegalFus "mapall"  pos
 fuseInExp (Redomap  _ _ _ _ _ pos) = errorIllegalFus "redomap"  pos
 {-
 fuseInExp (Map2     _ _ _     pos) = errorIllegalFus "map2"    pos
 fuseInExp (Reduce2  _ _ _ _   pos) = errorIllegalFus "reduce2" pos
 fuseInExp (Scan2    _ _ _ _   pos) = errorIllegalFus "scan2"   pos
 fuseInExp (Filter2  _ _       pos) = errorIllegalFus "filter2" pos
-fuseInExp (Mapall2  _ _       pos) = errorIllegalFus "mapall2" pos
 fuseInExp (Redomap2 _ _ _ _ _ pos) = errorIllegalFus "redomap2" pos
 -}
 fuseInExp (Apply fname _ _ pos)
@@ -1015,7 +989,6 @@ getLamSOAC :: Exp -> FusionGM Lambda
 getLamSOAC (Map2     lam _ _ _  ) = return lam
 getLamSOAC (Reduce2  lam _ _ _ _) = return lam
 getLamSOAC (Filter2  lam _ _    ) = return lam
-getLamSOAC (Mapall2  lam _ _    ) = return lam
 getLamSOAC (Redomap2 _ lam2 _ _ _ _) = return lam2
 getLamSOAC ee = badFusionGM $ EnablingOptError 
                                 (SrcLoc (locOf ee)) 
@@ -1026,7 +999,6 @@ updateLamSOAC :: Lambda -> Exp -> FusionGM Exp
 updateLamSOAC lam (Map2          _    arrs eltp pos) = return $ Map2          lam    arrs eltp pos
 updateLamSOAC lam (Reduce2       _ ne arrs eltp pos) = return $ Reduce2       lam ne arrs eltp pos
 updateLamSOAC lam (Filter2       _    arrs      pos) = return $ Filter2       lam    arrs      pos
-updateLamSOAC lam (Mapall2       _    arrs      pos) = return $ Mapall2       lam    arrs      pos
 updateLamSOAC lam (Redomap2 lam1 _ ne arrs eltp pos) = return $ Redomap2 lam1 lam ne arrs eltp pos
 updateLamSOAC _ ee = badFusionGM $ EnablingOptError 
                                     (SrcLoc (locOf ee)) 
@@ -1039,7 +1011,6 @@ getInpArrSOAC :: Exp -> FusionGM [Exp]
 getInpArrSOAC (Map2     _ arrs _ _  ) = return arrs
 getInpArrSOAC (Reduce2  _ _ arrs _ _) = return arrs
 getInpArrSOAC (Filter2  _ arrs _    ) = return arrs
-getInpArrSOAC (Mapall2  _ arrs _    ) = return arrs
 getInpArrSOAC (Redomap2 _ _ _ arrs _ _) = return arrs
 getInpArrSOAC ee = badFusionGM $ EnablingOptError 
                                 (SrcLoc (locOf ee)) 
@@ -1081,35 +1052,6 @@ getIdentArr (ee:_) =
                     ("In Fusion.hs, getIdentArr, broken invariant: "
                      ++" argument not a (indexed) variable! "++ppExp ee)
  
-
-mapall2Map :: Exp -> FusionGM Exp
-mapall2Map soac@(Mapall2 lam arrs pos) = do
-    let lam_tps = map (stripArray 1 . typeOf) arrs
-    let map_eltp= if length arrs == 1 
-                  then head lam_tps
-                  else Elem $ Tuple lam_tps 
-    let rtp     = typeOf soac
-    case head lam_tps of
-        Array{} -> do
-            let num_arrs = length arrs
-            lam_nms <- mapM new $ replicate num_arrs "tmp_lam"
-            let lam_pos = replicate num_arrs pos
-            let lam_ids = map (\(nm,tp,p)-> Ident nm tp p) (zip3 lam_nms lam_tps lam_pos)
-            lam_rtp<- case rtp of
-                        Elem (Tuple tps) -> return $ Elem $ Tuple $ map (stripArray 1) tps
-                        arrtp@Array{}    -> return $ stripArray 1 arrtp
-                        _                -> 
-                                badFusionGM $ EnablingOptError pos
-                                   ("In Fusion.hs, mapall2Map: invalid mapall return type: " 
-                                    ++ ppType rtp)
-            let new_lam = AnonymFun (map toParam lam_ids)
-                          (Mapall2 lam (map Var lam_ids) pos) (toDecl lam_rtp) pos
-            return $ Map2 new_lam  arrs map_eltp pos
-        _ ->return $ Map2 lam      arrs map_eltp pos
-mapall2Map eee = 
-    badFusionGM $ EnablingOptError (SrcLoc (locOf eee))
-                   ("In Fusion.hs, mapall2Map: argument not a mapall2: " 
-                    ++ ppExp eee)
 
 reduce2Redomap :: Exp -> FusionGM Exp
 reduce2Redomap (Reduce2 lam ne arrs eltp pos) = do
@@ -1419,7 +1361,6 @@ getUnmdParsAndBody inpp lamm = do
             return (new_ids, call2) 
 
 isCompatibleKer :: ([VName], Exp) -> FusedKer -> FusionGM Bool
-isCompatibleKer (_,       Mapall2 {}) ker = return $ isOmapKer   ker
 isCompatibleKer (_,       Map2    {}) ker = return $ isOmapKer   ker
 isCompatibleKer (out_nms, Filter2 {}) ker = do
     let (_, soac) = fsoac ker

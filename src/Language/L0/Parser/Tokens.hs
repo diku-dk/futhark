@@ -61,7 +61,6 @@ data Token = IF
            | SPLIT
            | CONCAT
            | FILTER
-           | MAPALL
            | REDOMAP
            | TRUE
            | FALSE
