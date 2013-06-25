@@ -43,6 +43,7 @@ module Language.L0.Attributes
   , setElemAliases
   , addAliases
   , addElemAliases
+  , setUniqueness
 
   -- ** Removing and adding names
   --
@@ -305,11 +306,13 @@ stripArray n (Array et ds u als)
   | otherwise     = Elem et `setAliases` als
 stripArray _ t = t
 
-withUniqueness :: TypeBase as vn -> Uniqueness -> TypeBase as vn
-withUniqueness (Array et dims _ als) u = Array et dims u als
-withUniqueness (Elem (Tuple ets)) u =
-  Elem $ Tuple $ map (`withUniqueness` u) ets
-withUniqueness t _ = t
+-- | Set the uniqueness attribute of a type.  If the type is a tuple,
+-- the uniqueness of its components will be modified.
+setUniqueness :: TypeBase as vn -> Uniqueness -> TypeBase as vn
+setUniqueness (Array et dims _ als) u = Array et dims u als
+setUniqueness (Elem (Tuple ets)) u =
+  Elem $ Tuple $ map (`setUniqueness` u) ets
+setUniqueness t _ = t
 
 -- | @t \`setAliases\` als@ returns @t@, but with @als@ substituted for
 -- any already present aliasing.
@@ -457,9 +460,9 @@ typeOf (Redomap redfun mapfun start arr rt loc) =
   lambdaType redfun [typeOf start, rowType $ typeOf $ Map mapfun arr rt loc]
 typeOf (Split _ _ t _) =
   Elem $ Tuple [arrayType 1 t Nonunique, arrayType 1 t Nonunique]
-typeOf (Concat x y _) = typeOf x `withUniqueness` u
+typeOf (Concat x y _) = typeOf x `setUniqueness` u
   where u = uniqueness (typeOf x) <> uniqueness (typeOf y)
-typeOf (Copy e _) = typeOf e `withUniqueness` Unique `setAliases` S.empty
+typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` S.empty
 typeOf (DoLoop _ _ _ _ _ body _) = typeOf body
 typeOf (Map2 f arrs _ _) =
   case lambdaType f $ map typeOf arrs of
