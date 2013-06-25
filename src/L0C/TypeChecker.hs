@@ -357,6 +357,12 @@ alternative m1 m2 = pass $ do
 unbinding :: VarName vn => TypeM vn a -> TypeM vn a
 unbinding = local (\env -> env { envVtable = M.empty})
 
+-- | Make all bindings nonunique.
+noUnique :: VarName vn => TypeM vn a -> TypeM vn a
+noUnique = local (\env -> env { envVtable = M.map f $ envVtable env})
+  where f (Bound t)      = Bound $ t `setUniqueness` Nonunique
+        f (Consumed loc) = Consumed loc
+
 binding :: VarName vn => [TaggedIdent CompTypeBase vn] -> TypeM vn a -> TypeM vn a
 binding bnds = check . local (`bindVars` bnds)
   where bindVars :: TypeEnv vn -> [TaggedIdent CompTypeBase vn] -> TypeEnv vn
@@ -1146,7 +1152,7 @@ checkLambda :: (TypeBox ty, VarName vn) =>
                TaggedLambda ty vn -> [Arg vn] -> TypeM vn (TaggedLambda CompTypeBase vn)
 checkLambda (AnonymFun params body ret pos) args = do
   (_, ret', params', body', _) <-
-    checkFun (nameFromString "<anonymous>", ret, params, body, pos)
+    noUnique $ checkFun (nameFromString "<anonymous>", ret, params, body, pos)
   case () of
     _ | length params' == length args -> do
           checkFuncall Nothing pos (map identType params') ret' args
