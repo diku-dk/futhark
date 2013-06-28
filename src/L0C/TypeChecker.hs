@@ -352,6 +352,11 @@ alternative m1 m2 = pass $ do
   let usage = Dataflow $ occurs1 `altOccurences` occurs2
   return ((x, y), const usage)
 
+-- | Remove all variable bindings from the vtable inside the given
+-- computation.
+unbinding :: VarName vn => TypeM vn a -> TypeM vn a
+unbinding = local (\env -> env { envVtable = M.empty})
+
 -- | Make all bindings nonunique.
 noUnique :: VarName vn => TypeM vn a -> TypeM vn a
 noUnique = local (\env -> env { envVtable = M.map f $ envVtable env})
@@ -845,33 +850,44 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
       rettype = param (typeOf mergeexp') $
                 diet mergepat' $ usageOccurences loopflow
 
+      boundnames = S.insert loopvar $ patNames mergepat
+      unbound ident = not $ identName ident `S.member` boundnames
+      ununique ident =
+        ident { identType = param (identType ident) NoCon }
+      -- Find the free variables of the loop body.
+      free = map ununique $ filter unbound $ S.toList $
+             freeInExp loopbody'
+
       merge  = Ident pname (fromDecl rettype) $ srclocOf mergeexp'
 
-      -- These are the parameters expected by the function: The index,
-      -- followed by the upper bound (currently not used), followed by
-      -- the merge value.
-      params = [iparam, toParam bound, toParam merge]
+      -- These are the parameters expected by the function: All of the
+      -- free variables, followed by the index, followed by the upper
+      -- bound (currently not used), followed by the merge value.
+      params = map toParam free ++
+               [iparam, toParam bound, toParam merge]
       bindfun env = env { envFtable = M.insert fname
                                       (rettype, map identType params) $
                                       envFtable env }
 
       -- The body of the function will be the loop body, but with all
       -- tails replaced with recursive calls.
-      recurse e = Apply fname [Var iparam, Var bound, e]
+      recurse e = Apply fname (map (Var . fromParam) free ++
+                               [Var iparam, Var bound, e])
                   (fromDecl rettype) (srclocOf e)
       funbody' = LetPat mergepat' (Var merge) (mapTails recurse loopbody')
                  (srclocOf loopbody')
 
   (funcall, callflow) <- collectDataflow $ local bindfun $ do
     -- Check that the function is internally consistent.
-    _ <- noUnique $ checkFun (fname, rettype, params, funbody', loc)
+    _ <- unbinding $ checkFun (fname, rettype, params, funbody', loc)
     -- Check the actual function call - we start by computing the
     -- bound and initial merge value, in case they use something
     -- consumed in the call.  This reintroduces the dataflow for
     -- boundexp and mergeexp that we previously threw away.
     checkExp $ LetPat (Id bound) boundexp'
                 (LetPat (Id merge) mergeexp'
-                 (Apply fname [Literal (IntVal 0) loc, Var bound, Var merge]
+                 (Apply fname (map (Var . fromParam) free ++
+                               [Literal (IntVal 0) loc, Var bound, Var merge])
                         (fromDecl rettype) $ srclocOf mergeexp)
                  (srclocOf mergeexp))
                 (srclocOf mergeexp)
