@@ -144,8 +144,8 @@ mapExpM tv (Replicate nexp vexp loc) =
 mapExpM tv (Reshape shape arrexp loc) =
   pure Reshape <*> mapM (mapOnExp tv) shape <*>
        mapOnExp tv arrexp <*> pure loc
-mapExpM tv (Transpose e loc) =
-  pure Transpose <*> mapOnExp tv e <*> pure loc
+mapExpM tv (Transpose k n e3 loc) =
+  pure (Transpose k n) <*> mapOnExp tv e3 <*> pure loc
 mapExpM tv (Map fun e int loc) =
   pure Map <*> mapOnLambda tv fun <*> mapOnExp tv e <*>
        mapOnType tv int <*> pure loc

@@ -636,30 +636,38 @@ compileExp place (Reshape shapeexps arrexp _) = do
                $exp:place.data = $id:arr.data;
              }|]
 
-compileExp place e@(Transpose arrexp _) = do
+compileExp place e@(Transpose k n arrexp _) = do
   arr <- new "transpose_arr"
-  i <- new "transpose_i"
-  j <- new "transpose_j"
   intype <- typeToCType $ typeOf arrexp
   basetype <- typeToCType $ Elem $ elemType $ typeOf arrexp
   arrexp' <- compileExp (varExp arr) arrexp
   let alloc = case arrayShapeExp (varExp arr) (typeOf arrexp) of
                 rows:cols:more -> allocArray place (cols:rows:more) basetype
                 _              -> error "One-dimensional array in transpose; should have been caught by type checker"
-      indexfrom = indexArrayExp (varExp arr) (typeOf arrexp) [varExp i, varExp j]
-      indexto   = indexArrayExp place (typeOf e) [varExp j, varExp i]
-      size = arraySliceSizeExp (varExp arr) (typeOf arrexp) 2
+      loop is 0 =
+        let iexps = map varExp is
+            indexfrom = indexArrayExp (varExp arr) (typeOf arrexp) iexps
+            indexto   = indexArrayExp place (typeOf e) $ move iexps
+        in return ([C.cstm|$exp:indexto = $exp:indexfrom;|], is)
+      loop is d = do i <- new "transpose_i"
+                     (inner, is') <- loop (i:is) (d-1)
+                     let body = [C.cstm|for ($id:i = 0; $id:i < $id:arr.dims[$int:(d-1)]; $id:i++) {
+                                      $stm:inner
+                                    }|]
+                     return (body, is')
+  (copy, is) <- loop [] $ arrayDims $ typeOf arrexp
+  let idecls = [[C.cdecl|int $id:i;|] | i <- is]
   return [C.cstm|{
                $ty:intype $id:arr;
-               int $id:i, $id:j;
+               $decls:idecls
                $stm:arrexp'
                $stm:alloc
-               for ($id:i = 0; $id:i < $id:arr.dims[0]; $id:i++) {
-                 for ($id:j = 0; $id:j < $id:arr.dims[1]; $id:j++) {
-                   memcpy(&$exp:indexto, &$exp:indexfrom, $exp:size * sizeof($id:arr.data[0]));
-                 }
-               }
+               $stm:copy
              }|]
+  where move l
+          | (pre,needle:post) <- splitAt k l,
+            (mid,end) <- splitAt n post = pre ++ mid ++ [needle] ++ end
+          | otherwise = l
 
 compileExp place (Split posexp arrexp _ _) = do
   arr <- new "split_arr"

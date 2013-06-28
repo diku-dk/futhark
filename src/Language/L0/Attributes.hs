@@ -65,6 +65,7 @@ module Language.L0.Attributes
   , arrayVal
   , emptyArray
   , flattenArray
+  , transposeArray
 
   -- * Type aliases
 
@@ -410,6 +411,30 @@ flattenArray (ArrayVal arr et) =
           flatten v = [v]
 flattenArray v = v
 
+-- | Array transpose generalised to multiple dimensions.  The result
+-- of @transposeArray k n a@ is an array where the element @a[i_1,
+-- ..., i_k ,i_{k+1}, ..., i_{k+n}, ..., i_q ]@ is now at index @[i_1
+-- ,.., i_{k+1} , ..., i_{k+n} ,i_k, ..., i_q ]@.
+--
+-- @transposeArray 0 1@ is equivalent to the common transpose.  If the
+-- given value is not an array, it is returned unchanged.
+transposeArray :: Int -> Int -> Value -> Value
+transposeArray k n v =
+  case flattenArray v of
+    ArrayVal inarr _ ->
+      let newshape = move oldshape
+          idx is shape = sum (zipWith (*) is (map product $ drop 1 (tails shape)))
+          f rt is (m:ms) =
+            arrayVal [ f (stripArray 1 rt) (is ++ [i]) ms | i <- [0..m-1] ] rt
+          f _ is [] = inarr ! idx (move is) oldshape
+      in f (rowType $ valueType v) [] newshape
+    _ -> v
+  where oldshape = arrayShape v
+        move l
+          | (pre,needle:post) <- splitAt k l,
+            (mid,end) <- splitAt n post = pre ++ mid ++ [needle] ++ end
+          | otherwise = l
+
 -- | The type of an L0 term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
 typeOf :: Ord vn => ExpBase CompTypeBase vn -> CompTypeBase vn
@@ -444,7 +469,11 @@ typeOf (Reshape shape e _) = build (length shape) (elemType $ typeOf e)
           Array (t `setElemAliases` NoInfo) (replicate n Nothing) Nonunique $
           case typeOf e of Array _ _ _ als -> als
                            _               -> S.empty -- Type error.
-typeOf (Transpose e _) = typeOf e
+typeOf (Transpose k n e _)
+  | Array et dims u als <- typeOf e,
+    (pre,d:post) <- splitAt k dims,
+    (mid,end) <- splitAt n post = Array et (pre++mid++[d]++end) u als
+  | otherwise = typeOf e
 typeOf (Map f arr _ _) = arrayType 1 et $ uniqueProp et
   where et = lambdaType f [rowType $ typeOf arr]
 typeOf (Reduce fun start arr _ _) =

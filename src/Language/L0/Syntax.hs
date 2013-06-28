@@ -211,8 +211,12 @@ data ExpBase ty vn =
             | Reshape [ExpBase ty vn] (ExpBase ty vn) SrcLoc
              -- ^ 1st arg is the new shape, 2nd arg is the input array *)
 
-            | Transpose (ExpBase ty vn) SrcLoc
-             -- ^ 1st arg is the (input) to-be-transSrcLoced array.
+            | Transpose Int Int (ExpBase ty vn) SrcLoc
+              -- ^ If @b=transpose(k,n,a)@, then @a[i_1, ..., i_k
+              -- ,i_{k+1}, ..., i_{k+n}, ..., i_q ] = b[i_1 ,..,
+              -- i_{k+1} , ..., i_{k+n} ,i_k, ..., i_q ]@.  Thus,
+              -- @transpose(0,1,a)@ is the common two-dimensional
+              -- transpose.
 
             -- Second-Order Array Combinators
             -- accept curried and anonymous
@@ -307,7 +311,7 @@ instance Located (ExpBase ty vn) where
   locOf (Shape _ pos) = locOf pos
   locOf (Replicate _ _ pos) = locOf pos
   locOf (Reshape _ _ pos) = locOf pos
-  locOf (Transpose _ pos) = locOf pos
+  locOf (Transpose _ _ _ pos) = locOf pos
   locOf (Map _ _ _ pos) = locOf pos
   locOf (Reduce _ _ _ _ pos) = locOf pos
   locOf (Zip _ pos) = locOf pos

@@ -96,7 +96,12 @@ instance (Eq vn, Pretty vn) => Pretty (ExpBase ty vn) where
     text "replicate" <> apply [ppr ne, align (ppr ve)]
   pprPrec _ (Reshape shape e _) =
     text "replicate" <> apply [apply (map ppr shape), ppr e]
-  pprPrec _ (Transpose e _) = text "transpose" <> parens (ppr e)
+  pprPrec _ (Transpose 0 1 e _) =
+    text "transpose" <> apply [ppr e]
+  pprPrec _ (Transpose k n e _) =
+    text "transpose" <> apply [text $ tildes $ show k,
+                               text $ tildes $ show n,
+                               ppr e]
   pprPrec _ (Map lam a _ _) = ppSOAC "map" [lam] [a]
   pprPrec _ (Reduce lam e a _ _) = ppSOAC "reduce" [lam] [e, a]
   pprPrec _ (Redomap redlam maplam e a _ _) =

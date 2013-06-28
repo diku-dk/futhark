@@ -395,14 +395,8 @@ evalExp re@(Reshape shapeexp arrexp pos) = do
         asInt (IntVal x) = return x
         asInt _ = bad $ TypeError pos "evalExp Reshape int"
 
-evalExp (Transpose arrexp pos) = do
-  v <- evalExp arrexp
-  case v of
-    ArrayVal inarr et -> do
-      let arr el = arrayVal el et
-      els' <- map arr <$> transpose <$> mapM (arrToList pos) (elems inarr)
-      return $ arrayVal els' et
-    _ -> bad $ TypeError pos "evalExp Transpose"
+evalExp (Transpose k n arrexp _) =
+  transposeArray k n <$> evalExp arrexp
 
 evalExp (Map fun e _ pos) = do
   vs <- arrToList pos =<< evalExp e

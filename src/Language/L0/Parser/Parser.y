@@ -242,8 +242,12 @@ Exp  :: { UncheckedExp }
      | reshape '(' '(' Exps ')' ',' Exp ')'
                       { Reshape $4 $7 $1 }
 
-     | transpose '(' Exp ')'
-                      { Transpose $3 $1 }
+     | transpose '(' Exp ')' { Transpose 0 1 $3 $1 }
+
+     | transpose '(' intlit ',' intlit ',' Exp ')'
+                      { let L pos (INTLIT k) = $3 in
+                        let L pos (INTLIT n) = $5 in
+                        Transpose k n $7 $1 }
 
      | split '(' Exp ',' Exp ')'
                       { Split $3 $5 NoInfo $1 }
