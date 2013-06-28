@@ -359,6 +359,15 @@ the language.
   \item[\texttt{\textit{transpose}(a)}]\hfill\\
     Return the transpose of \textit{a}.
 
+  \item[\texttt{\textit{transpose}(k,n,a)}]\hfill\\
+    Return the generalised transpose of \textit{a}.  If
+    \texttt{b=transpose(k,n,a)}, then $a[i_1, ..., i_k, i_{k+1}, ...,
+    i_{k+n}, ..., i_q ] = b[i_1 ,.., i_{k+1} , ..., i_{k+n}, i_k, ...,
+    i_q ]$.
+
+    Thus, \texttt{transpose(0,1,a)} is the common two-dimensional
+    transpose.
+
   \item[\texttt{let \textit{pat} = \textit{e} in \textit{body}}]\hfill\\
     While evaluating \textit{body}, bind the names mentioned in
     \textit{pat} to the components in the corresponding positions of
