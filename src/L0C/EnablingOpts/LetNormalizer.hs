@@ -308,10 +308,10 @@ letNormExp (Reshape dims arr pos) = do
     arr'  <- letNormExp arr >>= makeVarExpSubst "tmp_arr" pos
     makeVarExpSubst "tmp_resh" pos (Reshape dims' arr' pos)
 
-letNormExp (Transpose arr pos) = do
+letNormExp (Transpose k n arr pos) = do
     -- normalized arr param & get it outside replicate
     arr' <- letNormExp arr >>= makeVarExpSubst "tmp_arr" pos
-    makeVarExpSubst "tmp_tran" pos (Transpose arr' pos)
+    makeVarExpSubst "tmp_tran" pos (Transpose k n arr' pos)
 
 
 -------------------------------------

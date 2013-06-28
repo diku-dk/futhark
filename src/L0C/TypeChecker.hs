@@ -713,11 +713,12 @@ checkExp (Reshape shapeexps arrexp pos) = do
   arrexp' <- checkExp arrexp
   return (Reshape shapeexps' arrexp' pos)
 
-checkExp (Transpose arrexp pos) = do
+checkExp (Transpose k n arrexp pos) = do
   arrexp' <- checkExp arrexp
-  when (arrayDims (typeOf arrexp') < 2) $
-    bad $ TypeError pos "Argument to transpose does not have two dimensions."
-  return $ Transpose arrexp' pos
+  when (arrayDims (typeOf arrexp') < n + k + 1) $
+    bad $ TypeError pos $ "Argument to transpose does not have " ++
+          show (n+k+1) ++ " dimensions."
+  return $ Transpose k n arrexp' pos
 
 checkExp (Zip arrexps pos) = do
   arrexps' <- mapM (checkExp . fst) arrexps
