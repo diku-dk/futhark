@@ -63,7 +63,6 @@ commandLineOptions =
   , Option "i" ["interpret"]
     (NoArg $ \opts -> opts { l0action = interpret })
     "Run the program via an interpreter."
-  , tracepass [] ["trace"]
   , rename "r" ["rename"]
   , uttransform "u" ["untrace"] 
   , fotransform "f" ["first-order-transform"]
@@ -91,20 +90,6 @@ interpret prog =
         Left err -> do hPutStrLn stderr $ "Interpreter error:\n" ++ show err
                        exitWith $ ExitFailure 2
         Right val  -> putStrLn $ "Result of evaluation: " ++ ppValue val
-
-tracepass :: String -> [String] -> L0Option
-tracepass short long =
-  Option short long
-         (OptArg (\arg opts ->
-            opts { l0pipeline = pass arg : l0pipeline opts })
-         "DESC")
-  "Print pipeline argument to standard error."
-  where pass arg =
-          Pass { passName = case arg of
-                              Just arg' -> "trace " ++ arg'
-                              Nothing   -> "trace"
-               , passOp = \prog -> tell (prettyPrint prog) >> return prog
-               }
 
 passoption :: String -> Pass -> String -> [String] -> L0Option
 passoption desc pass short long =
