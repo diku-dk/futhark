@@ -5,6 +5,7 @@ import Control.Monad
 import Control.Monad.Trans
 import Control.Monad.Writer.Strict (Writer, runWriter, tell)
 import Control.Monad.Error
+import Data.Maybe (isJust)
 import System.Console.GetOpt
 import System.Environment (getArgs, getProgName)
 import System.Exit (exitWith, ExitCode(..))
@@ -22,7 +23,15 @@ import qualified L0C.TupleTransform as TT
 import L0C.Untrace
 import L0C.CCodeGen
 
-type L0CM = ErrorT String (Writer String)
+data CompileError = CompileError {
+    errorDesc :: String
+  , errorProg :: Maybe Prog
+  }
+
+instance Error CompileError where
+  strMsg s = CompileError s Nothing
+
+type L0CM = ErrorT CompileError (Writer String)
 
 data Pass = Pass {
     passName :: String
@@ -33,7 +42,7 @@ data L0Config = L0Config {
     l0pipeline :: [Pass]
   , l0action :: Prog -> IO ()
   , l0checkAliases :: Bool
-  , l0verbose :: Bool
+  , l0verbose :: Maybe (Maybe FilePath)
 }
 
 newL0Config :: L0Config
@@ -41,16 +50,22 @@ newL0Config = L0Config {
                 l0pipeline = []
               , l0action = putStrLn . prettyPrint
               , l0checkAliases = True
-              , l0verbose = False
+              , l0verbose = Nothing
               }
+
+verbose :: L0Config -> Bool
+verbose = isJust . l0verbose
+
+compileError :: String -> Maybe Prog -> L0CM a
+compileError s p = throwError $ CompileError s p
 
 type L0Option = OptDescr (L0Config -> L0Config)
 
 commandLineOptions :: [L0Option]
 commandLineOptions =
   [ Option "V" ["verbose"]
-    (NoArg $ \opts -> opts { l0verbose = True })
-    "Display verbose output on standard error."
+    (OptArg (\file opts -> opts { l0verbose = Just file }) "FILE")
+    "Print verbose output on standard error; wrong program to FILE."
   , Option [] ["inhibit-uniqueness-checking"]
     (NoArg $ \opts -> opts { l0checkAliases = False })
     "Don't check that uniqueness constraints are being upheld."
@@ -130,14 +145,14 @@ eotransform :: String -> [String] -> L0Option
 eotransform =
   passoption "Perform simple enabling optimisations."
   Pass { passName = "enabling optimations"
-       , passOp = either (throwError . show) return . enablingOpts
+       , passOp = liftPass enablingOpts
        }
 
 hotransform :: String -> [String] -> L0Option
 hotransform =
   passoption "Perform higher-order transformation, i.e., fusion."
   Pass { passName = "higer-order optimations"
-       , passOp = either (throwError . show) return . highOrdTransf 
+       , passOp = liftPass highOrdTransf
        }
 
 -- | Entry point.  Non-interactive, except when reading interpreter
@@ -151,8 +166,14 @@ main = do args <- getArgs
                   (msgs, res) = l0c config file contents
               hPutStr stderr msgs
               case res of
-                Left err -> do hPutStrLn stderr err
-                               exitWith $ ExitFailure 2
+                Left err -> do
+                  hPutStrLn stderr $ errorDesc err
+                  case (errorProg err, l0verbose config) of
+                    (Just prog, Just outfile) ->
+                      maybe (hPutStr stderr) writeFile outfile $
+                        prettyPrint prog
+                    _ -> return ()
+                  exitWith $ ExitFailure 2
                 Right prog -> l0action config prog
             (_, _, errs) -> usage errs
 
@@ -171,32 +192,34 @@ typeCheck config
   | l0checkAliases config = checkProg
   | otherwise             = checkProgNoUniqueness
 
-l0c :: L0Config -> FilePath -> String -> (String, Either String Prog)
+l0c :: L0Config -> FilePath -> String -> (String, Either CompileError Prog)
 l0c config filename srccode =
   case runWriter (runErrorT l0c') of
     (Left err, msgs) -> (msgs, Left err)
     (Right prog, msgs) -> (msgs, Right prog)
-  where l0c' = canFail (parseL0 filename srccode) >>=
-               canFail . typeCheck config >>=
+  where l0c' = canFail Nothing (parseL0 filename srccode) >>=
+               canFail Nothing . typeCheck config >>=
                pipeline . tagProg
         pipeline = foldl comb return $ l0pipeline config
         comb prev pass prog = do
           prog' <- prev prog
-          when (l0verbose config) $ tell $ "Running " ++ passName pass ++ ".\n"
+          when (verbose config) $ tell $ "Running " ++ passName pass ++ ".\n"
           res <- lift $ runErrorT $ passOp pass prog'
           case res of
             Left err ->
-              throwError $ "Error during pass '" ++ passName pass ++ "':\n" ++ err
+              compileError ("Error during pass '" ++ passName pass ++ "':\n" ++ errorDesc err)
+                           (Just prog')
             Right prog'' ->
               case typeCheck config prog'' of
                 Left err ->
-                  throwError $ "Type error after pass '" ++
-                  passName pass ++ "':\n" ++ show err ++
-                  if l0verbose config
-                  then "\nErroneous program is:\n" ++ prettyPrint prog''
-                  else ""
+                  compileError ("Type error after pass '" ++ passName pass ++
+                                "':\n" ++ show err)
+                               (Just prog'')
                 Right prog''' -> return prog'''
 
-canFail :: Show err => Either err a -> L0CM a
-canFail (Left err) = throwError $ show err
-canFail (Right v)  = return v
+canFail :: Show err => Maybe Prog -> Either err a -> L0CM a
+canFail p (Left err) = compileError (show err) p
+canFail _ (Right v)  = return v
+
+liftPass :: Show err => (Prog -> Either err a) -> Prog -> L0CM a
+liftPass f p = canFail (Just p) (f p)
