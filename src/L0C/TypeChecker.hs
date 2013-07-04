@@ -11,6 +11,7 @@ module L0C.TypeChecker ( checkProg
   where
 
 import Control.Applicative
+import Control.Arrow ((***))
 import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.State
@@ -1090,9 +1091,7 @@ checkBinding pat et dflow = do
         add ident = do
           bnd <- gets $ find (==ident) . snd
           case bnd of
-            Nothing ->
-              modify $ \(scope, names) -> (binding [ident] . scope,
-                                           ident : names)
+            Nothing -> modify $ (binding [ident].) *** (ident:)
             Just (Ident name _ pos2) ->
               lift $ bad $ DupPatternError (baseName name) (srclocOf ident) pos2
         -- A pattern with known type box (unit) for error messages.
