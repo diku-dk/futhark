@@ -1,4 +1,3 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, ScopedTypeVariables #-}
 -- | Common error definition for all the enabling optimisation submodules.
 module L0C.EnablingOpts.EnablingOptErrors ( EnablingOptError(..) )
   where
