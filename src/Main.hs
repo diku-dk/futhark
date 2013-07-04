@@ -170,7 +170,7 @@ main = do args <- getArgs
                   hPutStrLn stderr $ errorDesc err
                   case (errorProg err, l0verbose config) of
                     (Just prog, Just outfile) ->
-                      maybe (hPutStr stderr) writeFile outfile $
+                      maybe (hPutStrLn stderr) writeFile outfile $
                         prettyPrint prog
                     _ -> return ()
                   exitWith $ ExitFailure 2
