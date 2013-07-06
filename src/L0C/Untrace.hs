@@ -18,7 +18,7 @@ untraceFun (fname, ret, params, body, pos) =
   (fname, ret, params, untraceExp body, pos)
 
 untraceExp :: ExpBase ty vn -> ExpBase ty vn
-untraceExp (Apply fname [e] _ _)
+untraceExp (Apply fname [(e,_)] _ _)
   | "trace" <- nameToString fname = e
 untraceExp e = mapExp untrace e
   where untrace = identityMapper {

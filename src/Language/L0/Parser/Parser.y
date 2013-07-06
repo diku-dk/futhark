@@ -229,7 +229,7 @@ Exp  :: { UncheckedExp }
 
      | id '(' Exps ')'
                       { let L pos (ID name) = $1
-                        in Apply name $3 NoInfo pos }
+                        in Apply name [ (arg, Observe) | arg <- $3 ] NoInfo pos }
      | id '(' ')'     { let L pos (ID name) = $1
                         in Apply name [] NoInfo pos }
 

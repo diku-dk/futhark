@@ -76,7 +76,7 @@ instance (Eq vn, Pretty vn) => Pretty (ExpBase ty vn) where
                              text "then" <+> align (ppr t) </>
                              text "else" <+> align (ppr f)
   pprPrec _ (Apply fname args _ _) = text (nameToString fname) <>
-                                     apply (map (align . ppr) args)
+                                     apply (map (align . ppr . fst) args)
   pprPrec _ (LetPat pat e body _) = text "let" <+/> align (ppr pat) <+>
                                     equals <+> align (ppr e) <+> text "in" </>
                                     ppr body

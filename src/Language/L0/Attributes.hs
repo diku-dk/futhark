@@ -23,6 +23,8 @@ module Language.L0.Attributes
   , uniqueness
   , unique
   , aliases
+  , diet
+  , dietingAs
   , subtypeOf
   , similarTo
   , returnType
@@ -151,6 +153,25 @@ aliases :: Monoid (as vn) => TypeBase as vn -> as vn
 aliases (Array _ _ _ als) = als
 aliases (Elem (Tuple et)) = mconcat $ map aliases et
 aliases (Elem _)          = mempty
+
+-- | @diet t@ returns a description of how a function parameter of
+-- type @t@ might consume its argument.
+diet :: TypeBase as vn -> Diet
+diet (Elem (Tuple ets)) = TupleDiet $ map diet ets
+diet (Elem _) = Observe
+diet (Array _ _ Unique _) = Consume
+diet (Array _ _ Nonunique _) = Observe
+
+-- | @t `dietingAs` d@ modifies the uniqueness attributes of @t@ to
+-- reflect how it is consumed according to @d@ - if it is consumed, it
+-- becomes 'Unique'.  Tuples are handled intelligently.
+dietingAs :: TypeBase as vn -> Diet -> TypeBase as vn
+Elem (Tuple ets) `dietingAs` TupleDiet ds =
+  Elem $ Tuple $ zipWith dietingAs ets ds
+t `dietingAs` Consume =
+  t `setUniqueness` Unique
+t `dietingAs` _ =
+  t `setUniqueness` Nonunique
 
 -- | Remove aliasing information from a type.
 toDecl :: TypeBase as vn -> DeclTypeBase vn

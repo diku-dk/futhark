@@ -344,4 +344,4 @@ transformLambda (AnonymFun params body _ loc) args = do
   where bind e (Ident pname ptype _, arg) = LetPat (Id $ Ident pname ptype loc) arg e loc
 transformLambda (CurryFun fname curryargs rettype loc) args = do
   curryargs' <- mapM transformExp curryargs
-  return $ Apply fname (curryargs'++args) rettype loc
+  return $ Apply fname [(arg, Observe) | arg <- curryargs'++args] rettype loc

@@ -81,7 +81,7 @@ mkUnnamedLamLam ftab (CurryFun  nm params tp pos) =
         Just (fnm,_,idds,_,_) -> 
             let idds' = drop (length params) idds  
                 args  = params ++ map (Var . fromParam) idds'
-            in  AnonymFun idds' (Apply fnm args tp pos) (toDecl tp) pos
+            in  AnonymFun idds' (Apply fnm (zip args $ repeat Observe) tp pos) (toDecl tp) pos
 
 ------------------------------------------------------------------------------
 ------------------------------------------------------------------------------
@@ -163,8 +163,8 @@ buildCGexp :: ([Name],[Name]) -> Exp -> ([Name],[Name])
 
 buildCGexp callees@(fs, soacfs) (Apply fname args _ _)  =
     if isBuiltInFun fname || elem fname fs
-    then foldl buildCGexp callees args
-    else foldl buildCGexp (fname:fs, soacfs) args   
+    then foldl buildCGexp callees $ map fst args
+    else foldl buildCGexp (fname:fs, soacfs) $ map fst args
 
 
 buildCGexp callees e = 
@@ -290,10 +290,11 @@ doInlineInCaller (name,rtp,args,body,pos) inlcallees =
     in (name, rtp, args, body',pos)
 
 inlineInExp :: [FunDec] -> Exp -> Exp
-inlineInExp inlcallees (Apply fname aargs rtp pos) = 
-    let aargs' = map (inlineInExp inlcallees) aargs
+inlineInExp inlcallees (Apply fname args rtp pos) =
+    let aargs = map fst args
+        aargs' = map (inlineInExp inlcallees) aargs
     in  case filter (\(nm,_,_,_,_)->fname==nm) inlcallees of
-            [] -> Apply fname aargs' rtp pos
+            [] -> Apply fname (zip aargs' $ map snd args) rtp pos
             (_,_,fargs,body,_):_ ->
               let revbnds = reverse (zip (map fromParam fargs) aargs)
               in  foldl (addArgBnd pos) body revbnds

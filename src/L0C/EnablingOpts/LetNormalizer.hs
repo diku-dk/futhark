@@ -281,9 +281,9 @@ letNormExp (If e1 e2 e3 tp pos) = do
 
 letNormExp (Apply fnm args tp pos) = do
     -- transfer the bindings of arg exps to the outer let
-    args'  <- mapM (subLetoNormExp "tmp_arg") args
+    args'  <- mapM (subLetoNormExp "tmp_arg" . fst) args
     -- substitute the call with a fresh variable
-    makeVarExpSubst "tmp_call" pos (Apply fnm args' tp pos)
+    makeVarExpSubst "tmp_call" pos (Apply fnm (zip args' $ map snd args) tp pos)
 
 -----------------------------------------------
 ---- Iota/Size/Replicate/Reshape/Transpose ----

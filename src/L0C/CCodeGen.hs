@@ -538,7 +538,7 @@ compileExp place (If cond e1 e2 _ _) = do
              }|]
 
 compileExp place (Apply fname args _ _) = do
-  (vars, args') <- liftM unzip . forM args $ \arg -> do
+  (vars, args') <- liftM unzip . forM args $ \(arg, _) -> do
                      var <- new "apply_arg"
                      arg' <- compileExp (varExp var) arg
                      argtype <- expCType arg

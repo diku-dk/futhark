@@ -114,15 +114,15 @@ deadCodeElimExp :: Exp -> DCElimM Exp
 deadCodeElimExp (LetPat pat (Apply fname args tp p) body pos)
   | "trace" <- nameToString fname = do
     let ids = getBnds pat
-    args' <- mapM deadCodeElimExp args
+    args' <- mapM (deadCodeElimExp . fst) args
     body' <- binding ids $ deadCodeElimExp body
-    return $ LetPat pat (Apply fname args' tp p) body' pos
+    return $ LetPat pat (Apply fname (zip args' $ map snd args) tp p) body' pos
 deadCodeElimExp (LetPat pat (Apply fname args tp p) body pos)
   | "assertZip" <- nameToString fname = do
     let ids = getBnds pat
-    args' <- mapM deadCodeElimExp args
+    args' <- mapM (deadCodeElimExp . fst) args
     body' <- binding ids $ deadCodeElimExp body
-    return $ LetPat pat (Apply fname args' tp p) body' pos
+    return $ LetPat pat (Apply fname (zip args' $ map snd args) tp p) body' pos
 -----------------------------------------------------------------------------
  
 deadCodeElimExp (LetPat pat e body pos) = do

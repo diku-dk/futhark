@@ -350,15 +350,15 @@ copyCtPropExp (Shape e pos) = do
 -- exhibit side effects!
 copyCtPropExp (Apply fname args tp pos)
   | "trace" <- nameToString fname = do
-    args' <- mapM copyCtPropExp args
-    return $ Apply fname args' tp pos
+    args' <- mapM (copyCtPropExp . fst) args
+    return $ Apply fname (zip args' $ map snd args) tp pos
 copyCtPropExp (Apply fname args tp pos)
   | "assertZip" <- nameToString fname = do
-    args' <- mapM copyCtPropExp args
-    return $ Apply fname args' tp pos
+    args' <- mapM (copyCtPropExp . fst) args
+    return $ Apply fname (zip args' $ map snd args) tp pos
 
 copyCtPropExp (Apply fname args tp pos) = do
-    args' <- mapM copyCtPropExp args
+    args' <- mapM (copyCtPropExp . fst) args
     (all_are_vals, vals) <- allArgsAreValues args' 
     if all_are_vals
     then do prg <- asks program
@@ -367,7 +367,7 @@ copyCtPropExp (Apply fname args tp pos) = do
               (Right v) -> changed $ Literal v pos
               _ -> badCPropM $ EnablingOptError pos (" Interpreting fun " ++
                                                      nameToString fname ++ " yields error!")
-    else return $ Apply fname args' tp pos
+    else return $ Apply fname (zip args' $ map snd args) tp pos
 
     where 
         allArgsAreValues :: [Exp] -> CPropM (Bool, [Value])
