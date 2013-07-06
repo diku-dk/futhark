@@ -575,7 +575,7 @@ funDecByName fname = find (\(fname',_,_,_,_) -> fname == fname') . progFunctions
 
 -- | Change those subexpressions where evaluation of the expression
 -- would stop.
-mapTails :: (ExpBase ty vn -> (ExpBase ty vn)) -> ExpBase ty vn -> ExpBase ty vn
+mapTails :: (ExpBase ty vn -> ExpBase ty vn) -> ExpBase ty vn -> ExpBase ty vn
 mapTails f (LetPat pat e body loc) =
   LetPat pat e (mapTails f body) loc
 mapTails f (LetWith dest src idxs ve body loc) =
