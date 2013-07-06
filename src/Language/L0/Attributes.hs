@@ -16,6 +16,7 @@ module Language.L0.Attributes
   , expToValue
   , mapTails
   , typeOf
+  , patToExp
 
   -- * Queries on types
   , basicType
@@ -563,6 +564,13 @@ mapTails f (DoLoop pat me i bound loopbody body loc) =
 mapTails f (If c te fe t loc) =
   If c (mapTails f te) (mapTails f fe) t loc
 mapTails f e = f e
+
+-- | Convert a pattern into the corresponding expression, i.e. the
+-- pattern @(x, (y, z))@ becomes the expression @(x, (y, z))@
+-- (instructive, no?)
+patToExp :: TupIdentBase ty vn -> ExpBase ty vn
+patToExp (Id k)           = Var k
+patToExp (TupId pats loc) = TupLit (map patToExp pats) loc
 
 -- | Convert an identifier to a 'ParamBase'.
 toParam :: IdentBase (TypeBase as) vn -> ParamBase vn
