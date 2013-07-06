@@ -2,21 +2,21 @@
 //////////////////////////////////////////////////
 // SAC VERSION
 //////////////////////////////////////////////////
-//inline int[.,.] floydSbs1(int[.,.] D ) {
+//inline int[.,.] floydSbs1(int[.,.] D ) [
 //    DT = transpose(D);
 //    res = with
 //        (. <= [i,j] <= .) :
 //            min( D[i,j], minval( D[i] + DT[j]));
 //        : modarray(D);
 //    return( res);
-//}
+//]
 
 
 
 //////////////////////////////////////////////////
 // C VERSION
 //////////////////////////////////////////////////
-//inline int* floydSbs1( int N, int* D ) {
+//inline int* floydSbs1( int N, int* D ) [
 //    do k = 1, N
 //      do i = 1, N
 //        do j = 1, N
@@ -28,7 +28,7 @@
 //////////////////////////////////////////////////
 // C VERSION
 //////////////////////////////////////////////////
-//inline int* floydSbs1( int N, int* D ) {
+//inline int* floydSbs1( int N, int* D ) [
 //    do i = 1, N
 //      do j = 1, N
 //        minrow = 0;
@@ -60,7 +60,7 @@ fun [[int]] floydSbsFun(int N, [[int]] D ) =
     let partial = map(redmin2, abr)        in
         map(min1, zip(partial, D) )
 
-fun [[int]] floydSbsImp(int N, *[[int]] D) = 
+fun [[int]] floydSbsImp(int N, *[[int]] D) =
     let DT = copy(transpose(D)) in
     loop (D) = for i < N do
         loop (D) = for j < N do
@@ -70,10 +70,8 @@ fun [[int]] floydSbsImp(int N, *[[int]] D) =
             let D[i,j] = minrow in D
         in D
     in D
-            
-fun ([[int]],[[int]]) main() = 
-    let arr = {{2,4,5}, {1,1000,3}, {3,7,1}} in
-    //let x = write(transpose(arr)) 
-    (floydSbsFun(3, arr), floydSbsImp(3, copy(arr)))
 
-
+fun {[[int]],[[int]]} main() =
+    let arr = [[2,4,5], [1,1000,3], [3,7,1]] in
+    //let x = write(transpose(arr))
+    {floydSbsFun(3, arr), floydSbsImp(3, copy(arr))}

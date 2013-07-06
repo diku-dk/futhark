@@ -326,12 +326,9 @@ pattern ks loc = TupId (map Id ks) loc
 rows :: Exp -> SrcLoc -> TransformM Exp
 rows e loc = do
   (rs, rsv) <- newVar loc "rows" $ Elem Int
-  case arrayDims $ typeOf e of
-    1 -> return $ LetPat (Id rs) (Shape e loc) rsv loc
-    n -> do
-      names <- replicateM (n-1) $
-               liftM fst . newVar loc "dim" $ Elem Int
-      return $ LetPat (TupId (map Id $ rs:names) loc) (Shape e loc) rsv loc
+  names <- replicateM (arrayDims (typeOf e)-1) $
+           liftM fst . newVar loc "dim" $ Elem Int
+  return $ LetPat (TupId (map Id $ rs:names) loc) (Shape e loc) rsv loc
 
 size :: [Ident] -> TransformM Exp
 size [] = return $ Literal (IntVal 0) noLoc

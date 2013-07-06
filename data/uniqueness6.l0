@@ -1,6 +1,7 @@
 fun [  int  ] main( [  int  ]  arr) =
   let  newarr  =
        (let notused  = arr in
-        replicate(shape(arr) , 0)) in
+        let {n} = shape(arr) in
+        replicate(n , 0)) in
   let newarr[0] = 0 in
   arr
