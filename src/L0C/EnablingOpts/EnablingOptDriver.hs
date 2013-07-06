@@ -25,6 +25,7 @@ import L0C.EnablingOpts.CopyCtPropFold
 import L0C.EnablingOpts.DeadVarElim
 import L0C.EnablingOpts.TupleNormalizer
 import L0C.EnablingOpts.LetNormalizer
+import L0C.EnablingOpts.Hoisting as Hoisting
 import L0C.EnablingOpts.EnablingOptErrors
 
 import qualified L0C.TupleTransform as TT
@@ -60,8 +61,7 @@ normCopyDeadOpts prog = do
     (_, prog_nlet) <- letNormProg     prog
     (_,prog_cp)    <- copyCtProp      prog_nlet
     (_, prog_dce)  <- deadCodeElim    prog_cp
-
-    return prog_dce
+    return $ Hoisting.transformProg prog_dce
 
 normCopyOneLambda :: Prog -> VNameSource -> Lambda -> 
                      Either EnablingOptError (VNameSource, Lambda)

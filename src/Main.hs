@@ -20,6 +20,7 @@ import L0C.EnablingOpts.EnablingOptDriver
 import L0C.HOTrans.HOTransDriver
 import qualified L0C.FirstOrderTransform as FOT
 import qualified L0C.TupleTransform as TT
+import qualified L0C.EnablingOpts.Hoisting as LHO
 import L0C.Untrace
 import L0C.CCodeGen
 
@@ -79,6 +80,7 @@ commandLineOptions =
     (NoArg $ \opts -> opts { l0action = interpret })
     "Run the program via an interpreter."
   , rename "r" ["rename"]
+  , hoist "o" ["hoist"]
   , uttransform "u" ["untrace"] 
   , fotransform "f" ["first-order-transform"]
   , tatransform "t" ["tuple-of-arrays-transform"]
@@ -117,6 +119,13 @@ rename =
   passoption "Rename all non-function identifiers to be unique."
   Pass { passName = "renamer"
        , passOp = return . renameProg
+       }
+
+hoist :: String -> [String] -> L0Option
+hoist =
+  passoption "Let-hoisting"
+  Pass { passName = "let-hoister"
+       , passOp = return . LHO.transformProg
        }
 
 fotransform :: String -> [String] -> L0Option
