@@ -17,6 +17,7 @@ module Language.L0.Syntax
   , TypeBase(..)
   , CompTypeBase
   , DeclTypeBase
+  , Diet(..)
 
   -- * Values
   , Value(..)
@@ -125,6 +126,16 @@ type CompTypeBase = TypeBase Names
 -- | A type without aliasing information, used for declarations.
 type DeclTypeBase = TypeBase NoInfo
 
+-- | Information about which parts of a value/type are consumed.  For
+-- example, we might say that a function taking an argument of type
+-- @([int], *[int], [int])@ has diet @ConsumeTuple [Observe, Consume,
+-- Observe]@.
+data Diet = TupleDiet [Diet] -- ^ Consumes these parts of the tuple.
+          | Consume -- ^ Consumes this value.
+          | Observe -- ^ Only observes value in this position, does
+                    -- not consume.
+            deriving (Eq, Ord, Show)
+
 -- | Every possible value in L0.  Values are fully evaluated and their
 -- type is always unambiguous.
 data Value = IntVal !Int
@@ -188,7 +199,7 @@ data ExpBase ty vn =
             | If     (ExpBase ty vn) (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
             | Var    (IdentBase ty vn)
             -- Function Call and Let Construct
-            | Apply  Name [ExpBase ty vn] (ty vn) SrcLoc
+            | Apply  Name [(ExpBase ty vn, Diet)] (ty vn) SrcLoc
             | LetPat (TupIdentBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
 
             | LetWith (IdentBase ty vn) (IdentBase ty vn) [ExpBase ty vn] (ExpBase ty vn) (ExpBase ty vn) SrcLoc

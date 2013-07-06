@@ -164,7 +164,9 @@ runFun fname mainargs prog = do
           (Nothing, Nothing) -> bad $ MissingEntryPoint fname
           (Just (_,rettype,fparams,_,_), _)
             | map (toDecl . valueType) mainargs == map identType fparams ->
-              evalExp (Apply fname (map (`Literal` noLoc) mainargs)
+              evalExp (Apply fname [ (Literal arg noLoc,
+                                      diet $ identType paramt) |
+                                     (arg,paramt) <- zip mainargs fparams ]
                        (fromDecl rettype) noLoc)
             | otherwise ->
               bad $ InvalidFunctionArguments fname
@@ -297,7 +299,7 @@ evalExp (If e1 e2 e3 _ pos) = do
 evalExp (Var (Ident name _ _)) =
   lookupVar name
 
-evalExp (Apply fname [arg] _ loc)
+evalExp (Apply fname [(arg, _)] _ loc)
   | "trace" <- nameToString fname = do
   arg' <- evalExp arg
   tell [(loc, ppValue arg')]
@@ -305,7 +307,7 @@ evalExp (Apply fname [arg] _ loc)
 
 evalExp (Apply fname args _ loc)
   | "assertZip" <- nameToString fname = do
-  args' <- mapM evalExp args
+  args' <- mapM (evalExp . fst) args
   szs   <- mapM getArrSize args'
   case szs of
     n:ns | not $ all (==n) ns ->
@@ -319,7 +321,7 @@ evalExp (Apply fname args _ loc)
 
 evalExp (Apply fname args _ _) = do
   fun <- lookupFun fname
-  args' <- mapM evalExp args
+  args' <- mapM (evalExp . fst) args
   fun args'
 
 evalExp (LetPat pat e body pos) = do

@@ -52,10 +52,12 @@ module Language.L0.Traversals
   , progNames
   , patNames
   , freeInExp
+  , consumedInExp
   )
   where
 
 import Control.Applicative
+import Control.Arrow (first)
 import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.Writer
@@ -64,6 +66,7 @@ import Control.Monad.State
 import qualified Data.Set as S
 
 import Language.L0.Syntax
+import Language.L0.Attributes
 
 -- | Express a monad mapping operation on a syntax node.  Each element
 -- of this structure expresses the operation to be performed on a
@@ -121,9 +124,10 @@ mapExpM tv (If c texp fexp t loc) =
   pure If <*> mapOnExp tv c <*>
          mapOnExp tv texp <*> mapOnExp tv fexp <*>
          mapOnType tv t <*> pure loc
-mapExpM tv (Apply fname args t loc) =
-  pure (Apply fname) <*> mapM (mapOnExp tv) args <*>
-         mapOnType tv t <*> pure loc
+mapExpM tv (Apply fname args t loc) = do
+  args' <- forM args $ \(arg, d) ->
+             (,) <$> mapOnExp tv arg <*> pure d
+  pure (Apply fname) <*> pure args' <*> mapOnType tv t <*> pure loc
 mapExpM tv (LetPat pat e body loc) =
   pure LetPat <*> mapOnPattern tv pat <*> mapOnExp tv e <*>
          mapOnExp tv body <*> pure loc
@@ -378,3 +382,36 @@ freeInExp = execWriter . flip runReaderT S.empty . expFree
         lambdaFree (AnonymFun params body _ _) =
           local (`S.union` S.fromList (map identName params)) $ expFree body
         lambdaFree (CurryFun _ exps _ _) = mapM_ expFree exps
+
+consumedInExp :: Ord vn => ExpBase CompTypeBase vn -> S.Set vn
+consumedInExp = execWriter . expConsumed
+  where names = identityWalker {
+                  walkOnExp = expConsumed
+                }
+
+        unconsume s = censor (`S.difference` s)
+
+        consume ident =
+          tell $ identName ident `S.insert` aliases (identType ident)
+
+        expConsumed (LetPat pat e body _) = do
+          expConsumed e
+          unconsume (patNames pat) $ expConsumed body
+        expConsumed (LetWith dest src idxs ve body _) = do
+          mapM_ expConsumed idxs
+          expConsumed ve
+          consume src
+          unconsume (S.singleton $ identName dest) $ expConsumed body
+        expConsumed (DoLoop pat mergeexp i boundexp loopbody letbody _) = do
+          expConsumed mergeexp
+          expConsumed boundexp
+          unconsume (identName i `S.insert` patNames pat) $ do
+            expConsumed loopbody
+            expConsumed letbody
+        expConsumed (Apply _ args _ _) =
+          mapM_ (consumeArg . first typeOf) args
+          where consumeArg (t, Consume) = tell $ aliases t
+                consumeArg (Elem (Tuple ets), TupleDiet ds) =
+                  mapM_ consumeArg $ zip ets ds
+                consumeArg _ = return ()
+        expConsumed e = walkExpM names e

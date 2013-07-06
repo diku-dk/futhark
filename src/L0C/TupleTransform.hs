@@ -202,20 +202,20 @@ transformExp (ArrayLit es intype loc) = do
               arrexp t names = ArrayLit (map Var names) t loc
     et' -> return $ ArrayLit es' et' loc
 
-transformExp (Apply fname argexps rettype loc) = do
-  (argexps', bindings) <- foldM comb ([], id) argexps
-  return $ bindings $ Apply fname (reverse argexps') rettype' loc
+transformExp (Apply fname args rettype loc) = do
+  (args', bindings) <- foldM comb ([], id) args
+  return $ bindings $ Apply fname (reverse args') rettype' loc
     where rettype' = transformType rettype
-          comb (argexps', bindings) arg = do
+          comb (argexps', bindings) (arg, d) = do
             arg' <- transformExp arg
-            case typeOf arg' of
+            case transformType (typeOf arg `dietingAs` d) of
               Elem (Tuple ets) -> do
                 (names, namevs) <- unzip <$> mapM (newVar loc "array_tup") ets
-                return (reverse namevs ++ argexps',
+                return (reverse (zip namevs $ map diet ets) ++ argexps',
                         \body ->
                           bindings $
                           LetPat (TupId (map Id names) loc) arg' body loc)
-              _ -> return (arg' : argexps', bindings)
+              _ -> return ((arg', d) : argexps', bindings)
 
 transformExp (DoLoop mergepat mergeexp i bound loopbody letbody loc) = do
   bound' <- transformExp bound
@@ -273,7 +273,9 @@ transformExp (Zip es loc) = do
   es' <- mapM (transformExp . fst) es
   (names, namevs) <- unzip <$> mapM (newVar loc "zip_elem" . typeOf) es'
   let binder body = LetPat (TupId (map Id names) loc) (TupLit es' loc) body loc
-      azip = Apply (nameFromString "assertZip") namevs (Elem Bool) loc
+      azip = Apply
+             (nameFromString "assertZip")
+             (zip namevs $ repeat Observe) (Elem Bool) loc
   (dead, _) <- newVar loc "dead" (Elem Bool)
   transformExp $ binder $ LetPat (Id dead) azip (TupLit namevs loc) loc
 

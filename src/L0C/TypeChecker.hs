@@ -174,10 +174,10 @@ type TaggedElemType vn = ElemTypeBase Names (ID vn)
 type FunBinding vn = (DeclTypeBase (ID vn), [DeclTypeBase (ID vn)])
 
 data Binding vn = Bound (TaggedType vn)
-                | Consumed SrcLoc
+                | WasConsumed SrcLoc
 
-data Usage = Consume SrcLoc
-           | Observe SrcLoc
+data Usage = Consumed SrcLoc
+           | Observed SrcLoc
              deriving (Eq, Ord, Show)
 
 data Occurence vn = Occurence { observed :: Names (ID vn)
@@ -205,17 +205,17 @@ type UsageMap vn = M.Map (ID vn) [Usage]
 usageMap :: Occurences vn -> UsageMap vn
 usageMap = foldl comb M.empty
   where comb m (Occurence obs cons loc) =
-          let m' = S.foldl (ins $ Observe loc) m obs
-          in S.foldl (ins $ Consume loc) m' cons
+          let m' = S.foldl (ins $ Observed loc) m obs
+          in S.foldl (ins $ Consumed loc) m' cons
         ins v m k = M.insertWith (++) k [v] m
 
 combineOccurences :: ID vn -> Usage -> Usage -> Either (TypeError vn) Usage
-combineOccurences _ (Observe loc) (Observe _) = Right $ Observe loc
-combineOccurences name (Consume wloc) (Observe rloc) =
+combineOccurences _ (Observed loc) (Observed _) = Right $ Observed loc
+combineOccurences name (Consumed wloc) (Observed rloc) =
   Left $ UseAfterConsume (baseName name) rloc wloc
-combineOccurences name (Observe rloc) (Consume wloc) =
+combineOccurences name (Observed rloc) (Consumed wloc) =
   Left $ UseAfterConsume (baseName name) rloc wloc
-combineOccurences name (Consume loc1) (Consume loc2) =
+combineOccurences name (Consumed loc1) (Consumed loc2) =
   Left $ UseAfterConsume (baseName name) (max loc1 loc2) (min loc1 loc2)
 
 checkOccurences :: Occurences vn -> Either (TypeError vn) ()
@@ -317,27 +317,20 @@ consuming (Ident name t loc) m = do
   consume loc $ aliases t
   local consume' m
   where consume' env =
-          env { envVtable = M.insert name (Consumed loc) $ envVtable env }
+          env { envVtable = M.insert name (WasConsumed loc) $ envVtable env }
 
 collectDataflow :: VarName vn => TypeM vn a -> TypeM vn (a, Dataflow vn)
 collectDataflow m = pass $ do
   (x, dataflow) <- listen m
   return ((x, dataflow), const mempty)
 
--- | Information about which parts of a pattern are consumed within
--- its scope.
-data Diet = TupleCon [Diet]
-          | VarCon
-          | NoCon
-            deriving (Show)
-
-diet :: TaggedTupIdent CompTypeBase vn -> Occurences vn -> Diet
-diet pat occs = diet' pat
+patDiet :: TaggedTupIdent CompTypeBase vn -> Occurences vn -> Diet
+patDiet pat occs = patDiet' pat
   where cons =  allConsumed occs
-        diet' (Id k)
-          | identName k `S.member` cons = VarCon
-          | otherwise                   = NoCon
-        diet' (TupId pats _)            = TupleCon $ map diet' pats
+        patDiet' (Id k)
+          | identName k `S.member` cons = Consume
+          | otherwise                   = Observe
+        patDiet' (TupId pats _)         = TupleDiet $ map patDiet' pats
 
 maybeCheckOccurences :: VarName vn => Occurences vn -> TypeM vn ()
 maybeCheckOccurences us = do
@@ -361,8 +354,8 @@ unbinding = local (\env -> env { envVtable = M.empty})
 -- | Make all bindings nonunique.
 noUnique :: VarName vn => TypeM vn a -> TypeM vn a
 noUnique = local (\env -> env { envVtable = M.map f $ envVtable env})
-  where f (Bound t)      = Bound $ t `setUniqueness` Nonunique
-        f (Consumed loc) = Consumed loc
+  where f (Bound t)         = Bound $ t `setUniqueness` Nonunique
+        f (WasConsumed loc) = WasConsumed loc
 
 binding :: VarName vn => [TaggedIdent CompTypeBase vn] -> TypeM vn a -> TypeM vn a
 binding bnds = check . local (`bindVars` bnds)
@@ -411,7 +404,7 @@ lookupVar name pos = do
   case bnd of
     Nothing -> bad $ UnknownVariableError (baseName name) pos
     Just (Bound t) -> return t
-    Just (Consumed wloc) -> bad $ UseAfterConsume (baseName name) pos wloc
+    Just (WasConsumed wloc) -> bad $ UseAfterConsume (baseName name) pos wloc
 
 -- | Determine if two types are identical, ignoring uniqueness.
 -- Causes a '(TypeError vn)' if they fail to match, and otherwise returns
@@ -494,7 +487,7 @@ checkProg' checkoccurs prog = do
                         }
 
   liftM (untagProg . Prog) $
-        runTypeM typeenv src $ mapM checkFun $ progFunctions prog'
+          runTypeM typeenv src $ mapM checkFun $ progFunctions prog'
   where
     (prog', src) = tagProg' prog
     -- To build the ftable we loop through the list of function
@@ -633,32 +626,32 @@ checkExp (Var ident) = do
 checkExp (Apply fname args t pos)
   | "trace" <- nameToString fname =
   case args of
-    [e] -> do
-      e' <- checkExp e
-      t' <- checkAnnotation pos "return" t $ typeOf e'
-      return $ Apply fname [e'] t' pos
+    [(e, _)] -> do
+      e'  <- checkExp e
+      t'  <- checkAnnotation pos "return" t $ typeOf e'
+      return $ Apply fname [(e', Observe)] t' pos
     _ -> bad $ TypeError pos "Trace function takes a single parameter"
 
 checkExp (Apply fname args t pos)
   | "assertZip" <- nameToString fname = do
-  args' <- mapM checkExp args
+  args' <- mapM (checkExp . fst) args
   mapM_ rowTypeM args'
   t' <- checkAnnotation pos "return" t $ Elem Bool
-  return $ Apply fname args' t' pos
+  return $ Apply fname [ (arg, Observe) | arg <- args' ] t' pos
 
 checkExp (Apply fname args rettype loc) = do
   bnd <- asks $ M.lookup fname . envFtable
   case bnd of
     Nothing -> bad $ UnknownFunctionError fname loc
     Just (ftype, paramtypes) -> do
-      (args', argflows) <- unzip <$> mapM checkArg args
+      (args', argflows) <- unzip <$> mapM (checkArg . fst) args
 
       rettype' <- checkAnnotation loc "return" rettype $
                   returnType ftype $ map typeOf args'
 
       checkFuncall (Just fname) loc paramtypes (toDecl rettype') argflows
 
-      return $ Apply fname args' rettype' loc
+      return $ Apply fname (zip args' $ map diet paramtypes) rettype' loc
 
 checkExp (LetPat pat e body pos) = do
   (e', dataflow) <- collectDataflow $ checkExp e
@@ -837,10 +830,10 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
   let -- | Change the uniqueness attribute of a type to reflect how it
       -- was used.
       param (Array et sz _ _) con = Array et sz u NoInfo
-        where u = case con of VarCon     -> Unique
-                              TupleCon _ -> Unique
-                              NoCon      -> Nonunique
-      param (Elem (Tuple ts)) (TupleCon cons) =
+        where u = case con of Consume     -> Unique
+                              TupleDiet _ -> Unique
+                              Observe     -> Nonunique
+      param (Elem (Tuple ts)) (TupleDiet cons) =
         Elem $ Tuple $ zipWith param ts cons
       param t _ = t `setAliases` NoInfo
 
@@ -849,12 +842,12 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
       -- pattern are used - if something was consumed, it has to be a
       -- unique parameter to the function.
       rettype = param (typeOf mergeexp') $
-                diet mergepat' $ usageOccurences loopflow
+                patDiet mergepat' $ usageOccurences loopflow
 
       boundnames = S.insert loopvar $ patNames mergepat
       unbound ident = not $ identName ident `S.member` boundnames
       ununique ident =
-        ident { identType = param (identType ident) NoCon }
+        ident { identType = param (identType ident) Observe }
       -- Find the free variables of the loop body.
       free = map ununique $ filter unbound $ S.toList $
              freeInExp loopbody'
@@ -872,9 +865,12 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
 
       -- The body of the function will be the loop body, but with all
       -- tails replaced with recursive calls.
-      recurse e = Apply fname (map (Var . fromParam) free ++
-                               [Var iparam, Var bound, e])
-                  (fromDecl rettype) (srclocOf e)
+      recurse e = Apply fname
+                    ([(Var (fromParam k), diet (identType k)) | k <- free ] ++
+                     [(Var iparam, Observe),
+                      (Var bound, Observe),
+                      (e, diet $ typeOf e)])
+                    (fromDecl rettype) (srclocOf e)
       funbody' = LetPat mergepat' (Var merge) (mapTails recurse loopbody')
                  (srclocOf loopbody')
 
@@ -887,9 +883,12 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
     -- boundexp and mergeexp that we previously threw away.
     checkExp $ LetPat (Id bound) boundexp'
                 (LetPat (Id merge) mergeexp'
-                 (Apply fname (map (Var . fromParam) free ++
-                               [Literal (IntVal 0) loc, Var bound, Var merge])
-                        (fromDecl rettype) $ srclocOf mergeexp)
+                 (Apply fname
+                    ([(Var (fromParam k), diet (identType k)) | k <- free ] ++
+                     [(Literal (IntVal 0) loc, Observe),
+                      (Var bound, Observe),
+                      (Var merge, diet rettype)])
+                    (fromDecl rettype) $ srclocOf mergeexp)
                  (srclocOf mergeexp))
                 (srclocOf mergeexp)
 
@@ -1200,7 +1199,9 @@ checkLambda (CurryFun fname curryargexps rettype pos) args = do
               tupparam <- newIdent "x" tupt pos
               let tuplet = LetPat (TupId (map Id params) pos) (Var tupparam) body pos
                   tupfun = AnonymFun [toParam tupparam] tuplet (toDecl rettype') pos
-                  body = Apply fname (map Var params) rettype' pos
+                  body = Apply fname [(Var param, diet paramt) |
+                                      (param, paramt) <- zip params paramtypes]
+                         rettype' pos
               checkLambda tupfun args
           | otherwise -> do
               case find (unique . snd) $ zip curryargexps paramtypes of

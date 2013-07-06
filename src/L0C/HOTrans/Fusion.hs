@@ -605,13 +605,13 @@ fusionGatherExp fres (LetPat pat (Apply fname zip_args _ _) body _)
     let iddnms  = foldl (\s x-> case x of
                                   Var idd -> S.insert (identName idd) s
                                   _       -> s
-                        ) S.empty zip_args
+                        ) S.empty $ map fst zip_args
     let inzips' = foldl (\m x -> case M.lookup x m of
                                     Nothing -> M.insert x [nm]     m
                                     Just lst-> M.insert x (nm:lst) m
                         ) (inzips bres) (S.toList iddnms)
     let i = getBuiltinFunIdent "assertZip"
-    return $ bres { zips   = M.insert nm (i, S.fromList zip_args) (zips bres), inzips = inzips' }
+    return $ bres { zips   = M.insert nm (i, S.fromList $ map fst zip_args) (zips bres), inzips = inzips' }
 
 fusionGatherExp fres (LetPat pat (Shape arr _) body _) = do
     -- Fix implementation such that if the arg of size is not from a map, then it is parsed,
@@ -831,7 +831,7 @@ fuseInExp (LetPat pat (Apply fname _ rtp p1) body pos)
                                                   ("In Fusion.hs, fuseInExp LetPat of assertZip, "
                                                    ++" builtin funname not assertZip: "++fnm)
                          if length arrs > 1
-                         then return $ LetPat pat (Apply fname arrs rtp p1) body' pos
+                         then return $ LetPat pat (Apply fname (zip arrs $ repeat Observe) rtp p1) body' pos
                          else return $ body' -- i.e., assertZip eliminated
 
 fuseInExp (LetPat pat (Shape _ p1) body pos) = do
@@ -1345,7 +1345,7 @@ buildCall tps (CurryFun fnm aargs rtp pos) = do
                 ) tps
     -- let tup = TupLit (map (\x -> Var x) ids) pos
     let new_vars = map Var ids
-    return (ids, Apply fnm (aargs++new_vars) rtp pos) -- [tup]
+    return (ids, Apply fnm (zip (aargs++new_vars) $ repeat Observe) rtp pos)
 
 
 getUnmdParsAndBody :: [Exp] -> Lambda -> FusionGM ([Ident], Exp)
@@ -1357,7 +1357,7 @@ getUnmdParsAndBody inpp lamm = do
             let new_ids = map (\(nm,tp) -> Ident nm tp pos)
                               ( zip pnms (map (stripArray 1 . typeOf) inpp) )
             let es = map Var new_ids
-            let call2  = Apply fnm (aargs++es) rtp pos
+            let call2  = Apply fnm (zip (aargs++es) $ repeat Observe) rtp pos
             return (new_ids, call2) 
 
 isCompatibleKer :: ([VName], Exp) -> FusedKer -> FusionGM Bool
