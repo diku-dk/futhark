@@ -335,10 +335,7 @@ copyCtPropExp (Shape e pos) = do
         Literal a _ -> literal a
         _ ->  return $ Shape e' pos
     where literal a =
-            changed $ Literal (case arrayShape a of
-                                 [n] -> IntVal n
-                                 ns -> TupVal $ map IntVal ns)
-                              pos
+            changed $ Literal (TupVal $ map IntVal $ arrayShape a) pos
 
 -----------------------------------------------------------
 --- If all params are values and function is free of IO ---

@@ -180,10 +180,11 @@ ElemType : int           { Int }
          | real          { Real }
          | bool          { Bool }
          | char          { Char }
-         | '(' Types ')' { Tuple $2 }
+         | '{' Types '}' { Tuple $2 }
 
 Types : Type ',' Types { $1 : $3 }
-      | Type ',' Type  { [$1, $3] }
+      | Type           { [$1] }
+      |                { [] }
 ;
 
 TypeIds : Type id ',' TypeIds
@@ -201,7 +202,7 @@ Exp  :: { UncheckedExp }
      | false          { Literal (LogVal False) $1 }
      | Id             { Var $1 }
      | empty '(' Type ')' { Literal (emptyArray $3) $1 }
-     | '{' Exps '}'   { ArrayLit $2 NoInfo $1 }
+     | '[' Exps ']'   { ArrayLit $2 NoInfo $1 }
      | TupleExp       { let (exps, pos) = $1 in TupLit exps pos }
 
      | Exp '+' Exp    { BinOp Plus $1 $3 NoInfo $2 }
@@ -298,7 +299,7 @@ Exp  :: { UncheckedExp }
      | let Id '=' Exp in Exp %prec letprec
                       { LetPat (Id $2) $4 $6 $1 }
 
-     | let '(' TupIds ')' '=' Exp in Exp %prec letprec
+     | let '{' TupIds '}' '=' Exp in Exp %prec letprec
                       { LetPat (TupId $3 $1) $6 $8 $1 }
 
      | let Id '=' Id with '[' Exps ']' '<-' Exp in Exp %prec letprec
@@ -328,16 +329,18 @@ DExps : Exp ',' Exp ',' DExps { let (as, bs) = $5
                               }
       | Exp ',' Exp { ([$1], [$3]) }
 
-TupleExp : '(' Exps2 ')' { ($2, $1) }
+TupleExp : '{' Exps '}' { ($2, $1) }
+         | '{'      '}' { ([], $1) }
 
 Id : id { let L loc (ID name) = $1 in Ident name NoInfo loc }
 
-TupIds : TupId ',' TupId   { [$1, $3] }
-       | TupId ',' TupIds  { $1 : $3 }
+TupIds : TupId ',' TupIds  { $1 : $3 }
+       | TupId             { [$1] }
+       |                   { [] }
 ;
 
 TupId : id { let L pos (ID name) = $1 in Id $ Ident name NoInfo pos }
-      | '(' TupIds ')' { TupId $2 $1 }
+      | '{' TupIds '}' { TupId $2 $1 }
 
 FunAbstr : id { let L pos (ID name) = $1 in CurryFun name [] NoInfo pos }
          | Ops { let (name,pos) = $1 in CurryFun name [] NoInfo pos }

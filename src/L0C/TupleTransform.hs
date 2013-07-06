@@ -397,10 +397,11 @@ flattenPattern (Id ident)     = [ident]
 withPattern :: TupIdent -> (TupIdent -> TransformM a) -> TransformM a
 withPattern pat m =
   binding (flattenPattern pat) $ \idents ->
-    let pat' = case idents of
-                 [ident] -> Id ident
-                 _       -> TupId (map Id idents) $ srclocOf pat
-    in m pat'
+    let tup = TupId (map Id idents) $ srclocOf pat
+    in m $ case (idents, typeOf $ patToExp pat) of
+             (_, Elem (Tuple _)) -> tup
+             ([ident], _)        -> Id ident
+             _                   -> tup -- Should never be reached.
 
 newVar :: SrcLoc -> String -> Type -> TransformM (Ident, Exp)
 newVar loc name tp = do

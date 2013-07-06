@@ -37,18 +37,18 @@ instance Pretty Value where
   ppr (CharVal c) = text $ show c
   ppr (LogVal b) = text $ show b
   ppr (RealVal x) = text $ tildes $ show x
-  ppr (TupVal vs) = apply $ map ppr vs
+  ppr (TupVal vs) = braces $ commasep $ map ppr vs
   ppr v@(ArrayVal a t)
     | Just s <- arrayString v = text $ show s
     | [] <- elems a = text "empty" <> parens (ppr t)
-    | otherwise     = braces $ commasep $ map ppr $ elems a
+    | otherwise     = brackets $ commasep $ map ppr $ elems a
 
 instance (Eq vn, Pretty vn) => Pretty (ElemTypeBase as vn) where
   ppr Int = text "int"
   ppr Char = text "char"
   ppr Bool = text "bool"
   ppr Real = text "real"
-  ppr (Tuple ets) = apply $ map ppr ets
+  ppr (Tuple ets) = braces $ commasep $ map ppr ets
 
 instance (Eq vn, Pretty vn) => Pretty (TypeBase as vn) where
   ppr (Elem et) = ppr et
@@ -65,8 +65,8 @@ instance (Eq vn, Pretty vn) => Pretty (ExpBase ty vn) where
   ppr = pprPrec 0
   pprPrec _ (Var v) = ppr v
   pprPrec _ (Literal v _) = ppr v
-  pprPrec _ (TupLit es _) = apply $ map ppr es
-  pprPrec _ (ArrayLit es _ _) = braces $ commasep $ map ppr es
+  pprPrec _ (TupLit es _) = braces $ commasep $ map ppr es
+  pprPrec _ (ArrayLit es _ _) = brackets $ commasep $ map ppr es
   pprPrec p (BinOp bop x y _ _) = ppBinOp p bop x y
   pprPrec p (And x y _) = ppBinOp p LogAnd x y
   pprPrec p (Or x y _) = ppBinOp p LogOr x y
@@ -127,7 +127,7 @@ instance (Eq vn, Pretty vn) => Pretty (ExpBase ty vn) where
 
 instance (Eq vn, Pretty vn) => Pretty (TupIdentBase ty vn) where
   ppr (Id ident) = ppr ident
-  ppr (TupId pats _) = apply $ map ppr pats
+  ppr (TupId pats _) = braces $ commasep $ map ppr pats
 
 instance (Eq vn, Pretty vn) => Pretty (LambdaBase ty vn) where
   ppr (CurryFun fname [] _ _) = text $ nameToString fname
