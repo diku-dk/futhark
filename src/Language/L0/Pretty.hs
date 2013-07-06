@@ -95,7 +95,7 @@ instance (Eq vn, Pretty vn) => Pretty (ExpBase ty vn) where
   pprPrec _ (Replicate ne ve _) =
     text "replicate" <> apply [ppr ne, align (ppr ve)]
   pprPrec _ (Reshape shape e _) =
-    text "replicate" <> apply [apply (map ppr shape), ppr e]
+    text "reshape" <> apply [apply (map ppr shape), ppr e]
   pprPrec _ (Transpose 0 1 e _) =
     text "transpose" <> apply [ppr e]
   pprPrec _ (Transpose k n e _) =
