@@ -1,3 +1,3 @@
 fun *[int] main(int n, *[int] a) =
-  loop ({b} = {a}) = for i < n do {b} in
+  loop (b = a) = for i < n do b in
   b
