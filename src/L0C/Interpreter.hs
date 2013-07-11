@@ -366,7 +366,7 @@ evalExp (Iota e pos) = do
 
 evalExp (Shape e _) = do
   v <- evalExp e
-  return $ tuple $ map IntVal $ arrayShape v
+  return $ TupVal $ map IntVal $ arrayShape v
 
 evalExp (Replicate e1 e2 pos) = do
   v1 <- evalExp e1
