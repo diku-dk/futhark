@@ -1,0 +1,2 @@
+fun [{real, int}] main(int n, [{real, int}] a) =
+  let {first, rest} = split(n, a) in first
