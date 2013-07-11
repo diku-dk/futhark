@@ -159,8 +159,8 @@ eotransform =
 
 hotransform :: String -> [String] -> L0Option
 hotransform =
-  passoption "Perform higher-order transformation, i.e., fusion."
-  Pass { passName = "higer-order optimations"
+  passoption "Perform higher-order optimisation, i.e., fusion."
+  Pass { passName = "higher-order optimisations"
        , passOp = liftPass highOrdTransf
        }
 
