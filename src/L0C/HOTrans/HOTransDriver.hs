@@ -24,7 +24,7 @@ import L0C.HOTrans.Fusion
 highOrdTransf :: Prog -> Either EnablingOptError Prog
 highOrdTransf prog = do
     (_, prog') <- fuseProg prog
-    normCopyDeadOpts prog'
+    return prog'
 --    if succc 
 --    then normCopyDeadOpts prog' >>= highOrdTransf 
 --    else return prog'
