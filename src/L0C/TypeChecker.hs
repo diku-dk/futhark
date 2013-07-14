@@ -1132,20 +1132,14 @@ checkFuncall fname loc paramtypes _ args = do
     bad $ ParameterMismatch fname loc
           (Right $ map untagType paramtypes) (map untagType argts)
 
-  forM_ (zip paramtypes args) $ \(paramt, (t, dflow, argloc)) -> do
+  forM_ (zip (map diet paramtypes) args) $ \(d, (t, dflow, argloc)) -> do
     maybeCheckOccurences $ usageOccurences dflow
-    let occurs = [consumption (consumeArg (aliases t) paramt) argloc]
+    let occurs = [consumption (consumeArg t d) argloc]
     occur $ usageOccurences dflow `seqOccurences` occurs
-  where -- Check if an argument of the given type consumes anything.
-        consumes (Array _ _ Unique _) = True
-        consumes (Elem (Tuple ets)) = any consumes ets
-        consumes _ = False
-
-        consumeArg names (Elem (Tuple ets)) =
-          mconcat $ map (consumeArg names) ets
-        consumeArg names t
-          | consumes t = names
-          | otherwise  = S.empty
+  where consumeArg (Elem (Tuple ets)) (TupleDiet ds) =
+          mconcat $ zipWith consumeArg ets ds
+        consumeArg at Consume = aliases at
+        consumeArg _  _       = S.empty
 
 checkLambda :: (TypeBox ty, VarName vn) =>
                TaggedLambda ty vn -> [Arg vn] -> TypeM vn (TaggedLambda CompTypeBase vn)
