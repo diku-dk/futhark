@@ -367,7 +367,7 @@ CharValue : charlit      { let L pos (CHARLIT char) = $1 in CharVal char }
 StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in ArrayVal (arrayFromList $ map CharVal s) $ Elem Char }
 LogValue : true          { LogVal True }
         | false          { LogVal False }
-ArrayValue :  '{' Values '}'
+ArrayValue :  '[' Values ']'
              { case combArrayTypes $ map (toDecl . valueType) $2 of
                  Nothing -> error "Invalid array value"
                  Just ts -> ArrayVal (arrayFromList $2) $ removeNames ts
