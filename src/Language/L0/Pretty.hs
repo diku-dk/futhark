@@ -7,6 +7,7 @@ module Language.L0.Pretty
   ( ppType
   , ppValue
   , ppExp
+  , ppLambda
   , ppTupId
   , prettyPrint
   )
@@ -191,6 +192,10 @@ ppType = render80
 -- | Prettyprint an expression, wrapped to 80 characters.
 ppExp :: (Eq vn, Pretty vn) => ExpBase ty vn -> String
 ppExp = render80
+
+-- | Prettyprint a lambda, wrapped to 80 characters.
+ppLambda :: (Eq vn, Pretty vn) => LambdaBase ty vn -> String
+ppLambda = render80
 
 -- | Prettyprint a pattern, wrapped to 80 characters.
 ppTupId :: (Eq vn, Pretty vn) => TupIdentBase ty vn -> String
