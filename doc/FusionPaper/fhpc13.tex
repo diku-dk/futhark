@@ -648,24 +648,32 @@ be aliased with a non-modifiable function argument), and neither it
 nor any of its aliases may be used in any way after the function call.
 We say that it has been {\em consumed}.
 
-As a concrete example, a loop that uses in-place modification to add
-{\tt k} to every element of an integer array can be written like this.
+As a concrete example, a function using sequential loops and in-place
+modification to compute the LU-factorisation of an array can be
+written like this.
 
 \begin{colorcode}
-loop (a) = for i < n do
-             let b = a with [i] <- a[i]+k in b
-\end{colorcode}
-
-For clarity, the result of the in-place modification is given a
-distinct name from the input array, but this is not required.  The
-equivalent tail-recursive function, with uniqueness attributes, is as
-follows.
-
-\begin{colorcode}
-fun *[int] f(int i, int n, *[int] a, int k) =
-  if i >= n then a
-            else let b = a with [i] = a[i] + k in
-                 f(i+1, n, b, k)
+fun (*[[real]], *[[real]]) lu_inplace(*[[real]] a) =
+  let (n, unused) = shape(a) in
+  loop ((a,l,u) = (a,
+                   replicate(n,replicate(n,0.0)),
+                   replicate(n,replicate(n,0.0)))) =
+    for k < n do
+      let u[k,k] = a[k,k] in
+      loop ((l,u)) = for i < n-k do
+          let l[i+k,k] = a[i+k,k]/u[k,k] in
+          let u[k,i+k] = a[k,i+k] in
+          (l,u)
+        in
+      loop (a) = for i < n-k do
+        loop (a) = for j < n-k do
+          let a[i+k,j+k] =
+            a[i+k,j+k] - l[i+k,k] * u[k,j+k] in
+          a
+        in a
+      in (a,l,u)
+    in
+  (l,u)
 \end{colorcode}
 
 After an array has been used on the right-hand side of a let-with, we
