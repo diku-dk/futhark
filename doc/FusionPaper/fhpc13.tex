@@ -7,9 +7,12 @@
 % Purpose:      A template for sigplanconf.cls, which is a LaTeX 2e class
 %               file for SIGPLAN conference proceedings.
 %
+% Guide:        Refer to "Author's Guide to the ACM SIGPLAN Class,"
+%               sigplanconf-guide.pdf
+%
 % Author:       Paul C. Anagnostopoulos
 %               Windfall Software
-%               978 371-2316for the
+%               978 371-2316
 %               paul@windfall.com
 %
 % Created:      15 February 2005
@@ -89,9 +92,12 @@
 
 \begin{document}
 
+\special{papersize=8.5in,11in}
+
 \conferenceinfo{FHPC'13,} {September 23, 2013, Boston, Massachusets.}
-\CopyrightYear{2013}
+\copyrightyear{2013}
 %\copyrightdata{978-1-4503-1577-7/12/09}
+\doi{nnnnnnn.nnnnnnn} % TODO
 
 
 \title{A T2 Graph-Reduction Approach To Fusion}
@@ -186,9 +192,9 @@ with two main objectives in mind:
                 code translation, and, on the other hand, would
                 preserve the algorithmic invariants that are needed
                 to optimize the application globally?
-    \item[2.] What compiler optimizations would result in efficiency
-                comparable to the hardware hand-tuned version 
-                of the code?
+
+    \item[2.] What compiler optimizations would result in
+                efficiency comparable to code hand-tuned for the specific hardware?
 \end{itemize}
 
 The answer to the first question has been %, not surprisingly, 
@@ -196,8 +202,9 @@ a {\em functional} language, dubbed \LO{}, supporting %with support for
 \texttt{map-reduce} {\em nested} parallelism on {\em regular} arrays, i.e., 
 the size of each dimension is constant at runtime:\\
 It is {\em regular} because our suite does not require irregular 
-arrays in the sense of {\sc nesl} or {\sc dph}~\cite{BlellochCACM96NESL,Chak06DPH}, 
-and regular arrays are more amenable to compiler optimizations.
+arrays in the sense of {\sc nesl} or {\sc dph}~\cite{BlellochCACM96NESL,Chak06DPH},
+and regular arrays are more amenable to compiler optimizations, in
+particular by simplfying static size analysis.
 %
 It is {\em nested} because our suite exhibits several layers of 
 parallelism that cannot be exploited by flat parallelism in the style of 
@@ -274,7 +281,7 @@ it is possible to fuse a {\tt reduce} with a {\tt map} as
 i.e., the list is distributed between $P$ processors, each processor executes \emp{sequentially} 
 its chunk, and at the end the result is reduced (in parallel) across processors~\cite{BirdListTh}.
 One may observe that this fusion may asymptotically improve the space requirement, e.g.,
-if the input array is the iteration space. 
+if the input array is the iteration space.   The operator $\oplus$ must be associative with identity $e$.
 %
 Another observation is that both {\tt map} and {\tt reduce} have well-known 
 efficient parallel implementations and that fusion preserves parallelism. 
@@ -348,101 +355,6 @@ Section~\ref{sec:Concl} concludes the paper.
 \section{Preliminaries: $\mathcal{L}_0$ and Enabling Optimizations}
 \label{sec:Prelim}
 
-\LO{} is a mostly-monomorphic, statically typed, strictly evaluated,
-purely functional language.  Although some built-in higher-order
-functions provide polymorphism, user-defined functions are
-monomorphic, and their return- and parameter types must be specified
-explicitly.  For brevity, we will not cover the typing
-rules in detail, as they are quite trivial.  The only exception is our
-notion of {\em uniqueness types}, which is given a cursory treatment
-in Section~\ref{sec:in-place}.
-
-The syntax of the first-order fragment of \LO{} can be seen in Figure~\ref{fig:fo-syntax}.  
-Common arithmetic operators such as {\tt +} and
-{\tt /} are supported in the usual way.  Note that they are
-polymorphic in the sense that they accept both integers and
-floating-points, although both operands must be of the same type.
-Pattern matching is supported in a limited way as the only way of
-decomposing tuple values, but there is no {\tt case} construct.  
-Note that braces denote arrays, not sets.
-
-{\tt zip} and {\tt unzip} behave as usual, i.e, {\tt
-  zip(\{1,2,3\},\{4,5,6\})} $=$ {\tt \{{(1,4),(2,5),(3,6)}\}}, but the
-semantics of {\tt zip} requires that the input arrays have outermost
-dimensions of equal sizes. Otherwise a compile or runtime error is signalled.
-%It is an error if the arrays given to {\tt zip} are not of the exact same size.
-
-There are two non-standard constructs in the first-order part  % slightly complicated
-of \LO{}.  The first is the let-with construct for updating parts of
-arrays:
-
-\begin{colorcode}
-let b = a with [i\mymath{\myindx{1}},..,i\mymath{\myindx{k}}] <- v in body
-\end{colorcode}
-
-The above evaluates {\tt body} with {\tt b} bound to the value of {\tt a}, 
-except that the element at position {\tt (i$_1$,..,i$_k$)} is updated to
-the value of {\tt v}.  If {\tt a[i$_1$,..,i$_k$]} is itself an array,
-i.e., if {\tt a} has more than {\tt k} dimensions, {\tt v} must be 
-%(that is, if {\tt a} has more than {\tt k} dimensions), {\tt v} must be 
-an array of the same size as the slice it is replacing.  We write 
-{\tt let~a[i$_1$,..,i$_k$]~=~v~in~body} when the 
-source and destination array share the same name.
-%variable to be bound has the same name as the source variable.  
-%
-Section~\ref{sec:in-place} describes our method for doing array updates 
-{\em in-place} without losing referential transparency. This allows a 
-cost model in which the update takes time proportional to the total 
-size of {\tt v}, rather~than~{\tt a}.
-
-The other non-standard construct is the {\tt do}-loop:  
-It is fundamentally syntactical sugar for a certain form of 
-tail-recursive function, and is used by the user to express
-certain sequential computation that would be awkward to write
-functionally, and by the compiler in lower-level optimisations,
-such as loop interchange, distribution.  
-
-%The other unusual construct is the {\tt do}-loop:  
-%It is fundamentally
-%syntactical sugar for a certain form of tail-recursive function, 
-%in order to make it easier to express loop optimisations and certain
-%sequential loops.
-
-
-\begin{figure}
-\begin{minipage}{0.35\columnwidth}
-\begin{colorcode}
-loop (x = a) =
-  for i < n do
-    g(x)
-in body
-\end{colorcode}
-\end{minipage}
-\begin{minipage}{0.05\columnwidth}
-$\Rightarrow$
-\end{minipage}
-\begin{minipage}{0.6\columnwidth}
-\begin{colorcode}
-fun t f(int i, int n, t x) =
-  if i >= n then x
-     else f(i+1, n, g(x))
-
-let x = f(i, n, a)
-in body
-\end{colorcode}
-\end{minipage}
-\caption{Loop to recursive function}
-\label{fig:loop-recursion}
-\end{figure}
-
-For example, denoting by {\tt t} the type of {\tt x}, the loop in
-Figure~\ref{fig:loop-recursion} has the semantics of a call to the
-tail-recursive function on the right-hand side.
-%
-This was inspired by Single Assignment C~\cite{grelck2006sac}, which
-also uses loops with semantics that essentially desugar into
-tail-recursive functions.
-%(although SaC loops also have significant performance repercussions).
 
 \begin{figure}[bt]
 \begin{tabular}{lrll}
@@ -499,6 +411,101 @@ $prog$ & $::=$ & $\epsilon$ \\
 \caption{\LO{} syntax}
 \label{fig:fo-syntax}
 \end{figure}
+
+\LO{} is a mostly-monomorphic, statically typed, strictly evaluated,
+purely functional language.  Although some built-in higher-order
+functions provide polymorphism, user-defined functions are
+monomorphic, and their return- and parameter types must be specified
+explicitly.  For brevity, we will not cover the typing
+rules in detail, as they are quite trivial.  The only exception is our
+notion of {\em uniqueness types}, which is given a cursory treatment
+in Section~\ref{sec:in-place}.
+
+The syntax of the first-order fragment of \LO{} can be seen in Figure~\ref{fig:fo-syntax}.  
+Common arithmetic operators such as {\tt +} and
+{\tt /} are supported in the usual way.  Note that they are
+polymorphic in the sense that they accept both integers and
+floating-points, although both operands must be of the same type.
+Pattern matching is supported in a limited way as the only way of
+decomposing tuple values, but there is no {\tt case} construct.  
+Note that braces denote arrays, not sets.
+
+{\tt zip} and {\tt unzip} behave as usual, i.e, {\tt
+  zip(\{1,2,3\},\{4,5,6\})} $=$ {\tt \{{(1,4),(2,5),(3,6)}\}}, but the
+semantics of {\tt zip} requires that the input arrays have outermost
+dimensions of equal sizes. Otherwise a compile or runtime error is signalled.
+%It is an error if the arrays given to {\tt zip} are not of the exact same size.
+
+There are two non-standard constructs in the first-order part  % slightly complicated
+of \LO{}.  The first is the let-with construct for updating parts of
+arrays:
+
+\begin{colorcode}
+let b = a with [i\mymath{\myindx{1}},..,i\mymath{\myindx{k}}] <- v in body
+\end{colorcode}
+
+The above evaluates {\tt body} with {\tt b} bound to the value of {\tt a}, 
+except that the element at position {\tt (i$_1$,..,i$_k$)} is updated to
+the value of {\tt v}.  If {\tt a[i$_1$,..,i$_k$]} is itself an array,
+i.e., if {\tt a} has more than {\tt k} dimensions, {\tt v} must be 
+%(that is, if {\tt a} has more than {\tt k} dimensions), {\tt v} must be 
+an array of the same size as the slice it is replacing.  We write 
+{\tt let~a[i$_1$,..,i$_k$]~=~v~in~body} when the 
+source and destination array share the same name.
+%variable to be bound has the same name as the source variable.  
+%
+Section~\ref{sec:in-place} describes our method for doing array updates 
+{\em in-place} without losing referential transparency. This allows a 
+cost model in which the update takes time proportional to the total 
+size of {\tt v}, rather~than~{\tt a}.
+
+The other non-standard construct is the {\tt do}-loop:  
+It is fundamentally syntactical sugar for a certain form of 
+tail-recursive function, and is used by the user to express
+certain sequential computation that would be awkward to write
+functionally, and by the compiler in lower-level optimisations,
+such as loop interchange, distribution.  
+
+\begin{figure}
+\begin{minipage}{0.35\columnwidth}
+\begin{colorcode}
+loop (x = a) =
+  for i < n do
+    g(x)
+in body
+\end{colorcode}
+\end{minipage}
+\begin{minipage}{0.05\columnwidth}
+$\Rightarrow$
+\end{minipage}
+\begin{minipage}{0.6\columnwidth}
+\begin{colorcode}
+fun t f(int i, int n, t x) =
+  if i >= n then x
+     else f(i+1, n, g(x))
+
+let x = f(i, n, a)
+in body
+\end{colorcode}
+\end{minipage}
+\caption{Loop to recursive function}
+\label{fig:loop-recursion}
+\end{figure}
+
+%The other unusual construct is the {\tt do}-loop:  
+%It is fundamentally
+%syntactical sugar for a certain form of tail-recursive function, 
+%in order to make it easier to express loop optimisations and certain
+%sequential loops.
+
+For example, denoting by {\tt t} the type of {\tt x}, the loop in
+Figure~\ref{fig:loop-recursion} has the semantics of a call to the
+tail-recursive function on the right-hand side.
+%
+This was inspired by Single Assignment C~\cite{grelck2006sac}, which
+also uses loops with semantics that essentially desugar into
+tail-recursive functions.
+%(although SaC loops also have significant performance repercussions).
 
 \subsection{Second-order array combinators}
 \label{sec:soacs}
@@ -724,7 +731,7 @@ the compilation pipeline, the following program properties hold:
   replaced with {\tt assertZip}, which verifies either
   statically or at runtime that the outer size of {\tt zip}'s
   input matches, and finally, the original {\sc soac}s ({\tt map})
-  have been replaced with their tuple-of-array version ({\tt map2}),
+  have been replaced with their tuple-of-array version ({\tt map2}, see Section \ref{sec:tuple-transformation}),
 \item tuple expressions can appear only as the final result of
   a function, {\sc soac}, or {\tt if} expression, and similarly
   for the tuple pattern of a let binding, e.g., a formal argument
@@ -772,13 +779,13 @@ edge cases where the transformation is not an isomorphism.
 
 Consider the type {\tt [([int], [real])]}, which is transformed to
 {\tt([[int]], [[real]])}.  These two types are not isomorphic, as the
-latter has more stringent demands to the fullness of arrays.  For
+latter has more stringent demands to the regularity of arrays.  For
 example, {\tt\{(\{1\}, \{1.0\}), (\{2,3\}, \{2.0\})\}} is a value of
 the former, but the first element of the corresponding transformed
-tuple {\tt(\{\{1\}, \{2, 3\}\}, \{\{1.0\}, \{2.0\}\})} is not a full
-array.  Hence, when determining whether a program generates full
+tuple {\tt(\{\{1\}, \{2, 3\}\}, \{\{1.0\}, \{2.0\}\})} is not a regular
+array.  Hence, when determining whether a program generates regular
 arrays, we must look at the \textit{transformed} values - in a sense,
-the fullness requirement ``transcends'' the tuples.  Also, after
+the regularity requirement ``transcends'' the tuples.  Also, after
 tuple-transformation, {\tt zip} and {\tt unzip} disappear.
 
 After tuple transformation, the previously described {\sc soac}s are
