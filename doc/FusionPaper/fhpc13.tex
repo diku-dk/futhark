@@ -203,8 +203,9 @@ a {\em functional} language, dubbed \LO{}, supporting %with support for
 the size of each dimension is constant at runtime:\\
 It is {\em regular} because our suite does not require irregular 
 arrays in the sense of {\sc nesl} or {\sc dph}~\cite{BlellochCACM96NESL,Chak06DPH},
-and regular arrays are more amenable to compiler optimizations, in
-particular by simplfying static size analysis.
+and regular arrays are more amenable to compiler optimizations,
+e.g., they allow transposition and simplified size analysis. 
+%in particular by simplifying  size analysis. %static
 %
 It is {\em nested} because our suite exhibits several layers of 
 parallelism that cannot be exploited by flat parallelism in the style of 
@@ -317,9 +318,12 @@ Main contributions of this paper are:
             the dependency graph of the producer-consumer 
             array combinators is reducible 
             (via T$_2$ reduction). 
-    \item A compositional algebra for fusion that
-            includes the {\tt map}, {\tt reduce}, and {\tt filter} combinators.
-            These are presented in Section~\ref{sec:fusion}. 
+        The compositional algebra for fusion includes the {\tt map},
+            {\tt reduce} and {\tt filter} operators. 
+        These are presented in Section~\ref{sec:fusion}. 
+%    \item A compositional algebra for fusion that
+%            includes the {\tt map}, {\tt reduce}, and {\tt filter} combinators.
+%            These are presented in Section~\ref{sec:fusion}. 
     \item An analysis refinement that enables fusion across
             (otherwise) ``inhibitor'' built-in functions such
             as {\tt size}, {\tt split}, {\tt transpose}. 
@@ -329,8 +333,8 @@ Main contributions of this paper are:
             interchanges the outer-{\tt scan} with an inner {\tt map} 
             nest, and thus enhances the (exploitable) parallelism 
             degree of the program.
-    \item Statistics related to the success of fusion analysis 
-            on a set of six benchmarks. 
+%    \item Statistics related to the success of fusion analysis 
+%            on a set of six benchmarks. 
             These are discussed in Section~\ref{sec:Discuss}.
 \end{itemize}
    
