@@ -578,8 +578,8 @@ list homomorphism ({\sc lh}) promotion lemma~\cite{BirdListTh}, to an
 equivalent form:  \\
 ${\tt red}\mbox{ }\odot\mbox{ }{\tt e}\mbox{ }.\mbox{ }{\tt map}\mbox{
 }{\tt f}\mbox{ }\emphh{\equiv}$ $\mbox{ }{\tt red}\mbox{ }\odot\mbox{
-}{\tt e}\mbox{ }.\mbox{ }{\tt pmap}_{p} \mbox{ }$ $(\emp{{\tt red} \mbox{
-  }\odot\mbox{ }{\tt e}\mbox{ }.\mbox{ }{\tt map}\mbox{ }{\tt f}})$\\
+}{\tt e}\mbox{ }.\mbox{ }{\tt map}\mbox{ }$ $(\emp{{\tt red} \mbox{
+  }\odot\mbox{ }{\tt e}\mbox{ }.\mbox{ }{\tt map}\mbox{ }{\tt f}})\ .\mbox{ }{\tt split}_{p}$\\
 where the original list is distributed to $p$ parallel processors,
 each of which execute the original map-reduce computation sequentially
 and, at the end, reduce in parallel the per-processor result.  Hence
@@ -587,8 +587,8 @@ the {\em inner} map-reduce can be
 rewritten as a left-fold:\\
 ${\tt red}\mbox{ }\odot\mbox{ }{\tt e}\mbox{ }.\mbox{ }{\tt map}\mbox{
 }{\tt f}\mbox{ }\emphh{\equiv}$ $\mbox{ }{\tt red}\mbox{ }\odot\mbox{
-}{\tt e}\mbox{ }.\mbox{ }{\tt pmap}_{p} \mbox{ }$ $(\emp{{\tt foldl}\mbox{
-  }{\tt g}\mbox{ }{\tt e}})$\\
+}{\tt e}\mbox{ }.\mbox{ }{\tt map} \mbox{ }$ $(\emp{{\tt foldl}\mbox{
+  }{\tt g}\mbox{ }{\tt e}})\ .\ {\tt split}_{p}$\\
 It follows that in order to be generate parallel code for \\ 
 {\tt (red $\odot$ e) . (map f)} we need to record either $\odot$ and {\tt f},
 or $\odot$ and {\tt g}. We chose the latter, i.e., {\tt redomap($\odot$, g, e)}, 
@@ -759,12 +759,14 @@ step, while the latter three are due to normalisation.
 
 As mentioned above, the tuple-transformation stage flattens all tuples
 (i.e, {\tt (x,(y,z))} becomes {\tt (x,y,z)}), and converts arrays of
-tuples to tuples of arrays.  Arrays of tuples are in a sense merely
-syntactic sugar for tuples of arrays; the type {\tt [(int, real)]} is
-transformed to {\tt ([int], [real])} during the compilation process,
-and all code interacting with arrays of tuples is likewise
-transformed.  In most cases, this is fully transparent, but there are
-edge cases where the transformation is not an isomorphism.
+tuples to tuples of arrays.  This transformation was first developed
+in the context of NESL~\cite{blelloch1994implementation}.  Arrays of
+tuples are in a sense merely syntactic sugar for tuples of arrays; the
+type {\tt [(int, real)]} is transformed to {\tt ([int], [real])}
+during the compilation process, and all code interacting with arrays
+of tuples is likewise transformed.  In most cases, this is fully
+transparent, but there are edge cases where the transformation is not
+an isomorphism.
 
 \begin{figure}[bt]
 \begin{center}
@@ -2126,34 +2128,24 @@ on a data set that starves for additional parallelism.
 \label{sec:RelWork}
 
 Loop fusion is an old technique, dating back at least to the
-70s\cite{cheatham1977programming}, with the treatment of loop fusion
-in a parallel setting being covered in \cite{midki1990issues}.  Yet,
-the techniques employed differ from ours in that they treated loops
-written in traditional notation, rather than employing an algebra of
-higher-order functions.  The ideas behind such an algebra date back to
-the very beginnings of functional programming
-\cite{Backus:1978:PLV:359576.359579}, and an an algebra very similar
-to a subset of ours was presented in \cite{bird1989algebraic}, but for
-the purpose of proofs, not compiler optimisation.  In general,
-functional language compilers focused on removing intermediate data
-structures ({\em deforestation}), while sequential compilers attempted
-to generate more efficient code.  The GHC developers present their
-strategy for deforestation in \cite{gill1993short}, which also permits
-certain kinds of fusion.  Their technique does not rely on a large set
-of algebraic rules, but on rewriting bulk list operations into {\tt
-  foldr}/{\tt build} pairs which can then be optimised.
+seventies~\cite{cheatham1977programming}, with the treatment of loop
+fusion in a parallel setting being covered
+in~\cite{midki1990issues}. In imperative languages, the word
+``fusion'' typically does not refer to producer-consumer fusion, but
+to a complimentary technique, in which two sequential loops that do
+not depend on each other can fused into a single loop.  Single
+Assignment C~\cite{grelck2006sac} incorporated this in a functional
+language.
 
-The Repa~\cite{keller2010regular} approach to fusion is based on a
-delayed representation of arrays, which models an array as a function
-from index to value.  With this representation, fusion happens
-automatically through function composition, although this can cause
-duplication of work in many cases.  To counteract this, Repa lets the
-user {\em force} an array, by which it is converted from the
-delayed representation to a traditional sequence of values.  The pull
-arrays of Obsidian~\cite{claessen2012expressive} use a similar
-mechanism.
+The ideas behind a language algebra date back to the very beginnings
+of functional programming~\cite{Backus:1978:PLV:359576.359579}, and an
+algebra similar to ours was presented in~\cite{bird1989algebraic}.  In
+general, functional language compilers focused on removing
+intermediate data structures via a structural techique called {\em
+  deforestation}, which also performs certain kinds of
+fusion\cite{gill1993short}.
 
-Data-Parallel Haskell (DPH) ~\cite{chakravarty2007data} makes use of
+Data-Parallel Haskell (DPH)~\cite{chakravarty2007data} makes use of
 aggressive inlining and rewrite rules to perform fusion, including
 expressing array operations in terms of
 streams~\cite{coutts2007rewriting}, which have previously been shown
@@ -2164,6 +2156,16 @@ presence of in-place array updates, and whether the result of an array
 operation is used multiple times.  The Glasgow Haskell Compiler itself
 also bases its list fusion on rewrite rules and cross-module
 inlining~\cite{jones2001playing}.
+
+The Repa~\cite{keller2010regular} approach to fusion is based on a
+delayed representation of arrays, which models an array as a function
+from index to value.  With this representation, fusion happens
+automatically through function composition, although this can cause
+duplication of work in many cases.  To counteract this, Repa lets the
+user {\em force} an array, by which it is converted from the
+delayed representation to a traditional sequence of values.  The pull
+arrays of Obsidian~\cite{claessen2012expressive} use a similar
+mechanism.
 
 Accelerate~\cite{mcdonell2013optimising} uses an elaboration of the
 delayed arrays representation from Repa, and in particular manages to
@@ -2182,10 +2184,6 @@ of the flattened program.  Their approach is to use a form of
 copy-propagation on the intermediary code, and lift the resulting
 functions to work on entire arrays.  Their approach only works for
 what we would term {\tt map $\circ$ map} fusion, however.
-
-Single Assignment C~\cite{grelck2006sac} describes ``horizontal''
-fusion, in which two loops over the same input array can be fused into
-a single loop.
 
 Our uniqueness attributes have some similarities to the ``owning
 pointers'' found in the impure language Rust~\cite{rust}, although
