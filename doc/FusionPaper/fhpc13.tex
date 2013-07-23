@@ -1325,48 +1325,42 @@ may duplicate computation.
 \emp{fusion1 :: FusionRes -> Exp -> FusionM FusionRes}
 --------------------------------------------------
 -- Variable, Index, If, \mymath{\lambda}/Loop, In-Place Update --
-fusion1 r (Var id\mymath{\myindx{0}}) = do 
+fusion1 r (Var id\mymath{\myindx{0}}) =
   if not \$ isArrayType id\mymath{\myindx{0}} then return r
-  else do ufus' = S.insert id\mymath{\myindx{0}} (\emphh{unfusable} r)
-          return \$ r \{ \emphh{unfusable} = ufus' \}
+  else let ufus' = S.insert id\mymath{\myindx{0}} (\emphh{unfusable} r)
+       in return r \{ \emphh{unfusable} = ufus' \}
 
-fusion1 r (LetWith id1 id0 inds elem body \emp{alias} _) = do 
+fusion1 r (\textit{let} id1 \textit{=} id0 \textit{with}
+           \textit{[} inds \textit{] <-} elem \textit{in} body) = do
     r'  <- \emphh{bindVarsEnv} [id1] \$ fusion1 r body
     -- Add the aliases set of id0 (included)
     -- to the `inplace' field of any kernel:
-    let kers = M.map (\mymath{\backslash}k->k\{(\emphh{inplace} k) `S.union` \emp{alias}\}) 
-                     (kernels r')
+    let kers = M.map (addToInplace id0) (kernels r')
     let r'' = r' \{ kernels = kers \}
-    foldM fusion1 r'' (elem : (Var id0) : inds)
+    foldM fusion1 r'' (elem : Var id0 : inds)
 
-fusion1 r (If cond\mymath{\myindx{e}} then\mymath{\myindx{e}} else\mymath{\myindx{e}} _ _) = do
-    then\mymath{\myindx{r}} <- fusion1 mkNullRes then\mymath{\myindx{e}}
-    else\mymath{\myindx{r}} <- fusion1 mkNullRes else\mymath{\myindx{e}}
-    cond\mymath{\myindx{r}} <- fusion1 r         cond\mymath{\myindx{e}}
-    return \$ \emp{composeRes} cond\mymath{\myindx{r}} (\emp{unionRes} then\mymath{\myindx{r}} else\mymath{\myindx{r}})
+fusion1 r (\textit{if} e\mymath{\myindx{c}} \textit{then} e\mymath{\myindx{then}} \textit{else} e\mymath{\myindx{else}}) = do
+    r\mymath{\myindx{then}} <- fusion1 mkNullRes e\mymath{\myindx{then}}
+    r\mymath{\myindx{else}} <- fusion1 mkNullRes e\mymath{\myindx{else}}
+    r\mymath{\myindx{cond}} <- fusion1 r         e\mymath{\myindx{c}}
+    return \$ \emp{composeRes} r\mymath{\myindx{cond}} (\emp{unionRes} r\mymath{\myindx{then}} r\mymath{\myindx{else}})
 
-fusionLam1 r (AnonymFun ids body pos) = do
+fusion1 r ({\textit{fn}} (ids) => body) = do
     r' <- \emphh{bindVarsEnv} ids \$ fusion1 mkNullRes body
-    -- make the inpArr of the \mymath{\lambda}-body result unfusable
-    --  so that they cannot be fused from outside \mymath{\lambda} 
-    let inps = S.fromList \$ M.keys \$ inpArr r'
-    let unfus  = (unfusable r') `S.union` inps
-    -- filter out \mymath{\lambda}'s local vars
-    bnds <- asks \$ varsEnv
-    let unfus' = unfus `S.intersection` bnds
-    return \$ (unfus', \emp{unionRes} r (r'\{unfusable=unfus'\}))
------------------
--- Let Pattern --
-fusion1 r (LetPat pat soac@(Map2 \mymath{\lambda} _ _ _) bdy _)=do
-  r' <- \emphh{bindBothEnvs} pat soac \$ fusion1 r bdy    
-  (lam_vars, r'') <- fusionLam1 r' lam
-  \emp{tryFuseSOAC} lam_vars r'' (pat, soac)
--- similar for Reduce2, Filter2, Redomap2. 
--- Replicate has a specialized implem (not shown) 
+    -- Make the inpArr of the \mymath{\lambda}-body result unfusable
+    -- so that they cannot be fused from outside \mymath{\lambda}.
+    return $ composeRes r (composeRes r' r')
 
-fusion1 r (LetPat pat e body _) = do
-    r' <- \emphh{bindVarsEnv} pat \$ fusion1 r body
-    fusion1 r' e
+fusion1 r (\textit{let} pat \textit{=} rhs \textit{in} body) =
+  case rhs of
+    \textit{map2}(fun, inputs) -> do
+      r' <- \emphh{bindBothEnvs} pat rhs \$ fusion1 r bdy
+      (lam_vars, r'') <- fusionLam1 r' lam
+      \emp{tryFuseSOAC} lam_vars r'' (pat, rhs)
+   -- similar for reduce2, filter2, redomap2.
+   -- Replicate has a specialized implem (not shown)
+    _ -> do r' <- \emphh{bindVarsEnv} pat \$ fusion1 r body
+            fusion1 r' e
 \end{colorcode}
 } \vspace{-2ex}
 \caption{ Constructing Fused Kernels at Function Level}
@@ -1453,18 +1447,19 @@ expression.   If the expression is:
 %                {\tt b$_r$} becomes {\em unfusable}, i.e., the arrays in the intersection set
 %                may be used by two kernels on one execution path. 
 %            This solves both issues of \emp{Case 4} in Figure~\ref{fig:dontFuse}.
-    \item a lambda then the result for the lambda's body, {\tt r'},
-                is computed from a null result because any of the arrays defined 
-                inside the lambda are invisible outside.  Since a lambda's body
-                is executed multiple times inside a {\sc soac} then
-                the data flow equation is semantically:
-                {\tt composeRes r (composeRes r' r')}, i.e., the code regions
-                corresponding to {\tt r} and {\tt r'} share an execution path.
-            Figure~\ref{fig:FusionGather} shows a semantically equivalent but
-                optimized implementation, which performs less computation and
-                filters out the variables that are invisible in the outer scope.
-            In particular, the data-flow rules would prevent fusion in a loop/lambda
-            from outside it, i.e., \emp{Case 3} in Figure~\ref{fig:dontFuse}.
+          \item a lambda then the result for the lambda's body, {\tt
+              r'}, is computed from a null result because any of the
+            arrays defined inside the lambda are invisible outside.
+            Since a lambda's body is executed multiple times inside a
+            {\sc soac} then the data flow equation is semantically:
+            {\tt composeRes r (composeRes r' r')}, i.e., the code
+            regions corresponding to {\tt r} and {\tt r'} share an
+            execution path.  Our actual implementation uses an
+            optimization which filters out the variables that are
+            invisible in the outer scope.  In particular, the
+            data-flow rules would prevent fusion in a loop/lambda from
+            outside it, i.e., \emp{Case 3} in
+            Figure~\ref{fig:dontFuse}.
 %    \item a lambda then (i) the data-flow result for the lambda's body, {\tt r'},
 %                is computed from a null result because any of the arrays defined inside
 %                the lambda are not visible outside, hence cannot be fused in any of the
