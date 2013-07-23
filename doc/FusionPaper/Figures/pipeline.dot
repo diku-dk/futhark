@@ -25,7 +25,7 @@ digraph G
                 Inlining
                 DeadCodeRemoval [label="Dead code remover"]
                 ConstProp [label="Copy propagation \nand constant folding"]
-                Loop [label="Loop?"]
+                Loop [label="Loop?", shape=diamond]
                 {rank=same; Inlining Loop}
                 {rank=same; ConstProp DeadCodeRemoval}
                 Inlining->ConstProp->DeadCodeRemoval->Loop
