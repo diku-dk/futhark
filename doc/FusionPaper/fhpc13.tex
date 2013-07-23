@@ -1135,10 +1135,10 @@ The next two sections present in detail the backward-analysis pass.
 \vbox{
 \begin{minipage}{0.48\columnwidth}
 \begin{colorcode}
-import qualified Data.Map 
-                 as M
-import qualified Data.Set 
-                 as S
+import qualified
+  Data.Map as M
+import qualified
+  Data.Set as S
 data \emp{FusedKer} = FusedKer\{ 
  \emphh{soacStmt} :: ([Name],Exp)
 --^the fused SOAC stmt,eg,
@@ -1195,10 +1195,7 @@ data \emp{FusionEnv} = FusionEnv \{
   , \emphh{varsEnv}  :: S.Set Name 
     --^ set of in-scope variables at current prog point
 \}
-newtype \emp{FusionM} a = FusionM (StateT NameSrc 
-               (ReaderT \emp{FusionEnv} (Either FusionErr)) a)
-  deriving ( MonadState  NameSrc, MonadReader \emp{FusionEnv},
-             Monad, Applicative, Functor )
+
 \end{colorcode}
 \end{minipage}
 } 
@@ -1206,9 +1203,10 @@ newtype \emp{FusionM} a = FusionM (StateT NameSrc
 \label{fig:fusionDS}
 \end{figure}
 
-Figure~\ref{fig:fusionDS} shows the structure of the data-flow result
-computed during the bottom-up analysis pass, i.e., synthesized attribute.  
-A fused kernel, \emp{\tt FusedKer}, consists of:
+The L0 compiler is implemented in Haskell.  Figure~\ref{fig:fusionDS}
+shows the structure of the data-flow result computed during the
+bottom-up analysis pass, i.e., a synthesized attribute.  A fused
+kernel, \emp{\tt FusedKer}, consists of:
 \begin{itemize}
     \item the {\sc soac} statement, {\tt soacStmt}, which pairs up
             the output arrays of a fused {\sc soac} 
@@ -1257,11 +1255,9 @@ map binding array names to the {\sc soac} statement producing it, {\tt soacsEnv}
 The environment is computed during the top-down \textsc{AbSyn} traversal, 
 i.e., an inherited attribute.
 
-The computation takes place in the \emp{\tt FusionM} monad that is a
-composition of (i) the {\tt Reader} monad, for maintaining the environment,
-(ii) the {\tt State} monad, for fresh-names generation, and (iii) the 
-{\tt Either} monad, for error handling.
-
+The computation takes place in a \emp{\tt FusionM} monad that makes
+the {\tt FusionEnv} environment available with a {\tt Reader} monad
+interface..
 
 \begin{figure}[bt]
 %\hrule ~
@@ -1347,8 +1343,6 @@ fusion1 r (\textit{if} e\mymath{\myindx{c}} \textit{then} e\mymath{\myindx{then}
 
 fusion1 r ({\textit{fn}} (ids) => body) = do
     r' <- \emphh{bindVarsEnv} ids \$ fusion1 mkNullRes body
-    -- Make the inpArr of the \mymath{\lambda}-body result unfusable
-    -- so that they cannot be fused from outside \mymath{\lambda}.
     return $ composeRes r (composeRes r' r')
 
 fusion1 r (\textit{let} pat \textit{=} rhs \textit{in} body) =
@@ -1493,51 +1487,52 @@ expression.   If the expression is:
 %\hrule ~
 \vbox{
 \begin{colorcode}
-\emp{tryFuseSOAC}:: S.Set Name     ->         FusionRes -> 
+\emp{tryFuseSOAC}:: S.Set Name ->            FusionRes ->
              -- vars \mymath{\in} SOAC's lamba,   current result  
               ([Name], Exp) -> \emp{FusionM} FusionRes
-             -- SOAC stmt,      result after fusion
+             -- SOAC stmt,     result after fusion
 \emp{tryFuseSOAC} lam_vars res (out_nms, soac) = do   
   inp_ids <- getInpArrsSOAC soac
   -- e.g., [x,y] \mymath{\Leftarrow} map2(f, x, y)  
     
   -- \emp{Conditions for fusion:}
   --(1) \emphh{none of out_nms belongs to the unfusable set}
-  let cond1=L.all(\mymath{\backslash}x->not\$S.member x\$unfusable res) out_nms 
+  let cond1=not $ any (`S.member` unfusable res) out_nms
 
-  --(2) \emphh{\mymath{\exists} some kernels that use some of out_nms as inputs} 
+  --(2) \emphh{\mymath{\exists} some kernels that use some of out_nms as inputs}
   let to_fuse_knms = getKersWithInpArrs res out_nms
-  to_fuse_kers <- mapM (\mymath{\backslash}x-> case M.lookup x (kers res) of
-                              Nothing -> fusionErrorM ...
-                              Just ker-> return ker
-                       ) to_fuse_knms
-  --(3) \emphh{all kernels have to be compatible for fusion}, 
+  let to_fuse_kers =
+    fromJust \$ mapM (`M.lookup` kers res) to_fuse_knms
+  let cond2 = not $ null to_fuse_kers
+
+  --(3) \emphh{all kernels have to be compatible for fusion},
   --    \emphh{e.g., map2 o filter2 not supported}
-  let all_compat = L.all (isCompatibleKer out_nms soac) 
-                         to_fuse_kers
+  let cond3 =
+    all (isCompatibleKer out_nms soac) to_fuse_kers
+
   --(4) \emphh{fusion cannot move a use of an input array}
   --    \emphh{past its in-place update}
-  let all_used=foldl (\mymath{\backslash}y x->S.insert x y) lam_vars inp_ids
-  let ok_inplace = L.all S.null \$ 
-    map (S.intersection all_used . inplace) to_fuse_kers 
+  let used =
+    S.intersection $ lam_vars `S.union` S.fromList inp_ids
+  let cond4 = all (S.null . used . inplace) to_fuse_kers
 
-  let all4_ok = cond1 && not \$ null to_fuse_kers && 
-                all_compat && ok_inplace
+  let is_fusable = cond1 && cond4 && cond3 && cond4
+
   -- \emp{Update Unfusable Set} \emphh{with the input-array names that}
   -- \emphh{appear as input arrays in kernels \mymath{\notin} to_fuse_kers},
   -- \emphh{since those are input to at least 2 distinct kernels.}
   inp_nms <- allOutArrs inp_ids
-  -- e.g., [x,y] \mymath{\Leftarrow} map2(g, x) {\em if} let (x,y) = map2(f,a) 
+  -- e.g., [x,y] \mymath{\Leftarrow} map2(g, x) {\em if} let (x,y) = map2(f,a)
   let mod_kers=if is_fusable then to_fuse_knms else []
   let in2_kers=filter (inpArrInRes res mod_kers) inp_nms
-  let unfus'=S.union (unfusable res) (S.fromList in2_kers)
-  let res' = res \{ unfusable = unfus' \}
+  let res' = res \{ unfusable = unfusable res `S.union`
+                               S.fromList in2_kers \}
 
-  if not all4_ok 
-  then ... -- add a fresh kernel to the result, and    
-           -- update the outArr and inpArr fields
-  else ... -- fuse current soac with all to_fuse_kers
+  if is_fusable
+  then ... -- fuse current soac with all to_fuse_kers
            -- update out/inpArr \& kers fields of result
+  else ... -- add a fresh kernel to the result, and
+           -- update the outArr and inpArr fields
 \end{colorcode}
 } \vspace{-2ex}
 \caption{ Pseudo-code for Conservatively Fusing one {\sc soac} }
@@ -1631,7 +1626,7 @@ is fused with each of the kernels in {\tt to\_fuse\_kers}.
 \begin{minipage}{0.48\columnwidth}
 \begin{colorcode}
 // \emp{replicate can be fused}
-//\emp{without restrictions}
+// \emp{without restrictions}
 let x = replicate(N,a)in 
 let y = map2(f, x, b) in
 let z = map2(g, x, c) in 
