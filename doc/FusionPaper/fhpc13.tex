@@ -759,12 +759,14 @@ step, while the latter three are due to normalisation.
 
 As mentioned above, the tuple-transformation stage flattens all tuples
 (i.e, {\tt (x,(y,z))} becomes {\tt (x,y,z)}), and converts arrays of
-tuples to tuples of arrays.  Arrays of tuples are in a sense merely
-syntactic sugar for tuples of arrays; the type {\tt [(int, real)]} is
-transformed to {\tt ([int], [real])} during the compilation process,
-and all code interacting with arrays of tuples is likewise
-transformed.  In most cases, this is fully transparent, but there are
-edge cases where the transformation is not an isomorphism.
+tuples to tuples of arrays.  This transformation was first developed
+in the context of NESL~\cite{blelloch1994implementation}.  Arrays of
+tuples are in a sense merely syntactic sugar for tuples of arrays; the
+type {\tt [(int, real)]} is transformed to {\tt ([int], [real])}
+during the compilation process, and all code interacting with arrays
+of tuples is likewise transformed.  In most cases, this is fully
+transparent, but there are edge cases where the transformation is not
+an isomorphism.
 
 \begin{figure}[bt]
 \begin{center}
