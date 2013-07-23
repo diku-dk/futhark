@@ -1845,8 +1845,7 @@ fun  [int]  redplus2([[int]] a) = \emp{map}   (redplus1, a)
 
 fun  [int]  mul1( [int]  a, [int]  b)=\emp{map}(op *,zip(a,b))
 fun [[int]] mul2([[int]] a,[[int]] b)=\emp{map}(mul1,zip(a,b))
-
-fun [[int]] replin(int N, [int] a) = \emp{replicate}(N, a)
+fun [[int]] replin(int N,   [int]  a)=\emp{replicate}(N, a)
 
 fun [[int]] matmultFun(int N, [[int]] x, [[int]] y ) =
     let yt  = \emp{replicate}( N, transpose(b) ) in
