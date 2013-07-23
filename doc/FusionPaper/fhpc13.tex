@@ -304,7 +304,7 @@ One approach is to perform fusion aggressively, i.e., even when it duplicates
 computation, and to provide the user with primitives that inhibit 
 fusion~\cite{keller2010regular,claessen2012expressive}.
 The other approach performs fusion conservatively by means of rewrite 
-rules or skeletons~\cite{jones2001playing,chakravarty2007data,bergstrom2012nested}.
+rules or skeletons~\cite{jones2001playing,Chak06DPH,bergstrom2012nested}.
 Since the latter relies tightly on the inlining engine, e.g., to create exploitable 
 patterns, these approaches typically do not fuse an array that is used multiple times.
 %(in combinators such as {\tt map}).
@@ -2145,7 +2145,7 @@ intermediate data structures via a structural techique called {\em
   deforestation}, which also performs certain kinds of
 fusion\cite{gill1993short}.
 
-Data-Parallel Haskell (DPH)~\cite{chakravarty2007data} makes use of
+Data-Parallel Haskell (DPH)~\cite{Chak06DPH} makes use of
 aggressive inlining and rewrite rules to perform fusion, including
 expressing array operations in terms of
 streams~\cite{coutts2007rewriting}, which have previously been shown
