@@ -2134,12 +2134,12 @@ the techniques employed differ from ours in that they treated loops
 written in traditional notation, rather than employing an algebra of
 higher-order functions.  The ideas behind such an algebra date back to
 the very beginnings of functional programming
-\cite{Backus:1978:PLV:359576.359579}, and an an algebra very similar
-to a subset of ours was presented in \cite{bird1989algebraic}, but for
-the purpose of proofs, not compiler optimisation.  In general,
-functional language compilers focused on removing intermediate data
-structures ({\em deforestation}), while sequential compilers attempted
-to generate more efficient code.  The GHC developers present their
+\cite{Backus:1978:PLV:359576.359579}, and an algebra very similar to a
+subset of ours was presented in \cite{bird1989algebraic}, but for the
+purpose of proofs, not compiler optimisation.  In general, functional
+language compilers focused on removing intermediate data structures
+({\em deforestation}), while sequential compilers attempted to
+generate more efficient code.  The GHC developers present their
 strategy for deforestation in \cite{gill1993short}, which also permits
 certain kinds of fusion.  Their technique does not rely on a large set
 of algebraic rules, but on rewriting bulk list operations into {\tt
