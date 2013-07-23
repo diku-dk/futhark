@@ -1331,8 +1331,8 @@ fusion1 r (\textit{let} id1 \textit{=} id0 \textit{with}
     r'  <- \emphh{bindVarsEnv} [id1] \$ fusion1 r body
     -- Add the aliases set of id0 (included)
     -- to the `inplace' field of any kernel:
-    let kers = M.map (addToInplace id0) (kernels r')
-    let r'' = r' \{ kernels = kers \}
+    let kers = M.map (addToInplace id0) (\emphh{kernels} r')
+    let r'' = r' \{ \emphh{kernels} = kers \}
     foldM fusion1 r'' (elem : Var id0 : inds)
 
 fusion1 r (\textit{if} e\mymath{\myindx{c}} \textit{then} e\mymath{\myindx{then}} \textit{else} e\mymath{\myindx{else}}) = do
@@ -1343,7 +1343,7 @@ fusion1 r (\textit{if} e\mymath{\myindx{c}} \textit{then} e\mymath{\myindx{then}
 
 fusion1 r ({\textit{fn}} (ids) => body) = do
     r' <- \emphh{bindVarsEnv} ids \$ fusion1 mkNullRes body
-    return $ composeRes r (composeRes r' r')
+    return \$ composeRes r (composeRes r' r')
 
 fusion1 r (\textit{let} pat \textit{=} rhs \textit{in} body) =
   case rhs of
@@ -1351,8 +1351,8 @@ fusion1 r (\textit{let} pat \textit{=} rhs \textit{in} body) =
       r' <- \emphh{bindBothEnvs} pat rhs \$ fusion1 r bdy
       (lam_vars, r'') <- fusionLam1 r' lam
       \emp{tryFuseSOAC} lam_vars r'' (pat, rhs)
-   -- similar for reduce2, filter2, redomap2.
-   -- Replicate has a specialized implem (not shown)
+      -- similar for reduce2, filter2, redomap2.
+      -- Replicate has a specialized implem (not shown)
     _ -> do r' <- \emphh{bindVarsEnv} pat \$ fusion1 r body
             fusion1 r' e
 \end{colorcode}
@@ -1441,28 +1441,26 @@ expression.   If the expression is:
 %                {\tt b$_r$} becomes {\em unfusable}, i.e., the arrays in the intersection set
 %                may be used by two kernels on one execution path. 
 %            This solves both issues of \emp{Case 4} in Figure~\ref{fig:dontFuse}.
-          \item a lambda then the result for the lambda's body, {\tt
-              r'}, is computed from a null result because any of the
+          \item a lambda then the result for the lambda's body, {\tt r'}, 
+            is computed from a null result because any of the
             arrays defined inside the lambda are invisible outside.
             Since a lambda's body is executed multiple times inside a
             {\sc soac} then the data flow equation is semantically:
             {\tt composeRes r (composeRes r' r')}, i.e., the code
             regions corresponding to {\tt r} and {\tt r'} share an
-            execution path.  Our actual implementation uses an
-            optimization which filters out the variables that are
-            invisible in the outer scope.  In particular, the
-            data-flow rules would prevent fusion in a loop/lambda from
-            outside it, i.e., \emp{Case 3} in
-            Figure~\ref{fig:dontFuse}.
-%    \item a lambda then (i) the data-flow result for the lambda's body, {\tt r'},
-%                is computed from a null result because any of the arrays defined inside
-%                the lambda are not visible outside, hence cannot be fused in any of the
-%                {\tt r'} kernels, and (ii) the input-array set of {\tt r'}, i.e., the keys of 
-%                {\tt inpArr}, become unfusable in the data-flow result 
-%                (after the variables that are invisible in the outer scope have been filtered out). 
-%            This prevents fusion in a loop/lambda from outside it, i.e., 
-%                \emp{Case 3} in Figure~\ref{fig:dontFuse}.
-          A loop is treated similarly. 
+            execution path.  In particular, all variables used in
+            the lambda's body become {\tt unfusable}, which prevents
+            fusion in a lambda (or loop) from outside it, i.e., 
+            \emp{Case 3} in Figure~\ref{fig:dontFuse}.
+            The actual implementation performs less computation and also
+            filters out the variables that are invisible in the outer scope.
+            A loop is treated similarly.
+%            Our actual implementation uses an
+%            optimization which filters out the variables that are
+%            invisible in the outer scope.  In particular, the
+%            data-flow rules would prevent fusion in a loop/lambda from
+%            outside it, i.e., \emp{Case 3} in
+%            Figure~\ref{fig:dontFuse}.A loop is treated similarly.
     \item  the let-binding of a {\tt map2}, {\tt reduce2}, {\tt redomap2} or {\tt filter2} 
             statement, then (i) both environment variables, i.e., {\tt soacsEnv} and {\tt varsEnv}, 
             are updated with the new bindings, (ii) the body of the {\sc soac} 
@@ -1497,13 +1495,13 @@ expression.   If the expression is:
     
   -- \emp{Conditions for fusion:}
   --(1) \emphh{none of out_nms belongs to the unfusable set}
-  let cond1=not $ any (`S.member` unfusable res) out_nms
+  let cond1=not \$ any (`S.member` unfusable res) out_nms
 
   --(2) \emphh{\mymath{\exists} some kernels that use some of out_nms as inputs}
   let to_fuse_knms = getKersWithInpArrs res out_nms
   let to_fuse_kers =
     fromJust \$ mapM (`M.lookup` kers res) to_fuse_knms
-  let cond2 = not $ null to_fuse_kers
+  let cond2 = not \$ null to_fuse_kers
 
   --(3) \emphh{all kernels have to be compatible for fusion},
   --    \emphh{e.g., map2 o filter2 not supported}
@@ -1513,7 +1511,7 @@ expression.   If the expression is:
   --(4) \emphh{fusion cannot move a use of an input array}
   --    \emphh{past its in-place update}
   let used =
-    S.intersection $ lam_vars `S.union` S.fromList inp_ids
+    S.intersection \$ lam_vars `S.union` S.fromList inp_ids
   let cond4 = all (S.null . used . inplace) to_fuse_kers
 
   let is_fusable = cond1 && cond4 && cond3 && cond4
