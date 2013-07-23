@@ -1321,8 +1321,6 @@ may duplicate computation.
 \vbox{
 \begin{colorcode}
 \emp{fusion1 :: FusionRes -> Exp -> FusionM FusionRes}
---------------------------------------------------
--- Variable, Index, If, \mymath{\lambda}/Loop, In-Place Update --
 fusion1 r (Var id\mymath{\myindx{0}}) =
   if not \$ isArrayType id\mymath{\myindx{0}} then return r
   else let ufus' = S.insert id\mymath{\myindx{0}} (\emphh{unfusable} r)
@@ -1351,8 +1349,8 @@ fusion1 r (\textit{let} pat \textit{=} rhs \textit{in} body) =
   case rhs of
     \textit{map2}(fun, inputs) -> do
       r' <- \emphh{bindBothEnvs} pat rhs \$ fusion1 r bdy
-      (lam_vars, r'') <- fusionLam1 r' lam
-      \emp{tryFuseSOAC} lam_vars r'' (pat, rhs)
+      r'' <- fusion1 r' lam
+      \emp{tryFuseSOAC} (paramNames fun) r'' (pat, rhs)
       -- similar for reduce2, filter2, redomap2.
       -- Replicate has a specialized implem (not shown)
     _ -> do r' <- \emphh{bindVarsEnv} pat \$ fusion1 r body
