@@ -1013,7 +1013,7 @@ of {L}oops with {P}rivatization and {R}eduction {P}arallelization},
 @INPROCEEDINGS{Blume94RangeTest,
     author = {William Blume and Rudolf Eigenmann},
     title =  {The {R}ange {T}est: {A} {D}ependence {T}est for {S}ymbolic, {N}on-{L}inear {E}xpressions},
-    booktitle = {Procs. Int. Conf. on Supercomp},
+    booktitle = {Procs. Int. Conf. on Supercomp. (ICS)},
     year = {1994},
     pages = {528--537}
 }
@@ -1579,19 +1579,6 @@ publisherOPT = {IOS Press},
 	Year = 1996
 }
 
-@InProceedings{Chak06DPH,
-  author = 	 {{Manuel M. T.} Chakravarty  and Roman Leshchinskiy  and Simon Peyton Jones  and Gabriele Keller and Simon Marlow},
-  title = 	 { Data Parallel {H}askell: A status report},
-  booktitleOPT={{DAMP'07, Workshop on Declarative Aspects of Multicore Programming}},
-  booktitle={Int. Work. on Declarative Aspects of Multicore Prog. (DAMP)},
-  pages = 	 {10--18},
-  year = 	 {2007},
-  locationOPT = 	 {Nice, France},
-  publisherOPT = {ACM},
-  addressOPT =   {New York},
-  OPTnote = 	 {},
-}
-
 @book{ConcurrentML,
 	Author = {Reppy, J. H.},
 	Pages = {324},
@@ -1771,18 +1758,19 @@ publisherOPT = {IOS Press},
  keywordsOPT = {automatic translation, compiler optimization, cuda, gpu, openmp},
 } 
 
-@incollection{clean-uniqueness-types,
-year=1993,
-isbn={978-3-540-57529-0},
-booktitle={Foundations of Software Technology and Theoretical Computer Science},
-volume=761,
-series={Lecture Notes in Computer Science},
-editor={Shyamasundar, RudrapatnaK.},
-doi={10.1007/3-540-57529-4_42},
-title={Conventional and uniqueness typing in graph rewrite systems},
-publisher={Springer Berlin Heidelberg},
+@inproceedings{clean-uniqueness-types,
 author={Barendsen, Erik and Smetsers, Sjaak},
-pages={41-51}
+title={Conventional and uniqueness typing in graph rewrite systems},
+booktitle={Found. of Soft. Tech. and Theoretical Comp. Sci. (FSTTCS)},
+year={1993},
+volume=761,
+pages={41-51},
+series={LNCS},
+seriesOPT={Lecture Notes in Computer Science},
+isbnOPT={978-3-540-57529-0},
+editorOPT={Shyamasundar, RudrapatnaK.},
+doiOPT={10.1007/3-540-57529-4_42},
+publisherOPT={Springer Berlin Heidelberg}
 }
 
 @ONLINE{rust,
@@ -1804,7 +1792,7 @@ author={Graydon Hoare}
 }
 
 @article{keller2010regular,
-  title={Regular, shape-polymorphic, parallel arrays in Haskell},
+  title={Regular, {S}hape-{P}olymorphic, {P}arallel {A}rrays in {H}askell},
   author={Keller, Gabriele and Chakravarty, Manuel MT and Leshchinskiy, Roman and Peyton Jones, Simon and Lippmeier, Ben},
   journal={ACM Sigplan Notices},
   volume={45},
@@ -1814,19 +1802,32 @@ author={Graydon Hoare}
   publisher={ACM}
 }
 
-@inproceedings{chakravarty2007data,
-  title={Data Parallel Haskell: a status report},
-  author={Chakravarty, Manuel MT and Leshchinskiy, Roman and Jones, Simon Peyton and Keller, Gabriele and Marlow, Simon},
-  booktitle={Proceedings of the 2007 workshop on Declarative aspects of multicore programming},
-  pages={10--18},
-  year={2007},
-  organization={ACM}
+@InProceedings{Chak06DPH,
+  author = 	 {{Manuel M. T.} Chakravarty  and Roman Leshchinskiy  and Simon Peyton Jones  and Gabriele Keller and Simon Marlow},
+  title = 	 { Data {P}arallel {H}askell: {A} status report},
+  booktitleOPT={{DAMP'07, Workshop on Declarative Aspects of Multicore Programming}},
+  booktitle={Int. Work. on Decl. Aspects of Multicore Prog. (DAMP)},
+  pages = 	 {10--18},
+  year = 	 {2007},
+  locationOPT = 	 {Nice, France},
+  publisherOPT = {ACM},
+  addressOPT =   {New York},
+  OPTnote = 	 {},
+}
+
+@inproceedings{claessen2012expressive,
+  title={Expressive {A}rray {C}onstructs in an {E}mbedded {GPU} {K}ernel {P}rogramming {L}anguage},
+  author={Claessen, Koen and Sheeran, Mary and Svensson, Bo Joel},
+  booktitle={Work.~on~Decl.~Aspects~of~Multicore~Prog~DAMP},
+  pages={21-30},
+  year={2012},
+  organizationOPT={ACM}
 }
 
 @incollection{coutts2007rewriting,
   title={Rewriting haskell strings},
   author={Coutts, Duncan and Stewart, Don and Leshchinskiy, Roman},
-  booktitle={Practical Aspects of Declarative Languages},
+  booktitle={Practical Aspects of Decl. Lang.},
   pages={50--64},
   year={2007},
   publisher={Springer}
@@ -1841,11 +1842,11 @@ author={Graydon Hoare}
   organization={ACM}
 }
 
-@article{mcdonell2013optimising,
-  title={Optimising Purely Functional {GPU} Programs},
+@inproceedings{mcdonell2013optimising,
+  title={Optimising {P}urely {F}unctional {GPU} {P}rograms},
   author={McDonell, Trevor L. and Chakravarty, Manuel MT and Keller, Gabriele and Lippmeier, Ben},
   year=2013,
-  journal={ICFP '13},
+  booktitle={Procs. of Int. Conf. Funct. Prog. (ICFP)}
 }
 
 @phdthesis{svensson2011obsidian,
@@ -1866,17 +1867,10 @@ author={Graydon Hoare}
   publisher={Cambridge Univ Press}
 }
 
-@inproceedings{claessen2012expressive,
-  title={Expressive array constructs in an embedded {GPU} kernel programming language},
-  author={Claessen, Koen and Sheeran, Mary and Svensson, Bo Joel},
-  booktitle={Proceedings of the 7th workshop on Declarative aspects and applications of multicore programming},
-  pages={21--30},
-  year={2012},
-  organization={ACM}
-}
+
 
 @inproceedings{jones2001playing,
-  title={Playing by the rules: rewriting as a practical optimisation technique in {GHC}},
+  title={Playing by the {R}ules: {R}ewriting as a {P}ractical {O}ptimisation {T}echnique in {GHC}},
   author={Jones, Simon Peyton and Tolmach, Andrew and Hoare, Tony},
   booktitle={Haskell Workshop},
   volume={1},
@@ -1885,7 +1879,7 @@ author={Graydon Hoare}
 }
 
 @article{grelck2006sac,
-  title={{SAC} - A functional array language for efficient multi-threaded execution},
+  title={{SAC} - {A} {F}unctional {A}rray {L}anguage for {E}fficient {M}ulti-{T}hreaded {E}xecution},
   author={Grelck, Clemens and Scholz, Sven-Bodo},
   journal={International Journal of Parallel Programming},
   volume={34},
@@ -1898,7 +1892,7 @@ author={Graydon Hoare}
 @inproceedings{bergstrom2012nested,
   title={Nested {D}ata-{P}arallelism on the {GPU}},
   author={Bergstrom, Lars and Reppy, John},
-  booktitle={Proceedings of the 17th ACM SIGPLAN international conference on Functional programming},
+  booktitle={Procs. of Int. Conf. Funct. Prog. (ICFP)},
   pages={247--258},
   year={2012},
   organization={ACM}
@@ -1938,23 +1932,24 @@ author={Graydon Hoare}
 @incollection{cheatham1977programming,
   title={Programming language design issues},
   author={Cheatham Jr, Thomas E},
-  booktitle={Design and Implementation of Programming Languages},
+  booktitle={Design and Implem. of Prog. Lang.},
+  booktitleOPT={Design and Implementation of Programming Languages},
   pages={399--435},
   year={1977},
   publisher={Springer}
 }
 
 @inproceedings{midki1990issues,
-  title={Issues in the compile-time optimization of parallel programs},
+  title={Issues in the {C}ompile-{T}ime {O}ptimization of {P}arallel {P}rograms},
   author={Midki, Samuel P and Padua, David A},
-  booktitle={Proceedings of the 1990 International Conference on Parallel Processing},
+  booktitle={Procs. of Int. Conf. on Parallel Processing},
   volume={2},
   pages={105--113},
   year={1990}
 }
 
 @article{bird1989algebraic,
-  title={Algebraic identities for program calculation},
+  title={Algebraic {I}dentities for {P}rogram {C}alculation},
   author={Bird, Richard S.},
   journal={The Computer Journal},
   volume={32},
@@ -1973,10 +1968,10 @@ author={Graydon Hoare}
  number = {8},
  month = aug,
  year = {1978},
- issn = {0001-0782},
+ issnOPT = {0001-0782},
  pages = {613--641},
  numpages = {29},
- doi = {10.1145/359576.359579},
+ doiOPT = {10.1145/359576.359579},
  acmid = {359579},
  publisher = {ACM},
  address = {New York, NY, USA},
@@ -1984,9 +1979,9 @@ author={Graydon Hoare}
 }
 
 @inproceedings{gill1993short,
-  title={A short cut to deforestation},
+  title={A {S}hort {C}ut to {D}eforestation},
   author={Gill, Andrew and Launchbury, John and Peyton Jones, Simon L},
-  booktitle={Proceedings of the conference on Functional programming languages and computer architecture},
+  booktitle={Procs. of Int. Conf. on Functional Prog. Lang. and Computer Arch.},
   pages={223--232},
   year={1993},
   organization={ACM}
