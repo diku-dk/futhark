@@ -578,8 +578,8 @@ list homomorphism ({\sc lh}) promotion lemma~\cite{BirdListTh}, to an
 equivalent form:  \\
 ${\tt red}\mbox{ }\odot\mbox{ }{\tt e}\mbox{ }.\mbox{ }{\tt map}\mbox{
 }{\tt f}\mbox{ }\emphh{\equiv}$ $\mbox{ }{\tt red}\mbox{ }\odot\mbox{
-}{\tt e}\mbox{ }.\mbox{ }{\tt pmap}_{p} \mbox{ }$ $(\emp{{\tt red} \mbox{
-  }\odot\mbox{ }{\tt e}\mbox{ }.\mbox{ }{\tt map}\mbox{ }{\tt f}})$\\
+}{\tt e}\mbox{ }.\mbox{ }{\tt map}\mbox{ }$ $(\emp{{\tt red} \mbox{
+  }\odot\mbox{ }{\tt e}\mbox{ }.\mbox{ }{\tt map}\mbox{ }{\tt f}})\ .\mbox{ }{\tt split}_{p}$\\
 where the original list is distributed to $p$ parallel processors,
 each of which execute the original map-reduce computation sequentially
 and, at the end, reduce in parallel the per-processor result.  Hence
@@ -587,8 +587,8 @@ the {\em inner} map-reduce can be
 rewritten as a left-fold:\\
 ${\tt red}\mbox{ }\odot\mbox{ }{\tt e}\mbox{ }.\mbox{ }{\tt map}\mbox{
 }{\tt f}\mbox{ }\emphh{\equiv}$ $\mbox{ }{\tt red}\mbox{ }\odot\mbox{
-}{\tt e}\mbox{ }.\mbox{ }{\tt pmap}_{p} \mbox{ }$ $(\emp{{\tt foldl}\mbox{
-  }{\tt g}\mbox{ }{\tt e}})$\\
+}{\tt e}\mbox{ }.\mbox{ }{\tt map} \mbox{ }$ $(\emp{{\tt foldl}\mbox{
+  }{\tt g}\mbox{ }{\tt e}})\ .\ {\tt split}_{p}$\\
 It follows that in order to be generate parallel code for \\ 
 {\tt (red $\odot$ e) . (map f)} we need to record either $\odot$ and {\tt f},
 or $\odot$ and {\tt g}. We chose the latter, i.e., {\tt redomap($\odot$, g, e)}, 
