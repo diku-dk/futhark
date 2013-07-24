@@ -1356,7 +1356,7 @@ fusion1 r (\textit{let} pat \textit{=} rhs \textit{in} body) =
     \textit{map2}(fun, inputs) -> do
       r' <- \emphh{bindBothEnvs} pat rhs \$ fusion1 r bdy
       r'' <- fusion1 r' lam
-      \emp{tryFuseSOAC} (paramNames fun) r'' (pat, rhs)
+      \emp{tryFuseSOAC} (freeInBody fun) r'' (pat, rhs)
       -- similar for reduce2, filter2, redomap2.
       -- Replicate has a specialized implem (not shown)
     _ -> do r' <- \emphh{bindVarsEnv} pat \$ fusion1 r body
