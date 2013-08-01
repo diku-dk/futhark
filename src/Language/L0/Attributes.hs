@@ -517,7 +517,7 @@ typeOf (Zip es _) = arrayType 1 (Elem $ Tuple $ map snd es) Nonunique
 typeOf (Unzip _ ts _) =
   Elem $ Tuple $ map (\t -> arrayType 1 t $ uniqueProp t) ts
 typeOf (Scan fun start arr _ _) =
-  arrayType 1 et $ uniqueness et
+  arrayType 1 et Unique
     where et = lambdaType fun [typeOf start, rowType $ typeOf arr]
 typeOf (Filter _ arr _ _) = typeOf arr
 typeOf (Redomap redfun mapfun start arr rt loc) =
