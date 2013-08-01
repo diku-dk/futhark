@@ -487,11 +487,12 @@ typeOf (If _ e1 e2 _) = typeOf e1 `unifyUniqueness` typeOf e2
 typeOf (Var ident) =
   case identType ident of
     Elem (Tuple ets) -> Elem $ Tuple ets
-    t                -> t `setAliases` S.insert (identName ident) (aliases t)
+    t                -> t `addAliases` S.insert (identName ident)
 typeOf (Apply _ _ t _) = t
 typeOf (LetPat _ _ body _) = typeOf body
 typeOf (LetWith _ _ _ _ body _) = typeOf body
-typeOf (Index _ _ t _) = t
+typeOf (Index ident _ t _) =
+  t `addAliases` S.insert (identName ident)
 typeOf (Iota _ _) = arrayType 1 (Elem Int) Unique
 typeOf (Shape e _) =
   Elem $ Tuple (replicate (arrayDims $ typeOf e) $ Elem Int)
