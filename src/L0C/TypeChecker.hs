@@ -72,6 +72,11 @@ data TypeError vn = TypeError SrcLoc String
                   -- ^ One of the type annotations fails to match with the
                   -- derived type.  The string is a description of the
                   -- role of the type.  The last type is the new derivation.
+                  | BadTupleAnnotation SrcLoc String [Maybe (CompTypeBase (ID vn))] [CompTypeBase (ID vn)]
+                  -- ^ One of the tuple type annotations fails to
+                  -- match with the derived type.  The string is a
+                  -- description of the role of the type.  The last
+                  -- type is the elemens of the new derivation.
                   | CurriedConsumption Name SrcLoc
                   -- ^ A function is being curried with an argument to be consumed.
                   | BadLetWithValue SrcLoc
@@ -142,6 +147,11 @@ instance VarName vn => Show (TypeError vn) where
     "Annotation of \"" ++ desc ++ "\" type of expression at " ++
     locStr loc ++ " is " ++ ppType expected ++
     ", but derived to be " ++ ppType got ++ "."
+  show (BadTupleAnnotation loc desc expected got) =
+    "Annotation of \"" ++ desc ++ "\" type of expression at " ++
+    locStr loc ++ " is a tuple {" ++
+    intercalate ", " (map (maybe "(unspecified)" ppType) expected) ++
+    "}, but derived to be " ++ ppType (Elem $ Tuple got) ++ "."
   show (CurriedConsumption fname loc) =
     "Function " ++ nameToString fname ++
     " curried over a consuming parameter at " ++ locStr loc ++ "."
@@ -406,6 +416,34 @@ lookupVar name pos = do
     Just (Bound t) -> return t
     Just (WasConsumed wloc) -> bad $ UseAfterConsume (baseName name) pos wloc
 
+-- | @t1 `unifyTypes` t2@ attempts to unify @t2@ and @t2@.  If
+-- unification cannot happen, 'Nothing' is returned, otherwise a type
+-- that combines the aliasing of @t1@ and @t2@ is returned.  The
+-- uniqueness of the resulting type will be the least of the
+-- uniqueness of @t1@ and @t2@.
+unifyTypes :: Monoid (as vn) => TypeBase as vn -> TypeBase as vn
+           -> Maybe (TypeBase as vn)
+unifyTypes (Elem t1) (Elem t2) = Elem <$> t1 `unifyElemTypes` t2
+unifyTypes (Array t1 ds1 u1 als1) (Array t2 ds2 u2 als2)
+  | length ds1 == length ds2 = do
+  t <- t1 `unifyElemTypes` t2
+  Just $ Array t ds1 (u1 <> u2) (als1 <> als2)
+unifyTypes _ _ = Nothing
+
+-- | As 'unifyTypes', but for element types.
+unifyElemTypes :: Monoid (as vn) =>
+                  ElemTypeBase as vn -> ElemTypeBase as vn
+               -> Maybe (ElemTypeBase as vn)
+unifyElemTypes Int Int = Just Int
+unifyElemTypes Char Char = Just Char
+unifyElemTypes Bool Bool = Just Bool
+unifyElemTypes Real Real = Just Real
+unifyElemTypes (Tuple ts1) (Tuple ts2)
+  | length ts1 == length ts2 = do
+  ts <- zipWithM unifyTypes ts1 ts2
+  Just $ Tuple ts
+unifyElemTypes _ _ = Nothing
+
 -- | Determine if two types are identical, ignoring uniqueness.
 -- Causes a '(TypeError vn)' if they fail to match, and otherwise returns
 -- one of them.
@@ -415,32 +453,10 @@ unifyExpTypes :: VarName vn =>
               -> TypeM vn (TaggedType vn)
 unifyExpTypes e1 e2 =
   maybe (bad $ UnifyError (untagExp e1) (untagExp e2)) return $
-  unifyKnownTypes (typeOf e1) (typeOf e2)
-
-unifyElemTypes :: Monoid (as (ID vn)) =>
-                  ElemTypeBase as (ID vn) -> ElemTypeBase as (ID vn)
-               -> Maybe (ElemTypeBase as (ID vn))
-unifyElemTypes Int Int = Just Int
-unifyElemTypes Char Char = Just Char
-unifyElemTypes Bool Bool = Just Bool
-unifyElemTypes Real Real = Just Real
-unifyElemTypes (Tuple ts1) (Tuple ts2)
-  | length ts1 == length ts2 = do
-  ts <- zipWithM unifyKnownTypes ts1 ts2
-  Just $ Tuple ts
-unifyElemTypes _ _ = Nothing
-
-unifyKnownTypes :: Monoid (as (ID vn)) => TypeBase as (ID vn) -> TypeBase as (ID vn)
-                -> Maybe (TypeBase as (ID vn))
-unifyKnownTypes (Elem t1) (Elem t2) = Elem <$> t1 `unifyElemTypes` t2
-unifyKnownTypes (Array t1 ds1 u1 als1) (Array t2 ds2 u2 als2)
-  | length ds1 == length ds2 = do
-  t <- t1 `unifyElemTypes` t2
-  Just $ Array t ds1 (u1 <> u2) (als1 <> als2)
-unifyKnownTypes _ _ = Nothing
+  unifyTypes (typeOf e1) (typeOf e2)
 
 -- | @checkAnnotation loc s t1 t2@ returns @t2@ if @t1@ contains no
--- type, and otherwise tries to unify them with 'unifyKnownTypes'.  If
+-- type, and otherwise tries to unify them with 'unifyTypes'.  If
 -- this fails, a 'BadAnnotation' is raised.
 checkAnnotation :: (VarName vn, TypeBox ty) =>
                    SrcLoc -> String -> ty (ID vn) -> TaggedType vn
@@ -448,9 +464,24 @@ checkAnnotation :: (VarName vn, TypeBox ty) =>
 checkAnnotation loc desc t1 t2 =
   case unboxType t1 of
     Nothing -> return t2
-    Just t1' -> case unifyKnownTypes (t1' `setAliases` S.empty) t2 of
+    Just t1' -> case unifyTypes (t1' `setAliases` S.empty) t2 of
                   Nothing -> bad $ BadAnnotation loc desc t1' t2
                   Just t  -> return t
+
+-- | As @checkAnnotation@, but take the element types of a tuple as parameters, and use the entire list of types in any error message.
+checkTupleAnnotation :: (VarName vn, TypeBox ty) =>
+                        SrcLoc -> String -> [ty (ID vn)] -> [TaggedType vn]
+                     -> TypeM vn [TaggedType vn]
+checkTupleAnnotation loc desc t1s t2s
+  | length t1s' /= length t2s = barf
+  | otherwise = zipWithM check t1s' t2s
+  where t1s' = map unboxType t1s
+        barf = bad $ BadTupleAnnotation loc desc t1s' t2s
+        check (Just t1') t2 =
+          case unifyTypes (t1' `setAliases` S.empty) t2 of
+            Nothing -> barf
+            Just t  -> return t
+        check Nothing t2 = return t2
 
 -- | @require ts e@ causes a '(TypeError vn)' if @typeOf e@ does not unify
 -- with one of the types in @ts@.  Otherwise, simply returns @e@.
@@ -579,7 +610,7 @@ checkExp (ArrayLit es t loc) = do
           [] -> bad $ TypeError loc "Empty array literal"
           e:es'' ->
             let check elemt eleme
-                  | Just elemt' <- elemt `unifyKnownTypes` typeOf eleme =
+                  | Just elemt' <- elemt `unifyTypes` typeOf eleme =
                     return elemt'
                   | otherwise =
                     bad $ TypeError loc $ ppExp eleme ++ " is not of expected type " ++ ppType elemt ++ "."
@@ -612,11 +643,10 @@ checkExp (Negate e t pos) = do
   t' <- checkAnnotation pos "result" t $ typeOf e'
   return $ Negate e' t' pos
 
-checkExp (If e1 e2 e3 t pos) = do
+checkExp (If e1 e2 e3 pos) = do
   e1' <- require [Elem Bool] =<< checkExp e1
   (e2', e3') <- checkExp e2 `alternative` checkExp e3
-  bt <- checkAnnotation pos "result" t =<< unifyExpTypes e2' e3'
-  return $ If e1' e2' e3' bt pos
+  return $ If e1' e2' e3' pos
 
 checkExp (Var ident) = do
   ident' <- checkIdent ident
@@ -734,7 +764,7 @@ checkExp (Unzip e _ pos) = do
 checkExp (Map fun arrexp intype pos) = do
   (arrexp', arg@(rt, _, _)) <- checkSOACArrayArg arrexp
   fun' <- checkLambda fun [arg]
-  intype' <- checkAnnotation pos "input element" intype rt
+  intype' <- checkAnnotation pos "map input element" intype rt
   return (Map fun' arrexp' intype' pos)
 
 checkExp (Reduce fun startexp arrexp intype pos) = do
@@ -776,7 +806,7 @@ checkExp (Redomap redfun mapfun accexp arrexp intype pos) = do
   redfun' <- checkLambda redfun [accarg, maparg]
   let redtype = lambdaType redfun' [typeOf accexp', typeOf arrexp']
   _ <- require [redtype] accexp'
-  intype' <- checkAnnotation pos "input element" intype rt
+  intype' <- checkAnnotation pos "redomap input element" intype rt
   return $ Redomap redfun' mapfun' accexp' arrexp' intype' pos
 
 checkExp (Split splitexp arrexp intype pos) = do
@@ -903,42 +933,46 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
                     (Ident loopvar (Elem Int) loc) boundexp'
                     loopbody' letbody' loc
 
-----------------------------------------------
----- BEGIN Cosmin added SOAC2 combinators ----
-----------------------------------------------
 checkExp (Map2 fun arrexps intype pos) = do
   (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
-  ineltp  <- soac2ArgType pos "Map2" $ map argType arrargs
   fun'    <- checkLambda fun arrargs
-  intype' <- checkAnnotation pos "input element" intype ineltp
-  return $ Map2 fun' arrexps' intype' pos
+  case lambdaReturnType fun' of
+    Elem (Tuple _) -> do
+      intype' <- checkTupleAnnotation pos "map2 input row"
+                 intype (map argType arrargs)
+      return $ Map2 fun' arrexps' intype' pos
+    _ -> bad $ TypeError pos "map2 function does not return tuple"
 
 checkExp (Reduce2 fun startexps arrexps intype pos) = do
   (startexps', startargs) <- unzip <$> mapM checkArg startexps
-  startt <- soac2ArgType pos "Reduce2" $ map typeOf startexps'
+  let startt = Elem $ Tuple $ map typeOf startexps'
   (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
-  ineltp  <- soac2ArgType pos "Reduce2" $ map argType arrargs
-  intype' <- checkAnnotation pos "input element" intype ineltp
+  intype' <- checkTupleAnnotation pos "reduce2 input element"
+             intype (map argType arrargs)
   fun'    <- checkLambda fun $ startargs ++ arrargs
   let funret = lambdaType fun' $ map argType $ startargs ++ arrargs
-  unless (funret `subtypeOf` startt) $
-    bad $ TypeError pos $ "Accumulator is of type " ++ ppType startt ++
-                          ", but reduce function returns type " ++ ppType funret ++ "."
-  return $ Reduce2 fun' startexps' arrexps' intype' pos
+  case lambdaReturnType fun' of
+    Elem (Tuple _) -> do
+      unless (funret `subtypeOf` startt) $
+        bad $ TypeError pos $ "Accumulator is of type " ++ ppType startt ++
+              ", but reduce function returns type " ++ ppType funret ++ "."
+      return $ Reduce2 fun' startexps' arrexps' intype' pos
+    _ -> bad $ TypeError pos "reduce2 function does not return tuple"
 
-checkExp (Scan2 fun startexps arrexps intype pos) = do
+checkExp (Scan2 fun startexps arrexps intypes pos) = do
   (startexps', startargs) <- unzip <$> mapM checkArg startexps
-  startt <- soac2ArgType pos "Scan2" $ map typeOf startexps'
   (arrexps', arrargs)   <- unzip <$> mapM checkSOACArrayArg arrexps
-  inelemt   <- soac2ArgType pos "Scan2" $ map argType arrargs
-  intype'   <- checkAnnotation pos "element" intype inelemt
+  intype'   <- checkTupleAnnotation pos "element"
+               intypes (map argType arrargs)
+  let startt  = Elem . Tuple $ map typeOf startexps'
+      intupletype = Elem $ Tuple intype'
   fun'      <- checkLambda fun $ startargs ++ startargs
   let funret = lambdaType fun' $ map argType $ startargs ++ startargs
   unless (funret `subtypeOf` startt) $
     bad $ TypeError pos $ "Initial value is of type " ++ ppType startt ++
                           ", but scan function returns type " ++ ppType funret ++ "."
-  unless (funret `subtypeOf` intype') $
-    bad $ TypeError pos $ "Array element value is of type " ++ ppType intype' ++
+  unless (funret `subtypeOf` intupletype) $
+    bad $ TypeError pos $ "Array element value is of type " ++ ppType intupletype ++
                           ", but scan function returns type " ++ ppType funret ++ "."
   return $ Scan2 fun' startexps' arrexps' intype' pos
 
@@ -950,47 +984,44 @@ checkExp (Filter2 fun arrexps pos) = do
     bad $ TypeError pos "Filter function does not return bool."
   return $ Filter2 fun' arrexps' pos
 
-checkExp (Redomap2 redfun mapfun accexps arrexps intype pos) = do
+checkExp (Redomap2 redfun mapfun accexps arrexps intypes pos) = do
   (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
   (mapfun', maparg) <- checkLambdaArg mapfun arrargs
-
   (accexps', accargs) <- unzip <$> mapM checkArg accexps
-  acct <- soac2ArgType pos "Redomap2" $ map typeOf accexps'
+
   maparg' <- splitTupleArg maparg
   redfun' <- checkLambda redfun $ accargs ++ maparg'
-  let redret = lambdaType redfun' $ map argType $ accargs ++ maparg'
-  unless (redret `subtypeOf` acct) $
-    bad $ TypeError pos $ "Initial value is of type " ++ ppType acct ++
-                          ", but redomap2 reduction returns type " ++ ppType redret ++ "."
 
-  et <- soac2ArgType pos "Redomap2" $ map argType arrargs
-  intype' <- checkAnnotation pos "input element" intype et
-  return $ Redomap2 redfun' mapfun' accexps' arrexps' intype' pos
+  case (lambdaReturnType redfun', lambdaReturnType mapfun') of
+    (Elem (Tuple _), Elem (Tuple _)) -> do
+      let acct = Elem $ Tuple $ map typeOf accexps'
+          redret = lambdaType redfun' $ map argType $ accargs ++ maparg'
+      unless (redret `subtypeOf` acct) $
+        bad $ TypeError pos $ "Initial value is of type " ++ ppType acct ++
+              ", but redomap2 reduction returns type " ++ ppType redret ++ "."
 
-soacArrayArg :: VarName vn => Arg vn -> TypeM vn (Arg vn)
-soacArrayArg (t, dflow, argloc) =
-  case peelArray 1 t of
-    Nothing -> bad $ TypeError argloc "SOAC argument is not an array"
-    Just rt -> return (rt, dflow, argloc)
+      intype' <- checkTupleAnnotation pos "redomap2 input element"
+                 intypes (map argType arrargs)
+      return $ Redomap2 redfun' mapfun' accexps' arrexps' intype' pos
+
+    (_, Elem (Tuple _)) ->
+      bad $ TypeError pos "redomap2 reduce function does not return tuple"
+    _ ->
+      bad $ TypeError pos "redomap2 map function does not return tuple"
 
 checkSOACArrayArg :: (TypeBox ty, VarName vn) =>
                      TaggedExp ty vn -> TypeM vn (TaggedExp CompTypeBase vn, Arg vn)
 checkSOACArrayArg e = do
-  (e', arg) <- checkArg e
-  arg' <- soacArrayArg arg
-  return (e', arg')
+  (e', (t, dflow, argloc)) <- checkArg e
+  case peelArray 1 t of
+    Nothing -> bad $ TypeError argloc "SOAC argument is not an array"
+    Just rt -> return (e', (rt, dflow, argloc))
 
 splitTupleArg :: VarName vn => Arg vn -> TypeM vn [Arg vn]
 splitTupleArg (Elem (Tuple ts), dflow, loc) = do
   maybeCheckOccurences $ usageOccurences dflow
   return [ (t, mempty, loc) | t <- ts ]
 splitTupleArg arg = return [arg]
-
-soac2ArgType :: VarName vn =>
-                SrcLoc -> String -> [TaggedType vn] -> TypeM vn (TaggedType vn)
-soac2ArgType loc op [] = bad $ TypeError loc $ "Empty tuple given to " ++ op
-soac2ArgType _ _ [et] = return et
-soac2ArgType _ _ ets = return $ Elem $ Tuple ets
 
 checkLiteral :: VarName vn => SrcLoc -> Value -> TypeM vn Value
 checkLiteral _ (IntVal k) = return $ IntVal k
@@ -1201,8 +1232,12 @@ checkLambda (CurryFun fname curryargexps rettype pos) args = do
               case find (unique . snd) $ zip curryargexps paramtypes of
                 Just (e, _) -> bad $ CurriedConsumption fname $ srclocOf e
                 _           -> return ()
-              checkFuncall Nothing pos paramtypes rt (curryargs++args)
-              return $ CurryFun fname curryargexps' rettype' pos
+              let mkparam i t = newIdent ("param_" ++ show i) t pos
+              params <- zipWithM mkparam [(0::Int)..] $ drop (length curryargs) $ map fromDecl paramtypes
+              let fun = AnonymFun (map toParam params) body (toDecl rettype') pos
+                  body = Apply fname (zip (curryargexps'++map Var params) $ map diet paramtypes)
+                         rettype' pos
+              checkLambda fun args
 
 checkPolyLambdaOp :: (TypeBox ty, VarName vn) =>
                      BinOp -> [TaggedExp ty vn] -> ty (ID vn) -> [Arg vn] -> SrcLoc

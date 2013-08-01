@@ -196,7 +196,7 @@ data ExpBase ty vn =
             -- Unary Ops: Not for bools and Negate for ints
             | Not    (ExpBase ty vn) SrcLoc -- e.g., not True = False
             | Negate (ExpBase ty vn) (ty vn) SrcLoc -- e.g., ~(~1) = 1
-            | If     (ExpBase ty vn) (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
+            | If     (ExpBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
             | Var    (IdentBase ty vn)
             -- Function Call and Let Construct
             | Apply  Name [(ExpBase ty vn, Diet)] (ty vn) SrcLoc
@@ -289,17 +289,16 @@ data ExpBase ty vn =
             -- accept curried and anonymous
             -- functions as (first) params
             -----------------------------------------------------
-            | Map2 (LambdaBase ty vn) [ExpBase ty vn] (ty vn) SrcLoc
+            | Map2 (LambdaBase ty vn) [ExpBase ty vn] [ty vn] SrcLoc
              -- @map(op +(1), {1,2,..,n}) = {2,3,..,n+1}@
              -- 2nd arg is either a tuple of multi-dim arrays 
              --   of basic type, or a multi-dim array of basic type.
-             -- 3st arg is the  input-array row type
-             --   (either a tuple or an array)
+             -- 3rd arg is the input-array row types
 
-            | Reduce2 (LambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] (ty vn) SrcLoc
-            | Scan2   (LambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] (ty vn) SrcLoc
+            | Reduce2 (LambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] [ty vn] SrcLoc
+            | Scan2   (LambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] [ty vn] SrcLoc
             | Filter2 (LambdaBase ty vn) [ExpBase ty vn]          SrcLoc
-            | Redomap2(LambdaBase ty vn) (LambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] (ty vn) SrcLoc
+            | Redomap2(LambdaBase ty vn) (LambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] [ty vn] SrcLoc
 
               deriving (Eq, Ord, Show)
 
@@ -312,7 +311,7 @@ instance Located (ExpBase ty vn) where
   locOf (Or _ _ pos) = locOf pos
   locOf (Not _ pos) = locOf pos
   locOf (Negate _ _ pos) = locOf pos
-  locOf (If _ _ _ _ pos) = locOf pos
+  locOf (If _ _ _ pos) = locOf pos
   locOf (Var ident) = locOf ident
   locOf (Apply _ _ _ pos) = locOf pos
   locOf (LetPat _ _ _ pos) = locOf pos

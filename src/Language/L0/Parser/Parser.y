@@ -226,7 +226,7 @@ Exp  :: { UncheckedExp }
      | Exp '<=' Exp   { BinOp Leq  $1 $3 NoInfo $2 }
 
      | if Exp then Exp else Exp %prec ifprec
-                      { If $2 $4 $6 NoInfo $1 }
+                      { If $2 $4 $6 $1 }
 
      | id '(' Exps ')'
                       { let L pos (ID name) = $1
@@ -260,19 +260,21 @@ Exp  :: { UncheckedExp }
                       { Reduce $3 $5 $7 NoInfo $1 }
 
      | reduce2 '(' FunAbstr ',' DExps ')'
-                      { Reduce2 $3 (fst $5) (snd $5) NoInfo $1 }
+                      { let (accexps, arrexps) = $5 in
+                        Reduce2 $3 accexps arrexps (replicate (length arrexps) NoInfo) $1 }
 
      | map '(' FunAbstr ',' Exp ')'
                       { Map $3 $5 NoInfo $1 }
 
      | map2 '(' FunAbstr ',' Exps ')'
-                      { Map2 $3 $5 NoInfo $1 }
+                      { Map2 $3 $5 (replicate (length $5) NoInfo) $1 }
 
      | scan '(' FunAbstr ',' Exp ',' Exp ')'
                       { Scan $3 $5 $7 NoInfo $1 }
 
      | scan2 '(' FunAbstr ',' DExps ')'
-                      { Scan2 $3 (fst $5) (snd $5) NoInfo $1 }
+                      { let (accexps, arrexps) = $5 in
+                        Scan2 $3 accexps arrexps (replicate (length arrexps) NoInfo) $1 }
 
      | zip '(' Exps2 ')'
                       { Zip (map (\x -> (x, NoInfo)) $3) $1 }
@@ -290,7 +292,8 @@ Exp  :: { UncheckedExp }
                       { Redomap $3 $5 $7 $9 NoInfo $1 }
 
      | redomap2 '(' FunAbstr ',' FunAbstr ',' DExps ')'
-                      { Redomap2 $3 $5 (fst $7) (snd $7) NoInfo $1 }
+                      { let (accexps, arrexps) = $7 in
+                        Redomap2 $3 $5 accexps arrexps (replicate (length arrexps) NoInfo) $1 }
 
      | copy '(' Exp ')' { Copy $3 $1 }
 

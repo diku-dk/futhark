@@ -54,10 +54,9 @@ transformExp mape@(Map fun e intype loc) =
       funcall0 <- transformLambda fun [index0]
       funcall <- transformLambda fun [indexi]
       newLet "outarr" (Replicate nv funcall0 loc) $ \outarr outarrv -> do
-        let branch = If (BinOp Less zero nv (Elem Bool) loc)
-                     letbody
+        let branch = If (BinOp Less zero nv (Elem Bool) loc) letbody
                      (maybeCopy $ Literal (blankValue $ typeOf mape) loc)
-                     (typeOf mape) loc
+                     loc
             letbody = DoLoop (Id outarr) outarrv i nv loopbody outarrv loc
             loopbody = LetWith outarr outarr [iv] funcall outarrv loc
         return branch
@@ -86,11 +85,11 @@ transformExp (Filter fun arrexp rowtype loc) =
     newLet "n" rs $ \_ nv -> do
       let checkempty nonempty = If (BinOp Equal nv (intval 0) (Elem Bool) loc)
                                 (Literal (emptyArray rowtype) loc) nonempty
-                                (typeOf arrexp) loc
+                                loc
       (x, xv) <- newVar loc "x" rowtype
       (i, iv) <- newVar loc "i" (Elem Int)
       fun' <- transformLambda fun [xv]
-      let branch = If fun' (intval 1) (intval 0) (Elem Int) loc
+      let branch = If fun' (intval 1) (intval 0) loc
           indexin0 = Index arr [intval 0] rowtype loc
           indexin = Index arr [iv] rowtype loc
       mape <- transformExp $
@@ -112,7 +111,7 @@ transformExp (Filter fun arrexp rowtype loc) =
                                 (And (BinOp Less (intval 0) iv (Elem Bool) loc)
                                      (BinOp Equal indexi indexim1 (Elem Bool) loc) loc)
                              loc)
-                         resv update (typeOf resv) loc
+                         resv update loc
               update = LetWith res res [BinOp Minus indexi (intval 1) (Elem Int) loc]
                        indexin resv loc
           return $ checkempty loop
@@ -134,25 +133,24 @@ transformExp mape@(Map2 fun arrs _ loc) = do
     (i, iv) <- newVar loc "i" (Elem Int)
     sz <- size inarrs
     newLet "n" sz $ \_ nv -> do
-      funcall0 <- transformLambda fun $ index inarrs zero
-      funcall <- transformLambda fun $ index inarrs iv
+      funcall0 <- tuple <$> transformLambda fun (index inarrs zero)
+      funcall <- tuple <$> transformLambda fun (index inarrs iv)
       newResultArray nv funcall0 $ \outarr outarrv -> do
         loopbody <- letwith outarr iv funcall outarrv
         let branch = If (BinOp Less zero nv (Elem Bool) loc)
                      letbody
                      (maybeCopy $ Literal (blankValue $ typeOf mape) loc)
-                     (typeOf mape) loc
-            letbody = DoLoop (pattern outarr loc) outarrv i nv loopbody
+                     loc
+            letbody = DoLoop (TupId (map Id outarr) loc) outarrv i nv loopbody
                       outarrv loc
         return branch
 
 transformExp (Reduce2 fun accexp arrexps _ loc) =
   newReduction2 loc arrexps accexp $ \(arr, _) (acc, accv) (i, iv) -> do
-    funcall <- transformLambda fun $ map Var acc ++ index arr iv
+    funcall <- transformLambda fun (map Var acc ++ index arr iv)
     sz <- size arr
-    let loop = DoLoop (pattern acc loc) accv i sz
-               funcall accv loc
-    return loop
+    return $ DoLoop (TupId (map Id acc) loc) accv i sz
+             funcall accv loc
 
 transformExp (Scan2 fun accexp arrexps _ loc) =
   newReduction2 loc arrexps accexp $ \(arr, arrv) (acc, _) (i, iv) -> do
@@ -160,10 +158,8 @@ transformExp (Scan2 fun accexp arrexps _ loc) =
     loopbody <- letwith arr iv funcall $
                 TupLit (index arr iv++map Var arr) loc
     sz <- size arr
-    let looppat = case pattern acc loc of
-                    Id k         -> TupId (Id k : map Id arr) loc
-                    TupId pats _ -> TupId (pats ++ map Id arr) loc
-        loop = DoLoop looppat (TupLit (map Var $ acc ++ arr) loc)
+    let loop = DoLoop (TupId (map Id $ acc ++ arr) loc)
+               (TupLit (map Var $ acc ++ arr) loc)
                i sz loopbody arrv loc
     return loop
 
@@ -174,39 +170,36 @@ transformExp filtere@(Filter2 fun arrexps loc) =
       let checkempty nonempty =
             If (BinOp Equal nv (intval 0) (Elem Bool) loc)
             (Literal (blankValue $ typeOf filtere) loc) nonempty
-            (typeOf filtere) loc
+            loc
           rowtypes = map (rowType . identType) arr
       (xs, _) <- unzip <$> mapM (newVar loc "x") rowtypes
       (i, iv) <- newVar loc "i" $ Elem Int
       fun' <- transformLambda fun $ map Var xs
-      let branch = If fun' (intval 1) (intval 0) (Elem Int) loc
+      let branch = If fun' (intval 1) (intval 0) loc
           indexin0 = index arr $ intval 0
           indexin = index arr iv
-          rowtype = case rowtypes of [t] -> t
-                                     _   -> Elem $ Tuple rowtypes
       mape <- transformExp $
               Map2 (AnonymFun (map toParam xs) branch (Elem Int) loc) (map Var arr)
-              rowtype loc
+              rowtypes loc
       plus <- do
         (a,av) <- newVar loc "a" (Elem Int)
         (b,bv) <- newVar loc "b" (Elem Int)
         return $ AnonymFun [toParam a, toParam b] (BinOp Plus av bv (Elem Int) loc) (Elem Int) loc
-      scan <- transformExp $ Scan2 plus [intval 0] [mape] (Elem Int) loc
-      newLet "ia" scan $ \ia _ -> do
+      scan <- newTupLet "mape" mape $ \_ mape' ->
+                transformExp $ Scan2 plus [intval 0] [mape'] [Elem Int] loc
+      newTupLet "ia" scan $ \ia _ -> do
         let indexia ind = Index ia [ind] (Elem Int) loc
             indexiaend = indexia (sub1 nv)
             indexi = indexia iv
             indexim1 = indexia (sub1 iv)
-            tup es = case es of [e] -> e
-                                _   -> TupLit es loc
-        newResultArray indexiaend (tup indexin0) $ \res resv -> do
-          update <- letwith res (sub1 indexi) (tup indexin) resv
-          let loop = DoLoop (pattern res loc) resv i nv loopbody resv loc
+        newResultArray indexiaend (TupLit indexin0 loc) $ \res resv -> do
+          update <- letwith res (sub1 indexi) (TupLit indexin loc) resv
+          let loop = DoLoop (TupId (map Id res) loc) resv i nv loopbody resv loc
               loopbody = If (Or (BinOp Equal iv (intval 0) (Elem Bool) loc)
                                 (And (BinOp Less (intval 0) iv (Elem Bool) loc)
                                      (BinOp Equal indexi indexim1 (Elem Bool) loc) loc)
                              loc)
-                         resv update (typeOf resv) loc
+                         resv update loc
           return $ checkempty loop
   where intval x = Literal (IntVal x) loc
         sub1 e = BinOp Minus e (intval 1) (Elem Int) loc
@@ -215,7 +208,7 @@ transformExp (Redomap2 redfun mapfun accexps arrexps _ loc) =
   newReduction2 loc arrexps accexps $ \(arr, _) (acc, accv) (i, iv) -> do
     mapfuncall <- transformLambda mapfun $ index arr iv
     sz <- size arr
-    let loop loopbody = DoLoop (pattern acc loc) accv i sz loopbody accv loc
+    let loop loopbody = DoLoop (TupId (map Id acc) loc) accv i sz loopbody accv loc
     case typeOf mapfuncall of
       Elem (Tuple ts) -> do
         names <- mapM (liftM fst . newVar loc "mapres") ts
@@ -245,18 +238,11 @@ newReduction2 :: SrcLoc -> [Exp] -> [Exp]
              -> TransformM Exp
 newReduction2 loc arrexps accexps body = do
   (i, iv) <- newVar loc "i" (Elem Int)
-  newLets "arr" arrexps $ \arr arrv ->
-    case accexps of
-      [e] -> do
-        let t = typeOf e
-        (acc, accv) <- newVar loc "acc" t
-        let binder inner = LetPat (Id acc) e inner loc
-        binder <$> body (arr, arrv) ([acc], accv) (i, iv)
-      es -> do
-        let ets = map typeOf es
-        (names, namevs) <- unzip <$> mapM (newVar loc "acc") ets
-        let binder inner = LetPat (TupId (map Id names) loc) (TupLit accexps loc) inner loc
-        binder <$> body (arr, arrv) (names, TupLit namevs loc) (i, iv)
+  newLets "arr" arrexps $ \arr arrv -> do
+    let ets = map typeOf accexps
+    (names, namevs) <- unzip <$> mapM (newVar loc "acc") ets
+    let binder inner = LetPat (TupId (map Id names) loc) (TupLit accexps loc) inner loc
+    binder <$> body (arr, arrv) (names, TupLit namevs loc) (i, iv)
 
 newLet :: String -> Exp -> (Ident -> Exp -> TransformM Exp)
        -> TransformM Exp
@@ -267,11 +253,22 @@ newLet name e body = do
   xlet <$> body x xv
   where loc = srclocOf e
 
+newTupLet :: String -> Exp -> (Ident -> Exp -> TransformM Exp)
+       -> TransformM Exp
+newTupLet name e body = do
+  e' <- liftM maybeCopy $ transformExp e
+  case typeOf e' of
+    Elem (Tuple [t]) -> do
+      (x,xv) <- newVar loc name t
+      let xlet inner = LetPat (TupId [Id x] loc) e' inner loc
+      xlet <$> body x xv
+        where loc = srclocOf e
+    _ -> newLet name e body
+
 newLets :: String -> [Exp] -> ([Ident] -> Exp -> TransformM Exp)
         -> TransformM Exp
 newLets k es body = newLets' es []
-  where newLets' [] [name]      = body [name] $ Var name
-        newLets' [] names       =
+  where newLets' [] names       =
           body (reverse names) $ TupLit (map Var $ reverse names) noLoc
         newLets' (e:rest) names =
           newLet k e $ \name _ -> newLets' rest (name:names)
@@ -319,9 +316,9 @@ letwith ks i v body =
             return $ foldl comb body ks
   where loc = srclocOf body
 
-pattern :: [Ident] -> SrcLoc -> TupIdent
-pattern [k] _ = Id k
-pattern ks loc = TupId (map Id ks) loc
+tuple :: Exp -> Exp
+tuple e = case typeOf e of Elem (Tuple _) -> e
+                           _              -> TupLit [e] $ srclocOf e
 
 rows :: Exp -> SrcLoc -> TransformM Exp
 rows e loc = do

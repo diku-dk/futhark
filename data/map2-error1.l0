@@ -1,0 +1,3 @@
+// Wrong, because the map2 function must return an array.
+
+fun {[int]} main([int] a) = map2(fn int (int x) => x + 2, a)
