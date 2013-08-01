@@ -161,11 +161,11 @@ isConsumed body need =
   provides need `intersects` consumedInExp body
 
 hoistInExp :: Exp -> HoistM Exp
-hoistInExp (If c e1 e2 t loc) = do
+hoistInExp (If c e1 e2 loc) = do
   c' <- hoistInExp c
   e1' <- blockAllHoisting $ hoistInExp e1
   e2' <- blockAllHoisting $ hoistInExp e2
-  return $ If c' e1' e2' t loc
+  return $ If c' e1' e2' loc
 hoistInExp (LetPat pat e body _) = do
   e' <- hoistInExp e
   bind $ LetBind pat e' []

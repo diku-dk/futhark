@@ -47,6 +47,7 @@ module Language.L0.Attributes
   , addAliases
   , addElemAliases
   , setUniqueness
+  , unifyUniqueness
 
   -- ** Removing and adding names
   --
@@ -362,6 +363,19 @@ addElemAliases Real _ = Real
 addElemAliases Bool _ = Bool
 addElemAliases Char _ = Char
 
+-- | Unify the uniqueness attributes and aliasing information of two
+-- types.  The two types must otherwise be identical.  The resulting
+-- alias set will be the 'mappend' of the two input types aliasing sets,
+-- and the uniqueness will be 'Unique' only if both of the input types
+-- are unique.
+unifyUniqueness :: Monoid (as vn) =>
+                   TypeBase as vn -> TypeBase as vn -> TypeBase as vn
+unifyUniqueness (Array et dims u1 als1) (Array _ _ u2 als2) =
+  Array et dims (u1 <> u2) (als1 <> als2)
+unifyUniqueness (Elem (Tuple ets1)) (Elem (Tuple ets2)) =
+  Elem $ Tuple $ zipWith unifyUniqueness ets1 ets2
+unifyUniqueness t1 _ = t1
+
 -- | A "blank" value of the given type - this is zero, or whatever is
 -- close to it.  Don't depend on this value, but use it for creating
 -- arrays to be populated by do-loops.
@@ -469,7 +483,7 @@ typeOf (And {}) = Elem Bool
 typeOf (Or {}) = Elem Bool
 typeOf (Not _ _) = Elem Bool
 typeOf (Negate _ t _) = t
-typeOf (If _ _ _ t _) = t
+typeOf (If _ e1 e2 _) = typeOf e1 `unifyUniqueness` typeOf e2
 typeOf (Var ident) =
   case identType ident of
     Elem (Tuple ets) -> Elem $ Tuple ets
@@ -515,19 +529,15 @@ typeOf (Concat x y _) = typeOf x `setUniqueness` u
 typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` S.empty
 typeOf (DoLoop _ _ _ _ _ body _) = typeOf body
 typeOf (Map2 f arrs _ _) =
-  case lambdaType f $ map typeOf arrs of
-    Elem (Tuple tps) ->
-      Elem $ Tuple $ map (\x -> arrayType 1 x (uniqueProp x)) tps
-    ftp -> arrayType 1 ftp (uniqueProp ftp)
+  Elem $ Tuple $ case lambdaType f $ map typeOf arrs of
+                   Elem (Tuple tps) ->
+                     map (\x -> arrayType 1 x (uniqueProp x)) tps
+                   ftp -> [arrayType 1 ftp (uniqueProp ftp)]
 typeOf (Reduce2 fun acc arrs _ _) =
   lambdaType fun $ map typeOf acc ++ map typeOf arrs
-typeOf (Scan2 _ _ _ (Elem (Tuple tps)) _) =
-  Elem $ Tuple $ map (\x -> arrayType 1 x Unique) tps
-typeOf (Scan2 _ _ _ tp _) = arrayType 1 tp Unique
-typeOf (Filter2 _ arrs _) =
-  case map typeOf arrs of
-    [t] -> t
-    tps -> Elem $ Tuple tps
+typeOf (Scan2 _ _ _ ets _) =
+  Elem $ Tuple $ map (\x -> arrayType 1 x Unique) ets
+typeOf (Filter2 _ arrs _) = Elem $ Tuple $ map typeOf arrs
 typeOf (Redomap2 redfun mapfun start arrs rt loc) =
   lambdaType redfun $ map typeOf start ++ case typeOf (Map2 mapfun arrs rt loc) of
                                             Elem (Tuple ts) -> ts
@@ -581,8 +591,8 @@ mapTails f (LetWith dest src idxs ve body loc) =
   LetWith dest src idxs ve (mapTails f body) loc
 mapTails f (DoLoop pat me i bound loopbody body loc) =
   DoLoop pat me i bound loopbody (mapTails f body) loc
-mapTails f (If c te fe t loc) =
-  If c (mapTails f te) (mapTails f fe) t loc
+mapTails f (If c te fe loc) =
+  If c (mapTails f te) (mapTails f fe) loc
 mapTails f e = f e
 
 -- | Convert a pattern into the corresponding expression, i.e. the

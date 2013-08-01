@@ -525,7 +525,7 @@ compileExp place (Negate e1 _ _) = do
   e1' <- compileExp place e1
   return [C.cstm|{$stm:e1' $exp:place = -$exp:place;}|]
 
-compileExp place (If cond e1 e2 _ _) = do
+compileExp place (If cond e1 e2 _) = do
   condvar <- new "if_cond"
   cond' <- compileExp (varExp condvar) cond
   e1' <- compileExp place e1
