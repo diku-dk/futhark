@@ -53,4 +53,6 @@ on standard output.
 Testing
 =======
 
-Run the `data/runtests.sh` script to check how well we're doing.
+Run the `data/runtests.sh` script to check how well we're doing.  Use
+`data/runtests.sh -t` if you're in a hurry and only want the test
+suite to do type checking.
