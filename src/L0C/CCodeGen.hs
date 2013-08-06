@@ -214,9 +214,9 @@ printStm place (Elem (Tuple ets)) = do
               printStm [C.cexp|$exp:place.$id:(tupleField i)|] et
   let prints' = intercalate [[C.cstm|{putchar(','); putchar(' ');}|]] $ map (:[]) prints
   return [C.cstm|{
-               putchar('(');
+               putchar('{');
                $stms:prints'
-               putchar(')');
+               putchar('}');
              }|]
 printStm place (Array Char _ _ _) =
   return [C.cstm|printf("%s", $exp:place.data);|]
@@ -229,7 +229,7 @@ printStm place t@(Array et _ _ _) = do
   return [C.cstm|{
                int $id:i;
                $ty:et' $id:v;
-               putchar('{');
+               putchar('[');
                for ($id:i = 0; $id:i < $exp:place.dims[0]; $id:i++) {
                  $stm:indexi;
                  $stm:stm
@@ -238,7 +238,7 @@ printStm place t@(Array et _ _ _) = do
                    putchar(' ');
                  }
                }
-               putchar('}');
+               putchar(']');
              }|]
 
 readStm :: C.Exp -> GenType als -> CompilerM C.Stm
@@ -316,6 +316,8 @@ void error(int exitcode, const char *s) {
   abort();
   exit(exitcode);
 }
+
+$esc:("int l0_assertZip() { return 1; }")
 
 $edecls:(map funcToDef definitions)
 
