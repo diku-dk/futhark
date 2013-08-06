@@ -16,7 +16,7 @@ module Language.L0.Attributes
   , expToValue
   , mapTails
   , typeOf
-  , patToExp
+  , patType
 
   -- * Queries on types
   , basicType
@@ -596,12 +596,10 @@ mapTails f (If c te fe loc) =
   If c (mapTails f te) (mapTails f fe) loc
 mapTails f e = f e
 
--- | Convert a pattern into the corresponding expression, i.e. the
--- pattern @(x, (y, z))@ becomes the expression @(x, (y, z))@
--- (instructive, no?)
-patToExp :: TupIdentBase ty vn -> ExpBase ty vn
-patToExp (Id k)           = Var k
-patToExp (TupId pats loc) = TupLit (map patToExp pats) loc
+-- | Return the type of values that the pattern can bind.
+patType :: TupIdentBase (TypeBase as) vn -> TypeBase as vn
+patType (Id k)         = identType k
+patType (TupId pats _) = Elem $ Tuple $ map patType pats
 
 -- | Convert an identifier to a 'ParamBase'.
 toParam :: IdentBase (TypeBase as) vn -> ParamBase vn

@@ -485,7 +485,7 @@ withPattern :: TupIdent -> (TupIdent -> TransformM a) -> TransformM a
 withPattern pat m =
   binding (flattenPattern pat) $ \idents ->
     let tup = TupId (map Id idents) $ srclocOf pat
-    in m $ case (idents, typeOf $ patToExp pat) of
+    in m $ case (idents, patType pat) of
              (_, Elem (Tuple _)) -> tup
              ([ident], _)        -> Id ident
              _                   -> tup -- Should never be reached.
