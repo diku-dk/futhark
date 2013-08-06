@@ -240,10 +240,11 @@ transformExp (LetWith name src idxs ve body loc) = do
                           let vlet inner = LetPat (TupId (map Id vnames) loc) ve' inner loc
                           return (map Var vnames, vlet)
                         _ -> return ([ve'], id)
-    let comb olde (sname, v) inner =
-          LetWith sname sname idxs' v (olde inner) loc
-    let lws = foldl comb id $ zip srcs vnames
-    inner <- transformExp $ LetPat (Id name) (tuplit (map Var srcs) loc) body loc
+    srcs' <- map fst <$> mapM (newVar loc "letwith_dst" . identType) srcs
+    let comb olde (sname, dname, v) inner =
+          LetWith dname sname idxs' v (olde inner) loc
+    let lws = foldl comb id $ zip3 srcs srcs' vnames
+    inner <- transformExp $ LetPat (Id name) (tuplit (map Var srcs') loc) body loc
     return $ vlet $ lws inner
 
 transformExp (Replicate ne ve loc) = do
