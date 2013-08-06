@@ -16,7 +16,6 @@ module Language.L0.Attributes
   , expToValue
   , mapTails
   , typeOf
-  , patType
 
   -- * Queries on types
   , basicType
@@ -595,11 +594,6 @@ mapTails f (DoLoop pat me i bound loopbody body loc) =
 mapTails f (If c te fe loc) =
   If c (mapTails f te) (mapTails f fe) loc
 mapTails f e = f e
-
--- | Return the type of values that the pattern can bind.
-patType :: TupIdentBase (TypeBase as) vn -> TypeBase as vn
-patType (Id k)         = identType k
-patType (TupId pats _) = Elem $ Tuple $ map patType pats
 
 -- | Convert an identifier to a 'ParamBase'.
 toParam :: IdentBase (TypeBase as) vn -> ParamBase vn
