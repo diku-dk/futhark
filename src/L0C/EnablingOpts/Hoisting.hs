@@ -26,10 +26,11 @@ data BindNeed = LoopBind TupIdent Exp Ident Exp Exp
 
 asTail :: BindNeed -> Exp
 asTail (LoopBind mergepat mergeexp i bound loopbody) =
-  DoLoop mergepat mergeexp i bound loopbody (patToExp mergepat) $
-         srclocOf mergepat
+  DoLoop mergepat mergeexp i bound loopbody (TupLit [] loc) loc
+    where loc = srclocOf mergepat
 asTail (LetBind pat e _) =
-  LetPat pat e (patToExp pat) $ srclocOf pat
+  LetPat pat e (TupLit [] loc) loc
+    where loc = srclocOf pat
 asTail (LetWithBind dest src is ve) =
   LetWith dest src is ve (Var dest) $ srclocOf dest
 
