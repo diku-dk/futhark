@@ -41,6 +41,7 @@ data Token = IF
            | LCURLY
            | RCURLY
            | COMMA
+           | UNDERSCORE
            | FUN
            | FN
            | ARROW

@@ -73,6 +73,7 @@ import Language.L0.Parser.Lexer
       '{'             { L $$ LCURLY }
       '}'             { L $$ RCURLY }
       ','             { L $$ COMMA }
+      '_'             { L $$ UNDERSCORE }
       fun             { L $$ FUN }
       fn              { L $$ FN }
       '=>'            { L $$ ARROW }
@@ -302,6 +303,9 @@ Exp  :: { UncheckedExp }
      | let Id '=' Exp in Exp %prec letprec
                       { LetPat (Id $2) $4 $6 $1 }
 
+     | let '_' '=' Exp in Exp %prec letprec
+                      { LetPat (Wildcard NoInfo $2) $4 $6 $1 }
+
      | let '{' TupIds '}' '=' Exp in Exp %prec letprec
                       { LetPat (TupId $3 $1) $6 $8 $1 }
 
@@ -343,6 +347,7 @@ TupIds : TupId ',' TupIds  { $1 : $3 }
 ;
 
 TupId : id { let L pos (ID name) = $1 in Id $ Ident name NoInfo pos }
+      | '_' { Wildcard NoInfo $1 }
       | '{' TupIds '}' { TupId $2 $1 }
 
 FunAbstr : id { let L pos (ID name) = $1 in CurryFun name [] NoInfo pos }
@@ -396,6 +401,7 @@ arrayFromList l = listArray (0, length l-1) l
 tupIdExp :: UncheckedTupIdent -> UncheckedExp
 tupIdExp (Id ident) = Var ident
 tupIdExp (TupId pats loc) = TupLit (map tupIdExp pats) loc
+tupIdExp (Wildcard _ loc) = error $ "Cannot have wildcard at " ++ locStr loc
 
 parseError :: [L Token] -> Either String a
 parseError [] = Left "Parse error: End of file"

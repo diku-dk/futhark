@@ -615,16 +615,6 @@ isCtOrCopy (Index {}       ) = True
 isCtOrCopy _                 = False
 
 isRemovablePat  :: TupIdent -> Exp -> CPropM Bool
-isRemovablePat (Id _) e = 
- let s=case e of
-        Var     _         -> True
-        Index   {}        -> True
-        Literal v _       -> isBasicTypeVal v
-        TupLit  _ _       -> isCtOrCopy e     -- False
---      DO NOT INLINE IOTA
-        Iota    _ _       -> True
-        _                 -> False
- in return s
 
 isRemovablePat (TupId tups _) e = 
     case e of
@@ -640,7 +630,20 @@ isRemovablePat (TupId tups _) e =
           Literal val@(TupVal _) _ -> return (isBasicTypeVal val)
           _ -> return False
 
+-- Covers Wildcard and Id.
+isRemovablePat _ e =
+ let s=case e of
+        Var     _         -> True
+        Index   {}        -> True
+        Literal v _       -> isBasicTypeVal v
+        TupLit  _ _       -> isCtOrCopy e     -- False
+--      DO NOT INLINE IOTA
+        Iota    _ _       -> True
+        _                 -> False
+ in return s
+
 getPropBnds :: TupIdent -> Exp -> Bool -> CPropM [(VName, CtOrId)]
+getPropBnds ( Wildcard _ _ ) _ _ = return []
 getPropBnds ( Id (Ident var tp _) ) e to_rem =
   let r = case e of
             Literal v _          -> [(var, Constant v (fromDecl $ valueType v) to_rem)]

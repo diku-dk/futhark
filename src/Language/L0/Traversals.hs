@@ -347,6 +347,7 @@ progNames = execWriter . mapM funNames . progFunctions
 patNames :: Ord vn => TupIdentBase ty vn -> S.Set vn
 patNames (Id ident)     = S.singleton $ identName ident
 patNames (TupId pats _) = mconcat $ map patNames pats
+patNames (Wildcard _ _) = mempty
 
 -- | Return the set of identifiers that are free in the given
 -- expression.

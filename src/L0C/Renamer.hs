@@ -211,7 +211,11 @@ renamePattern (Id ident) = do
 renamePattern (TupId pats pos) = do
   pats' <- mapM renamePattern pats
   return $ TupId pats' pos
+renamePattern (Wildcard t loc) = do
+  t' <- renameType t
+  return $ Wildcard t' loc
 
 patternNames :: TupIdentBase ty f -> [IdentBase ty f]
-patternNames (Id ident) = [ident]
+patternNames (Id ident)     = [ident]
 patternNames (TupId pats _) = concatMap patternNames pats
+patternNames (Wildcard _ _)   = []
