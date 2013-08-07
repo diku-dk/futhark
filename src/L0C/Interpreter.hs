@@ -546,6 +546,7 @@ evalPattern (Id ident) v = Just [(ident, v)]
 evalPattern (TupId pats _) (TupVal vs)
   | length pats == length vs =
     concat <$> zipWithM evalPattern pats vs
+evalPattern (Wildcard _ _) _ = Just []
 evalPattern _ _ = Nothing
 
 applyLambda :: Lambda -> [Value] -> L0M Value
