@@ -126,26 +126,59 @@ transformFun (fname,rettype,params,body,loc) =
     return (fname, rettype', map toParam params', body', loc)
   where rettype' = transformType rettype
 
+transformParam :: Ident -> TransformM (Either Ident [Ident])
+transformParam param =
+  case identType param' of
+    Elem (Tuple ts) ->
+      -- We know from transformIdent that none of the element
+      -- types are themselves tuples.
+      Right <$> mapM (liftM fst . newVar loc base) ts
+    _ -> return $ Left param'
+  where param' = transformIdent param
+        loc = srclocOf param
+        base = nameToString $ baseName $ identName param
+
+transformParam' :: Ident -> TransformM [Ident]
+transformParam' param = either (:[]) id <$> transformParam param
+
 binding :: [Ident] -> ([Ident] -> TransformM a) -> TransformM a
 binding params m = do
-  (params', substs) <-
-    runWriterT $ concat <$> mapM (transformParam . transformIdent) params
-  let bind env = env { envSubsts = M.union substs $
-                                   foldr (M.delete . identName) (envSubsts env)
-                                   params
-                     }
+  (params', substs) <- runWriterT $ liftM concat . forM params $ \param -> do
+    param' <- lift $ transformParam' param
+    case param' of [_] -> return ()
+                   _   -> tell $ M.singleton (identName param) param'
+    return param'
+  let bind env = env { envSubsts = substs `M.union` envSubsts env }
   local bind $ m params'
-  where
-    transformParam param =
-      case identType param of
-        Elem (Tuple ts) -> do
-          -- We know from transformIdent that none of the element
-          -- types are themselves tuples.
-          let base = nameToString $ baseName $ identName param
-          names <- mapM (liftM fst . lift . newVar (srclocOf param) base) ts
-          tell $ M.singleton (identName param) names
-          return names
-        _ -> return [param]
+
+bindingPat :: TupIdent -> (TupIdent -> TransformM a) -> TransformM a
+bindingPat (Wildcard t loc) m =
+  case transformType t of
+    Elem (Tuple ets) -> m $ TupId (map (`Wildcard` loc) ets) loc
+    t' -> m $ Wildcard t' loc
+bindingPat (Id k) m = do
+  ks <- transformParam k
+  case ks of
+    Left k' -> m $ Id k'
+    Right ks' -> do
+      let bind env = env { envSubsts = M.insert (identName k) ks' $
+                                       envSubsts env }
+      local bind $ m $ TupId (map Id ks') $ srclocOf k
+bindingPat (TupId pats loc) m = do
+  (ks, substs) <- runWriterT $ concat <$> mapM delve pats
+  let bind env = env { envSubsts = substs `M.union` envSubsts env }
+  local bind $ m $ TupId ks loc
+    where delve (Id k) = do
+            ks <- lift $ transformParam' k
+            case ks of [_] -> return ()
+                       _   -> tell $ M.singleton (identName k) ks
+            return $ map Id ks
+          delve (Wildcard t _) =
+            case transformType t of
+              Elem (Tuple ets) -> return $ map (`Wildcard` loc) ets
+              t' -> return [Wildcard t' loc]
+          delve (TupId pats' _) =
+            concat <$> mapM delve pats'
 
 flattenExps :: [Exp] -> [Exp]
 flattenExps = concatMap flatten
@@ -225,7 +258,7 @@ transformExp (Apply fname args rettype loc) = do
 transformExp (DoLoop mergepat mergeexp i bound loopbody letbody loc) = do
   bound' <- transformExp bound
   mergeexp' <- transformExp mergeexp
-  withPattern mergepat $ \mergepat' -> do
+  bindingPat mergepat $ \mergepat' -> do
     loopbody' <- transformExp loopbody
     letbody' <- transformExp letbody
     return $ DoLoop mergepat' mergeexp' i bound' loopbody' letbody' loc
@@ -274,12 +307,11 @@ transformExp (Unzip e _ _) = transformExp e
 
 transformExp (Zip es loc) = do
   es' <- mapM (transformExp . fst) es
-  (dead, _) <- newVar loc "dead" $ Elem Bool
   let comb (e:es'') namevs = tupToExpList e $ \tes -> do
         (names, newnamevs) <- unzip <$> mapM (newVar loc "zip_elem" . typeOf) tes
         body <- comb es'' (namevs ++ newnamevs)
         return $ LetPat (TupId (map Id names) loc) (TupLit tes loc) body loc
-      comb [] namevs = return $ LetPat (Id dead) azip (TupLit namevs loc) loc
+      comb [] namevs = return $ LetPat (Wildcard (Elem Bool) loc) azip (TupLit namevs loc) loc
         where azip = Apply (nameFromString "assertZip")
                            (zip namevs $ repeat Observe) (Elem Bool) loc
   comb es' []
@@ -336,7 +368,7 @@ transformExp (Concat x y loc) = do
 
 transformExp (LetPat pat e body loc) = do
   e' <- transformExp e
-  withPattern pat $ \pat' -> do
+  bindingPat pat $ \pat' -> do
     body' <- transformExp body
     return $ LetPat pat' e' body' loc
 
@@ -477,21 +509,6 @@ tuplifyLam (AnonymFun params body rettype loc) =
 tuplifyType :: TypeBase als vn -> TypeBase als vn
 tuplifyType (Elem (Tuple ets)) = Elem $ Tuple ets
 tuplifyType t                  = Elem $ Tuple [t]
-
-flattenPattern :: TupIdent -> [Ident]
-flattenPattern (TupId pats _) = concatMap flattenPattern pats
-flattenPattern (Id ident)     = [ident]
-
-withPattern :: TupIdent -> (TupIdent -> TransformM a) -> TransformM a
-withPattern pat m =
-  binding (flattenPattern pat) $ \idents ->
-    m $ case idents of
-          [ident] | not matchedTuple -> Id ident
-          _                          -> TupId (map Id idents) $ srclocOf pat
-  where matchedTuple =
-          case pat of Id (Ident { identType = Elem (Tuple _) }) -> True
-                      TupId _ _                                 -> True
-                      _                                         -> False
 
 newVar :: SrcLoc -> String -> Type -> TransformM (Ident, Exp)
 newVar loc name tp = do

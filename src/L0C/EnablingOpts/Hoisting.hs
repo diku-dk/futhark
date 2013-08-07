@@ -149,6 +149,7 @@ hasFree :: S.Set VName -> BlockPred
 hasFree ks _ need = ks `intersects` requires need
 
 uniqPat :: TupIdent -> Bool
+uniqPat (Wildcard t _) = unique t
 uniqPat (Id k)         = unique $ identType k
 uniqPat (TupId pats _) = any uniqPat pats
 

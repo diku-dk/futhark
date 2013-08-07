@@ -590,33 +590,38 @@ fusionGatherExp fres (LetPat pat (Scan2 lam nes arrs _ _) body _) = do
 fusionGatherExp fres (LetPat pat (Apply fname zip_args _ _) body _)
   | "assertZip" <- nameToString fname = do
     bres  <- fusionGatherExp fres body
-    let nm = identName $ head $ getIdents pat
-
-    let iddnms  = foldl (\s x-> case x of
-                                  Var idd -> S.insert (identName idd) s
-                                  _       -> s
-                        ) S.empty $ map fst zip_args
-    let inzips' = foldl (\m x -> case M.lookup x m of
-                                    Nothing -> M.insert x [nm]     m
-                                    Just lst-> M.insert x (nm:lst) m
-                        ) (inzips bres) (S.toList iddnms)
-    let i = getBuiltinFunIdent "assertZip"
-    return $ bres { zips   = M.insert nm (i, S.fromList $ map fst zip_args) (zips bres), inzips = inzips' }
+    case getIdents pat of
+      [] -> return bres
+      ident:_ -> do
+        let nm = identName ident
+            iddnms  = foldl (\s x-> case x of
+                                      Var idd -> S.insert (identName idd) s
+                                      _       -> s
+                            ) S.empty $ map fst zip_args
+            inzips' = foldl (\m x -> case M.lookup x m of
+                                        Nothing -> M.insert x [nm]     m
+                                        Just lst-> M.insert x (nm:lst) m
+                            ) (inzips bres) (S.toList iddnms)
+            i = getBuiltinFunIdent "assertZip"
+        return $ bres { zips   = M.insert nm (i, S.fromList $ map fst zip_args) (zips bres), inzips = inzips' }
 
 fusionGatherExp fres (LetPat pat (Shape arr _) body _) = do
     -- Fix implementation such that if the arg of size is not from a map, then it is parsed,
     -- i.e., if the argument is coming from a filter then it should inhibit fusion!
     bres  <- fusionGatherExp fres body
-    let nm = identName $ head $ getIdents pat
-    (inzips',bres') <-
-        case arr of
+    case getIdents pat of
+      [] -> return bres
+      ident:_ -> do
+        let nm = identName ident
+            i  = getBuiltinFunIdent "shape"
+        (inzips',bres') <-
+          case arr of
             Var idd -> case M.lookup (identName idd) (inzips bres) of
                         Nothing -> return ( M.insert (identName idd) [nm]     (inzips bres), bres )
                         Just lst-> return ( M.insert (identName idd) (nm:lst) (inzips bres), bres )
             _       -> do new_res <- fusionGatherExp bres arr
                           return (inzips bres, new_res)
-    let i  = getBuiltinFunIdent "shape"
-    return $ bres' { zips   = M.insert nm (i, S.singleton arr) (zips bres'), inzips = inzips' }
+        return $ bres' { zips   = M.insert nm (i, S.singleton arr) (zips bres'), inzips = inzips' }
 
 
 fusionGatherExp fres (LetPat pat e body _) = do
@@ -804,25 +809,28 @@ fuseInExp (LetPat pat soac@(Scan2 {}) body pos) = do
     soac' <- fuseInExp soac
     return $ LetPat pat soac' body' pos
 
-fuseInExp (LetPat pat (Apply fname _ rtp p1) body pos)
+fuseInExp e@(LetPat pat (Apply fname _ rtp p1) body pos)
   | "assertZip" <- nameToString fname = do
     body' <- fuseInExp body
     fres  <- asks fusedRes
-    let nm = identName $ head $ getIdents pat
-    case M.lookup nm (zips fres) of
-        Nothing -> badFusionGM $ EnablingOptError pos
-                                   ("In Fusion.hs, fuseInExp LetPat of assertZip, "
-                                    ++" assertZip not in Res: "++textual nm)
-        Just (i,ss)-> do let arrs = S.toList ss
-                         let fnm  = getBuiltinFunName i
-                         _ <- if fnm == "assertZip"
-                              then return Nothing
-                              else badFusionGM $ EnablingOptError pos
-                                                  ("In Fusion.hs, fuseInExp LetPat of assertZip, "
-                                                   ++" builtin funname not assertZip: "++fnm)
-                         if length arrs > 1
-                         then return $ LetPat pat (Apply fname (zip arrs $ repeat Observe) rtp p1) body' pos
-                         else return body' -- i.e., assertZip eliminated
+    case getIdents pat of
+      [] -> return e
+      ident:_ -> do
+        let nm = identName ident
+        case M.lookup nm (zips fres) of
+          Nothing -> badFusionGM $ EnablingOptError pos
+                                     ("In Fusion.hs, fuseInExp LetPat of assertZip, "
+                                      ++" assertZip not in Res: "++textual nm)
+          Just (i,ss)-> do let arrs = S.toList ss
+                           let fnm  = getBuiltinFunName i
+                           _ <- if fnm == "assertZip"
+                                then return Nothing
+                                else badFusionGM $ EnablingOptError pos
+                                                    ("In Fusion.hs, fuseInExp LetPat of assertZip, "
+                                                     ++" builtin funname not assertZip: "++fnm)
+                           if length arrs > 1
+                           then return $ LetPat pat (Apply fname (zip arrs $ repeat Observe) rtp p1) body' pos
+                           else return body' -- i.e., assertZip eliminated
 
 fuseInExp (LetPat pat (Shape _ p1) body pos) = do
     body' <- fuseInExp body
@@ -974,8 +982,9 @@ mergeFusionRes res1 res2 = do
 
 -- | Returns the list of identifiers of a pattern.
 getIdents :: TupIdent -> [Ident]
-getIdents (Id idd)      = [idd]
-getIdents (TupId tis _) = concatMap getIdents tis
+getIdents (Wildcard _ _) = []
+getIdents (Id idd)       = [idd]
+getIdents (TupId tis _)  = concatMap getIdents tis
 
 getLamSOAC :: Exp -> FusionGM Lambda
 getLamSOAC (Map2     lam _ _ _  ) = return lam

@@ -127,8 +127,9 @@ instance (Eq vn, Pretty vn) => Pretty (ExpBase ty vn) where
   pprPrec _ (Filter2 lam as _) = ppSOAC "filter2" [lam] as
 
 instance (Eq vn, Pretty vn) => Pretty (TupIdentBase ty vn) where
-  ppr (Id ident) = ppr ident
+  ppr (Id ident)     = ppr ident
   ppr (TupId pats _) = braces $ commasep $ map ppr pats
+  ppr (Wildcard _ _) = text "_"
 
 instance (Eq vn, Pretty vn) => Pretty (LambdaBase ty vn) where
   ppr (CurryFun fname [] _ _) = text $ nameToString fname

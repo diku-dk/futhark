@@ -341,6 +341,7 @@ patDiet pat occs = patDiet' pat
           | identName k `S.member` cons = Consume
           | otherwise                   = Observe
         patDiet' (TupId pats _)         = TupleDiet $ map patDiet' pats
+        patDiet' (Wildcard _ _)         = Observe
 
 maybeCheckOccurences :: VarName vn => Occurences vn -> TypeM vn ()
 maybeCheckOccurences us = do
@@ -1115,6 +1116,9 @@ checkBinding pat et dflow = do
           | length pats == length ts = do
           pats' <- zipWithM checkBinding' pats ts
           return $ TupId pats' pos
+        checkBinding' (Wildcard wt loc) t = do
+          t' <- lift $ checkAnnotation (srclocOf pat) "wildcard" wt t
+          return $ Wildcard t' loc
         checkBinding' _ _ =
           lift $ bad $ InvalidPatternError (untagPattern errpat) (untagType et) $ srclocOf pat
 
@@ -1124,10 +1128,11 @@ checkBinding pat et dflow = do
             Nothing -> modify $ (binding [ident].) *** (ident:)
             Just (Ident name _ pos2) ->
               lift $ bad $ DupPatternError (baseName name) (srclocOf ident) pos2
-        -- A pattern with known type box (unit) for error messages.
+        -- A pattern with known type box (NoInfo) for error messages.
         errpat = rmTypes pat
         rmTypes (Id (Ident name _ pos)) = Id $ Ident name NoInfo pos
         rmTypes (TupId pats pos) = TupId (map rmTypes pats) pos
+        rmTypes (Wildcard _ loc) = Wildcard NoInfo loc
 
 validApply :: [DeclTypeBase (ID vn)] -> [TaggedType vn] -> Bool
 validApply expected got =

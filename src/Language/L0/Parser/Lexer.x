@@ -50,6 +50,7 @@ tokens :-
   "{"                      { const LCURLY }
   "}"                      { const RCURLY }
   ","                      { const COMMA }
+  "_"                      { const UNDERSCORE }
   "~"? [0-9]+              { INTLIT . readInt }
   "~"? (([0-9]+("."[0-9]*)?|"."[0-9]+))
     ([eE][\+\~]?[0-9]+)?     { REALLIT . readReal }

@@ -166,15 +166,14 @@ tupleNormExp e@(Var (Ident vnm _ pos)) = do
         Just pat -> mkTuplitFromPat pat
     where
         mkTuplitFromPat :: TupIdent -> TupNormM Exp
-        mkTuplitFromPat (Id idd) = do
-            let idd'= Ident { identName = identName idd, 
-                              identType = identType idd, 
-                              identSrcLoc = pos
-                            }
-            return $ Var idd' 
-        mkTuplitFromPat (TupId tupids _) = do 
-            exps <- mapM mkTuplitFromPat tupids
-            return $ TupLit exps pos 
+        mkTuplitFromPat (Wildcard _ _) =
+          badTupNormM $ EnablingOptError pos
+                        "In tupleNormExp: Broken invariant, pattern contains Wildcard."
+        mkTuplitFromPat (Id idd) =
+          return $ Var idd { identSrcLoc = pos }
+        mkTuplitFromPat (TupId tupids _) = do
+          exps <- mapM mkTuplitFromPat tupids
+          return $ TupLit exps pos
 
 tupleNormExp (Index idd inds tp2 pos) = do
     bnd <- asks $ M.lookup (identName idd) . envVtable
@@ -225,8 +224,11 @@ tupleNormLambda (CurryFun fname exps rettype pos) = do
 -----------------------------------------------------------------
 distribPatExp :: TupIdent -> Exp -> Exp -> TupNormM Exp
 
-distribPatExp pat@(Id idd) e body =
-    return $ LetPat pat e body (identSrcLoc idd)
+distribPatExp pat@(Wildcard _ _) e body =
+    return $ LetPat pat e body $ srclocOf pat
+
+distribPatExp pat@(Id _) e body =
+    return $ LetPat pat e body $ srclocOf pat
 
 distribPatExp pat@(TupId idlst pos) e body =
     case e of
@@ -251,32 +253,38 @@ distribPatExp pat@(TupId idlst pos) e body =
 --------------------
 mkFullPattern :: TupIdent -> TupNormM (TupIdent, [(VName, TupIdent)])
 
-mkFullPattern pat@(Id ident) = do
-    let (nm, tp) = (identName ident, identType ident)
-    case tp of
-        Elem (Tuple {}) ->
-            do  pat' <- mkPatFromType (identSrcLoc ident) nm tp
-                return (pat', [(nm, pat')])
-        _           -> return (pat, [])
+mkFullPattern (Wildcard tp@(Elem (Tuple {})) loc) = do
+  let mkId tp' = return $ Wildcard tp' loc
+  pat' <- mkPatFromType mkId loc tp
+  return (pat', [])
+mkFullPattern pat@(Wildcard _ _) = return (pat, [])
+
+mkFullPattern (Id ident@Ident { identName = nm
+                              , identType = tp@(Elem (Tuple _))}) = do
+  let mkId tp' = do nm' <- new nm
+                    return $ Id Ident { identName = nm'
+                                      , identSrcLoc = srclocOf ident
+                                      , identType = tp' }
+  pat' <- mkPatFromType mkId (srclocOf ident) tp
+  return (pat', [(nm, pat')])
+mkFullPattern pat@(Id _) = return (pat, [])
 
 mkFullPattern (TupId idlst pos) = do
-    reslst <- mapM mkFullPattern idlst
-    let (tupids, bndlsts) = unzip reslst
-    return (TupId tupids pos, concat bndlsts)
+  reslst <- mapM mkFullPattern idlst
+  let (tupids, bndlsts) = unzip reslst
+  return (TupId tupids pos, concat bndlsts)
 
 -----------------------
--- given a (tuple) type, creates a fully instantiated TupIdent 
+-- given a (tuple) type, and a way to create leaf nodes given a type,
+-- creates a fully instantiated TupIdent
 -----------------------
-mkPatFromType :: SrcLoc -> VName -> Type -> TupNormM TupIdent
+mkPatFromType :: (Type -> TupNormM TupIdent) -> SrcLoc -> Type -> TupNormM TupIdent
 
-mkPatFromType pos nm (Elem (Tuple tps)) = do
-  tupids <- mapM (mkPatFromType pos nm) tps
+mkPatFromType f pos (Elem (Tuple tps)) = do
+  tupids <- mapM (mkPatFromType f pos) tps
   return $ TupId tupids pos
-mkPatFromType pos nm tp = do
-  tmp_nm <- new nm
-  return $ Id Ident { identName = tmp_nm
-                    , identType = tp
-                    , identSrcLoc = pos  }
+mkPatFromType f _ tp = f tp
+
 
 
 --------------------------------------------------

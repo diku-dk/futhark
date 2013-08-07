@@ -207,3 +207,4 @@ deadCodeElimLambda (CurryFun fname curryargexps rettype pos) = do
 getBnds :: TupIdent -> [VName]
 getBnds ( Id (Ident var _ _) ) = [var]
 getBnds ( TupId ids _ ) = concatMap getBnds ids
+getBnds ( Wildcard _ _ ) = []

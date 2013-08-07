@@ -395,11 +395,13 @@ instance Located (LambdaBase ty vn) where
 -- | Tuple IdentBaseifier, i.e., pattern matching
 data TupIdentBase ty vn = TupId [TupIdentBase ty vn] SrcLoc
                         | Id (IdentBase ty vn)
+                        | Wildcard (ty vn) SrcLoc -- Nothing, i.e. underscore.
                           deriving (Eq, Ord, Show)
 
 instance Located (TupIdentBase ty vn) where
   locOf (TupId _ loc) = locOf loc
   locOf (Id ident) = locOf ident
+  locOf (Wildcard _ loc) = locOf loc
 
 -- | Function Declarations
 type FunDecBase ty vn = (Name,

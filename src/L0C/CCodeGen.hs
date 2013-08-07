@@ -885,7 +885,8 @@ compileExpInPlace place e = compileExp place e
 
 compilePattern :: TupIdent -> C.Exp -> [(VName, C.Exp)]
 compilePattern pat vexp = compilePattern' pat vexp
-  where compilePattern' (Id var) vexp' = do
+  where compilePattern' (Wildcard _ _) _ = []
+        compilePattern' (Id var) vexp' = do
           [(identName var, vexp')]
         compilePattern' (TupId pats _) vexp' = do
           concat $ zipWith prep pats [(0::Int)..]
