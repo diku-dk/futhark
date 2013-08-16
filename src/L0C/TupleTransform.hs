@@ -307,11 +307,12 @@ transformExp (Unzip e _ _) = transformExp e
 
 transformExp (Zip es loc) = do
   es' <- mapM (transformExp . fst) es
+  dead <- fst <$> newVar loc "dead" (Elem Bool)
   let comb (e:es'') namevs = tupToExpList e $ \tes -> do
         (names, newnamevs) <- unzip <$> mapM (newVar loc "zip_elem" . typeOf) tes
         body <- comb es'' (namevs ++ newnamevs)
         return $ LetPat (TupId (map Id names) loc) (TupLit tes loc) body loc
-      comb [] namevs = return $ LetPat (Wildcard (Elem Bool) loc) azip (TupLit namevs loc) loc
+      comb [] namevs = return $ LetPat (Id dead) azip (TupLit namevs loc) loc
         where azip = Apply (nameFromString "assertZip")
                            (zip namevs $ repeat Observe) (Elem Bool) loc
   comb es' []
