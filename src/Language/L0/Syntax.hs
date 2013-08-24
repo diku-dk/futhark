@@ -211,10 +211,8 @@ data ExpBase ty vn =
             | Iota (ExpBase ty vn) SrcLoc
             -- ^ @iota(n) = {0,1,..,n-1@
 
-            | Shape (ExpBase ty vn) SrcLoc
-            -- ^ The number of elements in an array, as a tuple with
-            -- an element per dimension if the array is
-            -- multi-dimensional.
+            | Size Int (ExpBase ty vn) SrcLoc
+            -- ^ The size of the specified array dimension.
 
             | Replicate (ExpBase ty vn) (ExpBase ty vn) SrcLoc
             -- ^ @replicate(3,1) = {1, 1, 1}@
@@ -318,7 +316,7 @@ instance Located (ExpBase ty vn) where
   locOf (LetWith _ _ _ _ _ pos) = locOf pos
   locOf (Index _ _ _ pos) = locOf pos
   locOf (Iota _ pos) = locOf pos
-  locOf (Shape _ pos) = locOf pos
+  locOf (Size _ _ pos) = locOf pos
   locOf (Replicate _ _ pos) = locOf pos
   locOf (Reshape _ _ pos) = locOf pos
   locOf (Transpose _ _ _ pos) = locOf pos

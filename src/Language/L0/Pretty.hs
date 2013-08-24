@@ -92,7 +92,7 @@ instance (Eq vn, Pretty vn) => Pretty (ExpBase ty vn) where
       text "in" </> ppr body
   pprPrec _ (Index v idxs _ _) = ppr v <> list (map ppr idxs)
   pprPrec _ (Iota e _) = text "iota" <> parens (ppr e)
-  pprPrec _ (Shape e _) = text "shape" <> parens (ppr e)
+  pprPrec _ (Size i e _) = text "size" <> apply [text $ tildes $ show i, ppr e]
   pprPrec _ (Replicate ne ve _) =
     text "replicate" <> apply [ppr ne, align (ppr ve)]
   pprPrec _ (Reshape shape e _) =

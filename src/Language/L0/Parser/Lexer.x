@@ -85,7 +85,7 @@ keyword s =
     "pow"          -> POW
 
     "iota"         -> IOTA
-    "shape"        -> SHAPE
+    "size"         -> SIZE
     "replicate"    -> REPLICATE
     "reshape"      -> RESHAPE
     "transpose"    -> TRANSPOSE

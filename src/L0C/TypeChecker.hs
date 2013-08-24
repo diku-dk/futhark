@@ -727,11 +727,15 @@ checkExp (Iota e pos) = do
   e' <- require [Elem Int] =<< checkExp e
   return $ Iota e' pos
 
-checkExp (Shape e pos) = do
+checkExp (Size i e pos) = do
   e' <- checkExp e
   case typeOf e' of
-    Array {} -> return $ Shape e' pos
-    _        -> bad $ TypeError pos "Argument to shape must be array."
+    Array {}
+      | i >= 0 && i < arrayDims (typeOf e') ->
+        return $ Size i e' pos
+      | otherwise ->
+        bad $ TypeError pos $ "Type " ++ ppType (typeOf e') ++ " has no dimension " ++ show i ++ "."
+    _        -> bad $ TypeError pos "Argument to size must be array."
 
 checkExp (Replicate countexp valexp pos) = do
   countexp' <- require [Elem Int] =<< checkExp countexp

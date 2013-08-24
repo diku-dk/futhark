@@ -13,16 +13,21 @@ import Control.Monad.Writer
 import Control.Monad.Reader
 
 import Data.Graph
+import Data.List
 import Data.Loc
 import qualified Data.Map as M
+import Data.Maybe
+import Data.Ord
 import qualified Data.Set as S
 
 import L0C.L0
 
 data BindNeed = LoopBind TupIdent Exp Ident Exp Exp
-              | LetBind TupIdent Exp [Exp]
+              | LetBind TupIdent Exp [(TupIdent, Exp)]
               | LetWithBind Ident Ident [Exp] Exp
                 deriving (Show, Eq, Ord)
+
+type NeedSet = S.Set BindNeed
 
 asTail :: BindNeed -> Exp
 asTail (LoopBind mergepat mergeexp i bound loopbody) =
@@ -42,20 +47,58 @@ provides (LoopBind mergepat _ _ _ _) = patNames mergepat
 provides (LetBind pat _ _) = patNames pat
 provides (LetWithBind dest _ _ _) = S.singleton $ identName dest
 
-data Need = Need { needBindings :: S.Set BindNeed
+data Need = Need { needBindings :: NeedSet
                  }
 
 instance Monoid Need where
   Need b1 `mappend` Need b2 = Need $ b1 <> b2
   mempty = Need S.empty
 
-data Env = Env { envBindings :: M.Map TupIdent Exp
+data ShapeBinding = Slice Int Ident -- ^ The shape is the same as a
+                                    -- slice of this other array
+                                    -- The integer denotes the
+                                    -- dimension.
+                  | DimSizes [Maybe Exp]
+
+data Env = Env { envBindings :: M.Map Ident [ShapeBinding]
+               , envSubsts :: M.Map Ident Ident
                }
 
 emptyEnv :: Env
 emptyEnv = Env {
              envBindings = M.empty
+           , envSubsts = M.empty
            }
+
+cartesian :: [[a]] -> [[a]]
+cartesian [] = []
+cartesian [x] = [x]
+cartesian (x:xs) = [ x' : xs' | xs' <- cartesian xs, x' <- x ]
+
+
+lookupShapeBindings :: Ident -> Env -> [ShapeBinding]
+lookupShapeBindings k env =
+  case M.lookup k $ envBindings env of
+    Nothing -> []
+    Just shs -> shs ++ concatMap recurse shs
+    where recurse (Slice d ident) =
+            map (deepen d) $ lookupShapeBindings ident env
+          recurse (DimSizes sz) = map DimSizes $ cartesian $ map inspect sz
+            where inspect :: Maybe Exp -> [Maybe Exp]
+                  inspect (Just (Size i (Var k') _)) =
+                    case lookupShapeBindings k' env of
+                      [] -> [Nothing]
+                      l  -> map (frob i) l
+                  inspect _ = [Nothing]
+          frob i (DimSizes sz) = case drop i sz of
+                                   e:_ -> e
+                                   []  -> Nothing
+          frob _ (Slice _ _) = Nothing
+          deepen strip (Slice d ident) =
+            Slice (d+strip) ident
+          deepen strip (DimSizes sz) =
+            DimSizes $ replicate strip Nothing ++ sz
+
 
 newtype HoistM a = HoistM (WriterT Need (Reader Env) a)
   deriving (Applicative, Functor, Monad,
@@ -64,8 +107,105 @@ newtype HoistM a = HoistM (WriterT Need (Reader Env) a)
 runHoistM :: HoistM a -> (a, Need)
 runHoistM (HoistM m) = runReader (runWriterT m) emptyEnv
 
-bind :: BindNeed -> HoistM ()
-bind = tell . Need . S.singleton
+addBinding :: TupIdent -> Exp -> HoistM ()
+addBinding pat e =
+  tell $ Need $ S.singleton $ LetBind pat e []
+
+bindLet :: TupIdent -> Exp -> HoistM a -> HoistM a
+bindLet (Id dest) (Var src) m = do
+  addBinding (Id dest) (Var src)
+  case identType src of Array {} -> withSlice dest src 0 m
+                        _        -> m
+
+bindLet pat@(Id dest) e@(Iota (Var x) _) m = do
+  addBinding pat e
+  withShape dest [Var x] m
+
+bindLet pat@(Id dest) e@(Replicate (Var x) _ _) m = do
+  addBinding pat e
+  withShape dest [Var x] m
+
+bindLet pat@(TupId [dest1, dest2] _) e@(Split (Var n) (Var src) _ loc) m = do
+  addBinding pat e
+  withShapes [(dest1, Var n : rest),
+               (dest2,
+                BinOp Minus (Size 0 (Var src) loc) (Var n) (Elem Int) loc
+                : rest)] m
+    where rest = [ Size i (Var src) loc
+                   | i <- [1.. arrayDims (identType src) - 1]]
+
+bindLet pat@(Id dest) e@(Map _ (Var src) _ loc) m = do
+  addBinding pat e
+  withShape dest [Size 0 (Var src) loc] m
+
+bindLet pat@(Id dest) e@(Scan _ _ (Var src) _ _) m = do
+  addBinding pat e
+  withSlice dest src 0 m
+
+bindLet pat@(TupId pats _) e@(Map2 _ srcs _ loc) m = do
+  addBinding pat e
+  withShapes (zip pats [[Size 0 src loc] | src <- srcs]) m
+
+bindLet pat@(TupId pats _) e@(Scan2 _ _ srcs _ loc) m = do
+  addBinding pat e
+  withShapes (zip pats [[Size 0 src loc] | src <- srcs]) m
+
+bindLet pat@(Id dest) e@(Index src idxs _ _) m = do
+  addBinding pat e
+  withSlice dest src (length idxs) m
+
+bindLet pat@(Id dest) e@(Transpose k n (Var src) loc) m = do
+  addBinding pat e
+  withShape dest dims m
+    where dims = transposeIndex k n
+                 [Size i (Var src) loc
+                  | i <- [0..arrayDims (identType src) - 1]]
+
+bindLet pat e@(Size i (Var x) loc) m = do
+  let mkAlt (Slice ydims y) = [(pat, Size (i+ydims) (Var y) loc)]
+      mkAlt (DimSizes ses) = case drop i ses of
+                               Just se:_ -> [(pat, se)]
+                               _        -> []
+  alts <- concatMap mkAlt <$> asks (lookupShapeBindings x)
+  tell $ Need $ S.singleton $ LetBind pat e alts
+  m
+
+bindLet pat e m = do
+  tell $ Need $ S.singleton $ LetBind pat e []
+  m
+
+bindLetWith :: Ident -> Ident -> [Exp] -> Exp -> HoistM a -> HoistM a
+bindLetWith dest src is ve m = do
+  tell $ Need $ S.singleton $ LetWithBind dest src is ve
+  withSlice dest src 0 m
+
+bindLoop :: TupIdent -> Exp -> Ident -> Exp -> Exp -> HoistM a -> HoistM a
+bindLoop pat e i bound body m = do
+  tell $ Need $ S.singleton $ LoopBind pat e i bound body
+  m
+
+-- | @k `withSlice` src d m@ executes @m@, during which the
+-- environment records that @k@ has the same shape as a slice of @src@
+-- starting at the @d@th dimension.
+withSlice :: Ident -> Ident -> Int -> HoistM a -> HoistM a
+withSlice slice src d =
+  local (\env -> env { envBindings =
+                         M.insertWith (++) slice [Slice d src]
+                            $ envBindings env })
+
+withShape :: Ident -> [Exp] -> HoistM a -> HoistM a
+withShape dest src =
+  local (\env -> env { envBindings =
+                         M.insertWith (++) dest [DimSizes $ map Just src]
+                            $ envBindings env })
+
+withShapes :: [(TupIdent, [Exp])] -> HoistM a -> HoistM a
+withShapes [] m =
+  m
+withShapes ((Id dest, es):rest) m =
+  withShape dest es $ withShapes rest m
+withShapes (_:rest) m =
+  withShapes rest m
 
 -- | Run the let-hoisting algorithm on the given program.  Even if the
 -- output differs from the output, meaningful hoisting may not have
@@ -80,16 +220,37 @@ transformFun (fname, rettype, params, body, loc) =
   where (body', need) = runHoistM $ hoistInExp body
 
 addBindings :: Need -> Exp -> Exp
-addBindings need body =
-  foldr comb body $ inDepOrder $ S.toList $ needBindings need
-  where comb (LoopBind mergepat mergeexp loopvar
-              boundexp loopbody) inner =
-          DoLoop mergepat mergeexp loopvar boundexp loopbody inner
-                   $ srclocOf inner
-        comb (LetBind pat e _) inner =
-          LetPat pat e inner $ srclocOf inner
-        comb (LetWithBind dest src is ve) inner =
-          LetWith dest src is ve inner $ srclocOf inner
+addBindings need =
+  snd $ foldl comb (M.empty, id) (inDepOrder $ S.toList $ needBindings need)
+  where comb (m, outer) bind@(LoopBind mergepat mergeexp loopvar
+                              boundexp loopbody) =
+          (m `M.union` distances m (provides bind) (requires bind),
+           \inner -> outer $
+                     DoLoop mergepat mergeexp loopvar boundexp
+                     loopbody inner $ srclocOf inner)
+        comb (m, outer) bind@(LetBind pat e alts) =
+          let add pat' e' =
+                (m `M.union` distances m (provides bind) (S.map identName $ freeInExp e),
+                 \inner -> outer $ LetPat pat' e' inner $ srclocOf inner)
+          in case map snd $ sortBy (comparing fst) $ map (score m) $ (pat,e):alts of
+               (pat',e'):_ -> add pat' e'
+               _           -> add pat e
+        comb (m, outer) bind@(LetWithBind dest src is ve) =
+          (m `M.union` distances m (provides bind) (requires bind),
+           \inner -> outer $ LetWith dest src is ve inner $ srclocOf inner)
+
+score :: M.Map VName Int -> (TupIdent, Exp) -> (Int, (TupIdent, Exp))
+score m (p, e) = (S.fold f 0 $ S.map identName $ freeInExp e, (p, e))
+  where f k x = case M.lookup k m of
+                  Just y  -> max x y
+                  Nothing -> x
+
+distances :: M.Map VName Int -> S.Set VName -> S.Set VName -> M.Map VName Int
+distances m outs ins = M.fromList [ (k, d+1) | k <- S.toList outs ]
+  where d = S.fold f 0 ins
+        f k x = case M.lookup k m of
+                  Just y  -> max x y
+                  Nothing -> x
 
 inDepOrder :: [BindNeed] -> [BindNeed]
 inDepOrder = flattenSCCs . stronglyConnComp . buildGraph
@@ -129,12 +290,13 @@ blockIf block m = pass $ do
           case need of
             LetBind pat e es ->
               let bad e' = block body (LetBind pat e' []) || ks `anyIsFreeIn` e'
-              in case (bad e, filter (not . bad) es) of
+                  badAlt (_, e') = bad e'
+              in case (bad e, filter (not . badAlt) es) of
                    (True, [])     ->
                      (need `S.insert` blocked, hoistable,
                       patNames pat `S.union` ks)
-                   (True, e':es') ->
-                     (blocked, LetBind pat e' es' `S.insert` hoistable, ks)
+                   (True, (pat', e'):es') ->
+                     (blocked, LetBind pat' e' es' `S.insert` hoistable, ks)
                    (False, es')   ->
                      (blocked, LetBind pat e es' `S.insert` hoistable, ks)
             _ | requires need `intersects` ks || block body need ->
@@ -170,25 +332,23 @@ hoistInExp (If c e1 e2 loc) = do
   return $ If c' e1' e2' loc
 hoistInExp (LetPat pat e body _) = do
   e' <- hoistInExp e
-  bind $ LetBind pat e' []
-  hoistInExp body
+  bindLet pat e' $ hoistInExp body
 hoistInExp (LetWith dest src idxs ve body _) = do
   idxs' <- mapM hoistInExp idxs
   ve' <- hoistInExp ve
-  bind $ LetWithBind dest src idxs' ve'
-  hoistInExp body
+  bindLetWith dest src idxs' ve' $ hoistInExp body
 hoistInExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody _) = do
   mergeexp' <- hoistInExp mergeexp
   boundexp' <- hoistInExp boundexp
   loopbody' <- blockIfSeq [hasFree boundnames, isConsumed] $
                hoistInExp loopbody
-  bind $ LoopBind mergepat mergeexp' loopvar boundexp' loopbody'
-  hoistInExp letbody
+  bindLoop mergepat mergeexp' loopvar boundexp' loopbody' $ hoistInExp letbody
   where boundnames = identName loopvar `S.insert` patNames mergepat
 hoistInExp e = mapExpM hoist e
   where hoist = identityMapper {
                   mapOnExp = hoistInExp
                 , mapOnLambda = hoistInLambda
+                , mapOnIdent = replaceIdent
                 }
 
 hoistInLambda :: Lambda -> HoistM Lambda
@@ -199,3 +359,6 @@ hoistInLambda (AnonymFun params body rettype loc) = do
   body' <- blockIf (hasFree params' `orIf` isUniqueBinding) $ hoistInExp body
   return $ AnonymFun params body' rettype loc
   where params' = S.fromList $ map identName params
+
+replaceIdent :: Ident -> HoistM Ident
+replaceIdent k = fromMaybe k <$> asks (M.lookup k . envSubsts)

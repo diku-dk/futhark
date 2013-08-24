@@ -324,18 +324,20 @@ copyCtPropExp (If e1 e2 e3 pos) = do
 
 -----------------------------------------------------------
 --- If expression is an array literal than replace it   ---
----    with the array's shape
+---    with the array's size
 -----------------------------------------------------------
-copyCtPropExp (Shape e pos) = do
+copyCtPropExp (Size i e pos) = do
     e' <- copyCtPropExp e
     case e' of
         Var idd -> do vv <- asks $ M.lookup (identName idd) . envVtable
                       case vv of Just (Constant a _ _) -> literal a
-                                 _ -> return $ Shape e' pos
+                                 _ -> return $ Size i e' pos
         Literal a _ -> literal a
-        _ ->  return $ Shape e' pos
+        _ ->  return $ Size i e' pos
     where literal a =
-            changed $ Literal (TupVal $ map IntVal $ arrayShape a) pos
+            case drop i $ arrayShape a of
+              []  -> badCPropM $ TypeError pos " array literal has too few dimensions! "
+              n:_ -> changed $ Literal (IntVal n) pos
 
 -----------------------------------------------------------
 --- If all params are values and function is free of IO ---

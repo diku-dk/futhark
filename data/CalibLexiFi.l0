@@ -596,7 +596,7 @@ fun real black_price(real today, {real,real,real} swaption, real vol ) =
 
     // morally equivalent to `swap_schedule2lvl(swap_schedule)' but in map-reduce form!!
     let {swap_sched1, swap_sched2} = unzip(swap_sched)                                    in
-    let {n} = shape(swap_sched) in
+    let n = size(0, swap_sched) in
     let swap_sched_new = zip(replicate(n, 0.0), swap_sched1, swap_sched2)  in
     let {lvl,t0,tn} = reduce(accumSched, {0.0, max_date(), min_date()},  swap_sched_new)  in
 
@@ -754,7 +754,7 @@ pricer_of_swaption( real                       today,
 
     // COSMIN: TODO: add schedulei as parameter for map!!!!!
     // COSMIN: PERFECT EXAMPLE FOR THE PAPER!!!!!
-    let {n_schedi} = shape(schedulei)                      in
+    let n_schedi = size(0, schedulei)                      in
     let ci = map(   fn real (int i) =>
                         let {d_beg,d_end} = schedulei[i]   in
                         let tau = date_act_365(d_end,d_beg)in
@@ -1043,7 +1043,7 @@ fun real main() =   //_applic() =
                     )    in
 
     let rms    = reduce(op +, 0.0, prices)      in
-    let {numswapts} = shape( getSwaptionQuotes() ) in
+    let numswapts = size(0, getSwaptionQuotes() ) in
     let rms    = 100.0 * sqrt ( rms / toReal(numswapts) ) in
 
     // printing the error!
