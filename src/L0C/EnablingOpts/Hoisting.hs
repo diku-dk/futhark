@@ -15,8 +15,8 @@ import Control.Monad.Reader
 import Data.Graph
 import Data.List
 import Data.Loc
-import qualified Data.Map as M
 import Data.Maybe
+import qualified Data.Map as M
 import Data.Ord
 import qualified Data.Set as S
 
@@ -61,13 +61,11 @@ data ShapeBinding = Slice Int Ident -- ^ The shape is the same as a
                   | DimSizes [Maybe Exp]
 
 data Env = Env { envBindings :: M.Map Ident [ShapeBinding]
-               , envSubsts :: M.Map Ident Ident
                }
 
 emptyEnv :: Env
 emptyEnv = Env {
              envBindings = M.empty
-           , envSubsts = M.empty
            }
 
 cartesian :: [[a]] -> [[a]]
@@ -84,8 +82,7 @@ lookupShapeBindings k env =
     where recurse (Slice d ident) =
             map (deepen d) $ lookupShapeBindings ident env
           recurse (DimSizes sz) = map DimSizes $ cartesian $ map inspect sz
-            where inspect :: Maybe Exp -> [Maybe Exp]
-                  inspect (Just (Size i (Var k') _)) =
+            where inspect (Just (Size i (Var k') _)) =
                     case lookupShapeBindings k' env of
                       [] -> [Nothing]
                       l  -> map (frob i) l
@@ -127,12 +124,17 @@ bindLet pat@(Id dest) e@(Replicate (Var x) _ _) m = do
 
 bindLet pat@(TupId [dest1, dest2] _) e@(Split (Var n) (Var src) _ loc) m = do
   addBinding pat e
-  withShapes [(dest1, Var n : rest),
-               (dest2,
-                BinOp Minus (Size 0 (Var src) loc) (Var n) (Elem Int) loc
-                : rest)] m
+  szs <- asks $ lookupShapeBindings src
+  withShapes [(dest1, Var n : rest)] $ bind $ mapMaybe dim0 szs
     where rest = [ Size i (Var src) loc
                    | i <- [1.. arrayDims (identType src) - 1]]
+          dim0 (Slice d k) = Just $ Size d (Var k) loc
+          dim0 (DimSizes (Just se:_)) = Just se
+          dim0 (DimSizes _) = Nothing
+          bind =
+            foldr (\se ->
+                   withShapes [(dest2, BinOp Minus se (Var n) (Elem Int) loc:rest)])
+            m
 
 bindLet pat@(Id dest) e@(Map _ (Var src) _ loc) m = do
   addBinding pat e
@@ -348,7 +350,6 @@ hoistInExp e = mapExpM hoist e
   where hoist = identityMapper {
                   mapOnExp = hoistInExp
                 , mapOnLambda = hoistInLambda
-                , mapOnIdent = replaceIdent
                 }
 
 hoistInLambda :: Lambda -> HoistM Lambda
@@ -359,6 +360,3 @@ hoistInLambda (AnonymFun params body rettype loc) = do
   body' <- blockIf (hasFree params' `orIf` isUniqueBinding) $ hoistInExp body
   return $ AnonymFun params body' rettype loc
   where params' = S.fromList $ map identName params
-
-replaceIdent :: Ident -> HoistM Ident
-replaceIdent k = fromMaybe k <$> asks (M.lookup k . envSubsts)
