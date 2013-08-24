@@ -1,7 +1,7 @@
 // Compute LU-factorisation of matrix.
 
 fun {*[[real]], *[[real]]} lu_inplace(*[[real]] a) =
-  let {n, unused} = shape(a) in
+  let n = size(0, a) in
   loop ({a,l,u} = {a,
                    replicate(n,replicate(n,0.0)),
                    replicate(n,replicate(n,0.0))}) =

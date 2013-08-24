@@ -69,6 +69,7 @@ module Language.L0.Attributes
   , emptyArray
   , flattenArray
   , transposeArray
+  , transposeIndex
 
   -- * Type aliases
 
@@ -465,10 +466,16 @@ transposeArray k n v =
       in f (rowType $ valueType v) [] newshape
     _ -> v
   where oldshape = arrayShape v
-        move l
-          | (pre,needle:post) <- splitAt k l,
-            (mid,end) <- splitAt n post = pre ++ mid ++ [needle] ++ end
-          | otherwise = l
+        move = transposeIndex k n
+
+-- | If @l@ is an index into the array @a@, then @transposeIndex k n
+-- l@ is an index to the same element in the array @transposeArray k n
+-- a@.
+transposeIndex :: Int -> Int -> [a] -> [a]
+transposeIndex k n l
+  | (pre,needle:post) <- splitAt k l,
+    (mid,end) <- splitAt n post = pre ++ mid ++ [needle] ++ end
+  | otherwise = l
 
 -- | The type of an L0 term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
@@ -493,8 +500,7 @@ typeOf (LetWith _ _ _ _ body _) = typeOf body
 typeOf (Index ident _ t _) =
   t `addAliases` S.insert (identName ident)
 typeOf (Iota _ _) = arrayType 1 (Elem Int) Unique
-typeOf (Shape e _) =
-  Elem $ Tuple (replicate (arrayDims $ typeOf e) $ Elem Int)
+typeOf (Size {}) = Elem Int
 typeOf (Replicate _ e _) = arrayType 1 (typeOf e) u
   where u | uniqueOrBasic (typeOf e) = Unique
           | otherwise = Nonunique

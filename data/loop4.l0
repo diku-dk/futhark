@@ -2,7 +2,7 @@ fun [[real]] main() =
   let e_rows = empty([real]) in
   let arr = copy(e_rows) in
   let acc = copy([1.0]) in
-  loop ({acc, arr} = {acc, arr}) = for i < let {rows_6, dim_7} = shape(arr) in rows_6 do
+  loop ({acc, arr} = {acc, arr}) = for i < size(0, arr) do
     let arr[i] = let y = arr[i] in
                  let x = acc in
                  [1.0] in

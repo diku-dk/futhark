@@ -82,7 +82,7 @@ import Language.L0.Parser.Lexer
       do              { L $$ DO }
       with            { L $$ WITH }
       iota            { L $$ IOTA }
-      shape           { L $$ SHAPE }
+      size            { L $$ SIZE }
       replicate       { L $$ REPLICATE }
       map             { L $$ MAP }
       map2            { L $$ MAP2 }
@@ -237,7 +237,8 @@ Exp  :: { UncheckedExp }
 
      | iota '(' Exp ')' { Iota $3 $1 }
 
-     | shape '(' Exp ')' { Shape $3 $1 }
+     | size '(' intlit ',' Exp ')' { let L _ (INTLIT i) = $3 in
+                                     Size i $5 $1 }
 
      | replicate '(' Exp ',' Exp ')' { Replicate $3 $5 $1 }
 
