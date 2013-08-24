@@ -8,7 +8,6 @@ import Control.Monad.Reader
 --import Control.Monad.Writer
 
 import Data.Loc
-import Data.Maybe
 
 import qualified Data.List as L
 import qualified Data.Map  as M
@@ -321,17 +320,17 @@ greedyFuse is_repl lam_used_nms res (idd, soac) = do
 
     -- If @soac@ is a Filter2, then check that none of its out idds
     --    are used in a size call.
-    let ok_sz=case soac of
-                Filter2{} ->
-                  let ok x = fromMaybe True $ do
-                               znms <- M.lookup x (inzips res)
-                               is <- map fst <$> mapM (`M.lookup` zips res) znms
-                               return $ not $ any ((== "size") . getBuiltinFunName) is
-                  in all ok out_nms
-                _ -> True
+    -- let ok_sz=case soac of
+    --             Filter2{} ->
+    --               let ok x = fromMaybe True $ do
+    --                            znms <- M.lookup x (inzips res)
+    --                            is <- map fst <$> mapM (`M.lookup` zips res) znms
+    --                            return $ not $ any ((== "size") . getBuiltinFunName) is
+    --               in all ok out_nms
+    --             _ -> True
 
     -- compute whether @soac@ is fusable or not
-    let is_fusable = not_unfusable && not (null to_fuse_kers) && ok_inplace && ok_kers_compat && ok_sz
+    let is_fusable = not_unfusable && not (null to_fuse_kers) && ok_inplace && ok_kers_compat
 
     -- DEBUG STMT (delete it!)
     --to_fuse_kers' <- trace ("ker: "++ppTupId idd++" fusable?: "++show is_fusable++" to_fuse_kers_num: "++show (length to_fuse_kers) ++ " inpArrs keys: " ++ concatMap nameToString (M.keys (inpArr res))) (return to_fuse_kers)
@@ -605,25 +604,6 @@ fusionGatherExp fres (LetPat pat (Apply fname zip_args _ _) body _)
             i = getBuiltinFunIdent "assertZip"
         return $ bres { zips   = M.insert nm (i, S.fromList $ map fst zip_args) (zips bres), inzips = inzips' }
 
-fusionGatherExp fres (LetPat pat (Size _ arr _) body _) = do
-    -- Fix implementation such that if the arg of size is not from a map, then it is parsed,
-    -- i.e., if the argument is coming from a filter then it should inhibit fusion!
-    bres  <- fusionGatherExp fres body
-    case getIdents pat of
-      [] -> return bres
-      ident:_ -> do
-        let nm = identName ident
-            i  = getBuiltinFunIdent "size"
-        (inzips',bres') <-
-          case arr of
-            Var idd -> case M.lookup (identName idd) (inzips bres) of
-                        Nothing -> return ( M.insert (identName idd) [nm]     (inzips bres), bres )
-                        Just lst-> return ( M.insert (identName idd) (nm:lst) (inzips bres), bres )
-            _       -> do new_res <- fusionGatherExp bres arr
-                          return (inzips bres, new_res)
-        return $ bres' { zips   = M.insert nm (i, S.singleton arr) (zips bres'), inzips = inzips' }
-
-
 fusionGatherExp fres (LetPat pat e body _) = do
     let pat_vars = map Var $ getIdents pat
     bres <- binding pat $ fusionGatherExp fres body
@@ -716,11 +696,6 @@ fusionGatherExp _ (Apply fname _ _ pos)
   | "assertZip" <- nameToString fname =
     badFusionGM $ EnablingOptError pos
                   "In Fusion.hs, assertZip found outside a let binding!"
-fusionGatherExp _ (Apply fname _ _ pos)
-  | "size" <- nameToString fname =
-    badFusionGM $ EnablingOptError pos
-                  "In Fusion.hs, size found outside a let binding!"
-
 
 -----------------------------------
 ---- Generic Traversal         ----
@@ -831,27 +806,6 @@ fuseInExp e@(LetPat pat (Apply fname _ rtp p1) body pos)
                            if length arrs > 1
                            then return $ LetPat pat (Apply fname (zip arrs $ repeat Observe) rtp p1) body' pos
                            else return body' -- i.e., assertZip eliminated
-
-fuseInExp (LetPat pat (Size d _ p1) body pos) = do
-    body' <- fuseInExp body
-    fres  <- asks fusedRes
-    let nm = identName $ head $ getIdents pat
-    case M.lookup nm (zips fres) of
-        Nothing -> badFusionGM $ EnablingOptError pos
-                                   ("In Fusion.hs, fuseInExp LetPat of size, "
-                                    ++" size not in Res: "++textual nm)
-        Just (i,ss)-> do
-          let fnm  = getBuiltinFunName i
-              bad = badFusionGM $ EnablingOptError pos
-                    ("In Fusion.hs, fuseInExp LetPat of size, "
-                     ++" builtin funname not size: "++fnm)
-          case S.toList ss of
-            _ | fnm /= "size" ->  bad
-            [Iota n_exp _] ->
-              return $ LetPat pat n_exp body' pos -- size eliminated
-            [arr]          ->
-              return $ LetPat pat (Size d arr p1) body' pos
-            _ -> bad
 
 fuseInExp (LetPat pat e body pos) = do
     body' <- fuseInExp body
@@ -1096,11 +1050,9 @@ errorIllegalFus soac_name pos =
 getBuiltinFunName  :: Int -> String
 getBuiltinFunName i = case i of
                         1 -> "assertZip"
-                        2 -> "size"
                         _ -> "unknownBuiltInFun"
 getBuiltinFunIdent :: String -> Int
 getBuiltinFunIdent "assertZip" = 1
-getBuiltinFunIdent "size"     = 2
 getBuiltinFunIdent _           = 33
 
 --------------------------------------------
