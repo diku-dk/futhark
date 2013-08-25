@@ -52,6 +52,7 @@ module Language.L0.Traversals
   , progNames
   , patNames
   , freeInExp
+  , freeNamesInExp
   , consumedInExp
   )
   where
@@ -382,6 +383,10 @@ freeInExp = execWriter . flip runReaderT S.empty . expFree
         lambdaFree (AnonymFun params body _ _) =
           local (`S.union` S.fromList (map identName params)) $ expFree body
         lambdaFree (CurryFun _ exps _ _) = mapM_ expFree exps
+
+-- | As 'freeInExp', but returns the raw names rather than 'IdentBase's.
+freeNamesInExp :: Ord vn => ExpBase ty vn -> S.Set vn
+freeNamesInExp = S.map identName . freeInExp
 
 consumedInExp :: Ord vn => ExpBase CompTypeBase vn -> S.Set vn
 consumedInExp = execWriter . expConsumed
