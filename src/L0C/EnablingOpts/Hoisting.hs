@@ -136,6 +136,14 @@ bindLet pat@(TupId [dest1, dest2] _) e@(Split (Var n) (Var src) _ loc) m = do
                    withShapes [(dest2, BinOp Minus se (Var n) (Elem Int) loc:rest)])
             m
 
+bindLet pat@(Id dest) e@(Concat (Var x) (Var y) loc) m = do
+  addBinding pat e
+  withShape dest (outerdim :
+                  [Size i (Var x) loc | i <- [1..arrayDims (identType x) - 1]]
+                 ) m
+  where outerdim = BinOp Plus (Size 0 (Var x) loc) (Size 0 (Var y) loc)
+                   (Elem Int) loc
+
 bindLet pat@(Id dest) e@(Map _ (Var src) _ loc) m = do
   addBinding pat e
   withShape dest [Size 0 (Var src) loc] m
