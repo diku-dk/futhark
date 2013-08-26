@@ -58,11 +58,7 @@ instance Monoid Need where
   Need b1 `mappend` Need b2 = Need $ b1 <> b2
   mempty = Need S.empty
 
-data ShapeBinding = Slice Int Ident -- ^ The shape is the same as a
-                                    -- slice of this other array
-                                    -- The integer denotes the
-                                    -- dimension.
-                  | DimSizes [Maybe Exp]
+data ShapeBinding = DimSizes [Maybe Exp]
 
 data Env = Env { envBindings :: M.Map Ident [ShapeBinding]
                }
@@ -83,23 +79,15 @@ lookupShapeBindings k env =
   case M.lookup k $ envBindings env of
     Nothing -> []
     Just shs -> shs ++ concatMap recurse shs
-    where recurse (Slice d ident) =
-            map (deepen d) $ lookupShapeBindings ident env
-          recurse (DimSizes sz) = map DimSizes $ cartesian $ map inspect sz
+    where recurse (DimSizes sz) = map DimSizes $ cartesian $ map inspect sz
             where inspect (Just (Size i (Var k') _)) =
                     case lookupShapeBindings k' env of
                       [] -> [Nothing]
-                      l  -> map (frob i) l
+                      l  -> map (fill i) l
                   inspect _ = [Nothing]
-          frob i (DimSizes sz) = case drop i sz of
+          fill i (DimSizes sz) = case drop i sz of
                                    e:_ -> e
                                    []  -> Nothing
-          frob _ (Slice _ _) = Nothing
-          deepen strip (Slice d ident) =
-            Slice (d+strip) ident
-          deepen strip (DimSizes sz) =
-            DimSizes $ replicate strip Nothing ++ sz
-
 
 newtype HoistM a = HoistM (RWS
                            Env                -- Reader
@@ -128,9 +116,8 @@ addNewBinding k e = do
   return ident
 
 addBinding :: TupIdent -> Exp -> HoistM ()
-addBinding pat e@(Size i (Var x) loc) = do
-  let mkAlt (Slice ydims y) = [(pat, Size (i+ydims) (Var y) loc)]
-      mkAlt (DimSizes ses) = case drop i ses of
+addBinding pat e@(Size i (Var x) _) = do
+  let mkAlt (DimSizes ses) = case drop i ses of
                                Just se:_ -> [(pat, se)]
                                _        -> []
   alts <- concatMap mkAlt <$> asks (lookupShapeBindings x)
@@ -141,7 +128,7 @@ addBinding pat e =
 bindLet :: TupIdent -> Exp -> HoistM a -> HoistM a
 bindLet (Id dest) (Var src) m = do
   addBinding (Id dest) (Var src)
-  case identType src of Array {} -> withSlice dest src 0 m
+  case identType src of Array {} -> withShape dest (slice 0 src) m
                         _        -> m
 
 bindLet pat@(Id dest) e@(Iota (Var x) _) m = do
@@ -177,7 +164,7 @@ bindLet pat@(Id dest) e@(Map _ (Var src) _ loc) m = do
 
 bindLet pat@(Id dest) e@(Scan _ _ (Var src) _ _) m = do
   addBinding pat e
-  withSlice dest src 0 m
+  withShape dest (slice 0 src) m
 
 bindLet pat@(TupId pats _) e@(Map2 _ srcs _ loc) m = do
   addBinding pat e
@@ -189,7 +176,7 @@ bindLet pat@(TupId pats _) e@(Scan2 _ _ srcs _ loc) m = do
 
 bindLet pat@(Id dest) e@(Index src idxs _ _) m = do
   addBinding pat e
-  withSlice dest src (length idxs) m
+  withShape dest (slice (length idxs) src) m
 
 bindLet pat@(Id dest) e@(Transpose k n (Var src) loc) m = do
   addBinding pat e
@@ -205,21 +192,16 @@ bindLet pat e m = do
 bindLetWith :: Ident -> Ident -> [Exp] -> Exp -> HoistM a -> HoistM a
 bindLetWith dest src is ve m = do
   tell $ Need $ S.singleton $ LetWithBind dest src is ve
-  withSlice dest src 0 m
+  withShape dest (slice 0 src) m
 
 bindLoop :: TupIdent -> Exp -> Ident -> Exp -> Exp -> HoistM a -> HoistM a
 bindLoop pat e i bound body m = do
   tell $ Need $ S.singleton $ LoopBind pat e i bound body
   m
 
--- | @k `withSlice` src d m@ executes @m@, during which the
--- environment records that @k@ has the same shape as a slice of @src@
--- starting at the @d@th dimension.
-withSlice :: Ident -> Ident -> Int -> HoistM a -> HoistM a
-withSlice slice src d =
-  local (\env -> env { envBindings =
-                         M.insertWith (++) slice [Slice d src]
-                            $ envBindings env })
+slice :: Int -> Ident -> [Exp]
+slice d k = [ Size i (Var k) $ srclocOf k
+              | i <- [d..arrayDims (identType k)-1]]
 
 withShape :: Ident -> [Exp] -> HoistM a -> HoistM a
 withShape dest src =
