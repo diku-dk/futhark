@@ -121,9 +121,15 @@ addBinding pat e@(Size i (Var x) _) = do
                                Just se:_ -> [(pat, se)]
                                _        -> []
   alts <- concatMap mkAlt <$> asks (lookupShapeBindings x)
+  addSeveralBindings pat e alts
+addBinding pat e = addSingleBinding pat e
+
+addSingleBinding :: TupIdent -> Exp -> HoistM ()
+addSingleBinding pat e = addSeveralBindings pat e []
+
+addSeveralBindings :: TupIdent -> Exp -> [(TupIdent, Exp)] -> HoistM ()
+addSeveralBindings pat e alts =
   tell $ Need $ S.singleton $ LetBind pat e alts
-addBinding pat e =
-  tell $ Need $ S.singleton $ LetBind pat e []
 
 bindLet :: TupIdent -> Exp -> HoistM a -> HoistM a
 bindLet (Id dest) (Var src) m = do
@@ -388,7 +394,31 @@ hoistInExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody _) = do
                hoistInExp loopbody
   bindLoop mergepat mergeexp' loopvar boundexp' loopbody' $ hoistInExp letbody
   where boundnames = identName loopvar `S.insert` patNames mergepat
-hoistInExp e = mapExpM hoist e
+hoistInExp e@(Map2 (AnonymFun params _ _ _) arrexps _ _) =
+  hoistInSOAC e arrexps $ \ks ->
+    withShapes (zip (map (Id . fromParam) params) $ map (slice 1) ks) $
+    hoistInExpBase e
+hoistInExp e@(Reduce2 (AnonymFun params _ _ _) accexps arrexps _ _) =
+  hoistInSOAC e arrexps $ \ks ->
+    withShapes (zip (map (Id . fromParam) $ drop (length accexps) params)
+               $ map (slice 1) ks) $
+    hoistInExpBase e
+hoistInExp e@(Scan2 (AnonymFun params _ _ _) accexps arrexps _ _) =
+  hoistInSOAC e arrexps $ \ks ->
+    withShapes (zip (map (Id . fromParam) $ drop (length accexps) params)
+               $ map (slice 1) ks) $
+    hoistInExpBase e
+hoistInExp e@(Redomap2 (AnonymFun redparams _ _ _) (AnonymFun mapparams _ _ _)
+              accexps arrexps _ _) =
+  hoistInSOAC e arrexps $ \ks ->
+    withShapes (zip (map (Id . fromParam) mapparams) $ map (slice 1) ks) $
+    withShapes (zip (map (Id . fromParam) $ drop (length accexps) redparams)
+               $ map (slice 1) ks) $
+    hoistInExpBase e
+hoistInExp e = hoistInExpBase e
+
+hoistInExpBase :: Exp -> HoistM Exp
+hoistInExpBase = mapExpM hoist
   where hoist = identityMapper {
                   mapOnExp = hoistInExp
                 , mapOnLambda = hoistInLambda
@@ -402,3 +432,14 @@ hoistInLambda (AnonymFun params body rettype loc) = do
   body' <- blockIf (hasFree params' `orIf` isUniqueBinding) $ hoistInExp body
   return $ AnonymFun params body' rettype loc
   where params' = S.fromList $ map identName params
+
+arrVars :: [Exp] -> Maybe [Ident]
+arrVars = mapM arrVars'
+  where arrVars' (Var k) = Just k
+        arrVars' _       = Nothing
+
+hoistInSOAC :: Exp -> [Exp] -> ([Ident] -> HoistM Exp) -> HoistM Exp
+hoistInSOAC e arrexps m =
+  case arrVars arrexps of
+    Nothing -> hoistInExpBase e
+    Just ks -> m ks
