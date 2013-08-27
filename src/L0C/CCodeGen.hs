@@ -584,7 +584,7 @@ compileExp place (Size i e _) = do
   e' <- compileExp (varExp dest) e
   return [C.cstm|{$ty:et $id:dest;
                   $stm:e';
-                  $exp:place.$id:(tupleField i) = $id:dest.dims[$int:i];
+                  $exp:place = $id:dest.dims[$int:i];
                   }|]
 
 compileExp place e@(Iota (Var v) _) = do
