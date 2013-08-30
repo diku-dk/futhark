@@ -426,8 +426,8 @@ hoistInExpBase = mapExpM hoist
 
 hoistInLambda :: Lambda -> HoistM Lambda
 hoistInLambda (CurryFun fname args rettype loc) = do
-  args' <- mapM hoistInExp args
-  return $ CurryFun fname args' rettype loc
+  args' <- mapM (hoistInExp . fst) args
+  return $ CurryFun fname (zip args' $ map snd args) rettype loc
 hoistInLambda (AnonymFun params body rettype loc) = do
   body' <- blockIf (hasFree params' `orIf` isUniqueBinding) $ hoistInExp body
   return $ AnonymFun params body' rettype loc

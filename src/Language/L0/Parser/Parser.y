@@ -356,9 +356,11 @@ FunAbstr : id { let L pos (ID name) = $1 in CurryFun name [] NoInfo pos }
          | id '(' ')' { let L pos (ID name) = $1 in CurryFun name [] NoInfo pos }
          | Ops '(' ')' { let (name,pos) = $1 in CurryFun name [] NoInfo pos }
          | id '(' Exps ')'
-               { let L pos (ID name) = $1 in CurryFun name $3 NoInfo pos }
+           { let L pos (ID name) = $1 in
+             CurryFun name [ (arg, Observe) | arg <- $3 ] NoInfo pos }
          | Ops '(' Exps ')'
-               { let (name,pos) = $1 in CurryFun name $3 NoInfo pos }
+               { let (name,pos) = $1 in
+                 CurryFun name [ (arg, Observe) | arg <- $3 ] NoInfo pos }
          | fn Type '(' TypeIds ')' '=>' Exp { AnonymFun $4 $7 $2 $1 }
 
 Value : IntValue { $1 }
