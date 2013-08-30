@@ -198,10 +198,10 @@ renameLambda (AnonymFun params body ret pos) =
     body' <- renameExp body
     ret' <- renameType ret
     return (AnonymFun params' body' ret' pos)
-renameLambda (CurryFun fname curryargs rettype pos) = do
-  curryargexps <- mapM (renameExp . fst) curryargs
+renameLambda (CurryFun fname curryargexps rettype pos) = do
+  curryargexps' <- mapM renameExp curryargexps
   rettype' <- renameType rettype
-  return (CurryFun fname (zip curryargexps $ map snd curryargs) rettype' pos)
+  return (CurryFun fname curryargexps' rettype' pos)
 
 renamePattern :: (TypeBox ty, VarName f, VarName t) =>
                  TupIdentBase ty f -> RenameM f t (TupIdentBase ty t)

@@ -207,9 +207,9 @@ tupleNormLambda (AnonymFun params body ret pos) = do
     body' <- tupleNormAbstrFun params body pos
     return $ AnonymFun params body' ret pos
 
-tupleNormLambda (CurryFun fname curryargs rettype pos) = do
-    exps  <- mapM (tupleNormExp . fst) curryargs
-    return $ CurryFun fname (zip exps $ map snd curryargs) rettype pos
+tupleNormLambda (CurryFun fname exps rettype pos) = do
+    exps'  <- mapM tupleNormExp exps
+    return $ CurryFun fname exps' rettype pos 
 
 
 --tupleNormExp e = do

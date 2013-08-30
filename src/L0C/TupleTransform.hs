@@ -492,9 +492,9 @@ transformLambda (CurryFun fname curryargs rettype loc) m =
   transform curryargs []
   where transform [] curryargs' =
           m $ CurryFun fname curryargs' (transformType rettype) loc
-        transform ((a,d):as) curryargs' =
+        transform (a:as) curryargs' =
           tupToExpList a $ \es ->
-            transform as (curryargs' ++ zip es (untupleDiet d))
+            transform as (curryargs' ++ es)
 
 -- | Take a lambda returning @t@ and make it return @{t}@.  If the
 -- lambda already returns a tuple, return it unchanged.
@@ -536,7 +536,3 @@ untupleType t = [t]
 tuplit :: [Exp] -> SrcLoc -> Exp
 tuplit [e] _ = e
 tuplit es loc = TupLit es loc
-
-untupleDiet :: Diet -> [Diet]
-untupleDiet (TupleDiet ds) = concatMap untupleDiet ds
-untupleDiet d = [d]

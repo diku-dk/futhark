@@ -134,7 +134,7 @@ instance (Eq vn, Pretty vn) => Pretty (TupIdentBase ty vn) where
 instance (Eq vn, Pretty vn) => Pretty (LambdaBase ty vn) where
   ppr (CurryFun fname [] _ _) = text $ nameToString fname
   ppr (CurryFun fname curryargs _ _) =
-    text (nameToString fname) <+> apply (map (ppr . fst) curryargs)
+    text (nameToString fname) <+> apply (map ppr curryargs)
   ppr (AnonymFun params body rettype _) =
     text "fn" <+> ppr rettype <+>
     apply (map ppParam params) <+>

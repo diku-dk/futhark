@@ -678,7 +678,7 @@ checkExp (Apply fname args rettype loc) = do
       (args', argflows) <- unzip <$> mapM (checkArg . fst) args
 
       rettype' <- checkAnnotation loc "return" rettype $
-                  returnType ftype (map diet paramtypes) (map typeOf args')
+                  returnType ftype $ map typeOf args'
 
       checkFuncall (Just fname) loc paramtypes (toDecl rettype') argflows
 
@@ -1210,13 +1210,13 @@ checkLambda (CurryFun fname [] rettype pos) [arg]
             (Negate (Var var) (argType arg) pos) (toDecl rettype') pos
   checkLambda lam [arg]
 
-checkLambda (CurryFun opfun curryargs rettype pos) args
+checkLambda (CurryFun opfun curryargexps rettype pos) args
   | Just op <- lookup (nameToString opfun) ops =
-  checkPolyLambdaOp op (map fst curryargs) rettype args pos
+  checkPolyLambdaOp op curryargexps rettype args pos
   where ops = map (\op -> ("op " ++ opStr op, op)) [minBound..maxBound]
 
-checkLambda (CurryFun fname curries rettype pos) args = do
-  (curryargexps', curryargs) <- unzip <$> mapM (checkArg . fst) curries
+checkLambda (CurryFun fname curryargexps rettype pos) args = do
+  (curryargexps', curryargs) <- unzip <$> mapM checkArg curryargexps
   bnd <- asks $ M.lookup fname . envFtable
   case bnd of
     Nothing -> bad $ UnknownFunctionError fname pos
@@ -1238,7 +1238,7 @@ checkLambda (CurryFun fname curries rettype pos) args = do
                          rettype' pos
               checkLambda tupfun args
           | otherwise -> do
-              case find (unique . snd) $ zip curryargexps' paramtypes of
+              case find (unique . snd) $ zip curryargexps paramtypes of
                 Just (e, _) -> bad $ CurriedConsumption fname $ srclocOf e
                 _           -> return ()
               let mkparam i t = newIdent ("param_" ++ show i) t pos
