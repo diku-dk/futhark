@@ -77,11 +77,11 @@ mkUnnamedLamLam ftab (AnonymFun ids body  tp pos) =
 mkUnnamedLamLam ftab (CurryFun  nm params tp pos) = 
     case M.lookup nm ftab of
         Nothing                      -> 
-            CurryFun nm (map (first (mkUnnamedLamExp ftab)) params) tp pos
+            CurryFun nm (map (mkUnnamedLamExp ftab) params) tp pos
         Just (fnm,_,idds,_,_) -> 
             let idds' = drop (length params) idds  
-                args  = params ++ zip (map (Var . fromParam) idds') (repeat Observe)
-            in  AnonymFun idds' (Apply fnm args tp pos) (toDecl tp) pos
+                args  = params ++ map (Var . fromParam) idds'
+            in  AnonymFun idds' (Apply fnm (zip args $ repeat Observe) tp pos) (toDecl tp) pos
 
 ------------------------------------------------------------------------------
 ------------------------------------------------------------------------------

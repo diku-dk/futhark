@@ -321,5 +321,5 @@ transformLambda (AnonymFun params body _ loc) args = do
   return $ foldl bind body' $ zip (map fromParam params) args
   where bind e (Ident pname ptype _, arg) = LetPat (Id $ Ident pname ptype loc) arg e loc
 transformLambda (CurryFun fname curryargs rettype loc) args = do
-  curryargs' <- mapM (transformExp . fst) curryargs
+  curryargs' <- mapM transformExp curryargs
   return $ Apply fname [(arg, Observe) | arg <- curryargs'++args] rettype loc

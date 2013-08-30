@@ -438,10 +438,10 @@ letNormLambda (AnonymFun params body ret pos) = do
     let body'' = addPatterns pos newbnds body'
     return $ AnonymFun params body'' ret pos
 
-letNormLambda (CurryFun fname args rettype pos) = do
-    exps  <- mapM (subLetoNormExp "tmp_arg" . fst) args
-    return $ CurryFun fname (zip exps $ map snd args) rettype pos
-
+letNormLambda (CurryFun fname exps rettype pos) = do
+    exps'  <- mapM (subLetoNormExp "tmp_arg") exps
+    return $ CurryFun fname exps' rettype pos 
+ 
 ---------------------------
 ---------------------------
 ---- Helper Functions -----

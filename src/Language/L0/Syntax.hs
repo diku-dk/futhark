@@ -383,7 +383,7 @@ opStr Leq = "<="
 -- | Anonymous Function
 data LambdaBase ty vn = AnonymFun [ParamBase vn] (ExpBase ty vn) (DeclTypeBase vn) SrcLoc
                       -- ^ @fn int (bool x, char z) => if(x) then ord(z) else ord(z)+1 *)@
-                      | CurryFun Name [(ExpBase ty vn, Diet)] (ty vn) SrcLoc -- ^ @op +(4)@
+                      | CurryFun Name [ExpBase ty vn] (ty vn) SrcLoc -- ^ @op +(4)@
                         deriving (Eq, Ord, Show)
 
 instance Located (LambdaBase ty vn) where

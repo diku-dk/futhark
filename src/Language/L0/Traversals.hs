@@ -306,7 +306,7 @@ foldlPattern expf lamf = foldExp m
               \x lam -> return $ foldl expf (lamf x lam) $ getLambdaExps lam
             }
         getLambdaExps (AnonymFun _ body   _ _) = [body]
-        getLambdaExps (CurryFun  _ params _ _) = map fst params
+        getLambdaExps (CurryFun  _ params _ _) = params
 
 -- | Common case of 'mapExp', where only 'Exp's are taken into
 -- account.
@@ -317,10 +317,8 @@ buildExpPattern f = mapExp f'
              , mapOnLambda = return . buildLambda
              }
 
-        buildLambda (AnonymFun tps body  tp pos) =
-          AnonymFun tps (f body) tp pos
-        buildLambda (CurryFun  nm params tp pos) =
-          CurryFun  nm  (map (first f) params) tp pos
+        buildLambda (AnonymFun tps body  tp pos) = AnonymFun tps     (f body  ) tp pos
+        buildLambda (CurryFun  nm params tp pos) = CurryFun  nm  (map f params) tp pos
 
 -- | Return the set of all variable names bound in a program.
 progNames :: Ord vn => ProgBase ty vn -> S.Set vn
@@ -343,8 +341,8 @@ progNames = execWriter . mapM funNames . progFunctions
 
         lambdaNames (AnonymFun params body _ _) =
           mapM_ one params >> expNames body
-        lambdaNames (CurryFun _ args _ _) =
-          mapM_ (expNames . fst) args
+        lambdaNames (CurryFun _ exps _ _) =
+          mapM_ expNames exps
 
 -- | The set of names bound in the given pattern.
 patNames :: Ord vn => TupIdentBase ty vn -> S.Set vn
@@ -384,7 +382,7 @@ freeInExp = execWriter . flip runReaderT S.empty . expFree
 
         lambdaFree (AnonymFun params body _ _) =
           local (`S.union` S.fromList (map identName params)) $ expFree body
-        lambdaFree (CurryFun _ args _ _) = mapM_ (expFree . fst) args
+        lambdaFree (CurryFun _ exps _ _) = mapM_ expFree exps
 
 -- | As 'freeInExp', but returns the raw names rather than 'IdentBase's.
 freeNamesInExp :: Ord vn => ExpBase ty vn -> S.Set vn

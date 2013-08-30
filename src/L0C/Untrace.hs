@@ -7,8 +7,6 @@ module L0C.Untrace
   ( untraceProg )
   where
 
-import Control.Arrow
-
 import L0C.L0
 
 -- | Remove all special debugging function calls from the program.
@@ -32,4 +30,4 @@ untraceLambda :: LambdaBase ty vn -> LambdaBase ty vn
 untraceLambda (AnonymFun params body ret pos) =
   AnonymFun params (untraceExp body) ret pos
 untraceLambda (CurryFun fname curryargexps rettype pos) =
-  CurryFun fname (map (first untraceExp) curryargexps) rettype pos
+  CurryFun fname (map untraceExp curryargexps) rettype pos

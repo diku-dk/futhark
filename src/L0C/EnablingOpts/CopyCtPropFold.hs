@@ -406,8 +406,8 @@ copyCtPropLambda (AnonymFun ids body tp pos) = do
     body' <- copyCtPropExp body
     return $ AnonymFun ids body' tp pos
 copyCtPropLambda (CurryFun fname params tp pos) = do
-    params' <- copyCtPropExpList $ map fst params
-    return $ CurryFun fname (zip params' $ map snd params) tp pos
+    params' <- copyCtPropExpList params
+    return $ CurryFun fname params' tp pos
 
     
 
