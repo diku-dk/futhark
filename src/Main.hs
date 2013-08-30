@@ -20,6 +20,7 @@ import L0C.EnablingOpts.EnablingOptDriver
 import L0C.HOTrans.HOTransDriver
 import qualified L0C.FirstOrderTransform as FOT
 import qualified L0C.TupleTransform as TT
+import qualified L0C.FullNormalization as FN
 import qualified L0C.EnablingOpts.Hoisting as LHO
 import L0C.Untrace
 import L0C.CCodeGen
@@ -81,7 +82,8 @@ commandLineOptions =
     "Run the program via an interpreter."
   , rename "r" ["rename"]
   , hoist "o" ["hoist"]
-  , uttransform "u" ["untrace"] 
+  , normalize "n" ["normalize"]
+  , uttransform "u" ["untrace"]
   , fotransform "f" ["first-order-transform"]
   , tatransform "t" ["tuple-of-arrays-transform"]
   , eotransform "e" ["enabling-optimisations"]
@@ -126,6 +128,13 @@ hoist =
   passoption "Let-hoisting"
   Pass { passName = "let-hoister"
        , passOp = return . LHO.transformProg
+       }
+
+normalize :: String -> [String] -> L0Option
+normalize =
+  passoption "Full normalization"
+  Pass { passName = "full normalizer"
+       , passOp = return . FN.normalizeProg
        }
 
 fotransform :: String -> [String] -> L0Option
