@@ -174,6 +174,15 @@ t `dietingAs` Consume =
 t `dietingAs` _ =
   t `setUniqueness` Nonunique
 
+-- | @t `maskAliases` d@ removes aliases (sets them to 'mempty') from
+-- the parts of @t@ that are denoted as 'Consumed' by the 'Diet' @d@.
+maskAliases :: Monoid (as vn) => TypeBase as vn -> Diet -> TypeBase as vn
+maskAliases t Consume = t `setAliases` mempty
+maskAliases t Observe = t
+maskAliases (Elem (Tuple ets)) (TupleDiet ds) =
+  Elem $ Tuple $ zipWith maskAliases ets ds
+maskAliases _ _ = error "Invalid arguments passed to maskAliases."
+
 -- | Remove aliasing information from a type.
 toDecl :: TypeBase as vn -> DeclTypeBase vn
 toDecl (Array et sz u _) = Array (toElemDecl et) sz u NoInfo
@@ -567,22 +576,28 @@ expToValue _ = Nothing
 -- given lambda function.
 lambdaType :: Ord vn =>
               LambdaBase CompTypeBase vn -> [CompTypeBase vn] -> CompTypeBase vn
-lambdaType = returnType . lambdaReturnType
+lambdaType lam = returnType (lambdaReturnType lam) (lambdaParamDiets lam)
 
 -- | The result of applying the arguments of the given types to a
--- function with the given return type.
-returnType :: Ord vn => DeclTypeBase vn -> [CompTypeBase vn] -> CompTypeBase vn
-returnType (Array et sz Nonunique NoInfo) args = Array et sz Nonunique als
-  where als = mconcat $ map aliases args
-returnType (Array et sz Unique NoInfo) _ = Array et sz Unique mempty
-returnType (Elem (Tuple ets)) args =
-  Elem $ Tuple $ map (`returnType` args) ets
-returnType (Elem t) _ = Elem t `setAliases` S.empty
+-- function with the given return type, consuming its parameters with
+-- the given diets .
+returnType :: Ord vn => DeclTypeBase vn -> [Diet] -> [CompTypeBase vn] -> CompTypeBase vn
+returnType (Array et sz Nonunique NoInfo) ds args = Array et sz Nonunique als
+  where als = mconcat $ map aliases $ zipWith maskAliases args ds
+returnType (Array et sz Unique NoInfo) _ _ = Array et sz Unique mempty
+returnType (Elem (Tuple ets)) ds args =
+  Elem $ Tuple $ map (\et -> returnType et ds args) ets
+returnType (Elem t) _ _ = Elem t `setAliases` S.empty
 
 -- | The specified return type of a lambda.
 lambdaReturnType :: LambdaBase CompTypeBase vn -> DeclTypeBase vn
 lambdaReturnType (AnonymFun _ _ t _) = t
 lambdaReturnType (CurryFun _ _ t _)  = toDecl t
+
+-- | The parameter 'Diet's of a lambda.
+lambdaParamDiets :: LambdaBase ty vn -> [Diet]
+lambdaParamDiets (AnonymFun params _ _ _) = map (diet . identType) params
+lambdaParamDiets (CurryFun _ args _ _) = map snd args
 
 -- | Find the function of the given name in the L0 program.
 funDecByName :: Name -> ProgBase ty vn -> Maybe (FunDecBase ty vn)

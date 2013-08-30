@@ -555,6 +555,6 @@ applyLambda :: Lambda -> [Value] -> L0M Value
 applyLambda (AnonymFun params body _ _) args =
   binding (zip (map fromParam params) args) $ evalExp body
 applyLambda (CurryFun name curryargs _ _) args = do
-  curryargs' <- mapM evalExp curryargs
+  curryargs' <- mapM (evalExp . fst) curryargs
   fun <- lookupFun name
   fun $ curryargs' ++ args

@@ -196,9 +196,9 @@ deadCodeElimLambda (AnonymFun params body ret pos) = do
     body' <- binding ids $ deadCodeElimExp body
     return $ AnonymFun params body' ret pos
 
-deadCodeElimLambda (CurryFun fname curryargexps rettype pos) = do
-    curryargexps' <- mapM deadCodeElimExp curryargexps
-    return (CurryFun fname curryargexps' rettype pos)
+deadCodeElimLambda (CurryFun fname curryargs rettype pos) = do
+    curryargexps <- mapM (deadCodeElimExp . fst) curryargs
+    return (CurryFun fname (zip curryargexps $ map snd curryargs) rettype pos)
 
 --deadCodeElimExp e = do
 --    return e

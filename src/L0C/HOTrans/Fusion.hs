@@ -727,7 +727,7 @@ fusionGatherLam (u_set,fres) (AnonymFun idds body _ pos) = do
     -- merge new_res with fres'
     return (u_set `S.union` unfus, unionFusionRes new_res' fres)
 fusionGatherLam (u_set1, fres) (CurryFun _ args _ pos) = do
-    (u_set2, fres') <- getUnfusableSet pos fres args
+    (u_set2, fres') <- getUnfusableSet pos fres $ map fst args
     return (u_set1 `S.union` u_set2, fres')
 
 
@@ -855,9 +855,9 @@ fuseInLambda (AnonymFun params body rtp pos) = do
     body' <- fuseInExp body
     return $ AnonymFun params body' rtp pos
 
-fuseInLambda (CurryFun fname exps rtp pos) = do
-    exps'  <- mapM fuseInExp exps
-    return $ CurryFun fname exps' rtp pos
+fuseInLambda (CurryFun fname args rtp pos) = do
+    exps  <- mapM (fuseInExp . fst) args
+    return $ CurryFun fname (zip exps $ map snd args) rtp pos
 
 --fuseInExp e = do return e
 
@@ -1288,7 +1288,7 @@ buildCall tps (CurryFun fnm aargs rtp pos) = do
                 ) tps
     -- let tup = TupLit (map (\x -> Var x) ids) pos
     let new_vars = map Var ids
-    return (ids, Apply fnm (zip (aargs++new_vars) $ repeat Observe) rtp pos)
+    return (ids, Apply fnm (aargs ++ zip new_vars (repeat Observe)) rtp pos)
 
 
 getUnmdParsAndBody :: [Exp] -> Lambda -> FusionGM ([Ident], Exp)
@@ -1300,7 +1300,7 @@ getUnmdParsAndBody inpp lamm =
             let new_ids = map (\(nm,tp) -> Ident nm tp pos)
                               ( zip pnms (map (stripArray 1 . typeOf) inpp) )
             let es = map Var new_ids
-            let call2  = Apply fnm (zip (aargs++es) $ repeat Observe) rtp pos
+            let call2  = Apply fnm (aargs ++ zip es (repeat Observe)) rtp pos
             return (new_ids, call2)
 
 isCompatibleKer :: ([VName], Exp) -> FusedKer -> FusionGM Bool
