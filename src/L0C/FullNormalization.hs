@@ -112,8 +112,8 @@ normalizeSubExp = mapExpM normalize
 
 normalizeLambda :: Lambda -> NormalizeM Lambda
 normalizeLambda (CurryFun fname args rettype loc) = do
-  args' <- mapM (normalizeExp . fst) args
-  return $ CurryFun fname (zip args' $ map snd args) rettype loc
+  args' <- mapM normalizeExp args
+  return $ CurryFun fname args' rettype loc
 normalizeLambda (AnonymFun params body rettype loc) = do
   body' <- insertBindings $ normalizeExp body
   return $ AnonymFun params body' rettype loc
