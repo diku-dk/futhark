@@ -659,7 +659,7 @@ fusionGatherExp fres (DoLoop merge_pat ini_val _ ub loop_body let_body _) = do
 
 -- bnds <- asks $ arrsInScope
 
-fusionGatherExp fres (If cond e_then e_else _) = do
+fusionGatherExp fres (If cond e_then e_else _ _) = do
     let null_res = mkFreshFusionRes
     then_res <- fusionGatherExp null_res e_then
     else_res <- fusionGatherExp null_res e_else
@@ -1087,7 +1087,7 @@ fuseRedFilt inp1 lam1 _ inp2 lam2 = do
     let then_var = TupLit (map Var par1 ) pos1
     let then_exp = LetPat then_pat then_var  bdy2 pos2
     let else_exp = TupLit (map Var ids21) pos2
-    let res_body = If call1 then_exp else_exp pos1
+    let res_body = If call1 then_exp else_exp (typeOf then_exp) pos1
     return (AnonymFun (map toParam $ ids21++par1) res_body rtp2 pos2, inp1)
 
 
@@ -1114,7 +1114,7 @@ fuseMapFilt inp1 lam1 ne inp2 lam2 = do
     let then_pat = TupId (map Id ids2) pos2
     let then_var = TupLit (map Var par1) pos1
     let then_exp = LetPat then_pat then_var bdy2 pos2
-    let res_body = If call1 then_exp ne pos1
+    let res_body = If call1 then_exp ne (typeOf ne) pos1
     return (AnonymFun (map toParam par1) res_body rtp2 pos2, inp1)
 
 {-

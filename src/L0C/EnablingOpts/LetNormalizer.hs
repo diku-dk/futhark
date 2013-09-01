@@ -263,7 +263,7 @@ letNormExp (Or e1 e2 pos) = do
 ---- If construct      ----
 ---------------------------
 
-letNormExp (If e1 e2 e3 pos) = do
+letNormExp (If e1 e2 e3 t pos) = do
     -- transfer the bindings to the outer let
     e1' <- subLetoNormExp "tmp_if" e1
     -- collect bindings for the each branches
@@ -273,7 +273,7 @@ letNormExp (If e1 e2 e3 pos) = do
     let e2'' = addPatterns pos bnds2 e2'
     let e3'' = addPatterns pos bnds3 e3'
     -- finally, build the normalized if
-    return $ If e1' e2'' e3'' pos
+    return $ If e1' e2'' e3'' t pos
 
 ---------------------------
 ---- Function Call     ----
@@ -460,7 +460,7 @@ subLetoNormExp str ee = letNormExp ee >>= subsLetExp str
             case e of
                 (LetPat      _ _ _ pos) -> makeVarExpSubst s pos e
                 (LetWith _ _ _ _ _ pos) -> makeVarExpSubst s pos e
-                (If          _ _ _ pos) -> makeVarExpSubst s pos e
+                (If        _ _ _ _ pos) -> makeVarExpSubst s pos e
                 _                       -> return e
 
 makeVarExpSubst :: String -> SrcLoc -> Exp -> LetNormM Exp

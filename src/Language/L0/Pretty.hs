@@ -73,9 +73,9 @@ instance (Eq vn, Pretty vn) => Pretty (ExpBase ty vn) where
   pprPrec p (Or x y _) = ppBinOp p LogOr x y
   pprPrec _ (Not e _) = text "not" <+> pprPrec 9 e
   pprPrec _ (Negate e _ _) = text "~" <> pprPrec 9 e
-  pprPrec _ (If c t f _) = text "if" <+> ppr c </>
-                           text "then" <+> align (ppr t) </>
-                           text "else" <+> align (ppr f)
+  pprPrec _ (If c t f _ _) = text "if" <+> ppr c </>
+                             text "then" <+> align (ppr t) </>
+                             text "else" <+> align (ppr f)
   pprPrec _ (Apply fname args _ _) = text (nameToString fname) <>
                                      apply (map (align . ppr . fst) args)
   pprPrec _ (LetPat pat e body _) = text "let" <+/> align (ppr pat) <+>

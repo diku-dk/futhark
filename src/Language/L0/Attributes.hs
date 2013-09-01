@@ -174,6 +174,15 @@ t `dietingAs` Consume =
 t `dietingAs` _ =
   t `setUniqueness` Nonunique
 
+-- | @t `maskAliases` d@ removes aliases (sets them to 'mempty') from
+-- the parts of @t@ that are denoted as 'Consumed' by the 'Diet' @d@.
+maskAliases :: Monoid (as vn) => TypeBase as vn -> Diet -> TypeBase as vn
+maskAliases t Consume = t `setAliases` mempty
+maskAliases t Observe = t
+maskAliases (Elem (Tuple ets)) (TupleDiet ds) =
+  Elem $ Tuple $ zipWith maskAliases ets ds
+maskAliases _ _ = error "Invalid arguments passed to maskAliases."
+
 -- | Remove aliasing information from a type.
 toDecl :: TypeBase as vn -> DeclTypeBase vn
 toDecl (Array et sz u _) = Array (toElemDecl et) sz u NoInfo
@@ -489,7 +498,7 @@ typeOf (And {}) = Elem Bool
 typeOf (Or {}) = Elem Bool
 typeOf (Not _ _) = Elem Bool
 typeOf (Negate _ t _) = t
-typeOf (If _ e1 e2 _) = typeOf e1 `unifyUniqueness` typeOf e2
+typeOf (If _ _ _ t _) = t
 typeOf (Var ident) =
   case identType ident of
     Elem (Tuple ets) -> Elem $ Tuple ets
@@ -567,39 +576,47 @@ expToValue _ = Nothing
 -- given lambda function.
 lambdaType :: Ord vn =>
               LambdaBase CompTypeBase vn -> [CompTypeBase vn] -> CompTypeBase vn
-lambdaType = returnType . lambdaReturnType
+lambdaType lam = returnType (lambdaReturnType lam) (lambdaParamDiets lam)
 
--- | The result of applying the arguments of the given types to a
--- function with the given return type.
-returnType :: Ord vn => DeclTypeBase vn -> [CompTypeBase vn] -> CompTypeBase vn
-returnType (Array et sz Nonunique NoInfo) args = Array et sz Nonunique als
-  where als = mconcat $ map aliases args
-returnType (Array et sz Unique NoInfo) _ = Array et sz Unique mempty
-returnType (Elem (Tuple ets)) args =
-  Elem $ Tuple $ map (`returnType` args) ets
-returnType (Elem t) _ = Elem t `setAliases` S.empty
+
+ -- | The result of applying the arguments of the given types to a
+-- function with the given return type, consuming its parameters with
+-- the given diets .
+returnType :: Ord vn => DeclTypeBase vn -> [Diet] -> [CompTypeBase vn] -> CompTypeBase vn
+returnType (Array et sz Nonunique NoInfo) ds args = Array et sz Nonunique als
+  where als = mconcat $ map aliases $ zipWith maskAliases args ds
+returnType (Array et sz Unique NoInfo) _ _ = Array et sz Unique mempty
+returnType (Elem (Tuple ets)) ds args =
+  Elem $ Tuple $ map (\et -> returnType et ds args) ets
+returnType (Elem t) _ _ = Elem t `setAliases` S.empty
 
 -- | The specified return type of a lambda.
 lambdaReturnType :: LambdaBase CompTypeBase vn -> DeclTypeBase vn
 lambdaReturnType (AnonymFun _ _ t _) = t
 lambdaReturnType (CurryFun _ _ t _)  = toDecl t
 
+-- | The parameter 'Diet's of a lambda.
+lambdaParamDiets :: LambdaBase ty vn -> [Diet]
+lambdaParamDiets (AnonymFun params _ _ _) = map (diet . identType) params
+lambdaParamDiets (CurryFun _ args _ _) = map (const Observe) args
+
 -- | Find the function of the given name in the L0 program.
 funDecByName :: Name -> ProgBase ty vn -> Maybe (FunDecBase ty vn)
 funDecByName fname = find (\(fname',_,_,_,_) -> fname == fname') . progFunctions
 
 -- | Change those subexpressions where evaluation of the expression
--- would stop.
-mapTails :: (ExpBase ty vn -> ExpBase ty vn) -> ExpBase ty vn -> ExpBase ty vn
-mapTails f (LetPat pat e body loc) =
-  LetPat pat e (mapTails f body) loc
-mapTails f (LetWith dest src idxs ve body loc) =
-  LetWith dest src idxs ve (mapTails f body) loc
-mapTails f (DoLoop pat me i bound loopbody body loc) =
-  DoLoop pat me i bound loopbody (mapTails f body) loc
-mapTails f (If c te fe loc) =
-  If c (mapTails f te) (mapTails f fe) loc
-mapTails f e = f e
+-- would stop.  Also change type annotations at branches.
+mapTails :: (ExpBase ty vn -> ExpBase ty vn) -> (ty vn -> ty vn)
+         -> ExpBase ty vn -> ExpBase ty vn
+mapTails f g (LetPat pat e body loc) =
+  LetPat pat e (mapTails f g body) loc
+mapTails f g (LetWith dest src idxs ve body loc) =
+  LetWith dest src idxs ve (mapTails f g body) loc
+mapTails f g (DoLoop pat me i bound loopbody body loc) =
+  DoLoop pat me i bound loopbody (mapTails f g body) loc
+mapTails f g (If c te fe t loc) =
+  If c (mapTails f g te) (mapTails f g fe) (g t) loc
+mapTails f _ e = f e
 
 -- | Convert an identifier to a 'ParamBase'.
 toParam :: IdentBase (TypeBase as) vn -> ParamBase vn

@@ -96,11 +96,11 @@ normalizeExp (LetWith dest src idxes ve body loc) = do
   ve'    <- normalizeExp ve
   body'  <- insertBindings $ normalizeExp body
   return $ LetWith dest src idxes' ve' body' loc
-normalizeExp (If c t f loc) = do
-  c' <- normalizeExp c
-  t' <- insertBindings $ normalizeExp t
-  f' <- insertBindings $ normalizeExp f
-  return $ If c' t' f' loc
+normalizeExp (If c te fe t loc) = do
+  c'  <- normalizeExp c
+  te' <- insertBindings $ normalizeExp te
+  fe' <- insertBindings $ normalizeExp fe
+  return $ If c' te' fe' t loc
 normalizeExp e = Var <$> (replaceExp (nameHint e) =<< normalizeSubExp e)
 
 normalizeSubExp :: Exp -> NormalizeM Exp

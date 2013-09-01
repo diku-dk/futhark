@@ -227,7 +227,7 @@ Exp  :: { UncheckedExp }
      | Exp '<=' Exp   { BinOp Leq  $1 $3 NoInfo $2 }
 
      | if Exp then Exp else Exp %prec ifprec
-                      { If $2 $4 $6 $1 }
+                      { If $2 $4 $6 NoInfo $1 }
 
      | id '(' Exps ')'
                       { let L pos (ID name) = $1

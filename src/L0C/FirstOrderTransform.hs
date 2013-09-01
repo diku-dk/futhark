@@ -55,7 +55,7 @@ transformExp mape@(Map fun e intype loc) =
       newLet "outarr" (Replicate nv funcall0 loc) $ \outarr outarrv -> do
         let branch = If (BinOp Less zero nv (Elem Bool) loc) letbody
                      (maybeCopy $ Literal (blankValue $ typeOf mape) loc)
-                     loc
+                     (typeOf letbody) loc
             letbody = DoLoop (Id outarr) outarrv i nv loopbody outarrv loc
             loopbody = LetWith outarr outarr [iv] funcall outarrv loc
         return branch
@@ -82,11 +82,11 @@ transformExp (Filter fun arrexp rowtype loc) =
     newLet "n" (Size 0 arrv loc) $ \_ nv -> do
       let checkempty nonempty = If (BinOp Equal nv (intval 0) (Elem Bool) loc)
                                 (Literal (emptyArray rowtype) loc) nonempty
-                                loc
+                                (typeOf nonempty) loc
       (x, xv) <- newVar loc "x" rowtype
       (i, iv) <- newVar loc "i" (Elem Int)
       fun' <- transformLambda fun [xv]
-      let branch = If fun' (intval 1) (intval 0) loc
+      let branch = If fun' (intval 1) (intval 0) (Elem Int) loc
           indexin0 = Index arr [intval 0] rowtype loc
           indexin = Index arr [iv] rowtype loc
       mape <- transformExp $
@@ -108,7 +108,7 @@ transformExp (Filter fun arrexp rowtype loc) =
                                 (And (BinOp Less (intval 0) iv (Elem Bool) loc)
                                      (BinOp Equal indexi indexim1 (Elem Bool) loc) loc)
                              loc)
-                         resv update loc
+                         resv update (typeOf resv) loc
               update = LetWith res res [BinOp Minus indexi (intval 1) (Elem Int) loc]
                        indexin resv loc
           return $ checkempty loop
@@ -135,7 +135,7 @@ transformExp mape@(Map2 fun arrs _ loc) = do
         let branch = If (BinOp Less zero nv (Elem Bool) loc)
                      letbody
                      (maybeCopy $ Literal (blankValue $ typeOf mape) loc)
-                     loc
+                     (typeOf letbody) loc
             letbody = DoLoop (TupId (map Id outarr) loc) outarrv i nv loopbody
                       outarrv loc
         return branch
@@ -162,12 +162,12 @@ transformExp filtere@(Filter2 fun arrexps loc) =
       let checkempty nonempty =
             If (BinOp Equal nv (intval 0) (Elem Bool) loc)
             (Literal (blankValue $ typeOf filtere) loc) nonempty
-            loc
+            (typeOf nonempty) loc
           rowtypes = map (rowType . identType) arr
       (xs, _) <- unzip <$> mapM (newVar loc "x") rowtypes
       (i, iv) <- newVar loc "i" $ Elem Int
       fun' <- transformLambda fun $ map Var xs
-      let branch = If fun' (intval 1) (intval 0) loc
+      let branch = If fun' (intval 1) (intval 0) (Elem Int) loc
           indexin0 = index arr $ intval 0
           indexin = index arr iv
       mape <- transformExp $
@@ -191,7 +191,7 @@ transformExp filtere@(Filter2 fun arrexps loc) =
                                 (And (BinOp Less (intval 0) iv (Elem Bool) loc)
                                      (BinOp Equal indexi indexim1 (Elem Bool) loc) loc)
                              loc)
-                         resv update loc
+                         resv update (typeOf resv) loc
           return $ checkempty loop
   where intval x = Literal (IntVal x) loc
         sub1 e = BinOp Minus e (intval 1) (Elem Int) loc
