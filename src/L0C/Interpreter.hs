@@ -290,7 +290,7 @@ evalExp (Negate e _ pos) = do
             RealVal x -> return $ RealVal (-x)
             _         -> bad $ TypeError pos "evalExp Negate"
 
-evalExp (If e1 e2 e3 pos) = do
+evalExp (If e1 e2 e3 _ pos) = do
   v <- evalExp e1
   case v of LogVal True  -> evalExp e2
             LogVal False -> evalExp e3

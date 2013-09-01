@@ -504,7 +504,7 @@ tuplifyLam (AnonymFun params body rettype loc) =
   AnonymFun params body' (tuplifyType rettype) loc
   where body' = case rettype of
                   Elem (Tuple _) -> body
-                  _              -> mapTails tuplifyLam' body
+                  _              -> mapTails tuplifyLam' tuplifyType body
         tuplifyLam' e = TupLit [e] loc
 
 tuplifyType :: TypeBase als vn -> TypeBase als vn

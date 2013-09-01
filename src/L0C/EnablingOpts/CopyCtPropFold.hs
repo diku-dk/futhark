@@ -314,13 +314,13 @@ copyCtPropExp (Not e pos) = do
             _ -> badCPropM $ TypeError pos  " not operands not of (the same) numeral type! "    
     else return $ Not e' pos
 
-copyCtPropExp (If e1 e2 e3 pos) = do
+copyCtPropExp (If e1 e2 e3 t pos) = do
     e1' <- copyCtPropExp e1
     e2' <- copyCtPropExp e2
     e3' <- copyCtPropExp e3
     if      isCt1 e1' then changed e2'
     else if isCt0 e1' then changed e3'
-    else return $ If e1' e2' e3' pos
+    else return $ If e1' e2' e3' t pos
 
 -----------------------------------------------------------
 --- If expression is an array literal than replace it   ---

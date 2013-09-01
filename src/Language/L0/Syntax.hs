@@ -196,7 +196,7 @@ data ExpBase ty vn =
             -- Unary Ops: Not for bools and Negate for ints
             | Not    (ExpBase ty vn) SrcLoc -- e.g., not True = False
             | Negate (ExpBase ty vn) (ty vn) SrcLoc -- e.g., ~(~1) = 1
-            | If     (ExpBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
+            | If     (ExpBase ty vn) (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
             | Var    (IdentBase ty vn)
             -- Function Call and Let Construct
             | Apply  Name [(ExpBase ty vn, Diet)] (ty vn) SrcLoc
@@ -309,7 +309,7 @@ instance Located (ExpBase ty vn) where
   locOf (Or _ _ pos) = locOf pos
   locOf (Not _ pos) = locOf pos
   locOf (Negate _ _ pos) = locOf pos
-  locOf (If _ _ _ pos) = locOf pos
+  locOf (If _ _ _ _ pos) = locOf pos
   locOf (Var ident) = locOf ident
   locOf (Apply _ _ _ pos) = locOf pos
   locOf (LetPat _ _ _ pos) = locOf pos

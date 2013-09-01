@@ -644,10 +644,14 @@ checkExp (Negate e t pos) = do
   t' <- checkAnnotation pos "result" t $ typeOf e'
   return $ Negate e' t' pos
 
-checkExp (If e1 e2 e3 pos) = do
+checkExp (If e1 e2 e3 t pos) = do
   e1' <- require [Elem Bool] =<< checkExp e1
-  (e2', e3') <- checkExp e2 `alternative` checkExp e3
-  return $ If e1' e2' e3' pos
+  ((e2', e3'), dflow) <- collectDataflow $ checkExp e2 `alternative` checkExp e3
+  tell dflow
+  t' <- checkAnnotation pos "branch result" t $
+        addAliases (typeOf e2' `unifyUniqueness` typeOf e3')
+        (S.\\ allConsumed (usageOccurences dflow))
+  return $ If e1' e2' e3' t' pos
 
 checkExp (Var ident) = do
   ident' <- checkIdent ident
@@ -678,7 +682,7 @@ checkExp (Apply fname args rettype loc) = do
       (args', argflows) <- unzip <$> mapM (checkArg . fst) args
 
       rettype' <- checkAnnotation loc "return" rettype $
-                  returnType ftype $ map typeOf args'
+                  returnType ftype (map diet paramtypes) (map typeOf args')
 
       checkFuncall (Just fname) loc paramtypes (toDecl rettype') argflows
 
@@ -906,7 +910,7 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
                       (Var bound, Observe),
                       (e, diet $ typeOf e)])
                     (fromDecl rettype) (srclocOf e)
-      funbody' = LetPat mergepat' (Var merge) (mapTails recurse loopbody')
+      funbody' = LetPat mergepat' (Var merge) (mapTails recurse id loopbody')
                  (srclocOf loopbody')
 
   (funcall, callflow) <- collectDataflow $ local bindfun $ do

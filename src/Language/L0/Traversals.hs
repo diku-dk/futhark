@@ -121,9 +121,9 @@ mapExpM tv (Not x loc) =
   pure Not <*> mapOnExp tv x <*> pure loc
 mapExpM tv (Negate x t loc) =
   pure Negate <*> mapOnExp tv x <*> mapOnType tv t <*> pure loc
-mapExpM tv (If c texp fexp loc) =
+mapExpM tv (If c texp fexp t loc) =
   pure If <*> mapOnExp tv c <*> mapOnExp tv texp <*> mapOnExp tv fexp <*>
-              pure loc
+       mapOnType tv t <*> pure loc
 mapExpM tv (Apply fname args t loc) = do
   args' <- forM args $ \(arg, d) ->
              (,) <$> mapOnExp tv arg <*> pure d
