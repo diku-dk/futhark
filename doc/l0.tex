@@ -53,7 +53,7 @@ The syntax of L0 is heavily inspired by Haskell and Standard ML.  An
 identifier stats with a letter, followed by any number of letters,
 digits and underscores.  Numeric constants use the same notation as
 Haskell, except that we use tilde (\tilde{}) for unary minus.  String
-and character literals literals use Haskell syntax (which is very
+and character literals use Haskell syntax (which is very
 similar to C), including all escape characters.  Comments are
 indicated with \texttt{//} and span to end of line.
 
@@ -78,22 +78,24 @@ the factorial function in L0.
 Indentation has no syntactical significance in L0, but recommended for
 readability.
 
-The syntax for tuple types is identical to that of Haskell, so
-\texttt{(int, real)} is a pair of an integer and a floating-point
-number.  Single-element tuples are not valid.  Arrays are written as
-the element type surrounded by brackets, meaning that \texttt{[int]}
-is a one-dimensional array of integers, and \texttt{[[[(int, real)]]]}
-is a three-dimensional array of tuples of integers and floats.  An
-array is written as a sequence of elements enclosed by braces.
+The syntax for tuple types is a comma-separated list of types or
+values enclosed in braces, so \texttt{\{int, real\}} is a pair of an
+integer and a floating-point number.  Both single-element and empty
+tuples are permitted.  Array types are written as the element type
+surrounded by brackets, meaning that \texttt{[int]} is a
+one-dimensional array of integers, and \texttt{[[[{int, real}]]]} is a
+three-dimensional array of tuples of integers and floats.  An
+immediate array is written as a sequence of elements enclosed by
+brackets.
 \begin{alltt}
-  \{1, 2, 3\}       // Array of type [int].
-  \{\{1\}, \{2\}, \{3\}\} // Array of type [[int]].
+  [1, 2, 3]       // Array of type [int].
+  [[1], [2], [3]] // Array of type [[int]].
 \end{alltt}
 All arrays must be \emph{regular} (often termed \emph{full}) - for
 example, all rows of a two-dimensional array must have the same number
 of elements.
 \begin{alltt}
-  \{\{1, 2\}, \{3\}\} // This is an error.
+  [[1, 2], [3]] // This is an error.
 \end{alltt}
 Arrays are indexed using the common row-major notation, 
 e.g., \texttt{a[i1, i2, i3...]}.  An indexing is said to be \textit{full} if
@@ -113,12 +115,12 @@ tuples, but this can only be done in \texttt{let}-bindings, and not
 directly in a function argument list.  Specifically, the following
 function definition is not valid.
 \begin{alltt}
-  fun int sumpair((int, int) (x, y)) = x + y // WRONG!
+  fun int sumpair({int, int} {x, y}) = x + y // WRONG!
 \end{alltt}
 Instead, we must use a let-binding explicitly, as follows.
 \begin{alltt}
-  fun int sumpair((int, int) t) =
-    let (x,y) = t in x + y
+  fun int sumpair({int, int} t) =
+    let {x,y} = t in x + y
 \end{alltt}
 Pattern-matching in a binding is the only way to access the components
 of a tuple.
@@ -154,7 +156,7 @@ the array \texttt{a}, we would write \texttt{map(op \tilde{}, a)}.
 This can also be combined with currying: \texttt{map(op + (2), a)}.
 
 Except for the arithmetic operators, which accept both \realt{}s
-and \intt{}s, every construct is L0 is fully monomorphic.  Every
+and \intt{}s, every construct in L0 is fully monomorphic.  Every
 user-defined function must be first-order; higher-order arguments can
 only be used in direct calls of SOACs.
 
@@ -170,8 +172,8 @@ function for computing the Fibonacci numbers.
 We can rewrite this using the \texttt{loop} construct.
 \begin{alltt}
   fun int fib(int n) =
-    loop ((x, y) = (1,1)) = for i < n do
-                              (y, x+y)
+    loop (\{x, y\} = \{1,1\}) = for i < n do
+                              {y, x+y}
     in x
 \end{alltt}
 The semantics of this is precisely as in the tail-recursive function
@@ -184,8 +186,10 @@ has the following semantics:
 
 \begin{enumerate}
   \item Bind \textit{pat} to the initial values given in \textit{initial}.
-  \item While $\textit{i} < \textit{bound}$, evaluate \textit{loopbody},
-    rebinding \textit{pat} to be the value returned by the body.
+  \item While $\textit{i} < \textit{bound}$, evaluate
+    \textit{loopbody}, rebinding \textit{pat} to be the value returned
+    by the body.  At the end of each iteration, increment \textit{i}
+    by one.
   \item Evaluate \textit{body} with \textit{pat} bound to its final
     value.
 \end{enumerate}
@@ -200,7 +204,7 @@ function below:
     fun TYPEOF(\emph{loopbody}) tailrec (int \emph{bound}, int {\em i}, 
                                   TYPEOF(\emph{loopbody}) \emph{pat}, 
                                   TYPEOF(\emph{loopinv_vars}) \emph{ro\_vars}) =
-        if (\emph{i} < \emph{bound}) 
+        if (\emph{i} >= \emph{bound}) 
         then \emph{pat}
         else tailrec(\emph{bound}, {\em i}+1, \emph{loopbody}, \emph{ro\_vars})
 \end{alltt}
@@ -221,7 +225,7 @@ in that case, \textit{value} must be an array of the proper size.  As
 an example, here's how we could replace an entire row of an
 $n\times3$ array.
 \begin{alltt}
-  let b = a with [3] <- \{1,2,3\} in b
+  let b = a with [3] <- [1,2,3] in b
 \end{alltt}
 Whenever $\textit{dest} = \textit{src}$, we can write
 \begin{alltt}
@@ -281,13 +285,13 @@ the language.
     Evaluate the binary operator on its operands, which must both be
     of type \intt.  The following operators are supported:
     \texttt{\^}, \texttt{\&}, \texttt{|}, \texttt{>>}, \texttt{<<},
-        i.e., bitwise xor, and, or, and shift right and left.  
+    i.e., bitwise xor, and, or, and arithmetic shift right and left.
 
   \item[\texttt{\textit{x} \&\& \textit{y}}]\hfill\\
     Short-circuiting conjunction, both operands must be of type \boolt.
 
   \item[\texttt{\textit{x} || \textit{y}}]\hfill\\
-    Short-circuiting disjunction, both operands mus tbe of type \boolt.
+    Short-circuiting disjunction, both operands must be of type \boolt.
 
   \item[\texttt{not \textit{x}}]\hfill\\
     Logical negation of \textit{x}, which must be of type \boolt.
@@ -332,9 +336,9 @@ the language.
   \item[\texttt{replicate(\textit{n}, \textit{a})}]\hfill\\
     An array consisting of \textit{n} copies of \textit{a}.
 
-  \item[\texttt{shape(\textit{a})}]\hfill\\
-    A tuple giving the shape of the array.  If \texttt{a} is
-    one-dimensional, the result is just a plain integer.
+  \item[\texttt{size($k$, \textit{a})}]\hfill\\
+    The size of dimension $k$ of array \textit{a}.  $k$ must be a
+    static integral constant.
 
   \item[\texttt{split(\textit{n}, \textit{a})}]\hfill\\
     Partitions the given array into two disjoint arrays
@@ -347,7 +351,7 @@ the language.
 
   \item[\texttt{copy(\textit{x})}]\hfill\\
     Return a deep copy of the argument.  Semantically, this is just
-    the identiti function, bit it has special semantics related to
+    the identiti function, but it has special semantics related to
     uniqueness types as described in section
     \ref{sec:l0-uniqueness-types}.
 
@@ -399,7 +403,7 @@ the language.
 
 In a SOAC, if the given function expects $n$ arguments of types
 \texttt{t$_{1}$,\ldots,{}t$_{n}$}, but the SOAC will call the function
-with a single argument of type \texttt{(t$_{1}$*\ldots{}*t$_{n}$)}
+with a single argument of type \texttt{\{t$_{1}$*\ldots{}*t$_{n}$\}}
 (that is, a tuple), the L0 compiler will automatically generate an
 anonymous unwrapping function in such a way that it still works.  This
 allows the following expression to type-check (and run):
@@ -417,19 +421,19 @@ This eliminates the need for a dedicated \texttt{zipWith} construct.
 \subsection{Arrays of tuples}
 
 Arrays of tuples are in a sense merely syntactic sugar for tuples of
-arrays.  The type \texttt{[(int, real)]} is transformed to
-\texttt{([int], [real])} during the compilation process, and all code
+arrays.  The type \texttt{[\{int, real\}]} is transformed to
+\texttt{\{[int], [real]\}} during the compilation process, and all code
 interacting with arrays of tuples is likewise transformed.  In most
 cases, this is fully transparent, but there are edge cases where the
 transformation is not trivially an isomorphism.
 
-Consider the type \texttt{[([int], [real])]}, which is transformed
-into \texttt{([[int]], [[real]])}.  These two types are not
+Consider the type \texttt{[\{[int], [real]\}]}, which is transformed
+into \texttt{\{[[int]], [[real]]\}}.  These two types are not
 isomorphic, as the latter has more stringent demands as to the
-fullness of arrays.  For example, \texttt{\{(\{1\}, \{1.0\}), (\{2,3\},
-    \{2.0\})\}} is a value of the former, but the first element of
+fullness of arrays.  For example, \texttt{[\{[1], [1.0]\}, \{[2,3],
+    [2.0]\}]} is a value of the former, but the first element of
 the corresponding transformed tuple 
-\texttt{(\{\{1\}, \{2, 3\}\}, \{\{1.0\}, \{2.0\}\})} is not a
+\texttt{\{[[1], [2, 3]], [[1.0], [2.0]]\}} is not a
 full array.  Hence, when determining whether a program generates full
 arrays, we must hence look at the \textit{transformed} values - in a
 sense, the fullness requirement ``transcends'' the tuples.
@@ -605,7 +609,7 @@ time they are accessed.  For example, the following program is
 invalid.
 \begin{alltt}
   fun [int] fibs(int i, int x) =
-    let a = \{1, 1, 2, 3, 5, 8, 13\} in
+    let a = [1, 1, 2, 3, 5, 8, 13] in
     let a[i] = x in a
 \end{alltt}
 Since \texttt{a} is not unique, its use in the let-with is a type
@@ -613,7 +617,7 @@ error.  However, we can use \texttt{copy} to create a unique duplicate
 of the array.
 \begin{alltt}
   fun [int] fibs(int i, int x) =
-    let a = copy(\{1, 1, 2, 3, 5, 8, 13\}) in
+    let a = copy([1, 1, 2, 3, 5, 8, 13]) in
     let a[i] = x in a
 \end{alltt}
 
