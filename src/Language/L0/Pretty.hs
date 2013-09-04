@@ -14,6 +14,7 @@ module Language.L0.Pretty
   where
 
 import Data.Array
+import qualified Data.Set as S
 
 import Text.PrettyPrint.Mainland
 
@@ -30,6 +31,22 @@ tildes = map tilde
 apply :: [Doc] -> Doc
 apply = encloseSep lparen rparen comma . map align
 
+aliasComment :: (Ord vn, Pretty vn, TypeBox ty) => TupIdentBase ty vn -> Doc -> Doc
+aliasComment pat d = case aliasComment' pat of
+                       [] -> d
+                       ls -> foldl (</>) empty ls </> d
+  where aliasComment' (Wildcard {}) = []
+        aliasComment' (TupId pats _) = concatMap aliasComment' pats
+        aliasComment' (Id ident) =
+          case maybe [] (clean . S.toList . aliases)
+                 $ unboxType $ identType ident of
+            [] -> []
+            als -> [oneline $
+                    text "// " <> ppr ident <> text " aliases " <>
+                    commasep (map ppr als)]
+          where clean = filter (/= identName ident)
+                oneline s = text $ displayS (renderCompact s) ""
+
 instance Pretty Name where
   ppr (Name t) = fromText t
 
@@ -44,14 +61,14 @@ instance Pretty Value where
     | [] <- elems a = text "empty" <> parens (ppr t)
     | otherwise     = brackets $ commasep $ map ppr $ elems a
 
-instance (Eq vn, Pretty vn) => Pretty (ElemTypeBase as vn) where
+instance (Ord vn, Pretty vn) => Pretty (ElemTypeBase as vn) where
   ppr Int = text "int"
   ppr Char = text "char"
   ppr Bool = text "bool"
   ppr Real = text "real"
   ppr (Tuple ets) = braces $ commasep $ map ppr ets
 
-instance (Eq vn, Pretty vn) => Pretty (TypeBase as vn) where
+instance (Ord vn, Pretty vn) => Pretty (TypeBase as vn) where
   ppr (Elem et) = ppr et
   ppr (Array et ds u _) = u' <> foldl f (ppr et) ds
     where f s Nothing = brackets s
@@ -59,10 +76,10 @@ instance (Eq vn, Pretty vn) => Pretty (TypeBase as vn) where
           u' | Unique <- u = star
              | otherwise = empty
 
-instance (Eq vn, Pretty vn) => Pretty (IdentBase ty vn) where
+instance (Ord vn, Pretty vn) => Pretty (IdentBase ty vn) where
   ppr = ppr . identName
 
-instance (Eq vn, Pretty vn) => Pretty (ExpBase ty vn) where
+instance (Ord vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) where
   ppr = pprPrec 0
   pprPrec _ (Var v) = ppr v
   pprPrec _ (Literal v _) = ppr v
@@ -78,7 +95,8 @@ instance (Eq vn, Pretty vn) => Pretty (ExpBase ty vn) where
                              text "else" <+> align (ppr f)
   pprPrec _ (Apply fname args _ _) = text (nameToString fname) <>
                                      apply (map (align . ppr . fst) args)
-  pprPrec _ (LetPat pat e body _) = text "let" <+/> align (ppr pat) <+>
+  pprPrec _ (LetPat pat e body _) = aliasComment pat $
+                                    text "let" <+/> align (ppr pat) <+>
                                     equals <+> align (ppr e) <+> text "in" </>
                                     ppr body
   pprPrec _ (LetWith dest src idxs ve body _)
@@ -115,6 +133,7 @@ instance (Eq vn, Pretty vn) => Pretty (ExpBase ty vn) where
   pprPrec _ (Concat x y _) = text "concat" <> apply [ppr x, ppr y]
   pprPrec _ (Copy e _) = text "copy" <> parens (ppr e)
   pprPrec _ (DoLoop pat initexp i bound loopbody letbody _) =
+    aliasComment pat $
     text "loop" <+> parens (ppr pat <+> equals <+> ppr initexp) <+>
     equals <+> text "for" <+> ppr i <+> text "<" <+> align (ppr bound) <+> text "do" </>
     indent 2 (ppr loopbody) <+> text "in" </>
@@ -126,12 +145,12 @@ instance (Eq vn, Pretty vn) => Pretty (ExpBase ty vn) where
   pprPrec _ (Scan2 lam es as _ _) = ppSOAC "scan2" [lam] $ es++as
   pprPrec _ (Filter2 lam as _) = ppSOAC "filter2" [lam] as
 
-instance (Eq vn, Pretty vn) => Pretty (TupIdentBase ty vn) where
+instance (Ord vn, Pretty vn) => Pretty (TupIdentBase ty vn) where
   ppr (Id ident)     = ppr ident
   ppr (TupId pats _) = braces $ commasep $ map ppr pats
   ppr (Wildcard _ _) = text "_"
 
-instance (Eq vn, Pretty vn) => Pretty (LambdaBase ty vn) where
+instance (Ord vn, Pretty vn, TypeBox ty) => Pretty (LambdaBase ty vn) where
   ppr (CurryFun fname [] _ _) = text $ nameToString fname
   ppr (CurryFun fname curryargs _ _) =
     text (nameToString fname) <+> apply (map ppr curryargs)
@@ -140,7 +159,7 @@ instance (Eq vn, Pretty vn) => Pretty (LambdaBase ty vn) where
     apply (map ppParam params) <+>
     text "=>" <+> ppr body
 
-instance (Eq vn, Pretty vn) => Pretty (ProgBase ty vn) where
+instance (Ord vn, Pretty vn, TypeBox ty) => Pretty (ProgBase ty vn) where
   ppr = stack . punctuate line . map ppFun . progFunctions
     where ppFun (name, rettype, args, body, _) =
             text "fun" <+> ppr rettype <+>
@@ -148,10 +167,10 @@ instance (Eq vn, Pretty vn) => Pretty (ProgBase ty vn) where
             apply (map ppParam args) <+>
             equals </> indent 2 (ppr body)
 
-ppParam :: (Eq vn, Pretty (ty vn), Pretty vn) => IdentBase ty vn -> Doc
+ppParam :: (Ord vn, Pretty (ty vn), Pretty vn, TypeBox ty) => IdentBase ty vn -> Doc
 ppParam param = ppr (identType param) <+> ppr param
 
-ppBinOp :: (Eq vn, Pretty vn) => Int -> BinOp -> ExpBase ty vn -> ExpBase ty vn -> Doc
+ppBinOp :: (Ord vn, Pretty vn, TypeBox ty) => Int -> BinOp -> ExpBase ty vn -> ExpBase ty vn -> Doc
 ppBinOp p bop x y = parensIf (p > precedence bop) $
                     pprPrec (precedence bop) x <+>
                     text (opStr bop) <+>
@@ -173,7 +192,7 @@ ppBinOp p bop x y = parensIf (p > precedence bop) $
         precedence Mod = 5
         precedence Pow = 6
 
-ppSOAC :: (Eq vn, Pretty vn) => String -> [LambdaBase ty vn] -> [ExpBase ty vn] -> Doc
+ppSOAC :: (Ord vn, Pretty vn, TypeBox ty) => String -> [LambdaBase ty vn] -> [ExpBase ty vn] -> Doc
 ppSOAC name [] es = text name <> apply (map ppr es)
 ppSOAC name (fun:funs) es =
   text name <> parens (foldl ppfun (ppr fun) funs <> comma <//> commasep (map ppr es))
@@ -187,21 +206,21 @@ ppValue :: Value -> String
 ppValue = render80
 
 -- | Prettyprint a type, wrapped to 80 characters.
-ppType :: (Eq vn, Pretty vn) => TypeBase as vn -> String
+ppType :: (Ord vn, Pretty vn) => TypeBase as vn -> String
 ppType = render80
 
 -- | Prettyprint an expression, wrapped to 80 characters.
-ppExp :: (Eq vn, Pretty vn) => ExpBase ty vn -> String
+ppExp :: (Ord vn, Pretty vn, TypeBox ty) => ExpBase ty vn -> String
 ppExp = render80
 
 -- | Prettyprint a lambda, wrapped to 80 characters.
-ppLambda :: (Eq vn, Pretty vn) => LambdaBase ty vn -> String
+ppLambda :: (Ord vn, Pretty vn, TypeBox ty) => LambdaBase ty vn -> String
 ppLambda = render80
 
 -- | Prettyprint a pattern, wrapped to 80 characters.
-ppTupId :: (Eq vn, Pretty vn) => TupIdentBase ty vn -> String
+ppTupId :: (Ord vn, Pretty vn, TypeBox ty) => TupIdentBase ty vn -> String
 ppTupId = render80
 
 -- | Prettyprint an entire L0 program, wrapped to 80 characters.
-prettyPrint :: (Eq vn, Pretty vn) => ProgBase ty vn -> String
+prettyPrint :: (Ord vn, Pretty vn, TypeBox ty) => ProgBase ty vn -> String
 prettyPrint = render80
