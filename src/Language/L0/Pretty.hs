@@ -33,8 +33,8 @@ apply = encloseSep lparen rparen comma . map align
 
 aliasComment :: (Ord vn, Pretty vn, TypeBox ty) => TupIdentBase ty vn -> Doc -> Doc
 aliasComment pat d = case aliasComment' pat of
-                       [] -> d
-                       ls -> foldl (</>) empty ls </> d
+                       []   -> d
+                       l:ls -> foldl (</>) l ls </> d
   where aliasComment' (Wildcard {}) = []
         aliasComment' (TupId pats _) = concatMap aliasComment' pats
         aliasComment' (Id ident) =
