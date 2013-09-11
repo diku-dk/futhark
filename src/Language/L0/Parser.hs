@@ -1,6 +1,10 @@
 -- | Interface to the L0 parser.
 module Language.L0.Parser
   ( parseL0
+  , parseExp
+  , parsePattern
+  , parseType
+
   , parseInt
   , parseReal
   , parseBool
@@ -35,45 +39,64 @@ instance Error ParseError where
 canFail :: (b -> Either String a) -> b -> Either ParseError a
 canFail f = either (Left . ParseError) Right . f
 
+parse :: ([L Token] -> Either String a)
+      -> FilePath -> String -> Either ParseError a
+parse f file = canFail $ f <=< alexScanTokens file
+
 -- | Parse an entire L0 program from the given 'String', using the
 -- 'FilePath' as the source name for error messages.
 parseL0 :: FilePath -> String -> Either ParseError UncheckedProg
-parseL0 file = canFail $ prog <=< alexScanTokens file
+parseL0 = parse prog
+
+-- | Parse an L0 expression from the given 'String', using the
+-- 'FilePath' as the source name for error messages.
+parseExp :: FilePath -> String -> Either ParseError UncheckedExp
+parseExp = parse expression
+
+-- | Parse an L0 pattern from the given 'String', using the
+-- 'FilePath' as the source name for error messages.
+parsePattern :: FilePath -> String -> Either ParseError UncheckedTupIdent
+parsePattern = parse pattern
+
+-- | Parse an L0 type from the given 'String', using the
+-- 'FilePath' as the source name for error messages.
+parseType :: FilePath -> String -> Either ParseError UncheckedType
+parseType = parse l0type
 
 -- | Parse an integer in L0 syntax from the given 'String', using the
 -- 'FilePath' as the source name for error messages.
 parseInt :: FilePath -> String -> Either ParseError Value
-parseInt file = canFail $ intValue <=< alexScanTokens file
+parseInt = parse intValue
 
 -- | Parse an real number in L0 syntax from the given 'String', using
 -- the 'FilePath' as the source name for error messages.
 parseReal :: FilePath -> String -> Either ParseError Value
-parseReal file = canFail $ realValue <=< alexScanTokens file
+parseReal = parse realValue
 
 -- | Parse a boolean L0 syntax from the given 'String', using the
 -- 'FilePath' as the source name for error messages.
 parseBool :: FilePath -> String -> Either ParseError Value
-parseBool file = canFail $ boolValue <=< alexScanTokens file
+parseBool = parse boolValue
 
 -- | Parse a character in L0 syntax from the given 'String', using the
 -- 'FilePath' as the source name for error messages.
 parseChar :: FilePath -> String -> Either ParseError Value
-parseChar file = canFail $ charValue <=< alexScanTokens file
+parseChar = parse charValue
 
 -- | Parse a string in L0 syntax from the given 'String', using the
 -- 'FilePath' as the source name for error messages.
 parseString :: FilePath -> String -> Either ParseError Value
-parseString file = canFail $ stringValue <=< alexScanTokens file
+parseString = parse stringValue
 
 -- | Parse a tuple in L0 syntax from the given 'String', using the
 -- 'FilePath' as the source name for error messages.
 parseTuple :: FilePath -> String -> Either ParseError Value
-parseTuple file = canFail $ tupleValue <=< alexScanTokens file
+parseTuple = parse tupleValue
 
 -- | Parse an array in L0 syntax from the given 'String', using the
 -- 'FilePath' as the source name for error messages.
 parseArray :: FilePath -> String -> Either ParseError Value
-parseArray file = canFail $ arrayValue <=< alexScanTokens file
+parseArray = parse arrayValue
 
 -- | Parse any L0 value from the given 'String', using the 'FilePath'
 -- as the source name for error messages.

@@ -1,6 +1,9 @@
 {
 module Language.L0.Parser.Parser
   ( prog
+  , expression
+  , pattern
+  , l0type
   , intValue
   , realValue
   , boolValue
@@ -21,6 +24,9 @@ import Language.L0.Parser.Lexer
 }
 
 %name prog Prog
+%name expression Exp
+%name pattern TupId
+%name l0type Type
 %name intValue IntValue
 %name realValue RealValue
 %name boolValue LogValue
