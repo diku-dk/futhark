@@ -7,6 +7,7 @@
 -- names.
 module L0C.TypeChecker ( checkProg
                        , checkProgNoUniqueness
+                       , checkClosedExp
                        , TypeError(..))
   where
 
@@ -26,7 +27,7 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 
 import L0C.L0
-import L0C.Renamer (tagProg', untagProg, untagExp, untagPattern, untagType)
+import L0C.Renamer (tagProg', tagExp, untagProg, untagExp, untagPattern, untagType)
 import L0C.FreshNames
 
 -- | Information about an error during type checking.  The 'Show'
@@ -528,7 +529,9 @@ checkProg' checkoccurs prog = do
     -- position information, in order to report both locations of
     -- duplicate function definitions.  The position information is
     -- removed at the end.
-    buildFtable = M.map rmLoc <$> foldM expand builtins (progFunctions prog')
+    buildFtable = M.map rmLoc <$>
+                  foldM expand (M.map addLoc builtInFunctions)
+                  (progFunctions prog')
     expand ftable (name,ret,args,_,pos)
       | Just (_,_,pos2) <- M.lookup name ftable =
         Left $ DupDefinitionError name pos pos2
@@ -536,13 +539,16 @@ checkProg' checkoccurs prog = do
         let argtypes = map (toDecl . identType) args -- Throw away argument names.
         in Right $ M.insert name (ret,argtypes,pos) ftable
     rmLoc (ret,args,_) = (ret,args)
-    builtins = M.mapKeys nameFromString $
-               M.fromList [("toReal", (Elem Real, [Elem Int], noLoc))
-                          ,("trunc", (Elem Int, [Elem Real], noLoc))
-                          ,("sqrt", (Elem Real, [Elem Real], noLoc))
-                          ,("log", (Elem Real, [Elem Real], noLoc))
-                          ,("exp", (Elem Real, [Elem Real], noLoc))
-                          ,("op not", (Elem Bool, [Elem Bool], noLoc))]
+    addLoc (t, ts) = (t, ts, noLoc)
+
+builtInFunctions :: M.Map Name (FunBinding vn)
+builtInFunctions = M.mapKeys nameFromString $
+                   M.fromList [("toReal", (Elem Real, [Elem Int]))
+                              ,("trunc", (Elem Int, [Elem Real]))
+                              ,("sqrt", (Elem Real, [Elem Real]))
+                              ,("log", (Elem Real, [Elem Real]))
+                              ,("exp", (Elem Real, [Elem Real]))
+                              ,("op not", (Elem Bool, [Elem Bool]))]
 
 checkFun :: (TypeBox ty, VarName vn) =>
             TaggedFunDec ty vn -> TypeM vn (TaggedFunDec CompTypeBase vn)
@@ -592,6 +598,18 @@ checkFun (fname, rettype, params, body, loc) = do
         returnAliasing (Elem (Tuple ets1)) (Elem (Tuple ets2)) =
           concat $ zipWith returnAliasing ets1 ets2
         returnAliasing expected got = [(uniqueness expected, aliases got)]
+
+-- | Type-check a single expression without any free variables or
+-- calls to non-builtin functions.
+checkClosedExp :: (TypeBox ty, VarName vn) => ExpBase ty vn ->
+                  Either (TypeError vn) (ExpBase CompTypeBase vn)
+checkClosedExp e = untagExp <$> runTypeM env src (checkExp e')
+  where env = TypeEnv { envFtable = builtInFunctions
+                      , envCheckOccurences = True
+                      , envVtable = M.empty
+                      }
+        e' = tagExp e
+        src = newNameSource $ freeNamesInExp e'
 
 checkExp :: (TypeBox ty, VarName vn) =>
              TaggedExp ty vn -> TypeM vn (TaggedExp CompTypeBase vn)
