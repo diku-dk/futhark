@@ -81,7 +81,7 @@ normalizeFun (fname, rettype, params, body, loc) = do
 normalizeExp :: Exp -> NormalizeM Exp
 normalizeExp (Var k) = return $ Var k
 normalizeExp (LetPat pat e body loc) = do
-  e' <- normalizeSubExp e
+  e' <- normalizeSubExps e
   body' <- insertBindings $ normalizeExp body
   return $ LetPat pat e' body' loc
 normalizeExp (DoLoop mergepat mergeexp loopvar
@@ -101,10 +101,15 @@ normalizeExp (If c te fe t loc) = do
   te' <- insertBindings $ normalizeExp te
   fe' <- insertBindings $ normalizeExp fe
   return $ If c' te' fe' t loc
-normalizeExp e = Var <$> (replaceExp (nameHint e) =<< normalizeSubExp e)
+normalizeExp e = Var <$> (replaceExp (nameHint e) =<< normalizeSubExps e)
 
-normalizeSubExp :: Exp -> NormalizeM Exp
-normalizeSubExp = mapExpM normalize
+-- | Leave the root of the expression as is, but normalise any
+-- subexpressions.
+normalizeSubExps :: Exp -> NormalizeM Exp
+normalizeSubExps (If c te fe t loc) =
+  -- Never normalise anything past a branch.
+  normalizeExp $ If c te fe t loc
+normalizeSubExps e = mapExpM normalize e
   where normalize = identityMapper {
                       mapOnExp = normalizeExp
                     , mapOnLambda = normalizeLambda
