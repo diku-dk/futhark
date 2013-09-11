@@ -11,6 +11,8 @@ module L0C.Renamer
   ( renameProg
   , tagProg
   , tagProg'
+  , tagExp
+  , tagType
   , untagProg
   , untagExp
   , untagPattern
@@ -57,6 +59,18 @@ tagProg' prog = let (funs, src) = runReader (runStateT f blankNameSource) env
                 in (Prog funs, src)
   where env = RenameEnv M.empty newID
         f = mapM renameFun $ progFunctions prog
+
+-- | As 'tagProg', but for expressions.
+tagExp :: (TypeBox ty, VarName vn) =>
+           ExpBase ty vn -> ExpBase ty (ID vn)
+tagExp e = runReader (evalStateT (renameExp e) blankNameSource) env
+  where env = RenameEnv M.empty newID
+
+-- | As 'tagProg', but for types.
+tagType :: (TypeBox ty, VarName vn) =>
+           ty vn -> ty (ID vn)
+tagType t = runReader (evalStateT (renameType t) blankNameSource) env
+  where env = RenameEnv M.empty newID
 
 -- | Remove tags from a program.  Note that this is potentially
 -- semantics-changing if the underlying names are not each unique.
