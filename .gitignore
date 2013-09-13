@@ -24,6 +24,7 @@ data/*testout
 *.hi
 
 !data/*.out
+!data/*/*.out
 
 # Ignore core dumps.
 core
