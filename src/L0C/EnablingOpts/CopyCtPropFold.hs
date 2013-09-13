@@ -247,9 +247,7 @@ copyCtPropExp eee@(Index idd@(Ident vnm tp p) inds tp2 pos) = do
 
 
         (Replicate _ vvv@(Var vv) _, _:is') -> do
-            inner <- if null is'
-                     then copyCtPropExp vvv
-                     else copyCtPropExp (Index vv is' tp2 pos)
+            inner <- copyCtPropExp (if null is' then vvv else Index vv is' tp2 pos)
             changed inner
         (Replicate _ (Index a ais _ _) _, _:is') -> do
             inner <- copyCtPropExp (Index a (ais ++ is') tp2 pos)
@@ -376,14 +374,14 @@ copyCtPropExp (Apply fname args tp pos) = do
         allArgsAreValues (a:as) =
             case a of
                 Literal v _ -> do (res, vals) <- allArgsAreValues as
-                                  if res then return (True,  v:vals)
-                                         else return (False, []    )
+                                  return (if res then (True, v : vals) else (False, []))
+                                  --if res then return (True,  v:vals)
+                                  --       else return (False, []    )
                 Var idd   -> do vv <- asks $ M.lookup (identName idd) . envVtable
                                 case vv of
                                   Just (Constant v _ _) -> do
                                     (res, vals) <- allArgsAreValues as
-                                    if res then return (True,  v:vals)
-                                           else return (False, []    )
+                                    return (if res then (True, v : vals) else (False, []))
                                   _ -> return (False, [])
                 _         -> return (False, [])
 
@@ -422,9 +420,9 @@ copyCtPropExpList = mapM copyCtPropExp
 ------------------------------------------------
 
 simplExp :: Exp -> CPropM Exp
-simplExp e = do
+simplExp e =
     case simplify e of
-      Left err -> badCPropM $ err
+      Left err -> badCPropM err
       Right e' -> return e'
 
 ------------------------------------------------

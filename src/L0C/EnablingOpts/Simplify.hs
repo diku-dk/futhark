@@ -87,18 +87,18 @@ data NaryExp = NaryPlus [NaryExp] Type SrcLoc
 
 -- | Applies Simplification at Expression level:
 simplify :: Exp -> Either EnablingOptError Exp
-simplify e = do
-    case (simplifyBothWays e) of
+simplify e = case simplifyBothWays e of
         SimplifyM (Left  err) -> Left err
         SimplifyM (Right e' ) -> Right e'
 
 
 simplifyNary :: Exp -> SimplifyM NaryExp
 
-simplifyNary (BinOp Plus e1 e2 tp pos) = do
-    e1' <- simplifyNary e1
-    e2' <- simplifyNary e2
-    let terms = (getTerms e1') ++ (getTerms e2')
+simplifyNary (BinOp Plus e1 e2 tp pos) =
+  do e1' <- simplifyNary e1
+     e2' <- simplifyNary e2
+     let terms = (getTerms e1') ++ (getTerms e2')
+
     --------------------------
     --- Fill in this part:
     --- My Pseudocode (you may come with your own or improve)
@@ -111,8 +111,8 @@ simplifyNary (BinOp Plus e1 e2 tp pos) = do
     --  4. transform the resulted key-value list into a list of n-ary
     --     expressions by multiplying the key with its corresponding value.
     --  5. the result is supposed to be stored in terms'
-    terms' <- return terms
-    return $ NaryPlus terms' tp pos
+     let terms' = terms
+     return $ NaryPlus terms' tp pos
 
 simplifyNary (BinOp Minus e1 e2 tp pos) = do
     min_1 <- getm1 tp pos
@@ -225,7 +225,7 @@ multWithVal (e, v) = do
     let tp  = typeOfNary e
     one    <- getp1 tp pos
     if (v == one)
-    then do return e
+    then return e
     else do let vt = (Literal v pos)
             case e of
                 NaryMult [] _ _ -> badSimplifyM $ SimplifyError pos
@@ -234,7 +234,7 @@ multWithVal (e, v) = do
                     case f of
                         Literal v' _ -> do
                             vv' <- mulVals v v' pos
-                            return $ NaryMult ( (Literal vv' pos):fs ) tp pos
+                            return $ NaryMult ( Literal vv' pos : fs ) tp pos
                         _ ->return $ NaryMult (vt:f:fs) tp pos
                 NaryPlus ts _ _ -> do
                     ts' <- mapM ( \x -> multWithVal (x, v) ) ts
@@ -255,13 +255,13 @@ get0 tp             p = badSimplifyM $ SimplifyError p ("get0 for type: "++ppTyp
 -}
 
 getp1 :: Type -> SrcLoc -> SimplifyM Value
-getp1 (Elem (Int  )) _ = return $  IntVal 1
-getp1 (Elem (Real )) _ = return $ RealVal 1.0
+getp1 (Elem Int  ) _ = return $  IntVal 1
+getp1 (Elem Real ) _ = return $ RealVal 1.0
 getp1 tp             p = badSimplifyM $ SimplifyError p ("getp1 for type: "++ppType tp)
 
 getm1 :: Type -> SrcLoc -> SimplifyM Value
-getm1 (Elem (Int  )) _ = return $  IntVal (-1)
-getm1 (Elem (Real )) _ = return $ RealVal (-1.0)
+getm1 (Elem Int  ) _ = return $  IntVal (-1)
+getm1 (Elem Real ) _ = return $ RealVal (-1.0)
 getm1 tp             p = badSimplifyM $ SimplifyError p ("getm1 for type: "++ppType tp)
 
 
@@ -275,7 +275,7 @@ splitTerm (NaryMult [f] tp pos) = do
         e             -> return (NaryMult [e]               tp pos, one)
 splitTerm ne@(NaryMult (f:fs) tp pos) =
     case f of
-        (Literal v _) -> do return (NaryMult fs tp pos, v)
+        (Literal v _) -> return (NaryMult fs tp pos, v)
         _             -> do one <- getp1 tp pos
                             return (ne, one)
 splitTerm e = do
@@ -285,8 +285,8 @@ splitTerm e = do
 
 discriminate :: [(NaryExp, Value)] -> (NaryExp, Value) -> SimplifyM [(NaryExp, Value)]
 discriminate []          e        = return [e]
-discriminate e@((k,v):t) (k', v') = do
+discriminate e@((k,v):t) (k', v') =
     if k == k'
     then do v'' <- addVals v v' (srclocOfNary k')
             return ( (k, v'') : t )
-    else do return ( (k', v') : e )
+    else return ( (k', v') : e )
