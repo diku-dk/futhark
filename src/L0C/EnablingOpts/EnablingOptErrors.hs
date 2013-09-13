@@ -19,6 +19,7 @@ data EnablingOptError = EnablingOptError SrcLoc String
                       | DupDefinitionError Name SrcLoc SrcLoc
                       | FunctionNotInFtab  Name
                       | VarNotInFtab SrcLoc VName
+                      | SimplifyError SrcLoc String
 
 instance Show EnablingOptError where
     show (EnablingOptError pos msg) =
