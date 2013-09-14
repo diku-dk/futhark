@@ -23,12 +23,12 @@ echo Quality-checking commit...
 echo
 
 # Find files with trailing whitespace
-if git diff-index --check HEAD | egrep -v '^[+-]'; then
+if git diff-index --cached --check HEAD | egrep -v '^[+-]'; then
     fail
 fi
 
 # Run hlint on changed files.
-for file in $(git diff-index --name-only HEAD | egrep '\.l?hsc?$'); do
+for file in $(git diff-index --cached --name-only HEAD | egrep '\.l?hsc?$'); do
     if [ $file != src/L0C/CCodeGen.hs ]; then # This one cannot be parsed by hlint.
         if ! hlint -i "Reduce duplication" "$file"; then
             fail
