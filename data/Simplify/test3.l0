@@ -1,0 +1,2 @@
+fun int main(int a, int b, int c, int d, int e, int f) =
+    (a+(b*c)) * ((e*f)+d)
