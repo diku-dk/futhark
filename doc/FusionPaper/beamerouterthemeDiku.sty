@@ -1,0 +1,96 @@
+\ProvidesPackage{beamerouterthemeDiku}[2011/11/03]
+
+%%%%%%%%%%%%%%%%%%%%%%%% progress bar stuff %%%%%%%%%%%%%%%%%%%%%%%%%%%
+% stolen from Beamer theme by Sylvain Bouveret
+% <sylvain[dot]bouveret[aT]cert[DoT]fr> jun. 2007 version 0.32
+%
+% based on the LaTeX-Beamer package :
+% Copyright 2003 by Till Tantau <tantau@users.sourceforge.net>
+%
+% This program can be redistributed and/or modified under the terms
+% of the GNU Public License, version 2.
+
+\RequirePackage{tikz}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%
+% Some computations dedicated to the progressbar...
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\newdimen\progressbar@currentbarlength
+\newdimen\progressbar@framenumberrectangle
+\newdimen\progressbar@titlerectangle
+\newdimen\progressbar@leftbar
+
+\newcount\progressbar@tmpresult
+\newcount\progressbar@numer
+\newcount\progressbar@denom
+\newcount\progressbar@barlength
+
+\progressbar@framenumberrectangle=\paperwidth
+\progressbar@titlerectangle=\paperwidth
+
+\advance\progressbar@framenumberrectangle by -0.9cm
+\advance\progressbar@titlerectangle by -1.1cm
+
+\progressbar@barlength=115 % (in millimeters)
+\progressbar@leftbar=\progressbar@titlerectangle
+\advance\progressbar@leftbar by -\progressbar@barlength mm
+
+\def\insertprogressbar{
+  \ifnum\inserttotalframenumber=1\else
+    \progressbar@numer=\insertframenumber
+    \advance\progressbar@numer by -1
+    \progressbar@denom=\inserttotalframenumber
+    \advance\progressbar@denom by -1
+    \progressbar@tmpresult=\progressbar@barlength
+    \multiply\progressbar@tmpresult by \progressbar@numer
+    \divide\progressbar@tmpresult by \progressbar@denom
+    \progressbar@currentbarlength=\progressbar@tmpresult mm
+
+    \begin{tikzpicture}
+      \draw (\progressbar@framenumberrectangle, 0.1cm) node [anchor=mid west] {\color{structure.fg!70!bg}\insertframenumber~/~\inserttotalframenumber};
+      \draw (\progressbar@titlerectangle, 0.02cm) node [anchor=south east] {\color{fg!70!bg}\insertshortauthor:~\insertshorttitle~~~~\insertshortdate};
+      \ifnum\insertframenumber=1\else
+%      % position marker, slightly shifted, switched off
+%      \draw [fill=fg] (\progressbar@currentbarlength, 0) rectangle ++(0.02cm, 0.08cm);
+      % shaded complete bar (frame only)
+      \draw[draw=fg!80!bg] (\progressbar@leftbar, 0.4mm) rectangle ++(\progressbar@barlength, 0.3mm);
+      % natgreen progressing bar
+      \draw [fill=fg] (\progressbar@leftbar, 0.4mm) rectangle ++(\progressbar@currentbarlength, 0.2mm);
+      \fi
+    \end{tikzpicture}
+  \fi
+}
+%%%%%%%%%%%%%%%%%%%%%%% end progress bar stuff %%%%%%%%%%%%%%%%%%%%%
+
+%\usebackgroundtemplate{\includegraphics[width=\paperwidth,height=\paperheight]{background}}
+
+\setbeamertemplate{footline}{%
+  \begin{beamercolorbox}{structure}%
+%  \begin{beamercolorbox}[wd=4mm,ht=2.25ex,dp=1ex,left]{date in
+%      head/foot}%
+%    \hspace{3pt}
+%    \insertframenumber{}
+% use a progress bar...
+    \insertprogressbar
+  \end{beamercolorbox}
+%  \vspace{2.5ex}
+}%
+
+\defbeamertemplate*{headline}{Diku theme}
+{%
+  \leavevmode%
+  \begin{beamercolorbox}[wd=\paperwidth,ht=3ex,dp=1.125ex]{kugray}%
+    {\tiny \hspace*{2em}{\textsc{University of Copenhagen}} \hfill 
+                   Department of Computer Science \hspace*{1em}}
+  \end{beamercolorbox}%
+%  \begin{beamercolorbox}[wd=\paperwidth,ht=3ex,dp=1.125ex]{section in head/foot}%
+%    \insertsectionnavigationhorizontal{\paperwidth}{}{}%\hskip0pt plus1filll}{}%
+%  \end{beamercolorbox}%
+}
+
+\setbeamersize{text margin left=2em,text margin right=2em}
+
+

@@ -1,0 +1,30 @@
+\ProvidesPackage{beamerinnerthemeDiku}[2011/11/03]
+
+
+%%%%%%%%%%%%%%%%%
+
+\setbeamertemplate{title page} {
+\mbox{}\vfill
+%  \centering
+  \vspace{1cm}
+    \mbox{\begin{beamercolorbox}[rounded=true,sep=5pt,wd=0.75\paperwidth]{title}
+      \usebeamerfont{title}\inserttitle%
+      {\usebeamercolor[fg]{titlegraphic}\inserttitlegraphic\par}
+      \ifx\insertsubtitle\@empty\else\vskip0.25em%
+        {\usebeamerfont{subtitle}\insertsubtitle\par}%
+      \fi%
+    \end{beamercolorbox}}\vskip1em\par
+    \begin{beamercolorbox}[sep=8pt]{author}
+      \usebeamerfont{author}\insertauthor
+    \end{beamercolorbox}
+    \begin{beamercolorbox}[sep=8pt]{institute}
+%      \centering
+      \usebeamerfont{author}\insertinstitute
+    \end{beamercolorbox}
+    \vfill
+    \begin{beamercolorbox}[sep=8pt]{date}
+      \usebeamerfont{institute}\insertdate
+    \end{beamercolorbox}\vskip0.5em
+    
+%  \vfill
+}
