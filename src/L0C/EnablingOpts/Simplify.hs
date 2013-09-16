@@ -143,8 +143,8 @@ simplifyNary (BinOp Times e1 e2 tp pos) =
               do prods <- mapM (makeProds ys) $ getTerms x
                  return $ NaryPlus (L.sort prods) tp pos
           (NaryPlus xs _ _, NaryPlus ys _ _) ->
-                              do asdf <- mapM getValsForProd xs
-                                 prods <- mapM (\x -> mapM (makeProds x) ys) asdf
+                              do xsMultChildren <- mapM getMultChildren xs
+                                 prods <- mapM (\x -> mapM (makeProds x) ys) xsMultChildren
                                  return $ NaryPlus (L.sort $ concat prods) tp pos
 
     -------------------------------
@@ -230,9 +230,9 @@ srclocOfNary :: NaryExp -> SrcLoc
 srclocOfNary (NaryPlus _ _ pos) = pos
 srclocOfNary (NaryMult _ _ pos) = pos
 
-getValsForProd :: NaryExp -> SimplifyM [Exp]
-getValsForProd (NaryPlus _ _ pos) = badSimplifyM $ SimplifyError pos "getValsForProd, NaryPlus should not be nested 2 levels deep "
-getValsForProd (NaryMult xs _ _) = return xs
+getMultChildren :: NaryExp -> SimplifyM [Exp]
+getMultChildren (NaryPlus _ _ pos) = badSimplifyM $ SimplifyError pos "getMultChildren, NaryPlus should not be nested 2 levels deep "
+getMultChildren (NaryMult xs _ _) = return xs
 
 getTerms :: NaryExp -> [NaryExp]
 getTerms (NaryPlus es  _ _)  = es
