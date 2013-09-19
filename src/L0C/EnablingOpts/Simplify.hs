@@ -19,41 +19,8 @@ newtype SimplifyM a = SimplifyM (Either EnablingOptError a)
 badSimplifyM :: EnablingOptError -> SimplifyM a
 badSimplifyM = SimplifyM . Left
 
-
----------------------------------------------------------------------
--- RASMUS & JONAS: Feel free to come up with your
---                   own type for n-ary expressions, and
---                   a different implementation,
---                 I placed fill-in-the-blank
---                   comments in several places in the
---                   implementation of `simplifyNary',
---                 I made the program compile but no
---                   actual simplification is performed ...
---
---  Remember: 1. Place this file in `EnablingOpts' folder
---
---            2. In `EnablingOpts/CopyCtPropFold.hs'
---               a) add at the beginning the import statement:
---                     `import L0C.EnablingOpts.Simplify'
---
---               b) add before the definition of `ctFoldBinOp'
---                  the following wrapper function for simplify:
---                      simplExp :: Exp -> CPropM Exp
---                      simplExp e = do
---                        case simplify e of
---                          Left err -> badCPropM $ err
---                          Right e' -> return e'
---
---               c) Modify the implementation of `ctFoldBinOp'
---                    to use your simplifier
---
---               d) write your most complicated L0 program that
---                    is ``solved'' by expression simplification.
---
---            3. If you want to do a map with a function
---                 that returns a monad use mapM, e.g.,
---                   `kvs <- mapM  splitTerm terms'
----------------------------------------------------------------------
+-- TODO: Improve use of simplifier in CopyCtPropFold
+-- TODO: most complicated L0 program that is ``solved'' by expression simplification.
 
 ------------------------------------
 -- The new type for an expression --
@@ -98,47 +65,34 @@ simplify e = case simplifyBothWays e of
 
 simplifyNary :: Exp -> SimplifyM NaryExp
 
-simplifyNary (BinOp Plus e1 e2 tp pos) =
-  do e1' <- simplifyNary e1
+simplifyNary (BinOp Plus e1 e2 tp pos) = do
+     e1' <- simplifyNary e1
      e2' <- simplifyNary e2
      let terms = (getTerms e1') ++ (getTerms e2')
      splittedTerms <- mapM splitTerm terms
-     let sortedTerms = L.sortBy myNarySort splittedTerms
-     merged <- foldM discriminate [] sortedTerms
-     let  filtered = filter testIfKVNotZero $ reverse merged
-     terms' <- mapM joinTerm filtered
+     let sortedTerms = L.sortBy (\(n1,_) (n2,_) -> compare n1 n2) splittedTerms
+     merged <- (foldM discriminate [] sortedTerms)
+     -- The above function also reverses the list, we would like to keep it in a ascending order.
+     let fixedOrder = reverse merged
+     terms' <- mapM joinTerm fixedOrder
 
-
-    --------------------------
-    --- Fill in this part:
-    --- My Pseudocode (you may come with your own or improve)
-    --  1. split the terms, e.g., via splitTerm, into key-value pais,
-    --     where the key is an N-ary expressions, and the value is a
-    --     value factor, if no such factor than 1.
-    --  2. Sort the result after the key; use L.sortBy
-    --  3. Sum-up the values corresponding to the same key and remove
-    --     the redundant keys -- this should be a segmented reduce.
-    --  4. transform the resulted key-value list into a list of n-ary
-    --     expressions by multiplying the key with its corresponding value.
-    --  5. the result is supposed to be stored in terms'
-     --let terms' = terms
-     return $ (NaryPlus terms' tp pos)
+     return $ NaryPlus terms' tp pos
 
 simplifyNary (BinOp Minus e1 e2 tp pos) = do
     min_1 <- getm1 tp pos
     let e2' = BinOp Times (Literal min_1 pos) e2 tp pos
     simplifyNary $ BinOp Plus e1 e2' tp pos
 
--- TODO: sorting function that ensures literals are first...
+-- TODO: sorting function that ensures literals are first for use in BinOp times
 
-simplifyNary (BinOp Times e1 e2 tp pos) =
-  do e1' <- simplifyNary e1
+simplifyNary (BinOp Times e1 e2 tp pos) = do
+     e1' <- simplifyNary e1
      e2' <- simplifyNary e2
      case (e1', e2') of
           (NaryMult xs _ _, y@(NaryMult _ _ _) ) -> makeProds xs y
           (NaryMult xs _ _, y) ->
               do prods <- mapM (makeProds xs) $ getTerms y
-                 return $ ( NaryPlus (L.sort prods) tp pos )
+                 return $ NaryPlus (L.sort prods) tp pos
           (x, NaryMult ys _ _) ->
               do prods <- mapM (makeProds ys) $ getTerms x
                  return $ NaryPlus (L.sort prods) tp pos
@@ -161,27 +115,30 @@ simplifyNary (BinOp Times e1 e2 tp pos) =
     -- 4. The next line is garbage:
     where
         makeProds :: [Exp] -> NaryExp -> SimplifyM NaryExp
-        makeProds [] _ = do
-            badSimplifyM $ SimplifyError pos
-                             " In simplifyNary, makeProds: 1st arg is the empty list! "
-        makeProds _ (NaryMult [] _ _) = do
-            badSimplifyM $ SimplifyError pos
-                             " In simplifyNary, makeProds: 2nd arg is the empty list! "
-        makeProds _ (NaryPlus _ _ _) = do
-            badSimplifyM $ SimplifyError pos
-                             " In simplifyNary, makeProds: e1 * e2: e2 is a sum of sums! "
+        makeProds [] _ =
+          badSimplifyM $ SimplifyError pos
+              " In simplifyNary, makeProds: 1st arg is the empty list! "
+
+        makeProds _ (NaryMult [] _ _) =
+          badSimplifyM $ SimplifyError pos
+            " In simplifyNary, makeProds: 2nd arg is the empty list! "
+
+        makeProds _ (NaryPlus _ _ _) =
+          badSimplifyM $ SimplifyError pos
+            " In simplifyNary, makeProds: e1 * e2: e2 is a sum of sums! "
+
         makeProds ((Literal v1 _):exs) (NaryMult ((Literal v2 pval):ys) tp1 pos1) = do
-            v <- mulVals v1 v2 pval
-            return $ NaryMult ( (Literal v pval) : (L.sort (ys++exs)) ) tp1 pos1
+          v <- mulVals v1 v2 pval
+          return $ NaryMult ( (Literal v pval) : (L.sort (ys++exs)) ) tp1 pos1
 
-        makeProds ((Literal v pval):exs) (NaryMult ys tp1 pos1) = do
-            return $ NaryMult ( (Literal v pval) : (L.sort (ys++exs)) ) tp1 pos1
+        makeProds ((Literal v pval):exs) (NaryMult ys tp1 pos1) =
+          return $ NaryMult ( (Literal v pval) : (L.sort (ys++exs)) ) tp1 pos1
 
-        makeProds exs (NaryMult ((Literal v pval):ys) tp1 pos1) = do
-            return $ NaryMult ( (Literal v pval) : (L.sort (ys++exs)) ) tp1 pos1
+        makeProds exs (NaryMult ((Literal v pval):ys) tp1 pos1) =
+          return $ NaryMult ( (Literal v pval) : (L.sort (ys++exs)) ) tp1 pos1
 
-        makeProds exs (NaryMult ys tp1 pos1) = do
-            return $ NaryMult (L.sort (ys++exs)) tp1 pos1
+        makeProds exs (NaryMult ys tp1 pos1) =
+          return $ NaryMult (L.sort (ys++exs)) tp1 pos1
 
 ------------------------------------------------
 -- Any other possible simplification, e.g., a
@@ -194,27 +151,25 @@ simplifyNary e = return $ NaryMult [e] (typeOf e) (srclocOf e)
 
 simplifyBack :: NaryExp -> SimplifyM Exp
 simplifyBack (NaryMult [] _ pos) =
-    badSimplifyM $ SimplifyError pos
+  badSimplifyM $ SimplifyError pos
                     " In simplifyBack, NaryMult: empty exp list! "
 simplifyBack (NaryPlus [] _ pos) =
-    badSimplifyM $ SimplifyError pos
+  badSimplifyM $ SimplifyError pos
                     " In simplifyBack, NaryPlus: empty exp list! "
-simplifyBack (NaryMult [f] _ _) = do
-    return f
-simplifyBack (NaryPlus [t] _ _) = do
-    simplifyBack t
+simplifyBack (NaryMult [f] _ _) = return f
+simplifyBack (NaryPlus [t] _ _) = simplifyBack t
 simplifyBack (NaryMult (f:fs) tp pos) = do
-    fs' <- simplifyBack $ NaryMult fs tp pos
-    return $ BinOp Times f fs' tp pos
+  fs' <- simplifyBack $ NaryMult fs tp pos
+  return $ BinOp Times f fs' tp pos
 simplifyBack (NaryPlus (f:fs) tp pos) = do
-    f'  <- simplifyBack f
-    fs' <- simplifyBack $ NaryPlus fs tp pos
-    return $ BinOp Plus f' fs' tp pos
+  f'  <- simplifyBack f
+  fs' <- simplifyBack $ NaryPlus fs tp pos
+  return $ BinOp Plus f' fs' tp pos
 
 simplifyBothWays :: Exp -> SimplifyM Exp
 simplifyBothWays e = do
-    enary <- simplifyNary e
-    simplifyBack enary
+  enary <- simplifyNary e
+  simplifyBack enary
 
 ----------------------------------------------
 --- Accessor Functions for n-ary exprs     ---
@@ -240,38 +195,38 @@ getTerms e                   = [e]
 
 addVals :: Value -> Value -> SrcLoc -> SimplifyM Value
 addVals e1 e2 pos = do
-    case (e1, e2) of
-      ( IntVal v1,  IntVal v2) -> return $  IntVal (v1+v2)
-      (RealVal v1, RealVal v2) -> return $ RealVal (v1+v2)
-      _ -> badSimplifyM $ SimplifyError pos  " + operands not of (the same) numeral type! "
+  case (e1, e2) of
+    ( IntVal v1,  IntVal v2) -> return $  IntVal (v1+v2)
+    (RealVal v1, RealVal v2) -> return $ RealVal (v1+v2)
+    _ -> badSimplifyM $ SimplifyError pos  " + operands not of (the same) numeral type! "
 
 mulVals :: Value -> Value -> SrcLoc -> SimplifyM Value
 mulVals e1 e2 pos = do
-    case (e1, e2) of
-      ( IntVal v1,  IntVal v2) -> return $  IntVal (v1*v2)
-      (RealVal v1, RealVal v2) -> return $ RealVal (v1*v2)
-      _ -> badSimplifyM $ SimplifyError pos (" * operands not of (the same) numeral type! ")
+  case (e1, e2) of
+    ( IntVal v1,  IntVal v2) -> return $  IntVal (v1*v2)
+    (RealVal v1, RealVal v2) -> return $ RealVal (v1*v2)
+    _ -> badSimplifyM $ SimplifyError pos (" * operands not of (the same) numeral type! ")
 
 multWithVal :: (NaryExp, Value) -> SimplifyM NaryExp
 multWithVal (e, v) = do
-    let pos = srclocOfNary e
-    let tp  = typeOfNary e
-    one    <- getp1 tp pos
-    if (v == one)
-    then return e
-    else do let vt = (Literal v pos)
-            case e of
-                NaryMult [] _ _ -> badSimplifyM $ SimplifyError pos
-                                                    (" In Simplify.hs, multWithVal: NaryMult is empty! ")
-                NaryMult (f:fs) _ _ -> do
-                    case f of
-                        Literal v' _ -> do
-                            vv' <- mulVals v v' pos
-                            return $ NaryMult ( Literal vv' pos : fs ) tp pos
-                        _ ->return $ NaryMult (vt:f:fs) tp pos
-                NaryPlus ts _ _ -> do
-                    ts' <- mapM ( \x -> multWithVal (x, v) ) ts
-                    return $ NaryPlus ts' tp pos
+  let pos = srclocOfNary e
+  let tp  = typeOfNary e
+  one    <- getp1 tp pos
+  if (v == one)
+  then return e
+  else do let vt = (Literal v pos)
+          case e of
+              NaryMult [] _ _ -> badSimplifyM $ SimplifyError pos
+                                                  (" In Simplify.hs, multWithVal: NaryMult is empty! ")
+              NaryMult (f:fs) _ _ -> do
+                  case f of
+                      Literal v' _ -> do
+                          vv' <- mulVals v v' pos
+                          return $ NaryMult ( Literal vv' pos : fs ) tp pos
+                      _ ->return $ NaryMult (vt:f:fs) tp pos
+              NaryPlus ts _ _ -> do
+                  ts' <- mapM ( \x -> multWithVal (x, v) ) ts
+                  return $ NaryPlus ts' tp pos
 
 
 --------------------------------------------
@@ -302,18 +257,18 @@ splitTerm :: NaryExp -> SimplifyM (NaryExp, Value)
 splitTerm (NaryMult [ ] _ pos) =
     badSimplifyM $ SimplifyError pos "splitTerm: Empty n-ary list of factors."
 splitTerm (NaryMult [f] tp pos) = do
-    one <- getp1 tp pos
-    case f of
-        (Literal v _) -> return (NaryMult [Literal one pos] tp pos, v  )
-        e             -> return (NaryMult [e]               tp pos, one)
+  one <- getp1 tp pos
+  case f of
+      (Literal v _) -> return (NaryMult [Literal one pos] tp pos, v  )
+      e             -> return (NaryMult [e]               tp pos, one)
 splitTerm ne@(NaryMult (f:fs) tp pos) =
-    case f of
-        (Literal v _) -> return (NaryMult fs tp pos, v)
-        _             -> do one <- getp1 tp pos
-                            return (ne, one)
+  case f of
+      (Literal v _) -> return (NaryMult fs tp pos, v)
+      _             -> do one <- getp1 tp pos
+                          return (ne, one)
 splitTerm e = do
-    one <- getp1 (typeOfNary e) (srclocOfNary e)
-    return (e, one)
+  one <- getp1 (typeOfNary e) (srclocOfNary e)
+  return (e, one)
 
 joinTerm :: (NaryExp, Value) -> SimplifyM NaryExp
 joinTerm ( (NaryMult [] _ pos), _) =
@@ -326,19 +281,10 @@ joinTerm ( e@(NaryMult fs tp pos), v)
 discriminate :: [(NaryExp, Value)] -> (NaryExp, Value) -> SimplifyM [(NaryExp, Value)]
 discriminate []          e        = return [e]
 discriminate e@((k,v):t) (k', v') =
-    if k == k'
-    then do v'' <- addVals v v' (srclocOfNary k')
-            return ( (k, v'') : t )
-    else return ( (k', v') : e )
-
-myNarySort :: (NaryExp, Value) -> (NaryExp, Value) -> Ordering
-myNarySort (n1, _) (n2, _) = compare n1 n2
-
-testIfKVNotZero :: (NaryExp, Value) -> Bool
-testIfKVNotZero (_,v) = case v of
-                  (IntVal  zr) -> zr /= 0
-                  (RealVal zr) -> zr /= 0.0
-                  _            -> False
+  if k == k'
+  then do v'' <- addVals v v' (srclocOfNary k')
+          return ( (k, v'') : t )
+  else return ( (k', v') : e )
 
 isValue1 :: Value -> Bool
 isValue1 (IntVal zr) = zr == 1
