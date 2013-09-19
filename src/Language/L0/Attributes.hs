@@ -579,9 +579,9 @@ lambdaType :: Ord vn =>
 lambdaType lam = returnType (lambdaReturnType lam) (lambdaParamDiets lam)
 
 
- -- | The result of applying the arguments of the given types to a
+-- | The result of applying the arguments of the given types to a
 -- function with the given return type, consuming its parameters with
--- the given diets .
+-- the given diets.
 returnType :: Ord vn => DeclTypeBase vn -> [Diet] -> [CompTypeBase vn] -> CompTypeBase vn
 returnType (Array et sz Nonunique NoInfo) ds args = Array et sz Nonunique als
   where als = mconcat $ map aliases $ zipWith maskAliases args ds
