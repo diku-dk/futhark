@@ -117,49 +117,32 @@
 \begin{frame}[fragile,t]
   \frametitle{Tuples}
 
-  No real pattern-matching (all branching is done with {\tt if}), but
-  patterns for extracting tuple elements.
+  Element extraction:
 
   \begin{colorcode}
     let (a, (b, c)) = f(x) in
     ...
   \end{colorcode}
 
-  Tuples can contain anything, and can be elements of arrays.  During
-  compilation, we convert arrays of tuples to tuples of arrays, and
-  flatten all tuples.
-
   \pause
 
+Tuple transformation:
+
   \begin{itemize}
-  \item {\tt (x,(y,z))} becomes {\tt (x,y,z)}.
-  \item Arrays of tuples are in a sense merely syntactic sugar for
-    tuples of arrays; the type {\tt [(int, real)]} is transformed to
-    {\tt ([int], [real])}.
+  \item {\tt (x,(y,z))} $\Rightarrow$ {\tt (x,y,z)}.
+  \item {\tt [(int, real)]} $\Rightarrow$ {\tt ([int], [real])}.
   \end{itemize}
 
-\end{frame}
+\pause
 
-\begin{frame}
-  \frametitle{Tuples, continued}
+Not always isomorphism.
 
-  Not always an isomorphism: {\tt [([int], [real])]}, is transformed to
-  {\tt([[int]], [[real]])}.  The latter has more stringent demands to
-  the regularity of arrays.  For example,
-
-  {\tt\{(\{1\}, \{1.0\}), (\{2, 3\}, \{2.0\})\}}
-
-  is a value of the former, but the first
-  element of the corresponding transformed tuple
-
-  {\tt(\{\{1\}, \{2, 3\}\}, \{\{1.0\}, \{2.0\}\})}
-
-  is not a regular array.
-
-  Hence, when determining whether a program generates regular arrays, we
-  must look at the \textit{transformed} values - in a sense, the
-  regularity requirement ``transcends'' the tuples.  Also, after
-  tuple-transformation, {\tt zip} and {\tt unzip} disappear.
+\begin{itemize}
+\item {\tt [([int], [real])]} $\Rightarrow$ {\tt([[int]], [[real]])}
+\item {\tt\{(\{1\}, \{1.0\}), (\{2, 3\}, \{2.0\})\}} $\Rightarrow$
+  {\tt(\{\{1\}, \{2, 3\}\}, \{\{1.0\}, \{2.0\}\})}, which is not
+  regular.
+\end{itemize}
 
 \end{frame}
 
@@ -173,7 +156,7 @@
       \begin{colorcode}
 loop (x = a) =
   for i < n do
-    \emp{g(x)}
+    \emp{g(i,x)}
 in \emph{body}
       \end{colorcode}
     \end{minipage}
@@ -186,9 +169,9 @@ in \emph{body}
 fun t f(int i, int n, t x) =
   if i >= n
     then x
-    else f(i+1, n, \emp{g(x)})
+    else f(i+1, n, \emp{g(i,x)})
 
-let x = f(i, n, a)
+let x = f(1, n, a)
 in \emph{body}
       \end{colorcode}
     \end{minipage}
@@ -196,8 +179,9 @@ in \emph{body}
 
   Where {\tt t} is the type of {\tt x}.
 
-  (A little more complicated in practice, as {\tt g(x)} may be an
-  expression containing free variables.)
+  (A little more complicated in practice, as {\tt g(i,x)} may be an
+  expression containing free variables, which must be passed as
+  additional arguments.)
 
 \end{frame}
 
@@ -282,7 +266,7 @@ fun [int] main(int n) =
   is its components.
 \pause
 \\\hfill\\
-  {\tt map(f, a, b) = unzip(map'(f', zip(a,b)))}
+  {\tt map2(f, a, b) = unzip(map(f', zip(a,b)))}
 
 
 \end{frame}
@@ -343,7 +327,7 @@ fun [int] main(int n) =
 
   \item Currently, don't fuse even if it intuitively negligible (\texttt{noFusion3})\smallskip
 
-  \item Don't fuse if it is incorrect. (\texttt{noFusion3})
+  \item Don't fuse if it is incorrect. (\texttt{noFusion4})
   \end{itemize}
 
 \end{frame}
