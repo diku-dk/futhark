@@ -85,19 +85,60 @@
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-\section{The \LO{} language}
+\section{Introduction}
+
+\begin{frame}[fragile,t]
+  \frametitle{Setting the stage}
+  \LO{} is a purely functional, data-parallel language intended to run
+  on vector processors (GPUs).  It looks like this:
+
+  \begin{colorcode}
+    fun int fact(int n) =
+      if n = 0 then 1 else n * fact(n-1)
+  \end{colorcode}
+
+  Or this:
+
+  \begin{colorcode}
+    fun int fact(int n) =
+      foldl(op *, 1, map (op + (1), iota(n-1)))
+  \end{colorcode}
+
+  \LO{} is an intermediate language, intended as a target for other,
+  higher-level languages.
+\end{frame}
+
+\begin{frame}[fragile,t]
+  \frametitle{Fusion}
+
+  Fusion is an optimisation to help avoid manifestation of
+  intermediate arrays.  For example:
+
+  \begin{colorcode}
+    let x = map(f, a) in
+    let y = map(g, x) in
+    ...
+  \end{colorcode}
+
+\pause
+
+We don't want to actually create the array {\tt x} in memory.  We can
+accomplish this by rewriting to:
+
+  \begin{colorcode}
+    let y = map(g . f, x) in
+    ...
+  \end{colorcode}
+\end{frame}
+
+\section{Fusion at a high level}
 
 \subsection{First-order fragment}
 
 \begin{frame}[fragile,t]
   \frametitle{The \LO{} Language}
 
-  Pure, functional and quite boring.
-
-  \begin{colorcode}
-    fun int fact(int n) =
-    if n = 0 then 1 else n * fact(n-1)
-  \end{colorcode}
+It looks like this:
 
   \pause
 
@@ -171,7 +212,7 @@ fun t f(int i, int n, t x) =
     then x
     else f(i+1, n, \emp{g(i,x)})
 
-let x = f(1, n, a)
+let x = f(0, n, a)
 in \emph{body}
       \end{colorcode}
     \end{minipage}
@@ -244,6 +285,29 @@ fun [int] main(int n) =
   used after the call, and unique return values are not aliased to any
   of the function parameters.
 
+\end{frame}
+
+\begin{frame}[fragile,t]
+  \frametitle{In-Place Array Update Fusion Restrictions}
+
+  \begin{block}{Incorrect Fusion (because of the in-place semantics)}
+    \begin{center}
+      \begin{colorcode}[fontsize=\scriptsize]
+fun real main([real] a) =
+let x      = map(f, a)   in
+let b <- a with [1] = 3.33 in
+let y      = map(g, x)     in
+b[1]+y[0]
+      \end{colorcode}
+      $\Downarrow$
+      \begin{colorcode}[fontsize=\scriptsize]
+fun real main([real] a) =
+let b <- a with [1] = 3.33   in
+let y      = map(g . f, a) in
+b[1]+y[0]
+      \end{colorcode}
+    \end{center}
+  \end{block}
 \end{frame}
 
 \subsection{Second-order array combinators}
@@ -330,29 +394,6 @@ fun [int] main(int n) =
   \item Don't fuse if it is incorrect. (\texttt{noFusion4})
   \end{itemize}
 
-\end{frame}
-
-\begin{frame}[fragile,t]
-  \frametitle{Example: In-Place Array Update Restrictions}
-
-  \begin{block}{Incorrect Fusion (because of the in-place semantics)}
-    \begin{center}
-      \begin{colorcode}[fontsize=\scriptsize]
-fun real main([real] arr) =
-let x      = map(f, arr)  in
-let arr[1] = 3.33         in
-let y      = map(g, x)    in
-y[0]
-      \end{colorcode}
-      $\Downarrow$
-      \begin{colorcode}[fontsize=\scriptsize]
-fun real main([real] arr) =
-let arr[1] = 3.33            in
-let y      = map(g . f, arr) in
-y[0]
-      \end{colorcode}
-    \end{center}
-  \end{block}
 \end{frame}
 
 \begin{frame}[fragile,t]
@@ -445,20 +486,11 @@ fun real main([real] arr) =
 
   \emp{Seems like everybody does fusion, but the explanations w.r.t. how are not very comprehensive.}
 
-  \bigskip
-  Anonymous quote:
-
-  \smallskip
-
-  \emph{``Existing fusion transforms rely on inlining to move producer
-    and consumer expressions next to each other, which allows
-    producer/consumer pairs to be detected. However, when let-bound
-    variables are used multiple times in the body of an expression,
-    un- restrained inlining can lead to duplication of work. Compilers
-    such as GHC, handle this situation by only inlining the
-    definitions of let- bound variables that have a single use site,
-    or by relying on some heuristic about the size of the resulting
-    code to decide what to inline ''}
+  \begin{itemize}
+    \item Inlining
+    \item Rewriting rules
+    \item ...
+  \end{itemize}
 
 \end{frame}
 
@@ -680,7 +712,7 @@ redomap(\mymath{\oplus}
 \begin{frame}[fragile,t]
   \frametitle{Finally ... }
 
-  Always fuse \emph{replicate} as it does not duplicates computation.
+  Always fuse \emph{replicate} as it does not duplicate computation.
 
   \bigskip
 
@@ -777,68 +809,7 @@ Interesting            &    & 1  & 1  &   &    &   \\\hline
 
 \end{frame}
 
-\section{Conclusions and future work}
-
-\begin{frame}[fragile,t]
-\frametitle{Future work: ISWIM}
-
-The fusion algebra for {\tt scan} and {\tt reduce} is relatively poor.
-The Interchange Scan With Inner Maps ({\sc iswim}) transform helps.
-
-\begin{colorcode}
-scan( fn [real] ([real] x, [real] y) => map(op +, x, y),
-     , {0.0,..,0.0}, a )
-transpose( map(fn [real] ([real] x) => scan(op +,0.0,x)
-         , transpose(a) )
-\end{colorcode}
-\pause
-We can generalise {\tt transpose} and {\tt map} to multiple
-dimensions.
-
-\begin{colorcode}
-// \emp{Generalization for nested map (similar for reduce)}
-map\mymath{\myindu{1}}(f, a\mymath{\myindx{1}},.., a\mymath{\myindx{k}}) \emphh{\mymath{\equiv}} map(g, a\mymath{\myindx{1}},.., a\mymath{\myindx{k}})
-map\mymath{\myindu{n}}(f, a\mymath{\myindx{1}},.., a\mymath{\myindx{k}}) \emphh{\mymath{\equiv}} map(fn ([\mymath{\beta\myindx{1}}],..,[\mymath{\beta\myindx{t}}]) ([\mymath{\alpha\myindx{1}}] x\mymath{\myindx{1}},..,[\mymath{\alpha\myindx{k}}] x\mymath{\myindx{k}}) =>
-                            map\mymath{\myindu{n-1}}(f, x\mymath{\myindx{1}},.., x\mymath{\myindx{k}}) , a\mymath{\myindx{1}},.., a\mymath{\myindx{k}} )
-
-// \emp{Generalization for transpose}:
-b=transpose(k,n,a) \mymath{\Rightarrow} a[i\mymath{\myindx{1}},..,i\mymath{\myindx{k}},i\mymath{\myindx{k+1}},..,i\mymath{\myindx{k+n}},..,i\mymath{\myindx{q}}] \emphh{\mymath{\equiv}}
-                      b[i\mymath{\myindx{1}},..,i\mymath{\myindx{k+1}},..,i\mymath{\myindx{k+n}},i\mymath{\myindx{k}},..,i\mymath{\myindx{q}}]
-
-// \emp{Fusing across transpose}:
-let x=map\mymath{\myindu{n}}(f,a) in let y=transpose(1,n-k,x) in map\mymath{\myindu{n}}(g,y)
-        \emphh{\mymath{\equiv}} map\mymath{\myindu{n}}(g o f, transpose(1,n-k,a) )
-\end{colorcode}
-
-\end{frame}
-
-\begin{frame}[fragile,t]
-\frametitle{Future work: ISWIM, continued}
-
-Arbitrary-nested-level generalisation of {\sc iswim}.
-
-\begin{colorcode}
-\emp{scan}( fn ( [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{1}}]],    .., [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{k}}]] )
-          ( [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{1}}]] x\mymath{\myindu{1}\myindx{1}}, .., [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{k}}]] x\mymath{\myindu{1}\myindx{k}},
-            [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{1}}]] x\mymath{\myindu{2}\myindx{1}}, .., [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{k}}]] x\mymath{\myindu{2}\myindx{k}} ) =>
-                \emphh{map}\mymath{\myindu{n}}(\mymath{\oplus}, x\mymath{\myindu{1}\myindx{1}},..., x\mymath{\myindu{1}\myindx{k}}, x\mymath{\myindu{2}\myindx{1}},..., x\mymath{\myindu{2}\myindx{k}})
-     , ne\mymath{\myindx{1}}, ..., ne\mymath{\myindx{k}}, a\mymath{\myindx{1}}, ..., a\mymath{\myindx{k}}) \emphh{\mymath{\equiv}}
-let (..., re\mymath{\myindx{t}}, ...) = (..., map\mymath{\myindu{n}}( replicate(1), ne\mymath{\myindx{t}} ), ...) in
-// replicate dim n of neutral elems so map sizes match
-let ( y\mymath{\myindx{1}},.., y\mymath{\myindx{k}} ) =
-  \emphh{map} (fn ( [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{1}}]], ..., [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{k}}]] )
-           ( [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{1}}]] x\mymath{\myindx{1}}, ..., [\mymath{\myindx{1}}[\mymath{\myindx{..n}}\mymath{\alpha\myindx{k}}]] x\mymath{\myindx{k}} ) =>
-          \emphh{map}\mymath{\myindu{n-1}}( fn ([\mymath{\myindx{1}}[\mymath{\myindx{..n-1}}\mymath{\alpha\myindx{1}}]],  ..., [\mymath{\myindx{1}}[\mymath{\myindx{..n-1}}\mymath{\alpha\myindx{k}}]] )
-                      ([\mymath{\myindx{1}}[\mymath{\myindx{..n-1}}\mymath{\alpha\myindx{1}}]] e\mymath{\myindx{1}},..,[\mymath{\myindx{1}}[\mymath{\myindx{..n-1}}\mymath{\alpha\myindx{k}}]] e\mymath{\myindx{k}},
-                       [\mymath{\myindx{1}}[\mymath{\myindx{..n-1}}\mymath{\alpha\myindx{1}}]] x\mymath{\myindx{1}},..,[\mymath{\myindx{1}}[\mymath{\myindx{..n-1}}\mymath{\alpha\myindx{k}}]] x\mymath{\myindx{k}})
-                     => \emp{scan}(\mymath{\oplus}, e\mymath{\myindx{1}}[0],..,e\mymath{\myindx{k}}[0], x\mymath{\myindx{1}},..,x\mymath{\myindx{k}})
-                 , re\mymath{\myindx{1}}, ..., re\mymath{\myindx{k}}, x\mymath{\myindx{1}}, ..., x\mymath{\myindx{k}} )
-       , transpose(1,n,a\mymath{\myindx{1}}), ..., transpose(1,n,a\mymath{\myindx{k}}) )
-in (transpose(n, q\mymath{\myindx{1}}-n, y\mymath{\myindx{1}}), ..., transpose(n, q\mymath{\myindx{k}}-n, y\mymath{\myindx{k}}))
-// transpose back the result; q\mymath{\myindx{t}}-n is the dimension of \mymath{\alpha\myindx{t}}
-\end{colorcode}
-
-\end{frame}
+\section{Conclusions}
 
 \begin{frame}[fragile,t]
   \frametitle{Conclusions}
