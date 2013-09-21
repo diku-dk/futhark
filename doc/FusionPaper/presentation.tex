@@ -89,13 +89,20 @@
 
 \begin{frame}[fragile,t]
   \frametitle{Setting the stage}
-  \LO{} is a purely functional, data-parallel language intended to run
-  on vector processors (GPUs).  It looks like this:
+
+  We want to develop a data-parallel functional language intended to
+  run on vector processors (GPUs).
+
+  \pause
+
+  We have designed a language we call \LO{}.  It looks like this:
 
   \begin{colorcode}
     fun int fact(int n) =
       if n = 0 then 1 else n * fact(n-1)
   \end{colorcode}
+
+\pause
 
   Or this:
 
@@ -129,49 +136,57 @@ accomplish this by rewriting to:
     let y = map(g . f, x) in
     ...
   \end{colorcode}
+
+  {\tt map}-{\tt map} fusion is only one case, but we'll use it as an
+  example.
 \end{frame}
 
-\section{Fusion at a high level}
-
-\subsection{First-order fragment}
-
-\begin{frame}[fragile,t]
-  \frametitle{The \LO{} Language}
-
-It looks like this:
-
-  \pause
-
-  \begin{itemize}
-  \item Primitive types: {\tt int}, {\tt char}, {\tt real}, {\tt bool}.
-  \item Arrays written as {\tt \{x, y, z, ...\}}; tuples as {\tt (x, y,
-      z, ...)}
-  \item Arrays can be multi-dimensional, and are always regular.
-  \item Built-in operations: {\tt split}, {\tt concat}, {\tt zip}, {\tt
-      unzip}, {\tt transpose}, etc.
-  \item Everything is fully monomorphic.
-  \item Type annotations required to prevent the need for type
-    reconstruction.
-  \end{itemize}
-\end{frame}
+\section{Fusion in \L0{}}
 
 \begin{frame}[fragile,t]
   \frametitle{Tuples}
 
-  Element extraction:
+  \LO{} has tuples that can contain anything.  Elements accessed
+  through pattern matching:
+
+\begin{colorcode}
+  let (a, (b, c)) = f(x) in
+\end{colorcode}
+
+\pause
+
+Functions {\tt zip} and {\tt unzip} transform tuples-of-arrays to
+arrays-of-tuples.
+
+\begin{itemize}
+\item {\tt zip(\{1,2,3\}, \{4,5,6\})} $\Rightarrow$ {\tt \{(1,4),
+    (2,5), (3,6)\}}.
+\item {\tt unzip(\{(1,4), (2,5), (3,6)\})} $\Rightarrow$ (\{1,2,3\},
+  \{4,5,6\}).
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}[fragile,t]
+  \frametitle{Tuples, continued}
+
+  Mapping across arrays of tuples:
 
   \begin{colorcode}
-    let (a, (b, c)) = f(x) in
-    ...
+    map(f, zip(a,b))
   \end{colorcode}
 
-  \pause
+  Complicates analysis.
+
+\pause
 
 Tuple transformation:
 
   \begin{itemize}
   \item {\tt (x,(y,z))} $\Rightarrow$ {\tt (x,y,z)}.
   \item {\tt [(int, real)]} $\Rightarrow$ {\tt ([int], [real])}.
+  \item {\tt map(f, zip(a,b))} $\Rightarrow$ {\tt map(f, a, b)}.
+  \item {\tt zip} and {\tt unzip} disappear.
   \end{itemize}
 
 \pause
@@ -223,6 +238,8 @@ in \emph{body}
   (A little more complicated in practice, as {\tt g(i,x)} may be an
   expression containing free variables, which must be passed as
   additional arguments.)
+
+  We don't attempt to fuse explicit loops.
 
 \end{frame}
 
@@ -310,8 +327,6 @@ b[1]+y[0]
   \end{block}
 \end{frame}
 
-\subsection{Second-order array combinators}
-
 \begin{frame}[fragile,t]
   \frametitle{Second-order array combinators (SOACs)}
 
@@ -330,9 +345,7 @@ b[1]+y[0]
   is its components.
 \pause
 \\\hfill\\
-  {\tt map2(f, a, b) = unzip(map(f', zip(a,b)))}
-
-
+  {\tt map(f, a, b) = unzip(map(f', zip(a,b)))}
 \end{frame}
 
 \begin{frame}[fragile,t]
@@ -368,7 +381,7 @@ b[1]+y[0]
 
 \end{frame}
 
-\section{Conservative Fusion}
+\section{Fusion Restrictions}
 
 \begin{frame}[fragile,t]
   \frametitle{What Not To Fuse?}
@@ -546,6 +559,35 @@ the code can be re-written using only regular (while) {\tt loop}s,
 \begin{frame}[fragile,t]
   \frametitle{T1-T2 Transform!}
 
+Compute control flow graph.
+
+\begin{tabular}{p{4.5cm}cp{4cm}}
+\begin{minipage}{4cm}
+\begin{colorcode}
+let x1 = map(f0, x2) in
+let x3 = map(f, x1) in
+let (y1, y2, y3) =
+  map(f1, x1, x2[1]) in
+let (z1, z2) =
+  map(f2, y1, y2) in
+let (q1, q2) =
+  map(g, y3, z1, y2, y3) in
+let res =
+  map(h, q1, q2, z2, y1, y3) ...
+\end{colorcode}
+\end{minipage}
+&
+$\Rightarrow$
+&
+\begin{minipage}{4cm}
+\includegraphics[height=30ex]{Figures/T1T2}
+\end{minipage}
+\end{tabular}
+\end{frame}
+
+\begin{frame}[fragile,t]
+  \frametitle{T1-T2 Transform!}
+
 \vbox{
 \begin{minipage}{0.46\columnwidth}
 \begin{center}
@@ -559,7 +601,7 @@ duplicates.
 \end{frame}
 
 \begin{frame}[fragile,t]
-  \frametitle{T1-T2 Transform!, continued}
+  \frametitle{T1-T2 Transform!}
 
 \vbox{
 \begin{minipage}{0.46\columnwidth}
