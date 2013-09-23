@@ -108,11 +108,22 @@
 
   \begin{colorcode}
     fun int fact(int n) =
-      foldl(op *, 1, map (op + (1), iota(n-1)))
+      reduce(op *, 1, map (op + (1), iota(n-1)))
   \end{colorcode}
+\end{frame}
 
-  \LO{} is an intermediate language, intended as a target for other,
-  higher-level languages.
+\begin{frame}
+\frametitle{Birds-Eye View of \LO{} Language}
+
+\begin{itemize}
+\item Pure {\em functional} \& {\em nested} parallelism \& {\em regular} arrays.\bigskip
+\item Inherently parallel second-order array combinators (\textsc{soac}),
+  e.g., {\tt map}, {\tt filter}, {\tt reduce}, {\tt scan} (binary associative operators)\bigskip
+\item Seeks a common ground between functional and imperative:\bigskip
+\item Do loops with in-place updates for sequential computation and cost garantees.\bigskip
+\item Transform program from functional towards imperative.
+\end{itemize}
+
 \end{frame}
 
 \begin{frame}[fragile,t]
@@ -139,6 +150,54 @@ accomplish this by rewriting to:
 
   {\tt map}-{\tt map} fusion is only one case, but we'll use it as an
   example.
+\end{frame}
+
+\begin{frame}
+\frametitle{Related Work}
+
+Two main directions:\bigskip
+\begin{itemize}
+    \item Delayed Arrays: index-function repres., e.g., Repa, Obsidian\smallskip
+            \begin{itemize}
+                \item user explicitly inserts array materlization points,\smallskip
+                \item may generate ugly indexing, e.g., memory coalesced access (?)\bigskip
+            \end{itemize}
+
+    \item Fuse when an array is consumed exactly once, e.g., DPH, Haskell;
+            implementation sensitive to the inlining engine.
+
+
+\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]
+  \frametitle{Problem Statement at a High-Level}
+
+\begin{block}{Code Example: x1, y1, y2 used multiple times; which can we fuse?  }
+\begin{colorcode}
+...
+let \emp{x1} = map(f0, x2) in
+
+let \{\emph{y1}, y2, y3\} = unzip ( map( f1, zip(\emp{x1}, x2[1]         ) ) ) in
+let \{z1, z2    \} = unzip ( map( f2, zip(\emph{y1}, y2            ) ) ) in
+
+let x3 = map(f,  \emp{x1}) in
+let s  = size(\emph{y1})    in
+
+let \{q1, q2    \} = unzip ( map( g,  zip(y3, z1, y2, y3    ) ) ) in
+let res          = unzip ( map( h,  zip(q1, q2, z2, \emph{y1}, y3) ) ) in
+    ...
+\end{colorcode}
+\end{block}
+
+{\em Fuse aggressively without duplicating computation.} Challenges:
+\begin{enumerate}
+    \item Nuisances to fusion, e.g., fuse across {\tt zip}, {\tt unzip}, {\tt size} (?)
+    \item Fusion algebra encompassing {\tt map}, {\tt reduce}, {\tt filter},\\
+            e.g., {\tt map} $\odot$ {\tt map} $\Rightarrow$ {\tt map}
+    \item How much can we fuse?  Any difference between \emp{\tt x1} and \emph{\tt y1}?
+\end{enumerate}
+
 \end{frame}
 
 \section{Fusion in \L0{}}
@@ -311,7 +370,7 @@ fun [int] main(int n) =
     \begin{center}
       \begin{colorcode}[fontsize=\scriptsize]
 fun real main([real] a) =
-let x      = map(f, a)   in
+let x      = map(f, a)     in
 let b <- a with [1] = 3.33 in
 let y      = map(g, x)     in
 b[1]+y[0]
@@ -320,7 +379,7 @@ b[1]+y[0]
       \begin{colorcode}[fontsize=\scriptsize]
 fun real main([real] a) =
 let b <- a with [1] = 3.33   in
-let y      = map(g . f, a) in
+let y      = map(g . f, a)   in
 b[1]+y[0]
       \end{colorcode}
     \end{center}
@@ -494,19 +553,6 @@ fun real main([real] arr) =
 
 
 \section{Discussion}
-\begin{frame}[fragile,t]
-  \frametitle{``Related Work''}
-
-  \emp{Seems like everybody does fusion, but the explanations w.r.t. how are not very comprehensive.}
-
-  \begin{itemize}
-    \item Inlining
-    \item Rewriting rules
-    \item ...
-  \end{itemize}
-
-\end{frame}
-
 
 \begin{frame}[fragile,t]
   \frametitle{How About This One?}
@@ -611,6 +657,20 @@ duplicates.
 \end{center}
 \end{minipage}
 }
+\end{frame}
+
+\begin{frame}[fragile, t]
+\frametitle{Fusion nuisances}
+
+\begin{colorcode}
+let \emphh{x} = map2(f, a)      in    let n = size(a)/2      in
+let n = size(\emp{x})/2       in    let (a\mymath{\myindx{1}},a\mymath{\myindx{2}})=split(n,a) in
+let (\emphh{x\mymath{\myindx{1}}},\emphh{x\mymath{\myindx{2}}})=split(n,\emp{x})  in \mymath{\Rightarrow} let \emphh{x\mymath{\myindx{1}}} = map2(f, a\mymath{\myindx{1}})   in
+let y = reduce2(g,\emphh{x\mymath{\myindx{1}}},\emphh{x\mymath{\myindx{2}}})..    let \emphh{x\mymath{\myindx{2}}} = map2(f, a\mymath{\myindx{2}})   in
+                              let y = reduce2(g,\emphh{x\mymath{\myindx{1}}},\emphh{x\mymath{\myindx{2}}})..
+\end{colorcode}
+The use of {\tt x} in {\tt size} and {\tt split} in the lefthand-side
+code would inhibit fusion.
 \end{frame}
 
 \begin{frame}[fragile,t]
@@ -800,20 +860,6 @@ fun [[int]] main(int N, [[int]] a, [[int]] b) =
       iota(N), a)
 \end{colorcode}
 
-\end{frame}
-
-\begin{frame}[fragile, t]
-\frametitle{Fusion hindrances}
-
-\begin{colorcode}
-let \emphh{x} = map2(f, a)      in    let n = size(a)/2      in
-let n = size(\emp{x})/2       in    let (a\mymath{\myindx{1}},a\mymath{\myindx{2}})=split(n,a) in
-let (\emphh{x\mymath{\myindx{1}}},\emphh{x\mymath{\myindx{2}}})=split(n,\emp{x})  in \mymath{\Rightarrow} let \emphh{x\mymath{\myindx{1}}} = map2(f, a\mymath{\myindx{1}})   in
-let y = reduce2(g,\emphh{x\mymath{\myindx{1}}},\emphh{x\mymath{\myindx{2}}})..    let \emphh{x\mymath{\myindx{2}}} = map2(f, a\mymath{\myindx{2}})   in
-                              let y = reduce2(g,\emphh{x\mymath{\myindx{1}}},\emphh{x\mymath{\myindx{2}}})..
-\end{colorcode}
-The use of {\tt x} in {\tt size} and {\tt split} in the lefthand-side
-code would inhibit fusion.
 \end{frame}
 
 \begin{frame}[fragile,t]
