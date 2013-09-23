@@ -25,6 +25,7 @@ data/*testout
 *.snm
 *.toc
 *.vrb
+*.nav
 
 !data/*.out
 !data/*/*.out
