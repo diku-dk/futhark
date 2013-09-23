@@ -311,11 +311,11 @@ Not always isomorphism.
 
   \pause
 
-  \begin{block}{Fibonacci function}
+  \begin{block}{Contrived example}
     \begin{colorcode}
 fun [int] main(int n) =
   let res = iota(n) in
-  let res = res with [1] = res[0] + res[2]
+  let res = res with [1] <- res[0] + res[2]
   in res
     \end{colorcode}
   \end{block}
@@ -387,7 +387,7 @@ fun real main([real] a) =
   {\tt redomap($f_{r}$, $f_{m}$, $x_{1}$, \ldots, $x_{n}$, $e_{1}$, \ldots, $e_{n}$)}
 
   Not part of the external language, but useful for the fusion
-  algebra.  Semantics is the same as\\{\tt foldl($f_{m}$, $(x_{1},\ldots,x_{n})$, zip($e_{1}$, \ldots, $e_{n}$))}.
+  algebra.  Semantics is the same as\\{\tt reduce($f_{m}$, $(x_{1},\ldots,x_{n})$, zip($e_{1}$, \ldots, $e_{n}$))}.
 \pause
 \begin{block}{List homomorphism} {\tt (red $\odot$ e) . (map f)} can
   be transformed to:  \\
@@ -465,66 +465,65 @@ fun real main([real] a, [[real]] b) =
   \end{block}
 \end{frame}
 
-\section{Simple Fusion}
+% \section{Simple Fusion}
 
-\begin{frame}[fragile,t]
-  \frametitle{What Can We Fuse?}
+% \begin{frame}[fragile,t]
+%   \frametitle{What Can We Fuse?}
 
-  \begin{block}{Simple Fusion Example}\vspace{-1ex}
-    \begin{columns}
-      \column{0.3\textwidth}\vspace{-1ex}
-      \begin{colorcode}[fontsize=\scriptsize]
-fun real f(real a) = a + 3.0
-fun real g(real a) = a * 3.0
+%   \begin{block}{Simple Fusion Example}\vspace{-1ex}
+%     \begin{columns}
+%       \column{0.3\textwidth}\vspace{-1ex}
+%       \begin{colorcode}[fontsize=\scriptsize]
+% fun real f(real a) = a + 3.0
+% fun real g(real a) = a * 3.0
 
-fun real main([real] arr) =
-  let x = map(f, arr) in
-  let y = map(g, x)   in
-  let z = map(g, y)   in
-  z[0]
-      \end{colorcode}
-      \column{0.45\textwidth}
-      \begin{colorcode}[fontsize=\scriptsize]
-fun real main([real] arr) =
-  let z = map(fn real (real a) =>
-                let b = a + 3.0 in
-                let c = b * 3.0 in
-                c * 3.0, arr) in
-  z[0]
-      \end{colorcode}
-    \end{columns}
-  \end{block}
+% fun real main([real] arr) =
+%   let x = map(f, arr) in
+%   let y = map(g, x)   in
+%   let z = map(g, y)   in
+%   z[0]
+%       \end{colorcode}
+%       \column{0.45\textwidth}
+%       \begin{colorcode}[fontsize=\scriptsize]
+% fun real main([real] arr) =
+%   let z = map(fn real (real a) =>
+%                 let b = a + 3.0 in
+%                 let c = b * 3.0 in
+%                 c * 3.0, arr) in
+%   z[0]
+%       \end{colorcode}
+%     \end{columns}
+%   \end{block}
 
-\end{frame}
-\begin{frame}[fragile,t]
-  \frametitle{What Can We Fuse?}
-  \begin{block}{Simple Fusion Example (Cont)}
-\begin{center}
-    \begin{colorcode}[fontsize=\scriptsize]
-fun real f(real a) = a + 3.0
-fun real h1(real a, real b, real c) = a * b + c
-fun real h2(real a, real b) = a * b
-fun real main([real] arr) =
-  let x = map(f, arr) in
-  let y = map(f, arr) in
-  let z = if arr[0] < 0.0
-            then map(h1, x, y, x)
-            else map(h2, y, x) in
-  z[0]
-    \end{colorcode}
-$\Downarrow$
-    \begin{colorcode}
-fun real main([real] arr) =
-  let z =
-    if arr[0] < 0.0 then
-      map(fn real (real a) => (a + 3.0) * (a + 3.0) + (a + 3.0), arr)
-    else map(fn real (real a) => (a + 3.0) * (a + 3.0), arr_4)
-  in z[0]
-    \end{colorcode}
-\end{center}
-  \end{block}
-\end{frame}
-
+% \end{frame}
+% \begin{frame}[fragile,t]
+%   \frametitle{What Can We Fuse?}
+%   \begin{block}{Simple Fusion Example (Cont)}
+% \begin{center}
+%     \begin{colorcode}[fontsize=\scriptsize]
+% fun real f(real a) = a + 3.0
+% fun real h1(real a, real b, real c) = a * b + c
+% fun real h2(real a, real b) = a * b
+% fun real main([real] arr) =
+%   let x = map(f, arr) in
+%   let y = map(f, arr) in
+%   let z = if arr[0] < 0.0
+%             then map(h1, x, y, x)
+%             else map(h2, y, x) in
+%   z[0]
+%     \end{colorcode}
+% $\Downarrow$
+%     \begin{colorcode}
+% fun real main([real] arr) =
+%   let z =
+%     if arr[0] < 0.0 then
+%       map(fn real (real a) => (a + 3.0) * (a + 3.0) + (a + 3.0), arr)
+%     else map(fn real (real a) => (a + 3.0) * (a + 3.0), arr_4)
+%   in z[0]
+%     \end{colorcode}
+% \end{center}
+%   \end{block}
+% \end{frame}
 
 \section{Discussion}
 
@@ -611,8 +610,10 @@ $\Rightarrow$
 \vbox{
 \begin{minipage}{0.46\columnwidth}
 \begin{center}
-\includegraphics[height=30ex]{Figures/T1T2}
+\begin{tabular}{p{5.3cm}||p{4cm}}
+\includegraphics[height=30ex]{Figures/T1T2}&
 \includegraphics[height=30ex]{Figures/T1T2Fuse1}
+\end{tabular}
 \end{center}
 \end{minipage}
 }
@@ -626,8 +627,10 @@ duplicates.
 \vbox{
 \begin{minipage}{0.46\columnwidth}
 \begin{center}
-\includegraphics[height=30ex]{Figures/T1T2Fuse2}
+\begin{tabular}{p{5.3cm}||p{4cm}}
+\includegraphics[height=30ex]{Figures/T1T2Fuse2}&
 \includegraphics[height=30ex]{Figures/T1T2Fuse3}
+\end{tabular}
 \end{center}
 \end{minipage}
 }
@@ -637,11 +640,11 @@ duplicates.
 \frametitle{Fusion nuisances}
 
 \begin{colorcode}
-let \emphh{x} = map2(f, a)      in    let n = size(a)/2      in
+let \emphh{x} = map(f, a)       in    let n = size(a)/2      in
 let n = size(\emp{x})/2       in    let (a\mymath{\myindx{1}},a\mymath{\myindx{2}})=split(n,a) in
-let (\emphh{x\mymath{\myindx{1}}},\emphh{x\mymath{\myindx{2}}})=split(n,\emp{x})  in \mymath{\Rightarrow} let \emphh{x\mymath{\myindx{1}}} = map2(f, a\mymath{\myindx{1}})   in
-let y = reduce2(g,\emphh{x\mymath{\myindx{1}}},\emphh{x\mymath{\myindx{2}}})..    let \emphh{x\mymath{\myindx{2}}} = map2(f, a\mymath{\myindx{2}})   in
-                              let y = reduce2(g,\emphh{x\mymath{\myindx{1}}},\emphh{x\mymath{\myindx{2}}})..
+let (\emphh{x\mymath{\myindx{1}}},\emphh{x\mymath{\myindx{2}}})=split(n,\emp{x})  in \mymath{\Rightarrow} let \emphh{x\mymath{\myindx{1}}} = map(f, a\mymath{\myindx{1}})   in
+let y = reduce(g,\emphh{x\mymath{\myindx{1}}},\emphh{x\mymath{\myindx{2}}})..     let \emphh{x\mymath{\myindx{2}}} = map(f, a\mymath{\myindx{2}})   in
+                              let y = reduce(g,\emphh{x\mymath{\myindx{1}}},\emphh{x\mymath{\myindx{2}}})..
 \end{colorcode}
 The use of {\tt x} in {\tt size} and {\tt split} in the lefthand-side
 code would inhibit fusion.
@@ -672,8 +675,8 @@ code would inhibit fusion.
 \column{0.45\textwidth}\vspace{-2ex}
 \begin{colorcode}[fontsize=\scriptsize]
 let \emp{r} = replicate(a+b, N) in
-map2( fn [int] (int i) =>
-        map2( fn int (int j, int r0)
+map( fn [int] (int i) =>
+        map( fn int (int j, int r0)
                  => i + j + \emp{r0},
               iota(N), \emp{r}
             )
@@ -684,8 +687,8 @@ map2( fn [int] (int i) =>
 \begin{colorcode}[fontsize=\scriptsize]
 let \emp{r0} = a + b
 //let \emp{r}  = replicate(r0, N) in
-map2( fn [int] (int i) =>
-        map2( fn int ( int j )
+map( fn [int] (int i) =>
+        map( fn int ( int j )
                   => i + j + \emp{r0},
               iota(N)
             )
@@ -737,6 +740,7 @@ The unfused version that computes {\tt filter} is significantly more expensive.
 \begin{frame}[fragile]
 \frametitle{Fusion Algebra Motivation, Result}
 
+\begin{block}{Fusion Result}
 \begin{colorcode}
 fun [int] main(int N, [int] dirs_vs) =
   map(fn int (int i) => let
@@ -746,10 +750,13 @@ fun [int] main(int N, [int] dirs_vs) =
                 let b = ((i >> 1) ^ i) & t in
                 if b = t
                   then dirs_vs[j]
-                  else 0,
-              0, iota(32)) in
+                  else \empr{0},
+              \empr{0}, iota(32)) in
       ,iota(N)) in
 \end{colorcode}
+\end{block}
+
+Note that {\tt filter} is entirely gone.
 \end{frame}
 
 \begin{frame}[fragile,t]
