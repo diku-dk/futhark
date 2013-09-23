@@ -118,10 +118,12 @@
 \begin{itemize}
 \item Pure {\em functional} \& {\em nested} parallelism \& {\em regular} arrays.\bigskip
 \item Inherently parallel second-order array combinators (\textsc{soac}),
-  e.g., {\tt map}, {\tt filter}, {\tt reduce}, {\tt scan} (binary associative operators)\bigskip
+  e.g., {\tt map}, {\tt filter}, {\tt reduce} and {\tt scan} (binary associative operators).\bigskip
 \item Seeks a common ground between functional and imperative:\bigskip
+\begin{itemize}
 \item Do loops with in-place updates for sequential computation and cost garantees.\bigskip
 \item Transform program from functional towards imperative.
+\end{itemize}
 \end{itemize}
 
 \end{frame}
@@ -178,13 +180,13 @@ Two main directions:\bigskip
 ...
 let \emp{x1} = map(f0, x2) in
 
-let \{\emph{y1}, y2, y3\} = unzip ( map( f1, zip(\emp{x1}, x2[1]         ) ) ) in
-let \{z1, z2    \} = unzip ( map( f2, zip(\emph{y1}, y2            ) ) ) in
+let (\emph{y1}, y2, y3) = unzip ( map( f1, zip(\emp{x1}, x2[1]         ) ) ) in
+let (z1, z2    ) = unzip ( map( f2, zip(\emph{y1}, y2            ) ) ) in
 
 let x3 = map(f,  \emp{x1}) in
 let s  = size(\emph{y1})    in
 
-let \{q1, q2    \} = unzip ( map( g,  zip(y3, z1, y2, y3    ) ) ) in
+let (q1, q2    ) = unzip ( map( g,  zip(y3, z1, y2, y3    ) ) ) in
 let res          = unzip ( map( h,  zip(q1, q2, z2, \emph{y1}, y3) ) ) in
     ...
 \end{colorcode}
@@ -194,7 +196,7 @@ let res          = unzip ( map( h,  zip(q1, q2, z2, \emph{y1}, y3) ) ) in
 \begin{enumerate}
     \item Nuisances to fusion, e.g., fuse across {\tt zip}, {\tt unzip}, {\tt size} (?)
     \item Fusion algebra encompassing {\tt map}, {\tt reduce}, {\tt filter},\\
-            e.g., {\tt map} $\odot$ {\tt map} $\Rightarrow$ {\tt map}
+            e.g., {\tt map} $\circ$ {\tt map} $\Rightarrow$ {\tt map}
     \item How much can we fuse?  Any difference between \emp{\tt x1} and \emph{\tt y1}?
 \end{enumerate}
 
@@ -245,7 +247,7 @@ Tuple transformation:
   \item {\tt (x,(y,z))} $\Rightarrow$ {\tt (x,y,z)}.
   \item {\tt [(int, real)]} $\Rightarrow$ {\tt ([int], [real])}.
   \item {\tt map(f, zip(a,b))} $\Rightarrow$ {\tt map(f, a, b)}.
-  \item {\tt zip} and {\tt unzip} disappear.
+  \item {\tt zip} and {\tt unzip} disappear.  {\em This is the important part.}
   \end{itemize}
 
 \pause
@@ -261,46 +263,46 @@ Not always isomorphism.
 
 \end{frame}
 
-\begin{frame}[fragile,t]
-  \frametitle{Do-loops}
+% \begin{frame}[fragile,t]
+%   \frametitle{Do-loops}
 
-  \LO{} supports sequential do-loops with a special syntax.\\
-  \hfill\\
-  \begin{block}{Loop to recursive function}
-    \begin{minipage}{0.2\columnwidth}
-      \begin{colorcode}
-loop (x = a) =
-  for i < n do
-    \emp{g(i,x)}
-in \emph{body}
-      \end{colorcode}
-    \end{minipage}
-    \pause
-    \begin{minipage}{0.05\columnwidth}
-      $\Rightarrow$
-    \end{minipage}
-    \begin{minipage}{0.1\columnwidth}
-      \begin{colorcode}
-fun t f(int i, int n, t x) =
-  if i >= n
-    then x
-    else f(i+1, n, \emp{g(i,x)})
+%   \LO{} supports sequential do-loops with a special syntax.\\
+%   \hfill\\
+%   \begin{block}{Loop to recursive function}
+%     \begin{minipage}{0.2\columnwidth}
+%       \begin{colorcode}
+% loop (x = a) =
+%   for i < n do
+%     \emp{g(i,x)}
+% in \emph{body}
+%       \end{colorcode}
+%     \end{minipage}
+%     \pause
+%     \begin{minipage}{0.05\columnwidth}
+%       $\Rightarrow$
+%     \end{minipage}
+%     \begin{minipage}{0.1\columnwidth}
+%       \begin{colorcode}
+% fun t f(int i, int n, t x) =
+%   if i >= n
+%     then x
+%     else f(i+1, n, \emp{g(i,x)})
 
-let x = f(0, n, a)
-in \emph{body}
-      \end{colorcode}
-    \end{minipage}
-  \end{block}
+% let x = f(0, n, a)
+% in \emph{body}
+%       \end{colorcode}
+%     \end{minipage}
+%   \end{block}
 
-  Where {\tt t} is the type of {\tt x}.
+%   Where {\tt t} is the type of {\tt x}.
 
-  (A little more complicated in practice, as {\tt g(i,x)} may be an
-  expression containing free variables, which must be passed as
-  additional arguments.)
+%   (A little more complicated in practice, as {\tt g(i,x)} may be an
+%   expression containing free variables, which must be passed as
+%   additional arguments.)
 
-  We don't attempt to fuse explicit loops.
+%   We don't attempt to fuse explicit loops.
 
-\end{frame}
+% \end{frame}
 
 \begin{frame}[fragile,t]
   \frametitle{In-place updates}
@@ -317,10 +319,8 @@ in \emph{body}
   \begin{block}{Fibonacci function}
     \begin{colorcode}
 fun [int] main(int n) =
-  let res = replicate(n, 1) in
-  loop (res) = for i < n-2 do
-    let res <- res with [i+2] = res[i] + res[i+1] in
-    res
+  let res = iota(n) in
+  let res = res with [1] = res[0] + res[2]
   in res
     \end{colorcode}
   \end{block}
@@ -341,20 +341,17 @@ fun [int] main(int n) =
   \end{colorcode}
 
   Acceptable iff {\tt a} (or any of its aliases) are not used
-  afterwards, and it is not alised to a {\it non-unique} function
+  afterwards, and it is not aliased to a {\it non-unique} function
   parameter.
 
   \begin{colorcode}
-    fun \emp{*}[int] computefibs(\emp{*}[int] arr) =
+    fun \emp{*}[int] fibs(int i, \emp{*}[int] arr) =
       let n = size(arr) in
-      let arr[0] = 1 in
-      let arr[1] = 1 in
-      loop (arr) = for i < n-2 do
-        let x = arr[i] in
-        let y = arr[i+1] in
-        let arr[i+2] = x + y in
-        arr
-      in arr
+      if i == n
+        then arr
+        else
+          let arr = arr with [i] <- arr[i-1] + arr[i-2] in
+          fibs(i+1, arr)
   \end{colorcode}
 
   The {\tt *} denotes a {\em unique} value.  Unique arguments are not
@@ -370,41 +367,23 @@ fun [int] main(int n) =
     \begin{center}
       \begin{colorcode}[fontsize=\scriptsize]
 fun real main([real] a) =
-let x      = map(f, a)     in
-let b <- a with [1] = 3.33 in
-let y      = map(g, x)     in
+let x      = map(f, a)    in
+let b = a with [1] = 3.33 in
+let y      = map(g, x)    in
 b[1]+y[0]
       \end{colorcode}
       $\Downarrow$
       \begin{colorcode}[fontsize=\scriptsize]
 fun real main([real] a) =
-let b <- a with [1] = 3.33   in
-let y      = map(g . f, a)   in
+let b = a with [1] = 3.33   in
+let y      = map(g . f, a)  in
 b[1]+y[0]
       \end{colorcode}
     \end{center}
   \end{block}
-\end{frame}
 
-\begin{frame}[fragile,t]
-  \frametitle{Second-order array combinators (SOACs)}
+(Contrived - in real programs, we can't just swap statements.)
 
-  All higher-order functions are built in.
-
-  \begin{block}{Built-in higher order functions}
-    {\tt map($f$, $e_{1}$, \ldots, $e_{n}$)} \\
-    {\tt filter($f$, $e_{1}$, \ldots, $e_{n}$)} \\
-    {\tt reduce($f$, $x_{1}$, \ldots, $x_{n}$, $e_{1}$, \ldots, $e_{n}$)} \\
-    {\tt scan($f$, $x_{1}$, \ldots, $x_{n}$, $e_{1}$, \ldots, $e_{n}$)} \\
-    {\tt redomap($f_{r}$, $f_{m}$, $x_{1}$, \ldots, $x_{n}$, $e_{1}$, \ldots, $e_{n}$)} \\
-  \end{block}
-
-  We assume that all tuples are flat and passed element-wise - e.g., if
-  the accumulator to {\tt reduce} is a tuple, $x_{1}$, \ldots, $x_{n}$
-  is its components.
-\pause
-\\\hfill\\
-  {\tt map(f, a, b) = unzip(map(f', zip(a,b)))}
 \end{frame}
 
 \begin{frame}[fragile,t]
@@ -811,28 +790,42 @@ redomap(\mymath{\oplus}
 }
 \end{frame}
 
-\begin{frame}[fragile,t]
-  \frametitle{Finally ... }
+\begin{frame}[fragile]
+  \frametitle{Always Fuse Replicate (Not Duplicating Computation)}
 
-  Always fuse \emph{replicate} as it does not duplicate computation.
-
-  \bigskip
-
-\begin{colorcode}
-fun   int    redplus1( [int]  a) = reduce(op +, 0, a)
-fun  [int]   redplus2([[int]] a) = map   (redplus1, a)
-
-fun  [int]   mul1( [int]  a,  [int]  b) = map(op *, a, b)
-fun [[int]]  mul2([[int]] a, [[int]] b) = map(mul1, a, b)
-
-fun [[int]]  replin(int N, [int] a) = replicate(N, a)
-
-fun [[int]] main(int N, [[int]] a, [[int]] b ) =
-    let br  = replicate( N, transpose(b) ) in
-    let ar  = map      ( replin(N),    a ) in
-    let abr = map  (mul2, ar, br)          in
-        map(redplus2, abr)
+\begin{block}{ Always Fuse Replicate Contrived Example }
+\begin{columns}
+\column{0.45\textwidth}\vspace{-2ex}
+\begin{colorcode}[fontsize=\scriptsize]
+let \emp{r} = replicate(a+b, N) in
+map2( fn [int] (int i) =>
+        map2( fn int (int j, int r0)
+                 => i + j + \emp{r0},
+              iota(N), \emp{r}
+            )
+      iota(N)
+    ) ...
 \end{colorcode}
+\column{0.45\textwidth}\vspace{-2ex}
+\begin{colorcode}[fontsize=\scriptsize]
+let \emp{r0} = a + b
+//let \emp{r}  = replicate(r0, N) in
+map2( fn [int] (int i) =>
+        map2( fn int ( int j )
+                  => i + j + \emp{r0},
+              iota(N)
+            )
+      iota(N)
+    ) ...
+\end{colorcode}
+\end{columns}
+\end{block}
+
+\bigskip
+
+The example shows that fusing {\tt replicate} \emp{inside} a map
+still does not duplicate computation
+
 \end{frame}
 
 \begin{frame}[fragile,t]
@@ -903,7 +896,7 @@ Interesting            &    & 1  & 1  &   &    &   \\\hline
   \frametitle{Conclusions}
 
   We can fuse even somewhat complex dataflow - particularly, when
-  producer/consumer output/input sets to do match exactly.
+  producer/consumer output/input sets do not match exactly.
 
   No good experimental results yet.
 
