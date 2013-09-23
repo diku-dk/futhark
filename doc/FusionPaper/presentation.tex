@@ -305,7 +305,7 @@ Not always isomorphism.
 % \end{frame}
 
 \begin{frame}[fragile,t]
-  \frametitle{In-place updates}
+  \frametitle{In-Place Updates}
 
   Let-with construct used to update slices of arrays.
 
@@ -331,7 +331,7 @@ fun [int] main(int n) =
 \end{frame}
 
 \begin{frame}[fragile,t]
-  \frametitle{In-place updates part 2: Uniqueness types}
+  \frametitle{In-Place Updates Part 2: Uniqueness Types}
 
   We can do this by aliasing analysis and {\em uniqueness types}.
 
@@ -669,6 +669,95 @@ code would inhibit fusion.
   \end{itemize}
 \end{frame}
 
+\begin{frame}[fragile]
+  \frametitle{Always Fuse Replicate (Not Duplicating Computation)}
+
+\begin{block}{ Always Fuse Replicate Contrived Example }
+\begin{columns}
+\column{0.45\textwidth}\vspace{-2ex}
+\begin{colorcode}[fontsize=\scriptsize]
+let \emp{r} = replicate(a+b, N) in
+map2( fn [int] (int i) =>
+        map2( fn int (int j, int r0)
+                 => i + j + \emp{r0},
+              iota(N), \emp{r}
+            )
+      iota(N)
+    ) ...
+\end{colorcode}
+\column{0.45\textwidth}\vspace{-2ex}
+\begin{colorcode}[fontsize=\scriptsize]
+let \emp{r0} = a + b
+//let \emp{r}  = replicate(r0, N) in
+map2( fn [int] (int i) =>
+        map2( fn int ( int j )
+                  => i + j + \emp{r0},
+              iota(N)
+            )
+      iota(N)
+    ) ...
+\end{colorcode}
+\end{columns}
+\end{block}
+
+\bigskip
+
+The example shows that fusing {\tt replicate} \emp{inside} a map
+still does not duplicate computation
+
+\end{frame}
+
+\begin{frame}[fragile]
+  \frametitle{Fusion Algebra Motivation}
+
+\begin{block}{ Fusion Produces Efficient GPU Code}
+\begin{colorcode}
+fun int grayCode( int x            ) = (x >> 1) ^ x
+fun int index   ( [int] arr, int i ) = arr[i]
+fun bool testBit( int n,   int ind ) = let t = (1 << ind) in (n & t) = t
+
+fun int sobolNum(int bits_num, [int] dir_vs, int n ) =
+    let bits    = iota   ( bits_num )                   in
+    let indices = \emp{filter} ( testBit(grayCode(n)), bits ) in
+    let xorvals = \emp{map}( index(dir_vs), indices )         in
+
+        \emp{reduce}( op ^, 0, xorvals )
+
+fun [int] main(int N, [int] dirs_vs) =
+    map( sobolNum(32, dirs_vs), iota(N) )
+\end{colorcode}
+\end{block}
+
+{\tt reduce} \mymath{\odot} {\tt map} \mymath{\odot} {\tt filter} $\Rightarrow$ redomap( ..., 0, 32 )
+
+\smallskip
+
+The segmented reduce of CT size 32 can be computed in
+local (fast) memory inside a local workgroup.
+%
+The unfused version that computes {\tt filter} is significantly more expensive.
+
+\end{frame}
+
+\begin{frame}[fragile]
+\frametitle{Fusion Algebra Motivation, Result}
+
+\begin{colorcode}
+fun [int] main(int N, [int] dirs_vs) =
+  map(fn int (int i) => let
+      redomap(fn int (int x, int y) =>
+                x ^ y,
+              fn int (int j) =>
+                let t = 1 << j in
+                let b = ((i >> 1) ^ i) & t in
+                if b = t
+                  then dirs_vs[j]
+                  else 0,
+              0, iota(32)) in
+      ,iota(N)) in
+\end{colorcode}
+\end{frame}
+
 \begin{frame}[fragile,t]
   \frametitle{Fusion algebra}
 
@@ -788,44 +877,6 @@ redomap(\mymath{\oplus}
 \end{colorcode}
 \end{minipage}
 }
-\end{frame}
-
-\begin{frame}[fragile]
-  \frametitle{Always Fuse Replicate (Not Duplicating Computation)}
-
-\begin{block}{ Always Fuse Replicate Contrived Example }
-\begin{columns}
-\column{0.45\textwidth}\vspace{-2ex}
-\begin{colorcode}[fontsize=\scriptsize]
-let \emp{r} = replicate(a+b, N) in
-map2( fn [int] (int i) =>
-        map2( fn int (int j, int r0)
-                 => i + j + \emp{r0},
-              iota(N), \emp{r}
-            )
-      iota(N)
-    ) ...
-\end{colorcode}
-\column{0.45\textwidth}\vspace{-2ex}
-\begin{colorcode}[fontsize=\scriptsize]
-let \emp{r0} = a + b
-//let \emp{r}  = replicate(r0, N) in
-map2( fn [int] (int i) =>
-        map2( fn int ( int j )
-                  => i + j + \emp{r0},
-              iota(N)
-            )
-      iota(N)
-    ) ...
-\end{colorcode}
-\end{columns}
-\end{block}
-
-\bigskip
-
-The example shows that fusing {\tt replicate} \emp{inside} a map
-still does not duplicate computation
-
 \end{frame}
 
 \begin{frame}[fragile,t]
