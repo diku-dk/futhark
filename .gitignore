@@ -22,6 +22,9 @@ data/*testout
 *.prof
 *.o
 *.hi
+*.snm
+*.toc
+*.vrb
 
 !data/*.out
 !data/*/*.out
