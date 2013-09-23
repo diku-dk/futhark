@@ -745,12 +745,12 @@ The unfused version that computes {\tt filter} is significantly more expensive.
 fun [int] main(int N, [int] dirs_vs) =
   map(fn int (int i) => let
       redomap(op ^,
-              fn int (int j) =>
+              fn int (int acc, int j) =>
                 let t = 1 << j in
                 let b = ((i >> 1) ^ i) & t in
                 if b = t
-                  then dirs_vs[j]
-                  else \empr{0},
+                  then acc ^ dirs_vs[j]
+                  else acc,
               \empr{0}, iota(32)) in
       ,iota(N)) in
 \end{colorcode}
