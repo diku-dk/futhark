@@ -71,10 +71,9 @@ simplifyNary (BinOp Plus e1 e2 tp pos) = do
      let terms = (getTerms e1') ++ (getTerms e2')
      splittedTerms <- mapM splitTerm terms
      let sortedTerms = L.sortBy (\(n1,_) (n2,_) -> compare n1 n2) splittedTerms
-     merged <- (foldM discriminate [] sortedTerms)
-     -- The above function also reverses the list, we would like to keep it in a ascending order.
-     let fixedOrder = reverse merged
-     terms' <- mapM joinTerm fixedOrder
+     -- The foldM function also reverses the list, we would like to keep it in a ascending order.
+     merged <- liftM reverse $ foldM discriminate [] sortedTerms
+     terms' <- mapM joinTerm merged
 
      return $ NaryPlus terms' tp pos
 
