@@ -1,0 +1,4 @@
+fun int main(int a) =
+    if not (4 + a = a)
+    then (a*2) + (a*~2)
+    else a
