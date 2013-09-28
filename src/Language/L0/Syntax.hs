@@ -298,6 +298,8 @@ data ExpBase ty vn =
             | Filter2 (LambdaBase ty vn) [ExpBase ty vn]          SrcLoc
             | Redomap2(LambdaBase ty vn) (LambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] [ty vn] SrcLoc
 
+            | Min (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
+
               deriving (Eq, Ord, Show)
 
 instance Located (ExpBase ty vn) where
@@ -337,6 +339,7 @@ instance Located (ExpBase ty vn) where
   locOf (Scan2 _ _ _ _ pos) = locOf pos
   locOf (Filter2 _ _ pos) = locOf pos
   locOf (Redomap2 _ _ _ _ _ pos) = locOf pos
+  locOf (Min _ _ _ pos) = locOf pos
 
 -- | Eagerly evaluated binary operators.  In particular, the
 -- short-circuited operators && and || are not here, although an

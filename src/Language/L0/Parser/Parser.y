@@ -67,6 +67,7 @@ import Language.L0.Parser.Lexer
       '<'             { L $$ LTH }
       '<='            { L $$ LEQ }
       pow             { L $$ POW }
+      min             { L $$ MIN }
       '<<'            { L $$ SHIFTL }
       '>>'            { L $$ SHIFTR }
       '|'             { L $$ BOR }
@@ -222,6 +223,10 @@ Exp  :: { UncheckedExp }
      | Exp '&&' Exp   { And $1 $3 $2 }
      | Exp '||' Exp   { Or $1 $3 $2 }
      | Exp pow Exp    { BinOp Pow $1 $3 NoInfo $2 }
+
+     | min '(' Exp ',' Exp ')'
+                      { Min $3 $5 NoInfo $1 }
+
      | Exp '>>' Exp   { BinOp ShiftR $1 $3 NoInfo $2 }
      | Exp '<<' Exp   { BinOp ShiftL $1 $3 NoInfo $2 }
      | Exp '&' Exp    { BinOp Band $1 $3 NoInfo $2 }

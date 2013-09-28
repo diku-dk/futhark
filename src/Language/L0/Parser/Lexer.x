@@ -83,6 +83,7 @@ keyword s =
     "True"         -> TRUE
     "False"        -> FALSE
     "pow"          -> POW
+    "min"          -> MIN
 
     "iota"         -> IOTA
     "size"         -> SIZE

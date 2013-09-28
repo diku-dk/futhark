@@ -29,6 +29,7 @@ data Token = IF
            | LTH
            | LEQ
            | POW
+           | MIN
            | SHIFTL
            | SHIFTR
            | BOR
