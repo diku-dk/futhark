@@ -70,12 +70,13 @@ canSimplify (e) = case typeOf e of
                     Elem Real -> True
                     _         -> False
 
+
 simplifyNary :: Exp -> SimplifyM NaryExp
 
 simplifyNary (BinOp Plus e1 e2 tp pos) = do
      e1' <- simplifyNary e1
      e2' <- simplifyNary e2
-     let terms = (getTerms e1') ++ (getTerms e2')
+     let terms = getTerms e1' ++ getTerms e2'
      splittedTerms <- mapM splitTerm terms
      let sortedTerms = L.sortBy (\(n1,_) (n2,_) -> compare n1 n2) splittedTerms
      -- The foldM function also reverses the list, we would like to keep it in a ascending order.
@@ -211,18 +212,18 @@ getTerms (NaryPlus es  _ _)  = es
 getTerms e                   = [e]
 
 addVals :: Value -> Value -> SrcLoc -> SimplifyM Value
-addVals e1 e2 pos = do
+addVals e1 e2 pos =
   case (e1, e2) of
     ( IntVal v1,  IntVal v2) -> return $  IntVal (v1+v2)
     (RealVal v1, RealVal v2) -> return $ RealVal (v1+v2)
     _ -> badSimplifyM $ SimplifyError pos  " + operands not of (the same) numeral type! "
 
 mulVals :: Value -> Value -> SrcLoc -> SimplifyM Value
-mulVals e1 e2 pos = do
+mulVals e1 e2 pos =
   case (e1, e2) of
     ( IntVal v1,  IntVal v2) -> return $  IntVal (v1*v2)
     (RealVal v1, RealVal v2) -> return $ RealVal (v1*v2)
-    _ -> badSimplifyM $ SimplifyError pos (" * operands not of (the same) numeral type! ")
+    _ -> badSimplifyM $ SimplifyError pos " * operands not of (the same) numeral type! "
 
 multWithVal :: (NaryExp, Value) -> SimplifyM NaryExp
 multWithVal (e, v) = do
