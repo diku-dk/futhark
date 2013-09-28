@@ -1,5 +1,5 @@
 {-# LANGUAGE DataKinds, GeneralizedNewtypeDeriving #-}
-module L0C.EnablingOpts.Simplify ( simplify )
+module L0C.EnablingOpts.Simplify ( simplify, canSimplify )
   where
 
 import Data.Loc
@@ -63,6 +63,12 @@ simplify e = case simplifyBothWays e of
         SimplifyM (Left  err) -> Left err
         SimplifyM (Right e' ) -> Right e'
 
+-- | Test if Simplification engine can handle this kind of expression
+canSimplify :: Exp -> Bool
+canSimplify (e) = case typeOf e of
+                    Elem Int  -> True
+                    Elem Real -> True
+                    _         -> False
 
 simplifyNary :: Exp -> SimplifyM NaryExp
 
