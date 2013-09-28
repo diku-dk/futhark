@@ -85,7 +85,7 @@ simplifyNary (BinOp Plus e1 e2 tp pos) = do
      return $ NaryPlus terms' tp pos
 
 simplifyNary (BinOp Minus e1 e2 tp pos) = do
-    min_1 <- getm1 tp pos
+    min_1 <- getNeg1 tp pos
     let e2' = BinOp Times (Literal min_1 pos) e2 tp pos
     simplifyNary $ BinOp Plus e1 e2' tp pos
 
@@ -223,7 +223,7 @@ multWithVal :: (NaryExp, Value) -> SimplifyM NaryExp
 multWithVal (e, v) = do
   let pos = srclocOfNary e
   let tp  = typeOfNary e
-  one    <- getp1 tp pos
+  one    <- getPos1 tp pos
   if (v == one)
   then return e
   else do let vt = (Literal v pos)
@@ -243,43 +243,52 @@ multWithVal (e, v) = do
 
 --------------------------------------------
 --- Helper Simplification Functions      ---
---- get0, getp1, getm1, splitTerm,       ---
---- splitFactor, discriminate            ---
+--- get0, getPos1, getNeg1,              ---
+--- isValue0, isValue1                   ---
+--- splitTerm, joinTerm, discriminate    ---
 --------------------------------------------
 
-{-
+
 get0 :: Type -> SrcLoc -> SimplifyM Value
-get0 (Elem (Int  )) _ = return $  IntVal 0
-get0 (Elem (Real )) _ = return $ RealVal 0.0
+get0 (Elem Int  ) _ = return $ IntVal 0
+get0 (Elem Real ) _ = return $ RealVal 0.0
 get0 tp             p = badSimplifyM $ SimplifyError p ("get0 for type: "++ppType tp)
--}
 
-getp1 :: Type -> SrcLoc -> SimplifyM Value
-getp1 (Elem Int  ) _ = return $  IntVal 1
-getp1 (Elem Real ) _ = return $ RealVal 1.0
-getp1 tp             p = badSimplifyM $ SimplifyError p ("getp1 for type: "++ppType tp)
+getPos1 :: Type -> SrcLoc -> SimplifyM Value
+getPos1 (Elem Int  ) _ = return $  IntVal 1
+getPos1 (Elem Real ) _ = return $ RealVal 1.0
+getPos1 tp             p = badSimplifyM $ SimplifyError p ("getPos1 for type: "++ppType tp)
 
-getm1 :: Type -> SrcLoc -> SimplifyM Value
-getm1 (Elem Int  ) _ = return $  IntVal (-1)
-getm1 (Elem Real ) _ = return $ RealVal (-1.0)
-getm1 tp             p = badSimplifyM $ SimplifyError p ("getm1 for type: "++ppType tp)
+getNeg1 :: Type -> SrcLoc -> SimplifyM Value
+getNeg1 (Elem Int  ) _ = return $  IntVal (-1)
+getNeg1 (Elem Real ) _ = return $ RealVal (-1.0)
+getNeg1 tp             p = badSimplifyM $ SimplifyError p ("getNeg1 for type: "++ppType tp)
 
+isValue0 :: Value -> Bool
+isValue0 (IntVal v)  = v == 0
+isValue0 (RealVal v) = v == 0.0
+isValue0 (_)         = False
+
+isValue1 :: Value -> Bool
+isValue1 (IntVal v)  = v == 1
+isValue1 (RealVal v) = v == 1.0
+isValue1 (_)         = False
 
 splitTerm :: NaryExp -> SimplifyM (NaryExp, Value)
 splitTerm (NaryMult [ ] _ pos) =
     badSimplifyM $ SimplifyError pos "splitTerm: Empty n-ary list of factors."
 splitTerm (NaryMult [f] tp pos) = do
-  one <- getp1 tp pos
+  one <- getPos1 tp pos
   case f of
       (Literal v _) -> return (NaryMult [Literal one pos] tp pos, v  )
       e             -> return (NaryMult [e]               tp pos, one)
 splitTerm ne@(NaryMult (f:fs) tp pos) =
   case f of
       (Literal v _) -> return (NaryMult fs tp pos, v)
-      _             -> do one <- getp1 tp pos
+      _             -> do one <- getPos1 tp pos
                           return (ne, one)
 splitTerm e = do
-  one <- getp1 (typeOfNary e) (srclocOfNary e)
+  one <- getPos1 (typeOfNary e) (srclocOfNary e)
   return (e, one)
 
 joinTerm :: (NaryExp, Value) -> SimplifyM NaryExp
@@ -297,8 +306,3 @@ discriminate e@((k,v):t) (k', v') =
   then do v'' <- addVals v v' (srclocOfNary k')
           return ( (k, v'') : t )
   else return ( (k', v') : e )
-
-isValue1 :: Value -> Bool
-isValue1 (IntVal zr) = zr == 1
-isValue1 (RealVal zr) = zr == 1.0
-isValue1 (_) = False
