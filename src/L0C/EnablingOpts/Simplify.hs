@@ -292,8 +292,14 @@ splitTerm e = do
   return (e, one)
 
 joinTerm :: (NaryExp, Value) -> SimplifyM NaryExp
-joinTerm ( (NaryMult [] _ pos), _) =
+joinTerm ( NaryPlus _ _ pos, _) =
+    badSimplifyM $ SimplifyError pos "joinTerm: NaryPlus two levels deep."
+joinTerm ( NaryMult [] _ pos, _) =
     badSimplifyM $ SimplifyError pos "joinTerm: Empty n-ary list of factors."
+joinTerm ( NaryMult (Literal l lp:fs) tp pos, v) = do
+    v' <- mulVals v l lp
+    let v'Lit = Literal v' lp
+    return $ NaryMult (v'Lit:fs) tp pos
 joinTerm ( e@(NaryMult fs tp pos), v)
   | isValue1 v = return e
   | otherwise = let vExp = Literal v pos
