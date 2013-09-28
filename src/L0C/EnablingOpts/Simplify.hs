@@ -11,7 +11,8 @@ import qualified Data.List as L
 import Control.Monad
 import Control.Applicative
 
---import Debug.Trace
+import Debug.Trace
+import L0C.EscapeColor
 
 newtype SimplifyM a = SimplifyM (Either EnablingOptError a)
     deriving (Monad, Applicative, Functor)
@@ -168,7 +169,13 @@ simplifyBack (NaryPlus (f:fs) tp pos) = do
 simplifyBothWays :: Exp -> SimplifyM Exp
 simplifyBothWays e = do
   enary <- simplifyNary e
-  simplifyBack enary
+  {- No debug
+  return simplifyBack enary
+  --}
+  --{- Debug before/after simplification
+  e' <- trace (escapeColorize Magenta $ "Before: " ++ ppExp e) simplifyBack enary
+  trace (escapeColorize Green $ "After: " ++ ppExp e') return e'
+  --}
 
 ----------------------------------------------
 --- Accessor Functions for n-ary exprs     ---
