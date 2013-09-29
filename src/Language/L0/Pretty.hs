@@ -132,6 +132,7 @@ instance (Ord vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) where
   pprPrec _ (Split e a _ _) = text "split" <> apply [ppr e, ppr a]
   pprPrec _ (Concat x y _) = text "concat" <> apply [ppr x, ppr y]
   pprPrec _ (Copy e _) = text "copy" <> parens (ppr e)
+  pprPrec _ (Min _ _ _ _) = error " Pretty print for min not implemented"
   pprPrec _ (DoLoop pat initexp i bound loopbody letbody _) =
     aliasComment pat $
     text "loop" <+> parens (ppr pat <+> equals <+> ppr initexp) <+>
