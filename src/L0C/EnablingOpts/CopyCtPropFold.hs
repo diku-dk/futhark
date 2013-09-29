@@ -27,7 +27,7 @@ import qualified L0C.Interpreter as Interp
 
 import L0C.EnablingOpts.Simplify
 
---import Debug.Trace
+import Debug.Trace
 -----------------------------------------------------------------
 -----------------------------------------------------------------
 ---- Copy and Constant Propagation + Constant Folding        ----
@@ -304,7 +304,9 @@ copyCtPropExp (Negate e tp pos) = do
             Literal (IntVal  v) _ -> changed $ Literal (IntVal  (-v)) pos
             Literal (RealVal v) _ -> changed $ Literal (RealVal (0.0-v)) pos
             _ -> badCPropM $ TypeError pos  " ~ operands not of (the same) numeral type! "
-    else return $ Negate e' tp pos
+    else case e' of
+            Negate e'' _ _ -> changed e''
+            _ -> return $ Negate e' tp pos
 
 copyCtPropExp (Not e pos) = do
     e'   <- copyCtPropExp e
@@ -551,39 +553,54 @@ ctFoldBinOp e@(Or e1 e2 pos)
       _ -> badCPropM $ TypeError pos  " || operands not of boolean type! "
   | otherwise = return e
 
-ctFoldBinOp e@(BinOp Equal e1 e2 _ pos) =
-    if isValue e1 && isValue e2 then
-      case (e1, e2) of
-        -- for numerals we could build node e1-e2, simplify and test equality with 0 or 0.0!
-        (Literal (IntVal  v1) _, Literal (IntVal  v2) _) -> changed $ Literal (LogVal (v1==v2)) pos
-        (Literal (RealVal v1) _, Literal (RealVal v2) _) -> changed $ Literal (LogVal (v1==v2)) pos
-        (Literal (LogVal  v1) _, Literal (LogVal  v2) _) -> changed $ Literal (LogVal (v1==v2)) pos
-        (Literal (CharVal v1) _, Literal (CharVal v2) _) -> changed $ Literal (LogVal (v1==v2)) pos
-        --(Literal (TupVal  v1 _), Literal (TupVal  v2 _)) -> return (True, Literal (LogVal (v1==v2) pos))
-        _ -> badCPropM $ TypeError pos  " equal operands not of (the same) basic type! "
-    else return e
-ctFoldBinOp e@(BinOp Less e1 e2 _ pos) =
-    if isValue e1 && isValue e2 then
-      case (e1, e2) of
-        -- for numerals we could build node e1-e2, simplify and compare with 0 or 0.0!
-        (Literal (IntVal  v1) _, Literal (IntVal  v2) _) -> changed $ Literal (LogVal (v1<v2)) pos
-        (Literal (RealVal v1) _, Literal (RealVal v2) _) -> changed $ Literal (LogVal (v1<v2)) pos
-        (Literal (LogVal  v1) _, Literal (LogVal  v2) _) -> changed $ Literal (LogVal (v1<v2)) pos
-        (Literal (CharVal v1) _, Literal (CharVal v2) _) -> changed $ Literal (LogVal (v1<v2)) pos
-        --(Literal (TupVal  v1 _), Literal (TupVal  v2 _)) -> return (True, Literal (LogVal (v1<v2) pos))
-        _ -> badCPropM $ TypeError pos  " less-than operands not of (the same) basic type! "
-    else return e
-ctFoldBinOp e@(BinOp Leq e1 e2 _ pos) =
-    if isValue e1 && isValue e2 then
-      case (e1, e2) of
-        -- for numerals we could build node e1-e2, simplify and compare with 0 or 0.0!
-        (Literal (IntVal  v1 ) _, Literal (IntVal  v2 ) _) -> changed $ Literal (LogVal (v1<=v2)) pos
-        (Literal (RealVal v1 ) _, Literal (RealVal v2 ) _) -> changed $ Literal (LogVal (v1<=v2)) pos
-        (Literal (LogVal  v1 ) _, Literal (LogVal  v2 ) _) -> changed $ Literal (LogVal (v1<=v2)) pos
-        (Literal (CharVal v1 ) _, Literal (CharVal v2 ) _) -> changed $ Literal (LogVal (v1<=v2)) pos
-        --(Literal (TupVal  v1 ) _, Literal (TupVal  v2 ) _) -> return (True, Literal (LogVal (v1<=v2)) pos)
-        _ -> badCPropM $ TypeError pos  " less-than-or-equal operands not of (the same) basic type! "
-    else return e
+ctFoldBinOp e@(BinOp Equal e1 e2 _ pos)
+    | canSimplify e1 = do
+        -- a = b <=> a - b = 0
+        e' <- simplExp (BinOp Minus e1 e2 (typeOf e1) pos)
+        case e' of
+          Literal (IntVal v) _ -> changed $ Literal (LogVal (v==0)) pos
+          Literal (RealVal v) _ -> changed $ Literal (LogVal (v==0.0)) pos
+          _ -> return e
+          -- TODO return the simplified expression?
+          -- PRO: a + b = 4 + b -> -4 + a = 0 (a little better, but could be a = 4)
+          -- CON: a = b -> a + ~1 * b = 0 (much worse)
+    | isValue e1 && isValue e2 =
+        case (e1, e2) of
+          (Literal (LogVal  v1) _, Literal (LogVal  v2) _) -> changed $ Literal (LogVal (v1==v2)) pos
+          (Literal (CharVal v1) _, Literal (CharVal v2) _) -> changed $ Literal (LogVal (v1==v2)) pos
+          --(Literal (TupVal  v1 _), Literal (TupVal  v2 _)) -> return (True, Literal (LogVal (v1==v2) pos))
+          _ -> badCPropM $ TypeError pos  " equal operands not of (the same) basic type! "
+    | otherwise = return e
+ctFoldBinOp e@(BinOp Less e1 e2 _ pos)
+    | canSimplify e1 = do
+        -- a < b <=> a-b < 0
+        e' <- simplExp (BinOp Minus e1 e2 (typeOf e1) pos)
+        case e' of
+          Literal (IntVal v) _ -> changed $ Literal (LogVal (v < 0)) pos
+          Literal (RealVal v) _ -> changed $ Literal (LogVal (v < 0.0)) pos
+          _ -> return e
+    | isValue e1 && isValue e2 =
+        case (e1, e2) of
+          (Literal (LogVal  v1) _, Literal (LogVal  v2) _) -> changed $ Literal (LogVal (v1<v2)) pos
+          (Literal (CharVal v1) _, Literal (CharVal v2) _) -> changed $ Literal (LogVal (v1<v2)) pos
+          --(Literal (TupVal  v1 _), Literal (TupVal  v2 _)) -> return (True, Literal (LogVal (v1<v2) pos))
+          _ -> badCPropM $ TypeError pos  " less-than operands not of (the same) basic type! "
+    | otherwise = return e
+ctFoldBinOp e@(BinOp Leq e1 e2 _ pos)
+    | canSimplify e1 = do
+        -- a <= b <=> a-b <= 0
+        e' <- simplExp (BinOp Minus e1 e2 (typeOf e1) pos)
+        case e' of
+          Literal (IntVal v) _ -> changed $ Literal (LogVal (v <= 0)) pos
+          Literal (RealVal v) _ -> changed $ Literal (LogVal (v <= 0.0)) pos
+          _ -> return e
+    | isValue e1 && isValue e2 =
+        case (e1, e2) of
+          (Literal (LogVal  v1 ) _, Literal (LogVal  v2 ) _) -> changed $ Literal (LogVal (v1<=v2)) pos
+          (Literal (CharVal v1 ) _, Literal (CharVal v2 ) _) -> changed $ Literal (LogVal (v1<=v2)) pos
+          --(Literal (TupVal  v1 ) _, Literal (TupVal  v2 ) _) -> return (True, Literal (LogVal (v1<=v2)) pos)
+          _ -> badCPropM $ TypeError pos  " less-than-or-equal operands not of (the same) basic type! "
+    | otherwise = return e
 ctFoldBinOp e = return e
 
 

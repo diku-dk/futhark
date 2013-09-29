@@ -20,7 +20,6 @@ newtype SimplifyM a = SimplifyM (Either EnablingOptError a)
 badSimplifyM :: EnablingOptError -> SimplifyM a
 badSimplifyM = SimplifyM . Left
 
--- TODO: Improve use of simplifier in CopyCtPropFold
 -- TODO: most complicated L0 program that is ``solved'' by expression simplification.
 
 ------------------------------------

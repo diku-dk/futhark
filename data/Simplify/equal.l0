@@ -1,4 +1,7 @@
-fun int main(int a) =
-    if not (4 + a = a)
+fun int main(int a, int b) =
+    let x = not (4 + a + b = a + b) in
+    let y = (b + a <= a + b) in
+    let z = not (a - b < a - b) in
+    if x && y && z
     then (a*2) + (a*~2)
     else a
