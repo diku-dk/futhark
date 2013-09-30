@@ -440,7 +440,7 @@ ctFoldBinOp e@(BinOp Plus e1 e2 _ pos)
       (Literal (IntVal  v1) _, Literal (IntVal  v2) _) -> changed $ Literal (IntVal  (v1+v2)) pos
       (Literal (RealVal v1) _, Literal (RealVal v2) _) -> changed $ Literal (RealVal (v1+v2)) pos
       _ -> badCPropM $ TypeError pos  " + operands not of (the same) numeral type! "
-  | otherwise =  simplExp e
+  | otherwise = simplExp e
 ctFoldBinOp e@(BinOp Minus e1 e2 _ pos)
   | isCt0 e2 = changed e1
   | isValue e1, isValue e2 =
@@ -448,7 +448,7 @@ ctFoldBinOp e@(BinOp Minus e1 e2 _ pos)
       (Literal (IntVal  v1) _, Literal (IntVal  v2) _) -> changed $ Literal (IntVal  (v1-v2)) pos
       (Literal (RealVal v1) _, Literal (RealVal v2) _) -> changed $ Literal (RealVal (v1-v2)) pos
       _ -> badCPropM $ TypeError pos  " - operands not of (the same) numeral type! "
-  | otherwise =  simplExp e
+  | otherwise = simplExp e
 ctFoldBinOp e@(BinOp Times e1 e2 _ pos)
   | isCt0 e1 = changed e1
   | isCt0 e2 = changed e2
@@ -459,7 +459,7 @@ ctFoldBinOp e@(BinOp Times e1 e2 _ pos)
       (Literal (IntVal  v1) _, Literal (IntVal  v2) _) -> changed $ Literal (IntVal  (v1*v2)) pos
       (Literal (RealVal v1) _, Literal (RealVal v2) _) -> changed $ Literal (RealVal (v1*v2)) pos
       _ -> badCPropM $ TypeError pos  " * operands not of (the same) numeral type! "
-  | otherwise =  simplExp e
+  | otherwise = simplExp e
 ctFoldBinOp e@(BinOp Divide e1 e2 _ pos)
   | isCt0 e1 = changed e1
   | isCt0 e2 = badCPropM $ Div0Error pos
@@ -469,7 +469,7 @@ ctFoldBinOp e@(BinOp Divide e1 e2 _ pos)
       (Literal (IntVal  v1) _, Literal (IntVal  v2) _) -> changed $ Literal (IntVal  (div v1 v2)) pos
       (Literal (RealVal v1) _, Literal (RealVal v2) _) -> changed $ Literal (RealVal (v1 / v2)) pos
       _ -> badCPropM $ TypeError pos  " / operands not of (the same) numeral type! "
-  | otherwise = return e
+  | otherwise = simplExp e
 ctFoldBinOp e@(BinOp Mod e1 e2 _ pos)
   | isCt0 e2 = badCPropM $ Div0Error pos
   | isValue e1, isValue e2 =
@@ -562,6 +562,8 @@ ctFoldBinOp e@(BinOp Equal e1 e2 _ pos)
           Literal (RealVal v) _ -> changed $ Literal (LogVal (v==0.0)) pos
           _ -> return e
           -- TODO return the simplified expression?
+          -- if needed, one could count the number of operations
+          -- in the exp before/after simplification as an indicator
           -- PRO: a + b = 4 + b -> -4 + a = 0 (a little better, but could be a = 4)
           -- CON: a = b -> a + ~1 * b = 0 (much worse)
     | isValue e1 && isValue e2 =

@@ -30,8 +30,6 @@ badSimplifyM = SimplifyM . Left
 --   this form, simplified and    --
 --   then translated back to a L0 --
 --   expression.                  --
--- Literals (ints) must be kept as--
---   the first element of the list--
 ------------------------------------
 data NaryExp = NaryPlus [NaryExp] Type SrcLoc
                -- ^ An n-ary plus expression,
@@ -46,6 +44,8 @@ data NaryExp = NaryPlus [NaryExp] Type SrcLoc
              | NaryMult [Exp] Type SrcLoc
                -- ^ An n-ary multiply expression,
                --   i.e., a1 * a2 * ... * an.
+               -- Literals must be kept as the
+               --   first element in the list
                -- An expression e that is not a
                --   multiplication is just:
                --   NaryMult [e] ...
@@ -94,12 +94,13 @@ simplifyBack (NaryPlus (f:fs) tp pos) = do
 
 simplifyBothWays :: Exp -> SimplifyM Exp
 simplifyBothWays e = do
-  enary <- simplifyNary e
   {- No debug
+  enary <- simplifyNary e
   return simplifyBack enary
   --}
   --{- Debug before/after simplification
-  e' <- trace (escapeColorize Magenta $ "Before: " ++ ppExp e) simplifyBack enary
+  enary <- trace (escapeColorize Magenta $ "Before: " ++ ppExp e) simplifyNary e
+  e' <- simplifyBack enary
   trace (escapeColorize Green $ "After: " ++ ppExp e') return e'
   --}
 
@@ -133,7 +134,7 @@ simplifyNary (BinOp Times e1 e2 tp pos) = do
      e1' <- simplifyNary e1
      e2' <- simplifyNary e2
      case (e1', e2') of
-          (NaryMult xs _ _, y@(NaryMult _ _ _) ) -> makeProds xs y
+          (NaryMult xs _ _, y@(NaryMult{}) ) -> makeProds xs y
           (NaryMult xs _ _, y) ->
               do prods <- mapM (makeProds xs) $ getTerms y
                  return $ NaryPlus (L.sort prods) tp pos
@@ -153,16 +154,16 @@ simplifyNary (BinOp Times e1 e2 tp pos) = do
         makeProds _ (NaryMult [] _ _) =
           badSimplifyM $ SimplifyError pos
             " In simplifyNary, makeProds: 2nd arg is the empty list! "
-        makeProds _ (NaryPlus _ _ _) =
+        makeProds _ (NaryPlus{}) =
           badSimplifyM $ SimplifyError pos
             " In simplifyNary, makeProds: e1 * e2: e2 is a sum of sums! "
-        makeProds ((Literal v1 _):exs) (NaryMult ((Literal v2 pval):ys) tp1 pos1) = do
+        makeProds (Literal v1 _ :exs) (NaryMult (Literal v2 pval : ys) tp1 pos1) = do
           v <- mulVals v1 v2 pval
-          return $ NaryMult ( (Literal v pval) : (L.sort (ys++exs)) ) tp1 pos1
-        makeProds ((Literal v pval):exs) (NaryMult ys tp1 pos1) =
-          return $ NaryMult ( (Literal v pval) : (L.sort (ys++exs)) ) tp1 pos1
-        makeProds exs (NaryMult ((Literal v pval):ys) tp1 pos1) =
-          return $ NaryMult ( (Literal v pval) : (L.sort (ys++exs)) ) tp1 pos1
+          return $ NaryMult ( Literal v pval : L.sort (ys++exs) ) tp1 pos1
+        makeProds (Literal v pval : exs) (NaryMult ys tp1 pos1) =
+          return $ NaryMult ( Literal v pval : L.sort (ys++exs) ) tp1 pos1
+        makeProds exs (NaryMult (Literal v pval : ys) tp1 pos1) =
+          return $ NaryMult ( Literal v pval : L.sort (ys++exs) ) tp1 pos1
         makeProds exs (NaryMult ys tp1 pos1) =
           return $ NaryMult (L.sort (ys++exs)) tp1 pos1
 
@@ -224,6 +225,7 @@ simplifyNary (Negate e tp pos) = do
     negOne <- getNeg1 tp pos
     simplifyNary $ BinOp Times (Literal negOne pos) e tp pos
 
+
 ------------------------------------------------
 -- TODO: Any other possible simplification,
 --   e.g., a heuristic for simplifying
@@ -258,16 +260,16 @@ getTerms e                   = [e]
 addVals :: Value -> Value -> SrcLoc -> SimplifyM Value
 addVals e1 e2 pos =
   case (e1, e2) of
-    ( IntVal v1,  IntVal v2) -> return $  IntVal (v1+v2)
+    (IntVal v1, IntVal v2) -> return $ IntVal (v1+v2)
     (RealVal v1, RealVal v2) -> return $ RealVal (v1+v2)
-    _ -> badSimplifyM $ SimplifyError pos  " + operands not of (the same) numeral type! "
+    _ -> badSimplifyM $ SimplifyError pos  "addVals: operands not of (the same) numeral type! "
 
 mulVals :: Value -> Value -> SrcLoc -> SimplifyM Value
 mulVals e1 e2 pos =
   case (e1, e2) of
-    ( IntVal v1,  IntVal v2) -> return $  IntVal (v1*v2)
+    (IntVal v1, IntVal v2) -> return $ IntVal (v1*v2)
     (RealVal v1, RealVal v2) -> return $ RealVal (v1*v2)
-    _ -> badSimplifyM $ SimplifyError pos " * operands not of (the same) numeral type! "
+    _ -> badSimplifyM $ SimplifyError pos "mulVals: operands not of (the same) numeral type! "
 
 divVals :: Value -> Value -> SrcLoc -> SimplifyM Value
 divVals e1 e2 pos =
