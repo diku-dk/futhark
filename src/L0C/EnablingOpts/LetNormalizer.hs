@@ -409,6 +409,15 @@ letNormExp (Redomap2 lam1 lam2 nes arr tp1 pos) = do
     arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
     makeVarExpSubst "tmp_redomap2" pos (Redomap2 lam1' lam2' nes' arr' tp1 pos)
 
+letNormExp (Min e1 e2 t pos) = do
+    e1' <- subLetoNormExp "tmp_and" e1
+    e2' <- subLetoNormExp "tmp_and" e2
+    return $ Min e1' e2' t pos
+
+letNormExp (Max e1 e2 t pos) = do
+    e1' <- subLetoNormExp "tmp_and" e1
+    e2' <- subLetoNormExp "tmp_and" e2
+    return $ Max e1' e2' t pos
 -------------------------------------------------------
 -------------------------------------------------------
 ---- Pattern Match The Rest of the Implementation! ----
