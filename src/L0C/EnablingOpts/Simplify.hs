@@ -166,6 +166,59 @@ simplifyNary (BinOp Times e1 e2 tp pos) = do
         makeProds exs (NaryMult ys tp1 pos1) =
           return $ NaryMult (L.sort (ys++exs)) tp1 pos1
 
+simplifyNary (BinOp Divide e1 e2 tp pos) = do
+    e1' <- simplifyNary e1
+    e2' <- simplifyNary e2
+    let numeratorTerms = getTerms e1'
+    let denominatorTerms = getTerms e2'
+    if numeratorTerms == denominatorTerms
+    then do one <- getPos1 tp pos
+            return $ NaryMult [Literal one pos] tp pos
+    else do numeFilt <- splitAndDiscriminate numeratorTerms
+            denomFilt <- splitAndDiscriminate denominatorTerms
+            case (numeFilt, denomFilt) of
+              (_,[]) -> badSimplifyM $ SimplifyError pos
+                          "In simplifyNary, BinOp Divide: trying to divide by zero! "
+
+              ([],_) -> do zero <- get0 tp pos
+                           return $ NaryMult [Literal zero pos] tp pos
+
+              -- This clause implies both the numerator and denominator are NaryMult
+              -- as NaryPlus cannot be nested two levels deep
+              ([numeKV],[demonKV]) -> divTwoNaryMults numeKV demonKV
+
+              (_, _) -> return $ NaryMult [BinOp Divide e1 e2 tp pos] tp pos
+
+    where
+          divTwoNaryMults :: (NaryExp, Value) -> (NaryExp, Value) -> SimplifyM NaryExp
+          divTwoNaryMults (NaryMult xs _ _, numeFactor) (NaryMult ys _ _, denomFactor) = do
+              res <- divVals numeFactor denomFactor pos
+              let resLit = Literal res pos
+
+              goodDiv <- canDivValsEvenly numeFactor denomFactor pos
+              if xs == ys
+              -- a `div` b == a * x `div` b * x
+              then return $ NaryMult [resLit] tp pos
+              else let (numeExps, denomExps) = divTwoProducts(xs, ys) in
+                   if null denomExps
+                   -- (numeFactor * a0*..*an) / denomFactor
+                   then if goodDiv
+                        -- Clean divide, ie 4 * a0*..*an / 2 = 2 * a0..*an
+                        then return $ NaryMult (resLit : numeExps) tp pos
+                        -- Unclean divide, ie 4 * a0*..*an / 3, result will depend on a0*..*an. If 3, then 4 * 3 / 3 = 4, if 1 then 4 / 3 = 1
+                        else do numeExp' <- simplifyBack $ NaryMult (numeFactorLit : numeExps) tp pos
+                                let divExp = BinOp Divide numeExp' denomFactorLit tp pos
+                                return $ NaryMult [divExp] tp pos
+                   -- create divide expression from (hopefully more) simplified subexpressions
+                   else do allNum <- simplifyBack $ NaryMult (numeFactorLit : numeExps) tp pos
+                           allDenom <- simplifyBack $ NaryMult (denomFactorLit : denomExps) tp pos
+                           let divExp = BinOp Divide allNum allDenom tp pos
+                           return $ NaryMult [divExp] tp pos
+
+              where numeFactorLit = Literal numeFactor pos
+                    denomFactorLit = Literal denomFactor pos
+
+          divTwoNaryMults _ _ = badSimplifyM $ SimplifyError pos "divTwoNaryMults, not for NaryPlus "
 
 simplifyNary (Negate e tp pos) = do
     negOne <- getNeg1 tp pos
@@ -182,7 +235,8 @@ simplifyNary e = return $ NaryMult [e] (typeOf e) (srclocOf e)
 ----------------------------------------------
 --- Accessor Functions for n-ary exprs     ---
 --- typeOf, srclocOf, getTerms, addVals,   ---
---- mulVals, mulWithVal                    ---
+--- mulVals, divVals, canDivValsEvenly     ---
+--- divTwoProducts                         ---
 ----------------------------------------------
 
 typeOfNary :: NaryExp -> Type
@@ -214,6 +268,34 @@ mulVals e1 e2 pos =
     ( IntVal v1,  IntVal v2) -> return $  IntVal (v1*v2)
     (RealVal v1, RealVal v2) -> return $ RealVal (v1*v2)
     _ -> badSimplifyM $ SimplifyError pos " * operands not of (the same) numeral type! "
+
+divVals :: Value -> Value -> SrcLoc -> SimplifyM Value
+divVals e1 e2 pos =
+  case (e1, e2) of
+    (IntVal v1, IntVal v2) -> return $ IntVal (v1 `div` v2)
+    (RealVal v1, RealVal v2) -> return $ RealVal (v1/v2)
+    _ -> badSimplifyM $ SimplifyError pos  "divVals: operands not of (the same) numeral type! "
+
+canDivValsEvenly :: Value -> Value -> SrcLoc -> SimplifyM Bool
+canDivValsEvenly e1 e2 pos =
+  case (e1, e2) of
+    (IntVal v1,  IntVal v2) -> return $ v1 `mod` v2 == 0
+    (RealVal _, RealVal _) -> return True
+    _ -> badSimplifyM $ SimplifyError pos  "canDivValsEvenly: operands not of (the same) numeral type! "
+
+-- Simplify the expression x0*..*xn / y0*..*ym
+-- Both lists must be sorted for this to work
+divTwoProducts :: ([Exp], [Exp]) -> ([Exp], [Exp])
+divTwoProducts ([], []) = ([], [])
+divTwoProducts ([], ys) = ([], ys)
+divTwoProducts (xs, []) = (xs, [])
+divTwoProducts (x:xs, y:ys) =
+  case x `compare` y of
+    EQ -> divTwoProducts(xs,ys)
+    LT -> let (xs',ys') = divTwoProducts(xs,y:ys)
+          in (x:xs',ys')
+    GT -> let (xs',ys') = divTwoProducts(x:xs,ys)
+          in (xs',y:ys')
 
 --------------------------------------------
 --- Helper Simplification Functions      ---
