@@ -170,6 +170,11 @@ simplifyNary (BinOp Times e1 e2 tp pos) = do
         makeProds exs (NaryMult ys tp1 pos1) =
           return $ NaryMult (L.sort (ys++exs)) tp1 pos1
 
+
+simplifyNary (Negate e tp pos) = do
+    negOne <- getNeg1 tp pos
+    simplifyNary $ BinOp Times (Literal negOne pos) e tp pos
+
 ------------------------------------------------
 -- TODO: Any other possible simplification,
 --   e.g., a heuristic for simplifying
