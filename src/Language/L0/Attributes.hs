@@ -557,8 +557,8 @@ typeOf (Redomap2 redfun mapfun start arrs rt loc) =
   lambdaType redfun $ map typeOf start ++ case typeOf (Map2 mapfun arrs rt loc) of
                                             Elem (Tuple ts) -> ts
                                             t               -> [t]
-typeOf (Min _ _ _ _) = Elem Int
-typeOf (Max _ _ _ _) = Elem Int
+typeOf (Min _ _ t _) = t
+typeOf (Max _ _ t _) = t
 
 uniqueProp :: TypeBase vn as -> Uniqueness
 uniqueProp tp = if uniqueOrBasic tp then Unique else Nonunique

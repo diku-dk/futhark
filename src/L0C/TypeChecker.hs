@@ -1037,15 +1037,19 @@ checkExp (Redomap2 redfun mapfun accexps arrexps intypes pos) = do
     _ ->
       bad $ TypeError pos "redomap2 map function does not return tuple"
 
-checkExp (Min x y _ pos) = do
-  x' <- require [Elem Int] =<< checkExp x
-  y' <- require [Elem Int] =<< checkExp y
-  return $ Min x' y' (Elem Int) pos
+checkExp (Min e1 e2 t pos) = do
+  e1' <- require [Elem Int, Elem Real] =<< checkExp e1
+  e2' <- require [Elem Int, Elem Real] =<< checkExp e2
+  t' <- unifyExpTypes e1' e2'
+  t'' <- checkAnnotation pos "result" t t'
+  return $ Min e1' e2' t'' pos
 
-checkExp (Max x y _ pos) = do
-  x' <- require [Elem Int] =<< checkExp x
-  y' <- require [Elem Int] =<< checkExp y
-  return $ Max x' y' (Elem Int) pos
+checkExp (Max e1 e2 t pos) = do
+  e1' <- require [Elem Int, Elem Real] =<< checkExp e1
+  e2' <- require [Elem Int, Elem Real] =<< checkExp e2
+  t' <- unifyExpTypes e1' e2'
+  t'' <- checkAnnotation pos "result" t t'
+  return $ Max e1' e2' t'' pos
 
 checkSOACArrayArg :: (TypeBox ty, VarName vn) =>
                      TaggedExp ty vn -> TypeM vn (TaggedExp CompTypeBase vn, Arg vn)
