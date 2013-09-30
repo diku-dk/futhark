@@ -67,7 +67,6 @@ import Language.L0.Parser.Lexer
       '<'             { L $$ LTH }
       '<='            { L $$ LEQ }
       pow             { L $$ POW }
-      min             { L $$ MIN }
       '<<'            { L $$ SHIFTL }
       '>>'            { L $$ SHIFTR }
       '|'             { L $$ BOR }
@@ -116,6 +115,9 @@ import Language.L0.Parser.Lexer
       op              { L $$ OP }
       empty           { L $$ EMPTY }
       copy            { L $$ COPY }
+
+      min             { L $$ MIN }
+      max             { L $$ MAX }
 
 %nonassoc ifprec letprec
 %left '||'
@@ -224,8 +226,6 @@ Exp  :: { UncheckedExp }
      | Exp '||' Exp   { Or $1 $3 $2 }
      | Exp pow Exp    { BinOp Pow $1 $3 NoInfo $2 }
 
-     | min '(' Exp ',' Exp ')'
-                      { Min $3 $5 NoInfo $1 }
 
      | Exp '>>' Exp   { BinOp ShiftR $1 $3 NoInfo $2 }
      | Exp '<<' Exp   { BinOp ShiftL $1 $3 NoInfo $2 }
@@ -335,6 +335,9 @@ Exp  :: { UncheckedExp }
                       { DoLoop $3 (tupIdExp $3) $7 $9 $11 $13 $1 }
      | loop '(' TupId '=' Exp ')' '=' for Id '<' Exp do Exp in Exp %prec letprec
                       { DoLoop $3 $5 $9 $11 $13 $15 $1 }
+
+     | min '(' Exp ',' Exp ')' { Min $3 $5 NoInfo $1 }
+     | max '(' Exp ',' Exp ')' { Max $3 $5 NoInfo $1 }
 
 Exps : Exp ',' Exps { $1 : $3 }
      | Exp          { [$1] }

@@ -494,7 +494,6 @@ typeOf (TupLit es _) = Elem $ Tuple $ map typeOf es
 typeOf (ArrayLit es t _) =
   arrayType 1 t $ mconcat $ map (uniqueness . typeOf) es
 typeOf (BinOp _ _ _ t _) = t
-typeOf (Min _ _ t _) = t
 typeOf (And {}) = Elem Bool
 typeOf (Or {}) = Elem Bool
 typeOf (Not _ _) = Elem Bool
@@ -558,6 +557,8 @@ typeOf (Redomap2 redfun mapfun start arrs rt loc) =
   lambdaType redfun $ map typeOf start ++ case typeOf (Map2 mapfun arrs rt loc) of
                                             Elem (Tuple ts) -> ts
                                             t               -> [t]
+typeOf (Min _ _ _ _) = Elem Int
+typeOf (Max _ _ _ _) = Elem Int
 
 uniqueProp :: TypeBase vn as -> Uniqueness
 uniqueProp tp = if uniqueOrBasic tp then Unique else Nonunique

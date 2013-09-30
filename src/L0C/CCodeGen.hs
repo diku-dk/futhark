@@ -814,6 +814,9 @@ compileExp _ (Scan2 {}) = soacError
 compileExp _ (Filter2 {}) = soacError
 compileExp _ (Redomap2 {}) = soacError
 
+compileExp _ (Min {}) = error "Min encountered during code generation."
+compileExp _ (Max {}) = error "Max encountered during code generation."
+
 compileExpInPlace :: C.Exp -> Exp -> CompilerM C.Stm
 
 compileExpInPlace place (Iota ne _) = do

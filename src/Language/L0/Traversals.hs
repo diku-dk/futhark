@@ -206,6 +206,12 @@ mapExpM tv (Redomap2 redfun mapfun accexps arrexps intypes loc) =
        mapM (mapOnExp tv) accexps <*> mapM (mapOnExp tv) arrexps <*>
        mapM (mapOnType tv) intypes <*> pure loc
 
+mapExpM tv (Min x y t loc) =
+  pure Min <*> mapOnExp tv x <*> mapOnExp tv y <*> mapOnType tv t <*> pure loc
+
+mapExpM tv (Max x y t loc) =
+  pure Max <*> mapOnExp tv x <*> mapOnExp tv y <*> mapOnType tv t <*> pure loc
+
 -- | Like 'mapExp', but in the 'Identity' monad.
 mapExp :: Mapper ty vn Identity -> ExpBase ty vn -> ExpBase ty vn
 mapExp m = runIdentity . mapExpM m

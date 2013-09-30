@@ -83,8 +83,6 @@ keyword s =
     "True"         -> TRUE
     "False"        -> FALSE
     "pow"          -> POW
-    "min"          -> MIN
-
     "iota"         -> IOTA
     "size"         -> SIZE
     "replicate"    -> REPLICATE
@@ -106,6 +104,10 @@ keyword s =
     "redomap2"     -> REDOMAP2
     "empty"        -> EMPTY
     "copy"         -> COPY
+
+    "min"          -> MIN
+    "max"          -> MAX
+
     _              -> ID $ nameFromString s
 
 type Byte = Word8

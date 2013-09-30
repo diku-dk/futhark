@@ -250,6 +250,7 @@ evalExp (BinOp Bor e1 e2 _ pos) = evalIntBinOp (.|.) e1 e2 pos
 evalExp (BinOp LogAnd e1 e2 _ pos) = evalBoolBinOp (&&) e1 e2 pos
 evalExp (BinOp LogOr e1 e2 _ pos) = evalBoolBinOp (||) e1 e2 pos
 
+
 evalExp (BinOp Equal e1 e2 _ _) = do
   v1 <- evalExp e1
   v2 <- evalExp e2
@@ -518,6 +519,20 @@ evalExp (Redomap2 redfun mapfun accexp arrexps _ loc) = do
   vs' <- mapM (applyLambda mapfun) $ transpose vss
   let foldfun acc x = applyLambda redfun $ untuple acc ++ untuple x
   foldM foldfun (tuple startaccs) vs'
+
+evalExp (Min e1 e2 _ pos) = do
+  v1 <- evalExp e1
+  v2 <- evalExp e2
+  case (v1, v2)  of (IntVal x, IntVal y)  -> return $ IntVal (min x y)
+                    (RealVal x, RealVal y)  -> return $ RealVal (min x y)
+                    (_,_)                 -> bad $ TypeError pos "evalExp Min"
+
+evalExp (Max e1 e2 _ pos) = do
+  v1 <- evalExp e1
+  v2 <- evalExp e2
+  case (v1, v2)  of (IntVal x, IntVal y)  -> return $ IntVal (max x y)
+                    (RealVal x, RealVal y)  -> return $ RealVal (max x y)
+                    (_,_)                 -> bad $ TypeError pos "evalExp Max"
 
 evalIntBinOp :: (Int -> Int -> Int) -> Exp -> Exp -> SrcLoc -> L0M Value
 evalIntBinOp op e1 e2 loc = do

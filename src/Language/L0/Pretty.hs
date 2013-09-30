@@ -132,7 +132,6 @@ instance (Ord vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) where
   pprPrec _ (Split e a _ _) = text "split" <> apply [ppr e, ppr a]
   pprPrec _ (Concat x y _) = text "concat" <> apply [ppr x, ppr y]
   pprPrec _ (Copy e _) = text "copy" <> parens (ppr e)
-  pprPrec _ (Min _ _ _ _) = error " Pretty print for min not implemented"
   pprPrec _ (DoLoop pat initexp i bound loopbody letbody _) =
     aliasComment pat $
     text "loop" <+> parens (ppr pat <+> equals <+> ppr initexp) <+>
@@ -145,6 +144,9 @@ instance (Ord vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) where
     ppSOAC "redomap2" [redlam, maplam] $ es++as
   pprPrec _ (Scan2 lam es as _ _) = ppSOAC "scan2" [lam] $ es++as
   pprPrec _ (Filter2 lam as _) = ppSOAC "filter2" [lam] as
+
+  pprPrec _ (Min x y _ _ ) = text "min" <> apply [ppr x, ppr y]
+  pprPrec _ (Max x y _ _ ) = text "max" <> apply [ppr x, ppr y]
 
 instance (Ord vn, Pretty vn) => Pretty (TupIdentBase ty vn) where
   ppr (Id ident)     = ppr ident

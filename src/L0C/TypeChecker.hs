@@ -749,6 +749,7 @@ checkExp (Iota e pos) = do
   e' <- require [Elem Int] =<< checkExp e
   return $ Iota e' pos
 
+
 checkExp (Size i e pos) = do
   e' <- checkExp e
   case typeOf e' of
@@ -1035,6 +1036,16 @@ checkExp (Redomap2 redfun mapfun accexps arrexps intypes pos) = do
       bad $ TypeError pos "redomap2 reduce function does not return tuple"
     _ ->
       bad $ TypeError pos "redomap2 map function does not return tuple"
+
+checkExp (Min x y _ pos) = do
+  x' <- require [Elem Int] =<< checkExp x
+  y' <- require [Elem Int] =<< checkExp y
+  return $ Min x' y' (Elem Int) pos
+
+checkExp (Max x y _ pos) = do
+  x' <- require [Elem Int] =<< checkExp x
+  y' <- require [Elem Int] =<< checkExp y
+  return $ Max x' y' (Elem Int) pos
 
 checkSOACArrayArg :: (TypeBox ty, VarName vn) =>
                      TaggedExp ty vn -> TypeM vn (TaggedExp CompTypeBase vn, Arg vn)

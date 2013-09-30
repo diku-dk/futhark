@@ -29,7 +29,6 @@ data Token = IF
            | LTH
            | LEQ
            | POW
-           | MIN
            | SHIFTL
            | SHIFTR
            | BOR
@@ -79,4 +78,8 @@ data Token = IF
            | FILTER2
            | MAPALL2
            | REDOMAP2
+
+           | MIN
+           | MAX
+
              deriving (Show, Eq)
