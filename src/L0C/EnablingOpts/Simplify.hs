@@ -113,11 +113,7 @@ simplifyNary (BinOp Plus e1 e2 tp pos) = do
      e1' <- simplifyNary e1
      e2' <- simplifyNary e2
      let terms = getTerms e1' ++ getTerms e2'
-     splittedTerms <- mapM splitTerm terms
-     let sortedTerms = L.sortBy (\(n1,_) (n2,_) -> compare n1 n2) splittedTerms
-     -- The foldM function also reverses the list, we would like to keep it in a ascending order.
-     merged <- liftM reverse $ foldM discriminate [] sortedTerms
-     let  filtered = filter (\(_,v) -> not $ isValue0 v ) merged
+     filtered <- splitAndDiscriminate terms
      if null filtered
      then do
         zero <- get0 tp pos
@@ -250,6 +246,17 @@ isValue1 :: Value -> Bool
 isValue1 (IntVal v)  = v == 1
 isValue1 (RealVal v) = v == 1.0
 isValue1 (_)         = False
+
+-- Splits a NaryMult list into tuples with (Exp, factor)
+-- If two Exps are equal, their factors will be added
+splitAndDiscriminate :: [NaryExp] -> SimplifyM [(NaryExp, Value)]
+splitAndDiscriminate terms = do
+  splittedTerms <- mapM splitTerm terms
+  let sortedTerms = L.sortBy (\(n1,_) (n2,_) -> compare n1 n2) splittedTerms
+  -- The foldM function also reverses the list, we would like to keep it in a ascending order.
+  merged <- liftM reverse $ foldM discriminate [] sortedTerms
+  let filtered = filter (\(_,v) -> not $ isValue0 v ) merged
+  return filtered
 
 splitTerm :: NaryExp -> SimplifyM (NaryExp, Value)
 splitTerm (NaryMult [ ] _ pos) =
