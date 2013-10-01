@@ -32,4 +32,4 @@ fun int main(int a, int b, int c, int d, int e, int f, int g, int h) =
     then 42
     else 0
 
-// in all uses 102 simplification steps
+// simplifier is called 102 times
