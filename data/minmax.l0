@@ -1,0 +1,5 @@
+// Compute Min
+fun int main(int a, int b) =
+   let x0 = max(a,b) in
+   let x1 = max(~(a*a),~(b*b)) in
+   min(x0, x1)
