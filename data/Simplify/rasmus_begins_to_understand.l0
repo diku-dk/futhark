@@ -1,0 +1,40 @@
+// Helper function for comparing arrays
+
+fun bool compareArrays ([int] a, [int] b) =
+    let ab = zip(a, b) in
+    let abEQ = map(op=, ab) in
+    reduce(op &&, True, abEQ)
+
+/////////////////////
+// How tuples work //
+/////////////////////
+
+fun int addTuples ( {int, int} t) =
+    let {x,y} = t in x + y
+
+fun bool mapOverTuples () =
+    let a = [ {1,2} , {3,4} ] in
+    let b = map (addTuples, a) in
+    let res = [3,7] in
+    compareArrays(b,res)
+
+///////////////////////////////
+// Some more about functions //
+///////////////////////////////
+
+fun int add (int x, int y) =
+    x + y
+
+fun bool curriedFuncs () =
+    let a = [1,2,3] in
+    let b = map (add (2), a) in
+    let c = map (fn int (int x) => 2 + x, a) in
+    let d = map (op+ (2), a) in
+    compareArrays(b,c) && compareArrays(c,d)
+
+//////////
+// Main //
+//////////
+
+fun bool main() =
+    mapOverTuples() && curriedFuncs()

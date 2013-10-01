@@ -1,0 +1,35 @@
+fun bool addNMult (int a, int b, int c, int d, int e, int f, int g, int h) =
+    let x0 = (a*2) + (~2*a) = 0 in
+    let x1 = ((a+b)*(c+d)) = (b*c + b*d + a*c + a*d) in
+    let x2 = (a*b)*(c*d) = d*a*c*b in
+    let x3 = (a*b + c*d) * (e*f + g*h) = (a*b*e*f + a*b*g*h + c*d*e*f + c*d*g*h) in
+    let x4 = ~(a+b) + a + b = 0 in
+    x0 && x1 && x2 && x3 && x4
+
+fun bool relationel (int a, int b) =
+    let x0 = not (4 + a + b = a + b) in
+    let x1 = (b + a <= a + b) in
+    let x2 = not (a - b < a - b) in
+    x0 && x1 && x2
+
+// cannot handle divions with multiple terms
+// fx ``~(a+b) / (a+b) = ~1''
+
+fun bool division(int a, int b, int c) =
+    let x0 = a / a = 1 in
+    let x1 = (a*b) / (a*b) = 1 in
+    let x2 = (a-a) / 5 = 0 in
+    let x3 = (5*a) / (a*2) = 2 in
+    let x4 = (~a) / a = ~1 in
+    let x5 = (4*a*b) / (3*a) = (4*b) / 3 in
+    let x6 = (4*b*a*b) / (3*b) = (4*a*b) / 3 in
+    let x7 = (4*a*b) / (3*a*c) = (4*b) / (3*c) in
+    let x8 = (a+b) / (a+b) = 1 in
+    x0 && x1 && x2 && x3 && x4 && x5 && x6 && x7 && x8
+
+fun int main(int a, int b, int c, int d, int e, int f, int g, int h) =
+    if relationel(a,b) && addNMult(a,b,c,d,e,f,g,h) && division(a,b,c)
+    then 42
+    else 0
+
+// in all uses 102 simplification steps
