@@ -178,22 +178,8 @@ hotransform =
 main :: IO ()
 main = do args <- getArgs
           case getOpt RequireOrder commandLineOptions args of
-            (opts, [file], []) -> do
-              contents <- readFile file
-              let config = foldl (.) id opts newL0Config
-                  (msgs, res) = l0c config file contents
-              hPutStr stderr msgs
-              case res of
-                Left err -> do
-                  hPutStrLn stderr $ errorDesc err
-                  case (errorProg err, l0verbose config) of
-                    (Just prog, Just outfile) ->
-                      maybe (hPutStrLn stderr) writeFile outfile $
-                        prettyPrint prog
-                    _ -> return ()
-                  exitWith $ ExitFailure 2
-                Right prog -> l0action config prog
-            (_, _, errs) -> usage errs
+            (opts, [file], []) -> compiler (foldl (.) id opts newL0Config) file
+            (_, _, errs)       -> usage errs
 
 usage :: [String] -> IO ()
 usage errs = do
@@ -202,6 +188,22 @@ usage errs = do
   hPutStr stderr "\n"
   hPutStr stderr $ usageInfo (prog ++ " [options] <file>") commandLineOptions
   exitWith $ ExitFailure 1
+
+compiler :: L0Config -> FilePath -> IO ()
+compiler config file = do
+  contents <- readFile file
+  let (msgs, res) = l0c config file contents
+  hPutStr stderr msgs
+  case res of
+    Left err -> do
+      hPutStrLn stderr $ errorDesc err
+      case (errorProg err, l0verbose config) of
+        (Just prog, Just outfile) ->
+          maybe (hPutStrLn stderr) writeFile outfile $
+            prettyPrint prog
+        _ -> return ()
+      exitWith $ ExitFailure 2
+    Right prog -> l0action config prog
 
 typeCheck :: (TypeBox ty, VarName vn) =>
              L0Config -> ProgBase ty vn

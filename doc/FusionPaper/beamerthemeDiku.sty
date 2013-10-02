@@ -1,0 +1,42 @@
+\ProvidesPackage{beamerthemeDiku}[2011/11/03]
+
+% [Original] Copyright 2003 by Till Tantau <tantau@users.sourceforge.net>
+%
+% This program can be redistributed and/or modified under the terms
+% of the GNU Public License, version 2.
+
+\mode<presentation>
+
+% order matters, outer theme uses color defined in color theme
+\usecolortheme{Diku}
+\useoutertheme{Diku}
+
+% order matters, inner theme redefines title page appearance
+\useinnertheme[shadow=true]{rounded}
+\useinnertheme{Diku}
+
+\setbeamerfont{block title}{size={}}
+
+%\let\oldframetitle\frametitle
+%\renewcommand{\frametitle}[1]{\oldframetitle{\begin{tabular}{l}\\#1\end{tabular}}}
+
+
+
+\newcommand{\titleslide}{%
+{%
+\usebackgroundtemplate{%
+  \includegraphics[width=\paperwidth,height=\paperheight]{front}}%
+\begin{frame}[plain]%
+  \titlepage %
+\end{frame}%
+}%
+}
+
+% no navigation
+\beamertemplatenavigationsymbolsempty
+
+\logo{\includegraphics[height=1.25cm]{diku-logo2}}
+
+
+\mode
+<all>

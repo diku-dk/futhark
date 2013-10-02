@@ -1,0 +1,70 @@
+\ProvidesPackage{beamercolorthemeDiku}[2011/11/03]
+
+% Copyright 2003 by Till Tantau <tantau@users.sourceforge.net>.
+%
+% This program can be redistributed and/or modified under the terms
+% of the GNU Public License, version 2.
+
+\mode<presentation>
+
+\definecolor{natgreen1}{RGB}{50,93,61}
+\definecolor{natgreen2}{RGB}{91,125,100}
+\definecolor{natgreen3}{RGB}{132,158,139}
+\definecolor{natgreen4}{RGB}{173,190,177}
+\definecolor{natgreen5}{RGB}{214,223,216}
+\definecolor{kugray1}{RGB}{102,102,102}
+\definecolor{kugray2}{RGB}{133,133,133}
+\definecolor{kugray3}{RGB}{163,163,163}
+\definecolor{kugray4}{RGB}{194,194,194}
+\definecolor{kugray5}{RGB}{224,224,224}
+\definecolor{kured}{RGB}{144,26,30}
+\definecolor{humblue1}{RGB}{54,90,165}
+\definecolor{humblue2}{RGB}{94,123,183}
+\definecolor{humblue3}{RGB}{134,156,201}
+\definecolor{humblue4}{RGB}{175,189,219}
+\definecolor{humblue5}{RGB}{215,222,237}
+
+\definecolor{craneorange}{RGB}{50,93,61}
+\definecolor{white}{RGB}{255,255,255}
+\definecolor{craneblue}{RGB}{4,6,76}
+
+\setbeamercolor{structure}{fg=natgreen1}
+\setbeamercolor{kugray}{fg=kugray5,bg=kugray1}
+
+\setbeamercolor{palette primary}{fg=white,bg=craneorange!70}
+\setbeamercolor{palette secondary}{fg=white,bg=craneorange!80}
+\setbeamercolor{palette tertiary}{fg=white,bg=craneorange!90}
+\setbeamercolor{palette quaternary}{fg=white,bg=craneorange}
+
+\setbeamercolor{titlelike}{parent=palette quaternary}
+
+\setbeamercolor{block title}{fg=white,bg=craneorange} %set color in titles on boxes
+\setbeamercolor{block title alerted}{use=alerted text,fg=white,bg=alerted text.fg!75!bg}
+\setbeamercolor{block title example}{use=example text,fg=craneblue,bg=example text.fg!75!bg}
+
+\setbeamercolor{block body}{parent=normal text,use=block title,bg=block title.bg!25!bg}
+\setbeamercolor{block body alerted}{parent=normal text,use=block title alerted,bg=block title alerted.bg!25!bg}
+\setbeamercolor{block body example}{parent=normal text,use=block title example,bg=block title example.bg!25!bg}
+
+\setbeamercolor{sidebar}{bg=craneorange!70}
+  
+\setbeamercolor{palette sidebar primary}{fg=craneblue}
+\setbeamercolor{palette sidebar secondary}{fg=craneblue!75}
+\setbeamercolor{palette sidebar tertiary}{fg=craneblue!75}
+\setbeamercolor{palette sidebar quaternary}{fg=craneblue}
+
+\setbeamercolor*{separation line}{}
+\setbeamercolor*{fine separation line}{}
+
+\setbeamercolor{frametitle}{bg=}
+\setbeamercolor{frametitle}{fg=natgreen1}
+\setbeamerfont{frametitle}{series=\bfseries}
+\setbeamercolor{frametitle right}{bg=}
+\setbeamercolor{frametitle right}{fg=natgreen1}
+
+%JB: closer to KU design guide.. :-P
+\setbeamercolor{title}{fg=natgreen1,bg=}
+
+
+\mode
+<all>
