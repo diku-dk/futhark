@@ -1,0 +1,970 @@
+\documentclass{beamer}
+
+%% \documentclass[handout]{beamer}
+%% % use this with the [handout] option to create handouts for the audience
+%% \usepackage{pgfpages}
+%% \pgfpagesuselayout{2 on 1}[a4paper,border shrink=5mm]
+
+\mode<presentation>
+{
+  \usetheme{Diku}
+  % set this to your preferences:
+  % \setbeamercovered{invisible}
+  \setbeamercovered{transparent}
+}
+
+\usepackage{graphicx}
+\usepackage{epic}
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+
+\newcommand{\basetop}[1]{\vtop{\vskip-1ex\hbox{#1}}}
+\newcommand{\source}[1]{\let\thefootnote\relax\footnotetext{\scriptsize\textcolor{kugray1}{Source: #1}}}
+
+% for coloured code citation in text:
+\usepackage{fancyvrb}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%% code sections   %%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% code highlighting commands in own block
+\DefineVerbatimEnvironment{code}{Verbatim}{fontsize=\scriptsize}
+\DefineVerbatimEnvironment{icode}{Verbatim}{fontsize=\scriptsize}
+
+% Fancy code with color commands:
+\DefineVerbatimEnvironment{colorcode}%
+{Verbatim}{fontsize=\scriptsize,commandchars=\\\{\}}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%% some coloring    %%%%%%%%
+
+% use "DIKU green" from our color theme for \emph
+\renewcommand{\emph}[1]{\textcolor{structure}{#1}}
+% use some not-too-bright red for an \emp command
+\definecolor{DikuRed}{RGB}{130,50,32}
+\newcommand{\emp}[1]{\textcolor{DikuRed}{ #1}}
+\definecolor{CosGreen}{RGB}{10,100,70}
+\newcommand{\emphh}[1]{\textcolor{CosGreen}{ #1}}
+\definecolor{CosBlue}{RGB}{55,111,122}
+\newcommand{\emphb}[1]{\textcolor{CosBlue}{ #1}}
+\definecolor{CosRed}{RGB}{253,1,1}
+\newcommand{\empr}[1]{\textcolor{CosRed}{ #1}}
+
+\newcommand{\mymath}[1]{$ #1 $}
+\newcommand{\myindx}[1]{_{#1}}
+\newcommand{\myindu}[1]{^{#1}}
+
+\newcommand{\myalt}{~|~}
+
+\newcommand{\LO}{$\mathcal{L}_0$}
+
+
+%%%%%%%%%%%%%%%%%%%%
+
+\title{A T2 Graph-Reduction Approach To Fusion}
+
+\author[T.Henriksen,C.Oancea]{Troels Henriksen {\tt athas@sigkill.dk}\\Cosmin Oancea {\tt cosmin@diku.dk}}
+
+\institute{Department of Computer Science (DIKU)\\University of Copenhagen}
+
+
+\date[09/23]{09/2013 \textsc{FHPC} '13}
+
+
+\begin{document}
+
+\titleslide
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\section{Introduction}
+
+\begin{frame}[fragile,t]
+  \frametitle{Setting the stage}
+
+  We want to develop a data-parallel functional language intended to
+  run on vector processors (GPUs).
+
+  \pause
+
+  We have designed a language we call \LO{}.  It looks like this:
+
+  \begin{colorcode}
+    fun int fact(int n) =
+      if n = 0 then 1 else n * fact(n-1)
+  \end{colorcode}
+
+\pause
+
+  Or this:
+
+  \begin{colorcode}
+    fun int fact(int n) =
+      reduce(op *, 1, map (op + (1), iota(n-1)))
+  \end{colorcode}
+\end{frame}
+
+\begin{frame}
+\frametitle{Birds-Eye View of \LO{} Language}
+
+\begin{itemize}
+\item Pure {\em functional} \& {\em nested} parallelism \& {\em regular} arrays.\bigskip
+\item Inherently parallel second-order array combinators (\textsc{soac}),
+  e.g., {\tt map}, {\tt filter}, {\tt reduce} and {\tt scan} (binary associative operators).\bigskip
+\item Seeks a common ground between functional and imperative:\bigskip
+\begin{itemize}
+\item Do loops with in-place updates for sequential computation and cost garantees.\bigskip
+\item Transform program from functional towards imperative.
+\end{itemize}
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}[fragile,t]
+  \frametitle{Fusion}
+
+  Fusion is an optimisation to help avoid manifestation of
+  intermediate arrays.  For example:
+
+  \begin{colorcode}
+    let x = map(f, a) in
+    let y = map(g, x) in
+    ...
+  \end{colorcode}
+
+\pause
+
+We don't want to actually create the array {\tt x} in memory.  We can
+accomplish this by rewriting to:
+
+  \begin{colorcode}
+    let y = map(g . f, x) in
+    ...
+  \end{colorcode}
+
+  {\tt map}-{\tt map} fusion is only one case, but we'll use it as an
+  example.
+\end{frame}
+
+\begin{frame}
+\frametitle{Related Work}
+
+Two main directions:\bigskip
+\begin{itemize}
+    \item Delayed Arrays: index-function repres., e.g., Repa, Obsidian\smallskip
+            \begin{itemize}
+                \item user explicitly inserts array materlization points,\smallskip
+                \item may generate ugly indexing, e.g., non-coalesced memory access\bigskip
+            \end{itemize}
+
+    \item Fuse when an array is consumed exactly once, e.g., DPH, Haskell;
+            implementation sensitive to the inlining engine.
+
+
+\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]
+  \frametitle{Problem Statement at a High-Level}
+
+\begin{block}{Code Example: x1, y1, y2 used multiple times; which can we fuse?  }
+\begin{colorcode}
+...
+let \emp{x1} = map(f0, x2) in
+
+let (\emph{y1}, y2, y3) = unzip ( map( f1, zip(\emp{x1}, x2[1]         ) ) ) in
+let (z1, z2    ) = unzip ( map( f2, zip(\emph{y1}, y2            ) ) ) in
+
+let x3 = map(f,  \emp{x1}) in
+let s  = size(\emph{y1})    in
+
+let (q1, q2    ) = unzip ( map( g,  zip(y3, z1, y2, y3    ) ) ) in
+let res          = unzip ( map( h,  zip(q1, q2, z2, \emph{y1}, y3) ) ) in
+    ...
+\end{colorcode}
+\end{block}
+
+{\em Fuse aggressively without duplicating computation.} Challenges:
+\begin{enumerate}
+    \item Nuisances to fusion, e.g., fuse across {\tt zip}, {\tt unzip}, {\tt size}
+    \item Fusion algebra encompassing {\tt map}, {\tt reduce}, {\tt filter},\\
+            e.g., {\tt map} $\circ$ {\tt map} $\Rightarrow$ {\tt map}
+    \item How much can we fuse?  Any difference between \emp{\tt x1} and \emph{\tt y1}?
+\end{enumerate}
+
+\end{frame}
+
+\section{Fusion in \L0{}}
+
+\begin{frame}[fragile,t]
+  \frametitle{Tuples}
+
+  \LO{} has tuples that can contain anything.  Elements accessed
+  through pattern matching:
+
+\begin{colorcode}
+  let (a, (b, c)) = f(x) in
+\end{colorcode}
+
+\pause
+
+Functions {\tt zip} and {\tt unzip} transform tuples-of-arrays to
+arrays-of-tuples.
+
+\begin{itemize}
+\item {\tt zip(\{1,2,3\}, \{4,5,6\})} $\Rightarrow$ {\tt \{(1,4),
+    (2,5), (3,6)\}}.
+\item {\tt unzip(\{(1,4), (2,5), (3,6)\})} $\Rightarrow$ (\{1,2,3\},
+  \{4,5,6\}).
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}[fragile,t]
+  \frametitle{Tuples, continued}
+
+  Mapping across arrays of tuples:
+
+  \begin{colorcode}
+    map(f, zip(a,b))
+  \end{colorcode}
+
+  Complicates analysis.
+
+\pause
+
+Tuple transformation:
+
+  \begin{itemize}
+  \item {\tt (x,(y,z))} $\Rightarrow$ {\tt (x,y,z)}.
+  \item {\tt [(int, real)]} $\Rightarrow$ {\tt ([int], [real])}.
+  \item {\tt map(f, zip(a,b))} $\Rightarrow$ {\tt map(f, a, b)}.
+  \item {\tt zip} and {\tt unzip} disappear.  {\em This is the important part.}
+  \end{itemize}
+
+\pause
+
+Not always isomorphism.
+
+\begin{itemize}
+\item {\tt [([int], [real])]} $\Rightarrow$ {\tt([[int]], [[real]])}
+\item {\tt\{(\{1\}, \{1.0\}), (\{2, 3\}, \{2.0\})\}}$\Rightarrow$\\
+  {\tt(\{\{1\}, \{2, 3\}\}, \{\{1.0\}, \{2.0\}\})}, which is not
+  regular.
+\end{itemize}
+
+\end{frame}
+
+% \begin{frame}[fragile,t]
+%   \frametitle{Do-loops}
+
+%   \LO{} supports sequential do-loops with a special syntax.\\
+%   \hfill\\
+%   \begin{block}{Loop to recursive function}
+%     \begin{minipage}{0.2\columnwidth}
+%       \begin{colorcode}
+% loop (x = a) =
+%   for i < n do
+%     \emp{g(i,x)}
+% in \emph{body}
+%       \end{colorcode}
+%     \end{minipage}
+%     \pause
+%     \begin{minipage}{0.05\columnwidth}
+%       $\Rightarrow$
+%     \end{minipage}
+%     \begin{minipage}{0.1\columnwidth}
+%       \begin{colorcode}
+% fun t f(int i, int n, t x) =
+%   if i >= n
+%     then x
+%     else f(i+1, n, \emp{g(i,x)})
+
+% let x = f(0, n, a)
+% in \emph{body}
+%       \end{colorcode}
+%     \end{minipage}
+%   \end{block}
+
+%   Where {\tt t} is the type of {\tt x}.
+
+%   (A little more complicated in practice, as {\tt g(i,x)} may be an
+%   expression containing free variables, which must be passed as
+%   additional arguments.)
+
+%   We don't attempt to fuse explicit loops.
+
+% \end{frame}
+
+\begin{frame}[fragile,t]
+  \frametitle{In-Place Updates}
+
+  Let-with construct used to update slices of arrays.
+
+  \begin{colorcode}
+    let b = a with [i\mymath{\myindx{1}},...,i\mymath{\myindx{k}}] <- v
+    in body
+  \end{colorcode}
+
+  \pause
+
+  \begin{block}{Contrived example}
+    \begin{colorcode}
+fun [int] main(int n) =
+  let res = iota(n) in
+  let res = res with [1] <- res[0] + res[2]
+  in res
+    \end{colorcode}
+  \end{block}
+
+  We would like to modify the array {\em in-place} while maintaining
+  referential transparency.
+
+\end{frame}
+
+\begin{frame}[fragile,t]
+  \frametitle{In-Place Updates Part 2: Uniqueness Types}
+
+  We can do this by aliasing analysis and {\em uniqueness types}.
+
+  \begin{colorcode}
+    let b = a with [i\mymath{\myindx{1}},...,i\mymath{\myindx{k}}] <- v
+    in body
+  \end{colorcode}
+
+  Acceptable iff {\tt a} (or any of its aliases) are not used
+  afterwards, and it is not aliased to a {\it non-unique} function
+  parameter.
+
+  \begin{colorcode}
+    fun \emp{*}[int] fibs(int i, \emp{*}[int] arr) =
+      let n = size(arr) in
+      if i == n
+        then arr
+        else
+          let arr = arr with [i] <- arr[i-1] + arr[i-2] in
+          fibs(i+1, arr)
+  \end{colorcode}
+
+  The {\tt {\emp *}} denotes a {\em unique} value.  Unique arguments are not
+  used after the call, and unique return values are not aliased to any
+  of the function parameters.
+
+\end{frame}
+
+\begin{frame}[fragile,t]
+  \frametitle{In-Place Array Update Fusion Restrictions}
+
+  \begin{block}{Incorrect Fusion (because of the in-place semantics)}
+    \begin{center}
+      \begin{colorcode}[fontsize=\scriptsize]
+fun real main([real] a) =
+  let x      = map(f, a)    in
+  let b = a with [1] = 3.33 in
+  let y      = map(g, x)    in
+  b[1]+y[0]
+      \end{colorcode}
+      $\Downarrow$
+      \begin{colorcode}[fontsize=\scriptsize]
+fun real main([real] a) =
+  let b = a with [1] = 3.33   in
+  let y      = map(g . f, a)  in
+  b[1]+y[0]
+      \end{colorcode}
+    \end{center}
+  \end{block}
+
+(Contrived - in real programs, we can't just swap statements.)
+
+\end{frame}
+
+\begin{frame}[fragile,t]
+  \frametitle{{\tt redomap}}
+
+  {\tt redomap($f_{r}$, $f_{m}$, $x_{1}$, \ldots, $x_{n}$, $e_{1}$, \ldots, $e_{n}$)}
+
+  Not part of the external language, but useful for the fusion
+  algebra.  Semantics is the same as\\{\tt reduce($f_{m}$, $(x_{1},\ldots,x_{n})$, zip($e_{1}$, \ldots, $e_{n}$))}.
+\pause
+\begin{block}{List homomorphism (using Haskell notation)} {\tt (red $\odot$ e) . (map f)} can
+  be transformed to:  \\
+  ${\tt red}\mbox{ }\odot\mbox{ }{\tt e}\mbox{ }.\mbox{ }{\tt
+    map}\mbox{ }{\tt f}\mbox{ }\emphh{\equiv}$ $\mbox{ }{\tt
+    red}\mbox{ }\odot\mbox{ }{\tt e}\mbox{ }.\mbox{ }{\tt pmap}_{p}
+  \mbox{ }$ $(\emp{{\tt red} \mbox{
+    }\odot\mbox{ }{\tt e}\mbox{ }.\mbox{ }{\tt map}\mbox{ }{\tt f}})$\\
+  Hence the {\em inner} map-reduce can be
+  rewritten as a left-fold:\\
+  ${\tt red}\mbox{ }\odot\mbox{ }{\tt e}\mbox{ }.\mbox{ }{\tt
+    map}\mbox{ }{\tt f}\mbox{ }\emphh{\equiv}$ $\mbox{ }{\tt
+    red}\mbox{ }\odot\mbox{ }{\tt e}\mbox{ }.\mbox{ }{\tt pmap}_{p}
+  \mbox{ }$ $(\emp{{\tt foldl}\mbox{
+    }{\tt g}\mbox{ }{\tt e}})$\\
+  It follows that in order to be generate parallel code for \\
+  {\tt (red $\odot$ e) . (map f)} we need to record either $\odot$ and
+  {\tt f}, or $\odot$ and {\tt g}. We chose the latter, i.e., {\tt
+    redomap($\odot$, g, e)}, because it allows a richer compositional
+  algebra for fusion.  In particular, it allows to fuse {\tt reduce
+    $\circ$ map $\circ$ filter} into a {\tt redomap} without
+  duplicating computation.
+\end{block}
+
+\end{frame}
+
+\section{Fusion Restrictions}
+
+\begin{frame}[fragile,t]
+  \frametitle{What Not To Fuse?}
+
+  Currently, the rules are:
+
+  \begin{itemize}
+  \item ``DON'T fuse if changes program semantics'' (common sense)
+  \item ``DON'T fuse if computation is duplicated'' (modulo negligible?)
+  \end{itemize}
+
+  \bigskip
+
+  Examples:
+  \begin{itemize}
+  \item Don't fuse inside a loop from outside (\texttt{noFusion1})\\
+    (might change asymptotic complexity) \smallskip
+
+  \item Don't fuse if you compute an array twice (\texttt{noFusion2})\smallskip
+
+  \item Currently, don't fuse even if it intuitively negligible (\texttt{noFusion3})\smallskip
+
+  \item Don't fuse if it is incorrect. (\texttt{noFusion4})
+  \end{itemize}
+
+\end{frame}
+
+\begin{frame}[fragile,t]
+  \frametitle{Example: Fusing into a loop}
+
+  \begin{block}{Inefficient Fusion (because of work duplication)}
+\begin{center}
+      \begin{colorcode}[fontsize=\scriptsize]
+fun real main([real] a, [[real]] b) =
+  let x      = map(f, a)                 in
+  let y      = map(fn real ([real] v) =>
+                   map(h,x,v), b)        in
+  y[0]
+      \end{colorcode}
+$\Downarrow$
+      \begin{colorcode}[fontsize=\scriptsize]
+fun real main([real] a, [[real]] b) =
+  let y      = map(fn real ([real] v) =>
+                   map(\mymath{f \circ h}, a, v), b) in
+  y[0]
+      \end{colorcode}
+\end{center}
+  \end{block}
+\end{frame}
+
+% \section{Simple Fusion}
+
+% \begin{frame}[fragile,t]
+%   \frametitle{What Can We Fuse?}
+
+%   \begin{block}{Simple Fusion Example}\vspace{-1ex}
+%     \begin{columns}
+%       \column{0.3\textwidth}\vspace{-1ex}
+%       \begin{colorcode}[fontsize=\scriptsize]
+% fun real f(real a) = a + 3.0
+% fun real g(real a) = a * 3.0
+
+% fun real main([real] arr) =
+%   let x = map(f, arr) in
+%   let y = map(g, x)   in
+%   let z = map(g, y)   in
+%   z[0]
+%       \end{colorcode}
+%       \column{0.45\textwidth}
+%       \begin{colorcode}[fontsize=\scriptsize]
+% fun real main([real] arr) =
+%   let z = map(fn real (real a) =>
+%                 let b = a + 3.0 in
+%                 let c = b * 3.0 in
+%                 c * 3.0, arr) in
+%   z[0]
+%       \end{colorcode}
+%     \end{columns}
+%   \end{block}
+
+% \end{frame}
+% \begin{frame}[fragile,t]
+%   \frametitle{What Can We Fuse?}
+%   \begin{block}{Simple Fusion Example (Cont)}
+% \begin{center}
+%     \begin{colorcode}[fontsize=\scriptsize]
+% fun real f(real a) = a + 3.0
+% fun real h1(real a, real b, real c) = a * b + c
+% fun real h2(real a, real b) = a * b
+% fun real main([real] arr) =
+%   let x = map(f, arr) in
+%   let y = map(f, arr) in
+%   let z = if arr[0] < 0.0
+%             then map(h1, x, y, x)
+%             else map(h2, y, x) in
+%   z[0]
+%     \end{colorcode}
+% $\Downarrow$
+%     \begin{colorcode}
+% fun real main([real] arr) =
+%   let z =
+%     if arr[0] < 0.0 then
+%       map(fn real (real a) => (a + 3.0) * (a + 3.0) + (a + 3.0), arr)
+%     else map(fn real (real a) => (a + 3.0) * (a + 3.0), arr_4)
+%   in z[0]
+%     \end{colorcode}
+% \end{center}
+%   \end{block}
+% \end{frame}
+
+\section{Discussion}
+
+\begin{frame}[fragile,t]
+  \frametitle{How About This One?}
+
+  Arrays \texttt{y1, y2, y3, z1, z2} are used multiple times .... \\ \emp{so we shouldn't fuse?}
+
+  \begin{block}{How About This one}
+    \begin{colorcode}[fontsize=\scriptsize]
+      fun (real,real,real) f1( real a1, real a2 ) =
+        (a1 * a2, a1 + a2, a1 - a2)
+
+      fun (real,real)      f2( real a1, real a2 ) =
+        (a1 - a2, a1 + 2.0*a2)
+
+      fun (real,real)      g ( real a1, real a2, real a3, real a4 ) =
+        (a1 * a2 - a3 * a4, a3 + a4 + a2 - a1)
+
+      fun real myop ( real a1, real a2, real a3, real a4, real a5 ) =
+        a1+a2+a3+a4+a5
+
+      fun real main([real] x1, [[real]] x2) =
+        let (\emp{y1}, \emp{y2}, \emp{y3}) = map( f1, x1, x2[1] )        in
+        let (\empr{z1}, \empr{z2})     = map( f2, \emp{y1}, \emp{y2} )           in
+        let (\emph{q1}, \emph{q2})     = map( g , \emp{y3},\empr{z1},\emp{y2},\emp{y3} )      in
+        let res          = map( myop, \emph{q1},\emph{q2},\empr{z2},\emp{y1},\emp{y3} ) in
+        res[3]
+    \end{colorcode}
+  \end{block}
+
+\end{frame}
+
+\begin{frame}[fragile,t]
+  \frametitle{T1-T2 Transform?}
+
+If repeated application of T$_1$ and T$_2$ to a control-flow graph ({\sc cfg})
+results in one point, then the {\sc cfg} is said to be reducible, i.e.,
+the code can be re-written using only regular (while) {\tt loop}s,
+{\tt if} and {\tt goto}-free statements (with function calls).
+
+  \vbox{
+    \begin{center}
+      \includegraphics[height=17ex]{Figures/CFG_T12}
+    \end{center}
+  }
+
+\LO{} guarantees reducible {\sc cfg}.
+
+\end{frame}
+
+\begin{frame}[fragile,t]
+  \frametitle{T1-T2 Transform!}
+
+Compute control flow graph.
+
+\begin{tabular}{p{4.5cm}cp{4cm}}
+\begin{minipage}{4cm}
+\begin{colorcode}
+let x1 = map(f0, x2) in
+let x3 = map(f, x1) in
+let (\emp{y1}, \emp{y2}, \emp{y3}) =
+  map(f1, x1, x2[1]) in
+let (\emphb{z1}, \emphb{z2}) =
+  map(f2, \emp{y1}, \emp{y2}) in
+let (\emphh{q1}, \emphh{q2}) =
+  map(g, \emp{y3}, \emphb{z1}, \emp{y2}, \emp{y3}) in
+let res =
+  map(h, \emphh{q1}, \emphh{q2}, \emphb{z2}, \emp{y1}, \emp{y3}) ...
+\end{colorcode}
+\end{minipage}
+&
+$\Rightarrow$
+&
+\begin{minipage}{4cm}
+\includegraphics[height=30ex]{Figures/T1T2}
+\end{minipage}
+\end{tabular}
+\end{frame}
+
+\begin{frame}[fragile,t]
+  \frametitle{T1-T2 Transform!}
+
+\vbox{
+\begin{minipage}{0.46\columnwidth}
+\begin{center}
+\begin{tabular}{p{5.3cm}||p{4cm}}
+\includegraphics[height=30ex]{Figures/T1T2}&
+\includegraphics[height=30ex]{Figures/T1T2Fuse1}
+\end{tabular}
+\end{center}
+\end{minipage}
+}
+Replace inputs {\tt q1}, {\tt q2} with {\tt y3, z1, y2, y3}, removing
+duplicates.
+\end{frame}
+
+\begin{frame}[fragile,t]
+  \frametitle{T1-T2 Transform!}
+
+\vbox{
+\begin{minipage}{0.46\columnwidth}
+\begin{center}
+\begin{tabular}{p{5.3cm}||p{4cm}}
+\includegraphics[height=30ex]{Figures/T1T2Fuse2}&
+\includegraphics[height=30ex]{Figures/T1T2Fuse3}
+\end{tabular}
+\end{center}
+\end{minipage}
+}
+\end{frame}
+
+\begin{frame}[fragile, t]
+\frametitle{Fusion nuisances}
+
+\begin{colorcode}
+let \emphh{x} = map(f, a)       in    let n = size(a)/2      in
+let n = size(\emp{x})/2       in    let (a\mymath{\myindx{1}},a\mymath{\myindx{2}})=split(n,a) in
+let (\emphh{x\mymath{\myindx{1}}},\emphh{x\mymath{\myindx{2}}})=split(n,\emp{x})  in \mymath{\Rightarrow} let \emphh{x\mymath{\myindx{1}}} = map(f, a\mymath{\myindx{1}})   in
+let y = reduce(g,\emphh{x\mymath{\myindx{1}}},\emphh{x\mymath{\myindx{2}}})..     let \emphh{x\mymath{\myindx{2}}} = map(f, a\mymath{\myindx{2}})   in
+                              let y = reduce(g,\emphh{x\mymath{\myindx{1}}},\emphh{x\mymath{\myindx{2}}})..
+\end{colorcode}
+The use of {\tt x} in {\tt size} and {\tt split} in the lefthand-side
+code would inhibit fusion.
+\end{frame}
+
+\begin{frame}[fragile]
+  \frametitle{Always Fuse Replicate (Not Duplicating Computation)}
+
+\begin{block}{ Always Fuse Replicate Contrived Example }
+\begin{columns}
+\column{0.45\textwidth}\vspace{-2ex}
+\begin{colorcode}[fontsize=\scriptsize]
+let \emp{r} = replicate(a+b, N) in
+map( fn [int] (int i) =>
+        map( fn int (int j, int r0)
+                 => i + j + \emp{r0},
+              iota(N), \emp{r}
+            )
+      iota(N)
+    ) ...
+\end{colorcode}
+\column{0.45\textwidth}\vspace{-2ex}
+\begin{colorcode}[fontsize=\scriptsize]
+let \emp{r0} = a + b
+//let \emp{r}  = replicate(r0, N) in
+map( fn [int] (int i) =>
+        map( fn int ( int j )
+                  => i + j + \emp{r0},
+              iota(N)
+            )
+      iota(N)
+    ) ...
+\end{colorcode}
+\end{columns}
+\end{block}
+
+\bigskip
+
+The example shows that fusing {\tt replicate} \emp{inside} a map
+still does not duplicate computation
+
+\end{frame}
+
+\begin{frame}[fragile]
+  \frametitle{Fusion Algebra Motivation}
+
+\begin{block}{ Fusion Produces Efficient GPU Code}
+\begin{colorcode}
+fun int grayCode( int x            ) = (x >> 1) ^ x
+fun int index   ( [int] arr, int i ) = arr[i]
+fun bool testBit( int n,   int ind ) = let t = (1 << ind) in (n & t) = t
+
+fun int sobolNum(int bits_num, [int] dir_vs, int n ) =
+    let bits    = iota   ( bits_num )                   in
+    let indices = \emp{filter} ( testBit(grayCode(n)), bits ) in
+    let xorvals = \emp{map}( index(dir_vs), indices )         in
+
+        \emp{reduce}( op ^, 0, xorvals )
+
+fun [int] main(int N, [int] dirs_vs) =
+    map( sobolNum(32, dirs_vs), iota(N) )
+\end{colorcode}
+\end{block}
+
+{\tt reduce} \mymath{\odot} {\tt map} \mymath{\odot} {\tt filter} $\Rightarrow$ redomap( ..., 0, 32 )
+
+\smallskip
+
+The segmented reduce of CT size 32 can be computed in
+local (fast) memory inside a local workgroup.
+%
+The unfused version that computes {\tt filter} is significantly more expensive.
+
+\end{frame}
+
+\begin{frame}[fragile]
+\frametitle{Fusion Algebra Motivation, Result}
+
+\begin{block}{Fusion Result}
+\begin{colorcode}
+fun [int] main(int N, [int] dirs_vs) =
+  map(fn int (int i) => let
+      redomap(op ^,
+              fn int (int acc, int j) =>
+                let t = 1 << j in
+                let b = ((i >> 1) ^ i) & t in
+                if b = t
+                  then \emph{acc ^ dirs_vs[j]}
+                  else acc,
+              \empr{0}, iota(32)) in
+      ,iota(N)) in
+\end{colorcode}
+\end{block}
+
+Note that {\tt filter} is entirely gone.
+\end{frame}
+
+\begin{frame}[fragile,t]
+  \frametitle{Fusion algebra}
+
+\vbox{
+\begin{minipage}{0.48\columnwidth}
+\begin{colorcode}
+// \emp{replicate can be fused}
+//\emp{without restrictions}
+let x = replicate(N,a)in
+let y = map(f, x, b) in
+let z = map(g, x, c) in
+let x[i] = ...
+    \emphh{\mymath{\equiv}}
+let x = replicate(N, a) in
+let y = map( fn \mymath{\beta\myindx{1}} (\mymath{\alpha\myindx{1}} b\mymath{\myindx{i}})
+              => f(a,b\mymath{\myindx{i}}), b)
+let z = map( fn \mymath{\beta\myindx{2}} (\mymath{\alpha\myindx{2}} c\mymath{\myindx{i}})
+              => g(a,c\mymath{\myindx{i}}), c)
+in let x[i] = ...
+
+
+//\emp{map o map \mymath{\Rightarrow} map}
+let (x1, x2) = map(f, a1)
+in  map(g, x1, y)
+    \emphh{\mymath{\equiv}}
+map(fn \mymath{\beta} (\mymath{\alpha\myindx{1}} a1\mymath{\myindx{i}}, \mymath{\alpha\myindx{2}} y\mymath{\myindx{i}})
+  =>let (x1\mymath{\myindx{i}}, x2\mymath{\myindx{i}}) = f(a1\mymath{\myindx{i}})
+    in  g(x1\mymath{\myindx{i}}, y\mymath{\myindx{i}})
+, a1, y )
+\end{colorcode}
+\end{minipage}
+\hfill
+\begin{minipage}{0.48\columnwidth}
+\begin{colorcode}
+//\emp{filter o filter\mymath{\Rightarrow}filter}
+//\emp{{\em{}IFF} consumer's input set}
+//\emp{  \mymath{\subseteq} producer's output set}
+let (x1,x2)=filter(c\mymath{\myindx{1}},a1,a2)
+in  let y = filter(c\mymath{\myindx{2}}, x1) ..
+    \emphh{\mymath{\equiv}}
+let (y, dead) = filter(
+  fn bool (\mymath{\alpha\myindx{1}} a1\mymath{\myindx{i}},\mymath{\alpha\myindx{2}} a2\mymath{\myindx{i}})=>
+      if   c\mymath{\myindx{1}}(a1\mymath{\myindx{i}}, a2\mymath{\myindx{i}})
+      then c\mymath{\myindx{2}}(a1\mymath{\myindx{i}})
+      else false
+, a1, a2 ) ..
+
+//\emp{reduce o filter\mymath{\Rightarrow}reduce}
+//\emp{{\em{}IFF} consumer's input set}
+//\emp{  \mymath{\equiv} producer's output set}
+let x = filter(c, a)
+in  reduce(\mymath{\oplus}, e, x)
+    \emphh{\mymath{\equiv}}
+reduce(fn \mymath{\beta} (\mymath{\beta} e, \mymath{\beta} a\mymath{\myindx{i}}) =>
+  if c(a\mymath{\myindx{i}}) then \mymath{\oplus}(e,a\mymath{\myindx{i}}) else e
+, e, a )
+\end{colorcode}
+\end{minipage}
+}
+\end{frame}
+
+\begin{frame}[fragile,t]
+  \frametitle{Fusion algebra, continued}
+
+\vbox{
+\begin{minipage}{0.48\columnwidth}
+\begin{colorcode}
+//\emp{reduce o map\mymath{\Rightarrow}redomap}
+let (x1, x2) = map(f, a1)
+in  reduce(\mymath{\oplus},e\mymath{\myindx{1}},e\mymath{\myindx{2}}, x1,y)
+    \emphh{\mymath{\equiv}}
+redomap(\mymath{\oplus}
+, fn (\mymath{\beta\myindx{1}},\mymath{\beta\myindx{2}}) ( \mymath{\beta\myindx{1}} e\mymath{\myindx{1}}, \mymath{\beta\myindx{2}} e\mymath{\myindx{2}}
+             , \mymath{\alpha\myindx{1}} a1\mymath{\myindx{i}},\mymath{\alpha\myindx{2}} y\mymath{\myindx{i}})
+   => let (x1\mymath{\myindx{i}}, x2\mymath{\myindx{i}}) = f(a1\mymath{\myindx{i}})
+      in  \mymath{\oplus}(e\mymath{\myindx{1}},e\mymath{\myindx{2}},x1\mymath{\myindx{i}},y\mymath{\myindx{i}})
+, (e\mymath{\myindx{1}}, e\mymath{\myindx{2}}), a1, y )
+
+
+//\emp{redomap o map\mymath{\Rightarrow}redomap}
+let (x1, x2) = map(f, a1)
+in  redomap(\mymath{\oplus}, g, e, x1, y)
+    \emphh{\mymath{\equiv}}
+redomap(\mymath{\oplus}
+, fn \mymath{\beta} (\mymath{\beta} e, \mymath{\alpha\myindx{1}} a1\mymath{\myindx{i}}, \mymath{\alpha\myindx{2}} y\mymath{\myindx{i}})
+   => let (x1\mymath{\myindx{i}}, x2\mymath{\myindx{i}}) = f(a1\mymath{\myindx{i}})
+      in  g(e, x1\mymath{\myindx{i}}, y\mymath{\myindx{i}})
+, e, a1, y )
+\end{colorcode}
+\end{minipage}
+\hfill
+\begin{minipage}{0.48\columnwidth}
+\begin{colorcode}
+//\emp{reduce o filter\mymath{\Rightarrow}redomap}
+//\emp{{\em{}IFF} consumer's input set}
+//\emp{  \mymath{\subseteq} producer's output set}
+let (x1,x2)=filter(c, a1, a2)
+in  reduce(\mymath{\oplus}, e, x1)
+    \emphh{\mymath{\equiv}}
+redomap(\mymath{\oplus}
+, fn \mymath{\beta} (\mymath{\beta} e, \mymath{\alpha\myindx{1}} a1\mymath{\myindx{i}}, \mymath{\alpha\myindx{2}} a2\mymath{\myindx{i}})
+   => if c(a1\mymath{\myindx{i}}, a2\mymath{\myindx{i}})
+      then \mymath{\oplus}(e, a1\mymath{\myindx{i}}) else e
+, e, a1, a2 )
+
+//\emp{redomap o filter\mymath{\Rightarrow}redomap}
+//\emp{{\em{}IFF} consumer's input set}
+//\emp{  \mymath{\subseteq} producer's output set}
+let (x1,x2)=filter(c, a1, a2)
+in  redomap(\mymath{\oplus}, g, e, x1)
+    \emphh{\mymath{\equiv}}
+redomap(\mymath{\oplus}
+, fn \mymath{\beta} (\mymath{\beta} e, \mymath{\alpha\myindx{1}} a1\mymath{\myindx{i}}, \mymath{\alpha\myindx{2}} a2\mymath{\myindx{i}})
+   => if c(a1\mymath{\myindx{i}}, a2\mymath{\myindx{i}})
+      then g(e, a1\mymath{\myindx{i}}) else e
+, e, a1, a2 )
+\end{colorcode}
+\end{minipage}
+}
+\end{frame}
+
+\begin{frame}[fragile,t]
+  \frametitle{Finally ... }
+
+\begin{colorcode}
+fun [[int]] main(int N, [[int]] a, [[int]] b ) =
+    let br  = replicate( N, transpose(b) ) in
+    let ar  = map      ( replin(N),    a ) in
+    let abr = map  (mul2, ar, br)      in
+        map(redplus2, abr)
+\end{colorcode}
+
+Fuses to...
+
+\begin{colorcode}
+fun [[int]] main(int N, [[int]] a, [[int]] b) =
+  let br = transpose(b) in
+  map(fn [int] (int i, [int] r) =>
+      map(fn int (int j, [int] c) =>
+          redomap(fn int (int x, int y) => x + y,
+                  fn int (int x, int y) => x * y,
+                  0, r, c),
+          iota(N), br),
+      iota(N), a)
+\end{colorcode}
+
+\end{frame}
+
+\begin{frame}[fragile,t]
+  \frametitle{Technicalities}
+
+  We assume a normalised program.  This means we do not have to build
+  the data-dependency graph explicitly, as a bottom-up traversal is
+  guaranteed to encounter the SOACs in the proper order.
+
+  The implementation is somewhat complex, but all bookkeeping, so I'll
+  skip the details.
+
+  \begin{itemize}
+    \item About 700 lines of Haskell.
+    \item ``Fast enough''.
+    \item Fully intraprocedural, relies on aggressive inlining.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile,t]
+  \frametitle{Experiments}
+
+{\tiny
+\begin{center}
+\begin{tabular}{l|c|c|c|c|c|c}
+Fusion Statistics & P0 & P1 & P2 & P3 & P4 & P5 \\\hline
+Lines Of Code          & 283 & 859 & 182 & 23 & 19 & 22\\\hline\hline
+{\tt map} $\circ$ {\tt map}          & 10 & 1  & 8  & 5 & 3  &   \\\hline
+{\tt map} $\circ$ {\tt replicate}    &    &    & 12 & 2 & 2  &   \\\hline
+{\tt redomap} $\circ$ {\tt filter}   & 1  &    &    &   &    &   \\\hline
+{\tt redomap} $\circ$ {\tt map}      & 5  &    &    &   &    &   \\\hline
+{\tt reduce} $\circ$ {\tt map}       & 6  & 12 &    & 2 & 1  & 1 \\\hline
+{\tt reduce} $\circ$ {\tt replicate} &    & 3  &    &   &    &   \\\hline\hline
+Interesting            &    & 1  & 1  &   &    &   \\\hline
+\end{tabular}
+\end{center}
+}
+
+\begin{description}
+%\begin{itemize}
+\item[P0:] a real-world pricing kernel for financial derivatives.
+\item[P1:] a real-world market calibration kernel that computes some
+  of the parameters of P0.
+\item[P2:] a real-world kernel for stochastic volatility calibration
+  via Crank-Nicolson finite differences solver.
+\item[P3:] a flat-parallelism, array-based implementation of the
+  shortest-path algorithm,
+\item[P4:] flat-parallelism implementation of matrix multiplication.
+\item[P5:] an implementation of the maximal segment sum problem.
+%\end{itemize}
+\end{description}
+
+\end{frame}
+
+\section{Conclusions}
+
+\begin{frame}[fragile,t]
+  \frametitle{Conclusions}
+
+  We can fuse even somewhat complex dataflow - particularly, when
+  producer/consumer output/input sets do not match exactly.
+
+  No good experimental results yet.
+
+  \pause
+
+  In the future, write a code generator; implement transformations
+  that ease weaknesses in the fusion algebra (e.g. ISWIM).
+
+  \pause
+  \begin{itemize}
+    \item Wild applause
+    \item Spontaneous rioting by the crowd
+    \item Questions?
+  \end{itemize}
+
+\end{frame}
+
+
+\end{document}
