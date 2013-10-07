@@ -8,6 +8,7 @@
 module L0C.Dev
   ( name
   , ident
+  , tident
   , expr
   , typ
   )
@@ -39,6 +40,13 @@ name k = unsafePerformIO $ do
 -- | Return a new, unique identifier.  Uses 'name'.
 ident :: String -> Type -> Ident
 ident k t = Ident (name k) t noLoc
+
+-- | Return a new, unique identifier, based on a type declaration of
+-- the form @"t name"@, for example @"[int] x"@.  Uses 'name'.
+tident :: String -> Ident
+tident s = case words s of
+             [t,k] -> ident k $ typ t
+             _ -> error "Bad ident"
 
 rightResult :: Show a => Either a b -> b
 rightResult = either (error . show) id
