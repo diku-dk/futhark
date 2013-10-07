@@ -174,7 +174,7 @@ ppBinOp :: (Ord vn, Pretty vn, TypeBox ty) => Int -> BinOp -> ExpBase ty vn -> E
 ppBinOp p bop x y = parensIf (p > precedence bop) $
                     pprPrec (precedence bop) x <+>
                     text (opStr bop) <+>
-                    pprPrec (precedence bop) y
+                    pprPrec (rprecedence bop) y
   where precedence LogAnd = 0
         precedence LogOr = 0
         precedence Band = 1
@@ -191,6 +191,8 @@ ppBinOp p bop x y = parensIf (p > precedence bop) $
         precedence Divide = 5
         precedence Mod = 5
         precedence Pow = 6
+        rprecedence Minus = 10
+        rprecedence op = precedence op
 
 ppSOAC :: (Ord vn, Pretty vn, TypeBox ty) => String -> [LambdaBase ty vn] -> [ExpBase ty vn] -> Doc
 ppSOAC name [] es = text name <> apply (map ppr es)
