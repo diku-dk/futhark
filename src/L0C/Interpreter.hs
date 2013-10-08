@@ -22,6 +22,7 @@ import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.Error
 
+
 import Data.Array
 import Data.Bits
 import Data.List
@@ -29,6 +30,8 @@ import Data.Loc
 import qualified Data.Map as M
 
 import L0C.L0
+
+import Debug.Trace
 
 -- | An error happened during execution, and this is why.
 data InterpreterError = MissingEntryPoint Name

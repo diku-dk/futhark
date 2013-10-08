@@ -26,6 +26,7 @@ import L0C.EnablingOpts.DeadVarElim
 import L0C.EnablingOpts.TupleNormalizer
 import L0C.EnablingOpts.LetNormalizer
 import L0C.EnablingOpts.EnablingOptErrors
+import Debug.Trace
 
 import qualified L0C.TupleTransform as TT
 
