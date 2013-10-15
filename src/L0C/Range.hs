@@ -30,16 +30,21 @@ type Range = (RExp, RExp)
 
 extractExp :: RExp -> Exp
 extractExp (RExp e) = e
- 
+
+simplExp :: Exp -> Exp
+simplExp e = 
+    case simplify e of
+        Right e' -> e'
+
 substitute :: Ident-> Range -> RExp -> Range
 substitute i r l@(RExp (Literal v sl)) = (l,l) 
 substitute i r v@(RExp (Var e)) = if e == i then r else (v,v)
-substitute i r (RExp (BinOp Plus e1 e2 ty pos)) = do
-    let (e1lb, e1ub) = substitute i r (RExp e1)
-    let (e2lb, e2ub) = substitute i r (RExp e2)
-    lb <- simplify (BinOp Plus (extractExp e1lb) (extractExp e2lb) ty pos) 
-    ub <- simplify (BinOp Plus (extractExp e1ub) (extractExp e2ub) ty pos)
-    (RExp lb, RExp ub)) 
+substitute i r (RExp (BinOp Plus e1 e2 ty pos)) =
+    let (e1lb, e1ub) = substitute i r (RExp e1) in
+    let (e2lb, e2ub) = substitute i r (RExp e2) in
+    let lb = simplExp(BinOp Plus (extractExp e1lb) (extractExp e2lb) ty pos) in
+    let ub = simplExp(BinOp Plus (extractExp e1ub) (extractExp e2ub) ty pos) in
+    (RExp lb, RExp ub) 
 
 
 
