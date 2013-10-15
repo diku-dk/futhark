@@ -50,7 +50,7 @@ substitute i r (RExp (BinOp Plus e1 e2 ty pos)) =
 
 -- TESTING
 
-res = substitute y ra (RExp $ Var x)
+res = substitute x ra rexp
 
 dummyPos = Data.Loc.Pos "DummyPos" 10 0 0
 dummySrcLoc = Data.Loc.SrcLoc (Data.Loc.Loc dummyPos dummyPos)
@@ -67,9 +67,10 @@ ra = (RExp $ Literal (IntVal 1) dummySrcLoc,
       RExp $ Var $ y)
 
 rexp =
-    let x' = (Var x) in
-    let x'' = BinOp Pow (Var x) (Literal (IntVal 2) dummySrcLoc) (Elem Int) dummySrcLoc in 
-    RExp $ BinOp Minus x'' x' (Elem Int) dummySrcLoc
+    let x' = Var x in
+    --let x'' = BinOp Pow (Var x) (Literal (IntVal 2) dummySrcLoc) (Elem Int) dummySrcLoc in 
+    let x'' = Literal (IntVal 2) dummySrcLoc in
+    RExp $ BinOp Plus x'' x' (Elem Int) dummySrcLoc
     
 
 -- empty :: Range a
