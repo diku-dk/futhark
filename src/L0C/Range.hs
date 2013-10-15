@@ -13,7 +13,7 @@ import Debug.Trace
 import qualified Data.Loc
 
 -- import L0C.L0
--- import L0C.EnablingOpts.Simplify
+import L0C.EnablingOpts.Simplify
 -- import qualified Data.Loc
 -- import qualified Data.Map as Map
 
@@ -24,21 +24,29 @@ data RExp = RExp Exp | Pinf | Ninf
       deriving (Show, Eq)
 -- 
 type Range = (RExp, RExp)
+
+
+extractExp :: RExp -> Exp
+extractExp RExp e = e
  
 substitute :: Ident-> Range -> RExp -> Range
-substitute i r (RExp e) =
-  case e of
-    Literal _ _          -> (Ninf, Pinf)
-    Var e                -> if trace (show (e == i)) e==i
-                            then r
-                            else (Ninf, Pinf)
+substitute i r l@(RExp (Literal v sl)) = (l,l) 
+substitute i r v@(RExp (Var e)) = if e == i then r else (v,v)
+substitute i r RExp (BinOp Plus e1 e2 ty pos) = do
+    let (e1lb, e1ub) = substitute i r e1
+    let (e2lb, e2ub) = substitute i r e2
+    lb <- simplify BinOp Plus (extractExp e1lb) (extractExp e2lb) ty pos
+    ub <- simplify BinOp Plus (extractExp e1ub) (extractExp e2ub) ty pos
+    (RExp lb, RExp ub) 
+    where
+
 
 
 
 
 -- TESTING
 
-res = substitute x ra (RExp $ Var x)
+res = substitute y ra (RExp $ Var x)
 
 dummyPos = Data.Loc.Pos "DummyPos" 10 0 0
 dummySrcLoc = Data.Loc.SrcLoc (Data.Loc.Loc dummyPos dummyPos)
