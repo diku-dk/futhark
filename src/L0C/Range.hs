@@ -11,6 +11,9 @@
 import L0C.L0
 import Debug.Trace
 import qualified Data.Loc
+import Control.Monad
+import Control.Applicative
+import Data.Either
 
 -- import L0C.L0
 import L0C.EnablingOpts.Simplify
@@ -34,9 +37,9 @@ substitute i r v@(RExp (Var e)) = if e == i then r else (v,v)
 substitute i r (RExp (BinOp Plus e1 e2 ty pos)) = do
     let (e1lb, e1ub) = substitute i r (RExp e1)
     let (e2lb, e2ub) = substitute i r (RExp e2)
-    lb <- (BinOp Plus (extractExp e1lb) (extractExp e2lb) ty pos) in 
-    ub <- (BinOp Plus (extractExp e1ub) (extractExp e2ub) ty pos) in
-    (RExp lb, RExp ub) 
+    lb <- simplify (BinOp Plus (extractExp e1lb) (extractExp e2lb) ty pos) 
+    ub <- simplify (BinOp Plus (extractExp e1ub) (extractExp e2ub) ty pos)
+    (RExp lb, RExp ub)) 
 
 
 
