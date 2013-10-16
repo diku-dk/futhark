@@ -22,11 +22,8 @@ import qualified Data.Map as M
 import Data.Ord
 import qualified Data.Set as S
 
-import qualified L0C.Dev as D
 import L0C.L0
 import L0C.FreshNames
-
-import Debug.Trace
 
 data BindNeed = LoopBind TupIdent Exp Ident Exp Exp
               | LetBind TupIdent Exp [(TupIdent, Exp)]
@@ -80,10 +77,12 @@ cartesian [] = []
 cartesian [x] = map (:[]) x
 cartesian (x:xs) = [ x' : xs' | xs' <- cartesian xs, x' <- x ]
 
+varExp :: Exp -> Maybe Ident
+varExp (Var k) = Just k
+varExp _       = Nothing
+
 vars :: [Exp] -> [Ident]
-vars = mapMaybe var
-  where var (Var k) = Just k
-        var _       = Nothing
+vars = mapMaybe varExp
 
 lookupShapeBindings :: Ident -> ShapeMap -> [ShapeBinding]
 lookupShapeBindings = delve S.empty
@@ -105,9 +104,9 @@ lookupShapeBindings = delve S.empty
                              e:_ -> e
                              []  -> Nothing
 
-sameShape :: Ident -> Ident -> ShapeMap -> Bool
-sameShape x y =
-  any matches . lookupShapeBindings x
+sameShape :: ShapeMap -> Ident -> Ident -> Bool
+sameShape m x y =
+  any matches $ lookupShapeBindings x m
     where matches (DimSizes sz) =
             all ok $ zip sz [0..]
           ok (Just (Size i (Var v) _), j) =
@@ -166,17 +165,20 @@ addBinding pat e@(Size i (Var x) _) = do
   alts <- concatMap mkAlt <$> asks (lookupShapeBindings x . envBindings)
   addSeveralBindings pat e alts
 
-addBinding pat e@(Apply fname [(Var x, xd), (Var y, yd)] t loc)
-   | "assertZip" <- nameToString fname = do
+addBinding pat e@(Apply fname args t loc)
+   | "assertZip" <- nameToString fname,
+     Just args' <- mapM (varExp . fst) args = do
   bindings <- asks envBindings
-  let cps = liftM2 (,) (x : copyOf x bindings) (y : copyOf y bindings)
-      sls = filter (\(x',y') -> sameShape x' y' bindings) $
-            liftM2 (,) (sliceOf x bindings) (sliceOf y bindings)
+  let cps = cartesian $ map (\a -> a : copyOf a bindings) args'
+      sls = filter allSameShape $
+            cartesian $ map (`sliceOf` bindings) args'
+      allSameShape [] = True
+      allSameShape (a:as) = all (sameShape bindings a) as
   case cps ++ sls of
     [] -> addSingleBinding pat e
     ls -> addSeveralBindings pat e
-          [ (pat, Apply fname [(Var x', xd), (Var y', yd)] t loc)
-            | (x', y') <- ls ]
+          [ (pat, Apply fname (map (\a -> (Var a, Observe)) l) t loc)
+            | l <- ls ]
 
 addBinding pat e = addSingleBinding pat e
 
