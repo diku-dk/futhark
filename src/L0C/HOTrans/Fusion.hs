@@ -163,10 +163,6 @@ data FusedKer = FusedKer {
                 -- -- ^ the set of variables used in
                 -- -- the closure of the `soac' stmt, i.e., `a', `b'.
 
-                --, asserts    :: M.Map Ident Exp
-                -- -- ^ the Map of `assertZip' stmts that involve
-                -- -- arrays that are input to the kernel.
-
                 , inplace    :: S.Set VName
                 -- ^ every kernel maintains a set of variables
                 -- that alias vars used in in-place updates,
@@ -196,16 +192,6 @@ data FusedRes = FusedRes {
   -- (ii) are used as input to at least two different kernels that
   --      are not located on disjoint control-flow branches, or
   --(iii) are used in the lambda expression of SOACs
-
-  , zips       :: M.Map VName (Int, S.Set Exp)
-  -- ^ a map between the name of the boolean variable
-  -- that holds the result of an assertZip function call
-  -- AND the expression represention of the corresponding
-  -- function call.
-
-  , inzips     :: M.Map VName [VName]
-  -- ^ a map between an array name in a zip and
-  -- its corresponding boolean value (in zips)
 
   , kernels    :: M.Map VName FusedKer
   -- ^ The hashtable recording the uses
@@ -270,7 +256,7 @@ addNewKer res (idd, soac) = do
     let is' = foldl (\x arr -> M.insertWith' S.union arr (S.singleton nm_ker) x)
                     (inpArr res) inp_nms0
 
-    return $ FusedRes (rsucc res) os' is' ufs' (zips res) (inzips res)
+    return $ FusedRes (rsucc res) os' is' ufs'
                       (M.insert nm_ker new_ker (kernels res))
 
 
@@ -318,17 +304,6 @@ greedyFuse is_repl lam_used_nms res (idd, soac) = do
     let ok_inplace = L.all (\ker-> not $ L.any (\x->S.member x $ inplace ker) (S.toList all_used_names)) to_fuse_kers
 
 
-    -- If @soac@ is a Filter2, then check that none of its out idds
-    --    are used in a size call.
-    -- let ok_sz=case soac of
-    --             Filter2{} ->
-    --               let ok x = fromMaybe True $ do
-    --                            znms <- M.lookup x (inzips res)
-    --                            is <- map fst <$> mapM (`M.lookup` zips res) znms
-    --                            return $ not $ any ((== "size") . getBuiltinFunName) is
-    --               in all ok out_nms
-    --             _ -> True
-
     -- compute whether @soac@ is fusable or not
     let is_fusable = not_unfusable && not (null to_fuse_kers) && ok_inplace && ok_kers_compat
 
@@ -354,7 +329,7 @@ greedyFuse is_repl lam_used_nms res (idd, soac) = do
                             (outArr res) out_nms
             let is' = foldl (\x arr -> M.insertWith' S.union arr (S.singleton nm_ker) x)
                             (inpArr res) inp_nms0
-            return $ FusedRes (rsucc res) os' is' ufs' (zips res) (inzips res)
+            return $ FusedRes (rsucc res) os' is' ufs'
                               (M.insert nm_ker new_ker (kernels res))
      else do -- ... fuse current soac into to_fuse_kers ...
             fused_kers <- mapM (fuseSOACwithKer (out_idds, soac)) to_fuse_kers
@@ -382,68 +357,11 @@ greedyFuse is_repl lam_used_nms res (idd, soac) = do
             let kernels' = foldl (\ kers (knew, knm) -> M.insert knm knew kers )
                                  (kernels res) (zip fused_kers to_fuse_knms)
 
-            -- TODO: fixing the zipAsserts:
-            --       (i) get the ``best'' substitution candidate from the input arrays
-            inp_rep <- getInpArrSOAC soac >>= getBestInpArr
-
-            --      (ii) remove the fused arrays from the `inzips' Map
-            --           and update the ``best'' substitution candidate
-            let (zip_nms, inzips') =
-                    foldl (\(l,m) x -> case M.lookup x m of
-                                    Nothing -> ([] :l, m)
-                                    Just lst-> (lst:l, M.delete x m)
-                          ) ([], inzips res) (reverse out_nms)
-            let inzips'' = case inp_rep of
-                            Var x -> case M.lookup (identName x) inzips' of
-                                        Nothing -> M.insert (identName x)
-                                                            (concat zip_nms)
-                                                            inzips'
-                                        Just l  -> M.insert (identName x)
-                                                            (L.nub $ concat zip_nms++l)
-                                                            inzips'
-                            _     -> inzips'
-
-
-            --     (iii) update the zips Map, i.e., perform the substitution
-            --           with the best candidate
-            --_ <- trace (ppExp inp_rep) (return Nothing)
-            --_ <- trace (ppTupId idd) (return Nothing)
-            let zips''= foldl (\mm (nm,bnms) ->
-                                    foldl (\m bnm ->
-                                            case M.lookup bnm m of
-                                                Nothing         -> m --error
-                                                Just (fnm,arrs) -> M.insert bnm (fnm, substCand inp_rep nm arrs) m
-                                          ) mm bnms
-                              ) (zips res) (zip out_nms zip_nms)
-
             -- nothing to do for `outArr' (since we have not added a new kernel)
-            return $ FusedRes True (outArr res) inpArr' ufs' zips'' inzips'' kernels'
+            return $ FusedRes True (outArr res) inpArr' ufs' kernels'
     where
         notUnfusable :: FusedRes -> VName -> Bool
         notUnfusable ress nm = not $ S.member nm $ unfusable ress
-
-        getBestInpArr :: [Exp] -> FusionGM Exp
-        getBestInpArr [] = badFusionGM $ EnablingOptError (srclocOf soac)
-                           "In Fusion.hs, getBestInpArr argument empty!"
-        getBestInpArr (arr:arrs) =
-            foldM (\b x -> case x of
-                               Iota{} -> return x
-                               Var {} -> case b of
-                                            Iota{} -> return b
-                                            _      -> return x
-                               Index{}-> return b
-                               _     -> badFusionGM $ EnablingOptError (srclocOf b)
-                                                      "In Fusion.hs, getBestInpArr error!"
-                  ) arr arrs
-
-        substCand :: Exp -> VName -> S.Set Exp -> S.Set Exp
-        substCand rep nm arrs =
-            let rres = foldl (\l arr -> case arr of
-                                Var x -> if nm == identName x
-                                         then rep:l else arr:l
-                                _     -> arr:l
-                             ) [] $ reverse $ S.toList arrs
-            in S.fromList rres
 
 fuseSOACwithKer :: ([Ident], Exp) -> FusedKer -> FusionGM FusedKer
 fuseSOACwithKer (out_ids1, soac1) ker = do
@@ -586,24 +504,6 @@ fusionGatherExp fres (LetPat pat (Scan2 lam nes arrs _ _) body _) = do
     bres  <- binding pat $ fusionGatherExp lres body
     foldM fusionGatherExp bres (nes++arrs)
 
-fusionGatherExp fres (LetPat pat (Apply fname zip_args _ _) body _)
-  | "assertZip" <- nameToString fname = do
-    bres  <- fusionGatherExp fres body
-    case getIdents pat of
-      [] -> return bres
-      ident:_ -> do
-        let nm = identName ident
-            iddnms  = foldl (\s x-> case x of
-                                      Var idd -> S.insert (identName idd) s
-                                      _       -> s
-                            ) S.empty $ map fst zip_args
-            inzips' = foldl (\m x -> case M.lookup x m of
-                                        Nothing -> M.insert x [nm]     m
-                                        Just lst-> M.insert x (nm:lst) m
-                            ) (inzips bres) (S.toList iddnms)
-            i = getBuiltinFunIdent "assertZip"
-        return $ bres { zips   = M.insert nm (i, S.fromList $ map fst zip_args) (zips bres), inzips = inzips' }
-
 fusionGatherExp fres (LetPat pat e body _) = do
     let pat_vars = map Var $ getIdents pat
     bres <- binding pat $ fusionGatherExp fres body
@@ -738,7 +638,7 @@ getUnfusableSet pos fres args = do
     let null_res = mkFreshFusionRes
     new_res <- foldM fusionGatherExp null_res args
     if not (M.null (outArr  new_res)) || not (M.null (inpArr new_res)) ||
-       not (M.null (kernels new_res)) || not (M.null (zips   new_res)) || rsucc new_res
+       not (M.null (kernels new_res)) || rsucc new_res
     then badFusionGM $ EnablingOptError pos $
                         "In Fusion.hs, getUnfusableSet, broken invariant!"
                         ++ " Unnormalized program: " ++ concatMap ppExp args
@@ -783,29 +683,6 @@ fuseInExp (LetPat pat soac@(Scan2 {}) body pos) = do
     body' <- fuseInExp body
     soac' <- fuseInExp soac
     return $ LetPat pat soac' body' pos
-
-fuseInExp e@(LetPat pat (Apply fname _ rtp p1) body pos)
-  | "assertZip" <- nameToString fname = do
-    body' <- fuseInExp body
-    fres  <- asks fusedRes
-    case getIdents pat of
-      [] -> return e
-      ident:_ -> do
-        let nm = identName ident
-        case M.lookup nm (zips fres) of
-          Nothing -> badFusionGM $ EnablingOptError pos
-                                     ("In Fusion.hs, fuseInExp LetPat of assertZip, "
-                                      ++" assertZip not in Res: "++textual nm)
-          Just (i,ss)-> do let arrs = S.toList ss
-                           let fnm  = getBuiltinFunName i
-                           _ <- if fnm == "assertZip"
-                                then return Nothing
-                                else badFusionGM $ EnablingOptError pos
-                                                    ("In Fusion.hs, fuseInExp LetPat of assertZip, "
-                                                     ++" builtin funname not assertZip: "++fnm)
-                           if length arrs > 1
-                           then return $ LetPat pat (Apply fname (zip arrs $ repeat Observe) rtp p1) body' pos
-                           else return body' -- i.e., assertZip eliminated
 
 fuseInExp (LetPat pat e body pos) = do
     body' <- fuseInExp body
@@ -908,7 +785,7 @@ replaceSOAC pat soac = do
 mkFreshFusionRes :: FusedRes
 mkFreshFusionRes =
     FusedRes { rsucc     = False,   outArr = M.empty, inpArr  = M.empty,
-               unfusable = S.empty, zips   = M.empty, inzips  = M.empty, kernels = M.empty }
+               unfusable = S.empty, kernels = M.empty }
 
 unionFusionRes :: FusedRes -> FusedRes -> FusedRes
 unionFusionRes res1 res2 =
@@ -916,8 +793,6 @@ unionFusionRes res1 res2 =
               (outArr    res1    `M.union`  outArr    res2)
               (M.unionWith S.union (inpArr res1) (inpArr res2) )
               (unfusable res1    `S.union`  unfusable res2)
-              (zips      res1    `M.union`  zips      res2)
-              (M.unionWith (++) (inzips res1) (inzips res2) )
               (kernels   res1    `M.union`  kernels   res2)
 
 mergeFusionRes :: FusedRes -> FusedRes -> FusionGM FusedRes
@@ -929,8 +804,6 @@ mergeFusionRes res1 res2 = do
                        (outArr    res1    `M.union`  outArr    res2)
                        (M.unionWith S.union (inpArr res1) (inpArr res2) )
                        m_unfus
-                       (zips      res1    `M.union`  zips      res2)
-                       (M.unionWith (++) (inzips res1) (inzips res2) )
                        (kernels   res1    `M.union`  kernels   res2)
 
 
@@ -1045,15 +918,6 @@ errorIllegalFus :: String -> SrcLoc -> FusionGM Exp
 errorIllegalFus soac_name pos =
     badFusionGM $ EnablingOptError pos
                   ("In Fusion.hs, soac "++soac_name++" appears illegaly in pgm!")
-
-
-getBuiltinFunName  :: Int -> String
-getBuiltinFunName i = case i of
-                        1 -> "assertZip"
-                        _ -> "unknownBuiltInFun"
-getBuiltinFunIdent :: String -> Int
-getBuiltinFunIdent "assertZip" = 1
-getBuiltinFunIdent _           = 33
 
 --------------------------------------------
 --------------------------------------------
