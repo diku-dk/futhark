@@ -17,12 +17,16 @@ import Control.Monad.RWS
 import Data.Graph
 import Data.List
 import Data.Loc
+import Data.Maybe
 import qualified Data.Map as M
 import Data.Ord
 import qualified Data.Set as S
 
+import qualified L0C.Dev as D
 import L0C.L0
 import L0C.FreshNames
+
+import Debug.Trace
 
 data BindNeed = LoopBind TupIdent Exp Ident Exp Exp
               | LetBind TupIdent Exp [(TupIdent, Exp)]
@@ -59,8 +63,11 @@ instance Monoid Need where
   mempty = Need S.empty
 
 data ShapeBinding = DimSizes [Maybe Exp]
+                    deriving (Show, Eq)
 
-data Env = Env { envBindings :: M.Map Ident [ShapeBinding]
+type ShapeMap = M.Map Ident [ShapeBinding]
+
+data Env = Env { envBindings :: ShapeMap
                }
 
 emptyEnv :: Env
@@ -73,21 +80,57 @@ cartesian [] = []
 cartesian [x] = [x]
 cartesian (x:xs) = [ x' : xs' | xs' <- cartesian xs, x' <- x ]
 
+vars :: [Exp] -> [Ident]
+vars = mapMaybe var
+  where var (Var k) = Just k
+        var _       = Nothing
 
-lookupShapeBindings :: Ident -> Env -> [ShapeBinding]
-lookupShapeBindings k env =
-  case M.lookup k $ envBindings env of
-    Nothing -> []
-    Just shs -> shs ++ concatMap recurse shs
-    where recurse (DimSizes sz) = map DimSizes $ cartesian $ map inspect sz
-            where inspect (Just (Size i (Var k') _)) =
-                    case lookupShapeBindings k' env of
-                      [] -> [Nothing]
-                      l  -> map (fill i) l
-                  inspect _ = [Nothing]
-          fill i (DimSizes sz) = case drop i sz of
-                                   e:_ -> e
-                                   []  -> Nothing
+lookupShapeBindings :: Ident -> ShapeMap -> [ShapeBinding]
+lookupShapeBindings = delve S.empty
+  where
+    delve s k m | k `S.member` s = []
+                | otherwise =
+                  case M.lookup k m of
+                    Nothing -> []
+                    Just shs -> shs ++ concatMap (recurse s m) shs
+    recurse s m (DimSizes sz) =
+      map DimSizes $ filter (not . all (==Nothing)) $
+          cartesian $ map inspect sz
+      where inspect (Just (Size i (Var k') _)) =
+              case delve (k' `S.insert` s) k' m of
+                [] -> [Nothing]
+                l  -> map (fill i) l
+            inspect _ = [Nothing]
+    fill i (DimSizes sz) = case drop i sz of
+                             e:_ -> e
+                             []  -> Nothing
+
+sameShape :: Ident -> Ident -> ShapeMap -> Bool
+sameShape x y =
+  any matches . lookupShapeBindings x
+    where matches (DimSizes sz) =
+            all ok $ zip sz [0..]
+          ok (Just (Size i (Var v) _), j) =
+            i == j && v == y
+          ok _ = False
+
+slices :: Ident -> ShapeMap -> [(Ident, Int)]
+slices x m = mapMaybe isSlice $ lookupShapeBindings x m
+  where isSlice (DimSizes (Just (Size i (Var y) _):sz))
+          | all (isDimOf y) $ zip sz [i+1..] = Just (y, i)
+          | otherwise = Nothing
+        isSlice _ = Nothing
+        isDimOf y (Just (Size i (Var z) _), j) =
+          y == z && i == j
+        isDimOf _ _ = False
+
+sliceOf :: Ident -> ShapeMap -> [Ident]
+sliceOf x m = map fst $ slices x m
+
+copyOf :: Ident -> ShapeMap -> [Ident]
+copyOf x m = mapMaybe isCopy $ slices x m
+  where isCopy (y, 0) = Just y
+        isCopy (_, _) = Nothing
 
 newtype HoistM a = HoistM (RWS
                            Env                -- Reader
@@ -120,8 +163,21 @@ addBinding pat e@(Size i (Var x) _) = do
   let mkAlt (DimSizes ses) = case drop i ses of
                                Just se:_ -> [(pat, se)]
                                _        -> []
-  alts <- concatMap mkAlt <$> asks (lookupShapeBindings x)
+  alts <- concatMap mkAlt <$> asks (lookupShapeBindings x . envBindings)
   addSeveralBindings pat e alts
+
+addBinding pat e@(Apply fname [(Var x, xd), (Var y, yd)] t loc)
+   | "assertZip" <- nameToString fname = do
+  bindings <- asks envBindings
+  let cps = liftM2 (,) (x : copyOf x bindings) (y : copyOf y bindings)
+      sls = filter (\(x',y') -> sameShape x' y' bindings) $
+            liftM2 (,) (sliceOf x bindings) (sliceOf y bindings)
+  case cps ++ sls of
+    [] -> addSingleBinding pat e
+    ls -> addSeveralBindings pat e
+          [ (pat, Apply fname [(Var x', xd), (Var y', yd)] t loc)
+            | (x', y') <- ls ]
+
 addBinding pat e = addSingleBinding pat e
 
 addSingleBinding :: TupIdent -> Exp -> HoistM ()
@@ -164,21 +220,25 @@ bindLet pat@(Id dest) e@(Concat (Var x) (Var y) loc) m = do
                   [Size i (Var x) loc | i <- [1..arrayDims (identType x) - 1]]
                  ) $ addBinding pat e >> m
 
-bindLet pat@(Id dest) e@(Map _ (Var src) _ loc) m = do
+bindLet pat e@(Map2 _ srcs _ _) m = do
   addBinding pat e
-  withShape dest [Size 0 (Var src) loc] m
+  withShapes (sameOuterShapes $ S.toList (patIdents pat) ++ vars srcs) m
 
-bindLet pat@(Id dest) e@(Scan _ _ (Var src) _ _) m = do
+bindLet pat e@(Reduce2 _ _ srcs _ _) m = do
   addBinding pat e
-  withShape dest (slice 0 src) m
+  withShapes (sameOuterShapesExps srcs) m
 
-bindLet pat@(TupId pats _) e@(Map2 _ srcs _ loc) m = do
+bindLet pat e@(Scan2 _ _ srcs _ _) m = do
   addBinding pat e
-  withShapes (zip pats [[Size 0 src loc] | src <- srcs]) m
+  withShapes (sameOuterShapesExps srcs) m
 
-bindLet pat@(TupId pats _) e@(Scan2 _ _ srcs _ loc) m = do
+bindLet pat e@(Filter2 _ srcs _) m = do
   addBinding pat e
-  withShapes (zip pats [[Size 0 src loc] | src <- srcs]) m
+  withShapes (sameOuterShapesExps srcs) m
+
+bindLet pat e@(Redomap2 _ _ _ srcs _ _) m = do
+  addBinding pat e
+  withShapes (sameOuterShapesExps srcs) m
 
 bindLet pat@(Id dest) e@(Index src idxs _ _) m = do
   addBinding pat e
@@ -222,6 +282,17 @@ withShapes ((Id dest, es):rest) m =
   withShape dest es $ withShapes rest m
 withShapes (_:rest) m =
   withShapes rest m
+
+sameOuterShapesExps :: [Exp] -> [(TupIdent, [Exp])]
+sameOuterShapesExps = sameOuterShapes . vars
+
+sameOuterShapes :: [Ident] -> [(TupIdent, [Exp])]
+sameOuterShapes = outer' []
+  where outer' _ [] = []
+        outer' prev (k:ks) =
+          [ (Id k, [Size 0 (Var k') $ srclocOf k])
+            | k' <- prev ++ ks ] ++
+          outer' (k:prev) ks
 
 -- | Run the let-hoisting algorithm on the given program.  Even if the
 -- output differs from the output, meaningful hoisting may not have
@@ -397,16 +468,19 @@ hoistInExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody _) = do
 hoistInExp e@(Map2 (AnonymFun params _ _ _) arrexps _ _) =
   hoistInSOAC e arrexps $ \ks ->
     withShapes (zip (map (Id . fromParam) params) $ map (slice 1) ks) $
+    withShapes (sameOuterShapesExps arrexps) $
     hoistInExpBase e
 hoistInExp e@(Reduce2 (AnonymFun params _ _ _) accexps arrexps _ _) =
   hoistInSOAC e arrexps $ \ks ->
     withShapes (zip (map (Id . fromParam) $ drop (length accexps) params)
                $ map (slice 1) ks) $
+    withShapes (sameOuterShapesExps arrexps) $
     hoistInExpBase e
 hoistInExp e@(Scan2 (AnonymFun params _ _ _) accexps arrexps _ _) =
   hoistInSOAC e arrexps $ \ks ->
     withShapes (zip (map (Id . fromParam) $ drop (length accexps) params)
                $ map (slice 1) ks) $
+    withShapes (sameOuterShapesExps arrexps) $
     hoistInExpBase e
 hoistInExp e@(Redomap2 (AnonymFun redparams _ _ _) (AnonymFun mapparams _ _ _)
               accexps arrexps _ _) =
@@ -414,6 +488,7 @@ hoistInExp e@(Redomap2 (AnonymFun redparams _ _ _) (AnonymFun mapparams _ _ _)
     withShapes (zip (map (Id . fromParam) mapparams) $ map (slice 1) ks) $
     withShapes (zip (map (Id . fromParam) $ drop (length accexps) redparams)
                $ map (slice 1) ks) $
+    withShapes (sameOuterShapesExps arrexps) $
     hoistInExpBase e
 hoistInExp e = hoistInExpBase e
 

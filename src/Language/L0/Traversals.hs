@@ -51,6 +51,7 @@ module Language.L0.Traversals
   -- * Specific traversals
   , progNames
   , patNames
+  , patIdents
   , freeInExp
   , freeNamesInExp
   , consumedInExp
@@ -346,9 +347,13 @@ progNames = execWriter . mapM funNames . progFunctions
 
 -- | The set of names bound in the given pattern.
 patNames :: Ord vn => TupIdentBase ty vn -> S.Set vn
-patNames (Id ident)     = S.singleton $ identName ident
-patNames (TupId pats _) = mconcat $ map patNames pats
-patNames (Wildcard _ _) = mempty
+patNames = S.map identName . patIdents
+
+-- | The set of idents bound in the given pattern.
+patIdents :: Ord vn => TupIdentBase ty vn -> S.Set (IdentBase ty vn)
+patIdents (Id ident)     = S.singleton ident
+patIdents (TupId pats _) = mconcat $ map patIdents pats
+patIdents (Wildcard _ _) = mempty
 
 -- | Return the set of identifiers that are free in the given
 -- expression.
