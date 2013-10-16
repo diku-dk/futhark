@@ -77,7 +77,7 @@ emptyEnv = Env {
 
 cartesian :: [[a]] -> [[a]]
 cartesian [] = []
-cartesian [x] = [x]
+cartesian [x] = map (:[]) x
 cartesian (x:xs) = [ x' : xs' | xs' <- cartesian xs, x' <- x ]
 
 vars :: [Exp] -> [Ident]
