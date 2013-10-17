@@ -592,11 +592,6 @@ fusionGatherExp _ (Scan2    _ _ _ _   pos) = errorIllegal "scan2"   pos
 fusionGatherExp _ (Filter2  _ _       pos) = errorIllegal "filter2" pos
 fusionGatherExp _ (Redomap2 _ _ _ _ _ pos) = errorIllegal "redomap2" pos
 
-fusionGatherExp _ (Apply fname _ _ pos)
-  | "assertZip" <- nameToString fname =
-    badFusionGM $ EnablingOptError pos
-                  "In Fusion.hs, assertZip found outside a let binding!"
-
 -----------------------------------
 ---- Generic Traversal         ----
 -----------------------------------
@@ -708,10 +703,6 @@ fuseInExp (Scan2    _ _ _ _   pos) = errorIllegalFus "scan2"   pos
 fuseInExp (Filter2  _ _       pos) = errorIllegalFus "filter2" pos
 fuseInExp (Redomap2 _ _ _ _ _ pos) = errorIllegalFus "redomap2" pos
 -}
-fuseInExp (Apply fname _ _ pos)
-  | "assertZip" <- nameToString fname =
-    badFusionGM $ EnablingOptError pos
-                  "In Fusion.hs, assertZip found outside a let binding!"
 
 -------------------------------------------------------
 -------------------------------------------------------
