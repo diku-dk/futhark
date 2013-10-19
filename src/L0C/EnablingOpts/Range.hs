@@ -41,6 +41,7 @@ data Sign = Neg
           -- ^ > 0
           | Any
           -- ^ No idea about the sign
+          deriving (Show, Eq)
 
 simplExp :: Exp -> Exp
 simplExp e =
