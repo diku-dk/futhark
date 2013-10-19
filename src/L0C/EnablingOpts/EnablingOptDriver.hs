@@ -12,10 +12,10 @@ module L0C.EnablingOpts.EnablingOptDriver (
                                   , EnablingOptError(..)
                             )
   where
- 
- 
+
+
 --import Data.Either
- 
+
 import L0C.L0
 import L0C.Renamer
 import L0C.FreshNames
@@ -26,6 +26,8 @@ import L0C.EnablingOpts.DeadVarElim
 import L0C.EnablingOpts.TupleNormalizer
 import L0C.EnablingOpts.LetNormalizer
 import L0C.EnablingOpts.EnablingOptErrors
+import L0C.EnablingOpts.RangeProp
+
 import Debug.Trace
 
 import qualified L0C.TupleTransform as TT
@@ -43,14 +45,20 @@ enablingOpts prog = do
 
     let prog_rn   = renameProg       prog_dfe
 
-    prog_ntup     <- tupleNormProg   prog_rn
+    rangeDict <- rangeProp prog_rn
+    dummyCalc <- dummyUsingRangeProp prog_rn rangeDict
+
+    prog_ntup     <- tupleNormProg   dummyCalc
 
     prog_enopt1 <- normCopyDeadOpts prog_ntup
     prog_enopt2 <- normCopyDeadOpts prog_enopt1
     prog_deadf2 <- deadFunElim      prog_enopt2
     prog_flat_opt <- normCopyDeadOpts $ renameProg $ TT.transformProg prog_deadf2
 
-    tupleNormProg   prog_flat_opt >>= tupleNormProg >>= normCopyDeadOpts
+    rangeDict' <- rangeProp prog_flat_opt
+    dummyCalc' <- dummyUsingRangeProp prog_flat_opt rangeDict'
+
+    tupleNormProg   dummyCalc' >>= tupleNormProg >>= normCopyDeadOpts
 
 --    if(succs)
 --    then enablingOpts outprog
@@ -63,7 +71,7 @@ normCopyDeadOpts prog = do
     (_, prog_dce)  <- deadCodeElim    prog_cp
     return prog_dce
 
-normCopyOneLambda :: Prog -> VNameSource -> Lambda -> 
+normCopyOneLambda :: Prog -> VNameSource -> Lambda ->
                      Either EnablingOptError (VNameSource, Lambda)
 normCopyOneLambda prog nmsrc lam = do
     (nmsrc', lam') <- letNormOneLambda    nmsrc lam

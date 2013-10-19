@@ -1,0 +1,9 @@
+fun int addFive (int n) = n + 5
+
+fun int main(int x) =
+    let y = max(5 , min(42,x) ) in // [5 : 42]
+    //let z = {y * 3, y * 4} in
+    if addFive(4) < addFive(y)
+    then 0
+    else ~1
+    //else let {res,_} = z in res
