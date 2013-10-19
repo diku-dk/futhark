@@ -94,11 +94,11 @@ simplifyBack (NaryPlus (f:fs) tp pos) = do
 
 simplifyBothWays :: Exp -> SimplifyM Exp
 simplifyBothWays e = do
-  {- No debug
+  --{- No debug
   enary <- simplifyNary e
-  return simplifyBack enary
+  simplifyBack enary
   --}
-  --{- Debug before/after simplification
+  {- Debug before/after simplification
   enary <- trace (escapeColorize Magenta $ "Before: " ++ ppExp e) simplifyNary e
   e' <- simplifyBack enary
   trace (escapeColorize Green $ "After: " ++ ppExp e') return e'

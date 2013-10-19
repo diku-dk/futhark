@@ -1,8 +1,10 @@
 module L0C.EnablingOpts.Range (
      Range
+   , RangeDict
    , RExp(..)
    , Sign(..)
    , substitute
+   , createRangeAndSign
 )
 where
 --
@@ -19,15 +21,19 @@ import Data.Either
 -- import L0C.L0
 import L0C.EnablingOpts.Simplify
 -- import qualified Data.Loc
--- import qualified Data.Map as Map
+import qualified Data.Map as Map
 
 -- data Exp = Plus Exp Exp | Ident Char | IntVal Int
 --     deriving (Show, Eq)
 --
 data RExp = RExp Exp | Pinf | Ninf
       deriving (Show, Eq)
---
+
+----------------------------------------
+
 type Range = (RExp, RExp)
+
+type RangeDict = Map.Map VName (Range, Sign)
 
 data Sign = Neg
           -- ^ < 0
@@ -39,9 +45,19 @@ data Sign = Neg
           -- ^ >= 0
           | Pos
           -- ^ > 0
-          | Any
+          | AnySign
           -- ^ No idea about the sign
           deriving (Show, Eq)
+
+----------------------------------------
+
+rangeUnknown :: (Range, Sign)
+rangeUnknown = ( (Ninf, Pinf) , AnySign )
+
+createRangeAndSign :: RangeDict -> Maybe Exp -> (Range, Sign)
+createRangeAndSign _ Nothing = rangeUnknown
+createRangeAndSign _ _ = rangeUnknown
+
 
 simplExp :: Exp -> Exp
 simplExp e =
@@ -52,7 +68,7 @@ substitute :: Ident-> Range -> RExp -> Range
 substitute i r l@(RExp (Literal v sl)) = (l,l)
 substitute i r v@(RExp (Var e)) = if e == i then r else (v,v)
 substitute i r (RExp (BinOp Plus e1 e2 ty pos)) =
-  let 
+  let
     (e1lb, e1ub) = substitute i r (RExp e1)
     (e2lb, e2ub) = substitute i r (RExp e2)
     lb = case (e1lb, e2lb) of
@@ -61,11 +77,11 @@ substitute i r (RExp (BinOp Plus e1 e2 ty pos)) =
     ub = case (e1ub, e2ub) of
         (RExp e1,RExp e2) -> RExp $ simplExp (BinOp Plus e1 e2 ty pos)
         otherwise -> Pinf
-  in 
+  in
     (lb,ub)
 
 substitute i r (RExp (BinOp Minus e1 e2 ty pos)) =
-  let 
+  let
     (e1lb, e1ub) = substitute i r (RExp e1)
     (e2lb, e2ub) = substitute i r (RExp e2)
     lb = case (e1lb, e2lb) of
@@ -74,26 +90,26 @@ substitute i r (RExp (BinOp Minus e1 e2 ty pos)) =
     ub = case (e1ub, e2ub) of
         (RExp e1,RExp e2) -> RExp $ simplExp (BinOp Minus e1 e2 ty pos)
         otherwise -> Pinf
-  in 
+  in
     (lb,ub)
 
 substitute i r (RExp (BinOp Times e1 e2 ty pos)) =
-  let 
+  let
     (e1lb, e1ub) = substitute i r (RExp e1)
     (e2lb, e2ub) = substitute i r (RExp e2)
     lb = case (e1lb, e1ub, e2lb) of
-        (RExp e1lb',RExp e1ub',RExp (e2lb'@(Literal (IntVal n) sl))) -> 
+        (RExp e1lb',RExp e1ub',RExp (e2lb'@(Literal (IntVal n) sl))) ->
             if n >= 0
             then RExp $ simplExp (BinOp Times e1lb' e2lb' ty pos)
             else RExp $ simplExp (BinOp Times e1ub' e2lb' ty pos)
         otherwise -> Ninf
     ub = case (e2lb, e2ub, e2ub) of
-        (RExp e2lb',RExp e2ub',RExp (e1ub'@(Literal (IntVal n) sl))) -> 
+        (RExp e2lb',RExp e2ub',RExp (e1ub'@(Literal (IntVal n) sl))) ->
             if n >= 0
             then RExp $ simplExp (BinOp Times e1ub' e2ub' ty pos)
             else RExp $ simplExp (BinOp Times e1ub' e2lb' ty pos)
         otherwise -> Pinf
-  in 
+  in
     (lb,ub)
 
 
