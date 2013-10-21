@@ -94,6 +94,14 @@ emptyRangeDict = M.empty
 -- Pretty printing
 ----------------------------------------
 
+ppRExp :: RExp -> String
+ppRExp Ninf = "-Inf"
+ppRExp Pinf = "-Pinf"
+ppRExp (RExp e) = ppExp e
+
+ppRange :: Range -> String
+ppRange (l,u) = "[ " ++ ppRExp l ++ " , " ++ ppRExp u ++ " ]"
+
 ppDictElem :: (VName, (Range, Sign)) -> String
 ppDictElem (vname, (range, sign)) =
   escapeColorize Green (textual vname) ++ " " ++
@@ -214,58 +222,78 @@ expToComparableRange e = return (Ninf, Pinf)
 
 ----------------------------------------
 
-simplExp :: Exp -> Exp
+simplExp :: Exp -> RangeM Exp
 simplExp e =
     case simplify e of
-        Right e' -> e'
+      Left err -> badRangeM err
+      Right e' -> return e'
 
-substitute :: Ident-> Range -> RExp -> Range
-substitute i r l@(RExp (Literal v sl)) = (l,l)
-substitute i r v@(RExp (Var e)) = if e == i then r else (v,v)
-substitute i r (RExp (BinOp Plus e1 e2 ty pos)) =
-  let
-    (e1lb, e1ub) = substitute i r (RExp e1)
-    (e2lb, e2ub) = substitute i r (RExp e2)
-    lb = case (e1lb, e2lb) of
-        (RExp e1,RExp e2) -> RExp $ simplExp (BinOp Plus e1 e2 ty pos)
-        otherwise -> Ninf
-    ub = case (e1ub, e2ub) of
-        (RExp e1,RExp e2) -> RExp $ simplExp (BinOp Plus e1 e2 ty pos)
-        otherwise -> Pinf
-  in
-    (lb,ub)
+substitute :: Ident -> Range -> RExp -> RangeM Range
+substitute _ _ l@(RExp (Literal{})) = return (l,l)
+substitute i r v@(RExp (Var e)) = return (if e == i
+                                          then r
+                                          else (v,v) )
 
-substitute i r (RExp (BinOp Minus e1 e2 ty pos)) =
-  let
-    (e1lb, e1ub) = substitute i r (RExp e1)
-    (e2lb, e2ub) = substitute i r (RExp e2)
-    lb = case (e1lb, e2lb) of
-        (RExp e1,RExp e2) -> RExp $ simplExp (BinOp Minus e1 e2 ty pos)
-        otherwise -> Ninf
-    ub = case (e1ub, e2ub) of
-        (RExp e1,RExp e2) -> RExp $ simplExp (BinOp Minus e1 e2 ty pos)
-        otherwise -> Pinf
-  in
-    (lb,ub)
+substitute i r (RExp (BinOp Plus e1 e2 ty pos)) = do
+    (e1lb, e1ub) <- substitute i r (RExp e1)
+    (e2lb, e2ub) <- substitute i r (RExp e2)
+    lb <- case (e1lb, e2lb) of
+            (RExp e1,RExp e2) -> do le <- simplExp (BinOp Plus e1 e2 ty pos)
+                                    return $ RExp le
+            _ -> return Ninf
+    ub <- case (e1ub, e2ub) of
+            (RExp e1,RExp e2) -> do ue <- simplExp (BinOp Plus e1 e2 ty pos)
+                                    return $ RExp ue
+            _ -> return Pinf
+    return (lb,ub)
 
-substitute i r (RExp (BinOp Times e1 e2 ty pos)) =
-  let
-    (e1lb, e1ub) = substitute i r (RExp e1)
-    (e2lb, e2ub) = substitute i r (RExp e2)
-    lb = case (e1lb, e1ub, e2lb) of
-        (RExp e1lb',RExp e1ub',RExp (e2lb'@(Literal (IntVal n) sl))) ->
-            if n >= 0
-            then RExp $ simplExp (BinOp Times e1lb' e2lb' ty pos)
-            else RExp $ simplExp (BinOp Times e1ub' e2lb' ty pos)
-        otherwise -> Ninf
-    ub = case (e2lb, e2ub, e2ub) of
-        (RExp e2lb',RExp e2ub',RExp (e1ub'@(Literal (IntVal n) sl))) ->
-            if n >= 0
-            then RExp $ simplExp (BinOp Times e1ub' e2ub' ty pos)
-            else RExp $ simplExp (BinOp Times e1ub' e2lb' ty pos)
-        otherwise -> Pinf
-  in
-    (lb,ub)
+substitute i r (RExp (BinOp Minus e1 e2 ty pos)) = do
+    (e1lb, e1ub) <- substitute i r (RExp e1)
+    (e2lb, e2ub) <- substitute i r (RExp e2)
+    lb <- case (e1lb, e2lb) of
+            (RExp e1,RExp e2) -> do le <- simplExp (BinOp Minus e1 e2 ty pos)
+                                    return $ RExp le
+            _ -> return Ninf
+    ub <- case (e1ub, e2ub) of
+            (RExp e1,RExp e2) -> do ue <- simplExp (BinOp Minus e1 e2 ty pos)
+                                    return $ RExp ue
+            _ -> return Pinf
+    return (lb,ub)
+
+substitute i r (RExp (BinOp Times e1 e2 ty pos)) = do
+    (e1lb, e1ub) <- substitute i r (RExp e1)
+    (e2lb, e2ub) <- substitute i r (RExp e2)
+    case (e1lb, e1ub, e2lb, e2ub) of
+      (RExp e1lb', RExp e1ub', RExp e2lb', RExp e2ub') -> do
+        e1Sign <- calculateRangeSign(e1lb,e1ub) pos
+        e2Sign <- calculateRangeSign(e2lb,e2ub) pos
+        case (e1Sign, e2Sign) of
+          (Zero,_) -> let z = RExp $ Literal (IntVal 0) pos in return (z,z)
+          (_,Zero) -> let z = RExp $ Literal (IntVal 0) pos in return (z,z)
+          (AnySign, _) -> return (Ninf, Pinf)
+          (_, AnySign) -> return (Ninf, Pinf)
+          _ -> case (isNeg e1Sign, isNeg e2Sign) of
+                  (True,True)   -> do lb <- simplExp (BinOp Times e1ub' e2ub' ty pos)
+                                      ub <- simplExp (BinOp Times e1lb' e2lb' ty pos)
+                                      return (RExp lb, RExp ub)
+                  (False,False) -> do lb <- simplExp (BinOp Times e1lb' e2lb' ty pos)
+                                      ub <- simplExp (BinOp Times e1ub' e2ub' ty pos)
+                                      return (RExp lb, RExp ub)
+                  (True,False)  -> do lb <- simplExp (BinOp Times e1lb' e2ub' ty pos)
+                                      ub <- simplExp (BinOp Times e1ub' e2lb' ty pos)
+                                      return (RExp lb, RExp ub)
+                  (False,True)  -> do lb <- simplExp (BinOp Times e1ub' e2lb' ty pos)
+                                      ub <- simplExp (BinOp Times e1lb' e2ub' ty pos)
+                                      return (RExp lb, RExp ub)
+      _ -> return (Ninf, Pinf)
+
+    where
+      isNeg :: Sign -> Bool
+      isNeg Neg = True
+      isNeg NonPos = True
+      isNeg _ = False
+
+substitute _ _ _ = return (Ninf, Pinf)
 
 ----------------------------------------
 -- TESTING
@@ -292,3 +320,15 @@ rexp =
     --let x'' = BinOp Pow (Var x) (Literal (IntVal 2) dummySrcLoc) (Elem Int) dummySrcLoc in
     let x'' = Literal (IntVal 2) dummySrcLoc in
     RExp $ BinOp Plus x'' x' (Elem Int) dummySrcLoc
+
+createRExpInt n = RExp $ Literal (IntVal n) dummySrcLoc
+
+xRange = (createRExpInt 1, createRExpInt 2)
+
+xMultNeg2 = BinOp Times (Var x) (Literal (IntVal (-2)) dummySrcLoc) (Elem Int) dummySrcLoc
+xMultXMultNeg2 = BinOp Times (Var x) xMultNeg2 (Elem Int) dummySrcLoc
+
+asdf = do
+  let env = RangeEnv { dict = emptyRangeDict }
+  case runRangeM (substitute x xRange (RExp xMultXMultNeg2) ) env of
+    Right r -> ppRange r
