@@ -26,7 +26,6 @@ import L0C.EnablingOpts.EnablingOptErrors
 import qualified L0C.Interpreter as Interp
 
 import L0C.EnablingOpts.Simplify
-import L0C.EnablingOpts.Range
 import L0C.EnablingOpts.RangeProp
 
 import Debug.Trace
