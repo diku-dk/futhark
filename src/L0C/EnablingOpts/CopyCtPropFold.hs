@@ -26,6 +26,8 @@ import L0C.EnablingOpts.EnablingOptErrors
 import qualified L0C.Interpreter as Interp
 
 import L0C.EnablingOpts.Simplify
+import L0C.EnablingOpts.Range
+import L0C.EnablingOpts.RangeProp
 
 import Debug.Trace
 -----------------------------------------------------------------
@@ -55,8 +57,9 @@ data CtOrId  = Constant Value Type Bool
              -- To Cosmin: Clean it up in the end, i.e., get rid of Exp.
 
 data CPropEnv = CopyPropEnv {
-    envVtable  :: M.Map VName CtOrId,
-    program    :: Prog
+    envVtable  :: M.Map VName CtOrId
+  , program    :: Prog
+  , rangeDict  :: RangeDict
   }
 
 
@@ -129,7 +132,7 @@ binding bnds = local (`bindVars` bnds)
 -- | Applies Copy/Constant Propagation and Folding to an Entire Program.
 copyCtProp :: Prog -> Either EnablingOptError (Bool, Prog)
 copyCtProp prog = do
-    let env = CopyPropEnv { envVtable = M.empty, program = prog }
+    let env = CopyPropEnv { envVtable = M.empty, program = prog, rangeDict = emptyRangeDict }
     -- res   <- runCPropM (mapM copyCtPropFun prog) env
     -- let (bs, rs) = unzip res
     (rs, res) <- runCPropM (mapM copyCtPropFun $ progFunctions prog) env
@@ -147,7 +150,7 @@ copyCtPropFun (fname, rettype, args, body, pos) = do
 
 copyCtPropOneLambda :: Prog -> Lambda -> Either EnablingOptError Lambda
 copyCtPropOneLambda prog lam = do
-    let env = CopyPropEnv { envVtable = M.empty, program = prog }
+    let env = CopyPropEnv { envVtable = M.empty, program = prog, rangeDict = emptyRangeDict }
     (res, _) <- runCPropM (copyCtPropLambda lam) env
     return res
 
