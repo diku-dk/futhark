@@ -1,40 +1,38 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+
 module L0C.EnablingOpts.Range (
      Range
    , RangeDict
    , RExp(..)
    , Sign(..)
    , substitute
-   , createRangeAndSign
    , emptyRangeDict
 )
 where
---
--- Exp = P
---
+
+
+import qualified Data.Loc as L
+import qualified Data.Map as M
+
+-- only for the fix function
+import Control.Monad.Fix
+import Control.Monad.Reader
+
+import L0C.EnablingOpts.EnablingOptErrors
 
 import L0C.L0
-import Debug.Trace
-import qualified Data.Loc
-import Control.Monad
-import Control.Applicative
-import Data.Either
-
--- import L0C.L0
 import L0C.EnablingOpts.Simplify
--- import qualified Data.Loc
-import qualified Data.Map as Map
 
--- data Exp = Plus Exp Exp | Ident Char | IntVal Int
---     deriving (Show, Eq)
---
-data RExp = RExp Exp | Pinf | Ninf
-      deriving (Show, Eq)
+import Debug.Trace
 
 ----------------------------------------
 
+data RExp = RExp Exp | Pinf | Ninf
+      deriving (Show, Eq)
+
 type Range = (RExp, RExp)
 
-type RangeDict = Map.Map VName (Range, Sign)
+type RangeDict = M.Map VName (Range, Sign)
 
 data Sign = Neg
           -- ^ < 0
@@ -48,14 +46,31 @@ data Sign = Neg
           -- ^ > 0
           | AnySign
           -- ^ No idea about the sign
-          deriving (Show, Eq)
+          deriving (Show, Eq, Ord)
 
-data InequalityRelationship = LT
-                            | LTE
-                            | EQ
-                            | GTE
-                            | GT
-                            | Unknown
+data InequalityRelationship = RLT
+                            | RLTE
+                            | REQ
+                            | RGTE
+                            | RGT
+                            | RUnknown
+                            deriving (Show, Eq)
+
+----------------------------------------
+
+data RangeEnv = RangeEnv {
+    dict  :: RangeDict
+  }
+
+newtype RangeM a = RangeM (ReaderT RangeEnv (Either EnablingOptError) a)
+  deriving (MonadReader RangeEnv,
+            Monad)
+
+runRangeM :: RangeM a -> RangeEnv -> Either EnablingOptError a
+runRangeM (RangeM a) = runReaderT a
+
+badRangeM :: EnablingOptError -> RangeM a
+badRangeM = RangeM . lift . Left
 
 ----------------------------------------
 
@@ -63,14 +78,62 @@ rangeUnknown :: (Range, Sign)
 rangeUnknown = ( (Ninf, Pinf) , AnySign )
 
 emptyRangeDict :: RangeDict
-emptyRangeDict = Map.empty
+emptyRangeDict = M.empty
 
------------------------------------------
+----------------------------------------
 
-createRangeAndSign :: RangeDict -> Maybe Exp -> (Range, Sign)
-createRangeAndSign _ Nothing = rangeUnknown
-createRangeAndSign _ _ = rangeUnknown
+rangeCompare :: Exp -> Exp -> RangeM InequalityRelationship
+rangeCompare e1 e2 = do
+  let e1SrcLoc = L.SrcLoc $ L.locOf e1
+  range <- expToComparableRange $ BinOp Minus e1 e2 (typeOf e1) e1SrcLoc
+  sign <- calculateRangeSign range e1SrcLoc
+  case sign of
+    Neg     -> return RLT
+    NonPos  -> return RLTE
+    Zero    -> return REQ
+    NonNeg  -> return RGTE
+    Pos     -> return RGT
+    AnySign -> return RUnknown
 
+----------------------------------------
+
+calculateRExpSign :: RExp -> RangeM Sign
+calculateRExpSign Pinf = return Pos
+calculateRExpSign Ninf = return Neg
+calculateRExpSign (RExp (Literal (IntVal v) _) )
+  | v < 0     = return Neg
+  | v == 0    = return Zero
+  | otherwise = return Pos
+calculateRExpSign (RExp (Var (Ident vname (Elem Int) p))) = do
+  bnd <- asks $ M.lookup vname . dict
+  case bnd of
+    Just (_,sign) -> return sign
+    Nothing       -> badRangeM $ RangePropError p $ "Identifier was not in range dict" ++ textual vname
+calculateRExpSign _ = return AnySign
+
+calculateRangeSign :: Range -> L.SrcLoc -> RangeM Sign
+calculateRangeSign (lb,ub) p = do
+  s1 <- calculateRExpSign lb
+  s2 <- calculateRExpSign ub
+  if s2 < s1 then badRangeM $ RangePropError p "Something like Pos, Neg"
+  else case (s1,s2) of
+    (Neg,Neg)       -> return Neg
+    (NonPos,NonPos) -> return NonPos
+    (Zero, Zero)    -> return Zero
+    (NonNeg,NonNeg) -> return NonNeg
+    (Pos,Pos)       -> return Pos
+    (NonNeg, _)     -> return NonNeg
+    (_, Zero)       -> return NonPos
+    (Zero, _)       -> return NonNeg
+    (Neg, NonPos)   -> return NonPos
+    (Neg, _)        -> return AnySign
+    (NonPos, _)     -> return AnySign
+    (Pos, _)        -> return Pos
+
+expToComparableRange :: Exp -> RangeM Range
+expToComparableRange e = return (Ninf, Pinf)
+
+----------------------------------------
 
 simplExp :: Exp -> Exp
 simplExp e =
@@ -130,8 +193,8 @@ substitute i r (RExp (BinOp Times e1 e2 ty pos)) =
 
 res = substitute x ra rexp
 
-dummyPos = Data.Loc.Pos "DummyPos" 10 0 0
-dummySrcLoc = Data.Loc.SrcLoc (Data.Loc.Loc dummyPos dummyPos)
+dummyPos = L.Pos "DummyPos" 10 0 0
+dummySrcLoc = L.SrcLoc (L.Loc dummyPos dummyPos)
 
 x = Ident {identName = ID (nameFromString "x",0),
                  identType = Elem Int,
@@ -149,58 +212,3 @@ rexp =
     --let x'' = BinOp Pow (Var x) (Literal (IntVal 2) dummySrcLoc) (Elem Int) dummySrcLoc in
     let x'' = Literal (IntVal 2) dummySrcLoc in
     RExp $ BinOp Plus x'' x' (Elem Int) dummySrcLoc
-
-
--- empty :: Range a
--- empty = Empty
---
---
--- singleton :: a -> Range a
--- singleton x = Bounds x x
---
---
--- range :: (Ord a) => a -> a -> Range a
--- range l u = if l <= u
---     then Bounds l u
---     else Empty
---
---
--- bounds :: Range a -> Maybe (a, a)
--- bounds Empty = Nothing
--- bounds (Bounds l u) = Just (l, u)
---
---
--- contains :: (Ord a) => Range a -> a -> Bool
--- contains Empty _ = False
--- contains (Bounds l u) x = l <= x && x <= u
---
---
--- extendTo :: (Ord a) => Range a -> a -> Range a
--- extendTo Empty x = singleton x
--- extendTo (Bounds l u) x
---     | x < l = Bounds x u
---     | x > u = Bounds l x
---     | otherwise = Bounds l u
---
---
--- intersect :: (Ord a) => Range a -> Range a -> Range a
--- intersect Empty _ = Empty
--- intersect _ Empty = Empty
--- intersect (Bounds l1 u1) (Bounds l2 u2) = range l u
---     where
---         l = max l1 l2
---         u = min u1 u2
---
---
--- union :: (Ord a) => Range a -> Range a -> Maybe (Range a)
--- union Empty range = Just range
--- union range Empty = Just range
--- union b1@(Bounds l1 u1) b2@(Bounds l2 u2) = case intersect b1 b2 of
---     Empty -> Nothing
---     Bounds{} -> Just $ Bounds l u
---     where
---         l = min l1 l2
---         u = max u1 u2
---
---
---
