@@ -5,6 +5,7 @@ module L0C.EnablingOpts.Range (
    , Sign(..)
    , substitute
    , createRangeAndSign
+   , emptyRangeDict
 )
 where
 --
@@ -49,10 +50,22 @@ data Sign = Neg
           -- ^ No idea about the sign
           deriving (Show, Eq)
 
+data InequalityRelationship = LT
+                            | LTE
+                            | EQ
+                            | GTE
+                            | GT
+                            | Unknown
+
 ----------------------------------------
 
 rangeUnknown :: (Range, Sign)
 rangeUnknown = ( (Ninf, Pinf) , AnySign )
+
+emptyRangeDict :: RangeDict
+emptyRangeDict = Map.empty
+
+-----------------------------------------
 
 createRangeAndSign :: RangeDict -> Maybe Exp -> (Range, Sign)
 createRangeAndSign _ Nothing = rangeUnknown
