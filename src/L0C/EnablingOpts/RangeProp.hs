@@ -15,7 +15,6 @@ import Control.Monad.Writer
 
 import Debug.Trace
 
-import Text.PrettyPrint.Mainland
 import L0C.EscapeColor
 
 --------------------------------
@@ -40,7 +39,7 @@ rangeProp prog = do
 
 ppDictElem :: (VName, (Range, Sign)) -> String
 ppDictElem (vname, (range, sign)) =
-  escapeColorize Green (pretty 80 $ ppr vname) ++ " " ++
+  escapeColorize Green (textual vname) ++ " " ++
   escapeColorize Blue (show range) ++ " " ++
   escapeColorize Yellow (show sign)
 
