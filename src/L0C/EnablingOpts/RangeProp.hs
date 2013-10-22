@@ -45,6 +45,7 @@ data Sign = Neg | NonPos | Zero | NonNeg | Pos | AnySign
 data InequalityRelationship = RLT | RLTE | REQ | RGTE | RGT | RUnknown
                             deriving (Show, Eq)
 
+----------------------------------------
 
 data RangeEnv = RangeEnv {
     dict  :: RangeDict
@@ -54,7 +55,7 @@ newtype RangeM a = RangeM (ReaderT RangeEnv (Either EnablingOptError) a)
   deriving (MonadReader RangeEnv, Monad)
 
 ----------------------------------------
---
+-- Monad helpers
 ----------------------------------------
 
 runRangeM :: RangeM a -> RangeEnv -> Either EnablingOptError a
@@ -71,12 +72,6 @@ simplExp e =
 
 
 ----------------------------------------
-
-emptyRangeDict :: RangeDict
-emptyRangeDict = M.empty
-
-
-----------------------------------------
 -- Range Propagation
 ----------------------------------------
 
@@ -85,19 +80,23 @@ dummyUsingRangeProp prog _ = return prog
 
 rangeProp :: Prog -> Either EnablingOptError RangeDict
 rangeProp prog = do
-    let asList = filter (\(_,t,_) -> isElemInt t) $ allIdentsAsList prog
-        hahaBadName = foldl keepAddingToRangeDict M.empty asList
-    trace ( foldr ((++) . (++ "\n") . ppDictElem) "" (M.toList hahaBadName) ++ "\n" ++
-           prettyPrint prog ++ "\n"
-           ) return hahaBadName
-    where isElemInt (Elem Int) = True
-          isElemInt _ = False
-          keepAddingToRangeDict acc (i,_,e) =
-            acc `M.union` M.singleton i (createRangeAndSign acc e)
+  let asList = reverse $ filter (\(_,t,_) -> isElemInt t) $ allIdentsAsList prog
+  newDict <- foldM keepAddingToRangeDict M.empty asList
+  trace (ppDict newDict ++ "\n" ++ prettyPrint prog ++ "\n")
+    return newDict
+  where
+    isElemInt (Elem Int) = True
+    isElemInt _ = False
+
+    keepAddingToRangeDict :: RangeDict -> (VName, DeclType, Maybe Exp) -> Either EnablingOptError RangeDict
+    keepAddingToRangeDict acc (i,_,e) = do
+      let env = RangeEnv { dict = acc }
+      res <- runRangeM (createRangeAndSign e) env
+      return $ acc `M.union` M.singleton i res
 
 -- stolen from Traversals.progNames
 allIdentsAsList :: Prog -> [ (VName, DeclType, Maybe Exp) ]
-allIdentsAsList = execWriter . mapM funNames . progFunctions
+allIdentsAsList = execWriter . mapM funIdents . progFunctions
   where
     tellParam :: Parameter -> Writer [ (VName, DeclType, Maybe Exp) ] ()
     tellParam (Ident name tp _) =
@@ -107,31 +106,32 @@ allIdentsAsList = execWriter . mapM funNames . progFunctions
     tellLet (Ident name tp _) toExp =
       tell [(name, toDecl tp, Just toExp)]
 
-    names = identityWalker {
-                  walkOnExp = expNames
-                , walkOnLambda = lambdaNames
+    idents = identityWalker {
+                  walkOnExp = expIdents
+                , walkOnLambda = lambdaIdents
                 }
 
-    funNames (_, _, params, body, _) =
-      mapM_ tellParam params >> expNames body
+    funIdents (_, _, params, body, _) =
+      mapM_ tellParam params >> expIdents body
 
-    expNames e@(LetPat (Id ident) toExp _ _) =
-      tellLet ident toExp >> walkExpM names e
-    --expNames e@(LetWith dest _ _ _ _ _) =
-      --tellParam dest >> walkExpM names e
-    --expNames e@(DoLoop _ _ i _ _ _ _) =
-      --tellParam i >> walkExpM names e
-    expNames e = walkExpM names e
+    expIdents (LetPat (Id ident) toExp inExp _) =
+      expIdents toExp >> tellLet ident toExp >> expIdents inExp
+    --expIdents e@(LetWith dest _ _ _ _ _) =
+      --tellParam dest >> walkExpM idents e
+    --expIdents e@(DoLoop _ _ i _ _ _ _) =
+      --tellParam i >> walkExpM idents e
+    expIdents e = walkExpM idents e
 
-    lambdaNames (AnonymFun params body _ _) =
-      mapM_ tellParam params >> expNames body
-    lambdaNames (CurryFun _ exps _ _) =
-          mapM_ expNames exps
+    lambdaIdents (AnonymFun params body _ _) =
+      mapM_ tellParam params >> expIdents body
+    lambdaIdents (CurryFun _ exps _ _) =
+          mapM_ expIdents exps
 
 ----------------------------------------
 
-createRangeAndSign :: RangeDict -> Maybe Exp -> (Range, Sign)
-createRangeAndSign _ _ = ((Ninf,Pinf),AnySign)
+createRangeAndSign :: Maybe Exp -> RangeM (Range, Sign)
+createRangeAndSign (Just e)  = return ( (RExp e, RExp e), AnySign )
+createRangeAndSign Nothing = return ( (Ninf, Pinf), AnySign )
 
 ----------------------------------------
 -- Range substitution
@@ -276,24 +276,33 @@ substitute _ _ _ = return (Ninf, Pinf)
 
 ppRExp :: RExp -> String
 ppRExp Ninf = "-Inf"
-ppRExp Pinf = "-Pinf"
+ppRExp Pinf = "Inf"
 ppRExp (RExp e) = ppExp e
 
 ppRange :: Range -> String
 ppRange (l,u) = "[ " ++ ppRExp l ++ " , " ++ ppRExp u ++ " ]"
 
-ppDictElem :: (VName, (Range, Sign)) -> String
-ppDictElem (vname, (range, sign)) =
-  escapeColorize Green (textual vname) ++ " " ++
-  escapeColorize Blue (show range) ++ " " ++
-  escapeColorize Yellow (show sign)
+ppSign :: Sign -> String
+ppSign = show
+
+ppDict :: RangeDict -> String
+ppDict dict = foldr ((++) . (++ "\n") . ppDictElem) "" (M.toList dict)
+              where
+                ppDictElem :: (VName, (Range, Sign)) -> String
+                ppDictElem (vname, (range, sign)) =
+                  escapeColorize Green (textual vname) ++ " " ++
+                  escapeColorize Blue (ppRange range) ++ " " ++
+                  escapeColorize Yellow (ppSign sign)
 
 ----------------------------------------
--- Helper
+-- Helpers / Constants
 ----------------------------------------
 
 createRExpInt :: Int -> L.SrcLoc -> RExp
 createRExpInt n pos = RExp $ Literal (IntVal n) pos
+
+emptyRangeDict :: RangeDict
+emptyRangeDict = M.empty
 
 ----------------------------------------
 -- TESTING
