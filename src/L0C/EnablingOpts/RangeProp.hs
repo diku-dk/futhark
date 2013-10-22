@@ -13,11 +13,9 @@ module L0C.EnablingOpts.RangeProp (
 )
 where
 
-
 import qualified Data.Loc as L
 import qualified Data.Map as M
 
--- only for the fix function
 import Control.Monad.Fix
 import Control.Monad.Reader
 import Control.Monad.Writer
@@ -34,46 +32,30 @@ import L0C.EscapeColor
 -- Data types
 ----------------------------------------
 
-----------------------------------------
-
 data RExp = RExp Exp | Pinf | Ninf
-      deriving (Show, Eq)
+    deriving (Show, Eq)
 
 type Range = (RExp, RExp)
 
 type RangeDict = M.Map VName (Range, Sign)
 
-data Sign = Neg
-          -- ^ < 0
-          | NonPos
-          -- ^ <= 0
-          | Zero
-          -- ^ = 0
-          | NonNeg
-          -- ^ >= 0
-          | Pos
-          -- ^ > 0
-          | AnySign
-          -- ^ No idea about the sign
+data Sign = Neg | NonPos | Zero | NonNeg | Pos | AnySign
           deriving (Show, Eq, Ord)
 
-data InequalityRelationship = RLT
-                            | RLTE
-                            | REQ
-                            | RGTE
-                            | RGT
-                            | RUnknown
+data InequalityRelationship = RLT | RLTE | REQ | RGTE | RGT | RUnknown
                             deriving (Show, Eq)
 
-----------------------------------------
 
 data RangeEnv = RangeEnv {
     dict  :: RangeDict
   }
 
 newtype RangeM a = RangeM (ReaderT RangeEnv (Either EnablingOptError) a)
-  deriving (MonadReader RangeEnv,
-            Monad)
+  deriving (MonadReader RangeEnv, Monad)
+
+----------------------------------------
+-- 
+----------------------------------------
 
 runRangeM :: RangeM a -> RangeEnv -> Either EnablingOptError a
 runRangeM (RangeM a) = runReaderT a
@@ -81,32 +63,18 @@ runRangeM (RangeM a) = runReaderT a
 badRangeM :: EnablingOptError -> RangeM a
 badRangeM = RangeM . lift . Left
 
-----------------------------------------
+simplExp :: Exp -> RangeM Exp
+simplExp e =
+    case simplify e of
+      Left err -> badRangeM err
+      Right e' -> return e'
 
-rangeUnknown :: (Range, Sign)
-rangeUnknown = ( (Ninf, Pinf) , AnySign )
+
+----------------------------------------
 
 emptyRangeDict :: RangeDict
 emptyRangeDict = M.empty
 
-
-----------------------------------------
--- Pretty printing
-----------------------------------------
-
-ppRExp :: RExp -> String
-ppRExp Ninf = "-Inf"
-ppRExp Pinf = "-Pinf"
-ppRExp (RExp e) = ppExp e
-
-ppRange :: Range -> String
-ppRange (l,u) = "[ " ++ ppRExp l ++ " , " ++ ppRExp u ++ " ]"
-
-ppDictElem :: (VName, (Range, Sign)) -> String
-ppDictElem (vname, (range, sign)) =
-  escapeColorize Green (textual vname) ++ " " ++
-  escapeColorize Blue (show range) ++ " " ++
-  escapeColorize Yellow (show sign)
 
 ----------------------------------------
 -- Range Propagation
@@ -163,7 +131,7 @@ allIdentsAsList = execWriter . mapM funNames . progFunctions
 ----------------------------------------
 
 createRangeAndSign :: RangeDict -> Maybe Exp -> (Range, Sign)
-createRangeAndSign _ _ = rangeUnknown
+createRangeAndSign _ _ = ((Ninf,Pinf),AnySign)
 
 ----------------------------------------
 -- Range substitution
@@ -184,80 +152,72 @@ rangeCompare e1 e2 = do
 
 ----------------------------------------
 
-calculateRExpSign :: RExp -> RangeM Sign
-calculateRExpSign Pinf = return Pos
-calculateRExpSign Ninf = return Neg
-calculateRExpSign (RExp (Literal (IntVal v) _) )
-  | v < 0     = return Neg
-  | v == 0    = return Zero
-  | otherwise = return Pos
-calculateRExpSign (RExp (Var (Ident vname (Elem Int) p))) = do
-  bnd <- asks $ M.lookup vname . dict
-  case bnd of
-    Just (_,sign) -> return sign
-    Nothing       -> badRangeM $ RangePropError p $ "Identifier was not in range dict" ++ textual vname
-calculateRExpSign _ = return AnySign
+
+----------------------------------------
+-- Does not work recursively?
+---------------------------------------
 
 calculateRangeSign :: Range -> L.SrcLoc -> RangeM Sign
 calculateRangeSign (lb,ub) p = do
-  s1 <- calculateRExpSign lb
-  s2 <- calculateRExpSign ub
-  if s2 < s1 then badRangeM $ RangePropError p "Something like Pos, Neg"
-  else case (s1,s2) of
-    (Neg,Neg)       -> return Neg
-    (NonPos,NonPos) -> return NonPos
-    (Zero, Zero)    -> return Zero
-    (NonNeg,NonNeg) -> return NonNeg
-    (Pos,Pos)       -> return Pos
-    (NonNeg, _)     -> return NonNeg
-    (_, Zero)       -> return NonPos
-    (Zero, _)       -> return NonNeg
-    (Neg, NonPos)   -> return NonPos
-    (Neg, _)        -> return AnySign
-    (NonPos, _)     -> return AnySign
-    (Pos, _)        -> return Pos
+  s1 <- determineRExpSign lb
+  s2 <- determineRExpSign ub
+  if s2 < s1 
+    then badRangeM $ RangePropError p "Something like Pos, Neg"
+    else if s1 == s2
+      then return s1
+      else case (s1,s2) of
+        (_,Neg)     -> return Neg
+        (_,NonPos)  -> return NonPos
+        (_,Zero)    -> return NonPos
+        (Pos,_)     -> return Pos
+        (NonNeg,_)  -> return NonNeg
+        (Zero,_)    -> return NonNeg
+        _           -> return AnySign
+  where
+    determineRExpSign :: RExp -> RangeM Sign
+    determineRExpSign Pinf = return Pos
+    determineRExpSign Ninf = return Neg
+    determineRExpSign (RExp (Literal (IntVal v) _) )
+      | v < 0     = return Neg
+      | v == 0    = return Zero
+      | otherwise = return Pos
+    determineRExpSign (RExp (Var (Ident vname (Elem Int) p))) = do
+      bnd <- asks $ M.lookup vname . dict
+      case bnd of
+        Just (_,sign) -> return sign
+        Nothing       -> badRangeM $ RangePropError p $ 
+            "Identifier was not in range dict" ++ textual vname
+    determineRExpSign _ = return AnySign
+
 
 expToComparableRange :: Exp -> RangeM Range
 expToComparableRange e = return (Ninf, Pinf)
 
 ----------------------------------------
 
-simplExp :: Exp -> RangeM Exp
-simplExp e =
-    case simplify e of
-      Left err -> badRangeM err
-      Right e' -> return e'
-
 substitute :: Ident -> Range -> RExp -> RangeM Range
 substitute _ _ l@(RExp (Literal{})) = return (l,l)
-substitute i r v@(RExp (Var e)) = return (if e == i
-                                          then r
-                                          else (v,v) )
-
+substitute i r v@(RExp (Var e)) = return (if e == i then r else (v,v))
 substitute i r (RExp (BinOp Plus e1 e2 ty pos)) = do
     (e1lb, e1ub) <- substitute i r (RExp e1)
     (e2lb, e2ub) <- substitute i r (RExp e2)
     lb <- case (e1lb, e2lb) of
-            (RExp e1,RExp e2) -> do le <- simplExp (BinOp Plus e1 e2 ty pos)
-                                    return $ RExp le
-            _ -> return Ninf
+            (RExp e1,RExp e2) -> liftM RExp (simplExp (BinOp Plus e1 e2 ty pos))
+            _                 -> return Ninf
     ub <- case (e1ub, e2ub) of
-            (RExp e1,RExp e2) -> do ue <- simplExp (BinOp Plus e1 e2 ty pos)
-                                    return $ RExp ue
-            _ -> return Pinf
+            (RExp e1,RExp e2) -> liftM RExp (simplExp (BinOp Plus e1 e2 ty pos))
+            _                 -> return Pinf
     return (lb,ub)
 
 substitute i r (RExp (BinOp Minus e1 e2 ty pos)) = do
     (e1lb, e1ub) <- substitute i r (RExp e1)
     (e2lb, e2ub) <- substitute i r (RExp e2)
     lb <- case (e1lb, e2lb) of
-            (RExp e1,RExp e2) -> do le <- simplExp (BinOp Minus e1 e2 ty pos)
-                                    return $ RExp le
-            _ -> return Ninf
+            (RExp e1,RExp e2) -> liftM RExp (simplExp (BinOp Minus e1 e2 ty pos))
+            _                 -> return Ninf
     ub <- case (e1ub, e2ub) of
-            (RExp e1,RExp e2) -> do ue <- simplExp (BinOp Minus e1 e2 ty pos)
-                                    return $ RExp ue
-            _ -> return Pinf
+            (RExp e1,RExp e2) -> liftM RExp (simplExp (BinOp Minus e1 e2 ty pos))
+            _                 -> return Pinf
     return (lb,ub)
 
 substitute i r (RExp (BinOp Times e1 e2 ty pos)) = do
@@ -294,6 +254,24 @@ substitute i r (RExp (BinOp Times e1 e2 ty pos)) = do
       isNeg _ = False
 
 substitute _ _ _ = return (Ninf, Pinf)
+
+----------------------------------------
+-- Pretty printing
+----------------------------------------
+
+ppRExp :: RExp -> String
+ppRExp Ninf = "-Inf"
+ppRExp Pinf = "-Pinf"
+ppRExp (RExp e) = ppExp e
+
+ppRange :: Range -> String
+ppRange (l,u) = "[ " ++ ppRExp l ++ " , " ++ ppRExp u ++ " ]"
+
+ppDictElem :: (VName, (Range, Sign)) -> String
+ppDictElem (vname, (range, sign)) =
+  escapeColorize Green (textual vname) ++ " " ++
+  escapeColorize Blue (show range) ++ " " ++
+  escapeColorize Yellow (show sign)
 
 ----------------------------------------
 -- TESTING
