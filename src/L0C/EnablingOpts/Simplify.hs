@@ -110,6 +110,36 @@ simplifyBothWays e = do
 
 simplifyNary :: Exp -> SimplifyM NaryExp
 
+simplifyNary (Min e1 e2 tp pos) = do
+      e1' <- simplifyNary e1
+      e2' <- simplifyNary e2
+      return $ NaryMult [(Min e1 e2 tp pos)] tp pos
+
+simplifyNary (Max e1 e2 tp pos) = do
+      e1' <- simplifyNary e1
+      e2' <- simplifyNary e2
+      return $ NaryMult [(Max e1 e2 tp pos)] tp pos
+
+simplifyNary (BinOp Plus (Max e1' e2' tp' pos') e2 tp pos) = do
+    let e1'' = BinOp Plus e1' e2 tp pos
+    let e2'' = BinOp Plus e2' e2 tp pos
+    simplifyNary $ Max e1'' e2'' tp pos
+
+simplifyNary (BinOp Plus e1 (Max e1' e2' tp' pos') tp pos) = do
+    let e1'' = BinOp Plus e1 e1' tp pos
+    let e2'' = BinOp Plus e1 e2' tp pos
+    simplifyNary $ Max e1'' e2'' tp pos
+
+simplifyNary (BinOp Plus (Min e1' e2' tp' pos') e2 tp pos) = do
+    let e1'' = BinOp Plus e1' e2 tp pos
+    let e2'' = BinOp Plus e2' e2 tp pos
+    simplifyNary $ Min e1'' e2'' tp pos
+
+simplifyNary (BinOp Plus e1 (Min e1' e2' tp' pos') tp pos) = do
+    let e1'' = BinOp Plus e1 e1' tp pos
+    let e2'' = BinOp Plus e1 e2' tp pos
+    simplifyNary $ Min e1'' e2'' tp pos
+
 simplifyNary (BinOp Plus e1 e2 tp pos) = do
      e1' <- simplifyNary e1
      e2' <- simplifyNary e2
