@@ -54,7 +54,7 @@ newtype RangeM a = RangeM (ReaderT RangeEnv (Either EnablingOptError) a)
   deriving (MonadReader RangeEnv, Monad)
 
 ----------------------------------------
--- 
+--
 ----------------------------------------
 
 runRangeM :: RangeM a -> RangeEnv -> Either EnablingOptError a
@@ -161,7 +161,7 @@ calculateRangeSign :: Range -> L.SrcLoc -> RangeM Sign
 calculateRangeSign (lb,ub) p = do
   s1 <- determineRExpSign lb
   s2 <- determineRExpSign ub
-  if s2 < s1 
+  if s2 < s1
     then badRangeM $ RangePropError p "Something like Pos, Neg"
     else if s1 == s2
       then return s1
@@ -185,7 +185,7 @@ calculateRangeSign (lb,ub) p = do
       bnd <- asks $ M.lookup vname . dict
       case bnd of
         Just (_,sign) -> return sign
-        Nothing       -> badRangeM $ RangePropError p $ 
+        Nothing       -> badRangeM $ RangePropError p $
             "Identifier was not in range dict" ++ textual vname
     determineRExpSign _ = return AnySign
 
