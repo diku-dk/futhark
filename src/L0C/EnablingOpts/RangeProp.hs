@@ -195,9 +195,9 @@ expToComparableRange e = return (Ninf, Pinf)
 
 ----------------------------------------
 
-substitute :: Ident -> Range -> RExp -> RangeM Range
+substitute :: VName -> Range -> RExp -> RangeM Range
 substitute _ _ l@(RExp (Literal{})) = return (l,l)
-substitute i r v@(RExp (Var e)) = return (if e == i then r else (v,v))
+substitute i r v@(RExp (Var e)) = return (if identName e == i then r else (v,v))
 substitute i r (RExp (BinOp Plus e1 e2 ty pos)) = do
   (a, b) <- substitute i r (RExp e1)
   (c, d) <- substitute i r (RExp e2)
@@ -342,34 +342,22 @@ emptyRangeDict = M.empty
 -- TESTING
 ----------------------------------------
 
-res = substitute x ra rexp
-
-dummyPos = L.Pos "DummyPos" 10 0 0
+dummyPos = L.Pos "DummyPos" 0 0 0
 dummySrcLoc = L.SrcLoc (L.Loc dummyPos dummyPos)
 
-x = Ident {identName = ID (nameFromString "x",0),
-                 identType = Elem Int,
-                 identSrcLoc = dummySrcLoc }
-
-y = Ident {identName = ID (nameFromString "y",1),
-                 identType = Elem Int,
-                 identSrcLoc = dummySrcLoc }
-
-ra = (RExp $ Literal (IntVal 1) dummySrcLoc,
-      RExp $ Var y)
-
-rexp =
-    let x' = Var x in
-    --let x'' = BinOp Pow (Var x) (Literal (IntVal 2) dummySrcLoc) (Elem Int) dummySrcLoc in
-    let x'' = Literal (IntVal 2) dummySrcLoc in
-    RExp $ BinOp Plus x'' x' (Elem Int) dummySrcLoc
+xId = ID (nameFromString "x",0)
+x = Ident {identName = xId,
+           identType = Elem Int,
+           identSrcLoc = dummySrcLoc }
 
 xRange = (createRExpInt 1 dummySrcLoc, createRExpInt 2 dummySrcLoc)
 
 xMultNeg2 = BinOp Times (Var x) (Literal (IntVal (-2)) dummySrcLoc) (Elem Int) dummySrcLoc
 xMultXMultNeg2 = BinOp Times (Var x) xMultNeg2 (Elem Int) dummySrcLoc
 
-asdf = do
+
+testRange = do
   let env = RangeEnv { dict = emptyRangeDict }
-  case runRangeM (substitute x xRange (RExp xMultXMultNeg2) ) env of
+  case runRangeM (substitute xId xRange (RExp xMultXMultNeg2) ) env of
     Right r -> ppRange r
+    Left _ -> error "Fail!"
