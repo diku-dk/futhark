@@ -80,9 +80,9 @@ dummyUsingRangeProp prog _ = return prog
 
 rangeProp :: Prog -> Either EnablingOptError RangeDict
 rangeProp prog = do
-  trace (ppDict newDict ++ "\n" ++ prettyPrint prog ++ "\n")
   let asList = filter (\(_,t,_) -> isElemInt t) $ allIdentsAsList prog
   newDict <- foldM keepAddingToRangeDict emptyRangeDict asList
+  trace (prettyPrint prog ++ "\n" ++ ppDict newDict ++ "\n")
     return newDict
   where
     isElemInt (Elem Int) = True
@@ -211,7 +211,7 @@ determineRExpSign (RExp (Var (Ident vname (Elem Int) p))) = do
   case bnd of
     Just (_,sign) -> return sign
     Nothing       -> badRangeM $ RangePropError p $
-        "Identifier was not in range dict" ++ textual vname
+        "Identifier was not in range dict: " ++ textual vname
 determineRExpSign _ = return AnySign
 
 
@@ -345,7 +345,7 @@ ppSign :: Sign -> String
 ppSign = show
 
 ppDict :: RangeDict -> String
-ppDict dict = foldr ((++) . (++ "\n") . ppDictElem) "" (M.toList dict)
+ppDict dict = foldr ((++) . (++ "\n") . ppDictElem) "" (M.toList $ M.delete dummyVName dict)
               where
                 ppDictElem :: (VName, (Range, Sign)) -> String
                 ppDictElem (vname, (range, sign)) =
