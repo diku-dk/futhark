@@ -80,9 +80,9 @@ dummyUsingRangeProp prog _ = return prog
 
 rangeProp :: Prog -> Either EnablingOptError RangeDict
 rangeProp prog = do
-  let asList = reverse $ filter (\(_,t,_) -> isElemInt t) $ allIdentsAsList prog
-  newDict <- foldM keepAddingToRangeDict M.empty asList
   trace (ppDict newDict ++ "\n" ++ prettyPrint prog ++ "\n")
+  let asList = filter (\(_,t,_) -> isElemInt t) $ allIdentsAsList prog
+  newDict <- foldM keepAddingToRangeDict emptyRangeDict asList
     return newDict
   where
     isElemInt (Elem Int) = True
@@ -129,9 +129,34 @@ allIdentsAsList = execWriter . mapM funIdents . progFunctions
 
 ----------------------------------------
 
+-- TODO: Right now it just simplifies as much as it can.
+-- I think we would just like to keep the old range
 createRangeAndSign :: Maybe Exp -> RangeM (Range, Sign)
-createRangeAndSign (Just e)  = return ( (RExp e, RExp e), AnySign )
+createRangeAndSign (Just e)  = do
+  computedRange <- doSomeFixPointIteration (RExp e, RExp e)
+  sign <- calculateRangeSign computedRange (L.SrcLoc $ L.locOf e)
+  return ( computedRange , sign )
 createRangeAndSign Nothing = return ( (Ninf, Pinf), AnySign )
+
+-- TODO: Use Control.Monad.Fix ?
+doSomeFixPointIteration :: Range -> RangeM Range
+doSomeFixPointIteration range = do
+  newRange <- replaceWithWholeDict range
+  if newRange == range
+  then return range
+  else doSomeFixPointIteration newRange
+
+replaceWithWholeDict :: Range -> RangeM Range
+replaceWithWholeDict range = do
+  dictAsList  <- liftM M.toAscList $ asks dict
+  foldM foldingFun range dictAsList
+
+  where
+    foldingFun :: Range -> (VName , (Range, Sign)) -> RangeM Range
+    foldingFun (a,b) (ident, (idRange,_)) = do
+      (a',_) <- substitute ident idRange a
+      (_,b') <- substitute ident idRange b
+      return (a',b')
 
 ----------------------------------------
 -- Range substitution
@@ -335,8 +360,14 @@ ppDict dict = foldr ((++) . (++ "\n") . ppDictElem) "" (M.toList dict)
 createRExpInt :: Int -> L.SrcLoc -> RExp
 createRExpInt n pos = RExp $ Literal (IntVal n) pos
 
+-- as the substitute function needs an identifier and range to work,
+-- we have to supply a dummy value for it to work on the first variable passed to it.
+
+dummyVName :: VName
+dummyVName = ID (nameFromString "dummy",-1)
+
 emptyRangeDict :: RangeDict
-emptyRangeDict = M.empty
+emptyRangeDict = M.singleton dummyVName ((Ninf,Pinf), AnySign)
 
 ----------------------------------------
 -- TESTING
