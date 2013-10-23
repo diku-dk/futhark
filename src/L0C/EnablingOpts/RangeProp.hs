@@ -268,6 +268,40 @@ substitute i r (RExp (BinOp Times e1 e2 ty pos)) = do
         _ -> return (if isPos xSign then Ninf else Pinf)
     multRExp x y = multRExp y x
 
+substitute i r (RExp (Min e1 e2 ty pos)) = do
+  (a, b) <- substitute i r (RExp e1)
+  (c, d) <- substitute i r (RExp e2)
+  ac <- minRExp a c
+  bd <- minRExp b d
+  return (ac, bd)
+
+  where
+    minRExp :: RExp -> RExp -> RangeM RExp
+    minRExp Pinf Ninf = badRangeM $ RangePropError pos "Taking min of Pinf Ninf"
+    minRExp Ninf Pinf = badRangeM $ RangePropError pos "Taking min of Ninf Pinf"
+    minRExp Pinf x = return x
+    minRExp x Pinf = return x
+    minRExp Ninf _ = return Ninf
+    minRExp _ Ninf = return Ninf
+    minRExp (RExp x) (RExp y) = liftM RExp $ simplExp (Min x y ty pos)
+
+substitute i r (RExp (Max e1 e2 ty pos)) = do
+  (a, b) <- substitute i r (RExp e1)
+  (c, d) <- substitute i r (RExp e2)
+  ac <- maxRExp a c
+  bd <- maxRExp b d
+  return (ac, bd)
+
+  where
+    maxRExp :: RExp -> RExp -> RangeM RExp
+    maxRExp Pinf Ninf = badRangeM $ RangePropError pos "Taking Max of Pinf Ninf"
+    maxRExp Ninf Pinf = badRangeM $ RangePropError pos "Taking Max of Ninf Pinf"
+    maxRExp Ninf x = return x
+    maxRExp x Ninf = return x
+    maxRExp Pinf _ = return Pinf
+    maxRExp _ Pinf = return Pinf
+    maxRExp (RExp x) (RExp y) = liftM RExp $ simplExp (Max x y ty pos)
+
 substitute _ _ _ = return (Ninf, Pinf)
 
 ----------------------------------------
