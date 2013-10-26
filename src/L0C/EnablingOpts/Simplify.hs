@@ -170,25 +170,30 @@ simplifyNary (BinOp Minus e1 e2 tp pos) = do
 
 -- TODO: sorting function that ensures literals are first for use in BinOp times
 --
-simplifyNary (BinOp Times e1 e2@(Max _ _ _ _) tp pos) =
-    simplifyNary (BinOp Times e2 e1 tp pos)
 
-simplifyNary (BinOp Times (Max e1' e2' _ _) e2 tp pos) = do
-    let e1'' = BinOp Times e1' e2 tp pos
-    let e2'' = BinOp Times e2' e2 tp pos
-    -- TODO: has to return bool value, based on the sign of e2
-    let op   = if True then Max else Min 
-    simplifyNary $ op e1'' e2'' tp pos
-
-simplifyNary (BinOp Times e1 e2@(Min _ _ _ _) tp pos) =
-    simplifyNary (BinOp Times e2 e1 tp pos)
-
-simplifyNary (BinOp Times (Min e1' e2' _ _) e2 tp pos) = do
-    let e1'' = BinOp Times e1' e2 tp pos
-    let e2'' = BinOp Times e2' e2 tp pos
-    -- TODO: has to return bool value, based on the sign of e2
-    let op   = if True then Min else Max
-    simplifyNary $ op e1'' e2'' tp pos
+---------------------------------------------------------------------
+-- Uncommented until we a working function for sign determination. -- 
+---------------------------------------------------------------------
+--
+-- simplifyNary (BinOp Times e1 e2@(Max _ _ _ _) tp pos) =
+--     simplifyNary (BinOp Times e2 e1 tp pos)
+-- 
+-- simplifyNary (BinOp Times (Max e1' e2' _ _) e2 tp pos) = do
+--     let e1'' = BinOp Times e1' e2 tp pos
+--     let e2'' = BinOp Times e2' e2 tp pos
+--     -- TODO: has to return bool value, based on the sign of e2
+--     let op   = if True then Max else Min 
+--     simplifyNary $ op e1'' e2'' tp pos
+-- 
+-- simplifyNary (BinOp Times e1 e2@(Min _ _ _ _) tp pos) =
+--     simplifyNary (BinOp Times e2 e1 tp pos)
+-- 
+-- simplifyNary (BinOp Times (Min e1' e2' _ _) e2 tp pos) = do
+--     let e1'' = BinOp Times e1' e2 tp pos
+--     let e2'' = BinOp Times e2' e2 tp pos
+--     -- TODO: has to return bool value, based on the sign of e2
+--     let op   = if True then Min else Max
+--     simplifyNary $ op e1'' e2'' tp pos
 
 simplifyNary (BinOp Times e1 e2 tp pos) = do
      e1' <- simplifyNary e1
