@@ -1,2 +1,2 @@
-fun int main(int a, int b) =
-    a * (a+b)
+fun int main(int a, int b, int c) =
+    ~4 * max(3,4)
