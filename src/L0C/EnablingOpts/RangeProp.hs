@@ -215,8 +215,8 @@ determineRExpSign (RExp (Var (Ident vname (Elem Int) p))) = do
   case bnd of
     Just (_,sign) -> return sign
     Nothing       -> badRangeM $ RangePropError p $
-        "Identifier was not in range dict: " ++ textual vname
-determineRExpSign _ = return AnySign
+        "determineRExpSign: Identifier was not in range dict: " ++ textual vname
+determineRExpSign _ = return Nothing
 
 
 expToComparableRange :: Exp -> RangeM Range
@@ -237,8 +237,8 @@ substitute i r (RExp (BinOp Plus e1 e2 ty pos)) = do
   where
     addRExp :: RExp -> RExp -> RangeM RExp
     addRExp (RExp x) (RExp y) = liftM RExp $ simplExp (BinOp Plus x y ty pos)
-    addRExp Ninf Pinf = badRangeM $ RangePropError pos "Trying to add Ninf and Pinf"
-    addRExp Pinf Ninf = badRangeM $ RangePropError pos "Trying to add Ninf and Pinf"
+    addRExp Ninf Pinf = badRangeM $ RangePropError pos "addRExp: Trying to add Ninf and Pinf"
+    addRExp Pinf Ninf = badRangeM $ RangePropError pos "addRExp: Trying to add Ninf and Pinf"
     addRExp Pinf _ = return Pinf
     addRExp _ Pinf = return Pinf
     addRExp Ninf _ = return Ninf
@@ -299,8 +299,8 @@ substitute i r (RExp (Min e1 e2 ty pos)) = do
 
   where
     minRExp :: RExp -> RExp -> RangeM RExp
-    minRExp Pinf Ninf = badRangeM $ RangePropError pos "Taking min of Pinf Ninf"
-    minRExp Ninf Pinf = badRangeM $ RangePropError pos "Taking min of Ninf Pinf"
+    minRExp Pinf Ninf = badRangeM $ RangePropError pos "minRExp: Taking min of Pinf Ninf"
+    minRExp Ninf Pinf = badRangeM $ RangePropError pos "minRExp: Taking min of Ninf Pinf"
     minRExp Pinf x = return x
     minRExp x Pinf = return x
     minRExp Ninf _ = return Ninf
@@ -316,8 +316,8 @@ substitute i r (RExp (Max e1 e2 ty pos)) = do
 
   where
     maxRExp :: RExp -> RExp -> RangeM RExp
-    maxRExp Pinf Ninf = badRangeM $ RangePropError pos "Taking Max of Pinf Ninf"
-    maxRExp Ninf Pinf = badRangeM $ RangePropError pos "Taking Max of Ninf Pinf"
+    maxRExp Pinf Ninf = badRangeM $ RangePropError pos "maxRExp: Taking Max of Pinf Ninf"
+    maxRExp Ninf Pinf = badRangeM $ RangePropError pos "maxRExp: Taking Max of Ninf Pinf"
     maxRExp Ninf x = return x
     maxRExp x Ninf = return x
     maxRExp Pinf _ = return Pinf
