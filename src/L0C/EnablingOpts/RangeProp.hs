@@ -327,6 +327,14 @@ substitute i r (RExp (Max e1 e2 ty pos)) = do
     maxRExp _ Pinf = return Pinf
     maxRExp (RExp x) (RExp y) = liftM RExp $ simplExp (Max x y ty pos)
 
+-- Resolve nested let, example:
+-- let x = (let y = 5 in y+3) in x+2
+-- First we process y, settings it's range to [5:5]
+-- Then we process x, encountering (let y = 5 in y+3)
+-- when trying to find it's range
+-- therefore we only need to look at the part after in, in this case y+3
+substitute i r (RExp (LetPat _ _ inExp _)) = substitute i r (RExp inExp)
+
 substitute _ _ _ = return (Ninf, Pinf)
 
 ----------------------------------------
