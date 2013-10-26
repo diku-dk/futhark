@@ -165,8 +165,8 @@ replaceWithWholeDict range = do
       return (a',b')
 
 ----------------------------------------
--- Range substitution
-----------------------------------------
+-- Make comparisons with ragne information
+---------------------------------------
 
 rangeCompare :: RangeDict -> Exp -> Exp -> Either EnablingOptError RangeInequality
 rangeCompare rdict e1 e2 = do
@@ -187,11 +187,11 @@ rangeCompareZero rdict e = do
     (Just Pos)     -> return $ Just ILT
     Nothing -> return Nothing
 
-----------------------------------------
+expToComparableRange :: Exp -> RangeM Range
+expToComparableRange e = doSomeFixPointIteration (RExp e, RExp e)
 
-
 ----------------------------------------
--- Does not work recursively?
+-- Calculate range signs
 ---------------------------------------
 
 -- TODO: make sanity check, that we don't have something like Pos, Neg ?
@@ -210,6 +210,7 @@ calculateRangeSign (lb,ub) = do
     (Just Pos,_)     -> return $ Just Pos
     _           -> return Nothing
 
+-- TODO: make work on expressions like Plus, Times and so on
 determineRExpSign :: RExp -> RangeM RangeSign
 determineRExpSign Pinf = return $ Just Pos
 determineRExpSign Ninf = return $ Just Neg
@@ -225,12 +226,8 @@ determineRExpSign (RExp (Var (Ident vname (Elem Int) p))) = do
         "determineRExpSign: Identifier was not in range dict: " ++ textual vname
 determineRExpSign _ = return Nothing
 
-
-expToComparableRange :: Exp -> RangeM Range
-expToComparableRange e = doSomeFixPointIteration (RExp e, RExp e)
-
-
-
+----------------------------------------
+-- Range substitution
 ----------------------------------------
 
 substitute :: VName -> Range -> RExp -> RangeM Range
