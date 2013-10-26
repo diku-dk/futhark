@@ -20,6 +20,7 @@ data EnablingOptError = EnablingOptError SrcLoc String
                       | FunctionNotInFtab  Name
                       | VarNotInFtab SrcLoc VName
                       | SimplifyError SrcLoc String
+                      | RangePropError SrcLoc String
 
 instance Show EnablingOptError where
     show (EnablingOptError pos msg) =
@@ -46,3 +47,5 @@ instance Show EnablingOptError where
         "Variable " ++ textual name ++ " not found in symbol table at " ++ locStr pos ++ "."
     show (SimplifyError pos msg) =
         "Simplify Error at " ++ locStr pos ++ ":\n" ++ msg
+    show (RangePropError pos msg) =
+        "Range Prop Error at " ++ locStr pos ++ ":\n" ++ msg
