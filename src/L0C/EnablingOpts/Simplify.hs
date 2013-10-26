@@ -110,6 +110,42 @@ simplifyBothWays e = do
 
 simplifyNary :: Exp -> SimplifyM NaryExp
 
+simplifyNary (Min e1 e2 tp pos) = do
+    e1'<- (simplifyNary e1) >>= simplifyBack
+    e2'<- (simplifyNary e2) >>= simplifyBack
+    case (e1',e2') of
+        (Literal (IntVal v1) _, Literal (IntVal v2) _) ->
+            return $ NaryMult [(Literal (IntVal $ min v1 v2) pos)] tp pos
+        _ -> 
+            return $ NaryMult [(Min e1' e2' tp pos)] tp pos
+
+simplifyNary (Max e1 e2 tp pos) = do
+    e1'<- (simplifyNary e1) >>= simplifyBack
+    e2'<- (simplifyNary e2) >>= simplifyBack
+    case (e1',e2') of
+        (Literal (IntVal v1) _, Literal (IntVal v2) _) ->
+            return $ NaryMult [(Literal (IntVal $ max v1 v2) pos)] tp pos
+        _ -> 
+            return $ NaryMult [(Max e1' e2' tp pos)] tp pos
+
+simplifyNary (BinOp Plus (Max e1' e2' _ _) e2 tp pos) = do
+    let e1'' = BinOp Plus e1' e2 tp pos
+    let e2'' = BinOp Plus e2' e2 tp pos
+    simplifyNary $ Max e1'' e2'' tp pos
+
+simplifyNary (BinOp Plus e1 e2@(Max _ _ _ _) tp pos) =
+    simplifyNary (BinOp Plus e2 e1 tp pos)
+
+
+simplifyNary (BinOp Plus (Min e1' e2' _ _) e2 tp pos) = do
+    let e1'' = BinOp Plus e1' e2 tp pos
+    let e2'' = BinOp Plus e2' e2 tp pos
+    simplifyNary $ Min e1'' e2'' tp pos
+
+simplifyNary (BinOp Plus e1 e2@(Min _ _ _ _) tp pos) =
+    simplifyNary (BinOp Plus e2 e1 tp pos)
+
+
 simplifyNary (BinOp Plus e1 e2 tp pos) = do
      e1' <- simplifyNary e1
      e2' <- simplifyNary e2
@@ -133,6 +169,31 @@ simplifyNary (BinOp Minus e1 e2 tp pos) = do
     simplifyNary $ BinOp Plus e1 e2' tp pos
 
 -- TODO: sorting function that ensures literals are first for use in BinOp times
+--
+
+---------------------------------------------------------------------
+-- Uncommented until we a working function for sign determination. -- 
+---------------------------------------------------------------------
+--
+-- simplifyNary (BinOp Times e1 e2@(Max _ _ _ _) tp pos) =
+--     simplifyNary (BinOp Times e2 e1 tp pos)
+-- 
+-- simplifyNary (BinOp Times (Max e1' e2' _ _) e2 tp pos) = do
+--     let e1'' = BinOp Times e1' e2 tp pos
+--     let e2'' = BinOp Times e2' e2 tp pos
+--     -- TODO: has to return bool value, based on the sign of e2
+--     let op   = if True then Max else Min 
+--     simplifyNary $ op e1'' e2'' tp pos
+-- 
+-- simplifyNary (BinOp Times e1 e2@(Min _ _ _ _) tp pos) =
+--     simplifyNary (BinOp Times e2 e1 tp pos)
+-- 
+-- simplifyNary (BinOp Times (Min e1' e2' _ _) e2 tp pos) = do
+--     let e1'' = BinOp Times e1' e2 tp pos
+--     let e2'' = BinOp Times e2' e2 tp pos
+--     -- TODO: has to return bool value, based on the sign of e2
+--     let op   = if True then Min else Max
+--     simplifyNary $ op e1'' e2'' tp pos
 
 simplifyNary (BinOp Times e1 e2 tp pos) = do
      e1' <- simplifyNary e1

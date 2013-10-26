@@ -1,2 +1,4 @@
 fun int main(int a) =
+    let v1 = min(1,2) in
+    let v2 = max(~2,2) in
     a + a * 2

@@ -27,9 +27,14 @@ fun bool division(int a, int b, int c) =
     let x8 = (a+b) / (a+b) = 1 in
     x0 && x1 && x2 && x3 && x4 && x5 && x6 && x7 && x8
 
+fun bool minmax(int a, int b, int c) =
+    let x0 = min(1,~2) = ~2 in
+    let x1 = max(~2,1) = 1 in 
+    let x2 = a + min(max(a - min(1 + a,100 + a),10) - 1,1 - 1) + b = a + b in
+    x0 && x1 && x2
+    
+
 fun int main(int a, int b, int c, int d, int e, int f, int g, int h) =
-    if relationel(a,b) && addNMult(a,b,c,d,e,f,g,h) && division(a,b,c)
+    if relationel(a,b) && addNMult(a,b,c,d,e,f,g,h) && division(a,b,c) && minmax(a,b,c)
     then 42
     else 0
-
-// simplifier is called 102 times
