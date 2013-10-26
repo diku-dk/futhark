@@ -5,6 +5,8 @@ module L0C.EnablingOpts.RangeProp (
     RangeDict
   , Inequality(..)
   , RangeInequality
+  , rangeCompare
+  , rangeCompareZero
 
     -- * Range Propagation
   , rangeProp
@@ -138,7 +140,7 @@ allIdentsAsList = execWriter . mapM funIdents . progFunctions
 createRangeAndSign :: Maybe Exp -> RangeM (Range, RangeSign)
 createRangeAndSign (Just e)  = do
   computedRange <- doSomeFixPointIteration (RExp e, RExp e)
-  sign <- calculateRangeSign computedRange (L.SrcLoc $ L.locOf e)
+  sign <- calculateRangeSign computedRange
   return ( computedRange , sign )
 createRangeAndSign Nothing = return ( (Ninf, Pinf), Nothing )
 
@@ -166,17 +168,23 @@ replaceWithWholeDict range = do
 -- Range substitution
 ----------------------------------------
 
-rangeCompare :: Exp -> Exp -> RangeM RangeInequality
-rangeCompare e1 e2 = do
+rangeCompare :: RangeDict -> Exp -> Exp -> Either EnablingOptError RangeInequality
+rangeCompare rdict e1 e2 = do
   let e1SrcLoc = L.SrcLoc $ L.locOf e1
-  range <- expToComparableRange $ BinOp Minus e1 e2 (typeOf e1) e1SrcLoc
-  sign <- calculateRangeSign range e1SrcLoc
+  rangeCompareZero rdict $ BinOp Minus e2 e1 (typeOf e1) e1SrcLoc
+
+-- Same as doing 0 `rangeCompare` exp
+rangeCompareZero :: RangeDict -> Exp -> Either EnablingOptError RangeInequality
+rangeCompareZero rdict e = do
+  let env = RangeEnv { dict = rdict }
+  let action = calculateRangeSign =<< expToComparableRange e
+  sign <- runRangeM action env
   case sign of
-    (Just Neg)     -> return $ Just ILT
-    (Just NonPos)  -> return $ Just ILTE
+    (Just Neg)     -> return $ Just IGT
+    (Just NonPos)  -> return $ Just IGTE
     (Just Zero)    -> return $ Just IEQ
-    (Just NonNeg)  -> return $ Just IGTE
-    (Just Pos)     -> return $ Just IGT
+    (Just NonNeg)  -> return $ Just ILTE
+    (Just Pos)     -> return $ Just ILT
     Nothing -> return Nothing
 
 ----------------------------------------
@@ -187,8 +195,8 @@ rangeCompare e1 e2 = do
 ---------------------------------------
 
 -- TODO: make sanity check, that we don't have something like Pos, Neg ?
-calculateRangeSign :: Range -> L.SrcLoc -> RangeM RangeSign
-calculateRangeSign (lb,ub) p = do
+calculateRangeSign :: Range -> RangeM RangeSign
+calculateRangeSign (lb,ub) = do
   s1 <- determineRExpSign lb
   s2 <- determineRExpSign ub
   if s1 == s2
@@ -219,7 +227,9 @@ determineRExpSign _ = return Nothing
 
 
 expToComparableRange :: Exp -> RangeM Range
-expToComparableRange e = return (Ninf, Pinf)
+expToComparableRange e = doSomeFixPointIteration (RExp e, RExp e)
+
+
 
 ----------------------------------------
 
@@ -251,8 +261,8 @@ substitute i r (RExp (BinOp Minus e1 e2 ty pos)) = do
 substitute i r (RExp (BinOp Times e1 e2 ty pos)) = do
   (a, b) <- substitute i r (RExp e1)
   (c, d) <- substitute i r (RExp e2)
-  e1Sign <- calculateRangeSign(a,b) pos
-  e2Sign <- calculateRangeSign(c,d) pos
+  e1Sign <- calculateRangeSign(a,b)
+  e2Sign <- calculateRangeSign(c,d)
   case (e1Sign, e2Sign) of
     (Just Zero,_) -> let z = createRExpIntLit 0 pos in return (z,z)
     (_,Just Zero) -> let z = createRExpIntLit 0 pos in return (z,z)
@@ -400,3 +410,7 @@ testRange = do
   case runRangeM (substitute xId xRange (RExp xMultXMultNeg2) ) env of
     Right r -> ppRange r
     Left _ -> error "Fail!"
+
+comp0to5 = rangeCompareZero emptyRangeDict $ createIntLit 5 dummySrcLoc
+comp4to5 = rangeCompare emptyRangeDict  (createIntLit 4 dummySrcLoc) (createIntLit 5 dummySrcLoc)
+comp10to5 = rangeCompare emptyRangeDict (createIntLit 10 dummySrcLoc) (createIntLit 5 dummySrcLoc)
