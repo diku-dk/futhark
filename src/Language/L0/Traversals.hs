@@ -54,6 +54,8 @@ module Language.L0.Traversals
   , patIdents
   , freeInExp
   , freeNamesInExp
+  , freeInLambda
+  , freeNamesInLambda
   , consumedInExp
   )
   where
@@ -63,7 +65,6 @@ import Control.Arrow (first)
 import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.Writer
-import Control.Monad.Reader
 import Control.Monad.State
 import qualified Data.Set as S
 
@@ -358,40 +359,52 @@ patIdents (Wildcard _ _) = mempty
 -- | Return the set of identifiers that are free in the given
 -- expression.
 freeInExp :: Ord vn => ExpBase ty vn -> S.Set (IdentBase ty vn)
-freeInExp = execWriter . flip runReaderT S.empty . expFree
+freeInExp = execWriter . expFree
   where names = identityWalker {
                   walkOnExp = expFree
                 , walkOnLambda = lambdaFree
                 , walkOnIdent = identFree
                 }
 
-        identFree ident = do
-          bound <- asks $ S.member (identName ident)
-          unless bound $ tell $ S.singleton ident
+        identFree ident =
+          tell $ S.singleton ident
 
         expFree (LetPat pat e body _) = do
           expFree e
-          local (`S.union` patNames pat) $ expFree body
+          binding (patIdents pat) $ expFree body
         expFree (LetWith dest src idxs ve body _) = do
           identFree src
           mapM_ expFree idxs
           expFree ve
-          local (S.insert $ identName dest) $ expFree body
+          binding (S.singleton dest) $ expFree body
         expFree (DoLoop pat mergeexp i boundexp loopbody letbody _) = do
           expFree mergeexp
           expFree boundexp
-          local (`S.union` (identName i `S.insert` patNames pat)) $ do
+          binding (i `S.insert` patIdents pat) $ do
             expFree loopbody
             expFree letbody
         expFree e = walkExpM names e
 
-        lambdaFree (AnonymFun params body _ _) =
-          local (`S.union` S.fromList (map identName params)) $ expFree body
-        lambdaFree (CurryFun _ exps _ _) = mapM_ expFree exps
+        lambdaFree = tell . freeInLambda
+
+        binding bound = censor (S.\\ bound)
+
+-- | Return the set of identifiers that are free in the given lambda.
+freeInLambda :: Ord vn => LambdaBase ty vn -> S.Set (IdentBase ty vn)
+freeInLambda (AnonymFun params body _ _) =
+  S.filter ((`notElem` params') . identName) $ freeInExp body
+    where params' = map identName params
+freeInLambda (CurryFun _ exps _ _) =
+  S.unions (map freeInExp exps)
 
 -- | As 'freeInExp', but returns the raw names rather than 'IdentBase's.
 freeNamesInExp :: Ord vn => ExpBase ty vn -> S.Set vn
 freeNamesInExp = S.map identName . freeInExp
+
+-- | As 'freeInLambda', but returns the raw names rather than
+-- 'IdentBase's.
+freeNamesInLambda :: Ord vn => LambdaBase ty vn -> S.Set vn
+freeNamesInLambda = S.map identName . freeInLambda
 
 consumedInExp :: Ord vn => ExpBase CompTypeBase vn -> S.Set vn
 consumedInExp = execWriter . expConsumed
