@@ -244,7 +244,7 @@ substitute i r (RExp (BinOp Plus e1 e2 ty pos)) = do
     addRExp _ Ninf = return Ninf
 
 substitute i r (RExp (BinOp Minus e1 e2 ty pos)) = do
-    let min_1 = Literal (IntVal (-1)) pos
+    let min_1 = createIntLit (-1) pos
     let e2' = BinOp Times min_1 e2 ty pos
     substitute i r . RExp $ BinOp Plus e1 e2' ty pos
 
@@ -254,8 +254,8 @@ substitute i r (RExp (BinOp Times e1 e2 ty pos)) = do
   e1Sign <- calculateRangeSign(a,b) pos
   e2Sign <- calculateRangeSign(c,d) pos
   case (e1Sign, e2Sign) of
-    (Just Zero,_) -> let z = RExp $ Literal (IntVal 0) pos in return (z,z)
-    (_,Just Zero) -> let z = RExp $ Literal (IntVal 0) pos in return (z,z)
+    (Just Zero,_) -> let z = createRExpIntLit 0 pos in return (z,z)
+    (_,Just Zero) -> let z = createRExpIntLit 0 pos in return (z,z)
     (Nothing, _)  -> return (Ninf, Pinf)
     (_, Nothing)  -> return (Ninf, Pinf)
     _             -> case (Just Zero < e1Sign, Just Zero < e2Sign) of
@@ -279,13 +279,13 @@ substitute i r (RExp (BinOp Times e1 e2 ty pos)) = do
       xSign <- determineRExpSign x
       case xSign of
         Nothing     -> badRangeM $ RangePropError pos "multRExp: Multiplying with Nothing"
-        (Just Zero) -> return $ createRExpInt 0 pos
+        (Just Zero) -> return $ createRExpIntLit 0 pos
         (Just s)    -> return (if Zero < s then Pinf else Ninf)
     multRExp Ninf x = do
       xSign <- determineRExpSign x
       case xSign of
         Nothing     -> badRangeM $ RangePropError pos "multRExp: Multiplying with Nothing"
-        (Just Zero) -> return $ createRExpInt 0 pos
+        (Just Zero) -> return $ createRExpIntLit 0 pos
         (Just s)    -> return (if Zero < s then Ninf else Pinf)
     multRExp x y = multRExp y x
 
@@ -362,8 +362,11 @@ ppDict dict = foldr ((++) . (++ "\n") . ppDictElem) "" (M.toList $ M.delete dumm
 -- Helpers / Constants
 ----------------------------------------
 
-createRExpInt :: Int -> L.SrcLoc -> RExp
-createRExpInt n pos = RExp $ Literal (IntVal n) pos
+createIntLit :: Int -> L.SrcLoc -> Exp
+createIntLit n = Literal (IntVal n)
+
+createRExpIntLit :: Int -> L.SrcLoc -> RExp
+createRExpIntLit n pos = RExp $ createIntLit n pos
 
 -- as the substitute function needs an identifier and range to work,
 -- we have to supply a dummy value for it to work on the first variable passed to it.
@@ -386,7 +389,7 @@ x = Ident {identName = xId,
            identType = Elem Int,
            identSrcLoc = dummySrcLoc }
 
-xRange = (createRExpInt 1 dummySrcLoc, createRExpInt 2 dummySrcLoc)
+xRange = (createRExpIntLit 1 dummySrcLoc, createRExpIntLit 2 dummySrcLoc)
 
 xMultNeg2 = BinOp Times (Var x) (Literal (IntVal (-2)) dummySrcLoc) (Elem Int) dummySrcLoc
 xMultXMultNeg2 = BinOp Times (Var x) xMultNeg2 (Elem Int) dummySrcLoc
