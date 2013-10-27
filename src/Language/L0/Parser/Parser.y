@@ -3,6 +3,7 @@ module Language.L0.Parser.Parser
   ( prog
   , expression
   , pattern
+  , lambda
   , l0type
   , intValue
   , realValue
@@ -26,6 +27,7 @@ import Language.L0.Parser.Lexer
 %name prog Prog
 %name expression Exp
 %name pattern TupId
+%name lambda FunAbstr
 %name l0type Type
 %name intValue IntValue
 %name realValue RealValue
