@@ -21,7 +21,7 @@ type TransformM = State VNameSource
 -- | Return a new, fresh name, with the given string being part of the
 -- name.
 new :: String -> TransformM VName
-new = state . newVName
+new = state . flip newVName
 
 -- | Perform the first-order transformation on an L0 program.
 transformProg :: Prog -> Prog

@@ -144,7 +144,7 @@ runHoistM (HoistM m) src = let (x, _, _) = runRWS m emptyEnv src
                            in x
 
 new :: String -> HoistM VName
-new k = do (name, src) <- gets $ newVName k
+new k = do (name, src) <- gets $ flip newVName k
            put src
            return name
 

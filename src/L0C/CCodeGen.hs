@@ -73,7 +73,7 @@ new = liftM textual  . newAsName
 
 -- | As 'new', but returns a 'Name' instead of a 'String'.
 newAsName :: String -> CompilerM VName
-newAsName k = do (name, src) <- gets $ newVName k . compNameSrc
+newAsName k = do (name, src) <- gets $ flip newVName k . compNameSrc
                  modify $ \s -> s { compNameSrc = src }
                  return name
 

@@ -86,7 +86,7 @@ badFusionGM = FusionGM . lift . lift . Left
 -- | Return a fresh, unique name.  The @VName@ is prepended to the
 -- name.
 new :: String -> FusionGM VName
-new = state . newVName
+new = state . flip newVName
 
 ------------------------------------------------------------------------
 --- Fusion Entry Points: gather the to-be-fused kernels@pgm level    ---

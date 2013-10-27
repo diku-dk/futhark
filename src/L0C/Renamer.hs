@@ -8,13 +8,24 @@
 -- then use 'renameProg' from then on.  Functions are also provided
 -- for removing the tags again from expressions, patterns and typs.
 module L0C.Renamer
-  ( renameProg
+  (
+  -- * Renaming programs
+   renameProg
+
+  -- * Tagging
   , tagProg
   , tagProg'
   , tagExp
+  , tagExp'
   , tagType
+  , tagType'
+  , tagLambda
+  , tagLambda'
+
+  -- * Untagging
   , untagProg
   , untagExp
+  , untagLambda
   , untagPattern
   , untagType
   )
@@ -60,17 +71,42 @@ tagProg' prog = let (funs, src) = runReader (runStateT f blankNameSource) env
   where env = RenameEnv M.empty newID
         f = mapM renameFun $ progFunctions prog
 
+-- | As 'tagExp', but accepts an initial name source and returns the
+-- new one.
+tagExp' :: (TypeBox ty, VarName vn) =>
+           NameSource (ID vn) -> ExpBase ty vn -> (ExpBase ty (ID vn), NameSource (ID vn))
+tagExp' src e = runReader (runStateT (renameExp e) src) env
+  where env = RenameEnv M.empty newID
+
 -- | As 'tagProg', but for expressions.
 tagExp :: (TypeBox ty, VarName vn) =>
            ExpBase ty vn -> ExpBase ty (ID vn)
-tagExp e = runReader (evalStateT (renameExp e) blankNameSource) env
+tagExp = fst . tagExp' blankNameSource
+
+-- | As 'tagType', but accepts an initial name source and returns the
+-- new one.
+tagType' :: (TypeBox ty, VarName vn) =>
+            NameSource (ID vn) -> ty vn -> (ty (ID vn), NameSource (ID vn))
+tagType' src t = runReader (runStateT (renameType t) src) env
   where env = RenameEnv M.empty newID
 
 -- | As 'tagProg', but for types.
 tagType :: (TypeBox ty, VarName vn) =>
            ty vn -> ty (ID vn)
-tagType t = runReader (evalStateT (renameType t) blankNameSource) env
+tagType = fst . tagType' blankNameSource
+
+-- | As 'tagLambda', but accepts an initial name source and returns
+-- the new one.
+tagLambda' :: (TypeBox ty, VarName vn) =>
+            NameSource (ID vn) -> LambdaBase ty vn
+         -> (LambdaBase ty (ID vn), NameSource (ID vn))
+tagLambda' src t = runReader (runStateT (renameLambda t) src) env
   where env = RenameEnv M.empty newID
+
+-- | As 'tagProg', but for anonymous functions.
+tagLambda :: (TypeBox ty, VarName vn) =>
+             LambdaBase ty vn -> LambdaBase ty (ID vn)
+tagLambda = fst . tagLambda' blankNameSource
 
 -- | Remove tags from a program.  Note that this is potentially
 -- semantics-changing if the underlying names are not each unique.
@@ -83,6 +119,12 @@ untagProg = untagger $ liftM Prog . mapM renameFun . progFunctions
 untagExp :: (TypeBox ty, VarName vn) =>
             ExpBase ty (ID vn) -> ExpBase ty vn
 untagExp = untagger renameExp
+
+-- | Remove tags from an anonymous function.  The same caveats as with
+-- 'untagProg' apply.
+untagLambda :: (TypeBox ty, VarName vn) =>
+               LambdaBase ty (ID vn) -> LambdaBase ty vn
+untagLambda = untagger renameLambda
 
 -- | Remove tags from a pattern.  The same caveats as with 'untagProg'
 -- apply.
@@ -100,11 +142,11 @@ untagger :: VarName vn =>
             (t -> RenameM (ID vn) vn a) -> t -> a
 untagger f x = runReader (evalStateT (f x) blankNameSource) env
   where env = RenameEnv M.empty rmTag
-        rmTag (ID (s, _)) src = (s, src)
+        rmTag src (ID (s, _)) = (s, src)
 
 data RenameEnv f t = RenameEnv {
     envNameMap :: M.Map f t
-  , envNameFn  :: f -> NameSource t -> (t, NameSource t)
+  , envNameFn  :: NameSource t -> f -> (t, NameSource t)
   }
 
 type RenameM f t = StateT (NameSource t) (Reader (RenameEnv f t))
@@ -112,7 +154,7 @@ type RenameM f t = StateT (NameSource t) (Reader (RenameEnv f t))
 -- | Return a fresh, unique name.  The @Name@ is prepended to the
 -- name.
 new :: f -> RenameM f t t
-new k = do (k', src') <- asks envNameFn <*> pure k <*> get
+new k = do (k', src') <- asks envNameFn <*> get <*> pure k
            put src'
            return k'
 
