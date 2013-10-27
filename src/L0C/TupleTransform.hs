@@ -57,7 +57,7 @@ data TransformEnv = TransformEnv {
 type TransformM = ReaderT TransformEnv (State TransformState)
 
 new :: String -> TransformM VName
-new k = do (name, src) <- gets $ newVName k . envNameSrc
+new k = do (name, src) <- gets $ flip newVName k . envNameSrc
            modify $ \s -> s { envNameSrc = src }
            return name
 

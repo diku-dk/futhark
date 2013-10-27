@@ -65,7 +65,7 @@ badTupNormM = TupNormM . lift . lift . Left
 -- | Return a fresh, unique name.  The @VName@ is prepended to the
 -- name.
 new :: VName -> TupNormM VName
-new = state . newName
+new = state . flip newName
 
 
 -----------------------------------------------------------------

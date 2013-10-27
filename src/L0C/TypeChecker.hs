@@ -301,7 +301,7 @@ liftEither = either bad return
 -- | Return a fresh, unique name.  The @VName@ is prepended to the
 -- name.
 new :: VarName vn => String -> TypeM vn (ID vn)
-new k = state $ newName $ varName k Nothing
+new k = state (`newName` varName k Nothing)
 
 newIdent :: VarName vn => String -> TaggedType vn -> SrcLoc
          -> TypeM vn (TaggedIdent CompTypeBase vn)

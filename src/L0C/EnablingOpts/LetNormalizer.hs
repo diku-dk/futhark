@@ -99,7 +99,7 @@ badLetNormM = LetNormM . lift . lift . Left
 -- | Return a fresh, unique name.  The @String@ is prepended to the
 -- name.
 new :: String -> LetNormM VName
-new = state . newVName
+new = state . flip newVName
 
 
 letNormProg :: Prog -> Either EnablingOptError (Bool, Prog)

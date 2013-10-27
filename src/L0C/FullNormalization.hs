@@ -44,7 +44,7 @@ newtype NormalizeM a = NormalizeM (RWS Env NewBindings (NameSource VName) a)
             MonadWriter NewBindings)
 
 new :: String -> NormalizeM VName
-new k = do (name, src) <- gets $ newVName k
+new k = do (name, src) <- gets $ flip newVName k
            put src
            return name
 
