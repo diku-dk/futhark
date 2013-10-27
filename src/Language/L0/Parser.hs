@@ -4,6 +4,7 @@ module Language.L0.Parser
   , parseExp
   , parsePattern
   , parseType
+  , parseLambda
 
   , parseInt
   , parseReal
@@ -62,6 +63,11 @@ parsePattern = parse pattern
 -- 'FilePath' as the source name for error messages.
 parseType :: FilePath -> String -> Either ParseError UncheckedType
 parseType = parse l0type
+
+-- | Parse an L0 anonymous function from the given 'String', using the
+-- 'FilePath' as the source name for error messages.
+parseLambda :: FilePath -> String -> Either ParseError UncheckedLambda
+parseLambda = parse lambda
 
 -- | Parse an integer in L0 syntax from the given 'String', using the
 -- 'FilePath' as the source name for error messages.
