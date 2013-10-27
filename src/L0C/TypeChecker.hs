@@ -8,6 +8,7 @@
 module L0C.TypeChecker ( checkProg
                        , checkProgNoUniqueness
                        , checkClosedExp
+                       , checkOpenExp
                        , TypeError(..))
   where
 
@@ -27,7 +28,8 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 
 import L0C.L0
-import L0C.Renamer (tagProg', tagExp, untagProg, untagExp, untagPattern, untagType)
+import L0C.Renamer (tagProg', tagExp, tagExp', tagType',
+                    untagProg, untagExp, untagPattern, untagType)
 import L0C.FreshNames
 
 -- | Information about an error during type checking.  The 'Show'
@@ -598,6 +600,27 @@ checkFun (fname, rettype, params, body, loc) = do
         returnAliasing (Elem (Tuple ets1)) (Elem (Tuple ets2)) =
           concat $ zipWith returnAliasing ets1 ets2
         returnAliasing expected got = [(uniqueness expected, aliases got)]
+
+-- | Type-check a single expression without any calls to non-builtin
+-- functions.  Free variables are permitted, as long as they are
+-- present in the passed-in vtable.
+checkOpenExp :: (TypeBox ty, VarName vn) =>
+                M.Map vn (CompTypeBase vn) -> ExpBase ty vn ->
+                Either (TypeError vn) (ExpBase CompTypeBase vn)
+checkOpenExp bnds e = untagExp <$> runTypeM env namesrc (checkExp e')
+  where env = TypeEnv { envFtable = builtInFunctions
+                      , envCheckOccurences = True
+                      , envVtable = vtable
+                      }
+        (e', src) = tagExp' blankNameSource e
+
+        (vtable, namesrc) = foldl tagBnd (M.empty, src) $
+                            S.toList $ freeNamesInExp e'
+        tagBnd (m, src') k =
+          case M.lookup (baseName k) bnds of
+            Nothing -> (m, src')
+            Just t  -> let (t', src'') = tagType' src' t
+                       in (M.insert k (Bound t') m, src'')
 
 -- | Type-check a single expression without any free variables or
 -- calls to non-builtin functions.
