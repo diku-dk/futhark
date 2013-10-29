@@ -347,6 +347,37 @@ substitute i r (RExp (BinOp Divide e1 e2 ty pos)) = do
           _     -> badRangeM $ RangePropError pos "divRExp: Dividing with something that could be 0"
       divRExp x y = divRExp y x
 
+substitute i r (RExp (BinOp Pow e1 e2 ty pos)) = do
+  (a, b) <- substitute i r (RExp e1)
+  (c, d) <- substitute i r (RExp e2)
+  case (c,d) of
+    ( RExp (Literal (IntVal v) _) , RExp (Literal (IntVal v') _) )
+      | v /= v' -> return (Ninf, Pinf)
+      | even v -> do
+          aSign <- determineRExpSign a
+          bSign <- determineRExpSign b
+          case (Just Zero <= aSign, Nothing <= bSign && bSign <= Just Zero) of
+            (True, _)    -> do av <- powRExp a v
+                               bv <- powRExp b v
+                               return (av, bv)
+            (_, False)   -> do av <- powRExp a v
+                               bv <- powRExp b v
+                               return (bv, av)
+            _            -> return (Ninf, Pinf)
+      | otherwise -> do
+          av <- powRExp a v
+          bv <- powRExp b v
+          return (av, bv)
+
+    _ -> return (Ninf, Pinf)
+
+  where
+    powRExp :: RExp -> Int -> RangeM RExp
+    powRExp _ 0 = return $ createRExpIntLit 1 pos
+    powRExp Pinf _ = return Pinf
+    powRExp Ninf _ = return Ninf
+    divRExp (RExp x) v = liftM RExp $ simplExp (BinOp Pow x (createIntLit v pos) ty pos)
+
 substitute i r (RExp (Min e1 e2 ty pos)) = do
   (a, b) <- substitute i r (RExp e1)
   (c, d) <- substitute i r (RExp e2)
