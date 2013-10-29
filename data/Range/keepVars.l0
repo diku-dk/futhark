@@ -1,0 +1,5 @@
+fun int main (int x) =
+    let y = x + 5 in
+    let d = y - x in
+    d
+// d should be [5, 5]
