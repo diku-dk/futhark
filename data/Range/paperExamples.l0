@@ -1,0 +1,18 @@
+// Section 2.1 , page 3
+fun int ex1 (int input) =
+    let y = max(1, input) in
+    let x = min(y, 10) in
+    let d = (x*y+1) - y in
+    d
+
+// Section 2.3, page 7
+fun int ex2 (int input) =
+    let y = max(1, input) in
+    let x = max(1, y) in
+    let d = x - y in
+    d
+
+fun int main(int input) =
+    let ex1 = ex1(input) in
+    let ex2 = ex2(input) in
+    ex1 + ex2
