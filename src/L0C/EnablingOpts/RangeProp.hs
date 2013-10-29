@@ -266,15 +266,19 @@ substitute i r (RExp (BinOp Times e1 e2 ty pos)) = do
     (Nothing, _)  -> return (Ninf, Pinf)
     (_, Nothing)  -> return (Ninf, Pinf)
     _             -> case (Just Zero < e1Sign, Just Zero < e2Sign) of
+                       -- [2:5] * [3:6] ~> [2*3 : 5*6]
                        (True,True)   -> do ac <- multRExp a c
                                            bd <- multRExp b d
                                            return (ac,bd)
+                       -- [-5:-2] * [-6:-3] ~> [-2*-3 : -5*-6]
                        (False,False) -> do ac <- multRExp a c
                                            bd <- multRExp b d
                                            return (bd,ac)
+                       -- [2:5] * [-6:-3] ~> [5*-6 : 2*-3]
                        (True,False)  -> do ad <- multRExp a d
                                            bc <- multRExp b c
                                            return (bc,ad)
+                       -- [-5:-2] * [3:6] ~> [-5*6 : -2*3]
                        (False,True)  -> do ad <- multRExp a d
                                            bc <- multRExp b c
                                            return (ad,bc)
@@ -295,6 +299,53 @@ substitute i r (RExp (BinOp Times e1 e2 ty pos)) = do
         (Just Zero) -> return $ createRExpIntLit 0 pos
         (Just s)    -> return (if Zero < s then Ninf else Pinf)
     multRExp x y = multRExp y x
+
+substitute i r (RExp (BinOp Divide e1 e2 ty pos)) = do
+  (a, b) <- substitute i r (RExp e1)
+  (c, d) <- substitute i r (RExp e2)
+  e1Sign <- calculateRangeSign(a,b)
+  e2Sign <- calculateRangeSign(c,d)
+  if canBeZero e1Sign || canBeZero e2Sign
+  then return (Ninf, Pinf)
+  else case (Just Zero < e1Sign, Just Zero < e2Sign) of
+          -- [2:5] / [3:6] ~> [2/6 : 5/3]
+          (True,True)   -> do ad <- divRExp a d
+                              bc <- divRExp b c
+                              return (ad,bc)
+          -- [-5:-2] / [-6:-3] ~> [-2/-6 : -5/-3]
+          (False,False) -> do ad <- divRExp a d
+                              bc <- divRExp b c
+                              return (bc,ad)
+          -- [2:5] / [-6:-3] ~> [5/-3 : 2/-6]
+          (True,False)  -> do ac <- divRExp a c
+                              bd <- divRExp b d
+                              return (ac,bd)
+          -- [-5:-2] / [3:6] ~> [-5/3 : -2/6]
+          (False,True)  -> do ac <- divRExp a c
+                              bd <- divRExp b d
+                              return (bd,ac)
+
+    where
+      canBeZero :: RangeSign -> Bool
+      canBeZero (Just Neg) = False
+      canBeZero (Just Pos) = False
+      canBeZero _ = True
+
+      divRExp :: RExp -> RExp -> RangeM RExp
+      divRExp (RExp x) (RExp y) = liftM RExp $ simplExp (BinOp Divide x y ty pos)
+      divRExp Pinf x = do
+        xSign <- determineRExpSign x
+        case xSign of
+          (Just Pos) -> return Pinf
+          (Just Neg) -> return Ninf
+          _     -> badRangeM $ RangePropError pos "divRExp: Dividing with something that could be 0"
+      divRExp Ninf x = do
+        xSign <- determineRExpSign x
+        case xSign of
+          (Just Pos) -> return Ninf
+          (Just Neg) -> return Pinf
+          _     -> badRangeM $ RangePropError pos "divRExp: Dividing with something that could be 0"
+      divRExp x y = divRExp y x
 
 substitute i r (RExp (Min e1 e2 ty pos)) = do
   (a, b) <- substitute i r (RExp e1)
