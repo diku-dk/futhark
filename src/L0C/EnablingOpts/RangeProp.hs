@@ -299,36 +299,16 @@ substitute i r (RExp (BinOp Times e1 e2 ty pos)) = do
 substitute i r (RExp (Min e1 e2 ty pos)) = do
   (a, b) <- substitute i r (RExp e1)
   (c, d) <- substitute i r (RExp e2)
-  ac <- minRExp a c
-  bd <- minRExp b d
+  ac <- minRExp a c pos
+  bd <- minRExp b d pos
   return (ac, bd)
-
-  where
-    minRExp :: RExp -> RExp -> RangeM RExp
-    minRExp Pinf Ninf = badRangeM $ RangePropError pos "minRExp: Taking min of Pinf Ninf"
-    minRExp Ninf Pinf = badRangeM $ RangePropError pos "minRExp: Taking min of Ninf Pinf"
-    minRExp Pinf x = return x
-    minRExp x Pinf = return x
-    minRExp Ninf _ = return Ninf
-    minRExp _ Ninf = return Ninf
-    minRExp (RExp x) (RExp y) = liftM RExp $ simplExp (Min x y ty pos)
 
 substitute i r (RExp (Max e1 e2 ty pos)) = do
   (a, b) <- substitute i r (RExp e1)
   (c, d) <- substitute i r (RExp e2)
-  ac <- maxRExp a c
-  bd <- maxRExp b d
+  ac <- maxRExp a c pos
+  bd <- maxRExp b d pos
   return (ac, bd)
-
-  where
-    maxRExp :: RExp -> RExp -> RangeM RExp
-    maxRExp Pinf Ninf = badRangeM $ RangePropError pos "maxRExp: Taking Max of Pinf Ninf"
-    maxRExp Ninf Pinf = badRangeM $ RangePropError pos "maxRExp: Taking Max of Ninf Pinf"
-    maxRExp Ninf x = return x
-    maxRExp x Ninf = return x
-    maxRExp Pinf _ = return Pinf
-    maxRExp _ Pinf = return Pinf
-    maxRExp (RExp x) (RExp y) = liftM RExp $ simplExp (Max x y ty pos)
 
 -- Resolve nested let, example:
 -- let x = (let y = 5 in y+3) in x+2
@@ -339,6 +319,63 @@ substitute i r (RExp (Max e1 e2 ty pos)) = do
 substitute i r (RExp (LetPat _ _ inExp _)) = substitute i r (RExp inExp)
 
 substitute _ _ _ = return (Ninf, Pinf)
+
+----------------------------------------
+-- Union + Intersection
+----------------------------------------
+
+rangeUnion :: Range -> Range ->  L.SrcLoc -> RangeM Range
+rangeUnion (a,b) (c,d) pos = do
+  ac <- minRExp a c pos
+  bd <- maxRExp b d pos
+  return (ac, bd)
+
+rangeIntersect :: Range -> Range ->  L.SrcLoc -> RangeM Range
+rangeIntersect (a,b) (c,d) pos = do
+  ac <- maxRExp a c pos
+  bd <- minRExp b d pos
+  return (ac, bd)
+
+----------------------------------------
+-- Helper functions
+----------------------------------------
+
+minRExp :: RExp -> RExp -> L.SrcLoc -> RangeM RExp
+minRExp Pinf Ninf pos = badRangeM $ RangePropError pos "minRExp: Taking min of Pinf Ninf"
+minRExp Ninf Pinf pos = badRangeM $ RangePropError pos "minRExp: Taking min of Ninf Pinf"
+minRExp Pinf x _ = return x
+minRExp x Pinf _ = return x
+minRExp Ninf _ _ = return Ninf
+minRExp _ Ninf _ = return Ninf
+minRExp (RExp x) (RExp y) pos = liftM RExp $ simplExp (Min x y (Elem Int) pos)
+
+maxRExp :: RExp -> RExp -> L.SrcLoc -> RangeM RExp
+maxRExp Pinf Ninf pos = badRangeM $ RangePropError pos "maxRExp: Taking Max of Pinf Ninf"
+maxRExp Ninf Pinf pos = badRangeM $ RangePropError pos "maxRExp: Taking Max of Ninf Pinf"
+maxRExp Ninf x _ = return x
+maxRExp x Ninf _ = return x
+maxRExp Pinf _ _ = return Pinf
+maxRExp _ Pinf _ = return Pinf
+maxRExp (RExp x) (RExp y) pos = liftM RExp $ simplExp (Max x y (Elem Int) pos)
+
+----------------------------------------
+-- Constants
+----------------------------------------
+
+createIntLit :: Int -> L.SrcLoc -> Exp
+createIntLit n = Literal (IntVal n)
+
+createRExpIntLit :: Int -> L.SrcLoc -> RExp
+createRExpIntLit n pos = RExp $ createIntLit n pos
+
+-- as the substitute function needs an identifier and range to work,
+-- we have to supply a dummy value for it to work on the first variable passed to it.
+
+dummyVName :: VName
+dummyVName = ID (nameFromString "dummy",-1)
+
+emptyRangeDict :: RangeDict
+emptyRangeDict = M.singleton dummyVName ((Ninf,Pinf), Nothing)
 
 ----------------------------------------
 -- Pretty printing
@@ -364,25 +401,6 @@ ppDict dict = foldr ((++) . (++ "\n") . ppDictElem) "" (M.toList $ M.delete dumm
                   escapeColorize Green (textual vname) ++ " " ++
                   escapeColorize Blue (ppRange range) ++ " " ++
                   escapeColorize Yellow (ppSign sign)
-
-----------------------------------------
--- Helpers / Constants
-----------------------------------------
-
-createIntLit :: Int -> L.SrcLoc -> Exp
-createIntLit n = Literal (IntVal n)
-
-createRExpIntLit :: Int -> L.SrcLoc -> RExp
-createRExpIntLit n pos = RExp $ createIntLit n pos
-
--- as the substitute function needs an identifier and range to work,
--- we have to supply a dummy value for it to work on the first variable passed to it.
-
-dummyVName :: VName
-dummyVName = ID (nameFromString "dummy",-1)
-
-emptyRangeDict :: RangeDict
-emptyRangeDict = M.singleton dummyVName ((Ninf,Pinf), Nothing)
 
 ----------------------------------------
 -- TESTING
