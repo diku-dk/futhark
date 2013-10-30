@@ -5,6 +5,7 @@ module Language.L0.Parser
   , parsePattern
   , parseType
   , parseLambda
+  , parseTupleLambda
 
   , parseInt
   , parseReal
@@ -68,6 +69,12 @@ parseType = parse l0type
 -- 'FilePath' as the source name for error messages.
 parseLambda :: FilePath -> String -> Either ParseError UncheckedLambda
 parseLambda = parse lambda
+
+-- | Parse an L0 anonymous function from the given 'String', using the
+-- 'FilePath' as the source name for error messages.  This anonymous
+-- function must not be a curry, and must return a tuple.
+parseTupleLambda :: FilePath -> String -> Either ParseError UncheckedTupleLambda
+parseTupleLambda = parse tupleLambda
 
 -- | Parse an integer in L0 syntax from the given 'String', using the
 -- 'FilePath' as the source name for error messages.

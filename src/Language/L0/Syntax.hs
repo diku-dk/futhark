@@ -29,6 +29,7 @@ module Language.L0.Syntax
   , BinOp(..)
   , opStr
   , LambdaBase(..)
+  , TupleLambdaBase(..)
   , TupIdentBase(..)
 
   -- * Definitions
@@ -287,16 +288,16 @@ data ExpBase ty vn =
             -- accept curried and anonymous
             -- functions as (first) params
             -----------------------------------------------------
-            | Map2 (LambdaBase ty vn) [ExpBase ty vn] [ty vn] SrcLoc
+            | Map2 (TupleLambdaBase ty vn) [ExpBase ty vn] [ty vn] SrcLoc
              -- @map(op +(1), {1,2,..,n}) = {2,3,..,n+1}@
              -- 2nd arg is either a tuple of multi-dim arrays 
              --   of basic type, or a multi-dim array of basic type.
              -- 3rd arg is the input-array row types
 
-            | Reduce2 (LambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] [ty vn] SrcLoc
-            | Scan2   (LambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] [ty vn] SrcLoc
-            | Filter2 (LambdaBase ty vn) [ExpBase ty vn]          SrcLoc
-            | Redomap2(LambdaBase ty vn) (LambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] [ty vn] SrcLoc
+            | Reduce2  (TupleLambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] [ty vn] SrcLoc
+            | Scan2    (TupleLambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] [ty vn] SrcLoc
+            | Filter2  (TupleLambdaBase ty vn) [ExpBase ty vn]          SrcLoc
+            | Redomap2 (TupleLambdaBase ty vn) (TupleLambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] [ty vn] SrcLoc
 
               deriving (Eq, Ord, Show)
 
@@ -389,6 +390,18 @@ data LambdaBase ty vn = AnonymFun [ParamBase vn] (ExpBase ty vn) (DeclTypeBase v
 instance Located (LambdaBase ty vn) where
   locOf (AnonymFun _ _ _ loc) = locOf loc
   locOf (CurryFun  _ _ _ loc) = locOf loc
+
+-- | Anonymous function for use in a tuple-SOAC.
+data TupleLambdaBase ty vn =
+  TupleLambda { tupleLambdaParams :: [ParamBase vn]
+              , tupleLambdaBody :: ExpBase ty vn
+              , tupleLambdaReturnType :: [DeclTypeBase vn]
+              , tupleLambdaSrcLo :: SrcLoc
+              }
+  deriving (Eq, Ord, Show)
+
+instance Located (TupleLambdaBase ty vn) where
+  locOf (TupleLambda _ _ _ loc) = locOf loc
 
 -- | Tuple IdentBaseifier, i.e., pattern matching
 data TupIdentBase ty vn = TupId [TupIdentBase ty vn] SrcLoc

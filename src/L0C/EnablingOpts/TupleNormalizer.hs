@@ -200,6 +200,7 @@ tupleNormExp e = mapExpM tupleNorm e
   where tupleNorm = identityMapper {
                       mapOnExp = tupleNormExp
                     , mapOnLambda = tupleNormLambda
+                    , mapOnTupleLambda = tupleNormTupleLambda
                     }
 
 tupleNormLambda :: Lambda -> TupNormM Lambda
@@ -211,6 +212,10 @@ tupleNormLambda (CurryFun fname exps rettype pos) = do
     exps'  <- mapM tupleNormExp exps
     return $ CurryFun fname exps' rettype pos 
 
+tupleNormTupleLambda :: TupleLambda -> TupNormM TupleLambda
+tupleNormTupleLambda (TupleLambda params body ret loc) = do
+    body' <- tupleNormAbstrFun params body loc
+    return $ TupleLambda params body' ret loc
 
 --tupleNormExp e = do
 --    return e

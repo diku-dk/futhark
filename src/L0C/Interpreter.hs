@@ -486,13 +486,14 @@ evalExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody pos) = do
 
 evalExp (Map2 fun arrexps _ loc) = do
   vss <- mapM (arrToList loc <=< evalExp) arrexps
-  vs' <- mapM (applyLambda fun) $ transpose vss
-  return $ arrays (fromDecl $ lambdaReturnType fun) vs'
+  vs' <- mapM (applyTupleLambda fun) $ transpose vss
+  return $ arrays (fromDecl $ Elem $ Tuple ret) vs'
+  where TupleLambda _ _ ret _ = fun
 
 evalExp (Reduce2 fun accexps arrexps _ loc) = do
   startaccs <- mapM evalExp accexps
   vss <- mapM (arrToList loc <=< evalExp) arrexps
-  let foldfun acc x = applyLambda fun $ untuple acc ++ x
+  let foldfun acc x = applyTupleLambda fun $ untuple acc ++ x
   foldM foldfun (tuple startaccs) (transpose vss)
 
 evalExp (Scan2 fun startexps arrexps _ loc) = do
@@ -501,22 +502,22 @@ evalExp (Scan2 fun startexps arrexps _ loc) = do
   (acc, vals') <- foldM scanfun (tuple startvals, []) $ transpose vss
   return $ arrays (fromDecl $ valueType acc) $ reverse vals'
     where scanfun (acc, l) x = do
-            acc' <- applyLambda fun $ untuple acc ++ x
+            acc' <- applyTupleLambda fun $ untuple acc ++ x
             return (acc', acc' : l)
 
 evalExp e@(Filter2 fun arrexp loc) = do
   vss <- mapM (arrToList loc <=< evalExp) arrexp
   vss' <- filterM filt $ transpose vss
   return $ arrays (typeOf e) $ map tuple vss'
-  where filt x = do res <- applyLambda fun x
-                    case res of (LogVal True) -> return True
-                                _             -> return False
+  where filt x = do res <- applyTupleLambda fun x
+                    case res of (TupVal [LogVal True]) -> return True
+                                _                      -> return False
 
 evalExp (Redomap2 redfun mapfun accexp arrexps _ loc) = do
   startaccs <- mapM evalExp accexp
   vss <- mapM (arrToList loc <=< evalExp) arrexps
-  vs' <- mapM (applyLambda mapfun) $ transpose vss
-  let foldfun acc x = applyLambda redfun $ untuple acc ++ untuple x
+  vs' <- mapM (applyTupleLambda mapfun) $ transpose vss
+  let foldfun acc x = applyTupleLambda redfun $ untuple acc ++ untuple x
   foldM foldfun (tuple startaccs) vs'
 
 evalIntBinOp :: (Int -> Int -> Int) -> Exp -> Exp -> SrcLoc -> L0M Value
@@ -558,3 +559,6 @@ applyLambda (CurryFun name curryargs _ _) args = do
   curryargs' <- mapM evalExp curryargs
   fun <- lookupFun name
   fun $ curryargs' ++ args
+
+applyTupleLambda :: TupleLambda -> [Value] -> L0M Value
+applyTupleLambda = applyLambda . tupleLambdaToLambda

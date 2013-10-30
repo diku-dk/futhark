@@ -16,6 +16,7 @@ module Language.L0.Attributes
   , expToValue
   , mapTails
   , typeOf
+  , tupleLambdaToLambda
 
   -- * Queries on types
   , basicType
@@ -28,6 +29,7 @@ module Language.L0.Attributes
   , similarTo
   , returnType
   , lambdaType
+  , tupleLambdaType
   , lambdaReturnType
 
   -- * Operations on types
@@ -81,6 +83,7 @@ module Language.L0.Attributes
   , UncheckedIdent
   , UncheckedExp
   , UncheckedLambda
+  , UncheckedTupleLambda
   , UncheckedTupIdent
   , UncheckedFunDec
   , UncheckedProg
@@ -544,19 +547,18 @@ typeOf (Concat x y _) = typeOf x `setUniqueness` u
 typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` S.empty
 typeOf (DoLoop _ _ _ _ _ body _) = typeOf body
 typeOf (Map2 f arrs _ _) =
-  Elem $ Tuple $ case lambdaType f $ map typeOf arrs of
-                   Elem (Tuple tps) ->
-                     map (\x -> arrayType 1 x (uniqueProp x)) tps
-                   ftp -> [arrayType 1 ftp (uniqueProp ftp)]
+  Elem $ Tuple $ map (\x -> arrayType 1 x (uniqueProp x)) $
+       tupleLambdaType f $ map typeOf arrs
 typeOf (Reduce2 fun acc arrs _ _) =
-  lambdaType fun $ map typeOf acc ++ map typeOf arrs
+  Elem $ Tuple $ tupleLambdaType fun $ map typeOf acc ++ map typeOf arrs
 typeOf (Scan2 _ _ _ ets _) =
   Elem $ Tuple $ map (\x -> arrayType 1 x Unique) ets
 typeOf (Filter2 _ arrs _) = Elem $ Tuple $ map typeOf arrs
 typeOf (Redomap2 redfun mapfun start arrs rt loc) =
-  lambdaType redfun $ map typeOf start ++ case typeOf (Map2 mapfun arrs rt loc) of
-                                            Elem (Tuple ts) -> ts
-                                            t               -> [t]
+  Elem $ Tuple $ tupleLambdaType redfun $
+       map typeOf start ++ case typeOf (Map2 mapfun arrs rt loc) of
+                             Elem (Tuple ts) -> ts
+                             t               -> [t]
 
 uniqueProp :: TypeBase vn as -> Uniqueness
 uniqueProp tp = if uniqueOrBasic tp then Unique else Nonunique
@@ -578,6 +580,15 @@ lambdaType :: Ord vn =>
               LambdaBase CompTypeBase vn -> [CompTypeBase vn] -> CompTypeBase vn
 lambdaType lam = returnType (lambdaReturnType lam) (lambdaParamDiets lam)
 
+-- | The result of applying the arguments of the given types to the
+-- given tuple lambda function.
+tupleLambdaType :: Ord vn =>
+                   TupleLambdaBase CompTypeBase vn
+                -> [CompTypeBase vn]
+                -> [CompTypeBase vn]
+tupleLambdaType (TupleLambda params _ ets _) args =
+  map (\et -> returnType et ds args) ets
+  where ds = map (diet . identType) params
 
 -- | The result of applying the arguments of the given types to a
 -- function with the given return type, consuming its parameters with
@@ -618,6 +629,10 @@ mapTails f g (If c te fe t loc) =
   If c (mapTails f g te) (mapTails f g fe) (g t) loc
 mapTails f _ e = f e
 
+tupleLambdaToLambda :: TupleLambdaBase ty vn -> LambdaBase ty vn
+tupleLambdaToLambda (TupleLambda params body rettype loc) =
+  AnonymFun params body (Elem $ Tuple rettype) loc
+
 -- | Convert an identifier to a 'ParamBase'.
 toParam :: IdentBase (TypeBase as) vn -> ParamBase vn
 toParam (Ident name t loc) = Ident name (toDecl t) loc
@@ -637,6 +652,9 @@ type UncheckedExp = ExpBase NoInfo Name
 
 -- | A lambda with no type annotations.
 type UncheckedLambda = LambdaBase NoInfo Name
+
+-- | A tuple lambda with no type annotations.
+type UncheckedTupleLambda = TupleLambdaBase NoInfo Name
 
 -- | A pattern with no type annotations.
 type UncheckedTupIdent = TupIdentBase NoInfo Name

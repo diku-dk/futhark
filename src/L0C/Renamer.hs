@@ -242,6 +242,7 @@ rename = Mapper {
          , mapOnPattern = renamePattern
          , mapOnIdent = repl
          , mapOnLambda = renameLambda
+         , mapOnTupleLambda = renameTupleLambda
          , mapOnType = renameType
          , mapOnValue = return
          }
@@ -258,6 +259,15 @@ renameLambda (CurryFun fname curryargexps rettype pos) = do
   curryargexps' <- mapM renameExp curryargexps
   rettype' <- renameType rettype
   return (CurryFun fname curryargexps' rettype' pos)
+
+renameTupleLambda :: (TypeBox ty, VarName f, VarName t) =>
+                     TupleLambdaBase ty f -> RenameM f t (TupleLambdaBase ty t)
+renameTupleLambda (TupleLambda params body rets pos) =
+  bind params $ do
+    params' <- mapM repl params
+    body' <- renameExp body
+    rets' <- mapM renameType rets
+    return (TupleLambda params' body' rets' pos)
 
 renamePattern :: (TypeBox ty, VarName f, VarName t) =>
                  TupIdentBase ty f -> RenameM f t (TupIdentBase ty t)

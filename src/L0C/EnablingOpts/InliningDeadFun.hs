@@ -56,17 +56,17 @@ mkUnnamedLamExp ftab (Redomap lam1 lam2 ne arrr eltp pos) =
     Redomap (mkUnnamedLamLam ftab lam1) (mkUnnamedLamLam ftab lam2) 
             (mkUnnamedLamExp ftab ne  ) (mkUnnamedLamExp ftab arrr) eltp pos
 mkUnnamedLamExp ftab (Map2 lam arrs eltp pos) =
-    Map2    (mkUnnamedLamLam ftab lam) (map (mkUnnamedLamExp ftab) arrs) eltp pos
+    Map2    (mkUnnamedTupleLamLam ftab lam) (map (mkUnnamedLamExp ftab) arrs) eltp pos
 mkUnnamedLamExp ftab (Filter2 lam arrs pos) =
-    Filter2 (mkUnnamedLamLam ftab lam) (map (mkUnnamedLamExp ftab) arrs) pos
+    Filter2 (mkUnnamedTupleLamLam ftab lam) (map (mkUnnamedLamExp ftab) arrs) pos
 mkUnnamedLamExp ftab (Reduce2 lam nes arrs eltp pos) =
-    Reduce2 (mkUnnamedLamLam ftab lam) (map (mkUnnamedLamExp ftab) nes)
+    Reduce2 (mkUnnamedTupleLamLam ftab lam) (map (mkUnnamedLamExp ftab) nes)
             (map (mkUnnamedLamExp ftab) arrs) eltp pos
 mkUnnamedLamExp ftab (Scan2 lam nes arrs eltp pos) =
-    Scan2   (mkUnnamedLamLam ftab lam) (map (mkUnnamedLamExp ftab) nes)
+    Scan2   (mkUnnamedTupleLamLam ftab lam) (map (mkUnnamedLamExp ftab) nes)
             (map (mkUnnamedLamExp ftab) arrs) eltp pos
 mkUnnamedLamExp ftab (Redomap2 lam1 lam2 nes arrs eltp pos) =
-    Redomap2 (mkUnnamedLamLam ftab lam1) (mkUnnamedLamLam ftab lam2)
+    Redomap2 (mkUnnamedTupleLamLam ftab lam1) (mkUnnamedTupleLamLam ftab lam2)
              (map (mkUnnamedLamExp ftab) nes) (map (mkUnnamedLamExp ftab) arrs) eltp pos
 
 mkUnnamedLamExp ftab e = buildExpPattern (mkUnnamedLamExp ftab) e
@@ -82,6 +82,10 @@ mkUnnamedLamLam ftab (CurryFun  nm params tp pos) =
             let idds' = drop (length params) idds  
                 args  = params ++ map (Var . fromParam) idds'
             in  AnonymFun idds' (Apply fnm (zip args $ repeat Observe) tp pos) (toDecl tp) pos
+
+mkUnnamedTupleLamLam :: M.Map Name FunDec -> TupleLambda -> TupleLambda
+mkUnnamedTupleLamLam ftab (TupleLambda ids body tp loc) =
+  TupleLambda ids (mkUnnamedLamExp ftab body) tp loc
 
 ------------------------------------------------------------------------------
 ------------------------------------------------------------------------------
@@ -168,7 +172,7 @@ buildCGexp callees@(fs, soacfs) (Apply fname args _ _)  =
 
 
 buildCGexp callees e = 
-    foldlPattern buildCGexp addLamFun callees e
+    foldlPattern buildCGexp addLamFun addTupleLamFun callees e
 
 -- Promoted to AbSyn
 --isBuiltInFun :: String -> Bool
@@ -179,6 +183,9 @@ addLamFun callees (AnonymFun {}) = callees
 addLamFun (fs,soacs) (CurryFun nm _ _ _) =
     if isBuiltInFun nm || elem nm fs
     then (fs,soacs) else (fs,nm:soacs)
+
+addTupleLamFun :: ([Name],[Name]) -> TupleLambda -> ([Name],[Name])
+addTupleLamFun callees _ = callees
 
 ------------------------------------------------------------------
 ------------------------------------------------------------------
