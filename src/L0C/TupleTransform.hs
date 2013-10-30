@@ -396,7 +396,7 @@ transformExp e@(Scan lam ne arr tp pscan) =
 transformExp e@(Filter lam arr _ loc) =
   transformLambda lam $ \lam' ->
   tupToExpList arr $ \arrs ->
-    untupleExp (typeOf e) $ Filter2 lam' arrs loc
+    untupleExp (typeOf e) $ Filter2 (tuplifyLam lam') arrs loc
 
 transformExp (Redomap lam1 lam2 ne arr tp1 pos) =
   transformLambda lam1 $ \lam1' ->
@@ -408,32 +408,32 @@ transformExp (Redomap lam1 lam2 ne arr tp1 pos) =
                nes arrs (untupleType $ transformType tp1) pos
 
 transformExp (Map2 lam arrs tps pmap) =
-  transformLambda lam $ \lam' ->
+  transformTupleLambda lam $ \lam' ->
   tupsToExpList arrs $ \arrs' ->
     return $ Map2 lam' arrs' (flattenTypes $ map transformType tps) pmap
 
 transformExp (Reduce2 lam nes arrs tps pos) =
-  transformLambda lam $ \lam' ->
+  transformTupleLambda lam $ \lam' ->
   tupsToExpList arrs $ \arrs' ->
   tupsToExpList nes $ \nes' ->
     return $ Reduce2 lam' nes' arrs'
              (flattenTypes $ map transformType tps) pos
 
 transformExp (Scan2 lam nes arrs tps loc) =
-  transformLambda lam $ \lam' ->
+  transformTupleLambda lam $ \lam' ->
   tupsToExpList arrs $ \arrs' ->
   tupsToExpList nes $ \nes' ->
     return $ Scan2 lam' nes' arrs'
              (flattenTypes $ map transformType tps) loc
 
 transformExp (Filter2 lam arrs loc) =
-  transformLambda lam $ \lam' ->
+  transformTupleLambda lam $ \lam' ->
   tupsToExpList arrs $ \arrs' ->
     return $ Filter2 lam' arrs' loc
 
 transformExp (Redomap2 lam1 lam2 nes arrs tps pos) =
-  transformLambda lam1 $ \lam1' ->
-  transformLambda lam2 $ \lam2' ->
+  transformTupleLambda lam1 $ \lam1' ->
+  transformTupleLambda lam2 $ \lam2' ->
   tupsToExpList arrs $ \arrs' ->
   tupsToExpList nes $ \nes' ->
     return $ Redomap2 lam1' lam2' nes' arrs' (map transformType tps) pos
@@ -443,6 +443,7 @@ transformExp e = mapExpM transform e
                       mapOnExp = transformExp
                     , mapOnType = return . transformType
                     , mapOnLambda = return -- Not used.
+                    , mapOnTupleLambda = return -- Not used.
                     , mapOnPattern = return -- Not used.
                     , mapOnIdent = return -- Not used.
                     , mapOnValue = return . transformValue
@@ -496,15 +497,23 @@ transformLambda (CurryFun fname curryargs rettype loc) m =
           tupToExpList a $ \es ->
             transform as (curryargs' ++ es)
 
--- | Take a lambda returning @t@ and make it return @{t}@.  If the
--- lambda already returns a tuple, return it unchanged.
-tuplifyLam :: Lambda -> Lambda
+transformTupleLambda :: TupleLambda -> (TupleLambda -> TransformM Exp) -> TransformM Exp
+transformTupleLambda (TupleLambda params body rettype loc) m = do
+  lam <- binding (map fromParam params) $ \params' -> do
+           body' <- transformExp body
+           return $ TupleLambda (map toParam params') body' rettype' loc
+  m lam
+  where rettype' = map (toDecl . transformType) rettype
+
+tuplifyLam :: Lambda -> TupleLambda
 tuplifyLam (CurryFun {}) = error "no curries yet"
 tuplifyLam (AnonymFun params body rettype loc) =
-  AnonymFun params body' (tuplifyType rettype) loc
-  where body' = case rettype of
-                  Elem (Tuple _) -> body
-                  _              -> mapTails tuplifyLam' tuplifyType body
+  TupleLambda params body' rettypes loc
+  where (rettypes, body') =
+          case rettype of
+            Elem (Tuple ets) -> (ets, body)
+            _                -> ([rettype],
+                                 mapTails tuplifyLam' tuplifyType body)
         tuplifyLam' e = TupLit [e] loc
 
 tuplifyType :: TypeBase als vn -> TypeBase als vn

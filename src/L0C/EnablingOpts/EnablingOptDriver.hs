@@ -8,7 +8,7 @@ module L0C.EnablingOpts.EnablingOptDriver (
                                   , aggInlineDriver
                                   , deadFunElim
                                   , normCopyDeadOpts
-                                  , normCopyOneLambda
+                                  , normCopyOneTupleLambda
                                   , EnablingOptError(..)
                             )
   where
@@ -62,9 +62,9 @@ normCopyDeadOpts prog = do
     (_, prog_dce)  <- deadCodeElim    prog_cp
     return prog_dce
 
-normCopyOneLambda :: Prog -> VNameSource -> Lambda -> 
-                     Either EnablingOptError (VNameSource, Lambda)
-normCopyOneLambda prog nmsrc lam = do
-    (nmsrc', lam') <- letNormOneLambda    nmsrc lam
-    lam''          <- copyCtPropOneLambda prog  lam'
+normCopyOneTupleLambda :: Prog -> VNameSource -> TupleLambda ->
+                          Either EnablingOptError (VNameSource, TupleLambda)
+normCopyOneTupleLambda prog nmsrc lam = do
+    (nmsrc', lam') <- letNormOneTupleLambda    nmsrc lam
+    lam''          <- copyCtPropOneTupleLambda prog  lam'
     return (nmsrc', lam'')

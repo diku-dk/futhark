@@ -92,3 +92,11 @@ lambda = uniqueTagLambda . rightResult . checkClosedLambda . rightResult . parse
             where env = M.fromList [ (identName param, fromDecl $ identType param)
                                      | param <- params ]
         checkClosedLambda (CurryFun {}) = error "Curries not handled"
+
+tupleLambda :: String -> TupleLambda
+tupleLambda = uniqueTagLambda . rightResult . checkClosedTupleLambda . rightResult . parseTupleLambda "input"
+  where checkClosedTupleLambda (TupleLambda params body rettype loc) = do
+          body' <- checkOpenExp env body
+          return $ TupleLambda params body' rettype loc
+            where env = M.fromList [ (identName param, fromDecl $ identType param)
+                                     | param <- params ]

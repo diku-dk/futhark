@@ -113,6 +113,7 @@ normalizeSubExps e = mapExpM normalize e
   where normalize = identityMapper {
                       mapOnExp = normalizeExp
                     , mapOnLambda = normalizeLambda
+                    , mapOnTupleLambda = normalizeTupleLambda
                     }
 
 normalizeLambda :: Lambda -> NormalizeM Lambda
@@ -122,6 +123,11 @@ normalizeLambda (CurryFun fname args rettype loc) = do
 normalizeLambda (AnonymFun params body rettype loc) = do
   body' <- insertBindings $ normalizeExp body
   return $ AnonymFun params body' rettype loc
+
+normalizeTupleLambda :: TupleLambda -> NormalizeM TupleLambda
+normalizeTupleLambda (TupleLambda params body rettype loc) = do
+  body' <- insertBindings $ normalizeExp body
+  return $ TupleLambda params body' rettype loc
 
 -- | Generate a name appropriate for the variable used to replace the
 -- given expression.  Only for readability purposes, so remove, modify

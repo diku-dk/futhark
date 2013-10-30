@@ -4,6 +4,7 @@ module Language.L0.Parser.Parser
   , expression
   , pattern
   , lambda
+  , tupleLambda
   , l0type
   , intValue
   , realValue
@@ -28,6 +29,7 @@ import Language.L0.Parser.Lexer
 %name expression Exp
 %name pattern TupId
 %name lambda FunAbstr
+%name tupleLambda TupleFunAbstr
 %name l0type Type
 %name intValue IntValue
 %name realValue RealValue
@@ -189,7 +191,9 @@ ElemType : int           { Int }
          | real          { Real }
          | bool          { Bool }
          | char          { Char }
-         | '{' Types '}' { Tuple $2 }
+         | TupleType     { Tuple $1 }
+
+TupleType : '{' Types '}' { $2 }
 
 Types : Type ',' Types { $1 : $3 }
       | Type           { [$1] }
@@ -269,20 +273,20 @@ Exp  :: { UncheckedExp }
      | reduce '(' FunAbstr ',' Exp ',' Exp ')'
                       { Reduce $3 $5 $7 NoInfo $1 }
 
-     | reduce2 '(' FunAbstr ',' DExps ')'
+     | reduce2 '(' TupleFunAbstr ',' DExps ')'
                       { let (accexps, arrexps) = $5 in
                         Reduce2 $3 accexps arrexps (replicate (length arrexps) NoInfo) $1 }
 
      | map '(' FunAbstr ',' Exp ')'
                       { Map $3 $5 NoInfo $1 }
 
-     | map2 '(' FunAbstr ',' Exps ')'
+     | map2 '(' TupleFunAbstr ',' Exps ')'
                       { Map2 $3 $5 (replicate (length $5) NoInfo) $1 }
 
      | scan '(' FunAbstr ',' Exp ',' Exp ')'
                       { Scan $3 $5 $7 NoInfo $1 }
 
-     | scan2 '(' FunAbstr ',' DExps ')'
+     | scan2 '(' TupleFunAbstr ',' DExps ')'
                       { let (accexps, arrexps) = $5 in
                         Scan2 $3 accexps arrexps (replicate (length arrexps) NoInfo) $1 }
 
@@ -295,13 +299,13 @@ Exp  :: { UncheckedExp }
      | filter '(' FunAbstr ',' Exp ')'
                       { Filter $3 $5 NoInfo $1 }
 
-     | filter2 '(' FunAbstr ',' Exps ')'
+     | filter2 '(' TupleFunAbstr ',' Exps ')'
                       { Filter2 $3 $5 $1 }
 
      | redomap '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
                       { Redomap $3 $5 $7 $9 NoInfo $1 }
 
-     | redomap2 '(' FunAbstr ',' FunAbstr ',' DExps ')'
+     | redomap2 '(' TupleFunAbstr ',' TupleFunAbstr ',' DExps ')'
                       { let (accexps, arrexps) = $7 in
                         Redomap2 $3 $5 accexps arrexps (replicate (length arrexps) NoInfo) $1 }
 
@@ -368,6 +372,8 @@ FunAbstr : id { let L pos (ID name) = $1 in CurryFun name [] NoInfo pos }
          | Ops '(' Exps ')'
                { let (name,pos) = $1 in CurryFun name $3 NoInfo pos }
          | fn Type '(' TypeIds ')' '=>' Exp { AnonymFun $4 $7 $2 $1 }
+
+TupleFunAbstr : fn TupleType '(' TypeIds ')' '=>' Exp { TupleLambda $4 $7 $2 $1 }
 
 Value : IntValue { $1 }
       | RealValue { $1 }

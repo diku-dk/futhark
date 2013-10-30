@@ -188,6 +188,7 @@ deadCodeElimExp e = mapExpM mapper e
   where mapper = identityMapper {
                    mapOnExp = deadCodeElimExp
                  , mapOnLambda = deadCodeElimLambda
+                 , mapOnTupleLambda = deadCodeElimTupleLambda
                  }
 
 deadCodeElimLambda :: Lambda -> DCElimM Lambda
@@ -199,6 +200,12 @@ deadCodeElimLambda (AnonymFun params body ret pos) = do
 deadCodeElimLambda (CurryFun fname curryargexps rettype pos) = do
     curryargexps' <- mapM deadCodeElimExp curryargexps
     return (CurryFun fname curryargexps' rettype pos)
+
+deadCodeElimTupleLambda :: TupleLambda -> DCElimM TupleLambda
+deadCodeElimTupleLambda (TupleLambda params body ret pos) = do
+  let ids  = map identName params
+  body' <- binding ids $ deadCodeElimExp body
+  return $ TupleLambda params body' ret pos
 
 --deadCodeElimExp e = do
 --    return e

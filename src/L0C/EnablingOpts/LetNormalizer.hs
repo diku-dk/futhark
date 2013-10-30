@@ -1,6 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
-module L0C.EnablingOpts.LetNormalizer ( letNormProg, letNormOneLambda )
+module L0C.EnablingOpts.LetNormalizer ( letNormProg, letNormOneTupleLambda )
   where
  
 import Control.Monad.State
@@ -113,18 +113,18 @@ letNormProg prog = do
 -----------------------------------------------------------------
 
 runLamLetNormM :: VNameSource -> LetNormM a -> Either EnablingOptError (a, LetNormRes)
-runLamLetNormM nmsrc (LetNormM a) = 
+runLamLetNormM nmsrc (LetNormM a) =
     runWriterT (evalStateT a nmsrc)
 
-letNormOneLambda :: VNameSource -> Lambda ->
-                    Either EnablingOptError (VNameSource, Lambda)
-letNormOneLambda nmsrc lam = do
-    (res, _) <- runLamLetNormM nmsrc (letNormLambdaAlone lam)
+letNormOneTupleLambda :: VNameSource -> TupleLambda
+                      -> Either EnablingOptError (VNameSource, TupleLambda)
+letNormOneTupleLambda nmsrc lam = do
+    (res, _) <- runLamLetNormM nmsrc (letNormTupleLambdaAlone lam)
     return res
 
-letNormLambdaAlone :: Lambda -> LetNormM (VNameSource, Lambda)
-letNormLambdaAlone lam = do
-    lam'   <- letNormLambda lam
+letNormTupleLambdaAlone :: TupleLambda -> LetNormM (VNameSource, TupleLambda)
+letNormTupleLambdaAlone lam = do
+    lam'   <- letNormTupleLambda lam
     nmsrc' <- get
     return (nmsrc', lam')
 
@@ -381,30 +381,30 @@ letNormExp (Redomap lam1 lam2 ne arr tp1 pos) = do
 ------------------------
 
 letNormExp (Map2 lam arr tp1 pos) = do  -- tp2 
-    lam'  <- letNormLambda lam
+    lam'  <- letNormTupleLambda lam
     arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
     makeVarExpSubst "tmp_map2" pos (Map2 lam' arr' tp1 pos) -- tp2 
 
 letNormExp (Filter2 lam arr pos) = do
-    lam'  <- letNormLambda lam
+    lam'  <- letNormTupleLambda lam
     arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
     makeVarExpSubst "tmp_filt2" pos (Filter2 lam' arr' pos)
 
 letNormExp (Reduce2 lam nes arr tp pos) = do
-    lam'  <- letNormLambda lam
+    lam'  <- letNormTupleLambda lam
     nes'  <- mapM (subLetoNormExp "tmp_arg") nes
     arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
     makeVarExpSubst "tmp_red2" pos (Reduce2 lam' nes' arr' tp pos)
 
 letNormExp (Scan2 lam nes arr tp pos) = do
-    lam'  <- letNormLambda lam
+    lam'  <- letNormTupleLambda lam
     nes'  <- mapM (subLetoNormExp "tmp_arg") nes
     arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
     makeVarExpSubst "tmp_scan2" pos (Scan2 lam' nes' arr' tp pos)
 
 letNormExp (Redomap2 lam1 lam2 nes arr tp1 pos) = do
-    lam1' <- letNormLambda lam1
-    lam2' <- letNormLambda lam2
+    lam1' <- letNormTupleLambda lam1
+    lam2' <- letNormTupleLambda lam2
     nes'  <- mapM (subLetoNormExp "tmp_arg") nes
     arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
     makeVarExpSubst "tmp_redomap2" pos (Redomap2 lam1' lam2' nes' arr' tp1 pos)
@@ -440,8 +440,14 @@ letNormLambda (AnonymFun params body ret pos) = do
 
 letNormLambda (CurryFun fname exps rettype pos) = do
     exps'  <- mapM (subLetoNormExp "tmp_arg") exps
-    return $ CurryFun fname exps' rettype pos 
- 
+    return $ CurryFun fname exps' rettype pos
+
+letNormTupleLambda :: TupleLambda -> LetNormM TupleLambda
+letNormTupleLambda (TupleLambda params body ret loc) = do
+  (body', newbnds) <- collectRes $ letNormExp body
+  let body'' = addPatterns loc newbnds body'
+  return $ TupleLambda params body'' ret loc
+
 ---------------------------
 ---------------------------
 ---- Helper Functions -----

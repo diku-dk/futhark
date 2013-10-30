@@ -128,8 +128,8 @@ transformExp mape@(Map2 fun arrs _ loc) = do
   newLets "inarr" arrs $ \inarrs _ -> do
     (i, iv) <- newVar loc "i" (Elem Int)
     newLet "n" (size inarrs) $ \_ nv -> do
-      funcall0 <- tuple <$> transformLambda fun (index inarrs zero)
-      funcall <- tuple <$> transformLambda fun (index inarrs iv)
+      funcall0 <- tuple <$> transformTupleLambda fun (index inarrs zero)
+      funcall <- tuple <$> transformTupleLambda fun (index inarrs iv)
       newResultArray nv funcall0 $ \outarr outarrv -> do
         loopbody <- letwith outarr iv funcall outarrv
         let branch = If (BinOp Less zero nv (Elem Bool) loc)
@@ -142,13 +142,13 @@ transformExp mape@(Map2 fun arrs _ loc) = do
 
 transformExp (Reduce2 fun accexp arrexps _ loc) =
   newReduction2 loc arrexps accexp $ \(arr, _) (acc, accv) (i, iv) -> do
-    funcall <- transformLambda fun (map Var acc ++ index arr iv)
+    funcall <- transformTupleLambda fun (map Var acc ++ index arr iv)
     return $ DoLoop (TupId (map Id acc) loc) accv i (size arr)
              funcall accv loc
 
 transformExp (Scan2 fun accexp arrexps _ loc) =
   newReduction2 loc arrexps accexp $ \(arr, arrv) (acc, _) (i, iv) -> do
-    funcall <- transformLambda fun $ map Var acc ++ index arr iv
+    funcall <- transformTupleLambda fun $ map Var acc ++ index arr iv
     loopbody <- letwith arr iv funcall $
                 TupLit (index arr iv++map Var arr) loc
     let loop = DoLoop (TupId (map Id $ acc ++ arr) loc)
@@ -166,17 +166,19 @@ transformExp filtere@(Filter2 fun arrexps loc) =
           rowtypes = map (rowType . identType) arr
       (xs, _) <- unzip <$> mapM (newVar loc "x") rowtypes
       (i, iv) <- newVar loc "i" $ Elem Int
-      fun' <- transformLambda fun $ map Var xs
-      let branch = If fun' (intval 1) (intval 0) (Elem Int) loc
+      fun' <- transformTupleLambda fun $ map Var xs
+      (check, checkv) <- newVar loc "check" $ Elem Bool
+      let test = LetPat (TupId [Id check] loc) fun' branch loc
+          branch = If checkv (intval 1) (intval 0) (Elem Int) loc
           indexin0 = index arr $ intval 0
           indexin = index arr iv
       mape <- transformExp $
-              Map2 (AnonymFun (map toParam xs) branch (Elem Int) loc) (map Var arr)
+              Map2 (TupleLambda (map toParam xs) test [Elem Int] loc) (map Var arr)
               rowtypes loc
       plus <- do
         (a,av) <- newVar loc "a" (Elem Int)
         (b,bv) <- newVar loc "b" (Elem Int)
-        return $ AnonymFun [toParam a, toParam b] (BinOp Plus av bv (Elem Int) loc) (Elem Int) loc
+        return $ TupleLambda [toParam a, toParam b] (BinOp Plus av bv (Elem Int) loc) [Elem Int] loc
       scan <- newTupLet "mape" mape $ \_ mape' ->
                 transformExp $ Scan2 plus [intval 0] [mape'] [Elem Int] loc
       newTupLet "ia" scan $ \ia _ -> do
@@ -198,16 +200,16 @@ transformExp filtere@(Filter2 fun arrexps loc) =
 
 transformExp (Redomap2 redfun mapfun accexps arrexps _ loc) =
   newReduction2 loc arrexps accexps $ \(arr, _) (acc, accv) (i, iv) -> do
-    mapfuncall <- transformLambda mapfun $ index arr iv
+    mapfuncall <- transformTupleLambda mapfun $ index arr iv
     let loop loopbody = DoLoop (TupId (map Id acc) loc) accv i (size arr) loopbody accv loc
     case typeOf mapfuncall of
       Elem (Tuple ts) -> do
         names <- mapM (liftM fst . newVar loc "mapres") ts
-        redfuncall <- transformLambda redfun $ map Var $ acc ++ names
+        redfuncall <- transformTupleLambda redfun $ map Var $ acc ++ names
         return $ loop $ LetPat (TupId (map Id names) loc) mapfuncall redfuncall loc
       t -> do
         name <- fst <$> newVar loc "mapres" t
-        redfuncall <- transformLambda redfun $ map Var $ acc ++ [name]
+        redfuncall <- transformTupleLambda redfun $ map Var $ acc ++ [name]
         return $ loop $ LetPat (Id name) mapfuncall redfuncall loc
 
 transformExp e = mapExpM transform e
@@ -323,3 +325,10 @@ transformLambda (AnonymFun params body _ loc) args = do
 transformLambda (CurryFun fname curryargs rettype loc) args = do
   curryargs' <- mapM transformExp curryargs
   return $ Apply fname [(arg, Observe) | arg <- curryargs'++args] rettype loc
+
+transformTupleLambda :: TupleLambda -> [Exp] -> TransformM Exp
+transformTupleLambda (TupleLambda params body _ loc) args = do
+  body' <- transformExp body
+  return $ foldl bind body' $ zip (map fromParam params) args
+  where bind e (Ident pname ptype _, arg) =
+          LetPat (Id $ Ident pname ptype loc) arg e loc

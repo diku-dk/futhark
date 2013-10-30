@@ -159,6 +159,10 @@ instance (Ord vn, Pretty vn, TypeBox ty) => Pretty (LambdaBase ty vn) where
     apply (map ppParam params) <+>
     text "=>" <+> ppr body
 
+instance (Ord vn, Pretty vn, TypeBox ty) => Pretty (TupleLambdaBase ty vn) where
+  ppr (TupleLambda params body rets loc) =
+    ppr (AnonymFun params body (Elem $ Tuple rets) loc)
+
 instance (Ord vn, Pretty vn, TypeBox ty) => Pretty (ProgBase ty vn) where
   ppr = stack . punctuate line . map ppFun . progFunctions
     where ppFun (name, rettype, args, body, _) =
@@ -194,7 +198,8 @@ ppBinOp p bop x y = parensIf (p > precedence bop) $
         rprecedence Minus = 10
         rprecedence op = precedence op
 
-ppSOAC :: (Ord vn, Pretty vn, TypeBox ty) => String -> [LambdaBase ty vn] -> [ExpBase ty vn] -> Doc
+ppSOAC :: (Ord vn, Pretty vn, TypeBox ty, Pretty fn) =>
+          String -> [fn] -> [ExpBase ty vn] -> Doc
 ppSOAC name [] es = text name <> apply (map ppr es)
 ppSOAC name (fun:funs) es =
   text name <> parens (foldl ppfun (ppr fun) funs <> comma <//> commasep (map ppr es))

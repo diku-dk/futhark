@@ -467,24 +467,24 @@ hoistInExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody _) = do
                hoistInExp loopbody
   bindLoop mergepat mergeexp' loopvar boundexp' loopbody' $ hoistInExp letbody
   where boundnames = identName loopvar `S.insert` patNames mergepat
-hoistInExp e@(Map2 (AnonymFun params _ _ _) arrexps _ _) =
+hoistInExp e@(Map2 (TupleLambda params _ _ _) arrexps _ _) =
   hoistInSOAC e arrexps $ \ks ->
     withShapes (zip (map (Id . fromParam) params) $ map (slice 1) ks) $
     withShapes (sameOuterShapesExps arrexps) $
     hoistInExpBase e
-hoistInExp e@(Reduce2 (AnonymFun params _ _ _) accexps arrexps _ _) =
+hoistInExp e@(Reduce2 (TupleLambda params _ _ _) accexps arrexps _ _) =
   hoistInSOAC e arrexps $ \ks ->
     withShapes (zip (map (Id . fromParam) $ drop (length accexps) params)
                $ map (slice 1) ks) $
     withShapes (sameOuterShapesExps arrexps) $
     hoistInExpBase e
-hoistInExp e@(Scan2 (AnonymFun params _ _ _) accexps arrexps _ _) =
+hoistInExp e@(Scan2 (TupleLambda params _ _ _) accexps arrexps _ _) =
   hoistInSOAC e arrexps $ \ks ->
     withShapes (zip (map (Id . fromParam) $ drop (length accexps) params)
                $ map (slice 1) ks) $
     withShapes (sameOuterShapesExps arrexps) $
     hoistInExpBase e
-hoistInExp e@(Redomap2 (AnonymFun redparams _ _ _) (AnonymFun mapparams _ _ _)
+hoistInExp e@(Redomap2 (TupleLambda redparams _ _ _) (TupleLambda mapparams _ _ _)
               accexps arrexps _ _) =
   hoistInSOAC e arrexps $ \ks ->
     withShapes (zip (map (Id . fromParam) mapparams) $ map (slice 1) ks) $
@@ -498,16 +498,13 @@ hoistInExpBase :: Exp -> HoistM Exp
 hoistInExpBase = mapExpM hoist
   where hoist = identityMapper {
                   mapOnExp = hoistInExp
-                , mapOnLambda = hoistInLambda
+                , mapOnTupleLambda = hoistInTupleLambda
                 }
 
-hoistInLambda :: Lambda -> HoistM Lambda
-hoistInLambda (CurryFun fname args rettype loc) = do
-  args' <- mapM hoistInExp args
-  return $ CurryFun fname args' rettype loc
-hoistInLambda (AnonymFun params body rettype loc) = do
+hoistInTupleLambda :: TupleLambda -> HoistM TupleLambda
+hoistInTupleLambda (TupleLambda params body rettype loc) = do
   body' <- blockIf (hasFree params' `orIf` isUniqueBinding) $ hoistInExp body
-  return $ AnonymFun params body' rettype loc
+  return $ TupleLambda params body' rettype loc
   where params' = S.fromList $ map identName params
 
 arrVars :: [Exp] -> Maybe [Ident]

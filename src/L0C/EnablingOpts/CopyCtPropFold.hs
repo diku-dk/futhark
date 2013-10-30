@@ -2,7 +2,7 @@
 
 module L0C.EnablingOpts.CopyCtPropFold (
                                 copyCtProp
-                              , copyCtPropOneLambda
+                              , copyCtPropOneTupleLambda
                             )
   where
  
@@ -143,10 +143,10 @@ copyCtPropFun (fname, rettype, args, body, pos) = do
 ---- Run on Lambda Only!
 -----------------------------------------------------------------
 
-copyCtPropOneLambda :: Prog -> Lambda -> Either EnablingOptError Lambda
-copyCtPropOneLambda prog lam = do
+copyCtPropOneTupleLambda :: Prog -> TupleLambda -> Either EnablingOptError TupleLambda
+copyCtPropOneTupleLambda prog lam = do
     let env = CopyPropEnv { envVtable = M.empty, program = prog }
-    (res, _) <- runCPropM (copyCtPropLambda lam) env
+    (res, _) <- runCPropM (copyCtPropTupleLambda lam) env
     return res
 
 --------------------------------------------------------------------
@@ -393,13 +393,8 @@ copyCtPropExp e = mapExpM mapper e
   where mapper = identityMapper {
                    mapOnExp = copyCtPropExp
                  , mapOnLambda = copyCtPropLambda
+                 , mapOnTupleLambda = copyCtPropTupleLambda
                  }
-
--- data Lambda ty = AnonymFun [Ident Type] (Exp ty) Type SrcLoc
---                    -- fn int (bool x, char z) => if(x) then ord(z) else ord(z)+1 *)
---               | CurryFun String [Exp ty] ty SrcLoc
---                    -- op +(4) *)
---                 deriving (Eq, Ord, Typeable, Data, Show)
 
 copyCtPropLambda :: Lambda -> CPropM Lambda
 copyCtPropLambda (AnonymFun ids body tp pos) = do
@@ -409,7 +404,10 @@ copyCtPropLambda (CurryFun fname params tp pos) = do
     params' <- copyCtPropExpList params
     return $ CurryFun fname params' tp pos
 
-    
+copyCtPropTupleLambda :: TupleLambda -> CPropM TupleLambda
+copyCtPropTupleLambda (TupleLambda ids body tp loc) = do
+    body' <- copyCtPropExp body
+    return $ TupleLambda ids body' tp loc
 
 
 copyCtPropExpList :: [Exp] -> CPropM [Exp]
