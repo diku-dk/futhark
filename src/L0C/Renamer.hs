@@ -21,6 +21,8 @@ module L0C.Renamer
   , tagType'
   , tagLambda
   , tagLambda'
+  , tagTupleLambda
+  , tagTupleLambda'
 
   -- * Untagging
   , untagProg
@@ -107,6 +109,19 @@ tagLambda' src t = runReader (runStateT (renameLambda t) src) env
 tagLambda :: (TypeBox ty, VarName vn) =>
              LambdaBase ty vn -> LambdaBase ty (ID vn)
 tagLambda = fst . tagLambda' blankNameSource
+
+-- | As 'tagTupleLambda', but accepts an initial name source and returns
+-- the new one.
+tagTupleLambda' :: (TypeBox ty, VarName vn) =>
+                   NameSource (ID vn) -> TupleLambdaBase ty vn
+                -> (TupleLambdaBase ty (ID vn), NameSource (ID vn))
+tagTupleLambda' src t = runReader (runStateT (renameTupleLambda t) src) env
+  where env = RenameEnv M.empty newID
+
+-- | As 'tagProg', but for anonymous tuple-functions.
+tagTupleLambda :: (TypeBox ty, VarName vn) =>
+             TupleLambdaBase ty vn -> TupleLambdaBase ty (ID vn)
+tagTupleLambda = fst . tagTupleLambda' blankNameSource
 
 -- | Remove tags from a program.  Note that this is potentially
 -- semantics-changing if the underlying names are not each unique.
