@@ -513,12 +513,11 @@ evalExp e@(Filter2 fun arrexp loc) = do
                     case res of (TupVal [LogVal True]) -> return True
                                 _                      -> return False
 
-evalExp (Redomap2 redfun mapfun accexp arrexps _ loc) = do
+evalExp (Redomap2 _ innerfun accexp arrexps _ loc) = do
   startaccs <- mapM evalExp accexp
   vss <- mapM (arrToList loc <=< evalExp) arrexps
-  vs' <- mapM (applyTupleLambda mapfun) $ transpose vss
-  let foldfun acc x = applyTupleLambda redfun $ untuple acc ++ untuple x
-  foldM foldfun (tuple startaccs) vs'
+  let foldfun acc x = applyTupleLambda innerfun $ untuple acc ++ x
+  foldM foldfun (tuple startaccs) $ transpose vss
 
 evalIntBinOp :: (Int -> Int -> Int) -> Exp -> Exp -> SrcLoc -> L0M Value
 evalIntBinOp op e1 e2 loc = do

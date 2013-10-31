@@ -17,6 +17,7 @@ import qualified Data.Set  as S
 import L0C.L0
 import L0C.FreshNames
 import L0C.EnablingOpts.EnablingOptDriver
+import L0C.HOTrans.Composing
 
 data FusionGEnv = FusionGEnv {
                     soacs      :: M.Map VName ([VName], Exp)
@@ -370,9 +371,9 @@ fuseSOACwithKer (out_ids1, soac1) ker = do
   case (soac2, soac1) of
       -- first get rid of the cases that can be solved by
       -- a bit of soac rewriting.
-    (Reduce2{}, Map2   {}) -> do
-      soac2' <- reduce2Redomap soac2
-      let ker'   = ker { fsoac = (out_ids2, soac2') }
+    (Reduce2 lam ne arrs rwtps loc, Map2   {}) -> do
+      let soac2' = Redomap2 lam lam ne arrs rwtps loc
+          ker'   = ker { fsoac = (out_ids2, soac2') }
       fuseSOACwithKer (out_ids1, soac1) ker'
     _ -> do -- treat the complicated cases!
             inp1_arr <- getInpArrSOAC soac1
@@ -387,10 +388,10 @@ fuseSOACwithKer (out_ids1, soac1) ker = do
                 -- The Fusions that are semantically map fusions:
                 ----------------------------------------------------
                 (Map2      _ _ _ pos, Map2    {}) -> do
-                  (res_lam, new_inp) <- fuse2SOACs inp1_arr lam1 out_ids1 inp2_arr lam2
+                  let (res_lam, new_inp) = fuseMaps lam1 inp1_arr out_ids1 lam2 inp2_arr
                   return (Map2    res_lam new_inp (mkElType new_inp) pos, new_inp)
                 (Redomap2 lam21 _ ne _ _ pos, Map2 {})-> do
-                  (res_lam, new_inp) <- fuse2SOACs inp1_arr lam1 out_ids1 inp2_arr lam2
+                  let (res_lam, new_inp) = fuseMaps lam1 inp1_arr out_ids1 lam2 inp2_arr
                   return (Redomap2 lam21 res_lam ne new_inp (mkElType new_inp) pos, new_inp)
 
                 ----------------------------------------------------
@@ -400,7 +401,8 @@ fuseSOACwithKer (out_ids1, soac1) ker = do
                   (res_lam, new_inp) <- fuseRedFilt inp1_arr lam1 out_ids1 inp2_arr lam2
                   return (Reduce2 res_lam ne new_inp eltp pos, new_inp)
                 (Redomap2 lam21 _ nes _ eltp pos, Filter2 {}) -> do
-                  (res_lam, new_inp) <- fuseMapFilt inp1_arr lam1 (TupLit nes pos) inp2_arr lam2
+                  name <- new "check"
+                  let (res_lam, new_inp) = fuseFilterIntoFold lam1 inp1_arr out_ids1 lam2 inp2_arr name
                   return (Redomap2 lam21 res_lam nes new_inp eltp pos, new_inp)
                 (Filter2 _ _ pos, Filter2 _ _ pos1) -> do
                   (res_lam, new_inp) <- fuseMapFilt inp1_arr lam1 (Literal (LogVal False) pos1) inp2_arr lam2
@@ -491,9 +493,9 @@ fusionGatherExp fres (LetPat pat soac@(Reduce2 lam nes _ _ loc) body _) = do
     (_, blres) <- fusionGatherLam (S.empty, bres') lam
     addNewKer blres (pat, soac)
 
-fusionGatherExp fres (LetPat pat soac@(Redomap2 lam_red lam_map ne _ _ loc) body _) = do
+fusionGatherExp fres (LetPat pat soac@(Redomap2 outer_red inner_red ne _ _ loc) body _) = do
     -- a redomap always starts a new kernel
-    (_, lres)  <- foldM fusionGatherLam (S.empty, fres) [lam_red, lam_map]
+    (_, lres)  <- foldM fusionGatherLam (S.empty, fres) [outer_red, inner_red]
     bres  <- bindPat pat soac $ fusionGatherExp lres body -- binding pat $
     bres' <- fusionGatherExp bres $ TupLit ne loc
     addNewKer bres' (pat, soac)
@@ -859,26 +861,9 @@ getIdentArr (Index idd _ _ _:es) = do
 getIdentArr (Iota _ _:es) = getIdentArr es
 getIdentArr (ee:_) =
     badFusionGM $ EnablingOptError
-                    (SrcLoc (locOf ee))
+                    (srclocOf ee)
                     ("In Fusion.hs, getIdentArr, broken invariant: "
                      ++" argument not a (indexed) variable! "++ppExp ee)
-
-
-reduce2Redomap :: Exp -> FusionGM Exp
-reduce2Redomap (Reduce2 lam ne arrs rwtps pos) = do
-    let num_arrs= length arrs
-    let lam_tps = map (stripArray 1 . typeOf) arrs
-    lam_nms <- mapM new (replicate num_arrs "tmp_lam")
-    let lam_pos = replicate num_arrs pos
-    let lam_ids = zipWith3 Ident lam_nms lam_tps lam_pos
-    let lam_body= TupLit (map Var lam_ids) pos
-    let map_lam = TupleLambda (map toParam lam_ids) lam_body (map (toDecl . identType) lam_ids) pos
-    return $ Redomap2 lam map_lam ne arrs rwtps pos
-reduce2Redomap eee =
-    badFusionGM $ EnablingOptError (SrcLoc (locOf eee))
-                   ("In Fusion.hs, reduce2Redomap: argument not a reduce2: "
-                    ++ ppExp eee)
-
 
 cleanFusionResult :: FusedRes -> FusedRes
 cleanFusionResult fres =
@@ -989,136 +974,6 @@ fuse2Filter inp1 lam1 _ inp2 lam2 = do
     let res_body = If call1 then_exp (Literal (LogVal False) pos1) (Elem Bool) pos1
     return (AnonymFun par1 res_body (Elem Bool) pos2, inp1)
 -}
-
-----------------------------------------------------------------------------------
--- | Params:
---    @inp1@ is the input of the (first) to-be-fused SOAC
---    @lam1@ is the function of the (first) to-be-fused SOAC
---    @out1@ are the result arrays (identifiers) of the first SOAC.
---    @inp2@ is the input to the second SOAC.
---    @lam2@ is the function of the second SOAC.
---   Result: the anonymous function of the result SOAC, tupled with
---           the input of the result SOAC.
---           (The output of the result SOAC == the one of the second SOAC)
-----------------------------------------------------------------------------------
-fuse2SOACs :: [Exp] -> TupleLambda -> [Ident]
-           -> [Exp] -> TupleLambda
-           -> FusionGM (TupleLambda, [Exp])
-fuse2SOACs inp1 lam1 out1 inp2 lam2 = do
-          -- inp2 (AnonymFun lam_args2 body2 rtp2 pos2) = do
-    let rtp2 = tupleLambdaReturnType lam2
-    let pos2 = srclocOf lam2
-    -- SOAC's lambda have been normalized, hence they accept an
-    --   arbitrary number of non-tuple arguments.
-    let (ids2, bdy2) = getUnmdParsAndBody lam2
-
-    -- get Map that bridge the out_arrays of SOAC1
-    -- with the input_lambda_parameters of SOAC2
-    let out_m1 = map identName out1
-    out_m2 <- buildOutMaps out1 ids2 inp2
-
-    -- compute: (inp2 \\ out1, ids2 \\ out1)
-    let inp_par2 =
-         filter (\(x,_)-> case x of
-                            Var idd -> identName idd `notElem` out_m1
-                            _       -> True
-                ) (zip inp2 ids2)
-    let (inp2', par2') = unzip inp_par2
-    let inp_res = inp1 ++ inp2'
-
-    -- Construct the body of the resulting lambda!
-    (ids_out1, bdy2') <-
-              foldM (\(idds,body) i ->
-                      case M.lookup i out_m2 of
-                        Just (_,a:as) -> return (idds++[a], mkCopies a as body)
-                        _ -> badFusionGM $ EnablingOptError
-                             (srclocOf body)
-                             ("In Fusion.hs, fuse2SOACs, foldM's lambda1 "
-                              ++" broken invariant: param index not in Map!")
-                    ) ([],bdy2) [0..length out1-1]
-
-    let call_idd = TupId (map Id ids_out1) $ srclocOf lam1
-
-    -- Build the call to the first SOAC function
-    (par1, call1) <- buildCall (map (stripArray 1 . typeOf) inp1) lam1
-    let bdy2'' = LetPat call_idd call1 bdy2' $ srclocOf lam1
-    let par = par1 ++ par2'
-
-    -- remove duplicate inputs
-    (inp_res', par', bdy2''') <- removeDupInps inp_res par bdy2''
-
-    return (TupleLambda (map toParam par') bdy2''' rtp2 pos2, inp_res')
-
-    where
-        -- | @arrs@ are the input arrays of a SOAC call
-        --   @idds@ are the args (ids) of the SOAC's unnamed function
-        --   @lam_bdy@ is the body of the lambda function.
-        --   Result: eliminates the duplicate input arrays (and lambda args),
-        --           by inserting copy statement in the body of the lambda.
-        --   E.g., originally: map(\(a,b,c) -> body,              x[i], y, x[i])
-        --         results in: map(\(b,c)   -> let a = b in body,       y, x[i])
-        removeDupInps :: [Exp] -> [Ident] -> Exp -> FusionGM ([Exp], [Ident], Exp)
-        removeDupInps [] [] lam_bdy = return ([], [], lam_bdy)
-        removeDupInps [] _  lam_bdy = badFusionGM $ EnablingOptError (SrcLoc (locOf lam_bdy))
-                                                     ("In Fusion.hs, removeDupInps, arr inps "
-                                                      ++" AND lam pars size do not match!")
-        removeDupInps _  [] lam_bdy = badFusionGM $ EnablingOptError (SrcLoc (locOf lam_bdy))
-                                                     ("In Fusion.hs, removeDupInps, arr inps "
-                                                      ++" AND lam pars size do not match!")
-        removeDupInps (arr:arrs) (idd:idds) lam_bdy =
-            case L.elemIndex arr arrs of
-                Nothing -> do (rec_arr, rec_idds, rec_bdy) <- removeDupInps arrs idds lam_bdy
-                              return (arr:rec_arr, idd:rec_idds, rec_bdy)
-                Just ind-> do -- eliminate the current so you can advance!
-                              let rec_bdy = LetPat (Id idd) (Var (idds !! ind)) lam_bdy (srclocOf idd)
-                              removeDupInps arrs idds rec_bdy
-
-
-
-        -- | @mkCopies x [y,z,t] body@ results in
-        --   @let y = x in let z = x in let t = x in body
-        mkCopies :: Ident -> [Ident] -> Exp -> Exp
-        mkCopies idd idds body =
-            foldl (\ bbdy ii -> LetPat (Id ii) (Var idd) bbdy (srclocOf idd) )
-                  body idds
-
-        -- | @out_arr1@ are the array result of a (first) SOAC (call)
-        --   @inp_par2@ are the (expanded lambda) param of another (second) SOAC,
-        --              which is to be fused with the first SOAC.
-        --   @inp_arr2@ are the input arrays of the second SOAC.
-        --   The result is a Map that ASSOCIATES:
-        --     (i) the position in which vars of @inp_par2@ appear in @out_arr1@
-        --    (ii) with a tuple formed by (1) the corresponding
-        --            element in the @out_arr1@ and (2) the set of vars in
-        --            @inp_par2@, i.e., lambda args, which correspond to (1).
-        -- E.g., let (x1,x2,x3) = map(f, a1, a2)
-        --       let res        = map(fn type (a,b,c,d) => ..., x3, x1, y1, x1)
-        --    Result is: { 1 -> ("x1", ["b","d"]), 2 -> ("",["new_tmp"], 3 -> ("x3", ["a"])}
-        buildOutMaps :: [Ident] -> [Ident] -> [Exp] ->
-                        FusionGM (M.Map Int (VName, [Ident]))
-        buildOutMaps out_arr1 inp_par2 inp_arr2 = do
-            -- let inp_pnm = map identName inp_par2
-            let out_anm = map identName out_arr1
-            let m2 = foldl (\ m (arr, par) ->
-                                case arr of
-                                    Var idd -> case L.elemIndex (identName idd) out_anm of
-                                                Nothing -> m
-                                                Just i  -> case M.lookup i m of
-                                                            Nothing    -> M.insert i (identName idd, [par] ) m
-                                                            Just (_,ps)-> M.insert i (identName idd, ps++[par]) m
-                                    _       -> m
-                           )   M.empty (zip inp_arr2 inp_par2)
-            -- add the unused vars from out_arr1
-            foldM (\m i ->
-                      case M.lookup i m2 of
-                        Nothing   -> do new_nm <- new "tmp"
-                                        let ppp    = out_arr1 !! i
-                                        let new_tp = stripArray 1 (identType ppp)
-                                        let new_id = Ident new_nm new_tp (srclocOf ppp)
-                                        -- CHECKME: Empty name?  This will definitely cause trouble.
-                                        return $ M.insert i (varName "" Nothing, [new_id]) m
-                        Just(_,_)-> return m)
-                  m2 [0..length out_anm-1]
 
 -- | Recieves a list of types @tps@, which should match
 --     the lambda's parameters, and a lambda expression.

@@ -114,14 +114,8 @@ transformExp (Filter fun arrexp rowtype loc) =
           return $ checkempty loop
         where intval x = Literal (IntVal x) loc
 
-transformExp (Redomap redfun mapfun accexp arrexp _ loc) =
-  newReduction loc arrexp accexp $ \(arr, arrv) (acc, accv) (i, iv) -> do
-    let indexi = Index arr [iv] (stripArray 1 $ typeOf arrexp) loc
-    mapfuncall <- transformLambda mapfun [indexi]
-    redfuncall <- transformLambda redfun [accv, mapfuncall]
-    let loop = DoLoop (Id acc) accv i (Size 0 arrv loc) loopbody accv loc
-        loopbody = LetWith acc acc [] redfuncall accv loc
-    return loop
+transformExp (Redomap _ innerfun accexp arrexp ets loc) =
+  transformExp $ Reduce innerfun accexp arrexp ets loc
 
 transformExp mape@(Map2 fun arrs _ loc) = do
   let zero = Literal (IntVal 0) loc
@@ -198,19 +192,8 @@ transformExp filtere@(Filter2 fun arrexps loc) =
   where intval x = Literal (IntVal x) loc
         sub1 e = BinOp Minus e (intval 1) (Elem Int) loc
 
-transformExp (Redomap2 redfun mapfun accexps arrexps _ loc) =
-  newReduction2 loc arrexps accexps $ \(arr, _) (acc, accv) (i, iv) -> do
-    mapfuncall <- transformTupleLambda mapfun $ index arr iv
-    let loop loopbody = DoLoop (TupId (map Id acc) loc) accv i (size arr) loopbody accv loc
-    case typeOf mapfuncall of
-      Elem (Tuple ts) -> do
-        names <- mapM (liftM fst . newVar loc "mapres") ts
-        redfuncall <- transformTupleLambda redfun $ map Var $ acc ++ names
-        return $ loop $ LetPat (TupId (map Id names) loc) mapfuncall redfuncall loc
-      t -> do
-        name <- fst <$> newVar loc "mapres" t
-        redfuncall <- transformTupleLambda redfun $ map Var $ acc ++ [name]
-        return $ loop $ LetPat (Id name) mapfuncall redfuncall loc
+transformExp (Redomap2 _ innerfun accexps arrexps ets loc) =
+  transformExp $ Reduce2 innerfun accexps arrexps ets loc
 
 transformExp e = mapExpM transform e
   where transform = identityMapper {
