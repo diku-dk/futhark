@@ -33,6 +33,9 @@ fun bool minmax(int a, int b, int c) =
     let x2 = a + min(max(a - min(1 + a,100 + a),10) - 1,1 - 1) + b = a + b in
     x0 && x1 && x2
     
+fun bool power(int a, int b) =
+    let x0 = 2 pow 2 = 4 in
+    x0 
 
 fun int main(int a, int b, int c, int d, int e, int f, int g, int h) =
     if relationel(a,b) && addNMult(a,b,c,d,e,f,g,h) && division(a,b,c) && minmax(a,b,c)
