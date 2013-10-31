@@ -12,6 +12,7 @@ module L0C.Dev
   , expr
   , typ
   , lambda
+  , tupleLambda
   )
 where
 
@@ -72,6 +73,9 @@ uniqueTagType = uniqueTag tagType'
 uniqueTagLambda :: TypeBox ty => LambdaBase ty Name -> LambdaBase ty VName
 uniqueTagLambda = uniqueTag tagLambda'
 
+uniqueTagTupleLambda :: TypeBox ty => TupleLambdaBase ty Name -> TupleLambdaBase ty VName
+uniqueTagTupleLambda = uniqueTag tagTupleLambda'
+
 rightResult :: Show a => Either a b -> b
 rightResult = either (error . show) id
 
@@ -94,7 +98,7 @@ lambda = uniqueTagLambda . rightResult . checkClosedLambda . rightResult . parse
         checkClosedLambda (CurryFun {}) = error "Curries not handled"
 
 tupleLambda :: String -> TupleLambda
-tupleLambda = uniqueTagLambda . rightResult . checkClosedTupleLambda . rightResult . parseTupleLambda "input"
+tupleLambda = uniqueTagTupleLambda . rightResult . checkClosedTupleLambda . rightResult . parseTupleLambda "input"
   where checkClosedTupleLambda (TupleLambda params body rettype loc) = do
           body' <- checkOpenExp env body
           return $ TupleLambda params body' rettype loc
