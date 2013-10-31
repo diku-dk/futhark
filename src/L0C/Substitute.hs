@@ -1,3 +1,8 @@
+-- |
+--
+-- This module contains exports just a single function,
+-- 'substituteNames', for performing name substitution in an L0
+-- expression.
 module L0C.Substitute
   (substituteNames)
   where
@@ -9,6 +14,12 @@ import qualified Data.Set as S
 
 import L0C.L0
 
+-- | @substituteNames m e@ replaces the variable names in @e@ with new
+-- names, based on the mapping in @m@.  It is assumed that all names
+-- in @e@ are unique, i.e. there is no shadowing.  Aliasing
+-- information is also updated, although the resulting information may
+-- be erroneous if any if the substitute names in @m@ were already in
+-- use in @e@.
 substituteNames :: M.Map VName VName -> Exp -> Exp
 substituteNames substs = substInExp
   where replaceName k = fromMaybe k $ M.lookup k substs
