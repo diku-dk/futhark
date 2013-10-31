@@ -289,15 +289,15 @@ copyCtPropExp (BinOp bop e1 e2 tp pos) = do
     e2'   <- copyCtPropExp e2
     ctFoldBinOp (BinOp bop e1' e2' tp pos)
 
-copyCtPropExp e@(Min e1 e2 tp pos) = do
+copyCtPropExp (Min e1 e2 tp pos) = do
     e1'   <- copyCtPropExp e1
     e2'   <- copyCtPropExp e2
-    simplExp e
+    simplExp (Min e1' e2' tp pos)
 
-copyCtPropExp e@(Max e1 e2 tp pos) = do
+copyCtPropExp (Max e1 e2 tp pos) = do
     e1'   <- copyCtPropExp e1
     e2'   <- copyCtPropExp e2
-    simplExp e
+    simplExp (Max e1' e2' tp pos)
 
 copyCtPropExp (And e1 e2 pos) = do
     e1'   <- copyCtPropExp e1
