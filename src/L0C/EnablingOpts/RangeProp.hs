@@ -170,6 +170,8 @@ rangeCompareZero rdict e = do
 -- Making ranges comparable
 ----------------------------------------
 
+-- Is the range currently in a state,
+--   where we can say something about it's sign?
 isComparable :: Range -> RangeM Bool
 isComparable range = do
   sign <- atomicRangeSign range
@@ -177,6 +179,8 @@ isComparable range = do
     Nothing -> return False
     _       -> return True
 
+-- Transform the range to a state, where we can
+--   say something about it's sign
 makeRangeComparable :: Range -> RangeM Range
 makeRangeComparable range = do
   dictAsList  <- liftM M.toDescList $ asks dict
@@ -198,12 +202,19 @@ makeRangeComparable range = do
 -- Calculate range signs
 ----------------------------------------
 
+-- Calculates the sign for the range supplied,
+--   by first making the range comparable
 calculateRangeSign :: Range -> RangeM RangeSign
 calculateRangeSign range = atomicRangeSign =<< makeRangeComparable range
 
+-- Calculates the sign for the RExp supplied,
+--   by first making the range (e,e) comparable
 determineRExpSign :: RExp -> RangeM RangeSign
 determineRExpSign e = calculateRangeSign (e,e)
 
+-- Tries to calculate the sign for the range supplied
+--   without making modifications to it.
+-- ie will return Nothing for the range (1+2, 1+3)
 -- TODO: make sanity check, that we don't have something like Pos, Neg ?
 atomicRangeSign :: Range -> RangeM RangeSign
 atomicRangeSign (lb,ub) = do
@@ -220,22 +231,23 @@ atomicRangeSign (lb,ub) = do
     (Just Pos,_)     -> return $ Just Pos
     _           -> return Nothing
 
-atomicRExpSign :: RExp -> RangeM RangeSign
-atomicRExpSign Pinf = return $ Just Pos
-atomicRExpSign Ninf = return $ Just Neg
-atomicRExpSign (RExp (Literal (IntVal v) _) )
-  | v < 0     = return $ Just Neg
-  | v == 0    = return $ Just Zero
-  | otherwise = return $ Just Pos
-atomicRExpSign (RExp (Literal _ pos) ) =
-  badRangeM $ RangePropError pos "atomicRExpSign: Encountered non integer literal"
-atomicRExpSign (RExp (Var (Ident vname (Elem Int) p))) = do
-  bnd <- asks $ M.lookup vname . dict
-  case bnd of
-    Just (_,sign) -> return sign
-    Nothing       -> badRangeM $ RangePropError p $
-        "atomicRExpSign: Identifier was not in range dict: " ++ textual vname
-atomicRExpSign _ = return Nothing
+  where
+    atomicRExpSign :: RExp -> RangeM RangeSign
+    atomicRExpSign Pinf = return $ Just Pos
+    atomicRExpSign Ninf = return $ Just Neg
+    atomicRExpSign (RExp (Literal (IntVal v) _) )
+      | v < 0     = return $ Just Neg
+      | v == 0    = return $ Just Zero
+      | otherwise = return $ Just Pos
+    atomicRExpSign (RExp (Literal _ pos) ) =
+      badRangeM $ RangePropError pos "atomicRExpSign: Encountered non integer literal"
+    atomicRExpSign (RExp (Var (Ident vname (Elem Int) p))) = do
+      bnd <- asks $ M.lookup vname . dict
+      case bnd of
+        Just (_,sign) -> return sign
+        Nothing       -> badRangeM $ RangePropError p $
+            "atomicRExpSign: Identifier was not in range dict: " ++ textual vname
+    atomicRExpSign _ = return Nothing
 
 ----------------------------------------
 -- Range substitution
