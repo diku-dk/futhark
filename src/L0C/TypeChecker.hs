@@ -826,9 +826,9 @@ checkExp (Reduce fun startexp arrexp intype pos) = do
   fun' <- checkLambda fun [startarg, arrarg]
   let redtype = lambdaType fun' [typeOf startexp', typeOf arrexp']
   unless (redtype `subtypeOf` typeOf startexp') $
-    bad $ TypeError pos $ "Initial value is of type " ++ ppType (typeOf startexp') ++ ", but scan function returns type " ++ ppType redtype ++ "."
+    bad $ TypeError pos $ "Initial value is of type " ++ ppType (typeOf startexp') ++ ", but reduce function returns type " ++ ppType redtype ++ "."
   unless (redtype `subtypeOf` intype') $
-    bad $ TypeError pos $ "Array element value is of type " ++ ppType intype' ++ ", but scan function returns type " ++ ppType redtype ++ "."
+    bad $ TypeError pos $ "Array element value is of type " ++ ppType intype' ++ ", but reduce function returns type " ++ ppType redtype ++ "."
   return $ Reduce fun' startexp' arrexp' intype' pos
 
 checkExp (Scan fun startexp arrexp intype pos) = do
@@ -851,15 +851,15 @@ checkExp (Filter fun arrexp rowtype pos) = do
     bad $ TypeError pos "Filter function does not return bool."
   return $ Filter fun' arrexp' rowtype' pos
 
-checkExp (Redomap redfun mapfun accexp arrexp intype pos) = do
+checkExp (Redomap outerfun innerfun accexp arrexp intype pos) = do
   (accexp', accarg) <- checkArg accexp
   (arrexp', arrarg@(rt, _, _)) <- checkSOACArrayArg arrexp
-  (mapfun', maparg) <- checkLambdaArg mapfun [arrarg]
-  redfun' <- checkLambda redfun [accarg, maparg]
-  let redtype = lambdaType redfun' [typeOf accexp', typeOf arrexp']
+  (outerfun', _) <- checkLambdaArg outerfun [accarg, accarg]
+  innerfun' <- checkLambda innerfun [accarg, arrarg]
+  let redtype = lambdaType innerfun' [typeOf accexp', rt]
   _ <- require [redtype] accexp'
   intype' <- checkAnnotation pos "redomap input element" intype rt
-  return $ Redomap redfun' mapfun' accexp' arrexp' intype' pos
+  return $ Redomap outerfun' innerfun' accexp' arrexp' intype' pos
 
 checkExp (Split splitexp arrexp intype pos) = do
   splitexp' <- require [Elem Int] =<< checkExp splitexp
@@ -1030,23 +1030,25 @@ checkExp (Filter2 fun arrexps pos) = do
     bad $ TypeError pos "Filter2 function does not return bool."
   return $ Filter2 fun' arrexps' pos
 
-checkExp (Redomap2 redfun mapfun accexps arrexps intypes pos) = do
-  (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
-  (mapfun', maparg) <- checkTupleLambdaArg mapfun arrargs
-  (accexps', accargs) <- unzip <$> mapM checkArg accexps
+checkExp (Redomap2 outerfun innerfun accexps arrexps intypes pos) = do
+  (arrexps', arrargs)   <- unzip <$> mapM checkSOACArrayArg arrexps
+  (accexps', accargs)   <- unzip <$> mapM checkArg accexps
+  (outerfun', outerarg) <- checkTupleLambdaArg outerfun $ accargs ++ accargs
 
-  maparg' <- splitTupleArg maparg
-  redfun' <- checkTupleLambda redfun $ accargs ++ maparg'
+  innerfun' <- checkTupleLambda innerfun $ accargs ++ arrargs
 
   let acct = Elem $ Tuple $ map typeOf accexps'
-      redret = Elem $ Tuple $ tupleLambdaType redfun' $ map argType $ accargs ++ maparg'
-  unless (redret `subtypeOf` acct) $
+      innerret = Elem $ Tuple $ tupleLambdaType innerfun' $ map argType $ accargs ++ arrargs
+  unless (innerret `subtypeOf` acct) $
     bad $ TypeError pos $ "Initial value is of type " ++ ppType acct ++
-          ", but redomap2 reduction returns type " ++ ppType redret ++ "."
+          ", but redomap2 inner reduction returns type " ++ ppType innerret ++ "."
+  unless (argType outerarg `subtypeOf` acct) $
+    bad $ TypeError pos $ "Initial value is of type " ++ ppType acct ++
+          ", but redomap2 outer reduction returns type " ++ ppType (argType outerarg) ++ "."
 
   intype' <- checkTupleAnnotation pos "redomap2 input element"
              intypes (map argType arrargs)
-  return $ Redomap2 redfun' mapfun' accexps' arrexps' intype' pos
+  return $ Redomap2 outerfun' innerfun' accexps' arrexps' intype' pos
 
 checkSOACArrayArg :: (TypeBox ty, VarName vn) =>
                      TaggedExp ty vn -> TypeM vn (TaggedExp CompTypeBase vn, Arg vn)
@@ -1055,12 +1057,6 @@ checkSOACArrayArg e = do
   case peelArray 1 t of
     Nothing -> bad $ TypeError argloc "SOAC argument is not an array"
     Just rt -> return (e', (rt, dflow, argloc))
-
-splitTupleArg :: VarName vn => Arg vn -> TypeM vn [Arg vn]
-splitTupleArg (Elem (Tuple ts), dflow, loc) = do
-  maybeCheckOccurences $ usageOccurences dflow
-  return [ (t, mempty, loc) | t <- ts ]
-splitTupleArg arg = return [arg]
 
 checkLiteral :: VarName vn => SrcLoc -> Value -> TypeM vn Value
 checkLiteral _ (IntVal k) = return $ IntVal k
