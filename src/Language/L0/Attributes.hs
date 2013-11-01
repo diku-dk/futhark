@@ -538,8 +538,9 @@ typeOf (Scan fun start arr _ _) =
   arrayType 1 et Unique
     where et = lambdaType fun [typeOf start, rowType $ typeOf arr]
 typeOf (Filter _ arr _ _) = typeOf arr
-typeOf (Redomap redfun mapfun start arr rt loc) =
-  lambdaType redfun [typeOf start, rowType $ typeOf $ Map mapfun arr rt loc]
+typeOf (Redomap outerfun innerfun start arr _ _ ) =
+  lambdaType outerfun [innerres, innerres]
+    where innerres = lambdaType innerfun [typeOf start, rowType $ typeOf arr]
 typeOf (Split _ _ t _) =
   Elem $ Tuple [arrayType 1 t Nonunique, arrayType 1 t Nonunique]
 typeOf (Concat x y _) = typeOf x `setUniqueness` u
@@ -554,11 +555,11 @@ typeOf (Reduce2 fun acc arrs _ _) =
 typeOf (Scan2 _ _ _ ets _) =
   Elem $ Tuple $ map (\x -> arrayType 1 x Unique) ets
 typeOf (Filter2 _ arrs _) = Elem $ Tuple $ map typeOf arrs
-typeOf (Redomap2 redfun mapfun start arrs rt loc) =
-  Elem $ Tuple $ tupleLambdaType redfun $
-       map typeOf start ++ case typeOf (Map2 mapfun arrs rt loc) of
-                             Elem (Tuple ts) -> ts
-                             t               -> [t]
+typeOf (Redomap2 outerfun innerfun acc arrs _ _) =
+  Elem $ Tuple $ tupleLambdaType outerfun $
+       tupleLambdaType innerfun (innerres ++ innerres)
+    where innerres = tupleLambdaType innerfun
+                     (map typeOf acc ++ map (rowType . typeOf) arrs)
 
 uniqueProp :: TypeBase vn as -> Uniqueness
 uniqueProp tp = if uniqueOrBasic tp then Unique else Nonunique
