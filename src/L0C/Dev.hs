@@ -11,8 +11,10 @@ module L0C.Dev
   , tident
   , expr
   , typ
+  , value
   , lambda
   , tupleLambda
+  , prog
   )
 where
 
@@ -64,6 +66,9 @@ uniqueTag f x =
     let (x', src') = f src x
     in (src', x')
 
+uniqueTagProg :: TypeBox ty => ProgBase ty Name -> ProgBase ty VName
+uniqueTagProg = uniqueTag tagProg'
+
 uniqueTagExp :: TypeBox ty => ExpBase ty Name -> ExpBase ty VName
 uniqueTagExp = uniqueTag tagExp'
 
@@ -79,6 +84,10 @@ uniqueTagTupleLambda = uniqueTag tagTupleLambda'
 rightResult :: Show a => Either a b -> b
 rightResult = either (error . show) id
 
+-- | Parse a string to a program.
+prog :: String -> Prog
+prog = uniqueTagProg . rightResult . checkProg . rightResult . parseL0 "input"
+
 -- | Parse a string to an expression.
 expr :: String -> Exp
 expr = uniqueTagExp . rightResult . checkClosedExp . rightResult . parseExp "input"
@@ -86,6 +95,10 @@ expr = uniqueTagExp . rightResult . checkClosedExp . rightResult . parseExp "inp
 -- | Parse a string to a type.
 typ :: String -> Type
 typ = uniqueTagType . (`setAliases` S.empty) . rightResult . parseType "input"
+
+-- | Parse a string to a value.
+value :: String -> Value
+value = rightResult . parseValue "input"
 
 -- | Parse a string to an anonymous function.  Does not handle curried functions.
 lambda :: String -> Lambda
