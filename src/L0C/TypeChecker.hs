@@ -526,7 +526,7 @@ checkProg' checkoccurs prog = do
   liftM (untagProg . Prog) $
           runTypeM typeenv src $ mapM checkFun $ progFunctions prog'
   where
-    (prog', src) = tagProg' prog
+    (prog', src) = tagProg' blankNameSource prog
     -- To build the ftable we loop through the list of function
     -- definitions.  In addition to the normal ftable information
     -- (name, return type, argument types), we also keep track of

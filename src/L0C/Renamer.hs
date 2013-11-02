@@ -64,12 +64,12 @@ tagProg prog = Prog $ runReader (evalStateT f blankNameSource) env
   where env = RenameEnv M.empty newID
         f = mapM renameFun $ progFunctions prog
 
--- | As 'tagProg', but also return the final state of the name
--- generator.
+-- | As 'tagProg', but accepts an initial name source and returns the
+-- resulting one.
 tagProg' :: (TypeBox ty, VarName vn) =>
-            ProgBase ty vn -> (ProgBase ty (ID vn), NameSource (ID vn))
-tagProg' prog = let (funs, src) = runReader (runStateT f blankNameSource) env
-                in (Prog funs, src)
+            NameSource (ID vn) -> ProgBase ty vn -> (ProgBase ty (ID vn), NameSource (ID vn))
+tagProg' src prog = let (funs, src') = runReader (runStateT f src) env
+                    in (Prog funs, src')
   where env = RenameEnv M.empty newID
         f = mapM renameFun $ progFunctions prog
 
