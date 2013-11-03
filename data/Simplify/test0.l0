@@ -1,2 +1,2 @@
 fun int main(int a, int b) =
-    1 * max(3,4)
+  a pow 0

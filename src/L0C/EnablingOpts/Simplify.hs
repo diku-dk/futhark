@@ -84,9 +84,19 @@ simplifyBack (NaryPlus [] _ pos) =
                     " In simplifyBack, NaryPlus: empty exp list! "
 simplifyBack (NaryMult [f] _ _) = return f
 simplifyBack (NaryPlus [t] _ _) = simplifyBack t
-simplifyBack (NaryMult (f:fs) tp pos) = do
-  fs' <- simplifyBack $ NaryMult fs tp pos
-  return $ BinOp Times f fs' tp pos
+simplifyBack (NaryMult fs tp pos) =
+  let 
+    fs' = L.zip (L.map length $ L.group $ L.sort fs)  (L.sort $ L.nub fs)
+  in
+    return $ L.foldl1' timeAcc $ L.map powerExp fs'
+  where
+    powerExp (num, e)
+      | num == 1  = e
+      | otherwise = BinOp Pow e (Literal (IntVal num) pos) tp pos
+    timeAcc e1 e2 = BinOp Times e1 e2 (typeOf e1) (srclocOf e1)
+
+
+
 simplifyBack (NaryPlus (f:fs) tp pos) = do
   f'  <- simplifyBack f
   fs' <- simplifyBack $ NaryPlus fs tp pos
@@ -98,7 +108,7 @@ simplifyBothWays e = do
   enary <- simplifyNary e
   simplifyBack enary
   --}
-  {- Debug before/after simplification
+  {--
   enary <- trace (escapeColorize Magenta $ "Before: " ++ ppExp e) simplifyNary e
   e' <- simplifyBack enary
   trace (escapeColorize Green $ "After: " ++ ppExp e') return e'
@@ -289,6 +299,17 @@ simplifyNary (BinOp Divide e1 e2 tp pos) = do
 simplifyNary (Negate e tp pos) = do
     negOne <- getNeg1 tp pos
     simplifyNary $ BinOp Times (Literal negOne pos) e tp pos
+
+simplifyNary e@(BinOp Pow e1 e2 tp pos) = do
+  e1'<- (simplifyNary e1) >>= simplifyBack
+  e2'<- (simplifyNary e2) >>= simplifyBack
+  case (e1',e2') of
+    (Literal (IntVal v1) _, Literal (IntVal v2) _) ->
+          return $ NaryMult [(Literal (IntVal $ v1^v2) pos)] tp pos
+    (e, Literal (IntVal v2) _) -> return $ NaryMult (replicate v2 e) tp pos
+    _   -> return $ NaryMult [(BinOp Pow e1' e2' tp pos)] (typeOf e) (srclocOf e)
+
+
 
 
 ------------------------------------------------
