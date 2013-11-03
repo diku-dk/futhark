@@ -151,19 +151,38 @@ createRangeAndSign Nothing = return ( (Ninf, Pinf), Nothing )
 rangeCompare :: RangeDict -> Exp -> Exp -> Either EnablingOptError RangeInequality
 rangeCompare rdict e1 e2 = do
   let e1SrcLoc = L.SrcLoc $ L.locOf e1
-  rangeCompareZero rdict $ BinOp Minus e2 e1 (typeOf e1) e1SrcLoc
+  let env = RangeEnv { dict = rdict }
+  runRangeM (rangeRExpCompare (RExp e1) (RExp e2) e1SrcLoc ) env
 
--- Same as doing 0 `rangeCompare` exp
+-- Same as doing exp `rangeCompare` 0
 rangeCompareZero :: RangeDict -> Exp -> Either EnablingOptError RangeInequality
 rangeCompareZero rdict e = do
   let env = RangeEnv { dict = rdict }
-  sign <- runRangeM (determineRExpSign $ RExp e) env
+  runRangeM (rangeRExpCompareZero $ RExp e) env
+
+rangeRExpCompare :: RExp -> RExp -> L.SrcLoc -> RangeM RangeInequality
+rangeRExpCompare Ninf Ninf _ = return $ Just IEQ
+rangeRExpCompare Pinf Pinf _ = return $ Just IEQ
+rangeRExpCompare Ninf _ _ = return $ Just ILT
+rangeRExpCompare _ Pinf _ = return $ Just ILT
+rangeRExpCompare Pinf _ _ = return $ Just IGT
+rangeRExpCompare _ Ninf _ = return $ Just IGT
+rangeRExpCompare (RExp e1) (RExp e2) _ = do
+  let e1SrcLoc = L.SrcLoc $ L.locOf e1
+  rangeRExpCompareZero . RExp $ BinOp Minus e1 e2 (typeOf e1) e1SrcLoc
+
+-- same as doing RExp `rangeRExpCompareZero` 0
+rangeRExpCompareZero :: RExp -> RangeM RangeInequality
+rangeRExpCompareZero Ninf = return $ Just ILT
+rangeRExpCompareZero Pinf = return $ Just IGT
+rangeRExpCompareZero e@(RExp _) = do
+  sign <- determineRExpSign e
   case sign of
-    (Just Neg)     -> return $ Just IGT
-    (Just NonPos)  -> return $ Just IGTE
+    (Just Neg)     -> return $ Just ILT
+    (Just NonPos)  -> return $ Just ILTE
     (Just Zero)    -> return $ Just IEQ
-    (Just NonNeg)  -> return $ Just ILTE
-    (Just Pos)     -> return $ Just ILT
+    (Just NonNeg)  -> return $ Just IGTE
+    (Just Pos)     -> return $ Just IGT
     Nothing        -> return Nothing
 
 ----------------------------------------
@@ -464,6 +483,6 @@ testRange = do
     Right r -> ppRange r
     Left _ -> error "Fail!"
 
-comp0to5 = rangeCompareZero emptyRangeDict $ createIntLit 5 dummySrcLoc
+comp5to0 = rangeCompareZero emptyRangeDict $ createIntLit 5 dummySrcLoc
 comp4to5 = rangeCompare emptyRangeDict  (createIntLit 4 dummySrcLoc) (createIntLit 5 dummySrcLoc)
 comp10to5 = rangeCompare emptyRangeDict (createIntLit 10 dummySrcLoc) (createIntLit 5 dummySrcLoc)
