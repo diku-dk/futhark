@@ -36,7 +36,7 @@ fun bool minmax(int a, int b, int c) =
 fun bool power(int a, int b) =
     let x0 = a pow 2 = a * a in
     let x1 = 2 pow 2 = 4 in
-    let x2 = a pow b = 4 in
+    let x2 = a pow 0 = 1 in
     x0 && x1 && x2
 
 fun int main(int a, int b, int c, int d, int e, int f, int g, int h) =
