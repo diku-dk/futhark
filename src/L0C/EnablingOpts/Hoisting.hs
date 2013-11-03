@@ -104,33 +104,6 @@ lookupShapeBindings = delve S.empty
                              e:_ -> e
                              []  -> Nothing
 
-sameShape :: ShapeMap -> Ident -> Ident -> Bool
-sameShape m x y =
-  any matches $ lookupShapeBindings x m
-    where matches (DimSizes sz) =
-            all ok $ zip sz [0..]
-          ok (Just (Size _ i (Var v) _), j) =
-            i == j && v == y
-          ok _ = False
-
-slices :: Ident -> ShapeMap -> [(Ident, Int)]
-slices x m = mapMaybe isSlice $ lookupShapeBindings x m
-  where isSlice (DimSizes (Just (Size _ i (Var y) _):sz))
-          | all (isDimOf y) $ zip sz [i+1..] = Just (y, i)
-          | otherwise = Nothing
-        isSlice _ = Nothing
-        isDimOf y (Just (Size _ i (Var z) _), j) =
-          y == z && i == j
-        isDimOf _ _ = False
-
-sliceOf :: Ident -> ShapeMap -> [Ident]
-sliceOf x m = map fst $ slices x m
-
-copyOf :: Ident -> ShapeMap -> [Ident]
-copyOf x m = mapMaybe isCopy $ slices x m
-  where isCopy (y, 0) = Just y
-        isCopy (_, _) = Nothing
-
 newtype HoistM a = HoistM (RWS
                            Env                -- Reader
                            Need               -- Writer
@@ -164,21 +137,6 @@ addBinding pat e@(Size _ i (Var x) _) = do
                                _        -> []
   alts <- concatMap mkAlt <$> asks (lookupShapeBindings x . envBindings)
   addSeveralBindings pat e alts
-
-addBinding pat e@(Apply fname args t loc)
-   | "assertZip" <- nameToString fname,
-     Just args' <- mapM (varExp . fst) args = do
-  bindings <- asks envBindings
-  let cps = cartesian $ map (\a -> a : copyOf a bindings) args'
-      sls = filter allSameShape $
-            cartesian $ map (`sliceOf` bindings) args'
-      allSameShape [] = True
-      allSameShape (a:as) = all (sameShape bindings a) as
-  case cps ++ sls of
-    [] -> addSingleBinding pat e
-    ls -> addSeveralBindings pat e
-          [ (pat, Apply fname (map (\a -> (Var a, Observe)) l) t loc)
-            | l <- ls ]
 
 addBinding pat e = addSingleBinding pat e
 

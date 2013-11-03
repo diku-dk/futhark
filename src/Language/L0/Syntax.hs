@@ -445,4 +445,4 @@ isBuiltInFun fnm = fnm `elem` builtInFuns
 
 -- | A list of names of all built-in functions.
 builtInFuns :: [Name]
-builtInFuns = map nameFromString ["toReal", "trunc", "sqrt", "log", "exp", "trace", "assertZip"]
+builtInFuns = map nameFromString ["toReal", "trunc", "sqrt", "log", "exp", "trace"]
