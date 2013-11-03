@@ -317,8 +317,6 @@ void error(int exitcode, const char *s) {
   exit(exitcode);
 }
 
-$esc:("int l0_assertZip() { return 1; }")
-
 $edecls:(map funcToDef definitions)
 
 int main() {
@@ -564,7 +562,7 @@ compileExp place (LetPat pat e body _) = do
                $stm:body'
              }|]
 
-compileExp place (Index var idxs _ _) = do
+compileExp place (Index _ var idxs _ _) = do
   arr <- lookupVar $ identName var
   idxvars <- mapM (new . ("index_"++) . show) [0..length idxs-1]
   idxs' <- zipWithM compileExp (map varExp idxvars) idxs
@@ -578,7 +576,7 @@ compileExp place (Index var idxs _ _) = do
                $stm:index
              }|]
 
-compileExp place (Size i e _) = do
+compileExp place (Size _ i e _) = do
   dest <- new "size_value"
   et <- typeToCType $ typeOf e
   e' <- compileExp (varExp dest) e
@@ -622,7 +620,7 @@ compileExp place (Replicate ne ve pos) = do
       vlet body = LetPat (Id vident) ve body pos
   compileExp place $ nlet $ vlet $ Replicate (Var nident) (Var vident) pos
 
-compileExp place (Reshape shapeexps arrexp _) = do
+compileExp place (Reshape _ shapeexps arrexp _) = do
   shapevars <- mapM (new . ("shape_"++) . show) [0..length shapeexps-1]
   arr <- new "reshape_arr"
   intype' <- typeToCType $ typeOf arrexp
@@ -639,7 +637,7 @@ compileExp place (Reshape shapeexps arrexp _) = do
                $exp:place.data = $id:arr.data;
              }|]
 
-compileExp place e@(Transpose k n arrexp _) = do
+compileExp place e@(Transpose _ k n arrexp _) = do
   arr <- new "transpose_arr"
   intype <- typeToCType $ typeOf arrexp
   basetype <- typeToCType $ Elem $ elemType $ typeOf arrexp
@@ -672,7 +670,7 @@ compileExp place e@(Transpose k n arrexp _) = do
             (mid,end) <- splitAt n post = pre ++ mid ++ [needle] ++ end
           | otherwise = l
 
-compileExp place (Split posexp arrexp _ _) = do
+compileExp place (Split _ posexp arrexp _ _) = do
   arr <- new "split_arr"
   pos <- new "split_pos"
   arrexp' <- compileExp (varExp arr) arrexp
@@ -697,7 +695,7 @@ compileExp place (Split posexp arrexp _ _) = do
                $exp:place1.dims[0] -= $id:pos;
              }|]
 
-compileExp place (Concat xarr yarr _) = do
+compileExp place (Concat _ xarr yarr _) = do
   x <- new "concat_x"
   y <- new "concat_y"
   xarr' <- compileExp (varExp x) xarr
@@ -727,7 +725,7 @@ compileExp place (Concat xarr yarr _) = do
                $stm:copyy
              }|]
 
-compileExp place (LetWith name src idxs ve body _) = do
+compileExp place (LetWith _ name src idxs ve body _) = do
   name' <- new $ textual $ identName name
   src' <- lookupVar $ identName src
   etype <- typeToCType $ identType src
@@ -799,6 +797,17 @@ compileExp place (Copy e _) = do
                $stm:e'
                $exp:place = $id:val;
                $stm:copy
+             }|]
+
+compileExp place (Assert e loc) = do
+  e' <- compileExp place e
+  return [C.cstm|{
+               $stm:e'
+               if (!$exp:place) {
+                 fprintf(stderr, "Assertion %s at %s failed.\n",
+                         $string:(ppExp e), $string:(show loc));
+                 exit(1);
+               }
              }|]
 
 compileExp _ (Zip {}) = error "Zip encountered during code generation."

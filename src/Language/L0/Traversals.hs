@@ -135,25 +135,31 @@ mapExpM tv (Apply fname args t loc) = do
 mapExpM tv (LetPat pat e body loc) =
   pure LetPat <*> mapOnPattern tv pat <*> mapOnExp tv e <*>
          mapOnExp tv body <*> pure loc
-mapExpM tv (LetWith dest src idxexps vexp body loc) =
-  pure LetWith <*> mapOnIdent tv dest <*> mapOnIdent tv src <*>
-         mapM (mapOnExp tv) idxexps <*> mapOnExp tv vexp <*>
-         mapOnExp tv body <*> pure loc
-mapExpM tv (Index arr idxexps outt loc) =
-  pure Index <*> mapOnIdent tv arr <*>
-         mapM (mapOnExp tv) idxexps <*>
-         mapOnType tv outt <*> pure loc
+mapExpM tv (LetWith cs dest src idxexps vexp body loc) =
+  pure LetWith <*> mapM (mapOnIdent tv) cs <*>
+       mapOnIdent tv dest <*> mapOnIdent tv src <*>
+       mapM (mapOnExp tv) idxexps <*> mapOnExp tv vexp <*>
+       mapOnExp tv body <*> pure loc
+mapExpM tv (Index cs arr idxexps outt loc) =
+  pure Index <*> mapM (mapOnIdent tv) cs <*>
+       mapOnIdent tv arr <*>
+       mapM (mapOnExp tv) idxexps <*>
+       mapOnType tv outt <*> pure loc
 mapExpM tv (Iota nexp loc) =
   pure Iota <*> mapOnExp tv nexp <*> pure loc
-mapExpM tv (Size i e loc) =
-  pure Size <*> pure i <*> mapOnExp tv e <*> pure loc
+mapExpM tv (Size cs i e loc) =
+  pure Size <*> mapM (mapOnIdent tv) cs <*>
+       pure i <*> mapOnExp tv e <*> pure loc
 mapExpM tv (Replicate nexp vexp loc) =
   pure Replicate <*> mapOnExp tv nexp <*> mapOnExp tv vexp <*> pure loc
-mapExpM tv (Reshape shape arrexp loc) =
-  pure Reshape <*> mapM (mapOnExp tv) shape <*>
+mapExpM tv (Reshape cs shape arrexp loc) =
+  pure Reshape <*> mapM (mapOnIdent tv) cs <*>
+       mapM (mapOnExp tv) shape <*>
        mapOnExp tv arrexp <*> pure loc
-mapExpM tv (Transpose k n e3 loc) =
-  pure (Transpose k n) <*> mapOnExp tv e3 <*> pure loc
+mapExpM tv (Transpose cs k n e3 loc) =
+  pure Transpose <*> mapM (mapOnIdent tv) cs <*>
+       pure k <*> pure n <*>
+       mapOnExp tv e3 <*> pure loc
 mapExpM tv (Map fun e int loc) =
   pure Map <*> mapOnLambda tv fun <*> mapOnExp tv e <*>
        mapOnType tv int <*> pure loc
@@ -180,33 +186,42 @@ mapExpM tv (Redomap redfun mapfun accexp arrexp intype loc) =
   pure Redomap <*> mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
        mapOnExp tv accexp <*> mapOnExp tv arrexp <*>
        mapOnType tv intype <*> pure loc
-mapExpM tv (Split nexp arrexp t loc) =
-  pure Split <*> mapOnExp tv nexp <*> mapOnExp tv arrexp <*>
+mapExpM tv (Split cs nexp arrexp t loc) =
+  pure Split <*> mapM (mapOnIdent tv) cs <*>
+       mapOnExp tv nexp <*> mapOnExp tv arrexp <*>
        mapOnType tv t <*> pure loc
-mapExpM tv (Concat x y loc) =
-  pure Concat <*> mapOnExp tv x <*> mapOnExp tv y <*> pure loc
+mapExpM tv (Concat cs x y loc) =
+  pure Concat <*> mapM (mapOnIdent tv) cs <*>
+       mapOnExp tv x <*> mapOnExp tv y <*> pure loc
 mapExpM tv (Copy e loc) =
   pure Copy <*> mapOnExp tv e <*> pure loc
+mapExpM tv (Assert e loc) =
+  pure Assert <*> mapOnExp tv e <*> pure loc
 mapExpM tv (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody loc) =
   pure DoLoop <*> mapOnPattern tv mergepat <*> mapOnExp tv mergeexp <*>
        mapOnIdent tv loopvar <*> mapOnExp tv boundexp <*>
        mapOnExp tv loopbody <*> mapOnExp tv letbody <*> pure loc
-mapExpM tv (Map2 fun arrexps intype loc) =
-  pure Map2 <*> mapOnTupleLambda tv fun <*> mapM (mapOnExp tv) arrexps <*>
+mapExpM tv (Map2 ass fun arrexps intype loc) =
+  pure Map2 <*> mapM (mapOnIdent tv) ass <*>
+       mapOnTupleLambda tv fun <*> mapM (mapOnExp tv) arrexps <*>
        mapM (mapOnType tv) intype  <*> pure loc
-mapExpM tv (Reduce2 fun startexps arrexps rowtypes loc) =
-  pure Reduce2 <*> mapOnTupleLambda tv fun <*>
+mapExpM tv (Reduce2 ass fun startexps arrexps rowtypes loc) =
+  pure Reduce2 <*> mapM (mapOnIdent tv) ass <*>
+       mapOnTupleLambda tv fun <*>
        mapM (mapOnExp tv) startexps <*> mapM (mapOnExp tv) arrexps <*>
        mapM (mapOnType tv) rowtypes <*> pure loc
-mapExpM tv (Scan2 fun startexps arrexps intypes loc) =
-  pure Scan2 <*> mapOnTupleLambda tv fun <*>
+mapExpM tv (Scan2 ass fun startexps arrexps intypes loc) =
+  pure Scan2 <*> mapM (mapOnIdent tv) ass <*>
+       mapOnTupleLambda tv fun <*>
        mapM (mapOnExp tv) startexps <*> mapM (mapOnExp tv) arrexps <*>
        mapM (mapOnType tv) intypes <*> pure loc
-mapExpM tv (Filter2 fun arrexps loc) =
-  pure Filter2 <*> mapOnTupleLambda tv fun <*>
+mapExpM tv (Filter2 ass fun arrexps loc) =
+  pure Filter2 <*> mapM (mapOnIdent tv) ass <*>
+       mapOnTupleLambda tv fun <*>
        mapM (mapOnExp tv) arrexps <*> pure loc
-mapExpM tv (Redomap2 redfun mapfun accexps arrexps intypes loc) =
-  pure Redomap2 <*> mapOnTupleLambda tv redfun <*> mapOnTupleLambda tv mapfun <*>
+mapExpM tv (Redomap2 ass redfun mapfun accexps arrexps intypes loc) =
+  pure Redomap2 <*> mapM (mapOnIdent tv) ass <*>
+       mapOnTupleLambda tv redfun <*> mapOnTupleLambda tv mapfun <*>
        mapM (mapOnExp tv) accexps <*> mapM (mapOnExp tv) arrexps <*>
        mapM (mapOnType tv) intypes <*> pure loc
 
@@ -352,7 +367,7 @@ progNames = execWriter . mapM funNames . progFunctions
         funNames (_, _, params, body, _) =
           mapM_ one params >> expNames body
 
-        expNames e@(LetWith dest _ _ _ _ _) =
+        expNames e@(LetWith _ dest _ _ _ _ _) =
           one dest >> walkExpM names e
         expNames e@(DoLoop _ _ i _ _ _ _) =
           one i >> walkExpM names e
@@ -390,7 +405,7 @@ freeInExp = execWriter . expFree
         expFree (LetPat pat e body _) = do
           expFree e
           binding (patIdents pat) $ expFree body
-        expFree (LetWith dest src idxs ve body _) = do
+        expFree (LetWith _ dest src idxs ve body _) = do
           identFree src
           mapM_ expFree idxs
           expFree ve
@@ -438,7 +453,7 @@ consumedInExp = execWriter . expConsumed
         expConsumed (LetPat pat e body _) = do
           expConsumed e
           unconsume (patNames pat) $ expConsumed body
-        expConsumed (LetWith dest src idxs ve body _) = do
+        expConsumed (LetWith _ dest src idxs ve body _) = do
           mapM_ expConsumed idxs
           expConsumed ve
           consume src

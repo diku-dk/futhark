@@ -145,13 +145,13 @@ tupleNormExp (DoLoop mergepat mergeexp idd n loopbdy letbdy pos) = do
     --            Just _ -> badTupNormM $ EnablingOptError pos ("tupleNormExp Implementation Shortcoming: "
     --                                                          ++" a merged var cannot have a tuple type")
 
-tupleNormExp (LetWith nm src inds el body pos) = do
+tupleNormExp (LetWith cs nm src inds el body pos) = do
     bnd <- asks $ M.lookup (identName src) . envVtable
     case bnd of
         Nothing  -> do  inds' <- mapM tupleNormExp inds
                         el'   <- tupleNormExp el
                         body' <- tupleNormExp body
-                        return $ LetWith nm src inds' el' body' pos
+                        return $ LetWith cs nm src inds' el' body' pos
         Just _   -> badTupNormM $ EnablingOptError pos ("In tupleNormExp of LetWith, broken invariant: "
                                                         ++" source array var has a TupId binding! ")
 
@@ -175,11 +175,11 @@ tupleNormExp e@(Var (Ident vnm _ pos)) = do
           exps <- mapM mkTuplitFromPat tupids
           return $ TupLit exps pos
 
-tupleNormExp (Index idd inds tp2 pos) = do
+tupleNormExp (Index cs idd inds tp2 pos) = do
     bnd <- asks $ M.lookup (identName idd) . envVtable
     case bnd of
         Nothing  -> do  inds' <- mapM tupleNormExp inds
-                        return $ Index idd inds' tp2 pos
+                        return $ Index cs idd inds' tp2 pos
         Just _   -> badTupNormM $ EnablingOptError pos ("In tupleNormExp of Index, broken invariant: "
                                                         ++" indexed var has a TupId binding! ")
 -------------------------------------------------------

@@ -86,7 +86,7 @@ rightResult = either (error . show) id
 
 -- | Parse a string to a program.
 prog :: String -> Prog
-prog = uniqueTagProg . rightResult . checkProg . rightResult . parseL0 "input"
+prog = renameProg . uniqueTagProg . rightResult . checkProg . rightResult . parseL0 "input"
 
 -- | Parse a string to an expression.
 expr :: String -> Exp

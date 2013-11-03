@@ -508,21 +508,21 @@ typeOf (Var ident) =
     t                -> t `addAliases` S.insert (identName ident)
 typeOf (Apply _ _ t _) = t
 typeOf (LetPat _ _ body _) = typeOf body
-typeOf (LetWith _ _ _ _ body _) = typeOf body
-typeOf (Index ident _ t _) =
+typeOf (LetWith _ _ _ _ _ body _) = typeOf body
+typeOf (Index _ ident _ t _) =
   t `addAliases` S.insert (identName ident)
 typeOf (Iota _ _) = arrayType 1 (Elem Int) Unique
 typeOf (Size {}) = Elem Int
 typeOf (Replicate _ e _) = arrayType 1 (typeOf e) u
   where u | uniqueOrBasic (typeOf e) = Unique
           | otherwise = Nonunique
-typeOf (Reshape shape e _) = build (length shape) (elemType $ typeOf e)
+typeOf (Reshape _ shape e _) = build (length shape) (elemType $ typeOf e)
   where build 0 t = Elem t
         build n t =
           Array (t `setElemAliases` NoInfo) (replicate n Nothing) Nonunique $
           case typeOf e of Array _ _ _ als -> als
                            _               -> S.empty -- Type error.
-typeOf (Transpose k n e _)
+typeOf (Transpose _ k n e _)
   | Array et dims u als <- typeOf e,
     (pre,d:post) <- splitAt k dims,
     (mid,end) <- splitAt n post = Array et (pre++mid++[d]++end) u als
@@ -541,21 +541,22 @@ typeOf (Filter _ arr _ _) = typeOf arr
 typeOf (Redomap outerfun innerfun start arr _ _ ) =
   lambdaType outerfun [innerres, innerres]
     where innerres = lambdaType innerfun [typeOf start, rowType $ typeOf arr]
-typeOf (Split _ _ t _) =
+typeOf (Split _ _ _ t _) =
   Elem $ Tuple [arrayType 1 t Nonunique, arrayType 1 t Nonunique]
-typeOf (Concat x y _) = typeOf x `setUniqueness` u
+typeOf (Concat _ x y _) = typeOf x `setUniqueness` u
   where u = uniqueness (typeOf x) <> uniqueness (typeOf y)
 typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` S.empty
+typeOf (Assert _ _) = Elem Bool
 typeOf (DoLoop _ _ _ _ _ body _) = typeOf body
-typeOf (Map2 f arrs _ _) =
+typeOf (Map2 _ f arrs _ _) =
   Elem $ Tuple $ map (\x -> arrayType 1 x (uniqueProp x)) $
        tupleLambdaType f $ map typeOf arrs
-typeOf (Reduce2 fun acc arrs _ _) =
+typeOf (Reduce2 _ fun acc arrs _ _) =
   Elem $ Tuple $ tupleLambdaType fun $ map typeOf acc ++ map typeOf arrs
-typeOf (Scan2 _ _ _ ets _) =
+typeOf (Scan2 _ _ _ _ ets _) =
   Elem $ Tuple $ map (\x -> arrayType 1 x Unique) ets
-typeOf (Filter2 _ arrs _) = Elem $ Tuple $ map typeOf arrs
-typeOf (Redomap2 outerfun innerfun acc arrs _ _) =
+typeOf (Filter2 _ _ arrs _) = Elem $ Tuple $ map typeOf arrs
+typeOf (Redomap2 _ outerfun innerfun acc arrs _ _) =
   Elem $ Tuple $ tupleLambdaType outerfun $
        tupleLambdaType innerfun (innerres ++ innerres)
     where innerres = tupleLambdaType innerfun
@@ -622,14 +623,15 @@ mapTails :: (ExpBase ty vn -> ExpBase ty vn) -> (ty vn -> ty vn)
          -> ExpBase ty vn -> ExpBase ty vn
 mapTails f g (LetPat pat e body loc) =
   LetPat pat e (mapTails f g body) loc
-mapTails f g (LetWith dest src idxs ve body loc) =
-  LetWith dest src idxs ve (mapTails f g body) loc
+mapTails f g (LetWith cs dest src idxs ve body loc) =
+  LetWith cs dest src idxs ve (mapTails f g body) loc
 mapTails f g (DoLoop pat me i bound loopbody body loc) =
   DoLoop pat me i bound loopbody (mapTails f g body) loc
 mapTails f g (If c te fe t loc) =
   If c (mapTails f g te) (mapTails f g fe) (g t) loc
 mapTails f _ e = f e
 
+-- | Convert a tuple-lambda to a regular lambda.
 tupleLambdaToLambda :: TupleLambdaBase ty vn -> LambdaBase ty vn
 tupleLambdaToLambda (TupleLambda params body rettype loc) =
   AnonymFun params body (Elem $ Tuple rettype) loc

@@ -40,6 +40,7 @@ tokens :-
   "%"                      { const MOD }
   "="                      { const EQU }
   "<"                      { const LTH }
+  ">"                      { const GTH }
   "&"                      { const BAND }
   "|"                      { const BOR }
   "^"                      { const XOR }
@@ -105,6 +106,7 @@ keyword s =
     "redomap2"     -> REDOMAP2
     "empty"        -> EMPTY
     "copy"         -> COPY
+    "assert"       -> ASSERT
     _              -> ID $ nameFromString s
 
 type Byte = Word8

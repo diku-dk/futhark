@@ -20,6 +20,7 @@ module L0C.L0
   , GenIdent
   , Ident
   , Parameter
+  , Certificates
   , Exp
   , Lambda
   , TupleLambda
@@ -102,6 +103,9 @@ type Ident = GenIdent Names
 -- | A name with a type, but no aliasing information.  Used for
 -- denoting function parameters.
 type Parameter = GenIdent NoInfo
+
+-- | An list of certificates with type information.
+type Certificates = CertificatesBase (TypeBase Names) VName
 
 -- | An expression with type information.
 type Exp = ExpBase (TypeBase Names) VName
