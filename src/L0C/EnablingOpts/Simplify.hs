@@ -86,14 +86,13 @@ simplifyBack (NaryMult [f] _ _) = return f
 simplifyBack (NaryPlus [t] _ _) = simplifyBack t
 simplifyBack (NaryMult fs tp pos) =
   let 
-    fs' = L.zip (L.map length $ L.group $ L.sort fs)  (L.sort $ L.nub fs)
-  in
-    return $ L.foldl1' timeAcc $ L.map powerExp fs'
-  where
-    powerExp (num, e)
+    fs' = L.zip (L.map length $ L.group fs)  (L.nub fs)
+    createTimesExp e1 e2 = BinOp Times e1 e2 (typeOf e1) (srclocOf e1)
+    takeExpToPower (num, e)
       | num == 1  = e
       | otherwise = BinOp Pow e (Literal (IntVal num) pos) tp pos
-    timeAcc e1 e2 = BinOp Times e1 e2 (typeOf e1) (srclocOf e1)
+  in
+    return $ L.foldl1' createTimesExp $ L.map takeExpToPower fs'
 
 
 
@@ -300,14 +299,17 @@ simplifyNary (Negate e tp pos) = do
     negOne <- getNeg1 tp pos
     simplifyNary $ BinOp Times (Literal negOne pos) e tp pos
 
-simplifyNary e@(BinOp Pow e1 e2 tp pos) = do
-  e1'<- (simplifyNary e1) >>= simplifyBack
-  e2'<- (simplifyNary e2) >>= simplifyBack
+simplifyNary (BinOp Pow e1 e2 tp pos) = do
+  e1' <- (simplifyNary e1) >>= simplifyBack
+  e2' <- (simplifyNary e2) >>= simplifyBack
   case (e1',e2') of
     (Literal (IntVal v1) _, Literal (IntVal v2) _) ->
           return $ NaryMult [(Literal (IntVal $ v1^v2) pos)] tp pos
-    (e, Literal (IntVal v2) _) -> return $ NaryMult (replicate v2 e) tp pos
-    _   -> return $ NaryMult [(BinOp Pow e1' e2' tp pos)] (typeOf e) (srclocOf e)
+    (_, Literal (IntVal v2) _) -> if v2 >= 0 
+                                  then return $ NaryMult (replicate v2 e1') tp pos
+                                  else return $ NaryMult (replicate (abs v2) $ 
+                                    BinOp Divide (Literal (IntVal 1) pos) e1' tp pos) tp pos
+    _   -> return $ NaryMult [(BinOp Pow e1' e2' tp pos)] (typeOf e1') (srclocOf e1')
 
 
 
