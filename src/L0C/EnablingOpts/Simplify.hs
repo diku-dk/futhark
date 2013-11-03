@@ -85,7 +85,7 @@ simplifyBack (NaryPlus [] _ pos) =
 simplifyBack (NaryMult [f] _ _) = return f
 simplifyBack (NaryPlus [t] _ _) = simplifyBack t
 simplifyBack (NaryMult fs tp pos) =
-  let 
+  let
     fs' = L.zip (L.map length $ L.group fs)  (L.nub fs)
     createTimesExp e1 e2 = BinOp Times e1 e2 (typeOf e1) (srclocOf e1)
     takeExpToPower (num, e)
@@ -125,7 +125,7 @@ simplifyNary (Min e1 e2 tp pos) = do
     case (e1',e2') of
         (Literal (IntVal v1) _, Literal (IntVal v2) _) ->
             return $ NaryMult [(Literal (IntVal $ min v1 v2) pos)] tp pos
-        _ -> 
+        _ ->
             return $ NaryMult [(Min e1' e2' tp pos)] tp pos
 
 simplifyNary (Max e1 e2 tp pos) = do
@@ -134,7 +134,7 @@ simplifyNary (Max e1 e2 tp pos) = do
     case (e1',e2') of
         (Literal (IntVal v1) _, Literal (IntVal v2) _) ->
             return $ NaryMult [(Literal (IntVal $ max v1 v2) pos)] tp pos
-        _ -> 
+        _ ->
             return $ NaryMult [(Max e1' e2' tp pos)] tp pos
 
 simplifyNary (BinOp Plus (Max e1' e2' _ _) e2 tp pos) = do
@@ -181,22 +181,22 @@ simplifyNary (BinOp Minus e1 e2 tp pos) = do
 --
 
 ---------------------------------------------------------------------
--- Uncommented until we a working function for sign determination. -- 
+-- Uncommented until we a working function for sign determination. --
 ---------------------------------------------------------------------
 --
 -- simplifyNary (BinOp Times e1 e2@(Max _ _ _ _) tp pos) =
 --     simplifyNary (BinOp Times e2 e1 tp pos)
--- 
+--
 -- simplifyNary (BinOp Times (Max e1' e2' _ _) e2 tp pos) = do
 --     let e1'' = BinOp Times e1' e2 tp pos
 --     let e2'' = BinOp Times e2' e2 tp pos
 --     -- TODO: has to return bool value, based on the sign of e2
---     let op   = if True then Max else Min 
+--     let op   = if True then Max else Min
 --     simplifyNary $ op e1'' e2'' tp pos
--- 
+--
 -- simplifyNary (BinOp Times e1 e2@(Min _ _ _ _) tp pos) =
 --     simplifyNary (BinOp Times e2 e1 tp pos)
--- 
+--
 -- simplifyNary (BinOp Times (Min e1' e2' _ _) e2 tp pos) = do
 --     let e1'' = BinOp Times e1' e2 tp pos
 --     let e2'' = BinOp Times e2' e2 tp pos
@@ -305,9 +305,9 @@ simplifyNary (BinOp Pow e1 e2 tp pos) = do
   case (e1',e2') of
     (Literal (IntVal v1) _, Literal (IntVal v2) _) ->
           return $ NaryMult [(Literal (IntVal $ v1^v2) pos)] tp pos
-    (_, Literal (IntVal v2) _) -> if v2 >= 0 
+    (_, Literal (IntVal v2) _) -> if v2 >= 0
                                   then return $ NaryMult (replicate v2 e1') tp pos
-                                  else return $ NaryMult (replicate (abs v2) $ 
+                                  else return $ NaryMult (replicate (abs v2) $
                                     BinOp Divide (Literal (IntVal 1) pos) e1' tp pos) tp pos
     _   -> return $ NaryMult [(BinOp Pow e1' e2' tp pos)] (typeOf e1') (srclocOf e1')
 
