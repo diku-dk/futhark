@@ -55,4 +55,5 @@ substituteNames substs = substInExp
                   , mapOnPattern = return . substInPattern
                   , mapOnValue = return
                   , mapOnLambda = return . substInLambda
+                  , mapOnCertificates = return . map replaceIdent
                   }

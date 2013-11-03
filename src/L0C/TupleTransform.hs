@@ -486,13 +486,9 @@ transformExp (Redomap2 cs1 lam1 lam2 nes arrs tps loc) =
                 (map Var nes') (map Var arrs') (map transformType tps) loc
 
 transformExp e = mapExpM transform e
-  where transform = Mapper {
+  where transform = identityMapper {
                       mapOnExp = transformExp
                     , mapOnType = return . transformType
-                    , mapOnLambda = return -- Not used.
-                    , mapOnTupleLambda = return -- Not used.
-                    , mapOnPattern = return -- Not used.
-                    , mapOnIdent = return -- Not used.
                     , mapOnValue = return . transformValue
                     }
 

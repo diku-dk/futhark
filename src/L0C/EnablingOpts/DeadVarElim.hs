@@ -171,6 +171,7 @@ deadCodeElimExp e = mapExpM mapper e
                  , mapOnLambda = deadCodeElimLambda
                  , mapOnTupleLambda = deadCodeElimTupleLambda
                  , mapOnIdent = deadCodeElimIdent
+                 , mapOnCertificates = mapM deadCodeElimIdent
                  }
 
 deadCodeElimIdent :: Ident -> DCElimM Ident

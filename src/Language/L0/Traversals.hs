@@ -82,6 +82,7 @@ data MapperBase tyf tyt vnf vnt m = Mapper {
   , mapOnPattern :: TupIdentBase tyf vnf -> m (TupIdentBase tyt vnt)
   , mapOnIdent :: IdentBase tyf vnf -> m (IdentBase tyt vnt)
   , mapOnValue :: Value -> m Value
+  , mapOnCertificates :: CertificatesBase tyf vnf -> m (CertificatesBase tyt vnt)
   }
 
 -- | A special case of 'MapperBase' when the name- and type
@@ -98,6 +99,7 @@ identityMapper = Mapper {
                  , mapOnPattern = return
                  , mapOnIdent = return
                  , mapOnValue = return
+                 , mapOnCertificates = return
                  }
 
 -- | Map a monadic action across the immediate children of an
@@ -136,28 +138,28 @@ mapExpM tv (LetPat pat e body loc) =
   pure LetPat <*> mapOnPattern tv pat <*> mapOnExp tv e <*>
          mapOnExp tv body <*> pure loc
 mapExpM tv (LetWith cs dest src idxexps vexp body loc) =
-  pure LetWith <*> mapM (mapOnIdent tv) cs <*>
+  pure LetWith <*> mapOnCertificates tv cs <*>
        mapOnIdent tv dest <*> mapOnIdent tv src <*>
        mapM (mapOnExp tv) idxexps <*> mapOnExp tv vexp <*>
        mapOnExp tv body <*> pure loc
 mapExpM tv (Index cs arr idxexps outt loc) =
-  pure Index <*> mapM (mapOnIdent tv) cs <*>
+  pure Index <*> mapOnCertificates tv cs <*>
        mapOnIdent tv arr <*>
        mapM (mapOnExp tv) idxexps <*>
        mapOnType tv outt <*> pure loc
 mapExpM tv (Iota nexp loc) =
   pure Iota <*> mapOnExp tv nexp <*> pure loc
 mapExpM tv (Size cs i e loc) =
-  pure Size <*> mapM (mapOnIdent tv) cs <*>
+  pure Size <*> mapOnCertificates tv cs <*>
        pure i <*> mapOnExp tv e <*> pure loc
 mapExpM tv (Replicate nexp vexp loc) =
   pure Replicate <*> mapOnExp tv nexp <*> mapOnExp tv vexp <*> pure loc
 mapExpM tv (Reshape cs shape arrexp loc) =
-  pure Reshape <*> mapM (mapOnIdent tv) cs <*>
+  pure Reshape <*> mapOnCertificates tv cs <*>
        mapM (mapOnExp tv) shape <*>
        mapOnExp tv arrexp <*> pure loc
 mapExpM tv (Transpose cs k n e3 loc) =
-  pure Transpose <*> mapM (mapOnIdent tv) cs <*>
+  pure Transpose <*> mapOnCertificates tv cs <*>
        pure k <*> pure n <*>
        mapOnExp tv e3 <*> pure loc
 mapExpM tv (Map fun e int loc) =
@@ -187,11 +189,11 @@ mapExpM tv (Redomap redfun mapfun accexp arrexp intype loc) =
        mapOnExp tv accexp <*> mapOnExp tv arrexp <*>
        mapOnType tv intype <*> pure loc
 mapExpM tv (Split cs nexp arrexp t loc) =
-  pure Split <*> mapM (mapOnIdent tv) cs <*>
+  pure Split <*> mapOnCertificates tv cs <*>
        mapOnExp tv nexp <*> mapOnExp tv arrexp <*>
        mapOnType tv t <*> pure loc
 mapExpM tv (Concat cs x y loc) =
-  pure Concat <*> mapM (mapOnIdent tv) cs <*>
+  pure Concat <*> mapOnCertificates tv cs <*>
        mapOnExp tv x <*> mapOnExp tv y <*> pure loc
 mapExpM tv (Copy e loc) =
   pure Copy <*> mapOnExp tv e <*> pure loc
@@ -238,6 +240,7 @@ data Folder ty vn a m = Folder {
   , foldOnPattern :: a -> TupIdentBase ty vn -> m a
   , foldOnIdent :: a -> IdentBase ty vn -> m a
   , foldOnValue :: a -> Value -> m a
+  , foldOnCertificates :: a -> CertificatesBase ty vn -> m a
   }
 
 -- | A folding operation where the accumulator is returned verbatim.
@@ -250,6 +253,7 @@ identityFolder = Folder {
                  , foldOnPattern = const . return
                  , foldOnIdent = const . return
                  , foldOnValue = const . return
+                 , foldOnCertificates = const . return
                  }
 
 -- | Perform a left-reduction across the immediate children of an
@@ -266,6 +270,7 @@ foldExpM f x e = execStateT (mapExpM m e) x
             , mapOnPattern = wrap foldOnPattern
             , mapOnIdent = wrap foldOnIdent
             , mapOnValue = wrap foldOnValue
+            , mapOnCertificates = wrap foldOnCertificates
             }
         wrap op k = do
           v <- get
@@ -287,6 +292,7 @@ data Walker ty vn m = Walker {
   , walkOnPattern :: TupIdentBase ty vn -> m ()
   , walkOnIdent :: IdentBase ty vn -> m ()
   , walkOnValue :: Value -> m ()
+  , walkOnCertificates :: CertificatesBase ty vn -> m ()
   }
 
 -- | A no-op traversal.
@@ -299,6 +305,7 @@ identityWalker = Walker {
                  , walkOnPattern = const $ return ()
                  , walkOnIdent = const $ return ()
                  , walkOnValue = const $ return ()
+                 , walkOnCertificates = const $ return ()
                  }
 
 -- | Perform a monadic action on each of the immediate children of an
@@ -316,6 +323,7 @@ walkExpM f = void . mapExpM m
             , mapOnPattern = wrap walkOnPattern
             , mapOnIdent = wrap walkOnIdent
             , mapOnValue = wrap walkOnValue
+            , mapOnCertificates = wrap walkOnCertificates
             }
         wrap op k = op f k >> return k
 
@@ -397,6 +405,7 @@ freeInExp = execWriter . expFree
                 , walkOnLambda = lambdaFree
                 , walkOnTupleLambda = lambdaFree . tupleLambdaToLambda
                 , walkOnIdent = identFree
+                , walkOnCertificates = mapM_ identFree
                 }
 
         identFree ident =

@@ -256,6 +256,7 @@ rename = Mapper {
          , mapOnTupleLambda = renameTupleLambda
          , mapOnType = renameType
          , mapOnValue = return
+         , mapOnCertificates = mapM repl
          }
 
 renameLambda :: (TypeBox ty, VarName f, VarName t) =>
