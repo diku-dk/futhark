@@ -305,20 +305,6 @@ evalExp (Apply fname [(arg, _)] _ loc)
   tell [(loc, ppValue arg')]
   return arg'
 
-evalExp (Apply fname args _ loc)
-  | "assertZip" <- nameToString fname = do
-  args' <- mapM (evalExp . fst) args
-  szs   <- mapM getArrSize args'
-  case szs of
-    n:ns | not $ all (==n) ns ->
-      bad $ TypeError loc $
-            "assertZip failed! args: " ++ intercalate ", " (map ppValue args')
-    _ -> return $ LogVal True
-  where
-    getArrSize :: Value -> L0M Int
-    getArrSize aa@(ArrayVal {}) = return $ arraySize aa
-    getArrSize _ = bad $ TypeError loc "one of assertZip args not an array val!"
-
 evalExp (Apply fname args _ _) = do
   fun <- lookupFun fname
   args' <- mapM (evalExp . fst) args
@@ -330,7 +316,7 @@ evalExp (LetPat pat e body pos) = do
     Nothing   -> bad $ TypeError pos "evalExp Let pat"
     Just bnds -> local (`bindVars` bnds) $ evalExp body
 
-evalExp (LetWith name src idxs ve body pos) = do
+evalExp (LetWith _ name src idxs ve body pos) = do
   v <- lookupVar $ identName src
   idxs' <- mapM evalExp idxs
   vev <- evalExp ve
@@ -346,7 +332,7 @@ evalExp (LetWith name src idxs ve body pos) = do
           where upper = snd $ bounds arr
         change _ _ _ = bad $ TypeError pos "evalExp Let Id"
 
-evalExp (Index (Ident name _ _) idxs _ pos) = do
+evalExp (Index _ (Ident name _ _) idxs _ pos) = do
   v <- lookupVar name
   idxs' <- mapM evalExp idxs
   foldM idx v idxs'
@@ -364,7 +350,7 @@ evalExp (Iota e pos) = do
       | otherwise -> bad $ NegativeIota pos x
     _ -> bad $ TypeError pos "evalExp Iota"
 
-evalExp (Size i e pos) = do
+evalExp (Size _ i e pos) = do
   v <- evalExp e
   case drop i $ arrayShape v of
     [] -> bad $ TypeError pos "evalExp Size"
@@ -379,7 +365,7 @@ evalExp (Replicate e1 e2 pos) = do
       | otherwise -> bad $ NegativeReplicate pos x
     _   -> bad $ TypeError pos "evalExp Replicate"
 
-evalExp re@(Reshape shapeexp arrexp pos) = do
+evalExp re@(Reshape _ shapeexp arrexp pos) = do
   shape <- mapM (asInt <=< evalExp) shapeexp
   arr <- evalExp arrexp
   let rt = stripArray 1 $ typeOf re
@@ -399,7 +385,7 @@ evalExp re@(Reshape shapeexp arrexp pos) = do
         asInt (IntVal x) = return x
         asInt _ = bad $ TypeError pos "evalExp Reshape int"
 
-evalExp (Transpose k n arrexp _) =
+evalExp (Transpose _ k n arrexp _) =
   transposeArray k n <$> evalExp arrexp
 
 evalExp (Map fun e _ pos) = do
@@ -455,7 +441,7 @@ evalExp (Redomap redfun mapfun accexp arrexp _ pos) = do
   let foldfun acc x = applyLambda redfun [acc, x]
   foldM foldfun startacc vs'
 
-evalExp (Split splitexp arrexp intype pos) = do
+evalExp (Split _ splitexp arrexp intype pos) = do
   split <- evalExp splitexp
   vs <- arrToList pos =<< evalExp arrexp
   case split of
@@ -466,12 +452,17 @@ evalExp (Split splitexp arrexp intype pos) = do
       | otherwise        -> bad $ IndexOutOfBounds pos (length vs) i
     _ -> bad $ TypeError pos "evalExp Split"
 
-evalExp (Concat arr1exp arr2exp pos) = do
+evalExp (Concat _ arr1exp arr2exp pos) = do
   elems1 <- arrToList pos =<< evalExp arr1exp
   elems2 <- arrToList pos =<< evalExp arr2exp
   return $ arrayVal (elems1 ++ elems2) $ stripArray 1 $ typeOf arr1exp
 
 evalExp (Copy e _) = evalExp e
+
+evalExp (Assert e loc) = do
+  v <- evalExp e
+  case v of LogVal True -> return $ LogVal True
+            _ -> bad $ TypeError loc "Assertion failed"
 
 evalExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody pos) = do
   bound <- evalExp boundexp
@@ -484,19 +475,19 @@ evalExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody pos) = do
           binding [(loopvar, IntVal i)] $
             evalExp $ LetPat mergepat (Literal mergeval pos) loopbody pos
 
-evalExp (Map2 fun arrexps _ loc) = do
+evalExp (Map2 _ fun arrexps _ loc) = do
   vss <- mapM (arrToList loc <=< evalExp) arrexps
   vs' <- mapM (applyTupleLambda fun) $ transpose vss
   return $ arrays (fromDecl $ Elem $ Tuple ret) vs'
   where TupleLambda _ _ ret _ = fun
 
-evalExp (Reduce2 fun accexps arrexps _ loc) = do
+evalExp (Reduce2 _ fun accexps arrexps _ loc) = do
   startaccs <- mapM evalExp accexps
   vss <- mapM (arrToList loc <=< evalExp) arrexps
   let foldfun acc x = applyTupleLambda fun $ untuple acc ++ x
   foldM foldfun (tuple startaccs) (transpose vss)
 
-evalExp (Scan2 fun startexps arrexps _ loc) = do
+evalExp (Scan2 _ fun startexps arrexps _ loc) = do
   startvals <- mapM evalExp startexps
   vss <- mapM (arrToList loc <=< evalExp) arrexps
   (acc, vals') <- foldM scanfun (tuple startvals, []) $ transpose vss
@@ -505,7 +496,7 @@ evalExp (Scan2 fun startexps arrexps _ loc) = do
             acc' <- applyTupleLambda fun $ untuple acc ++ x
             return (acc', acc' : l)
 
-evalExp e@(Filter2 fun arrexp loc) = do
+evalExp e@(Filter2 _ fun arrexp loc) = do
   vss <- mapM (arrToList loc <=< evalExp) arrexp
   vss' <- filterM filt $ transpose vss
   return $ arrays (typeOf e) $ map tuple vss'
@@ -513,7 +504,7 @@ evalExp e@(Filter2 fun arrexp loc) = do
                     case res of (TupVal [LogVal True]) -> return True
                                 _                      -> return False
 
-evalExp (Redomap2 _ innerfun accexp arrexps _ loc) = do
+evalExp (Redomap2 _ _ innerfun accexp arrexps _ loc) = do
   startaccs <- mapM evalExp accexp
   vss <- mapM (arrToList loc <=< evalExp) arrexps
   let foldfun acc x = applyTupleLambda innerfun $ untuple acc ++ x

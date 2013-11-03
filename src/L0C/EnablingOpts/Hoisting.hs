@@ -27,7 +27,7 @@ import L0C.FreshNames
 
 data BindNeed = LoopBind TupIdent Exp Ident Exp Exp
               | LetBind TupIdent Exp [(TupIdent, Exp)]
-              | LetWithBind Ident Ident [Exp] Exp
+              | LetWithBind Certificates Ident Ident [Exp] Exp
                 deriving (Show, Eq, Ord)
 
 type NeedSet = S.Set BindNeed
@@ -39,8 +39,8 @@ asTail (LoopBind mergepat mergeexp i bound loopbody) =
 asTail (LetBind pat e _) =
   LetPat pat e (TupLit [] loc) loc
     where loc = srclocOf pat
-asTail (LetWithBind dest src is ve) =
-  LetWith dest src is ve (Var dest) $ srclocOf dest
+asTail (LetWithBind cs dest src is ve) =
+  LetWith cs dest src is ve (Var dest) $ srclocOf dest
 
 requires :: BindNeed -> S.Set VName
 requires (LetBind pat e ((altpat,alte):alts)) =
@@ -50,7 +50,7 @@ requires bnd = S.map identName $ freeInExp $ asTail bnd
 provides :: BindNeed -> S.Set VName
 provides (LoopBind mergepat _ _ _ _) = patNames mergepat
 provides (LetBind pat _ _) = patNames pat
-provides (LetWithBind dest _ _ _) = S.singleton $ identName dest
+provides (LetWithBind _ dest _ _ _) = S.singleton $ identName dest
 
 data Need = Need { needBindings :: NeedSet
                  }
@@ -95,7 +95,7 @@ lookupShapeBindings = delve S.empty
     recurse s m (DimSizes sz) =
       map DimSizes $ filter (not . all (==Nothing)) $
           cartesian $ map inspect sz
-      where inspect (Just (Size i (Var k') _)) =
+      where inspect (Just (Size _ i (Var k') _)) =
               case delve (k' `S.insert` s) k' m of
                 [] -> [Nothing]
                 l  -> map (fill i) l
@@ -109,17 +109,17 @@ sameShape m x y =
   any matches $ lookupShapeBindings x m
     where matches (DimSizes sz) =
             all ok $ zip sz [0..]
-          ok (Just (Size i (Var v) _), j) =
+          ok (Just (Size _ i (Var v) _), j) =
             i == j && v == y
           ok _ = False
 
 slices :: Ident -> ShapeMap -> [(Ident, Int)]
 slices x m = mapMaybe isSlice $ lookupShapeBindings x m
-  where isSlice (DimSizes (Just (Size i (Var y) _):sz))
+  where isSlice (DimSizes (Just (Size _ i (Var y) _):sz))
           | all (isDimOf y) $ zip sz [i+1..] = Just (y, i)
           | otherwise = Nothing
         isSlice _ = Nothing
-        isDimOf y (Just (Size i (Var z) _), j) =
+        isDimOf y (Just (Size _ i (Var z) _), j) =
           y == z && i == j
         isDimOf _ _ = False
 
@@ -158,7 +158,7 @@ addNewBinding k e = do
   return ident
 
 addBinding :: TupIdent -> Exp -> HoistM ()
-addBinding pat e@(Size i (Var x) _) = do
+addBinding pat e@(Size _ i (Var x) _) = do
   let mkAlt (DimSizes ses) = case drop i ses of
                                Just se:_ -> [(pat, se)]
                                _        -> []
@@ -192,7 +192,7 @@ addSeveralBindings pat e alts =
 bindLet :: TupIdent -> Exp -> HoistM a -> HoistM a
 bindLet (Id dest) (Var src) m = do
   addBinding (Id dest) (Var src)
-  case identType src of Array {} -> withShape dest (slice 0 src) m
+  case identType src of Array {} -> withShape dest (slice [] 0 src) m
                         _        -> m
 
 bindLet pat@(Id dest) e@(Iota (Var x) _) m = do
@@ -203,73 +203,73 @@ bindLet pat@(Id dest) e@(Replicate (Var x) _ _) m = do
   addBinding pat e
   withShape dest [Var x] m
 
-bindLet pat@(TupId [dest1, dest2] _) e@(Split (Var n) (Var src) _ loc) m = do
+bindLet pat@(TupId [dest1, dest2] _) e@(Split cs (Var n) (Var src) _ loc) m = do
   addBinding pat e
-  src_sz <- addNewBinding "split_src_sz" $ Size 0 (Var src) loc
+  src_sz <- addNewBinding "split_src_sz" $ Size cs 0 (Var src) loc
   split_sz <- addNewBinding "split_sz" $
               BinOp Minus (Var src_sz) (Var n) (Elem Int) loc
   withShapes [(dest1, Var n : rest),
               (dest2, Var split_sz : rest)] m
-    where rest = [ Size i (Var src) loc
+    where rest = [ Size cs i (Var src) loc
                    | i <- [1.. arrayDims (identType src) - 1]]
 
-bindLet pat@(Id dest) e@(Concat (Var x) (Var y) loc) m = do
-  concat_x <- addNewBinding "concat_x" $ Size 0 (Var x) loc
-  concat_y <- addNewBinding "concat_y" $ Size 0 (Var y) loc
+bindLet pat@(Id dest) e@(Concat cs (Var x) (Var y) loc) m = do
+  concat_x <- addNewBinding "concat_x" $ Size cs 0 (Var x) loc
+  concat_y <- addNewBinding "concat_y" $ Size cs 0 (Var y) loc
   concat_sz <- addNewBinding "concat_sz" $
                BinOp Plus (Var concat_x) (Var concat_y) (Elem Int) loc
   withShape dest (Var concat_sz :
-                  [Size i (Var x) loc | i <- [1..arrayDims (identType x) - 1]]
+                  [Size cs i (Var x) loc | i <- [1..arrayDims (identType x) - 1]]
                  ) $ addBinding pat e >> m
 
-bindLet pat e@(Map2 _ srcs _ _) m = do
+bindLet pat e@(Map2 cs _ srcs _ _) m = do
   addBinding pat e
-  withShapes (sameOuterShapes $ S.toList (patIdents pat) ++ vars srcs) m
+  withShapes (sameOuterShapes cs $ S.toList (patIdents pat) ++ vars srcs) m
 
-bindLet pat e@(Reduce2 _ _ srcs _ _) m = do
+bindLet pat e@(Reduce2 cs _ _ srcs _ _) m = do
   addBinding pat e
-  withShapes (sameOuterShapesExps srcs) m
+  withShapes (sameOuterShapesExps cs srcs) m
 
-bindLet pat e@(Scan2 _ _ srcs _ _) m = do
+bindLet pat e@(Scan2 cs _ _ srcs _ _) m = do
   addBinding pat e
-  withShapes (sameOuterShapesExps srcs) m
+  withShapes (sameOuterShapesExps cs srcs) m
 
-bindLet pat e@(Filter2 _ srcs _) m = do
+bindLet pat e@(Filter2 cs _ srcs _) m = do
   addBinding pat e
-  withShapes (sameOuterShapesExps srcs) m
+  withShapes (sameOuterShapesExps cs srcs) m
 
-bindLet pat e@(Redomap2 _ _ _ srcs _ _) m = do
+bindLet pat e@(Redomap2 cs _ _ _ srcs _ _) m = do
   addBinding pat e
-  withShapes (sameOuterShapesExps srcs) m
+  withShapes (sameOuterShapesExps cs srcs) m
 
-bindLet pat@(Id dest) e@(Index src idxs _ _) m = do
+bindLet pat@(Id dest) e@(Index cs src idxs _ _) m = do
   addBinding pat e
-  withShape dest (slice (length idxs) src) m
+  withShape dest (slice cs (length idxs) src) m
 
-bindLet pat@(Id dest) e@(Transpose k n (Var src) loc) m = do
+bindLet pat@(Id dest) e@(Transpose cs k n (Var src) loc) m = do
   addBinding pat e
   withShape dest dims m
     where dims = transposeIndex k n
-                 [Size i (Var src) loc
+                 [Size cs i (Var src) loc
                   | i <- [0..arrayDims (identType src) - 1]]
 
 bindLet pat e m = do
   addBinding pat e
   m
 
-bindLetWith :: Ident -> Ident -> [Exp] -> Exp -> HoistM a -> HoistM a
-bindLetWith dest src is ve m = do
-  tell $ Need $ S.singleton $ LetWithBind dest src is ve
-  withShape dest (slice 0 src) m
+bindLetWith :: Certificates -> Ident -> Ident -> [Exp] -> Exp -> HoistM a -> HoistM a
+bindLetWith cs dest src is ve m = do
+  tell $ Need $ S.singleton $ LetWithBind cs dest src is ve
+  withShape dest (slice [] 0 src) m
 
 bindLoop :: TupIdent -> Exp -> Ident -> Exp -> Exp -> HoistM a -> HoistM a
 bindLoop pat e i bound body m = do
   tell $ Need $ S.singleton $ LoopBind pat e i bound body
   m
 
-slice :: Int -> Ident -> [Exp]
-slice d k = [ Size i (Var k) $ srclocOf k
-              | i <- [d..arrayDims (identType k)-1]]
+slice :: Certificates -> Int -> Ident -> [Exp]
+slice cs d k = [ Size cs i (Var k) $ srclocOf k
+                 | i <- [d..arrayDims (identType k)-1]]
 
 withShape :: Ident -> [Exp] -> HoistM a -> HoistM a
 withShape dest src =
@@ -285,14 +285,14 @@ withShapes ((Id dest, es):rest) m =
 withShapes (_:rest) m =
   withShapes rest m
 
-sameOuterShapesExps :: [Exp] -> [(TupIdent, [Exp])]
-sameOuterShapesExps = sameOuterShapes . vars
+sameOuterShapesExps :: Certificates -> [Exp] -> [(TupIdent, [Exp])]
+sameOuterShapesExps cs = sameOuterShapes cs . vars
 
-sameOuterShapes :: [Ident] -> [(TupIdent, [Exp])]
-sameOuterShapes = outer' []
+sameOuterShapes :: Certificates -> [Ident] -> [(TupIdent, [Exp])]
+sameOuterShapes cs = outer' []
   where outer' _ [] = []
         outer' prev (k:ks) =
-          [ (Id k, [Size 0 (Var k') $ srclocOf k])
+          [ (Id k, [Size cs 0 (Var k') $ srclocOf k])
             | k' <- prev ++ ks ] ++
           outer' (k:prev) ks
 
@@ -326,9 +326,9 @@ addBindings need =
           in case map snd $ sortBy (comparing fst) $ map (score m) $ (pat,e):alts of
                (pat',e'):_ -> add pat' e'
                _           -> add pat e
-        comb (m, outer) bind@(LetWithBind dest src is ve) =
+        comb (m, outer) bind@(LetWithBind cs dest src is ve) =
           (m `M.union` distances m bind,
-           \inner -> outer $ LetWith dest src is ve inner $ srclocOf inner)
+           \inner -> outer $ LetWith cs dest src is ve inner $ srclocOf inner)
 
 score :: M.Map VName Int -> (TupIdent, Exp) -> (Int, (TupIdent, Exp))
 score m (p, e) = (S.fold f 0 $ freeNamesInExp e, (p, e))
@@ -362,7 +362,7 @@ distances m need = M.fromList [ (k, d+cost) | k <- S.toList outs ]
           case need of
             LetBind pat e _ ->
               (patNames pat, freeNamesInExp e, expCost e)
-            LetWithBind dest src is ve ->
+            LetWithBind _ dest src is ve ->
               (S.singleton $ identName dest,
                identName src `S.insert`
                mconcat (map freeNamesInExp (ve:is)),
@@ -439,9 +439,9 @@ uniqPat (Id k)         = unique $ identType k
 uniqPat (TupId pats _) = any uniqPat pats
 
 isUniqueBinding :: BlockPred
-isUniqueBinding _ (LoopBind pat _ _ _ _)   = uniqPat pat
-isUniqueBinding _ (LetBind pat _ _)        = uniqPat pat
-isUniqueBinding _ (LetWithBind dest _ _ _) = unique $ identType dest
+isUniqueBinding _ (LoopBind pat _ _ _ _)     = uniqPat pat
+isUniqueBinding _ (LetBind pat _ _)          = uniqPat pat
+isUniqueBinding _ (LetWithBind _ dest _ _ _) = unique $ identType dest
 
 isConsumed :: BlockPred
 isConsumed body need =
@@ -456,10 +456,10 @@ hoistInExp (If c e1 e2 t loc) = do
 hoistInExp (LetPat pat e body _) = do
   e' <- hoistInExp e
   bindLet pat e' $ hoistInExp body
-hoistInExp (LetWith dest src idxs ve body _) = do
+hoistInExp (LetWith cs dest src idxs ve body _) = do
   idxs' <- mapM hoistInExp idxs
   ve' <- hoistInExp ve
-  bindLetWith dest src idxs' ve' $ hoistInExp body
+  bindLetWith cs dest src idxs' ve' $ hoistInExp body
 hoistInExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody _) = do
   mergeexp' <- hoistInExp mergeexp
   boundexp' <- hoistInExp boundexp
@@ -467,30 +467,30 @@ hoistInExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody _) = do
                hoistInExp loopbody
   bindLoop mergepat mergeexp' loopvar boundexp' loopbody' $ hoistInExp letbody
   where boundnames = identName loopvar `S.insert` patNames mergepat
-hoistInExp e@(Map2 (TupleLambda params _ _ _) arrexps _ _) =
+hoistInExp e@(Map2 cs (TupleLambda params _ _ _) arrexps _ _) =
   hoistInSOAC e arrexps $ \ks ->
-    withShapes (zip (map (Id . fromParam) params) $ map (slice 1) ks) $
-    withShapes (sameOuterShapesExps arrexps) $
+    withShapes (zip (map (Id . fromParam) params) $ map (slice cs 1) ks) $
+    withShapes (sameOuterShapesExps cs arrexps) $
     hoistInExpBase e
-hoistInExp e@(Reduce2 (TupleLambda params _ _ _) accexps arrexps _ _) =
-  hoistInSOAC e arrexps $ \ks ->
-    withShapes (zip (map (Id . fromParam) $ drop (length accexps) params)
-               $ map (slice 1) ks) $
-    withShapes (sameOuterShapesExps arrexps) $
-    hoistInExpBase e
-hoistInExp e@(Scan2 (TupleLambda params _ _ _) accexps arrexps _ _) =
+hoistInExp e@(Reduce2 cs (TupleLambda params _ _ _) accexps arrexps _ _) =
   hoistInSOAC e arrexps $ \ks ->
     withShapes (zip (map (Id . fromParam) $ drop (length accexps) params)
-               $ map (slice 1) ks) $
-    withShapes (sameOuterShapesExps arrexps) $
+               $ map (slice cs 1) ks) $
+    withShapes (sameOuterShapesExps cs arrexps) $
     hoistInExpBase e
-hoistInExp e@(Redomap2 (TupleLambda redparams _ _ _) (TupleLambda mapparams _ _ _)
+hoistInExp e@(Scan2 cs (TupleLambda params _ _ _) accexps arrexps _ _) =
+  hoistInSOAC e arrexps $ \ks ->
+    withShapes (zip (map (Id . fromParam) $ drop (length accexps) params)
+               $ map (slice cs 1) ks) $
+    withShapes (sameOuterShapesExps cs arrexps) $
+    hoistInExpBase e
+hoistInExp e@(Redomap2 cs (TupleLambda redparams _ _ _) (TupleLambda mapparams _ _ _)
               accexps arrexps _ _) =
   hoistInSOAC e arrexps $ \ks ->
-    withShapes (zip (map (Id . fromParam) mapparams) $ map (slice 1) ks) $
+    withShapes (zip (map (Id . fromParam) mapparams) $ map (slice cs 1) ks) $
     withShapes (zip (map (Id . fromParam) $ drop (length accexps) redparams)
-               $ map (slice 1) ks) $
-    withShapes (sameOuterShapesExps arrexps) $
+               $ map (slice cs 1) ks) $
+    withShapes (sameOuterShapesExps cs arrexps) $
     hoistInExpBase e
 hoistInExp e = hoistInExpBase e
 

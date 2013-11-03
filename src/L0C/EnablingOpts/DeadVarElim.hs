@@ -110,15 +110,9 @@ deadCodeElimFun (fname, rettype, args, body, pos) = do
 deadCodeElimExp :: Exp -> DCElimM Exp
 
 -----------------------------------------------------------------------------
--- 'trace' and 'assertZip' exhibit side effects and should not be removed!
+-- 'trace' exhibits side effects and should not be removed!
 deadCodeElimExp (LetPat pat (Apply fname args tp p) body pos)
   | "trace" <- nameToString fname = do
-    let ids = getBnds pat
-    args' <- mapM (deadCodeElimExp . fst) args
-    body' <- binding ids $ deadCodeElimExp body
-    return $ LetPat pat (Apply fname (zip args' $ map snd args) tp p) body' pos
-deadCodeElimExp (LetPat pat (Apply fname args tp p) body pos)
-  | "assertZip" <- nameToString fname = do
     let ids = getBnds pat
     args' <- mapM (deadCodeElimExp . fst) args
     body' <- binding ids $ deadCodeElimExp body
@@ -136,7 +130,8 @@ deadCodeElimExp (LetPat pat e body pos) = do
             return $ LetPat pat e' body' pos
 
 
-deadCodeElimExp (LetWith nm src inds el body pos) = do
+deadCodeElimExp (LetWith cs nm src inds el body pos) = do
+    cs' <- mapM deadCodeElimIdent cs
     (body', noref) <- collectRes [identName nm] $ binding [identName nm] $ deadCodeElimExp body
     
     if noref 
@@ -150,27 +145,13 @@ deadCodeElimExp (LetWith nm src inds el body pos) = do
                     _ <- tell $ DCElimRes False (S.insert srcnm S.empty)
                     inds' <- mapM deadCodeElimExp inds
                     el'   <- deadCodeElimExp el
-                    return $ LetWith nm src inds' el' body' pos
+                    return $ LetWith cs' nm src inds' el' body' pos
 
-
-deadCodeElimExp e@(Var (Ident vnm _ pos)) = do 
-    in_vtab <- asks $ S.member vnm . envVtable
-    if not in_vtab
-    then badDCElimM $ VarNotInFtab pos vnm
-    else do
-            _ <- tell $ DCElimRes False (S.insert vnm S.empty)
-            return e
-
-
-deadCodeElimExp (Index s idxs t2 pos) = do
-    let vnm = identName s
-    in_vtab <- asks $ S.member vnm . envVtable
-    if not in_vtab
-    then badDCElimM $ VarNotInFtab pos vnm
-    else do
-            _ <- tell $ DCElimRes False (S.insert vnm S.empty)
-            idxs' <- mapM deadCodeElimExp idxs
-            return $ Index s idxs' t2 pos
+deadCodeElimExp (Index cs s idxs t2 pos) = do
+  s' <- deadCodeElimIdent s
+  cs' <- mapM deadCodeElimIdent cs
+  idxs' <- mapM deadCodeElimExp idxs
+  return $ Index cs' s' idxs' t2 pos
 
 deadCodeElimExp (DoLoop mergepat mergeexp idd n loopbdy letbdy pos) = do
     let idnms = getBnds mergepat
@@ -189,7 +170,16 @@ deadCodeElimExp e = mapExpM mapper e
                    mapOnExp = deadCodeElimExp
                  , mapOnLambda = deadCodeElimLambda
                  , mapOnTupleLambda = deadCodeElimTupleLambda
+                 , mapOnIdent = deadCodeElimIdent
                  }
+
+deadCodeElimIdent :: Ident -> DCElimM Ident
+deadCodeElimIdent ident@(Ident vnm _ pos) = do
+  in_vtab <- asks $ S.member vnm . envVtable
+  if not in_vtab
+  then badDCElimM $ VarNotInFtab pos vnm
+  else do tell $ DCElimRes False (S.insert vnm S.empty)
+          return ident
 
 deadCodeElimLambda :: Lambda -> DCElimM Lambda
 deadCodeElimLambda (AnonymFun params body ret pos) = do

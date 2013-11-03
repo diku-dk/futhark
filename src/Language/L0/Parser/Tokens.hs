@@ -27,6 +27,7 @@ data Token = IF
            | MOD
            | EQU
            | LTH
+           | GTH
            | LEQ
            | POW
            | SHIFTL
@@ -78,4 +79,5 @@ data Token = IF
            | FILTER2
            | MAPALL2
            | REDOMAP2
+           | ASSERT
              deriving (Show, Eq)

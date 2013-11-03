@@ -497,6 +497,13 @@ require ts e
   | any (typeOf e `similarTo`) ts = return e
   | otherwise = bad $ UnexpectedType (untagExp e) $ map toDecl ts
 
+-- | Variant of 'require' working on identifiers.
+requireI :: VarName vn => [TaggedType vn] -> TaggedIdent CompTypeBase vn
+         -> TypeM vn (TaggedIdent CompTypeBase vn)
+requireI ts ident
+  | any (identType ident `similarTo`) ts = return ident
+  | otherwise = bad $ UnexpectedType (untagExp $ Var ident) $ map toDecl ts
+
 rowTypeM :: VarName vn => TaggedExp CompTypeBase vn -> TypeM vn (TaggedType vn)
 rowTypeM e = maybe wrong return $ peelArray 1 $ typeOf e
   where wrong = bad $ TypeError (srclocOf e) $ "Type of expression is not array, but " ++ ppType (typeOf e) ++ "."
@@ -684,7 +691,7 @@ checkExp (Not e pos) = do
 
 checkExp (Negate e t pos) = do
   e' <- require [Elem Int, Elem Real] =<< checkExp e
-  t' <- checkAnnotation pos "result" t $ typeOf e'
+  t' <- checkAnnotation pos "negate result" t $ typeOf e'
   return $ Negate e' t' pos
 
 checkExp (If e1 e2 e3 t pos) = do
@@ -710,13 +717,6 @@ checkExp (Apply fname args t pos)
       return $ Apply fname [(e', Observe)] t' pos
     _ -> bad $ TypeError pos "Trace function takes a single parameter"
 
-checkExp (Apply fname args t pos)
-  | "assertZip" <- nameToString fname = do
-  args' <- mapM (checkExp . fst) args
-  mapM_ rowTypeM args'
-  t' <- checkAnnotation pos "return" t $ Elem Bool
-  return $ Apply fname [ (arg, Observe) | arg <- args' ] t' pos
-
 checkExp (Apply fname args rettype loc) = do
   bnd <- asks $ M.lookup fname . envFtable
   case bnd of
@@ -738,7 +738,8 @@ checkExp (LetPat pat e body pos) = do
     body' <- checkExp body
     return $ LetPat pat' e' body' pos
 
-checkExp (LetWith (Ident dest destt destpos) src idxes ve body pos) = do
+checkExp (LetWith cs (Ident dest destt destpos) src idxes ve body pos) = do
+  cs' <- mapM (requireI [Elem Bool] <=< checkIdent) cs
   src' <- checkIdent src
   idxes' <- mapM (require [Elem Int] <=< checkExp) idxes
   destt' <- checkAnnotation pos "source" destt $ identType src' `setAliases` S.empty
@@ -756,9 +757,10 @@ checkExp (LetWith (Ident dest destt destpos) src idxes ve body pos) = do
           bad $ BadLetWithValue pos
         (scope, _) <- checkBinding (Id dest') destt' mempty
         body' <- consuming src' $ scope $ checkExp body
-        return $ LetWith dest' src' idxes' ve' body' pos
+        return $ LetWith cs' dest' src' idxes' ve' body' pos
 
-checkExp (Index ident idxes restype pos) = do
+checkExp (Index cs ident idxes restype pos) = do
+  cs' <- mapM (requireI [Elem Bool] <=< checkIdent) cs
   ident' <- checkIdent ident
   observe ident'
   vt <- lookupVar (identName ident') pos
@@ -768,18 +770,19 @@ checkExp (Index ident idxes restype pos) = do
     Just et -> do
       restype' <- checkAnnotation pos "indexing result" restype et
       idxes' <- mapM (require [Elem Int] <=< checkExp) idxes
-      return $ Index ident' idxes' restype' pos
+      return $ Index cs' ident' idxes' restype' pos
 
 checkExp (Iota e pos) = do
   e' <- require [Elem Int] =<< checkExp e
   return $ Iota e' pos
 
-checkExp (Size i e pos) = do
+checkExp (Size cs i e pos) = do
   e' <- checkExp e
+  cs' <- mapM (requireI [Elem Bool] <=< checkIdent) cs
   case typeOf e' of
     Array {}
       | i >= 0 && i < arrayDims (typeOf e') ->
-        return $ Size i e' pos
+        return $ Size cs' i e' pos
       | otherwise ->
         bad $ TypeError pos $ "Type " ++ ppType (typeOf e') ++ " has no dimension " ++ show i ++ "."
     _        -> bad $ TypeError pos "Argument to size must be array."
@@ -789,17 +792,19 @@ checkExp (Replicate countexp valexp pos) = do
   valexp' <- checkExp valexp
   return $ Replicate countexp' valexp' pos
 
-checkExp (Reshape shapeexps arrexp pos) = do
+checkExp (Reshape cs shapeexps arrexp pos) = do
+  cs' <- mapM (requireI [Elem Bool] <=< checkIdent) cs
   shapeexps' <- mapM (require [Elem Int] <=< checkExp) shapeexps
   arrexp' <- checkExp arrexp
-  return (Reshape shapeexps' arrexp' pos)
+  return (Reshape cs' shapeexps' arrexp' pos)
 
-checkExp (Transpose k n arrexp pos) = do
+checkExp (Transpose cs k n arrexp pos) = do
+  cs' <- mapM (requireI [Elem Bool] <=< checkIdent) cs
   arrexp' <- checkExp arrexp
   when (arrayDims (typeOf arrexp') < n + k + 1) $
     bad $ TypeError pos $ "Argument to transpose does not have " ++
           show (n+k+1) ++ " dimensions."
-  return $ Transpose k n arrexp' pos
+  return $ Transpose cs' k n arrexp' pos
 
 checkExp (Zip arrexps pos) = do
   arrexps' <- mapM (checkExp . fst) arrexps
@@ -861,22 +866,28 @@ checkExp (Redomap outerfun innerfun accexp arrexp intype pos) = do
   intype' <- checkAnnotation pos "redomap input element" intype rt
   return $ Redomap outerfun' innerfun' accexp' arrexp' intype' pos
 
-checkExp (Split splitexp arrexp intype pos) = do
+checkExp (Split cs splitexp arrexp intype pos) = do
+  cs' <- mapM (requireI [Elem Bool] <=< checkIdent) cs
   splitexp' <- require [Elem Int] =<< checkExp splitexp
   arrexp' <- checkExp arrexp
   et <- rowTypeM arrexp'
   intype' <- checkAnnotation pos "element" intype et
-  return $ Split splitexp' arrexp' intype' pos
+  return $ Split cs' splitexp' arrexp' intype' pos
 
-checkExp (Concat arr1exp arr2exp pos) = do
+checkExp (Concat cs arr1exp arr2exp pos) = do
+  cs' <- mapM (requireI [Elem Bool] <=< checkIdent) cs
   arr1exp' <- checkExp arr1exp
   arr2exp' <- require [typeOf arr1exp'] =<< checkExp arr2exp
   _ <- rowTypeM arr2exp' -- Just check that it's an array.
-  return $ Concat arr1exp' arr2exp' pos
+  return $ Concat cs' arr1exp' arr2exp' pos
 
 checkExp (Copy e pos) = do
   e' <- checkExp e
   return $ Copy e' pos
+
+checkExp (Assert e pos) = do
+  e' <- require [Elem Bool] =<< checkExp e
+  return $ Assert e' pos
 
 -- Checking of loops is done by synthesing the (almost) equivalent
 -- function and type-checking a call to it.  The difficult part is
@@ -985,14 +996,16 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
                     (Ident loopvar (Elem Int) loc) boundexp'
                     loopbody' letbody' loc
 
-checkExp (Map2 fun arrexps intype pos) = do
+checkExp (Map2 ass fun arrexps intype pos) = do
+  ass' <- mapM (requireI [Elem Bool] <=< checkIdent) ass
   (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
   fun'    <- checkTupleLambda fun arrargs
   intype' <- checkTupleAnnotation pos "map2 input row"
              intype (map argType arrargs)
-  return $ Map2 fun' arrexps' intype' pos
+  return $ Map2 ass' fun' arrexps' intype' pos
 
-checkExp (Reduce2 fun startexps arrexps intype pos) = do
+checkExp (Reduce2 ass fun startexps arrexps intype pos) = do
+  ass' <- mapM (requireI [Elem Bool] <=< checkIdent) ass
   (startexps', startargs) <- unzip <$> mapM checkArg startexps
   let startt = Elem $ Tuple $ map typeOf startexps'
   (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
@@ -1003,9 +1016,10 @@ checkExp (Reduce2 fun startexps arrexps intype pos) = do
   unless (funret `subtypeOf` startt) $
     bad $ TypeError pos $ "Accumulator is of type " ++ ppType startt ++
           ", but reduce function returns type " ++ ppType funret ++ "."
-  return $ Reduce2 fun' startexps' arrexps' intype' pos
+  return $ Reduce2 ass' fun' startexps' arrexps' intype' pos
 
-checkExp (Scan2 fun startexps arrexps intypes pos) = do
+checkExp (Scan2 ass fun startexps arrexps intypes pos) = do
+  ass' <- mapM (requireI [Elem Bool] <=< checkIdent) ass
   (startexps', startargs) <- unzip <$> mapM checkArg startexps
   (arrexps', arrargs)   <- unzip <$> mapM checkSOACArrayArg arrexps
   intype'   <- checkTupleAnnotation pos "element"
@@ -1020,17 +1034,19 @@ checkExp (Scan2 fun startexps arrexps intypes pos) = do
   unless (funret `subtypeOf` intupletype) $
     bad $ TypeError pos $ "Array element value is of type " ++ ppType intupletype ++
                           ", but scan function returns type " ++ ppType funret ++ "."
-  return $ Scan2 fun' startexps' arrexps' intype' pos
+  return $ Scan2 ass' fun' startexps' arrexps' intype' pos
 
-checkExp (Filter2 fun arrexps pos) = do
+checkExp (Filter2 ass fun arrexps pos) = do
+  ass' <- mapM (requireI [Elem Bool] <=< checkIdent) ass
   (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
   fun' <- checkTupleLambda fun arrargs
   let funret = tupleLambdaType fun' $ map argType arrargs
   when (funret /= [Elem Bool]) $
     bad $ TypeError pos "Filter2 function does not return bool."
-  return $ Filter2 fun' arrexps' pos
+  return $ Filter2 ass' fun' arrexps' pos
 
-checkExp (Redomap2 outerfun innerfun accexps arrexps intypes pos) = do
+checkExp (Redomap2 ass outerfun innerfun accexps arrexps intypes pos) = do
+  ass' <- mapM (requireI [Elem Bool] <=< checkIdent) ass
   (arrexps', arrargs)   <- unzip <$> mapM checkSOACArrayArg arrexps
   (accexps', accargs)   <- unzip <$> mapM checkArg accexps
   (outerfun', outerarg) <- checkTupleLambdaArg outerfun $ accargs ++ accargs
@@ -1048,7 +1064,7 @@ checkExp (Redomap2 outerfun innerfun accexps arrexps intypes pos) = do
 
   intype' <- checkTupleAnnotation pos "redomap2 input element"
              intypes (map argType arrargs)
-  return $ Redomap2 outerfun' innerfun' accexps' arrexps' intype' pos
+  return $ Redomap2 ass' outerfun' innerfun' accexps' arrexps' intype' pos
 
 checkSOACArrayArg :: (TypeBox ty, VarName vn) =>
                      TaggedExp ty vn -> TypeM vn (TaggedExp CompTypeBase vn, Arg vn)
@@ -1109,7 +1125,7 @@ checkRelOp op tl e1 e2 t pos = do
   e1' <- require (map Elem tl) =<< checkExp e1
   e2' <- require (map Elem tl) =<< checkExp e2
   _ <- unifyExpTypes e1' e2'
-  t' <- checkAnnotation pos "result" t $ Elem Bool
+  t' <- checkAnnotation pos (opStr op ++ " result") t $ Elem Bool
   return $ BinOp op e1' e2' t' pos
 
 checkPolyBinOp :: (TypeBox ty, VarName vn) =>
@@ -1120,7 +1136,7 @@ checkPolyBinOp op tl e1 e2 t pos = do
   e1' <- require (map Elem tl) =<< checkExp e1
   e2' <- require (map Elem tl) =<< checkExp e2
   t' <- unifyExpTypes e1' e2'
-  t'' <- checkAnnotation pos "result" t t'
+  t'' <- checkAnnotation pos (opStr op ++ " result") t t'
   return $ BinOp op e1' e2' t'' pos
 
 sequentially :: VarName vn =>

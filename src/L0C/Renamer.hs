@@ -206,25 +206,21 @@ renameFun (fname, ret, params, body, pos) =
 
 renameExp :: (TypeBox ty, VarName f, VarName t) =>
              ExpBase ty f -> RenameM f t (ExpBase ty t)
-renameExp (LetWith dest src idxs ve body pos) = do
+renameExp (LetWith cs dest src idxs ve body loc) = do
+  cs' <- mapM repl cs
   src' <- repl src
   idxs' <- mapM renameExp idxs
   ve' <- renameExp ve
   bind [dest] $ do
     dest' <- repl dest
     body' <- renameExp body
-    return (LetWith dest' src' idxs' ve' body' pos)
+    return $ LetWith cs' dest' src' idxs' ve' body' loc
 renameExp (LetPat pat e body pos) = do
   e1' <- renameExp e
   bind (patternNames pat) $ do
     pat' <- renamePattern pat
     body' <- renameExp body
     return $ LetPat pat' e1' body' pos
-renameExp (Index s idxs t pos) = do
-  s' <- repl s
-  idxs' <- mapM renameExp idxs
-  t' <- renameType t
-  return $ Index s' idxs' t' pos
 renameExp (DoLoop mergepat mergeexp loopvar e loopbody letbody pos) = do
   e' <- renameExp e
   mergeexp' <- renameExp mergeexp

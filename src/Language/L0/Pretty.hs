@@ -100,28 +100,31 @@ instance (Ord vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) where
                                     text "let" <+/> align (ppr pat) <+>
                                     equals <+> align (ppr e) <+> text "in" </>
                                     ppr body
-  pprPrec _ (LetWith dest src idxs ve body _)
+  pprPrec _ (LetWith cs dest src idxs ve body _)
     | dest == src =
-      text "let" <+> ppr dest <+> list (map ppr idxs) <+>
+      text "let" <+> ppCertificates cs <> ppr dest <+> list (map ppr idxs) <+>
       equals <+> align (ppr ve) <+>
       text "in" </> ppr body
     | otherwise =
-      text "let" <+> ppr dest <+> equals <+> ppr src <+>
+      text "let" <+> ppCertificates cs <> ppr dest <+> equals <+> ppr src <+>
       text "with" <+> list (map ppr idxs) <+> text "<-" <+> align (ppr ve) <+>
       text "in" </> ppr body
-  pprPrec _ (Index v idxs _ _) = ppr v <> list (map ppr idxs)
+  pprPrec _ (Index cs v idxs _ _) =
+    ppCertificates cs <> ppr v <> list (map ppr idxs)
   pprPrec _ (Iota e _) = text "iota" <> parens (ppr e)
-  pprPrec _ (Size i e _) = text "size" <> apply [text $ tildes $ show i, ppr e]
+  pprPrec _ (Size cs i e _) =
+    ppCertificates cs <> text "size" <> apply [text $ tildes $ show i, ppr e]
   pprPrec _ (Replicate ne ve _) =
     text "replicate" <> apply [ppr ne, align (ppr ve)]
-  pprPrec _ (Reshape shape e _) =
-    text "reshape" <> apply [apply (map ppr shape), ppr e]
-  pprPrec _ (Transpose 0 1 e _) =
-    text "transpose" <> apply [ppr e]
-  pprPrec _ (Transpose k n e _) =
-    text "transpose" <> apply [text $ tildes $ show k,
-                               text $ tildes $ show n,
-                               ppr e]
+  pprPrec _ (Reshape cs shape e _) =
+    ppCertificates cs <> text "reshape" <> apply [apply (map ppr shape), ppr e]
+  pprPrec _ (Transpose cs 0 1 e _) =
+    ppCertificates cs <> text "transpose" <> apply [ppr e]
+  pprPrec _ (Transpose cs k n e _) =
+        ppCertificates cs <>
+        text "transpose" <> apply [text $ tildes $ show k,
+                                   text $ tildes $ show n,
+                                   ppr e]
   pprPrec _ (Map lam a _ _) = ppSOAC "map" [lam] [a]
   pprPrec _ (Reduce lam e a _ _) = ppSOAC "reduce" [lam] [e, a]
   pprPrec _ (Redomap redlam maplam e a _ _) =
@@ -130,21 +133,28 @@ instance (Ord vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) where
   pprPrec _ (Filter lam a _ _) = ppSOAC "filter" [lam] [a]
   pprPrec _ (Zip es _) = text "zip" <> apply (map (ppr . fst) es)
   pprPrec _ (Unzip e _ _) = text "unzip" <> parens (ppr e)
-  pprPrec _ (Split e a _ _) = text "split" <> apply [ppr e, ppr a]
-  pprPrec _ (Concat x y _) = text "concat" <> apply [ppr x, ppr y]
+  pprPrec _ (Split cs e a _ _) =
+    ppCertificates cs <> text "split" <> apply [ppr e, ppr a]
+  pprPrec _ (Concat cs x y _) =
+    ppCertificates cs <> text "concat" <> apply [ppr x, ppr y]
   pprPrec _ (Copy e _) = text "copy" <> parens (ppr e)
+  pprPrec _ (Assert e _) = text "assert" <> parens (ppr e)
   pprPrec _ (DoLoop pat initexp i bound loopbody letbody _) =
     aliasComment pat $
     text "loop" <+> parens (ppr pat <+> equals <+> ppr initexp) <+>
     equals <+> text "for" <+> ppr i <+> text "<" <+> align (ppr bound) <+> text "do" </>
     indent 2 (ppr loopbody) <+> text "in" </>
     ppr letbody
-  pprPrec _ (Map2 lam as _ _) = ppSOAC "map2" [lam] as
-  pprPrec _ (Reduce2 lam es as _ _) = ppSOAC "reduce2" [lam] $ es++as
-  pprPrec _ (Redomap2 redlam maplam es as _ _) =
-    ppSOAC "redomap2" [redlam, maplam] $ es++as
-  pprPrec _ (Scan2 lam es as _ _) = ppSOAC "scan2" [lam] $ es++as
-  pprPrec _ (Filter2 lam as _) = ppSOAC "filter2" [lam] as
+  pprPrec _ (Map2 cs lam as _ _) =
+    ppCertificates cs <> ppSOAC "map2" [lam] as
+  pprPrec _ (Reduce2 cs lam es as _ _) =
+    ppCertificates cs <> ppSOAC "reduce2" [lam] (es++as)
+  pprPrec _ (Redomap2 cs redlam maplam es as _ _) =
+    ppCertificates cs <> ppSOAC "redomap2" [redlam, maplam] (es++as)
+  pprPrec _ (Scan2 cs lam es as _ _) =
+    ppCertificates cs <> ppSOAC "scan2" [lam] (es++as)
+  pprPrec _ (Filter2 cs lam as _) =
+    ppCertificates cs <> ppSOAC "filter2" [lam] as
 
 instance (Ord vn, Pretty vn) => Pretty (TupIdentBase ty vn) where
   ppr (Id ident)     = ppr ident
@@ -201,10 +211,15 @@ ppBinOp p bop x y = parensIf (p > precedence bop) $
 
 ppSOAC :: (Ord vn, Pretty vn, TypeBox ty, Pretty fn) =>
           String -> [fn] -> [ExpBase ty vn] -> Doc
-ppSOAC name [] es = text name <> apply (map ppr es)
-ppSOAC name (fun:funs) es =
-  text name <> parens (foldl ppfun (ppr fun) funs <> comma <//> commasep (map ppr es))
-  where ppfun s fun' = s <//> comma <> ppr fun'
+ppSOAC name funs es =
+  text name <> parens (ppList funs <//>
+                       commasep (map ppr es))
+  where ppList [] = empty
+        ppList as = commasep (map ppr as) <+> comma
+
+ppCertificates :: (Ord vn, TypeBox ty, Pretty vn) => CertificatesBase ty vn -> Doc
+ppCertificates [] = empty
+ppCertificates cs = text "<" <> commasep (map ppr cs) <> text ">"
 
 render80 :: Pretty a => a -> String
 render80 = pretty 80 . ppr

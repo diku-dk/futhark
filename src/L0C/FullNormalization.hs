@@ -91,11 +91,11 @@ normalizeExp (DoLoop mergepat mergeexp loopvar
   loopbody' <- insertBindings $ normalizeExp loopbody
   letbody'  <- insertBindings $ normalizeExp letbody
   return $ DoLoop mergepat mergeexp' loopvar boundexp' loopbody' letbody' loc
-normalizeExp (LetWith dest src idxes ve body loc) = do
+normalizeExp (LetWith cs dest src idxes ve body loc) = do
   idxes' <- mapM normalizeExp idxes
   ve'    <- normalizeExp ve
   body'  <- insertBindings $ normalizeExp body
-  return $ LetWith dest src idxes' ve' body' loc
+  return $ LetWith cs dest src idxes' ve' body' loc
 normalizeExp (If c te fe t loc) = do
   c'  <- normalizeExp c
   te' <- insertBindings $ normalizeExp te
