@@ -139,34 +139,14 @@ allIdentsAsList = execWriter . mapM funIdents . progFunctions
 -- I think we would just like to keep the old range
 createRangeAndSign :: Maybe Exp -> RangeM (Range, RangeSign)
 createRangeAndSign (Just e)  = do
-  computedRange <- doSomeFixPointIteration (RExp e, RExp e)
+  computedRange <- makeRangeComparable (RExp e, RExp e)
   sign <- calculateRangeSign computedRange
   return ( computedRange , sign )
 createRangeAndSign Nothing = return ( (Ninf, Pinf), Nothing )
 
--- TODO: Use Control.Monad.Fix ?
-doSomeFixPointIteration :: Range -> RangeM Range
-doSomeFixPointIteration range = do
-  newRange <- replaceWithWholeDict range
-  if newRange == range
-  then return range
-  else doSomeFixPointIteration newRange
-
-replaceWithWholeDict :: Range -> RangeM Range
-replaceWithWholeDict range = do
-  dictAsList  <- liftM M.toAscList $ asks dict
-  foldM foldingFun range dictAsList
-
-  where
-    foldingFun :: Range -> (VName , (Range, RangeSign)) -> RangeM Range
-    foldingFun (a,b) (ident, (idRange,_)) = do
-      (a',_) <- substitute ident idRange a
-      (_,b') <- substitute ident idRange b
-      return (a',b')
-
 ----------------------------------------
--- Make comparisons with ragne information
----------------------------------------
+-- Comparisons based on range dict
+----------------------------------------
 
 rangeCompare :: RangeDict -> Exp -> Exp -> Either EnablingOptError RangeInequality
 rangeCompare rdict e1 e2 = do
@@ -177,28 +157,69 @@ rangeCompare rdict e1 e2 = do
 rangeCompareZero :: RangeDict -> Exp -> Either EnablingOptError RangeInequality
 rangeCompareZero rdict e = do
   let env = RangeEnv { dict = rdict }
-  let action = calculateRangeSign =<< expToComparableRange e
-  sign <- runRangeM action env
+  sign <- runRangeM (determineRExpSign $ RExp e) env
   case sign of
     (Just Neg)     -> return $ Just IGT
     (Just NonPos)  -> return $ Just IGTE
     (Just Zero)    -> return $ Just IEQ
     (Just NonNeg)  -> return $ Just ILTE
     (Just Pos)     -> return $ Just ILT
-    Nothing -> return Nothing
+    Nothing        -> return Nothing
 
-expToComparableRange :: Exp -> RangeM Range
-expToComparableRange e = doSomeFixPointIteration (RExp e, RExp e)
+----------------------------------------
+-- Making ranges comparable
+----------------------------------------
+
+-- Is the range currently in a state,
+--   where we can say something about it's sign?
+isComparable :: Range -> RangeM Bool
+isComparable range = do
+  sign <- atomicRangeSign range
+  case sign of
+    Nothing -> return False
+    _       -> return True
+
+-- Transform the range to a state, where we can
+--   say something about it's sign
+makeRangeComparable :: Range -> RangeM Range
+makeRangeComparable range = do
+  dictAsList  <- liftM M.toDescList $ asks dict
+  range' <- foldM foldingFun range dictAsList
+  isComp <- isComparable range'
+  return ( if isComp then range' else (Ninf, Pinf) )
+
+  where
+    foldingFun :: Range -> (VName , (Range, RangeSign)) -> RangeM Range
+    foldingFun (a,b) (ident, (idRange,_)) = do
+      isComp <- isComparable (a,b)
+      if isComp
+      then return (a,b)
+      else do (a',_) <- substitute ident idRange a
+              (_,b') <- substitute ident idRange b
+              return (a',b')
 
 ----------------------------------------
 -- Calculate range signs
----------------------------------------
+----------------------------------------
 
--- TODO: make sanity check, that we don't have something like Pos, Neg ?
+-- Calculates the sign for the range supplied,
+--   by first making the range comparable
 calculateRangeSign :: Range -> RangeM RangeSign
-calculateRangeSign (lb,ub) = do
-  s1 <- determineRExpSign lb
-  s2 <- determineRExpSign ub
+calculateRangeSign range = atomicRangeSign =<< makeRangeComparable range
+
+-- Calculates the sign for the RExp supplied,
+--   by first making the range (e,e) comparable
+determineRExpSign :: RExp -> RangeM RangeSign
+determineRExpSign e = calculateRangeSign (e,e)
+
+-- Tries to calculate the sign for the range supplied
+--   without making modifications to it.
+-- ie will return Nothing for the range (1+2, 1+3)
+-- TODO: make sanity check, that we don't have something like Pos, Neg ?
+atomicRangeSign :: Range -> RangeM RangeSign
+atomicRangeSign (lb,ub) = do
+  s1 <- atomicRExpSign lb
+  s2 <- atomicRExpSign ub
   if s1 == s2
   then return s1
   else case (s1,s2) of
@@ -210,21 +231,23 @@ calculateRangeSign (lb,ub) = do
     (Just Pos,_)     -> return $ Just Pos
     _           -> return Nothing
 
--- TODO: make work on expressions like Plus, Times and so on
-determineRExpSign :: RExp -> RangeM RangeSign
-determineRExpSign Pinf = return $ Just Pos
-determineRExpSign Ninf = return $ Just Neg
-determineRExpSign (RExp (Literal (IntVal v) _) )
-  | v < 0     = return $ Just Neg
-  | v == 0    = return $ Just Zero
-  | otherwise = return $ Just Pos
-determineRExpSign (RExp (Var (Ident vname (Elem Int) p))) = do
-  bnd <- asks $ M.lookup vname . dict
-  case bnd of
-    Just (_,sign) -> return sign
-    Nothing       -> badRangeM $ RangePropError p $
-        "determineRExpSign: Identifier was not in range dict: " ++ textual vname
-determineRExpSign _ = return Nothing
+  where
+    atomicRExpSign :: RExp -> RangeM RangeSign
+    atomicRExpSign Pinf = return $ Just Pos
+    atomicRExpSign Ninf = return $ Just Neg
+    atomicRExpSign (RExp (Literal (IntVal v) _) )
+      | v < 0     = return $ Just Neg
+      | v == 0    = return $ Just Zero
+      | otherwise = return $ Just Pos
+    atomicRExpSign (RExp (Literal _ pos) ) =
+      badRangeM $ RangePropError pos "atomicRExpSign: Encountered non integer literal"
+    atomicRExpSign (RExp (Var (Ident vname (Elem Int) p))) = do
+      bnd <- asks $ M.lookup vname . dict
+      case bnd of
+        Just (_,sign) -> return sign
+        Nothing       -> badRangeM $ RangePropError p $
+            "atomicRExpSign: Identifier was not in range dict: " ++ textual vname
+    atomicRExpSign _ = return Nothing
 
 ----------------------------------------
 -- Range substitution
