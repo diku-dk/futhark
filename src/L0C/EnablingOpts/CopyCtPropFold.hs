@@ -159,7 +159,7 @@ copyCtPropExp :: Exp -> CPropM Exp
 
 copyCtPropExp (LetWith cs nm src inds el body pos) = do
     nonRemovable $ identName src
-    cs'       <- mapM copyCtPropIdent cs
+    cs'       <- copyCtPropCerts cs
     el'       <- copyCtPropExp el
     inds'     <- mapM copyCtPropExp inds
     body'     <- copyCtPropExp body
@@ -208,7 +208,7 @@ copyCtPropExp e@(Var (Ident vnm _ pos)) = do
 copyCtPropExp eee@(Index cs idd@(Ident vnm tp p) inds tp2 pos) = do
   inds' <- mapM copyCtPropExp inds
   bnd   <- asks $ M.lookup vnm . envVtable 
-  cs'   <- mapM copyCtPropIdent cs
+  cs'   <- copyCtPropCerts cs
   case bnd of
     Nothing               -> return  $ Index cs' idd inds' tp2 pos
     Just (VarId  id' _ _) -> changed $ Index cs' (Ident id' tp p) inds' tp2 pos
@@ -330,7 +330,7 @@ copyCtPropExp (If e1 e2 e3 t pos) = do
 -----------------------------------------------------------
 copyCtPropExp (Size cs i e pos) = do
     e' <- copyCtPropExp e
-    cs' <- mapM copyCtPropIdent cs
+    cs' <- copyCtPropCerts cs
     case e' of
         Var idd -> do vv <- asks $ M.lookup (identName idd) . envVtable
                       case vv of Just (Constant a _ _) -> literal a
@@ -341,6 +341,21 @@ copyCtPropExp (Size cs i e pos) = do
             case drop i $ arrayShape a of
               []  -> badCPropM $ TypeError pos " array literal has too few dimensions! "
               n:_ -> changed $ Literal (IntVal n) pos
+
+-----------------------------------------------------------
+--- If expression is true then just replace assertion   ---
+-----------------------------------------------------------
+
+copyCtPropExp (Assert e loc) = do
+  e' <- copyCtPropExp e
+  case e' of
+    Literal (LogVal True) _ -> return $ Literal (LogVal True) loc
+    Var idd -> do
+      vv <- asks $ M.lookup (identName idd) . envVtable
+      case vv of
+        Just (Constant (LogVal True) _ _) -> return $ Literal (LogVal True) loc
+        _                                 -> return $ Assert e' loc
+    _ -> return $ Assert e' loc
 
 -----------------------------------------------------------
 --- If all params are values and function is free of IO ---
@@ -393,6 +408,7 @@ copyCtPropExp e = mapExpM mapper e
                  , mapOnLambda = copyCtPropLambda
                  , mapOnTupleLambda = copyCtPropTupleLambda
                  , mapOnIdent = copyCtPropIdent
+                 , mapOnCertificates = copyCtPropCerts
                  }
 
 copyCtPropIdent :: Ident -> CPropM Ident
@@ -403,6 +419,16 @@ copyCtPropIdent ident@(Ident vnm _ loc) = do
       Just (VarId  id' tp1 _) -> changed $ Ident id' tp1 loc
       _                       -> do nonRemovable vnm
                                     return ident
+
+copyCtPropCerts :: Certificates -> CPropM Certificates
+copyCtPropCerts = liftM concat . mapM check
+  where check idd = do
+          vv <- asks $ M.lookup (identName idd) . envVtable
+          case vv of
+            Just (Constant (LogVal True) _ _) -> changed []
+            _                                 -> do
+              nonRemovable $ identName idd
+              return [idd]
 
 copyCtPropLambda :: Lambda -> CPropM Lambda
 copyCtPropLambda (AnonymFun ids body tp pos) = do
