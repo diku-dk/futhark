@@ -17,6 +17,7 @@ import Data.Array
 import Data.List
 
 import Data.Bits
+import Data.Loc
 
 import qualified Data.Map as M
 
@@ -426,9 +427,11 @@ copyCtPropCerts = liftM concat . mapM check
           vv <- asks $ M.lookup (identName idd) . envVtable
           case vv of
             Just (Constant (LogVal True) _ _) -> changed []
+            Just (VarId  id' tp1 _)           -> changed [Ident id' tp1 loc]
             _                                 -> do
               nonRemovable $ identName idd
               return [idd]
+          where loc = srclocOf idd
 
 copyCtPropLambda :: Lambda -> CPropM Lambda
 copyCtPropLambda (AnonymFun ids body tp pos) = do
