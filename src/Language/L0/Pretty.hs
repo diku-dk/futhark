@@ -96,10 +96,11 @@ instance (Ord vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) where
                              text "else" <+> align (ppr f)
   pprPrec _ (Apply fname args _ _) = text (nameToString fname) <>
                                      apply (map (align . ppr . fst) args)
-  pprPrec _ (LetPat pat e body _) = aliasComment pat $
-                                    text "let" <+/> align (ppr pat) <+>
-                                    equals <+> align (ppr e) <+> text "in" </>
-                                    ppr body
+  pprPrec _ (LetPat pat e body _) =
+    aliasComment pat $
+    text "let" <+> align (ppr pat) <+>
+    equals <+/> indent 2 (ppr e) <+> text "in" </>
+    ppr body
   pprPrec _ (LetWith cs dest src idxs ve body _)
     | dest == src =
       text "let" <+> ppCertificates cs <> ppr dest <+> list (map ppr idxs) <+>
@@ -171,7 +172,7 @@ instance (Ord vn, Pretty vn, TypeBox ty) => Pretty (LambdaBase ty vn) where
   ppr (AnonymFun params body rettype _) =
     text "fn" <+> ppr rettype <+>
     apply (map ppParam params) <+>
-    text "=>" <+> ppr body
+    text "=>" <+/> indent 2 (ppr body)
 
 instance (Ord vn, Pretty vn, TypeBox ty) => Pretty (TupleLambdaBase ty vn) where
   ppr (TupleLambda params body rets loc) =
