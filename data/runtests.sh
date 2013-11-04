@@ -19,6 +19,7 @@ done
 
 tests() {
     echo $testdir/*l0
+    echo $testdir/FusionTests/*l0
 #    echo $testdir/uniqueness*l0
 #    echo $testdir/PricingLexiFi.l0
 #    echo $testdir/HiperfitExample1.l0
