@@ -1,8 +1,8 @@
 fun real f(real a        ) = a + 3.0
 fun real g(real a        ) = a * 3.0
 fun real h1(real a1, real a2, real a3) = a1 * a2 + a3
-//fun real h2((real,real) a23) = let (a2,a3) = a23 in a2 * a3
-fun real h2(real a1, (real,real) a23) = let (a2,a3) = a23 in a2 * a3 - a1
+//fun real h2({real,real} a23) = let {a2,a3} = a23 in a2 * a3
+fun real h2(real a1, {real,real} a23) = let {a2,a3} = a23 in a2 * a3 - a1
 
 fun [real] main([real] arr) =
     let x = map(f, arr) in
