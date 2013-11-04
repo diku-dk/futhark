@@ -342,13 +342,11 @@ Exp  :: { UncheckedExp }
      | redomap '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
                       { Redomap $3 $5 $7 $9 NoInfo $1 }
 
-     | Certificates redomap2 '(' TupleFunAbstr ',' TupleFunAbstr ',' DExps ')'
-                      { let (accexps, arrexps) = $8 in
-                        Redomap2 $1 $4 $6 accexps arrexps (replicate (length arrexps) NoInfo) $2 }
+     | Certificates redomap2 '(' TupleFunAbstr ',' TupleFunAbstr ',' '{' Exps '}' ',' Exps ')'
+                      { Redomap2 $1 $4 $6 $9 $12 (replicate (length $12) NoInfo) $2 }
 
-     | redomap2 '(' TupleFunAbstr ',' TupleFunAbstr ',' DExps ')'
-                      { let (accexps, arrexps) = $7 in
-                        Redomap2 [] $3 $5 accexps arrexps (replicate (length arrexps) NoInfo) $1 }
+     | redomap2 '(' TupleFunAbstr ',' TupleFunAbstr ',' '{' Exps '}' ',' Exps ')'
+                      { Redomap2 [] $3 $5 $8 $11 (replicate (length $11) NoInfo) $1 }
 
      | copy '(' Exp ')' { Copy $3 $1 }
 

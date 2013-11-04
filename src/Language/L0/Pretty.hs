@@ -149,8 +149,11 @@ instance (Ord vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) where
     ppCertificates cs <> ppSOAC "map2" [lam] as
   pprPrec _ (Reduce2 cs lam es as _ _) =
     ppCertificates cs <> ppSOAC "reduce2" [lam] (es++as)
-  pprPrec _ (Redomap2 cs redlam maplam es as _ _) =
-    ppCertificates cs <> ppSOAC "redomap2" [redlam, maplam] (es++as)
+  pprPrec _ (Redomap2 cs outer inner es as _ _) =
+    ppCertificates cs <> text "redomap2" <>
+    parens (commasep (ppr outer : ppr inner :
+                      braces (commasep $ map ppr es) :
+                      map ppr as))
   pprPrec _ (Scan2 cs lam es as _ _) =
     ppCertificates cs <> ppSOAC "scan2" [lam] (es++as)
   pprPrec _ (Filter2 cs lam as _) =
@@ -214,8 +217,10 @@ ppSOAC :: (Ord vn, Pretty vn, TypeBox ty, Pretty fn) =>
 ppSOAC name funs es =
   text name <> parens (ppList funs <//>
                        commasep (map ppr es))
-  where ppList [] = empty
-        ppList as = commasep (map ppr as) <+> comma
+
+ppList :: (Pretty a) => [a] -> Doc
+ppList [] = empty
+ppList as = commasep (map ppr as) <+> comma
 
 ppCertificates :: (Ord vn, TypeBox ty, Pretty vn) => CertificatesBase ty vn -> Doc
 ppCertificates [] = empty
