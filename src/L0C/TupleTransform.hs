@@ -402,46 +402,49 @@ transformExp (Concat cs x y loc) = do
         return $ tuplit c' loc concs
     _ -> return $ Concat cs x' y' loc
 
-transformExp e@(Map lam arr tp pmap) =
-  transformLambda lam $ \lam' ->
+transformExp e@(Map lam arr tp loc) =
   tupToIdentList arr $ \c arrs ->
   let cs = certify c []
-  in untupleSOAC cs (typeOf e) $
+  in transformLambda (conjoin loc cs) lam $ \lam' ->
+     untupleSOAC cs (typeOf e) $
        Map2 cs (tuplifyLam lam') (map Var arrs)
-               (untupleType $ transformType' tp) pmap
+               (untupleType $ transformType' tp) loc
 
-transformExp (Reduce lam ne arr tp pos) =
-  transformLambda lam $ \lam' ->
-  tupToIdentList arr $ \c1 arrs ->
-  tupToIdentList ne $ \c2 nes ->
-  untupleDeclExp (lambdaReturnType lam) $
-  Reduce2 (catMaybes [c1,c2]) (tuplifyLam lam') (map Var nes) (map Var arrs)
-          (untupleType $ transformType' tp) pos
-
-transformExp e@(Scan lam ne arr tp pscan) =
-  transformLambda lam $ \lam' ->
+transformExp (Reduce lam ne arr tp loc) =
   tupToIdentList arr $ \c1 arrs ->
   tupToIdentList ne $ \c2 nes ->
   let cs = catMaybes [c1,c2]
-  in untupleSOAC cs (typeOf e) $
+  in transformLambda (conjoin loc cs) lam $ \lam' ->
+     untupleDeclExp (lambdaReturnType lam) $
+     Reduce2 cs (tuplifyLam lam') (map Var nes) (map Var arrs)
+             (untupleType $ transformType' tp) loc
+
+transformExp e@(Scan lam ne arr tp loc) =
+  tupToIdentList arr $ \c1 arrs ->
+  tupToIdentList ne $ \c2 nes ->
+  let cs = catMaybes [c1,c2]
+  in transformLambda (conjoin loc cs) lam $ \lam' ->
+     untupleSOAC cs (typeOf e) $
        Scan2 cs (tuplifyLam lam') (map Var nes) (map Var arrs)
-                (untupleType $ transformType' tp) pscan
+                (untupleType $ transformType' tp) loc
 
 transformExp e@(Filter lam arr _ loc) =
-  transformLambda lam $ \lam' ->
   tupToIdentList arr $ \c arrs ->
   let cs = catMaybes [c]
-  in untupleSOAC cs (typeOf e) $
+  in transformLambda (conjoin loc cs) lam $ \lam' ->
+     untupleSOAC cs (typeOf e) $
        Filter2 cs (tuplifyLam lam') (map Var arrs) loc
 
 transformExp (Redomap lam1 lam2 ne arr tp1 loc) =
-  transformLambda lam1 $ \lam1' ->
-  transformLambda lam2 $ \lam2' ->
   tupToIdentList arr $ \c1 arrs ->
   tupToIdentList ne $ \c2 nes ->
-  untupleDeclExp (lambdaReturnType lam1) $
-    Redomap2 (catMaybes [c1,c2]) (tuplifyLam lam1') (tuplifyLam lam2')
-             (map Var nes) (map Var arrs) (untupleType $ transformType' tp1) loc
+  let cs = catMaybes [c1,c2]
+  in transformLambda (conjoin loc cs) lam1 $ \lam1' ->
+     transformLambda (conjoin loc cs) lam2 $ \lam2' ->
+       untupleDeclExp (lambdaReturnType lam1) $
+       Redomap2 cs (tuplifyLam lam1') (tuplifyLam lam2')
+                   (map Var nes) (map Var arrs)
+                   (untupleType $ transformType' tp1) loc
 
 transformExp (Map2 cs1 lam arrs tps loc) =
   transformTupleLambda lam $ \lam' ->
@@ -531,23 +534,23 @@ mergeCerts (c:cs) f = do
   LetPat (Id cert) (Assert (conjoin loc $ c:cs) loc) <$> f (Just cert) <*> pure loc
   where loc = srclocOf c
 
-cleanLambdaParam :: [Ident] -> Type -> TransformM ([Ident], [Exp])
-cleanLambdaParam [] _ = return ([], [])
-cleanLambdaParam ks@(k:_) t =
+cleanLambdaParam :: Exp -> [Ident] -> Type -> TransformM ([Ident], [Exp])
+cleanLambdaParam _ [] _ = return ([], [])
+cleanLambdaParam ce ks@(k:_) t =
   case (ks, t, transformType t) of
     (_:ks', Array {}, Elem (Tuple _)) -> do
       (names, namevs) <- unzip <$> mapM (newVar loc "arg" . identType) ks'
-      return (names, given loc : namevs)
+      return (names, ce : namevs)
     (_, Elem (Tuple ets), Elem (Tuple _)) -> do
       let comb (ks', params, es) et =
             case transformType et of
               Elem (Tuple ets') -> do
                 (newparams, newes) <-
-                  cleanLambdaParam (take (length ets') ks') et
+                  cleanLambdaParam ce (take (length ets') ks') et
                 return (drop (length ets') ks', params++newparams, es++newes)
               _ -> do
                 (newparams, newes) <-
-                  cleanLambdaParam (take 1 ks') et
+                  cleanLambdaParam ce (take 1 ks') et
                 return (drop 1 ks', params++newparams, es++newes)
       (_, params, es) <- foldM comb (ks, [], []) ets
       return (params, es)
@@ -556,8 +559,8 @@ cleanLambdaParam ks@(k:_) t =
       return (names, namevs)
   where loc = srclocOf k
 
-lambdaBinding :: [Ident] -> ([Ident] -> (Exp -> Exp) -> TransformM a) -> TransformM a
-lambdaBinding params m = do
+lambdaBinding :: Exp -> [Ident] -> ([Ident] -> (Exp -> Exp) -> TransformM a) -> TransformM a
+lambdaBinding ce params m = do
   (params', (patpairs, substs)) <- runWriterT $ liftM concat . forM params $ \param -> do
     param' <- lift $ transformParam param
     case param' of
@@ -565,13 +568,13 @@ lambdaBinding params m = do
       FlatTuple [] -> return []
       FlatTuple ks@(k:_) -> do
         let loc = srclocOf k
-        (ks', es) <- lift $ cleanLambdaParam ks $ identType param
+        (ks', es) <- lift $ cleanLambdaParam ce ks $ identType param
         tell ([(TupId (map Id ks) loc, TupLit es loc)],
               M.singleton (identName param) $ TupleSubst ks)
         return ks'
       TupleArray c ks -> do
         let loc = srclocOf c
-        (ks', es) <- lift $ cleanLambdaParam (c:ks) $ identType param
+        (ks', es) <- lift $ cleanLambdaParam ce (c:ks) $ identType param
         tell ([(TupId (map Id $ c:ks) loc, TupLit es loc)],
               M.singleton (identName param) $ ArraySubst c ks)
         return ks'
@@ -580,14 +583,14 @@ lambdaBinding params m = do
       letf = foldl comb id patpairs
   local bind $ m params' letf
 
-transformLambda :: Lambda -> (Lambda -> TransformM Exp) -> TransformM Exp
-transformLambda (AnonymFun params body rettype loc) m = do
-  lam <- lambdaBinding (map fromParam params) $ \params' letf -> do
+transformLambda :: Exp -> Lambda -> (Lambda -> TransformM Exp) -> TransformM Exp
+transformLambda ce (AnonymFun params body rettype loc) m = do
+  lam <- lambdaBinding ce (map fromParam params) $ \params' letf -> do
            body' <- transformExp body
            return $ AnonymFun (map toParam params') (letf body') rettype' loc
   m lam
   where rettype' = toDecl $ transformType rettype
-transformLambda (CurryFun fname curryargs rettype loc) m =
+transformLambda _ (CurryFun fname curryargs rettype loc) m =
   transform curryargs []
   where transform [] curryargs' =
           m $ CurryFun fname curryargs' (transformType rettype) loc
