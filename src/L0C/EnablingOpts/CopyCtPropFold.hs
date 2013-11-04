@@ -335,8 +335,14 @@ copyCtPropExp (Size cs i e pos) = do
     case e' of
         Var idd -> do vv <- asks $ M.lookup (identName idd) . envVtable
                       case vv of Just (Constant a _ _) -> literal a
+                                 Just (SymArr (Iota ne _) _ _)
+                                   | i == 0 -> return ne
+                                 Just (SymArr (Replicate ne _ _) _ _)
+                                   | i == 0 -> return ne
                                  _ -> return $ Size cs' i e' pos
         Literal a _ -> literal a
+        Iota ne _        | i == 0 -> return ne
+        Replicate ne _ _ | i == 0 -> return ne
         _ ->  return $ Size cs i e' pos
     where literal a =
             case drop i $ arrayShape a of
