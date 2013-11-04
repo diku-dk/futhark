@@ -9,6 +9,7 @@ module L0C.HOTrans.Composing
   )
   where
 
+import Data.List
 import Data.Loc
 import qualified Data.Map  as M
 
@@ -88,15 +89,19 @@ fuseInputs lam1 inp1 out1 lam2 inp2 =
 filterOutParams :: [Ident] -> [Parameter] -> [Exp]
                 -> ([Parameter], [Either Type Ident])
 filterOutParams out1 lam2arrparams inp2 =
-  (map fst outParams, map checkUsed out1)
-  where outParams = filter (isOutParam . snd) $ zip lam2arrparams inp2
-        isOutParam (Var a) = a `elem` out1
-        isOutParam _       = False
-        outUsage = M.fromList $ map (uncurry $ flip (,)) outParams
-        checkUsed a = maybe
-                      (Left $ rowType $ identType a)
-                      (Right . fromParam) $
-                      M.lookup (Var a) outUsage
+  (map fst outParams, snd $ mapAccumL checkUsed outUsage out1)
+  where outParams = map snd $ filter fst $ snd $
+                    mapAccumL isOutParam out1 $ zip lam2arrparams inp2
+        isOutParam outs (p, Var a)
+          | a `elem` outs      = (a `delete` outs, (True,  (p, Var a)))
+          | otherwise          = (outs,            (False, (p, Var a)))
+        isOutParam outs (p, e) = (outs,            (False, (p, e)))
+        outUsage = foldl add M.empty outParams
+          where add m (p, e) = M.insertWith (++) e [fromParam p] m
+        checkUsed m a =
+          case M.lookup (Var a) m of
+            Just (p:ps) -> (M.insert (Var a) ps m, Right p)
+            _           -> (m, Left $ rowType $ identType a)
 
 removeDuplicateInputs :: M.Map Parameter Exp
                       -> (M.Map Parameter Exp, Exp -> Exp)
