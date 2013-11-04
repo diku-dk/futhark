@@ -289,7 +289,10 @@ addBindings need =
            \inner -> outer $ LetWith cs dest src is ve inner $ srclocOf inner)
 
 score :: M.Map VName Int -> (TupIdent, Exp) -> (Int, (TupIdent, Exp))
-score m (p, e) = (S.fold f 0 $ freeNamesInExp e, (p, e))
+score m (p, Var k) =
+  (fromMaybe (-1) $ M.lookup (identName k) m, (p,Var k))
+score m (p, e) =
+  (S.fold f 0 $ freeNamesInExp e, (p, e))
   where f k x = case M.lookup k m of
                   Just y  -> max x y
                   Nothing -> x
