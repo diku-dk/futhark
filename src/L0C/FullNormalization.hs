@@ -106,9 +106,13 @@ normalizeExp e = Var <$> (replaceExp (nameHint e) =<< normalizeSubExps e)
 -- | Leave the root of the expression as is, but normalise any
 -- subexpressions.
 normalizeSubExps :: Exp -> NormalizeM Exp
-normalizeSubExps (If c te fe t loc) =
+normalizeSubExps (Literal v loc) = return $ Literal v loc
+normalizeSubExps e@(If {}) =
   -- Never normalise anything past a branch.
-  normalizeExp $ If c te fe t loc
+  normalizeExp e
+normalizeSubExps e@(LetPat {}) = normalizeExp e
+normalizeSubExps e@(LetWith {}) = normalizeExp e
+normalizeSubExps e@(DoLoop {}) = normalizeExp e
 normalizeSubExps e = mapExpM normalize e
   where normalize = identityMapper {
                       mapOnExp = normalizeExp
