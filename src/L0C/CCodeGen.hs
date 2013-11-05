@@ -204,7 +204,8 @@ boundsCheckStm place idxs = [C.cstm|{$stms:(zipWith check idxs [0..])}|]
 printStm :: C.Exp -> GenType als -> CompilerM C.Stm
 printStm place (Elem Int)  = return [C.cstm|printf("%d", $exp:place);|]
 printStm place (Elem Char) = return [C.cstm|printf("%c", $exp:place);|]
-printStm place (Elem Bool) = return [C.cstm|printf($exp:place && "true" || "false");|]
+printStm place (Elem Bool) =
+  return [C.cstm|printf($exp:place ? "true" : "false");|]
 printStm place (Elem Real) = return [C.cstm|printf("%lf", $exp:place);|]
 printStm place (Elem (Tuple ets)) = do
   prints <- forM (zip [(0::Int)..] ets) $ \(i, et) ->
