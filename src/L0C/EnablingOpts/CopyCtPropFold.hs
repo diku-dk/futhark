@@ -582,8 +582,8 @@ ctFoldBinOp e@(Or e1 e2 pos)
       _ -> badCPropM $ TypeError pos  " || operands not of boolean type! "
   | otherwise = return e
 
-ctFoldBinOp e@(BinOp Equal e1 e2 _ pos) =
-    if isValue e1 && isValue e2 then
+ctFoldBinOp e@(BinOp Equal e1 e2 _ pos)
+  | isValue e1 && isValue e2 =
       case (e1, e2) of
         -- for numerals we could build node e1-e2, simplify and test equality with 0 or 0.0!
         (Literal (IntVal  v1) _, Literal (IntVal  v2) _) -> changed $ Literal (LogVal (v1==v2)) pos
@@ -592,7 +592,8 @@ ctFoldBinOp e@(BinOp Equal e1 e2 _ pos) =
         (Literal (CharVal v1) _, Literal (CharVal v2) _) -> changed $ Literal (LogVal (v1==v2)) pos
         --(Literal (TupVal  v1 _), Literal (TupVal  v2 _)) -> return (True, Literal (LogVal (v1==v2) pos))
         _ -> badCPropM $ TypeError pos  " equal operands not of (the same) basic type! "
-    else return e
+  | e1 == e2 = changed $ Literal (LogVal True) pos
+  | otherwise = return e
 ctFoldBinOp e@(BinOp Less e1 e2 _ pos) =
     if isValue e1 && isValue e2 then
       case (e1, e2) of
