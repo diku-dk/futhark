@@ -48,6 +48,10 @@ substituteNames substs = substInExp
         substInLambda (CurryFun fname curryargs rettype loc) =
           CurryFun fname (map substInExp curryargs) (substInType rettype) loc
 
+        substInTupleLambda (TupleLambda params body rettype loc) =
+          TupleLambda params (substInExp body)
+                      (map (toDecl . substInType . fromDecl) rettype) loc
+
         replace = Mapper {
                     mapOnIdent = return . replaceIdent
                   , mapOnExp = return . substInExp
@@ -55,5 +59,6 @@ substituteNames substs = substInExp
                   , mapOnPattern = return . substInPattern
                   , mapOnValue = return
                   , mapOnLambda = return . substInLambda
+                  , mapOnTupleLambda = return . substInTupleLambda
                   , mapOnCertificates = return . map replaceIdent
                   }
