@@ -23,6 +23,7 @@ import Data.Ord
 import qualified Data.Set as S
 
 import L0C.L0
+import L0C.Substitute
 import L0C.FreshNames
 
 data BindNeed = LoopBind TupIdent Exp Ident Exp Exp
@@ -268,25 +269,78 @@ transformFun (fname, rettype, params, body, loc) = do
   body' <- blockAllHoisting $ hoistInExp body
   return (fname, rettype, params, body', loc)
 
+-- The hoister is able to quite easily do CSE, so let's do that.  We
+-- only need a few helper functions.
+
+-- | Convert a pattern to an expression given the value returned by
+-- that pattern.  Uses a 'Maybe' type as patterns using 'Wildcard's
+-- cannot be thus converted.
+patToExp :: TupIdent -> Maybe Exp
+patToExp (Wildcard _ _)   = Nothing
+patToExp (Id idd)         = Just $ Var idd
+patToExp (TupId pats loc) = TupLit <$> mapM patToExp pats <*> pure loc
+
+mkSubsts :: TupIdent -> Exp -> M.Map VName VName
+mkSubsts pat e = execWriter $ subst pat e
+  where subst (Id idd1) (Var idd2) =
+          tell $ M.singleton (identName idd1) (identName idd2)
+        subst (TupId pats _) (TupLit es _) =
+          zipWithM_ subst pats es
+        subst _ _ =
+          return ()
+
+type DupeState = (M.Map Exp Exp, M.Map VName VName)
+
+newDupeState :: DupeState
+newDupeState = (M.empty, M.empty)
+
+-- | The main CSE function.  Given a state, a pattern and an
+-- expression to be bound to that pattern, return a replacement
+-- pattern (always the same as the input pattern, actually), a
+-- replacement expression, and a new state.  The function will look in
+-- the state to determine whether the expression can be replaced with
+-- something bound previously.
+handleDuplicates :: DupeState -> TupIdent -> Exp
+                -> (TupIdent, Exp, DupeState)
+-- Arrays may be consumed, so don't eliminate expressions producing
+-- arrays.  This is perhaps a bit too conservative - we could track
+-- exactly which are being consumed and keep a blacklist.
+handleDuplicates (esubsts, nsubsts) pat e
+  | any isArray $ S.toList $ patIdents pat =
+    (pat, e, (esubsts, nsubsts))
+  where isArray idd = case identType idd of
+                        Array {} -> True
+                        _        -> False
+handleDuplicates (esubsts, nsubsts) pat e =
+  case M.lookup (substituteNames nsubsts e) esubsts of
+    Just e' -> (pat, e', (esubsts, mkSubsts pat e' `M.union` nsubsts))
+    Nothing -> (pat, e,
+                case patToExp pat of
+                  Nothing   -> (esubsts, nsubsts)
+                  Just pate -> (M.insert e pate esubsts, nsubsts))
+
+-- End of CSE stuff.  It's used in 'addBindings'.
+
 addBindings :: Need -> Exp -> Exp
 addBindings need =
-  snd $ foldl comb (M.empty, id) (inDepOrder $ S.toList $ needBindings need)
-  where comb (m, outer) bind@(LoopBind mergepat mergeexp loopvar
+  foldl (.) id $ snd $ mapAccumL comb (M.empty, newDupeState) $
+  inDepOrder $ S.toList $ needBindings need
+  where comb (m,ds) bind@(LoopBind mergepat mergeexp loopvar
                               boundexp loopbody) =
-          (m `M.union` distances m bind,
-           \inner -> outer $
-                     DoLoop mergepat mergeexp loopvar boundexp
+          ((m `M.union` distances m bind,ds),
+           \inner -> DoLoop mergepat mergeexp loopvar boundexp
                      loopbody inner $ srclocOf inner)
-        comb (m, outer) (LetBind pat e alts) =
+        comb (m,ds) (LetBind pat e alts) =
           let add pat' e' =
-                (m `M.union` distances m (LetBind pat' e' []),
-                 \inner -> outer $ LetPat pat' e' inner $ srclocOf inner)
+                let (pat'',e'',ds') = handleDuplicates ds pat' e'
+                in ((m `M.union` distances m (LetBind pat' e' []),ds'),
+                    \inner -> LetPat pat'' e'' inner $ srclocOf inner)
           in case map snd $ sortBy (comparing fst) $ map (score m) $ (pat,e):alts of
                (pat',e'):_ -> add pat' e'
                _           -> add pat e
-        comb (m, outer) bind@(LetWithBind cs dest src is ve) =
-          (m `M.union` distances m bind,
-           \inner -> outer $ LetWith cs dest src is ve inner $ srclocOf inner)
+        comb (m,ds) bind@(LetWithBind cs dest src is ve) =
+          ((m `M.union` distances m bind,ds),
+           \inner -> LetWith cs dest src is ve inner $ srclocOf inner)
 
 score :: M.Map VName Int -> (TupIdent, Exp) -> (Int, (TupIdent, Exp))
 score m (p, Var k) =
