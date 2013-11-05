@@ -158,9 +158,9 @@ bindLet pat@(Id dest) e@(Iota (Var x) _) m = do
   addBinding pat e
   withShape dest [Var x] m
 
-bindLet pat@(Id dest) e@(Replicate (Var x) _ _) m = do
+bindLet pat@(Id dest) e@(Replicate (Var x) (Var y) _) m = do
   addBinding pat e
-  withShape dest [Var x] m
+  withShape dest (Var x:slice [] 0 y) m
 
 bindLet pat@(TupId [dest1, dest2] _) e@(Split cs (Var n) (Var src) _ loc) m = do
   addBinding pat e
@@ -368,6 +368,7 @@ expCost (Concat {}) = 1
 expCost (Split {}) = 1
 expCost (Reshape {}) = 1
 expCost (DoLoop {}) = 1
+expCost (Replicate {}) = 1
 expCost _ = 0
 
 distances :: M.Map VName Int -> BindNeed -> M.Map VName Int
