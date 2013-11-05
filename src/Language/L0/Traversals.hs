@@ -203,26 +203,26 @@ mapExpM tv (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody loc) =
   pure DoLoop <*> mapOnPattern tv mergepat <*> mapOnExp tv mergeexp <*>
        mapOnIdent tv loopvar <*> mapOnExp tv boundexp <*>
        mapOnExp tv loopbody <*> mapOnExp tv letbody <*> pure loc
-mapExpM tv (Map2 ass fun arrexps intype loc) =
-  pure Map2 <*> mapM (mapOnIdent tv) ass <*>
+mapExpM tv (Map2 cs fun arrexps intype loc) =
+  pure Map2 <*> mapOnCertificates tv cs <*>
        mapOnTupleLambda tv fun <*> mapM (mapOnExp tv) arrexps <*>
        mapM (mapOnType tv) intype  <*> pure loc
-mapExpM tv (Reduce2 ass fun startexps arrexps rowtypes loc) =
-  pure Reduce2 <*> mapM (mapOnIdent tv) ass <*>
+mapExpM tv (Reduce2 cs fun startexps arrexps rowtypes loc) =
+  pure Reduce2 <*> mapOnCertificates tv cs <*>
        mapOnTupleLambda tv fun <*>
        mapM (mapOnExp tv) startexps <*> mapM (mapOnExp tv) arrexps <*>
        mapM (mapOnType tv) rowtypes <*> pure loc
-mapExpM tv (Scan2 ass fun startexps arrexps intypes loc) =
-  pure Scan2 <*> mapM (mapOnIdent tv) ass <*>
+mapExpM tv (Scan2 cs fun startexps arrexps intypes loc) =
+  pure Scan2 <*> mapOnCertificates tv cs <*>
        mapOnTupleLambda tv fun <*>
        mapM (mapOnExp tv) startexps <*> mapM (mapOnExp tv) arrexps <*>
        mapM (mapOnType tv) intypes <*> pure loc
-mapExpM tv (Filter2 ass fun arrexps loc) =
-  pure Filter2 <*> mapM (mapOnIdent tv) ass <*>
+mapExpM tv (Filter2 cs fun arrexps loc) =
+  pure Filter2 <*> mapOnCertificates tv cs <*>
        mapOnTupleLambda tv fun <*>
        mapM (mapOnExp tv) arrexps <*> pure loc
-mapExpM tv (Redomap2 ass redfun mapfun accexps arrexps intypes loc) =
-  pure Redomap2 <*> mapM (mapOnIdent tv) ass <*>
+mapExpM tv (Redomap2 cs redfun mapfun accexps arrexps intypes loc) =
+  pure Redomap2 <*> mapOnCertificates tv cs <*>
        mapOnTupleLambda tv redfun <*> mapOnTupleLambda tv mapfun <*>
        mapM (mapOnExp tv) accexps <*> mapM (mapOnExp tv) arrexps <*>
        mapM (mapOnType tv) intypes <*> pure loc
