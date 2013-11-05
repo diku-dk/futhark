@@ -270,6 +270,7 @@ mainCall (fname,rettype,params,_,_) = do
                $stms:stms
                $id:ret = $id:(funName fname)($args:args);
                $stm:printRes
+               printf("\n");
              }|]
   where paramtypes = map identType params
 
