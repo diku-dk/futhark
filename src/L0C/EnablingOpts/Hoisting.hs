@@ -9,6 +9,7 @@ module L0C.EnablingOpts.Hoisting
   where
 
 import Control.Applicative
+import Control.Arrow (first)
 import Control.Monad.Writer
 import Control.Monad.Reader
 import Control.Monad.State
@@ -84,6 +85,11 @@ varExp _       = Nothing
 
 vars :: [Exp] -> [Ident]
 vars = mapMaybe varExp
+
+isArrayIdent :: Ident -> Bool
+isArrayIdent idd = case identType idd of
+                     Array {} -> True
+                     _        -> False
 
 lookupShapeBindings :: Ident -> ShapeMap -> [ShapeBinding]
 lookupShapeBindings = delve S.empty
@@ -306,11 +312,8 @@ handleDuplicates :: DupeState -> TupIdent -> Exp
 -- arrays.  This is perhaps a bit too conservative - we could track
 -- exactly which are being consumed and keep a blacklist.
 handleDuplicates (esubsts, nsubsts) pat e
-  | any isArray $ S.toList $ patIdents pat =
+  | any isArrayIdent $ S.toList $ patIdents pat =
     (pat, e, (esubsts, nsubsts))
-  where isArray idd = case identType idd of
-                        Array {} -> True
-                        _        -> False
 handleDuplicates (esubsts, nsubsts) pat e =
   case M.lookup (substituteNames nsubsts e) esubsts of
     Just e' -> (pat, e', (esubsts, mkSubsts pat e' `M.union` nsubsts))
@@ -495,9 +498,15 @@ hoistInExp e@(Reduce2 cs (TupleLambda params _ _ _) accexps arrexps _ _) =
     withShapes (sameOuterShapesExps cs arrexps) $
     hoistInExpBase e
 hoistInExp e@(Scan2 cs (TupleLambda params _ _ _) accexps arrexps _ _) =
-  hoistInSOAC e arrexps $ \ks ->
-    withShapes (zip (map (Id . fromParam) $ drop (length accexps) params)
-               $ map (slice cs 1) ks) $
+  hoistInSOAC e arrexps $ \arrks ->
+  hoistInSOAC e accexps $ \accks ->
+    let (accparams, arrparams) = splitAt (length accexps) $
+                                 map fromParam params in
+
+    withShapes (map (first Id) $ zip arrparams $
+                map (slice cs 1) arrks) $
+    withShapes (map (first Id) $ filter (isArrayIdent . fst) $
+                zip accparams $ map (slice cs 0) accks) $
     withShapes (sameOuterShapesExps cs arrexps) $
     hoistInExpBase e
 hoistInExp e@(Redomap2 cs (TupleLambda redparams _ _ _) (TupleLambda mapparams _ _ _)
