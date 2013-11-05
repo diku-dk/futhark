@@ -235,7 +235,12 @@ evalExp (BinOp Plus e1 e2 (Elem Int) pos) = evalIntBinOp (+) e1 e2 pos
 evalExp (BinOp Plus e1 e2 (Elem Real) pos) = evalRealBinOp (+) e1 e2 pos
 evalExp (BinOp Minus e1 e2 (Elem Int) pos) = evalIntBinOp (-) e1 e2 pos
 evalExp (BinOp Minus e1 e2 (Elem Real) pos) = evalRealBinOp (-) e1 e2 pos
-evalExp (BinOp Pow e1 e2 (Elem Int) pos) = evalIntBinOp (^) e1 e2 pos
+evalExp (BinOp Pow e1 e2 (Elem Int) pos) = evalIntBinOp pow e1 e2 pos
+  -- Haskell (^) cannot handle negative exponents, so check for that
+  -- explicitly.
+  where pow x y | y < 0, x == 0 = error "Negative exponential with zero base"
+                | y < 0         = 1 `div` (x ^ (-y))
+                | otherwise     = x ^ y
 evalExp (BinOp Pow e1 e2 (Elem Real) pos) = evalRealBinOp (**) e1 e2 pos
 evalExp (BinOp Times e1 e2 (Elem Int) pos) = evalIntBinOp (*) e1 e2 pos
 evalExp (BinOp Times e1 e2 (Elem Real) pos) = evalRealBinOp (*) e1 e2 pos
