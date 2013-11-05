@@ -429,16 +429,16 @@ ppDict rdict = foldr ((++) . (++ "\n") . ppDictElem) "" (M.toList $ M.delete dum
                 ppDictElem (vname, (range, sign)) =
                   escapeColorize Green (textual vname) ++ " " ++
                   escapeColorize Blue (ppRange range) ++ " " ++
-                  escapeColorize White (helper range) ++ " " ++
+                  escapeColorize White (ppRangeAsComp range) ++ " " ++
                   escapeColorize Yellow (ppSign sign)
 
                 -- makes the range comparable, so it's understandable for us humans
-                helper :: Range -> String
-                helper range = do
+                ppRangeAsComp :: Range -> String
+                ppRangeAsComp range = do
                   let env = RangeEnv { dict = rdict }
                   case runRangeM (makeRangeComparable range) env of
-                    Right asdf -> ppRange asdf
-                    Left e     -> show e
+                    Right range' -> ppRange range'
+                    Left err     -> show err
 
 ----------------------------------------
 -- TESTING
