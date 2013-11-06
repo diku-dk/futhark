@@ -92,18 +92,21 @@ isArrayIdent idd = case identType idd of
                      _        -> False
 
 lookupShapeBindings :: Ident -> ShapeMap -> [ShapeBinding]
-lookupShapeBindings idd m = delve S.empty idd
+lookupShapeBindings idd m = delve (3::Int) S.empty idd
   where
-    delve s k | k `S.member` s = []
-              | otherwise =
-                case M.lookup k m of
-                  Nothing -> []
-                  Just shs -> shs ++ concatMap (recurse $ k `S.insert` s) shs
-    recurse s (DimSizes sz) =
+    delve j s k | k `S.member` s || j == 0 = []
+                | otherwise =
+                  case M.lookup k m of
+                    Nothing -> []
+                    Just shs ->
+                      case concatMap (recurse (j-1) $ k `S.insert` s) shs of
+                        [] -> shs
+                        l  -> l
+    recurse j s (DimSizes sz) =
       map DimSizes $ filter (not . all (==Nothing)) $
           cartesian $ map inspect sz
       where inspect (Just (Size _ i (Var k') _)) =
-              case delve s k' of
+              case delve j s k' of
                 [] -> [Nothing]
                 l  -> map (fill i) l
             inspect _ = [Nothing]
