@@ -61,10 +61,16 @@ instance Monoid Need where
   Need b1 `mappend` Need b2 = Need $ b1 <> b2
   mempty = Need S.empty
 
-data ShapeBinding = DimSizes [Maybe Exp]
+type ColExps = [Exp]
+
+data ShapeBinding = DimSizes [ColExps]
                     deriving (Show, Eq)
 
-type ShapeMap = M.Map Ident [ShapeBinding]
+instance Monoid ShapeBinding where
+  mempty = DimSizes []
+  DimSizes xs `mappend` DimSizes ys = DimSizes $ xs ++ ys
+
+type ShapeMap = M.Map Ident ShapeBinding
 
 data Env = Env { envBindings :: ShapeMap
                }
@@ -73,11 +79,6 @@ emptyEnv :: Env
 emptyEnv = Env {
              envBindings = M.empty
            }
-
-cartesian :: [[a]] -> [[a]]
-cartesian [] = []
-cartesian [x] = map (:[]) x
-cartesian (x:xs) = [ x' : xs' | xs' <- cartesian xs, x' <- x ]
 
 varExp :: Exp -> Maybe Ident
 varExp (Var k) = Just k
@@ -91,28 +92,23 @@ isArrayIdent idd = case identType idd of
                      Array {} -> True
                      _        -> False
 
-lookupShapeBindings :: Ident -> ShapeMap -> [ShapeBinding]
-lookupShapeBindings idd m = delve (3::Int) S.empty idd
+lookupShapeBindings :: Ident -> ShapeMap -> [ColExps]
+lookupShapeBindings idd m = delve S.empty idd
   where
-    delve j s k | k `S.member` s || j == 0 = []
-                | otherwise =
-                  case M.lookup k m of
-                    Nothing -> []
-                    Just shs ->
-                      case concatMap (recurse (j-1) $ k `S.insert` s) shs of
-                        [] -> shs
-                        l  -> l
-    recurse j s (DimSizes sz) =
-      map DimSizes $ filter (not . all (==Nothing)) $
-          cartesian $ map inspect sz
-      where inspect (Just (Size _ i (Var k') _)) =
-              case delve j s k' of
-                [] -> [Nothing]
-                l  -> map (fill i) l
-            inspect _ = [Nothing]
-    fill i (DimSizes sz) = case drop i sz of
-                             e:_ -> e
-                             []  -> Nothing
+    delve s k | k `S.member` s = blank k
+              | otherwise =
+                case M.lookup k m of
+                  Nothing -> blank k
+                  Just (DimSizes colexps) ->
+                    map (concatMap (recurse $ k `S.insert` s)) colexps
+
+    blank k = replicate (arrayDims $ identType k) []
+
+    recurse s e@(Size _ i (Var k') _) =
+      case drop i $ delve s k' of
+        (d:ds):_ -> d:ds
+        _        -> [e]
+    recurse _ _ = []
 
 newtype HoistM a = HoistM (RWS
                            Env                -- Reader
@@ -142,9 +138,9 @@ addNewBinding k e = do
 
 addBinding :: TupIdent -> Exp -> HoistM ()
 addBinding pat e@(Size _ i (Var x) _) = do
-  let mkAlt (DimSizes ses) = case drop i ses of
-                               Just se:_ -> [(pat, se)]
-                               _        -> []
+  let mkAlt es = case drop i es of
+                   des:_ -> [(pat, des)]
+                   _     -> []
   alts <- concatMap mkAlt <$> asks (lookupShapeBindings x . envBindings)
   addSeveralBindings pat e alts
 
@@ -240,10 +236,15 @@ slice cs d k = [ Size cs i (Var k) $ srclocOf k
                  | i <- [d..arrayDims (identType k)-1]]
 
 withShape :: Ident -> [Exp] -> HoistM a -> HoistM a
-withShape dest src =
+withShape dest src m = do
+  bnds <- asks envBindings
+  let srcs = map (inspect bnds) src
   local (\env -> env { envBindings =
-                         M.insertWith (++) dest [DimSizes $ map Just src]
-                            $ envBindings env })
+                         M.insertWith (<>) dest (DimSizes srcs)
+                            $ envBindings env }) m
+    where inspect bnds (Size _ i (Var k) _)
+            | (x:xs):_ <- drop i $ lookupShapeBindings k bnds = x:xs
+          inspect _ e                                         = [e]
 
 withShapes :: [(TupIdent, [Exp])] -> HoistM a -> HoistM a
 withShapes [] m =
