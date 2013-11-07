@@ -193,8 +193,8 @@ indexArrayElemStms place from t idxs =
       in dimstms++[[C.cstm|$exp:place.data = &$exp:index;|]]
   where index = indexArrayExp from t idxs
 
-boundsCheckStm :: C.Exp -> [C.Exp] -> C.Stm
-boundsCheckStm place idxs = [C.cstm|{$stms:(zipWith check idxs [0..])}|]
+boundsCheckStm :: C.Exp -> [C.Exp] -> [C.Stm]
+boundsCheckStm place idxs = zipWith check idxs [0..]
   where check :: C.Exp -> Int -> C.Stm
         check var i = [C.cstm|if ($exp:var < 0 || $exp:var >= $exp:place.dims[$int:i]) {
                             error(1, "Array index out of bounds.\n");
@@ -582,7 +582,7 @@ compileExp place (Index _ var idxs _ _) = do
   return $ stm [C.cstm|{
                      $decls:vardecls
                      $items:idxs'
-                     $stm:(boundsCheckStm arr varexps)
+                     $stms:(boundsCheckStm arr varexps)
                      $stms:index
                    }|]
 
@@ -763,7 +763,7 @@ compileExp place (LetWith _ name src idxs ve body _) = do
                      $decls:idxdecls
                      $id:name' = $exp:src';
                      $items:idxs'
-                     $stm:(boundsCheckStm (varExp name') idxexps)
+                     $stms:(boundsCheckStm (varExp name') idxexps)
                      $stms:elempre
                      $items:ve'
                      $stm:elempost
