@@ -414,7 +414,8 @@ freeInExp = execWriter . expFree
         expFree (LetPat pat e body _) = do
           expFree e
           binding (patIdents pat) $ expFree body
-        expFree (LetWith _ dest src idxs ve body _) = do
+        expFree (LetWith cs dest src idxs ve body _) = do
+          mapM_ identFree cs
           identFree src
           mapM_ expFree idxs
           expFree ve
