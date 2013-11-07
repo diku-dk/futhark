@@ -20,6 +20,7 @@ import Data.Bits
 import Data.Loc
 
 import qualified Data.Map as M
+import qualified Data.Set as S
 
 import L0C.L0
 
@@ -90,6 +91,19 @@ nonRemovable :: VName -> CPropM ()
 nonRemovable name =
   tell $ CPropRes False [name]
 
+-- | The identifier was consumed, and should not be used within the
+-- body, so mark it and any aliases as nonremovable (with
+-- 'nonRemovable') and delete any expressions using it or an alias
+-- from the symbol table.
+consuming :: Ident -> CPropM a -> CPropM a
+consuming idd m = do
+  (vtable, removed) <- M.partition ok <$> asks envVtable
+  mapM_ nonRemovable $ identName idd : M.keys removed
+  local (\e -> e { envVtable = vtable }) m
+  where als = identName idd `S.insert` aliases (identType idd)
+        ok (Constant {})  = True
+        ok (VarId k _ _)  = k `S.notMember` als
+        ok (SymArr e _ _) = S.null $ als `S.intersection` freeNamesInExp e
 
 -- | @collectNonRemovable mvars m@ executes the action @m@.  The
 -- intersection of @mvars@ and any variables used as merge variables
@@ -158,8 +172,8 @@ copyCtPropOneTupleLambda prog lam = do
 
 copyCtPropExp :: Exp -> CPropM Exp
 
-copyCtPropExp (LetWith cs nm src inds el body pos) = do
-    nonRemovable $ identName src
+copyCtPropExp (LetWith cs nm src inds el body pos) =
+  consuming src $ do
     cs'       <- copyCtPropCerts cs
     el'       <- copyCtPropExp el
     inds'     <- mapM copyCtPropExp inds
