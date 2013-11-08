@@ -7,7 +7,7 @@ import L0C.L0
 
 import L0C.EnablingOpts.EnablingOptErrors
 
-import qualified Data.List as L
+import Data.List
 import Control.Monad
 import Control.Applicative
 
@@ -86,13 +86,14 @@ simplifyBack (NaryMult [f] _ _) = return f
 simplifyBack (NaryPlus [t] _ _) = simplifyBack t
 simplifyBack (NaryMult fs tp pos) =
   let
-    fs' = L.zip (L.map length $ L.group fs)  (L.nub fs)
-    createTimesExp e1 e2 = BinOp Times e1 e2 (typeOf e1) (srclocOf e1)
+    fs' = zip (map length $ group fs)  (nub fs)
     takeExpToPower (num, e)
       | num == 1  = e
       | otherwise = BinOp Pow e (Literal (IntVal num) pos) tp pos
   in
-    return $ L.foldl1' createTimesExp $ L.map takeExpToPower fs'
+    return $ foldl1 createTimesExp $ map takeExpToPower fs'
+  where
+    createTimesExp e1 e2 = BinOp Times e1 e2 (typeOf e1) (srclocOf e1)
 
 
 
@@ -160,7 +161,7 @@ simplifyNary (BinOp Plus e1 e2 tp pos) = do
      e2' <- simplifyNary e2
      let terms = getTerms e1' ++ getTerms e2'
      splittedTerms <- mapM splitTerm terms
-     let sortedTerms = L.sortBy (\(n1,_) (n2,_) -> compare n1 n2) splittedTerms
+     let sortedTerms = sortBy (\(n1,_) (n2,_) -> compare n1 n2) splittedTerms
      -- foldM discriminate, reverses the list, we would like to keep it in a ascending order.
      merged <- liftM reverse $ foldM discriminate [] sortedTerms
      let filtered = filter (\(_,v) -> not $ isValue0 v ) merged
@@ -211,14 +212,14 @@ simplifyNary (BinOp Times e1 e2 tp pos) = do
           (NaryMult xs _ _, y@(NaryMult{}) ) -> makeProds xs y
           (NaryMult xs _ _, y) ->
               do prods <- mapM (makeProds xs) $ getTerms y
-                 return $ NaryPlus (L.sort prods) tp pos
+                 return $ NaryPlus (sort prods) tp pos
           (x, NaryMult ys _ _) ->
               do prods <- mapM (makeProds ys) $ getTerms x
-                 return $ NaryPlus (L.sort prods) tp pos
+                 return $ NaryPlus (sort prods) tp pos
           (NaryPlus xs _ _, NaryPlus ys _ _) ->
                               do xsMultChildren <- mapM getMultChildren xs
                                  prods <- mapM (\x -> mapM (makeProds x) ys) xsMultChildren
-                                 return $ NaryPlus (L.sort $ concat prods) tp pos
+                                 return $ NaryPlus (sort $ concat prods) tp pos
 
     where
         makeProds :: [Exp] -> NaryExp -> SimplifyM NaryExp
@@ -233,13 +234,13 @@ simplifyNary (BinOp Times e1 e2 tp pos) = do
             " In simplifyNary, makeProds: e1 * e2: e2 is a sum of sums! "
         makeProds (Literal v1 _ :exs) (NaryMult (Literal v2 pval : ys) tp1 pos1) = do
           v <- mulVals v1 v2 pval
-          return $ NaryMult ( Literal v pval : L.sort (ys++exs) ) tp1 pos1
+          return $ NaryMult ( Literal v pval : sort (ys++exs) ) tp1 pos1
         makeProds (Literal v pval : exs) (NaryMult ys tp1 pos1) =
-          return $ NaryMult ( Literal v pval : L.sort (ys++exs) ) tp1 pos1
+          return $ NaryMult ( Literal v pval : sort (ys++exs) ) tp1 pos1
         makeProds exs (NaryMult (Literal v pval : ys) tp1 pos1) =
-          return $ NaryMult ( Literal v pval : L.sort (ys++exs) ) tp1 pos1
+          return $ NaryMult ( Literal v pval : sort (ys++exs) ) tp1 pos1
         makeProds exs (NaryMult ys tp1 pos1) =
-          return $ NaryMult (L.sort (ys++exs)) tp1 pos1
+          return $ NaryMult (sort (ys++exs)) tp1 pos1
 
 simplifyNary (BinOp Divide e1 e2 tp pos) = do
     e1' <- simplifyNary e1
