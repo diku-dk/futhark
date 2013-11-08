@@ -139,9 +139,10 @@ allIdentsAsList = execWriter . mapM funIdents . progFunctions
 -- I think we would just like to keep the old range
 createRangeAndSign :: Maybe Exp -> RangeM (Range, RangeSign)
 createRangeAndSign (Just e)  = do
-  simplifiedRange <- rangeSimplify (RExp e, RExp e)
-  sign <- calculateRangeSign simplifiedRange
-  return ( simplifiedRange , sign )
+  e' <- simplExp e
+  let range = (RExp e', RExp e')
+  sign <- calculateRangeSign range
+  return ( range , sign )
 createRangeAndSign Nothing = return ( (Ninf, Pinf), Nothing )
 
 ----------------------------------------
@@ -252,12 +253,6 @@ atomicRangeSign (lb,ub) = do
 ----------------------------------------
 -- Range substitution
 ----------------------------------------
-
-rangeSimplify :: Range -> RangeM Range
-rangeSimplify (a,b) = do
-  (a', _ ) <- substitute dummyVName (Ninf, Pinf) a
-  (_ , b') <- substitute dummyVName (Ninf, Pinf) b
-  return (a', b')
 
 substitute :: VName -> Range -> RExp -> RangeM Range
 substitute _ _ l@(RExp (Literal{})) = return (l,l)
