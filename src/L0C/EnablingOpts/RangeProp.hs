@@ -369,6 +369,22 @@ substitute i r (RExp (LetPat _ _ inExp _)) = substitute i r (RExp inExp)
 substitute _ _ _ = return (Ninf, Pinf)
 
 ----------------------------------------
+-- Extract from cond
+----------------------------------------
+isValid :: Range -> L.SrcLoc -> RangeM Bool
+isValid (Pinf, Pinf) pos =
+  badRangeM $ RangePropError pos "isValid: Illegal range [Pinf, Pinf]"
+isValid (Ninf, Ninf) pos =
+  badRangeM $ RangePropError pos "isValid: Illegal range [Ninf, Ninf]"
+isValid (Pinf, Ninf) pos =
+  badRangeM $ RangePropError pos "isValid: Illegal range [Pinf, Ninf]"
+isValid (e1, e2) pos = do
+  ineq <- rangeRExpCompare e1 e2 pos
+  case ineq of
+    (Just IGT)  -> return False
+    _           -> return True
+
+----------------------------------------
 -- Union + Intersection
 ----------------------------------------
 
