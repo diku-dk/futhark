@@ -440,15 +440,13 @@ unifyTypes _ _ = Nothing
 unifyElemTypes :: Monoid (as vn) =>
                   ElemTypeBase as vn -> ElemTypeBase as vn
                -> Maybe (ElemTypeBase as vn)
-unifyElemTypes Int Int = Just Int
-unifyElemTypes Char Char = Just Char
-unifyElemTypes Bool Bool = Just Bool
-unifyElemTypes Real Real = Just Real
 unifyElemTypes (Tuple ts1) (Tuple ts2)
   | length ts1 == length ts2 = do
   ts <- zipWithM unifyTypes ts1 ts2
   Just $ Tuple ts
-unifyElemTypes _ _ = Nothing
+unifyElemTypes t1 t2
+  | t1 == t2  = Just t1
+  | otherwise = Nothing
 
 -- | Determine if two types are identical, ignoring uniqueness.
 -- Causes a '(TypeError vn)' if they fail to match, and otherwise returns
@@ -529,7 +527,6 @@ checkProg' checkoccurs prog = do
                         , envFtable = ftable
                         , envCheckOccurences = checkoccurs
                         }
-
   liftM (untagProg . Prog) $
           runTypeM typeenv src $ mapM checkFun $ progFunctions prog'
   where
@@ -739,7 +736,7 @@ checkExp (LetPat pat e body pos) = do
     return $ LetPat pat' e' body' pos
 
 checkExp (LetWith cs (Ident dest destt destpos) src idxes ve body pos) = do
-  cs' <- mapM (requireI [Elem Bool] <=< checkIdent) cs
+  cs' <- mapM (requireI [Elem Cert] <=< checkIdent) cs
   src' <- checkIdent src
   idxes' <- mapM (require [Elem Int] <=< checkExp) idxes
   destt' <- checkAnnotation pos "source" destt $ identType src' `setAliases` S.empty
@@ -760,7 +757,7 @@ checkExp (LetWith cs (Ident dest destt destpos) src idxes ve body pos) = do
         return $ LetWith cs' dest' src' idxes' ve' body' pos
 
 checkExp (Index cs ident idxes restype pos) = do
-  cs' <- mapM (requireI [Elem Bool] <=< checkIdent) cs
+  cs' <- mapM (requireI [Elem Cert] <=< checkIdent) cs
   ident' <- checkIdent ident
   observe ident'
   vt <- lookupVar (identName ident') pos
@@ -778,7 +775,7 @@ checkExp (Iota e pos) = do
 
 checkExp (Size cs i e pos) = do
   e' <- checkExp e
-  cs' <- mapM (requireI [Elem Bool] <=< checkIdent) cs
+  cs' <- mapM (requireI [Elem Cert] <=< checkIdent) cs
   case typeOf e' of
     Array {}
       | i >= 0 && i < arrayDims (typeOf e') ->
@@ -793,13 +790,13 @@ checkExp (Replicate countexp valexp pos) = do
   return $ Replicate countexp' valexp' pos
 
 checkExp (Reshape cs shapeexps arrexp pos) = do
-  cs' <- mapM (requireI [Elem Bool] <=< checkIdent) cs
+  cs' <- mapM (requireI [Elem Cert] <=< checkIdent) cs
   shapeexps' <- mapM (require [Elem Int] <=< checkExp) shapeexps
   arrexp' <- checkExp arrexp
   return (Reshape cs' shapeexps' arrexp' pos)
 
 checkExp (Transpose cs k n arrexp pos) = do
-  cs' <- mapM (requireI [Elem Bool] <=< checkIdent) cs
+  cs' <- mapM (requireI [Elem Cert] <=< checkIdent) cs
   arrexp' <- checkExp arrexp
   when (arrayDims (typeOf arrexp') < n + k + 1) $
     bad $ TypeError pos $ "Argument to transpose does not have " ++
@@ -867,7 +864,7 @@ checkExp (Redomap outerfun innerfun accexp arrexp intype pos) = do
   return $ Redomap outerfun' innerfun' accexp' arrexp' intype' pos
 
 checkExp (Split cs splitexp arrexp intype pos) = do
-  cs' <- mapM (requireI [Elem Bool] <=< checkIdent) cs
+  cs' <- mapM (requireI [Elem Cert] <=< checkIdent) cs
   splitexp' <- require [Elem Int] =<< checkExp splitexp
   arrexp' <- checkExp arrexp
   et <- rowTypeM arrexp'
@@ -875,7 +872,7 @@ checkExp (Split cs splitexp arrexp intype pos) = do
   return $ Split cs' splitexp' arrexp' intype' pos
 
 checkExp (Concat cs arr1exp arr2exp pos) = do
-  cs' <- mapM (requireI [Elem Bool] <=< checkIdent) cs
+  cs' <- mapM (requireI [Elem Cert] <=< checkIdent) cs
   arr1exp' <- checkExp arr1exp
   arr2exp' <- require [typeOf arr1exp'] =<< checkExp arr2exp
   _ <- rowTypeM arr2exp' -- Just check that it's an array.
@@ -888,6 +885,10 @@ checkExp (Copy e pos) = do
 checkExp (Assert e pos) = do
   e' <- require [Elem Bool] =<< checkExp e
   return $ Assert e' pos
+
+checkExp (Conjoin es pos) = do
+  es' <- mapM (require [Elem Cert] <=< checkExp) es
+  return $ Conjoin es' pos
 
 -- Checking of loops is done by synthesing the (almost) equivalent
 -- function and type-checking a call to it.  The difficult part is
@@ -997,7 +998,7 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
                     loopbody' letbody' loc
 
 checkExp (Map2 ass fun arrexps intype pos) = do
-  ass' <- mapM (requireI [Elem Bool] <=< checkIdent) ass
+  ass' <- mapM (requireI [Elem Cert] <=< checkIdent) ass
   (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
   fun'    <- checkTupleLambda fun arrargs
   intype' <- checkTupleAnnotation pos "map2 input row"
@@ -1005,7 +1006,7 @@ checkExp (Map2 ass fun arrexps intype pos) = do
   return $ Map2 ass' fun' arrexps' intype' pos
 
 checkExp (Reduce2 ass fun startexps arrexps intype pos) = do
-  ass' <- mapM (requireI [Elem Bool] <=< checkIdent) ass
+  ass' <- mapM (requireI [Elem Cert] <=< checkIdent) ass
   (startexps', startargs) <- unzip <$> mapM checkArg startexps
   let startt = Elem $ Tuple $ map typeOf startexps'
   (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
@@ -1019,7 +1020,7 @@ checkExp (Reduce2 ass fun startexps arrexps intype pos) = do
   return $ Reduce2 ass' fun' startexps' arrexps' intype' pos
 
 checkExp (Scan2 ass fun startexps arrexps intypes pos) = do
-  ass' <- mapM (requireI [Elem Bool] <=< checkIdent) ass
+  ass' <- mapM (requireI [Elem Cert] <=< checkIdent) ass
   (startexps', startargs) <- unzip <$> mapM checkArg startexps
   (arrexps', arrargs)   <- unzip <$> mapM checkSOACArrayArg arrexps
   intype'   <- checkTupleAnnotation pos "element"
@@ -1037,7 +1038,7 @@ checkExp (Scan2 ass fun startexps arrexps intypes pos) = do
   return $ Scan2 ass' fun' startexps' arrexps' intype' pos
 
 checkExp (Filter2 ass fun arrexps pos) = do
-  ass' <- mapM (requireI [Elem Bool] <=< checkIdent) ass
+  ass' <- mapM (requireI [Elem Cert] <=< checkIdent) ass
   (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
   fun' <- checkTupleLambda fun arrargs
   let funret = tupleLambdaType fun' $ map argType arrargs
@@ -1046,7 +1047,7 @@ checkExp (Filter2 ass fun arrexps pos) = do
   return $ Filter2 ass' fun' arrexps' pos
 
 checkExp (Redomap2 ass outerfun innerfun accexps arrexps intypes pos) = do
-  ass' <- mapM (requireI [Elem Bool] <=< checkIdent) ass
+  ass' <- mapM (requireI [Elem Cert] <=< checkIdent) ass
   (arrexps', arrargs)   <- unzip <$> mapM checkSOACArrayArg arrexps
   (accexps', accargs)   <- unzip <$> mapM checkArg accexps
   (outerfun', outerarg) <- checkTupleLambdaArg outerfun $ accargs ++ accargs
@@ -1079,6 +1080,7 @@ checkLiteral _ (IntVal k) = return $ IntVal k
 checkLiteral _ (RealVal x) = return $ RealVal x
 checkLiteral _ (LogVal b) = return $ LogVal b
 checkLiteral _ (CharVal c) = return $ CharVal c
+checkLiteral _ Checked = return Checked
 checkLiteral loc (TupVal vals) = do
   vals' <- mapM (checkLiteral loc) vals
   return $ TupVal vals'

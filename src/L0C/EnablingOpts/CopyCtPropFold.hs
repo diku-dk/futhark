@@ -15,6 +15,7 @@ import Control.Monad.Writer
 --import Control.Monad.State
 import Data.Array
 import Data.List
+import Data.Maybe
 
 import Data.Bits
 import Data.Loc
@@ -370,13 +371,27 @@ copyCtPropExp (Size cs i e pos) = do
 copyCtPropExp (Assert e loc) = do
   e' <- copyCtPropExp e
   case e' of
-    Literal (LogVal True) _ -> return $ Literal (LogVal True) loc
+    Literal (LogVal True) _ -> return $ Literal Checked loc
     Var idd -> do
       vv <- asks $ M.lookup (identName idd) . envVtable
       case vv of
-        Just (Constant (LogVal True) _ _) -> return $ Literal (LogVal True) loc
+        Just (Constant (LogVal True) _ _) -> return $ Literal Checked loc
         _                                 -> return $ Assert e' loc
     _ -> return $ Assert e' loc
+
+copyCtPropExp (Conjoin es loc) = do
+  es' <- mapM copyCtPropExp es
+  -- Remove trivial certificates.
+  let check (Literal Checked _) = return Nothing
+      check (Var idd) = do
+        vv <- asks $ M.lookup (identName idd) . envVtable
+        case vv of
+          Just (Constant Checked _ _) -> return Nothing
+          _                           -> return $ Just $ Var idd
+      check e = return $ Just e
+  es'' <- liftM catMaybes $ mapM check es'
+  case es'' of [] -> return $ Literal Checked loc
+               _  -> return $ Conjoin es'' loc
 
 -----------------------------------------------------------
 --- If all params are values and function is free of IO ---

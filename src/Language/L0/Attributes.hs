@@ -135,6 +135,7 @@ subtypeOf (Elem Int) (Elem Int) = True
 subtypeOf (Elem Char) (Elem Char) = True
 subtypeOf (Elem Real) (Elem Real) = True
 subtypeOf (Elem Bool) (Elem Bool) = True
+subtypeOf (Elem Cert) (Elem Cert) = True
 subtypeOf _ _ = False
 
 -- | @x \`similarTo\` y@ is true if @x@ and @y@ are the same type,
@@ -291,6 +292,7 @@ removeElemNames Int  = Int
 removeElemNames Bool = Bool
 removeElemNames Char = Char
 removeElemNames Real = Real
+removeElemNames Cert = Cert
 
 -- | Add names to a type - this replaces array sizes with 'Nothing',
 -- although they probably are already, if you're using this.
@@ -308,6 +310,7 @@ addElemNames Int  = Int
 addElemNames Bool = Bool
 addElemNames Char = Char
 addElemNames Real = Real
+addElemNames Cert = Cert
 
 -- | @arrayOf t s u@ constructs an array type.  The convenience
 -- compared to using the 'Array' constructor directly is that @t@ can
@@ -374,6 +377,7 @@ addElemAliases Int  _ = Int
 addElemAliases Real _ = Real
 addElemAliases Bool _ = Bool
 addElemAliases Char _ = Char
+addElemAliases Cert _ = Cert
 
 -- | Unify the uniqueness attributes and aliasing information of two
 -- types.  The two types must otherwise be identical.  The resulting
@@ -396,6 +400,7 @@ blankValue (Elem Int) = IntVal 0
 blankValue (Elem Real) = RealVal 0.0
 blankValue (Elem Bool) = LogVal False
 blankValue (Elem Char) = CharVal '\0'
+blankValue (Elem Cert) = Checked
 blankValue (Elem (Tuple ts)) = TupVal (map blankValue ts)
 blankValue (Array et [_] _ _) = arrayVal [] $ Elem et
 blankValue (Array et (_:ds) u as) = arrayVal [] rt
@@ -408,6 +413,7 @@ valueType (IntVal _) = Elem Int
 valueType (RealVal _) = Elem Real
 valueType (LogVal _) = Elem Bool
 valueType (CharVal _) = Elem Char
+valueType Checked = Elem Cert
 valueType (TupVal vs) = Elem $ Tuple (map valueType vs)
 valueType (ArrayVal _ (Elem et)) =
   Array (addElemNames et) [Nothing] Nonunique NoInfo
@@ -546,7 +552,8 @@ typeOf (Split _ _ _ t _) =
 typeOf (Concat _ x y _) = typeOf x `setUniqueness` u
   where u = uniqueness (typeOf x) <> uniqueness (typeOf y)
 typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` S.empty
-typeOf (Assert _ _) = Elem Bool
+typeOf (Assert _ _) = Elem Cert
+typeOf (Conjoin _ _) = Elem Cert
 typeOf (DoLoop _ _ _ _ _ body _) = typeOf body
 typeOf (Map2 _ f arrs _ _) =
   Elem $ Tuple $ map (\x -> arrayType 1 x (uniqueProp x)) $

@@ -74,6 +74,7 @@ keyword s =
     "int"          -> INT
     "real"         -> REAL
     "bool"         -> BOOL
+    "cert"         -> CERT
     "char"         -> CHAR
     "fun"          -> FUN
     "fn"           -> FN
@@ -83,6 +84,7 @@ keyword s =
     "not"          -> NOT
     "True"         -> TRUE
     "False"        -> FALSE
+    "Checked"      -> CHECKED
     "pow"          -> POW
 
     "iota"         -> IOTA
@@ -107,6 +109,7 @@ keyword s =
     "empty"        -> EMPTY
     "copy"         -> COPY
     "assert"       -> ASSERT
+    "conjoin"      -> CONJOIN
     _              -> ID $ nameFromString s
 
 type Byte = Word8

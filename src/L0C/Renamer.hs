@@ -245,6 +245,7 @@ renameType = mapType renameType'
         renameElemType Char = return Char
         renameElemType Bool = return Bool
         renameElemType Real = return Real
+        renameElemType Cert = return Cert
 
 
 rename :: (TypeBox ty, VarName f, VarName t) => MapperBase ty ty f t (RenameM f t)

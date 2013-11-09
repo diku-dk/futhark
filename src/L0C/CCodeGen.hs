@@ -96,6 +96,7 @@ typeToCType (Elem Int) = return [C.cty|int|]
 typeToCType (Elem Bool) = return [C.cty|int|]
 typeToCType (Elem Char) = return [C.cty|char|]
 typeToCType (Elem Real) = return [C.cty|double|]
+typeToCType (Elem Cert) = return [C.cty|int|]
 typeToCType t@(Elem (Tuple ts)) = do
   ty <- gets $ find (sameRepresentation (toDecl t) . fst) . compTypeStructs
   case ty of
@@ -207,6 +208,7 @@ printStm place (Elem Char) = return [C.cstm|printf("%c", $exp:place);|]
 printStm place (Elem Bool) =
   return [C.cstm|printf($exp:place ? "true" : "false");|]
 printStm place (Elem Real) = return [C.cstm|printf("%lf", $exp:place);|]
+printStm _ (Elem Cert) = return [C.cstm|printf("checked");|]
 printStm place (Elem (Tuple ets)) = do
   prints <- forM (zip [(0::Int)..] ets) $ \(i, et) ->
               printStm [C.cexp|$exp:place.$id:(tupleField i)|] et
@@ -366,6 +368,8 @@ compileValue place (LogVal b) =
 compileValue place (CharVal c) =
   return [[C.cstm|$exp:place = $char:c;|]]
 
+compileValue _ Checked = return []
+
 compileValue place (TupVal vs) = do
   liftM concat . forM (zip vs [(0::Int)..]) $ \(v, i) ->
     compileValue (tupleFieldExp place i) v
@@ -394,6 +398,7 @@ compileValue place v@(ArrayVal _ rt) = do
         elemInit (IntVal x) = [[C.cinit|$int:x|]]
         elemInit (RealVal x) = [[C.cinit|$double:(toRational x)|]]
         elemInit (CharVal c) = [[C.cinit|$char:c|]]
+        elemInit Checked = [[C.cinit|0|]]
         elemInit (LogVal True) = [[C.cinit|1|]]
         elemInit (LogVal False) = [[C.cinit|0|]]
         elemInit (TupVal _) = error "Array-of-tuples encountered in code generator."
@@ -820,6 +825,8 @@ compileExp place (Assert e loc) = do
                             exit(1);
                           }
                    }|]
+
+compileExp _ (Conjoin _ _) = return []
 
 compileExp _ (Zip {}) = error "Zip encountered during code generation."
 compileExp _ (Unzip {}) = error "Unzip encountered during code generation."

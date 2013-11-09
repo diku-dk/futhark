@@ -349,6 +349,10 @@ letNormExp (Assert e loc) = do
   e' <- letNormExp e >>= makeVarExpSubst "tmp_e" loc
   makeVarExpSubst "tmp_assert" loc (Assert e' loc)
 
+letNormExp (Conjoin es loc) = do
+  es' <- mapM (letNormExp >=> makeVarExpSubst "tmp_e" loc) es
+  makeVarExpSubst "tmp_assert" loc (Conjoin es' loc)
+
 -----------------------------------------------
 ---- Map/Filter/Reduce/Scan/Redomap ----
 -----------------------------------------------

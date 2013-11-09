@@ -199,6 +199,8 @@ mapExpM tv (Copy e loc) =
   pure Copy <*> mapOnExp tv e <*> pure loc
 mapExpM tv (Assert e loc) =
   pure Assert <*> mapOnExp tv e <*> pure loc
+mapExpM tv (Conjoin es loc) =
+  pure Conjoin <*> mapM (mapOnExp tv) es <*> pure loc
 mapExpM tv (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody loc) =
   pure DoLoop <*> mapOnPattern tv mergepat <*> mapOnExp tv mergeexp <*>
        mapOnIdent tv loopvar <*> mapOnExp tv boundexp <*>
