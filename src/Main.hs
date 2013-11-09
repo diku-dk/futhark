@@ -21,7 +21,7 @@ import L0C.HOTrans.HOTransDriver
 import qualified L0C.FirstOrderTransform as FOT
 import qualified L0C.TupleTransform as TT
 import qualified L0C.FullNormalization as FN
-import qualified L0C.EnablingOpts.Hoisting as LHO
+import qualified L0C.Rebinder as RB
 import L0C.Untrace
 import L0C.CCodeGen
 
@@ -125,9 +125,9 @@ rename =
 
 hoist :: String -> [String] -> L0Option
 hoist =
-  passoption "Let-hoisting"
-  Pass { passName = "let-hoister"
-       , passOp = return . LHO.transformProg
+  passoption "Rebinder - hoisting, CSE, dependency graph compression."
+  Pass { passName = "rebinder"
+       , passOp = return . RB.transformProg
        }
 
 normalize :: String -> [String] -> L0Option
