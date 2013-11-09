@@ -422,17 +422,13 @@ type BlockPred = Exp -> BindNeed -> Bool
 orIf :: BlockPred -> BlockPred -> BlockPred
 orIf p1 p2 body need = p1 body need || p2 body need
 
-blockIfSeq :: [BlockPred] -> HoistM Exp -> HoistM Exp
-blockIfSeq ps m = foldl (flip blockIf) m ps
-
-blockIf :: BlockPred -> HoistM Exp -> HoistM Exp
-blockIf block m = pass $ do
-  (body, Need needs) <- listen m
+splitHoistable :: BlockPred -> Exp -> Need -> (Need, Need)
+splitHoistable block body (Need needs) =
   let (blocked, hoistable, _) =
-        foldl (split body) (S.empty, S.empty, S.empty) $
+        foldl split (S.empty, S.empty, S.empty) $
         inDepOrder $ S.toList needs
-  return (addBindings (Need blocked) body, const $ Need hoistable)
-  where split body (blocked, hoistable, ks) need =
+  in (Need blocked, Need hoistable)
+  where split (blocked, hoistable, ks) need =
           case need of
             LetBind pat e es ->
               let bad e' = block body (LetBind pat e' []) || ks `anyIsFreeIn` e'
@@ -450,11 +446,34 @@ blockIf block m = pass $ do
               | otherwise ->
                 (blocked, need `S.insert` hoistable, ks)
 
+blockIfSeq :: [BlockPred] -> HoistM Exp -> HoistM Exp
+blockIfSeq ps m = foldl (flip blockIf) m ps
+
+blockIf :: BlockPred -> HoistM Exp -> HoistM Exp
+blockIf block m = pass $ do
+  (body, needs) <- listen m
+  let (blocked, hoistable) = splitHoistable block body needs
+  return (addBindings blocked body, const hoistable)
+
 blockAllHoisting :: HoistM Exp -> HoistM Exp
 blockAllHoisting = blockIf $ \_ _ -> True
 
 hasFree :: S.Set VName -> BlockPred
 hasFree ks _ need = ks `intersects` requires need
+
+isNotSafe :: BlockPred
+isNotSafe _ = not . safeExp . asTail
+
+isNotCheap :: BlockPred
+isNotCheap _ = not . cheap . asTail
+  where cheap (Var _)      = True
+        cheap (Literal {}) = True
+        cheap (BinOp _ e1 e2 _ _) = cheap e1 && cheap e2
+        cheap (TupLit es _) = all cheap es
+        cheap (Not e _) = cheap e
+        cheap (Negate e _ _) = cheap e
+        cheap (LetPat _ e body _) = cheap e && cheap body
+        cheap _ = False
 
 uniqPat :: TupIdent -> Bool
 uniqPat (Wildcard t _) = unique t
@@ -470,11 +489,25 @@ isConsumed :: BlockPred
 isConsumed body need =
   provides need `intersects` consumedInExp body
 
+commonNeeds :: Need -> Need -> (Need, Need, Need)
+commonNeeds n1 n2 = (mempty, n1, n2) -- Placeholder.
+
+hoistCommon :: HoistM Exp -> HoistM Exp -> HoistM (Exp, Exp)
+hoistCommon m1 m2 = pass $ do
+  (body1, needs1) <- listen m1
+  (body2, needs2) <- listen m2
+  let splitOK = splitHoistable $ isNotSafe `orIf` isNotCheap
+      (needs1', safe1) = splitOK body1 needs1
+      (needs2', safe2) = splitOK body2 needs2
+      (common, needs1'', needs2'') = commonNeeds needs1' needs2'
+  return ((addBindings needs1'' body1,
+           addBindings needs2'' body2),
+          const $ mconcat [safe1, safe2, common])
+
 hoistInExp :: Exp -> HoistM Exp
 hoistInExp (If c e1 e2 t loc) = do
   c' <- hoistInExp c
-  e1' <- blockAllHoisting $ hoistInExp e1
-  e2' <- blockAllHoisting $ hoistInExp e2
+  (e1',e2') <- hoistCommon (hoistInExp e1) (hoistInExp e2)
   return $ If c' e1' e2' t loc
 hoistInExp (LetPat pat e body _) = do
   e' <- hoistInExp e
