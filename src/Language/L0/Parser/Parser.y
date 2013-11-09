@@ -11,6 +11,7 @@ module Language.L0.Parser.Parser
   , boolValue
   , charValue
   , stringValue
+  , certValue
   , arrayValue
   , tupleValue)
   where
@@ -35,6 +36,7 @@ import Language.L0.Parser.Lexer
 %name realValue RealValue
 %name boolValue LogValue
 %name charValue CharValue
+%name certValue CertValue
 %name stringValue StringValue
 %name arrayValue ArrayValue
 %name tupleValue TupleValue
@@ -52,6 +54,7 @@ import Language.L0.Parser.Lexer
       in              { L $$ IN }
       int             { L $$ INT }
       bool            { L $$ BOOL }
+      cert            { L $$ CERT }
       char            { L $$ CHAR }
       real            { L $$ REAL }
 
@@ -113,6 +116,7 @@ import Language.L0.Parser.Lexer
       redomap2        { L $$ REDOMAP2 }
       true            { L $$ TRUE }
       false           { L $$ FALSE }
+      checked         { L $$ CHECKED }
       not             { L $$ NOT }
       '~'             { L $$ NEGATE }
       '&&'            { L $$ AND }
@@ -121,6 +125,7 @@ import Language.L0.Parser.Lexer
       empty           { L $$ EMPTY }
       copy            { L $$ COPY }
       assert          { L $$ ASSERT }
+      conjoin         { L $$ CONJOIN }
 
 %nonassoc ifprec letprec
 %left '||'
@@ -192,6 +197,7 @@ InnerType : ElemType { ([], $1) }
 ElemType : int           { Int }
          | real          { Real }
          | bool          { Bool }
+         | cert          { Cert }
          | char          { Char }
          | TupleType     { Tuple $1 }
 
@@ -215,6 +221,7 @@ Exp  :: { UncheckedExp }
                         in Literal (ArrayVal (arrayFromList $ map CharVal s) $ Elem Char) pos }
      | true           { Literal (LogVal True) $1 }
      | false          { Literal (LogVal False) $1 }
+     | checked        { Literal Checked $1 }
      | Id             { Var $1 }
      | empty '(' Type ')' { Literal (emptyArray $3) $1 }
      | '[' Exps ']'   { ArrayLit $2 NoInfo $1 }
@@ -352,6 +359,10 @@ Exp  :: { UncheckedExp }
 
      | assert '(' Exp ')' { Assert $3 $1 }
 
+     | conjoin '(' Exps ')' { Conjoin $3 $1 }
+
+     | conjoin '(' ')' { Conjoin [] $1 }
+
      | '(' Exp ')' { $2 }
 
      | let Id '=' Exp in Exp %prec letprec
@@ -446,6 +457,7 @@ CharValue : charlit      { let L pos (CHARLIT char) = $1 in CharVal char }
 StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in ArrayVal (arrayFromList $ map CharVal s) $ Elem Char }
 LogValue : true          { LogVal True }
         | false          { LogVal False }
+CertValue : checked      { Checked }
 ArrayValue :  '[' Values ']'
              { case combArrayTypes $ map (toDecl . valueType) $2 of
                  Nothing -> error "Invalid array value"

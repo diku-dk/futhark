@@ -102,6 +102,7 @@ data ElemTypeBase as vn = Int
                         | Bool
                         | Char
                         | Real
+                        | Cert
                         | Tuple [TypeBase as vn]
                 deriving (Eq, Ord, Show)
 
@@ -144,6 +145,7 @@ data Value = IntVal !Int
            | RealVal !Double
            | LogVal !Bool
            | CharVal !Char
+           | Checked -- ^ The only value of type cert.
            | TupVal ![Value]
            | ArrayVal !(Array Int Value) (DeclTypeBase ())
              -- ^ It is assumed that the array is 0-indexed.  The type
@@ -277,6 +279,11 @@ data ExpBase ty vn =
             -- makes a difference in do-loops with merge variables.
 
             | Assert (ExpBase ty vn) SrcLoc
+            -- ^ Turn a boolean into a certificate, halting the
+            -- program if the boolean is false.
+
+            | Conjoin [ExpBase ty vn] SrcLoc
+            -- ^ Convert several certificates into a single certificate.
 
             | DoLoop
               (TupIdentBase ty vn) -- Merge variable pattern
@@ -338,6 +345,7 @@ instance Located (ExpBase ty vn) where
   locOf (Concat _ _ _ pos) = locOf pos
   locOf (Copy _ pos) = locOf pos
   locOf (Assert _ loc) = locOf loc
+  locOf (Conjoin _ loc) = locOf loc
   locOf (DoLoop _ _ _ _ _ _ pos) = locOf pos
   -- locOf for soac2 (Cosmin)
   locOf (Map2 _ _ _ _ pos) = locOf pos

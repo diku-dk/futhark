@@ -56,6 +56,7 @@ instance Pretty Value where
   ppr (CharVal c) = text $ show c
   ppr (LogVal b) = text $ show b
   ppr (RealVal x) = text $ tildes $ show x
+  ppr Checked = text "Checked"
   ppr (TupVal vs) = braces $ commasep $ map ppr vs
   ppr v@(ArrayVal a t)
     | Just s <- arrayString v = text $ show s
@@ -67,6 +68,7 @@ instance (Ord vn, Pretty vn) => Pretty (ElemTypeBase as vn) where
   ppr Char = text "char"
   ppr Bool = text "bool"
   ppr Real = text "real"
+  ppr Cert = text "cert"
   ppr (Tuple ets) = braces $ commasep $ map ppr ets
 
 instance (Ord vn, Pretty vn) => Pretty (TypeBase as vn) where
@@ -140,6 +142,7 @@ instance (Ord vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) where
     ppCertificates cs <> text "concat" <> apply [ppr x, ppr y]
   pprPrec _ (Copy e _) = text "copy" <> parens (ppr e)
   pprPrec _ (Assert e _) = text "assert" <> parens (ppr e)
+  pprPrec _ (Conjoin es _) = text "conjoin" <> parens (commasep $ map ppr es)
   pprPrec _ (DoLoop pat initexp i bound loopbody letbody _) =
     aliasComment pat $
     text "loop" <+> parens (ppr pat <+> equals <+> ppr initexp) <+>

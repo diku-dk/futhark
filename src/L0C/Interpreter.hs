@@ -469,6 +469,8 @@ evalExp (Assert e loc) = do
   case v of LogVal True -> return $ LogVal True
             _ -> bad $ TypeError loc "Assertion failed"
 
+evalExp (Conjoin _ _) = return Checked
+
 evalExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody pos) = do
   bound <- evalExp boundexp
   mergestart <- evalExp mergeexp

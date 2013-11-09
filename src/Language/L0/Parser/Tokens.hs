@@ -13,6 +13,7 @@ data Token = IF
            | IN
            | INT
            | BOOL
+           | CERT
            | CHAR
            | REAL
            | ID { idName :: Name }
@@ -66,6 +67,7 @@ data Token = IF
            | REDOMAP
            | TRUE
            | FALSE
+           | CHECKED
            | NOT
            | NEGATE
            | AND
@@ -80,4 +82,5 @@ data Token = IF
            | MAPALL2
            | REDOMAP2
            | ASSERT
+           | CONJOIN
              deriving (Show, Eq)

@@ -91,7 +91,7 @@ transformElemType' t = t
 -- Elem (Tuple [Elem Int,Elem Int,Elem Real,Elem Real,Elem Char])
 transformType :: Monoid (als VName) => TypeBase als VName -> TypeBase als VName
 transformType t@(Array {}) =
-  case transformType' t of Elem (Tuple ets) -> Elem $ Tuple $ Elem Bool : ets
+  case transformType' t of Elem (Tuple ets) -> Elem $ Tuple $ Elem Cert : ets
                            t'               -> t'
 transformType (Elem et) = Elem $ transformElemType et
 
@@ -119,9 +119,9 @@ transformValue (ArrayVal arr rt) =
   case transformType $ addNames rt of
     Elem (Tuple ts)
       | [] <- A.elems arr ->
-        TupVal $ LogVal True : flattenValues (map emptyOf ts)
+        TupVal $ Checked : flattenValues (map emptyOf ts)
       | otherwise         ->
-        TupVal $ LogVal True : flattenValues (zipWith asarray (flattenTypes ts) $ transpose arrayvalues)
+        TupVal $ Checked : flattenValues (zipWith asarray (flattenTypes ts) $ transpose arrayvalues)
     rt' -> ArrayVal arr $ removeNames rt'
   where emptyOf t = blankValue $ arrayType 1 t Nonunique
         asarray t vs = transformValue $ arrayVal vs t
@@ -405,7 +405,7 @@ transformExp (Concat cs x y loc) = do
 transformExp e@(Map lam arr tp loc) =
   tupToIdentList arr $ \c arrs ->
   let cs = certify c []
-  in transformLambda (conjoin loc cs) lam $ \lam' ->
+  in transformLambda (Conjoin (map Var cs) loc) lam $ \lam' ->
      untupleSOAC cs (typeOf e) $
        Map2 cs (tuplifyLam lam') (map Var arrs)
                (untupleType $ transformType' tp) loc
@@ -414,7 +414,7 @@ transformExp (Reduce lam ne arr tp loc) =
   tupToIdentList arr $ \c1 arrs ->
   tupToIdentList ne $ \c2 nes ->
   let cs = catMaybes [c1,c2]
-  in transformLambda (conjoin loc cs) lam $ \lam' ->
+  in transformLambda (Conjoin (map Var cs) loc) lam $ \lam' ->
      untupleDeclExp (lambdaReturnType lam) $
      Reduce2 cs (tuplifyLam lam') (map Var nes) (map Var arrs)
              (untupleType $ transformType' tp) loc
@@ -423,7 +423,7 @@ transformExp e@(Scan lam ne arr tp loc) =
   tupToIdentList arr $ \c1 arrs ->
   tupToIdentList ne $ \c2 nes ->
   let cs = catMaybes [c1,c2]
-  in transformLambda (conjoin loc cs) lam $ \lam' ->
+  in transformLambda (Conjoin (map Var cs) loc) lam $ \lam' ->
      untupleSOAC cs (typeOf e) $
        Scan2 cs (tuplifyLam lam') (map Var nes) (map Var arrs)
                 (untupleType $ transformType' tp) loc
@@ -431,7 +431,7 @@ transformExp e@(Scan lam ne arr tp loc) =
 transformExp e@(Filter lam arr _ loc) =
   tupToIdentList arr $ \c arrs ->
   let cs = catMaybes [c]
-  in transformLambda (conjoin loc cs) lam $ \lam' ->
+  in transformLambda (Conjoin (map Var cs) loc) lam $ \lam' ->
      untupleSOAC cs (typeOf e) $
        Filter2 cs (tuplifyLam lam') (map Var arrs) loc
 
@@ -439,8 +439,8 @@ transformExp (Redomap lam1 lam2 ne arr tp1 loc) =
   tupToIdentList arr $ \c1 arrs ->
   tupToIdentList ne $ \c2 nes ->
   let cs = catMaybes [c1,c2]
-  in transformLambda (conjoin loc cs) lam1 $ \lam1' ->
-     transformLambda (conjoin loc cs) lam2 $ \lam2' ->
+  in transformLambda (Conjoin (map Var cs) loc) lam1 $ \lam1' ->
+     transformLambda (Conjoin (map Var cs) loc) lam2 $ \lam2' ->
        untupleDeclExp (lambdaReturnType lam1) $
        Redomap2 cs (tuplifyLam lam1') (tuplifyLam lam2')
                    (map Var nes) (map Var arrs)
@@ -530,8 +530,8 @@ mergeCerts :: [Ident] -> (Maybe Ident -> TransformM Exp) -> TransformM Exp
 mergeCerts [] f = f Nothing
 mergeCerts [c] f = f $ Just c
 mergeCerts (c:cs) f = do
-  cert <- fst <$> newVar loc "comb_cert" (Elem Bool)
-  LetPat (Id cert) (Assert (conjoin loc $ c:cs) loc) <$> f (Just cert) <*> pure loc
+  cert <- fst <$> newVar loc "comb_cert" (Elem Cert)
+  LetPat (Id cert) (Conjoin (map Var $ c:cs) loc) <$> f (Just cert) <*> pure loc
   where loc = srclocOf c
 
 cleanLambdaParam :: Exp -> [Ident] -> Type -> TransformM ([Ident], [Exp])
@@ -648,7 +648,7 @@ untupleSOAC cs t e = do
     Elem (Tuple ets) -> do
       (names, namevs) <- unzip <$> mapM (newVar loc "soac_v") ets
       return $ LetPat (TupId (map Id names) loc) e
-                      (TupLit (conjoin loc cs:namevs) loc) loc
+                      (TupLit (Conjoin (map Var cs) loc:namevs) loc) loc
     _ -> return e
 
 untupleType :: Type -> [Type]
@@ -662,7 +662,7 @@ tuplit (Just c) loc es = TupLit (Var c:es) loc
 
 -- Name suggested by Spectrum.
 given :: SrcLoc -> Exp
-given = Literal $ LogVal True
+given = Literal Checked
 
 certify :: Maybe Ident -> Certificates -> Certificates
 certify k cs = maybeToList k ++ cs
@@ -680,9 +680,3 @@ bindVarsM desc (e:es) = do
   (k, f) <- bindVarM desc e
   (ks, g) <- bindVarsM desc es
   return (k:ks, f . g)
-
-conjoin :: SrcLoc -> [Ident] -> Exp
-conjoin loc [] = given loc
-conjoin loc (k:ks) =
-  let conjoin' e1 e2 = And e1 e2 loc
-  in foldl conjoin' (Var k) $ map Var ks
