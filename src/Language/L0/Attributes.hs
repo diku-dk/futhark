@@ -491,8 +491,16 @@ transposeArray k n v =
 -- a@.
 transposeIndex :: Int -> Int -> [a] -> [a]
 transposeIndex k n l
-  | (pre,needle:post) <- splitAt k l,
-    (mid,end) <- splitAt n post = pre ++ mid ++ [needle] ++ end
+  | k + n >= length l =
+    let n' = ((k + n) `mod` length l)-k
+    in transposeIndex k n' l
+  | n < 0,
+    (pre,needle:end) <- splitAt k l,
+    (beg,mid) <- splitAt (length pre+n) pre =
+    beg ++ [needle] ++ mid ++ end
+  | (beg,needle:post) <- splitAt k l,
+    (mid,end) <- splitAt n post =
+    beg ++ mid ++ [needle] ++ end
   | otherwise = l
 
 -- | The type of an L0 term.  The aliasing will refer to itself, if
