@@ -199,8 +199,8 @@ compiler config file = do
       hPutStrLn stderr $ errorDesc err
       case (errorProg err, l0verbose config) of
         (Just prog, Just outfile) ->
-          maybe (hPutStrLn stderr) writeFile outfile $
-            prettyPrint prog
+          maybe (hPutStr stderr) writeFile outfile $
+            prettyPrint prog ++ "\n"
         _ -> return ()
       exitWith $ ExitFailure 2
     Right prog -> l0action config prog
