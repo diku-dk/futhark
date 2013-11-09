@@ -47,30 +47,16 @@ module Language.L0.Traversals
   -- * Simple wrappers
   , foldlPattern
   , buildExpPattern
-
-  -- * Specific traversals
-  , progNames
-  , patNames
-  , patIdents
-  , freeInExp
-  , freeNamesInExp
-  , freeInLambda
-  , freeNamesInLambda
-  , consumedInExp
-  , safeExp
   )
   where
 
 import Control.Applicative
-import Control.Arrow (first)
 import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.Writer
 import Control.Monad.State
-import qualified Data.Set as S
 
 import Language.L0.Syntax
-import Language.L0.Attributes
 
 -- | Express a monad mapping operation on a syntax node.  Each element
 -- of this structure expresses the operation to be performed on a
@@ -342,8 +328,8 @@ foldlPattern expf lamf tlamf = foldExp m
             , foldOnLambda =
               \x lam -> return $ foldl expf (lamf x lam) $ getLambdaExps lam
             , foldOnTupleLambda =
-              \x lam -> return $ foldl expf (tlamf x lam) $
-                        getLambdaExps $ tupleLambdaToLambda lam
+              \x lam@(TupleLambda _ body _ _) ->
+                return $ foldl expf (tlamf x lam) [body]
             }
         getLambdaExps (AnonymFun _ body   _ _) = [body]
         getLambdaExps (CurryFun  _ params _ _) = params
@@ -363,158 +349,3 @@ buildExpPattern f = mapExp f'
 
         buildTupleLambda (TupleLambda tps body tp loc) =
           TupleLambda tps (f body) tp loc
-
--- | Return the set of all variable names bound in a program.
-progNames :: Ord vn => ProgBase ty vn -> S.Set vn
-progNames = execWriter . mapM funNames . progFunctions
-  where names = identityWalker {
-                  walkOnExp = expNames
-                , walkOnLambda = lambdaNames
-                , walkOnTupleLambda = lambdaNames . tupleLambdaToLambda
-                , walkOnPattern = tell . patNames
-                }
-
-        one = tell . S.singleton . identName
-        funNames (_, _, params, body, _) =
-          mapM_ one params >> expNames body
-
-        expNames e@(LetWith _ dest _ _ _ _ _) =
-          one dest >> walkExpM names e
-        expNames e@(DoLoop _ _ i _ _ _ _) =
-          one i >> walkExpM names e
-        expNames e = walkExpM names e
-
-        lambdaNames (AnonymFun params body _ _) =
-          mapM_ one params >> expNames body
-        lambdaNames (CurryFun _ exps _ _) =
-          mapM_ expNames exps
-
--- | The set of names bound in the given pattern.
-patNames :: Ord vn => TupIdentBase ty vn -> S.Set vn
-patNames = S.map identName . patIdents
-
--- | The set of idents bound in the given pattern.
-patIdents :: Ord vn => TupIdentBase ty vn -> S.Set (IdentBase ty vn)
-patIdents (Id ident)     = S.singleton ident
-patIdents (TupId pats _) = mconcat $ map patIdents pats
-patIdents (Wildcard _ _) = mempty
-
--- | Return the set of identifiers that are free in the given
--- expression.
-freeInExp :: Ord vn => ExpBase ty vn -> S.Set (IdentBase ty vn)
-freeInExp = execWriter . expFree
-  where names = identityWalker {
-                  walkOnExp = expFree
-                , walkOnLambda = lambdaFree
-                , walkOnTupleLambda = lambdaFree . tupleLambdaToLambda
-                , walkOnIdent = identFree
-                , walkOnCertificates = mapM_ identFree
-                }
-
-        identFree ident =
-          tell $ S.singleton ident
-
-        expFree (LetPat pat e body _) = do
-          expFree e
-          binding (patIdents pat) $ expFree body
-        expFree (LetWith cs dest src idxs ve body _) = do
-          mapM_ identFree cs
-          identFree src
-          mapM_ expFree idxs
-          expFree ve
-          binding (S.singleton dest) $ expFree body
-        expFree (DoLoop pat mergeexp i boundexp loopbody letbody _) = do
-          expFree mergeexp
-          expFree boundexp
-          binding (i `S.insert` patIdents pat) $ do
-            expFree loopbody
-            expFree letbody
-        expFree e = walkExpM names e
-
-        lambdaFree = tell . freeInLambda
-
-        binding bound = censor (S.\\ bound)
-
--- | Return the set of identifiers that are free in the given lambda.
-freeInLambda :: Ord vn => LambdaBase ty vn -> S.Set (IdentBase ty vn)
-freeInLambda (AnonymFun params body _ _) =
-  S.filter ((`notElem` params') . identName) $ freeInExp body
-    where params' = map identName params
-freeInLambda (CurryFun _ exps _ _) =
-  S.unions (map freeInExp exps)
-
--- | As 'freeInExp', but returns the raw names rather than 'IdentBase's.
-freeNamesInExp :: Ord vn => ExpBase ty vn -> S.Set vn
-freeNamesInExp = S.map identName . freeInExp
-
--- | As 'freeInLambda', but returns the raw names rather than
--- 'IdentBase's.
-freeNamesInLambda :: Ord vn => LambdaBase ty vn -> S.Set vn
-freeNamesInLambda = S.map identName . freeInLambda
-
-consumedInExp :: Ord vn => ExpBase CompTypeBase vn -> S.Set vn
-consumedInExp = execWriter . expConsumed
-  where names = identityWalker {
-                  walkOnExp = expConsumed
-                }
-
-        unconsume s = censor (`S.difference` s)
-
-        consume ident =
-          tell $ identName ident `S.insert` aliases (identType ident)
-
-        expConsumed (LetPat pat e body _) = do
-          expConsumed e
-          unconsume (patNames pat) $ expConsumed body
-        expConsumed (LetWith _ dest src idxs ve body _) = do
-          mapM_ expConsumed idxs
-          expConsumed ve
-          consume src
-          unconsume (S.singleton $ identName dest) $ expConsumed body
-        expConsumed (DoLoop pat mergeexp i boundexp loopbody letbody _) = do
-          expConsumed mergeexp
-          expConsumed boundexp
-          unconsume (identName i `S.insert` patNames pat) $ do
-            expConsumed loopbody
-            expConsumed letbody
-        expConsumed (Apply _ args _ _) =
-          mapM_ (consumeArg . first typeOf) args
-          where consumeArg (t, Consume) = tell $ aliases t
-                consumeArg (Elem (Tuple ets), TupleDiet ds) =
-                  mapM_ consumeArg $ zip ets ds
-                consumeArg _ = return ()
-        expConsumed e = walkExpM names e
-
--- | An expression is safe if it is always well-defined (assuming that
--- any required certificates have been checked) in any context.  For
--- example, array indexing is not safe, as the index may be out of
--- bounds.  On the other hand, adding two numbers cannot fail.
-safeExp :: ExpBase ty vn -> Bool
-safeExp (Index {}) = False
-safeExp (Split {}) = False
-safeExp (Assert {}) = False
-safeExp (Reshape {}) = False
-safeExp (LetWith {}) = False
-safeExp (Zip {}) = False
-safeExp (ArrayLit {}) = False
-safeExp (Concat {}) = False
-safeExp (Apply {}) = False
-safeExp (BinOp Divide _ _ _ _) = False
-safeExp (BinOp Pow _ _ _ _) = False
-safeExp (BinOp Mod _ _ _ _) = False
-safeExp e = case walkExpM safe e of
-              Just () -> True
-              Nothing -> False
-  -- The use of the Maybe monad is simply to short-circuit traversal.
-  where
-    boolToMaybe True  = Just ()
-    boolToMaybe False = Nothing
-
-    safe = identityWalker {
-             walkOnExp = boolToMaybe . safeExp
-           , walkOnLambda = boolToMaybe . safeLambda
-           , walkOnTupleLambda = boolToMaybe . safeLambda . tupleLambdaToLambda
-           }
-
-    safeLambda (AnonymFun _ body _ _) = safeExp body
-    safeLambda (CurryFun _ exps _ _)  = all safeExp exps
