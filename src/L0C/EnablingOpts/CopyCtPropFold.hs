@@ -461,9 +461,9 @@ copyCtPropCerts = liftM concat . mapM check
   where check idd = do
           vv <- asks $ M.lookup (identName idd) . envVtable
           case vv of
-            Just (Constant (LogVal True) _ _) -> changed []
-            Just (VarId  id' tp1 _)           -> changed [Ident id' tp1 loc]
-            _                                 -> do
+            Just (Constant Checked _ _) -> changed []
+            Just (VarId  id' tp1 _)     -> changed [Ident id' tp1 loc]
+            _                           -> do
               nonRemovable $ identName idd
               return [idd]
           where loc = srclocOf idd
