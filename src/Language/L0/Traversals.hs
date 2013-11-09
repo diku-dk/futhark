@@ -57,6 +57,7 @@ module Language.L0.Traversals
   , freeInLambda
   , freeNamesInLambda
   , consumedInExp
+  , safeExp
   )
   where
 
@@ -483,3 +484,37 @@ consumedInExp = execWriter . expConsumed
                   mapM_ consumeArg $ zip ets ds
                 consumeArg _ = return ()
         expConsumed e = walkExpM names e
+
+-- | An expression is safe if it is always well-defined (assuming that
+-- any required certificates have been checked) in any context.  For
+-- example, array indexing is not safe, as the index may be out of
+-- bounds.  On the other hand, adding two numbers cannot fail.
+safeExp :: ExpBase ty vn -> Bool
+safeExp (Index {}) = False
+safeExp (Split {}) = False
+safeExp (Assert {}) = False
+safeExp (Reshape {}) = False
+safeExp (LetWith {}) = False
+safeExp (Zip {}) = False
+safeExp (ArrayLit {}) = False
+safeExp (Concat {}) = False
+safeExp (Apply {}) = False
+safeExp (BinOp Divide _ _ _ _) = False
+safeExp (BinOp Pow _ _ _ _) = False
+safeExp (BinOp Mod _ _ _ _) = False
+safeExp e = case walkExpM safe e of
+              Just () -> True
+              Nothing -> False
+  -- The use of the Maybe monad is simply to short-circuit traversal.
+  where
+    boolToMaybe True  = Just ()
+    boolToMaybe False = Nothing
+
+    safe = identityWalker {
+             walkOnExp = boolToMaybe . safeExp
+           , walkOnLambda = boolToMaybe . safeLambda
+           , walkOnTupleLambda = boolToMaybe . safeLambda . tupleLambdaToLambda
+           }
+
+    safeLambda (AnonymFun _ body _ _) = safeExp body
+    safeLambda (CurryFun _ exps _ _)  = all safeExp exps
