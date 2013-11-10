@@ -44,7 +44,7 @@ lookup idd m = delve S.empty idd
       case drop i $ delve s k' of
         (d:ds):_ -> d:ds
         _        -> [e]
-    recurse _ _ = []
+    recurse _ e = [e]
 
 insert :: Ident -> [Exp] -> ShapeMap -> ShapeMap
 insert dest es bnds =
