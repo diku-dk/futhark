@@ -12,10 +12,7 @@ module L0C.EnablingOpts.EnablingOptDriver (
                                   , EnablingOptError(..)
                             )
   where
- 
- 
---import Data.Either
- 
+
 import L0C.L0
 import L0C.Renamer
 import L0C.FreshNames
@@ -23,7 +20,6 @@ import L0C.FreshNames
 import L0C.EnablingOpts.InliningDeadFun
 import L0C.EnablingOpts.CopyCtPropFold
 import L0C.EnablingOpts.DeadVarElim
-import L0C.EnablingOpts.TupleNormalizer
 import L0C.EnablingOpts.LetNormalizer
 import L0C.EnablingOpts.EnablingOptErrors
 
@@ -40,16 +36,14 @@ enablingOpts prog = do
 
     prog_dfe      <- deadFunElim     prog_inl
 
-    let prog_rn   = renameProg       prog_dfe
+    let prog_uniq = renameProg prog_dfe
 
-    prog_ntup     <- tupleNormProg   prog_rn
-
-    prog_enopt1 <- normCopyDeadOpts prog_ntup
+    prog_enopt1 <- normCopyDeadOpts prog_uniq
     prog_enopt2 <- normCopyDeadOpts prog_enopt1
     prog_deadf2 <- deadFunElim      prog_enopt2
-    prog_flat_opt <- normCopyDeadOpts $ renameProg $ TT.transformProg prog_deadf2
+    prog_flat_opt <- normCopyDeadOpts prog_deadf2
 
-    tupleNormProg   prog_flat_opt >>= tupleNormProg >>= normCopyDeadOpts
+    normCopyDeadOpts prog_flat_opt
 
 --    if(succs)
 --    then enablingOpts outprog
@@ -58,7 +52,7 @@ enablingOpts prog = do
 normCopyDeadOpts :: Prog -> Either EnablingOptError Prog
 normCopyDeadOpts prog = do
     (_, prog_nlet) <- letNormProg     prog
-    (_,prog_cp)    <- copyCtProp      prog_nlet
+    (_,prog_cp)    <- copyCtProp      $ TT.transformProg prog_nlet
     (_, prog_dce)  <- deadCodeElim    prog_cp
     return prog_dce
 
