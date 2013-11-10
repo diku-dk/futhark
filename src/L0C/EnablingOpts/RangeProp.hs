@@ -139,9 +139,10 @@ allIdentsAsList = execWriter . mapM funIdents . progFunctions
 -- I think we would just like to keep the old range
 createRangeAndSign :: Maybe Exp -> RangeM (Range, RangeSign)
 createRangeAndSign (Just e)  = do
-  computedRange <- makeRangeComparable (RExp e, RExp e)
-  sign <- calculateRangeSign computedRange
-  return ( computedRange , sign )
+  e' <- simplExp e
+  let range = (RExp e', RExp e')
+  sign <- calculateRangeSign range
+  return ( range , sign )
 createRangeAndSign Nothing = return ( (Ninf, Pinf), Nothing )
 
 ----------------------------------------
@@ -496,16 +497,25 @@ ppRange (l,u) = "[ " ++ ppRExp l ++ " , " ++ ppRExp u ++ " ]"
 
 ppSign :: RangeSign -> String
 ppSign (Just s) = show s
-ppSign Nothing = "Unknown"
+ppSign Nothing = "Any"
 
 ppDict :: RangeDict -> String
-ppDict dict = foldr ((++) . (++ "\n") . ppDictElem) "" (M.toList $ M.delete dummyVName dict)
+ppDict rdict = foldr ((++) . (++ "\n") . ppDictElem) "" (M.toList $ M.delete dummyVName rdict)
               where
                 ppDictElem :: (VName, (Range, RangeSign)) -> String
                 ppDictElem (vname, (range, sign)) =
                   escapeColorize Green (textual vname) ++ " " ++
                   escapeColorize Blue (ppRange range) ++ " " ++
+                  escapeColorize White (ppRangeAsComp range) ++ " " ++
                   escapeColorize Yellow (ppSign sign)
+
+                -- makes the range comparable, so it's understandable for us humans
+                ppRangeAsComp :: Range -> String
+                ppRangeAsComp range = do
+                  let env = RangeEnv { dict = rdict }
+                  case runRangeM (makeRangeComparable range) env of
+                    Right range' -> ppRange range'
+                    Left err     -> show err
 
 ----------------------------------------
 -- TESTING
