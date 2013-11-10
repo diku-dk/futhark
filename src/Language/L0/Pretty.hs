@@ -32,6 +32,9 @@ tildes = map tilde
 apply :: [Doc] -> Doc
 apply = encloseSep lparen rparen comma . map align
 
+commastack :: [Doc] -> Doc
+commastack = align . stack . punctuate comma
+
 aliasComment :: (Ord vn, Pretty vn, TypeBox ty) => TupIdentBase ty vn -> Doc -> Doc
 aliasComment pat d = case aliasComment' pat of
                        []   -> d
@@ -57,10 +60,15 @@ instance Pretty Value where
   ppr (LogVal b) = text $ show b
   ppr (RealVal x) = text $ tildes $ show x
   ppr Checked = text "Checked"
-  ppr (TupVal vs) = braces $ commasep $ map ppr vs
+  ppr (TupVal vs)
+    | any (not . basicType . valueType) vs =
+      braces $ commastack $ map ppr vs
+    | otherwise =
+      braces $ commasep $ map ppr vs
   ppr v@(ArrayVal a t)
     | Just s <- arrayString v = text $ show s
     | [] <- elems a = text "empty" <> parens (ppr t)
+    | Array {} <- t = brackets $ commastack $ map ppr $ elems a
     | otherwise     = brackets $ commasep $ map ppr $ elems a
 
 instance (Ord vn, Pretty vn) => Pretty (ElemTypeBase as vn) where
@@ -86,8 +94,20 @@ instance (Ord vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) where
   ppr = pprPrec 0
   pprPrec _ (Var v) = ppr v
   pprPrec _ (Literal v _) = ppr v
-  pprPrec _ (TupLit es _) = braces $ commasep $ map ppr es
-  pprPrec _ (ArrayLit es _ _) = brackets $ commasep $ map ppr es
+  pprPrec _ (TupLit es _)
+    | any hasArrayLit es = braces $ commastack $ map ppr es
+    | otherwise          = braces $ commasep $ map ppr es
+    where hasArrayLit (ArrayLit {}) = True
+          hasArrayLit (TupLit es2 _) = any hasArrayLit es2
+          hasArrayLit (Literal val _) = hasArrayVal val
+          hasArrayLit _ = False
+          hasArrayVal (ArrayVal {}) = True
+          hasArrayVal (TupVal vs) = any hasArrayVal vs
+          hasArrayVal _ = False
+  pprPrec _ (ArrayLit es rt _) =
+    case unboxType rt of
+      Just (Array {}) -> brackets $ commastack $ map ppr es
+      _               -> brackets $ commasep $ map ppr es
   pprPrec p (BinOp bop x y _ _) = ppBinOp p bop x y
   pprPrec p (And x y _) = ppBinOp p LogAnd x y
   pprPrec p (Or x y _) = ppBinOp p LogOr x y
@@ -155,9 +175,8 @@ instance (Ord vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) where
     ppCertificates cs <> ppSOAC "reduce2" [lam] (es++as)
   pprPrec _ (Redomap2 cs outer inner es as _ _) =
     ppCertificates cs <> text "redomap2" <>
-    parens (commasep (ppr outer : ppr inner :
-                      braces (commasep $ map ppr es) :
-                      map ppr as))
+    parens (ppr outer <> comma </> ppr inner <> comma </>
+            commasep (braces (commasep $ map ppr es) : map ppr as))
   pprPrec _ (Scan2 cs lam es as _ _) =
     ppCertificates cs <> ppSOAC "scan2" [lam] (es++as)
   pprPrec _ (Filter2 cs lam as _) =
@@ -219,12 +238,13 @@ ppBinOp p bop x y = parensIf (p > precedence bop) $
 ppSOAC :: (Ord vn, Pretty vn, TypeBox ty, Pretty fn) =>
           String -> [fn] -> [ExpBase ty vn] -> Doc
 ppSOAC name funs es =
-  text name <> parens (ppList funs <//>
+  text name <> parens (ppList funs </>
                        commasep (map ppr es))
 
 ppList :: (Pretty a) => [a] -> Doc
-ppList [] = empty
-ppList as = commasep (map ppr as) <+> comma
+ppList as = case map ppr as of
+              []     -> empty
+              a':as' -> foldl (</>) (a' <> comma) $ map (<> comma) as'
 
 ppCertificates :: (Ord vn, TypeBox ty, Pretty vn) => CertificatesBase ty vn -> Doc
 ppCertificates [] = empty
