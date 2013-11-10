@@ -1,4 +1,8 @@
-fun int main (int x) =
+// min(x, 42) -- [x, 42]
+// max(5, y) -- [5, y]
+
+fun int main (int input) =
+    let x = max(5, min(input, 42)) in
     let y = x + 5 in
     let d = y - x in
     d

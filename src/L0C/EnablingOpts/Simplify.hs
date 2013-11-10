@@ -280,17 +280,14 @@ simplifyNary (BinOp Divide e1 e2 tp pos) = do
                         -- Clean divide, ie 4 * a0*..*an / 2 = 2 * a0..*an
                         then return $ NaryMult (resLit : numeExps) tp pos
                         -- Unclean divide, ie 4 * a0*..*an / 3, result will depend on a0*..*an. If 3, then 4 * 3 / 3 = 4, if 1 then 4 / 3 = 1
-                        else do numeExp' <- simplifyBack $ NaryMult (numeFactorLit : numeExps) tp pos
-                                let divExp = BinOp Divide numeExp' denomFactorLit tp pos
+                        else do numeExp' <- simplifyBack =<< joinTerm (NaryMult numeExps tp pos, numeFactor)
+                                let divExp = BinOp Divide numeExp' (Literal denomFactor pos) tp pos
                                 return $ NaryMult [divExp] tp pos
                    -- create divide expression from (hopefully more) simplified subexpressions
-                   else do allNum <- simplifyBack $ NaryMult (numeFactorLit : numeExps) tp pos
-                           allDenom <- simplifyBack $ NaryMult (denomFactorLit : denomExps) tp pos
+                   else do allNum <- simplifyBack =<< joinTerm (NaryMult numeExps tp pos, numeFactor )
+                           allDenom <- simplifyBack =<< joinTerm (NaryMult denomExps tp pos, denomFactor)
                            let divExp = BinOp Divide allNum allDenom tp pos
                            return $ NaryMult [divExp] tp pos
-
-              where numeFactorLit = Literal numeFactor pos
-                    denomFactorLit = Literal denomFactor pos
 
           divTwoNaryMults _ _ = badSimplifyM $ SimplifyError pos "divTwoNaryMults, not for NaryPlus "
 

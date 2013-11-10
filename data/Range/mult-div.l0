@@ -1,0 +1,44 @@
+// min(x, 42) -- [x, 42]
+// max(5, y) -- [5, y]
+
+fun int main(int input1, int input2) =
+    let x = max(2, min(input1, 5)) in
+    let xn = ~1 * x in
+    let y = max(3, min(input2, 6)) in
+    let yn = y * ~1  in
+
+    let mul_t0 = x * 2 in
+    let mul_t1 = x * ~2 in
+    let mul_t2 = x * y in
+    let mul_t3 = xn * yn in
+    let mul_t5 = x * yn in
+    let mul_t5 = xn * y in
+
+    let div_t0 = x / 2 in
+    let div_t1 = x / ~2 in
+    let div_t2 = x / y in
+    let div_t3 = xn / yn in
+    let div_t4 = x / yn in
+    let div_t5 = xn / y in
+
+    // Now x can be both Negative or Positive
+    let x = max(~2, min(input1, 5)) in
+    let xn = ~1 * x in
+    let y = max(~3, min(input2, 6)) in
+    let yn = y * ~1  in
+
+    let mul_t0 = x * 2 in
+    let mul_t1 = x * ~2 in
+    let mul_t2 = x * y in
+    let mul_t3 = xn * yn in
+    let mul_t5 = x * yn in
+    let mul_t5 = xn * y in
+
+    let div_t0 = x / 2 in
+    let div_t1 = x / ~2 in
+    let div_t2 = x / y in
+    let div_t3 = xn / yn in
+    let div_t4 = x / yn in
+    let div_t5 = xn / y in
+
+    0
