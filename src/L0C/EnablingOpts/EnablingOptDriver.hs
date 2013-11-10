@@ -46,6 +46,7 @@ enablingOpts prog = do
     let prog_rn   = renameProg       prog_dfe
 
     rangeDict <- rangeProp prog_rn
+    _ <- progMapTest prog_rn
     dummyCalc <- dummyUsingRangeProp prog_rn rangeDict
 
     prog_ntup     <- tupleNormProg   dummyCalc
@@ -55,10 +56,10 @@ enablingOpts prog = do
     prog_deadf2 <- deadFunElim      prog_enopt2
     prog_flat_opt <- normCopyDeadOpts $ renameProg $ TT.transformProg prog_deadf2
 
-    rangeDict' <- rangeProp prog_flat_opt
-    dummyCalc' <- dummyUsingRangeProp prog_flat_opt rangeDict'
+    --rangeDict' <- rangeProp prog_flat_opt
+    --dummyCalc' <- dummyUsingRangeProp prog_flat_opt rangeDict'
 
-    tupleNormProg   dummyCalc' >>= tupleNormProg >>= normCopyDeadOpts
+    tupleNormProg   prog_flat_opt >>= tupleNormProg >>= normCopyDeadOpts
 
 --    if(succs)
 --    then enablingOpts outprog

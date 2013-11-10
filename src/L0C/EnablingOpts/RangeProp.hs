@@ -12,6 +12,7 @@ module L0C.EnablingOpts.RangeProp (
   , rangeProp
   , dummyUsingRangeProp
   , emptyRangeDict
+  , progMapTest
 
 )
 where
@@ -21,6 +22,7 @@ import qualified Data.Map as M
 
 import Control.Monad.Reader
 import Control.Monad.Writer
+import Control.Applicative
 
 import L0C.EnablingOpts.EnablingOptErrors
 
@@ -56,11 +58,12 @@ type RangeInequality = Maybe Inequality
 ----------------------------------------
 
 data RangeEnv = RangeEnv {
-    dict  :: RangeDict
+    dict    :: M.Map VName (Range, RangeSign)
+  , program :: Prog
   }
 
 newtype RangeM a = RangeM (ReaderT RangeEnv (Either EnablingOptError) a)
-  deriving (MonadReader RangeEnv, Monad)
+  deriving (MonadReader RangeEnv, Monad, Applicative, Functor)
 
 ----------------------------------------
 -- Monad helpers
@@ -82,6 +85,24 @@ simplExp e =
 ----------------------------------------
 -- Range Propagation
 ----------------------------------------
+
+
+
+
+progMapTest :: Prog -> Either EnablingOptError Prog
+progMapTest prog = do
+    let env = RangeEnv { dict = M.empty, program = prog }
+    res <- runRangeM (mapM rangePropFun $ progFunctions prog ) env
+    return $ Prog res
+  where
+    rangePropFun (fname, rettype, args, body, pos) = do
+        body' <- doSomething body
+        return (fname, rettype, args, body', pos)
+
+doSomething :: Exp -> RangeM Exp
+doSomething e = trace (show "something") (mapExpM mapper e)
+  where mapper = identityMapper { mapOnExp = doSomething }
+
 
 dummyUsingRangeProp :: Prog -> RangeDict -> Either EnablingOptError Prog
 dummyUsingRangeProp prog _ = return prog
