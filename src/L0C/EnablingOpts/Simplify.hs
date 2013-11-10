@@ -82,18 +82,16 @@ simplifyBack (NaryMult [] _ pos) =
 simplifyBack (NaryPlus [] _ pos) =
   badSimplifyM $ SimplifyError pos
                     " In simplifyBack, NaryPlus: empty exp list! "
-simplifyBack (NaryMult [f] _ _) = return f
 simplifyBack (NaryPlus [t] _ _) = simplifyBack t
+simplifyBack (NaryMult [f] _ _) = return f
 simplifyBack (NaryMult fs tp pos) =
-  let
-    fs' = zip (map length $ group fs)  (nub fs)
+  let fs' = zip (map length $ group fs)  (nub fs) in
+  return $ foldl1 createTimesExp $ map takeExpToPower fs'
+  where
+    createTimesExp e1 e2 = BinOp Times e1 e2 (typeOf e1) (srclocOf e1)
     takeExpToPower (num, e)
       | num == 1  = e
       | otherwise = BinOp Pow e (Literal (IntVal num) pos) tp pos
-  in
-    return $ foldl1 createTimesExp $ map takeExpToPower fs'
-  where
-    createTimesExp e1 e2 = BinOp Times e1 e2 (typeOf e1) (srclocOf e1)
 
 
 
@@ -121,29 +119,29 @@ simplifyBothWays e = do
 simplifyNary :: Exp -> SimplifyM NaryExp
 
 simplifyNary (Min e1 e2 tp pos) = do
-    e1'<- (simplifyNary e1) >>= simplifyBack
-    e2'<- (simplifyNary e2) >>= simplifyBack
+    e1'<- simplifyNary e1 >>= simplifyBack
+    e2'<- simplifyNary e2 >>= simplifyBack
     case (e1',e2') of
         (Literal (IntVal v1) _, Literal (IntVal v2) _) ->
-            return $ NaryMult [(Literal (IntVal $ min v1 v2) pos)] tp pos
+            return $ NaryMult [Literal (IntVal $ min v1 v2) pos] tp pos
         _ ->
-            return $ NaryMult [(Min e1' e2' tp pos)] tp pos
+            return $ NaryMult [Min e1' e2' tp pos] tp pos
 
 simplifyNary (Max e1 e2 tp pos) = do
-    e1'<- (simplifyNary e1) >>= simplifyBack
-    e2'<- (simplifyNary e2) >>= simplifyBack
+    e1'<- simplifyNary e1 >>= simplifyBack
+    e2'<- simplifyNary e2 >>= simplifyBack
     case (e1',e2') of
         (Literal (IntVal v1) _, Literal (IntVal v2) _) ->
-            return $ NaryMult [(Literal (IntVal $ max v1 v2) pos)] tp pos
+            return $ NaryMult [Literal (IntVal $ max v1 v2) pos] tp pos
         _ ->
-            return $ NaryMult [(Max e1' e2' tp pos)] tp pos
+            return $ NaryMult [Max e1' e2' tp pos] tp pos
 
 simplifyNary (BinOp Plus (Max e1' e2' _ _) e2 tp pos) = do
     let e1'' = BinOp Plus e1' e2 tp pos
     let e2'' = BinOp Plus e2' e2 tp pos
     simplifyNary $ Max e1'' e2'' tp pos
 
-simplifyNary (BinOp Plus e1 e2@(Max _ _ _ _) tp pos) =
+simplifyNary (BinOp Plus e1 e2@(Max{}) tp pos) =
     simplifyNary (BinOp Plus e2 e1 tp pos)
 
 
@@ -152,7 +150,7 @@ simplifyNary (BinOp Plus (Min e1' e2' _ _) e2 tp pos) = do
     let e2'' = BinOp Plus e2' e2 tp pos
     simplifyNary $ Min e1'' e2'' tp pos
 
-simplifyNary (BinOp Plus e1 e2@(Min _ _ _ _) tp pos) =
+simplifyNary (BinOp Plus e1 e2@(Min{}) tp pos) =
     simplifyNary (BinOp Plus e2 e1 tp pos)
 
 
@@ -301,16 +299,16 @@ simplifyNary (Negate e tp pos) = do
     simplifyNary $ BinOp Times (Literal negOne pos) e tp pos
 
 simplifyNary (BinOp Pow e1 e2 tp pos) = do
-  e1' <- (simplifyNary e1) >>= simplifyBack
-  e2' <- (simplifyNary e2) >>= simplifyBack
+  e1' <- simplifyNary e1 >>= simplifyBack
+  e2' <- simplifyNary e2 >>= simplifyBack
   case (e1',e2') of
     (Literal (IntVal v1) _, Literal (IntVal v2) _) ->
-          return $ NaryMult [(Literal (IntVal $ v1^v2) pos)] tp pos
-    (_, Literal (IntVal v2) _) -> if v2 >= 0
-                                  then return $ NaryMult (replicate v2 e1') tp pos
-                                  else return $ NaryMult (replicate (abs v2) $
-                                    BinOp Divide (Literal (IntVal 1) pos) e1' tp pos) tp pos
-    _   -> return $ NaryMult [(BinOp Pow e1' e2' tp pos)] (typeOf e1') (srclocOf e1')
+          return $ NaryMult [Literal (IntVal $ v1^v2) pos] tp pos
+    (_, Literal (IntVal v2) _) ->
+        return (if v2 >= 0
+                then NaryMult (replicate v2 e1') tp pos
+                else NaryMult (replicate (abs v2) $ BinOp Divide (Literal (IntVal 1) pos) e1' tp pos) tp pos)
+    _   -> return $ NaryMult [BinOp Pow e1' e2' tp pos] (typeOf e1') (srclocOf e1')
 
 
 
