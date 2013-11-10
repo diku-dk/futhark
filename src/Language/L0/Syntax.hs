@@ -173,6 +173,7 @@ instance Ord vn => Ord (IdentBase ty vn) where
 instance Located (IdentBase ty vn) where
   locOf = locOf . identSrcLoc
 
+-- | A list of identifiers used for certificates in some expressions.
 type CertificatesBase ty vn = [IdentBase ty vn]
 
 -- | L0 Expression Language: literals + vars + int binops + array
