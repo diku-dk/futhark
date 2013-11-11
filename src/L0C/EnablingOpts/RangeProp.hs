@@ -400,7 +400,7 @@ substitute i r (RExp (BinOp Pow e1 e2 ty pos)) = do
     powRExp _ 0 = return $ createRExpIntLit 1 pos
     powRExp Pinf _ = return Pinf
     powRExp Ninf _ = return Ninf
-    divRExp (RExp x) v = liftM RExp $ simplExp (BinOp Pow x (createIntLit v pos) ty pos)
+    powRExp (RExp x) v = liftM RExp $ simplExp (BinOp Pow x (createIntLit v pos) ty pos)
 
 substitute i r (RExp (Min e1 e2 ty pos)) = do
   (a, b) <- substitute i r (RExp e1)
