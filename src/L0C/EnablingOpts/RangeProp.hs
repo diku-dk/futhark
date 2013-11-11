@@ -30,6 +30,8 @@ import L0C.EnablingOpts.Simplify
 import Debug.Trace
 import L0C.EscapeColor
 
+import qualified Data.Traversable
+
 ----------------------------------------
 -- Data types
 ----------------------------------------
@@ -150,9 +152,8 @@ createRangeAndSign Nothing = return ( (Ninf, Pinf), Nothing )
 
 rangeCompare :: RangeDict -> Exp -> Exp -> Either EnablingOptError RangeInequality
 rangeCompare rdict e1 e2 = do
-  let e1SrcLoc = L.SrcLoc $ L.locOf e1
   let env = RangeEnv { dict = rdict }
-  runRangeM (rangeRExpCompare (RExp e1) (RExp e2) e1SrcLoc ) env
+  runRangeM (rangeRExpCompare (RExp e1) (RExp e2) (L.srclocOf e1) ) env
 
 -- Same as doing exp `rangeCompare` 0
 rangeCompareZero :: RangeDict -> Exp -> Either EnablingOptError RangeInequality
@@ -167,9 +168,8 @@ rangeRExpCompare Ninf _ _ = return $ Just ILT
 rangeRExpCompare _ Pinf _ = return $ Just ILT
 rangeRExpCompare Pinf _ _ = return $ Just IGT
 rangeRExpCompare _ Ninf _ = return $ Just IGT
-rangeRExpCompare (RExp e1) (RExp e2) _ = do
-  let e1SrcLoc = L.SrcLoc $ L.locOf e1
-  rangeRExpCompareZero . RExp $ BinOp Minus e1 e2 (typeOf e1) e1SrcLoc
+rangeRExpCompare (RExp e1) (RExp e2) _ =
+  rangeRExpCompareZero . RExp $ BinOp Minus e1 e2 (typeOf e1) (L.srclocOf e1)
 
 -- same as doing RExp `rangeRExpCompareZero` 0
 rangeRExpCompareZero :: RExp -> RangeM RangeInequality
@@ -215,6 +215,8 @@ makeRangeComparable range = do
       then return (a,b)
       else do (a',_) <- substitute ident idRange a
               (_,b') <- substitute ident idRange b
+              -- Enable for seeing what steps are taken
+              -- trace ("make " ++ ppRange(a,b) ++ " ~~> " ++ ppRange(a',b') ++ " by sub " ++ textual ident )
               return (a',b')
 
 ----------------------------------------
@@ -383,6 +385,14 @@ isValid (e1, e2) pos = do
   case ineq of
     (Just IGT)  -> return False
     _           -> return True
+
+----------------------------------------
+-- Monadic Data.Map functions
+----------------------------------------
+
+unionWithM :: (Monad m, Ord k) => (a -> a -> m a) -> M.Map k a -> M.Map k a -> m (M.Map k a)
+unionWithM f mapA mapB =
+  Data.Traversable.sequence $ M.unionWith (\a b -> do {x <- a; y <- b; f x y}) (M.map return mapA) (M.map return mapB)
 
 ----------------------------------------
 -- Union + Intersection
