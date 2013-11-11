@@ -411,7 +411,13 @@ minRExp Pinf x _ = return x
 minRExp x Pinf _ = return x
 minRExp Ninf _ _ = return Ninf
 minRExp _ Ninf _ = return Ninf
-minRExp (RExp x) (RExp y) pos = liftM RExp $ simplExp (Min x y (Elem Int) pos)
+minRExp (RExp x) (RExp y) pos = do
+  comp <- rangeRExpCompare (RExp x) (RExp y) pos
+  case comp of
+    (Just IGT) -> return (RExp y)
+    (Just IEQ) -> return (RExp x)
+    (Just ILT) -> return (RExp x)
+    _ -> liftM RExp $ simplExp (Min x y (Elem Int) pos)
 
 maxRExp :: RExp -> RExp -> L.SrcLoc -> RangeM RExp
 maxRExp Pinf Ninf pos = badRangeM $ RangePropError pos "maxRExp: Taking Max of Pinf Ninf"
@@ -420,7 +426,13 @@ maxRExp Ninf x _ = return x
 maxRExp x Ninf _ = return x
 maxRExp Pinf _ _ = return Pinf
 maxRExp _ Pinf _ = return Pinf
-maxRExp (RExp x) (RExp y) pos = liftM RExp $ simplExp (Max x y (Elem Int) pos)
+maxRExp (RExp x) (RExp y) pos = do
+  comp <- rangeRExpCompare (RExp x) (RExp y) pos
+  case comp of
+    (Just IGT) -> return (RExp x)
+    (Just IEQ) -> return (RExp x)
+    (Just ILT) -> return (RExp y)
+    _ -> liftM RExp $ simplExp (Max x y (Elem Int) pos)
 
 ----------------------------------------
 -- Constants
