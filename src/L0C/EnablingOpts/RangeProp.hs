@@ -48,7 +48,7 @@ data Sign = Neg | NonPos | Zero | NonNeg | Pos
 type RangeSign = Maybe Sign
 
 data Inequality = ILT | ILTE | IEQ | IGTE | IGT
-                deriving (Show, Eq)
+                deriving (Show, Eq, Ord)
 
 type RangeInequality = Maybe Inequality
 
@@ -104,14 +104,51 @@ rangeProp prog = do
       theDict  <- asks dict
       toExp' <- doSomething toExp
       info <- createRangeAndSign $ Just toExp'
-      let debugText = escapeColorize Red ("----- Added " ++ textual vname ++ " -----") ++ "\n" ++ ppExp e ++ "\n" ++ ppDict (M.insert vname info theDict)
+      let debugText = unlines [
+              escapeColorize Red ("----- Added " ++ textual vname ++ " -----")
+            , ppExp e
+            , ppDict (M.insert vname info theDict)
+            , escapeColorize Red "----- ^^ -----"
+            ]
       inExp' <- addToRangeDict vname info $ trace debugText doSomething inExp
       return $ LetPat i toExp' inExp' pos
 
-    doSomething e = mapExpM mapper e
+    doSomething e@(If cond thenE elseE ty pos) = do
+      cond' <- doSomething cond
+      (thenInfo, elseInfo) <- realExtractFromCond cond'
+      let debugText = unlines [
+              escapeColorize Red "----- If -----"
+            , ppExp e
+            , "Then:"
+            , ppDict thenInfo
+            , "Else:"
+            , ppDict elseInfo
+            , escapeColorize Red "----- ^^ -----"
+            ]
+      thenE' <- trace debugText $ mergeRangeEnvWithDict thenInfo $ doSomething thenE
+      elseE' <- mergeRangeEnvWithDict elseInfo $ doSomething elseE
+      return $ If cond' thenE' elseE' ty pos
+
+    doSomething (BinOp Less e1 e2 ty pos) = do
+      e1' <- doSomething e1
+      e2' <- doSomething e2
+      if typeOf e1 /= Elem Int then return $ BinOp Less e1' e2' ty pos
+      else do
+        ineq <- rangeRExpCompare (RExp e1) (RExp e2) pos
+        case () of _ | ineq == Just ILT -> return $ Literal (LogVal True) pos
+                     | ineq > Just IEQ -> return $ Literal (LogVal False) pos
+                     | otherwise -> return $ BinOp Less e1' e2' ty pos
+
+    doSomething e = do
+      theDict <- asks dict
+      let debugText = unlines [locStr $ L.srclocOf e, ppExp e , ppDict theDict]
+      trace debugText mapExpM mapper e
 
     addToRangeDict :: VName -> (Range, RangeSign) -> RangeM a -> RangeM a
     addToRangeDict vname info = local (\env -> env { dict = M.insert vname info $ dict env })
+
+    mergeRangeEnvWithDict :: RangeDict -> RangeM a -> RangeM a
+    mergeRangeEnvWithDict new = local (\env -> env { dict = M.union new $ dict env })
 
 
 rangeProp' :: Prog -> Either EnablingOptError RangeDict
@@ -231,7 +268,7 @@ isComparable range = do
 --   say something about it's sign
 makeRangeComparable :: Range -> RangeM Range
 makeRangeComparable range = do
-  dictAsList  <- liftM M.toDescList $ asks dict
+  dictAsList  <- {-trace ("will make comp"++ ppRange range)-} liftM M.toDescList $ asks dict
   range' <- foldM foldingFun range dictAsList
   isComp <- isComparable range'
   return ( if isComp then range' else (Ninf, Pinf) )
@@ -241,11 +278,11 @@ makeRangeComparable range = do
     foldingFun (a,b) (ident, (idRange,_)) = do
       isComp <- isComparable (a,b)
       if isComp
-      then return (a,b)
+      then {-trace("makeIsComp " ++ textual ident ++ ppRange(a,b))-} return (a,b)
       else do (a',_) <- substitute ident idRange a
               (_,b') <- substitute ident idRange b
               -- Enable for seeing what steps are taken
-              -- trace ("make " ++ ppRange(a,b) ++ " ~~> " ++ ppRange(a',b') ++ " by sub " ++ textual ident )
+              --trace ("make " ++ ppRange(a,b) ++ " ~~> " ++ ppRange(a',b') ++ " by sub " ++ textual ident )
               return (a',b')
 
 ----------------------------------------
@@ -479,26 +516,47 @@ substitute _ _ _ = return (Ninf, Pinf)
 -- Extract from cond
 ----------------------------------------
 
+realExtractFromCond :: Exp -> RangeM (RangeDict, RangeDict)
+realExtractFromCond e = do
+  condInfo <- extractFromCond e
+  thenInfo <- addRangeSign $ M.mapMaybe fst condInfo
+  elseInfo <- addRangeSign $ M.mapMaybe snd condInfo
+
+  return (thenInfo, elseInfo)
+  where
+    addRangeSign m = Data.Traversable.sequence $ M.mapWithKey monadHelper m
+    monadHelper vname (a, b) = do
+      asdf <- liftM (M.lookup vname) $ asks dict
+      (oldRange, _) <- case asdf of
+                    Just r -> return r
+                    Nothing -> badRangeM $ RangePropError (L.srclocOf e) "Old range not found"
+      (a', _) <- substitute vname oldRange a
+      (_, b') <- substitute vname oldRange b
+      sign <- calculateRangeSign (a',b')
+      return ((a',b'), sign)
+
 extractFromCond :: Exp -> RangeM ( M.Map VName (Maybe Range, Maybe Range) )
 extractFromCond (Not e _) = do
   res <- extractFromCond e
   return $ M.map (\(a, b) -> (b, a)) res
 
-extractFromCond (BinOp Less e1 e2 (Elem Int) _) =
+extractFromCond (BinOp Less e1 e2 _ _) =
   liftM2 M.union e1Info e2Info
   where
     e1Info = case e1 of
-              (Var ident) -> do e2Minus1 <- simplExp $ expMinusOne e2
+              (Var (Ident vname (Elem Int) _)) -> do
+                                e2Minus1 <- simplExp $ expMinusOne e2
                                 thenRange <- rangeIntersectIfValid (Ninf, RExp e2Minus1) e1
                                 elseRange <- rangeIntersectIfValid (RExp e2, Pinf) e1
-                                return $ M.singleton (identName ident) (thenRange, elseRange)
+                                return $ M.singleton vname (thenRange, elseRange)
               _ -> return M.empty
 
     e2Info = case e2 of
-              (Var ident) -> do e1Plus1 <- simplExp $ expPlusOne e1
+              (Var (Ident vname (Elem Int) _)) -> do
+                                e1Plus1 <- simplExp $ expPlusOne e1
                                 thenRange <- rangeIntersectIfValid (RExp e1Plus1, Pinf) e2
                                 elseRange <- rangeIntersectIfValid (Ninf, RExp e1) e2
-                                return $ M.singleton (identName ident) (thenRange, elseRange)
+                                return $ M.singleton vname (thenRange, elseRange)
               _ -> return M.empty
 
     rangeIntersectIfValid :: Range -> Exp -> RangeM (Maybe Range)
@@ -507,12 +565,12 @@ extractFromCond (BinOp Less e1 e2 (Elem Int) _) =
       isTmpValid <- isValid tmp (L.srclocOf e)
       return $ if isTmpValid then Just tmp else Nothing
 
-extractFromCond (BinOp Leq e1 e2 (Elem Int) pos) =
-  extractFromCond $ Not (BinOp Less e2 e1 (Elem Int) pos) pos
+extractFromCond (BinOp Leq e1 e2 ty pos) =
+  extractFromCond $ Not (BinOp Less e2 e1 ty pos) pos
 
-extractFromCond (BinOp Equal e1 e2 (Elem Int) pos) =
-  extractFromCond $ And (BinOp Leq e1 e2 (Elem Int) pos)
-                        (BinOp Leq e2 e1 (Elem Int) pos)
+extractFromCond (BinOp Equal e1 e2 ty pos) =
+  extractFromCond $ And (BinOp Leq e1 e2 ty pos)
+                        (BinOp Leq e2 e1 ty pos)
                         pos
 
 extractFromCond (And e1 e2 pos) = do
@@ -683,7 +741,7 @@ ppDict rdict = foldr ((++) . (++ "\n") . ppDictElem) "" (M.toList $ M.delete dum
                   let env = RangeEnv { dict = rdict }
                   case runRangeM (makeRangeComparable range) env of
                     Right range' -> ppRange range'
-                    Left err     -> show err
+                    Left err     -> error $ show err
 
 ----------------------------------------
 -- TESTING
@@ -720,8 +778,8 @@ testSimple = do
     Right r -> ppRange r
     Left e -> error $ show e
   where
-    tmp = RExp $ BinOp Minus (Var x) (Min (createIntLit 2 dummySrcLoc) (Var x) (Elem Int) dummySrcLoc) (Elem Int) dummySrcLoc
-    myRange = (tmp,tmp)
+    tmp = RExp $ Max (createIntLit 10 dummySrcLoc) (Var x) (Elem Int) dummySrcLoc
+    myRange = (tmp, RExp $ Var x)
 
 ----------------------------------------
 -- Basic test of rangeCompare
@@ -789,3 +847,12 @@ eqTest2 = mapM_ putStrLn [createXTest' Equal x 0, createXTest' Equal x 2, create
 xyTest = mapM_ putStrLn [createTest Less (Var x) (Var y), createTest Leq (Var x) (Var y), createTest Equal (Var x) (Var y)]
 yxTest = mapM_ putStrLn [createTest Less (Var y) (Var x), createTest Leq (Var y) (Var x), createTest Equal (Var y) (Var x)]
 
+shittyShit =
+  let testExp = BinOp Less (Var x) (createIntLit 10 dummySrcLoc) (Elem Bool) dummySrcLoc
+  in putStrLn $ testRange testExp
+  where
+    testRange e = do
+         let env = RangeEnv { dict = dictWithXY }
+         case runRangeM (realExtractFromCond e) env of
+           Right (thenR, elseR) -> unlines ["then", ppDict thenR, "else", ppDict elseR]
+           Left e -> error $ show e
