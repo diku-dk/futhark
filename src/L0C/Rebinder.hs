@@ -30,7 +30,7 @@ import L0C.Rebinder.CSE
 import qualified L0C.Rebinder.SizeTracking as SZ
 
 data BindNeed = LoopBind TupIdent Exp Ident Exp Exp
-              | LetBind TupIdent Exp [(TupIdent, Exp)]
+              | LetBind TupIdent Exp [Exp]
               | LetWithBind Certificates Ident Ident [Exp] Exp
                 deriving (Show, Eq, Ord)
 
@@ -47,8 +47,8 @@ asTail (LetWithBind cs dest src is ve) =
   LetWith cs dest src is ve (Var dest) $ srclocOf dest
 
 requires :: BindNeed -> S.Set VName
-requires (LetBind pat e ((altpat,alte):alts)) =
-  requires (LetBind pat e []) <> requires (LetBind altpat alte alts)
+requires (LetBind pat e (alte:alts)) =
+  requires (LetBind pat e []) <> requires (LetBind pat alte alts)
 requires bnd = S.map identName $ freeInExp $ asTail bnd
 
 provides :: BindNeed -> S.Set VName
@@ -64,11 +64,13 @@ instance Monoid Need where
   mempty = Need S.empty
 
 data Env = Env { envBindings :: SZ.ShapeMap
+               , envDupeState :: DupeState
                }
 
 emptyEnv :: Env
 emptyEnv = Env {
              envBindings = M.empty
+           , envDupeState = newDupeState
            }
 
 varExp :: Exp -> Maybe Ident
@@ -102,99 +104,101 @@ new k = do (name, src) <- gets $ flip newVName k
            put src
            return name
 
-addNewBinding :: String -> Exp -> HoistM Ident
-addNewBinding k e = do
+withNewBinding :: String -> Exp -> (Ident -> HoistM a) -> HoistM a
+withNewBinding k e m = do
   k' <- new k
   let ident = Ident { identName = k'
                     , identType = typeOf e
                     , identSrcLoc = srclocOf e }
-  addBinding (Id ident) e
-  return ident
+  withBinding (Id ident) e $ m ident
 
-addBinding :: TupIdent -> Exp -> HoistM ()
-addBinding pat e@(Size _ i (Var x) _) = do
+withBinding :: TupIdent -> Exp -> HoistM a -> HoistM a
+withBinding pat e@(Size _ i (Var x) _) m = do
   let mkAlt es = case drop i es of
-                   des:_ -> [(pat, des)]
-                   _     -> []
-  alts <- concatMap mkAlt <$> asks (SZ.lookup x . envBindings)
-  addSeveralBindings pat e alts
+                   des:_ -> Just des
+                   _     -> Nothing
+  alts <- mapMaybe mkAlt <$> asks (SZ.lookup x . envBindings)
+  withSeveralBindings pat e alts m
 
-addBinding pat e = addSingleBinding pat e
+withBinding pat e m = withSingleBinding pat e m
 
-addSingleBinding :: TupIdent -> Exp -> HoistM ()
-addSingleBinding pat e = addSeveralBindings pat e []
+withSingleBinding :: TupIdent -> Exp -> HoistM a -> HoistM a
+withSingleBinding pat e = withSeveralBindings pat e []
 
-addSeveralBindings :: TupIdent -> Exp -> [(TupIdent, Exp)] -> HoistM ()
-addSeveralBindings pat e alts =
-  tell $ Need $ S.singleton $ LetBind pat e alts
+withSeveralBindings :: TupIdent -> Exp -> [Exp]
+                    -> HoistM a -> HoistM a
+withSeveralBindings pat e alts m = do
+  ds <- asks envDupeState
+  let (e', ds') = performCSE ds pat e
+      (es, ds'') = performMultipleCSE ds pat alts
+  tell $ Need $ S.singleton $ LetBind pat e' es
+  local (\env -> env { envDupeState = ds' <> ds''}) m
 
 bindLet :: TupIdent -> Exp -> HoistM a -> HoistM a
-bindLet (Id dest) (Var src) m = do
-  addBinding (Id dest) (Var src)
+bindLet (Id dest) (Var src) m =
+  withBinding (Id dest) (Var src) $
   case identType src of Array {} -> withShape dest (slice [] 0 src) m
                         _        -> m
 
-bindLet pat@(Id dest) e@(Iota (Var x) _) m = do
-  addBinding pat e
+bindLet pat@(Id dest) e@(Iota (Var x) _) m =
+  withBinding pat e $
   withShape dest [Var x] m
 
-bindLet pat@(Id dest) e@(Replicate (Var x) (Var y) _) m = do
-  addBinding pat e
+bindLet pat@(Id dest) e@(Replicate (Var x) (Var y) _) m =
+  withBinding pat e $
   withShape dest (Var x:slice [] 0 y) m
 
-bindLet pat@(TupId [dest1, dest2] _) e@(Split cs (Var n) (Var src) _ loc) m = do
-  addBinding pat e
-  src_sz <- addNewBinding "split_src_sz" $ Size cs 0 (Var src) loc
-  split_sz <- addNewBinding "split_sz" $
-              BinOp Minus (Var src_sz) (Var n) (Elem Int) loc
+bindLet pat@(TupId [dest1, dest2] _) e@(Split cs (Var n) (Var src) _ loc) m =
+  withBinding pat e $
+  withNewBinding "split_src_sz" (Size cs 0 (Var src) loc) $ \src_sz ->
+  withNewBinding "split_sz" (BinOp Minus (Var src_sz) (Var n) (Elem Int) loc) $ \split_sz ->
   withShapes [(dest1, Var n : rest),
               (dest2, Var split_sz : rest)] m
     where rest = [ Size cs i (Var src) loc
                    | i <- [1.. arrayDims (identType src) - 1]]
 
-bindLet pat@(Id dest) e@(Concat cs (Var x) (Var y) loc) m = do
-  concat_x <- addNewBinding "concat_x" $ Size cs 0 (Var x) loc
-  concat_y <- addNewBinding "concat_y" $ Size cs 0 (Var y) loc
-  concat_sz <- addNewBinding "concat_sz" $
-               BinOp Plus (Var concat_x) (Var concat_y) (Elem Int) loc
+bindLet pat@(Id dest) e@(Concat cs (Var x) (Var y) loc) m =
+  withBinding pat e $
+  withNewBinding "concat_x" (Size cs 0 (Var x) loc) $ \concat_x ->
+  withNewBinding "concat_y" (Size cs 0 (Var y) loc) $ \concat_y ->
+  withNewBinding "concat_sz" (BinOp Plus (Var concat_x) (Var concat_y) (Elem Int) loc) $ \concat_sz ->
   withShape dest (Var concat_sz :
-                  [Size cs i (Var x) loc | i <- [1..arrayDims (identType x) - 1]]
-                 ) $ addBinding pat e >> m
+                  [Size cs i (Var x) loc
+                     | i <- [1..arrayDims (identType x) - 1]])
+  m
 
-bindLet pat e@(Map2 cs _ srcs _ _) m = do
-  addBinding pat e
+bindLet pat e@(Map2 cs _ srcs _ _) m =
+  withBinding pat e $
   withShapes (sameOuterShapes cs $ S.toList (patIdents pat) ++ vars srcs) m
 
-bindLet pat e@(Reduce2 cs _ _ srcs _ _) m = do
-  addBinding pat e
+bindLet pat e@(Reduce2 cs _ _ srcs _ _) m =
+  withBinding pat e $
   withShapes (sameOuterShapesExps cs srcs) m
 
-bindLet pat e@(Scan2 cs _ _ srcs _ _) m = do
-  addBinding pat e
+bindLet pat e@(Scan2 cs _ _ srcs _ _) m =
+  withBinding pat e $
   withShapes (sameOuterShapesExps cs srcs) m
 
-bindLet pat e@(Filter2 cs _ srcs _) m = do
-  addBinding pat e
+bindLet pat e@(Filter2 cs _ srcs _) m =
+  withBinding pat e $
   withShapes (sameOuterShapesExps cs srcs) m
 
-bindLet pat e@(Redomap2 cs _ _ _ srcs _ _) m = do
-  addBinding pat e
+bindLet pat e@(Redomap2 cs _ _ _ srcs _ _) m =
+  withBinding pat e $
   withShapes (sameOuterShapesExps cs srcs) m
 
-bindLet pat@(Id dest) e@(Index cs src idxs _ _) m = do
-  addBinding pat e
+bindLet pat@(Id dest) e@(Index cs src idxs _ _) m =
+  withBinding pat e $
   withShape dest (slice cs (length idxs) src) m
 
-bindLet pat@(Id dest) e@(Transpose cs k n (Var src) loc) m = do
-  addBinding pat e
+bindLet pat@(Id dest) e@(Transpose cs k n (Var src) loc) m =
+  withBinding pat e $
   withShape dest dims m
     where dims = transposeIndex k n
                  [Size cs i (Var src) loc
                   | i <- [0..arrayDims (identType src) - 1]]
 
-bindLet pat e m = do
-  addBinding pat e
-  m
+bindLet pat e m = withBinding pat e m
 
 bindLetWith :: Certificates -> Ident -> Ident -> [Exp] -> Exp -> HoistM a -> HoistM a
 bindLetWith cs dest src is ve m = do
@@ -247,9 +251,9 @@ transformFun (fname, rettype, params, body, loc) = do
   body' <- blockAllHoisting $ hoistInExp body
   return (fname, rettype, params, body', loc)
 
-addBindings :: Need -> Exp -> Exp
-addBindings need =
-  foldl (.) id $ snd $ mapAccumL comb (M.empty, newDupeState) $
+addBindings :: DupeState -> Need -> Exp -> Exp
+addBindings dupes need =
+  foldl (.) id $ snd $ mapAccumL comb (M.empty, dupes) $
   inDepOrder $ S.toList $ needBindings need
   where comb (m,ds) bind@(LoopBind mergepat mergeexp loopvar
                               boundexp loopbody) =
@@ -258,21 +262,21 @@ addBindings need =
                      loopbody inner $ srclocOf inner)
         comb (m,ds) (LetBind pat e alts) =
           let add pat' e' =
-                let (pat'',e'',ds') = performCSE ds pat' e'
+                let (e'',ds') = performCSE ds pat' e'
                 in ((m `M.union` distances m (LetBind pat' e' []),ds'),
-                    \inner -> LetPat pat'' e'' inner $ srclocOf inner)
-          in case map snd $ sortBy (comparing fst) $ map (score m) $ (pat,e):alts of
-               (pat',e'):_ -> add pat' e'
-               _           -> add pat e
+                    \inner -> LetPat pat' e'' inner $ srclocOf inner)
+          in case map snd $ sortBy (comparing fst) $ map (score m) $ e:alts of
+               e':_ -> add pat e'
+               _    -> add pat e
         comb (m,ds) bind@(LetWithBind cs dest src is ve) =
           ((m `M.union` distances m bind,ds),
            \inner -> LetWith cs dest src is ve inner $ srclocOf inner)
 
-score :: M.Map VName Int -> (TupIdent, Exp) -> (Int, (TupIdent, Exp))
-score m (p, Var k) =
-  (fromMaybe (-1) $ M.lookup (identName k) m, (p,Var k))
-score m (p, e) =
-  (S.fold f 0 $ freeNamesInExp e, (p, e))
+score :: M.Map VName Int -> Exp -> (Int, Exp)
+score m (Var k) =
+  (fromMaybe (-1) $ M.lookup (identName k) m, Var k)
+score m e =
+  (S.fold f 0 $ freeNamesInExp e, e)
   where f k x = case M.lookup k m of
                   Just y  -> max x y
                   Nothing -> x
@@ -351,13 +355,12 @@ splitHoistable block body (Need needs) =
           case need of
             LetBind pat e es ->
               let bad e' = block body (LetBind pat e' []) || ks `anyIsFreeIn` e'
-                  badAlt (_, e') = bad e'
-              in case (bad e, filter (not . badAlt) es) of
+              in case (bad e, filter (not . bad) es) of
                    (True, [])     ->
                      (need `S.insert` blocked, hoistable,
                       patNames pat `S.union` ks)
-                   (True, (pat', e'):es') ->
-                     (blocked, LetBind pat' e' es' `S.insert` hoistable, ks)
+                   (True, e':es') ->
+                     (blocked, LetBind pat e' es' `S.insert` hoistable, ks)
                    (False, es')   ->
                      (blocked, LetBind pat e es' `S.insert` hoistable, ks)
             _ | requires need `intersects` ks || block body need ->
@@ -372,7 +375,8 @@ blockIf :: BlockPred -> HoistM Exp -> HoistM Exp
 blockIf block m = pass $ do
   (body, needs) <- listen m
   let (blocked, hoistable) = splitHoistable block body needs
-  return (addBindings blocked body, const hoistable)
+  ds <- asks envDupeState
+  return (addBindings ds blocked body, const hoistable)
 
 blockAllHoisting :: HoistM Exp -> HoistM Exp
 blockAllHoisting = blockIf $ \_ _ -> True
@@ -419,8 +423,8 @@ hoistCommon m1 m2 = pass $ do
       (needs1', safe1) = splitOK body1 needs1
       (needs2', safe2) = splitOK body2 needs2
       (common, needs1'', needs2'') = commonNeeds needs1' needs2'
-  return ((addBindings needs1'' body1,
-           addBindings needs2'' body2),
+  return ((addBindings newDupeState needs1'' body1,
+           addBindings newDupeState needs2'' body2),
           const $ mconcat [safe1, safe2, common])
 
 hoistInExp :: Exp -> HoistM Exp

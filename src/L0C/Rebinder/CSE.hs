@@ -6,7 +6,9 @@
 module L0C.Rebinder.CSE
   ( DupeState
   , newDupeState
-  , performCSE )
+  , performCSE
+  , performMultipleCSE
+  )
   where
 
 import Control.Monad
@@ -46,22 +48,28 @@ newDupeState = (M.empty, M.empty)
 
 -- | The main CSE function.  Given a state, a pattern and an
 -- expression to be bound to that pattern, return a replacement
--- pattern (always the same as the input pattern, actually), a
--- replacement expression, and a new state.  The function will look in
--- the state to determine whether the expression can be replaced with
--- something bound previously.
+-- expression and a new state.  The function will look in the state to
+-- determine whether the expression can be replaced with something
+-- bound previously.
 performCSE :: DupeState -> TupIdent -> Exp
-           -> (TupIdent, Exp, DupeState)
+           -> (Exp, DupeState)
 -- Arrays may be consumed, so don't eliminate expressions producing
 -- arrays.  This is perhaps a bit too conservative - we could track
 -- exactly which are being consumed and keep a blacklist.
 performCSE (esubsts, nsubsts) pat e
   | any (not . basicType . identType) $ S.toList $ patIdents pat =
-    (pat, e, (esubsts, nsubsts))
+    (e, (esubsts, nsubsts))
 performCSE (esubsts, nsubsts) pat e =
   case M.lookup (substituteNames nsubsts e) esubsts of
-    Just e' -> (pat, e', (esubsts, mkSubsts pat e' `M.union` nsubsts))
-    Nothing -> (pat, e,
+    Just e' -> (e', (esubsts, mkSubsts pat e' `M.union` nsubsts))
+    Nothing -> (e,
                 case patToExp pat of
                   Nothing   -> (esubsts, nsubsts)
                   Just pate -> (M.insert e pate esubsts, nsubsts))
+
+-- | Run CSE over several pattern-expression pairs.
+performMultipleCSE :: DupeState -> TupIdent -> [Exp]
+                   -> ([Exp], DupeState)
+performMultipleCSE ds pat es =
+  let (es',dss) = unzip $ map (performCSE ds pat) es
+  in (es', mconcat dss)
