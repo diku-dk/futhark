@@ -141,9 +141,10 @@ allIdentsAsList = execWriter . mapM funIdents . progFunctions
 -- I think we would just like to keep the old range
 createRangeAndSign :: Maybe Exp -> RangeM (Range, RangeSign)
 createRangeAndSign (Just e)  = do
-  simplifiedRange <- rangeSimplify (RExp e, RExp e)
-  sign <- calculateRangeSign simplifiedRange
-  return ( simplifiedRange , sign )
+  e' <- simplExp e
+  let range = (RExp e', RExp e')
+  sign <- calculateRangeSign range
+  return ( range , sign )
 createRangeAndSign Nothing = return ( (Ninf, Pinf), Nothing )
 
 ----------------------------------------
@@ -274,12 +275,6 @@ atomicRangeSign (lb,ub) = do
 -- Range substitution
 ----------------------------------------
 
-rangeSimplify :: Range -> RangeM Range
-rangeSimplify (a,b) = do
-  (a', _ ) <- substitute dummyVName (Ninf, Pinf) a
-  (_ , b') <- substitute dummyVName (Ninf, Pinf) b
-  return (a', b')
-
 substitute :: VName -> Range -> RExp -> RangeM Range
 substitute _ _ l@(RExp (Literal{})) = return (l,l)
 substitute i r v@(RExp (Var e)) = return (if identName e == i then r else (v,v))
@@ -316,15 +311,19 @@ substitute i r (RExp (BinOp Times e1 e2 ty pos)) = do
     (Nothing, _)  -> return (Ninf, Pinf)
     (_, Nothing)  -> return (Ninf, Pinf)
     _             -> case (Just Zero < e1Sign, Just Zero < e2Sign) of
+                       -- [2:5] * [3:6] ~> [2*3 : 5*6]
                        (True,True)   -> do ac <- multRExp a c
                                            bd <- multRExp b d
                                            return (ac,bd)
+                       -- [-5:-2] * [-6:-3] ~> [-2*-3 : -5*-6]
                        (False,False) -> do ac <- multRExp a c
                                            bd <- multRExp b d
                                            return (bd,ac)
+                       -- [2:5] * [-6:-3] ~> [5*-6 : 2*-3]
                        (True,False)  -> do ad <- multRExp a d
                                            bc <- multRExp b c
                                            return (bc,ad)
+                       -- [-5:-2] * [3:6] ~> [-5*6 : -2*3]
                        (False,True)  -> do ad <- multRExp a d
                                            bc <- multRExp b c
                                            return (ad,bc)
@@ -346,7 +345,85 @@ substitute i r (RExp (BinOp Times e1 e2 ty pos)) = do
         (Just s)    -> return (if Zero < s then Ninf else Pinf)
     multRExp x y = multRExp y x
 
-substitute i r (RExp (Min e1 e2 _ pos)) = do
+substitute i r (RExp (BinOp Divide e1 e2 ty pos)) = do
+  (a, b) <- substitute i r (RExp e1)
+  (c, d) <- substitute i r (RExp e2)
+  e1Sign <- calculateRangeSign(a,b)
+  e2Sign <- calculateRangeSign(c,d)
+  if canBeZero e1Sign || canBeZero e2Sign
+  then return (Ninf, Pinf)
+  else case (Just Zero < e1Sign, Just Zero < e2Sign) of
+          -- [2:5] / [3:6] ~> [2/6 : 5/3]
+          (True,True)   -> do ad <- divRExp a d
+                              bc <- divRExp b c
+                              return (ad,bc)
+          -- [-5:-2] / [-6:-3] ~> [-2/-6 : -5/-3]
+          (False,False) -> do ad <- divRExp a d
+                              bc <- divRExp b c
+                              return (bc,ad)
+          -- [2:5] / [-6:-3] ~> [5/-3 : 2/-6]
+          (True,False)  -> do ac <- divRExp a c
+                              bd <- divRExp b d
+                              return (ac,bd)
+          -- [-5:-2] / [3:6] ~> [-5/3 : -2/6]
+          (False,True)  -> do ac <- divRExp a c
+                              bd <- divRExp b d
+                              return (bd,ac)
+
+    where
+      canBeZero :: RangeSign -> Bool
+      canBeZero (Just Neg) = False
+      canBeZero (Just Pos) = False
+      canBeZero _ = True
+
+      divRExp :: RExp -> RExp -> RangeM RExp
+      divRExp (RExp x) (RExp y) = liftM RExp $ simplExp (BinOp Divide x y ty pos)
+      divRExp Pinf x = do
+        xSign <- determineRExpSign x
+        case xSign of
+          (Just Pos) -> return Pinf
+          (Just Neg) -> return Ninf
+          _     -> badRangeM $ RangePropError pos "divRExp: Dividing with something that could be 0"
+      divRExp Ninf x = do
+        xSign <- determineRExpSign x
+        case xSign of
+          (Just Pos) -> return Ninf
+          (Just Neg) -> return Pinf
+          _     -> badRangeM $ RangePropError pos "divRExp: Dividing with something that could be 0"
+      divRExp x y = divRExp y x
+
+substitute i r (RExp (BinOp Pow e1 e2 ty pos)) = do
+  (a, b) <- substitute i r (RExp e1)
+  (c, d) <- substitute i r (RExp e2)
+  case (c,d) of
+    ( RExp (Literal (IntVal v) _) , RExp (Literal (IntVal v') _) )
+      | v /= v' -> return (Ninf, Pinf)
+      | even v -> do
+          aSign <- determineRExpSign a
+          bSign <- determineRExpSign b
+          case (Just Zero <= aSign, Nothing <= bSign && bSign <= Just Zero) of
+            (True, _)    -> do av <- powRExp a v
+                               bv <- powRExp b v
+                               return (av, bv)
+            (_, False)   -> do av <- powRExp a v
+                               bv <- powRExp b v
+                               return (bv, av)
+            _            -> return (Ninf, Pinf)
+      | otherwise -> do
+          av <- powRExp a v
+          bv <- powRExp b v
+          return (av, bv)
+
+    _ -> return (Ninf, Pinf)
+
+  where
+    powRExp :: RExp -> Int -> RangeM RExp
+    powRExp _ 0 = return $ createRExpIntLit 1 pos
+    powRExp Pinf _ = return Pinf
+    powRExp Ninf _ = return Ninf
+    divRExp (RExp x) v = liftM RExp $ simplExp (BinOp Pow x (createIntLit v pos) ty pos)
+
+substitute i r (RExp (Min e1 e2 ty pos)) = do
   (a, b) <- substitute i r (RExp e1)
   (c, d) <- substitute i r (RExp e2)
   ac <- minRExp a c pos
@@ -569,16 +646,16 @@ ppDict rdict = foldr ((++) . (++ "\n") . ppDictElem) "" (M.toList $ M.delete dum
                 ppDictElem (vname, (range, sign)) =
                   escapeColorize Green (textual vname) ++ " " ++
                   escapeColorize Blue (ppRange range) ++ " " ++
-                  escapeColorize White (helper range) ++ " " ++
+                  escapeColorize White (ppRangeAsComp range) ++ " " ++
                   escapeColorize Yellow (ppSign sign)
 
                 -- makes the range comparable, so it's understandable for us humans
-                helper :: Range -> String
-                helper range = do
+                ppRangeAsComp :: Range -> String
+                ppRangeAsComp range = do
                   let env = RangeEnv { dict = rdict }
                   case runRangeM (makeRangeComparable range) env of
-                    Right asdf -> ppRange asdf
-                    Left e     -> show e
+                    Right range' -> ppRange range'
+                    Left err     -> show err
 
 ----------------------------------------
 -- TESTING

@@ -116,7 +116,7 @@ simplifyNary (Min e1 e2 tp pos) = do
     case (e1',e2') of
         (Literal (IntVal v1) _, Literal (IntVal v2) _) ->
             return $ NaryMult [(Literal (IntVal $ min v1 v2) pos)] tp pos
-        _ -> 
+        _ ->
             return $ NaryMult [(Min e1' e2' tp pos)] tp pos
 
 simplifyNary (Max e1 e2 tp pos) = do
@@ -125,7 +125,7 @@ simplifyNary (Max e1 e2 tp pos) = do
     case (e1',e2') of
         (Literal (IntVal v1) _, Literal (IntVal v2) _) ->
             return $ NaryMult [(Literal (IntVal $ max v1 v2) pos)] tp pos
-        _ -> 
+        _ ->
             return $ NaryMult [(Max e1' e2' tp pos)] tp pos
 
 simplifyNary (BinOp Plus (Max e1' e2' _ _) e2 tp pos) = do
@@ -172,22 +172,22 @@ simplifyNary (BinOp Minus e1 e2 tp pos) = do
 --
 
 ---------------------------------------------------------------------
--- Uncommented until we a working function for sign determination. -- 
+-- Uncommented until we a working function for sign determination. --
 ---------------------------------------------------------------------
 --
 -- simplifyNary (BinOp Times e1 e2@(Max _ _ _ _) tp pos) =
 --     simplifyNary (BinOp Times e2 e1 tp pos)
--- 
+--
 -- simplifyNary (BinOp Times (Max e1' e2' _ _) e2 tp pos) = do
 --     let e1'' = BinOp Times e1' e2 tp pos
 --     let e2'' = BinOp Times e2' e2 tp pos
 --     -- TODO: has to return bool value, based on the sign of e2
---     let op   = if True then Max else Min 
+--     let op   = if True then Max else Min
 --     simplifyNary $ op e1'' e2'' tp pos
--- 
+--
 -- simplifyNary (BinOp Times e1 e2@(Min _ _ _ _) tp pos) =
 --     simplifyNary (BinOp Times e2 e1 tp pos)
--- 
+--
 -- simplifyNary (BinOp Times (Min e1' e2' _ _) e2 tp pos) = do
 --     let e1'' = BinOp Times e1' e2 tp pos
 --     let e2'' = BinOp Times e2' e2 tp pos
@@ -272,17 +272,14 @@ simplifyNary (BinOp Divide e1 e2 tp pos) = do
                         -- Clean divide, ie 4 * a0*..*an / 2 = 2 * a0..*an
                         then return $ NaryMult (resLit : numeExps) tp pos
                         -- Unclean divide, ie 4 * a0*..*an / 3, result will depend on a0*..*an. If 3, then 4 * 3 / 3 = 4, if 1 then 4 / 3 = 1
-                        else do numeExp' <- simplifyBack $ NaryMult (numeFactorLit : numeExps) tp pos
-                                let divExp = BinOp Divide numeExp' denomFactorLit tp pos
+                        else do numeExp' <- simplifyBack =<< joinTerm (NaryMult numeExps tp pos, numeFactor)
+                                let divExp = BinOp Divide numeExp' (Literal denomFactor pos) tp pos
                                 return $ NaryMult [divExp] tp pos
                    -- create divide expression from (hopefully more) simplified subexpressions
-                   else do allNum <- simplifyBack $ NaryMult (numeFactorLit : numeExps) tp pos
-                           allDenom <- simplifyBack $ NaryMult (denomFactorLit : denomExps) tp pos
+                   else do allNum <- simplifyBack =<< joinTerm (NaryMult numeExps tp pos, numeFactor )
+                           allDenom <- simplifyBack =<< joinTerm (NaryMult denomExps tp pos, denomFactor)
                            let divExp = BinOp Divide allNum allDenom tp pos
                            return $ NaryMult [divExp] tp pos
-
-              where numeFactorLit = Literal numeFactor pos
-                    denomFactorLit = Literal denomFactor pos
 
           divTwoNaryMults _ _ = badSimplifyM $ SimplifyError pos "divTwoNaryMults, not for NaryPlus "
 
