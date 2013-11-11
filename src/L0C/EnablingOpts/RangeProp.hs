@@ -10,9 +10,6 @@ module L0C.EnablingOpts.RangeProp (
 
     -- * Range Propagation
   , rangeProp
-  , dummyUsingRangeProp
-  , emptyRangeDict
-  , progMapTest
 
 )
 where
@@ -59,7 +56,6 @@ type RangeInequality = Maybe Inequality
 
 data RangeEnv = RangeEnv {
     dict    :: M.Map VName (Range, RangeSign)
-  , program :: Prog
   }
 
 newtype RangeM a = RangeM (ReaderT RangeEnv (Either EnablingOptError) a)
@@ -86,29 +82,40 @@ simplExp e =
 -- Range Propagation
 ----------------------------------------
 
-
-
-
-progMapTest :: Prog -> Either EnablingOptError Prog
-progMapTest prog = do
-    let env = RangeEnv { dict = M.empty, program = prog }
-    res <- runRangeM (mapM rangePropFun $ progFunctions prog ) env
+rangeProp :: Prog -> Either EnablingOptError Prog
+rangeProp prog = do
+    res <- mapM rangePropFun (progFunctions prog)
     return $ Prog res
   where
-    rangePropFun (fname, rettype, args, body, pos) = do
-        body' <- doSomething body
-        return (fname, rettype, args, body', pos)
+    rangePropFun (fname, rettype, params, body, pos) = do
+        let env = RangeEnv { dict = foldl tellParam emptyRangeDict params }
+        body' <- runRangeM (doSomething body) env
+        return (fname, rettype, params, body', pos)
 
-doSomething :: Exp -> RangeM Exp
-doSomething e = trace (show "something") (mapExpM mapper e)
-  where mapper = identityMapper { mapOnExp = doSomething }
+    tellParam :: RangeDict -> Parameter -> RangeDict
+    tellParam rdict (Ident vname (Elem Int) _) =
+      M.insert vname ((Ninf, Pinf), Nothing) rdict
+    tellParam rdict _ = rdict
+
+    mapper = identityMapper { mapOnExp = doSomething }
+
+    doSomething :: Exp -> RangeM Exp
+    doSomething e@(LetPat i@(Id (Ident vname (Elem Int) _)) toExp inExp pos) = do
+      theDict  <- asks dict
+      toExp' <- doSomething toExp
+      info <- createRangeAndSign $ Just toExp'
+      let debugText = escapeColorize Red ("----- Added " ++ textual vname ++ " -----") ++ "\n" ++ ppExp e ++ "\n" ++ ppDict (M.insert vname info theDict)
+      inExp' <- addToRangeDict vname info $ trace debugText doSomething inExp
+      return $ LetPat i toExp' inExp' pos
+
+    doSomething e = mapExpM mapper e
+
+    addToRangeDict :: VName -> (Range, RangeSign) -> RangeM a -> RangeM a
+    addToRangeDict vname info = local (\env -> env { dict = M.insert vname info $ dict env })
 
 
-dummyUsingRangeProp :: Prog -> RangeDict -> Either EnablingOptError Prog
-dummyUsingRangeProp prog _ = return prog
-
-rangeProp :: Prog -> Either EnablingOptError RangeDict
-rangeProp prog = do
+rangeProp' :: Prog -> Either EnablingOptError RangeDict
+rangeProp' prog = do
   let asList = filter (\(_,t,_) -> isElemInt t) $ allIdentsAsList prog
   newDict <- foldM keepAddingToRangeDict emptyRangeDict asList
   trace (prettyPrint prog ++ "\n" ++ ppDict newDict ++ "\n")
