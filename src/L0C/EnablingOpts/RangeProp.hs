@@ -373,6 +373,81 @@ substitute _ _ _ = return (Ninf, Pinf)
 ----------------------------------------
 -- Extract from cond
 ----------------------------------------
+
+extractFromCond :: Exp -> RangeM ( M.Map VName (Maybe Range, Maybe Range) )
+extractFromCond (Not e _) = do
+  res <- extractFromCond e
+  return $ M.map (\(a, b) -> (b, a)) res
+
+extractFromCond (BinOp Less e1 e2 (Elem Int) _) =
+  liftM2 M.union e1Info e2Info
+  where
+    e1Info = case e1 of
+              (Var ident) -> do e2Minus1 <- simplExp $ expMinusOne e2
+                                thenRange <- rangeIntersectIfValid (Ninf, RExp e2Minus1) e1
+                                elseRange <- rangeIntersectIfValid (RExp e2, Pinf) e1
+                                return $ M.singleton (identName ident) (thenRange, elseRange)
+              _ -> return M.empty
+
+    e2Info = case e2 of
+              (Var ident) -> do e1Plus1 <- simplExp $ expPlusOne e1
+                                thenRange <- rangeIntersectIfValid (RExp e1Plus1, Pinf) e2
+                                elseRange <- rangeIntersectIfValid (Ninf, RExp e1) e2
+                                return $ M.singleton (identName ident) (thenRange, elseRange)
+              _ -> return M.empty
+
+    rangeIntersectIfValid :: Range -> Exp -> RangeM (Maybe Range)
+    rangeIntersectIfValid range e = do
+      tmp <- rangeIntersect range (RExp e, RExp e) (L.srclocOf e)
+      isTmpValid <- isValid tmp (L.srclocOf e)
+      return $ if isTmpValid then Just tmp else Nothing
+
+extractFromCond (BinOp Leq e1 e2 (Elem Int) pos) =
+  extractFromCond $ Not (BinOp Less e2 e1 (Elem Int) pos) pos
+
+extractFromCond (BinOp Equal e1 e2 (Elem Int) pos) =
+  extractFromCond $ And (BinOp Leq e1 e2 (Elem Int) pos)
+                        (BinOp Leq e2 e1 (Elem Int) pos)
+                        pos
+
+extractFromCond (And e1 e2 pos) = do
+  e1Info <- extractFromCond e1
+  e2Info <- extractFromCond e2
+  unionWithM unionFunc e1Info e2Info
+  where
+    unionFunc (thenA, elseA) (thenB, elseB) = do
+      thenRange <- intersectIfDeinfed thenA thenB pos
+      elseRange <- unionIfDefined elseA elseB pos
+      return (thenRange, elseRange)
+
+extractFromCond (Or e1 e2 pos) = do
+  e1Info <- extractFromCond e1
+  e2Info <- extractFromCond e2
+  unionWithM unionFunc e1Info e2Info
+  where
+    unionFunc (thenA, elseA) (thenB, elseB) = do
+      thenRange <- unionIfDefined thenA thenB pos
+      elseRange <- unionIfDefined elseA elseB pos
+      return (thenRange, elseRange)
+
+extractFromCond _ = return M.empty
+
+----------------------------------------
+
+unionIfDefined :: Maybe Range -> Maybe Range -> L.SrcLoc -> RangeM (Maybe Range)
+unionIfDefined Nothing Nothing _ = return Nothing
+unionIfDefined (Just a) (Just b) pos = do
+  ab <- rangeUnion a b pos
+  return $ Just ab
+unionIfDefined (Just a) Nothing _ = return $ Just a
+unionIfDefined Nothing (Just b) _ = return $ Just b
+
+intersectIfDeinfed :: Maybe Range -> Maybe Range -> L.SrcLoc -> RangeM (Maybe Range)
+intersectIfDeinfed (Just a) (Just b) pos = do
+  ab <- rangeIntersect a b pos
+  return $ Just ab
+intersectIfDeinfed _ _ _ = return Nothing
+
 isValid :: Range -> L.SrcLoc -> RangeM Bool
 isValid (Pinf, Pinf) pos =
   badRangeM $ RangePropError pos "isValid: Illegal range [Pinf, Pinf]"
@@ -453,6 +528,14 @@ createIntLit n = Literal (IntVal n)
 
 createRExpIntLit :: Int -> L.SrcLoc -> RExp
 createRExpIntLit n pos = RExp $ createIntLit n pos
+
+expPlusOne :: Exp -> Exp
+expPlusOne e =
+  BinOp Plus e (createIntLit 1 (L.srclocOf e)) (Elem Int) (L.srclocOf e)
+
+expMinusOne :: Exp -> Exp
+expMinusOne e =
+  BinOp Minus e (createIntLit 1 (L.srclocOf e)) (Elem Int) (L.srclocOf e)
 
 -- as the substitute function needs an identifier and range to work,
 -- we have to supply a dummy value for it to work on the first variable passed to it.
