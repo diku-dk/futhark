@@ -346,14 +346,14 @@ substitute i r (RExp (BinOp Times e1 e2 ty pos)) = do
         (Just s)    -> return (if Zero < s then Ninf else Pinf)
     multRExp x y = multRExp y x
 
-substitute i r (RExp (Min e1 e2 ty pos)) = do
+substitute i r (RExp (Min e1 e2 _ pos)) = do
   (a, b) <- substitute i r (RExp e1)
   (c, d) <- substitute i r (RExp e2)
   ac <- minRExp a c pos
   bd <- minRExp b d pos
   return (ac, bd)
 
-substitute i r (RExp (Max e1 e2 ty pos)) = do
+substitute i r (RExp (Max e1 e2 _ pos)) = do
   (a, b) <- substitute i r (RExp e1)
   (c, d) <- substitute i r (RExp e2)
   ac <- maxRExp a c pos
@@ -592,18 +592,95 @@ x = Ident {identName = xId,
            identType = Elem Int,
            identSrcLoc = dummySrcLoc }
 
-xRange = (createRExpIntLit 1 dummySrcLoc, createRExpIntLit 2 dummySrcLoc)
+xRange = (createRExpIntLit 2 dummySrcLoc, createRExpIntLit 15 dummySrcLoc)
 
-xMultNeg2 = BinOp Times (Var x) (Literal (IntVal (-2)) dummySrcLoc) (Elem Int) dummySrcLoc
-xMultXMultNeg2 = BinOp Times (Var x) xMultNeg2 (Elem Int) dummySrcLoc
+dictWithX = M.insert xId (xRange, Just Pos) emptyRangeDict
 
+yId = ID (nameFromString "y",1)
+y = Ident {identName = yId,
+           identType = Elem Int,
+           identSrcLoc = dummySrcLoc }
 
-testRange = do
-  let env = RangeEnv { dict = emptyRangeDict }
-  case runRangeM (substitute xId xRange (RExp xMultXMultNeg2) ) env of
+yRange = (createRExpIntLit 0 dummySrcLoc, createRExpIntLit 7 dummySrcLoc)
+
+dictWithXY = M.insert yId (yRange, Just Pos) dictWithX
+
+----------------------------------------
+-- Simple makeRangeComparable test
+----------------------------------------
+
+testSimple = do
+  let env = RangeEnv { dict = dictWithX }
+  case runRangeM (makeRangeComparable myRange ) env of
     Right r -> ppRange r
-    Left _ -> error "Fail!"
+    Left e -> error $ show e
+  where
+    tmp = RExp $ BinOp Minus (Var x) (Min (createIntLit 2 dummySrcLoc) (Var x) (Elem Int) dummySrcLoc) (Elem Int) dummySrcLoc
+    myRange = (tmp,tmp)
+
+----------------------------------------
+-- Basic test of rangeCompare
+----------------------------------------
 
 comp5to0 = rangeCompareZero emptyRangeDict $ createIntLit 5 dummySrcLoc
 comp4to5 = rangeCompare emptyRangeDict  (createIntLit 4 dummySrcLoc) (createIntLit 5 dummySrcLoc)
 comp10to5 = rangeCompare emptyRangeDict (createIntLit 10 dummySrcLoc) (createIntLit 5 dummySrcLoc)
+
+----------------------------------------
+-- tests for isValid
+----------------------------------------
+
+isValidTests =
+  mapM_ print [test0, test1, test2, test3, test4, test5]
+  where
+    testIsValidOnRange res range = do
+      let env = RangeEnv { dict = dictWithX }
+      case runRangeM (isValid range dummySrcLoc) env of
+        Right b -> show (b == res)
+        Left e -> error $ show e
+
+    test0 = testIsValidOnRange True (RExp $ Var x, RExp $ Min (createIntLit 2 dummySrcLoc) (Var x) (Elem Int) dummySrcLoc)
+    test1 = testIsValidOnRange True (RExp $ Var x, RExp $ createIntLit 2 dummySrcLoc)
+    test2 = testIsValidOnRange True (RExp (createIntLit 2 dummySrcLoc), RExp (createIntLit 2 dummySrcLoc))
+    test3 = testIsValidOnRange False (RExp (createIntLit 2 dummySrcLoc), RExp (createIntLit (-2) dummySrcLoc))
+    test4 = testIsValidOnRange True (RExp (createIntLit (-2) dummySrcLoc), RExp (createIntLit 2 dummySrcLoc))
+    test5 = testIsValidOnRange True (RExp (createIntLit (-2) dummySrcLoc), RExp (createIntLit (-2) dummySrcLoc))
+
+----------------------------------------
+-- Test for extractFromCond
+----------------------------------------
+createXTest' :: BinOp -> Ident -> Int -> String
+createXTest' op ident n =
+  createTest op (Var ident) (createIntLit n dummySrcLoc)
+
+createXTest :: BinOp -> Int -> Ident -> String
+createXTest op n ident =
+  createTest op (createIntLit n dummySrcLoc) (Var ident)
+
+createTest :: BinOp -> Exp -> Exp -> String
+createTest op e1 e2 =
+  let xExp = BinOp op e1 e2 (Elem Int) dummySrcLoc
+  in testRange xExp
+
+  where
+    printCondInfoDictElem (vname, (ifRange, thenRange)) =
+      textual vname ++ ": " ++ printMaybeRange ifRange ++ " " ++ printMaybeRange thenRange
+    printMaybeRange (Just range) = ppRange range
+    printMaybeRange Nothing = "[ Nothing ]"
+    testRange e = do
+         let env = RangeEnv { dict = dictWithXY }
+         case runRangeM (extractFromCond e) env of
+           Right ifdict -> foldr ((++) . (++ "\n") . printCondInfoDictElem) "" (M.toList ifdict)
+           Left e -> error $ show e
+
+lessTest = mapM_ putStrLn [createXTest Less 0 x, createXTest Less 5 x, createXTest Less 20 x]
+lessEqTest = mapM_ putStrLn [createXTest Leq 0 x, createXTest Leq 5 x, createXTest Leq 20 x]
+eqTest = mapM_ putStrLn [createXTest Equal 0 x, createXTest Equal 2 x, createXTest Equal 20 x]
+
+lessTest2 = mapM_ putStrLn [createXTest' Less x 0, createXTest' Less x 5, createXTest' Less x 20]
+lessEqTest2 = mapM_ putStrLn [createXTest' Leq x 0, createXTest' Leq x 5, createXTest' Leq x 20]
+eqTest2 = mapM_ putStrLn [createXTest' Equal x 0, createXTest' Equal x 2, createXTest' Equal x 20]
+
+xyTest = mapM_ putStrLn [createTest Less (Var x) (Var y), createTest Leq (Var x) (Var y), createTest Equal (Var x) (Var y)]
+yxTest = mapM_ putStrLn [createTest Less (Var y) (Var x), createTest Leq (Var y) (Var x), createTest Equal (Var y) (Var x)]
+
