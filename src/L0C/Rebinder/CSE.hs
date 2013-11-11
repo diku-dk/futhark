@@ -56,7 +56,7 @@ performCSE :: DupeState -> TupIdent -> Exp
 -- arrays.  This is perhaps a bit too conservative - we could track
 -- exactly which are being consumed and keep a blacklist.
 performCSE (esubsts, nsubsts) pat e
-  | any ((>0) . arrayDims . identType) $ S.toList $ patIdents pat =
+  | any (not . basicType . identType) $ S.toList $ patIdents pat =
     (pat, e, (esubsts, nsubsts))
 performCSE (esubsts, nsubsts) pat e =
   case M.lookup (substituteNames nsubsts e) esubsts of
