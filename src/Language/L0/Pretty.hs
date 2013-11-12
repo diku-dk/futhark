@@ -121,8 +121,25 @@ instance (Ord vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) where
   pprPrec _ (LetPat pat e body _) =
     aliasComment pat $
     text "let" <+> align (ppr pat) <+>
-    equals <+/> indent 2 (ppr e) <+> text "in" </>
+    (if linebreak
+     then equals </> indent 2 (ppr e)
+     else equals <+> align (ppr e)) <+> text "in" </>
     ppr body
+    where linebreak = case e of
+                        Map {} -> True
+                        Reduce {} -> True
+                        Filter {} -> True
+                        Redomap {} -> True
+                        Scan {} -> True
+                        Map2 {} -> True
+                        Reduce2 {} -> True
+                        Filter2 {} -> True
+                        Redomap2 {} -> True
+                        Scan2 {} -> True
+                        DoLoop {} -> True
+                        LetPat {} -> True
+                        LetWith {} -> True
+                        _ -> False
   pprPrec _ (LetWith cs dest src idxs ve body _)
     | dest == src =
       text "let" <+> ppCertificates cs <> ppr dest <+> list (map ppr idxs) <+>
