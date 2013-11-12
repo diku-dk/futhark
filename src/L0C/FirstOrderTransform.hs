@@ -15,7 +15,6 @@ import Data.Loc
 
 import L0C.L0
 import L0C.FreshNames
-import L0C.Renamer
 
 type TransformM = State VNameSource
 
@@ -24,10 +23,12 @@ type TransformM = State VNameSource
 new :: String -> TransformM VName
 new = state . flip newVName
 
--- | Perform the first-order transformation on an L0 program.
+-- | Perform the first-order transformation on an L0 program.  The
+-- resulting program is not uniquely named, so make sure to run the
+-- renamer!
 transformProg :: Prog -> Prog
 transformProg prog =
-  renameProg $ Prog $ runTransformM $ mapM transformFunDec $ progFunctions prog
+  Prog $ runTransformM $ mapM transformFunDec $ progFunctions prog
   where runTransformM m = evalState m $ newNameSourceForProg prog
 
 transformFunDec :: FunDec -> TransformM FunDec
