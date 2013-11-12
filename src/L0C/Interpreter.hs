@@ -45,6 +45,8 @@ data InterpreterError = MissingEntryPoint Name
                       -- ^ First @Int@ is old shape, second is attempted new shape.
                       | ZipError SrcLoc [Int]
                       -- ^ The arguments to @zip@ were of different lengths.
+                      | AssertFailed SrcLoc
+                      -- ^ Assertion failed at this location.
                       | TypeError SrcLoc String
                       -- ^ Some value was of an unexpected type.
 
@@ -72,6 +74,8 @@ instance Show InterpreterError where
   show (ZipError pos lengths) =
     "Array arguments to zip must have same length, but arguments at " ++
     locStr pos ++ " have lenghts " ++ intercalate ", " (map show lengths) ++ "."
+  show (AssertFailed loc) =
+    "Assertion failed at " ++ locStr loc ++ "."
 
 instance Error InterpreterError where
   strMsg = TypeError noLoc
@@ -467,7 +471,7 @@ evalExp (Copy e _) = evalExp e
 evalExp (Assert e loc) = do
   v <- evalExp e
   case v of LogVal True -> return $ LogVal True
-            _ -> bad $ TypeError loc "Assertion failed"
+            _ -> bad $ AssertFailed loc
 
 evalExp (Conjoin _ _) = return Checked
 
