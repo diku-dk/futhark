@@ -60,12 +60,13 @@ performCSE (esubsts, nsubsts) pat e
   | any (not . basicType . identType) $ S.toList $ patIdents pat =
     (e, (esubsts, nsubsts))
 performCSE (esubsts, nsubsts) pat e =
-  case M.lookup (substituteNames nsubsts e) esubsts of
-    Just e' -> (e', (esubsts, mkSubsts pat e' `M.union` nsubsts))
-    Nothing -> (e,
+  case M.lookup e' esubsts of
+    Just e'' -> (e'', (esubsts, mkSubsts pat e'' `M.union` nsubsts))
+    Nothing -> (e',
                 case patToExp pat of
                   Nothing   -> (esubsts, nsubsts)
-                  Just pate -> (M.insert e pate esubsts, nsubsts))
+                  Just pate -> (M.insert e' pate esubsts, nsubsts))
+  where e' = substituteNames nsubsts e
 
 -- | Run CSE over several expression alternatives, all of which use
 -- the same pattern.  The same state is used to perform CSE on all of
