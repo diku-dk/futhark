@@ -540,7 +540,7 @@ typeOf (Var ident) =
 typeOf (Apply _ _ t _) = t
 typeOf (LetPat _ _ body _) = typeOf body
 typeOf (LetWith _ _ _ _ _ body _) = typeOf body
-typeOf (Index _ ident _ t _) =
+typeOf (Index _ ident _ _ t _) =
   t `addAliases` S.insert (identName ident)
 typeOf (Iota _ _) = arrayType 1 (Elem Int) Unique
 typeOf (Size {}) = Elem Int

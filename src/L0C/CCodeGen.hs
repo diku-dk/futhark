@@ -577,17 +577,19 @@ compileExp place (LetPat pat e body _) = do
                      $items:body'
                    }|]
 
-compileExp place (Index _ var idxs _ _) = do
+compileExp place (Index _ var csidxs idxs _ _) = do
   arr <- lookupVar $ identName var
   idxvars <- mapM (new . ("index_"++) . show) [0..length idxs-1]
   idxs' <- concat <$> zipWithM compileExp (map varExp idxvars) idxs
   let vardecls = [[C.cdecl|int $id:idxvar;|] | idxvar <- idxvars]
       varexps =  map varExp idxvars
       index = indexArrayElemStms place arr (identType var) varexps
+      check = case csidxs of Nothing -> boundsCheckStm arr varexps
+                             Just _  -> []
   return $ stm [C.cstm|{
                      $decls:vardecls
                      $items:idxs'
-                     $stms:(boundsCheckStm arr varexps)
+                     $stms:check
                      $stms:index
                    }|]
 

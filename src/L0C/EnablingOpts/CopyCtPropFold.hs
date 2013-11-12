@@ -221,42 +221,44 @@ copyCtPropExp e@(Var (Ident vnm _ pos)) = do
                 --Iota _ _          -> return e
                 _                 -> return e
 
-copyCtPropExp eee@(Index cs idd@(Ident vnm tp p) inds tp2 pos) = do
+copyCtPropExp eee@(Index cs idd@(Ident vnm tp p) csidx inds tp2 pos) = do
   inds' <- mapM copyCtPropExp inds
   bnd   <- asks $ M.lookup vnm . envVtable 
   cs'   <- copyCtPropCerts cs
   case bnd of
-    Nothing               -> return  $ Index cs' idd inds' tp2 pos
-    Just (VarId  id' _ _) -> changed $ Index cs' (Ident id' tp p) inds' tp2 pos
+    Nothing               -> return  $ Index cs' idd csidx inds' tp2 pos
+    Just (VarId  id' _ _) -> changed $ Index cs' (Ident id' tp p) csidx inds' tp2 pos
     Just (Constant v _ _) -> 
       case v of
         ArrayVal _ _ ->
           let sh = arrayShape v 
           in case ctIndex inds' of
-               Nothing -> return $ Index cs' idd inds' tp2 pos
+               Nothing -> return $ Index cs' idd csidx inds' tp2 pos
                Just iis-> 
                  if length iis == length sh
                  then case getArrValInd v iis of
-                        Nothing -> return $ Index cs' idd inds' tp2 pos
+                        Nothing -> return $ Index cs' idd csidx inds' tp2 pos
                         Just el -> changed $ Literal el pos
-                 else return $ Index cs' idd inds' tp2 pos
+                 else return $ Index cs' idd csidx inds' tp2 pos
         _ -> badCPropM $ TypeError pos  " indexing into a non-array value "
     Just (SymArr e' _ _) -> 
       case (e', inds') of 
         (Iota _ _, [ii]) -> changed ii
         (Iota _ _, _)    -> badCPropM $ TypeError pos  " bad indexing in iota "
 
-        (Index cs2 aa ais _ _,_) -> do
+        (Index cs2 aa csidx2 ais _ _,_) -> do
             -- the array element type is the same as the one of the big array, i.e., t1
             -- the result type is the same as eee's, i.e., tp2
-            inner <- copyCtPropExp( Index (cs'++cs2) aa (ais ++ inds') tp2 pos )
+            inner <- copyCtPropExp(Index (cs'++cs2) aa
+                                   (liftM2 (++) csidx csidx2)
+                                   (ais ++ inds') tp2 pos)
             changed inner
 
         (ArrayLit {}   , _) ->
             case ctIndex inds' of
-                Nothing  -> return $ Index cs' idd inds' tp2 pos
+                Nothing  -> return $ Index cs' idd csidx inds' tp2 pos
                 Just iis -> case getArrLitInd e' iis of
-                                Nothing -> return $ Index cs' idd inds' tp2 pos
+                                Nothing -> return $ Index cs' idd csidx inds' tp2 pos
                                 Just el -> changed el
 
         (TupLit   _ _, _       ) -> badCPropM $ TypeError pos  " indexing into a tuple (found tuplit) "
@@ -265,16 +267,18 @@ copyCtPropExp eee@(Index cs idd@(Ident vnm tp p) inds tp2 pos) = do
         (Replicate _ vvv@(Var vv) _, _:is') -> do
             inner <- if null is' 
                      then copyCtPropExp vvv
-                     else copyCtPropExp (Index cs' vv is' tp2 pos)
+                     else copyCtPropExp (Index cs' vv csidx is' tp2 pos)
             changed inner
-        (Replicate _ (Index cs2 a ais _ _) _, _:is') -> do
-            inner <- copyCtPropExp (Index (cs'++cs2) a (ais ++ is') tp2 pos)
+        (Replicate _ (Index cs2 a csidx2 ais _ _) _, _:is') -> do
+            inner <- copyCtPropExp (Index (cs'++cs2) a
+                                    (liftM2 (++) csidx csidx2)
+                                    (ais ++ is') tp2 pos)
             changed inner
         (Replicate _ (Literal arr@(ArrayVal _ _) _) _, _:is') ->
             case ctIndex is' of
-                Nothing -> return $ Index cs' idd inds' tp2 pos
+                Nothing -> return $ Index cs' idd csidx inds' tp2 pos
                 Just iis-> case getArrValInd arr iis of 
-                               Nothing -> return $ Index cs' idd inds' tp2 pos
+                               Nothing -> return $ Index cs' idd csidx inds' tp2 pos
                                Just el -> changed $ Literal el pos
         (Replicate _ val@(Literal _ _) _, _:is') ->
             if null is' then changed val
@@ -282,9 +286,9 @@ copyCtPropExp eee@(Index cs idd@(Ident vnm tp p) inds tp2 pos) = do
 
         (Replicate _ arr@(ArrayLit {}) _, _:is') ->
             case ctIndex is' of
-                Nothing -> return $ Index cs' idd inds' tp2 pos
+                Nothing -> return $ Index cs' idd csidx inds' tp2 pos
                 Just iis-> case getArrLitInd arr iis of 
-                               Nothing -> return $ Index cs' idd inds' tp2 pos
+                               Nothing -> return $ Index cs' idd csidx inds' tp2 pos
                                Just el -> changed el
         (Replicate _ tup@(TupLit _ _) _, _:is') ->
             if null is' && isCtOrCopy tup then changed tup
@@ -294,7 +298,7 @@ copyCtPropExp eee@(Index cs idd@(Ident vnm tp p) inds tp2 pos) = do
           | [x] <- is' -> changed x
           | otherwise -> badCPropM $ TypeError pos  (" illegal indexing: " ++ ppExp eee)
         (Replicate {}, _) ->
-            return $ Index cs' idd inds' tp2 pos
+            return $ Index cs' idd csidx inds' tp2 pos
 
         _ -> badCPropM $ CopyCtPropError pos (" Unreachable case in copyCtPropExp of Index exp: " ++
                                               ppExp eee++" is bound to "++ppExp e' )

@@ -213,8 +213,16 @@ data ExpBase ty vn =
               (IdentBase ty vn) [ExpBase ty vn] (ExpBase ty vn) (ExpBase ty vn) SrcLoc
             -- ^ Array Indexing and Array Constructors
 
-            | Index (CertificatesBase ty vn) (IdentBase ty vn) [ExpBase ty vn] (ty vn) SrcLoc
-             -- ^ 3rd arg is the result type
+            | Index (CertificatesBase ty vn)
+                    (IdentBase ty vn)
+                    (Maybe (CertificatesBase ty vn))
+                    [ExpBase ty vn]
+                    (ty vn)
+                    SrcLoc
+             -- ^ 3rd arg are (optional) certificates for bounds
+             -- checking.  If given (even as an empty list), no
+             -- run-time bounds checking is done.  5th arg is the
+             -- result type
 
             | Iota (ExpBase ty vn) SrcLoc
             -- ^ @iota(n) = {0,1,..,n-1@
@@ -329,7 +337,7 @@ instance Located (ExpBase ty vn) where
   locOf (Apply _ _ _ pos) = locOf pos
   locOf (LetPat _ _ _ pos) = locOf pos
   locOf (LetWith _ _ _ _ _ _ pos) = locOf pos
-  locOf (Index _ _ _ _ pos) = locOf pos
+  locOf (Index _ _ _ _ _ pos) = locOf pos
   locOf (Iota _ pos) = locOf pos
   locOf (Size _ _ _ pos) = locOf pos
   locOf (Replicate _ _ pos) = locOf pos

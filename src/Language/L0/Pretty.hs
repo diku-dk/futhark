@@ -149,8 +149,12 @@ instance (Ord vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) where
       text "let" <+> ppCertificates cs <> ppr dest <+> equals <+> ppr src <+>
       text "with" <+> list (map ppr idxs) <+> text "<-" <+> align (ppr ve) <+>
       text "in" </> ppr body
-  pprPrec _ (Index cs v idxs _ _) =
-    ppCertificates cs <> ppr v <> list (map ppr idxs)
+  pprPrec _ (Index cs v csidx idxs _ _) =
+    ppCertificates cs <> ppr v <>
+    brackets (ppcs <> commasep (map ppr idxs))
+    where ppcs = case csidx of Nothing     -> empty
+                               Just []     -> text "<>|"
+                               Just csidx' -> ppCertificates csidx' <> text "|"
   pprPrec _ (Iota e _) = text "iota" <> parens (ppr e)
   pprPrec _ (Size cs i e _) =
     ppCertificates cs <> text "size" <> apply [text $ tildes $ show i, ppr e]

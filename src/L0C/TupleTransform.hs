@@ -228,23 +228,23 @@ transformExp (Var var) = do
     Just (ArraySubst c ks) -> return $ TupLit (map Var $ c:ks) $ srclocOf var
     Just (TupleSubst ks)   -> return $ TupLit (map Var ks) $ srclocOf var
 
-transformExp (Index cs vname idxs outtype loc) = do
+transformExp (Index cs vname csidx idxs outtype loc) = do
   idxs' <- mapM transformExp idxs
   subst <- asks $ M.lookup (identName vname) . envSubsts
   case subst of
     Just (ArraySubst _ [v])
       | rt <- stripArray (length idxs') $ identType v,
         arrayDims rt == 0 ->
-      return $ Index cs v idxs' rt loc
+      return $ Index cs v csidx idxs' rt loc
     Just (ArraySubst c vs) -> do
-      let index v = Index [c] v idxs'
+      let index v = Index [c] v csidx idxs'
                     (stripArray (length idxs') $ identType v) loc
       mergeCerts (c:cs) $ \c' ->
         return $ case map index vs of
                    []   -> TupLit [] loc
                    a:as | arrayDims (typeOf a) == 0 -> TupLit (a:as) loc
                         | otherwise -> tuplit c' loc $ a:as
-    _ -> return $ Index cs vname idxs' outtype loc
+    _ -> return $ Index cs vname csidx idxs' outtype loc
 
 transformExp (TupLit es loc) = do
   (wrap, es') <-

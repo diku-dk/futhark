@@ -50,8 +50,8 @@ transformExp mape@(Map fun e intype loc) =
     (i, iv) <- newVar loc "i" (Elem Int)
     newLet "n" (Size [] 0 inarrv loc) $ \_ nv -> do
       let zero = Literal (IntVal 0) loc
-          index0 = Index [] inarr [zero] intype loc
-          indexi = Index [] inarr [iv] intype loc
+          index0 = Index [] inarr Nothing [zero] intype loc
+          indexi = Index [] inarr Nothing [iv] intype loc
       funcall0 <- transformLambda fun [index0]
       funcall <- transformLambda fun [indexi]
       newLet "outarr" (Replicate nv funcall0 loc) $ \outarr outarrv -> do
@@ -64,7 +64,7 @@ transformExp mape@(Map fun e intype loc) =
 
 transformExp (Reduce fun accexp arrexp intype loc) =
   newReduction loc arrexp accexp $ \(arr, arrv) (acc, accv) (i, iv) -> do
-    let indexi = Index [] arr [iv] intype loc
+    let indexi = Index [] arr Nothing [iv] intype loc
     funcall <- transformLambda fun [accv, indexi]
     let loop = DoLoop (Id acc) accv i (Size [] 0 arrv loc) loopbody accv loc
         loopbody = LetPat (Id acc) funcall accv loc
@@ -72,7 +72,7 @@ transformExp (Reduce fun accexp arrexp intype loc) =
 
 transformExp (Scan fun accexp arrexp intype loc) =
   newReduction loc arrexp accexp $ \(arr, arrv) (acc, accv) (i, iv) -> do
-    let indexi = Index [] arr [iv] intype loc
+    let indexi = Index [] arr Nothing [iv] intype loc
     funcall <- transformLambda fun [accv, indexi]
     let loop = DoLoop (TupId [Id acc, Id arr] loc)
                (TupLit [accv, arrv] loc) i (Size [] 0 arrv loc) loopbody arrv loc
@@ -89,8 +89,8 @@ transformExp (Filter fun arrexp rowtype loc) =
       (i, iv) <- newVar loc "i" (Elem Int)
       fun' <- transformLambda fun [xv]
       let branch = If fun' (intval 1) (intval 0) (Elem Int) loc
-          indexin0 = Index [] arr [intval 0] rowtype loc
-          indexin = Index [] arr [iv] rowtype loc
+          indexin0 = Index [] arr Nothing [intval 0] rowtype loc
+          indexin = Index [] arr Nothing [iv] rowtype loc
       mape <- transformExp $
               Map (AnonymFun [toParam x] branch (Elem Int) loc) arrv rowtype loc
       plus <- do
@@ -100,7 +100,7 @@ transformExp (Filter fun arrexp rowtype loc) =
                  (BinOp Plus av bv (Elem Int) loc) (Elem Int) loc
       scan <- transformExp $ Scan plus (intval 0) mape (Elem Int) loc
       newLet "ia" scan $ \ia _ -> do
-        let indexia ind = Index [] ia [ind] (Elem Int) loc
+        let indexia ind = Index [] ia Nothing [ind] (Elem Int) loc
             indexiaend = indexia (BinOp Minus nv (intval 1) (Elem Int) loc)
             indexi = indexia iv
             indexim1 = indexia (BinOp Minus iv (intval 1) (Elem Int) loc)
@@ -178,7 +178,7 @@ transformExp filtere@(Filter2 cs fun arrexps loc) =
       scan <- newTupLet "mape" mape $ \_ mape' ->
                 transformExp $ Scan2 cs plus [intval 0] [mape'] [Elem Int] loc
       newTupLet "ia" scan $ \ia _ -> do
-        let indexia ind = Index cs ia [ind] (Elem Int) loc
+        let indexia ind = Index cs ia Nothing [ind] (Elem Int) loc
             indexiaend = indexia (sub1 nv)
             indexi = indexia iv
             indexim1 = indexia (sub1 iv)
@@ -265,7 +265,7 @@ maybeCopy e
 
 index :: Certificates -> [Ident] -> Exp -> [Exp]
 index cs arrs i = flip map arrs $ \arr ->
-                  Index cs arr [i] (stripArray 1 $ identType arr) $ srclocOf i
+                  Index cs arr Nothing [i] (stripArray 1 $ identType arr) $ srclocOf i
 
 newResultArray :: Exp -> Exp -> ([Ident] -> Exp -> TransformM Exp) -> TransformM Exp
 newResultArray sizeexp valueexp body =

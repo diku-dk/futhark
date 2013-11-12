@@ -147,12 +147,6 @@ deadCodeElimExp (LetWith cs nm src inds el body pos) = do
                     el'   <- deadCodeElimExp el
                     return $ LetWith cs' nm src inds' el' body' pos
 
-deadCodeElimExp (Index cs s idxs t2 pos) = do
-  s' <- deadCodeElimIdent s
-  cs' <- mapM deadCodeElimIdent cs
-  idxs' <- mapM deadCodeElimExp idxs
-  return $ Index cs' s' idxs' t2 pos
-
 deadCodeElimExp (DoLoop mergepat mergeexp idd n loopbdy letbdy pos) = do
     let idnms = getBnds mergepat
     (letbdy',noref) <- collectRes idnms $ binding idnms $ deadCodeElimExp letbdy

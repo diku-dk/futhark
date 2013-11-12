@@ -211,7 +211,7 @@ bindLet pat e@(Redomap2 cs _ _ _ srcs _ _) m =
   withBinding pat e $
   withShapes (sameOuterShapesExps cs srcs) m
 
-bindLet pat@(Id dest) e@(Index cs src idxs _ _) m =
+bindLet pat@(Id dest) e@(Index cs src _ idxs _ _) m =
   withBinding pat e $
   withShape dest (slice cs (length idxs) src) m
 

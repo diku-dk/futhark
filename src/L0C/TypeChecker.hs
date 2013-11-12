@@ -756,8 +756,12 @@ checkExp (LetWith cs (Ident dest destt destpos) src idxes ve body pos) = do
         body' <- consuming src' $ scope $ checkExp body
         return $ LetWith cs' dest' src' idxes' ve' body' pos
 
-checkExp (Index cs ident idxes restype pos) = do
+checkExp (Index cs ident csidxes idxes restype pos) = do
   cs' <- mapM (requireI [Elem Cert] <=< checkIdent) cs
+  csidxes' <-
+    case csidxes of
+      Nothing       -> return Nothing
+      Just csidxes' -> Just <$> mapM (requireI [Elem Cert] <=< checkIdent) csidxes'
   ident' <- checkIdent ident
   observe ident'
   vt <- lookupVar (identName ident') pos
@@ -767,7 +771,7 @@ checkExp (Index cs ident idxes restype pos) = do
     Just et -> do
       restype' <- checkAnnotation pos "indexing result" restype et
       idxes' <- mapM (require [Elem Int] <=< checkExp) idxes
-      return $ Index cs' ident' idxes' restype' pos
+      return $ Index cs' ident' csidxes' idxes' restype' pos
 
 checkExp (Iota e pos) = do
   e' <- require [Elem Int] =<< checkExp e

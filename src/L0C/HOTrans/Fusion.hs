@@ -523,7 +523,7 @@ fusionGatherExp fres (Var idd) =
         Array{} -> return fres { unfusable = S.insert (identName idd) (unfusable fres) }
         _       -> return fres
 
-fusionGatherExp fres (Index _ idd inds _ _) =
+fusionGatherExp fres (Index _ idd _ inds _ _) =
     foldM fusionGatherExp fres (Var idd : inds)
 
 fusionGatherExp fres (LetWith _ id1 id0 inds elm body _) = do
@@ -866,7 +866,7 @@ getIdentArr (Var idd:es) = do
                             (srclocOf idd)
                             ("In Fusion.hs, getIdentArr, broken invariant: "
                              ++" argument not of array type! "++ppExp (Var idd))
-getIdentArr (Index _ idd _ _ _:es) = do
+getIdentArr (Index _ idd _ _ _ _:es) = do
     (vs, os) <- getIdentArr es
     case identType idd of
         Array {} -> return (vs, idd:os)
