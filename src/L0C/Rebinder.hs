@@ -25,7 +25,9 @@
 -- after the rebinder.
 --
 module L0C.Rebinder
-  ( transformProg )
+  ( transformProg
+  , transformProgAggr
+  )
   where
 
 import Control.Applicative
@@ -85,12 +87,14 @@ instance Monoid Need where
 
 data Env = Env { envBindings :: SZ.ShapeMap
                , envDupeState :: DupeState
+               , envAggressive :: Bool
                }
 
 emptyEnv :: Env
 emptyEnv = Env {
              envBindings = M.empty
            , envDupeState = newDupeState
+           , envAggressive = False
            }
 
 varExp :: Exp -> Maybe Ident
@@ -115,9 +119,9 @@ newtype HoistM a = HoistM (RWS
   deriving (Applicative, Functor, Monad,
             MonadWriter Need, MonadReader Env, MonadState (NameSource VName))
 
-runHoistM :: HoistM a -> NameSource VName -> a
-runHoistM (HoistM m) src = let (x, _, _) = runRWS m emptyEnv src
-                           in x
+runHoistM :: HoistM a -> NameSource VName -> Env -> a
+runHoistM (HoistM m) src env = let (x, _, _) = runRWS m env src
+                               in x
 
 new :: String -> HoistM VName
 new k = do (name, src) <- gets $ flip newVName k
@@ -263,8 +267,22 @@ sameOuterShapes cs = outer' []
 -- rearranged.  The function is idempotent, however.
 transformProg :: Prog -> Prog
 transformProg prog =
-  Prog $ runHoistM (mapM transformFun $ progFunctions prog) namesrc
+  Prog $ runHoistM (mapM transformFun $ progFunctions prog) namesrc env
   where namesrc = newNameSourceForProg prog
+        env = emptyEnv {
+                envAggressive = False
+              }
+
+-- | Like 'transformProg', but hoists more aggressively, which may
+-- create new nuisances to fusion.  Hence it is best to run it after
+-- fusion has been performed.
+transformProgAggr :: Prog -> Prog
+transformProgAggr prog =
+  Prog $ runHoistM (mapM transformFun $ progFunctions prog) namesrc env
+  where namesrc = newNameSourceForProg prog
+        env = emptyEnv {
+                envAggressive = True
+              }
 
 transformFun :: FunDec -> HoistM FunDec
 transformFun (fname, rettype, params, body, loc) = do
@@ -468,33 +486,27 @@ hoistInExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody _) = do
   where boundnames = identName loopvar `S.insert` patNames mergepat
 hoistInExp e@(Map2 cs (TupleLambda params _ _ _) arrexps _ _) =
   hoistInSOAC e arrexps $ \ks ->
-    withShapes (zip (map (Id . fromParam) params) $ map (slice cs 1) ks) $
+    withSOACArrSlices cs params ks $
     withShapes (sameOuterShapesExps cs arrexps) $
     hoistInExpBase e
 hoistInExp e@(Reduce2 cs (TupleLambda params _ _ _) accexps arrexps _ _) =
   hoistInSOAC e arrexps $ \ks ->
-    withShapes (zip (map (Id . fromParam) $ drop (length accexps) params)
-               $ map (slice cs 1) ks) $
+    withSOACArrSlices cs (drop (length accexps) params) ks $
     withShapes (sameOuterShapesExps cs arrexps) $
     hoistInExpBase e
 hoistInExp e@(Scan2 cs (TupleLambda params _ _ _) accexps arrexps _ _) =
   hoistInSOAC e arrexps $ \arrks ->
   hoistInSOAC e accexps $ \accks ->
-    let (accparams, arrparams) = splitAt (length accexps) $
-                                 map fromParam params in
-
-    withShapes (map (first Id) $ zip arrparams $
-                map (slice cs 1) arrks) $
+    let (accparams, arrparams) = splitAt (length accexps) params in
+    withSOACArrSlices cs arrparams arrks $
     withShapes (map (first Id) $ filter (isArrayIdent . fst) $
-                zip accparams $ map (slice cs 0) accks) $
+                zip (map fromParam accparams) $ map (slice cs 0) accks) $
     withShapes (sameOuterShapesExps cs arrexps) $
     hoistInExpBase e
-hoistInExp e@(Redomap2 cs (TupleLambda redparams _ _ _) (TupleLambda mapparams _ _ _)
+hoistInExp e@(Redomap2 cs _ (TupleLambda innerparams _ _ _)
               accexps arrexps _ _) =
   hoistInSOAC e arrexps $ \ks ->
-    withShapes (zip (map (Id . fromParam) mapparams) $ map (slice cs 1) ks) $
-    withShapes (zip (map (Id . fromParam) $ drop (length accexps) redparams)
-               $ map (slice cs 1) ks) $
+    withSOACArrSlices cs (drop (length accexps) innerparams) ks $
     withShapes (sameOuterShapesExps cs arrexps) $
     hoistInExpBase e
 hoistInExp e = hoistInExpBase e
@@ -522,3 +534,14 @@ hoistInSOAC e arrexps m =
   case arrVars arrexps of
     Nothing -> hoistInExpBase e
     Just ks -> m ks
+
+arrSlices :: Certificates -> [Parameter] -> [Ident] -> [(TupIdent, [Exp])]
+arrSlices cs params = zip (map (Id . fromParam) params) . map (slice cs 1)
+
+withSOACArrSlices :: Certificates -> [Parameter] -> [Ident]
+                  -> HoistM Exp -> HoistM Exp
+withSOACArrSlices cs params ks m = do
+  agg <- asks envAggressive
+  if agg
+  then withShapes (arrSlices cs params ks) m
+  else m

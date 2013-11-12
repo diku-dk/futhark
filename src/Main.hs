@@ -82,6 +82,7 @@ commandLineOptions =
     "Run the program via an interpreter."
   , rename "r" ["rename"]
   , hoist "o" ["hoist"]
+  , hoistAggr "O" ["hoist-aggressively"]
   , normalize "n" ["normalize"]
   , uttransform "u" ["untrace"]
   , fotransform "f" ["first-order-transform"]
@@ -128,6 +129,13 @@ hoist =
   passoption "Rebinder - hoisting, CSE, dependency graph compression."
   Pass { passName = "rebinder"
        , passOp = return . RB.transformProg
+       }
+
+hoistAggr :: String -> [String] -> L0Option
+hoistAggr =
+  passoption "Rebinder - hoisting, CSE, dependency graph compression (aggressively)."
+  Pass { passName = "rebinder (aggressive)"
+       , passOp = return . RB.transformProgAggr
        }
 
 normalize :: String -> [String] -> L0Option

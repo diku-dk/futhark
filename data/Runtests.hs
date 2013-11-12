@@ -17,7 +17,7 @@ import System.IO
 import System.Process
 
 l0flags :: String
-l0flags = "-utenohefoe"
+l0flags = "-utnoehefrnOe"
 
 -- | Number of concurrent l0c instances to run.
 concurrency :: Int
