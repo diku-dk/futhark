@@ -5,7 +5,7 @@
 -- format.  This specifically means that all operands to operators,
 -- function calls, SOACs and what have you, must be variables, not
 -- expressions.  In essence, we introduce explicit bindings for most
--- every piece of computation.  Some modules (e.g "L0C.Hoisting") will
+-- every piece of computation.  Some modules (e.g "L0C.Rebinder") will
 -- expect a normalized input program.
 --
 module L0C.FullNormalization
@@ -23,6 +23,13 @@ import qualified Data.Map as M
 
 import L0C.L0
 import L0C.FreshNames
+
+-- | Fully normalize an L0 program.  The resulting program is as
+-- uniquely named as the input program.
+normalizeProg :: Prog -> Prog
+normalizeProg prog =
+  Prog $ runNormalizeM (mapM normalizeFun $ progFunctions prog) namesrc
+  where namesrc = newNameSourceForProg prog
 
 data NewBindings = NewBindings (Exp -> Exp)
 
@@ -62,11 +69,6 @@ runNormalizeM :: NormalizeM a -> NameSource VName -> a
 runNormalizeM (NormalizeM m) src =
   let (x, _, _) = runRWS m emptyEnv src
   in x
-
-normalizeProg :: Prog -> Prog
-normalizeProg prog =
-  Prog $ runNormalizeM (mapM normalizeFun $ progFunctions prog) namesrc
-  where namesrc = newNameSourceForProg prog
 
 insertBindings :: NormalizeM Exp -> NormalizeM Exp
 insertBindings m = pass $ do
