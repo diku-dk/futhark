@@ -129,9 +129,12 @@ mapExpM tv (LetWith cs dest src idxexps vexp body loc) =
        mapOnIdent tv dest <*> mapOnIdent tv src <*>
        mapM (mapOnExp tv) idxexps <*> mapOnExp tv vexp <*>
        mapOnExp tv body <*> pure loc
-mapExpM tv (Index cs arr idxexps outt loc) =
+mapExpM tv (Index cs arr idxcs idxexps outt loc) =
   pure Index <*> mapOnCertificates tv cs <*>
        mapOnIdent tv arr <*>
+       (case idxcs of
+          Nothing -> return Nothing
+          Just idxcs' -> Just <$> mapOnCertificates tv idxcs') <*>
        mapM (mapOnExp tv) idxexps <*>
        mapOnType tv outt <*> pure loc
 mapExpM tv (Iota nexp loc) =
