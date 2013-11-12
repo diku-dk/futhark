@@ -1,8 +1,28 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 -- |
 --
--- Perform simple hoisting of let-bindings, moving them out as far as
--- possible (particularly outside loops).
+-- Perform a range of loosely connected low-level transformations
+-- based on data dependency information.  This module will:
+--
+--    * Perform common-subexpression elimination (CSE).
+--
+--    * Rewrite expressions such that the dependecy path from the root
+--    variables (the arguments to the function containing the
+--    expression) is as short as possible.  For example, @size(0,b)@
+--    will be rewritten to @size(0,a)@ if @b@ is the result of a @map@
+--    on @a@, as @a@ and @b@ will in that case have the same number of
+--    rows.
+--
+--    * Hoist expressions out of loops (including lambdas) and
+--    branches.  This is done as aggressively as possible.
+--
+-- For this module to work properly, the input program should be fully
+-- normalised; this can be accomplished through use of
+-- "L0C.FullNormalizer".
+--
+-- CSE (and other transformations) may also create many bindings of
+-- the form @let a=b@, so it is recommended to run copy propagation
+-- after the rebinder.
 --
 module L0C.Rebinder
   ( transformProg )

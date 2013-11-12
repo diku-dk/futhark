@@ -67,7 +67,10 @@ performCSE (esubsts, nsubsts) pat e =
                   Nothing   -> (esubsts, nsubsts)
                   Just pate -> (M.insert e pate esubsts, nsubsts))
 
--- | Run CSE over several pattern-expression pairs.
+-- | Run CSE over several expression alternatives, all of which use
+-- the same pattern.  The same state is used to perform CSE on all of
+-- the expressions in parallel, and the final state is a combination
+-- of the resulting states.
 performMultipleCSE :: DupeState -> TupIdent -> [Exp]
                    -> ([Exp], DupeState)
 performMultipleCSE ds pat es =
