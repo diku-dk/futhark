@@ -211,7 +211,7 @@ instance (Ord vn, Pretty vn, TypeBox ty) => Pretty (LambdaBase ty vn) where
   ppr (AnonymFun params body rettype _) =
     text "fn" <+> ppr rettype <+>
     apply (map ppParam params) <+>
-    text "=>" <+/> indent 2 (ppr body)
+    text "=>" </> indent 2 (ppr body)
 
 instance (Ord vn, Pretty vn, TypeBox ty) => Pretty (TupleLambdaBase ty vn) where
   ppr (TupleLambda params body rets loc) =
