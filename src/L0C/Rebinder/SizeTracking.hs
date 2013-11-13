@@ -9,6 +9,7 @@ module L0C.Rebinder.SizeTracking
   , insert )
   where
 
+import Data.List hiding (insert, lookup)
 import Data.Monoid
 import qualified Data.Map as M
 import qualified Data.Set as S
@@ -27,7 +28,7 @@ instance Monoid ShapeBinding where
   DimSizes xs `mappend` DimSizes ys = DimSizes $ merge xs ys
     where merge [] ys' = ys'
           merge xs' [] = xs'
-          merge (x:xs') (y:ys') = (x++y) : merge xs' ys'
+          merge (x:xs') (y:ys') = nub (x++y) : merge xs' ys'
 
 type ShapeMap = M.Map Ident ShapeBinding
 
