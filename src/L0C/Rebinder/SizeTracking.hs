@@ -24,7 +24,10 @@ data ShapeBinding = DimSizes [ColExps]
 
 instance Monoid ShapeBinding where
   mempty = DimSizes []
-  DimSizes xs `mappend` DimSizes ys = DimSizes $ xs ++ ys
+  DimSizes xs `mappend` DimSizes ys = DimSizes $ merge xs ys
+    where merge [] ys' = ys'
+          merge xs' [] = xs'
+          merge (x:xs') (y:ys') = (x++y) : merge xs' ys'
 
 type ShapeMap = M.Map Ident ShapeBinding
 
