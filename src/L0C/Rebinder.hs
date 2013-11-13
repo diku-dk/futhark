@@ -139,9 +139,9 @@ withNewBinding k e m = do
 withBinding :: TupIdent -> Exp -> HoistM a -> HoistM a
 withBinding pat e@(Size _ i (Var x) _) m = do
   let mkAlt es = case drop i es of
-                   des:_ -> Just des
-                   _     -> Nothing
-  alts <- mapMaybe mkAlt <$> asks (SZ.lookup x . envBindings)
+                   des:_ -> des
+                   _     -> []
+  alts <- mkAlt <$> asks (SZ.lookup x . envBindings)
   withSeveralBindings pat e alts m
 
 withBinding pat e m = withSingleBinding pat e m
@@ -487,12 +487,12 @@ hoistInExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody _) = do
 hoistInExp e@(Map2 cs (TupleLambda params _ _ _) arrexps _ _) =
   hoistInSOAC e arrexps $ \ks ->
     withSOACArrSlices cs params ks $
-    withShapes (sameOuterShapesExps cs arrexps) $
+    withShapes (sameOuterShapes cs ks) $
     hoistInExpBase e
 hoistInExp e@(Reduce2 cs (TupleLambda params _ _ _) accexps arrexps _ _) =
   hoistInSOAC e arrexps $ \ks ->
     withSOACArrSlices cs (drop (length accexps) params) ks $
-    withShapes (sameOuterShapesExps cs arrexps) $
+    withShapes (sameOuterShapes cs ks) $
     hoistInExpBase e
 hoistInExp e@(Scan2 cs (TupleLambda params _ _ _) accexps arrexps _ _) =
   hoistInSOAC e arrexps $ \arrks ->
@@ -501,13 +501,13 @@ hoistInExp e@(Scan2 cs (TupleLambda params _ _ _) accexps arrexps _ _) =
     withSOACArrSlices cs arrparams arrks $
     withShapes (map (first Id) $ filter (isArrayIdent . fst) $
                 zip (map fromParam accparams) $ map (slice cs 0) accks) $
-    withShapes (sameOuterShapesExps cs arrexps) $
+    withShapes (sameOuterShapes cs arrks) $
     hoistInExpBase e
 hoistInExp e@(Redomap2 cs _ (TupleLambda innerparams _ _ _)
               accexps arrexps _ _) =
   hoistInSOAC e arrexps $ \ks ->
     withSOACArrSlices cs (drop (length accexps) innerparams) ks $
-    withShapes (sameOuterShapesExps cs arrexps) $
+    withShapes (sameOuterShapes cs ks) $
     hoistInExpBase e
 hoistInExp e = hoistInExpBase e
 
