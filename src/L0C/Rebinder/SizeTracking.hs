@@ -18,7 +18,7 @@ import L0C.L0
 
 import Prelude hiding (lookup)
 
-type ColExps = [Exp]
+type ColExps = S.Set Exp
 
 data ShapeBinding = DimSizes [ColExps]
                     deriving (Show, Eq)
@@ -28,32 +28,33 @@ instance Monoid ShapeBinding where
   DimSizes xs `mappend` DimSizes ys = DimSizes $ merge xs ys
     where merge [] ys' = ys'
           merge xs' [] = xs'
-          merge (x:xs') (y:ys') = nub (x++y) : merge xs' ys'
+          merge (x:xs') (y:ys') = (x `S.union` y) : merge xs' ys'
 
 type ShapeMap = M.Map Ident ShapeBinding
 
 lookup :: Ident -> ShapeMap -> [ColExps]
-lookup idd m = delve S.empty idd
+lookup idd m = {-trace ("lookup\n" ++ textual (identName idd) ++ " " ++ show m) $-} delve S.empty idd
   where
     delve s k | k `S.member` s = blank k
               | otherwise =
                 case M.lookup k m of
                   Nothing -> blank k
                   Just (DimSizes colexps) ->
-                    map (concatMap (recurse $ k `S.insert` s)) colexps
+                    map (S.unions . map (recurse (k `S.insert` s)) . S.toList) colexps
 
-    blank k = replicate (arrayDims $ identType k) []
+    blank k = replicate (arrayDims $ identType k) S.empty
 
+    recurse :: S.Set Ident -> Exp -> ColExps
     recurse s e@(Size _ i (Var k') _) =
       case drop i $ delve s k' of
-        (d:ds):_ -> d:ds
-        _        -> [e]
-    recurse _ e = [e]
+        ds:_ | not (S.null ds) -> ds
+        _    -> S.singleton e
+    recurse _ e = S.singleton e
 
 insert :: Ident -> [Exp] -> ShapeMap -> ShapeMap
 insert dest es bnds =
   let es' = map inspect es
   in M.insertWith (<>) dest (DimSizes es') bnds
   where inspect (Size _ i (Var k) _)
-          | (x:xs):_ <- drop i $ lookup k bnds = x:xs
-        inspect e                              = [e]
+          | xs:_ <- drop i $ lookup k bnds, not (S.null xs) = xs
+        inspect e                              = S.singleton e
