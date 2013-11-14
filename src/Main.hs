@@ -40,9 +40,11 @@ data Pass = Pass {
   , passOp :: Prog -> L0CM Prog
   }
 
+type Action = (String, Prog -> IO ())
+
 data L0Config = L0Config {
     l0pipeline :: [Pass]
-  , l0action :: Prog -> IO ()
+  , l0action :: Action
   , l0checkAliases :: Bool
   , l0verbose :: Maybe (Maybe FilePath)
 }
@@ -50,7 +52,7 @@ data L0Config = L0Config {
 newL0Config :: L0Config
 newL0Config = L0Config {
                 l0pipeline = []
-              , l0action = putStrLn . prettyPrint
+              , l0action = printAction
               , l0checkAliases = True
               , l0verbose = Nothing
               }
@@ -72,13 +74,13 @@ commandLineOptions =
     (NoArg $ \opts -> opts { l0checkAliases = False })
     "Don't check that uniqueness constraints are being upheld."
   , Option "c" ["compile"]
-    (NoArg $ \opts -> opts { l0action = putStrLn . compileProg })
+    (NoArg $ \opts -> opts { l0action = codegenAction })
     "Translate program into C and write it on standard output."
   , Option "p" ["print"]
-    (NoArg $ \opts -> opts { l0action = putStrLn . prettyPrint })
+    (NoArg $ \opts -> opts { l0action = printAction })
     "Prettyprint the program on standard output (default action)."
   , Option "i" ["interpret"]
-    (NoArg $ \opts -> opts { l0action = interpret })
+    (NoArg $ \opts -> opts { l0action = interpretAction })
     "Run the program via an interpreter."
   , renameOpt "r" ["rename"]
   , hoistOpt "o" ["hoist"]
@@ -93,6 +95,15 @@ commandLineOptions =
     (NoArg $ \opts -> opts { l0pipeline = standardPipeline })
     "Use the recommended optimised pipeline."
   ]
+
+printAction :: Action
+printAction = ("prettyprinter", putStrLn . prettyPrint)
+
+interpretAction :: Action
+interpretAction = ("interpreter", interpret)
+
+codegenAction :: Action
+codegenAction = ("code generator", putStrLn . compileProg)
 
 interpret :: Prog -> IO ()
 interpret prog =
@@ -240,7 +251,11 @@ compiler config file = do
             prettyPrint prog ++ "\n"
         _ -> return ()
       exitWith $ ExitFailure 2
-    Right prog -> l0action config prog
+    Right prog -> do
+      let (actiondesc, action) = l0action config
+      when (verbose config) $
+        hPutStrLn stderr $ "Running " ++ actiondesc ++ "."
+      action prog
 
 typeCheck :: (TypeBox ty, VarName vn) =>
              L0Config -> ProgBase ty vn
