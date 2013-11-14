@@ -54,11 +54,13 @@ newDupeState = (M.empty, M.empty)
 performCSE :: DupeState -> TupIdent -> Exp
            -> (Exp, DupeState)
 -- Arrays may be consumed, so don't eliminate expressions producing
--- arrays.  This is perhaps a bit too conservative - we could track
--- exactly which are being consumed and keep a blacklist.
+-- unique arrays.  This is perhaps a bit too conservative - we could
+-- track exactly which are being consumed and keep a blacklist.
 performCSE (esubsts, nsubsts) pat e
-  | any (not . basicType . identType) $ S.toList $ patIdents pat =
+  | any (getAll . uniqArray) $ S.toList $ patIdents pat =
     (e, (esubsts, nsubsts))
+  where uniqArray = All . not . basicType . identType <>
+                    All . unique . identType
 performCSE (esubsts, nsubsts) pat e =
   case M.lookup e' esubsts of
     Just e'' -> (e'', (esubsts, mkSubsts pat e'' `M.union` nsubsts))
