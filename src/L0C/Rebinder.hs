@@ -139,7 +139,7 @@ withNewBinding k e m = do
 withBinding :: TupIdent -> Exp -> HoistM a -> HoistM a
 withBinding pat e@(Size _ i (Var x) _) m = do
   let mkAlt es = case drop i es of
-                   des:_ -> des
+                   des:_ -> S.toList des
                    _     -> []
   alts <- mkAlt <$> asks (SZ.lookup x . envBindings)
   withSeveralBindings pat e alts m
