@@ -378,7 +378,15 @@ anyIsFreeIn ks = (ks `intersects`) . S.map identName . freeInExp
 intersects :: Ord a => S.Set a -> S.Set a -> Bool
 intersects a b = not $ S.null $ a `S.intersection` b
 
-type BlockPred = Exp -> BindNeed -> Bool
+data BodyInfo = BodyInfo { bodyConsumes :: S.Set VName
+                         }
+
+bodyInfo :: Exp -> BodyInfo
+bodyInfo e = BodyInfo {
+               bodyConsumes = consumedInExp e
+             }
+
+type BlockPred = BodyInfo -> BindNeed -> Bool
 
 orIf :: BlockPred -> BlockPred -> BlockPred
 orIf p1 p2 body need = p1 body need || p2 body need
@@ -389,10 +397,11 @@ splitHoistable block body (Need needs) =
         foldl split (S.empty, S.empty, S.empty) $
         inDepOrder $ S.toList needs
   in (Need blocked, Need hoistable)
-  where split (blocked, hoistable, ks) need =
+  where block' = block $ bodyInfo body
+        split (blocked, hoistable, ks) need =
           case need of
             LetBind pat e es ->
-              let bad e' = block body (LetBind pat e' []) || ks `anyIsFreeIn` e'
+              let bad e' = block' (LetBind pat e' []) || ks `anyIsFreeIn` e'
               in case (bad e, filter (not . bad) es) of
                    (True, [])     ->
                      (need `S.insert` blocked, hoistable,
@@ -401,7 +410,7 @@ splitHoistable block body (Need needs) =
                      (blocked, LetBind pat e' es' `S.insert` hoistable, ks)
                    (False, es')   ->
                      (blocked, LetBind pat e es' `S.insert` hoistable, ks)
-            _ | requires need `intersects` ks || block body need ->
+            _ | requires need `intersects` ks || block' need ->
                 (need `S.insert` blocked, hoistable, provides need `S.union` ks)
               | otherwise ->
                 (blocked, need `S.insert` hoistable, ks)
@@ -448,7 +457,7 @@ isUniqueBinding _ (LetWithBind _ dest _ _ _) = unique $ identType dest
 
 isConsumed :: BlockPred
 isConsumed body need =
-  provides need `intersects` consumedInExp body
+  provides need `intersects` bodyConsumes body
 
 commonNeeds :: Need -> Need -> (Need, Need, Need)
 commonNeeds n1 n2 = (mempty, n1, n2) -- Placeholder.
