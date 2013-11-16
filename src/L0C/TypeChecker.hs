@@ -13,7 +13,6 @@ module L0C.TypeChecker ( checkProg
   where
 
 import Control.Applicative
-import Control.Arrow ((***))
 import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.State
@@ -315,10 +314,12 @@ occur :: VarName vn => Occurences vn -> TypeM vn ()
 occur occurs = tell Dataflow { usageOccurences = occurs }
 
 -- | Proclaim that we have made read-only use of the given variable.
+-- No-op unless the variable is array-typed.
 observe :: VarName vn => TaggedIdent CompTypeBase vn -> TypeM vn ()
-observe (Ident _ t loc) = do
-  let als = aliases t
-  occur [observation als loc]
+observe (Ident _ t loc)
+  | basicType t = return ()
+  | otherwise   = let als = aliases t
+                  in occur [observation als loc]
 
 -- | Proclaim that we have written to the given variable.
 consume :: VarName vn => SrcLoc -> Names (ID vn) -> TypeM vn ()
@@ -380,18 +381,19 @@ binding bnds = check . local (`bindVars` bnds)
 
         bindVar :: TypeEnv vn -> TaggedIdent CompTypeBase vn -> TypeEnv vn
         bindVar env (Ident name tp _) =
-          let inedges = aliases tp
-              update k (Bound tp')
+          let inedges = S.toList $ aliases tp
+              update _ (Bound tp')
               -- If 'name' is tuple-typed, don't alias the components
               -- to 'name', because tuples have no identity beyond
               -- their components.
                 | Elem (Tuple _) <- tp = Bound tp'
-                | k `S.member` inedges = Bound (tp' `addAliases` S.insert name)
-                | otherwise            = Bound tp'
+                | otherwise            = Bound (tp' `addAliases` S.insert name)
               update _ b = b
           in env { envVtable = M.insert name (Bound tp) $
-                               M.mapWithKey update $
+                               adjustSeveral update inedges $
                                envVtable env }
+
+        adjustSeveral f = flip $ foldl $ flip $ M.adjustWithKey f
 
         -- Check whether the bound variables have been used correctly
         -- within their scope.
@@ -1158,9 +1160,9 @@ checkBinding :: (VarName vn, TypeBox ty) =>
                 TaggedTupIdent ty vn -> TaggedType vn -> Dataflow vn
              -> TypeM vn (TypeM vn a -> TypeM vn a, TaggedTupIdent CompTypeBase vn)
 checkBinding pat et dflow = do
-  (pat', (scope, _)) <-
-    runStateT (checkBinding' pat et) (id, [])
-  return (\m -> sequentially (tell dflow) (const . const $ scope m), pat')
+  (pat', idds) <-
+    runStateT (checkBinding' pat et) []
+  return (\m -> sequentially (tell dflow) (const . const $ binding idds m), pat')
   where checkBinding' (Id (Ident name namet pos)) t = do
           t' <- lift $
                 checkAnnotation (srclocOf pat)
@@ -1179,9 +1181,9 @@ checkBinding pat et dflow = do
           lift $ bad $ InvalidPatternError (untagPattern errpat) (untagType et) $ srclocOf pat
 
         add ident = do
-          bnd <- gets $ find (==ident) . snd
+          bnd <- gets $ find (==ident)
           case bnd of
-            Nothing -> modify $ (binding [ident].) *** (ident:)
+            Nothing -> modify (ident:)
             Just (Ident name _ pos2) ->
               lift $ bad $ DupPatternError (baseName name) (srclocOf ident) pos2
         -- A pattern with known type box (NoInfo) for error messages.
