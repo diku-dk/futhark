@@ -92,7 +92,7 @@ commandLineOptions =
   , eotransformOpt "e" ["enabling-optimisations"]
   , hotransformOpt "h" ["higher-order-optimizations"]
   , Option "s" ["standard"]
-    (NoArg $ \opts -> opts { l0pipeline = standardPipeline })
+    (NoArg $ \opts -> opts { l0pipeline = standardPipeline ++ l0pipeline opts })
     "Use the recommended optimised pipeline."
   ]
 
