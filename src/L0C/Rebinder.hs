@@ -56,7 +56,7 @@ data BindNeed = LoopBind TupIdent Exp Ident Exp Exp
               | LetWithBind Certificates Ident Ident [Exp] Exp
                 deriving (Show, Eq, Ord)
 
-type NeedSet = S.Set BindNeed
+type NeedSet = [BindNeed]
 
 asTail :: BindNeed -> Exp
 asTail (LoopBind mergepat mergeexp i bound loopbody) =
@@ -83,7 +83,7 @@ data Need = Need { needBindings :: NeedSet
 
 instance Monoid Need where
   Need b1 `mappend` Need b2 = Need $ b1 <> b2
-  mempty = Need S.empty
+  mempty = Need []
 
 data Env = Env { envBindings :: SZ.ShapeMap
                , envDupeState :: DupeState
@@ -128,6 +128,9 @@ new k = do (name, src) <- gets $ flip newVName k
            put src
            return name
 
+needThis :: BindNeed -> HoistM ()
+needThis need = tell $ Need [need]
+
 withNewBinding :: String -> Exp -> (Ident -> HoistM a) -> HoistM a
 withNewBinding k e m = do
   k' <- new k
@@ -155,7 +158,7 @@ withSeveralBindings pat e alts m = do
   ds <- asks envDupeState
   let (e', ds') = performCSE ds pat e
       (es, ds'') = performMultipleCSE ds pat alts
-  tell $ Need $ S.singleton $ LetBind pat e' es
+  needThis $ LetBind pat e' es
   local (\env -> env { envDupeState = ds' <> ds''}) m
 
 bindLet :: TupIdent -> Exp -> HoistM a -> HoistM a
@@ -226,12 +229,12 @@ bindLet pat e m = withBinding pat e m
 
 bindLetWith :: Certificates -> Ident -> Ident -> [Exp] -> Exp -> HoistM a -> HoistM a
 bindLetWith cs dest src is ve m = do
-  tell $ Need $ S.singleton $ LetWithBind cs dest src is ve
+  needThis $ LetWithBind cs dest src is ve
   withShape dest (slice [] 0 src) m
 
 bindLoop :: TupIdent -> Exp -> Ident -> Exp -> Exp -> HoistM a -> HoistM a
 bindLoop pat e i bound body m = do
-  tell $ Need $ S.singleton $ LoopBind pat e i bound body
+  needThis $ LoopBind pat e i bound body
   m
 
 slice :: Certificates -> Int -> Ident -> [Exp]
@@ -289,10 +292,9 @@ transformFun (fname, rettype, params, body, loc) = do
   body' <- blockAllHoisting $ hoistInExp body
   return (fname, rettype, params, body', loc)
 
-addBindings :: DupeState -> Need -> Exp -> Exp
-addBindings dupes need =
-  foldl (.) id $ snd $ mapAccumL comb (M.empty, dupes) $
-  inDepOrder $ S.toList $ needBindings need
+addBindings :: DupeState -> [BindNeed] -> Exp -> Exp
+addBindings dupes needs =
+  foldl (.) id $ snd $ mapAccumL comb (M.empty, dupes) needs
   where comb (m,ds) bind@(LoopBind mergepat mergeexp loopvar
                               boundexp loopbody) =
           ((m `M.union` distances m bind,ds),
@@ -391,12 +393,11 @@ type BlockPred = BodyInfo -> BindNeed -> Bool
 orIf :: BlockPred -> BlockPred -> BlockPred
 orIf p1 p2 body need = p1 body need || p2 body need
 
-splitHoistable :: BlockPred -> Exp -> Need -> (Need, Need)
-splitHoistable block body (Need needs) =
+splitHoistable :: BlockPred -> Exp -> Need -> ([BindNeed], Need)
+splitHoistable block body needs =
   let (blocked, hoistable, _) =
-        foldl split (S.empty, S.empty, S.empty) $
-        inDepOrder $ S.toList needs
-  in (Need blocked, Need hoistable)
+        foldl split ([], [], S.empty) $ inDepOrder $ needBindings needs
+  in (reverse blocked, Need hoistable)
   where block' = block $ bodyInfo body
         split (blocked, hoistable, ks) need =
           case need of
@@ -404,16 +405,16 @@ splitHoistable block body (Need needs) =
               let bad e' = block' (LetBind pat e' []) || ks `anyIsFreeIn` e'
               in case (bad e, filter (not . bad) es) of
                    (True, [])     ->
-                     (need `S.insert` blocked, hoistable,
+                     (need : blocked, hoistable,
                       patNames pat `S.union` ks)
                    (True, e':es') ->
-                     (blocked, LetBind pat e' es' `S.insert` hoistable, ks)
+                     (blocked, LetBind pat e' es' : hoistable, ks)
                    (False, es')   ->
-                     (blocked, LetBind pat e es' `S.insert` hoistable, ks)
+                     (blocked, LetBind pat e es' : hoistable, ks)
             _ | requires need `intersects` ks || block' need ->
-                (need `S.insert` blocked, hoistable, provides need `S.union` ks)
+                (need : blocked, hoistable, provides need `S.union` ks)
               | otherwise ->
-                (blocked, need `S.insert` hoistable, ks)
+                (blocked, need : hoistable, ks)
 
 blockIfSeq :: [BlockPred] -> HoistM Exp -> HoistM Exp
 blockIfSeq ps m = foldl (flip blockIf) m ps
@@ -459,9 +460,6 @@ isConsumed :: BlockPred
 isConsumed body need =
   provides need `intersects` bodyConsumes body
 
-commonNeeds :: Need -> Need -> (Need, Need, Need)
-commonNeeds n1 n2 = (mempty, n1, n2) -- Placeholder.
-
 hoistCommon :: HoistM Exp -> HoistM Exp -> HoistM (Exp, Exp)
 hoistCommon m1 m2 = pass $ do
   (body1, needs1) <- listen m1
@@ -469,10 +467,9 @@ hoistCommon m1 m2 = pass $ do
   let splitOK = splitHoistable $ isNotSafe `orIf` isNotCheap
       (needs1', safe1) = splitOK body1 needs1
       (needs2', safe2) = splitOK body2 needs2
-      (common, needs1'', needs2'') = commonNeeds needs1' needs2'
-  return ((addBindings newDupeState needs1'' body1,
-           addBindings newDupeState needs2'' body2),
-          const $ mconcat [safe1, safe2, common])
+  return ((addBindings newDupeState needs1' body1,
+           addBindings newDupeState needs2' body2),
+          const $ safe1 <> safe2)
 
 hoistInExp :: Exp -> HoistM Exp
 hoistInExp (If c e1 e2 t loc) = do
