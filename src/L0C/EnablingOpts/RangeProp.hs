@@ -581,7 +581,7 @@ extractFromCond (Or e1 e2 pos) = do
   where
     unionFunc (thenA, elseA) (thenB, elseB) = do
       thenRange <- unionIfDefined thenA thenB pos
-      elseRange <- unionIfDefined elseA elseB pos
+      elseRange <- intersectIfDeinfed elseA elseB pos
       return (thenRange, elseRange)
 
 extractFromCond _ = return M.empty
