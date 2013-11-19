@@ -84,12 +84,13 @@ simplExp e =
 
 rangeProp :: Prog -> Either EnablingOptError Prog
 rangeProp prog = do
-    res <- mapM rangePropFun (progFunctions prog)
+    let funs = trace ("RANGE PROP START\n" ++ prettyPrint prog) progFunctions prog
+    res <- mapM rangePropFun funs
     return $ Prog res
   where
     rangePropFun (fname, rettype, params, body, pos) = do
         let env = RangeEnv { dict = foldl tellParam emptyRangeDict params }
-        body' <- runRangeM (doSomething body) env
+        body' <- runRangeM (rangePropExp body) env
         return (fname, rettype, params, body', pos)
 
     tellParam :: RangeDict -> Parameter -> RangeDict
@@ -97,41 +98,38 @@ rangeProp prog = do
       M.insert vname ((Ninf, Pinf), Nothing) rdict
     tellParam rdict _ = rdict
 
-    mapper = identityMapper { mapOnExp = doSomething }
+    rangePropMapper = identityMapper { mapOnExp = rangePropExp }
 
-    doSomething :: Exp -> RangeM Exp
-    doSomething e@(LetPat i@(Id (Ident vname (Elem Int) _)) toExp inExp pos) = do
+    rangePropExp :: Exp -> RangeM Exp
+    rangePropExp (LetPat i@(Id (Ident vname (Elem Int) _)) toExp inExp pos) = do
       theDict  <- asks dict
-      toExp' <- doSomething toExp
+      toExp' <- rangePropExp toExp
       info <- createRangeAndSign $ Just toExp'
-      let debugText = unlines [
-              escapeColorize Red ("----- Added " ++ textual vname ++ " -----")
-            , ppExp e
-            , ppDict (M.insert vname info theDict)
-            , escapeColorize Red "----- ^^ -----"
-            ]
-      inExp' <- addToRangeDict vname info $ trace debugText doSomething inExp
+      let debugText = unlines [ escapeColorize Red ("----- LetPat " ++ textual vname ++ " -----")
+                              , ppDict (M.insert vname info theDict)
+                              ]
+      inExp' <- trace debugText $ mergeRangeEnvWithDict (M.singleton vname info) $ rangePropExp inExp
       return $ LetPat i toExp' inExp' pos
 
-    doSomething e@(If cond thenE elseE ty pos) = do
-      cond' <- doSomething cond
+    rangePropExp (If cond thenE elseE ty pos) = do
+      cond' <- rangePropExp cond
       (thenInfo, elseInfo) <- realExtractFromCond cond'
-      let debugText = unlines [
-              escapeColorize Red "----- If -----"
-            , ppExp e
-            , "Then:"
-            , ppDict thenInfo
-            , "Else:"
-            , ppDict elseInfo
-            , escapeColorize Red "----- ^^ -----"
-            ]
-      thenE' <- trace debugText $ mergeRangeEnvWithDict thenInfo $ doSomething thenE
-      elseE' <- mergeRangeEnvWithDict elseInfo $ doSomething elseE
+      let debugText = unlines [ escapeColorize Red "----- If ----- " ++ escapeColorize Black (locStr pos)
+                              , ppExp cond
+                              , ""
+                              , "Then:"
+                              , ppDict thenInfo
+                              , "Else:"
+                              , ppDict elseInfo
+                              , escapeColorize Red "----- ^^ -----"
+                              ]
+      thenE' <- trace debugText $ mergeRangeEnvWithDict thenInfo $ rangePropExp thenE
+      elseE' <- mergeRangeEnvWithDict elseInfo $ rangePropExp elseE
       return $ If cond' thenE' elseE' ty pos
 
-    doSomething (BinOp Less e1 e2 ty pos) = do
-      e1' <- doSomething e1
-      e2' <- doSomething e2
+    rangePropExp (BinOp Less e1 e2 ty pos) = do
+      e1' <- rangePropExp e1
+      e2' <- rangePropExp e2
       if typeOf e1 /= Elem Int then return $ BinOp Less e1' e2' ty pos
       else do
         ineq <- rangeRExpCompare (RExp e1) (RExp e2) pos
@@ -139,71 +137,14 @@ rangeProp prog = do
                      | ineq > Just IEQ -> return $ Literal (LogVal False) pos
                      | otherwise -> return $ BinOp Less e1' e2' ty pos
 
-    doSomething e = do
-      theDict <- asks dict
-      let debugText = unlines [locStr $ L.srclocOf e, ppExp e , ppDict theDict]
-      trace debugText mapExpM mapper e
-
-    addToRangeDict :: VName -> (Range, RangeSign) -> RangeM a -> RangeM a
-    addToRangeDict vname info = local (\env -> env { dict = M.insert vname info $ dict env })
+    rangePropExp e =
+      mapExpM rangePropMapper e
 
     mergeRangeEnvWithDict :: RangeDict -> RangeM a -> RangeM a
-    mergeRangeEnvWithDict new = local (\env -> env { dict = M.union new $ dict env })
-
-
-rangeProp' :: Prog -> Either EnablingOptError RangeDict
-rangeProp' prog = do
-  let asList = filter (\(_,t,_) -> isElemInt t) $ allIdentsAsList prog
-  newDict <- foldM keepAddingToRangeDict emptyRangeDict asList
-  trace (prettyPrint prog ++ "\n" ++ ppDict newDict ++ "\n")
-    return newDict
-  where
-    isElemInt (Elem Int) = True
-    isElemInt _ = False
-
-    keepAddingToRangeDict :: RangeDict -> (VName, DeclType, Maybe Exp) -> Either EnablingOptError RangeDict
-    keepAddingToRangeDict acc (i,_,e) = do
-      let env = RangeEnv { dict = acc }
-      res <- runRangeM (createRangeAndSign e) env
-      return $ acc `M.union` M.singleton i res
-
--- stolen from Traversals.progNames
-allIdentsAsList :: Prog -> [ (VName, DeclType, Maybe Exp) ]
-allIdentsAsList = execWriter . mapM funIdents . progFunctions
-  where
-    tellParam :: Parameter -> Writer [ (VName, DeclType, Maybe Exp) ] ()
-    tellParam (Ident name tp _) =
-      tell [(name, tp, Nothing)]
-
-    tellLet :: Ident -> Exp ->  Writer [ (VName, DeclType, Maybe Exp) ] ()
-    tellLet (Ident name tp _) toExp =
-      tell [(name, toDecl tp, Just toExp)]
-
-    idents = identityWalker {
-                  walkOnExp = expIdents
-                , walkOnLambda = lambdaIdents
-                }
-
-    funIdents (_, _, params, body, _) =
-      mapM_ tellParam params >> expIdents body
-
-    expIdents (LetPat (Id ident) toExp inExp _) =
-      expIdents toExp >> tellLet ident toExp >> expIdents inExp
-    --expIdents e@(LetWith dest _ _ _ _ _) =
-      --tellParam dest >> walkExpM idents e
-    --expIdents e@(DoLoop _ _ i _ _ _ _) =
-      --tellParam i >> walkExpM idents e
-    expIdents e = walkExpM idents e
-
-    lambdaIdents (AnonymFun params body _ _) =
-      mapM_ tellParam params >> expIdents body
-    lambdaIdents (CurryFun _ exps _ _) =
-          mapM_ expIdents exps
+    mergeRangeEnvWithDict newDict = local (\env -> env { dict = M.union newDict $ dict env })
 
 ----------------------------------------
 
--- TODO: Right now it just simplifies as much as it can.
--- I think we would just like to keep the old range
 createRangeAndSign :: Maybe Exp -> RangeM (Range, RangeSign)
 createRangeAndSign (Just e)  = do
   e' <- simplExp e
