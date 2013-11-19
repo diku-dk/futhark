@@ -311,44 +311,68 @@ substitute i r (RExp (BinOp Times e1 e2 ty pos)) = do
   (c, d) <- substitute i r (RExp e2)
   e1Sign <- calculateRangeSign(a,b)
   e2Sign <- calculateRangeSign(c,d)
-  case (e1Sign, e2Sign) of
-    (Just Zero,_) -> let z = createRExpIntLit 0 pos in return (z,z)
-    (_,Just Zero) -> let z = createRExpIntLit 0 pos in return (z,z)
-    (Nothing, _)  -> return (Ninf, Pinf)
-    (_, Nothing)  -> return (Ninf, Pinf)
-    _             -> case (Just Zero < e1Sign, Just Zero < e2Sign) of
-                       -- [2:5] * [3:6] ~> [2*3 : 5*6]
-                       (True,True)   -> do ac <- multRExp a c
-                                           bd <- multRExp b d
-                                           return (ac,bd)
-                       -- [-5:-2] * [-6:-3] ~> [-2*-3 : -5*-6]
-                       (False,False) -> do ac <- multRExp a c
-                                           bd <- multRExp b d
-                                           return (bd,ac)
-                       -- [2:5] * [-6:-3] ~> [5*-6 : 2*-3]
-                       (True,False)  -> do ad <- multRExp a d
-                                           bc <- multRExp b c
-                                           return (bc,ad)
-                       -- [-5:-2] * [3:6] ~> [-5*6 : -2*3]
-                       (False,True)  -> do ad <- multRExp a d
-                                           bc <- multRExp b c
-                                           return (ad,bc)
+
+  lb <- liftM (fromMaybe Ninf) $ possibleLBTerm e1Sign (a,b) e2Sign (c,d)
+  ub <- liftM (fromMaybe Pinf) $ possibleUBTerm e1Sign (a,b) e2Sign (c,d)
+  return (lb,ub)
 
   where
-    multRExp :: RExp -> RExp -> RangeM RExp
-    multRExp (RExp x) (RExp y) = liftM RExp $ simplExp (BinOp Times x y ty pos)
+      -- General case:
+    -- [a:b]   * [c:d]   ~> [min(ac,ad,bc,bd), max(ac,ad,bc,bd)]
+
+    -- Simple examples:
+    -- [2:5]   * [3:6]   ~> [2*3 : 5*6]     (ac, bd)
+    -- [2:5]   * [-6:-3] ~> [5*-6 : 2*-3]   (bc, ad)
+    -- [-5:-2] * [3:6]   ~> [-5*6 : -2*3]   (ad, bc)
+    -- [-5:-2] * [-6:-3] ~> [-2*-3 : -5*-6] (bd, ac)
+
+    -- More complex example:
+    -- [-2:5]  * [3:6]   ~> [min(-2*6, : 5*6]     (ad, bd)
+
+    possibleLBTerm sign1 (a,b) sign2 (c,d)
+      | sign1 >= Just Zero , sign2 >= Just Zero = multRExp a c
+      | sign1 >= Just Zero , sign2 >  Nothing   = multRExp b c
+      | sign1 >= Just Zero , sign2 == Nothing   = multRExp b c -- c < 0 , 0 <= a <= b ~> bc < ac
+      | sign1 >  Nothing   , sign2 >= Just Zero = multRExp a d
+      | sign1 >  Nothing   , sign2 >  Nothing   = multRExp b d
+      | sign1 >  Nothing   , sign2 == Nothing   = multRExp a d -- 0 < d , a <= b <= 0 ~> ad < bd
+      | sign1 == Nothing   , sign2 >= Just Zero = multRExp a d -- a < 0 , 0 <= c <= d ~> ad < ac
+      | sign1 == Nothing   , sign2 >  Nothing   = multRExp b c -- 0 < b , c <= d <= 0 ~> bc < bd
+      | otherwise                              = do ad <- multRExp a d -- a < 0, b < 0 , c < 0, d < 0
+                                                    bc <- multRExp b c
+                                                    case (ad,bc) of
+                                                      (Just ad', Just bc') -> liftM Just $ minRExp ad' bc' pos
+                                                      _                    -> return Nothing
+
+    possibleUBTerm sign1 (a,b) sign2 (c,d)
+      | sign1 >= Just Zero, sign2 >= Just Zero = multRExp b d
+      | sign1 >= Just Zero, sign2 >  Nothing   = multRExp a d
+      | sign1 >= Just Zero, sign2 == Nothing   = multRExp b d -- 0 < d , 0 <= a <= b ~> ad < bd
+      | sign1 >  Nothing  , sign2 >= Just Zero = multRExp b c
+      | sign1 >  Nothing  , sign2 >  Nothing   = multRExp a c
+      | sign1 >  Nothing  , sign2 == Nothing   = multRExp a c -- c < 0, a <= b <= 0 ~> bc < ac
+      | sign1 == Nothing  , sign2 >= Just Zero = multRExp b d -- 0 < b , 0 <= c <= d ~> bc < bd
+      | sign1 == Nothing  , sign2 >  Nothing   = multRExp a c -- a < 0 , c <= d <= 0 ~> ad < ac
+      | otherwise                              = do ac <- multRExp a c -- a < 0, b < 0 , c < 0, b < 0
+                                                    bd <- multRExp b d
+                                                    case (ac,bd) of
+                                                      (Just ac', Just bd') -> liftM Just $ maxRExp ac' bd' pos
+                                                      _                    -> return Nothing
+
+    multRExp :: RExp -> RExp -> RangeM (Maybe RExp)
+    multRExp (RExp x) (RExp y) = liftM (Just . RExp) $ simplExp (BinOp Times x y ty pos)
     multRExp Pinf x = do
       xSign <- determineRExpSign x
       case xSign of
-        Nothing     -> badRangeM $ RangePropError pos "multRExp: Multiplying with Nothing"
-        (Just Zero) -> return $ createRExpIntLit 0 pos
-        (Just s)    -> return (if Zero < s then Pinf else Ninf)
+        Nothing     -> return Nothing --badRangeM $ RangePropError pos "multRExp: Multiplying Pinf with Nothing"
+        (Just Zero) -> return $ Just $ createRExpIntLit 0 pos
+        (Just s)    -> return $ Just (if Zero < s then Pinf else Ninf)
     multRExp Ninf x = do
       xSign <- determineRExpSign x
       case xSign of
-        Nothing     -> badRangeM $ RangePropError pos "multRExp: Multiplying with Nothing"
-        (Just Zero) -> return $ createRExpIntLit 0 pos
-        (Just s)    -> return (if Zero < s then Ninf else Pinf)
+        Nothing     -> return Nothing --badRangeM $ RangePropError pos "multRExp: Multiplying Ninf with Nothing"
+        (Just Zero) -> return $ Just $ createRExpIntLit 0 pos
+        (Just s)    -> return $ Just (if Zero < s then Ninf else Pinf)
     multRExp x y = multRExp y x
 
 substitute i r (RExp (BinOp Divide e1 e2 ty pos)) = do
@@ -356,47 +380,57 @@ substitute i r (RExp (BinOp Divide e1 e2 ty pos)) = do
   (c, d) <- substitute i r (RExp e2)
   e1Sign <- calculateRangeSign(a,b)
   e2Sign <- calculateRangeSign(c,d)
-  if canBeZero e1Sign || canBeZero e2Sign
-  then return (Ninf, Pinf)
-  else case (Just Zero < e1Sign, Just Zero < e2Sign) of
-          -- [2:5] / [3:6] ~> [2/6 : 5/3]
-          (True,True)   -> do ad <- divRExp a d
-                              bc <- divRExp b c
-                              return (ad,bc)
-          -- [-5:-2] / [-6:-3] ~> [-2/-6 : -5/-3]
-          (False,False) -> do ad <- divRExp a d
-                              bc <- divRExp b c
-                              return (bc,ad)
-          -- [2:5] / [-6:-3] ~> [5/-3 : 2/-6]
-          (True,False)  -> do ac <- divRExp a c
-                              bd <- divRExp b d
-                              return (ac,bd)
-          -- [-5:-2] / [3:6] ~> [-5/3 : -2/6]
-          (False,True)  -> do ac <- divRExp a c
-                              bd <- divRExp b d
-                              return (bd,ac)
+  if canBeZero e2Sign then return (Ninf, Pinf)
+  else do lb <- calcLB e1Sign (a,b) e2Sign (c,d)
+          ub <- calcUB e1Sign (a,b) e2Sign (c,d)
+          return (lb,ub)
+  where
+    canBeZero :: RangeSign -> Bool
+    canBeZero (Just Neg) = False
+    canBeZero (Just Pos) = False
+    canBeZero _ = True
 
-    where
-      canBeZero :: RangeSign -> Bool
-      canBeZero (Just Neg) = False
-      canBeZero (Just Pos) = False
-      canBeZero _ = True
+    -- [2:5] / [3:6]     ~> [2/6 : 5/3] (a/d, b/c)
+    -- [2:5] / [-6:-3]   ~> [5/-3 : 2/-6] (b/d, a/c)
+    -- [-5:-2] / [3:6]   ~> [-5/3 : -2/6] (a/c, b/d)
+    -- [-5:-2] / [-6:-3] ~> [-2/-6 : -5/-3] (b/c, a/d)
+    calcLB sign1 (a,b) sign2 (c,d)
+      | sign1 >= Just Zero, sign2 > Just Zero = divRExp a d
+      | sign1 >= Just Zero, sign2 > Nothing   = divRExp b d
+      | sign1 >  Nothing  , sign2 > Just Zero = divRExp a c
+      | sign1 >  Nothing  , sign2 > Nothing   = divRExp b c
+      | sign1 == Nothing  , sign2 > Just Zero = divRExp a c -- a < 0 , 0 <= c <= d ~> a/c <= a/d
+      | sign1 == Nothing  , sign2 > Nothing   = divRExp b d -- 0 < b , c <= d <= 0 ~> b/d <= b/c
+      | otherwise                             = badRangeM $ RangePropError pos "divRExp: Dividing with something that could be 0"
 
-      divRExp :: RExp -> RExp -> RangeM RExp
-      divRExp (RExp x) (RExp y) = liftM RExp $ simplExp (BinOp Divide x y ty pos)
-      divRExp Pinf x = do
-        xSign <- determineRExpSign x
-        case xSign of
-          (Just Pos) -> return Pinf
-          (Just Neg) -> return Ninf
-          _     -> badRangeM $ RangePropError pos "divRExp: Dividing with something that could be 0"
-      divRExp Ninf x = do
-        xSign <- determineRExpSign x
-        case xSign of
-          (Just Pos) -> return Ninf
-          (Just Neg) -> return Pinf
-          _     -> badRangeM $ RangePropError pos "divRExp: Dividing with something that could be 0"
-      divRExp x y = divRExp y x
+    calcUB sign1 (a,b) sign2 (c,d)
+      | sign1 >= Just Zero, sign2 > Just Zero = divRExp b c
+      | sign1 >= Just Zero, sign2 > Nothing   = divRExp a c
+      | sign1 >  Nothing  , sign2 > Just Zero = divRExp b d
+      | sign1 >  Nothing  , sign2 > Nothing   = divRExp a d
+      | sign1 == Nothing  , sign2 > Just Zero = divRExp b c -- 0 < b , 0 <= c <= d ~> b/d < b/c
+      | sign1 == Nothing  , sign2 > Nothing   = divRExp a d -- a < 0 , c <= d <= 0 ~> a/c < a/d
+      | otherwise                             = badRangeM $ RangePropError pos "divRExp: Dividing with something that could be 0"
+
+    divRExp :: RExp -> RExp -> RangeM RExp
+    divRExp (RExp x) (RExp y) = liftM RExp $ simplExp (BinOp Divide x y ty pos)
+    divRExp Pinf Ninf = badRangeM $ RangePropError pos "divRExp: Dividing Pinf with Ninf"
+    divRExp Pinf Pinf = badRangeM $ RangePropError pos "divRExp: Dividing Pinf with Pinf"
+    divRExp Ninf Pinf = badRangeM $ RangePropError pos "divRExp: Dividing Pinf with Pinf"
+    divRExp Pinf x = do
+      xSign <- determineRExpSign x
+      case xSign of
+        (Just Pos) -> return Pinf
+        (Just Neg) -> return Ninf
+        _     -> badRangeM $ RangePropError pos "divRExp: Dividing with something that could be 0"
+    divRExp Ninf x = do
+      xSign <- determineRExpSign x
+      case xSign of
+        (Just Pos) -> return Ninf
+        (Just Neg) -> return Pinf
+        _     -> badRangeM $ RangePropError pos "divRExp: Dividing with something that could be 0"
+    divRExp _ Pinf = return $ RExp $ createIntLit 0 pos
+    divRExp _ Ninf = return $ RExp $ createIntLit 0 pos
 
 substitute i r (RExp (BinOp Pow e1 e2 ty pos)) = do
   (a, b) <- substitute i r (RExp e1)
