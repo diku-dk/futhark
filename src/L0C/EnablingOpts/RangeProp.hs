@@ -16,6 +16,7 @@ where
 
 import qualified Data.Loc as L
 import qualified Data.Map as M
+import Data.Maybe
 
 import Control.Monad.Reader
 import Control.Monad.Writer
@@ -199,6 +200,7 @@ rangeRExpCompareZero e@(RExp _) = do
 -- Is the range currently in a state,
 --   where we can say something about it's sign?
 isComparable :: Range -> RangeM Bool
+isComparable (Ninf, Pinf) = return True
 isComparable range = do
   sign <- atomicRangeSign range
   case sign of
@@ -208,23 +210,36 @@ isComparable range = do
 -- Transform the range to a state, where we can
 --   say something about it's sign
 makeRangeComparable :: Range -> RangeM Range
+makeRangeComparable (Ninf, Pinf) = return (Ninf, Pinf)
 makeRangeComparable range = do
-  dictAsList  <- {-trace ("will make comp"++ ppRange range)-} liftM M.toDescList $ asks dict
-  range' <- foldM foldingFun range dictAsList
-  isComp <- isComparable range'
-  return ( if isComp then range' else (Ninf, Pinf) )
+  dictAsList  <- {-trace ("- makeComp "++ ppRange range)-} liftM M.toDescList $ asks dict
+  foldingFun range dictAsList
 
   where
-    foldingFun :: Range -> (VName , (Range, RangeSign)) -> RangeM Range
-    foldingFun (a,b) (ident, (idRange,_)) = do
+    foldingFun :: Range -> [(VName , (Range, RangeSign))] -> RangeM Range
+    foldingFun (a,b) [] = {-trace ("+ makeEndOfList " ++ ppRange(a,b))-} return (a,b)
+    foldingFun (a,b) ((ident, (idRange,_)) : rest) = do
       isComp <- isComparable (a,b)
       if isComp
-      then {-trace("makeIsComp " ++ textual ident ++ ppRange(a,b))-} return (a,b)
+      then {-trace("+ makeIsComp " ++ ppRange(a,b))-} return (a,b)
+      else if a == b
+      then do (a', b') <- substitute ident idRange a
+              --trace ("  make (eq) " ++ ppRExp a ++ " ~~> " ++ ppRange(a',b') ++ " by sub " ++ textual ident )
+              foldingFun (a',b') rest
       else do (a',_) <- substitute ident idRange a
               (_,b') <- substitute ident idRange b
-              -- Enable for seeing what steps are taken
-              --trace ("make " ++ ppRange(a,b) ++ " ~~> " ++ ppRange(a',b') ++ " by sub " ++ textual ident )
-              return (a',b')
+              --trace ("  make " ++ ppRange(a,b) ++ " ~~> " ++ ppRange(a',b') ++ " by sub " ++ textual ident )
+              foldingFun (a',b') rest
+
+varsUsedInExp :: Exp -> [VName]
+varsUsedInExp ex = execWriter $ expVars ex
+  where
+    vars = identityWalker { walkOnExp = expVars }
+
+    expVars e@(Var ident ) =
+      tell [identName ident] >> walkExpM vars e
+
+    expVars e = walkExpM vars e
 
 ----------------------------------------
 -- Calculate range signs
@@ -284,6 +299,7 @@ atomicRangeSign (lb,ub) = do
 substitute :: VName -> Range -> RExp -> RangeM Range
 substitute _ _ l@(RExp (Literal{})) = return (l,l)
 substitute i r v@(RExp (Var e)) = return (if identName e == i then r else (v,v))
+
 substitute i r (RExp (BinOp Plus e1 e2 ty pos)) = do
   (a, b) <- substitute i r (RExp e1)
   (c, d) <- substitute i r (RExp e2)
@@ -463,7 +479,7 @@ substitute i r (RExp (BinOp Pow e1 e2 ty pos)) = do
     powRExp Ninf _ = return Ninf
     powRExp (RExp x) v = liftM RExp $ simplExp (BinOp Pow x (createIntLit v pos) ty pos)
 
-substitute i r (RExp (Min e1 e2 ty pos)) = do
+substitute i r (RExp (Min e1 e2 _ pos)) = do
   (a, b) <- substitute i r (RExp e1)
   (c, d) <- substitute i r (RExp e2)
   ac <- minRExp a c pos
@@ -722,6 +738,7 @@ ppDict rdict = foldr ((++) . (++ "\n") . ppDictElem) "" (M.toList $ M.delete dum
 -- TESTING
 ----------------------------------------
 
+{-
 dummyPos = L.Pos "DummyPos" 0 0 0
 dummySrcLoc = L.SrcLoc (L.Loc dummyPos dummyPos)
 
@@ -831,3 +848,4 @@ shittyShit =
          case runRangeM (realExtractFromCond e) env of
            Right (thenR, elseR) -> unlines ["then", ppDict thenR, "else", ppDict elseR]
            Left e -> error $ show e
+--}
