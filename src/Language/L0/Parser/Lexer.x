@@ -40,6 +40,7 @@ tokens :-
   "%"                      { const MOD }
   "="                      { const EQU }
   "<"                      { const LTH }
+  ">"                      { const GTH }
   "&"                      { const BAND }
   "|"                      { const BOR }
   "^"                      { const XOR }
@@ -73,6 +74,7 @@ keyword s =
     "int"          -> INT
     "real"         -> REAL
     "bool"         -> BOOL
+    "cert"         -> CERT
     "char"         -> CHAR
     "fun"          -> FUN
     "fn"           -> FN
@@ -82,6 +84,7 @@ keyword s =
     "not"          -> NOT
     "True"         -> TRUE
     "False"        -> FALSE
+    "Checked"      -> CHECKED
     "pow"          -> POW
     "iota"         -> IOTA
     "size"         -> SIZE
@@ -104,6 +107,8 @@ keyword s =
     "redomap2"     -> REDOMAP2
     "empty"        -> EMPTY
     "copy"         -> COPY
+    "assert"       -> ASSERT
+    "conjoin"      -> CONJOIN
 
     "min"          -> MIN
     "max"          -> MAX

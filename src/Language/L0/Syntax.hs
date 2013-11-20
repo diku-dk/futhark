@@ -25,10 +25,12 @@ module Language.L0.Syntax
   -- * Abstract syntax tree
   , IdentBase(..)
   , ParamBase
+  , CertificatesBase
   , ExpBase(..)
   , BinOp(..)
   , opStr
   , LambdaBase(..)
+  , TupleLambdaBase(..)
   , TupIdentBase(..)
 
   -- * Definitions
@@ -100,6 +102,7 @@ data ElemTypeBase as vn = Int
                         | Bool
                         | Char
                         | Real
+                        | Cert
                         | Tuple [TypeBase as vn]
                 deriving (Eq, Ord, Show)
 
@@ -142,6 +145,7 @@ data Value = IntVal !Int
            | RealVal !Double
            | LogVal !Bool
            | CharVal !Char
+           | Checked -- ^ The only value of type cert.
            | TupVal ![Value]
            | ArrayVal !(Array Int Value) (DeclTypeBase ())
              -- ^ It is assumed that the array is 0-indexed.  The type
@@ -168,6 +172,9 @@ instance Ord vn => Ord (IdentBase ty vn) where
 
 instance Located (IdentBase ty vn) where
   locOf = locOf . identSrcLoc
+
+-- | A list of identifiers used for certificates in some expressions.
+type CertificatesBase ty vn = [IdentBase ty vn]
 
 -- | L0 Expression Language: literals + vars + int binops + array
 -- constructors + array combinators (SOAC) + if + function calls +
@@ -202,25 +209,34 @@ data ExpBase ty vn =
             | Apply  Name [(ExpBase ty vn, Diet)] (ty vn) SrcLoc
             | LetPat (TupIdentBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
 
-            | LetWith (IdentBase ty vn) (IdentBase ty vn) [ExpBase ty vn] (ExpBase ty vn) (ExpBase ty vn) SrcLoc
+            | LetWith (CertificatesBase ty vn) (IdentBase ty vn)
+              (IdentBase ty vn) [ExpBase ty vn] (ExpBase ty vn) (ExpBase ty vn) SrcLoc
             -- ^ Array Indexing and Array Constructors
 
-            | Index (IdentBase ty vn) [ExpBase ty vn] (ty vn) SrcLoc
-             -- ^ 3rd arg is the result type
+            | Index (CertificatesBase ty vn)
+                    (IdentBase ty vn)
+                    (Maybe (CertificatesBase ty vn))
+                    [ExpBase ty vn]
+                    (ty vn)
+                    SrcLoc
+             -- ^ 3rd arg are (optional) certificates for bounds
+             -- checking.  If given (even as an empty list), no
+             -- run-time bounds checking is done.  5th arg is the
+             -- result type
 
             | Iota (ExpBase ty vn) SrcLoc
             -- ^ @iota(n) = {0,1,..,n-1@
 
-            | Size Int (ExpBase ty vn) SrcLoc
+            | Size (CertificatesBase ty vn) Int (ExpBase ty vn) SrcLoc
             -- ^ The size of the specified array dimension.
 
             | Replicate (ExpBase ty vn) (ExpBase ty vn) SrcLoc
             -- ^ @replicate(3,1) = {1, 1, 1}@
 
-            | Reshape [ExpBase ty vn] (ExpBase ty vn) SrcLoc
+            | Reshape (CertificatesBase ty vn) [ExpBase ty vn] (ExpBase ty vn) SrcLoc
              -- ^ 1st arg is the new shape, 2nd arg is the input array *)
 
-            | Transpose Int Int (ExpBase ty vn) SrcLoc
+            | Transpose (CertificatesBase ty vn) Int Int (ExpBase ty vn) SrcLoc
               -- ^ If @b=transpose(k,n,a)@, then @a[i_1, ..., i_k
               -- ,i_{k+1}, ..., i_{k+n}, ..., i_q ] = b[i_1 ,..,
               -- i_{k+1} , ..., i_{k+n} ,i_k, ..., i_q ]@.  Thus,
@@ -260,16 +276,23 @@ data ExpBase ty vn =
              -- ^ @redomap(g, f, n, a) = reduce(g, n, map(f, a))@.
              -- 5th arg is the row type of the input  array.
 
-            | Split (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
+            | Split (CertificatesBase ty vn) (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
              -- ^ @split(1, { 1, 2, 3, 4 }) = ({1},{2, 3, 4})@.
              -- 3rd arg is the element type of the input array
 
-            | Concat (ExpBase ty vn) (ExpBase ty vn) SrcLoc
+            | Concat (CertificatesBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
              -- ^ @concat ({1},{2, 3, 4}) = {1, 2, 3, 4}@.
 
             | Copy (ExpBase ty vn) SrcLoc
             -- ^ Copy the value return by the expression.  This only
             -- makes a difference in do-loops with merge variables.
+
+            | Assert (ExpBase ty vn) SrcLoc
+            -- ^ Turn a boolean into a certificate, halting the
+            -- program if the boolean is false.
+
+            | Conjoin [ExpBase ty vn] SrcLoc
+            -- ^ Convert several certificates into a single certificate.
 
             | DoLoop
               (TupIdentBase ty vn) -- Merge variable pattern
@@ -287,16 +310,16 @@ data ExpBase ty vn =
             -- accept curried and anonymous
             -- functions as (first) params
             -----------------------------------------------------
-            | Map2 (LambdaBase ty vn) [ExpBase ty vn] [ty vn] SrcLoc
+            | Map2 (CertificatesBase ty vn) (TupleLambdaBase ty vn) [ExpBase ty vn] [ty vn] SrcLoc
              -- @map(op +(1), {1,2,..,n}) = {2,3,..,n+1}@
              -- 2nd arg is either a tuple of multi-dim arrays 
              --   of basic type, or a multi-dim array of basic type.
              -- 3rd arg is the input-array row types
 
-            | Reduce2 (LambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] [ty vn] SrcLoc
-            | Scan2   (LambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] [ty vn] SrcLoc
-            | Filter2 (LambdaBase ty vn) [ExpBase ty vn]          SrcLoc
-            | Redomap2(LambdaBase ty vn) (LambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] [ty vn] SrcLoc
+            | Reduce2  (CertificatesBase ty vn) (TupleLambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] [ty vn] SrcLoc
+            | Scan2    (CertificatesBase ty vn) (TupleLambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] [ty vn] SrcLoc
+            | Filter2  (CertificatesBase ty vn) (TupleLambdaBase ty vn) [ExpBase ty vn]          SrcLoc
+            | Redomap2 (CertificatesBase ty vn) (TupleLambdaBase ty vn) (TupleLambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] [ty vn] SrcLoc
 
             | Min (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
             | Max (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
@@ -316,13 +339,13 @@ instance Located (ExpBase ty vn) where
   locOf (Var ident) = locOf ident
   locOf (Apply _ _ _ pos) = locOf pos
   locOf (LetPat _ _ _ pos) = locOf pos
-  locOf (LetWith _ _ _ _ _ pos) = locOf pos
-  locOf (Index _ _ _ pos) = locOf pos
+  locOf (LetWith _ _ _ _ _ _ pos) = locOf pos
+  locOf (Index _ _ _ _ _ pos) = locOf pos
   locOf (Iota _ pos) = locOf pos
-  locOf (Size _ _ pos) = locOf pos
+  locOf (Size _ _ _ pos) = locOf pos
   locOf (Replicate _ _ pos) = locOf pos
-  locOf (Reshape _ _ pos) = locOf pos
-  locOf (Transpose _ _ _ pos) = locOf pos
+  locOf (Reshape _ _ _ pos) = locOf pos
+  locOf (Transpose _ _ _ _ pos) = locOf pos
   locOf (Map _ _ _ pos) = locOf pos
   locOf (Reduce _ _ _ _ pos) = locOf pos
   locOf (Zip _ pos) = locOf pos
@@ -330,16 +353,18 @@ instance Located (ExpBase ty vn) where
   locOf (Scan _ _ _ _ pos) = locOf pos
   locOf (Filter _ _ _ pos) = locOf pos
   locOf (Redomap _ _ _ _ _ pos) = locOf pos
-  locOf (Split _ _ _ pos) = locOf pos
-  locOf (Concat _ _ pos) = locOf pos
+  locOf (Split _ _ _ _ pos) = locOf pos
+  locOf (Concat _ _ _ pos) = locOf pos
   locOf (Copy _ pos) = locOf pos
+  locOf (Assert _ loc) = locOf loc
+  locOf (Conjoin _ loc) = locOf loc
   locOf (DoLoop _ _ _ _ _ _ pos) = locOf pos
   -- locOf for soac2 (Cosmin)
-  locOf (Map2 _ _ _ pos) = locOf pos
-  locOf (Reduce2 _ _ _ _ pos) = locOf pos
-  locOf (Scan2 _ _ _ _ pos) = locOf pos
-  locOf (Filter2 _ _ pos) = locOf pos
-  locOf (Redomap2 _ _ _ _ _ pos) = locOf pos
+  locOf (Map2 _ _ _ _ pos) = locOf pos
+  locOf (Reduce2 _ _ _ _ _ pos) = locOf pos
+  locOf (Scan2 _ _ _ _ _ pos) = locOf pos
+  locOf (Filter2 _ _ _ pos) = locOf pos
+  locOf (Redomap2 _ _ _ _ _ _ pos) = locOf pos
   locOf (Min _ _ _ pos) = locOf pos
   locOf (Max _ _ _ pos) = locOf pos
 
@@ -395,6 +420,18 @@ instance Located (LambdaBase ty vn) where
   locOf (AnonymFun _ _ _ loc) = locOf loc
   locOf (CurryFun  _ _ _ loc) = locOf loc
 
+-- | Anonymous function for use in a tuple-SOAC.
+data TupleLambdaBase ty vn =
+  TupleLambda { tupleLambdaParams :: [ParamBase vn]
+              , tupleLambdaBody :: ExpBase ty vn
+              , tupleLambdaReturnType :: [DeclTypeBase vn]
+              , tupleLambdaSrcLo :: SrcLoc
+              }
+  deriving (Eq, Ord, Show)
+
+instance Located (TupleLambdaBase ty vn) where
+  locOf (TupleLambda _ _ _ loc) = locOf loc
+
 -- | Tuple IdentBaseifier, i.e., pattern matching
 data TupIdentBase ty vn = TupId [TupIdentBase ty vn] SrcLoc
                         | Id (IdentBase ty vn)
@@ -430,4 +467,4 @@ isBuiltInFun fnm = fnm `elem` builtInFuns
 
 -- | A list of names of all built-in functions.
 builtInFuns :: [Name]
-builtInFuns = map nameFromString ["toReal", "trunc", "sqrt", "log", "exp", "trace", "assertZip"]
+builtInFuns = map nameFromString ["toReal", "trunc", "sqrt", "log", "exp", "trace"]

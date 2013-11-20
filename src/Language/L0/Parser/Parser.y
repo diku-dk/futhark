@@ -3,12 +3,15 @@ module Language.L0.Parser.Parser
   ( prog
   , expression
   , pattern
+  , lambda
+  , tupleLambda
   , l0type
   , intValue
   , realValue
   , boolValue
   , charValue
   , stringValue
+  , certValue
   , arrayValue
   , tupleValue)
   where
@@ -26,11 +29,14 @@ import Language.L0.Parser.Lexer
 %name prog Prog
 %name expression Exp
 %name pattern TupId
+%name lambda FunAbstr
+%name tupleLambda TupleFunAbstr
 %name l0type Type
 %name intValue IntValue
 %name realValue RealValue
 %name boolValue LogValue
 %name charValue CharValue
+%name certValue CertValue
 %name stringValue StringValue
 %name arrayValue ArrayValue
 %name tupleValue TupleValue
@@ -39,7 +45,7 @@ import Language.L0.Parser.Lexer
 %error { parseError }
 %monad { Either String } { >>= } { return }
 
-%token 
+%token
       if              { L $$ IF }
       then            { L $$ THEN }
       else            { L $$ ELSE }
@@ -48,6 +54,7 @@ import Language.L0.Parser.Lexer
       in              { L $$ IN }
       int             { L $$ INT }
       bool            { L $$ BOOL }
+      cert            { L $$ CERT }
       char            { L $$ CHAR }
       real            { L $$ REAL }
 
@@ -65,6 +72,7 @@ import Language.L0.Parser.Lexer
       '%'             { L $$ MOD }
       '='             { L $$ EQU }
       '<'             { L $$ LTH }
+      '>'             { L $$ GTH }
       '<='            { L $$ LEQ }
       pow             { L $$ POW }
       '<<'            { L $$ SHIFTL }
@@ -108,6 +116,7 @@ import Language.L0.Parser.Lexer
       redomap2        { L $$ REDOMAP2 }
       true            { L $$ TRUE }
       false           { L $$ FALSE }
+      checked         { L $$ CHECKED }
       not             { L $$ NOT }
       '~'             { L $$ NEGATE }
       '&&'            { L $$ AND }
@@ -115,6 +124,8 @@ import Language.L0.Parser.Lexer
       op              { L $$ OP }
       empty           { L $$ EMPTY }
       copy            { L $$ COPY }
+      assert          { L $$ ASSERT }
+      conjoin         { L $$ CONJOIN }
 
       min             { L $$ MIN }
       max             { L $$ MAX }
@@ -189,8 +200,11 @@ InnerType : ElemType { ([], $1) }
 ElemType : int           { Int }
          | real          { Real }
          | bool          { Bool }
+         | cert          { Cert }
          | char          { Char }
-         | '{' Types '}' { Tuple $2 }
+         | TupleType     { Tuple $1 }
+
+TupleType : '{' Types '}' { $2 }
 
 Types : Type ',' Types { $1 : $3 }
       | Type           { [$1] }
@@ -210,6 +224,7 @@ Exp  :: { UncheckedExp }
                         in Literal (ArrayVal (arrayFromList $ map CharVal s) $ Elem Char) pos }
      | true           { Literal (LogVal True) $1 }
      | false          { Literal (LogVal False) $1 }
+     | checked        { Literal Checked $1 }
      | Id             { Var $1 }
      | empty '(' Type ')' { Literal (emptyArray $3) $1 }
      | '[' Exps ']'   { ArrayLit $2 NoInfo $1 }
@@ -248,46 +263,78 @@ Exp  :: { UncheckedExp }
 
      | iota '(' Exp ')' { Iota $3 $1 }
 
-     | size '(' intlit ',' Exp ')' { let L _ (INTLIT i) = $3 in
-                                     Size i $5 $1 }
+     | Certificates size '(' intlit ',' Exp ')'
+                      { let L _ (INTLIT i) = $4
+                        in Size $1 i $6 $2 }
+
+     | size '(' intlit ',' Exp ')'
+                      { let L _ (INTLIT i) = $3
+                        in Size [] i $5 $1 }
 
      | replicate '(' Exp ',' Exp ')' { Replicate $3 $5 $1 }
 
-     | reshape '(' '(' Exps ')' ',' Exp ')'
-                      { Reshape $4 $7 $1 }
+     | Certificates reshape '(' '(' Exps ')' ',' Exp ')'
+                      { Reshape $1 $5 $8 $2 }
 
-     | transpose '(' Exp ')' { Transpose 0 1 $3 $1 }
+     | reshape '(' '(' Exps ')' ',' Exp ')'
+                      { Reshape [] $4 $7 $1 }
+
+     | Certificates transpose '(' Exp ')' { Transpose $1 0 1 $4 $2 }
+
+     | transpose '(' Exp ')' { Transpose [] 0 1 $3 $1 }
+
+     | Certificates transpose '(' intlit ',' intlit ',' Exp ')'
+                      { let L pos (INTLIT k) = $4 in
+                        let L pos (INTLIT n) = $6 in
+                        Transpose $1 k n $8 $2 }
 
      | transpose '(' intlit ',' intlit ',' Exp ')'
                       { let L pos (INTLIT k) = $3 in
                         let L pos (INTLIT n) = $5 in
-                        Transpose k n $7 $1 }
+                        Transpose [] k n $7 $1 }
+
+     | Certificates split '(' Exp ',' Exp ')'
+                      { Split $1 $4 $6 NoInfo $2 }
 
      | split '(' Exp ',' Exp ')'
-                      { Split $3 $5 NoInfo $1 }
+                      { Split [] $3 $5 NoInfo $1 }
+
+     | Certificates concat '(' Exp ',' Exp ')'
+                      { Concat $1 $4 $6 $2 }
 
      | concat '(' Exp ',' Exp ')'
-                      { Concat $3 $5 $1 }
+                      { Concat [] $3 $5 $1 }
 
      | reduce '(' FunAbstr ',' Exp ',' Exp ')'
                       { Reduce $3 $5 $7 NoInfo $1 }
 
-     | reduce2 '(' FunAbstr ',' DExps ')'
+     | Certificates reduce2 '(' TupleFunAbstr ',' DExps ')'
+                      { let (accexps, arrexps) = $6 in
+                        Reduce2 $1 $4 accexps arrexps (replicate (length arrexps) NoInfo) $2 }
+
+     | reduce2 '(' TupleFunAbstr ',' DExps ')'
                       { let (accexps, arrexps) = $5 in
-                        Reduce2 $3 accexps arrexps (replicate (length arrexps) NoInfo) $1 }
+                        Reduce2 [] $3 accexps arrexps (replicate (length arrexps) NoInfo) $1 }
 
      | map '(' FunAbstr ',' Exp ')'
                       { Map $3 $5 NoInfo $1 }
 
-     | map2 '(' FunAbstr ',' Exps ')'
-                      { Map2 $3 $5 (replicate (length $5) NoInfo) $1 }
+     | Certificates map2 '(' TupleFunAbstr ',' Exps ')'
+                      { Map2 $1 $4 $6 (replicate (length $6) NoInfo) $2 }
+
+     | map2 '(' TupleFunAbstr ',' Exps ')'
+                      { Map2 [] $3 $5 (replicate (length $5) NoInfo) $1 }
 
      | scan '(' FunAbstr ',' Exp ',' Exp ')'
                       { Scan $3 $5 $7 NoInfo $1 }
 
-     | scan2 '(' FunAbstr ',' DExps ')'
+     | Certificates scan2 '(' TupleFunAbstr ',' DExps ')'
+                      { let (accexps, arrexps) = $6 in
+                        Scan2 $1 $4 accexps arrexps (replicate (length arrexps) NoInfo) $2 }
+
+     | scan2 '(' TupleFunAbstr ',' DExps ')'
                       { let (accexps, arrexps) = $5 in
-                        Scan2 $3 accexps arrexps (replicate (length arrexps) NoInfo) $1 }
+                        Scan2 [] $3 accexps arrexps (replicate (length arrexps) NoInfo) $1 }
 
      | zip '(' Exps2 ')'
                       { Zip (map (\x -> (x, NoInfo)) $3) $1 }
@@ -298,17 +345,28 @@ Exp  :: { UncheckedExp }
      | filter '(' FunAbstr ',' Exp ')'
                       { Filter $3 $5 NoInfo $1 }
 
-     | filter2 '(' FunAbstr ',' Exps ')'
-                      { Filter2 $3 $5 $1 }
+     | Certificates filter2 '(' TupleFunAbstr ',' Exps ')'
+                      { Filter2 $1 $4 $6 $2 }
+
+     | filter2 '(' TupleFunAbstr ',' Exps ')'
+                      { Filter2 [] $3 $5 $1 }
 
      | redomap '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
                       { Redomap $3 $5 $7 $9 NoInfo $1 }
 
-     | redomap2 '(' FunAbstr ',' FunAbstr ',' DExps ')'
-                      { let (accexps, arrexps) = $7 in
-                        Redomap2 $3 $5 accexps arrexps (replicate (length arrexps) NoInfo) $1 }
+     | Certificates redomap2 '(' TupleFunAbstr ',' TupleFunAbstr ',' '{' Exps '}' ',' Exps ')'
+                      { Redomap2 $1 $4 $6 $9 $12 (replicate (length $12) NoInfo) $2 }
+
+     | redomap2 '(' TupleFunAbstr ',' TupleFunAbstr ',' '{' Exps '}' ',' Exps ')'
+                      { Redomap2 [] $3 $5 $8 $11 (replicate (length $11) NoInfo) $1 }
 
      | copy '(' Exp ')' { Copy $3 $1 }
+
+     | assert '(' Exp ')' { Assert $3 $1 }
+
+     | conjoin '(' Exps ')' { Conjoin $3 $1 }
+
+     | conjoin '(' ')' { Conjoin [] $1 }
 
      | '(' Exp ')' { $2 }
 
@@ -321,15 +379,30 @@ Exp  :: { UncheckedExp }
      | let '{' TupIds '}' '=' Exp in Exp %prec letprec
                       { LetPat (TupId $3 $1) $6 $8 $1 }
 
+     | let Certificates Id '=' Id with '[' Exps ']' '<-' Exp in Exp %prec letprec
+                      { LetWith $2 $3 $5 $8 $11 $13 $1 }
      | let Id '=' Id with '[' Exps ']' '<-' Exp in Exp %prec letprec
-                      { LetWith $2 $4 $7 $10 $12 $1 }
+                      { LetWith [] $2 $4 $7 $10 $12 $1 }
+     | let Certificates Id '[' Exps ']' '=' Exp in Exp %prec letprec
+                      { LetWith $2 $3 $3 $5 $8 $10 $1 }
      | let Id '[' Exps ']' '=' Exp in Exp %prec letprec
-                      { LetWith $2 $2 $4 $7 $9 $1 }
+                      { LetWith [] $2 $2 $4 $7 $9 $1 }
+     | let Certificates Id '[' ']' '=' Exp in Exp %prec letprec
+                      { LetWith $2 $3 $3 [] $7 $9 $1 }
      | let Id '[' ']' '=' Exp in Exp %prec letprec
-                      { LetWith $2 $2 [] $6 $8 $1 }
+                      { LetWith [] $2 $2 [] $6 $8 $1 }
+
+     | Id '[' Certificates '|' Exps ']'
+                      { Index [] $1 (Just $3) $5 NoInfo (srclocOf $1) }
 
      | Id '[' Exps ']'
-                      { Index $1 $3 NoInfo (srclocOf $1) }
+                      { Index [] $1 Nothing $3 NoInfo (srclocOf $1) }
+
+     | Certificates Id '[' Certificates '|' Exps ']'
+                      { Index $1 $2 (Just $4) $6 NoInfo (srclocOf $2) }
+
+     | Certificates Id '[' Exps ']'
+                      { Index $1 $2 Nothing $4 NoInfo (srclocOf $2) }
 
      | loop '(' TupId ')' '=' for Id '<' Exp do Exp in Exp %prec letprec
                       { DoLoop $3 (tupIdExp $3) $7 $9 $11 $13 $1 }
@@ -356,6 +429,12 @@ TupleExp : '{' Exps '}' { ($2, $1) }
 
 Id : id { let L loc (ID name) = $1 in Ident name NoInfo loc }
 
+Ids : Id         { [$1] }
+    | Id ',' Ids { $1 : $3 }
+
+Certificates : '<' '>'                   { [] }
+             | '<' Ids '>' { $2 }
+
 TupIds : TupId ',' TupIds  { $1 : $3 }
        | TupId             { [$1] }
        |                   { [] }
@@ -375,6 +454,8 @@ FunAbstr : id { let L pos (ID name) = $1 in CurryFun name [] NoInfo pos }
                { let (name,pos) = $1 in CurryFun name $3 NoInfo pos }
          | fn Type '(' TypeIds ')' '=>' Exp { AnonymFun $4 $7 $2 $1 }
 
+TupleFunAbstr : fn TupleType '(' TypeIds ')' '=>' Exp { TupleLambda $4 $7 $2 $1 }
+
 Value : IntValue { $1 }
       | RealValue { $1 }
       | CharValue { $1 }
@@ -390,6 +471,7 @@ CharValue : charlit      { let L pos (CHARLIT char) = $1 in CharVal char }
 StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in ArrayVal (arrayFromList $ map CharVal s) $ Elem Char }
 LogValue : true          { LogVal True }
         | false          { LogVal False }
+CertValue : checked      { Checked }
 ArrayValue :  '[' Values ']'
              { case combArrayTypes $ map (toDecl . valueType) $2 of
                  Nothing -> error "Invalid array value"

@@ -47,27 +47,16 @@ module Language.L0.Traversals
   -- * Simple wrappers
   , foldlPattern
   , buildExpPattern
-
-  -- * Specific traversals
-  , progNames
-  , patNames
-  , freeInExp
-  , freeNamesInExp
-  , consumedInExp
   )
   where
 
 import Control.Applicative
-import Control.Arrow (first)
 import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.Writer
-import Control.Monad.Reader
 import Control.Monad.State
-import qualified Data.Set as S
 
 import Language.L0.Syntax
-import Language.L0.Attributes
 
 -- | Express a monad mapping operation on a syntax node.  Each element
 -- of this structure expresses the operation to be performed on a
@@ -76,9 +65,11 @@ data MapperBase tyf tyt vnf vnt m = Mapper {
     mapOnExp :: ExpBase tyf vnf -> m (ExpBase tyt vnt)
   , mapOnType :: tyf vnf -> m (tyt vnt)
   , mapOnLambda :: LambdaBase tyf vnf -> m (LambdaBase tyt vnt)
+  , mapOnTupleLambda :: TupleLambdaBase tyf vnf -> m (TupleLambdaBase tyt vnt)
   , mapOnPattern :: TupIdentBase tyf vnf -> m (TupIdentBase tyt vnt)
   , mapOnIdent :: IdentBase tyf vnf -> m (IdentBase tyt vnt)
   , mapOnValue :: Value -> m Value
+  , mapOnCertificates :: CertificatesBase tyf vnf -> m (CertificatesBase tyt vnt)
   }
 
 -- | A special case of 'MapperBase' when the name- and type
@@ -91,9 +82,11 @@ identityMapper = Mapper {
                    mapOnExp = return
                  , mapOnType = return
                  , mapOnLambda = return
+                 , mapOnTupleLambda = return
                  , mapOnPattern = return
                  , mapOnIdent = return
                  , mapOnValue = return
+                 , mapOnCertificates = return
                  }
 
 -- | Map a monadic action across the immediate children of an
@@ -131,25 +124,34 @@ mapExpM tv (Apply fname args t loc) = do
 mapExpM tv (LetPat pat e body loc) =
   pure LetPat <*> mapOnPattern tv pat <*> mapOnExp tv e <*>
          mapOnExp tv body <*> pure loc
-mapExpM tv (LetWith dest src idxexps vexp body loc) =
-  pure LetWith <*> mapOnIdent tv dest <*> mapOnIdent tv src <*>
-         mapM (mapOnExp tv) idxexps <*> mapOnExp tv vexp <*>
-         mapOnExp tv body <*> pure loc
-mapExpM tv (Index arr idxexps outt loc) =
-  pure Index <*> mapOnIdent tv arr <*>
-         mapM (mapOnExp tv) idxexps <*>
-         mapOnType tv outt <*> pure loc
+mapExpM tv (LetWith cs dest src idxexps vexp body loc) =
+  pure LetWith <*> mapOnCertificates tv cs <*>
+       mapOnIdent tv dest <*> mapOnIdent tv src <*>
+       mapM (mapOnExp tv) idxexps <*> mapOnExp tv vexp <*>
+       mapOnExp tv body <*> pure loc
+mapExpM tv (Index cs arr idxcs idxexps outt loc) =
+  pure Index <*> mapOnCertificates tv cs <*>
+       mapOnIdent tv arr <*>
+       (case idxcs of
+          Nothing -> return Nothing
+          Just idxcs' -> Just <$> mapOnCertificates tv idxcs') <*>
+       mapM (mapOnExp tv) idxexps <*>
+       mapOnType tv outt <*> pure loc
 mapExpM tv (Iota nexp loc) =
   pure Iota <*> mapOnExp tv nexp <*> pure loc
-mapExpM tv (Size i e loc) =
-  pure Size <*> pure i <*> mapOnExp tv e <*> pure loc
+mapExpM tv (Size cs i e loc) =
+  pure Size <*> mapOnCertificates tv cs <*>
+       pure i <*> mapOnExp tv e <*> pure loc
 mapExpM tv (Replicate nexp vexp loc) =
   pure Replicate <*> mapOnExp tv nexp <*> mapOnExp tv vexp <*> pure loc
-mapExpM tv (Reshape shape arrexp loc) =
-  pure Reshape <*> mapM (mapOnExp tv) shape <*>
+mapExpM tv (Reshape cs shape arrexp loc) =
+  pure Reshape <*> mapOnCertificates tv cs <*>
+       mapM (mapOnExp tv) shape <*>
        mapOnExp tv arrexp <*> pure loc
-mapExpM tv (Transpose k n e3 loc) =
-  pure (Transpose k n) <*> mapOnExp tv e3 <*> pure loc
+mapExpM tv (Transpose cs k n e3 loc) =
+  pure Transpose <*> mapOnCertificates tv cs <*>
+       pure k <*> pure n <*>
+       mapOnExp tv e3 <*> pure loc
 mapExpM tv (Map fun e int loc) =
   pure Map <*> mapOnLambda tv fun <*> mapOnExp tv e <*>
        mapOnType tv int <*> pure loc
@@ -176,33 +178,44 @@ mapExpM tv (Redomap redfun mapfun accexp arrexp intype loc) =
   pure Redomap <*> mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
        mapOnExp tv accexp <*> mapOnExp tv arrexp <*>
        mapOnType tv intype <*> pure loc
-mapExpM tv (Split nexp arrexp t loc) =
-  pure Split <*> mapOnExp tv nexp <*> mapOnExp tv arrexp <*>
+mapExpM tv (Split cs nexp arrexp t loc) =
+  pure Split <*> mapOnCertificates tv cs <*>
+       mapOnExp tv nexp <*> mapOnExp tv arrexp <*>
        mapOnType tv t <*> pure loc
-mapExpM tv (Concat x y loc) =
-  pure Concat <*> mapOnExp tv x <*> mapOnExp tv y <*> pure loc
+mapExpM tv (Concat cs x y loc) =
+  pure Concat <*> mapOnCertificates tv cs <*>
+       mapOnExp tv x <*> mapOnExp tv y <*> pure loc
 mapExpM tv (Copy e loc) =
   pure Copy <*> mapOnExp tv e <*> pure loc
+mapExpM tv (Assert e loc) =
+  pure Assert <*> mapOnExp tv e <*> pure loc
+mapExpM tv (Conjoin es loc) =
+  pure Conjoin <*> mapM (mapOnExp tv) es <*> pure loc
 mapExpM tv (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody loc) =
   pure DoLoop <*> mapOnPattern tv mergepat <*> mapOnExp tv mergeexp <*>
        mapOnIdent tv loopvar <*> mapOnExp tv boundexp <*>
        mapOnExp tv loopbody <*> mapOnExp tv letbody <*> pure loc
-mapExpM tv (Map2 fun arrexps intype loc) =
-  pure Map2 <*> mapOnLambda tv fun <*> mapM (mapOnExp tv) arrexps <*>
+mapExpM tv (Map2 cs fun arrexps intype loc) =
+  pure Map2 <*> mapOnCertificates tv cs <*>
+       mapOnTupleLambda tv fun <*> mapM (mapOnExp tv) arrexps <*>
        mapM (mapOnType tv) intype  <*> pure loc
-mapExpM tv (Reduce2 fun startexps arrexps rowtypes loc) =
-  pure Reduce2 <*> mapOnLambda tv fun <*>
+mapExpM tv (Reduce2 cs fun startexps arrexps rowtypes loc) =
+  pure Reduce2 <*> mapOnCertificates tv cs <*>
+       mapOnTupleLambda tv fun <*>
        mapM (mapOnExp tv) startexps <*> mapM (mapOnExp tv) arrexps <*>
        mapM (mapOnType tv) rowtypes <*> pure loc
-mapExpM tv (Scan2 fun startexps arrexps intypes loc) =
-  pure Scan2 <*> mapOnLambda tv fun <*>
+mapExpM tv (Scan2 cs fun startexps arrexps intypes loc) =
+  pure Scan2 <*> mapOnCertificates tv cs <*>
+       mapOnTupleLambda tv fun <*>
        mapM (mapOnExp tv) startexps <*> mapM (mapOnExp tv) arrexps <*>
        mapM (mapOnType tv) intypes <*> pure loc
-mapExpM tv (Filter2 fun arrexps loc) =
-  pure Filter2 <*> mapOnLambda tv fun <*>
+mapExpM tv (Filter2 cs fun arrexps loc) =
+  pure Filter2 <*> mapOnCertificates tv cs <*>
+       mapOnTupleLambda tv fun <*>
        mapM (mapOnExp tv) arrexps <*> pure loc
-mapExpM tv (Redomap2 redfun mapfun accexps arrexps intypes loc) =
-  pure Redomap2 <*> mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
+mapExpM tv (Redomap2 cs redfun mapfun accexps arrexps intypes loc) =
+  pure Redomap2 <*> mapOnCertificates tv cs <*>
+       mapOnTupleLambda tv redfun <*> mapOnTupleLambda tv mapfun <*>
        mapM (mapOnExp tv) accexps <*> mapM (mapOnExp tv) arrexps <*>
        mapM (mapOnType tv) intypes <*> pure loc
 
@@ -221,9 +234,11 @@ data Folder ty vn a m = Folder {
     foldOnExp :: a -> ExpBase ty vn -> m a
   , foldOnType :: a -> ty vn -> m a
   , foldOnLambda :: a -> LambdaBase ty vn -> m a
+  , foldOnTupleLambda :: a -> TupleLambdaBase ty vn -> m a
   , foldOnPattern :: a -> TupIdentBase ty vn -> m a
   , foldOnIdent :: a -> IdentBase ty vn -> m a
   , foldOnValue :: a -> Value -> m a
+  , foldOnCertificates :: a -> CertificatesBase ty vn -> m a
   }
 
 -- | A folding operation where the accumulator is returned verbatim.
@@ -232,9 +247,11 @@ identityFolder = Folder {
                    foldOnExp = const . return
                  , foldOnType = const . return
                  , foldOnLambda = const . return
+                 , foldOnTupleLambda = const . return
                  , foldOnPattern = const . return
                  , foldOnIdent = const . return
                  , foldOnValue = const . return
+                 , foldOnCertificates = const . return
                  }
 
 -- | Perform a left-reduction across the immediate children of an
@@ -247,9 +264,11 @@ foldExpM f x e = execStateT (mapExpM m e) x
               mapOnExp = wrap foldOnExp
             , mapOnType = wrap foldOnType
             , mapOnLambda = wrap foldOnLambda
+            , mapOnTupleLambda = wrap foldOnTupleLambda
             , mapOnPattern = wrap foldOnPattern
             , mapOnIdent = wrap foldOnIdent
             , mapOnValue = wrap foldOnValue
+            , mapOnCertificates = wrap foldOnCertificates
             }
         wrap op k = do
           v <- get
@@ -267,9 +286,11 @@ data Walker ty vn m = Walker {
     walkOnExp :: ExpBase ty vn -> m ()
   , walkOnType :: ty vn -> m ()
   , walkOnLambda :: LambdaBase ty vn -> m ()
+  , walkOnTupleLambda :: TupleLambdaBase ty vn -> m ()
   , walkOnPattern :: TupIdentBase ty vn -> m ()
   , walkOnIdent :: IdentBase ty vn -> m ()
   , walkOnValue :: Value -> m ()
+  , walkOnCertificates :: CertificatesBase ty vn -> m ()
   }
 
 -- | A no-op traversal.
@@ -278,9 +299,11 @@ identityWalker = Walker {
                    walkOnExp = const $ return ()
                  , walkOnType = const $ return ()
                  , walkOnLambda = const $ return ()
+                 , walkOnTupleLambda = const $ return ()
                  , walkOnPattern = const $ return ()
                  , walkOnIdent = const $ return ()
                  , walkOnValue = const $ return ()
+                 , walkOnCertificates = const $ return ()
                  }
 
 -- | Perform a monadic action on each of the immediate children of an
@@ -294,22 +317,28 @@ walkExpM f = void . mapExpM m
               mapOnExp = wrap walkOnExp
             , mapOnType = wrap walkOnType
             , mapOnLambda = wrap walkOnLambda
+            , mapOnTupleLambda = wrap walkOnTupleLambda
             , mapOnPattern = wrap walkOnPattern
             , mapOnIdent = wrap walkOnIdent
             , mapOnValue = wrap walkOnValue
+            , mapOnCertificates = wrap walkOnCertificates
             }
         wrap op k = op f k >> return k
 
--- | Common case of 'foldExp', where only 'Exp's and 'Lambda's are
--- taken into account.
+-- | Common case of 'foldExp', where only 'Exp's, 'Lambda's and
+-- 'TupleLambda's are taken into account.
 foldlPattern :: (a -> ExpBase ty vn    -> a) ->
                 (a -> LambdaBase ty vn -> a) ->
-                  a -> ExpBase ty vn -> a
-foldlPattern expf lamf = foldExp m
+                (a -> TupleLambdaBase ty vn -> a) ->
+                a -> ExpBase ty vn -> a
+foldlPattern expf lamf tlamf = foldExp m
   where m = identityFolder {
               foldOnExp = \x -> return . expf x
             , foldOnLambda =
               \x lam -> return $ foldl expf (lamf x lam) $ getLambdaExps lam
+            , foldOnTupleLambda =
+              \x lam@(TupleLambda _ body _ _) ->
+                return $ foldl expf (tlamf x lam) [body]
             }
         getLambdaExps (AnonymFun _ body   _ _) = [body]
         getLambdaExps (CurryFun  _ params _ _) = params
@@ -321,108 +350,11 @@ buildExpPattern f = mapExp f'
   where f' = identityMapper {
                mapOnExp = return . f
              , mapOnLambda = return . buildLambda
+             , mapOnTupleLambda = return . buildTupleLambda
              }
 
         buildLambda (AnonymFun tps body  tp pos) = AnonymFun tps     (f body  ) tp pos
         buildLambda (CurryFun  nm params tp pos) = CurryFun  nm  (map f params) tp pos
 
--- | Return the set of all variable names bound in a program.
-progNames :: Ord vn => ProgBase ty vn -> S.Set vn
-progNames = execWriter . mapM funNames . progFunctions
-  where names = identityWalker {
-                  walkOnExp = expNames
-                , walkOnLambda = lambdaNames
-                , walkOnPattern = tell . patNames
-                }
-
-        one = tell . S.singleton . identName
-        funNames (_, _, params, body, _) =
-          mapM_ one params >> expNames body
-
-        expNames e@(LetWith dest _ _ _ _ _) =
-          one dest >> walkExpM names e
-        expNames e@(DoLoop _ _ i _ _ _ _) =
-          one i >> walkExpM names e
-        expNames e = walkExpM names e
-
-        lambdaNames (AnonymFun params body _ _) =
-          mapM_ one params >> expNames body
-        lambdaNames (CurryFun _ exps _ _) =
-          mapM_ expNames exps
-
--- | The set of names bound in the given pattern.
-patNames :: Ord vn => TupIdentBase ty vn -> S.Set vn
-patNames (Id ident)     = S.singleton $ identName ident
-patNames (TupId pats _) = mconcat $ map patNames pats
-patNames (Wildcard _ _) = mempty
-
--- | Return the set of identifiers that are free in the given
--- expression.
-freeInExp :: Ord vn => ExpBase ty vn -> S.Set (IdentBase ty vn)
-freeInExp = execWriter . flip runReaderT S.empty . expFree
-  where names = identityWalker {
-                  walkOnExp = expFree
-                , walkOnLambda = lambdaFree
-                , walkOnIdent = identFree
-                }
-
-        identFree ident = do
-          bound <- asks $ S.member (identName ident)
-          unless bound $ tell $ S.singleton ident
-
-        expFree (LetPat pat e body _) = do
-          expFree e
-          local (`S.union` patNames pat) $ expFree body
-        expFree (LetWith dest src idxs ve body _) = do
-          identFree src
-          mapM_ expFree idxs
-          expFree ve
-          local (S.insert $ identName dest) $ expFree body
-        expFree (DoLoop pat mergeexp i boundexp loopbody letbody _) = do
-          expFree mergeexp
-          expFree boundexp
-          local (`S.union` (identName i `S.insert` patNames pat)) $ do
-            expFree loopbody
-            expFree letbody
-        expFree e = walkExpM names e
-
-        lambdaFree (AnonymFun params body _ _) =
-          local (`S.union` S.fromList (map identName params)) $ expFree body
-        lambdaFree (CurryFun _ exps _ _) = mapM_ expFree exps
-
--- | As 'freeInExp', but returns the raw names rather than 'IdentBase's.
-freeNamesInExp :: Ord vn => ExpBase ty vn -> S.Set vn
-freeNamesInExp = S.map identName . freeInExp
-
-consumedInExp :: Ord vn => ExpBase CompTypeBase vn -> S.Set vn
-consumedInExp = execWriter . expConsumed
-  where names = identityWalker {
-                  walkOnExp = expConsumed
-                }
-
-        unconsume s = censor (`S.difference` s)
-
-        consume ident =
-          tell $ identName ident `S.insert` aliases (identType ident)
-
-        expConsumed (LetPat pat e body _) = do
-          expConsumed e
-          unconsume (patNames pat) $ expConsumed body
-        expConsumed (LetWith dest src idxs ve body _) = do
-          mapM_ expConsumed idxs
-          expConsumed ve
-          consume src
-          unconsume (S.singleton $ identName dest) $ expConsumed body
-        expConsumed (DoLoop pat mergeexp i boundexp loopbody letbody _) = do
-          expConsumed mergeexp
-          expConsumed boundexp
-          unconsume (identName i `S.insert` patNames pat) $ do
-            expConsumed loopbody
-            expConsumed letbody
-        expConsumed (Apply _ args _ _) =
-          mapM_ (consumeArg . first typeOf) args
-          where consumeArg (t, Consume) = tell $ aliases t
-                consumeArg (Elem (Tuple ets), TupleDiet ds) =
-                  mapM_ consumeArg $ zip ets ds
-                consumeArg _ = return ()
-        expConsumed e = walkExpM names e
+        buildTupleLambda (TupleLambda tps body tp loc) =
+          TupleLambda tps (f body) tp loc

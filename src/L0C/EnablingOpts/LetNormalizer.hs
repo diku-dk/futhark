@@ -1,6 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
-module L0C.EnablingOpts.LetNormalizer ( letNormProg, letNormOneLambda )
+module L0C.EnablingOpts.LetNormalizer ( letNormProg, letNormOneTupleLambda )
   where
  
 import Control.Monad.State
@@ -99,7 +99,7 @@ badLetNormM = LetNormM . lift . lift . Left
 -- | Return a fresh, unique name.  The @String@ is prepended to the
 -- name.
 new :: String -> LetNormM VName
-new = state . newVName
+new = state . flip newVName
 
 
 letNormProg :: Prog -> Either EnablingOptError (Bool, Prog)
@@ -113,18 +113,18 @@ letNormProg prog = do
 -----------------------------------------------------------------
 
 runLamLetNormM :: VNameSource -> LetNormM a -> Either EnablingOptError (a, LetNormRes)
-runLamLetNormM nmsrc (LetNormM a) = 
+runLamLetNormM nmsrc (LetNormM a) =
     runWriterT (evalStateT a nmsrc)
 
-letNormOneLambda :: VNameSource -> Lambda ->
-                    Either EnablingOptError (VNameSource, Lambda)
-letNormOneLambda nmsrc lam = do
-    (res, _) <- runLamLetNormM nmsrc (letNormLambdaAlone lam)
+letNormOneTupleLambda :: VNameSource -> TupleLambda
+                      -> Either EnablingOptError (VNameSource, TupleLambda)
+letNormOneTupleLambda nmsrc lam = do
+    (res, _) <- runLamLetNormM nmsrc (letNormTupleLambdaAlone lam)
     return res
 
-letNormLambdaAlone :: Lambda -> LetNormM (VNameSource, Lambda)
-letNormLambdaAlone lam = do
-    lam'   <- letNormLambda lam
+letNormTupleLambdaAlone :: TupleLambda -> LetNormM (VNameSource, TupleLambda)
+letNormTupleLambdaAlone lam = do
+    lam'   <- letNormTupleLambda lam
     nmsrc' <- get
     return (nmsrc', lam')
 
@@ -166,12 +166,12 @@ letNormExp (LetPat pat e body pos) = do
     return $ makeLetExp pos eres' res
 
 
-letNormExp (LetWith nm src inds el body pos) = do
+letNormExp (LetWith cs nm src inds el body pos) = do
     (body', bodyres') <- collectRes $ letNormExp body
     let body'' = makeLetExp pos bodyres' body'
 
     (el', eres')    <- collectRes $ letNormExp el 
-    let res = combinePats (WithPat nm src inds pos) el' body'' 
+    let res = combinePats (WithPat cs nm src inds pos) el' body''
     return $ makeLetExp pos eres' res
 
 
@@ -224,9 +224,9 @@ letNormExp (ArrayLit exps tp pos) = do
     -- exps' <- mapM (subsNormExp pos "tmp_lit") exps
     return $ ArrayLit exps' tp pos
 
-letNormExp (Index s idx t2 pos) = do
+letNormExp (Index cs s csidx idx t2 pos) = do
     idx' <- mapM (subLetoNormExp "tmp_ind") idx
-    return $ Index s idx' t2 pos
+    return $ Index cs s csidx idx' t2 pos
 
 -----------------------
 --- unary operators ---
@@ -293,9 +293,9 @@ letNormExp (Iota e pos) = do
     e' <- subLetoNormExp "tmp_arg" e
     makeVarExpSubst "tmp_iota" pos (Iota e' pos)
 
-letNormExp (Size i arr pos) = do
+letNormExp (Size cs i arr pos) = do
     arr' <- letNormExp arr >>= makeVarExpSubst "tmp_arr" pos
-    makeVarExpSubst "tmp_size" pos (Size i arr' pos)
+    makeVarExpSubst "tmp_size" pos (Size cs i arr' pos)
 
 letNormExp (Replicate n arr pos) = do
     n'    <- subLetoNormExp "tmp_arg" n
@@ -303,15 +303,15 @@ letNormExp (Replicate n arr pos) = do
     arr'  <- letNormExp arr >>= makeVarExpSubst "tmp_arr" pos
     makeVarExpSubst "tmp_repl" pos (Replicate n' arr' pos)
 
-letNormExp (Reshape dims arr pos) = do
+letNormExp (Reshape cs dims arr pos) = do
     dims' <- mapM (subLetoNormExp "tmp_dim") dims
     arr'  <- letNormExp arr >>= makeVarExpSubst "tmp_arr" pos
-    makeVarExpSubst "tmp_resh" pos (Reshape dims' arr' pos)
+    makeVarExpSubst "tmp_resh" pos (Reshape cs dims' arr' pos)
 
-letNormExp (Transpose k n arr pos) = do
+letNormExp (Transpose cs k n arr pos) = do
     -- normalized arr param & get it outside replicate
     arr' <- letNormExp arr >>= makeVarExpSubst "tmp_arr" pos
-    makeVarExpSubst "tmp_tran" pos (Transpose k n arr' pos)
+    makeVarExpSubst "tmp_tran" pos (Transpose cs k n arr' pos)
 
 
 -------------------------------------
@@ -327,20 +327,31 @@ letNormExp (Unzip arr tps pos) = do
     arr' <- letNormExp arr >>= makeVarExpSubst "tmp_arr" pos
     makeVarExpSubst "tmp_unzip" pos (Unzip arr' tps pos)
 
-letNormExp (Split n arr tp pos) = do
+letNormExp (Split cs n arr tp pos) = do
     n'    <- subLetoNormExp "tmp_arg" n
     arr'  <- letNormExp arr >>= makeVarExpSubst "tmp_arr" pos
-    makeVarExpSubst "tmp_split" pos (Split n' arr' tp pos)
+    makeVarExpSubst "tmp_split" pos (Split cs n' arr' tp pos)
 
-letNormExp (Concat arr1 arr2 pos) = do
+letNormExp (Concat cs arr1 arr2 pos) = do
     arr1' <- letNormExp arr1 >>= makeVarExpSubst "tmp_arr" pos
     arr2' <- letNormExp arr2 >>= makeVarExpSubst "tmp_arr" pos
-    makeVarExpSubst "tmp_conc" pos (Concat arr1' arr2' pos)
+    makeVarExpSubst "tmp_conc" pos (Concat cs arr1' arr2' pos)
 
 letNormExp (Copy arr pos) = do
     arr' <- letNormExp arr >>= makeVarExpSubst "tmp_arr" pos
     makeVarExpSubst "tmp_copy" pos (Copy arr' pos)
 
+----------------
+---- Assert ----
+----------------
+
+letNormExp (Assert e loc) = do
+  e' <- letNormExp e >>= makeVarExpSubst "tmp_e" loc
+  makeVarExpSubst "tmp_assert" loc (Assert e' loc)
+
+letNormExp (Conjoin es loc) = do
+  es' <- mapM (letNormExp >=> makeVarExpSubst "tmp_e" loc) es
+  makeVarExpSubst "tmp_assert" loc (Conjoin es' loc)
 
 -----------------------------------------------
 ---- Map/Filter/Reduce/Scan/Redomap ----
@@ -380,34 +391,34 @@ letNormExp (Redomap lam1 lam2 ne arr tp1 pos) = do
 ---- SOAC2 (Cosmin) ----
 ------------------------
 
-letNormExp (Map2 lam arr tp1 pos) = do  -- tp2 
-    lam'  <- letNormLambda lam
+letNormExp (Map2 cs lam arr tp1 pos) = do  -- tp2
+    lam'  <- letNormTupleLambda lam
     arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
-    makeVarExpSubst "tmp_map2" pos (Map2 lam' arr' tp1 pos) -- tp2 
+    makeVarExpSubst "tmp_map2" pos (Map2 cs lam' arr' tp1 pos)
 
-letNormExp (Filter2 lam arr pos) = do
-    lam'  <- letNormLambda lam
+letNormExp (Filter2 cs lam arr pos) = do
+    lam'  <- letNormTupleLambda lam
     arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
-    makeVarExpSubst "tmp_filt2" pos (Filter2 lam' arr' pos)
+    makeVarExpSubst "tmp_filt2" pos (Filter2 cs lam' arr' pos)
 
-letNormExp (Reduce2 lam nes arr tp pos) = do
-    lam'  <- letNormLambda lam
+letNormExp (Reduce2 cs lam nes arr tp pos) = do
+    lam'  <- letNormTupleLambda lam
     nes'  <- mapM (subLetoNormExp "tmp_arg") nes
     arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
-    makeVarExpSubst "tmp_red2" pos (Reduce2 lam' nes' arr' tp pos)
+    makeVarExpSubst "tmp_red2" pos (Reduce2 cs lam' nes' arr' tp pos)
 
-letNormExp (Scan2 lam nes arr tp pos) = do
-    lam'  <- letNormLambda lam
+letNormExp (Scan2 cs lam nes arr tp pos) = do
+    lam'  <- letNormTupleLambda lam
     nes'  <- mapM (subLetoNormExp "tmp_arg") nes
     arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
-    makeVarExpSubst "tmp_scan2" pos (Scan2 lam' nes' arr' tp pos)
+    makeVarExpSubst "tmp_scan2" pos (Scan2 cs lam' nes' arr' tp pos)
 
-letNormExp (Redomap2 lam1 lam2 nes arr tp1 pos) = do
-    lam1' <- letNormLambda lam1
-    lam2' <- letNormLambda lam2
+letNormExp (Redomap2 cs lam1 lam2 nes arr tp1 pos) = do
+    lam1' <- letNormTupleLambda lam1
+    lam2' <- letNormTupleLambda lam2
     nes'  <- mapM (subLetoNormExp "tmp_arg") nes
     arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
-    makeVarExpSubst "tmp_redomap2" pos (Redomap2 lam1' lam2' nes' arr' tp1 pos)
+    makeVarExpSubst "tmp_redomap2" pos (Redomap2 cs lam1' lam2' nes' arr' tp1 pos)
 
 letNormExp (Min e1 e2 t pos) = do
     e1' <- subLetoNormExp "tmp_and" e1
@@ -449,8 +460,14 @@ letNormLambda (AnonymFun params body ret pos) = do
 
 letNormLambda (CurryFun fname exps rettype pos) = do
     exps'  <- mapM (subLetoNormExp "tmp_arg") exps
-    return $ CurryFun fname exps' rettype pos 
- 
+    return $ CurryFun fname exps' rettype pos
+
+letNormTupleLambda :: TupleLambda -> LetNormM TupleLambda
+letNormTupleLambda (TupleLambda params body ret loc) = do
+  (body', newbnds) <- collectRes $ letNormExp body
+  let body'' = addPatterns loc newbnds body'
+  return $ TupleLambda params body'' ret loc
+
 ---------------------------
 ---------------------------
 ---- Helper Functions -----
@@ -467,10 +484,10 @@ subLetoNormExp str ee = letNormExp ee >>= subsLetExp str
         subsLetExp :: String -> Exp -> LetNormM Exp
         subsLetExp s e = 
             case e of
-                (LetPat      _ _ _ pos) -> makeVarExpSubst s pos e
-                (LetWith _ _ _ _ _ pos) -> makeVarExpSubst s pos e
-                (If        _ _ _ _ pos) -> makeVarExpSubst s pos e
-                _                       -> return e
+                (LetPat        _ _ _ pos) -> makeVarExpSubst s pos e
+                (LetWith _ _ _ _ _ _ pos) -> makeVarExpSubst s pos e
+                (If          _ _ _ _ pos) -> makeVarExpSubst s pos e
+                _                         -> return e
 
 makeVarExpSubst :: String -> SrcLoc -> Exp -> LetNormM Exp
 -- Precondition: e is normalized!
@@ -530,7 +547,7 @@ makeLetExp pos l@((vnm,ee):lll) body =
 
 
 data PatAbstr = ReguPat TupIdent SrcLoc
-              | WithPat Ident Ident [Exp] SrcLoc
+              | WithPat Certificates Ident Ident [Exp] SrcLoc
 
 combinePats :: PatAbstr -> Exp -> Exp -> Exp
 combinePats rp@(ReguPat y pos) e body =
@@ -540,8 +557,8 @@ combinePats rp@(ReguPat y pos) e body =
             LetPat x def_x (combinePats rp e_x body) pos_x
 
         -- let y = (let x1 = x0 with [inds] <- el in e_x) in body
-        LetWith x1 x0 inds el e_x pos_x ->
-            LetWith x1 x0 inds el (combinePats rp e_x body) pos_x
+        LetWith cs x1 x0 inds el e_x pos_x ->
+            LetWith cs x1 x0 inds el (combinePats rp e_x body) pos_x
 
         -- let y = (loop (...) for i < N do loopbody in letbody) in body
         DoLoop mergepat mergeexp idd n loopbdy letbdy pos_x ->
@@ -550,22 +567,22 @@ combinePats rp@(ReguPat y pos) e body =
         -- not a let bindings
         _ -> LetPat y e body pos
 
-combinePats wp@(WithPat y1 y0 inds pos) el body = 
+combinePats wp@(WithPat cs1 y1 y0 inds pos) el body =
     case el of
         -- let y1 = y0 with [inds] <- (let x = def_x in e_x) in body
         LetPat x def_x e_x pos_x ->
             LetPat x def_x (combinePats wp e_x body) pos_x
 
         -- let y1 = y0 with [inds] <- (let x1 = x0 with [indsx] <- el_x in e_x) in body
-        LetWith x1 x0 inds_x el_x e_x pos_x ->
-            LetWith x1 x0 inds_x el_x (combinePats wp e_x body) pos_x
+        LetWith cs2 x1 x0 inds_x el_x e_x pos_x ->
+            LetWith (cs1++cs2) x1 x0 inds_x el_x (combinePats wp e_x body) pos_x
 
         -- let y1 = y0 with [inds] <- (loop (...) = for i < N do loopbdy in letbdy) in body
         DoLoop mergepat mergeexp idd n loopbdy letbdy pos_x ->
             DoLoop mergepat mergeexp idd n loopbdy (combinePats wp letbdy body) pos_x
         
         -- not a let bindings
-        _ -> LetWith y1 y0 inds el body pos    
+        _ -> LetWith cs1 y1 y0 inds el body pos
 
 addPatterns :: SrcLoc -> [(VName, Exp)] -> Exp -> Exp
 addPatterns = makeLetExp

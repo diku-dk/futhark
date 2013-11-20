@@ -21,7 +21,7 @@ import L0C.HOTrans.HOTransDriver
 import qualified L0C.FirstOrderTransform as FOT
 import qualified L0C.TupleTransform as TT
 import qualified L0C.FullNormalization as FN
-import qualified L0C.EnablingOpts.Hoisting as LHO
+import qualified L0C.Rebinder as RB
 import L0C.Untrace
 import L0C.CCodeGen
 
@@ -40,9 +40,11 @@ data Pass = Pass {
   , passOp :: Prog -> L0CM Prog
   }
 
+type Action = (String, Prog -> IO ())
+
 data L0Config = L0Config {
     l0pipeline :: [Pass]
-  , l0action :: Prog -> IO ()
+  , l0action :: Action
   , l0checkAliases :: Bool
   , l0verbose :: Maybe (Maybe FilePath)
 }
@@ -50,7 +52,7 @@ data L0Config = L0Config {
 newL0Config :: L0Config
 newL0Config = L0Config {
                 l0pipeline = []
-              , l0action = putStrLn . prettyPrint
+              , l0action = printAction
               , l0checkAliases = True
               , l0verbose = Nothing
               }
@@ -72,23 +74,36 @@ commandLineOptions =
     (NoArg $ \opts -> opts { l0checkAliases = False })
     "Don't check that uniqueness constraints are being upheld."
   , Option "c" ["compile"]
-    (NoArg $ \opts -> opts { l0action = putStrLn . compileProg })
+    (NoArg $ \opts -> opts { l0action = codegenAction })
     "Translate program into C and write it on standard output."
   , Option "p" ["print"]
-    (NoArg $ \opts -> opts { l0action = putStrLn . prettyPrint })
+    (NoArg $ \opts -> opts { l0action = printAction })
     "Prettyprint the program on standard output (default action)."
   , Option "i" ["interpret"]
-    (NoArg $ \opts -> opts { l0action = interpret })
+    (NoArg $ \opts -> opts { l0action = interpretAction })
     "Run the program via an interpreter."
-  , rename "r" ["rename"]
-  , hoist "o" ["hoist"]
-  , normalize "n" ["normalize"]
-  , uttransform "u" ["untrace"]
-  , fotransform "f" ["first-order-transform"]
-  , tatransform "t" ["tuple-of-arrays-transform"]
-  , eotransform "e" ["enabling-optimisations"]
-  , hotransform "h" ["higher-order-optimizations"]
+  , renameOpt "r" ["rename"]
+  , hoistOpt "o" ["hoist"]
+  , hoistAggrOpt "O" ["hoist-aggressively"]
+  , normalizeOpt "n" ["normalize"]
+  , uttransformOpt "u" ["untrace"]
+  , fotransformOpt "f" ["first-order-transform"]
+  , tatransformOpt "t" ["tuple-of-arrays-transform"]
+  , eotransformOpt "e" ["enabling-optimisations"]
+  , hotransformOpt "h" ["higher-order-optimizations"]
+  , Option "s" ["standard"]
+    (NoArg $ \opts -> opts { l0pipeline = standardPipeline ++ l0pipeline opts })
+    "Use the recommended optimised pipeline."
   ]
+
+printAction :: Action
+printAction = ("prettyprinter", putStrLn . prettyPrint)
+
+interpretAction :: Action
+interpretAction = ("interpreter", interpret)
+
+codegenAction :: Action
+codegenAction = ("code generator", putStrLn . compileProg)
 
 interpret :: Prog -> IO ()
 interpret prog =
@@ -110,68 +125,101 @@ interpret prog =
                        exitWith $ ExitFailure 2
         Right val  -> putStrLn $ "Result of evaluation: " ++ ppValue val
 
+rename :: Pass
+rename = Pass { passName = "renamer"
+              , passOp = return . renameProg
+              }
+
+hoist :: Pass
+hoist = Pass { passName = "rebinder"
+             , passOp = return . RB.transformProg
+             }
+
+hoistAggr :: Pass
+hoistAggr = Pass { passName = "rebinder (aggressive)"
+                 , passOp = return . RB.transformProgAggr
+                 }
+
+normalize :: Pass
+normalize = Pass { passName = "full normalizer"
+                 , passOp = return . FN.normalizeProg
+                 }
+
+fotransform :: Pass
+fotransform = Pass { passName = "first-order transform"
+                   , passOp = return . FOT.transformProg
+                   }
+
+tatransform :: Pass
+tatransform = Pass { passName = "tuple-transform"
+                   , passOp = return . TT.transformProg
+                   }
+
+uttransform :: Pass
+uttransform = Pass { passName = "debugging annotation removal"
+                   , passOp = return . untraceProg
+                   }
+
+eotransform :: Pass
+eotransform = Pass { passName = "enabling optimations"
+                   , passOp = liftPass enablingOpts
+                   }
+
+hotransform :: Pass
+hotransform = Pass { passName = "higher-order optimisations"
+                   , passOp = liftPass highOrdTransf
+                   }
+
+standardPipeline :: [Pass]
+standardPipeline =
+  [ uttransform, tatransform, normalize, hoist, eotransform,
+    hotransform, eotransform, normalize, hoistAggr, eotransform ]
+
 passoption :: String -> Pass -> String -> [String] -> L0Option
 passoption desc pass short long =
   Option short long
   (NoArg $ \opts -> opts { l0pipeline = pass : l0pipeline opts })
   desc
 
-rename :: String -> [String] -> L0Option
-rename =
-  passoption "Rename all non-function identifiers to be unique."
-  Pass { passName = "renamer"
-       , passOp = return . renameProg
-       }
+renameOpt :: String -> [String] -> L0Option
+renameOpt =
+  passoption "Rename all non-function identifiers to be unique." rename
 
-hoist :: String -> [String] -> L0Option
-hoist =
-  passoption "Let-hoisting"
-  Pass { passName = "let-hoister"
-       , passOp = return . LHO.transformProg
-       }
+hoistOpt :: String -> [String] -> L0Option
+hoistOpt =
+  passoption "Rebinder - hoisting, CSE, dependency graph compression." hoist
 
-normalize :: String -> [String] -> L0Option
-normalize =
-  passoption "Full normalization"
-  Pass { passName = "full normalizer"
-       , passOp = return . FN.normalizeProg
-       }
+hoistAggrOpt :: String -> [String] -> L0Option
+hoistAggrOpt =
+  passoption "Rebinder - hoisting, CSE, dependency graph compression (aggressively)."
+  hoistAggr
 
-fotransform :: String -> [String] -> L0Option
-fotransform =
+normalizeOpt :: String -> [String] -> L0Option
+normalizeOpt =
+  passoption "Full normalization" normalize
+
+fotransformOpt :: String -> [String] -> L0Option
+fotransformOpt =
   passoption "Transform all second-order array combinators to for-loops."
-  Pass { passName = "first-order transform"
-       , passOp = return . FOT.transformProg
-       }
+  fotransform
 
-tatransform :: String -> [String] -> L0Option
-tatransform =
-  passoption "Transform most uses of tuples away"
-  Pass { passName = "tuple-transform"
-       , passOp = return . TT.transformProg
-       }
+tatransformOpt :: String -> [String] -> L0Option
+tatransformOpt =
+  passoption "Transform most uses of tuples away" tatransform
 
-uttransform :: String -> [String] -> L0Option
-uttransform =
-  passoption "Remove debugging annotations from program."
-  Pass { passName = "debugging annotation removal"
-       , passOp = return . untraceProg
-       }
+uttransformOpt :: String -> [String] -> L0Option
+uttransformOpt =
+  passoption "Remove debugging annotations from program." uttransform
 
-
-eotransform :: String -> [String] -> L0Option
-eotransform =
+eotransformOpt :: String -> [String] -> L0Option
+eotransformOpt =
   passoption "Perform simple enabling optimisations."
-  Pass { passName = "enabling optimations"
-       , passOp = liftPass enablingOpts
-       }
+  eotransform
 
-hotransform :: String -> [String] -> L0Option
-hotransform =
+hotransformOpt :: String -> [String] -> L0Option
+hotransformOpt =
   passoption "Perform higher-order optimisation, i.e., fusion."
-  Pass { passName = "higher-order optimisations"
-       , passOp = liftPass highOrdTransf
-       }
+  hotransform
 
 -- | Entry point.  Non-interactive, except when reading interpreter
 -- input from standard input.
@@ -199,11 +247,15 @@ compiler config file = do
       hPutStrLn stderr $ errorDesc err
       case (errorProg err, l0verbose config) of
         (Just prog, Just outfile) ->
-          maybe (hPutStrLn stderr) writeFile outfile $
-            prettyPrint prog
+          maybe (hPutStr stderr) writeFile outfile $
+            prettyPrint prog ++ "\n"
         _ -> return ()
       exitWith $ ExitFailure 2
-    Right prog -> l0action config prog
+    Right prog -> do
+      let (actiondesc, action) = l0action config
+      when (verbose config) $
+        hPutStrLn stderr $ "Running " ++ actiondesc ++ "."
+      action prog
 
 typeCheck :: (TypeBox ty, VarName vn) =>
              L0Config -> ProgBase ty vn
