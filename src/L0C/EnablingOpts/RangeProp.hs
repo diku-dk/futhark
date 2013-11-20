@@ -141,8 +141,8 @@ rangeProp prog = do
     rangePropExp e =
       mapExpM rangePropMapper e
 
-    mergeRangeEnvWithDict :: RangeDict -> RangeM a -> RangeM a
-    mergeRangeEnvWithDict newDict = local (\env -> env { dict = M.union newDict $ dict env })
+mergeRangeEnvWithDict :: RangeDict -> RangeM a -> RangeM a
+mergeRangeEnvWithDict newDict = local (\env -> env { dict = M.union newDict $ dict env })
 
 ----------------------------------------
 
@@ -508,6 +508,12 @@ substitute i (RExp (Max e1 e2 _ pos)) = do
 -- TODO: This is actually handled by let normalization
 substitute i (RExp (LetPat _ _ inExp _)) = substitute i (RExp inExp)
 
+substitute i (RExp (If cond te ee (Elem Int) pos)) = do
+  -- TODO: fucking does not work!
+  (thenInfo, elseInfo) <- realExtractFromCond cond
+  tr <- mergeRangeEnvWithDict thenInfo $ substitute i (RExp te)
+  er <- mergeRangeEnvWithDict elseInfo $ substitute i (RExp ee)
+  rangeUnion tr er pos
 
 substitute _ _ = return (Ninf, Pinf)
 
