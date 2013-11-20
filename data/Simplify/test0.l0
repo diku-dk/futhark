@@ -1,2 +1,2 @@
-fun int main(int a, int b) =
-  a pow 0
+fun int main(int a) =
+  min(a, min(a,2))

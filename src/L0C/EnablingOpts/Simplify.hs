@@ -122,10 +122,18 @@ simplifyNary (Min e1 e2 tp pos) = do
     e1'<- simplifyNary e1 >>= simplifyBack
     e2'<- simplifyNary e2 >>= simplifyBack
     case (e1',e2') of
+        (_ ,Min e1'' e2'' tp'' pos'') ->
+          if e1' ==  e1''
+            then
+              trace ("FEST") return $ NaryMult [e2'] tp pos
+            else
+              trace ("NO FEST") return $ NaryMult [Min e1' e2' tp pos] tp pos
         (Literal (IntVal v1) _, Literal (IntVal v2) _) ->
             return $ NaryMult [Literal (IntVal $ min v1 v2) pos] tp pos
         _ ->
             return $ NaryMult [Min e1' e2' tp pos] tp pos
+
+
 
 simplifyNary (Max e1 e2 tp pos) = do
     e1'<- simplifyNary e1 >>= simplifyBack
