@@ -36,14 +36,18 @@ enablingOpts prog = do
 
     prog_dfe      <- deadFunElim     prog_inl
 
-    let prog_uniq = renameProg prog_dfe
+    let prog_rn   = renameProg       prog_dfe
 
-    prog_enopt1 <- normCopyDeadOpts prog_uniq
+    prog_ntup     <- tupleNormProg   prog_rn
+
+    prog_enopt1 <- normCopyDeadOpts prog_ntup
     prog_enopt2 <- normCopyDeadOpts prog_enopt1
     prog_deadf2 <- deadFunElim      prog_enopt2
-    prog_flat_opt <- normCopyDeadOpts prog_deadf2
+    prog_flat_opt <- normCopyDeadOpts $ renameProg $ TT.transformProg prog_deadf2
 
-    normCopyDeadOpts prog_flat_opt
+    prog_rp <- rangeProp prog_flat_opt
+
+    tupleNormProg   prog_rp >>= tupleNormProg >>= normCopyDeadOpts
 
 --    if(succs)
 --    then enablingOpts outprog

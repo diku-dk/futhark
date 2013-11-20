@@ -1,7 +1,5 @@
-fun int addFive (int n) = n + 5
-
 fun int main(int x) =
     let y = max(5 , min(42,x) ) in // [5 : 42]
-    if addFive(4) < addFive(y)
+    if 4 < y
     then 0
     else ~1

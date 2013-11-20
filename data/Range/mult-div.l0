@@ -1,7 +1,7 @@
 // min(x, 42) -- [x, 42]
 // max(5, y) -- [5, y]
 
-fun int main(int input1, int input2) =
+fun int simple(int input1, int input2) =
     let x = max(2, min(input1, 5)) in
     let xn = ~1 * x in
     let y = max(3, min(input2, 6)) in
@@ -11,7 +11,7 @@ fun int main(int input1, int input2) =
     let mul_t1 = x * ~2 in
     let mul_t2 = x * y in
     let mul_t3 = xn * yn in
-    let mul_t5 = x * yn in
+    let mul_t4 = x * yn in
     let mul_t5 = xn * y in
 
     let div_t0 = x / 2 in
@@ -21,6 +21,9 @@ fun int main(int input1, int input2) =
     let div_t4 = x / yn in
     let div_t5 = xn / y in
 
+    mul_t0 + mul_t1 + mul_t2 + mul_t3 + mul_t4 + mul_t5 + div_t0 + div_t1 + div_t2 + div_t3 + div_t4 + div_t5
+
+fun int complex(int input1, int input2) =
     // Now x can be both Negative or Positive
     let x = max(~2, min(input1, 5)) in
     let xn = ~1 * x in
@@ -31,7 +34,7 @@ fun int main(int input1, int input2) =
     let mul_t1 = x * ~2 in
     let mul_t2 = x * y in
     let mul_t3 = xn * yn in
-    let mul_t5 = x * yn in
+    let mul_t4 = x * yn in
     let mul_t5 = xn * y in
 
     let div_t0 = x / 2 in
@@ -41,4 +44,7 @@ fun int main(int input1, int input2) =
     let div_t4 = x / yn in
     let div_t5 = xn / y in
 
-    0
+    mul_t0 + mul_t1 + mul_t2 + mul_t3 + mul_t4 + mul_t5 + div_t0 + div_t1 + div_t2 + div_t3 + div_t4 + div_t5
+
+fun int main(int input1, int input2) =
+    simple(input1, input2)
