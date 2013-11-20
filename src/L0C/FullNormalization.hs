@@ -5,7 +5,7 @@
 -- format.  This specifically means that all operands to operators,
 -- function calls, SOACs and what have you, must be variables, not
 -- expressions.  In essence, we introduce explicit bindings for most
--- every piece of computation.  Some modules (e.g "L0C.Hoisting") will
+-- every piece of computation.  Some modules (e.g "L0C.Rebinder") will
 -- expect a normalized input program.
 --
 module L0C.FullNormalization
@@ -23,6 +23,13 @@ import qualified Data.Map as M
 
 import L0C.L0
 import L0C.FreshNames
+
+-- | Fully normalize an L0 program.  The resulting program is as
+-- uniquely named as the input program.
+normalizeProg :: Prog -> Prog
+normalizeProg prog =
+  Prog $ runNormalizeM (mapM normalizeFun $ progFunctions prog) namesrc
+  where namesrc = newNameSourceForProg prog
 
 data NewBindings = NewBindings (Exp -> Exp)
 
@@ -44,7 +51,7 @@ newtype NormalizeM a = NormalizeM (RWS Env NewBindings (NameSource VName) a)
             MonadWriter NewBindings)
 
 new :: String -> NormalizeM VName
-new k = do (name, src) <- gets $ newVName k
+new k = do (name, src) <- gets $ flip newVName k
            put src
            return name
 
@@ -62,11 +69,6 @@ runNormalizeM :: NormalizeM a -> NameSource VName -> a
 runNormalizeM (NormalizeM m) src =
   let (x, _, _) = runRWS m emptyEnv src
   in x
-
-normalizeProg :: Prog -> Prog
-normalizeProg prog =
-  Prog $ runNormalizeM (mapM normalizeFun $ progFunctions prog) namesrc
-  where namesrc = newNameSourceForProg prog
 
 insertBindings :: NormalizeM Exp -> NormalizeM Exp
 insertBindings m = pass $ do
@@ -91,11 +93,11 @@ normalizeExp (DoLoop mergepat mergeexp loopvar
   loopbody' <- insertBindings $ normalizeExp loopbody
   letbody'  <- insertBindings $ normalizeExp letbody
   return $ DoLoop mergepat mergeexp' loopvar boundexp' loopbody' letbody' loc
-normalizeExp (LetWith dest src idxes ve body loc) = do
+normalizeExp (LetWith cs dest src idxes ve body loc) = do
   idxes' <- mapM normalizeExp idxes
   ve'    <- normalizeExp ve
   body'  <- insertBindings $ normalizeExp body
-  return $ LetWith dest src idxes' ve' body' loc
+  return $ LetWith cs dest src idxes' ve' body' loc
 normalizeExp (If c te fe t loc) = do
   c'  <- normalizeExp c
   te' <- insertBindings $ normalizeExp te
@@ -106,13 +108,18 @@ normalizeExp e = Var <$> (replaceExp (nameHint e) =<< normalizeSubExps e)
 -- | Leave the root of the expression as is, but normalise any
 -- subexpressions.
 normalizeSubExps :: Exp -> NormalizeM Exp
-normalizeSubExps (If c te fe t loc) =
+normalizeSubExps (Literal v loc) = return $ Literal v loc
+normalizeSubExps e@(If {}) =
   -- Never normalise anything past a branch.
-  normalizeExp $ If c te fe t loc
+  normalizeExp e
+normalizeSubExps e@(LetPat {}) = normalizeExp e
+normalizeSubExps e@(LetWith {}) = normalizeExp e
+normalizeSubExps e@(DoLoop {}) = normalizeExp e
 normalizeSubExps e = mapExpM normalize e
   where normalize = identityMapper {
                       mapOnExp = normalizeExp
                     , mapOnLambda = normalizeLambda
+                    , mapOnTupleLambda = normalizeTupleLambda
                     }
 
 normalizeLambda :: Lambda -> NormalizeM Lambda
@@ -122,6 +129,11 @@ normalizeLambda (CurryFun fname args rettype loc) = do
 normalizeLambda (AnonymFun params body rettype loc) = do
   body' <- insertBindings $ normalizeExp body
   return $ AnonymFun params body' rettype loc
+
+normalizeTupleLambda :: TupleLambda -> NormalizeM TupleLambda
+normalizeTupleLambda (TupleLambda params body rettype loc) = do
+  body' <- insertBindings $ normalizeExp body
+  return $ TupleLambda params body' rettype loc
 
 -- | Generate a name appropriate for the variable used to replace the
 -- given expression.  Only for readability purposes, so remove, modify

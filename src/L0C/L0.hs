@@ -20,8 +20,10 @@ module L0C.L0
   , GenIdent
   , Ident
   , Parameter
+  , Certificates
   , Exp
   , Lambda
+  , TupleLambda
   , TupIdent
   , FunDec
   , Prog
@@ -102,11 +104,17 @@ type Ident = GenIdent Names
 -- denoting function parameters.
 type Parameter = GenIdent NoInfo
 
+-- | An list of certificates with type information.
+type Certificates = CertificatesBase (TypeBase Names) VName
+
 -- | An expression with type information.
 type Exp = ExpBase (TypeBase Names) VName
 
 -- | A lambda with type information.
 type Lambda = LambdaBase (TypeBase Names) VName
+
+-- | A tuple lambda with type information.
+type TupleLambda = TupleLambdaBase (TypeBase Names) VName
 
 -- | A pattern with type information.
 type TupIdent = TupIdentBase (TypeBase Names) VName

@@ -1,0 +1,5 @@
+// Test a tricky case involving rewriting lambda arguments in the
+// tuple transformer.
+
+fun [int] main([[{int,int}]] a) =
+    map(fn int([{int,int}] r) => let {x,y} = r[0] in x+y, a)

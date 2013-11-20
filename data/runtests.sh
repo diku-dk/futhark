@@ -18,11 +18,8 @@ while true; do
 done
 
 tests() {
-    echo $testdir/*l0
-#    echo $testdir/uniqueness*l0
-#    echo $testdir/PricingLexiFi.l0
-#    echo $testdir/HiperfitExample1.l0
-#    echo $testdir/CalibLexiFi.l0
+    find $testdir/tests/ -name '*l0'
+    find $testdir/benchmarks/ -name '*l0'
 }
 
 # You can control exactly which tests to run by passing their names as

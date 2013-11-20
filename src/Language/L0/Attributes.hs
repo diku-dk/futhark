@@ -7,6 +7,7 @@ module Language.L0.Attributes
   ( locStr
   , TypeBox(..)
   , funDecByName
+  , progNames
 
   -- * Parameter handling
   , toParam
@@ -16,6 +17,21 @@ module Language.L0.Attributes
   , expToValue
   , mapTails
   , typeOf
+  , freeInExp
+  , freeNamesInExp
+  , consumedInExp
+  , safeExp
+
+  -- * Queries on patterns
+  , patNames
+  , patIdents
+
+  -- * Queries on lambdas
+  , freeInLambda
+  , freeNamesInLambda
+
+  -- * Operations on lambdas
+  , tupleLambdaToLambda
 
   -- * Queries on types
   , basicType
@@ -28,6 +44,7 @@ module Language.L0.Attributes
   , similarTo
   , returnType
   , lambdaType
+  , tupleLambdaType
   , lambdaReturnType
 
   -- * Operations on types
@@ -81,21 +98,24 @@ module Language.L0.Attributes
   , UncheckedIdent
   , UncheckedExp
   , UncheckedLambda
+  , UncheckedTupleLambda
   , UncheckedTupIdent
   , UncheckedFunDec
   , UncheckedProg
   )
   where
 
+import Control.Arrow (first)
 import Control.Applicative
+import Control.Monad.Writer
 
 import Data.Array
 import Data.List
 import Data.Loc
-import Data.Monoid
 import qualified Data.Set as S
 
 import Language.L0.Syntax
+import Language.L0.Traversals
 
 -- | A human-readable location string, of the form
 -- @filename:lineno:columnno@.
@@ -132,6 +152,7 @@ subtypeOf (Elem Int) (Elem Int) = True
 subtypeOf (Elem Char) (Elem Char) = True
 subtypeOf (Elem Real) (Elem Real) = True
 subtypeOf (Elem Bool) (Elem Bool) = True
+subtypeOf (Elem Cert) (Elem Cert) = True
 subtypeOf _ _ = False
 
 -- | @x \`similarTo\` y@ is true if @x@ and @y@ are the same type,
@@ -288,6 +309,7 @@ removeElemNames Int  = Int
 removeElemNames Bool = Bool
 removeElemNames Char = Char
 removeElemNames Real = Real
+removeElemNames Cert = Cert
 
 -- | Add names to a type - this replaces array sizes with 'Nothing',
 -- although they probably are already, if you're using this.
@@ -305,6 +327,7 @@ addElemNames Int  = Int
 addElemNames Bool = Bool
 addElemNames Char = Char
 addElemNames Real = Real
+addElemNames Cert = Cert
 
 -- | @arrayOf t s u@ constructs an array type.  The convenience
 -- compared to using the 'Array' constructor directly is that @t@ can
@@ -371,6 +394,7 @@ addElemAliases Int  _ = Int
 addElemAliases Real _ = Real
 addElemAliases Bool _ = Bool
 addElemAliases Char _ = Char
+addElemAliases Cert _ = Cert
 
 -- | Unify the uniqueness attributes and aliasing information of two
 -- types.  The two types must otherwise be identical.  The resulting
@@ -393,6 +417,7 @@ blankValue (Elem Int) = IntVal 0
 blankValue (Elem Real) = RealVal 0.0
 blankValue (Elem Bool) = LogVal False
 blankValue (Elem Char) = CharVal '\0'
+blankValue (Elem Cert) = Checked
 blankValue (Elem (Tuple ts)) = TupVal (map blankValue ts)
 blankValue (Array et [_] _ _) = arrayVal [] $ Elem et
 blankValue (Array et (_:ds) u as) = arrayVal [] rt
@@ -405,6 +430,7 @@ valueType (IntVal _) = Elem Int
 valueType (RealVal _) = Elem Real
 valueType (LogVal _) = Elem Bool
 valueType (CharVal _) = Elem Char
+valueType Checked = Elem Cert
 valueType (TupVal vs) = Elem $ Tuple (map valueType vs)
 valueType (ArrayVal _ (Elem et)) =
   Array (addElemNames et) [Nothing] Nonunique NoInfo
@@ -482,8 +508,16 @@ transposeArray k n v =
 -- a@.
 transposeIndex :: Int -> Int -> [a] -> [a]
 transposeIndex k n l
-  | (pre,needle:post) <- splitAt k l,
-    (mid,end) <- splitAt n post = pre ++ mid ++ [needle] ++ end
+  | k + n >= length l =
+    let n' = ((k + n) `mod` length l)-k
+    in transposeIndex k n' l
+  | n < 0,
+    (pre,needle:end) <- splitAt k l,
+    (beg,mid) <- splitAt (length pre+n) pre =
+    beg ++ [needle] ++ mid ++ end
+  | (beg,needle:post) <- splitAt k l,
+    (mid,end) <- splitAt n post =
+    beg ++ mid ++ [needle] ++ end
   | otherwise = l
 
 -- | The type of an L0 term.  The aliasing will refer to itself, if
@@ -505,21 +539,21 @@ typeOf (Var ident) =
     t                -> t `addAliases` S.insert (identName ident)
 typeOf (Apply _ _ t _) = t
 typeOf (LetPat _ _ body _) = typeOf body
-typeOf (LetWith _ _ _ _ body _) = typeOf body
-typeOf (Index ident _ t _) =
+typeOf (LetWith _ _ _ _ _ body _) = typeOf body
+typeOf (Index _ ident _ _ t _) =
   t `addAliases` S.insert (identName ident)
 typeOf (Iota _ _) = arrayType 1 (Elem Int) Unique
 typeOf (Size {}) = Elem Int
 typeOf (Replicate _ e _) = arrayType 1 (typeOf e) u
   where u | uniqueOrBasic (typeOf e) = Unique
           | otherwise = Nonunique
-typeOf (Reshape shape e _) = build (length shape) (elemType $ typeOf e)
+typeOf (Reshape _ shape e _) = build (length shape) (elemType $ typeOf e)
   where build 0 t = Elem t
         build n t =
           Array (t `setElemAliases` NoInfo) (replicate n Nothing) Nonunique $
           case typeOf e of Array _ _ _ als -> als
                            _               -> S.empty -- Type error.
-typeOf (Transpose k n e _)
+typeOf (Transpose _ k n e _)
   | Array et dims u als <- typeOf e,
     (pre,d:post) <- splitAt k dims,
     (mid,end) <- splitAt n post = Array et (pre++mid++[d]++end) u als
@@ -535,28 +569,30 @@ typeOf (Scan fun start arr _ _) =
   arrayType 1 et Unique
     where et = lambdaType fun [typeOf start, rowType $ typeOf arr]
 typeOf (Filter _ arr _ _) = typeOf arr
-typeOf (Redomap redfun mapfun start arr rt loc) =
-  lambdaType redfun [typeOf start, rowType $ typeOf $ Map mapfun arr rt loc]
-typeOf (Split _ _ t _) =
+typeOf (Redomap outerfun innerfun start arr _ _ ) =
+  lambdaType outerfun [innerres, innerres]
+    where innerres = lambdaType innerfun [typeOf start, rowType $ typeOf arr]
+typeOf (Split _ _ _ t _) =
   Elem $ Tuple [arrayType 1 t Nonunique, arrayType 1 t Nonunique]
-typeOf (Concat x y _) = typeOf x `setUniqueness` u
+typeOf (Concat _ x y _) = typeOf x `setUniqueness` u
   where u = uniqueness (typeOf x) <> uniqueness (typeOf y)
 typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` S.empty
+typeOf (Assert _ _) = Elem Cert
+typeOf (Conjoin _ _) = Elem Cert
 typeOf (DoLoop _ _ _ _ _ body _) = typeOf body
-typeOf (Map2 f arrs _ _) =
-  Elem $ Tuple $ case lambdaType f $ map typeOf arrs of
-                   Elem (Tuple tps) ->
-                     map (\x -> arrayType 1 x (uniqueProp x)) tps
-                   ftp -> [arrayType 1 ftp (uniqueProp ftp)]
-typeOf (Reduce2 fun acc arrs _ _) =
-  lambdaType fun $ map typeOf acc ++ map typeOf arrs
-typeOf (Scan2 _ _ _ ets _) =
+typeOf (Map2 _ f arrs _ _) =
+  Elem $ Tuple $ map (\x -> arrayType 1 x (uniqueProp x)) $
+       tupleLambdaType f $ map typeOf arrs
+typeOf (Reduce2 _ fun acc arrs _ _) =
+  Elem $ Tuple $ tupleLambdaType fun $ map typeOf acc ++ map typeOf arrs
+typeOf (Scan2 _ _ _ _ ets _) =
   Elem $ Tuple $ map (\x -> arrayType 1 x Unique) ets
-typeOf (Filter2 _ arrs _) = Elem $ Tuple $ map typeOf arrs
-typeOf (Redomap2 redfun mapfun start arrs rt loc) =
-  lambdaType redfun $ map typeOf start ++ case typeOf (Map2 mapfun arrs rt loc) of
-                                            Elem (Tuple ts) -> ts
-                                            t               -> [t]
+typeOf (Filter2 _ _ arrs _) = Elem $ Tuple $ map typeOf arrs
+typeOf (Redomap2 _ outerfun innerfun acc arrs _ _) =
+  Elem $ Tuple $ tupleLambdaType outerfun $
+       tupleLambdaType innerfun (innerres ++ innerres)
+    where innerres = tupleLambdaType innerfun
+                     (map typeOf acc ++ map (rowType . typeOf) arrs)
 typeOf (Min _ _ t _) = t
 typeOf (Max _ _ t _) = t
 
@@ -580,6 +616,15 @@ lambdaType :: Ord vn =>
               LambdaBase CompTypeBase vn -> [CompTypeBase vn] -> CompTypeBase vn
 lambdaType lam = returnType (lambdaReturnType lam) (lambdaParamDiets lam)
 
+-- | The result of applying the arguments of the given types to the
+-- given tuple lambda function.
+tupleLambdaType :: Ord vn =>
+                   TupleLambdaBase CompTypeBase vn
+                -> [CompTypeBase vn]
+                -> [CompTypeBase vn]
+tupleLambdaType (TupleLambda params _ ets _) args =
+  map (\et -> returnType et ds args) ets
+  where ds = map (diet . identType) params
 
 -- | The result of applying the arguments of the given types to a
 -- function with the given return type, consuming its parameters with
@@ -606,19 +651,171 @@ lambdaParamDiets (CurryFun _ args _ _) = map (const Observe) args
 funDecByName :: Name -> ProgBase ty vn -> Maybe (FunDecBase ty vn)
 funDecByName fname = find (\(fname',_,_,_,_) -> fname == fname') . progFunctions
 
+-- | Return the set of all variable names bound in a program.
+progNames :: Ord vn => ProgBase ty vn -> S.Set vn
+progNames = execWriter . mapM funNames . progFunctions
+  where names = identityWalker {
+                  walkOnExp = expNames
+                , walkOnLambda = lambdaNames
+                , walkOnTupleLambda = lambdaNames . tupleLambdaToLambda
+                , walkOnPattern = tell . patNames
+                }
+
+        one = tell . S.singleton . identName
+        funNames (_, _, params, body, _) =
+          mapM_ one params >> expNames body
+
+        expNames e@(LetWith _ dest _ _ _ _ _) =
+          one dest >> walkExpM names e
+        expNames e@(DoLoop _ _ i _ _ _ _) =
+          one i >> walkExpM names e
+        expNames e = walkExpM names e
+
+        lambdaNames (AnonymFun params body _ _) =
+          mapM_ one params >> expNames body
+        lambdaNames (CurryFun _ exps _ _) =
+          mapM_ expNames exps
+
 -- | Change those subexpressions where evaluation of the expression
 -- would stop.  Also change type annotations at branches.
 mapTails :: (ExpBase ty vn -> ExpBase ty vn) -> (ty vn -> ty vn)
          -> ExpBase ty vn -> ExpBase ty vn
 mapTails f g (LetPat pat e body loc) =
   LetPat pat e (mapTails f g body) loc
-mapTails f g (LetWith dest src idxs ve body loc) =
-  LetWith dest src idxs ve (mapTails f g body) loc
+mapTails f g (LetWith cs dest src idxs ve body loc) =
+  LetWith cs dest src idxs ve (mapTails f g body) loc
 mapTails f g (DoLoop pat me i bound loopbody body loc) =
   DoLoop pat me i bound loopbody (mapTails f g body) loc
 mapTails f g (If c te fe t loc) =
   If c (mapTails f g te) (mapTails f g fe) (g t) loc
 mapTails f _ e = f e
+
+-- | Convert a tuple-lambda to a regular lambda.
+tupleLambdaToLambda :: TupleLambdaBase ty vn -> LambdaBase ty vn
+tupleLambdaToLambda (TupleLambda params body rettype loc) =
+  AnonymFun params body (Elem $ Tuple rettype) loc
+
+-- | Return the set of identifiers that are free in the given
+-- expression.
+freeInExp :: Ord vn => ExpBase ty vn -> S.Set (IdentBase ty vn)
+freeInExp = execWriter . expFree
+  where names = identityWalker {
+                  walkOnExp = expFree
+                , walkOnLambda = lambdaFree
+                , walkOnTupleLambda = lambdaFree . tupleLambdaToLambda
+                , walkOnIdent = identFree
+                , walkOnCertificates = mapM_ identFree
+                }
+
+        identFree ident =
+          tell $ S.singleton ident
+
+        expFree (LetPat pat e body _) = do
+          expFree e
+          binding (patIdents pat) $ expFree body
+        expFree (LetWith cs dest src idxs ve body _) = do
+          mapM_ identFree cs
+          identFree src
+          mapM_ expFree idxs
+          expFree ve
+          binding (S.singleton dest) $ expFree body
+        expFree (DoLoop pat mergeexp i boundexp loopbody letbody _) = do
+          expFree mergeexp
+          expFree boundexp
+          binding (i `S.insert` patIdents pat) $ do
+            expFree loopbody
+            expFree letbody
+        expFree e = walkExpM names e
+
+        lambdaFree = tell . freeInLambda
+
+        binding bound = censor (S.\\ bound)
+
+-- | As 'freeInExp', but returns the raw names rather than 'IdentBase's.
+freeNamesInExp :: Ord vn => ExpBase ty vn -> S.Set vn
+freeNamesInExp = S.map identName . freeInExp
+
+-- | Return the set of variables names consumed by the given
+-- expression.
+consumedInExp :: Ord vn => ExpBase CompTypeBase vn -> S.Set vn
+consumedInExp = execWriter . expConsumed
+  where names = identityWalker {
+                  walkOnExp = expConsumed
+                }
+
+        unconsume s = censor (`S.difference` s)
+
+        consume ident =
+          tell $ identName ident `S.insert` aliases (identType ident)
+
+        expConsumed (LetPat pat e body _) = do
+          expConsumed e
+          unconsume (patNames pat) $ expConsumed body
+        expConsumed (LetWith _ dest src idxs ve body _) = do
+          mapM_ expConsumed idxs
+          expConsumed ve
+          consume src
+          unconsume (S.singleton $ identName dest) $ expConsumed body
+        expConsumed (DoLoop pat mergeexp i boundexp loopbody letbody _) = do
+          expConsumed mergeexp
+          expConsumed boundexp
+          unconsume (identName i `S.insert` patNames pat) $ do
+            expConsumed loopbody
+            expConsumed letbody
+        expConsumed (Apply _ args _ _) =
+          mapM_ (consumeArg . first typeOf) args
+          where consumeArg (t, Consume) = tell $ aliases t
+                consumeArg (Elem (Tuple ets), TupleDiet ds) =
+                  mapM_ consumeArg $ zip ets ds
+                consumeArg _ = return ()
+        expConsumed e = walkExpM names e
+
+-- | An expression is safe if it is always well-defined (assuming that
+-- any required certificates have been checked) in any context.  For
+-- example, array indexing is not safe, as the index may be out of
+-- bounds.  On the other hand, adding two numbers cannot fail.
+safeExp :: ExpBase ty vn -> Bool
+safeExp (Index {}) = False
+safeExp (Split {}) = False
+safeExp (Assert {}) = False
+safeExp (Reshape {}) = False
+safeExp (LetWith {}) = False
+safeExp (Zip {}) = False
+safeExp (ArrayLit {}) = False
+safeExp (Concat {}) = False
+safeExp (Apply {}) = False
+safeExp (BinOp Divide _ _ _ _) = False
+safeExp (BinOp Pow _ _ _ _) = False
+safeExp (BinOp Mod _ _ _ _) = False
+safeExp e = case walkExpM safe e of
+              Just () -> True
+              Nothing -> False
+  -- The use of the Maybe monad is simply to short-circuit traversal.
+  where
+    boolToMaybe True  = Just ()
+    boolToMaybe False = Nothing
+
+    safe = identityWalker {
+             walkOnExp = boolToMaybe . safeExp
+           , walkOnLambda = boolToMaybe . safeLambda
+           , walkOnTupleLambda = boolToMaybe . safeLambda . tupleLambdaToLambda
+           }
+
+    safeLambda (AnonymFun _ body _ _) = safeExp body
+    safeLambda (CurryFun _ exps _ _)  = all safeExp exps
+
+-- | Return the set of identifiers that are free in the given lambda.
+freeInLambda :: Ord vn => LambdaBase ty vn -> S.Set (IdentBase ty vn)
+freeInLambda (AnonymFun params body _ _) =
+  S.filter ((`notElem` params') . identName) $ freeInExp body
+    where params' = map identName params
+freeInLambda (CurryFun _ exps _ _) =
+  S.unions (map freeInExp exps)
+
+-- | As 'freeInLambda', but returns the raw names rather than
+-- 'IdentBase's.
+freeNamesInLambda :: Ord vn => LambdaBase ty vn -> S.Set vn
+freeNamesInLambda = S.map identName . freeInLambda
 
 -- | Convert an identifier to a 'ParamBase'.
 toParam :: IdentBase (TypeBase as) vn -> ParamBase vn
@@ -627,6 +824,16 @@ toParam (Ident name t loc) = Ident name (toDecl t) loc
 -- | Convert a 'ParamBase' to an identifier.
 fromParam :: ParamBase vn -> IdentBase CompTypeBase vn
 fromParam (Ident name t loc) = Ident name (fromDecl t) loc
+
+-- | The set of names bound in the given pattern.
+patNames :: Ord vn => TupIdentBase ty vn -> S.Set vn
+patNames = S.map identName . patIdents
+
+-- | The set of idents bound in the given pattern.
+patIdents :: Ord vn => TupIdentBase ty vn -> S.Set (IdentBase ty vn)
+patIdents (Id ident)     = S.singleton ident
+patIdents (TupId pats _) = mconcat $ map patIdents pats
+patIdents (Wildcard _ _) = mempty
 
 -- | A type with no aliasing information.
 type UncheckedType = TypeBase NoInfo Name
@@ -639,6 +846,9 @@ type UncheckedExp = ExpBase NoInfo Name
 
 -- | A lambda with no type annotations.
 type UncheckedLambda = LambdaBase NoInfo Name
+
+-- | A tuple lambda with no type annotations.
+type UncheckedTupleLambda = TupleLambdaBase NoInfo Name
 
 -- | A pattern with no type annotations.
 type UncheckedTupIdent = TupIdentBase NoInfo Name

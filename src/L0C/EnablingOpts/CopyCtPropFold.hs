@@ -2,7 +2,7 @@
 
 module L0C.EnablingOpts.CopyCtPropFold (
                                 copyCtProp
-                              , copyCtPropOneLambda
+                              , copyCtPropOneTupleLambda
                             )
   where
 
@@ -15,10 +15,13 @@ import Control.Monad.Writer
 --import Control.Monad.State
 import Data.Array
 import Data.List
+import Data.Maybe
 
 import Data.Bits
+import Data.Loc
 
 import qualified Data.Map as M
+import qualified Data.Set as S
 
 import L0C.L0
 
@@ -91,6 +94,19 @@ nonRemovable :: VName -> CPropM ()
 nonRemovable name =
   tell $ CPropRes False [name]
 
+-- | The identifier was consumed, and should not be used within the
+-- body, so mark it and any aliases as nonremovable (with
+-- 'nonRemovable') and delete any expressions using it or an alias
+-- from the symbol table.
+consuming :: Ident -> CPropM a -> CPropM a
+consuming idd m = do
+  (vtable, removed) <- M.partition ok <$> asks envVtable
+  mapM_ nonRemovable $ identName idd : M.keys removed
+  local (\e -> e { envVtable = vtable }) m
+  where als = identName idd `S.insert` aliases (identType idd)
+        ok (Constant {})  = True
+        ok (VarId k _ _)  = k `S.notMember` als
+        ok (SymArr e _ _) = S.null $ als `S.intersection` freeNamesInExp e
 
 -- | @collectNonRemovable mvars m@ executes the action @m@.  The
 -- intersection of @mvars@ and any variables used as merge variables
@@ -145,10 +161,10 @@ copyCtPropFun (fname, rettype, args, body, pos) = do
 ---- Run on Lambda Only!
 -----------------------------------------------------------------
 
-copyCtPropOneLambda :: Prog -> Lambda -> Either EnablingOptError Lambda
-copyCtPropOneLambda prog lam = do
+copyCtPropOneTupleLambda :: Prog -> TupleLambda -> Either EnablingOptError TupleLambda
+copyCtPropOneTupleLambda prog lam = do
     let env = CopyPropEnv { envVtable = M.empty, program = prog }
-    (res, _) <- runCPropM (copyCtPropLambda lam) env
+    (res, _) <- runCPropM (copyCtPropTupleLambda lam) env
     return res
 
 --------------------------------------------------------------------
@@ -159,12 +175,13 @@ copyCtPropOneLambda prog lam = do
 
 copyCtPropExp :: Exp -> CPropM Exp
 
-copyCtPropExp (LetWith nm src inds el body pos) = do
-    nonRemovable $ identName src
+copyCtPropExp (LetWith cs nm src inds el body pos) =
+  consuming src $ do
+    cs'       <- copyCtPropCerts cs
     el'       <- copyCtPropExp el
     inds'     <- mapM copyCtPropExp inds
     body'     <- copyCtPropExp body
-    return $ LetWith nm src inds' el' body' pos
+    return $ LetWith cs' nm src inds' el' body' pos
 
 copyCtPropExp (LetPat pat e body pos) = do
     e'    <- copyCtPropExp e
@@ -206,57 +223,64 @@ copyCtPropExp e@(Var (Ident vnm _ pos)) = do
                 --Iota _ _          -> return e
                 _                 -> return e
 
-copyCtPropExp eee@(Index idd@(Ident vnm tp p) inds tp2 pos) = do
+copyCtPropExp eee@(Index cs idd@(Ident vnm tp p) csidx inds tp2 pos) = do
   inds' <- mapM copyCtPropExp inds
   bnd   <- asks $ M.lookup vnm . envVtable
+  cs'   <- copyCtPropCerts cs
   case bnd of
-    Nothing               -> return  $ Index idd inds' tp2 pos
-    Just (VarId  id' _ _) -> changed $ Index (Ident id' tp p) inds' tp2 pos
+    Nothing               -> return  $ Index cs' idd csidx inds' tp2 pos
+    Just (VarId  id' _ _) -> changed $ Index cs' (Ident id' tp p) csidx inds' tp2 pos
     Just (Constant v _ _) ->
       case v of
         ArrayVal _ _ ->
           let sh = arrayShape v
           in case ctIndex inds' of
-               Nothing -> return $ Index idd inds' tp2 pos
+               Nothing -> return $ Index cs' idd csidx inds' tp2 pos
                Just iis->
                  if length iis == length sh
                  then case getArrValInd v iis of
-                        Nothing -> return $ Index idd inds' tp2 pos
+                        Nothing -> return $ Index cs' idd csidx inds' tp2 pos
                         Just el -> changed $ Literal el pos
-                 else return $ Index idd inds' tp2 pos
+                 else return $ Index cs' idd csidx inds' tp2 pos
         _ -> badCPropM $ TypeError pos  " indexing into a non-array value "
     Just (SymArr e' _ _) ->
       case (e', inds') of
         (Iota _ _, [ii]) -> changed ii
         (Iota _ _, _)    -> badCPropM $ TypeError pos  " bad indexing in iota "
 
-        (Index aa ais _ _,_) -> do
+        (Index cs2 aa csidx2 ais _ _,_) -> do
             -- the array element type is the same as the one of the big array, i.e., t1
             -- the result type is the same as eee's, i.e., tp2
-            inner <- copyCtPropExp( Index aa (ais ++ inds') tp2 pos )
+            inner <- copyCtPropExp(Index (cs'++cs2) aa
+                                   (liftM2 (++) csidx csidx2)
+                                   (ais ++ inds') tp2 pos)
             changed inner
 
         (ArrayLit {}   , _) ->
             case ctIndex inds' of
-                Nothing  -> return $ Index idd inds' tp2 pos
+                Nothing  -> return $ Index cs' idd csidx inds' tp2 pos
                 Just iis -> case getArrLitInd e' iis of
-                                Nothing -> return $ Index idd inds' tp2 pos
+                                Nothing -> return $ Index cs' idd csidx inds' tp2 pos
                                 Just el -> changed el
 
         (TupLit   _ _, _       ) -> badCPropM $ TypeError pos  " indexing into a tuple (found tuplit) "
 
 
         (Replicate _ vvv@(Var vv) _, _:is') -> do
-            inner <- copyCtPropExp (if null is' then vvv else Index vv is' tp2 pos)
+            inner <- if null is'
+                     then copyCtPropExp vvv
+                     else copyCtPropExp (Index cs' vv csidx is' tp2 pos)
             changed inner
-        (Replicate _ (Index a ais _ _) _, _:is') -> do
-            inner <- copyCtPropExp (Index a (ais ++ is') tp2 pos)
+        (Replicate _ (Index cs2 a csidx2 ais _ _) _, _:is') -> do
+            inner <- copyCtPropExp (Index (cs'++cs2) a
+                                    (liftM2 (++) csidx csidx2)
+                                    (ais ++ is') tp2 pos)
             changed inner
         (Replicate _ (Literal arr@(ArrayVal _ _) _) _, _:is') ->
             case ctIndex is' of
-                Nothing -> return $ Index idd inds' tp2 pos
+                Nothing -> return $ Index cs' idd csidx inds' tp2 pos
                 Just iis-> case getArrValInd arr iis of
-                               Nothing -> return $ Index idd inds' tp2 pos
+                               Nothing -> return $ Index cs' idd csidx inds' tp2 pos
                                Just el -> changed $ Literal el pos
         (Replicate _ val@(Literal _ _) _, _:is') ->
             if null is' then changed val
@@ -264,9 +288,9 @@ copyCtPropExp eee@(Index idd@(Ident vnm tp p) inds tp2 pos) = do
 
         (Replicate _ arr@(ArrayLit {}) _, _:is') ->
             case ctIndex is' of
-                Nothing -> return $ Index idd inds' tp2 pos
+                Nothing -> return $ Index cs' idd csidx inds' tp2 pos
                 Just iis-> case getArrLitInd arr iis of
-                               Nothing -> return $ Index idd inds' tp2 pos
+                               Nothing -> return $ Index cs' idd csidx inds' tp2 pos
                                Just el -> changed el
         (Replicate _ tup@(TupLit _ _) _, _:is') ->
             if null is' && isCtOrCopy tup then changed tup
@@ -276,7 +300,7 @@ copyCtPropExp eee@(Index idd@(Ident vnm tp p) inds tp2 pos) = do
           | [x] <- is' -> changed x
           | otherwise -> badCPropM $ TypeError pos  (" illegal indexing: " ++ ppExp eee)
         (Replicate {}, _) ->
-            return $ Index idd inds' tp2 pos
+            return $ Index cs' idd csidx inds' tp2 pos
 
         _ -> badCPropM $ CopyCtPropError pos (" Unreachable case in copyCtPropExp of Index exp: " ++
                                               ppExp eee++" is bound to "++ppExp e' )
@@ -338,33 +362,64 @@ copyCtPropExp (If e1 e2 e3 t pos) = do
 --- If expression is an array literal than replace it   ---
 ---    with the array's size
 -----------------------------------------------------------
-copyCtPropExp (Size i e pos) = do
+copyCtPropExp (Size cs i e pos) = do
     e' <- copyCtPropExp e
+    cs' <- copyCtPropCerts cs
     case e' of
         Var idd -> do vv <- asks $ M.lookup (identName idd) . envVtable
                       case vv of Just (Constant a _ _) -> literal a
-                                 _ -> return $ Size i e' pos
+                                 Just (SymArr (Iota ne _) _ _)
+                                   | i == 0 -> return ne
+                                 Just (SymArr (Replicate ne _ _) _ _)
+                                   | i == 0 -> return ne
+                                 _ -> return $ Size cs' i e' pos
         Literal a _ -> literal a
-        _ ->  return $ Size i e' pos
+        Iota ne _        | i == 0 -> return ne
+        Replicate ne _ _ | i == 0 -> return ne
+        _ ->  return $ Size cs i e' pos
     where literal a =
             case drop i $ arrayShape a of
               []  -> badCPropM $ TypeError pos " array literal has too few dimensions! "
               n:_ -> changed $ Literal (IntVal n) pos
 
 -----------------------------------------------------------
+--- If expression is true then just replace assertion   ---
+-----------------------------------------------------------
+
+copyCtPropExp (Assert e loc) = do
+  e' <- copyCtPropExp e
+  case e' of
+    Literal (LogVal True) _ -> return $ Literal Checked loc
+    Var idd -> do
+      vv <- asks $ M.lookup (identName idd) . envVtable
+      case vv of
+        Just (Constant (LogVal True) _ _) -> return $ Literal Checked loc
+        _                                 -> return $ Assert e' loc
+    _ -> return $ Assert e' loc
+
+copyCtPropExp (Conjoin es loc) = do
+  es' <- mapM copyCtPropExp es
+  -- Remove trivial certificates.
+  let check (Literal Checked _) = return Nothing
+      check (Var idd) = do
+        vv <- asks $ M.lookup (identName idd) . envVtable
+        case vv of
+          Just (Constant Checked _ _) -> return Nothing
+          _                           -> return $ Just $ Var idd
+      check e = return $ Just e
+  es'' <- liftM catMaybes $ mapM check es'
+  case es'' of [] -> return $ Literal Checked loc
+               _  -> return $ Conjoin es'' loc
+
+-----------------------------------------------------------
 --- If all params are values and function is free of IO ---
 ---    then evaluate the function call                  ---
 -----------------------------------------------------------
 
--- trace and assertZip are not executed at compile time
--- even if their arguments are values because they
--- exhibit side effects!
+-- trace is not executed at compile time even if its arguments are
+-- values because it exhibits side effects!
 copyCtPropExp (Apply fname args tp pos)
   | "trace" <- nameToString fname = do
-    args' <- mapM (copyCtPropExp . fst) args
-    return $ Apply fname (zip args' $ map snd args) tp pos
-copyCtPropExp (Apply fname args tp pos)
-  | "assertZip" <- nameToString fname = do
     args' <- mapM (copyCtPropExp . fst) args
     return $ Apply fname (zip args' $ map snd args) tp pos
 
@@ -394,6 +449,8 @@ copyCtPropExp (Apply fname args tp pos) = do
                                   Just (Constant v _ _) -> do
                                     (res, vals) <- allArgsAreValues as
                                     return (if res then (True, v : vals) else (False, []))
+                                    if res then return (True,  v:vals)
+                                           else return (False, []    )
                                   _ -> return (False, [])
                 _         -> return (False, [])
 
@@ -405,13 +462,31 @@ copyCtPropExp e = mapExpM mapper e
   where mapper = identityMapper {
                    mapOnExp = copyCtPropExp
                  , mapOnLambda = copyCtPropLambda
+                 , mapOnTupleLambda = copyCtPropTupleLambda
+                 , mapOnIdent = copyCtPropIdent
+                 , mapOnCertificates = copyCtPropCerts
                  }
 
--- data Lambda ty = AnonymFun [Ident Type] (Exp ty) Type SrcLoc
---                    -- fn int (bool x, char z) => if(x) then ord(z) else ord(z)+1 *)
---               | CurryFun String [Exp ty] ty SrcLoc
---                    -- op +(4) *)
---                 deriving (Eq, Ord, Typeable, Data, Show)
+copyCtPropIdent :: Ident -> CPropM Ident
+copyCtPropIdent ident@(Ident vnm _ loc) = do
+    bnd <- asks $ M.lookup vnm . envVtable
+    case bnd of
+      Nothing                 -> return ident
+      Just (VarId  id' tp1 _) -> changed $ Ident id' tp1 loc
+      _                       -> do nonRemovable vnm
+                                    return ident
+
+copyCtPropCerts :: Certificates -> CPropM Certificates
+copyCtPropCerts = liftM concat . mapM check
+  where check idd = do
+          vv <- asks $ M.lookup (identName idd) . envVtable
+          case vv of
+            Just (Constant Checked _ _) -> changed []
+            Just (VarId  id' tp1 _)     -> changed [Ident id' tp1 loc]
+            _                           -> do
+              nonRemovable $ identName idd
+              return [idd]
+          where loc = srclocOf idd
 
 copyCtPropLambda :: Lambda -> CPropM Lambda
 copyCtPropLambda (AnonymFun ids body tp pos) = do
@@ -421,7 +496,10 @@ copyCtPropLambda (CurryFun fname params tp pos) = do
     params' <- copyCtPropExpList params
     return $ CurryFun fname params' tp pos
 
-
+copyCtPropTupleLambda :: TupleLambda -> CPropM TupleLambda
+copyCtPropTupleLambda (TupleLambda ids body tp loc) = do
+    body' <- copyCtPropExp body
+    return $ TupleLambda ids body' tp loc
 
 
 copyCtPropExpList :: [Exp] -> CPropM [Exp]

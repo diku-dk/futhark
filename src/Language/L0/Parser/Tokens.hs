@@ -13,6 +13,7 @@ data Token = IF
            | IN
            | INT
            | BOOL
+           | CERT
            | CHAR
            | REAL
            | ID { idName :: Name }
@@ -27,6 +28,7 @@ data Token = IF
            | MOD
            | EQU
            | LTH
+           | GTH
            | LEQ
            | POW
            | SHIFTL
@@ -65,6 +67,7 @@ data Token = IF
            | REDOMAP
            | TRUE
            | FALSE
+           | CHECKED
            | NOT
            | NEGATE
            | AND
@@ -78,6 +81,8 @@ data Token = IF
            | FILTER2
            | MAPALL2
            | REDOMAP2
+           | ASSERT
+           | CONJOIN
 
            | MIN
            | MAX
