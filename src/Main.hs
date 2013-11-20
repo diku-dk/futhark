@@ -17,6 +17,7 @@ import L0C.TypeChecker
 import L0C.Renamer
 import L0C.Interpreter
 import L0C.EnablingOpts.EnablingOptDriver
+import L0C.EnablingOpts.RangeProp
 import L0C.HOTrans.HOTransDriver
 import qualified L0C.FirstOrderTransform as FOT
 import qualified L0C.TupleTransform as TT
@@ -91,6 +92,7 @@ commandLineOptions =
   , tatransformOpt "t" ["tuple-of-arrays-transform"]
   , eotransformOpt "e" ["enabling-optimisations"]
   , hotransformOpt "h" ["higher-order-optimizations"]
+  , symrangepropOpt "R" ["sym-range-prop"]
   , Option "s" ["standard"]
     (NoArg $ \opts -> opts { l0pipeline = standardPipeline ++ l0pipeline opts })
     "Use the recommended optimised pipeline."
@@ -170,6 +172,11 @@ hotransform = Pass { passName = "higher-order optimisations"
                    , passOp = liftPass highOrdTransf
                    }
 
+symrangeprop :: Pass
+symrangeprop = Pass { passName = "symbolic range propagation"
+                    , passOp = liftPass rangeProp
+                    }
+
 standardPipeline :: [Pass]
 standardPipeline =
   [ uttransform, tatransform, normalize, hoist, eotransform,
@@ -220,6 +227,11 @@ hotransformOpt :: String -> [String] -> L0Option
 hotransformOpt =
   passoption "Perform higher-order optimisation, i.e., fusion."
   hotransform
+
+symrangepropOpt :: String -> [String] -> L0Option
+symrangepropOpt =
+  passoption "Perform optimisations based on Symbolic Range Propagation"
+  symrangeprop
 
 -- | Entry point.  Non-interactive, except when reading interpreter
 -- input from standard input.
