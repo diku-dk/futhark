@@ -122,18 +122,22 @@ simplifyNary (Min e1 e2 tp pos) = do
     e1'<- simplifyNary e1 >>= simplifyBack
     e2'<- simplifyNary e2 >>= simplifyBack
     case (e1',e2') of
-        (_ ,Min e1'' e2'' tp'' pos'') ->
-          if e1' ==  e1''
-            then
-              trace ("FEST") return $ NaryMult [e2'] tp pos
-            else
-              trace ("NO FEST") return $ NaryMult [Min e1' e2' tp pos] tp pos
         (Literal (IntVal v1) _, Literal (IntVal v2) _) ->
             return $ NaryMult [Literal (IntVal $ min v1 v2) pos] tp pos
-        _ ->
-            return $ NaryMult [Min e1' e2' tp pos] tp pos
-
-
+        otherwise ->
+            return $ NaryMult [fixNestedMin(Min e1' e2' tp pos)] tp pos
+    where
+      fixNestedMin :: Exp -> Exp
+      fixNestedMin e@(Min e1@(Min e1' e2' tp' pos') e2 tp pos)
+        | e1  == e2 = e1
+        | e1' == e2 = Min e2' e2 tp pos
+        | e2' == e2 = Min e1' e2 tp pos
+        | otherwise = e
+      fixNestedMin e@(Min e1 e2@(Min e1' e2' tp' pos') tp pos)
+        | e1' == e1 = Min e2' e1 tp pos
+        | e2' == e1 = Min e1' e1 tp pos
+        | otherwise = e
+      fixNestedMin e = e
 
 simplifyNary (Max e1 e2 tp pos) = do
     e1'<- simplifyNary e1 >>= simplifyBack
@@ -142,7 +146,19 @@ simplifyNary (Max e1 e2 tp pos) = do
         (Literal (IntVal v1) _, Literal (IntVal v2) _) ->
             return $ NaryMult [Literal (IntVal $ max v1 v2) pos] tp pos
         _ ->
-            return $ NaryMult [Max e1' e2' tp pos] tp pos
+            return $ NaryMult [fixNestedMax $ Max e1' e2' tp pos] tp pos
+    where
+      fixNestedMax :: Exp -> Exp
+      fixNestedMax e@(Max e1@(Max e1' e2' tp' pos') e2 tp pos)
+        | e1  == e2 = e1
+        | e1' == e2 = Max e2' e2 tp pos
+        | e2' == e2 = Max e1' e2 tp pos
+        | otherwise = e
+      fixNestedMax e@(Max e1 e2@(Max e1' e2' tp' pos') tp pos)
+        | e1' == e1 = Max e2' e1 tp pos
+        | e2' == e1 = Max e1' e1 tp pos
+        | otherwise = e
+      fixNestedMax e = e
 
 simplifyNary (BinOp Plus (Max e1' e2' _ _) e2 tp pos) = do
     let e1'' = BinOp Plus e1' e2 tp pos

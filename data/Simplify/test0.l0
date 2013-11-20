@@ -1,2 +1,8 @@
 fun int main(int a) =
-  min(a, min(a,2))
+  let a1 = max(a, max(a,2)) in
+  let a2 = max(max(a,2), a) in
+  let a3 = max(max(2,a), a) in
+  let a4 = max(max(a,2), max(a,2)) in
+  a1 + a2 + a3 +a4
+
+
