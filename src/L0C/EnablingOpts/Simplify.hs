@@ -133,9 +133,17 @@ simplifyNary (Min e1 e2 tp pos) = do
         | e1' == e2 = Min e2' e2 tp pos
         | e2' == e2 = Min e1' e2 tp pos
         | otherwise = e
+      fixNestedMin e@(Min e1@(Max e1' e2' tp' pos') e2 tp pos)
+        | e1' == e2 = e2
+        | e2' == e2 = e2
+        | otherwise = e
       fixNestedMin e@(Min e1 e2@(Min e1' e2' tp' pos') tp pos)
         | e1' == e1 = Min e2' e1 tp pos
         | e2' == e1 = Min e1' e1 tp pos
+        | otherwise = e
+      fixNestedMin e@(Min e1 e2@(Max e1' e2' tp' pos') tp pos)
+        | e1' == e1 =  e1
+        | e2' == e1 =  e1
         | otherwise = e
       fixNestedMin e = e
 
@@ -154,9 +162,17 @@ simplifyNary (Max e1 e2 tp pos) = do
         | e1' == e2 = Max e2' e2 tp pos
         | e2' == e2 = Max e1' e2 tp pos
         | otherwise = e
+      fixNestedMax e@(Max e1@(Min e1' e2' tp' pos') e2 tp pos)
+        | e1' == e2 = e2
+        | e2' == e2 = e2
+        | otherwise = e
       fixNestedMax e@(Max e1 e2@(Max e1' e2' tp' pos') tp pos)
         | e1' == e1 = Max e2' e1 tp pos
         | e2' == e1 = Max e1' e1 tp pos
+        | otherwise = e
+      fixNestedMax e@(Max e1 e2@(Min e1' e2' tp' pos') tp pos)
+        | e1' == e1 = e1
+        | e2' == e1 = e1
         | otherwise = e
       fixNestedMax e = e
 
