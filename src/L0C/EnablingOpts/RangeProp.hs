@@ -16,6 +16,8 @@ where
 
 import qualified Data.Loc as L
 import qualified Data.Map as M
+import qualified Data.Set as S
+import qualified Data.List
 import Data.Maybe
 
 import Control.Monad.Reader
@@ -41,7 +43,8 @@ data RExp = RExp Exp | Pinf | Ninf
 
 type Range = (RExp, RExp)
 
-type RangeDict = M.Map VName (Range, RangeSign)
+type RangeDictInfo = (Range, Range, S.Set VName)
+type RangeDict = M.Map VName RangeDictInfo
 
 data Sign = Neg | NonPos | Zero | NonNeg | Pos
           deriving (Show, Eq, Ord)
@@ -56,7 +59,7 @@ type RangeInequality = Maybe Inequality
 ----------------------------------------
 
 data RangeEnv = RangeEnv {
-    dict    :: M.Map VName (Range, RangeSign)
+    dict    :: RangeDict
   }
 
 newtype RangeM a = RangeM (ReaderT RangeEnv (Either EnablingOptError) a)
@@ -95,19 +98,18 @@ rangeProp prog = do
         return (fname, rettype, params, body', pos)
 
     tellParam :: RangeDict -> Parameter -> RangeDict
-    tellParam rdict (Ident vname (Elem Int) _) =
-      M.insert vname ((Ninf, Pinf), Nothing) rdict
+    tellParam rdict (Ident vname (Elem Int) _) = M.insert vname noInfo rdict
     tellParam rdict _ = rdict
 
     rangePropMapper = identityMapper { mapOnExp = rangePropExp }
 
     rangePropExp :: Exp -> RangeM Exp
     rangePropExp (LetPat i@(Id (Ident vname (Elem Int) _)) toExp inExp pos) = do
-      theDict  <- asks dict
       toExp' <- rangePropExp toExp
-      info <- createRangeAndSign $ Just toExp'
-      let debugText = unlines [ escapeColorize Red ("----- LetPat " ++ textual vname ++ " -----")
-                              , ppDict (M.insert vname info theDict)
+      info <- createRangeInfo toExp'
+      let debugText = unlines [ escapeColorize Black (locStr pos)
+                              , escapeColorize Red ("----- LetPat " ++ textual vname ++ " -----")
+                              , ppDict (M.singleton vname info)
                               ]
       inExp' <- trace debugText $ mergeRangeEnvWithDict (M.singleton vname info) $ rangePropExp inExp
       return $ LetPat i toExp' inExp' pos
@@ -115,7 +117,8 @@ rangeProp prog = do
     rangePropExp (If cond thenE elseE ty pos) = do
       cond' <- rangePropExp cond
       (thenInfo, elseInfo) <- realExtractFromCond cond'
-      let debugText = unlines [ escapeColorize Red "----- If ----- " ++ escapeColorize Black (locStr pos)
+      let debugText = unlines [ escapeColorize Black (locStr pos)
+                              , escapeColorize Red "----- If ----- "
                               , ppExp cond
                               , ""
                               , "Then:"
@@ -146,13 +149,12 @@ mergeRangeEnvWithDict newDict = local (\env -> env { dict = M.union newDict $ di
 
 ----------------------------------------
 
-createRangeAndSign :: Maybe Exp -> RangeM (Range, RangeSign)
-createRangeAndSign (Just e)  = do
-  e' <- simplExp e
-  let range = (RExp e', RExp e')
-  sign <- calculateRangeSign range
-  return ( range , sign )
-createRangeAndSign Nothing = return ( (Ninf, Pinf), Nothing )
+createRangeInfo :: Exp -> RangeM RangeDictInfo
+createRangeInfo e = do
+  let symbolic = (RExp e, RExp e)
+  comp <- makeRangeComparable symbolic
+  let depend = varsUsedInExp e
+  return (symbolic, comp, depend)
 
 ----------------------------------------
 -- Comparisons based on range dict
@@ -212,13 +214,13 @@ isComparable range = do
 makeRangeComparable :: Range -> RangeM Range
 makeRangeComparable (Ninf, Pinf) = return (Ninf, Pinf)
 makeRangeComparable range = do
-  dictAsList  <- {-trace ("- makeComp "++ ppRange range)-} liftM M.toDescList $ asks dict
-  foldingFun range dictAsList
+  dictAsList  <- {-trace ("- makeComp "++ ppRange range)-} liftM M.keys $ asks dict
+  foldingFun range (reverse . Data.List.sort $ dictAsList)
 
   where
-    foldingFun :: Range -> [(VName , (Range, RangeSign))] -> RangeM Range
+    foldingFun :: Range -> [VName] -> RangeM Range
     foldingFun (a,b) [] = {-trace ("+ makeEndOfList " ++ ppRange(a,b))-} return (a,b)
-    foldingFun (a,b) ((ident, _) : rest) = do
+    foldingFun (a,b) (ident : rest) = do
       isComp <- isComparable (a,b)
       if isComp
       then {-trace("+ makeIsComp " ++ ppRange(a,b))-} return (a,b)
@@ -231,13 +233,13 @@ makeRangeComparable range = do
               --trace ("  make " ++ ppRange(a,b) ++ " ~~> " ++ ppRange(a',b') ++ " by sub " ++ textual ident )
               foldingFun (a',b') rest
 
-varsUsedInExp :: Exp -> [VName]
+varsUsedInExp :: Exp -> S.Set VName
 varsUsedInExp ex = execWriter $ expVars ex
   where
     vars = identityWalker { walkOnExp = expVars }
 
     expVars e@(Var ident ) =
-      tell [identName ident] >> walkExpM vars e
+      tell (S.singleton $ identName ident) >> walkExpM vars e
 
     expVars e = walkExpM vars e
 
@@ -287,7 +289,7 @@ atomicRangeSign (lb,ub) = do
     atomicRExpSign (RExp (Var (Ident vname (Elem Int) p))) = do
       bnd <- asks $ M.lookup vname . dict
       case bnd of
-        Just (_,sign) -> return sign
+        Just (_,comp,_) -> atomicRangeSign comp
         Nothing       -> badRangeM $ RangePropError p $
             "atomicRExpSign: Identifier was not in range dict: " ++ textual vname
     atomicRExpSign _ = return Nothing
@@ -303,7 +305,7 @@ substitute i v@(RExp (Var (Ident vname _ p))) =
   else do
     bnd <- asks $ M.lookup vname . dict
     case bnd of
-      Just (range,_) -> return range
+      Just (range,_,_) -> return range
       Nothing       -> badRangeM $ RangePropError p $ "substitute: Identifier was not in range dict: " ++ textual vname
 
 substitute i (RExp (BinOp Plus e1 e2 ty pos)) = do
@@ -533,8 +535,13 @@ realExtractFromCond e = do
     monadHelper vname (a, b) = do
       (a', _) <- substitute vname a
       (_, b') <- substitute vname b
-      sign <- calculateRangeSign (a',b')
-      return ((a',b'), sign)
+      comp <- makeRangeComparable (a',b')
+      let depend = case (a',b') of
+                  (RExp e1, RExp e2) -> S.union (varsUsedInExp e1) (varsUsedInExp e2)
+                  (RExp e1, _)       -> varsUsedInExp e1
+                  (_, RExp e2)       -> varsUsedInExp e2
+                  _                  -> S.empty
+      return ((a',b'), comp, depend)
 
 extractFromCond :: Exp -> RangeM ( M.Map VName (Maybe Range, Maybe Range) )
 extractFromCond (Not e _) = do
@@ -696,7 +703,10 @@ dummyVName :: VName
 dummyVName = ID (nameFromString "dummy",-1)
 
 emptyRangeDict :: RangeDict
-emptyRangeDict = M.singleton dummyVName ((Ninf,Pinf), Nothing)
+emptyRangeDict = M.singleton dummyVName noInfo
+
+noInfo :: RangeDictInfo
+noInfo = ((Ninf, Pinf), (Ninf, Pinf), S.empty)
 
 ----------------------------------------
 -- Pretty printing
@@ -717,20 +727,12 @@ ppSign Nothing = "Any"
 ppDict :: RangeDict -> String
 ppDict rdict = foldr ((++) . (++ "\n") . ppDictElem) "" (M.toList $ M.delete dummyVName rdict)
               where
-                ppDictElem :: (VName, (Range, RangeSign)) -> String
-                ppDictElem (vname, (range, sign)) =
+                ppDictElem :: (VName, RangeDictInfo) -> String
+                ppDictElem (vname, (range, comp, depend)) =
                   escapeColorize Green (textual vname) ++ " " ++
                   escapeColorize Blue (ppRange range) ++ " " ++
-                  escapeColorize White (ppRangeAsComp range) ++ " " ++
-                  escapeColorize Yellow (ppSign sign)
-
-                -- makes the range comparable, so it's understandable for us humans
-                ppRangeAsComp :: Range -> String
-                ppRangeAsComp range = do
-                  let env = RangeEnv { dict = rdict }
-                  case runRangeM (makeRangeComparable range) env of
-                    Right range' -> ppRange range'
-                    Left err     -> error $ show err
+                  escapeColorize White (ppRange comp) ++ " " ++
+                  escapeColorize Yellow (show . (map textual) $ S.toList depend)
 
 ----------------------------------------
 -- TESTING
