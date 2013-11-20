@@ -102,11 +102,11 @@ simplifyBack (NaryPlus (f:fs) tp pos) = do
 
 simplifyBothWays :: Exp -> SimplifyM Exp
 simplifyBothWays e = do
-  --{- No debug
+  {- No debug
   enary <- simplifyNary e
   simplifyBack enary
   --}
-  {--
+  --{--
   enary <- trace (escapeColorize Magenta $ "Before: " ++ ppExp e) simplifyNary e
   e' <- simplifyBack enary
   trace (escapeColorize Green $ "After: " ++ ppExp e') return e'
@@ -124,26 +124,26 @@ simplifyNary (Min e1 e2 tp pos) = do
     case (e1',e2') of
         (Literal (IntVal v1) _, Literal (IntVal v2) _) ->
             return $ NaryMult [Literal (IntVal $ min v1 v2) pos] tp pos
-        otherwise ->
+        _ ->
             return $ NaryMult [fixNestedMin(Min e1' e2' tp pos)] tp pos
     where
       fixNestedMin :: Exp -> Exp
-      fixNestedMin e@(Min e1@(Min e1' e2' tp' pos') e2 tp pos)
+      fixNestedMin e@(Min e1@(Min e11 e12 _ _) e2 _ _)
         | e1  == e2 = e1
-        | e1' == e2 = Min e2' e2 tp pos
-        | e2' == e2 = Min e1' e2 tp pos
+        | e11 == e2 = e1
+        | e12 == e2 = e1
         | otherwise = e
-      fixNestedMin e@(Min e1@(Max e1' e2' tp' pos') e2 tp pos)
-        | e1' == e2 = e2
-        | e2' == e2 = e2
+      fixNestedMin e@(Min e1@(Max e11 e12 _ _) e2 _ _)
+        | e11 == e2 = e2
+        | e12 == e2 = e2
         | otherwise = e
-      fixNestedMin e@(Min e1 e2@(Min e1' e2' tp' pos') tp pos)
-        | e1' == e1 = Min e2' e1 tp pos
-        | e2' == e1 = Min e1' e1 tp pos
+      fixNestedMin e@(Min e1 e2@(Min e21 e22 _ _) _ _)
+        | e1 == e21 = e2
+        | e1 == e22 = Min e1 e21 tp pos
         | otherwise = e
-      fixNestedMin e@(Min e1 e2@(Max e1' e2' tp' pos') tp pos)
-        | e1' == e1 =  e1
-        | e2' == e1 =  e1
+      fixNestedMin e@(Min e1 (Max e21 e22 _ _) _ _)
+        | e1 == e21 = e1
+        | e1 == e22 = e1
         | otherwise = e
       fixNestedMin e = e
 
@@ -157,22 +157,22 @@ simplifyNary (Max e1 e2 tp pos) = do
             return $ NaryMult [fixNestedMax $ Max e1' e2' tp pos] tp pos
     where
       fixNestedMax :: Exp -> Exp
-      fixNestedMax e@(Max e1@(Max e1' e2' tp' pos') e2 tp pos)
+      fixNestedMax e@(Max e1@(Max e11 e12 _ _) e2 _ _)
         | e1  == e2 = e1
-        | e1' == e2 = Max e2' e2 tp pos
-        | e2' == e2 = Max e1' e2 tp pos
+        | e11 == e2 = e1
+        | e12 == e2 = e1
         | otherwise = e
-      fixNestedMax e@(Max e1@(Min e1' e2' tp' pos') e2 tp pos)
-        | e1' == e2 = e2
-        | e2' == e2 = e2
+      fixNestedMax e@(Max (Min e11 e12 _ _) e2 _ _)
+        | e11 == e2 = e2
+        | e12 == e2 = e2
         | otherwise = e
-      fixNestedMax e@(Max e1 e2@(Max e1' e2' tp' pos') tp pos)
-        | e1' == e1 = Max e2' e1 tp pos
-        | e2' == e1 = Max e1' e1 tp pos
+      fixNestedMax e@(Max e1 e2@(Max e21 e22 _ _) _ _)
+        | e1 == e21 = e2
+        | e1 == e22 = e2
         | otherwise = e
-      fixNestedMax e@(Max e1 e2@(Min e1' e2' tp' pos') tp pos)
-        | e1' == e1 = e1
-        | e2' == e1 = e1
+      fixNestedMax e@(Max e1 (Min e21 e22 _ _) _ _)
+        | e1 == e21 = e1
+        | e1 == e22 = e1
         | otherwise = e
       fixNestedMax e = e
 
