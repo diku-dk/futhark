@@ -218,16 +218,16 @@ makeRangeComparable range = do
   where
     foldingFun :: Range -> [(VName , (Range, RangeSign))] -> RangeM Range
     foldingFun (a,b) [] = {-trace ("+ makeEndOfList " ++ ppRange(a,b))-} return (a,b)
-    foldingFun (a,b) ((ident, (idRange,_)) : rest) = do
+    foldingFun (a,b) ((ident, _) : rest) = do
       isComp <- isComparable (a,b)
       if isComp
       then {-trace("+ makeIsComp " ++ ppRange(a,b))-} return (a,b)
       else if a == b
-      then do (a', b') <- substitute ident idRange a
+      then do (a', b') <- substitute ident a
               --trace ("  make (eq) " ++ ppRExp a ++ " ~~> " ++ ppRange(a',b') ++ " by sub " ++ textual ident )
               foldingFun (a',b') rest
-      else do (a',_) <- substitute ident idRange a
-              (_,b') <- substitute ident idRange b
+      else do (a',_) <- substitute ident a
+              (_,b') <- substitute ident b
               --trace ("  make " ++ ppRange(a,b) ++ " ~~> " ++ ppRange(a',b') ++ " by sub " ++ textual ident )
               foldingFun (a',b') rest
 
@@ -296,13 +296,19 @@ atomicRangeSign (lb,ub) = do
 -- Range substitution
 ----------------------------------------
 
-substitute :: VName -> Range -> RExp -> RangeM Range
-substitute _ _ l@(RExp (Literal{})) = return (l,l)
-substitute i r v@(RExp (Var e)) = return (if identName e == i then r else (v,v))
+substitute :: VName -> RExp -> RangeM Range
+substitute _ l@(RExp (Literal{})) = return (l,l)
+substitute i v@(RExp (Var (Ident vname _ p))) =
+  if vname /= i then return (v,v)
+  else do
+    bnd <- asks $ M.lookup vname . dict
+    case bnd of
+      Just (range,_) -> return range
+      Nothing       -> badRangeM $ RangePropError p $ "substitute: Identifier was not in range dict: " ++ textual vname
 
-substitute i r (RExp (BinOp Plus e1 e2 ty pos)) = do
-  (a, b) <- substitute i r (RExp e1)
-  (c, d) <- substitute i r (RExp e2)
+substitute i (RExp (BinOp Plus e1 e2 ty pos)) = do
+  (a, b) <- substitute i (RExp e1)
+  (c, d) <- substitute i (RExp e2)
   ac <- addRExp a c
   bd <- addRExp b d
   return(ac,bd)
@@ -317,14 +323,14 @@ substitute i r (RExp (BinOp Plus e1 e2 ty pos)) = do
     addRExp Ninf _ = return Ninf
     addRExp _ Ninf = return Ninf
 
-substitute i r (RExp (BinOp Minus e1 e2 ty pos)) = do
+substitute i (RExp (BinOp Minus e1 e2 ty pos)) = do
     let min_1 = createIntLit (-1) pos
     let e2' = BinOp Times min_1 e2 ty pos
-    substitute i r . RExp $ BinOp Plus e1 e2' ty pos
+    substitute i . RExp $ BinOp Plus e1 e2' ty pos
 
-substitute i r (RExp (BinOp Times e1 e2 ty pos)) = do
-  (a, b) <- substitute i r (RExp e1)
-  (c, d) <- substitute i r (RExp e2)
+substitute i (RExp (BinOp Times e1 e2 ty pos)) = do
+  (a, b) <- substitute i (RExp e1)
+  (c, d) <- substitute i (RExp e2)
   e1Sign <- calculateRangeSign(a,b)
   e2Sign <- calculateRangeSign(c,d)
 
@@ -391,9 +397,9 @@ substitute i r (RExp (BinOp Times e1 e2 ty pos)) = do
         (Just s)    -> return $ Just (if Zero < s then Ninf else Pinf)
     multRExp x y = multRExp y x
 
-substitute i r (RExp (BinOp Divide e1 e2 ty pos)) = do
-  (a, b) <- substitute i r (RExp e1)
-  (c, d) <- substitute i r (RExp e2)
+substitute i (RExp (BinOp Divide e1 e2 ty pos)) = do
+  (a, b) <- substitute i (RExp e1)
+  (c, d) <- substitute i (RExp e2)
   e1Sign <- calculateRangeSign(a,b)
   e2Sign <- calculateRangeSign(c,d)
   if canBeZero e2Sign then return (Ninf, Pinf)
@@ -448,9 +454,9 @@ substitute i r (RExp (BinOp Divide e1 e2 ty pos)) = do
     divRExp _ Pinf = return $ RExp $ createIntLit 0 pos
     divRExp _ Ninf = return $ RExp $ createIntLit 0 pos
 
-substitute i r (RExp (BinOp Pow e1 e2 ty pos)) = do
-  (a, b) <- substitute i r (RExp e1)
-  (c, d) <- substitute i r (RExp e2)
+substitute i (RExp (BinOp Pow e1 e2 ty pos)) = do
+  (a, b) <- substitute i (RExp e1)
+  (c, d) <- substitute i (RExp e2)
   case (c,d) of
     ( RExp (Literal (IntVal v) _) , RExp (Literal (IntVal v') _) )
       | v /= v' -> return (Ninf, Pinf)
@@ -479,16 +485,16 @@ substitute i r (RExp (BinOp Pow e1 e2 ty pos)) = do
     powRExp Ninf _ = return Ninf
     powRExp (RExp x) v = liftM RExp $ simplExp (BinOp Pow x (createIntLit v pos) ty pos)
 
-substitute i r (RExp (Min e1 e2 _ pos)) = do
-  (a, b) <- substitute i r (RExp e1)
-  (c, d) <- substitute i r (RExp e2)
+substitute i (RExp (Min e1 e2 _ pos)) = do
+  (a, b) <- substitute i (RExp e1)
+  (c, d) <- substitute i (RExp e2)
   ac <- minRExp a c pos
   bd <- minRExp b d pos
   return (ac, bd)
 
-substitute i r (RExp (Max e1 e2 _ pos)) = do
-  (a, b) <- substitute i r (RExp e1)
-  (c, d) <- substitute i r (RExp e2)
+substitute i (RExp (Max e1 e2 _ pos)) = do
+  (a, b) <- substitute i (RExp e1)
+  (c, d) <- substitute i (RExp e2)
   ac <- maxRExp a c pos
   bd <- maxRExp b d pos
   return (ac, bd)
@@ -499,9 +505,11 @@ substitute i r (RExp (Max e1 e2 _ pos)) = do
 -- Then we process x, encountering (let y = 5 in y+3)
 -- when trying to find it's range
 -- therefore we only need to look at the part after in, in this case y+3
-substitute i r (RExp (LetPat _ _ inExp _)) = substitute i r (RExp inExp)
+-- TODO: This is actually handled by let normalization
+substitute i (RExp (LetPat _ _ inExp _)) = substitute i (RExp inExp)
 
-substitute _ _ _ = return (Ninf, Pinf)
+
+substitute _ _ = return (Ninf, Pinf)
 
 ----------------------------------------
 -- Extract from cond
@@ -517,12 +525,8 @@ realExtractFromCond e = do
   where
     addRangeSign m = Data.Traversable.sequence $ M.mapWithKey monadHelper m
     monadHelper vname (a, b) = do
-      asdf <- liftM (M.lookup vname) $ asks dict
-      (oldRange, _) <- case asdf of
-                    Just r -> return r
-                    Nothing -> badRangeM $ RangePropError (L.srclocOf e) "Old range not found"
-      (a', _) <- substitute vname oldRange a
-      (_, b') <- substitute vname oldRange b
+      (a', _) <- substitute vname a
+      (_, b') <- substitute vname b
       sign <- calculateRangeSign (a',b')
       return ((a',b'), sign)
 
