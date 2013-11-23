@@ -591,7 +591,7 @@ realExtractFromCond e = do
     monadHelper :: VName -> Range -> RangeM RangeDictInfo
     monadHelper vname rng = do
       rng' <- case rng of
-               Single e -> return $ Single e
+               Single e -> substitute vname e
                Span a b -> do lowRng <- substitute' vname a
                               upRng <- substitute' vname b
                               return $ mergeRanges lowRng upRng
@@ -650,15 +650,15 @@ extractFromCond (And e1 e2 pos) = do
       elseRange <- unionIfDefined elseA elseB pos
       return (thenRange, elseRange)
 
-extractFromCond (Or e1 e2 pos) = do
-  e1Info <- extractFromCond e1
-  e2Info <- extractFromCond e2
-  unionWithM unionFunc e1Info e2Info
-  where
-    unionFunc (thenA, elseA) (thenB, elseB) = do
-      thenRange <- unionIfDefined thenA thenB pos
-      elseRange <- intersectIfDeinfed elseA elseB pos
-      return (thenRange, elseRange)
+{- e1 |  e2 | !(e1) && !(e2) | e1 || e2
+   ------------------------------------
+   T  |  T  |        F       |     T
+   T  |  F  |        F       |     T
+   F  |  T  |        F       |     T
+   F  |  F  |        T       |     F
+-}
+extractFromCond (Or e1 e2 pos) =
+  extractFromCond $ Not (And (Not e1 pos) (Not e2 pos) pos) pos
 
 extractFromCond _ = return M.empty
 
@@ -710,6 +710,7 @@ rangeUnion (Span a b) (Span c d) pos = do
   ac <- minRExp a c pos
   bd <- maxRExp b d pos
   return $ Span ac bd
+rangeUnion r1 r2 pos = rangeUnion r2 r1 pos
 
 rangeIntersect :: Range -> Range ->  L.SrcLoc -> RangeM Range
 rangeIntersect (Single e) r pos = rangeIntersect r (Span (RExp e) (RExp e)) pos
@@ -717,6 +718,7 @@ rangeIntersect (Span a b) (Span c d) pos = do
   ac <- maxRExp a c pos
   bd <- minRExp b d pos
   return $ Span ac bd
+rangeIntersect r1 r2 pos = rangeIntersect r2 r1 pos
 
 ----------------------------------------
 -- Helper functions
