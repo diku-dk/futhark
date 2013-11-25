@@ -38,6 +38,9 @@ data Range = Span RExp RExp
 type RangeDictInfo = (Range, Range, S.Set VName)
 type RangeDict = M.Map VName RangeDictInfo
 
+type CondDictInfo = (M.Map VName (Maybe Range, Maybe Range))
+type CondDict = M.Map VName CondDictInfo
+
 data RangeSign = AnySign | Neg | NonPos | Zero | NonNeg | Pos
           deriving (Show, Eq, Ord)
 
@@ -47,7 +50,8 @@ data RangeInequality = IANY | ILT | ILTE | IEQ | IGTE | IGT
 ----------------------------------------
 
 data RangeEnv = RangeEnv {
-    dict    :: RangeDict
+    dict     :: RangeDict
+  , condDict :: CondDict
   }
 
 newtype RangeM a = RangeM (ReaderT RangeEnv (Either EnablingOptError) a)
@@ -90,7 +94,7 @@ rangeProp prog = do
     return $ Prog res
   where
     rangePropFun (fname, rettype, params, body, pos) = do
-        let env = RangeEnv { dict = foldl tellParam emptyRangeDict params }
+        let env = RangeEnv { dict = foldl tellParam emptyRangeDict params, condDict = M.empty }
         body' <- runRangeM (rangePropExp body) env
         return (fname, rettype, params, body', pos)
 
@@ -109,6 +113,12 @@ rangeProp prog = do
                               , ppDict (M.singleton vname info)
                               ]
       inExp' <- trace debugText $ mergeRangeEnvWithDict (M.singleton vname info) $ rangePropExp inExp
+      return $ LetPat i toExp' inExp' pos
+
+    rangePropExp (LetPat i@(Id (Ident vname (Elem Bool) _)) toExp inExp pos) = do
+      toExp' <- rangePropExp toExp
+      info <- extractFromCond toExp'
+      inExp' <- mergeRangeEnvWithCondDict (M.singleton vname info) $ rangePropExp inExp
       return $ LetPat i toExp' inExp' pos
 
     rangePropExp (If cond thenE elseE ty pos) = do
@@ -143,6 +153,9 @@ rangeProp prog = do
 
 mergeRangeEnvWithDict :: RangeDict -> RangeM a -> RangeM a
 mergeRangeEnvWithDict newDict = local (\env -> env { dict = M.union newDict $ dict env })
+
+mergeRangeEnvWithCondDict :: CondDict -> RangeM a -> RangeM a
+mergeRangeEnvWithCondDict newCondDict = local (\env -> env { condDict = M.union newCondDict $ condDict env })
 
 ----------------------------------------
 
@@ -603,6 +616,12 @@ realExtractFromCond e = do
       return (rng', comp, depend)
 
 extractFromCond :: Exp -> RangeM ( M.Map VName (Maybe Range, Maybe Range) )
+extractFromCond (Var (Ident vname (Elem Bool) p)) = do
+  bnd <- asks $ M.lookup vname . condDict
+  case bnd of
+    Just info -> return info
+    Nothing       -> badRangeM $ RangePropError p $ "extractFromCond: Conidtion was not found in cond dict: " ++ textual vname
+
 extractFromCond (Not e _) = do
   res <- extractFromCond e
   return $ M.map (\(a, b) -> (b, a)) res
