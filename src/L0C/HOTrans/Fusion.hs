@@ -366,6 +366,8 @@ greedyFuse is_repl lam_used_nms res (idd, soac) = do
 
 fuseSOACwithKer :: ([Ident], Exp) -> FusedKer -> FusionGM FusedKer
 fuseSOACwithKer (out_ids1, soac1) ker = do
+  -- We are fusing soac1 into soac2, i.e, the output of soac1 is going
+  -- into soac2.
   let (out_ids2, soac2) = fsoac ker
   cs1      <- getCertsSOAC soac1
   cs2      <- getCertsSOAC soac2
@@ -399,7 +401,8 @@ fuseSOACwithKer (out_ids1, soac1) ker = do
                 -- The Fusions that are semantically filter fusions:
                 ----------------------------------------------------
                 (Reduce2 _ _ ne _ eltp pos, Filter2 {}) -> do
-                  (res_lam, new_inp) <- fuseRedFilt inp1_arr lam1 out_ids1 inp2_arr lam2
+                  name <- new "check"
+                  let (res_lam, new_inp) = fuseFilterIntoFold lam1 inp1_arr out_ids1 lam2 inp2_arr name
                   return (Reduce2 (cs1++cs2) res_lam ne new_inp eltp pos, new_inp)
                 (Redomap2 _ lam21 _ nes _ eltp pos, Filter2 {}) -> do
                   name <- new "check"
@@ -910,36 +913,6 @@ errorIllegalFus soac_name pos =
 --------------------------------------------
 --------------------------------------------
 
-
--- | Assumption: the order and number of elements matches between
---       the input to the Reduce and the input to Filter,
---       i.e., already checked in @isCompatibleKer@
-fuseRedFilt :: [Exp] -> TupleLambda -> [Ident]
-            -> [Exp] -> TupleLambda
-            -> FusionGM (TupleLambda, [Exp])
-fuseRedFilt inp1 lam1 _ inp2 lam2 = do
-    let rtp2 = tupleLambdaReturnType lam2
-    let pos2 = srclocOf lam2
-    let pos1 = srclocOf lam1
-    let (ids2, bdy2 ) = getUnmdParsAndBody lam2
-    (par1, call1) <- buildCall (map (stripArray 1 . typeOf) inp1) lam1
-
-    let n   = length inp2
-    let nd2 = n `div` 2
-    (ids21, ids22) <- if n `mod` 2 == 0 && nd2 == length par1 && n == length ids2
-                      then return (take nd2 ids2, drop nd2 ids2)
-                      else badFusionGM $ EnablingOptError pos2
-                                          ("In Fusion.hs, fuseRedFilt: uneven lambda params "
-                                           ++ "of lam2 (lam1): " ++ show n ++ " " ++ show (length par1))
-
-    let then_pat = TupId (map Id ids22) pos2
-    let then_var = TupLit (map Var par1 ) pos1
-    let then_exp = LetPat then_pat then_var  bdy2 pos2
-    let else_exp = TupLit (map Var ids21) pos2
-    let res_body = If call1 then_exp else_exp (typeOf then_exp) pos1
-    return (TupleLambda (map toParam $ ids21++par1) res_body rtp2 pos2, inp1)
-
-
 -- | Assumption: the order and number of elements matches
 --       between the map and the reduce,
 --       i.e., already checked in @isCompatibleKer@.
@@ -967,30 +940,6 @@ fuseMapFilt inp1 lam1 ne inp2 lam2 = do
     let res_branch = If (Var check) then_exp ne (typeOf ne) pos1
     let res_body = LetPat (TupId [Id check] pos2) call1 res_branch pos2
     return (TupleLambda (map toParam par1) res_body rtp2 pos2, inp1)
-
-{-
--- | Assumption: the order and number of elements matches between the two filters,
---     i.e., already checked in @isCompatibleKer@
-fuse2Filter :: [Exp] -> Lambda -> [Ident]
-                -> [Exp] -> Lambda
-                -> FusionGM (Lambda, [Exp])
-fuse2Filter inp1 lam1 _ inp2 lam2 = do
-    let pos2 = (SrcLoc (locOf lam2))
-    let pos1 = (SrcLoc (locOf lam1))
-    (par1, call1) <- buildCall (map (stripArray 1 . typeOf) inp1) lam1
-    (ids2, bdy2 ) <- getUnmdParsAndBody inp2 lam2
-    _ <- if length ids2 == length par1 && length par1 == length inp1 && length inp2 == length inp1
-         then return 1
-         else badFusionGM $ EnablingOptError pos2
-                             ("In Fusion.hs, fuse2Filter: num of params of "
-                              ++ "lam2, lam1 and inp1 do not agree: " ++ show (length ids2)
-                              ++ " " ++ show (length par1) ++ " " ++ show (length inp1))
-    let then_pat = TupId  (map (\x->Id  x) ids2) pos2
-    let then_var = TupLit (map (\x->Var x) par1) pos1
-    let then_exp = LetPat then_pat then_var  bdy2 pos2
-    let res_body = If call1 then_exp (Literal (LogVal False) pos1) (Elem Bool) pos1
-    return (AnonymFun par1 res_body (Elem Bool) pos2, inp1)
--}
 
 -- | Recieves a list of types @tps@, which should match
 --     the lambda's parameters, and a lambda expression.
