@@ -408,8 +408,9 @@ fuseSOACwithKer (out_ids1, soac1) ker = do
                   name <- new "check"
                   let (res_lam, new_inp) = fuseFilterIntoFold lam1 inp1_arr out_ids1 lam2 inp2_arr name
                   return (Redomap2 (cs1++cs2) lam21 res_lam nes new_inp eltp pos, new_inp)
-                (Filter2 _ _ _ pos, Filter2 _ _ _ pos1) -> do
-                  (res_lam, new_inp) <- fuseMapFilt inp1_arr lam1 (Literal (LogVal False) pos1) inp2_arr lam2
+                (Filter2 _ _ _ pos, Filter2 {}) -> do
+                  name <- new "check"
+                  let (res_lam, new_inp) = fuseFilters lam1 inp1_arr out_ids1 lam2 inp2_arr name
                   return (Filter2 (cs1++cs2) res_lam new_inp pos, new_inp)
 
                 ----------------------------------------------------
@@ -912,50 +913,6 @@ errorIllegalFus soac_name pos =
 --- FUSING 2 COMPATIBLE SOACs:           ---
 --------------------------------------------
 --------------------------------------------
-
--- | Assumption: the order and number of elements matches
---       between the map and the reduce,
---       i.e., already checked in @isCompatibleKer@.
-fuseMapFilt :: [Exp] -> TupleLambda -> Exp
-            -> [Exp] -> TupleLambda
-            -> FusionGM (TupleLambda, [Exp])
-fuseMapFilt inp1 lam1 ne inp2 lam2 = do
-    let rtp2 = tupleLambdaReturnType lam2
-    let pos2 = srclocOf lam2
-    let pos1 = srclocOf lam1
-    let (ids2, bdy2 ) = getUnmdParsAndBody lam2
-    (par1, call1) <- buildCall (map (stripArray 1 . typeOf) inp1) lam1
-
-    _ <- if length ids2 == length par1 && length par1 == length inp1 && length inp2 == length inp1
-         then return Nothing
-         else badFusionGM $ EnablingOptError pos2
-                             ("In Fusion.hs, fuse2Filter: num of params of "
-                              ++ "lam2, lam1 and inp1 do not agree: " ++ show (length ids2)
-                              ++ " " ++ show (length par1) ++ " " ++ show (length inp1))
-
-    let then_pat = TupId (map Id ids2) pos2
-    let then_var = TupLit (map Var par1) pos1
-    let then_exp = LetPat then_pat then_var bdy2 pos2
-    check <- Ident <$> new "check" <*> pure (Elem Bool) <*> pure pos2
-    let res_branch = If (Var check) then_exp ne (typeOf ne) pos1
-    let res_body = LetPat (TupId [Id check] pos2) call1 res_branch pos2
-    return (TupleLambda (map toParam par1) res_body rtp2 pos2, inp1)
-
--- | Recieves a list of types @tps@, which should match
---     the lambda's parameters, and a lambda expression.
---   Returns a list of identifiers, corresponding to
---     the `expanded' argument of lambda, and the lambda call.
-buildCall :: [Type] -> TupleLambda -> FusionGM ([Ident], Exp)
-buildCall tps (TupleLambda lam_args bdy _ pos)    = do
-    let (ids, bdy') = (lam_args, bdy) -- getLamNormIdsAndBody lam_args bdy
-    let bres = and $ zipWith subtypeOf tps $ map (identType . fromParam) ids
-    if bres then return (map fromParam ids, bdy')
-    else badFusionGM $ EnablingOptError pos
-                       "In Fusion.hs, buildCall, types do NOT match!"
-
-getUnmdParsAndBody :: TupleLambda -> ([Ident], Exp)
-getUnmdParsAndBody (TupleLambda lam_args2 body2 _ _) =
-  (map fromParam lam_args2, body2)
 
 isCompatibleKer :: ([VName], Exp) -> FusedKer -> FusionGM Bool
 isCompatibleKer (_,       Map2    {}) ker = return $ isOmapKer   ker
