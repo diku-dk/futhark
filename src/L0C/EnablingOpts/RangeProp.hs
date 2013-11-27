@@ -227,12 +227,12 @@ makeRangeComparable range = do
            return r
       else case r of
         Single e -> do r' <- substitute' ident (RExp e)
-                       trace ("# make (eq) " ++ ppRange r ++ " ~~> " ++ ppRange r' ++ " by sub " ++ textual ident )
-                         foldingFun r' rest
+                       --trace ("# make (eq) " ++ ppRange r ++ " ~~> " ++ ppRange r' ++ " by sub " ++ textual ident )
+                       foldingFun r' rest
         Span a b -> do a' <- substitute' ident a
                        b' <- substitute' ident b
-                       trace ("# make " ++ ppRange r ++ " ~~> " ++ ppRange (mergeRanges a' b') ++ " by sub " ++ textual ident )
-                         foldingFun (mergeRanges a' b') rest
+                       --trace ("# make " ++ ppRange r ++ " ~~> " ++ ppRange (mergeRanges a' b') ++ " by sub " ++ textual ident )
+                       foldingFun (mergeRanges a' b') rest
 
 varsUsedInExp :: Exp -> S.Set VName
 varsUsedInExp ex = execWriter $ expVars ex
