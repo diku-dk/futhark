@@ -218,12 +218,12 @@ makeRangeComparable range = do
 
   where
     foldingFun :: Range -> [VName] -> RangeM Range
-    foldingFun r [] = --trace ("+ makeEndOfList " ++ ppRange(a,b))
+    foldingFun r [] = --trace ("+ makeEndOfList " ++ ppRange r)
                       return r
     foldingFun r (ident : rest) = do
       isComp <- isComparable r
       if isComp
-      then --trace("+ makeIsComp " ++ ppRange(a,b))
+      then --trace("+ makeIsComp " ++ ppRange r)
            return r
       else case r of
         Single e -> do r' <- substitute' ident (RExp e)
