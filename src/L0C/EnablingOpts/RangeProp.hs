@@ -389,13 +389,13 @@ substitute i (BinOp Times e1 e2 ty pos) = do
 
     possibleLBTerm sign1 (a,b) sign2 (c,d)
       | sign1 >= Zero      , sign2 >= Zero     = multRExp a c
-      | sign1 >= Zero      , sign2 >  AnySign  = multRExp b c
+      | sign1 >= Zero      , sign2 >= Neg      = multRExp b c
       | sign1 >= Zero      , sign2 == AnySign  = multRExp b c -- c < 0 , 0 <= a <= b ~> bc < ac
-      | sign1 >  AnySign   , sign2 >= Zero     = multRExp a d
-      | sign1 >  AnySign   , sign2 >  AnySign  = multRExp b d
-      | sign1 >  AnySign   , sign2 == AnySign  = multRExp a d -- 0 < d , a <= b <= 0 ~> ad < bd
+      | sign1 >= Neg       , sign2 >= Zero     = multRExp a d
+      | sign1 >= Neg       , sign2 >= Neg      = multRExp b d
+      | sign1 >= Neg       , sign2 == AnySign  = multRExp a d -- 0 < d , a <= b <= 0 ~> ad < bd
       | sign1 == AnySign   , sign2 >= Zero     = multRExp a d -- a < 0 , 0 <= c <= d ~> ad < ac
-      | sign1 == AnySign   , sign2 >  AnySign  = multRExp b c -- 0 < b , c <= d <= 0 ~> bc < bd
+      | sign1 == AnySign   , sign2 >= Neg      = multRExp b c -- 0 < b , c <= d <= 0 ~> bc < bd
       | otherwise                              = return Nothing
                                                 -- TODO: Only enable again when we substitute
                                                 -- with identifiers present in expressions
@@ -407,13 +407,13 @@ substitute i (BinOp Times e1 e2 ty pos) = do
 
     possibleUBTerm sign1 (a,b) sign2 (c,d)
       | sign1 >= Zero     , sign2 >= Zero     = multRExp b d
-      | sign1 >= Zero     , sign2 >  AnySign  = multRExp a d
+      | sign1 >= Zero     , sign2 >= Neg      = multRExp a d
       | sign1 >= Zero     , sign2 == AnySign  = multRExp b d -- 0 < d , 0 <= a <= b ~> ad < bd
-      | sign1 >  AnySign  , sign2 >= Zero     = multRExp b c
-      | sign1 >  AnySign  , sign2 >  AnySign  = multRExp a c
-      | sign1 >  AnySign  , sign2 == AnySign  = multRExp a c -- c < 0, a <= b <= 0 ~> bc < ac
+      | sign1 >= Neg      , sign2 >= Zero     = multRExp b c
+      | sign1 >= Neg      , sign2 >= Neg      = multRExp a c
+      | sign1 >= Neg      , sign2 == AnySign  = multRExp a c -- c < 0, a <= b <= 0 ~> bc < ac
       | sign1 == AnySign  , sign2 >= Zero     = multRExp b d -- 0 < b , 0 <= c <= d ~> bc < bd
-      | sign1 == AnySign  , sign2 >  AnySign  = multRExp a c -- a < 0 , c <= d <= 0 ~> ad < ac
+      | sign1 == AnySign  , sign2 >= Neg      = multRExp a c -- a < 0 , c <= d <= 0 ~> ad < ac
       | otherwise                             = return Nothing
                                                 -- TODO: Only enable again when we substitute
                                                 -- with identifiers present in expressions
@@ -466,21 +466,21 @@ substitute i (BinOp Divide e1 e2 ty pos) = do
     -- [-5:-2] / [3:6]   ~> [-5/3 : -2/6] (a/c, b/d)
     -- [-5:-2] / [-6:-3] ~> [-2/-6 : -5/-3] (b/c, a/d)
     calcLB sign1 (a,b) sign2 (c,d)
-      | sign1 >= Zero     , sign2 > Zero      = divRExp a d
-      | sign1 >= Zero     , sign2 > AnySign   = divRExp b d
-      | sign1 >  AnySign  , sign2 > Zero      = divRExp a c
-      | sign1 >  AnySign  , sign2 > AnySign   = divRExp b c
-      | sign1 == AnySign  , sign2 > Zero      = divRExp a c -- a < 0 , 0 <= c <= d ~> a/c <= a/d
-      | sign1 == AnySign  , sign2 > AnySign   = divRExp b d -- 0 < b , c <= d <= 0 ~> b/d <= b/c
+      | sign1 >= Zero     , sign2 == Pos      = divRExp a d
+      | sign1 >= Zero     , sign2 == Neg      = divRExp b d
+      | sign1 >= Neg      , sign2 == Pos      = divRExp a c
+      | sign1 >= Neg      , sign2 == Neg      = divRExp b c
+      | sign1 == AnySign  , sign2 == Pos      = divRExp a c -- a < 0 , 0 <= c <= d ~> a/c <= a/d
+      | sign1 == AnySign  , sign2 == Neg      = divRExp b d -- 0 < b , c <= d <= 0 ~> b/d <= b/c
       | otherwise                             = badRangeM $ RangePropError pos "divRExp: Dividing with something that could be 0"
 
     calcUB sign1 (a,b) sign2 (c,d)
-      | sign1 >= Zero     , sign2 > Zero      = divRExp b c
-      | sign1 >= Zero     , sign2 > AnySign   = divRExp a c
-      | sign1 >  AnySign  , sign2 > Zero      = divRExp b d
-      | sign1 >  AnySign  , sign2 > AnySign   = divRExp a d
-      | sign1 == AnySign  , sign2 > Zero      = divRExp b c -- 0 < b , 0 <= c <= d ~> b/d < b/c
-      | sign1 == AnySign  , sign2 > AnySign   = divRExp a d -- a < 0 , c <= d <= 0 ~> a/c < a/d
+      | sign1 >= Zero     , sign2 == Pos      = divRExp b c
+      | sign1 >= Zero     , sign2 == Neg      = divRExp a c
+      | sign1 >= Neg      , sign2 == Pos      = divRExp b d
+      | sign1 >= Neg      , sign2 == Neg      = divRExp a d
+      | sign1 == AnySign  , sign2 == Pos      = divRExp b c -- 0 < b , 0 <= c <= d ~> b/d < b/c
+      | sign1 == AnySign  , sign2 == Neg      = divRExp a d -- a < 0 , c <= d <= 0 ~> a/c < a/d
       | otherwise                             = badRangeM $ RangePropError pos "divRExp: Dividing with something that could be 0"
 
     divRExp :: RExp -> RExp -> RangeM RExp
