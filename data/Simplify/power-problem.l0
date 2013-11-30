@@ -1,8 +1,8 @@
-fun bool main (int a) =
+fun int main (int a) =
     //let x4 = (a pow (~3)) = 1 / (a*a) in
     //let x5 = (a pow ~2) = 1/a * 1/a in
     //let x6 = a pow 1 = a in
     //let x7 = a pow (~2) = 0 in
-    let x8 = (a pow (a-a) ) = 1 in
+    let x8 = 0 pow 0  in
     //x4 && x5 && x6 && x7 && x8
     x8

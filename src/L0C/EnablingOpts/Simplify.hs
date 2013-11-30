@@ -86,10 +86,11 @@ simplifyBack (NaryPlus [t] _ _) = simplifyBack t
 simplifyBack (NaryMult [f] _ _) = return f
 simplifyBack (NaryMult fs tp pos) =
   let fs' = zip (map length $ group fs)  (nub fs) in
-  return $ foldl1 createTimesExp $ map takeExpToPower fs'
+    return $ foldl1 createTimesExp $ map takeExpToPower fs'
   where
     createTimesExp e1 e2 = BinOp Times e1 e2 (typeOf e1) (srclocOf e1)
     takeExpToPower (num, e)
+      | num == 0  = Literal (IntVal 1) pos
       | num == 1  = e
       | otherwise = BinOp Pow e (Literal (IntVal num) pos) tp pos
 
@@ -338,13 +339,19 @@ simplifyNary (Negate e tp pos) = do
 simplifyNary (BinOp Pow e1 e2 tp pos) = do
   e1' <- simplifyNary e1 >>= simplifyBack
   e2' <- simplifyNary e2 >>= simplifyBack
+
   case (e1',e2') of
     (Literal (IntVal v1) _, Literal (IntVal v2) _) ->
-          return $ NaryMult [Literal (IntVal $ v1^v2) pos] tp pos
+      trace ("fest") return $ NaryMult [Literal (IntVal $ v1^v2) pos] tp pos
+
+    (_, Literal (IntVal 0) _) ->
+      return $ NaryMult [Literal (IntVal 1) pos] tp pos
+
     (_, Literal (IntVal v2) _) ->
-        return (if v2 >= 0
-                then NaryMult (replicate v2 e1') tp pos
-                else NaryMult (replicate (abs v2) $ BinOp Divide (Literal (IntVal 1) pos) e1' tp pos) tp pos)
+      return (if v2 >= 1
+              then NaryMult (replicate v2 e1') tp pos
+              else NaryMult (replicate (abs v2) $ BinOp Divide (Literal (IntVal 1) pos) e1' tp pos) tp pos)
+
     _   -> return $ NaryMult [BinOp Pow e1' e2' tp pos] (typeOf e1') (srclocOf e1')
 
 
