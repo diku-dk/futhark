@@ -1,0 +1,8 @@
+fun int main(int x) =
+    let y = if 0 <= x && x < 10
+            then x-2
+            else 42
+    in
+    if y < 50
+    then 0
+    else ~1
