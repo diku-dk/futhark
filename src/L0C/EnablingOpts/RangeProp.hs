@@ -38,6 +38,9 @@ data Range = Span RExp RExp
 type RangeDictInfo = (Range, Range, S.Set VName)
 type RangeDict = M.Map VName RangeDictInfo
 
+type CondDictInfo = (M.Map VName (Maybe Range, Maybe Range))
+type CondDict = M.Map VName CondDictInfo
+
 data RangeSign = AnySign | Neg | NonPos | Zero | NonNeg | Pos
           deriving (Show, Eq, Ord)
 
@@ -47,7 +50,8 @@ data RangeInequality = IANY | ILT | ILTE | IEQ | IGTE | IGT
 ----------------------------------------
 
 data RangeEnv = RangeEnv {
-    dict    :: RangeDict
+    dict     :: RangeDict
+  , condDict :: CondDict
   }
 
 newtype RangeM a = RangeM (ReaderT RangeEnv (Either EnablingOptError) a)
@@ -90,7 +94,7 @@ rangeProp prog = do
     return $ Prog res
   where
     rangePropFun (fname, rettype, params, body, pos) = do
-        let env = RangeEnv { dict = foldl tellParam emptyRangeDict params }
+        let env = RangeEnv { dict = foldl tellParam emptyRangeDict params, condDict = M.empty }
         body' <- runRangeM (rangePropExp body) env
         return (fname, rettype, params, body', pos)
 
@@ -109,6 +113,12 @@ rangeProp prog = do
                               , ppDict (M.singleton vname info)
                               ]
       inExp' <- trace debugText $ mergeRangeEnvWithDict (M.singleton vname info) $ rangePropExp inExp
+      return $ LetPat i toExp' inExp' pos
+
+    rangePropExp (LetPat i@(Id (Ident vname (Elem Bool) _)) toExp inExp pos) = do
+      toExp' <- rangePropExp toExp
+      info <- extractFromCond toExp'
+      inExp' <- mergeRangeEnvWithCondDict (M.singleton vname info) $ rangePropExp inExp
       return $ LetPat i toExp' inExp' pos
 
     rangePropExp (If cond thenE elseE ty pos) = do
@@ -163,6 +173,9 @@ rangeProp prog = do
 
 mergeRangeEnvWithDict :: RangeDict -> RangeM a -> RangeM a
 mergeRangeEnvWithDict newDict = local (\env -> env { dict = M.union newDict $ dict env })
+
+mergeRangeEnvWithCondDict :: CondDict -> RangeM a -> RangeM a
+mergeRangeEnvWithCondDict newCondDict = local (\env -> env { condDict = M.union newCondDict $ condDict env })
 
 ----------------------------------------
 
@@ -225,21 +238,21 @@ makeRangeComparable range = do
 
   where
     foldingFun :: Range -> [VName] -> RangeM Range
-    foldingFun r [] = --trace ("+ makeEndOfList " ++ ppRange(a,b))
+    foldingFun r [] = --trace ("+ makeEndOfList " ++ ppRange r)
                       return r
     foldingFun r (ident : rest) = do
       isComp <- isComparable r
       if isComp
-      then --trace("+ makeIsComp " ++ ppRange(a,b))
+      then --trace("+ makeIsComp " ++ ppRange r)
            return r
       else case r of
         Single e -> do r' <- substitute' ident (RExp e)
-                       trace ("# make (eq) " ++ ppRange r ++ " ~~> " ++ ppRange r' ++ " by sub " ++ textual ident )
-                         foldingFun r' rest
+                       --trace ("# make (eq) " ++ ppRange r ++ " ~~> " ++ ppRange r' ++ " by sub " ++ textual ident )
+                       foldingFun r' rest
         Span a b -> do a' <- substitute' ident a
                        b' <- substitute' ident b
-                       trace ("# make " ++ ppRange r ++ " ~~> " ++ ppRange (mergeRanges a' b') ++ " by sub " ++ textual ident )
-                         foldingFun (mergeRanges a' b') rest
+                       --trace ("# make " ++ ppRange r ++ " ~~> " ++ ppRange (mergeRanges a' b') ++ " by sub " ++ textual ident )
+                       foldingFun (mergeRanges a' b') rest
 
 varsUsedInExp :: Exp -> S.Set VName
 varsUsedInExp ex = execWriter $ expVars ex
@@ -396,13 +409,13 @@ substitute i (BinOp Times e1 e2 ty pos) = do
 
     possibleLBTerm sign1 (a,b) sign2 (c,d)
       | sign1 >= Zero      , sign2 >= Zero     = multRExp a c
-      | sign1 >= Zero      , sign2 >  AnySign  = multRExp b c
+      | sign1 >= Zero      , sign2 >= Neg      = multRExp b c
       | sign1 >= Zero      , sign2 == AnySign  = multRExp b c -- c < 0 , 0 <= a <= b ~> bc < ac
-      | sign1 >  AnySign   , sign2 >= Zero     = multRExp a d
-      | sign1 >  AnySign   , sign2 >  AnySign  = multRExp b d
-      | sign1 >  AnySign   , sign2 == AnySign  = multRExp a d -- 0 < d , a <= b <= 0 ~> ad < bd
+      | sign1 >= Neg       , sign2 >= Zero     = multRExp a d
+      | sign1 >= Neg       , sign2 >= Neg      = multRExp b d
+      | sign1 >= Neg       , sign2 == AnySign  = multRExp a d -- 0 < d , a <= b <= 0 ~> ad < bd
       | sign1 == AnySign   , sign2 >= Zero     = multRExp a d -- a < 0 , 0 <= c <= d ~> ad < ac
-      | sign1 == AnySign   , sign2 >  AnySign  = multRExp b c -- 0 < b , c <= d <= 0 ~> bc < bd
+      | sign1 == AnySign   , sign2 >= Neg      = multRExp b c -- 0 < b , c <= d <= 0 ~> bc < bd
       | otherwise                              = return Nothing
                                                 -- TODO: Only enable again when we substitute
                                                 -- with identifiers present in expressions
@@ -414,13 +427,13 @@ substitute i (BinOp Times e1 e2 ty pos) = do
 
     possibleUBTerm sign1 (a,b) sign2 (c,d)
       | sign1 >= Zero     , sign2 >= Zero     = multRExp b d
-      | sign1 >= Zero     , sign2 >  AnySign  = multRExp a d
+      | sign1 >= Zero     , sign2 >= Neg      = multRExp a d
       | sign1 >= Zero     , sign2 == AnySign  = multRExp b d -- 0 < d , 0 <= a <= b ~> ad < bd
-      | sign1 >  AnySign  , sign2 >= Zero     = multRExp b c
-      | sign1 >  AnySign  , sign2 >  AnySign  = multRExp a c
-      | sign1 >  AnySign  , sign2 == AnySign  = multRExp a c -- c < 0, a <= b <= 0 ~> bc < ac
+      | sign1 >= Neg      , sign2 >= Zero     = multRExp b c
+      | sign1 >= Neg      , sign2 >= Neg      = multRExp a c
+      | sign1 >= Neg      , sign2 == AnySign  = multRExp a c -- c < 0, a <= b <= 0 ~> bc < ac
       | sign1 == AnySign  , sign2 >= Zero     = multRExp b d -- 0 < b , 0 <= c <= d ~> bc < bd
-      | sign1 == AnySign  , sign2 >  AnySign  = multRExp a c -- a < 0 , c <= d <= 0 ~> ad < ac
+      | sign1 == AnySign  , sign2 >= Neg      = multRExp a c -- a < 0 , c <= d <= 0 ~> ad < ac
       | otherwise                             = return Nothing
                                                 -- TODO: Only enable again when we substitute
                                                 -- with identifiers present in expressions
@@ -473,21 +486,21 @@ substitute i (BinOp Divide e1 e2 ty pos) = do
     -- [-5:-2] / [3:6]   ~> [-5/3 : -2/6] (a/c, b/d)
     -- [-5:-2] / [-6:-3] ~> [-2/-6 : -5/-3] (b/c, a/d)
     calcLB sign1 (a,b) sign2 (c,d)
-      | sign1 >= Zero     , sign2 > Zero      = divRExp a d
-      | sign1 >= Zero     , sign2 > AnySign   = divRExp b d
-      | sign1 >  AnySign  , sign2 > Zero      = divRExp a c
-      | sign1 >  AnySign  , sign2 > AnySign   = divRExp b c
-      | sign1 == AnySign  , sign2 > Zero      = divRExp a c -- a < 0 , 0 <= c <= d ~> a/c <= a/d
-      | sign1 == AnySign  , sign2 > AnySign   = divRExp b d -- 0 < b , c <= d <= 0 ~> b/d <= b/c
+      | sign1 >= Zero     , sign2 == Pos      = divRExp a d
+      | sign1 >= Zero     , sign2 == Neg      = divRExp b d
+      | sign1 >= Neg      , sign2 == Pos      = divRExp a c
+      | sign1 >= Neg      , sign2 == Neg      = divRExp b c
+      | sign1 == AnySign  , sign2 == Pos      = divRExp a c -- a < 0 , 0 <= c <= d ~> a/c <= a/d
+      | sign1 == AnySign  , sign2 == Neg      = divRExp b d -- 0 < b , c <= d <= 0 ~> b/d <= b/c
       | otherwise                             = badRangeM $ RangePropError pos "divRExp: Dividing with something that could be 0"
 
     calcUB sign1 (a,b) sign2 (c,d)
-      | sign1 >= Zero     , sign2 > Zero      = divRExp b c
-      | sign1 >= Zero     , sign2 > AnySign   = divRExp a c
-      | sign1 >  AnySign  , sign2 > Zero      = divRExp b d
-      | sign1 >  AnySign  , sign2 > AnySign   = divRExp a d
-      | sign1 == AnySign  , sign2 > Zero      = divRExp b c -- 0 < b , 0 <= c <= d ~> b/d < b/c
-      | sign1 == AnySign  , sign2 > AnySign   = divRExp a d -- a < 0 , c <= d <= 0 ~> a/c < a/d
+      | sign1 >= Zero     , sign2 == Pos      = divRExp b c
+      | sign1 >= Zero     , sign2 == Neg      = divRExp a c
+      | sign1 >= Neg      , sign2 == Pos      = divRExp b d
+      | sign1 >= Neg      , sign2 == Neg      = divRExp a d
+      | sign1 == AnySign  , sign2 == Pos      = divRExp b c -- 0 < b , 0 <= c <= d ~> b/d < b/c
+      | sign1 == AnySign  , sign2 == Neg      = divRExp a d -- a < 0 , c <= d <= 0 ~> a/c < a/d
       | otherwise                             = badRangeM $ RangePropError pos "divRExp: Dividing with something that could be 0"
 
     divRExp :: RExp -> RExp -> RangeM RExp
@@ -623,6 +636,12 @@ realExtractFromCond e = do
       return (rng', comp, depend)
 
 extractFromCond :: Exp -> RangeM ( M.Map VName (Maybe Range, Maybe Range) )
+extractFromCond (Var (Ident vname (Elem Bool) p)) = do
+  bnd <- asks $ M.lookup vname . condDict
+  case bnd of
+    Just info -> return info
+    Nothing       -> badRangeM $ RangePropError p $ "extractFromCond: Conidtion was not found in cond dict: " ++ textual vname
+
 extractFromCond (Not e _) = do
   res <- extractFromCond e
   return $ M.map (\(a, b) -> (b, a)) res
