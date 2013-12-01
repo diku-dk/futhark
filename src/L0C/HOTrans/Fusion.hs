@@ -240,7 +240,8 @@ greedyFuse is_repl lam_used_nms res (idd, soac) = do
     -- Conditions for fusion:
     --   (i) none of `out_idds' belongs to the unfusable set.
     --  (ii) there are some kernels that use some of `out_idds' as inputs
-    let not_unfusable  = is_repl || all notUnfusable out_nms
+    let isUnfusable    = (`S.member` unfusable res)
+        not_unfusable  = is_repl || not (any isUnfusable out_nms)
         to_fuse_knmSet = getKersWithInpArrs res out_nms
         to_fuse_knms   = S.toList to_fuse_knmSet
         lookup_kern k  = case M.lookup k (kernels res) of
@@ -272,16 +273,16 @@ greedyFuse is_repl lam_used_nms res (idd, soac) = do
     let mod_kerS  = if is_fusable then to_fuse_knmSet else S.empty
     let used_inps = filter (isInpArrInResModKers res mod_kerS) inp_nms
     let ufs       = unfusable res `S.union` S.fromList used_inps `S.union` S.fromList other_nms
+    let comb      = M.unionWith S.union
 
     if not is_fusable then
       if is_repl then return res
       else do -- nothing to fuse, add a new soac kernel to the result
         let new_ker = FusedKer (idd, soac) (S.fromList inp_idds) S.empty []
         nm_ker  <- new "ker"
-        let os' = foldl (\x arr -> M.insert arr nm_ker x)
-                        (outArr res) out_nms
-        let is' = foldl (\x arr -> M.insertWith' S.union arr (S.singleton nm_ker) x)
-                        (inpArr res) inp_nms0
+        let os' = M.fromList (zip out_nms $ repeat nm_ker) `M.union` outArr res
+        let is' = M.fromList (zip inp_nms0 $ repeat (S.singleton nm_ker)) `comb`
+                  inpArr res
         return $ FusedRes (rsucc res) os' is' ufs
                           (M.insert nm_ker new_ker (kernels res))
      else do -- ... fuse current soac into to_fuse_kers ...
@@ -300,20 +301,17 @@ greedyFuse is_repl lam_used_nms res (idd, soac) = do
                                                      then M.delete nm         inpp
                                                      else M.insert nm new_set inpp
                                     )
-                            inpa (S.map identName (inp kold))
-                      in S.foldl (\inpp nm -> M.insertWith S.union nm (S.singleton knm) inpp)
-                         inpa' (S.map identName (inp knew))
-                   )
+                            inpa $ S.map identName $ inp kold
+                      in M.fromList [ (k, S.singleton knm)
+                                        | k <- S.toList $ S.map identName (inp knew) ]
+                           `comb` inpa')
              (inpArr res) (zip3 to_fuse_kers fused_kers to_fuse_knms)
        -- Update the kernels map
-       let kernels' = foldl (\kers (knew, knm) -> M.insert knm knew kers)
-                            (kernels res) (zip fused_kers to_fuse_knms)
+       let kernels' = M.fromList (zip to_fuse_knms fused_kers)
+                      `M.union` kernels res
 
        -- nothing to do for `outArr' (since we have not added a new kernel)
        return $ FusedRes True (outArr res) inpArr' ufs kernels'
-    where
-        notUnfusable :: VName -> Bool
-        notUnfusable nm = not $ S.member nm $ unfusable res
 
 fuseSOACwithKer :: ([Ident], Exp) -> FusedKer -> FusionGM FusedKer
 fuseSOACwithKer (out_ids1, soac1) ker = do
@@ -421,26 +419,23 @@ fusionGatherExp fres (LetPat pat soac@(Map2 _ lam _ _ _) body _) = do
     (used_lam, blres) <- fusionGatherLam (S.empty, bres) lam
     greedyFuse False used_lam blres (pat, soac)
 
-fusionGatherExp fres (LetPat pat soac@(Replicate n el pos) body _) = do
+fusionGatherExp fres (LetPat pat soac@(Replicate n el loc) body _) = do
     bres <- bindPat pat soac $ fusionGatherExp fres body
     -- Implemented inplace: gets the variables in `n` and `el`
-    (used_set, bres')<- getUnfusableSet pos bres [n,el]
+    (used_set, bres') <- getUnfusableSet loc bres [n,el]
     repl_idnm <- new "repl_x"
-    let repl_id = Ident repl_idnm (Elem Int) pos
+    let repl_id = Ident repl_idnm (Elem Int) loc
         (lame, rwt) = case typeOf el of
                         Elem (Tuple ets) -> (el, ets)
-                        t                -> (TupLit [el] pos, [t])
-        repl_lam = TupleLambda [toParam repl_id] lame (map toDecl rwt) pos
-        soac_repl= Map2 [] repl_lam [Iota n pos] rwt pos
+                        t                -> (TupLit [el] loc, [t])
+        repl_lam = TupleLambda [toParam repl_id] lame (map toDecl rwt) loc
+        soac_repl= Map2 [] repl_lam [Iota n loc] rwt loc
     greedyFuse True used_set bres' (pat, soac_repl)
 
 fusionGatherExp fres (LetPat pat soac@(Filter2 _ lam _ _) body _) = do
     bres  <- bindPat pat soac $ fusionGatherExp fres body
     (used_lam, blres) <- fusionGatherLam (S.empty, bres) lam
     greedyFuse False used_lam blres (pat, soac)
-    --bres' <- foldM fusionGatherExp bres arrs
-    --(_, lres) <- fusionGatherLam (S.empty, bres') lam
-    --return lres
 
 fusionGatherExp fres (LetPat pat soac@(Reduce2 _ lam nes _ _ loc) body _) = do
     -- a reduce always starts a new kernel
@@ -837,7 +832,7 @@ errorIllegalFus soac_name pos =
 --------------------------------------------
 
 isCompatibleKer :: ([VName], Exp) -> FusedKer -> FusionGM Bool
-isCompatibleKer (_,       Map2    {}) ker = return $ isOmapKer   ker
+isCompatibleKer (_,       Map2    {}) ker = return $ isOmapKer ker
 isCompatibleKer (out_nms, Filter2 {}) ker = do
     let (_, soac) = fsoac ker
     let ok = case soac of
@@ -847,9 +842,11 @@ isCompatibleKer (out_nms, Filter2 {}) ker = do
                 _          -> False
     if not ok
     then return False
-    else do -- check that the input-array  set of soac is included
-            --         in the output-array set of soac_filt
+    else do -- check that the input-array set of consumer is included
+            -- in the output-array set of producer.  That is, a
+            -- filter-producer can only be fused if the consumer
+            -- accepts input from no other source.
             (inp_idds2, other_idds2) <- getInpArrSOAC soac >>= getIdentArr
             let inp_lst = map identName inp_idds2
-            return $ null other_idds2 && inp_lst == out_nms -- inp_set `S.isSubsetOf` S.fromList out_nms
+            return $ null other_idds2 && all (`elem` out_nms) inp_lst
 isCompatibleKer _ _ = return False
