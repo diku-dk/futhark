@@ -390,12 +390,13 @@ copyCtPropExp (Conjoin es loc) = do
       check (Var idd) = do
         vv <- asks $ M.lookup (identName idd) . envVtable
         case vv of
-          Just (Constant Checked _ _) -> return Nothing
+          Just (Constant Checked _ _) -> changed Nothing
           _                           -> return $ Just $ Var idd
       check e = return $ Just e
   es'' <- liftM catMaybes $ mapM check es'
-  case es'' of [] -> return $ Literal Checked loc
-               _  -> return $ Conjoin es'' loc
+  case es'' of []  -> changed $ Literal Checked loc
+               [c] -> changed c
+               _   -> return $ Conjoin es'' loc
 
 -----------------------------------------------------------
 --- If all params are values and function is free of IO ---
