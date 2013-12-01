@@ -5,7 +5,7 @@ module L0C.EnablingOpts.CopyCtPropFold (
                               , copyCtPropOneTupleLambda
                             )
   where
- 
+
 import Control.Applicative
 import Control.Monad.Reader
 import Control.Monad.Writer
@@ -37,7 +37,7 @@ import qualified L0C.Interpreter as Interp
 
 -----------------------------------------------
 -- The data to be stored in vtable           --
---   the third param (Bool) indicates if the -- 
+--   the third param (Bool) indicates if the --
 --   binding is to be removed from program   --
 -----------------------------------------------
 
@@ -199,14 +199,14 @@ copyCtPropExp (DoLoop mergepat mergeexp idd n loopbdy letbdy pos) = do
     loopbdy' <- copyCtPropExp loopbdy
     letbdy'  <- copyCtPropExp letbdy
     return $ DoLoop mergepat mergeexp' idd n' loopbdy' letbdy' pos
-    
 
-copyCtPropExp e@(Var (Ident vnm _ pos)) = do 
+
+copyCtPropExp e@(Var (Ident vnm _ pos)) = do
     -- let _ = trace ("In VarExp: "++ppExp 0 e) e
     bnd <- asks $ M.lookup vnm . envVtable
     case bnd of
         Nothing                 -> return e
-        Just (Constant v   _ _) -> if isBasicTypeVal v 
+        Just (Constant v   _ _) -> if isBasicTypeVal v
                                    then changed $ Literal v pos
                                    else return e
         Just (VarId  id' tp1 _) -> changed $ Var (Ident id' tp1 pos) -- or tp
@@ -223,26 +223,26 @@ copyCtPropExp e@(Var (Ident vnm _ pos)) = do
 
 copyCtPropExp eee@(Index cs idd@(Ident vnm tp p) csidx inds tp2 pos) = do
   inds' <- mapM copyCtPropExp inds
-  bnd   <- asks $ M.lookup vnm . envVtable 
+  bnd   <- asks $ M.lookup vnm . envVtable
   cs'   <- copyCtPropCerts cs
   case bnd of
     Nothing               -> return  $ Index cs' idd csidx inds' tp2 pos
     Just (VarId  id' _ _) -> changed $ Index cs' (Ident id' tp p) csidx inds' tp2 pos
-    Just (Constant v _ _) -> 
+    Just (Constant v _ _) ->
       case v of
         ArrayVal _ _ ->
-          let sh = arrayShape v 
+          let sh = arrayShape v
           in case ctIndex inds' of
                Nothing -> return $ Index cs' idd csidx inds' tp2 pos
-               Just iis-> 
+               Just iis->
                  if length iis == length sh
                  then case getArrValInd v iis of
                         Nothing -> return $ Index cs' idd csidx inds' tp2 pos
                         Just el -> changed $ Literal el pos
                  else return $ Index cs' idd csidx inds' tp2 pos
         _ -> badCPropM $ TypeError pos  " indexing into a non-array value "
-    Just (SymArr e' _ _) -> 
-      case (e', inds') of 
+    Just (SymArr e' _ _) ->
+      case (e', inds') of
         (Iota _ _, [ii]) -> changed ii
         (Iota _ _, _)    -> badCPropM $ TypeError pos  " bad indexing in iota "
 
@@ -265,7 +265,7 @@ copyCtPropExp eee@(Index cs idd@(Ident vnm tp p) csidx inds tp2 pos) = do
 
 
         (Replicate _ vvv@(Var vv) _, _:is') -> do
-            inner <- if null is' 
+            inner <- if null is'
                      then copyCtPropExp vvv
                      else copyCtPropExp (Index cs' vv csidx is' tp2 pos)
             changed inner
@@ -277,7 +277,7 @@ copyCtPropExp eee@(Index cs idd@(Ident vnm tp p) csidx inds tp2 pos) = do
         (Replicate _ (Literal arr@(ArrayVal _ _) _) _, _:is') ->
             case ctIndex is' of
                 Nothing -> return $ Index cs' idd csidx inds' tp2 pos
-                Just iis-> case getArrValInd arr iis of 
+                Just iis-> case getArrValInd arr iis of
                                Nothing -> return $ Index cs' idd csidx inds' tp2 pos
                                Just el -> changed $ Literal el pos
         (Replicate _ val@(Literal _ _) _, _:is') ->
@@ -287,7 +287,7 @@ copyCtPropExp eee@(Index cs idd@(Ident vnm tp p) csidx inds tp2 pos) = do
         (Replicate _ arr@(ArrayLit {}) _, _:is') ->
             case ctIndex is' of
                 Nothing -> return $ Index cs' idd csidx inds' tp2 pos
-                Just iis-> case getArrLitInd arr iis of 
+                Just iis-> case getArrLitInd arr iis of
                                Nothing -> return $ Index cs' idd csidx inds' tp2 pos
                                Just el -> changed el
         (Replicate _ tup@(TupLit _ _) _, _:is') ->
@@ -328,12 +328,12 @@ copyCtPropExp (Negate e tp pos) = do
             _ -> badCPropM $ TypeError pos  " ~ operands not of (the same) numeral type! "
     else return $ Negate e' tp pos
 
-copyCtPropExp (Not e pos) = do 
+copyCtPropExp (Not e pos) = do
     e'   <- copyCtPropExp e
     if isValue e'
     then case e' of
             Literal (LogVal  v) _ -> changed $ Literal (LogVal (not v)) pos
-            _ -> badCPropM $ TypeError pos  " not operands not of (the same) numeral type! "    
+            _ -> badCPropM $ TypeError pos  " not operands not of (the same) numeral type! "
     else return $ Not e' pos
 
 copyCtPropExp (If e1 e2 e3 t pos) = do
@@ -402,7 +402,7 @@ copyCtPropExp (Conjoin es loc) = do
 --- If all params are values and function is free of IO ---
 ---    then evaluate the function call                  ---
 -----------------------------------------------------------
- 
+
 -- trace is not executed at compile time even if its arguments are
 -- values because it exhibits side effects!
 copyCtPropExp (Apply fname args tp pos)
@@ -412,7 +412,7 @@ copyCtPropExp (Apply fname args tp pos)
 
 copyCtPropExp (Apply fname args tp pos) = do
     args' <- mapM (copyCtPropExp . fst) args
-    (all_are_vals, vals) <- allArgsAreValues args' 
+    (all_are_vals, vals) <- allArgsAreValues args'
     if all_are_vals
     then do prg <- asks program
             let vv = Interp.runFunNoTrace fname vals  prg
@@ -422,7 +422,7 @@ copyCtPropExp (Apply fname args tp pos) = do
                                                      nameToString fname ++ " yields error!")
     else return $ Apply fname (zip args' $ map snd args) tp pos
 
-    where 
+    where
         allArgsAreValues :: [Exp] -> CPropM (Bool, [Value])
         allArgsAreValues []     = return (True, [])
         allArgsAreValues (a:as) =
@@ -541,12 +541,12 @@ ctFoldBinOp e@(BinOp Mod e1 e2 _ pos)
       _ -> badCPropM $ TypeError pos  " % operands not of integer type! "
   | otherwise = return e
 ctFoldBinOp e@(BinOp Pow e1 e2 _ pos)
-  | isCt0 e1 || isCt1 e1 || isCt1 e2 = changed e1
   | isCt0 e2 =
     case typeOf e1 of
       Elem Int  -> changed $ Literal (IntVal  1) pos
       Elem Real -> changed $ Literal (RealVal 1.0) pos
       _ -> badCPropM $ TypeError pos  " pow operands not of (the same) numeral type! "
+  | isCt0 e1 || isCt1 e1 || isCt1 e2 = changed e1
   |  isValue e1, isValue e2 =
     case (e1, e2) of
       (Literal (IntVal v1) _, Literal (IntVal v2) _) -> changed $ Literal (IntVal  (v1 ^v2)) pos
@@ -694,15 +694,15 @@ isCtOrCopy _                 = False
 
 isRemovablePat  :: TupIdent -> Exp -> CPropM Bool
 
-isRemovablePat (TupId tups _) e = 
+isRemovablePat (TupId tups _) e =
     case e of
           Var (Ident vnm _ _)      -> do
               bnd <- asks $ M.lookup vnm . envVtable
               case bnd of
                   Just (Constant val@(TupVal ts) _ _) ->
                       return ( isBasicTypeVal val && length ts == length tups )
-                  Just (SymArr   tup@(TupLit ts _  ) _ _) -> 
-                      return ( isCtOrCopy tup && length ts == length tups ) 
+                  Just (SymArr   tup@(TupLit ts _  ) _ _) ->
+                      return ( isCtOrCopy tup && length ts == length tups )
                   _ ->  return False
           TupLit  _ _              -> return (isCtOrCopy     e  )
           Literal val@(TupVal _) _ -> return (isBasicTypeVal val)
@@ -733,9 +733,9 @@ getPropBnds ( Id (Ident var tp _) ) e to_rem =
                                     in  [(var, SymArr e newtp to_rem)]
             Replicate {}      -> [(var, SymArr e tp to_rem)]
             ArrayLit  {}      -> [(var, SymArr e tp to_rem)]
-            _ -> [] 
-  in return r 
-getPropBnds pat@(TupId ids _) e to_rem = 
+            _ -> []
+  in return r
+getPropBnds pat@(TupId ids _) e to_rem =
     case e of
         TupLit  ts _          ->
             if length ids == length ts
@@ -745,35 +745,35 @@ getPropBnds pat@(TupId ids _) e to_rem =
             if length ids == length ts
             then concat <$> mapM (\(x,y)->getPropBnds x (Literal y loc) to_rem) (zip ids ts)
             else return []
-        Var (Ident vnm _ loc)   -> do 
+        Var (Ident vnm _ loc)   -> do
             bnd <- asks $ M.lookup vnm . envVtable
             case bnd of
                 Just (SymArr tup@(TupLit   _ _) _ _) -> getPropBnds pat tup               to_rem
-                Just (Constant tup@(TupVal _) _ _)   -> getPropBnds pat (Literal tup loc) to_rem 
+                Just (Constant tup@(TupVal _) _ _)   -> getPropBnds pat (Literal tup loc) to_rem
                 _                                    -> return []
         _ -> return []
 
 ctIndex :: [Exp] -> Maybe [Int]
 ctIndex []     = Just []
-ctIndex (i:is) = 
+ctIndex (i:is) =
   case i of
     Literal (IntVal ii) _ ->
       let x = ctIndex is in
       case x of
         Nothing -> Nothing
         Just y -> Just (ii:y)
-    _ -> Nothing 
+    _ -> Nothing
 
 getArrValInd :: Value -> [Int] -> Maybe Value
-getArrValInd v [] = if isBasicTypeVal v then Just v else Nothing 
+getArrValInd v [] = if isBasicTypeVal v then Just v else Nothing
 getArrValInd (ArrayVal arr _) (i:is) = getArrValInd (arr ! i) is
-getArrValInd _ _ = Nothing 
+getArrValInd _ _ = Nothing
 
 getArrLitInd :: Exp -> [Int] -> Maybe Exp
-getArrLitInd e [] = if isCtOrCopy e then Just e else Nothing 
+getArrLitInd e [] = if isCtOrCopy e then Just e else Nothing
 getArrLitInd (ArrayLit els _ _) (i:is) = getArrLitInd (els !! i) is
-getArrLitInd (Literal arr@(ArrayVal _ _) loc) (i:is) = 
+getArrLitInd (Literal arr@(ArrayVal _ _) loc) (i:is) =
     case getArrValInd arr (i:is) of
         Nothing -> Nothing
         Just v  -> Just (Literal v loc)
-getArrLitInd _ _ = Nothing 
+getArrLitInd _ _ = Nothing
