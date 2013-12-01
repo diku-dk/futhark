@@ -196,32 +196,36 @@ expandSoacInpArr =
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 
+soacInputs :: Exp -> FusionGM ([Ident], [Ident], [VName], [VName])
+soacInputs soac = do
+  (inp_idds, other_idds) <- getInpArrSOAC soac >>= getIdentArr
+  let (inp_nms0,other_nms0) = (map identName inp_idds, map identName other_idds)
+  inp_nms   <- expandSoacInpArr   inp_nms0
+  other_nms <- expandSoacInpArr other_nms0
+  return (inp_idds, other_idds, inp_nms, other_nms)
+
 addNewKer :: FusedRes -> (TupIdent, Exp) -> FusionGM FusedRes
 addNewKer res (idd, soac) = do
-    (inp_idds, other_idds) <- getInpArrSOAC soac >>= getIdentArr
-    let (inp_nms0,other_nms0) = (map identName inp_idds, map identName other_idds)
-    inp_nms   <- expandSoacInpArr   inp_nms0
-    other_nms <- expandSoacInpArr other_nms0
+  (_, _, inp_nms, other_nms) <- soacInputs soac
 
-    let used_inps = filter (isInpArrInResModKers res S.empty) inp_nms
-    let ufs' =  unfusable res        `S.union`
-                S.fromList used_inps `S.union`
-                S.fromList other_nms
+  let used_inps = filter (isInpArrInResModKers res S.empty) inp_nms
+  let ufs = S.unions [unfusable res, S.fromList used_inps, S.fromList other_nms]
 
-    let new_ker = FusedKer (idd, soac) (S.fromList inp_idds) S.empty []
-    nm_ker  <- new "ker"
+  addNewKerWithUnfusable res (idd, soac) ufs
 
-    let out_nms = patNames idd
-
-    let os' = S.foldl (\x arr -> M.insert arr nm_ker x)
-                      (outArr res) out_nms
-
-    let is' = foldl (\x arr -> M.insertWith' S.union arr (S.singleton nm_ker) x)
-                    (inpArr res) inp_nms0
-
-    return $ FusedRes (rsucc res) os' is' ufs'
-                      (M.insert nm_ker new_ker (kernels res))
-
+addNewKerWithUnfusable :: FusedRes -> (TupIdent, Exp) -> S.Set VName -> FusionGM FusedRes
+addNewKerWithUnfusable res (idd, soac) ufs = do
+  (inp_idds, _) <- getInpArrSOAC soac >>= getIdentArr
+  nm_ker  <- new "ker"
+  let inp_nms0 = map identName inp_idds
+      new_ker = FusedKer (idd, soac) (S.fromList inp_idds) S.empty []
+      out_nms = patNames idd
+      os' = S.foldl (\x arr -> M.insert arr nm_ker x)
+            (outArr res) out_nms
+      is' = foldl (\x arr -> M.insertWith' S.union arr (S.singleton nm_ker) x)
+            (inpArr res) inp_nms0
+  return $ FusedRes (rsucc res) os' is' ufs
+           (M.insert nm_ker new_ker (kernels res))
 
 -- map, reduce, redomap
 greedyFuse :: Bool -> S.Set VName -> FusedRes -> (TupIdent, Exp) -> FusionGM FusedRes
@@ -230,10 +234,7 @@ greedyFuse is_repl lam_used_nms res (idd, soac) = do
 
     -- E.g., with `map2(f, a, b[i])', `a' belongs to `inp_idds' and
     --        `b' belongs to `other_idds'
-    (inp_idds, other_idds) <- getInpArrSOAC soac >>= getIdentArr
-    let (inp_nms0,other_nms0) = (map identName inp_idds, map identName other_idds)
-    inp_nms   <- expandSoacInpArr   inp_nms0
-    other_nms <- expandSoacInpArr other_nms0
+    (inp_idds, other_idds, inp_nms, other_nms) <- soacInputs soac
 
     let out_idds     = S.toList $ patIdents idd
     let out_nms      = map identName out_idds
@@ -272,19 +273,13 @@ greedyFuse is_repl lam_used_nms res (idd, soac) = do
     --         BUT which said kernel is not the one we are fusing with (now)!
     let mod_kerS  = if is_fusable then to_fuse_knmSet else S.empty
     let used_inps = filter (isInpArrInResModKers res mod_kerS) inp_nms
-    let ufs       = unfusable res `S.union` S.fromList used_inps `S.union` S.fromList other_nms
+    let ufs       = S.unions [unfusable res, S.fromList used_inps, S.fromList other_nms]
     let comb      = M.unionWith S.union
 
     if not is_fusable then
       if is_repl then return res
-      else do -- nothing to fuse, add a new soac kernel to the result
-        let new_ker = FusedKer (idd, soac) (S.fromList inp_idds) S.empty []
-        nm_ker  <- new "ker"
-        let os' = M.fromList (zip out_nms $ repeat nm_ker) `M.union` outArr res
-        let is' = M.fromList (zip inp_nms0 $ repeat (S.singleton nm_ker)) `comb`
-                  inpArr res
-        return $ FusedRes (rsucc res) os' is' ufs
-                          (M.insert nm_ker new_ker (kernels res))
+      else -- nothing to fuse, add a new soac kernel to the result
+        addNewKerWithUnfusable res (idd, soac) ufs
      else do -- ... fuse current soac into to_fuse_kers ...
        fused_kers <- mapM (fuseSOACwithKer (out_idds, soac)) to_fuse_kers
        -- Need to suitably update `inpArr':
