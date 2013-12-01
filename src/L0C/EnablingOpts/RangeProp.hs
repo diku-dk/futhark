@@ -148,26 +148,29 @@ rangeProp prog = do
                      | ineq >= IEQ -> return $ Literal (LogVal False) pos
                      | otherwise -> return $ BinOp Less e1' e2' ty pos
 
-    rangePropExp (BinOp Equal e1 e2 ty pos) = do
-      e1' <- rangePropExp e1
-      e2' <- rangePropExp e2
-      if typeOf e1 /= Elem Int then return $ BinOp Less e1' e2' ty pos
-      else do
-        ineq <- rangeRExpCompare (RExp e1) (RExp e2) pos
-        case () of _ | ineq == Just IEQ -> return $ Literal (LogVal True) pos
-                     | ineq > Just IEQ -> return $ Literal (LogVal False) pos
-                     | ineq < Just IEQ -> return $ Literal (LogVal False) pos
-                     | otherwise -> return $ BinOp Equal e1' e2' ty pos
-
     rangePropExp (BinOp Leq e1 e2 ty pos) = do
       e1' <- rangePropExp e1
       e2' <- rangePropExp e2
       if typeOf e1 /= Elem Int then return $ BinOp Less e1' e2' ty pos
       else do
-        ineq <- rangeRExpCompare (RExp e1) (RExp e2) pos
-        case () of _ | ineq <= Just ILTE -> return $ Literal (LogVal True) pos
-                     | ineq >  Just ILTE -> return $ Literal (LogVal False) pos
-                     | otherwise -> return $ BinOp Leq e1' e2' ty pos
+        ineq <- rangeCompare (RExp e1) (RExp e2) pos
+        case () of _ | ineq == ILT  -> return $ Literal (LogVal True) pos
+                     | ineq == ILTE -> return $ Literal (LogVal True) pos
+                     | ineq == IEQ  -> return $ Literal (LogVal True) pos
+                     | ineq == IGT  -> return $ Literal (LogVal False) pos
+                     | otherwise    -> return $ BinOp Leq e1' e2' ty pos
+
+    rangePropExp (BinOp Equal e1 e2 ty pos) = do
+      e1' <- rangePropExp e1
+      e2' <- rangePropExp e2
+      if typeOf e1 /= Elem Int then return $ BinOp Less e1' e2' ty pos
+      else do
+        ineq <- rangeCompare (RExp e1) (RExp e2) pos
+        case () of _ | ineq == IEQ -> return $ Literal (LogVal True) pos
+                     | ineq == ILT -> return $ Literal (LogVal False) pos
+                     | ineq == IGT -> return $ Literal (LogVal False) pos
+                     | otherwise   -> return $ BinOp Equal e1' e2' ty pos
+
     rangePropExp e =
       mapExpM rangePropMapper e
 
