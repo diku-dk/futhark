@@ -281,10 +281,10 @@ simplifyNary (BinOp Times e1 e2 tp pos) = do
         makeProds exs (NaryMult ys tp1 pos1) =
           return $ NaryMult (sort (ys++exs)) tp1 pos1
 
-simplifyNary (BinOp Divide (Literal (IntVal 1) _)  (BinOp Pow e1 e2 _ _) tp pos) = do
-  e1' <- simplifyNary e1 >>= simplifyBack
+simplifyNary (BinOp Divide (Literal (IntVal 1) _) (BinOp Pow e1 e2 _ _) tp pos) = do
+  e1' <-simplifyNary e1 >>= simplifyBack
   e2' <- simplifyNary e2 >>= simplifyBack
-  case (e1', e2') of
+  case (e1, e2) of
     (_, Literal (IntVal 0) _) -> return $ NaryMult [(Literal (IntVal 1) pos)] tp pos
 
     (_, Literal (IntVal v1) _) ->
@@ -293,6 +293,9 @@ simplifyNary (BinOp Divide (Literal (IntVal 1) _)  (BinOp Pow e1 e2 _ _) tp pos)
               else NaryMult (replicate (abs v1) $ e1) tp pos)
 
     _   -> return $ NaryMult [BinOp Divide (Literal (IntVal 1) pos)  (BinOp Pow e1' e2' tp pos) tp pos] tp pos
+
+simplifyNary (BinOp Divide (Literal (IntVal 1) _) (BinOp Divide (Literal (IntVal 1) _) e2 _ _) tp pos) =
+  simplifyNary e2
 
 simplifyNary (BinOp Divide e1 e2 tp pos) = do
     e1' <- simplifyNary e1
@@ -355,7 +358,7 @@ simplifyNary (BinOp Pow e1 e2 tp pos) = do
 
   case (e1',e2') of
     (Literal (IntVal v1) _, Literal (IntVal v2) _) ->
-      trace ("fest") return $ NaryMult [Literal (IntVal $ v1^v2) pos] tp pos
+      return $ NaryMult [Literal (IntVal $ v1^v2) pos] tp pos
 
     (_, Literal (IntVal 0) _) ->
       return $ NaryMult [Literal (IntVal 1) pos] tp pos

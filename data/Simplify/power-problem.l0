@@ -5,4 +5,5 @@ fun bool main (int a) =
     let x4 = a pow (~3) = (1/a)*(1/a)*(1/a) in
     let x5 = 0 pow 0 = 1  in
     let x6 = a pow 0 = 1  in
-    x1 && x2 && x3 && x4 && x5 && x6
+    let x7 = 1 / (a pow (~2)) = a pow 2 in
+    x1 && x2 && x3 && x4 && x5 && x6 && x7
