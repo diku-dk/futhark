@@ -281,22 +281,6 @@ simplifyNary (BinOp Times e1 e2 tp pos) = do
         makeProds exs (NaryMult ys tp1 pos1) =
           return $ NaryMult (sort (ys++exs)) tp1 pos1
 
-simplifyNary (BinOp Divide (Literal (IntVal 1) _) (BinOp Pow e1 e2 _ _) tp pos) = do
-  e1' <-simplifyNary e1 >>= simplifyBack
-  e2' <- simplifyNary e2 >>= simplifyBack
-  case (e1, e2) of
-    (_, Literal (IntVal 0) _) -> return $ NaryMult [(Literal (IntVal 1) pos)] tp pos
-
-    (_, Literal (IntVal v1) _) ->
-      return (if v1 >= 0
-              then NaryMult (replicate (abs v1) $ BinOp Divide (Literal (IntVal 1) pos) e1' tp pos) tp pos
-              else NaryMult (replicate (abs v1) $ e1) tp pos)
-
-    _   -> return $ NaryMult [BinOp Divide (Literal (IntVal 1) pos)  (BinOp Pow e1' e2' tp pos) tp pos] tp pos
-
-simplifyNary (BinOp Divide (Literal (IntVal 1) _) (BinOp Divide (Literal (IntVal 1) _) e2 _ _) tp pos) =
-  simplifyNary e2
-
 simplifyNary (BinOp Divide e1 e2 tp pos) = do
     e1' <- simplifyNary e1
     e2' <- simplifyNary e2
@@ -352,26 +336,34 @@ simplifyNary (Negate e tp pos) = do
     negOne <- getNeg1 tp pos
     simplifyNary $ BinOp Times (Literal negOne pos) e tp pos
 
+-- cannot handle 0^a, because if a < 0 then it's an error.
+-- Could be extented to handle negative exponents better, if needed
 simplifyNary (BinOp Pow e1 e2 tp pos) = do
   e1' <- simplifyNary e1 >>= simplifyBack
   e2' <- simplifyNary e2 >>= simplifyBack
+  if isCt1 e1' || isCt0 e2'
+  then do one <- getPos1 tp pos
+          return $ NaryMult [Literal one pos] tp pos
+  else if isCt1 e2'
+  then return $ NaryMult [e1'] tp pos
+  else case (e1',e2') of
+        (Literal v1 _, Literal v2 _)  -> do res <- powVals v1 v2
+                                            return $ NaryMult [Literal res pos] tp pos
+        (_, Literal (IntVal n) _) ->
+          return (if n >= 1
+                  then NaryMult (replicate n e1') tp pos
+                  else NaryMult [BinOp Pow e1' e2' tp pos] tp pos
+                  )
+        _                         -> return $ NaryMult [BinOp Pow e1' e2' tp pos] tp pos
 
-  case (e1',e2') of
-    (Literal (IntVal v1) _, Literal (IntVal v2) _) ->
-      return $ NaryMult [Literal (IntVal $ v1^v2) pos] tp pos
-
-    (_, Literal (IntVal 0) _) ->
-      return $ NaryMult [Literal (IntVal 1) pos] tp pos
-
-    (_, Literal (IntVal v2) _) ->
-      return (if v2 >= 1
-              then NaryMult (replicate v2 e1') tp pos
-              else NaryMult (replicate (abs v2) $ BinOp Divide (Literal (IntVal 1) pos) e1' tp pos) tp pos)
-
-    _   -> return $ NaryMult [BinOp Pow e1' e2' tp pos] (typeOf e1') (srclocOf e1')
-
-
-
+  where
+    powVals :: Value -> Value -> SimplifyM Value
+    powVals (IntVal v1) (IntVal v2)
+      | v2 < 0, v1 == 0 = badSimplifyM $ SimplifyError pos "powVals: Negative exponential with zero base"
+      | v2 < 0          = return $ IntVal ( 1 `div` (v1 ^ (-v2)) )
+      | otherwise       = return $ IntVal ( v1 ^ v2 )
+    powVals (RealVal v1) (RealVal v2) = return $ RealVal (v1 ** v2)
+    powVals _ _ = badSimplifyM $ SimplifyError pos  "powVals: operands not of (the same) numeral type! "
 
 ------------------------------------------------
 -- TODO: Any other possible simplification,
@@ -477,6 +469,18 @@ isValue1 :: Value -> Bool
 isValue1 (IntVal v)  = v == 1
 isValue1 (RealVal v) = v == 1.0
 isValue1 (_)         = False
+
+isCt1 :: Exp -> Bool
+isCt1 e = case e of
+            Literal (IntVal  one) _ -> one == 1
+            Literal (RealVal one) _ -> one == 1.0
+            _                       -> False
+
+isCt0 :: Exp -> Bool
+isCt0 e = case e of
+            Literal (IntVal  zr) _   -> zr == 0
+            Literal (RealVal zr) _   -> zr == 0.0
+            _                        -> False
 
 splitTerm :: NaryExp -> SimplifyM (NaryExp, Value)
 splitTerm (NaryMult [ ] _ pos) =

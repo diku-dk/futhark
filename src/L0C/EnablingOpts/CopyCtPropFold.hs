@@ -565,18 +565,11 @@ ctFoldBinOp e@(BinOp Mod e1 e2 _ pos)
       (Literal (IntVal  v1) _, Literal (IntVal  v2) _) -> changed $ Literal (IntVal  (v1 `mod` v2)) pos
       _ -> badCPropM $ TypeError pos  " % operands not of integer type! "
   | otherwise = return e
-ctFoldBinOp e@(BinOp Pow e1 e2 _ pos)
-  | isCt0 e2 =
-    case typeOf e1 of
-      Elem Int  -> changed $ Literal (IntVal  1) pos
-      Elem Real -> changed $ Literal (RealVal 1.0) pos
-      _ -> badCPropM $ TypeError pos  " pow operands not of (the same) numeral type! "
-  |  isValue e1, isValue e2 =
-    case (e1, e2) of
-      (Literal (IntVal v1) _, Literal (IntVal v2) _) -> changed $ Literal (IntVal  (v1 ^ v2)) pos
-      (Literal (RealVal v1) _, Literal (RealVal v2) _) -> changed $ Literal (RealVal (v1**v2)) pos
-      _ -> badCPropM $ TypeError pos  " pow operands not of (the same) numeral type! "
-  | otherwise = simplExp e
+ctFoldBinOp e@(BinOp Pow e1 e2 _ pos) =
+  case (typeOf e1, typeOf e2) of
+    (Elem Int, Elem Int) -> simplExp e
+    (Elem Real, Elem Real) -> simplExp e
+    _ -> badCPropM $ TypeError pos  " pow operands not of (the same) numeral type! "
 ctFoldBinOp e@(BinOp ShiftL e1 e2 _ pos)
   | isCt0 e2 = changed e1
   | isValue e1, isValue e2 =
