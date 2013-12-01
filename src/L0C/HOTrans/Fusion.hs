@@ -46,7 +46,8 @@ bindVars :: FusionGEnv -> [VName] -> FusionGEnv
 bindVars = foldl bindVar
 
 bindingIdents :: [Ident] -> FusionGM a -> FusionGM a
-bindingIdents nms = local (`bindVars` map identName (filter (basicType . identType) nms))
+bindingIdents idds = local (`bindVars` namesOfArrays idds)
+  where namesOfArrays = map identName . filter (not . basicType . identType)
 
 binding :: TupIdent -> FusionGM a -> FusionGM a
 binding = bindingIdents . S.toList . patIdents
@@ -196,17 +197,17 @@ expandSoacInpArr =
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 
-soacInputs :: Exp -> FusionGM ([Ident], [Ident], [VName], [VName])
+soacInputs :: Exp -> FusionGM ([VName], [VName])
 soacInputs soac = do
   (inp_idds, other_idds) <- getInpArrSOAC soac >>= getIdentArr
   let (inp_nms0,other_nms0) = (map identName inp_idds, map identName other_idds)
   inp_nms   <- expandSoacInpArr   inp_nms0
   other_nms <- expandSoacInpArr other_nms0
-  return (inp_idds, other_idds, inp_nms, other_nms)
+  return (inp_nms, other_nms)
 
 addNewKer :: FusedRes -> (TupIdent, Exp) -> FusionGM FusedRes
 addNewKer res (idd, soac) = do
-  (_, _, inp_nms, other_nms) <- soacInputs soac
+  (inp_nms, other_nms) <- soacInputs soac
 
   let used_inps = filter (isInpArrInResModKers res S.empty) inp_nms
   let ufs = S.unions [unfusable res, S.fromList used_inps, S.fromList other_nms]
@@ -234,7 +235,7 @@ greedyFuse is_repl lam_used_nms res (idd, soac) = do
 
     -- E.g., with `map2(f, a, b[i])', `a' belongs to `inp_idds' and
     --        `b' belongs to `other_idds'
-    (inp_idds, other_idds, inp_nms, other_nms) <- soacInputs soac
+    (inp_nms, other_nms) <- soacInputs soac
 
     let out_idds     = S.toList $ patIdents idd
     let out_nms      = map identName out_idds
