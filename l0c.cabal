@@ -19,6 +19,7 @@ Executable l0c
                  srcloc >= 0.4,
                  language-c-quote >= 0.7.1,
                  mainland-pretty >= 0.2.5,
+                 monad-loops >= 0.4.2,
                  text
 
   -- We have to mention these explicitly, or alex and happy won't be
