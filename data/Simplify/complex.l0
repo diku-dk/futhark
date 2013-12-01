@@ -30,8 +30,9 @@ fun bool division(int a, int b, int c) =
 fun bool minmax(int a, int b, int c) =
     let x0 = min(1,~2) = ~2 in
     let x1 = max(~2,1) = 1 in
-    let x2 = a + min(max(a - min(1 + a,100 + a),10) - 1,1 - 1) + b = a + b in
-    x0 && x1 && x2
+    let x2 = min(a, min(a,2) ) = min(a,2) in
+    let x3 = min(a, max(a, b)) = a in
+    x0 && x1 && x2 && x3
 
 fun bool power(int a, int b) =
     let x0 = a pow 2 = a * a in
@@ -42,5 +43,5 @@ fun bool power(int a, int b) =
 
 fun int main(int a, int b, int c, int d, int e, int f, int g, int h) =
     if relationel(a,b) && addNMult(a,b,c,d,e,f,g,h) && division(a,b,c) && minmax(a,b,c) && power(a,b)
-    then 42
-    else 0
+    then 0 //success
+    else ~1 //failure
