@@ -227,21 +227,22 @@ copyCtPropExp eee@(Index cs idd@(Ident vnm tp p) csidx inds tp2 pos) = do
   inds' <- mapM copyCtPropExp inds
   bnd   <- asks $ M.lookup vnm . envVtable
   cs'   <- copyCtPropCerts cs
+  csidx' <- maybe (return Nothing) (liftM Just) $ liftM copyCtPropCerts csidx
   case bnd of
-    Nothing               -> return  $ Index cs' idd csidx inds' tp2 pos
-    Just (VarId  id' _ _) -> changed $ Index cs' (Ident id' tp p) csidx inds' tp2 pos
+    Nothing               -> return  $ Index cs' idd csidx' inds' tp2 pos
+    Just (VarId  id' _ _) -> changed $ Index cs' (Ident id' tp p) csidx' inds' tp2 pos
     Just (Constant v _ _) ->
       case v of
         ArrayVal _ _ ->
           let sh = arrayShape v
           in case ctIndex inds' of
-               Nothing -> return $ Index cs' idd csidx inds' tp2 pos
+               Nothing -> return $ Index cs' idd csidx' inds' tp2 pos
                Just iis->
                  if length iis == length sh
                  then case getArrValInd v iis of
-                        Nothing -> return $ Index cs' idd csidx inds' tp2 pos
+                        Nothing -> return $ Index cs' idd csidx' inds' tp2 pos
                         Just el -> changed $ Literal el pos
-                 else return $ Index cs' idd csidx inds' tp2 pos
+                 else return $ Index cs' idd csidx' inds' tp2 pos
         _ -> badCPropM $ TypeError pos  " indexing into a non-array value "
     Just (SymArr e' _ _) ->
       case (e', inds') of
@@ -252,15 +253,15 @@ copyCtPropExp eee@(Index cs idd@(Ident vnm tp p) csidx inds tp2 pos) = do
             -- the array element type is the same as the one of the big array, i.e., t1
             -- the result type is the same as eee's, i.e., tp2
             inner <- copyCtPropExp(Index (cs'++cs2) aa
-                                   (liftM2 (++) csidx csidx2)
+                                   (liftM2 (++) csidx' csidx2)
                                    (ais ++ inds') tp2 pos)
             changed inner
 
         (ArrayLit {}   , _) ->
             case ctIndex inds' of
-                Nothing  -> return $ Index cs' idd csidx inds' tp2 pos
+                Nothing  -> return $ Index cs' idd csidx' inds' tp2 pos
                 Just iis -> case getArrLitInd e' iis of
-                                Nothing -> return $ Index cs' idd csidx inds' tp2 pos
+                                Nothing -> return $ Index cs' idd csidx' inds' tp2 pos
                                 Just el -> changed el
 
         (TupLit   _ _, _       ) -> badCPropM $ TypeError pos  " indexing into a tuple (found tuplit) "
@@ -269,18 +270,18 @@ copyCtPropExp eee@(Index cs idd@(Ident vnm tp p) csidx inds tp2 pos) = do
         (Replicate _ vvv@(Var vv) _, _:is') -> do
             inner <- if null is'
                      then copyCtPropExp vvv
-                     else copyCtPropExp (Index cs' vv csidx is' tp2 pos)
+                     else copyCtPropExp (Index cs' vv csidx' is' tp2 pos)
             changed inner
         (Replicate _ (Index cs2 a csidx2 ais _ _) _, _:is') -> do
             inner <- copyCtPropExp (Index (cs'++cs2) a
-                                    (liftM2 (++) csidx csidx2)
+                                    (liftM2 (++) csidx' csidx2)
                                     (ais ++ is') tp2 pos)
             changed inner
         (Replicate _ (Literal arr@(ArrayVal _ _) _) _, _:is') ->
             case ctIndex is' of
-                Nothing -> return $ Index cs' idd csidx inds' tp2 pos
+                Nothing -> return $ Index cs' idd csidx' inds' tp2 pos
                 Just iis-> case getArrValInd arr iis of
-                               Nothing -> return $ Index cs' idd csidx inds' tp2 pos
+                               Nothing -> return $ Index cs' idd csidx' inds' tp2 pos
                                Just el -> changed $ Literal el pos
         (Replicate _ val@(Literal _ _) _, _:is') ->
             if null is' then changed val
@@ -288,9 +289,9 @@ copyCtPropExp eee@(Index cs idd@(Ident vnm tp p) csidx inds tp2 pos) = do
 
         (Replicate _ arr@(ArrayLit {}) _, _:is') ->
             case ctIndex is' of
-                Nothing -> return $ Index cs' idd csidx inds' tp2 pos
+                Nothing -> return $ Index cs' idd csidx' inds' tp2 pos
                 Just iis-> case getArrLitInd arr iis of
-                               Nothing -> return $ Index cs' idd csidx inds' tp2 pos
+                               Nothing -> return $ Index cs' idd csidx' inds' tp2 pos
                                Just el -> changed el
         (Replicate _ tup@(TupLit _ _) _, _:is') ->
             if null is' && isCtOrCopy tup then changed tup
@@ -300,7 +301,7 @@ copyCtPropExp eee@(Index cs idd@(Ident vnm tp p) csidx inds tp2 pos) = do
           | [x] <- is' -> changed x
           | otherwise -> badCPropM $ TypeError pos  (" illegal indexing: " ++ ppExp eee)
         (Replicate {}, _) ->
-            return $ Index cs' idd csidx inds' tp2 pos
+            return $ Index cs' idd csidx' inds' tp2 pos
 
         _ -> badCPropM $ CopyCtPropError pos (" Unreachable case in copyCtPropExp of Index exp: " ++
                                               ppExp eee++" is bound to "++ppExp e' )
@@ -567,12 +568,12 @@ ctFoldBinOp e@(BinOp Mod e1 e2 _ pos)
       _ -> badCPropM $ TypeError pos  " % operands not of integer type! "
   | otherwise = return e
 ctFoldBinOp e@(BinOp Pow e1 e2 _ pos)
-  | isCt0 e1 || isCt1 e1 || isCt1 e2 = changed e1
   | isCt0 e2 =
     case typeOf e1 of
       Elem Int  -> changed $ Literal (IntVal  1) pos
       Elem Real -> changed $ Literal (RealVal 1.0) pos
       _ -> badCPropM $ TypeError pos  " pow operands not of (the same) numeral type! "
+  | isCt0 e1 || isCt1 e1 || isCt1 e2 = changed e1
   |  isValue e1, isValue e2 =
     case (e1, e2) of
       (Literal (IntVal v1) _, Literal (IntVal v2) _) -> changed $ Literal (IntVal  (v1 ^v2)) pos
