@@ -118,6 +118,12 @@ fuseInFun res (fnm, rtp, idds, body, pos) = do
 ---------------------------------------------------
 ---------------------------------------------------
 
+-- | A type used for (hopefully) uniquely referring a producer SOAC.
+-- The uniquely identifying value is the name of the first array
+-- returned from the SOAC.
+newtype KernName = KernName { unKernName :: VName }
+  deriving (Eq, Ord, Show)
+
 data FusedKer = FusedKer {
                   fsoac      :: (TupIdent, Exp)
                 -- ^ the fused SOAC statement, e.g.,
@@ -141,11 +147,11 @@ data FusedRes = FusedRes {
     rsucc :: Bool
   -- ^ Whether we have fused something anywhere.
 
-  , outArr     :: M.Map VName VName
+  , outArr     :: M.Map VName KernName
   -- ^ Associates an array to the name of the
   -- SOAC kernel that has produced it.
 
-  , inpArr     :: M.Map VName (S.Set VName)
+  , inpArr     :: M.Map VName (S.Set KernName)
   -- ^ Associates an array to the names of the
   -- SOAC kernels that uses it. These sets include
   -- only the SOAC input arrays used as full variables, i.e., no `a[i]'.
@@ -160,7 +166,7 @@ data FusedRes = FusedRes {
   --
   --   3. are used in the lambda expression of SOACs
 
-  , kernels    :: M.Map VName FusedKer
+  , kernels    :: M.Map KernName FusedKer
   -- ^ The map recording the uses
   }
 
@@ -174,13 +180,13 @@ isOmapKer ker =
         _          -> False
 
 
-isInpArrInResModKers :: FusedRes -> S.Set VName -> VName -> Bool
+isInpArrInResModKers :: FusedRes -> S.Set KernName -> VName -> Bool
 isInpArrInResModKers ress kers nm =
   case M.lookup nm (inpArr ress) of
     Nothing -> False
     Just s  -> not $ S.null $ s `S.difference` kers
 
-getKersWithInpArrs :: FusedRes -> [VName] -> S.Set VName
+getKersWithInpArrs :: FusedRes -> [VName] -> S.Set KernName
 getKersWithInpArrs ress =
   S.unions . mapMaybe (`M.lookup` inpArr ress)
 
@@ -217,7 +223,7 @@ addNewKer res (idd, soac) = do
 addNewKerWithUnfusable :: FusedRes -> (TupIdent, Exp) -> S.Set VName -> FusionGM FusedRes
 addNewKerWithUnfusable res (idd, soac) ufs = do
   (inp_idds, _) <- getInpArrSOAC soac >>= getIdentArr
-  nm_ker  <- new "ker"
+  nm_ker <- KernName <$> new "ker"
   let inp_nms0 = map identName inp_idds
       new_ker = FusedKer (idd, soac) (S.fromList inp_idds) S.empty []
       out_nms = patNames idd
@@ -231,10 +237,8 @@ addNewKerWithUnfusable res (idd, soac) ufs = do
 -- map, reduce, redomap
 greedyFuse :: Bool -> S.Set VName -> FusedRes -> (TupIdent, Exp) -> FusionGM FusedRes
 greedyFuse is_repl lam_used_nms res (idd, soac) = do
-    -- Assumtion: the free vars in lambda are already in `unfusable'
-
-    -- E.g., with `map2(f, a, b[i])', `a' belongs to `inp_idds' and
-    --        `b' belongs to `other_idds'
+    -- Assumption: the free vars in lambda are already in
+    -- 'unfusable res'.
     (inp_nms, other_nms) <- soacInputs soac
 
     let out_idds     = S.toList $ patIdents idd
@@ -406,10 +410,6 @@ fusionGatherExp :: FusedRes -> Exp -> FusionGM FusedRes
 --- Let-Pattern: most important construct
 ----------------------------------------------
 
--- bnd <- asks $ M.lookup (identName src) . envVtable
--- body' <- binding bnds $ tupleNormExp  body
-
-
 fusionGatherExp fres (LetPat pat soac@(Map2 _ lam _ _ _) body _) = do
     bres  <- bindPat pat soac $ fusionGatherExp fres body
     (used_lam, blres) <- fusionGatherLam (S.empty, bres) lam
@@ -537,12 +537,8 @@ fusionGatherExp fres e = do
     let foldstct = identityFolder { foldOnExp = fusionGatherExp }
     foldExpM foldstct fres e
 
-----------------------------------------------
---- Lambdas create a new scope. Disalow fusing
----   from outside lambda by adding inp_arrs
----   to the unfusable set.
-----------------------------------------------
-
+-- Lambdas create a new scope.  Disallow fusing from outside lambda by
+-- adding inp_arrs to the unfusable set.
 fusionGatherLam :: (S.Set VName, FusedRes) -> TupleLambda -> FusionGM (S.Set VName, FusedRes)
 fusionGatherLam (u_set,fres) (TupleLambda idds body _ _) = do
     let null_res = mkFreshFusionRes
@@ -646,7 +642,7 @@ replaceSOAC pat soac = do
         case M.lookup knm (kernels fres) of
           Nothing  -> badFusionGM $ EnablingOptError loc
                                      ("In Fusion.hs, replaceSOAC, outArr in ker_name "
-                                      ++"which is not in Res: "++textual knm)
+                                      ++"which is not in Res: "++textual (unKernName knm))
           Just ker -> do
             let (pat', new_soac) = fsoac ker
             if pat /= pat'
