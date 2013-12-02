@@ -47,4 +47,4 @@ fun int complex(int input1, int input2) =
     mul_t0 + mul_t1 + mul_t2 + mul_t3 + mul_t4 + mul_t5 + div_t0 + div_t1 + div_t2 + div_t3 + div_t4 + div_t5
 
 fun int main(int input1, int input2) =
-    simple(input1, input2)
+    complex(input1, input2)

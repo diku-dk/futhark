@@ -5,6 +5,7 @@
 -- want.
 module L0C.HOTrans.Composing
   ( fuseMaps
+  , fuseFilters
   , fuseFilterIntoFold
   )
   where
@@ -45,10 +46,27 @@ fuseMaps lam1 inp1 out1 lam2 inp2 = (lam2', M.elems inputmap)
 
         (lam2redparams, pat, inputmap, makeCopies) = fuseInputs lam1 inp1 out1 lam2 inp2
 
+fuseFilters :: TupleLambda -> [Exp] -> [Ident]
+            -> TupleLambda -> [Exp] -> VName
+            -> (TupleLambda, [Exp])
+fuseFilters lam1 inp1 out1 lam2 inp2 vname =
+  fuseFilterInto lam1 inp1 out1 lam2 inp2 vname false
+  where false = Literal (TupVal [LogVal False]) $ srclocOf lam2
+
 fuseFilterIntoFold :: TupleLambda -> [Exp] -> [Ident]
                    -> TupleLambda -> [Exp] -> VName
                    -> (TupleLambda, [Exp])
-fuseFilterIntoFold lam1 inp1 out1 lam2 inp2 vname = (lam2', M.elems inputmap)
+fuseFilterIntoFold lam1 inp1 out1 lam2 inp2 vname =
+  fuseFilterInto lam1 inp1 out1 lam2 inp2 vname identity
+  where identity = TupLit (map (Var . fromParam) lam2redparams) $ srclocOf lam2
+        lam2redparams = take (length (tupleLambdaParams lam2) - length inp2) $
+                        tupleLambdaParams lam2
+
+fuseFilterInto :: TupleLambda -> [Exp] -> [Ident]
+               -> TupleLambda -> [Exp]
+               -> VName -> Exp
+               -> (TupleLambda, [Exp])
+fuseFilterInto lam1 inp1 out1 lam2 inp2 vname falsebranch = (lam2', M.elems inputmap)
   where lam2' =
           lam2 { tupleLambdaParams = lam2redparams ++ M.keys inputmap
                , tupleLambdaBody = makeCopies bindins
@@ -57,19 +75,16 @@ fuseFilterIntoFold lam1 inp1 out1 lam2 inp2 vname = (lam2', M.elems inputmap)
         checkident = Ident vname (Elem Bool) loc
         branch = If (Var checkident)
                  (tupleLambdaBody lam2)
-                 identity
-                 rettype
+                 falsebranch
+                 (typeOf (tupleLambdaBody lam2) `unifyUniqueness`
+                  typeOf falsebranch)
                  loc
         check = LetPat (TupId [Id checkident] loc)
                 (tupleLambdaBody lam1) branch loc
         lam1tuple = TupLit (map (Var . fromParam) $ tupleLambdaParams lam1) loc
         bindins = LetPat pat lam1tuple check loc
 
-        rettype = fromDecl $ Elem $ Tuple $ tupleLambdaReturnType lam2
-        identity = TupLit (map (Var . fromParam) lam2redparams) loc
-
         (lam2redparams, pat, inputmap, makeCopies) = fuseInputs lam1 inp1 out1 lam2 inp2
-
 
 fuseInputs :: TupleLambda -> [Exp] -> [Ident]
            -> TupleLambda -> [Exp]
