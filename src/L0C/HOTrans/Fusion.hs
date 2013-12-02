@@ -480,8 +480,7 @@ fusionGatherExp fres (LetWith _ id1 id0 inds elm body _) = do
     let (ker_nms, kers) = unzip $ M.toList $ kernels fres'
 
     -- Now add the aliases of id0 (itself included) to the `inplace' field
-    --     of any existent kernel. ToDo: extend the list to contain the
-    --     whole set of aliases (not available now!)
+    --     of any existent kernel.
     let inplace_aliases = S.toList $ aliases $ typeOf $ Var id0
     let kers' = map (\ k -> let inplace' = foldl (flip S.insert) (inplace k) inplace_aliases
                             in  k { inplace = inplace' }
@@ -500,13 +499,9 @@ fusionGatherExp fres (DoLoop merge_pat ini_val _ ub loop_body let_body _) = do
     -- make the inpArr unfusable, so that they
     -- cannot be fused from outside the loop:
     let (inp_arrs, _) = unzip $ M.toList $ inpArr new_res
-    -- let unfus = (unfusable new_res) `S.union` (S.fromList inp_arrs)
     let new_res' = new_res { unfusable = foldl (flip S.insert) (unfusable new_res) inp_arrs }
     -- merge new_res with fres'
     return $ unionFusionRes new_res' fres'
-
-
--- bnds <- asks $ arrsInScope
 
 fusionGatherExp fres (If cond e_then e_else _ _) = do
     let null_res = mkFreshFusionRes
@@ -515,13 +510,6 @@ fusionGatherExp fres (If cond e_then e_else _ _) = do
     let both_res = unionFusionRes then_res else_res
     fres'    <- fusionGatherExp fres cond
     mergeFusionRes fres' both_res
-
-------WRONG IMPLEM
---    let null_res = mkFreshFusionRes
---    then_res <- fusionGatherExp null_res e_then
---    else_res <- fusionGatherExp null_res e_else
---    fres'    <- fusionGatherExp fres cond
---    return $ unionFusionRes fres' (unionFusionRes then_res else_res)
 
 -----------------------------------------------------------------------------------
 --- Errors: all SOACs, both the regular ones (because they cannot appear in prg)---
