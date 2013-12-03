@@ -835,7 +835,7 @@ checkExp (Reduce fun startexp arrexp intype pos) = do
   intype' <- checkAnnotation pos "element" intype inrowt
   fun' <- checkLambda fun [startarg, arrarg]
   let redtype = lambdaType fun' [typeOf startexp', typeOf arrexp']
-  unless (redtype `subtypeOf` typeOf startexp') $
+  unless (typeOf startexp' `subtypeOf` redtype) $
     bad $ TypeError pos $ "Initial value is of type " ++ ppType (typeOf startexp') ++ ", but reduce function returns type " ++ ppType redtype ++ "."
   unless (redtype `subtypeOf` intype') $
     bad $ TypeError pos $ "Array element value is of type " ++ ppType intype' ++ ", but reduce function returns type " ++ ppType redtype ++ "."
