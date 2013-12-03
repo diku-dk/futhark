@@ -148,7 +148,7 @@ subtypeOf (Array t1 dims1 u1 _) (Array t2 dims2 u2 _) =
        && Elem t1 `subtypeOf` Elem t2
        && length dims1 == length dims2
 subtypeOf (Elem (Tuple ts1)) (Elem (Tuple ts2)) =
-  and $ zipWith subtypeOf ts1 ts2
+  length ts1 == length ts2 && and (zipWith subtypeOf ts1 ts2)
 subtypeOf (Elem Int) (Elem Int) = True
 subtypeOf (Elem Char) (Elem Char) = True
 subtypeOf (Elem Real) (Elem Real) = True
