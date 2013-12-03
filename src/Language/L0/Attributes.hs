@@ -110,9 +110,10 @@ import Control.Applicative
 import Control.Monad.Writer
 
 import Data.Array
+import Data.Hashable
 import Data.List
 import Data.Loc
-import qualified Data.Set as S
+import qualified Data.HashSet as HS
 
 import Language.L0.Syntax
 import Language.L0.Traversals
@@ -216,13 +217,13 @@ toElemDecl t          = t `setElemAliases` NoInfo
 
 -- | Replace no aliasing with an empty alias set.
 fromDecl :: DeclTypeBase vn -> TypeBase Names vn
-fromDecl (Array et sz u _) = Array et sz u S.empty
+fromDecl (Array et sz u _) = Array et sz u HS.empty
 fromDecl (Elem et) = Elem $ fromElemDecl et
 
 -- | Replace no aliasing with an empty alias set.
 fromElemDecl :: ElemTypeBase NoInfo vn -> ElemTypeBase Names vn
 fromElemDecl (Tuple ts) = Tuple $ map fromDecl ts
-fromElemDecl t          = t `setElemAliases` S.empty
+fromElemDecl t          = t `setElemAliases` HS.empty
 
 -- | A type box provides a way to box a 'CompTypeBase', and possibly
 -- retrieve one, if the box is not empty.  This can be used to write
@@ -522,7 +523,7 @@ transposeIndex k n l
 
 -- | The type of an L0 term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
-typeOf :: Ord vn => ExpBase CompTypeBase vn -> CompTypeBase vn
+typeOf :: (Eq vn, Hashable vn) => ExpBase CompTypeBase vn -> CompTypeBase vn
 typeOf (Literal val _) = fromDecl $ valueType val
 typeOf (TupLit es _) = Elem $ Tuple $ map typeOf es
 typeOf (ArrayLit es t _) =
@@ -536,12 +537,12 @@ typeOf (If _ _ _ t _) = t
 typeOf (Var ident) =
   case identType ident of
     Elem (Tuple ets) -> Elem $ Tuple ets
-    t                -> t `addAliases` S.insert (identName ident)
+    t                -> t `addAliases` HS.insert (identName ident)
 typeOf (Apply _ _ t _) = t
 typeOf (LetPat _ _ body _) = typeOf body
 typeOf (LetWith _ _ _ _ _ body _) = typeOf body
 typeOf (Index _ ident _ _ t _) =
-  t `addAliases` S.insert (identName ident)
+  t `addAliases` HS.insert (identName ident)
 typeOf (Iota _ _) = arrayType 1 (Elem Int) Unique
 typeOf (Size {}) = Elem Int
 typeOf (Replicate _ e _) = arrayType 1 (typeOf e) u
@@ -552,7 +553,7 @@ typeOf (Reshape _ shape e _) = build (length shape) (elemType $ typeOf e)
         build n t =
           Array (t `setElemAliases` NoInfo) (replicate n Nothing) Nonunique $
           case typeOf e of Array _ _ _ als -> als
-                           _               -> S.empty -- Type error.
+                           _               -> HS.empty -- Type error.
 typeOf (Transpose _ k n e _)
   | Array et dims u als <- typeOf e,
     (pre,d:post) <- splitAt k dims,
@@ -576,7 +577,7 @@ typeOf (Split _ _ _ t _) =
   Elem $ Tuple [arrayType 1 t Nonunique, arrayType 1 t Nonunique]
 typeOf (Concat _ x y _) = typeOf x `setUniqueness` u
   where u = uniqueness (typeOf x) <> uniqueness (typeOf y)
-typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` S.empty
+typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` HS.empty
 typeOf (Assert _ _) = Elem Cert
 typeOf (Conjoin _ _) = Elem Cert
 typeOf (DoLoop _ _ _ _ _ body _) = typeOf body
@@ -610,13 +611,13 @@ expToValue _ = Nothing
 
 -- | The result of applying the arguments of the given types to the
 -- given lambda function.
-lambdaType :: Ord vn =>
+lambdaType :: (Eq vn, Hashable vn) =>
               LambdaBase CompTypeBase vn -> [CompTypeBase vn] -> CompTypeBase vn
 lambdaType lam = returnType (lambdaReturnType lam) (lambdaParamDiets lam)
 
 -- | The result of applying the arguments of the given types to the
 -- given tuple lambda function.
-tupleLambdaType :: Ord vn =>
+tupleLambdaType :: (Eq vn, Hashable vn) =>
                    TupleLambdaBase CompTypeBase vn
                 -> [CompTypeBase vn]
                 -> [CompTypeBase vn]
@@ -627,13 +628,13 @@ tupleLambdaType (TupleLambda params _ ets _) args =
 -- | The result of applying the arguments of the given types to a
 -- function with the given return type, consuming its parameters with
 -- the given diets.
-returnType :: Ord vn => DeclTypeBase vn -> [Diet] -> [CompTypeBase vn] -> CompTypeBase vn
+returnType :: (Eq vn, Hashable vn) => DeclTypeBase vn -> [Diet] -> [CompTypeBase vn] -> CompTypeBase vn
 returnType (Array et sz Nonunique NoInfo) ds args = Array et sz Nonunique als
   where als = mconcat $ map aliases $ zipWith maskAliases args ds
 returnType (Array et sz Unique NoInfo) _ _ = Array et sz Unique mempty
 returnType (Elem (Tuple ets)) ds args =
   Elem $ Tuple $ map (\et -> returnType et ds args) ets
-returnType (Elem t) _ _ = Elem t `setAliases` S.empty
+returnType (Elem t) _ _ = Elem t `setAliases` HS.empty
 
 -- | The specified return type of a lambda.
 lambdaReturnType :: LambdaBase CompTypeBase vn -> DeclTypeBase vn
@@ -650,7 +651,7 @@ funDecByName :: Name -> ProgBase ty vn -> Maybe (FunDecBase ty vn)
 funDecByName fname = find (\(fname',_,_,_,_) -> fname == fname') . progFunctions
 
 -- | Return the set of all variable names bound in a program.
-progNames :: Ord vn => ProgBase ty vn -> S.Set vn
+progNames :: (Eq vn, Hashable vn) => ProgBase ty vn -> HS.HashSet vn
 progNames = execWriter . mapM funNames . progFunctions
   where names = identityWalker {
                   walkOnExp = expNames
@@ -659,7 +660,7 @@ progNames = execWriter . mapM funNames . progFunctions
                 , walkOnPattern = tell . patNames
                 }
 
-        one = tell . S.singleton . identName
+        one = tell . HS.singleton . identName
         funNames (_, _, params, body, _) =
           mapM_ one params >> expNames body
 
@@ -695,7 +696,7 @@ tupleLambdaToLambda (TupleLambda params body rettype loc) =
 
 -- | Return the set of identifiers that are free in the given
 -- expression.
-freeInExp :: Ord vn => ExpBase ty vn -> S.Set (IdentBase ty vn)
+freeInExp :: (Eq vn, Hashable vn) => ExpBase ty vn -> HS.HashSet (IdentBase ty vn)
 freeInExp = execWriter . expFree
   where names = identityWalker {
                   walkOnExp = expFree
@@ -706,7 +707,7 @@ freeInExp = execWriter . expFree
                 }
 
         identFree ident =
-          tell $ S.singleton ident
+          tell $ HS.singleton ident
 
         expFree (LetPat pat e body _) = do
           expFree e
@@ -716,35 +717,35 @@ freeInExp = execWriter . expFree
           identFree src
           mapM_ expFree idxs
           expFree ve
-          binding (S.singleton dest) $ expFree body
+          binding (HS.singleton dest) $ expFree body
         expFree (DoLoop pat mergeexp i boundexp loopbody letbody _) = do
           expFree mergeexp
           expFree boundexp
-          binding (i `S.insert` patIdents pat) $ do
+          binding (i `HS.insert` patIdents pat) $ do
             expFree loopbody
             expFree letbody
         expFree e = walkExpM names e
 
         lambdaFree = tell . freeInLambda
 
-        binding bound = censor (S.\\ bound)
+        binding bound = censor (`HS.difference` bound)
 
 -- | As 'freeInExp', but returns the raw names rather than 'IdentBase's.
-freeNamesInExp :: Ord vn => ExpBase ty vn -> S.Set vn
-freeNamesInExp = S.map identName . freeInExp
+freeNamesInExp :: (Eq vn, Hashable vn) => ExpBase ty vn -> HS.HashSet vn
+freeNamesInExp = HS.map identName . freeInExp
 
 -- | Return the set of variables names consumed by the given
 -- expression.
-consumedInExp :: Ord vn => ExpBase CompTypeBase vn -> S.Set vn
+consumedInExp :: (Eq vn, Hashable vn) => ExpBase CompTypeBase vn -> HS.HashSet vn
 consumedInExp = execWriter . expConsumed
   where names = identityWalker {
                   walkOnExp = expConsumed
                 }
 
-        unconsume s = censor (`S.difference` s)
+        unconsume s = censor (`HS.difference` s)
 
         consume ident =
-          tell $ identName ident `S.insert` aliases (identType ident)
+          tell $ identName ident `HS.insert` aliases (identType ident)
 
         expConsumed (LetPat pat e body _) = do
           expConsumed e
@@ -753,11 +754,11 @@ consumedInExp = execWriter . expConsumed
           mapM_ expConsumed idxs
           expConsumed ve
           consume src
-          unconsume (S.singleton $ identName dest) $ expConsumed body
+          unconsume (HS.singleton $ identName dest) $ expConsumed body
         expConsumed (DoLoop pat mergeexp i boundexp loopbody letbody _) = do
           expConsumed mergeexp
           expConsumed boundexp
-          unconsume (identName i `S.insert` patNames pat) $ do
+          unconsume (identName i `HS.insert` patNames pat) $ do
             expConsumed loopbody
             expConsumed letbody
         expConsumed (Apply _ args _ _) =
@@ -803,17 +804,17 @@ safeExp e = case walkExpM safe e of
     safeLambda (CurryFun _ exps _ _)  = all safeExp exps
 
 -- | Return the set of identifiers that are free in the given lambda.
-freeInLambda :: Ord vn => LambdaBase ty vn -> S.Set (IdentBase ty vn)
+freeInLambda :: (Eq vn, Hashable vn) => LambdaBase ty vn -> HS.HashSet (IdentBase ty vn)
 freeInLambda (AnonymFun params body _ _) =
-  S.filter ((`notElem` params') . identName) $ freeInExp body
+  HS.filter ((`notElem` params') . identName) $ freeInExp body
     where params' = map identName params
 freeInLambda (CurryFun _ exps _ _) =
-  S.unions (map freeInExp exps)
+  HS.unions (map freeInExp exps)
 
 -- | As 'freeInLambda', but returns the raw names rather than
 -- 'IdentBase's.
-freeNamesInLambda :: Ord vn => LambdaBase ty vn -> S.Set vn
-freeNamesInLambda = S.map identName . freeInLambda
+freeNamesInLambda :: (Eq vn, Hashable vn) => LambdaBase ty vn -> HS.HashSet vn
+freeNamesInLambda = HS.map identName . freeInLambda
 
 -- | Convert an identifier to a 'ParamBase'.
 toParam :: IdentBase (TypeBase as) vn -> ParamBase vn
@@ -824,12 +825,12 @@ fromParam :: ParamBase vn -> IdentBase CompTypeBase vn
 fromParam (Ident name t loc) = Ident name (fromDecl t) loc
 
 -- | The set of names bound in the given pattern.
-patNames :: Ord vn => TupIdentBase ty vn -> S.Set vn
-patNames = S.map identName . patIdents
+patNames :: (Eq vn, Hashable vn) => TupIdentBase ty vn -> HS.HashSet vn
+patNames = HS.map identName . patIdents
 
 -- | The set of idents bound in the given pattern.
-patIdents :: Ord vn => TupIdentBase ty vn -> S.Set (IdentBase ty vn)
-patIdents (Id ident)     = S.singleton ident
+patIdents :: (Eq vn, Hashable vn) => TupIdentBase ty vn -> HS.HashSet (IdentBase ty vn)
+patIdents (Id ident)     = HS.singleton ident
 patIdents (TupId pats _) = mconcat $ map patIdents pats
 patIdents (Wildcard _ _) = mempty
 

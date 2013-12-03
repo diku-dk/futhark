@@ -10,7 +10,6 @@ import Control.Monad.Reader
 import Control.Monad.Writer
 
 import qualified Data.Set as S
---import qualified Data.Map as M
 
 import L0C.L0
 

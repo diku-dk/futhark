@@ -49,9 +49,10 @@ module Language.L0.Syntax
   where
 
 import Data.Array
+import Data.Hashable
 import Data.Loc
 import Data.Monoid
-import qualified Data.Set as S
+import qualified Data.HashSet as HS
 import qualified Data.Text as T
 
 -- | The abstract (not really) type representing names in the L0
@@ -59,6 +60,9 @@ import qualified Data.Text as T
 -- while 'T.Text's are based on byte-arrays.
 newtype Name = Name T.Text
   deriving (Show, Eq, Ord)
+
+instance Hashable Name where
+  hashWithSalt salt (Name t) = hashWithSalt salt t
 
 -- | Convert a name to the corresponding list of characters.
 nameToString :: Name -> String
@@ -89,6 +93,10 @@ instance Monoid Uniqueness where
   Nonunique `mappend` _ = Nonunique
   u `mappend` _         = u
 
+instance Hashable Uniqueness where
+  hashWithSalt salt Unique    = salt
+  hashWithSalt salt Nonunique = salt * 2
+
 -- | Don't use this for anything.
 type DimSize vn = ExpBase (TypeBase Names) vn
 
@@ -114,13 +122,27 @@ data TypeBase as vn = Elem (ElemTypeBase as vn)
                     -- ^ 1st arg: array's element type, 2nd arg:
                     -- lengths of dimensions, 3rd arg: uniqueness
                     -- attribute, 4th arg: aliasing information.
-                    deriving (Ord, Show)
+                    deriving (Show)
 
 instance Eq (TypeBase as vn) where
   Elem et1 == Elem et2 = et1 == et2
   Array et1 dims1 u1 _ == Array et2 dims2 u2 _ =
     et1 == et2 && u1 == u2 && length dims1 == length dims2
   _ == _ = False
+
+instance Ord vn => Ord (TypeBase as vn) where
+  Elem et1 <= Elem et2 =
+    et1 <= et2
+  Array et1 dims1 u1 _ <= Array et2 dims2 u2 _
+    | et1 < et2     = True
+    | et1 > et2     = False
+    | dims1 < dims2 = True
+    | dims1 > dims2 = False
+    | u1 < u2       = True
+    | u1 > u2       = False
+    | otherwise     = True
+  Elem {} <= Array {} = True
+  Array {} <= Elem {} = False
 
 -- | A type with aliasing information, used for describing the type of
 -- a computation.
@@ -172,6 +194,9 @@ instance Ord vn => Ord (IdentBase ty vn) where
 
 instance Located (IdentBase ty vn) where
   locOf = locOf . identSrcLoc
+
+instance Hashable vn => Hashable (IdentBase ty vn) where
+  hashWithSalt salt = hashWithSalt salt . identName
 
 -- | A list of identifiers used for certificates in some expressions.
 type CertificatesBase ty vn = [IdentBase ty vn]
@@ -450,7 +475,7 @@ newtype ProgBase ty vn = Prog { progFunctions :: [FunDecBase ty vn] }
   deriving (Show)
 
 -- | A set of names.
-type Names = S.Set
+type Names = HS.HashSet
 
 -- | The name of the default program entry point (main).
 defaultEntryPoint :: Name

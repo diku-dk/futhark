@@ -18,7 +18,7 @@ module L0C.FreshNames
   , newVName
   ) where
 
-import qualified Data.Set as S
+import qualified Data.HashSet as HS
 
 import L0C.L0
 
@@ -31,10 +31,10 @@ data NameSource vn = NameSource {
   -- ^ Produce a fresh name, using the given name as a template.
 }
 
-counterGenerator :: VarName vn => Int -> S.Set vn -> vn -> (vn, NameSource vn)
+counterGenerator :: VarName vn => Int -> HS.HashSet vn -> vn -> (vn, NameSource vn)
 counterGenerator counter skip s =
   let s' = s `setID` counter
-  in if s' `S.member` skip then next s
+  in if s' `HS.member` skip then next s
      else (s', newsrc)
     where newsrc = NameSource next
           next = counterGenerator (counter+1) skip
@@ -44,11 +44,11 @@ type VNameSource = NameSource VName
 
 -- | A blank name source.
 blankNameSource :: VarName vn => NameSource vn
-blankNameSource = NameSource $ counterGenerator 0 S.empty
+blankNameSource = NameSource $ counterGenerator 0 HS.empty
 
 -- | Create a new 'NameSource' that will never produce any of the
 -- names in the given set.
-newNameSource :: VarName vn => S.Set vn -> NameSource vn
+newNameSource :: VarName vn => HS.HashSet vn -> NameSource vn
 newNameSource = NameSource . counterGenerator 0
 
 -- | Create a new 'NameSource' that will never produce any of the

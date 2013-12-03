@@ -15,8 +15,9 @@ import Control.Monad
 import Control.Monad.Writer
 import Control.Applicative
 
-import qualified Data.Map as M
-import qualified Data.Set as S
+import qualified Data.HashMap.Lazy as HM
+import qualified Data.HashSet as HS
+import qualified Data.Map.Lazy as M
 
 import L0C.L0
 import L0C.Substitute
@@ -29,22 +30,22 @@ patToExp (Wildcard _ _)   = Nothing
 patToExp (Id idd)         = Just $ Var idd
 patToExp (TupId pats loc) = TupLit <$> mapM patToExp pats <*> pure loc
 
-mkSubsts :: TupIdent -> Exp -> M.Map VName VName
+mkSubsts :: TupIdent -> Exp -> HM.HashMap VName VName
 mkSubsts pat e = execWriter $ subst pat e
   where subst (Id idd1) (Var idd2) =
-          tell $ M.singleton (identName idd1) (identName idd2)
+          tell $ HM.singleton (identName idd1) (identName idd2)
         subst (TupId pats _) (TupLit es _) =
           zipWithM_ subst pats es
         subst _ _ =
           return ()
 
 -- | State passed to 'performCSE'.
-type DupeState = (M.Map Exp Exp, M.Map VName VName)
+type DupeState = (M.Map Exp Exp, HM.HashMap VName VName)
 
 -- | The state that should be passed to the first call to
 -- 'performCSE'.
 newDupeState :: DupeState
-newDupeState = (M.empty, M.empty)
+newDupeState = (M.empty, HM.empty)
 
 -- | The main CSE function.  Given a state, a pattern and an
 -- expression to be bound to that pattern, return a replacement
@@ -57,13 +58,13 @@ performCSE :: DupeState -> TupIdent -> Exp
 -- unique arrays.  This is perhaps a bit too conservative - we could
 -- track exactly which are being consumed and keep a blacklist.
 performCSE (esubsts, nsubsts) pat e
-  | any (getAll . uniqArray) $ S.toList $ patIdents pat =
+  | any (getAll . uniqArray) $ HS.toList $ patIdents pat =
     (e, (esubsts, nsubsts))
   where uniqArray = All . not . basicType . identType <>
                     All . unique . identType
 performCSE (esubsts, nsubsts) pat e =
   case M.lookup e' esubsts of
-    Just e'' -> (e'', (esubsts, mkSubsts pat e'' `M.union` nsubsts))
+    Just e'' -> (e'', (esubsts, mkSubsts pat e'' `HM.union` nsubsts))
     Nothing -> (e',
                 case patToExp pat of
                   Nothing   -> (esubsts, nsubsts)

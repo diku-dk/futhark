@@ -19,7 +19,7 @@ import Control.Monad.Reader
 import Control.Monad.RWS
 
 import Data.Loc
-import qualified Data.Map as M
+import qualified Data.HashMap.Lazy as HM
 
 import L0C.L0
 import L0C.FreshNames
@@ -38,11 +38,11 @@ instance Monoid NewBindings where
     NewBindings $ f . g
   mempty = NewBindings id
 
-data Env = Env { envSubsts :: M.Map Ident [Ident]
+data Env = Env { envSubsts :: HM.HashMap Ident [Ident]
                }
 
 emptyEnv :: Env
-emptyEnv = Env { envSubsts = M.empty }
+emptyEnv = Env { envSubsts = HM.empty }
 
 newtype NormalizeM a = NormalizeM (RWS Env NewBindings (NameSource VName) a)
   deriving (Monad, Functor, Applicative,

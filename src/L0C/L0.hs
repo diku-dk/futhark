@@ -35,6 +35,7 @@ module L0C.L0
 where
 
 import Data.Char (isDigit)
+import Data.Hashable
 import Data.Maybe
 import Data.Monoid
 import qualified Data.Text as T
@@ -68,9 +69,12 @@ instance Ord (ID vn) where
 instance Pretty vn => Pretty (ID vn) where
   ppr (ID (vn, i)) = ppr vn <> text "_" <> text (show i)
 
+instance Hashable (ID vn) where
+  hashWithSalt salt (ID (_,i)) = salt * i
+
 -- | A type that can be used for representing variable names.  These
 -- must support tagging, as well as conversion to a textual format.
-class (Ord vn, Show vn, Pretty vn) => VarName vn where
+class (Ord vn, Show vn, Pretty vn, Hashable vn) => VarName vn where
   -- | Set the numeric tag associated with this name.
   setID :: vn -> Int -> vn
   -- | Identity-preserving prettyprinting of a name.  This means that

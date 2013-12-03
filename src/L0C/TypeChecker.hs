@@ -21,10 +21,9 @@ import Data.Array
 import Data.List
 import Data.Loc
 import Data.Maybe
-import qualified Data.Traversable as T
 
-import qualified Data.Map as M
-import qualified Data.Set as S
+import qualified Data.HashMap.Strict as HM
+import qualified Data.HashSet as HS
 
 import L0C.L0
 import L0C.Renamer (tagProg', tagExp, tagExp', tagType',
@@ -198,30 +197,30 @@ data Occurence vn = Occurence { observed :: Names (ID vn)
                               , consumed :: Names (ID vn)
                               , location :: SrcLoc
                               }
-             deriving (Eq, Ord, Show)
+             deriving (Eq, Show)
 
 instance Located (Occurence vn) where
   locOf = locOf . location
 
 observation :: Names (ID vn) -> SrcLoc -> Occurence vn
-observation = flip Occurence S.empty
+observation = flip Occurence HS.empty
 
 consumption :: Names (ID vn) -> SrcLoc -> Occurence vn
-consumption = Occurence S.empty
+consumption = Occurence HS.empty
 
 nullOccurence :: Occurence vn -> Bool
-nullOccurence occ = S.null (observed occ) && S.null (consumed occ)
+nullOccurence occ = HS.null (observed occ) && HS.null (consumed occ)
 
 type Occurences vn = [Occurence vn]
 
-type UsageMap vn = M.Map (ID vn) [Usage]
+type UsageMap vn = HM.HashMap (ID vn) [Usage]
 
 usageMap :: Occurences vn -> UsageMap vn
-usageMap = foldl comb M.empty
+usageMap = foldl comb HM.empty
   where comb m (Occurence obs cons loc) =
-          let m' = S.foldl (ins $ Observed loc) m obs
-          in S.foldl (ins $ Consumed loc) m' cons
-        ins v m k = M.insertWith (++) k [v] m
+          let m' = HS.foldl' (ins $ Observed loc) m obs
+          in HS.foldl' (ins $ Consumed loc) m' cons
+        ins v m k = HM.insertWith (++) k [v] m
 
 combineOccurences :: ID vn -> Usage -> Usage -> Either (TypeError vn) Usage
 combineOccurences _ (Observed loc) (Observed _) = Right $ Observed loc
@@ -233,26 +232,26 @@ combineOccurences name (Consumed loc1) (Consumed loc2) =
   Left $ UseAfterConsume (baseName name) (max loc1 loc2) (min loc1 loc2)
 
 checkOccurences :: Occurences vn -> Either (TypeError vn) ()
-checkOccurences = void . T.sequence . M.mapWithKey comb . usageMap
-  where comb _    []     = Right []
-        comb name (u:us) = (:[]) <$> foldM (combineOccurences name) u us
+checkOccurences = void . HM.traverseWithKey comb . usageMap
+  where comb _    []     = Right ()
+        comb name (u:us) = foldM_ (combineOccurences name) u us
 
 allConsumed :: Occurences vn -> Names (ID vn)
-allConsumed = S.unions . map consumed
+allConsumed = HS.unions . map consumed
 
 seqOccurences :: Occurences vn -> Occurences vn -> Occurences vn
 seqOccurences occurs1 occurs2 =
   filter (not . nullOccurence) $ map filt occurs1 ++ occurs2
   where filt occ =
-          occ { observed = observed occ S.\\ postcons }
+          occ { observed = observed occ `HS.difference` postcons }
         postcons = allConsumed occurs2
 
 altOccurences :: Occurences vn -> Occurences vn -> Occurences vn
 altOccurences occurs1 occurs2 =
   filter (not . nullOccurence) $ map filt occurs1 ++ occurs2
   where filt occ =
-          occ { consumed = consumed occ S.\\ postcons
-              , observed = observed occ S.\\ postcons }
+          occ { consumed = consumed occ `HS.difference` postcons
+              , observed = observed occ `HS.difference` postcons }
         postcons = allConsumed occurs2
 
 
@@ -273,8 +272,8 @@ instance VarName vn => Monoid (Dataflow vn) where
 -- only initialised at the very beginning, but the variable table will
 -- be extended during type-checking when let-expressions are
 -- encountered.
-data TypeEnv vn = TypeEnv { envVtable :: M.Map (ID vn) (Binding vn)
-                          , envFtable :: M.Map Name (FunBinding vn)
+data TypeEnv vn = TypeEnv { envVtable :: HM.HashMap (ID vn) (Binding vn)
+                          , envFtable :: HM.HashMap Name (FunBinding vn)
                           , envCheckOccurences :: Bool
                           }
 
@@ -333,7 +332,7 @@ consuming (Ident name t loc) m = do
   consume loc $ aliases t
   local consume' m
   where consume' env =
-          env { envVtable = M.insert name (WasConsumed loc) $ envVtable env }
+          env { envVtable = HM.insert name (WasConsumed loc) $ envVtable env }
 
 collectDataflow :: VarName vn => TypeM vn a -> TypeM vn (a, Dataflow vn)
 collectDataflow m = pass $ do
@@ -344,7 +343,7 @@ patDiet :: TaggedTupIdent CompTypeBase vn -> Occurences vn -> Diet
 patDiet pat occs = patDiet' pat
   where cons =  allConsumed occs
         patDiet' (Id k)
-          | identName k `S.member` cons = Consume
+          | identName k `HS.member` cons = Consume
           | otherwise                   = Observe
         patDiet' (TupId pats _)         = TupleDiet $ map patDiet' pats
         patDiet' (Wildcard _ _)         = Observe
@@ -366,11 +365,11 @@ alternative m1 m2 = pass $ do
 -- | Remove all variable bindings from the vtable inside the given
 -- computation.
 unbinding :: VarName vn => TypeM vn a -> TypeM vn a
-unbinding = local (\env -> env { envVtable = M.empty})
+unbinding = local (\env -> env { envVtable = HM.empty})
 
 -- | Make all bindings nonunique.
 noUnique :: VarName vn => TypeM vn a -> TypeM vn a
-noUnique = local (\env -> env { envVtable = M.map f $ envVtable env})
+noUnique = local (\env -> env { envVtable = HM.map f $ envVtable env})
   where f (Bound t)         = Bound $ t `setUniqueness` Nonunique
         f (WasConsumed loc) = WasConsumed loc
 
@@ -381,19 +380,19 @@ binding bnds = check . local (`bindVars` bnds)
 
         bindVar :: TypeEnv vn -> TaggedIdent CompTypeBase vn -> TypeEnv vn
         bindVar env (Ident name tp _) =
-          let inedges = S.toList $ aliases tp
-              update _ (Bound tp')
+          let inedges = HS.toList $ aliases tp
+              update (Bound tp')
               -- If 'name' is tuple-typed, don't alias the components
               -- to 'name', because tuples have no identity beyond
               -- their components.
                 | Elem (Tuple _) <- tp = Bound tp'
-                | otherwise            = Bound (tp' `addAliases` S.insert name)
-              update _ b = b
-          in env { envVtable = M.insert name (Bound tp) $
+                | otherwise            = Bound (tp' `addAliases` HS.insert name)
+              update b = b
+          in env { envVtable = HM.insert name (Bound tp) $
                                adjustSeveral update inedges $
                                envVtable env }
 
-        adjustSeveral f = flip $ foldl $ flip $ M.adjustWithKey f
+        adjustSeveral f = flip $ foldl $ flip $ HM.adjust f
 
         -- Check whether the bound variables have been used correctly
         -- within their scope.
@@ -410,15 +409,16 @@ binding bnds = check . local (`bindVars` bnds)
           return ((x, relevant), const $ usage { usageOccurences = rest })
           where split = unzip .
                         map (\occ ->
-                             let (obs1, obs2) = S.partition (`elem` names) $ observed occ
-                                 (con1, con2) = S.partition (`elem` names) $ consumed occ
+                             let (obs1, obs2) = divide $ observed occ
+                                 (con1, con2) = divide $ consumed occ
                              in (occ { observed = obs1, consumed = con1 },
                                  occ { observed = obs2, consumed = con2 }))
-                names = map identName bnds
+                names = HS.fromList $ map identName bnds
+                divide s = (s `HS.intersection` names, s `HS.difference` names)
 
 lookupVar :: VarName vn => ID vn -> SrcLoc -> TypeM vn (TaggedType vn)
 lookupVar name pos = do
-  bnd <- asks $ M.lookup name . envVtable
+  bnd <- asks $ HM.lookup name . envVtable
   case bnd of
     Nothing -> bad $ UnknownVariableError (baseName name) pos
     Just (Bound t) -> return t
@@ -470,7 +470,7 @@ checkAnnotation :: (VarName vn, TypeBox ty) =>
 checkAnnotation loc desc t1 t2 =
   case unboxType t1 of
     Nothing -> return t2
-    Just t1' -> case unifyTypes (t1' `setAliases` S.empty) t2 of
+    Just t1' -> case unifyTypes (t1' `setAliases` HS.empty) t2 of
                   Nothing -> bad $ BadAnnotation loc desc t1' t2
                   Just t  -> return t
 
@@ -484,7 +484,7 @@ checkTupleAnnotation loc desc t1s t2s
   where t1s' = map unboxType t1s
         barf = bad $ BadTupleAnnotation loc desc t1s' t2s
         check (Just t1') t2 =
-          case unifyTypes (t1' `setAliases` S.empty) t2 of
+          case unifyTypes (t1' `setAliases` HS.empty) t2 of
             Nothing -> barf
             Just t  -> return t
         check Nothing t2 = return t2
@@ -525,10 +525,11 @@ checkProg' :: (VarName vn, TypeBox ty) =>
               Bool -> ProgBase ty vn -> Either (TypeError vn) (ProgBase CompTypeBase vn)
 checkProg' checkoccurs prog = do
   ftable <- buildFtable
-  let typeenv = TypeEnv { envVtable = M.empty
+  let typeenv = TypeEnv { envVtable = HM.empty
                         , envFtable = ftable
                         , envCheckOccurences = checkoccurs
                         }
+
   liftM (untagProg . Prog) $
           runTypeM typeenv src $ mapM checkFun $ progFunctions prog'
   where
@@ -539,26 +540,27 @@ checkProg' checkoccurs prog = do
     -- position information, in order to report both locations of
     -- duplicate function definitions.  The position information is
     -- removed at the end.
-    buildFtable = M.map rmLoc <$>
-                  foldM expand (M.map addLoc builtInFunctions)
+    buildFtable = HM.map rmLoc <$>
+                  foldM expand (HM.map addLoc builtInFunctions)
                   (progFunctions prog')
     expand ftable (name,ret,args,_,pos)
-      | Just (_,_,pos2) <- M.lookup name ftable =
+      | Just (_,_,pos2) <- HM.lookup name ftable =
         Left $ DupDefinitionError name pos pos2
       | otherwise =
         let argtypes = map (toDecl . identType) args -- Throw away argument names.
-        in Right $ M.insert name (ret,argtypes,pos) ftable
+        in Right $ HM.insert name (ret,argtypes,pos) ftable
     rmLoc (ret,args,_) = (ret,args)
     addLoc (t, ts) = (t, ts, noLoc)
 
-builtInFunctions :: M.Map Name (FunBinding vn)
-builtInFunctions = M.mapKeys nameFromString $
-                   M.fromList [("toReal", (Elem Real, [Elem Int]))
-                              ,("trunc", (Elem Int, [Elem Real]))
-                              ,("sqrt", (Elem Real, [Elem Real]))
-                              ,("log", (Elem Real, [Elem Real]))
-                              ,("exp", (Elem Real, [Elem Real]))
-                              ,("op not", (Elem Bool, [Elem Bool]))]
+builtInFunctions :: HM.HashMap Name (FunBinding vn)
+builtInFunctions = HM.fromList $ map namify
+                   [("toReal", (Elem Real, [Elem Int]))
+                   ,("trunc", (Elem Int, [Elem Real]))
+                   ,("sqrt", (Elem Real, [Elem Real]))
+                   ,("log", (Elem Real, [Elem Real]))
+                   ,("exp", (Elem Real, [Elem Real]))
+                   ,("op not", (Elem Bool, [Elem Bool]))]
+  where namify (k,v) = (nameFromString k, v)
 
 checkFun :: (TypeBox ty, VarName vn) =>
             TaggedFunDec ty vn -> TypeM vn (TaggedFunDec CompTypeBase vn)
@@ -584,26 +586,26 @@ checkFun (fname, rettype, params, body, loc) = do
         notAliasingParam names =
           forM_ params $ \p ->
             when (not (unique $ identType p) &&
-                  identName p `S.member` names) $
+                  identName p `HS.member` names) $
               bad $ ReturnAliased fname (baseName $ identName p) loc
 
         -- | Check that unique return values do not alias a
         -- non-consumed parameter.
         checkReturnAlias =
-          foldM_ checkReturnAlias' S.empty . returnAliasing rettype
+          foldM_ checkReturnAlias' HS.empty . returnAliasing rettype
 
         checkReturnAlias' seen (Unique, names)
-          | any (`S.member` S.map snd seen) $ S.toList names =
+          | any (`HS.member` HS.map snd seen) $ HS.toList names =
             bad $ UniqueReturnAliased fname loc
           | otherwise = do
             notAliasingParam names
-            return $ seen `S.union` tag Unique names
+            return $ seen `HS.union` tag Unique names
         checkReturnAlias' seen (Nonunique, names)
-          | any (`S.member` seen) $ S.toList $ tag Unique names =
+          | any (`HS.member` seen) $ HS.toList $ tag Unique names =
             bad $ UniqueReturnAliased fname loc
-          | otherwise = return $ seen `S.union` tag Nonunique names
+          | otherwise = return $ seen `HS.union` tag Nonunique names
 
-        tag u = S.map $ \name -> (u, name)
+        tag u = HS.map $ \name -> (u, name)
 
         returnAliasing (Elem (Tuple ets1)) (Elem (Tuple ets2)) =
           concat $ zipWith returnAliasing ets1 ets2
@@ -613,7 +615,7 @@ checkFun (fname, rettype, params, body, loc) = do
 -- functions.  Free variables are permitted, as long as they are
 -- present in the passed-in vtable.
 checkOpenExp :: (TypeBox ty, VarName vn) =>
-                M.Map vn (CompTypeBase vn) -> ExpBase ty vn ->
+                HM.HashMap vn (CompTypeBase vn) -> ExpBase ty vn ->
                 Either (TypeError vn) (ExpBase CompTypeBase vn)
 checkOpenExp bnds e = untagExp <$> runTypeM env namesrc (checkExp e')
   where env = TypeEnv { envFtable = builtInFunctions
@@ -622,13 +624,13 @@ checkOpenExp bnds e = untagExp <$> runTypeM env namesrc (checkExp e')
                       }
         (e', src) = tagExp' blankNameSource e
 
-        (vtable, namesrc) = foldl tagBnd (M.empty, src) $
-                            S.toList $ freeNamesInExp e'
+        (vtable, namesrc) = foldl tagBnd (HM.empty, src) $
+                            HS.toList $ freeNamesInExp e'
         tagBnd (m, src') k =
-          case M.lookup (baseName k) bnds of
+          case HM.lookup (baseName k) bnds of
             Nothing -> (m, src')
             Just t  -> let (t', src'') = tagType' src' t
-                       in (M.insert k (Bound t') m, src'')
+                       in (HM.insert k (Bound t') m, src'')
 
 -- | Type-check a single expression without any free variables or
 -- calls to non-builtin functions.
@@ -637,7 +639,7 @@ checkClosedExp :: (TypeBox ty, VarName vn) => ExpBase ty vn ->
 checkClosedExp e = untagExp <$> runTypeM env src (checkExp e')
   where env = TypeEnv { envFtable = builtInFunctions
                       , envCheckOccurences = True
-                      , envVtable = M.empty
+                      , envVtable = HM.empty
                       }
         e' = tagExp e
         src = newNameSource $ freeNamesInExp e'
@@ -699,7 +701,7 @@ checkExp (If e1 e2 e3 t pos) = do
   tell dflow
   t' <- checkAnnotation pos "branch result" t $
         addAliases (typeOf e2' `unifyUniqueness` typeOf e3')
-        (S.\\ allConsumed (usageOccurences dflow))
+        (`HS.difference` allConsumed (usageOccurences dflow))
   return $ If e1' e2' e3' t' pos
 
 checkExp (Var ident) = do
@@ -717,7 +719,7 @@ checkExp (Apply fname args t pos)
     _ -> bad $ TypeError pos "Trace function takes a single parameter"
 
 checkExp (Apply fname args rettype loc) = do
-  bnd <- asks $ M.lookup fname . envFtable
+  bnd <- asks $ HM.lookup fname . envFtable
   case bnd of
     Nothing -> bad $ UnknownFunctionError fname loc
     Just (ftype, paramtypes) -> do
@@ -741,7 +743,7 @@ checkExp (LetWith cs (Ident dest destt destpos) src idxes ve body pos) = do
   cs' <- mapM (requireI [Elem Cert] <=< checkIdent) cs
   src' <- checkIdent src
   idxes' <- mapM (require [Elem Int] <=< checkExp) idxes
-  destt' <- checkAnnotation pos "source" destt $ identType src' `setAliases` S.empty
+  destt' <- checkAnnotation pos "source" destt $ identType src' `setAliases` HS.empty
   let dest' = Ident dest destt' destpos
 
   unless (unique (identType src') || basicType (identType src')) $
@@ -752,7 +754,7 @@ checkExp (LetWith cs (Ident dest destt destpos) src idxes ve body pos) = do
                      (arrayDims $ identType src') (length idxes) (srclocOf src)
     Just elemt ->
       sequentially (require [elemt] =<< checkExp ve) $ \ve' _ -> do
-        when (identName src `S.member` aliases (typeOf ve')) $
+        when (identName src `HS.member` aliases (typeOf ve')) $
           bad $ BadLetWithValue pos
         (scope, _) <- checkBinding (Id dest') destt' mempty
         body' <- consuming src' $ scope $ checkExp body
@@ -944,14 +946,12 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
       rettype = param (typeOf mergeexp') $
                 patDiet mergepat' $ usageOccurences loopflow
 
-      boundnames = S.insert loopvar $ patNames mergepat
-      unbound ident = not $ identName ident `S.member` boundnames
+      boundnames = HS.insert iparam $ patIdents mergepat'
       ununique ident =
         ident { identType = param (identType ident) Observe }
       -- Find the free variables of the loop body.
-      free = map ununique $ filter unbound $ S.toList $
-             freeInExp loopbody'
-
+      free = map ununique $ HS.toList $
+             freeInExp loopbody' `HS.difference` boundnames
       merge  = Ident pname (fromDecl rettype) $ srclocOf mergeexp'
 
       -- These are the parameters expected by the function: All of the
@@ -959,7 +959,7 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
       -- bound (currently not used), followed by the merge value.
       params = map toParam free ++
                [iparam, toParam bound, toParam merge]
-      bindfun env = env { envFtable = M.insert fname
+      bindfun env = env { envFtable = HM.insert fname
                                       (rettype, map identType params) $
                                       envFtable env }
 
@@ -1241,7 +1241,7 @@ checkFuncall fname loc paramtypes _ args = do
   where consumeArg (Elem (Tuple ets)) (TupleDiet ds) =
           mconcat $ zipWith consumeArg ets ds
         consumeArg at Consume = aliases at
-        consumeArg _  _       = S.empty
+        consumeArg _  _       = HS.empty
 
 checkTupleLambda :: (TypeBox ty, VarName vn) =>
                     TaggedTupleLambda ty vn -> [Arg vn]
@@ -1292,7 +1292,7 @@ checkLambda (CurryFun opfun curryargexps rettype pos) args
 
 checkLambda (CurryFun fname curryargexps rettype pos) args = do
   (curryargexps', curryargs) <- unzip <$> mapM checkArg curryargexps
-  bnd <- asks $ M.lookup fname . envFtable
+  bnd <- asks $ HM.lookup fname . envFtable
   case bnd of
     Nothing -> bad $ UnknownFunctionError fname pos
     Just (rt, paramtypes) -> do

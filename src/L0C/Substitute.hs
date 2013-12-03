@@ -1,16 +1,15 @@
 -- |
 --
--- This module contains exports just a single function,
--- 'substituteNames', for performing name substitution in an L0
--- expression.
+-- This module contains exports a single function, 'substituteNames',
+-- for performing name substitution in an L0 expression.
 module L0C.Substitute
   (substituteNames)
   where
 
 import Control.Monad
 import Data.Maybe
-import qualified Data.Map as M
-import qualified Data.Set as S
+import qualified Data.HashMap.Lazy as HM
+import qualified Data.HashSet as HS
 
 import L0C.L0
 
@@ -20,9 +19,9 @@ import L0C.L0
 -- information is also updated, although the resulting information may
 -- be erroneous if any if the substitute names in @m@ were already in
 -- use in @e@.
-substituteNames :: M.Map VName VName -> Exp -> Exp
+substituteNames :: HM.HashMap VName VName -> Exp -> Exp
 substituteNames substs = substInExp
-  where replaceName k = fromMaybe k $ M.lookup k substs
+  where replaceName k = fromMaybe k $ HM.lookup k substs
 
         replaceIdent v = v { identName = replaceName $ identName v }
 
@@ -35,7 +34,7 @@ substituteNames substs = substInExp
         substInType (Array et sz u als) =
           Array (toElemDecl $ substInElemType $ fromElemDecl et)
                   (map (liftM substInArrayDim) sz)
-                  u (S.map replaceName als)
+                  u (HS.map replaceName als)
 
         substInArrayDim = mapExp replace
         substInPattern (Id v) = Id $ replaceIdent v

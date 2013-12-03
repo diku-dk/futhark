@@ -38,11 +38,13 @@ import Control.Monad.State
 import Control.Monad.RWS
 
 import Data.Graph
+import Data.Hashable
 import Data.List
 import Data.Loc
 import Data.Maybe
-import qualified Data.Map as M
+import qualified Data.HashMap.Strict as HM
 import Data.Ord
+import qualified Data.HashSet as HS
 import qualified Data.Set as S
 
 import L0C.L0
@@ -54,7 +56,7 @@ import qualified L0C.Rebinder.SizeTracking as SZ
 data BindNeed = LoopBind TupIdent Exp Ident Exp Exp
               | LetBind TupIdent Exp [Exp]
               | LetWithBind Certificates Ident Ident [Exp] Exp
-                deriving (Show, Eq, Ord)
+                deriving (Show, Eq)
 
 type NeedSet = [BindNeed]
 
@@ -68,15 +70,15 @@ asTail (LetBind pat e _) =
 asTail (LetWithBind cs dest src is ve) =
   LetWith cs dest src is ve (Var dest) $ srclocOf dest
 
-requires :: BindNeed -> S.Set VName
+requires :: BindNeed -> HS.HashSet VName
 requires (LetBind pat e (alte:alts)) =
   requires (LetBind pat e []) <> requires (LetBind pat alte alts)
-requires bnd = S.map identName $ freeInExp $ asTail bnd
+requires bnd = HS.map identName $ freeInExp $ asTail bnd
 
-provides :: BindNeed -> S.Set VName
+provides :: BindNeed -> HS.HashSet VName
 provides (LoopBind mergepat _ _ _ _) = patNames mergepat
 provides (LetBind pat _ _) = patNames pat
-provides (LetWithBind _ dest _ _ _) = S.singleton $ identName dest
+provides (LetWithBind _ dest _ _ _) = HS.singleton $ identName dest
 
 data Need = Need { needBindings :: NeedSet
                  }
@@ -92,7 +94,7 @@ data Env = Env { envBindings :: SZ.ShapeMap
 
 emptyEnv :: Env
 emptyEnv = Env {
-             envBindings = M.empty
+             envBindings = HM.empty
            , envDupeState = newDupeState
            , envAggressive = False
            }
@@ -196,7 +198,7 @@ bindLet pat@(Id dest) e@(Concat cs (Var x) (Var y) loc) m =
 
 bindLet pat e@(Map2 cs _ srcs _ _) m =
   withBinding pat e $
-  withShapes (sameOuterShapes cs $ S.toList (patIdents pat) ++ vars srcs) m
+  withShapes (sameOuterShapes cs $ HS.toList (patIdents pat) ++ vars srcs) m
 
 bindLet pat e@(Reduce2 cs _ _ srcs _ _) m =
   withBinding pat e $
@@ -294,30 +296,30 @@ transformFun (fname, rettype, params, body, loc) = do
 
 addBindings :: DupeState -> [BindNeed] -> Exp -> Exp
 addBindings dupes needs =
-  foldl (.) id $ snd $ mapAccumL comb (M.empty, dupes) needs
+  foldl (.) id $ snd $ mapAccumL comb (HM.empty, dupes) needs
   where comb (m,ds) bind@(LoopBind mergepat mergeexp loopvar
                               boundexp loopbody) =
-          ((m `M.union` distances m bind,ds),
+          ((m `HM.union` distances m bind,ds),
            \inner -> DoLoop mergepat mergeexp loopvar boundexp
                      loopbody inner $ srclocOf inner)
         comb (m,ds) (LetBind pat e alts) =
           let add pat' e' =
                 let (e'',ds') = performCSE ds pat' e'
-                in ((m `M.union` distances m (LetBind pat' e' []),ds'),
+                in ((m `HM.union` distances m (LetBind pat' e' []),ds'),
                     \inner -> LetPat pat' e'' inner $ srclocOf inner)
           in case map snd $ sortBy (comparing fst) $ map (score m) $ e:alts of
                e':_ -> add pat e'
                _    -> add pat e
         comb (m,ds) bind@(LetWithBind cs dest src is ve) =
-          ((m `M.union` distances m bind,ds),
+          ((m `HM.union` distances m bind,ds),
            \inner -> LetWith cs dest src is ve inner $ srclocOf inner)
 
-score :: M.Map VName Int -> Exp -> (Int, Exp)
+score :: HM.HashMap VName Int -> Exp -> (Int, Exp)
 score m (Var k) =
-  (fromMaybe (-1) $ M.lookup (identName k) m, Var k)
+  (fromMaybe (-1) $ HM.lookup (identName k) m, Var k)
 score m e =
-  (S.fold f 0 $ freeNamesInExp e, e)
-  where f k x = case M.lookup k m of
+  (HS.foldl' f 0 $ freeNamesInExp e, e)
+  where f x k = case HM.lookup k m of
                   Just y  -> max x y
                   Nothing -> x
 
@@ -341,46 +343,54 @@ expCost (DoLoop {}) = 1
 expCost (Replicate {}) = 1
 expCost _ = 0
 
-distances :: M.Map VName Int -> BindNeed -> M.Map VName Int
-distances m need = M.fromList [ (k, d+cost) | k <- S.toList outs ]
-  where d = S.fold f 0 ins
+distances :: HM.HashMap VName Int -> BindNeed -> HM.HashMap VName Int
+distances m need = HM.fromList [ (k, d+cost) | k <- HS.toList outs ]
+  where d = HS.foldl' f 0 ins
         (outs, ins, cost) =
           case need of
             LetBind pat e _ ->
               (patNames pat, freeNamesInExp e, expCost e)
             LetWithBind _ dest src is ve ->
-              (S.singleton $ identName dest,
-               identName src `S.insert`
+              (HS.singleton $ identName dest,
+               identName src `HS.insert`
                mconcat (map freeNamesInExp (ve:is)),
                1)
             LoopBind pat mergeexp _ bound loopbody ->
               (patNames pat,
                mconcat $ map freeNamesInExp [mergeexp, bound, loopbody],
                1)
-        f k x = case M.lookup k m of
+        f x k = case HM.lookup k m of
                   Just y  -> max x y
                   Nothing -> x
 
 inDepOrder :: [BindNeed] -> [BindNeed]
 inDepOrder = flattenSCCs . stronglyConnComp . buildGraph
   where buildGraph bnds =
-          [ (bnd, provides bnd, deps) |
+          [ (bnd, representative $ provides bnd, deps) |
             bnd <- bnds,
-            let deps = [ provides dep | dep <- bnds, dep `mustPrecede` bnd ] ]
+            let deps = [ representative $ provides dep
+                         | dep <- bnds, dep `mustPrecede` bnd ] ]
+
+        -- As all names are unique, a pattern can be uniquely
+        -- represented by any of its names.  If the pattern has no
+        -- names, then it doesn't matter anyway.
+        representative s = case HS.toList s of
+                             x:_ -> Just x
+                             []  -> Nothing
 
 mustPrecede :: BindNeed -> BindNeed -> Bool
 bnd1 `mustPrecede` bnd2 =
-  not $ S.null $ (provides bnd1 `S.intersection` requires bnd2) `S.union`
-                 (consumedInExp e2 `S.intersection` requires bnd1)
+  not $ HS.null $ (provides bnd1 `HS.intersection` requires bnd2) `HS.union`
+                 (consumedInExp e2 `HS.intersection` requires bnd1)
   where e2 = asTail bnd2
 
-anyIsFreeIn :: S.Set VName -> Exp -> Bool
-anyIsFreeIn ks = (ks `intersects`) . S.map identName . freeInExp
+anyIsFreeIn :: HS.HashSet VName -> Exp -> Bool
+anyIsFreeIn ks = (ks `intersects`) . HS.map identName . freeInExp
 
-intersects :: Ord a => S.Set a -> S.Set a -> Bool
-intersects a b = not $ S.null $ a `S.intersection` b
+intersects :: (Eq a, Hashable a) => HS.HashSet a -> HS.HashSet a -> Bool
+intersects a b = not $ HS.null $ a `HS.intersection` b
 
-data BodyInfo = BodyInfo { bodyConsumes :: S.Set VName
+data BodyInfo = BodyInfo { bodyConsumes :: HS.HashSet VName
                          }
 
 bodyInfo :: Exp -> BodyInfo
@@ -396,7 +406,7 @@ orIf p1 p2 body need = p1 body need || p2 body need
 splitHoistable :: BlockPred -> Exp -> Need -> ([BindNeed], Need)
 splitHoistable block body needs =
   let (blocked, hoistable, _) =
-        foldl split ([], [], S.empty) $ inDepOrder $ needBindings needs
+        foldl split ([], [], HS.empty) $ inDepOrder $ needBindings needs
   in (reverse blocked, Need hoistable)
   where block' = block $ bodyInfo body
         split (blocked, hoistable, ks) need =
@@ -406,13 +416,13 @@ splitHoistable block body needs =
               in case (bad e, filter (not . bad) es) of
                    (True, [])     ->
                      (need : blocked, hoistable,
-                      patNames pat `S.union` ks)
+                      patNames pat `HS.union` ks)
                    (True, e':es') ->
                      (blocked, LetBind pat e' es' : hoistable, ks)
                    (False, es')   ->
                      (blocked, LetBind pat e es' : hoistable, ks)
             _ | requires need `intersects` ks || block' need ->
-                (need : blocked, hoistable, provides need `S.union` ks)
+                (need : blocked, hoistable, provides need `HS.union` ks)
               | otherwise ->
                 (blocked, need : hoistable, ks)
 
@@ -429,7 +439,7 @@ blockIf block m = pass $ do
 blockAllHoisting :: HoistM Exp -> HoistM Exp
 blockAllHoisting = blockIf $ \_ _ -> True
 
-hasFree :: S.Set VName -> BlockPred
+hasFree :: HS.HashSet VName -> BlockPred
 hasFree ks _ need = ks `intersects` requires need
 
 isNotSafe :: BlockPred
@@ -489,7 +499,7 @@ hoistInExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody _) = do
   loopbody' <- blockIfSeq [hasFree boundnames, isConsumed] $
                hoistInExp loopbody
   bindLoop mergepat mergeexp' loopvar boundexp' loopbody' $ hoistInExp letbody
-  where boundnames = identName loopvar `S.insert` patNames mergepat
+  where boundnames = identName loopvar `HS.insert` patNames mergepat
 hoistInExp e@(Map2 cs (TupleLambda params _ _ _) arrexps _ _) =
   hoistInSOAC e arrexps $ \ks ->
     withSOACArrSlices cs params ks $
@@ -528,7 +538,7 @@ hoistInTupleLambda :: TupleLambda -> HoistM TupleLambda
 hoistInTupleLambda (TupleLambda params body rettype loc) = do
   body' <- blockIf (hasFree params' `orIf` isUniqueBinding) $ hoistInExp body
   return $ TupleLambda params body' rettype loc
-  where params' = S.fromList $ map identName params
+  where params' = HS.fromList $ map identName params
 
 arrVars :: [Exp] -> Maybe [Ident]
 arrVars = mapM arrVars'

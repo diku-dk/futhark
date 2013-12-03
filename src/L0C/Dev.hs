@@ -20,8 +20,8 @@ where
 
 import Data.IORef
 import Data.Loc
-import qualified Data.Map as M
-import qualified Data.Set as S
+import qualified Data.HashMap.Strict as HM
+import qualified Data.HashSet as HS
 import System.IO.Unsafe
 
 import Language.L0.Parser
@@ -51,13 +51,13 @@ tident s = case words s of
 
 uniqueNameSource :: IORef (NameSource VName)
 uniqueNameSource = unsafePerformIO $ newIORef newUniqueNameSource
-  where newUniqueNameSource = NameSource $ generator 0 M.empty
+  where newUniqueNameSource = NameSource $ generator 0 HM.empty
         generator i m s =
-          case M.lookup (baseName s) m of
+          case HM.lookup (baseName s) m of
             Just s' -> (s', NameSource $ generator i m)
             Nothing ->
               let s' = s `setID` i
-                  m' = M.insert (baseName s) s' m
+                  m' = HM.insert (baseName s) s' m
               in (s', NameSource $ generator (i+1) m')
 
 uniqueTag :: (NameSource VName -> f -> (t, NameSource VName)) -> f -> t
@@ -94,7 +94,7 @@ expr = uniqueTagExp . rightResult . checkClosedExp . rightResult . parseExp "inp
 
 -- | Parse a string to a type.
 typ :: String -> Type
-typ = uniqueTagType . (`setAliases` S.empty) . rightResult . parseType "input"
+typ = uniqueTagType . (`setAliases` HS.empty) . rightResult . parseType "input"
 
 -- | Parse a string to a value.
 value :: String -> Value
@@ -106,7 +106,7 @@ lambda = uniqueTagLambda . rightResult . checkClosedLambda . rightResult . parse
   where checkClosedLambda (AnonymFun params body rettype loc) = do
           body' <- checkOpenExp env body
           return $ AnonymFun params body' rettype loc
-            where env = M.fromList [ (identName param, fromDecl $ identType param)
+            where env = HM.fromList [ (identName param, fromDecl $ identType param)
                                      | param <- params ]
         checkClosedLambda (CurryFun {}) = error "Curries not handled"
 
@@ -115,5 +115,5 @@ tupleLambda = uniqueTagTupleLambda . rightResult . checkClosedTupleLambda . righ
   where checkClosedTupleLambda (TupleLambda params body rettype loc) = do
           body' <- checkOpenExp env body
           return $ TupleLambda params body' rettype loc
-            where env = M.fromList [ (identName param, fromDecl $ identType param)
+            where env = HM.fromList [ (identName param, fromDecl $ identType param)
                                      | param <- params ]

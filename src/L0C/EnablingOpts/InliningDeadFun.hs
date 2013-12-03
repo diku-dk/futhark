@@ -19,7 +19,7 @@ import Control.Monad.Reader
 import Data.List
 import Data.Loc
 
-import qualified Data.Map as M
+import qualified Data.HashMap.Lazy as HM
 
 import L0C.L0
 
@@ -35,15 +35,15 @@ import L0C.EnablingOpts.EnablingOptErrors
 mkUnnamedLamPrg :: Prog -> Prog
 mkUnnamedLamPrg prog =
     let fnms = map (\(nm,_,_,_,_)->nm) $ progFunctions prog
-        ftab = M.fromList $ zip fnms $ progFunctions prog
+        ftab = HM.fromList $ zip fnms $ progFunctions prog
     in  Prog $ map (mkUnnamedLamFun ftab) $ progFunctions prog
 
-mkUnnamedLamFun :: M.Map Name FunDec -> FunDec -> FunDec
+mkUnnamedLamFun :: HM.HashMap Name FunDec -> FunDec -> FunDec
 mkUnnamedLamFun ftab (fnm,rtp,idds,body,pos) = 
     let body' = mkUnnamedLamExp ftab body
     in  (fnm,rtp,idds,body',pos)
 
-mkUnnamedLamExp :: M.Map Name FunDec -> Exp -> Exp
+mkUnnamedLamExp :: HM.HashMap Name FunDec -> Exp -> Exp
 mkUnnamedLamExp ftab (Map lam arrr eltp pos) = 
     Map    (mkUnnamedLamLam ftab lam) (mkUnnamedLamExp ftab arrr) eltp pos
 mkUnnamedLamExp ftab (Filter lam arrr eltp pos) = 
@@ -71,11 +71,11 @@ mkUnnamedLamExp ftab (Redomap2 cs lam1 lam2 nes arrs eltp pos) =
 
 mkUnnamedLamExp ftab e = buildExpPattern (mkUnnamedLamExp ftab) e
 
-mkUnnamedLamLam ::  M.Map Name FunDec -> Lambda -> Lambda
+mkUnnamedLamLam ::  HM.HashMap Name FunDec -> Lambda -> Lambda
 mkUnnamedLamLam ftab (AnonymFun ids body  tp pos) = 
     AnonymFun ids (mkUnnamedLamExp ftab body) tp pos
 mkUnnamedLamLam ftab (CurryFun  nm params tp pos) = 
-    case M.lookup nm ftab of
+    case HM.lookup nm ftab of
         Nothing                      -> 
             CurryFun nm (map (mkUnnamedLamExp ftab) params) tp pos
         Just (fnm,_,idds,_,_) -> 
@@ -83,7 +83,7 @@ mkUnnamedLamLam ftab (CurryFun  nm params tp pos) =
                 args  = params ++ map (Var . fromParam) idds'
             in  AnonymFun idds' (Apply fnm (zip args $ repeat Observe) tp pos) (toDecl tp) pos
 
-mkUnnamedTupleLamLam :: M.Map Name FunDec -> TupleLambda -> TupleLambda
+mkUnnamedTupleLamLam :: HM.HashMap Name FunDec -> TupleLambda -> TupleLambda
 mkUnnamedTupleLamLam ftab (TupleLambda ids body tp loc) =
   TupleLambda ids (mkUnnamedLamExp ftab body) tp loc
 
@@ -99,10 +99,10 @@ mkUnnamedTupleLamLam ftab (TupleLambda ids body tp loc) =
 -- i.e., ``apply'' callees. The second element is a list that contains the (unique) 
 -- function names that may be called via SOACs. The third element is a boolean
 -- that specifies whether the current function, i.e., the caller, contains IO ops.
-type CallGraph = M.Map Name ([Name],[Name])
+type CallGraph = HM.HashMap Name ([Name],[Name])
 
 -- | The symbol table for functions
-data CGEnv = CGEnv { envFtable  :: M.Map Name FunDec }
+data CGEnv = CGEnv { envFtable  :: HM.HashMap Name FunDec }
 
 newtype CGM a = CGM (ReaderT CGEnv (Either EnablingOptError) a)
     deriving (MonadReader CGEnv, Monad, Applicative, Functor)
@@ -121,36 +121,36 @@ badCGM = CGM . lift . Left
 buildCG :: Prog -> Either EnablingOptError CallGraph
 buildCG prog = do
     env <- foldM expand env0 (progFunctions prog)
-    runCGM (buildCGfun M.empty defaultEntryPoint) env
+    runCGM (buildCGfun HM.empty defaultEntryPoint) env
 
     where
-        env0 = CGEnv { envFtable = M.empty }
+        env0 = CGEnv { envFtable = HM.empty }
         expand :: CGEnv -> FunDec -> Either EnablingOptError CGEnv
         expand ftab f@(name,_,_,_,pos)
-            | Just (_,_,_,_,pos2) <- M.lookup name (envFtable ftab) =
+            | Just (_,_,_,_,pos2) <- HM.lookup name (envFtable ftab) =
               Left $ DupDefinitionError name pos pos2
             | otherwise =
-                Right CGEnv { envFtable = M.insert name f (envFtable ftab) }
+                Right CGEnv { envFtable = HM.insert name f (envFtable ftab) }
 
 
 -- | @buildCG cg fname@ updates Call Graph @cg@ with the contributions of function 
 -- @fname@, and recursively, with the contributions of the callees of @fname@.
--- In particular, @buildCGfun M.empty defaultEntryPoint@ should construct the Call Graph
+-- In particular, @buildCGfun HM.empty defaultEntryPoint@ should construct the Call Graph
 -- of the whole program.
 buildCGfun :: CallGraph -> Name -> CGM CallGraph
 buildCGfun cg fname  = do
-  bnd <- asks $ M.lookup fname . envFtable
+  bnd <- asks $ HM.lookup fname . envFtable
   case bnd of
     Nothing -> badCGM $ FunctionNotInFtab fname
     Just (caller,_,_,body,pos) -> 
       if caller == fname
       then
-        case M.lookup caller cg of
+        case HM.lookup caller cg of
           Just _  -> return cg
           Nothing -> do let callees@(fs, soacs) = buildCGexp ([],[]) body
 
                         -- at this point caller is only known whether it has `local' IO. 
-                        let cg' = M.insert caller callees cg
+                        let cg' = HM.insert caller callees cg
 
                         -- recursively build the callees
                         let fs_soacs = fs `union` soacs
@@ -197,22 +197,22 @@ addTupleLamFun callees _ = callees
 aggInlineDriver :: Prog -> Either EnablingOptError Prog
 aggInlineDriver prog = do
     env <- foldM expand env0 $ progFunctions prog
-    cg  <- runCGM (buildCGfun M.empty defaultEntryPoint) env
+    cg  <- runCGM (buildCGfun HM.empty defaultEntryPoint) env
     runCGM (aggInlining cg) env
     where
-        env0 = CGEnv { envFtable = M.empty }
+        env0 = CGEnv { envFtable = HM.empty }
         expand :: CGEnv -> FunDec -> Either EnablingOptError CGEnv
         expand ftab f@(name,_,_,_,pos)
-            | Just (_,_,_,_,pos2) <- M.lookup name (envFtable ftab) =
+            | Just (_,_,_,_,pos2) <- HM.lookup name (envFtable ftab) =
               Left $ DupDefinitionError name pos pos2
             | otherwise = 
-                Right CGEnv { envFtable = M.insert name f (envFtable ftab) }
+                Right CGEnv { envFtable = HM.insert name f (envFtable ftab) }
 
 
 -- | Bind a name as a common (non-merge) variable.
 bindVarFtab :: CGEnv -> (Name, FunDec) -> CGEnv
 bindVarFtab env (name,val) =
-  env { envFtable = M.insert name val $ envFtable env }
+  env { envFtable = HM.insert name val $ envFtable env }
 
 bindVarsFtab :: CGEnv -> [(Name, FunDec)] -> CGEnv
 bindVarsFtab = foldl bindVarFtab
@@ -222,7 +222,7 @@ bindingFtab bnds = local (`bindVarsFtab` bnds)
 
 -- | Remove the binding for a name.
 remVarFtab :: CGEnv -> Name -> CGEnv
-remVarFtab env name = env { envFtable = M.delete name $ envFtable env }
+remVarFtab env name = env { envFtable = HM.delete name $ envFtable env }
 
 remVarsFtab :: CGEnv -> [Name] -> CGEnv
 remVarsFtab = foldl remVarFtab
@@ -234,17 +234,14 @@ remBindingsFtab keys = local (`remVarsFtab` keys)
 
 aggInlining :: CallGraph -> CGM Prog
 aggInlining cg = do
-    let inlcand    = M.keys (M.filter funHasNoCalls cg)
+    let inlcand    = HM.keys (HM.filter funHasNoCalls cg)
     let inlinf     = getInlineOps inlcand cg
---    let inlinf     = (  M.filter (\l -> not (null l)) . 
---                        M.map (\callees -> intersect inlcand callees)
---                     ) cg
-    let work       = M.toList inlinf
+    let work       = HM.toList inlinf
 
     if null work 
          -- a fix point has been reached, hence gather the program
          -- from the hashtable and return it.
-    then Prog <$> asks (M.elems . envFtable)
+    then Prog <$> asks (HM.elems . envFtable)
 
          -- Remove the to-be-inlined functions from the Call Graph,
          -- and then, for each caller that exhibits to-be-inlined callees
@@ -252,7 +249,7 @@ aggInlining cg = do
          -- iterate to a fix point. At this point it is guaranteed
          -- that `work' is not empty, hence there are functions to
          -- be inlined in each caller function (from `work').
-    else do let cg'  = M.map ( \(callees,l) -> ( (\\) callees inlcand, l ) ) cg
+    else do let cg'  = HM.map ( \(callees,l) -> ( (\\) callees inlcand, l ) ) cg
             let work'= map ( \(x,(y,_)) -> (x,y) ) work
             newfuns  <- mapM processfun work'
             let newfunnms  = fst (unzip work')
@@ -262,7 +259,7 @@ aggInlining cg = do
     where
         processfun :: (Name, [Name]) -> CGM FunDec
         processfun (fname, inlcallees) = do
-            f  <- asks $ M.lookup fname . envFtable
+            f  <- asks $ HM.lookup fname . envFtable
             case f of
                 Nothing -> badCGM $ FunctionNotInFtab fname
                 Just ff -> do
@@ -271,15 +268,15 @@ aggInlining cg = do
 
         getFromFtable :: Name -> CGM FunDec
         getFromFtable fname = do 
-            f <- asks $ M.lookup fname . envFtable
+            f <- asks $ HM.lookup fname . envFtable
             case f of
                 Nothing -> badCGM $ FunctionNotInFtab fname
                 Just ff -> return ff
             
         getInlineOps :: [Name] -> CallGraph -> CallGraph
         getInlineOps inlcand =
-            M.filter (\(callees,_) -> not (null callees)) .
-            M.map (first $ intersect inlcand)
+            HM.filter (\(callees,_) -> not (null callees)) .
+            HM.map (first $ intersect inlcand)
 
         funHasNoCalls :: ([Name],[Name]) -> Bool
         funHasNoCalls (callees,_) = null callees 
@@ -329,22 +326,22 @@ inlineInExp inlcallees e =
 deadFunElim :: Prog -> Either EnablingOptError Prog
 deadFunElim prog = do
     env  <- foldM expand env0 $ progFunctions prog
-    cg   <- runCGM (buildCGfun M.empty defaultEntryPoint) env
-    let env'  = (M.filter (isFunInCallGraph cg) . envFtable) env
-    let prog' = M.elems env'
+    cg   <- runCGM (buildCGfun HM.empty defaultEntryPoint) env
+    let env'  = (HM.filter (isFunInCallGraph cg) . envFtable) env
+    let prog' = HM.elems env'
     return $ Prog prog'
     where
-        env0 = CGEnv { envFtable = M.empty }
+        env0 = CGEnv { envFtable = HM.empty }
 
         expand :: CGEnv -> FunDec -> Either EnablingOptError CGEnv
         expand ftab f@(name,_,_,_,pos)
-            | Just (_,_,_,_,pos2) <- M.lookup name (envFtable ftab) =
+            | Just (_,_,_,_,pos2) <- HM.lookup name (envFtable ftab) =
               Left $ DupDefinitionError name pos pos2
             | otherwise = 
-                Right CGEnv { envFtable = M.insert name f (envFtable ftab) }
+                Right CGEnv { envFtable = HM.insert name f (envFtable ftab) }
 
         isFunInCallGraph :: CallGraph -> FunDec -> Bool
         isFunInCallGraph cg (fnm,_,_,_,_) = 
-            case M.lookup fnm cg of
+            case HM.lookup fnm cg of
                 Nothing -> False
                 Just  _ -> True

@@ -12,7 +12,7 @@ import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Reader
 import qualified Data.Array as A
-import qualified Data.Map as M
+import qualified Data.HashMap.Lazy as HM
 import Data.List
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.C as C
@@ -38,12 +38,12 @@ newCompilerState prog = CompilerState {
                         }
 
 data CompilerEnv = CompilerEnv {
-    envVarMap :: M.Map VName C.Exp
+    envVarMap :: HM.HashMap VName C.Exp
   }
 
 newCompilerEnv :: CompilerEnv
 newCompilerEnv = CompilerEnv {
-                   envVarMap = M.empty
+                   envVarMap = HM.empty
                  }
 
 -- | Return a list of struct definitions for the tuples and arrays
@@ -59,10 +59,10 @@ newtype CompilerM a = CompilerM (ReaderT CompilerEnv (State CompilerState) a)
 
 binding :: [(VName, C.Exp)] -> CompilerM a -> CompilerM a
 binding kvs = local (flip (foldl add) kvs)
-  where add env (k, v) = env { envVarMap = M.insert k v $ envVarMap env }
+  where add env (k, v) = env { envVarMap = HM.insert k v $ envVarMap env }
 
 lookupVar :: VName -> CompilerM C.Exp
-lookupVar k = do v <- asks $ M.lookup k . envVarMap
+lookupVar k = do v <- asks $ HM.lookup k . envVarMap
                  case v of
                    Nothing -> error $ "Uknown variable " ++ textual k ++ " in code generator."
                    Just v' -> return v'

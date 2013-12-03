@@ -31,7 +31,7 @@ import Control.Monad.Reader
 import Control.Monad.Writer
 
 import qualified Data.Array as A
-import qualified Data.Map as M
+import qualified Data.HashMap.Lazy as HM
 import Data.Maybe
 import Data.List
 import Data.Loc
@@ -45,7 +45,7 @@ transformProg prog =
   Prog $ runTransformM $ mapM transformFun $ progFunctions prog
   where runTransformM m = evalState (runReaderT m newEnv) newState
         newState = TransformState $ newNameSourceForProg prog
-        newEnv = TransformEnv M.empty
+        newEnv = TransformEnv HM.empty
 
 data TransformState = TransformState {
     envNameSrc :: VNameSource
@@ -55,7 +55,7 @@ data Replacement = ArraySubst Ident [Ident]
                  | TupleSubst [Ident]
 
 data TransformEnv = TransformEnv {
-    envSubsts :: M.Map VName Replacement
+    envSubsts :: HM.HashMap VName Replacement
   }
 
 type TransformM = ReaderT TransformEnv (State TransformState)
@@ -169,12 +169,12 @@ binding params m = do
     case param' of
       Simple k -> return [k]
       FlatTuple ks -> do
-        tell $ M.singleton (identName param) $ TupleSubst ks
+        tell $ HM.singleton (identName param) $ TupleSubst ks
         return ks
       TupleArray c ks -> do
-        tell $ M.singleton (identName param) $ ArraySubst c ks
+        tell $ HM.singleton (identName param) $ ArraySubst c ks
         return $ c:ks
-  let bind env = env { envSubsts = substs `M.union` envSubsts env }
+  let bind env = env { envSubsts = substs `HM.union` envSubsts env }
   local bind $ m params'
 
 bindingPat :: TupIdent -> (TupIdent -> TransformM a) -> TransformM a
@@ -190,21 +190,21 @@ bindingPat (Id k) m = do
     TupleArray c ks -> substing (c:ks) $ ArraySubst c ks
   where substing ks sub =
           let bind env =
-                env { envSubsts = M.insert (identName k) sub $ envSubsts env }
+                env { envSubsts = HM.insert (identName k) sub $ envSubsts env }
           in local bind $ m $ TupId (map Id ks) $ srclocOf k
 bindingPat (TupId pats loc) m = do
   (ks, substs) <- runWriterT $ concat <$> mapM delve pats
-  let bind env = env { envSubsts = substs `M.union` envSubsts env }
+  let bind env = env { envSubsts = substs `HM.union` envSubsts env }
   local bind $ m $ TupId ks loc
     where delve (Id k) = do
             p <- lift $ transformParam k
             case p of
               Simple k'    -> return [Id k']
               FlatTuple ks -> do
-                tell $ M.singleton (identName k) $ TupleSubst ks
+                tell $ HM.singleton (identName k) $ TupleSubst ks
                 return $ map Id ks
               TupleArray c ks -> do
-                tell $ M.singleton (identName k) $ ArraySubst c ks
+                tell $ HM.singleton (identName k) $ ArraySubst c ks
                 return $ map Id $ c : ks
           delve (Wildcard t _) =
             case transformType t of
@@ -222,7 +222,7 @@ flattenExps = concatMap flatten
 transformExp :: Exp -> TransformM Exp
 
 transformExp (Var var) = do
-  subst <- asks $ M.lookup (identName var) . envSubsts
+  subst <- asks $ HM.lookup (identName var) . envSubsts
   case subst of
     Nothing -> return $ Var var
     Just (ArraySubst c ks) -> return $ TupLit (map Var $ c:ks) $ srclocOf var
@@ -230,7 +230,7 @@ transformExp (Var var) = do
 
 transformExp (Index cs vname csidx idxs outtype loc) = do
   idxs' <- mapM transformExp idxs
-  subst <- asks $ M.lookup (identName vname) . envSubsts
+  subst <- asks $ HM.lookup (identName vname) . envSubsts
   case subst of
     Just (ArraySubst _ [v])
       | rt <- stripArray (length idxs') $ identType v,
@@ -570,15 +570,15 @@ lambdaBinding ce params m = do
         let loc = srclocOf k
         (ks', es) <- lift $ cleanLambdaParam ce ks $ identType param
         tell ([(TupId (map Id ks) loc, TupLit es loc)],
-              M.singleton (identName param) $ TupleSubst ks)
+              HM.singleton (identName param) $ TupleSubst ks)
         return ks'
       TupleArray c ks -> do
         let loc = srclocOf c
         (ks', es) <- lift $ cleanLambdaParam ce (c:ks) $ identType param
         tell ([(TupId (map Id $ c:ks) loc, TupLit es loc)],
-              M.singleton (identName param) $ ArraySubst c ks)
+              HM.singleton (identName param) $ ArraySubst c ks)
         return ks'
-  let bind env = env { envSubsts = substs `M.union` envSubsts env }
+  let bind env = env { envSubsts = substs `HM.union` envSubsts env }
       comb outer (pat,e) inner = outer $ LetPat pat e inner $ srclocOf pat
       letf = foldl comb id patpairs
   local bind $ m params' letf

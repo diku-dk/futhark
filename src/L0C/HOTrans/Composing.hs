@@ -12,7 +12,8 @@ module L0C.HOTrans.Composing
 
 import Data.List
 import Data.Loc
-import qualified Data.Map  as M
+import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map as M
 
 import L0C.L0
 
@@ -36,9 +37,9 @@ import L0C.L0
 fuseMaps :: TupleLambda -> [Exp] -> [Ident]
          -> TupleLambda -> [Exp]
          -> (TupleLambda, [Exp])
-fuseMaps lam1 inp1 out1 lam2 inp2 = (lam2', M.elems inputmap)
+fuseMaps lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
   where lam2' =
-          lam2 { tupleLambdaParams = lam2redparams ++ M.keys inputmap
+          lam2 { tupleLambdaParams = lam2redparams ++ HM.keys inputmap
                , tupleLambdaBody = makeCopies $
                                    LetPat pat (tupleLambdaBody lam1) (tupleLambdaBody lam2) loc
                }
@@ -66,9 +67,9 @@ fuseFilterInto :: TupleLambda -> [Exp] -> [Ident]
                -> TupleLambda -> [Exp]
                -> VName -> Exp
                -> (TupleLambda, [Exp])
-fuseFilterInto lam1 inp1 out1 lam2 inp2 vname falsebranch = (lam2', M.elems inputmap)
+fuseFilterInto lam1 inp1 out1 lam2 inp2 vname falsebranch = (lam2', HM.elems inputmap)
   where lam2' =
-          lam2 { tupleLambdaParams = lam2redparams ++ M.keys inputmap
+          lam2 { tupleLambdaParams = lam2redparams ++ HM.keys inputmap
                , tupleLambdaBody = makeCopies bindins
                }
         loc = srclocOf lam2
@@ -88,18 +89,18 @@ fuseFilterInto lam1 inp1 out1 lam2 inp2 vname falsebranch = (lam2', M.elems inpu
 
 fuseInputs :: TupleLambda -> [Exp] -> [Ident]
            -> TupleLambda -> [Exp]
-           -> ([Parameter], TupIdent, M.Map Parameter Exp, Exp -> Exp)
+           -> ([Parameter], TupIdent, HM.HashMap Parameter Exp, Exp -> Exp)
 fuseInputs lam1 inp1 out1 lam2 inp2 =
   (lam2redparams, pat, inputmap, makeCopies)
   where loc = srclocOf lam2
         pat = TupId (map (either (`Wildcard` loc) Id) outbnds) loc
         (lam2redparams, lam2arrparams) =
           splitAt (length (tupleLambdaParams lam2) - length inp2) $ tupleLambdaParams lam2
-        originputmap = M.fromList $
+        originputmap = HM.fromList $
                        zip (tupleLambdaParams lam1 ++ lam2arrparams) (inp1 ++ inp2)
         (outins, outbnds) = filterOutParams out1 lam2arrparams inp2
         (inputmap, makeCopies) =
-          removeDuplicateInputs $ foldr M.delete originputmap outins
+          removeDuplicateInputs $ foldr HM.delete originputmap outins
 
 filterOutParams :: [Ident] -> [Parameter] -> [Exp]
                 -> ([Parameter], [Either Type Ident])
@@ -118,17 +119,17 @@ filterOutParams out1 lam2arrparams inp2 =
             Just (p:ps) -> (M.insert (Var a) ps m, Right p)
             _           -> (m, Left $ rowType $ identType a)
 
-removeDuplicateInputs :: M.Map Parameter Exp
-                      -> (M.Map Parameter Exp, Exp -> Exp)
-removeDuplicateInputs = fst . M.foldlWithKey comb ((M.empty, id), M.empty)
+removeDuplicateInputs :: HM.HashMap Parameter Exp
+                      -> (HM.HashMap Parameter Exp, Exp -> Exp)
+removeDuplicateInputs = fst . HM.foldlWithKey' comb ((HM.empty, id), HM.empty)
   where comb ((parmap, inner), arrmap) par (Var arr) =
-          case M.lookup arr arrmap of
-            Nothing -> ((M.insert par (Var arr) parmap, inner),
-                        M.insert arr par arrmap)
+          case HM.lookup arr arrmap of
+            Nothing -> ((HM.insert par (Var arr) parmap, inner),
+                        HM.insert arr par arrmap)
             Just par' -> ((parmap, inner . forward par par'),
                           arrmap)
         comb ((parmap, inner), arrmap) par arr =
-          ((M.insert par arr parmap, inner), arrmap)
+          ((HM.insert par arr parmap, inner), arrmap)
         forward to from e = LetPat (Id $ fromParam to)
                             (Var $ fromParam from) e $ srclocOf e
 

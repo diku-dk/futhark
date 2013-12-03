@@ -26,7 +26,7 @@ import Data.Array
 import Data.Bits
 import Data.List
 import Data.Loc
-import qualified Data.Map as M
+import qualified Data.HashMap.Strict as HM
 
 import L0C.L0
 
@@ -80,8 +80,8 @@ instance Show InterpreterError where
 instance Error InterpreterError where
   strMsg = TypeError noLoc
 
-data L0Env = L0Env { envVtable  :: M.Map VName Value
-                   , envFtable  :: M.Map Name ([Value] -> L0M Value)
+data L0Env = L0Env { envVtable  :: HM.HashMap VName Value
+                   , envFtable  :: HM.HashMap Name ([Value] -> L0M Value)
                    }
 
 -- | A list of places where @trace@ was called, alongside the
@@ -101,7 +101,7 @@ bad = L0M . throwError
 
 bindVar :: L0Env -> (Ident, Value) -> L0Env
 bindVar env (Ident name _ _,val) =
-  env { envVtable = M.insert name val $ envVtable env }
+  env { envVtable = HM.insert name val $ envVtable env }
 
 bindVars :: L0Env -> [(Ident, Value)] -> L0Env
 bindVars = foldl bindVar
@@ -111,13 +111,13 @@ binding bnds = local (`bindVars` bnds)
 
 lookupVar :: VName -> L0M Value
 lookupVar vname = do
-  val <- asks $ M.lookup vname . envVtable
+  val <- asks $ HM.lookup vname . envVtable
   case val of Just val' -> return val'
               Nothing   -> bad $ TypeError noLoc $ "lookupVar " ++ textual vname
 
 lookupFun :: Name -> L0M ([Value] -> L0M Value)
 lookupFun fname = do
-  fun <- asks $ M.lookup fname . envFtable
+  fun <- asks $ HM.lookup fname . envFtable
   case fun of Just fun' -> return fun'
               Nothing   -> bad $ TypeError noLoc $ "lookupFun " ++ textual fname
 
@@ -160,11 +160,11 @@ arrays rowtype vs = arrayVal vs rowtype
 runFun :: Name -> [Value] -> Prog -> (Either InterpreterError Value, Trace)
 runFun fname mainargs prog = do
   let ftable = foldl expand builtins $ progFunctions prog
-      l0env = L0Env { envVtable = M.empty
+      l0env = L0Env { envVtable = HM.empty
                     , envFtable = ftable
                     }
       runmain =
-        case (funDecByName fname prog, M.lookup fname ftable) of
+        case (funDecByName fname prog, HM.lookup fname ftable) of
           (Nothing, Nothing) -> bad $ MissingEntryPoint fname
           (Just (_,rettype,fparams,_,_), _)
             | map (toDecl . valueType) mainargs == map identType fparams ->
@@ -185,7 +185,7 @@ runFun fname mainargs prog = do
     -- we don't check for duplicate definitions.
     expand ftable (name,_,params,body,_) =
       let fun args = binding (zip (map fromParam params) args) $ evalExp body
-      in M.insert name fun ftable
+      in HM.insert name fun ftable
 
 -- | As 'runFun', but throws away the trace.
 runFunNoTrace :: Name -> [Value] -> Prog -> Either InterpreterError Value
@@ -197,15 +197,16 @@ runFunNoTrace = ((.) . (.) . (.)) fst runFun -- I admit this is just for fun.
 --------------------------------------------
 --------------------------------------------
 
-builtins :: M.Map Name ([Value] -> L0M Value)
-builtins = M.mapKeys nameFromString $
-           M.fromList [("toReal", builtin "toReal")
-                      ,("trunc", builtin "trunc")
-                      ,("sqrt", builtin "sqrt")
-                      ,("log", builtin "log")
-                      ,("exp", builtin "exp")
-                      ,("op not", builtin "op not")
-                      ,("op ~", builtin "op ~")]
+builtins :: HM.HashMap Name ([Value] -> L0M Value)
+builtins = HM.fromList $ map namify
+           [("toReal", builtin "toReal")
+           ,("trunc", builtin "trunc")
+           ,("sqrt", builtin "sqrt")
+           ,("log", builtin "log")
+           ,("exp", builtin "exp")
+           ,("op not", builtin "op not")
+           ,("op ~", builtin "op ~")]
+  where namify (k,v) = (nameFromString k, v)
 
 builtin :: String -> [Value] -> L0M Value
 builtin "toReal" [IntVal x] = return $ RealVal (fromIntegral x)

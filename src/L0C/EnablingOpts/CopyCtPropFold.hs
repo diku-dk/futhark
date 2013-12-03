@@ -20,8 +20,8 @@ import Data.Maybe
 import Data.Bits
 import Data.Loc
 
-import qualified Data.Map as M
-import qualified Data.Set as S
+import qualified Data.HashMap.Lazy as HM
+import qualified Data.HashSet      as HS
 
 import L0C.L0
 
@@ -56,7 +56,7 @@ data CtOrId  = Constant Value Type Bool
              -- To Cosmin: Clean it up in the end, i.e., get rid of Exp.
 
 data CPropEnv = CopyPropEnv {
-    envVtable  :: M.Map VName CtOrId,
+    envVtable  :: HM.HashMap VName CtOrId,
     program    :: Prog
   }
 
@@ -98,13 +98,15 @@ nonRemovable name =
 -- from the symbol table.
 consuming :: Ident -> CPropM a -> CPropM a
 consuming idd m = do
-  (vtable, removed) <- M.partition ok <$> asks envVtable
-  mapM_ nonRemovable $ identName idd : M.keys removed
+  (vtable, removed) <- spartition ok <$> asks envVtable
+  mapM_ nonRemovable $ identName idd : HM.keys removed
   local (\e -> e { envVtable = vtable }) m
-  where als = identName idd `S.insert` aliases (identType idd)
+  where als = identName idd `HS.insert` aliases (identType idd)
+        spartition f s = let s' = HM.filter f s
+                         in (s', s `HM.difference` s')
         ok (Constant {})  = True
-        ok (VarId k _ _)  = k `S.notMember` als
-        ok (SymArr e _ _) = S.null $ als `S.intersection` freeNamesInExp e
+        ok (VarId k _ _)  = not $ k `HS.member` als
+        ok (SymArr e _ _) = HS.null $ als `HS.intersection` freeNamesInExp e
 
 -- | @collectNonRemovable mvars m@ executes the action @m@.  The
 -- intersection of @mvars@ and any variables used as merge variables
@@ -132,7 +134,7 @@ badCPropM = CPropM . lift . lift . Left
 -- | Bind a name as a common (non-merge) variable.
 bindVar :: CPropEnv -> (VName, CtOrId) -> CPropEnv
 bindVar env (name,val) =
-  env { envVtable = M.insert name val $ envVtable env }
+  env { envVtable = HM.insert name val $ envVtable env }
 
 bindVars :: CPropEnv -> [(VName, CtOrId)] -> CPropEnv
 bindVars = foldl bindVar
@@ -143,7 +145,7 @@ binding bnds = local (`bindVars` bnds)
 -- | Applies Copy/Constant Propagation and Folding to an Entire Program.
 copyCtProp :: Prog -> Either EnablingOptError (Bool, Prog)
 copyCtProp prog = do
-    let env = CopyPropEnv { envVtable = M.empty, program = prog }
+    let env = CopyPropEnv { envVtable = HM.empty, program = prog }
     -- res   <- runCPropM (mapM copyCtPropFun prog) env
     -- let (bs, rs) = unzip res
     (rs, res) <- runCPropM (mapM copyCtPropFun $ progFunctions prog) env
@@ -161,7 +163,7 @@ copyCtPropFun (fname, rettype, args, body, pos) = do
 
 copyCtPropOneTupleLambda :: Prog -> TupleLambda -> Either EnablingOptError TupleLambda
 copyCtPropOneTupleLambda prog lam = do
-    let env = CopyPropEnv { envVtable = M.empty, program = prog }
+    let env = CopyPropEnv { envVtable = HM.empty, program = prog }
     (res, _) <- runCPropM (copyCtPropTupleLambda lam) env
     return res
 
@@ -203,7 +205,7 @@ copyCtPropExp (DoLoop mergepat mergeexp idd n loopbdy letbdy pos) = do
 
 copyCtPropExp e@(Var (Ident vnm _ pos)) = do
     -- let _ = trace ("In VarExp: "++ppExp 0 e) e
-    bnd <- asks $ M.lookup vnm . envVtable
+    bnd <- asks $ HM.lookup vnm . envVtable
     case bnd of
         Nothing                 -> return e
         Just (Constant v   _ _) -> if isBasicTypeVal v
@@ -223,7 +225,7 @@ copyCtPropExp e@(Var (Ident vnm _ pos)) = do
 
 copyCtPropExp eee@(Index cs idd@(Ident vnm tp p) csidx inds tp2 pos) = do
   inds' <- mapM copyCtPropExp inds
-  bnd   <- asks $ M.lookup vnm . envVtable
+  bnd   <- asks $ HM.lookup vnm . envVtable
   cs'   <- copyCtPropCerts cs
   csidx' <- maybe (return Nothing) (liftM Just) $ liftM copyCtPropCerts csidx
   case bnd of
@@ -353,7 +355,7 @@ copyCtPropExp (Size cs i e pos) = do
     e' <- copyCtPropExp e
     cs' <- copyCtPropCerts cs
     case e' of
-        Var idd -> do vv <- asks $ M.lookup (identName idd) . envVtable
+        Var idd -> do vv <- asks $ HM.lookup (identName idd) . envVtable
                       case vv of Just (Constant a _ _) -> literal a
                                  Just (SymArr (Iota ne _) _ _)
                                    | i == 0 -> return ne
@@ -378,7 +380,7 @@ copyCtPropExp (Assert e loc) = do
   case e' of
     Literal (LogVal True) _ -> return $ Literal Checked loc
     Var idd -> do
-      vv <- asks $ M.lookup (identName idd) . envVtable
+      vv <- asks $ HM.lookup (identName idd) . envVtable
       case vv of
         Just (Constant (LogVal True) _ _) -> return $ Literal Checked loc
         _                                 -> return $ Assert e' loc
@@ -389,7 +391,7 @@ copyCtPropExp (Conjoin es loc) = do
   -- Remove trivial certificates.
   let check (Literal Checked _) = return Nothing
       check (Var idd) = do
-        vv <- asks $ M.lookup (identName idd) . envVtable
+        vv <- asks $ HM.lookup (identName idd) . envVtable
         case vv of
           Just (Constant Checked _ _) -> changed Nothing
           _                           -> return $ Just $ Var idd
@@ -431,7 +433,7 @@ copyCtPropExp (Apply fname args tp pos) = do
                 Literal v _ -> do (res, vals) <- allArgsAreValues as
                                   if res then return (True,  v:vals)
                                          else return (False, []    )
-                Var idd   -> do vv <- asks $ M.lookup (identName idd) . envVtable
+                Var idd   -> do vv <- asks $ HM.lookup (identName idd) . envVtable
                                 case vv of
                                   Just (Constant v _ _) -> do
                                     (res, vals) <- allArgsAreValues as
@@ -455,7 +457,7 @@ copyCtPropExp e = mapExpM mapper e
 
 copyCtPropIdent :: Ident -> CPropM Ident
 copyCtPropIdent ident@(Ident vnm _ loc) = do
-    bnd <- asks $ M.lookup vnm . envVtable
+    bnd <- asks $ HM.lookup vnm . envVtable
     case bnd of
       Nothing                 -> return ident
       Just (VarId  id' tp1 _) -> changed $ Ident id' tp1 loc
@@ -465,7 +467,7 @@ copyCtPropIdent ident@(Ident vnm _ loc) = do
 copyCtPropCerts :: Certificates -> CPropM Certificates
 copyCtPropCerts = liftM concat . mapM check
   where check idd = do
-          vv <- asks $ M.lookup (identName idd) . envVtable
+          vv <- asks $ HM.lookup (identName idd) . envVtable
           case vv of
             Just (Constant Checked _ _) -> changed []
             Just (VarId  id' tp1 _)     -> changed [Ident id' tp1 loc]
@@ -698,7 +700,7 @@ isRemovablePat  :: TupIdent -> Exp -> CPropM Bool
 isRemovablePat (TupId tups _) e =
     case e of
           Var (Ident vnm _ _)      -> do
-              bnd <- asks $ M.lookup vnm . envVtable
+              bnd <- asks $ HM.lookup vnm . envVtable
               case bnd of
                   Just (Constant val@(TupVal ts) _ _) ->
                       return ( isBasicTypeVal val && length ts == length tups )
@@ -747,7 +749,7 @@ getPropBnds pat@(TupId ids _) e to_rem =
             then concat <$> mapM (\(x,y)->getPropBnds x (Literal y loc) to_rem) (zip ids ts)
             else return []
         Var (Ident vnm _ loc)   -> do
-            bnd <- asks $ M.lookup vnm . envVtable
+            bnd <- asks $ HM.lookup vnm . envVtable
             case bnd of
                 Just (SymArr tup@(TupLit   _ _) _ _) -> getPropBnds pat tup               to_rem
                 Just (Constant tup@(TupVal _) _ _)   -> getPropBnds pat (Literal tup loc) to_rem

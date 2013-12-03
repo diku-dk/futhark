@@ -37,8 +37,8 @@ import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Reader
 
-import qualified Data.Map as M
-import qualified Data.Set as S
+import qualified Data.HashMap.Strict as HM
+import qualified Data.HashSet as HS
 
 import L0C.L0
 import L0C.FreshNames
@@ -50,7 +50,7 @@ import L0C.FreshNames
 renameProg :: (TypeBox ty, VarName vn) =>
               ProgBase ty vn -> ProgBase ty vn
 renameProg prog = Prog $ runReader (evalStateT f src) env
-  where env = RenameEnv M.empty newName
+  where env = RenameEnv HM.empty newName
         src = newNameSourceForProg prog
         f = mapM renameFun $ progFunctions prog
 
@@ -61,7 +61,7 @@ renameProg prog = Prog $ runReader (evalStateT f src) env
 tagProg :: (TypeBox ty, VarName vn) =>
            ProgBase ty vn -> ProgBase ty (ID vn)
 tagProg prog = Prog $ runReader (evalStateT f blankNameSource) env
-  where env = RenameEnv M.empty newID
+  where env = RenameEnv HM.empty newID
         f = mapM renameFun $ progFunctions prog
 
 -- | As 'tagProg', but accepts an initial name source and returns the
@@ -70,7 +70,7 @@ tagProg' :: (TypeBox ty, VarName vn) =>
             NameSource (ID vn) -> ProgBase ty vn -> (ProgBase ty (ID vn), NameSource (ID vn))
 tagProg' src prog = let (funs, src') = runReader (runStateT f src) env
                     in (Prog funs, src')
-  where env = RenameEnv M.empty newID
+  where env = RenameEnv HM.empty newID
         f = mapM renameFun $ progFunctions prog
 
 -- | As 'tagExp', but accepts an initial name source and returns the
@@ -78,7 +78,7 @@ tagProg' src prog = let (funs, src') = runReader (runStateT f src) env
 tagExp' :: (TypeBox ty, VarName vn) =>
            NameSource (ID vn) -> ExpBase ty vn -> (ExpBase ty (ID vn), NameSource (ID vn))
 tagExp' src e = runReader (runStateT (renameExp e) src) env
-  where env = RenameEnv M.empty newID
+  where env = RenameEnv HM.empty newID
 
 -- | As 'tagProg', but for expressions.
 tagExp :: (TypeBox ty, VarName vn) =>
@@ -90,7 +90,7 @@ tagExp = fst . tagExp' blankNameSource
 tagType' :: (TypeBox ty, VarName vn) =>
             NameSource (ID vn) -> ty vn -> (ty (ID vn), NameSource (ID vn))
 tagType' src t = runReader (runStateT (renameType t) src) env
-  where env = RenameEnv M.empty newID
+  where env = RenameEnv HM.empty newID
 
 -- | As 'tagProg', but for types.
 tagType :: (TypeBox ty, VarName vn) =>
@@ -103,7 +103,7 @@ tagLambda' :: (TypeBox ty, VarName vn) =>
             NameSource (ID vn) -> LambdaBase ty vn
          -> (LambdaBase ty (ID vn), NameSource (ID vn))
 tagLambda' src t = runReader (runStateT (renameLambda t) src) env
-  where env = RenameEnv M.empty newID
+  where env = RenameEnv HM.empty newID
 
 -- | As 'tagProg', but for anonymous functions.
 tagLambda :: (TypeBox ty, VarName vn) =>
@@ -116,7 +116,7 @@ tagTupleLambda' :: (TypeBox ty, VarName vn) =>
                    NameSource (ID vn) -> TupleLambdaBase ty vn
                 -> (TupleLambdaBase ty (ID vn), NameSource (ID vn))
 tagTupleLambda' src t = runReader (runStateT (renameTupleLambda t) src) env
-  where env = RenameEnv M.empty newID
+  where env = RenameEnv HM.empty newID
 
 -- | As 'tagProg', but for anonymous tuple-functions.
 tagTupleLambda :: (TypeBox ty, VarName vn) =>
@@ -156,11 +156,11 @@ untagType = untagger renameType
 untagger :: VarName vn =>
             (t -> RenameM (ID vn) vn a) -> t -> a
 untagger f x = runReader (evalStateT (f x) blankNameSource) env
-  where env = RenameEnv M.empty rmTag
+  where env = RenameEnv HM.empty rmTag
         rmTag src (ID (s, _)) = (s, src)
 
 data RenameEnv f t = RenameEnv {
-    envNameMap :: M.Map f t
+    envNameMap :: HM.HashMap f t
   , envNameFn  :: NameSource t -> f -> (t, NameSource t)
   }
 
@@ -183,17 +183,17 @@ repl (Ident name tp loc) = do
 
 replName :: (VarName f, VarName t) => f -> RenameM f t t
 replName name = maybe (new name) return =<<
-                asks (M.lookup name . envNameMap)
+                asks (HM.lookup name . envNameMap)
 
 bind :: (TypeBox ty, VarName f) => [IdentBase ty f] -> RenameM f t a -> RenameM f t a
 bind vars body = do
   vars' <- mapM new varnames
-  -- This works because Data.Map.union prefers elements from left
+  -- This works because map union prefers elements from left
   -- operand.
   local (bind' vars') body
   where varnames = map identName vars
-        bind' vars' env = env { envNameMap = M.fromList (zip varnames vars')
-                                             `M.union` envNameMap env }
+        bind' vars' env = env { envNameMap = HM.fromList (zip varnames vars')
+                                             `HM.union` envNameMap env }
 
 renameFun :: (TypeBox ty, VarName f, VarName t) =>
              FunDecBase ty f -> RenameM f t (FunDecBase ty t)
@@ -236,7 +236,7 @@ renameExp e = mapExpM rename e
 renameType :: (TypeBox ty, VarName f, VarName t) => ty f -> RenameM f t (ty t)
 renameType = mapType renameType'
   where renameType' (Array et dims u als) = do
-          als' <- S.fromList <$> mapM replName (S.toList als)
+          als' <- HS.fromList <$> mapM replName (HS.toList als)
           et' <- toElemDecl <$> renameElemType (fromElemDecl et)
           return $ Array et' (replicate (length dims) Nothing) u als'
         renameType' (Elem et) = Elem <$> renameElemType et
