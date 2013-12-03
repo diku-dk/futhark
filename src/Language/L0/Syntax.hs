@@ -290,7 +290,7 @@ data ExpBase ty vn =
 
             | Scan (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
              -- ^ @scan(plus, 0, { 1, 2, 3 }) = { 1, 3, 6 }@.
-             -- 4th arg is the element type of the input array
+             -- 4th arg is the row type of the input array
 
             | Filter (LambdaBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
             -- ^ 3rd arg is the row type of the input (and
@@ -445,7 +445,7 @@ data TupleLambdaBase ty vn =
   TupleLambda { tupleLambdaParams :: [ParamBase vn]
               , tupleLambdaBody :: ExpBase ty vn
               , tupleLambdaReturnType :: [DeclTypeBase vn]
-              , tupleLambdaSrcLo :: SrcLoc
+              , tupleLambdaSrcLoc :: SrcLoc
               }
   deriving (Eq, Ord, Show)
 
