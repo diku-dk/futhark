@@ -210,33 +210,33 @@ type CertificatesBase ty vn = [IdentBase ty vn]
 -- values.  -- This allows us to encode whether or not the expression
 -- has been type-checked in the Haskell type of the expression.
 -- Specifically, the parser will produce expressions of type @Exp
--- 'Maybe Type'@, and the type checker will convert these to @Exp
--- 'Type'@, in which type information is always present.
+-- 'NoInfo'@, and the type checker will convert these to @Exp 'Type'@,
+-- in which type information is always present.
 data ExpBase ty vn =
               Literal Value SrcLoc
             | TupLit    [ExpBase ty vn] SrcLoc
             -- ^ Tuple literals, e.g., (1+3, (x, y+z)).  Second
             -- argument is the tuple's type.
             | ArrayLit  [ExpBase ty vn] (ty vn) SrcLoc
-            -- ^ Array literals, e.g., { {1+x, 3}, {2, 1+4} }.  Second
-            -- arg is the type of of the rows of the array (not the
-            -- element type).
+            -- ^ Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
+            -- Second arg is the type of of the rows of the array (not
+            -- the element type).
             | BinOp BinOp (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
             -- Binary Ops for Booleans
             | And    (ExpBase ty vn) (ExpBase ty vn) SrcLoc
             | Or     (ExpBase ty vn) (ExpBase ty vn) SrcLoc
             -- Unary Ops: Not for bools and Negate for ints
-            | Not    (ExpBase ty vn) SrcLoc -- e.g., not True = False
-            | Negate (ExpBase ty vn) (ty vn) SrcLoc -- e.g., ~(~1) = 1
+            | Not    (ExpBase ty vn) SrcLoc -- ^ E.g., @not True == False@.
+            | Negate (ExpBase ty vn) (ty vn) SrcLoc -- ^ E.g., @~(~1) = 1@.
             | If     (ExpBase ty vn) (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
             | Var    (IdentBase ty vn)
-            -- Function Call and Let Construct
+            -- Function call and let construct
             | Apply  Name [(ExpBase ty vn, Diet)] (ty vn) SrcLoc
             | LetPat (TupIdentBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
 
             | LetWith (CertificatesBase ty vn) (IdentBase ty vn)
               (IdentBase ty vn) [ExpBase ty vn] (ExpBase ty vn) (ExpBase ty vn) SrcLoc
-            -- ^ Array Indexing and Array Constructors
+            -- ^ Array indexing and array constructors.
 
             | Index (CertificatesBase ty vn)
                     (IdentBase ty vn)
@@ -250,13 +250,13 @@ data ExpBase ty vn =
              -- result type
 
             | Iota (ExpBase ty vn) SrcLoc
-            -- ^ @iota(n) = {0,1,..,n-1@
+            -- ^ @iota(n) = [0,1,..,n-1]@
 
             | Size (CertificatesBase ty vn) Int (ExpBase ty vn) SrcLoc
             -- ^ The size of the specified array dimension.
 
             | Replicate (ExpBase ty vn) (ExpBase ty vn) SrcLoc
-            -- ^ @replicate(3,1) = {1, 1, 1}@
+            -- ^ @replicate(3,1) = [1, 1, 1]@
 
             | Reshape (CertificatesBase ty vn) [ExpBase ty vn] (ExpBase ty vn) SrcLoc
              -- ^ 1st arg is the new shape, 2nd arg is the input array *)
@@ -268,16 +268,15 @@ data ExpBase ty vn =
               -- @transpose(0,1,a)@ is the common two-dimensional
               -- transpose.
 
-            -- Second-Order Array Combinators
-            -- accept curried and anonymous
-            -- functions as (first) params
+            -- Second-Order Array Combinators accept curried and
+            -- anonymous functions as first params.
             | Map (LambdaBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
-             -- @map(op +(1), {1,2,..,n}) = {2,3,..,n+1}@
-             -- 3st arg is the input-array row type
+             -- ^ @map(op +(1), {1,2,..,n}) = [2,3,..,n+1]@.  3rd arg
+             -- is the input-array row type
 
             | Reduce (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
-             -- @reduce(op +, 0, {1,2,..,n}) = (0+1+2+..+n)@
-             -- 4th arg is the input-array element type
+             -- ^ @reduce(op +, 0, {1,2,...,n}) = (0+1+2+...+n)@ 4th arg
+             -- is the input-array element type
 
             | Zip [(ExpBase ty vn, ty vn)] SrcLoc
             -- ^ Normal zip supporting variable number of arguments.
@@ -289,7 +288,7 @@ data ExpBase ty vn =
             -- types are the elements of the tuple.
 
             | Scan (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
-             -- ^ @scan(plus, 0, { 1, 2, 3 }) = { 1, 3, 6 }@.
+             -- ^ @scan(plus, 0, [ 1, 2, 3 ]) = [ 1, 3, 6 ]@.
              -- 4th arg is the row type of the input array
 
             | Filter (LambdaBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
@@ -302,11 +301,11 @@ data ExpBase ty vn =
              -- 5th arg is the row type of the input  array.
 
             | Split (CertificatesBase ty vn) (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
-             -- ^ @split(1, { 1, 2, 3, 4 }) = ({1},{2, 3, 4})@.
-             -- 3rd arg is the element type of the input array
+             -- ^ @split(1, [ 1, 2, 3, 4 ]) = {[1],[2, 3, 4]}@.
+             -- 4th arg is the element type of the input array
 
             | Concat (CertificatesBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
-             -- ^ @concat ({1},{2, 3, 4}) = {1, 2, 3, 4}@.
+             -- ^ @concat([1],[2, 3, 4]) = [1, 2, 3, 4]@.
 
             | Copy (ExpBase ty vn) SrcLoc
             -- ^ Copy the value return by the expression.  This only
@@ -336,10 +335,10 @@ data ExpBase ty vn =
             -- functions as (first) params
             -----------------------------------------------------
             | Map2 (CertificatesBase ty vn) (TupleLambdaBase ty vn) [ExpBase ty vn] [ty vn] SrcLoc
-             -- @map(op +(1), {1,2,..,n}) = {2,3,..,n+1}@
-             -- 2nd arg is either a tuple of multi-dim arrays 
+             -- ^ @map(op +(1), {1,2,..,n}) = [2,3,..,n+1]@.
+             -- 3rd arg is either a tuple of multi-dim arrays
              --   of basic type, or a multi-dim array of basic type.
-             -- 3rd arg is the input-array row types
+             -- 4th arg is the input-array row types
 
             | Reduce2  (CertificatesBase ty vn) (TupleLambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] [ty vn] SrcLoc
             | Scan2    (CertificatesBase ty vn) (TupleLambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] [ty vn] SrcLoc
@@ -381,7 +380,6 @@ instance Located (ExpBase ty vn) where
   locOf (Assert _ loc) = locOf loc
   locOf (Conjoin _ loc) = locOf loc
   locOf (DoLoop _ _ _ _ _ _ pos) = locOf pos
-  -- locOf for soac2 (Cosmin)
   locOf (Map2 _ _ _ _ pos) = locOf pos
   locOf (Reduce2 _ _ _ _ _ pos) = locOf pos
   locOf (Scan2 _ _ _ _ _ pos) = locOf pos
