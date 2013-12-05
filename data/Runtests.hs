@@ -93,6 +93,22 @@ makeTest f = do
              (True, False)    -> TypeCheck f
              _                   -> TypeFailure f
 
+reportInteractive :: String -> Int -> Int -> Int -> IO ()
+reportInteractive first failed passed remaining = do
+  clearLine
+  putStr $ "\rWaiting for " ++ first ++ " (" ++
+         show failed ++ " failed, " ++
+         show passed ++ " passed, " ++
+         show remaining ++ " to go.)\r"
+  hFlush stdout
+
+reportText :: String -> Int -> Int -> Int -> IO ()
+reportText first failed passed remaining =
+  putStr $ "Waiting for " ++ first ++ " (" ++
+         show failed ++ " failed, " ++
+         show passed ++ " passed, " ++
+         show remaining ++ " to go.)\n"
+
 runTests :: Bool -> [FilePath] -> IO ()
 runTests run files = do
   testmvar <- newEmptyMVar
@@ -101,17 +117,14 @@ runTests run files = do
   _ <- forkIO $ forM_ files $ \file -> do
          test <- makeTest file
          putMVar testmvar (file, test)
-  let getResults :: S.Set FilePath -> Int -> Int -> IO (Int,Int)
+  isTTY <- hIsTerminalDevice stdout
+  let report = if isTTY then reportInteractive else reportText
+      getResults :: S.Set FilePath -> Int -> Int -> IO (Int,Int)
       getResults remaining failed passed =
         case S.toList remaining of
           []      -> clearLine >> return (failed, passed)
           first:_ -> do
-            clearLine
-            putStr $ "\rWaiting for " ++ first ++ " (" ++
-                   show failed ++ " failed, " ++
-                   show passed ++ " passed, " ++
-                   show (S.size remaining) ++ " to go.)\r"
-            hFlush stdout
+            report first failed passed $ S.size remaining
             (file, res) <- takeMVar resmvar
             let next = getResults $ file `S.delete` remaining
             case res of
