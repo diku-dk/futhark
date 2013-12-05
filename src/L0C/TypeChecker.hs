@@ -946,7 +946,7 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
       rettype = param (typeOf mergeexp') $
                 patDiet mergepat' $ usageOccurences loopflow
 
-      boundnames = HS.insert iparam $ patIdents mergepat'
+      boundnames = HS.insert iparam $ patIdentSet mergepat'
       ununique ident =
         ident { identType = param (identType ident) Observe }
       -- Find the free variables of the loop body.

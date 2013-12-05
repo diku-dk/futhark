@@ -16,7 +16,6 @@ import Control.Monad.Writer
 import Control.Applicative
 
 import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet as HS
 import qualified Data.Map.Lazy as M
 
 import L0C.L0
@@ -58,7 +57,7 @@ performCSE :: DupeState -> TupIdent -> Exp
 -- unique arrays.  This is perhaps a bit too conservative - we could
 -- track exactly which are being consumed and keep a blacklist.
 performCSE (esubsts, nsubsts) pat e
-  | any (getAll . uniqArray) $ HS.toList $ patIdents pat =
+  | any (getAll . uniqArray) $ patIdents pat =
     (e, (esubsts, nsubsts))
   where uniqArray = All . not . basicType . identType <>
                     All . unique . identType

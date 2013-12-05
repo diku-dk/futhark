@@ -24,7 +24,9 @@ module Language.L0.Attributes
 
   -- * Queries on patterns
   , patNames
+  , patNameSet
   , patIdents
+  , patIdentSet
 
   -- * Queries on lambdas
   , freeInLambda
@@ -657,7 +659,7 @@ progNames = execWriter . mapM funNames . progFunctions
                   walkOnExp = expNames
                 , walkOnLambda = lambdaNames
                 , walkOnTupleLambda = lambdaNames . tupleLambdaToLambda
-                , walkOnPattern = tell . patNames
+                , walkOnPattern = tell . patNameSet
                 }
 
         one = tell . HS.singleton . identName
@@ -711,7 +713,7 @@ freeInExp = execWriter . expFree
 
         expFree (LetPat pat e body _) = do
           expFree e
-          binding (patIdents pat) $ expFree body
+          binding (patIdentSet pat) $ expFree body
         expFree (LetWith cs dest src idxs ve body _) = do
           mapM_ identFree cs
           identFree src
@@ -721,7 +723,7 @@ freeInExp = execWriter . expFree
         expFree (DoLoop pat mergeexp i boundexp loopbody letbody _) = do
           expFree mergeexp
           expFree boundexp
-          binding (i `HS.insert` patIdents pat) $ do
+          binding (i `HS.insert` patIdentSet pat) $ do
             expFree loopbody
             expFree letbody
         expFree e = walkExpM names e
@@ -749,7 +751,7 @@ consumedInExp = execWriter . expConsumed
 
         expConsumed (LetPat pat e body _) = do
           expConsumed e
-          unconsume (patNames pat) $ expConsumed body
+          unconsume (patNameSet pat) $ expConsumed body
         expConsumed (LetWith _ dest src idxs ve body _) = do
           mapM_ expConsumed idxs
           expConsumed ve
@@ -758,7 +760,7 @@ consumedInExp = execWriter . expConsumed
         expConsumed (DoLoop pat mergeexp i boundexp loopbody letbody _) = do
           expConsumed mergeexp
           expConsumed boundexp
-          unconsume (identName i `HS.insert` patNames pat) $ do
+          unconsume (identName i `HS.insert` patNameSet pat) $ do
             expConsumed loopbody
             expConsumed letbody
         expConsumed (Apply _ args _ _) =
@@ -824,15 +826,28 @@ toParam (Ident name t loc) = Ident name (toDecl t) loc
 fromParam :: ParamBase vn -> IdentBase CompTypeBase vn
 fromParam (Ident name t loc) = Ident name (fromDecl t) loc
 
--- | The set of names bound in the given pattern.
-patNames :: (Eq vn, Hashable vn) => TupIdentBase ty vn -> HS.HashSet vn
-patNames = HS.map identName . patIdents
+-- | The list of names bound in the given pattern.
+patNames :: (Eq vn, Hashable vn) => TupIdentBase ty vn -> [vn]
+patNames = map identName . patIdents
 
--- | The set of idents bound in the given pattern.
-patIdents :: (Eq vn, Hashable vn) => TupIdentBase ty vn -> HS.HashSet (IdentBase ty vn)
-patIdents (Id ident)     = HS.singleton ident
+-- | As 'patNames', but returns a the set of names (which means that
+-- information about ordering is destroyed - make sure this is what
+-- you want).
+patNameSet :: (Eq vn, Hashable vn) => TupIdentBase ty vn -> HS.HashSet vn
+patNameSet = HS.map identName . patIdentSet
+
+-- | The list of idents bound in the given pattern.  The order of
+-- idents is given by the pre-order traversal of the pattern.
+patIdents :: (Eq vn, Hashable vn) => TupIdentBase ty vn -> [IdentBase ty vn]
+patIdents (Id ident)     = [ident]
 patIdents (TupId pats _) = mconcat $ map patIdents pats
-patIdents (Wildcard _ _) = mempty
+patIdents (Wildcard _ _) = []
+
+-- | As 'patIdents', but returns a the set of names (which means that
+-- information about ordering is destroyed - make sure this is what
+-- you want).
+patIdentSet :: (Eq vn, Hashable vn) => TupIdentBase ty vn -> HS.HashSet (IdentBase ty vn)
+patIdentSet = HS.fromList . patIdents
 
 -- | A type with no aliasing information.
 type UncheckedType = TypeBase NoInfo Name

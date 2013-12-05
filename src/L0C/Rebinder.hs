@@ -76,8 +76,8 @@ requires (LetBind pat e (alte:alts)) =
 requires bnd = HS.map identName $ freeInExp $ asTail bnd
 
 provides :: BindNeed -> HS.HashSet VName
-provides (LoopBind mergepat _ _ _ _) = patNames mergepat
-provides (LetBind pat _ _) = patNames pat
+provides (LoopBind mergepat _ _ _ _) = patNameSet mergepat
+provides (LetBind pat _ _) = patNameSet pat
 provides (LetWithBind _ dest _ _ _) = HS.singleton $ identName dest
 
 data Need = Need { needBindings :: NeedSet
@@ -198,7 +198,7 @@ bindLet pat@(Id dest) e@(Concat cs (Var x) (Var y) loc) m =
 
 bindLet pat e@(Map2 cs _ srcs _ _) m =
   withBinding pat e $
-  withShapes (sameOuterShapes cs $ HS.toList (patIdents pat) ++ vars srcs) m
+  withShapes (sameOuterShapes cs $ patIdents pat ++ vars srcs) m
 
 bindLet pat e@(Reduce2 cs _ _ srcs _ _) m =
   withBinding pat e $
@@ -349,14 +349,14 @@ distances m need = HM.fromList [ (k, d+cost) | k <- HS.toList outs ]
         (outs, ins, cost) =
           case need of
             LetBind pat e _ ->
-              (patNames pat, freeNamesInExp e, expCost e)
+              (patNameSet pat, freeNamesInExp e, expCost e)
             LetWithBind _ dest src is ve ->
               (HS.singleton $ identName dest,
                identName src `HS.insert`
                mconcat (map freeNamesInExp (ve:is)),
                1)
             LoopBind pat mergeexp _ bound loopbody ->
-              (patNames pat,
+              (patNameSet pat,
                mconcat $ map freeNamesInExp [mergeexp, bound, loopbody],
                1)
         f x k = case HM.lookup k m of
@@ -416,7 +416,7 @@ splitHoistable block body needs =
               in case (bad e, filter (not . bad) es) of
                    (True, [])     ->
                      (need : blocked, hoistable,
-                      patNames pat `HS.union` ks)
+                      patNameSet pat `HS.union` ks)
                    (True, e':es') ->
                      (blocked, LetBind pat e' es' : hoistable, ks)
                    (False, es')   ->
@@ -499,7 +499,7 @@ hoistInExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody _) = do
   loopbody' <- blockIfSeq [hasFree boundnames, isConsumed] $
                hoistInExp loopbody
   bindLoop mergepat mergeexp' loopvar boundexp' loopbody' $ hoistInExp letbody
-  where boundnames = identName loopvar `HS.insert` patNames mergepat
+  where boundnames = identName loopvar `HS.insert` patNameSet mergepat
 hoistInExp e@(Map2 cs (TupleLambda params _ _ _) arrexps _ _) =
   hoistInSOAC e arrexps $ \ks ->
     withSOACArrSlices cs params ks $

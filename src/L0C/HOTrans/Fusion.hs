@@ -53,7 +53,7 @@ bindingIdents idds = local (`bindVars` namesOfArrays idds)
   where namesOfArrays = map identName . filter (not . basicType . identType)
 
 binding :: TupIdent -> FusionGM a -> FusionGM a
-binding = bindingIdents . HS.toList . patIdents
+binding = bindingIdents . patIdents
 
 -- | Binds an array name to the set of soac-produced vars
 bindPatVar :: [VName] -> FusionGEnv -> VName -> FusionGEnv
@@ -66,7 +66,7 @@ bindPatVars names env = foldl (bindPatVar names) env names
 
 bindPat :: TupIdent -> FusionGM a -> FusionGM a
 bindPat pat = do
-  let nms = map identName $ HS.toList $ patIdents pat
+  let nms = map identName $ patIdents pat
   local $ bindPatVars nms
 
 -- | Binds the fusion result to the environment.
@@ -234,7 +234,7 @@ addNewKerWithUnfusable res (idd, soac) ufs = do
       new_ker = FusedKer (idd, soac) (HS.fromList inp_idds) HS.empty []
       out_nms = patNames idd
       comb    = HM.unionWith HS.union
-      os' = HM.fromList [(arr,nm_ker) | arr <- HS.toList out_nms]
+      os' = HM.fromList [(arr,nm_ker) | arr <- out_nms]
             `HM.union` outArr res
       is' = HM.fromList [(arr,HS.singleton nm_ker) | arr <- inp_nms0]
             `comb` inpArr res
@@ -248,7 +248,7 @@ greedyFuse is_repl lam_used_nms res (idd, soac) = do
     -- 'unfusable res'.
     (inp_nms, other_nms) <- soacInputs soac
 
-    let out_idds     = HS.toList $ patIdents idd
+    let out_idds     = patIdents idd
     let out_nms      = map identName out_idds
     -- Conditions for fusion:
     --   (i) none of `out_idds' belongs to the unfusable set.
@@ -464,7 +464,7 @@ fusionGatherExp fres (LetPat pat (Replicate n el loc) body _) = do
     greedyFuse True used_set bres' (pat, soac_repl)
 
 fusionGatherExp fres (LetPat pat e body _) = do
-    let pat_vars = map Var $ HS.toList $ patIdents pat
+    let pat_vars = map Var $ patIdents pat
     bres <- binding pat $ fusionGatherExp fres body
     foldM fusionGatherExp bres (e:pat_vars)
 
@@ -501,7 +501,7 @@ fusionGatherExp fres (LetWith _ id1 id0 inds elm body _) = do
 fusionGatherExp fres (DoLoop merge_pat ini_val _ ub loop_body let_body _) = do
     letbres <- binding merge_pat $ fusionGatherExp fres let_body
 
-    let pat_vars = map Var $ HS.toList $ patIdents merge_pat
+    let pat_vars = map Var $ patIdents merge_pat
     fres' <- foldM fusionGatherExp letbres (ini_val:ub:pat_vars)
 
     let null_res = mkFreshFusionRes
@@ -630,7 +630,7 @@ replaceSOAC :: TupIdent -> SOAC -> FusionGM Exp
 replaceSOAC pat soac = do
   fres  <- asks fusedRes
   let loc     = srclocOf soac
-  let pat_nm  = identName $ head $ HS.toList $ patIdents pat
+  let pat_nm  = identName $ head $ patIdents pat
   case HM.lookup pat_nm (outArr fres) of
       Nothing  -> fuseInExp $ SOAC.toExp soac
       Just knm ->
