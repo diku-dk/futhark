@@ -172,7 +172,7 @@ hotransform = Pass { passName = "higher-order optimisations"
 
 standardPipeline :: [Pass]
 standardPipeline =
-  [ uttransform, tatransform, normalize, hoist, eotransform,
+  [ uttransform, tatransform, eotransform, normalize, hoist, eotransform,
     hotransform, eotransform, normalize, hoistAggr, eotransform ]
 
 passoption :: String -> Pass -> String -> [String] -> L0Option
