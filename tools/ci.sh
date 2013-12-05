@@ -32,6 +32,8 @@ update() {
 }
 
 build() {
+    cmd cabal clean
+    cmd cabal configure
     cmd cabal build
 }
 
