@@ -1,6 +1,8 @@
 #!/bin/sh
 #
 # The L0C continuous integration tool.  Enjoy.
+#
+# Hardcoded to only send email when running as 'concieggs' user.
 
 set -e # Die on error.
 
