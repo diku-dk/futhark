@@ -121,15 +121,13 @@ filterOutParams out1 lam2arrparams inp2 =
 
 removeDuplicateInputs :: HM.HashMap Parameter Exp
                       -> (HM.HashMap Parameter Exp, Exp -> Exp)
-removeDuplicateInputs = fst . HM.foldlWithKey' comb ((HM.empty, id), HM.empty)
-  where comb ((parmap, inner), arrmap) par (Var arr) =
-          case HM.lookup arr arrmap of
-            Nothing -> ((HM.insert par (Var arr) parmap, inner),
-                        HM.insert arr par arrmap)
+removeDuplicateInputs = fst . HM.foldlWithKey' comb ((HM.empty, id), M.empty)
+  where comb ((parmap, inner), arrmap) par arr =
+          case M.lookup arr arrmap of
+            Nothing -> ((HM.insert par arr parmap, inner),
+                        M.insert arr par arrmap)
             Just par' -> ((parmap, inner . forward par par'),
                           arrmap)
-        comb ((parmap, inner), arrmap) par arr =
-          ((HM.insert par arr parmap, inner), arrmap)
         forward to from e = LetPat (Id $ fromParam to)
                             (Var $ fromParam from) e $ srclocOf e
 
