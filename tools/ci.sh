@@ -8,8 +8,8 @@ set -e # Die on error.
 
 memlimit=$((1024 * 512)) # In KiB
 
-maxtesttime=$((5)) # The length of time the test suite is
-                         # permitted to run for (in seconds).
+maxtesttime=$((60 * 5)) # The length of time the test suite is
+                      e  # permitted to run for (in seconds).
 
 mail=athas@sigkill.dk # Where to send error reports.
 
@@ -26,7 +26,7 @@ ulimit -m $memlimit
 
 cmd() {
     echo "% $@"
-    $@
+    $@ 2>&1
 }
 
 update() {
@@ -67,7 +67,7 @@ mail() {
         echo
         cat
     else
-        mailx -s "L0C build error" "$mail" -- -r concieggs@eggsml.dk
+        mailx -s "L0C integration error" "$mail" -- -r concieggs@eggsml.dk
     fi
 }
 
