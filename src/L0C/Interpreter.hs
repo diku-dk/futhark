@@ -471,7 +471,7 @@ evalExp (Copy e _) = evalExp e
 
 evalExp (Assert e loc) = do
   v <- evalExp e
-  case v of LogVal True -> return $ LogVal True
+  case v of LogVal True -> return Checked
             _ -> bad $ AssertFailed loc
 
 evalExp (Conjoin _ _) = return Checked
