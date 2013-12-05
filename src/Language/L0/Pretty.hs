@@ -144,6 +144,8 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
                         DoLoop {} -> True
                         LetPat {} -> True
                         LetWith {} -> True
+                        Literal (ArrayVal {}) _ -> False
+                        ArrayLit {} -> False
                         _ -> hasArrayLit e
   pprPrec _ (LetWith cs dest src idxs ve body _)
     | dest == src =
