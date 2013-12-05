@@ -91,6 +91,17 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase as vn) where
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (IdentBase ty vn) where
   ppr = ppr . identName
 
+hasArrayLit :: ExpBase ty vn -> Bool
+hasArrayLit (ArrayLit {}) = True
+hasArrayLit (TupLit es2 _) = any hasArrayLit es2
+hasArrayLit (Literal val _) = hasArrayVal val
+hasArrayLit _ = False
+
+hasArrayVal :: Value -> Bool
+hasArrayVal (ArrayVal {}) = True
+hasArrayVal (TupVal vs) = any hasArrayVal vs
+hasArrayVal _ = False
+
 instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) where
   ppr = pprPrec 0
   pprPrec _ (Var v) = ppr v
@@ -98,13 +109,6 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
   pprPrec _ (TupLit es _)
     | any hasArrayLit es = braces $ commastack $ map ppr es
     | otherwise          = braces $ commasep $ map ppr es
-    where hasArrayLit (ArrayLit {}) = True
-          hasArrayLit (TupLit es2 _) = any hasArrayLit es2
-          hasArrayLit (Literal val _) = hasArrayVal val
-          hasArrayLit _ = False
-          hasArrayVal (ArrayVal {}) = True
-          hasArrayVal (TupVal vs) = any hasArrayVal vs
-          hasArrayVal _ = False
   pprPrec _ (ArrayLit es rt _) =
     case unboxType rt of
       Just (Array {}) -> brackets $ commastack $ map ppr es
@@ -140,7 +144,7 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
                         DoLoop {} -> True
                         LetPat {} -> True
                         LetWith {} -> True
-                        _ -> False
+                        _ -> hasArrayLit e
   pprPrec _ (LetWith cs dest src idxs ve body _)
     | dest == src =
       text "let" <+> ppCertificates cs <> ppr dest <+> list (map ppr idxs) <+>
