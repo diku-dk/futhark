@@ -70,7 +70,7 @@ toExp (Redomap2 cs l1 l2 es as ts loc) = L0.Redomap2 cs l1 l2 es as ts loc
 
 fromExp :: Exp -> Maybe SOAC
 fromExp (L0.Map2 cs l as t loc) = Just $ Map2 cs l as t loc
-fromExp (L0.Reduce2 cs l es as ts loc) = Just $ Scan2 cs l es as ts loc
+fromExp (L0.Reduce2 cs l es as ts loc) = Just $ Reduce2 cs l es as ts loc
 fromExp (L0.Scan2 cs l es as ts loc) = Just $ Scan2 cs l es as ts loc
 fromExp (L0.Filter2 cs l es loc) = Just $ Filter2 cs l es loc
 fromExp (L0.Redomap2 cs l1 l2 es as ts loc) = Just $ Redomap2 cs l1 l2 es as ts loc
