@@ -41,7 +41,7 @@ build() {
 }
 
 runtests() {
-    PATH=dist/build/l0c/l0c:$PATH cmd timeout $maxtesttime data/runtests.sh -t
+    PATH=dist/build/l0c/:$PATH cmd timeout $maxtesttime data/runtests.sh -t
     status=$?
     if [ $status = 124 ]; then
         echo "Test suite exceeded permitted run time"
