@@ -32,8 +32,9 @@ update() {
 }
 
 build() {
-    cmd cabal clean
-    cmd cabal configure
+    cmd cabal install --only-dependencies &&
+    cmd cabal clean &&
+    cmd cabal configure &&
     cmd cabal build
 }
 
