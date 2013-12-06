@@ -8,8 +8,8 @@ set -e # Die on error.
 
 memlimit=$((1024 * 512)) # In KiB
 
-maxtesttime=$((60 * 5)) # The length of time the test suite is
-                      e  # permitted to run for (in seconds).
+maxtesttime=$((60 * 20)) # The length of time the test suite is
+                         # permitted to run for (in seconds).
 
 mail=athas@sigkill.dk # Where to send error reports.
 
