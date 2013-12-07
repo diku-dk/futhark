@@ -5,6 +5,13 @@ module L0C.HOTrans.SOAC ( SOAC(..)
                         , certificates
                         , fromExp
                         , toExp
+                        , LoopNest
+                        , optimNest
+                        , unNest
+                        , toNest
+                        , MapN
+                        , mapNfromSOAC
+                        , mapNtoSOAC
                         )
   where
 
@@ -75,3 +82,83 @@ fromExp (L0.Scan2 cs l es as ts loc) = Just $ Scan2 cs l es as ts loc
 fromExp (L0.Filter2 cs l es loc) = Just $ Filter2 cs l es loc
 fromExp (L0.Redomap2 cs l1 l2 es as ts loc) = Just $ Redomap2 cs l1 l2 es as ts loc
 fromExp _ = Nothing
+
+data LoopNest = SWIM Certificates Certificates (Exp, Exp) (Ident,Ident) TupleLambda SrcLoc
+
+optimNest :: LoopNest -> Exp
+optimNest (SWIM cs1 cs2 (e,a) (_,arrident) ml loc) =
+  trans (L0.Map2 cs1 l [trans a] [rowType $ typeOf $ trans a] loc)
+    where l = TupleLambda {
+                tupleLambdaParams = [toParam arrident]
+              , tupleLambdaBody = lb
+              , tupleLambdaReturnType = [toDecl $ typeOf lb]
+              , tupleLambdaSrcLoc = loc
+              }
+          lb = L0.Scan2 cs2 ml [e] [Var arrident] [rowType $ identType arrident] loc
+          trans x = Transpose (cs1++cs2) 0 1 x loc
+
+unNest :: LoopNest -> SOAC
+unNest (SWIM cs1 cs2 (e,a) (accident,arrident) ml loc) =
+  Scan2 cs1 sl [e] [a] ts loc
+    where sl = TupleLambda {
+                 tupleLambdaParams = map toParam [accident,arrident]
+               , tupleLambdaBody = slbody
+               , tupleLambdaReturnType = [toDecl $ typeOf slbody]
+               , tupleLambdaSrcLoc = loc
+               }
+          slbody = L0.Map2 cs2 ml [Var accident,Var arrident]
+                   [rowType $ identType accident,
+                    rowType $ identType arrident]
+                   loc
+          ts = [rowType $ typeOf a]
+
+toNest :: SOAC -> Maybe LoopNest
+toNest (Scan2 cs1 sl [e] [a] _ loc)
+  | (L0.Map2 cs2 ml as _ _) <- tupleLambdaBody sl,
+
+    [accparam,arrparam] <- tupleLambdaParams sl,
+    [Var accident,Var arrident] <- as,
+
+    [accparam, arrparam] `matches` [accident, arrident] =
+      Just $ SWIM cs1 cs2 (e, a) (accident,arrident) ml loc
+toNest _ = Nothing
+
+type MapN = (Certificates, TupleLambda, [([Ident], [DeclType])], [Exp], SrcLoc)
+
+mapNfromSOAC :: SOAC -> Maybe MapN
+mapNfromSOAC (Map2 cs l as _ loc) =
+  let (inner_cs, inner_l, inner_params) = descend l
+  in Just (cs++inner_cs, inner_l, inner_params, as, loc)
+  where descend l'
+          | Just (Map2 inner_cs inner_l inner_as _ _) <-
+              fromExp (tupleLambdaBody l'),
+            Just ks <- vars inner_as,
+            tupleLambdaParams l' `matches` ks =
+              let (inner_inner_cs, inner_inner_l, inner_inner_params) = descend inner_l
+              in (inner_cs++inner_inner_cs,
+                  inner_inner_l,
+                  (ks,tupleLambdaReturnType l'):inner_inner_params)
+          | otherwise = ([], l', [])
+
+mapNfromSOAC _ = Nothing
+
+mapNtoSOAC :: MapN -> SOAC
+mapNtoSOAC (cs, l, [], as, loc) =
+  Map2 cs l as (map (rowType . typeOf) as) loc
+mapNtoSOAC (cs, l, (ps,rt):pss, as, loc) =
+  Map2 cs l' as (map (rowType . typeOf) as) loc
+    where l' = TupleLambda { tupleLambdaParams = map toParam ps
+                           , tupleLambdaReturnType = rt
+                           , tupleLambdaBody = body
+                           , tupleLambdaSrcLoc = loc
+                           }
+          body = toExp $ mapNtoSOAC ([], l, pss, map Var ps, loc)
+
+vars :: [Exp] -> Maybe [Ident]
+vars = mapM varExp
+  where varExp (Var k) = Just k
+        varExp _       = Nothing
+
+matches :: [Parameter] -> [Ident] -> Bool
+matches params idds =
+  and $ zipWith (==) (map identName params) (map identName idds)
