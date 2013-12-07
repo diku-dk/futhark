@@ -707,28 +707,16 @@ getIdentArr :: [Exp] -> FusionGM ([Ident], [Ident])
 getIdentArr []             = return ([],[])
 getIdentArr (Var idd:es) = do
     (vs, os) <- getIdentArr es
-    case identType idd of
-        Array {} -> return (idd:vs, os)
-        _        -> -- return (vs, os)
-            badFusionGM $ EnablingOptError
-                            (srclocOf idd)
-                            ("In Fusion.hs, getIdentArr, broken invariant: "
-                             ++" argument not of array type! "++ppExp (Var idd))
+    return (idd:vs, os)
 getIdentArr (Index _ idd _ _ _ _:es) = do
     (vs, os) <- getIdentArr es
-    case identType idd of
-        Array {} -> return (vs, idd:os)
-        _        ->
-            badFusionGM $ EnablingOptError
-                            (srclocOf idd)
-                            ("In Fusion.hs, getIdentArr, broken invariant: "
-                             ++" argument not of array type! "++ppExp (Var idd))
+    return (vs, idd:os)
 getIdentArr (Iota _ _:es) = getIdentArr es
 getIdentArr (ee:_) =
     badFusionGM $ EnablingOptError
                     (srclocOf ee)
                     ("In Fusion.hs, getIdentArr, broken invariant: "
-                     ++" argument not a (indexed) variable! "++ppExp ee)
+                     ++" invalid SOAC input "++ppExp ee)
 
 cleanFusionResult :: FusedRes -> FusedRes
 cleanFusionResult fres =
