@@ -1,5 +1,6 @@
 module L0C.HOTrans.SOAC ( SOAC(..)
                         , inputs
+                        , setInputs
                         , lambda
                         , setLambda
                         , certificates
@@ -10,6 +11,7 @@ module L0C.HOTrans.SOAC ( SOAC(..)
                         , unNest
                         , toNest
                         , MapN
+                        , mapNDepth
                         , mapNfromSOAC
                         , mapNtoSOAC
                         )
@@ -40,6 +42,18 @@ inputs (Reduce2  _ _ _   arrs _ _) = arrs
 inputs (Scan2    _ _ _   arrs _ _) = arrs
 inputs (Filter2  _ _     arrs _  ) = arrs
 inputs (Redomap2 _ _ _ _ arrs _ _) = arrs
+
+setInputs :: [Exp] -> SOAC -> SOAC
+setInputs arrs (Map2 cs lam _ eltp loc) =
+  Map2 cs lam arrs eltp loc
+setInputs arrs (Reduce2 cs lam ne _ eltp loc) =
+  Reduce2 cs lam ne arrs eltp loc
+setInputs arrs (Scan2 cs lam ne _ eltp loc) =
+  Scan2 cs lam ne arrs eltp loc
+setInputs arrs (Filter2 cs lam _ loc) =
+  Filter2 cs lam arrs loc
+setInputs arrs (Redomap2 cs lam1 lam ne _ eltp loc) =
+  Redomap2 cs lam1 lam ne arrs eltp loc
 
 lambda :: SOAC -> TupleLambda
 lambda (Map2     _ lam _    _ _    ) = lam
@@ -124,6 +138,11 @@ toNest (Scan2 cs1 sl [e] [a] _ loc)
 toNest _ = Nothing
 
 type MapN = (Certificates, TupleLambda, [([Ident], [DeclType])], [Exp], SrcLoc)
+
+mapNDepth :: SOAC -> Int
+mapNDepth s = case mapNfromSOAC s of
+                Nothing               -> 0
+                Just (_, _, ps, _, _) -> length ps + 1
 
 mapNfromSOAC :: SOAC -> Maybe MapN
 mapNfromSOAC (Map2 cs l as _ loc) =
