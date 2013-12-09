@@ -10,9 +10,6 @@ import Control.Applicative
 import Control.Monad.Reader
 import Control.Monad.Writer
 
---import Data.Either
-
---import Control.Monad.State
 import Data.Array
 import Data.List
 import Data.Maybe
@@ -28,7 +25,6 @@ import L0C.L0
 import L0C.EnablingOpts.EnablingOptErrors
 import qualified L0C.Interpreter as Interp
 
---import Debug.Trace
 -----------------------------------------------------------------
 -----------------------------------------------------------------
 ---- Copy and Constant Propagation + Constant Folding        ----
@@ -204,24 +200,24 @@ copyCtPropExp (DoLoop mergepat mergeexp idd n loopbdy letbdy pos) = do
 
 
 copyCtPropExp e@(Var (Ident vnm _ pos)) = do
-    -- let _ = trace ("In VarExp: "++ppExp 0 e) e
-    bnd <- asks $ HM.lookup vnm . envVtable
-    case bnd of
-        Nothing                 -> return e
-        Just (Constant v   _ _) -> if isBasicTypeVal v
-                                   then changed $ Literal v pos
-                                   else return e
-        Just (VarId  id' tp1 _) -> changed $ Var (Ident id' tp1 pos) -- or tp
-        Just (SymArr e'    _ _) ->
-            case e' of
-                Replicate {}      -> return e
-                TupLit    _ _     -> if isCtOrCopy e then changed e' else return e
-                ArrayLit  {}      -> return e
-                Index {}          -> changed e'
-                -- DO NOT INLINE IOTA!
-                Iota  _ _         -> changed e'
-                --Iota _ _          -> return e
-                _                 -> return e
+  bnd <- asks $ HM.lookup vnm . envVtable
+  case bnd of
+    Nothing                 -> return e
+    Just (Constant v   _ _) -> if isBasicTypeVal v
+                               then changed $ Literal v pos
+                               else return e
+    Just (VarId  id' tp1 _) -> changed $ Var (Ident id' tp1 pos) -- or tp
+    Just (SymArr e'    _ _) ->
+      case e' of
+        Replicate {}      -> return e
+        TupLit    _ _     -> if isCtOrCopy e then changed e' else return e
+        ArrayLit  {}      -> return e
+        Index {}          -> changed e'
+        Transpose {}      -> changed e'
+        -- DO NOT INLINE IOTA!
+        Iota  _ _         -> changed e'
+        --Iota _ _          -> return e
+        _                 -> return e
 
 copyCtPropExp eee@(Index cs idd@(Ident vnm tp p) csidx inds tp2 pos) = do
   inds' <- mapM copyCtPropExp inds
@@ -303,9 +299,15 @@ copyCtPropExp eee@(Index cs idd@(Ident vnm tp p) csidx inds tp2 pos) = do
         (Replicate {}, _) ->
             return $ Index cs' idd csidx' inds' tp2 pos
 
+        (Transpose cs2 k n (Var src) _, _)
+          | k+n < length inds' ->
+            changed $ Index (cs'++cs2) src csidx' (transposeIndex k n inds') tp2 pos
+        (Transpose {}, _) -> do
+          nonRemovable vnm
+          return $ Index cs' idd csidx' inds' tp2 pos
+
         _ -> badCPropM $ CopyCtPropError pos (" Unreachable case in copyCtPropExp of Index exp: " ++
                                               ppExp eee++" is bound to "++ppExp e' )
-                                              --" index-exp of "++ppExp 0 eee++" bound to "++ppExp 0 e' ) --e
 
 copyCtPropExp (BinOp bop e1 e2 tp pos) = do
     e1'   <- copyCtPropExp e1
@@ -400,18 +402,6 @@ copyCtPropExp (Conjoin es loc) = do
   case es'' of []  -> changed $ Literal Checked loc
                [c] -> changed c
                _   -> return $ Conjoin es'' loc
-
------------------------------------------------------------
---- If all params are values and function is free of IO ---
----    then evaluate the function call                  ---
------------------------------------------------------------
-
--- trace is not executed at compile time even if its arguments are
--- values because it exhibits side effects!
-copyCtPropExp (Apply fname args tp pos)
-  | "trace" <- nameToString fname = do
-    args' <- mapM (copyCtPropExp . fst) args
-    return $ Apply fname (zip args' $ map snd args) tp pos
 
 copyCtPropExp (Apply fname args tp pos) = do
     args' <- mapM (copyCtPropExp . fst) args
@@ -692,36 +682,34 @@ isCtOrCopy (Literal  val _ ) = isBasicTypeVal val
 isCtOrCopy (TupLit   ts _  ) = all isCtOrCopy ts
 isCtOrCopy (Var           _) = True
 isCtOrCopy (Iota        _ _) = True
+isCtOrCopy (Transpose {}   ) = True
 isCtOrCopy (Index {}       ) = True
 isCtOrCopy _                 = False
 
 isRemovablePat  :: TupIdent -> Exp -> CPropM Bool
 
 isRemovablePat (TupId tups _) e =
-    case e of
-          Var (Ident vnm _ _)      -> do
-              bnd <- asks $ HM.lookup vnm . envVtable
-              case bnd of
-                  Just (Constant val@(TupVal ts) _ _) ->
-                      return ( isBasicTypeVal val && length ts == length tups )
-                  Just (SymArr   tup@(TupLit ts _  ) _ _) ->
-                      return ( isCtOrCopy tup && length ts == length tups )
-                  _ ->  return False
-          TupLit  _ _              -> return (isCtOrCopy     e  )
-          Literal val@(TupVal _) _ -> return (isBasicTypeVal val)
-          _ -> return False
+  case e of
+    Var (Ident vnm _ _) -> do
+     bnd <- asks $ HM.lookup vnm . envVtable
+     case bnd of
+       Just (Constant val@(TupVal ts) _ _) ->
+         return ( isBasicTypeVal val && length ts == length tups )
+       Just (SymArr   tup@(TupLit ts _  ) _ _) ->
+         return ( isCtOrCopy tup && length ts == length tups )
+       _ ->  return False
+    TupLit {}                -> return $ isCtOrCopy e
+    Literal val@(TupVal _) _ -> return $ isBasicTypeVal val
+    _                        -> return False
 
 -- Covers Wildcard and Id.
-isRemovablePat _ e =
- let s=case e of
-        Var     _         -> True
-        Index   {}        -> True
-        Literal v _       -> isBasicTypeVal v
-        TupLit  _ _       -> isCtOrCopy e     -- False
---      DO NOT INLINE IOTA
-        Iota    _ _       -> True
-        _                 -> False
- in return s
+isRemovablePat _ (Var _)        = return True
+isRemovablePat _ (Index {})     = return True
+isRemovablePat _ (Literal v _)  = return $ isBasicTypeVal v
+isRemovablePat _ e@(TupLit {})  = return $ isCtOrCopy e
+isRemovablePat _ (Transpose {}) = return True
+isRemovablePat _ (Iota {})      = return True
+isRemovablePat _ _              = return False
 
 getPropBnds :: TupIdent -> Exp -> Bool -> CPropM [(VName, CtOrId)]
 getPropBnds ( Wildcard _ _ ) _ _ = return []
@@ -731,6 +719,7 @@ getPropBnds ( Id (Ident var tp _) ) e to_rem =
             Var (Ident id1 tp1 _)-> [(var, VarId  id1 tp1 to_rem)]
             Index   {}           -> [(var, SymArr e   tp  to_rem)]
             TupLit  {}           -> [(var, SymArr e   tp  to_rem)]
+            Transpose   {}       -> [(var, SymArr e   tp  to_rem)]
 
             Iota {}              -> let newtp = Array Int [Nothing] Nonunique mempty
                                     in  [(var, SymArr e newtp to_rem)]
