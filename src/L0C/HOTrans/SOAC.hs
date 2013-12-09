@@ -95,6 +95,11 @@ fromExp (L0.Reduce2 cs l es as ts loc) = Just $ Reduce2 cs l es as ts loc
 fromExp (L0.Scan2 cs l es as ts loc) = Just $ Scan2 cs l es as ts loc
 fromExp (L0.Filter2 cs l es loc) = Just $ Filter2 cs l es loc
 fromExp (L0.Redomap2 cs l1 l2 es as ts loc) = Just $ Redomap2 cs l1 l2 es as ts loc
+fromExp (L0.LetPat (TupId pats _) e (L0.TupLit tupes _) _)
+  | Just soac <- fromExp e,
+    Just tupvs <- vars tupes,
+    map Id tupvs == pats =
+      Just soac
 fromExp _ = Nothing
 
 data LoopNest = SWIM Certificates Certificates (Exp, Exp) (Ident,Ident) TupleLambda SrcLoc
@@ -150,18 +155,8 @@ mapNfromSOAC (Map2 cs l as _ loc) =
   in Just (cs++inner_cs, inner_l, inner_params, as, loc)
   where descend l'
           | Just (Map2 inner_cs inner_l inner_as _ _)
-              <- fromExp (tupleLambdaBody l') =
-              foundMap l' inner_cs inner_l inner_as
-          | (L0.LetPat
-                 (TupId pats _)
-                 (L0.Map2 inner_cs inner_l inner_as _ _)
-                 (L0.TupLit tupes _) _) <- tupleLambdaBody l',
-            Just tupvs <- vars tupes, map Id tupvs == pats =
-              foundMap l' inner_cs inner_l inner_as
-          | otherwise = ([], l', [])
-
-        foundMap l' inner_cs inner_l inner_as
-          | Just ks <- vars inner_as,
+              <- fromExp (tupleLambdaBody l'),
+            Just ks <- vars inner_as,
             tupleLambdaParams l' `matches` ks =
               let (inner_inner_cs, inner_inner_l, inner_inner_params) = descend inner_l
               in (inner_cs++inner_inner_cs,
