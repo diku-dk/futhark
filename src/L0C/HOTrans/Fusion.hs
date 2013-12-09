@@ -18,6 +18,7 @@ import L0C.L0
 import L0C.FreshNames
 import L0C.EnablingOpts.EnablingOptDriver
 import L0C.HOTrans.Composing
+import L0C.HOTrans.LoopKernel
 import L0C.HOTrans.SOAC (SOAC)
 import qualified L0C.HOTrans.SOAC as SOAC
 
@@ -130,25 +131,6 @@ newtype KernName = KernName { unKernName :: VName }
 instance Hashable KernName where
   hashWithSalt salt = hashWithSalt salt . unKernName
 
-data FusedKer = FusedKer {
-                  fsoac      :: (TupIdent, SOAC)
-                -- ^ the fused SOAC statement, e.g.,
-                -- (z,w) = map2( f(a,b), x, y )
-
-                , inp        :: HS.HashSet Ident
-                -- ^ the input arrays used in the `soac'
-                -- stmt, i.e., `x', `y'.
-
-                , inplace    :: HS.HashSet VName
-                -- ^ every kernel maintains a set of variables
-                -- that alias vars used in in-place updates,
-                -- such that fusion is prevented to move
-                -- a use of an
-
-                , fusedVars :: [Ident]
-                -- ^ whether at least a fusion has been performed.
-                }
-
 data FusedRes = FusedRes {
     rsucc :: Bool
   -- ^ Whether we have fused something anywhere.
@@ -231,7 +213,8 @@ addNewKerWithUnfusable res (idd, soac) ufs = do
   (inp_idds, _) <- getIdentArr $ SOAC.inputs soac
   nm_ker <- KernName <$> new "ker"
   let inp_nms0 = map identName inp_idds
-      new_ker = FusedKer (idd, soac) (HS.fromList inp_idds) HS.empty []
+      new_ker = optimizeKernel $
+                FusedKer (idd, soac) (HS.fromList inp_idds) HS.empty [] []
       out_nms = patNames idd
       comb    = HM.unionWith HS.union
       os' = HM.fromList [(arr,nm_ker) | arr <- out_nms]
@@ -385,7 +368,7 @@ fuseSOACwithKer (out_ids1, soac1) ker = do
             -- soac_new1<- trace ("\nFUSED KERNEL: " ++ (nameToString . identName) (head out_ids1) ++ " : " ++ ppExp res_soac ++ " Input arrs: " ++ concatMap (nameToString . identName) inp_new) (return res_soac)
 
             let fusedVars_new = fusedVars ker++out_ids1
-            return $ FusedKer (out_ids2, res_soac) (HS.fromList inp_new) (inplace ker) fusedVars_new
+            return $ FusedKer (out_ids2, res_soac) (HS.fromList inp_new) (inplace ker) fusedVars_new (outputTransform ker)
 
     where mkElType  = map (stripArray 1 . typeOf)
 
@@ -593,15 +576,8 @@ fuseInExp :: Exp -> FusionGM Exp
 
 fuseInExp (LetPat pat e body pos) =
   case SOAC.fromExp e of
-    Just (SOAC.Scan2 {}) -> do
-      -- NOT FUSABLE
-      body' <- fuseInExp body
-      soac' <- fuseInExp e
-      return $ LetPat pat soac' body' pos
-    Just soac -> do
-      body' <- fuseInExp body
-      soac' <- replaceSOAC pat soac
-      return $ LetPat pat soac' body' pos
+    Just soac ->
+      replaceSOAC pat soac <*> fuseInExp body
     _ -> do
       body' <- fuseInExp body
       e'    <- fuseInExp e
@@ -626,41 +602,63 @@ fuseInLambda (TupleLambda params body rtp pos) = do
   body' <- fuseInExp body
   return $ TupleLambda params body' rtp pos
 
-replaceSOAC :: TupIdent -> SOAC -> FusionGM Exp
+replaceSOAC :: TupIdent -> SOAC -> FusionGM (Exp -> Exp)
 replaceSOAC pat soac = do
   fres  <- asks fusedRes
   let loc     = srclocOf soac
   let pat_nm  = identName $ head $ patIdents pat
+  let bind e = return $ \body -> LetPat pat e body $ srclocOf pat
   case HM.lookup pat_nm (outArr fres) of
-      Nothing  -> fuseInExp $ SOAC.toExp soac
-      Just knm ->
-        case HM.lookup knm (kernels fres) of
-          Nothing  -> badFusionGM $ EnablingOptError loc
-                                     ("In Fusion.hs, replaceSOAC, outArr in ker_name "
-                                      ++"which is not in Res: "++textual (unKernName knm))
-          Just ker -> do
-            let (pat', new_soac) = fsoac ker
-            if pat /= pat'
-            then badFusionGM $ EnablingOptError loc
-                                ("In Fusion.hs, replaceSOAC, "
-                                 ++" pat does not match kernel's pat: "++ppTupId pat)
-            else if null $ fusedVars ker
-                 then badFusionGM $ EnablingOptError loc
-                                     ("In Fusion.hs, replaceSOAC, unfused kernel "
-                                      ++"still in result: "++ppTupId pat)
-                 -- then fuseInExp soac
-                 else do -- TRY MOVE THIS TO OUTER LEVEL!!!
-                         let lam = SOAC.lambda new_soac
-                         nmsrc <- get
-                         prog  <- asks program
-                         case normCopyOneTupleLambda prog nmsrc lam of
-                            Left err             -> badFusionGM err
-                            Right (nmsrc', lam') -> do
-                              put nmsrc'
-                              (_, nfres) <- fusionGatherLam (HS.empty, mkFreshFusionRes) lam'
-                              let nfres' =  cleanFusionResult nfres
-                              lam''      <- bindRes nfres' $ fuseInLambda lam'
-                              return $ SOAC.toExp $ SOAC.setLambda lam'' new_soac
+    Nothing  -> bind =<< fuseInExp (SOAC.toExp soac)
+    Just knm ->
+      case HM.lookup knm (kernels fres) of
+        Nothing  -> badFusionGM $ EnablingOptError loc
+                                   ("In Fusion.hs, replaceSOAC, outArr in ker_name "
+                                    ++"which is not in Res: "++textual (unKernName knm))
+        Just ker -> do
+          let (pat', new_soac) = fsoac ker
+          if pat /= pat'
+          then badFusionGM $ EnablingOptError loc
+                              ("In Fusion.hs, replaceSOAC, "
+                               ++" pat does not match kernel's pat: "++ppTupId pat)
+          else if null $ fusedVars ker
+               then badFusionGM $ EnablingOptError loc
+                                   ("In Fusion.hs, replaceSOAC, unfused kernel "
+                                    ++"still in result: "++ppTupId pat)
+               -- then fuseInExp soac
+               else do -- TRY MOVE THIS TO OUTER LEVEL!!!
+                       let lam = SOAC.lambda new_soac
+                       nmsrc <- get
+                       prog  <- asks program
+                       case normCopyOneTupleLambda prog nmsrc lam of
+                          Left err             -> badFusionGM err
+                          Right (nmsrc', lam') -> do
+                            put nmsrc'
+                            (_, nfres) <- fusionGatherLam (HS.empty, mkFreshFusionRes) lam'
+                            let nfres' =  cleanFusionResult nfres
+                            lam''      <- bindRes nfres' $ fuseInLambda lam'
+                            transformOutput (outputTransform ker) (patIdents pat) $
+                              SOAC.setLambda lam'' new_soac
+
+transformOutput :: [OutputTransform]
+                -> [Ident] -> SOAC -> FusionGM (Exp -> Exp)
+transformOutput trnss outIds soac = do
+  (outIds', bind) <- manyTransform outIds trnss
+  return $ \body -> LetPat (TupId (map Id outIds') loc)
+                    (SOAC.toExp soac) (bind body) loc
+  where loc = srclocOf soac
+        newNames = mapM $ \idd -> do
+                     name <- new $ (++"_trns") $
+                             nameToString $ baseName $ identName idd
+                     return $ idd { identName = name }
+        manyTransform ids = foldM oneTransform (ids, id) . reverse
+        oneTransform (ids, inner) trn = do
+          ids' <- newNames ids
+          let lets = zipWith (bindTransform trn) ids ids'
+              bnds = foldl (.) id lets
+          return (ids', bnds . inner)
+        bindTransform trn to from body =
+          LetPat (Id to) (applyTransform trn from loc) body loc
 
 ---------------------------------------------------
 ---------------------------------------------------
@@ -696,16 +694,20 @@ mergeFusionRes res1 res2 = do
 
 
 -- | The expression arguments are supposed to be array-type exps.
---   Returns a tuple, in which the arrays that are vars are in
---     the first element of the tuple, and the one which are
---     indexed should be in the second.
---     The normalization *SHOULD* ensure that input arrays in SOAC's
---     are only vars, indexed-vars, and iotas, hence error is raised
---     in all other cases.
--- E.g., for expression `map2(f, a, b[i])', the result should be `([a],[b])'
+--   Returns a tuple, in which the arrays that are vars or transposes
+--   are in the first element of the tuple, and the one which are
+--   indexed should be in the second.
+--
+--   The normalization *SHOULD* ensure that input arrays in SOAC's are
+--   only vars, transposes, indexed-vars, and iotas, hence error is
+--   raised in all other cases.  E.g., for expression `map2(f, a,
+--   b[i])', the result should be `([a],[b])'
 getIdentArr :: [Exp] -> FusionGM ([Ident], [Ident])
 getIdentArr []             = return ([],[])
 getIdentArr (Var idd:es) = do
+    (vs, os) <- getIdentArr es
+    return (idd:vs, os)
+getIdentArr (Transpose _ _ _ (Var idd) _:es) = do
     (vs, os) <- getIdentArr es
     return (idd:vs, os)
 getIdentArr (Index _ idd _ _ _ _:es) = do
