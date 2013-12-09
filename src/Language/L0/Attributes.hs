@@ -274,9 +274,7 @@ elemType (Elem t) = t
 -- | Return the immediate row-type of an array.  For @[[int]]@, this
 -- would be @[int]@.
 rowType :: TypeBase vn as -> TypeBase vn as
-rowType (Array et (_:_:dims) u als) = Array et dims u als
-rowType (Array et _ _ als) = Elem et `setAliases` als
-rowType (Elem et) = Elem et
+rowType = stripArray 1
 
 -- | A type is a basic type if it is not an array and any component
 -- types are basic types.
