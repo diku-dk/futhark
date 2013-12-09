@@ -314,8 +314,8 @@ fuseSOACwithKer (out_ids1, soac1) ker = do
   case (soac2, soac1) of
       -- first get rid of the cases that can be solved by
       -- a bit of soac rewriting.
-    (SOAC.Reduce2 _ lam ne arrs rwtps loc, SOAC.Map2   {}) -> do
-      let soac2' = SOAC.Redomap2 (cs1++cs2) lam lam ne arrs rwtps loc
+    (SOAC.Reduce2 _ lam ne arrs loc, SOAC.Map2   {}) -> do
+      let soac2' = SOAC.Redomap2 (cs1++cs2) lam lam ne arrs loc
           ker'   = ker { fsoac = (out_ids2, soac2') }
       fuseSOACwithKer (out_ids1, soac1) ker'
     _ -> do -- treat the complicated cases!
@@ -329,24 +329,24 @@ fuseSOACwithKer (out_ids1, soac1) ker = do
                 ----------------------------------------------------
                 -- The Fusions that are semantically map fusions:
                 ----------------------------------------------------
-                (SOAC.Map2 _ _ _ _ pos, SOAC.Map2    {}) -> do
+                (SOAC.Map2 _ _ _ pos, SOAC.Map2    {}) -> do
                   let (res_lam, new_inp) = fuseMaps lam1 inp1_arr out_ids1 lam2 inp2_arr
-                  return (SOAC.Map2 (cs1++cs2) res_lam new_inp (mkElType new_inp) pos, new_inp)
-                (SOAC.Redomap2 _ lam21 _ ne _ _ pos, SOAC.Map2 {})-> do
+                  return (SOAC.Map2 (cs1++cs2) res_lam new_inp pos, new_inp)
+                (SOAC.Redomap2 _ lam21 _ ne _ pos, SOAC.Map2 {})-> do
                   let (res_lam, new_inp) = fuseMaps lam1 inp1_arr out_ids1 lam2 inp2_arr
-                  return (SOAC.Redomap2 (cs1++cs2) lam21 res_lam ne new_inp (mkElType new_inp) pos, new_inp)
+                  return (SOAC.Redomap2 (cs1++cs2) lam21 res_lam ne new_inp pos, new_inp)
 
                 ----------------------------------------------------
                 -- The Fusions that are semantically filter fusions:
                 ----------------------------------------------------
-                (SOAC.Reduce2 _ _ ne _ eltp pos, SOAC.Filter2 {}) -> do
+                (SOAC.Reduce2 _ _ ne _ pos, SOAC.Filter2 {}) -> do
                   name <- new "check"
                   let (res_lam, new_inp) = fuseFilterIntoFold lam1 inp1_arr out_ids1 lam2 inp2_arr name
-                  return (SOAC.Reduce2 (cs1++cs2) res_lam ne new_inp eltp pos, new_inp)
-                (SOAC.Redomap2 _ lam21 _ nes _ eltp pos, SOAC.Filter2 {}) -> do
+                  return (SOAC.Reduce2 (cs1++cs2) res_lam ne new_inp pos, new_inp)
+                (SOAC.Redomap2 _ lam21 _ nes _ pos, SOAC.Filter2 {}) -> do
                   name <- new "check"
                   let (res_lam, new_inp) = fuseFilterIntoFold lam1 inp1_arr out_ids1 lam2 inp2_arr name
-                  return (SOAC.Redomap2 (cs1++cs2) lam21 res_lam nes new_inp eltp pos, new_inp)
+                  return (SOAC.Redomap2 (cs1++cs2) lam21 res_lam nes new_inp pos, new_inp)
                 (SOAC.Filter2 _ _ _ pos, SOAC.Filter2 {}) -> do
                   name <- new "check"
                   let (res_lam, new_inp) = fuseFilters lam1 inp1_arr out_ids1 lam2 inp2_arr name
@@ -369,10 +369,6 @@ fuseSOACwithKer (out_ids1, soac1) ker = do
 
             let fusedVars_new = fusedVars ker++out_ids1
             return $ FusedKer (out_ids2, res_soac) (HS.fromList inp_new) (inplace ker) fusedVars_new (outputTransform ker)
-
-    where mkElType  = map (stripArray 1 . typeOf)
-
-
 
 ------------------------------------------------------------------------
 ------------------------------------------------------------------------
@@ -403,7 +399,7 @@ fusionGatherExp :: FusedRes -> Exp -> FusionGM FusedRes
 fusionGatherExp fres (LetPat pat e body _)
   | Just soac <- SOAC.fromExp e =
       case soac of
-        SOAC.Map2 _ lam _ _ _ -> do
+        SOAC.Map2 _ lam _ _ -> do
           bres  <- bindPat pat $ fusionGatherExp fres body
           (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
           greedyFuse False used_lam blres (pat, soac)
@@ -413,21 +409,21 @@ fusionGatherExp fres (LetPat pat e body _)
           (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
           greedyFuse False used_lam blres (pat, soac)
 
-        SOAC.Reduce2 _ lam nes _ _ loc -> do
+        SOAC.Reduce2 _ lam nes _ loc -> do
           -- a reduce always starts a new kernel
           bres  <- bindPat pat $ fusionGatherExp fres body
           bres' <- fusionGatherExp bres $ TupLit nes loc
           (_, blres) <- fusionGatherLam (HS.empty, bres') lam
           addNewKer blres (pat, soac)
 
-        SOAC.Redomap2 _ outer_red inner_red ne _ _ loc -> do
+        SOAC.Redomap2 _ outer_red inner_red ne _ loc -> do
           -- a redomap always starts a new kernel
           (_, lres)  <- foldM fusionGatherLam (HS.empty, fres) [outer_red, inner_red]
           bres  <- bindPat pat $ fusionGatherExp lres body
           bres' <- fusionGatherExp bres $ TupLit ne loc
           addNewKer bres' (pat, soac)
 
-        SOAC.Scan2 _ lam nes arrs _ _ -> do
+        SOAC.Scan2 _ lam nes arrs _ -> do
           -- NOT FUSABLE
           (_, lres)  <- fusionGatherLam (HS.empty, fres) lam
           bres  <- binding pat $ fusionGatherExp lres body
@@ -443,7 +439,7 @@ fusionGatherExp fres (LetPat pat (Replicate n el loc) body _) = do
                         Elem (Tuple ets) -> (el, ets)
                         t                -> (TupLit [el] loc, [t])
         repl_lam = TupleLambda [toParam repl_id] lame (map toDecl rwt) loc
-        soac_repl= SOAC.Map2 [] repl_lam [Iota n loc] rwt loc
+        soac_repl= SOAC.Map2 [] repl_lam [Iota n loc] loc
     greedyFuse True used_set bres' (pat, soac_repl)
 
 fusionGatherExp fres (LetPat pat e body _) = do

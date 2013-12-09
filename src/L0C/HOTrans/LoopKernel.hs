@@ -8,14 +8,15 @@ module L0C.HOTrans.LoopKernel
 
 import Control.Monad
 
-import qualified Data.HashSet      as HS
+import qualified Data.HashSet as HS
 
 import Data.Maybe
 import Data.Loc
 
 import L0C.L0
 import L0C.HOTrans.SOAC (SOAC)
-import qualified L0C.HOTrans.SOAC as SOAC
+import L0C.HOTrans.SOACNest (SOACNest)
+import qualified L0C.HOTrans.SOACNest as Nest
 
 data OutputTransform = OTranspose Certificates Int Int
 
@@ -44,21 +45,27 @@ data FusedKer = FusedKer {
   }
 
 optimizeKernel :: FusedKer -> FusedKer
-optimizeKernel ker = fromMaybe ker $ pushTranspose ker
+optimizeKernel ker = ker { fsoac = (fst $ fsoac ker, Nest.toSOAC resNest)
+                         , outputTransform = resTrans
+                         }
+  where (resNest, resTrans) =
+          fromMaybe (startNest, startTrans) $
+          pushTranspose startNest startTrans
+        startNest = Nest.fromSOAC $ snd $ fsoac ker
+        startTrans = outputTransform ker
 
-pushTranspose :: FusedKer -> Maybe FusedKer
-pushTranspose ker = do
-  (n, k, cs, inputs') <- transposedInputs $ SOAC.inputs soac
-  let depth = SOAC.mapNDepth soac
+pushTranspose :: SOACNest -> [OutputTransform] -> Maybe (SOACNest, [OutputTransform])
+pushTranspose nest@(Nest.Map2 _ _ ps _ _) ots = do
+  (n, k, cs, inputs') <- transposedInputs $ Nest.inputs nest
+  let depth = length ps + 1
   if n+k < depth then
-    Just ker { fsoac = (pat, inputs' `SOAC.setInputs` soac)
-             , outputTransform = outputTransform ker ++ [OTranspose cs n k]
-             }
+    Just (inputs' `Nest.setInputs` nest,
+          ots ++ [OTranspose cs n k])
   else Nothing
-  where (pat, soac) = fsoac ker
-        transposedInputs (Transpose cs n k (Var idd) _:args) =
+  where transposedInputs (Transpose cs n k (Var idd) _:args) =
           foldM comb (n, k, cs, [Var idd]) args
           where comb (n1, k1, cs1, idds) (Transpose cs2 n2 k2 (Var idd2) _)
                   | n1==n2, k1==k2         = Just (n1,k1,cs1++cs2,idds++[Var idd2])
                 comb _                   _ = Nothing
         transposedInputs _ = Nothing
+pushTranspose _ _ = Nothing
