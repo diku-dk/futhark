@@ -82,6 +82,8 @@ normalizeFun (fname, rettype, params, body, loc) = do
 
 normalizeExp :: Exp -> NormalizeM Exp
 normalizeExp (Var k) = return $ Var k
+normalizeExp (Literal v loc)
+  | basicType $ valueType v = return $ Literal v loc
 normalizeExp (LetPat pat e body loc) = do
   e' <- normalizeSubExps e
   body' <- insertBindings $ normalizeExp body
