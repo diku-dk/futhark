@@ -55,10 +55,9 @@ optimizeKernel ker = ker { fsoac = (fst $ fsoac ker, Nest.toSOAC resNest)
         startTrans = outputTransform ker
 
 pushTranspose :: SOACNest -> [OutputTransform] -> Maybe (SOACNest, [OutputTransform])
-pushTranspose nest@(Nest.Map2 _ _ ps _ _) ots = do
+pushTranspose nest ots = do
   (n, k, cs, inputs') <- transposedInputs $ Nest.inputs nest
-  let depth = length ps + 1
-  if n+k < depth then
+  if n+k < mapDepth then
     Just (inputs' `Nest.setInputs` nest,
           ots ++ [OTranspose cs n k])
   else Nothing
@@ -68,4 +67,6 @@ pushTranspose nest@(Nest.Map2 _ _ ps _ _) ots = do
                   | n1==n2, k1==k2         = Just (n1,k1,cs1++cs2,idds++[Var idd2])
                 comb _                   _ = Nothing
         transposedInputs _ = Nothing
-pushTranspose _ _ = Nothing
+        mapDepth = case Nest.operation nest of
+                     Nest.Map2 _ _ levels _ -> length levels + 1
+                     _                      -> 0
