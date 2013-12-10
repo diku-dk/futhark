@@ -766,6 +766,8 @@ rangeIntersect (Span a b) (Span c d) pos = do
   return $ Span ac bd
 rangeIntersect r1 r2 pos = rangeIntersect r2 r1 pos
 
+
+
 ----------------------------------------
 -- Helper functions
 ----------------------------------------
@@ -880,7 +882,10 @@ replacementOrder r = do
       | vertices == M.keysSet rdgMap = return rdgMap
       | otherwise = do
           let newkey = S.findMin $ S.difference vertices $ M.keysSet rdgMap
-          (_,_,deps) <- liftM fromJust $ asks $ M.lookup newkey . dict
+          bnd <- asks $ M.lookup newkey . dict
+          let deps =  case bnd of
+                Just (_,_,deps') -> deps'
+                Nothing -> error "deriveRDG cound not find key in dict,"
           deriveRDG (vertices `S.union` deps) (M.insert newkey deps rdgMap)
 
     sccToOrder :: [G.SCC VName] -> [VName]
