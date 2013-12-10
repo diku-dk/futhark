@@ -6,10 +6,6 @@ module L0C.HOTrans.SOAC ( SOAC(..)
                         , certificates
                         , fromExp
                         , toExp
-                        , LoopNest
-                        , optimNest
-                        , unNest
-                        , toNest
                         )
   where
 
@@ -102,50 +98,7 @@ fromExp (L0.LetPat (TupId pats _) e (L0.TupLit tupes _) _)
       Just soac
 fromExp _ = Nothing
 
-data LoopNest = SWIM Certificates Certificates (Exp, Exp) (Ident,Ident) TupleLambda SrcLoc
-
-optimNest :: LoopNest -> Exp
-optimNest (SWIM cs1 cs2 (e,a) (_,arrident) ml loc) =
-  trans (L0.Map2 cs1 l [trans a] [rowType $ typeOf $ trans a] loc)
-    where l = TupleLambda {
-                tupleLambdaParams = [toParam arrident]
-              , tupleLambdaBody = lb
-              , tupleLambdaReturnType = [toDecl $ typeOf lb]
-              , tupleLambdaSrcLoc = loc
-              }
-          lb = L0.Scan2 cs2 ml [e] [Var arrident] [rowType $ identType arrident] loc
-          trans x = Transpose (cs1++cs2) 0 1 x loc
-
-unNest :: LoopNest -> SOAC
-unNest (SWIM cs1 cs2 (e,a) (accident,arrident) ml loc) =
-  Scan2 cs1 sl [e] [a] loc
-    where sl = TupleLambda {
-                 tupleLambdaParams = map toParam [accident,arrident]
-               , tupleLambdaBody = slbody
-               , tupleLambdaReturnType = [toDecl $ typeOf slbody]
-               , tupleLambdaSrcLoc = loc
-               }
-          slbody = L0.Map2 cs2 ml [Var accident,Var arrident]
-                   [rowType $ identType accident,
-                    rowType $ identType arrident]
-                   loc
-
-toNest :: SOAC -> Maybe LoopNest
-toNest (Scan2 cs1 sl [e] [a] loc)
-  | (L0.Map2 cs2 ml as _ _) <- tupleLambdaBody sl,
-
-    [accparam,arrparam] <- tupleLambdaParams sl,
-    [Var accident,Var arrident] <- as,
-
-    [accparam, arrparam] `matches` [accident, arrident] =
-      Just $ SWIM cs1 cs2 (e, a) (accident,arrident) ml loc
-toNest _ = Nothing
-
 vars :: [Exp] -> Maybe [Ident]
 vars = mapM varExp
   where varExp (Var k) = Just k
         varExp _       = Nothing
-
-matches :: [Parameter] -> [Ident] -> Bool
-matches params idds =
-  and $ zipWith (==) (map identName params) (map identName idds)
