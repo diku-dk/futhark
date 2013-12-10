@@ -8,6 +8,7 @@ where
 import qualified Data.Loc as L
 import qualified Data.Map as M
 import qualified Data.Set as S
+import qualified Data.Graph as G
 import qualified Data.List
 import Data.Maybe
 
@@ -221,6 +222,8 @@ rangeCompareZero (RExp e) = do
 ----------------------------------------
 -- Making ranges comparable
 ----------------------------------------
+--
+
 
 -- Is the range currently in a state,
 --   where we can say something about it's sign?
@@ -230,15 +233,16 @@ isComparable range = do
   sign <- atomicRangeSign range
   return $ isJust sign
 
+
+--
 -- Transform the range to a state, where we can
---   say something about it's sign
+--   say something about it's sign Input range is the difference between
+--   q and p, in the papir figure 2 described as d <- [q-p : q-p]
 makeRangeComparable :: Range -> RangeM Range
 makeRangeComparable (Span Ninf Pinf) = return $ Span Ninf Pinf
 makeRangeComparable range = do
-  dictAsList  <- --trace ("- makeComp "++ ppRange range)
-                 liftM M.keys $ asks dict
-  foldingFun range (Data.List.sortBy (flip compare) dictAsList)
-
+  rep_order <- replacementOrder range
+  trace ("\nreplacemantorder:\n\t" ++ show rep_order) $  foldingFun range rep_order
   where
     foldingFun :: Range -> [VName] -> RangeM Range
     foldingFun r [] = --trace ("+ makeEndOfList " ++ ppRange r)
@@ -839,6 +843,51 @@ ppDict rdict = foldr ((++) . (++ "\n") . ppDictElem) "" (M.toList $ M.delete dum
                   escapeColorize Blue (ppRange range) ++ " " ++
                   escapeColorize White (ppRange comp) ++ " " ++
                   escapeColorize Yellow (show . map textual $ S.toList depend)
+
+
+
+-- Returns a list of VName's that represents the order in which variables
+-- should be replaced in the range comparison algorithm described in Figure
+-- 2 of the paper. The only caller of this function should be the
+-- initialization function of the range comparison algorithm
+--
+-- The function finds all dependency variables of the input range and
+-- builds a map (with buildDepMap), containing vertices -> edges, these are
+-- used to build the SCC. the helper function sccToRepOrder follows the
+-- rules described in section 2.4.
+
+
+type RDGMap = M.Map VName (S.Set VName)
+
+replacementOrder :: Range -> RangeM [VName]
+replacementOrder r = do
+  let dependencies =
+       case r of
+         (Single e)                 -> varsUsedInExp e
+         (Span (RExp e1) (RExp e2)) -> varsUsedInExp e1 `S.union`
+                                       varsUsedInExp e2
+         (Span (RExp e)  _        ) -> varsUsedInExp e
+         (Span _         (RExp e) ) -> varsUsedInExp e
+         _                          -> S.empty
+
+  rdg <- deriveRDG dependencies M.empty
+  let scc = G.stronglyConnComp [(k,k,S.toList v) | (k,v) <- M.toList rdg]
+  return $ sccToOrder scc
+  where
+    deriveRDG :: (S.Set VName) -> RDGMap -> RangeM RDGMap
+    deriveRDG vertices rdgMap
+      | vertices == M.keysSet rdgMap = return rdgMap
+      | otherwise = do
+          let newkey = S.findMin $ S.difference vertices $ M.keysSet rdgMap
+          (_,_,deps) <- liftM fromJust $ asks $ M.lookup newkey . dict
+          deriveRDG (vertices `S.union` deps) (M.insert newkey deps rdgMap)
+
+    sccToOrder :: [G.SCC VName] -> [VName]
+    sccToOrder scc =
+      let sccToList = reverse . map (\s -> G.flattenSCC s)
+          doubleSingleNonEntry =
+            concat . concatMap (\s -> if length s > 1 then [s,s] else [s])
+      in doubleSingleNonEntry $ sccToList scc
 
 ----------------------------------------
 -- TESTING
