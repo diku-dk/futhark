@@ -887,11 +887,9 @@ replacementOrder r = do
     sccToOrder scc =
       let
         sccToList = reverse . map (\s -> G.flattenSCC s)
-        duplicate = concat . concatMap (\s -> if length s > 1
-                                              then [s,s]
-                                              else [s])
+        duplicate = (\s -> if length s > 1 then [s,s] else [s])
       in
-        duplicate $ sccToList scc
+        concat . concatMap duplicate $ sccToList scc
 
 
 ----------------------------------------
