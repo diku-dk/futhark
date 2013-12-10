@@ -855,8 +855,7 @@ ppDict rdict = foldr ((++) . (++ "\n") . ppDictElem) "" (M.toList $ M.delete dum
 -- builds a map (with buildDepMap), containing vertices -> edges, these are
 -- used to build the SCC. the helper function sccToRepOrder follows the
 -- rules described in section 2.4.
-
-
+--
 type RDGMap = M.Map VName (S.Set VName)
 
 replacementOrder :: Range -> RangeM [VName]
@@ -869,11 +868,13 @@ replacementOrder r = do
          (Span (RExp e)  _        ) -> varsUsedInExp e
          (Span _         (RExp e) ) -> varsUsedInExp e
          _                          -> S.empty
-
   rdg <- deriveRDG dependencies M.empty
   let scc = G.stronglyConnComp [(k,k,S.toList v) | (k,v) <- M.toList rdg]
+
   return $ sccToOrder scc
+
   where
+
     deriveRDG :: (S.Set VName) -> RDGMap -> RangeM RDGMap
     deriveRDG vertices rdgMap
       | vertices == M.keysSet rdgMap = return rdgMap
@@ -884,10 +885,14 @@ replacementOrder r = do
 
     sccToOrder :: [G.SCC VName] -> [VName]
     sccToOrder scc =
-      let sccToList = reverse . map (\s -> G.flattenSCC s)
-          doubleSingleNonEntry =
-            concat . concatMap (\s -> if length s > 1 then [s,s] else [s])
-      in doubleSingleNonEntry $ sccToList scc
+      let
+        sccToList = reverse . map (\s -> G.flattenSCC s)
+        duplicate = concat . concatMap (\s -> if length s > 1
+                                              then [s,s]
+                                              else [s])
+      in
+        duplicate $ sccToList scc
+
 
 ----------------------------------------
 -- TESTING
