@@ -1,0 +1,7 @@
+fun int main(int input) =
+    let x = input + 2 in
+    let y = x - input in
+    let z = x * y in
+    let u = x * y * z in
+    let input = input + x in
+    input + x + y + z + u
