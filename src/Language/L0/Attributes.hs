@@ -783,9 +783,13 @@ safeExp (Zip {}) = False
 safeExp (ArrayLit {}) = False
 safeExp (Concat {}) = False
 safeExp (Apply {}) = False
+safeExp (BinOp Divide _ (Literal (IntVal k)  _) _ _) = k /= 0
+safeExp (BinOp Divide _ (Literal (RealVal k) _) _ _) = k /= 0
 safeExp (BinOp Divide _ _ _ _) = False
-safeExp (BinOp Pow _ _ _ _) = False
+safeExp (BinOp Mod _ (Literal (IntVal k)  _) _ _) = k /= 0
+safeExp (BinOp Mod _ (Literal (RealVal k) _) _ _) = k /= 0
 safeExp (BinOp Mod _ _ _ _) = False
+safeExp (BinOp Pow _ _ _ _) = False
 safeExp e = case walkExpM safe e of
               Just () -> True
               Nothing -> False
