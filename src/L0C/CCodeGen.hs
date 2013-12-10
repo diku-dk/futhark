@@ -743,7 +743,7 @@ compileExp place (Concat _ xarr yarr _) = do
                      $stm:copyy
              }|]
 
-compileExp place (LetWith _ name src idxs ve body _) = do
+compileExp place (LetWith _ name src idxcs idxs ve body _) = do
   name' <- new $ textual $ identName name
   src' <- lookupVar $ identName src
   etype <- typeToCType $ identType src
@@ -754,6 +754,9 @@ compileExp place (LetWith _ name src idxs ve body _) = do
   elty <- typeToCType $ typeOf ve
   ve' <- compileExpInPlace (varExp el) ve
   let idxdecls = [[C.cdecl|int $id:idxvar;|] | idxvar <- idxvars]
+      check = case idxcs of
+                Just _ -> []
+                Nothing -> boundsCheckStm (varExp name') idxexps
       (elempre, elempost) =
         case typeOf ve of
           Array {} -> (indexArrayElemStms (varExp el) (varExp name') (identType src) idxexps,
@@ -770,7 +773,7 @@ compileExp place (LetWith _ name src idxs ve body _) = do
                      $decls:idxdecls
                      $id:name' = $exp:src';
                      $items:idxs'
-                     $stms:(boundsCheckStm (varExp name') idxexps)
+                     $stms:check
                      $stms:elempre
                      $items:ve'
                      $stm:elempost

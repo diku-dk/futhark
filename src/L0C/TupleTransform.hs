@@ -298,14 +298,14 @@ transformExp (DoLoop mergepat mergeexp i bound loopbody letbody loc) = do
     letbody' <- transformExp letbody
     return $ DoLoop mergepat' mergeexp' i bound' loopbody' letbody' loc
 
-transformExp (LetWith cs name src idxs ve body loc) = do
+transformExp (LetWith cs name src idxcs idxs ve body loc) = do
   idxs' <- mapM transformExp idxs
   tupToIdentList (Var src) $ \c1 srcs ->
     tupToIdentList ve $ \c2 vnames -> do
       dsts <- map fst <$> mapM (newVar loc "letwith_dst" . identType) srcs
       mergeCerts (catMaybes [c1,c2]++cs) $ \c -> do
         let comb olde (dname, sname, vname) inner =
-              LetWith cs dname sname idxs' (Var vname) (olde inner) loc
+              LetWith cs dname sname idxcs idxs' (Var vname) (olde inner) loc
             lws = foldl comb id $ zip3 dsts srcs vnames
         inner <- transformExp $ LetPat (Id name)
                  (tuplit c loc (map Var dsts)) body loc

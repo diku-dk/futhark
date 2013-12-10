@@ -326,7 +326,7 @@ evalExp (LetPat pat e body pos) = do
     Nothing   -> bad $ TypeError pos "evalExp Let pat"
     Just bnds -> local (`bindVars` bnds) $ evalExp body
 
-evalExp (LetWith _ name src idxs ve body pos) = do
+evalExp (LetWith _ name src _ idxs ve body pos) = do
   v <- lookupVar $ identName src
   idxs' <- mapM evalExp idxs
   vev <- evalExp ve

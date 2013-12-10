@@ -124,9 +124,12 @@ mapExpM tv (Apply fname args t loc) = do
 mapExpM tv (LetPat pat e body loc) =
   pure LetPat <*> mapOnPattern tv pat <*> mapOnExp tv e <*>
          mapOnExp tv body <*> pure loc
-mapExpM tv (LetWith cs dest src idxexps vexp body loc) =
+mapExpM tv (LetWith cs dest src idxcs idxexps vexp body loc) =
   pure LetWith <*> mapOnCertificates tv cs <*>
        mapOnIdent tv dest <*> mapOnIdent tv src <*>
+       (case idxcs of
+          Nothing -> return Nothing
+          Just idxcs' -> Just <$> mapOnCertificates tv idxcs') <*>
        mapM (mapOnExp tv) idxexps <*> mapOnExp tv vexp <*>
        mapOnExp tv body <*> pure loc
 mapExpM tv (Index cs arr idxcs idxexps outt loc) =

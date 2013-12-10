@@ -234,8 +234,9 @@ data ExpBase ty vn =
             | Apply  Name [(ExpBase ty vn, Diet)] (ty vn) SrcLoc
             | LetPat (TupIdentBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
 
-            | LetWith (CertificatesBase ty vn) (IdentBase ty vn)
-              (IdentBase ty vn) [ExpBase ty vn] (ExpBase ty vn) (ExpBase ty vn) SrcLoc
+            | LetWith (CertificatesBase ty vn) (IdentBase ty vn) (IdentBase ty vn)
+                      (Maybe (CertificatesBase ty vn)) [ExpBase ty vn] (ExpBase ty vn)
+                      (ExpBase ty vn) SrcLoc
             -- ^ Array indexing and array constructors.
 
             | Index (CertificatesBase ty vn)
@@ -360,7 +361,7 @@ instance Located (ExpBase ty vn) where
   locOf (Var ident) = locOf ident
   locOf (Apply _ _ _ pos) = locOf pos
   locOf (LetPat _ _ _ pos) = locOf pos
-  locOf (LetWith _ _ _ _ _ _ pos) = locOf pos
+  locOf (LetWith _ _ _ _ _ _ _ pos) = locOf pos
   locOf (Index _ _ _ _ _ pos) = locOf pos
   locOf (Iota _ pos) = locOf pos
   locOf (Size _ _ _ pos) = locOf pos

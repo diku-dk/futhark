@@ -374,35 +374,32 @@ Exp  :: { UncheckedExp }
      | let '{' TupIds '}' '=' Exp in Exp %prec letprec
                       { LetPat (TupId $3 $1) $6 $8 $1 }
 
-     | let Certificates Id '=' Id with '[' Exps ']' '<-' Exp in Exp %prec letprec
-                      { LetWith $2 $3 $5 $8 $11 $13 $1 }
-     | let Id '=' Id with '[' Exps ']' '<-' Exp in Exp %prec letprec
-                      { LetWith [] $2 $4 $7 $10 $12 $1 }
-     | let Certificates Id '[' Exps ']' '=' Exp in Exp %prec letprec
-                      { LetWith $2 $3 $3 $5 $8 $10 $1 }
-     | let Id '[' Exps ']' '=' Exp in Exp %prec letprec
-                      { LetWith [] $2 $2 $4 $7 $9 $1 }
+     | let Certificates Id '=' Id with Index '<-' Exp in Exp %prec letprec
+                      { LetWith $2 $3 $5 (fst $7) (snd $7) $9 $11 $1 }
+     | let Id '=' Id with Index '<-' Exp in Exp %prec letprec
+                      { LetWith [] $2 $4 (fst $6) (snd $6) $8 $10 $1 }
+     | let Certificates Id Index '=' Exp in Exp %prec letprec
+                      { LetWith $2 $3 $3 (fst $4) (snd $4) $6 $8 $1 }
+     | let Id Index '=' Exp in Exp %prec letprec
+                      { LetWith [] $2 $2 (fst $3) (snd $3) $5 $7 $1 }
      | let Certificates Id '[' ']' '=' Exp in Exp %prec letprec
-                      { LetWith $2 $3 $3 [] $7 $9 $1 }
+                      { LetWith $2 $3 $3 Nothing [] $7 $9 $1 }
      | let Id '[' ']' '=' Exp in Exp %prec letprec
-                      { LetWith [] $2 $2 [] $6 $8 $1 }
+                      { LetWith [] $2 $2 Nothing [] $6 $8 $1 }
 
-     | Id '[' Certificates '|' Exps ']'
-                      { Index [] $1 (Just $3) $5 NoInfo (srclocOf $1) }
+     | Id Index
+                      { Index [] $1 (fst $2) (snd $2) NoInfo (srclocOf $1) }
 
-     | Id '[' Exps ']'
-                      { Index [] $1 Nothing $3 NoInfo (srclocOf $1) }
-
-     | Certificates Id '[' Certificates '|' Exps ']'
-                      { Index $1 $2 (Just $4) $6 NoInfo (srclocOf $2) }
-
-     | Certificates Id '[' Exps ']'
-                      { Index $1 $2 Nothing $4 NoInfo (srclocOf $2) }
+     | Certificates Id Index
+                      { Index $1 $2 (fst $3) (snd $3) NoInfo (srclocOf $2) }
 
      | loop '(' TupId ')' '=' for Id '<' Exp do Exp in Exp %prec letprec
                       { DoLoop $3 (tupIdExp $3) $7 $9 $11 $13 $1 }
      | loop '(' TupId '=' Exp ')' '=' for Id '<' Exp do Exp in Exp %prec letprec
                       { DoLoop $3 $5 $9 $11 $13 $15 $1 }
+
+Index : '[' Certificates '|' Exps ']' { (Just $2, $4) }
+      | '[' Exps ']'                  { (Nothing, $2) }
 
 Exps : Exp ',' Exps { $1 : $3 }
      | Exp          { [$1] }

@@ -59,7 +59,7 @@ transformExp mape@(Map fun e intype loc) =
                      (maybeCopy $ Literal (blankValue $ typeOf mape) loc)
                      (typeOf letbody) loc
             letbody = DoLoop (Id outarr) outarrv i nv loopbody outarrv loc
-            loopbody = LetWith [] outarr outarr [iv] funcall outarrv loc
+            loopbody = LetWith [] outarr outarr Nothing [iv] funcall outarrv loc
         return branch
 
 transformExp (Reduce fun accexp arrexp intype loc) =
@@ -76,7 +76,7 @@ transformExp (Scan fun accexp arrexp intype loc) =
     funcall <- transformLambda fun [accv, indexi]
     let loop = DoLoop (TupId [Id acc, Id arr] loc)
                (TupLit [accv, arrv] loc) i (Size [] 0 arrv loc) loopbody arrv loc
-        loopbody = LetWith [] arr arr [iv] funcall (TupLit [indexi, arrv] loc) loc
+        loopbody = LetWith [] arr arr Nothing [iv] funcall (TupLit [indexi, arrv] loc) loc
     return loop
 
 transformExp (Filter fun arrexp rowtype loc) =
@@ -111,7 +111,7 @@ transformExp (Filter fun arrexp rowtype loc) =
                                      (BinOp Equal indexi indexim1 (Elem Bool) loc) loc)
                              loc)
                          resv update (typeOf resv) loc
-              update = LetWith [] res res [BinOp Minus indexi (intval 1) (Elem Int) loc]
+              update = LetWith [] res res Nothing [BinOp Minus indexi (intval 1) (Elem Int) loc]
                        indexin resv loc
           return $ checkempty loop
         where intval x = Literal (IntVal x) loc
@@ -287,10 +287,10 @@ letwith cs ks i v body =
   case typeOf v of
     Elem (Tuple ets) -> do
       names <- mapM (liftM fst . newVar loc "tup") ets
-      let comb inner (k, name) = LetWith cs k k [i] (Var name) inner loc
+      let comb inner (k, name) = LetWith cs k k Nothing [i] (Var name) inner loc
       return $ LetPat (TupId (map Id names) loc) v
                (foldl comb body $ zip ks names) loc
-    _ -> do let comb inner k = LetWith cs k k [i] v inner loc
+    _ -> do let comb inner k = LetWith cs k k Nothing [i] v inner loc
             return $ foldl comb body ks
   where loc = srclocOf body
 

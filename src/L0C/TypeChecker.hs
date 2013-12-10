@@ -739,9 +739,13 @@ checkExp (LetPat pat e body pos) = do
     body' <- checkExp body
     return $ LetPat pat' e' body' pos
 
-checkExp (LetWith cs (Ident dest destt destpos) src idxes ve body pos) = do
+checkExp (LetWith cs (Ident dest destt destpos) src idxcs idxes ve body pos) = do
   cs' <- mapM (requireI [Elem Cert] <=< checkIdent) cs
   src' <- checkIdent src
+  idxcs' <-
+    case idxcs of
+      Nothing       -> return Nothing
+      Just idxcs' -> Just <$> mapM (requireI [Elem Cert] <=< checkIdent) idxcs'
   idxes' <- mapM (require [Elem Int] <=< checkExp) idxes
   destt' <- checkAnnotation pos "source" destt $ identType src' `setAliases` HS.empty
   let dest' = Ident dest destt' destpos
@@ -758,7 +762,7 @@ checkExp (LetWith cs (Ident dest destt destpos) src idxes ve body pos) = do
           bad $ BadLetWithValue pos
         (scope, _) <- checkBinding (Id dest') destt' mempty
         body' <- consuming src' $ scope $ checkExp body
-        return $ LetWith cs' dest' src' idxes' ve' body' pos
+        return $ LetWith cs' dest' src' idxcs' idxes' ve' body' pos
 
 checkExp (Index cs ident csidxes idxes restype pos) = do
   cs' <- mapM (requireI [Elem Cert] <=< checkIdent) cs

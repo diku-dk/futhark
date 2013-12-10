@@ -55,7 +55,7 @@ import qualified L0C.Rebinder.SizeTracking as SZ
 
 data BindNeed = LoopBind TupIdent Exp Ident Exp Exp
               | LetBind TupIdent Exp [Exp]
-              | LetWithBind Certificates Ident Ident [Exp] Exp
+              | LetWithBind Certificates Ident Ident (Maybe Certificates) [Exp] Exp
                 deriving (Show, Eq)
 
 type NeedSet = [BindNeed]
@@ -67,8 +67,8 @@ asTail (LoopBind mergepat mergeexp i bound loopbody) =
 asTail (LetBind pat e _) =
   LetPat pat e (TupLit [] loc) loc
     where loc = srclocOf pat
-asTail (LetWithBind cs dest src is ve) =
-  LetWith cs dest src is ve (Var dest) $ srclocOf dest
+asTail (LetWithBind cs dest src idxcs idxs ve) =
+  LetWith cs dest src idxcs idxs ve (Var dest) $ srclocOf dest
 
 requires :: BindNeed -> HS.HashSet VName
 requires (LetBind pat e (alte:alts)) =
@@ -76,9 +76,9 @@ requires (LetBind pat e (alte:alts)) =
 requires bnd = HS.map identName $ freeInExp $ asTail bnd
 
 provides :: BindNeed -> HS.HashSet VName
-provides (LoopBind mergepat _ _ _ _) = patNameSet mergepat
-provides (LetBind pat _ _) = patNameSet pat
-provides (LetWithBind _ dest _ _ _) = HS.singleton $ identName dest
+provides (LoopBind mergepat _ _ _ _)  = patNameSet mergepat
+provides (LetBind pat _ _)            = patNameSet pat
+provides (LetWithBind _ dest _ _ _ _) = HS.singleton $ identName dest
 
 data Need = Need { needBindings :: NeedSet
                  }
@@ -229,9 +229,11 @@ bindLet pat@(Id dest) e@(Transpose cs k n (Var src) loc) m =
 
 bindLet pat e m = withBinding pat e m
 
-bindLetWith :: Certificates -> Ident -> Ident -> [Exp] -> Exp -> HoistM a -> HoistM a
-bindLetWith cs dest src is ve m = do
-  needThis $ LetWithBind cs dest src is ve
+bindLetWith :: Certificates -> Ident -> Ident
+            -> Maybe Certificates -> [Exp] -> Exp
+            -> HoistM a -> HoistM a
+bindLetWith cs dest src idxcs idxs ve m = do
+  needThis $ LetWithBind cs dest src idxcs idxs ve
   withShape dest (slice [] 0 src) m
 
 bindLoop :: TupIdent -> Exp -> Ident -> Exp -> Exp -> HoistM a -> HoistM a
@@ -310,9 +312,9 @@ addBindings dupes needs =
           in case map snd $ sortBy (comparing fst) $ map (score m) $ e:alts of
                e':_ -> add pat e'
                _    -> add pat e
-        comb (m,ds) bind@(LetWithBind cs dest src is ve) =
+        comb (m,ds) bind@(LetWithBind cs dest src idxcs idxs ve) =
           ((m `HM.union` distances m bind,ds),
-           \inner -> LetWith cs dest src is ve inner $ srclocOf inner)
+           \inner -> LetWith cs dest src idxcs idxs ve inner $ srclocOf inner)
 
 score :: HM.HashMap VName Int -> Exp -> (Int, Exp)
 score m (Var k) =
@@ -350,10 +352,10 @@ distances m need = HM.fromList [ (k, d+cost) | k <- HS.toList outs ]
           case need of
             LetBind pat e _ ->
               (patNameSet pat, freeNamesInExp e, expCost e)
-            LetWithBind _ dest src is ve ->
+            LetWithBind _ dest src _ idxs ve ->
               (HS.singleton $ identName dest,
                identName src `HS.insert`
-               mconcat (map freeNamesInExp (ve:is)),
+               mconcat (map freeNamesInExp (ve:idxs)),
                1)
             LoopBind pat mergeexp _ bound loopbody ->
               (patNameSet pat,
@@ -462,9 +464,9 @@ uniqPat (Id k)         = unique $ identType k
 uniqPat (TupId pats _) = any uniqPat pats
 
 isUniqueBinding :: BlockPred
-isUniqueBinding _ (LoopBind pat _ _ _ _)     = uniqPat pat
-isUniqueBinding _ (LetBind pat _ _)          = uniqPat pat
-isUniqueBinding _ (LetWithBind _ dest _ _ _) = unique $ identType dest
+isUniqueBinding _ (LoopBind pat _ _ _ _)       = uniqPat pat
+isUniqueBinding _ (LetBind pat _ _)            = uniqPat pat
+isUniqueBinding _ (LetWithBind _ dest _ _ _ _) = unique $ identType dest
 
 isConsumed :: BlockPred
 isConsumed body need =
@@ -489,10 +491,10 @@ hoistInExp (If c e1 e2 t loc) = do
 hoistInExp (LetPat pat e body _) = do
   e' <- hoistInExp e
   bindLet pat e' $ hoistInExp body
-hoistInExp (LetWith cs dest src idxs ve body _) = do
+hoistInExp (LetWith cs dest src idxcs idxs ve body _) = do
   idxs' <- mapM hoistInExp idxs
   ve' <- hoistInExp ve
-  bindLetWith cs dest src idxs' ve' $ hoistInExp body
+  bindLetWith cs dest src idxcs idxs' ve' $ hoistInExp body
 hoistInExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody _) = do
   mergeexp' <- hoistInExp mergeexp
   boundexp' <- hoistInExp boundexp

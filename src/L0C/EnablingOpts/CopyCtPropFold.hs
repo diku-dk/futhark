@@ -171,13 +171,16 @@ copyCtPropOneTupleLambda prog lam = do
 
 copyCtPropExp :: Exp -> CPropM Exp
 
-copyCtPropExp (LetWith cs nm src inds el body pos) =
+copyCtPropExp (LetWith cs nm src indcs inds el body pos) =
   consuming src $ do
     cs'       <- copyCtPropCerts cs
     el'       <- copyCtPropExp el
+    indcs'    <- case indcs of
+                   Just indcs' -> Just <$> copyCtPropCerts indcs'
+                   Nothing     -> return Nothing
     inds'     <- mapM copyCtPropExp inds
     body'     <- copyCtPropExp body
-    return $ LetWith cs' nm src inds' el' body' pos
+    return $ LetWith cs' nm src indcs' inds' el' body' pos
 
 copyCtPropExp (LetPat pat e body pos) = do
     e'    <- copyCtPropExp e

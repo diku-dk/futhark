@@ -461,7 +461,7 @@ fusionGatherExp fres (Var idd) =
 fusionGatherExp fres (Index _ idd _ inds _ _) =
     foldM fusionGatherExp fres (Var idd : inds)
 
-fusionGatherExp fres (LetWith _ id1 id0 inds elm body _) = do
+fusionGatherExp fres (LetWith _ id1 id0 _ inds elm body _) = do
     bres  <- bindingIdents [id1] $ fusionGatherExp fres body
 
     let pat_vars = [Var id0, Var id1]

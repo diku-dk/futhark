@@ -129,10 +129,12 @@ deadCodeElimExp (LetPat pat e body pos) = do
             return $ LetPat pat e' body' pos
 
 
-deadCodeElimExp (LetWith cs nm src inds el body pos) = do
+deadCodeElimExp (LetWith cs nm src idxcs idxs el body pos) = do
     cs' <- mapM deadCodeElimIdent cs
     (body', noref) <- collectRes [identName nm] $ binding [identName nm] $ deadCodeElimExp body
-    
+    idxcs' <- case idxcs of
+                Nothing     -> return Nothing
+                Just idxcs' -> Just <$> mapM deadCodeElimIdent idxcs'
     if noref 
     then changed $ return body'
     else do
@@ -142,9 +144,9 @@ deadCodeElimExp (LetWith cs nm src inds el body pos) = do
             then badDCElimM $ VarNotInFtab pos srcnm
             else do
                     _ <- tell $ DCElimRes False (S.insert srcnm S.empty)
-                    inds' <- mapM deadCodeElimExp inds
+                    idxs' <- mapM deadCodeElimExp idxs
                     el'   <- deadCodeElimExp el
-                    return $ LetWith cs' nm src inds' el' body' pos
+                    return $ LetWith cs' nm src idxcs' idxs' el' body' pos
 
 deadCodeElimExp (DoLoop mergepat mergeexp idd n loopbdy letbdy pos) = do
     let idnms = getBnds mergepat

@@ -166,12 +166,12 @@ letNormExp (LetPat pat e body pos) = do
     return $ makeLetExp pos eres' res
 
 
-letNormExp (LetWith cs nm src inds el body pos) = do
+letNormExp (LetWith cs nm src indcs inds el body pos) = do
     (body', bodyres') <- collectRes $ letNormExp body
     let body'' = makeLetExp pos bodyres' body'
 
     (el', eres')    <- collectRes $ letNormExp el 
-    let res = combinePats (WithPat cs nm src inds pos) el' body''
+    let res = combinePats (WithPat cs nm src indcs inds pos) el' body''
     return $ makeLetExp pos eres' res
 
 
@@ -475,10 +475,10 @@ subLetoNormExp str ee = letNormExp ee >>= subsLetExp str
         subsLetExp :: String -> Exp -> LetNormM Exp
         subsLetExp s e = 
             case e of
-                (LetPat        _ _ _ pos) -> makeVarExpSubst s pos e
-                (LetWith _ _ _ _ _ _ pos) -> makeVarExpSubst s pos e
-                (If          _ _ _ _ pos) -> makeVarExpSubst s pos e
-                _                         -> return e
+                (LetPat          _ _ _ pos) -> makeVarExpSubst s pos e
+                (LetWith _ _ _ _ _ _ _ pos) -> makeVarExpSubst s pos e
+                (If            _ _ _ _ pos) -> makeVarExpSubst s pos e
+                _                           -> return e
 
 makeVarExpSubst :: String -> SrcLoc -> Exp -> LetNormM Exp
 -- Precondition: e is normalized!
@@ -538,7 +538,7 @@ makeLetExp pos l@((vnm,ee):lll) body =
 
 
 data PatAbstr = ReguPat TupIdent SrcLoc
-              | WithPat Certificates Ident Ident [Exp] SrcLoc
+              | WithPat Certificates Ident Ident (Maybe Certificates) [Exp] SrcLoc
 
 combinePats :: PatAbstr -> Exp -> Exp -> Exp
 combinePats rp@(ReguPat y pos) e body =
@@ -548,8 +548,8 @@ combinePats rp@(ReguPat y pos) e body =
             LetPat x def_x (combinePats rp e_x body) pos_x
 
         -- let y = (let x1 = x0 with [inds] <- el in e_x) in body
-        LetWith cs x1 x0 inds el e_x pos_x ->
-            LetWith cs x1 x0 inds el (combinePats rp e_x body) pos_x
+        LetWith cs x1 x0 indcs inds el e_x pos_x ->
+            LetWith cs x1 x0 indcs inds el (combinePats rp e_x body) pos_x
 
         -- let y = (loop (...) for i < N do loopbody in letbody) in body
         DoLoop mergepat mergeexp idd n loopbdy letbdy pos_x ->
@@ -558,22 +558,22 @@ combinePats rp@(ReguPat y pos) e body =
         -- not a let bindings
         _ -> LetPat y e body pos
 
-combinePats wp@(WithPat cs1 y1 y0 inds pos) el body =
+combinePats wp@(WithPat cs1 y1 y0 indcs inds pos) el body =
     case el of
         -- let y1 = y0 with [inds] <- (let x = def_x in e_x) in body
         LetPat x def_x e_x pos_x ->
             LetPat x def_x (combinePats wp e_x body) pos_x
 
         -- let y1 = y0 with [inds] <- (let x1 = x0 with [indsx] <- el_x in e_x) in body
-        LetWith cs2 x1 x0 inds_x el_x e_x pos_x ->
-            LetWith (cs1++cs2) x1 x0 inds_x el_x (combinePats wp e_x body) pos_x
+        LetWith cs2 x1 x0 ind_xcs inds_x el_x e_x pos_x ->
+            LetWith (cs1++cs2) x1 x0 ind_xcs inds_x el_x (combinePats wp e_x body) pos_x
 
         -- let y1 = y0 with [inds] <- (loop (...) = for i < N do loopbdy in letbdy) in body
         DoLoop mergepat mergeexp idd n loopbdy letbdy pos_x ->
             DoLoop mergepat mergeexp idd n loopbdy (combinePats wp letbdy body) pos_x
         
         -- not a let bindings
-        _ -> LetWith cs1 y1 y0 inds el body pos
+        _ -> LetWith cs1 y1 y0 indcs inds el body pos
 
 addPatterns :: SrcLoc -> [(VName, Exp)] -> Exp -> Exp
 addPatterns = makeLetExp

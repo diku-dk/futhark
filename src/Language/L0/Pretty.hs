@@ -147,15 +147,19 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
                         Literal (ArrayVal {}) _ -> False
                         ArrayLit {} -> False
                         _ -> hasArrayLit e
-  pprPrec _ (LetWith cs dest src idxs ve body _)
+  pprPrec _ (LetWith cs dest src idxcs idxs ve body _)
     | dest == src =
       text "let" <+> ppCertificates cs <> ppr dest <+> list (map ppr idxs) <+>
       equals <+> align (ppr ve) <+>
       text "in" </> ppr body
     | otherwise =
       text "let" <+> ppCertificates cs <> ppr dest <+> equals <+> ppr src <+>
-      text "with" <+> list (map ppr idxs) <+> text "<-" <+> align (ppr ve) <+>
+      text "with" <+> brackets (ppcs <> commasep (map ppr idxs)) <+>
+      text "<-" <+> align (ppr ve) <+>
       text "in" </> ppr body
+    where ppcs = case idxcs of Nothing     -> empty
+                               Just []     -> text "<>|"
+                               Just csidx' -> ppCertificates csidx' <> text "|"
   pprPrec _ (Index cs v csidx idxs _ _) =
     ppCertificates cs <> ppr v <>
     brackets (ppcs <> commasep (map ppr idxs))
