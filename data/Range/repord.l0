@@ -1,0 +1,7 @@
+fun bool main(int input) =
+    let u = input in
+    let y = max(1,input)-u in
+    let x = max(1,y)-u in
+    let u = input in
+    let v = max(u,x) in
+    v <= y
