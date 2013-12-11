@@ -1033,7 +1033,7 @@ checkExp (Scan2 ass fun startexps arrexps intypes pos) = do
   ass' <- mapM (requireI [Elem Cert] <=< checkIdent) ass
   (startexps', startargs) <- unzip <$> mapM checkArg startexps
   (arrexps', arrargs)   <- unzip <$> mapM checkSOACArrayArg arrexps
-  intype'   <- checkTupleAnnotation pos "element"
+  intype'   <- checkTupleAnnotation pos "scan2 input element"
                intypes (map argType arrargs)
   let startt  = Elem . Tuple $ map typeOf startexps'
       intupletype = Elem $ Tuple intype'
