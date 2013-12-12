@@ -1,6 +1,8 @@
 module L0C.HOTrans.SOACNest ( SOACNest(..)
                             , Combinator(..)
                             , NestBody(..)
+                            , bodyToLambda
+                            , lambdaToBody
                             , setInputs
                             , certificates
                             , fromSOAC
