@@ -193,8 +193,8 @@ expandSoacInpArr =
 
 soacInputs :: SOAC -> FusionGM ([VName], [VName])
 soacInputs soac = do
-  (inp_idds, other_idds) <- getIdentArr $ SOAC.inputs soac
-  let (inp_nms0,other_nms0) = (map identName inp_idds, map identName other_idds)
+  let (inp_idds, other_idds) = getIdentArr $ SOAC.inputs soac
+      (inp_nms0,other_nms0)  = (map identName inp_idds, map identName other_idds)
   inp_nms   <- expandSoacInpArr   inp_nms0
   other_nms <- expandSoacInpArr other_nms0
   return (inp_nms, other_nms)
@@ -210,9 +210,9 @@ addNewKer res (idd, soac) = do
 
 addNewKerWithUnfusable :: FusedRes -> (TupIdent, SOAC) -> HS.HashSet VName -> FusionGM FusedRes
 addNewKerWithUnfusable res (idd, soac) ufs = do
-  (inp_idds, _) <- getIdentArr $ SOAC.inputs soac
   nm_ker <- KernName <$> new "ker"
-  let inp_nms0 = map identName inp_idds
+  let (inp_idds, _) = getIdentArr $ SOAC.inputs soac
+      inp_nms0 = map identName inp_idds
       new_ker = optimizeKernel $
                 FusedKer (idd, soac) (HS.fromList inp_idds) HS.empty [] []
       out_nms = patNames idd
@@ -292,9 +292,9 @@ greedyFuse is_repl lam_used_nms res (idd, soac) = do
                                                    then HM.delete nm         inpp
                                                    else HM.insert nm new_set inpp
                                 )
-                            inpa $ HS.map identName $ inp kold
+                            inpa $ HS.map identName $ inputs kold
                       in HM.fromList [ (k, HS.singleton knm)
-                                        | k <- HS.toList $ HS.map identName (inp knew) ]
+                                        | k <- HS.toList $ HS.map identName (inputs knew) ]
                            `comb` inpa')
              (inpArr res) (zip3 to_fuse_kers fused_kers to_fuse_knms)
        -- Update the kernels map
@@ -361,8 +361,8 @@ fuseSOACwithKer (out_ids1, soac1) ker = do
             -- END CASE(soac2,soac1)
 
             let inp_new = foldl (\lst e -> case e of
-                                            Var idd -> lst++[idd]
-                                            _       -> lst
+                                            SOAC.Var idd -> lst++[idd]
+                                            _            -> lst
                                 ) [] res_inp
 
             -- soac_new1<- trace ("\nFUSED KERNEL: " ++ (nameToString . identName) (head out_ids1) ++ " : " ++ ppExp res_soac ++ " Input arrs: " ++ concatMap (nameToString . identName) inp_new) (return res_soac)
@@ -397,7 +397,7 @@ fusionGatherExp :: FusedRes -> Exp -> FusionGM FusedRes
 ----------------------------------------------
 
 fusionGatherExp fres (LetPat pat e body _)
-  | Just soac <- SOAC.fromExp e =
+  | Right soac <- SOAC.fromExp e =
       case soac of
         SOAC.Map2 _ lam _ _ -> do
           bres  <- bindPat pat $ fusionGatherExp fres body
@@ -431,6 +431,12 @@ fusionGatherExp fres (LetPat pat e body _)
           blres' <- fusionGatherExp blres $ TupLit nes loc
           addNewKer blres' (pat, soac)
 
+fusionGatherExp _ (LetPat _ e _ loc)
+  | Left (SOAC.InvalidArrayInput inpe) <- SOAC.fromExp e =
+    badFusionGM $ EnablingOptError loc
+                  ("In Fusion.hs, "++ppExp inpe++" is not valid array input.")
+
+
 fusionGatherExp fres (LetPat pat (Replicate n el loc) body _) = do
     bres <- bindPat pat $ fusionGatherExp fres body
     -- Implemented inplace: gets the variables in `n` and `el`
@@ -441,7 +447,7 @@ fusionGatherExp fres (LetPat pat (Replicate n el loc) body _) = do
                         Elem (Tuple ets) -> (el, ets)
                         t                -> (TupLit [el] loc, [t])
         repl_lam = TupleLambda [toParam repl_id] lame (map toDecl rwt) loc
-        soac_repl= SOAC.Map2 [] repl_lam [Iota n loc] loc
+        soac_repl= SOAC.Map2 [] repl_lam [SOAC.Iota n] loc
     greedyFuse True used_set bres' (pat, soac_repl)
 
 fusionGatherExp fres (LetPat pat e body _) = do
@@ -574,7 +580,7 @@ fuseInExp :: Exp -> FusionGM Exp
 
 fuseInExp (LetPat pat e body pos) =
   case SOAC.fromExp e of
-    Just soac ->
+    Right soac ->
       replaceSOAC pat soac <*> fuseInExp body
     _ -> do
       body' <- fuseInExp body
@@ -700,23 +706,16 @@ mergeFusionRes res1 res2 = do
 --   only vars, transposes, indexed-vars, and iotas, hence error is
 --   raised in all other cases.  E.g., for expression `map2(f, a,
 --   b[i])', the result should be `([a],[b])'
-getIdentArr :: [Exp] -> FusionGM ([Ident], [Ident])
-getIdentArr []             = return ([],[])
-getIdentArr (Var idd:es) = do
-    (vs, os) <- getIdentArr es
-    return (idd:vs, os)
-getIdentArr (Transpose _ _ _ (Var idd) _:es) = do
-    (vs, os) <- getIdentArr es
-    return (idd:vs, os)
-getIdentArr (Index _ idd _ _ _ _:es) = do
-    (vs, os) <- getIdentArr es
-    return (vs, idd:os)
-getIdentArr (Iota _ _:es) = getIdentArr es
-getIdentArr (ee:_) =
-    badFusionGM $ EnablingOptError
-                    (srclocOf ee)
-                    ("In Fusion.hs, getIdentArr, broken invariant: "
-                     ++" invalid SOAC input "++ppExp ee)
+getIdentArr :: [SOAC.Input] -> ([Ident], [Ident])
+getIdentArr = foldl comb ([],[])
+  where comb (vs, os) (SOAC.Var idd) =
+          (idd:vs, os)
+        comb (vs, os) (SOAC.Transpose _ _ _ inp) =
+          let (ks1, ks2) = getIdentArr [inp]
+          in (ks1++vs, ks2++os)
+        comb (vs, os) (SOAC.Index _ idd _ _) =
+          (vs, idd:os)
+        comb (vs, os) (SOAC.Iota _) = (vs, os)
 
 cleanFusionResult :: FusedRes -> FusedRes
 cleanFusionResult fres =
@@ -762,7 +761,7 @@ isCompatibleKer (out_nms, SOAC.Filter2 {}) ker = do
             -- in the output-array set of producer.  That is, a
             -- filter-producer can only be fused if the consumer
             -- accepts input from no other source.
-            (inp_idds2, other_idds2) <- getIdentArr $ SOAC.inputs soac
-            let inp_lst = map identName inp_idds2
+            let (inp_idds2, other_idds2) = getIdentArr $ SOAC.inputs soac
+                inp_lst = map identName inp_idds2
             return $ null other_idds2 && all (`elem` out_nms) inp_lst
 isCompatibleKer _ _ = return False

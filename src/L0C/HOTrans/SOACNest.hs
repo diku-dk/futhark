@@ -33,7 +33,7 @@ bodyToLambda (NewNest (paramIds, bndIds, retTypes) op) =
               , tupleLambdaReturnType = retTypes
               , tupleLambdaBody =
                 LetPat (TupId (map Id bndIds) loc)
-                       (SOAC.toExp $ toSOAC $ SOACNest (map Var paramIds) op)
+                       (SOAC.toExp $ toSOAC $ SOACNest (map SOAC.Var paramIds) op)
                        (TupLit (map Var bndIds) loc)
                        loc
               }
@@ -42,8 +42,8 @@ bodyToLambda (NewNest (paramIds, bndIds, retTypes) op) =
 lambdaToBody :: TupleLambda -> NestBody
 lambdaToBody l = fromMaybe (Lambda l) $ isNesting $ tupleLambdaBody l
   where isNesting (LetPat pat e body _) = do
-          soac <- SOAC.fromExp e
-          inpks <- vars $ SOAC.inputs soac
+          soac <- either (const Nothing) Just $ SOAC.fromExp e
+          inpks <- inpVars $ SOAC.inputs soac
           ks <- tuplePatAndLit pat body
           if tupleLambdaParams l `matches` inpks then
             let nesting = (inpks, ks, tupleLambdaReturnType l)
@@ -79,7 +79,7 @@ setLevels ls (Scan2 cs b _ es loc) = Scan2 cs b ls es loc
 setLevels ls (Filter2 cs b _ loc) = Filter2 cs b ls loc
 setLevels ls (Redomap2 cs l b _ es loc) = Redomap2 cs l b ls es loc
 
-data SOACNest = SOACNest { inputs :: [Exp]
+data SOACNest = SOACNest { inputs :: [SOAC.Input]
                          , operation :: Combinator
                          }
                 deriving (Show)
@@ -87,7 +87,7 @@ data SOACNest = SOACNest { inputs :: [Exp]
 instance Located SOACNest where
   locOf = locOf . operation
 
-setInputs :: [Exp] -> SOACNest -> SOACNest
+setInputs :: [SOAC.Input] -> SOACNest -> SOACNest
 setInputs arrs nest = nest { inputs = arrs }
 
 -- | Returns the certificates used in a SOACNest.
@@ -131,8 +131,8 @@ nested l
     Just tks  <- vars es, map Id tks == pats, -- ...where the body is
                                               -- a tuple literal of
                                               -- the bound variables
-    Just soac <- fromSOAC <$> SOAC.fromExp e, -- ...the bindee is a SOAC...
-    Just ks   <- vars $ inputs soac, -- ...all of whose inputs are variables...
+    Right soac <- fromSOAC <$> SOAC.fromExp e, -- ...the bindee is a SOAC...
+    Just ks   <- inpVars $ inputs soac, -- ...all of whose inputs are variables...
     tupleLambdaParams l `matches` ks = -- ...and those inputs are the parameters to l!
       Just (operation soac, (ks, tks, tupleLambdaReturnType l))
   | otherwise = Nothing
@@ -158,7 +158,7 @@ subLambda b comb =
                   , tupleLambdaBody       =
                     LetPat (TupId (map Id bndIds) loc)
                            (SOAC.toExp $ toSOAC $
-                            SOACNest (map Var paramIds)
+                            SOACNest (map SOAC.Var paramIds)
                                      (rest `setLevels` comb))
                            (TupLit (map Var bndIds) loc) loc
                   , tupleLambdaSrcLoc     = loc
@@ -170,6 +170,9 @@ vars :: [Exp] -> Maybe [Ident]
 vars = mapM varExp
   where varExp (Var k) = Just k
         varExp _       = Nothing
+
+inpVars :: [SOAC.Input] -> Maybe [Ident]
+inpVars = vars . map SOAC.inputToExp
 
 matches :: [Parameter] -> [Ident] -> Bool
 matches params idds =

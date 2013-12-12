@@ -15,6 +15,7 @@ import Data.Loc
 
 import L0C.L0
 import L0C.HOTrans.SOAC (SOAC)
+import qualified L0C.HOTrans.SOAC as SOAC
 import L0C.HOTrans.SOACNest (SOACNest)
 import qualified L0C.HOTrans.SOACNest as Nest
 
@@ -29,7 +30,7 @@ data FusedKer = FusedKer {
   -- ^ the fused SOAC statement, e.g.,
   -- (z,w) = map2( f(a,b), x, y )
 
-  , inp        :: HS.HashSet Ident
+  , inputs     :: HS.HashSet Ident
   -- ^ the input arrays used in the `soac'
   -- stmt, i.e., `x', `y'.
 
@@ -67,10 +68,10 @@ pushTranspose nest ots = do
     Just (inputs' `Nest.setInputs` nest,
           ots ++ [OTranspose cs n k])
   else Nothing
-  where transposedInputs (Transpose cs n k (Var idd) _:args) =
-          foldM comb (n, k, cs, [Var idd]) args
-          where comb (n1, k1, cs1, idds) (Transpose cs2 n2 k2 (Var idd2) _)
-                  | n1==n2, k1==k2         = Just (n1,k1,cs1++cs2,idds++[Var idd2])
+  where transposedInputs (SOAC.Transpose cs n k input:args) =
+          foldM comb (n, k, cs, [input]) args
+          where comb (n1, k1, cs1, idds) (SOAC.Transpose cs2 n2 k2 input')
+                  | n1==n2, k1==k2         = Just (n1,k1,cs1++cs2,idds++[input'])
                 comb _                   _ = Nothing
         transposedInputs _ = Nothing
         mapDepth = case Nest.operation nest of
@@ -80,7 +81,8 @@ pushTranspose nest ots = do
 iswim :: SOACNest -> [OutputTransform] -> Maybe (SOACNest, [OutputTransform])
 iswim nest ots
   | Nest.Scan2 cs1 (Nest.NewNest lvl nn) [] es@[_] loc1 <- Nest.operation nest,
-    Nest.Map2 cs2 mb [] loc2 <- nn =
+    Nest.Map2 cs2 mb [] loc2 <- nn,
+    Just es' <- mapM SOAC.inputFromExp es =
     let (paramIds, bndIds, retTypes) = lvl
         toInnerAccParam idd = idd { identType = rowType $ identType idd }
         innerAccParams = map toInnerAccParam $ take (length es) paramIds
@@ -97,8 +99,8 @@ iswim nest ots
               , tupleLambdaSrcLoc = loc2
               }
     in Just (Nest.SOACNest
-               (es ++ [ Transpose cs2 0 1 e loc1 |
-                        e <- Nest.inputs nest])
+               (es' ++ [ SOAC.Transpose cs2 0 1 e |
+                         e <- Nest.inputs nest])
                (Nest.Map2 cs1 (Nest.Lambda lam) [] loc2),
              ots ++ [OTranspose cs2 0 1])
 iswim _ _ = Nothing

@@ -17,6 +17,9 @@ import qualified Data.Map as M
 
 import L0C.L0
 
+import L0C.HOTrans.SOAC (Input)
+import qualified L0C.HOTrans.SOAC as SOAC
+
 -- | @fusemap lam1 inp1 out1 lam2 inp2@ fuses the function @lam1@ into
 -- @lam2@.  Both functions must be mapping functions, although @lam2@
 -- may have leading reduction parameters.  @inp1@ and @inp2@ are the
@@ -34,9 +37,9 @@ import L0C.L0
 --
 -- The result is the fused function, and a list of the array inputs
 -- expected by the SOAC containing the fused function.
-fuseMaps :: TupleLambda -> [Exp] -> [Ident]
-         -> TupleLambda -> [Exp]
-         -> (TupleLambda, [Exp])
+fuseMaps :: TupleLambda -> [Input] -> [Ident]
+         -> TupleLambda -> [Input]
+         -> (TupleLambda, [Input])
 fuseMaps lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
   where lam2' =
           lam2 { tupleLambdaParams = lam2redparams ++ HM.keys inputmap
@@ -47,26 +50,26 @@ fuseMaps lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
 
         (lam2redparams, pat, inputmap, makeCopies) = fuseInputs lam1 inp1 out1 lam2 inp2
 
-fuseFilters :: TupleLambda -> [Exp] -> [Ident]
-            -> TupleLambda -> [Exp] -> VName
-            -> (TupleLambda, [Exp])
+fuseFilters :: TupleLambda -> [Input] -> [Ident]
+            -> TupleLambda -> [Input] -> VName
+            -> (TupleLambda, [Input])
 fuseFilters lam1 inp1 out1 lam2 inp2 vname =
   fuseFilterInto lam1 inp1 out1 lam2 inp2 vname false
   where false = Literal (TupVal [LogVal False]) $ srclocOf lam2
 
-fuseFilterIntoFold :: TupleLambda -> [Exp] -> [Ident]
-                   -> TupleLambda -> [Exp] -> VName
-                   -> (TupleLambda, [Exp])
+fuseFilterIntoFold :: TupleLambda -> [Input] -> [Ident]
+                   -> TupleLambda -> [Input] -> VName
+                   -> (TupleLambda, [Input])
 fuseFilterIntoFold lam1 inp1 out1 lam2 inp2 vname =
   fuseFilterInto lam1 inp1 out1 lam2 inp2 vname identity
   where identity = TupLit (map (Var . fromParam) lam2redparams) $ srclocOf lam2
         lam2redparams = take (length (tupleLambdaParams lam2) - length inp2) $
                         tupleLambdaParams lam2
 
-fuseFilterInto :: TupleLambda -> [Exp] -> [Ident]
-               -> TupleLambda -> [Exp]
+fuseFilterInto :: TupleLambda -> [Input] -> [Ident]
+               -> TupleLambda -> [Input]
                -> VName -> Exp
-               -> (TupleLambda, [Exp])
+               -> (TupleLambda, [Input])
 fuseFilterInto lam1 inp1 out1 lam2 inp2 vname falsebranch = (lam2', HM.elems inputmap)
   where lam2' =
           lam2 { tupleLambdaParams = lam2redparams ++ HM.keys inputmap
@@ -87,9 +90,9 @@ fuseFilterInto lam1 inp1 out1 lam2 inp2 vname falsebranch = (lam2', HM.elems inp
 
         (lam2redparams, pat, inputmap, makeCopies) = fuseInputs lam1 inp1 out1 lam2 inp2
 
-fuseInputs :: TupleLambda -> [Exp] -> [Ident]
-           -> TupleLambda -> [Exp]
-           -> ([Parameter], TupIdent, HM.HashMap Parameter Exp, Exp -> Exp)
+fuseInputs :: TupleLambda -> [Input] -> [Ident]
+           -> TupleLambda -> [Input]
+           -> ([Parameter], TupIdent, HM.HashMap Parameter Input, Exp -> Exp)
 fuseInputs lam1 inp1 out1 lam2 inp2 =
   (lam2redparams, pat, inputmap, makeCopies)
   where loc = srclocOf lam2
@@ -102,25 +105,25 @@ fuseInputs lam1 inp1 out1 lam2 inp2 =
         (inputmap, makeCopies) =
           removeDuplicateInputs $ foldr HM.delete originputmap outins
 
-filterOutParams :: [Ident] -> [Parameter] -> [Exp]
+filterOutParams :: [Ident] -> [Parameter] -> [Input]
                 -> ([Parameter], [Either Type Ident])
 filterOutParams out1 lam2arrparams inp2 =
   (map fst outParams, snd $ mapAccumL checkUsed outUsage out1)
   where outParams = map snd $ filter fst $ snd $
                     mapAccumL isOutParam out1 $ zip lam2arrparams inp2
-        isOutParam outs (p, Var a)
-          | a `elem` outs      = (a `delete` outs, (True,  (p, Var a)))
-          | otherwise          = (outs,            (False, (p, Var a)))
+        isOutParam outs (p, SOAC.Var a)
+          | a `elem` outs      = (a `delete` outs, (True,  (p, SOAC.Var a)))
+          | otherwise          = (outs,            (False, (p, SOAC.Var a)))
         isOutParam outs (p, e) = (outs,            (False, (p, e)))
         outUsage = foldl add M.empty outParams
           where add m (p, e) = M.insertWith (++) e [fromParam p] m
         checkUsed m a =
-          case M.lookup (Var a) m of
-            Just (p:ps) -> (M.insert (Var a) ps m, Right p)
+          case M.lookup (SOAC.Var a) m of
+            Just (p:ps) -> (M.insert (SOAC.Var a) ps m, Right p)
             _           -> (m, Left $ rowType $ identType a)
 
-removeDuplicateInputs :: HM.HashMap Parameter Exp
-                      -> (HM.HashMap Parameter Exp, Exp -> Exp)
+removeDuplicateInputs :: HM.HashMap Parameter Input
+                      -> (HM.HashMap Parameter Input, Exp -> Exp)
 removeDuplicateInputs = fst . HM.foldlWithKey' comb ((HM.empty, id), M.empty)
   where comb ((parmap, inner), arrmap) par arr =
           case M.lookup arr arrmap of
@@ -145,7 +148,7 @@ import L0C.Dev
 And now I can have top-level bindings the like the following, that explicitly call fuseMaps:
 
 (test1fun, test1ins) = fuseMaps lam1 lam1in out lam2 lam2in
-  where lam1in = [Var $ tident "[int] arr_x", Var $ tident "[int] arr_z"]
+  where lam1in = [SOAC.Var $ tident "[int] arr_x", SOAC.Var $ tident "[int] arr_z"]
         lam1 = lambdaToFunction $ tupleLambda "fn {int, int} (int x, int z_b) => {x + z_b, x - z_b}"
         outarr = tident "[int] arr_y"
         outarr2 = tident "[int] arr_unused"
@@ -155,7 +158,7 @@ And now I can have top-level bindings the like the following, that explicitly ca
 
 
 (test2fun, test2ins) = fuseFilterIntoFold lam1 lam1in out lam2 lam2in (name "check")
-  where lam1in = [Var $ tident "[int] arr_x", Var $ tident "[int] arr_v"]
+  where lam1in = [SOAC.Var $ tident "[int] arr_x", SOAC.Var $ tident "[int] arr_v"]
         lam1 = tupleLambda "fn {bool} (int x, int v) => x+v < 0"
         outarr = tident "[int] arr_y"
         outarr2 = tident "[int] arr_unused"
@@ -169,7 +172,7 @@ And now I can have top-level bindings the like the following, that explicitly ca
         outarr = tident "[int] arr_p"
         outarr2 = tident "[int] arr_unused"
         out  = [outarr, outarr2]
-        lam2in = [Var outarr]
+        lam2in = [SOAC.Var outarr]
         lam2 = tupleLambda "fn {int} (int x, int p) => {x ^ p}"
 
 I can inspect these values directly in GHCi.
