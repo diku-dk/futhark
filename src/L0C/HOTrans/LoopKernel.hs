@@ -19,6 +19,7 @@ import L0C.HOTrans.SOACNest (SOACNest)
 import qualified L0C.HOTrans.SOACNest as Nest
 
 data OutputTransform = OTranspose Certificates Int Int
+                       deriving (Show)
 
 applyTransform :: OutputTransform -> Ident -> SrcLoc -> Exp
 applyTransform (OTranspose cs k n)  = Transpose cs k n . Var
@@ -49,10 +50,15 @@ optimizeKernel ker = ker { fsoac = (fst $ fsoac ker, Nest.toSOAC resNest)
                          , outputTransform = resTrans
                          }
   where (resNest, resTrans) =
-          fromMaybe (startNest, startTrans) $
-          pushTranspose startNest startTrans
+          foldr ((.) . tryOptim) id optimizations (startNest, startTrans)
         startNest = Nest.fromSOAC $ snd $ fsoac ker
         startTrans = outputTransform ker
+        tryOptim f x = fromMaybe x $ uncurry f x
+
+type Optimization = SOACNest -> [OutputTransform] -> Maybe (SOACNest, [OutputTransform])
+
+optimizations :: [Optimization]
+optimizations = [iswim, pushTranspose]
 
 pushTranspose :: SOACNest -> [OutputTransform] -> Maybe (SOACNest, [OutputTransform])
 pushTranspose nest ots = do
@@ -70,3 +76,29 @@ pushTranspose nest ots = do
         mapDepth = case Nest.operation nest of
                      Nest.Map2 _ _ levels _ -> length levels + 1
                      _                      -> 0
+
+iswim :: SOACNest -> [OutputTransform] -> Maybe (SOACNest, [OutputTransform])
+iswim nest ots
+  | Nest.Scan2 cs1 (Nest.NewNest lvl nn) [] es@[_] loc1 <- Nest.operation nest,
+    Nest.Map2 cs2 mb [] loc2 <- nn =
+    let (paramIds, bndIds, retTypes) = lvl
+        toInnerAccParam idd = idd { identType = rowType $ identType idd }
+        innerAccParams = map toInnerAccParam $ take (length es) paramIds
+        innerArrParams = drop (length es) paramIds
+        innerScan = Scan2 cs2 (Nest.bodyToLambda mb)
+                          (map Var innerAccParams) (map Var innerArrParams)
+                          (map (rowType . identType) innerArrParams) loc1
+        lam = TupleLambda {
+                tupleLambdaParams = map toParam $ innerAccParams ++ innerArrParams
+              , tupleLambdaReturnType = retTypes
+              , tupleLambdaBody =
+                  LetPat (TupId (map Id bndIds) loc2) innerScan
+                  (TupLit (map Var bndIds) loc2) loc2
+              , tupleLambdaSrcLoc = loc2
+              }
+    in Just (Nest.SOACNest
+               (es ++ [ Transpose cs2 0 1 e loc1 |
+                        e <- Nest.inputs nest])
+               (Nest.Map2 cs1 (Nest.Lambda lam) [] loc2),
+             ots ++ [OTranspose cs2 0 1])
+iswim _ _ = Nothing

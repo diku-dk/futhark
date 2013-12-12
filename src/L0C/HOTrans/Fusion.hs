@@ -423,11 +423,13 @@ fusionGatherExp fres (LetPat pat e body _)
           bres' <- fusionGatherExp bres $ TupLit ne loc
           addNewKer bres' (pat, soac)
 
-        SOAC.Scan2 _ lam nes arrs _ -> do
-          -- NOT FUSABLE
-          (_, lres)  <- fusionGatherLam (HS.empty, fres) lam
-          bres  <- binding pat $ fusionGatherExp lres body
-          foldM fusionGatherExp bres (nes++arrs)
+        SOAC.Scan2 _ lam nes _ loc -> do
+          -- NOT FUSABLE (probably), but still add as kernel, as
+          -- optimisations like ISWIM may make it fusable.
+          bres  <- bindPat pat $ fusionGatherExp fres body
+          (_, blres) <- fusionGatherLam (HS.empty, bres) lam
+          blres' <- fusionGatherExp blres $ TupLit nes loc
+          addNewKer blres' (pat, soac)
 
 fusionGatherExp fres (LetPat pat (Replicate n el loc) body _) = do
     bres <- bindPat pat $ fusionGatherExp fres body
