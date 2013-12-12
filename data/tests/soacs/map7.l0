@@ -1,0 +1,5 @@
+fun [[int]] main([[{int,int}]] a) =
+  let b = map(fn [int] ([{int,int}] row) =>
+                map(op+ , row),
+              a) in
+  b

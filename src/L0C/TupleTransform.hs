@@ -407,7 +407,7 @@ transformExp e@(Map lam arr tp loc) =
   let cs = certify c []
   in transformLambda (Conjoin (map Var cs) loc) lam $ \lam' ->
      untupleSOAC cs (typeOf e) $
-       Map2 cs (tuplifyLam lam') (map Var arrs)
+       Map2 cs lam' (map Var arrs)
                (untupleType $ transformType' tp) loc
 
 transformExp (Reduce lam ne arr tp loc) =
@@ -416,7 +416,7 @@ transformExp (Reduce lam ne arr tp loc) =
   let cs = catMaybes [c1,c2]
   in transformLambda (Conjoin (map Var cs) loc) lam $ \lam' ->
      untupleDeclExp (lambdaReturnType lam) $
-     Reduce2 cs (tuplifyLam lam') (map Var nes) (map Var arrs)
+     Reduce2 cs lam' (map Var nes) (map Var arrs)
              (untupleType $ transformType' tp) loc
 
 transformExp e@(Scan lam ne arr tp loc) =
@@ -425,7 +425,7 @@ transformExp e@(Scan lam ne arr tp loc) =
   let cs = catMaybes [c1,c2]
   in transformLambda (Conjoin (map Var cs) loc) lam $ \lam' ->
      untupleSOAC cs (typeOf e) $
-       Scan2 cs (tuplifyLam lam') (map Var nes) (map Var arrs)
+       Scan2 cs lam' (map Var nes) (map Var arrs)
                 (untupleType $ transformType' tp) loc
 
 transformExp e@(Filter lam arr _ loc) =
@@ -433,7 +433,7 @@ transformExp e@(Filter lam arr _ loc) =
   let cs = catMaybes [c]
   in transformLambda (Conjoin (map Var cs) loc) lam $ \lam' ->
      untupleSOAC cs (typeOf e) $
-       Filter2 cs (tuplifyLam lam') (map Var arrs) loc
+       Filter2 cs lam' (map Var arrs) loc
 
 transformExp (Redomap lam1 lam2 ne arr tp1 loc) =
   tupToIdentList arr $ \c1 arrs ->
@@ -442,7 +442,7 @@ transformExp (Redomap lam1 lam2 ne arr tp1 loc) =
   in transformLambda (Conjoin (map Var cs) loc) lam1 $ \lam1' ->
      transformLambda (Conjoin (map Var cs) loc) lam2 $ \lam2' ->
        untupleDeclExp (lambdaReturnType lam1) $
-       Redomap2 cs (tuplifyLam lam1') (tuplifyLam lam2')
+       Redomap2 cs lam1' lam2'
                    (map Var nes) (map Var arrs)
                    (untupleType $ transformType' tp1) loc
 
@@ -583,20 +583,16 @@ lambdaBinding ce params m = do
       letf = foldl comb id patpairs
   local bind $ m params' letf
 
-transformLambda :: Exp -> Lambda -> (Lambda -> TransformM Exp) -> TransformM Exp
+transformLambda :: Exp -> Lambda -> (TupleLambda -> TransformM Exp) -> TransformM Exp
 transformLambda ce (AnonymFun params body rettype loc) m = do
   lam <- lambdaBinding ce (map fromParam params) $ \params' letf -> do
-           body' <- transformExp body
-           return $ AnonymFun (map toParam params') (letf body') rettype' loc
+           body' <- tupToIdentList body $ \_ ks -> return $ TupLit (map Var ks) loc
+           return $ TupleLambda (map toParam params') (letf body') rettype' loc
   m lam
-  where rettype' = toDecl $ transformType rettype
-transformLambda _ (CurryFun fname curryargs rettype loc) m =
-  transform curryargs []
-  where transform [] curryargs' =
-          m $ CurryFun fname curryargs' (transformType rettype) loc
-        transform (a:as) curryargs' =
-          tupToIdentList a $ \c ks ->
-            transform as (curryargs' ++ map Var (certify c ks))
+  where rettype' = case toDecl $ transformType' rettype of
+                     Elem (Tuple ets) -> ets
+                     _                -> [rettype]
+transformLambda _ (CurryFun {}) _ = error "no curries yet"
 
 transformTupleLambda :: TupleLambda -> (TupleLambda -> TransformM Exp) -> TransformM Exp
 transformTupleLambda (TupleLambda params body rettype loc) m = do
@@ -605,21 +601,6 @@ transformTupleLambda (TupleLambda params body rettype loc) m = do
            return $ TupleLambda (map toParam params') body' rettype' loc
   m lam
   where rettype' = map (toDecl . transformType) rettype
-
-tuplifyLam :: Lambda -> TupleLambda
-tuplifyLam (CurryFun {}) = error "no curries yet"
-tuplifyLam (AnonymFun params body rettype loc) =
-  TupleLambda params body' rettypes loc
-  where (rettypes, body') =
-          case rettype of
-            Elem (Tuple ets) -> (ets, body)
-            _                -> ([rettype],
-                                 mapTails tuplifyLam' tuplifyType body)
-        tuplifyLam' e = TupLit [e] loc
-
-tuplifyType :: TypeBase als vn -> TypeBase als vn
-tuplifyType (Elem (Tuple ets)) = Elem $ Tuple ets
-tuplifyType t                  = Elem $ Tuple [t]
 
 newVar :: SrcLoc -> String -> Type -> TransformM (Ident, Exp)
 newVar loc name tp = do
