@@ -147,6 +147,7 @@ data NotSOAC = NotSOAC -- ^ The expression is not a (tuple-)SOAC at all.
              | InvalidArrayInput Exp -- ^ One of the input arrays has an
                                      -- invalid form, i.e. cannot be
                                      -- converted to an 'Input' value.
+               deriving (Show)
 
 inputFromExp' :: Exp -> Either NotSOAC Input
 inputFromExp' e = maybe (Left $ InvalidArrayInput e) Right $ inputFromExp e
