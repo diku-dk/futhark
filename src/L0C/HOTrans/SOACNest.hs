@@ -176,7 +176,8 @@ inpVars = mapM SOAC.inputToIdent
 
 matches :: [Parameter] -> [Ident] -> Bool
 matches params idds =
-  and $ zipWith (==) (map identName params) (map identName idds)
+  length params == length idds &&
+  and (zipWith (==) (map identName params) (map identName idds))
 
 tuplePatAndLit :: TupIdent -> Exp -> Maybe [Ident]
 tuplePatAndLit (TupId pats _) (TupLit es _)
