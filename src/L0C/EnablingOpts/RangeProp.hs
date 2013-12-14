@@ -241,8 +241,10 @@ isComparable range = do
 makeRangeComparable :: Range -> RangeM Range
 makeRangeComparable (Span Ninf Pinf) = return $ Span Ninf Pinf
 makeRangeComparable range = do
+  --_ <- trace ("\nMaking comparable: " ++ ppRange range) return ()
   rep_order <- replacementOrder range
-  trace ("\nreplacemantorder:\n\t" ++ show rep_order) $  foldingFun range rep_order
+  --_ <- trace ("replacemantorder: " ++ show (map textual rep_order) ) return ()
+  foldingFun range rep_order
   where
     foldingFun :: Range -> [VName] -> RangeM Range
     foldingFun r [] = --trace ("+ makeEndOfList " ++ ppRange r)
@@ -254,12 +256,19 @@ makeRangeComparable range = do
            return r
       else case r of
         Single e -> do r' <- substitute' ident (RExp e)
-                       --trace ("# make (eq) " ++ ppRange r ++ " ~~> " ++ ppRange r' ++ " by sub " ++ textual ident )
+                       --_ <- trace ("# make (eq) " ++ ppRange r ++ " ~~> " ++ ppRange r' ++ " by sub " ++ textual ident ) return ()
                        foldingFun r' rest
         Span a b -> do a' <- substitute' ident a
                        b' <- substitute' ident b
-                       --trace ("# make " ++ ppRange r ++ " ~~> " ++ ppRange (mergeRanges a' b') ++ " by sub " ++ textual ident )
+                       --_ <- trace ("# make " ++ ppRange r ++ " ~~> " ++ ppRange (mergeRanges a' b') ++ " by sub " ++ textual ident ) return ()
                        foldingFun (mergeRanges a' b') rest
+
+varsUsedInRange :: Range -> S.Set VName
+varsUsedInRange (Single e)                 = varsUsedInExp e
+varsUsedInRange (Span (RExp e1) (RExp e2)) = varsUsedInExp e1 `S.union` varsUsedInExp e2
+varsUsedInRange (Span (RExp e)  _        ) = varsUsedInExp e
+varsUsedInRange (Span _         (RExp e) ) = varsUsedInExp e
+varsUsedInRange _                          = S.empty
 
 varsUsedInExp :: Exp -> S.Set VName
 varsUsedInExp ex = execWriter $ expVars ex
@@ -549,7 +558,7 @@ substitute i (BinOp Pow e1 e2 ty pos) = do
             (True, _)    -> do av <- powRExp a v
                                bv <- powRExp b v
                                return $ Span av bv
-            (_, False)   -> do av <- powRExp a v
+            (_, True)    -> do av <- powRExp a v
                                bv <- powRExp b v
                                return $ Span bv av
             _            -> return $ Span Ninf Pinf
@@ -636,10 +645,7 @@ realExtractFromCond e = do
                               upRng <- substitute' vname b
                               return $ mergeRanges lowRng upRng
       comp <- makeRangeComparable rng'
-      let depend = case rng' of
-                     Span (RExp e1) (RExp e2) -> varsUsedInExp e1 `S.union` varsUsedInExp e2
-                     Single e1                -> varsUsedInExp e1
-                     _                        -> S.empty
+      let depend = varsUsedInRange rng'
       return (rng', comp, depend)
 
 extractFromCond :: Exp -> RangeM ( M.Map VName (Maybe Range, Maybe Range) )
@@ -848,36 +854,30 @@ ppDict rdict = foldr ((++) . (++ "\n") . ppDictElem) "" (M.toList $ M.delete dum
 
 
 
--- Returns a list of VName's that represents the order in which variables
--- should be replaced in the range comparison algorithm described in Figure
--- 2 of the paper. The only caller of this function should be the
--- initialization function of the range comparison algorithm
---
--- The function finds all dependency variables of the input range and
--- builds a map (with buildDepMap), containing vertices -> edges, these are
--- used to build the SCC. the helper function sccToRepOrder follows the
--- rules described in section 2.4.
---
+----------------------------------------
+-- Replacement order
+----------------------------------------
+
+-- Only used in these local computations
 type RDGMap = M.Map VName (S.Set VName)
 
+-- The list of VNames returned, represents a good order in which variables
+--   should be substituted when making a range comparable.
 replacementOrder :: Range -> RangeM [VName]
 replacementOrder r = do
-  let dependencies =
-       case r of
-         (Single e)                 -> varsUsedInExp e
-         (Span (RExp e1) (RExp e2)) -> varsUsedInExp e1 `S.union`
-                                       varsUsedInExp e2
-         (Span (RExp e)  _        ) -> varsUsedInExp e
-         (Span _         (RExp e) ) -> varsUsedInExp e
-         _                          -> S.empty
+  let dependencies = varsUsedInRange r
   rdg <- deriveRDG dependencies M.empty
   let scc = G.stronglyConnComp [(k,k,S.toList v) | (k,v) <- M.toList rdg]
-
   return $ sccToOrder scc
 
-  where
+  -- The heuristic for finding such an order, is to create a dependency graph
+  --   between variables. By finding and sorting the Strongly Connected Components (SCC)
+  --   we find the variables on which no other variable depend, and can substitute by that first.
+  -- We handle cyclic dependencies within a SCC by substituting each of the contained variables
+  --   twice , starting by a radonmly picked variable. (handled by sccToOrder)
 
-    deriveRDG :: (S.Set VName) -> RDGMap -> RangeM RDGMap
+  where
+    deriveRDG :: S.Set VName -> RDGMap -> RangeM RDGMap
     deriveRDG vertices rdgMap
       | vertices == M.keysSet rdgMap = return rdgMap
       | otherwise = do
@@ -890,11 +890,11 @@ replacementOrder r = do
 
     sccToOrder :: [G.SCC VName] -> [VName]
     sccToOrder scc =
-      let
-        sccToList = reverse . map (\s -> G.flattenSCC s)
-        duplicate = (\s -> if length s > 1 then [s,s] else [s])
-      in
-        concat . concatMap duplicate $ sccToList scc
+      concat . concatMap duplicate $ sccToList scc
+      where
+        sccToList = reverse . map G.flattenSCC
+        duplicate s = if length s > 1 then [s,s] else [s]
+
 
 
 ----------------------------------------
