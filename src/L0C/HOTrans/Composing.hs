@@ -14,6 +14,7 @@ import Data.List
 import Data.Loc
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.Map as M
+import Data.Maybe
 
 import L0C.L0
 
@@ -44,11 +45,13 @@ fuseMaps lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
   where lam2' =
           lam2 { tupleLambdaParams = lam2redparams ++ HM.keys inputmap
                , tupleLambdaBody = makeCopies $
-                                   LetPat pat (tupleLambdaBody lam1) (tupleLambdaBody lam2) loc
+                                   LetPat pat (tupleLambdaBody lam1)
+                                   (makeCopiesInner (tupleLambdaBody lam2)) loc
                }
         loc = srclocOf lam2
 
-        (lam2redparams, pat, inputmap, makeCopies) = fuseInputs lam1 inp1 out1 lam2 inp2
+        (lam2redparams, pat, inputmap, makeCopies, makeCopiesInner) =
+          fuseInputs lam1 inp1 out1 lam2 inp2
 
 fuseFilters :: TupleLambda -> [Input] -> [Ident]
             -> TupleLambda -> [Input] -> VName
@@ -84,39 +87,47 @@ fuseFilterInto lam1 inp1 out1 lam2 inp2 vname falsebranch = (lam2', HM.elems inp
                   typeOf falsebranch)
                  loc
         check = LetPat (TupId [Id checkident] loc)
-                (tupleLambdaBody lam1) branch loc
+                (tupleLambdaBody lam1) (makeCopiesInner branch) loc
         lam1tuple = TupLit (map (Var . fromParam) $ tupleLambdaParams lam1) loc
         bindins = LetPat pat lam1tuple check loc
 
-        (lam2redparams, pat, inputmap, makeCopies) = fuseInputs lam1 inp1 out1 lam2 inp2
+        (lam2redparams, pat, inputmap, makeCopies, makeCopiesInner) =
+          fuseInputs lam1 inp1 out1 lam2 inp2
 
 fuseInputs :: TupleLambda -> [Input] -> [Ident]
            -> TupleLambda -> [Input]
-           -> ([Parameter], TupIdent, HM.HashMap Parameter Input, Exp -> Exp)
+           -> ([Parameter], TupIdent, HM.HashMap Parameter Input, Exp -> Exp, Exp -> Exp)
 fuseInputs lam1 inp1 out1 lam2 inp2 =
-  (lam2redparams, pat, inputmap, makeCopies)
+  (lam2redparams, pat, inputmap, makeCopies, makeCopiesInner)
   where loc = srclocOf lam2
         pat = TupId (map (either (`Wildcard` loc) Id) outbnds) loc
         (lam2redparams, lam2arrparams) =
           splitAt (length (tupleLambdaParams lam2) - length inp2) $ tupleLambdaParams lam2
-        originputmap = HM.fromList $
-                       zip (tupleLambdaParams lam1 ++ lam2arrparams) (inp1 ++ inp2)
-        (outins, outbnds) = filterOutParams out1 lam2arrparams inp2
+        lam1inputmap = HM.fromList $ zip (tupleLambdaParams lam1) inp1
+        lam2inputmap = HM.fromList $ zip lam2arrparams            inp2
+        (lam2inputmap', makeCopiesInner) = removeDuplicateInputs lam2inputmap
+        originputmap = lam1inputmap `HM.union` lam2inputmap'
+        outins = uncurry (outParams out1) $ unzip $ HM.toList lam2inputmap'
+        outbnds = filterOutParams out1 outins
         (inputmap, makeCopies) =
-          removeDuplicateInputs $ foldr HM.delete originputmap outins
+          removeDuplicateInputs $ originputmap `HM.difference` outins
 
-filterOutParams :: [Ident] -> [Parameter] -> [Input]
-                -> ([Parameter], [Either Type Ident])
-filterOutParams out1 lam2arrparams inp2 =
-  (map fst outParams, snd $ mapAccumL checkUsed outUsage out1)
-  where outParams = map snd $ filter fst $ snd $
-                    mapAccumL isOutParam out1 $ zip lam2arrparams inp2
-        isOutParam outs (p, SOAC.Var a)
-          | a `elem` outs      = (a `delete` outs, (True,  (p, SOAC.Var a)))
-          | otherwise          = (outs,            (False, (p, SOAC.Var a)))
-        isOutParam outs (p, e) = (outs,            (False, (p, e)))
-        outUsage = foldl add M.empty outParams
-          where add m (p, e) = M.insertWith (++) e [fromParam p] m
+outParams :: [Ident] -> [Parameter] -> [Input]
+          -> HM.HashMap Parameter Input
+outParams out1 lam2arrparams inp2 =
+  HM.fromList $ mapMaybe isOutParam $ zip lam2arrparams inp2
+  where isOutParam (p, SOAC.Var a)
+          | a `elem` out1 = Just (p, SOAC.Var a)
+        isOutParam _      = Nothing
+
+filterOutParams :: [Ident]
+                -> HM.HashMap Parameter Input
+                -> [Either Type Ident]
+filterOutParams out1 outins =
+  snd $ mapAccumL checkUsed outUsage out1
+  where outUsage = HM.foldlWithKey' add M.empty outins
+          where add m p e = M.insertWith (++) e [fromParam p] m
+
         checkUsed m a =
           case M.lookup (SOAC.Var a) m of
             Just (p:ps) -> (M.insert (SOAC.Var a) ps m, Right p)
@@ -145,7 +156,7 @@ import L0C.Dev
 -}
 
 {-
-And now I can have top-level bindings the like the following, that explicitly call fuseMaps:
+And now I can have top-level bindings like the following, that explicitly call fuseMaps:
 
 (test1fun, test1ins) = fuseMaps lam1 lam1in out lam2 lam2in
   where lam1in = [SOAC.Var $ tident "[int] arr_x", SOAC.Var $ tident "[int] arr_z"]
