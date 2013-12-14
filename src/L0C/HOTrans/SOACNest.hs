@@ -172,7 +172,7 @@ vars = mapM varExp
         varExp _       = Nothing
 
 inpVars :: [SOAC.Input] -> Maybe [Ident]
-inpVars = vars . map SOAC.inputToExp
+inpVars = mapM SOAC.inputToIdent
 
 matches :: [Parameter] -> [Ident] -> Bool
 matches params idds =

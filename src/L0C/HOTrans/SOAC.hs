@@ -3,6 +3,8 @@ module L0C.HOTrans.SOAC ( SOAC (..)
                         , Index (..)
                         , inputFromExp
                         , inputToExp
+                        , inputToIdent
+                        , inputArray
                         , inputs
                         , setInputs
                         , lambda
@@ -60,6 +62,18 @@ inputToExp (Index cs idd idxcs idxs) =
   where t = stripArray (length idxs) $ identType idd
         idx (VarIndex indidd) = L0.Var indidd
         idx (ConstIndex i)    = Literal (IntVal i) $ srclocOf idd
+
+inputToIdent :: Input -> Maybe Ident
+inputToIdent (Var idd)             = Just idd
+inputToIdent (Iota _)              = Nothing
+inputToIdent (Transpose _ _ _ inp) = inputToIdent inp
+inputToIdent (Index {})            = Nothing
+
+inputArray :: Input -> Maybe Ident
+inputArray (Var idd)             = Just idd
+inputArray (Iota _)              = Nothing
+inputArray (Transpose _ _ _ inp) = inputArray inp
+inputArray (Index {})            = Nothing
 
 data SOAC = Map2 Certificates TupleLambda [Input] SrcLoc
           | Reduce2  Certificates TupleLambda [Exp] [Input] SrcLoc
