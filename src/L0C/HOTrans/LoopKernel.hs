@@ -1,5 +1,7 @@
 module L0C.HOTrans.LoopKernel
   ( FusedKer(..)
+  , newKernel
+  , inputs
   , OutputTransform(..)
   , applyTransform
   , optimizeKernel
@@ -26,13 +28,11 @@ applyTransform :: OutputTransform -> Ident -> SrcLoc -> Exp
 applyTransform (OTranspose cs k n)  = Transpose cs k n . Var
 
 data FusedKer = FusedKer {
-    fsoac      :: (TupIdent, SOAC)
-  -- ^ the fused SOAC statement, e.g.,
-  -- (z,w) = map2( f(a,b), x, y )
+    fsoac      :: SOAC
+  -- ^ the SOAC expression, e.g., map2( f(a,b), x, y )
 
-  , inputs     :: HS.HashSet Ident
-  -- ^ the input arrays used in the `soac'
-  -- stmt, i.e., `x', `y'.
+  , outputs    :: [Ident]
+  -- ^ The names bound to the outputs of the SOAC.
 
   , inplace    :: HS.HashSet VName
   -- ^ every kernel maintains a set of variables
@@ -46,13 +46,29 @@ data FusedKer = FusedKer {
   , outputTransform :: [OutputTransform]
   }
 
+newKernel :: [Ident] -> SOAC -> FusedKer
+newKernel idds soac =
+  FusedKer { fsoac = soac
+           , outputs = idds
+           , inplace = HS.empty
+           , fusedVars = []
+           , outputTransform = []
+           }
+
+
+inputs :: FusedKer -> HS.HashSet Ident
+inputs = HS.fromList . mapMaybe varInput . SOAC.inputs . fsoac
+  where varInput (SOAC.Var idd) = Just idd
+        varInput _              = Nothing
+
+
 optimizeKernel :: FusedKer -> FusedKer
-optimizeKernel ker = ker { fsoac = (fst $ fsoac ker, Nest.toSOAC resNest)
+optimizeKernel ker = ker { fsoac = Nest.toSOAC resNest
                          , outputTransform = resTrans
                          }
   where (resNest, resTrans) =
           foldr ((.) . tryOptim) id optimizations (startNest, startTrans)
-        startNest = Nest.fromSOAC $ snd $ fsoac ker
+        startNest = Nest.fromSOAC $ fsoac ker
         startTrans = outputTransform ker
         tryOptim f x = fromMaybe x $ uncurry f x
 

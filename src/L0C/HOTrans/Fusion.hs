@@ -158,16 +158,6 @@ data FusedRes = FusedRes {
   -- ^ The map recording the uses
   }
 
-isOmapKer :: FusedKer -> Bool
-isOmapKer ker =
-    let (_, soac) = fsoac ker
-    in case soac of
-        SOAC.Reduce2 {} -> True
-        SOAC.Redomap2{} -> True
-        SOAC.Map2    {} -> True
-        _              -> False
-
-
 isInpArrInResModKers :: FusedRes -> HS.HashSet KernName -> VName -> Bool
 isInpArrInResModKers ress kers nm =
   case HM.lookup nm (inpArr ress) of
@@ -199,7 +189,7 @@ soacInputs soac = do
   other_nms <- expandSoacInpArr other_nms0
   return (inp_nms, other_nms)
 
-addNewKer :: FusedRes -> (TupIdent, SOAC) -> FusionGM FusedRes
+addNewKer :: FusedRes -> ([Ident], SOAC) -> FusionGM FusedRes
 addNewKer res (idd, soac) = do
   (inp_nms, other_nms) <- soacInputs soac
 
@@ -208,14 +198,13 @@ addNewKer res (idd, soac) = do
 
   addNewKerWithUnfusable res (idd, soac) ufs
 
-addNewKerWithUnfusable :: FusedRes -> (TupIdent, SOAC) -> HS.HashSet VName -> FusionGM FusedRes
+addNewKerWithUnfusable :: FusedRes -> ([Ident], SOAC) -> HS.HashSet VName -> FusionGM FusedRes
 addNewKerWithUnfusable res (idd, soac) ufs = do
   nm_ker <- KernName <$> new "ker"
   let (inp_idds, _) = getIdentArr $ SOAC.inputs soac
       inp_nms0 = map identName inp_idds
-      new_ker = optimizeKernel $
-                FusedKer (idd, soac) (HS.fromList inp_idds) HS.empty [] []
-      out_nms = patNames idd
+      new_ker = optimizeKernel $ newKernel idd soac
+      out_nms = map identName idd
       comb    = HM.unionWith HS.union
       os' = HM.fromList [(arr,nm_ker) | arr <- out_nms]
             `HM.union` outArr res
@@ -225,13 +214,12 @@ addNewKerWithUnfusable res (idd, soac) ufs = do
            (HM.insert nm_ker new_ker (kernels res))
 
 -- map, reduce, redomap
-greedyFuse :: Bool -> HS.HashSet VName -> FusedRes -> (TupIdent, SOAC) -> FusionGM FusedRes
-greedyFuse is_repl lam_used_nms res (idd, soac) = do
+greedyFuse :: Bool -> HS.HashSet VName -> FusedRes -> ([Ident], SOAC) -> FusionGM FusedRes
+greedyFuse is_repl lam_used_nms res (out_idds, soac) = do
     -- Assumption: the free vars in lambda are already in
     -- 'unfusable res'.
     (inp_nms, other_nms) <- soacInputs soac
 
-    let out_idds     = patIdents idd
     let out_nms      = map identName out_idds
     -- Conditions for fusion:
     --   (i) none of `out_idds' belongs to the unfusable set.
@@ -274,7 +262,7 @@ greedyFuse is_repl lam_used_nms res (idd, soac) = do
     if not is_fusable then
       if is_repl then return res
       else -- nothing to fuse, add a new soac kernel to the result
-        addNewKerWithUnfusable res (idd, soac) ufs
+        addNewKerWithUnfusable res (out_idds, soac) ufs
      else do -- ... fuse current soac into to_fuse_kers ...
        fused_kers <- mapM (fuseSOACwithKer (out_idds, soac)) to_fuse_kers
        -- Need to suitably update `inpArr':
@@ -308,7 +296,8 @@ fuseSOACwithKer :: ([Ident], SOAC) -> FusedKer -> FusionGM FusedKer
 fuseSOACwithKer (out_ids1, soac1) ker = do
   -- We are fusing soac1 into soac2, i.e, the output of soac1 is going
   -- into soac2.
-  let (out_ids2, soac2) = fsoac ker
+  let soac2 = fsoac ker
+      out_ids2 = outputs ker
       cs1      = SOAC.certificates soac1
       cs2      = SOAC.certificates soac2
   case (soac2, soac1) of
@@ -316,7 +305,8 @@ fuseSOACwithKer (out_ids1, soac1) ker = do
       -- a bit of soac rewriting.
     (SOAC.Reduce2 _ lam ne arrs loc, SOAC.Map2   {}) -> do
       let soac2' = SOAC.Redomap2 (cs1++cs2) lam lam ne arrs loc
-          ker'   = ker { fsoac = (out_ids2, soac2') }
+          ker'   = ker { fsoac = soac2'
+                       , outputs = out_ids2 }
       fuseSOACwithKer (out_ids1, soac1) ker'
     _ -> do -- treat the complicated cases!
             let inp1_arr = SOAC.inputs soac1
@@ -324,17 +314,17 @@ fuseSOACwithKer (out_ids1, soac1) ker = do
                 lam1     = SOAC.lambda soac1
                 lam2     = SOAC.lambda soac2
 
-            (res_soac, res_inp) <-
+            res_soac <-
               case (soac2,soac1) of
                 ----------------------------------------------------
                 -- The Fusions that are semantically map fusions:
                 ----------------------------------------------------
                 (SOAC.Map2 _ _ _ pos, SOAC.Map2    {}) -> do
                   let (res_lam, new_inp) = fuseMaps lam1 inp1_arr out_ids1 lam2 inp2_arr
-                  return (SOAC.Map2 (cs1++cs2) res_lam new_inp pos, new_inp)
+                  return $ SOAC.Map2 (cs1++cs2) res_lam new_inp pos
                 (SOAC.Redomap2 _ lam21 _ ne _ pos, SOAC.Map2 {})-> do
                   let (res_lam, new_inp) = fuseMaps lam1 inp1_arr out_ids1 lam2 inp2_arr
-                  return (SOAC.Redomap2 (cs1++cs2) lam21 res_lam ne new_inp pos, new_inp)
+                  return $ SOAC.Redomap2 (cs1++cs2) lam21 res_lam ne new_inp pos
 
                 ----------------------------------------------------
                 -- The Fusions that are semantically filter fusions:
@@ -342,15 +332,15 @@ fuseSOACwithKer (out_ids1, soac1) ker = do
                 (SOAC.Reduce2 _ _ ne _ pos, SOAC.Filter2 {}) -> do
                   name <- new "check"
                   let (res_lam, new_inp) = fuseFilterIntoFold lam1 inp1_arr out_ids1 lam2 inp2_arr name
-                  return (SOAC.Reduce2 (cs1++cs2) res_lam ne new_inp pos, new_inp)
+                  return $ SOAC.Reduce2 (cs1++cs2) res_lam ne new_inp pos
                 (SOAC.Redomap2 _ lam21 _ nes _ pos, SOAC.Filter2 {}) -> do
                   name <- new "check"
                   let (res_lam, new_inp) = fuseFilterIntoFold lam1 inp1_arr out_ids1 lam2 inp2_arr name
-                  return (SOAC.Redomap2 (cs1++cs2) lam21 res_lam nes new_inp pos, new_inp)
+                  return $ SOAC.Redomap2 (cs1++cs2) lam21 res_lam nes new_inp pos
                 (SOAC.Filter2 _ _ _ pos, SOAC.Filter2 {}) -> do
                   name <- new "check"
                   let (res_lam, new_inp) = fuseFilters lam1 inp1_arr out_ids1 lam2 inp2_arr name
-                  return (SOAC.Filter2 (cs1++cs2) res_lam new_inp pos, new_inp)
+                  return $ SOAC.Filter2 (cs1++cs2) res_lam new_inp pos
 
                 ----------------------------------------------------
                 -- Unfusable: should not have reached here!!!
@@ -360,15 +350,13 @@ fuseSOACwithKer (out_ids1, soac1) ker = do
                                      ++ "(soac2,soac1): (" ++ ppExp (SOAC.toExp soac2)++", "++ppExp (SOAC.toExp soac1))
             -- END CASE(soac2,soac1)
 
-            let inp_new = foldl (\lst e -> case e of
-                                            SOAC.Var idd -> lst++[idd]
-                                            _            -> lst
-                                ) [] res_inp
-
             -- soac_new1<- trace ("\nFUSED KERNEL: " ++ (nameToString . identName) (head out_ids1) ++ " : " ++ ppExp res_soac ++ " Input arrs: " ++ concatMap (nameToString . identName) inp_new) (return res_soac)
 
             let fusedVars_new = fusedVars ker++out_ids1
-            return $ FusedKer (out_ids2, res_soac) (HS.fromList inp_new) (inplace ker) fusedVars_new (outputTransform ker)
+            return $ ker { fsoac = res_soac
+                         , outputs = out_ids2
+                         , fusedVars = fusedVars_new
+                         }
 
 ------------------------------------------------------------------------
 ------------------------------------------------------------------------
@@ -402,26 +390,26 @@ fusionGatherExp fres (LetPat pat e body _)
         SOAC.Map2 _ lam _ _ -> do
           bres  <- bindPat pat $ fusionGatherExp fres body
           (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
-          greedyFuse False used_lam blres (pat, soac)
+          greedyFuse False used_lam blres (patIdents pat, soac)
 
         SOAC.Filter2 _ lam _ _ -> do
           bres  <- bindPat pat $ fusionGatherExp fres body
           (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
-          greedyFuse False used_lam blres (pat, soac)
+          greedyFuse False used_lam blres (patIdents pat, soac)
 
         SOAC.Reduce2 _ lam nes _ loc -> do
           -- a reduce always starts a new kernel
           bres  <- bindPat pat $ fusionGatherExp fres body
           bres' <- fusionGatherExp bres $ TupLit nes loc
           (_, blres) <- fusionGatherLam (HS.empty, bres') lam
-          addNewKer blres (pat, soac)
+          addNewKer blres (patIdents pat, soac)
 
         SOAC.Redomap2 _ outer_red inner_red ne _ loc -> do
           -- a redomap always starts a new kernel
           (_, lres)  <- foldM fusionGatherLam (HS.empty, fres) [outer_red, inner_red]
           bres  <- bindPat pat $ fusionGatherExp lres body
           bres' <- fusionGatherExp bres $ TupLit ne loc
-          addNewKer bres' (pat, soac)
+          addNewKer bres' (patIdents pat, soac)
 
         SOAC.Scan2 _ lam nes _ loc -> do
           -- NOT FUSABLE (probably), but still add as kernel, as
@@ -429,7 +417,7 @@ fusionGatherExp fres (LetPat pat e body _)
           bres  <- bindPat pat $ fusionGatherExp fres body
           (_, blres) <- fusionGatherLam (HS.empty, bres) lam
           blres' <- fusionGatherExp blres $ TupLit nes loc
-          addNewKer blres' (pat, soac)
+          addNewKer blres' (patIdents pat, soac)
 
 fusionGatherExp _ (LetPat _ e _ loc)
   | Left (SOAC.InvalidArrayInput inpe) <- SOAC.fromExp e =
@@ -448,7 +436,7 @@ fusionGatherExp fres (LetPat pat (Replicate n el loc) body _) = do
                         t                -> (TupLit [el] loc, [t])
         repl_lam = TupleLambda [toParam repl_id] lame (map toDecl rwt) loc
         soac_repl= SOAC.Map2 [] repl_lam [SOAC.Iota n] loc
-    greedyFuse True used_set bres' (pat, soac_repl)
+    greedyFuse True used_set bres' (patIdents pat, soac_repl)
 
 fusionGatherExp fres (LetPat pat e body _) = do
     let pat_vars = map Var $ patIdents pat
@@ -620,7 +608,8 @@ replaceSOAC pat soac = do
                                    ("In Fusion.hs, replaceSOAC, outArr in ker_name "
                                     ++"which is not in Res: "++textual (unKernName knm))
         Just ker -> do
-          let (pat', new_soac) = fsoac ker
+          let new_soac = fsoac ker
+              pat' = TupId (map Id $ outputs ker) loc
           if pat /= pat'
           then badFusionGM $ EnablingOptError loc
                               ("In Fusion.hs, replaceSOAC, "
@@ -641,7 +630,7 @@ replaceSOAC pat soac = do
                             (_, nfres) <- fusionGatherLam (HS.empty, mkFreshFusionRes) lam'
                             let nfres' =  cleanFusionResult nfres
                             lam''      <- bindRes nfres' $ fuseInLambda lam'
-                            transformOutput (outputTransform ker) (patIdents pat) $
+                            transformOutput (outputTransform ker) (outputs ker) $
                               SOAC.setLambda lam'' new_soac
 
 transformOutput :: [OutputTransform]
@@ -748,20 +737,28 @@ errorIllegalFus soac_name pos =
 isCompatibleKer :: ([VName], SOAC) -> FusedKer -> FusionGM Bool
 isCompatibleKer (_,       SOAC.Map2    {}) ker = return $ isOmapKer ker
 isCompatibleKer (out_nms, SOAC.Filter2 {}) ker = do
-    let (_, soac) = fsoac ker
-    let ok = case soac of
-                SOAC.Reduce2 {} -> True
-                SOAC.Redomap2{} -> True
-                SOAC.Filter2 {} -> True
-                SOAC.Map2    {} -> False
-                SOAC.Scan2   {} -> False
-    if not ok
-    then return False
-    else do -- check that the input-array set of consumer is included
-            -- in the output-array set of producer.  That is, a
-            -- filter-producer can only be fused if the consumer
-            -- accepts input from no other source.
-            let (inp_idds2, other_idds2) = getIdentArr $ SOAC.inputs soac
-                inp_lst = map identName inp_idds2
-            return $ null other_idds2 && all (`elem` out_nms) inp_lst
+  let soac = fsoac ker
+      ok = case soac of
+            SOAC.Reduce2 {} -> True
+            SOAC.Redomap2{} -> True
+            SOAC.Filter2 {} -> True
+            SOAC.Map2    {} -> False
+            SOAC.Scan2   {} -> False
+  if not ok
+  then return False
+  else do -- check that the input-array set of consumer is included
+          -- in the output-array set of producer.  That is, a
+          -- filter-producer can only be fused if the consumer
+          -- accepts input from no other source.
+          let (inp_idds2, other_idds2) = getIdentArr $ SOAC.inputs soac
+              inp_lst = map identName inp_idds2
+          return $ null other_idds2 && all (`elem` out_nms) inp_lst
 isCompatibleKer _ _ = return False
+
+isOmapKer :: FusedKer -> Bool
+isOmapKer ker =
+  case fsoac ker of
+    SOAC.Reduce2 {} -> True
+    SOAC.Redomap2{} -> True
+    SOAC.Map2    {} -> True
+    _               -> False
