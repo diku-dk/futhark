@@ -458,7 +458,7 @@ copyCtPropIdent ident@(Ident vnm _ loc) = do
                                     return ident
 
 copyCtPropCerts :: Certificates -> CPropM Certificates
-copyCtPropCerts = liftM concat . mapM check
+copyCtPropCerts = liftM (nub . concat) . mapM check
   where check idd = do
           vv <- asks $ HM.lookup (identName idd) . envVtable
           case vv of
