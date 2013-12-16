@@ -2,12 +2,19 @@ module L0C.HOTrans.LoopKernel
   ( FusedKer(..)
   , newKernel
   , inputs
+  , setInputs
+  , arrInputs
   , OutputTransform(..)
   , applyTransform
+  , outputToInput
+  , outputsToInput
   , optimizeKernel
+  , optimizeSOAC
   )
   where
 
+import Control.Applicative
+import Control.Arrow (first)
 import Control.Monad
 
 import qualified Data.HashSet as HS
@@ -26,6 +33,12 @@ data OutputTransform = OTranspose Certificates Int Int
 
 applyTransform :: OutputTransform -> Ident -> SrcLoc -> Exp
 applyTransform (OTranspose cs k n)  = Transpose cs k n . Var
+
+outputToInput :: OutputTransform -> SOAC.Input -> SOAC.Input
+outputToInput (OTranspose cs k n) = SOAC.Transpose cs k n
+
+outputsToInput :: [OutputTransform] -> SOAC.Input -> SOAC.Input
+outputsToInput = foldr ((.) . outputToInput) id
 
 data FusedKer = FusedKer {
     fsoac      :: SOAC
@@ -56,21 +69,40 @@ newKernel idds soac =
            }
 
 
-inputs :: FusedKer -> HS.HashSet Ident
-inputs = HS.fromList . mapMaybe varInput . SOAC.inputs . fsoac
-  where varInput (SOAC.Var idd) = Just idd
-        varInput _              = Nothing
+arrInputs :: FusedKer -> HS.HashSet Ident
+arrInputs = HS.fromList . mapMaybe arrInput . inputs
+  where arrInput (SOAC.Var idd)             = Just idd
+        arrInput (SOAC.Transpose _ _ _ inp) = arrInput inp
+        arrInput _                          = Nothing
 
+inputs :: FusedKer -> [SOAC.Input]
+inputs = SOAC.inputs . fsoac
 
-optimizeKernel :: FusedKer -> FusedKer
-optimizeKernel ker = ker { fsoac = Nest.toSOAC resNest
-                         , outputTransform = resTrans
-                         }
-  where (resNest, resTrans) =
-          foldr ((.) . tryOptim) id optimizations (startNest, startTrans)
-        startNest = Nest.fromSOAC $ fsoac ker
+setInputs :: [SOAC.Input] -> FusedKer -> FusedKer
+setInputs inps ker = ker { fsoac = inps `SOAC.setInputs` fsoac ker }
+
+optimizeKernel :: FusedKer -> Maybe FusedKer
+optimizeKernel ker = do
+  (resNest, resTrans) <- optimizeSOACNest startNest startTrans
+  Just ker { fsoac = Nest.toSOAC resNest
+           , outputTransform = resTrans
+           }
+  where startNest = Nest.fromSOAC $ fsoac ker
         startTrans = outputTransform ker
-        tryOptim f x = fromMaybe x $ uncurry f x
+
+optimizeSOAC :: SOAC -> Maybe (SOAC, [OutputTransform])
+optimizeSOAC soac =
+  first Nest.toSOAC <$> optimizeSOACNest (Nest.fromSOAC soac) []
+
+optimizeSOACNest :: SOACNest -> [OutputTransform]
+                 -> Maybe (SOACNest, [OutputTransform])
+optimizeSOACNest soac os = case foldr comb (False, (soac, os)) optimizations of
+                             (False, _)           -> Nothing
+                             (True, (soac', os')) -> Just (soac', os')
+  where comb f (changed, (soac', os')) =
+          case f soac' os of
+            Nothing             -> (changed, (soac',  os'))
+            Just (soac'', os'') -> (True,    (soac'', os''))
 
 type Optimization = SOACNest -> [OutputTransform] -> Maybe (SOACNest, [OutputTransform])
 

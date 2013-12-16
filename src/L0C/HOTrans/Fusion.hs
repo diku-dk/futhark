@@ -202,7 +202,8 @@ addNewKerWithUnfusable res (idd, soac) ufs = do
   nm_ker <- KernName <$> new "ker"
   let (inp_idds, _) = getIdentArr $ SOAC.inputs soac
       inp_nms0 = map identName inp_idds
-      new_ker = optimizeKernel $ newKernel idd soac
+      ini_ker = newKernel idd soac
+      new_ker = fromMaybe ini_ker $ optimizeKernel ini_ker
       out_nms = map identName idd
       comb    = HM.unionWith HS.union
       os' = HM.fromList [(arr,nm_ker) | arr <- out_nms]
@@ -282,9 +283,9 @@ greedyFuse is_repl lam_used_nms res (out_idds, soac) = do
                                                    then HM.delete nm         inpp
                                                    else HM.insert nm new_set inpp
                                 )
-                            inpa $ HS.map identName $ inputs kold
+                            inpa $ HS.map identName $ arrInputs kold
                       in HM.fromList [ (k, HS.singleton knm)
-                                        | k <- HS.toList $ HS.map identName (inputs knew) ]
+                                        | k <- HS.toList $ HS.map identName (arrInputs knew) ]
                            `comb` inpa')
              (inpArr res) (zip3 to_fuse_kers fused_kers to_fuse_knms)
        -- Update the kernels map
@@ -295,10 +296,16 @@ greedyFuse is_repl lam_used_nms res (out_idds, soac) = do
        return $ FusedRes True (outArr res) inpArr' ufs kernels'
 
 attemptFusion :: [Ident] -> SOAC -> FusedKer -> FusionGM (Maybe FusedKer)
-attemptFusion outIds soac ker =
-  if isCompatibleKer (map identName outIds, soac) ker then
-    Just <$> fuseSOACwithKer (outIds, soac) ker
-  else return Nothing
+attemptFusion outIds soac ker
+  | Just (soac', ots) <- optimizeSOAC soac =
+      let ker' = map (outputsToInput ots) (inputs ker) `setInputs` ker
+      in attemptFusion outIds soac' ker'
+  | Just ker' <- optimizeKernel ker =
+      attemptFusion outIds soac ker'
+  | isCompatibleKer (map identName outIds, soac) ker =
+      Just <$> fuseSOACwithKer (outIds, soac) ker
+  | otherwise =
+      return Nothing
 
 fuseSOACwithKer :: ([Ident], SOAC) -> FusedKer -> FusionGM FusedKer
 fuseSOACwithKer (out_ids1, soac1) ker = do
@@ -423,9 +430,9 @@ fusionGatherExp fres (LetPat pat e body _)
           -- NOT FUSABLE (probably), but still add as kernel, as
           -- optimisations like ISWIM may make it fusable.
           bres  <- bindPat pat $ fusionGatherExp fres body
-          (_, blres) <- fusionGatherLam (HS.empty, bres) lam
+          (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
           blres' <- fusionGatherExp blres $ TupLit nes loc
-          addNewKer blres' (patIdents pat, soac)
+          greedyFuse False used_lam blres' (patIdents pat, soac)
 
 fusionGatherExp _ (LetPat _ e _ loc)
   | Left (SOAC.InvalidArrayInput inpe) <- SOAC.fromExp e =
