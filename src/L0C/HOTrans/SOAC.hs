@@ -5,6 +5,7 @@ module L0C.HOTrans.SOAC ( SOAC (..)
                         , inputToExp
                         , inputToIdent
                         , inputArray
+                        , inputType
                         , inputs
                         , setInputs
                         , lambda
@@ -74,6 +75,9 @@ inputArray (Var idd)             = Just idd
 inputArray (Iota _)              = Nothing
 inputArray (Transpose _ _ _ inp) = inputArray inp
 inputArray (Index {})            = Nothing
+
+inputType :: Input -> Type
+inputType = typeOf . inputToExp
 
 data SOAC = Map2 Certificates TupleLambda [Input] SrcLoc
           | Reduce2  Certificates TupleLambda [Exp] [Input] SrcLoc
