@@ -1,8 +1,8 @@
 module L0C.HORepresentation.SOACNest
   ( SOACNest(..)
   , Combinator(..)
-  , levels
-  , setLevels
+  , nesting
+  , setNesting
   , body
   , setBody
   , NestBody(..)
@@ -78,19 +78,19 @@ instance Located Combinator where
   locOf (Filter2 _ _ _ loc) = locOf loc
   locOf (Redomap2 _ _ _ _ _ loc) = locOf loc
 
-levels :: Combinator -> [Nesting]
-levels (Map2 _ _ ls _) = ls
-levels (Reduce2 _ _ ls _ _) = ls
-levels (Scan2 _ _ ls _ _) = ls
-levels (Filter2 _ _ ls _) = ls
-levels (Redomap2 _ _ _ ls _ _) = ls
+nesting :: Combinator -> [Nesting]
+nesting (Map2 _ _ ls _) = ls
+nesting (Reduce2 _ _ ls _ _) = ls
+nesting (Scan2 _ _ ls _ _) = ls
+nesting (Filter2 _ _ ls _) = ls
+nesting (Redomap2 _ _ _ ls _ _) = ls
 
-setLevels :: [Nesting] -> Combinator -> Combinator
-setLevels ls (Map2 cs b _ loc) = Map2 cs b ls loc
-setLevels ls (Reduce2 cs b _ es loc) = Reduce2 cs b ls es loc
-setLevels ls (Scan2 cs b _ es loc) = Scan2 cs b ls es loc
-setLevels ls (Filter2 cs b _ loc) = Filter2 cs b ls loc
-setLevels ls (Redomap2 cs l b _ es loc) = Redomap2 cs l b ls es loc
+setNesting :: [Nesting] -> Combinator -> Combinator
+setNesting ls (Map2 cs b _ loc) = Map2 cs b ls loc
+setNesting ls (Reduce2 cs b _ es loc) = Reduce2 cs b ls es loc
+setNesting ls (Scan2 cs b _ es loc) = Scan2 cs b ls es loc
+setNesting ls (Filter2 cs b _ loc) = Filter2 cs b ls loc
+setNesting ls (Redomap2 cs l b _ es loc) = Redomap2 cs l b ls es loc
 
 body :: Combinator -> NestBody
 body (Map2 _ b _ _) = b
@@ -185,7 +185,7 @@ toSOAC (SOACNest as comb@(Redomap2 cs l b _ es loc)) =
 
 subLambda :: NestBody -> Combinator -> TupleLambda
 subLambda b comb =
-  case levels comb of
+  case nesting comb of
     [] -> bodyToLambda b
     ((paramIds, inps, bndIds, retTypes):rest) ->
       let inps' = fromMaybe (map SOAC.Var paramIds) inps
@@ -193,7 +193,7 @@ subLambda b comb =
                      , tupleLambdaBody       =
                        LetPat (TupId (map Id bndIds) loc)
                                 (SOAC.toExp $ toSOAC $
-                                 SOACNest inps' (rest `setLevels` comb))
+                                 SOACNest inps' (rest `setNesting` comb))
                                 (TupLit (map Var bndIds) loc) loc
                      , tupleLambdaSrcLoc     = loc
                      , tupleLambdaParams     = map toParam paramIds
