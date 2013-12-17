@@ -200,15 +200,14 @@ addNewKer res (idd, soac) = do
 addNewKerWithUnfusable :: FusedRes -> ([Ident], SOAC) -> HS.HashSet VName -> FusionGM FusedRes
 addNewKerWithUnfusable res (idd, soac) ufs = do
   nm_ker <- KernName <$> new "ker"
-  let (inp_idds, _) = getIdentArr $ SOAC.inputs soac
-      inp_nms0 = map identName inp_idds
-      ini_ker = newKernel idd soac
-      new_ker = fromMaybe ini_ker $ optimizeKernel ini_ker
+  let ini_ker = newKernel idd soac
+      new_ker = fromMaybe ini_ker $ optimizeKernel Nothing ini_ker
       out_nms = map identName idd
       comb    = HM.unionWith HS.union
       os' = HM.fromList [(arr,nm_ker) | arr <- out_nms]
             `HM.union` outArr res
-      is' = HM.fromList [(arr,HS.singleton nm_ker) | arr <- inp_nms0]
+      is' = HM.fromList [(identName arr,HS.singleton nm_ker)
+                         | arr <- mapMaybe SOAC.inputArray $ SOAC.inputs soac]
             `comb` inpArr res
   return $ FusedRes (rsucc res) os' is' ufs
            (HM.insert nm_ker new_ker (kernels res))
@@ -260,7 +259,9 @@ greedyFuse is_repl lam_used_nms res (out_idds, soac) = do
     --         BUT which said kernel is not the one we are fusing with (now)!
     let mod_kerS  = if is_fusable then to_fuse_knmSet else HS.empty
     let used_inps = filter (isInpArrInResModKers res mod_kerS) inp_nms
-    let ufs       = HS.unions [unfusable res, HS.fromList used_inps, HS.fromList other_nms]
+    let ufs       = HS.unions [unfusable res, HS.fromList used_inps,
+                               HS.fromList other_nms `HS.difference`
+                               HS.fromList (map identName $ mapMaybe SOAC.inputArray $ SOAC.inputs soac)]
     let comb      = HM.unionWith HS.union
 
     if not is_fusable then
@@ -297,12 +298,12 @@ greedyFuse is_repl lam_used_nms res (out_idds, soac) = do
 
 attemptFusion :: [Ident] -> SOAC -> FusedKer -> FusionGM (Maybe FusedKer)
 attemptFusion outIds soac ker
-  | Just (soac', ots) <- optimizeSOAC soac =
+  | Just (soac', ots) <- optimizeSOAC Nothing soac =
       let ker' = map (outputsToInput ots) (inputs ker) `setInputs` ker
       in attemptFusion outIds soac' ker'
-  | Just ker' <- optimizeKernel ker =
+  | Just ker' <- optimizeKernel (Just outIds) ker =
       attemptFusion outIds soac ker'
-  | isCompatibleKer (map identName outIds, soac) ker =
+  | isCompatibleKer (outIds, soac) ker =
       Just <$> fuseSOACwithKer (outIds, soac) ker
   | otherwise =
       return Nothing
@@ -702,21 +703,19 @@ mergeFusionRes res1 res2 = do
 
 
 -- | The expression arguments are supposed to be array-type exps.
---   Returns a tuple, in which the arrays that are vars or transposes
---   are in the first element of the tuple, and the one which are
---   indexed should be in the second.
+--   Returns a tuple, in which the arrays that are vars are in the
+--   first element of the tuple, and the one which are indexed or
+--   transposes should be in the second.
 --
---   The normalization *SHOULD* ensure that input arrays in SOAC's are
---   only vars, transposes, indexed-vars, and iotas, hence error is
---   raised in all other cases.  E.g., for expression `map2(f, a,
---   b[i])', the result should be `([a],[b])'
+--   E.g., for expression `map2(f, a, b[i])', the result should be
+--   `([a],[b])'
 getIdentArr :: [SOAC.Input] -> ([Ident], [Ident])
 getIdentArr = foldl comb ([],[])
   where comb (vs, os) (SOAC.Var idd) =
           (idd:vs, os)
         comb (vs, os) (SOAC.Transpose _ _ _ inp) =
           let (ks1, ks2) = getIdentArr [inp]
-          in (ks1++vs, ks2++os)
+          in (vs, ks1++ks2++os)
         comb (vs, os) (SOAC.Index _ idd _ _) =
           (vs, idd:os)
         comb (vs, os) (SOAC.Iota _) = (vs, os)
@@ -727,7 +726,6 @@ cleanFusionResult fres =
         newoa = HM.filter (`HM.member` newks)            (outArr  fres)
         newia = HM.map    (HS.filter (`HM.member` newks)) (inpArr fres)
     in fres { outArr = newoa, inpArr = newia, kernels = newks }
-
 
 --------------
 --- Errors ---
@@ -749,9 +747,11 @@ errorIllegalFus soac_name pos =
 --------------------------------------------
 --------------------------------------------
 
-isCompatibleKer :: ([VName], SOAC) -> FusedKer -> Bool
-isCompatibleKer (_,       SOAC.Map2    {}) ker = isOmapKer ker
-isCompatibleKer (out_nms, SOAC.Filter2 {}) ker =
+isCompatibleKer :: ([Ident], SOAC) -> FusedKer -> Bool
+isCompatibleKer (outIds, SOAC.Map2 {}) ker =
+  isOmapKer ker &&
+  all (`elem` inputs ker) (map SOAC.Var outIds)
+isCompatibleKer (outIds, SOAC.Filter2 {}) ker =
   let soac = fsoac ker
       ok = case soac of
             SOAC.Reduce2 {} -> True
@@ -761,13 +761,13 @@ isCompatibleKer (out_nms, SOAC.Filter2 {}) ker =
             SOAC.Scan2   {} -> False
   in if not ok
      then False
-     else let -- check that the input-array set of consumer is included
-              -- in the output-array set of producer.  That is, a
-              -- filter-producer can only be fused if the consumer
-              -- accepts input from no other source.
-              (inp_idds2, other_idds2) = getIdentArr $ SOAC.inputs soac
-              inp_lst = map identName inp_idds2
-          in null other_idds2 && all (`elem` out_nms) inp_lst
+     else -- check that the input-array set of consumer is included
+          -- in the output-array set of producer.  That is, a
+          -- filter-producer can only be fused if the consumer
+          -- accepts input from no other source.
+          case mapM SOAC.inputArray $ SOAC.inputs soac of
+            Nothing       -> False
+            Just inputIds -> all (`elem` outIds) inputIds
 isCompatibleKer _ _ = False
 
 isOmapKer :: FusedKer -> Bool

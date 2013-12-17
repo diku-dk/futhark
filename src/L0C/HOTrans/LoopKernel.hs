@@ -14,7 +14,7 @@ module L0C.HOTrans.LoopKernel
   where
 
 import Control.Applicative
-import Control.Arrow (first)
+import Control.Arrow (first, second)
 import Control.Monad
 
 import qualified Data.HashSet as HS
@@ -58,6 +58,7 @@ data FusedKer = FusedKer {
 
   , outputTransform :: [OutputTransform]
   }
+                deriving (Show)
 
 newKernel :: [Ident] -> SOAC -> FusedKer
 newKernel idds soac =
@@ -70,10 +71,7 @@ newKernel idds soac =
 
 
 arrInputs :: FusedKer -> HS.HashSet Ident
-arrInputs = HS.fromList . mapMaybe arrInput . inputs
-  where arrInput (SOAC.Var idd)             = Just idd
-        arrInput (SOAC.Transpose _ _ _ inp) = arrInput inp
-        arrInput _                          = Nothing
+arrInputs = HS.fromList . mapMaybe SOAC.inputArray . inputs
 
 inputs :: FusedKer -> [SOAC.Input]
 inputs = SOAC.inputs . fsoac
@@ -81,57 +79,97 @@ inputs = SOAC.inputs . fsoac
 setInputs :: [SOAC.Input] -> FusedKer -> FusedKer
 setInputs inps ker = ker { fsoac = inps `SOAC.setInputs` fsoac ker }
 
-optimizeKernel :: FusedKer -> Maybe FusedKer
-optimizeKernel ker = do
-  (resNest, resTrans) <- optimizeSOACNest startNest startTrans
+optimizeKernel :: Maybe [Ident] -> FusedKer -> Maybe FusedKer
+optimizeKernel inp ker = do
+  (resNest, resTrans) <- optimizeSOACNest inp startNest startTrans
   Just ker { fsoac = Nest.toSOAC resNest
            , outputTransform = resTrans
            }
   where startNest = Nest.fromSOAC $ fsoac ker
         startTrans = outputTransform ker
 
-optimizeSOAC :: SOAC -> Maybe (SOAC, [OutputTransform])
-optimizeSOAC soac =
-  first Nest.toSOAC <$> optimizeSOACNest (Nest.fromSOAC soac) []
+optimizeSOAC :: Maybe [Ident] -> SOAC -> Maybe (SOAC, [OutputTransform])
+optimizeSOAC inp soac =
+  first Nest.toSOAC <$> optimizeSOACNest inp (Nest.fromSOAC soac) []
 
-optimizeSOACNest :: SOACNest -> [OutputTransform]
+optimizeSOACNest :: Maybe [Ident] -> SOACNest -> [OutputTransform]
                  -> Maybe (SOACNest, [OutputTransform])
-optimizeSOACNest soac os = case foldr comb (False, (soac, os)) optimizations of
+optimizeSOACNest inp soac os = case foldr comb (False, (soac, os)) optimizations of
                              (False, _)           -> Nothing
                              (True, (soac', os')) -> Just (soac', os')
   where comb f (changed, (soac', os')) =
-          case f soac' os of
+          case f inp soac' os of
             Nothing             -> (changed, (soac',  os'))
             Just (soac'', os'') -> (True,    (soac'', os''))
 
-type Optimization = SOACNest -> [OutputTransform] -> Maybe (SOACNest, [OutputTransform])
+type Optimization = Maybe [Ident] -> SOACNest -> [OutputTransform] -> Maybe (SOACNest, [OutputTransform])
 
 optimizations :: [Optimization]
 optimizations = [iswim, pushTranspose]
 
-pushTranspose :: SOACNest -> [OutputTransform] -> Maybe (SOACNest, [OutputTransform])
-pushTranspose nest ots = do
-  (n, k, cs, inputs') <- transposedInputs $ Nest.inputs nest
-  if n+k < mapDepth then
-    Just (inputs' `Nest.setInputs` nest,
-          ots ++ [OTranspose cs n k])
-  else Nothing
+mapDepth :: SOACNest -> Int
+mapDepth nest = case Nest.operation nest of
+                  Nest.Map2 _ _ levels _ -> length levels + 1
+                  _                      -> 0
+
+pushTranspose :: Maybe [Ident] -> SOACNest -> [OutputTransform] -> Maybe (SOACNest, [OutputTransform])
+pushTranspose _ nest ots
+  | Just (n, k, cs, inputs') <- transposedInputs $ Nest.inputs nest,
+    n+k < mapDepth nest = Just (inputs' `Nest.setInputs` nest,
+                                ots ++ [OTranspose cs n k])
   where transposedInputs (SOAC.Transpose cs n k input:args) =
           foldM comb (n, k, cs, [input]) args
           where comb (n1, k1, cs1, idds) (SOAC.Transpose cs2 n2 k2 input')
-                  | n1==n2, k1==k2         = Just (n1,k1,cs1++cs2,idds++[input'])
-                comb _                   _ = Nothing
+                  | n1==n2, k1==k2   = Just (n1,k1,cs1++cs2,idds++[input'])
+                comb _             _ = Nothing
         transposedInputs _ = Nothing
-        mapDepth = case Nest.operation nest of
-                     Nest.Map2 _ _ levels _ -> length levels + 1
-                     _                      -> 0
+pushTranspose inpIds nest ots
+  | Just inpIds' <- inpIds,
+    Just (ts, inputs') <- fixupInputs inpIds' (Nest.inputs nest),
+    transposeReach ts < mapDepth nest =
+      let outInvTrns = uncurry (OTranspose []) . uncurry transposeInverse
+      in Just (inputs' `Nest.setInputs` nest,
+               ots ++ map outInvTrns (reverse ts))
+pushTranspose _ _ _ = Nothing
 
-iswim :: SOACNest -> [OutputTransform] -> Maybe (SOACNest, [OutputTransform])
-iswim nest ots
-  | Nest.Scan2 cs1 (Nest.NewNest lvl nn Nothing) [] es@[_] loc1 <- Nest.operation nest,
+transposeReach :: [(Int,Int)] -> Int
+transposeReach = foldr (max . transDepth) 0
+  where transDepth (k,n) = max k (k+n)
+
+fixupInputs :: [Ident] -> [SOAC.Input] -> Maybe ([(Int,Int)], [SOAC.Input])
+fixupInputs inpIds inps =
+  case filter (not . null) $
+       map (snd . transposeIndices) $
+       filter exposable inps of
+    ts:_ -> do inps' <- mapM (fixupInput (transposeReach ts) ts) inps
+               return (ts, inps')
+    _    -> Nothing
+  where exposable = maybe False (`elem` inpIds) . SOAC.inputArray
+
+        fixupInput d ts inp
+          | exposable inp = case transposeIndices inp of
+                              (inp', ts') | ts == ts' -> Just inp'
+                                          | otherwise -> Nothing
+          | arrayDims (SOAC.inputType inp) > d =
+              Just $ transposes inp $ map (uncurry transposeInverse) ts
+          | otherwise = Nothing
+
+transposeIndices :: SOAC.Input -> (SOAC.Input, [(Int,Int)])
+transposeIndices (SOAC.Transpose _ k n inp) =
+  second ((k,n):) $ transposeIndices inp
+transposeIndices inp =
+  (inp, [])
+
+transposes :: SOAC.Input -> [(Int, Int)] -> SOAC.Input
+transposes = foldr inverseTrans'
+  where inverseTrans' (k,n) = SOAC.Transpose [] k n
+
+iswim :: Maybe [Ident] -> SOACNest -> [OutputTransform] -> Maybe (SOACNest, [OutputTransform])
+iswim _ nest ots
+  | Nest.Scan2 cs1 (Nest.NewNest lvl nn) [] es@[_] loc1 <- Nest.operation nest,
     Nest.Map2 cs2 mb [] loc2 <- nn,
     Just es' <- mapM SOAC.inputFromExp es =
-    let (paramIds, bndIds, retTypes) = lvl
+    let (paramIds, Nothing, bndIds, retTypes) = lvl
         toInnerAccParam idd = idd { identType = rowType $ identType idd }
         innerAccParams = map toInnerAccParam $ take (length es) paramIds
         innerArrParams = drop (length es) paramIds
@@ -151,4 +189,4 @@ iswim nest ots
                          e <- Nest.inputs nest])
                (Nest.Map2 cs1 (Nest.Lambda lam) [] loc2),
              ots ++ [OTranspose cs2 0 1])
-iswim _ _ = Nothing
+iswim _ _ _ = Nothing
