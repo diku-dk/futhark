@@ -22,33 +22,39 @@ import L0C.L0 hiding (Map2, Reduce2, Scan2, Filter2, Redomap2)
 type Nesting = ([Ident], [Ident], [DeclType])
 
 data NestBody = Lambda TupleLambda
-              | NewNest Nesting Combinator
+              | NewNest Nesting Combinator (Maybe [SOAC.Input])
                 deriving (Show)
 
 bodyToLambda :: NestBody -> TupleLambda
 bodyToLambda (Lambda l) = l
-bodyToLambda (NewNest (paramIds, bndIds, retTypes) op) =
+bodyToLambda (NewNest (paramIds, bndIds, retTypes) op inps) =
   TupleLambda { tupleLambdaSrcLoc = loc
               , tupleLambdaParams = map toParam paramIds
               , tupleLambdaReturnType = retTypes
               , tupleLambdaBody =
                 LetPat (TupId (map Id bndIds) loc)
-                       (SOAC.toExp $ toSOAC $ SOACNest (map SOAC.Var paramIds) op)
+                       (SOAC.toExp $ toSOAC $ SOACNest inps' op)
                        (TupLit (map Var bndIds) loc)
                        loc
               }
   where loc = srclocOf op
+        inps' = fromMaybe (map SOAC.Var paramIds) inps
+
+nestInputs :: TupleLambda -> [SOAC.Input] -> Maybe [SOAC.Input]
+nestInputs l inps =
+  case inpVars inps of
+    Just inpks | tupleLambdaParams l `matches` inpks -> Nothing
+    _ -> Just inps
 
 lambdaToBody :: TupleLambda -> NestBody
 lambdaToBody l = fromMaybe (Lambda l) $ isNesting $ tupleLambdaBody l
   where isNesting (LetPat pat e body _) = do
           soac <- either (const Nothing) Just $ SOAC.fromExp e
-          inpks <- inpVars $ SOAC.inputs soac
           ks <- tuplePatAndLit pat body
-          if tupleLambdaParams l `matches` inpks then
-            let nesting = (inpks, ks, tupleLambdaReturnType l)
-            in Just $ NewNest nesting $ operation $ fromSOAC soac
-          else Nothing
+          let inps' = nestInputs l $ SOAC.inputs soac
+              params = map fromParam $ tupleLambdaParams l -- XXX: Loses aliasing information.
+              nesting = (params, ks, tupleLambdaReturnType l)
+          Just $ NewNest nesting (operation $ fromSOAC soac) inps'
         isNesting _ = Nothing
 
 data Combinator = Map2 Certificates NestBody [Nesting] SrcLoc

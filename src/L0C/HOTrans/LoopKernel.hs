@@ -128,7 +128,7 @@ pushTranspose nest ots = do
 
 iswim :: SOACNest -> [OutputTransform] -> Maybe (SOACNest, [OutputTransform])
 iswim nest ots
-  | Nest.Scan2 cs1 (Nest.NewNest lvl nn) [] es@[_] loc1 <- Nest.operation nest,
+  | Nest.Scan2 cs1 (Nest.NewNest lvl nn Nothing) [] es@[_] loc1 <- Nest.operation nest,
     Nest.Map2 cs2 mb [] loc2 <- nn,
     Just es' <- mapM SOAC.inputFromExp es =
     let (paramIds, bndIds, retTypes) = lvl
