@@ -1,20 +1,21 @@
-module L0C.HOTrans.SOAC ( SOAC (..)
-                        , Input (..)
-                        , Index (..)
-                        , inputFromExp
-                        , inputToExp
-                        , inputToIdent
-                        , inputArray
-                        , inputType
-                        , inputs
-                        , setInputs
-                        , lambda
-                        , setLambda
-                        , certificates
-                        , NotSOAC (..)
-                        , fromExp
-                        , toExp
-                        )
+module L0C.HORepresentation.SOAC
+  ( SOAC (..)
+  , Input (..)
+  , Index (..)
+  , inputFromExp
+  , inputToExp
+  , inputToIdent
+  , inputArray
+  , inputType
+  , inputs
+  , setInputs
+  , lambda
+  , setLambda
+  , certificates
+  , NotSOAC (..)
+  , fromExp
+  , toExp
+  )
   where
 
 import Data.Loc

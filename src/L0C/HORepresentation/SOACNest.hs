@@ -1,13 +1,14 @@
-module L0C.HOTrans.SOACNest ( SOACNest(..)
-                            , Combinator(..)
-                            , NestBody(..)
-                            , bodyToLambda
-                            , lambdaToBody
-                            , setInputs
-                            , certificates
-                            , fromSOAC
-                            , toSOAC
-                            )
+module L0C.HORepresentation.SOACNest
+  ( SOACNest(..)
+  , Combinator(..)
+  , NestBody(..)
+  , bodyToLambda
+  , lambdaToBody
+  , setInputs
+  , certificates
+  , fromSOAC
+  , toSOAC
+  )
   where
 
 import Control.Applicative
@@ -15,8 +16,8 @@ import Control.Applicative
 import Data.Loc
 import Data.Maybe
 
-import L0C.HOTrans.SOAC (SOAC)
-import qualified L0C.HOTrans.SOAC as SOAC
+import L0C.HORepresentation.SOAC (SOAC)
+import qualified L0C.HORepresentation.SOAC as SOAC
 import L0C.L0 hiding (Map2, Reduce2, Scan2, Filter2, Redomap2)
 
 type Nesting = ([Ident], Maybe [SOAC.Input], [Ident], [DeclType])

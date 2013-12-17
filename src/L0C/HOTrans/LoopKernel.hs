@@ -23,10 +23,10 @@ import Data.Maybe
 import Data.Loc
 
 import L0C.L0
-import L0C.HOTrans.SOAC (SOAC)
-import qualified L0C.HOTrans.SOAC as SOAC
-import L0C.HOTrans.SOACNest (SOACNest)
-import qualified L0C.HOTrans.SOACNest as Nest
+import L0C.HORepresentation.SOAC (SOAC)
+import qualified L0C.HORepresentation.SOAC as SOAC
+import L0C.HORepresentation.SOACNest (SOACNest)
+import qualified L0C.HORepresentation.SOACNest as Nest
 
 data OutputTransform = OTranspose Certificates Int Int
                        deriving (Show)

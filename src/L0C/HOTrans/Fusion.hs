@@ -18,8 +18,8 @@ import L0C.FreshNames
 import L0C.EnablingOpts.EnablingOptDriver
 import L0C.HOTrans.Composing
 import L0C.HOTrans.LoopKernel
-import L0C.HOTrans.SOAC (SOAC)
-import qualified L0C.HOTrans.SOAC as SOAC
+import L0C.HORepresentation.SOAC (SOAC)
+import qualified L0C.HORepresentation.SOAC as SOAC
 
 data FusionGEnv = FusionGEnv {
     soacs      :: HM.HashMap VName [VName]

@@ -18,8 +18,8 @@ import Data.Maybe
 
 import L0C.L0
 
-import L0C.HOTrans.SOAC (Input)
-import qualified L0C.HOTrans.SOAC as SOAC
+import L0C.HORepresentation.SOAC (Input)
+import qualified L0C.HORepresentation.SOAC as SOAC
 
 -- | @fusemap lam1 inp1 out1 lam2 inp2@ fuses the function @lam1@ into
 -- @lam2@.  Both functions must be mapping functions, although @lam2@
