@@ -89,6 +89,7 @@ module Language.L0.Attributes
   , flattenArray
   , transposeArray
   , transposeIndex
+  , transposeInverse
 
   -- * Type aliases
 
@@ -521,6 +522,13 @@ transposeIndex k n l
     (mid,end) <- splitAt n post =
     beg ++ mid ++ [needle] ++ end
   | otherwise = l
+
+-- | Compute the inverse of a given transposition.  Upholds the
+-- following property:
+--
+-- @uncurry transposeIndex (transposeInverse k n) (transposeIndex k n l) == l@
+transposeInverse :: Int -> Int -> (Int,Int)
+transposeInverse k n = (k+n,-n)
 
 -- | The type of an L0 term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
