@@ -6,12 +6,14 @@ module L0C.HORepresentation.SOACNest
   , lambdaToBody
   , setInputs
   , certificates
+  , fromExp
   , fromSOAC
   , toSOAC
   )
   where
 
 import Control.Applicative
+import Control.Monad
 
 import Data.Loc
 import Data.Maybe
@@ -104,6 +106,9 @@ certificates (SOACNest _ (Reduce2  cs _   _ _ _)) = cs
 certificates (SOACNest _ (Scan2    cs _   _ _ _)) = cs
 certificates (SOACNest _ (Filter2  cs _   _   _)) = cs
 certificates (SOACNest _ (Redomap2 cs _ _ _ _ _)) = cs
+
+fromExp :: Exp -> Either SOAC.NotSOAC SOACNest
+fromExp = liftM fromSOAC . SOAC.fromExp
 
 fromSOAC :: SOAC -> SOACNest
 fromSOAC (SOAC.Map2 cs l as loc)
