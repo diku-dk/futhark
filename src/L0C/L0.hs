@@ -2,10 +2,7 @@
 -- | L0C-specific type- and class definitions built on top of the L0
 -- definitions in "Language.L0".
 module L0C.L0
-  ( module Language.L0.Syntax
-  , module Language.L0.Attributes
-  , module Language.L0.Pretty
-  , module Language.L0.Traversals
+  ( module X
 
   -- * Tagged names
   , ID(..)
@@ -42,10 +39,10 @@ import qualified Data.Text as T
 
 import Text.PrettyPrint.Mainland
 
-import Language.L0.Syntax
-import Language.L0.Attributes
-import Language.L0.Pretty
-import Language.L0.Traversals
+import Language.L0.Syntax as X
+import Language.L0.Attributes as X
+import Language.L0.Pretty as X
+import Language.L0.Traversals as X
 
 -- | An arbitrary value tagged with some integer.  Only the integer is
 -- used in comparisons, no matter the type of @vn@.
