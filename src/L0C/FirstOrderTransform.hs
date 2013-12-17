@@ -119,7 +119,7 @@ transformExp (Filter fun arrexp rowtype loc) =
 transformExp (Redomap _ innerfun accexp arrexp ets loc) =
   transformExp $ Reduce innerfun accexp arrexp ets loc
 
-transformExp mape@(Map2 cs fun arrs _ loc) = do
+transformExp mape@(Map2 cs fun arrs loc) = do
   let zero = Literal (IntVal 0) loc
   newLets "inarr" arrs $ \inarrs _ -> do
     (i, iv) <- newVar loc "i" (Elem Int)
@@ -136,13 +136,13 @@ transformExp mape@(Map2 cs fun arrs _ loc) = do
                       outarrv loc
         return branch
 
-transformExp (Reduce2 cs fun accexp arrexps _ loc) =
+transformExp (Reduce2 cs fun accexp arrexps loc) =
   newReduction2 loc arrexps accexp $ \(arr, _) (acc, accv) (i, iv) -> do
     funcall <- transformTupleLambda fun (map Var acc ++ index cs arr iv)
     return $ DoLoop (TupId (map Id acc) loc) accv i (size cs arr)
              funcall accv loc
 
-transformExp (Scan2 cs fun accexp arrexps _ loc) =
+transformExp (Scan2 cs fun accexp arrexps loc) =
   newReduction2 loc arrexps accexp $ \(arr, arrv) (acc, _) (i, iv) -> do
     funcall <- transformTupleLambda fun $ map Var acc ++ index cs arr iv
     loopbody <- letwith cs arr iv funcall $
@@ -169,14 +169,13 @@ transformExp filtere@(Filter2 cs fun arrexps loc) =
           indexin0 = index cs arr $ intval 0
           indexin = index cs arr iv
       mape <- transformExp $
-              Map2 cs (TupleLambda (map toParam xs) test [Elem Int] loc) (map Var arr)
-              rowtypes loc
+              Map2 cs (TupleLambda (map toParam xs) test [Elem Int] loc) (map Var arr) loc
       plus <- do
         (a,av) <- newVar loc "a" (Elem Int)
         (b,bv) <- newVar loc "b" (Elem Int)
         return $ TupleLambda [toParam a, toParam b] (BinOp Plus av bv (Elem Int) loc) [Elem Int] loc
       scan <- newTupLet "mape" mape $ \_ mape' ->
-                transformExp $ Scan2 cs plus [intval 0] [mape'] [Elem Int] loc
+                transformExp $ Scan2 cs plus [intval 0] [mape'] loc
       newTupLet "ia" scan $ \ia _ -> do
         let indexia ind = Index cs ia Nothing [ind] (Elem Int) loc
             indexiaend = indexia (sub1 nv)
@@ -194,8 +193,8 @@ transformExp filtere@(Filter2 cs fun arrexps loc) =
   where intval x = Literal (IntVal x) loc
         sub1 e = BinOp Minus e (intval 1) (Elem Int) loc
 
-transformExp (Redomap2 ass _ innerfun accexps arrexps ets loc) =
-  transformExp $ Reduce2 ass innerfun accexps arrexps ets loc
+transformExp (Redomap2 ass _ innerfun accexps arrexps loc) =
+  transformExp $ Reduce2 ass innerfun accexps arrexps loc
 
 transformExp e = mapExpM transform e
   where transform = identityMapper {

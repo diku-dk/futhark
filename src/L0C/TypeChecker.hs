@@ -474,21 +474,6 @@ checkAnnotation loc desc t1 t2 =
                   Nothing -> bad $ BadAnnotation loc desc t1' t2
                   Just t  -> return t
 
--- | As @checkAnnotation@, but take the element types of a tuple as parameters, and use the entire list of types in any error message.
-checkTupleAnnotation :: (VarName vn, TypeBox ty) =>
-                        SrcLoc -> String -> [ty (ID vn)] -> [TaggedType vn]
-                     -> TypeM vn [TaggedType vn]
-checkTupleAnnotation loc desc t1s t2s
-  | length t1s' /= length t2s = barf
-  | otherwise = zipWithM check t1s' t2s
-  where t1s' = map unboxType t1s
-        barf = bad $ BadTupleAnnotation loc desc t1s' t2s
-        check (Just t1') t2 =
-          case unifyTypes (t1' `setAliases` HS.empty) t2 of
-            Nothing -> barf
-            Just t  -> return t
-        check Nothing t2 = return t2
-
 -- | @require ts e@ causes a '(TypeError vn)' if @typeOf e@ does not unify
 -- with one of the types in @ts@.  Otherwise, simply returns @e@.
 -- This function is very useful in 'checkExp'.
@@ -1007,36 +992,30 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
                     (Ident loopvar (Elem Int) loc) boundexp'
                     loopbody' letbody' loc
 
-checkExp (Map2 ass fun arrexps intype pos) = do
+checkExp (Map2 ass fun arrexps pos) = do
   ass' <- mapM (requireI [Elem Cert] <=< checkIdent) ass
   (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
   fun'    <- checkTupleLambda fun arrargs
-  intype' <- checkTupleAnnotation pos "map2 input row"
-             intype (map argType arrargs)
-  return $ Map2 ass' fun' arrexps' intype' pos
+  return $ Map2 ass' fun' arrexps' pos
 
-checkExp (Reduce2 ass fun startexps arrexps intype pos) = do
+checkExp (Reduce2 ass fun startexps arrexps pos) = do
   ass' <- mapM (requireI [Elem Cert] <=< checkIdent) ass
   (startexps', startargs) <- unzip <$> mapM checkArg startexps
   let startt = Elem $ Tuple $ map typeOf startexps'
   (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
-  intype' <- checkTupleAnnotation pos "reduce2 input element"
-             intype (map argType arrargs)
   fun'    <- checkTupleLambda fun $ startargs ++ arrargs
   let funret = Elem $ Tuple $ tupleLambdaType fun' $ map argType $ startargs ++ arrargs
   unless (funret `subtypeOf` startt) $
     bad $ TypeError pos $ "Accumulator is of type " ++ ppType startt ++
           ", but reduce function returns type " ++ ppType funret ++ "."
-  return $ Reduce2 ass' fun' startexps' arrexps' intype' pos
+  return $ Reduce2 ass' fun' startexps' arrexps' pos
 
-checkExp (Scan2 ass fun startexps arrexps intypes pos) = do
+checkExp (Scan2 ass fun startexps arrexps pos) = do
   ass' <- mapM (requireI [Elem Cert] <=< checkIdent) ass
   (startexps', startargs) <- unzip <$> mapM checkArg startexps
   (arrexps', arrargs)   <- unzip <$> mapM checkSOACArrayArg arrexps
-  intype'   <- checkTupleAnnotation pos "scan2 input element"
-               intypes (map argType arrargs)
   let startt  = Elem . Tuple $ map typeOf startexps'
-      intupletype = Elem $ Tuple intype'
+      intupletype = Elem $ Tuple $ map argType arrargs
   fun'      <- checkTupleLambda fun $ startargs ++ startargs
   let funret = Elem $ Tuple $ tupleLambdaType fun' $ map argType $ startargs ++ startargs
   unless (funret `subtypeOf` startt) $
@@ -1045,7 +1024,7 @@ checkExp (Scan2 ass fun startexps arrexps intypes pos) = do
   unless (funret `subtypeOf` intupletype) $
     bad $ TypeError pos $ "Array element value is of type " ++ ppType intupletype ++
                           ", but scan function returns type " ++ ppType funret ++ "."
-  return $ Scan2 ass' fun' startexps' arrexps' intype' pos
+  return $ Scan2 ass' fun' startexps' arrexps' pos
 
 checkExp (Filter2 ass fun arrexps pos) = do
   ass' <- mapM (requireI [Elem Cert] <=< checkIdent) ass
@@ -1056,7 +1035,7 @@ checkExp (Filter2 ass fun arrexps pos) = do
     bad $ TypeError pos "Filter2 function does not return bool."
   return $ Filter2 ass' fun' arrexps' pos
 
-checkExp (Redomap2 ass outerfun innerfun accexps arrexps intypes pos) = do
+checkExp (Redomap2 ass outerfun innerfun accexps arrexps pos) = do
   ass' <- mapM (requireI [Elem Cert] <=< checkIdent) ass
   (arrexps', arrargs)   <- unzip <$> mapM checkSOACArrayArg arrexps
   (accexps', accargs)   <- unzip <$> mapM checkArg accexps
@@ -1073,9 +1052,7 @@ checkExp (Redomap2 ass outerfun innerfun accexps arrexps intypes pos) = do
     bad $ TypeError pos $ "Initial value is of type " ++ ppType acct ++
           ", but redomap2 outer reduction returns type " ++ ppType (argType outerarg) ++ "."
 
-  intype' <- checkTupleAnnotation pos "redomap2 input element"
-             intypes (map argType arrargs)
-  return $ Redomap2 ass' outerfun' innerfun' accexps' arrexps' intype' pos
+  return $ Redomap2 ass' outerfun' innerfun' accexps' arrexps' pos
 
 checkSOACArrayArg :: (TypeBox ty, VarName vn) =>
                      TaggedExp ty vn -> TypeM vn (TaggedExp CompTypeBase vn, Arg vn)

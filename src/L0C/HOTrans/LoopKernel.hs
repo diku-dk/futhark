@@ -137,7 +137,7 @@ iswim nest ots
         innerArrParams = drop (length es) paramIds
         innerScan = Scan2 cs2 (Nest.bodyToLambda mb)
                           (map Var innerAccParams) (map Var innerArrParams)
-                          (map (rowType . identType) innerArrParams) loc1
+                          loc1
         lam = TupleLambda {
                 tupleLambdaParams = map toParam $ innerAccParams ++ innerArrParams
               , tupleLambdaReturnType = retTypes

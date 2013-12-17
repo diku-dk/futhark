@@ -402,31 +402,28 @@ transformExp (Concat cs x y loc) = do
         return $ tuplit c' loc concs
     _ -> return $ Concat cs x' y' loc
 
-transformExp e@(Map lam arr tp loc) =
+transformExp e@(Map lam arr _ loc) =
   tupToIdentList arr $ \c arrs ->
   let cs = certify c []
   in transformLambda (Conjoin (map Var cs) loc) lam $ \lam' ->
      untupleSOAC cs (typeOf e) $
-       Map2 cs lam' (map Var arrs)
-               (untupleType $ transformType' tp) loc
+       Map2 cs lam' (map Var arrs) loc
 
-transformExp (Reduce lam ne arr tp loc) =
+transformExp (Reduce lam ne arr _ loc) =
   tupToIdentList arr $ \c1 arrs ->
   tupToIdentList ne $ \c2 nes ->
   let cs = catMaybes [c1,c2]
   in transformLambda (Conjoin (map Var cs) loc) lam $ \lam' ->
      untupleDeclExp (lambdaReturnType lam) $
-     Reduce2 cs lam' (map Var nes) (map Var arrs)
-             (untupleType $ transformType' tp) loc
+     Reduce2 cs lam' (map Var nes) (map Var arrs) loc
 
-transformExp e@(Scan lam ne arr tp loc) =
+transformExp e@(Scan lam ne arr _ loc) =
   tupToIdentList arr $ \c1 arrs ->
   tupToIdentList ne $ \c2 nes ->
   let cs = catMaybes [c1,c2]
   in transformLambda (Conjoin (map Var cs) loc) lam $ \lam' ->
      untupleSOAC cs (typeOf e) $
-       Scan2 cs lam' (map Var nes) (map Var arrs)
-                (untupleType $ transformType' tp) loc
+       Scan2 cs lam' (map Var nes) (map Var arrs) loc
 
 transformExp e@(Filter lam arr _ loc) =
   tupToIdentList arr $ \c arrs ->
@@ -435,7 +432,7 @@ transformExp e@(Filter lam arr _ loc) =
      untupleSOAC cs (typeOf e) $
        Filter2 cs lam' (map Var arrs) loc
 
-transformExp (Redomap lam1 lam2 ne arr tp1 loc) =
+transformExp (Redomap lam1 lam2 ne arr _ loc) =
   tupToIdentList arr $ \c1 arrs ->
   tupToIdentList ne $ \c2 nes ->
   let cs = catMaybes [c1,c2]
@@ -443,34 +440,29 @@ transformExp (Redomap lam1 lam2 ne arr tp1 loc) =
      transformLambda (Conjoin (map Var cs) loc) lam2 $ \lam2' ->
        untupleDeclExp (lambdaReturnType lam1) $
        Redomap2 cs lam1' lam2'
-                   (map Var nes) (map Var arrs)
-                   (untupleType $ transformType' tp1) loc
+                (map Var nes) (map Var arrs) loc
 
-transformExp (Map2 cs1 lam arrs tps loc) =
+transformExp (Map2 cs1 lam arrs loc) =
   transformTupleLambda lam $ \lam' ->
   tupsToIdentList arrs $ \arrlst ->
   let (cs2, arrs') = splitCertExps arrlst
-  in return $ Map2 (cs1++cs2) lam'
-                (map Var arrs')
-                (flattenTypes $ map transformType tps) loc
+  in return $ Map2 (cs1++cs2) lam' (map Var arrs') loc
 
-transformExp (Reduce2 cs1 lam nes arrs tps loc) =
+transformExp (Reduce2 cs1 lam nes arrs loc) =
   transformTupleLambda lam $ \lam' ->
   tupsToIdentList arrs $ \arrlst ->
   tupsToIdentList nes $ \nelst ->
     let (cs2, arrs') = splitCertExps arrlst
         (cs3, nes') = splitCertExps nelst
-    in return $ Reduce2 (cs1++cs2++cs3) lam' (map Var nes') (map Var arrs')
-                        (flattenTypes $ map transformType tps) loc
+    in return $ Reduce2 (cs1++cs2++cs3) lam' (map Var nes') (map Var arrs') loc
 
-transformExp (Scan2 cs1 lam nes arrs tps loc) =
+transformExp (Scan2 cs1 lam nes arrs loc) =
   transformTupleLambda lam $ \lam' ->
   tupsToIdentList arrs $ \arrlst ->
   tupsToIdentList nes $ \nelst ->
     let (cs2, arrs') = splitCertExps arrlst
         (cs3, nes') = splitCertExps nelst
-    in return $ Scan2 (cs1++cs2++cs3) lam' (map Var nes') (map Var arrs')
-                      (flattenTypes $ map transformType tps) loc
+    in return $ Scan2 (cs1++cs2++cs3) lam' (map Var nes') (map Var arrs') loc
 
 transformExp (Filter2 cs1 lam arrs loc) =
   transformTupleLambda lam $ \lam' ->
@@ -478,7 +470,7 @@ transformExp (Filter2 cs1 lam arrs loc) =
     let (cs2, arrs') = splitCertExps arrlst
     in return $ Filter2 (cs1++cs2) lam' (map Var arrs') loc
 
-transformExp (Redomap2 cs1 lam1 lam2 nes arrs tps loc) =
+transformExp (Redomap2 cs1 lam1 lam2 nes arrs loc) =
   transformTupleLambda lam1 $ \lam1' ->
   transformTupleLambda lam2 $ \lam2' ->
   tupsToIdentList arrs $ \arrlst ->
@@ -486,7 +478,7 @@ transformExp (Redomap2 cs1 lam1 lam2 nes arrs tps loc) =
     let (cs2, arrs') = splitCertExps arrlst
         (cs3, nes') = splitCertExps nelst
     in return $ Redomap2 (cs1++cs2++cs3) lam1' lam2'
-                (map Var nes') (map Var arrs') (map transformType tps) loc
+                (map Var nes') (map Var arrs') loc
 
 transformExp e = mapExpM transform e
   where transform = identityMapper {
@@ -631,10 +623,6 @@ untupleSOAC cs t e = do
       return $ LetPat (TupId (map Id names) loc) e
                       (TupLit (Conjoin (map Var cs) loc:namevs) loc) loc
     _ -> return e
-
-untupleType :: Type -> [Type]
-untupleType (Elem (Tuple ts)) = ts
-untupleType t = [t]
 
 tuplit :: Maybe Ident -> SrcLoc -> [Exp] -> Exp
 tuplit _ _ [e] = e

@@ -201,15 +201,15 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
     equals <+> text "for" <+> ppr i <+> text "<" <+> align (ppr bound) <+> text "do" </>
     indent 2 (ppr loopbody) <+> text "in" </>
     ppr letbody
-  pprPrec _ (Map2 cs lam as _ _) =
+  pprPrec _ (Map2 cs lam as _) =
     ppCertificates cs <> ppSOAC "map2" [lam] as
-  pprPrec _ (Reduce2 cs lam es as _ _) =
+  pprPrec _ (Reduce2 cs lam es as _) =
     ppCertificates cs <> ppSOAC "reduce2" [lam] (es++as)
-  pprPrec _ (Redomap2 cs outer inner es as _ _) =
+  pprPrec _ (Redomap2 cs outer inner es as _) =
     ppCertificates cs <> text "redomap2" <>
     parens (ppr outer <> comma </> ppr inner <> comma </>
             commasep (braces (commasep $ map ppr es) : map ppr as))
-  pprPrec _ (Scan2 cs lam es as _ _) =
+  pprPrec _ (Scan2 cs lam es as _) =
     ppCertificates cs <> ppSOAC "scan2" [lam] (es++as)
   pprPrec _ (Filter2 cs lam as _) =
     ppCertificates cs <> ppSOAC "filter2" [lam] as

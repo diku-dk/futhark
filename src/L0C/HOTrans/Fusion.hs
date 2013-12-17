@@ -523,11 +523,11 @@ fusionGatherExp _ (Scan     _ _ _ _   pos) = errorIllegal "scan"    pos
 fusionGatherExp _ (Filter   _ _ _     pos) = errorIllegal "filter"  pos
 fusionGatherExp _ (Redomap  _ _ _ _ _ pos) = errorIllegal "redomap"  pos
 
-fusionGatherExp _ (Map2     _ _ _ _     pos) = errorIllegal "map2"    pos
-fusionGatherExp _ (Reduce2  _ _ _ _ _   pos) = errorIllegal "reduce2" pos
-fusionGatherExp _ (Scan2    _ _ _ _ _   pos) = errorIllegal "scan2"   pos
-fusionGatherExp _ (Filter2  _ _ _       pos) = errorIllegal "filter2" pos
-fusionGatherExp _ (Redomap2 _ _ _ _ _ _ pos) = errorIllegal "redomap2" pos
+fusionGatherExp _ (Map2     _ _ _     pos) = errorIllegal "map2"    pos
+fusionGatherExp _ (Reduce2  _ _ _ _   pos) = errorIllegal "reduce2" pos
+fusionGatherExp _ (Scan2    _ _ _ _   pos) = errorIllegal "scan2"   pos
+fusionGatherExp _ (Filter2  _ _ _     pos) = errorIllegal "filter2" pos
+fusionGatherExp _ (Redomap2 _ _ _ _ _ pos) = errorIllegal "redomap2" pos
 
 -----------------------------------
 ---- Generic Traversal         ----

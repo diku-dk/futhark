@@ -305,31 +305,31 @@ Exp  :: { UncheckedExp }
 
      | Certificates reduce2 '(' TupleFunAbstr ',' DExps ')'
                       { let (accexps, arrexps) = $6 in
-                        Reduce2 $1 $4 accexps arrexps (replicate (length arrexps) NoInfo) $2 }
+                        Reduce2 $1 $4 accexps arrexps $2 }
 
      | reduce2 '(' TupleFunAbstr ',' DExps ')'
                       { let (accexps, arrexps) = $5 in
-                        Reduce2 [] $3 accexps arrexps (replicate (length arrexps) NoInfo) $1 }
+                        Reduce2 [] $3 accexps arrexps $1 }
 
      | map '(' FunAbstr ',' Exp ')'
                       { Map $3 $5 NoInfo $1 }
 
      | Certificates map2 '(' TupleFunAbstr ',' Exps ')'
-                      { Map2 $1 $4 $6 (replicate (length $6) NoInfo) $2 }
+                      { Map2 $1 $4 $6 $2 }
 
      | map2 '(' TupleFunAbstr ',' Exps ')'
-                      { Map2 [] $3 $5 (replicate (length $5) NoInfo) $1 }
+                      { Map2 [] $3 $5 $1 }
 
      | scan '(' FunAbstr ',' Exp ',' Exp ')'
                       { Scan $3 $5 $7 NoInfo $1 }
 
      | Certificates scan2 '(' TupleFunAbstr ',' DExps ')'
                       { let (accexps, arrexps) = $6 in
-                        Scan2 $1 $4 accexps arrexps (replicate (length arrexps) NoInfo) $2 }
+                        Scan2 $1 $4 accexps arrexps $2 }
 
      | scan2 '(' TupleFunAbstr ',' DExps ')'
                       { let (accexps, arrexps) = $5 in
-                        Scan2 [] $3 accexps arrexps (replicate (length arrexps) NoInfo) $1 }
+                        Scan2 [] $3 accexps arrexps $1 }
 
      | zip '(' Exps2 ')'
                       { Zip (map (\x -> (x, NoInfo)) $3) $1 }
@@ -350,10 +350,10 @@ Exp  :: { UncheckedExp }
                       { Redomap $3 $5 $7 $9 NoInfo $1 }
 
      | Certificates redomap2 '(' TupleFunAbstr ',' TupleFunAbstr ',' '{' Exps '}' ',' Exps ')'
-                      { Redomap2 $1 $4 $6 $9 $12 (replicate (length $12) NoInfo) $2 }
+                      { Redomap2 $1 $4 $6 $9 $12 $2 }
 
      | redomap2 '(' TupleFunAbstr ',' TupleFunAbstr ',' '{' Exps '}' ',' Exps ')'
-                      { Redomap2 [] $3 $5 $8 $11 (replicate (length $11) NoInfo) $1 }
+                      { Redomap2 [] $3 $5 $8 $11 $1 }
 
      | copy '(' Exp ')' { Copy $3 $1 }
 

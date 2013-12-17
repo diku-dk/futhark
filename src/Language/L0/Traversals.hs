@@ -198,29 +198,29 @@ mapExpM tv (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody loc) =
   pure DoLoop <*> mapOnPattern tv mergepat <*> mapOnExp tv mergeexp <*>
        mapOnIdent tv loopvar <*> mapOnExp tv boundexp <*>
        mapOnExp tv loopbody <*> mapOnExp tv letbody <*> pure loc
-mapExpM tv (Map2 cs fun arrexps intype loc) =
+mapExpM tv (Map2 cs fun arrexps loc) =
   pure Map2 <*> mapOnCertificates tv cs <*>
        mapOnTupleLambda tv fun <*> mapM (mapOnExp tv) arrexps <*>
-       mapM (mapOnType tv) intype  <*> pure loc
-mapExpM tv (Reduce2 cs fun startexps arrexps rowtypes loc) =
+       pure loc
+mapExpM tv (Reduce2 cs fun startexps arrexps loc) =
   pure Reduce2 <*> mapOnCertificates tv cs <*>
        mapOnTupleLambda tv fun <*>
        mapM (mapOnExp tv) startexps <*> mapM (mapOnExp tv) arrexps <*>
-       mapM (mapOnType tv) rowtypes <*> pure loc
-mapExpM tv (Scan2 cs fun startexps arrexps intypes loc) =
+       pure loc
+mapExpM tv (Scan2 cs fun startexps arrexps loc) =
   pure Scan2 <*> mapOnCertificates tv cs <*>
        mapOnTupleLambda tv fun <*>
        mapM (mapOnExp tv) startexps <*> mapM (mapOnExp tv) arrexps <*>
-       mapM (mapOnType tv) intypes <*> pure loc
+       pure loc
 mapExpM tv (Filter2 cs fun arrexps loc) =
   pure Filter2 <*> mapOnCertificates tv cs <*>
        mapOnTupleLambda tv fun <*>
        mapM (mapOnExp tv) arrexps <*> pure loc
-mapExpM tv (Redomap2 cs redfun mapfun accexps arrexps intypes loc) =
+mapExpM tv (Redomap2 cs redfun mapfun accexps arrexps loc) =
   pure Redomap2 <*> mapOnCertificates tv cs <*>
        mapOnTupleLambda tv redfun <*> mapOnTupleLambda tv mapfun <*>
        mapM (mapOnExp tv) accexps <*> mapM (mapOnExp tv) arrexps <*>
-       mapM (mapOnType tv) intypes <*> pure loc
+       pure loc
 
 -- | Like 'mapExp', but in the 'Identity' monad.
 mapExp :: Mapper ty vn Identity -> ExpBase ty vn -> ExpBase ty vn

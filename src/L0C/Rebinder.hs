@@ -196,15 +196,15 @@ bindLet pat@(Id dest) e@(Concat cs (Var x) (Var y) loc) m =
                      | i <- [1..arrayDims (identType x) - 1]])
   m
 
-bindLet pat e@(Map2 cs _ srcs _ _) m =
+bindLet pat e@(Map2 cs _ srcs _) m =
   withBinding pat e $
   withShapes (sameOuterShapes cs $ patIdents pat ++ vars srcs) m
 
-bindLet pat e@(Reduce2 cs _ _ srcs _ _) m =
+bindLet pat e@(Reduce2 cs _ _ srcs _) m =
   withBinding pat e $
   withShapes (sameOuterShapesExps cs srcs) m
 
-bindLet pat e@(Scan2 cs _ _ srcs _ _) m =
+bindLet pat e@(Scan2 cs _ _ srcs _) m =
   withBinding pat e $
   withShapes (sameOuterShapesExps cs srcs) m
 
@@ -212,7 +212,7 @@ bindLet pat e@(Filter2 cs _ srcs _) m =
   withBinding pat e $
   withShapes (sameOuterShapesExps cs srcs) m
 
-bindLet pat e@(Redomap2 cs _ _ _ srcs _ _) m =
+bindLet pat e@(Redomap2 cs _ _ _ srcs _) m =
   withBinding pat e $
   withShapes (sameOuterShapesExps cs srcs) m
 
@@ -502,17 +502,17 @@ hoistInExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody _) = do
                hoistInExp loopbody
   bindLoop mergepat mergeexp' loopvar boundexp' loopbody' $ hoistInExp letbody
   where boundnames = identName loopvar `HS.insert` patNameSet mergepat
-hoistInExp e@(Map2 cs (TupleLambda params _ _ _) arrexps _ _) =
+hoistInExp e@(Map2 cs (TupleLambda params _ _ _) arrexps _) =
   hoistInSOAC e arrexps $ \ks ->
     withSOACArrSlices cs params ks $
     withShapes (sameOuterShapes cs ks) $
     hoistInExpBase e
-hoistInExp e@(Reduce2 cs (TupleLambda params _ _ _) accexps arrexps _ _) =
+hoistInExp e@(Reduce2 cs (TupleLambda params _ _ _) accexps arrexps _) =
   hoistInSOAC e arrexps $ \ks ->
     withSOACArrSlices cs (drop (length accexps) params) ks $
     withShapes (sameOuterShapes cs ks) $
     hoistInExpBase e
-hoistInExp e@(Scan2 cs (TupleLambda params _ _ _) accexps arrexps _ _) =
+hoistInExp e@(Scan2 cs (TupleLambda params _ _ _) accexps arrexps _) =
   hoistInSOAC e arrexps $ \arrks ->
   hoistInSOAC e accexps $ \accks ->
     let (accparams, arrparams) = splitAt (length accexps) params in
@@ -522,7 +522,7 @@ hoistInExp e@(Scan2 cs (TupleLambda params _ _ _) accexps arrexps _ _) =
     withShapes (sameOuterShapes cs arrks) $
     hoistInExpBase e
 hoistInExp e@(Redomap2 cs _ (TupleLambda innerparams _ _ _)
-              accexps arrexps _ _) =
+              accexps arrexps _) =
   hoistInSOAC e arrexps $ \ks ->
     withSOACArrSlices cs (drop (length accexps) innerparams) ks $
     withShapes (sameOuterShapes cs ks) $

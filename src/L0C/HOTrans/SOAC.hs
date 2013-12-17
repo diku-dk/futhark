@@ -136,23 +136,20 @@ certificates (Scan2    cs _ _   _ _) = cs
 certificates (Filter2  cs _     _ _) = cs
 certificates (Redomap2 cs _ _ _ _ _) = cs
 
-rowTypes :: [Exp] -> [Type]
-rowTypes = map (rowType . typeOf)
-
 toExp :: SOAC -> Exp
 toExp (Map2 cs l as loc) =
-  L0.Map2 cs l as' (rowTypes as') loc
+  L0.Map2 cs l as' loc
   where as' = map inputToExp as
 toExp (Reduce2 cs l es as loc) =
-  L0.Reduce2 cs l es as' (rowTypes as') loc
+  L0.Reduce2 cs l es as' loc
   where as' = map inputToExp as
 toExp (Scan2 cs l es as loc) =
-  L0.Scan2 cs l es as' (rowTypes as') loc
+  L0.Scan2 cs l es as' loc
   where as' = map inputToExp as
 toExp (Filter2 cs l as loc) =
   L0.Filter2 cs l (map inputToExp as) loc
 toExp (Redomap2 cs l1 l2 es as loc) =
-  L0.Redomap2 cs l1 l2 es as' (rowTypes as') loc
+  L0.Redomap2 cs l1 l2 es as' loc
   where as' = map inputToExp as
 
 -- The reason why some expression cannot be converted to a 'SOAC'
@@ -167,19 +164,19 @@ inputFromExp' :: Exp -> Either NotSOAC Input
 inputFromExp' e = maybe (Left $ InvalidArrayInput e) Right $ inputFromExp e
 
 fromExp :: Exp -> Either NotSOAC SOAC
-fromExp (L0.Map2 cs l as _ loc) = do
+fromExp (L0.Map2 cs l as loc) = do
   as' <- mapM inputFromExp' as
   Right $ Map2 cs l as' loc
-fromExp (L0.Reduce2 cs l es as _ loc) = do
+fromExp (L0.Reduce2 cs l es as loc) = do
   as' <- mapM inputFromExp' as
   Right $ Reduce2 cs l es as' loc
-fromExp (L0.Scan2 cs l es as _ loc) = do
+fromExp (L0.Scan2 cs l es as loc) = do
   as' <- mapM inputFromExp' as
   Right $ Scan2 cs l es as' loc
 fromExp (L0.Filter2 cs l as loc) = do
   as' <- mapM inputFromExp' as
   Right $ Filter2 cs l as' loc
-fromExp (L0.Redomap2 cs l1 l2 es as _ loc) = do
+fromExp (L0.Redomap2 cs l1 l2 es as loc) = do
   as' <- mapM inputFromExp' as
   Right $ Redomap2 cs l1 l2 es as' loc
 fromExp (L0.LetPat (TupId pats _) e (L0.TupLit tupes _) _)
