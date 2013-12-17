@@ -1,6 +1,10 @@
 module L0C.HORepresentation.SOACNest
   ( SOACNest(..)
   , Combinator(..)
+  , levels
+  , setLevels
+  , body
+  , setBody
   , NestBody(..)
   , bodyToLambda
   , lambdaToBody
@@ -51,9 +55,9 @@ nestInputs l inps =
 
 lambdaToBody :: TupleLambda -> NestBody
 lambdaToBody l = fromMaybe (Lambda l) $ isNesting $ tupleLambdaBody l
-  where isNesting (LetPat pat e body _) = do
+  where isNesting (LetPat pat e b _) = do
           soac <- either (const Nothing) Just $ SOAC.fromExp e
-          ks <- tuplePatAndLit pat body
+          ks <- tuplePatAndLit pat b
           let inps' = nestInputs l $ SOAC.inputs soac
               params = map fromParam $ tupleLambdaParams l -- XXX: Loses aliasing information.
               nesting = (params, inps', ks, tupleLambdaReturnType l)
@@ -87,6 +91,20 @@ setLevels ls (Reduce2 cs b _ es loc) = Reduce2 cs b ls es loc
 setLevels ls (Scan2 cs b _ es loc) = Scan2 cs b ls es loc
 setLevels ls (Filter2 cs b _ loc) = Filter2 cs b ls loc
 setLevels ls (Redomap2 cs l b _ es loc) = Redomap2 cs l b ls es loc
+
+body :: Combinator -> NestBody
+body (Map2 _ b _ _) = b
+body (Reduce2 _ b _ _ _) = b
+body (Scan2 _ b _ _ _) = b
+body (Filter2 _ b _ _) = b
+body (Redomap2 _ _ b _ _ _) = b
+
+setBody :: NestBody -> Combinator -> Combinator
+setBody b (Map2 cs _ ls loc) = Map2 cs b ls loc
+setBody b (Reduce2 cs _ ls es loc) = Reduce2 cs b ls es loc
+setBody b (Scan2 cs _ ls es loc) = Scan2 cs b ls es loc
+setBody b (Filter2 cs _ ls loc) = Filter2 cs b ls loc
+setBody b (Redomap2 cs l _ ls es loc) = Redomap2 cs l b ls es loc
 
 data SOACNest = SOACNest { inputs :: [SOAC.Input]
                          , operation :: Combinator
