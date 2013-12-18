@@ -119,17 +119,18 @@ runTests run files = do
          putMVar testmvar (file, test)
   isTTY <- hIsTerminalDevice stdout
   let report = if isTTY then reportInteractive else reportText
+      clear  = if isTTY then clearLine else putStr "\n"
       getResults :: S.Set FilePath -> Int -> Int -> IO (Int,Int)
       getResults remaining failed passed =
         case S.toList remaining of
-          []      -> clearLine >> return (failed, passed)
+          []      -> clear >> return (failed, passed)
           first:_ -> do
             report first failed passed $ S.size remaining
             (file, res) <- takeMVar resmvar
             let next = getResults $ file `S.delete` remaining
             case res of
               Success -> next failed (passed+1)
-              Failure s -> do clearLine
+              Failure s -> do clear
                               putStrLn (file ++ ":\n" ++ s)
                               next (failed+1) passed
 
