@@ -14,6 +14,7 @@ import Control.Monad.Reader
 import qualified Data.Array as A
 import qualified Data.HashMap.Lazy as HM
 import Data.List
+
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.C as C
 
@@ -21,6 +22,7 @@ import Text.PrettyPrint.Mainland
 
 import L0C.L0
 import L0C.MonadFreshNames
+import qualified L0C.BohriumBackend as Bohrium
 
 data CompilerState = CompilerState {
     compTypeStructs :: [(DeclType, (C.Type, C.Definition))]
@@ -838,11 +840,15 @@ compileExp _ (Reduce {}) = soacError
 compileExp _ (Scan {}) = soacError
 compileExp _ (Filter {}) = soacError
 compileExp _ (Redomap {}) = soacError
-compileExp _ (Map2 {}) = soacError
-compileExp _ (Reduce2 {}) = soacError
-compileExp _ (Scan2 {}) = soacError
-compileExp _ (Filter2 {}) = soacError
-compileExp _ (Redomap2 {}) = soacError
+compileExp target e@(Map2 {}) = tryBohriumCompile target e
+compileExp target e@(Reduce2 {}) = tryBohriumCompile target e
+compileExp target e@(Scan2 {}) = tryBohriumCompile target e
+compileExp target e@(Filter2 {}) = tryBohriumCompile target e
+compileExp target e@(Redomap2 {}) = tryBohriumCompile target e
+
+tryBohriumCompile :: C.Exp -> Exp -> CompilerM [C.BlockItem]
+tryBohriumCompile target e =
+  maybe soacError return =<< Bohrium.compileExp lookupVar target e
 
 compileExpInPlace :: C.Exp -> Exp -> CompilerM [C.BlockItem]
 
