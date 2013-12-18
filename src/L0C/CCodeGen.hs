@@ -221,11 +221,11 @@ printStm place (Elem (Tuple ets)) = do
              }|]
 printStm place (Array Char _ _ _) =
   return [C.cstm|printf("%s", $exp:place.data);|]
-printStm place t@(Array et _ _ _) = do
+printStm place t@(Array {}) = do
   i <- new "print_i"
   v <- new "print_elem"
-  et' <- typeToCType $ Elem et
-  pstm <- printStm (varExp v) $ Elem et
+  et' <- typeToCType $ rowType t
+  pstm <- printStm (varExp v) $ rowType t
   let indexi = indexArrayElemStms (varExp v) place t [varExp i]
   return [C.cstm|{
                int $id:i;
