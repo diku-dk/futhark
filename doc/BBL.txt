@@ -1,0 +1,17 @@
+
+* L0-rewriting
+
+    - Loop fission
+    - Horizontal fission
+    - Branching -> bitmasks
+    - reduce(map) -> map(reduce)
+
+* Modify C code generator
+
+    - Recognize L0-patterns
+
+* Test programs
+
+* "Formalization"
+
+
