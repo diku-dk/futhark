@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 -- | The code generator cannot handle the array combinators (@map@ and
 -- friends), so this module was written to transform them into the
 -- equivalent do-loops.  The transformation is currently rather naive
@@ -5,7 +6,7 @@
 -- transformations in-place.  This module should be run very late in
 -- the compilation pipeline, ideally just before the code generator.
 module L0C.FirstOrderTransform
-  ( transformProg )
+  ( transformProg, transformExp )
   where
 
 import Control.Applicative
@@ -14,14 +15,7 @@ import Control.Monad.State
 import Data.Loc
 
 import L0C.L0
-import L0C.FreshNames
-
-type TransformM = State VNameSource
-
--- | Return a new, fresh name, with the given string being part of the
--- name.
-new :: String -> TransformM VName
-new = state . flip newVName
+import L0C.MonadFreshNames
 
 -- | Perform the first-order transformation on an L0 program.  The
 -- resulting program is not uniquely named, so make sure to run the
@@ -31,7 +25,7 @@ transformProg prog =
   Prog $ runTransformM $ mapM transformFunDec $ progFunctions prog
   where runTransformM m = evalState m $ newNameSourceForProg prog
 
-transformFunDec :: FunDec -> TransformM FunDec
+transformFunDec :: MonadFreshNames VName m => FunDec -> m FunDec
 transformFunDec (fname, rettype, params, body, loc) = do
   body' <- transformExp body
   return (fname, rettype, params, body', loc)
@@ -43,7 +37,7 @@ transformFunDec (fname, rettype, params, body, loc) = do
 -- element of the array and use that to construct the array for the
 -- rest.  If the input array is empty, we simply return an empty
 -- output array.
-transformExp :: Exp -> TransformM Exp
+transformExp :: MonadFreshNames VName m => Exp -> m Exp
 
 transformExp mape@(Map fun e intype loc) =
   newLet "inarr" e $ \inarr inarrv -> do
@@ -201,18 +195,18 @@ transformExp e = mapExpM transform e
                       mapOnExp = transformExp
                     }
 
-newReduction :: SrcLoc -> Exp -> Exp
-             -> ((Ident, Exp) -> (Ident, Exp) -> (Ident, Exp) -> TransformM Exp)
-             -> TransformM Exp
+newReduction :: MonadFreshNames VName m =>
+                SrcLoc -> Exp -> Exp ->
+                ((Ident, Exp) -> (Ident, Exp) -> (Ident, Exp) -> m Exp) -> m Exp
 newReduction loc arrexp accexp body =
   newLet "arr" arrexp $ \arr arrv ->
     newLet "acc" accexp $ \acc accv -> do
       (i, iv) <- newVar loc "i" (Elem Int)
       body (arr, arrv) (acc, accv) (i, iv)
 
-newReduction2 :: SrcLoc -> [Exp] -> [Exp]
-             -> (([Ident], Exp) -> ([Ident], Exp) -> (Ident, Exp) -> TransformM Exp)
-             -> TransformM Exp
+newReduction2 :: MonadFreshNames VName m =>
+                 SrcLoc -> [Exp] -> [Exp]
+              -> (([Ident], Exp) -> ([Ident], Exp) -> (Ident, Exp) -> m Exp) -> m Exp
 newReduction2 loc arrexps accexps body = do
   (i, iv) <- newVar loc "i" (Elem Int)
   newLets "arr" arrexps $ \arr arrv -> do
@@ -221,8 +215,8 @@ newReduction2 loc arrexps accexps body = do
     let binder inner = LetPat (TupId (map Id names) loc) (TupLit accexps loc) inner loc
     binder <$> body (arr, arrv) (names, TupLit namevs loc) (i, iv)
 
-newLet :: String -> Exp -> (Ident -> Exp -> TransformM Exp)
-       -> TransformM Exp
+newLet :: MonadFreshNames VName m =>
+          String -> Exp -> (Ident -> Exp -> m Exp) -> m  Exp
 newLet name e body = do
   e' <- liftM maybeCopy $ transformExp e
   (x,xv) <- newVar loc name (typeOf e')
@@ -230,8 +224,8 @@ newLet name e body = do
   xlet <$> body x xv
   where loc = srclocOf e
 
-newTupLet :: String -> Exp -> (Ident -> Exp -> TransformM Exp)
-       -> TransformM Exp
+newTupLet :: MonadFreshNames VName m =>
+             String -> Exp -> (Ident -> Exp -> m Exp) -> m Exp
 newTupLet name e body = do
   e' <- liftM maybeCopy $ transformExp e
   case typeOf e' of
@@ -242,17 +236,17 @@ newTupLet name e body = do
         where loc = srclocOf e
     _ -> newLet name e body
 
-newLets :: String -> [Exp] -> ([Ident] -> Exp -> TransformM Exp)
-        -> TransformM Exp
+newLets :: MonadFreshNames VName m =>
+           String -> [Exp] -> ([Ident] -> Exp -> m Exp) -> m Exp
 newLets k es body = newLets' es []
   where newLets' [] names       =
           body (reverse names) $ TupLit (map Var $ reverse names) noLoc
         newLets' (e:rest) names =
           newLet k e $ \name _ -> newLets' rest (name:names)
 
-newVar :: SrcLoc -> String -> Type -> TransformM (Ident, Exp)
+newVar :: MonadFreshNames VName m => SrcLoc -> String -> Type -> m (Ident, Exp)
 newVar loc name tp = do
-  x <- new name
+  x <- newVName name
   return (Ident x tp loc, Var $ Ident x tp loc)
 
 -- | @maybeCopy e@ returns a copy expression containing @e@ if @e@ is
@@ -266,7 +260,7 @@ index :: Certificates -> [Ident] -> Exp -> [Exp]
 index cs arrs i = flip map arrs $ \arr ->
                   Index cs arr Nothing [i] (stripArray 1 $ identType arr) $ srclocOf i
 
-newResultArray :: Exp -> Exp -> ([Ident] -> Exp -> TransformM Exp) -> TransformM Exp
+newResultArray :: MonadFreshNames VName m => Exp -> Exp -> ([Ident] -> Exp -> m Exp) -> m Exp
 newResultArray sizeexp valueexp body =
   case typeOf valueexp of
     Elem (Tuple ets) -> do
@@ -281,7 +275,7 @@ newResultArray sizeexp valueexp body =
             bnd <$> body [name] namev
   where loc = srclocOf valueexp
 
-letwith :: Certificates -> [Ident] -> Exp -> Exp -> Exp -> TransformM Exp
+letwith :: MonadFreshNames VName m => Certificates -> [Ident] -> Exp -> Exp -> Exp -> m Exp
 letwith cs ks i v body =
   case typeOf v of
     Elem (Tuple ets) -> do
@@ -301,7 +295,7 @@ size :: Certificates -> [Ident] -> Exp
 size _ [] = Literal (IntVal 0) noLoc
 size cs (k:_) = Size cs 0 (Var k) $ srclocOf k
 
-transformLambda :: Lambda -> [Exp] -> TransformM Exp
+transformLambda :: MonadFreshNames VName m => Lambda -> [Exp] -> m Exp
 transformLambda (AnonymFun params body _ loc) args = do
   body' <- transformExp body
   return $ foldl bind body' $ zip (map fromParam params) args
@@ -310,7 +304,7 @@ transformLambda (CurryFun fname curryargs rettype loc) args = do
   curryargs' <- mapM transformExp curryargs
   return $ Apply fname [(arg, Observe) | arg <- curryargs'++args] rettype loc
 
-transformTupleLambda :: TupleLambda -> [Exp] -> TransformM Exp
+transformTupleLambda :: MonadFreshNames VName m => TupleLambda -> [Exp] -> m Exp
 transformTupleLambda (TupleLambda params body _ loc) args = do
   body' <- transformExp body
   return $ foldl bind body' $ zip (map fromParam params) args
