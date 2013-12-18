@@ -1,7 +1,17 @@
+                       Bohrium Backend for L0
+
+         Kenneth Skovhede, Martin Elsman, Troels Blum, Martin Dybdal,
+         Troels Henriksen, Simon Lund
+
+* L0
+
+* Bohrium
 
 * L0-rewriting
 
     - Loop fission
+
+
     - Horizontal fission
     - Branching -> bitmasks
     - reduce(map) -> map(reduce)
