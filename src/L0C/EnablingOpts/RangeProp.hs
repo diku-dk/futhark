@@ -241,9 +241,9 @@ isComparable range = do
 makeRangeComparable :: Range -> RangeM Range
 makeRangeComparable (Span Ninf Pinf) = return $ Span Ninf Pinf
 makeRangeComparable range = do
-  --_ <- trace ("\nMaking comparable: " ++ ppRange range) return ()
+  --_ <- trace ("- makeComp " ++ ppRange range) return ()
   rep_order <- replacementOrder range
-  --_ <- trace ("replacemantorder: " ++ show (map textual rep_order) ) return ()
+  --_ <- trace ("- replacement order " ++ show (map textual rep_order) ) return ()
   foldingFun range rep_order
   where
     foldingFun :: Range -> [VName] -> RangeM Range
