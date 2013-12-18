@@ -1,22 +1,27 @@
-                       Bohrium Backend for L0
+                           Bohrium Backend for L0
 
-         Troels Blum, Martin Dybdal, Martin Elsman, Troels Henriksen,
-         Simon Lund, Kenneth Skovhede
+                Troels Blum, Martin Dybdal, Martin Elsman, 
+               Troels Henriksen, Simon Lund, Kenneth Skovhede
 
-                 Sophienberg, December 2013
+                         Sophienberg, December 2013
+
 
 
 * L0
 
+
 * Bohrium
 
+
 * L0-rewriting
+
 
     - Loop fission
 
         map (fn row => red(op +,0,row) / m, a)   ==>
           let t = map (fn row => red(op +, 0, row), a)
           in map (fn e => e / m, t)
+
 
     - Horizontal fission
 
@@ -27,6 +32,7 @@
         xs = red (fn (accMax,x) => max accMax x, a)
         ys = red (fn (accMin,x) => min accMin x, a)
 
+
     - Branching -> bitmasks
 
         map (fn x => if x > c then f x else g x, a)   ==>
@@ -36,13 +42,17 @@
         gxs = map (g,a)
         map (fn (m,x,y) => x * m + y * not m, mask, fxs, gxs)
 
+
     - reduce(map) -> map(reduce)
+
 
 * Modify C code generator
 
     - Recognize L0-patterns
 
+
 * Test programs
+
 
 * "Formalization"
 
