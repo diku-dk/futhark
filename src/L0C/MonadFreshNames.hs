@@ -16,6 +16,8 @@ module L0C.MonadFreshNames
   , module FreshNames
   ) where
 
+import Control.Applicative
+
 import qualified Control.Monad.State.Lazy
 import qualified Control.Monad.State.Strict
 
@@ -33,15 +35,15 @@ import L0C.FreshNames hiding (newName, newID, newVName)
 --    getNameSource = get
 --    putNameSource = put
 -- @
-class (Monad m, VarName vn)  => MonadFreshNames vn m where
+class (Applicative m, Monad m, VarName vn)  => MonadFreshNames vn m where
   getNameSource :: m (NameSource vn)
   putNameSource :: NameSource vn -> m ()
 
-instance (VarName vn, Monad im) => MonadFreshNames vn (Control.Monad.State.Lazy.StateT (NameSource vn) im) where
+instance (Applicative im, VarName vn, Monad im) => MonadFreshNames vn (Control.Monad.State.Lazy.StateT (NameSource vn) im) where
   getNameSource = Control.Monad.State.Lazy.get
   putNameSource = Control.Monad.State.Lazy.put
 
-instance (VarName vn, Monad im) => MonadFreshNames vn (Control.Monad.State.Strict.StateT (NameSource vn) im) where
+instance (Applicative im, VarName vn, Monad im) => MonadFreshNames vn (Control.Monad.State.Strict.StateT (NameSource vn) im) where
   getNameSource = Control.Monad.State.Strict.get
   putNameSource = Control.Monad.State.Strict.put
 
