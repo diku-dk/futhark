@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleInstances, MultiParamTypeClasses, FlexibleContexts #-}
 -- | The type checker checks whether the program is type-consistent.
 -- Whether type annotations are already present is irrelevant, but if
 -- they are, the type checker will signal an error if they are wrong.
@@ -28,7 +28,8 @@ import qualified Data.HashSet as HS
 import L0C.L0
 import L0C.Renamer (tagProg', tagExp, tagExp', tagType',
                     untagProg, untagExp, untagPattern, untagType)
-import L0C.FreshNames
+import qualified L0C.FreshNames as FreshNames
+import L0C.MonadFreshNames
 
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.
@@ -297,17 +298,16 @@ runTypeM env src (TypeM m) = fst <$> evalRWST m env src
 bad :: VarName vn => TypeError vn -> TypeM vn a
 bad = TypeM . lift . Left
 
+instance VarName vn => MonadFreshNames (ID vn) (TypeM vn) where
+  getNameSource = get
+  putNameSource = put
+
+newFname :: VarName vn => String -> TypeM vn Name
+newFname s = do s' <- state (`FreshNames.newID` varName s Nothing)
+                return $ nameFromString $ textual $ baseName s'
+
 liftEither :: VarName vn => Either (TypeError vn) a -> TypeM vn a
 liftEither = either bad return
-
--- | Return a fresh, unique name.  The @VName@ is prepended to the
--- name.
-new :: VarName vn => String -> TypeM vn (ID vn)
-new k = state (`newName` varName k Nothing)
-
-newIdent :: VarName vn => String -> TaggedType vn -> SrcLoc
-         -> TypeM vn (TaggedIdent CompTypeBase vn)
-newIdent k t loc = Ident <$> new k <*> pure t <*> pure loc
 
 occur :: VarName vn => Occurences vn -> TypeM vn ()
 occur occurs = tell Dataflow { usageOccurences = occurs }
@@ -912,11 +912,10 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
   (loopbody', loopflow) <- firstscope $
                            collectDataflow $ binding [iparam] $ checkExp loopbody
 
-  -- We can use the name generator in a slightly hacky way to generate a
-  -- Name for the function.
-  fname <- nameFromString . textual <$> new "loop_fun"
-  pname <- new "merge_val"
+  -- We can use the name generator in a slightly hacky way to generate
+  -- a unique Name for the function.
   bound <- newIdent "loop_bound" (Elem Int) loc
+  fname <- newFname "loop_fun"
 
   let -- | Change the uniqueness attribute of a type to reflect how it
       -- was used.
@@ -935,13 +934,14 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
       rettype = param (typeOf mergeexp') $
                 patDiet mergepat' $ usageOccurences loopflow
 
-      boundnames = HS.insert iparam $ patIdentSet mergepat'
+  merge <- newIdent "merge_val" (fromDecl rettype) $ srclocOf mergeexp'
+
+  let boundnames = HS.insert iparam $ patIdentSet mergepat'
       ununique ident =
         ident { identType = param (identType ident) Observe }
       -- Find the free variables of the loop body.
       free = map ununique $ HS.toList $
              freeInExp loopbody' `HS.difference` boundnames
-      merge  = Ident pname (fromDecl rettype) $ srclocOf mergeexp'
 
       -- These are the parameters expected by the function: All of the
       -- free variables, followed by the index, followed by the upper
@@ -1314,8 +1314,8 @@ checkPolyLambdaOp op curryargexps rettype args pos = do
           [t1, t2] | t1 == t2 -> return t1
           [Elem (Tuple [t1,t2])] | t1 == t2 -> return t1 -- For autoshimming.
           l -> bad $ ParameterMismatch (Just fname) pos (Left 2) $ map untagType l
-  xname <- new "x"
-  yname <- new "y"
+  xname <- newIDFromString "x"
+  yname <- newIDFromString "y"
   let xident t = Ident xname t pos
       yident t = Ident yname t pos
   (x,y,params) <- case curryargexps of

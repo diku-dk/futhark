@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses #-}
 -- |
 --
 -- This module implements a transformation on L0 programs that
@@ -37,19 +38,15 @@ import Data.List
 import Data.Loc
 
 import L0C.L0
-import L0C.FreshNames
+import L0C.MonadFreshNames
 
 -- | Perform the tuple transformation on an entire program.
 transformProg :: Prog -> Prog
 transformProg prog =
   Prog $ runTransformM $ mapM transformFun $ progFunctions prog
   where runTransformM m = evalState (runReaderT m newEnv) newState
-        newState = TransformState $ newNameSourceForProg prog
+        newState = newNameSourceForProg prog
         newEnv = TransformEnv HM.empty
-
-data TransformState = TransformState {
-    envNameSrc :: VNameSource
-  }
 
 data Replacement = ArraySubst Ident [Ident]
                  | TupleSubst [Ident]
@@ -58,12 +55,11 @@ data TransformEnv = TransformEnv {
     envSubsts :: HM.HashMap VName Replacement
   }
 
-type TransformM = ReaderT TransformEnv (State TransformState)
+type TransformM = ReaderT TransformEnv (State VNameSource)
 
-new :: String -> TransformM VName
-new k = do (name, src) <- gets $ flip newVName k . envNameSrc
-           modify $ \s -> s { envNameSrc = src }
-           return name
+instance MonadFreshNames VName TransformM where
+  getNameSource = get
+  putNameSource = put
 
 flattenTypes :: [TypeBase als VName] -> [TypeBase als VName]
 flattenTypes = concatMap flatten
@@ -596,7 +592,7 @@ transformTupleLambda (TupleLambda params body rettype loc) m = do
 
 newVar :: SrcLoc -> String -> Type -> TransformM (Ident, Exp)
 newVar loc name tp = do
-  x <- new name
+  x <- newVName name
   return (Ident x tp loc, Var $ Ident x tp loc)
 
 untupleDeclExp :: DeclType -> Exp -> TransformM Exp
