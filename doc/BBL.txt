@@ -28,6 +28,14 @@
         ys = red (fn (accMin,x) => min accMin x, a)
 
     - Branching -> bitmasks
+
+        map (fn x => if x > c then f x else g x, a)   ==>
+       
+        mask = map (fn x => x > c, a) 
+        fxs = map (f,a)
+        gxs = map (g,a)
+        map (fn (m,x,y) => x * m + y * not m, mask, fxs, gxs)
+
     - reduce(map) -> map(reduce)
 
 * Modify C code generator
