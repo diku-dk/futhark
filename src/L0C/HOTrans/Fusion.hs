@@ -200,8 +200,7 @@ addNewKer res (idd, soac) = do
 addNewKerWithUnfusable :: FusedRes -> ([Ident], SOAC) -> HS.HashSet VName -> FusionGM FusedRes
 addNewKerWithUnfusable res (idd, soac) ufs = do
   nm_ker <- KernName <$> new "ker"
-  let ini_ker = newKernel idd soac
-      new_ker = fromMaybe ini_ker $ optimizeKernel Nothing ini_ker
+  let new_ker = newKernel idd soac
       out_nms = map identName idd
       comb    = HM.unionWith HS.union
       os' = HM.fromList [(arr,nm_ker) | arr <- out_nms]
