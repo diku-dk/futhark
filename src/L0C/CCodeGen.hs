@@ -76,7 +76,7 @@ lookupVar k = do v <- asks $ HM.lookup k . envVarMap
 
 -- | 'new s' returns a fresh variable name, with 's' prepended to it.
 new :: String -> CompilerM String
-new = liftM textual  . newVName
+new = liftM textual . newVName
 
 -- | Turn a name into a C expression consisting of just that name.
 varExp :: String -> C.Exp
