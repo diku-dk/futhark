@@ -1,4 +1,4 @@
-{-# LANGUAGE QuasiQuotes, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE QuasiQuotes, GeneralizedNewtypeDeriving, FlexibleInstances, MultiParamTypeClasses #-}
 -- | C code generator.  This module can convert a well-typed L0
 -- program to an equivalent C program.  It is assumed that the L0
 -- program does not contain any arrays of tuples (use
@@ -14,13 +14,16 @@ import Control.Monad.Reader
 import qualified Data.Array as A
 import qualified Data.HashMap.Lazy as HM
 import Data.List
+
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.C as C
 
 import Text.PrettyPrint.Mainland
 
 import L0C.L0
-import L0C.FreshNames
+import qualified L0C.FirstOrderTransform as FOT
+import L0C.MonadFreshNames
+import qualified L0C.BohriumBackend as Bohrium
 
 data CompilerState = CompilerState {
     compTypeStructs :: [(DeclType, (C.Type, C.Definition))]
@@ -57,6 +60,10 @@ newtype CompilerM a = CompilerM (ReaderT CompilerEnv (State CompilerState) a)
   deriving (Functor, Applicative, Monad,
             MonadState CompilerState, MonadReader CompilerEnv)
 
+instance MonadFreshNames VName CompilerM where
+  getNameSource = gets compNameSrc
+  putNameSource src = modify $ \s -> s { compNameSrc = src }
+
 binding :: [(VName, C.Exp)] -> CompilerM a -> CompilerM a
 binding kvs = local (flip (foldl add) kvs)
   where add env (k, v) = env { envVarMap = HM.insert k v $ envVarMap env }
@@ -69,13 +76,7 @@ lookupVar k = do v <- asks $ HM.lookup k . envVarMap
 
 -- | 'new s' returns a fresh variable name, with 's' prepended to it.
 new :: String -> CompilerM String
-new = liftM textual  . newAsName
-
--- | As 'new', but returns a 'Name' instead of a 'String'.
-newAsName :: String -> CompilerM VName
-newAsName k = do (name, src) <- gets $ flip newVName k . compNameSrc
-                 modify $ \s -> s { compNameSrc = src }
-                 return name
+new = liftM textual  . newVName
 
 -- | Turn a name into a C expression consisting of just that name.
 varExp :: String -> C.Exp
@@ -613,7 +614,7 @@ compileExp place e@(Iota (Var v) _) = do
                    }|]
 
 compileExp place (Iota ne pos) = do
-  size <- newAsName "iota_size"
+  size <- newVName "iota_size"
   let ident = Ident size (Elem Int) pos
   compileExp place $ LetPat (Id ident) ne (Iota (Var ident) pos) pos
 
@@ -630,8 +631,8 @@ compileExp place e@(Replicate (Var nv) (Var vv) _) = do
                    }|]
 
 compileExp place (Replicate ne ve pos) = do
-  nv <- newAsName "replicate_n"
-  vv <- newAsName "replicate_v"
+  nv <- newVName "replicate_n"
+  vv <- newVName "replicate_v"
   let nident = Ident nv (Elem Int) pos
       vident = Ident vv (typeOf ve) pos
       nlet body = LetPat (Id nident) ne body pos
@@ -840,11 +841,17 @@ compileExp _ (Reduce {}) = soacError
 compileExp _ (Scan {}) = soacError
 compileExp _ (Filter {}) = soacError
 compileExp _ (Redomap {}) = soacError
-compileExp _ (Map2 {}) = soacError
-compileExp _ (Reduce2 {}) = soacError
-compileExp _ (Scan2 {}) = soacError
-compileExp _ (Filter2 {}) = soacError
-compileExp _ (Redomap2 {}) = soacError
+compileExp target e@(Map2 {}) = tryBohriumCompile target e
+compileExp target e@(Reduce2 {}) = tryBohriumCompile target e
+compileExp target e@(Scan2 {}) = tryBohriumCompile target e
+compileExp target e@(Filter2 {}) = tryBohriumCompile target e
+compileExp target e@(Redomap2 {}) = tryBohriumCompile target e
+
+tryBohriumCompile :: C.Exp -> Exp -> CompilerM [C.BlockItem]
+tryBohriumCompile target e = do
+  res <- Bohrium.compileExp lookupVar target e
+  case res of Just e' -> return e'
+              Nothing -> compileExp target =<< FOT.transformExp e
 
 compileExpInPlace :: C.Exp -> Exp -> CompilerM [C.BlockItem]
 
