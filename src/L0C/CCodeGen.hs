@@ -21,6 +21,7 @@ import qualified Language.C.Quote.C as C
 import Text.PrettyPrint.Mainland
 
 import L0C.L0
+import qualified L0C.FirstOrderTransform as FOT
 import L0C.MonadFreshNames
 import qualified L0C.BohriumBackend as Bohrium
 
@@ -59,7 +60,7 @@ newtype CompilerM a = CompilerM (ReaderT CompilerEnv (State CompilerState) a)
   deriving (Functor, Applicative, Monad,
             MonadState CompilerState, MonadReader CompilerEnv)
 
-instance MonadFreshNames (ID Name) CompilerM where
+instance MonadFreshNames VName CompilerM where
   getNameSource = gets compNameSrc
   putNameSource src = modify $ \s -> s { compNameSrc = src }
 
@@ -847,8 +848,10 @@ compileExp target e@(Filter2 {}) = tryBohriumCompile target e
 compileExp target e@(Redomap2 {}) = tryBohriumCompile target e
 
 tryBohriumCompile :: C.Exp -> Exp -> CompilerM [C.BlockItem]
-tryBohriumCompile target e =
-  maybe soacError return =<< Bohrium.compileExp lookupVar target e
+tryBohriumCompile target e = do
+  res <- Bohrium.compileExp lookupVar target e
+  case res of Just e' -> return e'
+              Nothing -> compileExp target =<< FOT.transformExp e
 
 compileExpInPlace :: C.Exp -> Exp -> CompilerM [C.BlockItem]
 
