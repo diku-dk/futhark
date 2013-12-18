@@ -1,7 +1,10 @@
                        Bohrium Backend for L0
 
-         Kenneth Skovhede, Martin Elsman, Troels Blum, Martin Dybdal,
-         Troels Henriksen, Simon Lund
+         Troels Blum, Martin Dybdal, Martin Elsman, Troels Henriksen,
+         Simon Lund, Kenneth Skovhede
+
+                 Sophienberg, December 2013
+
 
 * L0
 
@@ -11,8 +14,19 @@
 
     - Loop fission
 
+        map (fn row => red(op +,0,row) / m, a)   ==>
+          let t = map (fn row => red(op +, 0, row), a)
+          in map (fn e => e / m, t)
 
     - Horizontal fission
+
+        (xs,ys) = unzip(red(fn ((accMax,accMin),x) => (max accMax x, 
+                                                       min accMin x),
+                            a)) ==> 
+
+        xs = red (fn (accMax,x) => max accMax x, a)
+        ys = red (fn (accMin,x) => min accMin x, a)
+
     - Branching -> bitmasks
     - reduce(map) -> map(reduce)
 
