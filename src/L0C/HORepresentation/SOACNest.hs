@@ -5,6 +5,7 @@ module L0C.HORepresentation.SOACNest
   , setNesting
   , body
   , setBody
+  , params
   , NestBody(..)
   , bodyToLambda
   , lambdaToBody
@@ -59,9 +60,9 @@ lambdaToBody l = fromMaybe (Lambda l) $ isNesting $ tupleLambdaBody l
           soac <- either (const Nothing) Just $ SOAC.fromExp e
           ks <- tuplePatAndLit pat b
           let inps' = nestInputs l $ SOAC.inputs soac
-              params = map fromParam $ tupleLambdaParams l -- XXX: Loses aliasing information.
-              nesting = (params, inps', ks, tupleLambdaReturnType l)
-          Just $ NewNest nesting (operation $ fromSOAC soac)
+              ps = map fromParam $ tupleLambdaParams l -- XXX: Loses aliasing information.
+              nest = (ps, inps', ks, tupleLambdaReturnType l)
+          Just $ NewNest nest (operation $ fromSOAC soac)
         isNesting _ = Nothing
 
 data Combinator = Map2 Certificates NestBody [Nesting] SrcLoc
@@ -106,6 +107,14 @@ setBody b (Scan2 cs _ ls es loc) = Scan2 cs b ls es loc
 setBody b (Filter2 cs _ ls loc) = Filter2 cs b ls loc
 setBody b (Redomap2 cs l _ ls es loc) = Redomap2 cs l b ls es loc
 
+params :: Combinator -> [Parameter]
+params comb =
+  case nesting comb of
+    (ps,_,_,_):_ -> map toParam ps
+    []           -> case body comb of
+                      Lambda l             -> tupleLambdaParams l
+                      NewNest (ps,_,_,_) _ -> map toParam ps
+
 data SOACNest = SOACNest { inputs :: [SOAC.Input]
                          , operation :: Combinator
                          }
@@ -130,23 +139,23 @@ fromExp = liftM fromSOAC . SOAC.fromExp
 
 fromSOAC :: SOAC -> SOACNest
 fromSOAC (SOAC.Map2 cs l as loc)
-  | Just (Map2 cs2 l2 params _, nest) <- nested l =
-      SOACNest as $ Map2 (cs++cs2) l2 (nest:params) loc
+  | Just (Map2 cs2 l2 ps _, nest) <- nested l =
+      SOACNest as $ Map2 (cs++cs2) l2 (nest:ps) loc
   | otherwise =
       SOACNest as $ Map2 cs (lambdaToBody l) [] loc
 fromSOAC (SOAC.Reduce2 cs l es as loc)
-  | Just (Reduce2 cs2 l2 params _ _, nest) <- nested l =
-      SOACNest as $ Reduce2 (cs++cs2) l2 (nest:params) es loc
+  | Just (Reduce2 cs2 l2 ps _ _, nest) <- nested l =
+      SOACNest as $ Reduce2 (cs++cs2) l2 (nest:ps) es loc
   | otherwise =
       SOACNest as $ Reduce2 cs (lambdaToBody l) [] es loc
 fromSOAC (SOAC.Scan2 cs l es as loc)
-  | Just (Scan2 cs2 l2 params _ _, nest) <- nested l =
-      SOACNest as $ Scan2 (cs++cs2) l2 (nest:params) es loc
+  | Just (Scan2 cs2 l2 ps _ _, nest) <- nested l =
+      SOACNest as $ Scan2 (cs++cs2) l2 (nest:ps) es loc
   | otherwise =
       SOACNest as $ Scan2 cs (lambdaToBody l) [] es loc
 fromSOAC (SOAC.Filter2 cs l as loc)
-  | Just (Filter2 cs2 l2 params  _, nest) <- nested l =
-      SOACNest as $ Filter2 (cs++cs2) l2 (nest:params) loc
+  | Just (Filter2 cs2 l2 ps  _, nest) <- nested l =
+      SOACNest as $ Filter2 (cs++cs2) l2 (nest:ps) loc
   | otherwise =
       SOACNest as $ Filter2 cs (lambdaToBody l) [] loc
 fromSOAC (SOAC.Redomap2 cs ol l es as loc) =
@@ -209,9 +218,9 @@ inpVars :: [SOAC.Input] -> Maybe [Ident]
 inpVars = mapM SOAC.inputToIdent
 
 matches :: [Parameter] -> [Ident] -> Bool
-matches params idds =
-  length params == length idds &&
-  and (zipWith (==) (map identName params) (map identName idds))
+matches ps idds =
+  length ps == length idds &&
+  and (zipWith (==) (map identName ps) (map identName idds))
 
 tuplePatAndLit :: TupIdent -> Exp -> Maybe [Ident]
 tuplePatAndLit (TupId pats _) (TupLit es _)
