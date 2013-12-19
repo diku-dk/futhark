@@ -1,11 +1,10 @@
 {-# LANGUAGE QuasiQuotes, GeneralizedNewtypeDeriving, FlexibleInstances, MultiParamTypeClasses #-}
--- | C code generator.  This module can convert a well-typed L0
--- program to an equivalent C program.  It is assumed that the L0
--- program does not contain any arrays of tuples (use
--- "L0C.TupleTransform") or SOACs (use "L0C.FirstOrderTransform").
--- The C code is strictly sequential and leaks memory like a sieve, so
--- it's not very useful yet.
-module L0C.CCodeGen (compileProg) where
+-- | C code generator framework.
+module L0C.Backends.GenericC
+  ( compileProg
+  , CompilerM
+  , lookupVar
+  ) where
 
 import Control.Applicative
 import Control.Monad.Identity
@@ -21,9 +20,8 @@ import qualified Language.C.Quote.C as C
 import Text.PrettyPrint.Mainland
 
 import L0C.L0
-import qualified L0C.FirstOrderTransform as FOT
+import L0C.Backends.SimpleRepresentation
 import L0C.MonadFreshNames
-import qualified L0C.BohriumBackend as Bohrium
 
 data CompilerState = CompilerState {
     compTypeStructs :: [(DeclType, (C.Type, C.Definition))]
@@ -40,14 +38,18 @@ newCompilerState prog = CompilerState {
                         , compNameSrc = newNameSourceForProg prog
                         }
 
+type ExpCompiler = C.Exp -> Exp -> CompilerM (Either Exp [C.BlockItem])
+
 data CompilerEnv = CompilerEnv {
     envVarMap :: HM.HashMap VName C.Exp
+  , envCompileExp :: ExpCompiler
   }
 
-newCompilerEnv :: CompilerEnv
-newCompilerEnv = CompilerEnv {
-                   envVarMap = HM.empty
-                 }
+newCompilerEnv :: ExpCompiler -> CompilerEnv
+newCompilerEnv ec = CompilerEnv {
+                      envVarMap = HM.empty
+                    , envCompileExp = ec
+                    }
 
 -- | Return a list of struct definitions for the tuples and arrays
 -- seen during compilation.  The list is sorted according to
@@ -64,6 +66,10 @@ instance MonadFreshNames VName CompilerM where
   getNameSource = gets compNameSrc
   putNameSource src = modify $ \s -> s { compNameSrc = src }
 
+runCompilerM :: ExpCompiler -> Prog -> CompilerM a -> (a, CompilerState)
+runCompilerM ec prog (CompilerM m) =
+  runState (runReaderT m $ newCompilerEnv ec) $ newCompilerState prog
+
 binding :: [(VName, C.Exp)] -> CompilerM a -> CompilerM a
 binding kvs = local (flip (foldl add) kvs)
   where add env (k, v) = env { envVarMap = HM.insert k v $ envVarMap env }
@@ -77,20 +83,6 @@ lookupVar k = do v <- asks $ HM.lookup k . envVarMap
 -- | 'new s' returns a fresh variable name, with 's' prepended to it.
 new :: String -> CompilerM String
 new = liftM textual . newVName
-
--- | Turn a name into a C expression consisting of just that name.
-varExp :: String -> C.Exp
-varExp k = [C.cexp|$id:k|]
-
--- | True if both types map to the same runtime representation.  This
--- is the case if they are identical modulo uniqueness.
-sameRepresentation :: Eq (als VName) => GenType als -> GenType als -> Bool
-sameRepresentation (Elem (Tuple ets1)) (Elem (Tuple ets2))
-  | length ets1 == length ets2 =
-    and $ zipWith sameRepresentation ets1 ets2
-sameRepresentation (Array et1 ds1 _ _) (Array et2 ds2 _ _) =
-  length ds1 == length ds2 && sameRepresentation (Elem et1) (Elem et2)
-sameRepresentation t1 t2 = t1 == t2
 
 typeToCType :: GenType als -> CompilerM C.Type
 typeToCType (Elem Int) = return [C.cty|int|]
@@ -120,87 +112,13 @@ typeToCType t@(Array {}) = do
       ct <- typeToCType $ Elem $ elemType t
       name <- new "array_type"
       let ctp = [C.cty|$ty:ct*|]
-          struct = [C.cedecl|struct $id:name { int dims[$int:(arrayDims t)]; $ty:ctp data; };|]
+          struct = [C.cedecl|struct $id:name { typename int64_t dims[$int:(arrayDims t)]; $ty:ctp data; };|]
           stype  = [C.cty|struct $id:name|]
       modify $ \s -> s { compTypeStructs = (toDecl t, (stype, struct)) : compTypeStructs s }
       return stype
 
 expCType :: Exp -> CompilerM C.Type
 expCType = typeToCType . typeOf
-
-tupleField :: Int -> String
-tupleField i = "elem_" ++ show i
-
-tupleFieldExp :: C.Exp -> Int -> C.Exp
-tupleFieldExp e i = [C.cexp|$exp:e.$id:(tupleField i)|]
-
--- | @funName f@ is the name of the C function corresponding to
--- the L0 function @f@.
-funName :: Name -> String
-funName = ("l0_"++) . nameToString
-
--- | The size is in elements.
-allocArray :: C.Exp -> [C.Exp] -> C.Type -> C.Stm
-allocArray place shape basetype =
-  [C.cstm|{$stms:shapeassign
-           $exp:place.data = calloc($exp:sizeexp, sizeof($ty:basetype));}|]
-  where sizeexp = foldl mult [C.cexp|1|] shape
-        mult x y = [C.cexp|$exp:x * $exp:y|]
-        shapeassign = zipWith assign shape [0..]
-        assign :: C.Exp -> Int -> C.Stm
-        assign n i = [C.cstm|$exp:place.dims[$int:i] = $exp:n;|]
-
--- | @arraySliceCopyStm to from t slice@ is a @memcpy()@ statement copying
--- a slice of the array @from@ to the memory pointed at by @to@.
-arraySliceCopyStm :: C.Exp -> C.Exp -> Type -> Int -> C.Stm
-arraySliceCopyStm to from t slice =
-  [C.cstm|memcpy($exp:to,
-                 $exp:from.data,
-                 $exp:(arraySliceSizeExp from t slice)*sizeof($exp:from.data[0]));|]
-
--- | Return an expression giving the array slice size in elements.
--- The integer argument is the number of dimensions sliced off.
-arraySliceSizeExp :: C.Exp -> Type -> Int -> C.Exp
-arraySliceSizeExp place t slice =
-  foldl comb [C.cexp|1|] [slice..arrayDims t-1]
-  where comb y i = [C.cexp|$exp:place.dims[$int:i] * $exp:y|]
-
--- | Return an list of expressions giving the array shape in elements.
-arrayShapeExp :: C.Exp -> GenType als -> [C.Exp]
-arrayShapeExp place t =
-  map comb [0..arrayDims t-1]
-  where comb i = [C.cexp|$exp:place.dims[$int:i]|]
-
-indexArrayExp :: C.Exp -> GenType als -> [C.Exp] -> C.Exp
-indexArrayExp place t indexes =
-  let sizes = map (foldl mult [C.cexp|1|]) $ tails $ map field [1..arrayDims t - 1]
-      field :: Int -> C.Exp
-      field i = [C.cexp|$exp:place.dims[$int:i]|]
-      mult x y = [C.cexp|$exp:x * $exp:y|]
-      add x y = [C.cexp|$exp:x + $exp:y|]
-      index = foldl add [C.cexp|0|] $ zipWith mult sizes indexes
-  in [C.cexp|$exp:place.data[$exp:index]|]
-
--- | @indexArrayElemStms place from t idxs@ produces a statement that
--- stores the value at @from[idxs]@ in @place@.  In contrast to
--- 'indexArrayExp', this function takes care of creating proper size
--- information if the result is an array itself.
-indexArrayElemStms :: C.Exp -> C.Exp -> GenType als -> [C.Exp] -> [C.Stm]
-indexArrayElemStms place from t idxs =
-  case drop (length idxs) $ arrayShapeExp from t of
-    [] -> [[C.cstm|$exp:place = $exp:index;|]]
-    dims ->
-      let dimstms = [ [C.cstm|$exp:place.dims[$int:i] = $exp:dim;|] |
-                      (i, dim) <- zip [(0::Int)..] dims ]
-      in dimstms++[[C.cstm|$exp:place.data = &$exp:index;|]]
-  where index = indexArrayExp from t idxs
-
-boundsCheckStm :: C.Exp -> [C.Exp] -> [C.Stm]
-boundsCheckStm place idxs = zipWith check idxs [0..]
-  where check :: C.Exp -> Int -> C.Stm
-        check var i = [C.cstm|if ($exp:var < 0 || $exp:var >= $exp:place.dims[$int:i]) {
-                            error(1, "Array index out of bounds.\n");
-                          }|]
 
 -- | Return a statement printing the given value.
 printStm :: C.Exp -> GenType als -> CompilerM C.Stm
@@ -277,9 +195,10 @@ mainCall (fname,rettype,params,_,_) = do
 
 -- | Compile L0 program to a C program.  Always uses the function
 -- named "main" as entry point, so make sure it is defined.
-compileProg :: Prog -> String
-compileProg prog =
-  let ((prototypes, definitions, main), endstate) = runCompilerM $ compileProg'
+compileProg :: ExpCompiler -> Prog -> String
+compileProg ec prog =
+  let ((prototypes, definitions, main), endstate) =
+        runCompilerM ec prog compileProg'
       funName' = funName . nameFromString
   in pretty 0 $ ppr [C.cunit|
 $esc:("#include <stdio.h>")
@@ -338,8 +257,6 @@ int main() {
           where loc = case func of
                         C.OldFunc _ _ _ _ _ _ l -> l
                         C.Func _ _ _ _ _ l      -> l
-        runCompilerM (CompilerM m) =
-          runState (runReaderT m newCompilerEnv) $ newCompilerState prog
 
 compileFun :: FunDec -> CompilerM (C.Definition, C.Func)
 compileFun (fname, rettype, args, body, _) = do
@@ -404,24 +321,23 @@ compileValue place v@(ArrayVal _ rt) = do
         elemInit (LogVal False) = [[C.cinit|0|]]
         elemInit (TupVal _) = error "Array-of-tuples encountered in code generator."
 
-stm :: C.Stm -> [C.BlockItem]
-stm (C.Block items _) = items
-stm (C.Default s _) = stm s
-stm s = [[C.citem|$stm:s|]]
+compileExp  :: C.Exp -> Exp -> CompilerM [C.BlockItem]
 
-stms :: [C.Stm] -> [C.BlockItem]
-stms = map $ \s -> [C.citem|$stm:s|]
+compileExp target e = do
+  res <- join $ asks envCompileExp <*> pure target <*> pure e
+  case res of Left e'    -> compileExp' target e'
+              Right res' -> return res'
 
-compileExp :: C.Exp -> Exp -> CompilerM [C.BlockItem]
+compileExp' :: C.Exp -> Exp -> CompilerM [C.BlockItem]
 
-compileExp place (Literal val _) = do
+compileExp' place (Literal val _) = do
   stms <$> compileValue place val
 
-compileExp place (Var (Ident name _ _)) = do
+compileExp' place (Var (Ident name _ _)) = do
   name' <- lookupVar name
   return $ stm [C.cstm|$exp:place = $exp:name';|]
 
-compileExp place (TupLit es _) = do
+compileExp' place (TupLit es _) = do
   liftM concat . forM (zip es [(0::Int)..]) $ \(e, i) -> do
     var <- new $ "TupVal_" ++ show i
     e' <- compileExp (varExp var) e
@@ -433,10 +349,10 @@ compileExp place (TupLit es _) = do
                        $exp:place.$id:field = $id:var;
                      }|]
 
-compileExp place a@(ArrayLit [] _ _) = do
+compileExp' place a@(ArrayLit [] _ _) = do
   stms <$> compileValue place (blankValue $ typeOf a)
 
-compileExp place (ArrayLit (e:es) _ _) = do
+compileExp' place (ArrayLit (e:es) _ _) = do
   name <- new "ArrayLit_elem"
   et <- typeToCType $ typeOf e
   bt <- typeToCType $ Elem $ elemType $ typeOf e
@@ -490,7 +406,7 @@ compileExp place (ArrayLit (e:es) _ _) = do
                          $stms:es''
                        }|]
 
-compileExp place (BinOp bop e1 e2 _ _) = do
+compileExp' place (BinOp bop e1 e2 _ _) = do
   e1_dest <- new "binop_x1"
   e2_dest <- new "binop_x2"
   e1' <- compileExp (varExp e1_dest) e1
@@ -523,25 +439,25 @@ compileExp place (BinOp bop e1 e2 _ _) = do
             Less -> [C.cstm|$exp:place = $id:x < $id:y;|]
             Leq -> [C.cstm|$exp:place = $id:x <= $id:y;|]
 
-compileExp place (And e1 e2 _) = do
+compileExp' place (And e1 e2 _) = do
   e1' <- compileExp place e1
   e2' <- compileExp place e2
   return $ stm [C.cstm|{$items:e1' if ($exp:place) { $items:e2' }}|]
 
-compileExp place (Or e1 e2 _) = do
+compileExp' place (Or e1 e2 _) = do
   e1' <- compileExp place e1
   e2' <- compileExp place e2
   return $ stm [C.cstm|{$items:e1' if (!$exp:place) { $items:e2' }}|]
 
-compileExp place (Not e1 _) = do
+compileExp' place (Not e1 _) = do
   e1' <- compileExp place e1
   return $ stm [C.cstm|{$items:e1' $exp:place = !$exp:place;}|]
 
-compileExp place (Negate e1 _ _) = do
+compileExp' place (Negate e1 _ _) = do
   e1' <- compileExp place e1
   return $ stm [C.cstm|{$items:e1' $exp:place = -$exp:place;}|]
 
-compileExp place (If cond e1 e2 _ _) = do
+compileExp' place (If cond e1 e2 _ _) = do
   condvar <- new "if_cond"
   cond' <- compileExp (varExp condvar) cond
   e1' <- compileExp place e1
@@ -553,7 +469,7 @@ compileExp place (If cond e1 e2 _ _) = do
                      else { $items:e2' }
                    }|]
 
-compileExp place (Apply fname args _ _) = do
+compileExp' place (Apply fname args _ _) = do
   (vars, args') <- liftM unzip . forM args $ \(arg, _) -> do
                      var <- new "apply_arg"
                      arg' <- compileExp (varExp var) arg
@@ -566,7 +482,7 @@ compileExp place (Apply fname args _ _) = do
                      $exp:place = $id:(funName fname)($args:varexps);
                }|]
 
-compileExp place (LetPat pat e body _) = do
+compileExp' place (LetPat pat e body _) = do
   val <- new "let_value"
   e' <- compileExp (varExp val) e
   let bindings = compilePattern pat (varExp val)
@@ -578,7 +494,7 @@ compileExp place (LetPat pat e body _) = do
                      $items:body'
                    }|]
 
-compileExp place (Index _ var csidxs idxs _ _) = do
+compileExp' place (Index _ var csidxs idxs _ _) = do
   arr <- lookupVar $ identName var
   idxvars <- mapM (new . ("index_"++) . show) [0..length idxs-1]
   idxs' <- concat <$> zipWithM compileExp (map varExp idxvars) idxs
@@ -594,7 +510,7 @@ compileExp place (Index _ var csidxs idxs _ _) = do
                      $stms:index
                    }|]
 
-compileExp place (Size _ i e _) = do
+compileExp' place (Size _ i e _) = do
   dest <- new "size_value"
   et <- typeToCType $ typeOf e
   e' <- compileExp (varExp dest) e
@@ -604,7 +520,7 @@ compileExp place (Size _ i e _) = do
                      $exp:place = $id:dest.dims[$int:i];
                    }|]
 
-compileExp place e@(Iota (Var v) _) = do
+compileExp' place e@(Iota (Var v) _) = do
   e' <- compileExpInPlace place e
   v' <- lookupVar $ identName v
   let alloc = allocArray place [v'] [C.cty|int|]
@@ -613,12 +529,12 @@ compileExp place e@(Iota (Var v) _) = do
                      $items:e'
                    }|]
 
-compileExp place (Iota ne pos) = do
+compileExp' place (Iota ne pos) = do
   size <- newVName "iota_size"
   let ident = Ident size (Elem Int) pos
   compileExp place $ LetPat (Id ident) ne (Iota (Var ident) pos) pos
 
-compileExp place e@(Replicate (Var nv) (Var vv) _) = do
+compileExp' place e@(Replicate (Var nv) (Var vv) _) = do
   e' <- compileExpInPlace place e
   bt <- typeToCType $ Elem $ elemType $ identType vv
   nv' <- lookupVar $ identName nv
@@ -630,7 +546,7 @@ compileExp place e@(Replicate (Var nv) (Var vv) _) = do
                      $items:e'
                    }|]
 
-compileExp place (Replicate ne ve pos) = do
+compileExp' place (Replicate ne ve pos) = do
   nv <- newVName "replicate_n"
   vv <- newVName "replicate_v"
   let nident = Ident nv (Elem Int) pos
@@ -639,7 +555,7 @@ compileExp place (Replicate ne ve pos) = do
       vlet body = LetPat (Id vident) ve body pos
   compileExp place $ nlet $ vlet $ Replicate (Var nident) (Var vident) pos
 
-compileExp place (Reshape _ shapeexps arrexp _) = do
+compileExp' place (Reshape _ shapeexps arrexp _) = do
   shapevars <- mapM (new . ("shape_"++) . show) [0..length shapeexps-1]
   arr <- new "reshape_arr"
   intype' <- typeToCType $ typeOf arrexp
@@ -656,7 +572,7 @@ compileExp place (Reshape _ shapeexps arrexp _) = do
                      $exp:place.data = $id:arr.data;
                    }|]
 
-compileExp place e@(Transpose _ k n arrexp _) = do
+compileExp' place e@(Transpose _ k n arrexp _) = do
   arr <- new "transpose_arr"
   intype <- typeToCType $ typeOf arrexp
   basetype <- typeToCType $ Elem $ elemType $ typeOf arrexp
@@ -689,7 +605,7 @@ compileExp place e@(Transpose _ k n arrexp _) = do
             (mid,end) <- splitAt n post = pre ++ mid ++ [needle] ++ end
           | otherwise = l
 
-compileExp place (Split _ posexp arrexp _ _) = do
+compileExp' place (Split _ posexp arrexp _ _) = do
   arr <- new "split_arr"
   pos <- new "split_pos"
   arrexp' <- compileExp (varExp arr) arrexp
@@ -714,7 +630,7 @@ compileExp place (Split _ posexp arrexp _ _) = do
                      $exp:place1.dims[0] -= $id:pos;
                    }|]
 
-compileExp place (Concat _ xarr yarr _) = do
+compileExp' place (Concat _ xarr yarr _) = do
   x <- new "concat_x"
   y <- new "concat_y"
   xarr' <- compileExp (varExp x) xarr
@@ -744,7 +660,7 @@ compileExp place (Concat _ xarr yarr _) = do
                      $stm:copyy
              }|]
 
-compileExp place (LetWith _ name src idxcs idxs ve body _) = do
+compileExp' place (LetWith _ name src idxcs idxs ve body _) = do
   name' <- new $ textual $ identName name
   src' <- lookupVar $ identName src
   etype <- typeToCType $ identType src
@@ -781,7 +697,7 @@ compileExp place (LetWith _ name src idxcs idxs ve body _) = do
                      $items:body'
                    }|]
 
-compileExp place (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody _) = do
+compileExp' place (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody _) = do
   loopvar' <- new $ textual $ identName loopvar
   bound <- new "loop_bound"
   mergevarR <- new $ "loop_mergevar_read"
@@ -806,7 +722,7 @@ compileExp place (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody _) 
                      $items:letbody'
                    }|]
 
-compileExp place (Copy e _) = do
+compileExp' place (Copy e _) = do
   val <- new "copy_val"
   e' <- compileExp (varExp val) e
   t <- typeToCType $ typeOf e
@@ -821,7 +737,7 @@ compileExp place (Copy e _) = do
                      $stm:copy
                    }|]
 
-compileExp place (Assert e loc) = do
+compileExp' place (Assert e loc) = do
   e' <- compileExp place e
   return $ stm [C.cstm|{
                      $items:e'
@@ -832,26 +748,20 @@ compileExp place (Assert e loc) = do
                           }
                    }|]
 
-compileExp _ (Conjoin _ _) = return []
+compileExp' _ (Conjoin _ _) = return []
 
-compileExp _ (Zip {}) = error "Zip encountered during code generation."
-compileExp _ (Unzip {}) = error "Unzip encountered during code generation."
-compileExp _ (Map {}) = soacError
-compileExp _ (Reduce {}) = soacError
-compileExp _ (Scan {}) = soacError
-compileExp _ (Filter {}) = soacError
-compileExp _ (Redomap {}) = soacError
-compileExp target e@(Map2 {}) = tryBohriumCompile target e
-compileExp target e@(Reduce2 {}) = tryBohriumCompile target e
-compileExp target e@(Scan2 {}) = tryBohriumCompile target e
-compileExp target e@(Filter2 {}) = tryBohriumCompile target e
-compileExp target e@(Redomap2 {}) = tryBohriumCompile target e
-
-tryBohriumCompile :: C.Exp -> Exp -> CompilerM [C.BlockItem]
-tryBohriumCompile target e = do
-  res <- Bohrium.compileExp lookupVar target e
-  case res of Just e' -> return e'
-              Nothing -> compileExp target =<< FOT.transformExp e
+compileExp' _ (Zip {}) = error "Zip encountered during code generation."
+compileExp' _ (Unzip {}) = error "Unzip encountered during code generation."
+compileExp' _ (Map {}) = soacError
+compileExp' _ (Reduce {}) = soacError
+compileExp' _ (Scan {}) = soacError
+compileExp' _ (Filter {}) = soacError
+compileExp' _ (Redomap {}) = soacError
+compileExp' _ (Map2 {}) = soacError
+compileExp' _ (Reduce2 {}) = soacError
+compileExp' _ (Scan2 {}) = soacError
+compileExp' _ (Filter2 {}) = soacError
+compileExp' _ (Redomap2 {}) = soacError
 
 compileExpInPlace :: C.Exp -> Exp -> CompilerM [C.BlockItem]
 

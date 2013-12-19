@@ -23,7 +23,8 @@ import qualified L0C.TupleTransform as TT
 import qualified L0C.FullNormalization as FN
 import qualified L0C.Rebinder as RB
 import L0C.Untrace
-import L0C.CCodeGen
+import qualified L0C.Backends.SequentialC as SequentialC
+import qualified L0C.Backends.Bohrium as Bohrium
 
 data CompileError = CompileError {
     errorDesc :: String
@@ -73,9 +74,12 @@ commandLineOptions =
   , Option [] ["inhibit-uniqueness-checking"]
     (NoArg $ \opts -> opts { l0checkAliases = False })
     "Don't check that uniqueness constraints are being upheld."
-  , Option "c" ["compile"]
-    (NoArg $ \opts -> opts { l0action = codegenAction })
-    "Translate program into C and write it on standard output."
+  , Option [] ["compile-sequential"]
+    (NoArg $ \opts -> opts { l0action = seqCodegenAction })
+    "Translate program into sequential C and write it on standard output."
+  , Option [] ["compile-bohrium"]
+    (NoArg $ \opts -> opts { l0action = bohriumCodegenAction })
+    "Translate program into C using Bohrium and write it on standard output."
   , Option "p" ["print"]
     (NoArg $ \opts -> opts { l0action = printAction })
     "Prettyprint the program on standard output (default action)."
@@ -102,8 +106,11 @@ printAction = ("prettyprinter", putStrLn . prettyPrint)
 interpretAction :: Action
 interpretAction = ("interpreter", interpret)
 
-codegenAction :: Action
-codegenAction = ("code generator", putStrLn . compileProg)
+seqCodegenAction :: Action
+seqCodegenAction = ("sequential code generator", putStrLn . SequentialC.compileProg)
+
+bohriumCodegenAction :: Action
+bohriumCodegenAction = ("Bohrium code generator", putStrLn . Bohrium.compileProg)
 
 interpret :: Prog -> IO ()
 interpret prog =
