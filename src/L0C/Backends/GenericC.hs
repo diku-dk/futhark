@@ -4,6 +4,8 @@ module L0C.Backends.GenericC
   ( compileProg
   , CompilerM
   , lookupVar
+  , compileExp
+  , compileExpNewVar
   ) where
 
 import Control.Applicative
@@ -832,6 +834,13 @@ compileExpInPlace place e
                      }|]
 
 compileExpInPlace place e = compileExp place e
+
+compileExpNewVar :: Exp -> CompilerM (String, [C.BlockItem])
+compileExpNewVar e = do
+  v <- new "val"
+  ctype <- typeToCType $ typeOf e
+  e' <- compileExp (varExp v) e
+  return (v, [C.citem|$ty:ctype $id:v;|] : e')
 
 compilePattern :: TupIdent -> C.Exp -> [(VName, C.Exp)]
 compilePattern pat vexp = compilePattern' pat vexp
