@@ -1,20 +1,38 @@
+-- | High-level representation of SOACs.  When performing
+-- SOAC-transformations, operating on normal 'Exp' values is somewhat
+-- of a nuisance, as they can represent terms that are not proper
+-- SOACs.  In contrast, this module exposes a SOAC representation that
+-- does not enable invalid representations (except for type errors).
+--
+-- The names exported by this module conflict with the standard L0
+-- syntax tree constructors, so you are advised to use a qualified
+-- import:
+--
+-- @
+-- import L0C.HORepresentation.SOAC (SOAC)
+-- import qualified L0C.HORepresentation.SOAC as SOAC
+-- @
 module L0C.HORepresentation.SOAC
-  ( SOAC (..)
-  , Input (..)
-  , Index (..)
-  , inputFromExp
-  , inputToExp
-  , inputToIdent
-  , inputArray
-  , inputType
+  (
+   -- * SOACs
+    SOAC (..)
   , inputs
   , setInputs
   , lambda
   , setLambda
   , certificates
+  -- ** Converting to and from expressions
   , NotSOAC (..)
   , fromExp
   , toExp
+  -- * SOAC inputs
+  , Input (..)
+  , Index (..)
+  , inputArray
+  , inputType
+  -- ** Converting to and from expressions
+  , inputFromExp
+  , inputToExp
   )
   where
 
@@ -24,12 +42,22 @@ import qualified L0C.L0 as L0
 import L0C.L0 hiding (Map2, Reduce2, Scan2, Filter2, Redomap2,
                       Var, Iota, Transpose, Index)
 
+-- | One array input to a SOAC - a SOAC may have multiple inputs, but
+-- all are of this form.  Only the array inputs are expressed with
+-- this type; other arguments, such as initial accumulator values, are
+-- plain expressions.
 data Input = Var Ident
+           -- ^ Some array-typed variable in scope.
            | Iota Exp
+           -- ^ @iota(e)@.
            | Transpose Certificates Int Int Input
+           -- ^ A transposition of an otherwise valid input (possibly
+           -- another transposition!).
            | Index Certificates Ident (Maybe Certificates) [Index]
+             -- ^ @a[i]@.
              deriving (Show, Eq, Ord)
 
+-- | An index used in an 'Input'.
 data Index = VarIndex Ident
            | ConstIndex Int
              deriving (Show, Eq, Ord)
@@ -40,6 +68,8 @@ instance Located Input where
   locOf (Transpose _ _ _ inp) = locOf inp
   locOf (Index _ k _ _)       = locOf k
 
+-- | If the given expression represents a normalised SOAC input,
+-- return that input.
 inputFromExp :: Exp -> Maybe Input
 inputFromExp (L0.Var k)    = Just $ Var k
 inputFromExp (L0.Iota e _) = Just $ Iota e
@@ -54,6 +84,7 @@ inputFromExp (L0.Index cs idd idxcs idxs _ _) = do
         idx _                         = Nothing
 inputFromExp _ = Nothing
 
+-- | Convert a SOAC input to the corresponding expression.
 inputToExp :: Input -> Exp
 inputToExp (Var k)  = L0.Var k
 inputToExp (Iota e) = L0.Iota e $ srclocOf e
@@ -65,21 +96,20 @@ inputToExp (Index cs idd idxcs idxs) =
         idx (VarIndex indidd) = L0.Var indidd
         idx (ConstIndex i)    = Literal (IntVal i) $ srclocOf idd
 
-inputToIdent :: Input -> Maybe Ident
-inputToIdent (Var idd)             = Just idd
-inputToIdent (Iota _)              = Nothing
-inputToIdent (Transpose _ _ _ inp) = inputToIdent inp
-inputToIdent (Index {})            = Nothing
-
+-- | If the input is a (possibly transposed) array variable, return
+-- that variable.
 inputArray :: Input -> Maybe Ident
 inputArray (Var idd)             = Just idd
 inputArray (Iota _)              = Nothing
 inputArray (Transpose _ _ _ inp) = inputArray inp
 inputArray (Index {})            = Nothing
 
+-- | Return the type of an input - just another name for @'typeOf'
+-- . 'inputToExp'@.
 inputType :: Input -> Type
 inputType = typeOf . inputToExp
 
+-- | A definite representation of a SOAC expression.
 data SOAC = Map2 Certificates TupleLambda [Input] SrcLoc
           | Reduce2  Certificates TupleLambda [Exp] [Input] SrcLoc
           | Scan2 Certificates TupleLambda [Exp] [Input] SrcLoc
@@ -94,7 +124,7 @@ instance Located SOAC where
   locOf (Filter2 _ _ _ loc) = locOf loc
   locOf (Redomap2 _ _ _ _ _ loc) = locOf loc
 
--- | Returns the input arrays used in a SOAC.
+-- | Returns the inputs used in a SOAC.
 inputs :: SOAC -> [Input]
 inputs (Map2 _     _     arrs _) = arrs
 inputs (Reduce2  _ _ _   arrs _) = arrs
@@ -102,6 +132,7 @@ inputs (Scan2    _ _ _   arrs _) = arrs
 inputs (Filter2  _ _     arrs _) = arrs
 inputs (Redomap2 _ _ _ _ arrs _) = arrs
 
+-- | Set the inputs to a SOAC.
 setInputs :: [Input] -> SOAC -> SOAC
 setInputs arrs (Map2 cs lam _ loc) =
   Map2 cs lam arrs loc
@@ -114,6 +145,7 @@ setInputs arrs (Filter2 cs lam _ loc) =
 setInputs arrs (Redomap2 cs lam1 lam ne _ loc) =
   Redomap2 cs lam1 lam ne arrs loc
 
+-- | The lambda used in a given SOAC.
 lambda :: SOAC -> TupleLambda
 lambda (Map2     _ lam _    _    ) = lam
 lambda (Reduce2  _ lam _    _ _  ) = lam
@@ -121,6 +153,7 @@ lambda (Scan2    _ lam _    _ _  ) = lam
 lambda (Filter2  _ lam _    _    ) = lam
 lambda (Redomap2 _ _   lam2 _ _ _) = lam2
 
+-- | Set the lambda used in the SOAC.
 setLambda :: TupleLambda -> SOAC -> SOAC
 setLambda lam (Map2     cs         _    arrs loc) =
   Map2     cs          lam    arrs loc
@@ -141,6 +174,7 @@ certificates (Scan2    cs _ _   _ _) = cs
 certificates (Filter2  cs _     _ _) = cs
 certificates (Redomap2 cs _ _ _ _ _) = cs
 
+-- | Convert a SOAC to the corresponding expression.
 toExp :: SOAC -> Exp
 toExp (Map2 cs l as loc) =
   L0.Map2 cs l as' loc
@@ -157,7 +191,7 @@ toExp (Redomap2 cs l1 l2 es as loc) =
   L0.Redomap2 cs l1 l2 es as' loc
   where as' = map inputToExp as
 
--- The reason why some expression cannot be converted to a 'SOAC'
+-- | The reason why some expression cannot be converted to a 'SOAC'
 -- value.
 data NotSOAC = NotSOAC -- ^ The expression is not a (tuple-)SOAC at all.
              | InvalidArrayInput Exp -- ^ One of the input arrays has an
@@ -168,6 +202,9 @@ data NotSOAC = NotSOAC -- ^ The expression is not a (tuple-)SOAC at all.
 inputFromExp' :: Exp -> Either NotSOAC Input
 inputFromExp' e = maybe (Left $ InvalidArrayInput e) Right $ inputFromExp e
 
+-- | Either convert an expression to the normalised SOAC
+-- representation, or a reason why the expression does not have the
+-- valid form.
 fromExp :: Exp -> Either NotSOAC SOAC
 fromExp (L0.Map2 cs l as loc) = do
   as' <- mapM inputFromExp' as

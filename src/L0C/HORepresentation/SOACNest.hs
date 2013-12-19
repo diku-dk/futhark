@@ -215,7 +215,7 @@ vars = mapM varExp
         varExp _       = Nothing
 
 inpVars :: [SOAC.Input] -> Maybe [Ident]
-inpVars = mapM SOAC.inputToIdent
+inpVars = mapM SOAC.inputArray
 
 matches :: [Parameter] -> [Ident] -> Bool
 matches ps idds =
