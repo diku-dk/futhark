@@ -57,9 +57,9 @@ compileInput place shape inp = do
   let t = typeOf e
       d = arrayDims t
       strideStm 0 = [C.cexp|1|]
-      strideStm i = [C.cexp|$exp:shape[$int:i-1] * $id:stride[$int:i-1]|]
+      strideStm i = [C.cexp|$exp:shape[$int:i-1] * $id:stride[$int:d-$int:i]|]
       shapeStms = concat [ [[C.cstm|$exp:shape[$int:i] = $exp:se;|],
-                            [C.cstm|$id:stride[$int:i] = $exp:(strideStm i);|]]
+                            [C.cstm|$id:stride[$int:d-$int:i-1] = $exp:(strideStm i);|]]
                            | (i, se) <- zip [(0::Int)..] $ arrayShapeExp (varExp arr) t ]
   return $ stm [C.cstm|{
                      typename int64_t $id:stride[$int:d];
@@ -127,17 +127,40 @@ compileMapWithScan _ _ = return Nothing
 data BohriumUnOp = BohrIntInc Int
 
 data BohriumBinOp = BohrIntSum
+                  | BohrIntSub
+                  | BohrIntMult
+                  | BohrIntDiv
+                  | BohrIntMod
+                  | BohrIntXor
+                  | BohrIntOr
+                  | BohrIntAnd
+                  | BohrIntEqual
+                  | BohrIntLess
+                  | BohrIntLeq
 
 unOp :: [Parameter] -> Exp -> Maybe BohriumUnOp
 unOp ps (BinOp Plus (Literal (IntVal x) _) (Var p1) _ _)
-  | [toParam p1] `matches` ps = Just $ BohrIntInc x
+  | [toParam p1] == ps = Just $ BohrIntInc x
 unOp ps (BinOp Plus (Var p1) (Literal (IntVal x) _) _ _)
-  | [toParam p1] `matches` ps = Just $ BohrIntInc x
+  | [toParam p1] == ps = Just $ BohrIntInc x
 unOp _ _ = Nothing
 
 binOp :: [Parameter] -> Exp -> Maybe BohriumBinOp
-binOp ps (BinOp Plus (Var p1) (Var p2) _ _)
-  | [toParam p1, toParam p2] `matches` ps = Just BohrIntSum
+binOp ps (BinOp op (Var p1) (Var p2) _ _)
+  | [toParam p1, toParam p2] `matches` ps = op'
+  where op' = liftM snd $ find ((==op) . fst)
+              [(Plus,BohrIntSum),
+               (Minus, BohrIntSub),
+               (Times, BohrIntMult),
+               (Divide, BohrIntDiv),
+               (Mod, BohrIntMod),
+               (Band, BohrIntAnd),
+               (Xor, BohrIntXor),
+               (Bor, BohrIntOr),
+               (Equal, BohrIntEqual),
+               (Less, BohrIntLess),
+               (Leq, BohrIntLeq)]
+
 binOp _ _ = Nothing
 
 compileLambda :: TupleLambda -> ([Parameter] -> Exp -> Maybe a) -> Maybe a
@@ -152,8 +175,20 @@ doUnaryOperation (BohrIntInc x) outputName inputName =
   [C.cstm|$id:outputName = bh_multi_array_int32_add_scalar_rhs($id:inputName, $int:x);|]
 
 doBinaryOperation :: BohriumBinOp -> String -> String -> String -> C.Stm
-doBinaryOperation BohrIntSum outputName inputName1 inputName2 =
-  [C.cstm|$id:outputName = bh_multi_array_int32_add($id:inputName1, $id:inputName2);|]
+doBinaryOperation op outputName inputName1 inputName2 =
+  [C.cstm|$id:outputName = $id:opfun($id:inputName1, $id:inputName2);|]
+    where opfun = case op of
+                    BohrIntSum   -> "bh_multi_array_int32_add"
+                    BohrIntSub   -> "bh_multi_array_int32_subtract"
+                    BohrIntDiv   -> "bh_multi_array_int32_divide"
+                    BohrIntMod   -> "bh_multi_array_int32_modulo"
+                    BohrIntXor   -> "bh_multi_array_int32_bitwise_xor"
+                    BohrIntOr    -> "bh_multi_array_int32_bitwise_or"
+                    BohrIntAnd   -> "bh_multi_array_int32_bitwise_and"
+                    BohrIntMult  -> "bh_multi_array_int32_multiply"
+                    BohrIntEqual -> "bh_multi_array_int32_equal_to"
+                    BohrIntLess  -> "bh_multi_array_int32_less_than"
+                    BohrIntLeq   -> "bh_multi_array_int32_less_than_or_equal_to"
 
 matches :: Ord a => [a] -> [a] -> Bool
 matches xs ys = sort xs == sort ys
