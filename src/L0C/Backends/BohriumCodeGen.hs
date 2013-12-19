@@ -1,7 +1,6 @@
 {-# LANGUAGE FlexibleContexts, QuasiQuotes #-}
 module L0C.Backends.BohriumCodeGen (compileSOACtoBohrium) where
 
-import Control.Applicative
 import Control.Monad
 
 import Data.List
@@ -11,7 +10,6 @@ import L0C.MonadFreshNames
 import L0C.Backends.SimpleRepresentation
 import L0C.Backends.GenericC
 
-import L0C.HORepresentation.SOAC (SOAC)
 import qualified L0C.HORepresentation.SOAC as SOAC
 import L0C.HORepresentation.SOACNest (SOACNest(..))
 import qualified L0C.HORepresentation.SOACNest as Nest
