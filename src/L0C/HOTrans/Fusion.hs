@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses #-}
 module L0C.HOTrans.Fusion ( fuseProg )
   where
 
@@ -14,7 +14,7 @@ import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet      as HS
 
 import L0C.L0
-import L0C.FreshNames
+import L0C.MonadFreshNames
 import L0C.EnablingOpts.EnablingOptDriver
 import L0C.HOTrans.Composing
 import L0C.HOTrans.LoopKernel
@@ -34,6 +34,9 @@ newtype FusionGM a = FusionGM (StateT VNameSource (ReaderT FusionGEnv (Either En
                 MonadReader FusionGEnv,
                 Monad, Applicative, Functor )
 
+instance MonadFreshNames VName FusionGM where
+  getNameSource = get
+  putNameSource = put
 
 ------------------------------------------------------------------------
 --- Monadic Helpers: bind/new/runFusionGatherM, etc                      ---
@@ -83,11 +86,6 @@ runFusionGatherM prog (FusionGM a) =
 
 badFusionGM :: EnablingOptError -> FusionGM a
 badFusionGM = FusionGM . lift . lift . Left
-
--- | Return a fresh, unique name.  The given @String@ is prepended to
--- the name.
-new :: String -> FusionGM VName
-new = state . flip newVName
 
 ------------------------------------------------------------------------
 --- Fusion Entry Points: gather the to-be-fused kernels@pgm level    ---
@@ -199,7 +197,7 @@ addNewKer res (idd, soac) = do
 
 addNewKerWithUnfusable :: FusedRes -> ([Ident], SOAC) -> HS.HashSet VName -> FusionGM FusedRes
 addNewKerWithUnfusable res (idd, soac) ufs = do
-  nm_ker <- KernName <$> new "ker"
+  nm_ker <- KernName <$> newVName "ker"
   let new_ker = newKernel idd soac
       out_nms = map identName idd
       comb    = HM.unionWith HS.union
@@ -345,15 +343,15 @@ fuseSOACwithKer (out_ids1, soac1) ker = do
                 -- The Fusions that are semantically filter fusions:
                 ----------------------------------------------------
                 (SOAC.Reduce2 _ _ ne _ pos, SOAC.Filter2 {}) -> do
-                  name <- new "check"
+                  name <- newVName "check"
                   let (res_lam, new_inp) = fuseFilterIntoFold lam1 inp1_arr out_ids1 lam2 inp2_arr name
                   return $ SOAC.Reduce2 (cs1++cs2) res_lam ne new_inp pos
                 (SOAC.Redomap2 _ lam21 _ nes _ pos, SOAC.Filter2 {}) -> do
-                  name <- new "check"
+                  name <- newVName "check"
                   let (res_lam, new_inp) = fuseFilterIntoFold lam1 inp1_arr out_ids1 lam2 inp2_arr name
                   return $ SOAC.Redomap2 (cs1++cs2) lam21 res_lam nes new_inp pos
                 (SOAC.Filter2 _ _ _ pos, SOAC.Filter2 {}) -> do
-                  name <- new "check"
+                  name <- newVName "check"
                   let (res_lam, new_inp) = fuseFilters lam1 inp1_arr out_ids1 lam2 inp2_arr name
                   return $ SOAC.Filter2 (cs1++cs2) res_lam new_inp pos
 
@@ -444,7 +442,7 @@ fusionGatherExp fres (LetPat pat (Replicate n el loc) body _) = do
     bres <- bindPat pat $ fusionGatherExp fres body
     -- Implemented inplace: gets the variables in `n` and `el`
     (used_set, bres') <- getUnfusableSet loc bres [n,el]
-    repl_idnm <- new "repl_x"
+    repl_idnm <- newVName "repl_x"
     let repl_id = Ident repl_idnm (Elem Int) loc
         (lame, rwt) = case typeOf el of
                         Elem (Tuple ets) -> (el, ets)
@@ -656,7 +654,7 @@ transformOutput trnss outIds soac = do
                     (SOAC.toExp soac) (bind body) loc
   where loc = srclocOf soac
         newNames = mapM $ \idd -> do
-                     name <- new $ (++"_trns") $
+                     name <- newVName $ (++"_trns") $
                              nameToString $ baseName $ identName idd
                      return $ idd { identName = name }
         manyTransform ids = foldM oneTransform (ids, id) . reverse

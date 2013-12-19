@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses #-}
 -- |
 --
 -- Fully normalize an L0 program to a vaguely three-address-code-like
@@ -22,7 +22,7 @@ import Data.Loc
 import qualified Data.HashMap.Lazy as HM
 
 import L0C.L0
-import L0C.FreshNames
+import L0C.MonadFreshNames
 
 -- | Fully normalize an L0 program.  The resulting program is as
 -- uniquely named as the input program.
@@ -50,14 +50,13 @@ newtype NormalizeM a = NormalizeM (RWS Env NewBindings (NameSource VName) a)
             MonadReader Env,
             MonadWriter NewBindings)
 
-new :: String -> NormalizeM VName
-new k = do (name, src) <- gets $ flip newVName k
-           put src
-           return name
+instance MonadFreshNames VName NormalizeM where
+  getNameSource = get
+  putNameSource = put
 
 replaceExp :: String -> Exp -> NormalizeM Ident
 replaceExp k e = do
-  k' <- new k
+  k' <- newVName k
   let ident = Ident { identName = k'
                     , identType = typeOf e
                     , identSrcLoc = srclocOf e }

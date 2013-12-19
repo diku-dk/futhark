@@ -1,5 +1,3 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-
 module L0C.EnablingOpts.EnablingOptDriver (
                                     enablingOpts
                                   , copyCtProp

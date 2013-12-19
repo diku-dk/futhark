@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses #-}
 -- |
 --
 -- Perform a range of loosely connected low-level transformations
@@ -48,7 +48,7 @@ import qualified Data.HashSet as HS
 import qualified Data.Set as S
 
 import L0C.L0
-import L0C.FreshNames
+import L0C.MonadFreshNames
 
 import L0C.Rebinder.CSE
 import qualified L0C.Rebinder.SizeTracking as SZ
@@ -121,21 +121,20 @@ newtype HoistM a = HoistM (RWS
   deriving (Applicative, Functor, Monad,
             MonadWriter Need, MonadReader Env, MonadState (NameSource VName))
 
+instance MonadFreshNames VName HoistM where
+  getNameSource = get
+  putNameSource = put
+
 runHoistM :: HoistM a -> NameSource VName -> Env -> a
 runHoistM (HoistM m) src env = let (x, _, _) = runRWS m env src
                                in x
-
-new :: String -> HoistM VName
-new k = do (name, src) <- gets $ flip newVName k
-           put src
-           return name
 
 needThis :: BindNeed -> HoistM ()
 needThis need = tell $ Need [need]
 
 withNewBinding :: String -> Exp -> (Ident -> HoistM a) -> HoistM a
 withNewBinding k e m = do
-  k' <- new k
+  k' <- newVName k
   let ident = Ident { identName = k'
                     , identType = typeOf e
                     , identSrcLoc = srclocOf e }

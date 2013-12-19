@@ -1,5 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-
+{-# LANGUAGE GeneralizedNewtypeDeriving, TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses #-}
 module L0C.EnablingOpts.LetNormalizer ( letNormProg, letNormOneTupleLambda )
   where
  
@@ -12,7 +11,7 @@ import qualified Data.List as L
 import L0C.L0
 import Data.Loc
  
-import L0C.FreshNames
+import L0C.MonadFreshNames
 
 --import L0.Traversals
 import L0C.EnablingOpts.EnablingOptErrors
@@ -51,6 +50,9 @@ newtype LetNormM a = LetNormM (StateT VNameSource (WriterT LetNormRes (Either En
                 MonadWriter LetNormRes,
                 Monad, Applicative, Functor )
 
+instance MonadFreshNames VName LetNormM where
+  getNameSource = get
+  putNameSource = put
 
 -----------------------------
 --- Collecting the result ---
@@ -95,12 +97,6 @@ runLetNormM prog (LetNormM a) =
 badLetNormM :: EnablingOptError -> LetNormM a
 badLetNormM = LetNormM . lift . lift . Left
 -}
-
--- | Return a fresh, unique name.  The @String@ is prepended to the
--- name.
-new :: String -> LetNormM VName
-new = state . flip newVName
-
 
 letNormProg :: Prog -> Either EnablingOptError (Bool, Prog)
 letNormProg prog = do
@@ -488,7 +484,7 @@ makeVarExpSubst str pos e = case e of
     Index {} -> return e
     -- perform substitution for all other expression
     _               -> do
-        tmp_nm <- new str
+        tmp_nm <- newVName str
         let idd = Ident { identName = tmp_nm,
                           identType = typeOf e,
                           identSrcLoc = pos
