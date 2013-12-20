@@ -15,6 +15,8 @@ module L0C.Dev
   , lambda
   , tupleLambda
   , prog
+  , fromLeft
+  , fromRight
   )
 where
 
@@ -117,3 +119,13 @@ tupleLambda = uniqueTagTupleLambda . rightResult . checkClosedTupleLambda . righ
           return $ TupleLambda params body' rettype loc
             where env = HM.fromList [ (identName param, fromDecl $ identType param)
                                      | param <- params ]
+
+-- | Return the 'Left' component of an 'Either' value.
+fromLeft :: Either a b -> a
+fromLeft (Left x)  = x
+fromLeft (Right _) = error "fromLeft: passed Right value."
+
+-- | Return the 'Right' component of an 'Either' value.
+fromRight :: Either a b -> b
+fromRight (Right x) = x
+fromRight (Left _)  = error "fromRight: passed Left value."
