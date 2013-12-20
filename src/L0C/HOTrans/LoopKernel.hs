@@ -169,7 +169,7 @@ iswim _ nest ots
   | Nest.ScanT cs1 (Nest.NewNest lvl nn) [] es@[_] loc1 <- Nest.operation nest,
     Nest.MapT cs2 mb [] loc2 <- nn,
     Just es' <- mapM SOAC.inputFromExp es =
-    let (paramIds, Nothing, bndIds, retTypes) = lvl
+    let Nest.Nesting paramIds Nothing bndIds retTypes = lvl
         toInnerAccParam idd = idd { identType = rowType $ identType idd }
         innerAccParams = map toInnerAccParam $ take (length es) paramIds
         innerArrParams = drop (length es) paramIds

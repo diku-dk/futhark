@@ -1,12 +1,13 @@
 module L0C.HORepresentation.SOACNest
-  ( SOACNest(..)
-  , Combinator(..)
+  ( SOACNest (..)
+  , Combinator (..)
   , nesting
   , setNesting
   , body
   , setBody
   , params
-  , NestBody(..)
+  , NestBody (..)
+  , Nesting (..)
   , bodyToLambda
   , lambdaToBody
   , setInputs
@@ -27,7 +28,12 @@ import L0C.HORepresentation.SOAC (SOAC)
 import qualified L0C.HORepresentation.SOAC as SOAC
 import L0C.L0 hiding (MapT, ReduceT, ScanT, FilterT, RedomapT)
 
-type Nesting = ([Ident], Maybe [SOAC.Input], [Ident], [DeclType])
+data Nesting = Nesting {
+    nestingParams     :: [Ident]
+  , nestingInputs     :: Maybe [SOAC.Input]
+  , nestingResult     :: [Ident]
+  , nestingReturnType :: [DeclType]
+  } deriving (Show)
 
 data NestBody = Lambda TupleLambda
               | NewNest Nesting Combinator
@@ -35,7 +41,7 @@ data NestBody = Lambda TupleLambda
 
 bodyToLambda :: NestBody -> TupleLambda
 bodyToLambda (Lambda l) = l
-bodyToLambda (NewNest (paramIds, inps, bndIds, retTypes) op) =
+bodyToLambda (NewNest (Nesting paramIds inps bndIds retTypes) op) =
   TupleLambda { tupleLambdaSrcLoc = loc
               , tupleLambdaParams = map toParam paramIds
               , tupleLambdaReturnType = retTypes
@@ -61,7 +67,7 @@ lambdaToBody l = fromMaybe (Lambda l) $ isNesting $ tupleLambdaBody l
           ks <- tuplePatAndLit pat b
           let inps' = nestInputs l $ SOAC.inputs soac
               ps = map fromParam $ tupleLambdaParams l -- XXX: Loses aliasing information.
-              nest = (ps, inps', ks, tupleLambdaReturnType l)
+              nest = Nesting ps inps' ks $ tupleLambdaReturnType l
           Just $ NewNest nest (operation $ fromSOAC soac)
         isNesting _ = Nothing
 
@@ -110,10 +116,10 @@ setBody b (RedomapT cs l _ ls es loc) = RedomapT cs l b ls es loc
 params :: Combinator -> [Parameter]
 params comb =
   case nesting comb of
-    (ps,_,_,_):_ -> map toParam ps
-    []           -> case body comb of
-                      Lambda l             -> tupleLambdaParams l
-                      NewNest (ps,_,_,_) _ -> map toParam ps
+    nest:_ -> map toParam $ nestingParams nest
+    []     -> case body comb of
+                Lambda l       -> tupleLambdaParams l
+                NewNest nest _ -> map toParam $ nestingParams nest
 
 data SOACNest = SOACNest { inputs :: [SOAC.Input]
                          , operation :: Combinator
@@ -175,9 +181,9 @@ nested l
             case inpVars $ inputs soac of
               Just ks -- ...all of whose inputs are variables...
                 | tupleLambdaParams l `matches` ks -> -- ...and those inputs are the parameters to l!
-                    (ks, Nothing, tks, tupleLambdaReturnType l)
-              _ -> (map fromParam $ tupleLambdaParams l, -- ... if they are something else.
-                    Just (inputs soac), tks, tupleLambdaReturnType l))
+                    Nesting ks Nothing tks $ tupleLambdaReturnType l
+              _ -> Nesting (map fromParam $ tupleLambdaParams l) -- ... if they are something else.
+                           (Just $ inputs soac) tks (tupleLambdaReturnType l))
   | otherwise = Nothing
 
 toSOAC :: SOACNest -> SOAC
@@ -196,7 +202,7 @@ subLambda :: NestBody -> Combinator -> TupleLambda
 subLambda b comb =
   case nesting comb of
     [] -> bodyToLambda b
-    ((paramIds, inps, bndIds, retTypes):rest) ->
+    (Nesting paramIds inps bndIds retTypes:rest) ->
       let inps' = fromMaybe (map SOAC.Var paramIds) inps
       in TupleLambda { tupleLambdaReturnType = retTypes
                      , tupleLambdaBody       =
