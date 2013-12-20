@@ -136,11 +136,11 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
                         Filter {} -> True
                         Redomap {} -> True
                         Scan {} -> True
-                        Map2 {} -> True
-                        Reduce2 {} -> True
-                        Filter2 {} -> True
-                        Redomap2 {} -> True
-                        Scan2 {} -> True
+                        MapT {} -> True
+                        ReduceT {} -> True
+                        FilterT {} -> True
+                        RedomapT {} -> True
+                        ScanT {} -> True
                         DoLoop {} -> True
                         LetPat {} -> True
                         LetWith {} -> True
@@ -201,18 +201,18 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
     equals <+> text "for" <+> ppr i <+> text "<" <+> align (ppr bound) <+> text "do" </>
     indent 2 (ppr loopbody) <+> text "in" </>
     ppr letbody
-  pprPrec _ (Map2 cs lam as _) =
-    ppCertificates cs <> ppSOAC "map2" [lam] as
-  pprPrec _ (Reduce2 cs lam es as _) =
-    ppCertificates cs <> ppSOAC "reduce2" [lam] (es++as)
-  pprPrec _ (Redomap2 cs outer inner es as _) =
-    ppCertificates cs <> text "redomap2" <>
+  pprPrec _ (MapT cs lam as _) =
+    ppCertificates cs <> ppSOAC "mapT" [lam] as
+  pprPrec _ (ReduceT cs lam es as _) =
+    ppCertificates cs <> ppSOAC "reduceT" [lam] (es++as)
+  pprPrec _ (RedomapT cs outer inner es as _) =
+    ppCertificates cs <> text "redomapT" <>
     parens (ppr outer <> comma </> ppr inner <> comma </>
             commasep (braces (commasep $ map ppr es) : map ppr as))
-  pprPrec _ (Scan2 cs lam es as _) =
-    ppCertificates cs <> ppSOAC "scan2" [lam] (es++as)
-  pprPrec _ (Filter2 cs lam as _) =
-    ppCertificates cs <> ppSOAC "filter2" [lam] as
+  pprPrec _ (ScanT cs lam es as _) =
+    ppCertificates cs <> ppSOAC "scanT" [lam] (es++as)
+  pprPrec _ (FilterT cs lam as _) =
+    ppCertificates cs <> ppSOAC "filterT" [lam] as
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TupIdentBase ty vn) where
   ppr (Id ident)     = ppr ident

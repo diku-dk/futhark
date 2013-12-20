@@ -42,7 +42,7 @@ outputsToInput = foldr ((.) . outputToInput) id
 
 data FusedKer = FusedKer {
     fsoac      :: SOAC
-  -- ^ the SOAC expression, e.g., map2( f(a,b), x, y )
+  -- ^ the SOAC expression, e.g., mapT( f(a,b), x, y )
 
   , outputs    :: [Ident]
   -- ^ The names bound to the outputs of the SOAC.
@@ -109,7 +109,7 @@ optimizations = [iswim, pushTranspose]
 
 mapDepth :: SOACNest -> Int
 mapDepth nest = case Nest.operation nest of
-                  Nest.Map2 _ _ levels _ -> length levels + 1
+                  Nest.MapT _ _ levels _ -> length levels + 1
                   _                      -> 0
 
 pushTranspose :: Maybe [Ident] -> SOACNest -> [OutputTransform] -> Maybe (SOACNest, [OutputTransform])
@@ -166,14 +166,14 @@ transposes = foldr inverseTrans'
 
 iswim :: Maybe [Ident] -> SOACNest -> [OutputTransform] -> Maybe (SOACNest, [OutputTransform])
 iswim _ nest ots
-  | Nest.Scan2 cs1 (Nest.NewNest lvl nn) [] es@[_] loc1 <- Nest.operation nest,
-    Nest.Map2 cs2 mb [] loc2 <- nn,
+  | Nest.ScanT cs1 (Nest.NewNest lvl nn) [] es@[_] loc1 <- Nest.operation nest,
+    Nest.MapT cs2 mb [] loc2 <- nn,
     Just es' <- mapM SOAC.inputFromExp es =
     let (paramIds, Nothing, bndIds, retTypes) = lvl
         toInnerAccParam idd = idd { identType = rowType $ identType idd }
         innerAccParams = map toInnerAccParam $ take (length es) paramIds
         innerArrParams = drop (length es) paramIds
-        innerScan = Scan2 cs2 (Nest.bodyToLambda mb)
+        innerScan = ScanT cs2 (Nest.bodyToLambda mb)
                           (map Var innerAccParams) (map Var innerArrParams)
                           loc1
         lam = TupleLambda {
@@ -187,6 +187,6 @@ iswim _ nest ots
     in Just (Nest.SOACNest
                (es' ++ [ SOAC.Transpose cs2 0 1 e |
                          e <- Nest.inputs nest])
-               (Nest.Map2 cs1 (Nest.Lambda lam) [] loc2),
+               (Nest.MapT cs1 (Nest.Lambda lam) [] loc2),
              ots ++ [OTranspose cs2 0 1])
 iswim _ _ _ = Nothing

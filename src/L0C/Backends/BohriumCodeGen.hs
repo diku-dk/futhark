@@ -70,7 +70,7 @@ compileInput place shape inp = do
                    }|]
 
 compileMap :: C.Exp -> SOACNest -> CompilerM (Maybe [C.BlockItem])
-compileMap target (SOACNest [inp] (Nest.Map2 _ (Nest.Lambda l) _ _))
+compileMap target (SOACNest [inp] (Nest.MapT _ (Nest.Lambda l) _ _))
   | all (basicType . identType) $ tupleLambdaParams l,
     Just op <- compileLambda l unOp = do
       inputName <- new "map_input"
@@ -86,7 +86,7 @@ compileMap target (SOACNest [inp] (Nest.Map2 _ (Nest.Lambda l) _ _))
                                   bh_multi_array_int32_get_base_data
                                     (bh_multi_array_int32_get_base($id:outputName));
                               }|]
-compileMap target (SOACNest [inp1, inp2] (Nest.Map2 _ (Nest.Lambda l) _ _))
+compileMap target (SOACNest [inp1, inp2] (Nest.MapT _ (Nest.Lambda l) _ _))
   | all (basicType . identType) $ tupleLambdaParams l,
     Just op <- compileLambda l binOp = do
       inputName1 <- new "map_input_x"
@@ -108,17 +108,17 @@ compileMap target (SOACNest [inp1, inp2] (Nest.Map2 _ (Nest.Lambda l) _ _))
 compileMap _ _ = return Nothing
 
 compileReduce :: C.Exp -> SOACNest -> CompilerM (Maybe [C.BlockItem])
-compileReduce _ (SOACNest _ (Nest.Reduce2 _ (Nest.Lambda _) _ _ _)) =
+compileReduce _ (SOACNest _ (Nest.ReduceT _ (Nest.Lambda _) _ _ _)) =
   return Nothing
 compileReduce _ _ = return Nothing
 
 compileMapWithReduce :: C.Exp -> SOACNest -> CompilerM (Maybe [C.BlockItem])
-compileMapWithReduce _ (SOACNest _ (Nest.Reduce2 _ (Nest.NewNest _ (Nest.Map2 {})) _ _ _)) =
+compileMapWithReduce _ (SOACNest _ (Nest.ReduceT _ (Nest.NewNest _ (Nest.MapT {})) _ _ _)) =
   return Nothing
 compileMapWithReduce _ _ = return Nothing
 
 compileMapWithScan :: C.Exp -> SOACNest -> CompilerM (Maybe [C.BlockItem])
-compileMapWithScan _ (SOACNest _ (Nest.Scan2 _ (Nest.NewNest _ (Nest.Map2 {})) _ _ _)) =
+compileMapWithScan _ (SOACNest _ (Nest.ScanT _ (Nest.NewNest _ (Nest.MapT {})) _ _ _)) =
   return Nothing
 compileMapWithScan _ _ = return Nothing
 

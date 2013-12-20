@@ -387,34 +387,34 @@ letNormExp (Redomap lam1 lam2 ne arr tp1 pos) = do
 ---- SOAC2 (Cosmin) ----
 ------------------------
 
-letNormExp (Map2 cs lam arr pos) = do  -- tp2
+letNormExp (MapT cs lam arr pos) = do  -- tp2
     lam'  <- letNormTupleLambda lam
     arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
-    makeVarExpSubst "tmp_map2" pos (Map2 cs lam' arr' pos)
+    makeVarExpSubst "tmp_mapT" pos (MapT cs lam' arr' pos)
 
-letNormExp (Filter2 cs lam arr pos) = do
+letNormExp (FilterT cs lam arr pos) = do
     lam'  <- letNormTupleLambda lam
     arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
-    makeVarExpSubst "tmp_filt2" pos (Filter2 cs lam' arr' pos)
+    makeVarExpSubst "tmp_filt2" pos (FilterT cs lam' arr' pos)
 
-letNormExp (Reduce2 cs lam nes arr pos) = do
-    lam'  <- letNormTupleLambda lam
-    nes'  <- mapM (subLetoNormExp "tmp_arg") nes
-    arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
-    makeVarExpSubst "tmp_red2" pos (Reduce2 cs lam' nes' arr' pos)
-
-letNormExp (Scan2 cs lam nes arr pos) = do
+letNormExp (ReduceT cs lam nes arr pos) = do
     lam'  <- letNormTupleLambda lam
     nes'  <- mapM (subLetoNormExp "tmp_arg") nes
     arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
-    makeVarExpSubst "tmp_scan2" pos (Scan2 cs lam' nes' arr' pos)
+    makeVarExpSubst "tmp_red2" pos (ReduceT cs lam' nes' arr' pos)
 
-letNormExp (Redomap2 cs lam1 lam2 nes arr pos) = do
+letNormExp (ScanT cs lam nes arr pos) = do
+    lam'  <- letNormTupleLambda lam
+    nes'  <- mapM (subLetoNormExp "tmp_arg") nes
+    arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
+    makeVarExpSubst "tmp_scanT" pos (ScanT cs lam' nes' arr' pos)
+
+letNormExp (RedomapT cs lam1 lam2 nes arr pos) = do
     lam1' <- letNormTupleLambda lam1
     lam2' <- letNormTupleLambda lam2
     nes'  <- mapM (subLetoNormExp "tmp_arg") nes
     arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
-    makeVarExpSubst "tmp_redomap2" pos (Redomap2 cs lam1' lam2' nes' arr' pos)
+    makeVarExpSubst "tmp_redomapT" pos (RedomapT cs lam1' lam2' nes' arr' pos)
 
 -------------------------------------------------------
 -------------------------------------------------------

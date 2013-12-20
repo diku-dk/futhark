@@ -38,7 +38,7 @@
     "fun" "fn" "for" "do" "do" "op" "not" "pow"
     "iota" "shape" "replicate" "reshape" "transpose" "map" "reduce" "zip" "unzip"
     "scan" "split" "concat" "filter" "redomap"
-    "map2" "reduce2" "scan2" "filter2" "redomap2"
+    "mapT" "reduceT" "scanT" "filterT" "redomapT"
     "empty" "copy")
   "A list of L0 keywords.")
 

@@ -55,18 +55,18 @@ mkUnnamedLamExp ftab (Scan lam ne arrr eltp pos) =
 mkUnnamedLamExp ftab (Redomap lam1 lam2 ne arrr eltp pos) = 
     Redomap (mkUnnamedLamLam ftab lam1) (mkUnnamedLamLam ftab lam2) 
             (mkUnnamedLamExp ftab ne  ) (mkUnnamedLamExp ftab arrr) eltp pos
-mkUnnamedLamExp ftab (Map2 cs lam arrs pos) =
-    Map2    cs (mkUnnamedTupleLamLam ftab lam) (map (mkUnnamedLamExp ftab) arrs) pos
-mkUnnamedLamExp ftab (Filter2 cs lam arrs pos) =
-    Filter2 cs (mkUnnamedTupleLamLam ftab lam) (map (mkUnnamedLamExp ftab) arrs) pos
-mkUnnamedLamExp ftab (Reduce2 cs lam nes arrs pos) =
-    Reduce2 cs (mkUnnamedTupleLamLam ftab lam) (map (mkUnnamedLamExp ftab) nes)
+mkUnnamedLamExp ftab (MapT cs lam arrs pos) =
+    MapT    cs (mkUnnamedTupleLamLam ftab lam) (map (mkUnnamedLamExp ftab) arrs) pos
+mkUnnamedLamExp ftab (FilterT cs lam arrs pos) =
+    FilterT cs (mkUnnamedTupleLamLam ftab lam) (map (mkUnnamedLamExp ftab) arrs) pos
+mkUnnamedLamExp ftab (ReduceT cs lam nes arrs pos) =
+    ReduceT cs (mkUnnamedTupleLamLam ftab lam) (map (mkUnnamedLamExp ftab) nes)
                (map (mkUnnamedLamExp ftab) arrs) pos
-mkUnnamedLamExp ftab (Scan2 cs lam nes arrs pos) =
-    Scan2 cs (mkUnnamedTupleLamLam ftab lam) (map (mkUnnamedLamExp ftab) nes)
+mkUnnamedLamExp ftab (ScanT cs lam nes arrs pos) =
+    ScanT cs (mkUnnamedTupleLamLam ftab lam) (map (mkUnnamedLamExp ftab) nes)
              (map (mkUnnamedLamExp ftab) arrs) pos
-mkUnnamedLamExp ftab (Redomap2 cs lam1 lam2 nes arrs pos) =
-    Redomap2 cs (mkUnnamedTupleLamLam ftab lam1) (mkUnnamedTupleLamLam ftab lam2)
+mkUnnamedLamExp ftab (RedomapT cs lam1 lam2 nes arrs pos) =
+    RedomapT cs (mkUnnamedTupleLamLam ftab lam1) (mkUnnamedTupleLamLam ftab lam2)
                 (map (mkUnnamedLamExp ftab) nes) (map (mkUnnamedLamExp ftab) arrs) pos
 
 mkUnnamedLamExp ftab e = buildExpPattern (mkUnnamedLamExp ftab) e

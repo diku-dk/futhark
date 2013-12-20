@@ -759,11 +759,11 @@ compileExp' _ (Reduce {}) = soacError
 compileExp' _ (Scan {}) = soacError
 compileExp' _ (Filter {}) = soacError
 compileExp' _ (Redomap {}) = soacError
-compileExp' _ (Map2 {}) = soacError
-compileExp' _ (Reduce2 {}) = soacError
-compileExp' _ (Scan2 {}) = soacError
-compileExp' _ (Filter2 {}) = soacError
-compileExp' _ (Redomap2 {}) = soacError
+compileExp' _ (MapT {}) = soacError
+compileExp' _ (ReduceT {}) = soacError
+compileExp' _ (ScanT {}) = soacError
+compileExp' _ (FilterT {}) = soacError
+compileExp' _ (RedomapT {}) = soacError
 
 compileExpInPlace :: C.Exp -> Exp -> CompilerM [C.BlockItem]
 

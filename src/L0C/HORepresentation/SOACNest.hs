@@ -25,7 +25,7 @@ import Data.Maybe
 
 import L0C.HORepresentation.SOAC (SOAC)
 import qualified L0C.HORepresentation.SOAC as SOAC
-import L0C.L0 hiding (Map2, Reduce2, Scan2, Filter2, Redomap2)
+import L0C.L0 hiding (MapT, ReduceT, ScanT, FilterT, RedomapT)
 
 type Nesting = ([Ident], Maybe [SOAC.Input], [Ident], [DeclType])
 
@@ -65,47 +65,47 @@ lambdaToBody l = fromMaybe (Lambda l) $ isNesting $ tupleLambdaBody l
           Just $ NewNest nest (operation $ fromSOAC soac)
         isNesting _ = Nothing
 
-data Combinator = Map2 Certificates NestBody [Nesting] SrcLoc
-                | Reduce2 Certificates NestBody [Nesting] [Exp] SrcLoc
-                | Scan2 Certificates NestBody [Nesting] [Exp] SrcLoc
-                | Filter2 Certificates NestBody [Nesting] SrcLoc
-                | Redomap2 Certificates TupleLambda NestBody [Nesting] [Exp] SrcLoc
+data Combinator = MapT Certificates NestBody [Nesting] SrcLoc
+                | ReduceT Certificates NestBody [Nesting] [Exp] SrcLoc
+                | ScanT Certificates NestBody [Nesting] [Exp] SrcLoc
+                | FilterT Certificates NestBody [Nesting] SrcLoc
+                | RedomapT Certificates TupleLambda NestBody [Nesting] [Exp] SrcLoc
                  deriving (Show)
 
 instance Located Combinator where
-  locOf (Map2 _ _ _ loc) = locOf loc
-  locOf (Reduce2 _ _ _ _ loc) = locOf loc
-  locOf (Scan2 _ _ _ _ loc) = locOf loc
-  locOf (Filter2 _ _ _ loc) = locOf loc
-  locOf (Redomap2 _ _ _ _ _ loc) = locOf loc
+  locOf (MapT _ _ _ loc) = locOf loc
+  locOf (ReduceT _ _ _ _ loc) = locOf loc
+  locOf (ScanT _ _ _ _ loc) = locOf loc
+  locOf (FilterT _ _ _ loc) = locOf loc
+  locOf (RedomapT _ _ _ _ _ loc) = locOf loc
 
 nesting :: Combinator -> [Nesting]
-nesting (Map2 _ _ ls _) = ls
-nesting (Reduce2 _ _ ls _ _) = ls
-nesting (Scan2 _ _ ls _ _) = ls
-nesting (Filter2 _ _ ls _) = ls
-nesting (Redomap2 _ _ _ ls _ _) = ls
+nesting (MapT _ _ ls _) = ls
+nesting (ReduceT _ _ ls _ _) = ls
+nesting (ScanT _ _ ls _ _) = ls
+nesting (FilterT _ _ ls _) = ls
+nesting (RedomapT _ _ _ ls _ _) = ls
 
 setNesting :: [Nesting] -> Combinator -> Combinator
-setNesting ls (Map2 cs b _ loc) = Map2 cs b ls loc
-setNesting ls (Reduce2 cs b _ es loc) = Reduce2 cs b ls es loc
-setNesting ls (Scan2 cs b _ es loc) = Scan2 cs b ls es loc
-setNesting ls (Filter2 cs b _ loc) = Filter2 cs b ls loc
-setNesting ls (Redomap2 cs l b _ es loc) = Redomap2 cs l b ls es loc
+setNesting ls (MapT cs b _ loc) = MapT cs b ls loc
+setNesting ls (ReduceT cs b _ es loc) = ReduceT cs b ls es loc
+setNesting ls (ScanT cs b _ es loc) = ScanT cs b ls es loc
+setNesting ls (FilterT cs b _ loc) = FilterT cs b ls loc
+setNesting ls (RedomapT cs l b _ es loc) = RedomapT cs l b ls es loc
 
 body :: Combinator -> NestBody
-body (Map2 _ b _ _) = b
-body (Reduce2 _ b _ _ _) = b
-body (Scan2 _ b _ _ _) = b
-body (Filter2 _ b _ _) = b
-body (Redomap2 _ _ b _ _ _) = b
+body (MapT _ b _ _) = b
+body (ReduceT _ b _ _ _) = b
+body (ScanT _ b _ _ _) = b
+body (FilterT _ b _ _) = b
+body (RedomapT _ _ b _ _ _) = b
 
 setBody :: NestBody -> Combinator -> Combinator
-setBody b (Map2 cs _ ls loc) = Map2 cs b ls loc
-setBody b (Reduce2 cs _ ls es loc) = Reduce2 cs b ls es loc
-setBody b (Scan2 cs _ ls es loc) = Scan2 cs b ls es loc
-setBody b (Filter2 cs _ ls loc) = Filter2 cs b ls loc
-setBody b (Redomap2 cs l _ ls es loc) = Redomap2 cs l b ls es loc
+setBody b (MapT cs _ ls loc) = MapT cs b ls loc
+setBody b (ReduceT cs _ ls es loc) = ReduceT cs b ls es loc
+setBody b (ScanT cs _ ls es loc) = ScanT cs b ls es loc
+setBody b (FilterT cs _ ls loc) = FilterT cs b ls loc
+setBody b (RedomapT cs l _ ls es loc) = RedomapT cs l b ls es loc
 
 params :: Combinator -> [Parameter]
 params comb =
@@ -128,40 +128,40 @@ setInputs arrs nest = nest { inputs = arrs }
 
 -- | Returns the certificates used in a SOACNest.
 certificates :: SOACNest -> Certificates
-certificates (SOACNest _ (Map2     cs _     _ _)) = cs
-certificates (SOACNest _ (Reduce2  cs _   _ _ _)) = cs
-certificates (SOACNest _ (Scan2    cs _   _ _ _)) = cs
-certificates (SOACNest _ (Filter2  cs _   _   _)) = cs
-certificates (SOACNest _ (Redomap2 cs _ _ _ _ _)) = cs
+certificates (SOACNest _ (MapT     cs _     _ _)) = cs
+certificates (SOACNest _ (ReduceT  cs _   _ _ _)) = cs
+certificates (SOACNest _ (ScanT    cs _   _ _ _)) = cs
+certificates (SOACNest _ (FilterT  cs _   _   _)) = cs
+certificates (SOACNest _ (RedomapT cs _ _ _ _ _)) = cs
 
 fromExp :: Exp -> Either SOAC.NotSOAC SOACNest
 fromExp = liftM fromSOAC . SOAC.fromExp
 
 fromSOAC :: SOAC -> SOACNest
-fromSOAC (SOAC.Map2 cs l as loc)
-  | Just (Map2 cs2 l2 ps _, nest) <- nested l =
-      SOACNest as $ Map2 (cs++cs2) l2 (nest:ps) loc
+fromSOAC (SOAC.MapT cs l as loc)
+  | Just (MapT cs2 l2 ps _, nest) <- nested l =
+      SOACNest as $ MapT (cs++cs2) l2 (nest:ps) loc
   | otherwise =
-      SOACNest as $ Map2 cs (lambdaToBody l) [] loc
-fromSOAC (SOAC.Reduce2 cs l es as loc)
-  | Just (Reduce2 cs2 l2 ps _ _, nest) <- nested l =
-      SOACNest as $ Reduce2 (cs++cs2) l2 (nest:ps) es loc
+      SOACNest as $ MapT cs (lambdaToBody l) [] loc
+fromSOAC (SOAC.ReduceT cs l es as loc)
+  | Just (ReduceT cs2 l2 ps _ _, nest) <- nested l =
+      SOACNest as $ ReduceT (cs++cs2) l2 (nest:ps) es loc
   | otherwise =
-      SOACNest as $ Reduce2 cs (lambdaToBody l) [] es loc
-fromSOAC (SOAC.Scan2 cs l es as loc)
-  | Just (Scan2 cs2 l2 ps _ _, nest) <- nested l =
-      SOACNest as $ Scan2 (cs++cs2) l2 (nest:ps) es loc
+      SOACNest as $ ReduceT cs (lambdaToBody l) [] es loc
+fromSOAC (SOAC.ScanT cs l es as loc)
+  | Just (ScanT cs2 l2 ps _ _, nest) <- nested l =
+      SOACNest as $ ScanT (cs++cs2) l2 (nest:ps) es loc
   | otherwise =
-      SOACNest as $ Scan2 cs (lambdaToBody l) [] es loc
-fromSOAC (SOAC.Filter2 cs l as loc)
-  | Just (Filter2 cs2 l2 ps  _, nest) <- nested l =
-      SOACNest as $ Filter2 (cs++cs2) l2 (nest:ps) loc
+      SOACNest as $ ScanT cs (lambdaToBody l) [] es loc
+fromSOAC (SOAC.FilterT cs l as loc)
+  | Just (FilterT cs2 l2 ps  _, nest) <- nested l =
+      SOACNest as $ FilterT (cs++cs2) l2 (nest:ps) loc
   | otherwise =
-      SOACNest as $ Filter2 cs (lambdaToBody l) [] loc
-fromSOAC (SOAC.Redomap2 cs ol l es as loc) =
+      SOACNest as $ FilterT cs (lambdaToBody l) [] loc
+fromSOAC (SOAC.RedomapT cs ol l es as loc) =
   -- Never nested, because we need a way to test alpha-equivalence of
   -- the outer combining function.
-  SOACNest as $ Redomap2 cs ol (lambdaToBody l) [] es loc
+  SOACNest as $ RedomapT cs ol (lambdaToBody l) [] es loc
 
 nested :: TupleLambda -> Maybe (Combinator, Nesting)
 nested l
@@ -181,16 +181,16 @@ nested l
   | otherwise = Nothing
 
 toSOAC :: SOACNest -> SOAC
-toSOAC (SOACNest as comb@(Map2 cs b _ loc)) =
-  SOAC.Map2 cs (subLambda b comb) as loc
-toSOAC (SOACNest as comb@(Reduce2 cs b _ es loc)) =
-  SOAC.Reduce2 cs (subLambda b comb) es as loc
-toSOAC (SOACNest as comb@(Scan2 cs b _ es loc)) =
-  SOAC.Scan2 cs (subLambda b comb) es as loc
-toSOAC (SOACNest as comb@(Filter2 cs b _ loc)) =
-  SOAC.Filter2 cs (subLambda b comb) as loc
-toSOAC (SOACNest as comb@(Redomap2 cs l b _ es loc)) =
-  SOAC.Redomap2 cs l (subLambda b comb) es as loc
+toSOAC (SOACNest as comb@(MapT cs b _ loc)) =
+  SOAC.MapT cs (subLambda b comb) as loc
+toSOAC (SOACNest as comb@(ReduceT cs b _ es loc)) =
+  SOAC.ReduceT cs (subLambda b comb) es as loc
+toSOAC (SOACNest as comb@(ScanT cs b _ es loc)) =
+  SOAC.ScanT cs (subLambda b comb) es as loc
+toSOAC (SOACNest as comb@(FilterT cs b _ loc)) =
+  SOAC.FilterT cs (subLambda b comb) as loc
+toSOAC (SOACNest as comb@(RedomapT cs l b _ es loc)) =
+  SOAC.RedomapT cs l (subLambda b comb) es as loc
 
 subLambda :: NestBody -> Combinator -> TupleLambda
 subLambda b comb =

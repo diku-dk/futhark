@@ -487,19 +487,19 @@ evalExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody pos) = do
           binding [(loopvar, IntVal i)] $
             evalExp $ LetPat mergepat (Literal mergeval pos) loopbody pos
 
-evalExp (Map2 _ fun arrexps loc) = do
+evalExp (MapT _ fun arrexps loc) = do
   vss <- mapM (arrToList loc <=< evalExp) arrexps
   vs' <- mapM (applyTupleLambda fun) $ transpose vss
   return $ arrays (fromDecl $ Elem $ Tuple ret) vs'
   where TupleLambda _ _ ret _ = fun
 
-evalExp (Reduce2 _ fun accexps arrexps loc) = do
+evalExp (ReduceT _ fun accexps arrexps loc) = do
   startaccs <- mapM evalExp accexps
   vss <- mapM (arrToList loc <=< evalExp) arrexps
   let foldfun acc x = applyTupleLambda fun $ untuple acc ++ x
   foldM foldfun (tuple startaccs) (transpose vss)
 
-evalExp (Scan2 _ fun startexps arrexps loc) = do
+evalExp (ScanT _ fun startexps arrexps loc) = do
   startvals <- mapM evalExp startexps
   vss <- mapM (arrToList loc <=< evalExp) arrexps
   (acc, vals') <- foldM scanfun (tuple startvals, []) $ transpose vss
@@ -508,7 +508,7 @@ evalExp (Scan2 _ fun startexps arrexps loc) = do
             acc' <- applyTupleLambda fun $ untuple acc ++ x
             return (acc', acc' : l)
 
-evalExp e@(Filter2 _ fun arrexp loc) = do
+evalExp e@(FilterT _ fun arrexp loc) = do
   vss <- mapM (arrToList loc <=< evalExp) arrexp
   vss' <- filterM filt $ transpose vss
   return $ arrays (typeOf e) $ map tuple vss'
@@ -516,7 +516,7 @@ evalExp e@(Filter2 _ fun arrexp loc) = do
                     case res of (TupVal [LogVal True]) -> return True
                                 _                      -> return False
 
-evalExp (Redomap2 _ _ innerfun accexp arrexps loc) = do
+evalExp (RedomapT _ _ innerfun accexp arrexps loc) = do
   startaccs <- mapM evalExp accexp
   vss <- mapM (arrToList loc <=< evalExp) arrexps
   let foldfun acc x = applyTupleLambda innerfun $ untuple acc ++ x

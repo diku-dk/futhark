@@ -590,15 +590,15 @@ typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` HS.empty
 typeOf (Assert _ _) = Elem Cert
 typeOf (Conjoin _ _) = Elem Cert
 typeOf (DoLoop _ _ _ _ _ body _) = typeOf body
-typeOf (Map2 _ f arrs _) =
+typeOf (MapT _ f arrs _) =
   Elem $ Tuple $ map (\x -> arrayType 1 x (uniqueProp x)) $
        tupleLambdaType f $ map typeOf arrs
-typeOf (Reduce2 _ fun acc arrs _) =
+typeOf (ReduceT _ fun acc arrs _) =
   Elem $ Tuple $ tupleLambdaType fun $ map typeOf acc ++ map typeOf arrs
-typeOf (Scan2 _ _ _ arrs _) =
+typeOf (ScanT _ _ _ arrs _) =
   (Elem $ Tuple $ map typeOf arrs) `setUniqueness` Unique
-typeOf (Filter2 _ _ arrs _) = Elem $ Tuple $ map typeOf arrs
-typeOf (Redomap2 _ outerfun innerfun acc arrs _) =
+typeOf (FilterT _ _ arrs _) = Elem $ Tuple $ map typeOf arrs
+typeOf (RedomapT _ outerfun innerfun acc arrs _) =
   Elem $ Tuple $ tupleLambdaType outerfun $
        tupleLambdaType innerfun (innerres ++ innerres)
     where innerres = tupleLambdaType innerfun

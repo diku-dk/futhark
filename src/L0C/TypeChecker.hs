@@ -992,13 +992,13 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
                     (Ident loopvar (Elem Int) loc) boundexp'
                     loopbody' letbody' loc
 
-checkExp (Map2 ass fun arrexps pos) = do
+checkExp (MapT ass fun arrexps pos) = do
   ass' <- mapM (requireI [Elem Cert] <=< checkIdent) ass
   (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
   fun'    <- checkTupleLambda fun arrargs
-  return $ Map2 ass' fun' arrexps' pos
+  return $ MapT ass' fun' arrexps' pos
 
-checkExp (Reduce2 ass fun startexps arrexps pos) = do
+checkExp (ReduceT ass fun startexps arrexps pos) = do
   ass' <- mapM (requireI [Elem Cert] <=< checkIdent) ass
   (startexps', startargs) <- unzip <$> mapM checkArg startexps
   let startt = Elem $ Tuple $ map typeOf startexps'
@@ -1008,9 +1008,9 @@ checkExp (Reduce2 ass fun startexps arrexps pos) = do
   unless (funret `subtypeOf` startt) $
     bad $ TypeError pos $ "Accumulator is of type " ++ ppType startt ++
           ", but reduce function returns type " ++ ppType funret ++ "."
-  return $ Reduce2 ass' fun' startexps' arrexps' pos
+  return $ ReduceT ass' fun' startexps' arrexps' pos
 
-checkExp (Scan2 ass fun startexps arrexps pos) = do
+checkExp (ScanT ass fun startexps arrexps pos) = do
   ass' <- mapM (requireI [Elem Cert] <=< checkIdent) ass
   (startexps', startargs) <- unzip <$> mapM checkArg startexps
   (arrexps', arrargs)   <- unzip <$> mapM checkSOACArrayArg arrexps
@@ -1024,18 +1024,18 @@ checkExp (Scan2 ass fun startexps arrexps pos) = do
   unless (funret `subtypeOf` intupletype) $
     bad $ TypeError pos $ "Array element value is of type " ++ ppType intupletype ++
                           ", but scan function returns type " ++ ppType funret ++ "."
-  return $ Scan2 ass' fun' startexps' arrexps' pos
+  return $ ScanT ass' fun' startexps' arrexps' pos
 
-checkExp (Filter2 ass fun arrexps pos) = do
+checkExp (FilterT ass fun arrexps pos) = do
   ass' <- mapM (requireI [Elem Cert] <=< checkIdent) ass
   (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
   fun' <- checkTupleLambda fun arrargs
   let funret = tupleLambdaType fun' $ map argType arrargs
   when (funret /= [Elem Bool]) $
-    bad $ TypeError pos "Filter2 function does not return bool."
-  return $ Filter2 ass' fun' arrexps' pos
+    bad $ TypeError pos "FilterT function does not return bool."
+  return $ FilterT ass' fun' arrexps' pos
 
-checkExp (Redomap2 ass outerfun innerfun accexps arrexps pos) = do
+checkExp (RedomapT ass outerfun innerfun accexps arrexps pos) = do
   ass' <- mapM (requireI [Elem Cert] <=< checkIdent) ass
   (arrexps', arrargs)   <- unzip <$> mapM checkSOACArrayArg arrexps
   (accexps', accargs)   <- unzip <$> mapM checkArg accexps
@@ -1047,12 +1047,12 @@ checkExp (Redomap2 ass outerfun innerfun accexps arrexps pos) = do
       innerret = Elem $ Tuple $ tupleLambdaType innerfun' $ map argType $ accargs ++ arrargs
   unless (innerret `subtypeOf` acct) $
     bad $ TypeError pos $ "Initial value is of type " ++ ppType acct ++
-          ", but redomap2 inner reduction returns type " ++ ppType innerret ++ "."
+          ", but redomapT inner reduction returns type " ++ ppType innerret ++ "."
   unless (argType outerarg `subtypeOf` acct) $
     bad $ TypeError pos $ "Initial value is of type " ++ ppType acct ++
-          ", but redomap2 outer reduction returns type " ++ ppType (argType outerarg) ++ "."
+          ", but redomapT outer reduction returns type " ++ ppType (argType outerarg) ++ "."
 
-  return $ Redomap2 ass' outerfun' innerfun' accexps' arrexps' pos
+  return $ RedomapT ass' outerfun' innerfun' accexps' arrexps' pos
 
 checkSOACArrayArg :: (TypeBox ty, VarName vn) =>
                      TaggedExp ty vn -> TypeM vn (TaggedExp CompTypeBase vn, Arg vn)

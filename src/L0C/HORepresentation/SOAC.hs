@@ -39,7 +39,7 @@ module L0C.HORepresentation.SOAC
 import Data.Loc
 
 import qualified L0C.L0 as L0
-import L0C.L0 hiding (Map2, Reduce2, Scan2, Filter2, Redomap2,
+import L0C.L0 hiding (MapT, ReduceT, ScanT, FilterT, RedomapT,
                       Var, Iota, Transpose, Index)
 
 -- | One array input to a SOAC - a SOAC may have multiple inputs, but
@@ -110,85 +110,85 @@ inputType :: Input -> Type
 inputType = typeOf . inputToExp
 
 -- | A definite representation of a SOAC expression.
-data SOAC = Map2 Certificates TupleLambda [Input] SrcLoc
-          | Reduce2  Certificates TupleLambda [Exp] [Input] SrcLoc
-          | Scan2 Certificates TupleLambda [Exp] [Input] SrcLoc
-          | Filter2 Certificates TupleLambda [Input] SrcLoc
-          | Redomap2 Certificates TupleLambda TupleLambda [Exp] [Input] SrcLoc
+data SOAC = MapT Certificates TupleLambda [Input] SrcLoc
+          | ReduceT  Certificates TupleLambda [Exp] [Input] SrcLoc
+          | ScanT Certificates TupleLambda [Exp] [Input] SrcLoc
+          | FilterT Certificates TupleLambda [Input] SrcLoc
+          | RedomapT Certificates TupleLambda TupleLambda [Exp] [Input] SrcLoc
             deriving (Show)
 
 instance Located SOAC where
-  locOf (Map2 _ _ _ loc) = locOf loc
-  locOf (Reduce2 _ _ _ _ loc) = locOf loc
-  locOf (Scan2 _ _ _ _ loc) = locOf loc
-  locOf (Filter2 _ _ _ loc) = locOf loc
-  locOf (Redomap2 _ _ _ _ _ loc) = locOf loc
+  locOf (MapT _ _ _ loc) = locOf loc
+  locOf (ReduceT _ _ _ _ loc) = locOf loc
+  locOf (ScanT _ _ _ _ loc) = locOf loc
+  locOf (FilterT _ _ _ loc) = locOf loc
+  locOf (RedomapT _ _ _ _ _ loc) = locOf loc
 
 -- | Returns the inputs used in a SOAC.
 inputs :: SOAC -> [Input]
-inputs (Map2 _     _     arrs _) = arrs
-inputs (Reduce2  _ _ _   arrs _) = arrs
-inputs (Scan2    _ _ _   arrs _) = arrs
-inputs (Filter2  _ _     arrs _) = arrs
-inputs (Redomap2 _ _ _ _ arrs _) = arrs
+inputs (MapT _     _     arrs _) = arrs
+inputs (ReduceT  _ _ _   arrs _) = arrs
+inputs (ScanT    _ _ _   arrs _) = arrs
+inputs (FilterT  _ _     arrs _) = arrs
+inputs (RedomapT _ _ _ _ arrs _) = arrs
 
 -- | Set the inputs to a SOAC.
 setInputs :: [Input] -> SOAC -> SOAC
-setInputs arrs (Map2 cs lam _ loc) =
-  Map2 cs lam arrs loc
-setInputs arrs (Reduce2 cs lam ne _ loc) =
-  Reduce2 cs lam ne arrs loc
-setInputs arrs (Scan2 cs lam ne _ loc) =
-  Scan2 cs lam ne arrs loc
-setInputs arrs (Filter2 cs lam _ loc) =
-  Filter2 cs lam arrs loc
-setInputs arrs (Redomap2 cs lam1 lam ne _ loc) =
-  Redomap2 cs lam1 lam ne arrs loc
+setInputs arrs (MapT cs lam _ loc) =
+  MapT cs lam arrs loc
+setInputs arrs (ReduceT cs lam ne _ loc) =
+  ReduceT cs lam ne arrs loc
+setInputs arrs (ScanT cs lam ne _ loc) =
+  ScanT cs lam ne arrs loc
+setInputs arrs (FilterT cs lam _ loc) =
+  FilterT cs lam arrs loc
+setInputs arrs (RedomapT cs lam1 lam ne _ loc) =
+  RedomapT cs lam1 lam ne arrs loc
 
 -- | The lambda used in a given SOAC.
 lambda :: SOAC -> TupleLambda
-lambda (Map2     _ lam _    _    ) = lam
-lambda (Reduce2  _ lam _    _ _  ) = lam
-lambda (Scan2    _ lam _    _ _  ) = lam
-lambda (Filter2  _ lam _    _    ) = lam
-lambda (Redomap2 _ _   lam2 _ _ _) = lam2
+lambda (MapT     _ lam _    _    ) = lam
+lambda (ReduceT  _ lam _    _ _  ) = lam
+lambda (ScanT    _ lam _    _ _  ) = lam
+lambda (FilterT  _ lam _    _    ) = lam
+lambda (RedomapT _ _   lam2 _ _ _) = lam2
 
 -- | Set the lambda used in the SOAC.
 setLambda :: TupleLambda -> SOAC -> SOAC
-setLambda lam (Map2     cs         _    arrs loc) =
-  Map2     cs          lam    arrs loc
-setLambda lam (Reduce2  cs         _ ne arrs loc) =
-  Reduce2  cs      lam ne arrs loc
-setLambda lam (Scan2    cs         _ ne arrs loc) =
-  Scan2  cs      lam ne arrs loc
-setLambda lam (Filter2  cs         _    arrs loc) =
-  Filter2  cs      lam    arrs      loc
-setLambda lam (Redomap2 cs lam1    _ ne arrs loc) =
-  Redomap2 cs lam1 lam ne arrs loc
+setLambda lam (MapT     cs         _    arrs loc) =
+  MapT     cs          lam    arrs loc
+setLambda lam (ReduceT  cs         _ ne arrs loc) =
+  ReduceT  cs      lam ne arrs loc
+setLambda lam (ScanT    cs         _ ne arrs loc) =
+  ScanT  cs      lam ne arrs loc
+setLambda lam (FilterT  cs         _    arrs loc) =
+  FilterT  cs      lam    arrs      loc
+setLambda lam (RedomapT cs lam1    _ ne arrs loc) =
+  RedomapT cs lam1 lam ne arrs loc
 
 -- | Returns the certificates used in a SOAC.
 certificates :: SOAC -> Certificates
-certificates (Map2     cs _     _ _) = cs
-certificates (Reduce2  cs _ _   _ _) = cs
-certificates (Scan2    cs _ _   _ _) = cs
-certificates (Filter2  cs _     _ _) = cs
-certificates (Redomap2 cs _ _ _ _ _) = cs
+certificates (MapT     cs _     _ _) = cs
+certificates (ReduceT  cs _ _   _ _) = cs
+certificates (ScanT    cs _ _   _ _) = cs
+certificates (FilterT  cs _     _ _) = cs
+certificates (RedomapT cs _ _ _ _ _) = cs
 
 -- | Convert a SOAC to the corresponding expression.
 toExp :: SOAC -> Exp
-toExp (Map2 cs l as loc) =
-  L0.Map2 cs l as' loc
+toExp (MapT cs l as loc) =
+  L0.MapT cs l as' loc
   where as' = map inputToExp as
-toExp (Reduce2 cs l es as loc) =
-  L0.Reduce2 cs l es as' loc
+toExp (ReduceT cs l es as loc) =
+  L0.ReduceT cs l es as' loc
   where as' = map inputToExp as
-toExp (Scan2 cs l es as loc) =
-  L0.Scan2 cs l es as' loc
+toExp (ScanT cs l es as loc) =
+  L0.ScanT cs l es as' loc
   where as' = map inputToExp as
-toExp (Filter2 cs l as loc) =
-  L0.Filter2 cs l (map inputToExp as) loc
-toExp (Redomap2 cs l1 l2 es as loc) =
-  L0.Redomap2 cs l1 l2 es as' loc
+toExp (FilterT cs l as loc) =
+  L0.FilterT cs l (map inputToExp as) loc
+toExp (RedomapT cs l1 l2 es as loc) =
+  L0.RedomapT cs l1 l2 es as' loc
   where as' = map inputToExp as
 
 -- | The reason why some expression cannot be converted to a 'SOAC'
@@ -206,21 +206,21 @@ inputFromExp' e = maybe (Left $ InvalidArrayInput e) Right $ inputFromExp e
 -- representation, or a reason why the expression does not have the
 -- valid form.
 fromExp :: Exp -> Either NotSOAC SOAC
-fromExp (L0.Map2 cs l as loc) = do
+fromExp (L0.MapT cs l as loc) = do
   as' <- mapM inputFromExp' as
-  Right $ Map2 cs l as' loc
-fromExp (L0.Reduce2 cs l es as loc) = do
+  Right $ MapT cs l as' loc
+fromExp (L0.ReduceT cs l es as loc) = do
   as' <- mapM inputFromExp' as
-  Right $ Reduce2 cs l es as' loc
-fromExp (L0.Scan2 cs l es as loc) = do
+  Right $ ReduceT cs l es as' loc
+fromExp (L0.ScanT cs l es as loc) = do
   as' <- mapM inputFromExp' as
-  Right $ Scan2 cs l es as' loc
-fromExp (L0.Filter2 cs l as loc) = do
+  Right $ ScanT cs l es as' loc
+fromExp (L0.FilterT cs l as loc) = do
   as' <- mapM inputFromExp' as
-  Right $ Filter2 cs l as' loc
-fromExp (L0.Redomap2 cs l1 l2 es as loc) = do
+  Right $ FilterT cs l as' loc
+fromExp (L0.RedomapT cs l1 l2 es as loc) = do
   as' <- mapM inputFromExp' as
-  Right $ Redomap2 cs l1 l2 es as' loc
+  Right $ RedomapT cs l1 l2 es as' loc
 fromExp (L0.LetPat (TupId pats _) e (L0.TupLit tupes _) _)
   | Right soac <- fromExp e,
     Just tupvs <- vars tupes,

@@ -99,21 +99,21 @@ import Language.L0.Parser.Lexer
       size            { L $$ SIZE }
       replicate       { L $$ REPLICATE }
       map             { L $$ MAP }
-      map2            { L $$ MAP2 }
+      mapT            { L $$ MAP2 }
       reduce          { L $$ REDUCE }
-      reduce2         { L $$ REDUCE2 }
+      reduceT         { L $$ REDUCE2 }
       reshape         { L $$ RESHAPE }
       transpose       { L $$ TRANSPOSE }
       zip             { L $$ ZIP }
       unzip           { L $$ UNZIP }
       scan            { L $$ SCAN }
-      scan2           { L $$ SCAN2 }
+      scanT           { L $$ SCAN2 }
       split           { L $$ SPLIT }
       concat          { L $$ CONCAT }
       filter          { L $$ FILTER }
-      filter2         { L $$ FILTER2 }
+      filterT         { L $$ FILTER2 }
       redomap         { L $$ REDOMAP }
-      redomap2        { L $$ REDOMAP2 }
+      redomapT        { L $$ REDOMAP2 }
       true            { L $$ TRUE }
       false           { L $$ FALSE }
       checked         { L $$ CHECKED }
@@ -303,33 +303,33 @@ Exp  :: { UncheckedExp }
      | reduce '(' FunAbstr ',' Exp ',' Exp ')'
                       { Reduce $3 $5 $7 NoInfo $1 }
 
-     | Certificates reduce2 '(' TupleFunAbstr ',' DExps ')'
+     | Certificates reduceT '(' TupleFunAbstr ',' DExps ')'
                       { let (accexps, arrexps) = $6 in
-                        Reduce2 $1 $4 accexps arrexps $2 }
+                        ReduceT $1 $4 accexps arrexps $2 }
 
-     | reduce2 '(' TupleFunAbstr ',' DExps ')'
+     | reduceT '(' TupleFunAbstr ',' DExps ')'
                       { let (accexps, arrexps) = $5 in
-                        Reduce2 [] $3 accexps arrexps $1 }
+                        ReduceT [] $3 accexps arrexps $1 }
 
      | map '(' FunAbstr ',' Exp ')'
                       { Map $3 $5 NoInfo $1 }
 
-     | Certificates map2 '(' TupleFunAbstr ',' Exps ')'
-                      { Map2 $1 $4 $6 $2 }
+     | Certificates mapT '(' TupleFunAbstr ',' Exps ')'
+                      { MapT $1 $4 $6 $2 }
 
-     | map2 '(' TupleFunAbstr ',' Exps ')'
-                      { Map2 [] $3 $5 $1 }
+     | mapT '(' TupleFunAbstr ',' Exps ')'
+                      { MapT [] $3 $5 $1 }
 
      | scan '(' FunAbstr ',' Exp ',' Exp ')'
                       { Scan $3 $5 $7 NoInfo $1 }
 
-     | Certificates scan2 '(' TupleFunAbstr ',' DExps ')'
+     | Certificates scanT '(' TupleFunAbstr ',' DExps ')'
                       { let (accexps, arrexps) = $6 in
-                        Scan2 $1 $4 accexps arrexps $2 }
+                        ScanT $1 $4 accexps arrexps $2 }
 
-     | scan2 '(' TupleFunAbstr ',' DExps ')'
+     | scanT '(' TupleFunAbstr ',' DExps ')'
                       { let (accexps, arrexps) = $5 in
-                        Scan2 [] $3 accexps arrexps $1 }
+                        ScanT [] $3 accexps arrexps $1 }
 
      | zip '(' Exps2 ')'
                       { Zip (map (\x -> (x, NoInfo)) $3) $1 }
@@ -340,20 +340,20 @@ Exp  :: { UncheckedExp }
      | filter '(' FunAbstr ',' Exp ')'
                       { Filter $3 $5 NoInfo $1 }
 
-     | Certificates filter2 '(' TupleFunAbstr ',' Exps ')'
-                      { Filter2 $1 $4 $6 $2 }
+     | Certificates filterT '(' TupleFunAbstr ',' Exps ')'
+                      { FilterT $1 $4 $6 $2 }
 
-     | filter2 '(' TupleFunAbstr ',' Exps ')'
-                      { Filter2 [] $3 $5 $1 }
+     | filterT '(' TupleFunAbstr ',' Exps ')'
+                      { FilterT [] $3 $5 $1 }
 
      | redomap '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
                       { Redomap $3 $5 $7 $9 NoInfo $1 }
 
-     | Certificates redomap2 '(' TupleFunAbstr ',' TupleFunAbstr ',' '{' Exps '}' ',' Exps ')'
-                      { Redomap2 $1 $4 $6 $9 $12 $2 }
+     | Certificates redomapT '(' TupleFunAbstr ',' TupleFunAbstr ',' '{' Exps '}' ',' Exps ')'
+                      { RedomapT $1 $4 $6 $9 $12 $2 }
 
-     | redomap2 '(' TupleFunAbstr ',' TupleFunAbstr ',' '{' Exps '}' ',' Exps ')'
-                      { Redomap2 [] $3 $5 $8 $11 $1 }
+     | redomapT '(' TupleFunAbstr ',' TupleFunAbstr ',' '{' Exps '}' ',' Exps ')'
+                      { RedomapT [] $3 $5 $8 $11 $1 }
 
      | copy '(' Exp ')' { Copy $3 $1 }
 

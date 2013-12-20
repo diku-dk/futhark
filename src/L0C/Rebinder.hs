@@ -195,23 +195,23 @@ bindLet pat@(Id dest) e@(Concat cs (Var x) (Var y) loc) m =
                      | i <- [1..arrayDims (identType x) - 1]])
   m
 
-bindLet pat e@(Map2 cs _ srcs _) m =
+bindLet pat e@(MapT cs _ srcs _) m =
   withBinding pat e $
   withShapes (sameOuterShapes cs $ patIdents pat ++ vars srcs) m
 
-bindLet pat e@(Reduce2 cs _ _ srcs _) m =
+bindLet pat e@(ReduceT cs _ _ srcs _) m =
   withBinding pat e $
   withShapes (sameOuterShapesExps cs srcs) m
 
-bindLet pat e@(Scan2 cs _ _ srcs _) m =
+bindLet pat e@(ScanT cs _ _ srcs _) m =
   withBinding pat e $
   withShapes (sameOuterShapesExps cs srcs) m
 
-bindLet pat e@(Filter2 cs _ srcs _) m =
+bindLet pat e@(FilterT cs _ srcs _) m =
   withBinding pat e $
   withShapes (sameOuterShapesExps cs srcs) m
 
-bindLet pat e@(Redomap2 cs _ _ _ srcs _) m =
+bindLet pat e@(RedomapT cs _ _ _ srcs _) m =
   withBinding pat e $
   withShapes (sameOuterShapesExps cs srcs) m
 
@@ -326,15 +326,15 @@ score m e =
 
 expCost :: Exp -> Int
 expCost (Map {}) = 1
-expCost (Map2 {}) = 1
+expCost (MapT {}) = 1
 expCost (Filter {}) = 1
-expCost (Filter2 {}) = 1
+expCost (FilterT {}) = 1
 expCost (Reduce {}) = 1
-expCost (Reduce2 {}) = 1
+expCost (ReduceT {}) = 1
 expCost (Scan {}) = 1
-expCost (Scan2 {}) = 1
+expCost (ScanT {}) = 1
 expCost (Redomap {}) = 1
-expCost (Redomap2 {}) = 1
+expCost (RedomapT {}) = 1
 expCost (Transpose {}) = 1
 expCost (Copy {}) = 1
 expCost (Concat {}) = 1
@@ -501,17 +501,17 @@ hoistInExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody _) = do
                hoistInExp loopbody
   bindLoop mergepat mergeexp' loopvar boundexp' loopbody' $ hoistInExp letbody
   where boundnames = identName loopvar `HS.insert` patNameSet mergepat
-hoistInExp e@(Map2 cs (TupleLambda params _ _ _) arrexps _) =
+hoistInExp e@(MapT cs (TupleLambda params _ _ _) arrexps _) =
   hoistInSOAC e arrexps $ \ks ->
     withSOACArrSlices cs params ks $
     withShapes (sameOuterShapes cs ks) $
     hoistInExpBase e
-hoistInExp e@(Reduce2 cs (TupleLambda params _ _ _) accexps arrexps _) =
+hoistInExp e@(ReduceT cs (TupleLambda params _ _ _) accexps arrexps _) =
   hoistInSOAC e arrexps $ \ks ->
     withSOACArrSlices cs (drop (length accexps) params) ks $
     withShapes (sameOuterShapes cs ks) $
     hoistInExpBase e
-hoistInExp e@(Scan2 cs (TupleLambda params _ _ _) accexps arrexps _) =
+hoistInExp e@(ScanT cs (TupleLambda params _ _ _) accexps arrexps _) =
   hoistInSOAC e arrexps $ \arrks ->
   hoistInSOAC e accexps $ \accks ->
     let (accparams, arrparams) = splitAt (length accexps) params in
@@ -520,7 +520,7 @@ hoistInExp e@(Scan2 cs (TupleLambda params _ _ _) accexps arrexps _) =
                 zip (map fromParam accparams) $ map (slice cs 0) accks) $
     withShapes (sameOuterShapes cs arrks) $
     hoistInExpBase e
-hoistInExp e@(Redomap2 cs _ (TupleLambda innerparams _ _ _)
+hoistInExp e@(RedomapT cs _ (TupleLambda innerparams _ _ _)
               accexps arrexps _) =
   hoistInSOAC e arrexps $ \ks ->
     withSOACArrSlices cs (drop (length accexps) innerparams) ks $

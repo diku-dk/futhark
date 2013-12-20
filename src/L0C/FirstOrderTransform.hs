@@ -135,7 +135,7 @@ transformExp rec (Filter fun arrexp rowtype loc) =
 transformExp rec (Redomap _ innerfun accexp arrexp ets loc) =
   transformExp rec $ Reduce innerfun accexp arrexp ets loc
 
-transformExp rec mape@(Map2 cs fun arrs loc) = do
+transformExp rec mape@(MapT cs fun arrs loc) = do
   let zero = Literal (IntVal 0) loc
   newLets (dec rec) "inarr" arrs $ \inarrs _ -> do
     (i, iv) <- newVar loc "i" (Elem Int)
@@ -152,13 +152,13 @@ transformExp rec mape@(Map2 cs fun arrs loc) = do
                       outarrv loc
         return branch
 
-transformExp rec (Reduce2 cs fun accexp arrexps loc) =
+transformExp rec (ReduceT cs fun accexp arrexps loc) =
   newReduction2 (dec rec) loc arrexps accexp $ \(arr, _) (acc, accv) (i, iv) -> do
     funcall <- transformTupleLambda (dec rec) fun (map Var acc ++ index cs arr iv)
     return $ DoLoop (TupId (map Id acc) loc) accv i (size cs arr)
              funcall accv loc
 
-transformExp rec (Scan2 cs fun accexp arrexps loc) =
+transformExp rec (ScanT cs fun accexp arrexps loc) =
   newReduction2 (dec rec) loc arrexps accexp $ \(arr, arrv) (acc, _) (i, iv) -> do
     funcall <- transformTupleLambda (dec rec) fun $ map Var acc ++ index cs arr iv
     loopbody <- letwith cs arr iv funcall $
@@ -168,7 +168,7 @@ transformExp rec (Scan2 cs fun accexp arrexps loc) =
                i (size cs arr) loopbody arrv loc
     return loop
 
-transformExp rec filtere@(Filter2 cs fun arrexps loc) =
+transformExp rec filtere@(FilterT cs fun arrexps loc) =
   newLets (dec rec) "arr" arrexps $ \arr _ ->
     newLet (dec rec) "n" (size cs arr) $ \_ nv -> do
       let checkempty nonempty =
@@ -185,13 +185,13 @@ transformExp rec filtere@(Filter2 cs fun arrexps loc) =
           indexin0 = index cs arr $ intval 0
           indexin = index cs arr iv
       mape <- transformExp (dec rec) $
-              Map2 cs (TupleLambda (map toParam xs) test [Elem Int] loc) (map Var arr) loc
+              MapT cs (TupleLambda (map toParam xs) test [Elem Int] loc) (map Var arr) loc
       plus <- do
         (a,av) <- newVar loc "a" (Elem Int)
         (b,bv) <- newVar loc "b" (Elem Int)
         return $ TupleLambda [toParam a, toParam b] (BinOp Plus av bv (Elem Int) loc) [Elem Int] loc
       scan <- newTupLet (dec rec) "mape" mape $ \_ mape' ->
-                transformExp (dec rec) $ Scan2 cs plus [intval 0] [mape'] loc
+                transformExp (dec rec) $ ScanT cs plus [intval 0] [mape'] loc
       newTupLet (dec rec) "ia" scan $ \ia _ -> do
         let indexia ind = Index cs ia Nothing [ind] (Elem Int) loc
             indexiaend = indexia (sub1 nv)
@@ -209,8 +209,8 @@ transformExp rec filtere@(Filter2 cs fun arrexps loc) =
   where intval x = Literal (IntVal x) loc
         sub1 e = BinOp Minus e (intval 1) (Elem Int) loc
 
-transformExp rec (Redomap2 ass _ innerfun accexps arrexps loc) =
-  transformExp rec $ Reduce2 ass innerfun accexps arrexps loc
+transformExp rec (RedomapT ass _ innerfun accexps arrexps loc) =
+  transformExp rec $ ReduceT ass innerfun accexps arrexps loc
 
 transformExp rec e = mapExpM transform e
   where transform = identityMapper {
