@@ -38,7 +38,7 @@ import L0C.L0 hiding (MapT, ReduceT, ScanT, FilterT, RedomapT)
 
 data Nesting = Nesting {
     nestingParams     :: [Ident]
-  , nestingInputs     :: Maybe [SOAC.Input]
+  , nestingInputs     :: [SOAC.Input]
   , nestingResult     :: [Ident]
   , nestingReturnType :: [DeclType]
   } deriving (Show)
@@ -55,27 +55,20 @@ bodyToLambda (NewNest (Nesting paramIds inps bndIds retTypes) op) =
               , tupleLambdaReturnType = retTypes
               , tupleLambdaBody =
                 LetPat (TupId (map Id bndIds) loc)
-                       (SOAC.toExp $ toSOAC $ SOACNest inps' op)
+                       (SOAC.toExp $ toSOAC $ SOACNest inps op)
                        (TupLit (map Var bndIds) loc)
                        loc
               }
   where loc = srclocOf op
-        inps' = fromMaybe (map SOAC.Var paramIds) inps
-
-nestInputs :: TupleLambda -> [SOAC.Input] -> Maybe [SOAC.Input]
-nestInputs l inps =
-  case inpVars inps of
-    Just inpks | tupleLambdaParams l `matches` inpks -> Nothing
-    _ -> Just inps
 
 lambdaToBody :: TupleLambda -> NestBody
 lambdaToBody l = fromMaybe (Lambda l) $ isNesting $ tupleLambdaBody l
   where isNesting (LetPat pat e b _) = do
           soac <- either (const Nothing) Just $ SOAC.fromExp e
           ks <- tuplePatAndLit pat b
-          let inps' = nestInputs l $ SOAC.inputs soac
+          let inps = SOAC.inputs soac
               ps = map fromParam $ tupleLambdaParams l -- XXX: Loses aliasing information.
-              nest = Nesting ps inps' ks $ tupleLambdaReturnType l
+              nest = Nesting ps inps ks $ tupleLambdaReturnType l
           Just $ NewNest nest (operation $ fromSOAC soac)
         isNesting _ = Nothing
 
@@ -211,16 +204,15 @@ subLambda b comb =
   case nesting comb of
     [] -> bodyToLambda b
     (Nesting paramIds inps bndIds retTypes:rest) ->
-      let inps' = fromMaybe (map SOAC.Var paramIds) inps
-      in TupleLambda { tupleLambdaReturnType = retTypes
-                     , tupleLambdaBody       =
-                       LetPat (TupId (map Id bndIds) loc)
-                                (SOAC.toExp $ toSOAC $
-                                 SOACNest inps' (rest `setNesting` comb))
-                                (TupLit (map Var bndIds) loc) loc
-                     , tupleLambdaSrcLoc     = loc
-                     , tupleLambdaParams     = map toParam paramIds
-                     }
+      TupleLambda { tupleLambdaReturnType = retTypes
+                  , tupleLambdaBody       =
+                    LetPat (TupId (map Id bndIds) loc)
+                             (SOAC.toExp $ toSOAC $
+                              SOACNest inps (rest `setNesting` comb))
+                             (TupLit (map Var bndIds) loc) loc
+                  , tupleLambdaSrcLoc     = loc
+                  , tupleLambdaParams     = map toParam paramIds
+                  }
   where loc = srclocOf comb
 
 vars :: [Exp] -> Maybe [Ident]

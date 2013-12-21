@@ -168,9 +168,10 @@ iswim :: Maybe [Ident] -> SOACNest -> [OutputTransform] -> Maybe (SOACNest, [Out
 iswim _ nest ots
   | Nest.ScanT cs1 (Nest.NewNest lvl nn) [] es@[_] loc1 <- Nest.operation nest,
     Nest.MapT cs2 mb [] loc2 <- nn,
-    Just es' <- mapM SOAC.inputFromExp es =
-    let Nest.Nesting paramIds Nothing bndIds retTypes = lvl
-        toInnerAccParam idd = idd { identType = rowType $ identType idd }
+    Just es' <- mapM SOAC.inputFromExp es,
+    Nest.Nesting paramIds mapArrs bndIds retTypes <- lvl,
+    mapArrs == map SOAC.Var paramIds =
+    let toInnerAccParam idd = idd { identType = rowType $ identType idd }
         innerAccParams = map toInnerAccParam $ take (length es) paramIds
         innerArrParams = drop (length es) paramIds
         innerScan = ScanT cs2 (Nest.bodyToLambda mb)
