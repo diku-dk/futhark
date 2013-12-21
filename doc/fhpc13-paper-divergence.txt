@@ -1,0 +1,30 @@
+Since the paper "A T2 Graph-Reduction Approach To Fusion" was written,
+the L0-language and compiler has changed.  This file attempts to
+document the changes in order for the paper to remain a usable
+resource.
+
+Language changes
+---
+
+  * The syntax for arrays and tuples have changed.  Array literals are
+    now written with square brackets, as in: [1,2,3].  The syntax for
+    array types has not changed.  Tuples are always written with curly
+    braces: {1,2,3} is a tuple of three integers.  The tuple type
+    syntax has likewise changed: the type of the just mentioned tuple
+    would be {int,int,int}.  This is motivated by enabling
+    singleton-tuples, which makes some transformations more
+    convenience.
+
+  * map2, reduce2, filter2, scan2 and redomap2 are now named mapT,
+    reduceT, filterT, scanT, redomapT.  The old nomenclature was
+    confusing: many people thought that map2 was a map that accepted
+    just two arrays, and it was clumsy to talk about nested maps using
+    a typical squaring syntax.  mapT^2 is more understandable than
+    map2^2, especially on a whiteboard (where you'd often abbreviate
+    to just map^2).
+
+Compiler changes
+---
+
+  * Tuple-SOACS (mapT et al) now use a proper assertion mechanism
+    rather than assertZip.
