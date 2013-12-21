@@ -18,6 +18,14 @@ module L0C.HORepresentation.SOACNest
   )
   where
 
+-- Current problems:
+--
+-- * Some "nests" are detected that really are not.  For example,
+-- nested reduces that do not use the same accumulator.  Also look at
+-- how they deal with their lambda params.  Also, the inputs to a
+-- nested loop should not be used inside the body, or it's not a
+-- proper nest!  (I think...)
+
 import Control.Applicative
 import Control.Monad
 
