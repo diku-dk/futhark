@@ -179,12 +179,8 @@ nested l
                                               -- the bound variables
     Right soac <- fromSOAC <$> SOAC.fromExp e = -- ...the bindee is a SOAC...
       Just (operation soac,
-            case inpVars $ inputs soac of
-              Just ks -- ...all of whose inputs are variables...
-                | tupleLambdaParams l `matches` ks -> -- ...and those inputs are the parameters to l!
-                    Nesting ks Nothing tks $ tupleLambdaReturnType l
-              _ -> Nesting (map fromParam $ tupleLambdaParams l) -- ... if they are something else.
-                           (Just $ inputs soac) tks (tupleLambdaReturnType l))
+            Nesting (map fromParam $ tupleLambdaParams l) -- ... FIXME: need more checks here.
+                    (inputs soac) tks (tupleLambdaReturnType l))
   | otherwise = Nothing
 
 toSOAC :: SOACNest -> SOAC
