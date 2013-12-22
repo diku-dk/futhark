@@ -30,11 +30,14 @@ module L0C.HORepresentation.SOAC
   , Index (..)
   , inputArray
   , inputType
+  , inputTransposes
   -- ** Converting to and from expressions
   , inputFromExp
   , inputToExp
   )
   where
+
+import Control.Arrow (second)
 
 import Data.Loc
 
@@ -108,6 +111,14 @@ inputArray (Index {})            = Nothing
 -- . 'inputToExp'@.
 inputType :: Input -> Type
 inputType = typeOf . inputToExp
+
+-- | Strip surrounding transpositions from the input, returning the
+-- inner input and a list of @(k,n)@-transposition pairs.
+inputTransposes :: Input -> (Input, [(Int,Int)])
+inputTransposes (Transpose _ k n inp) =
+  second ((k,n):) $ inputTransposes inp
+inputTransposes inp =
+  (inp, [])
 
 -- | A definite representation of a SOAC expression.
 data SOAC = MapT Certificates TupleLambda [Input] SrcLoc

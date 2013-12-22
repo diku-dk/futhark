@@ -14,7 +14,7 @@ module L0C.HOTrans.LoopKernel
   where
 
 import Control.Applicative
-import Control.Arrow (first, second)
+import Control.Arrow (first)
 import Control.Monad
 
 import qualified Data.HashSet as HS
@@ -139,7 +139,7 @@ transposeReach = foldr (max . transDepth) 0
 fixupInputs :: [Ident] -> [SOAC.Input] -> Maybe ([(Int,Int)], [SOAC.Input])
 fixupInputs inpIds inps =
   case filter (not . null) $
-       map (snd . transposeIndices) $
+       map (snd . SOAC.inputTransposes) $
        filter exposable inps of
     ts:_ -> do inps' <- mapM (fixupInput (transposeReach ts) ts) inps
                return (ts, inps')
@@ -147,18 +147,12 @@ fixupInputs inpIds inps =
   where exposable = maybe False (`elem` inpIds) . SOAC.inputArray
 
         fixupInput d ts inp
-          | exposable inp = case transposeIndices inp of
+          | exposable inp = case SOAC.inputTransposes inp of
                               (inp', ts') | ts == ts' -> Just inp'
                                           | otherwise -> Nothing
           | arrayDims (SOAC.inputType inp) > d =
               Just $ transposes inp $ map (uncurry transposeInverse) ts
           | otherwise = Nothing
-
-transposeIndices :: SOAC.Input -> (SOAC.Input, [(Int,Int)])
-transposeIndices (SOAC.Transpose _ k n inp) =
-  second ((k,n):) $ transposeIndices inp
-transposeIndices inp =
-  (inp, [])
 
 transposes :: SOAC.Input -> [(Int, Int)] -> SOAC.Input
 transposes = foldr inverseTrans'
