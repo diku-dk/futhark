@@ -203,14 +203,14 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
     ppr letbody
   pprPrec _ (MapT cs lam as _) =
     ppCertificates cs <> ppSOAC "mapT" [lam] as
-  pprPrec _ (ReduceT cs lam es as _) =
-    ppCertificates cs <> ppSOAC "reduceT" [lam] (es++as)
+  pprPrec _ (ReduceT cs lam es as loc) =
+    ppCertificates cs <> ppSOAC "reduceT" [lam] (TupLit es loc:as)
   pprPrec _ (RedomapT cs outer inner es as _) =
     ppCertificates cs <> text "redomapT" <>
     parens (ppr outer <> comma </> ppr inner <> comma </>
             commasep (braces (commasep $ map ppr es) : map ppr as))
-  pprPrec _ (ScanT cs lam es as _) =
-    ppCertificates cs <> ppSOAC "scanT" [lam] (es++as)
+  pprPrec _ (ScanT cs lam es as loc) =
+    ppCertificates cs <> ppSOAC "scanT" [lam] (TupLit es loc : as)
   pprPrec _ (FilterT cs lam as _) =
     ppCertificates cs <> ppSOAC "filterT" [lam] as
 

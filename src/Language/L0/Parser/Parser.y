@@ -304,11 +304,11 @@ Exp  :: { UncheckedExp }
                       { Reduce $3 $5 $7 NoInfo $1 }
 
      | Certificates reduceT '(' TupleFunAbstr ',' DExps ')'
-                      { let (accexps, arrexps) = $6 in
+                      { let (accexps, arrexps) = unzip $6 in
                         ReduceT $1 $4 accexps arrexps $2 }
 
      | reduceT '(' TupleFunAbstr ',' DExps ')'
-                      { let (accexps, arrexps) = $5 in
+                      { let (accexps, arrexps) = unzip $5 in
                         ReduceT [] $3 accexps arrexps $1 }
 
      | map '(' FunAbstr ',' Exp ')'
@@ -324,11 +324,11 @@ Exp  :: { UncheckedExp }
                       { Scan $3 $5 $7 NoInfo $1 }
 
      | Certificates scanT '(' TupleFunAbstr ',' DExps ')'
-                      { let (accexps, arrexps) = $6 in
+                      { let (accexps, arrexps) = unzip $6 in
                         ScanT $1 $4 accexps arrexps $2 }
 
      | scanT '(' TupleFunAbstr ',' DExps ')'
-                      { let (accexps, arrexps) = $5 in
+                      { let (accexps, arrexps) = unzip $5 in
                         ScanT [] $3 accexps arrexps $1 }
 
      | zip '(' Exps2 ')'
@@ -407,11 +407,16 @@ Exps : Exp ',' Exps { $1 : $3 }
 Exps2 : Exp ',' Exps2 { $1 : $3 }
       | Exp ',' Exp   { [$1, $3] }
 
-DExps : Exp ',' Exp ',' DExps { let (as, bs) = $5
-                                in ($1:$3:reverse(drop 1 $ reverse as),
-                                    take 1 (reverse as)++bs)
-                              }
-      | Exp ',' Exp { ([$1], [$3]) }
+
+DExps   :: { [(UncheckedExp, UncheckedExp)] }
+        : '{' DExps_ { $2 }
+DExps_  :: { [(UncheckedExp, UncheckedExp)] }
+        : DExps__ ',' Exp { let (end, es) = $1
+                            in (end,$3) : es }
+DExps__ :: { (UncheckedExp, [(UncheckedExp, UncheckedExp)]) }
+        : Exp '}'                 { ($1, []) }
+        | Exp ',' DExps__ ',' Exp { let (end, es) = $3
+                                    in ($1, (end,$5) : es) }
 
 TupleExp : '{' Exps '}' { ($2, $1) }
          | '{'      '}' { ([], $1) }

@@ -1,3 +1,0 @@
-// Wrong, because the scanT function must return an array.
-
-fun {[int]} main([int] a) = scanT(fn int (int y, int x) => x + y, 2, a)

@@ -23,6 +23,20 @@ Language changes
     map2^2, especially on a whiteboard (where you'd often abbreviate
     to just map^2).
 
+  * reduceT and scanT now require curly braces around their initial
+    accumulator values.  That is, we went from
+
+      reduceT(f, x,y,z, a, b, z)
+
+    to
+
+      reduceT(f, {x,y,z}, a, b, z).
+
+    Note that this is not just a tuple expression, but an actual part
+    of the reduceT syntax.  It is still syntactically required that
+    the number of elements in the "tuple" equals the number of input
+    arrays.
+
 Compiler changes
 ---
 
