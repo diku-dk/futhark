@@ -179,9 +179,10 @@ iswim _ nest ots
                   (TupLit (map Var bndIds) loc2) loc2
               , tupleLambdaSrcLoc = loc2
               }
+        transposeInput (SOAC.Transpose _ 0 1 inp) = inp
+        transposeInput inp                        = SOAC.Transpose cs2 0 1 inp
     in Just (Nest.SOACNest
-               (es' ++ [ SOAC.Transpose cs2 0 1 e |
-                         e <- Nest.inputs nest])
+               (es' ++ map transposeInput (Nest.inputs nest))
                (Nest.MapT cs1 (Nest.Lambda lam) [] loc2),
              ots ++ [OTranspose cs2 0 1])
 iswim _ _ _ = Nothing
