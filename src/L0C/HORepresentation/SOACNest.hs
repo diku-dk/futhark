@@ -15,6 +15,8 @@ module L0C.HORepresentation.SOACNest
   , fromExp
   , fromSOAC
   , toSOAC
+  , inputBindings
+  , inputsPerLevel
   )
   where
 
@@ -216,15 +218,54 @@ vars = mapM varExp
   where varExp (Var k) = Just k
         varExp _       = Nothing
 
-inpVars :: [SOAC.Input] -> Maybe [Ident]
-inpVars = mapM SOAC.inputArray
-
-matches :: [Parameter] -> [Ident] -> Bool
-matches ps idds =
-  length ps == length idds &&
-  and (zipWith (==) (map identName ps) (map identName idds))
-
 tuplePatAndLit :: TupIdent -> Exp -> Maybe [Ident]
 tuplePatAndLit (TupId pats _) (TupLit es _)
   | Just ks <- vars es, map Id ks == pats = Just ks
 tuplePatAndLit _ _                        = Nothing
+
+inputBindings :: SOACNest -> [[Ident]]
+inputBindings outernest =
+  inputBindings' ps comb
+  where ps  = [ inpArr >> Just param
+                | (inpArr,param) <- zip inpArrs $ nextInputParams comb]
+        inpArrs = map SOAC.inputArray $ inputs outernest
+        comb    = operation outernest
+
+inputBindings' :: [Maybe Ident] -> Combinator -> [[Ident]]
+inputBindings' ps comb =
+  zipWith (++) (map maybeToList ps) $
+  case nesting comb of
+    [] ->
+      case body comb of
+        Lambda _              ->
+          replicate (length ps) []
+        NewNest nest comb' ->
+          inputBindings' (usedParams ps nest comb') comb'
+    nest:nests ->
+      let comb' = nests `setNesting` comb
+      in inputBindings' (usedParams ps nest comb') comb'
+
+usedParams :: [Maybe Ident] -> Nesting -> Combinator -> [Maybe Ident]
+usedParams ps nest comb = nestingInputParam ps nest $ nextInputParams comb
+
+nextInputParams :: Combinator -> [Ident]
+nextInputParams comb =
+  case nesting comb of
+    []        -> case body comb of
+                   Lambda l       -> map fromParam $ tupleLambdaParams l -- FIXME: remove accumulator params!
+                   NewNest nest _ -> nestingParams nest
+    nest:_ -> nestingParams nest
+
+nestingInputParam :: [Maybe Ident] -> Nesting -> [Ident] -> [Maybe Ident]
+nestingInputParam ps nest nextparams =
+  map ((`lookupParamIn` zip inps nextparams)=<<) ps
+  where inps = nestingInputs nest
+        lookupParamIn = lookup . SOAC.Var
+
+inputsPerLevel :: SOACNest -> [[SOAC.Input]]
+inputsPerLevel = nestedInputs' . operation
+  where nestedInputs' comb =
+          map nestingInputs (nesting comb) ++
+          case body comb of
+            Lambda _           -> []
+            NewNest nest comb' -> nestingInputs nest : nestedInputs' comb'

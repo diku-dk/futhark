@@ -31,7 +31,6 @@ module L0C.Rebinder
   where
 
 import Control.Applicative
-import Control.Arrow (first)
 import Control.Monad.Writer
 import Control.Monad.Reader
 import Control.Monad.State
@@ -49,6 +48,7 @@ import qualified Data.Set as S
 
 import L0C.L0
 import L0C.MonadFreshNames
+import qualified L0C.HORepresentation.SOACNest as Nest
 
 import L0C.Rebinder.CSE
 import qualified L0C.Rebinder.SizeTracking as SZ
@@ -98,13 +98,6 @@ emptyEnv = Env {
            , envDupeState = newDupeState
            , envAggressive = False
            }
-
-varExp :: Exp -> Maybe Ident
-varExp (Var k) = Just k
-varExp _       = Nothing
-
-vars :: [Exp] -> [Ident]
-vars = mapMaybe varExp
 
 isArrayIdent :: Ident -> Bool
 isArrayIdent idd = case identType idd of
@@ -176,7 +169,7 @@ bindLet pat@(Id dest) e@(Replicate (Var x) (Var y) _) m =
   withBinding pat e $
   withShape dest (Var x:slice [] 0 y) m
 
-bindLet pat@(TupId [dest1, dest2] _) e@(Split cs (Var n) (Var src) _ loc) m =
+bindLet pat@(TupId [Id dest1, Id dest2] _) e@(Split cs (Var n) (Var src) _ loc) m =
   withBinding pat e $
   withNewBinding "split_src_sz" (Size cs 0 (Var src) loc) $ \src_sz ->
   withNewBinding "split_sz" (BinOp Minus (Var src_sz) (Var n) (Elem Int) loc) $ \split_sz ->
@@ -195,25 +188,10 @@ bindLet pat@(Id dest) e@(Concat cs (Var x) (Var y) loc) m =
                      | i <- [1..arrayDims (identType x) - 1]])
   m
 
-bindLet pat e@(MapT cs _ srcs _) m =
-  withBinding pat e $
-  withShapes (sameOuterShapes cs $ patIdents pat ++ vars srcs) m
-
-bindLet pat e@(ReduceT cs _ _ srcs _) m =
-  withBinding pat e $
-  withShapes (sameOuterShapesExps cs srcs) m
-
-bindLet pat e@(ScanT cs _ _ srcs _) m =
-  withBinding pat e $
-  withShapes (sameOuterShapesExps cs srcs) m
-
-bindLet pat e@(FilterT cs _ srcs _) m =
-  withBinding pat e $
-  withShapes (sameOuterShapesExps cs srcs) m
-
-bindLet pat e@(RedomapT cs _ _ _ srcs _) m =
-  withBinding pat e $
-  withShapes (sameOuterShapesExps cs srcs) m
+bindLet pat e m
+  | Right nest <- Nest.fromExp e =
+    withBinding pat e $
+    withShapes (SZ.sizeRelations (patIdents pat) nest) m
 
 bindLet pat@(Id dest) e@(Index cs src _ idxs _ _) m =
   withBinding pat e $
@@ -248,22 +226,16 @@ withShape :: Ident -> [Exp] -> HoistM a -> HoistM a
 withShape dest src =
   local (\env -> env { envBindings = SZ.insert dest src $ envBindings env })
 
-withShapes :: [(TupIdent, [Exp])] -> HoistM a -> HoistM a
-withShapes [] m =
-  m
-withShapes ((Id dest, es):rest) m =
+withShapes :: [(Ident, [Exp])] -> HoistM a -> HoistM a
+withShapes [] m = m
+withShapes ((dest, es):rest) m =
   withShape dest es $ withShapes rest m
-withShapes (_:rest) m =
-  withShapes rest m
 
-sameOuterShapesExps :: Certificates -> [Exp] -> [(TupIdent, [Exp])]
-sameOuterShapesExps cs = sameOuterShapes cs . vars
-
-sameOuterShapes :: Certificates -> [Ident] -> [(TupIdent, [Exp])]
+sameOuterShapes :: Certificates -> [Ident] -> [(Ident, [Exp])]
 sameOuterShapes cs = outer' []
   where outer' _ [] = []
         outer' prev (k:ks) =
-          [ (Id k, [Size cs 0 (Var k') $ srclocOf k])
+          [ (k, [Size cs 0 (Var k') $ srclocOf k])
             | k' <- prev ++ ks ] ++
           outer' (k:prev) ks
 
@@ -516,7 +488,7 @@ hoistInExp e@(ScanT cs (TupleLambda params _ _ _) accexps arrexps _) =
   hoistInSOAC e accexps $ \accks ->
     let (accparams, arrparams) = splitAt (length accexps) params in
     withSOACArrSlices cs arrparams arrks $
-    withShapes (map (first Id) $ filter (isArrayIdent . fst) $
+    withShapes (filter (isArrayIdent . fst) $
                 zip (map fromParam accparams) $ map (slice cs 0) accks) $
     withShapes (sameOuterShapes cs arrks) $
     hoistInExpBase e
@@ -552,8 +524,8 @@ hoistInSOAC e arrexps m =
     Nothing -> hoistInExpBase e
     Just ks -> m ks
 
-arrSlices :: Certificates -> [Parameter] -> [Ident] -> [(TupIdent, [Exp])]
-arrSlices cs params = zip (map (Id . fromParam) params) . map (slice cs 1)
+arrSlices :: Certificates -> [Parameter] -> [Ident] -> [(Ident, [Exp])]
+arrSlices cs params = zip (map fromParam params) . map (slice cs 1)
 
 withSOACArrSlices :: Certificates -> [Parameter] -> [Ident]
                   -> HoistM Exp -> HoistM Exp
