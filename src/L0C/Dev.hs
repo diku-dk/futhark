@@ -17,6 +17,7 @@ module L0C.Dev
   , prog
   , fromLeft
   , fromRight
+  , fromFile
   )
 where
 
@@ -129,3 +130,8 @@ fromLeft (Right _) = error "fromLeft: passed Right value."
 fromRight :: Either a b -> b
 fromRight (Right x) = x
 fromRight (Left _)  = error "fromRight: passed Left value."
+
+-- | Return the contents of the given file - useful if you don't want
+-- to type long strings at the REPL.
+fromFile :: FilePath -> String
+fromFile = unsafePerformIO . readFile
