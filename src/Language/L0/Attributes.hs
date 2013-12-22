@@ -87,9 +87,12 @@ module Language.L0.Attributes
   , arrayVal
   , emptyArray
   , flattenArray
+
+  -- * Transposition
   , transposeArray
   , transposeIndex
   , transposeInverse
+  , transposeDimension
 
   -- * Type aliases
 
@@ -529,6 +532,13 @@ transposeIndex k n l
 -- @uncurry transposeIndex (transposeInverse k n) (transposeIndex k n l) == l@
 transposeInverse :: Int -> Int -> (Int,Int)
 transposeInverse k n = (k+n,-n)
+
+-- | @transposeDimension k n dim numDims@ gives the new position of
+-- dimension @dim@ in a @numDims@-dimensional array after being
+-- @n,k@-transposed.
+transposeDimension :: Int -> Int -> Int -> Int -> Int
+transposeDimension k n dim numDims =
+  transposeIndex k n [0..numDims-1] !! dim
 
 -- | The type of an L0 term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
