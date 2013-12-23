@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses, FlexibleContexts #-}
 module L0C.EnablingOpts.EnablingOptDriver (
                                     enablingOpts
                                   , copyCtProp
@@ -13,7 +14,7 @@ module L0C.EnablingOpts.EnablingOptDriver (
 
 import L0C.L0
 import L0C.Renamer
-import L0C.FreshNames
+import L0C.MonadFreshNames
 
 import L0C.EnablingOpts.InliningDeadFun
 import L0C.EnablingOpts.CopyCtPropFold
@@ -54,9 +55,14 @@ normCopyDeadOpts prog = do
     (_, prog_dce)  <- deadCodeElim    prog_cp
     return prog_dce
 
-normCopyOneTupleLambda :: Prog -> VNameSource -> TupleLambda ->
-                          Either EnablingOptError (VNameSource, TupleLambda)
-normCopyOneTupleLambda prog nmsrc lam = do
-    (nmsrc', lam') <- letNormOneTupleLambda    nmsrc lam
-    lam''          <- copyCtPropOneTupleLambda prog  lam'
-    return (nmsrc', lam'')
+normCopyOneTupleLambda :: MonadFreshNames VName m => Prog -> TupleLambda ->
+                          m (Either EnablingOptError TupleLambda)
+normCopyOneTupleLambda prog lam = do
+  nmsrc <- getNameSource
+  let res = do (nmsrc', lam') <- letNormOneTupleLambda    nmsrc lam
+               lam''          <- copyCtPropOneTupleLambda prog  lam'
+               return (nmsrc',lam'')
+  case res of Left e -> return $ Left e
+              Right (nmsrc', normLam) -> do
+                putNameSource nmsrc'
+                return $ Right normLam

@@ -633,13 +633,11 @@ replaceSOAC pat soac = do
                                     ++"still in result: "++ppTupId pat)
                -- then fuseInExp soac
                else do -- TRY MOVE THIS TO OUTER LEVEL!!!
-                       let lam = SOAC.lambda new_soac
-                       nmsrc <- get
-                       prog  <- asks program
-                       case normCopyOneTupleLambda prog nmsrc lam of
+                       prog <- asks program
+                       tryLam <- normCopyOneTupleLambda prog $ SOAC.lambda new_soac
+                       case tryLam of
                           Left err             -> badFusionGM err
-                          Right (nmsrc', lam') -> do
-                            put nmsrc'
+                          Right lam' -> do
                             (_, nfres) <- fusionGatherLam (HS.empty, mkFreshFusionRes) lam'
                             let nfres' =  cleanFusionResult nfres
                             lam''      <- bindRes nfres' $ fuseInLambda lam'
