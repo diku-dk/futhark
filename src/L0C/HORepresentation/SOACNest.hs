@@ -13,20 +13,13 @@ module L0C.HORepresentation.SOACNest
   , setInputs
   , certificates
   , fromExp
+  , toExp
   , fromSOAC
   , toSOAC
   , inputBindings
   , inputsPerLevel
   )
   where
-
--- Current problems:
---
--- * Some "nests" are detected that really are not.  For example,
--- nested reduces that do not use the same accumulator.  Also look at
--- how they deal with their lambda params.  Also, the inputs to a
--- nested loop should not be used inside the body, or it's not a
--- proper nest!  (I think...)
 
 import Control.Applicative
 import Control.Monad
@@ -37,6 +30,14 @@ import Data.Maybe
 import L0C.HORepresentation.SOAC (SOAC)
 import qualified L0C.HORepresentation.SOAC as SOAC
 import L0C.L0 hiding (MapT, ReduceT, ScanT, FilterT, RedomapT)
+
+-- Current problems:
+--
+-- * Some "nests" are detected that really are not.  For example,
+-- nested reduces that do not use the same accumulator.  Also look at
+-- how they deal with their lambda params.  Also, the inputs to a
+-- nested loop should not be used inside the body, or it's not a
+-- proper nest!  (I think...)
 
 data Nesting = Nesting {
     nestingParams     :: [Ident]
@@ -145,6 +146,9 @@ certificates (SOACNest _ (RedomapT cs _ _ _ _ _)) = cs
 
 fromExp :: Exp -> Either SOAC.NotSOAC SOACNest
 fromExp = liftM fromSOAC . SOAC.fromExp
+
+toExp :: SOACNest -> Exp
+toExp = SOAC.toExp . toSOAC
 
 fromSOAC :: SOAC -> SOACNest
 fromSOAC (SOAC.MapT cs l as loc)
