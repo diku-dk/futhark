@@ -300,6 +300,9 @@ attemptFusion outIds soac ker
       in attemptFusion outIds soac' ker'
   | Just ker' <- optimizeKernel (Just outIds) ker =
       attemptFusion outIds soac ker'
+  | Just (ker', ots) <- exposeInputs outIds ker,
+    Just soac' <- pullOutputTransforms soac ots =
+      attemptFusion outIds soac' ker'
   | isCompatibleKer (outIds, soac) ker =
       Just <$> fuseSOACwithKer (outIds, soac) ker
   | otherwise =
