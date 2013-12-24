@@ -12,13 +12,13 @@ import Control.Monad.Writer
 
 import Data.Array
 import Data.List
-import Data.Maybe
 
 import Data.Bits
 import Data.Loc
 
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet      as HS
+import qualified Data.Set          as S
 
 import L0C.L0
 
@@ -220,7 +220,8 @@ copyCtPropExp e@(Var (Ident vnm _ pos)) = do
         -- DO NOT INLINE IOTA!
         Iota  _ _         -> changed e'
         --Iota _ _          -> return e
-        _                 -> return e
+        _                 -> do nonRemovable vnm
+                                return e
 
 copyCtPropExp eee@(Index cs idd@(Ident vnm tp p) csidx inds tp2 pos) = do
   inds' <- mapM copyCtPropExp inds
@@ -394,14 +395,16 @@ copyCtPropExp (Assert e loc) = do
 copyCtPropExp (Conjoin es loc) = do
   es' <- mapM copyCtPropExp es
   -- Remove trivial certificates.
-  let check (Literal Checked _) = return Nothing
-      check (Var idd) = do
+  let check seen (Literal Checked _) = return seen
+      check seen (Conjoin es2 _)     = changed $ seen `S.union` S.fromList es2
+      check seen (Var idd) = do
         vv <- asks $ HM.lookup (identName idd) . envVtable
         case vv of
-          Just (Constant Checked _ _) -> changed Nothing
-          _                           -> return $ Just $ Var idd
-      check e = return $ Just e
-  es'' <- liftM catMaybes $ mapM check es'
+          Just (Constant Checked _ _)       -> changed seen
+          Just (SymArr (Conjoin es2 _) _ _) -> changed $ seen `S.union` S.fromList es2
+          _                                 -> return  $ Var idd `S.insert` seen
+      check seen e = return $ e `S.insert` seen
+  es'' <- S.toList <$> foldM check S.empty es'
   case es'' of []  -> changed $ Literal Checked loc
                [c] -> changed c
                _   -> return $ Conjoin es'' loc
@@ -712,6 +715,7 @@ isRemovablePat _ (Literal v _)  = return $ isBasicTypeVal v
 isRemovablePat _ e@(TupLit {})  = return $ isCtOrCopy e
 isRemovablePat _ (Transpose {}) = return True
 isRemovablePat _ (Iota {})      = return True
+isRemovablePat _ (Conjoin {})   = return True
 isRemovablePat _ _              = return False
 
 getPropBnds :: TupIdent -> Exp -> Bool -> CPropM [(VName, CtOrId)]
@@ -723,6 +727,7 @@ getPropBnds ( Id (Ident var tp _) ) e to_rem =
             Index   {}           -> [(var, SymArr e   tp  to_rem)]
             TupLit  {}           -> [(var, SymArr e   tp  to_rem)]
             Transpose   {}       -> [(var, SymArr e   tp  to_rem)]
+            Conjoin {}           -> [(var, SymArr e   tp  to_rem)]
 
             Iota {}              -> let newtp = Array Int [Nothing] Nonunique mempty
                                     in  [(var, SymArr e newtp to_rem)]
