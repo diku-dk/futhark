@@ -585,7 +585,7 @@ fuseInExp :: Exp -> FusionGM Exp
 fuseInExp (LetPat pat e body pos) =
   case SOAC.fromExp e of
     Right soac ->
-      replaceSOAC pat soac <*> fuseInExp body
+      replaceSOAC (patIdents pat) soac <*> fuseInExp body
     _ -> do
       body' <- fuseInExp body
       e'    <- fuseInExp e
@@ -610,12 +610,13 @@ fuseInLambda (TupleLambda params body rtp pos) = do
   body' <- fuseInExp body
   return $ TupleLambda params body' rtp pos
 
-replaceSOAC :: TupIdent -> SOAC -> FusionGM (Exp -> Exp)
-replaceSOAC pat soac = do
+replaceSOAC :: [Ident] -> SOAC -> FusionGM (Exp -> Exp)
+replaceSOAC [] _ = return id
+replaceSOAC names@(Ident pat_nm _ _ : _) soac = do
   fres  <- asks fusedRes
-  let loc     = srclocOf soac
-  let pat_nm  = identName $ head $ patIdents pat
-  let bind e = return $ \body -> LetPat pat e body $ srclocOf pat
+  let loc    = srclocOf soac
+      pat    = TupId (map Id names) loc
+      bind e = return $ \body -> LetPat pat e body $ srclocOf pat
   case HM.lookup pat_nm (outArr fres) of
     Nothing  -> bind =<< fuseInExp (SOAC.toExp soac)
     Just knm ->
@@ -625,8 +626,7 @@ replaceSOAC pat soac = do
                                     ++"which is not in Res: "++textual (unKernName knm))
         Just ker -> do
           let new_soac = fsoac ker
-              pat' = TupId (map Id $ outputs ker) loc
-          if pat /= pat'
+          if names /= outputs ker
           then badFusionGM $ EnablingOptError loc
                               ("In Fusion.hs, replaceSOAC, "
                                ++" pat does not match kernel's pat: "++ppTupId pat)
