@@ -1,3 +1,4 @@
+-- | Re-export the external L0 modules for convenience.
 module Language.L0
   ( module Language.L0.Syntax
   , module Language.L0.Attributes

@@ -13,7 +13,7 @@ module L0C.MonadFreshNames
   , newIDFromString
   , newVName
   , newIdent
-  , module FreshNames
+  , module L0C.FreshNames
   ) where
 
 import Control.Applicative

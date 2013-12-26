@@ -97,8 +97,7 @@ mkUnnamedTupleLamLam ftab (TupleLambda ids body tp loc) =
 -- to a three-element tuple: The first element is a list that contains the 
 -- (unique) function names that may be called directly from the current function, 
 -- i.e., ``apply'' callees. The second element is a list that contains the (unique) 
--- function names that may be called via SOACs. The third element is a boolean
--- that specifies whether the current function, i.e., the caller, contains IO ops.
+-- function names that may be called via SOACs.
 type CallGraph = HM.HashMap Name ([Name],[Name])
 
 -- | The symbol table for functions
@@ -149,7 +148,6 @@ buildCGfun cg fname  = do
           Just _  -> return cg
           Nothing -> do let callees@(fs, soacs) = buildCGexp ([],[]) body
 
-                        -- at this point caller is only known whether it has `local' IO. 
                         let cg' = HM.insert caller callees cg
 
                         -- recursively build the callees
