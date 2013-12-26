@@ -3,6 +3,13 @@
 -- of testing, debugging and development.  Of course, there is nothing
 -- preventing you from using the exported functions whereever you
 -- want.
+--
+-- Important: this module is \"dumb\" in the sense that it does not
+-- check the validity of its inputs, and does not have any
+-- functionality for massaging SOACs to be fusable.  It is assumed
+-- that the given SOACs are immediately compatible.
+--
+-- The module will, however, remove duplicate inputs after fusion.
 module L0C.HOTrans.Composing
   ( fuseMaps
   , fuseFilters
@@ -21,7 +28,7 @@ import L0C.L0
 import L0C.HORepresentation.SOAC (Input)
 import qualified L0C.HORepresentation.SOAC as SOAC
 
--- | @fusemap lam1 inp1 out1 lam2 inp2@ fuses the function @lam1@ into
+-- | @fuseMaps lam1 inp1 out1 lam2 inp2@ fuses the function @lam1@ into
 -- @lam2@.  Both functions must be mapping functions, although @lam2@
 -- may have leading reduction parameters.  @inp1@ and @inp2@ are the
 -- array inputs to the SOACs containing @lam1@ and @lam2@
@@ -30,17 +37,21 @@ import qualified L0C.HORepresentation.SOAC as SOAC
 -- this function unless the intersection of @out1@ and @inp2@ is
 -- non-empty.
 --
--- If @lam2@ accepts more parameters than there are
--- elements in @inp2@, it is assumed that the surplus (which are
--- positioned at the beginning of the parameter list) are reduction
+-- If @lam2@ accepts more parameters than there are elements in
+-- @inp2@, it is assumed that the surplus (which are positioned at the
+-- beginning of the parameter list) are reduction (accumulator)
 -- parameters, that do not correspond to array elements, and they are
 -- thus not modified.
 --
 -- The result is the fused function, and a list of the array inputs
 -- expected by the SOAC containing the fused function.
-fuseMaps :: TupleLambda -> [Input] -> [Ident]
-         -> TupleLambda -> [Input]
-         -> (TupleLambda, [Input])
+fuseMaps :: TupleLambda -- ^ Function of SOAC to be fused.
+         -> [Input] -- ^ Input of SOAC to be fused.
+         -> [Ident] -- ^ Output of SOAC to be fused.
+         -> TupleLambda -- ^ Function to be fused with.
+         -> [Input] -- ^ Input of SOAC to be fused with.
+         -> (TupleLambda, [Input]) -- ^ The fused lambda and the
+                                   -- inputs of the resulting SOAC.
 fuseMaps lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
   where lam2' =
           lam2 { tupleLambdaParams = lam2redparams ++ HM.keys inputmap
@@ -53,16 +64,39 @@ fuseMaps lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
         (lam2redparams, pat, inputmap, makeCopies, makeCopiesInner) =
           fuseInputs lam1 inp1 out1 lam2 inp2
 
-fuseFilters :: TupleLambda -> [Input] -> [Ident]
-            -> TupleLambda -> [Input] -> VName
-            -> (TupleLambda, [Input])
+-- | Similar to 'fuseMaps', although the two functions must be
+-- predicates returning @{bool}@.  Returns a new predicate function.
+fuseFilters :: TupleLambda -- ^ Function of SOAC to be fused.
+            -> [Input] -- ^ Input of SOAC to be fused.
+            -> [Ident] -- ^ Output of SOAC to be fused.
+            -> TupleLambda -- ^ Function to be fused with.
+            -> [Input] -- ^ Input of SOAC to be fused with.
+            -> VName -- ^ A fresh name (used internally).
+            -> (TupleLambda, [Input]) -- ^ The fused lambda and the inputs of the resulting SOAC.
 fuseFilters lam1 inp1 out1 lam2 inp2 vname =
   fuseFilterInto lam1 inp1 out1 lam2 inp2 vname false
   where false = Literal (TupVal [LogVal False]) $ srclocOf lam2
 
-fuseFilterIntoFold :: TupleLambda -> [Input] -> [Ident]
-                   -> TupleLambda -> [Input] -> VName
-                   -> (TupleLambda, [Input])
+-- | Similar to 'fuseFilters', except the second function does not
+-- have to return @{bool}@, but must be a folding function taking at
+-- least one reduction parameter (that is, the number of parameters
+-- accepted by the function must be at least one greater than its
+-- number of inputs).  If @f1@ is the to-be-fused function, and @f2@
+-- is the function to be fused with, the resulting function will be of
+-- roughly following form:
+--
+-- @
+-- fn (acc, args) => if f1(args)
+--                   then f2(acc,args)
+--                   else acc
+-- @
+fuseFilterIntoFold :: TupleLambda -- ^ Function of SOAC to be fused.
+                   -> [Input] -- ^ Input of SOAC to be fused.
+                   -> [Ident] -- ^ Output of SOAC to be fused.
+                   -> TupleLambda -- ^ Function to be fused with.
+                   -> [Input] -- ^ Input of SOAC to be fused with.
+                   -> VName -- ^ A fresh name (used internally).
+                   -> (TupleLambda, [Input]) -- ^ The fused lambda and the inputs of the resulting SOAC.
 fuseFilterIntoFold lam1 inp1 out1 lam2 inp2 vname =
   fuseFilterInto lam1 inp1 out1 lam2 inp2 vname identity
   where identity = TupLit (map (Var . fromParam) lam2redparams) $ srclocOf lam2
