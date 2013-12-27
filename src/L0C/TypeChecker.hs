@@ -128,8 +128,8 @@ instance VarName vn => Show (TypeError vn) where
   show (UnknownFunctionError fname pos) =
     "Unknown function " ++ nameToString fname ++ " called at " ++ locStr pos ++ "."
   show (ParameterMismatch fname pos expected got) =
-    "In call of " ++ fname' ++ " at position " ++ locStr pos ++
-    ": expecting " ++ show nexpected ++ " argument(s) of type(s) " ++
+    "In call of " ++ fname' ++ " at position " ++ locStr pos ++ ":\n" ++
+    "expecting " ++ show nexpected ++ " argument(s) of type(s) " ++
      expected' ++ ", but got " ++ show ngot ++
     " arguments of types " ++ intercalate ", " (map ppType got) ++ "."
     where (nexpected, expected') =
