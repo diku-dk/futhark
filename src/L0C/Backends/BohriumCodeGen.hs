@@ -1,4 +1,24 @@
 {-# LANGUAGE FlexibleContexts, QuasiQuotes #-}
+-- | Translate SOACs into calls to the Bohrium C API.  Quite unfinished.
+--
+-- The idea: For every SOAC expression we encounter, check whether it
+-- can be directly translated to a Bohrium primitive.  If it can't,
+-- the "L0C.Backends.BohriumBackend" will translate it into a
+-- sequential loop for us, but that's obviously not something we want
+-- to happen.  Hence, another (currently unwritten) compiler pass
+-- should do aggressive loop fission and other transformations in
+-- order to make the program fit patterns recognised by this module.
+--
+-- For example, the SOAC @map(fn int (int x) => x+2,a)@ corresponds
+-- nicely to the Bohrium function
+-- @bh_multi_array_int32_add_scalar_rhs@.  And @map(fn int (int x, int
+-- y) => x+y,zip(a,b))@ is @bh_multi_array_int32_add@.  This module
+-- should eventually recognise all such simple patterns.
+--
+-- Current state: Simple unary and binary mappings across integer
+-- arrays can be translated, nothing else.  Also significantly, arrays
+-- are copied to Bohrium space before every operation, and back when
+-- it's done.  This is massively wasteful.
 module L0C.Backends.BohriumCodeGen (compileSOACtoBohrium) where
 
 import Control.Monad

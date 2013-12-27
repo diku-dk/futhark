@@ -1,4 +1,8 @@
 -- | Bohrium code generator.
+--
+-- Interesting stuff does in "L0C.Backends.BohriumCodeGen".
+--
+
 module L0C.Backends.Bohrium (compileProg) where
 
 import Control.Monad
