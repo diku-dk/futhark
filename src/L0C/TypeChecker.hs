@@ -315,9 +315,9 @@ occur occurs = tell Dataflow { usageOccurences = occurs }
 -- | Proclaim that we have made read-only use of the given variable.
 -- No-op unless the variable is array-typed.
 observe :: VarName vn => TaggedIdent CompTypeBase vn -> TypeM vn ()
-observe (Ident _ t loc)
+observe (Ident nm t loc)
   | basicType t = return ()
-  | otherwise   = let als = aliases t
+  | otherwise   = let als = nm `HS.insert` aliases t
                   in occur [observation als loc]
 
 -- | Proclaim that we have written to the given variable.
