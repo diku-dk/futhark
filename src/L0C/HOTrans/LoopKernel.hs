@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 module L0C.HOTrans.LoopKernel
   ( FusedKer(..)
   , newKernel
@@ -6,12 +7,7 @@ module L0C.HOTrans.LoopKernel
   , arrInputs
   , OutputTransform(..)
   , applyTransform
-  , outputToInput
-  , outputsToInput
-  , exposeInputs
-  , pullOutputTransforms
-  , optimizeKernel
-  , optimizeSOAC
+  , attemptFusion
   )
   where
 
@@ -25,10 +21,12 @@ import Data.Maybe
 import Data.Loc
 
 import L0C.L0
+import L0C.MonadFreshNames
 import L0C.HORepresentation.SOAC (SOAC)
 import qualified L0C.HORepresentation.SOAC as SOAC
 import L0C.HORepresentation.SOACNest (SOACNest)
 import qualified L0C.HORepresentation.SOACNest as Nest
+import L0C.HOTrans.Composing
 
 data OutputTransform = OTranspose Certificates Int Int
                        deriving (Eq, Ord, Show)
@@ -84,6 +82,93 @@ inputs = SOAC.inputs . fsoac
 
 setInputs :: [SOAC.Input] -> FusedKer -> FusedKer
 setInputs inps ker = ker { fsoac = inps `SOAC.setInputs` fsoac ker }
+
+attemptFusion :: MonadFreshNames VName m => [Ident] -> SOAC -> FusedKer -> m (Maybe FusedKer)
+attemptFusion outIds soac ker
+  | Just (soac', ots) <- optimizeSOAC Nothing soac =
+      let ker' = map (outputsToInput ots) (inputs ker) `setInputs` ker
+      in attemptFusion outIds soac' ker'
+  | Just ker' <- optimizeKernel (Just outIds) ker =
+      attemptFusion outIds soac ker'
+  | Just (ker', ots) <- exposeInputs outIds ker,
+    Just soac' <- pullOutputTransforms soac ots =
+      attemptFusion outIds soac' ker'
+  | otherwise =
+      fuseSOACwithKer (outIds, soac) ker
+
+-- | Check that the consumer uses at least one output of the producer
+-- unmodified.
+mapFusionOK :: [Ident] -> FusedKer -> Bool
+mapFusionOK outIds ker = any (`elem` inputs ker) (map SOAC.Var outIds)
+
+-- | check that the input-array set of consumer is included in the
+-- output-array set of producer.  That is, a filter-producer can only
+-- be fused if the consumer accepts input from no other source.
+filterFusionOK :: [Ident] -> FusedKer -> Bool
+filterFusionOK outIds ker =
+  case mapM SOAC.inputArray $ inputs ker of
+    Nothing       -> False
+    Just inputIds -> all (`elem` outIds) inputIds
+
+fuseSOACwithKer :: MonadFreshNames VName m => ([Ident], SOAC) -> FusedKer -> m (Maybe FusedKer)
+fuseSOACwithKer (outIds, soac1) ker = do
+  -- We are fusing soac1 into soac2, i.e, the output of soac1 is going
+  -- into soac2.
+  let soac2 = fsoac ker
+      out_ids2 = outputs ker
+      cs1      = SOAC.certificates soac1
+      cs2      = SOAC.certificates soac2
+      inp1_arr = SOAC.inputs soac1
+      inp2_arr = SOAC.inputs soac2
+      lam1     = SOAC.lambda soac1
+      lam2     = SOAC.lambda soac2
+      success res_soac = do
+        let fusedVars_new = fusedVars ker++outIds
+        return $ Just ker { fsoac = res_soac
+                          , outputs = out_ids2
+                          , fusedVars = fusedVars_new
+                          }
+  case (soac2, soac1) of
+      -- first get rid of the cases that can be solved by
+      -- a bit of soac rewriting.
+    (SOAC.ReduceT _ lam ne arrs loc, SOAC.MapT   {}) -> do
+      let soac2' = SOAC.RedomapT (cs1++cs2) lam lam ne arrs loc
+          ker'   = ker { fsoac = soac2'
+                       , outputs = out_ids2 }
+      fuseSOACwithKer (outIds, soac1) ker'
+
+    -- The Fusions that are semantically map fusions:
+    (SOAC.MapT _ _ _ pos, SOAC.MapT    {})
+      | mapFusionOK outIds ker -> do
+      let (res_lam, new_inp) = fuseMaps lam1 inp1_arr outIds lam2 inp2_arr
+      success $ SOAC.MapT (cs1++cs2) res_lam new_inp pos
+    (SOAC.RedomapT _ lam21 _ ne _ pos, SOAC.MapT {})
+      | mapFusionOK outIds ker -> do
+      let (res_lam, new_inp) = fuseMaps lam1 inp1_arr outIds lam2 inp2_arr
+      success $ SOAC.RedomapT (cs1++cs2) lam21 res_lam ne new_inp pos
+
+    -- The Fusions that are semantically filter fusions:
+    (SOAC.ReduceT _ _ ne _ pos, SOAC.FilterT {})
+      | filterFusionOK outIds ker -> do
+      name <- newVName "check"
+      let (res_lam, new_inp) = fuseFilterIntoFold lam1 inp1_arr outIds lam2 inp2_arr name
+      success $ SOAC.ReduceT (cs1++cs2) res_lam ne new_inp pos
+
+    (SOAC.RedomapT _ lam21 _ nes _ pos, SOAC.FilterT {})
+      | filterFusionOK outIds ker-> do
+      name <- newVName "check"
+      let (res_lam, new_inp) = fuseFilterIntoFold lam1 inp1_arr outIds lam2 inp2_arr name
+      success $ SOAC.RedomapT (cs1++cs2) lam21 res_lam nes new_inp pos
+
+    (SOAC.FilterT _ _ _ pos, SOAC.FilterT {})
+      | filterFusionOK outIds ker -> do
+      name <- newVName "check"
+      let (res_lam, new_inp) = fuseFilters lam1 inp1_arr outIds lam2 inp2_arr name
+      success $ SOAC.FilterT (cs1++cs2) res_lam new_inp pos
+
+    _ -> return Nothing
+
+-- Here follows optimizations and transforms to expose fusability.
 
 optimizeKernel :: Maybe [Ident] -> FusedKer -> Maybe FusedKer
 optimizeKernel inp ker = do
