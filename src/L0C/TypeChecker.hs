@@ -836,9 +836,9 @@ checkExp (Scan fun startexp arrexp intype pos) = do
   intype' <- checkAnnotation pos "element" intype inrowt
   fun' <- checkLambda fun [startarg, arrarg]
   let scantype = lambdaType fun' [typeOf startexp', typeOf arrexp']
-  unless (scantype `subtypeOf` typeOf startexp') $
+  unless (typeOf startexp' `subtypeOf` scantype) $
     bad $ TypeError pos $ "Initial value is of type " ++ ppType (typeOf startexp') ++ ", but scan function returns type " ++ ppType scantype ++ "."
-  unless (scantype `subtypeOf` intype') $
+  unless (intype' `subtypeOf` scantype) $
     bad $ TypeError pos $ "Array element value is of type " ++ ppType intype' ++ ", but scan function returns type " ++ ppType scantype ++ "."
   return $ Scan fun' startexp' arrexp' intype' pos
 
@@ -1013,15 +1013,16 @@ checkExp (ReduceT ass fun startexps arrexps pos) = do
 checkExp (ScanT ass fun startexps arrexps pos) = do
   ass' <- mapM (requireI [Elem Cert] <=< checkIdent) ass
   (startexps', startargs) <- unzip <$> mapM checkArg startexps
-  (arrexps', arrargs)   <- unzip <$> mapM checkSOACArrayArg arrexps
-  let startt  = Elem . Tuple $ map typeOf startexps'
+  (arrexps', arrargs)     <- unzip <$> mapM checkSOACArrayArg arrexps
+  fun'                    <-
+    checkTupleLambda fun $ startargs ++ map argWithoutDataflow startargs
+  let startt      = Elem $ Tuple $ map typeOf startexps'
       intupletype = Elem $ Tuple $ map argType arrargs
-  fun'      <- checkTupleLambda fun $ startargs ++ startargs
-  let funret = Elem $ Tuple $ tupleLambdaType fun' $ map argType $ startargs ++ startargs
-  unless (funret `subtypeOf` startt) $
+      funret      = Elem $ Tuple $ tupleLambdaType fun' $ map argType $ startargs ++ startargs
+  unless (startt `subtypeOf` funret) $
     bad $ TypeError pos $ "Initial value is of type " ++ ppType startt ++
                           ", but scan function returns type " ++ ppType funret ++ "."
-  unless (funret `subtypeOf` intupletype) $
+  unless (intupletype `subtypeOf` funret) $
     bad $ TypeError pos $ "Array element value is of type " ++ ppType intupletype ++
                           ", but scan function returns type " ++ ppType funret ++ "."
   return $ ScanT ass' fun' startexps' arrexps' pos
@@ -1182,6 +1183,9 @@ type Arg vn = (TaggedType vn, Dataflow vn, SrcLoc)
 
 argType :: Arg vn -> TaggedType vn
 argType (t, _, _) = t
+
+argWithoutDataflow :: VarName vn => Arg vn -> Arg vn
+argWithoutDataflow (t,_,loc) = (t,mempty,loc)
 
 checkArg :: (TypeBox ty, VarName vn) =>
             TaggedExp ty vn -> TypeM vn (TaggedExp CompTypeBase vn, Arg vn)
