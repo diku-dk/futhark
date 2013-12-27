@@ -826,7 +826,7 @@ checkExp (Reduce fun startexp arrexp intype pos) = do
   let redtype = lambdaType fun' [typeOf startexp', typeOf arrexp']
   unless (typeOf startexp' `subtypeOf` redtype) $
     bad $ TypeError pos $ "Initial value is of type " ++ ppType (typeOf startexp') ++ ", but reduce function returns type " ++ ppType redtype ++ "."
-  unless (redtype `subtypeOf` intype') $
+  unless (intype' `subtypeOf` redtype) $
     bad $ TypeError pos $ "Array element value is of type " ++ ppType intype' ++ ", but reduce function returns type " ++ ppType redtype ++ "."
   return $ Reduce fun' startexp' arrexp' intype' pos
 
@@ -1005,7 +1005,7 @@ checkExp (ReduceT ass fun startexps arrexps pos) = do
   (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
   fun'    <- checkTupleLambda fun $ startargs ++ arrargs
   let funret = Elem $ Tuple $ tupleLambdaType fun' $ map argType $ startargs ++ arrargs
-  unless (funret `subtypeOf` startt) $
+  unless (startt `subtypeOf` funret) $
     bad $ TypeError pos $ "Accumulator is of type " ++ ppType startt ++
           ", but reduce function returns type " ++ ppType funret ++ "."
   return $ ReduceT ass' fun' startexps' arrexps' pos
