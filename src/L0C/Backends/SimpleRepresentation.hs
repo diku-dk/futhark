@@ -40,9 +40,13 @@ sameRepresentation (Array et1 ds1 _ _) (Array et2 ds2 _ _) =
   length ds1 == length ds2 && sameRepresentation (Elem et1) (Elem et2)
 sameRepresentation t1 t2 = t1 == t2
 
+-- | @tupleField i@ is the name of field number @i@ in a tuple.
 tupleField :: Int -> String
 tupleField i = "elem_" ++ show i
 
+-- | @tupleFieldExp e i@ is the expression for accesing field @i@ of
+-- tuple @e@.  If @e@ is an lvalue, so will the resulting expression
+-- be.
 tupleFieldExp :: C.Exp -> Int -> C.Exp
 tupleFieldExp e i = [C.cexp|$exp:e.$id:(tupleField i)|]
 
@@ -70,6 +74,7 @@ arraySliceCopyStm to from t slice =
                  $exp:from.data,
                  $exp:(arraySliceSizeExp from t slice)*sizeof($exp:from.data[0]));|]
 
+-- | The size of the array of the given L0 type, as an integer.
 arraySizeExp :: C.Exp -> Type -> C.Exp
 arraySizeExp place t = arraySliceSizeExp place t 0
 
@@ -86,6 +91,8 @@ arrayShapeExp place t =
   map comb [0..arrayDims t-1]
   where comb i = [C.cexp|$exp:place.dims[$int:i]|]
 
+-- | Generate an expression indexing the given array with the given
+-- indices.  No bounds checking is done.
 indexArrayExp :: C.Exp -> GenType als -> [C.Exp] -> C.Exp
 indexArrayExp place t indexes =
   let sizes = map (foldl mult [C.cexp|1|]) $ tails $ map field [1..arrayDims t - 1]
