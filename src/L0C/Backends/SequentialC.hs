@@ -13,5 +13,7 @@ import qualified L0C.FirstOrderTransform as FOT
 import qualified L0C.Backends.GenericC as GenericC
 
 compileProg :: Prog -> String
-compileProg = GenericC.compileProg $ const $
-              liftM Left . FOT.transformExp FOT.noDepthLimit
+compileProg = GenericC.compileProg expCompiler
+  where expCompiler _ e
+          | FOT.transformable e = liftM Left $ FOT.transformExp FOT.noDepthLimit e
+          | otherwise           = return $ Left e

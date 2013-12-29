@@ -2,6 +2,7 @@
 -- | C code generator framework.
 module L0C.Backends.GenericC
   ( compileProg
+  , ExpCompiler
   , CompilerM
   , lookupVar
   , compileExp
@@ -40,6 +41,9 @@ newCompilerState prog = CompilerState {
                         , compNameSrc = newNameSourceForProg prog
                         }
 
+-- | A substitute expression compiler, tried before the main
+-- expression compilation function.  If this returns 'Left', that new
+-- expression is compiled instead.
 type ExpCompiler = C.Exp -> Exp -> CompilerM (Either Exp [C.BlockItem])
 
 data CompilerEnv = CompilerEnv {
