@@ -129,7 +129,7 @@ typeToCType t@(Array {}) = do
       ct <- typeToCType $ Elem $ elemType t
       let name = typeName t
           ctp = [C.cty|$ty:ct*|]
-          struct = [C.cedecl|struct $id:name { typename int64_t dims[$int:(arrayDims t)]; $ty:ctp data; };|]
+          struct = [C.cedecl|struct $id:name { typename int64_t shape[$int:(arrayDims t)]; $ty:ctp data; };|]
           stype  = [C.cty|struct $id:name|]
       modify $ \s -> s { compTypeStructs = (toDecl t, (stype, struct)) : compTypeStructs s }
       return stype
@@ -166,10 +166,10 @@ printStm place t@(Array {}) = do
                int $id:i;
                $ty:et' $id:v;
                putchar('[');
-               for ($id:i = 0; $id:i < $exp:place.dims[0]; $id:i++) {
+               for ($id:i = 0; $id:i < $exp:place.shape[0]; $id:i++) {
                  $stms:indexi;
                  $stm:pstm
-                 if ($id:i != $exp:place.dims[0]-1) {
+                 if ($id:i != $exp:place.shape[0]-1) {
                    putchar(',');
                    putchar(' ');
                  }
@@ -315,8 +315,8 @@ compileValue place v@(ArrayVal _ rt) = do
   ct <- typeToCType $ valueType v
   cbt <- typeToCType $ addNames $ Elem $ elemType rt
   let asinit n = [C.cinit|$int:n|]
-      dims = map asinit $ arrayShape v
-      arrdef = [C.cedecl|$ty:ct $id:val = { $inits:dims, NULL };|]
+      shape = map asinit $ arrayShape v
+      arrdef = [C.cedecl|$ty:ct $id:val = { $inits:shape, NULL };|]
   case elemInit v of
     [] -> modify $ \s -> s { compVarDefinitions = arrdef : compVarDefinitions s }
     elems -> let elemdef = case arrayString $ flattenArray v of
@@ -534,7 +534,7 @@ compileExp' place (Size _ i e _) = do
   return $ stm [C.cstm|{
                      $ty:et $id:dest;
                      $items:e';
-                     $exp:place = $id:dest.dims[$int:i];
+                     $exp:place = $id:dest.shape[$int:i];
                    }|]
 
 compileExp' place e@(Iota (Var v) _) = do
@@ -579,7 +579,7 @@ compileExp' place (Reshape _ shapeexps arrexp _) = do
   shapeexps' <- concat <$> zipWithM compileExp (map varExp shapevars) shapeexps
   arrexp' <- compileExp (varExp arr) arrexp
   let vardecls = [[C.cdecl|int $id:var;|] | var <- shapevars]
-      assignstms = [[C.cstm|$exp:place.dims[$int:i] = $id:var;|] | (var, i) <- zip shapevars [(0::Int)..]]
+      assignstms = [[C.cstm|$exp:place.shape[$int:i] = $id:var;|] | (var, i) <- zip shapevars [(0::Int)..]]
   return $ stm [C.cstm|{
                      $ty:intype' $id:arr;
                      $decls:vardecls
@@ -604,7 +604,7 @@ compileExp' place e@(Transpose _ k n arrexp _) = do
         in return ([C.cstm|$exp:indexto = $exp:indexfrom;|], is)
       loop is d = do i <- new "transpose_i"
                      (inner, is') <- loop (i:is) (d-1)
-                     let body = [C.cstm|for ($id:i = 0; $id:i < $id:arr.dims[$int:(d-1)]; $id:i++) {
+                     let body = [C.cstm|for ($id:i = 0; $id:i < $id:arr.shape[$int:(d-1)]; $id:i++) {
                                       $stm:inner
                                     }|]
                      return (body, is')
@@ -636,15 +636,15 @@ compileExp' place (Split _ posexp arrexp _ _) = do
                      int $id:pos;
                      $items:posexp'
                      $items:arrexp'
-                     if ($id:pos < 0 || $id:pos > $id:arr.dims[0]) {
+                     if ($id:pos < 0 || $id:pos > $id:arr.shape[0]) {
                        error(1, "Split out of bounds.\n");
                      }
-                     memcpy($exp:place0.dims, $id:arr.dims, sizeof($id:arr.dims));
-                     memcpy($exp:place1.dims, $id:arr.dims, sizeof($id:arr.dims));
+                     memcpy($exp:place0.shape, $id:arr.shape, sizeof($id:arr.shape));
+                     memcpy($exp:place1.shape, $id:arr.shape, sizeof($id:arr.shape));
                      $exp:place0.data = $id:arr.data;
-                     $exp:place0.dims[0] = $id:pos;
+                     $exp:place0.shape[0] = $id:pos;
                      $exp:place1.data = &$exp:splitexp;
-                     $exp:place1.dims[0] -= $id:pos;
+                     $exp:place1.shape[0] -= $id:pos;
                    }|]
 
 compileExp' place (Concat _ xarr yarr _) = do
@@ -789,7 +789,7 @@ compileExpInPlace place (Iota ne _) = do
   return $ stm [C.cstm|{
                      int $id:size, $id:i;
                      $items:ne'
-                     if ($exp:place.dims[0] != $id:size) {
+                     if ($exp:place.shape[0] != $id:size) {
                             error(1, "Cannot fit iota array in destination.\n");
                      }
                      for ($id:i = 0; $id:i < $id:size; $id:i++) {
@@ -807,8 +807,8 @@ compileExpInPlace place e@(Replicate ne ve _) = do
         case typeOf ve of
           Array {} ->
             ([C.cstm|{
-                   memcpy($id:v.dims, &$exp:place.dims[1],
-                          sizeof($exp:place.dims)-sizeof($exp:place.dims[0]));
+                   memcpy($id:v.shape, &$exp:place.shape[1],
+                          sizeof($exp:place.shape)-sizeof($exp:place.shape[0]));
                    $id:v.data = $exp:place.data;
                  }|],
              [C.cstm|{}|])
@@ -822,7 +822,7 @@ compileExpInPlace place e@(Replicate ne ve _) = do
                      int $id:size, $id:i;
                      $ty:vt $id:v;
                      $items:ne'
-                     if ($exp:place.dims[0] != $id:size) {
+                     if ($exp:place.shape[0] != $id:size) {
                        error(1, "Cannot fit replicate array in destination.\n");
                      }
                      $stm:vsetup
@@ -841,7 +841,7 @@ compileExpInPlace place e
     return $ stm [C.cstm|{
                        $ty:ctype $id:tmpplace;
                        $items:e'
-                       if (memcmp($exp:place.dims, $id:tmpplace.dims, sizeof($id:tmpplace.dims)) == 0) {
+                       if (memcmp($exp:place.shape, $id:tmpplace.shape, sizeof($id:tmpplace.shape)) == 0) {
                           $stm:copy
                        } else {
                            error(1, "Cannot fit array in destination.\n");
