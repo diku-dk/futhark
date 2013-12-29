@@ -232,7 +232,7 @@ Exp  :: { UncheckedExp }
      | Exp '*' Exp    { BinOp Times $1 $3 NoInfo $2 }
      | Exp '/' Exp    { BinOp Divide $1 $3 NoInfo $2 }
      | Exp '%' Exp    { BinOp Mod $1 $3 NoInfo $2 }
-     | '~' Exp        { Negate $2 NoInfo $1 }
+     | '-' Exp        { Negate $2 NoInfo $1 }
      | not Exp        { Not $2 $1 }
      | Exp '&&' Exp   { And $1 $3 $2 }
      | Exp '||' Exp   { Or $1 $3 $2 }

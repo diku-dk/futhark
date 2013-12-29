@@ -23,11 +23,6 @@ import Text.PrettyPrint.Mainland
 import Language.L0.Syntax
 import Language.L0.Attributes
 
-tildes :: String -> String
-tildes = map tilde
-  where tilde '-' = '~'
-        tilde c   = c
-
 -- | The document @'apply' ds@ separates @ds@ with commas and encloses them with
 -- parentheses.
 apply :: [Doc] -> Doc
@@ -56,10 +51,10 @@ instance Pretty Name where
   ppr (Name t) = fromText t
 
 instance Pretty Value where
-  ppr (IntVal x) = text $ tildes $ show x
+  ppr (IntVal x) = text $ show x
   ppr (CharVal c) = text $ show c
   ppr (LogVal b) = text $ show b
-  ppr (RealVal x) = text $ tildes $ show x
+  ppr (RealVal x) = text $ show x
   ppr Checked = text "Checked"
   ppr (TupVal vs)
     | any (not . basicType . valueType) vs =
@@ -168,7 +163,7 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
                                Just csidx' -> ppCertificates csidx' <> text "|"
   pprPrec _ (Iota e _) = text "iota" <> parens (ppr e)
   pprPrec _ (Size cs i e _) =
-    ppCertificates cs <> text "size" <> apply [text $ tildes $ show i, ppr e]
+    ppCertificates cs <> text "size" <> apply [text $ show i, ppr e]
   pprPrec _ (Replicate ne ve _) =
     text "replicate" <> apply [ppr ne, align (ppr ve)]
   pprPrec _ (Reshape cs shape e _) =
@@ -177,8 +172,8 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
     ppCertificates cs <> text "transpose" <> apply [ppr e]
   pprPrec _ (Transpose cs k n e _) =
         ppCertificates cs <>
-        text "transpose" <> apply [text $ tildes $ show k,
-                                   text $ tildes $ show n,
+        text "transpose" <> apply [text $ show k,
+                                   text $ show n,
                                    ppr e]
   pprPrec _ (Map lam a _ _) = ppSOAC "map" [lam] [a]
   pprPrec _ (Reduce lam e a _ _) = ppSOAC "reduce" [lam] [e, a]

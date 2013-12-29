@@ -52,9 +52,9 @@ tokens :-
   "}"                      { const RCURLY }
   ","                      { const COMMA }
   "_"                      { const UNDERSCORE }
-  "~"? [0-9]+              { INTLIT . readInt }
-  "~"? (([0-9]+("."[0-9]*)?|"."[0-9]+))
-    ([eE][\+\~]?[0-9]+)?     { REALLIT . readReal }
+  [0-9]+                   { INTLIT . readInt }
+  (([0-9]+("."[0-9]*)?|"."[0-9]+))
+    ([eE][\+\-]?[0-9]+)?   { REALLIT . readReal }
   [a-zA-Z] [a-zA-Z0-9_]* { keyword }
   "'" @charlit "'" { CHARLIT . read }
   \" @stringcharlit* \" { STRINGLIT . read }
@@ -180,14 +180,10 @@ alexScanTokens file str = go (alexStartPos,'\n',[],str)
         posnToPos (AlexPn offset line col) = Pos file line col offset
 
 readReal :: String -> Double
-readReal = read . map subst
-  where subst '~' = '-'
-        subst c   = c
+readReal = read
 
 readInt :: String -> Int
-readInt = read . map subst
-  where subst '~' = '-'
-        subst c   = c
+readInt = read
 
 data L a = L SrcLoc a
 

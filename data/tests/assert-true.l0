@@ -4,4 +4,4 @@ fun int main(int i) =
   if 0 <= i && i < 10
   then let dummy = assert(True) in
            a[<dummy>|i]
-  else ~1
+  else -1

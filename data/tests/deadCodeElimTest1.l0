@@ -1,4 +1,4 @@
-fun int neg(int x) = ~x
+fun int neg(int x) = -x
 
 fun int main(int a) =
   let b = a + 100      in
