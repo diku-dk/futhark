@@ -217,7 +217,7 @@ compileProg ec prog =
   let ((prototypes, definitions, main), endstate) =
         runCompilerM ec prog compileProg'
       funName' = funName . nameFromString
-  in pretty 0 $ ppr [C.cunit|
+  in pretty 80 $ ppr [C.cunit|
 $esc:("#include <stdio.h>")
 $esc:("#include <stdlib.h>")
 $esc:("#include <string.h>")
