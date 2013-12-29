@@ -90,6 +90,17 @@ lookupVar k = do v <- asks $ HM.lookup k . envVarMap
 new :: String -> CompilerM String
 new = liftM textual . newVName
 
+typeName :: GenType als -> String
+typeName (Elem Int) = "int"
+typeName (Elem Bool) = "bool"
+typeName (Elem Char) = "char"
+typeName (Elem Real) = "real"
+typeName (Elem Cert) = "cert"
+typeName (Elem (Tuple ts)) =
+  "tuple_" ++ intercalate "_" (map typeName ts)
+typeName t@(Array {}) =
+  typeName (Elem $ elemType t) ++ show (arrayDims t) ++ "d"
+
 typeToCType :: GenType als -> CompilerM C.Type
 typeToCType (Elem Int) = return [C.cty|int|]
 typeToCType (Elem Bool) = return [C.cty|int|]
@@ -102,8 +113,8 @@ typeToCType t@(Elem (Tuple ts)) = do
     Just (_, (cty, _)) -> return cty
     Nothing -> do
       members <- zipWithM field ts [(0::Int)..]
-      name <- new "tuple_type"
-      let struct = [C.cedecl|struct $id:name { $sdecls:members };|]
+      let name = typeName t
+          struct = [C.cedecl|struct $id:name { $sdecls:members };|]
           stype  = [C.cty|struct $id:name|]
       modify $ \s -> s { compTypeStructs = (toDecl t, (stype,struct)) : compTypeStructs s }
       return stype
@@ -116,8 +127,8 @@ typeToCType t@(Array {}) = do
     Just (_, (cty, _)) -> return cty
     Nothing -> do
       ct <- typeToCType $ Elem $ elemType t
-      name <- new "array_type"
-      let ctp = [C.cty|$ty:ct*|]
+      let name = typeName t
+          ctp = [C.cty|$ty:ct*|]
           struct = [C.cedecl|struct $id:name { typename int64_t dims[$int:(arrayDims t)]; $ty:ctp data; };|]
           stype  = [C.cty|struct $id:name|]
       modify $ \s -> s { compTypeStructs = (toDecl t, (stype, struct)) : compTypeStructs s }
