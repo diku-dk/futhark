@@ -144,7 +144,7 @@ printStm place (Elem Char) = return [C.cstm|printf("%c", $exp:place);|]
 printStm place (Elem Bool) =
   return [C.cstm|printf($exp:place ? "true" : "false");|]
 printStm place (Elem Real) = return [C.cstm|printf("%lf", $exp:place);|]
-printStm _ (Elem Cert) = return [C.cstm|printf("checked");|]
+printStm _ (Elem Cert) = return [C.cstm|printf("Checked");|]
 printStm place (Elem (Tuple ets)) = do
   prints <- forM (zip [(0::Int)..] ets) $ \(i, et) ->
               printStm [C.cexp|$exp:place.$id:(tupleField i)|] et
