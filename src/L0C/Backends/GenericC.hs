@@ -387,7 +387,7 @@ compileExp' place (ArrayLit (e:es) _ _) = do
           alloc = allocArray place dimexps bt
           es'' = [ [C.cstm|{
                          $items:e''
-                         if (memcmp($id:eldims, $id:name.dims, sizeof($id:eldims)) != 0) {
+                         if (memcmp($id:eldims, $id:name.shape, sizeof($id:eldims)) != 0) {
                              error(1, "Array elements have different sizes.\n");
                          }
                          memcpy($id:datap, $id:name.data, $id:elsize);
@@ -400,7 +400,7 @@ compileExp' place (ArrayLit (e:es) _ _) = do
                          int $id:i;
                          char *$id:datap;
                          $items:e'
-                         memcpy($id:eldims, $id:name.dims, sizeof($id:eldims));
+                         memcpy($id:eldims, $id:name.shape, sizeof($id:eldims));
                          for ($id:i = 0; $id:i < $int:numdims; $id:i++) {
                            $id:elsize *= $id:eldims[$id:i];
                          }
