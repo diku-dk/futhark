@@ -760,7 +760,7 @@ compileExp' place (Assert e loc) = do
                      $items:e'
                      if (!$exp:place) {
                             fprintf(stderr, "Assertion %s at %s failed.\n",
-                                    $string:(ppExp e), $string:(show loc));
+                                    $string:(ppExp e), $string:(locStr loc));
                             exit(1);
                           }
                    }|]
