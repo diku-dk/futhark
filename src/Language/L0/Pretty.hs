@@ -19,6 +19,7 @@ import Data.Hashable
 import qualified Data.HashSet as HS
 
 import Text.PrettyPrint.Mainland
+import Text.Printf
 
 import Language.L0.Syntax
 import Language.L0.Attributes
@@ -54,7 +55,7 @@ instance Pretty Value where
   ppr (IntVal x) = text $ show x
   ppr (CharVal c) = text $ show c
   ppr (LogVal b) = text $ show b
-  ppr (RealVal x) = text $ show x
+  ppr (RealVal x) = text $ printf "%.6f" x
   ppr Checked = text "Checked"
   ppr (TupVal vs)
     | any (not . basicType . valueType) vs =
