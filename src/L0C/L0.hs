@@ -28,6 +28,7 @@ module L0C.L0
   , FunDec
   , Prog
   , GenType
+  , GenElemType
   , Type
   , DeclType
   , ElemType
@@ -131,6 +132,9 @@ type Prog = ProgBase (TypeBase Names) VName
 
 -- | A known type parametrised over its aliasing information.
 type GenType als = TypeBase als VName
+
+-- | A known element type parametrised over its aliasing information.
+type GenElemType als = ElemTypeBase als VName
 
 -- | A known type with aliasing information.
 type Type = TypeBase Names VName

@@ -24,6 +24,7 @@ import Text.PrettyPrint.Mainland
 
 import L0C.L0
 import L0C.Backends.SimpleRepresentation
+import L0C.Backends.GenericCReading
 import L0C.MonadFreshNames
 
 data CompilerState = CompilerState {
@@ -143,7 +144,7 @@ printStm place (Elem Int)  = return [C.cstm|printf("%d", $exp:place);|]
 printStm place (Elem Char) = return [C.cstm|printf("%c", $exp:place);|]
 printStm place (Elem Bool) =
   return [C.cstm|printf($exp:place ? "true" : "false");|]
-printStm place (Elem Real) = return [C.cstm|printf("%lf", $exp:place);|]
+printStm place (Elem Real) = return [C.cstm|printf("%.6f", $exp:place);|]
 printStm _ (Elem Cert) = return [C.cstm|printf("Checked");|]
 printStm place (Elem (Tuple ets)) = do
   prints <- forM (zip [(0::Int)..] ets) $ \(i, et) ->
@@ -177,18 +178,36 @@ printStm place t@(Array {}) = do
                putchar(']');
              }|]
 
-readStm :: C.Exp -> GenType als -> CompilerM C.Stm
-readStm place (Elem Int) =
-  return [C.cstm|scanf("%d", &$exp:place);|]
-readStm place (Elem Char) =
-  return [C.cstm|scanf("%c", &$exp:place);|]
-readStm place (Elem Real) =
-  return [C.cstm|scanf("%f", &$exp:place);|]
+readFun :: GenElemType als -> Maybe String
+readFun Int  = Just "read_int"
+readFun Char = Just "read_char"
+readFun Real = Just "read_double"
+readFun _    = Nothing
+
+readStm :: C.Exp -> GenType als -> C.Stm
+readStm place (Elem et)
+  | Just f <- readFun et =
+    [C.cstm|if ($id:f(&$exp:place) != 0) {
+          fprintf(stderr, "Syntax error when reading %s:\n", $string:(ppType $ Elem et));
+                 exit(1);
+        }|]
+readStm place t@(Array {})
+  | Just f <- readFun (elemType t) =
+    [C.cstm|if (read_array(sizeof(*$exp:place.data),
+                           $id:f,
+                           (void**)&$exp:place.data,
+                           $exp:place.shape,
+                           $int:n)
+                != 0) {
+       fprintf(stderr, "Syntax error when reading %s:\n", $string:(ppType t));
+       exit(1);
+     }|]
+  where n  = arrayDims t
 readStm _ t =
-  return [C.cstm|{
-               fprintf(stderr, "Cannot read %s yet.\n", $string:(ppType t));
-               exit(1);
-             }|]
+  [C.cstm|{
+        fprintf(stderr, "Cannot read %s yet.\n", $string:(ppType t));
+        exit(1);
+      }|]
 
 mainCall :: FunDec -> CompilerM C.Stm
 mainCall (fname,rettype,params,_,_) = do
@@ -198,7 +217,7 @@ mainCall (fname,rettype,params,_,_) = do
   (args, decls, rstms) <- liftM unzip3 . forM paramtypes $ \paramtype -> do
     name <- new "main_arg"
     cparamtype <- typeToCType paramtype
-    rstm <- readStm (varExp name) paramtype
+    let rstm = readStm (varExp name) paramtype
     return (varExp name, [C.cdecl|$ty:cparamtype $id:name;|], rstm)
   return [C.cstm|{
                $decls:decls
@@ -248,6 +267,8 @@ double $id:(funName' "sqrt")(double x) {
 double $id:(funName' "exp")(double x) {
   return exp(x);
 }
+
+$edecls:readerFunctions
 
 void error(int exitcode, const char *s) {
   fprintf(stderr, "%s", s);
