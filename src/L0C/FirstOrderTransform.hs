@@ -6,8 +6,13 @@
 -- transformations in-place.  This module should be run very late in
 -- the compilation pipeline, ideally just before the code generator.
 module L0C.FirstOrderTransform
-  ( transformProg, transformExp
-  , RecDepth, noDepthLimit, noRecursion )
+  ( transformable
+  , transformProg
+  , transformExp
+  , RecDepth
+  , noDepthLimit
+  , noRecursion
+  )
   where
 
 import Control.Applicative
@@ -17,6 +22,21 @@ import Data.Loc
 
 import L0C.L0
 import L0C.MonadFreshNames
+
+-- | Return 'True' if the given expression is a SOAC that can be
+-- first-order transformed.
+transformable :: Exp -> Bool
+transformable (Map {}) = True
+transformable (Reduce {}) = True
+transformable (Redomap {}) = True
+transformable (Scan {}) = True
+transformable (Filter {}) = True
+transformable (MapT {}) = True
+transformable (ReduceT {}) = True
+transformable (RedomapT {}) = True
+transformable (ScanT {}) = True
+transformable (FilterT {}) = True
+transformable _ = False
 
 -- | Perform the first-order transformation on an L0 program.  The
 -- resulting program is not uniquely named, so make sure to run the
