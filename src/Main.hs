@@ -130,7 +130,9 @@ interpret prog =
       case res of
         Left err -> do hPutStrLn stderr $ "Interpreter error:\n" ++ show err
                        exitWith $ ExitFailure 2
-        Right val  -> putStrLn $ ppValue val
+        Right val  -> putStrLn $ ppOutput val
+  where ppOutput val | Just s <- arrayString val = s
+                     | otherwise                 = ppValue val
 
 rename :: Pass
 rename = Pass { passName = "renamer"
