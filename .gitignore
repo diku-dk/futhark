@@ -11,8 +11,14 @@
 dist
 
 # Ignore result of test suite.
-data/*testout
-data/**/*testout
+data/*interpreterout
+data/**/*interpreterout
+data/*compilerout
+data/**/*compilerout
+data/*bin
+data/**/*bin
+data/*c
+data/**/*c
 
 # Ignore side-effects of compilation.
 *.aux

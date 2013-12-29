@@ -2,6 +2,7 @@
 
 module Main(main) where
 
+import Control.Applicative
 import Control.Concurrent
 import Control.Exception
 import Control.Monad
@@ -19,7 +20,7 @@ import System.Process
 l0flags :: String
 l0flags = "-sfrOe"
 
--- | Number of concurrent l0c instances to run.
+-- | Number of tests to run concurrently.
 concurrency :: Int
 concurrency = 8
 
@@ -30,8 +31,16 @@ data TestResult = Success
                 | Failure String
 
 data Test = TypeFailure FilePath
-          | TypeCheck FilePath
+          | Optimise FilePath
           | Run FilePath FilePath FilePath
+          | Compile FilePath FilePath FilePath
+            deriving (Eq, Ord)
+
+testDescription :: Test -> String
+testDescription (TypeFailure f) = "type failure of " ++ f
+testDescription (Optimise f) = "optimisation of " ++ f
+testDescription (Run f _ _) = "interpretation of " ++ f
+testDescription (Compile f _ _) = "compilation of " ++ f
 
 failureTest :: FilePath -> IO TestResult
 failureTest f = do
@@ -41,8 +50,8 @@ failureTest f = do
     ExitFailure 1 -> return $ Failure err
     ExitFailure _ -> return Success
 
-compileTest :: FilePath -> IO TestResult
-compileTest f = do
+typeCheckTest :: FilePath -> IO TestResult
+typeCheckTest f = do
   (code, _, err) <- readProcessWithExitCode "l0c" [l0flags, f] ""
   case code of
     ExitSuccess -> return Success
@@ -60,7 +69,33 @@ executeTest f inputf outputf = do
         writeFile expectedOutputf output
         return $ Failure $ outputf ++ " and " ++ expectedOutputf ++ " do not match."
     ExitFailure _ -> return $ Failure err
-  where expectedOutputf = outputf `replaceExtension` "testout"
+  where expectedOutputf = outputf `replaceExtension` "interpreterout"
+
+compileTest :: FilePath -> FilePath -> FilePath -> IO TestResult
+compileTest f inputf outputf = do
+  input <- readFile inputf
+  expectedOutput <- readFile outputf
+  (l0code, l0prog, l0err) <- readProcessWithExitCode "l0c" [l0flags, "--compile-sequential", f] ""
+  writeFile cOutputf l0prog
+  case l0code of
+    ExitFailure _ -> return $ Failure l0err
+    ExitSuccess   -> do
+      (gccCode, _, gccerr) <- readProcessWithExitCode "gcc" [cOutputf, "-o", binOutputf, "-lm"] ""
+      case gccCode of
+        ExitFailure _ -> return $ Failure gccerr
+        ExitSuccess   -> do
+          (progCode, output, progerr) <- readProcessWithExitCode binOutputf [] input
+          writeFile cOutputf output
+          case progCode of
+            ExitFailure _ -> return $ Failure progerr
+            ExitSuccess
+              | output `compareOutput` expectedOutput -> return Success
+              | otherwise -> do
+                  writeFile expectedOutputf output
+                  return $ Failure $ outputf ++ " and " ++ expectedOutputf ++ " do not match."
+  where cOutputf = outputf `replaceExtension` "c"
+        binOutputf = outputf `replaceExtension` "bin"
+        expectedOutputf = outputf `replaceExtension` "compilerout"
 
 compareOutput :: String -> String -> Bool
 compareOutput x y = filter (not . isSpace) x == filter (not . isSpace) y
@@ -70,28 +105,29 @@ catching m = m `catch` save
   where save :: SomeException -> IO TestResult
         save e = return $ Failure $ show e
 
-doTest :: Bool -> Test -> IO TestResult
-doTest _ (TypeFailure f) = catching $ failureTest f
-doTest _ (TypeCheck f) = catching $ compileTest f
-doTest True (Run f inputf outputf) = catching $ executeTest f inputf outputf
-doTest False (Run f _ _) = catching $ compileTest f
+doTest :: Test -> IO TestResult
+doTest (TypeFailure f) = catching $ failureTest f
+doTest (Optimise f) = catching $ typeCheckTest f
+doTest (Run f inputf outputf) = catching $ executeTest f inputf outputf
+doTest (Compile f inputf outputf) = catching $ compileTest f inputf outputf
 
-runTest :: Bool -> MVar (FilePath, Test) -> MVar (FilePath, TestResult) -> IO ()
-runTest run testmvar resmvar = forever $ do
-  (file, test) <- takeMVar testmvar
-  res <- doTest run test
-  putMVar resmvar (file, res)
+runTest :: MVar Test -> MVar (Test, TestResult) -> IO ()
+runTest testmvar resmvar = forever $ do
+  test <- takeMVar testmvar
+  res <- doTest test
+  putMVar resmvar (test, res)
 
-makeTest :: FilePath -> IO Test
-makeTest f = do
-  let infile = f `replaceExtension` "in"
+makeTests :: Bool -> FilePath -> IO [Test]
+makeTests run f = do
+  let infile  = f `replaceExtension` "in"
       outfile = f `replaceExtension` "out"
   inexists <- doesFileExist infile
   outexists <- doesFileExist outfile
   return $ case (inexists, outexists) of
-             (True, True)  -> Run f infile outfile
-             (True, False)    -> TypeCheck f
-             _                   -> TypeFailure f
+             (True, True) | run -> [Run f infile outfile,
+                                    Compile f infile outfile]
+             (True, False) -> [Optimise f]
+             _             -> [TypeFailure f]
 
 reportInteractive :: String -> Int -> Int -> Int -> IO ()
 reportInteractive first failed passed remaining = do
@@ -113,28 +149,26 @@ runTests :: Bool -> [FilePath] -> IO ()
 runTests run files = do
   testmvar <- newEmptyMVar
   resmvar <- newEmptyMVar
-  replicateM_ concurrency $ forkIO $ runTest run testmvar resmvar
-  _ <- forkIO $ forM_ files $ \file -> do
-         test <- makeTest file
-         putMVar testmvar (file, test)
+  replicateM_ concurrency $ forkIO $ runTest testmvar resmvar
+  tests <- concat <$> mapM (makeTests run) files
+  _ <- forkIO $ mapM_ (putMVar testmvar) tests
   isTTY <- hIsTerminalDevice stdout
   let report = if isTTY then reportInteractive else reportText
       clear  = if isTTY then clearLine else putStr "\n"
-      getResults :: S.Set FilePath -> Int -> Int -> IO (Int,Int)
       getResults remaining failed passed =
         case S.toList remaining of
           []      -> clear >> return (failed, passed)
           first:_ -> do
-            report first failed passed $ S.size remaining
-            (file, res) <- takeMVar resmvar
-            let next = getResults $ file `S.delete` remaining
+            report (testDescription first) failed passed $ S.size remaining
+            (test, res) <- takeMVar resmvar
+            let next = getResults $ test `S.delete` remaining
             case res of
               Success -> next failed (passed+1)
               Failure s -> do clear
-                              putStrLn (file ++ ":\n" ++ s)
+                              putStrLn (testDescription test ++ ":\n" ++ s)
                               next (failed+1) passed
 
-  (failed, passed) <- getResults (S.fromList files) 0 0
+  (failed, passed) <- getResults (S.fromList tests) 0 0
   putStrLn $ show failed ++ " failed, " ++ show passed ++ " passed."
   exitWith $ case failed of 0 -> ExitSuccess
                             _ -> ExitFailure 1
