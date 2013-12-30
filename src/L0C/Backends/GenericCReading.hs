@@ -187,7 +187,7 @@ readerFunctions =
     }
 
     int read_int(void* dest) {
-      if (scanf("%ld", (int*)dest) == 1) {
+      if (scanf("%d", (int*)dest) == 1) {
         return 0;
       } else {
         return 1;
