@@ -122,6 +122,11 @@ filterFoldFusionOK outIds ker =
     Nothing       -> False
     Just inputIds -> all (`elem` outIds) inputIds
 
+mapOrFilter :: SOAC -> Bool
+mapOrFilter (SOAC.FilterT {}) = True
+mapOrFilter (SOAC.MapT {})    = True
+mapOrFilter _                 = False
+
 fuseSOACwithKer :: MonadFreshNames VName m => ([Ident], SOAC) -> FusedKer -> m (Maybe FusedKer)
 fuseSOACwithKer (outIds, soac1) ker = do
   -- We are fusing soac1 into soac2, i.e, the output of soac1 is going
@@ -143,7 +148,7 @@ fuseSOACwithKer (outIds, soac1) ker = do
   case (soac2, soac1) of
       -- first get rid of the cases that can be solved by
       -- a bit of soac rewriting.
-    (SOAC.ReduceT _ lam ne arrs loc, SOAC.MapT   {}) -> do
+    (SOAC.ReduceT _ lam ne arrs loc, _) | mapOrFilter soac1 -> do
       let soac2' = SOAC.RedomapT (cs1++cs2) lam lam ne arrs loc
           ker'   = ker { fsoac = soac2'
                        , outputs = out_ids2 }
