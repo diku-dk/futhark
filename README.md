@@ -28,13 +28,13 @@ the `data/` directory) and the options which passes and final action
 to perform.  If no options are given, the default action is to
 pretty-print (`-p`) the program after type-checking.  It is also
 possible to instruct `l0c` to interpret the program, by using the `-i`
-option.  If the `-c` flag is given, the program will be compiled to C
-and printed on standard output.  Note, however, that for the C code
-generator to work, you must manually run the first-order transform
-(with `-f`) and the tuple-array transform (`-t`).  In total, the
-command for compiling a program is:
+option.  If the `--compile-sequential` flag is given, the program will
+be compiled to C and printed on standard output.  Note, however, that
+for the C code generator to work, you must manually run the
+first-order transform (with `-f`) and the tuple-array transform
+(`-t`).  In total, the command for compiling a program is:
 
-    l0c -f -t -c <program.0> > program.c
+    l0c -f -t --compile-sequential <program.0> > program.c
 
 The order of passes (`-f` then `-t`) is significant.  Run `l0c` with
 no arguments to see a list of possible passes.
