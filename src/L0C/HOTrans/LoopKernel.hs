@@ -103,8 +103,9 @@ mapFusionOK outIds ker = any (`elem` inputs ker) (map SOAC.Var outIds)
 
 -- | Check that the input-array set of consumer is equal to the
 -- output-array set of producer.  That is, a filter-producer can only
--- be fused with a filter-consumer if the consumer accepts input from
--- no other source, and consumes everything by the producer.
+-- be fused with a filter or reduce-consumer if the consumer accepts
+-- input from no other source, and consumes everything by the
+-- producer.
 filterFusionOK :: [Ident] -> FusedKer -> Bool
 filterFusionOK outIds ker =
   case mapM SOAC.inputArray $ inputs ker of
@@ -115,8 +116,8 @@ filterFusionOK outIds ker =
 -- | Check that the input-array set of consumer is contained in the
 -- output-array set of producer.  That is, a filter-producer can only
 -- be fused if the consumer accepts input from no other source.
-filterReduceFusionOK :: [Ident] -> FusedKer -> Bool
-filterReduceFusionOK outIds ker =
+filterFoldFusionOK :: [Ident] -> FusedKer -> Bool
+filterFoldFusionOK outIds ker =
   case mapM SOAC.inputArray $ inputs ker of
     Nothing       -> False
     Just inputIds -> all (`elem` outIds) inputIds
@@ -160,13 +161,13 @@ fuseSOACwithKer (outIds, soac1) ker = do
 
     -- The Fusions that are semantically filter fusions:
     (SOAC.ReduceT _ _ ne _ pos, SOAC.FilterT {})
-      | filterReduceFusionOK outIds ker -> do
+      | filterFusionOK outIds ker -> do
       name <- newVName "check"
       let (res_lam, new_inp) = fuseFilterIntoFold lam1 inp1_arr outIds lam2 inp2_arr name
       success $ SOAC.ReduceT (cs1++cs2) res_lam ne new_inp pos
 
     (SOAC.RedomapT _ lam21 _ nes _ pos, SOAC.FilterT {})
-      | filterReduceFusionOK outIds ker-> do
+      | filterFoldFusionOK outIds ker-> do
       name <- newVName "check"
       let (res_lam, new_inp) = fuseFilterIntoFold lam1 inp1_arr outIds lam2 inp2_arr name
       success $ SOAC.RedomapT (cs1++cs2) lam21 res_lam nes new_inp pos

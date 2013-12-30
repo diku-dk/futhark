@@ -1001,21 +1001,26 @@ checkExp (MapT ass fun arrexps pos) = do
 checkExp (ReduceT ass fun startexps arrexps pos) = do
   ass' <- mapM (requireI [Elem Cert] <=< checkIdent) ass
   (startexps', startargs) <- unzip <$> mapM checkArg startexps
-  let startt = Elem $ Tuple $ map typeOf startexps'
-  (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
-  fun'    <- checkTupleLambda fun $ startargs ++ arrargs
-  let funret = Elem $ Tuple $ tupleLambdaType fun' $ map argType $ startargs ++ arrargs
+  (arrexps', arrargs)     <- unzip <$> mapM checkSOACArrayArg arrexps
+  fun'                    <- checkTupleLambda fun $ startargs ++ arrargs
+  let startt      = Elem $ Tuple $ map typeOf startexps'
+      intupletype = Elem $ Tuple $ map argType arrargs
+      funret      = Elem $ Tuple $ tupleLambdaType fun' $ map argType $ startargs ++ arrargs
   unless (startt `subtypeOf` funret) $
-    bad $ TypeError pos $ "Accumulator is of type " ++ ppType startt ++
-          ", but reduce function returns type " ++ ppType funret ++ "."
+      bad $ TypeError pos $ "Accumulator is of type " ++ ppType startt ++
+                            ", but reduce function returns type " ++ ppType funret ++ "."
+  unless (intupletype `subtypeOf` funret) $
+      bad $ TypeError pos $ "Array element value is of type " ++ ppType intupletype ++
+                            ", but scan function returns type " ++ ppType funret ++ "."
   return $ ReduceT ass' fun' startexps' arrexps' pos
 
+-- ScanT is exactly identical to ReduceT.  Duplicate for clarity
+-- anyway.
 checkExp (ScanT ass fun startexps arrexps pos) = do
   ass' <- mapM (requireI [Elem Cert] <=< checkIdent) ass
   (startexps', startargs) <- unzip <$> mapM checkArg startexps
   (arrexps', arrargs)     <- unzip <$> mapM checkSOACArrayArg arrexps
-  fun'                    <-
-    checkTupleLambda fun $ startargs ++ map argWithoutDataflow startargs
+  fun'                    <- checkTupleLambda fun $ startargs ++ arrargs
   let startt      = Elem $ Tuple $ map typeOf startexps'
       intupletype = Elem $ Tuple $ map argType arrargs
       funret      = Elem $ Tuple $ tupleLambdaType fun' $ map argType $ startargs ++ startargs
@@ -1183,9 +1188,6 @@ type Arg vn = (TaggedType vn, Dataflow vn, SrcLoc)
 
 argType :: Arg vn -> TaggedType vn
 argType (t, _, _) = t
-
-argWithoutDataflow :: VarName vn => Arg vn -> Arg vn
-argWithoutDataflow (t,_,loc) = (t,mempty,loc)
 
 checkArg :: (TypeBox ty, VarName vn) =>
             TaggedExp ty vn -> TypeM vn (TaggedExp CompTypeBase vn, Arg vn)
