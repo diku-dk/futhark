@@ -52,9 +52,8 @@ transparency is upheld.
 The syntax of L0 is heavily inspired by Haskell and Standard ML.  An
 identifier stats with a letter, followed by any number of letters,
 digits and underscores.  Numeric constants use the same notation as
-Haskell, except that we use tilde (\tilde{}) for unary minus.  String
-and character literals use Haskell syntax (which is very
-similar to C), including all escape characters.  Comments are
+Haskell.  String and character literals also use Haskell syntax (which
+is very similar to C), including all escape characters.  Comments are
 indicated with \texttt{//} and span to end of line.
 
 An L0 program consists of a sequence of \emph{function definitions},
@@ -154,6 +153,8 @@ An operator can be used as the function argument of a SOAC by
 prefixing it with \texttt{op}.  For example, to negate every number in
 the array \texttt{a}, we would write \texttt{map(op \tilde{}, a)}.
 This can also be combined with currying: \texttt{map(op + (2), a)}.
+Note that we use ``\tilde{}'', rather than ``-'', to indicate
+numerical negation in \textit{only} this case.
 
 Except for the arithmetic operators, which accept both \realt{}s
 and \intt{}s, every construct in L0 is fully monomorphic.  Every
@@ -296,7 +297,7 @@ the language.
   \item[\texttt{not \textit{x}}]\hfill\\
     Logical negation of \textit{x}, which must be of type \boolt.
 
-  \item[\texttt{\tilde \textit{x}}]\hfill\\
+  \item[\texttt{-\textit{x}}]\hfill\\
     Numerical negation of \textit{x}, which must be of type \realt{} or \intt.
 
   \item[\texttt{a[i]}]\hfill\\
