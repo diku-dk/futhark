@@ -188,7 +188,7 @@ readStm :: C.Exp -> GenType als -> C.Stm
 readStm place (Elem et)
   | Just f <- readFun et =
     [C.cstm|if ($id:f(&$exp:place) != 0) {
-          fprintf(stderr, "Syntax error when reading %s:\n", $string:(ppType $ Elem et));
+          fprintf(stderr, "Syntax error when reading %s.\n", $string:(ppType $ Elem et));
                  exit(1);
         }|]
 readStm place t@(Array {})
@@ -199,7 +199,7 @@ readStm place t@(Array {})
                            $exp:place.shape,
                            $int:n)
                 != 0) {
-       fprintf(stderr, "Syntax error when reading %s:\n", $string:(ppType t));
+       fprintf(stderr, "Syntax error when reading %s.\n", $string:(ppType t));
        exit(1);
      }|]
   where n  = arrayDims t
