@@ -126,8 +126,8 @@ makeTests run f = do
   return $ case (inexists, outexists) of
              (True, True) | run -> [Run f infile outfile,
                                     Compile f infile outfile]
-             (True, False) -> [Optimise f]
-             _             -> [TypeFailure f]
+             (True, _)          -> [Optimise f]
+             _                  -> [TypeFailure f]
 
 reportInteractive :: String -> Int -> Int -> Int -> IO ()
 reportInteractive first failed passed remaining = do
