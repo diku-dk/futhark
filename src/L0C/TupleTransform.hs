@@ -232,14 +232,14 @@ transformExp (Index cs vname csidx idxs outtype loc) = do
       | rt <- stripArray (length idxs') $ identType v,
         arrayDims rt == 0 ->
       return $ Index cs v csidx idxs' rt loc
-    Just (ArraySubst c vs) -> do
-      let index v = Index [c] v csidx idxs'
-                    (stripArray (length idxs') $ identType v) loc
-      mergeCerts (c:cs) $ \c' ->
+    Just (ArraySubst c vs) ->
+      mergeCerts (c:cs) $ \c' -> do
+        let index v = Index (certify c' []) v csidx idxs'
+                      (stripArray (length idxs') $ identType v) loc
         return $ case map index vs of
                    []   -> TupLit [] loc
-                   a:as | arrayDims (typeOf a) == 0 -> TupLit (a:as) loc
-                        | otherwise -> tuplit c' loc $ a:as
+                   a:as | arrayDims outtype == 0 -> TupLit (a:as) loc
+                        | otherwise              -> tuplit c' loc $ a:as
     _ -> return $ Index cs vname csidx idxs' outtype loc
 
 transformExp (TupLit es loc) = do
