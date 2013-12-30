@@ -615,13 +615,12 @@ compileExp' place e@(Transpose _ k n arrexp _) = do
   intype <- typeToCType $ typeOf arrexp
   basetype <- typeToCType $ Elem $ elemType $ typeOf arrexp
   arrexp' <- compileExp (varExp arr) arrexp
-  let alloc = case arrayShapeExp (varExp arr) (typeOf arrexp) of
-                rows:cols:more -> allocArray place (cols:rows:more) basetype
-                _              -> error "One-dimensional array in transpose; should have been caught by type checker"
+  let newshape = transposeIndex k n $ arrayShapeExp (varExp arr) (typeOf arrexp)
+      alloc =  allocArray place newshape basetype
       loop is 0 =
         let iexps = map varExp is
             indexfrom = indexArrayExp (varExp arr) (typeOf arrexp) iexps
-            indexto   = indexArrayExp place (typeOf e) $ move iexps
+            indexto   = indexArrayExp place (typeOf e) $ transposeIndex k n iexps
         in return ([C.cstm|$exp:indexto = $exp:indexfrom;|], is)
       loop is d = do i <- new "transpose_i"
                      (inner, is') <- loop (i:is) (d-1)
@@ -638,10 +637,6 @@ compileExp' place e@(Transpose _ k n arrexp _) = do
                      $stm:alloc
                      $stm:copy
                    }|]
-  where move l
-          | (pre,needle:post) <- splitAt k l,
-            (mid,end) <- splitAt n post = pre ++ mid ++ [needle] ++ end
-          | otherwise = l
 
 compileExp' place (Split _ posexp arrexp _ _) = do
   arr <- new "split_arr"
