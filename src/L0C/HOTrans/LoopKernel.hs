@@ -101,14 +101,16 @@ attemptFusion outIds soac ker
 mapFusionOK :: [Ident] -> FusedKer -> Bool
 mapFusionOK outIds ker = any (`elem` inputs ker) (map SOAC.Var outIds)
 
--- | check that the input-array set of consumer is included in the
+-- | check that the input-array set of consumer is equal to the
 -- output-array set of producer.  That is, a filter-producer can only
--- be fused if the consumer accepts input from no other source.
+-- be fused if the consumer accepts input from no other source, and
+-- consumes everything by the producer.
 filterFusionOK :: [Ident] -> FusedKer -> Bool
 filterFusionOK outIds ker =
   case mapM SOAC.inputArray $ inputs ker of
     Nothing       -> False
-    Just inputIds -> all (`elem` outIds) inputIds
+    Just inputIds -> all (`elem` outIds) inputIds &&
+                     all (`elem` inputIds) outIds
 
 fuseSOACwithKer :: MonadFreshNames VName m => ([Ident], SOAC) -> FusedKer -> m (Maybe FusedKer)
 fuseSOACwithKer (outIds, soac1) ker = do
