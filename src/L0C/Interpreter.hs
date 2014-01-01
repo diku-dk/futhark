@@ -383,9 +383,8 @@ evalExp re@(Reshape _ shapeexp arrexp pos) = do
         | length vs `mod` n == 0 =
           arrayVal <$> mapM (reshape rest) (chunk (length vs `div` n) vs)
                    <*> pure rt
-        | otherwise = bad $ InvalidArrayShape pos (arrayShape arr) shape
       reshape [] [v] = return v
-      reshape _ _ = bad $ TypeError pos "evalExp Reshape reshape"
+      reshape _ _ = bad $ InvalidArrayShape pos (arrayShape arr) shape
   reshape shape $ flatten arr
   where flatten (ArrayVal arr _) = concatMap flatten $ elems arr
         flatten t = [t]

@@ -1,4 +1,0 @@
-fun int main () =
-    let b1 = copy( [ [1,2], [3,4] ] ) in
-    let c1 = reshape( (1), b1) in
-    c1[0]
