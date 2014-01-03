@@ -146,14 +146,6 @@ fuseSOACwithKer (outIds, soac1) ker = do
                           , fusedVars = fusedVars_new
                           }
   case (soac2, soac1) of
-      -- first get rid of the cases that can be solved by
-      -- a bit of soac rewriting.
-    (SOAC.ReduceT _ lam ne arrs loc, _) | mapOrFilter soac1 -> do
-      let soac2' = SOAC.RedomapT (cs1++cs2) lam lam ne arrs loc
-          ker'   = ker { fsoac = soac2'
-                       , outputs = out_ids2 }
-      fuseSOACwithKer (outIds, soac1) ker'
-
     -- The Fusions that are semantically map fusions:
     (SOAC.MapT _ _ _ pos, SOAC.MapT    {})
       | mapFusionOK outIds ker -> do
@@ -182,6 +174,14 @@ fuseSOACwithKer (outIds, soac1) ker = do
       name <- newVName "check"
       let (res_lam, new_inp) = fuseFilters lam1 inp1_arr outIds lam2 inp2_arr name
       success $ SOAC.FilterT (cs1++cs2) res_lam new_inp pos
+
+    -- Nothing else worked, so let's try rewriting to redomap if
+    -- possible.
+    (SOAC.ReduceT _ lam ne arrs loc, _) | mapOrFilter soac1 -> do
+       let soac2' = SOAC.RedomapT (cs1++cs2) lam lam ne arrs loc
+           ker'   = ker { fsoac = soac2'
+                        , outputs = out_ids2 }
+       fuseSOACwithKer (outIds, soac1) ker'
 
     _ -> return Nothing
 
