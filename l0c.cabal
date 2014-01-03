@@ -14,7 +14,7 @@ Executable l0c
   Main-is: Main.hs
 
   -- Packages needed in order to build this package.
-  Build-depends: base >= 4,
+  Build-depends: base >= 4 && < 5,
                  array >= 0.4,
                  containers >= 0.5,
                  mtl >= 2.1,
