@@ -2,6 +2,8 @@ Name:                l0c
 Version:             0.1
 Synopsis:            An optimising compiler for a functional, array-oriented language.
 Category:            Language
+License:             BSD3
+License-file:        LICENSE
 Build-type:          Simple
 
 -- Constraint on the version of Cabal needed to build this package.
