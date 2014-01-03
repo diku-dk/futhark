@@ -5,11 +5,15 @@ import Control.Monad
 import Control.Monad.Trans
 import Control.Monad.Writer.Strict (Writer, runWriter, tell)
 import Control.Monad.Error
+import Data.Array
 import Data.Maybe (isJust)
+import Data.List
 import System.Console.GetOpt
 import System.Environment (getArgs, getProgName)
 import System.Exit (exitWith, ExitCode(..))
 import System.IO
+
+import Text.Printf
 
 import Language.L0.Parser
 import L0C.L0
@@ -132,7 +136,15 @@ interpret prog =
                        exitWith $ ExitFailure 2
         Right val  -> putStrLn $ ppOutput val
   where ppOutput val | Just s <- arrayString val = s
-                     | otherwise                 = ppValue val
+        ppOutput (RealVal x) = printf "%.6f" x
+        ppOutput (IntVal x)  = show x
+        ppOutput (CharVal c) = show c
+        ppOutput (LogVal b)  = show b
+        ppOutput Checked = "Checked"
+        ppOutput (TupVal vs) = "{" ++ intercalate ", " (map ppOutput vs) ++ "}"
+        ppOutput (ArrayVal a t)
+          | [] <- elems a = "empty(" ++ ppType t ++ ")"
+          | otherwise     = "[" ++ intercalate ", " (map ppOutput $ elems a) ++ "]"
 
 rename :: Pass
 rename = Pass { passName = "renamer"
