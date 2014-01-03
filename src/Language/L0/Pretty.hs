@@ -113,7 +113,7 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
   pprPrec p (And x y _) = ppBinOp p LogAnd x y
   pprPrec p (Or x y _) = ppBinOp p LogOr x y
   pprPrec _ (Not e _) = text "not" <+> pprPrec 9 e
-  pprPrec _ (Negate e _ _) = text "~" <> pprPrec 9 e
+  pprPrec _ (Negate e _ _) = text "-" <> pprPrec 9 e
   pprPrec _ (If c t f _ _) = text "if" <+> ppr c </>
                              text "then" <+> align (ppr t) </>
                              text "else" <+> align (ppr f)
