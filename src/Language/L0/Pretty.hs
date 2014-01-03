@@ -55,7 +55,7 @@ instance Pretty Value where
   ppr (IntVal x) = text $ show x
   ppr (CharVal c) = text $ show c
   ppr (LogVal b) = text $ show b
-  ppr (RealVal x) = text $ printf "%.6f" x
+  ppr (RealVal x) = text $ printf "%f" x
   ppr Checked = text "Checked"
   ppr (TupVal vs)
     | any (not . basicType . valueType) vs =
