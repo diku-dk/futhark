@@ -280,14 +280,11 @@ mapDepth nest = case Nest.operation nest of
                   Nest.MapT _ _ levels _ -> length levels + 1
                   _                      -> 0
 
-pullTranspose :: SOACNest -> [OutputTransform] -> Maybe SOACNest
-pullTranspose nest ots
-  | Just (cs, k, n) <- transposedOutput ots,
-    n+k < mapDepth nest =
+pullTranspose :: SOACNest -> [OutputTransform] -> Maybe (SOACNest, [OutputTransform])
+pullTranspose nest (OTranspose cs k n:ots')
+  | n+k < mapDepth nest =
       let inputs' = map (SOAC.Transpose cs k n) $ Nest.inputs nest
-      in Just $ inputs' `Nest.setInputs` nest
-  where transposedOutput [OTranspose cs k n] = Just (cs, k, n)
-        transposedOutput _                   = Nothing
+      in Just (inputs' `Nest.setInputs` nest, ots')
 pullTranspose _ _ = Nothing
 
 pushTranspose :: Maybe [Ident] -> SOACNest -> [OutputTransform]
@@ -336,7 +333,7 @@ transposes :: SOAC.Input -> [(Int, Int)] -> SOAC.Input
 transposes = foldr inverseTrans'
   where inverseTrans' (k,n) = SOAC.Transpose [] k n
 
-pullReshape :: MonadFreshNames VName m => SOACNest -> [OutputTransform] -> m (Maybe SOACNest)
+pullReshape :: MonadFreshNames VName m => SOACNest -> [OutputTransform] -> m (Maybe (SOACNest, [OutputTransform]))
 pullReshape nest (OReshape cs shape:ots)
   | op@Nest.MapT {} <- Nest.operation nest,
     all basicType $ Nest.returnType op = do
@@ -367,7 +364,7 @@ pullReshape nest (OReshape cs shape:ots)
                       Nest.inputs    = inputs'
                     , Nest.operation = nesting' `Nest.setNesting` op
                     }
-      (<|> Just nest') <$> pullReshape nest' ots
+      return $ Just (nest',ots)
 pullReshape _ _ = return Nothing
 
 -- Tie it all together in exposeInputs (for making inputs to a
@@ -388,7 +385,7 @@ exposeInputs inpIds ker =
           return ker { fsoac = Nest.toSOAC nest', outputTransform = ot' }
 
         pullTranspose' = do
-          nest' <- pullTranspose nest ot
+          (nest',[]) <- pullTranspose nest ot
           return ker { fsoac = Nest.toSOAC nest', outputTransform = [] }
 
         exposeInputs' ker' =
@@ -400,19 +397,24 @@ exposeInputs inpIds ker =
         exposed (SOAC.Var _) = True
         exposed inp = maybe True (`notElem` inpIds) $ SOAC.inputArray inp
 
-purePuller :: Monad m => (SOACNest -> [OutputTransform] -> Maybe SOACNest)
-           -> SOACNest -> [OutputTransform] -> m (Maybe SOACNest)
+purePuller :: Monad m =>
+              (SOACNest -> [OutputTransform] -> Maybe (SOACNest, [OutputTransform]))
+           -> SOACNest -> [OutputTransform] -> m (Maybe (SOACNest, [OutputTransform]))
 purePuller f soac ots = return $ f soac ots
 
 outputTransformPullers :: MonadFreshNames VName m =>
-                          [SOACNest -> [OutputTransform] -> m (Maybe SOACNest)]
+                          [SOACNest -> [OutputTransform] -> m (Maybe (SOACNest, [OutputTransform]))]
 outputTransformPullers = [purePuller pullTranspose, pullReshape]
 
 pullOutputTransforms :: MonadFreshNames VName m =>
                         SOAC -> [OutputTransform] -> m (Maybe SOAC)
-pullOutputTransforms soac ots =
-  attempt outputTransformPullers
-    where nest = Nest.fromSOAC soac
-          attempt [] = return Nothing
-          attempt (p:ps) =
-            maybe (attempt ps) (return . Just . Nest.toSOAC) =<< p nest ots
+pullOutputTransforms soac origOts =
+  liftM Nest.toSOAC <$> attemptAll (Nest.fromSOAC soac) origOts
+  where attemptAll nest ots = attempt nest ots outputTransformPullers
+        attempt _ _ [] = return Nothing
+        attempt nest ots (p:ps) = do
+          x <- p nest ots
+          case x of
+            Nothing            -> attempt nest ots ps
+            Just (nest', [])   -> return $ Just nest'
+            Just (nest', ots') -> attemptAll nest' ots'
