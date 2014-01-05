@@ -217,6 +217,7 @@ copyCtPropExp e@(Var (Ident vnm _ pos)) = do
         ArrayLit  {}      -> return e
         Index {}          -> changed e'
         Transpose {}      -> changed e'
+        Reshape {}        -> changed e'
         -- DO NOT INLINE IOTA!
         Iota  _ _         -> changed e'
         --Iota _ _          -> return e
@@ -307,6 +308,10 @@ copyCtPropExp eee@(Index cs idd@(Ident vnm tp p) csidx inds tp2 pos) = do
           | k+n < length inds' ->
             changed $ Index (cs'++cs2) src csidx' (transposeIndex k n inds') tp2 pos
         (Transpose {}, _) -> do
+          nonRemovable vnm
+          return $ Index cs' idd csidx' inds' tp2 pos
+
+        (Reshape {}, _) -> do
           nonRemovable vnm
           return $ Index cs' idd csidx' inds' tp2 pos
 
@@ -689,6 +694,7 @@ isCtOrCopy (TupLit   ts _  ) = all isCtOrCopy ts
 isCtOrCopy (Var           _) = True
 isCtOrCopy (Iota        _ _) = True
 isCtOrCopy (Transpose {}   ) = True
+isCtOrCopy (Reshape {}     ) = True
 isCtOrCopy (Index {}       ) = True
 isCtOrCopy _                 = False
 
@@ -714,6 +720,7 @@ isRemovablePat _ (Index {})     = return True
 isRemovablePat _ (Literal v _)  = return $ isBasicTypeVal v
 isRemovablePat _ e@(TupLit {})  = return $ isCtOrCopy e
 isRemovablePat _ (Transpose {}) = return True
+isRemovablePat _ (Reshape {})   = return True
 isRemovablePat _ (Iota {})      = return True
 isRemovablePat _ (Conjoin {})   = return True
 isRemovablePat _ _              = return False
@@ -727,6 +734,7 @@ getPropBnds ( Id (Ident var tp _) ) e to_rem =
             Index   {}           -> [(var, SymArr e   tp  to_rem)]
             TupLit  {}           -> [(var, SymArr e   tp  to_rem)]
             Transpose   {}       -> [(var, SymArr e   tp  to_rem)]
+            Reshape   {}         -> [(var, SymArr e   tp  to_rem)]
             Conjoin {}           -> [(var, SymArr e   tp  to_rem)]
 
             Iota {}              -> let newtp = Array Int [Nothing] Nonunique mempty

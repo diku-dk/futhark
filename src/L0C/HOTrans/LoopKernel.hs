@@ -12,7 +12,7 @@ module L0C.HOTrans.LoopKernel
   where
 
 import Control.Applicative
-import Control.Arrow (first)
+import Control.Arrow (first, second)
 import Control.Monad
 
 import qualified Data.HashSet as HS
@@ -29,19 +29,29 @@ import qualified L0C.HORepresentation.SOACNest as Nest
 import L0C.HOTrans.Composing
 
 data OutputTransform = OTranspose Certificates Int Int
+                     | OReshape Certificates [Exp]
                        deriving (Eq, Ord, Show)
 
 applyTransform :: OutputTransform -> Ident -> SrcLoc -> Exp
-applyTransform (OTranspose cs k n)  = Transpose cs k n . Var
+applyTransform (OTranspose cs k n) = Transpose cs k n . Var
+applyTransform (OReshape cs shape) = Reshape cs shape . Var
 
 outputToInput :: OutputTransform -> SOAC.Input -> SOAC.Input
 outputToInput (OTranspose cs k n) = SOAC.Transpose cs k n
+outputToInput (OReshape cs shape) = SOAC.Reshape cs shape
 
 outputsToInput :: [OutputTransform] -> SOAC.Input -> SOAC.Input
 outputsToInput = foldr ((.) . outputToInput) id
 
 inputToOutput :: SOAC.Input -> Maybe (OutputTransform, SOAC.Input)
-inputToOutput (SOAC.Transpose cs k n inp) = Just (OTranspose cs k n, inp)
+inputToOutput (SOAC.Transpose cs k n (SOAC.Var v)) =
+  Just (OTranspose cs k n, SOAC.Var v)
+inputToOutput (SOAC.Transpose cs k n inp) =
+  second (SOAC.Transpose cs k n) <$> inputToOutput inp
+inputToOutput (SOAC.Reshape cs shape (SOAC.Var v)) =
+  Just (OReshape cs shape, SOAC.Var v)
+inputToOutput (SOAC.Reshape cs shape inp) =
+  second (SOAC.Reshape cs shape) <$> inputToOutput inp
 inputToOutput _                           = Nothing
 
 data FusedKer = FusedKer {

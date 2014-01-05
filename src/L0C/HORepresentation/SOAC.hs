@@ -43,7 +43,7 @@ import Data.Loc
 
 import qualified L0C.L0 as L0
 import L0C.L0 hiding (MapT, ReduceT, ScanT, FilterT, RedomapT,
-                      Var, Iota, Transpose, Index)
+                      Var, Iota, Transpose, Reshape, Index)
 
 -- | One array input to a SOAC - a SOAC may have multiple inputs, but
 -- all are of this form.  Only the array inputs are expressed with
@@ -56,8 +56,10 @@ data Input = Var Ident
            | Transpose Certificates Int Int Input
            -- ^ A transposition of an otherwise valid input (possibly
            -- another transposition!).
+           | Reshape Certificates [Exp] Input
+           -- ^ A reshaping of an otherwise valid input.
            | Index Certificates Ident (Maybe Certificates) [Index]
-             -- ^ @a[i]@.
+           -- ^ @a[i]@.
              deriving (Show, Eq, Ord)
 
 -- | An index used in an 'Input'.
@@ -69,6 +71,7 @@ instance Located Input where
   locOf (Var idd)             = locOf idd
   locOf (Iota e)              = locOf e
   locOf (Transpose _ _ _ inp) = locOf inp
+  locOf (Reshape _ _ inp)     = locOf inp
   locOf (Index _ k _ _)       = locOf k
 
 -- | If the given expression represents a normalised SOAC input,
@@ -79,6 +82,9 @@ inputFromExp (L0.Iota e _) = Just $ Iota e
 inputFromExp (L0.Transpose cs k n inp _) = do
   inp' <- inputFromExp inp
   Just $ Transpose cs k n inp'
+inputFromExp (L0.Reshape cs shape inp _) = do
+  inp' <- inputFromExp inp
+  Just $ Reshape cs shape inp'
 inputFromExp (L0.Index cs idd idxcs idxs _ _) = do
   idxs' <- mapM idx idxs
   Just $ Index cs idd idxcs idxs'
@@ -93,18 +99,21 @@ inputToExp (Var k)  = L0.Var k
 inputToExp (Iota e) = L0.Iota e $ srclocOf e
 inputToExp (Transpose cs k n inp) =
   L0.Transpose cs k n (inputToExp inp) $ srclocOf inp
+inputToExp (Reshape cs shape inp) =
+  L0.Reshape cs shape (inputToExp inp) $ srclocOf inp
 inputToExp (Index cs idd idxcs idxs) =
   L0.Index cs idd idxcs (map idx idxs) t $ srclocOf idd
   where t = stripArray (length idxs) $ identType idd
         idx (VarIndex indidd) = L0.Var indidd
         idx (ConstIndex i)    = Literal (IntVal i) $ srclocOf idd
 
--- | If the input is a (possibly transposed) array variable, return
--- that variable.
+-- | If the input is a (possibly transposed, reshaped or otherwise
+-- transformed) array variable, return that variable.
 inputArray :: Input -> Maybe Ident
 inputArray (Var idd)             = Just idd
 inputArray (Iota _)              = Nothing
 inputArray (Transpose _ _ _ inp) = inputArray inp
+inputArray (Reshape _ _ inp)     = inputArray inp
 inputArray (Index {})            = Nothing
 
 -- | Return the type of an input - just another name for @'typeOf'
