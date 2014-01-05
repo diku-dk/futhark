@@ -100,9 +100,11 @@ attemptFusion outIds soac ker
       in attemptFusion outIds soac' ker'
   | Just ker' <- optimizeKernel (Just outIds) ker =
       attemptFusion outIds soac ker'
-  | Just (ker', ots) <- exposeInputs outIds ker,
-    Just soac' <- pullOutputTransforms soac ots =
-      attemptFusion outIds soac' ker'
+  | Just (ker', ots) <- exposeInputs outIds ker = do
+      msoac' <- pullOutputTransforms soac ots
+      case msoac' of
+        Just soac' -> attemptFusion outIds soac' ker'
+        Nothing    -> fuseSOACwithKer (outIds, soac) ker
   | otherwise =
       fuseSOACwithKer (outIds, soac) ker
 
@@ -241,9 +243,7 @@ iswim _ nest ots
         lam = TupleLambda {
                 tupleLambdaParams = map toParam $ innerAccParams ++ innerArrParams
               , tupleLambdaReturnType = retTypes
-              , tupleLambdaBody =
-                  LetPat (TupId (map Id bndIds) loc2) innerScan
-                  (TupLit (map Var bndIds) loc2) loc2
+              , tupleLambdaBody = Nest.letPattern bndIds innerScan
               , tupleLambdaSrcLoc = loc2
               }
         transposeInput (SOAC.Transpose _ 0 1 inp) = inp
@@ -336,6 +336,44 @@ transposes :: SOAC.Input -> [(Int, Int)] -> SOAC.Input
 transposes = foldr inverseTrans'
   where inverseTrans' (k,n) = SOAC.Transpose [] k n
 
+pullReshape :: MonadFreshNames VName m => SOACNest -> [OutputTransform] -> m (Maybe SOACNest)
+pullReshape nest (OReshape cs shape:ots)
+  | op@Nest.MapT {} <- Nest.operation nest,
+    all basicType $ Nest.returnType op = do
+      let shapeForParam inp = reshapeOuter shape 1 (SOAC.inputToExp inp)
+          inputs' = [ SOAC.Reshape cs (shapeForParam inp) inp
+                      | inp <- Nest.inputs nest ]
+          outernest i = do
+            let j  = length shape - 1 - i
+                addDims t = arrayOf t (replicate j Nothing) $ uniqueness t
+                retTypes = map addDims $ Nest.returnType op
+
+            ps <- forM (zip (Nest.params op) inputs') $ \(p, inp) -> do
+                    let t = rowType $ stripArray i $ SOAC.inputType inp
+                    newIdent "pullReshape_param" t $ srclocOf p
+
+            bnds <- forM retTypes $ \t ->
+                      newIdent "pullReshape_bnd" (fromDecl t) $ srclocOf nest
+
+            return Nest.Nesting {
+                          Nest.nestingParams = ps
+                        , Nest.nestingInputs = map SOAC.Var ps
+                        , Nest.nestingResult = bnds
+                        , Nest.nestingReturnType = retTypes
+                        }
+      outerNests <- mapM outernest [0..length shape - 2]
+      let nesting' = outerNests ++ Nest.nesting op
+          nest'   = Nest.SOACNest {
+                      Nest.inputs    = inputs'
+                    , Nest.operation = nesting' `Nest.setNesting` op
+                    }
+      (<|> Just nest') <$> pullReshape nest' ots
+pullReshape _ _ = return Nothing
+
+-- Tie it all together in exposeInputs (for making inputs to a
+-- consumer available) and pullOutputTransforms (for moving
+-- output-transforms of a producer to its inputs instead).
+
 exposeInputs :: [Ident] -> FusedKer
              -> Maybe (FusedKer, [OutputTransform])
 exposeInputs inpIds ker =
@@ -362,6 +400,19 @@ exposeInputs inpIds ker =
         exposed (SOAC.Var _) = True
         exposed inp = maybe True (`notElem` inpIds) $ SOAC.inputArray inp
 
-pullOutputTransforms :: SOAC -> [OutputTransform] -> Maybe SOAC
-pullOutputTransforms soac =
-  liftM Nest.toSOAC . pullTranspose (Nest.fromSOAC soac)
+purePuller :: Monad m => (SOACNest -> [OutputTransform] -> Maybe SOACNest)
+           -> SOACNest -> [OutputTransform] -> m (Maybe SOACNest)
+purePuller f soac ots = return $ f soac ots
+
+outputTransformPullers :: MonadFreshNames VName m =>
+                          [SOACNest -> [OutputTransform] -> m (Maybe SOACNest)]
+outputTransformPullers = [purePuller pullTranspose, pullReshape]
+
+pullOutputTransforms :: MonadFreshNames VName m =>
+                        SOAC -> [OutputTransform] -> m (Maybe SOAC)
+pullOutputTransforms soac ots =
+  attempt outputTransformPullers
+    where nest = Nest.fromSOAC soac
+          attempt [] = return Nothing
+          attempt (p:ps) =
+            maybe (attempt ps) (return . Just . Nest.toSOAC) =<< p nest ots
