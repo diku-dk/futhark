@@ -94,6 +94,10 @@ module Language.L0.Attributes
   , transposeInverse
   , transposeDimension
 
+  -- * Reshaping
+  , partialReshape
+  , reshapeOuter
+
   -- * Type aliases
 
   -- | Values of these types are produces by the parser.  They use
@@ -539,6 +543,29 @@ transposeInverse k n = (k+n,-n)
 transposeDimension :: Int -> Int -> Int -> Int -> Int
 transposeDimension k n dim numDims =
   transposeIndex k n [0..numDims-1] !! dim
+
+-- | @partialReshape shape src@ returns an 'n+1'-dimensional shape for
+-- @src@, where 'n' is the number of elements in 'shape', and where
+-- the first @'length' shape@ dimensions are @shape@.
+partialReshape :: (Eq vn, Hashable vn) =>
+                  [ExpBase CompTypeBase vn] -> ExpBase CompTypeBase vn
+               -> [ExpBase CompTypeBase vn]
+partialReshape shape src = shape ++ [leftover]
+  where loc = srclocOf src
+        productExp []     = Literal (IntVal 0) loc -- Ought never to happen.
+        productExp (d:ds) = foldl (\x y -> BinOp Times x y (Elem Int) loc) d ds
+        srcsize = productExp [ Size [] i src loc | i <- [0..arrayDims (typeOf src) - 1]]
+        destelems = productExp shape
+        leftover = BinOp Divide srcsize destelems (Elem Int) loc
+
+-- | @reshapeOuter shape n src@ returns a 'Reshape' expression that
+-- replaces the outer @n@ dimensions of @src@ with @shape@.
+reshapeOuter :: (Eq vn, Hashable vn) =>
+                [ExpBase CompTypeBase vn] -> Int -> ExpBase CompTypeBase vn
+             -> [ExpBase CompTypeBase vn]
+reshapeOuter shape n src =
+  shape ++ drop n [Size [] i src loc | i <- [0..arrayDims (typeOf src) - 1] ]
+  where loc = srclocOf src
 
 -- | The type of an L0 term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
