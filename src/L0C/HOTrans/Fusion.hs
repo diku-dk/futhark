@@ -632,6 +632,9 @@ getIdentArr = foldl comb ([],[])
         comb (vs, os) (SOAC.Transpose _ _ _ inp) =
           let (ks1, ks2) = getIdentArr [inp]
           in (vs, ks1++ks2++os)
+        comb (vs, os) (SOAC.Reshape _ _ inp) =
+          let (ks1, ks2) = getIdentArr [inp]
+          in (vs, ks1++ks2++os)
         comb (vs, os) (SOAC.Index _ idd _ _) =
           (vs, idd:os)
         comb (vs, os) (SOAC.Iota _) = (vs, os)
