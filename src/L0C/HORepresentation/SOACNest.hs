@@ -6,6 +6,7 @@ module L0C.HORepresentation.SOACNest
   , body
   , setBody
   , params
+  , returnType
   , NestBody (..)
   , Nesting (..)
   , bodyToLambda
@@ -16,6 +17,7 @@ module L0C.HORepresentation.SOACNest
   , toExp
   , fromSOAC
   , toSOAC
+  , letPattern
   , inputBindings
   , inputsPerLevel
   )
@@ -29,7 +31,7 @@ import Data.Maybe
 
 import L0C.HORepresentation.SOAC (SOAC)
 import qualified L0C.HORepresentation.SOAC as SOAC
-import L0C.L0 hiding (MapT, ReduceT, ScanT, FilterT, RedomapT)
+import L0C.L0 hiding (MapT, ReduceT, ScanT, FilterT, RedomapT, returnType)
 
 -- Current problems:
 --
@@ -57,10 +59,7 @@ bodyToLambda (NewNest (Nesting paramIds inps bndIds retTypes) op) =
               , tupleLambdaParams = map toParam paramIds
               , tupleLambdaReturnType = retTypes
               , tupleLambdaBody =
-                LetPat (TupId (map Id bndIds) loc)
-                       (SOAC.toExp $ toSOAC $ SOACNest inps op)
-                       (TupLit (map Var bndIds) loc)
-                       loc
+                letPattern bndIds $ SOAC.toExp $ toSOAC $ SOACNest inps op
               }
   where loc = srclocOf op
 
@@ -117,13 +116,22 @@ setBody b (ScanT cs _ ls es loc) = ScanT cs b ls es loc
 setBody b (FilterT cs _ ls loc) = FilterT cs b ls loc
 setBody b (RedomapT cs l _ ls es loc) = RedomapT cs l b ls es loc
 
-params :: Combinator -> [Parameter]
-params comb =
+combinatorFirstLoop :: Combinator -> ([Parameter], [DeclType])
+combinatorFirstLoop comb =
   case nesting comb of
-    nest:_ -> map toParam $ nestingParams nest
-    []     -> case body comb of
-                Lambda l       -> tupleLambdaParams l
-                NewNest nest _ -> map toParam $ nestingParams nest
+      nest:_ -> (map toParam $ nestingParams nest,
+                 nestingReturnType nest)
+      []     -> case body comb of
+                  Lambda l       -> (tupleLambdaParams l,
+                                     tupleLambdaReturnType l)
+                  NewNest nest _ -> (map toParam $ nestingParams nest,
+                                    nestingReturnType nest)
+
+params :: Combinator -> [Parameter]
+params = fst . combinatorFirstLoop
+
+returnType :: Combinator -> [DeclType]
+returnType = snd . combinatorFirstLoop
 
 data SOACNest = SOACNest { inputs :: [SOAC.Input]
                          , operation :: Combinator
@@ -208,10 +216,8 @@ subLambda b comb =
     (Nesting paramIds inps bndIds retTypes:rest) ->
       TupleLambda { tupleLambdaReturnType = retTypes
                   , tupleLambdaBody       =
-                    LetPat (TupId (map Id bndIds) loc)
-                             (SOAC.toExp $ toSOAC $
-                              SOACNest inps (rest `setNesting` comb))
-                             (TupLit (map Var bndIds) loc) loc
+                    letPattern bndIds $
+                    SOAC.toExp $ toSOAC $ SOACNest inps (rest `setNesting` comb)
                   , tupleLambdaSrcLoc     = loc
                   , tupleLambdaParams     = map toParam paramIds
                   }
@@ -226,6 +232,11 @@ tuplePatAndLit :: TupIdent -> Exp -> Maybe [Ident]
 tuplePatAndLit (TupId pats _) (TupLit es _)
   | Just ks <- vars es, map Id ks == pats = Just ks
 tuplePatAndLit _ _                        = Nothing
+
+letPattern :: [Ident] -> Exp -> Exp
+letPattern bndIds e =
+  LetPat (TupId (map Id bndIds) loc) e (TupLit (map Var bndIds) loc) loc
+  where loc = srclocOf e
 
 inputBindings :: SOACNest -> [[Ident]]
 inputBindings outernest =
