@@ -261,6 +261,7 @@ ppBinOp p bop x y = parensIf (p > precedence bop) $
         precedence Mod = 5
         precedence Pow = 6
         rprecedence Minus = 10
+        rprecedence Divide = 10
         rprecedence op = precedence op
 
 ppSOAC :: (Eq vn, Hashable vn, Pretty vn, TypeBox ty, Pretty fn) =>
