@@ -213,31 +213,57 @@ type CertificatesBase ty vn = [IdentBase ty vn]
 -- 'NoInfo'@, and the type checker will convert these to @Exp 'Type'@,
 -- in which type information is always present.
 data ExpBase ty vn =
+            -- Core language
               Literal Value SrcLoc
+
             | TupLit    [ExpBase ty vn] SrcLoc
             -- ^ Tuple literals, e.g., (1+3, (x, y+z)).  Second
             -- argument is the tuple's type.
+
             | ArrayLit  [ExpBase ty vn] (ty vn) SrcLoc
+
+            | Var    (IdentBase ty vn)
             -- ^ Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
             -- Second arg is the type of of the rows of the array (not
             -- the element type).
+            | LetPat (TupIdentBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
+
+            | If     (ExpBase ty vn) (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
+
+            | Apply  Name [(ExpBase ty vn, Diet)] (ty vn) SrcLoc
+
+            | DoLoop
+              (TupIdentBase ty vn) -- Merge variable pattern
+              (ExpBase ty vn) -- Initial values of merge variables.
+              (IdentBase ty vn) -- Iterator.
+              (ExpBase ty vn) -- Upper bound.
+              (ExpBase ty vn) -- Loop body.
+              (ExpBase ty vn) -- Let-body.
+              SrcLoc
+
+            -- Scalar operations
             | BinOp BinOp (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
+
             -- Binary Ops for Booleans
             | And    (ExpBase ty vn) (ExpBase ty vn) SrcLoc
             | Or     (ExpBase ty vn) (ExpBase ty vn) SrcLoc
+
             -- Unary Ops: Not for bools and Negate for ints
             | Not    (ExpBase ty vn) SrcLoc -- ^ E.g., @not True == False@.
             | Negate (ExpBase ty vn) (ty vn) SrcLoc -- ^ E.g., @~(~1) = 1@.
-            | If     (ExpBase ty vn) (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
-            | Var    (IdentBase ty vn)
-            -- Function call and let construct
-            | Apply  Name [(ExpBase ty vn, Diet)] (ty vn) SrcLoc
-            | LetPat (TupIdentBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
 
+            -- Assertion management.
+            | Assert (ExpBase ty vn) SrcLoc
+            -- ^ Turn a boolean into a certificate, halting the
+            -- program if the boolean is false.
+
+            | Conjoin [ExpBase ty vn] SrcLoc
+            -- ^ Convert several certificates into a single certificate.
+
+            -- Primitive array operations
             | LetWith (CertificatesBase ty vn) (IdentBase ty vn) (IdentBase ty vn)
                       (Maybe (CertificatesBase ty vn)) [ExpBase ty vn] (ExpBase ty vn)
                       (ExpBase ty vn) SrcLoc
-            -- ^ Array indexing and array constructors.
 
             | Index (CertificatesBase ty vn)
                     (IdentBase ty vn)
@@ -245,23 +271,34 @@ data ExpBase ty vn =
                     [ExpBase ty vn]
                     (ty vn)
                     SrcLoc
-             -- ^ 3rd arg are (optional) certificates for bounds
-             -- checking.  If given (even as an empty list), no
-             -- run-time bounds checking is done.  5th arg is the
-             -- result type
-
-            | Iota (ExpBase ty vn) SrcLoc
-            -- ^ @iota(n) = [0,1,..,n-1]@
+            -- ^ 3rd arg are (optional) certificates for bounds
+            -- checking.  If given (even as an empty list), no
+            -- run-time bounds checking is done.  5th arg is the
+            -- result type
 
             | Size (CertificatesBase ty vn) Int (ExpBase ty vn) SrcLoc
             -- ^ The size of the specified array dimension.
 
+            | Split (CertificatesBase ty vn) (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
+            -- ^ @split(1, [ 1, 2, 3, 4 ]) = {[1],[2, 3, 4]}@.
+            -- 4th arg is the element type of the input array
+
+            | Concat (CertificatesBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
+            -- ^ @concat([1],[2, 3, 4]) = [1, 2, 3, 4]@.
+
+            | Copy (ExpBase ty vn) SrcLoc
+            -- ^ Copy the value return by the expression.  This only
+            -- makes a difference in do-loops with merge variables.
+
+            -- Array construction.
+            | Iota (ExpBase ty vn) SrcLoc
+            -- ^ @iota(n) = [0,1,..,n-1]@
             | Replicate (ExpBase ty vn) (ExpBase ty vn) SrcLoc
             -- ^ @replicate(3,1) = [1, 1, 1]@
 
+            -- Array index space transformation.
             | Reshape (CertificatesBase ty vn) [ExpBase ty vn] (ExpBase ty vn) SrcLoc
              -- ^ 1st arg is the new shape, 2nd arg is the input array *)
-
             | Transpose (CertificatesBase ty vn) Int Int (ExpBase ty vn) SrcLoc
               -- ^ If @b=transpose(k,n,a)@, then @a[i_1, ..., i_k
               -- ,i_{k+1}, ..., i_{k+n}, ..., i_q ] = b[i_1 ,..,
@@ -279,15 +316,6 @@ data ExpBase ty vn =
              -- ^ @reduce(op +, 0, {1,2,...,n}) = (0+1+2+...+n)@ 4th arg
              -- is the input-array element type
 
-            | Zip [(ExpBase ty vn, ty vn)] SrcLoc
-            -- ^ Normal zip supporting variable number of arguments.
-            -- The type paired to each expression is the element type
-            -- of the array returned by that expression.
-
-            | Unzip (ExpBase ty vn) [ty vn] SrcLoc
-            -- ^ Unzip that can unzip tuples of arbitrary size.  The
-            -- types are the elements of the tuple.
-
             | Scan (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
              -- ^ @scan(plus, 0, [ 1, 2, 3 ]) = [ 1, 3, 6 ]@.
              -- 4th arg is the row type of the input array
@@ -296,37 +324,18 @@ data ExpBase ty vn =
             -- ^ 3rd arg is the row type of the input (and
             -- result) array
 
-
             | Redomap (LambdaBase ty vn) (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
              -- ^ @redomap(g, f, n, a) = reduce(g, n, map(f, a))@.
              -- 5th arg is the row type of the input  array.
 
-            | Split (CertificatesBase ty vn) (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
-             -- ^ @split(1, [ 1, 2, 3, 4 ]) = {[1],[2, 3, 4]}@.
-             -- 4th arg is the element type of the input array
+            | Zip [(ExpBase ty vn, ty vn)] SrcLoc
+            -- ^ Normal zip supporting variable number of arguments.
+            -- The type paired to each expression is the element type
+            -- of the array returned by that expression.
 
-            | Concat (CertificatesBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
-             -- ^ @concat([1],[2, 3, 4]) = [1, 2, 3, 4]@.
-
-            | Copy (ExpBase ty vn) SrcLoc
-            -- ^ Copy the value return by the expression.  This only
-            -- makes a difference in do-loops with merge variables.
-
-            | Assert (ExpBase ty vn) SrcLoc
-            -- ^ Turn a boolean into a certificate, halting the
-            -- program if the boolean is false.
-
-            | Conjoin [ExpBase ty vn] SrcLoc
-            -- ^ Convert several certificates into a single certificate.
-
-            | DoLoop
-              (TupIdentBase ty vn) -- Merge variable pattern
-              (ExpBase ty vn) -- Initial values of merge variables.
-              (IdentBase ty vn) -- Iterator.
-              (ExpBase ty vn) -- Upper bound.
-              (ExpBase ty vn) -- Loop body.
-              (ExpBase ty vn) -- Let-body.
-              SrcLoc
+            | Unzip (ExpBase ty vn) [ty vn] SrcLoc
+            -- ^ Unzip that can unzip tuples of arbitrary size.  The
+            -- types are the elements of the tuple.
 
             -----------------------------------------------------
             -- Second-Order Array Combinators
