@@ -100,11 +100,14 @@ attemptFusion outIds soac ker
       in attemptFusion outIds soac' ker'
   | Just ker' <- optimizeKernel (Just outIds) ker =
       attemptFusion outIds soac ker'
-  | Just (ker', ots) <- exposeInputs outIds ker = do
-      msoac' <- pullOutputTransforms soac ots
-      case msoac' of
-        Just soac' -> attemptFusion outIds soac' ker'
-        Nothing    -> fuseSOACwithKer (outIds, soac) ker
+  | Just (ker', ots) <- exposeInputs outIds ker =
+      case ots of
+        [] -> fuseSOACwithKer (outIds, soac) ker'
+        _  -> do
+          msoac' <- pullOutputTransforms soac ots
+          case msoac' of
+            Just soac' -> attemptFusion outIds soac' ker'
+            Nothing    -> fuseSOACwithKer (outIds, soac) ker
   | otherwise =
       fuseSOACwithKer (outIds, soac) ker
 
@@ -374,9 +377,9 @@ pullReshape _ _ = return Nothing
 exposeInputs :: [Ident] -> FusedKer
              -> Maybe (FusedKer, [OutputTransform])
 exposeInputs inpIds ker =
-  exposeInputs' ker                  <|>
   (exposeInputs' =<< pushTranspose') <|>
-  (exposeInputs' =<< pullTranspose')
+  (exposeInputs' =<< pullTranspose') <|>
+  exposeInputs' ker
   where nest = Nest.fromSOAC $ fsoac ker
         ot = outputTransform ker
 
