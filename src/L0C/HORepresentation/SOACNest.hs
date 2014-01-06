@@ -64,15 +64,7 @@ bodyToLambda (NewNest (Nesting paramIds inps bndIds retTypes) op) =
   where loc = srclocOf op
 
 lambdaToBody :: TupleLambda -> NestBody
-lambdaToBody l = fromMaybe (Lambda l) $ isNesting $ tupleLambdaBody l
-  where isNesting (LetPat pat e b _) = do
-          soac <- either (const Nothing) Just $ SOAC.fromExp e
-          ks <- tuplePatAndLit pat b
-          let inps = SOAC.inputs soac
-              ps = map fromParam $ tupleLambdaParams l -- XXX: Loses aliasing information.
-              nest = Nesting ps inps ks $ tupleLambdaReturnType l
-          Just $ NewNest nest (operation $ fromSOAC soac)
-        isNesting _ = Nothing
+lambdaToBody l = fromMaybe (Lambda l) $ liftM (uncurry $ flip NewNest) $ nested l
 
 data Combinator = MapT Certificates NestBody [Nesting] SrcLoc
                 | ReduceT Certificates NestBody [Nesting] [Exp] SrcLoc
@@ -227,11 +219,6 @@ vars :: [Exp] -> Maybe [Ident]
 vars = mapM varExp
   where varExp (Var k) = Just k
         varExp _       = Nothing
-
-tuplePatAndLit :: TupIdent -> Exp -> Maybe [Ident]
-tuplePatAndLit (TupId pats _) (TupLit es _)
-  | Just ks <- vars es, map Id ks == pats = Just ks
-tuplePatAndLit _ _                        = Nothing
 
 letPattern :: [Ident] -> Exp -> Exp
 letPattern bndIds e =
