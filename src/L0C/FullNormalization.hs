@@ -83,6 +83,7 @@ normalizeExp :: Exp -> NormalizeM Exp
 normalizeExp (Var k) = return $ Var k
 normalizeExp (Literal v loc)
   | basicType $ valueType v = return $ Literal v loc
+normalizeExp (TupLit es loc) = TupLit <$> mapM normalizeExp es <*> pure loc
 normalizeExp (LetPat pat e body loc) = do
   e' <- normalizeSubExps e
   body' <- insertBindings $ normalizeExp body
