@@ -235,7 +235,7 @@ iswim _ nest ots
   | Nest.ScanT cs1 (Nest.NewNest lvl nn) [] es@[_] loc1 <- Nest.operation nest,
     Nest.MapT cs2 mb [] loc2 <- nn,
     Just es' <- mapM SOAC.inputFromExp es,
-    Nest.Nesting paramIds mapArrs bndIds retTypes <- lvl,
+    Nest.Nesting paramIds mapArrs bndIds postExp retTypes <- lvl,
     mapArrs == map SOAC.Var paramIds =
     let toInnerAccParam idd = idd { identType = rowType $ identType idd }
         innerAccParams = map toInnerAccParam $ take (length es) paramIds
@@ -246,7 +246,7 @@ iswim _ nest ots
         lam = TupleLambda {
                 tupleLambdaParams = map toParam $ innerAccParams ++ innerArrParams
               , tupleLambdaReturnType = retTypes
-              , tupleLambdaBody = Nest.letPattern bndIds innerScan
+              , tupleLambdaBody = Nest.letPattern bndIds innerScan postExp
               , tupleLambdaSrcLoc = loc2
               }
         transposeInput (SOAC.Transpose _ 0 1 inp) = inp
@@ -279,9 +279,10 @@ commonTransforms' inps =
         inspect (mot, prev) inp = Just (mot,inp:prev)
 
 mapDepth :: SOACNest -> Int
-mapDepth nest = case Nest.operation nest of
-                  Nest.MapT _ _ levels _ -> length levels + 1
-                  _                      -> 0
+mapDepth nest =
+  case Nest.operation nest of
+    Nest.MapT _ _ levels _ -> length (takeWhile Nest.pureNest levels) + 1
+    _                      -> 0
 
 pullTranspose :: SOACNest -> [OutputTransform] -> Maybe (SOACNest, [OutputTransform])
 pullTranspose nest (OTranspose cs k n:ots')
@@ -340,7 +341,8 @@ pullReshape :: MonadFreshNames VName m => SOACNest -> [OutputTransform] -> m (Ma
 pullReshape nest (OReshape cs shape:ots)
   | op@Nest.MapT {} <- Nest.operation nest,
     all basicType $ Nest.returnType op = do
-      let shapeForParam inp = reshapeOuter shape 1 (SOAC.inputToExp inp)
+      let loc = srclocOf nest
+          shapeForParam inp = reshapeOuter shape 1 (SOAC.inputToExp inp)
           inputs' = [ SOAC.Reshape cs (shapeForParam inp) inp
                       | inp <- Nest.inputs nest ]
           outernest i = do
@@ -353,12 +355,13 @@ pullReshape nest (OReshape cs shape:ots)
                     newIdent "pullReshape_param" t $ srclocOf p
 
             bnds <- forM retTypes $ \t ->
-                      newIdent "pullReshape_bnd" (fromDecl t) $ srclocOf nest
+                      newIdent "pullReshape_bnd" (fromDecl t) loc
 
             return Nest.Nesting {
                           Nest.nestingParams = ps
                         , Nest.nestingInputs = map SOAC.Var ps
                         , Nest.nestingResult = bnds
+                        , Nest.nestingPostExp = TupLit (map Var bnds) loc
                         , Nest.nestingReturnType = retTypes
                         }
       outerNests <- mapM outernest [0..length shape - 2]
