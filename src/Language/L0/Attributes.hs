@@ -39,6 +39,7 @@ module Language.L0.Attributes
   , basicType
   , uniqueness
   , unique
+  , uniqueOrBasic
   , aliases
   , diet
   , dietingAs
@@ -298,6 +299,8 @@ basicType (Array {}) = False
 basicType (Elem (Tuple ts)) = all basicType ts
 basicType _ = True
 
+-- | Is the given type either unique (as per 'unique') or basic (as
+-- per 'basicType')?
 uniqueOrBasic :: TypeBase vn as -> Bool
 uniqueOrBasic x = basicType x || unique x
 
