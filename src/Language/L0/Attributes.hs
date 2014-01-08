@@ -44,6 +44,8 @@ module Language.L0.Attributes
   , dietingAs
   , subtypeOf
   , similarTo
+  , arrayRank
+  , arrayDims
   , returnType
   , lambdaType
   , tupleLambdaType
@@ -76,7 +78,6 @@ module Language.L0.Attributes
   , removeElemNames
 
   -- * Queries on values
-  , arrayRank
   , arrayShape
   , arraySize
   , arrayString
@@ -143,8 +144,13 @@ locStr (SrcLoc (Loc (Pos file line1 col1 _) (Pos _ line2 col2 _))) =
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
 -- it is two, and so forth.
 arrayRank :: TypeBase vn as -> Int
-arrayRank (Array _ ds _ _) = length ds
-arrayRank _                = 0
+arrayRank = length . arrayDims
+
+-- | Return the dimensions of a type - for non-arrays, this is the
+-- empty list.
+arrayDims :: TypeBase vn as -> ArraySize as
+arrayDims (Array _ ds _ _) = ds
+arrayDims _                = []
 
 -- | @x `subuniqueOf` y@ is true if @x@ is not less unique than @y@.
 subuniqueOf :: Uniqueness -> Uniqueness -> Bool
@@ -345,8 +351,8 @@ addElemNames Cert = Cert
 -- a list of length @n@, the resulting type is of an @n+m@ dimensions.
 -- The uniqueness of the new array will be @u@, no matter the
 -- uniqueness of @t@.
-arrayOf :: Monoid (as vn) =>
-           TypeBase as vn -> ArraySize vn -> Uniqueness -> TypeBase as vn
+arrayOf :: Monoid (vn as) =>
+           TypeBase vn as -> ArraySize as -> Uniqueness -> TypeBase vn as
 arrayOf (Array et size1 _ als) size2 u =
   Array et (size2 ++ size1) u als
 arrayOf (Elem et) size u =
