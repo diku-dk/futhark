@@ -100,7 +100,7 @@ typeName (Elem Cert) = "cert"
 typeName (Elem (Tuple ts)) =
   "tuple_" ++ intercalate "_" (map typeName ts)
 typeName t@(Array {}) =
-  typeName (Elem $ elemType t) ++ show (arrayDims t) ++ "d"
+  typeName (Elem $ elemType t) ++ show (arrayRank t) ++ "d"
 
 typeToCType :: GenType als -> CompilerM C.Type
 typeToCType (Elem Int) = return [C.cty|int|]
@@ -130,7 +130,7 @@ typeToCType t@(Array {}) = do
       ct <- typeToCType $ Elem $ elemType t
       let name = typeName t
           ctp = [C.cty|$ty:ct*|]
-          struct = [C.cedecl|struct $id:name { typename int64_t shape[$int:(arrayDims t)]; $ty:ctp data; };|]
+          struct = [C.cedecl|struct $id:name { typename int64_t shape[$int:(arrayRank t)]; $ty:ctp data; };|]
           stype  = [C.cty|struct $id:name|]
       modify $ \s -> s { compTypeStructs = (toDecl t, (stype, struct)) : compTypeStructs s }
       return stype
@@ -202,7 +202,7 @@ readStm place t@(Array {})
        fprintf(stderr, "Syntax error when reading %s.\n", $string:(ppType t));
        exit(1);
      }|]
-  where n  = arrayDims t
+  where n  = arrayRank t
 readStm _ t =
   [C.cstm|{
         fprintf(stderr, "Cannot read %s yet.\n", $string:(ppType t));
@@ -402,7 +402,7 @@ compileExp' place (ArrayLit (e:es) _ _) = do
       eldims <- new "ArrayLit_eldims"
       elsize <- new "ArrayLit_elsize"
       datap <- new "ArrayLit_datap"
-      let numdims = arrayDims $ typeOf e
+      let numdims = arrayRank $ typeOf e
           dimexps = [C.cexp|$int:(length es+1)|] :
                     [ [C.cexp|$id:eldims[$int:j]|] | j <- [0..numdims-1] ]
           alloc = allocArray place dimexps bt
@@ -628,7 +628,7 @@ compileExp' place e@(Transpose _ k n arrexp _) = do
                                       $stm:inner
                                     }|]
                      return (body, is')
-  (copy, is) <- loop [] $ arrayDims $ typeOf arrexp
+  (copy, is) <- loop [] $ arrayRank $ typeOf arrexp
   let idecls = [[C.cdecl|int $id:i;|] | i <- is]
   return $ stm [C.cstm|{
                      $ty:intype $id:arr;

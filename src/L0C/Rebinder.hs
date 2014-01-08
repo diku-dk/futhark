@@ -176,7 +176,7 @@ bindLet pat@(TupId [Id dest1, Id dest2] _) e@(Split cs (Var n) (Var src) _ loc) 
   withShapes [(dest1, Var n : rest),
               (dest2, Var split_sz : rest)] m
     where rest = [ Size cs i (Var src) loc
-                   | i <- [1.. arrayDims (identType src) - 1]]
+                   | i <- [1.. arrayRank (identType src) - 1]]
 
 bindLet pat@(Id dest) e@(Concat cs (Var x) (Var y) loc) m =
   withBinding pat e $
@@ -185,7 +185,7 @@ bindLet pat@(Id dest) e@(Concat cs (Var x) (Var y) loc) m =
   withNewBinding "concat_sz" (BinOp Plus (Var concat_x) (Var concat_y) (Elem Int) loc) $ \concat_sz ->
   withShape dest (Var concat_sz :
                   [Size cs i (Var x) loc
-                     | i <- [1..arrayDims (identType x) - 1]])
+                     | i <- [1..arrayRank (identType x) - 1]])
   m
 
 bindLet pat e m
@@ -202,7 +202,7 @@ bindLet pat@(Id dest) e@(Transpose cs k n (Var src) loc) m =
   withShape dest dims m
     where dims = transposeIndex k n
                  [Size cs i (Var src) loc
-                  | i <- [0..arrayDims (identType src) - 1]]
+                  | i <- [0..arrayRank (identType src) - 1]]
 
 bindLet pat e m = withBinding pat e m
 
@@ -220,7 +220,7 @@ bindLoop pat e i bound body m = do
 
 slice :: Certificates -> Int -> Ident -> [Exp]
 slice cs d k = [ Size cs i (Var k) $ srclocOf k
-                 | i <- [d..arrayDims (identType k)-1]]
+                 | i <- [d..arrayRank (identType k)-1]]
 
 withShape :: Ident -> [Exp] -> HoistM a -> HoistM a
 withShape dest src =

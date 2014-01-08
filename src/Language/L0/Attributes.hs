@@ -76,7 +76,7 @@ module Language.L0.Attributes
   , removeElemNames
 
   -- * Queries on values
-  , arrayDims
+  , arrayRank
   , arrayShape
   , arraySize
   , arrayString
@@ -142,9 +142,9 @@ locStr (SrcLoc (Loc (Pos file line1 col1 _) (Pos _ line2 col2 _))) =
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
 -- it is two, and so forth.
-arrayDims :: TypeBase vn as -> Int
-arrayDims (Array _ ds _ _) = length ds
-arrayDims _                = 0
+arrayRank :: TypeBase vn as -> Int
+arrayRank (Array _ ds _ _) = length ds
+arrayRank _                = 0
 
 -- | @x `subuniqueOf` y@ is true if @x@ is not less unique than @y@.
 subuniqueOf :: Uniqueness -> Uniqueness -> Bool
@@ -455,7 +455,7 @@ valueType (ArrayVal _ (Array et ds _ _)) =
 arrayShape :: Value -> [Int]
 arrayShape (ArrayVal arr rt)
   | v:_ <- elems arr = snd (bounds arr) + 1 : arrayShape v
-  | otherwise = replicate (1 + arrayDims rt) 0
+  | otherwise = replicate (1 + arrayRank rt) 0
 arrayShape _ = []
 
 -- | Return the size of the first dimension of an array, or zero for
@@ -554,7 +554,7 @@ partialReshape shape src = shape ++ [leftover]
   where loc = srclocOf src
         productExp []     = Literal (IntVal 0) loc -- Ought never to happen.
         productExp (d:ds) = foldl (\x y -> BinOp Times x y (Elem Int) loc) d ds
-        srcsize = productExp [ Size [] i src loc | i <- [0..arrayDims (typeOf src) - 1]]
+        srcsize = productExp [ Size [] i src loc | i <- [0..arrayRank (typeOf src) - 1]]
         destelems = productExp shape
         leftover = BinOp Divide srcsize destelems (Elem Int) loc
 
@@ -564,7 +564,7 @@ reshapeOuter :: (Eq vn, Hashable vn) =>
                 [ExpBase CompTypeBase vn] -> Int -> ExpBase CompTypeBase vn
              -> [ExpBase CompTypeBase vn]
 reshapeOuter shape n src =
-  shape ++ drop n [Size [] i src loc | i <- [0..arrayDims (typeOf src) - 1] ]
+  shape ++ drop n [Size [] i src loc | i <- [0..arrayRank (typeOf src) - 1] ]
   where loc = srclocOf src
 
 -- | The type of an L0 term.  The aliasing will refer to itself, if

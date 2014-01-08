@@ -50,7 +50,7 @@ lookup idd m = delve HS.empty idd
                   Just (DimSizes colexps) ->
                     map (S.unions . map (recurse (k `HS.insert` s)) . S.toList) colexps
 
-    blank k = replicate (arrayDims $ identType k) S.empty
+    blank k = replicate (arrayRank $ identType k) S.empty
 
     recurse :: HS.HashSet Ident -> Exp -> ColExps
     recurse s e@(Size _ i (Var k') _) =
@@ -115,7 +115,7 @@ levelSizes nest = merge inputSizes iotaSizes
                                  Nest.inputBindings nest
           where mkSizes inp bnds
                   | (SOAC.Var inputArray, idxs) <- SOAC.inputTransposes inp =
-                      let numDims = arrayDims $ identType inputArray
+                      let numDims = arrayRank $ identType inputArray
                           trns' (k, n) dim = transposeDimension k n dim numDims
                           trns i = foldr trns' i idxs
                       in [ Size cs (trns i) (Var inputArray) loc | i <- [0..length bnds-1] ]

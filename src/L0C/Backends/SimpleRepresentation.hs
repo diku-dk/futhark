@@ -82,20 +82,20 @@ arraySizeExp place t = arraySliceSizeExp place t 0
 -- The integer argument is the number of dimensions sliced off.
 arraySliceSizeExp :: C.Exp -> Type -> Int -> C.Exp
 arraySliceSizeExp place t slice =
-  foldl comb [C.cexp|1|] [slice..arrayDims t-1]
+  foldl comb [C.cexp|1|] [slice..arrayRank t-1]
   where comb y i = [C.cexp|$exp:place.shape[$int:i] * $exp:y|]
 
 -- | Return an list of expressions giving the array shape in elements.
 arrayShapeExp :: C.Exp -> GenType als -> [C.Exp]
 arrayShapeExp place t =
-  map comb [0..arrayDims t-1]
+  map comb [0..arrayRank t-1]
   where comb i = [C.cexp|$exp:place.shape[$int:i]|]
 
 -- | Generate an expression indexing the given array with the given
 -- indices.  No bounds checking is done.
 indexArrayExp :: C.Exp -> GenType als -> [C.Exp] -> C.Exp
 indexArrayExp place t indexes =
-  let sizes = map (foldl mult [C.cexp|1|]) $ tails $ map field [1..arrayDims t - 1]
+  let sizes = map (foldl mult [C.cexp|1|]) $ tails $ map field [1..arrayRank t - 1]
       field :: Int -> C.Exp
       field i = [C.cexp|$exp:place.shape[$int:i]|]
       mult x y = [C.cexp|$exp:x * $exp:y|]

@@ -740,7 +740,7 @@ checkExp (LetWith cs (Ident dest destt destpos) src idxcs idxes ve body pos) = d
 
   case peelArray (length idxes) (identType src') of
     Nothing -> bad $ IndexingError (baseName $ identName src)
-                     (arrayDims $ identType src') (length idxes) (srclocOf src)
+                     (arrayRank $ identType src') (length idxes) (srclocOf src)
     Just elemt ->
       sequentially (require [elemt] =<< checkExp ve) $ \ve' _ -> do
         when (identName src `HS.member` aliases (typeOf ve')) $
@@ -760,7 +760,7 @@ checkExp (Index cs ident csidxes idxes restype pos) = do
   vt <- lookupVar (identName ident') pos
   case peelArray (length idxes) vt of
     Nothing -> bad $ IndexingError (baseName $ identName ident)
-                     (arrayDims vt) (length idxes) pos
+                     (arrayRank vt) (length idxes) pos
     Just et -> do
       restype' <- checkAnnotation pos "indexing result" restype et
       idxes' <- mapM (require [Elem Int] <=< checkExp) idxes
@@ -775,7 +775,7 @@ checkExp (Size cs i e pos) = do
   cs' <- mapM (requireI [Elem Cert] <=< checkIdent) cs
   case typeOf e' of
     Array {}
-      | i >= 0 && i < arrayDims (typeOf e') ->
+      | i >= 0 && i < arrayRank (typeOf e') ->
         return $ Size cs' i e' pos
       | otherwise ->
         bad $ TypeError pos $ "Type " ++ ppType (typeOf e') ++ " has no dimension " ++ show i ++ "."
@@ -795,7 +795,7 @@ checkExp (Reshape cs shapeexps arrexp pos) = do
 checkExp (Transpose cs k n arrexp pos) = do
   cs' <- mapM (requireI [Elem Cert] <=< checkIdent) cs
   arrexp' <- checkExp arrexp
-  when (arrayDims (typeOf arrexp') < n + k + 1) $
+  when (arrayRank (typeOf arrexp') < n + k + 1) $
     bad $ TypeError pos $ "Argument to transpose does not have " ++
           show (n+k+1) ++ " dimensions."
   return $ Transpose cs' k n arrexp' pos

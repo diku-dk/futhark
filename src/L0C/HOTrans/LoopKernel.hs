@@ -329,7 +329,7 @@ fixupInputs inpIds inps =
           | exposable inp = case SOAC.inputTransposes inp of
                               (inp', ts') | ts == ts' -> Just inp'
                                           | otherwise -> Nothing
-          | arrayDims (SOAC.inputType inp) > d =
+          | arrayRank (SOAC.inputType inp) > d =
               Just $ transposes inp $ map (uncurry transposeInverse) ts
           | otherwise = Nothing
 

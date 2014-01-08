@@ -230,7 +230,7 @@ transformExp (Index cs vname csidx idxs outtype loc) = do
   case subst of
     Just (ArraySubst _ [v])
       | rt <- stripArray (length idxs') $ identType v,
-        arrayDims rt == 0 ->
+        arrayRank rt == 0 ->
       return $ Index cs v csidx idxs' rt loc
     Just (ArraySubst c vs) ->
       mergeCerts (c:cs) $ \c' -> do
@@ -238,7 +238,7 @@ transformExp (Index cs vname csidx idxs outtype loc) = do
                       (stripArray (length idxs') $ identType v) loc
         return $ case map index vs of
                    []   -> TupLit [] loc
-                   a:as | arrayDims outtype == 0 -> TupLit (a:as) loc
+                   a:as | arrayRank outtype == 0 -> TupLit (a:as) loc
                         | otherwise              -> tuplit c' loc $ a:as
     _ -> return $ Index cs vname csidx idxs' outtype loc
 

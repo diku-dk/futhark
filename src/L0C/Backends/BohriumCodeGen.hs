@@ -73,7 +73,7 @@ compileInput place shape inp = do
   (arr, e') <- compileExpNewVar  e
   stride <- new "stride"
   let t = typeOf e
-      d = arrayDims t
+      d = arrayRank t
       strideStm 0 = [C.cexp|1|]
       strideStm i = [C.cexp|$exp:shape[$int:i-1] * $id:stride[$int:d-$int:i]|]
       shapeStms = concat [ [[C.cstm|$exp:shape[$int:i] = $exp:se;|],
