@@ -610,12 +610,11 @@ typeOf (Size {}) = Elem Int
 typeOf (Replicate _ e _) = arrayType 1 (typeOf e) u
   where u | uniqueOrBasic (typeOf e) = Unique
           | otherwise = Nonunique
-typeOf (Reshape _ shape e _) = build (length shape) (elemType $ typeOf e)
-  where build 0 t = Elem t
-        build n t =
-          Array (t `setElemAliases` NoInfo) (replicate n Nothing) Nonunique $
-          case typeOf e of Array _ _ _ als -> als
-                           _               -> HS.empty -- Type error.
+typeOf (Reshape _ [] e _) =
+  Elem $ elemType $ typeOf e
+typeOf (Reshape _ shape  e _) =
+  replicate (length shape) Nothing `setArrayDims` typeOf e
+
 typeOf (Transpose _ k n e _)
   | Array et dims u als <- typeOf e,
     (pre,d:post) <- splitAt k dims,
