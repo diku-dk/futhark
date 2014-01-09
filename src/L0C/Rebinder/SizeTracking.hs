@@ -71,7 +71,7 @@ outputSizeRelations :: [Ident] -> SOACNest -> [[Exp]] -> [(Ident, [Exp])]
 outputSizeRelations outputIds nest widths
   | n <- nestingDepth $ Nest.operation nest,
     n > 0 =
-      let outputs = zip (map SOAC.Var outputIds) $ repeat n
+      let outputs = zip (map SOAC.varInput outputIds) $ repeat n
       in relationExps (varPairs outputs) widths
   | otherwise = []
 
@@ -84,8 +84,8 @@ nestingDepth _ = 0
 
 varPairs :: [(SOAC.Input, Int)] -> [(Ident, Int)]
 varPairs = mapMaybe varPair
-  where varPair (SOAC.Var outputId,n) = Just (outputId, n)
-        varPair _                     = Nothing
+  where varPair (SOAC.Input [] (SOAC.Var outputId),n) = Just (outputId, n)
+        varPair _                                     = Nothing
 
 relationExps :: [(Ident, Int)] -> [[Exp]] -> [(Ident, [Exp])]
 relationExps ks widths = map relate ks
@@ -114,7 +114,8 @@ levelSizes nest = merge inputSizes iotaSizes
         inputSizes = transpose $ zipWith mkSizes (Nest.inputs nest) $
                                  Nest.inputBindings nest
           where mkSizes inp bnds
-                  | (SOAC.Var inputArray, idxs) <- SOAC.inputTransposes inp =
+                  | (SOAC.Input [] (SOAC.Var inputArray), idxs)
+                    <- SOAC.inputTransposes inp =
                       let numDims = arrayRank $ identType inputArray
                           trns' (k, n) dim = transposeDimension k n dim numDims
                           trns i = foldr trns' i idxs
@@ -123,4 +124,4 @@ levelSizes nest = merge inputSizes iotaSizes
 
         iotaSizes = map mkSizes $ Nest.inputs nest : Nest.inputsPerLevel nest
           where mkSizes inps =
-                  [ Literal v loc | SOAC.Iota (Literal v _) <- inps ]
+                  [ Literal v loc | SOAC.Input [] (SOAC.Iota (Literal v _)) <- inps ]

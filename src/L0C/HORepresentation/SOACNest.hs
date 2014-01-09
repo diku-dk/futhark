@@ -291,7 +291,7 @@ nestingInputParam :: [Maybe Ident] -> Nesting -> [Ident] -> [Maybe Ident]
 nestingInputParam ps nest nextparams =
   map ((`lookupParamIn` zip inps nextparams)=<<) ps
   where inps = nestingInputs nest
-        lookupParamIn = lookup . SOAC.Var
+        lookupParamIn = lookup . SOAC.varInput
 
 inputsPerLevel :: SOACNest -> [[SOAC.Input]]
 inputsPerLevel = nestedInputs' . operation

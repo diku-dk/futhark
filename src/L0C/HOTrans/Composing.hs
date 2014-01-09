@@ -150,8 +150,8 @@ outParams :: [Ident] -> [Parameter] -> [Input]
           -> HM.HashMap Parameter Input
 outParams out1 lam2arrparams inp2 =
   HM.fromList $ mapMaybe isOutParam $ zip lam2arrparams inp2
-  where isOutParam (p, SOAC.Var a)
-          | a `elem` out1 = Just (p, SOAC.Var a)
+  where isOutParam (p, SOAC.Input [] (SOAC.Var a))
+          | a `elem` out1 = Just (p, SOAC.varInput a)
         isOutParam _      = Nothing
 
 filterOutParams :: [Ident]
@@ -163,8 +163,8 @@ filterOutParams out1 outins =
           where add m p e = M.insertWith (++) e [fromParam p] m
 
         checkUsed m a =
-          case M.lookup (SOAC.Var a) m of
-            Just (p:ps) -> (M.insert (SOAC.Var a) ps m, Right p)
+          case M.lookup (SOAC.varInput a) m of
+            Just (p:ps) -> (M.insert (SOAC.varInput a) ps m, Right p)
             _           -> (m, Left $ rowType $ identType a)
 
 removeDuplicateInputs :: HM.HashMap Parameter Input
@@ -193,7 +193,7 @@ import L0C.Dev
 And now I can have top-level bindings like the following, that explicitly call fuseMaps:
 
 (test1fun, test1ins) = fuseMaps lam1 lam1in out lam2 lam2in
-  where lam1in = [SOAC.Var $ tident "[int] arr_x", SOAC.Var $ tident "[int] arr_z"]
+  where lam1in = [SOAC.varInput $ tident "[int] arr_x", SOAC.varInput $ tident "[int] arr_z"]
         lam1 = lambdaToFunction $ tupleLambda "fn {int, int} (int x, int z_b) => {x + z_b, x - z_b}"
         outarr = tident "[int] arr_y"
         outarr2 = tident "[int] arr_unused"
@@ -203,7 +203,7 @@ And now I can have top-level bindings like the following, that explicitly call f
 
 
 (test2fun, test2ins) = fuseFilterIntoFold lam1 lam1in out lam2 lam2in (name "check")
-  where lam1in = [SOAC.Var $ tident "[int] arr_x", SOAC.Var $ tident "[int] arr_v"]
+  where lam1in = [SOAC.varInput $ tident "[int] arr_x", SOAC.varInput $ tident "[int] arr_v"]
         lam1 = tupleLambda "fn {bool} (int x, int v) => x+v < 0"
         outarr = tident "[int] arr_y"
         outarr2 = tident "[int] arr_unused"
@@ -217,7 +217,7 @@ And now I can have top-level bindings like the following, that explicitly call f
         outarr = tident "[int] arr_p"
         outarr2 = tident "[int] arr_unused"
         out  = [outarr, outarr2]
-        lam2in = [SOAC.Var outarr]
+        lam2in = [SOAC.varInput outarr]
         lam2 = tupleLambda "fn {int} (int x, int p) => {x ^ p}"
 
 I can inspect these values directly in GHCi.

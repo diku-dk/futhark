@@ -56,9 +56,9 @@ compileSOACtoBohrium target e
          try compileMapWithScan
   | otherwise = return Nothing
 
-compileInput :: C.Exp -> C.Exp -> SOAC.Input -> CompilerM [C.BlockItem]
+compileInput :: C.Exp -> C.Exp -> Exp -> CompilerM [C.BlockItem]
 
-compileInput place shape (SOAC.Iota ne) = do
+compileInput place shape (Iota ne _) = do
   nv <- new "iota_n"
   ne' <- compileExp (varExp nv) ne
   return $ stm [C.cstm|{
@@ -68,8 +68,7 @@ compileInput place shape (SOAC.Iota ne) = do
                      $exp:place = bh_multi_array_int32_new_range(0, $id:nv-1, 0);
                    }|]
 
-compileInput place shape inp = do
-  let e = SOAC.inputToExp inp
+compileInput place shape e = do
   (arr, e') <- compileExpNewVar  e
   stride <- new "stride"
   let t = typeOf e
@@ -90,24 +89,26 @@ compileInput place shape inp = do
                    }|]
 
 compileMap :: C.Exp -> SOACNest -> CompilerM (Maybe [C.BlockItem])
-compileMap target (SOACNest [inp] (Nest.MapT _ (Nest.Lambda l) _ _))
-  | all (basicType . identType) $ tupleLambdaParams l,
-    Just op <- compileLambda l unOp = do
-      inputName <- new "map_input"
-      outputName <- new "output"
-      inp' <- compileInput (varExp inputName) [C.cexp|$exp:target.elem_0.dims|] inp
-      return $ Just $ stm [C.cstm|{
-                                typename bh_multi_array_int32_p $id:inputName;
-                                typename bh_multi_array_int32_p $id:outputName;
-                                $items:inp';
-                                $stm:(doUnaryOperation op outputName inputName);
-                                bh_multi_array_int32_sync($id:outputName);
-                                $exp:target.elem_0.data =
-                                  bh_multi_array_int32_get_base_data
-                                    (bh_multi_array_int32_get_base($id:outputName));
-                              }|]
-compileMap target (SOACNest [inp1, inp2] (Nest.MapT _ (Nest.Lambda l) _ _))
-  | all (basicType . identType) $ tupleLambdaParams l,
+compileMap target (SOACNest inps (Nest.MapT _ (Nest.Lambda l) _ _))
+  | [inp] <- SOAC.inputsToExps inps,
+    all (basicType . identType) $ tupleLambdaParams l,
+   Just op <- compileLambda l unOp = do
+     inputName <- new "map_input"
+     outputName <- new "output"
+     inp' <- compileInput (varExp inputName) [C.cexp|$exp:target.elem_0.dims|] inp
+     return $ Just $ stm [C.cstm|{
+                               typename bh_multi_array_int32_p $id:inputName;
+                               typename bh_multi_array_int32_p $id:outputName;
+                               $items:inp';
+                               $stm:(doUnaryOperation op outputName inputName);
+                               bh_multi_array_int32_sync($id:outputName);
+                               $exp:target.elem_0.data =
+                                 bh_multi_array_int32_get_base_data
+                                   (bh_multi_array_int32_get_base($id:outputName));
+                             }|]
+compileMap target (SOACNest inps (Nest.MapT _ (Nest.Lambda l) _ _))
+  | [inp1,inp2] <- SOAC.inputsToExps inps,
+    all (basicType . identType) $ tupleLambdaParams l,
     Just op <- compileLambda l binOp = do
       inputName1 <- new "map_input_x"
       inputName2 <- new "map_input_y"

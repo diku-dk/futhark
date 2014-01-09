@@ -369,7 +369,7 @@ fusionGatherExp fres (LetPat pat (Replicate n el loc) body _) = do
                         Elem (Tuple ets) -> (el, ets)
                         t                -> (TupLit [el] loc, [t])
         repl_lam = TupleLambda [toParam repl_id] lame (map toDecl rwt) loc
-        soac_repl= SOAC.MapT [] repl_lam [SOAC.Iota n] loc
+        soac_repl= SOAC.MapT [] repl_lam [SOAC.Input [] $ SOAC.Iota n] loc
     greedyFuse True used_set bres' (patIdents pat, soac_repl)
 
 fusionGatherExp fres (LetPat pat e body _) = do
@@ -621,23 +621,16 @@ mergeFusionRes res1 res2 = do
 -- | The expression arguments are supposed to be array-type exps.
 --   Returns a tuple, in which the arrays that are vars are in the
 --   first element of the tuple, and the one which are indexed or
---   transposes should be in the second.
+--   transposes (or otherwise transformed) should be in the second.
 --
 --   E.g., for expression `mapT(f, a, b[i])', the result should be
 --   `([a],[b])'
 getIdentArr :: [SOAC.Input] -> ([Ident], [Ident])
 getIdentArr = foldl comb ([],[])
-  where comb (vs, os) (SOAC.Var idd) =
+  where comb (vs,os) (SOAC.Input [] (SOAC.Var idd)) =
           (idd:vs, os)
-        comb (vs, os) (SOAC.Transpose _ _ _ inp) =
-          let (ks1, ks2) = getIdentArr [inp]
-          in (vs, ks1++ks2++os)
-        comb (vs, os) (SOAC.Reshape _ _ inp) =
-          let (ks1, ks2) = getIdentArr [inp]
-          in (vs, ks1++ks2++os)
-        comb (vs, os) (SOAC.Index _ idd _ _) =
-          (vs, idd:os)
-        comb (vs, os) (SOAC.Iota _) = (vs, os)
+        comb (vs, os) inp =
+          (vs, maybeToList (SOAC.inputArray inp)++os)
 
 cleanFusionResult :: FusedRes -> FusedRes
 cleanFusionResult fres =
