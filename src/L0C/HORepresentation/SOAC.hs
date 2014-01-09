@@ -135,11 +135,11 @@ inputFromExp ie = do (ts, ia) <- examineExp ie
 
         examineExp (L0.Transpose cs k n inp _) = do
           (ts, inp') <- examineExp inp
-          Just $ (Transpose cs k n : ts, inp')
+          Just (Transpose cs k n : ts, inp')
 
         examineExp (L0.Reshape cs shape inp _) = do
           (ts, inp') <- examineExp inp
-          Just $ (Reshape cs shape : ts, inp')
+          Just (Reshape cs shape : ts, inp')
 
         examineExp _ = Nothing
 
