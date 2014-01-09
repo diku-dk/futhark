@@ -47,6 +47,7 @@ module Language.L0.Attributes
   , similarTo
   , arrayRank
   , arrayDims
+  , setArrayDims
   , returnType
   , lambdaType
   , tupleLambdaType
@@ -152,6 +153,12 @@ arrayRank = length . arrayDims
 arrayDims :: TypeBase vn as -> ArraySize as
 arrayDims (Array _ ds _ _) = ds
 arrayDims _                = []
+
+-- | Set the dimensions of an array.  If the given type is not an
+-- array, return the type unchanged.
+setArrayDims :: ArraySize as -> TypeBase vn as -> TypeBase vn as
+setArrayDims ds (Array et _ u as) = Array et ds u as
+setArrayDims _  t                 = t
 
 -- | @x `subuniqueOf` y@ is true if @x@ is not less unique than @y@.
 subuniqueOf :: Uniqueness -> Uniqueness -> Bool
