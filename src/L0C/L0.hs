@@ -10,6 +10,7 @@ module L0C.L0
   -- * Tagged names
   , ID(..)
   , baseName
+  , baseString
   , VarName(..)
   , VName
 
@@ -60,6 +61,10 @@ type VName = ID Name
 -- | Return the name contained in the 'ID'.
 baseName :: ID vn -> vn
 baseName (ID (vn, _)) = vn
+
+-- | Return the base 'Name' converted to a string.
+baseString :: VName -> String
+baseString = nameToString . baseName
 
 instance Eq (ID vn) where
   ID (_, x) == ID (_, y) = x == y
