@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleInstances, MultiParamTypeClasses #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 -- | This module contains a bunch of quick and dirty definitions for
 -- making interactive development of @l0c@ easier.  Don't ever use
 -- anything exported from this module in actual production code.
@@ -29,17 +31,14 @@ import System.IO.Unsafe
 
 import Language.L0.Parser
 
-import L0C.FreshNames
+import L0C.MonadFreshNames
 import L0C.L0
 import L0C.Renamer
 import L0C.TypeChecker
 
 -- | Return a tagged name based on a string.
 name :: String -> VName
-name k = unsafePerformIO $
-           atomicModifyIORef' uniqueNameSource $ \src ->
-            let (k', src') = newID src $ nameFromString k
-            in (src', k')
+name = unsafePerformIO . newIDFromString
 
 -- | Return a new, unique identifier.  Uses 'name'.
 ident :: String -> Type -> Ident
@@ -135,3 +134,7 @@ fromRight (Left _)  = error "fromRight: passed Left value."
 -- to type long strings at the REPL.
 fromFile :: FilePath -> String
 fromFile = unsafePerformIO . readFile
+
+instance MonadFreshNames (ID Name) IO where
+  getNameSource = readIORef uniqueNameSource
+  putNameSource = writeIORef uniqueNameSource
