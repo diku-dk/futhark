@@ -100,6 +100,7 @@ module Language.L0.Attributes
   -- * Reshaping
   , partialReshape
   , reshapeOuter
+  , reshapeInner
 
   -- * Type aliases
 
@@ -574,14 +575,25 @@ partialReshape shape src = shape ++ [leftover]
         destelems = productExp shape
         leftover = BinOp Divide srcsize destelems (Elem Int) loc
 
+shapeExps :: (Eq vn, Hashable vn) =>
+             ExpBase CompTypeBase vn -> [ExpBase CompTypeBase vn]
+shapeExps src = [Size [] i src loc | i <- [0..arrayRank (typeOf src) - 1] ]
+  where loc = srclocOf src
+
 -- | @reshapeOuter shape n src@ returns a 'Reshape' expression that
 -- replaces the outer @n@ dimensions of @src@ with @shape@.
 reshapeOuter :: (Eq vn, Hashable vn) =>
                 [ExpBase CompTypeBase vn] -> Int -> ExpBase CompTypeBase vn
              -> [ExpBase CompTypeBase vn]
-reshapeOuter shape n src =
-  shape ++ drop n [Size [] i src loc | i <- [0..arrayRank (typeOf src) - 1] ]
-  where loc = srclocOf src
+reshapeOuter shape n src = shape ++ drop n (shapeExps src)
+
+-- | @reshapeInner shape n src@ returns a 'Reshape' expression that
+-- replaces the inner @m-n@ dimensions (where @m@ is the rank of
+-- @src@) of @src@ with @shape@.
+reshapeInner :: (Eq vn, Hashable vn) =>
+                [ExpBase CompTypeBase vn] -> Int -> ExpBase CompTypeBase vn
+             -> [ExpBase CompTypeBase vn]
+reshapeInner shape n src = take n (shapeExps src) ++ shape
 
 -- | The type of an L0 term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
