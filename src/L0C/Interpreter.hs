@@ -109,11 +109,11 @@ bindVars = foldl bindVar
 binding :: [(Ident, Value)] -> L0M a -> L0M a
 binding bnds = local (`bindVars` bnds)
 
-lookupVar :: VName -> L0M Value
-lookupVar vname = do
+lookupVar :: Ident -> L0M Value
+lookupVar (Ident vname _ loc) = do
   val <- asks $ HM.lookup vname . envVtable
   case val of Just val' -> return val'
-              Nothing   -> bad $ TypeError noLoc $ "lookupVar " ++ textual vname
+              Nothing   -> bad $ TypeError loc $ "lookupVar " ++ textual vname
 
 lookupFun :: Name -> L0M ([Value] -> L0M Value)
 lookupFun fname = do
@@ -306,8 +306,8 @@ evalExp (If e1 e2 e3 _ pos) = do
             LogVal False -> evalExp e3
             _            -> bad $ TypeError pos "evalExp If"
 
-evalExp (Var (Ident name _ _)) =
-  lookupVar name
+evalExp (Var ident) =
+  lookupVar ident
 
 evalExp (Apply fname [(arg, _)] _ loc)
   | "trace" <- nameToString fname = do
@@ -327,7 +327,7 @@ evalExp (LetPat pat e body pos) = do
     Just bnds -> local (`bindVars` bnds) $ evalExp body
 
 evalExp (LetWith _ name src _ idxs ve body pos) = do
-  v <- lookupVar $ identName src
+  v <- lookupVar src
   idxs' <- mapM evalExp idxs
   vev <- evalExp ve
   v' <- change v idxs' vev
@@ -342,8 +342,8 @@ evalExp (LetWith _ name src _ idxs ve body pos) = do
           where upper = snd $ bounds arr
         change _ _ _ = bad $ TypeError pos "evalExp Let Id"
 
-evalExp (Index _ (Ident name _ _) _ idxs _ pos) = do
-  v <- lookupVar name
+evalExp (Index _ ident _ idxs _ pos) = do
+  v <- lookupVar ident
   idxs' <- mapM evalExp idxs
   foldM idx v idxs'
   where idx (ArrayVal arr _) (IntVal i)
