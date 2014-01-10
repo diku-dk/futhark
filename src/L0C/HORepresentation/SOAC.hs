@@ -61,6 +61,8 @@ data InputTransform = Transpose Certificates Int Int
                     -- ^ A reshaping of an otherwise valid input.
                     | ReshapeOuter Certificates [Exp]
                     -- ^ A reshaping of the outer dimension.
+                    | ReshapeInner Certificates [Exp]
+                    -- ^ A reshaping of everything but the outer dimension.
                     | Repeat
                     -- ^ Replicate the input a whole number of times in order
                     -- to match the outer size of the other inputs.  If this is
@@ -168,6 +170,10 @@ inputsToExps is = map inputToExp' is
           let e' = transform d e ts
           in L0.Reshape cs (reshapeOuter shape 1 e') e $ srclocOf e
 
+        transform d e (ReshapeInner cs shape:ts) =
+          let e' = transform d e ts
+          in L0.Reshape cs (reshapeInner shape 1 e') e $ srclocOf e
+
 dimSizes :: [Input] -> [Maybe Exp]
 dimSizes is =
   map (listToMaybe . catMaybes) $ transpose $ map inspect is
@@ -196,6 +202,9 @@ dimSizes is =
         inspect' ds (ReshapeOuter _ shape) =
           map Just shape ++ drop 1 ds
 
+        inspect' ds (ReshapeInner _ shape) =
+          take 1 ds ++ map Just shape
+
         inspect' ds (Repeat) =
           Nothing : ds
 
@@ -218,6 +227,8 @@ inputType (Input ts ia) = foldl transformType (typeOf $ inputArrayToExp ia) ts
           setArrayDims (replicate (length shape) Nothing) t
         transformType t (ReshapeOuter _ shape) =
           setArrayDims (replicate (length shape) Nothing ++ drop 1 (arrayDims t)) t
+        transformType t (ReshapeInner _ shape) =
+          setArrayDims (take 1 (arrayDims t) ++ replicate (length shape) Nothing) t
 
 -- | Strip surrounding transpositions from the input, returning the
 -- inner input and a list of @(k,n)@-transposition pairs.
@@ -230,8 +241,14 @@ inputTransposes (Input ts ia) =
         takeTransposes rest = ([],rest)
 
 transformRows :: [InputTransform] -> Input -> Input
-transformRows []  (Input ots ia) = Input ots ia
-transformRows _ _ = error "Cannot transform anything yet"
+transformRows [] (Input ots ia) =
+  Input ots ia
+transformRows (Transpose cs k n:nts) inp =
+  transformRows nts $ addTransform (Transpose cs (k+1) n) inp
+transformRows (Reshape cs shape:nts) inp =
+  transformRows nts $ addTransform (ReshapeInner cs shape) inp
+transformRows nts inp =
+  error $ "transformRows: Cannot transform this yet:\n" ++ show nts ++ "\n" ++ show inp
 
 -- | A definite representation of a SOAC expression.
 data SOAC = MapT Certificates TupleLambda [Input] SrcLoc
