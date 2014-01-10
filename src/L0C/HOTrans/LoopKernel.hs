@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts, GeneralizedNewtypeDeriving, TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses #-}
 module L0C.HOTrans.LoopKernel
   ( FusedKer(..)
   , newKernel
@@ -8,12 +8,16 @@ module L0C.HOTrans.LoopKernel
   , OutputTransform(..)
   , applyTransform
   , attemptFusion
+  , TryFusion
+  , tryFusion
   )
   where
 
 import Control.Applicative
 import Control.Arrow (first)
 import Control.Monad
+import Control.Monad.Trans.Maybe
+import Control.Monad.State
 
 import qualified Data.HashSet as HS
 
@@ -27,6 +31,25 @@ import qualified L0C.HORepresentation.SOAC as SOAC
 import L0C.HORepresentation.SOACNest (SOACNest)
 import qualified L0C.HORepresentation.SOACNest as Nest
 import L0C.HOTrans.Composing
+
+newtype TryFusion a = TryFusion (MaybeT (State (NameSource VName)) a)
+  deriving (Functor, Applicative, Alternative,
+            Monad, MonadState (NameSource VName))
+
+instance MonadFreshNames VName TryFusion where
+  getNameSource = get
+  putNameSource = put
+
+tryFusion :: MonadFreshNames VName m => TryFusion a -> m (Maybe a)
+tryFusion (TryFusion m) = do
+  src <- getNameSource
+  let (x, src') = runState (runMaybeT m) src
+  putNameSource src'
+  return x
+
+liftMaybe :: Maybe a -> TryFusion a
+liftMaybe Nothing = fail "Nothing"
+liftMaybe (Just x) = return x
 
 data OutputTransform = OTranspose Certificates Int Int
                      | OReshape Certificates [Exp]
@@ -92,7 +115,6 @@ newKernel idds soac =
            , outputTransform = []
            }
 
-
 arrInputs :: FusedKer -> HS.HashSet Ident
 arrInputs = HS.fromList . mapMaybe SOAC.inputArray . inputs
 
@@ -102,23 +124,35 @@ inputs = SOAC.inputs . fsoac
 setInputs :: [SOAC.Input] -> FusedKer -> FusedKer
 setInputs inps ker = ker { fsoac = inps `SOAC.setInputs` fsoac ker }
 
+tryOptimizeSOAC :: [Ident] -> SOAC -> FusedKer -> TryFusion FusedKer
+tryOptimizeSOAC outIds soac ker = do
+  (soac', ots) <- liftMaybe $ optimizeSOAC Nothing soac
+  let ker' = map (outputsToInput ots) (inputs ker) `setInputs` ker
+  attemptFusion' outIds soac' ker'
+
+tryOptimizeKernel :: [Ident] -> SOAC -> FusedKer -> TryFusion FusedKer
+tryOptimizeKernel outIds soac ker = do
+  ker' <- liftMaybe $ optimizeKernel (Just outIds) ker
+  attemptFusion' outIds soac ker'
+
+tryExposeInputs :: [Ident] -> SOAC -> FusedKer -> TryFusion FusedKer
+tryExposeInputs outIds soac ker = do
+  (ker', ots) <- exposeInputs outIds ker
+  case ots of
+    [] -> fuseSOACwithKer (outIds, soac) ker'
+    _  -> do
+      soac' <- pullOutputTransforms soac ots
+      attemptFusion' outIds soac' ker'
+
+attemptFusion' :: [Ident] -> SOAC -> FusedKer -> TryFusion FusedKer
+attemptFusion' outIds soac ker =
+  tryOptimizeSOAC outIds soac ker <|>
+  tryOptimizeKernel outIds soac ker <|>
+  tryExposeInputs outIds soac ker <|>
+  fuseSOACwithKer (outIds, soac) ker
+
 attemptFusion :: MonadFreshNames VName m => [Ident] -> SOAC -> FusedKer -> m (Maybe FusedKer)
-attemptFusion outIds soac ker
-  | Just (soac', ots) <- optimizeSOAC Nothing soac =
-      let ker' = map (outputsToInput ots) (inputs ker) `setInputs` ker
-      in attemptFusion outIds soac' ker'
-  | Just ker' <- optimizeKernel (Just outIds) ker =
-      attemptFusion outIds soac ker'
-  | Just (ker', ots) <- exposeInputs outIds ker =
-      case ots of
-        [] -> fuseSOACwithKer (outIds, soac) ker'
-        _  -> do
-          msoac' <- pullOutputTransforms soac ots
-          case msoac' of
-            Just soac' -> attemptFusion outIds soac' ker'
-            Nothing    -> fuseSOACwithKer (outIds, soac) ker
-  | otherwise =
-      fuseSOACwithKer (outIds, soac) ker
+attemptFusion outIds soac ker = tryFusion $ attemptFusion' outIds soac ker
 
 -- | Check that the consumer uses at least one output of the producer
 -- unmodified.
@@ -151,7 +185,7 @@ mapOrFilter (SOAC.FilterT {}) = True
 mapOrFilter (SOAC.MapT {})    = True
 mapOrFilter _                 = False
 
-fuseSOACwithKer :: MonadFreshNames VName m => ([Ident], SOAC) -> FusedKer -> m (Maybe FusedKer)
+fuseSOACwithKer :: ([Ident], SOAC) -> FusedKer -> TryFusion FusedKer
 fuseSOACwithKer (outIds, soac1) ker = do
   -- We are fusing soac1 into soac2, i.e, the output of soac1 is going
   -- into soac2.
@@ -165,10 +199,10 @@ fuseSOACwithKer (outIds, soac1) ker = do
       lam2     = SOAC.lambda soac2
       success res_soac = do
         let fusedVars_new = fusedVars ker++outIds
-        return $ Just ker { fsoac = res_soac
-                          , outputs = out_ids2
-                          , fusedVars = fusedVars_new
-                          }
+        return $ ker { fsoac = res_soac
+                     , outputs = out_ids2
+                     , fusedVars = fusedVars_new
+                     }
   case (soac2, soac1) of
     -- The Fusions that are semantically map fusions:
     (SOAC.MapT _ _ _ pos, SOAC.MapT    {})
@@ -207,7 +241,7 @@ fuseSOACwithKer (outIds, soac1) ker = do
                         , outputs = out_ids2 }
        fuseSOACwithKer (outIds, soac1) ker'
 
-    _ -> return Nothing
+    _ -> fail "Cannot fuse"
 
 -- Here follows optimizations and transforms to expose fusability.
 
@@ -349,7 +383,7 @@ transposes :: SOAC.Input -> [(Int, Int)] -> SOAC.Input
 transposes (SOAC.Input ts ia) kns =
   SOAC.Input (ts++[SOAC.Transpose [] k n | (k,n) <- kns]) ia
 
-pullReshape :: MonadFreshNames VName m => SOACNest -> [OutputTransform] -> m (Maybe (SOACNest, [OutputTransform]))
+pullReshape :: SOACNest -> [OutputTransform] -> TryFusion (SOACNest, [OutputTransform])
 pullReshape nest (OReshape cs shape:ots)
   | op@Nest.MapT {} <- Nest.operation nest,
     all basicType $ Nest.returnType op = do
@@ -382,15 +416,15 @@ pullReshape nest (OReshape cs shape:ots)
                       Nest.inputs    = inputs'
                     , Nest.operation = nesting' `Nest.setNesting` op
                     }
-      return $ Just (nest',ots)
-pullReshape _ _ = return Nothing
+      return (nest',ots)
+pullReshape _ _ = fail "Cannot pull reshape"
 
 -- Tie it all together in exposeInputs (for making inputs to a
 -- consumer available) and pullOutputTransforms (for moving
 -- output-transforms of a producer to its inputs instead).
 
 exposeInputs :: [Ident] -> FusedKer
-             -> Maybe (FusedKer, [OutputTransform])
+             -> TryFusion (FusedKer, [OutputTransform])
 exposeInputs inpIds ker =
   (exposeInputs' =<< pushTranspose') <|>
   (exposeInputs' =<< pullTranspose') <|>
@@ -399,40 +433,39 @@ exposeInputs inpIds ker =
         ot = outputTransform ker
 
         pushTranspose' = do
-          (nest', ot') <- pushTranspose (Just inpIds) nest ot
+          (nest', ot') <- liftMaybe $ pushTranspose (Just inpIds) nest ot
           return ker { fsoac = Nest.toSOAC nest', outputTransform = ot' }
 
         pullTranspose' = do
-          (nest',[]) <- pullTranspose nest ot
+          (nest',[]) <- liftMaybe $ pullTranspose nest ot
           return ker { fsoac = Nest.toSOAC nest', outputTransform = [] }
 
         exposeInputs' ker' =
           case commonTransforms inpIds $ inputs ker' of
             (ot', inps') | all exposed inps' ->
-              Just (ker' { fsoac = inps' `SOAC.setInputs` fsoac ker'}, ot')
-            _ -> Nothing
+              return (ker' { fsoac = inps' `SOAC.setInputs` fsoac ker'}, ot')
+            _ -> fail "Cannot expose"
 
         exposed (SOAC.Input [] (SOAC.Var _)) = True
         exposed inp = maybe True (`notElem` inpIds) $ SOAC.inputArray inp
 
-purePuller :: Monad m =>
-              (SOACNest -> [OutputTransform] -> Maybe (SOACNest, [OutputTransform]))
-           -> SOACNest -> [OutputTransform] -> m (Maybe (SOACNest, [OutputTransform]))
-purePuller f soac ots = return $ f soac ots
+purePuller :: (SOACNest -> [OutputTransform] -> Maybe (SOACNest, [OutputTransform]))
+           -> SOACNest -> [OutputTransform] -> TryFusion (SOACNest, [OutputTransform])
+purePuller f soac ots = case f soac ots of
+                          Nothing -> fail "Pure puller failed"
+                          Just x  -> return x
 
-outputTransformPullers :: MonadFreshNames VName m =>
-                          [SOACNest -> [OutputTransform] -> m (Maybe (SOACNest, [OutputTransform]))]
+outputTransformPullers :: [SOACNest -> [OutputTransform] -> TryFusion (SOACNest, [OutputTransform])]
 outputTransformPullers = [purePuller pullTranspose, pullReshape]
 
-pullOutputTransforms :: MonadFreshNames VName m =>
-                        SOAC -> [OutputTransform] -> m (Maybe SOAC)
+pullOutputTransforms :: SOAC -> [OutputTransform] -> TryFusion SOAC
 pullOutputTransforms soac origOts =
-  liftM Nest.toSOAC <$> attemptAll (Nest.fromSOAC soac) origOts
+  Nest.toSOAC <$> attemptAll (Nest.fromSOAC soac) origOts
   where attemptAll nest ots = attempt nest ots outputTransformPullers
-        attempt _ _ [] = return Nothing
+        attempt _ _ [] = fail "Cannot pull anything"
         attempt nest ots (p:ps) = do
-          x <- p nest ots
-          case x of
-            Nothing            -> attempt nest ots ps
-            Just (nest', [])   -> return $ Just nest'
-            Just (nest', ots') -> attemptAll nest' ots'
+          (nest',ots') <- p nest ots
+          case ots of
+            []  -> return nest'
+            _   -> attemptAll nest' ots' <|> return nest'
+          <|> attempt nest ots ps

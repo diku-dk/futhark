@@ -18,6 +18,7 @@ Executable l0c
                  array >= 0.4,
                  containers >= 0.5,
                  mtl >= 2.1,
+                 transformers >= 0.3,
                  srcloc >= 0.4,
                  language-c-quote >= 0.7.1,
                  mainland-pretty >= 0.2.5,
