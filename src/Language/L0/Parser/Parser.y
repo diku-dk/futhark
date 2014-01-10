@@ -258,13 +258,11 @@ Exp  :: { UncheckedExp }
 
      | iota '(' Exp ')' { Iota $3 $1 }
 
-     | Certificates size '(' intlit ',' Exp ')'
-                      { let L _ (INTLIT i) = $4
-                        in Size $1 i $6 $2 }
+     | Certificates size '(' NaturalInt ',' Exp ')'
+                      { Size $1 $4 $6 $2 }
 
-     | size '(' intlit ',' Exp ')'
-                      { let L _ (INTLIT i) = $3
-                        in Size [] i $5 $1 }
+     | size '(' NaturalInt ',' Exp ')'
+                      { Size [] $3 $5 $1 }
 
      | replicate '(' Exp ',' Exp ')' { Replicate $3 $5 $1 }
 
@@ -278,15 +276,11 @@ Exp  :: { UncheckedExp }
 
      | transpose '(' Exp ')' { Transpose [] 0 1 $3 $1 }
 
-     | Certificates transpose '(' intlit ',' intlit ',' Exp ')'
-                      { let L pos (INTLIT k) = $4 in
-                        let L pos (INTLIT n) = $6 in
-                        Transpose $1 k n $8 $2 }
+     | Certificates transpose '(' NaturalInt ',' SignedInt ',' Exp ')'
+                      { Transpose $1 $4 $6 $8 $2 }
 
-     | transpose '(' intlit ',' intlit ',' Exp ')'
-                      { let L pos (INTLIT k) = $3 in
-                        let L pos (INTLIT n) = $5 in
-                        Transpose [] k n $7 $1 }
+     | transpose '(' NaturalInt ',' SignedInt ',' Exp ')'
+                      { Transpose [] $3 $5 $7 $1 }
 
      | Certificates split '(' Exp ',' Exp ')'
                       { Split $1 $4 $6 NoInfo $2 }
@@ -458,6 +452,10 @@ Value : IntValue { $1 }
       | ArrayValue { $1 }
       | TupleValue { $1 }
 
+SignedInt :     intlit { let L _ (INTLIT num) = $1 in num  }
+          | '-' intlit { let L _ (INTLIT num) = $2 in -num }
+
+NaturalInt :     intlit { let L _ (INTLIT num) = $1 in num  }
 
 IntValue : intlit        { let L pos (INTLIT num) = $1 in IntVal num }
 RealValue : reallit      { let L pos (REALLIT num) = $1 in RealVal num }
