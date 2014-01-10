@@ -148,22 +148,25 @@ inputsToExps :: [Input] -> [Exp]
 inputsToExps is = map inputToExp' is
   where sizes = dimSizes is ++ repeat Nothing
         inputToExp' (Input ts ia) =
-          foldl transform (inputArrayToExp ia) ts
+          transform 0 (inputArrayToExp ia) $ reverse ts
 
-        transform e Repeat =
-          L0.Replicate sze' e loc
+        transform _ e [] = e
+
+        transform d e (Repeat:ts) =
+          L0.Replicate sze' (transform (d+1) e ts) loc
           where sze' = fromMaybe (Literal (IntVal 0) loc) $
-                       join $ listToMaybe $ drop (arrayRank $ typeOf e) sizes
+                       join $ listToMaybe $ drop d sizes
                 loc  = srclocOf e
 
-        transform e (Transpose cs k n) =
-          L0.Transpose cs k n e $ srclocOf e
+        transform d e (Transpose cs k n:ts) =
+          L0.Transpose cs k n (transform d e ts) $ srclocOf e
 
-        transform e (Reshape cs shape) =
-          L0.Reshape cs shape e $ srclocOf e
+        transform d e (Reshape cs shape:ts) =
+          L0.Reshape cs shape (transform d e ts) $ srclocOf e
 
-        transform e (ReshapeOuter cs shape) =
-          L0.Reshape cs (reshapeOuter shape 1 e) e $ srclocOf e
+        transform d e (ReshapeOuter cs shape:ts) =
+          let e' = transform d e ts
+          in L0.Reshape cs (reshapeOuter shape 1 e') e $ srclocOf e
 
 dimSizes :: [Input] -> [Maybe Exp]
 dimSizes is =
