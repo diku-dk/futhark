@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts, GeneralizedNewtypeDeriving, TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses #-}
+{-# LANGUAGE FlexibleContexts #-}
 module L0C.HOTrans.LoopKernel
   ( FusedKer(..)
   , newKernel
@@ -16,8 +16,6 @@ module L0C.HOTrans.LoopKernel
 import Control.Applicative
 import Control.Arrow (first)
 import Control.Monad
-import Control.Monad.Trans.Maybe
-import Control.Monad.State
 
 import qualified Data.HashSet as HS
 
@@ -30,26 +28,10 @@ import L0C.HORepresentation.SOAC (SOAC)
 import qualified L0C.HORepresentation.SOAC as SOAC
 import L0C.HORepresentation.SOACNest (SOACNest)
 import qualified L0C.HORepresentation.SOACNest as Nest
+import L0C.HORepresentation.MapNest (MapNest)
+import qualified L0C.HORepresentation.MapNest as MapNest
+import L0C.HOTrans.TryFusion
 import L0C.HOTrans.Composing
-
-newtype TryFusion a = TryFusion (MaybeT (State (NameSource VName)) a)
-  deriving (Functor, Applicative, Alternative,
-            Monad, MonadState (NameSource VName))
-
-instance MonadFreshNames VName TryFusion where
-  getNameSource = get
-  putNameSource = put
-
-tryFusion :: MonadFreshNames VName m => TryFusion a -> m (Maybe a)
-tryFusion (TryFusion m) = do
-  src <- getNameSource
-  let (x, src') = runState (runMaybeT m) src
-  putNameSource src'
-  return x
-
-liftMaybe :: Maybe a -> TryFusion a
-liftMaybe Nothing = fail "Nothing"
-liftMaybe (Just x) = return x
 
 data OutputTransform = OTranspose Certificates Int Int
                      | OReshape Certificates [Exp]
@@ -323,43 +305,36 @@ commonTransforms' inps =
            _              -> Nothing
         inspect (mot, prev) inp = Just (mot,inp:prev)
 
-mapDepth :: SOACNest -> Int
-mapDepth nest =
-  case Nest.operation nest of
-    Nest.MapT _ _ levels _ -> length (takeWhile Nest.pureNest levels) + 1
-    _                      -> 0
+mapDepth :: MapNest -> Int
+mapDepth (MapNest.MapNest _ _ levels _ _) =
+  length (takeWhile MapNest.pureNest levels) + 1
 
-pullTranspose :: SOACNest -> [OutputTransform] -> Maybe (SOACNest, [OutputTransform])
-pullTranspose nest (OTranspose cs k n:ots')
-  | n+k < mapDepth nest =
-      let inputs' = map (SOAC.addTransform $ SOAC.Transpose cs k n) $
-                    Nest.inputs nest
-      in Just (inputs' `Nest.setInputs` nest, ots')
-pullTranspose _ _ = Nothing
+pullTranspose :: SOACNest -> [OutputTransform] -> TryFusion (SOACNest, [OutputTransform])
+pullTranspose nest ots = do
+  nest' <- liftMaybeNeedNames $ MapNest.fromSOACNest nest
+  OTranspose cs k n:ots' <- return ots
+  if transposeDepth (k,n) < mapDepth nest' then
+    let inputs' = map (SOAC.addTransform $ SOAC.Transpose cs k n) $ MapNest.inputs nest'
+    in return (inputs' `Nest.setInputs` MapNest.toSOACNest nest',
+               ots')
+  else fail "Cannot pull transpose"
 
-pushTranspose :: Maybe [Ident] -> SOACNest -> [OutputTransform]
-              -> Maybe (SOACNest, [OutputTransform])
-pushTranspose _ nest ots
-  | Just (n, k, cs, inputs') <- transposedInputs $ Nest.inputs nest,
-    n+k < mapDepth nest = Just (inputs' `Nest.setInputs` nest,
-                                ots ++ [OTranspose cs n k])
-  where transposedInputs (SOAC.Input (SOAC.Transpose cs n k:ts) ia:args) =
-          foldM comb (n, k, cs, [SOAC.Input ts ia]) args
-          where comb (n1, k1, cs1, idds) (SOAC.Input (SOAC.Transpose cs2 n2 k2:ts') ia')
-                  | n1==n2, k1==k2   = Just (n1,k1,cs1++cs2,idds++[SOAC.Input ts' ia'])
-                comb _             _ = Nothing
-        transposedInputs _ = Nothing
-pushTranspose (Just inpIds) nest ots
-  | Just (ts, inputs') <- fixupInputs inpIds (Nest.inputs nest),
-    transposeReach ts < mapDepth nest =
-      let outInvTrns = uncurry (OTranspose []) . uncurry transposeInverse
-      in Just (inputs' `Nest.setInputs` nest,
+pushTranspose :: [Ident] -> SOACNest -> [OutputTransform]
+              -> TryFusion (SOACNest, [OutputTransform])
+pushTranspose inpIds nest ots = do
+  nest' <- liftMaybeNeedNames $ MapNest.fromSOACNest nest
+  (ts, inputs') <- liftMaybe $ fixupInputs inpIds $ MapNest.inputs nest'
+  if transposeReach ts < mapDepth nest' then
+    let outInvTrns = uncurry (OTranspose []) . uncurry transposeInverse
+    in return (inputs' `Nest.setInputs` MapNest.toSOACNest nest',
                ots ++ map outInvTrns (reverse ts))
-pushTranspose _ _ _ = Nothing
+  else fail "Cannot push transpose"
 
 transposeReach :: [(Int,Int)] -> Int
-transposeReach = foldr (max . transDepth) 0
-  where transDepth (k,n) = max k (k+n)
+transposeReach = foldr (max . transposeDepth) 0
+
+transposeDepth :: (Int, Int) -> Int
+transposeDepth (k,n) = max k (k+n)
 
 fixupInputs :: [Ident] -> [SOAC.Input] -> Maybe ([(Int,Int)], [SOAC.Input])
 fixupInputs inpIds inps =
@@ -433,11 +408,11 @@ exposeInputs inpIds ker =
         ot = outputTransform ker
 
         pushTranspose' = do
-          (nest', ot') <- liftMaybe $ pushTranspose (Just inpIds) nest ot
+          (nest', ot') <- pushTranspose inpIds nest ot
           return ker { fsoac = Nest.toSOAC nest', outputTransform = ot' }
 
         pullTranspose' = do
-          (nest',[]) <- liftMaybe $ pullTranspose nest ot
+          (nest',[]) <- pullTranspose nest ot
           return ker { fsoac = Nest.toSOAC nest', outputTransform = [] }
 
         exposeInputs' ker' =
@@ -449,14 +424,8 @@ exposeInputs inpIds ker =
         exposed (SOAC.Input [] (SOAC.Var _)) = True
         exposed inp = maybe True (`notElem` inpIds) $ SOAC.inputArray inp
 
-purePuller :: (SOACNest -> [OutputTransform] -> Maybe (SOACNest, [OutputTransform]))
-           -> SOACNest -> [OutputTransform] -> TryFusion (SOACNest, [OutputTransform])
-purePuller f soac ots = case f soac ots of
-                          Nothing -> fail "Pure puller failed"
-                          Just x  -> return x
-
 outputTransformPullers :: [SOACNest -> [OutputTransform] -> TryFusion (SOACNest, [OutputTransform])]
-outputTransformPullers = [purePuller pullTranspose, pullReshape]
+outputTransformPullers = [pullTranspose, pullReshape]
 
 pullOutputTransforms :: SOAC -> [OutputTransform] -> TryFusion SOAC
 pullOutputTransforms soac origOts =
