@@ -198,17 +198,17 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
     indent 2 (ppr loopbody) <+> text "in" </>
     ppr letbody
   pprPrec _ (MapT cs lam as _) =
-    ppCertificates cs <> ppSOAC "mapT" [lam] as
+    ppCertificates' cs <> ppSOAC "mapT" [lam] as
   pprPrec _ (ReduceT cs lam es as loc) =
-    ppCertificates cs <> ppSOAC "reduceT" [lam] (TupLit es loc:as)
+    ppCertificates' cs <> ppSOAC "reduceT" [lam] (TupLit es loc:as)
   pprPrec _ (RedomapT cs outer inner es as _) =
-    ppCertificates cs <> text "redomapT" <>
+    ppCertificates' cs <> text "redomapT" <>
     parens (ppr outer <> comma </> ppr inner <> comma </>
             commasep (braces (commasep $ map ppr es) : map ppr as))
   pprPrec _ (ScanT cs lam es as loc) =
-    ppCertificates cs <> ppSOAC "scanT" [lam] (TupLit es loc : as)
+    ppCertificates' cs <> ppSOAC "scanT" [lam] (TupLit es loc : as)
   pprPrec _ (FilterT cs lam as _) =
-    ppCertificates cs <> ppSOAC "filterT" [lam] as
+    ppCertificates' cs <> ppSOAC "filterT" [lam] as
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TupIdentBase ty vn) where
   ppr (Id ident)     = ppr ident
@@ -278,6 +278,10 @@ ppList as = case map ppr as of
 ppCertificates :: (Eq vn, Hashable vn, TypeBox ty, Pretty vn) => CertificatesBase ty vn -> Doc
 ppCertificates [] = empty
 ppCertificates cs = text "<" <> commasep (map ppr cs) <> text ">"
+
+ppCertificates' :: (Eq vn, Hashable vn, TypeBox ty, Pretty vn) => CertificatesBase ty vn -> Doc
+ppCertificates' [] = empty
+ppCertificates' cs = ppCertificates cs <> line
 
 render80 :: Pretty a => a -> String
 render80 = pretty 80 . ppr
