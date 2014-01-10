@@ -56,7 +56,7 @@
             ;; Boolean literals
             ("\\<\\(True\\|False\\)\\>" . font-lock-constant-face)
             ;; Numeric literals; both integers and floating-point.
-            ("~?\\([0-9]+\\|\\([0-9]+\\(\\.[0-9]*\\)?\\|\\.[0-9]+\\)\\([eE][\+\~]?[0-9]+\\)?\\)" . font-lock-constant-face)
+            ("-?\\([0-9]+\\|\\([0-9]+\\(\\.[0-9]*\\)?\\|\\.[0-9]+\\)\\([eE][\+\~]?[0-9]+\\)?\\)" . font-lock-constant-face)
             ))
   "As `l0-font-lock-keywords-1`, but also highlight constants.")
 
