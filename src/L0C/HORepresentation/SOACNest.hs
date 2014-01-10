@@ -10,7 +10,6 @@ module L0C.HORepresentation.SOACNest
   , NestBody (..)
   , bodyParams
   , Nesting (..)
-  , pureNest
   , bodyToLambda
   , lambdaToBody
   , setInputs
@@ -75,18 +74,6 @@ bodyToLambda (NewNest (Nesting paramIds inps bndIds postExp retTypes) op) =
 
 lambdaToBody :: TupleLambda -> NestBody
 lambdaToBody l = fromMaybe (Lambda l) $ liftM (uncurry $ flip NewNest) $ nested l
-
-pureNest :: Nesting -> Bool
-pureNest nest
-  | TupLit es _ <- nestingPostExp nest,
-    Just vs     <- vars es =
-      vs == nestingResult nest
-  | otherwise = False
-
-vars :: [Exp] -> Maybe [Ident]
-vars = mapM varExp
-  where varExp (Var k) = Just k
-        varExp _       = Nothing
 
 data Combinator = MapT Certificates NestBody [Nesting] SrcLoc
                 | ReduceT Certificates NestBody [Nesting] [Exp] SrcLoc
