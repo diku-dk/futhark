@@ -795,10 +795,11 @@ checkExp (Reshape cs shapeexps arrexp pos) = do
 checkExp (Transpose cs k n arrexp pos) = do
   cs' <- mapM (requireI [Elem Cert] <=< checkIdent) cs
   arrexp' <- checkExp arrexp
-  when (arrayRank (typeOf arrexp') < n + k + 1) $
+  when (arrayRank (typeOf arrexp') < reach + 1) $
     bad $ TypeError pos $ "Argument to transpose does not have " ++
-          show (n+k+1) ++ " dimensions."
+          show (reach+1) ++ " dimensions."
   return $ Transpose cs' k n arrexp' pos
+  where reach = max k $ n + k
 
 checkExp (Zip arrexps pos) = do
   arrexps' <- mapM (checkExp . fst) arrexps
