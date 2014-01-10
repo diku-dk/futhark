@@ -1,0 +1,36 @@
+// Inspired by PricingLexiFi.l0.  We cannot fuse this into a single
+// kernel, and I'm not certain that it's even possible.
+fun [real] main([real] r, [[real]] a) =
+  let divs = [0.00026609544843735446, 0.00008445945945945946,
+                0.0008333333333333334] in
+  let {b} =
+    scanT(fn {[real]} ([real] x, [real] y) =>
+            let {b1} =
+              mapT(fn {real} (real p,
+                              real v) =>
+                     let res = p * v in
+                     {res},
+                   x, y) in
+            {b1},
+          {r}, a) in
+  let {c} =
+    mapT(fn {[real]} ([real] xs) =>
+           let {b2} =
+             mapT(fn {real} (real p, real v) =>
+                    let res = p * v in
+                    {res},
+                  xs, divs) in
+           {b2},
+         b) in
+  let {d} =
+    mapT(fn {real} ([real] xs) =>
+           let {b3} =
+             reduceT(fn {real} (real x, real y) =>
+                       let bop = x < y in
+                       let v = if bop
+                               then x
+                               else y in
+                       {v},
+                     {xs[0]}, xs) in
+           {b3}, c) in
+  d

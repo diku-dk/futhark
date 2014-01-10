@@ -1,0 +1,8 @@
+fun {[[int]]} main([[int]] input) =
+  scanT(fn {*[int]} ([int] a_0, [int] b_1) =>
+        let {x_2} =
+          mapT(fn {int} (int x_2, int y_3) =>
+                 {x_2 + y_3},
+               a_0, b_1) in
+        {x_2},
+      {iota(3)}, replicate(10, iota(3)))
