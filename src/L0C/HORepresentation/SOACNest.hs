@@ -8,6 +8,7 @@ module L0C.HORepresentation.SOACNest
   , params
   , returnType
   , NestBody (..)
+  , bodyParams
   , Nesting (..)
   , pureNest
   , bodyToLambda
@@ -49,11 +50,15 @@ data Nesting = Nesting {
   , nestingResult     :: [Ident]
   , nestingPostExp    :: Exp
   , nestingReturnType :: [DeclType]
-  } deriving (Show)
+  } deriving (Eq, Ord, Show)
 
 data NestBody = Lambda TupleLambda
               | NewNest Nesting Combinator
                 deriving (Show)
+
+bodyParams :: NestBody -> [Parameter]
+bodyParams (Lambda l)       = tupleLambdaParams l
+bodyParams (NewNest nest _) = map toParam $ nestingParams nest
 
 bodyToLambda :: NestBody -> TupleLambda
 bodyToLambda (Lambda l) = l
