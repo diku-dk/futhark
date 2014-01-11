@@ -28,6 +28,7 @@ module L0C.HORepresentation.SOAC
   -- * SOAC inputs
   , Input (..)
   , varInput
+  , isVarInput
   , addTransform
   , addTransforms
   , InputTransform(..)
@@ -109,6 +110,12 @@ instance Located Input where
 -- | Create a plain array variable input with no transformations.
 varInput :: Ident -> Input
 varInput = Input [] . Var
+
+-- | If the given input is a plain variable input, with no transforms,
+-- return the variable.
+isVarInput :: Input -> Maybe Ident
+isVarInput (Input [] (Var v)) = Just v
+isVarInput _                  = Nothing
 
 -- | Add a transformation to the end of the transformation list.
 addTransform :: InputTransform -> Input -> Input
