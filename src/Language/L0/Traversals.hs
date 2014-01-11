@@ -202,16 +202,18 @@ mapExpM tv (MapT cs fun arrexps loc) =
   pure MapT <*> mapOnCertificates tv cs <*>
        mapOnTupleLambda tv fun <*> mapM (mapOnExp tv) arrexps <*>
        pure loc
-mapExpM tv (ReduceT cs fun startexps arrexps loc) =
+mapExpM tv (ReduceT cs fun inputs loc) =
   pure ReduceT <*> mapOnCertificates tv cs <*>
        mapOnTupleLambda tv fun <*>
-       mapM (mapOnExp tv) startexps <*> mapM (mapOnExp tv) arrexps <*>
+       (zip <$> mapM (mapOnExp tv) startexps <*> mapM (mapOnExp tv) arrexps) <*>
        pure loc
-mapExpM tv (ScanT cs fun startexps arrexps loc) =
+  where (startexps, arrexps) = unzip inputs
+mapExpM tv (ScanT cs fun inputs loc) =
   pure ScanT <*> mapOnCertificates tv cs <*>
        mapOnTupleLambda tv fun <*>
-       mapM (mapOnExp tv) startexps <*> mapM (mapOnExp tv) arrexps <*>
+       (zip <$> mapM (mapOnExp tv) startexps <*> mapM (mapOnExp tv) arrexps) <*>
        pure loc
+  where (startexps, arrexps) = unzip inputs
 mapExpM tv (FilterT cs fun arrexps loc) =
   pure FilterT <*> mapOnCertificates tv cs <*>
        mapOnTupleLambda tv fun <*>

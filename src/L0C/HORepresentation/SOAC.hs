@@ -252,24 +252,24 @@ transformRows nts inp =
 
 -- | A definite representation of a SOAC expression.
 data SOAC = MapT Certificates TupleLambda [Input] SrcLoc
-          | ReduceT  Certificates TupleLambda [Exp] [Input] SrcLoc
-          | ScanT Certificates TupleLambda [Exp] [Input] SrcLoc
+          | ReduceT  Certificates TupleLambda [(Exp,Input)] SrcLoc
+          | ScanT Certificates TupleLambda [(Exp,Input)] SrcLoc
           | FilterT Certificates TupleLambda [Input] SrcLoc
           | RedomapT Certificates TupleLambda TupleLambda [Exp] [Input] SrcLoc
             deriving (Show)
 
 instance Located SOAC where
   locOf (MapT _ _ _ loc) = locOf loc
-  locOf (ReduceT _ _ _ _ loc) = locOf loc
-  locOf (ScanT _ _ _ _ loc) = locOf loc
+  locOf (ReduceT _ _ _ loc) = locOf loc
+  locOf (ScanT _ _ _ loc) = locOf loc
   locOf (FilterT _ _ _ loc) = locOf loc
   locOf (RedomapT _ _ _ _ _ loc) = locOf loc
 
 -- | Returns the inputs used in a SOAC.
 inputs :: SOAC -> [Input]
 inputs (MapT _     _     arrs _) = arrs
-inputs (ReduceT  _ _ _   arrs _) = arrs
-inputs (ScanT    _ _ _   arrs _) = arrs
+inputs (ReduceT  _ _     args _) = map snd args
+inputs (ScanT    _ _     args _) = map snd args
 inputs (FilterT  _ _     arrs _) = arrs
 inputs (RedomapT _ _ _ _ arrs _) = arrs
 
@@ -277,10 +277,10 @@ inputs (RedomapT _ _ _ _ arrs _) = arrs
 setInputs :: [Input] -> SOAC -> SOAC
 setInputs arrs (MapT cs lam _ loc) =
   MapT cs lam arrs loc
-setInputs arrs (ReduceT cs lam ne _ loc) =
-  ReduceT cs lam ne arrs loc
-setInputs arrs (ScanT cs lam ne _ loc) =
-  ScanT cs lam ne arrs loc
+setInputs arrs (ReduceT cs lam args loc) =
+  ReduceT cs lam (zip (map fst args) arrs) loc
+setInputs arrs (ScanT cs lam args loc) =
+  ScanT cs lam (zip (map fst args) arrs) loc
 setInputs arrs (FilterT cs lam _ loc) =
   FilterT cs lam arrs loc
 setInputs arrs (RedomapT cs lam1 lam ne _ loc) =
@@ -288,30 +288,30 @@ setInputs arrs (RedomapT cs lam1 lam ne _ loc) =
 
 -- | The lambda used in a given SOAC.
 lambda :: SOAC -> TupleLambda
-lambda (MapT     _ lam _    _    ) = lam
-lambda (ReduceT  _ lam _    _ _  ) = lam
-lambda (ScanT    _ lam _    _ _  ) = lam
-lambda (FilterT  _ lam _    _    ) = lam
+lambda (MapT     _ lam _        _) = lam
+lambda (ReduceT  _ lam _        _) = lam
+lambda (ScanT    _ lam _        _) = lam
+lambda (FilterT  _ lam _        _) = lam
 lambda (RedomapT _ _   lam2 _ _ _) = lam2
 
 -- | Set the lambda used in the SOAC.
 setLambda :: TupleLambda -> SOAC -> SOAC
-setLambda lam (MapT     cs         _    arrs loc) =
-  MapT     cs          lam    arrs loc
-setLambda lam (ReduceT  cs         _ ne arrs loc) =
-  ReduceT  cs      lam ne arrs loc
-setLambda lam (ScanT    cs         _ ne arrs loc) =
-  ScanT  cs      lam ne arrs loc
-setLambda lam (FilterT  cs         _    arrs loc) =
-  FilterT  cs      lam    arrs      loc
-setLambda lam (RedomapT cs lam1    _ ne arrs loc) =
+setLambda lam (MapT cs _ arrs loc) =
+  MapT cs lam    arrs loc
+setLambda lam (ReduceT cs _ args loc) =
+  ReduceT cs lam args loc
+setLambda lam (ScanT cs _ args loc) =
+  ScanT cs lam args loc
+setLambda lam (FilterT cs _ arrs loc) =
+  FilterT cs lam arrs loc
+setLambda lam (RedomapT cs lam1 _ ne arrs loc) =
   RedomapT cs lam1 lam ne arrs loc
 
 -- | Returns the certificates used in a SOAC.
 certificates :: SOAC -> Certificates
 certificates (MapT     cs _     _ _) = cs
-certificates (ReduceT  cs _ _   _ _) = cs
-certificates (ScanT    cs _ _   _ _) = cs
+certificates (ReduceT  cs _ _     _) = cs
+certificates (ScanT    cs _ _     _) = cs
 certificates (FilterT  cs _     _ _) = cs
 certificates (RedomapT cs _ _ _ _ _) = cs
 
@@ -319,10 +319,12 @@ certificates (RedomapT cs _ _ _ _ _) = cs
 toExp :: SOAC -> Exp
 toExp (MapT cs l as loc) =
   L0.MapT cs l (inputsToExps as) loc
-toExp (ReduceT cs l es as loc) =
-  L0.ReduceT cs l es (inputsToExps as) loc
-toExp (ScanT cs l es as loc) =
-  L0.ScanT cs l es (inputsToExps as) loc
+toExp (ReduceT cs l args loc) =
+  L0.ReduceT cs l (zip es $ inputsToExps as) loc
+  where (es, as) = unzip args
+toExp (ScanT cs l args loc) =
+  L0.ScanT cs l (zip es $ inputsToExps as) loc
+  where (es, as) = unzip args
 toExp (FilterT cs l as loc) =
   L0.FilterT cs l (inputsToExps as) loc
 toExp (RedomapT cs l1 l2 es as loc) =
@@ -346,12 +348,14 @@ fromExp :: Exp -> Either NotSOAC SOAC
 fromExp (L0.MapT cs l as loc) = do
   as' <- mapM inputFromExp' as
   Right $ MapT cs l as' loc
-fromExp (L0.ReduceT cs l es as loc) = do
+fromExp (L0.ReduceT cs l args loc) = do
+  let (es,as) = unzip args
   as' <- mapM inputFromExp' as
-  Right $ ReduceT cs l es as' loc
-fromExp (L0.ScanT cs l es as loc) = do
+  Right $ ReduceT cs l (zip es as') loc
+fromExp (L0.ScanT cs l args loc) = do
+  let (es,as) = unzip args
   as' <- mapM inputFromExp' as
-  Right $ ScanT cs l es as' loc
+  Right $ ScanT cs l (zip es as') loc
 fromExp (L0.FilterT cs l as loc) = do
   as' <- mapM inputFromExp' as
   Right $ FilterT cs l as' loc

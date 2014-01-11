@@ -397,17 +397,19 @@ letNormExp (FilterT cs lam arr pos) = do
     arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
     makeVarExpSubst "tmp_filt2" pos (FilterT cs lam' arr' pos)
 
-letNormExp (ReduceT cs lam nes arr pos) = do
+letNormExp (ReduceT cs lam inputs pos) = do
+    let (nes, arr) = unzip inputs
     lam'  <- letNormTupleLambda lam
     nes'  <- mapM (subLetoNormExp "tmp_arg") nes
     arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
-    makeVarExpSubst "tmp_red2" pos (ReduceT cs lam' nes' arr' pos)
+    makeVarExpSubst "tmp_red2" pos (ReduceT cs lam' (zip nes' arr') pos)
 
-letNormExp (ScanT cs lam nes arr pos) = do
+letNormExp (ScanT cs lam inputs pos) = do
+    let (nes, arr) = unzip inputs
     lam'  <- letNormTupleLambda lam
     nes'  <- mapM (subLetoNormExp "tmp_arg") nes
     arr'  <- mapM (letNormOmakeVarExpSubst "tmp_arr" pos) arr
-    makeVarExpSubst "tmp_scanT" pos (ScanT cs lam' nes' arr' pos)
+    makeVarExpSubst "tmp_scanT" pos (ScanT cs lam' (zip nes' arr') pos)
 
 letNormExp (RedomapT cs lam1 lam2 nes arr pos) = do
     lam1' <- letNormTupleLambda lam1

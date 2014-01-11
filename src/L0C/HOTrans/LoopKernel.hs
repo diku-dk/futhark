@@ -197,11 +197,12 @@ fuseSOACwithKer (outIds, soac1) ker = do
       success $ SOAC.RedomapT (cs1++cs2) lam21 res_lam ne new_inp pos
 
     -- The Fusions that are semantically filter fusions:
-    (SOAC.ReduceT _ _ ne _ pos, SOAC.FilterT {})
+    (SOAC.ReduceT _ _ args pos, SOAC.FilterT {})
       | filterFusionOK outIds ker -> do
+      let ne = map fst args
       name <- newVName "check"
       let (res_lam, new_inp) = fuseFilterIntoFold lam1 inp1_arr outIds lam2 inp2_arr name
-      success $ SOAC.ReduceT (cs1++cs2) res_lam ne new_inp pos
+      success $ SOAC.ReduceT (cs1++cs2) res_lam (zip ne new_inp) pos
 
     (SOAC.RedomapT _ lam21 _ nes _ pos, SOAC.FilterT {})
       | filterFoldFusionOK outIds ker-> do
@@ -217,8 +218,9 @@ fuseSOACwithKer (outIds, soac1) ker = do
 
     -- Nothing else worked, so let's try rewriting to redomap if
     -- possible.
-    (SOAC.ReduceT _ lam ne arrs loc, _) | mapOrFilter soac1 -> do
-       let soac2' = SOAC.RedomapT (cs1++cs2) lam lam ne arrs loc
+    (SOAC.ReduceT _ lam args loc, _) | mapOrFilter soac1 -> do
+       let (ne, arrs) = unzip args
+           soac2' = SOAC.RedomapT (cs1++cs2) lam lam ne arrs loc
            ker'   = ker { fsoac = soac2'
                         , outputs = out_ids2 }
        fuseSOACwithKer (outIds, soac1) ker'
@@ -266,7 +268,7 @@ iswim _ nest ots
         innerAccParams = map toInnerAccParam $ take (length es) paramIds
         innerArrParams = drop (length es) paramIds
         innerScan = ScanT cs2 (Nest.bodyToLambda mb)
-                          (map Var innerAccParams) (map Var innerArrParams)
+                          (zip (map Var innerAccParams) (map Var innerArrParams))
                           loc1
         lam = TupleLambda {
                 tupleLambdaParams = map toParam $ innerAccParams ++ innerArrParams

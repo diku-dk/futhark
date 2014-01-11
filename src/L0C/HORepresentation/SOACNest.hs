@@ -165,16 +165,20 @@ fromSOAC (SOAC.MapT cs l as loc)
       SOACNest as $ MapT (cs++cs2) l2 (nest:ps) loc
   | otherwise =
       SOACNest as $ MapT cs (lambdaToBody l) [] loc
-fromSOAC (SOAC.ReduceT cs l es as loc)
+fromSOAC (SOAC.ReduceT cs l args loc)
   | Just (ReduceT cs2 l2 ps _ _, nest) <- nested l =
-      SOACNest as $ ReduceT (cs++cs2) l2 (nest:ps) es loc
+      SOACNest (map snd args) $
+      ReduceT (cs++cs2) l2 (nest:ps) (map fst args) loc
   | otherwise =
-      SOACNest as $ ReduceT cs (lambdaToBody l) [] es loc
-fromSOAC (SOAC.ScanT cs l es as loc)
+      SOACNest (map snd args) $
+      ReduceT cs (lambdaToBody l) [] (map fst args) loc
+fromSOAC (SOAC.ScanT cs l args loc)
   | Just (ScanT cs2 l2 ps _ _, nest) <- nested l =
-      SOACNest as $ ScanT (cs++cs2) l2 (nest:ps) es loc
+      SOACNest (map snd args) $
+      ScanT (cs++cs2) l2 (nest:ps) (map fst args) loc
   | otherwise =
-      SOACNest as $ ScanT cs (lambdaToBody l) [] es loc
+      SOACNest (map snd args) $
+      ScanT cs (lambdaToBody l) [] (map fst args) loc
 fromSOAC (SOAC.FilterT cs l as loc)
   | Just (FilterT cs2 l2 ps  _, nest) <- nested l =
       SOACNest as $ FilterT (cs++cs2) l2 (nest:ps) loc
@@ -218,9 +222,9 @@ toSOAC :: SOACNest -> SOAC
 toSOAC (SOACNest as comb@(MapT cs b _ loc)) =
   SOAC.MapT cs (subLambda b comb) as loc
 toSOAC (SOACNest as comb@(ReduceT cs b _ es loc)) =
-  SOAC.ReduceT cs (subLambda b comb) es as loc
+  SOAC.ReduceT cs (subLambda b comb) (zip es as) loc
 toSOAC (SOACNest as comb@(ScanT cs b _ es loc)) =
-  SOAC.ScanT cs (subLambda b comb) es as loc
+  SOAC.ScanT cs (subLambda b comb) (zip es as) loc
 toSOAC (SOACNest as comb@(FilterT cs b _ loc)) =
   SOAC.FilterT cs (subLambda b comb) as loc
 toSOAC (SOACNest as comb@(RedomapT cs l b _ es loc)) =

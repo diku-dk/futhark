@@ -298,12 +298,10 @@ Exp  :: { UncheckedExp }
                       { Reduce $3 $5 $7 NoInfo $1 }
 
      | Certificates reduceT '(' TupleFunAbstr ',' DExps ')'
-                      { let (accexps, arrexps) = unzip $6 in
-                        ReduceT $1 $4 accexps arrexps $2 }
+                      { ReduceT $1 $4 $6 $2 }
 
      | reduceT '(' TupleFunAbstr ',' DExps ')'
-                      { let (accexps, arrexps) = unzip $5 in
-                        ReduceT [] $3 accexps arrexps $1 }
+                      { ReduceT [] $3 $5 $1 }
 
      | map '(' FunAbstr ',' Exp ')'
                       { Map $3 $5 NoInfo $1 }
@@ -318,12 +316,10 @@ Exp  :: { UncheckedExp }
                       { Scan $3 $5 $7 NoInfo $1 }
 
      | Certificates scanT '(' TupleFunAbstr ',' DExps ')'
-                      { let (accexps, arrexps) = unzip $6 in
-                        ScanT $1 $4 accexps arrexps $2 }
+                      { ScanT $1 $4 $6 $2 }
 
      | scanT '(' TupleFunAbstr ',' DExps ')'
-                      { let (accexps, arrexps) = unzip $5 in
-                        ScanT [] $3 accexps arrexps $1 }
+                      { ScanT [] $3 $5 $1 }
 
      | zip '(' Exps2 ')'
                       { Zip (map (\x -> (x, NoInfo)) $3) $1 }

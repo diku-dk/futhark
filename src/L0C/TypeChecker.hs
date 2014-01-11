@@ -999,7 +999,8 @@ checkExp (MapT ass fun arrexps pos) = do
   fun'    <- checkTupleLambda fun arrargs
   return $ MapT ass' fun' arrexps' pos
 
-checkExp (ReduceT ass fun startexps arrexps pos) = do
+checkExp (ReduceT ass fun inputs pos) = do
+  let (startexps, arrexps) = unzip inputs
   ass' <- mapM (requireI [Elem Cert] <=< checkIdent) ass
   (startexps', startargs) <- unzip <$> mapM checkArg startexps
   (arrexps', arrargs)     <- unzip <$> mapM checkSOACArrayArg arrexps
@@ -1013,11 +1014,12 @@ checkExp (ReduceT ass fun startexps arrexps pos) = do
   unless (intupletype `subtypeOf` funret) $
       bad $ TypeError pos $ "Array element value is of type " ++ ppType intupletype ++
                             ", but scan function returns type " ++ ppType funret ++ "."
-  return $ ReduceT ass' fun' startexps' arrexps' pos
+  return $ ReduceT ass' fun' (zip startexps' arrexps') pos
 
 -- ScanT is exactly identical to ReduceT.  Duplicate for clarity
 -- anyway.
-checkExp (ScanT ass fun startexps arrexps pos) = do
+checkExp (ScanT ass fun inputs pos) = do
+  let (startexps, arrexps) = unzip inputs
   ass' <- mapM (requireI [Elem Cert] <=< checkIdent) ass
   (startexps', startargs) <- unzip <$> mapM checkArg startexps
   (arrexps', arrargs)     <- unzip <$> mapM checkSOACArrayArg arrexps
@@ -1031,7 +1033,7 @@ checkExp (ScanT ass fun startexps arrexps pos) = do
   unless (intupletype `subtypeOf` funret) $
     bad $ TypeError pos $ "Array element value is of type " ++ ppType intupletype ++
                           ", but scan function returns type " ++ ppType funret ++ "."
-  return $ ScanT ass' fun' startexps' arrexps' pos
+  return $ ScanT ass' fun' (zip startexps' arrexps') pos
 
 checkExp (FilterT ass fun arrexps pos) = do
   ass' <- mapM (requireI [Elem Cert] <=< checkIdent) ass

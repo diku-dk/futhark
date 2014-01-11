@@ -411,7 +411,7 @@ transformExp (Reduce lam ne arr _ loc) =
   let cs = catMaybes [c1,c2]
   in transformLambda (Conjoin (map Var cs) loc) lam $ \lam' ->
      untupleDeclExp (lambdaReturnType lam) $
-     ReduceT cs lam' (map Var nes) (map Var arrs) loc
+     ReduceT cs lam' (zip (map Var nes) (map Var arrs)) loc
 
 transformExp e@(Scan lam ne arr _ loc) =
   tupToIdentList arr $ \c1 arrs ->
@@ -419,7 +419,7 @@ transformExp e@(Scan lam ne arr _ loc) =
   let cs = catMaybes [c1,c2]
   in transformLambda (Conjoin (map Var cs) loc) lam $ \lam' ->
      untupleSOAC cs (typeOf e) $
-       ScanT cs lam' (map Var nes) (map Var arrs) loc
+       ScanT cs lam' (zip (map Var nes) (map Var arrs)) loc
 
 transformExp e@(Filter lam arr _ loc) =
   tupToIdentList arr $ \c arrs ->
@@ -444,21 +444,25 @@ transformExp (MapT cs1 lam arrs loc) =
   let (cs2, arrs') = splitCertExps arrlst
   in return $ MapT (cs1++cs2) lam' (map Var arrs') loc
 
-transformExp (ReduceT cs1 lam nes arrs loc) =
+transformExp (ReduceT cs1 lam inputs loc) =
   transformTupleLambda lam $ \lam' ->
   tupsToIdentList arrs $ \arrlst ->
   tupsToIdentList nes $ \nelst ->
     let (cs2, arrs') = splitCertExps arrlst
         (cs3, nes') = splitCertExps nelst
-    in return $ ReduceT (cs1++cs2++cs3) lam' (map Var nes') (map Var arrs') loc
+    in return $ ReduceT (cs1++cs2++cs3) lam'
+                (zip (map Var nes') (map Var arrs')) loc
+  where (nes, arrs) = unzip inputs
 
-transformExp (ScanT cs1 lam nes arrs loc) =
+transformExp (ScanT cs1 lam inputs loc) =
   transformTupleLambda lam $ \lam' ->
   tupsToIdentList arrs $ \arrlst ->
   tupsToIdentList nes $ \nelst ->
     let (cs2, arrs') = splitCertExps arrlst
         (cs3, nes') = splitCertExps nelst
-    in return $ ScanT (cs1++cs2++cs3) lam' (map Var nes') (map Var arrs') loc
+    in return $ ScanT (cs1++cs2++cs3) lam'
+                (zip (map Var nes') (map Var arrs')) loc
+  where (nes, arrs) = unzip inputs
 
 transformExp (FilterT cs1 lam arrs loc) =
   transformTupleLambda lam $ \lam' ->

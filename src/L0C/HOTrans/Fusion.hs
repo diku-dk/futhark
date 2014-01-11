@@ -331,8 +331,9 @@ fusionGatherExp fres (LetPat pat e body _)
           (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
           greedyFuse False used_lam blres (patIdents pat, soac)
 
-        SOAC.ReduceT _ lam nes _ loc -> do
+        SOAC.ReduceT _ lam args loc -> do
           -- a reduce always starts a new kernel
+          let nes = map fst args
           bres  <- bindPat pat $ fusionGatherExp fres body
           bres' <- fusionGatherExp bres $ TupLit nes loc
           (_, blres) <- fusionGatherLam (HS.empty, bres') lam
@@ -345,9 +346,10 @@ fusionGatherExp fres (LetPat pat e body _)
           bres' <- fusionGatherExp bres $ TupLit ne loc
           addNewKer bres' (patIdents pat, soac)
 
-        SOAC.ScanT _ lam nes _ loc -> do
+        SOAC.ScanT _ lam args loc -> do
           -- NOT FUSABLE (probably), but still add as kernel, as
           -- optimisations like ISWIM may make it fusable.
+          let nes = map fst args
           bres  <- bindPat pat $ fusionGatherExp fres body
           (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
           blres' <- fusionGatherExp blres $ TupLit nes loc
@@ -443,8 +445,8 @@ fusionGatherExp _ (Filter   _ _ _     pos) = errorIllegal "filter"  pos
 fusionGatherExp _ (Redomap  _ _ _ _ _ pos) = errorIllegal "redomap"  pos
 
 fusionGatherExp _ (MapT     _ _ _     pos) = errorIllegal "mapT"    pos
-fusionGatherExp _ (ReduceT  _ _ _ _   pos) = errorIllegal "reduceT" pos
-fusionGatherExp _ (ScanT    _ _ _ _   pos) = errorIllegal "scanT"   pos
+fusionGatherExp _ (ReduceT  _ _ _     pos) = errorIllegal "reduceT" pos
+fusionGatherExp _ (ScanT    _ _ _     pos) = errorIllegal "scanT"   pos
 fusionGatherExp _ (FilterT  _ _ _     pos) = errorIllegal "filterT" pos
 fusionGatherExp _ (RedomapT _ _ _ _ _ pos) = errorIllegal "redomapT" pos
 

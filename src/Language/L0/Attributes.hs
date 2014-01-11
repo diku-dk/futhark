@@ -657,10 +657,12 @@ typeOf (DoLoop _ _ _ _ _ body _) = typeOf body
 typeOf (MapT _ f arrs _) =
   Elem $ Tuple $ map (\x -> arrayType 1 x (uniqueProp x)) $
        tupleLambdaType f $ map typeOf arrs
-typeOf (ReduceT _ fun acc arrs _) =
+typeOf (ReduceT _ fun inputs _) =
   Elem $ Tuple $ tupleLambdaType fun $ map typeOf acc ++ map typeOf arrs
-typeOf (ScanT _ _ _ arrs _) =
+  where (acc, arrs) = unzip inputs
+typeOf (ScanT _ _ inputs _) =
   (Elem $ Tuple $ map typeOf arrs) `setUniqueness` Unique
+  where (_, arrs) = unzip inputs
 typeOf (FilterT _ _ arrs _) = Elem $ Tuple $ map typeOf arrs
 typeOf (RedomapT _ outerfun innerfun acc arrs _) =
   Elem $ Tuple $ tupleLambdaType outerfun $

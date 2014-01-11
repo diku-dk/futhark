@@ -478,12 +478,13 @@ hoistInExp e@(MapT cs (TupleLambda params _ _ _) arrexps _) =
     withSOACArrSlices cs params ks $
     withShapes (sameOuterShapes cs ks) $
     hoistInExpBase e
-hoistInExp e@(ReduceT cs (TupleLambda params _ _ _) accexps arrexps _) =
+hoistInExp e@(ReduceT cs (TupleLambda params _ _ _) args _) =
   hoistInSOAC e arrexps $ \ks ->
     withSOACArrSlices cs (drop (length accexps) params) ks $
     withShapes (sameOuterShapes cs ks) $
     hoistInExpBase e
-hoistInExp e@(ScanT cs (TupleLambda params _ _ _) accexps arrexps _) =
+  where (accexps, arrexps) = unzip args
+hoistInExp e@(ScanT cs (TupleLambda params _ _ _) args _) =
   hoistInSOAC e arrexps $ \arrks ->
   hoistInSOAC e accexps $ \accks ->
     let (accparams, arrparams) = splitAt (length accexps) params in
@@ -492,6 +493,7 @@ hoistInExp e@(ScanT cs (TupleLambda params _ _ _) accexps arrexps _) =
                 zip (map fromParam accparams) $ map (slice cs 0) accks) $
     withShapes (sameOuterShapes cs arrks) $
     hoistInExpBase e
+  where (accexps, arrexps) = unzip args
 hoistInExp e@(RedomapT cs _ (TupleLambda innerparams _ _ _)
               accexps arrexps _) =
   hoistInSOAC e arrexps $ \ks ->

@@ -350,8 +350,8 @@ data ExpBase ty vn =
              --   of basic type, or a multi-dim array of basic type.
              -- 4th arg is the input-array row types
 
-            | ReduceT  (CertificatesBase ty vn) (TupleLambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] SrcLoc
-            | ScanT    (CertificatesBase ty vn) (TupleLambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] SrcLoc
+            | ReduceT  (CertificatesBase ty vn) (TupleLambdaBase ty vn) [(ExpBase ty vn, ExpBase ty vn)] SrcLoc
+            | ScanT    (CertificatesBase ty vn) (TupleLambdaBase ty vn) [(ExpBase ty vn, ExpBase ty vn)] SrcLoc
             | FilterT  (CertificatesBase ty vn) (TupleLambdaBase ty vn) [ExpBase ty vn] SrcLoc
             | RedomapT (CertificatesBase ty vn) (TupleLambdaBase ty vn) (TupleLambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] SrcLoc
 
@@ -391,8 +391,8 @@ instance Located (ExpBase ty vn) where
   locOf (Conjoin _ loc) = locOf loc
   locOf (DoLoop _ _ _ _ _ _ pos) = locOf pos
   locOf (MapT _ _ _ pos) = locOf pos
-  locOf (ReduceT _ _ _ _ pos) = locOf pos
-  locOf (ScanT _ _ _ _ pos) = locOf pos
+  locOf (ReduceT _ _ _ pos) = locOf pos
+  locOf (ScanT _ _ _ pos) = locOf pos
   locOf (FilterT _ _ _ pos) = locOf pos
   locOf (RedomapT _ _ _ _ _ pos) = locOf pos
 

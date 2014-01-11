@@ -100,7 +100,7 @@ transformExp rec mape@(Map fun e intype loc) =
         return branch
 
 transformExp rec (Reduce fun accexp arrexp intype loc) =
-  newReduction (dec rec) loc arrexp accexp $ \(arr, arrv) (acc, accv) (i, iv) -> do
+  newFold (dec rec) loc arrexp accexp $ \(arr, arrv) (acc, accv) (i, iv) -> do
     let indexi = Index [] arr Nothing [iv] intype loc
     funcall <- transformLambda (dec rec) fun [accv, indexi]
     let loop = DoLoop (Id acc) accv i (Size [] 0 arrv loc) loopbody accv loc
@@ -108,7 +108,7 @@ transformExp rec (Reduce fun accexp arrexp intype loc) =
     return loop
 
 transformExp rec (Scan fun accexp arrexp intype loc) =
-  newReduction (dec rec) loc arrexp accexp $ \(arr, arrv) (acc, accv) (i, iv) -> do
+  newFold (dec rec) loc arrexp accexp $ \(arr, arrv) (acc, accv) (i, iv) -> do
     let indexi = Index [] arr Nothing [iv] intype loc
     funcall <- transformLambda (dec rec) fun [accv, indexi]
     let loop = DoLoop (TupId [Id acc, Id arr] loc)
@@ -172,14 +172,15 @@ transformExp rec mape@(MapT cs fun arrs loc) = do
                       outarrv loc
         return branch
 
-transformExp rec (ReduceT cs fun accexp arrexps loc) =
-  newReduction2 (dec rec) loc arrexps accexp $ \(arr, _) (acc, accv) (i, iv) -> do
+transformExp rec (ReduceT cs fun args loc) =
+  newFold2 (dec rec) loc arrexps accexp $ \(arr, _) (acc, accv) (i, iv) -> do
     funcall <- transformTupleLambda (dec rec) fun (map Var acc ++ index cs arr iv)
     return $ DoLoop (TupId (map Id acc) loc) accv i (size cs arr)
              funcall accv loc
+  where (accexp, arrexps) = unzip args
 
-transformExp rec (ScanT cs fun accexp arrexps loc) =
-  newReduction2 (dec rec) loc arrexps accexp $ \(arr, arrv) (acc, _) (i, iv) -> do
+transformExp rec (ScanT cs fun args loc) =
+  newFold2 (dec rec) loc arrexps accexp $ \(arr, arrv) (acc, _) (i, iv) -> do
     funcall <- transformTupleLambda (dec rec) fun $ map Var acc ++ index cs arr iv
     loopbody <- letwith cs arr iv funcall $
                 TupLit (index cs arr iv++map Var arr) loc
@@ -187,6 +188,7 @@ transformExp rec (ScanT cs fun accexp arrexps loc) =
                (TupLit (map Var $ acc ++ arr) loc)
                i (size cs arr) loopbody arrv loc
     return loop
+  where (accexp, arrexps) = unzip args
 
 transformExp rec filtere@(FilterT cs fun arrexps loc) =
   newLets (dec rec) "arr" arrexps $ \arr _ ->
@@ -211,7 +213,7 @@ transformExp rec filtere@(FilterT cs fun arrexps loc) =
         (b,bv) <- newVar loc "b" (Elem Int)
         return $ TupleLambda [toParam a, toParam b] (BinOp Plus av bv (Elem Int) loc) [Elem Int] loc
       scan <- newTupLet (dec rec) "mape" mape $ \_ mape' ->
-                transformExp (dec rec) $ ScanT cs plus [intval 0] [mape'] loc
+                transformExp (dec rec) $ ScanT cs plus [(intval 0,mape')] loc
       newTupLet (dec rec) "ia" scan $ \ia _ -> do
         let indexia ind = Index cs ia Nothing [ind] (Elem Int) loc
             indexiaend = indexia (sub1 nv)
@@ -229,27 +231,30 @@ transformExp rec filtere@(FilterT cs fun arrexps loc) =
   where intval x = Literal (IntVal x) loc
         sub1 e = BinOp Minus e (intval 1) (Elem Int) loc
 
-transformExp rec (RedomapT ass _ innerfun accexps arrexps loc) =
-  transformExp rec $ ReduceT ass innerfun accexps arrexps loc
+transformExp rec (RedomapT cs _ innerfun accexps arrexps loc) =
+  newFold2 (dec rec) loc arrexps accexps $ \(arr, _) (acc, accv) (i, iv) -> do
+    funcall <- transformTupleLambda (dec rec) innerfun (map Var acc ++ index cs arr iv)
+    return $ DoLoop (TupId (map Id acc) loc) accv i (size cs arr)
+             funcall accv loc
 
 transformExp rec e = mapExpM transform e
   where transform = identityMapper {
                       mapOnExp = transformExp (dec rec)
                     }
 
-newReduction :: MonadFreshNames VName m =>
+newFold :: MonadFreshNames VName m =>
                 RecDepth -> SrcLoc -> Exp -> Exp ->
                 ((Ident, Exp) -> (Ident, Exp) -> (Ident, Exp) -> m Exp) -> m Exp
-newReduction rec loc arrexp accexp body =
+newFold rec loc arrexp accexp body =
   newLet rec "arr" arrexp $ \arr arrv ->
     newLet rec "acc" accexp $ \acc accv -> do
       (i, iv) <- newVar loc "i" (Elem Int)
       body (arr, arrv) (acc, accv) (i, iv)
 
-newReduction2 :: MonadFreshNames VName m =>
+newFold2 :: MonadFreshNames VName m =>
                  RecDepth -> SrcLoc -> [Exp] -> [Exp]
               -> (([Ident], Exp) -> ([Ident], Exp) -> (Ident, Exp) -> m Exp) -> m Exp
-newReduction2 rec loc arrexps accexps body = do
+newFold2 rec loc arrexps accexps body = do
   (i, iv) <- newVar loc "i" (Elem Int)
   newLets rec "arr" arrexps $ \arr arrv -> do
     let ets = map typeOf accexps

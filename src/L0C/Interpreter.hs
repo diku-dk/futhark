@@ -492,14 +492,16 @@ evalExp (MapT _ fun arrexps loc) = do
   return $ arrays (fromDecl $ Elem $ Tuple ret) vs'
   where TupleLambda _ _ ret _ = fun
 
-evalExp (ReduceT _ fun accexps arrexps loc) = do
+evalExp (ReduceT _ fun inputs loc) = do
+  let (accexps, arrexps) = unzip inputs
   startaccs <- mapM evalExp accexps
   vss <- mapM (arrToList loc <=< evalExp) arrexps
   let foldfun acc x = applyTupleLambda fun $ untuple acc ++ x
   foldM foldfun (tuple startaccs) (transpose vss)
 
-evalExp (ScanT _ fun startexps arrexps loc) = do
-  startvals <- mapM evalExp startexps
+evalExp (ScanT _ fun inputs loc) = do
+  let (accexps, arrexps) = unzip inputs
+  startvals <- mapM evalExp accexps
   vss <- mapM (arrToList loc <=< evalExp) arrexps
   (acc, vals') <- foldM scanfun (tuple startvals, []) $ transpose vss
   return $ arrays (fromDecl $ valueType acc) $ reverse vals'
