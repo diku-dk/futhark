@@ -14,6 +14,7 @@ module L0C.HOTrans.Composing
   ( fuseMaps
   , fuseFilters
   , fuseFilterIntoFold
+  , Input(..)
   )
   where
 
@@ -23,10 +24,29 @@ import qualified Data.HashMap.Lazy as HM
 import qualified Data.Map as M
 import Data.Maybe
 
+import qualified L0C.HORepresentation.SOAC as SOAC
+
 import L0C.L0
 
-import L0C.HORepresentation.SOAC (Input)
-import qualified L0C.HORepresentation.SOAC as SOAC
+-- | Something that can be used as a SOAC input.  As far as this
+-- module is concerned, this means supporting two operations.  The
+-- following invariants must hold:
+--
+-- @isVarInput (varInput x) == Just x@
+--
+-- @varInput (fromJust (isVarInput inp)) == inp@.
+--
+-- (The latter only if 'isVarInput' does not return Nothing.)
+class (Ord a, Eq a) => Input a where
+  -- | Turn an arbitrary identifier into an input.
+  varInput   :: Ident -> a
+  -- | Check whether an arbitrary input corresponds to a plain
+  -- variable input.
+  isVarInput :: a -> Maybe Ident
+
+instance Input SOAC.Input where
+  varInput = SOAC.varInput
+  isVarInput = SOAC.isVarInput
 
 -- | @fuseMaps lam1 inp1 out1 lam2 inp2@ fuses the function @lam1@ into
 -- @lam2@.  Both functions must be mapping functions, although @lam2@
@@ -45,12 +65,13 @@ import qualified L0C.HORepresentation.SOAC as SOAC
 --
 -- The result is the fused function, and a list of the array inputs
 -- expected by the SOAC containing the fused function.
-fuseMaps :: TupleLambda -- ^ Function of SOAC to be fused.
-         -> [Input] -- ^ Input of SOAC to be fused.
+fuseMaps :: Input input =>
+            TupleLambda -- ^ Function of SOAC to be fused.
+         -> [input] -- ^ Input of SOAC to be fused.
          -> [Ident] -- ^ Output of SOAC to be fused.
          -> TupleLambda -- ^ Function to be fused with.
-         -> [Input] -- ^ Input of SOAC to be fused with.
-         -> (TupleLambda, [Input]) -- ^ The fused lambda and the
+         -> [input] -- ^ Input of SOAC to be fused with.
+         -> (TupleLambda, [input]) -- ^ The fused lambda and the
                                    -- inputs of the resulting SOAC.
 fuseMaps lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
   where lam2' =
@@ -66,13 +87,14 @@ fuseMaps lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
 
 -- | Similar to 'fuseMaps', although the two functions must be
 -- predicates returning @{bool}@.  Returns a new predicate function.
-fuseFilters :: TupleLambda -- ^ Function of SOAC to be fused.
-            -> [Input] -- ^ Input of SOAC to be fused.
+fuseFilters :: Input input =>
+               TupleLambda -- ^ Function of SOAC to be fused.
+            -> [input] -- ^ Input of SOAC to be fused.
             -> [Ident] -- ^ Output of SOAC to be fused.
             -> TupleLambda -- ^ Function to be fused with.
-            -> [Input] -- ^ Input of SOAC to be fused with.
+            -> [input] -- ^ Input of SOAC to be fused with.
             -> VName -- ^ A fresh name (used internally).
-            -> (TupleLambda, [Input]) -- ^ The fused lambda and the inputs of the resulting SOAC.
+            -> (TupleLambda, [input]) -- ^ The fused lambda and the inputs of the resulting SOAC.
 fuseFilters lam1 inp1 out1 lam2 inp2 vname =
   fuseFilterInto lam1 inp1 out1 lam2 inp2 vname false
   where false = Literal (TupVal [LogVal False]) $ srclocOf lam2
@@ -90,23 +112,25 @@ fuseFilters lam1 inp1 out1 lam2 inp2 vname =
 --                   then f2(acc,args)
 --                   else acc
 -- @
-fuseFilterIntoFold :: TupleLambda -- ^ Function of SOAC to be fused.
-                   -> [Input] -- ^ Input of SOAC to be fused.
+fuseFilterIntoFold :: Input input =>
+                      TupleLambda -- ^ Function of SOAC to be fused.
+                   -> [input] -- ^ Input of SOAC to be fused.
                    -> [Ident] -- ^ Output of SOAC to be fused.
                    -> TupleLambda -- ^ Function to be fused with.
-                   -> [Input] -- ^ Input of SOAC to be fused with.
+                   -> [input] -- ^ Input of SOAC to be fused with.
                    -> VName -- ^ A fresh name (used internally).
-                   -> (TupleLambda, [Input]) -- ^ The fused lambda and the inputs of the resulting SOAC.
+                   -> (TupleLambda, [input]) -- ^ The fused lambda and the inputs of the resulting SOAC.
 fuseFilterIntoFold lam1 inp1 out1 lam2 inp2 vname =
   fuseFilterInto lam1 inp1 out1 lam2 inp2 vname identity
   where identity = TupLit (map (Var . fromParam) lam2redparams) $ srclocOf lam2
         lam2redparams = take (length (tupleLambdaParams lam2) - length inp2) $
                         tupleLambdaParams lam2
 
-fuseFilterInto :: TupleLambda -> [Input] -> [Ident]
-               -> TupleLambda -> [Input]
+fuseFilterInto :: Input input =>
+                  TupleLambda -> [input] -> [Ident]
+               -> TupleLambda -> [input]
                -> VName -> Exp
-               -> (TupleLambda, [Input])
+               -> (TupleLambda, [input])
 fuseFilterInto lam1 inp1 out1 lam2 inp2 vname falsebranch = (lam2', HM.elems inputmap)
   where lam2' =
           lam2 { tupleLambdaParams = lam2redparams ++ HM.keys inputmap
@@ -128,9 +152,13 @@ fuseFilterInto lam1 inp1 out1 lam2 inp2 vname falsebranch = (lam2', HM.elems inp
         (lam2redparams, pat, inputmap, makeCopies, makeCopiesInner) =
           fuseInputs lam1 inp1 out1 lam2 inp2
 
-fuseInputs :: TupleLambda -> [Input] -> [Ident]
-           -> TupleLambda -> [Input]
-           -> ([Parameter], TupIdent, HM.HashMap Parameter Input, Exp -> Exp, Exp -> Exp)
+fuseInputs :: Input input =>
+              TupleLambda -> [input] -> [Ident]
+           -> TupleLambda -> [input]
+           -> ([Parameter],
+               TupIdent,
+               HM.HashMap Parameter input,
+               Exp -> Exp, Exp -> Exp)
 fuseInputs lam1 inp1 out1 lam2 inp2 =
   (lam2redparams, pat, inputmap, makeCopies, makeCopiesInner)
   where loc = srclocOf lam2
@@ -146,16 +174,19 @@ fuseInputs lam1 inp1 out1 lam2 inp2 =
         (inputmap, makeCopies) =
           removeDuplicateInputs $ originputmap `HM.difference` outins
 
-outParams :: [Ident] -> [Parameter] -> [Input]
-          -> HM.HashMap Parameter Input
+outParams :: Input input =>
+             [Ident] -> [Parameter] -> [input]
+          -> HM.HashMap Parameter input
 outParams out1 lam2arrparams inp2 =
   HM.fromList $ mapMaybe isOutParam $ zip lam2arrparams inp2
-  where isOutParam (p, SOAC.Input [] (SOAC.Var a))
-          | a `elem` out1 = Just (p, SOAC.varInput a)
+  where isOutParam (p, inp)
+          | Just a <- isVarInput inp,
+            a `elem` out1 = Just (p, inp)
         isOutParam _      = Nothing
 
-filterOutParams :: [Ident]
-                -> HM.HashMap Parameter Input
+filterOutParams :: Input input =>
+                   [Ident]
+                -> HM.HashMap Parameter input
                 -> [Either Type Ident]
 filterOutParams out1 outins =
   snd $ mapAccumL checkUsed outUsage out1
@@ -163,12 +194,13 @@ filterOutParams out1 outins =
           where add m p e = M.insertWith (++) e [fromParam p] m
 
         checkUsed m a =
-          case M.lookup (SOAC.varInput a) m of
-            Just (p:ps) -> (M.insert (SOAC.varInput a) ps m, Right p)
+          case M.lookup (varInput a) m of
+            Just (p:ps) -> (M.insert (varInput a) ps m, Right p)
             _           -> (m, Left $ rowType $ identType a)
 
-removeDuplicateInputs :: HM.HashMap Parameter Input
-                      -> (HM.HashMap Parameter Input, Exp -> Exp)
+removeDuplicateInputs :: Input input =>
+                         HM.HashMap Parameter input
+                      -> (HM.HashMap Parameter input, Exp -> Exp)
 removeDuplicateInputs = fst . HM.foldlWithKey' comb ((HM.empty, id), M.empty)
   where comb ((parmap, inner), arrmap) par arr =
           case M.lookup arr arrmap of
