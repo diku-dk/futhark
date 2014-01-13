@@ -42,13 +42,16 @@ transformExp (LetPat pat e@(MapT cs fun es mloc) body loc) = do
 transformExp e@(Index cs v idxcs (idx:idxs) loc) = do
   me <- asks $ lookupDelayed v cs idxcs idx
   case me of
-    Just e' -> do e'' <- provideNames e'
-                  case idxs of
-                    [] -> return e''
-                    _  -> do ident <- newIdent elname (typeOf e'') loc
-                             idxmore <- transformExp $ Index cs ident idxcs idxs loc
-                             return $ LetPat (Id ident) e'' idxmore loc
     Nothing -> return e
+    Just e' -> do
+     e'' <- provideNames e'
+     ident <- newIdent elname (typeOf e'') loc
+     idxmore <- transformExp $ Index cs ident idxcs idxs loc
+     let res = LetPat (Id ident) e'' idxmore loc
+     case idxs of
+       [] | cheapExp e'' -> return e''
+       _  | cheapExp res -> return res
+       _                 -> return e
   where elname = baseString (identName v) ++ "_elem"
 
 transformExp e = mapExpM transform e
@@ -110,6 +113,17 @@ performArrayDelays pat e = do
     Just f ->
       return $ HM.fromList [ (name, dels f bnd) | (name,bnd) <- zip names bnds ]
   where names = patIdents pat
+
+cheapExp :: Exp -> Bool
+cheapExp (LetPat _ e body _) = cheapExp e && cheapExp body
+cheapExp (BinOp _ x y _ _) = cheapExp x && cheapExp y
+cheapExp (Not x _) = cheapExp x
+cheapExp (Negate x _ _) = cheapExp x
+cheapExp (Var {}) = True
+cheapExp (Literal {}) = True
+cheapExp (TupLit es _) = all cheapExp es
+cheapExp (Index _ _ _ idx _) = all cheapExp idx
+cheapExp _ = False
 
 newtype InlinerM a = InlinerM (StateT (NameSource VName) (Reader ArrayIndexMap) a)
   deriving (Functor, Applicative, Monad,
