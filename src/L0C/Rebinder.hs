@@ -81,11 +81,12 @@ provides (LetBind pat _ _)            = patNameSet pat
 provides (LetWithBind _ dest _ _ _ _) = HS.singleton $ identName dest
 
 data Need = Need { needBindings :: NeedSet
+                 , freeInBound  :: HS.HashSet VName
                  }
 
 instance Monoid Need where
-  Need b1 `mappend` Need b2 = Need $ b1 <> b2
-  mempty = Need []
+  Need b1 f1 `mappend` Need b2 f2 = Need (b1 <> b2) (f1 <> f2)
+  mempty = Need [] HS.empty
 
 data Env = Env { envBindings :: SZ.ShapeMap
                , envDupeState :: DupeState
@@ -123,7 +124,10 @@ runHoistM (HoistM m) src env = let (x, _, _) = runRWS m env src
                                in x
 
 needThis :: BindNeed -> HoistM ()
-needThis need = tell $ Need [need]
+needThis need = tell $ Need [need] HS.empty
+
+boundFree :: HS.HashSet VName -> HoistM ()
+boundFree fs = tell $ Need [] fs
 
 withNewBinding :: String -> Exp -> (Ident -> HoistM a) -> HoistM a
 withNewBinding k e m = do
@@ -267,25 +271,44 @@ transformFun (fname, rettype, params, body, loc) = do
   body' <- blockAllHoisting $ hoistInExp body
   return (fname, rettype, params, body', loc)
 
-addBindings :: DupeState -> [BindNeed] -> Exp -> Exp
+addBindings :: DupeState -> [BindNeed] -> Exp -> HS.HashSet VName
+            -> (Exp, HS.HashSet VName)
 addBindings dupes needs =
-  foldl (.) id $ snd $ mapAccumL comb (HM.empty, dupes) needs
-  where comb (m,ds) bind@(LoopBind mergepat mergeexp loopvar
-                              boundexp loopbody) =
-          ((m `HM.union` distances m bind,ds),
-           \inner -> DoLoop mergepat mergeexp loopvar boundexp
-                     loopbody inner $ srclocOf inner)
+  curry $ foldl (.) id $ snd $
+          mapAccumL comb (HM.empty, dupes) needs
+  where bind bnd binder (inner, fs)
+          | provides bnd `intersects` fs =
+            (binder inner,
+             (fs `HS.difference` provides bnd)
+             `HS.union` requires bnd)
+          | otherwise =
+            (inner, fs)
+
+        comb (m,ds) bnd@(LoopBind mergepat mergeexp loopvar
+                          boundexp loopbody) =
+          ((m `HM.union` distances m bnd, ds),
+           bind bnd $
+           \inner ->
+             DoLoop mergepat mergeexp loopvar boundexp
+             loopbody inner $ srclocOf inner)
+
         comb (m,ds) (LetBind pat e alts) =
-          let add pat' e' =
-                let (e'',ds') = performCSE ds pat' e'
-                in ((m `HM.union` distances m (LetBind pat' e' []),ds'),
-                    \inner -> LetPat pat' e'' inner $ srclocOf inner)
+          let add e' =
+                let (e'',ds') = performCSE ds pat e'
+                    bnd       = LetBind pat e'' []
+                in ((m `HM.union` distances m bnd, ds'),
+                    bind bnd $
+                    \inner ->
+                      LetPat pat e'' inner $ srclocOf inner)
           in case map snd $ sortBy (comparing fst) $ map (score m) $ e:alts of
-               e':_ -> add pat e'
-               _    -> add pat e
-        comb (m,ds) bind@(LetWithBind cs dest src idxcs idxs ve) =
-          ((m `HM.union` distances m bind,ds),
-           \inner -> LetWith cs dest src idxcs idxs ve inner $ srclocOf inner)
+               e':_ -> add e'
+               _    -> add e
+
+        comb (m,ds) bnd@(LetWithBind cs dest src idxcs idxs ve) =
+          ((m `HM.union` distances m bnd, ds),
+           bind bnd $
+           \inner ->
+             LetWith cs dest src idxcs idxs ve inner $ srclocOf inner)
 
 score :: HM.HashMap VName Int -> Exp -> (Int, Exp)
 score m (Var k) =
@@ -376,11 +399,11 @@ type BlockPred = BodyInfo -> BindNeed -> Bool
 orIf :: BlockPred -> BlockPred -> BlockPred
 orIf p1 p2 body need = p1 body need || p2 body need
 
-splitHoistable :: BlockPred -> Exp -> Need -> ([BindNeed], Need)
+splitHoistable :: BlockPred -> Exp -> NeedSet -> ([BindNeed], NeedSet)
 splitHoistable block body needs =
   let (blocked, hoistable, _) =
-        foldl split ([], [], HS.empty) $ inDepOrder $ needBindings needs
-  in (reverse blocked, Need hoistable)
+        foldl split ([], [], HS.empty) $ inDepOrder needs
+  in (reverse blocked, hoistable)
   where block' = block $ bodyInfo body
         split (blocked, hoistable, ks) need =
           case need of
@@ -405,9 +428,13 @@ blockIfSeq ps m = foldl (flip blockIf) m ps
 blockIf :: BlockPred -> HoistM Exp -> HoistM Exp
 blockIf block m = pass $ do
   (body, needs) <- listen m
-  let (blocked, hoistable) = splitHoistable block body needs
   ds <- asks envDupeState
-  return (addBindings ds blocked body, const hoistable)
+  let (blocked, hoistable) = splitHoistable block body $ needBindings needs
+      (e, fs) = addBindings ds blocked body $ freeInBound needs
+  return (e,
+          const Need { needBindings = hoistable
+                     , freeInBound  = fs
+                     })
 
 blockAllHoisting :: HoistM Exp -> HoistM Exp
 blockAllHoisting = blockIf $ \_ _ -> True
@@ -448,11 +475,14 @@ hoistCommon m1 m2 = pass $ do
   (body1, needs1) <- listen m1
   (body2, needs2) <- listen m2
   let splitOK = splitHoistable $ isNotSafe `orIf` isNotCheap
-      (needs1', safe1) = splitOK body1 needs1
-      (needs2', safe2) = splitOK body2 needs2
-  return ((addBindings newDupeState needs1' body1,
-           addBindings newDupeState needs2' body2),
-          const $ safe1 <> safe2)
+      (needs1', safe1) = splitOK body1 $ needBindings needs1
+      (needs2', safe2) = splitOK body2 $ needBindings needs2
+      (e1, f1) = addBindings newDupeState needs1' body1 $ freeInBound needs1
+      (e2, f2) = addBindings newDupeState needs2' body2 $ freeInBound needs2
+  return ((e1, e2),
+          const Need { needBindings = safe1 <> safe2
+                     , freeInBound = f1 <> f2
+                     })
 
 hoistInExp :: Exp -> HoistM Exp
 hoistInExp (If c e1 e2 t loc) = do
@@ -500,7 +530,9 @@ hoistInExp e@(RedomapT cs _ (TupleLambda innerparams _ _ _)
     withSOACArrSlices cs (drop (length accexps) innerparams) ks $
     withShapes (sameOuterShapes cs ks) $
     hoistInExpBase e
-hoistInExp e = hoistInExpBase e
+hoistInExp e = do e' <- hoistInExpBase e
+                  boundFree $ freeNamesInExp e'
+                  return e'
 
 hoistInExpBase :: Exp -> HoistM Exp
 hoistInExpBase = mapExpM hoist
