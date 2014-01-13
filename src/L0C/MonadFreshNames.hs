@@ -13,6 +13,7 @@ module L0C.MonadFreshNames
   , newIDFromString
   , newVName
   , newIdent
+  , newIdent'
   , module L0C.FreshNames
   ) where
 
@@ -76,3 +77,13 @@ newIdent :: (VarName vn, MonadFreshNames (ID vn) m) =>
 newIdent s t loc = do
   s' <- newID $ varName s Nothing
   return $ Ident s' t loc
+
+-- | Produce a fresh 'Ident', using the given 'Ident' as a template,
+-- but possibly modifying the name.
+newIdent' :: (MonadFreshNames VName m) =>
+             (String -> String)
+          -> IdentBase ty VName -> m (IdentBase ty VName)
+newIdent' f ident =
+  newIdent (f $ nameToString $ baseName $ identName ident)
+           (identType ident) $
+           srclocOf ident
