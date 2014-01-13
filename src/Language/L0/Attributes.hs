@@ -615,8 +615,9 @@ typeOf (Var ident) =
 typeOf (Apply _ _ t _) = t
 typeOf (LetPat _ _ body _) = typeOf body
 typeOf (LetWith _ _ _ _ _ _ body _) = typeOf body
-typeOf (Index _ ident _ _ t _) =
-  t `addAliases` HS.insert (identName ident)
+typeOf (Index _ ident _ idx _) =
+  stripArray (length idx) (identType ident)
+  `addAliases` HS.insert (identName ident)
 typeOf (Iota _ _) = arrayType 1 (Elem Int) Unique
 typeOf (Size {}) = Elem Int
 typeOf (Replicate _ e _) = arrayType 1 (typeOf e) u

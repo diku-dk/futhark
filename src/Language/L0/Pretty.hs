@@ -156,7 +156,7 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
     where ppcs = case idxcs of Nothing     -> empty
                                Just []     -> text "<>|"
                                Just csidx' -> ppCertificates csidx' <> text "|"
-  pprPrec _ (Index cs v csidx idxs _ _) =
+  pprPrec _ (Index cs v csidx idxs _) =
     ppCertificates cs <> ppr v <>
     brackets (ppcs <> commasep (map ppr idxs))
     where ppcs = case csidx of Nothing     -> empty

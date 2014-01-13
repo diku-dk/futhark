@@ -193,7 +193,7 @@ bindLet pat e m
     withBinding pat e $
     withShapes (SZ.sizeRelations (patIdents pat) nest) m
 
-bindLet pat@(Id dest) e@(Index cs src _ idxs _ _) m =
+bindLet pat@(Id dest) e@(Index cs src _ idxs _) m =
   withBinding pat e $
   withShape dest (slice cs (length idxs) src) m
 

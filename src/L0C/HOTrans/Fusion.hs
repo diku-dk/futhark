@@ -390,7 +390,7 @@ fusionGatherExp fres (Var idd) =
         Array{} -> return fres { unfusable = HS.insert (identName idd) (unfusable fres) }
         _       -> return fres
 
-fusionGatherExp fres (Index _ idd _ inds _ _) =
+fusionGatherExp fres (Index _ idd _ inds _) =
     foldM fusionGatherExp fres (Var idd : inds)
 
 fusionGatherExp fres (LetWith _ id1 id0 _ inds elm body _) = do

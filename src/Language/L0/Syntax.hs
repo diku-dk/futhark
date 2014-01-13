@@ -269,12 +269,10 @@ data ExpBase ty vn =
                     (IdentBase ty vn)
                     (Maybe (CertificatesBase ty vn))
                     [ExpBase ty vn]
-                    (ty vn)
                     SrcLoc
             -- ^ 3rd arg are (optional) certificates for bounds
             -- checking.  If given (even as an empty list), no
-            -- run-time bounds checking is done.  5th arg is the
-            -- result type
+            -- run-time bounds checking is done.
 
             | Size (CertificatesBase ty vn) Int (ExpBase ty vn) SrcLoc
             -- ^ The size of the specified array dimension.
@@ -371,7 +369,7 @@ instance Located (ExpBase ty vn) where
   locOf (Apply _ _ _ pos) = locOf pos
   locOf (LetPat _ _ _ pos) = locOf pos
   locOf (LetWith _ _ _ _ _ _ _ pos) = locOf pos
-  locOf (Index _ _ _ _ _ pos) = locOf pos
+  locOf (Index _ _ _ _ pos) = locOf pos
   locOf (Iota _ pos) = locOf pos
   locOf (Size _ _ _ pos) = locOf pos
   locOf (Replicate _ _ pos) = locOf pos

@@ -82,13 +82,13 @@ transformExp rec e | stopRecursion rec = return e
 -- element of the array and use that to construct the array for the
 -- rest.  If the input array is empty, we simply return an empty
 -- output array.
-transformExp rec mape@(Map fun e intype loc) =
+transformExp rec mape@(Map fun e _ loc) =
   newLet (dec rec) "inarr" e $ \inarr inarrv -> do
     (i, iv) <- newVar loc "i" (Elem Int)
     newLet (dec rec) "n" (Size [] 0 inarrv loc) $ \_ nv -> do
       let zero = Literal (IntVal 0) loc
-          index0 = Index [] inarr Nothing [zero] intype loc
-          indexi = Index [] inarr Nothing [iv] intype loc
+          index0 = Index [] inarr Nothing [zero] loc
+          indexi = Index [] inarr Nothing [iv] loc
       funcall0 <- transformLambda (dec rec) fun [index0]
       funcall <- transformLambda (dec rec) fun [indexi]
       newLet (dec rec) "outarr" (Replicate nv funcall0 loc) $ \outarr outarrv -> do
@@ -99,17 +99,17 @@ transformExp rec mape@(Map fun e intype loc) =
             loopbody = LetWith [] outarr outarr Nothing [iv] funcall outarrv loc
         return branch
 
-transformExp rec (Reduce fun accexp arrexp intype loc) =
+transformExp rec (Reduce fun accexp arrexp _ loc) =
   newFold (dec rec) loc arrexp accexp $ \(arr, arrv) (acc, accv) (i, iv) -> do
-    let indexi = Index [] arr Nothing [iv] intype loc
+    let indexi = Index [] arr Nothing [iv] loc
     funcall <- transformLambda (dec rec) fun [accv, indexi]
     let loop = DoLoop (Id acc) accv i (Size [] 0 arrv loc) loopbody accv loc
         loopbody = LetPat (Id acc) funcall accv loc
     return loop
 
-transformExp rec (Scan fun accexp arrexp intype loc) =
+transformExp rec (Scan fun accexp arrexp _ loc) =
   newFold (dec rec) loc arrexp accexp $ \(arr, arrv) (acc, accv) (i, iv) -> do
-    let indexi = Index [] arr Nothing [iv] intype loc
+    let indexi = Index [] arr Nothing [iv] loc
     funcall <- transformLambda (dec rec) fun [accv, indexi]
     let loop = DoLoop (TupId [Id acc, Id arr] loc)
                (TupLit [accv, arrv] loc) i (Size [] 0 arrv loc) loopbody arrv loc
@@ -126,8 +126,8 @@ transformExp rec (Filter fun arrexp rowtype loc) =
       (i, iv) <- newVar loc "i" (Elem Int)
       fun' <- transformLambda (dec rec) fun [xv]
       let branch = If fun' (intval 1) (intval 0) (Elem Int) loc
-          indexin0 = Index [] arr Nothing [intval 0] rowtype loc
-          indexin = Index [] arr Nothing [iv] rowtype loc
+          indexin0 = Index [] arr Nothing [intval 0] loc
+          indexin = Index [] arr Nothing [iv] loc
       mape <- transformExp rec $ Map (AnonymFun [toParam x] branch (Elem Int) loc) arrv rowtype loc
       plus <- do
         (a,av) <- newVar loc "a" (Elem Int)
@@ -136,7 +136,7 @@ transformExp rec (Filter fun arrexp rowtype loc) =
                  (BinOp Plus av bv (Elem Int) loc) (Elem Int) loc
       scan <- transformExp (dec rec) $ Scan plus (intval 0) mape (Elem Int) loc
       newLet (dec rec) "ia" scan $ \ia _ -> do
-        let indexia ind = Index [] ia Nothing [ind] (Elem Int) loc
+        let indexia ind = Index [] ia Nothing [ind] loc
             indexiaend = indexia (BinOp Minus nv (intval 1) (Elem Int) loc)
             indexi = indexia iv
             indexim1 = indexia (BinOp Minus iv (intval 1) (Elem Int) loc)
@@ -215,7 +215,7 @@ transformExp rec filtere@(FilterT cs fun arrexps loc) =
       scan <- newTupLet (dec rec) "mape" mape $ \_ mape' ->
                 transformExp (dec rec) $ ScanT cs plus [(intval 0,mape')] loc
       newTupLet (dec rec) "ia" scan $ \ia _ -> do
-        let indexia ind = Index cs ia Nothing [ind] (Elem Int) loc
+        let indexia ind = Index cs ia Nothing [ind] loc
             indexiaend = indexia (sub1 nv)
             indexi = indexia iv
             indexim1 = indexia (sub1 iv)
@@ -305,7 +305,7 @@ maybeCopy e
 
 index :: Certificates -> [Ident] -> Exp -> [Exp]
 index cs arrs i = flip map arrs $ \arr ->
-                  Index cs arr Nothing [i] (stripArray 1 $ identType arr) $ srclocOf i
+                  Index cs arr Nothing [i] $ srclocOf i
 
 newResultArray :: MonadFreshNames VName m =>
                   RecDepth -> Exp -> Exp -> ([Ident] -> Exp -> m Exp) -> m Exp

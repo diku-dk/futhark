@@ -378,10 +378,10 @@ Exp  :: { UncheckedExp }
                       { LetWith [] $2 $2 Nothing [] $6 $8 $1 }
 
      | Id Index
-                      { Index [] $1 (fst $2) (snd $2) NoInfo (srclocOf $1) }
+                      { Index [] $1 (fst $2) (snd $2) (srclocOf $1) }
 
      | Certificates Id Index
-                      { Index $1 $2 (fst $3) (snd $3) NoInfo (srclocOf $2) }
+                      { Index $1 $2 (fst $3) (snd $3) (srclocOf $2) }
 
      | loop '(' TupId ')' '=' for Id '<' Exp do Exp in Exp %prec letprec
                       { DoLoop $3 (tupIdExp $3) $7 $9 $11 $13 $1 }

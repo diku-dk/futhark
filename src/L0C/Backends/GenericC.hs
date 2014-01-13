@@ -532,7 +532,7 @@ compileExp' place (LetPat pat e body _) = do
                      $items:body'
                    }|]
 
-compileExp' place (Index _ var csidxs idxs _ _) = do
+compileExp' place (Index _ var csidxs idxs _) = do
   arr <- lookupVar $ identName var
   idxvars <- mapM (new . ("index_"++) . show) [0..length idxs-1]
   idxs' <- concat <$> zipWithM compileExp (map varExp idxvars) idxs

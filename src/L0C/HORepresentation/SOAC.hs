@@ -89,9 +89,8 @@ inputArrayToExp :: InputArray -> Exp
 inputArrayToExp (Var k)  = L0.Var k
 inputArrayToExp (Iota e) = L0.Iota e $ srclocOf e
 inputArrayToExp (Index cs idd idxcs idxs) =
-  L0.Index cs idd idxcs (map idx idxs) t $ srclocOf idd
-  where t = stripArray (length idxs) $ identType idd
-        idx (VarIndex indidd) = L0.Var indidd
+  L0.Index cs idd idxcs (map idx idxs) $ srclocOf idd
+  where idx (VarIndex indidd) = L0.Var indidd
         idx (ConstIndex i)    = Literal (IntVal i) $ srclocOf idd
 
 -- | One array input to a SOAC - a SOAC may have multiple inputs, but
@@ -135,7 +134,7 @@ inputFromExp ie = do (ts, ia) <- examineExp ie
 
         examineExp (L0.Iota ne _) = Just ([], Iota ne)
 
-        examineExp (L0.Index cs idd idxcs idxs _ _) = do
+        examineExp (L0.Index cs idd idxcs idxs _) = do
           idxs' <- mapM idx idxs
           Just ([], Index cs idd idxcs idxs')
           where idx (L0.Var indidd)           = Just $ VarIndex indidd
