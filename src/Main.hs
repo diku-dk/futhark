@@ -26,6 +26,7 @@ import qualified L0C.FirstOrderTransform as FOT
 import qualified L0C.TupleTransform as TT
 import qualified L0C.FullNormalization as FN
 import qualified L0C.Rebinder as RB
+import qualified L0C.IndexInliner as II
 import L0C.Untrace
 import qualified L0C.Backends.SequentialC as SequentialC
 import qualified L0C.Backends.Bohrium as Bohrium
@@ -98,6 +99,7 @@ commandLineOptions =
   , fotransformOpt "f" ["first-order-transform"]
   , tatransformOpt "t" ["tuple-of-arrays-transform"]
   , eotransformOpt "e" ["enabling-optimisations"]
+  , iitransformOpt []  ["inline-map-indexes"]
   , hotransformOpt "h" ["higher-order-optimizations"]
   , Option "s" ["standard"]
     (NoArg $ \opts -> opts { l0pipeline = standardPipeline ++ l0pipeline opts })
@@ -186,6 +188,11 @@ eotransform = Pass { passName = "enabling optimations"
                    , passOp = liftPass enablingOpts
                    }
 
+iitransform :: Pass
+iitransform = Pass { passName = "inlining map indexing"
+                   , passOp = return . II.transformProg
+                   }
+
 hotransform :: Pass
 hotransform = Pass { passName = "higher-order optimisations"
                    , passOp = liftPass highOrdTransf
@@ -193,8 +200,9 @@ hotransform = Pass { passName = "higher-order optimisations"
 
 standardPipeline :: [Pass]
 standardPipeline =
-  [ uttransform, tatransform, eotransform, normalize, hoist, eotransform,
-    hotransform, eotransform, normalize, hoistAggr, eotransform ]
+  [ uttransform, tatransform, eotransform, iitransform, rename,
+    normalize, hoist, eotransform, hotransform, eotransform, normalize,
+    hoistAggr, eotransform ]
 
 passoption :: String -> Pass -> String -> [String] -> L0Option
 passoption desc pass short long =
@@ -236,6 +244,11 @@ eotransformOpt :: String -> [String] -> L0Option
 eotransformOpt =
   passoption "Perform simple enabling optimisations."
   eotransform
+
+iitransformOpt :: String -> [String] -> L0Option
+iitransformOpt =
+  passoption "Inline indexing into maps."
+  iitransform
 
 hotransformOpt :: String -> [String] -> L0Option
 hotransformOpt =
