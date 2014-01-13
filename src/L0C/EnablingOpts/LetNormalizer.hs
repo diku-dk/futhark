@@ -108,21 +108,14 @@ letNormProg prog = do
 ---- Run on Lambda Only!
 -----------------------------------------------------------------
 
-runLamLetNormM :: VNameSource -> LetNormM a -> Either EnablingOptError (a, LetNormRes)
+runLamLetNormM :: VNameSource -> LetNormM a -> Either EnablingOptError (a, VNameSource)
 runLamLetNormM nmsrc (LetNormM a) =
-    runWriterT (evalStateT a nmsrc)
+  fst <$> runWriterT (runStateT a nmsrc)
 
 letNormOneTupleLambda :: VNameSource -> TupleLambda
-                      -> Either EnablingOptError (VNameSource, TupleLambda)
-letNormOneTupleLambda nmsrc lam = do
-    (res, _) <- runLamLetNormM nmsrc (letNormTupleLambdaAlone lam)
-    return res
-
-letNormTupleLambdaAlone :: TupleLambda -> LetNormM (VNameSource, TupleLambda)
-letNormTupleLambdaAlone lam = do
-    lam'   <- letNormTupleLambda lam
-    nmsrc' <- get
-    return (nmsrc', lam')
+                      -> Either EnablingOptError (TupleLambda, VNameSource)
+letNormOneTupleLambda nmsrc lam =
+  runLamLetNormM nmsrc (letNormTupleLambda lam)
 
 -----------------------------------------------------------------
 -----------------------------------------------------------------

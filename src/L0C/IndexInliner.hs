@@ -3,8 +3,9 @@
 -- is directly the result of a 'mapT'.  Beware: The resulting program
 -- is not uniquely named.
 module L0C.IndexInliner
-  (
-  transformProg
+  ( transformProg
+  , transformExp
+  , transformLambda
   )
   where
 
@@ -23,30 +24,40 @@ import L0C.NeedNames
 transformProg :: Prog -> Prog
 transformProg prog =
   let src = newNameSourceForProg prog
-  in Prog $ runInlinerM src $ mapM transformFun $ progFunctions prog
+  in Prog $ fst $ runInlinerM src $ mapM transformFun $ progFunctions prog
+
+-- | Transform just a single expression.
+transformExp :: NameSource VName -> Exp -> (Exp, NameSource VName)
+transformExp src = runInlinerM src . transformExpM
+
+-- | Transform just a single lambda.
+transformLambda :: NameSource VName -> TupleLambda -> (TupleLambda, NameSource VName)
+transformLambda src l =
+  let (e, src') = transformExp src $ tupleLambdaBody l
+  in (l { tupleLambdaBody = e }, src')
 
 transformFun :: FunDec -> InlinerM FunDec
 transformFun (fname, rettype, params, body, loc) = do
-  body' <- transformExp body
+  body' <- transformExpM body
   return (fname, rettype, params, body', loc)
 
-transformExp :: Exp -> InlinerM Exp
+transformExpM :: Exp -> InlinerM Exp
 
-transformExp (LetPat pat e@(MapT cs fun es mloc) body loc) = do
-  es'  <- mapM transformExp es
+transformExpM (LetPat pat e@(MapT cs fun es mloc) body loc) = do
+  es'  <- mapM transformExpM es
   fun' <- transformTupleLambda fun
   dels <- performArrayDelays pat e
-  body' <- local (HM.union dels) $ transformExp body
+  body' <- local (HM.union dels) $ transformExpM body
   return $ LetPat pat (MapT cs fun' es' mloc) body' loc
 
-transformExp e@(Index cs v idxcs (idx:idxs) loc) = do
+transformExpM e@(Index cs v idxcs (idx:idxs) loc) = do
   me <- asks $ lookupDelayed v cs idxcs idx
   case me of
     Nothing -> return e
     Just e' -> do
      e'' <- provideNames e'
      ident <- newIdent elname (typeOf e'') loc
-     idxmore <- transformExp $ Index cs ident idxcs idxs loc
+     idxmore <- transformExpM $ Index cs ident idxcs idxs loc
      let res = LetPat (Id ident) e'' idxmore loc
      case idxs of
        [] | cheapExp e'' -> return e''
@@ -54,15 +65,15 @@ transformExp e@(Index cs v idxcs (idx:idxs) loc) = do
        _                 -> return e
   where elname = baseString (identName v) ++ "_elem"
 
-transformExp e = mapExpM transform e
+transformExpM e = mapExpM transform e
   where transform = identityMapper {
-                      mapOnExp         = transformExp
+                      mapOnExp         = transformExpM
                     , mapOnTupleLambda = transformTupleLambda
                     }
 
 transformTupleLambda :: TupleLambda -> InlinerM TupleLambda
 transformTupleLambda l = do
-  e <- transformExp $ tupleLambdaBody l
+  e <- transformExpM $ tupleLambdaBody l
   return l { tupleLambdaBody = e }
 
 type ArrayIndexMap = HM.HashMap Ident
@@ -133,5 +144,5 @@ instance MonadFreshNames VName InlinerM where
   getNameSource = get
   putNameSource = put
 
-runInlinerM :: NameSource VName -> InlinerM a -> a
-runInlinerM src (InlinerM m) = runReader (evalStateT m src) emptyArrayIndexMap
+runInlinerM :: NameSource VName -> InlinerM a -> (a, NameSource VName)
+runInlinerM src (InlinerM m) = runReader (runStateT m src) emptyArrayIndexMap

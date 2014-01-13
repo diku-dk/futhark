@@ -15,6 +15,7 @@ module L0C.EnablingOpts.EnablingOptDriver (
 import L0C.L0
 import L0C.Renamer
 import L0C.MonadFreshNames
+import qualified L0C.IndexInliner as II
 
 import L0C.EnablingOpts.InliningDeadFun
 import L0C.EnablingOpts.CopyCtPropFold
@@ -59,10 +60,11 @@ normCopyOneTupleLambda :: MonadFreshNames VName m => Prog -> TupleLambda ->
                           m (Either EnablingOptError TupleLambda)
 normCopyOneTupleLambda prog lam = do
   nmsrc <- getNameSource
-  let res = do (nmsrc', lam') <- letNormOneTupleLambda    nmsrc lam
+  let res = do (lam', nmsrc') <- letNormOneTupleLambda    nmsrc lam
                lam''          <- copyCtPropOneTupleLambda prog  lam'
-               return (nmsrc',lam'')
+               let (lam''', nmsrc'') = II.transformLambda nmsrc' lam''
+               return (lam''', nmsrc'')
   case res of Left e -> return $ Left e
-              Right (nmsrc', normLam) -> do
+              Right (normLam, nmsrc') -> do
                 putNameSource nmsrc'
                 return $ Right normLam
