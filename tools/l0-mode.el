@@ -79,7 +79,7 @@
   "Indent current line as L0 code."
   (interactive)
   (let ((savep (> (current-column) (current-indentation)))
-	(indent (or (l0-calculate-indentation)
+    (indent (or (l0-calculate-indentation)
                 (current-indentation))))
     (if savep
         (save-excursion (indent-line-to indent))
@@ -123,7 +123,7 @@ and \"else\", and \"let\", \"loop\", and \"in\"."
            ;; Don't touch comments.
            ((looking-at "//")
             (current-column))
-           
+
            ;; Function definitions to column 0.
            ((looking-at "fun\\>")
             0)
@@ -173,7 +173,7 @@ and \"else\", and \"let\", \"loop\", and \"in\"."
                        (or (l0-find-keyword-backward "let")
                            (l0-find-keyword-backward "loop")))
               (current-column)))
-          
+
           ;; Otherwise, try to align to a control keyword if the
           ;; previous line does not end with a comma.
           (when (not (save-excursion
