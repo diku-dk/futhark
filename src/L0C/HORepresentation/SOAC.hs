@@ -154,7 +154,7 @@ inputFromExp ie = do (ts, ia) <- examineExp ie
 -- | Convert SOAC inputs to the corresponding expressions.
 inputsToExps :: [Input] -> [Exp]
 inputsToExps is =
-  map (inputToExp' $ dimSizes is ++ repeat Nothing) is
+  map (inputToExp' $ dimSizes is) is
   where inputToExp' sizes (Input ts ia) =
           transform sizes 0 (inputArrayToExp ia) $ reverse ts
 
