@@ -153,31 +153,32 @@ inputFromExp ie = do (ts, ia) <- examineExp ie
 
 -- | Convert SOAC inputs to the corresponding expressions.
 inputsToExps :: [Input] -> [Exp]
-inputsToExps is = map inputToExp' is
-  where sizes = dimSizes is ++ repeat Nothing
-        inputToExp' (Input ts ia) =
-          transform 0 (inputArrayToExp ia) $ reverse ts
+inputsToExps is =
+  map (inputToExp' $ dimSizes is ++ repeat Nothing) is
+  where inputToExp' sizes (Input ts ia) =
+          transform sizes 0 (inputArrayToExp ia) $ reverse ts
 
-        transform _ e [] = e
+        transform _ _ e [] = e
 
-        transform d e (Repeat:ts) =
-          L0.Replicate sze' (transform (d+1) e ts) loc
+        transform sizes d e (Repeat:ts) =
+          L0.Replicate sze' (transform sizes (d+1) e ts) loc
           where sze' = fromMaybe (Literal (IntVal 0) loc) $
                        join $ listToMaybe $ drop d sizes
                 loc  = srclocOf e
 
-        transform d e (Transpose cs k n:ts) =
-          L0.Transpose cs k n (transform d e ts) $ srclocOf e
+        transform sizes d e (Transpose cs k n:ts) =
+          let e' = transform (transposeIndex k n sizes) d e ts
+          in L0.Transpose cs k n e' $ srclocOf e
 
-        transform d e (Reshape cs shape:ts) =
-          L0.Reshape cs shape (transform d e ts) $ srclocOf e
+        transform sizes d e (Reshape cs shape:ts) =
+          L0.Reshape cs shape (transform sizes d e ts) $ srclocOf e
 
-        transform d e (ReshapeOuter cs shape:ts) =
-          let e' = transform d e ts
+        transform sizes d e (ReshapeOuter cs shape:ts) =
+          let e' = transform sizes d e ts
           in L0.Reshape cs (reshapeOuter shape 1 e') e $ srclocOf e
 
-        transform d e (ReshapeInner cs shape:ts) =
-          let e' = transform d e ts
+        transform sizes d e (ReshapeInner cs shape:ts) =
+          let e' = transform sizes d e ts
           in L0.Reshape cs (reshapeInner shape 1 e') e $ srclocOf e
 
 dimSizes :: [Input] -> [Maybe Exp]
@@ -253,6 +254,8 @@ transformRows (Transpose cs k n:nts) inp =
   transformRows nts $ addTransform (Transpose cs (k+1) n) inp
 transformRows (Reshape cs shape:nts) inp =
   transformRows nts $ addTransform (ReshapeInner cs shape) inp
+transformRows (Repeat:nts) inp =
+  transformRows nts $ addTransforms [Transpose [] 0 1, Repeat, Transpose [] 0 2] inp
 transformRows nts inp =
   error $ "transformRows: Cannot transform this yet:\n" ++ show nts ++ "\n" ++ show inp
 
