@@ -86,7 +86,7 @@
       (indent-line-to indent))))
 
 ;; Keywords on which to base indentation.
-(cl-defstruct l0-indkwd name level pos)
+(defstruct l0-indkwd name level pos)
 
 (defun l0-indkwd-column (k)
   (save-excursion
@@ -115,14 +115,16 @@ prefer as little indentation as possible to visually separate the
 code, but use more detailed indentation with \"if\", \"then\",
 and \"else\", and \"let\", \"loop\", and \"in\"."
   (let ((parse-sexp-lookup-properties t)
-        (parse-sexp-ignore-comments t))
+        (parse-sexp-ignore-comments t)
+        (oldp (point)))
     (save-excursion
       (beginning-of-line-text)
-      (or (cond
 
-           ;; Don't touch comments.
-           ((looking-at "//")
-            (current-column))
+      ;; Align comment to next non-comment line.
+      (when (looking-at "//")
+        (forward-comment (buffer-size)))
+
+      (or (cond
 
            ;; Function definitions to column 0.
            ((looking-at "fun\\>")
@@ -174,6 +176,16 @@ and \"else\", and \"let\", \"loop\", and \"in\"."
                            (l0-find-keyword-backward "loop")))
               (current-column)))
 
+          ;; Otherwise, if the previous line ends with "=", indent to
+          ;; the matching "let" if it's close.
+          (save-excursion
+            (when (and (l0-backward-part)
+                       (looking-at "=")
+                       (let ((linum (line-number-at-pos)))
+                         (when (l0-find-keyword-backward "let")
+                           (= linum (line-number-at-pos)))))
+              (+ l0-indent-level (current-column))))
+
           ;; Otherwise, try to align to a control keyword if the
           ;; previous line does not end with a comma.
           (when (not (save-excursion
@@ -219,15 +231,20 @@ and \"else\", and \"let\", \"loop\", and \"in\"."
             (goto-char (1+ (point)))
             (or
              (save-excursion
-               ;; If the top element is not on the same line as the
-               ;; opening paren, use 1 indent level.
                (when (re-search-forward "[^[:space:]]" (line-end-position) t)
                  (goto-char (1- (point)))
                  (current-column)))
-             (+ l0-indent-level (1- (current-column)))))
+             ;; If the top element is not on the same line as the opening paren,
+             ;; use 1 indent level relative to the previous line.
+             (save-excursion
+               (goto-char oldp)
+               (forward-line -1)
+               (beginning-of-line-text)
+               (+ l0-indent-level (current-column)))
+             ))
 
-          ;; In all remaining cases (what are those?), keep the
-          ;; current indentation.
+          ;; In all remaining cases (what are those?), keep the current
+          ;; indentation.
           ))))
 
 (defun l0-find-keyword-first-on-line-backward (word &optional is-at-in)
@@ -258,13 +275,13 @@ return t if found; return nil otherwise."
         ;; indentation.
         (orig-in (or is-at-in (looking-at "in")))
         ;; Only look in the current paren-delimited code.
-        (startp (or (ignore-errors
-                      (save-excursion
-                        (backward-up-list 1)
-                        (point)))
-                      -1)))
+        (topp (or (ignore-errors
+                    (save-excursion
+                      (backward-up-list 1)
+                      (point)))
+                  -1)))
     (while (and (not (bobp))
-                (> (point) startp)
+                (> (point) topp)
                 (l0-backward-part)
                 (or (not (or (looking-at word)
                              (looking-at "fun")))
@@ -283,7 +300,8 @@ return t if found; return nil otherwise."
                 (setq missing-outs (max 0 (1- missing-outs))))
                ((looking-at "in")
                 (incf missing-outs))))))
-    (if (looking-at word)
+    (if (and (looking-at word)
+             (not (= (point) oldp)))
         t
       (goto-char oldp)
       nil)))
