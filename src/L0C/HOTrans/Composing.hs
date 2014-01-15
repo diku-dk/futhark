@@ -29,23 +29,13 @@ import qualified L0C.HORepresentation.SOAC as SOAC
 import L0C.L0
 
 -- | Something that can be used as a SOAC input.  As far as this
--- module is concerned, this means supporting two operations.  The
--- following invariants must hold:
---
--- @isVarInput (varInput x) == Just x@
---
--- @varInput (fromJust (isVarInput inp)) == inp@.
---
--- (The latter only if 'isVarInput' does not return Nothing.)
+-- module is concerned, this means supporting just a single operation.
 class (Ord a, Eq a) => Input a where
-  -- | Turn an arbitrary identifier into an input.
-  varInput   :: Ident -> a
   -- | Check whether an arbitrary input corresponds to a plain
-  -- variable input.
+  -- variable input.  If so, return that variable.
   isVarInput :: a -> Maybe Ident
 
 instance Input SOAC.Input where
-  varInput = SOAC.varInput
   isVarInput = SOAC.isVarInput
 
 -- | @fuseMaps lam1 inp1 out1 lam2 inp2@ fuses the function @lam1@ into
@@ -191,11 +181,14 @@ filterOutParams :: Input input =>
 filterOutParams out1 outins =
   snd $ mapAccumL checkUsed outUsage out1
   where outUsage = HM.foldlWithKey' add M.empty outins
-          where add m p e = M.insertWith (++) e [fromParam p] m
+          where add m p inp =
+                  case isVarInput inp of
+                    Just v  -> M.insertWith (++) v [fromParam p] m
+                    Nothing -> m
 
         checkUsed m a =
-          case M.lookup (varInput a) m of
-            Just (p:ps) -> (M.insert (varInput a) ps m, Right p)
+          case M.lookup a m of
+            Just (p:ps) -> (M.insert a ps m, Right p)
             _           -> (m, Left $ rowType $ identType a)
 
 removeDuplicateInputs :: Input input =>
