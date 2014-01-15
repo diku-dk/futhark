@@ -38,6 +38,9 @@ class (Ord a, Eq a) => Input a where
 instance Input SOAC.Input where
   isVarInput = SOAC.isVarInput
 
+instance (Show a, Ord a, Input inp) => Input (a, inp) where
+  isVarInput = isVarInput . snd
+
 -- | @fuseMaps lam1 inp1 out1 lam2 inp2@ fuses the function @lam1@ into
 -- @lam2@.  Both functions must be mapping functions, although @lam2@
 -- may have leading reduction parameters.  @inp1@ and @inp2@ are the

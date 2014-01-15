@@ -20,6 +20,7 @@ import Control.Monad
 import qualified Data.HashSet as HS
 
 import Data.Maybe
+import Data.List
 import Data.Loc
 
 import L0C.L0
@@ -162,6 +163,16 @@ filterFoldFusionOK outIds ker =
     Nothing       -> False
     Just inputIds -> all (`elem` outIds) inputIds
 
+mapScanFusionOK :: [Ident] -> [SOAC.Input] -> FusedKer -> Bool
+mapScanFusionOK outIds inp1 ker =
+  length inp1 == length replacing &&
+  and (zipWith subtypeOf
+       (sort $ map (rowType . identType) replacing)
+       (sort $ map (rowType . SOAC.inputType) inp1))
+  where replacing = filter (`elem` outIds) $
+                    mapMaybe SOAC.isVarInput $
+                    inputs ker
+
 mapOrFilter :: SOAC -> Bool
 mapOrFilter (SOAC.FilterT {}) = True
 mapOrFilter (SOAC.MapT {})    = True
@@ -191,10 +202,17 @@ fuseSOACwithKer (outIds, soac1) ker = do
       | mapFusionOK outIds ker -> do
       let (res_lam, new_inp) = fuseMaps lam1 inp1_arr outIds lam2 inp2_arr
       success $ SOAC.MapT (cs1++cs2) res_lam new_inp pos
+
     (SOAC.RedomapT _ lam21 _ ne _ pos, SOAC.MapT {})
       | mapFusionOK outIds ker -> do
       let (res_lam, new_inp) = fuseMaps lam1 inp1_arr outIds lam2 inp2_arr
       success $ SOAC.RedomapT (cs1++cs2) lam21 res_lam ne new_inp pos
+
+    (SOAC.ScanT _ _ inps2 loc, SOAC.MapT _ _ inps1 _)
+      | mapScanFusionOK outIds inp1_arr ker -> do
+      let (res_lam, new_inps) =
+            fuseMaps lam1 (zip (map fst inps2) inps1) outIds lam2 inps2
+      success $ SOAC.ScanT (cs1++cs2) res_lam new_inps loc
 
     -- The Fusions that are semantically filter fusions:
     (SOAC.ReduceT _ _ args pos, SOAC.FilterT {})
