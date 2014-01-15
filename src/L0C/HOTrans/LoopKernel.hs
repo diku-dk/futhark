@@ -149,7 +149,7 @@ mapFusionOK outIds ker = any (`elem` inputs ker) (map SOAC.varInput outIds)
 -- producer.
 filterFusionOK :: [Ident] -> FusedKer -> Bool
 filterFusionOK outIds ker =
-  case mapM SOAC.inputArray $ inputs ker of
+  case mapM SOAC.isVarInput $ inputs ker of
     Nothing       -> False
     Just inputIds -> all (`elem` outIds) inputIds &&
                      all (`elem` inputIds) outIds
@@ -159,7 +159,7 @@ filterFusionOK outIds ker =
 -- be fused if the consumer accepts input from no other source.
 filterFoldFusionOK :: [Ident] -> FusedKer -> Bool
 filterFoldFusionOK outIds ker =
-  case mapM SOAC.inputArray $ inputs ker of
+  case mapM SOAC.isVarInput $ inputs ker of
     Nothing       -> False
     Just inputIds -> all (`elem` outIds) inputIds
 
