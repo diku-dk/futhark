@@ -15,13 +15,15 @@ import Control.Monad
 
 import Data.List
 import Data.Loc
+import qualified Data.HashMap.Lazy as HM
+import qualified Data.HashSet as HS
 
 import L0C.NeedNames
 import L0C.MonadFreshNames
 import qualified L0C.HORepresentation.SOAC as SOAC
 import L0C.HORepresentation.SOACNest (SOACNest)
 import qualified L0C.HORepresentation.SOACNest as Nest
-
+import L0C.Substitute
 import L0C.L0
 
 data Nesting = Nesting {
@@ -54,11 +56,39 @@ inputs :: MapNest -> [SOAC.Input]
 inputs (MapNest _ _ _ inps _) = inps
 
 fromSOACNest :: SOACNest -> NeedNames (Maybe MapNest)
-fromSOACNest (Nest.SOACNest inps (Nest.MapT cs l [] loc)) =
-  return $ Just $ MapNest cs l [] inps loc
-fromSOACNest (Nest.SOACNest inps (Nest.MapT cs body (n:ns) loc)) = do
+fromSOACNest = fromSOACNest' HS.empty
+
+fromSOACNest' :: HS.HashSet Ident -> SOACNest -> NeedNames (Maybe MapNest)
+
+fromSOACNest' bound (Nest.SOACNest inps (Nest.MapT cs body [] loc)) = do
+  newParams <- mapM (newIdent' (++"_wasfree")) boundUsedInBody
+  let subst = HM.fromList $ zip (map identName boundUsedInBody) (map identName newParams)
+      inps' = map (substituteNamesInInput subst) inps ++
+              map (SOAC.Input [SOAC.Repeat] . SOAC.Var) boundUsedInBody
+      body' =
+        case body of
+          Nest.NewNest n comb ->
+            let n'    = substituteNamesInNesting subst
+                        n { Nest.nestingParams = Nest.nestingParams n' ++ newParams }
+                comb' = substituteNamesInCombinator subst comb
+            in Nest.NewNest n' comb'
+          Nest.Lambda l ->
+            Nest.Lambda l { tupleLambdaBody =
+                              substituteNames subst $ tupleLambdaBody l
+                          , tupleLambdaParams =
+                              tupleLambdaParams l ++ map toParam newParams
+                          }
+  return $ Just $
+         if HM.null subst
+         then MapNest cs body [] inps loc
+         else MapNest cs body' [] inps' loc
+  where boundUsedInBody =
+          HS.toList $ freeInExp (tupleLambdaBody $ Nest.bodyToLambda body)
+                      `HS.intersection` bound
+
+fromSOACNest' bound (Nest.SOACNest inps (Nest.MapT cs body (n:ns) loc)) = do
   Just mn@(MapNest cs' body' ns' inps' _) <-
-    fromSOACNest (Nest.SOACNest (Nest.nestingInputs n) (Nest.MapT cs body ns loc))
+    fromSOACNest' bound' (Nest.SOACNest (Nest.nestingInputs n) (Nest.MapT cs body ns loc))
   (ps, inps'') <-
     unzip <$> fixInputs (zip (map toParam $ Nest.nestingParams n) inps)
                         (zip (params mn) inps')
@@ -69,8 +99,9 @@ fromSOACNest (Nest.SOACNest inps (Nest.MapT cs body (n:ns) loc)) = do
            , nestingPostExp    = Nest.nestingPostExp n
            }
   return $ Just $ MapNest cs' body' (n':ns') inps'' loc
-fromSOACNest _ =
-  return Nothing
+  where bound' = bound `HS.union` HS.fromList (Nest.nestingParams n)
+
+fromSOACNest' _ _ = return Nothing
 
 toSOACNest :: MapNest -> SOACNest
 toSOACNest (MapNest cs body ns inps loc) =
@@ -104,9 +135,43 @@ fixInputs ourInps childInps =
     inspect (remPs, newInps) (param, inp@(SOAC.Input ts ia)) =
       case ia of
         SOAC.Var v | Just ((p,pInp), remPs') <- findParam remPs v ->
-          return (remPs', (p, SOAC.transformRows ts pInp):newInps)
+          let pInp' = SOAC.transformRows ts pInp
+          in return (remPs',
+                     (p { identType = toDecl $ rowType $ SOAC.inputType pInp' },
+                      SOAC.transformRows ts pInp)
+                     : newInps)
         _ -> do
-          newParam <- Ident <$> newNameFromString (baseString (identName param) ++ "_over")
+          newParam <- Ident <$> newNameFromString (baseString (identName param) ++ "_rep")
                             <*> pure (toDecl $ SOAC.inputType inp)
                             <*> pure (srclocOf inp)
           return (remPs, (newParam, SOAC.Input (ts++[SOAC.Repeat]) ia):newInps)
+
+substituteNamesInInput :: HM.HashMap VName VName -> SOAC.Input -> SOAC.Input
+substituteNamesInInput m (SOAC.Input ts (SOAC.Var v)) =
+  case HM.lookup (identName v) m of
+    Just name -> SOAC.Input ts $ SOAC.Var v { identName = name }
+    Nothing   -> SOAC.Input ts $ SOAC.Var v
+substituteNamesInInput _ (SOAC.Input ts ia) =
+  SOAC.Input ts ia
+
+substituteNamesInNesting :: HM.HashMap VName VName -> Nest.Nesting -> Nest.Nesting
+substituteNamesInNesting m n =
+  n { Nest.nestingInputs =
+        map (substituteNamesInInput m) $ Nest.nestingInputs n }
+
+substituteNamesInCombinator :: HM.HashMap VName VName -> Nest.Combinator -> Nest.Combinator
+substituteNamesInCombinator m comb =
+  substituteNamesInBody m (Nest.body comb) `Nest.setBody`
+  (map (substituteNamesInNesting m) (Nest.nesting comb) `Nest.setNesting`
+  comb)
+
+substituteNamesInBody :: HM.HashMap VName VName -> Nest.NestBody -> Nest.NestBody
+substituteNamesInBody m (Nest.NewNest n comb) =
+  let n'    = substituteNamesInNesting m
+              n { Nest.nestingParams = Nest.nestingParams n' }
+      comb' = substituteNamesInCombinator m comb
+  in Nest.NewNest n' comb'
+substituteNamesInBody m (Nest.Lambda l) =
+  Nest.Lambda l { tupleLambdaBody =
+                    substituteNames m $ tupleLambdaBody l
+                }
