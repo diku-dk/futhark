@@ -184,11 +184,11 @@ inputsToExps is =
 dimSizes :: [Input] -> [Maybe Exp]
 dimSizes is =
   map (listToMaybe . catMaybes) $ transpose $ map inspect is
-  where inspect (Input ts ia) = foldl inspect' (iaDims ia) ts
+  where inspect (Input ts ia) = foldr inspect' (iaDims ia) ts
 
         iaDims (Var v) =
           [ Just $ L0.Size [] i (L0.Var v) loc
-            | i <- [0..arrayRank t] ]
+            | i <- [0..arrayRank t-1] ]
           where loc = srclocOf v
                 t   = identType v
 
@@ -200,19 +200,19 @@ dimSizes is =
           where loc = srclocOf v
                 t   = identType v
 
-        inspect' ds (Transpose _ k n) =
+        inspect' (Transpose _ k n) ds =
           transposeIndex k n ds
 
-        inspect' _ (Reshape _ shape) =
+        inspect' (Reshape _ shape) _ =
           map Just shape
 
-        inspect' ds (ReshapeOuter _ shape) =
+        inspect' (ReshapeOuter _ shape) ds =
           map Just shape ++ drop 1 ds
 
-        inspect' ds (ReshapeInner _ shape) =
+        inspect' (ReshapeInner _ shape) ds =
           take 1 ds ++ map Just shape
 
-        inspect' ds (Repeat) =
+        inspect' (Repeat) ds =
           Nothing : ds
 
 -- | If the input is a (possibly transposed, reshaped or otherwise
