@@ -34,6 +34,7 @@ import qualified Data.HashSet as HS
 import L0C.HORepresentation.SOAC (SOAC)
 import qualified L0C.HORepresentation.SOAC as SOAC
 import L0C.L0 hiding (MapT, ReduceT, ScanT, FilterT, RedomapT, returnType)
+import L0C.Substitute
 
 -- Current problems:
 --
@@ -54,6 +55,17 @@ data Nesting = Nesting {
 data NestBody = Lambda TupleLambda
               | NewNest Nesting Combinator
                 deriving (Show)
+
+instance Substitute NestBody where
+  substituteNames m (NewNest n comb) =
+    let n'    = substituteNames m
+                n { nestingParams = nestingParams n' }
+        comb' = substituteNames m comb
+    in NewNest n' comb'
+  substituteNames m (Lambda l) =
+    Lambda l { tupleLambdaBody =
+                 substituteNames m $ tupleLambdaBody l
+             }
 
 bodyParams :: NestBody -> [Parameter]
 bodyParams (Lambda l)       = tupleLambdaParams l
@@ -88,6 +100,15 @@ instance Located Combinator where
   locOf (ScanT _ _ _ _ loc) = locOf loc
   locOf (FilterT _ _ _ loc) = locOf loc
   locOf (RedomapT _ _ _ _ _ loc) = locOf loc
+
+instance Substitute Combinator where
+  substituteNames m comb =
+    substituteNames m (body comb) `setBody`
+    (map (substituteNames m) (nesting comb) `setNesting` comb)
+
+instance Substitute Nesting where
+  substituteNames m n =
+    n { nestingInputs = map (substituteNames m) $ nestingInputs n }
 
 nesting :: Combinator -> [Nesting]
 nesting (MapT _ _ ls _) = ls

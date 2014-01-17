@@ -50,8 +50,10 @@ import Control.Monad
 import Data.List
 import Data.Loc
 import Data.Maybe
+import qualified Data.HashMap.Lazy as HM
 
 import qualified L0C.L0 as L0
+import L0C.Substitute
 import L0C.L0 hiding (MapT, ReduceT, ScanT, FilterT, RedomapT,
                       Var, Iota, Transpose, Reshape, Index)
 
@@ -105,6 +107,14 @@ instance Located Input where
   locOf (Input _ (Var v))         = locOf v
   locOf (Input _ (Iota e))        = locOf e
   locOf (Input _ (Index _ k _ _)) = locOf k
+
+instance Substitute Input where
+  substituteNames m (Input ts (Var v)) =
+    case HM.lookup (identName v) m of
+      Just name -> Input ts $ Var v { identName = name }
+      Nothing   -> Input ts $ Var v
+  substituteNames _ (Input ts ia) =
+    Input ts ia
 
 -- | Create a plain array variable input with no transformations.
 varInput :: Ident -> Input

@@ -63,14 +63,14 @@ fromSOACNest' :: HS.HashSet Ident -> SOACNest -> NeedNames (Maybe MapNest)
 fromSOACNest' bound (Nest.SOACNest inps (Nest.MapT cs body [] loc)) = do
   newParams <- mapM (newIdent' (++"_wasfree")) boundUsedInBody
   let subst = HM.fromList $ zip (map identName boundUsedInBody) (map identName newParams)
-      inps' = map (substituteNamesInInput subst) inps ++
+      inps' = map (substituteNames subst) inps ++
               map (SOAC.Input [SOAC.Repeat] . SOAC.Var) boundUsedInBody
       body' =
         case body of
           Nest.NewNest n comb ->
-            let n'    = substituteNamesInNesting subst
+            let n'    = substituteNames subst
                         n { Nest.nestingParams = Nest.nestingParams n' ++ newParams }
-                comb' = substituteNamesInCombinator subst comb
+                comb' = substituteNames subst comb
             in Nest.NewNest n' comb'
           Nest.Lambda l ->
             Nest.Lambda l { tupleLambdaBody =
@@ -145,33 +145,3 @@ fixInputs ourInps childInps =
                             <*> pure (toDecl $ SOAC.inputType inp)
                             <*> pure (srclocOf inp)
           return (remPs, (newParam, SOAC.Input (ts++[SOAC.Repeat]) ia):newInps)
-
-substituteNamesInInput :: HM.HashMap VName VName -> SOAC.Input -> SOAC.Input
-substituteNamesInInput m (SOAC.Input ts (SOAC.Var v)) =
-  case HM.lookup (identName v) m of
-    Just name -> SOAC.Input ts $ SOAC.Var v { identName = name }
-    Nothing   -> SOAC.Input ts $ SOAC.Var v
-substituteNamesInInput _ (SOAC.Input ts ia) =
-  SOAC.Input ts ia
-
-substituteNamesInNesting :: HM.HashMap VName VName -> Nest.Nesting -> Nest.Nesting
-substituteNamesInNesting m n =
-  n { Nest.nestingInputs =
-        map (substituteNamesInInput m) $ Nest.nestingInputs n }
-
-substituteNamesInCombinator :: HM.HashMap VName VName -> Nest.Combinator -> Nest.Combinator
-substituteNamesInCombinator m comb =
-  substituteNamesInBody m (Nest.body comb) `Nest.setBody`
-  (map (substituteNamesInNesting m) (Nest.nesting comb) `Nest.setNesting`
-  comb)
-
-substituteNamesInBody :: HM.HashMap VName VName -> Nest.NestBody -> Nest.NestBody
-substituteNamesInBody m (Nest.NewNest n comb) =
-  let n'    = substituteNamesInNesting m
-              n { Nest.nestingParams = Nest.nestingParams n' }
-      comb' = substituteNamesInCombinator m comb
-  in Nest.NewNest n' comb'
-substituteNamesInBody m (Nest.Lambda l) =
-  Nest.Lambda l { tupleLambdaBody =
-                    substituteNames m $ tupleLambdaBody l
-                }
