@@ -545,27 +545,32 @@ replaceSOAC names@(Ident pat_nm _ _ : _) soac = do
                                    ("In Fusion.hs, replaceSOAC, outArr in ker_name "
                                     ++"which is not in Res: "++textual (unKernName knm))
         Just ker -> do
-          let new_soac = fsoac ker
-          if names /= outputs ker
-          then badFusionGM $ EnablingOptError loc
-                              ("In Fusion.hs, replaceSOAC, "
-                               ++" pat does not match kernel's pat: "++ppTupId pat)
-          else if null $ fusedVars ker
-               then badFusionGM $ EnablingOptError loc
-                                   ("In Fusion.hs, replaceSOAC, unfused kernel "
-                                    ++"still in result: "++ppTupId pat)
-               -- then fuseInExp soac
-               else do -- TRY MOVE THIS TO OUTER LEVEL!!!
-                       prog <- asks program
-                       tryLam <- normCopyOneTupleLambda prog $ SOAC.lambda new_soac
-                       case tryLam of
-                          Left err             -> badFusionGM err
-                          Right lam' -> do
-                            (_, nfres) <- fusionGatherLam (HS.empty, mkFreshFusionRes) lam'
-                            let nfres' =  cleanFusionResult nfres
-                            lam''      <- bindRes nfres' $ fuseInLambda lam'
-                            transformOutput (outputTransform ker) (outputs ker) $
-                              SOAC.setLambda lam'' new_soac
+          when (names /= outputs ker) $
+            badFusionGM $ EnablingOptError loc
+                          ("In Fusion.hs, replaceSOAC, "
+                           ++" pat does not match kernel's pat: "++ppTupId pat)
+          when (null $ fusedVars ker) $
+            badFusionGM $ EnablingOptError loc
+                          ("In Fusion.hs, replaceSOAC, unfused kernel "
+                          ++"still in result: "++ppTupId pat)
+
+          insertKerSOAC ker
+
+insertKerSOAC :: FusedKer -> FusionGM (Exp -> Exp)
+insertKerSOAC ker = do
+  prog <- asks program
+  let new_soac = fsoac ker
+  tryLam <- normCopyOneTupleLambda prog $ SOAC.lambda new_soac
+
+  case tryLam of
+    Left err   ->
+      badFusionGM err
+    Right lam' -> do
+      (_, nfres) <- fusionGatherLam (HS.empty, mkFreshFusionRes) lam'
+      let nfres' =  cleanFusionResult nfres
+      lam''      <- bindRes nfres' $ fuseInLambda lam'
+      transformOutput (outputTransform ker) (outputs ker) $
+        SOAC.setLambda lam'' new_soac
 
 transformOutput :: [OutputTransform]
                 -> [Ident] -> SOAC -> FusionGM (Exp -> Exp)
