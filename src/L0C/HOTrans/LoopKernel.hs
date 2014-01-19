@@ -111,48 +111,58 @@ tryOptimizeSOAC :: [Ident] -> SOAC -> FusedKer -> TryFusion FusedKer
 tryOptimizeSOAC outIds soac ker = do
   (soac', ots) <- liftMaybe $ optimizeSOAC Nothing soac
   let ker' = map (outputsToInput ots) (inputs ker) `setInputs` ker
-  attemptFusion' outIds soac' ker'
+  applyFusionRules outIds soac' ker'
 
 tryOptimizeKernel :: [Ident] -> SOAC -> FusedKer -> TryFusion FusedKer
 tryOptimizeKernel outIds soac ker = do
   ker' <- liftMaybe $ optimizeKernel (Just outIds) ker
-  attemptFusion' outIds soac ker'
+  applyFusionRules outIds soac ker'
 
 tryExposeInputs :: [Ident] -> SOAC -> FusedKer -> TryFusion FusedKer
 tryExposeInputs outIds soac ker = do
   (ker', ots) <- exposeInputs outIds ker
   case ots of
-    [] -> fuseSOACwithKer (outIds, soac) ker'
+    [] -> fuseSOACwithKer outIds soac ker'
     _  -> do
       soac' <- pullOutputTransforms soac ots
-      attemptFusion' outIds soac' ker'
+      applyFusionRules outIds soac' ker'
 
-attemptFusion' :: [Ident] -> SOAC -> FusedKer -> TryFusion FusedKer
-attemptFusion' outIds soac ker =
+applyFusionRules :: [Ident] -> SOAC -> FusedKer -> TryFusion FusedKer
+applyFusionRules outIds soac ker =
   tryOptimizeSOAC outIds soac ker <|>
   tryOptimizeKernel outIds soac ker <|>
   tryExposeInputs outIds soac ker <|>
-  fuseSOACwithKer (outIds, soac) ker
+  fuseSOACwithKer outIds soac ker
 
-attemptFusion :: MonadFreshNames VName m => [Ident] -> SOAC -> FusedKer -> m (Maybe FusedKer)
+attemptFusion :: MonadFreshNames VName m =>
+                 [Ident] -> SOAC -> FusedKer -> m (Maybe FusedKer)
 attemptFusion outIds soac ker =
-  tryFusion $ attemptFusion' outIds (simplifySOAC soac) ker
+  liftM removeUnusedParamsFromKer <$>
+  tryFusion (applyFusionRules outIds soac ker)
 
--- | Remove unused parameters and inputs.  Only affects 'SOAC.MapT'
--- and 'SOAC.RedomapT'.
-simplifySOAC :: SOAC -> SOAC
-simplifySOAC (SOAC.MapT cs l inps loc) =
-  SOAC.MapT cs l' inps' loc
-  where (l', inps') = removeUnusedParams l inps
-simplifySOAC (SOAC.RedomapT cs l1 l2 accs inps loc) =
-  SOAC.RedomapT cs l1 l2' accs inps' loc
-  where (l2', inps') = removeUnusedParams l2 inps
-simplifySOAC soac = soac
+removeUnusedParamsFromKer :: FusedKer -> FusedKer
+removeUnusedParamsFromKer ker =
+  case soac of
+    SOAC.MapT {}     -> ker { fsoac = soac' }
+    SOAC.RedomapT {} -> ker { fsoac = soac' }
+    _                -> ker
+  where soac = fsoac ker
+        l = SOAC.lambda soac
+        inps = SOAC.inputs soac
+        (l', inps') = removeUnusedParams l inps
+        soac' = l' `SOAC.setLambda`
+                (inps' `SOAC.setInputs` soac)
 
 removeUnusedParams :: TupleLambda -> [SOAC.Input] -> (TupleLambda, [SOAC.Input])
-removeUnusedParams l inps = (l { tupleLambdaParams = ps'}, inps')
-  where (ps', inps') =
-          unzip $ filter (used . fst) $ zip (tupleLambdaParams l) inps
+removeUnusedParams l inps =
+  (l { tupleLambdaParams = accParams ++ ps' }, inps')
+  where allParams = tupleLambdaParams l
+        (accParams, arrParams) =
+          splitAt (length allParams - length inps) allParams
+        pInps = zip arrParams inps
+        (ps', inps') = case (unzip $ filter (used . fst) pInps, pInps) of
+                         (([], []), (p,inp):_) -> ([p], [inp])
+                         ((ps_, inps_), _)     -> (ps_, inps_)
         used p = identName p `HS.member` freeInBody
         freeInBody = freeNamesInExp $ tupleLambdaBody l
 
@@ -197,8 +207,8 @@ mapOrFilter (SOAC.FilterT {}) = True
 mapOrFilter (SOAC.MapT {})    = True
 mapOrFilter _                 = False
 
-fuseSOACwithKer :: ([Ident], SOAC) -> FusedKer -> TryFusion FusedKer
-fuseSOACwithKer (outIds, soac1) ker = do
+fuseSOACwithKer :: [Ident] -> SOAC -> FusedKer -> TryFusion FusedKer
+fuseSOACwithKer outIds soac1 ker = do
   -- We are fusing soac1 into soac2, i.e, the output of soac1 is going
   -- into soac2.
   let soac2 = fsoac ker
@@ -260,7 +270,7 @@ fuseSOACwithKer (outIds, soac1) ker = do
            soac2' = SOAC.RedomapT (cs1++cs2) lam lam ne arrs loc
            ker'   = ker { fsoac = soac2'
                         , outputs = out_ids2 }
-       fuseSOACwithKer (outIds, soac1) ker'
+       fuseSOACwithKer outIds soac1 ker'
 
     _ -> fail "Cannot fuse"
 
