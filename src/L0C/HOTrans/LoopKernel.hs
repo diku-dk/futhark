@@ -135,7 +135,26 @@ attemptFusion' outIds soac ker =
   fuseSOACwithKer (outIds, soac) ker
 
 attemptFusion :: MonadFreshNames VName m => [Ident] -> SOAC -> FusedKer -> m (Maybe FusedKer)
-attemptFusion outIds soac ker = tryFusion $ attemptFusion' outIds soac ker
+attemptFusion outIds soac ker =
+  tryFusion $ attemptFusion' outIds (simplifySOAC soac) ker
+
+-- | Remove unused parameters and inputs.  Only affects 'SOAC.MapT'
+-- and 'SOAC.RedomapT'.
+simplifySOAC :: SOAC -> SOAC
+simplifySOAC (SOAC.MapT cs l inps loc) =
+  SOAC.MapT cs l' inps' loc
+  where (l', inps') = removeUnusedParams l inps
+simplifySOAC (SOAC.RedomapT cs l1 l2 accs inps loc) =
+  SOAC.RedomapT cs l1 l2' accs inps' loc
+  where (l2', inps') = removeUnusedParams l2 inps
+simplifySOAC soac = soac
+
+removeUnusedParams :: TupleLambda -> [SOAC.Input] -> (TupleLambda, [SOAC.Input])
+removeUnusedParams l inps = (l { tupleLambdaParams = ps'}, inps')
+  where (ps', inps') =
+          unzip $ filter (used . fst) $ zip (tupleLambdaParams l) inps
+        used p = identName p `HS.member` freeInBody
+        freeInBody = freeNamesInExp $ tupleLambdaBody l
 
 -- | Check that the consumer uses at least one output of the producer
 -- unmodified.
