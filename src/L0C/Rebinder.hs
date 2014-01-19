@@ -165,22 +165,22 @@ bindLet (Id dest) (Var src) m =
   case identType src of Array {} -> withShape dest (slice [] 0 src) m
                         _        -> m
 
-bindLet pat@(Id dest) e@(Iota (Var x) _) m =
+bindLet pat@(Id dest) e@(Iota ne _) m =
   withBinding pat e $
-  withShape dest [Var x] m
+  withShape dest [ne] m
 
-bindLet pat@(Id dest) e@(Replicate (Var x) (Var y) _) m =
+bindLet pat@(Id dest) e@(Replicate ne (Var y) _) m =
   withBinding pat e $
-  withShape dest (Var x:slice [] 0 y) m
+  withShape dest (ne:slice [] 0 y) m
 
-bindLet pat@(TupId [Id dest1, Id dest2] _) e@(Split cs (Var n) (Var src) _ loc) m =
+bindLet pat@(TupId [Id dest1, Id dest2] _) e@(Split cs ne srce _ loc) m =
   withBinding pat e $
-  withNewBinding "split_src_sz" (Size cs 0 (Var src) loc) $ \src_sz ->
-  withNewBinding "split_sz" (BinOp Minus (Var src_sz) (Var n) (Elem Int) loc) $ \split_sz ->
-  withShapes [(dest1, Var n : rest),
+  withNewBinding "split_src_sz" (Size cs 0 srce loc) $ \src_sz ->
+  withNewBinding "split_sz" (BinOp Minus (Var src_sz) ne (Elem Int) loc) $ \split_sz ->
+  withShapes [(dest1, ne : rest),
               (dest2, Var split_sz : rest)] m
-    where rest = [ Size cs i (Var src) loc
-                   | i <- [1.. arrayRank (identType src) - 1]]
+    where rest = [ Size cs i srce loc
+                   | i <- [1.. arrayRank (typeOf srce) - 1]]
 
 bindLet pat@(Id dest) e@(Concat cs (Var x) (Var y) loc) m =
   withBinding pat e $
