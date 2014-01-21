@@ -11,8 +11,6 @@ module L0C.SOACFlowGraph
   )
   where
 
-import Debug.Trace
-
 import Control.Monad.Writer
 
 import Data.List
@@ -97,8 +95,7 @@ flowForExp (LetPat pat e body _)
   | Right e' <- SOAC.fromExp e,
     names@(name:_) <- patNames pat = do
   soacSeen name names e'
-  walkExpM flow body
-  walkExpM flow e
+  flowForExp body
 flowForExp e = walkExpM flow e
 
 flow :: Walker (TypeBase Names) VName FlowM
