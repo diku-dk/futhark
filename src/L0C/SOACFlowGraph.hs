@@ -14,6 +14,7 @@ module L0C.SOACFlowGraph
 import Control.Monad.Writer
 
 import Data.Graph
+import Data.Maybe
 import Data.List
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
@@ -26,16 +27,18 @@ newtype FlowGraph = FlowGraph (HM.HashMap Name ExpFlowGraph)
 
 newtype ExpFlowGraph =
   ExpFlowGraph {
-    expFlowGraph :: HM.HashMap String (String, HS.HashSet String, ExpFlowGraph)
+    expFlowGraph :: HM.HashMap String (String, HS.HashSet (String, [String]), ExpFlowGraph)
   }
 
-graphInDepOrder :: ExpFlowGraph -> [(String, (String, HS.HashSet String, ExpFlowGraph))]
+graphInDepOrder :: ExpFlowGraph
+                -> [(String, (String, HS.HashSet (String, [String]), ExpFlowGraph))]
 graphInDepOrder = reverse . flattenSCCs . stronglyConnComp . buildGraph
   where buildGraph (ExpFlowGraph m) =
           [ (node, name, deps) |
             node@(name, (_, users,_)) <- m',
+            let users' = HS.map fst users,
             let deps = [ other
-                         | other <- map fst m', other `HS.member` users ] ]
+                         | other <- map fst m', other `HS.member` users' ] ]
           where m' = HM.toList m
 
 ppFlowGraph :: FlowGraph -> String
@@ -45,8 +48,10 @@ ppFlowGraph (FlowGraph m) = intercalate "\n" . map ppFunFlow . HM.toList $ m
           concatMap (padLines . ppExpGraph) (graphInDepOrder eg)
         ppExpGraph (name, (soac, users, eg)) =
           name ++ " (" ++ soac ++ ") -> " ++
-          intercalate ", " (HS.toList users) ++ ":\n" ++
+          intercalate ", " (map ppUsage $ HS.toList users) ++ ":\n" ++
           intercalate "" (map (padLines . ppExpGraph) $ graphInDepOrder eg)
+        ppUsage (user, [])   = user
+        ppUsage (user, trns) = user ++ "(" ++ intercalate ", " trns ++ ")"
         pad = ("  "++)
         padLines = unlines . map pad . lines
 
@@ -59,7 +64,7 @@ makeFlowGraph = FlowGraph . HM.fromList . map flowForFun . progFunctions
 data SOACInfo = SOACInfo {
     soacType     :: String
   , soacProduced :: HS.HashSet VName
-  , soacConsumed :: HS.HashSet VName
+  , soacConsumed :: HM.HashMap VName (HS.HashSet [String])
   , soacBodyInfo :: AccFlow
   }
 
@@ -68,9 +73,11 @@ type AccFlow = HM.HashMap String SOACInfo
 flowForFun :: FunDec -> (Name, ExpFlowGraph)
 flowForFun (fname, _, _, fbody, _) =
   let allInfos = execWriter $ flowForExp fbody
-      uses infos name = HS.fromList $ map fst $
-                        filter (HS.member name . soacConsumed . snd) $
-                        HM.toList infos
+      usages name (consumer, info) =
+        case HM.lookup name $ soacConsumed info of
+          Nothing -> HS.empty
+          Just ss -> HS.map (\s -> (consumer, s)) ss
+      uses infos name = mconcat $ map (usages name) $ HM.toList infos
       graph infos =
         HM.fromList [ (soacname, (soacType info, users, ExpFlowGraph $ graph $ soacBodyInfo info)) |
                       (soacname, info) <- HM.toList infos,
@@ -88,7 +95,7 @@ soacSeen name produced soac =
            soacType = desc
          , soacProduced = HS.fromList produced
          , soacConsumed =
-           mconcat $ map freeNamesInExp $ SOAC.inputsToExps (SOAC.inputs soac)
+             HM.fromListWith HS.union $ mapMaybe inspectInput $ SOAC.inputs soac
          , soacBodyInfo =
            mconcat (map (execWriter . flowForExp) bodys)
          }
@@ -100,6 +107,19 @@ soacSeen name produced soac =
             SOAC.ReduceT _ l _ _ -> ("reduceT", [tupleLambdaBody l])
             SOAC.RedomapT _ l1 l2 _ _ _ -> ("redomapT", [tupleLambdaBody l1, tupleLambdaBody l2])
 
+        inspectInput (SOAC.Input ts (SOAC.Var v)) =
+          Just (identName v, HS.singleton $ map descTransform ts)
+        inspectInput (SOAC.Input _ (SOAC.Iota _)) =
+          Nothing
+        inspectInput (SOAC.Input ts (SOAC.Index _ v _ _)) =
+          Just (identName v, HS.singleton $ "index" : map descTransform ts)
+
+        descTransform (SOAC.Transpose {})    = "transpose"
+        descTransform (SOAC.Reshape {})      = "reshape"
+        descTransform (SOAC.ReshapeOuter {}) = "reshape"
+        descTransform (SOAC.ReshapeInner {}) = "reshape"
+        descTransform SOAC.Repeat            = "replicate"
+
 flowForExp :: Exp -> FlowM ()
 flowForExp (LetPat pat e body _)
   | Right e' <- SOAC.fromExp e,
@@ -110,11 +130,17 @@ flowForExp (LetPat pat e body _) = do
   flowForExp e
   tell $ HM.map expand $ execWriter $ flowForExp body
   where names = HS.fromList $ patNames pat
-        freeInE = freeNamesInExp e
+        freeInE = HS.toList $ freeNamesInExp e
         expand info =
-          if HS.null (names `HS.intersection` soacConsumed info)
-          then info
-          else info { soacConsumed = freeInE `HS.union` soacConsumed info }
+          info { soacConsumed =
+                   HM.fromList $ concatMap update $
+                   HM.toList $ soacConsumed info
+               }
+        update (usedName, s)
+          | usedName `HS.member` names =
+            [ (name, HS.map ("complex":) s) | name <- freeInE ]
+          | otherwise =
+            [(usedName, s)]
 flowForExp (DoLoop mergepat initexp _ boundexp loopbody body _)
   | names@(name:_) <- patNames mergepat = do
   flowForExp initexp
@@ -126,8 +152,12 @@ flowForExp (DoLoop mergepat initexp _ boundexp loopbody body _)
            soacType = "loop"
          , soacProduced = HS.fromList names
          , soacConsumed =
-             mconcat (map freeNamesInExp [initexp, boundexp, loopbody])
-             `HS.difference` HS.fromList names
+             HM.fromList
+                 [ (used, HS.singleton []) |
+                   used <- HS.toList
+                           $ mconcat (map freeNamesInExp [initexp, boundexp, loopbody])
+                          `HS.difference` HS.fromList names
+                 ]
          , soacBodyInfo = execWriter $ flowForExp loopbody
          }
 flowForExp e = walkExpM flow e
