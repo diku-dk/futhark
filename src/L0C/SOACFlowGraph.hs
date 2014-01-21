@@ -106,6 +106,15 @@ flowForExp (LetPat pat e body _)
     names@(name:_) <- patNames pat = do
   soacSeen name names e'
   flowForExp body
+flowForExp (LetPat pat e body _) = do
+  flowForExp e
+  tell $ HM.map expand $ execWriter $ flowForExp body
+  where names = HS.fromList $ patNames pat
+        freeInE = freeNamesInExp e
+        expand info =
+          if HS.null (names `HS.intersection` soacConsumed info)
+          then info
+          else info { soacConsumed = freeInE `HS.union` soacConsumed info }
 flowForExp (DoLoop mergepat initexp _ boundexp loopbody body _)
   | names@(name:_) <- patNames mergepat = do
   flowForExp initexp
