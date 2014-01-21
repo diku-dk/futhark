@@ -13,6 +13,7 @@ module L0C.SOACFlowGraph
 
 import Control.Monad.Writer
 
+import Data.Graph
 import Data.List
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
@@ -28,15 +29,24 @@ newtype ExpFlowGraph =
     expFlowGraph :: HM.HashMap String (String, HS.HashSet String, ExpFlowGraph)
   }
 
+graphInDepOrder :: ExpFlowGraph -> [(String, (String, HS.HashSet String, ExpFlowGraph))]
+graphInDepOrder = flattenSCCs . stronglyConnComp . buildGraph
+  where buildGraph (ExpFlowGraph m) =
+          [ (node, name, deps) |
+            node@(name, (_, users,_)) <- m',
+            let deps = [ name
+                         | other <- map fst m', other `HS.member` users ] ]
+          where m' = HM.toList m
+
 ppFlowGraph :: FlowGraph -> String
 ppFlowGraph (FlowGraph m) = intercalate "\n" . map ppFunFlow . HM.toList $ m
-  where ppFunFlow (fname, ExpFlowGraph em) =
+  where ppFunFlow (fname, eg) =
           "function " ++ nameToString fname ++ ":\n" ++
-          concatMap (padLines . ppExpGraph) (HM.toList em)
-        ppExpGraph (name, (soac, users, ExpFlowGraph em)) =
+          concatMap (padLines . ppExpGraph) (graphInDepOrder eg)
+        ppExpGraph (name, (soac, users, eg)) =
           name ++ " (" ++ soac ++ ") -> " ++
           intercalate ", " (HS.toList users) ++ ":\n" ++
-          intercalate "" (map (padLines . ppExpGraph) $ HM.toList em)
+          intercalate "" (map (padLines . ppExpGraph) $ graphInDepOrder eg)
         pad = ("  "++)
         padLines = unlines . map pad . lines
 
@@ -96,6 +106,21 @@ flowForExp (LetPat pat e body _)
     names@(name:_) <- patNames pat = do
   soacSeen name names e'
   flowForExp body
+flowForExp (DoLoop mergepat initexp _ boundexp loopbody body _)
+  | names@(name:_) <- patNames mergepat = do
+  flowForExp initexp
+  flowForExp boundexp
+  flowForExp body
+  tell $ HM.singleton
+         (textual name)
+         SOACInfo {
+           soacType = "loop"
+         , soacProduced = HS.fromList names
+         , soacConsumed =
+             mconcat (map freeNamesInExp [initexp, boundexp, loopbody])
+             `HS.difference` HS.fromList names
+         , soacBodyInfo = execWriter $ flowForExp loopbody
+         }
 flowForExp e = walkExpM flow e
 
 flow :: Walker (TypeBase Names) VName FlowM
