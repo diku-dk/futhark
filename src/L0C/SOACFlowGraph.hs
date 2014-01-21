@@ -30,11 +30,11 @@ newtype ExpFlowGraph =
   }
 
 graphInDepOrder :: ExpFlowGraph -> [(String, (String, HS.HashSet String, ExpFlowGraph))]
-graphInDepOrder = flattenSCCs . stronglyConnComp . buildGraph
+graphInDepOrder = reverse . flattenSCCs . stronglyConnComp . buildGraph
   where buildGraph (ExpFlowGraph m) =
           [ (node, name, deps) |
             node@(name, (_, users,_)) <- m',
-            let deps = [ name
+            let deps = [ other
                          | other <- map fst m', other `HS.member` users ] ]
           where m' = HM.toList m
 
