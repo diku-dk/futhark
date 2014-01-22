@@ -138,7 +138,7 @@ fixInputs ourInps childInps =
           let pInp' = SOAC.transformRows ts pInp
           in return (remPs',
                      (p { identType = toDecl $ rowType $ SOAC.inputType pInp' },
-                      SOAC.transformRows ts pInp)
+                      pInp')
                      : newInps)
         _ -> do
           newParam <- Ident <$> newNameFromString (baseString (identName param) ++ "_rep")
