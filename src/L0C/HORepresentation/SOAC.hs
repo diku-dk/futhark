@@ -265,9 +265,7 @@ transformRows (Transpose cs k n:nts) inp =
 transformRows (Reshape cs shape:nts) inp =
   transformRows nts $ addTransform (ReshapeInner cs shape) inp
 transformRows (Repeat:nts) inp =
-  if arrayRank (inputType inp) < 2
-  then transformRows nts $ addTransforms [Repeat, Transpose [] 0 1] inp
-  else transformRows nts $ addTransforms [Transpose [] 0 1, Repeat, Transpose [] 0 2] inp
+  transformRows nts $ addTransforms [Repeat, Transpose [] 0 1] inp
 transformRows nts inp =
   error $ "transformRows: Cannot transform this yet:\n" ++ show nts ++ "\n" ++ show inp
 
