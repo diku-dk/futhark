@@ -399,14 +399,12 @@ Exps2 : Exp ',' Exps2 { $1 : $3 }
 
 
 DExps   :: { [(UncheckedExp, UncheckedExp)] }
-        : '{' DExps_ { $2 }
-DExps_  :: { [(UncheckedExp, UncheckedExp)] }
-        : DExps__ ',' Exp { let (end, es) = $1
-                            in (end,$3) : es }
-DExps__ :: { (UncheckedExp, [(UncheckedExp, UncheckedExp)]) }
-        : Exp '}'                 { ($1, []) }
-        | Exp ',' DExps__ ',' Exp { let (end, es) = $3
-                                    in ($1, (end,$5) : es) }
+        : '{' DExps_ { let (es, as) = $2
+                       in zip es $ reverse as }
+DExps_ :: { ([UncheckedExp], [UncheckedExp]) }
+       : Exp '}' ',' Exp         { ([$1], [$4]) }
+       | Exp ',' DExps_ ',' Exp { let (es, as) = $3
+                                  in ($1:es, $5:as) }
 
 TupleExp : '{' Exps '}' { ($2, $1) }
          | '{'      '}' { ([], $1) }
