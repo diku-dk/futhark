@@ -99,7 +99,7 @@ hasArrayVal (TupVal vs) = any hasArrayVal vs
 hasArrayVal _ = False
 
 instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) where
-  ppr = pprPrec 0
+  ppr = pprPrec (-1)
   pprPrec _ (Var v) = ppr v
   pprPrec _ (Literal v _) = ppr v
   pprPrec _ (TupLit es _)
@@ -119,14 +119,15 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
                              text "else" <+> align (ppr f)
   pprPrec _ (Apply fname args _ _) = text (nameToString fname) <>
                                      apply (map (align . ppr . fst) args)
-  pprPrec _ (LetPat pat e body _) =
-    aliasComment pat $ align $
+  pprPrec p (LetPat pat e body _) =
+    aliasComment pat $ mparens $ align $
     text "let" <+> align (ppr pat) <+>
     (if linebreak
      then equals </> indent 2 (ppr e)
      else equals <+> align (ppr e)) <+> text "in" </>
     ppr body
-    where linebreak = case e of
+    where mparens = if p == -1 then id else parens
+          linebreak = case e of
                         Map {} -> True
                         Reduce {} -> True
                         Filter {} -> True
