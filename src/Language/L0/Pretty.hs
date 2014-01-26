@@ -120,7 +120,7 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
   pprPrec _ (Apply fname args _ _) = text (nameToString fname) <>
                                      apply (map (align . ppr . fst) args)
   pprPrec _ (LetPat pat e body _) =
-    aliasComment pat $
+    aliasComment pat $ align $
     text "let" <+> align (ppr pat) <+>
     (if linebreak
      then equals </> indent 2 (ppr e)
@@ -141,6 +141,7 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
                         LetPat {} -> True
                         LetWith {} -> True
                         Literal (ArrayVal {}) _ -> False
+                        If {} -> True
                         ArrayLit {} -> False
                         _ -> hasArrayLit e
   pprPrec _ (LetWith cs dest src idxcs idxs ve body _)
@@ -243,7 +244,7 @@ ppParam param = ppr (identType param) <+> ppr param
 
 ppBinOp :: (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Int -> BinOp -> ExpBase ty vn -> ExpBase ty vn -> Doc
 ppBinOp p bop x y = parensIf (p > precedence bop) $
-                    pprPrec (precedence bop) x <+>
+                    pprPrec (precedence bop) x <+/>
                     text (opStr bop) <+>
                     pprPrec (rprecedence bop) y
   where precedence LogAnd = 0
