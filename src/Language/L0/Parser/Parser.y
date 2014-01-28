@@ -237,6 +237,8 @@ Exp  :: { UncheckedExp }
      | Exp pow Exp    { BinOp Pow $1 $3 NoInfo $2 }
      | Exp '>>' Exp   { BinOp ShiftR $1 $3 NoInfo $2 }
      | Exp '<<' Exp   { BinOp ShiftL $1 $3 NoInfo $2 }
+     | Exp '&&' Exp   { BinOp LogAnd $1 $3 NoInfo $2 }
+     | Exp '||' Exp   { BinOp LogOr $1 $3 NoInfo $2 }
      | Exp '&' Exp    { BinOp Band $1 $3 NoInfo $2 }
      | Exp '|' Exp    { BinOp Bor $1 $3 NoInfo $2 }
      | Exp '^' Exp    { BinOp Xor $1 $3 NoInfo $2 }
