@@ -289,10 +289,14 @@ the language.
     i.e., bitwise xor, and, or, and arithmetic shift right and left.
 
   \item[\texttt{\textit{x} \&\& \textit{y}}]\hfill\\
-    Short-circuiting conjunction, both operands must be of type \boolt.
+    Logical conjunction; both operands must be of type \boolt.  Not
+    short-circuiting, as this complicates program transformation.  If
+    short-circuiting behaviour is desired, the programmer can use
+    \texttt{if} explicitly.
 
   \item[\texttt{\textit{x} || \textit{y}}]\hfill\\
-    Short-circuiting disjunction, both operands must be of type \boolt.
+    Logical disjunction; both operands must be of type \boolt.  As
+    with \texttt{\&\&}, not short-circuiting.
 
   \item[\texttt{not \textit{x}}]\hfill\\
     Logical negation of \textit{x}, which must be of type \boolt.

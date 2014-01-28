@@ -238,16 +238,6 @@ letNormExp (BinOp bop e1 e2 tp pos) = do
     e2' <- subLetoNormExp "tmp_bop" e2
     return $ BinOp bop e1' e2' tp pos
 
-letNormExp (And e1 e2 pos) = do
-    e1' <- subLetoNormExp "tmp_and" e1
-    e2' <- subLetoNormExp "tmp_and" e2
-    return $ And e1' e2' pos
-
-letNormExp (Or e1 e2 pos) = do
-    e1' <- subLetoNormExp "tmp_and" e1
-    e2' <- subLetoNormExp "tmp_and" e2
-    return $ Or e1' e2' pos
-
 ---------------------------
 ---- If construct      ----
 ---------------------------

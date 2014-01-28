@@ -244,10 +244,6 @@ data ExpBase ty vn =
             -- Scalar operations
             | BinOp BinOp (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
 
-            -- Binary Ops for Booleans
-            | And    (ExpBase ty vn) (ExpBase ty vn) SrcLoc
-            | Or     (ExpBase ty vn) (ExpBase ty vn) SrcLoc
-
             -- Unary Ops: Not for bools and Negate for ints
             | Not    (ExpBase ty vn) SrcLoc -- ^ E.g., @not True == False@.
             | Negate (ExpBase ty vn) (ty vn) SrcLoc -- ^ E.g., @~(~1) = 1@.
@@ -360,8 +356,6 @@ instance Located (ExpBase ty vn) where
   locOf (TupLit _ pos) = locOf pos
   locOf (ArrayLit _ _ pos) = locOf pos
   locOf (BinOp _ _ _ _ pos) = locOf pos
-  locOf (And _ _ pos) = locOf pos
-  locOf (Or _ _ pos) = locOf pos
   locOf (Not _ pos) = locOf pos
   locOf (Negate _ _ pos) = locOf pos
   locOf (If _ _ _ _ pos) = locOf pos
@@ -394,9 +388,7 @@ instance Located (ExpBase ty vn) where
   locOf (FilterT _ _ _ pos) = locOf pos
   locOf (RedomapT _ _ _ _ _ pos) = locOf pos
 
--- | Eagerly evaluated binary operators.  In particular, the
--- short-circuited operators && and || are not here, although an
--- eagerly evaluated variant is.
+-- | Binary operators.
 data BinOp = Plus -- Binary Ops for Numbers
            | Minus
            | Pow

@@ -323,16 +323,6 @@ copyCtPropExp (BinOp bop e1 e2 tp pos) = do
     e2'   <- copyCtPropExp e2
     ctFoldBinOp (BinOp bop e1' e2' tp pos)
 
-copyCtPropExp (And e1 e2 pos) = do
-    e1'   <- copyCtPropExp e1
-    e2'   <- copyCtPropExp e2
-    ctFoldBinOp (And e1' e2' pos)
-
-copyCtPropExp (Or e1 e2 pos) = do
-    e1'   <- copyCtPropExp e1
-    e2'   <- copyCtPropExp e2
-    ctFoldBinOp $ Or e1' e2' pos
-
 copyCtPropExp (Negate e tp pos) = do
     e'   <- copyCtPropExp e
     if isValue e'
@@ -599,7 +589,7 @@ ctFoldBinOp e@(BinOp Xor e1 e2 _ pos)
       (Literal (IntVal v1) _, Literal (IntVal v2) _) -> changed $ Literal (IntVal  (xor v1 v2)) pos
       _ -> badCPropM $ TypeError pos  " ^ operands not of integer type! "
   | otherwise = return e
-ctFoldBinOp e@(And e1 e2 pos)
+ctFoldBinOp e@(BinOp LogAnd e1 e2 _ pos)
   | isCt0 e1 = changed e1
   | isCt0 e2 = changed e2
   | isCt1 e1 = changed e2
@@ -609,7 +599,7 @@ ctFoldBinOp e@(And e1 e2 pos)
       (Literal (LogVal  v1) _, Literal (LogVal  v2) _) -> changed $ Literal (LogVal  (v1 && v2)) pos
       _ -> badCPropM $ TypeError pos  " && operands not of boolean type! "
   | otherwise = return e
-ctFoldBinOp e@(Or e1 e2 pos)
+ctFoldBinOp e@(BinOp LogOr e1 e2 _ pos)
   | isCt0 e1 = changed e2
   | isCt0 e2 = changed e1
   | isCt1 e1 = changed e1

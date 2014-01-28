@@ -477,16 +477,6 @@ compileExp' place (BinOp bop e1 e2 _ _) = do
             Less -> [C.cstm|$exp:place = $id:x < $id:y;|]
             Leq -> [C.cstm|$exp:place = $id:x <= $id:y;|]
 
-compileExp' place (And e1 e2 _) = do
-  e1' <- compileExp place e1
-  e2' <- compileExp place e2
-  return $ stm [C.cstm|{$items:e1' if ($exp:place) { $items:e2' }}|]
-
-compileExp' place (Or e1 e2 _) = do
-  e1' <- compileExp place e1
-  e2' <- compileExp place e2
-  return $ stm [C.cstm|{$items:e1' if (!$exp:place) { $items:e2' }}|]
-
 compileExp' place (Not e1 _) = do
   e1' <- compileExp place e1
   return $ stm [C.cstm|{$items:e1' $exp:place = !$exp:place;}|]

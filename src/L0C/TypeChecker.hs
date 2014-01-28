@@ -661,16 +661,6 @@ checkExp (ArrayLit es t loc) = do
 
 checkExp (BinOp op e1 e2 t pos) = checkBinOp op e1 e2 t pos
 
-checkExp (And e1 e2 pos) = do
-  e1' <- require [Elem Bool] =<< checkExp e1
-  e2' <- require [Elem Bool] =<< checkExp e2
-  return $ And e1' e2' pos
-
-checkExp (Or e1 e2 pos) = do
-  e1' <- require [Elem Bool] =<< checkExp e1
-  e2' <- require [Elem Bool] =<< checkExp e2
-  return $ Or e1' e2' pos
-
 checkExp (Not e pos) = do
   e' <- require [Elem Bool] =<< checkExp e
   return $ Not e' pos

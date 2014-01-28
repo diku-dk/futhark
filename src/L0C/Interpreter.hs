@@ -277,18 +277,6 @@ evalExp (BinOp Leq e1 e2 _ _) = do
 
 evalExp (BinOp _ _ _ _ pos) = bad $ TypeError pos "evalExp Binop"
 
-evalExp (And e1 e2 pos) = do
-  v1 <- evalExp e1
-  case v1 of LogVal True  -> evalExp e2
-             LogVal False -> return v1
-             _            -> bad $ TypeError pos "evalExp And"
-
-evalExp (Or e1 e2 pos) = do
-  v1 <- evalExp e1
-  case v1 of LogVal True  -> return v1
-             LogVal False -> evalExp e2
-             _            -> bad $ TypeError pos "evalExp Or"
-
 evalExp (Not e pos) = do
   v <- evalExp e
   case v of LogVal b -> return $ LogVal (not b)

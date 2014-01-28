@@ -142,10 +142,13 @@ transformExp rec (Filter fun arrexp rowtype loc) =
             indexim1 = indexia (BinOp Minus iv (intval 1) (Elem Int) loc)
         newLet (dec rec) "res" (Replicate indexiaend indexin0 loc) $ \res resv -> do
           let loop = DoLoop (Id res) resv i nv loopbody resv loc
-              loopbody = If (Or (BinOp Equal iv (intval 0) (Elem Bool) loc)
-                                (And (BinOp Less (intval 0) iv (Elem Bool) loc)
-                                     (BinOp Equal indexi indexim1 (Elem Bool) loc) loc)
-                             loc)
+              loopbody = If (BinOp LogOr
+                                   (BinOp Equal iv (intval 0) (Elem Bool) loc)
+                                   (BinOp LogAnd
+                                          (BinOp Less (intval 0) iv (Elem Bool) loc)
+                                          (BinOp Equal indexi indexim1 (Elem Bool) loc)
+                                          (Elem Bool) loc)
+                             (Elem Bool) loc)
                          resv update (typeOf resv) loc
               update = LetWith [] res res Nothing [BinOp Minus indexi (intval 1) (Elem Int) loc]
                        indexin resv loc
@@ -222,10 +225,13 @@ transformExp rec filtere@(FilterT cs fun arrexps loc) =
         newResultArray (dec rec) indexiaend (TupLit indexin0 loc) $ \res resv -> do
           update <- letwith cs res (sub1 indexi) (TupLit indexin loc) resv
           let loop = DoLoop (TupId (map Id res) loc) resv i nv loopbody resv loc
-              loopbody = If (Or (BinOp Equal iv (intval 0) (Elem Bool) loc)
-                                (And (BinOp Less (intval 0) iv (Elem Bool) loc)
-                                     (BinOp Equal indexi indexim1 (Elem Bool) loc) loc)
-                             loc)
+              loopbody = If (BinOp LogOr
+                               (BinOp Equal iv (intval 0) (Elem Bool) loc)
+                               (BinOp LogAnd
+                                  (BinOp Less (intval 0) iv (Elem Bool) loc)
+                                  (BinOp Equal indexi indexim1 (Elem Bool) loc)
+                                  (Elem Bool) loc)
+                             (Elem Bool) loc)
                          resv update (typeOf resv) loc
           return $ checkempty loop
   where intval x = Literal (IntVal x) loc
