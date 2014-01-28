@@ -108,8 +108,8 @@ mapExpM tv (BinOp bop x y t loc) =
          mapOnType tv t <*> pure loc
 mapExpM tv (Not x loc) =
   pure Not <*> mapOnExp tv x <*> pure loc
-mapExpM tv (Negate x t loc) =
-  pure Negate <*> mapOnExp tv x <*> mapOnType tv t <*> pure loc
+mapExpM tv (Negate x loc) =
+  pure Negate <*> mapOnExp tv x <*> pure loc
 mapExpM tv (If c texp fexp t loc) =
   pure If <*> mapOnExp tv c <*> mapOnExp tv texp <*> mapOnExp tv fexp <*>
        mapOnType tv t <*> pure loc
@@ -177,10 +177,10 @@ mapExpM tv (Redomap redfun mapfun accexp arrexp intype loc) =
   pure Redomap <*> mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
        mapOnExp tv accexp <*> mapOnExp tv arrexp <*>
        mapOnType tv intype <*> pure loc
-mapExpM tv (Split cs nexp arrexp t loc) =
+mapExpM tv (Split cs nexp arrexp loc) =
   pure Split <*> mapOnCertificates tv cs <*>
        mapOnExp tv nexp <*> mapOnExp tv arrexp <*>
-       mapOnType tv t <*> pure loc
+       pure loc
 mapExpM tv (Concat cs x y loc) =
   pure Concat <*> mapOnCertificates tv cs <*>
        mapOnExp tv x <*> mapOnExp tv y <*> pure loc

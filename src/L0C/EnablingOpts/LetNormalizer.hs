@@ -221,9 +221,9 @@ letNormExp (Index cs s csidx idx pos) = do
 --- unary operators ---
 -----------------------
 
-letNormExp (Negate e tp pos) = do
+letNormExp (Negate e pos) = do
     e' <- subLetoNormExp "tmp_neg" e
-    return $ Negate e' tp pos
+    return $ Negate e' pos
 
 letNormExp (Not e pos) = do
     e' <- subLetoNormExp "tmp_not" e
@@ -306,10 +306,10 @@ letNormExp (Unzip arr tps pos) = do
     arr' <- letNormExp arr >>= makeVarExpSubst "tmp_arr" pos
     makeVarExpSubst "tmp_unzip" pos (Unzip arr' tps pos)
 
-letNormExp (Split cs n arr tp pos) = do
+letNormExp (Split cs n arr pos) = do
     n'    <- subLetoNormExp "tmp_arg" n
     arr'  <- letNormExp arr >>= makeVarExpSubst "tmp_arr" pos
-    makeVarExpSubst "tmp_split" pos (Split cs n' arr' tp pos)
+    makeVarExpSubst "tmp_split" pos (Split cs n' arr' pos)
 
 letNormExp (Concat cs arr1 arr2 pos) = do
     arr1' <- letNormExp arr1 >>= makeVarExpSubst "tmp_arr" pos

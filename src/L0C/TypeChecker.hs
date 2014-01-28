@@ -665,10 +665,9 @@ checkExp (Not e pos) = do
   e' <- require [Elem Bool] =<< checkExp e
   return $ Not e' pos
 
-checkExp (Negate e t pos) = do
+checkExp (Negate e loc) = do
   e' <- require [Elem Int, Elem Real] =<< checkExp e
-  t' <- checkAnnotation pos "negate result" t $ typeOf e'
-  return $ Negate e' t' pos
+  return $ Negate e' loc
 
 checkExp (If e1 e2 e3 t pos) = do
   e1' <- require [Elem Bool] =<< checkExp e1
@@ -849,13 +848,12 @@ checkExp (Redomap outerfun innerfun accexp arrexp intype pos) = do
   intype' <- checkAnnotation pos "redomap input element" intype rt
   return $ Redomap outerfun' innerfun' accexp' arrexp' intype' pos
 
-checkExp (Split cs splitexp arrexp intype pos) = do
+checkExp (Split cs splitexp arrexp pos) = do
   cs' <- mapM (requireI [Elem Cert] <=< checkIdent) cs
   splitexp' <- require [Elem Int] =<< checkExp splitexp
   arrexp' <- checkExp arrexp
-  et <- rowTypeM arrexp'
-  intype' <- checkAnnotation pos "element" intype et
-  return $ Split cs' splitexp' arrexp' intype' pos
+  _ <- rowTypeM arrexp' -- Just check that it's an array.
+  return $ Split cs' splitexp' arrexp' pos
 
 checkExp (Concat cs arr1exp arr2exp pos) = do
   cs' <- mapM (requireI [Elem Cert] <=< checkIdent) cs
@@ -1260,7 +1258,7 @@ checkLambda (CurryFun fname [] rettype pos) [arg]
   rettype' <- checkAnnotation pos "return" rettype $ argType arg
   var <- newIdent "x" (argType arg) pos
   let lam = AnonymFun [toParam var]
-            (Negate (Var var) (argType arg) pos) (toDecl rettype') pos
+            (Negate (Var var) pos) (toDecl rettype') pos
   checkLambda lam [arg]
 
 checkLambda (CurryFun opfun curryargexps rettype pos) args

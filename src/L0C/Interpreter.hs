@@ -282,7 +282,7 @@ evalExp (Not e pos) = do
   case v of LogVal b -> return $ LogVal (not b)
             _        -> bad $ TypeError pos "evalExp Not"
 
-evalExp (Negate e _ pos) = do
+evalExp (Negate e pos) = do
   v <- evalExp e
   case v of IntVal x  -> return $ IntVal (-x)
             RealVal x -> return $ RealVal (-x)
@@ -438,16 +438,17 @@ evalExp (Redomap redfun mapfun accexp arrexp _ pos) = do
   let foldfun acc x = applyLambda redfun [acc, x]
   foldM foldfun startacc vs'
 
-evalExp (Split _ splitexp arrexp intype pos) = do
+evalExp (Split _ splitexp arrexp pos) = do
   split <- evalExp splitexp
   vs <- arrToList pos =<< evalExp arrexp
   case split of
     IntVal i
       | i <= length vs ->
         let (bef,aft) = splitAt i vs
-        in return $ TupVal [arrayVal bef intype, arrayVal aft intype]
+        in return $ TupVal [arrayVal bef rt, arrayVal aft rt]
       | otherwise        -> bad $ IndexOutOfBounds pos (length vs) i
     _ -> bad $ TypeError pos "evalExp Split"
+  where rt = rowType $ typeOf arrexp
 
 evalExp (Concat _ arr1exp arr2exp pos) = do
   elems1 <- arrToList pos =<< evalExp arr1exp

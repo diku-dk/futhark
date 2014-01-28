@@ -111,7 +111,7 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
       _               -> brackets $ commasep $ map ppr es
   pprPrec p (BinOp bop x y _ _) = ppBinOp p bop x y
   pprPrec _ (Not e _) = text "not" <+> pprPrec 9 e
-  pprPrec _ (Negate e _ _) = text "-" <> pprPrec 9 e
+  pprPrec _ (Negate e _) = text "-" <> pprPrec 9 e
   pprPrec _ (If c t f _ _) = text "if" <+> ppr c </>
                              text "then" <+> align (ppr t) </>
                              text "else" <+> align (ppr f)
@@ -184,7 +184,7 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
   pprPrec _ (Filter lam a _ _) = ppSOAC "filter" [lam] [a]
   pprPrec _ (Zip es _) = text "zip" <> apply (map (ppr . fst) es)
   pprPrec _ (Unzip e _ _) = text "unzip" <> parens (ppr e)
-  pprPrec _ (Split cs e a _ _) =
+  pprPrec _ (Split cs e a _) =
     ppCertificates cs <> text "split" <> apply [ppr e, ppr a]
   pprPrec _ (Concat cs x y _) =
     ppCertificates cs <> text "concat" <> apply [ppr x, ppr y]

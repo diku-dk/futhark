@@ -173,7 +173,7 @@ bindLet pat@(Id dest) e@(Replicate ne (Var y) _) m =
   withBinding pat e $
   withShape dest (ne:slice [] 0 y) m
 
-bindLet pat@(TupId [Id dest1, Id dest2] _) e@(Split cs ne srce _ loc) m =
+bindLet pat@(TupId [Id dest1, Id dest2] _) e@(Split cs ne srce loc) m =
   withBinding pat e $
   withNewBinding "split_src_sz" (Size cs 0 srce loc) $ \src_sz ->
   withNewBinding "split_sz" (BinOp Minus (Var src_sz) ne (Elem Int) loc) $ \split_sz ->
@@ -452,7 +452,7 @@ isNotCheap _ = not . cheap . asTail
         cheap (BinOp _ e1 e2 _ _) = cheap e1 && cheap e2
         cheap (TupLit es _) = all cheap es
         cheap (Not e _) = cheap e
-        cheap (Negate e _ _) = cheap e
+        cheap (Negate e _) = cheap e
         cheap (LetPat _ e body _) = cheap e && cheap body
         cheap _ = False
 

@@ -359,7 +359,7 @@ transformExp (Reshape cs shape e loc) =
   return $ tuplit cs' loc
            [Reshape (certify cs' []) shape (Var k) loc | k <- ks]
 
-transformExp (Split cs nexp arrexp eltype loc) = do
+transformExp (Split cs nexp arrexp loc) = do
   nexp' <- transformExp nexp
   arrexp' <- transformExp arrexp
   case typeOf arrexp' of
@@ -372,16 +372,15 @@ transformExp (Split cs nexp arrexp eltype loc) = do
                      b <- fst <$> newVar loc "split_b" et
                      return (a, b)
       let cert = maybe (given loc) Var cs'
-          combsplit olde (arr, (a,b), et) inner =
+          combsplit olde (arr, (a,b)) inner =
             olde $ LetPat (TupId [Id a, Id b] loc)
-                   (Split (certify c []) (Var n) (Var arr) et loc) inner loc
+                   (Split (certify c []) (Var n) (Var arr) loc) inner loc
           letsplits = foldl combsplit id $
-                      zip3 arrs partnames $
-                      map (stripArray 1) ets
+                      zip arrs partnames
           els = (cert : map (Var . fst) partnames) ++
                 (cert : map (Var . snd) partnames)
       return $ letn $ letsplits $ TupLit els loc
-    _ -> return $ Split cs nexp' arrexp' (transformType eltype) loc
+    _ -> return $ Split cs nexp' arrexp' loc
 
 transformExp (Concat cs x y loc) = do
   x' <- transformExp x

@@ -232,7 +232,7 @@ Exp  :: { UncheckedExp }
      | Exp '*' Exp    { BinOp Times $1 $3 NoInfo $2 }
      | Exp '/' Exp    { BinOp Divide $1 $3 NoInfo $2 }
      | Exp '%' Exp    { BinOp Mod $1 $3 NoInfo $2 }
-     | '-' Exp        { Negate $2 NoInfo $1 }
+     | '-' Exp        { Negate $2 $1 }
      | not Exp        { Not $2 $1 }
      | Exp pow Exp    { BinOp Pow $1 $3 NoInfo $2 }
      | Exp '>>' Exp   { BinOp ShiftR $1 $3 NoInfo $2 }
@@ -283,10 +283,10 @@ Exp  :: { UncheckedExp }
                       { Transpose [] $3 $5 $7 $1 }
 
      | Certificates split '(' Exp ',' Exp ')'
-                      { Split $1 $4 $6 NoInfo $2 }
+                      { Split $1 $4 $6 $2 }
 
      | split '(' Exp ',' Exp ')'
-                      { Split [] $3 $5 NoInfo $1 }
+                      { Split [] $3 $5 $1 }
 
      | Certificates concat '(' Exp ',' Exp ')'
                       { Concat $1 $4 $6 $2 }

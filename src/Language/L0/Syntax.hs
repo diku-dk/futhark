@@ -217,8 +217,7 @@ data ExpBase ty vn =
               Literal Value SrcLoc
 
             | TupLit    [ExpBase ty vn] SrcLoc
-            -- ^ Tuple literals, e.g., (1+3, (x, y+z)).  Second
-            -- argument is the tuple's type.
+            -- ^ Tuple literals, e.g., (1+3, (x, y+z)).
 
             | ArrayLit  [ExpBase ty vn] (ty vn) SrcLoc
 
@@ -246,7 +245,7 @@ data ExpBase ty vn =
 
             -- Unary Ops: Not for bools and Negate for ints
             | Not    (ExpBase ty vn) SrcLoc -- ^ E.g., @not True == False@.
-            | Negate (ExpBase ty vn) (ty vn) SrcLoc -- ^ E.g., @~(~1) = 1@.
+            | Negate (ExpBase ty vn) SrcLoc -- ^ E.g., @~(~1) = 1@.
 
             -- Assertion management.
             | Assert (ExpBase ty vn) SrcLoc
@@ -273,9 +272,8 @@ data ExpBase ty vn =
             | Size (CertificatesBase ty vn) Int (ExpBase ty vn) SrcLoc
             -- ^ The size of the specified array dimension.
 
-            | Split (CertificatesBase ty vn) (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
+            | Split (CertificatesBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
             -- ^ @split(1, [ 1, 2, 3, 4 ]) = {[1],[2, 3, 4]}@.
-            -- 4th arg is the element type of the input array
 
             | Concat (CertificatesBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
             -- ^ @concat([1],[2, 3, 4]) = [1, 2, 3, 4]@.
@@ -357,7 +355,7 @@ instance Located (ExpBase ty vn) where
   locOf (ArrayLit _ _ pos) = locOf pos
   locOf (BinOp _ _ _ _ pos) = locOf pos
   locOf (Not _ pos) = locOf pos
-  locOf (Negate _ _ pos) = locOf pos
+  locOf (Negate _ pos) = locOf pos
   locOf (If _ _ _ _ pos) = locOf pos
   locOf (Var ident) = locOf ident
   locOf (Apply _ _ _ pos) = locOf pos
@@ -376,7 +374,7 @@ instance Located (ExpBase ty vn) where
   locOf (Scan _ _ _ _ pos) = locOf pos
   locOf (Filter _ _ _ pos) = locOf pos
   locOf (Redomap _ _ _ _ _ pos) = locOf pos
-  locOf (Split _ _ _ _ pos) = locOf pos
+  locOf (Split _ _ _ pos) = locOf pos
   locOf (Concat _ _ _ pos) = locOf pos
   locOf (Copy _ pos) = locOf pos
   locOf (Assert _ loc) = locOf loc

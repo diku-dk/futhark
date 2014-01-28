@@ -323,14 +323,14 @@ copyCtPropExp (BinOp bop e1 e2 tp pos) = do
     e2'   <- copyCtPropExp e2
     ctFoldBinOp (BinOp bop e1' e2' tp pos)
 
-copyCtPropExp (Negate e tp pos) = do
+copyCtPropExp (Negate e pos) = do
     e'   <- copyCtPropExp e
     if isValue e'
     then case e' of
             Literal (IntVal  v) _ -> changed $ Literal (IntVal  (-v)) pos
             Literal (RealVal v) _ -> changed $ Literal (RealVal (0.0-v)) pos
             _ -> badCPropM $ TypeError pos  " ~ operands not of (the same) numeral type! "
-    else return $ Negate e' tp pos
+    else return $ Negate e' pos
 
 copyCtPropExp (Not e pos) = do
     e'   <- copyCtPropExp e

@@ -129,7 +129,7 @@ cheapExp :: Exp -> Bool
 cheapExp (LetPat _ e body _) = cheapExp e && cheapExp body
 cheapExp (BinOp _ x y _ _) = cheapExp x && cheapExp y
 cheapExp (Not x _) = cheapExp x
-cheapExp (Negate x _ _) = cheapExp x
+cheapExp (Negate x _) = cheapExp x
 cheapExp (Var {}) = True
 cheapExp (Literal {}) = True
 cheapExp (TupLit es _) = all cheapExp es

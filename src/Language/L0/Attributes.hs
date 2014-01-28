@@ -604,7 +604,7 @@ typeOf (ArrayLit es t _) =
   arrayType 1 t $ mconcat $ map (uniqueness . typeOf) es
 typeOf (BinOp _ _ _ t _) = t
 typeOf (Not _ _) = Elem Bool
-typeOf (Negate _ t _) = t
+typeOf (Negate e _) = typeOf e
 typeOf (If _ _ _ t _) = t
 typeOf (Var ident) =
   case identType ident of
@@ -645,8 +645,8 @@ typeOf (Filter _ arr _ _) = typeOf arr
 typeOf (Redomap outerfun innerfun start arr _ _ ) =
   lambdaType outerfun [innerres, innerres]
     where innerres = lambdaType innerfun [typeOf start, rowType $ typeOf arr]
-typeOf (Split _ _ _ t _) =
-  Elem $ Tuple [arrayType 1 t Nonunique, arrayType 1 t Nonunique]
+typeOf (Split _ _ e _) =
+  Elem $ Tuple [typeOf e, typeOf e]
 typeOf (Concat _ x y _) = typeOf x `setUniqueness` u
   where u = uniqueness (typeOf x) <> uniqueness (typeOf y)
 typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` HS.empty

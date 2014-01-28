@@ -481,7 +481,7 @@ compileExp' place (Not e1 _) = do
   e1' <- compileExp place e1
   return $ stm [C.cstm|{$items:e1' $exp:place = !$exp:place;}|]
 
-compileExp' place (Negate e1 _ _) = do
+compileExp' place (Negate e1 _) = do
   e1' <- compileExp place e1
   return $ stm [C.cstm|{$items:e1' $exp:place = -$exp:place;}|]
 
@@ -628,7 +628,7 @@ compileExp' place e@(Transpose _ k n arrexp _) = do
                      $stm:copy
                    }|]
 
-compileExp' place (Split _ posexp arrexp _ _) = do
+compileExp' place (Split _ posexp arrexp _) = do
   arr <- new "split_arr"
   pos <- new "split_pos"
   arrexp' <- compileExp (varExp arr) arrexp
