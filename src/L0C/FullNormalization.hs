@@ -18,6 +18,7 @@ import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.RWS
 
+import Data.Char
 import Data.Loc
 import qualified Data.HashMap.Lazy as HM
 
@@ -144,7 +145,7 @@ nameHint :: Exp -> String
 nameHint (LetPat {}) = "let"
 nameHint (DoLoop {}) = "loop"
 nameHint (LetWith {}) = "letwith"
-nameHint (BinOp {}) = "bop"
+nameHint (BinOp bop _ _ _ _) = binOpNameHint bop
 nameHint (Not {}) = "not"
 nameHint (Negate {}) = "negate"
 nameHint (If {}) = "if"
@@ -152,4 +153,8 @@ nameHint (Size {}) = "size"
 nameHint (Concat {}) = "concat"
 nameHint (Split {}) = "split"
 nameHint (Iota {}) = "iota"
+nameHint (Index {}) = "index"
 nameHint _ = "norm"
+
+binOpNameHint :: BinOp -> String
+binOpNameHint = map toLower . show
