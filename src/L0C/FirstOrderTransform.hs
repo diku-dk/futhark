@@ -144,10 +144,10 @@ transformExp rec (Filter fun arrexp rowtype loc) =
           let loop = DoLoop (Id res) resv i nv loopbody resv loc
               loopbody = If (BinOp LogOr
                                    (BinOp Equal iv (intval 0) (Elem Bool) loc)
-                                   (BinOp LogAnd
-                                          (BinOp Less (intval 0) iv (Elem Bool) loc)
-                                          (BinOp Equal indexi indexim1 (Elem Bool) loc)
-                                          (Elem Bool) loc)
+                                   (If (BinOp Less (intval 0) iv (Elem Bool) loc)
+                                       (BinOp Equal indexi indexim1 (Elem Bool) loc)
+                                       (Literal (LogVal False) loc)
+                                       (Elem Bool) loc)
                              (Elem Bool) loc)
                          resv update (typeOf resv) loc
               update = LetWith [] res res Nothing [BinOp Minus indexi (intval 1) (Elem Int) loc]
@@ -227,11 +227,11 @@ transformExp rec filtere@(FilterT cs fun arrexps loc) =
           let loop = DoLoop (TupId (map Id res) loc) resv i nv loopbody resv loc
               loopbody = If (BinOp LogOr
                                (BinOp Equal iv (intval 0) (Elem Bool) loc)
-                               (BinOp LogAnd
-                                  (BinOp Less (intval 0) iv (Elem Bool) loc)
-                                  (BinOp Equal indexi indexim1 (Elem Bool) loc)
-                                  (Elem Bool) loc)
-                             (Elem Bool) loc)
+                               (If (BinOp Less (intval 0) iv (Elem Bool) loc)
+                                   (BinOp Equal indexi indexim1 (Elem Bool) loc)
+                                   (Literal (LogVal False) loc)
+                                   (Elem Bool) loc)
+                               (Elem Bool) loc)
                          resv update (typeOf resv) loc
           return $ checkempty loop
   where intval x = Literal (IntVal x) loc
