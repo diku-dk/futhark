@@ -166,16 +166,20 @@ printStm place t@(Array {}) = do
   return [C.cstm|{
                int $id:i;
                $ty:et' $id:v;
-               putchar('[');
-               for ($id:i = 0; $id:i < $exp:place.shape[0]; $id:i++) {
-                 $stms:indexi;
-                 $stm:pstm
-                 if ($id:i != $exp:place.shape[0]-1) {
-                   putchar(',');
-                   putchar(' ');
-                 }
-               }
+               if ($exp:place.shape[0] == 0) {
+                   printf("empty(%s)", $exp:(ppType $ rowType t));
+               } else {
+                   putchar('[');
+                   for ($id:i = 0; $id:i < $exp:place.shape[0]; $id:i++) {
+                           $stms:indexi;
+                           $stm:pstm
+                           if ($id:i != $exp:place.shape[0]-1) {
+                                  putchar(',');
+                                  putchar(' ');
+                           }
+                   }
                putchar(']');
+               }
              }|]
 
 readFun :: GenElemType als -> Maybe String
