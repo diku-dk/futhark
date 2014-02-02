@@ -42,11 +42,15 @@ testDescription (Optimise f) = "optimisation of " ++ f
 testDescription (Run f _ _) = "interpretation of " ++ f
 testDescription (Compile f _ _) = "compilation of " ++ f
 
+l0cNotFound :: String
+l0cNotFound = "l0c binary not found"
+
 failureTest :: FilePath -> IO TestResult
 failureTest f = do
   (code, _, err) <- readProcessWithExitCode "l0c" [l0flags, f] ""
   case code of
     ExitSuccess -> return $ Failure "Expected failure\n"
+    ExitFailure 127 -> return $ Failure l0cNotFound
     ExitFailure 1 -> return $ Failure err
     ExitFailure _ -> return Success
 
@@ -55,6 +59,7 @@ typeCheckTest f = do
   (code, _, err) <- readProcessWithExitCode "l0c" [l0flags, f] ""
   case code of
     ExitSuccess -> return Success
+    ExitFailure 127 -> return $ Failure l0cNotFound
     ExitFailure _ -> return $ Failure err
 
 executeTest :: FilePath -> FilePath -> FilePath -> IO TestResult
@@ -68,7 +73,8 @@ executeTest f inputf outputf = do
       | otherwise -> do
         writeFile expectedOutputf output
         return $ Failure $ outputf ++ " and " ++ expectedOutputf ++ " do not match."
-    ExitFailure _ -> return $ Failure err
+    ExitFailure 127 -> return $ Failure l0cNotFound
+    ExitFailure _   -> return $ Failure err
   where expectedOutputf = outputf `replaceExtension` "interpreterout"
 
 compileTest :: FilePath -> FilePath -> FilePath -> IO TestResult
@@ -78,8 +84,9 @@ compileTest f inputf outputf = do
   (l0code, l0prog, l0err) <- readProcessWithExitCode "l0c" [l0flags, "--compile-sequential", f] ""
   writeFile cOutputf l0prog
   case l0code of
-    ExitFailure _ -> return $ Failure l0err
-    ExitSuccess   -> do
+    ExitFailure 127 -> return $ Failure l0cNotFound
+    ExitFailure _   -> return $ Failure l0err
+    ExitSuccess     -> do
       (gccCode, _, gccerr) <- readProcessWithExitCode "gcc" [cOutputf, "-o", binOutputf, "-lm"] ""
       case gccCode of
         ExitFailure _ -> return $ Failure gccerr
