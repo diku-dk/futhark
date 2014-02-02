@@ -34,8 +34,7 @@ data/**/*c
 *.vrb
 *.nav
 
-!data/*.out
-!data/*/*.out
+!data/**/*.out
 
 # Ignore core dumps.
 core
