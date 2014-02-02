@@ -1,10 +1,10 @@
-fun [[real]] main() =
+fun {[real],[[real]]} main() =
   let e_rows = empty([real]) in
   let arr = copy(e_rows) in
   let acc = copy([1.0]) in
   loop ({acc, arr} = {acc, arr}) = for i < size(0, arr) do
     let arr[i] = let y = arr[i] in
                  let x = acc in
-                 [1.0] in
+                 [2.0] in
     {arr[i], arr} in
-  arr
+  {acc,arr}
