@@ -577,12 +577,15 @@ lambdaBinding ce params m = do
 transformLambda :: Exp -> Lambda -> (TupleLambda -> TransformM Exp) -> TransformM Exp
 transformLambda ce (AnonymFun params body rettype loc) m = do
   lam <- lambdaBinding ce (map fromParam params) $ \params' letf -> do
-           body' <- tupToIdentList body $ \_ ks -> return $ TupLit (map Var ks) loc
+           body' <- tupToIdentList body $ \_ ks -> return $ TupLit (map Var $ stripCert ks) loc
            return $ TupleLambda (map toParam params') (letf body') rettype' loc
   m lam
   where rettype' = case toDecl $ transformType' rettype of
                      Elem (Tuple ets) -> ets
                      _                -> [rettype]
+        stripCert (c:es)
+          | identType c == Elem Cert = es -- XXX HACK
+        stripCert es = es
 transformLambda _ (CurryFun {}) _ = error "no curries yet"
 
 transformTupleLambda :: TupleLambda -> (TupleLambda -> TransformM Exp) -> TransformM Exp
