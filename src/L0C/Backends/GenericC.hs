@@ -143,7 +143,7 @@ printStm :: C.Exp -> GenType als -> CompilerM C.Stm
 printStm place (Elem Int)  = return [C.cstm|printf("%d", $exp:place);|]
 printStm place (Elem Char) = return [C.cstm|printf("%c", $exp:place);|]
 printStm place (Elem Bool) =
-  return [C.cstm|printf($exp:place ? "true" : "false");|]
+  return [C.cstm|printf($exp:place ? "True" : "False");|]
 printStm place (Elem Real) = return [C.cstm|printf("%.6f", $exp:place);|]
 printStm _ (Elem Cert) = return [C.cstm|printf("Checked");|]
 printStm place (Elem (Tuple ets)) = do
