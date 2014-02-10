@@ -163,11 +163,13 @@ runFun fname mainargs prog = do
       l0env = L0Env { envVtable = HM.empty
                     , envFtable = ftable
                     }
+      argtypes = map ((`setUniqueness` Unique) . valueType) mainargs
       runmain =
         case (funDecByName fname prog, HM.lookup fname ftable) of
           (Nothing, Nothing) -> bad $ MissingEntryPoint fname
           (Just (_,rettype,fparams,_,_), _)
-            | map (toDecl . valueType) mainargs == map identType fparams ->
+            | length argtypes == length fparams &&
+              and (zipWith subtypeOf argtypes $ map identType fparams) ->
               evalExp (Apply fname [ (Literal arg noLoc,
                                       diet $ identType paramt) |
                                      (arg,paramt) <- zip mainargs fparams ]
@@ -175,7 +177,7 @@ runFun fname mainargs prog = do
             | otherwise ->
               bad $ InvalidFunctionArguments fname
                     (Just (map identType fparams))
-                    (map (fromDecl . valueType) mainargs)
+                    (map fromDecl argtypes)
           (_ , Just fun) -> -- It's a builtin function, it'll
                             -- do its own error checking.
             fun mainargs
