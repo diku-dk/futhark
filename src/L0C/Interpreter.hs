@@ -433,12 +433,11 @@ evalExp (Filter fun arrexp _ pos) = do
                     case res of (LogVal True) -> return True
                                 _             -> return False
 
-evalExp (Redomap redfun mapfun accexp arrexp _ pos) = do
+evalExp (Redomap _ innerfun accexp arrexp _ loc) = do
   startacc <- evalExp accexp
-  vs <- arrToList pos =<< evalExp arrexp
-  vs' <- mapM (applyLambda mapfun . (:[])) vs
-  let foldfun acc x = applyLambda redfun [acc, x]
-  foldM foldfun startacc vs'
+  vs <- arrToList loc =<< evalExp arrexp
+  let foldfun acc x = applyLambda innerfun [acc, x]
+  foldM foldfun startacc vs
 
 evalExp (Split _ splitexp arrexp pos) = do
   split <- evalExp splitexp
