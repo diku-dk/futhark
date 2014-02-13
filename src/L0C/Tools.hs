@@ -1,12 +1,19 @@
 {-# LANGUAGE FlexibleContexts #-}
 module L0C.Tools
-  ( asSubExp
-  , asSubExps
+  ( letSubExp
+  , letSubExps
+  , letExp
+  , letExps
+  , letTupExp
 
   , newVar
 
   , eIf
   , eBinOp
+  , eIndex
+  , eCopy
+  , eDoLoop
+  , eTupLit
   )
 where
 
@@ -16,27 +23,61 @@ import Control.Applicative
 import L0C.InternalRep
 import L0C.InternalRep.MonadFreshNames
 
-asSubExp :: MonadFreshNames VName m => m Exp -> (SubExp -> m Exp) -> m Exp
-asSubExp m f = do
+letSubExp :: MonadFreshNames VName m =>
+           String -> m Exp -> (SubExp -> m Exp) -> m Exp
+letSubExp desc m f = do
+  e <- m
+  case (e, typeOf e) of
+    (SubExp se, _) -> f se
+    (_, [_])         -> letExp desc m (f . Var)
+    _                -> fail "letSubExp: tuple-typed expression given."
+
+letExp :: MonadFreshNames VName m =>
+          String -> m Exp -> (Ident -> m Exp) -> m Exp
+letExp desc m f = do
   e <- m
   let loc = srclocOf e
   case (e, typeOf e) of
-    (SubExp se, _) -> f se
-    (_, [t])         -> do v <- fst <$> newVar loc "subexp" t
-                           LetPat [v] e <$> f (Var v) <*> pure loc
-    _                -> fail "asSubExp: tuple-typed expression given."
+    (SubExp (Var v), _) -> f v
+    (_, [t])            -> do v <- fst <$> newVar loc desc t
+                              LetPat [v] e <$> f v <*> pure loc
+    _                   -> fail "letExp: tuple-typed expression given."
 
-asSubExps :: MonadFreshNames VName m => m [Exp] -> ([SubExp] -> m Exp) -> m Exp
-asSubExps m f =
-  asSubExps' [] =<< m
-  where asSubExps' ses []            = f $ reverse ses
-        asSubExps' ses (SubExp e:es) = asSubExps' (e : ses) es
-        asSubExps' ses (e:es)
+letSubExps :: MonadFreshNames VName m =>
+            String -> m [Exp] -> ([SubExp] -> m Exp) -> m Exp
+letSubExps desc m f =
+  letSubExps' [] =<< m
+  where letSubExps' ses []            = f $ reverse ses
+        letSubExps' ses (SubExp e:es) = letSubExps' (e : ses) es
+        letSubExps' ses (e:es)
           | [t] <- typeOf e = do
-            v  <- fst <$> newVar loc "subexp" t
-            LetPat [v] e <$> asSubExps' (Var v:ses) es <*> pure loc
-          | otherwise = fail "asSubExps: tuple-typed expression given."
+            v  <- fst <$> newVar loc desc t
+            LetPat [v] e <$> letSubExps' (Var v:ses) es <*> pure loc
+          | otherwise = fail "letSubExps: tuple-typed expression given."
           where loc = srclocOf e
+
+letExps :: MonadFreshNames VName m =>
+           String -> m [Exp] -> ([Ident] -> m Exp) -> m Exp
+letExps desc m f =
+  letExps' [] =<< m
+  where letExps' vs []                  = f $ reverse vs
+        letExps' vs (SubExp (Var v):es) = letExps' (v : vs) es
+        letExps' vs (e:es)
+          | [t] <- typeOf e = do
+            v  <- fst <$> newVar loc desc t
+            LetPat [v] e <$> letExps' (v:vs) es <*> pure loc
+          | otherwise = fail "letExps: tuple-typed expression given."
+          where loc = srclocOf e
+
+letTupExp :: MonadFreshNames VName m =>
+             String -> m Exp -> ([Ident] -> Exp -> m Exp) -> m Exp
+letTupExp name e body = do
+  e' <- e
+  let ts  = typeOf e'
+      loc = srclocOf e'
+  (names, namevs) <- unzip <$> mapM (newVar loc name) ts
+  let bndOuter inner = LetPat names e' inner loc
+  bndOuter <$> body names (TupLit namevs loc)
 
 newVar :: MonadFreshNames VName m => SrcLoc -> String -> Type -> m (Ident, SubExp)
 newVar loc name tp = do
@@ -46,14 +87,39 @@ newVar loc name tp = do
 eIf :: MonadFreshNames VName m =>
           m Exp -> m Exp -> m Exp -> [Type] -> SrcLoc -> m Exp
 eIf ce te fe ts loc =
-  asSubExp ce $ \ce' -> do
+  letSubExp "cond" ce $ \ce' -> do
     te' <- te
     fe' <- fe
     return $ If ce' te' fe' ts loc
 
 eBinOp :: MonadFreshNames VName m =>
-             BinOp -> m Exp -> m Exp -> Type -> SrcLoc -> m Exp
+          BinOp -> m Exp -> m Exp -> Type -> SrcLoc -> m Exp
 eBinOp op x y t loc =
-  asSubExp x $ \x' ->
-  asSubExp y $ \y' ->
+  letSubExp "x" x $ \x' ->
+  letSubExp "y" y $ \y' ->
   return $ BinOp op x' y' t loc
+
+eIndex :: MonadFreshNames VName m =>
+          Certificates -> Ident -> Maybe Certificates -> [m Exp] -> SrcLoc
+       -> m Exp
+eIndex cs a idxcs idxs loc =
+  letSubExps "i" (sequence idxs) $ \idxs' ->
+    return $ Index cs a idxcs idxs' loc
+
+eCopy :: MonadFreshNames VName m =>
+         m Exp -> m Exp
+eCopy e = letSubExp "copy_arg" e $ \e' -> return $ Copy e' $ srclocOf e'
+
+eDoLoop :: MonadFreshNames VName m =>
+           [(Ident,m Exp)] -> Ident -> m Exp -> Exp -> Exp -> SrcLoc -> m Exp
+eDoLoop pat i boundexp loopbody body loc =
+  letSubExps "merge_init" (sequence mergeexps) $ \mergeexps' ->
+  letSubExp "bound" boundexp $ \boundexp' ->
+  return $ DoLoop (zip mergepat mergeexps') i boundexp' loopbody body loc
+  where (mergepat, mergeexps) = unzip pat
+
+eTupLit :: MonadFreshNames VName m =>
+           [m Exp] -> SrcLoc -> m Exp
+eTupLit es loc =
+  letSubExps "tuplit_elems" (sequence es) $ \es' ->
+  return $ TupLit es' loc

@@ -16,8 +16,8 @@ import Control.Monad.State
 import Data.Loc
 import qualified Data.HashMap.Strict as HM
 
-import L0C.L0
-import L0C.MonadFreshNames
+import L0C.InternalRep
+import L0C.InternalRep.MonadFreshNames
 import L0C.NeedNames
 
 -- | Perform the transformation.  Never fails.
@@ -31,10 +31,10 @@ transformExp :: NameSource VName -> Exp -> (Exp, NameSource VName)
 transformExp src = runInlinerM src . transformExpM
 
 -- | Transform just a single lambda.
-transformLambda :: NameSource VName -> TupleLambda -> (TupleLambda, NameSource VName)
+transformLambda :: NameSource VName -> Lambda -> (Lambda, NameSource VName)
 transformLambda src l =
-  let (e, src') = transformExp src $ tupleLambdaBody l
-  in (l { tupleLambdaBody = e }, src')
+  let (e, src') = transformExp src $ lambdaBody l
+  in (l { lambdaBody = e }, src')
 
 transformFun :: FunDec -> InlinerM FunDec
 transformFun (fname, rettype, params, body, loc) = do
@@ -43,12 +43,11 @@ transformFun (fname, rettype, params, body, loc) = do
 
 transformExpM :: Exp -> InlinerM Exp
 
-transformExpM (LetPat pat e@(MapT cs fun es mloc) body loc) = do
-  es'  <- mapM transformExpM es
-  fun' <- transformTupleLambda fun
+transformExpM (LetPat pat e@(Map cs fun es mloc) body loc) = do
+  fun' <- transformLambdaM fun
   dels <- performArrayDelays pat e
   body' <- local (HM.union dels) $ transformExpM body
-  return $ LetPat pat (MapT cs fun' es' mloc) body' loc
+  return $ LetPat pat (Map cs fun' es mloc) body' loc
 
 transformExpM e@(Index cs v idxcs (idx:idxs) loc) = do
   me <- asks $ lookupDelayed v cs idxcs idx
@@ -56,9 +55,8 @@ transformExpM e@(Index cs v idxcs (idx:idxs) loc) = do
     Nothing -> return e
     Just e' -> do
      e'' <- provideNames e'
-     ident <- newIdent elname (typeOf e'') loc
-     idxmore <- transformExpM $ Index cs ident idxcs idxs loc
-     let res = LetPat (Id ident) e'' idxmore loc
+     idents <- mapM (\t -> newIdent elname t loc) $ typeOf e''
+     let res = LetPat idents e'' (TupLit (map Var idents) loc) loc
      case idxs of
        [] | cheapExp e'' -> return e''
        _  | cheapExp res -> return res
@@ -67,50 +65,50 @@ transformExpM e@(Index cs v idxcs (idx:idxs) loc) = do
 
 transformExpM e = mapExpM transform e
   where transform = identityMapper {
-                      mapOnExp         = transformExpM
-                    , mapOnTupleLambda = transformTupleLambda
+                      mapOnExp    = transformExpM
+                    , mapOnLambda = transformLambdaM
                     }
 
-transformTupleLambda :: TupleLambda -> InlinerM TupleLambda
-transformTupleLambda l = do
-  e <- transformExpM $ tupleLambdaBody l
-  return l { tupleLambdaBody = e }
+transformLambdaM :: Lambda -> InlinerM Lambda
+transformLambdaM l = do
+  e <- transformExpM $ lambdaBody l
+  return l { lambdaBody = e }
 
 type ArrayIndexMap = HM.HashMap Ident
-                     (Certificates -> Maybe Certificates -> Exp -> NeedNames Exp)
+                     (Certificates -> Maybe Certificates -> SubExp -> NeedNames Exp)
 
 emptyArrayIndexMap :: ArrayIndexMap
 emptyArrayIndexMap = HM.empty
 
-lookupDelayed :: Ident -> Certificates -> Maybe Certificates -> Exp
+lookupDelayed :: Ident -> Certificates -> Maybe Certificates -> SubExp
               -> ArrayIndexMap
               -> Maybe (NeedNames Exp)
 lookupDelayed var cs idxcs idx m = do
   f <- HM.lookup var m
   return $ f cs idxcs idx
 
-performArrayDelay :: Exp -> Maybe (Certificates -> Maybe Certificates -> Exp -> NeedNames Exp)
-performArrayDelay (MapT cs fun es _) = do
+performArrayDelay :: Exp -> Maybe (Certificates -> Maybe Certificates -> SubExp -> NeedNames Exp)
+performArrayDelay (Map cs fun es _) = do
   vs <- mapM varExp es
   Just $ performArrayDelay' cs fun vs
   where varExp (Var v) = Just v
         varExp _       = Nothing
 performArrayDelay _ = Nothing
 
-performArrayDelay' :: Certificates -> TupleLambda -> [Ident]
-                   -> Certificates -> Maybe Certificates -> Exp -> NeedNames Exp
+performArrayDelay' :: Certificates -> Lambda -> [Ident]
+                   -> Certificates -> Maybe Certificates -> SubExp -> NeedNames Exp
 performArrayDelay' mcs fun vs cs idxcs idx =
-  return $ inlineMapFun (tupleLambdaParams fun)
+  return $ inlineMapFun (lambdaParams fun)
                         [Index (mcs++cs) v idxcs [idx] $ srclocOf v
                            | v <- vs ]
   where inlineMapFun (p:ps) (ie:ies) =
-          LetPat (Id $ fromParam p) ie (inlineMapFun ps ies) $ srclocOf p
+          LetPat [fromParam p] ie (inlineMapFun ps ies) $ srclocOf p
         inlineMapFun _ _ =
-          tupleLambdaBody fun
+          lambdaBody fun
 
-performArrayDelays :: MonadFreshNames VName m => TupIdent -> Exp -> m ArrayIndexMap
+performArrayDelays :: MonadFreshNames VName m => [Ident] -> Exp -> m ArrayIndexMap
 performArrayDelays pat e = do
-  bnds <- forM names $ \name ->
+  bnds <- forM pat $ \name ->
             newIdent (baseString $ identName name)
                      (stripArray 1 $ identType name)
                      (srclocOf name)
@@ -118,22 +116,21 @@ performArrayDelays pat e = do
   let dels f bnd cs ics is = do
         fe <- f cs ics is
         let loc = srclocOf fe
-        return $ LetPat (TupId (map Id bnds) loc) fe (Var bnd) loc
+        return $ LetPat bnds fe (SubExp $ Var bnd) loc
   case performArrayDelay e of
     Nothing -> return emptyArrayIndexMap
     Just f ->
-      return $ HM.fromList [ (name, dels f bnd) | (name,bnd) <- zip names bnds ]
-  where names = patIdents pat
+      return $ HM.fromList [ (name, dels f bnd)
+                             | (name,bnd) <- zip pat bnds ]
 
 cheapExp :: Exp -> Bool
-cheapExp (LetPat _ e body _) = cheapExp e && cheapExp body
-cheapExp (BinOp _ x y _ _) = cheapExp x && cheapExp y
-cheapExp (Not x _) = cheapExp x
-cheapExp (Negate x _) = cheapExp x
-cheapExp (Var {}) = True
-cheapExp (Literal {}) = True
-cheapExp (TupLit es _) = all cheapExp es
-cheapExp (Index _ _ _ idx _) = all cheapExp idx
+cheapExp (LetPat _ _ body _) = cheapExp body
+cheapExp (BinOp {}) = True
+cheapExp (Not {}) = True
+cheapExp (Negate {}) = True
+cheapExp (TupLit {}) = True
+cheapExp (Index {}) = True
+cheapExp (SubExp {}) = True
 cheapExp _ = False
 
 newtype InlinerM a = InlinerM (StateT (NameSource VName) (Reader ArrayIndexMap) a)

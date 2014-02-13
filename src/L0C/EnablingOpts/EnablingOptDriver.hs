@@ -1,15 +1,16 @@
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses, FlexibleContexts #-}
-module L0C.EnablingOpts.EnablingOptDriver (
-                                    enablingOpts
-                                  , copyCtProp
-                                  , CallGraph
-                                  , buildCG
-                                  , aggInlineDriver
-                                  , deadFunElim
-                                  , normCopyDeadOpts
-                                  , normCopyOneTupleLambda
-                                  , EnablingOptError(..)
-                            )
+module L0C.EnablingOpts.EnablingOptDriver
+  (
+   enablingOpts
+  , copyCtProp
+  , CallGraph
+  , buildCG
+  , aggInlineDriver
+  , deadFunElim
+  , normCopyDeadOpts
+  , normCopyOneTupleLambda
+  , EnablingOptError(..)
+  )
   where
 
 import L0C.L0
@@ -22,8 +23,6 @@ import L0C.EnablingOpts.CopyCtPropFold
 import L0C.EnablingOpts.DeadVarElim
 import L0C.EnablingOpts.LetNormalizer
 import L0C.EnablingOpts.EnablingOptErrors
-
-import qualified L0C.TupleTransform as TT
 
 --------------------------------------------------------------
 ---- Enabling Optimization Driver
@@ -52,7 +51,7 @@ enablingOpts prog = do
 normCopyDeadOpts :: Prog -> Either EnablingOptError Prog
 normCopyDeadOpts prog = do
     (_, prog_nlet) <- letNormProg     prog
-    (_,prog_cp)    <- copyCtProp      $ TT.transformProg prog_nlet
+    (_,prog_cp)    <- copyCtProp      prog_nlet
     (_, prog_dce)  <- deadCodeElim    prog_cp
     return prog_dce
 

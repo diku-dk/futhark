@@ -21,7 +21,7 @@ import qualified Data.HashSet as HS
 
 import L0C.HORepresentation.SOAC (SOAC)
 import qualified L0C.HORepresentation.SOAC as SOAC
-import L0C.L0
+import L0C.InternalRep
 
 newtype FlowGraph = FlowGraph (HM.HashMap Name ExpFlowGraph)
 

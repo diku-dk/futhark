@@ -28,7 +28,7 @@ import Data.List
 import Data.Loc
 import qualified Data.HashMap.Strict as HM
 
-import L0C.L0
+import L0C.InternalRep
 
 -- | An error happened during execution, and this is why.
 data InterpreterError = MissingEntryPoint Name
@@ -81,7 +81,7 @@ instance Error InterpreterError where
   strMsg = TypeError noLoc
 
 data L0Env = L0Env { envVtable  :: HM.HashMap VName Value
-                   , envFtable  :: HM.HashMap Name ([Value] -> L0M Value)
+                   , envFtable  :: HM.HashMap Name ([Value] -> L0M [Value])
                    }
 
 -- | A list of places where @trace@ was called, alongside the
@@ -115,7 +115,7 @@ lookupVar (Ident vname _ loc) = do
   case val of Just val' -> return val'
               Nothing   -> bad $ TypeError loc $ "lookupVar " ++ textual vname
 
-lookupFun :: Name -> L0M ([Value] -> L0M Value)
+lookupFun :: Name -> L0M ([Value] -> L0M [Value])
 lookupFun fname = do
   fun <- asks $ HM.lookup fname . envFtable
   case fun of Just fun' -> return fun'
@@ -125,23 +125,11 @@ arrToList :: SrcLoc -> Value -> L0M [Value]
 arrToList _ (ArrayVal l _) = return $ elems l
 arrToList loc _ = bad $ TypeError loc "arrToList"
 
-tupToList :: SrcLoc -> Value -> L0M [Value]
-tupToList _ (TupVal l) = return l
-tupToList loc _ = bad $ TypeError loc "tupToList"
-
-untuple :: Value -> [Value]
-untuple (TupVal vs) = vs
-untuple v           = [v]
-
-tuple :: [Value] -> Value
-tuple [v] = v
-tuple vs = TupVal vs
-
-arrays :: Type -> [Value] -> Value
-arrays (Elem (Tuple ts)) v =
-  TupVal $ zipWith arrayVal (arrays' (map untuple v)) ts
+arrays :: [Type] -> [[Value]] -> [Value]
+arrays [rowtype] vs = [arrayVal (concat vs) rowtype]
+arrays ts v =
+  zipWith arrayVal (arrays' v) ts
   where arrays' = foldr (zipWith (:)) (replicate (length ts) [])
-arrays rowtype vs = arrayVal vs rowtype
 
 --------------------------------------------------
 ------- Interpreting an arbitrary function -------
@@ -157,7 +145,7 @@ arrays rowtype vs = arrayVal vs rowtype
 -- you'll get an error from the interpreter - it may just as well
 -- silently return a wrong value.  You are, however, guaranteed that
 -- the initial call to 'prog' is properly checked.
-runFun :: Name -> [Value] -> Prog -> (Either InterpreterError Value, Trace)
+runFun :: Name -> [Value] -> Prog -> (Either InterpreterError [Value], Trace)
 runFun fname mainargs prog = do
   let ftable = foldl expand builtins $ progFunctions prog
       l0env = L0Env { envVtable = HM.empty
@@ -170,10 +158,10 @@ runFun fname mainargs prog = do
           (Just (_,rettype,fparams,_,_), _)
             | length argtypes == length fparams &&
               and (zipWith subtypeOf argtypes $ map identType fparams) ->
-              evalExp (Apply fname [ (Literal arg noLoc,
+              evalExp (Apply fname [ (Constant arg noLoc,
                                       diet $ identType paramt) |
                                      (arg,paramt) <- zip mainargs fparams ]
-                       (fromDecl rettype) noLoc)
+                       (map fromDecl rettype) noLoc)
             | otherwise ->
               bad $ InvalidFunctionArguments fname
                     (Just (map identType fparams))
@@ -190,7 +178,7 @@ runFun fname mainargs prog = do
       in HM.insert name fun ftable
 
 -- | As 'runFun', but throws away the trace.
-runFunNoTrace :: Name -> [Value] -> Prog -> Either InterpreterError Value
+runFunNoTrace :: Name -> [Value] -> Prog -> Either InterpreterError [Value]
 runFunNoTrace = ((.) . (.) . (.)) fst runFun -- I admit this is just for fun.
 
 --------------------------------------------
@@ -199,7 +187,7 @@ runFunNoTrace = ((.) . (.) . (.)) fst runFun -- I admit this is just for fun.
 --------------------------------------------
 --------------------------------------------
 
-builtins :: HM.HashMap Name ([Value] -> L0M Value)
+builtins :: HM.HashMap Name ([Value] -> L0M [Value])
 builtins = HM.fromList $ map namify
            [("toReal", builtin "toReal")
            ,("trunc", builtin "trunc")
@@ -210,33 +198,42 @@ builtins = HM.fromList $ map namify
            ,("op ~", builtin "op ~")]
   where namify (k,v) = (nameFromString k, v)
 
-builtin :: String -> [Value] -> L0M Value
-builtin "toReal" [IntVal x] = return $ RealVal (fromIntegral x)
-builtin "trunc" [RealVal x] = return $ IntVal (truncate x)
-builtin "sqrt" [RealVal x] = return $ RealVal (sqrt x)
-builtin "log" [RealVal x] = return $ RealVal (log x)
-builtin "exp" [RealVal x] = return $ RealVal (exp x)
-builtin "op not" [LogVal b] = return $ LogVal (not b)
-builtin "op ~" [RealVal b] = return $ RealVal (-b)
+builtin :: String -> [Value] -> L0M [Value]
+builtin "toReal" [BasicValue (IntVal x)] =
+  return [BasicValue $ RealVal (fromIntegral x)]
+builtin "trunc" [BasicValue (RealVal x)] =
+  return [BasicValue $ IntVal (truncate x)]
+builtin "sqrt" [BasicValue (RealVal x)] =
+  return [BasicValue $ RealVal (sqrt x)]
+builtin "log" [BasicValue (RealVal x)] =
+  return [BasicValue $ RealVal (log x)]
+builtin "exp" [BasicValue (RealVal x)] =
+  return [BasicValue $ RealVal (exp x)]
+builtin "op not" [BasicValue (LogVal b)] =
+  return [BasicValue $ LogVal (not b)]
+builtin "op ~" [BasicValue (RealVal b)] =
+  return [BasicValue $ RealVal (-b)]
 builtin fname args =
   bad $ InvalidFunctionArguments (nameFromString fname) Nothing $
         map (fromDecl . valueType) args
 
---------------------------------------------
---------------------------------------------
---------------------------------------------
---------------------------------------------
+single :: Value -> [Value]
+single v = [v]
 
+evalSubExp :: SubExp -> L0M Value
+evalSubExp (Var ident)    = lookupVar ident
+evalSubExp (Constant v _) = return v
 
-evalExp :: Exp -> L0M Value
+evalExp :: Exp -> L0M [Value]
 
-evalExp (Literal val _) = return val
+evalExp (SubExp se) =
+  single <$> evalSubExp se
 
 evalExp (TupLit es _) =
-  TupVal <$> mapM evalExp es
+  mapM evalSubExp es
 
 evalExp (ArrayLit es rt _) =
-  arrayVal <$> mapM evalExp es <*> pure rt
+  single <$> (arrayVal <$> mapM evalSubExp es <*> pure rt)
 
 evalExp (BinOp Plus e1 e2 (Elem Int) pos) = evalIntBinOp (+) e1 e2 pos
 evalExp (BinOp Plus e1 e2 (Elem Real) pos) = evalRealBinOp (+) e1 e2 pos
@@ -263,67 +260,62 @@ evalExp (BinOp LogAnd e1 e2 _ pos) = evalBoolBinOp (&&) e1 e2 pos
 evalExp (BinOp LogOr e1 e2 _ pos) = evalBoolBinOp (||) e1 e2 pos
 
 evalExp (BinOp Equal e1 e2 _ _) = do
-  v1 <- evalExp e1
-  v2 <- evalExp e2
-  return $ LogVal (v1==v2)
+  v1 <- evalSubExp e1
+  v2 <- evalSubExp e2
+  return [BasicValue $ LogVal (v1==v2)]
 
 evalExp (BinOp Less e1 e2 _ _) = do
-  v1 <- evalExp e1
-  v2 <- evalExp e2
-  return $ LogVal (v1<v2)
+  v1 <- evalSubExp e1
+  v2 <- evalSubExp e2
+  return [BasicValue $ LogVal (v1<v2)]
 
 evalExp (BinOp Leq e1 e2 _ _) = do
-  v1 <- evalExp e1
-  v2 <- evalExp e2
-  return $ LogVal (v1<=v2)
+  v1 <- evalSubExp e1
+  v2 <- evalSubExp e2
+  return [BasicValue $ LogVal (v1<=v2)]
 
 evalExp (BinOp _ _ _ _ pos) = bad $ TypeError pos "evalExp Binop"
 
 evalExp (Not e pos) = do
-  v <- evalExp e
-  case v of LogVal b -> return $ LogVal (not b)
-            _        -> bad $ TypeError pos "evalExp Not"
+  v <- evalSubExp e
+  case v of BasicValue (LogVal b) -> return [BasicValue $ LogVal (not b)]
+            _                     -> bad $ TypeError pos "evalExp Not"
 
 evalExp (Negate e pos) = do
-  v <- evalExp e
-  case v of IntVal x  -> return $ IntVal (-x)
-            RealVal x -> return $ RealVal (-x)
-            _         -> bad $ TypeError pos "evalExp Negate"
+  v <- evalSubExp e
+  case v of BasicValue (IntVal x)  -> return [BasicValue $ IntVal (-x)]
+            BasicValue (RealVal x) -> return [BasicValue $ RealVal (-x)]
+            _                      -> bad $ TypeError pos "evalExp Negate"
 
 evalExp (If e1 e2 e3 _ pos) = do
-  v <- evalExp e1
-  case v of LogVal True  -> evalExp e2
-            LogVal False -> evalExp e3
-            _            -> bad $ TypeError pos "evalExp If"
-
-evalExp (Var ident) =
-  lookupVar ident
+  v <- evalSubExp e1
+  case v of BasicValue (LogVal True)  -> evalExp e2
+            BasicValue (LogVal False) -> evalExp e3
+            _                         -> bad $ TypeError pos "evalExp If"
 
 evalExp (Apply fname [(arg, _)] _ loc)
   | "trace" <- nameToString fname = do
-  arg' <- evalExp arg
+  arg' <- evalSubExp arg
   tell [(loc, ppValue arg')]
-  return arg'
+  return [arg']
 
 evalExp (Apply fname args _ _) = do
   fun <- lookupFun fname
-  args' <- mapM (evalExp . fst) args
+  args' <- mapM (evalSubExp . fst) args
   fun args'
 
-evalExp (LetPat pat e body pos) = do
+evalExp (LetPat pat e body _) = do
   v <- evalExp e
-  case evalPattern pat v of
-    Nothing   -> bad $ TypeError pos "evalExp Let pat"
-    Just bnds -> local (`bindVars` bnds) $ evalExp body
+  local (`bindVars` zip pat v) $ evalExp body
 
 evalExp (LetWith _ name src _ idxs ve body pos) = do
   v <- lookupVar src
-  idxs' <- mapM evalExp idxs
-  vev <- evalExp ve
+  idxs' <- mapM evalSubExp idxs
+  vev <- evalSubExp ve
   v' <- change v idxs' vev
   binding [(name, v')] $ evalExp body
   where change _ [] to = return to
-        change (ArrayVal arr t) (IntVal i:rest) to
+        change (ArrayVal arr t) (BasicValue (IntVal i):rest) to
           | i >= 0 && i <= upper = do
             let x = arr ! i
             x' <- change x rest to
@@ -334,224 +326,172 @@ evalExp (LetWith _ name src _ idxs ve body pos) = do
 
 evalExp (Index _ ident _ idxs pos) = do
   v <- lookupVar ident
-  idxs' <- mapM evalExp idxs
-  foldM idx v idxs'
-  where idx (ArrayVal arr _) (IntVal i)
+  idxs' <- mapM evalSubExp idxs
+  single <$> foldM idx v idxs'
+  where idx (ArrayVal arr _) (BasicValue (IntVal i))
           | i >= 0 && i <= upper = return $ arr ! i
           | otherwise             = bad $ IndexOutOfBounds pos (upper+1) i
           where upper = snd $ bounds arr
         idx _ _ = bad $ TypeError pos "evalExp Index"
 
 evalExp (Iota e pos) = do
-  v <- evalExp e
+  v <- evalSubExp e
   case v of
-    IntVal x
-      | x >= 0    -> return $ arrayVal (map IntVal [0..x-1]) $ Elem Int
-      | otherwise -> bad $ NegativeIota pos x
+    BasicValue (IntVal x)
+      | x >= 0    ->
+        return [arrayVal (map (BasicValue . IntVal) [0..x-1]) $ Elem Int]
+      | otherwise ->
+        bad $ NegativeIota pos x
     _ -> bad $ TypeError pos "evalExp Iota"
 
 evalExp (Size _ i e pos) = do
-  v <- evalExp e
+  v <- evalSubExp e
   case drop i $ arrayShape v of
     [] -> bad $ TypeError pos "evalExp Size"
-    n:_ -> return $ IntVal n
+    n:_ -> return [BasicValue $ IntVal n]
 
 evalExp (Replicate e1 e2 pos) = do
-  v1 <- evalExp e1
-  v2 <- evalExp e2
+  v1 <- evalSubExp e1
+  v2 <- evalSubExp e2
   case v1 of
-    IntVal x
-      | x >= 0    -> return $ ArrayVal (listArray (0,x-1) $ repeat v2) $ valueType v2
+    BasicValue (IntVal x)
+      | x >= 0    ->
+        return [ArrayVal (listArray (0,x-1) $ repeat v2) $ valueType v2]
       | otherwise -> bad $ NegativeReplicate pos x
     _   -> bad $ TypeError pos "evalExp Replicate"
 
-evalExp re@(Reshape _ shapeexp arrexp pos) = do
-  shape <- mapM (asInt <=< evalExp) shapeexp
-  arr <- evalExp arrexp
-  let rt = stripArray 1 $ typeOf re
+evalExp (Reshape _ shapeexp arrexp pos) = do
+  shape <- mapM (asInt <=< evalSubExp) shapeexp
+  arr <- evalSubExp arrexp
+  let arrt = subExpType arrexp
+      rt = arrayType (length shapeexp-1) arrt (uniqueness arrt)
       reshape (n:rest) vs
         | length vs `mod` n == 0 =
           arrayVal <$> mapM (reshape rest) (chunk (length vs `div` n) vs)
                    <*> pure rt
       reshape [] [v] = return v
       reshape _ _ = bad $ InvalidArrayShape pos (arrayShape arr) shape
-  reshape shape $ flatten arr
+  single <$> reshape shape (flatten arr)
   where flatten (ArrayVal arr _) = concatMap flatten $ elems arr
         flatten t = [t]
         chunk _ [] = []
         chunk i l = let (a,b) = splitAt i l
                     in a : chunk i b
-        asInt (IntVal x) = return x
-        asInt _ = bad $ TypeError pos "evalExp Reshape int"
+        asInt (BasicValue (IntVal x)) = return x
+        asInt _ = bad $ TypeError pos "evalExp Reshape asInt"
 
 evalExp (Transpose _ k n arrexp _) =
-  transposeArray k n <$> evalExp arrexp
-
-evalExp (Map fun e _ pos) = do
-  vs <- arrToList pos =<< evalExp e
-  vs' <- mapM (applyLambda fun . (:[])) vs
-  return $ arrayVal vs' $ lambdaReturnType fun
-
-evalExp (Reduce fun accexp arrexp _ loc) = do
-  startacc <- evalExp accexp
-  vs <- arrToList loc =<< evalExp arrexp
-  let foldfun acc x = applyLambda fun [acc, x]
-  foldM foldfun startacc vs
-
-evalExp (Zip arrexps pos) = do
-  arrs <- mapM ((arrToList pos <=< evalExp) . fst) arrexps
-  let zipit ls
-        | all null ls = return []
-        | otherwise = case unzip <$> mapM split ls of
-                        Just (hds, tls) -> do
-                          ls' <- zipit tls
-                          return $ TupVal hds : ls'
-                        Nothing -> bad $ ZipError pos (map length arrs)
-  arrayVal <$> zipit arrs <*> pure (Elem $ Tuple $ map snd arrexps)
-  where split []     = Nothing
-        split (x:xs) = Just (x, xs)
-
-evalExp (Unzip e ts pos) = do
-  arr <- mapM (tupToList pos) =<< arrToList pos =<< evalExp e
-  return $ TupVal (zipWith arrayVal (transpose arr) ts)
-
--- scan * e {x1,..,xn} = {e*x1, e*x1*x2, ..., e*x1*x2*...*xn}
--- we can change this definition of scan if deemed not suitable
-evalExp (Scan fun startexp arrexp _ pos) = do
-  startval <- evalExp startexp
-  vals <- arrToList pos =<< evalExp arrexp
-  (acc, vals') <- foldM scanfun (startval, []) vals
-  return $ arrayVal (reverse vals') $ valueType acc
-    where scanfun (acc, l) x = do
-            acc' <- applyLambda fun [acc, x]
-            return (acc', acc' : l)
-
-evalExp (Filter fun arrexp _ pos) = do
-  vs <- filterM filt =<< arrToList pos =<< evalExp arrexp
-  return $ arrayVal vs $ lambdaReturnType fun
-  where filt x = do res <- applyLambda fun [x]
-                    case res of (LogVal True) -> return True
-                                _             -> return False
-
-evalExp (Redomap _ innerfun accexp arrexp _ loc) = do
-  startacc <- evalExp accexp
-  vs <- arrToList loc =<< evalExp arrexp
-  let foldfun acc x = applyLambda innerfun [acc, x]
-  foldM foldfun startacc vs
+  single <$> transposeArray k n <$> evalSubExp arrexp
 
 evalExp (Split _ splitexp arrexp pos) = do
-  split <- evalExp splitexp
-  vs <- arrToList pos =<< evalExp arrexp
+  split <- evalSubExp splitexp
+  vs <- arrToList pos =<< evalSubExp arrexp
   case split of
-    IntVal i
+    BasicValue (IntVal i)
       | i <= length vs ->
         let (bef,aft) = splitAt i vs
-        in return $ TupVal [arrayVal bef rt, arrayVal aft rt]
+        in return [arrayVal bef rt, arrayVal aft rt]
       | otherwise        -> bad $ IndexOutOfBounds pos (length vs) i
     _ -> bad $ TypeError pos "evalExp Split"
-  where rt = rowType $ typeOf arrexp
+  where rt = rowType $ subExpType arrexp
 
 evalExp (Concat _ arr1exp arr2exp pos) = do
-  elems1 <- arrToList pos =<< evalExp arr1exp
-  elems2 <- arrToList pos =<< evalExp arr2exp
-  return $ arrayVal (elems1 ++ elems2) $ stripArray 1 $ typeOf arr1exp
+  elems1 <- arrToList pos =<< evalSubExp arr1exp
+  elems2 <- arrToList pos =<< evalSubExp arr2exp
+  return $ single $ arrayVal (elems1 ++ elems2) $ stripArray 1 $ subExpType arr1exp
 
-evalExp (Copy e _) = evalExp e
+evalExp (Copy e _) = single <$> evalSubExp e
 
 evalExp (Assert e loc) = do
-  v <- evalExp e
-  case v of LogVal True -> return Checked
-            _ -> bad $ AssertFailed loc
+  v <- evalSubExp e
+  case v of BasicValue (LogVal True) ->
+              return [BasicValue Checked]
+            _ ->
+              bad $ AssertFailed loc
 
-evalExp (Conjoin _ _) = return Checked
+evalExp (Conjoin _ _) = return [BasicValue Checked]
 
-evalExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody pos) = do
-  bound <- evalExp boundexp
-  mergestart <- evalExp mergeexp
+evalExp (DoLoop merge loopvar boundexp loopbody letbody pos) = do
+  bound <- evalSubExp boundexp
+  mergestart <- mapM evalSubExp mergeexp
   case bound of
-    IntVal n -> do loopresult <- foldM iteration mergestart [0..n-1]
-                   evalExp $ LetPat mergepat (Literal loopresult pos) letbody pos
+    BasicValue (IntVal n) -> do
+      loopresult <- foldM iteration mergestart [0..n-1]
+      local (`bindVars` zip mergepat loopresult) $ evalExp letbody
     _ -> bad $ TypeError pos "evalExp DoLoop"
-  where iteration mergeval i =
-          binding [(loopvar, IntVal i)] $
-            evalExp $ LetPat mergepat (Literal mergeval pos) loopbody pos
+  where (mergepat, mergeexp) = unzip merge
+        iteration mergeval i =
+          binding [(loopvar, BasicValue $ IntVal i)] $
+            local (`bindVars` zip mergepat mergeval) $
+              evalExp loopbody
 
-evalExp (MapT _ fun arrexps loc) = do
-  vss <- mapM (arrToList loc <=< evalExp) arrexps
-  vs' <- mapM (applyTupleLambda fun) $ transpose vss
-  return $ arrays (fromDecl $ Elem $ Tuple ret) vs'
-  where TupleLambda _ _ ret _ = fun
+evalExp (Map _ fun arrexps loc) = do
+  vss <- mapM (arrToList loc <=< evalSubExp) arrexps
+  vs' <- mapM (applyLambda fun) $ transpose vss
+  return $ arrays (map fromDecl $ lambdaReturnType fun) vs'
 
-evalExp (ReduceT _ fun inputs loc) = do
+evalExp (Reduce _ fun inputs loc) = do
   let (accexps, arrexps) = unzip inputs
-  startaccs <- mapM evalExp accexps
-  vss <- mapM (arrToList loc <=< evalExp) arrexps
-  let foldfun acc x = applyTupleLambda fun $ untuple acc ++ x
-  foldM foldfun (tuple startaccs) (transpose vss)
+  startaccs <- mapM evalSubExp accexps
+  vss <- mapM (arrToList loc <=< evalSubExp) arrexps
+  let foldfun acc x = applyLambda fun $ acc ++ x
+  foldM foldfun startaccs (transpose vss)
 
-evalExp (ScanT _ fun inputs loc) = do
+evalExp (Scan _ fun inputs loc) = do
   let (accexps, arrexps) = unzip inputs
-  startvals <- mapM evalExp accexps
-  vss <- mapM (arrToList loc <=< evalExp) arrexps
-  (acc, vals') <- foldM scanfun (tuple startvals, []) $ transpose vss
-  return $ arrays (fromDecl $ valueType acc) $ reverse vals'
+  startvals <- mapM evalSubExp accexps
+  vss <- mapM (arrToList loc <=< evalSubExp) arrexps
+  (acc, vals') <- foldM scanfun (startvals, []) $ transpose vss
+  return $ arrays (map (fromDecl . valueType) acc) $ reverse vals'
     where scanfun (acc, l) x = do
-            acc' <- applyTupleLambda fun $ untuple acc ++ x
+            acc' <- applyLambda fun $ acc ++ x
             return (acc', acc' : l)
 
-evalExp e@(FilterT _ fun arrexp loc) = do
-  vss <- mapM (arrToList loc <=< evalExp) arrexp
+evalExp e@(Filter _ fun arrexp loc) = do
+  vss <- mapM (arrToList loc <=< evalSubExp) arrexp
   vss' <- filterM filt $ transpose vss
-  return $ arrays (typeOf e) $ map tuple vss'
-  where filt x = do res <- applyTupleLambda fun x
-                    case res of (TupVal [LogVal True]) -> return True
-                                _                      -> return False
+  return $ arrays (typeOf e) vss'
+  where filt x = do
+          res <- applyLambda fun x
+          case res of [BasicValue (LogVal True)] -> return True
+                      _                          -> return False
 
-evalExp (RedomapT _ _ innerfun accexp arrexps loc) = do
-  startaccs <- mapM evalExp accexp
-  vss <- mapM (arrToList loc <=< evalExp) arrexps
-  let foldfun acc x = applyTupleLambda innerfun $ untuple acc ++ x
-  foldM foldfun (tuple startaccs) $ transpose vss
+evalExp (Redomap _ _ innerfun accexp arrexps loc) = do
+  startaccs <- mapM evalSubExp accexp
+  vss <- mapM (arrToList loc <=< evalSubExp) arrexps
+  let foldfun acc x = applyLambda innerfun $ acc ++ x
+  foldM foldfun startaccs $ transpose vss
 
-evalIntBinOp :: (Int -> Int -> Int) -> Exp -> Exp -> SrcLoc -> L0M Value
+evalIntBinOp :: (Int -> Int -> Int) -> SubExp -> SubExp -> SrcLoc -> L0M [Value]
 evalIntBinOp op e1 e2 loc = do
-  v1 <- evalExp e1
-  v2 <- evalExp e2
+  v1 <- evalSubExp e1
+  v2 <- evalSubExp e2
   case (v1, v2) of
-    (IntVal x, IntVal y) -> return $ IntVal (op x y)
-    _                    -> bad $ TypeError loc "evalIntBinOp"
+    (BasicValue (IntVal x), BasicValue (IntVal y)) ->
+      return [BasicValue $ IntVal (op x y)]
+    _                    ->
+      bad $ TypeError loc "evalIntBinOp"
 
-evalRealBinOp :: (Double -> Double -> Double) -> Exp -> Exp -> SrcLoc -> L0M Value
+evalRealBinOp :: (Double -> Double -> Double) -> SubExp -> SubExp -> SrcLoc -> L0M [Value]
 evalRealBinOp op e1 e2 loc = do
-  v1 <- evalExp e1
-  v2 <- evalExp e2
+  v1 <- evalSubExp e1
+  v2 <- evalSubExp e2
   case (v1, v2) of
-    (RealVal x, RealVal y) -> return $ RealVal (op x y)
-    _                      -> bad $ TypeError loc $ "evalRealBinOp " ++ ppValue v1 ++ " " ++ ppValue v2
+    (BasicValue (RealVal x), BasicValue (RealVal y)) ->
+      return [BasicValue $ RealVal (op x y)]
+    _                      ->
+      bad $ TypeError loc $ "evalRealBinOp " ++ ppValue v1 ++ " " ++ ppValue v2
 
-evalBoolBinOp :: (Bool -> Bool -> Bool) -> Exp -> Exp -> SrcLoc -> L0M Value
+evalBoolBinOp :: (Bool -> Bool -> Bool) -> SubExp -> SubExp -> SrcLoc -> L0M [Value]
 evalBoolBinOp op e1 e2 loc = do
-  v1 <- evalExp e1
-  v2 <- evalExp e2
+  v1 <- evalSubExp e1
+  v2 <- evalSubExp e2
   case (v1, v2) of
-    (LogVal x, LogVal y) -> return $ LogVal (op x y)
-    _                    -> bad $ TypeError loc $ "evalBoolBinOp " ++ ppValue v1 ++ " " ++ ppValue v2
+    (BasicValue (LogVal x), BasicValue (LogVal y)) ->
+      return [BasicValue $ LogVal (op x y)]
+    _                        ->
+      bad $ TypeError loc $ "evalBoolBinOp " ++ ppValue v1 ++ " " ++ ppValue v2
 
-evalPattern :: TupIdent -> Value -> Maybe [(Ident, Value)]
-evalPattern (Id ident) v = Just [(ident, v)]
-evalPattern (TupId pats _) (TupVal vs)
-  | length pats == length vs =
-    concat <$> zipWithM evalPattern pats vs
-evalPattern (Wildcard _ _) _ = Just []
-evalPattern _ _ = Nothing
-
-applyLambda :: Lambda -> [Value] -> L0M Value
-applyLambda (AnonymFun params body _ _) args =
+applyLambda :: Lambda -> [Value] -> L0M [Value]
+applyLambda (Lambda params body _ _) args =
   binding (zip (map fromParam params) args) $ evalExp body
-applyLambda (CurryFun name curryargs _ _) args = do
-  curryargs' <- mapM evalExp curryargs
-  fun <- lookupFun name
-  fun $ curryargs' ++ args
-
-applyTupleLambda :: TupleLambda -> [Value] -> L0M Value
-applyTupleLambda = applyLambda . tupleLambdaToLambda

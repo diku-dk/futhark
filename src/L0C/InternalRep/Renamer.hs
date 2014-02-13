@@ -70,12 +70,12 @@ bind vars body = do
                                              `HM.union` envNameMap env }
 
 renameFun :: FunDec -> RenameM FunDec
-renameFun (fname, ret, params, body, pos) =
+renameFun (fname, ret, params, body, loc) =
   bind params $ do
     params' <- mapM (liftM toParam . repl . fromParam) params
     body' <- renameExp body
     ret' <- mapM (liftM toDecl . renameType . fromDecl) ret
-    return (fname, ret', params', body', pos)
+    return (fname, ret', params', body', loc)
 
 renameSubExp :: SubExp -> RenameM SubExp
 renameSubExp (Var v)          = Var <$> repl v
@@ -93,22 +93,24 @@ renameExp (LetWith cs dest src idxcs idxs ve body loc) = do
     dest' <- repl dest
     body' <- renameExp body
     return $ LetWith cs' dest' src' idxcs' idxs' ve' body' loc
-renameExp (LetPat pat e body pos) = do
+renameExp (LetPat pat e body loc) = do
   e1' <- renameExp e
   bind pat $ do
     pat' <- mapM repl pat
     body' <- renameExp body
-    return $ LetPat pat' e1' body' pos
-renameExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody pos) = do
+    return $ LetPat pat' e1' body' loc
+renameExp (DoLoop merge loopvar boundexp loopbody letbody loc) = do
+  let (mergepat, mergeexp) = unzip merge
   boundexp' <- renameSubExp boundexp
-  mergeexp' <- renameSubExp mergeexp
+  mergeexp' <- mapM renameSubExp mergeexp
   bind mergepat $ do
     mergepat' <- mapM repl mergepat
     letbody' <- renameExp letbody
     bind [loopvar] $ do
       loopvar'  <- repl loopvar
       loopbody' <- renameExp loopbody
-      return $ DoLoop mergepat' mergeexp' loopvar' boundexp' loopbody' letbody' pos
+      return $ DoLoop (zip mergepat' mergeexp')
+                      loopvar' boundexp' loopbody' letbody' loc
 renameExp e = mapExpM rename e
 
 renameType :: Type -> RenameM Type
@@ -129,9 +131,9 @@ rename = Mapper {
          }
 
 renameLambda :: Lambda -> RenameM Lambda
-renameLambda (Lambda params body ret pos) =
+renameLambda (Lambda params body ret loc) =
   bind params $ do
     params' <- mapM (liftM toParam . repl . fromParam) params
     body' <- renameExp body
     ret' <- mapM (liftM toDecl . renameType . fromDecl) ret
-    return $ Lambda params' body' ret' pos
+    return $ Lambda params' body' ret' loc

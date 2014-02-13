@@ -1,10 +1,10 @@
 -- | Common error definition for all the enabling optimisation submodules.
 module L0C.EnablingOpts.EnablingOptErrors ( EnablingOptError(..) )
   where
-  
+
 import Data.Loc
-import L0C.L0
- 
+import L0C.InternalRep
+
 -- | Information about an error during enabling optimisations.  The 'Show'
 -- instance for this type produces a human-readable description.
 data EnablingOptError = EnablingOptError SrcLoc String

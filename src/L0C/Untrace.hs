@@ -7,27 +7,25 @@ module L0C.Untrace
   ( untraceProg )
   where
 
-import L0C.L0
+import L0C.InternalRep
 
 -- | Remove all special debugging function calls from the program.
-untraceProg :: ProgBase ty vn -> ProgBase ty vn
+untraceProg :: Prog -> Prog
 untraceProg = Prog . map untraceFun . progFunctions
 
-untraceFun :: FunDecBase ty vn -> FunDecBase ty vn
+untraceFun :: FunDec -> FunDec
 untraceFun (fname, ret, params, body, pos) =
   (fname, ret, params, untraceExp body, pos)
 
-untraceExp :: ExpBase ty vn -> ExpBase ty vn
+untraceExp :: Exp -> Exp
 untraceExp (Apply fname [(e,_)] _ _)
-  | "trace" <- nameToString fname = e
+  | "trace" <- nameToString fname = SubExp e
 untraceExp e = mapExp untrace e
   where untrace = identityMapper {
                     mapOnExp = return . untraceExp
                   , mapOnLambda = return . untraceLambda
                   }
 
-untraceLambda :: LambdaBase ty vn -> LambdaBase ty vn
-untraceLambda (AnonymFun params body ret pos) =
-  AnonymFun params (untraceExp body) ret pos
-untraceLambda (CurryFun fname curryargexps rettype pos) =
-  CurryFun fname (map untraceExp curryargexps) rettype pos
+untraceLambda :: Lambda -> Lambda
+untraceLambda (Lambda params body ret pos) =
+  Lambda params (untraceExp body) ret pos

@@ -19,7 +19,7 @@ import qualified Data.HashMap.Lazy as HM
 import qualified Data.Set as S
 import qualified Data.HashSet as HS
 
-import L0C.L0
+import L0C.InternalRep
 import qualified L0C.HORepresentation.SOAC as SOAC
 import L0C.HORepresentation.SOACNest (SOACNest)
 import qualified L0C.HORepresentation.SOACNest as Nest

@@ -6,6 +6,7 @@
 module L0C.InternalRep.Pretty
   ( ppType
   , ppValue
+  , ppValues
   , ppExp
   , ppSubExp
   , ppLambda
@@ -241,6 +242,10 @@ render80 = pretty 80 . ppr
 -- | Prettyprint a value, wrapped to 80 characters.
 ppValue :: Value -> String
 ppValue = render80
+
+-- | Prettyprint several values, wrapped to 80 characters.
+ppValues :: [Value] -> String
+ppValues = pretty 80 . ppTuple
 
 -- | Prettyprint a type, wrapped to 80 characters.
 ppType :: TypeBase als -> String

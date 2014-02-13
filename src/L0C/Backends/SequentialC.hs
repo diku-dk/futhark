@@ -7,7 +7,7 @@ module L0C.Backends.SequentialC (compileProg) where
 
 import Control.Monad
 
-import L0C.L0
+import L0C.InternalRep
 import qualified L0C.FirstOrderTransform as FOT
 
 import qualified L0C.Backends.GenericC as GenericC
