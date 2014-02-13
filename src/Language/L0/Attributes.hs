@@ -645,20 +645,25 @@ typeOf (Assert _ _) = Elem Cert
 typeOf (Conjoin _ _) = Elem Cert
 typeOf (DoLoop _ _ _ _ _ body _) = typeOf body
 typeOf (MapT _ f arrs _) =
-  Elem $ Tuple $ map (\x -> arrayType 1 x (uniqueProp x)) $
+  untuple $ Elem $ Tuple $ map (\x -> arrayType 1 x (uniqueProp x)) $
        tupleLambdaType f $ map typeOf arrs
 typeOf (ReduceT _ fun inputs _) =
-  Elem $ Tuple $ tupleLambdaType fun $ map typeOf acc ++ map typeOf arrs
+  untuple $ Elem $ Tuple $ tupleLambdaType fun $ map typeOf acc ++ map typeOf arrs
   where (acc, arrs) = unzip inputs
 typeOf (ScanT _ _ inputs _) =
-  (Elem $ Tuple $ map typeOf arrs) `setUniqueness` Unique
+  untuple $ (Elem $ Tuple $ map typeOf arrs) `setUniqueness` Unique
   where (_, arrs) = unzip inputs
-typeOf (FilterT _ _ arrs _) = Elem $ Tuple $ map typeOf arrs
+typeOf (FilterT _ _ arrs _) =
+  untuple $ Elem $ Tuple $ map typeOf arrs
 typeOf (RedomapT _ outerfun innerfun acc arrs _) =
-  Elem $ Tuple $ tupleLambdaType outerfun $
+  untuple $ Elem $ Tuple $ tupleLambdaType outerfun $
        tupleLambdaType innerfun (innerres ++ innerres)
     where innerres = tupleLambdaType innerfun
                      (map typeOf acc ++ map (rowType . typeOf) arrs)
+
+untuple :: TypeBase vn as -> TypeBase vn as
+untuple (Elem (Tuple [t])) = t
+untuple t                  = t
 
 uniqueProp :: TypeBase vn as -> Uniqueness
 uniqueProp tp = if uniqueOrBasic tp then Unique else Nonunique
