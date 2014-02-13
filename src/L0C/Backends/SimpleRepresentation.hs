@@ -3,6 +3,7 @@
 module L0C.Backends.SimpleRepresentation
   ( varExp
   , sameRepresentation
+  , sameRepresentation'
   , tupleField
   , tupleFieldExp
   , funName
@@ -19,7 +20,7 @@ module L0C.Backends.SimpleRepresentation
   )
     where
 
-import L0C.L0
+import L0C.InternalRep
 
 import Data.List
 
@@ -32,13 +33,16 @@ varExp k = [C.cexp|$id:k|]
 
 -- | True if both types map to the same runtime representation.  This
 -- is the case if they are identical modulo uniqueness.
-sameRepresentation :: Eq (als VName) => GenType als -> GenType als -> Bool
-sameRepresentation (Elem (Tuple ets1)) (Elem (Tuple ets2))
+sameRepresentation :: [DeclType] -> [DeclType] -> Bool
+sameRepresentation ets1 ets2
   | length ets1 == length ets2 =
-    and $ zipWith sameRepresentation ets1 ets2
-sameRepresentation (Array et1 ds1 _ _) (Array et2 ds2 _ _) =
-  length ds1 == length ds2 && sameRepresentation (Elem et1) (Elem et2)
-sameRepresentation t1 t2 = t1 == t2
+    and $ zipWith sameRepresentation' ets1 ets2
+  | otherwise = False
+
+sameRepresentation' :: DeclType -> DeclType -> Bool
+sameRepresentation' (Array et1 ds1 _ _) (Array et2 ds2 _ _) =
+  length ds1 == length ds2 && sameRepresentation' (Elem et1) (Elem et2)
+sameRepresentation' t1 t2 = t1 == t2
 
 -- | @tupleField i@ is the name of field number @i@ in a tuple.
 tupleField :: Int -> String
@@ -93,9 +97,9 @@ arrayShapeExp place t =
 
 -- | Generate an expression indexing the given array with the given
 -- indices.  No bounds checking is done.
-indexArrayExp :: C.Exp -> GenType als -> [C.Exp] -> C.Exp
-indexArrayExp place t indexes =
-  let sizes = map (foldl mult [C.cexp|1|]) $ tails $ map field [1..arrayRank t - 1]
+indexArrayExp :: C.Exp -> Int -> [C.Exp] -> C.Exp
+indexArrayExp place rank indexes =
+  let sizes = map (foldl mult [C.cexp|1|]) $ tails $ map field [1..rank - 1]
       field :: Int -> C.Exp
       field i = [C.cexp|$exp:place.shape[$int:i]|]
       mult x y = [C.cexp|$exp:x * $exp:y|]
@@ -115,7 +119,7 @@ indexArrayElemStms place from t idxs =
       let dimstms = [ [C.cstm|$exp:place.shape[$int:i] = $exp:dim;|] |
                       (i, dim) <- zip [(0::Int)..] dims ]
       in dimstms++[[C.cstm|$exp:place.data = &$exp:index;|]]
-  where index = indexArrayExp from t idxs
+  where index = indexArrayExp from (arrayRank t) idxs
 
 boundsCheckStm :: C.Exp -> [C.Exp] -> [C.Stm]
 boundsCheckStm place idxs = zipWith check idxs [0..]

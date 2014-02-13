@@ -7,7 +7,7 @@
 -- The intent is that you call 'tagProg' once at some early stage,
 -- then use 'renameProg' from then on.  Functions are also provided
 -- for removing the tags again from expressions, patterns and typs.
-module L0C.Renamer
+module L0C.ExternalRep.Renamer
   (
   -- * Renaming programs
    renameProg
@@ -40,7 +40,7 @@ import Control.Monad.Reader
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 
-import L0C.L0
+import L0C.ExternalRep
 import L0C.FreshNames
 
 -- | Rename variables such that each is unique.  The semantics of the

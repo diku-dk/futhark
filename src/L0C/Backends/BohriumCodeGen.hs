@@ -25,7 +25,7 @@ import Control.Monad
 
 import Data.List
 
-import L0C.L0
+import L0C.InternalRep
 import L0C.MonadFreshNames
 import L0C.Backends.SimpleRepresentation
 import L0C.Backends.GenericC
@@ -91,7 +91,7 @@ compileInput place shape e = do
 compileMap :: C.Exp -> SOACNest -> CompilerM (Maybe [C.BlockItem])
 compileMap target (SOACNest inps (Nest.MapT _ (Nest.Lambda l) _ _))
   | [inp] <- SOAC.inputsToExps inps,
-    all (basicType . identType) $ tupleLambdaParams l,
+    all (basicType . identType) $ lambdaParams l,
    Just op <- compileLambda l unOp = do
      inputName <- new "map_input"
      outputName <- new "output"
@@ -108,7 +108,7 @@ compileMap target (SOACNest inps (Nest.MapT _ (Nest.Lambda l) _ _))
                              }|]
 compileMap target (SOACNest inps (Nest.MapT _ (Nest.Lambda l) _ _))
   | [inp1,inp2] <- SOAC.inputsToExps inps,
-    all (basicType . identType) $ tupleLambdaParams l,
+    all (basicType . identType) $ lambdaParams l,
     Just op <- compileLambda l binOp = do
       inputName1 <- new "map_input_x"
       inputName2 <- new "map_input_y"
@@ -182,11 +182,11 @@ binOp ps (BinOp op (Var p1) (Var p2) _ _)
 
 binOp _ _ = Nothing
 
-compileLambda :: TupleLambda -> ([Parameter] -> Exp -> Maybe a) -> Maybe a
+compileLambda :: Lambda -> ([Parameter] -> Exp -> Maybe a) -> Maybe a
 compileLambda l f =
-  case tupleLambdaBody l of
+  case lambdaBody l of
     LetPat (Id k1) op (TupLit [Var k2] _) _
-      | k1 == k2 -> f (tupleLambdaParams l) op
+      | k1 == k2 -> f (lambdaParams l) op
     _ -> Nothing
 
 doUnaryOperation :: BohriumUnOp -> String -> String -> C.Stm

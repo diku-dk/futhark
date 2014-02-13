@@ -12,7 +12,7 @@ import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 
-import L0C.L0
+import L0C.InternalRep
 
 class Substitute a where
   -- | @substituteNames m e@ replaces the variable names in @e@ with
@@ -26,49 +26,32 @@ class Substitute a where
 instance Substitute VName where
   substituteNames substs k = fromMaybe k $ HM.lookup k substs
 
+instance Substitute SubExp where
+  substituteNames substs (Var v)     = Var $ substituteNames substs v
+  substituteNames _ (Constant v loc) = Constant v loc
+
 instance Substitute Exp where
   substituteNames substs = mapExp replace
     where replace = Mapper {
                       mapOnIdent = return . substituteNames substs
+                    , mapOnSubExp = return . substituteNames substs
                     , mapOnExp = return . substituteNames substs
                     , mapOnType = return . substituteNames substs
-                    , mapOnPattern = return . substituteNames substs
                     , mapOnValue = return
                     , mapOnLambda = return . substituteNames substs
-                    , mapOnTupleLambda = return . substituteNames substs
                     , mapOnCertificates = return . map (substituteNames substs)
                     }
 
-instance Substitute TupIdent where
-  substituteNames substs (Id v) =
-    Id $ substituteNames substs v
-  substituteNames substs (TupId pats loc) =
-    TupId (map (substituteNames substs) pats) loc
-  substituteNames _ (Wildcard t loc) =
-    Wildcard t loc
-
-instance Substitute ElemType where
-  substituteNames substs (Tuple ts) = Tuple $ map (substituteNames substs) ts
-  substituteNames _     et = et
-
 instance Substitute Type where
-  substituteNames substs (Elem et) = Elem $ substituteNames substs et
+  substituteNames _ (Elem et) = Elem et
   substituteNames substs (Array et sz u als) =
-    Array (toElemDecl $ substituteNames substs $ fromElemDecl et)
-            (map (liftM $ substituteNames substs) sz)
-            u (HS.map (substituteNames substs) als)
+    Array et (map (liftM $ substituteNames substs) sz)
+             u (HS.map (substituteNames substs) als)
 
 instance Substitute Lambda where
-  substituteNames substs (AnonymFun params body rettype loc) =
-    AnonymFun params (substituteNames substs body)
-    (toDecl $ substituteNames substs $ fromDecl rettype) loc
-  substituteNames substs (CurryFun fname curryargs rettype loc) =
-    CurryFun fname (map (substituteNames substs) curryargs) (substituteNames substs rettype) loc
-
-instance Substitute TupleLambda where
-  substituteNames substs (TupleLambda params body rettype loc) =
-    TupleLambda params (substituteNames substs body)
-                (map (toDecl . substituteNames substs . fromDecl) rettype) loc
+  substituteNames substs (Lambda params body rettype loc) =
+    Lambda params (substituteNames substs body)
+           (map (toDecl . substituteNames substs . fromDecl) rettype) loc
 
 instance Substitute Ident where
   substituteNames substs v = v { identName = substituteNames substs $ identName v }

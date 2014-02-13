@@ -16,12 +16,21 @@ import System.IO
 import Text.Printf
 
 import Language.L0.Parser
+import qualified L0C.Internalise
+
+import qualified L0C.ExternalRep as E
+import qualified L0C.ExternalRep.TypeChecker as E
+import qualified L0C.ExternalRep.Renamer as E
+
+import qualified L0C.InternalRep as I
+import qualified L0C.InternalRep.TypeChecker as I
+
 import L0C.L0
 import L0C.TypeChecker
 import L0C.Renamer
 import L0C.Interpreter
 import L0C.EnablingOpts.EnablingOptDriver
-import L0C.HOTrans.HOTransDriver
+-- import L0C.HOTrans.HOTransDriver
 import qualified L0C.FirstOrderTransform as FOT
 import qualified L0C.TupleTransform as TT
 import qualified L0C.FullNormalization as FN
@@ -30,7 +39,7 @@ import qualified L0C.IndexInliner as II
 import qualified L0C.SOACFlowGraph as FG
 import L0C.Untrace
 import qualified L0C.Backends.SequentialC as SequentialC
-import qualified L0C.Backends.Bohrium as Bohrium
+-- import qualified L0C.Backends.Bohrium as Bohrium
 
 data CompileError = CompileError {
     errorDesc :: String
@@ -83,9 +92,11 @@ commandLineOptions =
   , Option [] ["compile-sequential"]
     (NoArg $ \opts -> opts { l0action = seqCodegenAction })
     "Translate program into sequential C and write it on standard output."
+{-
   , Option [] ["compile-bohrium"]
     (NoArg $ \opts -> opts { l0action = bohriumCodegenAction })
     "Translate program into C using Bohrium and write it on standard output."
+-}
   , Option [] ["generate-flow-graph"]
     (NoArg $ \opts -> opts { l0action = flowGraphAction })
     "Print the SOAC flow graph of the final program."
@@ -104,7 +115,7 @@ commandLineOptions =
   , tatransformOpt "t" ["tuple-of-arrays-transform"]
   , eotransformOpt "e" ["enabling-optimisations"]
   , iitransformOpt []  ["inline-map-indexes"]
-  , hotransformOpt "h" ["higher-order-optimizations"]
+--  , hotransformOpt "h" ["higher-order-optimizations"]
   , Option "s" ["standard"]
     (NoArg $ \opts -> opts { l0pipeline = standardPipeline ++ l0pipeline opts })
     "Use the recommended optimised pipeline."
@@ -118,10 +129,10 @@ interpretAction = ("interpreter", interpret)
 
 seqCodegenAction :: Action
 seqCodegenAction = ("sequential code generator", putStrLn . SequentialC.compileProg)
-
+{-
 bohriumCodegenAction :: Action
 bohriumCodegenAction = ("Bohrium code generator", putStrLn . Bohrium.compileProg)
-
+-}
 flowGraphAction :: Action
 flowGraphAction = ("SOAC flow graph", putStrLn . FG.makeFlowGraphString)
 
@@ -199,12 +210,12 @@ iitransform :: Pass
 iitransform = Pass { passName = "inlining map indexing"
                    , passOp = return . II.transformProg
                    }
-
+{-
 hotransform :: Pass
 hotransform = Pass { passName = "higher-order optimisations"
                    , passOp = liftPass highOrdTransf
                    }
-
+-}
 standardPipeline :: [Pass]
 standardPipeline =
   [ uttransform, tatransform, eotransform, iitransform, rename,
@@ -256,12 +267,12 @@ iitransformOpt :: String -> [String] -> L0Option
 iitransformOpt =
   passoption "Inline indexing into maps."
   iitransform
-
+{-
 hotransformOpt :: String -> [String] -> L0Option
 hotransformOpt =
   passoption "Perform higher-order optimisation, i.e., fusion."
   hotransform
-
+-}
 -- | Entry point.  Non-interactive, except when reading interpreter
 -- input from standard input.
 main :: IO ()
@@ -336,3 +347,36 @@ canFail _ (Right v)  = return v
 
 liftPass :: Show err => (Prog -> Either err a) -> Prog -> L0CM a
 liftPass f p = canFail (Just p) (f p)
+
+{-
+module Main where
+
+import Control.Applicative
+import L0C.ExternalRep as E
+import Language.L0.Parser
+import qualified L0C.Internalise
+
+import qualified L0C.ExternalRep as E
+import qualified L0C.ExternalRep.TypeChecker as E
+import qualified L0C.ExternalRep.Renamer as E
+
+import qualified L0C.InternalRep as I
+import qualified L0C.InternalRep.TypeChecker as I
+
+import System.Environment
+
+test :: FilePath -> IO ()
+test file = do Right exprog <- parseL0 file <$> readFile file
+               case E.checkProg $ E.tagProg exprog of
+                 Left err -> error $ show err
+                 Right exprog' -> do
+                   let inprog = L0C.Internalise.transformProg exprog'
+                   putStrLn $ I.prettyPrint inprog
+                   case I.checkProg inprog of
+                     Left err -> error $ show err
+                     Right _  -> putStrLn "It's all good"
+
+main :: IO ()
+main = do [f] <- getArgs
+          test f
+-}

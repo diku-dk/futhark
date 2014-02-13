@@ -5,11 +5,12 @@
 -- The program does not need to have any particular properties for the
 -- type checker to function; in particular it does not need unique
 -- names.
-module L0C.TypeChecker ( checkProg
-                       , checkProgNoUniqueness
-                       , checkClosedExp
-                       , checkOpenExp
-                       , TypeError(..))
+module L0C.ExternalRep.TypeChecker
+  ( checkProg
+  , checkProgNoUniqueness
+  , checkClosedExp
+  , checkOpenExp
+  , TypeError)
   where
 
 import Control.Applicative
@@ -25,148 +26,22 @@ import Data.Maybe
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 
-import L0C.L0
-import L0C.Renamer (tagProg', tagExp, tagExp', tagType',
-                    untagProg, untagExp, untagPattern, untagType)
+import L0C.ExternalRep
+import L0C.ExternalRep.Renamer (tagProg', tagExp, tagExp', tagType',
+                                untagProg, untagExp, untagPattern, untagType)
 import qualified L0C.FreshNames as FreshNames
-import L0C.MonadFreshNames
+import L0C.ExternalRep.MonadFreshNames
+import L0C.TypeError
 
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.
-data TypeError vn = TypeError SrcLoc String
-                  -- ^ A general error happened at the given position and
-                  -- for the given reason.
-                  | UnifyError (ExpBase CompTypeBase vn) (ExpBase CompTypeBase vn)
-                  -- ^ Types of two expressions failed to unify.
-                  | UnexpectedType (ExpBase CompTypeBase vn) [DeclTypeBase (ID vn)]
-                  -- ^ Expression of type was not one of the expected
-                  -- types.
-                  | ReturnTypeError SrcLoc Name (DeclTypeBase (ID vn)) (DeclTypeBase (ID vn))
-                  -- ^ The body of a function definition has a different
-                  -- type than its declaration.
-                  | DupDefinitionError Name SrcLoc SrcLoc
-                  -- ^ Two functions have been defined with the same name.
-                  | DupParamError Name vn SrcLoc
-                  -- ^ Two function parameters share the same name.
-                  | DupPatternError vn SrcLoc SrcLoc
-                  -- ^ Two pattern variables share the same name.
-                  | InvalidPatternError (TupIdentBase NoInfo vn) (CompTypeBase vn) SrcLoc
-                  -- ^ The pattern is not compatible with the type.
-                  | UnknownVariableError vn SrcLoc
-                  -- ^ Unknown variable of the given name referenced at the given spot.
-                  | UnknownFunctionError Name SrcLoc
-                  -- ^ Unknown function of the given name called at the given spot.
-                  | ParameterMismatch (Maybe Name) SrcLoc (Either Int [DeclTypeBase vn]) [CompTypeBase vn]
-                  -- ^ A function (possibly anonymous) was called with
-                  -- invalid arguments.  The third argument is either the
-                  -- number of parameters, or the specific types of
-                  -- parameters accepted (sometimes, only the former can
-                  -- be determined).
-                  | UseAfterConsume vn SrcLoc SrcLoc
-                  -- ^ A variable was attempted used after being
-                  -- consumed.  The last location is the point of
-                  -- consumption.
-                  | IndexingError vn Int Int SrcLoc
-                  -- ^ Too many indices provided.  The first integer is
-                  -- the number of dimensions in the array being
-                  -- indexed.
-                  | BadAnnotation SrcLoc String (CompTypeBase (ID vn)) (CompTypeBase (ID vn))
-                  -- ^ One of the type annotations fails to match with the
-                  -- derived type.  The string is a description of the
-                  -- role of the type.  The last type is the new derivation.
-                  | BadTupleAnnotation SrcLoc String [Maybe (CompTypeBase (ID vn))] [CompTypeBase (ID vn)]
-                  -- ^ One of the tuple type annotations fails to
-                  -- match with the derived type.  The string is a
-                  -- description of the role of the type.  The last
-                  -- type is the elemens of the new derivation.
-                  | CurriedConsumption Name SrcLoc
-                  -- ^ A function is being curried with an argument to be consumed.
-                  | BadLetWithValue SrcLoc
-                  -- ^ The new value for an array slice in let-with is aliased to the source.
-                  | ReturnAliased Name vn SrcLoc
-                  -- ^ The unique return value of the function aliases
-                  -- one of the function parameters.
-                  | UniqueReturnAliased Name SrcLoc
-                  -- ^ A unique element of the tuple returned by the
-                  -- function aliases some other element of the tuple.
 
-
-instance VarName vn => Show (TypeError vn) where
-  show (TypeError pos msg) =
-    "Type error at " ++ locStr pos ++ ":\n" ++ msg
-  show (UnifyError e1 e2) =
-    "Cannot unify type " ++ ppType (typeOf e1) ++
-    " of expression at " ++ locStr (srclocOf e1) ++
-    " with type " ++ ppType (typeOf e2) ++
-    " of expression at " ++ locStr (srclocOf e2)
-  show (UnexpectedType e []) =
-    "Type of expression at " ++ locStr (srclocOf e) ++
-    " cannot have any type - possibly a bug in the type checker."
-  show (UnexpectedType e ts) =
-    "Type of expression at " ++ locStr (srclocOf e) ++
-    " must be one of " ++ intercalate ", " (map ppType ts) ++ ", but is " ++
-    ppType (typeOf e) ++ "."
-  show (ReturnTypeError pos fname rettype bodytype) =
-    "Declaration of function " ++ nameToString fname ++ " at " ++ locStr pos ++
-    " declares return type " ++ ppType rettype ++ ", but body has type " ++
-    ppType bodytype
-  show (DupDefinitionError name pos1 pos2) =
-    "Duplicate definition of function " ++ nameToString name ++ ".  Defined at " ++
-    locStr pos1 ++ " and " ++ locStr pos2 ++ "."
-  show (DupParamError funname paramname pos) =
-    "Parameter " ++ textual paramname ++
-    " mentioned multiple times in argument list of function " ++
-    nameToString funname ++ " at " ++ locStr pos ++ "."
-  show (DupPatternError name pos1 pos2) =
-    "Variable " ++ textual name ++ " bound twice in tuple pattern; at " ++
-    locStr pos1 ++ " and " ++ locStr pos2 ++ "."
-  show (InvalidPatternError pat t loc) =
-    "Pattern " ++ ppTupId pat ++ " at " ++ locStr (srclocOf pat) ++
-    " cannot match value of type " ++ ppType t ++ " at " ++ locStr loc ++ "."
-  show (UnknownVariableError name pos) =
-    "Unknown variable " ++ textual name ++ " referenced at " ++ locStr pos ++ "."
-  show (UnknownFunctionError fname pos) =
-    "Unknown function " ++ nameToString fname ++ " called at " ++ locStr pos ++ "."
-  show (ParameterMismatch fname pos expected got) =
-    "In call of " ++ fname' ++ " at position " ++ locStr pos ++ ":\n" ++
-    "expecting " ++ show nexpected ++ " argument(s) of type(s) " ++
-     expected' ++ ", but got " ++ show ngot ++
-    " arguments of types " ++ intercalate ", " (map ppType got) ++ "."
-    where (nexpected, expected') =
-            case expected of
-              Left i -> (i, "(polymorphic)")
-              Right ts -> (length ts, intercalate ", " $ map ppType ts)
-          ngot = length got
-          fname' = maybe "anonymous function" (("function "++) . nameToString) fname
-  show (UseAfterConsume name rloc wloc) =
-    "Variable " ++ textual name ++ " used at " ++ locStr rloc ++
-    ", but it was consumed at " ++ locStr wloc ++ ".  (Possibly through aliasing)"
-  show (IndexingError name dims got pos) =
-    show got ++ " indices given at " ++ locStr pos ++
-    ", but type of variable " ++ textual name ++
-    " has " ++ show dims ++ " dimension(s)."
-  show (BadAnnotation loc desc expected got) =
-    "Annotation of \"" ++ desc ++ "\" type of expression at " ++
-    locStr loc ++ " is " ++ ppType expected ++
-    ", but derived to be " ++ ppType got ++ "."
-  show (BadTupleAnnotation loc desc expected got) =
-    "Annotation of \"" ++ desc ++ "\" type of expression at " ++
-    locStr loc ++ " is a tuple {" ++
-    intercalate ", " (map (maybe "(unspecified)" ppType) expected) ++
-    "}, but derived to be " ++ ppType (Elem $ Tuple got) ++ "."
-  show (CurriedConsumption fname loc) =
-    "Function " ++ nameToString fname ++
-    " curried over a consuming parameter at " ++ locStr loc ++ "."
-  show (BadLetWithValue loc) =
-    "New value for elements in let-with shares data with source array at " ++
-    locStr loc ++ ".  This is illegal, as it prevents in-place modification."
-  show (ReturnAliased fname name loc) =
-    "Unique return value of function " ++ nameToString fname ++ " at " ++
-    locStr loc ++ " is aliased to " ++ textual name ++ ", which is not consumed."
-  show (UniqueReturnAliased fname loc) =
-    "A unique tuple element of return value of function " ++
-    nameToString fname ++ " at " ++ locStr loc ++
-    " is aliased to some other tuple component."
+type TypeError vn =
+  GenTypeError
+  vn
+  (ExpBase CompTypeBase vn)
+  (DeclTypeBase vn)
+  (TupIdentBase NoInfo vn)
 
 type TaggedIdent ty vn = IdentBase ty (ID vn)
 
@@ -458,8 +333,12 @@ unifyExpTypes :: VarName vn =>
               -> TaggedExp CompTypeBase vn
               -> TypeM vn (TaggedType vn)
 unifyExpTypes e1 e2 =
-  maybe (bad $ UnifyError (untagExp e1) (untagExp e2)) return $
+  maybe (bad $ UnifyError e1' t1 e2' t2) return $
   unifyTypes (typeOf e1) (typeOf e2)
+  where e1' = untagExp e1
+        t1  = toDecl $ typeOf e1'
+        e2' = untagExp e2
+        t2  = toDecl $ typeOf e2'
 
 -- | @checkAnnotation loc s t1 t2@ returns @t2@ if @t1@ contains no
 -- type, and otherwise tries to unify them with 'unifyTypes'.  If
@@ -471,7 +350,9 @@ checkAnnotation loc desc t1 t2 =
   case unboxType t1 of
     Nothing -> return t2
     Just t1' -> case unifyTypes (t1' `setAliases` HS.empty) t2 of
-                  Nothing -> bad $ BadAnnotation loc desc t1' t2
+                  Nothing -> bad $ BadAnnotation loc desc
+                                   (toDecl $ untagType t1')
+                                   (toDecl $ untagType t2)
                   Just t  -> return t
 
 -- | @require ts e@ causes a '(TypeError vn)' if @typeOf e@ does not unify
@@ -480,14 +361,17 @@ checkAnnotation loc desc t1 t2 =
 require :: VarName vn => [TaggedType vn] -> TaggedExp CompTypeBase vn -> TypeM vn (TaggedExp CompTypeBase vn)
 require ts e
   | any (typeOf e `similarTo`) ts = return e
-  | otherwise = bad $ UnexpectedType (untagExp e) $ map toDecl ts
+  | otherwise = bad $ UnexpectedType e' (toDecl $ typeOf e') $
+                      map (toDecl . untagType) ts
+  where e' = untagExp e
 
 -- | Variant of 'require' working on identifiers.
 requireI :: VarName vn => [TaggedType vn] -> TaggedIdent CompTypeBase vn
          -> TypeM vn (TaggedIdent CompTypeBase vn)
 requireI ts ident
   | any (identType ident `similarTo`) ts = return ident
-  | otherwise = bad $ UnexpectedType (untagExp $ Var ident) $ map toDecl ts
+  | otherwise = bad $ UnexpectedType e (toDecl $ typeOf e) $ map (untagType . toDecl) ts
+  where e = untagExp $ Var ident
 
 rowTypeM :: VarName vn => TaggedExp CompTypeBase vn -> TypeM vn (TaggedType vn)
 rowTypeM e = maybe wrong return $ peelArray 1 $ typeOf e
@@ -558,7 +442,7 @@ checkFun (fname, rettype, params, body, loc) = do
 
   if toDecl (typeOf body') `subtypeOf` rettype then
     return (fname, rettype, params', body', loc)
-  else bad $ ReturnTypeError loc fname rettype $ toDecl $ typeOf body'
+  else bad $ ReturnTypeError loc fname (untagType rettype) $ toDecl $ untagType $ typeOf body'
 
   where checkParams = reverse <$> foldM expand [] params
 
@@ -1154,7 +1038,8 @@ checkBinding pat et dflow = do
           t' <- lift $ checkAnnotation (srclocOf pat) "wildcard" wt t
           return $ Wildcard t' loc
         checkBinding' _ _ =
-          lift $ bad $ InvalidPatternError (untagPattern errpat) (untagType et) $ srclocOf pat
+          lift $ bad $ InvalidPatternError (untagPattern errpat) (srclocOf errpat)
+                                           (toDecl $ untagType et) $ srclocOf pat
 
         add ident = do
           bnd <- gets $ find (==ident)
@@ -1208,7 +1093,7 @@ checkFuncall fname loc paramtypes _ args = do
 
   unless (validApply paramtypes argts) $
     bad $ ParameterMismatch fname loc
-          (Right $ map untagType paramtypes) (map untagType argts)
+          (Right $ map untagType paramtypes) (map (toDecl . untagType) argts)
 
   forM_ (zip (map diet paramtypes) args) $ \(d, (t, dflow, argloc)) -> do
     maybeCheckOccurences $ usageOccurences dflow
@@ -1308,7 +1193,7 @@ checkPolyLambdaOp op curryargexps rettype args pos = do
   tp <- case curryargexpts ++ argts of
           [t1, t2] | t1 == t2 -> return t1
           [Elem (Tuple [t1,t2])] | t1 == t2 -> return t1 -- For autoshimming.
-          l -> bad $ ParameterMismatch (Just fname) pos (Left 2) $ map untagType l
+          l -> bad $ ParameterMismatch (Just fname) pos (Left 2) $ map (toDecl . untagType) l
   xname <- newIDFromString "x"
   yname <- newIDFromString "y"
   let xident t = Ident xname t pos

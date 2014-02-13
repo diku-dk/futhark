@@ -4,10 +4,7 @@
 -- reference, or this module may be a little hard to understand.
 module Language.L0.Syntax
   (
-   -- * Names
-   Name(..)
-  , nameToString
-  , nameFromString
+   module Language.L0.Core
 
   -- * Types
   , Uniqueness(..)
@@ -27,8 +24,6 @@ module Language.L0.Syntax
   , ParamBase
   , CertificatesBase
   , ExpBase(..)
-  , BinOp(..)
-  , opStr
   , LambdaBase(..)
   , TupleLambdaBase(..)
   , TupIdentBase(..)
@@ -53,24 +48,9 @@ import Data.Hashable
 import Data.Loc
 import Data.Monoid
 import qualified Data.HashSet as HS
-import qualified Data.Text as T
 
--- | The abstract (not really) type representing names in the L0
--- compiler.  'String's, being lists of characters, are very slow,
--- while 'T.Text's are based on byte-arrays.
-newtype Name = Name T.Text
-  deriving (Show, Eq, Ord)
-
-instance Hashable Name where
-  hashWithSalt salt (Name t) = hashWithSalt salt t
-
--- | Convert a name to the corresponding list of characters.
-nameToString :: Name -> String
-nameToString (Name t) = T.unpack t
-
--- | Convert a list of characters to the corresponding name.
-nameFromString :: String -> Name
-nameFromString = Name . T.pack
+import Language.L0.Misc
+import Language.L0.Core
 
 -- | No information.  Usually used for placeholder type- or aliasing
 -- information.
@@ -80,22 +60,6 @@ data NoInfo vn = NoInfo
 instance Monoid (NoInfo vn) where
   mempty = NoInfo
   _ `mappend` _ = NoInfo
-
--- | The uniqueness attribute of a type.  This essentially indicates
--- whether or not in-place modifications are acceptable.
-data Uniqueness = Unique    -- ^ At most one outer reference.
-                | Nonunique -- ^ Any number of references.
-                  deriving (Eq, Ord, Show)
-
-instance Monoid Uniqueness where
-  mempty = Unique
-  _ `mappend` Nonunique = Nonunique
-  Nonunique `mappend` _ = Nonunique
-  u `mappend` _         = u
-
-instance Hashable Uniqueness where
-  hashWithSalt salt Unique    = salt
-  hashWithSalt salt Nonunique = salt * 2
 
 -- | Don't use this for anything.
 type DimSize vn = ExpBase (TypeBase Names) vn
@@ -385,46 +349,6 @@ instance Located (ExpBase ty vn) where
   locOf (ScanT _ _ _ pos) = locOf pos
   locOf (FilterT _ _ _ pos) = locOf pos
   locOf (RedomapT _ _ _ _ _ pos) = locOf pos
-
--- | Binary operators.
-data BinOp = Plus -- Binary Ops for Numbers
-           | Minus
-           | Pow
-           | Times
-           | Divide
-           | Mod
-           | ShiftR
-           | ShiftL
-           | Band
-           | Xor
-           | Bor
-           | LogAnd
-           | LogOr
-           -- Relational Ops for all basic types at least
-           | Equal
-           | Less
-           | Leq
-             deriving (Eq, Ord, Enum, Bounded, Show)
-
--- | The Operator, without whitespace, that corresponds to this
--- @BinOp@.  For example, @opStr Plus@ gives @"+"@.
-opStr :: BinOp -> String
-opStr Plus = "+"
-opStr Minus = "-"
-opStr Pow = "pow"
-opStr Times = "*"
-opStr Divide = "/"
-opStr Mod = "%"
-opStr ShiftR = ">>"
-opStr ShiftL = "<<"
-opStr Band = "&"
-opStr Xor = "^"
-opStr Bor = "|"
-opStr LogAnd = "&&"
-opStr LogOr = "||"
-opStr Equal = "="
-opStr Less = "<"
-opStr Leq = "<="
 
 -- | Anonymous Function
 data LambdaBase ty vn = AnonymFun [ParamBase vn] (ExpBase ty vn) (DeclTypeBase vn) SrcLoc

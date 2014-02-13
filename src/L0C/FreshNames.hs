@@ -12,7 +12,6 @@ module L0C.FreshNames
   , VNameSource
   , blankNameSource
   , newNameSource
-  , newNameSourceForProg
   , newName
   , newID
   , newVName
@@ -20,7 +19,7 @@ module L0C.FreshNames
 
 import qualified Data.HashSet as HS
 
-import L0C.L0
+import Language.L0.Misc
 
 -- | A name source is conceptually an infinite sequence of names with
 -- no repeating entries.  In practice, when asked for a name, the name
@@ -50,11 +49,6 @@ blankNameSource = NameSource $ counterGenerator 0 HS.empty
 -- names in the given set.
 newNameSource :: VarName vn => HS.HashSet vn -> NameSource vn
 newNameSource = NameSource . counterGenerator 0
-
--- | Create a new 'NameSource' that will never produce any of the
--- names used as variables in the given program.
-newNameSourceForProg :: VarName vn => ProgBase ty vn -> NameSource vn
-newNameSourceForProg = newNameSource . progNames
 
 -- | Produce a fresh 'ID', using the given base name as a template.
 newID :: VarName vn =>

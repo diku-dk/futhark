@@ -130,18 +130,9 @@ import Data.Loc
 import Data.Maybe
 import qualified Data.HashSet as HS
 
+import Language.L0.Misc
 import Language.L0.Syntax
 import Language.L0.Traversals
-
--- | A human-readable location string, of the form
--- @filename:lineno:columnno@.
-locStr :: SrcLoc -> String
-locStr (SrcLoc NoLoc) = "unknown location"
-locStr (SrcLoc (Loc (Pos file line1 col1 _) (Pos _ line2 col2 _))) =
-  -- Assume that both positions are in the same file (what would the
-  -- alternative mean?)
-  file ++ ":" ++ show line1 ++ ":" ++ show col1
-       ++ "-" ++ show line2 ++ ":" ++ show col2
 
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional

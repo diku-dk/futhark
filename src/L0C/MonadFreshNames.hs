@@ -12,8 +12,6 @@ module L0C.MonadFreshNames
   , newID
   , newIDFromString
   , newVName
-  , newIdent
-  , newIdent'
   , module L0C.FreshNames
   ) where
 
@@ -22,9 +20,7 @@ import Control.Applicative
 import qualified Control.Monad.State.Lazy
 import qualified Control.Monad.State.Strict
 
-import Data.Loc
-
-import L0C.L0
+import Language.L0.Misc
 import qualified L0C.FreshNames as FreshNames
 import L0C.FreshNames hiding (newName, newID, newVName)
 
@@ -70,20 +66,3 @@ newIDFromString s = newID $ varName s Nothing
 -- | Produce a fresh 'VName', using the given base name as a template.
 newVName :: MonadFreshNames VName m => String -> m VName
 newVName = newID . nameFromString
-
--- | Produce a fresh 'Ident', using the given name as a template.
-newIdent :: (VarName vn, MonadFreshNames (ID vn) m) =>
-            String -> ty (ID vn) -> SrcLoc -> m (IdentBase ty (ID vn))
-newIdent s t loc = do
-  s' <- newID $ varName s Nothing
-  return $ Ident s' t loc
-
--- | Produce a fresh 'Ident', using the given 'Ident' as a template,
--- but possibly modifying the name.
-newIdent' :: (MonadFreshNames VName m) =>
-             (String -> String)
-          -> IdentBase ty VName -> m (IdentBase ty VName)
-newIdent' f ident =
-  newIdent (f $ nameToString $ baseName $ identName ident)
-           (identType ident) $
-           srclocOf ident

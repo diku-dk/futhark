@@ -20,6 +20,7 @@ import Control.Monad (foldM)
 import Data.Array
 import Data.Loc hiding (L, unLoc) -- Lexer has replacements.
 
+import Language.L0.Misc (nameFromString)
 import Language.L0.Syntax
 import Language.L0.Attributes
 import Language.L0.Parser.Lexer

@@ -21,6 +21,7 @@ import qualified Data.HashSet as HS
 import Text.PrettyPrint.Mainland
 import Text.Printf
 
+import Language.L0.Misc
 import Language.L0.Syntax
 import Language.L0.Attributes
 
@@ -47,9 +48,6 @@ aliasComment pat d = case aliasComment' pat of
                     commasep (map ppr als)]
           where clean = filter (/= identName ident)
                 oneline s = text $ displayS (renderCompact s) ""
-
-instance Pretty Name where
-  ppr (Name t) = fromText t
 
 instance Pretty Value where
   ppr (IntVal x) = text $ show x
