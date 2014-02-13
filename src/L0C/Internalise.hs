@@ -48,7 +48,7 @@ import L0C.Tools
 
 import Prelude hiding (mapM)
 
--- | Perform the tuple internaliseation on an entire program.
+-- | Convert a program in external L0 to a program in internal L0.
 internaliseProg :: E.Prog -> I.Prog
 internaliseProg prog =
   I.Prog $ runInternaliseM $ mapM internaliseFun $ E.progFunctions prog
@@ -58,6 +58,7 @@ internaliseProg prog =
 
 data Replacement = ArraySubst I.Ident [I.Ident]
                  | TupleSubst [I.Ident]
+                   deriving (Show)
 
 data InternaliseEnv = InternaliseEnv {
     envSubsts :: HM.HashMap VName Replacement
@@ -255,10 +256,8 @@ internaliseExp (E.Index cs var csidx idxs loc) =
   where outtype = E.stripArray (length idxs) $ E.identType var
 
 internaliseExp (E.TupLit es loc) =
-  letSubExps "tup_elem" (concatMap flatten <$> mapM internaliseExp es) $ \es' ->
-    return $ I.TupLit es' loc
-  where flatten (I.TupLit els _) = map I.SubExp els
-        flatten e                = [e]
+  tupsToIdentList es $ \ks ->
+    return $ I.TupLit (map I.Var $ combCertExps ks) loc
 
 internaliseExp (E.ArrayLit [] et loc) =
   case internaliseType et of
@@ -545,6 +544,9 @@ tupsToIdentList = tupsToIdentList' []
 splitCertExps :: [(Maybe I.Ident, [I.Ident])] -> ([I.Ident], [I.Ident])
 splitCertExps l = (mapMaybe fst l,
                    concatMap snd l)
+
+combCertExps :: [(Maybe I.Ident, [I.Ident])] -> [I.Ident]
+combCertExps = concatMap $ \(cert, ks) -> maybeToList cert ++ ks
 
 mergeCerts :: [I.Ident] -> (Maybe I.Ident -> InternaliseM I.Exp) -> InternaliseM I.Exp
 mergeCerts [] f = f Nothing

@@ -29,8 +29,8 @@ letSubExp desc m f = do
   e <- m
   case (e, typeOf e) of
     (SubExp se, _) -> f se
-    (_, [_])         -> letExp desc m (f . Var)
-    _                -> fail "letSubExp: tuple-typed expression given."
+    (_, [_])       -> letExp desc m (f . Var)
+    _              -> fail $ "letSubExp: tuple-typed expression given for " ++ desc ++ ":\n" ++ ppExp e
 
 letExp :: MonadFreshNames VName m =>
           String -> m Exp -> (Ident -> m Exp) -> m Exp
@@ -41,7 +41,7 @@ letExp desc m f = do
     (SubExp (Var v), _) -> f v
     (_, [t])            -> do v <- fst <$> newVar loc desc t
                               LetPat [v] e <$> f v <*> pure loc
-    _                   -> fail "letExp: tuple-typed expression given."
+    _                   -> fail $ "letExp: tuple-typed expression given:\n" ++ ppExp e
 
 letSubExps :: MonadFreshNames VName m =>
             String -> m [Exp] -> ([SubExp] -> m Exp) -> m Exp
@@ -53,7 +53,7 @@ letSubExps desc m f =
           | [t] <- typeOf e = do
             v  <- fst <$> newVar loc desc t
             LetPat [v] e <$> letSubExps' (Var v:ses) es <*> pure loc
-          | otherwise = fail "letSubExps: tuple-typed expression given."
+          | otherwise = fail $ "letSubExps: tuple-typed expression given:\n" ++ ppExp e
           where loc = srclocOf e
 
 letExps :: MonadFreshNames VName m =>

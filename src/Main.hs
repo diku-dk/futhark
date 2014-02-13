@@ -319,8 +319,8 @@ l0c config filename srccode =
     (Left err, msgs) -> (msgs, Left err)
     (Right prog, msgs) -> (msgs, Right prog)
   where l0c' = canFail Nothing (parseL0 filename srccode) >>=
-               canFail Nothing . typeCheck E.checkProg E.checkProgNoUniqueness config . E.tagProg >>=
-               pipeline . internaliseProg
+               canFail Nothing . typeCheck E.checkProg E.checkProgNoUniqueness config >>=
+               pipeline . internaliseProg . E.tagProg
         pipeline = foldl comb return $ l0pipeline config
         comb prev pass prog = do
           prog' <- prev prog
