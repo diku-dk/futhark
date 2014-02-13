@@ -356,9 +356,8 @@ internaliseExp (E.Zip es loc) =
                          letSubExp "zip_len_y" (pure $ rows e2) $ \e2' ->
                          letSubExp "zip_cmp" (pure $ I.BinOp I.Equal e1' e2' (I.Elem I.Bool) loc) $ \cmp ->
                          pure (I.Assert cmp loc)
-         assertions <- zipWithM ass namevs $ drop 1 namevs
-         (cs2, bindcs) <- bindVarsM "zip_assert" assertions
-         bindcs <$> mergeCerts (cs1++cs2) (\c -> return $ tuplit c loc namevs)
+         letExps "zip_assert" (zipWithM ass namevs $ drop 1 namevs) $ \cs2 ->
+           mergeCerts (cs1++cs2) $ \c -> return $ tuplit c loc namevs
 
 internaliseExp (E.Iota e loc) =
   letSubExp "n" (internaliseExp e) $ \e' ->
@@ -422,7 +421,7 @@ internaliseExp (E.Concat cs x y loc) =
 internaliseExp (E.Map lam arr _ loc) =
   tupToIdentList arr $ \c arrs ->
   let cs = certify c []
-  in letSubExp "cert" (pure $ I.Conjoin (map I.Var cs) loc) $ \se ->
+  in conjoinCerts cs loc $ \se ->
      internaliseLambda se lam $ \lam' ->
        certifySOAC se $
        I.Map cs lam' (map I.Var arrs) loc
@@ -431,7 +430,7 @@ internaliseExp (E.Reduce lam ne arr _ loc) =
   tupToIdentList arr $ \c1 arrs ->
   tupToIdentList ne $ \c2 nes ->
   let cs = catMaybes [c1,c2]
-  in letSubExp "cert" (pure $ I.Conjoin (map I.Var cs) loc) $ \se ->
+  in conjoinCerts cs loc $ \se ->
      internaliseLambda se lam $ \lam' ->
        certifySOAC se $
        I.Reduce cs lam' (zip (map I.Var nes) (map I.Var arrs)) loc
@@ -440,7 +439,7 @@ internaliseExp (E.Scan lam ne arr _ loc) =
   tupToIdentList arr $ \c1 arrs ->
   tupToIdentList ne $ \c2 nes ->
   let cs = catMaybes [c1,c2]
-  in letSubExp "cert" (pure $ I.Conjoin (map I.Var cs) loc) $ \se ->
+  in conjoinCerts cs loc $ \se ->
      internaliseLambda se lam $ \lam' ->
        certifySOAC se $
        I.Scan cs lam' (zip (map I.Var nes) (map I.Var arrs)) loc
@@ -448,7 +447,7 @@ internaliseExp (E.Scan lam ne arr _ loc) =
 internaliseExp (E.Filter lam arr _ loc) =
   tupToIdentList arr $ \c arrs ->
   let cs = catMaybes [c]
-  in letSubExp "cert" (pure $ I.Conjoin (map I.Var cs) loc) $ \se ->
+  in conjoinCerts cs loc $ \se ->
      internaliseLambda se lam $ \lam' ->
        certifySOAC se $
        I.Filter cs lam' (map I.Var arrs) loc
@@ -457,7 +456,7 @@ internaliseExp (E.Redomap lam1 lam2 ne arr _ loc) =
   tupToIdentList arr $ \c1 arrs ->
   tupToIdentList ne $ \c2 nes ->
   let cs = catMaybes [c1,c2]
-  in letSubExp "cert" (pure $ I.Conjoin (map I.Var cs) loc) $ \se ->
+  in conjoinCerts cs loc $ \se ->
      internaliseLambda se lam1 $ \lam1' ->
      internaliseLambda se lam2 $ \lam2' ->
        certifySOAC se $
@@ -506,11 +505,46 @@ internaliseExp (E.Conjoin es loc) =
   letSubExps "conjoin_arg" (mapM internaliseExp es) $ \es' ->
   return $ I.Conjoin es' loc
 
-internaliseExp (E.MapT {}) = fail "no"
-internaliseExp (E.ReduceT {}) = fail "no"
-internaliseExp (E.ScanT {}) = fail "no"
-internaliseExp (E.FilterT {}) = fail "no"
-internaliseExp (E.RedomapT {}) = fail "no"
+internaliseExp (E.MapT cs fun arrs loc) =
+  letSubExps "map_arg" (mapM internaliseExp arrs) $ \arrs' -> do
+    cs' <- internaliseCerts cs
+    conjoinCerts cs' loc $ \ce ->
+      internaliseTupleLambda ce fun $ \fun' ->
+      return $ I.Map cs' fun' arrs' loc
+
+internaliseExp (E.ReduceT cs fun inputs loc) =
+  letSubExps "red_arg" (mapM internaliseExp arrs) $ \arrs' ->
+  letSubExps "red_acc" (mapM internaliseExp accs) $ \accs' -> do
+    cs' <- internaliseCerts cs
+    conjoinCerts cs' loc $ \ce ->
+      internaliseTupleLambda ce fun $ \fun' ->
+      return $ I.Reduce cs' fun' (zip accs' arrs') loc
+  where (arrs, accs) = unzip inputs
+
+internaliseExp (E.ScanT cs fun inputs loc) =
+  letSubExps "scan_arg" (mapM internaliseExp arrs) $ \arrs' ->
+  letSubExps "scan_acc" (mapM internaliseExp accs) $ \accs' -> do
+    cs' <- internaliseCerts cs
+    conjoinCerts cs' loc $ \ce ->
+      internaliseTupleLambda ce fun $ \fun' ->
+      return $ I.Scan cs' fun' (zip accs' arrs') loc
+  where (arrs, accs) = unzip inputs
+
+internaliseExp (E.FilterT cs fun arrs loc) =
+  letSubExps "filter_arg" (mapM internaliseExp arrs) $ \arrs' -> do
+    cs' <- internaliseCerts cs
+    conjoinCerts cs' loc $ \ce ->
+      internaliseTupleLambda ce fun $ \fun' ->
+      return $ I.Filter cs' fun' arrs' loc
+
+internaliseExp (E.RedomapT cs fun1 fun2 accs arrs loc) =
+  letSubExps "redomap_acc" (mapM internaliseExp accs) $ \accs' ->
+  letSubExps "redomap_arg" (mapM internaliseExp arrs) $ \arrs' -> do
+    cs' <- internaliseCerts cs
+    conjoinCerts cs' loc $ \ce ->
+      internaliseTupleLambda ce fun1 $ \fun1' ->
+      internaliseTupleLambda ce fun2 $ \fun2' ->
+      return $ I.Redomap cs' fun1' fun2' accs' arrs' loc
 
 tupToIdentList :: E.Exp -> (Maybe I.Ident -> [I.Ident] -> InternaliseM I.Exp)
                -> InternaliseM I.Exp
@@ -541,6 +575,11 @@ tupsToIdentList = tupsToIdentList' []
           tupToIdentList e $ \c e' ->
             tupsToIdentList' (acc++[(c,e')]) es m
 
+conjoinCerts :: I.Certificates -> SrcLoc -> (I.SubExp -> InternaliseM I.Exp)
+             -> InternaliseM I.Exp
+conjoinCerts cs loc =
+  letSubExp "cert" $ pure $ I.Conjoin (map I.Var cs) loc
+
 splitCertExps :: [(Maybe I.Ident, [I.Ident])] -> ([I.Ident], [I.Ident])
 splitCertExps l = (mapMaybe fst l,
                    concatMap snd l)
@@ -548,7 +587,7 @@ splitCertExps l = (mapMaybe fst l,
 combCertExps :: [(Maybe I.Ident, [I.Ident])] -> [I.Ident]
 combCertExps = concatMap $ \(cert, ks) -> maybeToList cert ++ ks
 
-mergeCerts :: [I.Ident] -> (Maybe I.Ident -> InternaliseM I.Exp) -> InternaliseM I.Exp
+mergeCerts :: I.Certificates -> (Maybe I.Ident -> InternaliseM I.Exp) -> InternaliseM I.Exp
 mergeCerts [] f = f Nothing
 mergeCerts [c] f = f $ Just c
 mergeCerts (c:cs) f = do
@@ -619,6 +658,10 @@ internaliseLambda ce (E.AnonymFun params body rettype loc) m = do
         stripCert es = es
 internaliseLambda _ (E.CurryFun {}) _ = error "no curries yet"
 
+internaliseTupleLambda :: I.SubExp -> E.TupleLambda
+                       -> (I.Lambda -> InternaliseM I.Exp) -> InternaliseM I.Exp
+internaliseTupleLambda ce = internaliseLambda ce . E.tupleLambdaToLambda
+
 tuplit :: Maybe I.Ident -> SrcLoc -> [I.SubExp] -> I.Exp
 tuplit _ _ [e] = SubExp e
 tuplit Nothing loc es = I.TupLit (given loc:es) loc
@@ -638,18 +681,3 @@ certifySOAC ce e =
     ts  -> do (ks,vs) <- unzip <$> mapM (newVar loc "soac") ts
               return $ I.LetPat ks e (I.TupLit (ce:vs) loc) loc
   where loc = srclocOf e
-
-bindVarM :: String -> I.Exp -> InternaliseM (I.Ident, I.Exp -> I.Exp)
-bindVarM _ (I.SubExp (I.Var k)) =
-  return (k, id)
-bindVarM desc e
-  | [t] <- I.typeOf e = do k <- fst <$> newVar (srclocOf e) desc t
-                           return (k, \inner -> I.LetPat [k] e inner $ srclocOf e)
-  | otherwise = fail "L0C.Internalise.bindVarM: Cannot bind tuple-typed expression."
-
-bindVarsM :: String -> [I.Exp] -> InternaliseM ([I.Ident], I.Exp -> I.Exp)
-bindVarsM _ [] = return ([], id)
-bindVarsM desc (e:es) = do
-  (k, f) <- bindVarM desc e
-  (ks, g) <- bindVarsM desc es
-  return (k:ks, f . g)

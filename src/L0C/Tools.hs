@@ -24,7 +24,7 @@ import L0C.InternalRep
 import L0C.InternalRep.MonadFreshNames
 
 letSubExp :: MonadFreshNames VName m =>
-           String -> m Exp -> (SubExp -> m Exp) -> m Exp
+             String -> m Exp -> (SubExp -> m Exp) -> m Exp
 letSubExp desc m f = do
   e <- m
   case (e, typeOf e) of
