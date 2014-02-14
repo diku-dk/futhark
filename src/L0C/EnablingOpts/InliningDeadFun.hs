@@ -13,15 +13,12 @@ import Control.Arrow
 import Control.Applicative
 import Control.Monad.Reader
 
---import Data.Either
-
---import Control.Monad.State
 import Data.List
 import Data.Loc
 
 import qualified Data.HashMap.Lazy as HM
 
-import L0C.L0
+import L0C.InternalRep
 
 import L0C.EnablingOpts.EnablingOptErrors
 
@@ -44,50 +41,23 @@ mkUnnamedLamFun ftab (fnm,rtp,idds,body,pos) =
     in  (fnm,rtp,idds,body',pos)
 
 mkUnnamedLamExp :: HM.HashMap Name FunDec -> Exp -> Exp
-mkUnnamedLamExp ftab (Map lam arrr eltp pos) =
-    Map    (mkUnnamedLamLam ftab lam) (mkUnnamedLamExp ftab arrr) eltp pos
-mkUnnamedLamExp ftab (Filter lam arrr eltp pos) =
-    Filter (mkUnnamedLamLam ftab lam) (mkUnnamedLamExp ftab arrr) eltp pos
-mkUnnamedLamExp ftab (Reduce lam ne arrr eltp pos) =
-    Reduce (mkUnnamedLamLam ftab lam) (mkUnnamedLamExp ftab ne) (mkUnnamedLamExp ftab arrr) eltp pos
-mkUnnamedLamExp ftab (Scan lam ne arrr eltp pos) =
-    Scan   (mkUnnamedLamLam ftab lam) (mkUnnamedLamExp ftab ne) (mkUnnamedLamExp ftab arrr) eltp pos
-mkUnnamedLamExp ftab (Redomap lam1 lam2 ne arrr eltp pos) =
-    Redomap (mkUnnamedLamLam ftab lam1) (mkUnnamedLamLam ftab lam2)
-            (mkUnnamedLamExp ftab ne  ) (mkUnnamedLamExp ftab arrr) eltp pos
-mkUnnamedLamExp ftab (MapT cs lam arrs pos) =
-    MapT    cs (mkUnnamedTupleLamLam ftab lam) (map (mkUnnamedLamExp ftab) arrs) pos
-mkUnnamedLamExp ftab (FilterT cs lam arrs pos) =
-    FilterT cs (mkUnnamedTupleLamLam ftab lam) (map (mkUnnamedLamExp ftab) arrs) pos
-mkUnnamedLamExp ftab (ReduceT cs lam inputs pos) =
-    ReduceT cs (mkUnnamedTupleLamLam ftab lam)
-               (zip (map (mkUnnamedLamExp ftab) nes) (map (mkUnnamedLamExp ftab) arrs)) pos
-  where (nes, arrs) = unzip inputs
-mkUnnamedLamExp ftab (ScanT cs lam inputs pos) =
-    ScanT cs (mkUnnamedTupleLamLam ftab lam)
-             (zip (map (mkUnnamedLamExp ftab) nes) (map (mkUnnamedLamExp ftab) arrs)) pos
-  where (nes, arrs) = unzip inputs
-mkUnnamedLamExp ftab (RedomapT cs lam1 lam2 nes arrs pos) =
-    RedomapT cs (mkUnnamedTupleLamLam ftab lam1) (mkUnnamedTupleLamLam ftab lam2)
-                (map (mkUnnamedLamExp ftab) nes) (map (mkUnnamedLamExp ftab) arrs) pos
+mkUnnamedLamExp ftab (Map cs lam arrs pos) =
+    Map    cs (mkUnnamedTupleLamLam ftab lam) arrs pos
+mkUnnamedLamExp ftab (Filter cs lam arrs pos) =
+    Filter cs (mkUnnamedTupleLamLam ftab lam) arrs pos
+mkUnnamedLamExp ftab (Reduce cs lam inputs pos) =
+    Reduce cs (mkUnnamedTupleLamLam ftab lam) inputs pos
+mkUnnamedLamExp ftab (Scan cs lam inputs pos) =
+    Scan cs (mkUnnamedTupleLamLam ftab lam) inputs pos
+mkUnnamedLamExp ftab (Redomap cs lam1 lam2 nes arrs pos) =
+    Redomap cs (mkUnnamedTupleLamLam ftab lam1) (mkUnnamedTupleLamLam ftab lam2)
+               nes arrs pos
 
 mkUnnamedLamExp ftab e = buildExpPattern (mkUnnamedLamExp ftab) e
 
-mkUnnamedLamLam ::  HM.HashMap Name FunDec -> Lambda -> Lambda
-mkUnnamedLamLam ftab (AnonymFun ids body  tp pos) =
-    AnonymFun ids (mkUnnamedLamExp ftab body) tp pos
-mkUnnamedLamLam ftab (CurryFun  nm params tp pos) =
-    case HM.lookup nm ftab of
-        Nothing                      ->
-            CurryFun nm (map (mkUnnamedLamExp ftab) params) tp pos
-        Just (fnm,_,idds,_,_) ->
-            let idds' = drop (length params) idds
-                args  = params ++ map (Var . fromParam) idds'
-            in  AnonymFun idds' (Apply fnm (zip args $ repeat Observe) tp pos) (toDecl tp) pos
-
-mkUnnamedTupleLamLam :: HM.HashMap Name FunDec -> TupleLambda -> TupleLambda
-mkUnnamedTupleLamLam ftab (TupleLambda ids body tp loc) =
-  TupleLambda ids (mkUnnamedLamExp ftab body) tp loc
+mkUnnamedTupleLamLam :: HM.HashMap Name FunDec -> Lambda -> Lambda
+mkUnnamedTupleLamLam ftab (Lambda ids body tp loc) =
+  Lambda ids (mkUnnamedLamExp ftab body) tp loc
 
 ------------------------------------------------------------------------------
 ------------------------------------------------------------------------------
@@ -165,23 +135,16 @@ buildCGfun cg fname  = do
 
 buildCGexp :: ([Name],[Name]) -> Exp -> ([Name],[Name])
 
-buildCGexp callees@(fs, soacfs) (Apply fname args _ _)  =
+buildCGexp callees@(fs, soacfs) (Apply fname _ _ _)  =
     if isBuiltInFun fname || elem fname fs
-    then foldl buildCGexp callees $ map fst args
-    else foldl buildCGexp (fname:fs, soacfs) $ map fst args
-
+    then callees
+    else (fname:fs, soacfs)
 
 buildCGexp callees e =
-    foldlPattern buildCGexp addLamFun addTupleLamFun callees e
+    foldlPattern buildCGexp addLamFun callees e
 
 addLamFun :: ([Name],[Name]) -> Lambda -> ([Name],[Name])
-addLamFun callees (AnonymFun {}) = callees
-addLamFun (fs,soacs) (CurryFun nm _ _ _) =
-    if isBuiltInFun nm || elem nm fs
-    then (fs,soacs) else (fs,nm:soacs)
-
-addTupleLamFun :: ([Name],[Name]) -> TupleLambda -> ([Name],[Name])
-addTupleLamFun callees _ = callees
+addLamFun callees _ = callees
 
 ------------------------------------------------------------------
 ------------------------------------------------------------------
@@ -292,20 +255,19 @@ doInlineInCaller (name,rtp,args,body,pos) inlcallees =
 inlineInExp :: [FunDec] -> Exp -> Exp
 inlineInExp inlcallees (Apply fname args rtp pos) =
     let aargs = map fst args
-        aargs' = map (inlineInExp inlcallees) aargs
     in  case filter (\(nm,_,_,_,_)->fname==nm) inlcallees of
-            [] -> Apply fname (zip aargs' $ map snd args) rtp pos
+            [] -> Apply fname args rtp pos
             (_,_,fargs,body,_):_ ->
               let revbnds = reverse (zip (map fromParam fargs) aargs)
               in  foldl (addArgBnd pos) body revbnds
     where
-        addArgBnd :: SrcLoc -> Exp -> (Ident, Exp) -> Exp
+        addArgBnd :: SrcLoc -> Exp -> (Ident, SubExp) -> Exp
         addArgBnd ppos body (farg, aarg) =
-            let fargutp = boxType (identType farg)
+            let fargutp = identType farg
                 fargnm  = identName   farg
                 fargpos = identSrcLoc farg
                 farg' = Ident fargnm fargutp fargpos
-            in  LetPat (Id farg') aarg body ppos
+            in  LetPat [farg'] (SubExp aarg) body ppos
 
 
 inlineInExp inlcallees e =

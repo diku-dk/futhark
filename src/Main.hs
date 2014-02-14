@@ -27,7 +27,7 @@ import qualified L0C.InternalRep.TypeChecker as I
 import qualified L0C.InternalRep.Renamer as I
 
 import L0C.Interpreter
--- import L0C.EnablingOpts.EnablingOptDriver
+import L0C.EnablingOpts.EnablingOptDriver
 -- import L0C.HOTrans.HOTransDriver
 import qualified L0C.FirstOrderTransform as FOT
 -- import qualified L0C.FullNormalization as FN
@@ -111,7 +111,7 @@ commandLineOptions =
 --  , normalizeOpt "n" ["normalize"]
   , uttransformOpt "u" ["untrace"]
   , fotransformOpt "f" ["first-order-transform"]
---  , eotransformOpt "e" ["enabling-optimisations"]
+  , eotransformOpt "e" ["enabling-optimisations"]
   , iitransformOpt []  ["inline-map-indexes"]
 --  , hotransformOpt "h" ["higher-order-optimizations"]
   , Option "s" ["standard"]
@@ -198,12 +198,12 @@ uttransform :: Pass
 uttransform = Pass { passName = "debugging annotation removal"
                    , passOp = return . untraceProg
                    }
-{-
+
 eotransform :: Pass
 eotransform = Pass { passName = "enabling optimations"
                    , passOp = liftPass enablingOpts
                    }
--}
+
 iitransform :: Pass
 iitransform = Pass { passName = "inlining map indexing"
                    , passOp = return . II.transformProg
@@ -216,9 +216,9 @@ hotransform = Pass { passName = "higher-order optimisations"
 -}
 standardPipeline :: [Pass]
 standardPipeline =
-  [ uttransform, {- eotransform, -} iitransform, rename
-  {- , hoist, -} {- eotransform, -} {- hotransform, -} {- eotransform -}
-  {- , hoistAggr, -} {- eotransform -} ]
+  [ uttransform, eotransform, iitransform, rename {- , hoist -}
+  , eotransform, {- hotransform, -} eotransform {- , hoistAggr, -}
+  , eotransform ]
 
 passoption :: String -> Pass -> String -> [String] -> L0Option
 passoption desc pass short long =
@@ -253,12 +253,12 @@ fotransformOpt =
 uttransformOpt :: String -> [String] -> L0Option
 uttransformOpt =
   passoption "Remove debugging annotations from program." uttransform
-{-
+
 eotransformOpt :: String -> [String] -> L0Option
 eotransformOpt =
   passoption "Perform simple enabling optimisations."
   eotransform
--}
+
 iitransformOpt :: String -> [String] -> L0Option
 iitransformOpt =
   passoption "Inline indexing into maps."

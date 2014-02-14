@@ -154,7 +154,7 @@ instance Pretty Exp where
   ppr (Conjoin es _) = text "conjoin" <> parens (commasep $ map ppr es)
   ppr (DoLoop mergepat i bound loopbody letbody _) =
     aliasComment pat $
-    text "loop" <+> parens (ppr pat <+> equals <+> ppr initexp) <+>
+    text "loop" <+> parens (ppTuple pat <+> equals <+> ppTuple initexp) <+>
     equals <+> text "for" <+> ppr i <+> text "<" <+> align (ppr bound) <+> text "do" </>
     indent 2 (ppr loopbody) <+> text "in" </>
     ppr letbody

@@ -8,13 +8,13 @@ module L0C.EnablingOpts.EnablingOptDriver
   , aggInlineDriver
   , deadFunElim
   , normCopyDeadOpts
-  , normCopyOneTupleLambda
+  , normCopyOneLambda
   , EnablingOptError(..)
   )
   where
 
-import L0C.L0
-import L0C.Renamer
+import L0C.InternalRep
+import L0C.InternalRep.Renamer
 import L0C.MonadFreshNames
 import qualified L0C.IndexInliner as II
 
@@ -53,13 +53,13 @@ normCopyDeadOpts prog = do
     (_, prog_dce)  <- deadCodeElim    prog_cp
     return prog_dce
 
-normCopyOneTupleLambda :: MonadFreshNames VName m => Prog -> TupleLambda ->
-                          m (Either EnablingOptError TupleLambda)
-normCopyOneTupleLambda prog lam = do
+normCopyOneLambda :: MonadFreshNames VName m => Prog -> Lambda ->
+                     m (Either EnablingOptError Lambda)
+normCopyOneLambda prog lam = do
   nmsrc <- getNameSource
-  let res = do lam'          <- copyCtPropOneTupleLambda prog  lam
-               let (lam'', nmsrc'') = II.transformLambda nmsrc' lam'
-               return (lam'', nmsrc'')
+  let res = do lam' <- copyCtPropOneLambda prog  lam
+               let (lam'', nmsrc') = II.transformLambda nmsrc lam'
+               return (lam'', nmsrc')
   case res of Left e -> return $ Left e
               Right (normLam, nmsrc') -> do
                 putNameSource nmsrc'

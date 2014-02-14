@@ -354,9 +354,10 @@ checkProg' checkoccurs prog = do
                         , envCheckOccurences = checkoccurs
                         }
 
-  liftM Prog $ runTypeM typeenv blankNameSource $
+  liftM Prog $ runTypeM typeenv src $
         mapM checkFun $ progFunctions prog
   where
+    src = newNameSourceForProg prog
     -- To build the ftable we loop through the list of function
     -- definitions.  In addition to the normal ftable information
     -- (name, return type, argument types), we also keep track of
@@ -678,8 +679,8 @@ checkExp (DoLoop mergepat (Ident loopvar _ _)
   -- mergepat.
   (firstscope, mergevs') <-
     checkBinding loc mergevs loc (map subExpType es') mempty
-  (loopbody', loopflow) <- firstscope $
-                           collectDataflow $ binding [iparam] $ checkExp loopbody
+  (loopbody', loopflow) <-
+    firstscope $ collectDataflow $ binding [iparam] $ checkExp loopbody
 
   -- We can use the name generator in a slightly hacky way to generate
   -- a unique Name for the function.
@@ -723,11 +724,13 @@ checkExp (DoLoop mergepat (Ident loopvar _ _)
       -- tails replaced with recursive calls.
       recurse e = do
         call <- newIdents "tail" (typeOf e) loc
-        return $ Apply fname
-                 ([(Var (fromParam k), diet (identType k)) | k <- free ] ++
-                  [(Var iparam, Observe),
-                   (Var bound, Observe)] ++
-                  zip (map Var call) (map diet $ typeOf e))
+        let bindArgs apply = LetPat call e apply loc
+        return $ bindArgs $
+                  Apply fname
+                  ([(Var (fromParam k), diet (identType k)) | k <- free ] ++
+                   [(Var iparam, Observe),
+                    (Var bound, Observe)] ++
+                   zip (map Var call) (map diet $ typeOf e))
                   (map fromDecl rettype) (srclocOf e)
   funbody' <- LetPat mergevs' (TupLit (map Var merge) loc) <$>
               mapTailsM recurse return loopbody' <*>
