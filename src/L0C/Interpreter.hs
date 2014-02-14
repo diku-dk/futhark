@@ -199,20 +199,20 @@ builtins = HM.fromList $ map namify
   where namify (k,v) = (nameFromString k, v)
 
 builtin :: String -> [Value] -> L0M [Value]
-builtin "toReal" [BasicValue (IntVal x)] =
-  return [BasicValue $ RealVal (fromIntegral x)]
-builtin "trunc" [BasicValue (RealVal x)] =
-  return [BasicValue $ IntVal (truncate x)]
-builtin "sqrt" [BasicValue (RealVal x)] =
-  return [BasicValue $ RealVal (sqrt x)]
-builtin "log" [BasicValue (RealVal x)] =
-  return [BasicValue $ RealVal (log x)]
-builtin "exp" [BasicValue (RealVal x)] =
-  return [BasicValue $ RealVal (exp x)]
-builtin "op not" [BasicValue (LogVal b)] =
-  return [BasicValue $ LogVal (not b)]
-builtin "op ~" [BasicValue (RealVal b)] =
-  return [BasicValue $ RealVal (-b)]
+builtin "toReal" [BasicVal (IntVal x)] =
+  return [BasicVal $ RealVal (fromIntegral x)]
+builtin "trunc" [BasicVal (RealVal x)] =
+  return [BasicVal $ IntVal (truncate x)]
+builtin "sqrt" [BasicVal (RealVal x)] =
+  return [BasicVal $ RealVal (sqrt x)]
+builtin "log" [BasicVal (RealVal x)] =
+  return [BasicVal $ RealVal (log x)]
+builtin "exp" [BasicVal (RealVal x)] =
+  return [BasicVal $ RealVal (exp x)]
+builtin "op not" [BasicVal (LogVal b)] =
+  return [BasicVal $ LogVal (not b)]
+builtin "op ~" [BasicVal (RealVal b)] =
+  return [BasicVal $ RealVal (-b)]
 builtin fname args =
   bad $ InvalidFunctionArguments (nameFromString fname) Nothing $
         map (fromDecl . valueType) args
@@ -235,22 +235,22 @@ evalExp (TupLit es _) =
 evalExp (ArrayLit es rt _) =
   single <$> (arrayVal <$> mapM evalSubExp es <*> pure rt)
 
-evalExp (BinOp Plus e1 e2 (Elem Int) pos) = evalIntBinOp (+) e1 e2 pos
-evalExp (BinOp Plus e1 e2 (Elem Real) pos) = evalRealBinOp (+) e1 e2 pos
-evalExp (BinOp Minus e1 e2 (Elem Int) pos) = evalIntBinOp (-) e1 e2 pos
-evalExp (BinOp Minus e1 e2 (Elem Real) pos) = evalRealBinOp (-) e1 e2 pos
-evalExp (BinOp Pow e1 e2 (Elem Int) pos) = evalIntBinOp pow e1 e2 pos
+evalExp (BinOp Plus e1 e2 (Basic Int) pos) = evalIntBinOp (+) e1 e2 pos
+evalExp (BinOp Plus e1 e2 (Basic Real) pos) = evalRealBinOp (+) e1 e2 pos
+evalExp (BinOp Minus e1 e2 (Basic Int) pos) = evalIntBinOp (-) e1 e2 pos
+evalExp (BinOp Minus e1 e2 (Basic Real) pos) = evalRealBinOp (-) e1 e2 pos
+evalExp (BinOp Pow e1 e2 (Basic Int) pos) = evalIntBinOp pow e1 e2 pos
   -- Haskell (^) cannot handle negative exponents, so check for that
   -- explicitly.
   where pow x y | y < 0, x == 0 = error "Negative exponential with zero base"
                 | y < 0         = 1 `div` (x ^ (-y))
                 | otherwise     = x ^ y
-evalExp (BinOp Pow e1 e2 (Elem Real) pos) = evalRealBinOp (**) e1 e2 pos
-evalExp (BinOp Times e1 e2 (Elem Int) pos) = evalIntBinOp (*) e1 e2 pos
-evalExp (BinOp Times e1 e2 (Elem Real) pos) = evalRealBinOp (*) e1 e2 pos
-evalExp (BinOp Divide e1 e2 (Elem Int) pos) = evalIntBinOp div e1 e2 pos
-evalExp (BinOp Mod e1 e2 (Elem Int) pos) = evalIntBinOp mod e1 e2 pos
-evalExp (BinOp Divide e1 e2 (Elem Real) pos) = evalRealBinOp (/) e1 e2 pos
+evalExp (BinOp Pow e1 e2 (Basic Real) pos) = evalRealBinOp (**) e1 e2 pos
+evalExp (BinOp Times e1 e2 (Basic Int) pos) = evalIntBinOp (*) e1 e2 pos
+evalExp (BinOp Times e1 e2 (Basic Real) pos) = evalRealBinOp (*) e1 e2 pos
+evalExp (BinOp Divide e1 e2 (Basic Int) pos) = evalIntBinOp div e1 e2 pos
+evalExp (BinOp Mod e1 e2 (Basic Int) pos) = evalIntBinOp mod e1 e2 pos
+evalExp (BinOp Divide e1 e2 (Basic Real) pos) = evalRealBinOp (/) e1 e2 pos
 evalExp (BinOp ShiftR e1 e2 _ pos) = evalIntBinOp shiftR e1 e2 pos
 evalExp (BinOp ShiftL e1 e2 _ pos) = evalIntBinOp shiftL e1 e2 pos
 evalExp (BinOp Band e1 e2 _ pos) = evalIntBinOp (.&.) e1 e2 pos
@@ -262,35 +262,35 @@ evalExp (BinOp LogOr e1 e2 _ pos) = evalBoolBinOp (||) e1 e2 pos
 evalExp (BinOp Equal e1 e2 _ _) = do
   v1 <- evalSubExp e1
   v2 <- evalSubExp e2
-  return [BasicValue $ LogVal (v1==v2)]
+  return [BasicVal $ LogVal (v1==v2)]
 
 evalExp (BinOp Less e1 e2 _ _) = do
   v1 <- evalSubExp e1
   v2 <- evalSubExp e2
-  return [BasicValue $ LogVal (v1<v2)]
+  return [BasicVal $ LogVal (v1<v2)]
 
 evalExp (BinOp Leq e1 e2 _ _) = do
   v1 <- evalSubExp e1
   v2 <- evalSubExp e2
-  return [BasicValue $ LogVal (v1<=v2)]
+  return [BasicVal $ LogVal (v1<=v2)]
 
 evalExp (BinOp _ _ _ _ pos) = bad $ TypeError pos "evalExp Binop"
 
 evalExp (Not e pos) = do
   v <- evalSubExp e
-  case v of BasicValue (LogVal b) -> return [BasicValue $ LogVal (not b)]
+  case v of BasicVal (LogVal b) -> return [BasicVal $ LogVal (not b)]
             _                     -> bad $ TypeError pos "evalExp Not"
 
 evalExp (Negate e pos) = do
   v <- evalSubExp e
-  case v of BasicValue (IntVal x)  -> return [BasicValue $ IntVal (-x)]
-            BasicValue (RealVal x) -> return [BasicValue $ RealVal (-x)]
+  case v of BasicVal (IntVal x)  -> return [BasicVal $ IntVal (-x)]
+            BasicVal (RealVal x) -> return [BasicVal $ RealVal (-x)]
             _                      -> bad $ TypeError pos "evalExp Negate"
 
 evalExp (If e1 e2 e3 _ pos) = do
   v <- evalSubExp e1
-  case v of BasicValue (LogVal True)  -> evalExp e2
-            BasicValue (LogVal False) -> evalExp e3
+  case v of BasicVal (LogVal True)  -> evalExp e2
+            BasicVal (LogVal False) -> evalExp e3
             _                         -> bad $ TypeError pos "evalExp If"
 
 evalExp (Apply fname [(arg, _)] _ loc)
@@ -315,7 +315,7 @@ evalExp (LetWith _ name src _ idxs ve body pos) = do
   v' <- change v idxs' vev
   binding [(name, v')] $ evalExp body
   where change _ [] to = return to
-        change (ArrayVal arr t) (BasicValue (IntVal i):rest) to
+        change (ArrayVal arr t) (BasicVal (IntVal i):rest) to
           | i >= 0 && i <= upper = do
             let x = arr ! i
             x' <- change x rest to
@@ -328,7 +328,7 @@ evalExp (Index _ ident _ idxs pos) = do
   v <- lookupVar ident
   idxs' <- mapM evalSubExp idxs
   single <$> foldM idx v idxs'
-  where idx (ArrayVal arr _) (BasicValue (IntVal i))
+  where idx (ArrayVal arr _) (BasicVal (IntVal i))
           | i >= 0 && i <= upper = return $ arr ! i
           | otherwise             = bad $ IndexOutOfBounds pos (upper+1) i
           where upper = snd $ bounds arr
@@ -337,9 +337,9 @@ evalExp (Index _ ident _ idxs pos) = do
 evalExp (Iota e pos) = do
   v <- evalSubExp e
   case v of
-    BasicValue (IntVal x)
+    BasicVal (IntVal x)
       | x >= 0    ->
-        return [arrayVal (map (BasicValue . IntVal) [0..x-1]) $ Elem Int]
+        return [arrayVal (map (BasicVal . IntVal) [0..x-1]) $ Basic Int]
       | otherwise ->
         bad $ NegativeIota pos x
     _ -> bad $ TypeError pos "evalExp Iota"
@@ -348,13 +348,13 @@ evalExp (Size _ i e pos) = do
   v <- evalSubExp e
   case drop i $ arrayShape v of
     [] -> bad $ TypeError pos "evalExp Size"
-    n:_ -> return [BasicValue $ IntVal n]
+    n:_ -> return [BasicVal $ IntVal n]
 
 evalExp (Replicate e1 e2 pos) = do
   v1 <- evalSubExp e1
   v2 <- evalSubExp e2
   case v1 of
-    BasicValue (IntVal x)
+    BasicVal (IntVal x)
       | x >= 0    ->
         return [ArrayVal (listArray (0,x-1) $ repeat v2) $ valueType v2]
       | otherwise -> bad $ NegativeReplicate pos x
@@ -377,7 +377,7 @@ evalExp (Reshape _ shapeexp arrexp pos) = do
         chunk _ [] = []
         chunk i l = let (a,b) = splitAt i l
                     in a : chunk i b
-        asInt (BasicValue (IntVal x)) = return x
+        asInt (BasicVal (IntVal x)) = return x
         asInt _ = bad $ TypeError pos "evalExp Reshape asInt"
 
 evalExp (Transpose _ k n arrexp _) =
@@ -387,7 +387,7 @@ evalExp (Split _ splitexp arrexp pos) = do
   split <- evalSubExp splitexp
   vs <- arrToList pos =<< evalSubExp arrexp
   case split of
-    BasicValue (IntVal i)
+    BasicVal (IntVal i)
       | i <= length vs ->
         let (bef,aft) = splitAt i vs
         in return [arrayVal bef rt, arrayVal aft rt]
@@ -404,24 +404,24 @@ evalExp (Copy e _) = single <$> evalSubExp e
 
 evalExp (Assert e loc) = do
   v <- evalSubExp e
-  case v of BasicValue (LogVal True) ->
-              return [BasicValue Checked]
+  case v of BasicVal (LogVal True) ->
+              return [BasicVal Checked]
             _ ->
               bad $ AssertFailed loc
 
-evalExp (Conjoin _ _) = return [BasicValue Checked]
+evalExp (Conjoin _ _) = return [BasicVal Checked]
 
 evalExp (DoLoop merge loopvar boundexp loopbody letbody pos) = do
   bound <- evalSubExp boundexp
   mergestart <- mapM evalSubExp mergeexp
   case bound of
-    BasicValue (IntVal n) -> do
+    BasicVal (IntVal n) -> do
       loopresult <- foldM iteration mergestart [0..n-1]
       local (`bindVars` zip mergepat loopresult) $ evalExp letbody
     _ -> bad $ TypeError pos "evalExp DoLoop"
   where (mergepat, mergeexp) = unzip merge
         iteration mergeval i =
-          binding [(loopvar, BasicValue $ IntVal i)] $
+          binding [(loopvar, BasicVal $ IntVal i)] $
             local (`bindVars` zip mergepat mergeval) $
               evalExp loopbody
 
@@ -453,7 +453,7 @@ evalExp e@(Filter _ fun arrexp loc) = do
   return $ arrays (typeOf e) vss'
   where filt x = do
           res <- applyLambda fun x
-          case res of [BasicValue (LogVal True)] -> return True
+          case res of [BasicVal (LogVal True)] -> return True
                       _                          -> return False
 
 evalExp (Redomap _ _ innerfun accexp arrexps loc) = do
@@ -467,9 +467,9 @@ evalIntBinOp op e1 e2 loc = do
   v1 <- evalSubExp e1
   v2 <- evalSubExp e2
   case (v1, v2) of
-    (BasicValue (IntVal x), BasicValue (IntVal y)) ->
-      return [BasicValue $ IntVal (op x y)]
-    _                    ->
+    (BasicVal (IntVal x), BasicVal (IntVal y)) ->
+      return [BasicVal $ IntVal (op x y)]
+    _ ->
       bad $ TypeError loc "evalIntBinOp"
 
 evalRealBinOp :: (Double -> Double -> Double) -> SubExp -> SubExp -> SrcLoc -> L0M [Value]
@@ -477,9 +477,9 @@ evalRealBinOp op e1 e2 loc = do
   v1 <- evalSubExp e1
   v2 <- evalSubExp e2
   case (v1, v2) of
-    (BasicValue (RealVal x), BasicValue (RealVal y)) ->
-      return [BasicValue $ RealVal (op x y)]
-    _                      ->
+    (BasicVal (RealVal x), BasicVal (RealVal y)) ->
+      return [BasicVal $ RealVal (op x y)]
+    _ ->
       bad $ TypeError loc $ "evalRealBinOp " ++ ppValue v1 ++ " " ++ ppValue v2
 
 evalBoolBinOp :: (Bool -> Bool -> Bool) -> SubExp -> SubExp -> SrcLoc -> L0M [Value]
@@ -487,9 +487,9 @@ evalBoolBinOp op e1 e2 loc = do
   v1 <- evalSubExp e1
   v2 <- evalSubExp e2
   case (v1, v2) of
-    (BasicValue (LogVal x), BasicValue (LogVal y)) ->
-      return [BasicValue $ LogVal (op x y)]
-    _                        ->
+    (BasicVal (LogVal x), BasicVal (LogVal y)) ->
+      return [BasicVal $ LogVal (op x y)]
+    _ ->
       bad $ TypeError loc $ "evalBoolBinOp " ++ ppValue v1 ++ " " ++ ppValue v2
 
 applyLambda :: Lambda -> [Value] -> L0M [Value]

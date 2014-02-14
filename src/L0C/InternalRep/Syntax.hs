@@ -10,7 +10,6 @@ module L0C.InternalRep.Syntax
   , Uniqueness(..)
   , DimSize
   , ArraySize
-  , BasicType(..)
   , TypeBase(..)
   , Type
   , DeclType
@@ -33,11 +32,6 @@ module L0C.InternalRep.Syntax
   , FunDec
   , Prog(..)
 
-  -- * Special identifiers
-  , defaultEntryPoint
-  , isBuiltInFun
-  , builtInFuns
-
   -- * Miscellaneous
   , Names
   )
@@ -48,7 +42,6 @@ import Data.Hashable
 import Data.Loc
 import qualified Data.HashSet as HS
 
-import Language.L0.Misc
 import Language.L0.Core
 
 -- | Don't use this for anything.
@@ -58,33 +51,24 @@ type DimSize = Exp
 -- 'Nothing', that dimension is of a (statically) unknown size.
 type ArraySize = [Maybe DimSize]
 
--- | Types that can be elements of arrays.  TODO: please add float,
--- double, long int, etc.
-data BasicType = Int
-               | Bool
-               | Char
-               | Real
-               | Cert
-                 deriving (Eq, Ord, Show)
-
 -- | An L0 type is either an array or an element type.  When comparing
 -- types for equality with '==', aliases are ignored, as are
 -- dimension sizes (but not the number of dimensions themselves).
-data TypeBase as = Elem BasicType
+data TypeBase as = Basic BasicType
                  | Array BasicType ArraySize Uniqueness as
                     -- ^ 1st arg: array's element type, 2nd arg:
                     -- lengths of dimensions, 3rd arg: uniqueness
                     -- attribute, 4th arg: aliasing information.
-                    deriving (Show)
+                   deriving (Show)
 
 instance Eq (TypeBase as) where
-  Elem et1 == Elem et2 = et1 == et2
+  Basic et1 == Basic et2 = et1 == et2
   Array et1 dims1 u1 _ == Array et2 dims2 u2 _ =
     et1 == et2 && u1 == u2 && length dims1 == length dims2
   _ == _ = False
 
 instance Ord (TypeBase as) where
-  Elem et1 <= Elem et2 =
+  Basic et1 <= Basic et2 =
     et1 <= et2
   Array et1 dims1 u1 _ <= Array et2 dims2 u2 _
     | et1 < et2     = True
@@ -94,8 +78,8 @@ instance Ord (TypeBase as) where
     | u1 < u2       = True
     | u1 > u2       = False
     | otherwise     = True
-  Elem {} <= Array {} = True
-  Array {} <= Elem {} = False
+  Basic {} <= Array {} = True
+  Array {} <= Basic {} = False
 
 -- | A type with aliasing information, used for describing the type of
 -- a computation.
@@ -113,17 +97,9 @@ data Diet = Consume -- ^ Consumes this value.
                     -- not consume.
             deriving (Eq, Ord, Show)
 
--- | Non-array values.
-data BasicValue = IntVal !Int
-                | RealVal !Double
-                | LogVal !Bool
-                | CharVal !Char
-                | Checked -- ^ The only value of type @cert@.
-                  deriving (Eq, Ord, Show)
-
 -- | Every possible value in L0.  Values are fully evaluated and their
 -- type is always unambiguous.
-data Value = BasicValue BasicValue
+data Value = BasicVal BasicValue
            | ArrayVal !(Array Int Value) DeclType
              -- ^ It is assumed that the array is 0-indexed.  The type
              -- is the row type.
@@ -322,15 +298,3 @@ newtype Prog = Prog { progFunctions :: [FunDec] }
 
 -- | A set of names.
 type Names = HS.HashSet VName
-
--- | The name of the default program entry point (main).
-defaultEntryPoint :: Name
-defaultEntryPoint = nameFromString "main"
-
--- | @isBuiltInFun k@ is 'True' if @k@ is an element of 'builtInFuns'.
-isBuiltInFun :: Name -> Bool
-isBuiltInFun fnm = fnm `elem` builtInFuns
-
--- | A list of names of all built-in functions.
-builtInFuns :: [Name]
-builtInFuns = map nameFromString ["toReal", "trunc", "sqrt", "log", "exp", "trace"]

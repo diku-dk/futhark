@@ -32,11 +32,6 @@ module Language.L0.Syntax
   , FunDecBase
   , ProgBase(..)
 
-  -- * Special identifiers
-  , defaultEntryPoint
-  , isBuiltInFun
-  , builtInFuns
-
   -- * Miscellaneous
   , NoInfo(..)
   , Names
@@ -49,7 +44,6 @@ import Data.Loc
 import Data.Monoid
 import qualified Data.HashSet as HS
 
-import Language.L0.Misc
 import Language.L0.Core
 
 -- | No information.  Usually used for placeholder type- or aliasing
@@ -68,13 +62,8 @@ type DimSize vn = ExpBase (TypeBase Names) vn
 -- 'Nothing', that dimension is of a (statically) unknown size.
 type ArraySize vn = [Maybe (DimSize vn)]
 
--- | Types that can be elements of arrays.  TODO: please add float,
--- double, long int, etc.
-data ElemTypeBase as vn = Int
-                        | Bool
-                        | Char
-                        | Real
-                        | Cert
+-- | Types that can be elements of arrays.
+data ElemTypeBase as vn = Basic BasicType
                         | Tuple [TypeBase as vn]
                 deriving (Eq, Ord, Show)
 
@@ -127,11 +116,7 @@ data Diet = TupleDiet [Diet] -- ^ Consumes these parts of the tuple.
 
 -- | Every possible value in L0.  Values are fully evaluated and their
 -- type is always unambiguous.
-data Value = IntVal !Int
-           | RealVal !Double
-           | LogVal !Bool
-           | CharVal !Char
-           | Checked -- ^ The only value of type cert.
+data Value = BasicVal !BasicValue
            | TupVal ![Value]
            | ArrayVal !(Array Int Value) (DeclTypeBase ())
              -- ^ It is assumed that the array is 0-indexed.  The type
@@ -396,15 +381,3 @@ newtype ProgBase ty vn = Prog { progFunctions :: [FunDecBase ty vn] }
 
 -- | A set of names.
 type Names = HS.HashSet
-
--- | The name of the default program entry point (main).
-defaultEntryPoint :: Name
-defaultEntryPoint = nameFromString "main"
-
--- | @isBuiltInFun k@ is 'True' if @k@ is an element of 'builtInFuns'.
-isBuiltInFun :: Name -> Bool
-isBuiltInFun fnm = fnm `elem` builtInFuns
-
--- | A list of names of all built-in functions.
-builtInFuns :: [Name]
-builtInFuns = map nameFromString ["toReal", "trunc", "sqrt", "log", "exp", "trace"]

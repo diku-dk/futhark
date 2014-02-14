@@ -19,9 +19,7 @@ import Data.Array
 import qualified Data.HashSet as HS
 
 import Text.PrettyPrint.Mainland
-import Text.Printf
 
-import Language.L0.Misc
 import L0C.InternalRep.Syntax
 import L0C.InternalRep.Attributes
 
@@ -46,30 +44,16 @@ aliasComment pat d = case concatMap aliasComment' pat of
           where clean = filter (/= identName ident)
                 oneline s = text $ displayS (renderCompact s) ""
 
-instance Pretty BasicValue where
-  ppr (IntVal x) = text $ show x
-  ppr (CharVal c) = text $ show c
-  ppr (LogVal b) = text $ show b
-  ppr (RealVal x) = text $ printf "%f" x
-  ppr Checked = text "Checked"
-
 instance Pretty Value where
-  ppr (BasicValue bv) = ppr bv
+  ppr (BasicVal bv) = ppr bv
   ppr v@(ArrayVal a t)
     | Just s <- arrayString v = text $ show s
     | [] <- elems a = text "empty" <> parens (ppr t)
     | Array {} <- t = brackets $ commastack $ map ppr $ elems a
     | otherwise     = brackets $ commasep $ map ppr $ elems a
 
-instance Pretty BasicType where
-  ppr Int = text "int"
-  ppr Char = text "char"
-  ppr Bool = text "bool"
-  ppr Real = text "real"
-  ppr Cert = text "cert"
-
 instance Pretty (TypeBase als) where
-  ppr (Elem et) = ppr et
+  ppr (Basic et) = ppr et
   ppr (Array et ds u _) = u' <> foldl f (ppr et) ds
     where f s Nothing = brackets s
           f s (Just e) = brackets $ s <> comma <> ppr e

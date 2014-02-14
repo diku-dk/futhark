@@ -93,7 +93,6 @@ import Data.Loc
 import Data.Maybe
 import qualified Data.HashSet as HS
 
-import Language.L0.Misc
 import L0C.InternalRep.Syntax
 import L0C.InternalRep.Traversals
 
@@ -125,13 +124,13 @@ subuniqueOf _ _ = True
 subtypeOf :: TypeBase as1 -> TypeBase as2 -> Bool
 subtypeOf (Array t1 dims1 u1 _) (Array t2 dims2 u2 _) =
   u1 `subuniqueOf` u2
-       && Elem t1 `subtypeOf` Elem t2
+       && Basic t1 `subtypeOf` Basic t2
        && length dims1 == length dims2
-subtypeOf (Elem Int) (Elem Int) = True
-subtypeOf (Elem Char) (Elem Char) = True
-subtypeOf (Elem Real) (Elem Real) = True
-subtypeOf (Elem Bool) (Elem Bool) = True
-subtypeOf (Elem Cert) (Elem Cert) = True
+subtypeOf (Basic Int) (Basic Int) = True
+subtypeOf (Basic Char) (Basic Char) = True
+subtypeOf (Basic Real) (Basic Real) = True
+subtypeOf (Basic Bool) (Basic Bool) = True
+subtypeOf (Basic Cert) (Basic Cert) = True
 subtypeOf _ _ = False
 
 -- | @xs \`subtypesOf\` ys@ is true if @xs@ is the same size as @ys@,
@@ -159,12 +158,12 @@ unique = (==Unique) . uniqueness
 -- type.
 aliases :: Monoid as => TypeBase as -> as
 aliases (Array _ _ _ als) = als
-aliases (Elem _)          = mempty
+aliases (Basic _)          = mempty
 
 -- | @diet t@ returns a description of how a function parameter of
 -- type @t@ might consume its argument.
 diet :: TypeBase as -> Diet
-diet (Elem _) = Observe
+diet (Basic _) = Observe
 diet (Array _ _ Unique _) = Consume
 diet (Array _ _ Nonunique _) = Observe
 
@@ -186,19 +185,19 @@ maskAliases t Observe = t
 -- | Remove aliasing information from a type.
 toDecl :: TypeBase as -> DeclType
 toDecl (Array et sz u _) = Array et sz u ()
-toDecl (Elem et) = Elem et
+toDecl (Basic et) = Basic et
 
 -- | Replace no aliasing with an empty alias set.
 fromDecl :: DeclType -> Type
 fromDecl (Array et sz u _) = Array et sz u HS.empty
-fromDecl (Elem et) = Elem et
+fromDecl (Basic et) = Basic et
 
 -- | @peelArray n t@ returns the type resulting from peeling the first
 -- @n@ array dimensions from @t@.  Returns @Nothing@ if @t@ has less
 -- than @n@ dimensions.
 peelArray :: Int -> TypeBase as -> Maybe (TypeBase as)
 peelArray 0 t = Just t
-peelArray 1 (Array et [_] _ als) = Just $ Elem et `setAliases` als
+peelArray 1 (Array et [_] _ als) = Just $ Basic et `setAliases` als
 peelArray n (Array et (_:ds) u als) =
   peelArray (n-1) $ Array et ds u als
 peelArray _ _ = Nothing
@@ -207,7 +206,7 @@ peelArray _ _ = Nothing
 -- would be @int@.  If the given type is not an array, it is returned.
 elemType :: TypeBase as -> BasicType
 elemType (Array t _ _ _) = t
-elemType (Elem t)        = t
+elemType (Basic t)        = t
 
 -- | Return the immediate row-type of an array.  For @[[int]]@, this
 -- would be @[int]@.
@@ -235,7 +234,7 @@ arrayOf :: Monoid as =>
            TypeBase as -> ArraySize -> Uniqueness -> TypeBase as
 arrayOf (Array et size1 _ als) size2 u =
   Array et (size2 ++ size1) u als
-arrayOf (Elem et) size u =
+arrayOf (Basic et) size u =
   Array et size u mempty
 
 -- | @array n t@ is the type of @n@-dimensional arrays having @t@ as
@@ -255,7 +254,7 @@ arrayType n t u = arrayOf t ds u
 stripArray :: Int -> TypeBase as -> TypeBase as
 stripArray n (Array et ds u als)
   | n < length ds = Array et (drop n ds) u als
-  | otherwise     = Elem et `setAliases` als
+  | otherwise     = Basic et `setAliases` als
 stripArray _ t = t
 
 -- | Set the uniqueness attribute of a type.  If the type is a tuple,
@@ -273,7 +272,7 @@ setAliases t = changeAliases t . const
 -- aliasing replaced by @f@ applied to that aliasing.
 changeAliases :: TypeBase asf -> (asf -> ast) -> TypeBase ast
 changeAliases (Array et dims u als) f = Array et dims u $ f als
-changeAliases (Elem et) _ = Elem et
+changeAliases (Basic et) _ = Basic et
 
 -- | Unify the uniqueness attributes and aliasing information of two
 -- types.  The two types must otherwise be identical.  The resulting
@@ -289,28 +288,20 @@ unifyUniqueness t1 _ = t1
 -- close to it.  Don't depend on this value, but use it for creating
 -- arrays to be populated by do-loops.
 blankValue :: TypeBase as -> Value
-blankValue (Elem Int) = BasicValue $ IntVal 0
-blankValue (Elem Real) = BasicValue $ RealVal 0.0
-blankValue (Elem Bool) = BasicValue $ LogVal False
-blankValue (Elem Char) = BasicValue $ CharVal '\0'
-blankValue (Elem Cert) = BasicValue Checked
-blankValue (Array et [_] _ _) = arrayVal [] $ Elem et
+blankValue (Basic Int) = BasicVal $ IntVal 0
+blankValue (Basic Real) = BasicVal $ RealVal 0.0
+blankValue (Basic Bool) = BasicVal $ LogVal False
+blankValue (Basic Char) = BasicVal $ CharVal '\0'
+blankValue (Basic Cert) = BasicVal Checked
+blankValue (Array et [_] _ _) = arrayVal [] $ Basic et
 blankValue (Array et (_:ds) u as) = arrayVal [] rt
   where rt = Array et ds u as
-blankValue (Array et _ _ _) = arrayVal [] $ Elem et
-
--- | The type of an L0 value.
-basicValueType :: BasicValue -> BasicType
-basicValueType (IntVal _)  = Int
-basicValueType (RealVal _) = Real
-basicValueType (LogVal _)  = Bool
-basicValueType (CharVal _) = Char
-basicValueType Checked     = Cert
+blankValue (Array et _ _ _) = arrayVal [] $ Basic et
 
 valueType :: Value -> DeclType
-valueType (BasicValue v) =
-  Elem $ basicValueType v
-valueType (ArrayVal _ (Elem et)) =
+valueType (BasicVal v) =
+  Basic $ basicValueType v
+valueType (ArrayVal _ (Basic et)) =
   Array et [Nothing] Nonunique ()
 valueType (ArrayVal _ (Array et ds _ _)) =
   Array et (Nothing:replicate (length ds) Nothing) Nonunique ()
@@ -347,7 +338,7 @@ emptyArray = arrayVal []
 arrayString :: Value -> Maybe String
 arrayString (ArrayVal arr _)
   | c:cs <- elems arr = mapM asChar $ c:cs
-  where asChar (BasicValue (CharVal c)) = Just c
+  where asChar (BasicVal (CharVal c)) = Just c
         asChar _                        = Nothing
 arrayString _ = Nothing
 
@@ -442,7 +433,7 @@ typeOf (TupLit vs _) = map subExpType vs
 typeOf (ArrayLit es t _) =
   [arrayType 1 t $ mconcat $ map (uniqueness . subExpType) es]
 typeOf (BinOp _ _ _ t _) = [t]
-typeOf (Not _ _) = [Elem Bool]
+typeOf (Not _ _) = [Basic Bool]
 typeOf (Negate e _) = [subExpType e]
 typeOf (If _ _ _ t _) = t
 typeOf (Apply _ _ t _) = t
@@ -451,13 +442,13 @@ typeOf (LetWith _ _ _ _ _ _ body _) = typeOf body
 typeOf (Index _ ident _ idx _) =
   [stripArray (length idx) (varType ident)
    `changeAliases` HS.insert (identName ident)]
-typeOf (Iota _ _) = [arrayType 1 (Elem Int) Unique]
-typeOf (Size {}) = [Elem Int]
+typeOf (Iota _ _) = [arrayType 1 (Basic Int) Unique]
+typeOf (Size {}) = [Basic Int]
 typeOf (Replicate _ e _) = [arrayType 1 (subExpType e) u]
   where u | uniqueOrBasic (subExpType e) = Unique
           | otherwise = Nonunique
 typeOf (Reshape _ [] e _) =
-  [Elem $ elemType $ subExpType e]
+  [Basic $ elemType $ subExpType e]
 typeOf (Reshape _ shape e _) =
   [replicate (length shape) Nothing `setArrayDims` subExpType e]
 typeOf (Transpose _ k n e _)
@@ -471,8 +462,8 @@ typeOf (Concat _ x y _) =
   [subExpType x `setUniqueness` u]
   where u = uniqueness (subExpType x) <> uniqueness (subExpType y)
 typeOf (Copy e _) = [subExpType e `setUniqueness` Unique `setAliases` HS.empty]
-typeOf (Assert _ _) = [Elem Cert]
-typeOf (Conjoin _ _) = [Elem Cert]
+typeOf (Assert _ _) = [Basic Cert]
+typeOf (Conjoin _ _) = [Basic Cert]
 typeOf (DoLoop _ _ _ _ body _) = typeOf body
 typeOf (Map _ f arrs _) =
   map (\x -> arrayType 1 x (uniqueProp x)) $
@@ -510,8 +501,8 @@ returnType rts ds args = map returnType' rts
           where als = mconcat $ map aliases $ zipWith maskAliases args ds
         returnType' (Array et sz Unique ()) =
           Array et sz Unique mempty
-        returnType' (Elem t) =
-          Elem t `setAliases` HS.empty
+        returnType' (Basic t) =
+          Basic t `setAliases` HS.empty
 
 -- | Find the function of the given name in the L0 program.
 funDecByName :: Name -> Prog -> Maybe FunDec
@@ -646,11 +637,11 @@ safeExp (LetWith {}) = False
 safeExp (ArrayLit {}) = False
 safeExp (Concat {}) = False
 safeExp (Apply {}) = False
-safeExp (BinOp Divide _ (Constant (BasicValue (IntVal k))  _) _ _) = k /= 0
-safeExp (BinOp Divide _ (Constant (BasicValue (RealVal k)) _) _ _) = k /= 0
+safeExp (BinOp Divide _ (Constant (BasicVal (IntVal k))  _) _ _) = k /= 0
+safeExp (BinOp Divide _ (Constant (BasicVal (RealVal k)) _) _ _) = k /= 0
 safeExp (BinOp Divide _ _ _ _) = False
-safeExp (BinOp Mod _ (Constant (BasicValue (IntVal k))  _) _ _) = k /= 0
-safeExp (BinOp Mod _ (Constant (BasicValue (RealVal k)) _) _ _) = k /= 0
+safeExp (BinOp Mod _ (Constant (BasicVal (IntVal k))  _) _ _) = k /= 0
+safeExp (BinOp Mod _ (Constant (BasicVal (RealVal k)) _) _ _) = k /= 0
 safeExp (BinOp Mod _ _ _ _) = False
 safeExp (BinOp Pow _ _ _ _) = False
 safeExp e = case walkExpM safe e of

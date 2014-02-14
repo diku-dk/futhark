@@ -20,8 +20,7 @@ import Control.Monad (foldM)
 import Data.Array
 import Data.Loc hiding (L, unLoc) -- Lexer has replacements.
 
-import Language.L0.Misc (nameFromString)
-import Language.L0.Syntax
+import Language.L0.Syntax hiding (ID)
 import Language.L0.Attributes
 import Language.L0.Parser.Lexer
 
@@ -195,11 +194,11 @@ InnerType : ElemType { ([], $1) }
 --          | '[' InnerType ',' Exp ']' { let (ds, et) = $2
 --                                        in (Just $4:ds, et) }
 
-ElemType : int           { Int }
-         | real          { Real }
-         | bool          { Bool }
-         | cert          { Cert }
-         | char          { Char }
+ElemType : int           { Basic Int }
+         | real          { Basic Real }
+         | bool          { Basic Bool }
+         | cert          { Basic Cert }
+         | char          { Basic Char }
          | TupleType     { Tuple $1 }
 
 TupleType : '{' Types '}' { $2 }
@@ -215,14 +214,14 @@ TypeIds : Type id ',' TypeIds
 ;
 
 Exp  :: { UncheckedExp }
-     : intlit         { let L pos (INTLIT num) = $1 in Literal (IntVal num) pos }
-     | reallit        { let L pos (REALLIT num) = $1 in Literal (RealVal num) pos }
-     | charlit        { let L pos (CHARLIT char) = $1 in Literal (CharVal char) pos }
+     : intlit         { let L pos (INTLIT num) = $1 in Literal (BasicVal $ IntVal num) pos }
+     | reallit        { let L pos (REALLIT num) = $1 in Literal (BasicVal $ RealVal num) pos }
+     | charlit        { let L pos (CHARLIT char) = $1 in Literal (BasicVal $ CharVal char) pos }
      | stringlit      { let L pos (STRINGLIT s) = $1
-                        in Literal (ArrayVal (arrayFromList $ map CharVal s) $ Elem Char) pos }
-     | true           { Literal (LogVal True) $1 }
-     | false          { Literal (LogVal False) $1 }
-     | checked        { Literal Checked $1 }
+                        in Literal (ArrayVal (arrayFromList $ map (BasicVal . CharVal) s) $ Elem $ Basic Char) pos }
+     | true           { Literal (BasicVal $ LogVal True) $1 }
+     | false          { Literal (BasicVal $ LogVal False) $1 }
+     | checked        { Literal (BasicVal Checked) $1 }
      | Id             { Var $1 }
      | empty '(' Type ')' { Literal (emptyArray $3) $1 }
      | '[' Exps ']'   { ArrayLit $2 NoInfo $1 }
@@ -452,13 +451,13 @@ SignedInt :     intlit { let L _ (INTLIT num) = $1 in num  }
 
 NaturalInt :     intlit { let L _ (INTLIT num) = $1 in num  }
 
-IntValue : intlit        { let L pos (INTLIT num) = $1 in IntVal num }
-RealValue : reallit      { let L pos (REALLIT num) = $1 in RealVal num }
-CharValue : charlit      { let L pos (CHARLIT char) = $1 in CharVal char }
-StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in ArrayVal (arrayFromList $ map CharVal s) $ Elem Char }
-LogValue : true          { LogVal True }
-        | false          { LogVal False }
-CertValue : checked      { Checked }
+IntValue : intlit        { let L pos (INTLIT num) = $1 in BasicVal $ IntVal num }
+RealValue : reallit      { let L pos (REALLIT num) = $1 in BasicVal $ RealVal num }
+CharValue : charlit      { let L pos (CHARLIT char) = $1 in BasicVal $ CharVal char }
+StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in ArrayVal (arrayFromList $ map (BasicVal . CharVal) s) $ Elem $ Basic Char }
+LogValue : true          { BasicVal $ LogVal True }
+        | false          { BasicVal $ LogVal False }
+CertValue : checked      { BasicVal Checked }
 ArrayValue :  '[' Values ']'
              { case combArrayTypes $ map (toDecl . valueType) $2 of
                  Nothing -> error "Invalid array value"

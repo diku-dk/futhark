@@ -15,7 +15,6 @@ module L0C.InternalRep.MonadFreshNames
 
 import Data.Loc
 
-import Language.L0.Misc
 import L0C.InternalRep
 import L0C.MonadFreshNames
 import L0C.FreshNames hiding (newName, newID, newVName)

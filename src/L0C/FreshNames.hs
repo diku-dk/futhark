@@ -18,8 +18,7 @@ module L0C.FreshNames
   ) where
 
 import qualified Data.HashSet as HS
-
-import Language.L0.Misc
+import Language.L0.Core
 
 -- | A name source is conceptually an infinite sequence of names with
 -- no repeating entries.  In practice, when asked for a name, the name

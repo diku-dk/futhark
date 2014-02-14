@@ -19,9 +19,7 @@ import Data.Hashable
 import qualified Data.HashSet as HS
 
 import Text.PrettyPrint.Mainland
-import Text.Printf
 
-import Language.L0.Misc
 import Language.L0.Syntax
 import Language.L0.Attributes
 
@@ -50,11 +48,7 @@ aliasComment pat d = case aliasComment' pat of
                 oneline s = text $ displayS (renderCompact s) ""
 
 instance Pretty Value where
-  ppr (IntVal x) = text $ show x
-  ppr (CharVal c) = text $ show c
-  ppr (LogVal b) = text $ show b
-  ppr (RealVal x) = text $ printf "%f" x
-  ppr Checked = text "Checked"
+  ppr (BasicVal bv) = ppr bv
   ppr (TupVal vs)
     | any (not . basicType . valueType) vs =
       braces $ commastack $ map ppr vs
@@ -67,11 +61,11 @@ instance Pretty Value where
     | otherwise     = brackets $ commasep $ map ppr $ elems a
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ElemTypeBase as vn) where
-  ppr Int = text "int"
-  ppr Char = text "char"
-  ppr Bool = text "bool"
-  ppr Real = text "real"
-  ppr Cert = text "cert"
+  ppr (Basic Int) = text "int"
+  ppr (Basic Char) = text "char"
+  ppr (Basic Bool) = text "bool"
+  ppr (Basic Real) = text "real"
+  ppr (Basic Cert) = text "cert"
   ppr (Tuple ets) = braces $ commasep $ map ppr ets
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase as vn) where

@@ -9,8 +9,7 @@ import Data.Loc
 import Data.List
 
 import Text.PrettyPrint.Mainland
-
-import Language.L0.Misc
+import Language.L0.Core
 
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.

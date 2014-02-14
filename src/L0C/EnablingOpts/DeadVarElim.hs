@@ -11,11 +11,9 @@ import Control.Monad.Writer
 
 import qualified Data.Set as S
 
-import L0C.L0
+import L0C.InternalRep
 
---import L0.EnablingOpts.InliningDeadFun
 import L0C.EnablingOpts.EnablingOptErrors
-
 
 -----------------------------------------------------------------
 -----------------------------------------------------------------
@@ -106,28 +104,20 @@ deadCodeElimFun (fname, rettype, args, body, pos) = do
 --------------------------------------------------------------------
 --------------------------------------------------------------------
 
+deadCodeElimSubExp :: SubExp -> DCElimM SubExp
+deadCodeElimSubExp (Var ident)      = Var <$> deadCodeElimIdent ident
+deadCodeElimSubExp (Constant v loc) = return $ Constant v loc
+
 deadCodeElimExp :: Exp -> DCElimM Exp
 
------------------------------------------------------------------------------
--- 'trace' exhibits side effects and should not be removed!
-deadCodeElimExp (LetPat pat (Apply fname args tp p) body pos)
-  | "trace" <- nameToString fname = do
-    let ids = getBnds pat
-    args' <- mapM (deadCodeElimExp . fst) args
-    body' <- binding ids $ deadCodeElimExp body
-    return $ LetPat pat (Apply fname (zip args' $ map snd args) tp p) body' pos
------------------------------------------------------------------------------
- 
 deadCodeElimExp (LetPat pat e body pos) = do
-    let ids = getBnds pat
-    (body', noref) <- collectRes ids $ binding ids $ deadCodeElimExp body
+  let idds = map identName pat
+  (body', noref) <- collectRes idds $ binding idds $ deadCodeElimExp body
 
-    if noref 
-    then changed $ return body'
-    else do
-            e' <- deadCodeElimExp e
-            return $ LetPat pat e' body' pos
-
+  if noref
+  then changed $ return body'
+  else do e' <- deadCodeElimExp e
+          return $ LetPat pat e' body' pos
 
 deadCodeElimExp (LetWith cs nm src idxcs idxs el body pos) = do
     cs' <- mapM deadCodeElimIdent cs
@@ -135,36 +125,35 @@ deadCodeElimExp (LetWith cs nm src idxcs idxs el body pos) = do
     idxcs' <- case idxcs of
                 Nothing     -> return Nothing
                 Just idxcs' -> Just <$> mapM deadCodeElimIdent idxcs'
-    if noref 
+    if noref
     then changed $ return body'
     else do
             let srcnm = identName src
             in_vtab <- asks $ S.member srcnm . envVtable
             if not in_vtab
             then badDCElimM $ VarNotInFtab pos srcnm
-            else do
-                    _ <- tell $ DCElimRes False (S.insert srcnm S.empty)
-                    idxs' <- mapM deadCodeElimExp idxs
-                    el'   <- deadCodeElimExp el
+            else do _ <- tell $ DCElimRes False (S.insert srcnm S.empty)
+                    idxs' <- mapM deadCodeElimSubExp idxs
+                    el'   <- deadCodeElimSubExp el
                     return $ LetWith cs' nm src idxcs' idxs' el' body' pos
 
-deadCodeElimExp (DoLoop mergepat mergeexp idd n loopbdy letbdy pos) = do
-    let idnms = getBnds mergepat
-    (letbdy',noref) <- collectRes idnms $ binding idnms $ deadCodeElimExp letbdy
-    if noref 
-    then changed $ return letbdy'
-    else do mergeexp'   <- deadCodeElimExp mergeexp
-            n'      <- deadCodeElimExp n
-            loopbdy'<- binding ( identName idd : idnms) $ deadCodeElimExp loopbdy
-            return $ DoLoop mergepat mergeexp' idd n' loopbdy' letbdy' pos
-
-
+deadCodeElimExp (DoLoop merge idd n loopbdy letbdy pos) = do
+  let (mergepat, mergeexp) = unzip merge
+      idds = map identName mergepat
+  (letbdy',noref) <- collectRes idds $ binding idds $ deadCodeElimExp letbdy
+  if noref
+  then changed $ return letbdy'
+  else do
+    mergeexp' <- mapM deadCodeElimSubExp mergeexp
+    n'        <- deadCodeElimSubExp n
+    loopbdy'  <- binding ( identName idd : idds) $ deadCodeElimExp loopbdy
+    return $ DoLoop (zip mergepat mergeexp') idd n' loopbdy' letbdy' pos
 
 deadCodeElimExp e = mapExpM mapper e
   where mapper = identityMapper {
                    mapOnExp = deadCodeElimExp
+                 , mapOnSubExp = deadCodeElimSubExp
                  , mapOnLambda = deadCodeElimLambda
-                 , mapOnTupleLambda = deadCodeElimTupleLambda
                  , mapOnIdent = deadCodeElimIdent
                  , mapOnCertificates = mapM deadCodeElimIdent
                  }
@@ -178,26 +167,7 @@ deadCodeElimIdent ident@(Ident vnm _ pos) = do
           return ident
 
 deadCodeElimLambda :: Lambda -> DCElimM Lambda
-deadCodeElimLambda (AnonymFun params body ret pos) = do
-    let ids  = map identName params
-    body' <- binding ids $ deadCodeElimExp body
-    return $ AnonymFun params body' ret pos
-
-deadCodeElimLambda (CurryFun fname curryargexps rettype pos) = do
-    curryargexps' <- mapM deadCodeElimExp curryargexps
-    return (CurryFun fname curryargexps' rettype pos)
-
-deadCodeElimTupleLambda :: TupleLambda -> DCElimM TupleLambda
-deadCodeElimTupleLambda (TupleLambda params body ret pos) = do
+deadCodeElimLambda (Lambda params body ret pos) = do
   let ids  = map identName params
   body' <- binding ids $ deadCodeElimExp body
-  return $ TupleLambda params body' ret pos
-
---deadCodeElimExp e = do
---    return e
-
-
-getBnds :: TupIdent -> [VName]
-getBnds ( Id (Ident var _ _) ) = [var]
-getBnds ( TupId ids _ ) = concatMap getBnds ids
-getBnds ( Wildcard _ _ ) = []
+  return $ Lambda params body' ret pos

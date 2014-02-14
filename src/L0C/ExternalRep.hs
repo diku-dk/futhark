@@ -3,8 +3,7 @@
 -- definitions in "Language.L0".
 module L0C.ExternalRep
   (
-    module Language.L0.Misc
-  , module Language.L0.Syntax
+    module Language.L0.Syntax
   , module Language.L0.Attributes
   , module Language.L0.Pretty
   , module Language.L0.Traversals
@@ -34,7 +33,6 @@ module L0C.ExternalRep
   )
 where
 
-import Language.L0.Misc
 import Language.L0.Syntax
 import Language.L0.Attributes
 import Language.L0.Pretty

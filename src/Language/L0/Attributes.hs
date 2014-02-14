@@ -20,7 +20,6 @@ module Language.L0.Attributes
   , freeInExp
   , freeNamesInExp
   , consumedInExp
-  , safeExp
 
   -- * Queries on patterns
   , patNames
@@ -97,11 +96,6 @@ module Language.L0.Attributes
   , transposeInverse
   , transposeDimension
 
-  -- * Reshaping
-  , partialReshape
-  , reshapeOuter
-  , reshapeInner
-
   -- * Type aliases
 
   -- | Values of these types are produces by the parser.  They use
@@ -126,11 +120,9 @@ import Control.Monad.Writer
 import Data.Array
 import Data.Hashable
 import Data.List
-import Data.Loc
 import Data.Maybe
 import qualified Data.HashSet as HS
 
-import Language.L0.Misc
 import Language.L0.Syntax
 import Language.L0.Traversals
 
@@ -166,11 +158,7 @@ subtypeOf (Array t1 dims1 u1 _) (Array t2 dims2 u2 _) =
        && length dims1 == length dims2
 subtypeOf (Elem (Tuple ts1)) (Elem (Tuple ts2)) =
   length ts1 == length ts2 && and (zipWith subtypeOf ts1 ts2)
-subtypeOf (Elem Int) (Elem Int) = True
-subtypeOf (Elem Char) (Elem Char) = True
-subtypeOf (Elem Real) (Elem Real) = True
-subtypeOf (Elem Bool) (Elem Bool) = True
-subtypeOf (Elem Cert) (Elem Cert) = True
+subtypeOf (Elem (Basic bt1)) (Elem (Basic bt2)) = bt1 == bt2
 subtypeOf _ _ = False
 
 -- | @x \`similarTo\` y@ is true if @x@ and @y@ are the same type,
@@ -323,11 +311,7 @@ removeNames (Elem et) = Elem $ removeElemNames et
 -- | Remove names from an element type, as in 'removeNames'.
 removeElemNames :: ElemTypeBase as vn -> ElemTypeBase NoInfo ()
 removeElemNames (Tuple ets) = Tuple $ map removeNames ets
-removeElemNames Int  = Int
-removeElemNames Bool = Bool
-removeElemNames Char = Char
-removeElemNames Real = Real
-removeElemNames Cert = Cert
+removeElemNames (Basic bt) = Basic bt
 
 -- | Add names to a type - this replaces array sizes with 'Nothing',
 -- although they probably are already, if you're using this.
@@ -341,11 +325,7 @@ addNames (Elem et) = Elem $ addElemNames et
 -- this.
 addElemNames :: ElemTypeBase NoInfo () -> ElemTypeBase NoInfo vn
 addElemNames (Tuple ets) = Tuple $ map addNames ets
-addElemNames Int  = Int
-addElemNames Bool = Bool
-addElemNames Char = Char
-addElemNames Real = Real
-addElemNames Cert = Cert
+addElemNames (Basic bt)  = Basic bt
 
 -- | @arrayOf t s u@ constructs an array type.  The convenience
 -- compared to using the 'Array' constructor directly is that @t@ can
@@ -408,11 +388,7 @@ addAliases (Elem et) f = Elem $ et `addElemAliases` f
 -- aliasing replaced by @f@ applied to that aliasing.
 addElemAliases :: ElemTypeBase asf vn -> (asf vn -> ast vn) -> ElemTypeBase ast vn
 addElemAliases (Tuple ets) f = Tuple $ map (`addAliases` f) ets
-addElemAliases Int  _ = Int
-addElemAliases Real _ = Real
-addElemAliases Bool _ = Bool
-addElemAliases Char _ = Char
-addElemAliases Cert _ = Cert
+addElemAliases (Basic bt) _ = Basic bt
 
 -- | Unify the uniqueness attributes and aliasing information of two
 -- types.  The two types must otherwise be identical.  The resulting
@@ -431,11 +407,7 @@ unifyUniqueness t1 _ = t1
 -- close to it.  Don't depend on this value, but use it for creating
 -- arrays to be populated by do-loops.
 blankValue :: TypeBase as vn -> Value
-blankValue (Elem Int) = IntVal 0
-blankValue (Elem Real) = RealVal 0.0
-blankValue (Elem Bool) = LogVal False
-blankValue (Elem Char) = CharVal '\0'
-blankValue (Elem Cert) = Checked
+blankValue (Elem (Basic bt)) = BasicVal $ blankBasicValue bt
 blankValue (Elem (Tuple ts)) = TupVal (map blankValue ts)
 blankValue (Array et [_] _ _) = arrayVal [] $ Elem et
 blankValue (Array et (_:ds) u as) = arrayVal [] rt
@@ -444,11 +416,7 @@ blankValue (Array et _ _ _) = arrayVal [] $ Elem et
 
 -- | The type of an L0 value.
 valueType :: Value -> DeclTypeBase vn
-valueType (IntVal _) = Elem Int
-valueType (RealVal _) = Elem Real
-valueType (LogVal _) = Elem Bool
-valueType (CharVal _) = Elem Char
-valueType Checked = Elem Cert
+valueType (BasicVal bv) = Elem $ Basic $ basicValueType bv
 valueType (TupVal vs) = Elem $ Tuple (map valueType vs)
 valueType (ArrayVal _ (Elem et)) =
   Array (addElemNames et) [Nothing] Nonunique NoInfo
@@ -487,8 +455,8 @@ emptyArray = arrayVal []
 arrayString :: Value -> Maybe String
 arrayString (ArrayVal arr _)
   | c:cs <- elems arr = mapM asChar $ c:cs
-  where asChar (CharVal c) = Just c
-        asChar _ = Nothing
+  where asChar (BasicVal (CharVal c)) = Just c
+        asChar _                      = Nothing
 arrayString _ = Nothing
 
 -- | Given an N-dimensional array, return a one-dimensional array
@@ -552,40 +520,6 @@ transposeDimension :: Int -> Int -> Int -> Int -> Int
 transposeDimension k n dim numDims =
   transposeIndex k n [0..numDims-1] !! dim
 
--- | @partialReshape shape src@ returns an 'n+1'-dimensional shape for
--- @src@, where 'n' is the number of elements in 'shape', and where
--- the first @'length' shape@ dimensions are @shape@.
-partialReshape :: (Eq vn, Hashable vn) =>
-                  [ExpBase CompTypeBase vn] -> ExpBase CompTypeBase vn
-               -> [ExpBase CompTypeBase vn]
-partialReshape shape src = shape ++ [leftover]
-  where loc = srclocOf src
-        productExp []     = Literal (IntVal 0) loc -- Ought never to happen.
-        productExp (d:ds) = foldl (\x y -> BinOp Times x y (Elem Int) loc) d ds
-        srcsize = productExp [ Size [] i src loc | i <- [0..arrayRank (typeOf src) - 1]]
-        destelems = productExp shape
-        leftover = BinOp Divide srcsize destelems (Elem Int) loc
-
-shapeExps :: (Eq vn, Hashable vn) =>
-             ExpBase CompTypeBase vn -> [ExpBase CompTypeBase vn]
-shapeExps src = [Size [] i src loc | i <- [0..arrayRank (typeOf src) - 1] ]
-  where loc = srclocOf src
-
--- | @reshapeOuter shape n src@ returns a 'Reshape' expression that
--- replaces the outer @n@ dimensions of @src@ with @shape@.
-reshapeOuter :: (Eq vn, Hashable vn) =>
-                [ExpBase CompTypeBase vn] -> Int -> ExpBase CompTypeBase vn
-             -> [ExpBase CompTypeBase vn]
-reshapeOuter shape n src = shape ++ drop n (shapeExps src)
-
--- | @reshapeInner shape n src@ returns a 'Reshape' expression that
--- replaces the inner @m-n@ dimensions (where @m@ is the rank of
--- @src@) of @src@ with @shape@.
-reshapeInner :: (Eq vn, Hashable vn) =>
-                [ExpBase CompTypeBase vn] -> Int -> ExpBase CompTypeBase vn
-             -> [ExpBase CompTypeBase vn]
-reshapeInner shape n src = take n (shapeExps src) ++ shape
-
 -- | The type of an L0 term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
 typeOf :: (Eq vn, Hashable vn) => ExpBase CompTypeBase vn -> CompTypeBase vn
@@ -594,7 +528,7 @@ typeOf (TupLit es _) = Elem $ Tuple $ map typeOf es
 typeOf (ArrayLit es t _) =
   arrayType 1 t $ mconcat $ map (uniqueness . typeOf) es
 typeOf (BinOp _ _ _ t _) = t
-typeOf (Not _ _) = Elem Bool
+typeOf (Not _ _) = Elem $ Basic Bool
 typeOf (Negate e _) = typeOf e
 typeOf (If _ _ _ t _) = t
 typeOf (Var ident) =
@@ -607,8 +541,8 @@ typeOf (LetWith _ _ _ _ _ _ body _) = typeOf body
 typeOf (Index _ ident _ idx _) =
   stripArray (length idx) (identType ident)
   `addAliases` HS.insert (identName ident)
-typeOf (Iota _ _) = arrayType 1 (Elem Int) Unique
-typeOf (Size {}) = Elem Int
+typeOf (Iota _ _) = arrayType 1 (Elem $ Basic Int) Unique
+typeOf (Size {}) = Elem $ Basic Int
 typeOf (Replicate _ e _) = arrayType 1 (typeOf e) u
   where u | uniqueOrBasic (typeOf e) = Unique
           | otherwise = Nonunique
@@ -641,8 +575,8 @@ typeOf (Split _ _ e _) =
 typeOf (Concat _ x y _) = typeOf x `setUniqueness` u
   where u = uniqueness (typeOf x) <> uniqueness (typeOf y)
 typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` HS.empty
-typeOf (Assert _ _) = Elem Cert
-typeOf (Conjoin _ _) = Elem Cert
+typeOf (Assert _ _) = Elem $ Basic Cert
+typeOf (Conjoin _ _) = Elem $ Basic Cert
 typeOf (DoLoop _ _ _ _ _ body _) = typeOf body
 typeOf (MapT _ f arrs _) =
   Elem $ Tuple $ map (\x -> arrayType 1 x (uniqueProp x)) $
@@ -834,44 +768,6 @@ consumedInExp = execWriter . expConsumed
                   mapM_ consumeArg $ zip ets ds
                 consumeArg _ = return ()
         expConsumed e = walkExpM names e
-
--- | An expression is safe if it is always well-defined (assuming that
--- any required certificates have been checked) in any context.  For
--- example, array indexing is not safe, as the index may be out of
--- bounds.  On the other hand, adding two numbers cannot fail.
-safeExp :: ExpBase ty vn -> Bool
-safeExp (Index {}) = False
-safeExp (Split {}) = False
-safeExp (Assert {}) = False
-safeExp (Reshape {}) = False
-safeExp (LetWith {}) = False
-safeExp (Zip {}) = False
-safeExp (ArrayLit {}) = False
-safeExp (Concat {}) = False
-safeExp (Apply {}) = False
-safeExp (BinOp Divide _ (Literal (IntVal k)  _) _ _) = k /= 0
-safeExp (BinOp Divide _ (Literal (RealVal k) _) _ _) = k /= 0
-safeExp (BinOp Divide _ _ _ _) = False
-safeExp (BinOp Mod _ (Literal (IntVal k)  _) _ _) = k /= 0
-safeExp (BinOp Mod _ (Literal (RealVal k) _) _ _) = k /= 0
-safeExp (BinOp Mod _ _ _ _) = False
-safeExp (BinOp Pow _ _ _ _) = False
-safeExp e = case walkExpM safe e of
-              Just () -> True
-              Nothing -> False
-  -- The use of the Maybe monad is simply to short-circuit traversal.
-  where
-    boolToMaybe True  = Just ()
-    boolToMaybe False = Nothing
-
-    safe = identityWalker {
-             walkOnExp = boolToMaybe . safeExp
-           , walkOnLambda = boolToMaybe . safeLambda
-           , walkOnTupleLambda = boolToMaybe . safeLambda . tupleLambdaToLambda
-           }
-
-    safeLambda (AnonymFun _ body _ _) = safeExp body
-    safeLambda (CurryFun _ exps _ _)  = all safeExp exps
 
 -- | Return the set of identifiers that are free in the given lambda.
 freeInLambda :: (Eq vn, Hashable vn) => LambdaBase ty vn -> HS.HashSet (IdentBase ty vn)

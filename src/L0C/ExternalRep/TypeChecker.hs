@@ -57,8 +57,6 @@ type TaggedFunDec ty vn = FunDecBase ty (ID vn)
 
 type TaggedType vn = TypeBase Names (ID vn)
 
-type TaggedElemType vn = ElemTypeBase Names (ID vn)
-
 -- | A tuple of a return type and a list of argument types.
 type FunBinding vn = (DeclTypeBase (ID vn), [DeclTypeBase (ID vn)])
 
@@ -423,12 +421,12 @@ checkProg' checkoccurs prog = do
 
 builtInFunctions :: HM.HashMap Name (FunBinding vn)
 builtInFunctions = HM.fromList $ map namify
-                   [("toReal", (Elem Real, [Elem Int]))
-                   ,("trunc", (Elem Int, [Elem Real]))
-                   ,("sqrt", (Elem Real, [Elem Real]))
-                   ,("log", (Elem Real, [Elem Real]))
-                   ,("exp", (Elem Real, [Elem Real]))
-                   ,("op not", (Elem Bool, [Elem Bool]))]
+                   [("toReal", (Elem $ Basic Real, [Elem $ Basic Int]))
+                   ,("trunc", (Elem $ Basic Int, [Elem $ Basic Real]))
+                   ,("sqrt", (Elem $ Basic Real, [Elem $ Basic Real]))
+                   ,("log", (Elem $ Basic Real, [Elem $ Basic Real]))
+                   ,("exp", (Elem $ Basic Real, [Elem $ Basic Real]))
+                   ,("op not", (Elem $ Basic Bool, [Elem $ Basic Bool]))]
   where namify (k,v) = (nameFromString k, v)
 
 checkFun :: (TypeBox ty, VarName vn) =>
@@ -546,15 +544,15 @@ checkExp (ArrayLit es t loc) = do
 checkExp (BinOp op e1 e2 t pos) = checkBinOp op e1 e2 t pos
 
 checkExp (Not e pos) = do
-  e' <- require [Elem Bool] =<< checkExp e
+  e' <- require [Elem $ Basic Bool] =<< checkExp e
   return $ Not e' pos
 
 checkExp (Negate e loc) = do
-  e' <- require [Elem Int, Elem Real] =<< checkExp e
+  e' <- require [Elem $ Basic Int, Elem $ Basic Real] =<< checkExp e
   return $ Negate e' loc
 
 checkExp (If e1 e2 e3 t pos) = do
-  e1' <- require [Elem Bool] =<< checkExp e1
+  e1' <- require [Elem $ Basic Bool] =<< checkExp e1
   ((e2', e3'), dflow) <- collectDataflow $ checkExp e2 `alternative` checkExp e3
   tell dflow
   t' <- checkAnnotation pos "branch result" t $
@@ -598,13 +596,13 @@ checkExp (LetPat pat e body pos) = do
     return $ LetPat pat' e' body' pos
 
 checkExp (LetWith cs (Ident dest destt destpos) src idxcs idxes ve body pos) = do
-  cs' <- mapM (requireI [Elem Cert] <=< checkIdent) cs
+  cs' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) cs
   src' <- checkIdent src
   idxcs' <-
     case idxcs of
       Nothing       -> return Nothing
-      Just idxcs' -> Just <$> mapM (requireI [Elem Cert] <=< checkIdent) idxcs'
-  idxes' <- mapM (require [Elem Int] <=< checkExp) idxes
+      Just idxcs' -> Just <$> mapM (requireI [Elem $ Basic Cert] <=< checkIdent) idxcs'
+  idxes' <- mapM (require [Elem $ Basic Int] <=< checkExp) idxes
   destt' <- checkAnnotation pos "source" destt $ identType src' `setAliases` HS.empty
   let dest' = Ident dest destt' destpos
 
@@ -623,27 +621,28 @@ checkExp (LetWith cs (Ident dest destt destpos) src idxcs idxes ve body pos) = d
         return $ LetWith cs' dest' src' idxcs' idxes' ve' body' pos
 
 checkExp (Index cs ident csidxes idxes pos) = do
-  cs' <- mapM (requireI [Elem Cert] <=< checkIdent) cs
+  cs' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) cs
   csidxes' <-
     case csidxes of
       Nothing       -> return Nothing
-      Just csidxes' -> Just <$> mapM (requireI [Elem Cert] <=< checkIdent) csidxes'
+      Just csidxes' ->
+        Just <$> mapM (requireI [Elem $ Basic Cert] <=< checkIdent) csidxes'
   ident' <- checkIdent ident
   observe ident'
   vt <- lookupVar (identName ident') pos
   when (arrayRank vt < length idxes) $
     bad $ IndexingError (baseName $ identName ident)
           (arrayRank vt) (length idxes) pos
-  idxes' <- mapM (require [Elem Int] <=< checkExp) idxes
+  idxes' <- mapM (require [Elem $ Basic Int] <=< checkExp) idxes
   return $ Index cs' ident' csidxes' idxes' pos
 
 checkExp (Iota e pos) = do
-  e' <- require [Elem Int] =<< checkExp e
+  e' <- require [Elem $ Basic Int] =<< checkExp e
   return $ Iota e' pos
 
 checkExp (Size cs i e pos) = do
   e' <- checkExp e
-  cs' <- mapM (requireI [Elem Cert] <=< checkIdent) cs
+  cs' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) cs
   case typeOf e' of
     Array {}
       | i >= 0 && i < arrayRank (typeOf e') ->
@@ -653,18 +652,18 @@ checkExp (Size cs i e pos) = do
     _        -> bad $ TypeError pos "Argument to size must be array."
 
 checkExp (Replicate countexp valexp pos) = do
-  countexp' <- require [Elem Int] =<< checkExp countexp
+  countexp' <- require [Elem $ Basic Int] =<< checkExp countexp
   valexp' <- checkExp valexp
   return $ Replicate countexp' valexp' pos
 
 checkExp (Reshape cs shapeexps arrexp pos) = do
-  cs' <- mapM (requireI [Elem Cert] <=< checkIdent) cs
-  shapeexps' <- mapM (require [Elem Int] <=< checkExp) shapeexps
+  cs' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) cs
+  shapeexps' <- mapM (require [Elem $ Basic Int] <=< checkExp) shapeexps
   arrexp' <- checkExp arrexp
   return (Reshape cs' shapeexps' arrexp' pos)
 
 checkExp (Transpose cs k n arrexp pos) = do
-  cs' <- mapM (requireI [Elem Cert] <=< checkIdent) cs
+  cs' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) cs
   arrexp' <- checkExp arrexp
   when (arrayRank (typeOf arrexp') < reach + 1) $
     bad $ TypeError pos $ "Argument to transpose does not have " ++
@@ -718,7 +717,7 @@ checkExp (Filter fun arrexp rowtype pos) = do
   (arrexp', arrarg@(rowelemt, _, _)) <- checkSOACArrayArg arrexp
   rowtype' <- checkAnnotation pos "row" rowtype rowelemt
   fun' <- checkLambda fun [arrarg]
-  when (lambdaType fun' [rowtype'] /= Elem Bool) $
+  when (lambdaType fun' [rowtype'] /= Elem (Basic Bool)) $
     bad $ TypeError pos "Filter function does not return bool."
   return $ Filter fun' arrexp' rowtype' pos
 
@@ -733,14 +732,14 @@ checkExp (Redomap outerfun innerfun accexp arrexp intype pos) = do
   return $ Redomap outerfun' innerfun' accexp' arrexp' intype' pos
 
 checkExp (Split cs splitexp arrexp pos) = do
-  cs' <- mapM (requireI [Elem Cert] <=< checkIdent) cs
-  splitexp' <- require [Elem Int] =<< checkExp splitexp
+  cs' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) cs
+  splitexp' <- require [Elem $ Basic Int] =<< checkExp splitexp
   arrexp' <- checkExp arrexp
   _ <- rowTypeM arrexp' -- Just check that it's an array.
   return $ Split cs' splitexp' arrexp' pos
 
 checkExp (Concat cs arr1exp arr2exp pos) = do
-  cs' <- mapM (requireI [Elem Cert] <=< checkIdent) cs
+  cs' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) cs
   arr1exp' <- checkExp arr1exp
   arr2exp' <- require [typeOf arr1exp'] =<< checkExp arr2exp
   _ <- rowTypeM arr2exp' -- Just check that it's an array.
@@ -751,11 +750,11 @@ checkExp (Copy e pos) = do
   return $ Copy e' pos
 
 checkExp (Assert e pos) = do
-  e' <- require [Elem Bool] =<< checkExp e
+  e' <- require [Elem $ Basic Bool] =<< checkExp e
   return $ Assert e' pos
 
 checkExp (Conjoin es pos) = do
-  es' <- mapM (require [Elem Cert] <=< checkExp) es
+  es' <- mapM (require [Elem $ Basic Cert] <=< checkExp) es
   return $ Conjoin es' pos
 
 -- Checking of loops is done by synthesing the (almost) equivalent
@@ -771,10 +770,10 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
   -- away the dataflow.  The dataflow will be reconstructed later, but
   -- we need the result of this to synthesize the function.
   ((boundexp', mergeexp'), _) <-
-    collectDataflow $ do boundexp' <- require [Elem Int] =<< checkExp boundexp
+    collectDataflow $ do boundexp' <- require [Elem $ Basic Int] =<< checkExp boundexp
                          mergeexp' <- checkExp mergeexp
                          return (boundexp', mergeexp')
-  let iparam = Ident loopvar (Elem Int) loc
+  let iparam = Ident loopvar (Elem $ Basic Int) loc
 
   -- Check the loop body.  We tap the dataflow before leaving scope,
   -- so we'll be able to see occurences of variables bound by
@@ -785,7 +784,7 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
 
   -- We can use the name generator in a slightly hacky way to generate
   -- a unique Name for the function.
-  bound <- newIdent "loop_bound" (Elem Int) loc
+  bound <- newIdent "loop_bound" (Elem $ Basic Int) loc
   fname <- newFname "loop_fun"
 
   let -- | Change the uniqueness attribute of a type to reflect how it
@@ -845,7 +844,7 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
                 (LetPat (Id merge) mergeexp'
                  (Apply fname
                     ([(Var (fromParam k), diet (identType k)) | k <- free ] ++
-                     [(Literal (IntVal 0) loc, Observe),
+                     [(Literal (BasicVal $ IntVal 0) loc, Observe),
                       (Var bound, Observe),
                       (Var merge, diet rettype)])
                     (fromDecl rettype) $ srclocOf mergeexp)
@@ -860,18 +859,18 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
   secondscope $ do
     letbody' <- checkExp letbody
     return $ DoLoop mergepat' mergeexp'
-                    (Ident loopvar (Elem Int) loc) boundexp'
+                    (Ident loopvar (Elem $ Basic Int) loc) boundexp'
                     loopbody' letbody' loc
 
 checkExp (MapT ass fun arrexps pos) = do
-  ass' <- mapM (requireI [Elem Cert] <=< checkIdent) ass
+  ass' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) ass
   (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
   fun'    <- checkTupleLambda fun arrargs
   return $ MapT ass' fun' arrexps' pos
 
 checkExp (ReduceT ass fun inputs pos) = do
   let (startexps, arrexps) = unzip inputs
-  ass' <- mapM (requireI [Elem Cert] <=< checkIdent) ass
+  ass' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) ass
   (startexps', startargs) <- unzip <$> mapM checkArg startexps
   (arrexps', arrargs)     <- unzip <$> mapM checkSOACArrayArg arrexps
   fun'                    <- checkTupleLambda fun $ startargs ++ arrargs
@@ -890,7 +889,7 @@ checkExp (ReduceT ass fun inputs pos) = do
 -- anyway.
 checkExp (ScanT ass fun inputs pos) = do
   let (startexps, arrexps) = unzip inputs
-  ass' <- mapM (requireI [Elem Cert] <=< checkIdent) ass
+  ass' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) ass
   (startexps', startargs) <- unzip <$> mapM checkArg startexps
   (arrexps', arrargs)     <- unzip <$> mapM checkSOACArrayArg arrexps
   fun'                    <- checkTupleLambda fun $ startargs ++ arrargs
@@ -906,16 +905,16 @@ checkExp (ScanT ass fun inputs pos) = do
   return $ ScanT ass' fun' (zip startexps' arrexps') pos
 
 checkExp (FilterT ass fun arrexps pos) = do
-  ass' <- mapM (requireI [Elem Cert] <=< checkIdent) ass
+  ass' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) ass
   (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
   fun' <- checkTupleLambda fun arrargs
   let funret = tupleLambdaType fun' $ map argType arrargs
-  when (funret /= [Elem Bool]) $
+  when (funret /= [Elem $ Basic Bool]) $
     bad $ TypeError pos "FilterT function does not return bool."
   return $ FilterT ass' fun' arrexps' pos
 
 checkExp (RedomapT ass outerfun innerfun accexps arrexps pos) = do
-  ass' <- mapM (requireI [Elem Cert] <=< checkIdent) ass
+  ass' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) ass
   (arrexps', arrargs)   <- unzip <$> mapM checkSOACArrayArg arrexps
   (accexps', accargs)   <- unzip <$> mapM checkArg accexps
   (outerfun', outerarg) <- checkTupleLambdaArg outerfun $ accargs ++ accargs
@@ -942,11 +941,7 @@ checkSOACArrayArg e = do
     Just rt -> return (e', (rt, dflow, argloc))
 
 checkLiteral :: VarName vn => SrcLoc -> Value -> TypeM vn Value
-checkLiteral _ (IntVal k) = return $ IntVal k
-checkLiteral _ (RealVal x) = return $ RealVal x
-checkLiteral _ (LogVal b) = return $ LogVal b
-checkLiteral _ (CharVal c) = return $ CharVal c
-checkLiteral _ Checked = return Checked
+checkLiteral _ (BasicVal bv) = return $ BasicVal bv
 checkLiteral loc (TupVal vals) = do
   vals' <- mapM (checkLiteral loc) vals
   return $ TupVal vals'
@@ -985,24 +980,24 @@ checkBinOp Less e1 e2 t pos = checkRelOp Less [Int, Real] e1 e2 t pos
 checkBinOp Leq e1 e2 t pos = checkRelOp Leq [Int, Real] e1 e2 t pos
 
 checkRelOp :: (TypeBox ty, VarName vn) =>
-              BinOp -> [TaggedElemType vn]
+              BinOp -> [BasicType]
            -> TaggedExp ty vn -> TaggedExp ty vn
            -> ty (ID vn) -> SrcLoc
            -> TypeM vn (TaggedExp CompTypeBase vn)
 checkRelOp op tl e1 e2 t pos = do
-  e1' <- require (map Elem tl) =<< checkExp e1
-  e2' <- require (map Elem tl) =<< checkExp e2
+  e1' <- require (map (Elem . Basic) tl) =<< checkExp e1
+  e2' <- require (map (Elem . Basic) tl) =<< checkExp e2
   _ <- unifyExpTypes e1' e2'
-  t' <- checkAnnotation pos (opStr op ++ " result") t $ Elem Bool
+  t' <- checkAnnotation pos (opStr op ++ " result") t $ Elem $ Basic Bool
   return $ BinOp op e1' e2' t' pos
 
 checkPolyBinOp :: (TypeBox ty, VarName vn) =>
-                  BinOp -> [TaggedElemType vn]
+                  BinOp -> [BasicType]
                -> TaggedExp ty vn -> TaggedExp ty vn -> ty (ID vn) -> SrcLoc
                -> TypeM vn (TaggedExp CompTypeBase vn)
 checkPolyBinOp op tl e1 e2 t pos = do
-  e1' <- require (map Elem tl) =<< checkExp e1
-  e2' <- require (map Elem tl) =<< checkExp e2
+  e1' <- require (map (Elem . Basic) tl) =<< checkExp e1
+  e2' <- require (map (Elem . Basic) tl) =<< checkExp e2
   t' <- unifyExpTypes e1' e2'
   t'' <- checkAnnotation pos (opStr op ++ " result") t t'
   return $ BinOp op e1' e2' t'' pos

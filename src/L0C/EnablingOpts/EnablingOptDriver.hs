@@ -21,7 +21,6 @@ import qualified L0C.IndexInliner as II
 import L0C.EnablingOpts.InliningDeadFun
 import L0C.EnablingOpts.CopyCtPropFold
 import L0C.EnablingOpts.DeadVarElim
-import L0C.EnablingOpts.LetNormalizer
 import L0C.EnablingOpts.EnablingOptErrors
 
 --------------------------------------------------------------
@@ -50,8 +49,7 @@ enablingOpts prog = do
 
 normCopyDeadOpts :: Prog -> Either EnablingOptError Prog
 normCopyDeadOpts prog = do
-    (_, prog_nlet) <- letNormProg     prog
-    (_,prog_cp)    <- copyCtProp      prog_nlet
+    (_,prog_cp)    <- copyCtProp      prog
     (_, prog_dce)  <- deadCodeElim    prog_cp
     return prog_dce
 
@@ -59,10 +57,9 @@ normCopyOneTupleLambda :: MonadFreshNames VName m => Prog -> TupleLambda ->
                           m (Either EnablingOptError TupleLambda)
 normCopyOneTupleLambda prog lam = do
   nmsrc <- getNameSource
-  let res = do (lam', nmsrc') <- letNormOneTupleLambda    nmsrc lam
-               lam''          <- copyCtPropOneTupleLambda prog  lam'
-               let (lam''', nmsrc'') = II.transformLambda nmsrc' lam''
-               return (lam''', nmsrc'')
+  let res = do lam'          <- copyCtPropOneTupleLambda prog  lam
+               let (lam'', nmsrc'') = II.transformLambda nmsrc' lam'
+               return (lam'', nmsrc'')
   case res of Left e -> return $ Left e
               Right (normLam, nmsrc') -> do
                 putNameSource nmsrc'

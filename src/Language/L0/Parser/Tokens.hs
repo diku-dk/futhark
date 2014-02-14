@@ -3,7 +3,7 @@ module Language.L0.Parser.Tokens
   )
   where
 
-import Language.L0.Misc (Name)
+import Language.L0.Core
 
 data Token = IF
            | THEN

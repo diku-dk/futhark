@@ -15,7 +15,7 @@ import System.IO
 
 import Text.Printf
 
-import Language.L0.Misc
+import Language.L0.Core
 import Language.L0.Parser
 import L0C.Internalise
 
@@ -158,11 +158,11 @@ interpret prog =
   where ppOutput [v] = ppOutput' v
         ppOutput vs = "{" ++ intercalate ", " (map ppOutput' vs) ++ "}"
         ppOutput' val | Just s <- I.arrayString val = s
-        ppOutput' (I.BasicValue (I.RealVal x)) = printf "%.6f" x
-        ppOutput' (I.BasicValue (I.IntVal x))  = show x
-        ppOutput' (I.BasicValue (I.CharVal c)) = show c
-        ppOutput' (I.BasicValue (I.LogVal b))  = show b
-        ppOutput' (I.BasicValue I.Checked) = "Checked"
+        ppOutput' (I.BasicVal (I.RealVal x)) = printf "%.6f" x
+        ppOutput' (I.BasicVal (I.IntVal x))  = show x
+        ppOutput' (I.BasicVal (I.CharVal c)) = show c
+        ppOutput' (I.BasicVal (I.LogVal b))  = show b
+        ppOutput' (I.BasicVal I.Checked) = "Checked"
         ppOutput' (I.ArrayVal a t)
           | [] <- elems a = "empty(" ++ I.ppType t ++ ")"
           | otherwise     = "[" ++ intercalate ", " (map ppOutput' $ elems a) ++ "]"

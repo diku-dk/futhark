@@ -79,9 +79,9 @@ transformExp rec e | stopRecursion rec = return e
 -- rest.  If the input array is empty, we simply return an empty
 -- output array.
 transformExp rec mape@(Map cs fun arrs loc) = do
-  let zero = Constant (BasicValue $ IntVal 0) loc
+  let zero = Constant (BasicVal $ IntVal 0) loc
   letExps "inarr" (pure $ map SubExp arrs) $ \inarrs -> do
-    (i, iv) <- newVar loc "i" (Elem Int)
+    (i, iv) <- newVar loc "i" (Basic Int)
     letExp "n" (pure $ size cs inarrs) $ \n -> do
       let funcall0 = transformLambda (dec rec) fun (index cs inarrs zero)
       let funcall = transformLambda (dec rec) fun (index cs inarrs iv)
@@ -92,7 +92,7 @@ transformExp rec mape@(Map cs fun arrs loc) = do
           loopbody <- letwith cs outarr (pexp iv) (map (SubExp . Var) x) outarrv
           letbody <- eDoLoop (zip outarr $ map (pexp . Var) outarr)
                      i (pexp $ Var n) loopbody outarrv loc
-          eIf (eBinOp Less (pexp zero) (pexp $ Var n) (Elem Bool) loc)
+          eIf (eBinOp Less (pexp zero) (pexp $ Var n) (Basic Bool) loc)
               (pure letbody)
               (blankArray (typeOf mape) loc)
               (typeOf mape) loc
@@ -119,29 +119,29 @@ transformExp rec filtere@(Filter cs fun arrexps loc) =
   letExps "arr" (pure $ map SubExp arrexps) $ \arr ->
     letSubExp "size" (transformExp (dec rec) (size cs arr)) $ \nv -> do
       let checkempty nonempty =
-            eIf (eBinOp Equal (pexp nv) (pexp $ intval 0) (Elem Bool) loc)
+            eIf (eBinOp Equal (pexp nv) (pexp $ intval 0) (Basic Bool) loc)
                 (blankArray (typeOf filtere) loc) (pure nonempty)
                 (typeOf nonempty) loc
           rowtypes = map (rowType . identType) arr
       (xs, _) <- unzip <$> mapM (newVar loc "x") rowtypes
-      (i, iv) <- newVar loc "i" $ Elem Int
+      (i, iv) <- newVar loc "i" $ Basic Int
       fun' <- transformLambda (dec rec) fun $ map (SubExp . Var) xs
-      (check, checkv) <- newVar loc "check" $ Elem Bool
+      (check, checkv) <- newVar loc "check" $ Basic Bool
       let test = LetPat [check] fun' branch loc
-          branch = If checkv (SubExp $ intval 1) (SubExp $ intval 0) [Elem Int] loc
+          branch = If checkv (SubExp $ intval 1) (SubExp $ intval 0) [Basic Int] loc
           indexin0 = index cs arr $ intval 0
           indexin = index cs arr iv
       mape <- transformExp (dec rec) $
-              Map cs (Lambda (map toParam xs) test [Elem Int] loc) (map Var arr) loc
+              Map cs (Lambda (map toParam xs) test [Basic Int] loc) (map Var arr) loc
       plus <- do
-        (a,av) <- newVar loc "a" (Elem Int)
-        (b,bv) <- newVar loc "b" (Elem Int)
-        return $ Lambda [toParam a, toParam b] (BinOp Plus av bv (Elem Int) loc) [Elem Int] loc
+        (a,av) <- newVar loc "a" (Basic Int)
+        (b,bv) <- newVar loc "b" (Basic Int)
+        return $ Lambda [toParam a, toParam b] (BinOp Plus av bv (Basic Int) loc) [Basic Int] loc
       scan <- letExp "mape" (pure mape) $ \mape' ->
                 transformExp (dec rec) $ Scan cs plus [(intval 0,Var mape')] loc
       letExp "ia" (pure scan) $ \ia -> do
         let indexia ind = eIndex cs ia Nothing [ind] loc
-            sub1 e = eBinOp Minus e (pexp $ intval 1) (Elem Int) loc
+            sub1 e = eBinOp Minus e (pexp $ intval 1) (Basic Int) loc
             indexi = indexia $ pexp iv
             indexim1 = indexia $ sub1 $ pexp nv
         indexiaend <- indexia $ sub1 $ pexp nv
@@ -150,15 +150,15 @@ transformExp rec filtere@(Filter cs fun arrexps loc) =
           update <- letwith cs res (sub1 indexi) indexin resv
           loopbody <-
             eIf (eBinOp LogOr
-                 (eBinOp Equal (pexp iv) (pexp $ intval 0) (Elem Bool) loc)
-                 (eIf (eBinOp Less (pexp $ intval 0) (pexp iv) (Elem Bool) loc)
-                      (eBinOp Equal indexi indexim1 (Elem Bool) loc)
-                      (pexp $ Constant (BasicValue $ LogVal False) loc)
-                      [Elem Bool] loc)
-                 (Elem Bool) loc)
+                 (eBinOp Equal (pexp iv) (pexp $ intval 0) (Basic Bool) loc)
+                 (eIf (eBinOp Less (pexp $ intval 0) (pexp iv) (Basic Bool) loc)
+                      (eBinOp Equal indexi indexim1 (Basic Bool) loc)
+                      (pexp $ Constant (BasicVal $ LogVal False) loc)
+                      [Basic Bool] loc)
+                 (Basic Bool) loc)
                 (pure resv) (pure update) (typeOf resv) loc
           checkempty $ DoLoop (zip res $ map Var res) i nv loopbody resv loc -- XXX, name shadowing
-  where intval x = Constant (BasicValue $ IntVal x) loc
+  where intval x = Constant (BasicVal $ IntVal x) loc
 
 transformExp rec (Redomap cs _ innerfun accexps arrexps loc) =
   newFold loc arrexps accexps $ \arr (acc, accv) (i, iv) -> do
@@ -176,7 +176,7 @@ newFold :: MonadFreshNames VName m =>
            SrcLoc -> [SubExp] -> [SubExp]
         -> ([Ident] -> ([Ident], [SubExp]) -> (Ident, SubExp) -> m Exp) -> m Exp
 newFold loc arrexps accexps body = do
-  (i, iv) <- newVar loc "i" (Elem Int)
+  (i, iv) <- newVar loc "i" (Basic Int)
   letExps "arr" (pure $ map SubExp arrexps) $ \arr -> do
     let ets = map subExpType accexps
     (names, namevs) <- unzip <$> mapM (newVar loc "acc") ets
@@ -224,7 +224,7 @@ letwith cs ks i vs body =
     where loc = srclocOf body
 
 size :: Certificates -> [Ident] -> Exp
-size _ []     = SubExp $ Constant (BasicValue $ IntVal 0) noLoc
+size _ []     = SubExp $ Constant (BasicVal $ IntVal 0) noLoc
 size cs (k:_) = Size cs 0 (Var k) $ srclocOf k
 
 pexp :: Applicative f => SubExp -> f Exp

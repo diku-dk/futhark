@@ -117,7 +117,7 @@ renameType :: Type -> RenameM Type
 renameType (Array et dims u als) = do
   als' <- HS.fromList <$> mapM replName (HS.toList als)
   return $ Array et (replicate (length dims) Nothing) u als'
-renameType (Elem et) = return $ Elem et
+renameType (Basic et) = return $ Basic et
 
 rename :: Mapper RenameM
 rename = Mapper {

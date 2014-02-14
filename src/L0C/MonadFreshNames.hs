@@ -20,7 +20,7 @@ import Control.Applicative
 import qualified Control.Monad.State.Lazy
 import qualified Control.Monad.State.Strict
 
-import Language.L0.Misc
+import Language.L0.Core
 import qualified L0C.FreshNames as FreshNames
 import L0C.FreshNames hiding (newName, newID, newVName)
 

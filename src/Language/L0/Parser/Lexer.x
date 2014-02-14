@@ -9,7 +9,7 @@ module Language.L0.Parser.Lexer
 
 import Data.Loc hiding (L, unLoc)
 
-import Language.L0.Misc (nameFromString)
+import Language.L0.Core (nameFromString)
 import Language.L0.Parser.Tokens
 
 import Data.Word (Word8)

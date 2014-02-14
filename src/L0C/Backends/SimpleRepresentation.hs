@@ -41,7 +41,7 @@ sameRepresentation ets1 ets2
 
 sameRepresentation' :: DeclType -> DeclType -> Bool
 sameRepresentation' (Array et1 ds1 _ _) (Array et2 ds2 _ _) =
-  length ds1 == length ds2 && sameRepresentation' (Elem et1) (Elem et2)
+  length ds1 == length ds2 && sameRepresentation' (Basic et1) (Basic et2)
 sameRepresentation' t1 t2 = t1 == t2
 
 -- | @tupleField i@ is the name of field number @i@ in a tuple.

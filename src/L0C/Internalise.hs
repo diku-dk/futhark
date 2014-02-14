@@ -40,7 +40,6 @@ import Data.List
 import Data.Loc
 import Data.Traversable (mapM)
 
-import Language.L0.Misc
 import L0C.ExternalRep as E
 import L0C.InternalRep as I
 import L0C.MonadFreshNames
@@ -75,14 +74,10 @@ internaliseUniqueness E.Nonunique = I.Nonunique
 internaliseUniqueness E.Unique = I.Unique
 
 internaliseElemType :: Monoid (als VName) =>
-                     E.GenElemType als -> [I.GenType als]
+                       E.GenElemType als -> [I.GenType als]
 internaliseElemType (Tuple elemts) =
   concatMap internaliseType elemts
-internaliseElemType E.Int  = [I.Elem I.Int]
-internaliseElemType E.Real = [I.Elem I.Real]
-internaliseElemType E.Char = [I.Elem I.Char]
-internaliseElemType E.Bool = [I.Elem I.Bool]
-internaliseElemType E.Cert = [I.Elem I.Cert]
+internaliseElemType (E.Basic bt)  = [I.Basic bt]
 
 internaliseElemType' :: Monoid (als VName) =>
                      E.GenElemType als -> [I.GenType als]
@@ -100,7 +95,7 @@ internaliseElemType' t = internaliseElemType t
 internaliseType :: Monoid (als VName) => E.GenType als -> [I.GenType als]
 
 internaliseType t@(E.Array {}) =
-  case internaliseType' t of et1:et2:ets -> I.Elem I.Cert : et1 : et2 : ets
+  case internaliseType' t of et1:et2:ets -> I.Basic I.Cert : et1 : et2 : ets
                              t'          -> t'
 internaliseType (E.Elem et) = internaliseElemType et
 
@@ -122,19 +117,15 @@ internaliseValue (E.ArrayVal arr rt) =
     [rt'] -> [I.arrayVal (concatMap internaliseValue $ A.elems arr) $ I.toDecl rt']
     ts
       | [] <- A.elems arr ->
-        I.BasicValue I.Checked : map emptyOf ts
+        I.BasicVal I.Checked : map emptyOf ts
       | otherwise         ->
-        I.BasicValue I.Checked : zipWith asarray ts (transpose arrayvalues)
+        I.BasicVal I.Checked : zipWith asarray ts (transpose arrayvalues)
   where emptyOf t = I.blankValue $ I.arrayType 1 t I.Nonunique
         asarray t vs = I.arrayVal vs t
         arrayvalues = map internaliseValue $ A.elems arr
         -- Above should never happen in well-typed program.
 internaliseValue (E.TupVal vs) = concatMap internaliseValue vs
-internaliseValue (E.IntVal x) = [I.BasicValue $ I.IntVal x]
-internaliseValue (E.RealVal x) = [I.BasicValue $ I.RealVal x]
-internaliseValue (E.LogVal x) = [I.BasicValue $ I.LogVal x]
-internaliseValue (E.CharVal x) = [I.BasicValue $ I.CharVal x]
-internaliseValue E.Checked = [I.BasicValue I.Checked]
+internaliseValue (E.BasicVal bv) = [I.BasicVal bv]
 
 internaliseFun :: E.FunDec -> InternaliseM I.FunDec
 internaliseFun (fname,rettype,params,body,loc) =
@@ -338,7 +329,7 @@ internaliseExp (E.Size cs i e loc) = do
   tupToIdentList e $ \c ks ->
     case ks of
       (k:_) -> return $ I.Size (certify c cs') i (I.Var k) loc
-      []    -> return $ I.SubExp (I.Constant (I.BasicValue $ I.IntVal 0) loc) -- Will this ever happen?
+      []    -> return $ I.SubExp (I.Constant (I.BasicVal $ I.IntVal 0) loc) -- Will this ever happen?
 
 internaliseExp (E.Unzip e _ _) =
   tupToIdentList e $ \_ ks ->
@@ -354,7 +345,7 @@ internaliseExp (E.Zip es loc) =
              rows e = I.Size [] 0 e loc
              ass e1 e2 = letSubExp "zip_len_x" (pure $ rows e1) $ \e1' ->
                          letSubExp "zip_len_y" (pure $ rows e2) $ \e2' ->
-                         letSubExp "zip_cmp" (pure $ I.BinOp I.Equal e1' e2' (I.Elem I.Bool) loc) $ \cmp ->
+                         letSubExp "zip_cmp" (pure $ I.BinOp I.Equal e1' e2' (I.Basic I.Bool) loc) $ \cmp ->
                          pure (I.Assert cmp loc)
          letExps "zip_assert" (zipWithM ass namevs $ drop 1 namevs) $ \cs2 ->
            mergeCerts (cs1++cs2) $ \c -> return $ tuplit c loc namevs
@@ -591,7 +582,7 @@ mergeCerts :: I.Certificates -> (Maybe I.Ident -> InternaliseM I.Exp) -> Interna
 mergeCerts [] f = f Nothing
 mergeCerts [c] f = f $ Just c
 mergeCerts (c:cs) f = do
-  cert <- fst <$> newVar loc "comb_cert" (I.Elem I.Cert)
+  cert <- fst <$> newVar loc "comb_cert" (I.Basic I.Cert)
   I.LetPat [cert] (I.Conjoin (map I.Var $ c:cs) loc) <$> f (Just cert) <*> pure loc
   where loc = srclocOf c
 
@@ -654,7 +645,7 @@ internaliseLambda ce (E.AnonymFun params body rettype loc) m = do
                      [t] -> [t]
                      ets -> ets
         stripCert (c:es)
-          | I.identType c == I.Elem I.Cert = es -- XXX HACK
+          | I.identType c == I.Basic I.Cert = es -- XXX HACK
         stripCert es = es
 internaliseLambda _ (E.CurryFun {}) _ = error "no curries yet"
 
@@ -669,7 +660,7 @@ tuplit (Just c) loc es = I.TupLit (I.Var c:es) loc
 
 -- Name suggested by Spectrum.
 given :: SrcLoc -> SubExp
-given = I.Constant $ I.BasicValue I.Checked
+given = I.Constant $ I.BasicVal I.Checked
 
 certify :: Maybe I.Ident -> I.Certificates -> I.Certificates
 certify k cs = maybeToList k ++ cs

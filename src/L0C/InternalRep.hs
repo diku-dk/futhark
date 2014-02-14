@@ -1,6 +1,5 @@
 module L0C.InternalRep
-  ( module Language.L0.Misc
-  , module L0C.InternalRep.Syntax
+  ( module L0C.InternalRep.Syntax
   , module L0C.InternalRep.Attributes
   , module L0C.InternalRep.Traversals
   , module L0C.InternalRep.Pretty
@@ -15,7 +14,6 @@ where
 
 import Text.PrettyPrint.Mainland
 
-import Language.L0.Misc
 import L0C.InternalRep.Syntax
 import L0C.InternalRep.Attributes
 import L0C.InternalRep.Traversals

@@ -6,7 +6,6 @@ module Language.L0.Externalise
   )
   where
 
-import Language.L0.Misc
 import L0C.ExternalRep as E
 import L0C.InternalRep as I
 import L0C.MonadFreshNames

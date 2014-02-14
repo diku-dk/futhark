@@ -243,12 +243,7 @@ renameType = mapType renameType'
           return $ Array et' (replicate (length dims) Nothing) u als'
         renameType' (Elem et) = Elem <$> renameElemType et
         renameElemType (Tuple ts) = Tuple <$> mapM renameType' ts
-        renameElemType Int = return Int
-        renameElemType Char = return Char
-        renameElemType Bool = return Bool
-        renameElemType Real = return Real
-        renameElemType Cert = return Cert
-
+        renameElemType (Basic bt) = return $ Basic bt
 
 rename :: (TypeBox ty, VarName f, VarName t) => MapperBase ty ty f t (RenameM f t)
 rename = Mapper {
