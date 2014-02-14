@@ -4,8 +4,8 @@
 -- keep "L0.Language.Syntax" simple, and put whatever embellishments
 -- we need here.
 module Language.L0.Attributes
-  ( locStr
-  , TypeBox(..)
+  (
+    TypeBox(..)
   , funDecByName
   , progNames
 
@@ -19,17 +19,12 @@ module Language.L0.Attributes
   , typeOf
   , freeInExp
   , freeNamesInExp
-  , consumedInExp
 
   -- * Queries on patterns
   , patNames
   , patNameSet
   , patIdents
   , patIdentSet
-
-  -- * Queries on lambdas
-  , freeInLambda
-  , freeNamesInLambda
 
   -- * Operations on lambdas
   , tupleLambdaToLambda
@@ -79,22 +74,12 @@ module Language.L0.Attributes
   , removeElemNames
 
   -- * Queries on values
-  , arrayShape
-  , arraySize
   , arrayString
   , valueType
 
   -- * Operations on values
-  , blankValue
   , arrayVal
   , emptyArray
-  , flattenArray
-
-  -- * Transposition
-  , transposeArray
-  , transposeIndex
-  , transposeInverse
-  , transposeDimension
 
   -- * Type aliases
 
@@ -113,7 +98,6 @@ module Language.L0.Attributes
   )
   where
 
-import Control.Arrow (first)
 import Control.Applicative
 import Control.Monad.Writer
 
@@ -403,17 +387,6 @@ unifyUniqueness (Elem (Tuple ets1)) (Elem (Tuple ets2)) =
   Elem $ Tuple $ zipWith unifyUniqueness ets1 ets2
 unifyUniqueness t1 _ = t1
 
--- | A "blank" value of the given type - this is zero, or whatever is
--- close to it.  Don't depend on this value, but use it for creating
--- arrays to be populated by do-loops.
-blankValue :: TypeBase as vn -> Value
-blankValue (Elem (Basic bt)) = BasicVal $ blankBasicValue bt
-blankValue (Elem (Tuple ts)) = TupVal (map blankValue ts)
-blankValue (Array et [_] _ _) = arrayVal [] $ Elem et
-blankValue (Array et (_:ds) u as) = arrayVal [] rt
-  where rt = Array et ds u as
-blankValue (Array et _ _ _) = arrayVal [] $ Elem et
-
 -- | The type of an L0 value.
 valueType :: Value -> DeclTypeBase vn
 valueType (BasicVal bv) = Elem $ Basic $ basicValueType bv
@@ -422,24 +395,6 @@ valueType (ArrayVal _ (Elem et)) =
   Array (addElemNames et) [Nothing] Nonunique NoInfo
 valueType (ArrayVal _ (Array et ds _ _)) =
   Array (addElemNames et) (Nothing:replicate (length ds) Nothing) Nonunique NoInfo
-
--- | Return a list of the sizes of an array (the shape, in other
--- terms).  For non-arrays, this is the empty list.  A two-dimensional
--- array with five rows and three columns would return the list @[5,
--- 3]@.  If an array has @n@ dimensions, the result is always a list
--- of @n@ elements.
-arrayShape :: Value -> [Int]
-arrayShape (ArrayVal arr rt)
-  | v:_ <- elems arr = snd (bounds arr) + 1 : arrayShape v
-  | otherwise = replicate (1 + arrayRank rt) 0
-arrayShape _ = []
-
--- | Return the size of the first dimension of an array, or zero for
--- non-arrays.
-arraySize :: Value -> Int
-arraySize t = case arrayShape t of
-                []  -> 0
-                n:_ -> n
 
 -- | Construct an array value containing the given elements.
 arrayVal :: [Value] -> TypeBase as vn -> Value
@@ -458,67 +413,6 @@ arrayString (ArrayVal arr _)
   where asChar (BasicVal (CharVal c)) = Just c
         asChar _                      = Nothing
 arrayString _ = Nothing
-
--- | Given an N-dimensional array, return a one-dimensional array
--- with the same elements.
-flattenArray :: Value -> Value
-flattenArray (ArrayVal arr et) =
-  arrayVal (concatMap flatten $ elems arr) et
-    where flatten (ArrayVal arr' _) = concatMap flatten $ elems arr'
-          flatten v = [v]
-flattenArray v = v
-
--- | Array transpose generalised to multiple dimensions.  The result
--- of @transposeArray k n a@ is an array where the element @a[i_1,
--- ..., i_k ,i_{k+1}, ..., i_{k+n}, ..., i_q ]@ is now at index @[i_1
--- ,.., i_{k+1} , ..., i_{k+n} ,i_k, ..., i_q ]@.
---
--- @transposeArray 0 1@ is equivalent to the common transpose.  If the
--- given value is not an array, it is returned unchanged.
-transposeArray :: Int -> Int -> Value -> Value
-transposeArray k n v =
-  case flattenArray v of
-    ArrayVal inarr _ ->
-      let newshape = move oldshape
-          idx is shape = sum (zipWith (*) is (map product $ drop 1 (tails shape)))
-          f rt is (m:ms) =
-            arrayVal [ f (stripArray 1 rt) (is ++ [i]) ms | i <- [0..m-1] ] rt
-          f _ is [] = inarr ! idx (move is) oldshape
-      in f (rowType $ valueType v) [] newshape
-    _ -> v
-  where oldshape = arrayShape v
-        move = transposeIndex k n
-
--- | If @l@ is an index into the array @a@, then @transposeIndex k n
--- l@ is an index to the same element in the array @transposeArray k n
--- a@.
-transposeIndex :: Int -> Int -> [a] -> [a]
-transposeIndex k n l
-  | k + n >= length l =
-    let n' = ((k + n) `mod` length l)-k
-    in transposeIndex k n' l
-  | n < 0,
-    (pre,needle:end) <- splitAt k l,
-    (beg,mid) <- splitAt (length pre+n) pre =
-    beg ++ [needle] ++ mid ++ end
-  | (beg,needle:post) <- splitAt k l,
-    (mid,end) <- splitAt n post =
-    beg ++ mid ++ [needle] ++ end
-  | otherwise = l
-
--- | Compute the inverse of a given transposition.  Upholds the
--- following property:
---
--- @uncurry transposeIndex (transposeInverse k n) (transposeIndex k n l) == l@
-transposeInverse :: Int -> Int -> (Int,Int)
-transposeInverse k n = (k+n,-n)
-
--- | @transposeDimension k n dim numDims@ gives the new position of
--- dimension @dim@ in a @numDims@-dimensional array after being
--- @n,k@-transposed.
-transposeDimension :: Int -> Int -> Int -> Int -> Int
-transposeDimension k n dim numDims =
-  transposeIndex k n [0..numDims-1] !! dim
 
 -- | The type of an L0 term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
@@ -734,41 +628,6 @@ freeInExp = execWriter . expFree
 freeNamesInExp :: (Eq vn, Hashable vn) => ExpBase ty vn -> HS.HashSet vn
 freeNamesInExp = HS.map identName . freeInExp
 
--- | Return the set of variables names consumed by the given
--- expression.
-consumedInExp :: (Eq vn, Hashable vn) => ExpBase CompTypeBase vn -> HS.HashSet vn
-consumedInExp = execWriter . expConsumed
-  where names = identityWalker {
-                  walkOnExp = expConsumed
-                }
-
-        unconsume s = censor (`HS.difference` s)
-
-        consume ident =
-          tell $ identName ident `HS.insert` aliases (identType ident)
-
-        expConsumed (LetPat pat e body _) = do
-          expConsumed e
-          unconsume (patNameSet pat) $ expConsumed body
-        expConsumed (LetWith _ dest src _ idxs ve body _) = do
-          mapM_ expConsumed idxs
-          expConsumed ve
-          consume src
-          unconsume (HS.singleton $ identName dest) $ expConsumed body
-        expConsumed (DoLoop pat mergeexp i boundexp loopbody letbody _) = do
-          expConsumed mergeexp
-          expConsumed boundexp
-          unconsume (identName i `HS.insert` patNameSet pat) $ do
-            expConsumed loopbody
-            expConsumed letbody
-        expConsumed (Apply _ args _ _) =
-          mapM_ (consumeArg . first typeOf) args
-          where consumeArg (t, Consume) = tell $ aliases t
-                consumeArg (Elem (Tuple ets), TupleDiet ds) =
-                  mapM_ consumeArg $ zip ets ds
-                consumeArg _ = return ()
-        expConsumed e = walkExpM names e
-
 -- | Return the set of identifiers that are free in the given lambda.
 freeInLambda :: (Eq vn, Hashable vn) => LambdaBase ty vn -> HS.HashSet (IdentBase ty vn)
 freeInLambda (AnonymFun params body _ _) =
@@ -776,11 +635,6 @@ freeInLambda (AnonymFun params body _ _) =
     where params' = map identName params
 freeInLambda (CurryFun _ exps _ _) =
   HS.unions (map freeInExp exps)
-
--- | As 'freeInLambda', but returns the raw names rather than
--- 'IdentBase's.
-freeNamesInLambda :: (Eq vn, Hashable vn) => LambdaBase ty vn -> HS.HashSet vn
-freeNamesInLambda = HS.map identName . freeInLambda
 
 -- | Convert an identifier to a 'ParamBase'.
 toParam :: IdentBase (TypeBase as) vn -> ParamBase vn
