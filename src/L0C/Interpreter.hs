@@ -293,11 +293,11 @@ evalExp (If e1 e2 e3 _ pos) = do
             BasicVal (LogVal False) -> evalExp e3
             _                         -> bad $ TypeError pos "evalExp If"
 
-evalExp (Apply fname [(arg, _)] _ loc)
+evalExp (Apply fname args _ loc)
   | "trace" <- nameToString fname = do
-  arg' <- evalSubExp arg
-  tell [(loc, ppValue arg')]
-  return [arg']
+  vs <- mapM (evalSubExp . fst) args
+  tell [(loc, ppValues vs)]
+  return vs
 
 evalExp (Apply fname args _ _) = do
   fun <- lookupFun fname

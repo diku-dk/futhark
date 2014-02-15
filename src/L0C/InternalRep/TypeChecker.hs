@@ -521,13 +521,10 @@ checkExp (If e1 e2 e3 t pos) = do
   return $ If e1' e2' e3' t' pos
 
 checkExp (Apply fname args t pos)
-  | "trace" <- nameToString fname =
-  case args of
-    [(e, _)] -> do
-      e'  <- checkSubExp e
-      t'  <- checkTupleAnnotation pos "return" t [subExpType e']
-      return $ Apply fname [(e', Observe)] t' pos
-    _ -> bad $ TypeError pos "Trace function takes a single parameter"
+  | "trace" <- nameToString fname = do
+  args' <- mapM (checkSubExp . fst) args
+  t'    <- checkTupleAnnotation pos "return" t $ map subExpType args'
+  return $ Apply fname [(arg, Observe) | arg <- args'] t' pos
 
 checkExp (Apply fname args rettype loc) = do
   bnd <- asks $ HM.lookup fname . envFtable
