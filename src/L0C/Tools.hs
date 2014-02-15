@@ -16,14 +16,19 @@ module L0C.Tools
   , eTupLit
 
   , MonadBinder(..)
-  , addBindingWriter
-  , collectBindingsWriter
   , Binding(..)
   , insertBindings
   , insertBindings'
+  , letBind
+  , letWithBind
+  , loopBind
+  -- * A concrete @Binder@ monad.
   , Binder
   , runBinder
   , runBinderWithNameSource
+  -- * Writer convenience interface
+  , addBindingWriter
+  , collectBindingsWriter
   )
 where
 
@@ -38,22 +43,21 @@ import L0C.InternalRep.MonadFreshNames
 
 letSubExp :: MonadBinder m =>
              String -> Exp -> m SubExp
+letSubExp _ (SubExp se) = return se
 letSubExp desc e =
-  case (e, typeOf e) of
-    (SubExp se, _) -> return se
-    (_, [_])       -> Var <$> letExp desc e
-    _              -> fail $ "letSubExp: tuple-typed expression given for " ++ desc ++ ":\n" ++ ppExp e
+  case typeOf e of
+    [_] -> Var <$> letExp desc e
+    _   -> fail $ "letSubExp: tuple-typed expression given for " ++ desc ++ ":\n" ++ ppExp e
 
 letExp :: MonadBinder m =>
           String -> Exp -> m Ident
-letExp desc e = do
-  let loc = srclocOf e
-  case (e, typeOf e) of
-    (SubExp (Var v), _) -> return v
-    (_, [t])            -> do v <- fst <$> newVar loc desc t
-                              addBinding $ LetBind [v] e
-                              return v
-    _                   -> fail $ "letExp: tuple-typed expression given:\n" ++ ppExp e
+letExp _ (SubExp (Var v)) = return v
+letExp desc e =
+  case typeOf e of
+    [t] -> do v <- fst <$> newVar (srclocOf e) desc t
+              letBind [v] e
+              return v
+    _   -> fail $ "letExp: tuple-typed expression given:\n" ++ ppExp e
 
 letSubExps :: MonadBinder m =>
               String -> [Exp] -> m [SubExp]
@@ -69,7 +73,7 @@ letTupExp name e body = do
   let ts  = typeOf e
       loc = srclocOf e
   (names, namevs) <- unzip <$> mapM (newVar loc name) ts
-  addBinding $ LetBind names e
+  letBind names e
   body names (TupLit namevs loc)
 
 newVar :: MonadFreshNames VName m =>
@@ -130,15 +134,18 @@ class (MonadFreshNames VName m, Applicative m, Monad m) => MonadBinder m where
   addBinding      :: Binding -> m ()
   collectBindings :: m a -> m (a, [Binding])
 
-addBindingWriter :: (MonadFreshNames VName m, Applicative m, MonadWriter (DL.DList Binding) m) =>
-                    Binding -> m ()
-addBindingWriter = tell . DL.singleton
+letBind :: MonadBinder m => [Ident] -> Exp -> m ()
+letBind pat e =
+  addBinding $ LetBind pat e
 
-collectBindingsWriter :: (MonadFreshNames VName m, Applicative m, MonadWriter (DL.DList Binding) m) =>
-                         m a -> m (a, [Binding])
-collectBindingsWriter m = pass $ do
-                            (x, bnds) <- listen m
-                            return ((x, DL.toList bnds), const DL.empty)
+letWithBind :: MonadBinder m =>
+               Certificates -> Ident -> Ident -> Maybe Certificates -> [SubExp] -> SubExp -> m ()
+letWithBind cs dest src idxcs idxs ve =
+  addBinding $ LetWithBind cs dest src idxcs idxs ve
+
+loopBind :: MonadBinder m => [(Ident, SubExp)] -> Ident -> SubExp -> Exp -> m ()
+loopBind pat i bound loopbody =
+  addBinding $ LoopBind pat i bound loopbody
 
 insertBindings :: MonadBinder m => m Exp -> m Exp
 insertBindings m = do
@@ -153,6 +160,16 @@ insertBindings' = foldr bind
           LetPat pat pate e $ srclocOf e
         bind (LetWithBind cs dest src idxcs idxs ve) e =
           LetWith cs dest src idxcs idxs ve e $ srclocOf e
+
+addBindingWriter :: (MonadFreshNames VName m, Applicative m, MonadWriter (DL.DList Binding) m) =>
+                    Binding -> m ()
+addBindingWriter = tell . DL.singleton
+
+collectBindingsWriter :: (MonadFreshNames VName m, Applicative m, MonadWriter (DL.DList Binding) m) =>
+                         m a -> m (a, [Binding])
+collectBindingsWriter m = pass $ do
+                            (x, bnds) <- listen m
+                            return ((x, DL.toList bnds), const DL.empty)
 
 newtype Binder a = TransformM (WriterT (DL.DList Binding) (State VNameSource) a)
   deriving (Functor, Monad, Applicative,
