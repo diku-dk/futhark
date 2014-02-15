@@ -560,7 +560,7 @@ checkExp (LetWith cs (Ident dest destt destpos) src idxcs idxes ve body pos) = d
   let dest' = Ident dest destt' destpos
 
   unless (unique (identType src') || basicType (identType src')) $
-    bad $ TypeError pos $ "Source '" ++ textual (baseName $ identName src) ++ "' is not unique"
+    bad $ TypeError pos $ "Source '" ++ textual (identName src) ++ "' is not unique"
 
   case peelArray (length idxes) (identType src') of
     Nothing -> bad $ IndexingError (identName src)
@@ -901,7 +901,7 @@ checkBinding patloc pat tloc ts dflow
   where checkBinding' (Ident name namet pos) t = do
           t' <- lift $
                 checkAnnotation (srclocOf pat)
-                ("binding of variable " ++ textual (baseName name)) namet t
+                ("binding of variable " ++ textual name) namet t
           let t'' = subExpType $ Var $ Ident name t' pos
           add $ Ident name t'' pos
           return $ Ident name t'' pos
