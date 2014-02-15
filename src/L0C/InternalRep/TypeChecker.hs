@@ -486,7 +486,7 @@ checkExp (ArrayLit es t loc) = do
   es' <- mapM checkSubExp es
   -- Find the universal type of the array arguments.
   et <- case es' of
-          [] -> bad $ TypeError loc "Empty array literal"
+          [] -> return t
           e:es'' ->
             let check elemt eleme
                   | Just elemt' <- elemt `unifyTypes` subExpType eleme =
