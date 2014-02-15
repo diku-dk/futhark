@@ -113,8 +113,8 @@ eDoLoop :: MonadBinder m =>
 eDoLoop pat i boundexp loopbody body loc = do
   mergeexps' <- letSubExps "merge_init" =<< sequence mergeexps
   boundexp' <- letSubExp "bound" =<< boundexp
-  loopbody' <- loopbody
-  body' <- body
+  loopbody' <- insertBindings loopbody
+  body' <- insertBindings body
   return $ DoLoop (zip mergepat mergeexps') i boundexp' loopbody' body' loc
   where (mergepat, mergeexps) = unzip pat
 
