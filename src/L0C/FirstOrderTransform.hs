@@ -85,15 +85,15 @@ transformExp rec mape@(Map cs fun arrs loc) = do
   n <- letExp "n" $ size cs inarrs
   let letbody = do
         funcall0 <- transformLambda (dec rec) fun (index cs inarrs zero)
-        letTupExp "fun0" funcall0 $ \y _ ->
-          newResultArray (SubExp $ Var n) (map (SubExp . Var) y) $ \outarr -> do
-            let outarrv = TupLit (map Var outarr) loc
-            let loopbody = do
-                  funcall <- transformLambda (dec rec) fun (index cs inarrs iv)
-                  letTupExp "fun" funcall $ \x _ ->
-                    letwith cs outarr (pexp iv) (map (SubExp . Var) x) outarrv
-            eDoLoop (zip outarr $ map (pexp . Var) outarr)
-                    i (pexp $ Var n) loopbody (pure outarrv) loc
+        y <- letTupExp "fun0" funcall0
+        newResultArray (SubExp $ Var n) (map (SubExp . Var) y) $ \outarr -> do
+          let outarrv = TupLit (map Var outarr) loc
+          let loopbody = do
+                funcall <- transformLambda (dec rec) fun (index cs inarrs iv)
+                x <- letTupExp "fun" funcall
+                letwith cs outarr (pexp iv) (map (SubExp . Var) x) outarrv
+          eDoLoop (zip outarr $ map (pexp . Var) outarr)
+                  i (pexp $ Var n) loopbody (pure outarrv) loc
   eIf (eBinOp Less (pexp zero) (pexp $ Var n) (Basic Bool) loc)
       letbody
       (blankArray (typeOf mape) loc)
@@ -110,12 +110,12 @@ transformExp rec (Reduce cs fun args loc) =
 transformExp rec (Scan cs fun args loc) =
   newFold loc arrexps accexp $ \arr (acc, _) (i, iv) -> do
     funcall <- transformLambda (dec rec) fun $ map (SubExp . Var) acc ++ index cs arr iv
-    letTupExp "fun" funcall $ \x _ -> do
-      let loopbody =
-            letwith cs arr (pexp iv) (map (SubExp . Var) x) =<<
-            eTupLit (map pure $ index cs arr iv++map (SubExp . Var) arr) loc
-      eDoLoop (zip (acc ++ arr) (map (pexp . Var) $ acc ++ arr)) -- XXX Shadowing
-              i (pure $ size cs arr) loopbody (pure $ TupLit (map Var arr) loc) loc
+    x <- letTupExp "fun" funcall
+    let loopbody =
+          letwith cs arr (pexp iv) (map (SubExp . Var) x) =<<
+          eTupLit (map pure $ index cs arr iv++map (SubExp . Var) arr) loc
+    eDoLoop (zip (acc ++ arr) (map (pexp . Var) $ acc ++ arr)) -- XXX Shadowing
+            i (pure $ size cs arr) loopbody (pure $ TupLit (map Var arr) loc) loc
   where (accexp, arrexps) = unzip args
 
 transformExp rec filtere@(Filter cs fun arrexps loc) = do

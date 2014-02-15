@@ -67,14 +67,13 @@ letExps :: MonadBinder m =>
            String -> [Exp] -> m [Ident]
 letExps desc = mapM $ letExp desc
 
-letTupExp :: MonadBinder m =>
-             String -> Exp -> ([Ident] -> Exp -> m Exp) -> m Exp
-letTupExp name e body = do
+letTupExp :: MonadBinder m => String -> Exp -> m [Ident]
+letTupExp name e = do
   let ts  = typeOf e
       loc = srclocOf e
-  (names, namevs) <- unzip <$> mapM (newVar loc name) ts
+  names <- mapM (liftM fst . newVar loc name) ts
   letBind names e
-  body names (TupLit namevs loc)
+  return names
 
 newVar :: MonadFreshNames VName m =>
           SrcLoc -> String -> Type -> m (Ident, SubExp)

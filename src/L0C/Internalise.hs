@@ -276,17 +276,14 @@ internaliseExp (E.ArrayLit es rowtype loc) = do
       tuplit c loc <$> letSubExps "arr_elem" (zipWith arraylit (transpose es') ets)
 
 internaliseExp (E.Apply fname args rettype loc) = do
-  args' <- tupsToIdentList (map fst args)
+  args' <- tupsToIdentList $ map fst args
   let args'' = concatMap flatten $ zip args' $ map snd args
   return $ I.Apply fname args'' rettype' loc
   where rettype' = internaliseType rettype
-        flatten ((c, ks), d) =
+        flatten ((c, ks), _) =
           (case c of Just c' -> [(I.Var c', I.Observe)]
                      Nothing -> []) ++
-          [ (I.Var k, d') | (k,d') <- zip ks $ flattenDiet d ]
-        flattenDiet E.Observe        = [I.Observe]
-        flattenDiet E.Consume        = [I.Consume]
-        flattenDiet (E.TupleDiet ds) = concatMap flattenDiet ds
+          [ (I.Var k, I.Observe) | k <- ks ]
 
 internaliseExp (E.LetPat pat e body _) = do
   e' <- internaliseExp e
@@ -296,12 +293,12 @@ internaliseExp (E.LetPat pat e body _) = do
 
 internaliseExp (E.DoLoop mergepat mergeexp i bound loopbody letbody loc) = do
   bound' <- letSubExp "bound" =<< internaliseExp bound
-  (c,mergevs) <- tupToIdentList mergeexp
+  mergevs <- letTupExp "merge_val" =<< internaliseExp mergeexp
   i' <- internaliseIdent i
   bindingPat mergepat $ \mergepat' -> do
     loopbody' <- insertBindings $ internaliseExp loopbody
     letbody' <- insertBindings $ internaliseExp letbody
-    return $ I.DoLoop (zip mergepat' $ map I.Var $ maybeToList c ++ mergevs)
+    return $ I.DoLoop (zip mergepat' $ map I.Var mergevs)
                       i' bound' loopbody' letbody' loc
 
 internaliseExp (E.LetWith cs name src idxcs idxs ve body loc) = do
@@ -489,10 +486,11 @@ internaliseExp (E.Assert e loc) = do
   return $ I.Assert e' loc
 
 internaliseExp (E.Copy e loc) = do
-  (c,es) <- tupToIdentList e
-  case es of
-    [e'] -> return $ I.Copy (I.Var e') loc
-    _    -> return $ tuplit c loc $ map I.Var es
+  vs <- letTupExp "copy_arg" =<< internaliseExp e
+  case vs of
+    [v] -> return $ I.Copy (I.Var v) loc
+    _    -> do ses <- letSubExps "copy_res" [I.Copy (I.Var v) loc | v <- vs]
+               return $ I.TupLit ses loc
 
 internaliseExp (E.Conjoin es loc) = do
   es' <- letSubExps "conjoin_arg" =<< mapM internaliseExp es
