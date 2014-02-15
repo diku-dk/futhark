@@ -299,8 +299,8 @@ internaliseExp (E.DoLoop mergepat mergeexp i bound loopbody letbody loc) = do
   (c,mergevs) <- tupToIdentList mergeexp
   i' <- internaliseIdent i
   bindingPat mergepat $ \mergepat' -> do
-    loopbody' <- internaliseExp loopbody
-    letbody' <- internaliseExp letbody
+    loopbody' <- insertBindings $ internaliseExp loopbody
+    letbody' <- insertBindings $ internaliseExp letbody
     return $ I.DoLoop (zip mergepat' $ map I.Var $ maybeToList c ++ mergevs)
                       i' bound' loopbody' letbody' loc
 
@@ -312,13 +312,12 @@ internaliseExp (E.LetWith cs name src idxcs idxs ve body loc) = do
   idxcs' <- mapM internaliseCerts idxcs
   dsts <- map fst <$> mapM (newVar loc "letwith_dst" . I.identType) srcs
   c <- mergeCerts (catMaybes [c1,c2]++cs')
-  let comb olde (dname, sname, vname) inner =
-        I.LetWith cs' dname sname idxcs' idxs' (I.Var vname) (olde inner) loc
-      lws = foldl comb id $ zip3 dsts srcs vnames
-  inner <- bindingPat (E.Id name) $ \pat' -> do
-             letBind pat' $ tuplit c loc (map I.Var dsts)
-             internaliseExp body
-  return $ lws inner
+  let comb (dname, sname, vname) =
+        letWithBind cs' dname sname idxcs' idxs' $ I.Var vname
+  mapM_ comb $ zip3 dsts srcs vnames
+  bindingPat (E.Id name) $ \pat' -> do
+    letBind pat' $ tuplit c loc (map I.Var dsts)
+    insertBindings $ internaliseExp body
 
 internaliseExp (E.Replicate ne ve loc) = do
   ne' <- letSubExp "n" =<< internaliseExp ne
