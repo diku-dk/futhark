@@ -2,11 +2,9 @@
 module Main (main) where
 
 import Control.Monad
-import Control.Monad.Trans
-import Control.Monad.Writer.Strict (Writer, runWriter, tell)
+import Control.Monad.Writer.Strict (runWriter)
 import Control.Monad.Error
 import Data.Array
-import Data.Maybe (isJust)
 import Data.List
 import System.Console.GetOpt
 import System.Environment (getArgs, getProgName)
@@ -18,6 +16,7 @@ import Text.Printf
 import Language.L0.Core
 import Language.L0.Parser
 import L0C.Internalise
+import L0C.Pipeline
 
 import qualified L0C.ExternalRep.TypeChecker as E
 import qualified L0C.ExternalRep.Renamer as E
@@ -38,30 +37,6 @@ import L0C.Untrace
 import qualified L0C.Backends.SequentialC as SequentialC
 -- import qualified L0C.Backends.Bohrium as Bohrium
 
-data CompileError = CompileError {
-    errorDesc :: String
-  , errorProg :: Maybe I.Prog
-  }
-
-instance Error CompileError where
-  strMsg s = CompileError s Nothing
-
-type L0CM = ErrorT CompileError (Writer String)
-
-data Pass = Pass {
-    passName :: String
-  , passOp :: I.Prog -> L0CM I.Prog
-  }
-
-type Action = (String, I.Prog -> IO ())
-
-data L0Config = L0Config {
-    l0pipeline :: [Pass]
-  , l0action :: Action
-  , l0checkAliases :: Bool
-  , l0verbose :: Maybe (Maybe FilePath)
-}
-
 newL0Config :: L0Config
 newL0Config = L0Config {
                 l0pipeline = []
@@ -69,12 +44,6 @@ newL0Config = L0Config {
               , l0checkAliases = True
               , l0verbose = Nothing
               }
-
-verbose :: L0Config -> Bool
-verbose = isJust . l0verbose
-
-compileError :: String -> Maybe I.Prog -> L0CM a
-compileError s p = throwError $ CompileError s p
 
 type L0Option = OptDescr (L0Config -> L0Config)
 
@@ -318,32 +287,23 @@ l0c config filename srccode =
   case runWriter (runErrorT l0c') of
     (Left err, msgs) -> (msgs, Left err)
     (Right prog, msgs) -> (msgs, Right prog)
-  where l0c' = canFail Nothing (parseL0 filename srccode) >>=
-               canFail Nothing . typeCheck E.checkProg E.checkProgNoUniqueness config >>=
-               pipeline . internaliseProg . E.tagProg
-        pipeline = foldl comb return $ l0pipeline config
-        comb prev pass prog = do
-          prog' <- prev prog
-          when (verbose config) $ tell $ "Running " ++ passName pass ++ ".\n"
-          res <- lift $ runErrorT $ passOp pass prog'
-          case res of
-            Left err ->
-              compileError ("Error during pass '" ++ passName pass ++ "':\n" ++ errorDesc err)
-                           (Just prog')
-            Right prog'' ->
-              case typeCheck I.checkProg I.checkProgNoUniqueness config prog'' of
-                Left err ->
-                  compileError ("Type error after pass '" ++ passName pass ++
-                                "':\n" ++ show err)
-                               (Just prog'')
-                Right prog''' -> return prog'''
+  where l0c' = do
+          parsed_prog <- canFail "" Nothing $ parseL0 filename srccode
+          ext_prog    <- canFail "" Nothing $
+                         typeCheck E.checkProg E.checkProgNoUniqueness config
+                         parsed_prog
+          int_prog    <- canFail "After internalisation:\n" Nothing $
+                         typeCheck I.checkProg I.checkProgNoUniqueness config $
+                         internaliseProg $
+                         E.tagProg ext_prog
+          runPasses config int_prog
 
-canFail :: Show err => Maybe I.Prog -> Either err a -> L0CM a
-canFail p (Left err) = compileError (show err) p
-canFail _ (Right v)  = return v
+canFail :: Show err => String -> Maybe I.Prog -> Either err a -> L0CM a
+canFail d p (Left err) = compileError (d ++ show err) p
+canFail _ _ (Right v)  = return v
 
 liftPass :: Show err => (I.Prog -> Either err a) -> I.Prog -> L0CM a
-liftPass f p = canFail (Just p) (f p)
+liftPass f p = canFail "" (Just p) (f p)
 
 {-
 module Main where
