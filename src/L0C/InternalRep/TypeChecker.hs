@@ -545,9 +545,8 @@ checkExp (Apply fname args rettype loc) = do
 
 checkExp (LetPat pat e body loc) = do
   (e', dataflow) <- collectDataflow $ checkExp e
-  (scope, pat') <- checkBinding loc pat
-                                (srclocOf e') (typeOf e')
-                                dataflow
+  (scope, pat') <-
+    checkBinding loc pat (srclocOf e') (typeOf e') dataflow
   scope $ do
     body' <- checkExp body
     return $ LetPat pat' e' body' loc
@@ -843,7 +842,7 @@ checkSOACArrayArg e = do
 checkIdent :: Ident -> TypeM Ident
 checkIdent (Ident name t pos) = do
   vt <- lookupVar name pos
-  t' <- checkAnnotation pos ("variable " ++ textual (baseName name)) t vt
+  t' <- checkAnnotation pos ("variable " ++ textual name) t vt
   return $ Ident name t' pos
 
 checkBinOp :: BinOp -> SubExp -> SubExp -> Type -> SrcLoc -> TypeM Exp

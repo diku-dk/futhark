@@ -522,7 +522,7 @@ progNames = execWriter . mapM funNames . progFunctions
 
         expNames e@(LetWith _ dest _ _ _ _ _ _) =
           one dest >> walkExpM names e
-        expNames e@(LetPat pat _ body _) =
+        expNames e@(LetPat pat _ _ _) =
           mapM_ one pat >> walkExpM names e
         expNames e@(DoLoop pat i _ _ _ _) =
           mapM_ (one . fst) pat >> one i >> walkExpM names e
