@@ -25,6 +25,7 @@ Executable l0c
                  monad-loops >= 0.4.2,
                  hashable >= 1.2.1.0,
                  unordered-containers >= 0.2.3.3,
+                 dlist >= 0.6.0.1,
                  text
 
   -- We have to mention these explicitly, or alex and happy won't be

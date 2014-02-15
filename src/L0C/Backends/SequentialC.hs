@@ -9,11 +9,12 @@ import Control.Monad
 
 import L0C.InternalRep
 import qualified L0C.FirstOrderTransform as FOT
+import L0C.Tools
 
 import qualified L0C.Backends.GenericC as GenericC
 
 compileProg :: Prog -> String
 compileProg = GenericC.compileProg expCompiler
   where expCompiler _ e
-          | FOT.transformable e = liftM Left $ FOT.transformExp FOT.noDepthLimit e
+          | FOT.transformable e = liftM Left $ runBinder $ FOT.transformExp FOT.noDepthLimit e
           | otherwise           = return $ Left e
