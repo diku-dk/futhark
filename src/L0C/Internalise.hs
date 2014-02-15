@@ -512,7 +512,7 @@ internaliseExp (E.ReduceT cs fun inputs loc) = do
   ce <- conjoinCerts cs' loc
   fun' <- internaliseTupleLambda ce fun
   return $ I.Reduce cs' fun' (zip accs' arrs') loc
-  where (arrs, accs) = unzip inputs
+  where (accs, arrs) = unzip inputs
 
 internaliseExp (E.ScanT cs fun inputs loc) = do
   arrs' <- letSubExps "scan_arg" =<< mapM internaliseExp arrs
@@ -521,7 +521,7 @@ internaliseExp (E.ScanT cs fun inputs loc) = do
   ce <- conjoinCerts cs' loc
   fun' <- internaliseTupleLambda ce fun
   return $ I.Scan cs' fun' (zip accs' arrs') loc
-  where (arrs, accs) = unzip inputs
+  where (accs, arrs) = unzip inputs
 
 internaliseExp (E.FilterT cs fun arrs loc) = do
   arrs' <- letSubExps "filter_arg" =<< mapM internaliseExp arrs
