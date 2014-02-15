@@ -283,6 +283,7 @@ internaliseExp (E.Apply fname args rettype loc) = do
         flatten ((c, ks), _) =
           (case c of Just c' -> [(I.Var c', I.Observe)]
                      Nothing -> []) ++
+          -- Diet wrong, but will be fixed by type-checker.
           [ (I.Var k, I.Observe) | k <- ks ]
 
 internaliseExp (E.LetPat pat e body _) = do
@@ -380,7 +381,7 @@ internaliseExp (E.Split cs nexp arrexp loc) = do
           fail "L0C.Internalise.internaliseExp Split: Empty array"
         internalise cs' nexp' _ [arr] =
           return $ I.Split cs' nexp' (I.Var arr) loc
-        internalise cs' nexp' c (_:arrs) = do
+        internalise cs' nexp' c arrs = do
           cs'' <- mergeCerts (certify c cs')
           partnames <- forM (map I.identType arrs) $ \et -> do
                          a <- fst <$> newVar loc "split_a" et
@@ -422,7 +423,7 @@ internaliseExp (E.Reduce lam ne arr _ loc) = do
   let cs = catMaybes [c1,c2]
   se <- conjoinCerts cs loc
   lam' <- internaliseLambda se lam
-  certifySOAC se $ I.Reduce cs lam' (zip (map I.Var nes) (map I.Var arrs)) loc
+  return $ I.Reduce cs lam' (zip (map I.Var nes) (map I.Var arrs)) loc
 
 internaliseExp (E.Scan lam ne arr _ loc) = do
   (c1,arrs) <- tupToIdentList arr
@@ -446,8 +447,8 @@ internaliseExp (E.Redomap lam1 lam2 ne arr _ loc) = do
   se <- conjoinCerts cs loc
   lam1' <- internaliseLambda se lam1
   lam2' <- internaliseLambda se lam2
-  certifySOAC se $ I.Redomap cs lam1' lam2'
-                   (map I.Var nes) (map I.Var arrs) loc
+  return $ I.Redomap cs lam1' lam2'
+           (map I.Var nes) (map I.Var arrs) loc
 
 -- The "interesting" cases are over, now it's mostly boilerplate.
 
@@ -458,12 +459,8 @@ internaliseExp (E.Literal v loc) =
 
 internaliseExp (E.If ce te fe t loc) = do
   ce' <- letSubExp "cond" =<< internaliseExp ce
-  te' <- insertBindings $ do
-           (c,ks) <- tupToIdentList te
-           return $ tuplit c loc $ map I.Var ks
-  fe' <- insertBindings $ do
-           (c,ks) <- tupToIdentList fe
-           return $ tuplit c loc $ map I.Var ks
+  te' <- insertBindings $ internaliseExp te
+  fe' <- insertBindings $ internaliseExp fe
   return $ I.If ce' te' fe' (internaliseType t) loc
 
 internaliseExp (E.BinOp bop xe ye t loc) = do
