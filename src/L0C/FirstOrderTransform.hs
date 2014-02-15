@@ -21,7 +21,7 @@ import Control.Monad.State
 import Data.Loc
 
 import L0C.InternalRep
-import L0C.MonadFreshNames
+import L0C.InternalRep.MonadFreshNames
 import L0C.Tools
 
 -- | Return 'True' if the given expression is a SOAC that can be
@@ -86,36 +86,37 @@ transformExp rec mape@(Map cs fun arrs loc) = do
   let letbody = do
         funcall0 <- transformLambda (dec rec) fun (index cs inarrs zero)
         y <- letTupExp "fun0" funcall0
-        newResultArray (SubExp $ Var n) (map (SubExp . Var) y) $ \outarr -> do
-          let outarrv = TupLit (map Var outarr) loc
-          let loopbody = do
-                funcall <- transformLambda (dec rec) fun (index cs inarrs iv)
-                x <- letTupExp "fun" funcall
-                letwith cs outarr (pexp iv) (map (SubExp . Var) x) outarrv
-          eDoLoop (zip outarr $ map (pexp . Var) outarr)
-                  i (pexp $ Var n) loopbody (pure outarrv) loc
+        outarr <- newResultArray (SubExp $ Var n) (map (SubExp . Var) y)
+        let outarrv = TupLit (map Var outarr) loc
+            loopbody = do
+              funcall <- transformLambda (dec rec) fun (index cs inarrs iv)
+              x <- letTupExp "fun" funcall
+              dests <- letwith cs outarr (pexp iv) (map (SubExp . Var) x)
+              return $ TupLit (map Var dests) loc
+        eDoLoop (zip outarr $ map (pexp . Var) outarr)
+                i (pexp $ Var n) loopbody (pure outarrv) loc
   eIf (eBinOp Less (pexp zero) (pexp $ Var n) (Basic Bool) loc)
       letbody
       (blankArray (typeOf mape) loc)
       (typeOf mape) loc
 
-transformExp rec (Reduce cs fun args loc) =
-  newFold loc arrexps accexp $ \arr (acc, accv) (i, iv) -> do
-    let funcall = transformLambda (dec rec) fun $
-                  map (SubExp . Var) acc ++ index cs arr iv
-    eDoLoop (zip acc $ map pexp accv) i (pure $ size cs arr)
-            funcall (pure $ TupLit (map Var acc) loc) loc
+transformExp rec (Reduce cs fun args loc) = do
+  (arr, (acc, accv), (i, iv)) <- newFold loc arrexps accexp
+  let funcall = transformLambda (dec rec) fun $
+                map (SubExp . Var) acc ++ index cs arr iv
+  eDoLoop (zip acc $ map pexp accv) i (pure $ size cs arr)
+          funcall (pure $ TupLit (map Var acc) loc) loc
   where (accexp, arrexps) = unzip args
 
-transformExp rec (Scan cs fun args loc) =
-  newFold loc arrexps accexp $ \arr (acc, _) (i, iv) -> do
-    funcall <- transformLambda (dec rec) fun $ map (SubExp . Var) acc ++ index cs arr iv
-    x <- letTupExp "fun" funcall
-    let loopbody =
-          letwith cs arr (pexp iv) (map (SubExp . Var) x) =<<
-          eTupLit (map pure $ index cs arr iv++map (SubExp . Var) arr) loc
-    eDoLoop (zip (acc ++ arr) (map (pexp . Var) $ acc ++ arr)) -- XXX Shadowing
-            i (pure $ size cs arr) loopbody (pure $ TupLit (map Var arr) loc) loc
+transformExp rec (Scan cs fun args loc) = do
+  (arr, (acc, _), (i, iv)) <- newFold loc arrexps accexp
+  let loopbody = do
+        funcall <- transformLambda (dec rec) fun $ map (SubExp . Var) acc ++ index cs arr iv
+        x <- letTupExp "fun" funcall
+        dests <- letwith cs arr (pexp iv) (map (SubExp . Var) x)
+        eTupLit (map pure $ index cs dests iv++map (SubExp . Var) dests) loc
+  eDoLoop (zip (acc ++ arr) (map (pexp . Var) $ acc ++ arr)) -- XXX Shadowing
+          i (pure $ size cs arr) loopbody (pure $ TupLit (map Var arr) loc) loc
   where (accexp, arrexps) = unzip args
 
 transformExp rec filtere@(Filter cs fun arrexps loc) = do
@@ -133,7 +134,6 @@ transformExp rec filtere@(Filter cs fun arrexps loc) = do
   let test = LetPat [check] fun' branch loc
       branch = If checkv (SubExp $ intval 1) (SubExp $ intval 0) [Basic Int] loc
       indexin0 = index cs arr $ intval 0
-      indexin = index cs arr iv
   mape <- transformExp (dec rec) $
           Map cs (Lambda (map toParam xs) test [Basic Int] loc) (map Var arr) loc
   plus <- do
@@ -144,46 +144,45 @@ transformExp rec filtere@(Filter cs fun arrexps loc) = do
              transformExp (dec rec) $ Scan cs plus [(intval 0,Var mape')] loc
   ia <- letExp "ia" scan
   let indexia ind = eIndex cs ia Nothing [ind] loc
-      sub1 e = eBinOp Minus e (pexp $ intval 1) (Basic Int) loc
-      indexi = indexia $ pexp iv
       indexim1 = indexia $ sub1 $ pexp nv
+      sub1 e = eBinOp Minus e (pexp $ intval 1) (Basic Int) loc
   indexiaend <- indexia $ sub1 $ pexp nv
-  newResultArray indexiaend indexin0 $ \res -> do
-    let resv = TupLit (map Var res) loc
-    update <- letwith cs res (sub1 indexi) indexin resv
-    loopbody <-
-      eIf (eBinOp LogOr
-           (eBinOp Equal (pexp iv) (pexp $ intval 0) (Basic Bool) loc)
-           (eIf (eBinOp Less (pexp $ intval 0) (pexp iv) (Basic Bool) loc)
-                (eBinOp Equal indexi indexim1 (Basic Bool) loc)
-                (pexp $ Constant (BasicVal $ LogVal False) loc)
-                [Basic Bool] loc)
-           (Basic Bool) loc)
-          (pure resv) (pure update) (typeOf resv) loc
-    checkempty $ DoLoop (zip res $ map Var res) i nv loopbody resv loc -- XXX, name shadowing
+  res <- newResultArray indexiaend indexin0
+  let resv = TupLit (map Var res) loc
+      loopbody = do
+        let indexi = indexia $ pexp iv
+            indexin = index cs arr iv
+        update <- letwith cs res (sub1 indexi) indexin
+        eIf (eBinOp LogOr
+             (eBinOp Equal (pexp iv) (pexp $ intval 0) (Basic Bool) loc)
+             (eIf (eBinOp Less (pexp $ intval 0) (pexp iv) (Basic Bool) loc)
+              (eBinOp Equal indexi indexim1 (Basic Bool) loc)
+              (pexp $ Constant (BasicVal $ LogVal False) loc)
+              [Basic Bool] loc)
+             (Basic Bool) loc)
+            (pure resv) (pure $ TupLit (map Var update) loc) (typeOf resv) loc
+  checkempty =<< eDoLoop (zip res $ map (pexp . Var) res) i (pexp nv) loopbody (pure resv) loc -- XXX, name shadowing
   where intval x = Constant (BasicVal $ IntVal x) loc
 
-transformExp rec (Redomap cs _ innerfun accexps arrexps loc) =
-  newFold loc arrexps accexps $ \arr (acc, accv) (i, iv) -> do
-    funcall <- transformLambda (dec rec) innerfun
-               (map (SubExp . Var) acc ++ index cs arr iv)
-    sze <- letSubExp "size" $ size cs arr
-    return $ DoLoop (zip acc accv) i sze funcall (TupLit accv loc) loc
+transformExp rec (Redomap cs _ innerfun accexps arrexps loc) = do
+  (arr, (acc, accv), (i, iv)) <- newFold loc arrexps accexps
+  funcall <- transformLambda (dec rec) innerfun
+             (map (SubExp . Var) acc ++ index cs arr iv)
+  sze <- letSubExp "size" $ size cs arr
+  return $ DoLoop (zip acc accv) i sze funcall (TupLit accv loc) loc
 
 transformExp rec e = mapExpM transform e
   where transform = identityMapper {
-                      mapOnExp = transformExp (dec rec)
+                      mapOnExp = insertBindings . transformExp (dec rec)
                     }
 
 newFold :: SrcLoc -> [SubExp] -> [SubExp]
-        -> ([Ident] -> ([Ident], [SubExp]) -> (Ident, SubExp) -> Binder Exp) -> Binder Exp
-newFold loc arrexps accexps body = do
-  (i, iv) <- newVar loc "i" (Basic Int)
-  arr <- letExps "arr" $ map SubExp arrexps
-  let ets = map subExpType accexps
-  (names, namevs) <- unzip <$> mapM (newVar loc "acc") ets
-  let binder inner = LetPat names (TupLit accexps loc) inner loc
-  binder <$> body arr (names, namevs) (i, iv)
+        -> Binder ([Ident], ([Ident], [SubExp]), (Ident, SubExp))
+newFold loc arrexps accexps = do
+  (i, iv) <- newVar loc "i" $ Basic Int
+  arr <- letExps "arr" $ map maybeCopy arrexps
+  acc <- letExps "acc" $ map maybeCopy accexps
+  return (arr, (acc, map Var acc), (i, iv))
 
 -- | @maybeCopy e@ returns a copy expression containing @e@ if @e@ is
 -- not unique or a basic type, otherwise just returns @e@ itself.
@@ -204,25 +203,24 @@ index :: Certificates -> [Ident] -> SubExp -> [Exp]
 index cs arrs i = flip map arrs $ \arr ->
                   Index cs arr Nothing [i] $ srclocOf i
 
-newResultArray :: Exp -> [Exp] -> ([Ident] -> Binder Exp) -> Binder Exp
-newResultArray sizeexp valueexps body = do
+newResultArray :: Exp -> [Exp] -> Binder [Ident]
+newResultArray sizeexp valueexps = do
   sizeexp' <- letSubExp "size" sizeexp
   valueexps' <- letSubExps "value" valueexps
   (names, namevs) <- unzip <$> mapM (newVar loc "outarr_v" . subExpType) valueexps'
-  let bnd inner = LetPat names (TupLit valueexps' loc) inner loc
-      arrexp = [ Replicate sizeexp' namev loc | namev <- namevs ]
-  outarrs <- letExps "outarr" arrexp
-  bnd <$> body outarrs
+  letBind names (TupLit valueexps' loc)
+  outarrs <- letExps "outarr" [ Replicate sizeexp' namev loc | namev <- namevs ]
+  letExps "outarr" $ map (maybeCopy . Var) outarrs
   where loc = srclocOf sizeexp
 
-letwith :: Certificates -> [Ident] -> Binder Exp -> [Exp] -> Exp -> Binder Exp
-letwith cs ks i vs body = do
+letwith :: Certificates -> [Ident] -> Binder Exp -> [Exp] -> Binder [Ident]
+letwith cs ks i vs = do
   vs' <- letSubExps "values" vs
   i' <- letSubExp "i" =<< i
-  names <- mapM (liftM fst . newVar loc "tup" . subExpType) vs'
-  let comb inner (k, name) = LetWith cs k k Nothing [i'] (Var name) inner loc
-  return $ LetPat names (TupLit vs' loc) (foldl comb body $ zip ks names) loc
-  where loc = srclocOf body
+  dests <- mapM (newIdent' (const "letwith_dest")) ks
+  let update (dest, k, v) = letWithBind cs dest k Nothing [i'] v
+  mapM_ update $ zip3 dests ks vs'
+  return dests
 
 size :: Certificates -> [Ident] -> Exp
 size _ []     = SubExp $ Constant (BasicVal $ IntVal 0) noLoc
