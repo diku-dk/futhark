@@ -292,11 +292,11 @@ l0c config filename srccode =
           ext_prog    <- canFail "" Nothing $
                          typeCheck E.checkProg E.checkProgNoUniqueness config
                          parsed_prog
-          int_prog    <- canFail "After internalisation:\n" Nothing $
-                         typeCheck I.checkProg I.checkProgNoUniqueness config $
-                         internaliseProg $
-                         E.tagProg ext_prog
-          runPasses config int_prog
+          let int_prog = internaliseProg $ E.tagProg ext_prog
+          int_prog_checked <- canFail "After internalisation:\n" (Just int_prog) $
+                              typeCheck I.checkProg I.checkProgNoUniqueness config
+                              int_prog
+          runPasses config int_prog_checked
 
 canFail :: Show err => String -> Maybe I.Prog -> Either err a -> L0CM a
 canFail d p (Left err) = compileError (d ++ show err) p
