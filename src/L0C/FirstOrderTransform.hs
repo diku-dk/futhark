@@ -169,10 +169,10 @@ transformExp rec filtere@(Filter cs fun arrexps loc) = do
 
 transformExp rec (Redomap cs _ innerfun accexps arrexps loc) = do
   (arr, (acc, accv), (i, iv)) <- newFold loc arrexps accexps
-  funcall <- transformLambda (dec rec) innerfun
-             (map (SubExp . Var) acc ++ index cs arr iv)
+  let funcall = transformLambda (dec rec) innerfun
+                (map (SubExp . Var) acc ++ index cs arr iv)
   sze <- letSubExp "size" $ size cs arr
-  return $ DoLoop (zip acc accv) i sze funcall (TupLit accv loc) loc
+  eDoLoop (zip acc $ map pexp accv) i (pexp sze) funcall (pure $ TupLit accv loc) loc
 
 transformExp rec e = mapExpM transform e
   where transform = identityMapper {
