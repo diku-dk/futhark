@@ -129,8 +129,8 @@ transformExp rec filtere@(Filter cs fun arrexps loc) = do
       rowtypes = map (rowType . identType) arr
   (xs, _) <- unzip <$> mapM (newVar loc "x") rowtypes
   (i, iv) <- newVar loc "i" $ Basic Int
-  fun' <- transformLambda (dec rec) fun $ map (SubExp . Var) xs
   (check, checkv) <- newVar loc "check" $ Basic Bool
+  fun' <- insertBindings $ transformLambda (dec rec) fun $ map (SubExp . Var) xs
   let test = LetPat [check] fun' branch loc
       branch = If checkv (SubExp $ intval 1) (SubExp $ intval 0) [Basic Int] loc
       indexin0 = index cs arr $ intval 0
