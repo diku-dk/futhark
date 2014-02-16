@@ -101,11 +101,11 @@ soacSeen name produced soac =
          }
   where (desc, bodys) =
           case soac of
-            SOAC.MapT _ l _ _  -> ("mapT", [tupleLambdaBody l])
-            SOAC.FilterT _ l _ _ -> ("filterT", [tupleLambdaBody l])
-            SOAC.ScanT _ l _ _ -> ("scanT", [tupleLambdaBody l])
-            SOAC.ReduceT _ l _ _ -> ("reduceT", [tupleLambdaBody l])
-            SOAC.RedomapT _ l1 l2 _ _ _ -> ("redomapT", [tupleLambdaBody l1, tupleLambdaBody l2])
+            SOAC.Map _ l _ _  -> ("mapT", [lambdaBody l])
+            SOAC.Filter _ l _ _ -> ("filterT", [lambdaBody l])
+            SOAC.Scan _ l _ _ -> ("scanT", [lambdaBody l])
+            SOAC.Reduce _ l _ _ -> ("reduceT", [lambdaBody l])
+            SOAC.Redomap _ l1 l2 _ _ _ -> ("redomapT", [lambdaBody l1, lambdaBody l2])
 
         inspectInput (SOAC.Input ts (SOAC.Var v)) =
           Just (identName v, HS.singleton $ map descTransform ts)
@@ -122,14 +122,14 @@ soacSeen name produced soac =
 
 flowForExp :: Exp -> FlowM ()
 flowForExp (LetPat pat e body _)
-  | Right e' <- SOAC.fromExp e,
-    names@(name:_) <- patNames pat = do
+  | Right e' <- SOAC.fromExp (const Nothing) e,
+    names@(name:_) <- map identName pat = do
   soacSeen name names e'
   flowForExp body
 flowForExp (LetPat pat e body _) = do
   flowForExp e
   tell $ HM.map expand $ execWriter $ flowForExp body
-  where names = HS.fromList $ patNames pat
+  where names = HS.fromList $ map identName pat
         freeInE = HS.toList $ freeNamesInExp e
         expand info =
           info { soacConsumed =
@@ -141,10 +141,8 @@ flowForExp (LetPat pat e body _) = do
             [ (name, HS.map ("complex":) s) | name <- freeInE ]
           | otherwise =
             [(usedName, s)]
-flowForExp (DoLoop mergepat initexp _ boundexp loopbody body _)
-  | names@(name:_) <- patNames mergepat = do
-  flowForExp initexp
-  flowForExp boundexp
+flowForExp (DoLoop merge _ boundexp loopbody body _)
+  | names@(name:_) <- map (identName . fst) merge = do
   flowForExp body
   tell $ HM.singleton
          (textual name)
@@ -155,15 +153,17 @@ flowForExp (DoLoop mergepat initexp _ boundexp loopbody body _)
              HM.fromList
                  [ (used, HS.singleton []) |
                    used <- HS.toList
-                           $ mconcat (map freeNamesInExp [initexp, boundexp, loopbody])
+                           $ mconcat (map freeNamesInExp $
+                                      [SubExp boundexp, loopbody] ++
+                                      map (SubExp . snd) merge)
                           `HS.difference` HS.fromList names
                  ]
          , soacBodyInfo = execWriter $ flowForExp loopbody
          }
 flowForExp e = walkExpM flow e
 
-flow :: Walker (TypeBase Names) VName FlowM
+flow :: Walker FlowM
 flow = identityWalker {
          walkOnExp = flowForExp
-       , walkOnTupleLambda = flowForExp . tupleLambdaBody
+       , walkOnLambda = flowForExp . lambdaBody
        }
