@@ -172,12 +172,11 @@ copyCtPropSubExp :: SubExp -> CPropM SubExp
 copyCtPropSubExp e@(Var (Ident vnm _ pos)) = do
   bnd <- asks $ HM.lookup vnm . envVtable
   case bnd of
-    Nothing                 -> return e
-    Just (Value v   _ _)    -> if isBasicTypeVal v
-                               then changed $ Constant v pos
-                               else return e
-    Just (VarId  id' tp1 _) -> changed $ Var (Ident id' tp1 pos) -- or tp
-    Just (SymArr {})        -> do nonRemovable vnm
+    Just (Value v   _ _)
+      | isBasicTypeVal v    -> changed $ Constant v pos
+    Just (VarId  id' tp1 _) -> do nonRemovable id'
+                                  changed $ Var (Ident id' tp1 pos) -- or tp
+    _                       -> do nonRemovable vnm
                                   return e
 copyCtPropSubExp (Constant v loc) = return $ Constant v loc
 
@@ -199,12 +198,11 @@ copyCtPropExp (LetPat pat e body pos) = do
     let bnds = getPropBnds pat e' remv
         remv = not $ null bnds
 
-    (body', mvars) <-  collectNonRemovable (map fst bnds) $
-                       if null bnds then copyCtPropExp body
-                       else binding bnds $ copyCtPropExp body
-    if remv && null mvars && False then changed body'
+    (body', mvars) <- collectNonRemovable (map fst bnds) $
+                      if null bnds then copyCtPropExp body
+                      else binding bnds $ copyCtPropExp body
+    if remv && null mvars then changed body'
     else return $ LetPat pat e' body' pos
-
 
 copyCtPropExp (DoLoop merge idd n loopbdy letbdy loc) = do
   let (mergepat, mergeexp) = unzip merge
@@ -214,81 +212,58 @@ copyCtPropExp (DoLoop merge idd n loopbdy letbdy loc) = do
   letbdy'  <- copyCtPropExp letbdy
   return $ DoLoop (zip mergepat mergeexp') idd n' loopbdy' letbdy' loc
 
-copyCtPropExp eee@(Index cs idd@(Ident vnm tp p) csidx inds pos) = do
+copyCtPropExp (Index cs idd@(Ident vnm tp p) csidx inds pos) = do
   inds' <- mapM copyCtPropSubExp inds
   bnd   <- asks $ HM.lookup vnm . envVtable
   cs'   <- copyCtPropCerts cs
   csidx' <- maybe (return Nothing) (liftM Just) $ liftM copyCtPropCerts csidx
   case bnd of
-    Nothing               -> return  $ Index cs' idd csidx' inds' pos
-    Just (VarId  id' _ _) -> changed $ Index cs' (Ident id' tp p) csidx' inds' pos
-    Just (Value v _ _) ->
-      case v of
-        ArrayVal _ _ ->
-          let sh = arrayShape v
-          in case ctIndex inds' of
-               Nothing -> return $ Index cs' idd csidx' inds' pos
-               Just iis->
-                 if length iis == length sh
-                 then case getArrValInd v iis of
-                        Nothing -> return $ Index cs' idd csidx' inds' pos
-                        Just el -> changed $ SubExp $ Constant el pos
-                 else return $ Index cs' idd csidx' inds' pos
-        _ -> badCPropM $ TypeError pos  " indexing into a non-array value "
+    Nothing               -> do nonRemovable vnm
+                                return $ Index cs' idd csidx' inds' pos
+    Just (VarId  id' _ _) -> do nonRemovable id'
+                                changed $ Index cs' (Ident id' tp p) csidx' inds' pos
+    Just (Value v@(ArrayVal _ _) _ _)
+      | Just iis <- ctIndex inds',
+        length iis == length (arrayShape v),
+        Just el <- getArrValInd v iis -> changed $ SubExp $ Constant el pos
+
     Just (SymArr e' _ _) ->
       case (e', inds') of
         (Iota _ _, [ii]) -> changed $ SubExp ii
-        (Iota _ _, _)    -> badCPropM $ TypeError pos  " bad indexing in iota "
 
         (Index cs2 aa csidx2 ais _,_) -> do
-            -- the array element type is the same as the one of the big array, i.e., t1
-            -- the result type is the same as eee's, i.e., tp2
-            inner <- copyCtPropExp(Index (cs'++cs2) aa
-                                   (liftM2 (++) csidx' csidx2)
-                                   (ais ++ inds') pos)
+            inner <- copyCtPropExp (Index (cs'++cs2) aa
+                                    (liftM2 (++) csidx' csidx2)
+                                    (ais ++ inds') pos)
             changed inner
 
-        (ArrayLit {}   , _) ->
-            case ctIndex inds' of
-                Nothing  -> return $ Index cs' idd csidx' inds' pos
-                Just iis -> case getArrLitInd e' iis of
-                                Nothing -> return $ Index cs' idd csidx' inds' pos
-                                Just el -> changed el
-
-        (TupLit   _ _, _       ) -> badCPropM $ TypeError pos  " indexing into a tuple (found tuplit) "
-
+        (ArrayLit {}   , _)
+          | Just iis <- ctIndex inds',
+            Just el <- getArrLitInd e' iis -> changed el
 
         (Replicate _ (Var vv) _, _:is') -> do
             inner <- if null is'
                      then SubExp <$> copyCtPropSubExp (Var vv)
                      else copyCtPropExp (Index cs' vv csidx' is' pos)
             changed inner
-        (Replicate _ (Constant arr@(ArrayVal _ _) _) _, _:is') ->
-            case ctIndex is' of
-                Nothing -> return $ Index cs' idd csidx' inds' pos
-                Just iis-> case getArrValInd arr iis of
-                               Nothing -> return $ Index cs' idd csidx' inds' pos
-                               Just el -> changed $ SubExp $ Constant el pos
-        (Replicate _ val@(Constant _ _) _, _:is') ->
-            if null is' then changed $ SubExp val
-            else badCPropM $ TypeError pos  " indexing into a basic type "
 
-        (Replicate {}, _) ->
-            return $ Index cs' idd csidx' inds' pos
+        (Replicate _ (Constant arr@(ArrayVal _ _) _) _, _:is')
+          | Just iis <- ctIndex is',
+            Just el <- getArrValInd arr iis ->
+              changed $ SubExp $ Constant el pos
+
+        (Replicate _ val@(Constant _ _) _, [_]) ->
+          changed $ SubExp val
 
         (Transpose cs2 k n (Var src) _, _)
           | k+n < length inds' ->
             changed $ Index (cs'++cs2) src csidx' (transposeIndex k n inds') pos
-        (Transpose {}, _) -> do
-          nonRemovable vnm
-          return $ Index cs' idd csidx' inds' pos
 
-        (Reshape {}, _) -> do
-          nonRemovable vnm
-          return $ Index cs' idd csidx' inds' pos
+        _ -> do nonRemovable vnm
+                return $ Index cs' idd csidx' inds' pos
 
-        _ -> badCPropM $ CopyCtPropError pos (" Unreachable case in copyCtPropExp of Index exp: " ++
-                                              ppExp eee++" is bound to "++ppExp e' )
+    _ -> do nonRemovable vnm
+            return $ Index cs' idd csidx' inds' pos
 
 copyCtPropExp (BinOp bop e1 e2 tp pos) = do
     e1'   <- copyCtPropSubExp e1
@@ -414,6 +389,7 @@ copyCtPropExp (Apply fname args tp pos) = do
 copyCtPropExp e = mapExpM mapper e
   where mapper = identityMapper {
                    mapOnExp = copyCtPropExp
+                 , mapOnSubExp = copyCtPropSubExp
                  , mapOnLambda = copyCtPropLambda
                  , mapOnIdent = copyCtPropIdent
                  , mapOnCertificates = copyCtPropCerts
@@ -434,7 +410,8 @@ copyCtPropCerts = liftM (nub . concat) . mapM check
           vv <- asks $ HM.lookup (identName idd) . envVtable
           case vv of
             Just (Value (BasicVal Checked) _ _) -> changed []
-            Just (VarId  id' tp1 _)             -> changed [Ident id' tp1 loc]
+            Just (VarId  id' tp1 _)             -> do nonRemovable id'
+                                                      changed [Ident id' tp1 loc]
             _ -> do nonRemovable $ identName idd
                     return [idd]
           where loc = srclocOf idd
@@ -683,10 +660,9 @@ getPropBnds [Ident var tp _] e to_rem =
     Replicate {}          -> [(var, SymArr e tp to_rem)]
     ArrayLit  {}          -> [(var, SymArr e tp to_rem)]
     _                     -> []
-getPropBnds ids (TupLit ts _) to_rem =
-  if length ids == length ts
-  then concatMap (\(x,y)-> getPropBnds [x] (SubExp y) to_rem) $ zip ids ts
-  else []
+getPropBnds ids (TupLit ts _) to_rem
+  | length ids == length ts =
+    concatMap (\(x,y)-> getPropBnds [x] (SubExp y) to_rem) $ zip ids ts
 getPropBnds _ _ _ = []
 
 ctIndex :: [SubExp] -> Maybe [Int]

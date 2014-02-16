@@ -14,7 +14,6 @@ module L0C.EnablingOpts.EnablingOptDriver
   where
 
 import L0C.InternalRep
-import L0C.InternalRep.Renamer
 import L0C.MonadFreshNames
 import qualified L0C.IndexInliner as II
 
@@ -30,22 +29,16 @@ import L0C.EnablingOpts.EnablingOptErrors
 enablingOpts :: Prog -> Either EnablingOptError Prog
 enablingOpts prog = do
 
-    prog_inl      <- aggInlineDriver $ mkUnnamedLamPrg prog
+    prog_inl    <- aggInlineDriver $ mkUnnamedLamPrg prog
 
-    prog_dfe      <- deadFunElim     prog_inl
+    prog_dfe    <- deadFunElim     prog_inl
 
-    let prog_uniq = renameProg prog_dfe
-
-    prog_enopt1 <- normCopyDeadOpts prog_uniq
+    prog_enopt1 <- normCopyDeadOpts prog_dfe
     prog_enopt2 <- normCopyDeadOpts prog_enopt1
     prog_deadf2 <- deadFunElim      prog_enopt2
     prog_flat_opt <- normCopyDeadOpts prog_deadf2
 
     normCopyDeadOpts prog_flat_opt
-
---    if(succs)
---    then enablingOpts outprog
---    else return       outprog
 
 normCopyDeadOpts :: Prog -> Either EnablingOptError Prog
 normCopyDeadOpts prog = do
