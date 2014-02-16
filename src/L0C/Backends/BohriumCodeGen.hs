@@ -48,7 +48,7 @@ alt x y = do x' <- x
 
 compileSOACtoBohrium :: C.Exp -> Exp -> CompilerM (Maybe [C.BlockItem])
 compileSOACtoBohrium target e
-  | Right nest <- Nest.fromExp e =
+  | Right nest <- Nest.fromExp (const Nothing) e =
       let try f = f target nest
       in try compileMap `alt`
          try compileReduce `alt`
@@ -60,7 +60,7 @@ compileInput :: C.Exp -> C.Exp -> Exp -> CompilerM [C.BlockItem]
 
 compileInput place shape (Iota ne _) = do
   nv <- new "iota_n"
-  ne' <- compileExp (varExp nv) ne
+  ne' <- compileSubExp (varExp nv) ne
   return $ stm [C.cstm|{
                      typename int64_t $id:nv;
                      $items:ne'
@@ -89,7 +89,7 @@ compileInput place shape e = do
                    }|]
 
 compileMap :: C.Exp -> SOACNest -> CompilerM (Maybe [C.BlockItem])
-compileMap target (SOACNest inps (Nest.MapT _ (Nest.Lambda l) _ _))
+compileMap target (SOACNest inps (Nest.Map _ (Nest.Fun l) _ _))
   | [inp] <- SOAC.inputsToExps inps,
     all (basicType . identType) $ lambdaParams l,
    Just op <- compileLambda l unOp = do
@@ -106,7 +106,7 @@ compileMap target (SOACNest inps (Nest.MapT _ (Nest.Lambda l) _ _))
                                  bh_multi_array_int32_get_base_data
                                    (bh_multi_array_int32_get_base($id:outputName));
                              }|]
-compileMap target (SOACNest inps (Nest.MapT _ (Nest.Lambda l) _ _))
+compileMap target (SOACNest inps (Nest.Map _ (Nest.Fun l) _ _))
   | [inp1,inp2] <- SOAC.inputsToExps inps,
     all (basicType . identType) $ lambdaParams l,
     Just op <- compileLambda l binOp = do
@@ -129,17 +129,17 @@ compileMap target (SOACNest inps (Nest.MapT _ (Nest.Lambda l) _ _))
 compileMap _ _ = return Nothing
 
 compileReduce :: C.Exp -> SOACNest -> CompilerM (Maybe [C.BlockItem])
-compileReduce _ (SOACNest _ (Nest.ReduceT _ (Nest.Lambda _) _ _ _)) =
+compileReduce _ (SOACNest _ (Nest.Reduce _ (Nest.Fun _) _ _ _)) =
   return Nothing
 compileReduce _ _ = return Nothing
 
 compileMapWithReduce :: C.Exp -> SOACNest -> CompilerM (Maybe [C.BlockItem])
-compileMapWithReduce _ (SOACNest _ (Nest.ReduceT _ (Nest.NewNest _ (Nest.MapT {})) _ _ _)) =
+compileMapWithReduce _ (SOACNest _ (Nest.Reduce _ (Nest.NewNest _ (Nest.Map {})) _ _ _)) =
   return Nothing
 compileMapWithReduce _ _ = return Nothing
 
 compileMapWithScan :: C.Exp -> SOACNest -> CompilerM (Maybe [C.BlockItem])
-compileMapWithScan _ (SOACNest _ (Nest.ScanT _ (Nest.NewNest _ (Nest.MapT {})) _ _ _)) =
+compileMapWithScan _ (SOACNest _ (Nest.Scan _ (Nest.NewNest _ (Nest.Map {})) _ _ _)) =
   return Nothing
 compileMapWithScan _ _ = return Nothing
 
@@ -157,14 +157,14 @@ data BohriumBinOp = BohrIntSum
                   | BohrIntLess
                   | BohrIntLeq
 
-unOp :: [Parameter] -> Exp -> Maybe BohriumUnOp
-unOp ps (BinOp Plus (Literal (IntVal x) _) (Var p1) _ _)
+unOp :: [Param] -> Exp -> Maybe BohriumUnOp
+unOp ps (BinOp Plus (Constant (BasicVal (IntVal x)) _) (Var p1) _ _)
   | [toParam p1] == ps = Just $ BohrIntInc x
-unOp ps (BinOp Plus (Var p1) (Literal (IntVal x) _) _ _)
+unOp ps (BinOp Plus (Var p1) (Constant (BasicVal (IntVal x)) _) _ _)
   | [toParam p1] == ps = Just $ BohrIntInc x
 unOp _ _ = Nothing
 
-binOp :: [Parameter] -> Exp -> Maybe BohriumBinOp
+binOp :: [Param] -> Exp -> Maybe BohriumBinOp
 binOp ps (BinOp op (Var p1) (Var p2) _ _)
   | [toParam p1, toParam p2] `matches` ps = op'
   where op' = liftM snd $ find ((==op) . fst)
@@ -182,10 +182,10 @@ binOp ps (BinOp op (Var p1) (Var p2) _ _)
 
 binOp _ _ = Nothing
 
-compileLambda :: Lambda -> ([Parameter] -> Exp -> Maybe a) -> Maybe a
+compileLambda :: Lambda -> ([Param] -> Exp -> Maybe a) -> Maybe a
 compileLambda l f =
   case lambdaBody l of
-    LetPat (Id k1) op (TupLit [Var k2] _) _
+    LetPat [k1] op (TupLit [Var k2] _) _
       | k1 == k2 -> f (lambdaParams l) op
     _ -> Nothing
 

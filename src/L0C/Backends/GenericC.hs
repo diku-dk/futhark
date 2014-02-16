@@ -6,6 +6,7 @@ module L0C.Backends.GenericC
   , CompilerM
   , lookupVar
   , compileExp
+  , compileSubExp
   , compileExpNewVar
   ) where
 
