@@ -22,6 +22,7 @@ import Data.Loc
 
 import L0C.InternalRep
 import L0C.InternalRep.MonadFreshNames
+import L0C.InternalRep.Renamer
 import L0C.Tools
 
 -- | Return 'True' if the given expression is a SOAC that can be
@@ -39,7 +40,7 @@ transformable _ = False
 -- renamer!
 transformProg :: Prog -> Prog
 transformProg prog =
-  Prog $ evalState (mapM transformFunDec $ progFunctions prog) src
+  renameProg $ Prog $ evalState (mapM transformFunDec $ progFunctions prog) src
   where src = newNameSourceForProg prog
 
 transformFunDec :: MonadFreshNames (ID Name) m => FunDec -> m FunDec
@@ -152,7 +153,9 @@ transformExp rec filtere@(Filter cs fun arrexps loc) = do
       loopbody = do
         let indexi = indexia $ pexp iv
             indexin = index cs arr iv
-        update <- letwith cs res (sub1 indexi) indexin
+            update = do
+              dest <- letwith cs res (sub1 indexi) indexin
+              return $ TupLit (map Var dest) loc
         eIf (eBinOp LogOr
              (eBinOp Equal (pexp iv) (pexp $ intval 0) (Basic Bool) loc)
              (eIf (eBinOp Less (pexp $ intval 0) (pexp iv) (Basic Bool) loc)
@@ -160,7 +163,7 @@ transformExp rec filtere@(Filter cs fun arrexps loc) = do
               (pexp $ Constant (BasicVal $ LogVal False) loc)
               [Basic Bool] loc)
              (Basic Bool) loc)
-            (pure resv) (pure $ TupLit (map Var update) loc) (typeOf resv) loc
+            (pure resv) update (typeOf resv) loc
   checkempty =<< eDoLoop (zip res $ map (pexp . Var) res) i (pexp nv) loopbody (pure resv) loc -- XXX, name shadowing
   where intval x = Constant (BasicVal $ IntVal x) loc
 
