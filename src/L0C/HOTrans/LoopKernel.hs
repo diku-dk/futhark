@@ -23,8 +23,8 @@ import Data.Maybe
 import Data.List
 import Data.Loc
 
-import L0C.L0
-import L0C.MonadFreshNames
+import L0C.InternalRep
+import L0C.InternalRep.MonadFreshNames
 import L0C.HORepresentation.SOAC (SOAC)
 import qualified L0C.HORepresentation.SOAC as SOAC
 import L0C.HORepresentation.SOACNest (SOACNest)
@@ -35,17 +35,17 @@ import L0C.HOTrans.TryFusion
 import L0C.HOTrans.Composing
 
 data OutputTransform = OTranspose Certificates Int Int
-                     | OReshape Certificates [Exp]
-                     | OReshapeOuter Certificates [Exp]
+                     | OReshape Certificates [SubExp]
+                     | OReshapeOuter Certificates [SubExp]
                        deriving (Eq, Ord, Show)
 
-applyTransform :: OutputTransform -> Ident -> SrcLoc -> Exp
+applyTransform :: OutputTransform -> SubExp -> SrcLoc -> Exp
 applyTransform (OTranspose cs k n) v =
-  Transpose cs k n $ Var v
+  Transpose cs k n v
 applyTransform (OReshape cs shape) v =
-  Reshape cs shape $ Var v
+  Reshape cs shape v
 applyTransform (OReshapeOuter cs shape) v =
-  Reshape cs (reshapeOuter shape 1 (Var v)) $ Var v
+  Reshape cs (reshapeOuter shape 1 v) v
 
 outputTransformToInputTransform :: OutputTransform -> SOAC.InputTransform
 outputTransformToInputTransform (OTranspose cs k n) =
@@ -143,8 +143,8 @@ attemptFusion outIds soac ker =
 removeUnusedParamsFromKer :: FusedKer -> FusedKer
 removeUnusedParamsFromKer ker =
   case soac of
-    SOAC.MapT {}     -> ker { fsoac = soac' }
-    SOAC.RedomapT {} -> ker { fsoac = soac' }
+    SOAC.Map {}     -> ker { fsoac = soac' }
+    SOAC.Redomap {} -> ker { fsoac = soac' }
     _                -> ker
   where soac = fsoac ker
         l = SOAC.lambda soac
@@ -153,10 +153,10 @@ removeUnusedParamsFromKer ker =
         soac' = l' `SOAC.setLambda`
                 (inps' `SOAC.setInputs` soac)
 
-removeUnusedParams :: TupleLambda -> [SOAC.Input] -> (TupleLambda, [SOAC.Input])
+removeUnusedParams :: Lambda -> [SOAC.Input] -> (Lambda, [SOAC.Input])
 removeUnusedParams l inps =
-  (l { tupleLambdaParams = accParams ++ ps' }, inps')
-  where allParams = tupleLambdaParams l
+  (l { lambdaParams = accParams ++ ps' }, inps')
+  where allParams = lambdaParams l
         (accParams, arrParams) =
           splitAt (length allParams - length inps) allParams
         pInps = zip arrParams inps
@@ -164,7 +164,7 @@ removeUnusedParams l inps =
                          (([], []), (p,inp):_) -> ([p], [inp])
                          ((ps_, inps_), _)     -> (ps_, inps_)
         used p = identName p `HS.member` freeInBody
-        freeInBody = freeNamesInExp $ tupleLambdaBody l
+        freeInBody = freeNamesInExp $ lambdaBody l
 
 -- | Check that the consumer uses at least one output of the producer
 -- unmodified.
@@ -203,8 +203,8 @@ mapScanFusionOK outIds inp1 ker =
                     inputs ker
 
 mapOrFilter :: SOAC -> Bool
-mapOrFilter (SOAC.FilterT {}) = True
-mapOrFilter (SOAC.MapT {})    = True
+mapOrFilter (SOAC.Filter {}) = True
+mapOrFilter (SOAC.Map {})    = True
 mapOrFilter _                 = False
 
 fuseSOACwithKer :: [Ident] -> SOAC -> FusedKer -> TryFusion FusedKer
@@ -227,47 +227,47 @@ fuseSOACwithKer outIds soac1 ker = do
                      }
   case (soac2, soac1) of
     -- The Fusions that are semantically map fusions:
-    (SOAC.MapT _ _ _ pos, SOAC.MapT    {})
+    (SOAC.Map _ _ _ pos, SOAC.Map    {})
       | mapFusionOK outIds ker -> do
       let (res_lam, new_inp) = fuseMaps lam1 inp1_arr outIds lam2 inp2_arr
-      success $ SOAC.MapT (cs1++cs2) res_lam new_inp pos
+      success $ SOAC.Map (cs1++cs2) res_lam new_inp pos
 
-    (SOAC.RedomapT _ lam21 _ ne _ pos, SOAC.MapT {})
+    (SOAC.Redomap _ lam21 _ ne _ pos, SOAC.Map {})
       | mapFusionOK outIds ker -> do
       let (res_lam, new_inp) = fuseMaps lam1 inp1_arr outIds lam2 inp2_arr
-      success $ SOAC.RedomapT (cs1++cs2) lam21 res_lam ne new_inp pos
+      success $ SOAC.Redomap (cs1++cs2) lam21 res_lam ne new_inp pos
 
-    (SOAC.ScanT _ _ inps2 loc, SOAC.MapT _ _ inps1 _)
+    (SOAC.Scan _ _ inps2 loc, SOAC.Map _ _ inps1 _)
       | mapScanFusionOK outIds inp1_arr ker -> do
       let (res_lam, new_inps) =
             fuseMaps lam1 (zip (map fst inps2) inps1) outIds lam2 inps2
-      success $ SOAC.ScanT (cs1++cs2) res_lam new_inps loc
+      success $ SOAC.Scan (cs1++cs2) res_lam new_inps loc
 
     -- The Fusions that are semantically filter fusions:
-    (SOAC.ReduceT _ _ args pos, SOAC.FilterT {})
+    (SOAC.Reduce _ _ args pos, SOAC.Filter {})
       | filterFusionOK outIds ker -> do
       let ne = map fst args
       name <- newVName "check"
       let (res_lam, new_inp) = fuseFilterIntoFold lam1 inp1_arr outIds lam2 inp2_arr name
-      success $ SOAC.ReduceT (cs1++cs2) res_lam (zip ne new_inp) pos
+      success $ SOAC.Reduce (cs1++cs2) res_lam (zip ne new_inp) pos
 
-    (SOAC.RedomapT _ lam21 _ nes _ pos, SOAC.FilterT {})
+    (SOAC.Redomap _ lam21 _ nes _ pos, SOAC.Filter {})
       | filterFoldFusionOK outIds ker-> do
       name <- newVName "check"
       let (res_lam, new_inp) = fuseFilterIntoFold lam1 inp1_arr outIds lam2 inp2_arr name
-      success $ SOAC.RedomapT (cs1++cs2) lam21 res_lam nes new_inp pos
+      success $ SOAC.Redomap (cs1++cs2) lam21 res_lam nes new_inp pos
 
-    (SOAC.FilterT _ _ _ pos, SOAC.FilterT {})
+    (SOAC.Filter _ _ _ pos, SOAC.Filter {})
       | filterFusionOK outIds ker -> do
       name <- newVName "check"
       let (res_lam, new_inp) = fuseFilters lam1 inp1_arr outIds lam2 inp2_arr name
-      success $ SOAC.FilterT (cs1++cs2) res_lam new_inp pos
+      success $ SOAC.Filter (cs1++cs2) res_lam new_inp pos
 
     -- Nothing else worked, so let's try rewriting to redomap if
     -- possible.
-    (SOAC.ReduceT _ lam args loc, _) | mapOrFilter soac1 -> do
+    (SOAC.Reduce _ lam args loc, _) | mapOrFilter soac1 -> do
        let (ne, arrs) = unzip args
-           soac2' = SOAC.RedomapT (cs1++cs2) lam lam ne arrs loc
+           soac2' = SOAC.Redomap (cs1++cs2) lam lam ne arrs loc
            ker'   = ker { fsoac = soac2'
                         , outputs = out_ids2 }
        fuseSOACwithKer outIds soac1 ker'
@@ -306,22 +306,22 @@ optimizations = [iswim]
 
 iswim :: Maybe [Ident] -> SOACNest -> [OutputTransform] -> Maybe (SOACNest, [OutputTransform])
 iswim _ nest ots
-  | Nest.ScanT cs1 (Nest.NewNest lvl nn) [] es@[_] loc1 <- Nest.operation nest,
-    Nest.MapT cs2 mb [] loc2 <- nn,
+  | Nest.Scan cs1 (Nest.NewNest lvl nn) [] es@[_] loc1 <- Nest.operation nest,
+    Nest.Map cs2 mb [] loc2 <- nn,
     Just es' <- mapM SOAC.inputFromExp es,
     Nest.Nesting paramIds mapArrs bndIds postExp retTypes <- lvl,
     mapArrs == map SOAC.varInput paramIds =
     let toInnerAccParam idd = idd { identType = rowType $ identType idd }
         innerAccParams = map toInnerAccParam $ take (length es) paramIds
         innerArrParams = drop (length es) paramIds
-        innerScan = ScanT cs2 (Nest.bodyToLambda mb)
+        innerScan = Scan cs2 (Nest.bodyToLambda mb)
                           (zip (map Var innerAccParams) (map Var innerArrParams))
                           loc1
-        lam = TupleLambda {
-                tupleLambdaParams = map toParam $ innerAccParams ++ innerArrParams
-              , tupleLambdaReturnType = retTypes
-              , tupleLambdaBody = Nest.letPattern bndIds innerScan postExp
-              , tupleLambdaSrcLoc = loc2
+        lam = Lambda {
+                lambdaParams = map toParam $ innerAccParams ++ innerArrParams
+              , lambdaReturnType = retTypes
+              , lambdaBody = Nest.letPattern bndIds innerScan postExp
+              , lambdaSrcLoc = loc2
               }
         transposeInput (SOAC.Input [SOAC.Transpose _ 0 1] ia) =
           SOAC.Input [] ia
@@ -329,7 +329,7 @@ iswim _ nest ots
           SOAC.Input (ts++[SOAC.Transpose cs2 0 1]) ia
     in Just (Nest.SOACNest
                (es' ++ map transposeInput (Nest.inputs nest))
-               (Nest.MapT cs1 (Nest.Lambda lam) [] loc2),
+               (Nest.Map cs1 (Nest.Fun lam) [] loc2),
              ots ++ [OTranspose cs2 0 1])
 iswim _ _ _ = Nothing
 
@@ -409,7 +409,7 @@ transposes (SOAC.Input ts ia) kns =
 
 pullReshape :: SOACNest -> [OutputTransform] -> TryFusion (SOACNest, [OutputTransform])
 pullReshape nest (OReshape cs shape:ots)
-  | op@Nest.MapT {} <- Nest.operation nest,
+  | op@Nest.Map {} <- Nest.operation nest,
     all basicType $ Nest.returnType op = do
       let loc = srclocOf nest
           inputs' = [ SOAC.Input (ts ++ [SOAC.ReshapeOuter cs shape]) ia

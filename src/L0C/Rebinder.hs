@@ -46,29 +46,29 @@ import Data.Ord
 import qualified Data.HashSet as HS
 import qualified Data.Set as S
 
-import L0C.L0
-import L0C.MonadFreshNames
+import L0C.InternalRep
+import L0C.InternalRep.MonadFreshNames
 import qualified L0C.HORepresentation.SOACNest as Nest
 
 import L0C.Rebinder.CSE
 import qualified L0C.Rebinder.SizeTracking as SZ
 
-data BindNeed = LoopBind TupIdent Exp Ident Exp Exp
-              | LetBind TupIdent Exp [Exp]
-              | LetWithBind Certificates Ident Ident (Maybe Certificates) [Exp] Exp
+data BindNeed = LoopBind [(Ident,SubExp)] Ident SubExp Exp
+              | LetBind [Ident] Exp [Exp]
+              | LetWithBind Certificates Ident Ident (Maybe Certificates) [SubExp] SubExp
                 deriving (Show, Eq)
 
 type NeedSet = [BindNeed]
 
 asTail :: BindNeed -> Exp
-asTail (LoopBind mergepat mergeexp i bound loopbody) =
-  DoLoop mergepat mergeexp i bound loopbody (TupLit [] loc) loc
-    where loc = srclocOf mergepat
+asTail (LoopBind merge i bound loopbody) =
+  DoLoop merge i bound loopbody (TupLit [] loc) loc
+    where loc = srclocOf loopbody
 asTail (LetBind pat e _) =
   LetPat pat e (TupLit [] loc) loc
     where loc = srclocOf pat
 asTail (LetWithBind cs dest src idxcs idxs ve) =
-  LetWith cs dest src idxcs idxs ve (Var dest) $ srclocOf dest
+  LetWith cs dest src idxcs idxs ve (SubExp $ Var dest) $ srclocOf dest
 
 requires :: BindNeed -> HS.HashSet VName
 requires (LetBind pat e (alte:alts)) =
@@ -76,9 +76,12 @@ requires (LetBind pat e (alte:alts)) =
 requires bnd = HS.map identName $ freeInExp $ asTail bnd
 
 provides :: BindNeed -> HS.HashSet VName
-provides (LoopBind mergepat _ _ _ _)  = patNameSet mergepat
+provides (LoopBind merge _ _ _)       = patNameSet $ map fst merge
 provides (LetBind pat _ _)            = patNameSet pat
 provides (LetWithBind _ dest _ _ _ _) = HS.singleton $ identName dest
+
+patNameSet :: [Ident] -> HS.HashSet VName
+patNameSet = HS.fromList . map identName
 
 data Need = Need { needBindings :: NeedSet
                  , freeInBound  :: HS.HashSet VName
@@ -132,12 +135,15 @@ boundFree fs = tell $ Need [] fs
 withNewBinding :: String -> Exp -> (Ident -> HoistM a) -> HoistM a
 withNewBinding k e m = do
   k' <- newVName k
-  let ident = Ident { identName = k'
-                    , identType = typeOf e
-                    , identSrcLoc = srclocOf e }
-  withBinding (Id ident) e $ m ident
+  case typeOf e of
+    [t] ->
+      let ident = Ident { identName = k'
+                        , identType = t
+                        , identSrcLoc = srclocOf e }
+      in withBinding [ident] e $ m ident
+    _   -> fail "Rebinder.withNewBinding: Cannot insert tuple-typed binding."
 
-withBinding :: TupIdent -> Exp -> HoistM a -> HoistM a
+withBinding :: [Ident] -> Exp -> HoistM a -> HoistM a
 withBinding pat e@(Size _ i (Var x) _) m = do
   let mkAlt es = case drop i es of
                    des:_ -> S.toList des
@@ -147,10 +153,10 @@ withBinding pat e@(Size _ i (Var x) _) m = do
 
 withBinding pat e m = withSingleBinding pat e m
 
-withSingleBinding :: TupIdent -> Exp -> HoistM a -> HoistM a
+withSingleBinding :: [Ident] -> Exp -> HoistM a -> HoistM a
 withSingleBinding pat e = withSeveralBindings pat e []
 
-withSeveralBindings :: TupIdent -> Exp -> [Exp]
+withSeveralBindings :: [Ident] -> Exp -> [Exp]
                     -> HoistM a -> HoistM a
 withSeveralBindings pat e alts m = do
   ds <- asks envDupeState
@@ -159,49 +165,49 @@ withSeveralBindings pat e alts m = do
   needThis $ LetBind pat e' es
   local (\env -> env { envDupeState = ds' <> ds''}) m
 
-bindLet :: TupIdent -> Exp -> HoistM a -> HoistM a
-bindLet (Id dest) (Var src) m =
-  withBinding (Id dest) (Var src) $
+bindLet :: [Ident] -> Exp -> HoistM a -> HoistM a
+bindLet [dest] (SubExp (Var src)) m =
+  withBinding [dest] (SubExp $ Var src) $
   case identType src of Array {} -> withShape dest (slice [] 0 src) m
                         _        -> m
 
-bindLet pat@(Id dest) e@(Iota ne _) m =
+bindLet pat@[dest] e@(Iota ne _) m =
   withBinding pat e $
-  withShape dest [ne] m
+  withShape dest [SubExp ne] m
 
-bindLet pat@(Id dest) e@(Replicate ne (Var y) _) m =
+bindLet pat@[dest] e@(Replicate ne (Var y) _) m =
   withBinding pat e $
-  withShape dest (ne:slice [] 0 y) m
+  withShape dest (SubExp ne:slice [] 0 y) m
 
-bindLet pat@(TupId [Id dest1, Id dest2] _) e@(Split cs ne srce loc) m =
+bindLet pat@[dest1, dest2] e@(Split cs ne srce loc) m =
   withBinding pat e $
   withNewBinding "split_src_sz" (Size cs 0 srce loc) $ \src_sz ->
-  withNewBinding "split_sz" (BinOp Minus (Var src_sz) ne (Elem Int) loc) $ \split_sz ->
-  withShapes [(dest1, ne : rest),
-              (dest2, Var split_sz : rest)] m
+  withNewBinding "split_sz" (BinOp Minus (Var src_sz) ne (Basic Int) loc) $ \split_sz ->
+  withShapes [(dest1, SubExp ne : rest),
+              (dest2, SubExp (Var split_sz) : rest)] m
     where rest = [ Size cs i srce loc
-                   | i <- [1.. arrayRank (typeOf srce) - 1]]
+                   | i <- [1.. arrayRank (subExpType srce) - 1]]
 
-bindLet pat@(Id dest) e@(Concat cs (Var x) (Var y) loc) m =
+bindLet pat@[dest] e@(Concat cs (Var x) (Var y) loc) m =
   withBinding pat e $
   withNewBinding "concat_x" (Size cs 0 (Var x) loc) $ \concat_x ->
   withNewBinding "concat_y" (Size cs 0 (Var y) loc) $ \concat_y ->
-  withNewBinding "concat_sz" (BinOp Plus (Var concat_x) (Var concat_y) (Elem Int) loc) $ \concat_sz ->
-  withShape dest (Var concat_sz :
+  withNewBinding "concat_sz" (BinOp Plus (Var concat_x) (Var concat_y) (Basic Int) loc) $ \concat_sz ->
+  withShape dest (SubExp (Var concat_sz) :
                   [Size cs i (Var x) loc
                      | i <- [1..arrayRank (identType x) - 1]])
   m
 
 bindLet pat e m
-  | Right nest <- Nest.fromExp e =
+  | Right nest <- Nest.fromExp (const Nothing) e =
     withBinding pat e $
-    withShapes (SZ.sizeRelations (patIdents pat) nest) m
+    withShapes (SZ.sizeRelations pat nest) m
 
-bindLet pat@(Id dest) e@(Index cs src _ idxs _) m =
+bindLet pat@[dest] e@(Index cs src _ idxs _) m =
   withBinding pat e $
   withShape dest (slice cs (length idxs) src) m
 
-bindLet pat@(Id dest) e@(Transpose cs k n (Var src) loc) m =
+bindLet pat@[dest] e@(Transpose cs k n (Var src) loc) m =
   withBinding pat e $
   withShape dest dims m
     where dims = transposeIndex k n
@@ -211,15 +217,15 @@ bindLet pat@(Id dest) e@(Transpose cs k n (Var src) loc) m =
 bindLet pat e m = withBinding pat e m
 
 bindLetWith :: Certificates -> Ident -> Ident
-            -> Maybe Certificates -> [Exp] -> Exp
+            -> Maybe Certificates -> [SubExp] -> SubExp
             -> HoistM a -> HoistM a
 bindLetWith cs dest src idxcs idxs ve m = do
   needThis $ LetWithBind cs dest src idxcs idxs ve
   withShape dest (slice [] 0 src) m
 
-bindLoop :: TupIdent -> Exp -> Ident -> Exp -> Exp -> HoistM a -> HoistM a
-bindLoop pat e i bound body m = do
-  needThis $ LoopBind pat e i bound body
+bindLoop :: [(Ident,SubExp)] -> Ident -> SubExp -> Exp -> HoistM a -> HoistM a
+bindLoop merge i bound body m = do
+  needThis $ LoopBind merge i bound body
   m
 
 slice :: Certificates -> Int -> Ident -> [Exp]
@@ -284,12 +290,11 @@ addBindings dupes needs =
           | otherwise =
             (inner, fs)
 
-        comb (m,ds) bnd@(LoopBind mergepat mergeexp loopvar
-                          boundexp loopbody) =
+        comb (m,ds) bnd@(LoopBind merge loopvar boundexp loopbody) =
           ((m `HM.union` distances m bnd, ds),
            bind bnd $
            \inner ->
-             DoLoop mergepat mergeexp loopvar boundexp
+             DoLoop merge loopvar boundexp
              loopbody inner $ srclocOf inner)
 
         comb (m,ds) (LetBind pat e alts) =
@@ -311,8 +316,8 @@ addBindings dupes needs =
              LetWith cs dest src idxcs idxs ve inner $ srclocOf inner)
 
 score :: HM.HashMap VName Int -> Exp -> (Int, Exp)
-score m (Var k) =
-  (fromMaybe (-1) $ HM.lookup (identName k) m, Var k)
+score m (SubExp (Var k)) =
+  (fromMaybe (-1) $ HM.lookup (identName k) m, SubExp $ Var k)
 score m e =
   (HS.foldl' f 0 $ freeNamesInExp e, e)
   where f x k = case HM.lookup k m of
@@ -321,15 +326,10 @@ score m e =
 
 expCost :: Exp -> Int
 expCost (Map {}) = 1
-expCost (MapT {}) = 1
 expCost (Filter {}) = 1
-expCost (FilterT {}) = 1
 expCost (Reduce {}) = 1
-expCost (ReduceT {}) = 1
 expCost (Scan {}) = 1
-expCost (ScanT {}) = 1
 expCost (Redomap {}) = 1
-expCost (RedomapT {}) = 1
 expCost (Transpose {}) = 1
 expCost (Copy {}) = 1
 expCost (Concat {}) = 1
@@ -349,11 +349,12 @@ distances m need = HM.fromList [ (k, d+cost) | k <- HS.toList outs ]
             LetWithBind _ dest src _ idxs ve ->
               (HS.singleton $ identName dest,
                identName src `HS.insert`
-               mconcat (map freeNamesInExp (ve:idxs)),
+               mconcat (map (freeNamesInExp . SubExp) $ ve:idxs),
                1)
-            LoopBind pat mergeexp _ bound loopbody ->
-              (patNameSet pat,
-               mconcat $ map freeNamesInExp [mergeexp, bound, loopbody],
+            LoopBind merge _ bound loopbody ->
+              (patNameSet $ map fst merge,
+               mconcat $ map freeNamesInExp $
+               [SubExp bound, loopbody] ++ map (SubExp . snd) merge,
                1)
         f x k = case HM.lookup k m of
                   Just y  -> max x y
@@ -447,22 +448,19 @@ isNotSafe _ = not . safeExp . asTail
 
 isNotCheap :: BlockPred
 isNotCheap _ = not . cheap . asTail
-  where cheap (Var _)      = True
-        cheap (Literal {}) = True
-        cheap (BinOp _ e1 e2 _ _) = cheap e1 && cheap e2
-        cheap (TupLit es _) = all cheap es
-        cheap (Not e _) = cheap e
-        cheap (Negate e _) = cheap e
+  where cheap (SubExp _)   = True
+        cheap (BinOp {})   = True
+        cheap (TupLit {})  = True
+        cheap (Not {})     = True
+        cheap (Negate {})  = True
         cheap (LetPat _ e body _) = cheap e && cheap body
         cheap _ = False
 
-uniqPat :: TupIdent -> Bool
-uniqPat (Wildcard t _) = unique t
-uniqPat (Id k)         = unique $ identType k
-uniqPat (TupId pats _) = any uniqPat pats
+uniqPat :: [Ident] -> Bool
+uniqPat = any $ unique . identType
 
 isUniqueBinding :: BlockPred
-isUniqueBinding _ (LoopBind pat _ _ _ _)       = uniqPat pat
+isUniqueBinding _ (LoopBind merge _ _ _)       = uniqPat $ map fst merge
 isUniqueBinding _ (LetBind pat _ _)            = uniqPat pat
 isUniqueBinding _ (LetWithBind _ dest _ _ _ _) = unique $ identType dest
 
@@ -486,35 +484,30 @@ hoistCommon m1 m2 = pass $ do
 
 hoistInExp :: Exp -> HoistM Exp
 hoistInExp (If c e1 e2 t loc) = do
-  c' <- hoistInExp c
   (e1',e2') <- hoistCommon (hoistInExp e1) (hoistInExp e2)
-  return $ If c' e1' e2' t loc
+  return $ If c e1' e2' t loc
 hoistInExp (LetPat pat e body _) = do
   e' <- hoistInExp e
   bindLet pat e' $ hoistInExp body
-hoistInExp (LetWith cs dest src idxcs idxs ve body _) = do
-  idxs' <- mapM hoistInExp idxs
-  ve' <- hoistInExp ve
-  bindLetWith cs dest src idxcs idxs' ve' $ hoistInExp body
-hoistInExp (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody _) = do
-  mergeexp' <- hoistInExp mergeexp
-  boundexp' <- hoistInExp boundexp
+hoistInExp (LetWith cs dest src idxcs idxs ve body _) =
+  bindLetWith cs dest src idxcs idxs ve $ hoistInExp body
+hoistInExp (DoLoop merge loopvar boundexp loopbody letbody _) = do
   loopbody' <- blockIfSeq [hasFree boundnames, isConsumed] $
                hoistInExp loopbody
-  bindLoop mergepat mergeexp' loopvar boundexp' loopbody' $ hoistInExp letbody
-  where boundnames = identName loopvar `HS.insert` patNameSet mergepat
-hoistInExp e@(MapT cs (TupleLambda params _ _ _) arrexps _) =
+  bindLoop merge loopvar boundexp loopbody' $ hoistInExp letbody
+  where boundnames = identName loopvar `HS.insert` patNameSet (map fst merge)
+hoistInExp e@(Map cs (Lambda params _ _ _) arrexps _) =
   hoistInSOAC e arrexps $ \ks ->
     withSOACArrSlices cs params ks $
     withShapes (sameOuterShapes cs ks) $
     hoistInExpBase e
-hoistInExp e@(ReduceT cs (TupleLambda params _ _ _) args _) =
+hoistInExp e@(Reduce cs (Lambda params _ _ _) args _) =
   hoistInSOAC e arrexps $ \ks ->
     withSOACArrSlices cs (drop (length accexps) params) ks $
     withShapes (sameOuterShapes cs ks) $
     hoistInExpBase e
   where (accexps, arrexps) = unzip args
-hoistInExp e@(ScanT cs (TupleLambda params _ _ _) args _) =
+hoistInExp e@(Scan cs (Lambda params _ _ _) args _) =
   hoistInSOAC e arrexps $ \arrks ->
   hoistInSOAC e accexps $ \accks ->
     let (accparams, arrparams) = splitAt (length accexps) params in
@@ -524,7 +517,7 @@ hoistInExp e@(ScanT cs (TupleLambda params _ _ _) args _) =
     withShapes (sameOuterShapes cs arrks) $
     hoistInExpBase e
   where (accexps, arrexps) = unzip args
-hoistInExp e@(RedomapT cs _ (TupleLambda innerparams _ _ _)
+hoistInExp e@(Redomap cs _ (Lambda innerparams _ _ _)
               accexps arrexps _) =
   hoistInSOAC e arrexps $ \ks ->
     withSOACArrSlices cs (drop (length accexps) innerparams) ks $
@@ -538,30 +531,30 @@ hoistInExpBase :: Exp -> HoistM Exp
 hoistInExpBase = mapExpM hoist
   where hoist = identityMapper {
                   mapOnExp = hoistInExp
-                , mapOnTupleLambda = hoistInTupleLambda
+                , mapOnLambda = hoistInLambda
                 }
 
-hoistInTupleLambda :: TupleLambda -> HoistM TupleLambda
-hoistInTupleLambda (TupleLambda params body rettype loc) = do
+hoistInLambda :: Lambda -> HoistM Lambda
+hoistInLambda (Lambda params body rettype loc) = do
   body' <- blockIf (hasFree params' `orIf` isUniqueBinding) $ hoistInExp body
-  return $ TupleLambda params body' rettype loc
-  where params' = HS.fromList $ map identName params
+  return $ Lambda params body' rettype loc
+  where params' = patNameSet $ map fromParam params
 
-arrVars :: [Exp] -> Maybe [Ident]
+arrVars :: [SubExp] -> Maybe [Ident]
 arrVars = mapM arrVars'
   where arrVars' (Var k) = Just k
         arrVars' _       = Nothing
 
-hoistInSOAC :: Exp -> [Exp] -> ([Ident] -> HoistM Exp) -> HoistM Exp
+hoistInSOAC :: Exp -> [SubExp] -> ([Ident] -> HoistM Exp) -> HoistM Exp
 hoistInSOAC e arrexps m =
   case arrVars arrexps of
     Nothing -> hoistInExpBase e
     Just ks -> m ks
 
-arrSlices :: Certificates -> [Parameter] -> [Ident] -> [(Ident, [Exp])]
+arrSlices :: Certificates -> [Param] -> [Ident] -> [(Ident, [Exp])]
 arrSlices cs params = zip (map fromParam params) . map (slice cs 1)
 
-withSOACArrSlices :: Certificates -> [Parameter] -> [Ident]
+withSOACArrSlices :: Certificates -> [Param] -> [Ident]
                   -> HoistM Exp -> HoistM Exp
 withSOACArrSlices cs params ks m = do
   agg <- asks envAggressive

@@ -23,6 +23,9 @@ class Substitute a where
   -- already in use in @e@.
   substituteNames :: HM.HashMap VName VName -> a -> a
 
+instance Substitute a => Substitute [a] where
+  substituteNames substs = map $ substituteNames substs
+
 instance Substitute VName where
   substituteNames substs k = fromMaybe k $ HM.lookup k substs
 
@@ -43,7 +46,7 @@ instance Substitute Exp where
                     }
 
 instance Substitute Type where
-  substituteNames _ (Elem et) = Elem et
+  substituteNames _ (Basic et) = Basic et
   substituteNames substs (Array et sz u als) =
     Array et (map (liftM $ substituteNames substs) sz)
              u (HS.map (substituteNames substs) als)

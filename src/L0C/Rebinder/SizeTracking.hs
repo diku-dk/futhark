@@ -76,9 +76,9 @@ outputSizeRelations outputIds nest widths
   | otherwise = []
 
 nestingDepth :: Nest.Combinator -> Int
-nestingDepth comb@(Nest.MapT {}) = length (Nest.nesting comb) + 1
-nestingDepth comb@(Nest.ScanT {})
-  | Nest.NewNest _ comb2@Nest.MapT {} <- Nest.body comb =
+nestingDepth comb@(Nest.Map {}) = length (Nest.nesting comb) + 1
+nestingDepth comb@(Nest.Scan {})
+  | Nest.NewNest _ comb2@Nest.Map {} <- Nest.body comb =
       length (Nest.nesting comb) + length (Nest.nesting comb2) + 2
 nestingDepth _ = 0
 
@@ -124,4 +124,5 @@ levelSizes nest = merge inputSizes iotaSizes
 
         iotaSizes = map mkSizes $ Nest.inputs nest : Nest.inputsPerLevel nest
           where mkSizes inps =
-                  [ Literal v loc | SOAC.Input [] (SOAC.Iota (Literal v _)) <- inps ]
+                  [ SubExp $ Constant v loc
+                      | SOAC.Input [] (SOAC.Iota (Constant v _)) <- inps ]

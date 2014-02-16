@@ -12,7 +12,7 @@ import Control.Applicative
 import Control.Monad.Trans.Maybe
 import Control.Monad.State
 
-import L0C.L0
+import L0C.InternalRep
 import L0C.NeedNames
 import L0C.MonadFreshNames
 

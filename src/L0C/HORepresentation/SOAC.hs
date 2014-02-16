@@ -23,6 +23,7 @@ module L0C.HORepresentation.SOAC
   , certificates
   -- ** Converting to and from expressions
   , NotSOAC (..)
+  , VarLookup
   , fromExp
   , toExp
   -- * SOAC inputs
@@ -45,6 +46,7 @@ module L0C.HORepresentation.SOAC
   where
 
 import Control.Arrow (first)
+import Control.Applicative
 import Control.Monad
 
 import Data.List
@@ -53,18 +55,19 @@ import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
 
 import qualified L0C.InternalRep as L0
-import L0C.Substitute
 import L0C.InternalRep hiding (Map, Reduce, Scan, Filter, Redomap,
                                Var, Iota, Transpose, Reshape, Index)
+import L0C.Substitute
+import L0C.Tools
 
 data InputTransform = Transpose Certificates Int Int
                     -- ^ A transposition of an otherwise valid input (possibly
                     -- another transposition!).
-                    | Reshape Certificates [Exp]
+                    | Reshape Certificates [SubExp]
                     -- ^ A reshaping of an otherwise valid input.
-                    | ReshapeOuter Certificates [Exp]
+                    | ReshapeOuter Certificates [SubExp]
                     -- ^ A reshaping of the outer dimension.
-                    | ReshapeInner Certificates [Exp]
+                    | ReshapeInner Certificates [SubExp]
                     -- ^ A reshaping of everything but the outer dimension.
                     | Repeat
                     -- ^ Replicate the input a whole number of times in order
@@ -81,19 +84,19 @@ data Index = VarIndex Ident
 -- variable (possibly indexed) or an @iota@.
 data InputArray = Var Ident
                 -- ^ Some array-typed variable in scope.
-                | Iota Exp
+                | Iota SubExp
                 -- ^ @iota(e)@.
                 | Index Certificates Ident (Maybe Certificates) [Index]
                   -- ^ @a[i]@.
                   deriving (Show, Eq, Ord)
 
 inputArrayToExp :: InputArray -> Exp
-inputArrayToExp (Var k)  = L0.Var k
+inputArrayToExp (Var k)  = SubExp $ L0.Var k
 inputArrayToExp (Iota e) = L0.Iota e $ srclocOf e
 inputArrayToExp (Index cs idd idxcs idxs) =
   L0.Index cs idd idxcs (map idx idxs) $ srclocOf idd
   where idx (VarIndex indidd) = L0.Var indidd
-        idx (ConstIndex i)    = Constant (IntVal i) $ srclocOf idd
+        idx (ConstIndex i)    = Constant (BasicVal $ IntVal i) $ srclocOf idd
 
 -- | One array input to a SOAC - a SOAC may have multiple inputs, but
 -- all are of this form.  Only the array inputs are expressed with
@@ -135,81 +138,93 @@ addTransform t (Input ts ia) = Input (ts++[t]) ia
 addTransforms :: [InputTransform] -> Input -> Input
 addTransforms ts1 (Input ts2 ia) = Input (ts2++ts1) ia
 
+type VarLookup = Ident -> Maybe Exp
+
 -- | If the given expression represents a normalised SOAC input,
 -- return that input.
-inputFromExp :: Exp -> Maybe Input
-inputFromExp ie = do (ts, ia) <- examineExp ie
-                     return $ Input (reverse ts) ia
-  where examineExp (L0.Var k)    = Just ([], Var k)
+inputFromExp :: VarLookup -> Exp -> Maybe Input
+inputFromExp look ie = do (ts, ia) <- examineExp ie
+                          return $ Input (reverse ts) ia
+  where examineExp (L0.SubExp (L0.Var k)) =
+          (examineExp =<< look k) <|> Just ([], Var k)
 
         examineExp (L0.Iota ne _) = Just ([], Iota ne)
 
         examineExp (L0.Index cs idd idxcs idxs _) = do
           idxs' <- mapM idx idxs
           Just ([], Index cs idd idxcs idxs')
-          where idx (L0.Var indidd)           = Just $ VarIndex indidd
-                idx (L0.Constant (IntVal i) _) = Just $ ConstIndex i
-                idx _                         = Nothing
+          where idx (L0.Var indidd)                       = Just $ VarIndex indidd
+                idx (L0.Constant (BasicVal (IntVal i)) _) = Just $ ConstIndex i
+                idx _                                     = Nothing
 
         examineExp (L0.Transpose cs k n inp _) = do
-          (ts, inp') <- examineExp inp
+          (ts, inp') <- examineExp $ SubExp inp
           Just (Transpose cs k n : ts, inp')
 
         examineExp (L0.Reshape cs shape inp _) = do
-          (ts, inp') <- examineExp inp
+          (ts, inp') <- examineExp $ SubExp inp
           Just (Reshape cs shape : ts, inp')
 
         examineExp _ = Nothing
 
 -- | Convert SOAC inputs to the corresponding expressions.
-inputsToExps :: [Input] -> [Exp]
-inputsToExps is =
-  map (inputToExp' $ dimSizes is) is
-  where inputToExp' sizes (Input ts ia) =
-          transform sizes 0 (inputArrayToExp ia) $ reverse ts
+inputsToExps :: [Input] -> Binder [SubExp]
+inputsToExps is = do
+  sizes <- dimSizes is
+  mapM (inputToExp' sizes) is
+  where inputToExp' sizes (Input ts ia) = do
+          ia' <- letSubExp "soac_input" $ inputArrayToExp ia
+          (_, _, ia'') <- foldM transform (sizes, 0, ia') ts
+          return ia''
 
-        transform _ _ e [] = e
-
-        transform sizes d e (Repeat:ts) =
-          L0.Replicate sze' (transform sizes (d+1) e ts) loc
-          where sze' = fromMaybe (Constant (IntVal 0) loc) $
+        transform (sizes, d, ia) Repeat = do
+          ia' <- letSubExp "repeat" $ L0.Replicate sze' ia loc
+          return (sizes, d+1, ia')
+          where sze' = fromMaybe (Constant (BasicVal $ IntVal 0) loc) $
                        join $ listToMaybe $ drop d sizes
-                loc  = srclocOf e
+                loc  = srclocOf ia
 
-        transform sizes d e (Transpose cs k n:ts) =
-          let e' = transform (transposeIndex k n sizes) d e ts
-          in L0.Transpose cs k n e' $ srclocOf e
+        transform (sizes, d, ia) (Transpose cs k n) = do
+          ia' <- letSubExp "transpose" $ L0.Transpose cs k n ia $ srclocOf ia
+          return (transposeIndex k n sizes, d, ia')
 
-        transform sizes d e (Reshape cs shape:ts) =
-          L0.Reshape cs shape (transform sizes d e ts) $ srclocOf e
+        transform (sizes, d, ia) (Reshape cs shape) = do
+          ia' <- letSubExp "reshape" $ L0.Reshape cs shape ia $ srclocOf ia
+          return (sizes, d, ia')
 
-        transform sizes d e (ReshapeOuter cs shape:ts) =
-          let e' = transform sizes d e ts
-          in L0.Reshape cs (reshapeOuter shape 1 e') e $ srclocOf e
+        transform (sizes, d, ia) (ReshapeOuter cs shape) = do
+          shape' <- letSubExps "shape" $ reshapeOuter (map SubExp shape) 1 ia
+          ia' <- letSubExp "reshape" $ L0.Reshape cs shape' ia $ srclocOf ia
+          return (sizes, d, ia')
 
-        transform sizes d e (ReshapeInner cs shape:ts) =
-          let e' = transform sizes d e ts
-          in L0.Reshape cs (reshapeInner shape 1 e') e $ srclocOf e
+        transform (sizes, d, ia) (ReshapeInner cs shape) = do
+          shape' <- letSubExps "shape" $ reshapeInner (map SubExp shape) 1 ia
+          ia' <- letSubExp "reshape" $ L0.Reshape cs shape' ia $ srclocOf ia
+          return (sizes, d, ia')
 
-dimSizes :: [Input] -> [Maybe Exp]
+dimSizes :: [Input] -> Binder [Maybe SubExp]
 dimSizes is =
-  map (listToMaybe . catMaybes) $ transpose $ map inspect is
-  where inspect (Input ts ia) = foldr inspect' (iaDims ia) ts
+  map (listToMaybe . catMaybes) . transpose <$> mapM inspect is
+  where inspect :: Input -> Binder [Maybe SubExp]
+        inspect (Input ts ia) = do
+          dims <- iaDims ia
+          return $ foldr inspect' (map Just dims) ts
 
         iaDims (Var v) =
-          [ Just $ L0.Size [] i (L0.Var v) loc
-            | i <- [0..arrayRank t-1] ]
+          letSubExps "size" [ L0.Size [] i (L0.Var v) loc
+                                | i <- [0..arrayRank t-1] ]
           where loc = srclocOf v
                 t   = identType v
 
-        iaDims (Iota e) = [Just e]
+        iaDims (Iota e) = return [e]
 
         iaDims (Index cs v _ idxs) =
-          [ Just $ L0.Size cs i (L0.Var v) loc
-            | i <- [0..arrayRank t-length idxs] ]
+          letSubExps "size" [ L0.Size cs i (L0.Var v) loc
+                                | i <- [0..arrayRank t-length idxs] ]
           where loc = srclocOf v
                 t   = identType v
 
+        inspect' :: InputTransform -> [Maybe SubExp] -> [Maybe SubExp]
         inspect' (Transpose _ k n) ds =
           transposeIndex k n ds
 
@@ -232,9 +247,14 @@ inputArray (Input _ (Var v))         = Just v
 inputArray (Input _ (Index _ v _ _)) = Just v
 inputArray (Input _ (Iota _))        = Nothing
 
+inputArrayType :: InputArray -> Type
+inputArrayType (Var v)            = identType v
+inputArrayType (Iota _)           = arrayOf (Basic Int) [Nothing] Unique
+inputArrayType (Index _ v _ idxs) = stripArray (length idxs) (identType v)
+
 -- | Return the type of an input.
 inputType :: Input -> Type
-inputType (Input ts ia) = foldl transformType (typeOf $ inputArrayToExp ia) ts
+inputType (Input ts ia) = foldl transformType (inputArrayType ia) ts
   where transformType t Repeat = arrayOf t [Nothing] u
           where u | uniqueOrBasic t = Unique
                   | otherwise       = Nonunique
@@ -271,10 +291,10 @@ transformRows nts inp =
 
 -- | A definite representation of a SOAC expression.
 data SOAC = Map Certificates Lambda [Input] SrcLoc
-          | Reduce  Certificates Lambda [(Exp,Input)] SrcLoc
-          | Scan Certificates Lambda [(Exp,Input)] SrcLoc
+          | Reduce  Certificates Lambda [(SubExp,Input)] SrcLoc
+          | Scan Certificates Lambda [(SubExp,Input)] SrcLoc
           | Filter Certificates Lambda [Input] SrcLoc
-          | Redomap Certificates Lambda Lambda [Exp] [Input] SrcLoc
+          | Redomap Certificates Lambda Lambda [SubExp] [Input] SrcLoc
             deriving (Show)
 
 instance Located SOAC where
@@ -335,60 +355,60 @@ certificates (Filter  cs _     _ _) = cs
 certificates (Redomap cs _ _ _ _ _) = cs
 
 -- | Convert a SOAC to the corresponding expression.
-toExp :: SOAC -> Exp
+toExp :: SOAC -> Binder Exp
 toExp (Map cs l as loc) =
-  L0.Map cs l (inputsToExps as) loc
+  L0.Map cs l <$> inputsToExps as <*> pure loc
 toExp (Reduce cs l args loc) =
-  L0.Reduce cs l (zip es $ inputsToExps as) loc
+  L0.Reduce cs l <$> (zip es <$> inputsToExps as) <*> pure loc
   where (es, as) = unzip args
 toExp (Scan cs l args loc) =
-  L0.Scan cs l (zip es $ inputsToExps as) loc
+  L0.Scan cs l <$> (zip es <$> inputsToExps as) <*> pure loc
   where (es, as) = unzip args
 toExp (Filter cs l as loc) =
-  L0.Filter cs l (inputsToExps as) loc
+  L0.Filter cs l <$> inputsToExps as <*> pure loc
 toExp (Redomap cs l1 l2 es as loc) =
-  L0.Redomap cs l1 l2 es (inputsToExps as) loc
+  L0.Redomap cs l1 l2 es <$> inputsToExps as <*> pure loc
 
 -- | The reason why some expression cannot be converted to a 'SOAC'
 -- value.
 data NotSOAC = NotSOAC -- ^ The expression is not a (tuple-)SOAC at all.
-             | InvalidArrayInput Exp -- ^ One of the input arrays has an
-                                     -- invalid form, i.e. cannot be
-                                     -- converted to an 'Input' value.
+             | InvalidArrayInput SubExp -- ^ One of the input arrays has an
+                                        -- invalid form, i.e. cannot be
+                                        -- converted to an 'Input' value.
                deriving (Show)
 
-inputFromExp' :: Exp -> Either NotSOAC Input
-inputFromExp' e = maybe (Left $ InvalidArrayInput e) Right $ inputFromExp e
+inputFromExp' :: VarLookup -> SubExp -> Either NotSOAC Input
+inputFromExp' l e = maybe (Left $ InvalidArrayInput e) Right $ inputFromExp l $ SubExp e
 
 -- | Either convert an expression to the normalised SOAC
 -- representation, or a reason why the expression does not have the
 -- valid form.
-fromExp :: Exp -> Either NotSOAC SOAC
-fromExp (L0.Map cs l as loc) = do
-  as' <- mapM inputFromExp' as
+fromExp :: VarLookup -> Exp -> Either NotSOAC SOAC
+fromExp look (L0.Map cs l as loc) = do
+  as' <- mapM (inputFromExp' look) as
   Right $ Map cs l as' loc
-fromExp (L0.Reduce cs l args loc) = do
+fromExp look (L0.Reduce cs l args loc) = do
   let (es,as) = unzip args
-  as' <- mapM inputFromExp' as
+  as' <- mapM (inputFromExp' look) as
   Right $ Reduce cs l (zip es as') loc
-fromExp (L0.Scan cs l args loc) = do
+fromExp look (L0.Scan cs l args loc) = do
   let (es,as) = unzip args
-  as' <- mapM inputFromExp' as
+  as' <- mapM (inputFromExp' look) as
   Right $ Scan cs l (zip es as') loc
-fromExp (L0.Filter cs l as loc) = do
-  as' <- mapM inputFromExp' as
+fromExp look (L0.Filter cs l as loc) = do
+  as' <- mapM (inputFromExp' look) as
   Right $ Filter cs l as' loc
-fromExp (L0.Redomap cs l1 l2 es as loc) = do
-  as' <- mapM inputFromExp' as
+fromExp look (L0.Redomap cs l1 l2 es as loc) = do
+  as' <- mapM (inputFromExp' look) as
   Right $ Redomap cs l1 l2 es as' loc
-fromExp (L0.LetPat pats e (L0.TupLit tupes _) _)
-  | Right soac <- fromExp e,
+fromExp look (L0.LetPat pats e (L0.TupLit tupes _) _)
+  | Right soac <- fromExp look e,
     Just tupvs <- vars tupes,
     tupvs == pats =
       Right soac
-fromExp _ = Left NotSOAC
+fromExp _ _ = Left NotSOAC
 
-vars :: [Exp] -> Maybe [Ident]
+vars :: [SubExp] -> Maybe [Ident]
 vars = mapM varExp
   where varExp (L0.Var k) = Just k
         varExp _          = Nothing

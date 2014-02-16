@@ -19,12 +19,12 @@ import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 
 import L0C.NeedNames
-import L0C.MonadFreshNames
 import qualified L0C.HORepresentation.SOAC as SOAC
 import L0C.HORepresentation.SOACNest (SOACNest)
 import qualified L0C.HORepresentation.SOACNest as Nest
 import L0C.Substitute
-import L0C.L0
+import L0C.InternalRep
+import L0C.InternalRep.MonadFreshNames
 
 data Nesting = Nesting {
     nestingParams     :: [Ident]
@@ -40,7 +40,7 @@ pureNest nest
       vs == nestingResult nest
   | otherwise = False
 
-vars :: [Exp] -> Maybe [Ident]
+vars :: [SubExp] -> Maybe [Ident]
 vars = mapM varExp
   where varExp (Var k) = Just k
         varExp _       = Nothing
@@ -48,7 +48,7 @@ vars = mapM varExp
 data MapNest = MapNest Certificates Nest.NestBody [Nesting] [SOAC.Input] SrcLoc
                deriving (Show)
 
-params :: MapNest -> [Parameter]
+params :: MapNest -> [Param]
 params (MapNest _ body [] _ _)       = Nest.bodyParams body
 params (MapNest _ _    (nest:_) _ _) = map toParam $ nestingParams nest
 
@@ -60,7 +60,9 @@ fromSOACNest = fromSOACNest' HS.empty
 
 fromSOACNest' :: HS.HashSet Ident -> SOACNest -> NeedNames (Maybe MapNest)
 
-fromSOACNest' bound (Nest.SOACNest inps (Nest.MapT cs body [] loc)) = do
+fromSOACNest' bound (Nest.SOACNest inps (Nest.Map cs body [] loc)) = do
+  lam <- lambdaBody <$> Nest.bodyToLambda body
+  let boundUsedInBody = HS.toList $ freeInExp lam `HS.intersection` bound
   newParams <- mapM (newIdent' (++"_wasfree")) boundUsedInBody
   let subst = HM.fromList $ zip (map identName boundUsedInBody) (map identName newParams)
       inps' = map (substituteNames subst) inps ++
@@ -72,23 +74,20 @@ fromSOACNest' bound (Nest.SOACNest inps (Nest.MapT cs body [] loc)) = do
                         n { Nest.nestingParams = Nest.nestingParams n' ++ newParams }
                 comb' = substituteNames subst comb
             in Nest.NewNest n' comb'
-          Nest.Lambda l ->
-            Nest.Lambda l { tupleLambdaBody =
-                              substituteNames subst $ tupleLambdaBody l
-                          , tupleLambdaParams =
-                              tupleLambdaParams l ++ map toParam newParams
-                          }
+          Nest.Fun l ->
+            Nest.Fun l { lambdaBody =
+                           substituteNames subst $ lambdaBody l
+                       , lambdaParams =
+                         lambdaParams l ++ map toParam newParams
+                       }
   return $ Just $
          if HM.null subst
          then MapNest cs body [] inps loc
          else MapNest cs body' [] inps' loc
-  where boundUsedInBody =
-          HS.toList $ freeInExp (tupleLambdaBody $ Nest.bodyToLambda body)
-                      `HS.intersection` bound
 
-fromSOACNest' bound (Nest.SOACNest inps (Nest.MapT cs body (n:ns) loc)) = do
+fromSOACNest' bound (Nest.SOACNest inps (Nest.Map cs body (n:ns) loc)) = do
   Just mn@(MapNest cs' body' ns' inps' _) <-
-    fromSOACNest' bound' (Nest.SOACNest (Nest.nestingInputs n) (Nest.MapT cs body ns loc))
+    fromSOACNest' bound' (Nest.SOACNest (Nest.nestingInputs n) (Nest.Map cs body ns loc))
   (ps, inps'') <-
     unzip <$> fixInputs (zip (map toParam $ Nest.nestingParams n) inps)
                         (zip (params mn) inps')
@@ -105,7 +104,7 @@ fromSOACNest' _ _ = return Nothing
 
 toSOACNest :: MapNest -> SOACNest
 toSOACNest (MapNest cs body ns inps loc) =
-  Nest.SOACNest inps $ Nest.MapT cs body ns' loc
+  Nest.SOACNest inps $ Nest.Map cs body ns' loc
   where ns' = map soacNesting ns
         soacNesting nest =
           Nest.Nesting {
@@ -117,8 +116,8 @@ toSOACNest (MapNest cs body ns inps loc) =
                 , Nest.nestingPostExp = nestingPostExp nest
                 }
 
-fixInputs :: [(Parameter, SOAC.Input)] -> [(Parameter, SOAC.Input)]
-          -> NeedNames [(Parameter, SOAC.Input)]
+fixInputs :: [(Param, SOAC.Input)] -> [(Param, SOAC.Input)]
+          -> NeedNames [(Param, SOAC.Input)]
 fixInputs ourInps childInps =
   reverse . snd <$> foldM inspect (ourInps, []) childInps
   where

@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 module L0C.HORepresentation.SOACNest
   ( SOACNest (..)
   , Combinator (..)
@@ -31,9 +32,11 @@ import Data.Loc
 import Data.Maybe
 import qualified Data.HashSet as HS
 
+import L0C.InternalRep hiding (Map, Reduce, Scan, Filter, Redomap, returnType)
+import L0C.InternalRep.MonadFreshNames
+import L0C.Tools
 import L0C.HORepresentation.SOAC (SOAC)
 import qualified L0C.HORepresentation.SOAC as SOAC
-import L0C.InternalRep hiding (Map, Reduce, Scan, Filter, Redomap, returnType)
 import L0C.Substitute
 
 -- Current problems:
@@ -52,7 +55,7 @@ data Nesting = Nesting {
   , nestingReturnType :: [DeclType]
   } deriving (Eq, Ord, Show)
 
-data NestBody = Lambda TupleLambda
+data NestBody = Fun Lambda
               | NewNest Nesting Combinator
                 deriving (Show)
 
@@ -62,36 +65,34 @@ instance Substitute NestBody where
                 n { nestingParams = nestingParams n' }
         comb' = substituteNames m comb
     in NewNest n' comb'
-  substituteNames m (Lambda l) =
-    Lambda l { tupleLambdaBody =
-                 substituteNames m $ tupleLambdaBody l
-             }
+  substituteNames m (Fun l) =
+    Fun l { lambdaBody =
+              substituteNames m $ lambdaBody l
+          }
 
-bodyParams :: NestBody -> [Parameter]
-bodyParams (Lambda l)       = tupleLambdaParams l
+bodyParams :: NestBody -> [Param]
+bodyParams (Fun l)          = lambdaParams l
 bodyParams (NewNest nest _) = map toParam $ nestingParams nest
 
-bodyToLambda :: NestBody -> TupleLambda
-bodyToLambda (Lambda l) = l
-bodyToLambda (NewNest (Nesting paramIds inps bndIds postExp retTypes) op) =
-  TupleLambda { tupleLambdaSrcLoc = loc
-              , tupleLambdaParams = map toParam paramIds
-              , tupleLambdaReturnType = retTypes
-              , tupleLambdaBody =
-                letPattern bndIds
-                (SOAC.toExp $ toSOAC $ SOACNest inps op)
-                postExp
-              }
+bodyToLambda :: MonadFreshNames VName m => NestBody -> m Lambda
+bodyToLambda (Fun l) = return l
+bodyToLambda (NewNest (Nesting paramIds inps bndIds postExp retTypes) op) = do
+  e <- runBinder $ SOAC.toExp =<< toSOAC (SOACNest inps op)
+  return Lambda { lambdaSrcLoc = loc
+                , lambdaParams = map toParam paramIds
+                , lambdaReturnType = retTypes
+                , lambdaBody = LetPat bndIds e postExp loc
+                }
   where loc = srclocOf op
 
-lambdaToBody :: TupleLambda -> NestBody
-lambdaToBody l = fromMaybe (Lambda l) $ liftM (uncurry $ flip NewNest) $ nested l
+lambdaToBody :: SOAC.VarLookup -> Lambda -> NestBody
+lambdaToBody look l = fromMaybe (Fun l) $ liftM (uncurry $ flip NewNest) $ nested look l
 
 data Combinator = Map Certificates NestBody [Nesting] SrcLoc
-                | Reduce Certificates NestBody [Nesting] [Exp] SrcLoc
-                | Scan Certificates NestBody [Nesting] [Exp] SrcLoc
+                | Reduce Certificates NestBody [Nesting] [SubExp] SrcLoc
+                | Scan Certificates NestBody [Nesting] [SubExp] SrcLoc
                 | Filter Certificates NestBody [Nesting] SrcLoc
-                | Redomap Certificates TupleLambda NestBody [Nesting] [Exp] SrcLoc
+                | Redomap Certificates Lambda NestBody [Nesting] [SubExp] SrcLoc
                  deriving (Show)
 
 instance Located Combinator where
@@ -138,18 +139,18 @@ setBody b (Scan cs _ ls es loc) = Scan cs b ls es loc
 setBody b (Filter cs _ ls loc) = Filter cs b ls loc
 setBody b (Redomap cs l _ ls es loc) = Redomap cs l b ls es loc
 
-combinatorFirstLoop :: Combinator -> ([Parameter], [DeclType])
+combinatorFirstLoop :: Combinator -> ([Param], [DeclType])
 combinatorFirstLoop comb =
   case nesting comb of
       nest:_ -> (map toParam $ nestingParams nest,
                  nestingReturnType nest)
       []     -> case body comb of
-                  Lambda l       -> (tupleLambdaParams l,
-                                     tupleLambdaReturnType l)
+                  Fun l          -> (lambdaParams l,
+                                     lambdaReturnType l)
                   NewNest nest _ -> (map toParam $ nestingParams nest,
                                     nestingReturnType nest)
 
-params :: Combinator -> [Parameter]
+params :: Combinator -> [Param]
 params = fst . combinatorFirstLoop
 
 returnType :: Combinator -> [DeclType]
@@ -174,101 +175,92 @@ certificates (SOACNest _ (Scan    cs _   _ _ _)) = cs
 certificates (SOACNest _ (Filter  cs _   _   _)) = cs
 certificates (SOACNest _ (Redomap cs _ _ _ _ _)) = cs
 
-fromExp :: Exp -> Either SOAC.NotSOAC SOACNest
-fromExp = liftM fromSOAC . SOAC.fromExp
+fromExp :: SOAC.VarLookup -> Exp -> Either SOAC.NotSOAC SOACNest
+fromExp look = liftM (fromSOAC look) . SOAC.fromExp look
 
-toExp :: SOACNest -> Exp
-toExp = SOAC.toExp . toSOAC
+toExp :: SOACNest -> Binder Exp
+toExp = SOAC.toExp <=< toSOAC
 
-fromSOAC :: SOAC -> SOACNest
-fromSOAC (SOAC.Map cs l as loc)
-  | Just (Map cs2 l2 ps _, nest) <- nested l =
+fromSOAC :: SOAC.VarLookup -> SOAC -> SOACNest
+fromSOAC look (SOAC.Map cs l as loc)
+  | Just (Map cs2 l2 ps _, nest) <- nested look l =
       SOACNest as $ Map (cs++cs2) l2 (nest:ps) loc
   | otherwise =
-      SOACNest as $ Map cs (lambdaToBody l) [] loc
-fromSOAC (SOAC.Reduce cs l args loc)
-  | Just (Reduce cs2 l2 ps _ _, nest) <- nested l =
+      SOACNest as $ Map cs (lambdaToBody look l) [] loc
+fromSOAC look (SOAC.Reduce cs l args loc)
+  | Just (Reduce cs2 l2 ps _ _, nest) <- nested look l =
       SOACNest (map snd args) $
       Reduce (cs++cs2) l2 (nest:ps) (map fst args) loc
   | otherwise =
       SOACNest (map snd args) $
-      Reduce cs (lambdaToBody l) [] (map fst args) loc
-fromSOAC (SOAC.Scan cs l args loc)
-  | Just (Scan cs2 l2 ps _ _, nest) <- nested l =
+      Reduce cs (lambdaToBody look l) [] (map fst args) loc
+fromSOAC look (SOAC.Scan cs l args loc)
+  | Just (Scan cs2 l2 ps _ _, nest) <- nested look l =
       SOACNest (map snd args) $
       Scan (cs++cs2) l2 (nest:ps) (map fst args) loc
   | otherwise =
       SOACNest (map snd args) $
-      Scan cs (lambdaToBody l) [] (map fst args) loc
-fromSOAC (SOAC.Filter cs l as loc)
-  | Just (Filter cs2 l2 ps  _, nest) <- nested l =
+      Scan cs (lambdaToBody look l) [] (map fst args) loc
+fromSOAC look (SOAC.Filter cs l as loc)
+  | Just (Filter cs2 l2 ps  _, nest) <- nested look l =
       SOACNest as $ Filter (cs++cs2) l2 (nest:ps) loc
   | otherwise =
-      SOACNest as $ Filter cs (lambdaToBody l) [] loc
-fromSOAC (SOAC.Redomap cs ol l es as loc) =
+      SOACNest as $ Filter cs (lambdaToBody look l) [] loc
+fromSOAC look (SOAC.Redomap cs ol l es as loc) =
   -- Never nested, because we need a way to test alpha-equivalence of
   -- the outer combining function.
-  SOACNest as $ Redomap cs ol (lambdaToBody l) [] es loc
+  SOACNest as $ Redomap cs ol (lambdaToBody look l) [] es loc
 
-nested :: TupleLambda -> Maybe (Combinator, Nesting)
-nested l
-  | LetPat pat e pe _ <- tupleLambdaBody l, -- Is a let-binding...
-    Right soac <- fromSOAC <$> SOAC.fromExp e, -- ...the bindee is a SOAC...
-    Just ids   <- tupId pat, -- ...with a tuple-pattern...
+nested :: SOAC.VarLookup -> Lambda -> Maybe (Combinator, Nesting)
+nested look l
+  | LetPat ids e pe _ <- lambdaBody l, -- Is a let-binding...
+    Right soac <- fromSOAC look <$> SOAC.fromExp look e, -- ...the bindee is a SOAC...
     Just pe' <-
-      checkPostExp (map fromParam $ tupleLambdaParams l) pe = -- ...where the body is a tuple
+      checkPostExp (map fromParam $ lambdaParams l) pe = -- ...where the body is a tuple
                                                               -- literal of the bound variables.
       Just (operation soac,
             -- ... FIXME: need more checks here.
-            Nesting { nestingParams = map fromParam $ tupleLambdaParams l
+            Nesting { nestingParams = map fromParam $ lambdaParams l
                     , nestingInputs = inputs soac
                     , nestingResult = ids
                     , nestingPostExp = pe'
-                    , nestingReturnType = tupleLambdaReturnType l
+                    , nestingReturnType = lambdaReturnType l
                     })
   | otherwise = Nothing
-
-tupId :: TupIdent -> Maybe [Ident]
-tupId (TupId pats _) = mapM tupId' pats
-  where tupId' (Id ident) = Just ident
-        tupId' _          = Nothing
-tupId _ = Nothing
 
 checkPostExp :: [Ident] -> Exp -> Maybe Exp
 checkPostExp ks e
   | HS.null $ HS.fromList ks `HS.intersection` freeInExp e = Just e
   | otherwise                                              = Nothing
 
-toSOAC :: SOACNest -> SOAC
+toSOAC :: SOACNest -> Binder SOAC
 toSOAC (SOACNest as comb@(Map cs b _ loc)) =
-  SOAC.Map cs (subLambda b comb) as loc
+  SOAC.Map cs <$> subLambda b comb <*> pure as <*> pure loc
 toSOAC (SOACNest as comb@(Reduce cs b _ es loc)) =
-  SOAC.Reduce cs (subLambda b comb) (zip es as) loc
+  SOAC.Reduce cs <$> subLambda b comb <*> pure (zip es as) <*> pure loc
 toSOAC (SOACNest as comb@(Scan cs b _ es loc)) =
-  SOAC.Scan cs (subLambda b comb) (zip es as) loc
+  SOAC.Scan cs <$> subLambda b comb <*> pure (zip es as) <*> pure loc
 toSOAC (SOACNest as comb@(Filter cs b _ loc)) =
-  SOAC.Filter cs (subLambda b comb) as loc
+  SOAC.Filter cs <$> subLambda b comb <*> pure as <*> pure loc
 toSOAC (SOACNest as comb@(Redomap cs l b _ es loc)) =
-  SOAC.Redomap cs l (subLambda b comb) es as loc
+  SOAC.Redomap cs l <$> subLambda b comb <*> pure es <*> pure as <*> pure loc
 
-subLambda :: NestBody -> Combinator -> TupleLambda
+subLambda :: MonadFreshNames VName m => NestBody -> Combinator -> m Lambda
 subLambda b comb =
   case nesting comb of
     [] -> bodyToLambda b
-    (Nesting paramIds inps bndIds postExp retTypes:rest) ->
-      TupleLambda { tupleLambdaReturnType = retTypes
-                  , tupleLambdaBody       =
-                    letPattern bndIds
-                    (SOAC.toExp $ toSOAC $ SOACNest inps (rest `setNesting` comb))
-                    postExp
-                  , tupleLambdaSrcLoc     = loc
-                  , tupleLambdaParams     = map toParam paramIds
-                  }
+    (Nesting paramIds inps bndIds postExp retTypes:rest) -> do
+      e <- runBinder $ SOAC.toExp <=< toSOAC $ SOACNest inps $ rest `setNesting` comb
+      return Lambda { lambdaReturnType = retTypes
+                    , lambdaBody       = LetPat bndIds e postExp loc
+                    , lambdaSrcLoc     = loc
+                    , lambdaParams     = map toParam paramIds
+                    }
   where loc = srclocOf comb
 
 letPattern :: [Ident] -> Exp -> Exp -> Exp
 letPattern bndIds e postExp =
-  LetPat (TupId (map Id bndIds) loc) e postExp loc
+  LetPat bndIds e postExp loc
   where loc = srclocOf e
 
 inputBindings :: SOACNest -> [[Ident]]
@@ -285,7 +277,7 @@ inputBindings' ps comb =
   case nesting comb of
     [] ->
       case body comb of
-        Lambda _              ->
+        Fun _              ->
           replicate (length ps) []
         NewNest nest comb' ->
           inputBindings' (usedParams ps nest comb') comb'
@@ -300,7 +292,7 @@ nextInputParams :: Combinator -> [Ident]
 nextInputParams comb =
   case nesting comb of
     []        -> case body comb of
-                   Lambda l       -> map fromParam $ tupleLambdaParams l -- FIXME: remove accumulator params!
+                   Fun l          -> map fromParam $ lambdaParams l -- FIXME: remove accumulator params!
                    NewNest nest _ -> nestingParams nest
     nest:_ -> nestingParams nest
 
@@ -315,5 +307,5 @@ inputsPerLevel = nestedInputs' . operation
   where nestedInputs' comb =
           map nestingInputs (nesting comb) ++
           case body comb of
-            Lambda _           -> []
+            Fun _              -> []
             NewNest nest comb' -> nestingInputs nest : nestedInputs' comb'

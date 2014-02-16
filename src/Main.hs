@@ -29,8 +29,7 @@ import L0C.Interpreter
 import L0C.EnablingOpts.EnablingOptDriver
 -- import L0C.HOTrans.HOTransDriver
 import qualified L0C.FirstOrderTransform as FOT
--- import qualified L0C.FullNormalization as FN
--- import qualified L0C.Rebinder as RB
+import qualified L0C.Rebinder as RB
 import qualified L0C.IndexInliner as II
 -- import qualified L0C.SOACFlowGraph as FG
 import L0C.Untrace
@@ -75,9 +74,8 @@ commandLineOptions =
     (NoArg $ \opts -> opts { l0action = interpretAction })
     "Run the program via an interpreter."
   , renameOpt "r" ["rename"]
---  , hoistOpt "o" ["hoist"]
---  , hoistAggrOpt "O" ["hoist-aggressively"]
---  , normalizeOpt "n" ["normalize"]
+  , hoistOpt "o" ["hoist"]
+  , hoistAggrOpt "O" ["hoist-aggressively"]
   , uttransformOpt "u" ["untrace"]
   , fotransformOpt "f" ["first-order-transform"]
   , eotransformOpt "e" ["enabling-optimisations"]
@@ -140,7 +138,7 @@ rename :: Pass
 rename = Pass { passName = "renamer"
               , passOp = return . I.renameProg
               }
-{-
+
 hoist :: Pass
 hoist = Pass { passName = "rebinder"
              , passOp = return . RB.transformProg
@@ -150,13 +148,6 @@ hoistAggr :: Pass
 hoistAggr = Pass { passName = "rebinder (aggressive)"
                  , passOp = return . RB.transformProgAggr
                  }
--}
-{-
-normalize :: Pass
-normalize = Pass { passName = "full normalizer"
-                 , passOp = return . FN.normalizeProg
-                 }
--}
 
 fotransform :: Pass
 fotransform = Pass { passName = "first-order transform"
@@ -185,8 +176,8 @@ hotransform = Pass { passName = "higher-order optimisations"
 -}
 standardPipeline :: [Pass]
 standardPipeline =
-  [ uttransform, eotransform, iitransform, rename {- , hoist -}
-  , eotransform, {- hotransform, -} eotransform {- , hoistAggr, -}
+  [ uttransform, eotransform, iitransform, rename, hoist
+  , eotransform{-, hotransform-}, eotransform , hoistAggr
   , eotransform ]
 
 passoption :: String -> Pass -> String -> [String] -> L0Option
@@ -198,7 +189,7 @@ passoption desc pass short long =
 renameOpt :: String -> [String] -> L0Option
 renameOpt =
   passoption "Rename all non-function identifiers to be unique." rename
-{-
+
 hoistOpt :: String -> [String] -> L0Option
 hoistOpt =
   passoption "Rebinder - hoisting, CSE, dependency graph compression." hoist
@@ -207,12 +198,6 @@ hoistAggrOpt :: String -> [String] -> L0Option
 hoistAggrOpt =
   passoption "Rebinder - hoisting, CSE, dependency graph compression (aggressively)."
   hoistAggr
--}
-{-
-normalizeOpt :: String -> [String] -> L0Option
-normalizeOpt =
-  passoption "Full normalization" normalize
--}
 
 fotransformOpt :: String -> [String] -> L0Option
 fotransformOpt =
