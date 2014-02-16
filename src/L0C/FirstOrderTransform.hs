@@ -115,7 +115,9 @@ transformExp rec (Scan cs fun args loc) = do
         funcall <- transformLambda (dec rec) fun $ map (SubExp . Var) acc ++ index cs arr iv
         x <- letTupExp "fun" funcall
         dests <- letwith cs arr (pexp iv) (map (SubExp . Var) x)
-        eTupLit (map pure $ index cs dests iv++map (SubExp . Var) dests) loc
+        irows <- letSubExps "row" $ index cs dests iv
+        let rowcopies = [ Copy irow loc | irow <- irows ]
+        eTupLit (map pure $ rowcopies ++ map (SubExp . Var) dests) loc
   eDoLoop (zip (acc ++ arr) (map (pexp . Var) $ acc ++ arr)) -- XXX Shadowing
           i (pure $ size cs arr) loopbody (pure $ TupLit (map Var arr) loc) loc
   where (accexp, arrexps) = unzip args
