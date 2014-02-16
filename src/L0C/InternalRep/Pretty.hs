@@ -80,6 +80,8 @@ instance Pretty Exp where
   ppr (TupLit es _)
     | any hasArrayLit es = braces $ commastack $ map ppr es
     | otherwise          = braces $ commasep $ map ppr es
+  ppr (ArrayLit [] rt _) =
+    text "empty" <> parens (ppr rt)
   ppr (ArrayLit es rt _) =
     case rt of
       Array {} -> brackets $ commastack $ map ppr es
