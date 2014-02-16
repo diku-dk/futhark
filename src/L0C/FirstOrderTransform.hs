@@ -207,9 +207,7 @@ newResultArray :: Exp -> [Exp] -> Binder [Ident]
 newResultArray sizeexp valueexps = do
   sizeexp' <- letSubExp "size" sizeexp
   valueexps' <- letSubExps "value" valueexps
-  (names, namevs) <- unzip <$> mapM (newVar loc "outarr_v" . subExpType) valueexps'
-  letBind names (TupLit valueexps' loc)
-  outarrs <- letExps "outarr" [ Replicate sizeexp' namev loc | namev <- namevs ]
+  outarrs <- letExps "outarr" [ Replicate sizeexp' vexp loc | vexp <- valueexps' ]
   letExps "outarr" $ map (maybeCopy . Var) outarrs
   where loc = srclocOf sizeexp
 
@@ -230,8 +228,6 @@ pexp :: Applicative f => SubExp -> f Exp
 pexp = pure . SubExp
 
 transformLambda :: RecDepth -> Lambda -> [Exp] -> Binder Exp
-transformLambda rec (Lambda params body _ loc) args = do
-  body' <- transformExp rec body
-  return $ foldl bind body' $ zip (map fromParam params) args
-  where bind e (Ident pname ptype _, arg) =
-          LetPat [Ident pname ptype loc] arg e loc
+transformLambda rec (Lambda params body _ _) args = do
+  zipWithM_ letBind (map ((:[]) . fromParam) params) args
+  transformExp rec body

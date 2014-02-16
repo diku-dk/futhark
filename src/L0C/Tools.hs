@@ -43,7 +43,8 @@ import L0C.InternalRep.MonadFreshNames
 
 letSubExp :: MonadBinder m =>
              String -> Exp -> m SubExp
-letSubExp _ (SubExp se) = return se
+letSubExp _ (SubExp se)     = return se
+letSubExp _ (TupLit [se] _) = return se
 letSubExp desc e =
   case typeOf e of
     [_] -> Var <$> letExp desc e
@@ -51,7 +52,8 @@ letSubExp desc e =
 
 letExp :: MonadBinder m =>
           String -> Exp -> m Ident
-letExp _ (SubExp (Var v)) = return v
+letExp _ (SubExp (Var v))   = return v
+letExp _ (TupLit [Var v] _) = return v
 letExp desc e =
   case typeOf e of
     [t] -> do v <- fst <$> newVar (srclocOf e) desc t
@@ -67,7 +69,17 @@ letExps :: MonadBinder m =>
            String -> [Exp] -> m [Ident]
 letExps desc = mapM $ letExp desc
 
+varSubExp :: SubExp -> Maybe Ident
+varSubExp (Var v) = Just v
+varSubExp _       = Nothing
+
 letTupExp :: MonadBinder m => String -> Exp -> m [Ident]
+letTupExp _ (TupLit es _)
+  | Just vs <- mapM varSubExp es = return vs
+letTupExp _ (SubExp (Var v)) = return [v]
+letTupExp desc (LetPat pat e body _) = do
+  letBind pat e
+  letTupExp desc body
 letTupExp name e = do
   let ts  = typeOf e
       loc = srclocOf e
