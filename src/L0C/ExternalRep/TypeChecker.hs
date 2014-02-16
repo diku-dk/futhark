@@ -1091,13 +1091,15 @@ checkFuncall fname loc paramtypes _ args = do
           (Right $ map untagType paramtypes) (map (toDecl . untagType) argts)
 
   forM_ (zip (map diet paramtypes) args) $ \(d, (t, dflow, argloc)) -> do
-    maybeCheckOccurences $ usageOccurences dflow
-    let occurs = [consumption (consumeArg t d) argloc]
+    maybeCheckOccurences $ usageOccurences  dflow
+    let occurs = consumeArg argloc t d
     occur $ usageOccurences dflow `seqOccurences` occurs
-  where consumeArg (Elem (Tuple ets)) (TupleDiet ds) =
-          mconcat $ zipWith consumeArg ets ds
-        consumeArg at Consume = aliases at
-        consumeArg _  _       = HS.empty
+
+consumeArg :: SrcLoc -> TaggedType vn -> Diet -> [Occurence vn]
+consumeArg loc (Elem (Tuple ets)) (TupleDiet ds) =
+  concat $ zipWith (consumeArg loc) ets ds
+consumeArg loc at Consume = [consumption (aliases at) loc]
+consumeArg loc at _       = [observation (aliases at) loc]
 
 checkTupleLambda :: (TypeBox ty, VarName vn) =>
                     TaggedTupleLambda ty vn -> [Arg vn]
