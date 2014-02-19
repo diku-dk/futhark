@@ -485,7 +485,8 @@ hoistCommon m1 m2 = pass $ do
 hoistInExp :: Exp -> HoistM Exp
 hoistInExp (If c e1 e2 t loc) = do
   (e1',e2') <- hoistCommon (hoistInExp e1) (hoistInExp e2)
-  return $ If c e1' e2' t loc
+  c' <- hoistInSubExp c
+  return $ If c' e1' e2' t loc
 hoistInExp (LetPat pat e body _) = do
   e' <- hoistInExp e
   bindLet pat e' $ hoistInExp body
@@ -523,16 +524,24 @@ hoistInExp e@(Redomap cs _ (Lambda innerparams _ _ _)
     withSOACArrSlices cs (drop (length accexps) innerparams) ks $
     withShapes (sameOuterShapes cs ks) $
     hoistInExpBase e
-hoistInExp e = do e' <- hoistInExpBase e
-                  boundFree $ freeNamesInExp e'
-                  return e'
+hoistInExp e = hoistInExpBase e
 
 hoistInExpBase :: Exp -> HoistM Exp
 hoistInExpBase = mapExpM hoist
   where hoist = identityMapper {
                   mapOnExp = hoistInExp
+                , mapOnSubExp = hoistInSubExp
                 , mapOnLambda = hoistInLambda
+                , mapOnIdent = hoistInIdent
                 }
+
+hoistInSubExp :: SubExp -> HoistM SubExp
+hoistInSubExp (Var v)          = Var <$> hoistInIdent v
+hoistInSubExp (Constant v loc) = return $ Constant v loc
+
+hoistInIdent :: Ident -> HoistM Ident
+hoistInIdent v = do boundFree $ HS.singleton $ identName v
+                    return v
 
 hoistInLambda :: Lambda -> HoistM Lambda
 hoistInLambda (Lambda params body rettype loc) = do
@@ -549,7 +558,7 @@ hoistInSOAC :: Exp -> [SubExp] -> ([Ident] -> HoistM Exp) -> HoistM Exp
 hoistInSOAC e arrexps m =
   case arrVars arrexps of
     Nothing -> hoistInExpBase e
-    Just ks -> m ks
+    Just ks -> m =<< mapM hoistInIdent ks
 
 arrSlices :: Certificates -> [Param] -> [Ident] -> [(Ident, [Exp])]
 arrSlices cs params = zip (map fromParam params) . map (slice cs 1)
