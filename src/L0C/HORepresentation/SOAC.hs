@@ -23,7 +23,6 @@ module L0C.HORepresentation.SOAC
   , certificates
   -- ** Converting to and from expressions
   , NotSOAC (..)
-  , VarLookup
   , fromExp
   , toExp
   -- * SOAC inputs
@@ -40,8 +39,8 @@ module L0C.HORepresentation.SOAC
   , inputTransposes
   , transformRows
   -- ** Converting to and from expressions
-  , inputFromExp
-  , inputsToExps
+  , inputFromSubExp
+  , inputsToSubExps
   )
   where
 
@@ -138,38 +137,15 @@ addTransform t (Input ts ia) = Input (ts++[t]) ia
 addTransforms :: [InputTransform] -> Input -> Input
 addTransforms ts1 (Input ts2 ia) = Input (ts2++ts1) ia
 
-type VarLookup = Ident -> Maybe Exp
-
 -- | If the given expression represents a normalised SOAC input,
 -- return that input.
-inputFromExp :: VarLookup -> Exp -> Maybe Input
-inputFromExp look ie = do (ts, ia) <- examineExp ie
-                          return $ Input (reverse ts) ia
-  where examineExp (L0.SubExp (L0.Var k)) =
-          (examineExp =<< look k) <|> Just ([], Var k)
-
-        examineExp (L0.Iota ne _) = Just ([], Iota ne)
-
-        examineExp (L0.Index cs idd idxcs idxs _) = do
-          idxs' <- mapM idx idxs
-          Just ([], Index cs idd idxcs idxs')
-          where idx (L0.Var indidd)                       = Just $ VarIndex indidd
-                idx (L0.Constant (BasicVal (IntVal i)) _) = Just $ ConstIndex i
-                idx _                                     = Nothing
-
-        examineExp (L0.Transpose cs k n inp _) = do
-          (ts, inp') <- examineExp $ SubExp inp
-          Just (Transpose cs k n : ts, inp')
-
-        examineExp (L0.Reshape cs shape inp _) = do
-          (ts, inp') <- examineExp $ SubExp inp
-          Just (Reshape cs shape : ts, inp')
-
-        examineExp _ = Nothing
+inputFromSubExp :: SubExp -> Maybe Input
+inputFromSubExp (L0.Var v) = Just $ Input [] $ Var v
+inputFromSubExp _          = Nothing
 
 -- | Convert SOAC inputs to the corresponding expressions.
-inputsToExps :: [Input] -> Binder [SubExp]
-inputsToExps is = do
+inputsToSubExps :: [Input] -> Binder [SubExp]
+inputsToSubExps is = do
   sizes <- dimSizes is
   mapM (inputToExp' sizes) is
   where inputToExp' sizes (Input ts ia) = do
@@ -357,17 +333,17 @@ certificates (Redomap cs _ _ _ _ _) = cs
 -- | Convert a SOAC to the corresponding expression.
 toExp :: SOAC -> Binder Exp
 toExp (Map cs l as loc) =
-  L0.Map cs l <$> inputsToExps as <*> pure loc
+  L0.Map cs l <$> inputsToSubExps as <*> pure loc
 toExp (Reduce cs l args loc) =
-  L0.Reduce cs l <$> (zip es <$> inputsToExps as) <*> pure loc
+  L0.Reduce cs l <$> (zip es <$> inputsToSubExps as) <*> pure loc
   where (es, as) = unzip args
 toExp (Scan cs l args loc) =
-  L0.Scan cs l <$> (zip es <$> inputsToExps as) <*> pure loc
+  L0.Scan cs l <$> (zip es <$> inputsToSubExps as) <*> pure loc
   where (es, as) = unzip args
 toExp (Filter cs l as loc) =
-  L0.Filter cs l <$> inputsToExps as <*> pure loc
+  L0.Filter cs l <$> inputsToSubExps as <*> pure loc
 toExp (Redomap cs l1 l2 es as loc) =
-  L0.Redomap cs l1 l2 es <$> inputsToExps as <*> pure loc
+  L0.Redomap cs l1 l2 es <$> inputsToSubExps as <*> pure loc
 
 -- | The reason why some expression cannot be converted to a 'SOAC'
 -- value.
@@ -377,36 +353,36 @@ data NotSOAC = NotSOAC -- ^ The expression is not a (tuple-)SOAC at all.
                                         -- converted to an 'Input' value.
                deriving (Show)
 
-inputFromExp' :: VarLookup -> SubExp -> Either NotSOAC Input
-inputFromExp' l e = maybe (Left $ InvalidArrayInput e) Right $ inputFromExp l $ SubExp e
+inputFromSubExp' :: SubExp -> Either NotSOAC Input
+inputFromSubExp' e = maybe (Left $ InvalidArrayInput e) Right $ inputFromSubExp e
 
 -- | Either convert an expression to the normalised SOAC
 -- representation, or a reason why the expression does not have the
 -- valid form.
-fromExp :: VarLookup -> Exp -> Either NotSOAC SOAC
-fromExp look (L0.Map cs l as loc) = do
-  as' <- mapM (inputFromExp' look) as
+fromExp :: Exp -> Either NotSOAC SOAC
+fromExp (L0.Map cs l as loc) = do
+  as' <- mapM inputFromSubExp' as
   Right $ Map cs l as' loc
-fromExp look (L0.Reduce cs l args loc) = do
+fromExp (L0.Reduce cs l args loc) = do
   let (es,as) = unzip args
-  as' <- mapM (inputFromExp' look) as
+  as' <- mapM inputFromSubExp' as
   Right $ Reduce cs l (zip es as') loc
-fromExp look (L0.Scan cs l args loc) = do
+fromExp (L0.Scan cs l args loc) = do
   let (es,as) = unzip args
-  as' <- mapM (inputFromExp' look) as
+  as' <- mapM inputFromSubExp' as
   Right $ Scan cs l (zip es as') loc
-fromExp look (L0.Filter cs l as loc) = do
-  as' <- mapM (inputFromExp' look) as
+fromExp (L0.Filter cs l as loc) = do
+  as' <- mapM inputFromSubExp' as
   Right $ Filter cs l as' loc
-fromExp look (L0.Redomap cs l1 l2 es as loc) = do
-  as' <- mapM (inputFromExp' look) as
+fromExp (L0.Redomap cs l1 l2 es as loc) = do
+  as' <- mapM inputFromSubExp' as
   Right $ Redomap cs l1 l2 es as' loc
-fromExp look (L0.LetPat pats e (L0.TupLit tupes _) _)
-  | Right soac <- fromExp look e,
+fromExp (L0.LetPat pats e (L0.TupLit tupes _) _)
+  | Right soac <- fromExp e,
     Just tupvs <- vars tupes,
     tupvs == pats =
       Right soac
-fromExp _ _ = Left NotSOAC
+fromExp _ = Left NotSOAC
 
 vars :: [SubExp] -> Maybe [Ident]
 vars = mapM varExp

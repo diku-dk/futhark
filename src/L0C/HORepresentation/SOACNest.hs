@@ -85,8 +85,8 @@ bodyToLambda (NewNest (Nesting paramIds inps bndIds postExp retTypes) op) = do
                 }
   where loc = srclocOf op
 
-lambdaToBody :: SOAC.VarLookup -> Lambda -> NestBody
-lambdaToBody look l = fromMaybe (Fun l) $ liftM (uncurry $ flip NewNest) $ nested look l
+lambdaToBody :: Lambda -> NestBody
+lambdaToBody l = fromMaybe (Fun l) $ liftM (uncurry $ flip NewNest) $ nested l
 
 data Combinator = Map Certificates NestBody [Nesting] SrcLoc
                 | Reduce Certificates NestBody [Nesting] [SubExp] SrcLoc
@@ -175,46 +175,46 @@ certificates (SOACNest _ (Scan    cs _   _ _ _)) = cs
 certificates (SOACNest _ (Filter  cs _   _   _)) = cs
 certificates (SOACNest _ (Redomap cs _ _ _ _ _)) = cs
 
-fromExp :: SOAC.VarLookup -> Exp -> Either SOAC.NotSOAC SOACNest
-fromExp look = liftM (fromSOAC look) . SOAC.fromExp look
+fromExp :: Exp -> Either SOAC.NotSOAC SOACNest
+fromExp = liftM fromSOAC . SOAC.fromExp
 
 toExp :: SOACNest -> Binder Exp
 toExp = SOAC.toExp <=< toSOAC
 
-fromSOAC :: SOAC.VarLookup -> SOAC -> SOACNest
-fromSOAC look (SOAC.Map cs l as loc)
-  | Just (Map cs2 l2 ps _, nest) <- nested look l =
+fromSOAC :: SOAC -> SOACNest
+fromSOAC (SOAC.Map cs l as loc)
+  | Just (Map cs2 l2 ps _, nest) <- nested l =
       SOACNest as $ Map (cs++cs2) l2 (nest:ps) loc
   | otherwise =
-      SOACNest as $ Map cs (lambdaToBody look l) [] loc
-fromSOAC look (SOAC.Reduce cs l args loc)
-  | Just (Reduce cs2 l2 ps _ _, nest) <- nested look l =
+      SOACNest as $ Map cs (lambdaToBody l) [] loc
+fromSOAC (SOAC.Reduce cs l args loc)
+  | Just (Reduce cs2 l2 ps _ _, nest) <- nested l =
       SOACNest (map snd args) $
       Reduce (cs++cs2) l2 (nest:ps) (map fst args) loc
   | otherwise =
       SOACNest (map snd args) $
-      Reduce cs (lambdaToBody look l) [] (map fst args) loc
-fromSOAC look (SOAC.Scan cs l args loc)
-  | Just (Scan cs2 l2 ps _ _, nest) <- nested look l =
+      Reduce cs (lambdaToBody l) [] (map fst args) loc
+fromSOAC (SOAC.Scan cs l args loc)
+  | Just (Scan cs2 l2 ps _ _, nest) <- nested l =
       SOACNest (map snd args) $
       Scan (cs++cs2) l2 (nest:ps) (map fst args) loc
   | otherwise =
       SOACNest (map snd args) $
-      Scan cs (lambdaToBody look l) [] (map fst args) loc
-fromSOAC look (SOAC.Filter cs l as loc)
-  | Just (Filter cs2 l2 ps  _, nest) <- nested look l =
+      Scan cs (lambdaToBody l) [] (map fst args) loc
+fromSOAC (SOAC.Filter cs l as loc)
+  | Just (Filter cs2 l2 ps  _, nest) <- nested l =
       SOACNest as $ Filter (cs++cs2) l2 (nest:ps) loc
   | otherwise =
-      SOACNest as $ Filter cs (lambdaToBody look l) [] loc
-fromSOAC look (SOAC.Redomap cs ol l es as loc) =
+      SOACNest as $ Filter cs (lambdaToBody l) [] loc
+fromSOAC (SOAC.Redomap cs ol l es as loc) =
   -- Never nested, because we need a way to test alpha-equivalence of
   -- the outer combining function.
-  SOACNest as $ Redomap cs ol (lambdaToBody look l) [] es loc
+  SOACNest as $ Redomap cs ol (lambdaToBody l) [] es loc
 
-nested :: SOAC.VarLookup -> Lambda -> Maybe (Combinator, Nesting)
-nested look l
+nested :: Lambda -> Maybe (Combinator, Nesting)
+nested l
   | LetPat ids e pe _ <- lambdaBody l, -- Is a let-binding...
-    Right soac <- fromSOAC look <$> SOAC.fromExp look e, -- ...the bindee is a SOAC...
+    Right soac <- fromSOAC <$> SOAC.fromExp e, -- ...the bindee is a SOAC...
     Just pe' <-
       checkPostExp (map fromParam $ lambdaParams l) pe = -- ...where the body is a tuple
                                                               -- literal of the bound variables.

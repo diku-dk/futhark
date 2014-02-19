@@ -199,7 +199,7 @@ bindLet pat@[dest] e@(Concat cs (Var x) (Var y) loc) m =
   m
 
 bindLet pat e m
-  | Right nest <- Nest.fromExp (const Nothing) e =
+  | Right nest <- Nest.fromExp e =
     withBinding pat e $
     withShapes (SZ.sizeRelations pat nest) m
 

@@ -122,7 +122,7 @@ soacSeen name produced soac =
 
 flowForExp :: Exp -> FlowM ()
 flowForExp (LetPat pat e body _)
-  | Right e' <- SOAC.fromExp (const Nothing) e,
+  | Right e' <- SOAC.fromExp e,
     names@(name:_) <- map identName pat = do
   soacSeen name names e'
   flowForExp body
