@@ -16,7 +16,7 @@ import L0C.InternalRep
 import L0C.NeedNames
 import L0C.MonadFreshNames
 
-newtype TryFusion a = TryFusion (MaybeT (State (NameSource VName)) a)
+newtype TryFusion a = TryFusion (MaybeT (State VNameSource) a)
   deriving (Functor, Applicative, Alternative,
             Monad, MonadState (NameSource VName))
 

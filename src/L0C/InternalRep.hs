@@ -32,7 +32,8 @@ type GenType als = TypeBase (als VName)
 newtype Several a = Several [a]
 
 instance Pretty a => Pretty (Several a) where
-  ppr (Several ts) = ppPat ts
+  ppr (Several [t]) = ppr t
+  ppr (Several ts)  = braces $ commasep $ map ppr ts
 
 justOne :: a -> Several a
 justOne x = Several [x]

@@ -10,7 +10,7 @@ module L0C.InternalRep.Pretty
   , ppExp
   , ppSubExp
   , ppLambda
-  , ppPat
+  , ppPattern
   , prettyPrint
   )
   where
@@ -248,6 +248,10 @@ ppSubExp = render80
 -- | Prettyprint a lambda, wrapped to 80 characters.
 ppLambda :: Lambda -> String
 ppLambda = render80
+
+-- | Prettyprint a pattern.
+ppPattern :: Pretty a => [a] -> String
+ppPattern = pretty 80 . ppPat
 
 -- | Prettyprint an entire L0 program, wrapped to 80 characters.
 prettyPrint :: Prog -> String

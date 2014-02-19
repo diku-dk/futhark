@@ -32,7 +32,7 @@ import L0C.FreshNames hiding (newName, newID, newVName)
 --    getNameSource = get
 --    putNameSource = put
 -- @
-class (Applicative m, Monad m, VarName vn)  => MonadFreshNames vn m where
+class (Applicative m, Monad m, VarName vn) => MonadFreshNames vn m where
   getNameSource :: m (NameSource vn)
   putNameSource :: NameSource vn -> m ()
 

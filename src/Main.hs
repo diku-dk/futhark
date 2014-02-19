@@ -27,7 +27,7 @@ import qualified L0C.InternalRep.Renamer as I
 
 import L0C.Interpreter
 import L0C.EnablingOpts.EnablingOptDriver
--- import L0C.HOTrans.HOTransDriver
+import L0C.HOTrans.HOTransDriver
 import qualified L0C.FirstOrderTransform as FOT
 import qualified L0C.Rebinder as RB
 import qualified L0C.IndexInliner as II
@@ -78,7 +78,7 @@ commandLineOptions =
   , fotransformOpt "f" ["first-order-transform"]
   , eotransformOpt "e" ["enabling-optimisations"]
   , iitransformOpt []  ["inline-map-indexes"]
---  , hotransformOpt "h" ["higher-order-optimizations"]
+  , hotransformOpt "h" ["higher-order-optimizations"]
   , Option "s" ["standard"]
     (NoArg $ \opts -> opts { l0pipeline = standardPipeline ++ l0pipeline opts })
     "Use the recommended optimised pipeline."
@@ -165,16 +165,16 @@ iitransform :: Pass
 iitransform = Pass { passName = "inlining map indexing"
                    , passOp = return . II.transformProg
                    }
-{-
+
 hotransform :: Pass
 hotransform = Pass { passName = "higher-order optimisations"
                    , passOp = liftPass highOrdTransf
                    }
--}
+
 standardPipeline :: [Pass]
 standardPipeline =
   [ uttransform, eotransform, iitransform, rename, hoist
-  , eotransform{-, hotransform-}, eotransform , hoistAggr
+  , eotransform, hotransform, eotransform , hoistAggr
   , eotransform ]
 
 passoption :: String -> Pass -> String -> [String] -> L0Option
@@ -214,12 +214,12 @@ iitransformOpt :: String -> [String] -> L0Option
 iitransformOpt =
   passoption "Inline indexing into maps."
   iitransform
-{-
+
 hotransformOpt :: String -> [String] -> L0Option
 hotransformOpt =
   passoption "Perform higher-order optimisation, i.e., fusion."
   hotransform
--}
+
 -- | Entry point.  Non-interactive, except when reading interpreter
 -- input from standard input.
 main :: IO ()

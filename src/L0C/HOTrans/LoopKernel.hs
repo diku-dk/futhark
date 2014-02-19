@@ -33,19 +33,21 @@ import L0C.HORepresentation.MapNest (MapNest)
 import qualified L0C.HORepresentation.MapNest as MapNest
 import L0C.HOTrans.TryFusion
 import L0C.HOTrans.Composing
+import L0C.Tools
 
 data OutputTransform = OTranspose Certificates Int Int
                      | OReshape Certificates [SubExp]
                      | OReshapeOuter Certificates [SubExp]
                        deriving (Eq, Ord, Show)
 
-applyTransform :: OutputTransform -> SubExp -> SrcLoc -> Exp
+applyTransform :: OutputTransform -> SubExp -> Binder Exp
 applyTransform (OTranspose cs k n) v =
-  Transpose cs k n v
+  return $ Transpose cs k n v $ srclocOf v
 applyTransform (OReshape cs shape) v =
-  Reshape cs shape v
-applyTransform (OReshapeOuter cs shape) v =
-  Reshape cs (reshapeOuter shape 1 v) v
+  return $ Reshape cs shape v $ srclocOf v
+applyTransform (OReshapeOuter cs shape) v = do
+  shapes <- letSubExps "shape" $ reshapeOuter (map SubExp shape) 1 v
+  return $ Reshape cs shapes v $ srclocOf v
 
 outputTransformToInputTransform :: OutputTransform -> SOAC.InputTransform
 outputTransformToInputTransform (OTranspose cs k n) =
@@ -109,13 +111,13 @@ setInputs inps ker = ker { fsoac = inps `SOAC.setInputs` fsoac ker }
 
 tryOptimizeSOAC :: [Ident] -> SOAC -> FusedKer -> TryFusion FusedKer
 tryOptimizeSOAC outIds soac ker = do
-  (soac', ots) <- liftMaybe $ optimizeSOAC Nothing soac
+  (soac', ots) <- optimizeSOAC Nothing soac
   let ker' = map (outputsToInput ots) (inputs ker) `setInputs` ker
   applyFusionRules outIds soac' ker'
 
 tryOptimizeKernel :: [Ident] -> SOAC -> FusedKer -> TryFusion FusedKer
 tryOptimizeKernel outIds soac ker = do
-  ker' <- liftMaybe $ optimizeKernel (Just outIds) ker
+  ker' <- optimizeKernel (Just outIds) ker
   applyFusionRules outIds soac ker'
 
 tryExposeInputs :: [Ident] -> SOAC -> FusedKer -> TryFusion FusedKer
@@ -276,45 +278,51 @@ fuseSOACwithKer outIds soac1 ker = do
 
 -- Here follows optimizations and transforms to expose fusability.
 
-optimizeKernel :: Maybe [Ident] -> FusedKer -> Maybe FusedKer
+optimizeKernel :: Maybe [Ident] -> FusedKer -> TryFusion FusedKer
 optimizeKernel inp ker = do
   (resNest, resTrans) <- optimizeSOACNest inp startNest startTrans
-  Just ker { fsoac = Nest.toSOAC resNest
-           , outputTransform = resTrans
-           }
+  soac <- Nest.toSOAC resNest
+  return $ ker { fsoac = soac
+               , outputTransform = resTrans
+               }
   where startNest = Nest.fromSOAC $ fsoac ker
         startTrans = outputTransform ker
 
-optimizeSOAC :: Maybe [Ident] -> SOAC -> Maybe (SOAC, [OutputTransform])
-optimizeSOAC inp soac =
-  first Nest.toSOAC <$> optimizeSOACNest inp (Nest.fromSOAC soac) []
+optimizeSOAC :: Maybe [Ident] -> SOAC -> TryFusion (SOAC, [OutputTransform])
+optimizeSOAC inp soac = do
+  (nest, ots) <- optimizeSOACNest inp (Nest.fromSOAC soac) []
+  soac' <- Nest.toSOAC nest
+  return (soac', ots)
 
 optimizeSOACNest :: Maybe [Ident] -> SOACNest -> [OutputTransform]
-                 -> Maybe (SOACNest, [OutputTransform])
-optimizeSOACNest inp soac os = case foldr comb (False, (soac, os)) optimizations of
-                             (False, _)           -> Nothing
-                             (True, (soac', os')) -> Just (soac', os')
-  where comb f (changed, (soac', os')) =
-          case f inp soac' os of
-            Nothing             -> (changed, (soac',  os'))
-            Just (soac'', os'') -> (True,    (soac'', os''))
+                 -> TryFusion (SOACNest, [OutputTransform])
+optimizeSOACNest inp soac os = do
+  res <- foldM comb (False, soac, os) $ reverse optimizations
+  case res of
+    (False, _, _)      -> fail "No optimisation applied"
+    (True, soac', os') -> return (soac', os')
+  where comb (changed, soac', os') f = do
+          (soac'', os'') <- f inp soac' os
+          return (True, soac'', os'')
+          <|> return (changed, soac', os')
 
-type Optimization = Maybe [Ident] -> SOACNest -> [OutputTransform] -> Maybe (SOACNest, [OutputTransform])
+type Optimization = Maybe [Ident] -> SOACNest -> [OutputTransform] -> TryFusion (SOACNest, [OutputTransform])
 
 optimizations :: [Optimization]
 optimizations = [iswim]
 
-iswim :: Maybe [Ident] -> SOACNest -> [OutputTransform] -> Maybe (SOACNest, [OutputTransform])
+iswim :: Maybe [Ident] -> SOACNest -> [OutputTransform] -> TryFusion (SOACNest, [OutputTransform])
 iswim _ nest ots
   | Nest.Scan cs1 (Nest.NewNest lvl nn) [] es@[_] loc1 <- Nest.operation nest,
     Nest.Map cs2 mb [] loc2 <- nn,
-    Just es' <- mapM SOAC.inputFromExp es,
+    Just es' <- mapM SOAC.inputFromSubExp es,
     Nest.Nesting paramIds mapArrs bndIds postExp retTypes <- lvl,
-    mapArrs == map SOAC.varInput paramIds =
+    mapArrs == map SOAC.varInput paramIds = do
     let toInnerAccParam idd = idd { identType = rowType $ identType idd }
         innerAccParams = map toInnerAccParam $ take (length es) paramIds
         innerArrParams = drop (length es) paramIds
-        innerScan = Scan cs2 (Nest.bodyToLambda mb)
+    innerlam <- Nest.bodyToLambda mb
+    let innerScan = Scan cs2 innerlam
                           (zip (map Var innerAccParams) (map Var innerArrParams))
                           loc1
         lam = Lambda {
@@ -327,11 +335,11 @@ iswim _ nest ots
           SOAC.Input [] ia
         transposeInput (SOAC.Input ts                     ia) =
           SOAC.Input (ts++[SOAC.Transpose cs2 0 1]) ia
-    in Just (Nest.SOACNest
-               (es' ++ map transposeInput (Nest.inputs nest))
-               (Nest.Map cs1 (Nest.Fun lam) [] loc2),
-             ots ++ [OTranspose cs2 0 1])
-iswim _ _ _ = Nothing
+    return (Nest.SOACNest
+            (es' ++ map transposeInput (Nest.inputs nest))
+            (Nest.Map cs1 (Nest.Fun lam) [] loc2),
+            ots ++ [OTranspose cs2 0 1])
+iswim _ _ _ = fail "ISWIM does not apply"
 
 -- Now for fiddling with transpositions...
 
@@ -458,11 +466,13 @@ exposeInputs inpIds ker =
 
         pushTranspose' = do
           (nest', ot') <- pushTranspose inpIds nest ot
-          return ker { fsoac = Nest.toSOAC nest', outputTransform = ot' }
+          soac         <- Nest.toSOAC nest'
+          return ker { fsoac = soac, outputTransform = ot' }
 
         pullTranspose' = do
           (nest',[]) <- pullTranspose nest ot
-          return ker { fsoac = Nest.toSOAC nest', outputTransform = [] }
+          soac       <- Nest.toSOAC nest'
+          return ker { fsoac = soac, outputTransform = [] }
 
         exposeInputs' ker' =
           case commonTransforms inpIds $ inputs ker' of
@@ -478,7 +488,7 @@ outputTransformPullers = [pullTranspose, pullReshape]
 
 pullOutputTransforms :: SOAC -> [OutputTransform] -> TryFusion SOAC
 pullOutputTransforms soac origOts =
-  Nest.toSOAC <$> attemptAll (Nest.fromSOAC soac) origOts
+  Nest.toSOAC =<< attemptAll (Nest.fromSOAC soac) origOts
   where attemptAll nest ots = attempt nest ots outputTransformPullers
         attempt _ _ [] = fail "Cannot pull anything"
         attempt nest ots (p:ps) = do

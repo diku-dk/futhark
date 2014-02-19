@@ -233,7 +233,7 @@ checkPostExp ks e
   | HS.null $ HS.fromList ks `HS.intersection` freeInExp e = Just e
   | otherwise                                              = Nothing
 
-toSOAC :: SOACNest -> Binder SOAC
+toSOAC :: MonadFreshNames (ID Name) m => SOACNest -> m SOAC
 toSOAC (SOACNest as comb@(Map cs b _ loc)) =
   SOAC.Map cs <$> subLambda b comb <*> pure as <*> pure loc
 toSOAC (SOACNest as comb@(Reduce cs b _ es loc)) =
