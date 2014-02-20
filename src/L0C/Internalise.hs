@@ -136,7 +136,7 @@ internaliseValue (E.BasicVal bv) = [I.BasicVal bv]
 internaliseFun :: E.FunDec -> InternaliseM I.FunDec
 internaliseFun (fname,rettype,params,body,loc) =
   binding (map E.fromParam params) $ \params' -> do
-    body' <- insertBindings $ internaliseExp body
+    body' <- insertBindings $ internaliseBody body
     return (fname, rettype', map I.toParam params', body', loc)
   where rettype' = map I.toDecl $ internaliseType rettype
 
@@ -219,6 +219,17 @@ internaliseIdent (E.Ident name tp loc) =
 
 internaliseCerts :: E.Certificates -> InternaliseM I.Certificates
 internaliseCerts = mapM internaliseIdent
+
+internaliseBody :: E.Exp -> InternaliseM I.Exp
+internaliseBody = bodyFy <=< internaliseExp
+
+bodyFy :: I.Exp -> InternaliseM I.Exp
+bodyFy e'@(I.TupLit {}) = return e'
+bodyFy e'@(I.SubExp {}) = return e'
+bodyFy e' = do
+  es <- letTupExp "norm" e'
+  case es of [se] -> return $ I.SubExp $ I.Var se
+             _    -> return $ I.TupLit (map I.Var es) $ srclocOf e'
 
 internaliseExp :: E.Exp -> InternaliseM I.Exp
 
@@ -459,8 +470,8 @@ internaliseExp (E.Literal v loc) =
 
 internaliseExp (E.If ce te fe t loc) = do
   ce' <- letSubExp "cond" =<< internaliseExp ce
-  te' <- insertBindings $ internaliseExp te
-  fe' <- insertBindings $ internaliseExp fe
+  te' <- insertBindings $ internaliseBody te
+  fe' <- insertBindings $ internaliseBody fe
   return $ I.If ce' te' fe' (internaliseType t) loc
 
 internaliseExp (E.BinOp bop xe ye t loc) = do
