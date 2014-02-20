@@ -70,7 +70,7 @@ newtype CompilerM a = CompilerM (ReaderT CompilerEnv (State CompilerState) a)
   deriving (Functor, Applicative, Monad,
             MonadState CompilerState, MonadReader CompilerEnv)
 
-instance MonadFreshNames VName CompilerM where
+instance MonadFreshNames CompilerM where
   getNameSource = gets compNameSrc
   putNameSource src = modify $ \s -> s { compNameSrc = src }
 

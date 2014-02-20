@@ -20,11 +20,11 @@ newtype TryFusion a = TryFusion (MaybeT (State VNameSource) a)
   deriving (Functor, Applicative, Alternative,
             Monad, MonadState (NameSource VName))
 
-instance MonadFreshNames VName TryFusion where
+instance MonadFreshNames TryFusion where
   getNameSource = get
   putNameSource = put
 
-tryFusion :: MonadFreshNames VName m => TryFusion a -> m (Maybe a)
+tryFusion :: MonadFreshNames m => TryFusion a -> m (Maybe a)
 tryFusion (TryFusion m) = do
   src <- getNameSource
   let (x, src') = runState (runMaybeT m) src

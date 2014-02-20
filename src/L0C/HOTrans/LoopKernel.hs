@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
 module L0C.HOTrans.LoopKernel
   ( FusedKer(..)
   , newKernel
@@ -24,7 +23,7 @@ import Data.List
 import Data.Loc
 
 import L0C.InternalRep
-import L0C.InternalRep.MonadFreshNames
+import L0C.MonadFreshNames
 import L0C.HORepresentation.SOAC (SOAC)
 import qualified L0C.HORepresentation.SOAC as SOAC
 import L0C.HORepresentation.SOACNest (SOACNest)
@@ -136,7 +135,7 @@ applyFusionRules outIds soac ker =
   tryExposeInputs outIds soac ker <|>
   fuseSOACwithKer outIds soac ker
 
-attemptFusion :: MonadFreshNames VName m =>
+attemptFusion :: MonadFreshNames m =>
                  [Ident] -> SOAC -> FusedKer -> m (Maybe FusedKer)
 attemptFusion outIds soac ker =
   liftM removeUnusedParamsFromKer <$>

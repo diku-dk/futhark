@@ -26,7 +26,7 @@ import qualified Data.HashSet as HS
 
 import L0C.InternalRep
 import qualified L0C.FreshNames as FreshNames
-import L0C.InternalRep.MonadFreshNames
+import L0C.MonadFreshNames
 import L0C.TypeError
 
 type TypeError = GenTypeError VName Exp (Several Type) (Several Ident)
@@ -145,7 +145,7 @@ runTypeM env src (TypeM m) = fst <$> evalRWST m env src
 bad :: TypeError -> TypeM a
 bad = TypeM . lift . Left
 
-instance MonadFreshNames VName TypeM where
+instance MonadFreshNames TypeM where
   getNameSource = get
   putNameSource = put
 

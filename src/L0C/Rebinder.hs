@@ -47,7 +47,7 @@ import qualified Data.HashSet as HS
 import qualified Data.Set as S
 
 import L0C.InternalRep
-import L0C.InternalRep.MonadFreshNames
+import L0C.MonadFreshNames
 import qualified L0C.HORepresentation.SOACNest as Nest
 
 import L0C.Rebinder.CSE
@@ -118,7 +118,7 @@ newtype HoistM a = HoistM (RWS
   deriving (Applicative, Functor, Monad,
             MonadWriter Need, MonadReader Env, MonadState (NameSource VName))
 
-instance MonadFreshNames VName HoistM where
+instance MonadFreshNames HoistM where
   getNameSource = get
   putNameSource = put
 

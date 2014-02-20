@@ -67,7 +67,7 @@ data InternaliseEnv = InternaliseEnv {
 type InternaliseM =
   WriterT (DL.DList Binding) (ReaderT InternaliseEnv (State VNameSource))
 
-instance MonadFreshNames VName InternaliseM where
+instance MonadFreshNames InternaliseM where
   getNameSource = get
   putNameSource = put
 

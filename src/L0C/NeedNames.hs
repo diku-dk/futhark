@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleContexts, FlexibleInstances, MultiParamTypeClasses #-}
 -- | Simple monad for computations that need access to unique names.
 -- In particular, this monad permits a degree of speculation, by which
 -- the computation can be run and then inspected as to whether it
@@ -35,12 +34,12 @@ instance Applicative NeedNames where
                x' <- x
                return $ f' x'
 
-instance MonadFreshNames (ID Name) NeedNames where
+instance MonadFreshNames NeedNames where
   getNameSource     = NeedName $ \src -> (src, return src)
   putNameSource src = NeedName $ \_   -> (src, return ())
 
 -- | Provide whichever names are needed, then return the result.
-provideNames :: MonadFreshNames VName m => NeedNames a -> m a
+provideNames :: MonadFreshNames m => NeedNames a -> m a
 provideNames (Done x)       = return x
 provideNames (NeedName f) = do
   src <- getNameSource

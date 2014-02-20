@@ -17,7 +17,7 @@ import Data.Loc
 import qualified Data.HashMap.Strict as HM
 
 import L0C.InternalRep
-import L0C.InternalRep.MonadFreshNames
+import L0C.MonadFreshNames
 import L0C.NeedNames
 
 -- | Perform the transformation.  Never fails.
@@ -106,7 +106,7 @@ performArrayDelay' mcs fun vs cs idxcs idx =
         inlineMapFun _ _ =
           lambdaBody fun
 
-performArrayDelays :: MonadFreshNames VName m => [Ident] -> Exp -> m ArrayIndexMap
+performArrayDelays :: MonadFreshNames m => [Ident] -> Exp -> m ArrayIndexMap
 performArrayDelays pat e = do
   bnds <- forM pat $ \name ->
             newIdent (baseString $ identName name)
@@ -135,9 +135,9 @@ cheapExp _ = False
 
 newtype InlinerM a = InlinerM (StateT (NameSource VName) (Reader ArrayIndexMap) a)
   deriving (Functor, Applicative, Monad,
-            MonadReader ArrayIndexMap, MonadState (NameSource VName))
+            MonadReader ArrayIndexMap, MonadState VNameSource)
 
-instance MonadFreshNames VName InlinerM where
+instance MonadFreshNames InlinerM where
   getNameSource = get
   putNameSource = put
 

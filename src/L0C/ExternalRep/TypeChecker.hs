@@ -29,8 +29,8 @@ import qualified Data.HashSet as HS
 import L0C.ExternalRep
 import L0C.ExternalRep.Renamer (tagProg', tagExp, tagExp', tagType',
                                 untagProg, untagExp, untagPattern, untagType)
-import qualified L0C.FreshNames as FreshNames
-import L0C.ExternalRep.MonadFreshNames
+import L0C.FreshNames hiding (newID, newName)
+import qualified L0C.FreshNames
 import L0C.TypeError
 
 -- | Information about an error during type checking.  The 'Show'
@@ -171,13 +171,27 @@ runTypeM env src (TypeM m) = fst <$> evalRWST m env src
 bad :: VarName vn => TypeError vn -> TypeM vn a
 bad = TypeM . lift . Left
 
-instance VarName vn => MonadFreshNames (ID vn) (TypeM vn) where
-  getNameSource = get
-  putNameSource = put
+newName :: VarName vn => ID vn -> TypeM vn (ID vn)
+newName s = do src <- get
+               let (s', src') = L0C.FreshNames.newName src s
+               put src'
+               return s'
 
 newFname :: VarName vn => String -> TypeM vn Name
-newFname s = do s' <- state (`FreshNames.newID` varName s Nothing)
+newFname s = do s' <- newName $ varName s Nothing
                 return $ nameFromString $ textual $ baseName s'
+
+newID :: VarName vn => vn -> TypeM vn (ID vn)
+newID s = newName $ ID (s, 0)
+
+newIDFromString :: VarName vn => String -> TypeM vn (ID vn)
+newIDFromString s = newID $ varName s Nothing
+
+newIdent :: VarName vn =>
+            String -> ty (ID vn) -> SrcLoc -> TypeM vn (IdentBase ty (ID vn))
+newIdent s t loc = do
+  s' <- newID $ varName s Nothing
+  return $ Ident s' t loc
 
 liftEither :: VarName vn => Either (TypeError vn) a -> TypeM vn a
 liftEither = either bad return

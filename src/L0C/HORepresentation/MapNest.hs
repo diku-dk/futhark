@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
 module L0C.HORepresentation.MapNest
   ( Nesting (..)
   , pureNest
@@ -24,7 +23,7 @@ import L0C.HORepresentation.SOACNest (SOACNest)
 import qualified L0C.HORepresentation.SOACNest as Nest
 import L0C.Substitute
 import L0C.InternalRep
-import L0C.InternalRep.MonadFreshNames
+import L0C.MonadFreshNames
 
 data Nesting = Nesting {
     nestingParams     :: [Ident]

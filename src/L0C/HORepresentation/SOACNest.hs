@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
 module L0C.HORepresentation.SOACNest
   ( SOACNest (..)
   , Combinator (..)
@@ -33,7 +32,7 @@ import Data.Maybe
 import qualified Data.HashSet as HS
 
 import L0C.InternalRep hiding (Map, Reduce, Scan, Filter, Redomap, returnType)
-import L0C.InternalRep.MonadFreshNames
+import L0C.MonadFreshNames
 import L0C.Tools
 import L0C.HORepresentation.SOAC (SOAC)
 import qualified L0C.HORepresentation.SOAC as SOAC
@@ -74,7 +73,7 @@ bodyParams :: NestBody -> [Param]
 bodyParams (Fun l)          = lambdaParams l
 bodyParams (NewNest nest _) = map toParam $ nestingParams nest
 
-bodyToLambda :: MonadFreshNames VName m => NestBody -> m Lambda
+bodyToLambda :: MonadFreshNames m => NestBody -> m Lambda
 bodyToLambda (Fun l) = return l
 bodyToLambda (NewNest (Nesting paramIds inps bndIds postExp retTypes) op) = do
   e <- runBinder $ SOAC.toExp =<< toSOAC (SOACNest inps op)
@@ -233,7 +232,7 @@ checkPostExp ks e
   | HS.null $ HS.fromList ks `HS.intersection` freeInExp e = Just e
   | otherwise                                              = Nothing
 
-toSOAC :: MonadFreshNames (ID Name) m => SOACNest -> m SOAC
+toSOAC :: MonadFreshNames m => SOACNest -> m SOAC
 toSOAC (SOACNest as comb@(Map cs b _ loc)) =
   SOAC.Map cs <$> subLambda b comb <*> pure as <*> pure loc
 toSOAC (SOACNest as comb@(Reduce cs b _ es loc)) =
@@ -245,7 +244,7 @@ toSOAC (SOACNest as comb@(Filter cs b _ loc)) =
 toSOAC (SOACNest as comb@(Redomap cs l b _ es loc)) =
   SOAC.Redomap cs l <$> subLambda b comb <*> pure es <*> pure as <*> pure loc
 
-subLambda :: MonadFreshNames VName m => NestBody -> Combinator -> m Lambda
+subLambda :: MonadFreshNames m => NestBody -> Combinator -> m Lambda
 subLambda b comb =
   case nesting comb of
     [] -> bodyToLambda b

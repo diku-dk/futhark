@@ -12,15 +12,19 @@ module L0C.MonadFreshNames
   , newID
   , newIDFromString
   , newVName
+  , newIdent
+  , newIdent'
+  , newIdents
   , module L0C.FreshNames
   ) where
 
 import Control.Applicative
-
 import qualified Control.Monad.State.Lazy
 import qualified Control.Monad.State.Strict
 
-import Language.L0.Core
+import Data.Loc
+
+import L0C.InternalRep
 import qualified L0C.FreshNames as FreshNames
 import L0C.FreshNames hiding (newName, newID, newVName)
 
@@ -32,37 +36,61 @@ import L0C.FreshNames hiding (newName, newID, newVName)
 --    getNameSource = get
 --    putNameSource = put
 -- @
-class (Applicative m, Monad m, VarName vn) => MonadFreshNames vn m where
-  getNameSource :: m (NameSource vn)
-  putNameSource :: NameSource vn -> m ()
+class (Applicative m, Monad m) => MonadFreshNames m where
+  getNameSource :: m VNameSource
+  putNameSource :: VNameSource -> m ()
 
-instance (Applicative im, VarName vn, Monad im) => MonadFreshNames vn (Control.Monad.State.Lazy.StateT (NameSource vn) im) where
+instance (Applicative im, Monad im) => MonadFreshNames (Control.Monad.State.Lazy.StateT VNameSource im) where
   getNameSource = Control.Monad.State.Lazy.get
   putNameSource = Control.Monad.State.Lazy.put
 
-instance (Applicative im, VarName vn, Monad im) => MonadFreshNames vn (Control.Monad.State.Strict.StateT (NameSource vn) im) where
+instance (Applicative im, Monad im) => MonadFreshNames (Control.Monad.State.Strict.StateT VNameSource im) where
   getNameSource = Control.Monad.State.Strict.get
   putNameSource = Control.Monad.State.Strict.put
 
 -- | Produce a fresh name, using the given name as a template.
-newName :: MonadFreshNames vn m => vn -> m vn
+newName :: MonadFreshNames m => VName -> m VName
 newName s = do src <- getNameSource
                let (s', src') = FreshNames.newName src s
                putNameSource src'
                return s'
 
 -- | As @newName@, but takes a 'String' for the name template.
-newNameFromString :: MonadFreshNames vn m => String -> m vn
+newNameFromString :: MonadFreshNames m => String -> m VName
 newNameFromString s = newName $ varName s Nothing
 
 -- | Produce a fresh 'ID', using the given base name as a template.
-newID :: MonadFreshNames (ID vn) m => vn -> m (ID vn)
+newID :: MonadFreshNames m => Name -> m VName
 newID s = newName $ ID (s, 0)
 
 -- | As 'newID', but takes a 'String' for the name template.
-newIDFromString :: VarName vn => MonadFreshNames (ID vn) m => String -> m (ID vn)
+newIDFromString :: MonadFreshNames m => String -> m VName
 newIDFromString s = newID $ varName s Nothing
 
 -- | Produce a fresh 'VName', using the given base name as a template.
-newVName :: MonadFreshNames VName m => String -> m VName
+newVName :: MonadFreshNames m => String -> m VName
 newVName = newID . nameFromString
+
+-- | Produce a fresh 'Ident', using the given name as a template.
+newIdent :: MonadFreshNames m =>
+            String -> GenType als -> SrcLoc -> m (IdentBase (als VName))
+newIdent s t loc = do
+  s' <- newID $ varName s Nothing
+  return $ Ident s' t loc
+
+-- | Produce a fresh 'Ident', using the given 'Ident' as a template,
+-- but possibly modifying the name.
+newIdent' :: MonadFreshNames m =>
+             (String -> String)
+          -> IdentBase (als VName) -> m (IdentBase (als VName))
+newIdent' f ident =
+  newIdent (f $ nameToString $ baseName $ identName ident)
+           (identType ident) $
+           srclocOf ident
+
+-- | Produce several 'Ident's, using the given name as a template,
+-- based on a list of types.
+newIdents :: MonadFreshNames m =>
+             String -> [GenType als] -> SrcLoc -> m [IdentBase (als VName)]
+newIdents s ts loc =
+  mapM (\t -> newIdent s t loc) ts

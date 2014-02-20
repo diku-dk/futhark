@@ -14,7 +14,7 @@ import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet      as HS
 
 import L0C.InternalRep
-import L0C.InternalRep.MonadFreshNames
+import L0C.MonadFreshNames
 import L0C.EnablingOpts.EnablingOptDriver
 import L0C.HOTrans.LoopKernel
 import L0C.HORepresentation.SOAC (SOAC)
@@ -34,7 +34,7 @@ newtype FusionGM a = FusionGM (StateT VNameSource (ReaderT FusionGEnv (Either En
                 MonadReader FusionGEnv,
                 Monad, Applicative, Functor )
 
-instance MonadFreshNames VName FusionGM where
+instance MonadFreshNames FusionGM where
   getNameSource = get
   putNameSource = put
 

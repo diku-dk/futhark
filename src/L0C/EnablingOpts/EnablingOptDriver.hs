@@ -46,7 +46,7 @@ normCopyDeadOpts prog = do
     (_, prog_dce)  <- deadCodeElim    prog_cp
     return prog_dce
 
-normCopyOneLambda :: MonadFreshNames VName m => Prog -> Lambda ->
+normCopyOneLambda :: MonadFreshNames m => Prog -> Lambda ->
                      m (Either EnablingOptError Lambda)
 normCopyOneLambda prog lam = do
   nmsrc <- getNameSource

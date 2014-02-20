@@ -39,7 +39,7 @@ import Control.Monad.Writer
 import Control.Monad.State
 
 import L0C.InternalRep
-import L0C.InternalRep.MonadFreshNames
+import L0C.MonadFreshNames
 
 letSubExp :: MonadBinder m =>
              String -> Exp -> m SubExp
@@ -87,7 +87,7 @@ letTupExp name e = do
   letBind names e
   return names
 
-newVar :: MonadFreshNames VName m =>
+newVar :: MonadFreshNames m =>
           SrcLoc -> String -> Type -> m (Ident, SubExp)
 newVar loc name tp = do
   x <- newVName name
@@ -141,7 +141,7 @@ data Binding = LoopBind [(Ident, SubExp)] Ident SubExp Exp
              | LetWithBind Certificates Ident Ident (Maybe Certificates) [SubExp] SubExp
                deriving (Show, Eq)
 
-class (MonadFreshNames VName m, Applicative m, Monad m) => MonadBinder m where
+class (MonadFreshNames m, Applicative m, Monad m) => MonadBinder m where
   addBinding      :: Binding -> m ()
   collectBindings :: m a -> m (a, [Binding])
 
@@ -172,11 +172,11 @@ insertBindings' = foldr bind
         bind (LetWithBind cs dest src idxcs idxs ve) e =
           LetWith cs dest src idxcs idxs ve e $ srclocOf e
 
-addBindingWriter :: (MonadFreshNames VName m, Applicative m, MonadWriter (DL.DList Binding) m) =>
+addBindingWriter :: (MonadFreshNames m, Applicative m, MonadWriter (DL.DList Binding) m) =>
                     Binding -> m ()
 addBindingWriter = tell . DL.singleton
 
-collectBindingsWriter :: (MonadFreshNames VName m, Applicative m, MonadWriter (DL.DList Binding) m) =>
+collectBindingsWriter :: (MonadFreshNames m, Applicative m, MonadWriter (DL.DList Binding) m) =>
                          m a -> m (a, [Binding])
 collectBindingsWriter m = pass $ do
                             (x, bnds) <- listen m
@@ -186,7 +186,7 @@ newtype Binder a = TransformM (WriterT (DL.DList Binding) (State VNameSource) a)
   deriving (Functor, Monad, Applicative,
             MonadWriter (DL.DList Binding), MonadState VNameSource)
 
-instance MonadFreshNames (ID Name) Binder where
+instance MonadFreshNames Binder where
   getNameSource = get
   putNameSource = put
 
@@ -194,7 +194,7 @@ instance MonadBinder Binder where
   addBinding      = addBindingWriter
   collectBindings = collectBindingsWriter
 
-runBinder :: MonadFreshNames (ID Name) m => Binder Exp -> m Exp
+runBinder :: MonadFreshNames m => Binder Exp -> m Exp
 runBinder m = do
   src <- getNameSource
   let (e,src') = runBinderWithNameSource m src

@@ -21,7 +21,7 @@ import Control.Monad.State
 import Data.Loc
 
 import L0C.InternalRep
-import L0C.InternalRep.MonadFreshNames
+import L0C.MonadFreshNames
 import L0C.InternalRep.Renamer
 import L0C.Tools
 
@@ -43,7 +43,7 @@ transformProg prog =
   renameProg $ Prog $ evalState (mapM transformFunDec $ progFunctions prog) src
   where src = newNameSourceForProg prog
 
-transformFunDec :: MonadFreshNames (ID Name) m => FunDec -> m FunDec
+transformFunDec :: MonadFreshNames m => FunDec -> m FunDec
 transformFunDec (fname, rettype, params, body, loc) = do
   body' <- runBinder $ transformExp noDepthLimit body
   return (fname, rettype, params, body', loc)
