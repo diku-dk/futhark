@@ -34,7 +34,7 @@ import qualified L0C.IndexInliner as II
 import qualified L0C.SOACFlowGraph as FG
 import L0C.Untrace
 import qualified L0C.Backends.SequentialC as SequentialC
--- import qualified L0C.Backends.Bohrium as Bohrium
+import qualified L0C.Backends.Bohrium as Bohrium
 
 newL0Config :: L0Config
 newL0Config = L0Config {
@@ -57,11 +57,9 @@ commandLineOptions =
   , Option [] ["compile-sequential"]
     (NoArg $ \opts -> opts { l0action = seqCodegenAction })
     "Translate program into sequential C and write it on standard output."
-{-
   , Option [] ["compile-bohrium"]
     (NoArg $ \opts -> opts { l0action = bohriumCodegenAction })
     "Translate program into C using Bohrium and write it on standard output."
--}
   , Option [] ["generate-flow-graph"]
     (NoArg $ \opts -> opts { l0action = flowGraphAction })
     "Print the SOAC flow graph of the final program."
@@ -92,10 +90,9 @@ interpretAction = ("interpreter", interpret)
 
 seqCodegenAction :: Action
 seqCodegenAction = ("sequential code generator", putStrLn . SequentialC.compileProg)
-{-
+
 bohriumCodegenAction :: Action
 bohriumCodegenAction = ("Bohrium code generator", putStrLn . Bohrium.compileProg)
--}
 
 flowGraphAction :: Action
 flowGraphAction = ("SOAC flow graph", putStrLn . FG.makeFlowGraphString)

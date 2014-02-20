@@ -10,6 +10,7 @@ import Control.Monad
 import L0C.InternalRep
 import qualified L0C.FirstOrderTransform as FOT
 import L0C.Backends.BohriumCodeGen
+import L0C.Tools
 
 import qualified L0C.Backends.GenericC as GenericC
 

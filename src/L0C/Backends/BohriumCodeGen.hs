@@ -48,7 +48,7 @@ alt x y = do x' <- x
 
 compileSOACtoBohrium :: C.Exp -> Exp -> CompilerM (Maybe [C.BlockItem])
 compileSOACtoBohrium target e
-  | Right nest <- Nest.fromExp (const Nothing) e =
+  | Right nest <- Nest.fromExp e =
       let try f = f target nest
       in try compileMap `alt`
          try compileReduce `alt`
@@ -56,22 +56,12 @@ compileSOACtoBohrium target e
          try compileMapWithScan
   | otherwise = return Nothing
 
-compileInput :: C.Exp -> C.Exp -> Exp -> CompilerM [C.BlockItem]
-
-compileInput place shape (Iota ne _) = do
-  nv <- new "iota_n"
-  ne' <- compileSubExp (varExp nv) ne
-  return $ stm [C.cstm|{
-                     typename int64_t $id:nv;
-                     $items:ne'
-                     $exp:shape[0] = $id:nv;
-                     $exp:place = bh_multi_array_int32_new_range(0, $id:nv-1, 0);
-                   }|]
+compileInput :: C.Exp -> C.Exp -> SubExp -> CompilerM [C.BlockItem]
 
 compileInput place shape e = do
-  (arr, e') <- compileExpNewVar  e
+  (arr, e') <- compileExpNewVar $ SubExp e
   stride <- new "stride"
-  let t = typeOf e
+  let t = subExpType e
       d = arrayRank t
       strideStm 0 = [C.cexp|1|]
       strideStm i = [C.cexp|$exp:shape[$int:i-1] * $id:stride[$int:d-$int:i]|]
@@ -89,32 +79,32 @@ compileInput place shape e = do
                    }|]
 
 compileMap :: C.Exp -> SOACNest -> CompilerM (Maybe [C.BlockItem])
-compileMap target (SOACNest inps (Nest.Map _ (Nest.Fun l) _ _))
-  | [inp] <- SOAC.inputsToExps inps,
-    all (basicType . identType) $ lambdaParams l,
-   Just op <- compileLambda l unOp = do
-     inputName <- new "map_input"
-     outputName <- new "output"
-     inp' <- compileInput (varExp inputName) [C.cexp|$exp:target.elem_0.dims|] inp
-     return $ Just $ stm [C.cstm|{
-                               typename bh_multi_array_int32_p $id:inputName;
-                               typename bh_multi_array_int32_p $id:outputName;
-                               $items:inp';
-                               $stm:(doUnaryOperation op outputName inputName);
-                               bh_multi_array_int32_sync($id:outputName);
-                               $exp:target.elem_0.data =
-                                 bh_multi_array_int32_get_base_data
-                                   (bh_multi_array_int32_get_base($id:outputName));
-                             }|]
-compileMap target (SOACNest inps (Nest.Map _ (Nest.Fun l) _ _))
-  | [inp1,inp2] <- SOAC.inputsToExps inps,
-    all (basicType . identType) $ lambdaParams l,
+compileMap target (SOACNest [SOAC.Input [] (SOAC.Var inp)] (Nest.Map _ (Nest.Fun l) _ _))
+  | all (basicType . identType) $ lambdaParams l,
+    Just op <- compileLambda l unOp = do
+      inputName <- new "map_input"
+      outputName <- new "output"
+      inp' <- compileInput (varExp inputName) [C.cexp|$exp:target.elem_0.dims|] $ Var inp
+      return $ Just $ stm [C.cstm|{
+                                typename bh_multi_array_int32_p $id:inputName;
+                                typename bh_multi_array_int32_p $id:outputName;
+                                $items:inp';
+                                $stm:(doUnaryOperation op outputName inputName);
+                                bh_multi_array_int32_sync($id:outputName);
+                                $exp:target.elem_0.data =
+                                  bh_multi_array_int32_get_base_data
+                                    (bh_multi_array_int32_get_base($id:outputName));
+                              }|]
+compileMap target (SOACNest [SOAC.Input [] (SOAC.Var inp1),
+                             SOAC.Input [] (SOAC.Var inp2)]
+                   (Nest.Map _ (Nest.Fun l) _ _))
+  | all (basicType . identType) $ lambdaParams l,
     Just op <- compileLambda l binOp = do
       inputName1 <- new "map_input_x"
       inputName2 <- new "map_input_y"
       outputName <- new "output"
-      inp1' <- compileInput (varExp inputName1) [C.cexp|$exp:target.elem_0.dims|] inp1
-      inp2' <- compileInput (varExp inputName2) [C.cexp|$exp:target.elem_0.dims|] inp2
+      inp1' <- compileInput (varExp inputName1) [C.cexp|$exp:target.elem_0.dims|] $ Var inp1
+      inp2' <- compileInput (varExp inputName2) [C.cexp|$exp:target.elem_0.dims|] $ Var inp2
       return $ Just $ stm [C.cstm|{
                                 typename bh_multi_array_int32_p $id:inputName1;
                                 typename bh_multi_array_int32_p $id:inputName2;
