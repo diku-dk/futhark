@@ -8,8 +8,6 @@ module L0C.EnablingOpts.InliningDeadFun  (
                     )
   where
 
-import Debug.Trace
-
 import Control.Arrow
 import Control.Applicative
 import Control.Monad.Reader
