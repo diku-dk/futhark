@@ -283,36 +283,3 @@ canFail _ _ (Right v)  = return v
 
 liftPass :: Show err => (I.Prog -> Either err a) -> I.Prog -> L0CM a
 liftPass f p = canFail "" (Just p) (f p)
-
-{-
-module Main where
-
-import Control.Applicative
-import L0C.ExternalRep as E
-import Language.L0.Parser
-import qualified L0C.Internalise
-
-import qualified L0C.ExternalRep as E
-import qualified L0C.ExternalRep.TypeChecker as E
-import qualified L0C.ExternalRep.Renamer as E
-
-import qualified L0C.InternalRep as I
-import qualified L0C.InternalRep.TypeChecker as I
-
-import System.Environment
-
-test :: FilePath -> IO ()
-test file = do Right exprog <- parseL0 file <$> readFile file
-               case E.checkProg $ E.tagProg exprog of
-                 Left err -> error $ show err
-                 Right exprog' -> do
-                   let inprog = L0C.Internalise.transformProg exprog'
-                   putStrLn $ I.prettyPrint inprog
-                   case I.checkProg inprog of
-                     Left err -> error $ show err
-                     Right _  -> putStrLn "It's all good"
-
-main :: IO ()
-main = do [f] <- getArgs
-          test f
--}
