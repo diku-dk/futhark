@@ -4,7 +4,7 @@
 -- is not uniquely named.
 module L0C.IndexInliner
   ( transformProg
-  , transformExp
+  , transformBody
   , transformLambda
   )
   where
@@ -19,6 +19,7 @@ import qualified Data.HashMap.Strict as HM
 import L0C.InternalRep
 import L0C.MonadFreshNames
 import L0C.NeedNames
+import L0C.Tools
 
 -- | Perform the transformation.  Never fails.
 transformProg :: Prog -> Prog
@@ -27,67 +28,76 @@ transformProg prog =
   in Prog $ fst $ runInlinerM src $ mapM transformFun $ progFunctions prog
 
 -- | Transform just a single expression.
-transformExp :: NameSource VName -> Exp -> (Exp, NameSource VName)
-transformExp src = runInlinerM src . transformExpM
+transformBody :: NameSource VName -> Body -> (Body, NameSource VName)
+transformBody src = runInlinerM src . transformBodyM
 
 -- | Transform just a single lambda.
 transformLambda :: NameSource VName -> Lambda -> (Lambda, NameSource VName)
 transformLambda src l =
-  let (e, src') = transformExp src $ lambdaBody l
+  let (e, src') = transformBody src $ lambdaBody l
   in (l { lambdaBody = e }, src')
 
 transformFun :: FunDec -> InlinerM FunDec
 transformFun (fname, rettype, params, body, loc) = do
-  body' <- transformExpM body
+  body' <- transformBodyM body
   return (fname, rettype, params, body', loc)
 
-transformExpM :: Exp -> InlinerM Exp
-
-transformExpM (LetPat pat e@(Map cs fun es mloc) body loc) = do
+transformBodyM :: Body -> InlinerM Body
+transformBodyM (LetPat pat e@(Map cs fun es mloc) body loc) = do
   fun' <- transformLambdaM fun
   dels <- performArrayDelays pat e
-  body' <- local (HM.union dels) $ transformExpM body
+  body' <- local (HM.union dels) $ transformBodyM body
   return $ LetPat pat (Map cs fun' es mloc) body' loc
-
-transformExpM e@(Index cs v idxcs (idx:idxs) loc) = do
-  me <- asks $ lookupDelayed v cs idxcs idx
-  case me of
-    Nothing -> return e
-    Just e' -> do
-     e'' <- provideNames e'
-     idents <- mapM (\t -> newIdent elname t loc) $ typeOf e''
-     let res = LetPat idents e'' (TupLit (map Var idents) loc) loc
-     case idxs of
-       [] | cheapExp e'' -> return e''
-       _  | cheapExp res -> return res
-       _                 -> return e
-  where elname = baseString (identName v) ++ "_elem"
-
-transformExpM e = mapExpM transform e
+transformBodyM (LetPat pat e body loc) = do
+  env <- ask
+  (e',f) <- runBinder' $ do
+              es <- transformExp env e
+              case es of
+                Left e'   -> return e'
+                Right es' -> return $ TupLit es' loc
+  f <$> (LetPat pat e' <$> transformBodyM body <*> pure loc)
+transformBodyM body = mapBodyM transform body
   where transform = identityMapper {
-                      mapOnExp    = transformExpM
-                    , mapOnLambda = transformLambdaM
+                      mapOnBody   = mapBodyM transform
+                    }
+
+transformExp :: ArrayIndexMap -> Exp -> Binder (Either Exp [SubExp])
+
+transformExp m e@(Index cs v idxcs (idx:idxs) _) =
+  case me of
+    Nothing -> return $ Left e
+    Just e' -> do
+     b <- provideNames e'
+     case idxs of
+       _ | cheapBody b -> do e'' <- bodyBind b
+                             return $ Right e''
+       _               -> return $ Left e
+  where me = lookupDelayed v cs idxcs idx m
+
+transformExp _ e = Left <$> mapExpM transform e
+  where transform = identityMapper {
+                      mapOnLambda   = runInlinerM' . transformLambdaM
                     }
 
 transformLambdaM :: Lambda -> InlinerM Lambda
 transformLambdaM l = do
-  e <- transformExpM $ lambdaBody l
+  e <- transformBodyM $ lambdaBody l
   return l { lambdaBody = e }
 
 type ArrayIndexMap = HM.HashMap Ident
-                     (Certificates -> Maybe Certificates -> SubExp -> NeedNames Exp)
+                     (Certificates -> Maybe Certificates -> SubExp -> NeedNames Body)
 
 emptyArrayIndexMap :: ArrayIndexMap
 emptyArrayIndexMap = HM.empty
 
 lookupDelayed :: Ident -> Certificates -> Maybe Certificates -> SubExp
               -> ArrayIndexMap
-              -> Maybe (NeedNames Exp)
+              -> Maybe (NeedNames Body)
 lookupDelayed var cs idxcs idx m = do
   f <- HM.lookup var m
   return $ f cs idxcs idx
 
-performArrayDelay :: Exp -> Maybe (Certificates -> Maybe Certificates -> SubExp -> NeedNames Exp)
+performArrayDelay :: Exp -> Maybe (Certificates -> Maybe Certificates -> SubExp -> NeedNames Body)
 performArrayDelay (Map cs fun es _) = do
   vs <- mapM varExp es
   Just $ performArrayDelay' cs fun vs
@@ -96,7 +106,7 @@ performArrayDelay (Map cs fun es _) = do
 performArrayDelay _ = Nothing
 
 performArrayDelay' :: Certificates -> Lambda -> [Ident]
-                   -> Certificates -> Maybe Certificates -> SubExp -> NeedNames Exp
+                   -> Certificates -> Maybe Certificates -> SubExp -> NeedNames Body
 performArrayDelay' mcs fun vs cs idxcs idx =
   return $ inlineMapFun (lambdaParams fun)
                         [Index (mcs++cs) v idxcs [idx] $ srclocOf v
@@ -114,17 +124,22 @@ performArrayDelays pat e = do
                      (srclocOf name)
 
   let dels f bnd cs ics is = do
-        fe <- f cs ics is
-        let loc = srclocOf fe
-        return $ LetPat bnds fe (SubExp $ Var bnd) loc
+        fb <- f cs ics is
+        let loc = srclocOf fb
+        runBinder $ do
+          es <- bodyBind fb
+          return $ LetPat bnds (TupLit es loc) (Result [Var bnd] loc) loc
   case performArrayDelay e of
     Nothing -> return emptyArrayIndexMap
     Just f ->
       return $ HM.fromList [ (name, dels f bnd)
                              | (name,bnd) <- zip pat bnds ]
 
+cheapBody :: Body -> Bool
+cheapBody (LetPat _ e body _) = cheapExp e && cheapBody body
+cheapBody _ = False
+
 cheapExp :: Exp -> Bool
-cheapExp (LetPat _ _ body _) = cheapExp body
 cheapExp (BinOp {}) = True
 cheapExp (Not {}) = True
 cheapExp (Negate {}) = True
@@ -143,3 +158,10 @@ instance MonadFreshNames InlinerM where
 
 runInlinerM :: NameSource VName -> InlinerM a -> (a, NameSource VName)
 runInlinerM src (InlinerM m) = runReader (runStateT m src) emptyArrayIndexMap
+
+runInlinerM' :: MonadFreshNames m => InlinerM a -> m a
+runInlinerM' m = do
+  src <- getNameSource
+  let (x, src') = runInlinerM src m
+  putNameSource src'
+  return x

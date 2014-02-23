@@ -174,7 +174,7 @@ runFun fname mainargs prog = do
     -- We assume that the program already passed the type checker, so
     -- we don't check for duplicate definitions.
     expand ftable (name,_,params,body,_) =
-      let fun args = binding (zip (map fromParam params) args) $ evalExp body
+      let fun args = binding (zip (map fromParam params) args) $ evalBody body
       in HM.insert name fun ftable
 
 -- | As 'runFun', but throws away the trace.
@@ -223,6 +223,45 @@ single v = [v]
 evalSubExp :: SubExp -> L0M Value
 evalSubExp (Var ident)    = lookupVar ident
 evalSubExp (Constant v _) = return v
+
+evalBody :: Body -> L0M [Value]
+
+evalBody (LetPat pat e body _) = do
+  v <- evalExp e
+  local (`bindVars` zip pat v) $ evalBody body
+
+evalBody (LetWith _ name src _ idxs ve body pos) = do
+  v <- lookupVar src
+  idxs' <- mapM evalSubExp idxs
+  vev <- evalSubExp ve
+  v' <- change v idxs' vev
+  binding [(name, v')] $ evalBody body
+  where change _ [] to = return to
+        change (ArrayVal arr t) (BasicVal (IntVal i):rest) to
+          | i >= 0 && i <= upper = do
+            let x = arr ! i
+            x' <- change x rest to
+            return $ ArrayVal (arr // [(i, x')]) t
+          | otherwise = bad $ IndexOutOfBounds pos (upper+1) i
+          where upper = snd $ bounds arr
+        change _ _ _ = bad $ TypeError pos "evalBody Let Id"
+
+evalBody (DoLoop merge loopvar boundexp loopbody letbody pos) = do
+  bound <- evalSubExp boundexp
+  mergestart <- mapM evalSubExp mergeexp
+  case bound of
+    BasicVal (IntVal n) -> do
+      loopresult <- foldM iteration mergestart [0..n-1]
+      local (`bindVars` zip mergepat loopresult) $ evalBody letbody
+    _ -> bad $ TypeError pos "evalBody DoLoop"
+  where (mergepat, mergeexp) = unzip merge
+        iteration mergeval i =
+          binding [(loopvar, BasicVal $ IntVal i)] $
+            local (`bindVars` zip mergepat mergeval) $
+              evalBody loopbody
+
+evalBody (Result es _) =
+  mapM evalSubExp es
 
 evalExp :: Exp -> L0M [Value]
 
@@ -289,9 +328,9 @@ evalExp (Negate e pos) = do
 
 evalExp (If e1 e2 e3 _ pos) = do
   v <- evalSubExp e1
-  case v of BasicVal (LogVal True)  -> evalExp e2
-            BasicVal (LogVal False) -> evalExp e3
-            _                         -> bad $ TypeError pos "evalExp If"
+  case v of BasicVal (LogVal True)  -> evalBody e2
+            BasicVal (LogVal False) -> evalBody e3
+            _                       -> bad $ TypeError pos "evalExp If"
 
 evalExp (Apply fname args _ loc)
   | "trace" <- nameToString fname = do
@@ -303,26 +342,6 @@ evalExp (Apply fname args _ _) = do
   fun <- lookupFun fname
   args' <- mapM (evalSubExp . fst) args
   fun args'
-
-evalExp (LetPat pat e body _) = do
-  v <- evalExp e
-  local (`bindVars` zip pat v) $ evalExp body
-
-evalExp (LetWith _ name src _ idxs ve body pos) = do
-  v <- lookupVar src
-  idxs' <- mapM evalSubExp idxs
-  vev <- evalSubExp ve
-  v' <- change v idxs' vev
-  binding [(name, v')] $ evalExp body
-  where change _ [] to = return to
-        change (ArrayVal arr t) (BasicVal (IntVal i):rest) to
-          | i >= 0 && i <= upper = do
-            let x = arr ! i
-            x' <- change x rest to
-            return $ ArrayVal (arr // [(i, x')]) t
-          | otherwise = bad $ IndexOutOfBounds pos (upper+1) i
-          where upper = snd $ bounds arr
-        change _ _ _ = bad $ TypeError pos "evalExp Let Id"
 
 evalExp (Index _ ident _ idxs pos) = do
   v <- lookupVar ident
@@ -411,20 +430,6 @@ evalExp (Assert e loc) = do
 
 evalExp (Conjoin _ _) = return [BasicVal Checked]
 
-evalExp (DoLoop merge loopvar boundexp loopbody letbody pos) = do
-  bound <- evalSubExp boundexp
-  mergestart <- mapM evalSubExp mergeexp
-  case bound of
-    BasicVal (IntVal n) -> do
-      loopresult <- foldM iteration mergestart [0..n-1]
-      local (`bindVars` zip mergepat loopresult) $ evalExp letbody
-    _ -> bad $ TypeError pos "evalExp DoLoop"
-  where (mergepat, mergeexp) = unzip merge
-        iteration mergeval i =
-          binding [(loopvar, BasicVal $ IntVal i)] $
-            local (`bindVars` zip mergepat mergeval) $
-              evalExp loopbody
-
 evalExp (Map _ fun arrexps loc) = do
   vss <- mapM (arrToList loc <=< evalSubExp) arrexps
   vs' <- mapM (applyLambda fun) $ transpose vss
@@ -494,4 +499,4 @@ evalBoolBinOp op e1 e2 loc = do
 
 applyLambda :: Lambda -> [Value] -> L0M [Value]
 applyLambda (Lambda params body _ _) args =
-  binding (zip (map fromParam params) args) $ evalExp body
+  binding (zip (map fromParam params) args) $ evalBody body

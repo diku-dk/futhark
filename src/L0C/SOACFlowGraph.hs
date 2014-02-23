@@ -72,7 +72,7 @@ type AccFlow = HM.HashMap String SOACInfo
 
 flowForFun :: FunDec -> (Name, ExpFlowGraph)
 flowForFun (fname, _, _, fbody, _) =
-  let allInfos = execWriter $ flowForExp fbody
+  let allInfos = execWriter $ flowForBody fbody
       usages name (consumer, info) =
         case HM.lookup name $ soacConsumed info of
           Nothing -> HS.empty
@@ -97,7 +97,7 @@ soacSeen name produced soac =
          , soacConsumed =
              HM.fromListWith HS.union $ mapMaybe inspectInput $ SOAC.inputs soac
          , soacBodyInfo =
-           mconcat (map (execWriter . flowForExp) bodys)
+           mconcat (map (execWriter . flowForBody) bodys)
          }
   where (desc, bodys) =
           case soac of
@@ -120,15 +120,15 @@ soacSeen name produced soac =
         descTransform (SOAC.ReshapeInner {}) = "reshape"
         descTransform SOAC.Repeat            = "replicate"
 
-flowForExp :: Exp -> FlowM ()
-flowForExp (LetPat pat e body _)
+flowForBody :: Body -> FlowM ()
+flowForBody (LetPat pat e body _)
   | Right e' <- SOAC.fromExp e,
     names@(name:_) <- map identName pat = do
   soacSeen name names e'
-  flowForExp body
-flowForExp (LetPat pat e body _) = do
+  flowForBody body
+flowForBody (LetPat pat e body _) = do
   flowForExp e
-  tell $ HM.map expand $ execWriter $ flowForExp body
+  tell $ HM.map expand $ execWriter $ flowForBody body
   where names = HS.fromList $ map identName pat
         freeInE = HS.toList $ freeNamesInExp e
         expand info =
@@ -141,9 +141,9 @@ flowForExp (LetPat pat e body _) = do
             [ (name, HS.map ("complex":) s) | name <- freeInE ]
           | otherwise =
             [(usedName, s)]
-flowForExp (DoLoop merge _ boundexp loopbody body _)
+flowForBody (DoLoop merge _ boundexp loopbody body _)
   | names@(name:_) <- map (identName . fst) merge = do
-  flowForExp body
+  flowForBody body
   tell $ HM.singleton
          (textual name)
          SOACInfo {
@@ -153,17 +153,23 @@ flowForExp (DoLoop merge _ boundexp loopbody body _)
              HM.fromList
                  [ (used, HS.singleton []) |
                    used <- HS.toList
-                           $ mconcat (map freeNamesInExp $
-                                      [SubExp boundexp, loopbody] ++
-                                      map (SubExp . snd) merge)
+                           $ mconcat (freeNamesInBody loopbody :
+                                      map freeNamesInExp
+                                      (SubExp boundexp :
+                                      map (SubExp . snd) merge))
                           `HS.difference` HS.fromList names
                  ]
-         , soacBodyInfo = execWriter $ flowForExp loopbody
+         , soacBodyInfo = execWriter $ flowForBody loopbody
          }
-flowForExp e = walkExpM flow e
+
+flowForBody b = walkBodyM flow b
+
+flowForExp :: Exp -> FlowM ()
+flowForExp = walkExpM flow
 
 flow :: Walker FlowM
 flow = identityWalker {
          walkOnExp = flowForExp
-       , walkOnLambda = flowForExp . lambdaBody
+       , walkOnBody = flowForBody
+       , walkOnLambda = flowForBody . lambdaBody
        }

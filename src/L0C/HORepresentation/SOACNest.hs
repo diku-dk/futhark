@@ -50,7 +50,7 @@ data Nesting = Nesting {
     nestingParams     :: [Ident]
   , nestingInputs     :: [SOAC.Input]
   , nestingResult     :: [Ident]
-  , nestingPostExp    :: Exp
+  , nestingPostBody   :: Body
   , nestingReturnType :: [DeclType]
   } deriving (Eq, Ord, Show)
 
@@ -75,12 +75,12 @@ bodyParams (NewNest nest _) = map toParam $ nestingParams nest
 
 bodyToLambda :: MonadFreshNames m => NestBody -> m Lambda
 bodyToLambda (Fun l) = return l
-bodyToLambda (NewNest (Nesting paramIds inps bndIds postExp retTypes) op) = do
-  e <- runBinder $ SOAC.toExp =<< toSOAC (SOACNest inps op)
+bodyToLambda (NewNest (Nesting paramIds inps bndIds postBody retTypes) op) = do
+  (e,f) <- runBinder' $ SOAC.toExp =<< toSOAC (SOACNest inps op)
   return Lambda { lambdaSrcLoc = loc
                 , lambdaParams = map toParam paramIds
                 , lambdaReturnType = retTypes
-                , lambdaBody = LetPat bndIds e postExp loc
+                , lambdaBody = f $ LetPat bndIds e postBody loc
                 }
   where loc = srclocOf op
 
@@ -215,22 +215,22 @@ nested l
   | LetPat ids e pe _ <- lambdaBody l, -- Is a let-binding...
     Right soac <- fromSOAC <$> SOAC.fromExp e, -- ...the bindee is a SOAC...
     Just pe' <-
-      checkPostExp (map fromParam $ lambdaParams l) pe = -- ...where the body is a tuple
-                                                              -- literal of the bound variables.
+      checkPostBody (map fromParam $ lambdaParams l) pe = -- ...where the body is a tuple
+                                                         -- literal of the bound variables.
       Just (operation soac,
             -- ... FIXME: need more checks here.
             Nesting { nestingParams = map fromParam $ lambdaParams l
                     , nestingInputs = inputs soac
                     , nestingResult = ids
-                    , nestingPostExp = pe'
+                    , nestingPostBody = pe'
                     , nestingReturnType = lambdaReturnType l
                     })
   | otherwise = Nothing
 
-checkPostExp :: [Ident] -> Exp -> Maybe Exp
-checkPostExp ks e
-  | HS.null $ HS.fromList ks `HS.intersection` freeInExp e = Just e
-  | otherwise                                              = Nothing
+checkPostBody :: [Ident] -> Body -> Maybe Body
+checkPostBody ks b
+  | HS.null $ HS.fromList ks `HS.intersection` freeInBody b = Just b
+  | otherwise                                               = Nothing
 
 toSOAC :: MonadFreshNames m => SOACNest -> m SOAC
 toSOAC (SOACNest as comb@(Map cs b _ loc)) =
@@ -248,18 +248,18 @@ subLambda :: MonadFreshNames m => NestBody -> Combinator -> m Lambda
 subLambda b comb =
   case nesting comb of
     [] -> bodyToLambda b
-    (Nesting paramIds inps bndIds postExp retTypes:rest) -> do
-      e <- runBinder $ SOAC.toExp <=< toSOAC $ SOACNest inps $ rest `setNesting` comb
+    (Nesting paramIds inps bndIds postBody retTypes:rest) -> do
+      (e,f) <- runBinder' $ SOAC.toExp <=< toSOAC $ SOACNest inps $ rest `setNesting` comb
       return Lambda { lambdaReturnType = retTypes
-                    , lambdaBody       = LetPat bndIds e postExp loc
+                    , lambdaBody       = f $ LetPat bndIds e postBody loc
                     , lambdaSrcLoc     = loc
                     , lambdaParams     = map toParam paramIds
                     }
   where loc = srclocOf comb
 
-letPattern :: [Ident] -> Exp -> Exp -> Exp
-letPattern bndIds e postExp =
-  LetPat bndIds e postExp loc
+letPattern :: [Ident] -> Exp -> Body -> Body
+letPattern bndIds e postBody =
+  LetPat bndIds e postBody loc
   where loc = srclocOf e
 
 inputBindings :: SOACNest -> [[Ident]]

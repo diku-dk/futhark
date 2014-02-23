@@ -309,8 +309,9 @@ checkAnnotation loc desc t1 t2 =
 checkTupleAnnotation :: SrcLoc -> String -> [Type] -> [Type] -> TypeM [Type]
 checkTupleAnnotation loc desc t1s t2s
   | length t1s == length t2s,
-    Just ts <- zipWithM unifyTypes t1s t2s = return ts
+    Just ts <- zipWithM unifyTypes (blankAliases t1s) t2s = return ts
   | otherwise = bad $ BadAnnotation loc desc (Several t1s) (Several t2s)
+  where blankAliases = map (`changeAliases` const mempty)
 
 -- | @require ts e@ causes a '(TypeError vn)' if @typeOf e@ does not unify
 -- with one of the types in @ts@.  Otherwise, simply returns @e@.
@@ -390,15 +391,15 @@ checkFun :: FunDec -> TypeM FunDec
 checkFun (fname, rettype, params, body, loc) = do
   params' <- checkParams
   (body', _) <-
-    collectDataflow $ binding (map fromParam params') $ checkExp body
+    collectDataflow $ binding (map fromParam params') $ checkBody body
 
-  checkReturnAlias $ typeOf body'
+  checkReturnAlias $ bodyType body'
 
-  if typeOf body' `subtypesOf` rettype then
+  if bodyType body' `subtypesOf` rettype then
     return (fname, rettype, params', body', loc)
   else bad $ ReturnTypeError loc fname
              (Several $ map fromDecl rettype)
-             (Several $ typeOf body')
+             (Several $ bodyType body')
 
   where checkParams = reverse <$> foldM expand [] params
 
@@ -473,82 +474,20 @@ checkSubExp (Var ident) = do
   observe ident'
   return $ Var ident'
 
-checkExp :: Exp -> TypeM Exp
+checkBody :: Body -> TypeM Body
 
-checkExp (SubExp se) =
-  SubExp <$> checkSubExp se
+checkBody (Result es loc) =
+  Result <$> mapM checkSubExp es <*> pure loc
 
-checkExp (TupLit es pos) = do
-  es' <- mapM checkSubExp es
-  return $ TupLit es' pos
-
-checkExp (ArrayLit es t loc) = do
-  es' <- mapM checkSubExp es
-  -- Find the universal type of the array arguments.
-  et <- case es' of
-          [] -> return t
-          e:es'' ->
-            let check elemt eleme
-                  | Just elemt' <- elemt `unifyTypes` subExpType eleme =
-                    return elemt'
-                  | otherwise =
-                    bad $ TypeError loc $ undefined eleme ++ " is not of expected type " ++ undefined elemt ++ "."
-            in foldM check (subExpType e) es''
-
-  -- Unify that type with the one given for the array literal.
-  t' <- checkAnnotation loc "array-element" t et
-
-  return $ ArrayLit es' t' loc
-
-checkExp (BinOp op e1 e2 t pos) = checkBinOp op e1 e2 t pos
-
-checkExp (Not e pos) = do
-  e' <- require [Basic Bool] =<< checkSubExp e
-  return $ Not e' pos
-
-checkExp (Negate e loc) = do
-  e' <- require [Basic Int, Basic Real] =<< checkSubExp e
-  return $ Negate e' loc
-
-checkExp (If e1 e2 e3 t pos) = do
-  e1' <- require [Basic Bool] =<< checkSubExp e1
-  ((e2', e3'), dflow) <- collectDataflow $ checkExp e2 `alternative` checkExp e3
-  tell dflow
-  let removeConsumed = (`HS.difference` allConsumed (usageOccurences dflow))
-  t' <- checkTupleAnnotation pos "branch result" t $
-        map (`changeAliases` removeConsumed) $
-        zipWith unifyUniqueness (typeOf e2') (typeOf e3')
-  return $ If e1' e2' e3' t' pos
-
-checkExp (Apply fname args t pos)
-  | "trace" <- nameToString fname = do
-  args' <- mapM (checkSubExp . fst) args
-  t'    <- checkTupleAnnotation pos "return" t $ map subExpType args'
-  return $ Apply fname [(arg, Observe) | arg <- args'] t' pos
-
-checkExp (Apply fname args rettype loc) = do
-  bnd <- asks $ HM.lookup fname . envFtable
-  case bnd of
-    Nothing -> bad $ UnknownFunctionError fname loc
-    Just (ftype, paramtypes) -> do
-      (args', argflows) <- unzip <$> mapM (checkArg . fst) args
-
-      rettype' <- checkTupleAnnotation loc "return" rettype $
-                  returnType ftype (map diet paramtypes) (map subExpType args')
-
-      checkFuncall (Just fname) loc paramtypes (map toDecl rettype') argflows
-
-      return $ Apply fname (zip args' $ map diet paramtypes) rettype' loc
-
-checkExp (LetPat pat e body loc) = do
+checkBody (LetPat pat e body loc) = do
   (e', dataflow) <- collectDataflow $ checkExp e
   (scope, pat') <-
     checkBinding loc pat (srclocOf e') (typeOf e') dataflow
   scope $ do
-    body' <- checkExp body
+    body' <- checkBody body
     return $ LetPat pat' e' body' loc
 
-checkExp (LetWith cs (Ident dest destt destpos) src idxcs idxes ve body pos) = do
+checkBody (LetWith cs (Ident dest destt destpos) src idxcs idxes ve body pos) = do
   cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
   src' <- checkIdent src
   idxcs' <-
@@ -572,8 +511,184 @@ checkExp (LetWith cs (Ident dest destt destpos) src idxcs idxes ve body pos) = d
         (scope, _) <- checkBinding (srclocOf dest') [dest']
                                    (srclocOf dest') [destt']
                                    mempty
-        body' <- consuming src' $ scope $ checkExp body
+        body' <- consuming src' $ scope $ checkBody body
         return $ LetWith cs' dest' src' idxcs' idxes' ve' body' pos
+
+-- Checking of loops is done by synthesing the (almost) equivalent
+-- function and type-checking a call to it.  The difficult part is
+-- assigning uniqueness attributes to the parameters of the function -
+-- we'll do this by inspecting the loop body, and look at which of the
+-- variables in mergepat are actually consumed.  Also, any variables
+-- that are free in the loop body must be passed along as (non-unique)
+-- parameters to the function.
+checkBody (DoLoop mergepat (Ident loopvar _ _)
+          boundexp loopbody letbody loc) = do
+  let (mergevs, es) = unzip mergepat
+  -- First, check the bound and initial merge expression and throw
+  -- away the dataflow.  The dataflow will be reconstructed later, but
+  -- we need the result of this to synthesize the function.
+  ((boundexp', es'), _) <-
+    collectDataflow $ do boundexp' <- require [Basic Int] =<< checkSubExp boundexp
+                         es'       <- mapM checkSubExp es
+                         return (boundexp', es')
+  let iparam = Ident loopvar (Basic Int) loc
+
+  -- Check the loop body.  We tap the dataflow before leaving scope,
+  -- so we'll be able to see occurences of variables bound by
+  -- mergepat.
+  (firstscope, mergevs') <-
+    checkBinding loc mergevs loc (map subExpType es') mempty
+  (loopbody', loopflow) <-
+    firstscope $ collectDataflow $ binding [iparam] $ checkBody loopbody
+
+  -- We can use the name generator in a slightly hacky way to generate
+  -- a unique Name for the function.
+  bound <- newIdent "loop_bound" (Basic Int) loc
+  fname <- newFname "loop_fun"
+
+  let -- | Change the uniqueness attribute of a type to reflect how it
+      -- was used.
+      param (Array et sz _ _) con = Array et sz u ()
+        where u = case con of Consume     -> Unique
+                              Observe     -> Nonunique
+      param (Basic bt) _ = Basic bt
+
+      -- We use the type of the merge expression, but with uniqueness
+      -- attributes reflected to show how the parts of the merge
+      -- pattern are used - if something was consumed, it has to be a
+      -- unique parameter to the function.
+      rettype = zipWith param (map subExpType es') $
+                patDiet mergevs' $
+                usageOccurences loopflow
+
+  merge  <- newIdents "merge_val" (map fromDecl rettype) loc
+  result <- newIdents "merge_val" (map fromDecl rettype) loc
+
+  let boundnames = HS.insert iparam $ HS.fromList mergevs'
+      ununique ident =
+        ident { identType = param (identType ident) Observe }
+      -- Find the free variables of the loop body.
+      free = map ununique $ HS.toList $
+             freeInBody loopbody' `HS.difference` boundnames
+
+      -- These are the parameters expected by the function: All of the
+      -- free variables, followed by the index, followed by the upper
+      -- bound (currently not used), followed by the merge value.
+      params = free ++
+               [iparam, toParam bound] ++ map toParam merge
+      bindfun env = env { envFtable = HM.insert fname
+                                      (rettype, map identType params) $
+                                      envFtable env }
+
+      -- The body of the function will be the loop body, but with all
+      -- tails replaced with recursive calls.
+      recurse args = LetPat result
+                     (Apply fname
+                      ([(Var (fromParam k), diet (identType k)) | k <- free ] ++
+                       [(Var iparam, Observe),
+                        (Var bound, Observe)] ++
+                       zip args (map (diet . subExpType) args))
+                      (map fromDecl rettype) loc)
+                     (Result (map Var result) loc) loc
+  let funbody' = LetPat mergevs' (TupLit (map Var merge) loc)
+                 (mapTail recurse loopbody') $
+                 srclocOf loopbody'
+
+  (funcall, callflow) <- collectDataflow $ local bindfun $ do
+    -- Check that the function is internally consistent.
+    _ <- unbinding $ checkFun (fname, rettype, params, funbody', loc)
+    -- Check the actual function call - we start by computing the
+    -- bound and initial merge value, in case they use something
+    -- consumed in the call.  This reintroduces the dataflow for
+    -- boundexp and mergeexp that we previously threw away.
+    checkBody $ LetPat merge (TupLit es' loc)
+                (LetPat result
+                 (Apply fname
+                  ([(Var (fromParam k), diet (identType k)) | k <- free ] ++
+                   [(Constant (BasicVal $ IntVal 0) loc, Observe),
+                    (boundexp', Observe)] ++
+                   zip (map Var merge) (map diet rettype))
+                  (map fromDecl rettype) loc)
+                 (Result (map Var result) loc) loc)
+                loc
+
+  -- Now we just need to bind the result of the function call to the
+  -- original merge pattern...
+  (secondscope, _) <- checkBinding loc mergevs loc (bodyType funcall) callflow
+
+  -- And then check the let-body.
+  secondscope $ do
+    letbody' <- checkBody letbody
+    return $ DoLoop (zip mergevs' es')
+                    (Ident loopvar (Basic Int) loc) boundexp'
+                    loopbody' letbody' loc
+
+checkExp :: Exp -> TypeM Exp
+
+checkExp (SubExp se) =
+  SubExp <$> checkSubExp se
+
+checkExp (TupLit es pos) = do
+  es' <- mapM checkSubExp es
+  return $ TupLit es' pos
+
+checkExp (ArrayLit es t loc) = do
+  es' <- mapM checkSubExp es
+  -- Find the universal type of the array arguments.
+  et <- case es' of
+          [] -> return t
+          e:es'' ->
+            let check elemt eleme
+                  | Just elemt' <- elemt `unifyTypes` subExpType eleme =
+                    return elemt'
+                  | otherwise =
+                    bad $ TypeError loc $ ppType (subExpType eleme) ++ " is not of expected type " ++ ppType elemt ++ "."
+            in foldM check (subExpType e) es''
+
+  -- Unify that type with the one given for the array literal.
+  t' <- checkAnnotation loc "array-element" t et
+
+  return $ ArrayLit es' t' loc
+
+checkExp (BinOp op e1 e2 t pos) = checkBinOp op e1 e2 t pos
+
+checkExp (Not e pos) = do
+  e' <- require [Basic Bool] =<< checkSubExp e
+  return $ Not e' pos
+
+checkExp (Negate e loc) = do
+  e' <- require [Basic Int, Basic Real] =<< checkSubExp e
+  return $ Negate e' loc
+
+checkExp (If e1 e2 e3 t pos) = do
+  e1' <- require [Basic Bool] =<< checkSubExp e1
+  ((e2', e3'), dflow) <- collectDataflow $ checkBody e2 `alternative` checkBody e3
+  tell dflow
+  let removeConsumed = (`HS.difference` allConsumed (usageOccurences dflow))
+  t' <- checkTupleAnnotation pos "branch result" t $
+        map (`changeAliases` removeConsumed) $
+        zipWith unifyUniqueness (bodyType e2') (bodyType e3')
+  return $ If e1' e2' e3' t' pos
+
+checkExp (Apply fname args t pos)
+  | "trace" <- nameToString fname = do
+  args' <- mapM (checkSubExp . fst) args
+  t'    <- checkTupleAnnotation pos "return" t $ map subExpType args'
+  return $ Apply fname [(arg, Observe) | arg <- args'] t' pos
+
+checkExp (Apply fname args rettype loc) = do
+  bnd <- asks $ HM.lookup fname . envFtable
+  case bnd of
+    Nothing -> bad $ UnknownFunctionError fname loc
+    Just (ftype, paramtypes) -> do
+      (args', argflows) <- unzip <$> mapM (checkArg . fst) args
+
+      rettype' <- checkTupleAnnotation loc "return" rettype $
+                  returnType ftype (map diet paramtypes) (map subExpType args')
+
+      checkFuncall (Just fname) loc paramtypes (map toDecl rettype') argflows
+
+      return $ Apply fname (zip args' $ map diet paramtypes) rettype' loc
 
 checkExp (Index cs ident csidxes idxes pos) = do
   cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
@@ -602,7 +717,7 @@ checkExp (Size cs i e pos) = do
       | i >= 0 && i < arrayRank (subExpType e') ->
         return $ Size cs' i e' pos
       | otherwise ->
-        bad $ TypeError pos $ "Type " ++ undefined (subExpType e') ++ " has no dimension " ++ show i ++ "."
+        bad $ TypeError pos $ "Type " ++ ppType (subExpType e') ++ " has no dimension " ++ show i ++ "."
     _        -> bad $ TypeError pos "Argument to size must be array."
 
 checkExp (Replicate countexp valexp pos) = do
@@ -651,114 +766,6 @@ checkExp (Conjoin es pos) = do
   es' <- mapM (require [Basic Cert] <=< checkSubExp) es
   return $ Conjoin es' pos
 
--- Checking of loops is done by synthesing the (almost) equivalent
--- function and type-checking a call to it.  The difficult part is
--- assigning uniqueness attributes to the parameters of the function -
--- we'll do this by inspecting the loop body, and look at which of the
--- variables in mergepat are actually consumed.  Also, any variables
--- that are free in the loop body must be passed along as (non-unique)
--- parameters to the function.
-checkExp (DoLoop mergepat (Ident loopvar _ _)
-          boundexp loopbody letbody loc) = do
-  let (mergevs, es) = unzip mergepat
-  -- First, check the bound and initial merge expression and throw
-  -- away the dataflow.  The dataflow will be reconstructed later, but
-  -- we need the result of this to synthesize the function.
-  ((boundexp', es'), _) <-
-    collectDataflow $ do boundexp' <- require [Basic Int] =<< checkSubExp boundexp
-                         es'       <- mapM checkSubExp es
-                         return (boundexp', es')
-  let iparam = Ident loopvar (Basic Int) loc
-
-  -- Check the loop body.  We tap the dataflow before leaving scope,
-  -- so we'll be able to see occurences of variables bound by
-  -- mergepat.
-  (firstscope, mergevs') <-
-    checkBinding loc mergevs loc (map subExpType es') mempty
-  (loopbody', loopflow) <-
-    firstscope $ collectDataflow $ binding [iparam] $ checkExp loopbody
-
-  -- We can use the name generator in a slightly hacky way to generate
-  -- a unique Name for the function.
-  bound <- newIdent "loop_bound" (Basic Int) loc
-  fname <- newFname "loop_fun"
-
-  let -- | Change the uniqueness attribute of a type to reflect how it
-      -- was used.
-      param (Array et sz _ _) con = Array et sz u ()
-        where u = case con of Consume     -> Unique
-                              Observe     -> Nonunique
-      param (Basic bt) _ = Basic bt
-
-      -- We use the type of the merge expression, but with uniqueness
-      -- attributes reflected to show how the parts of the merge
-      -- pattern are used - if something was consumed, it has to be a
-      -- unique parameter to the function.
-      rettype = zipWith param (map subExpType es') $
-                patDiet mergevs' $
-                usageOccurences loopflow
-
-  merge <- newIdents "merge_val" (map fromDecl rettype) loc
-
-  let boundnames = HS.insert iparam $ HS.fromList mergevs'
-      ununique ident =
-        ident { identType = param (identType ident) Observe }
-      -- Find the free variables of the loop body.
-      free = map ununique $ HS.toList $
-             freeInExp loopbody' `HS.difference` boundnames
-
-      -- These are the parameters expected by the function: All of the
-      -- free variables, followed by the index, followed by the upper
-      -- bound (currently not used), followed by the merge value.
-      params = free ++
-               [iparam, toParam bound] ++ map toParam merge
-      bindfun env = env { envFtable = HM.insert fname
-                                      (rettype, map identType params) $
-                                      envFtable env }
-
-      -- The body of the function will be the loop body, but with all
-      -- tails replaced with recursive calls.
-      recurse e = do
-        call <- newIdents "tail" (typeOf e) loc
-        let bindArgs apply = LetPat call e apply loc
-        return $ bindArgs $
-                  Apply fname
-                  ([(Var (fromParam k), diet (identType k)) | k <- free ] ++
-                   [(Var iparam, Observe),
-                    (Var bound, Observe)] ++
-                   zip (map Var call) (map diet $ typeOf e))
-                  (map fromDecl rettype) (srclocOf e)
-  funbody' <- LetPat mergevs' (TupLit (map Var merge) loc) <$>
-              mapTailsM recurse return loopbody' <*>
-              pure (srclocOf loopbody')
-
-  (funcall, callflow) <- collectDataflow $ local bindfun $ do
-    -- Check that the function is internally consistent.
-    _ <- unbinding $ checkFun (fname, rettype, params, funbody', loc)
-    -- Check the actual function call - we start by computing the
-    -- bound and initial merge value, in case they use something
-    -- consumed in the call.  This reintroduces the dataflow for
-    -- boundexp and mergeexp that we previously threw away.
-    checkExp $ LetPat merge (TupLit es' loc)
-               (Apply fname
-                  ([(Var (fromParam k), diet (identType k)) | k <- free ] ++
-                   [(Constant (BasicVal $ IntVal 0) loc, Observe),
-                    (boundexp', Observe)] ++
-                   zip (map Var merge) (map diet rettype))
-                  (map fromDecl rettype) loc)
-               loc
-
-  -- Now we just need to bind the result of the function call to the
-  -- original merge pattern...
-  (secondscope, _) <- checkBinding loc mergevs loc (typeOf funcall) callflow
-
-  -- And then check the let-body.
-  secondscope $ do
-    letbody' <- checkExp letbody
-    return $ DoLoop (zip mergevs' es')
-                    (Ident loopvar (Basic Int) loc) boundexp'
-                    loopbody' letbody' loc
-
 checkExp (Map ass fun arrexps pos) = do
   ass' <- mapM (requireI [Basic Cert] <=< checkIdent) ass
   (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
@@ -775,11 +782,11 @@ checkExp (Reduce ass fun inputs pos) = do
       intupletype = map argType arrargs
       funret      = lambdaType fun' $ map argType $ startargs ++ arrargs
   unless (startt `subtypesOf` funret) $
-      bad $ TypeError pos $ "Accumulator is of type " ++ undefined startt ++
-                            ", but reduce function returns type " ++ undefined funret ++ "."
+      bad $ TypeError pos $ "Accumulator is of type " ++ ppPattern startt ++
+                            ", but reduce function returns type " ++ ppPattern funret ++ "."
   unless (intupletype `subtypesOf` funret) $
-      bad $ TypeError pos $ "Array element value is of type " ++ undefined intupletype ++
-                            ", but scan function returns type " ++ undefined funret ++ "."
+      bad $ TypeError pos $ "Array element value is of type " ++ ppPattern intupletype ++
+                            ", but scan function returns type " ++ ppPattern funret ++ "."
   return $ Reduce ass' fun' (zip startexps' arrexps') pos
 
 -- ScanT is exactly identical to ReduceT.  Duplicate for clarity
@@ -794,11 +801,11 @@ checkExp (Scan ass fun inputs pos) = do
       intupletype = map argType arrargs
       funret      = lambdaType fun' $ map argType $ startargs ++ startargs
   unless (startt `subtypesOf` funret) $
-    bad $ TypeError pos $ "Initial value is of type " ++ undefined startt ++
-                          ", but scan function returns type " ++ undefined funret ++ "."
+    bad $ TypeError pos $ "Initial value is of type " ++ ppPattern startt ++
+                          ", but scan function returns type " ++ ppPattern funret ++ "."
   unless (intupletype `subtypesOf` funret) $
-    bad $ TypeError pos $ "Array element value is of type " ++ undefined intupletype ++
-                          ", but scan function returns type " ++ undefined funret ++ "."
+    bad $ TypeError pos $ "Array element value is of type " ++ ppPattern intupletype ++
+                          ", but scan function returns type " ++ ppPattern funret ++ "."
   return $ Scan ass' fun' (zip startexps' arrexps') pos
 
 checkExp (Filter ass fun arrexps pos) = do
@@ -814,18 +821,19 @@ checkExp (Redomap ass outerfun innerfun accexps arrexps pos) = do
   ass' <- mapM (requireI [Basic Cert] <=< checkIdent) ass
   (arrexps', arrargs)  <- unzip <$> mapM checkSOACArrayArg arrexps
   (accexps', accargs)  <- unzip <$> mapM checkArg accexps
-  (outerfun', retType) <- checkLambdaArg outerfun $ accargs ++ accargs
+  (innerfun', innerRet) <- checkLambdaArg innerfun $ accargs ++ arrargs
 
-  innerfun' <- checkLambda innerfun $ accargs ++ arrargs
+  (outerfun', outerRet) <- checkLambdaArg outerfun $ innerRet ++ innerRet
 
   let acct = map subExpType accexps'
-      innerret = lambdaType innerfun' $ map argType $ accargs ++ arrargs
-  unless (innerret `subtypesOf` acct) $
-    bad $ TypeError pos $ "Initial value is of type " ++ undefined acct ++
-          ", but redomapT inner reduction returns type " ++ undefined innerret ++ "."
-  unless (retType `subtypesOf` acct) $
-    bad $ TypeError pos $ "Initial value is of type " ++ undefined acct ++
-          ", but redomapT outer reduction returns type " ++ undefined retType ++ "."
+      innerRetType = map argType innerRet
+      outerRetType = map argType outerRet
+  unless (innerRetType `subtypesOf` acct) $
+    bad $ TypeError pos $ "Initial value is of type " ++ ppPattern acct ++
+          ", but redomapT inner reduction returns type " ++ ppPattern innerRetType ++ "."
+  unless (outerRetType `subtypesOf` acct) $
+    bad $ TypeError pos $ "Initial value is of type " ++ ppPattern acct ++
+          ", but redomapT outer reduction returns type " ++ ppPattern outerRetType ++ "."
 
   return $ Redomap ass' outerfun' innerfun' accexps' arrexps' pos
 
@@ -928,11 +936,11 @@ checkArg arg = do (arg', dflow) <- collectDataflow $ checkSubExp arg
                   return (arg', (subExpType arg', dflow, srclocOf arg'))
 
 checkLambdaArg :: Lambda -> [Arg]
-               -> TypeM (Lambda, [Type])
+               -> TypeM (Lambda, [Arg])
 checkLambdaArg lam args = do
-  lam' <- checkLambda lam args
+  (lam', dflow) <- collectDataflow $ checkLambda lam args
   let lamt = lambdaType lam' $ map argType args
-  return (lam', lamt)
+  return (lam', [ (t, dflow, srclocOf lam) | t <- lamt ])
 
 checkFuncall :: Maybe Name -> SrcLoc
              -> [DeclType] -> [DeclType] -> [Arg]
@@ -944,7 +952,6 @@ checkFuncall fname loc paramtypes _ args = do
     bad $ ParameterMismatch fname loc
           (Right $ map (justOne . fromDecl) paramtypes) $
           map justOne argts
-
   forM_ (zip (map diet paramtypes) args) $ \(d, (t, dflow, argloc)) -> do
     maybeCheckOccurences $ usageOccurences dflow
     let occurs = [consumption (consumeArg t d) argloc]

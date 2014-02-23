@@ -3,12 +3,15 @@
 module L0C.Backends.GenericC
   ( compileProg
   , ExpCompiler
+  , ExpCompilerResult(..)
   , CompilerM
   , lookupVar
   , compileExp
   , compileSubExp
   , compileExpNewVar
   ) where
+
+import Debug.Trace
 
 import Control.Applicative
 import Control.Monad.Identity
@@ -44,9 +47,18 @@ newCompilerState prog = CompilerState {
                         }
 
 -- | A substitute expression compiler, tried before the main
--- expression compilation function.  If this returns 'Left', that new
--- expression is compiled instead.
-type ExpCompiler = C.Exp -> Exp -> CompilerM (Either Exp [C.BlockItem])
+-- expression compilation function.
+type ExpCompiler = C.Exp -> Exp -> CompilerM ExpCompilerResult
+
+-- | The result of the substitute expression compiler.
+data ExpCompilerResult = CompileBody Body
+                       -- | New bindings.  Note that the bound
+                       -- expressions will themselves be compiled
+                       -- using the expression compiler.
+                       | CompileExp Exp -- | A new expression (or
+                                        -- possibly the same as the
+                                        -- input).
+                       | CCode [C.BlockItem] -- | Compiled C code.
 
 data CompilerEnv = CompilerEnv {
     envVarMap :: HM.HashMap VName C.Exp
@@ -140,6 +152,9 @@ typeToCType t = do
 
 expCType :: Exp -> CompilerM C.Type
 expCType = typeToCType . typeOf
+
+bodyCType :: Body -> CompilerM C.Type
+bodyCType = typeToCType . bodyType
 
 -- | Return a statement printing the given value.
 printStm :: C.Exp -> [GenType als] -> CompilerM C.Stm
@@ -306,7 +321,7 @@ int main() {
 compileFun :: FunDec -> CompilerM (C.Definition, C.Func)
 compileFun (fname, rettype, args, body, _) = do
   (argexps, args') <- unzip <$> mapM compileArg args
-  body' <- binding (zip (map identName args) $ argexps) $ compileBody body
+  body' <- binding (zip (map identName args) $ argexps) $ compileFunBody body
   crettype <- typeToCType $ map fromDecl rettype
   return ([C.cedecl|static $ty:crettype $id:(funName fname)( $params:args' );|],
           [C.cfun|static $ty:crettype $id:(funName fname)( $params:args' ) { $items:body' }|])
@@ -370,16 +385,100 @@ compileSubExp place (Var (Ident name _ _)) = do
   name' <- lookupVar name
   return $ stm [C.cstm|$exp:place = $exp:name';|]
 
-compileExp  :: C.Exp -> Exp -> CompilerM [C.BlockItem]
+compileBody :: C.Exp -> Body -> CompilerM [C.BlockItem]
+compileBody place (LetPat pat e body _) = do
+  val <- new "let_value"
+  e' <- compileExp (varExp val) e
+  let bindings = compilePattern pat (varExp val)
+  body' <- binding bindings $ compileBody place body
+  et <- expCType e
+  return $ stm [C.cstm|{
+                     $ty:et $id:val;
+                     $items:e'
+                     $items:body'
+                   }|]
+
+compileBody place (LetWith _ name src idxcs idxs ve body _) = do
+  name' <- new $ textual $ identName name
+  src' <- lookupVar $ identName src
+  etype <- typeToCType [identType src]
+  idxvars <- mapM (const $ new "letwith_index") [1..length idxs]
+  let idxexps = map varExp idxvars
+  idxs' <- concat <$> zipWithM compileSubExp idxexps idxs
+  el <- new "letwith_el"
+  elty <- typeToCType [subExpType ve]
+  ve' <- compileSubExpInPlace (varExp el) ve
+  let idxdecls = [[C.cdecl|int $id:idxvar;|] | idxvar <- idxvars]
+      check = case idxcs of
+                Just _ -> []
+                Nothing -> boundsCheckStm (varExp name') idxexps
+      (elempre, elempost) =
+        case subExpType ve of
+          Array {} -> (indexArrayElemStms (varExp el) (varExp name') (identType src) idxexps,
+                       [C.cstm|;|])
+          _ -> ([[C.cstm|;|]],
+                case identType src of
+                  Array {} ->
+                    [C.cstm|$exp:(indexArrayExp (varExp name')
+                                  (arrayRank $ identType src) idxexps) = $id:el;|]
+                  _ -> [C.cstm|$id:name' = $id:el;|])
+  body' <- binding [(identName name, varExp name')] $ compileBody place body
+  return $ stm [C.cstm|{
+                     $ty:etype $id:name';
+                     $ty:elty $id:el;
+                     $decls:idxdecls
+                     $id:name' = $exp:src';
+                     $items:idxs'
+                     $stms:check
+                     $stms:elempre
+                     $items:ve'
+                     $stm:elempost
+                     $items:body'
+                   }|]
+
+compileBody place (DoLoop merge loopvar boundexp loopbody letbody loc) = do
+  let (mergepat, mergeexp) = unzip merge
+  loopvar' <- new $ textual $ identName loopvar
+  bound <- new "loop_bound"
+  mergevarR <- new $ "loop_mergevar_read"
+  mergevarW <- new $ "loop_mergevar_write"
+  let bindings = compilePattern mergepat (varExp mergevarR)
+  mergeexp' <- compileExp (varExp mergevarR) $ TupLit mergeexp loc
+  mergetype <- bodyCType loopbody
+  boundexp' <- compileSubExp (varExp bound) boundexp
+  loopbody' <- binding ((identName loopvar, varExp loopvar') : bindings) $
+               compileBody (varExp mergevarW) loopbody
+  letbody' <- binding bindings $ compileBody place letbody
+  return $ stm [C.cstm|{
+                     int $id:bound, $id:loopvar';
+                     $ty:mergetype $id:mergevarR;
+                     $ty:mergetype $id:mergevarW;
+                     $items:mergeexp'
+                     $items:boundexp'
+                     for ($id:loopvar' = 0; $id:loopvar' < $id:bound; $id:loopvar'++) {
+                       $items:loopbody'
+                       $id:mergevarR = $id:mergevarW;
+                     }
+                     $items:letbody'
+                   }|]
+
+compileBody place (Result [e] _)  = compileSubExp place e
+compileBody place (Result es loc) = compileExp place $ TupLit es loc
+
+compileExp :: C.Exp -> Exp -> CompilerM [C.BlockItem]
 
 compileExp target e = do
   res <- join $ asks envCompileExp <*> pure target <*> pure e
-  case res of Left e'    -> compileExp' target e'
-              Right res' -> return res'
+  case res of CompileBody b  -> trace ("body " ++ ppBody b) $ compileBody target b
+              CompileExp  e' -> compileExp' target e'
+              CCode res'     -> return res'
 
 compileExp' :: C.Exp -> Exp -> CompilerM [C.BlockItem]
 
 compileExp' place (SubExp e) =
+  compileSubExp place e
+
+compileExp' place (TupLit [e] _) =
   compileSubExp place e
 
 compileExp' place (TupLit es _) = do
@@ -495,8 +594,8 @@ compileExp' place (Negate e1 _) = do
 compileExp' place (If cond e1 e2 _ _) = do
   condvar <- new "if_cond"
   cond' <- compileSubExp (varExp condvar) cond
-  e1' <- compileExp place e1
-  e2' <- compileExp place e2
+  e1' <- compileBody place e1
+  e2' <- compileBody place e2
   return $ stm [C.cstm|{
                      int $id:condvar;
                      $items:cond'
@@ -516,18 +615,6 @@ compileExp' place (Apply fname args _ _) = do
                      $items:(concat args')
                      $exp:place = $id:(funName fname)($args:varexps);
                }|]
-
-compileExp' place (LetPat pat e body _) = do
-  val <- new "let_value"
-  e' <- compileExp (varExp val) e
-  let bindings = compilePattern pat (varExp val)
-  body' <- binding bindings $ compileExp place body
-  et <- expCType e
-  return $ stm [C.cstm|{
-                     $ty:et $id:val;
-                     $items:e'
-                     $items:body'
-                   }|]
 
 compileExp' place (Index _ var csidxs idxs _) = do
   arr <- lookupVar $ identName var
@@ -555,19 +642,17 @@ compileExp' place (Size _ i e _) = do
                      $exp:place = $id:dest.shape[$int:i];
                    }|]
 
-compileExp' place e@(Iota (Var v) _) = do
+compileExp' place e@(Iota se _) = do
+  n <- new "iota_n"
   e' <- compileExpInPlace place e
-  v' <- lookupVar $ identName v
-  let alloc = allocArray place [v'] [C.cty|int|]
+  se' <- compileSubExp (varExp n) se
+  let alloc = allocArray place [varExp n] [C.cty|int|]
   return $ stm [C.cstm|{
+                     int $id:n;
+                     $items:se'
                      $stm:alloc
                      $items:e'
                    }|]
-
-compileExp' place (Iota ne pos) = do
-  size <- newVName "iota_size"
-  let ident = Ident size (Basic Int) pos
-  compileExp place $ LetPat [ident] (SubExp ne) (Iota (Var ident) pos) pos
 
 compileExp' place e@(Replicate (Var nv) (Var vv) _) = do
   e' <- compileExpInPlace place e
@@ -584,11 +669,14 @@ compileExp' place e@(Replicate (Var nv) (Var vv) _) = do
 compileExp' place (Replicate ne ve pos) = do
   nv <- newVName "replicate_n"
   vv <- newVName "replicate_v"
+  rr <- newVName "replicate_r"
   let nident = Ident nv (Basic Int) pos
       vident = Ident vv (subExpType ve) pos
+      rident = Ident rr (arrayOf (subExpType ve) [Nothing] Unique) pos
       nlet body = LetPat [nident] (SubExp ne) body pos
       vlet body = LetPat [vident] (SubExp ve) body pos
-  compileExp place $ nlet $ vlet $ Replicate (Var nident) (Var vident) pos
+      rlet body = LetPat [rident] (Replicate (Var nident) (Var vident) pos) body pos
+  compileBody place $ nlet $ vlet $ rlet $ Result [Var rident] pos
 
 compileExp' place (Reshape _ shapeexps arrexp _) = do
   shapevars <- mapM (new . ("shape_"++) . show) [0..length shapeexps-1]
@@ -690,70 +778,6 @@ compileExp' place (Concat _ xarr yarr _) = do
                      $stm:copyx
                      $stm:copyy
              }|]
-
-compileExp' place (LetWith _ name src idxcs idxs ve body _) = do
-  name' <- new $ textual $ identName name
-  src' <- lookupVar $ identName src
-  etype <- typeToCType [identType src]
-  idxvars <- mapM (const $ new "letwith_index") [1..length idxs]
-  let idxexps = map varExp idxvars
-  idxs' <- concat <$> zipWithM compileSubExp idxexps idxs
-  el <- new "letwith_el"
-  elty <- typeToCType [subExpType ve]
-  ve' <- compileSubExpInPlace (varExp el) ve
-  let idxdecls = [[C.cdecl|int $id:idxvar;|] | idxvar <- idxvars]
-      check = case idxcs of
-                Just _ -> []
-                Nothing -> boundsCheckStm (varExp name') idxexps
-      (elempre, elempost) =
-        case subExpType ve of
-          Array {} -> (indexArrayElemStms (varExp el) (varExp name') (identType src) idxexps,
-                       [C.cstm|;|])
-          _ -> ([[C.cstm|;|]],
-                case identType src of
-                  Array {} ->
-                    [C.cstm|$exp:(indexArrayExp (varExp name')
-                                  (arrayRank $ identType src) idxexps) = $id:el;|]
-                  _ -> [C.cstm|$id:name' = $id:el;|])
-  body' <- binding [(identName name, varExp name')] $ compileExp place body
-  return $ stm [C.cstm|{
-                     $ty:etype $id:name';
-                     $ty:elty $id:el;
-                     $decls:idxdecls
-                     $id:name' = $exp:src';
-                     $items:idxs'
-                     $stms:check
-                     $stms:elempre
-                     $items:ve'
-                     $stm:elempost
-                     $items:body'
-                   }|]
-
-compileExp' place (DoLoop merge loopvar boundexp loopbody letbody loc) = do
-  let (mergepat, mergeexp) = unzip merge
-  loopvar' <- new $ textual $ identName loopvar
-  bound <- new "loop_bound"
-  mergevarR <- new $ "loop_mergevar_read"
-  mergevarW <- new $ "loop_mergevar_write"
-  let bindings = compilePattern mergepat (varExp mergevarR)
-  mergeexp' <- compileExp (varExp mergevarR) $ TupLit mergeexp loc
-  mergetype <- typeToCType $ typeOf loopbody
-  boundexp' <- compileSubExp (varExp bound) boundexp
-  loopbody' <- binding ((identName loopvar, varExp loopvar') : bindings) $
-               compileExp (varExp mergevarW) loopbody
-  letbody' <- binding bindings $ compileExp place letbody
-  return $ stm [C.cstm|{
-                     int $id:bound, $id:loopvar';
-                     $ty:mergetype $id:mergevarR;
-                     $ty:mergetype $id:mergevarW;
-                     $items:mergeexp'
-                     $items:boundexp'
-                     for ($id:loopvar' = 0; $id:loopvar' < $id:bound; $id:loopvar'++) {
-                       $items:loopbody'
-                       $id:mergevarR = $id:mergevarW;
-                     }
-                     $items:letbody'
-                   }|]
 
 compileExp' place (Copy e _) = do
   val <- new "copy_val"
@@ -894,11 +918,11 @@ compilePattern pat vexp =
           (identName v, [C.cexp|$exp:vexp.$id:field|])
             where field = tupleField i
 
-compileBody :: Exp -> CompilerM [C.BlockItem]
-compileBody body = do
+compileFunBody :: Body -> CompilerM [C.BlockItem]
+compileFunBody body = do
   retval <- new "retval"
-  body' <- compileExp (varExp retval) body
-  bodytype <- expCType body
+  body' <- compileBody (varExp retval) body
+  bodytype <- bodyCType body
   return $ stm [C.cstm|{
                      $ty:bodytype $id:retval;
                      $items:body'

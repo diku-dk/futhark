@@ -7,6 +7,8 @@ module L0C.Backends.Bohrium (compileProg) where
 
 import Control.Monad
 
+import Data.Loc
+
 import L0C.InternalRep
 import qualified L0C.FirstOrderTransform as FOT
 import L0C.Backends.BohriumCodeGen
@@ -18,6 +20,8 @@ compileProg :: Prog -> String
 compileProg = addHeader . GenericC.compileProg expCompiler
   where expCompiler target e = do
           res <- compileSOACtoBohrium target e
-          case res of Nothing   -> liftM Left $ runBinder $ FOT.transformExp FOT.noRecursion e
-                      Just res' -> return $ Right res'
+          case res of Nothing   -> liftM GenericC.CompileBody $ runBinder $ do
+                                     es <- letTupExp "soac" =<< FOT.transformExp e
+                                     return $ Result (map Var es) $ srclocOf e
+                      Just res' -> return $ GenericC.CCode res'
         addHeader = ("#include <bh_c.h>\n"++)

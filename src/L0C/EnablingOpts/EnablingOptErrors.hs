@@ -15,7 +15,6 @@ data EnablingOptError = EnablingOptError SrcLoc String
                       | CopyCtPropError SrcLoc String
                       -- ^ Copy/Constant Propagation Error
                       | TypeError SrcLoc String
-                      | Div0Error SrcLoc
                       | DupDefinitionError Name SrcLoc SrcLoc
                       | FunctionNotInFtab  Name
                       | VarNotInFtab SrcLoc VName
@@ -33,9 +32,6 @@ instance Show EnablingOptError where
     show (TypeError pos s) =
         "Type error at " ++ locStr pos ++ " in " ++ s ++ 
         " during interpretation.  This implies a bug in the type checker."
-    show (Div0Error pos) =
-        "Division by zero Error detected during copy/constant propagation and folding at line: " 
-        ++ locStr pos 
     show (DupDefinitionError name pos1 pos2) =
         "Duplicate definition of function " ++ nameToString name ++ ".  Defined at " ++
         locStr pos1 ++ " and " ++ locStr pos2 ++ "."

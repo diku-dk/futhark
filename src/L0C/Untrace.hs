@@ -15,17 +15,20 @@ untraceProg = Prog . map untraceFun . progFunctions
 
 untraceFun :: FunDec -> FunDec
 untraceFun (fname, ret, params, body, pos) =
-  (fname, ret, params, untraceExp body, pos)
+  (fname, ret, params, untraceBody body, pos)
 
-untraceExp :: Exp -> Exp
-untraceExp (Apply fname [(e,_)] _ _)
-  | "trace" <- nameToString fname = SubExp e
-untraceExp e = mapExp untrace e
+untraceBody :: Body -> Body
+untraceBody = mapBody untrace
   where untrace = identityMapper {
                     mapOnExp = return . untraceExp
+                  , mapOnBody = return .untraceBody
                   , mapOnLambda = return . untraceLambda
                   }
+        untraceExp (Apply fname [(e,_)] _ _)
+          | "trace" <- nameToString fname = SubExp e
+        untraceExp e = mapExp untrace e
+
 
 untraceLambda :: Lambda -> Lambda
 untraceLambda (Lambda params body ret pos) =
-  Lambda params (untraceExp body) ret pos
+  Lambda params (untraceBody body) ret pos

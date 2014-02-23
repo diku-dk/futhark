@@ -164,8 +164,8 @@ removeUnusedParams l inps =
         (ps', inps') = case (unzip $ filter (used . fst) pInps, pInps) of
                          (([], []), (p,inp):_) -> ([p], [inp])
                          ((ps_, inps_), _)     -> (ps_, inps_)
-        used p = identName p `HS.member` freeInBody
-        freeInBody = freeNamesInExp $ lambdaBody l
+        used p = identName p `HS.member` freeVars
+        freeVars = freeNamesInBody $ lambdaBody l
 
 -- | Check that the consumer uses at least one output of the producer
 -- unmodified.
@@ -248,14 +248,14 @@ fuseSOACwithKer outIds soac1 ker = do
     (SOAC.Reduce _ _ args pos, SOAC.Filter {})
       | filterFusionOK outIds ker -> do
       let ne = map fst args
-      name <- newVName "check"
-      let (res_lam, new_inp) = fuseFilterIntoFold lam1 inp1_arr outIds lam2 inp2_arr name
+      names <- replicateM (length $ lambdaReturnType lam2) $ newVName "check"
+      let (res_lam, new_inp) = fuseFilterIntoFold lam1 inp1_arr outIds lam2 inp2_arr names
       success $ SOAC.Reduce (cs1++cs2) res_lam (zip ne new_inp) pos
 
     (SOAC.Redomap _ lam21 _ nes _ pos, SOAC.Filter {})
       | filterFoldFusionOK outIds ker-> do
-      name <- newVName "check"
-      let (res_lam, new_inp) = fuseFilterIntoFold lam1 inp1_arr outIds lam2 inp2_arr name
+      names <- replicateM (length $ lambdaReturnType lam21) $ newVName "check"
+      let (res_lam, new_inp) = fuseFilterIntoFold lam1 inp1_arr outIds lam2 inp2_arr names
       success $ SOAC.Redomap (cs1++cs2) lam21 res_lam nes new_inp pos
 
     (SOAC.Filter _ _ _ pos, SOAC.Filter {})
@@ -438,7 +438,7 @@ pullReshape nest (OReshape cs shape:ots)
                           Nest.nestingParams = ps
                         , Nest.nestingInputs = map SOAC.varInput ps
                         , Nest.nestingResult = bnds
-                        , Nest.nestingPostExp = TupLit (map Var bnds) loc
+                        , Nest.nestingPostBody = Result (map Var bnds) loc
                         , Nest.nestingReturnType = retTypes
                         }
       outerNests <- mapM outernest [0..length shape - 2]

@@ -29,11 +29,15 @@ module L0C.InternalRep.Traversals
   -- * Mapping
     Mapper(..)
   , identityMapper
+  , mapBodyM
+  , mapBody
   , mapExpM
   , mapExp
 
   -- * Folding
   , Folder(..)
+  , foldBodyM
+  , foldBody
   , foldExpM
   , foldExp
   , identityFolder
@@ -42,10 +46,11 @@ module L0C.InternalRep.Traversals
   , Walker(..)
   , identityWalker
   , walkExpM
+  , walkBodyM
 
   -- * Simple wrappers
-  , foldlPattern
   , buildExpPattern
+  , foldlPattern
   )
   where
 
@@ -62,6 +67,7 @@ import L0C.InternalRep.Syntax
 -- given child.
 data Mapper m = Mapper {
     mapOnSubExp :: SubExp -> m SubExp
+  , mapOnBody :: Body -> m Body
   , mapOnExp :: Exp -> m Exp
   , mapOnType :: Type -> m Type
   , mapOnLambda :: Lambda -> m Lambda
@@ -75,12 +81,38 @@ identityMapper :: Monad m => Mapper m
 identityMapper = Mapper {
                    mapOnSubExp = return
                  , mapOnExp = return
+                 , mapOnBody = return
                  , mapOnType = return
                  , mapOnLambda = return
                  , mapOnIdent = return
                  , mapOnValue = return
                  , mapOnCertificates = return
                  }
+
+mapBodyM :: (Applicative m, Monad m) => Mapper m -> Body -> m Body
+mapBodyM tv (LetPat pat e body loc) =
+  pure LetPat <*> mapM (mapOnIdent tv) pat <*> mapOnExp tv e <*>
+       mapOnBody tv body <*> pure loc
+mapBodyM tv (LetWith cs dest src idxcs idxexps vexp body loc) =
+  pure LetWith <*> mapOnCertificates tv cs <*>
+       mapOnIdent tv dest <*> mapOnIdent tv src <*>
+       (case idxcs of
+          Nothing -> return Nothing
+          Just idxcs' -> Just <$> mapOnCertificates tv idxcs') <*>
+       mapM (mapOnSubExp tv) idxexps <*> mapOnSubExp tv vexp <*>
+       mapOnBody tv body <*> pure loc
+mapBodyM tv (DoLoop mergepat loopvar boundexp loopbody letbody loc) =
+  pure DoLoop <*>
+       (zip <$> mapM (mapOnIdent tv) vs <*> mapM (mapOnSubExp tv) es) <*>
+       mapOnIdent tv loopvar <*> mapOnSubExp tv boundexp <*>
+       mapOnBody tv loopbody <*> mapOnBody tv letbody <*> pure loc
+  where (vs,es) = unzip mergepat
+mapBodyM tv (Result ses loc) =
+  Result <$> mapM (mapOnSubExp tv) ses <*> pure loc
+
+-- | Like 'mapBodyM', but in the 'Identity' monad.
+mapBody :: Mapper Identity -> Body -> Body
+mapBody m = runIdentity . mapBodyM m
 
 -- | Map a monadic action across the immediate children of an
 -- expression.  Importantly, the 'mapOnExp' action is not invoked for
@@ -102,23 +134,12 @@ mapExpM tv (Not x loc) =
 mapExpM tv (Negate x loc) =
   pure Negate <*> mapOnSubExp tv x <*> pure loc
 mapExpM tv (If c texp fexp t loc) =
-  pure If <*> mapOnSubExp tv c <*> mapOnExp tv texp <*> mapOnExp tv fexp <*>
+  pure If <*> mapOnSubExp tv c <*> mapOnBody tv texp <*> mapOnBody tv fexp <*>
        mapM (mapOnType tv) t <*> pure loc
 mapExpM tv (Apply fname args t loc) = do
   args' <- forM args $ \(arg, d) ->
              (,) <$> mapOnSubExp tv arg <*> pure d
   pure (Apply fname) <*> pure args' <*> mapM (mapOnType tv) t <*> pure loc
-mapExpM tv (LetPat pat e body loc) =
-  pure LetPat <*> mapM (mapOnIdent tv) pat <*> mapOnExp tv e <*>
-         mapOnExp tv body <*> pure loc
-mapExpM tv (LetWith cs dest src idxcs idxexps vexp body loc) =
-  pure LetWith <*> mapOnCertificates tv cs <*>
-       mapOnIdent tv dest <*> mapOnIdent tv src <*>
-       (case idxcs of
-          Nothing -> return Nothing
-          Just idxcs' -> Just <$> mapOnCertificates tv idxcs') <*>
-       mapM (mapOnSubExp tv) idxexps <*> mapOnSubExp tv vexp <*>
-       mapOnExp tv body <*> pure loc
 mapExpM tv (Index cs arr idxcs idxexps loc) =
   pure Index <*> mapOnCertificates tv cs <*>
        mapOnIdent tv arr <*>
@@ -155,12 +176,6 @@ mapExpM tv (Assert e loc) =
   pure Assert <*> mapOnSubExp tv e <*> pure loc
 mapExpM tv (Conjoin es loc) =
   pure Conjoin <*> mapM (mapOnSubExp tv) es <*> pure loc
-mapExpM tv (DoLoop mergepat loopvar boundexp loopbody letbody loc) =
-  pure DoLoop <*>
-       (zip <$> mapM (mapOnIdent tv) vs <*> mapM (mapOnSubExp tv) es) <*>
-       mapOnIdent tv loopvar <*> mapOnSubExp tv boundexp <*>
-       mapOnExp tv loopbody <*> mapOnExp tv letbody <*> pure loc
-  where (vs,es) = unzip mergepat
 mapExpM tv (Map cs fun arrexps loc) =
   pure Map <*> mapOnCertificates tv cs <*>
        mapOnLambda tv fun <*> mapM (mapOnSubExp tv) arrexps <*>
@@ -194,6 +209,7 @@ mapExp m = runIdentity . mapExpM m
 -- | Reification of a left-reduction across a syntax tree.
 data Folder a m = Folder {
     foldOnSubExp :: a -> SubExp -> m a
+  , foldOnBody :: a -> Body -> m a
   , foldOnExp :: a -> Exp -> m a
   , foldOnType :: a -> Type -> m a
   , foldOnLambda :: a -> Lambda -> m a
@@ -206,6 +222,7 @@ data Folder a m = Folder {
 identityFolder :: Monad m => Folder a m
 identityFolder = Folder {
                    foldOnSubExp = const . return
+                 , foldOnBody = const . return
                  , foldOnExp = const . return
                  , foldOnType = const . return
                  , foldOnLambda = const . return
@@ -214,25 +231,36 @@ identityFolder = Folder {
                  , foldOnCertificates = const . return
                  }
 
--- | Perform a left-reduction across the immediate children of an
--- expression.  Importantly, the 'foldOnExp' action is not invoked for
--- the expression itself, and the reduction does not descend recursively
--- into subexpressions.  The reduction is done left-to-right.
-foldExpM :: (Monad m, Functor m) => Folder a m -> a -> Exp -> m a
-foldExpM f x e = execStateT (mapExpM m e) x
-  where m = Mapper {
-              mapOnSubExp = wrap foldOnSubExp
-            , mapOnExp = wrap foldOnExp
-            , mapOnType = wrap foldOnType
-            , mapOnLambda = wrap foldOnLambda
-            , mapOnIdent = wrap foldOnIdent
-            , mapOnValue = wrap foldOnValue
-            , mapOnCertificates = wrap foldOnCertificates
-            }
-        wrap op k = do
+foldMapper :: Monad m => Folder a m -> Mapper (StateT a m)
+foldMapper f = Mapper {
+                 mapOnSubExp = wrap foldOnSubExp
+               , mapOnBody = wrap foldOnBody
+               , mapOnExp = wrap foldOnExp
+               , mapOnType = wrap foldOnType
+               , mapOnLambda = wrap foldOnLambda
+               , mapOnIdent = wrap foldOnIdent
+               , mapOnValue = wrap foldOnValue
+               , mapOnCertificates = wrap foldOnCertificates
+               }
+  where wrap op k = do
           v <- get
           put =<< lift (op f v k)
           return k
+
+-- | Perform a left-reduction across the immediate children of a
+-- body.  Importantly, the 'foldOnExp' action is not invoked for
+-- the body itself, and the reduction does not descend recursively
+-- into subterms.  The reduction is done left-to-right.
+foldBodyM :: (Monad m, Functor m) => Folder a m -> a -> Body -> m a
+foldBodyM f x e = execStateT (mapBodyM (foldMapper f) e) x
+
+-- | As 'foldBodyM', but in the 'Identity' monad.
+foldBody :: Folder a Identity -> a -> Body -> a
+foldBody m x = runIdentity . foldBodyM m x
+
+-- | As 'foldBodyM', but for expressions.
+foldExpM :: (Monad m, Functor m) => Folder a m -> a -> Exp -> m a
+foldExpM f x e = execStateT (mapExpM (foldMapper f) e) x
 
 -- | As 'foldExpM', but in the 'Identity' monad.
 foldExp :: Folder a Identity -> a -> Exp -> a
@@ -243,6 +271,7 @@ foldExp m x = runIdentity . foldExpM m x
 -- child.
 data Walker m = Walker {
     walkOnSubExp :: SubExp -> m ()
+  , walkOnBody :: Body -> m ()
   , walkOnExp :: Exp -> m ()
   , walkOnType :: Type -> m ()
   , walkOnLambda :: Lambda -> m ()
@@ -256,6 +285,7 @@ data Walker m = Walker {
 identityWalker :: Monad m => Walker m
 identityWalker = Walker {
                    walkOnSubExp = const $ return ()
+                 , walkOnBody = const $ return ()
                  , walkOnExp = const $ return ()
                  , walkOnType = const $ return ()
                  , walkOnLambda = const $ return ()
@@ -265,36 +295,32 @@ identityWalker = Walker {
                  , walkOnCertificates = const $ return ()
                  }
 
+walkMapper :: Monad m => Walker m -> Mapper m
+walkMapper f = Mapper {
+                 mapOnSubExp = wrap walkOnSubExp
+               , mapOnBody = wrap walkOnBody
+               , mapOnExp = wrap walkOnExp
+               , mapOnType = wrap walkOnType
+               , mapOnLambda = wrap walkOnLambda
+               , mapOnIdent = wrap walkOnIdent
+               , mapOnValue = wrap walkOnValue
+               , mapOnCertificates = wrap walkOnCertificates
+               }
+  where wrap op k = op f k >> return k
+
 -- | Perform a monadic action on each of the immediate children of an
 -- expression.  Importantly, the 'walkOnExp' action is not invoked for
 -- the expression itself, and the traversal does not descend
 -- recursively into subexpressions.  The traversal is done
 -- left-to-right.
+walkBodyM :: (Monad m, Applicative m) => Walker m -> Body -> m ()
+walkBodyM f = void . mapBodyM m
+  where m = walkMapper f
+
+-- | As 'walkBodyM', but for expressions.
 walkExpM :: (Monad m, Applicative m) => Walker m -> Exp -> m ()
 walkExpM f = void . mapExpM m
-  where m = Mapper {
-              mapOnSubExp = wrap walkOnSubExp
-            , mapOnExp = wrap walkOnExp
-            , mapOnType = wrap walkOnType
-            , mapOnLambda = wrap walkOnLambda
-            , mapOnIdent = wrap walkOnIdent
-            , mapOnValue = wrap walkOnValue
-            , mapOnCertificates = wrap walkOnCertificates
-            }
-        wrap op k = op f k >> return k
-
--- | Common case of 'foldExp', where only 'Exp's, 'Lambda's and
--- 'TupleLambda's are taken into account.
-foldlPattern :: (a -> Exp    -> a) ->
-                (a -> Lambda -> a) ->
-                a -> Exp -> a
-foldlPattern expf lamf = foldExp m
-  where m = identityFolder {
-              foldOnExp = \x -> return . expf x
-            , foldOnLambda =
-              \x lam@(Lambda _ body _ _) ->
-                return $ foldl expf (lamf x lam) [body]
-            }
+  where m = walkMapper f
 
 -- | Common case of 'mapExp', where only 'Exp's are taken into
 -- account.
@@ -302,8 +328,23 @@ buildExpPattern :: (Exp -> Exp) -> Exp -> Exp
 buildExpPattern f = mapExp f'
   where f' = identityMapper {
                mapOnExp = return . f
+             , mapOnBody = return . mapBody f'
              , mapOnLambda = return . buildLambda
              }
 
         buildLambda (Lambda tps body tp loc) =
-          Lambda tps (f body) tp loc
+          Lambda tps (mapBody f' body) tp loc
+
+-- | Common case of 'foldExp', where only 'Exp's and 'Lambda's are
+-- taken into account.
+foldlPattern :: (a -> Exp    -> a) ->
+                (a -> Lambda -> a) ->
+                a -> Exp -> a
+foldlPattern expf lamf = foldExp m
+  where m = identityFolder {
+              foldOnExp = \x -> return . expf x
+            , foldOnBody = \x -> return . foldBody m x
+            , foldOnLambda =
+              \x lam@(Lambda _ body _ _) ->
+                return $ foldBody m (lamf x lam) body
+            }

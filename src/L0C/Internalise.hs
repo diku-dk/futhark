@@ -136,7 +136,7 @@ internaliseValue (E.BasicVal bv) = [I.BasicVal bv]
 internaliseFun :: E.FunDec -> InternaliseM I.FunDec
 internaliseFun (fname,rettype,params,body,loc) =
   binding (map E.fromParam params) $ \params' -> do
-    body' <- insertBindings $ internaliseBody body
+    body' <- internaliseBody body
     return (fname, rettype', map I.toParam params', body', loc)
   where rettype' = map I.toDecl $ internaliseType rettype
 
@@ -220,16 +220,10 @@ internaliseIdent (E.Ident name tp loc) =
 internaliseCerts :: E.Certificates -> InternaliseM I.Certificates
 internaliseCerts = mapM internaliseIdent
 
-internaliseBody :: E.Exp -> InternaliseM I.Exp
-internaliseBody = bodyFy <=< internaliseExp
-
-bodyFy :: I.Exp -> InternaliseM I.Exp
-bodyFy e'@(I.TupLit {}) = return e'
-bodyFy e'@(I.SubExp {}) = return e'
-bodyFy e' = do
-  es <- letTupExp "norm" e'
-  case es of [se] -> return $ I.SubExp $ I.Var se
-             _    -> return $ I.TupLit (map I.Var es) $ srclocOf e'
+internaliseBody :: E.Exp -> InternaliseM Body
+internaliseBody e = insertBindings $ do
+  ses <- letTupExp "norm" =<< internaliseExp e
+  return $ I.Result (map I.Var ses) $ srclocOf e
 
 internaliseExp :: E.Exp -> InternaliseM I.Exp
 
@@ -303,15 +297,14 @@ internaliseExp (E.LetPat pat e body _) = do
     letBind pat' e'
     internaliseExp body
 
-internaliseExp (E.DoLoop mergepat mergeexp i bound loopbody letbody loc) = do
+internaliseExp (E.DoLoop mergepat mergeexp i bound loopbody letbody _) = do
   bound' <- letSubExp "bound" =<< internaliseExp bound
   mergevs <- letTupExp "merge_val" =<< internaliseExp mergeexp
   i' <- internaliseIdent i
   bindingPat mergepat $ \mergepat' -> do
-    loopbody' <- insertBindings $ internaliseExp loopbody
-    letbody' <- insertBindings $ internaliseExp letbody
-    return $ I.DoLoop (zip mergepat' $ map I.Var mergevs)
-                      i' bound' loopbody' letbody' loc
+    loopbody' <- internaliseBody loopbody
+    loopBind (zip mergepat' $ map I.Var mergevs) i' bound' loopbody'
+    internaliseExp letbody
 
 internaliseExp (E.LetWith cs name src idxcs idxs ve body loc) = do
   idxs' <- letSubExps "idx" =<< mapM internaliseExp idxs
@@ -326,7 +319,7 @@ internaliseExp (E.LetWith cs name src idxcs idxs ve body loc) = do
   mapM_ comb $ zip3 dsts srcs vnames
   bindingPat (E.Id name) $ \pat' -> do
     letBind pat' $ tuplit c loc (map I.Var dsts)
-    insertBindings $ internaliseExp body
+    internaliseExp body
 
 internaliseExp (E.Replicate ne ve loc) = do
   ne' <- letSubExp "n" =<< internaliseExp ne
@@ -470,8 +463,8 @@ internaliseExp (E.Literal v loc) =
 
 internaliseExp (E.If ce te fe t loc) = do
   ce' <- letSubExp "cond" =<< internaliseExp ce
-  te' <- insertBindings $ internaliseBody te
-  fe' <- insertBindings $ internaliseBody fe
+  te' <- internaliseBody te
+  fe' <- internaliseBody fe
   return $ I.If ce' te' fe' (internaliseType t) loc
 
 internaliseExp (E.BinOp bop xe ye t loc) = do
@@ -620,7 +613,7 @@ cleanLambdaParam ce ks@(k:_) t =
       return (names, namevs)
   where loc = srclocOf k
 
-lambdaBinding :: I.SubExp -> [E.Ident] -> InternaliseM I.Exp -> InternaliseM (I.Exp, [I.Ident])
+lambdaBinding :: I.SubExp -> [E.Ident] -> InternaliseM I.Body -> InternaliseM (I.Body, [I.Ident])
 lambdaBinding ce params m = do
   (params', (patpairs, substs)) <- runWriterT $ liftM concat . forM params $ \param -> do
     param' <- lift $ internaliseParam param
@@ -649,7 +642,7 @@ internaliseLambda :: I.SubExp -> E.Lambda -> InternaliseM I.Lambda
 internaliseLambda ce (E.AnonymFun params body rettype loc) = do
   (body', params') <- lambdaBinding ce (map E.fromParam params) $ do
     (_,ks) <- tupToIdentList body
-    return $ I.TupLit (map I.Var $ stripCert ks) loc
+    return $ I.Result (map I.Var $ stripCert ks) loc
   return $ I.Lambda (map I.toParam params') body' rettype' loc
   where rettype' = case map I.toDecl $ internaliseType' rettype of
                      [t] -> [t]

@@ -29,7 +29,7 @@ import L0C.EnablingOpts.EnablingOptErrors
 enablingOpts :: Prog -> Either EnablingOptError Prog
 enablingOpts prog = do
 
-    prog_inl    <- aggInlineDriver $ mkUnnamedLamPrg prog
+    prog_inl    <- aggInlineDriver prog
 
     prog_dfe    <- deadFunElim     prog_inl
 

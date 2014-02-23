@@ -53,27 +53,28 @@ import qualified L0C.HORepresentation.SOACNest as Nest
 import L0C.Rebinder.CSE
 import qualified L0C.Rebinder.SizeTracking as SZ
 
-data BindNeed = LoopBind [(Ident,SubExp)] Ident SubExp Exp
+data BindNeed = LoopBind [(Ident,SubExp)] Ident SubExp Body
               | LetBind [Ident] Exp [Exp]
               | LetWithBind Certificates Ident Ident (Maybe Certificates) [SubExp] SubExp
                 deriving (Show, Eq)
 
 type NeedSet = [BindNeed]
 
-asTail :: BindNeed -> Exp
+asTail :: BindNeed -> Body
 asTail (LoopBind merge i bound loopbody) =
-  DoLoop merge i bound loopbody (TupLit [] loc) loc
+  DoLoop merge i bound loopbody (Result [] loc) loc
     where loc = srclocOf loopbody
 asTail (LetBind pat e _) =
-  LetPat pat e (TupLit [] loc) loc
+  LetPat pat e (Result [] loc) loc
     where loc = srclocOf pat
 asTail (LetWithBind cs dest src idxcs idxs ve) =
-  LetWith cs dest src idxcs idxs ve (SubExp $ Var dest) $ srclocOf dest
+  LetWith cs dest src idxcs idxs ve (Result [Var dest] loc) loc
+    where loc = srclocOf dest
 
 requires :: BindNeed -> HS.HashSet VName
 requires (LetBind pat e (alte:alts)) =
   requires (LetBind pat e []) <> requires (LetBind pat alte alts)
-requires bnd = HS.map identName $ freeInExp $ asTail bnd
+requires bnd = HS.map identName $ freeInBody $ asTail bnd
 
 provides :: BindNeed -> HS.HashSet VName
 provides (LoopBind merge _ _ _)       = patNameSet $ map fst merge
@@ -223,7 +224,7 @@ bindLetWith cs dest src idxcs idxs ve m = do
   needThis $ LetWithBind cs dest src idxcs idxs ve
   withShape dest (slice [] 0 src) m
 
-bindLoop :: [(Ident,SubExp)] -> Ident -> SubExp -> Exp -> HoistM a -> HoistM a
+bindLoop :: [(Ident,SubExp)] -> Ident -> SubExp -> Body -> HoistM a -> HoistM a
 bindLoop merge i bound body m = do
   needThis $ LoopBind merge i bound body
   m
@@ -274,11 +275,11 @@ transformProgAggr prog =
 
 transformFun :: FunDec -> HoistM FunDec
 transformFun (fname, rettype, params, body, loc) = do
-  body' <- blockAllHoisting $ hoistInExp body
+  body' <- blockAllHoisting $ hoistInBody body
   return (fname, rettype, params, body', loc)
 
-addBindings :: DupeState -> [BindNeed] -> Exp -> HS.HashSet VName
-            -> (Exp, HS.HashSet VName)
+addBindings :: DupeState -> [BindNeed] -> Body -> HS.HashSet VName
+            -> (Body, HS.HashSet VName)
 addBindings dupes needs =
   curry $ foldl (.) id $ snd $
           mapAccumL comb (HM.empty, dupes) needs
@@ -335,7 +336,6 @@ expCost (Copy {}) = 1
 expCost (Concat {}) = 1
 expCost (Split {}) = 1
 expCost (Reshape {}) = 1
-expCost (DoLoop {}) = 1
 expCost (Replicate {}) = 1
 expCost _ = 0
 
@@ -353,8 +353,8 @@ distances m need = HM.fromList [ (k, d+cost) | k <- HS.toList outs ]
                1)
             LoopBind merge _ bound loopbody ->
               (patNameSet $ map fst merge,
-               mconcat $ map freeNamesInExp $
-               [SubExp bound, loopbody] ++ map (SubExp . snd) merge,
+               mconcat $ freeNamesInBody loopbody : map freeNamesInExp
+               (SubExp bound : map (SubExp . snd) merge),
                1)
         f x k = case HM.lookup k m of
                   Just y  -> max x y
@@ -378,7 +378,7 @@ inDepOrder = flattenSCCs . stronglyConnComp . buildGraph
 mustPrecede :: BindNeed -> BindNeed -> Bool
 bnd1 `mustPrecede` bnd2 =
   not $ HS.null $ (provides bnd1 `HS.intersection` requires bnd2) `HS.union`
-                 (consumedInExp e2 `HS.intersection` requires bnd1)
+                  (consumedInBody e2 `HS.intersection` requires bnd1)
   where e2 = asTail bnd2
 
 anyIsFreeIn :: HS.HashSet VName -> Exp -> Bool
@@ -390,9 +390,9 @@ intersects a b = not $ HS.null $ a `HS.intersection` b
 data BodyInfo = BodyInfo { bodyConsumes :: HS.HashSet VName
                          }
 
-bodyInfo :: Exp -> BodyInfo
-bodyInfo e = BodyInfo {
-               bodyConsumes = consumedInExp e
+bodyInfo :: Body -> BodyInfo
+bodyInfo b = BodyInfo {
+               bodyConsumes = consumedInBody b
              }
 
 type BlockPred = BodyInfo -> BindNeed -> Bool
@@ -400,7 +400,7 @@ type BlockPred = BodyInfo -> BindNeed -> Bool
 orIf :: BlockPred -> BlockPred -> BlockPred
 orIf p1 p2 body need = p1 body need || p2 body need
 
-splitHoistable :: BlockPred -> Exp -> NeedSet -> ([BindNeed], NeedSet)
+splitHoistable :: BlockPred -> Body -> NeedSet -> ([BindNeed], NeedSet)
 splitHoistable block body needs =
   let (blocked, hoistable, _) =
         foldl split ([], [], HS.empty) $ inDepOrder needs
@@ -423,10 +423,10 @@ splitHoistable block body needs =
               | otherwise ->
                 (blocked, need : hoistable, ks)
 
-blockIfSeq :: [BlockPred] -> HoistM Exp -> HoistM Exp
+blockIfSeq :: [BlockPred] -> HoistM Body -> HoistM Body
 blockIfSeq ps m = foldl (flip blockIf) m ps
 
-blockIf :: BlockPred -> HoistM Exp -> HoistM Exp
+blockIf :: BlockPred -> HoistM Body -> HoistM Body
 blockIf block m = pass $ do
   (body, needs) <- listen m
   ds <- asks envDupeState
@@ -437,24 +437,27 @@ blockIf block m = pass $ do
                      , freeInBound  = fs
                      })
 
-blockAllHoisting :: HoistM Exp -> HoistM Exp
+blockAllHoisting :: HoistM Body -> HoistM Body
 blockAllHoisting = blockIf $ \_ _ -> True
 
 hasFree :: HS.HashSet VName -> BlockPred
 hasFree ks _ need = ks `intersects` requires need
 
 isNotSafe :: BlockPred
-isNotSafe _ = not . safeExp . asTail
+isNotSafe _ = not . safeBnd
+  where safeBnd (LetBind _ e _) = safeExp e
+        safeBnd _               = False
 
 isNotCheap :: BlockPred
-isNotCheap _ = not . cheap . asTail
+isNotCheap _ = not . cheapBnd
   where cheap (SubExp _)   = True
         cheap (BinOp {})   = True
         cheap (TupLit {})  = True
         cheap (Not {})     = True
         cheap (Negate {})  = True
-        cheap (LetPat _ e body _) = cheap e && cheap body
-        cheap _ = False
+        cheap _            = False
+        cheapBnd (LetBind _ e _) = cheap e
+        cheapBnd _               = False
 
 uniqPat :: [Ident] -> Bool
 uniqPat = any $ unique . identType
@@ -468,7 +471,7 @@ isConsumed :: BlockPred
 isConsumed body need =
   provides need `intersects` bodyConsumes body
 
-hoistCommon :: HoistM Exp -> HoistM Exp -> HoistM (Exp, Exp)
+hoistCommon :: HoistM Body -> HoistM Body -> HoistM (Body, Body)
 hoistCommon m1 m2 = pass $ do
   (body1, needs1) <- listen m1
   (body2, needs2) <- listen m2
@@ -482,21 +485,25 @@ hoistCommon m1 m2 = pass $ do
                      , freeInBound = f1 <> f2
                      })
 
+hoistInBody :: Body -> HoistM Body
+hoistInBody (LetPat pat e body _) = do
+  e' <- hoistInExp e
+  bindLet pat e' $ hoistInBody body
+hoistInBody (LetWith cs dest src idxcs idxs ve body _) =
+  bindLetWith cs dest src idxcs idxs ve $ hoistInBody body
+hoistInBody (DoLoop merge loopvar boundexp loopbody letbody _) = do
+  loopbody' <- blockIfSeq [hasFree boundnames, isConsumed] $
+               hoistInBody loopbody
+  bindLoop merge loopvar boundexp loopbody' $ hoistInBody letbody
+  where boundnames = identName loopvar `HS.insert` patNameSet (map fst merge)
+hoistInBody (Result es loc) =
+  Result <$> mapM hoistInSubExp es <*> pure loc
+
 hoistInExp :: Exp -> HoistM Exp
 hoistInExp (If c e1 e2 t loc) = do
-  (e1',e2') <- hoistCommon (hoistInExp e1) (hoistInExp e2)
+  (e1',e2') <- hoistCommon (hoistInBody e1) (hoistInBody e2)
   c' <- hoistInSubExp c
   return $ If c' e1' e2' t loc
-hoistInExp (LetPat pat e body _) = do
-  e' <- hoistInExp e
-  bindLet pat e' $ hoistInExp body
-hoistInExp (LetWith cs dest src idxcs idxs ve body _) =
-  bindLetWith cs dest src idxcs idxs ve $ hoistInExp body
-hoistInExp (DoLoop merge loopvar boundexp loopbody letbody _) = do
-  loopbody' <- blockIfSeq [hasFree boundnames, isConsumed] $
-               hoistInExp loopbody
-  bindLoop merge loopvar boundexp loopbody' $ hoistInExp letbody
-  where boundnames = identName loopvar `HS.insert` patNameSet (map fst merge)
 hoistInExp e@(Map cs (Lambda params _ _ _) arrexps _) =
   hoistInSOAC e arrexps $ \ks ->
     withSOACArrSlices cs params ks $
@@ -530,6 +537,7 @@ hoistInExpBase :: Exp -> HoistM Exp
 hoistInExpBase = mapExpM hoist
   where hoist = identityMapper {
                   mapOnExp = hoistInExp
+                , mapOnBody = hoistInBody
                 , mapOnSubExp = hoistInSubExp
                 , mapOnLambda = hoistInLambda
                 , mapOnIdent = hoistInIdent
@@ -545,7 +553,7 @@ hoistInIdent v = do boundFree $ HS.singleton $ identName v
 
 hoistInLambda :: Lambda -> HoistM Lambda
 hoistInLambda (Lambda params body rettype loc) = do
-  body' <- blockIf (hasFree params' `orIf` isUniqueBinding) $ hoistInExp body
+  body' <- blockIf (hasFree params' `orIf` isUniqueBinding) $ hoistInBody body
   return $ Lambda params body' rettype loc
   where params' = patNameSet $ map fromParam params
 

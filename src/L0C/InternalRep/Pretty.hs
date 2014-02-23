@@ -7,6 +7,7 @@ module L0C.InternalRep.Pretty
   ( ppType
   , ppValue
   , ppValues
+  , ppBody
   , ppExp
   , ppSubExp
   , ppLambda
@@ -75,6 +76,48 @@ instance Pretty SubExp where
   ppr (Var v)        = ppr v
   ppr (Constant v _) = ppr v
 
+instance Pretty Body where
+  ppr (LetPat pat e body _) =
+    aliasComment pat $ align $
+    text "let" <+> align (ppPat pat) <+>
+    (if linebreak
+     then equals </> indent 2 (ppr e)
+     else equals <+> align (ppr e)) <+> text "in" </>
+    ppr body
+    where linebreak = case e of
+                        Map {} -> True
+                        Reduce {} -> True
+                        Filter {} -> True
+                        Redomap {} -> True
+                        Scan {} -> True
+                        SubExp (Constant (ArrayVal {}) _) -> False
+                        If {} -> True
+                        ArrayLit {} -> False
+                        _ -> False
+  ppr (LetWith cs dest src idxcs idxs ve body _)
+    | dest == src =
+      text "let" <+> ppCertificates cs <> ppr dest <+> list (map ppr idxs) <+>
+      equals <+> align (ppr ve) <+>
+      text "in" </> ppr body
+    | otherwise =
+      text "let" <+> ppCertificates cs <> ppr dest <+> equals <+> ppr src <+>
+      text "with" <+> brackets (ppcs <> commasep (map ppr idxs)) <+>
+      text "<-" <+> align (ppr ve) <+>
+      text "in" </> ppr body
+    where ppcs = case idxcs of Nothing     -> empty
+                               Just []     -> text "<>|"
+                               Just csidx' -> ppCertificates csidx' <> text "|"
+  ppr (DoLoop mergepat i bound loopbody letbody _) =
+    aliasComment pat $
+    text "loop" <+> parens (ppTuple pat <+> equals <+> ppTuple initexp) <+>
+    equals <+> text "for" <+> ppr i <+> text "<" <+> align (ppr bound) <+> text "do" </>
+    indent 2 (ppr loopbody) <+> text "in" </>
+    ppr letbody
+    where (pat, initexp) = unzip mergepat
+  ppr (Result es _)
+    | any hasArrayLit es = braces $ commastack $ map ppr es
+    | otherwise          = braces $ commasep $ map ppr es
+
 instance Pretty Exp where
   ppr (SubExp se) = ppr se
   ppr (TupLit es _)
@@ -94,39 +137,7 @@ instance Pretty Exp where
                              text "else" <+> align (ppr f)
   ppr (Apply fname args _ _) = text (nameToString fname) <>
                                      apply (map (align . ppr . fst) args)
-  ppr (LetPat pat e body _) =
-    aliasComment pat $ align $
-    text "let" <+> align (ppPat pat) <+>
-    (if linebreak
-     then equals </> indent 2 (ppr e)
-     else equals <+> align (ppr e)) <+> text "in" </>
-    ppr body
-    where linebreak = case e of
-                        Map {} -> True
-                        Reduce {} -> True
-                        Filter {} -> True
-                        Redomap {} -> True
-                        Scan {} -> True
-                        DoLoop {} -> True
-                        LetPat {} -> True
-                        LetWith {} -> True
-                        SubExp (Constant (ArrayVal {}) _) -> False
-                        If {} -> True
-                        ArrayLit {} -> False
-                        _ -> False
-  ppr (LetWith cs dest src idxcs idxs ve body _)
-    | dest == src =
-      text "let" <+> ppCertificates cs <> ppr dest <+> list (map ppr idxs) <+>
-      equals <+> align (ppr ve) <+>
-      text "in" </> ppr body
-    | otherwise =
-      text "let" <+> ppCertificates cs <> ppr dest <+> equals <+> ppr src <+>
-      text "with" <+> brackets (ppcs <> commasep (map ppr idxs)) <+>
-      text "<-" <+> align (ppr ve) <+>
-      text "in" </> ppr body
-    where ppcs = case idxcs of Nothing     -> empty
-                               Just []     -> text "<>|"
-                               Just csidx' -> ppCertificates csidx' <> text "|"
+
   ppr (Index cs v csidx idxs _) =
     ppCertificates cs <> ppr v <>
     brackets (ppcs <> commasep (map ppr idxs))
@@ -154,13 +165,6 @@ instance Pretty Exp where
   ppr (Copy e _) = text "copy" <> parens (ppr e)
   ppr (Assert e _) = text "assert" <> parens (ppr e)
   ppr (Conjoin es _) = text "conjoin" <> parens (commasep $ map ppr es)
-  ppr (DoLoop mergepat i bound loopbody letbody _) =
-    aliasComment pat $
-    text "loop" <+> parens (ppTuple pat <+> equals <+> ppTuple initexp) <+>
-    equals <+> text "for" <+> ppr i <+> text "<" <+> align (ppr bound) <+> text "do" </>
-    indent 2 (ppr loopbody) <+> text "in" </>
-    ppr letbody
-    where (pat, initexp) = unzip mergepat
   ppr (Map cs lam as _) =
     ppCertificates' cs <> ppSOAC "mapT" [lam] Nothing as
   ppr (Reduce cs lam inputs _) =
@@ -236,6 +240,10 @@ ppValues = pretty 80 . ppTuple
 -- | Prettyprint a type, wrapped to 80 characters.
 ppType :: TypeBase als -> String
 ppType = render80
+
+-- | Prettyprint a body, wrapped to 80 characters.
+ppBody :: Body -> String
+ppBody = render80
 
 -- | Prettyprint an expression, wrapped to 80 characters.
 ppExp :: Exp -> String

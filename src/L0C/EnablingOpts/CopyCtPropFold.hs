@@ -140,17 +140,16 @@ binding bnds = local (`bindVars` bnds)
 -- | Applies Copy/Constant Propagation and Folding to an Entire Program.
 copyCtProp :: Prog -> Either EnablingOptError (Bool, Prog)
 copyCtProp prog = do
-    let env = CopyPropEnv { envVtable = HM.empty, program = prog }
-    -- res   <- runCPropM (mapM copyCtPropFun prog) env
-    -- let (bs, rs) = unzip res
-    (rs, res) <- runCPropM (mapM copyCtPropFun $ progFunctions prog) env
-    return (resSuccess res, Prog rs)
+  let env = CopyPropEnv { envVtable = HM.empty, program = prog }
+  -- res   <- runCPropM (mapM copyCtPropFun prog) env
+  -- let (bs, rs) = unzip res
+  (rs, res) <- runCPropM (mapM copyCtPropFun $ progFunctions prog) env
+  return (resSuccess res, Prog rs)
 
 copyCtPropFun :: FunDec -> CPropM FunDec
 copyCtPropFun (fname, rettype, args, body, pos) = do
-    body' <- copyCtPropExp body
-    return (fname, rettype, args, body', pos)
-
+  body' <- copyCtPropBody body
+  return (fname, rettype, args, body', pos)
 
 -----------------------------------------------------------------
 ---- Run on Lambda Only!
@@ -164,9 +163,56 @@ copyCtPropOneLambda prog lam = do
 
 --------------------------------------------------------------------
 --------------------------------------------------------------------
----- Main Function: Copy/Ct propagation and folding for exps    ----
+---- Main functions: Copy/Ct propagation and folding for exps   ----
 --------------------------------------------------------------------
 --------------------------------------------------------------------
+
+copyCtPropBody :: Body -> CPropM Body
+
+copyCtPropBody (LetWith cs nm src indcs inds el body pos) =
+  consuming src $ do
+    cs'       <- copyCtPropCerts cs
+    el'       <- copyCtPropSubExp el
+    indcs'    <- case indcs of
+                   Just indcs' -> Just <$> copyCtPropCerts indcs'
+                   Nothing     -> return Nothing
+    inds'     <- mapM copyCtPropSubExp inds
+    body'     <- copyCtPropBody body
+    return $ LetWith cs' nm src indcs' inds' el' body' pos
+
+copyCtPropBody (LetPat pat e body loc) = do
+  let continue e' = do
+        let bnds = getPropBnds pat e' remv
+            remv = not $ null bnds
+
+        (body', mvars) <- collectNonRemovable (map fst bnds) $
+                          if null bnds then copyCtPropBody body
+                          else binding bnds $ copyCtPropBody body
+        if remv && null mvars then changed body'
+        else return $ LetPat pat e' body' loc
+      continue' es = continue $ TupLit es loc
+  e' <- copyCtPropExp e
+  case e' of
+    If e1 tb fb t ifloc -> do
+      e1' <- copyCtPropSubExp e1
+      tb' <- copyCtPropBody tb
+      fb' <- copyCtPropBody fb
+      if      isCt1 e1' then mapTailM continue' tb'
+      else if isCt0 e1' then mapTailM continue' fb'
+           else continue $ If e1' tb' fb' t ifloc
+    _ -> continue e'
+
+
+copyCtPropBody (DoLoop merge idd n loopbdy letbdy loc) = do
+  let (mergepat, mergeexp) = unzip merge
+  mergeexp'    <- mapM copyCtPropSubExp mergeexp
+  n'       <- copyCtPropSubExp n
+  loopbdy' <- copyCtPropBody loopbdy
+  letbdy'  <- copyCtPropBody letbdy
+  return $ DoLoop (zip mergepat mergeexp') idd n' loopbdy' letbdy' loc
+
+copyCtPropBody (Result es loc) =
+  Result <$> mapM copyCtPropSubExp es <*> pure loc
 
 copyCtPropSubExp :: SubExp -> CPropM SubExp
 copyCtPropSubExp e@(Var (Ident vnm _ pos)) = do
@@ -176,41 +222,15 @@ copyCtPropSubExp e@(Var (Ident vnm _ pos)) = do
       | isBasicTypeVal v    -> changed $ Constant v pos
     Just (VarId  id' tp1 _) -> do nonRemovable id'
                                   changed $ Var (Ident id' tp1 pos) -- or tp
+    Just (SymArr (SubExp se) _ _) -> changed se
     _                       -> do nonRemovable vnm
                                   return e
 copyCtPropSubExp (Constant v loc) = return $ Constant v loc
 
 copyCtPropExp :: Exp -> CPropM Exp
 
-copyCtPropExp (LetWith cs nm src indcs inds el body pos) =
-  consuming src $ do
-    cs'       <- copyCtPropCerts cs
-    el'       <- copyCtPropSubExp el
-    indcs'    <- case indcs of
-                   Just indcs' -> Just <$> copyCtPropCerts indcs'
-                   Nothing     -> return Nothing
-    inds'     <- mapM copyCtPropSubExp inds
-    body'     <- copyCtPropExp body
-    return $ LetWith cs' nm src indcs' inds' el' body' pos
-
-copyCtPropExp (LetPat pat e body pos) = do
-    e'    <- copyCtPropExp e
-    let bnds = getPropBnds pat e' remv
-        remv = not $ null bnds
-
-    (body', mvars) <- collectNonRemovable (map fst bnds) $
-                      if null bnds then copyCtPropExp body
-                      else binding bnds $ copyCtPropExp body
-    if remv && null mvars then changed body'
-    else return $ LetPat pat e' body' pos
-
-copyCtPropExp (DoLoop merge idd n loopbdy letbdy loc) = do
-  let (mergepat, mergeexp) = unzip merge
-  mergeexp'    <- mapM copyCtPropSubExp mergeexp
-  n'       <- copyCtPropSubExp n
-  loopbdy' <- copyCtPropExp loopbdy
-  letbdy'  <- copyCtPropExp letbdy
-  return $ DoLoop (zip mergepat mergeexp') idd n' loopbdy' letbdy' loc
+copyCtPropExp (TupLit es loc) =
+  TupLit <$> mapM copyCtPropSubExp es <*> pure loc
 
 copyCtPropExp (Index cs idd@(Ident vnm tp p) csidx inds pos) = do
   inds' <- mapM copyCtPropSubExp inds
@@ -289,14 +309,6 @@ copyCtPropExp (Not e pos) = do
               changed $ SubExp $ Constant (BasicVal $ LogVal (not v)) pos
             _ -> badCPropM $ TypeError pos  " not operands not of (the same) numeral type! "
     else return $ Not e' pos
-
-copyCtPropExp (If e1 e2 e3 t pos) = do
-    e1' <- copyCtPropSubExp e1
-    e2' <- copyCtPropExp e2
-    e3' <- copyCtPropExp e3
-    if      isCt1 e1' then changed e2'
-    else if isCt0 e1' then changed e3'
-    else return $ If e1' e2' e3' t pos
 
 -----------------------------------------------------------
 --- If expression is an array literal than replace it   ---
@@ -418,7 +430,7 @@ copyCtPropCerts = liftM (nub . concat) . mapM check
 
 copyCtPropLambda :: Lambda -> CPropM Lambda
 copyCtPropLambda (Lambda ids body tp loc) = do
-    body' <- copyCtPropExp body
+    body' <- copyCtPropBody body
     return $ Lambda ids body' tp loc
 
 ------------------------------------------------
@@ -465,7 +477,7 @@ ctFoldBinOp e@(BinOp Times e1 e2 _ pos)
   | otherwise = return e
 ctFoldBinOp e@(BinOp Divide e1 e2 _ pos)
   | isCt0 e1 = changed $ SubExp e1
-  | isCt0 e2 = badCPropM $ Div0Error pos
+  | isCt0 e2 = return e -- Division by zero
   | isCt1 e2 = changed $ SubExp e1
   | isValue e1, isValue e2 =
     case (e1, e2) of
@@ -476,7 +488,7 @@ ctFoldBinOp e@(BinOp Divide e1 e2 _ pos)
       _ -> badCPropM $ TypeError pos  " / operands not of (the same) numeral type! "
   | otherwise = return e
 ctFoldBinOp e@(BinOp Mod e1 e2 _ pos)
-  | isCt0 e2 = badCPropM $ Div0Error pos
+  | isCt0 e2 = return e -- Division by zero
   | isValue e1, isValue e2 =
     case (e1, e2) of
       (Constant (BasicVal (IntVal v1)) _, Constant (BasicVal (IntVal v2)) _) ->
@@ -650,7 +662,7 @@ getPropBnds [Ident var tp _] e to_rem =
     SubExp (Constant v _) -> [(var, Value v (fromDecl $ valueType v) to_rem)]
     SubExp (Var v)        -> [(var, VarId  (identName v) (identType v) to_rem)]
     Index   {}            -> [(var, SymArr e   tp  to_rem)]
-    TupLit  {}            -> [(var, SymArr e   tp  to_rem)]
+    TupLit  [e'] _        -> [(var, SymArr (SubExp e') tp to_rem)]
     Transpose   {}        -> [(var, SymArr e   tp  to_rem)]
     Reshape   {}          -> [(var, SymArr e   tp  to_rem)]
     Conjoin {}            -> [(var, SymArr e   tp  to_rem)]

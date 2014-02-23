@@ -13,12 +13,16 @@ module L0C.InternalRep.Attributes
   , fromParam
 
   -- * Queries on expressions
-  , mapTails
-  , mapTailsM
+  , mapTail
+  , mapTailM
   , subExpType
+  , bodyType
   , typeOf
+  , freeInBody
+  , freeNamesInBody
   , freeInExp
   , freeNamesInExp
+  , consumedInBody
   , consumedInExp
   , safeExp
 
@@ -425,6 +429,12 @@ subExpType :: SubExp -> Type
 subExpType (Constant val _) = fromDecl $ valueType val
 subExpType (Var ident)      = varType ident
 
+bodyType :: Body -> [Type]
+bodyType (LetPat _ _ body _) = bodyType body
+bodyType (LetWith _ _ _ _ _ _ body _) = bodyType body
+bodyType (DoLoop _ _ _ _ body _) = bodyType body
+bodyType (Result ses _) = map subExpType ses
+
 -- | The type of an L0 term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
 typeOf :: Exp -> [Type]
@@ -437,8 +447,6 @@ typeOf (Not _ _) = [Basic Bool]
 typeOf (Negate e _) = [subExpType e]
 typeOf (If _ _ _ t _) = t
 typeOf (Apply _ _ t _) = t
-typeOf (LetPat _ _ body _) = typeOf body
-typeOf (LetWith _ _ _ _ _ _ body _) = typeOf body
 typeOf (Index _ ident _ idx _) =
   [stripArray (length idx) (varType ident)
    `changeAliases` HS.insert (identName ident)]
@@ -464,7 +472,6 @@ typeOf (Concat _ x y _) =
 typeOf (Copy e _) = [subExpType e `setUniqueness` Unique `setAliases` HS.empty]
 typeOf (Assert _ _) = [Basic Cert]
 typeOf (Conjoin _ _) = [Basic Cert]
-typeOf (DoLoop _ _ _ _ body _) = typeOf body
 typeOf (Map _ f arrs _) =
   map (\x -> arrayType 1 x (uniqueProp x)) $
        lambdaType f $ map subExpType arrs
@@ -513,116 +520,134 @@ progNames :: Prog -> HS.HashSet VName
 progNames = execWriter . mapM funNames . progFunctions
   where names = identityWalker {
                   walkOnExp = expNames
+                , walkOnBody = bodyNames
                 , walkOnLambda = lambdaNames
                 }
 
         one = tell . HS.singleton . identName
         funNames (_, _, params, body, _) =
-          mapM_ one params >> expNames body
+          mapM_ one params >> bodyNames body
 
-        expNames e@(LetWith _ dest _ _ _ _ _ _) =
-          one dest >> walkExpM names e
-        expNames e@(LetPat pat _ _ _) =
-          mapM_ one pat >> walkExpM names e
-        expNames e@(DoLoop pat i _ _ _ _) =
-          mapM_ (one . fst) pat >> one i >> walkExpM names e
-        expNames e = walkExpM names e
+        bodyNames e@(LetWith _ dest _ _ _ _ _ _) =
+          one dest >> walkBodyM names e
+        bodyNames e@(LetPat pat _ _ _) =
+          mapM_ one pat >> walkBodyM names e
+        bodyNames e@(DoLoop pat i _ _ _ _) =
+          mapM_ (one . fst) pat >> one i >> walkBodyM names e
+        bodyNames e = walkBodyM names e
+
+        expNames = walkExpM names
 
         lambdaNames (Lambda params body _ _) =
-          mapM_ one params >> expNames body
+          mapM_ one params >> bodyNames body
 
--- | Change those subexpressions where evaluation of the expression
--- would stop.  Also change type annotations at branches.
-mapTailsM :: (Applicative m, Monad m) => (Exp -> m Exp) -> (Type -> m Type) -> Exp -> m Exp
-mapTailsM f g (LetPat pat e body loc) =
-  LetPat pat e <$> mapTailsM f g body <*> pure loc
-mapTailsM f g (LetWith cs dest src csidx idxs ve body loc) =
-  LetWith cs dest src csidx idxs ve <$> mapTailsM f g body <*> pure loc
-mapTailsM f g (DoLoop pat i bound loopbody body loc) =
-  DoLoop pat i bound loopbody <$> mapTailsM f g body <*> pure loc
-mapTailsM f g (If c te fe t loc) =
-  If c <$> mapTailsM f g te <*> mapTailsM f g fe <*> mapM g t <*> pure loc
-mapTailsM f _ e = f e
+-- | Change that subexpression where evaluation of the body would
+-- stop.  Also change type annotations at branches.
+mapTailM :: (Applicative m, Monad m) => ([SubExp] -> m Body) -> Body -> m Body
+mapTailM f (LetPat pat e body loc) =
+  LetPat pat e <$> mapTailM f body <*> pure loc
+mapTailM f (LetWith cs dest src csidx idxs ve body loc) =
+  LetWith cs dest src csidx idxs ve <$> mapTailM f body <*> pure loc
+mapTailM f (DoLoop pat i bound loopbody body loc) =
+  DoLoop pat i bound loopbody <$> mapTailM f body <*> pure loc
+mapTailM f (Result ses _) = f ses
 
--- | Change those subexpressions where evaluation of the expression
--- would stop.  Also change type annotations at branches.  This a
--- non-monadic variant of @mapTailsM@.
-mapTails :: (Exp -> Exp) -> (Type -> Type) -> Exp -> Exp
-mapTails f g e = runIdentity $ mapTailsM (return . f) (return . g) e
+-- | Change that result where evaluation of the body would stop.  Also
+-- change type annotations at branches.  This a non-monadic variant of
+-- @mapTailM@.
+mapTail :: ([SubExp] -> Body) -> Body -> Body
+mapTail f e = runIdentity $ mapTailM (return . f) e
 
--- | Return the set of identifiers that are free in the given
--- expression.
-freeInExp :: Exp -> HS.HashSet Ident
-freeInExp = execWriter . expFree
-  where names = identityWalker {
-                  walkOnSubExp = subExpFree
-                , walkOnExp = expFree
-                , walkOnLambda = lambdaFree
-                , walkOnIdent = identFree
-                , walkOnCertificates = mapM_ identFree
-                }
-
-        identFree ident =
+freeWalker :: Walker (Writer (HS.HashSet Ident))
+freeWalker = identityWalker {
+               walkOnSubExp = subExpFree
+             , walkOnBody = bodyFree
+             , walkOnExp = expFree
+             , walkOnLambda = lambdaFree
+             , walkOnIdent = identFree
+             , walkOnCertificates = mapM_ identFree
+             }
+  where identFree ident =
           tell $ HS.singleton ident
 
         subExpFree (Var ident) = identFree ident
         subExpFree (Constant {})  = return ()
 
-        expFree (LetPat pat e body _) = do
+        bodyFree (LetPat pat e body _) = do
           expFree e
-          binding (HS.fromList pat) $ expFree body
-        expFree (LetWith cs dest src idxcs idxs ve body _) = do
+          binding (HS.fromList pat) $ bodyFree body
+        bodyFree (LetWith cs dest src idxcs idxs ve body _) = do
           mapM_ identFree cs
           identFree src
           mapM_ identFree $ fromMaybe [] idxcs
           mapM_ subExpFree idxs
           subExpFree ve
-          binding (HS.singleton dest) $ expFree body
-        expFree (DoLoop pat i boundexp loopbody letbody _) = do
+          binding (HS.singleton dest) $ bodyFree body
+        bodyFree (DoLoop pat i boundexp loopbody letbody _) = do
           mapM_ (subExpFree . snd) pat
           subExpFree boundexp
           binding (i `HS.insert` HS.fromList (map fst pat)) $ do
-            expFree loopbody
-            expFree letbody
-        expFree e = walkExpM names e
+            bodyFree loopbody
+            bodyFree letbody
+        bodyFree (Result ses _) =
+          mapM_ subExpFree ses
+
+        expFree = walkExpM freeWalker
 
         lambdaFree = tell . freeInLambda
 
         binding bound = censor (`HS.difference` bound)
 
--- | As 'freeInExp', but returns the raw names rather than 'IdentBase's.
+-- | Return the set of identifiers that are free in the given
+-- body.
+freeInBody :: Body -> HS.HashSet Ident
+freeInBody = execWriter . walkOnBody freeWalker
+
+-- | As 'freeInBody', but returns the raw names rather than 'Ident's.
+freeNamesInBody :: Body -> HS.HashSet VName
+freeNamesInBody = HS.map identName . freeInBody
+
+-- | Return the set of identifiers that are free in the given
+-- expression.
+freeInExp :: Exp -> HS.HashSet Ident
+freeInExp = execWriter . walkOnExp freeWalker
+
+-- | As 'freeInExp', but returns the raw names rather than 'Ident's.
 freeNamesInExp :: Exp -> HS.HashSet VName
 freeNamesInExp = HS.map identName . freeInExp
 
 -- | Return the set of variables names consumed by the given
--- expression.
-consumedInExp :: Exp -> HS.HashSet VName
-consumedInExp = execWriter . expConsumed
-  where names = identityWalker {
-                  walkOnExp = expConsumed
-                }
-
-        unconsume s = censor (`HS.difference` s)
+-- body.
+consumedInBody :: Body -> HS.HashSet VName
+consumedInBody = execWriter . bodyConsumed
+  where unconsume s = censor (`HS.difference` s)
 
         consume ident =
           tell $ identName ident `HS.insert` aliases (identType ident)
 
-        expConsumed (LetPat pat e body _) = do
+        bodyConsumed (LetPat pat e body _) = do
           expConsumed e
-          unconsume (HS.fromList $ map identName pat) $ expConsumed body
-        expConsumed (LetWith _ dest src _ _ _ body _) = do
+          unconsume (HS.fromList $ map identName pat) $ bodyConsumed body
+        bodyConsumed (LetWith _ dest src _ _ _ body _) = do
           consume src
-          unconsume (HS.singleton $ identName dest) $ expConsumed body
-        expConsumed (DoLoop pat i _ loopbody letbody _) =
+          unconsume (HS.singleton $ identName dest) $ bodyConsumed body
+        bodyConsumed (DoLoop pat i _ loopbody letbody _) =
           unconsume (identName i `HS.insert`
                      HS.fromList (map (identName . fst) pat)) $ do
-            expConsumed loopbody
-            expConsumed letbody
-        expConsumed (Apply _ args _ _) =
-          mapM_ (consumeArg . first subExpType) args
-          where consumeArg (t, Consume) = tell $ aliases t
-                consumeArg (_, Observe) = return ()
-        expConsumed e = walkExpM names e
+            bodyConsumed loopbody
+            bodyConsumed letbody
+        bodyConsumed (Result {}) = return ()
+
+        expConsumed = tell . consumedInExp
+
+-- | Return the set of variables names consumed by the given
+-- body.
+consumedInExp :: Exp -> HS.HashSet VName
+consumedInExp (Apply _ args _ _) =
+  mconcat $ map (consumeArg . first subExpType) args
+  where consumeArg (t, Consume) = aliases t
+        consumeArg (_, Observe) = mempty
+consumedInExp _ = mempty
 
 -- | An expression is safe if it is always well-defined (assuming that
 -- any required certificates have been checked) in any context.  For
@@ -633,7 +658,6 @@ safeExp (Index {}) = False
 safeExp (Split {}) = False
 safeExp (Assert {}) = False
 safeExp (Reshape {}) = False
-safeExp (LetWith {}) = False
 safeExp (ArrayLit {}) = False
 safeExp (Concat {}) = False
 safeExp (Apply {}) = False
@@ -644,25 +668,12 @@ safeExp (BinOp Mod _ (Constant (BasicVal (IntVal k))  _) _ _) = k /= 0
 safeExp (BinOp Mod _ (Constant (BasicVal (RealVal k)) _) _ _) = k /= 0
 safeExp (BinOp Mod _ _ _ _) = False
 safeExp (BinOp Pow _ _ _ _) = False
-safeExp e = case walkExpM safe e of
-              Just () -> True
-              Nothing -> False
-  -- The use of the Maybe monad is simply to short-circuit traversal.
-  where
-    boolToMaybe True  = Just ()
-    boolToMaybe False = Nothing
-
-    safe = identityWalker {
-             walkOnExp = boolToMaybe . safeExp
-           , walkOnLambda = boolToMaybe . safeLambda
-           }
-
-    safeLambda = safeExp . lambdaBody
+safeExp _ = False
 
 -- | Return the set of identifiers that are free in the given lambda.
 freeInLambda :: Lambda -> HS.HashSet Ident
 freeInLambda (Lambda params body _ _) =
-  HS.filter ((`notElem` params') . identName) $ freeInExp body
+  HS.filter ((`notElem` params') . identName) $ freeInBody body
     where params' = map identName params
 
 -- | As 'freeInLambda', but returns the raw names rather than

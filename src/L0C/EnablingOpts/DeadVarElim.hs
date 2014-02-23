@@ -95,7 +95,7 @@ deadCodeElim prog = do
 deadCodeElimFun :: FunDec -> DCElimM FunDec
 deadCodeElimFun (fname, rettype, args, body, pos) = do
     let ids = map identName args
-    body' <- binding ids $ deadCodeElimExp body
+    body' <- binding ids $ deadCodeElimBody body
     return (fname, rettype, args, body', pos)
 
 --------------------------------------------------------------------
@@ -108,20 +108,20 @@ deadCodeElimSubExp :: SubExp -> DCElimM SubExp
 deadCodeElimSubExp (Var ident)      = Var <$> deadCodeElimIdent ident
 deadCodeElimSubExp (Constant v loc) = return $ Constant v loc
 
-deadCodeElimExp :: Exp -> DCElimM Exp
+deadCodeElimBody :: Body -> DCElimM Body
 
-deadCodeElimExp (LetPat pat e body pos) = do
+deadCodeElimBody (LetPat pat e body pos) = do
   let idds = map identName pat
-  (body', noref) <- collectRes idds $ binding idds $ deadCodeElimExp body
+  (body', noref) <- collectRes idds $ binding idds $ deadCodeElimBody body
 
   if noref
   then changed $ return body'
   else do e' <- deadCodeElimExp e
           return $ LetPat pat e' body' pos
 
-deadCodeElimExp (LetWith cs nm src idxcs idxs el body pos) = do
+deadCodeElimBody (LetWith cs nm src idxcs idxs el body pos) = do
     cs' <- mapM deadCodeElimIdent cs
-    (body', noref) <- collectRes [identName nm] $ binding [identName nm] $ deadCodeElimExp body
+    (body', noref) <- collectRes [identName nm] $ binding [identName nm] $ deadCodeElimBody body
     idxcs' <- case idxcs of
                 Nothing     -> return Nothing
                 Just idxcs' -> Just <$> mapM deadCodeElimIdent idxcs'
@@ -137,21 +137,26 @@ deadCodeElimExp (LetWith cs nm src idxcs idxs el body pos) = do
                     el'   <- deadCodeElimSubExp el
                     return $ LetWith cs' nm src idxcs' idxs' el' body' pos
 
-deadCodeElimExp (DoLoop merge idd n loopbdy letbdy pos) = do
+deadCodeElimBody (DoLoop merge idd n loopbdy letbdy pos) = do
   let (mergepat, mergeexp) = unzip merge
       idds = map identName mergepat
-  (letbdy',noref) <- collectRes idds $ binding idds $ deadCodeElimExp letbdy
+  (letbdy',noref) <- collectRes idds $ binding idds $ deadCodeElimBody letbdy
   if noref
   then changed $ return letbdy'
   else do
     mergeexp' <- mapM deadCodeElimSubExp mergeexp
     n'        <- deadCodeElimSubExp n
-    loopbdy'  <- binding ( identName idd : idds) $ deadCodeElimExp loopbdy
+    loopbdy'  <- binding ( identName idd : idds) $ deadCodeElimBody loopbdy
     return $ DoLoop (zip mergepat mergeexp') idd n' loopbdy' letbdy' pos
 
-deadCodeElimExp e = mapExpM mapper e
+deadCodeElimBody (Result es loc) =
+  Result <$> mapM deadCodeElimSubExp es <*> pure loc
+
+deadCodeElimExp :: Exp -> DCElimM Exp
+deadCodeElimExp = mapExpM mapper
   where mapper = identityMapper {
                    mapOnExp = deadCodeElimExp
+                 , mapOnBody = deadCodeElimBody
                  , mapOnSubExp = deadCodeElimSubExp
                  , mapOnLambda = deadCodeElimLambda
                  , mapOnIdent = deadCodeElimIdent
@@ -169,5 +174,5 @@ deadCodeElimIdent ident@(Ident vnm _ pos) = do
 deadCodeElimLambda :: Lambda -> DCElimM Lambda
 deadCodeElimLambda (Lambda params body ret pos) = do
   let ids  = map identName params
-  body' <- binding ids $ deadCodeElimExp body
+  body' <- binding ids $ deadCodeElimBody body
   return $ Lambda params body' ret pos

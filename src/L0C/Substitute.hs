@@ -8,6 +8,7 @@ module L0C.Substitute
   where
 
 import Control.Monad
+import Control.Monad.Identity
 import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
@@ -34,16 +35,22 @@ instance Substitute SubExp where
   substituteNames _ (Constant v loc) = Constant v loc
 
 instance Substitute Exp where
-  substituteNames substs = mapExp replace
-    where replace = Mapper {
-                      mapOnIdent = return . substituteNames substs
-                    , mapOnSubExp = return . substituteNames substs
-                    , mapOnExp = return . substituteNames substs
-                    , mapOnType = return . substituteNames substs
-                    , mapOnValue = return
-                    , mapOnLambda = return . substituteNames substs
-                    , mapOnCertificates = return . map (substituteNames substs)
-                    }
+  substituteNames substs = mapExp $ replace substs
+
+instance Substitute Body where
+  substituteNames substs = mapBody $ replace substs
+
+replace :: HM.HashMap VName VName -> Mapper Identity
+replace substs = Mapper {
+                   mapOnIdent = return . substituteNames substs
+                 , mapOnSubExp = return . substituteNames substs
+                 , mapOnBody = return . substituteNames substs
+                 , mapOnExp = return . substituteNames substs
+                 , mapOnType = return . substituteNames substs
+                 , mapOnValue = return
+                 , mapOnLambda = return . substituteNames substs
+                 , mapOnCertificates = return . map (substituteNames substs)
+                 }
 
 instance Substitute Type where
   substituteNames _ (Basic et) = Basic et

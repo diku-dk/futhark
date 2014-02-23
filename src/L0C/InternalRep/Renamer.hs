@@ -73,7 +73,7 @@ renameFun :: FunDec -> RenameM FunDec
 renameFun (fname, ret, params, body, loc) =
   bind params $ do
     params' <- mapM (liftM toParam . repl . fromParam) params
-    body' <- renameExp body
+    body' <- renameBody body
     ret' <- mapM (liftM toDecl . renameType . fromDecl) ret
     return (fname, ret', params', body', loc)
 
@@ -81,8 +81,8 @@ renameSubExp :: SubExp -> RenameM SubExp
 renameSubExp (Var v)          = Var <$> repl v
 renameSubExp (Constant v loc) = return $ Constant v loc
 
-renameExp :: Exp -> RenameM Exp
-renameExp (LetWith cs dest src idxcs idxs ve body loc) = do
+renameBody :: Body -> RenameM Body
+renameBody (LetWith cs dest src idxcs idxs ve body loc) = do
   cs' <- mapM repl cs
   src' <- repl src
   idxcs' <- case idxcs of Just idxcs' -> Just <$> mapM repl idxcs'
@@ -91,27 +91,31 @@ renameExp (LetWith cs dest src idxcs idxs ve body loc) = do
   ve' <- renameSubExp ve
   bind [dest] $ do
     dest' <- repl dest
-    body' <- renameExp body
+    body' <- renameBody body
     return $ LetWith cs' dest' src' idxcs' idxs' ve' body' loc
-renameExp (LetPat pat e body loc) = do
+renameBody (LetPat pat e body loc) = do
   e1' <- renameExp e
   bind pat $ do
     pat' <- mapM repl pat
-    body' <- renameExp body
+    body' <- renameBody body
     return $ LetPat pat' e1' body' loc
-renameExp (DoLoop merge loopvar boundexp loopbody letbody loc) = do
+renameBody (DoLoop merge loopvar boundexp loopbody letbody loc) = do
   let (mergepat, mergeexp) = unzip merge
   boundexp' <- renameSubExp boundexp
   mergeexp' <- mapM renameSubExp mergeexp
   bind mergepat $ do
     mergepat' <- mapM repl mergepat
-    letbody' <- renameExp letbody
+    letbody' <- renameBody letbody
     bind [loopvar] $ do
       loopvar'  <- repl loopvar
-      loopbody' <- renameExp loopbody
+      loopbody' <- renameBody loopbody
       return $ DoLoop (zip mergepat' mergeexp')
                       loopvar' boundexp' loopbody' letbody' loc
-renameExp e = mapExpM rename e
+renameBody (Result ses loc) =
+  Result <$> mapM renameSubExp ses <*> pure loc
+
+renameExp :: Exp -> RenameM Exp
+renameExp = mapExpM rename
 
 renameType :: Type -> RenameM Type
 renameType (Array et dims u als) = do
@@ -122,6 +126,7 @@ renameType (Basic et) = return $ Basic et
 rename :: Mapper RenameM
 rename = Mapper {
            mapOnExp = renameExp
+         , mapOnBody = renameBody
          , mapOnSubExp = renameSubExp
          , mapOnIdent = repl
          , mapOnLambda = renameLambda
@@ -134,6 +139,6 @@ renameLambda :: Lambda -> RenameM Lambda
 renameLambda (Lambda params body ret loc) =
   bind params $ do
     params' <- mapM (liftM toParam . repl . fromParam) params
-    body' <- renameExp body
+    body' <- renameBody body
     ret' <- mapM (liftM toDecl . renameType . fromDecl) ret
     return $ Lambda params' body' ret' loc

@@ -7,6 +7,8 @@ module L0C.Backends.SequentialC (compileProg) where
 
 import Control.Monad
 
+import Data.Loc
+
 import L0C.InternalRep
 import qualified L0C.FirstOrderTransform as FOT
 import L0C.Tools
@@ -16,5 +18,9 @@ import qualified L0C.Backends.GenericC as GenericC
 compileProg :: Prog -> String
 compileProg = GenericC.compileProg expCompiler
   where expCompiler _ e
-          | FOT.transformable e = liftM Left $ runBinder $ FOT.transformExp FOT.noDepthLimit e
-          | otherwise           = return $ Left e
+          | FOT.transformable e =
+            liftM GenericC.CompileBody $ runBinder $ do
+              es <- letTupExp "soac" =<< FOT.transformExp e
+              return $ Result (map Var es) $ srclocOf e
+          | otherwise           =
+            return $ GenericC.CompileExp e

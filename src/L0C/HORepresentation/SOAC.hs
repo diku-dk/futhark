@@ -377,14 +377,4 @@ fromExp (L0.Filter cs l as loc) = do
 fromExp (L0.Redomap cs l1 l2 es as loc) = do
   as' <- mapM inputFromSubExp' as
   Right $ Redomap cs l1 l2 es as' loc
-fromExp (L0.LetPat pats e (L0.TupLit tupes _) _)
-  | Right soac <- fromExp e,
-    Just tupvs <- vars tupes,
-    tupvs == pats =
-      Right soac
 fromExp _ = Left NotSOAC
-
-vars :: [SubExp] -> Maybe [Ident]
-vars = mapM varExp
-  where varExp (L0.Var k) = Just k
-        varExp _          = Nothing

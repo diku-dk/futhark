@@ -14,6 +14,7 @@ module L0C.Tools
   , eCopy
   , eDoLoop
   , eTupLit
+  , eBody
 
   , MonadBinder(..)
   , Binding(..)
@@ -22,9 +23,11 @@ module L0C.Tools
   , letBind
   , letWithBind
   , loopBind
+  , bodyBind
   -- * A concrete @Binder@ monad.
   , Binder
   , runBinder
+  , runBinder'
   , runBinderWithNameSource
   -- * Writer convenience interface
   , addBindingWriter
@@ -77,9 +80,6 @@ letTupExp :: MonadBinder m => String -> Exp -> m [Ident]
 letTupExp _ (TupLit es _)
   | Just vs <- mapM varSubExp es = return vs
 letTupExp _ (SubExp (Var v)) = return [v]
-letTupExp desc (LetPat pat e body _) = do
-  letBind pat e
-  letTupExp desc body
 letTupExp name e = do
   let ts  = typeOf e
       loc = srclocOf e
@@ -94,7 +94,7 @@ newVar loc name tp = do
   return (Ident x tp loc, Var $ Ident x tp loc)
 
 eIf :: MonadBinder m =>
-       m Exp -> m Exp -> m Exp -> [Type] -> SrcLoc -> m Exp
+       m Exp -> m Body -> m Body -> [Type] -> SrcLoc -> m Exp
 eIf ce te fe ts loc = do
   ce' <- letSubExp "cond" =<< ce
   te' <- insertBindings te
@@ -121,7 +121,7 @@ eCopy e = do e' <- letSubExp "copy_arg" =<< e
              return $ Copy e' $ srclocOf e'
 
 eDoLoop :: MonadBinder m =>
-           [(Ident,m Exp)] -> Ident -> m Exp -> m Exp -> m Exp -> SrcLoc -> m Exp
+           [(Ident,m Exp)] -> Ident -> m Exp -> m Body -> m Body -> SrcLoc -> m Body
 eDoLoop pat i boundexp loopbody body loc = do
   mergeexps' <- letSubExps "merge_init" =<< sequence mergeexps
   boundexp' <- letSubExp "bound" =<< boundexp
@@ -136,7 +136,14 @@ eTupLit es loc = do
   es' <- letSubExps "tuplit_elems" =<< sequence es
   return $ TupLit es' loc
 
-data Binding = LoopBind [(Ident, SubExp)] Ident SubExp Exp
+eBody :: MonadBinder m =>
+         m Exp -> m Body
+eBody e = insertBindings $ do
+            e' <- e
+            x <- letTupExp "x" e'
+            return $ Result (map Var x) $ srclocOf e'
+
+data Binding = LoopBind [(Ident, SubExp)] Ident SubExp Body
              | LetBind [Ident] Exp
              | LetWithBind Certificates Ident Ident (Maybe Certificates) [SubExp] SubExp
                deriving (Show, Eq)
@@ -154,16 +161,28 @@ letWithBind :: MonadBinder m =>
 letWithBind cs dest src idxcs idxs ve =
   addBinding $ LetWithBind cs dest src idxcs idxs ve
 
-loopBind :: MonadBinder m => [(Ident, SubExp)] -> Ident -> SubExp -> Exp -> m ()
+loopBind :: MonadBinder m => [(Ident, SubExp)] -> Ident -> SubExp -> Body -> m ()
 loopBind pat i bound loopbody =
   addBinding $ LoopBind pat i bound loopbody
 
-insertBindings :: MonadBinder m => m Exp -> m Exp
+bodyBind :: MonadBinder m => Body -> m [SubExp]
+bodyBind (Result es _) = return es
+bodyBind (LetPat pat e body _) = do
+  letBind pat e
+  bodyBind body
+bodyBind (LetWith cs dest src idxcs idxs ve body _) = do
+  letWithBind cs dest src idxcs idxs ve
+  bodyBind body
+bodyBind (DoLoop merge i bound loopbody letbody _) = do
+  loopBind merge i bound loopbody
+  bodyBind letbody
+
+insertBindings :: MonadBinder m => m Body -> m Body
 insertBindings m = do
   (e,bnds) <- collectBindings m
   return $ insertBindings' e bnds
 
-insertBindings' :: Exp -> [Binding] -> Exp
+insertBindings' :: Body -> [Binding] -> Body
 insertBindings' = foldr bind
   where bind (LoopBind pat i bound loopbody) e =
           DoLoop pat i bound loopbody e $ srclocOf e
@@ -194,14 +213,19 @@ instance MonadBinder Binder where
   addBinding      = addBindingWriter
   collectBindings = collectBindingsWriter
 
-runBinder :: MonadFreshNames m => Binder Exp -> m Exp
+runBinder :: MonadFreshNames m => Binder Body -> m Body
 runBinder m = do
-  src <- getNameSource
-  let (e,src') = runBinderWithNameSource m src
-  putNameSource src'
-  return e
+  (b, f) <- runBinder' m
+  return $ f b
 
-runBinderWithNameSource :: Binder Exp -> VNameSource -> (Exp, VNameSource)
+runBinder' :: MonadFreshNames m => Binder a -> m (a, Body -> Body)
+runBinder' m = do
+  src <- getNameSource
+  let (x, f, src') = runBinderWithNameSource m src
+  putNameSource src'
+  return (x, f)
+
+runBinderWithNameSource :: Binder a -> VNameSource -> (a, Body -> Body, VNameSource)
 runBinderWithNameSource (TransformM m) src =
-  let ((e,bnds),src') = runState (runWriterT m) src
-  in (insertBindings' e $ DL.toList bnds, src')
+  let ((x,bnds),src') = runState (runWriterT m) src
+  in (x, flip insertBindings' $ DL.toList bnds, src')

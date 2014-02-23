@@ -29,12 +29,12 @@ data Nesting = Nesting {
     nestingParams     :: [Ident]
   , nestingResult     :: [Ident]
   , nestingReturnType :: [DeclType]
-  , nestingPostExp    :: Exp
+  , nestingPostBody   :: Body
   } deriving (Eq, Ord, Show)
 
 pureNest :: Nesting -> Bool
 pureNest nest
-  | TupLit es _ <- nestingPostExp nest,
+  | Result es _ <- nestingPostBody nest,
     Just vs     <- vars es =
       vs == nestingResult nest
   | otherwise = False
@@ -61,7 +61,7 @@ fromSOACNest' :: HS.HashSet Ident -> SOACNest -> NeedNames (Maybe MapNest)
 
 fromSOACNest' bound (Nest.SOACNest inps (Nest.Map cs body [] loc)) = do
   lam <- lambdaBody <$> Nest.bodyToLambda body
-  let boundUsedInBody = HS.toList $ freeInExp lam `HS.intersection` bound
+  let boundUsedInBody = HS.toList $ freeInBody lam `HS.intersection` bound
   newParams <- mapM (newIdent' (++"_wasfree")) boundUsedInBody
   let subst = HM.fromList $ zip (map identName boundUsedInBody) (map identName newParams)
       inps' = map (substituteNames subst) inps ++
@@ -94,7 +94,7 @@ fromSOACNest' bound (Nest.SOACNest inps (Nest.Map cs body (n:ns) loc)) = do
              nestingParams     = map fromParam ps
            , nestingResult     = Nest.nestingResult n
            , nestingReturnType = Nest.nestingReturnType n
-           , nestingPostExp    = Nest.nestingPostExp n
+           , nestingPostBody   = Nest.nestingPostBody n
            }
   return $ Just $ MapNest cs' body' (n':ns') inps'' loc
   where bound' = bound `HS.union` HS.fromList (Nest.nestingParams n)
@@ -112,7 +112,7 @@ toSOACNest (MapNest cs body ns inps loc) =
                 , Nest.nestingReturnType = nestingReturnType nest
                 , Nest.nestingInputs =
                   map SOAC.varInput $ nestingParams nest
-                , Nest.nestingPostExp = nestingPostExp nest
+                , Nest.nestingPostBody = nestingPostBody nest
                 }
 
 fixInputs :: [(Param, SOAC.Input)] -> [(Param, SOAC.Input)]

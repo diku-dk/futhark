@@ -25,6 +25,7 @@ module L0C.InternalRep.Syntax
   , Param
   , Certificates
   , SubExp(..)
+  , Body(..)
   , Exp(..)
   , Lambda(..)
 
@@ -143,6 +144,27 @@ instance Located SubExp where
   locOf (Constant _ loc) = locOf loc
   locOf (Var ident)      = locOf ident
 
+data Body = LetPat [Ident] Exp Body SrcLoc
+          | DoLoop
+            [(Ident,SubExp)] -- Merge variable pattern and initial
+                             -- values.
+            Ident -- Iterator.
+            SubExp -- Upper bound.
+            Body -- Loop body.
+            Body -- Let-body.
+            SrcLoc
+          | LetWith Certificates Ident Ident
+            (Maybe Certificates) [SubExp] SubExp
+            Body SrcLoc
+          | Result [SubExp] SrcLoc
+            deriving (Eq, Ord, Show)
+
+instance Located Body where
+  locOf (LetPat _ _ _ loc)          = locOf loc
+  locOf (DoLoop _ _ _ _ _ loc)      = locOf loc
+  locOf (LetWith _ _ _ _ _ _ _ loc) = locOf loc
+  locOf (Result _ loc)              = locOf loc
+
 -- | L0 Expression Language: literals + vars + int binops + array
 -- constructors + array combinators (SOAC) + if + function calls +
 -- let + tuples (literals & identifiers) TODO: please add float,
@@ -154,24 +176,13 @@ data Exp =
             -- ^ Tuple literals, e.g., (1+3, (x, y+z)).
 
             | ArrayLit  [SubExp] Type SrcLoc
-
             -- ^ Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
             -- Second arg is the type of of the rows of the array (not
             -- the element type).
-            | LetPat [Ident] Exp Exp SrcLoc
 
-            | If     SubExp Exp Exp [Type] SrcLoc
+            | If     SubExp Body Body [Type] SrcLoc
 
             | Apply  Name [(SubExp, Diet)] [Type] SrcLoc
-
-            | DoLoop
-              [(Ident,SubExp)] -- Merge variable pattern and initial
-                               -- values.
-              Ident -- Iterator.
-              SubExp -- Upper bound.
-              Exp -- Loop body.
-              Exp -- Let-body.
-              SrcLoc
 
             -- Scalar operations
             | BinOp BinOp SubExp SubExp Type SrcLoc
@@ -189,9 +200,6 @@ data Exp =
             -- ^ Convert several certificates into a single certificate.
 
             -- Primitive array operations
-            | LetWith Certificates Ident Ident
-                      (Maybe Certificates) [SubExp] SubExp
-                      Exp SrcLoc
 
             | Index Certificates
                     Ident
@@ -253,8 +261,6 @@ instance Located Exp where
   locOf (Negate _ pos) = locOf pos
   locOf (If _ _ _ _ pos) = locOf pos
   locOf (Apply _ _ _ pos) = locOf pos
-  locOf (LetPat _ _ _ pos) = locOf pos
-  locOf (LetWith _ _ _ _ _ _ _ pos) = locOf pos
   locOf (Index _ _ _ _ pos) = locOf pos
   locOf (Iota _ pos) = locOf pos
   locOf (Size _ _ _ pos) = locOf pos
@@ -266,7 +272,6 @@ instance Located Exp where
   locOf (Copy _ pos) = locOf pos
   locOf (Assert _ loc) = locOf loc
   locOf (Conjoin _ loc) = locOf loc
-  locOf (DoLoop _ _ _ _ _ pos) = locOf pos
   locOf (Map _ _ _ pos) = locOf pos
   locOf (Reduce _ _ _ pos) = locOf pos
   locOf (Scan _ _ _ pos) = locOf pos
@@ -276,7 +281,7 @@ instance Located Exp where
 -- | Anonymous function for use in a tuple-SOAC.
 data Lambda =
   Lambda { lambdaParams     :: [Param]
-         , lambdaBody       :: Exp
+         , lambdaBody       :: Body
          , lambdaReturnType :: [DeclType]
          , lambdaSrcLoc     :: SrcLoc
          }
@@ -289,7 +294,7 @@ instance Located Lambda where
 type FunDec = (Name,
                [DeclType],
                [Param],
-               Exp,
+               Body,
                SrcLoc)
 
 -- | An entire L0 program.
