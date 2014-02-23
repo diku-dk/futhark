@@ -782,11 +782,11 @@ checkExp (Reduce ass fun inputs pos) = do
       intupletype = map argType arrargs
       funret      = lambdaType fun' $ map argType $ startargs ++ arrargs
   unless (startt `subtypesOf` funret) $
-      bad $ TypeError pos $ "Accumulator is of type " ++ ppPattern startt ++
-                            ", but reduce function returns type " ++ ppPattern funret ++ "."
+      bad $ TypeError pos $ "Accumulator is of type " ++ ppTuple startt ++
+                            ", but reduce function returns type " ++ ppTuple funret ++ "."
   unless (intupletype `subtypesOf` funret) $
-      bad $ TypeError pos $ "Array element value is of type " ++ ppPattern intupletype ++
-                            ", but scan function returns type " ++ ppPattern funret ++ "."
+      bad $ TypeError pos $ "Array element value is of type " ++ ppTuple intupletype ++
+                            ", but scan function returns type " ++ ppTuple funret ++ "."
   return $ Reduce ass' fun' (zip startexps' arrexps') pos
 
 -- ScanT is exactly identical to ReduceT.  Duplicate for clarity
@@ -801,11 +801,11 @@ checkExp (Scan ass fun inputs pos) = do
       intupletype = map argType arrargs
       funret      = lambdaType fun' $ map argType $ startargs ++ startargs
   unless (startt `subtypesOf` funret) $
-    bad $ TypeError pos $ "Initial value is of type " ++ ppPattern startt ++
-                          ", but scan function returns type " ++ ppPattern funret ++ "."
+    bad $ TypeError pos $ "Initial value is of type " ++ ppTuple startt ++
+                          ", but scan function returns type " ++ ppTuple funret ++ "."
   unless (intupletype `subtypesOf` funret) $
-    bad $ TypeError pos $ "Array element value is of type " ++ ppPattern intupletype ++
-                          ", but scan function returns type " ++ ppPattern funret ++ "."
+    bad $ TypeError pos $ "Array element value is of type " ++ ppTuple intupletype ++
+                          ", but scan function returns type " ++ ppTuple funret ++ "."
   return $ Scan ass' fun' (zip startexps' arrexps') pos
 
 checkExp (Filter ass fun arrexps pos) = do
@@ -829,11 +829,11 @@ checkExp (Redomap ass outerfun innerfun accexps arrexps pos) = do
       innerRetType = map argType innerRet
       outerRetType = map argType outerRet
   unless (innerRetType `subtypesOf` acct) $
-    bad $ TypeError pos $ "Initial value is of type " ++ ppPattern acct ++
-          ", but redomapT inner reduction returns type " ++ ppPattern innerRetType ++ "."
+    bad $ TypeError pos $ "Initial value is of type " ++ ppTuple acct ++
+          ", but redomapT inner reduction returns type " ++ ppTuple innerRetType ++ "."
   unless (outerRetType `subtypesOf` acct) $
-    bad $ TypeError pos $ "Initial value is of type " ++ ppPattern acct ++
-          ", but redomapT outer reduction returns type " ++ ppPattern outerRetType ++ "."
+    bad $ TypeError pos $ "Initial value is of type " ++ ppTuple acct ++
+          ", but redomapT outer reduction returns type " ++ ppTuple outerRetType ++ "."
 
   return $ Redomap ass' outerfun' innerfun' accexps' arrexps' pos
 

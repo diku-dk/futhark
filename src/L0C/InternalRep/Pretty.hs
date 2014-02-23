@@ -11,7 +11,7 @@ module L0C.InternalRep.Pretty
   , ppExp
   , ppSubExp
   , ppLambda
-  , ppPattern
+  , ppTuple
   , prettyPrint
   )
   where
@@ -79,7 +79,7 @@ instance Pretty SubExp where
 instance Pretty Body where
   ppr (LetPat pat e body _) =
     aliasComment pat $ align $
-    text "let" <+> align (ppPat pat) <+>
+    text "let" <+> align (ppTuple' pat) <+>
     (if linebreak
      then equals </> indent 2 (ppr e)
      else equals <+> align (ppr e)) <+> text "in" </>
@@ -109,7 +109,7 @@ instance Pretty Body where
                                Just csidx' -> ppCertificates csidx' <> text "|"
   ppr (DoLoop mergepat i bound loopbody letbody _) =
     aliasComment pat $
-    text "loop" <+> parens (ppTuple pat <+> equals <+> ppTuple initexp) <+>
+    text "loop" <+> parens (ppTuple' pat <+> equals <+> ppTuple' initexp) <+>
     equals <+> text "for" <+> ppr i <+> text "<" <+> align (ppr bound) <+> text "do" </>
     indent 2 (ppr loopbody) <+> text "in" </>
     ppr letbody
@@ -182,14 +182,14 @@ instance Pretty Exp where
 
 instance Pretty Lambda where
   ppr (Lambda params body rettype _) =
-    text "fn" <+> ppTuple rettype <+>
+    text "fn" <+> ppTuple' rettype <+>
     apply (map ppParam params) <+>
     text "=>" </> indent 2 (ppr body)
 
 instance Pretty Prog where
   ppr = stack . punctuate line . map ppFun . progFunctions
     where ppFun (name, rettype, args, body, _) =
-            text "fun" <+> ppPat rettype <+>
+            text "fun" <+> ppTuple' rettype <+>
             text (nameToString name) <//>
             apply (map ppParam args) <+>
             equals </> indent 2 (ppr body)
@@ -204,19 +204,15 @@ ppSOAC :: Pretty fn => String -> [fn] -> Maybe [SubExp] -> [SubExp] -> Doc
 ppSOAC name funs es as =
   text name <> parens (ppList funs </>
                        commasep (es' ++ map ppr as))
-  where es' = maybe [] ((:[]) . ppTuple) es
+  where es' = maybe [] ((:[]) . ppTuple') es
 
 ppList :: Pretty a => [a] -> Doc
 ppList as = case map ppr as of
               []     -> empty
               a':as' -> foldl (</>) (a' <> comma) $ map (<> comma) as'
 
-ppTuple :: Pretty a => [a] -> Doc
-ppTuple ets = braces $ commasep $ map ppr ets
-
-ppPat :: Pretty a => [a] -> Doc
-ppPat [t] = ppr t
-ppPat ts  = ppTuple ts
+ppTuple' :: Pretty a => [a] -> Doc
+ppTuple' ets = braces $ commasep $ map ppr ets
 
 ppCertificates :: Certificates -> Doc
 ppCertificates [] = empty
@@ -235,7 +231,7 @@ ppValue = render80
 
 -- | Prettyprint several values, wrapped to 80 characters.
 ppValues :: [Value] -> String
-ppValues = pretty 80 . ppTuple
+ppValues = pretty 80 . ppTuple'
 
 -- | Prettyprint a type, wrapped to 80 characters.
 ppType :: TypeBase als -> String
@@ -257,9 +253,9 @@ ppSubExp = render80
 ppLambda :: Lambda -> String
 ppLambda = render80
 
--- | Prettyprint a pattern.
-ppPattern :: Pretty a => [a] -> String
-ppPattern = pretty 80 . ppPat
+-- | Prettyprint a list enclosed in curly braces.
+ppTuple :: Pretty a => [a] -> String
+ppTuple = pretty 80 . ppTuple'
 
 -- | Prettyprint an entire L0 program, wrapped to 80 characters.
 prettyPrint :: Prog -> String

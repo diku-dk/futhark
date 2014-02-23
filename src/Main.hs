@@ -16,8 +16,10 @@ import Text.Printf
 import Language.L0.Core
 import Language.L0.Parser
 import L0C.Internalise
+import L0C.Externalise
 import L0C.Pipeline
 
+import qualified L0C.ExternalRep as E
 import qualified L0C.ExternalRep.TypeChecker as E
 import qualified L0C.ExternalRep.Renamer as E
 
@@ -65,10 +67,13 @@ commandLineOptions =
     "Print the SOAC flow graph of the final program."
   , Option "p" ["print"]
     (NoArg $ \opts -> opts { l0action = printAction })
-    "Prettyprint the program on standard output (default action)."
+    "Prettyprint the resulting internal representation on standard output (default action)."
   , Option "i" ["interpret"]
     (NoArg $ \opts -> opts { l0action = interpretAction })
     "Run the program via an interpreter."
+  , Option [] ["externalise"]
+    (NoArg $ \opts -> opts { l0action = externaliseAction})
+    "Prettyprint the resulting external representation on standard output."
   , renameOpt "r" ["rename"]
   , hoistOpt "o" ["hoist"]
   , hoistAggrOpt "O" ["hoist-aggressively"]
@@ -84,6 +89,9 @@ commandLineOptions =
 
 printAction :: Action
 printAction = ("prettyprinter", putStrLn . I.prettyPrint)
+
+externaliseAction :: Action
+externaliseAction = ("externalise", putStrLn . E.prettyPrint . externaliseProg)
 
 interpretAction :: Action
 interpretAction = ("interpreter", interpret)

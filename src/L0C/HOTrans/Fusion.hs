@@ -577,11 +577,11 @@ replaceSOAC names@(Ident pat_nm _ _ : _) soac body = do
           when (names /= outputs ker) $
             badFusionGM $ EnablingOptError loc
                           ("In Fusion.hs, replaceSOAC, "
-                           ++" pat does not match kernel's pat: "++ppPattern names)
+                           ++" pat does not match kernel's pat: "++ppTuple names)
           when (null $ fusedVars ker) $
             badFusionGM $ EnablingOptError loc
                           ("In Fusion.hs, replaceSOAC, unfused kernel "
-                          ++"still in result: "++ppPattern names)
+                          ++"still in result: "++ppTuple names)
 
           insertKerSOAC ker body
 
