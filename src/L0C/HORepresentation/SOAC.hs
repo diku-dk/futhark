@@ -32,7 +32,7 @@ module L0C.HORepresentation.SOAC
   , addTransform
   , addTransforms
   , InputTransform(..)
-  , Index (..)
+  , transformFromExp
   , InputArray (..)
   , inputArray
   , inputType
@@ -55,7 +55,7 @@ import qualified Data.HashMap.Lazy as HM
 
 import qualified L0C.InternalRep as L0
 import L0C.InternalRep hiding (Map, Reduce, Scan, Filter, Redomap,
-                               Var, Iota, Transpose, Reshape, Index)
+                               Var, Iota, Transpose, Reshape)
 import L0C.Substitute
 import L0C.Tools
 
@@ -74,10 +74,16 @@ data InputTransform = Transpose Certificates Int Int
                     -- the only input, it will be the empty array.
                       deriving (Show, Eq, Ord)
 
--- | An index used in an 'Input'.
-data Index = VarIndex Ident
-           | ConstIndex Int
-             deriving (Show, Eq, Ord)
+-- | Given an expression, determine whether the expression represents
+-- an input transformation of an array variable.  If so, return the
+-- variable and the transformation.  Only 'Transpose' and 'Reshape'
+-- are possible to express this way.
+transformFromExp :: Exp -> Maybe (Ident, InputTransform)
+transformFromExp (L0.Transpose cs k n (L0.Var v) _) =
+  Just (v, Transpose cs k n)
+transformFromExp (L0.Reshape cs shape (L0.Var v) _) =
+  Just (v, Reshape cs shape)
+transformFromExp _ = Nothing
 
 -- | The basic source of data for an array input - either an array
 -- variable (possibly indexed) or an @iota@.
@@ -85,17 +91,11 @@ data InputArray = Var Ident
                 -- ^ Some array-typed variable in scope.
                 | Iota SubExp
                 -- ^ @iota(e)@.
-                | Index Certificates Ident (Maybe Certificates) [Index]
-                  -- ^ @a[i]@.
                   deriving (Show, Eq, Ord)
 
 inputArrayToExp :: InputArray -> Exp
 inputArrayToExp (Var k)  = SubExp $ L0.Var k
 inputArrayToExp (Iota e) = L0.Iota e $ srclocOf e
-inputArrayToExp (Index cs idd idxcs idxs) =
-  L0.Index cs idd idxcs (map idx idxs) $ srclocOf idd
-  where idx (VarIndex indidd) = L0.Var indidd
-        idx (ConstIndex i)    = Constant (BasicVal $ IntVal i) $ srclocOf idd
 
 -- | One array input to a SOAC - a SOAC may have multiple inputs, but
 -- all are of this form.  Only the array inputs are expressed with
@@ -108,7 +108,6 @@ data Input = Input [InputTransform] InputArray
 instance Located Input where
   locOf (Input _ (Var v))         = locOf v
   locOf (Input _ (Iota e))        = locOf e
-  locOf (Input _ (Index _ k _ _)) = locOf k
 
 instance Substitute Input where
   substituteNames m (Input ts (Var v)) =
@@ -194,12 +193,6 @@ dimSizes is =
 
         iaDims (Iota e) = return [e]
 
-        iaDims (Index cs v _ idxs) =
-          letSubExps "size" [ L0.Size cs i (L0.Var v) loc
-                                | i <- [0..arrayRank t-length idxs] ]
-          where loc = srclocOf v
-                t   = identType v
-
         inspect' :: InputTransform -> [Maybe SubExp] -> [Maybe SubExp]
         inspect' (Transpose _ k n) ds =
           transposeIndex k n ds
@@ -220,13 +213,11 @@ dimSizes is =
 -- transformed) array variable, return that variable.
 inputArray :: Input -> Maybe Ident
 inputArray (Input _ (Var v))         = Just v
-inputArray (Input _ (Index _ v _ _)) = Just v
 inputArray (Input _ (Iota _))        = Nothing
 
 inputArrayType :: InputArray -> Type
 inputArrayType (Var v)            = identType v
 inputArrayType (Iota _)           = arrayOf (Basic Int) [Nothing] Unique
-inputArrayType (Index _ v _ idxs) = stripArray (length idxs) (identType v)
 
 -- | Return the type of an input.
 inputType :: Input -> Type

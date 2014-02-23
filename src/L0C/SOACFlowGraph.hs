@@ -111,8 +111,6 @@ soacSeen name produced soac =
           Just (identName v, HS.singleton $ map descTransform ts)
         inspectInput (SOAC.Input _ (SOAC.Iota _)) =
           Nothing
-        inspectInput (SOAC.Input ts (SOAC.Index _ v _ _)) =
-          Just (identName v, HS.singleton $ "index" : map descTransform ts)
 
         descTransform (SOAC.Transpose {})    = "transpose"
         descTransform (SOAC.Reshape {})      = "reshape"

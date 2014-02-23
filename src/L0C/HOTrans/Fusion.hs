@@ -24,15 +24,14 @@ import qualified L0C.HORepresentation.SOAC as SOAC
 data FusionGEnv = FusionGEnv {
     soacs      :: HM.HashMap VName [VName]
   -- ^ Mapping from variable name to its entire family.
-  , arrsInScope:: HS.HashSet VName
+  , arrsInScope:: HM.HashMap VName (Maybe (Ident, [SOAC.InputTransform]))
   , fusedRes   :: FusedRes
   , program    :: Prog
   }
 
 newtype FusionGM a = FusionGM (StateT VNameSource (ReaderT FusionGEnv (Either EnablingOptError)) a)
-    deriving (  MonadState VNameSource,
-                MonadReader FusionGEnv,
-                Monad, Applicative, Functor )
+  deriving (Monad, Applicative, Functor,
+            MonadState VNameSource, MonadReader FusionGEnv)
 
 instance MonadFreshNames FusionGM where
   getNameSource = get
@@ -42,35 +41,49 @@ instance MonadFreshNames FusionGM where
 --- Monadic Helpers: bind/new/runFusionGatherM, etc                      ---
 ------------------------------------------------------------------------
 
+arrayTransforms :: Ident -> FusionGM (Ident, [SOAC.InputTransform])
+arrayTransforms v = do
+  v' <- asks $ HM.lookup (identName v) . arrsInScope
+  case v' of Just (Just res) -> return res
+             _               -> return (v, [])
 
 -- | Binds an array name to the set of used-array vars
 bindVar :: FusionGEnv -> VName -> FusionGEnv
 bindVar env name =
-  env { arrsInScope = HS.insert name $ arrsInScope env }
+  env { arrsInScope = HM.insert name Nothing $ arrsInScope env }
 
 bindVars :: FusionGEnv -> [VName] -> FusionGEnv
 bindVars = foldl bindVar
 
-bindingIdents :: [Ident] -> FusionGM a -> FusionGM a
-bindingIdents idds = local (`bindVars` namesOfArrays idds)
+binding :: [Ident] -> FusionGM a -> FusionGM a
+binding idds = local (`bindVars` namesOfArrays idds)
   where namesOfArrays = map identName . filter (not . basicType . identType)
 
-binding :: [Ident] -> FusionGM a -> FusionGM a
-binding = bindingIdents
-
 -- | Binds an array name to the set of soac-produced vars
-bindPatVar :: [VName] -> FusionGEnv -> VName -> FusionGEnv
-bindPatVar faml env nm = env { soacs       = HM.insert nm faml $ soacs env
-                             , arrsInScope = HS.insert nm      $ arrsInScope env
-                             }
+bindingFamilyVar :: [VName] -> FusionGEnv -> VName -> FusionGEnv
+bindingFamilyVar faml env nm =
+  env { soacs       = HM.insert nm faml    $ soacs env
+      , arrsInScope = HM.insert nm Nothing $ arrsInScope env
+      }
 
-bindPatVars :: [VName] -> FusionGEnv -> FusionGEnv
-bindPatVars names env = foldl (bindPatVar names) env names
+bindingFamily :: [Ident] -> FusionGM a -> FusionGM a
+bindingFamily pat = local $ \env -> foldl (bindingFamilyVar names) env names
+  where names = map identName pat
 
-bindPat :: [Ident] -> FusionGM a -> FusionGM a
-bindPat pat = do
-  let nms = map identName pat
-  local $ bindPatVars nms
+bindingTransform :: Ident -> Ident -> SOAC.InputTransform -> FusionGM a -> FusionGM a
+bindingTransform v src trns = local $ \env ->
+  case HM.lookup srcname $ arrsInScope env of
+    Just (Just (src', ts)) ->
+      env { arrsInScope =
+              HM.insert vname (Just (src', ts++[trns])) $ arrsInScope env
+          }
+    Just Nothing ->
+      env { arrsInScope =
+              HM.insert vname (Just (src, [trns])) $ arrsInScope env
+          }
+    _ -> bindVar env vname
+  where vname   = identName v
+        srcname = identName src
 
 -- | Binds the fusion result to the environment.
 bindRes :: FusedRes -> FusionGM a -> FusionGM a
@@ -94,7 +107,11 @@ badFusionGM = FusionGM . lift . lift . Left
 
 fuseProg :: Prog -> Either EnablingOptError (Bool, Prog)
 fuseProg prog = do
-  let env = FusionGEnv { soacs = HM.empty, arrsInScope = HS.empty, fusedRes = mkFreshFusionRes, program = prog }
+  let env = FusionGEnv { soacs = HM.empty
+                       , arrsInScope = HM.empty
+                       , fusedRes = mkFreshFusionRes
+                       , program = prog
+                       }
   let funs= progFunctions prog
   ks <- runFusionGatherM prog (mapM fusionGatherFun funs) env
   let ks'    = map cleanFusionResult ks
@@ -209,89 +226,101 @@ addNewKerWithUnfusable res (idd, soac) ufs = do
   return $ FusedRes (rsucc res) os' is' ufs
            (HM.insert nm_ker new_ker (kernels res))
 
+inlineSOACInput :: SOAC.Input -> FusionGM SOAC.Input
+inlineSOACInput (SOAC.Input ts (SOAC.Var v)) = do
+  (v2, ts2) <- arrayTransforms v
+  return $ SOAC.Input (ts2++ts) (SOAC.Var v2)
+inlineSOACInput input = return input
+
+inlineSOACInputs :: SOAC -> FusionGM SOAC
+inlineSOACInputs soac = do
+  inputs' <- mapM inlineSOACInput $ SOAC.inputs soac
+  return $ inputs' `SOAC.setInputs` soac
+
 -- map, reduce, redomap
 greedyFuse :: Bool -> HS.HashSet VName -> FusedRes -> ([Ident], SOAC) -> FusionGM FusedRes
-greedyFuse is_repl lam_used_nms res (out_idds, soac) = do
-    -- Assumption: the free vars in lambda are already in
-    -- 'unfusable res'.
-    (inp_nms, other_nms) <- soacInputs soac
+greedyFuse is_repl lam_used_nms res (out_idds, orig_soac) = do
+  soac <- inlineSOACInputs orig_soac
+  -- Assumption: the free vars in lambda are already in
+  -- 'unfusable res'.
+  (inp_nms, other_nms) <- soacInputs soac
 
-    let out_nms      = map identName out_idds
-    -- Conditions for fusion:
-    --   (i) none of `out_idds' belongs to the unfusable set.
-    --  (ii) there are some kernels that use some of `out_idds' as inputs
-    let isUnfusable    = (`HS.member` unfusable res)
-        not_unfusable  = is_repl || not (any isUnfusable out_nms)
-        to_fuse_knmSet = getKersWithInpArrs res out_nms
-        to_fuse_knms   = HS.toList to_fuse_knmSet
-        lookup_kern k  = case HM.lookup k (kernels res) of
-                           Nothing  -> badFusionGM $ EnablingOptError (srclocOf soac)
-                                       ("In Fusion.hs, greedyFuse, comp of to_fuse_kers: "
-                                        ++ "kernel name not found in kernels field!")
-                           Just ker -> return ker
+  let out_nms      = map identName out_idds
+  -- Conditions for fusion:
+  --   (i) none of `out_idds' belongs to the unfusable set.
+  --  (ii) there are some kernels that use some of `out_idds' as inputs
+  let isUnfusable    = (`HS.member` unfusable res)
+      not_unfusable  = is_repl || not (any isUnfusable out_nms)
+      to_fuse_knmSet = getKersWithInpArrs res out_nms
+      to_fuse_knms   = HS.toList to_fuse_knmSet
+      lookup_kern k  = case HM.lookup k (kernels res) of
+                         Nothing  -> badFusionGM $ EnablingOptError (srclocOf soac)
+                                     ("In Fusion.hs, greedyFuse, comp of to_fuse_kers: "
+                                      ++ "kernel name not found in kernels field!")
+                         Just ker -> return ker
 
-    to_fuse_kers <- mapM lookup_kern to_fuse_knms
+  to_fuse_kers <- mapM lookup_kern to_fuse_knms
 
-    -- all kernels has to be compatible for fusion, e.g., if
-    -- the kernel is a map, and the current soac is a filter,
-    -- then they cannot be fused
-    (ok_kers_compat, fused_kers) <- do
-      kers <- mapM (attemptFusion out_idds soac) to_fuse_kers
-      case sequence kers of
-        Nothing    -> return (False, [])
-        Just kers' -> return (True, kers')
+  -- all kernels has to be compatible for fusion, e.g., if
+  -- the kernel is a map, and the current soac is a filter,
+  -- then they cannot be fused
+  (ok_kers_compat, fused_kers) <- do
+    kers <- mapM (attemptFusion out_idds soac) to_fuse_kers
+    case sequence kers of
+      Nothing    -> return (False, [])
+      Just kers' -> return (True, kers')
 
-    -- check whether fusing @soac@ will violate any in-place update
-    --    restriction, e.g., would move an input array past its in-place update.
-    let all_used_names = HS.toList $ HS.unions [lam_used_nms, HS.fromList inp_nms, HS.fromList other_nms]
-        has_inplace ker = any (`HS.member` inplace ker) all_used_names
-        ok_inplace = not $ any has_inplace to_fuse_kers
+  -- check whether fusing @soac@ will violate any in-place update
+  --    restriction, e.g., would move an input array past its in-place update.
+  let all_used_names = HS.toList $ HS.unions [lam_used_nms, HS.fromList inp_nms, HS.fromList other_nms]
+      has_inplace ker = any (`HS.member` inplace ker) all_used_names
+      ok_inplace = not $ any has_inplace to_fuse_kers
 
-    -- compute whether @soac@ is fusable or not
-    let is_fusable = not_unfusable && not (null to_fuse_kers) && ok_inplace && ok_kers_compat
+  -- compute whether @soac@ is fusable or not
+  let is_fusable = not_unfusable && not (null to_fuse_kers) && ok_inplace && ok_kers_compat
 
-    --  (i) inparr ids other than vars will be added to unfusable list,
-    -- (ii) will also become part of the unfusable set the inparr vars
-    --         that also appear as inparr of another kernel,
-    --         BUT which said kernel is not the one we are fusing with (now)!
-    let mod_kerS  = if is_fusable then to_fuse_knmSet else HS.empty
-    let used_inps = filter (isInpArrInResModKers res mod_kerS) inp_nms
-    let ufs       = HS.unions [unfusable res, HS.fromList used_inps,
-                               HS.fromList other_nms `HS.difference`
-                               HS.fromList (map identName $ mapMaybe SOAC.inputArray $ SOAC.inputs soac)]
-    let comb      = HM.unionWith HS.union
+  --  (i) inparr ids other than vars will be added to unfusable list,
+  -- (ii) will also become part of the unfusable set the inparr vars
+  --         that also appear as inparr of another kernel,
+  --         BUT which said kernel is not the one we are fusing with (now)!
+  let mod_kerS  = if is_fusable then to_fuse_knmSet else HS.empty
+  let used_inps = filter (isInpArrInResModKers res mod_kerS) inp_nms
+  let ufs       = HS.unions [unfusable res, HS.fromList used_inps,
+                             HS.fromList other_nms `HS.difference`
+                             HS.fromList (map identName $ mapMaybe SOAC.inputArray $ SOAC.inputs soac)]
+  let comb      = HM.unionWith HS.union
 
-    if not is_fusable then
-      if is_repl then return res
-      else -- nothing to fuse, add a new soac kernel to the result
-        addNewKerWithUnfusable res (out_idds, soac) ufs
-     else do
-       -- Need to suitably update `inpArr':
-       --   (i) first remove the inpArr bindings of the old kernel
-       --  (ii) then add the inpArr bindings of the new kernel
-       let inpArr' =
-             foldl (\inpa (kold, knew, knm) ->
-                      let inpa' =
-                            HS.foldl'
-                                (\inpp nm ->
-                                   case HM.lookup nm inpp of
-                                     Nothing -> inpp
-                                     Just s  -> let new_set = HS.delete knm s
-                                                in if HS.null new_set
-                                                   then HM.delete nm         inpp
-                                                   else HM.insert nm new_set inpp
-                                )
-                            inpa $ HS.map identName $ arrInputs kold
-                      in HM.fromList [ (k, HS.singleton knm)
-                                        | k <- HS.toList $ HS.map identName (arrInputs knew) ]
-                           `comb` inpa')
-             (inpArr res) (zip3 to_fuse_kers fused_kers to_fuse_knms)
-       -- Update the kernels map
-       let kernels' = HM.fromList (zip to_fuse_knms fused_kers)
-                      `HM.union` kernels res
+  if not is_fusable then
+    if is_repl then return res
+    else -- nothing to fuse, add a new soac kernel to the result
+      addNewKerWithUnfusable res (out_idds, soac) ufs
+   else do
+     -- Need to suitably update `inpArr':
+     --   (i) first remove the inpArr bindings of the old kernel
+     --  (ii) then add the inpArr bindings of the new kernel
+     let inpArr' =
+           foldl (\inpa (kold, knew, knm) ->
+                    let inpa' =
+                          HS.foldl'
+                              (\inpp nm ->
+                                 case HM.lookup nm inpp of
+                                   Nothing -> inpp
+                                   Just s  -> let new_set = HS.delete knm s
+                                              in if HS.null new_set
+                                                 then HM.delete nm         inpp
+                                                 else HM.insert nm new_set inpp
+                              )
+                          inpa $ HS.map identName $ arrInputs kold
+                    in HM.fromList [ (k, HS.singleton knm)
+                                      | k <- HS.toList $ HS.map identName (arrInputs knew) ]
+                         `comb` inpa')
+           (inpArr res) (zip3 to_fuse_kers fused_kers to_fuse_knms)
+     -- Update the kernels map
+     let kernels' = HM.fromList (zip to_fuse_knms fused_kers)
+                    `HM.union` kernels res
 
-       -- nothing to do for `outArr' (since we have not added a new kernel)
-       return $ FusedRes True (outArr res) inpArr' ufs kernels'
+     -- nothing to do for `outArr' (since we have not added a new kernel)
+     return $ FusedRes True (outArr res) inpArr' ufs kernels'
 
 ------------------------------------------------------------------------
 ------------------------------------------------------------------------
@@ -321,19 +350,19 @@ fusionGatherBody fres (LetPat pat e body _)
   | Right soac <- SOAC.fromExp e =
       case soac of
         SOAC.Map _ lam _ _ -> do
-          bres  <- bindPat pat $ fusionGatherBody fres body
+          bres  <- bindingFamily pat $ fusionGatherBody fres body
           (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
           greedyFuse False used_lam blres (pat, soac)
 
         SOAC.Filter _ lam _ _ -> do
-          bres  <- bindPat pat $ fusionGatherBody fres body
+          bres  <- bindingFamily pat $ fusionGatherBody fres body
           (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
           greedyFuse False used_lam blres (pat, soac)
 
         SOAC.Reduce _ lam args loc -> do
           -- a reduce always starts a new kernel
           let nes = map fst args
-          bres  <- bindPat pat $ fusionGatherBody fres body
+          bres  <- bindingFamily pat $ fusionGatherBody fres body
           bres' <- fusionGatherExp bres $ TupLit nes loc
           (_, blres) <- fusionGatherLam (HS.empty, bres') lam
           addNewKer blres (pat, soac)
@@ -341,7 +370,7 @@ fusionGatherBody fres (LetPat pat e body _)
         SOAC.Redomap _ outer_red inner_red ne _ loc -> do
           -- a redomap always starts a new kernel
           (_, lres)  <- foldM fusionGatherLam (HS.empty, fres) [outer_red, inner_red]
-          bres  <- bindPat pat $ fusionGatherBody lres body
+          bres  <- bindingFamily pat $ fusionGatherBody lres body
           bres' <- fusionGatherExp bres $ TupLit ne loc
           addNewKer bres' (pat, soac)
 
@@ -349,7 +378,7 @@ fusionGatherBody fres (LetPat pat e body _)
           -- NOT FUSABLE (probably), but still add as kernel, as
           -- optimisations like ISWIM may make it fusable.
           let nes = map fst args
-          bres  <- bindPat pat $ fusionGatherBody fres body
+          bres  <- bindingFamily pat $ fusionGatherBody fres body
           (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
           blres' <- fusionGatherExp blres $ TupLit nes loc
           greedyFuse False used_lam blres' (pat, soac)
@@ -359,9 +388,12 @@ fusionGatherBody _ (LetPat _ e _ loc)
     badFusionGM $ EnablingOptError loc
                   ("In Fusion.hs, "++ppExp (SubExp inpe)++" is not valid array input.")
 
+fusionGatherBody fres (LetPat [v] e body _)
+  | Just (src,trns) <- SOAC.transformFromExp e =
+    bindingTransform v src trns $ fusionGatherBody fres body
 
 fusionGatherBody fres (LetPat pat (Replicate n el loc) body _) = do
-  bres <- bindPat pat $ fusionGatherBody fres body
+  bres <- bindingFamily pat $ fusionGatherBody fres body
   -- Implemented inplace: gets the variables in `n` and `el`
   (used_set, bres') <- getUnfusableSet loc bres [SubExp n,SubExp el]
   repl_idnm <- newVName "repl_x"
@@ -376,7 +408,7 @@ fusionGatherBody fres (LetPat pat e body _) = do
     foldM fusionGatherExp bres (e:pat_vars)
 
 fusionGatherBody fres (LetWith _ id1 id0 _ inds elm body _) = do
-  bres  <- bindingIdents [id1] $ fusionGatherBody fres body
+  bres  <- binding [id1] $ fusionGatherBody fres body
 
   let pat_vars = [Var id0, Var id1]
   fres' <- foldM fusionGatherSubExp bres (elm : inds ++ pat_vars)
@@ -413,7 +445,7 @@ fusionGatherBody fres (Result _ _) =
 fusionGatherExp :: FusedRes -> Exp -> FusionGM FusedRes
 
 -----------------------------------------
----- Var/Index/LetWith/Do-Loop/If    ----
+---- Index/If    ----
 -----------------------------------------
 
 fusionGatherExp fres (Index _ idd _ inds _) =
@@ -449,12 +481,15 @@ fusionGatherExp fres e = do
     foldExpM foldstct fres e
 
 fusionGatherSubExp :: FusedRes -> SubExp -> FusionGM FusedRes
-fusionGatherSubExp fres (Var idd) =
-  -- IF idd is an array THEN ADD it to the unfusable set!
-  case identType idd of
-    Array{} -> return fres { unfusable = HS.insert (identName idd) (unfusable fres) }
-    _       -> return fres
-fusionGatherSubExp fres _ =
+fusionGatherSubExp fres (Var idd) = addIdentToUnfusable fres idd
+fusionGatherSubExp fres _         = return fres
+
+addIdentToUnfusable :: FusedRes -> Ident -> FusionGM FusedRes
+addIdentToUnfusable fres orig_idd
+  | Array{} <- identType orig_idd = do
+  (idd,_) <- arrayTransforms orig_idd
+  return fres { unfusable = HS.insert (identName idd) (unfusable fres) }
+addIdentToUnfusable fres _ =
   return fres
 
 -- Lambdas create a new scope.  Disallow fusing from outside lambda by
@@ -462,13 +497,13 @@ fusionGatherSubExp fres _ =
 fusionGatherLam :: (HS.HashSet VName, FusedRes) -> Lambda -> FusionGM (HS.HashSet VName, FusedRes)
 fusionGatherLam (u_set,fres) (Lambda idds body _ _) = do
     let null_res = mkFreshFusionRes
-    new_res <- bindingIdents (map fromParam idds) $ fusionGatherBody null_res body
+    new_res <- binding (map fromParam idds) $ fusionGatherBody null_res body
     -- make the inpArr unfusable, so that they
     -- cannot be fused from outside the lambda:
     let inp_arrs = HS.fromList $ HM.keys $ inpArr new_res
     let unfus = unfusable new_res `HS.union` inp_arrs
-    bnds <- asks arrsInScope
-    let unfus'  = unfus `HS.intersection` bnds
+    bnds <- HM.keys <$> asks arrsInScope
+    let unfus'  = unfus `HS.intersection` HS.fromList bnds
     -- merge fres with new_res'
     let new_res' = new_res { unfusable = unfus' }
     -- merge new_res with fres'
