@@ -137,6 +137,7 @@ performArrayDelays pat e = do
 
 cheapBody :: Body -> Bool
 cheapBody (LetPat _ e body _) = cheapExp e && cheapBody body
+cheapBody (Result _ _)        = True
 cheapBody _ = False
 
 cheapExp :: Exp -> Bool
