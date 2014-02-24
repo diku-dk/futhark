@@ -60,15 +60,13 @@ data CPropEnv = CopyPropEnv {
 data CPropRes = CPropRes {
     resSuccess :: Bool
   -- ^ Whether we have changed something.
-  , resNonRemovable :: HS.HashSet VName
-  -- ^ The set of variables used as merge variables.
   }
 
 
 instance Monoid CPropRes where
-  CPropRes c1 m1 `mappend` CPropRes c2 m2 =
-    CPropRes (c1 || c2) (m1 `HS.union` m2)
-  mempty = CPropRes False HS.empty
+  CPropRes c1 `mappend` CPropRes c2 =
+    CPropRes (c1 || c2)
+  mempty = CPropRes False
 
 newtype CPropM a = CPropM (WriterT CPropRes (ReaderT CPropEnv (Either EnablingOptError)) a)
     deriving (MonadWriter CPropRes,
@@ -79,14 +77,8 @@ newtype CPropM a = CPropM (WriterT CPropRes (ReaderT CPropEnv (Either EnablingOp
 -- convenience, use this instead of 'return'.
 changed :: a -> CPropM a
 changed x = do
-  tell $ CPropRes True HS.empty
+  tell $ CPropRes True
   return x
-
-
--- | This name was used as a merge variable.
-nonRemovable :: VName -> CPropM ()
-nonRemovable name =
-  tell $ CPropRes False $ HS.singleton name
 
 -- | The identifier was consumed, and should not be used within the
 -- body, so mark it and any aliases as nonremovable (with
@@ -94,8 +86,7 @@ nonRemovable name =
 -- from the symbol table.
 consuming :: Ident -> CPropM a -> CPropM a
 consuming idd m = do
-  (vtable, removed) <- spartition ok <$> asks envVtable
-  mapM_ nonRemovable $ identName idd : HM.keys removed
+  (vtable, _) <- spartition ok <$> asks envVtable
   local (\e -> e { envVtable = vtable }) m
   where als = identName idd `HS.insert` aliases (identType idd)
         spartition f s = let s' = HM.filter f s
@@ -103,21 +94,6 @@ consuming idd m = do
         ok (Value {})  = True
         ok (VarId k _ _)  = not $ k `HS.member` als
         ok (SymArr e _ _) = HS.null $ als `HS.intersection` freeNamesInExp e
-
--- | @collectNonRemovable mvars m@ executes the action @m@.  The
--- intersection of @mvars@ and any variables used as merge variables
--- while executing @m@ will also be returned, and removed from the
--- writer result.  The latter property is only important if names are
--- not unique.
-collectNonRemovable :: [VName] -> CPropM a -> CPropM (a, Bool)
-collectNonRemovable mvars m = pass $ do
-  (x,res) <- listen m
-  if any (`HS.member` resNonRemovable res) mvars then
-    return ((x, False),
-             const $ res { resNonRemovable = resNonRemovable res `HS.difference`
-                                             HS.fromList mvars })
-  else return ((x, True), const res)
-
 
 -- | The enabling optimizations run in this monad.  Note that it has no mutable
 -- state, but merely keeps track of current bindings in a 'TypeEnv'.
@@ -185,16 +161,10 @@ copyCtPropBody (LetWith cs nm src indcs inds el body pos) =
 
 copyCtPropBody (LetPat pat e body loc) = do
   let continue e' = do
-        let bnds = getPropBnds pat e' remv
-            remv = not $ null bnds
+        let bnds = getPropBnds pat e' True
 
-        case bnds of
-          [] -> LetPat pat e' <$> copyCtPropBody body <*> pure loc
-          _ -> do
-            (body', removable) <- collectNonRemovable (map fst bnds) $
-                                  binding bnds $ copyCtPropBody body
-            if removable then changed body'
-            else return $ LetPat pat e' body' loc
+        body' <- binding bnds $ copyCtPropBody body
+        return $ LetPat pat e' body' loc
       continue' es = continue $ TupLit es loc
   e' <- copyCtPropExp e
   case e' of
@@ -221,11 +191,9 @@ copyCtPropSubExp e@(Var (Ident vnm _ pos)) = do
   case bnd of
     Just (Value v   _ _)
       | isBasicTypeVal v    -> changed $ Constant v pos
-    Just (VarId  id' tp1 _) -> do nonRemovable id'
-                                  changed $ Var (Ident id' tp1 pos) -- or tp
+    Just (VarId  id' tp1 _) -> changed $ Var (Ident id' tp1 pos) -- or tp
     Just (SymArr (SubExp se) _ _) -> changed se
-    _                       -> do nonRemovable vnm
-                                  return e
+    _                       -> return e
 copyCtPropSubExp (Constant v loc) = return $ Constant v loc
 
 copyCtPropExp :: Exp -> CPropM Exp
@@ -239,10 +207,8 @@ copyCtPropExp (Index cs idd@(Ident vnm tp p) csidx inds pos) = do
   cs'   <- copyCtPropCerts cs
   csidx' <- maybe (return Nothing) (liftM Just) $ liftM copyCtPropCerts csidx
   case bnd of
-    Nothing               -> do nonRemovable vnm
-                                return $ Index cs' idd csidx' inds' pos
-    Just (VarId  id' _ _) -> do nonRemovable id'
-                                changed $ Index cs' (Ident id' tp p) csidx' inds' pos
+    Nothing               -> return $ Index cs' idd csidx' inds' pos
+    Just (VarId  id' _ _) -> changed $ Index cs' (Ident id' tp p) csidx' inds' pos
     Just (Value v@(ArrayVal _ _) _ _)
       | Just iis <- ctIndex inds',
         length iis == length (arrayShape v),
@@ -280,11 +246,9 @@ copyCtPropExp (Index cs idd@(Ident vnm tp p) csidx inds pos) = do
           | k+n < length inds' ->
             changed $ Index (cs'++cs2) src csidx' (transposeIndex k n inds') pos
 
-        _ -> do nonRemovable vnm
-                return $ Index cs' idd csidx' inds' pos
+        _ -> return $ Index cs' idd csidx' inds' pos
 
-    _ -> do nonRemovable vnm
-            return $ Index cs' idd csidx' inds' pos
+    _ -> return $ Index cs' idd csidx' inds' pos
 
 copyCtPropExp (BinOp bop e1 e2 tp pos) = do
     e1'   <- copyCtPropSubExp e1
@@ -415,8 +379,7 @@ copyCtPropIdent ident@(Ident vnm _ loc) = do
     case bnd of
       Nothing                 -> return ident
       Just (VarId  id' tp1 _) -> changed $ Ident id' tp1 loc
-      _                       -> do nonRemovable vnm
-                                    return ident
+      _                       -> return ident
 
 copyCtPropCerts :: Certificates -> CPropM Certificates
 copyCtPropCerts = liftM (nub . concat) . mapM check
@@ -424,10 +387,8 @@ copyCtPropCerts = liftM (nub . concat) . mapM check
           vv <- asks $ HM.lookup (identName idd) . envVtable
           case vv of
             Just (Value (BasicVal Checked) _ _) -> changed []
-            Just (VarId  id' tp1 _)             -> do nonRemovable id'
-                                                      changed [Ident id' tp1 loc]
-            _ -> do nonRemovable $ identName idd
-                    return [idd]
+            Just (VarId  id' tp1 _)             -> changed [Ident id' tp1 loc]
+            _ -> return [idd]
           where loc = srclocOf idd
 
 copyCtPropLambda :: Lambda -> CPropM Lambda
