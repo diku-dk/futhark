@@ -553,6 +553,8 @@ checkBody (DoLoop mergepat (Ident loopvar _ _)
                               Observe     -> Nonunique
       param (Basic bt) _ = Basic bt
 
+      setIdentType v t = v { identType = t }
+
       -- We use the type of the merge expression, but with uniqueness
       -- attributes reflected to show how the parts of the merge
       -- pattern are used - if something was consumed, it has to be a
@@ -560,8 +562,8 @@ checkBody (DoLoop mergepat (Ident loopvar _ _)
       rettype = zipWith param (map subExpType es') $
                 patDiet mergevs' $
                 usageOccurences loopflow
+      funparams = zipWith setIdentType mergevs' rettype
 
-  merge  <- newIdents "merge_val" (map fromDecl rettype) loc
   result <- newIdents "merge_val" (map fromDecl rettype) loc
 
   let boundnames = HS.insert iparam $ HS.fromList mergevs'
@@ -574,8 +576,7 @@ checkBody (DoLoop mergepat (Ident loopvar _ _)
       -- These are the parameters expected by the function: All of the
       -- free variables, followed by the index, followed by the upper
       -- bound (currently not used), followed by the merge value.
-      params = free ++
-               [iparam, toParam bound] ++ map toParam merge
+      params = free ++ [iparam, toParam bound] ++ funparams
       bindfun env = env { envFtable = HM.insert fname
                                       (rettype, map identType params) $
                                       envFtable env }
@@ -590,9 +591,7 @@ checkBody (DoLoop mergepat (Ident loopvar _ _)
                        zip args (map (diet . subExpType) args))
                       (map fromDecl rettype) loc)
                      (Result (map Var result) loc) loc
-  let funbody' = LetPat mergevs' (TupLit (map Var merge) loc)
-                 (mapTail recurse loopbody') $
-                 srclocOf loopbody'
+  let funbody' = mapTail recurse loopbody'
 
   (funcall, callflow) <- collectDataflow $ local bindfun $ do
     -- Check that the function is internally consistent.
@@ -601,16 +600,14 @@ checkBody (DoLoop mergepat (Ident loopvar _ _)
     -- bound and initial merge value, in case they use something
     -- consumed in the call.  This reintroduces the dataflow for
     -- boundexp and mergeexp that we previously threw away.
-    checkBody $ LetPat merge (TupLit es' loc)
-                (LetPat result
-                 (Apply fname
-                  ([(Var (fromParam k), diet (identType k)) | k <- free ] ++
-                   [(Constant (BasicVal $ IntVal 0) loc, Observe),
-                    (boundexp', Observe)] ++
-                   zip (map Var merge) (map diet rettype))
-                  (map fromDecl rettype) loc)
-                 (Result (map Var result) loc) loc)
-                loc
+    checkBody $ LetPat result
+                (Apply fname
+                 ([(Var (fromParam k), diet (identType k)) | k <- free ] ++
+                  [(Constant (BasicVal $ IntVal 0) loc, Observe),
+                   (boundexp', Observe)] ++
+                  zip es' (map diet rettype))
+                 (map fromDecl rettype) loc)
+                (Result (map Var result) loc) loc
 
   -- Now we just need to bind the result of the function call to the
   -- original merge pattern...
