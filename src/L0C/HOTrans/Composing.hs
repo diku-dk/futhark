@@ -160,9 +160,8 @@ fuseInputs :: Input input =>
                HM.HashMap Param input,
                Body -> Body, Body -> Body)
 fuseInputs lam1 inp1 out1 lam2 inp2 =
-  (lam2redparams, pat, inputmap, makeCopies, makeCopiesInner)
-  where pat = map (either id id) outbnds
-        (lam2redparams, lam2arrparams) =
+  (lam2redparams, outbnds, inputmap, makeCopies, makeCopiesInner)
+  where (lam2redparams, lam2arrparams) =
           splitAt (length (lambdaParams lam2) - length inp2) $ lambdaParams lam2
         lam1inputmap = HM.fromList $ zip (lambdaParams lam1) inp1
         lam2inputmap = HM.fromList $ zip lam2arrparams            inp2
@@ -186,7 +185,7 @@ outParams out1 lam2arrparams inp2 =
 filterOutParams :: Input input =>
                    [Ident]
                 -> HM.HashMap Param input
-                -> [Either Ident Ident]
+                -> [Ident]
 filterOutParams out1 outins =
   snd $ mapAccumL checkUsed outUsage out1
   where outUsage = HM.foldlWithKey' add M.empty outins
@@ -197,8 +196,10 @@ filterOutParams out1 outins =
 
         checkUsed m a =
           case M.lookup a m of
-            Just (p:ps) -> (M.insert a ps m, Right p)
-            _           -> (m, Left a)
+            Just (p:ps) -> (M.insert a ps m, p)
+            _           -> (m, rowIdent a)
+
+        rowIdent v = v { identType = rowType $ identType v }
 
 removeDuplicateInputs :: Input input =>
                          HM.HashMap Param input
