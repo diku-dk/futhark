@@ -36,13 +36,13 @@ import qualified L0C.Interpreter as Interp
 --   binding is to be removed from program   --
 -----------------------------------------------
 
-data CtOrId  = Value Value Type Bool
+data CtOrId  = Value Value Type
              -- | value for constant propagation
 
-             | VarId VName Type Bool
+             | VarId VName Type
              -- | Variable id for copy propagation
 
-             | SymArr Exp Type Bool
+             | SymArr Exp Type
              -- | Various other opportunities for copy propagation,
              -- for the moment: (i) an indexed variable, (ii) a iota
              -- array, (iii) a replicated array, (iv) a TupLit, and
@@ -91,9 +91,9 @@ consuming idd m = do
   where als = identName idd `HS.insert` aliases (identType idd)
         spartition f s = let s' = HM.filter f s
                          in (s', s `HM.difference` s')
-        ok (Value {})  = True
-        ok (VarId k _ _)  = not $ k `HS.member` als
-        ok (SymArr e _ _) = HS.null $ als `HS.intersection` freeNamesInExp e
+        ok (Value {})   = True
+        ok (VarId k _)  = not $ k `HS.member` als
+        ok (SymArr e _) = HS.null $ als `HS.intersection` freeNamesInExp e
 
 -- | The enabling optimizations run in this monad.  Note that it has no mutable
 -- state, but merely keeps track of current bindings in a 'TypeEnv'.
@@ -161,8 +161,7 @@ copyCtPropBody (LetWith cs nm src indcs inds el body pos) =
 
 copyCtPropBody (LetPat pat e body loc) = do
   let continue e' = do
-        let bnds = getPropBnds pat e' True
-
+        let bnds = getPropBnds pat e'
         body' <- binding bnds $ copyCtPropBody body
         return $ LetPat pat e' body' loc
       continue' es = continue $ TupLit es loc
@@ -189,10 +188,10 @@ copyCtPropSubExp :: SubExp -> CPropM SubExp
 copyCtPropSubExp e@(Var (Ident vnm _ pos)) = do
   bnd <- asks $ HM.lookup vnm . envVtable
   case bnd of
-    Just (Value v   _ _)
-      | isBasicTypeVal v    -> changed $ Constant v pos
-    Just (VarId  id' tp1 _) -> changed $ Var (Ident id' tp1 pos) -- or tp
-    Just (SymArr (SubExp se) _ _) -> changed se
+    Just (Value v   _)
+      | isBasicTypeVal v  -> changed $ Constant v pos
+    Just (VarId  id' tp1) -> changed $ Var (Ident id' tp1 pos) -- or tp
+    Just (SymArr (SubExp se) _) -> changed se
     _                       -> return e
 copyCtPropSubExp (Constant v loc) = return $ Constant v loc
 
@@ -207,14 +206,14 @@ copyCtPropExp (Index cs idd@(Ident vnm tp p) csidx inds pos) = do
   cs'   <- copyCtPropCerts cs
   csidx' <- maybe (return Nothing) (liftM Just) $ liftM copyCtPropCerts csidx
   case bnd of
-    Nothing               -> return $ Index cs' idd csidx' inds' pos
-    Just (VarId  id' _ _) -> changed $ Index cs' (Ident id' tp p) csidx' inds' pos
-    Just (Value v@(ArrayVal _ _) _ _)
+    Nothing             -> return $ Index cs' idd csidx' inds' pos
+    Just (VarId  id' _) -> changed $ Index cs' (Ident id' tp p) csidx' inds' pos
+    Just (Value v@(ArrayVal _ _) _)
       | Just iis <- ctIndex inds',
         length iis == length (arrayShape v),
         Just el <- getArrValInd v iis -> changed $ SubExp $ Constant el pos
 
-    Just (SymArr e' _ _) ->
+    Just (SymArr e' _) ->
       case (e', inds') of
         (Iota _ _, [ii]) -> changed $ SubExp ii
 
@@ -284,10 +283,10 @@ copyCtPropExp (Size cs i e pos) = do
     cs' <- copyCtPropCerts cs
     case e' of
       Var idd -> do vv <- asks $ HM.lookup (identName idd) . envVtable
-                    case vv of Just (Value a _ _) -> literal a
-                               Just (SymArr (Iota ne _) _ _)
+                    case vv of Just (Value a _) -> literal a
+                               Just (SymArr (Iota ne _) _)
                                  | i == 0 -> return $ SubExp ne
-                               Just (SymArr (Replicate ne _ _) _ _)
+                               Just (SymArr (Replicate ne _ _) _)
                                  | i == 0 -> return $ SubExp ne
                                _ -> return $ Size cs' i e' pos
       Constant a _ -> literal a
@@ -308,7 +307,7 @@ copyCtPropExp (Assert e loc) = do
     Var idd -> do
       vv <- asks $ HM.lookup (identName idd) . envVtable
       case vv of
-        Just (Value (BasicVal (LogVal True)) _ _) ->
+        Just (Value (BasicVal (LogVal True)) _) ->
           return $ SubExp $ Constant (BasicVal Checked) loc
         _                                         ->
           return $ Assert e' loc
@@ -321,8 +320,8 @@ copyCtPropExp (Conjoin es loc) = do
       check seen (Var idd) = do
         vv <- asks $ HM.lookup (identName idd) . envVtable
         case vv of
-          Just (Value (BasicVal Checked) _ _)       -> changed seen
-          Just (SymArr (Conjoin es2 _) _ _) -> changed $ seen `S.union` S.fromList es2
+          Just (Value (BasicVal Checked) _) -> changed seen
+          Just (SymArr (Conjoin es2 _) _)   -> changed $ seen `S.union` S.fromList es2
           _                                 -> return  $ Var idd `S.insert` seen
       check seen e = return $ e `S.insert` seen
   es'' <- S.toList <$> foldM check S.empty es'
@@ -353,7 +352,7 @@ copyCtPropExp (Apply fname args tp pos) = do
                                           else return (False, []    )
                 Var idd   -> do vv <- asks $ HM.lookup (identName idd) . envVtable
                                 case vv of
-                                  Just (Value v _ _) -> do
+                                  Just (Value v _) -> do
                                     (res, vals) <- allArgsAreValues as
                                     if res then return (True,  v:vals)
                                            else return (False, []    )
@@ -377,17 +376,17 @@ copyCtPropIdent :: Ident -> CPropM Ident
 copyCtPropIdent ident@(Ident vnm _ loc) = do
     bnd <- asks $ HM.lookup vnm . envVtable
     case bnd of
-      Nothing                 -> return ident
-      Just (VarId  id' tp1 _) -> changed $ Ident id' tp1 loc
-      _                       -> return ident
+      Nothing               -> return ident
+      Just (VarId  id' tp1) -> changed $ Ident id' tp1 loc
+      _                     -> return ident
 
 copyCtPropCerts :: Certificates -> CPropM Certificates
 copyCtPropCerts = liftM (nub . concat) . mapM check
   where check idd = do
           vv <- asks $ HM.lookup (identName idd) . envVtable
           case vv of
-            Just (Value (BasicVal Checked) _ _) -> changed []
-            Just (VarId  id' tp1 _)             -> changed [Ident id' tp1 loc]
+            Just (Value (BasicVal Checked) _) -> changed []
+            Just (VarId  id' tp1)             -> changed [Ident id' tp1 loc]
             _ -> return [idd]
           where loc = srclocOf idd
 
@@ -619,26 +618,26 @@ isCt0 _                                   = False
 isBasicTypeVal :: Value -> Bool
 isBasicTypeVal = basicType . valueType
 
-getPropBnds :: [Ident] -> Exp -> Bool -> [(VName, CtOrId)]
-getPropBnds [Ident var tp _] e to_rem =
+getPropBnds :: [Ident] -> Exp -> [(VName, CtOrId)]
+getPropBnds [ident@(Ident var tp _)] e =
   case e of
-    SubExp (Constant v _) -> [(var, Value v (fromDecl $ valueType v) to_rem)]
-    SubExp (Var v)        -> [(var, VarId  (identName v) (identType v) to_rem)]
-    Index   {}            -> [(var, SymArr e   tp  to_rem)]
-    TupLit  [e'] _        -> [(var, SymArr (SubExp e') tp to_rem)]
-    Transpose   {}        -> [(var, SymArr e   tp  to_rem)]
-    Reshape   {}          -> [(var, SymArr e   tp  to_rem)]
-    Conjoin {}            -> [(var, SymArr e   tp  to_rem)]
+    SubExp (Constant v _) -> [(var, Value v (fromDecl $ valueType v))]
+    SubExp (Var v)        -> [(var, VarId  (identName v) (identType v))]
+    Index   {}            -> [(var, SymArr e   tp)]
+    TupLit  [e'] _        -> getPropBnds [ident] $ SubExp e'
+    Transpose   {}        -> [(var, SymArr e   tp)]
+    Reshape   {}          -> [(var, SymArr e   tp)]
+    Conjoin {}            -> [(var, SymArr e   tp)]
 
     Iota {}               -> let newtp = Array Int [Nothing] Nonunique mempty
-                             in  [(var, SymArr e newtp to_rem)]
-    Replicate {}          -> [(var, SymArr e tp to_rem)]
-    ArrayLit  {}          -> [(var, SymArr e tp to_rem)]
+                             in  [(var, SymArr e newtp)]
+    Replicate {}          -> [(var, SymArr e tp)]
+    ArrayLit  {}          -> [(var, SymArr e tp)]
     _                     -> []
-getPropBnds ids (TupLit ts _) to_rem
+getPropBnds ids (TupLit ts _)
   | length ids == length ts =
-    concatMap (\(x,y)-> getPropBnds [x] (SubExp y) to_rem) $ zip ids ts
-getPropBnds _ _ _ = []
+    concatMap (\(x,y)-> getPropBnds [x] (SubExp y)) $ zip ids ts
+getPropBnds _ _ = []
 
 ctIndex :: [SubExp] -> Maybe [Int]
 ctIndex [] = Just []
