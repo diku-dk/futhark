@@ -1,9 +1,9 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
-module L0C.EnablingOpts.CopyCtPropFold (
-                                copyCtProp
-                              , copyCtPropOneLambda
-                            )
+module L0C.EnablingOpts.CopyCtPropFold
+  ( copyCtProp
+  , copyCtPropOneLambda
+  )
   where
 
 import Control.Applicative
@@ -37,18 +37,19 @@ import qualified L0C.Interpreter as Interp
 -----------------------------------------------
 
 data CtOrId  = Value Value Type Bool
-             -- value for constant propagation
+             -- | value for constant propagation
 
              | VarId VName Type Bool
-             -- Variable id for copy propagation
+             -- | Variable id for copy propagation
 
              | SymArr Exp Type Bool
-             -- various other opportunities for copy
-             -- propagation, for the moment: (i) an indexed variable,
-             -- (ii) a iota array, (iii) a replicated array, (iv) a TupLit,
-             -- and (v) an ArrayLit.   I leave this one open, i.e., Exp,
-             -- as I do not know exactly what we need here
-             -- To Cosmin: Clean it up in the end, i.e., get rid of Exp.
+             -- | Various other opportunities for copy propagation,
+             -- for the moment: (i) an indexed variable, (ii) a iota
+             -- array, (iii) a replicated array, (iv) a TupLit, and
+             -- (v) an ArrayLit.  I leave this one open, i.e., Exp, as
+             -- I do not know exactly what we need here To Cosmin:
+             -- Clean it up in the end, i.e., get rid of Exp.
+               deriving (Show)
 
 data CPropEnv = CopyPropEnv {
     envVtable  :: HM.HashMap VName CtOrId,
@@ -59,15 +60,15 @@ data CPropEnv = CopyPropEnv {
 data CPropRes = CPropRes {
     resSuccess :: Bool
   -- ^ Whether we have changed something.
-  , resNonRemovable :: [VName]
+  , resNonRemovable :: HS.HashSet VName
   -- ^ The set of variables used as merge variables.
   }
 
 
 instance Monoid CPropRes where
   CPropRes c1 m1 `mappend` CPropRes c2 m2 =
-    CPropRes (c1 || c2) (m1 `union` m2)
-  mempty = CPropRes False []
+    CPropRes (c1 || c2) (m1 `HS.union` m2)
+  mempty = CPropRes False HS.empty
 
 newtype CPropM a = CPropM (WriterT CPropRes (ReaderT CPropEnv (Either EnablingOptError)) a)
     deriving (MonadWriter CPropRes,
@@ -78,14 +79,14 @@ newtype CPropM a = CPropM (WriterT CPropRes (ReaderT CPropEnv (Either EnablingOp
 -- convenience, use this instead of 'return'.
 changed :: a -> CPropM a
 changed x = do
-  tell $ CPropRes True []
+  tell $ CPropRes True HS.empty
   return x
 
 
 -- | This name was used as a merge variable.
 nonRemovable :: VName -> CPropM ()
 nonRemovable name =
-  tell $ CPropRes False [name]
+  tell $ CPropRes False $ HS.singleton name
 
 -- | The identifier was consumed, and should not be used within the
 -- body, so mark it and any aliases as nonremovable (with
@@ -108,12 +109,12 @@ consuming idd m = do
 -- while executing @m@ will also be returned, and removed from the
 -- writer result.  The latter property is only important if names are
 -- not unique.
-collectNonRemovable :: [VName] -> CPropM a -> CPropM (a, [VName])
-collectNonRemovable mvars m = pass collect
-  where collect = do
-          (x,res) <- listen m
-          return ((x, mvars `intersect` resNonRemovable res),
-                  const $ res { resNonRemovable = resNonRemovable res \\ mvars})
+collectNonRemovable :: [VName] -> CPropM a -> CPropM (a, HS.HashSet VName)
+collectNonRemovable mvars m = pass $ do
+  (x,res) <- listen m
+  return ((x, HS.fromList mvars `HS.intersection` resNonRemovable res),
+          const $ res { resNonRemovable = resNonRemovable res `HS.difference`
+                                          HS.fromList mvars})
 
 
 -- | The enabling optimizations run in this monad.  Note that it has no mutable
@@ -185,21 +186,19 @@ copyCtPropBody (LetPat pat e body loc) = do
         let bnds = getPropBnds pat e' remv
             remv = not $ null bnds
 
-        (body', mvars) <- collectNonRemovable (map fst bnds) $
-                          if null bnds then copyCtPropBody body
-                          else binding bnds $ copyCtPropBody body
-        if remv && null mvars then changed body'
-        else return $ LetPat pat e' body' loc
+        case bnds of
+          [] -> LetPat pat e' <$> copyCtPropBody body <*> pure loc
+          _ -> do
+            (body', mvars) <- collectNonRemovable (map fst bnds) $
+                              binding bnds $ copyCtPropBody body
+            if HS.null mvars then changed body'
+            else return $ LetPat pat e' body' loc
       continue' es = continue $ TupLit es loc
   e' <- copyCtPropExp e
   case e' of
-    If e1 tb fb t ifloc -> do
-      e1' <- copyCtPropSubExp e1
-      tb' <- copyCtPropBody tb
-      fb' <- copyCtPropBody fb
-      if      isCt1 e1' then mapTailM continue' tb'
-      else if isCt0 e1' then mapTailM continue' fb'
-           else continue $ If e1' tb' fb' t ifloc
+    If e1 tb fb _ _
+      | isCt1 e1 -> mapTailM continue' tb
+      | isCt0 e1 -> mapTailM continue' fb
     _ -> continue e'
 
 
@@ -401,6 +400,7 @@ copyCtPropExp (Apply fname args tp pos) = do
 copyCtPropExp e = mapExpM mapper e
   where mapper = identityMapper {
                    mapOnExp = copyCtPropExp
+                 , mapOnBody = copyCtPropBody
                  , mapOnSubExp = copyCtPropSubExp
                  , mapOnLambda = copyCtPropLambda
                  , mapOnIdent = copyCtPropIdent
