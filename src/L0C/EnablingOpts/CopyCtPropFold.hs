@@ -109,12 +109,14 @@ consuming idd m = do
 -- while executing @m@ will also be returned, and removed from the
 -- writer result.  The latter property is only important if names are
 -- not unique.
-collectNonRemovable :: [VName] -> CPropM a -> CPropM (a, HS.HashSet VName)
+collectNonRemovable :: [VName] -> CPropM a -> CPropM (a, Bool)
 collectNonRemovable mvars m = pass $ do
   (x,res) <- listen m
-  return ((x, HS.fromList mvars `HS.intersection` resNonRemovable res),
-          const $ res { resNonRemovable = resNonRemovable res `HS.difference`
-                                          HS.fromList mvars})
+  if any (`HS.member` resNonRemovable res) mvars then
+    return ((x, False),
+             const $ res { resNonRemovable = resNonRemovable res `HS.difference`
+                                             HS.fromList mvars })
+  else return ((x, True), const res)
 
 
 -- | The enabling optimizations run in this monad.  Note that it has no mutable
@@ -189,9 +191,9 @@ copyCtPropBody (LetPat pat e body loc) = do
         case bnds of
           [] -> LetPat pat e' <$> copyCtPropBody body <*> pure loc
           _ -> do
-            (body', mvars) <- collectNonRemovable (map fst bnds) $
-                              binding bnds $ copyCtPropBody body
-            if HS.null mvars then changed body'
+            (body', removable) <- collectNonRemovable (map fst bnds) $
+                                  binding bnds $ copyCtPropBody body
+            if removable then changed body'
             else return $ LetPat pat e' body' loc
       continue' es = continue $ TupLit es loc
   e' <- copyCtPropExp e
