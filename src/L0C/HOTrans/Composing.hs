@@ -61,7 +61,11 @@ instance (Show a, Ord a, Input inp) => Input (a, inp) where
 fuseMaps :: Input input =>
             Lambda -- ^ Function of SOAC to be fused.
          -> [input] -- ^ Input of SOAC to be fused.
-         -> [Ident] -- ^ Output of SOAC to be fused.
+         -> [(Ident,Ident)] -- ^ Output of SOAC to be fused.  The
+                            -- first identifier is the name of the
+                            -- actual output, where the second output
+                            -- is an identifier that can be used to
+                            -- bind a single element of that output.
          -> Lambda -- ^ Function to be fused with.
          -> [input] -- ^ Input of SOAC to be fused with.
          -> (Lambda, [input]) -- ^ The fused lambda and the inputs of
@@ -84,7 +88,7 @@ fuseMaps lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
 fuseFilters :: Input input =>
                Lambda -- ^ Function of SOAC to be fused.
             -> [input] -- ^ Input of SOAC to be fused.
-            -> [Ident] -- ^ Output of SOAC to be fused.
+            -> [(Ident,Ident)] -- ^ Output of SOAC to be fused.
             -> Lambda -- ^ Function to be fused with.
             -> [input] -- ^ Input of SOAC to be fused with.
             -> VName -- ^ A fresh name (used internally).
@@ -110,7 +114,7 @@ fuseFilters lam1 inp1 out1 lam2 inp2 vname =
 fuseFilterIntoFold :: Input input =>
                       Lambda -- ^ Function of SOAC to be fused.
                    -> [input] -- ^ Input of SOAC to be fused.
-                   -> [Ident] -- ^ Output of SOAC to be fused.
+                   -> [(Ident,Ident)] -- ^ Output of SOAC to be fused.
                    -> Lambda -- ^ Function to be fused with.
                    -> [input] -- ^ Input of SOAC to be fused with.
                    -> [VName] -- ^ A fresh name (used internally).
@@ -122,7 +126,7 @@ fuseFilterIntoFold lam1 inp1 out1 lam2 inp2 vnames =
                         lambdaParams lam2
 
 fuseFilterInto :: Input input =>
-                  Lambda -> [input] -> [Ident]
+                  Lambda -> [input] -> [(Ident,Ident)]
                -> Lambda -> [input]
                -> [VName] -> Body
                -> (Lambda, [input])
@@ -153,7 +157,7 @@ fuseFilterInto lam1 inp1 out1 lam2 inp2 vnames falsebranch = (lam2', HM.elems in
           fuseInputs lam1 inp1 out1 lam2 inp2
 
 fuseInputs :: Input input =>
-              Lambda -> [input] -> [Ident]
+              Lambda -> [input] -> [(Ident,Ident)]
            -> Lambda -> [input]
            -> ([Param],
                [Ident],
@@ -167,7 +171,8 @@ fuseInputs lam1 inp1 out1 lam2 inp2 =
         lam2inputmap = HM.fromList $ zip lam2arrparams            inp2
         (lam2inputmap', makeCopiesInner) = removeDuplicateInputs lam2inputmap
         originputmap = lam1inputmap `HM.union` lam2inputmap'
-        outins = uncurry (outParams out1) $ unzip $ HM.toList lam2inputmap'
+        outins = uncurry (outParams $ map fst out1) $
+                 unzip $ HM.toList lam2inputmap'
         outbnds = filterOutParams out1 outins
         (inputmap, makeCopies) =
           removeDuplicateInputs $ originputmap `HM.difference` outins
@@ -183,7 +188,7 @@ outParams out1 lam2arrparams inp2 =
         isOutParam _      = Nothing
 
 filterOutParams :: Input input =>
-                   [Ident]
+                   [(Ident,Ident)]
                 -> HM.HashMap Param input
                 -> [Ident]
 filterOutParams out1 outins =
@@ -194,12 +199,11 @@ filterOutParams out1 outins =
                     Just v  -> M.insertWith (++) v [fromParam p] m
                     Nothing -> m
 
-        checkUsed m a =
+        checkUsed m (a,ra) =
           case M.lookup a m of
             Just (p:ps) -> (M.insert a ps m, p)
-            _           -> (m, rowIdent a)
+            _           -> (m, ra)
 
-        rowIdent v = v { identType = rowType $ identType v }
 
 removeDuplicateInputs :: Input input =>
                          HM.HashMap Param input

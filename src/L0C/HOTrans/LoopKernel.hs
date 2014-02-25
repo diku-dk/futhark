@@ -7,8 +7,6 @@ module L0C.HOTrans.LoopKernel
   , OutputTransform(..)
   , applyTransform
   , attemptFusion
-  , TryFusion
-  , tryFusion
   )
   where
 
@@ -226,22 +224,26 @@ fuseSOACwithKer outIds soac1 ker = do
                      , outputs = out_ids2
                      , fusedVars = fusedVars_new
                      }
+  outPairs <- forM outIds $ \outId -> do
+                outId' <- newIdent' (++"_elem") outId
+                return (outId,
+                        outId' { identType = rowType $ identType outId' })
   case (soac2, soac1) of
     -- The Fusions that are semantically map fusions:
     (SOAC.Map _ _ _ pos, SOAC.Map    {})
       | mapFusionOK outIds ker -> do
-      let (res_lam, new_inp) = fuseMaps lam1 inp1_arr outIds lam2 inp2_arr
+      let (res_lam, new_inp) = fuseMaps lam1 inp1_arr outPairs lam2 inp2_arr
       success $ SOAC.Map (cs1++cs2) res_lam new_inp pos
 
     (SOAC.Redomap _ lam21 _ ne _ pos, SOAC.Map {})
       | mapFusionOK outIds ker -> do
-      let (res_lam, new_inp) = fuseMaps lam1 inp1_arr outIds lam2 inp2_arr
+      let (res_lam, new_inp) = fuseMaps lam1 inp1_arr outPairs lam2 inp2_arr
       success $ SOAC.Redomap (cs1++cs2) lam21 res_lam ne new_inp pos
 
     (SOAC.Scan _ _ inps2 loc, SOAC.Map _ _ inps1 _)
       | mapScanFusionOK outIds inp1_arr ker -> do
       let (res_lam, new_inps) =
-            fuseMaps lam1 (zip (map fst inps2) inps1) outIds lam2 inps2
+            fuseMaps lam1 (zip (map fst inps2) inps1) outPairs lam2 inps2
       success $ SOAC.Scan (cs1++cs2) res_lam new_inps loc
 
     -- The Fusions that are semantically filter fusions:
@@ -249,19 +251,19 @@ fuseSOACwithKer outIds soac1 ker = do
       | filterFusionOK outIds ker -> do
       let ne = map fst args
       names <- replicateM (length $ lambdaReturnType lam2) $ newVName "check"
-      let (res_lam, new_inp) = fuseFilterIntoFold lam1 inp1_arr outIds lam2 inp2_arr names
+      let (res_lam, new_inp) = fuseFilterIntoFold lam1 inp1_arr outPairs lam2 inp2_arr names
       success $ SOAC.Reduce (cs1++cs2) res_lam (zip ne new_inp) pos
 
     (SOAC.Redomap _ lam21 _ nes _ pos, SOAC.Filter {})
       | filterFoldFusionOK outIds ker-> do
       names <- replicateM (length $ lambdaReturnType lam21) $ newVName "check"
-      let (res_lam, new_inp) = fuseFilterIntoFold lam1 inp1_arr outIds lam2 inp2_arr names
+      let (res_lam, new_inp) = fuseFilterIntoFold lam1 inp1_arr outPairs lam2 inp2_arr names
       success $ SOAC.Redomap (cs1++cs2) lam21 res_lam nes new_inp pos
 
     (SOAC.Filter _ _ _ pos, SOAC.Filter {})
       | filterFusionOK outIds ker -> do
       name <- newVName "check"
-      let (res_lam, new_inp) = fuseFilters lam1 inp1_arr outIds lam2 inp2_arr name
+      let (res_lam, new_inp) = fuseFilters lam1 inp1_arr outPairs lam2 inp2_arr name
       success $ SOAC.Filter (cs1++cs2) res_lam new_inp pos
 
     -- Nothing else worked, so let's try rewriting to redomap if
