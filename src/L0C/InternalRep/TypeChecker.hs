@@ -238,6 +238,11 @@ binding bnds = check . local (`bindVars` bnds)
         -- Check whether the bound variables have been used correctly
         -- within their scope.
         check m = do
+          already_bound <- asks envVtable
+          case filter ((`HM.member` already_bound) . identName) bnds of
+            []  -> return ()
+            v:_ -> bad $ TypeError (srclocOf v) $
+                         "Variable " ++ textual (identName v) ++ " being redefined."
           (a, usages) <- collectOccurences m
           maybeCheckOccurences usages
           return a
