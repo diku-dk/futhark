@@ -9,14 +9,13 @@ module L0C.HOTrans.TryFusion
   where
 
 import Control.Applicative
-import Control.Monad.Trans.Maybe
 import Control.Monad.State
 
 import L0C.InternalRep
 import L0C.NeedNames
 import L0C.MonadFreshNames
 
-newtype TryFusion a = TryFusion (MaybeT (State VNameSource) a)
+newtype TryFusion a = TryFusion (StateT VNameSource Maybe a)
   deriving (Functor, Applicative, Alternative,
             Monad, MonadState (NameSource VName))
 
@@ -27,9 +26,11 @@ instance MonadFreshNames TryFusion where
 tryFusion :: MonadFreshNames m => TryFusion a -> m (Maybe a)
 tryFusion (TryFusion m) = do
   src <- getNameSource
-  let (x, src') = runState (runMaybeT m) src
-  putNameSource src'
-  return x
+  case runStateT m src of
+    Just (x, src') -> do
+      putNameSource src'
+      return $ Just x
+    Nothing -> return Nothing
 
 liftMaybe :: Maybe a -> TryFusion a
 liftMaybe Nothing = fail "Nothing"
