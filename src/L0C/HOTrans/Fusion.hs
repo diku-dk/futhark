@@ -93,9 +93,9 @@ bindRes rrr = local (\x -> x { fusedRes = rrr })
 -- state refers to the fresh-names engine.
 -- The reader hides the vtable that associates ... to ... (fill in, please).
 -- The 'Either' monad is used for error handling.
-runFusionGatherM :: Prog -> FusionGM a -> FusionGEnv -> Either EnablingOptError a
-runFusionGatherM prog (FusionGM a) =
-    runReaderT (evalStateT a (newNameSourceForProg prog))
+runFusionGatherM :: VNameSource -> FusionGM a -> FusionGEnv -> Either EnablingOptError (a, VNameSource)
+runFusionGatherM src (FusionGM a) =
+  runReaderT (runStateT a src)
 
 badFusionGM :: EnablingOptError -> FusionGM a
 badFusionGM = FusionGM . lift . lift . Left
@@ -107,18 +107,19 @@ badFusionGM = FusionGM . lift . lift . Left
 
 fuseProg :: Prog -> Either EnablingOptError (Bool, Prog)
 fuseProg prog = do
-  let env = FusionGEnv { soacs = HM.empty
-                       , arrsInScope = HM.empty
-                       , fusedRes = mkFreshFusionRes
-                       , program = prog
-                       }
-  let funs= progFunctions prog
-  ks <- runFusionGatherM prog (mapM fusionGatherFun funs) env
+  let env  = FusionGEnv { soacs = HM.empty
+                        , arrsInScope = HM.empty
+                        , fusedRes = mkFreshFusionRes
+                        , program = prog
+                        }
+      funs = progFunctions prog
+      src  = newNameSourceForProg prog
+  (ks,src') <- runFusionGatherM src (mapM fusionGatherFun funs) env
   let ks'    = map cleanFusionResult ks
   let succc = any rsucc ks'
   if not succc
   then return (False, prog)
-  else do funs' <- runFusionGatherM prog (zipWithM fuseInFun ks' funs) env
+  else do (funs',_) <- runFusionGatherM src' (zipWithM fuseInFun ks' funs) env
           return (True, Prog funs')
 
 fusionGatherFun :: FunDec -> FusionGM FusedRes
