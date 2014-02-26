@@ -422,7 +422,7 @@ checkProg' checkoccurs prog = do
     -- duplicate function definitions.  The position information is
     -- removed at the end.
     buildFtable = HM.map rmLoc <$>
-                  foldM expand (HM.map addLoc builtInFunctions)
+                  foldM expand (HM.map addLoc initialFtable)
                   (progFunctions prog')
     expand ftable (name,ret,args,_,pos)
       | Just (_,_,pos2) <- HM.lookup name ftable =
@@ -433,15 +433,9 @@ checkProg' checkoccurs prog = do
     rmLoc (ret,args,_) = (ret,args)
     addLoc (t, ts) = (t, ts, noLoc)
 
-builtInFunctions :: HM.HashMap Name (FunBinding vn)
-builtInFunctions = HM.fromList $ map namify
-                   [("toReal", (Elem $ Basic Real, [Elem $ Basic Int]))
-                   ,("trunc", (Elem $ Basic Int, [Elem $ Basic Real]))
-                   ,("sqrt", (Elem $ Basic Real, [Elem $ Basic Real]))
-                   ,("log", (Elem $ Basic Real, [Elem $ Basic Real]))
-                   ,("exp", (Elem $ Basic Real, [Elem $ Basic Real]))
-                   ,("op not", (Elem $ Basic Bool, [Elem $ Basic Bool]))]
-  where namify (k,v) = (nameFromString k, v)
+initialFtable :: HM.HashMap Name (FunBinding vn)
+initialFtable = HM.map addBuiltin builtInFunctions
+  where addBuiltin (t, ts) = (Elem $ Basic t, map (Elem . Basic) ts)
 
 checkFun :: (TypeBox ty, VarName vn) =>
             TaggedFunDec ty vn -> TypeM vn (TaggedFunDec CompTypeBase vn)
@@ -499,7 +493,7 @@ checkOpenExp :: (TypeBox ty, VarName vn) =>
                 HM.HashMap vn (CompTypeBase vn) -> ExpBase ty vn ->
                 Either (TypeError vn) (ExpBase CompTypeBase vn)
 checkOpenExp bnds e = untagExp <$> runTypeM env namesrc (checkExp e')
-  where env = TypeEnv { envFtable = builtInFunctions
+  where env = TypeEnv { envFtable = initialFtable
                       , envCheckOccurences = True
                       , envVtable = vtable
                       }
@@ -518,7 +512,7 @@ checkOpenExp bnds e = untagExp <$> runTypeM env namesrc (checkExp e')
 checkClosedExp :: (TypeBox ty, VarName vn) => ExpBase ty vn ->
                   Either (TypeError vn) (ExpBase CompTypeBase vn)
 checkClosedExp e = untagExp <$> runTypeM env src (checkExp e')
-  where env = TypeEnv { envFtable = builtInFunctions
+  where env = TypeEnv { envFtable = initialFtable
                       , envCheckOccurences = True
                       , envVtable = HM.empty
                       }
@@ -1139,14 +1133,15 @@ checkLambda (AnonymFun params body ret pos) args = do
           return $ AnonymFun params body' ret' pos
       | [(Elem (Tuple ets), _, _)] <- args,
         validApply (map identType params) ets -> do
-          -- The function expects N parmeters, but the argument is a
+          -- The function expects N parameters, but the argument is a
           -- single N-tuple whose types match the parameters.
           -- Generate a shim to make it fit.
           tupparam <- newIdent "tup_shim" (Elem (Tuple $ map (fromDecl . identType) params)) pos
           let tupfun = AnonymFun [toParam tupparam] tuplet ret pos
               tuplet = LetPat (TupId (map (Id . fromParam) params) pos)
                               (Var tupparam) body' pos
-          checkLambda tupfun args
+          _ <- checkLambda tupfun args
+          return $ AnonymFun params body' ret' pos
       | otherwise -> bad $ TypeError pos $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
 checkLambda (CurryFun fname [] rettype pos) [arg]
@@ -1172,9 +1167,7 @@ checkLambda (CurryFun fname curryargexps rettype pos) args = do
       case () of
         _ | [(tupt@(Elem (Tuple ets)), _, _)] <- args,
             validApply paramtypes ets -> do
-              -- Same shimming as in the case for anonymous functions,
-              -- although we don't have to worry about name shadowing
-              -- here.
+              -- Same shimming as in the case for anonymous functions.
               let mkparam i t = newIdent ("param_" ++ show i) t pos
               params <- zipWithM mkparam [(0::Int)..] $ map fromDecl paramtypes
               tupparam <- newIdent "x" tupt pos
@@ -1193,7 +1186,8 @@ checkLambda (CurryFun fname curryargexps rettype pos) args = do
               let fun = AnonymFun (map toParam params) body (toDecl rettype') pos
                   body = Apply fname (zip (curryargexps'++map Var params) $ map diet paramtypes)
                          rettype' pos
-              checkLambda fun args
+              _ <- checkLambda fun args
+              return $ CurryFun fname curryargexps' rettype' pos
 
 checkPolyLambdaOp :: (TypeBox ty, VarName vn) =>
                      BinOp -> [TaggedExp ty vn] -> ty (ID vn) -> [Arg vn] -> SrcLoc

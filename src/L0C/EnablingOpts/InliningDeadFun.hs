@@ -106,7 +106,7 @@ buildCGbody = foldBody build
 buildCGexp :: ([Name],[Name]) -> Exp -> ([Name],[Name])
 
 buildCGexp callees@(fs, soacfs) (Apply fname _ _ _)  =
-    if isBuiltInFun fname || elem fname fs
+    if isBuiltInFunction fname || elem fname fs
     then callees
     else (fname:fs, soacfs)
 

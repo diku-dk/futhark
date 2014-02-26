@@ -371,7 +371,7 @@ checkProg' checkoccurs prog = do
     -- duplicate function definitions.  The position information is
     -- removed at the end.
     buildFtable = HM.map rmLoc <$>
-                  foldM expand (HM.map addLoc builtInFunctions)
+                  foldM expand (HM.map addLoc initialFtable)
                   (progFunctions prog)
     expand ftable (name,ret,args,_,pos)
       | Just (_,_,pos2) <- HM.lookup name ftable =
@@ -382,15 +382,9 @@ checkProg' checkoccurs prog = do
     rmLoc (ret,args,_) = (ret,args)
     addLoc (t, ts) = (t, ts, noLoc)
 
-builtInFunctions :: HM.HashMap Name FunBinding
-builtInFunctions = HM.fromList $ map namify
-                   [("toReal", ([Basic Real], [Basic Int]))
-                   ,("trunc", ([Basic Int], [Basic Real]))
-                   ,("sqrt", ([Basic Real], [Basic Real]))
-                   ,("log", ([Basic Real], [Basic Real]))
-                   ,("exp", ([Basic Real], [Basic Real]))
-                   ,("op not", ([Basic Bool], [Basic Bool]))]
-  where namify (k,v) = (nameFromString k, v)
+initialFtable :: HM.HashMap Name FunBinding
+initialFtable = HM.map addBuiltin builtInFunctions
+  where addBuiltin (t, ts) = ([Basic t], map Basic ts)
 
 checkFun :: FunDec -> TypeM FunDec
 checkFun (fname, rettype, params, body, loc) = do
@@ -448,7 +442,7 @@ checkFun (fname, rettype, params, body, loc) = do
 checkOpenExp :: HM.HashMap VName Type -> Exp ->
                 Either TypeError Exp
 checkOpenExp bnds e = runTypeM env (newNameSource frees) $ checkExp e
-  where env = TypeEnv { envFtable = builtInFunctions
+  where env = TypeEnv { envFtable = initialFtable
                       , envCheckOccurences = True
                       , envVtable = vtable
                       }
@@ -465,7 +459,7 @@ checkOpenExp bnds e = runTypeM env (newNameSource frees) $ checkExp e
 -- calls to non-builtin functions.
 checkClosedExp :: Exp -> Either TypeError Exp
 checkClosedExp e = runTypeM env src $ checkExp e
-  where env = TypeEnv { envFtable = builtInFunctions
+  where env = TypeEnv { envFtable = initialFtable
                       , envCheckOccurences = True
                       , envVtable = HM.empty
                       }

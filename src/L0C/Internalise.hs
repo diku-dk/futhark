@@ -54,15 +54,29 @@ internaliseProg prog =
   I.Prog $ runInternaliseM $ mapM internaliseFun $ E.progFunctions prog
   where runInternaliseM m = fst $ evalState (runReaderT (runWriterT m) newEnv) newState
         newState = E.newNameSourceForProg prog
-        newEnv = InternaliseEnv HM.empty
+        newEnv = InternaliseEnv {
+                   envSubsts = HM.empty
+                 , envFtable = initialFtable `HM.union` ftable
+                 }
+        ftable = HM.fromList
+                 [ (fname,(rettype, map E.identType params)) |
+                   (fname,rettype,params,_,_) <- E.progFunctions prog ]
 
 data Replacement = ArraySubst I.Ident [I.Ident]
                  | TupleSubst [I.Ident]
                    deriving (Show)
 
+-- | A tuple of a return type and a list of argument types.
+type FunBinding = (E.DeclType, [E.DeclType])
+
 data InternaliseEnv = InternaliseEnv {
     envSubsts :: HM.HashMap VName Replacement
+  , envFtable :: HM.HashMap Name FunBinding
   }
+
+initialFtable :: HM.HashMap Name FunBinding
+initialFtable = HM.map addBuiltin builtInFunctions
+  where addBuiltin (t, ts) = (E.Elem $ E.Basic t, map (E.Elem . E.Basic) ts)
 
 type InternaliseM =
   WriterT (DL.DList Binding) (ReaderT InternaliseEnv (State VNameSource))
@@ -74,6 +88,12 @@ instance MonadFreshNames InternaliseM where
 instance MonadBinder InternaliseM where
   addBinding      = addBindingWriter
   collectBindings = collectBindingsWriter
+
+lookupFunction :: Name -> InternaliseM FunBinding
+lookupFunction fname = do
+  fun <- HM.lookup fname <$> asks envFtable
+  case fun of Nothing   -> fail $ "Function '" ++ nameToString fname ++ "' not found"
+              Just fun' -> return fun'
 
 internaliseUniqueness :: E.Uniqueness -> I.Uniqueness
 internaliseUniqueness E.Nonunique = I.Nonunique
@@ -650,7 +670,22 @@ internaliseLambda ce (E.AnonymFun params body rettype loc) = do
         stripCert (c:es)
           | I.identType c == I.Basic I.Cert = es -- XXX HACK
         stripCert es = es
-internaliseLambda _ (E.CurryFun {}) = error "no curries yet"
+internaliseLambda ce (E.CurryFun fname curargs rettype loc) = do
+  (_,paramtypes) <- lookupFunction fname
+  let missing = drop (length curargs) paramtypes
+  params <- forM missing $ \t -> do
+              s <- newNameFromString "curried"
+              return E.Ident {
+                         E.identType   = t
+                       , E.identSrcLoc = loc
+                       , E.identName   = s
+                       }
+  let observe x = (x, E.Observe) -- Actual diet doesn't matter here, the
+                                 -- type checker will eventually fix it.
+      call = E.Apply fname
+             (map observe $ curargs ++ map (E.Var . E.fromParam) params)
+             rettype loc
+  internaliseLambda ce $ E.AnonymFun params call (E.toDecl rettype) loc
 
 internaliseTupleLambda :: I.SubExp -> E.TupleLambda -> InternaliseM I.Lambda
 internaliseTupleLambda ce = internaliseLambda ce . E.tupleLambdaToLambda

@@ -25,8 +25,8 @@ module Language.L0.Core
 
   -- * Special identifiers
   , defaultEntryPoint
-  , isBuiltInFun
-  , builtInFuns
+  , isBuiltInFunction
+  , builtInFunctions
   )
 
 where
@@ -37,6 +37,7 @@ import Data.Loc
 import Data.Maybe
 import Data.Monoid
 import qualified Data.Text as T
+import qualified Data.HashMap.Lazy as HM
 
 import Text.PrettyPrint.Mainland
 import Text.Printf
@@ -150,13 +151,20 @@ instance Pretty BasicValue where
 defaultEntryPoint :: Name
 defaultEntryPoint = nameFromString "main"
 
--- | @isBuiltInFun k@ is 'True' if @k@ is an element of 'builtInFuns'.
-isBuiltInFun :: Name -> Bool
-isBuiltInFun fnm = fnm `elem` builtInFuns
+-- | @isBuiltInFunction k@ is 'True' if @k@ is an element of 'builtInFunctions'.
+isBuiltInFunction :: Name -> Bool
+isBuiltInFunction fnm = fnm `HM.member` builtInFunctions
 
--- | A list of names of all built-in functions.
-builtInFuns :: [Name]
-builtInFuns = map nameFromString ["toReal", "trunc", "sqrt", "log", "exp", "trace"]
+-- | A map of all built-in functions and their types.
+builtInFunctions :: HM.HashMap Name (BasicType,[BasicType])
+builtInFunctions = HM.fromList $ map namify
+                   [("toReal", (Real, [Int]))
+                   ,("trunc", (Int, [Real]))
+                   ,("sqrt", (Real, [Real]))
+                   ,("log", (Real, [Real]))
+                   ,("exp", (Real, [Real]))
+                   ,("op not", (Bool, [Bool]))]
+  where namify (k,v) = (nameFromString k, v)
 
 -- | The abstract (not really) type representing names in the L0
 -- compiler.  'String's, being lists of characters, are very slow,
