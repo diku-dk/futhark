@@ -183,7 +183,7 @@ dimSizes is =
   where inspect :: Input -> Binder [Maybe SubExp]
         inspect (Input ts ia) = do
           dims <- iaDims ia
-          return $ foldr inspect' (map Just dims) ts
+          return $ foldl inspect' (map Just dims) ts
 
         iaDims (Var v) =
           letSubExps "size" [ L0.Size [] i (L0.Var v) loc
@@ -193,20 +193,20 @@ dimSizes is =
 
         iaDims (Iota e) = return [e]
 
-        inspect' :: InputTransform -> [Maybe SubExp] -> [Maybe SubExp]
-        inspect' (Transpose _ k n) ds =
+        inspect' :: [Maybe SubExp] -> InputTransform -> [Maybe SubExp]
+        inspect' ds (Transpose _ k n) =
           transposeIndex k n ds
 
-        inspect' (Reshape _ shape) _ =
+        inspect' _ (Reshape _ shape) =
           map Just shape
 
-        inspect' (ReshapeOuter _ shape) ds =
+        inspect' ds (ReshapeOuter _ shape) =
           map Just shape ++ drop 1 ds
 
-        inspect' (ReshapeInner _ shape) ds =
+        inspect' ds (ReshapeInner _ shape) =
           take 1 ds ++ map Just shape
 
-        inspect' (Repeat) ds =
+        inspect' ds (Repeat) =
           Nothing : ds
 
 -- | If the input is a (possibly transposed, reshaped or otherwise
