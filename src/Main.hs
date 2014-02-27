@@ -38,6 +38,8 @@ import L0C.Untrace
 import qualified L0C.Backends.SequentialC as SequentialC
 import qualified L0C.Backends.Bohrium as Bohrium
 
+import L0C.AccurateSizes
+
 newL0Config :: L0Config
 newL0Config = L0Config {
                 l0pipeline = []
@@ -82,6 +84,7 @@ commandLineOptions =
   , eotransformOpt "e" ["enabling-optimisations"]
   , iitransformOpt []  ["inline-map-indexes"]
   , hotransformOpt "h" ["higher-order-optimizations"]
+  , astransformOpt [] ["add-size-information"]
   , Option "s" ["standard"]
     (NoArg $ \opts -> opts { l0pipeline = standardPipeline ++ l0pipeline opts })
     "Use the recommended optimised pipeline."
@@ -176,6 +179,11 @@ hotransform = Pass { passName = "higher-order optimisations"
                    , passOp = liftPass highOrdTransf
                    }
 
+astransform :: Pass
+astransform = Pass { passName = "accurate size insertion"
+                   , passOp = return . addSizeInformation
+                   }
+
 standardPipeline :: [Pass]
 standardPipeline =
   [ uttransform, eotransform, iitransform, rename
@@ -225,6 +233,11 @@ hotransformOpt :: String -> [String] -> L0Option
 hotransformOpt =
   passoption "Perform higher-order optimisation, i.e., fusion."
   hotransform
+
+astransformOpt :: String -> [String] -> L0Option
+astransformOpt =
+  passoption "Add accurate size information to program."
+  astransform
 
 -- | Entry point.  Non-interactive, except when reading interpreter
 -- input from standard input.
