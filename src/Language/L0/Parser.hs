@@ -16,12 +16,19 @@ module Language.L0.Parser
   , parseTuple
   , parseValue
 
+  , parseExpIncr
+  , parseExpIncrIO
+
   , ParseError
   )
   where
 
 import Control.Monad
+import Control.Monad.Trans.Either
+import Control.Monad.Reader
+import Control.Monad.Trans.State
 import Control.Monad.Error
+import Data.Either.Combinators
 
 import Language.L0.Syntax
 import Language.L0.Attributes
@@ -38,12 +45,34 @@ instance Error ParseError where
   noMsg = ParseError "Unspecifed parse error"
   strMsg = ParseError
 
-canFail :: (b -> Either String a) -> b -> Either ParseError a
-canFail f = either (Left . ParseError) Right . f
+parseInMonad :: ParserMonad a -> FilePath -> String -> ReadLineMonad (Either ParseError a)
+parseInMonad p file program = liftM (mapLeft ParseError)
+                              $ either (return . Left)
+                              (evalStateT (runReaderT (runEitherT p) file))
+                              (alexScanTokens file program)
 
-parse :: ([L Token] -> Either String a)
-      -> FilePath -> String -> Either ParseError a
-parse f file = canFail $ f <=< alexScanTokens file
+parseIncrementalIO :: ParserMonad a -> FilePath -> String -> IO (Either ParseError a)
+parseIncrementalIO p file program = getLinesFromIO $ parseInMonad p file program
+
+parseIncremental :: ParserMonad a -> FilePath -> String -> Either ParseError a
+parseIncremental p file program = join $ mapLeft ParseError
+                                  $ getLinesFromStrings (lines program)
+                                  $ parseInMonad p file ""
+
+parse :: ParserMonad a -> FilePath -> String -> Either ParseError a
+parse p file program = join $ mapLeft ParseError
+                       $ getNoLines $ parseInMonad p file program
+
+-- | Parse an L0 expression greedily from the given 'String', only parsing
+-- enough lines to get a correct expression, using the 'FilePath' as the source
+-- name for error messages.
+parseExpIncr :: FilePath -> String -> Either ParseError UncheckedExp
+parseExpIncr = parseIncremental expression
+
+-- | Parse an L0 expression incrementally from IO 'getLine' calls, using the
+-- 'FilePath' as the source name for error messages.
+parseExpIncrIO :: FilePath -> String -> IO (Either ParseError UncheckedExp)
+parseExpIncrIO = parseIncrementalIO expression
 
 -- | Parse an entire L0 program from the given 'String', using the
 -- 'FilePath' as the source name for error messages.

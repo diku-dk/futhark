@@ -26,6 +26,44 @@ Executable l0c
                  hashable >= 1.2.1.0,
                  unordered-containers >= 0.2.3.3,
                  dlist >= 0.6.0.1,
+                 either >= 3.4.2,
+                 text
+
+  -- We have to mention these explicitly, or alex and happy won't be
+  -- run to generate them.
+  Other-modules: Language.L0.Parser.Parser,
+                 Language.L0.Parser.Lexer
+
+  -- Directories other than the root containing source files.
+  hs-source-dirs:      src
+
+  -- Extra tools (e.g. alex, hsc2hs, ...) needed to build the source.
+  Build-tools:         alex, happy
+
+  Default-Language:   Haskell2010
+
+  Ghc-Options:        -Wall
+
+  Ghc-Prof-Options:   -prof -auto-all -rtsopts
+
+
+Executable l0ci
+  Main-is: l0ci.hs
+
+  -- Packages needed in order to build this package.
+  Build-depends: base >= 4 && < 5,
+                 array >= 0.4,
+                 containers >= 0.5,
+                 mtl >= 2.1,
+                 transformers >= 0.3,
+                 srcloc >= 0.4,
+                 language-c-quote >= 0.7.1,
+                 mainland-pretty >= 0.2.5,
+                 monad-loops >= 0.4.2,
+                 hashable >= 1.2.1.0,
+                 unordered-containers >= 0.2.3.3,
+                 dlist >= 0.6.0.1,
+                 either >= 3.4.2,
                  text
 
   -- We have to mention these explicitly, or alex and happy won't be

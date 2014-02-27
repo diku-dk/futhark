@@ -13,10 +13,20 @@ module Language.L0.Parser.Parser
   , stringValue
   , certValue
   , arrayValue
-  , tupleValue)
+  , tupleValue
+  , ParserMonad
+  , ReadLineMonad(..)
+  , getLinesFromIO
+  , getLinesFromStrings
+  , getNoLines)
   where
 
-import Control.Monad (foldM)
+import Control.Monad
+import Control.Monad.Trans
+import Control.Monad.Trans.Either
+import Control.Monad.Reader
+import Control.Monad.Trans.State
+import Control.Applicative ((<$>), (<*>))
 import Data.Array
 import Data.Loc hiding (L, unLoc) -- Lexer has replacements.
 
@@ -43,7 +53,8 @@ import Language.L0.Parser.Lexer
 
 %tokentype { L Token }
 %error { parseError }
-%monad { Either String } { >>= } { return }
+%monad { ParserMonad }
+%lexer { lexer } { L _ EOF }
 
 %token
       if              { L $$ IF }
@@ -131,7 +142,7 @@ import Language.L0.Parser.Lexer
 %left '||'
 %left '&&'
 %left '&' '^' '|'
-%left '<=' '<' '=' 
+%left '<=' '<' '='
 
 %left '<<' '>>'
 %left '+' '-'
@@ -169,9 +180,9 @@ FunDecs : fun Fun FunDecs   { $2 : $3 }
         | fun Fun           { [$2] }
 ;
 
-Fun :     Type id '(' TypeIds ')' '=' Exp 
+Fun :     Type id '(' TypeIds ')' '=' Exp
                         { let L pos (ID name) = $2 in (name, $1, $4, $7, pos) }
-        | Type id '(' ')' '=' Exp 
+        | Type id '(' ')' '=' Exp
                         { let L pos (ID name) = $2 in (name, $1, [], $6, pos) }
 ;
 
@@ -384,7 +395,7 @@ Exp  :: { UncheckedExp }
                       { Index $1 $2 (fst $3) (snd $3) (srclocOf $2) }
 
      | loop '(' TupId ')' '=' for Id '<' Exp do Exp in Exp %prec letprec
-                      { DoLoop $3 (tupIdExp $3) $7 $9 $11 $13 $1 }
+                      {% liftM (\t -> DoLoop $3 t $7 $9 $11 $13 $1) (tupIdExp $3) }
      | loop '(' TupId '=' Exp ')' '=' for Id '<' Exp do Exp in Exp %prec letprec
                       { DoLoop $3 $5 $9 $11 $13 $15 $1 }
 
@@ -459,9 +470,9 @@ LogValue : true          { BasicVal $ LogVal True }
         | false          { BasicVal $ LogVal False }
 CertValue : checked      { BasicVal Checked }
 ArrayValue :  '[' Values ']'
-             { case combArrayTypes $ map (toDecl . valueType) $2 of
-                 Nothing -> error "Invalid array value"
-                 Just ts -> ArrayVal (arrayFromList $2) $ removeNames ts
+             {% case combArrayTypes $ map (toDecl . valueType) $2 of
+                  Nothing -> left "Invalid array value"
+                  Just ts -> right $ ArrayVal (arrayFromList $2) $ removeNames ts
              }
 TupleValue : '(' Values2 ')' { TupVal $2 }
 
@@ -471,6 +482,38 @@ Values : Value ',' Values { $1 : $3 }
 Values2 : Value ',' Values { $1 : $3 }
 
 {
+
+type ParserMonad a =
+  EitherT String (
+    ReaderT FilePath (
+       StateT [L Token] ReadLineMonad)) a
+
+data ReadLineMonad a = Value a
+                     | GetLine (String -> ReadLineMonad a)
+
+readLineFromMonad :: ReadLineMonad String
+readLineFromMonad = GetLine Value
+
+instance Monad ReadLineMonad where
+  return = Value
+  Value x >>= f = f x
+  GetLine g >>= f = GetLine $ \s -> g s >>= f
+
+getLinesFromIO :: ReadLineMonad a -> IO a
+getLinesFromIO (Value x) = return x
+getLinesFromIO (GetLine f) = do
+  s <- getLine
+  getLinesFromIO $ f s
+
+getLinesFromStrings :: [String] -> ReadLineMonad a -> Either String a
+getLinesFromStrings _ (Value x) = Right x
+getLinesFromStrings (x : xs) (GetLine f) = getLinesFromStrings xs $ f x
+getLinesFromStrings [] (GetLine _) = Left "Ran out of input"
+
+getNoLines :: ReadLineMonad a -> Either String a
+getNoLines (Value x) = Right x
+getNoLines (GetLine _) = Left "No extra lines"
+
 combArrayTypes :: [UncheckedType] -> Maybe UncheckedType
 combArrayTypes []     = Nothing
 combArrayTypes (v:vs) = foldM comb v vs
@@ -481,12 +524,47 @@ combArrayTypes (v:vs) = foldM comb v vs
 arrayFromList :: [a] -> Array Int a
 arrayFromList l = listArray (0, length l-1) l
 
-tupIdExp :: UncheckedTupIdent -> UncheckedExp
-tupIdExp (Id ident) = Var ident
-tupIdExp (TupId pats loc) = TupLit (map tupIdExp pats) loc
-tupIdExp (Wildcard _ loc) = error $ "Cannot have wildcard at " ++ locStr loc
+tupIdExp :: UncheckedTupIdent -> ParserMonad UncheckedExp
+tupIdExp (Id ident) = return $ Var ident
+tupIdExp (TupId pats loc) = TupLit <$> (mapM tupIdExp pats) <*> return loc
+tupIdExp (Wildcard _ loc) = left $ "Cannot have wildcard at " ++ locStr loc
 
-parseError :: [L Token] -> Either String a
-parseError [] = Left "Parse error: End of file"
-parseError (tok:_) = Left $ "Parse error at " ++ locStr (srclocOf tok)
+eof :: L Token
+eof = L (SrcLoc $ Loc (Pos "" 0 0 0) (Pos "" 0 0 0)) EOF
+
+getTokens :: ParserMonad [L Token]
+getTokens = lift $ lift get
+
+putTokens :: [L Token] -> ParserMonad ()
+putTokens ts = lift $ lift $ put ts
+
+getFilename :: ParserMonad FilePath
+getFilename = lift ask
+
+readLine :: ParserMonad String
+readLine = lift $ lift $ lift readLineFromMonad
+
+lexer :: (L Token -> ParserMonad a) -> ParserMonad a
+lexer cont = do
+  ts <- getTokens
+  case ts of
+    [] -> do
+      ended <- lift $ runEitherT $ cont eof
+      case ended of
+        Right x -> right x
+        Left _ -> do
+          ts' <- alexScanTokens <$> getFilename <*> readLine
+          ts'' <- hoistEither ts'
+          case ts'' of
+            [] -> cont eof
+            xs -> do
+              putTokens xs
+              lexer cont
+    (x : xs) -> do
+      putTokens xs
+      cont x
+
+parseError :: L Token -> ParserMonad a
+parseError (L _ EOF) = left "Parse error: End of file"
+parseError tok = left $ "Parse error at " ++ locStr (srclocOf tok)
 }

@@ -83,4 +83,5 @@ data Token = IF
            | REDOMAP2
            | ASSERT
            | CONJOIN
+           | EOF
              deriving (Show, Eq)
