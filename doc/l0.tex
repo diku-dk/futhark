@@ -127,7 +127,8 @@ $e$ & $::=$ & $k$ & (Constant)\\
 & $|$ & \texttt{replicate($e_{n}$, $e_{v}$)} & (Replication) \\
 & $|$ & \texttt{size($e$)} & (Array length) \\
 & $|$ & \texttt{reshape(($e_{1}$,\ldots,$e_{n}$), $e$)} & (Array reshape) \\
-& $|$ & \texttt{transpose($e$)} & (Transposition) \\
+& $|$ & \texttt{rearrange(($k_{1}$, \ldots, $k_{n}$), $e$)} & (Transposition) \\
+& $|$ & \texttt{transpose($k$, $n$, $e$)} & (Transposition) \\
 & $|$ & \texttt{split($e_{1}$, $e_{2}$)} & (Split $e_{2}$ at index $e_{1}$) \\
 & $|$ & \texttt{concat($e_{1}$, $e_{2}$)} & (Concatenation) \\
 & $|$ & \texttt{let $v_{1}$ = $v_{2}$ with} & (In-place update) \\
@@ -566,8 +567,8 @@ the language.
     The number of elements in \textit{a} must be equal to
     $\texttt{dim}_{1}\times\ldots\times\texttt{dim}_{n}$.
 
-  \item[\texttt{transpose(a)}]\hfill\\
-    Return the transpose of \textit{a}.
+  \item[\texttt{rearrange((\textit{k}$_{1}$, \ldots, \textit{k}$_{n}$), a)}]\hfill\\
+    Permute the dimensions in the array, returning a new array.
 
   \item[\texttt{transpose(k,n,a)}]\hfill\\
     Return the generalised transpose of \textit{a}.  If
@@ -584,6 +585,13 @@ the language.
     Be aware that $k$ and $n$ must be static integer literals, and
     $k+n$ must be non-negative and smaller than the rank of
     \texttt{a}, or it is considered a type error.
+
+    This operation is merely syntactical sugar for the equivalent
+    \texttt{rearrange} operation.
+
+  \item[\texttt{transpose(a)}]\hfill\\
+    Return the transpose of \textit{a}.  Syntactical sugar for
+    \texttt{transpose(0,1,a)}.
 
   \item[\texttt{let \textit{pat} = \textit{e} in \textit{body}}]\hfill\\
     While evaluating \textit{body}, bind the names mentioned in
