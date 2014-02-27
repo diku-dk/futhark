@@ -26,7 +26,6 @@ Executable l0c
                  hashable >= 1.2.1.0,
                  unordered-containers >= 0.2.3.3,
                  dlist >= 0.6.0.1,
-                 either >= 3.4.2,
                  text
 
   -- We have to mention these explicitly, or alex and happy won't be
@@ -63,7 +62,6 @@ Executable l0ci
                  hashable >= 1.2.1.0,
                  unordered-containers >= 0.2.3.3,
                  dlist >= 0.6.0.1,
-                 either >= 3.4.2,
                  text
 
   -- We have to mention these explicitly, or alex and happy won't be

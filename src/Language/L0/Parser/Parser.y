@@ -21,9 +21,10 @@ module Language.L0.Parser.Parser
   , getNoLines)
   where
 
+import Control.Applicative
 import Control.Monad
 import Control.Monad.Trans
-import Control.Monad.Trans.Either
+import Control.Monad.Error
 import Control.Monad.Reader
 import Control.Monad.Trans.State
 import Control.Applicative ((<$>), (<*>))
@@ -483,8 +484,8 @@ LogValue : true          { BasicVal $ LogVal True }
 CertValue : checked      { BasicVal Checked }
 ArrayValue :  '[' Values ']'
              {% case combArrayTypes $ map (toDecl . valueType) $2 of
-                  Nothing -> left "Invalid array value"
-                  Just ts -> right $ ArrayVal (arrayFromList $2) $ removeNames ts
+                  Nothing -> throwError "Invalid array value"
+                  Just ts -> return $ ArrayVal (arrayFromList $2) $ removeNames ts
              }
 TupleValue : '(' Values2 ')' { TupVal $2 }
 
@@ -496,7 +497,7 @@ Values2 : Value ',' Values { $1 : $3 }
 {
 
 type ParserMonad a =
-  EitherT String (
+  ErrorT String (
     ReaderT FilePath (
        StateT [L Token] ReadLineMonad)) a
 
@@ -510,6 +511,13 @@ instance Monad ReadLineMonad where
   return = Value
   Value x >>= f = f x
   GetLine g >>= f = GetLine $ \s -> g s >>= f
+
+instance Functor ReadLineMonad where
+  f `fmap` m = do x <- m
+                  return $ f x
+
+instance Applicative ReadLineMonad where
+  (<*>) = ap
 
 getLinesFromIO :: ReadLineMonad a -> IO a
 getLinesFromIO (Value x) = return x
@@ -539,7 +547,7 @@ arrayFromList l = listArray (0, length l-1) l
 tupIdExp :: UncheckedTupIdent -> ParserMonad UncheckedExp
 tupIdExp (Id ident) = return $ Var ident
 tupIdExp (TupId pats loc) = TupLit <$> (mapM tupIdExp pats) <*> return loc
-tupIdExp (Wildcard _ loc) = left $ "Cannot have wildcard at " ++ locStr loc
+tupIdExp (Wildcard _ loc) = throwError $ "Cannot have wildcard at " ++ locStr loc
 
 eof :: L Token
 eof = L (SrcLoc $ Loc (Pos "" 0 0 0) (Pos "" 0 0 0)) EOF
@@ -561,12 +569,13 @@ lexer cont = do
   ts <- getTokens
   case ts of
     [] -> do
-      ended <- lift $ runEitherT $ cont eof
+      ended <- lift $ runErrorT $ cont eof
       case ended of
-        Right x -> right x
+        Right x -> return x
         Left _ -> do
           ts' <- alexScanTokens <$> getFilename <*> readLine
-          ts'' <- hoistEither ts'
+          ts'' <- case ts' of Right x -> return x
+                              Left e  -> throwError e
           case ts'' of
             [] -> cont eof
             xs -> do
@@ -577,6 +586,6 @@ lexer cont = do
       cont x
 
 parseError :: L Token -> ParserMonad a
-parseError (L _ EOF) = left "Parse error: End of file"
-parseError tok = left $ "Parse error at " ++ locStr (srclocOf tok)
+parseError (L _ EOF) = throwError "Parse error: End of file"
+parseError tok       = throwError $ "Parse error at " ++ locStr (srclocOf tok)
 }
