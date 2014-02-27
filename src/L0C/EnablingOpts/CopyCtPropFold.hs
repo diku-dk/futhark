@@ -241,14 +241,14 @@ copyCtPropExp (Index cs idd@(Ident vnm tp p) csidx inds pos) = do
         (Replicate _ val@(Constant _ _) _, [_]) ->
           changed $ SubExp val
 
-        (Transpose cs2 k n (Var src) _, _)
-          | transposeDepth k n < length inds' ->
-            changed $ Index (cs'++cs2) src csidx' (transposeIndex k n inds') pos
+        (Rearrange cs2 perm (Var src) _, _)
+          | permuteReach perm < length inds' ->
+            let inds'' = permuteDims (take (length inds') perm) inds'
+            in changed $ Index (cs'++cs2) src csidx' inds'' pos
 
         _ -> return $ Index cs' idd csidx' inds' pos
 
     _ -> return $ Index cs' idd csidx' inds' pos
-  where transposeDepth k n = max k (k+n)
 
 copyCtPropExp (BinOp bop e1 e2 tp pos) = do
     e1'   <- copyCtPropSubExp e1
@@ -626,7 +626,7 @@ getPropBnds [ident@(Ident var tp _)] e =
     SubExp (Var v)        -> [(var, VarId  (identName v) (identType v))]
     Index   {}            -> [(var, SymArr e   tp)]
     TupLit  [e'] _        -> getPropBnds [ident] $ SubExp e'
-    Transpose   {}        -> [(var, SymArr e   tp)]
+    Rearrange   {}        -> [(var, SymArr e   tp)]
     Reshape   {}          -> [(var, SymArr e   tp)]
     Conjoin {}            -> [(var, SymArr e   tp)]
 

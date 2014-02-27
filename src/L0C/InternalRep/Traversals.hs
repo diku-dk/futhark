@@ -159,10 +159,9 @@ mapExpM tv (Reshape cs shape arrexp loc) =
   pure Reshape <*> mapOnCertificates tv cs <*>
        mapM (mapOnSubExp tv) shape <*>
        mapOnSubExp tv arrexp <*> pure loc
-mapExpM tv (Transpose cs k n e3 loc) =
-  pure Transpose <*> mapOnCertificates tv cs <*>
-       pure k <*> pure n <*>
-       mapOnSubExp tv e3 <*> pure loc
+mapExpM tv (Rearrange cs perm e loc) =
+  pure Rearrange <*> mapOnCertificates tv cs <*>
+       pure perm <*> mapOnSubExp tv e <*> pure loc
 mapExpM tv (Split cs nexp arrexp loc) =
   pure Split <*> mapOnCertificates tv cs <*>
        mapOnSubExp tv nexp <*> mapOnSubExp tv arrexp <*>

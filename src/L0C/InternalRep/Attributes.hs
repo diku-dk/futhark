@@ -74,6 +74,13 @@ module L0C.InternalRep.Attributes
   , emptyArray
   , flattenArray
 
+  -- * Rearranging
+  , permuteDims
+  , permuteArray
+  , permuteInverse
+  , permuteReach
+  , permuteCompose
+
   -- * Transposition
   , transposeArray
   , transposeIndex
@@ -92,6 +99,7 @@ import Control.Monad.Writer
 import Control.Monad.Identity
 
 import Data.Array
+import Data.Ord
 import Data.List
 import Data.Loc
 import Data.Maybe
@@ -355,15 +363,13 @@ flattenArray (ArrayVal arr et) =
           flatten v = [v]
 flattenArray v = v
 
--- | Array transpose generalised to multiple dimensions.  The result
--- of @transposeArray k n a@ is an array where the element @a[i_1,
--- ..., i_k ,i_{k+1}, ..., i_{k+n}, ..., i_q ]@ is now at index @[i_1
--- ,.., i_{k+1} , ..., i_{k+n} ,i_k, ..., i_q ]@.
---
--- @transposeArray 0 1@ is equivalent to the common transpose.  If the
--- given value is not an array, it is returned unchanged.
-transposeArray :: Int -> Int -> Value -> Value
-transposeArray k n v =
+-- | Calculate the given permutation of the list.  It is an error if
+-- the permutation goes out of bounds.
+permuteDims :: [Int] -> [a] -> [a]
+permuteDims perm l = map (l!!) perm
+
+permuteArray :: [Int] -> Value -> Value
+permuteArray perm v =
   case flattenArray v of
     ArrayVal inarr _ ->
       let newshape = move oldshape
@@ -374,7 +380,35 @@ transposeArray k n v =
       in f (rowType $ valueType v) [] newshape
     _ -> v
   where oldshape = arrayShape v
-        move = transposeIndex k n
+        move = permuteDims perm
+
+-- | Produce the inverse permutation.
+permuteInverse :: [Int] -> [Int]
+permuteInverse perm = map snd $ sortBy (comparing fst) $ zip perm [0..]
+
+-- | Return the first dimension not affected by the permutation.  For
+-- example, the permutation @[1,0,2]@ would return @2@.
+permuteReach :: [Int] -> Int
+permuteReach perm = case dropWhile (uncurry (/=)) $ zip (tails perm) (tails [0..n-1]) of
+                      []          -> n + 1
+                      (perm',_):_ -> n - length perm'
+  where n = length perm
+
+-- | Compose two permutations, with the second given permutation being
+-- applied first.
+permuteCompose :: [Int] -> [Int] -> [Int]
+permuteCompose = permuteDims
+
+-- | Array transpose generalised to multiple dimensions.  The result
+-- of @transposeArray k n a@ is an array where the element @a[i_1,
+-- ..., i_k ,i_{k+1}, ..., i_{k+n}, ..., i_q ]@ is now at index @[i_1
+-- ,.., i_{k+1} , ..., i_{k+n} ,i_k, ..., i_q ]@.
+--
+-- @transposeArray 0 1@ is equivalent to the common transpose.  If the
+-- given value is not an array, it is returned unchanged.
+transposeArray :: Int -> Int -> Value -> Value
+transposeArray k n v = permuteArray (transposeIndex k n [0..rank-1]) v
+  where rank = arrayRank $ valueType v
 
 -- | If @l@ is an index into the array @a@, then @transposeIndex k n
 -- l@ is an index to the same element in the array @transposeArray k n
@@ -459,11 +493,8 @@ typeOf (Reshape _ [] e _) =
   [Basic $ elemType $ subExpType e]
 typeOf (Reshape _ shape e _) =
   [replicate (length shape) Nothing `setArrayDims` subExpType e]
-typeOf (Transpose _ k n e _)
-  | Array et dims u als <- subExpType e,
-    (pre,d:post) <- splitAt k dims,
-    (mid,end) <- splitAt n post = [Array et (pre++mid++[d]++end) u als]
-  | otherwise = [subExpType e]
+typeOf (Rearrange _ perm e _) =
+  [permuteDims perm (arrayDims $ subExpType e) `setArrayDims` subExpType e]
 typeOf (Split _ _ e _) =
   [subExpType e, subExpType e]
 typeOf (Concat _ x y _) =

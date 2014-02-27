@@ -208,10 +208,10 @@ bindLet pat@[dest] e@(Index cs src _ idxs _) m =
   withBinding pat e $
   withShape dest (slice cs (length idxs) src) m
 
-bindLet pat@[dest] e@(Transpose cs k n (Var src) loc) m =
+bindLet pat@[dest] e@(Rearrange cs perm (Var src) loc) m =
   withBinding pat e $
   withShape dest dims m
-    where dims = transposeIndex k n
+    where dims = permuteDims perm
                  [Size cs i (Var src) loc
                   | i <- [0..arrayRank (identType src) - 1]]
 
@@ -331,7 +331,7 @@ expCost (Filter {}) = 1
 expCost (Reduce {}) = 1
 expCost (Scan {}) = 1
 expCost (Redomap {}) = 1
-expCost (Transpose {}) = 1
+expCost (Rearrange {}) = 1
 expCost (Copy {}) = 1
 expCost (Concat {}) = 1
 expCost (Split {}) = 1

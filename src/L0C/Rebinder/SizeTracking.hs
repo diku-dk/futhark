@@ -113,13 +113,9 @@ levelSizes nest = merge inputSizes iotaSizes
 
         inputSizes = transpose $ zipWith mkSizes (Nest.inputs nest) $
                                  Nest.inputBindings nest
-          where mkSizes inp bnds
-                  | (SOAC.Input [] (SOAC.Var inputArray), idxs)
-                    <- SOAC.inputTransposes inp =
-                      let numDims = arrayRank $ identType inputArray
-                          trns' (k, n) dim = transposeDimension k n dim numDims
-                          trns i = foldr trns' i idxs
-                      in [ Size cs (trns i) (Var inputArray) loc | i <- [0..length bnds-1] ]
+          where mkSizes (SOAC.Input [SOAC.Rearrange rcs perm] (SOAC.Var inputArray)) bnds =
+                      let trns i = perm !! i
+                      in [ Size (cs++rcs) (trns i) (Var inputArray) loc | i <- [0..length bnds-1] ]
                 mkSizes _ _ = []
 
         iotaSizes = map mkSizes $ Nest.inputs nest : Nest.inputsPerLevel nest

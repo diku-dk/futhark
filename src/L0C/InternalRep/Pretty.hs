@@ -151,13 +151,8 @@ instance Pretty Exp where
     text "replicate" <> apply [ppr ne, align (ppr ve)]
   ppr (Reshape cs shape e _) =
     ppCertificates cs <> text "reshape" <> apply [apply (map ppr shape), ppr e]
-  ppr (Transpose cs 0 1 e _) =
-    ppCertificates cs <> text "transpose" <> apply [ppr e]
-  ppr (Transpose cs k n e _) =
-        ppCertificates cs <>
-        text "transpose" <> apply [text $ show k,
-                                   text $ show n,
-                                   ppr e]
+  ppr (Rearrange cs perm e _) =
+    ppCertificates cs <> text "rearrange" <> apply [apply (map ppr perm), ppr e]
   ppr (Split cs e a _) =
     ppCertificates cs <> text "split" <> apply [ppr e, ppr a]
   ppr (Concat cs x y _) =

@@ -36,15 +36,14 @@ module L0C.HORepresentation.SOAC
   , InputArray (..)
   , inputArray
   , inputType
-  , inputTransposes
   , transformRows
+  , transposeInput
   -- ** Converting to and from expressions
   , inputFromSubExp
   , inputsToSubExps
   )
   where
 
-import Control.Arrow (first)
 import Control.Applicative
 import Control.Monad
 
@@ -55,13 +54,12 @@ import qualified Data.HashMap.Lazy as HM
 
 import qualified L0C.InternalRep as L0
 import L0C.InternalRep hiding (Map, Reduce, Scan, Filter, Redomap,
-                               Var, Iota, Transpose, Reshape)
+                               Var, Iota, Rearrange, Reshape)
 import L0C.Substitute
 import L0C.Tools
 
-data InputTransform = Transpose Certificates Int Int
-                    -- ^ A transposition of an otherwise valid input (possibly
-                    -- another transposition!).
+data InputTransform = Rearrange Certificates [Int]
+                    -- ^ A permutation of an otherwise valid input.
                     | Reshape Certificates [SubExp]
                     -- ^ A reshaping of an otherwise valid input.
                     | ReshapeOuter Certificates [SubExp]
@@ -76,11 +74,11 @@ data InputTransform = Transpose Certificates Int Int
 
 -- | Given an expression, determine whether the expression represents
 -- an input transformation of an array variable.  If so, return the
--- variable and the transformation.  Only 'Transpose' and 'Reshape'
+-- variable and the transformation.  Only 'Rearrange' and 'Reshape'
 -- are possible to express this way.
 transformFromExp :: Exp -> Maybe (Ident, InputTransform)
-transformFromExp (L0.Transpose cs k n (L0.Var v) _) =
-  Just (v, Transpose cs k n)
+transformFromExp (L0.Rearrange cs perm (L0.Var v) _) =
+  Just (v, Rearrange cs perm)
 transformFromExp (L0.Reshape cs shape (L0.Var v) _) =
   Just (v, Reshape cs shape)
 transformFromExp _ = Nothing
@@ -129,7 +127,13 @@ isVarInput _                  = Nothing
 
 -- | Add a transformation to the end of the transformation list.
 addTransform :: InputTransform -> Input -> Input
-addTransform t (Input ts ia) = Input (ts++[t]) ia
+addTransform t (Input ts ia) =
+  Input ts' ia
+  -- Simplify a little bit to remove redundant transformations.
+  where ts' = case (t, reverse ts) of
+                (Rearrange cs2 perm2, Rearrange cs1 perm1 : rest) ->
+                  reverse $ Rearrange (cs1++cs2) (perm1 `permuteCompose` perm2) : rest
+                _ -> ts++[t]
 
 -- | Add several transformations to the end of the transformation
 -- list.
@@ -159,9 +163,9 @@ inputsToSubExps is = do
                        join $ listToMaybe $ drop d sizes
                 loc  = srclocOf ia
 
-        transform (sizes, d, ia) (Transpose cs k n) = do
-          ia' <- letSubExp "transpose" $ L0.Transpose cs k n ia $ srclocOf ia
-          return (transposeIndex k n sizes, d, ia')
+        transform (sizes, d, ia) (Rearrange cs perm) = do
+          ia' <- letSubExp "rearrange" $ L0.Rearrange cs perm ia $ srclocOf ia
+          return (permuteDims perm sizes, d, ia')
 
         transform (sizes, d, ia) (Reshape cs shape) = do
           ia' <- letSubExp "reshape" $ L0.Reshape cs shape ia $ srclocOf ia
@@ -194,8 +198,8 @@ dimSizes is =
         iaDims (Iota e) = return [e]
 
         inspect' :: [Maybe SubExp] -> InputTransform -> [Maybe SubExp]
-        inspect' ds (Transpose _ k n) =
-          transposeIndex k n ds
+        inspect' ds (Rearrange _ perm) =
+          permuteDims perm ds
 
         inspect' _ (Reshape _ shape) =
           map Just shape
@@ -209,7 +213,7 @@ dimSizes is =
         inspect' ds (Repeat) =
           Nothing : ds
 
--- | If the input is a (possibly transposed, reshaped or otherwise
+-- | If the input is a (possibly rearranged, reshaped or otherwise
 -- transformed) array variable, return that variable.
 inputArray :: Input -> Maybe Ident
 inputArray (Input _ (Var v))         = Just v
@@ -219,14 +223,18 @@ inputArrayType :: InputArray -> Type
 inputArrayType (Var v)            = identType v
 inputArrayType (Iota _)           = arrayOf (Basic Int) [Nothing] Unique
 
+-- | Return the array rank (dimensionality) of an input.
+inputRank :: Input -> Int
+inputRank = arrayRank . inputType
+
 -- | Return the type of an input.
 inputType :: Input -> Type
 inputType (Input ts ia) = foldl transformType (inputArrayType ia) ts
   where transformType t Repeat = arrayOf t [Nothing] u
           where u | uniqueOrBasic t = Unique
                   | otherwise       = Nonunique
-        transformType t (Transpose _ k n) =
-          setArrayDims (transposeIndex k n $ arrayDims t) t
+        transformType t (Rearrange _ perm) =
+          setArrayDims (permuteDims perm $ arrayDims t) t
         transformType t (Reshape _ shape) =
           setArrayDims (replicate (length shape) Nothing) t
         transformType t (ReshapeOuter _ shape) =
@@ -234,27 +242,25 @@ inputType (Input ts ia) = foldl transformType (inputArrayType ia) ts
         transformType t (ReshapeInner _ shape) =
           setArrayDims (take 1 (arrayDims t) ++ replicate (length shape) Nothing) t
 
--- | Strip surrounding transpositions from the input, returning the
--- inner input and a list of @(k,n)@-transposition pairs.
-inputTransposes :: Input -> (Input, [(Int,Int)])
-inputTransposes (Input ts ia) =
-  (Input ts' ia, kns)
-  where (kns, ts') = takeTransposes ts
-        takeTransposes (Transpose _ k n : rest) =
-          first ((k,n):) $ takeTransposes rest
-        takeTransposes rest = ([],rest)
-
 transformRows :: [InputTransform] -> Input -> Input
 transformRows [] (Input ots ia) =
   Input ots ia
-transformRows (Transpose cs k n:nts) inp =
-  transformRows nts $ addTransform (Transpose cs (k+1) n) inp
+transformRows (Rearrange cs perm:nts) inp =
+  transformRows nts $ addTransform (Rearrange cs (0:map (+1) perm)) inp
 transformRows (Reshape cs shape:nts) inp =
   transformRows nts $ addTransform (ReshapeInner cs shape) inp
 transformRows (Repeat:nts) inp =
-  transformRows nts $ addTransforms [Repeat, Transpose [] 0 1] inp
+  transformRows nts $ addTransforms [Repeat, Rearrange [] (1:0:[2..inputRank inp])] inp
 transformRows nts inp =
   error $ "transformRows: Cannot transform this yet:\n" ++ show nts ++ "\n" ++ show inp
+
+-- | Add to the input a 'Rearrange' transform that performs an @(k,n)@
+-- transposition.  The new transform will be at the end of the current
+-- transformation list.
+transposeInput :: Int -> Int -> Input -> Input
+transposeInput k n inp =
+  addTransform (Rearrange [] $ transposeIndex k n [0..rank-1]) inp
+  where rank = arrayRank $ inputType inp
 
 -- | A definite representation of a SOAC expression.
 data SOAC = Map Certificates Lambda [Input] SrcLoc

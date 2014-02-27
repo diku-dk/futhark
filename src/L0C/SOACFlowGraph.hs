@@ -112,7 +112,7 @@ soacSeen name produced soac =
         inspectInput (SOAC.Input _ (SOAC.Iota _)) =
           Nothing
 
-        descTransform (SOAC.Transpose {})    = "transpose"
+        descTransform (SOAC.Rearrange {})    = "rearrange"
         descTransform (SOAC.Reshape {})      = "reshape"
         descTransform (SOAC.ReshapeOuter {}) = "reshape"
         descTransform (SOAC.ReshapeInner {}) = "reshape"

@@ -444,7 +444,8 @@ typeOf (Reshape _ [] e _) =
   Elem $ elemType $ typeOf e
 typeOf (Reshape _ shape  e _) =
   replicate (length shape) Nothing `setArrayDims` typeOf e
-
+typeOf (Rearrange _ _ e _) =
+  typeOf e
 typeOf (Transpose _ k n e _)
   | Array et dims u als <- typeOf e,
     (pre,d:post) <- splitAt k dims,

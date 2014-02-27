@@ -240,12 +240,19 @@ data ExpBase ty vn =
             -- Array index space transformation.
             | Reshape (CertificatesBase ty vn) [ExpBase ty vn] (ExpBase ty vn) SrcLoc
              -- ^ 1st arg is the new shape, 2nd arg is the input array *)
+
             | Transpose (CertificatesBase ty vn) Int Int (ExpBase ty vn) SrcLoc
-              -- ^ If @b=transpose(k,n,a)@, then @a[i_1, ..., i_k
-              -- ,i_{k+1}, ..., i_{k+n}, ..., i_q ] = b[i_1 ,..,
-              -- i_{k+1} , ..., i_{k+n} ,i_k, ..., i_q ]@.  Thus,
-              -- @transpose(0,1,a)@ is the common two-dimensional
-              -- transpose.
+            -- ^ If @b=transpose(k,n,a)@, then @a[i_1, ..., i_k
+            -- ,i_{k+1}, ..., i_{k+n}, ..., i_q ] = b[i_1 ,.., i_{k+1}
+            -- , ..., i_{k+n} ,i_k, ..., i_q ]@.  Thus,
+            -- @transpose(0,1,a)@ is the common two-dimensional
+            -- transpose.
+
+            | Rearrange (CertificatesBase ty vn) [Int] (ExpBase ty vn) SrcLoc
+            -- ^ Permute the dimensions of the input array.  The list
+            -- of integers is a list of dimensions (0-indexed), which
+            -- must be a permutation of @[0,n-1]@, where @n@ is the
+            -- number of dimensions in the input array.
 
             -- Second-Order Array Combinators accept curried and
             -- anonymous functions as first params.
@@ -316,6 +323,7 @@ instance Located (ExpBase ty vn) where
   locOf (Replicate _ _ pos) = locOf pos
   locOf (Reshape _ _ _ pos) = locOf pos
   locOf (Transpose _ _ _ _ pos) = locOf pos
+  locOf (Rearrange _ _ _ pos) = locOf pos
   locOf (Map _ _ _ pos) = locOf pos
   locOf (Reduce _ _ _ _ pos) = locOf pos
   locOf (Zip _ pos) = locOf pos

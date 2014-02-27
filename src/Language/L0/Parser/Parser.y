@@ -114,6 +114,7 @@ import Language.L0.Parser.Lexer
       reduce          { L $$ REDUCE }
       reduceT         { L $$ REDUCE2 }
       reshape         { L $$ RESHAPE }
+      rearrange       { L $$ REARRANGE }
       transpose       { L $$ TRANSPOSE }
       zip             { L $$ ZIP }
       unzip           { L $$ UNZIP }
@@ -282,6 +283,12 @@ Exp  :: { UncheckedExp }
 
      | reshape '(' '(' Exps ')' ',' Exp ')'
                       { Reshape [] $4 $7 $1 }
+
+     | Certificates rearrange '(' '(' NaturalInts ')' ',' Exp ')'
+                      { Rearrange $1 $5 $8 $2 }
+
+     | rearrange '(' '(' NaturalInts ')' ',' Exp ')'
+                      { Rearrange [] $4 $7 $1 }
 
      | Certificates transpose '(' Exp ')' { Transpose $1 0 1 $4 $2 }
 
@@ -460,7 +467,12 @@ Value : IntValue { $1 }
 SignedInt :     intlit { let L _ (INTLIT num) = $1 in num  }
           | '-' intlit { let L _ (INTLIT num) = $2 in -num }
 
-NaturalInt :     intlit { let L _ (INTLIT num) = $1 in num  }
+NaturalInt :: { Int }
+           :  intlit { let L _ (INTLIT num) = $1 in num  }
+
+NaturalInts :: { [Int] }
+           : intlit                 { let L _ (INTLIT num) = $1 in [num] }
+           | intlit ',' NaturalInts { let L _ (INTLIT num) = $1 in num : $3  }
 
 IntValue : intlit        { let L pos (INTLIT num) = $1 in BasicVal $ IntVal num }
 RealValue : reallit      { let L pos (REALLIT num) = $1 in BasicVal $ RealVal num }

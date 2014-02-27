@@ -670,6 +670,14 @@ checkExp (Reshape cs shapeexps arrexp pos) = do
   arrexp' <- checkExp arrexp
   return (Reshape cs' shapeexps' arrexp' pos)
 
+checkExp (Rearrange cs perm arrexp pos) = do
+  cs' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) cs
+  arrexp' <- checkExp arrexp
+  let rank = arrayRank $ typeOf arrexp'
+  when (length perm /= rank || sort perm /= [0..rank-1]) $
+    bad $ PermutationError pos perm rank
+  return $ Rearrange cs' perm arrexp' pos
+
 checkExp (Transpose cs k n arrexp pos) = do
   cs' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) cs
   arrexp' <- checkExp arrexp

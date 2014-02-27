@@ -113,9 +113,9 @@ externaliseExp (I.Reshape cs shape e loc) =
             (map externaliseSubExp shape)
             (externaliseSubExp e)
             loc
-externaliseExp (I.Transpose cs k n e loc) =
-  E.Transpose (externaliseCerts cs)
-              k n
+externaliseExp (I.Rearrange cs perm e loc) =
+  E.Rearrange (externaliseCerts cs)
+              perm
               (externaliseSubExp e)
               loc
 externaliseExp (I.Map cs fun es loc) =

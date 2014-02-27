@@ -71,6 +71,8 @@ data GenTypeError vn e t pat =
   -- ^ A unique element of the tuple returned by the
   -- function aliases some other element of the tuple.
   | NotAnArray SrcLoc e t
+  | PermutationError SrcLoc [Int] Int
+  -- ^ The permutation is not valid.
 
 instance (VarName vn, Pretty e, Located e, Pretty t, Pretty pat) => Show (GenTypeError vn e t pat) where
   show (TypeError pos msg) =
@@ -151,6 +153,10 @@ instance (VarName vn, Pretty e, Located e, Pretty t, Pretty pat) => Show (GenTyp
   show (NotAnArray loc _ t) =
     "The expression at " ++ locStr loc ++
     " is expected to be an array, but is " ++ ppr' t ++ "."
+  show (PermutationError loc perm rank) =
+    "The permutation (" ++ intercalate ", " (map show perm) ++
+    ") is not valid for array of rank " ++ show rank ++ " at " ++
+    locStr loc ++ "."
 
 ppTuple :: Pretty a => [a] -> String
 ppTuple ts = intercalate ", " $ map ppr' ts

@@ -727,14 +727,13 @@ checkExp (Reshape cs shapeexps arrexp pos) = do
   arrexp' <- checkSubExp arrexp
   return (Reshape cs' shapeexps' arrexp' pos)
 
-checkExp (Transpose cs k n arrexp pos) = do
+checkExp (Rearrange cs perm arrexp pos) = do
   cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
   arrexp' <- checkSubExp arrexp
-  when (arrayRank (subExpType arrexp') < reach + 1) $
-    bad $ TypeError pos $ "Argument to transpose does not have " ++
-          show (reach+1) ++ " dimensions."
-  return $ Transpose cs' k n arrexp' pos
-  where reach = max k $ n + k
+  let rank = arrayRank $ subExpType arrexp'
+  when (length perm /= rank || sort perm /= [0..rank-1]) $
+    bad $ PermutationError pos perm rank
+  return $ Rearrange cs' perm arrexp' pos
 
 checkExp (Split cs splitexp arrexp pos) = do
   cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs

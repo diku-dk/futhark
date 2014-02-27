@@ -695,18 +695,18 @@ compileExp' place (Reshape _ shapeexps arrexp _) = do
                      $exp:place.data = $id:arr.data;
                    }|]
 
-compileExp' place (Transpose _ k n arrexp _) = do
+compileExp' place (Rearrange _ perm arrexp _) = do
   arr <- new "transpose_arr"
   intype <- typeToCType [subExpType arrexp]
   basetype <- typeToCType [Basic $ elemType $ subExpType arrexp]
   arrexp' <- compileSubExp (varExp arr) arrexp
-  let newshape = transposeIndex k n $ arrayShapeExp (varExp arr) (subExpType arrexp)
+  let newshape = permuteDims perm $ arrayShapeExp (varExp arr) (subExpType arrexp)
       alloc =  allocArray place newshape basetype
       rank = arrayRank $ subExpType arrexp
       loop is 0 =
         let iexps = map varExp is
             indexfrom = indexArrayExp (varExp arr) rank iexps
-            indexto   = indexArrayExp place rank $ transposeIndex k n iexps
+            indexto   = indexArrayExp place rank $ permuteDims perm iexps
         in return ([C.cstm|$exp:indexto = $exp:indexfrom;|], is)
       loop is d = do i <- new "transpose_i"
                      (inner, is') <- loop (i:is) (d-1)

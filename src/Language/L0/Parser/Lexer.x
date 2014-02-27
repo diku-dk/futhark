@@ -91,6 +91,7 @@ keyword s =
     "size"         -> SIZE
     "replicate"    -> REPLICATE
     "reshape"      -> RESHAPE
+    "rearrange"    -> REARRANGE
     "transpose"    -> TRANSPOSE
     "map"          -> MAP
     "reduce"       -> REDUCE

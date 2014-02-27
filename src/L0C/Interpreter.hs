@@ -399,8 +399,8 @@ evalExp (Reshape _ shapeexp arrexp pos) = do
         asInt (BasicVal (IntVal x)) = return x
         asInt _ = bad $ TypeError pos "evalExp Reshape asInt"
 
-evalExp (Transpose _ k n arrexp _) =
-  single <$> transposeArray k n <$> evalSubExp arrexp
+evalExp (Rearrange _ perm arrexp _) =
+  single <$> permuteArray perm <$> evalSubExp arrexp
 
 evalExp (Split _ splitexp arrexp pos) = do
   split <- evalSubExp splitexp

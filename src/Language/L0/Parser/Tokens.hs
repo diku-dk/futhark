@@ -57,6 +57,7 @@ data Token = IF
            | MAP
            | REDUCE
            | RESHAPE
+           | REARRANGE
            | TRANSPOSE
            | ZIP
            | UNZIP
