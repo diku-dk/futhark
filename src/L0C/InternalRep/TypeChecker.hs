@@ -10,7 +10,8 @@ module L0C.InternalRep.TypeChecker
   , checkProgNoUniqueness
   , checkClosedExp
   , checkOpenExp
-  , TypeError)
+  , TypeError
+  )
   where
 
 import Control.Applicative
@@ -29,6 +30,7 @@ import qualified L0C.FreshNames as FreshNames
 import L0C.MonadFreshNames
 import L0C.TypeError
 
+-- | Information about an error that occured during type checking.
 type TypeError = GenTypeError VName Exp (Several Type) (Several Ident)
 
 -- | A tuple of a return type and a list of argument types.

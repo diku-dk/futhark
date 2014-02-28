@@ -1,5 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-
+-- | This module implements a compiler pass that removes unused
+-- @let@-bindings.
 module L0C.EnablingOpts.DeadVarElim (
                                 deadCodeElim
                             )

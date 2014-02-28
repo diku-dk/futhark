@@ -137,6 +137,21 @@ internaliseType' (E.Array elemt size u als) =
         arr t = I.arrayOf t size' $ internaliseUniqueness u
 internaliseType' (E.Elem et) = internaliseElemType' et
 
+-- | Transform an external value to a number of internal values.
+-- Roughly:
+--
+-- * The resulting list is empty if the original value is an empty
+--   tuple.
+--
+-- * It contains a single element if the original value was a
+-- singleton tuple or non-tuple.
+--
+-- * The list contains more than one element if the original value was
+-- a non-empty non-singleton tuple.
+--
+-- Although note that the transformation from arrays-of-tuples to
+-- tuples-of-arrays may also contribute to several discrete arrays
+-- being returned for a single input array.
 internaliseValue :: E.Value -> [I.Value]
 internaliseValue (E.ArrayVal arr rt) =
   case internaliseType $ E.addNames rt of

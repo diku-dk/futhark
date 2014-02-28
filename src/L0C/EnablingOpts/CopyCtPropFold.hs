@@ -37,13 +37,13 @@ import qualified L0C.Interpreter as Interp
 -----------------------------------------------
 
 data CtOrId  = Value Value Type
-             -- | value for constant propagation
+             -- ^ value for constant propagation
 
              | VarId VName Type
-             -- | Variable id for copy propagation
+             -- ^ Variable id for copy propagation
 
              | SymArr Exp Type
-             -- | Various other opportunities for copy propagation,
+             -- ^ Various other opportunities for copy propagation,
              -- for the moment: (i) an indexed variable, (ii) a iota
              -- array, (iii) a replicated array, (iv) a TupLit, and
              -- (v) an ArrayLit.  I leave this one open, i.e., Exp, as

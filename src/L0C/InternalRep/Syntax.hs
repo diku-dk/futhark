@@ -136,6 +136,9 @@ instance Hashable (IdentBase ty) where
 -- | A list of identifiers used for certificates in some expressions.
 type Certificates = [Ident]
 
+-- | A subexpression is either a constant or a variable.  One
+-- important property is that evaluation of a subexpression is
+-- guaranteed to complete in constant time.
 data SubExp = Constant Value SrcLoc
             | Var      Ident
               deriving (Eq, Ord, Show)
@@ -144,6 +147,8 @@ instance Located SubExp where
   locOf (Constant _ loc) = locOf loc
   locOf (Var ident)      = locOf ident
 
+-- | A body consists of a number of bindings, terminating in a result
+-- (essentially a tuple literal).
 data Body = LetPat [Ident] Exp Body SrcLoc
           | DoLoop
             [(Ident,SubExp)] -- Merge variable pattern and initial

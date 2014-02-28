@@ -52,13 +52,13 @@ type ExpCompiler = C.Exp -> Exp -> CompilerM ExpCompilerResult
 
 -- | The result of the substitute expression compiler.
 data ExpCompilerResult = CompileBody Body
-                       -- | New bindings.  Note that the bound
+                       -- ^ New bindings.  Note that the bound
                        -- expressions will themselves be compiled
                        -- using the expression compiler.
-                       | CompileExp Exp -- | A new expression (or
+                       | CompileExp Exp -- ^ A new expression (or
                                         -- possibly the same as the
                                         -- input).
-                       | CCode [C.BlockItem] -- | Compiled C code.
+                       | CCode [C.BlockItem] -- ^ Compiled C code.
 
 data CompilerEnv = CompilerEnv {
     envVarMap :: HM.HashMap VName C.Exp

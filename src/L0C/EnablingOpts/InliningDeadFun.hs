@@ -1,5 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-
+-- | This module implements a compiler pass for inlining functions,
+-- then removing those that have become dead.
 module L0C.EnablingOpts.InliningDeadFun  (
                         CallGraph
                       , buildCG
