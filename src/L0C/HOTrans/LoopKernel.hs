@@ -10,8 +10,6 @@ module L0C.HOTrans.LoopKernel
   )
   where
 
-import Debug.Trace
-
 import Control.Applicative
 import Control.Arrow (first)
 import Control.Monad
