@@ -43,7 +43,7 @@ import L0C.AccurateSizes
 newL0Config :: L0Config
 newL0Config = L0Config {
                 l0pipeline = []
-              , l0action = printAction
+              , l0action = externaliseAction
               , l0checkAliases = True
               , l0verbose = Nothing
               }
@@ -68,14 +68,14 @@ commandLineOptions =
     (NoArg $ \opts -> opts { l0action = flowGraphAction })
     "Print the SOAC flow graph of the final program."
   , Option "p" ["print"]
-    (NoArg $ \opts -> opts { l0action = printAction })
-    "Prettyprint the resulting internal representation on standard output (default action)."
+    (NoArg $ \opts -> opts { l0action = externaliseAction })
+    "Prettyprint the resulting external representation on standard output (default action)."
   , Option "i" ["interpret"]
     (NoArg $ \opts -> opts { l0action = interpretAction })
     "Run the program via an interpreter."
-  , Option [] ["externalise"]
-    (NoArg $ \opts -> opts { l0action = externaliseAction})
-    "Prettyprint the resulting external representation on standard output."
+  , Option [] ["internalise"]
+    (NoArg $ \opts -> opts { l0action = printAction})
+    "Prettyprint the resulting internal representation on standard output."
   , renameOpt "r" ["rename"]
   , hoistOpt "o" ["hoist"]
   , hoistAggrOpt "O" ["hoist-aggressively"]
