@@ -398,7 +398,7 @@ compileBody place (LetPat pat e body _) = do
                      $items:body'
                    }|]
 
-compileBody place (LetWith _ name src _ idxs ve body _) = do
+compileBody place (LetWith _ name src idxs ve body _) = do
   name' <- new $ textual $ identName name
   src' <- lookupVar $ identName src
   etype <- typeToCType [identType src]
@@ -612,7 +612,7 @@ compileExp' place (Apply fname args _ _) = do
                      $exp:place = $id:(funName fname)($args:varexps);
                }|]
 
-compileExp' place (Index _ var _ idxs _) = do
+compileExp' place (Index _ var idxs _) = do
   arr <- lookupVar $ identName var
   idxvars <- mapM (new . ("index_"++) . show) [0..length idxs-1]
   idxs' <- concat <$> zipWithM compileSubExp (map varExp idxvars) idxs

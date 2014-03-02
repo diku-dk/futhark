@@ -408,7 +408,7 @@ fusionGatherBody fres (LetPat pat e body _) = do
     bres <- binding pat $ fusionGatherBody fres body
     foldM fusionGatherExp bres (e:pat_vars)
 
-fusionGatherBody fres (LetWith _ id1 id0 _ inds elm body _) = do
+fusionGatherBody fres (LetWith _ id1 id0 inds elm body _) = do
   bres  <- binding [id1] $ fusionGatherBody fres body
 
   let pat_vars = [Var id0, Var id1]
@@ -449,7 +449,7 @@ fusionGatherExp :: FusedRes -> Exp -> FusionGM FusedRes
 ---- Index/If    ----
 -----------------------------------------
 
-fusionGatherExp fres (Index _ idd _ inds _) =
+fusionGatherExp fres (Index _ idd inds _) =
   foldM fusionGatherSubExp fres (Var idd : inds)
 
 fusionGatherExp fres (If cond e_then e_else _ _) = do

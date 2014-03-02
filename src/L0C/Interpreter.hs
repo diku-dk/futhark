@@ -230,7 +230,7 @@ evalBody (LetPat pat e body _) = do
   v <- evalExp e
   local (`bindVars` zip pat v) $ evalBody body
 
-evalBody (LetWith _ name src _ idxs ve body pos) = do
+evalBody (LetWith _ name src idxs ve body pos) = do
   v <- lookupVar src
   idxs' <- mapM evalSubExp idxs
   vev <- evalSubExp ve
@@ -343,7 +343,7 @@ evalExp (Apply fname args _ _) = do
   args' <- mapM (evalSubExp . fst) args
   fun args'
 
-evalExp (Index _ ident _ idxs pos) = do
+evalExp (Index _ ident idxs pos) = do
   v <- lookupVar ident
   idxs' <- mapM evalSubExp idxs
   single <$> foldM idx v idxs'

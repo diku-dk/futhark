@@ -120,21 +120,20 @@ deadCodeElimBody (LetPat pat e body pos) = do
   else do e' <- deadCodeElimExp e
           return $ LetPat pat e' body' pos
 
-deadCodeElimBody (LetWith cs nm src idxcs idxs el body pos) = do
-    cs' <- mapM deadCodeElimIdent cs
-    (body', noref) <- collectRes [identName nm] $ binding [identName nm] $ deadCodeElimBody body
-    idxcs' <- mapM deadCodeElimIdent idxcs
-    if noref
-    then changed $ return body'
-    else do
-            let srcnm = identName src
-            in_vtab <- asks $ S.member srcnm . envVtable
-            if not in_vtab
-            then badDCElimM $ VarNotInFtab pos srcnm
-            else do _ <- tell $ DCElimRes False (S.insert srcnm S.empty)
-                    idxs' <- mapM deadCodeElimSubExp idxs
-                    el'   <- deadCodeElimSubExp el
-                    return $ LetWith cs' nm src idxcs' idxs' el' body' pos
+deadCodeElimBody (LetWith cs nm src idxs el body pos) = do
+  cs' <- mapM deadCodeElimIdent cs
+  (body', noref) <- collectRes [identName nm] $ binding [identName nm] $ deadCodeElimBody body
+  if noref
+  then changed $ return body'
+  else do
+          let srcnm = identName src
+          in_vtab <- asks $ S.member srcnm . envVtable
+          if not in_vtab
+          then badDCElimM $ VarNotInFtab pos srcnm
+          else do _ <- tell $ DCElimRes False (S.insert srcnm S.empty)
+                  idxs' <- mapM deadCodeElimSubExp idxs
+                  el'   <- deadCodeElimSubExp el
+                  return $ LetWith cs' nm src idxs' el' body' pos
 
 deadCodeElimBody (DoLoop merge idd n loopbdy letbdy pos) = do
   let (mergepat, mergeexp) = unzip merge

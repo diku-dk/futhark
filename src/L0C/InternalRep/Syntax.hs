@@ -159,16 +159,16 @@ data Body = LetPat [Ident] Exp Body SrcLoc
             Body -- Let-body.
             SrcLoc
           | LetWith Certificates Ident Ident
-            Certificates [SubExp] SubExp
+            [SubExp] SubExp
             Body SrcLoc
           | Result [SubExp] SrcLoc
             deriving (Eq, Ord, Show)
 
 instance Located Body where
-  locOf (LetPat _ _ _ loc)          = locOf loc
-  locOf (DoLoop _ _ _ _ _ loc)      = locOf loc
-  locOf (LetWith _ _ _ _ _ _ _ loc) = locOf loc
-  locOf (Result _ loc)              = locOf loc
+  locOf (LetPat _ _ _ loc)        = locOf loc
+  locOf (DoLoop _ _ _ _ _ loc)    = locOf loc
+  locOf (LetWith _ _ _ _ _ _ loc) = locOf loc
+  locOf (Result _ loc)            = locOf loc
 
 -- | L0 Expression Language: literals + vars + int binops + array
 -- constructors + array combinators (SOAC) + if + function calls +
@@ -208,7 +208,6 @@ data Exp =
 
             | Index Certificates
                     Ident
-                    Certificates
                     [SubExp]
                     SrcLoc
             -- ^ 3rd arg are (optional) certificates for bounds
@@ -266,7 +265,7 @@ instance Located Exp where
   locOf (Negate _ pos) = locOf pos
   locOf (If _ _ _ _ pos) = locOf pos
   locOf (Apply _ _ _ pos) = locOf pos
-  locOf (Index _ _ _ _ pos) = locOf pos
+  locOf (Index _ _ _ pos) = locOf pos
   locOf (Iota _ pos) = locOf pos
   locOf (Size _ _ _ pos) = locOf pos
   locOf (Replicate _ _ pos) = locOf pos

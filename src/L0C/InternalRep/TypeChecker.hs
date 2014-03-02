@@ -488,10 +488,9 @@ checkBody (LetPat pat e body loc) = do
     body' <- checkBody body
     return $ LetPat pat' e' body' loc
 
-checkBody (LetWith cs (Ident dest destt destpos) src idxcs idxes ve body pos) = do
+checkBody (LetWith cs (Ident dest destt destpos) src idxes ve body pos) = do
   cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
   src' <- checkIdent src
-  idxcs' <- mapM (requireI [Basic Cert] <=< checkIdent) idxcs
   idxes' <- mapM (require [Basic Int] <=< checkSubExp) idxes
   destt' <- checkAnnotation pos "source" destt $ identType src' `setAliases` HS.empty
   let dest' = Ident dest destt' destpos
@@ -510,7 +509,7 @@ checkBody (LetWith cs (Ident dest destt destpos) src idxcs idxes ve body pos) = 
                                    (srclocOf dest') [destt']
                                    mempty
         body' <- consuming src' $ scope $ checkBody body
-        return $ LetWith cs' dest' src' idxcs' idxes' ve' body' pos
+        return $ LetWith cs' dest' src' idxes' ve' body' pos
 
 -- Checking of loops is done by synthesing the (almost) equivalent
 -- function and type-checking a call to it.  The difficult part is
@@ -690,9 +689,8 @@ checkExp (Apply fname args rettype loc) = do
 
       return $ Apply fname (zip args' $ map diet paramtypes) rettype' loc
 
-checkExp (Index cs ident csidxes idxes pos) = do
+checkExp (Index cs ident idxes pos) = do
   cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
-  csidxes' <- mapM (requireI [Basic Cert] <=< checkIdent) csidxes
   ident' <- checkIdent ident
   observe ident'
   vt <- lookupVar (identName ident') pos
@@ -700,7 +698,7 @@ checkExp (Index cs ident csidxes idxes pos) = do
     bad $ IndexingError (identName ident)
           (arrayRank vt) (length idxes) pos
   idxes' <- mapM (require [Basic Int] <=< checkSubExp) idxes
-  return $ Index cs' ident' csidxes' idxes' pos
+  return $ Index cs' ident' idxes' pos
 
 checkExp (Iota e pos) = do
   e' <- require [Basic Int] =<< checkSubExp e

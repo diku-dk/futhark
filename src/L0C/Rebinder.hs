@@ -55,7 +55,7 @@ import qualified L0C.Rebinder.SizeTracking as SZ
 
 data BindNeed = LoopBind [(Ident,SubExp)] Ident SubExp Body
               | LetBind [Ident] Exp [Exp]
-              | LetWithBind Certificates Ident Ident Certificates [SubExp] SubExp
+              | LetWithBind Certificates Ident Ident [SubExp] SubExp
                 deriving (Show, Eq)
 
 type NeedSet = [BindNeed]
@@ -67,8 +67,8 @@ asTail (LoopBind merge i bound loopbody) =
 asTail (LetBind pat e _) =
   LetPat pat e (Result [] loc) loc
     where loc = srclocOf pat
-asTail (LetWithBind cs dest src idxcs idxs ve) =
-  LetWith cs dest src idxcs idxs ve (Result [Var dest] loc) loc
+asTail (LetWithBind cs dest src idxs ve) =
+  LetWith cs dest src idxs ve (Result [Var dest] loc) loc
     where loc = srclocOf dest
 
 requires :: BindNeed -> HS.HashSet VName
@@ -77,9 +77,9 @@ requires (LetBind _ e alts) =
 requires bnd = HS.map identName $ freeInBody $ asTail bnd
 
 provides :: BindNeed -> HS.HashSet VName
-provides (LoopBind merge _ _ _)       = patNameSet $ map fst merge
-provides (LetBind pat _ _)            = patNameSet pat
-provides (LetWithBind _ dest _ _ _ _) = HS.singleton $ identName dest
+provides (LoopBind merge _ _ _)     = patNameSet $ map fst merge
+provides (LetBind pat _ _)          = patNameSet pat
+provides (LetWithBind _ dest _ _ _) = HS.singleton $ identName dest
 
 patNameSet :: [Ident] -> HS.HashSet VName
 patNameSet = HS.fromList . map identName
@@ -208,7 +208,7 @@ bindLet pat e m
     withBinding pat e $
     withShapes (SZ.sizeRelations pat nest) m
 
-bindLet pat@[dest] e@(Index cs src _ idxs _) m =
+bindLet pat@[dest] e@(Index cs src idxs _) m =
   withBinding pat e $
   withShape dest (slice cs (length idxs) src) m
 
@@ -222,10 +222,10 @@ bindLet pat@[dest] e@(Rearrange cs perm (Var src) loc) m =
 bindLet pat e m = withBinding pat e m
 
 bindLetWith :: Certificates -> Ident -> Ident
-            -> Certificates -> [SubExp] -> SubExp
+            -> [SubExp] -> SubExp
             -> HoistM a -> HoistM a
-bindLetWith cs dest src idxcs idxs ve m = do
-  needThis $ LetWithBind cs dest src idxcs idxs ve
+bindLetWith cs dest src idxs ve m = do
+  needThis $ LetWithBind cs dest src idxs ve
   withShape dest (slice [] 0 src) m
 
 bindLoop :: [(Ident,SubExp)] -> Ident -> SubExp -> Body -> HoistM a -> HoistM a
@@ -314,11 +314,11 @@ addBindings dupes needs =
                e':_ -> add e'
                _    -> add e
 
-        comb (m,ds) bnd@(LetWithBind cs dest src idxcs idxs ve) =
+        comb (m,ds) bnd@(LetWithBind cs dest src idxs ve) =
           ((m `HM.union` distances m bnd, ds),
            bind bnd $
            \inner ->
-             LetWith cs dest src idxcs idxs ve inner $ srclocOf inner)
+             LetWith cs dest src idxs ve inner $ srclocOf inner)
 
 score :: HM.HashMap VName Int -> Exp -> (Int, Exp)
 score m (SubExp (Var k)) =
@@ -350,7 +350,7 @@ distances m need = HM.fromList [ (k, d+cost) | k <- HS.toList outs ]
           case need of
             LetBind pat e _ ->
               (patNameSet pat, freeNamesInExp e, expCost e)
-            LetWithBind _ dest src _ idxs ve ->
+            LetWithBind _ dest src idxs ve ->
               (HS.singleton $ identName dest,
                identName src `HS.insert`
                mconcat (map (freeNamesInExp . SubExp) $ ve:idxs),
@@ -467,9 +467,9 @@ uniqPat :: [Ident] -> Bool
 uniqPat = any $ unique . identType
 
 isUniqueBinding :: BlockPred
-isUniqueBinding _ (LoopBind merge _ _ _)       = uniqPat $ map fst merge
-isUniqueBinding _ (LetBind pat _ _)            = uniqPat pat
-isUniqueBinding _ (LetWithBind _ dest _ _ _ _) = unique $ identType dest
+isUniqueBinding _ (LoopBind merge _ _ _)     = uniqPat $ map fst merge
+isUniqueBinding _ (LetBind pat _ _)          = uniqPat pat
+isUniqueBinding _ (LetWithBind _ dest _ _ _) = unique $ identType dest
 
 isConsumed :: BlockPred
 isConsumed body need =
@@ -493,8 +493,8 @@ hoistInBody :: Body -> HoistM Body
 hoistInBody (LetPat pat e body _) = do
   e' <- hoistInExp e
   bindLet pat e' $ hoistInBody body
-hoistInBody (LetWith cs dest src idxcs idxs ve body _) =
-  bindLetWith cs dest src idxcs idxs ve $ hoistInBody body
+hoistInBody (LetWith cs dest src idxs ve body _) =
+  bindLetWith cs dest src idxs ve $ hoistInBody body
 hoistInBody (DoLoop merge loopvar boundexp loopbody letbody _) = do
   loopbody' <- blockIfSeq [hasFree boundnames, isConsumed] $
                hoistInBody loopbody

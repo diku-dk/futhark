@@ -464,7 +464,7 @@ subExpType (Var ident)      = varType ident
 
 bodyType :: Body -> [Type]
 bodyType (LetPat _ _ body _) = bodyType body
-bodyType (LetWith _ _ _ _ _ _ body _) = bodyType body
+bodyType (LetWith _ _ _ _ _ body _) = bodyType body
 bodyType (DoLoop _ _ _ _ body _) = bodyType body
 bodyType (Result ses _) = map subExpType ses
 
@@ -480,7 +480,7 @@ typeOf (Not _ _) = [Basic Bool]
 typeOf (Negate e _) = [subExpType e]
 typeOf (If _ _ _ t _) = t
 typeOf (Apply _ _ t _) = t
-typeOf (Index _ ident _ idx _) =
+typeOf (Index _ ident idx _) =
   [stripArray (length idx) (varType ident)
    `changeAliases` HS.insert (identName ident)]
 typeOf (Iota _ _) = [arrayType 1 (Basic Int) Unique]
@@ -558,7 +558,7 @@ progNames = execWriter . mapM funNames . progFunctions
         funNames (_, _, params, body, _) =
           mapM_ one params >> bodyNames body
 
-        bodyNames e@(LetWith _ dest _ _ _ _ _ _) =
+        bodyNames e@(LetWith _ dest _ _ _ _ _) =
           one dest >> walkBodyM names e
         bodyNames e@(LetPat pat _ _ _) =
           mapM_ one pat >> walkBodyM names e
@@ -576,8 +576,8 @@ progNames = execWriter . mapM funNames . progFunctions
 mapTailM :: (Applicative m, Monad m) => ([SubExp] -> m Body) -> Body -> m Body
 mapTailM f (LetPat pat e body loc) =
   LetPat pat e <$> mapTailM f body <*> pure loc
-mapTailM f (LetWith cs dest src csidx idxs ve body loc) =
-  LetWith cs dest src csidx idxs ve <$> mapTailM f body <*> pure loc
+mapTailM f (LetWith cs dest src idxs ve body loc) =
+  LetWith cs dest src idxs ve <$> mapTailM f body <*> pure loc
 mapTailM f (DoLoop pat i bound loopbody body loc) =
   DoLoop pat i bound loopbody <$> mapTailM f body <*> pure loc
 mapTailM f (Result ses _) = f ses
@@ -606,10 +606,9 @@ freeWalker = identityWalker {
         bodyFree (LetPat pat e body _) = do
           expFree e
           binding (HS.fromList pat) $ bodyFree body
-        bodyFree (LetWith cs dest src idxcs idxs ve body _) = do
+        bodyFree (LetWith cs dest src idxs ve body _) = do
           mapM_ identFree cs
           identFree src
-          mapM_ identFree idxcs
           mapM_ subExpFree idxs
           subExpFree ve
           binding (HS.singleton dest) $ bodyFree body
@@ -658,7 +657,7 @@ consumedInBody = execWriter . bodyConsumed
         bodyConsumed (LetPat pat e body _) = do
           expConsumed e
           unconsume (HS.fromList $ map identName pat) $ bodyConsumed body
-        bodyConsumed (LetWith _ dest src _ _ _ body _) = do
+        bodyConsumed (LetWith _ dest src _ _ body _) = do
           consume src
           unconsume (HS.singleton $ identName dest) $ bodyConsumed body
         bodyConsumed (DoLoop pat i _ loopbody letbody _) =

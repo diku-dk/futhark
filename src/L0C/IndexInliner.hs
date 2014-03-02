@@ -63,7 +63,7 @@ transformBodyM body = mapBodyM transform body
 
 transformExp :: ArrayIndexMap -> Exp -> Binder (Either Exp [SubExp])
 
-transformExp m e@(Index cs v idxcs (idx:idxs) _) =
+transformExp m e@(Index cs v (idx:idxs) _) =
   case me of
     Nothing -> return $ Left e
     Just e' -> do
@@ -72,7 +72,7 @@ transformExp m e@(Index cs v idxcs (idx:idxs) _) =
        _ | cheapBody b -> do e'' <- bodyBind b
                              return $ Right e''
        _               -> return $ Left e
-  where me = lookupDelayed v cs idxcs idx m
+  where me = lookupDelayed v cs idx m
 
 transformExp _ e = Left <$> mapExpM transform e
   where transform = identityMapper {
@@ -85,19 +85,19 @@ transformLambdaM l = do
   return l { lambdaBody = e }
 
 type ArrayIndexMap = HM.HashMap Ident
-                     (Certificates -> Certificates -> SubExp -> NeedNames Body)
+                     (Certificates -> SubExp -> NeedNames Body)
 
 emptyArrayIndexMap :: ArrayIndexMap
 emptyArrayIndexMap = HM.empty
 
-lookupDelayed :: Ident -> Certificates -> Certificates -> SubExp
+lookupDelayed :: Ident -> Certificates -> SubExp
               -> ArrayIndexMap
               -> Maybe (NeedNames Body)
-lookupDelayed var cs idxcs idx m = do
+lookupDelayed var cs idx m = do
   f <- HM.lookup var m
-  return $ f cs idxcs idx
+  return $ f cs idx
 
-performArrayDelay :: Exp -> Maybe (Certificates -> Certificates -> SubExp -> NeedNames Body)
+performArrayDelay :: Exp -> Maybe (Certificates -> SubExp -> NeedNames Body)
 performArrayDelay (Map cs fun es _) = do
   vs <- mapM varExp es
   Just $ performArrayDelay' cs fun vs
@@ -106,10 +106,10 @@ performArrayDelay (Map cs fun es _) = do
 performArrayDelay _ = Nothing
 
 performArrayDelay' :: Certificates -> Lambda -> [Ident]
-                   -> Certificates -> Certificates -> SubExp -> NeedNames Body
-performArrayDelay' mcs fun vs cs idxcs idx =
+                   -> Certificates -> SubExp -> NeedNames Body
+performArrayDelay' mcs fun vs cs idx =
   return $ inlineMapFun (lambdaParams fun)
-                        [Index (mcs++cs) v idxcs [idx] $ srclocOf v
+                        [Index (mcs++cs) v [idx] $ srclocOf v
                            | v <- vs ]
   where inlineMapFun (p:ps) (ie:ies) =
           LetPat [fromParam p] ie (inlineMapFun ps ies) $ srclocOf p
@@ -123,8 +123,8 @@ performArrayDelays pat e = do
                      (stripArray 1 $ identType name)
                      (srclocOf name)
 
-  let dels f bnd cs ics is = do
-        fb <- f cs ics is
+  let dels f bnd cs is = do
+        fb <- f cs is
         let loc = srclocOf fb
         runBinder $ do
           es <- bodyBind fb

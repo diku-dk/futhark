@@ -110,11 +110,11 @@ eBinOp op x y t loc = do
   return $ BinOp op x' y' t loc
 
 eIndex :: MonadBinder m =>
-          Certificates -> Ident -> Certificates -> [m Exp] -> SrcLoc
+          Certificates -> Ident -> [m Exp] -> SrcLoc
        -> m Exp
-eIndex cs a idxcs idxs loc = do
+eIndex cs a idxs loc = do
   idxs' <- letSubExps "i" =<< sequence idxs
-  return $ Index cs a idxcs idxs' loc
+  return $ Index cs a idxs' loc
 
 eCopy :: MonadBinder m =>
          m Exp -> m Exp
@@ -151,7 +151,7 @@ eBody e = insertBindings $ do
 
 data Binding = LoopBind [(Ident, SubExp)] Ident SubExp Body
              | LetBind [Ident] Exp
-             | LetWithBind Certificates Ident Ident Certificates [SubExp] SubExp
+             | LetWithBind Certificates Ident Ident [SubExp] SubExp
                deriving (Show, Eq)
 
 class (MonadFreshNames m, Applicative m, Monad m) => MonadBinder m where
@@ -163,9 +163,9 @@ letBind pat e =
   addBinding $ LetBind pat e
 
 letWithBind :: MonadBinder m =>
-               Certificates -> Ident -> Ident -> Certificates -> [SubExp] -> SubExp -> m ()
-letWithBind cs dest src idxcs idxs ve =
-  addBinding $ LetWithBind cs dest src idxcs idxs ve
+               Certificates -> Ident -> Ident -> [SubExp] -> SubExp -> m ()
+letWithBind cs dest src idxs ve =
+  addBinding $ LetWithBind cs dest src idxs ve
 
 loopBind :: MonadBinder m => [(Ident, SubExp)] -> Ident -> SubExp -> Body -> m ()
 loopBind pat i bound loopbody =
@@ -176,8 +176,8 @@ bodyBind (Result es _) = return es
 bodyBind (LetPat pat e body _) = do
   letBind pat e
   bodyBind body
-bodyBind (LetWith cs dest src idxcs idxs ve body _) = do
-  letWithBind cs dest src idxcs idxs ve
+bodyBind (LetWith cs dest src idxs ve body _) = do
+  letWithBind cs dest src idxs ve
   bodyBind body
 bodyBind (DoLoop merge i bound loopbody letbody _) = do
   loopBind merge i bound loopbody
@@ -194,8 +194,8 @@ insertBindings' = foldr bind
           DoLoop pat i bound loopbody e $ srclocOf e
         bind (LetBind pat pate) e =
           LetPat pat pate e $ srclocOf e
-        bind (LetWithBind cs dest src idxcs idxs ve) e =
-          LetWith cs dest src idxcs idxs ve e $ srclocOf e
+        bind (LetWithBind cs dest src idxs ve) e =
+          LetWith cs dest src idxs ve e $ srclocOf e
 
 addBindingWriter :: (MonadFreshNames m, Applicative m, MonadWriter (DL.DList Binding) m) =>
                     Binding -> m ()

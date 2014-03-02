@@ -280,7 +280,7 @@ internaliseExp (E.Index cs var csidx idxs loc) = do
     Just (ArraySubst c vs) -> do
       c' <- mergeCerts (c:cs')
       csidx' <- mkCerts vs
-      let index v = I.Index (certify c' []) v csidx' idxs' loc
+      let index v = I.Index (certify c' csidx') v idxs' loc
           resultTupLit [] = I.TupLit [] loc
           resultTupLit (a:as)
             | E.arrayRank outtype == 0 = I.TupLit (a:as) loc
@@ -289,7 +289,7 @@ internaliseExp (E.Index cs var csidx idxs loc) = do
     _ -> do
       var' <- internaliseIdent var
       csidx' <- mkCerts [var']
-      return $ I.Index cs' var' csidx' idxs' loc
+      return $ I.Index (cs'++csidx') var' idxs' loc
   where outtype = E.stripArray (length idxs) $ E.identType var
 
 
@@ -353,7 +353,7 @@ internaliseExp (E.LetWith cs name src idxcs idxs ve body loc) = do
   dsts <- map fst <$> mapM (newVar loc "letwith_dst" . I.identType) srcs
   c <- mergeCerts (catMaybes [c1,c2]++cs')
   let comb (dname, sname, vname) =
-        letWithBind cs' dname sname idxcs' idxs' $ I.Var vname
+        letWithBind (cs'++idxcs') dname sname idxs' $ I.Var vname
   mapM_ comb $ zip3 dsts srcs vnames
   bindingPat (E.Id name) $ \pat' -> do
     letBind pat' $ tuplit c loc (map I.Var dsts)

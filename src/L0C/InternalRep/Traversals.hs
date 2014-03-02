@@ -93,10 +93,9 @@ mapBodyM :: (Applicative m, Monad m) => Mapper m -> Body -> m Body
 mapBodyM tv (LetPat pat e body loc) =
   pure LetPat <*> mapM (mapOnIdent tv) pat <*> mapOnExp tv e <*>
        mapOnBody tv body <*> pure loc
-mapBodyM tv (LetWith cs dest src idxcs idxexps vexp body loc) =
+mapBodyM tv (LetWith cs dest src idxexps vexp body loc) =
   pure LetWith <*> mapOnCertificates tv cs <*>
        mapOnIdent tv dest <*> mapOnIdent tv src <*>
-       mapOnCertificates tv idxcs <*>
        mapM (mapOnSubExp tv) idxexps <*> mapOnSubExp tv vexp <*>
        mapOnBody tv body <*> pure loc
 mapBodyM tv (DoLoop mergepat loopvar boundexp loopbody letbody loc) =
@@ -138,10 +137,9 @@ mapExpM tv (Apply fname args t loc) = do
   args' <- forM args $ \(arg, d) ->
              (,) <$> mapOnSubExp tv arg <*> pure d
   pure (Apply fname) <*> pure args' <*> mapM (mapOnType tv) t <*> pure loc
-mapExpM tv (Index cs arr idxcs idxexps loc) =
+mapExpM tv (Index cs arr idxexps loc) =
   pure Index <*> mapOnCertificates tv cs <*>
        mapOnIdent tv arr <*>
-       mapOnCertificates tv idxcs <*>
        mapM (mapOnSubExp tv) idxexps <*>
        pure loc
 mapExpM tv (Iota nexp loc) =

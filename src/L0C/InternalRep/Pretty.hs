@@ -94,17 +94,16 @@ instance Pretty Body where
                         If {} -> True
                         ArrayLit {} -> False
                         _ -> False
-  ppr (LetWith cs dest src idxcs idxs ve body _)
+  ppr (LetWith cs dest src idxs ve body _)
     | dest == src =
       text "let" <+> ppCertificates cs <> ppr dest <+> list (map ppr idxs) <+>
       equals <+> align (ppr ve) <+>
       text "in" </> ppr body
     | otherwise =
       text "let" <+> ppCertificates cs <> ppr dest <+> equals <+> ppr src <+>
-      text "with" <+> brackets (ppcs <> commasep (map ppr idxs)) <+>
+      text "with" <+> brackets (commasep (map ppr idxs)) <+>
       text "<-" <+> align (ppr ve) <+>
       text "in" </> ppr body
-    where ppcs = ppCertificates idxcs <> text "|"
   ppr (DoLoop mergepat i bound loopbody letbody _) =
     aliasComment pat $
     text "loop" <+> parens (ppTuple' pat <+> equals <+> ppTuple' initexp) <+>
@@ -136,9 +135,9 @@ instance Pretty Exp where
   ppr (Apply fname args _ _) = text (nameToString fname) <>
                                      apply (map (align . ppr . fst) args)
 
-  ppr (Index cs v csidx idxs _) =
+  ppr (Index cs v idxs _) =
     ppCertificates cs <> ppr v <>
-    brackets (ppCertificates csidx <> text "|" <> commasep (map ppr idxs))
+    brackets (commasep (map ppr idxs))
   ppr (Iota e _) = text "iota" <> parens (ppr e)
   ppr (Size cs i e _) =
     ppCertificates cs <> text "size" <> apply [text $ show i, ppr e]

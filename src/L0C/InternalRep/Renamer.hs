@@ -81,16 +81,15 @@ renameSubExp (Var v)          = Var <$> repl v
 renameSubExp (Constant v loc) = return $ Constant v loc
 
 renameBody :: Body -> RenameM Body
-renameBody (LetWith cs dest src idxcs idxs ve body loc) = do
+renameBody (LetWith cs dest src idxs ve body loc) = do
   cs' <- mapM repl cs
   src' <- repl src
-  idxcs' <- mapM repl idxcs
   idxs' <- mapM renameSubExp idxs
   ve' <- renameSubExp ve
   bind [dest] $ do
     dest' <- repl dest
     body' <- renameBody body
-    return $ LetWith cs' dest' src' idxcs' idxs' ve' body' loc
+    return $ LetWith cs' dest' src' idxs' ve' body' loc
 renameBody (LetPat pat e body loc) = do
   e1' <- renameExp e
   bind pat $ do

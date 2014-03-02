@@ -128,7 +128,7 @@ transformExp filtere@(Filter cs fun arrexps loc) = do
     return $ Lambda [toParam a, toParam b] body [Basic Int] loc
   scan <- transformExp $ Scan cs plus [(intval 0,Var mape)] loc
   ia <- letExp "ia" scan
-  let indexia ind = eIndex cs ia [] [ind] loc
+  let indexia ind = eIndex cs ia [ind] loc
       sub1 e = eBinOp Minus e (pexp $ intval 1) (Basic Int) loc
   indexiaend <- indexia $ sub1 $ pexp nv
   res <- newResultArray indexiaend indexin0
@@ -197,7 +197,7 @@ blankArray ts  loc = do
 
 index :: Certificates -> [Ident] -> SubExp -> [Exp]
 index cs arrs i = flip map arrs $ \arr ->
-                  Index cs arr [] [i] $ srclocOf i
+                  Index cs arr [i] $ srclocOf i
 
 newResultArray :: Exp -> [Exp] -> Binder [Ident]
 newResultArray sizeexp valueexps = do
@@ -212,7 +212,7 @@ letwith cs ks i vs = do
   vs' <- letSubExps "values" vs
   i' <- letSubExp "i" =<< i
   dests <- mapM (newIdent' (const "letwith_dest")) ks
-  let update (dest, k, v) = letWithBind cs dest k [] [i'] v
+  let update (dest, k, v) = letWithBind cs dest k [i'] v
   mapM_ update $ zip3 dests ks vs'
   return dests
 

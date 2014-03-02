@@ -148,14 +148,13 @@ copyCtPropOneLambda prog lam = do
 
 copyCtPropBody :: Body -> CPropM Body
 
-copyCtPropBody (LetWith cs nm src indcs inds el body pos) =
+copyCtPropBody (LetWith cs nm src inds el body pos) =
   consuming src $ do
     cs'    <- copyCtPropCerts cs
     el'    <- copyCtPropSubExp el
-    indcs' <- copyCtPropCerts indcs
     inds'  <- mapM copyCtPropSubExp inds
     body'  <- copyCtPropBody body
-    return $ LetWith cs' nm src indcs' inds' el' body' pos
+    return $ LetWith cs' nm src inds' el' body' pos
 
 copyCtPropBody (LetPat pat e body loc) = do
   let continue e' = do
@@ -198,14 +197,13 @@ copyCtPropExp :: Exp -> CPropM Exp
 copyCtPropExp (TupLit es loc) =
   TupLit <$> mapM copyCtPropSubExp es <*> pure loc
 
-copyCtPropExp (Index cs idd@(Ident vnm tp p) csidx inds pos) = do
+copyCtPropExp (Index cs idd@(Ident vnm tp p) inds pos) = do
   inds' <- mapM copyCtPropSubExp inds
   bnd   <- asks $ HM.lookup vnm . envVtable
   cs'   <- copyCtPropCerts cs
-  csidx' <- copyCtPropCerts csidx
   case bnd of
-    Nothing             -> return $ Index cs' idd csidx' inds' pos
-    Just (VarId  id' _) -> changed $ Index cs' (Ident id' tp p) csidx' inds' pos
+    Nothing             -> return $ Index cs' idd inds' pos
+    Just (VarId  id' _) -> changed $ Index cs' (Ident id' tp p) inds' pos
     Just (Value v@(ArrayVal _ _) _)
       | Just iis <- ctIndex inds',
         length iis == length (arrayShape v),
@@ -215,9 +213,8 @@ copyCtPropExp (Index cs idd@(Ident vnm tp p) csidx inds pos) = do
       case (e', inds') of
         (Iota _ _, [ii]) -> changed $ SubExp ii
 
-        (Index cs2 aa csidx2 ais _,_) -> do
+        (Index cs2 aa ais _,_) -> do
             inner <- copyCtPropExp (Index (cs'++cs2) aa
-                                    (csidx' ++ csidx2)
                                     (ais ++ inds') pos)
             changed inner
 
@@ -228,7 +225,7 @@ copyCtPropExp (Index cs idd@(Ident vnm tp p) csidx inds pos) = do
         (Replicate _ (Var vv) _, _:is') -> do
             inner <- if null is'
                      then SubExp <$> copyCtPropSubExp (Var vv)
-                     else copyCtPropExp (Index cs' vv csidx' is' pos)
+                     else copyCtPropExp (Index cs' vv is' pos)
             changed inner
 
         (Replicate _ (Constant arr@(ArrayVal _ _) _) _, _:is')
@@ -242,11 +239,11 @@ copyCtPropExp (Index cs idd@(Ident vnm tp p) csidx inds pos) = do
         (Rearrange cs2 perm (Var src) _, _)
           | permuteReach perm < length inds' ->
             let inds'' = permuteDims (take (length inds') perm) inds'
-            in changed $ Index (cs'++cs2) src csidx' inds'' pos
+            in changed $ Index (cs'++cs2) src inds'' pos
 
-        _ -> return $ Index cs' idd csidx' inds' pos
+        _ -> return $ Index cs' idd inds' pos
 
-    _ -> return $ Index cs' idd csidx' inds' pos
+    _ -> return $ Index cs' idd inds' pos
 
 copyCtPropExp (BinOp bop e1 e2 tp pos) = do
     e1'   <- copyCtPropSubExp e1
