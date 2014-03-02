@@ -150,7 +150,11 @@ withBinding pat e@(Size _ i (Var x) _) m = do
                    des:_ -> S.toList des
                    _     -> []
   alts <- mkAlt <$> asks (SZ.lookup x . envBindings)
-  withSeveralBindings pat e alts m
+  -- XXX: Take a closer look at whether we can't just fix the best
+  -- replacement right here.
+  case alts of
+    alt:alts' -> withSeveralBindings pat alt alts' m
+    []        -> withSingleBinding pat e m
 
 withBinding pat e m = withSingleBinding pat e m
 
