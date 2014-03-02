@@ -611,8 +611,13 @@ checkBody (DoLoop mergepat (Ident loopvar _ _)
                 (Result (map Var result) loc) loc
 
   -- Now we just need to bind the result of the function call to the
-  -- original merge pattern...
-  (secondscope, _) <- checkBinding loc mergevs loc (bodyType funcall) callflow
+  -- original merge pattern.  We remove any aliasing to the merge_val
+  -- variables we generated, as they will not actually appear in the
+  -- type-checked program.
+  let removeMergeVals als = als `HS.difference` HS.fromList (map identName result)
+  (secondscope, _) <-
+    checkBinding loc mergevs loc
+    (map (`changeAliases` removeMergeVals) $ bodyType funcall) callflow
 
   -- And then check the let-body.
   secondscope $ do
