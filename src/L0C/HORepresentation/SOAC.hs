@@ -221,7 +221,7 @@ inputArray (Input _ (Iota _))        = Nothing
 
 inputArrayType :: InputArray -> Type
 inputArrayType (Var v)            = identType v
-inputArrayType (Iota _)           = arrayOf (Basic Int) [Nothing] Unique
+inputArrayType (Iota _)           = arrayType 1 (Basic Int) Unique
 
 -- | Return the array rank (dimensionality) of an input.
 inputRank :: Input -> Int
@@ -230,7 +230,7 @@ inputRank = arrayRank . inputType
 -- | Return the type of an input.
 inputType :: Input -> Type
 inputType (Input ts ia) = foldl transformType (inputArrayType ia) ts
-  where transformType t Repeat = arrayOf t [Nothing] u
+  where transformType t Repeat = arrayType 1 t u
           where u | uniqueOrBasic t = Unique
                   | otherwise       = Nonunique
         transformType t (Rearrange _ perm) =

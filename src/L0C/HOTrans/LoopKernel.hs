@@ -414,7 +414,7 @@ pullReshape nest (OReshape cs shape:ots)
                       | SOAC.Input ts ia <- Nest.inputs nest ]
           outernest i = do
             let j  = length shape - 1 - i
-                addDims t = arrayOf t (replicate j Nothing) $ uniqueness t
+                addDims t = arrayType j t $ uniqueness t
                 retTypes = map addDims $ Nest.returnType op
 
             ps <- forM (zip (Nest.params op) inputs') $ \(p, inp) -> do

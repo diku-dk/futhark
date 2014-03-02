@@ -133,8 +133,7 @@ internaliseType' (E.Array elemt size u als) =
   map (`I.setAliases` als) ets
   where ets = case internaliseElemType' $ elemt `E.setElemAliases` als of
                 elemts -> map arr elemts
-        size' = replicate (length size) Nothing
-        arr t = I.arrayOf t size' $ internaliseUniqueness u
+        arr t = I.arrayType (length size) t $ internaliseUniqueness u
 internaliseType' (E.Elem et) = internaliseElemType' et
 
 -- | Transform an external value to a number of internal values.
@@ -690,9 +689,6 @@ internaliseLambda ce (E.AnonymFun params body rettype loc) = do
         return $ I.Result (cs++certs') vals loc
   return $ I.Lambda (map I.toParam params') body' rettype' loc
   where rettype' = map I.toDecl $ internaliseType' rettype
-        stripCert (c:es)
-          | I.identType c == I.Basic I.Cert = es -- XXX HACK
-        stripCert es = es
 internaliseLambda ce (E.CurryFun fname curargs rettype loc) = do
   (_,paramtypes) <- lookupFunction fname
   let missing = drop (length curargs) paramtypes

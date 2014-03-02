@@ -665,7 +665,7 @@ compileExp' place (Replicate ne ve pos) = do
   rr <- newVName "replicate_r"
   let nident = Ident nv (Basic Int) pos
       vident = Ident vv (subExpType ve) pos
-      rident = Ident rr (arrayOf (subExpType ve) [Nothing] Unique) pos
+      rident = Ident rr (arrayType 1 (subExpType ve) Unique) pos
       nlet body = LetPat [nident] (SubExp ne) body pos
       vlet body = LetPat [vident] (SubExp ve) body pos
       rlet body = LetPat [rident] (Replicate (Var nident) (Var vident) pos) body pos
