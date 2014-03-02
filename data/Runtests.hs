@@ -18,7 +18,7 @@ import System.IO
 import System.Process
 
 l0flags :: String
-l0flags = "-sfrOe"
+l0flags = "-sfOe"
 
 -- | Number of tests to run concurrently.
 concurrency :: Int

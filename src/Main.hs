@@ -25,7 +25,6 @@ import qualified L0C.ExternalRep.Renamer as E
 
 import qualified L0C.InternalRep as I
 import qualified L0C.InternalRep.TypeChecker as I
-import qualified L0C.InternalRep.Renamer as I
 
 import L0C.Interpreter
 import L0C.EnablingOpts.EnablingOptDriver
@@ -76,7 +75,6 @@ commandLineOptions =
   , Option [] ["externalise"]
     (NoArg $ \opts -> opts { l0action = externaliseAction})
     "Prettyprint the resulting external representation on standard output."
-  , renameOpt "r" ["rename"]
   , hoistOpt "o" ["hoist"]
   , hoistAggrOpt "O" ["hoist-aggressively"]
   , uttransformOpt "u" ["untrace"]
@@ -139,11 +137,6 @@ interpret prog =
           | [] <- elems a = "empty(" ++ I.ppType t ++ ")"
           | otherwise     = "[" ++ intercalate ", " (map ppOutput' $ elems a) ++ "]"
 
-rename :: Pass
-rename = Pass { passName = "renamer"
-              , passOp = return . I.renameProg
-              }
-
 hoist :: Pass
 hoist = Pass { passName = "rebinder"
              , passOp = return . RB.transformProg
@@ -186,7 +179,7 @@ astransform = Pass { passName = "accurate size insertion"
 
 standardPipeline :: [Pass]
 standardPipeline =
-  [ uttransform, eotransform, iitransform, rename
+  [ uttransform, eotransform, iitransform
   , hoist,     hotransform, eotransform
   , hoistAggr, hotransform, eotransform
   ]
@@ -196,10 +189,6 @@ passoption desc pass short long =
   Option short long
   (NoArg $ \opts -> opts { l0pipeline = pass : l0pipeline opts })
   desc
-
-renameOpt :: String -> [String] -> L0Option
-renameOpt =
-  passoption "Rename all non-function identifiers to be unique." rename
 
 hoistOpt :: String -> [String] -> L0Option
 hoistOpt =
