@@ -258,7 +258,7 @@ internaliseCerts = mapM internaliseIdent
 internaliseBody :: E.Exp -> InternaliseM Body
 internaliseBody e = insertBindings $ do
   ses <- letTupExp "norm" =<< internaliseExp e
-  return $ I.Result (map I.Var ses) $ srclocOf e
+  return $ I.Result [] (map I.Var ses) $ srclocOf e
 
 internaliseExp :: E.Exp -> InternaliseM I.Exp
 
@@ -677,12 +677,19 @@ lambdaBinding ce params m = do
 internaliseLambda :: I.SubExp -> E.Lambda -> InternaliseM I.Lambda
 internaliseLambda ce (E.AnonymFun params body rettype loc) = do
   (body', params') <- lambdaBinding ce (map E.fromParam params) $ do
-    (_,ks) <- tupToIdentList body
-    return $ I.Result (map I.Var $ stripCert ks) loc
+    body' <- internaliseBody body
+    flip mapTailM body' $ \cs es -> do
+      -- Some of the subexpressions are actually
+      -- certificates... filter them out!  This is slightly hacky, as
+      -- we assume that the original input program does not contain
+      -- certificates (or at least, that they are not part of the
+      -- lambda return type).
+      let (certs,vals) = partition ((==I.Basic I.Cert) . subExpType) es
+      insertBindings $ do
+        certs' <- letExps "lambda_cert" $ map I.SubExp certs
+        return $ I.Result (cs++certs') vals loc
   return $ I.Lambda (map I.toParam params') body' rettype' loc
-  where rettype' = case map I.toDecl $ internaliseType' rettype of
-                     [t] -> [t]
-                     ets -> ets
+  where rettype' = map I.toDecl $ internaliseType' rettype
         stripCert (c:es)
           | I.identType c == I.Basic I.Cert = es -- XXX HACK
         stripCert es = es

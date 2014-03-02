@@ -147,7 +147,7 @@ eBody :: MonadBinder m =>
 eBody e = insertBindings $ do
             e' <- e
             x <- letTupExp "x" e'
-            return $ Result (map Var x) $ srclocOf e'
+            return $ Result [] (map Var x) $ srclocOf e'
 
 data Binding = LoopBind [(Ident, SubExp)] Ident SubExp Body
              | LetBind [Ident] Exp
@@ -172,7 +172,7 @@ loopBind pat i bound loopbody =
   addBinding $ LoopBind pat i bound loopbody
 
 bodyBind :: MonadBinder m => Body -> m [SubExp]
-bodyBind (Result es _) = return es
+bodyBind (Result _ es _) = return es
 bodyBind (LetPat pat e body _) = do
   letBind pat e
   bodyBind body

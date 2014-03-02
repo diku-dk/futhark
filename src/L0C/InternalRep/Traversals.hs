@@ -104,8 +104,8 @@ mapBodyM tv (DoLoop mergepat loopvar boundexp loopbody letbody loc) =
        mapOnIdent tv loopvar <*> mapOnSubExp tv boundexp <*>
        mapOnBody tv loopbody <*> mapOnBody tv letbody <*> pure loc
   where (vs,es) = unzip mergepat
-mapBodyM tv (Result ses loc) =
-  Result <$> mapM (mapOnSubExp tv) ses <*> pure loc
+mapBodyM tv (Result cs ses loc) =
+  Result <$> mapOnCertificates tv cs <*> mapM (mapOnSubExp tv) ses <*> pure loc
 
 -- | Like 'mapBodyM', but in the 'Identity' monad.
 mapBody :: Mapper Identity -> Body -> Body

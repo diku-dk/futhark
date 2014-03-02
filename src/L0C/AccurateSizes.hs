@@ -67,9 +67,9 @@ bodySizes (LetPat pat e body loc) = do
                      Nothing    -> [v]
   return $ LetPat pat' e' body' loc
 
-bodySizes (Result es loc) = do
+bodySizes (Result cs es loc) = do
   es' <- concat <$> mapM addShapes es
-  return $ Result es' loc
+  return $ Result cs es' loc
   where addShapes (Constant v cloc) =
           return [Constant v cloc]
         addShapes (Var v) = do

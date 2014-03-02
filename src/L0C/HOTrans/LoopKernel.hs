@@ -429,7 +429,7 @@ pullReshape nest (OReshape cs shape:ots)
                           Nest.nestingParams = ps
                         , Nest.nestingInputs = map SOAC.varInput ps
                         , Nest.nestingResult = bnds
-                        , Nest.nestingPostBody = Result (map Var bnds) loc
+                        , Nest.nestingPostBody = Result [] (map Var bnds) loc
                         , Nest.nestingReturnType = retTypes
                         }
       outerNests <- mapM outernest [0..length shape - 2]

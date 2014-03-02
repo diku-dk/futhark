@@ -477,8 +477,9 @@ checkSubExp (Var ident) = do
 
 checkBody :: Body -> TypeM Body
 
-checkBody (Result es loc) =
-  Result <$> mapM checkSubExp es <*> pure loc
+checkBody (Result cs es loc) =
+  Result <$> mapM (requireI [Basic Cert] <=< checkIdent) cs
+         <*> mapM checkSubExp es <*> pure loc
 
 checkBody (LetPat pat e body loc) = do
   (e', dataflow) <- collectDataflow $ checkExp e
@@ -580,14 +581,14 @@ checkBody (DoLoop mergepat (Ident loopvar _ _)
 
       -- The body of the function will be the loop body, but with all
       -- tails replaced with recursive calls.
-      recurse args = LetPat result
-                     (Apply fname
-                      ([(Var (fromParam k), diet (identType k)) | k <- free ] ++
-                       [(Var iparam, Observe),
-                        (Var bound, Observe)] ++
-                       zip args (map (diet . subExpType) args))
-                      (map fromDecl rettype) loc)
-                     (Result (map Var result) loc) loc
+      recurse cs args = LetPat result
+                        (Apply fname
+                        ([(Var (fromParam k), diet (identType k)) | k <- free ] ++
+                         [(Var iparam, Observe),
+                          (Var bound, Observe)] ++
+                         zip args (map (diet . subExpType) args))
+                        (map fromDecl rettype) loc)
+                        (Result cs (map Var result) loc) loc
   let funbody' = mapTail recurse loopbody'
 
   (funcall, callflow) <- collectDataflow $ local bindfun $ do
@@ -604,7 +605,7 @@ checkBody (DoLoop mergepat (Ident loopvar _ _)
                    (boundexp', Observe)] ++
                   zip es' (map diet rettype))
                  (map fromDecl rettype) loc)
-                (Result (map Var result) loc) loc
+                (Result [] (map Var result) loc) loc
 
   -- Now we just need to bind the result of the function call to the
   -- original merge pattern.  We remove any aliasing to the merge_val

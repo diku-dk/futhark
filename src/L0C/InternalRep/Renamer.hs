@@ -108,8 +108,8 @@ renameBody (DoLoop merge loopvar boundexp loopbody letbody loc) = do
       loopbody' <- renameBody loopbody
       return $ DoLoop (zip mergepat' mergeexp')
                       loopvar' boundexp' loopbody' letbody' loc
-renameBody (Result ses loc) =
-  Result <$> mapM renameSubExp ses <*> pure loc
+renameBody (Result cs ses loc) =
+  Result <$> mapM repl cs <*> mapM renameSubExp ses <*> pure loc
 
 renameExp :: Exp -> RenameM Exp
 renameExp = mapExpM rename

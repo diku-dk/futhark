@@ -66,11 +66,11 @@ transformExp mape@(Map cs fun arrs loc) = do
   letbody <- insertBindings $ do
     y <- bodyBind =<< transformLambda fun (index cs inarrs zero)
     outarr <- newResultArray (SubExp $ Var n) $ map SubExp y
-    let outarrv = Result (map Var outarr) loc
+    let outarrv = Result [] (map Var outarr) loc
         loopbody = runBinder $ do
           x <- bodyBind =<< transformLambda fun (index cs inarrs iv)
           dests <- letwith cs outarr (pexp iv) $ map SubExp x
-          return $ Result (map Var dests) loc
+          return $ Result [] (map Var dests) loc
     eDoLoop (zip outarr $ map (pexp . Var) outarr)
             i (pexp $ Var n) loopbody (pure outarrv) loc
   nonempty <- letExp "nonempty" =<<
@@ -78,7 +78,7 @@ transformExp mape@(Map cs fun arrs loc) = do
   blank <- letTupExp "blank" =<< blankArray (typeOf mape) loc
   return $ If (Var nonempty)
               letbody
-              (Result (map Var blank) loc)
+              (Result [] (map Var blank) loc)
               (typeOf mape) loc
 
 transformExp (Reduce cs fun args loc) = do
@@ -98,7 +98,7 @@ transformExp (Scan cs fun args loc) = do
     dests <- letwith cs arr (pexp iv) $ map SubExp x
     irows <- letSubExps "row" $ index cs dests iv
     rowcopies <- letExps "copy" [ Copy irow loc | irow <- irows ]
-    return $ Result (map Var $ rowcopies ++ dests) loc
+    return $ Result [] (map Var $ rowcopies ++ dests) loc
   sz <- letSubExp "size" $ size cs arr
   loopBind (zip (acc ++ arr) (initacc ++ map Var arr)) -- XXX Shadowing
            i sz loopbody
@@ -114,8 +114,8 @@ transformExp filtere@(Filter cs fun arrexps loc) = do
   test <- insertBindings $ do
    [check] <- bodyBind =<< transformLambda fun (map (SubExp . Var) xs) -- XXX
    res <- letSubExp "res" $
-          If check (Result [intval 1] loc) (Result [intval 0] loc) [Basic Int] loc
-   return $ Result [res] loc
+          If check (Result [] [intval 1] loc) (Result [] [intval 0] loc) [Basic Int] loc
+   return $ Result [] [res] loc
   mape <- letExp "mape" <=< transformExp $
           Map cs (Lambda (map toParam xs) test [Basic Int] loc) (map Var arr) loc
   let indexin0 = index cs arr $ intval 0
@@ -124,7 +124,7 @@ transformExp filtere@(Filter cs fun arrexps loc) = do
     (b,bv) <- newVar loc "b" (Basic Int)
     body <- insertBindings $ do
       res <- letSubExp "sum" $ BinOp Plus av bv (Basic Int) loc
-      return $ Result [res] loc
+      return $ Result [] [res] loc
     return $ Lambda [toParam a, toParam b] body [Basic Int] loc
   scan <- transformExp $ Scan cs plus [(intval 0,Var mape)] loc
   ia <- letExp "ia" scan
@@ -132,7 +132,7 @@ transformExp filtere@(Filter cs fun arrexps loc) = do
       sub1 e = eBinOp Minus e (pexp $ intval 1) (Basic Int) loc
   indexiaend <- indexia $ sub1 $ pexp nv
   res <- newResultArray indexiaend indexin0
-  let resv = Result (map Var res) loc
+  let resv = Result [] (map Var res) loc
   loopbody <- insertBindings $ do
     let indexi = indexia $ pexp iv
         indexin = index cs arr iv
@@ -151,7 +151,7 @@ transformExp filtere@(Filter cs fun arrexps loc) = do
   isempty <- letSubExp "isempty" =<<
              eBinOp Equal (pexp nv) (pexp $ intval 0) (Basic Bool) loc
   blank <- letTupExp "blank" =<< blankArray (typeOf filtere) loc
-  return $ If isempty (Result (map Var blank) loc)
+  return $ If isempty (Result [] (map Var blank) loc)
            nonempty (bodyType nonempty) loc
   where intval x = Constant (BasicVal $ IntVal x) loc
 

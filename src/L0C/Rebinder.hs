@@ -62,13 +62,13 @@ type NeedSet = [BindNeed]
 
 asTail :: BindNeed -> Body
 asTail (LoopBind merge i bound loopbody) =
-  DoLoop merge i bound loopbody (Result [] loc) loc
+  DoLoop merge i bound loopbody (Result [] [] loc) loc
     where loc = srclocOf loopbody
 asTail (LetBind pat e _) =
-  LetPat pat e (Result [] loc) loc
+  LetPat pat e (Result [] [] loc) loc
     where loc = srclocOf pat
 asTail (LetWithBind cs dest src idxs ve) =
-  LetWith cs dest src idxs ve (Result [Var dest] loc) loc
+  LetWith cs dest src idxs ve (Result [] [Var dest] loc) loc
     where loc = srclocOf dest
 
 requires :: BindNeed -> HS.HashSet VName
@@ -500,8 +500,9 @@ hoistInBody (DoLoop merge loopvar boundexp loopbody letbody _) = do
                hoistInBody loopbody
   bindLoop merge loopvar boundexp loopbody' $ hoistInBody letbody
   where boundnames = identName loopvar `HS.insert` patNameSet (map fst merge)
-hoistInBody (Result es loc) =
-  Result <$> mapM hoistInSubExp es <*> pure loc
+hoistInBody (Result cs es loc) =
+  Result <$> mapM hoistInIdent cs
+         <*> mapM hoistInSubExp es <*> pure loc
 
 hoistInExp :: Exp -> HoistM Exp
 hoistInExp (If c e1 e2 t loc) = do

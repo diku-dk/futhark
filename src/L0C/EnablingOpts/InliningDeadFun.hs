@@ -226,7 +226,7 @@ inlineInBody :: [FunDec] -> Body -> Body
 inlineInBody inlcallees (LetPat pat (Apply fname args rtp _) letbody loc) =
   let continue e =
         LetPat pat e (inlineInBody inlcallees letbody) loc
-      continue' es = continue $ TupLit es loc
+      continue' _ es = continue $ TupLit es loc
   in  case filter (\(nm,_,_,_,_)->fname==nm) inlcallees of
         [] -> continue $ Apply fname args rtp loc
         (_,_,fargs,body,_):_ ->

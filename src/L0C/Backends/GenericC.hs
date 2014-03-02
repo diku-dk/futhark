@@ -458,8 +458,8 @@ compileBody place (DoLoop merge loopvar boundexp loopbody letbody loc) = do
                      $items:letbody'
                    }|]
 
-compileBody place (Result [e] _)  = compileSubExp place e
-compileBody place (Result es loc) = compileExp place $ TupLit es loc
+compileBody place (Result _ [e] _)  = compileSubExp place e
+compileBody place (Result _ es loc) = compileExp place $ TupLit es loc
 
 compileExp :: C.Exp -> Exp -> CompilerM [C.BlockItem]
 
@@ -669,7 +669,7 @@ compileExp' place (Replicate ne ve pos) = do
       nlet body = LetPat [nident] (SubExp ne) body pos
       vlet body = LetPat [vident] (SubExp ve) body pos
       rlet body = LetPat [rident] (Replicate (Var nident) (Var vident) pos) body pos
-  compileBody place $ nlet $ vlet $ rlet $ Result [Var rident] pos
+  compileBody place $ nlet $ vlet $ rlet $ Result [] [Var rident] pos
 
 compileExp' place (Reshape _ shapeexps arrexp _) = do
   shapevars <- mapM (new . ("shape_"++) . show) [0..length shapeexps-1]

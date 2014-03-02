@@ -74,8 +74,8 @@ fuseMaps lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
   where lam2' =
           lam2 { lambdaParams = lam2redparams ++ HM.keys inputmap
                , lambdaBody =
-                 let bindLambda es = LetPat pat (TupLit es loc)
-                                     (makeCopiesInner (lambdaBody lam2)) loc
+                 let bindLambda _ es = LetPat pat (TupLit es loc)
+                                       (makeCopiesInner (lambdaBody lam2)) loc
                  in makeCopies $ mapTail bindLambda $ lambdaBody lam1
                }
         loc = srclocOf lam2
@@ -95,7 +95,7 @@ fuseFilters :: Input input =>
             -> (Lambda, [input]) -- ^ The fused lambda and the inputs of the resulting SOAC.
 fuseFilters lam1 inp1 out1 lam2 inp2 vname =
   fuseFilterInto lam1 inp1 out1 lam2 inp2 [vname] false
-  where false = Result [Constant (BasicVal $ LogVal False) loc] loc
+  where false = Result [] [Constant (BasicVal $ LogVal False) loc] loc
         loc   = srclocOf lam2
 
 -- | Similar to 'fuseFilters', except the second function does not
@@ -121,7 +121,7 @@ fuseFilterIntoFold :: Input input =>
                    -> (Lambda, [input]) -- ^ The fused lambda and the inputs of the resulting SOAC.
 fuseFilterIntoFold lam1 inp1 out1 lam2 inp2 vnames =
   fuseFilterInto lam1 inp1 out1 lam2 inp2 vnames identity
-  where identity = Result (map (Var . fromParam) lam2redparams) $ srclocOf lam2
+  where identity = Result [] (map (Var . fromParam) lam2redparams) $ srclocOf lam2
         lam2redparams = take (length (lambdaParams lam2) - length inp2) $
                         lambdaParams lam2
 
@@ -138,7 +138,7 @@ fuseFilterInto lam1 inp1 out1 lam2 inp2 vnames falsebranch = (lam2', HM.elems in
         loc = srclocOf lam2
         residents = [ Ident vname t loc |
                       (vname, t) <- zip vnames $ bodyType falsebranch ]
-        branch = flip mapTail (lambdaBody lam1) $ \es ->
+        branch = flip mapTail (lambdaBody lam1) $ \cs es ->
                  let [e] = es in -- XXX
                  LetPat residents
                         (If e
@@ -148,7 +148,7 @@ fuseFilterInto lam1 inp1 out1 lam2 inp2 vnames falsebranch = (lam2', HM.elems in
                           (bodyType (lambdaBody lam2))
                           (bodyType falsebranch))
                          loc)
-                 (Result (map Var residents) loc)
+                 (Result cs (map Var residents) loc)
                  loc
         lam1tuple = TupLit (map (Var . fromParam) $ lambdaParams lam1) loc
         bindins = LetPat pat lam1tuple branch loc

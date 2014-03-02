@@ -161,7 +161,7 @@ copyCtPropBody (LetPat pat e body loc) = do
         let bnds = getPropBnds pat e'
         body' <- binding bnds $ copyCtPropBody body
         return $ LetPat pat e' body' loc
-      continue' es = continue $ TupLit es loc
+      continue' _ es = continue $ TupLit es loc
   e' <- copyCtPropExp e
   case e' of
     If e1 tb fb _ _
@@ -178,8 +178,8 @@ copyCtPropBody (DoLoop merge idd n loopbdy letbdy loc) = do
   letbdy'  <- copyCtPropBody letbdy
   return $ DoLoop (zip mergepat mergeexp') idd n' loopbdy' letbdy' loc
 
-copyCtPropBody (Result es loc) =
-  Result <$> mapM copyCtPropSubExp es <*> pure loc
+copyCtPropBody (Result cs es loc) =
+  Result <$> copyCtPropCerts cs <*> mapM copyCtPropSubExp es <*> pure loc
 
 copyCtPropSubExp :: SubExp -> CPropM SubExp
 copyCtPropSubExp e@(Var (Ident vnm _ pos)) = do

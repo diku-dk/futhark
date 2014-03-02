@@ -46,7 +46,7 @@ externaliseBody (I.DoLoop merge i bound loopbody letbody loc) =
            (externaliseIdent i) (externaliseSubExp bound)
            (externaliseBody loopbody) (externaliseBody letbody) loc
   where (mergepat, mergeexp) = unzip merge
-externaliseBody (I.Result es loc) =
+externaliseBody (I.Result _ es loc) =
   externaliseSubExps es loc
 
 externaliseExp :: I.Exp -> E.Exp

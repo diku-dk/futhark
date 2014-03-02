@@ -147,8 +147,8 @@ deadCodeElimBody (DoLoop merge idd n loopbdy letbdy pos) = do
     loopbdy'  <- binding ( identName idd : idds) $ deadCodeElimBody loopbdy
     return $ DoLoop (zip mergepat mergeexp') idd n' loopbdy' letbdy' pos
 
-deadCodeElimBody (Result es loc) =
-  Result <$> mapM deadCodeElimSubExp es <*> pure loc
+deadCodeElimBody (Result cs es loc) =
+  Result <$> mapM deadCodeElimIdent cs <*> mapM deadCodeElimSubExp es <*> pure loc
 
 deadCodeElimExp :: Exp -> DCElimM Exp
 deadCodeElimExp = mapExpM mapper

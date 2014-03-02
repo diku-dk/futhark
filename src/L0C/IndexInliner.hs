@@ -128,7 +128,7 @@ performArrayDelays pat e = do
         let loc = srclocOf fb
         runBinder $ do
           es <- bodyBind fb
-          return $ LetPat bnds (TupLit es loc) (Result [Var bnd] loc) loc
+          return $ LetPat bnds (TupLit es loc) (Result [] [Var bnd] loc) loc
   case performArrayDelay e of
     Nothing -> return emptyArrayIndexMap
     Just f ->
@@ -137,7 +137,7 @@ performArrayDelays pat e = do
 
 cheapBody :: Body -> Bool
 cheapBody (LetPat _ e body _) = cheapExp e && cheapBody body
-cheapBody (Result _ _)        = True
+cheapBody (Result {})         = True
 cheapBody _ = False
 
 cheapExp :: Exp -> Bool

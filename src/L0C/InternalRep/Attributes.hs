@@ -466,7 +466,7 @@ bodyType :: Body -> [Type]
 bodyType (LetPat _ _ body _) = bodyType body
 bodyType (LetWith _ _ _ _ _ body _) = bodyType body
 bodyType (DoLoop _ _ _ _ body _) = bodyType body
-bodyType (Result ses _) = map subExpType ses
+bodyType (Result _ ses _) = map subExpType ses
 
 -- | The type of an L0 term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
@@ -573,20 +573,20 @@ progNames = execWriter . mapM funNames . progFunctions
 
 -- | Change that subexpression where evaluation of the body would
 -- stop.  Also change type annotations at branches.
-mapTailM :: (Applicative m, Monad m) => ([SubExp] -> m Body) -> Body -> m Body
+mapTailM :: (Applicative m, Monad m) => (Certificates -> [SubExp] -> m Body) -> Body -> m Body
 mapTailM f (LetPat pat e body loc) =
   LetPat pat e <$> mapTailM f body <*> pure loc
 mapTailM f (LetWith cs dest src idxs ve body loc) =
   LetWith cs dest src idxs ve <$> mapTailM f body <*> pure loc
 mapTailM f (DoLoop pat i bound loopbody body loc) =
   DoLoop pat i bound loopbody <$> mapTailM f body <*> pure loc
-mapTailM f (Result ses _) = f ses
+mapTailM f (Result cs ses _) = f cs ses
 
 -- | Change that result where evaluation of the body would stop.  Also
 -- change type annotations at branches.  This a non-monadic variant of
 -- @mapTailM@.
-mapTail :: ([SubExp] -> Body) -> Body -> Body
-mapTail f e = runIdentity $ mapTailM (return . f) e
+mapTail :: (Certificates -> [SubExp] -> Body) -> Body -> Body
+mapTail f e = runIdentity $ mapTailM (((.).(.)) return f) e
 
 freeWalker :: Walker (Writer (HS.HashSet Ident))
 freeWalker = identityWalker {
@@ -618,7 +618,8 @@ freeWalker = identityWalker {
           binding (i `HS.insert` HS.fromList (map fst pat)) $ do
             bodyFree loopbody
             bodyFree letbody
-        bodyFree (Result ses _) =
+        bodyFree (Result cs ses _) = do
+          mapM_ identFree cs
           mapM_ subExpFree ses
 
         expFree = walkExpM freeWalker

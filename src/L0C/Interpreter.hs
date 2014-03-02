@@ -260,7 +260,7 @@ evalBody (DoLoop merge loopvar boundexp loopbody letbody pos) = do
             local (`bindVars` zip mergepat mergeval) $
               evalBody loopbody
 
-evalBody (Result es _) =
+evalBody (Result _ es _) =
   mapM evalSubExp es
 
 evalExp :: Exp -> L0M [Value]

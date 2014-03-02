@@ -399,7 +399,7 @@ fusionGatherBody fres (LetPat pat (Replicate n el loc) body _) = do
   (used_set, bres') <- getUnfusableSet loc bres [SubExp n,SubExp el]
   repl_idnm <- newVName "repl_x"
   let repl_id = Ident repl_idnm (Basic Int) loc
-      repl_lam = Lambda [toParam repl_id] (Result [el] loc) [toDecl $ subExpType el] loc
+      repl_lam = Lambda [toParam repl_id] (Result [] [el] loc) [toDecl $ subExpType el] loc
       soac_repl= SOAC.Map [] repl_lam [SOAC.Input [] $ SOAC.Iota n] loc
   greedyFuse True used_set bres' (pat, soac_repl)
 
@@ -440,7 +440,7 @@ fusionGatherBody fres (DoLoop merge _ ub loop_body let_body _) = do
   -- merge new_res with fres'
   return $ unionFusionRes new_res' fres'
 
-fusionGatherBody fres (Result _ _) =
+fusionGatherBody fres (Result {}) =
   return fres
 
 fusionGatherExp :: FusedRes -> Exp -> FusionGM FusedRes

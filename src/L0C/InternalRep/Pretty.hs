@@ -111,9 +111,9 @@ instance Pretty Body where
     indent 2 (ppr loopbody) <+> text "in" </>
     ppr letbody
     where (pat, initexp) = unzip mergepat
-  ppr (Result es _)
-    | any hasArrayLit es = braces $ commastack $ map ppr es
-    | otherwise          = braces $ commasep $ map ppr es
+  ppr (Result cs es _)
+    | any hasArrayLit es = ppCertificates cs <> braces (commastack $ map ppr es)
+    | otherwise          = ppCertificates cs <> braces (commasep   $ map ppr es)
 
 instance Pretty Exp where
   ppr (SubExp se) = ppr se

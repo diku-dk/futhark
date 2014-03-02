@@ -22,6 +22,6 @@ compileProg = addHeader . GenericC.compileProg expCompiler
           res <- compileSOACtoBohrium target e
           case res of Nothing   -> liftM GenericC.CompileBody $ runBinder $ do
                                      es <- letTupExp "soac" =<< FOT.transformExp e
-                                     return $ Result (map Var es) $ srclocOf e
+                                     return $ Result [] (map Var es) $ srclocOf e
                       Just res' -> return $ GenericC.CCode res'
         addHeader = ("#include <bh_c.h>\n"++)

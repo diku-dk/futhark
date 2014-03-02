@@ -161,14 +161,14 @@ data Body = LetPat [Ident] Exp Body SrcLoc
           | LetWith Certificates Ident Ident
             [SubExp] SubExp
             Body SrcLoc
-          | Result [SubExp] SrcLoc
+          | Result Certificates [SubExp] SrcLoc
             deriving (Eq, Ord, Show)
 
 instance Located Body where
   locOf (LetPat _ _ _ loc)        = locOf loc
   locOf (DoLoop _ _ _ _ _ loc)    = locOf loc
   locOf (LetWith _ _ _ _ _ _ loc) = locOf loc
-  locOf (Result _ loc)            = locOf loc
+  locOf (Result _ _ loc)          = locOf loc
 
 -- | L0 Expression Language: literals + vars + int binops + array
 -- constructors + array combinators (SOAC) + if + function calls +

@@ -34,8 +34,8 @@ data Nesting = Nesting {
 
 pureNest :: Nesting -> Bool
 pureNest nest
-  | Result es _ <- nestingPostBody nest,
-    Just vs     <- vars es =
+  | Result _ es _ <- nestingPostBody nest,
+    Just vs       <- vars es =
       vs == nestingResult nest
   | otherwise = False
 
