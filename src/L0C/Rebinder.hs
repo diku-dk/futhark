@@ -55,7 +55,7 @@ import qualified L0C.Rebinder.SizeTracking as SZ
 
 data BindNeed = LoopBind [(Ident,SubExp)] Ident SubExp Body
               | LetBind [Ident] Exp [Exp]
-              | LetWithBind Certificates Ident Ident (Maybe Certificates) [SubExp] SubExp
+              | LetWithBind Certificates Ident Ident Certificates [SubExp] SubExp
                 deriving (Show, Eq)
 
 type NeedSet = [BindNeed]
@@ -72,8 +72,8 @@ asTail (LetWithBind cs dest src idxcs idxs ve) =
     where loc = srclocOf dest
 
 requires :: BindNeed -> HS.HashSet VName
-requires (LetBind pat e (alte:alts)) =
-  requires (LetBind pat e []) <> requires (LetBind pat alte alts)
+requires (LetBind pat e alts) =
+  mconcat $ map freeNamesInExp $ e : alts
 requires bnd = HS.map identName $ freeInBody $ asTail bnd
 
 provides :: BindNeed -> HS.HashSet VName
@@ -222,7 +222,7 @@ bindLet pat@[dest] e@(Rearrange cs perm (Var src) loc) m =
 bindLet pat e m = withBinding pat e m
 
 bindLetWith :: Certificates -> Ident -> Ident
-            -> Maybe Certificates -> [SubExp] -> SubExp
+            -> Certificates -> [SubExp] -> SubExp
             -> HoistM a -> HoistM a
 bindLetWith cs dest src idxcs idxs ve m = do
   needThis $ LetWithBind cs dest src idxcs idxs ve

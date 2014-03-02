@@ -159,7 +159,7 @@ data Body = LetPat [Ident] Exp Body SrcLoc
             Body -- Let-body.
             SrcLoc
           | LetWith Certificates Ident Ident
-            (Maybe Certificates) [SubExp] SubExp
+            Certificates [SubExp] SubExp
             Body SrcLoc
           | Result [SubExp] SrcLoc
             deriving (Eq, Ord, Show)
@@ -208,7 +208,7 @@ data Exp =
 
             | Index Certificates
                     Ident
-                    (Maybe Certificates)
+                    Certificates
                     [SubExp]
                     SrcLoc
             -- ^ 3rd arg are (optional) certificates for bounds

@@ -150,13 +150,11 @@ copyCtPropBody :: Body -> CPropM Body
 
 copyCtPropBody (LetWith cs nm src indcs inds el body pos) =
   consuming src $ do
-    cs'       <- copyCtPropCerts cs
-    el'       <- copyCtPropSubExp el
-    indcs'    <- case indcs of
-                   Just indcs' -> Just <$> copyCtPropCerts indcs'
-                   Nothing     -> return Nothing
-    inds'     <- mapM copyCtPropSubExp inds
-    body'     <- copyCtPropBody body
+    cs'    <- copyCtPropCerts cs
+    el'    <- copyCtPropSubExp el
+    indcs' <- copyCtPropCerts indcs
+    inds'  <- mapM copyCtPropSubExp inds
+    body'  <- copyCtPropBody body
     return $ LetWith cs' nm src indcs' inds' el' body' pos
 
 copyCtPropBody (LetPat pat e body loc) = do
@@ -204,7 +202,7 @@ copyCtPropExp (Index cs idd@(Ident vnm tp p) csidx inds pos) = do
   inds' <- mapM copyCtPropSubExp inds
   bnd   <- asks $ HM.lookup vnm . envVtable
   cs'   <- copyCtPropCerts cs
-  csidx' <- maybe (return Nothing) (liftM Just) $ liftM copyCtPropCerts csidx
+  csidx' <- copyCtPropCerts csidx
   case bnd of
     Nothing             -> return $ Index cs' idd csidx' inds' pos
     Just (VarId  id' _) -> changed $ Index cs' (Ident id' tp p) csidx' inds' pos
@@ -219,7 +217,7 @@ copyCtPropExp (Index cs idd@(Ident vnm tp p) csidx inds pos) = do
 
         (Index cs2 aa csidx2 ais _,_) -> do
             inner <- copyCtPropExp (Index (cs'++cs2) aa
-                                    (liftM2 (++) csidx' csidx2)
+                                    (csidx' ++ csidx2)
                                     (ais ++ inds') pos)
             changed inner
 

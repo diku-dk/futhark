@@ -104,9 +104,7 @@ instance Pretty Body where
       text "with" <+> brackets (ppcs <> commasep (map ppr idxs)) <+>
       text "<-" <+> align (ppr ve) <+>
       text "in" </> ppr body
-    where ppcs = case idxcs of Nothing     -> empty
-                               Just []     -> text "<>|"
-                               Just csidx' -> ppCertificates csidx' <> text "|"
+    where ppcs = ppCertificates idxcs <> text "|"
   ppr (DoLoop mergepat i bound loopbody letbody _) =
     aliasComment pat $
     text "loop" <+> parens (ppTuple' pat <+> equals <+> ppTuple' initexp) <+>
@@ -140,10 +138,7 @@ instance Pretty Exp where
 
   ppr (Index cs v csidx idxs _) =
     ppCertificates cs <> ppr v <>
-    brackets (ppcs <> commasep (map ppr idxs))
-    where ppcs = case csidx of Nothing     -> empty
-                               Just []     -> text "<>|"
-                               Just csidx' -> ppCertificates csidx' <> text "|"
+    brackets (ppCertificates csidx <> text "|" <> commasep (map ppr idxs))
   ppr (Iota e _) = text "iota" <> parens (ppr e)
   ppr (Size cs i e _) =
     ppCertificates cs <> text "size" <> apply [text $ show i, ppr e]

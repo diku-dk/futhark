@@ -96,9 +96,7 @@ mapBodyM tv (LetPat pat e body loc) =
 mapBodyM tv (LetWith cs dest src idxcs idxexps vexp body loc) =
   pure LetWith <*> mapOnCertificates tv cs <*>
        mapOnIdent tv dest <*> mapOnIdent tv src <*>
-       (case idxcs of
-          Nothing -> return Nothing
-          Just idxcs' -> Just <$> mapOnCertificates tv idxcs') <*>
+       mapOnCertificates tv idxcs <*>
        mapM (mapOnSubExp tv) idxexps <*> mapOnSubExp tv vexp <*>
        mapOnBody tv body <*> pure loc
 mapBodyM tv (DoLoop mergepat loopvar boundexp loopbody letbody loc) =
@@ -143,9 +141,7 @@ mapExpM tv (Apply fname args t loc) = do
 mapExpM tv (Index cs arr idxcs idxexps loc) =
   pure Index <*> mapOnCertificates tv cs <*>
        mapOnIdent tv arr <*>
-       (case idxcs of
-          Nothing -> return Nothing
-          Just idxcs' -> Just <$> mapOnCertificates tv idxcs') <*>
+       mapOnCertificates tv idxcs <*>
        mapM (mapOnSubExp tv) idxexps <*>
        pure loc
 mapExpM tv (Iota nexp loc) =

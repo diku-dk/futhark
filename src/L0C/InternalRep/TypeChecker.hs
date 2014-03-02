@@ -491,10 +491,7 @@ checkBody (LetPat pat e body loc) = do
 checkBody (LetWith cs (Ident dest destt destpos) src idxcs idxes ve body pos) = do
   cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
   src' <- checkIdent src
-  idxcs' <-
-    case idxcs of
-      Nothing       -> return Nothing
-      Just idxcs' -> Just <$> mapM (requireI [Basic Cert] <=< checkIdent) idxcs'
+  idxcs' <- mapM (requireI [Basic Cert] <=< checkIdent) idxcs
   idxes' <- mapM (require [Basic Int] <=< checkSubExp) idxes
   destt' <- checkAnnotation pos "source" destt $ identType src' `setAliases` HS.empty
   let dest' = Ident dest destt' destpos
@@ -695,10 +692,7 @@ checkExp (Apply fname args rettype loc) = do
 
 checkExp (Index cs ident csidxes idxes pos) = do
   cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
-  csidxes' <-
-    case csidxes of
-      Nothing       -> return Nothing
-      Just csidxes' -> Just <$> mapM (requireI [Basic Cert] <=< checkIdent) csidxes'
+  csidxes' <- mapM (requireI [Basic Cert] <=< checkIdent) csidxes
   ident' <- checkIdent ident
   observe ident'
   vt <- lookupVar (identName ident') pos

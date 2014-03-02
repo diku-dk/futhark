@@ -12,6 +12,7 @@ module L0C.Tools
   , eBinOp
   , eIndex
   , eCopy
+  , eAssert
   , eDoLoop
   , eTupLit
   , eBody
@@ -109,7 +110,7 @@ eBinOp op x y t loc = do
   return $ BinOp op x' y' t loc
 
 eIndex :: MonadBinder m =>
-          Certificates -> Ident -> Maybe Certificates -> [m Exp] -> SrcLoc
+          Certificates -> Ident -> Certificates -> [m Exp] -> SrcLoc
        -> m Exp
 eIndex cs a idxcs idxs loc = do
   idxs' <- letSubExps "i" =<< sequence idxs
@@ -119,6 +120,11 @@ eCopy :: MonadBinder m =>
          m Exp -> m Exp
 eCopy e = do e' <- letSubExp "copy_arg" =<< e
              return $ Copy e' $ srclocOf e'
+
+eAssert :: MonadBinder m =>
+         m Exp -> m Exp
+eAssert e = do e' <- letSubExp "assert_arg" =<< e
+               return $ Assert e' $ srclocOf e'
 
 eDoLoop :: MonadBinder m =>
            [(Ident,m Exp)] -> Ident -> m Exp -> m Body -> m Body -> SrcLoc -> m Body
@@ -145,7 +151,7 @@ eBody e = insertBindings $ do
 
 data Binding = LoopBind [(Ident, SubExp)] Ident SubExp Body
              | LetBind [Ident] Exp
-             | LetWithBind Certificates Ident Ident (Maybe Certificates) [SubExp] SubExp
+             | LetWithBind Certificates Ident Ident Certificates [SubExp] SubExp
                deriving (Show, Eq)
 
 class (MonadFreshNames m, Applicative m, Monad m) => MonadBinder m where
@@ -157,7 +163,7 @@ letBind pat e =
   addBinding $ LetBind pat e
 
 letWithBind :: MonadBinder m =>
-               Certificates -> Ident -> Ident -> Maybe Certificates -> [SubExp] -> SubExp -> m ()
+               Certificates -> Ident -> Ident -> Certificates -> [SubExp] -> SubExp -> m ()
 letWithBind cs dest src idxcs idxs ve =
   addBinding $ LetWithBind cs dest src idxcs idxs ve
 

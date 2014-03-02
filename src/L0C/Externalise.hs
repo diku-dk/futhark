@@ -13,7 +13,6 @@ module L0C.Externalise
   )
   where
 
-import Control.Applicative
 import qualified Data.Array as A
 import Data.Loc
 
@@ -40,7 +39,7 @@ externaliseBody (I.LetPat pat e body loc) =
   E.LetPat (externalisePat pat loc) (externaliseExp e) (externaliseBody body) loc
 externaliseBody (I.LetWith cs dest src idxcs idxs ve body loc) =
   E.LetWith (externaliseCerts cs) (externaliseIdent dest) (externaliseIdent src)
-            (externaliseCerts <$> idxcs) (map externaliseSubExp idxs)
+            (Just $ externaliseCerts idxcs) (map externaliseSubExp idxs)
             (externaliseSubExp ve) (externaliseBody body) loc
 externaliseBody (I.DoLoop merge i bound loopbody letbody loc) =
   E.DoLoop (externalisePat mergepat loc) (externaliseSubExps mergeexp loc)
@@ -82,7 +81,7 @@ externaliseExp (I.Conjoin es loc) =
 externaliseExp (I.Index cs src idxcs idxs loc) =
   E.Index (externaliseCerts cs)
           (externaliseIdent src)
-          (externaliseCerts <$> idxcs)
+          (Just $ externaliseCerts idxcs)
           (map externaliseSubExp idxs)
           loc
 externaliseExp (I.Size cs i e loc) =

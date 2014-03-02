@@ -123,9 +123,7 @@ deadCodeElimBody (LetPat pat e body pos) = do
 deadCodeElimBody (LetWith cs nm src idxcs idxs el body pos) = do
     cs' <- mapM deadCodeElimIdent cs
     (body', noref) <- collectRes [identName nm] $ binding [identName nm] $ deadCodeElimBody body
-    idxcs' <- case idxcs of
-                Nothing     -> return Nothing
-                Just idxcs' -> Just <$> mapM deadCodeElimIdent idxcs'
+    idxcs' <- mapM deadCodeElimIdent idxcs
     if noref
     then changed $ return body'
     else do

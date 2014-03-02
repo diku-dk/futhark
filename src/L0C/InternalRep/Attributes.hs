@@ -102,7 +102,6 @@ import Data.Array
 import Data.Ord
 import Data.List
 import Data.Loc
-import Data.Maybe
 import qualified Data.HashSet as HS
 
 import L0C.InternalRep.Syntax
@@ -610,7 +609,7 @@ freeWalker = identityWalker {
         bodyFree (LetWith cs dest src idxcs idxs ve body _) = do
           mapM_ identFree cs
           identFree src
-          mapM_ identFree $ fromMaybe [] idxcs
+          mapM_ identFree idxcs
           mapM_ subExpFree idxs
           subExpFree ve
           binding (HS.singleton dest) $ bodyFree body

@@ -273,14 +273,13 @@ internaliseExp (E.Index cs var csidx idxs loc) = do
   idxs' <- letSubExps "i" =<< mapM internaliseExp idxs
   subst <- asks $ HM.lookup (E.identName var) . envSubsts
   cs' <- internaliseCerts cs
-  csidx' <- mapM internaliseCerts csidx
+  let mkCerts vs = case csidx of
+                     Just csidx' -> internaliseCerts csidx'
+                     Nothing     -> boundsChecks vs idxs'
   case subst of
-    Just (ArraySubst _ [subv])
-      | rt <- I.stripArray (length idxs') $ I.identType subv,
-        I.arrayRank rt == 0 ->
-      return $ I.Index cs' subv csidx' idxs' loc
     Just (ArraySubst c vs) -> do
       c' <- mergeCerts (c:cs')
+      csidx' <- mkCerts vs
       let index v = I.Index (certify c' []) v csidx' idxs' loc
           resultTupLit [] = I.TupLit [] loc
           resultTupLit (a:as)
@@ -289,8 +288,10 @@ internaliseExp (E.Index cs var csidx idxs loc) = do
       resultTupLit <$> letSubExps "idx" (map index vs)
     _ -> do
       var' <- internaliseIdent var
+      csidx' <- mkCerts [var']
       return $ I.Index cs' var' csidx' idxs' loc
   where outtype = E.stripArray (length idxs) $ E.identType var
+
 
 internaliseExp (E.TupLit es loc) = do
   ks <- tupsToIdentList es
@@ -346,7 +347,9 @@ internaliseExp (E.LetWith cs name src idxcs idxs ve body loc) = do
   (c1,srcs) <- tupToIdentList (E.Var src)
   (c2,vnames) <- tupToIdentList ve
   cs' <- internaliseCerts cs
-  idxcs' <- mapM internaliseCerts idxcs
+  idxcs' <- case idxcs of
+              Just idxcs' -> internaliseCerts idxcs'
+              Nothing     -> boundsChecks srcs idxs'
   dsts <- map fst <$> mapM (newVar loc "letwith_dst" . I.identType) srcs
   c <- mergeCerts (catMaybes [c1,c2]++cs')
   let comb (dname, sname, vname) =
@@ -736,3 +739,18 @@ certifySOAC ce e =
               letBind ks e
               return $ I.TupLit (ce:vs) loc
   where loc = srclocOf e
+
+boundsChecks :: [I.Ident] -> [I.SubExp] -> InternaliseM I.Certificates
+boundsChecks []    _  = return []
+boundsChecks (v:_) es = zipWithM (boundsCheck v) [0..] es
+
+boundsCheck :: I.Ident -> Int -> I.SubExp -> InternaliseM I.Ident
+boundsCheck v i e = do
+  size <- letSubExp "size" $ I.Size [] i (I.Var v) loc
+  let check = eBinOp LogAnd (pure lowerBound) (pure upperBound) bool loc
+      lowerBound = I.BinOp Leq (I.Constant (I.BasicVal $ IntVal 0) loc)
+                               size bool loc
+      upperBound = I.BinOp Less e size bool loc
+  letExp "bounds_check" =<< eAssert check
+  where bool = I.Basic Bool
+        loc = srclocOf e

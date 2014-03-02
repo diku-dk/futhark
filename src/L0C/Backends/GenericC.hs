@@ -398,7 +398,7 @@ compileBody place (LetPat pat e body _) = do
                      $items:body'
                    }|]
 
-compileBody place (LetWith _ name src idxcs idxs ve body _) = do
+compileBody place (LetWith _ name src _ idxs ve body _) = do
   name' <- new $ textual $ identName name
   src' <- lookupVar $ identName src
   etype <- typeToCType [identType src]
@@ -409,9 +409,6 @@ compileBody place (LetWith _ name src idxcs idxs ve body _) = do
   elty <- typeToCType [subExpType ve]
   ve' <- compileSubExpInPlace (varExp el) ve
   let idxdecls = [[C.cdecl|int $id:idxvar;|] | idxvar <- idxvars]
-      check = case idxcs of
-                Just _ -> []
-                Nothing -> boundsCheckStm (varExp name') idxexps
       (elempre, elempost) =
         case subExpType ve of
           Array {} -> (indexArrayElemStms (varExp el) (varExp name') (identType src) idxexps,
@@ -429,7 +426,6 @@ compileBody place (LetWith _ name src idxcs idxs ve body _) = do
                      $decls:idxdecls
                      $id:name' = $exp:src';
                      $items:idxs'
-                     $stms:check
                      $stms:elempre
                      $items:ve'
                      $stm:elempost
@@ -616,19 +612,16 @@ compileExp' place (Apply fname args _ _) = do
                      $exp:place = $id:(funName fname)($args:varexps);
                }|]
 
-compileExp' place (Index _ var csidxs idxs _) = do
+compileExp' place (Index _ var _ idxs _) = do
   arr <- lookupVar $ identName var
   idxvars <- mapM (new . ("index_"++) . show) [0..length idxs-1]
   idxs' <- concat <$> zipWithM compileSubExp (map varExp idxvars) idxs
   let vardecls = [[C.cdecl|int $id:idxvar;|] | idxvar <- idxvars]
       varexps =  map varExp idxvars
       index = indexArrayElemStms place arr (identType var) varexps
-      check = case csidxs of Nothing -> boundsCheckStm arr varexps
-                             Just _  -> []
   return $ stm [C.cstm|{
                      $decls:vardecls
                      $items:idxs'
-                     $stms:check
                      $stms:index
                    }|]
 

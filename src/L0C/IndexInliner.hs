@@ -85,19 +85,19 @@ transformLambdaM l = do
   return l { lambdaBody = e }
 
 type ArrayIndexMap = HM.HashMap Ident
-                     (Certificates -> Maybe Certificates -> SubExp -> NeedNames Body)
+                     (Certificates -> Certificates -> SubExp -> NeedNames Body)
 
 emptyArrayIndexMap :: ArrayIndexMap
 emptyArrayIndexMap = HM.empty
 
-lookupDelayed :: Ident -> Certificates -> Maybe Certificates -> SubExp
+lookupDelayed :: Ident -> Certificates -> Certificates -> SubExp
               -> ArrayIndexMap
               -> Maybe (NeedNames Body)
 lookupDelayed var cs idxcs idx m = do
   f <- HM.lookup var m
   return $ f cs idxcs idx
 
-performArrayDelay :: Exp -> Maybe (Certificates -> Maybe Certificates -> SubExp -> NeedNames Body)
+performArrayDelay :: Exp -> Maybe (Certificates -> Certificates -> SubExp -> NeedNames Body)
 performArrayDelay (Map cs fun es _) = do
   vs <- mapM varExp es
   Just $ performArrayDelay' cs fun vs
@@ -106,7 +106,7 @@ performArrayDelay (Map cs fun es _) = do
 performArrayDelay _ = Nothing
 
 performArrayDelay' :: Certificates -> Lambda -> [Ident]
-                   -> Certificates -> Maybe Certificates -> SubExp -> NeedNames Body
+                   -> Certificates -> Certificates -> SubExp -> NeedNames Body
 performArrayDelay' mcs fun vs cs idxcs idx =
   return $ inlineMapFun (lambdaParams fun)
                         [Index (mcs++cs) v idxcs [idx] $ srclocOf v

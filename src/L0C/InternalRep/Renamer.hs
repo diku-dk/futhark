@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
 -- | This module provides facilities for transforming L0 programs such
 -- that names are unique, via the 'renameProg' function.
 -- Additionally, the module also supports adding integral \"tags\" to
@@ -85,8 +84,7 @@ renameBody :: Body -> RenameM Body
 renameBody (LetWith cs dest src idxcs idxs ve body loc) = do
   cs' <- mapM repl cs
   src' <- repl src
-  idxcs' <- case idxcs of Just idxcs' -> Just <$> mapM repl idxcs'
-                          Nothing     -> return Nothing
+  idxcs' <- mapM repl idxcs
   idxs' <- mapM renameSubExp idxs
   ve' <- renameSubExp ve
   bind [dest] $ do
