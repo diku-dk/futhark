@@ -72,7 +72,7 @@ asTail (LetWithBind cs dest src idxcs idxs ve) =
     where loc = srclocOf dest
 
 requires :: BindNeed -> HS.HashSet VName
-requires (LetBind pat e alts) =
+requires (LetBind _ e alts) =
   mconcat $ map freeNamesInExp $ e : alts
 requires bnd = HS.map identName $ freeInBody $ asTail bnd
 
