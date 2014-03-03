@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleInstances, MultiParamTypeClasses, FlexibleContexts #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 -- | The type checker checks whether the program is type-consistent.
 -- Whether type annotations are already present is irrelevant, but if
 -- they are, the type checker will signal an error if they are wrong.

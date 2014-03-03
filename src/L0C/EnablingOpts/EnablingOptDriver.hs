@@ -1,4 +1,3 @@
-{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses, FlexibleContexts #-}
 module L0C.EnablingOpts.EnablingOptDriver
   (
    enablingOpts

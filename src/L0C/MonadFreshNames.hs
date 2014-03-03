@@ -1,4 +1,4 @@
-{-# LANGUAGE MultiParamTypeClasses, FlexibleContexts, FlexibleInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
 -- | This module provides a monadic facility similar (and built on top
 -- of) "L0C.FreshNames".  The removes the need for a (small) amount of
 -- boilerplate, at the cost of using some GHC extensions.  The idea is

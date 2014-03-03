@@ -1,4 +1,4 @@
-{-# LANGUAGE QuasiQuotes, GeneralizedNewtypeDeriving, FlexibleInstances, MultiParamTypeClasses #-}
+{-# LANGUAGE QuasiQuotes, GeneralizedNewtypeDeriving #-}
 -- | C code generator framework.
 module L0C.Backends.GenericC
   ( compileProg

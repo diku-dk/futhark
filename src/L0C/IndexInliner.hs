@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses, FlexibleContexts #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 -- | A transformation pass that inlines instances of @a[i]@, when @a@
 -- is directly the result of a 'mapT'.  Beware: The resulting program
 -- is not uniquely named.

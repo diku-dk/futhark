@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts, FlexibleInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE FlexibleContexts, GeneralizedNewtypeDeriving #-}
 module L0C.Tools
   ( letSubExp
   , letSubExps

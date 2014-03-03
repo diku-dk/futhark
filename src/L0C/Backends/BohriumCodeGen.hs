@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts, QuasiQuotes #-}
+{-# LANGUAGE QuasiQuotes #-}
 -- | Translate SOACs into calls to the Bohrium C API.  Quite unfinished.
 --
 -- The idea: For every SOAC expression we encounter, check whether it

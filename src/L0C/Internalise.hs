@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses #-}
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
 -- |
 --
 -- This module implements a transformation on L0 programs that

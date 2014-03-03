@@ -77,8 +77,9 @@ functionSizes (fname, rettype, params, body, loc) = do
 bodySizes :: Body -> SizeM Body
 
 bodySizes (LetPat pat e body loc) = do
-  (shapes,e') <- expSizes pat e
-  body' <- bindShapes (HM.map (map shapeBindingIdent) shapes) $ bodySizes body
+  (shapes, e', f) <- expSizes pat e
+  body' <- bindShapes (HM.map (map shapeBindingIdent) shapes) $
+           liftM f $ bodySizes body
   let pat' = concatMap addShape pat
       addShape v =
         case HM.lookup (identName v) shapes of
@@ -105,7 +106,9 @@ bodySizes (Result cs es loc) = do
             Just shape' -> return $ Var v : shape'
             Nothing     -> return [Var v]
 
-expSizes :: [Ident] -> Exp -> SizeM (HM.HashMap VName [ShapeBinding], Exp)
+expSizes :: [Ident] -> Exp -> SizeM (HM.HashMap VName [ShapeBinding],
+                                     Exp,
+                                     Body -> Body)
 
 expSizes pat (Map cs fun args loc) = do
   fun' <- sizeLambda fun
@@ -119,18 +122,18 @@ expSizes pat (Map cs fun args loc) = do
               ExistingShape argSize :
               [ ComputedShape $ Ident name (arrayType 1 (Basic Int) Unique) loc
                   | name <- names ])
-  return (shapes, Map cs fun' args loc)
+  return (shapes, Map cs fun' args loc, undefined)
 
 expSizes [v] (Iota e loc) =
-  return (HM.singleton (identName v) [ExistingShape e], Iota e loc)
+  return (HM.singleton (identName v) [ExistingShape e], Iota e loc, id)
 
 expSizes _ (Size _ i (Var v) _) = do
   se <- lookupSize i v
-  return (HM.empty, SubExp se)
+  return (HM.empty, SubExp se, id)
 
 expSizes pat e
   | all (basicType . identType) pat =
-    return (HM.empty, e)
+    return (HM.empty, e, id)
 
 sizeLambda :: Lambda -> SizeM Lambda
 sizeLambda (Lambda params body rettype loc) = do

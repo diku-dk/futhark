@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleInstances #-}
 -- | L0C-specific type- and class definitions built on top of the L0
 -- definitions in "Language.L0".
 module L0C.ExternalRep

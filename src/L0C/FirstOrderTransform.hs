@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
 -- | The code generator cannot handle the array combinators (@map@ and
 -- friends), so this module was written to transform them into the
 -- equivalent do-loops.  The transformation is currently rather naive
