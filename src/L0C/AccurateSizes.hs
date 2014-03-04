@@ -9,6 +9,7 @@ import Control.Applicative
 import Control.Monad.Reader
 import Control.Monad.State
 
+import Data.Loc
 import Data.Maybe
 
 import L0C.InternalRep
@@ -20,8 +21,10 @@ addSizeInformation :: Prog -> Prog
 addSizeInformation prog = runSizeM prog $
   Prog <$> mapM functionSizes (progFunctions prog)
 
+type SizeTable = HM.HashMap VName [SubExp]
+
 data SizeEnv = SizeEnv {
-    envVtable :: HM.HashMap VName [SubExp]
+    envVtable :: SizeTable
   }
 
 newtype SizeM a = SizeM (ReaderT SizeEnv (State VNameSource) a)
@@ -32,7 +35,7 @@ instance MonadFreshNames SizeM where
   getNameSource = get
   putNameSource = put
 
-bindShapes :: HM.HashMap VName [SubExp] -> SizeM a -> SizeM a
+bindShapes :: SizeTable -> SizeM a -> SizeM a
 bindShapes shapes = local bind
   where bind env = env { envVtable = shapes `HM.union` envVtable env }
 
@@ -43,13 +46,18 @@ sameShapes dest src = local bind
             Just srcShape ->
               env { envVtable = HM.insert (identName dest) srcShape $
                                 envVtable env }
-            Nothing -> error "Shape not found - should never happen."
+            Nothing -> error $ "Shape for " ++ textual (identName src) ++ " not found - should never happen."
+
+lookupShape :: Ident -> SizeM [SubExp]
+lookupShape v =  do
+  shape <- asks $ HM.lookup (identName v) . envVtable
+  case shape of Nothing     -> error "Unknown variable"
+                Just shape' -> return shape'
 
 lookupSize :: Int -> Ident -> SizeM SubExp
 lookupSize i v = do
-  shape <- asks $ HM.lookup (identName v) . envVtable
-  case shape of Nothing     -> error "Unknown variable"
-                Just shape' -> return $ shape' !! i
+  shape <- lookupShape v
+  return $ shape !! i
 
 runSizeM :: Prog -> SizeM a -> a
 runSizeM prog (SizeM m) = evalState (runReaderT m env) src
@@ -60,32 +68,19 @@ runSizeM prog (SizeM m) = evalState (runReaderT m env) src
 
 functionSizes :: FunDec -> SizeM FunDec
 functionSizes (fname, rettype, params, body, loc) = do
-  shapes <- liftM HM.fromList $ forM params $ \param -> do
-    let rank = arrayRank (identType param)
-    names <- replicateM rank $ newNameFromString "param_size"
-    return (identName param,
-            [ Ident name (Basic Int) loc | name <- names ])
-  let params' = concatMap addShape params
-      addShape v = case HM.lookup (identName v) shapes of
-                     Just shape -> fromParam v : shape
-                     Nothing    -> [fromParam v]
-      rettype' = concatMap addShapeTypes rettype
-      addShapeTypes t = t : replicate (arrayRank t) (Basic Int)
-  body' <- bindShapes (HM.map (map Var) shapes) $ bodySizes body
+  (shapes,params') <- patternSizes $ map fromParam params
+  let rettype' = typeSizes rettype
+  body' <- bindShapes shapes $ bodySizes body
   return (fname, rettype', map toParam params', body', loc)
 
 bodySizes :: Body -> SizeM Body
 
 bodySizes (LetPat pat e body loc) = do
-  (shapes, e', f) <- expSizes pat e
-  body' <- bindShapes (HM.map (map shapeBindingIdent) shapes) $
-           liftM f $ bodySizes body
-  let pat' = concatMap addShape pat
-      addShape v =
-        case HM.lookup (identName v) shapes of
-          Just shape -> v : mapMaybe isComputedShape shape
-          Nothing    -> [v]
-  return $ LetPat pat' e' body' loc
+  (shapes, bnds) <- expSizes pat e
+  let bind [] = bindShapes shapes $ bodySizes body
+      bind ((pat',e'):rest) =
+        LetPat pat' e' <$> bind rest <*> pure loc
+  bind bnds
 
 bodySizes (LetWith cs dest src idx iv body loc) =
   LetWith cs dest src idx iv <$>
@@ -106,50 +101,157 @@ bodySizes (Result cs es loc) = do
             Just shape' -> return $ Var v : shape'
             Nothing     -> return [Var v]
 
-expSizes :: [Ident] -> Exp -> SizeM (HM.HashMap VName [ShapeBinding],
-                                     Exp,
-                                     Body -> Body)
-
-expSizes pat (Map cs fun args loc) = do
-  fun' <- sizeLambda fun
-  shapes <-
-    liftM HM.fromList $ forM (zip pat args) $ \(v, arg) -> do
-      names <- replicateM (arrayRank (identType v) - 1) $
-               newNameFromString "map_shape"
-      let Var argv = arg
-      argSize <- lookupSize 0 argv
-      return (identName v,
-              ExistingShape argSize :
-              [ ComputedShape $ Ident name (arrayType 1 (Basic Int) Unique) loc
-                  | name <- names ])
-  return (shapes, Map cs fun' args loc, undefined)
-
-expSizes [v] (Iota e loc) =
-  return (HM.singleton (identName v) [ExistingShape e], Iota e loc, id)
-
-expSizes _ (Size _ i (Var v) _) = do
-  se <- lookupSize i v
-  return (HM.empty, SubExp se, id)
+expSizes :: [Ident] -> Exp -> SizeM (SizeTable, [([Ident], Exp)])
 
 expSizes pat e
   | all (basicType . identType) pat =
-    return (HM.empty, e, id)
+    return (HM.empty, [(pat, e)])
 
-sizeLambda :: Lambda -> SizeM Lambda
-sizeLambda (Lambda params body rettype loc) = do
-  body' <- bodySizes body
+expSizes pat (Map cs fun args loc) = do
+  fun' <- lambdaSizes fun args
+  let (sizefun, valuefun) = splitLambda fun'
+  (inner_shapes, all_comp_shapes, checks) <-
+    liftM unzip3 $ forM pat $ \v -> do
+      let n = arrayRank (identType v) - 1
+      comp_shapes <- replicateM n $ newIdent "map_computed_shape"
+                                    (arrayType 1 (Basic Int) Unique) loc
+      certs  <- replicateM n $ newIdent "map_cert" (Basic Cert) loc
+      shapes <- replicateM n $ newIdent "map_shape" (Basic Int) loc
+      return ((identName v, shapes),
+              comp_shapes,
+              (certs,
+               [([cert, shape],
+                 Apply (nameFromString "all_equal")
+                 [(Var comp_shape, Observe)]
+                 [Basic Cert, Basic Int] loc)
+                | (cert, shape, comp_shape) <- zip3 certs shapes comp_shapes ]))
+  let (certs, shape_checks) = unzip checks
+      sizecomp = if null $ concat all_comp_shapes
+                 then []
+                 else [(concat all_comp_shapes, Map cs sizefun  args loc)]
+  shapes <-
+    liftM HM.fromList $ forM (zip inner_shapes args) $ \((v, inner_shape), arg) -> do
+      let Var argv = arg
+      outer_shape <- lookupSize 0 argv
+      return (v, outer_shape : map Var inner_shape)
+  return (shapes,
+          sizecomp ++
+          concat shape_checks ++
+          [(pat, Map (cs++concat certs) valuefun args loc)])
+
+expSizes pat (SubExp se) = do
+  shape <- subExpShape se
+  return (hasShape pat shape, [(pat, SubExp se)])
+
+expSizes pat (Iota e loc) =
+  return (hasShape pat [e], [(pat, Iota e loc)])
+
+expSizes pat (Size _ i (Var v) _) = do
+  se <- lookupSize i v
+  return (HM.empty, [(pat, SubExp se)])
+
+expSizes pat (TupLit es loc) = do
+  shapes <- mapM subExpShape es
+  return (HM.unions $ map (hasShape pat) shapes, [(pat, TupLit es loc)])
+
+expSizes pat (If ce tb fb rettype loc) = do
+  tb' <- bodySizes tb
+  fb' <- bodySizes fb
+  (shapes, pat') <- patternSizes pat
+  return (shapes, [(pat', If ce tb' fb' rettype' loc)])
+  where rettype' = typeSizes rettype
+
+expSizes pat (Apply fname args rettype loc) = do
+  (shapes, pat') <- patternSizes pat
+  args' <- liftM concat $ forM args $ \(e,d) -> do
+             sizes <- subExpShape e
+             return $ (e,d) : [ (size, Observe) | size <- sizes ]
+  return (shapes, [(pat', Apply fname args' (typeSizes rettype) loc)])
+
+expSizes pat e@(BinOp {}) =
+  return (HM.empty, [(pat, e)])
+
+expSizes pat e@(Not {}) =
+  return (HM.empty, [(pat, e)])
+
+expSizes pat e@(Negate {}) =
+  return (HM.empty, [(pat, e)])
+
+expSizes pat e@(Assert {}) =
+  return (HM.empty, [(pat, e)])
+
+expSizes pat e@(Conjoin {}) =
+  return (HM.empty, [(pat, e)])
+
+expSizes [v1,v2] e@(Split _ ne (Var av) loc) = do
+  outer : inner <- lookupShape av
+  v2size <- newIdent "v2_size" (Basic Int) loc
+  return (HM.fromList [(identName v1, ne : inner),
+                       (identName v2, Var v2size : inner)],
+          [([v2size], BinOp Minus outer ne (Basic Int) loc),
+           ([v1,v2],  e)])
+
+expSizes pat e@(Concat _ (Var v1) (Var v2) loc) = do
+  v1n : inner <- lookupShape v1
+  v2n : _     <- lookupShape v2
+  concat_size <- newIdent "concat_size" (Basic Int) loc
+  return (hasShape pat $ Var concat_size : inner,
+          [([concat_size], BinOp Plus v1n v2n (Basic Int) loc),
+            (pat, e)])
+
+expSizes pat e@(ArrayLit [] rt loc) =
+  return (hasShape pat $ replicate (arrayRank rt+1) zero,
+          [(pat, e)])
+  where zero = Constant (BasicVal $ IntVal 0) loc
+
+expSizes pat e@(ArrayLit elems@(se:_) _ loc) = do
+  shape <- subExpShape se
+  -- XXX: Check that they are all equal?
+  return (hasShape pat $ outer : shape, [(pat, e)])
+  where outer = Constant (BasicVal $ IntVal $ length elems) loc
+
+subExpShape :: SubExp -> SizeM [SubExp]
+subExpShape (Var v)        = lookupShape v
+subExpShape (Constant v loc) =
+  return [ Constant (BasicVal $ IntVal d) loc | d <- arrayShape v ]
+
+hasShape :: [Ident] -> [SubExp] -> SizeTable
+hasShape vs es = HM.fromList [(identName v, es) | v <- vs]
+
+lambdaSizes :: Lambda -> [SubExp] -> SizeM Lambda
+lambdaSizes (Lambda params body rettype loc) args = do
+  shapes <- mapM (liftM (drop 1) . subExpShape) args
+  let arrparams = drop (length params - length args) params
+      shapemap = HM.fromList $ zip (map identName arrparams) shapes
+  body' <- bindShapes shapemap $ bodySizes body
   return $ Lambda params body' rettype' loc
-  where rettype' = concatMap addShapes rettype
-        addShapes t =
-          t : replicate (arrayRank t) (Basic Int)
+  where rettype' = typeSizes rettype
 
-data ShapeBinding = ComputedShape Ident
-                  | ExistingShape SubExp
+splitLambda :: Lambda -> (Lambda, Lambda)
+splitLambda (Lambda params body rettype loc) =
+  (Lambda params sizeBody  sizeRettype  loc,
+   Lambda params valueBody valueRettype loc)
+    where sizeBody = flip mapTail body $ \cs es ->
+                     Result cs (fst $ splitTyped subExpType es) loc
+          valueBody = flip mapTail body $ \cs es ->
+                      Result cs (snd $ splitTyped subExpType es) loc
+          (sizeRettype, valueRettype) = splitTyped id rettype
 
-isComputedShape :: ShapeBinding -> Maybe Ident
-isComputedShape (ComputedShape v) = Just v
-isComputedShape (ExistingShape _) = Nothing
+          splitTyped _ []     = ([],[])
+          splitTyped f (x:xs) =
+            let (sizes, values) = splitTyped f (drop n xs)
+            in (take n xs ++ sizes, x : values)
+            where n = arrayRank $ f x
 
-shapeBindingIdent :: ShapeBinding -> SubExp
-shapeBindingIdent (ComputedShape v) = Var v
-shapeBindingIdent (ExistingShape v) = v
+patternSizes :: [Ident] -> SizeM (SizeTable, [Ident])
+patternSizes pat = do
+  (shapes, pat') <- liftM unzip $ forM pat $ \v -> do
+    let rank = arrayRank $ identType v
+    names <- replicateM rank $ newIdent "param_size" (Basic Int) $ srclocOf v
+    return ((identName v, map Var names),
+            v : names)
+  return (HM.fromList shapes, concat pat')
+
+typeSizes :: [TypeBase als] -> [TypeBase als]
+typeSizes = concatMap addShapeTypes
+  where addShapeTypes t = t : replicate (arrayRank t) (Basic Int)
