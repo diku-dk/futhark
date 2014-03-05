@@ -809,7 +809,9 @@ checkExp (Filter ass fun arrexps pos) = do
   fun' <- checkLambda fun arrargs
   let funret = lambdaType fun' $ map argType arrargs
   when (funret /= [Basic Bool]) $
-    bad $ TypeError pos "FilterT function does not return bool."
+    bad $ TypeError pos "Filter function does not return bool."
+  when (any (unique . identType) $ lambdaParams fun) $
+    bad $ TypeError pos "Filter function consumes its arguments."
   return $ Filter ass' fun' arrexps' pos
 
 checkExp (Redomap ass outerfun innerfun accexps arrexps pos) = do

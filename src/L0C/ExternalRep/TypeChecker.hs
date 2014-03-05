@@ -730,11 +730,14 @@ checkExp (Scan fun startexp arrexp intype pos) = do
   return $ Scan fun' startexp' arrexp' intype' pos
 
 checkExp (Filter fun arrexp rowtype pos) = do
-  (arrexp', arrarg@(rowelemt, _, _)) <- checkSOACArrayArg arrexp
+  (arrexp', (rowelemt, argflow, argloc)) <- checkSOACArrayArg arrexp
+  let nonunique_arg = (rowelemt `setUniqueness` Nonunique,
+                       argflow, argloc)
   rowtype' <- checkAnnotation pos "row" rowtype rowelemt
-  fun' <- checkLambda fun [arrarg]
+  fun' <- checkLambda fun [nonunique_arg]
   when (lambdaType fun' [rowtype'] /= Elem (Basic Bool)) $
     bad $ TypeError pos "Filter function does not return bool."
+
   return $ Filter fun' arrexp' rowtype' pos
 
 checkExp (Redomap outerfun innerfun accexp arrexp intype pos) = do
@@ -927,6 +930,8 @@ checkExp (FilterT ass fun arrexps pos) = do
   let funret = tupleLambdaType fun' $ map argType arrargs
   when (funret /= [Elem $ Basic Bool]) $
     bad $ TypeError pos "FilterT function does not return bool."
+  when (any (unique . identType) $ tupleLambdaParams fun) $
+    bad $ TypeError pos "FilterT function consumes its arguments."
   return $ FilterT ass' fun' arrexps' pos
 
 checkExp (RedomapT ass outerfun innerfun accexps arrexps pos) = do
