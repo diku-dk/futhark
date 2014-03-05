@@ -17,6 +17,8 @@ module L0C.Tools
   , eTupLit
   , eBody
 
+  , binOpLambda
+
   , MonadBinder(..)
   , Binding(..)
   , insertBindings
@@ -148,6 +150,24 @@ eBody e = insertBindings $ do
             e' <- e
             x <- letTupExp "x" e'
             return $ Result [] (map Var x) $ srclocOf e'
+
+-- | Create a two-parameter lambda whose body applies the given binary
+-- operation to its arguments.  It is assumed that both argument and
+-- result types are the same.  (This assumption should be fixed at
+-- some point.)
+binOpLambda :: MonadFreshNames m =>
+               BinOp -> Type -> SrcLoc -> m Lambda
+binOpLambda bop t loc = do
+  x   <- newIdent "x"   t loc
+  y   <- newIdent "y"   t loc
+  res <- newIdent "res" t loc
+  return Lambda {
+             lambdaParams     = [toParam x, toParam y]
+           , lambdaReturnType = [toDecl t]
+           , lambdaSrcLoc     = loc
+           , lambdaBody = LetPat [res] (BinOp bop (Var x) (Var y) t loc)
+                          (Result [] [Var res] loc) loc
+           }
 
 data Binding = LoopBind [(Ident, SubExp)] Ident SubExp Body
              | LetBind [Ident] Exp
