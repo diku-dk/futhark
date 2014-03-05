@@ -5,14 +5,11 @@ module L0C.AccurateSizes
   )
   where
 
-import Debug.Trace
-
 import Control.Applicative
 import Control.Monad.Reader
 import Control.Monad.State
 
 import Data.Loc
-import Data.Maybe
 
 import L0C.InternalRep
 import L0C.MonadFreshNames
@@ -106,16 +103,10 @@ expSizes pat (Map cs fun args@(arg:_) loc) = do
       let n = arrayRank (identType v) - 1
       comp_shapes <- replicateM n $ newIdent "map_computed_shape"
                                     (arrayType 1 (Basic Int) Unique) loc
-      certs  <- replicateM n $ newIdent "map_cert" (Basic Cert) loc
-      shapes <- replicateM n $ newIdent "map_shape" (Basic Int) loc
+      (certs, shapes, all_equal) <- allEqual comp_shapes
       return ((identName v, shapes),
               comp_shapes,
-              (certs,
-               [([cert, shape],
-                 Apply (nameFromString "all_equal")
-                 [(Var comp_shape, Observe)]
-                 [Basic Cert, Basic Int] loc)
-                | (cert, shape, comp_shape) <- zip3 certs shapes comp_shapes ]))
+              (certs, all_equal))
   let (certs, shape_checks) = unzip checks
       sizecomp = if null $ concat all_comp_shapes
                  then []
@@ -169,7 +160,7 @@ expSizes pat (Filter cs fun args loc) = do
         one  = Constant (BasicVal $ IntVal 1) loc
 
 expSizes pat (Redomap cs outerfun innerfun accargs arrargs loc) = do
--- XXX Shouldn't we use a modified function that checks the size...?
+  -- XXX Shouldn't we use a modified function that checks the size...?
   (_, outervaluefun) <- splitLambda <$> lambdaSizes outerfun accargs arrargs
   (_, innervaluefun) <- splitLambda <$> lambdaSizes innerfun accargs arrargs
   shapes <- mapM subExpShape accargs
@@ -326,3 +317,15 @@ patternSizes pat = do
 typeSizes :: [TypeBase als] -> [TypeBase als]
 typeSizes = concatMap addShapeTypes
   where addShapeTypes t = t : replicate (arrayRank t) (Basic Int)
+
+allEqual :: [Ident] -> SizeM ([Ident], [Ident], [([Ident], Exp)])
+allEqual comp_shapes =
+  liftM unzip3 $ forM comp_shapes $ \comp_shape -> do
+    let loc = srclocOf comp_shape
+    cert  <- newIdent "map_cert" (Basic Cert) loc
+    shape <- newIdent "map_shape" (Basic Int) loc
+    return (cert, shape,
+            ([cert, shape],
+             Apply (nameFromString "all_equal")
+             [(Var comp_shape, Observe)]
+             [Basic Cert, Basic Int] loc))
