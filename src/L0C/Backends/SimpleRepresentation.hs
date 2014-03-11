@@ -41,7 +41,7 @@ sameRepresentation ets1 ets2
 
 sameRepresentation' :: DeclType -> DeclType -> Bool
 sameRepresentation' (Array et1 ds1 _ _) (Array et2 ds2 _ _) =
-  length ds1 == length ds2 && sameRepresentation' (Basic et1) (Basic et2)
+  shapeRank ds1 == shapeRank ds2 && sameRepresentation' (Basic et1) (Basic et2)
 sameRepresentation' t1 t2 = t1 == t2
 
 -- | @tupleField i@ is the name of field number @i@ in a tuple.
@@ -90,7 +90,7 @@ arraySliceSizeExp place t slice =
   where comb y i = [C.cexp|$exp:place.shape[$int:i] * $exp:y|]
 
 -- | Return an list of expressions giving the array shape in elements.
-arrayShapeExp :: C.Exp -> GenType als -> [C.Exp]
+arrayShapeExp :: ArrayShape shape => C.Exp -> TypeBase als shape -> [C.Exp]
 arrayShapeExp place t =
   map comb [0..arrayRank t-1]
   where comb i = [C.cexp|$exp:place.shape[$int:i]|]
@@ -111,7 +111,7 @@ indexArrayExp place rank indexes =
 -- stores the value at @from[idxs]@ in @place@.  In contrast to
 -- 'indexArrayExp', this function takes care of creating proper size
 -- information if the result is an array itself.
-indexArrayElemStms :: C.Exp -> C.Exp -> GenType als -> [C.Exp] -> [C.Stm]
+indexArrayElemStms :: ArrayShape shape => C.Exp -> C.Exp -> TypeBase als shape -> [C.Exp] -> [C.Stm]
 indexArrayElemStms place from t idxs =
   case drop (length idxs) $ arrayShapeExp from t of
     [] -> [[C.cstm|$exp:place = $exp:index;|]]

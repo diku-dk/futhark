@@ -73,7 +73,7 @@ newVName = newID . nameFromString
 
 -- | Produce a fresh 'Ident', using the given name as a template.
 newIdent :: MonadFreshNames m =>
-            String -> GenType als -> SrcLoc -> m (IdentBase (als VName))
+            String -> TypeBase als shape -> SrcLoc -> m (IdentBase als shape)
 newIdent s t loc = do
   s' <- newID $ varName s Nothing
   return $ Ident s' t loc
@@ -82,7 +82,7 @@ newIdent s t loc = do
 -- but possibly modifying the name.
 newIdent' :: MonadFreshNames m =>
              (String -> String)
-          -> IdentBase (als VName) -> m (IdentBase (als VName))
+          -> IdentBase als shape -> m (IdentBase als shape)
 newIdent' f ident =
   newIdent (f $ nameToString $ baseName $ identName ident)
            (identType ident) $
@@ -91,6 +91,6 @@ newIdent' f ident =
 -- | Produce several 'Ident's, using the given name as a template,
 -- based on a list of types.
 newIdents :: MonadFreshNames m =>
-             String -> [GenType als] -> SrcLoc -> m [IdentBase (als VName)]
+             String -> [TypeBase als shape] -> SrcLoc -> m [IdentBase als shape]
 newIdents s ts loc =
   mapM (\t -> newIdent s t loc) ts

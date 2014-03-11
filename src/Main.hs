@@ -28,7 +28,7 @@ import qualified L0C.InternalRep.TypeChecker as I
 
 import L0C.Interpreter
 import L0C.EnablingOpts.EnablingOptDriver
-import L0C.HOTrans.HOTransDriver
+-- import L0C.HOTrans.HOTransDriver
 import qualified L0C.FirstOrderTransform as FOT
 import qualified L0C.Rebinder as RB
 import qualified L0C.IndexInliner as II
@@ -36,8 +36,6 @@ import qualified L0C.SOACFlowGraph as FG
 import L0C.Untrace
 import qualified L0C.Backends.SequentialC as SequentialC
 import qualified L0C.Backends.Bohrium as Bohrium
-
-import L0C.AccurateSizes
 
 newL0Config :: L0Config
 newL0Config = L0Config {
@@ -81,8 +79,7 @@ commandLineOptions =
   , fotransformOpt "f" ["first-order-transform"]
   , eotransformOpt "e" ["enabling-optimisations"]
   , iitransformOpt []  ["inline-map-indexes"]
-  , hotransformOpt "h" ["higher-order-optimizations"]
-  , astransformOpt [] ["add-size-information"]
+--  , hotransformOpt "h" ["higher-order-optimizations"]
   , Option "s" ["standard"]
     (NoArg $ \opts -> opts { l0pipeline = standardPipeline ++ l0pipeline opts })
     "Use the recommended optimised pipeline."
@@ -166,22 +163,17 @@ iitransform :: Pass
 iitransform = Pass { passName = "inlining map indexing"
                    , passOp = return . II.transformProg
                    }
-
+{-
 hotransform :: Pass
 hotransform = Pass { passName = "higher-order optimisations"
                    , passOp = liftPass highOrdTransf
                    }
-
-astransform :: Pass
-astransform = Pass { passName = "accurate size insertion"
-                   , passOp = return . addSizeInformation
-                   }
-
+-}
 standardPipeline :: [Pass]
 standardPipeline =
   [ uttransform, eotransform, iitransform
-  , hoist,     hotransform, eotransform
-  , hoistAggr, hotransform, eotransform
+  , hoist,     {-hotransform,-} eotransform
+  , hoistAggr, {-hotransform,-} eotransform
   ]
 
 passoption :: String -> Pass -> String -> [String] -> L0Option
@@ -218,15 +210,12 @@ iitransformOpt =
   passoption "Inline indexing into maps."
   iitransform
 
+{-
 hotransformOpt :: String -> [String] -> L0Option
 hotransformOpt =
   passoption "Perform higher-order optimisation, i.e., fusion."
   hotransform
-
-astransformOpt :: String -> [String] -> L0Option
-astransformOpt =
-  passoption "Add accurate size information to program."
-  astransform
+-}
 
 -- | Entry point.  Non-interactive, except when reading interpreter
 -- input from standard input.

@@ -31,7 +31,7 @@ import L0C.MonadFreshNames
 import L0C.TypeError
 
 -- | Information about an error that occured during type checking.
-type TypeError = GenTypeError VName Exp (Several Type) (Several Ident)
+type TypeError = GenTypeError VName Exp (Several DeclType) (Several Ident)
 
 -- | A tuple of a return type and a list of argument types.
 type FunBinding = ([DeclType], [DeclType])
@@ -277,10 +277,10 @@ lookupVar name pos = do
 -- that combines the aliasing of @t1@ and @t2@ is returned.  The
 -- uniqueness of the resulting type will be the least of the
 -- uniqueness of @t1@ and @t2@.
-unifyTypes :: Type -> Type -> Maybe Type
+unifyTypes :: ArrayShape shape => Type -> TypeBase Names shape -> Maybe Type
 unifyTypes (Basic t1) (Basic t2) = Basic <$> t1 `unifyBasicTypes` t2
 unifyTypes (Array t1 ds1 u1 als1) (Array t2 ds2 u2 als2)
-  | length ds1 == length ds2 = do
+  | shapeRank ds1 == shapeRank ds2 = do
   t <- t1 `unifyBasicTypes` t2
   Just $ Array t ds1 (u1 <> u2) (als1 <> als2)
 unifyTypes _ _ = Nothing
@@ -296,7 +296,8 @@ unifyBasicTypes t1 t2
 -- one of them.
 unifySubExpTypes :: SubExp -> SubExp -> TypeM Type
 unifySubExpTypes e1 e2 =
-  maybe (bad $ UnifyError (SubExp e1) (justOne t1) (SubExp e2) (justOne t2)) return $
+  maybe (bad $ UnifyError (SubExp e1) (justOne $ toDecl t1)
+                          (SubExp e2) (justOne $ toDecl t2)) return $
   unifyTypes t1 t2
   where t1 = subExpType e1
         t2 = subExpType e2
@@ -307,17 +308,20 @@ unifySubExpTypes e1 e2 =
 checkAnnotation :: SrcLoc -> String -> Type -> Type -> TypeM Type
 checkAnnotation loc desc t1 t2 =
   case unifyTypes (t1 `setAliases` HS.empty) t2 of
-    Nothing -> bad $ BadAnnotation loc desc (justOne t1) (justOne t2)
+    Nothing -> bad $ BadAnnotation loc desc
+                     (justOne $ toDecl t1) (justOne $ toDecl t2)
     Just t  -> return t
 
 -- | @checkTupleAnnotation loc s t1s t2s@ tries to unify the types in
 -- @t1s@ and @t2s@ with 'unifyTypes'.  If this fails, or @t1s@ and @t2s@ are not the same length, a
 -- 'BadAnnotation' is raised.
-checkTupleAnnotation :: SrcLoc -> String -> [Type] -> [Type] -> TypeM [Type]
+checkTupleAnnotation :: ArrayShape shape =>
+                        SrcLoc -> String -> [Type] -> [TypeBase Names shape] -> TypeM [Type]
 checkTupleAnnotation loc desc t1s t2s
   | length t1s == length t2s,
     Just ts <- zipWithM unifyTypes (blankAliases t1s) t2s = return ts
-  | otherwise = bad $ BadAnnotation loc desc (Several t1s) (Several t2s)
+  | otherwise = bad $ BadAnnotation loc desc (Several $ map toDecl t1s)
+                                             (Several $ map toDecl t2s)
   where blankAliases = map (`changeAliases` const mempty)
 
 -- | @require ts e@ causes a '(TypeError vn)' if @typeOf e@ does not unify
@@ -327,21 +331,21 @@ require :: [Type] -> SubExp -> TypeM SubExp
 require ts e
   | any (subExpType e `similarTo`) ts = return e
   | otherwise = bad $ UnexpectedType (SubExp e)
-                      (justOne $ subExpType e)
-                      (map justOne ts)
+                      (justOne $ toDecl $ subExpType e)
+                      (map (justOne . toDecl) ts)
 
 -- | Variant of 'require' working on identifiers.
 requireI :: [Type] -> Ident -> TypeM Ident
 requireI ts ident
   | any (identType ident `similarTo`) ts = return ident
   | otherwise = bad $ UnexpectedType (SubExp $ Var ident)
-                      (justOne $ identType ident)
-                      (map justOne ts)
+                      (justOne $ toDecl $ identType ident)
+                      (map (justOne . toDecl) ts)
 
 rowTypeM :: SubExp -> TypeM Type
 rowTypeM e = maybe wrong return $ peelArray 1 $ subExpType e
   where wrong = bad $ NotAnArray (srclocOf e) (SubExp e) $
-                      justOne $ subExpType e
+                      justOne $ toDecl $ subExpType e
 
 -- | Type check a program containing arbitrary type information,
 -- yielding either a type error or a program with complete type
@@ -385,8 +389,11 @@ checkProg' checkoccurs prog = do
     addLoc (t, ts) = (t, ts, noLoc)
 
 initialFtable :: HM.HashMap Name FunBinding
-initialFtable = HM.map addBuiltin builtInFunctions
+initialFtable = HM.insert (nameFromString "all_equal") all_equal $
+                HM.map addBuiltin builtInFunctions
   where addBuiltin (t, ts) = ([Basic t], map Basic ts)
+        all_equal = ([Basic Cert, Basic Int],
+                     [arrayOf (Basic Int) (Rank 1) Nonunique])
 
 checkFun :: FunDec -> TypeM FunDec
 checkFun (fname, rettype, params, body, loc) = do
@@ -396,11 +403,11 @@ checkFun (fname, rettype, params, body, loc) = do
 
   checkReturnAlias $ bodyType body'
 
-  if bodyType body' `subtypesOf` rettype then
+  if map toDecl (bodyType body') `subtypesOf` rettype then
     return (fname, rettype, params', body', loc)
   else bad $ ReturnTypeError loc fname
-             (Several $ map fromDecl rettype)
-             (Several $ bodyType body')
+             (Several rettype)
+             (Several $ map toDecl $ bodyType body')
 
   where checkParams = reverse <$> foldM expand [] params
 
@@ -546,7 +553,7 @@ checkBody (DoLoop mergepat (Ident loopvar _ _)
 
   let -- | Change the uniqueness attribute of a type to reflect how it
       -- was used.
-      param (Array et sz _ _) con = Array et sz u ()
+      param (Array et sz _ als) con = Array et sz u als
         where u = case con of Consume     -> Unique
                               Observe     -> Nonunique
       param (Basic bt) _ = Basic bt
@@ -562,7 +569,7 @@ checkBody (DoLoop mergepat (Ident loopvar _ _)
                 usageOccurences loopflow
       funparams = zipWith setIdentType mergevs' rettype
 
-  result <- newIdents "merge_val" (map fromDecl rettype) loc
+  result <- newIdents "merge_val" rettype loc
 
   let boundnames = HS.insert iparam $ HS.fromList mergevs'
       ununique ident =
@@ -574,37 +581,39 @@ checkBody (DoLoop mergepat (Ident loopvar _ _)
       -- These are the parameters expected by the function: All of the
       -- free variables, followed by the index, followed by the upper
       -- bound (currently not used), followed by the merge value.
-      params = free ++ [iparam, toParam bound] ++ funparams
+      params = free ++ [iparam, bound] ++ funparams
       bindfun env = env { envFtable = HM.insert fname
-                                      (rettype, map identType params) $
+                                      (map toDecl rettype,
+                                       map (toDecl . identType) params) $
                                       envFtable env }
 
       -- The body of the function will be the loop body, but with all
       -- tails replaced with recursive calls.
       recurse cs args = LetPat result
                         (Apply fname
-                        ([(Var (fromParam k), diet (identType k)) | k <- free ] ++
+                        ([(Var k, diet (identType k)) | k <- free ] ++
                          [(Var iparam, Observe),
                           (Var bound, Observe)] ++
                          zip args (map (diet . subExpType) args))
-                        (map fromDecl rettype) loc)
+                        rettype loc)
                         (Result cs (map Var result) loc) loc
   let funbody' = mapTail recurse loopbody'
 
   (funcall, callflow) <- collectDataflow $ local bindfun $ do
     -- Check that the function is internally consistent.
-    _ <- unbinding $ checkFun (fname, rettype, params, funbody', loc)
+    _ <- unbinding $ checkFun (fname, map toDecl rettype,
+                               map toParam params, funbody', loc)
     -- Check the actual function call - we start by computing the
     -- bound and initial merge value, in case they use something
     -- consumed in the call.  This reintroduces the dataflow for
     -- boundexp and mergeexp that we previously threw away.
     checkBody $ LetPat result
                 (Apply fname
-                 ([(Var (fromParam k), diet (identType k)) | k <- free ] ++
+                 ([(Var k, diet (identType k)) | k <- free ] ++
                   [(Constant (BasicVal $ IntVal 0) loc, Observe),
                    (boundexp', Observe)] ++
                   zip es' (map diet rettype))
-                 (map fromDecl rettype) loc)
+                 rettype loc)
                 (Result [] (map Var result) loc) loc
 
   -- Now we just need to bind the result of the function call to the
@@ -803,8 +812,9 @@ checkExp (Scan ass fun inputs pos) = do
                           ", but scan function returns type " ++ ppTuple funret ++ "."
   return $ Scan ass' fun' (zip startexps' arrexps') pos
 
-checkExp (Filter ass fun arrexps pos) = do
+checkExp (Filter ass fun arrexps outer_shape pos) = do
   ass' <- mapM (requireI [Basic Cert] <=< checkIdent) ass
+  outer_shape' <- requireI [Basic Int] =<< checkIdent outer_shape
   (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
   fun' <- checkLambda fun arrargs
   let funret = lambdaType fun' $ map argType arrargs
@@ -812,7 +822,7 @@ checkExp (Filter ass fun arrexps pos) = do
     bad $ TypeError pos "Filter function does not return bool."
   when (any (unique . identType) $ lambdaParams fun) $
     bad $ TypeError pos "Filter function consumes its arguments."
-  return $ Filter ass' fun' arrexps' pos
+  return $ Filter ass' fun' arrexps' outer_shape' pos
 
 checkExp (Redomap ass outerfun innerfun accexps arrexps pos) = do
   ass' <- mapM (requireI [Basic Cert] <=< checkIdent) ass
@@ -902,7 +912,7 @@ checkBinding patloc pat tloc ts dflow
     runStateT (zipWithM checkBinding' pat ts) []
   return (\m -> sequentially (tell dflow) (const . const $ binding idds m), pat')
   | otherwise =
-  bad $ InvalidPatternError (Several pat) patloc (Several ts) tloc
+  bad $ InvalidPatternError (Several pat) patloc (Several $ map toDecl ts) tloc
   where checkBinding' (Ident name namet pos) t = do
           t' <- lift $
                 checkAnnotation (srclocOf pat)
@@ -947,8 +957,8 @@ checkFuncall fname loc paramtypes _ args = do
 
   unless (validApply paramtypes argts) $
     bad $ ParameterMismatch fname loc
-          (Right $ map (justOne . fromDecl) paramtypes) $
-          map justOne argts
+          (Right $ map justOne paramtypes) $
+          map (justOne . toDecl) argts
   forM_ (zip (map diet paramtypes) args) $ \(d, (t, dflow, argloc)) -> do
     maybeCheckOccurences $ usageOccurences dflow
     let occurs = [consumption (consumeArg t d) argloc]
@@ -958,9 +968,9 @@ checkFuncall fname loc paramtypes _ args = do
 
 checkLambda :: Lambda -> [Arg] -> TypeM Lambda
 checkLambda (Lambda params body ret loc) args = do
-  (_, ret', params', body', _) <-
-    noUnique $ checkFun (nameFromString "<anonymous>", ret, params, body, loc)
-  if length params' == length args then do
-    checkFuncall Nothing loc (map identType params') ret' args
-    return $ Lambda params body' ret' loc
+  (_, _, _, body', _) <-
+    noUnique $ checkFun (nameFromString "<anonymous>", map toDecl ret, params, body, loc)
+  if length params == length args then do
+    checkFuncall Nothing loc (map (toDecl . identType) params) (map toDecl ret) args
+    return $ Lambda params body' ret loc
   else bad $ TypeError loc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."

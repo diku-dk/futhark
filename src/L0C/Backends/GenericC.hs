@@ -104,20 +104,20 @@ lookupVar k = do v <- asks $ HM.lookup k . envVarMap
 new :: String -> CompilerM String
 new = liftM textual . newVName
 
-typeName' :: GenType als -> String
+typeName' :: ArrayShape shape => TypeBase als shape -> String
 typeName' (Basic Int)  = "int"
 typeName' (Basic Bool) = "bool"
 typeName' (Basic Char) = "char"
 typeName' (Basic Real) = "real"
 typeName' (Basic Cert) = "cert"
 typeName' t@(Array {}) =
-  typeName' (Basic $ elemType t) ++ show (arrayRank t) ++ "d"
+  typeName' (basicDecl $ elemType t) ++ show (arrayRank t) ++ "d"
 
-typeName :: [GenType als] -> String
+typeName :: ArrayShape shape => [TypeBase als shape] -> String
 typeName [t] = typeName' t
 typeName ts  = "tuple_" ++ intercalate "_" (map typeName' ts)
 
-typeToCType :: [GenType als] -> CompilerM C.Type
+typeToCType :: ArrayShape shape => [TypeBase als shape] -> CompilerM C.Type
 typeToCType [Basic Int]  = return [C.cty|int|]
 typeToCType [Basic Bool] = return [C.cty|int|]
 typeToCType [Basic Char] = return [C.cty|char|]
@@ -128,7 +128,7 @@ typeToCType [t@Array {}] = do
   case ty of
     Just (_, (cty, _)) -> return cty
     Nothing -> do
-      ct <- typeToCType [Basic $ elemType t]
+      ct <- typeToCType [basicDecl $ elemType t]
       let name = typeName [t]
           ctp = [C.cty|$ty:ct*|]
           struct = [C.cedecl|struct $id:name { typename int64_t shape[$int:(arrayRank t)]; $ty:ctp data; };|]
@@ -157,7 +157,7 @@ bodyCType :: Body -> CompilerM C.Type
 bodyCType = typeToCType . bodyType
 
 -- | Return a statement printing the given value.
-printStm :: C.Exp -> [GenType als] -> CompilerM C.Stm
+printStm :: C.Exp -> [DeclType] -> CompilerM C.Stm
 printStm place [Basic Int]  = return [C.cstm|printf("%d", $exp:place);|]
 printStm place [Basic Char] = return [C.cstm|printf("%c", $exp:place);|]
 printStm place [Basic Bool] =
@@ -206,11 +206,11 @@ readFun Char = Just "read_char"
 readFun Real = Just "read_double"
 readFun _    = Nothing
 
-readStm :: C.Exp -> GenType als -> C.Stm
-readStm place (Basic et)
+readStm :: C.Exp -> DeclType -> C.Stm
+readStm place t@(Basic et)
   | Just f <- readFun et =
     [C.cstm|if ($id:f(&$exp:place) != 0) {
-          fprintf(stderr, "Syntax error when reading %s.\n", $string:(ppType $ Basic et));
+          fprintf(stderr, "Syntax error when reading %s.\n", $string:(ppType t));
                  exit(1);
         }|]
 readStm place t@(Array {})
@@ -235,11 +235,11 @@ mainCall :: FunDec -> CompilerM C.Stm
 mainCall (fname,rettype,params,_,_) = do
   crettype <- typeToCType $ map fromDecl rettype
   ret <- new "main_ret"
-  printRes <- printStm (varExp ret) $ map fromDecl rettype
+  printRes <- printStm (varExp ret) rettype
   (args, decls, rstms) <- liftM unzip3 . forM paramtypes $ \paramtype -> do
     name <- new "main_arg"
-    cparamtype <- typeToCType [fromDecl paramtype]
-    let rstm = readStm (varExp name) $ fromDecl paramtype
+    cparamtype <- typeToCType [paramtype]
+    let rstm = readStm (varExp name) $ toDecl paramtype
     return (varExp name, [C.cdecl|$ty:cparamtype $id:name;|], rstm)
   return [C.cstm|{
                $decls:decls
@@ -327,7 +327,7 @@ compileFun (fname, rettype, args, body, _) = do
           [C.cfun|static $ty:crettype $id:(funName fname)( $params:args' ) { $items:body' }|])
   where compileArg (Ident name t _) = do
           name' <- new $ textual name
-          ctp <- typeToCType [fromDecl t]
+          ctp <- typeToCType [t]
           return (varExp name', [C.cparam|$ty:ctp $id:name'|])
 
 compileValue :: C.Exp -> Value -> CompilerM [C.Stm]
@@ -351,10 +351,10 @@ compileValue _ (BasicVal Checked) = return []
 compileValue place v@(ArrayVal _ rt) = do
   val <- new "ArrayVal"
   dt <- new "ArrayData"
-  ct <- typeToCType [fromDecl $ valueType v]
-  cbt <- typeToCType [Basic $ elemType rt]
+  ct <- typeToCType [valueType v]
+  cbt <- typeToCType [basicDecl $ elemType rt]
   let asinit n = [C.cinit|$int:n|]
-      shape = map asinit $ arrayShape v
+      shape = map asinit $ valueShape v
       arrdef = [C.cedecl|$ty:ct $id:val = { $inits:shape, NULL };|]
   case elemInit v of
     [] -> modify $ \s -> s { compVarDefinitions = arrdef : compVarDefinitions s }
@@ -490,12 +490,13 @@ compileExp' place (TupLit es _) = do
                      }|]
 
 compileExp' place (ArrayLit [] rt _) = do
-  stms <$> compileValue place (blankValue $ arrayType 1 rt Unique)
+  stms <$> compileValue place
+           (blankValue $ arrayOf (toDecl rt) (Rank 1) Unique)
 
 compileExp' place (ArrayLit (e:es) _ _) = do
   name <- new "ArrayLit_elem"
   et <- typeToCType [subExpType e]
-  bt <- typeToCType [Basic $ elemType $ subExpType e]
+  bt <- typeToCType [basicDecl $ elemType $ subExpType e]
   e' <- compileSubExp (varExp name) e
   es' <- mapM (compileSubExpInPlace $ varExp name) es
   i <- new "ArrayLit_i"
@@ -649,7 +650,7 @@ compileExp' place e@(Iota se _) = do
 
 compileExp' place e@(Replicate (Var nv) (Var vv) _) = do
   e' <- compileExpInPlace place e
-  bt <- typeToCType [Basic $ elemType $ identType vv]
+  bt <- typeToCType [basicDecl $ elemType $ identType vv]
   nv' <- lookupVar $ identName nv
   vv' <- lookupVar $ identName vv
   let dims = nv' : arrayShapeExp vv' (identType vv)
@@ -665,7 +666,7 @@ compileExp' place (Replicate ne ve pos) = do
   rr <- newVName "replicate_r"
   let nident = Ident nv (Basic Int) pos
       vident = Ident vv (subExpType ve) pos
-      rident = Ident rr (arrayType 1 (subExpType ve) Unique) pos
+      rident = Ident rr (arrayOf (subExpType ve) (Shape [Var nident]) Unique) pos
       nlet body = LetPat [nident] (SubExp ne) body pos
       vlet body = LetPat [vident] (SubExp ve) body pos
       rlet body = LetPat [rident] (Replicate (Var nident) (Var vident) pos) body pos
@@ -691,15 +692,15 @@ compileExp' place (Reshape _ shapeexps arrexp _) = do
 compileExp' place (Rearrange _ perm arrexp _) = do
   arr <- new "transpose_arr"
   intype <- typeToCType [subExpType arrexp]
-  basetype <- typeToCType [Basic $ elemType $ subExpType arrexp]
+  basetype <- typeToCType [basicDecl $ elemType $ subExpType arrexp]
   arrexp' <- compileSubExp (varExp arr) arrexp
-  let newshape = permuteDims perm $ arrayShapeExp (varExp arr) (subExpType arrexp)
+  let newshape = permuteShape perm $ arrayShapeExp (varExp arr) (subExpType arrexp)
       alloc =  allocArray place newshape basetype
       rank = arrayRank $ subExpType arrexp
       loop is 0 =
         let iexps = map varExp is
             indexfrom = indexArrayExp (varExp arr) rank iexps
-            indexto   = indexArrayExp place rank $ permuteDims perm iexps
+            indexto   = indexArrayExp place rank $ permuteShape perm iexps
         in return ([C.cstm|$exp:indexto = $exp:indexfrom;|], is)
       loop is d = do i <- new "transpose_i"
                      (inner, is') <- loop (i:is) (d-1)
@@ -748,7 +749,7 @@ compileExp' place (Concat _ xarr yarr _) = do
   xarr' <- compileSubExp (varExp x) xarr
   yarr' <- compileSubExp (varExp y) yarr
   arrt <- typeToCType [subExpType xarr]
-  bt' <- typeToCType [Basic $ elemType $ subExpType xarr]
+  bt' <- typeToCType [basicDecl $ elemType $ subExpType xarr]
   let alloc = case (arrayShapeExp (varExp x) (subExpType xarr),
                     arrayShapeExp (varExp y) (subExpType yarr)) of
                 (xrows:rest, yrows:_) ->

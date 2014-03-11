@@ -104,7 +104,7 @@ transformExp (Scan cs fun args loc) = do
   return $ TupLit (map Var arr) loc
   where (accexps, arrexps) = unzip args
 
-transformExp filtere@(Filter cs fun arrexps loc) = do
+transformExp filtere@(Filter cs fun arrexps _ loc) = do
   arr <- letExps "arr" $ map SubExp arrexps
   nv <- letSubExp "size" =<< transformExp (size cs arr)
   let rowtypes = map (rowType . identType) arr

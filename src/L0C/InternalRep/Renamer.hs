@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleInstances #-}
 -- | This module provides facilities for transforming L0 programs such
 -- that names are unique, via the 'renameProg' function.
 -- Additionally, the module also supports adding integral \"tags\" to
@@ -47,18 +48,20 @@ new k = do (k', src') <- asks envNameFn <*> get <*> pure k
            put src'
            return k'
 
--- | 'repl s' returns the new name of the variable 's'.
-repl :: Ident -> RenameM Ident
-repl (Ident name tp loc) = do
-  name' <- replName name
-  tp' <- renameType tp
-  return $ Ident name' tp' loc
+class Rename a where
+  rename :: a -> RenameM a
 
-replName :: VName -> RenameM VName
-replName name = maybe (new name) return =<<
+instance Rename VName where
+  rename name = maybe (new name) return =<<
                 asks (HM.lookup name . envNameMap)
 
-bind :: [IdentBase als] -> RenameM a -> RenameM a
+instance (Rename als, Rename shape) => Rename (IdentBase als shape) where
+  rename (Ident name tp loc) = do
+    name' <- rename name
+    tp' <- rename tp
+    return $ Ident name' tp' loc
+
+bind :: [IdentBase als shape] -> RenameM a -> RenameM a
 bind vars body = do
   vars' <- mapM new varnames
   -- This works because map union prefers elements from left
@@ -71,71 +74,82 @@ bind vars body = do
 renameFun :: FunDec -> RenameM FunDec
 renameFun (fname, ret, params, body, loc) =
   bind params $ do
-    params' <- mapM (liftM toParam . repl . fromParam) params
-    body' <- renameBody body
-    ret' <- mapM (liftM toDecl . renameType . fromDecl) ret
+    params' <- mapM rename params
+    body' <- rename body
+    ret' <- mapM rename ret
     return (fname, ret', params', body', loc)
 
-renameSubExp :: SubExp -> RenameM SubExp
-renameSubExp (Var v)          = Var <$> repl v
-renameSubExp (Constant v loc) = return $ Constant v loc
+instance Rename SubExp where
+  rename (Var v)          = Var <$> rename v
+  rename (Constant v loc) = return $ Constant v loc
 
-renameBody :: Body -> RenameM Body
-renameBody (LetWith cs dest src idxs ve body loc) = do
-  cs' <- mapM repl cs
-  src' <- repl src
-  idxs' <- mapM renameSubExp idxs
-  ve' <- renameSubExp ve
-  bind [dest] $ do
-    dest' <- repl dest
-    body' <- renameBody body
-    return $ LetWith cs' dest' src' idxs' ve' body' loc
-renameBody (LetPat pat e body loc) = do
-  e1' <- renameExp e
-  bind pat $ do
-    pat' <- mapM repl pat
-    body' <- renameBody body
-    return $ LetPat pat' e1' body' loc
-renameBody (DoLoop merge loopvar boundexp loopbody letbody loc) = do
-  let (mergepat, mergeexp) = unzip merge
-  boundexp' <- renameSubExp boundexp
-  mergeexp' <- mapM renameSubExp mergeexp
-  bind mergepat $ do
-    mergepat' <- mapM repl mergepat
-    letbody' <- renameBody letbody
-    bind [loopvar] $ do
-      loopvar'  <- repl loopvar
-      loopbody' <- renameBody loopbody
-      return $ DoLoop (zip mergepat' mergeexp')
-                      loopvar' boundexp' loopbody' letbody' loc
-renameBody (Result cs ses loc) =
-  Result <$> mapM repl cs <*> mapM renameSubExp ses <*> pure loc
+instance Rename Body where
+  rename (LetWith cs dest src idxs ve body loc) = do
+    cs' <- mapM rename cs
+    src' <- rename src
+    idxs' <- mapM rename idxs
+    ve' <- rename ve
+    bind [dest] $ do
+      dest' <- rename dest
+      body' <- rename body
+      return $ LetWith cs' dest' src' idxs' ve' body' loc
+  rename (LetPat pat e body loc) = do
+    e1' <- rename e
+    bind pat $ do
+      pat' <- mapM rename pat
+      body' <- rename body
+      return $ LetPat pat' e1' body' loc
+  rename (DoLoop merge loopvar boundexp loopbody letbody loc) = do
+    let (mergepat, mergeexp) = unzip merge
+    boundexp' <- rename boundexp
+    mergeexp' <- mapM rename mergeexp
+    bind mergepat $ do
+      mergepat' <- mapM rename mergepat
+      letbody' <- rename letbody
+      bind [loopvar] $ do
+        loopvar'  <- rename loopvar
+        loopbody' <- rename loopbody
+        return $ DoLoop (zip mergepat' mergeexp')
+                        loopvar' boundexp' loopbody' letbody' loc
+  rename (Result cs ses loc) =
+    Result <$> mapM rename cs <*> mapM rename ses <*> pure loc
 
-renameExp :: Exp -> RenameM Exp
-renameExp = mapExpM rename
+instance Rename Exp where
+  rename = mapExpM mapper
+    where mapper = Mapper {
+                      mapOnExp = rename
+                    , mapOnBody = rename
+                    , mapOnSubExp = rename
+                    , mapOnIdent = rename
+                    , mapOnLambda = rename
+                    , mapOnType = rename
+                    , mapOnValue = return
+                    , mapOnCertificates = mapM rename
+                    }
 
-renameType :: Type -> RenameM Type
-renameType (Array et dims u als) = do
-  als' <- HS.fromList <$> mapM replName (HS.toList als)
-  return $ Array et (replicate (length dims) Nothing) u als'
-renameType (Basic et) = return $ Basic et
+instance (Rename als, Rename shape) => Rename (TypeBase als shape) where
+  rename (Array et size u als) = do
+    als' <- rename als
+    size' <- rename size
+    return $ Array et size' u als'
+  rename (Basic et) = return $ Basic et
 
-rename :: Mapper RenameM
-rename = Mapper {
-           mapOnExp = renameExp
-         , mapOnBody = renameBody
-         , mapOnSubExp = renameSubExp
-         , mapOnIdent = repl
-         , mapOnLambda = renameLambda
-         , mapOnType = renameType
-         , mapOnValue = return
-         , mapOnCertificates = mapM repl
-         }
+instance Rename Lambda where
+  rename (Lambda params body ret loc) =
+    bind params $ do
+      params' <- mapM rename params
+      body' <- rename body
+      ret' <- mapM rename ret
+      return $ Lambda params' body' ret' loc
 
-renameLambda :: Lambda -> RenameM Lambda
-renameLambda (Lambda params body ret loc) =
-  bind params $ do
-    params' <- mapM (liftM toParam . repl . fromParam) params
-    body' <- renameBody body
-    ret' <- mapM (liftM toDecl . renameType . fromDecl) ret
-    return $ Lambda params' body' ret' loc
+instance Rename Names where
+  rename = liftM HS.fromList . mapM rename . HS.toList
+
+instance Rename Rank where
+  rename = return
+
+instance Rename Shape where
+  rename (Shape l) = Shape <$> mapM rename l
+
+instance Rename () where
+  rename = return

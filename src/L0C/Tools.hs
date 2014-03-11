@@ -163,7 +163,7 @@ binOpLambda bop t loc = do
   res <- newIdent "res" t loc
   return Lambda {
              lambdaParams     = [toParam x, toParam y]
-           , lambdaReturnType = [toDecl t]
+           , lambdaReturnType = [toConstType t]
            , lambdaSrcLoc     = loc
            , lambdaBody = LetPat [res] (BinOp bop (Var x) (Var y) t loc)
                           (Result [] [Var res] loc) loc

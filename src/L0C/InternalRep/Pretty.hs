@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
+{-# LANGUAGE FlexibleInstances, FlexibleContexts #-}
 -- | L0 prettyprinter.  This module defines 'Pretty' instances for the
 -- AST defined in "L0C.InternalRep.Syntax", but also a number of
 -- convenience functions if you don't want to use the interface from
@@ -53,15 +54,21 @@ instance Pretty Value where
     | Array {} <- t = brackets $ commastack $ map ppr $ elems a
     | otherwise     = brackets $ commasep $ map ppr $ elems a
 
-instance Pretty (TypeBase als) where
+instance Pretty (TypeBase als Shape) where
   ppr (Basic et) = ppr et
-  ppr (Array et ds u _) = u' <> foldl f (ppr et) ds
-    where f s Nothing = brackets s
-          f s (Just e) = brackets $ s <> comma <> ppr e
+  ppr (Array et (Shape ds) u _) = u' <> foldl f (ppr et) ds
+    where f s e = brackets $ s <> comma <> ppr e
           u' | Unique <- u = star
              | otherwise = empty
 
-instance Pretty (IdentBase als) where
+instance Pretty (TypeBase als Rank) where
+  ppr (Basic et) = ppr et
+  ppr (Array et (Rank n) u _) = u' <> foldl f (ppr et) [1..n]
+    where f s _ = brackets s
+          u' | Unique <- u = star
+             | otherwise = empty
+
+instance Pretty (IdentBase als shape) where
   ppr = text . textual . identName
 
 hasArrayLit :: SubExp -> Bool
@@ -79,7 +86,7 @@ instance Pretty SubExp where
 instance Pretty Body where
   ppr (LetPat pat e body _) =
     aliasComment pat $ align $
-    text "let" <+> align (ppTuple' pat) <+>
+    text "let" <+> align (ppBinding pat) <+>
     (if linebreak
      then equals </> indent 2 (ppr e)
      else equals <+> align (ppr e)) <+> text "in" </>
@@ -106,7 +113,7 @@ instance Pretty Body where
       text "in" </> ppr body
   ppr (DoLoop mergepat i bound loopbody letbody _) =
     aliasComment pat $
-    text "loop" <+> parens (ppTuple' pat <+> equals <+> ppTuple' initexp) <+>
+    text "loop" <+> parens (ppBinding pat <+> equals <+> ppTuple' initexp) <+>
     equals <+> text "for" <+> ppr i <+> text "<" <+> align (ppr bound) <+> text "do" </>
     indent 2 (ppr loopbody) <+> text "in" </>
     ppr letbody
@@ -166,7 +173,7 @@ instance Pretty Exp where
   ppr (Scan cs lam inputs _) =
     ppCertificates' cs <> ppSOAC "scanT" [lam] (Just es) as
     where (es, as) = unzip inputs
-  ppr (Filter cs lam as _) =
+  ppr (Filter cs lam as _ _) =
     ppCertificates' cs <> ppSOAC "filterT" [lam] Nothing as
 
 instance Pretty Lambda where
@@ -200,6 +207,10 @@ ppList as = case map ppr as of
               []     -> empty
               a':as' -> foldl (</>) (a' <> comma) $ map (<> comma) as'
 
+ppBinding :: [Ident] -> Doc
+ppBinding = braces . commasep . map ppTypeAndName
+  where ppTypeAndName ident = ppr (identType ident) <+> ppr ident
+
 ppTuple' :: Pretty a => [a] -> Doc
 ppTuple' ets = braces $ commasep $ map ppr ets
 
@@ -223,7 +234,7 @@ ppValues :: [Value] -> String
 ppValues = pretty 80 . ppTuple'
 
 -- | Prettyprint a type, wrapped to 80 characters.
-ppType :: TypeBase als -> String
+ppType :: Pretty (TypeBase als shape) => TypeBase als shape -> String
 ppType = render80
 
 -- | Prettyprint a body, wrapped to 80 characters.

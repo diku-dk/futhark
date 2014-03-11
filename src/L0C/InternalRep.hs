@@ -6,7 +6,6 @@ module L0C.InternalRep
 
   , newNameSourceForProg
 
-  , GenType
   , Several(..)
   , justOne
   )
@@ -24,10 +23,6 @@ import L0C.FreshNames
 -- names used as variables in the given program.
 newNameSourceForProg :: Prog -> VNameSource
 newNameSourceForProg = newNameSource . progNames
-
--- | A known type parametrised over its aliasing information (of kind
--- @* -> *@).
-type GenType als = TypeBase (als VName)
 
 newtype Several a = Several [a]
 

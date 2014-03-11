@@ -163,7 +163,8 @@ builtInFunctions = HM.fromList $ map namify
                    ,("sqrt", (Real, [Real]))
                    ,("log", (Real, [Real]))
                    ,("exp", (Real, [Real]))
-                   ,("op not", (Bool, [Bool]))]
+                   ,("op not", (Bool, [Bool]))
+                   ,("all_equal", (Int, [Int]))]
   where namify (k,v) = (nameFromString k, v)
 
 -- | The abstract (not really) type representing names in the L0
@@ -177,6 +178,10 @@ instance Pretty Name where
 
 instance Hashable Name where
   hashWithSalt salt (Name t) = hashWithSalt salt t
+
+instance Monoid Name where
+  Name t1 `mappend` Name t2 = Name $ t1 <> t2
+  mempty = Name mempty
 
 -- | Convert a name to the corresponding list of characters.
 nameToString :: Name -> String

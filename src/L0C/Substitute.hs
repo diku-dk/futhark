@@ -7,7 +7,6 @@ module L0C.Substitute
   (Substitute(..))
   where
 
-import Control.Monad
 import Control.Monad.Identity
 import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
@@ -52,16 +51,28 @@ replace substs = Mapper {
                  , mapOnCertificates = return . map (substituteNames substs)
                  }
 
-instance Substitute Type where
+instance Substitute Rank where
+  substituteNames _ = id
+
+instance Substitute () where
+  substituteNames _ = id
+
+instance Substitute Shape where
+  substituteNames substs (Shape es) =
+    Shape $ map (substituteNames substs) es
+
+instance Substitute Names where
+  substituteNames = HS.map . substituteNames
+
+instance (Substitute als, Substitute shape) => Substitute (TypeBase als shape) where
   substituteNames _ (Basic et) = Basic et
   substituteNames substs (Array et sz u als) =
-    Array et (map (liftM $ substituteNames substs) sz)
-             u (HS.map (substituteNames substs) als)
+    Array et (substituteNames substs sz) u (substituteNames substs als)
 
 instance Substitute Lambda where
   substituteNames substs (Lambda params body rettype loc) =
     Lambda params (substituteNames substs body)
-           (map (toDecl . substituteNames substs . fromDecl) rettype) loc
+           (map (substituteNames substs) rettype) loc
 
 instance Substitute Ident where
   substituteNames substs v = v { identName = substituteNames substs $ identName v }

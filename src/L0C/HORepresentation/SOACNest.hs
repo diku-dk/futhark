@@ -51,7 +51,7 @@ data Nesting = Nesting {
   , nestingInputs     :: [SOAC.Input]
   , nestingResult     :: [Ident]
   , nestingPostBody   :: Body
-  , nestingReturnType :: [DeclType]
+  , nestingReturnType :: [ConstType]
   } deriving (Eq, Ord, Show)
 
 data NestBody = Fun Lambda
@@ -90,7 +90,7 @@ lambdaToBody l = fromMaybe (Fun l) $ liftM (uncurry $ flip NewNest) $ nested l
 data Combinator = Map Certificates NestBody [Nesting] SrcLoc
                 | Reduce Certificates NestBody [Nesting] [SubExp] SrcLoc
                 | Scan Certificates NestBody [Nesting] [SubExp] SrcLoc
-                | Filter Certificates NestBody [Nesting] SrcLoc
+                | Filter Certificates NestBody [Nesting] Ident SrcLoc
                 | Redomap Certificates Lambda NestBody [Nesting] [SubExp] SrcLoc
                  deriving (Show)
 
@@ -98,7 +98,7 @@ instance Located Combinator where
   locOf (Map _ _ _ loc) = locOf loc
   locOf (Reduce _ _ _ _ loc) = locOf loc
   locOf (Scan _ _ _ _ loc) = locOf loc
-  locOf (Filter _ _ _ loc) = locOf loc
+  locOf (Filter _ _ _ _ loc) = locOf loc
   locOf (Redomap _ _ _ _ _ loc) = locOf loc
 
 instance Substitute Combinator where
@@ -114,31 +114,31 @@ nesting :: Combinator -> [Nesting]
 nesting (Map _ _ ls _) = ls
 nesting (Reduce _ _ ls _ _) = ls
 nesting (Scan _ _ ls _ _) = ls
-nesting (Filter _ _ ls _) = ls
+nesting (Filter _ _ ls _ _) = ls
 nesting (Redomap _ _ _ ls _ _) = ls
 
 setNesting :: [Nesting] -> Combinator -> Combinator
 setNesting ls (Map cs b _ loc) = Map cs b ls loc
 setNesting ls (Reduce cs b _ es loc) = Reduce cs b ls es loc
 setNesting ls (Scan cs b _ es loc) = Scan cs b ls es loc
-setNesting ls (Filter cs b _ loc) = Filter cs b ls loc
+setNesting ls (Filter cs b _ outer_shape loc) = Filter cs b ls outer_shape loc
 setNesting ls (Redomap cs l b _ es loc) = Redomap cs l b ls es loc
 
 body :: Combinator -> NestBody
 body (Map _ b _ _) = b
 body (Reduce _ b _ _ _) = b
 body (Scan _ b _ _ _) = b
-body (Filter _ b _ _) = b
+body (Filter _ b _ _ _) = b
 body (Redomap _ _ b _ _ _) = b
 
 setBody :: NestBody -> Combinator -> Combinator
 setBody b (Map cs _ ls loc) = Map cs b ls loc
 setBody b (Reduce cs _ ls es loc) = Reduce cs b ls es loc
 setBody b (Scan cs _ ls es loc) = Scan cs b ls es loc
-setBody b (Filter cs _ ls loc) = Filter cs b ls loc
+setBody b (Filter cs _ ls outer_shape loc) = Filter cs b ls outer_shape loc
 setBody b (Redomap cs l _ ls es loc) = Redomap cs l b ls es loc
 
-combinatorFirstLoop :: Combinator -> ([Param], [DeclType])
+combinatorFirstLoop :: Combinator -> ([Param], [ConstType])
 combinatorFirstLoop comb =
   case nesting comb of
       nest:_ -> (map toParam $ nestingParams nest,
@@ -152,7 +152,7 @@ combinatorFirstLoop comb =
 params :: Combinator -> [Param]
 params = fst . combinatorFirstLoop
 
-returnType :: Combinator -> [DeclType]
+returnType :: Combinator -> [ConstType]
 returnType = snd . combinatorFirstLoop
 
 data SOACNest = SOACNest { inputs :: [SOAC.Input]
@@ -171,7 +171,7 @@ certificates :: SOACNest -> Certificates
 certificates (SOACNest _ (Map     cs _     _ _)) = cs
 certificates (SOACNest _ (Reduce  cs _   _ _ _)) = cs
 certificates (SOACNest _ (Scan    cs _   _ _ _)) = cs
-certificates (SOACNest _ (Filter  cs _   _   _)) = cs
+certificates (SOACNest _ (Filter  cs _   _ _ _)) = cs
 certificates (SOACNest _ (Redomap cs _ _ _ _ _)) = cs
 
 fromExp :: Exp -> Either SOAC.NotSOAC SOACNest
@@ -200,11 +200,11 @@ fromSOAC (SOAC.Scan cs l args loc)
   | otherwise =
       SOACNest (map snd args) $
       Scan cs (lambdaToBody l) [] (map fst args) loc
-fromSOAC (SOAC.Filter cs l as loc)
-  | Just (Filter cs2 l2 ps  _, nest) <- nested l =
-      SOACNest as $ Filter (cs++cs2) l2 (nest:ps) loc
+fromSOAC (SOAC.Filter cs l as outer_shape loc)
+  | Just (Filter cs2 l2 ps _ _, nest) <- nested l =
+      SOACNest as $ Filter (cs++cs2) l2 (nest:ps) outer_shape loc
   | otherwise =
-      SOACNest as $ Filter cs (lambdaToBody l) [] loc
+      SOACNest as $ Filter cs (lambdaToBody l) [] outer_shape loc
 fromSOAC (SOAC.Redomap cs ol l es as loc) =
   -- Never nested, because we need a way to test alpha-equivalence of
   -- the outer combining function.
@@ -239,8 +239,8 @@ toSOAC (SOACNest as comb@(Reduce cs b _ es loc)) =
   SOAC.Reduce cs <$> subLambda b comb <*> pure (zip es as) <*> pure loc
 toSOAC (SOACNest as comb@(Scan cs b _ es loc)) =
   SOAC.Scan cs <$> subLambda b comb <*> pure (zip es as) <*> pure loc
-toSOAC (SOACNest as comb@(Filter cs b _ loc)) =
-  SOAC.Filter cs <$> subLambda b comb <*> pure as <*> pure loc
+toSOAC (SOACNest as comb@(Filter cs b _ outer_shape loc)) =
+  SOAC.Filter cs <$> subLambda b comb <*> pure as <*> pure outer_shape <*> pure loc
 toSOAC (SOACNest as comb@(Redomap cs l b _ es loc)) =
   SOAC.Redomap cs l <$> subLambda b comb <*> pure es <*> pure as <*> pure loc
 

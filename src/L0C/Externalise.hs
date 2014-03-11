@@ -134,7 +134,7 @@ externaliseExp (I.Scan cs fun inputs loc) =
           [ (externaliseSubExp ve, externaliseSubExp ae)
             | (ve, ae) <- inputs ]
           loc
-externaliseExp (I.Filter cs fun es loc) =
+externaliseExp (I.Filter cs fun es _ loc) =
   E.FilterT (externaliseCerts cs)
             (externaliseLambda fun)
             (map externaliseSubExp es)
@@ -150,7 +150,7 @@ externaliseExp (I.Redomap cs outerfun innerfun vs as loc) =
 externaliseLambda :: I.Lambda -> E.TupleLambda
 externaliseLambda (Lambda params body ret loc) =
   E.TupleLambda (map externaliseParam params) (externaliseBody body)
-                (map externaliseDeclType ret) loc
+                (map (externaliseDeclType . I.toDecl) ret) loc
 
 externaliseDiet :: I.Diet -> E.Diet
 externaliseDiet I.Consume = E.Consume
@@ -177,13 +177,13 @@ externaliseTypes ts =
 
 externaliseDeclType :: I.DeclType -> E.DeclType
 externaliseDeclType (I.Basic t) = E.Elem $ E.Basic t
-externaliseDeclType (I.Array et size u ()) =
-  E.Array (E.Basic et) (replicate (length size) Nothing) u NoInfo
+externaliseDeclType (I.Array et shape u ()) =
+  E.Array (E.Basic et) (replicate (shapeRank shape) Nothing) u NoInfo
 
 externaliseType :: I.Type -> E.Type
 externaliseType (I.Basic t) = E.Elem $ E.Basic t
-externaliseType (I.Array et size u als) =
-  E.Array (E.Basic et) (replicate (length size) Nothing)
+externaliseType (I.Array et shape u als) =
+  E.Array (E.Basic et) (replicate (shapeRank shape) Nothing)
           u als
 
 externaliseSubExps :: [I.SubExp] -> SrcLoc -> E.Exp
@@ -198,7 +198,7 @@ externaliseSubExp (I.Constant v loc) =
 
 externaliseParam :: I.Param -> E.Parameter
 externaliseParam (I.Ident name t loc) =
-  E.Ident name (externaliseDeclType t) loc
+  E.Ident name (externaliseDeclType $ I.toDecl t) loc
 
 externaliseIdent :: I.Ident -> E.Ident
 externaliseIdent (I.Ident name t loc) =

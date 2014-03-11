@@ -185,10 +185,11 @@ mapExpM tv (Scan cs fun inputs loc) =
        (zip <$> mapM (mapOnSubExp tv) startexps <*> mapM (mapOnSubExp tv) arrexps) <*>
        pure loc
   where (startexps, arrexps) = unzip inputs
-mapExpM tv (Filter cs fun arrexps loc) =
+mapExpM tv (Filter cs fun arrexps outer_shape loc) =
   pure Filter <*> mapOnCertificates tv cs <*>
        mapOnLambda tv fun <*>
-       mapM (mapOnSubExp tv) arrexps <*> pure loc
+       mapM (mapOnSubExp tv) arrexps <*>
+       mapOnIdent tv outer_shape <*> pure loc
 mapExpM tv (Redomap cs redfun mapfun accexps arrexps loc) =
   pure Redomap <*> mapOnCertificates tv cs <*>
        mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>

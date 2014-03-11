@@ -28,7 +28,7 @@ import L0C.MonadFreshNames
 data Nesting = Nesting {
     nestingParams     :: [Ident]
   , nestingResult     :: [Ident]
-  , nestingReturnType :: [DeclType]
+  , nestingReturnType :: [ConstType]
   , nestingPostBody   :: Body
   } deriving (Eq, Ord, Show)
 
@@ -126,6 +126,9 @@ fixInputs ourInps childInps =
       | ([ourP], remPs') <- partition (isParam v) remPs = Just (ourP, remPs')
       | otherwise                                       = Nothing
 
+    inspect :: ([(Param, SOAC.Input)], [(Param, SOAC.Input)])
+            -> (Param, SOAC.Input)
+            -> NeedNames ([(Param, SOAC.Input)], [(Param, SOAC.Input)])
     inspect (remPs, newInps) (_, SOAC.Input [] (SOAC.Var v))
       | Just (ourP, remPs') <- findParam remPs v =
           return (remPs', ourP:newInps)
@@ -135,11 +138,11 @@ fixInputs ourInps childInps =
         SOAC.Var v | Just ((p,pInp), remPs') <- findParam remPs v ->
           let pInp' = SOAC.transformRows ts pInp
           in return (remPs',
-                     (p { identType = toDecl $ rowType $ SOAC.inputType pInp' },
+                     (p { identType = undefined $ rowType $ SOAC.inputType pInp' },
                       pInp')
                      : newInps)
         _ -> do
           newParam <- Ident <$> newNameFromString (baseString (identName param) ++ "_rep")
-                            <*> pure (toDecl $ SOAC.inputType inp)
+                            <*> pure (SOAC.inputType inp)
                             <*> pure (srclocOf inp)
-          return (remPs, (newParam, SOAC.Input (ts++[SOAC.Repeat]) ia):newInps)
+          return (remPs, (undefined newParam, SOAC.Input (ts++[SOAC.Repeat]) ia) : newInps)

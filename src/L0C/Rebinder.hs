@@ -215,7 +215,7 @@ bindLet pat@[dest] e@(Index cs src idxs _) m =
 bindLet pat@[dest] e@(Rearrange cs perm (Var src) loc) m =
   withBinding pat e $
   withShape dest dims m
-    where dims = permuteDims perm
+    where dims = permuteShape perm
                  [Size cs i (Var src) loc
                   | i <- [0..arrayRank (identType src) - 1]]
 

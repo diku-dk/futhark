@@ -9,10 +9,14 @@ module L0C.InternalRep.Syntax
   -- * Types
   , Uniqueness(..)
   , DimSize
-  , ArraySize
+  , Shape(..)
+  , Rank(..)
+  , ArrayShape(..)
   , TypeBase(..)
   , Type
   , DeclType
+  , ExpType
+  , ConstType
   , Diet(..)
 
   -- * Values
@@ -41,53 +45,103 @@ module L0C.InternalRep.Syntax
 import Data.Array
 import Data.Hashable
 import Data.Loc
+import Data.Monoid
+import Data.Ord
 import qualified Data.HashSet as HS
 
 import Language.L0.Core
 
--- | Don't use this for anything.
-type DimSize = Exp
+-- | The size of this dimension.
+type DimSize = SubExp
 
--- | The size of an array type is a list of its dimension sizes.  If
--- 'Nothing', that dimension is of a (statically) unknown size.
-type ArraySize = [Maybe DimSize]
+-- | The size of an array type as a list of its dimension sizes.  If a
+-- variable, that variable must be in scope where this array is used.
+-- When compared for equality, only the number of dimensions is
+-- considered.
+newtype Shape = Shape { shapeDims :: [DimSize] }
+  deriving (Show)
+
+instance Eq Shape where
+  Shape l1 == Shape l2 = length l1 == length l2
+
+instance Ord Shape where
+  compare = comparing shapeRank
+
+-- | The size of an array type as merely the number of dimensions,
+-- with no further information.
+data Rank = Rank Int
+            deriving (Show, Eq, Ord)
+
+-- | A class encompassing types containing array shape information.
+class (Monoid a, Eq a, Ord a) => ArrayShape a where
+  -- | Return the rank of an array with the given size.
+  shapeRank :: a -> Int
+  -- | @stripDims n shape@ strips the outer @n@ dimensions from
+  -- @shape@.
+  stripDims :: Int -> a -> a
+
+instance Monoid Shape where
+  mempty = Shape mempty
+  Shape l1 `mappend` Shape l2 = Shape $ l1 `mappend` l2
+
+instance ArrayShape Shape where
+  shapeRank (Shape l) = length l
+  stripDims n (Shape dims) = Shape $ drop n dims
+
+instance Monoid Rank where
+  mempty = Rank 0
+  Rank x `mappend` Rank y = Rank $ x + y
+
+instance ArrayShape Rank where
+  shapeRank (Rank x) = x
+  stripDims n (Rank x) = Rank $ x - n
 
 -- | An L0 type is either an array or an element type.  When comparing
 -- types for equality with '==', aliases are ignored, as are
 -- dimension sizes (but not the number of dimensions themselves).
-data TypeBase as = Basic BasicType
-                 | Array BasicType ArraySize Uniqueness as
-                    -- ^ 1st arg: array's element type, 2nd arg:
-                    -- lengths of dimensions, 3rd arg: uniqueness
-                    -- attribute, 4th arg: aliasing information.
-                   deriving (Show)
+data TypeBase as shape = Basic BasicType
+                       | Array BasicType shape Uniqueness as
+                         -- ^ 1st arg: array's element type, 2nd arg:
+                         -- lengths of dimensions, 3rd arg: uniqueness
+                         -- attribute, 4th arg: aliasing information.
+                         deriving (Show)
 
-instance Eq (TypeBase as) where
+instance ArrayShape shape => Eq (TypeBase als shape) where
   Basic et1 == Basic et2 = et1 == et2
   Array et1 dims1 u1 _ == Array et2 dims2 u2 _ =
-    et1 == et2 && u1 == u2 && length dims1 == length dims2
+    et1 == et2 && u1 == u2 && dims1 == dims2
   _ == _ = False
 
-instance Ord (TypeBase as) where
+instance ArrayShape shape => Ord (TypeBase als shape) where
   Basic et1 <= Basic et2 =
     et1 <= et2
   Array et1 dims1 u1 _ <= Array et2 dims2 u2 _
-    | et1 < et2     = True
-    | et1 > et2     = False
+    | et1 < et2                   = True
+    | et1 > et2                   = False
     | dims1 < dims2 = True
     | dims1 > dims2 = False
-    | u1 < u2       = True
-    | u1 > u2       = False
-    | otherwise     = True
+    | u1 < u2                     = True
+    | u1 > u2                     = False
+    | otherwise                   = True
   Basic {} <= Array {} = True
   Array {} <= Basic {} = False
 
 -- | A type with aliasing information, used for describing the type of
 -- a computation.
-type Type = TypeBase Names
+type Type = TypeBase Names Shape
 
 -- | A type without aliasing information, used for declarations.
-type DeclType = TypeBase ()
+type DeclType = TypeBase () Rank
+
+-- | A type with aliasing information, but without shape information.
+-- This is used when computing the type of expressions, as the shape
+-- information generally cannot be deduced from the expression in
+-- isolation.
+type ExpType = TypeBase Names Rank
+
+-- | A type with shape information, but no aliasing information.  Can
+-- be used for parameters and constants.
+type ConstType = TypeBase () Shape
 
 -- | Information about which parts of a value/type are consumed.  For
 -- example, we might say that a function taking three arguments of
@@ -108,29 +162,29 @@ data Value = BasicVal BasicValue
 
 -- | An identifier consists of its name and the type of the value
 -- bound to the identifier.
-data IdentBase als = Ident { identName :: VName
-                           , identType :: TypeBase als
-                           , identSrcLoc :: SrcLoc
-                           }
+data IdentBase als shape = Ident { identName :: VName
+                                 , identType :: TypeBase als shape
+                                 , identSrcLoc :: SrcLoc
+                                 }
                     deriving (Show)
 
 -- | A name with aliasing information.  Used for normal variables.
-type Ident = IdentBase Names
+type Ident = IdentBase Names Shape
 
 -- | A name with no aliasing information.  These are used for function
 -- parameters.
-type Param = IdentBase ()
+type Param = IdentBase () Shape
 
-instance Eq (IdentBase ty) where
+instance Eq (IdentBase als shape) where
   x == y = identName x == identName y
 
-instance Ord (IdentBase ty) where
+instance Ord (IdentBase als shape) where
   x `compare` y = identName x `compare` identName y
 
-instance Located (IdentBase ty) where
+instance Located (IdentBase als shape) where
   locOf = locOf . identSrcLoc
 
-instance Hashable (IdentBase ty) where
+instance Hashable (IdentBase als shape) where
   hashWithSalt salt = hashWithSalt salt . identName
 
 -- | A list of identifiers used for certificates in some expressions.
@@ -251,7 +305,9 @@ data Exp =
 
             | Reduce  Certificates Lambda [(SubExp, SubExp)] SrcLoc
             | Scan   Certificates Lambda [(SubExp, SubExp)] SrcLoc
-            | Filter  Certificates Lambda [SubExp] SrcLoc
+            | Filter  Certificates Lambda [SubExp] Ident SrcLoc
+            -- ^ The 'Ident' should contain the outer shape of the
+            -- result.
             | Redomap Certificates Lambda Lambda [SubExp] [SubExp] SrcLoc
 
               deriving (Eq, Ord, Show)
@@ -279,14 +335,14 @@ instance Located Exp where
   locOf (Map _ _ _ pos) = locOf pos
   locOf (Reduce _ _ _ pos) = locOf pos
   locOf (Scan _ _ _ pos) = locOf pos
-  locOf (Filter _ _ _ pos) = locOf pos
+  locOf (Filter _ _ _ _ pos) = locOf pos
   locOf (Redomap _ _ _ _ _ pos) = locOf pos
 
 -- | Anonymous function for use in a tuple-SOAC.
 data Lambda =
   Lambda { lambdaParams     :: [Param]
          , lambdaBody       :: Body
-         , lambdaReturnType :: [DeclType]
+         , lambdaReturnType :: [ConstType]
          , lambdaSrcLoc     :: SrcLoc
          }
   deriving (Eq, Ord, Show)

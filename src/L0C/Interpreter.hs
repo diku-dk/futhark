@@ -33,7 +33,7 @@ import L0C.InternalRep
 -- | An error happened during execution, and this is why.
 data InterpreterError = MissingEntryPoint Name
                       -- ^ The specified start function does not exist.
-                      | InvalidFunctionArguments Name (Maybe [DeclType]) [Type]
+                      | InvalidFunctionArguments Name (Maybe [DeclType]) [DeclType]
                       -- ^ The arguments given to a function were mistyped.
                       | IndexOutOfBounds SrcLoc Int Int
                       -- ^ First @Int@ is array size, second is attempted index.
@@ -125,7 +125,7 @@ arrToList :: SrcLoc -> Value -> L0M [Value]
 arrToList _ (ArrayVal l _) = return $ elems l
 arrToList loc _ = bad $ TypeError loc "arrToList"
 
-arrays :: [Type] -> [[Value]] -> [Value]
+arrays :: ArrayShape shape => [TypeBase als shape] -> [[Value]] -> [Value]
 arrays [rowtype] vs = [arrayVal (concat vs) rowtype]
 arrays ts v =
   zipWith arrayVal (arrays' v) ts
@@ -155,17 +155,14 @@ runFun fname mainargs prog = do
       runmain =
         case (funDecByName fname prog, HM.lookup fname ftable) of
           (Nothing, Nothing) -> bad $ MissingEntryPoint fname
-          (Just (_,rettype,fparams,_,_), _)
+          (Just (_,_,fparams,_,_), _)
             | length argtypes == length fparams &&
               and (zipWith subtypeOf argtypes $ map identType fparams) ->
-              evalExp (Apply fname [ (Constant arg noLoc,
-                                      diet $ identType paramt) |
-                                     (arg,paramt) <- zip mainargs fparams ]
-                       (map fromDecl rettype) noLoc)
+              evalFuncall fname [ Constant v noLoc | v <- mainargs ]
             | otherwise ->
               bad $ InvalidFunctionArguments fname
-                    (Just (map identType fparams))
-                    (map fromDecl argtypes)
+                    (Just (map (toDecl . identType) fparams))
+                    (map toDecl argtypes)
           (_ , Just fun) -> -- It's a builtin function, it'll
                             -- do its own error checking.
             fun mainargs
@@ -215,7 +212,7 @@ builtin "op ~" [BasicVal (RealVal b)] =
   return [BasicVal $ RealVal (-b)]
 builtin fname args =
   bad $ InvalidFunctionArguments (nameFromString fname) Nothing $
-        map (fromDecl . valueType) args
+        map (toDecl . valueType) args
 
 single :: Value -> [Value]
 single v = [v]
@@ -338,10 +335,8 @@ evalExp (Apply fname args _ loc)
   tell [(loc, ppValues vs)]
   return vs
 
-evalExp (Apply fname args _ _) = do
-  fun <- lookupFun fname
-  args' <- mapM (evalSubExp . fst) args
-  fun args'
+evalExp (Apply fname args _ _) =
+  evalFuncall fname $ map fst args
 
 evalExp (Index _ ident idxs pos) = do
   v <- lookupVar ident
@@ -358,14 +353,15 @@ evalExp (Iota e pos) = do
   case v of
     BasicVal (IntVal x)
       | x >= 0    ->
-        return [arrayVal (map (BasicVal . IntVal) [0..x-1]) $ Basic Int]
+        return [arrayVal (map (BasicVal . IntVal) [0..x-1])
+                         (Basic Int :: DeclType)]
       | otherwise ->
         bad $ NegativeIota pos x
     _ -> bad $ TypeError pos "evalExp Iota"
 
 evalExp (Size _ i e pos) = do
   v <- evalSubExp e
-  case drop i $ arrayShape v of
+  case drop i $ valueShape v of
     [] -> bad $ TypeError pos "evalExp Size"
     n:_ -> return [BasicVal $ IntVal n]
 
@@ -375,21 +371,21 @@ evalExp (Replicate e1 e2 pos) = do
   case v1 of
     BasicVal (IntVal x)
       | x >= 0    ->
-        return [ArrayVal (listArray (0,x-1) $ repeat v2) $ valueType v2]
+        return [arrayVal (replicate x v2) $ valueType v2]
       | otherwise -> bad $ NegativeReplicate pos x
     _   -> bad $ TypeError pos "evalExp Replicate"
 
 evalExp (Reshape _ shapeexp arrexp pos) = do
   shape <- mapM (asInt <=< evalSubExp) shapeexp
   arr <- evalSubExp arrexp
-  let arrt = subExpType arrexp
-      rt = arrayType (length shapeexp-1) arrt (uniqueness arrt)
+  let arrt = toDecl $ subExpType arrexp
+      rt = arrayOf arrt (Rank $ length shapeexp-1) (uniqueness arrt)
       reshape (n:rest) vs
         | length vs `mod` n == 0 =
           arrayVal <$> mapM (reshape rest) (chunk (length vs `div` n) vs)
                    <*> pure rt
       reshape [] [v] = return v
-      reshape _ _ = bad $ InvalidArrayShape pos (arrayShape arr) shape
+      reshape _ _ = bad $ InvalidArrayShape pos (valueShape arr) shape
   single <$> reshape shape (flatten arr)
   where flatten (ArrayVal arr _) = concatMap flatten $ elems arr
         flatten t = [t]
@@ -433,7 +429,7 @@ evalExp (Conjoin _ _) = return [BasicVal Checked]
 evalExp (Map _ fun arrexps loc) = do
   vss <- mapM (arrToList loc <=< evalSubExp) arrexps
   vs' <- mapM (applyLambda fun) $ transpose vss
-  return $ arrays (map fromDecl $ lambdaReturnType fun) vs'
+  return $ arrays (lambdaReturnType fun) vs'
 
 evalExp (Reduce _ fun inputs loc) = do
   let (accexps, arrexps) = unzip inputs
@@ -447,12 +443,12 @@ evalExp (Scan _ fun inputs loc) = do
   startvals <- mapM evalSubExp accexps
   vss <- mapM (arrToList loc <=< evalSubExp) arrexps
   (acc, vals') <- foldM scanfun (startvals, []) $ transpose vss
-  return $ arrays (map (fromDecl . valueType) acc) $ reverse vals'
+  return $ arrays (map valueType acc) $ reverse vals'
     where scanfun (acc, l) x = do
             acc' <- applyLambda fun $ acc ++ x
             return (acc', acc' : l)
 
-evalExp e@(Filter _ fun arrexp loc) = do
+evalExp e@(Filter _ fun arrexp _ loc) = do
   vss <- mapM (arrToList loc <=< evalSubExp) arrexp
   vss' <- filterM filt $ transpose vss
   return $ arrays (typeOf e) vss'
@@ -466,6 +462,12 @@ evalExp (Redomap _ _ innerfun accexp arrexps loc) = do
   vss <- mapM (arrToList loc <=< evalSubExp) arrexps
   let foldfun acc x = applyLambda innerfun $ acc ++ x
   foldM foldfun startaccs $ transpose vss
+
+evalFuncall :: Name -> [SubExp] -> L0M [Value]
+evalFuncall fname args = do
+  fun <- lookupFun fname
+  args' <- mapM evalSubExp args
+  fun args'
 
 evalIntBinOp :: (Int -> Int -> Int) -> SubExp -> SubExp -> SrcLoc -> L0M [Value]
 evalIntBinOp op e1 e2 loc = do
