@@ -271,27 +271,6 @@ copyCtPropExp (Not e pos) = do
     else return $ Not e' pos
 
 -----------------------------------------------------------
---- If expression is an array literal than replace it   ---
----    with the array's size
------------------------------------------------------------
-copyCtPropExp (Size cs i e pos) = do
-    e' <- copyCtPropSubExp e
-    cs' <- copyCtPropCerts cs
-    case e' of
-      Var idd -> do vv <- asks $ HM.lookup (identName idd) . envVtable
-                    case vv of Just (Value a) -> literal a
-                               Just (SymArr (Iota ne _))
-                                 | i == 0 -> return $ SubExp ne
-                               Just (SymArr (Replicate ne _ _))
-                                 | i == 0 -> return $ SubExp ne
-                               _ -> return $ Size cs' i e' pos
-      Constant a _ -> literal a
-    where literal a =
-            case drop i $ valueShape a of
-              []  -> badCPropM $ TypeError pos " array literal has too few dimensions! "
-              n:_ -> changed $ SubExp $ Constant (BasicVal $ IntVal n) pos
-
------------------------------------------------------------
 --- If expression is true then just replace assertion   ---
 -----------------------------------------------------------
 

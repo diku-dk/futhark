@@ -61,19 +61,19 @@ transformExp mape@(Map cs fun arrs loc) = do
   let zero = Constant (BasicVal $ IntVal 0) loc
   inarrs <- letExps "inarr" $ map SubExp arrs
   (i, iv) <- newVar loc "i" $ Basic Int
-  n <- letExp "n" $ size cs inarrs
+  let n = size inarrs
   letbody <- insertBindings $ do
     y <- bodyBind =<< transformLambda fun (index cs inarrs zero)
-    outarr <- newResultArray (SubExp $ Var n) $ map SubExp y
+    outarr <- newResultArray (SubExp n) $ map SubExp y
     let outarrv = Result [] (map Var outarr) loc
         loopbody = runBinder $ do
           x <- bodyBind =<< transformLambda fun (index cs inarrs iv)
           dests <- letwith cs outarr (pexp iv) $ map SubExp x
           return $ Result [] (map Var dests) loc
     eDoLoop (zip outarr $ map (pexp . Var) outarr)
-            i (pexp $ Var n) loopbody (pure outarrv) loc
+            i (pexp n) loopbody (pure outarrv) loc
   nonempty <- letExp "nonempty" =<<
-              eBinOp Less (pexp zero) (pexp $ Var n) (Basic Bool) loc
+              eBinOp Less (pexp zero) (pexp n) (Basic Bool) loc
   blank <- letTupExp "blank" =<< blankArray (typeOf mape) loc
   return $ If (Var nonempty)
               letbody
@@ -84,8 +84,7 @@ transformExp (Reduce cs fun args loc) = do
   (arr, (acc, initacc), (i, iv)) <- newFold loc arrexps accexps
   loopbody <- insertBindings $ transformLambda fun $
               map (SubExp . Var) acc ++ index cs arr iv
-  siz <- letSubExp "size" $ size cs arr
-  loopBind (zip acc initacc) i siz loopbody
+  loopBind (zip acc initacc) i (size arr) loopbody
   return $ TupLit (map Var acc) loc
   where (accexps, arrexps) = unzip args
 
@@ -98,16 +97,15 @@ transformExp (Scan cs fun args loc) = do
     irows <- letSubExps "row" $ index cs dests iv
     rowcopies <- letExps "copy" [ Copy irow loc | irow <- irows ]
     return $ Result [] (map Var $ rowcopies ++ dests) loc
-  sz <- letSubExp "size" $ size cs arr
   loopBind (zip (acc ++ arr) (initacc ++ map Var arr)) -- XXX Shadowing
-           i sz loopbody
+           i (size arr) loopbody
   return $ TupLit (map Var arr) loc
   where (accexps, arrexps) = unzip args
 
 transformExp filtere@(Filter cs fun arrexps _ loc) = do
   arr <- letExps "arr" $ map SubExp arrexps
-  nv <- letSubExp "size" =<< transformExp (size cs arr)
-  let rowtypes = map (rowType . identType) arr
+  let nv = size arr
+      rowtypes = map (rowType . identType) arr
   (xs, _) <- unzip <$> mapM (newVar loc "x") rowtypes
   (i, iv) <- newVar loc "i" $ Basic Int
   test <- insertBindings $ do
@@ -156,10 +154,9 @@ transformExp filtere@(Filter cs fun arrexps _ loc) = do
 
 transformExp (Redomap cs _ innerfun accexps arrexps loc) = do
   (arr, (acc, initacc), (i, iv)) <- newFold loc arrexps accexps
-  sze <- letSubExp "size" $ size cs arr
   loopbody <- insertBindings $ transformLambda innerfun
                                (map (SubExp . Var) acc ++ index cs arr iv)
-  loopBind (zip acc initacc) i sze loopbody
+  loopBind (zip acc initacc) i (size arr) loopbody
   return $ TupLit (map Var acc) loc
 
 transformExp e = mapExpM transform e
@@ -215,9 +212,10 @@ letwith cs ks i vs = do
   mapM_ update $ zip3 dests ks vs'
   return dests
 
-size :: Certificates -> [Ident] -> Exp
-size _ []     = SubExp $ Constant (BasicVal $ IntVal 0) noLoc
-size cs (k:_) = Size cs 0 (Var k) $ srclocOf k
+size :: [Ident] -> SubExp
+size (v:_)
+  | se : _ <- shapeDims $ arrayShape $ identType v = se
+size _ = Constant (BasicVal $ IntVal 0) noLoc
 
 pexp :: Applicative f => SubExp -> f Exp
 pexp = pure . SubExp

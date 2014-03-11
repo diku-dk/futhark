@@ -626,16 +626,6 @@ compileExp' place (Index _ var idxs _) = do
                      $stms:index
                    }|]
 
-compileExp' place (Size _ i e _) = do
-  dest <- new "size_value"
-  et <- typeToCType [subExpType e]
-  e' <- compileSubExp (varExp dest) e
-  return $ stm [C.cstm|{
-                     $ty:et $id:dest;
-                     $items:e';
-                     $exp:place = $id:dest.shape[$int:i];
-                   }|]
-
 compileExp' place e@(Iota se _) = do
   n <- new "iota_n"
   e' <- compileExpInPlace place e

@@ -190,10 +190,7 @@ dimSizes is =
           return $ foldl inspect' (map Just dims) ts
 
         iaDims (Var v) =
-          letSubExps "size" [ L0.Size [] i (L0.Var v) loc
-                                | i <- [0..arrayRank t-1] ]
-          where loc = srclocOf v
-                t   = identType v
+          return $ shapeDims $ arrayShape $ identType v
 
         iaDims (Iota e) = return [e]
 

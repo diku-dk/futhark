@@ -26,7 +26,6 @@
 --
 module L0C.Rebinder
   ( transformProg
-  , transformProgAggr
   )
   where
 
@@ -44,14 +43,11 @@ import Data.Maybe
 import qualified Data.HashMap.Strict as HM
 import Data.Ord
 import qualified Data.HashSet as HS
-import qualified Data.Set as S
 
 import L0C.InternalRep
 import L0C.MonadFreshNames
-import qualified L0C.HORepresentation.SOACNest as Nest
 
 import L0C.Rebinder.CSE
-import qualified L0C.Rebinder.SizeTracking as SZ
 
 data BindNeed = LoopBind [(Ident,SubExp)] Ident SubExp Body
               | LetBind [Ident] Exp [Exp]
@@ -92,24 +88,13 @@ instance Monoid Need where
   Need b1 f1 `mappend` Need b2 f2 = Need (b1 <> b2) (f1 <> f2)
   mempty = Need [] HS.empty
 
-data Env = Env { envBindings :: SZ.ShapeMap
-               , envDupeState :: DupeState
-               , envAggressive :: Bool
+data Env = Env { envDupeState :: DupeState
                }
 
 emptyEnv :: Env
 emptyEnv = Env {
-             envBindings = HM.empty
-           , envDupeState = newDupeState
-           , envAggressive = False
+             envDupeState = newDupeState
            }
-
-isArrayIdent :: Ident -> Bool
-isArrayIdent idd = case identType idd of
-                     Array {} -> True
-                     _        -> False
-
-
 
 newtype HoistM a = HoistM (RWS
                            Env                -- Reader
@@ -133,30 +118,8 @@ needThis need = tell $ Need [need] HS.empty
 boundFree :: HS.HashSet VName -> HoistM ()
 boundFree fs = tell $ Need [] fs
 
-withNewBinding :: String -> Exp -> (Ident -> HoistM a) -> HoistM a
-withNewBinding k e m = do
-  k' <- newVName k
-  case typeOf e of
-    [t] ->
-      let ident = Ident { identName = k'
-                        , identType = t
-                        , identSrcLoc = srclocOf e }
-      in withBinding [ident] e $ m ident
-    _   -> fail "Rebinder.withNewBinding: Cannot insert tuple-typed binding."
-
 withBinding :: [Ident] -> Exp -> HoistM a -> HoistM a
-withBinding pat e@(Size _ i (Var x) _) m = do
-  let mkAlt es = case drop i es of
-                   des:_ -> S.toList des
-                   _     -> []
-  alts <- mkAlt <$> asks (SZ.lookup x . envBindings)
-  -- XXX: Take a closer look at whether we can't just fix the best
-  -- replacement right here.
-  case alts of
-    alt:alts' -> withSeveralBindings pat alt alts' m
-    []        -> withSingleBinding pat e m
-
-withBinding pat e m = withSingleBinding pat e m
+withBinding = withSingleBinding
 
 withSingleBinding :: [Ident] -> Exp -> HoistM a -> HoistM a
 withSingleBinding pat e = withSeveralBindings pat e []
@@ -171,88 +134,20 @@ withSeveralBindings pat e alts m = do
   local (\env -> env { envDupeState = ds' <> ds''}) m
 
 bindLet :: [Ident] -> Exp -> HoistM a -> HoistM a
-bindLet [dest] (SubExp (Var src)) m =
-  withBinding [dest] (SubExp $ Var src) $
-  case identType src of Array {} -> withShape dest (slice [] 0 src) m
-                        _        -> m
 
-bindLet pat@[dest] e@(Iota ne _) m =
-  withBinding pat e $
-  withShape dest [SubExp ne] m
-
-bindLet pat@[dest] e@(Replicate ne (Var y) _) m =
-  withBinding pat e $
-  withShape dest (SubExp ne:slice [] 0 y) m
-
-bindLet pat@[dest1, dest2] e@(Split cs ne srce loc) m =
-  withBinding pat e $
-  withNewBinding "split_src_sz" (Size cs 0 srce loc) $ \src_sz ->
-  withNewBinding "split_sz" (BinOp Minus (Var src_sz) ne (Basic Int) loc) $ \split_sz ->
-  withShapes [(dest1, SubExp ne : rest),
-              (dest2, SubExp (Var split_sz) : rest)] m
-    where rest = [ Size cs i srce loc
-                   | i <- [1.. arrayRank (subExpType srce) - 1]]
-
-bindLet pat@[dest] e@(Concat cs (Var x) (Var y) loc) m =
-  withBinding pat e $
-  withNewBinding "concat_x" (Size cs 0 (Var x) loc) $ \concat_x ->
-  withNewBinding "concat_y" (Size cs 0 (Var y) loc) $ \concat_y ->
-  withNewBinding "concat_sz" (BinOp Plus (Var concat_x) (Var concat_y) (Basic Int) loc) $ \concat_sz ->
-  withShape dest (SubExp (Var concat_sz) :
-                  [Size cs i (Var x) loc
-                     | i <- [1..arrayRank (identType x) - 1]])
-  m
-
-bindLet pat e m
-  | Right nest <- Nest.fromExp e =
-    withBinding pat e $
-    withShapes (SZ.sizeRelations pat nest) m
-
-bindLet pat@[dest] e@(Index cs src idxs _) m =
-  withBinding pat e $
-  withShape dest (slice cs (length idxs) src) m
-
-bindLet pat@[dest] e@(Rearrange cs perm (Var src) loc) m =
-  withBinding pat e $
-  withShape dest dims m
-    where dims = permuteShape perm
-                 [Size cs i (Var src) loc
-                  | i <- [0..arrayRank (identType src) - 1]]
-
-bindLet pat e m = withBinding pat e m
+bindLet = withBinding
 
 bindLetWith :: Certificates -> Ident -> Ident
             -> [SubExp] -> SubExp
             -> HoistM a -> HoistM a
 bindLetWith cs dest src idxs ve m = do
   needThis $ LetWithBind cs dest src idxs ve
-  withShape dest (slice [] 0 src) m
+  m
 
 bindLoop :: [(Ident,SubExp)] -> Ident -> SubExp -> Body -> HoistM a -> HoistM a
 bindLoop merge i bound body m = do
   needThis $ LoopBind merge i bound body
   m
-
-slice :: Certificates -> Int -> Ident -> [Exp]
-slice cs d k = [ Size cs i (Var k) $ srclocOf k
-                 | i <- [d..arrayRank (identType k)-1]]
-
-withShape :: Ident -> [Exp] -> HoistM a -> HoistM a
-withShape dest src =
-  local (\env -> env { envBindings = SZ.insert dest src $ envBindings env })
-
-withShapes :: [(Ident, [Exp])] -> HoistM a -> HoistM a
-withShapes [] m = m
-withShapes ((dest, es):rest) m =
-  withShape dest es $ withShapes rest m
-
-sameOuterShapes :: Certificates -> [Ident] -> [(Ident, [Exp])]
-sameOuterShapes cs = outer' []
-  where outer' _ [] = []
-        outer' prev (k:ks) =
-          [ (k, [Size cs 0 (Var k') $ srclocOf k])
-            | k' <- prev ++ ks ] ++
-          outer' (k:prev) ks
 
 -- | Run the let-hoisting algorithm on the given program.  Even if the
 -- output differs from the output, meaningful hoisting may not have
@@ -262,20 +157,7 @@ transformProg :: Prog -> Prog
 transformProg prog =
   Prog $ runHoistM (mapM transformFun $ progFunctions prog) namesrc env
   where namesrc = newNameSourceForProg prog
-        env = emptyEnv {
-                envAggressive = False
-              }
-
--- | Like 'transformProg', but hoists more aggressively, which may
--- create new nuisances to fusion.  Hence it is best to run it after
--- fusion has been performed.
-transformProgAggr :: Prog -> Prog
-transformProgAggr prog =
-  Prog $ runHoistM (mapM transformFun $ progFunctions prog) namesrc env
-  where namesrc = newNameSourceForProg prog
-        env = emptyEnv {
-                envAggressive = True
-              }
+        env = emptyEnv
 
 transformFun :: FunDec -> HoistM FunDec
 transformFun (fname, rettype, params, body, loc) = do
@@ -509,33 +391,6 @@ hoistInExp (If c e1 e2 t loc) = do
   (e1',e2') <- hoistCommon (hoistInBody e1) (hoistInBody e2)
   c' <- hoistInSubExp c
   return $ If c' e1' e2' t loc
-hoistInExp e@(Map cs (Lambda params _ _ _) arrexps _) =
-  hoistInSOAC e arrexps $ \ks ->
-    withSOACArrSlices cs params ks $
-    withShapes (sameOuterShapes cs ks) $
-    hoistInExpBase e
-hoistInExp e@(Reduce cs (Lambda params _ _ _) args _) =
-  hoistInSOAC e arrexps $ \ks ->
-    withSOACArrSlices cs (drop (length accexps) params) ks $
-    withShapes (sameOuterShapes cs ks) $
-    hoistInExpBase e
-  where (accexps, arrexps) = unzip args
-hoistInExp e@(Scan cs (Lambda params _ _ _) args _) =
-  hoistInSOAC e arrexps $ \arrks ->
-  hoistInSOAC e accexps $ \accks ->
-    let (accparams, arrparams) = splitAt (length accexps) params in
-    withSOACArrSlices cs arrparams arrks $
-    withShapes (filter (isArrayIdent . fst) $
-                zip (map fromParam accparams) $ map (slice cs 0) accks) $
-    withShapes (sameOuterShapes cs arrks) $
-    hoistInExpBase e
-  where (accexps, arrexps) = unzip args
-hoistInExp e@(Redomap cs _ (Lambda innerparams _ _ _)
-              accexps arrexps _) =
-  hoistInSOAC e arrexps $ \ks ->
-    withSOACArrSlices cs (drop (length accexps) innerparams) ks $
-    withShapes (sameOuterShapes cs ks) $
-    hoistInExpBase e
 hoistInExp e = hoistInExpBase e
 
 hoistInExpBase :: Exp -> HoistM Exp
@@ -561,25 +416,3 @@ hoistInLambda (Lambda params body rettype loc) = do
   body' <- blockIf (hasFree params' `orIf` isUniqueBinding) $ hoistInBody body
   return $ Lambda params body' rettype loc
   where params' = patNameSet $ map fromParam params
-
-arrVars :: [SubExp] -> Maybe [Ident]
-arrVars = mapM arrVars'
-  where arrVars' (Var k) = Just k
-        arrVars' _       = Nothing
-
-hoistInSOAC :: Exp -> [SubExp] -> ([Ident] -> HoistM Exp) -> HoistM Exp
-hoistInSOAC e arrexps m =
-  case arrVars arrexps of
-    Nothing -> hoistInExpBase e
-    Just ks -> m =<< mapM hoistInIdent ks
-
-arrSlices :: Certificates -> [Param] -> [Ident] -> [(Ident, [Exp])]
-arrSlices cs params = zip (map fromParam params) . map (slice cs 1)
-
-withSOACArrSlices :: Certificates -> [Param] -> [Ident]
-                  -> HoistM Exp -> HoistM Exp
-withSOACArrSlices cs params ks m = do
-  agg <- asks envAggressive
-  if agg
-  then withShapes (arrSlices cs params ks) m
-  else m

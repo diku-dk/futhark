@@ -714,17 +714,6 @@ checkExp (Iota e pos) = do
   e' <- require [Basic Int] =<< checkSubExp e
   return $ Iota e' pos
 
-checkExp (Size cs i e pos) = do
-  e' <- checkSubExp e
-  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
-  case subExpType e' of
-    Array {}
-      | i >= 0 && i < arrayRank (subExpType e') ->
-        return $ Size cs' i e' pos
-      | otherwise ->
-        bad $ TypeError pos $ "Type " ++ ppType (subExpType e') ++ " has no dimension " ++ show i ++ "."
-    _        -> bad $ TypeError pos "Argument to size must be array."
-
 checkExp (Replicate countexp valexp pos) = do
   countexp' <- require [Basic Int] =<< checkSubExp countexp
   valexp' <- checkSubExp valexp

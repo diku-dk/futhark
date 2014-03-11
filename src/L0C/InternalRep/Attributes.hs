@@ -43,6 +43,8 @@ module L0C.InternalRep.Attributes
   , similarTo
   , arrayRank
   , arrayShape
+  , arrayDims
+  , arraySize
   , setArrayShape
   , returnType
   , lambdaType
@@ -115,11 +117,23 @@ import L0C.InternalRep.Traversals
 arrayRank :: ArrayShape shape => TypeBase as shape -> Int
 arrayRank = shapeRank . arrayShape
 
--- | Return the dimensions of a type - for non-arrays, this is the
--- empty list.
+-- | Return the shape of a type - for non-arrays, this is the
+-- 'mempty'.
 arrayShape :: ArrayShape shape => TypeBase as shape -> shape
 arrayShape (Array _ ds _ _) = ds
 arrayShape _                = mempty
+
+-- | Return the dimensions of a type - for non-arrays, this is the
+-- empty list.
+arrayDims :: TypeBase als Shape -> [SubExp]
+arrayDims = shapeDims . arrayShape
+
+-- | Return the size of the given dimension.  If the dimension does
+-- not exist, the zero constant is returned.
+arraySize :: Int -> TypeBase als Shape -> SubExp
+arraySize i t = case drop i $ arrayDims t of
+                  e : _ -> e
+                  _     -> Constant (BasicVal $ IntVal 0) noLoc
 
 -- | Set the dimensions of an array.  If the given type is not an
 -- array, return the type unchanged.
@@ -447,20 +461,20 @@ transposeDimension :: Int -> Int -> Int -> Int -> Int
 transposeDimension k n dim numDims =
   transposeIndex k n [0..numDims-1] !! dim
 
-shapeExps :: SubExp -> [Exp]
-shapeExps src = [Size [] i src loc | i <- [0..arrayRank (subExpType src) - 1] ]
-  where loc = srclocOf src
+shapeExps :: SubExp -> [SubExp]
+shapeExps = shapeDims . arrayShape . subExpType
 
 -- | @reshapeOuter shape n src@ returns a 'Reshape' expression that
 -- replaces the outer @n@ dimensions of @src@ with @shape@.
 reshapeOuter :: [Exp] -> Int -> SubExp -> [Exp]
-reshapeOuter shape n src = shape ++ drop n (shapeExps src)
+reshapeOuter shape n src = shape ++ drop n (map SubExp $ shapeExps src)
 
 -- | @reshapeInner shape n src@ returns a 'Reshape' expression that
 -- replaces the inner @m-n@ dimensions (where @m@ is the rank of
 -- @src@) of @src@ with @shape@.
 reshapeInner :: [Exp] -> Int -> SubExp -> [Exp]
-reshapeInner shape n src = take n (shapeExps src) ++ shape
+reshapeInner shape n src = take n (map SubExp $ shapeExps src) ++ shape
+
 
 varType :: Ident -> Type
 varType ident = identType ident `changeAliases` HS.insert (identName ident)
@@ -493,7 +507,6 @@ typeOf (Index _ ident idx _) =
    `changeAliases` HS.insert (identName ident)]
 typeOf (Iota ne _) =
   [arrayOf (Basic Int) (Shape [ne]) Unique]
-typeOf (Size {}) = [Basic Int]
 typeOf (Replicate ne e _) =
   [arrayOf (subExpType e) (Shape [ne]) u]
   where u | uniqueOrBasic (subExpType e) = Unique

@@ -268,9 +268,6 @@ data Exp =
             -- checking.  If given (even as an empty list), no
             -- run-time bounds checking is done.
 
-            | Size Certificates Int SubExp SrcLoc
-            -- ^ The size of the specified array dimension.
-
             | Split Certificates SubExp SubExp SrcLoc
             -- ^ @split(1, [ 1, 2, 3, 4 ]) = {[1],[2, 3, 4]}@.
 
@@ -323,7 +320,6 @@ instance Located Exp where
   locOf (Apply _ _ _ pos) = locOf pos
   locOf (Index _ _ _ pos) = locOf pos
   locOf (Iota _ pos) = locOf pos
-  locOf (Size _ _ _ pos) = locOf pos
   locOf (Replicate _ _ pos) = locOf pos
   locOf (Reshape _ _ _ pos) = locOf pos
   locOf (Rearrange _ _ _ pos) = locOf pos

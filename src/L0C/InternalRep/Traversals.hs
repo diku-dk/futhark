@@ -144,9 +144,6 @@ mapExpM tv (Index cs arr idxexps loc) =
        pure loc
 mapExpM tv (Iota nexp loc) =
   pure Iota <*> mapOnSubExp tv nexp <*> pure loc
-mapExpM tv (Size cs i e loc) =
-  pure Size <*> mapOnCertificates tv cs <*>
-       pure i <*> mapOnSubExp tv e <*> pure loc
 mapExpM tv (Replicate nexp vexp loc) =
   pure Replicate <*> mapOnSubExp tv nexp <*> mapOnSubExp tv vexp <*> pure loc
 mapExpM tv (Reshape cs shape arrexp loc) =

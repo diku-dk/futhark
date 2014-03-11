@@ -359,12 +359,6 @@ evalExp (Iota e pos) = do
         bad $ NegativeIota pos x
     _ -> bad $ TypeError pos "evalExp Iota"
 
-evalExp (Size _ i e pos) = do
-  v <- evalSubExp e
-  case drop i $ valueShape v of
-    [] -> bad $ TypeError pos "evalExp Size"
-    n:_ -> return [BasicVal $ IntVal n]
-
 evalExp (Replicate e1 e2 pos) = do
   v1 <- evalSubExp e1
   v2 <- evalSubExp e2

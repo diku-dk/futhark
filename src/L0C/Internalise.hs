@@ -204,12 +204,12 @@ internaliseExp (E.Replicate ne ve loc) = do
     _ -> do reps <- letSubExps "v" [I.Replicate ne' (I.Var ve') loc | ve' <- ves ]
             return $ I.TupLit (given loc : reps) loc
 
-internaliseExp (E.Size cs i e loc) = do
-  let cs' = internaliseCerts cs
-  (c,ks) <- tupToIdentList e
+internaliseExp (E.Size _ i e loc) = do
+  (_,ks) <- tupToIdentList e
+  -- XXX: Throwing away certificates?
   case ks of
-    (k:_) -> return $ I.Size (certify c cs') i (I.Var k) loc
-    []    -> return $ I.SubExp (I.Constant (I.BasicVal $ I.IntVal 0) loc) -- Will this ever happen?
+    (k:_) -> return $ I.SubExp $ I.arraySize i $ I.identType k
+    _     -> return $ I.SubExp (I.Constant (I.BasicVal $ I.IntVal 0) loc) -- Will this ever happen?
 
 internaliseExp (E.Unzip e _ _) = do
   (_,ks) <- tupToIdentList e
@@ -222,10 +222,8 @@ internaliseExp (E.Zip es loc) = do
     [] -> return $ I.TupLit [] loc
     _ -> do
       let namevs = map I.Var names
-          rows e = I.Size [] 0 e loc
-          ass e1 e2 = do e1' <- letSubExp "zip_len_x" $ rows e1
-                         e2' <- letSubExp "zip_len_y" $ rows e2
-                         cmp <- letSubExp "zip_cmp" $ I.BinOp I.Equal e1' e2' (I.Basic I.Bool) loc
+          rows e = arraySize 0 $ I.subExpType e
+          ass e1 e2 = do cmp <- letSubExp "zip_cmp" $ I.BinOp I.Equal (rows e1) (rows e2) (I.Basic I.Bool) loc
                          pure $ I.Assert cmp loc
       cs2 <- letExps "zip_assert" =<< zipWithM ass namevs (drop 1 namevs)
       c <- mergeCerts (cs1++cs2)
@@ -509,8 +507,8 @@ boundsChecks (v:_) es = zipWithM (boundsCheck v) [0..] es
 
 boundsCheck :: I.Ident -> Int -> I.SubExp -> InternaliseM I.Ident
 boundsCheck v i e = do
-  size <- letSubExp "size" $ I.Size [] i (I.Var v) loc
-  let check = eBinOp LogAnd (pure lowerBound) (pure upperBound) bool loc
+  let size  = arraySize i $ I.identType v
+      check = eBinOp LogAnd (pure lowerBound) (pure upperBound) bool loc
       lowerBound = I.BinOp Leq (I.Constant (I.BasicVal $ IntVal 0) loc)
                                size bool loc
       upperBound = I.BinOp Less e size bool loc

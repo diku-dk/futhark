@@ -146,8 +146,6 @@ instance Pretty Exp where
     ppCertificates cs <> ppr v <>
     brackets (commasep (map ppr idxs))
   ppr (Iota e _) = text "iota" <> parens (ppr e)
-  ppr (Size cs i e _) =
-    ppCertificates cs <> text "size" <> apply [text $ show i, ppr e]
   ppr (Replicate ne ve _) =
     text "replicate" <> apply [ppr ne, align (ppr ve)]
   ppr (Reshape cs shape e _) =

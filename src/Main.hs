@@ -74,7 +74,6 @@ commandLineOptions =
     (NoArg $ \opts -> opts { l0action = externaliseAction})
     "Prettyprint the resulting external representation on standard output."
   , hoistOpt "o" ["hoist"]
-  , hoistAggrOpt "O" ["hoist-aggressively"]
   , uttransformOpt "u" ["untrace"]
   , fotransformOpt "f" ["first-order-transform"]
   , eotransformOpt "e" ["enabling-optimisations"]
@@ -139,11 +138,6 @@ hoist = Pass { passName = "rebinder"
              , passOp = return . RB.transformProg
              }
 
-hoistAggr :: Pass
-hoistAggr = Pass { passName = "rebinder (aggressive)"
-                 , passOp = return . RB.transformProgAggr
-                 }
-
 fotransform :: Pass
 fotransform = Pass { passName = "first-order transform"
                    , passOp = return . FOT.transformProg
@@ -173,7 +167,6 @@ standardPipeline :: [Pass]
 standardPipeline =
   [ uttransform, eotransform, iitransform
   , hoist,     {-hotransform,-} eotransform
-  , hoistAggr, {-hotransform,-} eotransform
   ]
 
 passoption :: String -> Pass -> String -> [String] -> L0Option
@@ -185,11 +178,6 @@ passoption desc pass short long =
 hoistOpt :: String -> [String] -> L0Option
 hoistOpt =
   passoption "Rebinder - hoisting, CSE, dependency graph compression." hoist
-
-hoistAggrOpt :: String -> [String] -> L0Option
-hoistAggrOpt =
-  passoption "Rebinder - hoisting, CSE, dependency graph compression (aggressively)."
-  hoistAggr
 
 fotransformOpt :: String -> [String] -> L0Option
 fotransformOpt =
