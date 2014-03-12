@@ -101,6 +101,8 @@ internaliseExp (E.Index cs var csidx idxs loc) = do
                      Just csidx' -> return $ internaliseCerts csidx'
                      Nothing     -> boundsChecks vs idxs'
   case subst of
+    Nothing ->
+      fail $ "L0C.Internalise.internaliseExp Index: unknown variable " ++ textual (E.identName var) ++ "."
     Just (ArraySubst c vs) -> do
       c' <- mergeCerts (c:cs')
       csidx' <- mkCerts vs
@@ -110,10 +112,11 @@ internaliseExp (E.Index cs var csidx idxs loc) = do
             | E.arrayRank outtype == 0 = I.TupLit (a:as) loc
             | otherwise                = tuplit c' loc $ a:as
       resultTupLit <$> letSubExps "idx" (map index vs)
-    _ -> do
-      var' <- internaliseIdent var
+    Just (DirectSubst var') -> do
       csidx' <- mkCerts [var']
       return $ I.Index (cs'++csidx') var' idxs' loc
+    Just (TupleSubst _) ->
+      fail $ "L0C.Internalise.internaliseExp Index: cannot index tuple " ++ textual (E.identName var) ++ "."
   where outtype = E.stripArray (length idxs) $ E.identType var
 
 internaliseExp (E.TupLit es loc) = do
@@ -191,8 +194,10 @@ internaliseExp (E.LetWith cs name src idxcs idxs ve body loc) = do
   c <- mergeCerts (catMaybes [c1,c2]++cs')
   let comb (dname, sname, vname) =
         letWithBind (cs'++idxcs') dname sname idxs' $ I.Var vname
+      dstt = case dsts of [dst] -> [I.identType dst]
+                          _     -> I.Basic Cert : map I.identType dsts
   mapM_ comb $ zip3 dsts srcs vnames
-  bindingPattern (E.Id name) (map I.identType dsts) $ \pat' -> do
+  bindingPattern (E.Id name) dstt $ \pat' -> do
     letBind pat' $ tuplit c loc (map I.Var dsts)
     internaliseExp body
 

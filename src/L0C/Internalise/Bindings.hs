@@ -38,19 +38,17 @@ data InternaliseRes shape
 internaliseParam :: MonadFreshNames m => E.Ident
                  -> m (InternaliseRes I.Rank)
 internaliseParam param =
-  case (internaliseType $ E.identType param, E.identType param) of
-    (_:t:ts, E.Array {}) -> do
-      ns <- forM (t:ts) $ \t' -> newIdent base t' loc
+  case internaliseType $ E.identType param of
+   I.Basic Cert : ts@(I.Array {} : _) -> do
+      ns <- forM ts $ \t' -> newIdent base t' loc
       cert <- newIdent ("zip_cert_" ++ base) (I.Basic Cert) loc
       return $ TupleArray cert ns
-    ([paramt], _) -> return $ Direct $
-                     I.Ident (E.identName param)
-                             paramt
-                             (E.identSrcLoc param)
-    (ts, _) ->
-      -- We know from internaliseIdent that none of the element
-      -- types are themselves tuples.
-      FlatTuple <$> mapM (\t' -> newIdent base t' loc) ts
+   [paramt] -> return $ Direct $
+               I.Ident (E.identName param) paramt (E.identSrcLoc param)
+   ts ->
+     -- We know from internaliseIdent that none of the element
+     -- types are themselves tuples.
+     FlatTuple <$> mapM (\t' -> newIdent base t' loc) ts
   where loc = srclocOf param
         base = nameToString $ baseName $ E.identName param
 
@@ -83,11 +81,11 @@ bindingFlatPatternAs handleMapping = bindingFlatPattern' []
       let (vs, substs) = unzip pat
           substs' = HM.fromList substs
       local (\env -> env { envSubsts = substs' `HM.union` envSubsts env})
-              $ m $ concat vs
+              $ m $ concat $ reverse vs
 
     bindingFlatPattern' pat (p:rest) ts m = do
-      (p', subst, rest_ts) <- handleMapping ts <$> internaliseParam p
-      bindingFlatPattern' ((p', (E.identName p, subst)) : pat) rest rest_ts m
+      (ps, subst, rest_ts) <- handleMapping ts <$> internaliseParam p
+      bindingFlatPattern' ((ps, (E.identName p, subst)) : pat) rest rest_ts m
 
 bindingFlatPattern :: [E.Ident] -> [I.Type]
                    -> ([I.Ident] -> InternaliseM a) -> InternaliseM a
