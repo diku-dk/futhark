@@ -28,6 +28,8 @@ module L0C.Internalise
   )
   where
 
+import Debug.Trace
+
 import Control.Applicative
 import Control.Monad.State  hiding (mapM)
 import Control.Monad.Reader hiding (mapM)
@@ -40,6 +42,7 @@ import Data.Traversable (mapM)
 
 import L0C.ExternalRep as E
 import L0C.InternalRep as I
+import L0C.MonadFreshNames
 import L0C.Tools
 
 import L0C.Internalise.Monad
@@ -83,15 +86,21 @@ internaliseBody e = insertBindings $ do
   ses <- letTupExp "norm" =<< internaliseExp e
   return $ I.Result [] (subExpsWithShapes $ map I.Var ses) $ srclocOf e
 
+internaliseBodyNoCertReturn :: E.Exp -> InternaliseM Body
+internaliseBodyNoCertReturn e = insertBindings $ do
+  (c,ses) <- tupToIdentList e
+  return $ I.Result (maybeToList c) (subExpsWithShapes $ map I.Var ses) $ srclocOf e
+
 internaliseExp :: E.Exp -> InternaliseM I.Exp
 
 internaliseExp (E.Var var) = do
   subst <- asks $ HM.lookup (E.identName var) . envSubsts
   case subst of
-    Nothing -> fail $ "L0C.Internalise.internaliseExp: unknown variable " ++ textual (E.identName var) ++ "."
-    Just (DirectSubst v)   -> return $ I.SubExp $ I.Var v
-    Just (ArraySubst c ks) -> return $ I.TupLit (map I.Var $ c:ks) $ srclocOf var
-    Just (TupleSubst ks)   -> return $ I.TupLit (map I.Var ks) $ srclocOf var
+    Nothing     -> I.SubExp <$> I.Var <$> internaliseIdent var
+    Just substs ->
+      return $ I.TupLit (concatMap insertSubst substs) $ srclocOf var
+  where insertSubst (DirectSubst v)   = [I.Var v]
+        insertSubst (ArraySubst c ks) = c : map I.Var ks
 
 internaliseExp (E.Index cs var csidx idxs loc) = do
   idxs' <- letSubExps "i" =<< mapM internaliseExp idxs
@@ -103,8 +112,8 @@ internaliseExp (E.Index cs var csidx idxs loc) = do
   case subst of
     Nothing ->
       fail $ "L0C.Internalise.internaliseExp Index: unknown variable " ++ textual (E.identName var) ++ "."
-    Just (ArraySubst c vs) -> do
-      c' <- mergeCerts (c:cs')
+    Just [ArraySubst c vs] -> do
+      c' <- mergeSubExpCerts (c:map I.Var cs')
       csidx' <- mkCerts vs
       let index v = I.Index (certify c' csidx') v idxs' loc
           resultTupLit [] = I.TupLit [] loc
@@ -112,11 +121,12 @@ internaliseExp (E.Index cs var csidx idxs loc) = do
             | E.arrayRank outtype == 0 = I.TupLit (a:as) loc
             | otherwise                = tuplit c' loc $ a:as
       resultTupLit <$> letSubExps "idx" (map index vs)
-    Just (DirectSubst var') -> do
+    Just [DirectSubst var'] -> do
       csidx' <- mkCerts [var']
       return $ I.Index (cs'++csidx') var' idxs' loc
-    Just (TupleSubst _) ->
-      fail $ "L0C.Internalise.internaliseExp Index: cannot index tuple " ++ textual (E.identName var) ++ "."
+    Just _ ->
+      fail $ "L0C.Internalise.internaliseExp Index: " ++ textual (E.identName var) ++ " is not an aray."
+
   where outtype = E.stripArray (length idxs) $ E.identType var
 
 internaliseExp (E.TupLit es loc) = do
@@ -139,7 +149,7 @@ internaliseExp (E.ArrayLit es rowtype loc) = do
     [et] -> do
       ses <- letSubExps "arr_elem" $ map (tuplit Nothing loc . map I.Var) es'
       return $ I.ArrayLit ses
-               (et `setArrayShape` Shape (intlit (length es) : rowshape))
+               (et `setArrayShape` Shape (intlit (length es) : drop 1 rowshape))
                loc
     ets   -> do
       let arraylit ks et = I.ArrayLit (map I.Var ks)
@@ -149,16 +159,22 @@ internaliseExp (E.ArrayLit es rowtype loc) = do
       tuplit c loc <$> letSubExps "arr_elem" (zipWith arraylit (transpose es') ets)
   where intlit x = I.Constant (I.BasicVal $ I.IntVal x) loc
 
+internaliseExp (E.Apply fname args _ loc)
+  | "trace" <- nameToString fname = do
+  args' <- tupsToIdentList $ map fst args
+  let args'' = concatMap tag args'
+  return $ I.Apply fname args'' (map (subExpType . fst) args'')  loc
+  where tag (_,vs) = [ (I.Var v, I.Observe) | v <- vs ]
+
 internaliseExp (E.Apply fname args rettype loc) = do
   args' <- tupsToIdentList $ map fst args
   args'' <- concat <$> mapM flatten args'
-  fun_shape <- case shapeRettype of
-                 [] -> return []
-                 _  -> letTupExp "fun_shape" $ I.Apply shapeFname args'' shapeRettype loc
-  let valueRettype' = addTypeShapes valueRettype $ map I.Var fun_shape
+  result_shape <- resultShape args''
+  let valueRettype' = addTypeShapes valueRettype result_shape
   return $ I.Apply fname args'' valueRettype' loc
   where (shapeRettype, valueRettype) = splitType $ typeSizes $ internaliseType rettype
         shapeFname = shapeFunctionName fname
+
         flatten (c,vs) = do
           vs' <- liftM concat $ forM vs $ \v -> do
                    let shape = subExpShape $ I.Var v
@@ -167,19 +183,27 @@ internaliseExp (E.Apply fname args rettype loc) = do
           return $ (case c of Just c' -> [(I.Var c', I.Observe)]
                               Nothing -> []) ++ vs'
 
-internaliseExp (E.LetPat pat e body _) = do
-  e' <- internaliseExp e
-  bindingPattern pat (I.typeOf e') $ \pat' -> do
-    letBind pat' e'
+        resultShape args''
+          | []      <- shapeRettype = return []
+          | otherwise               =
+            liftM (map I.Var) $
+            letTupExp "fun_shape" $
+            I.Apply shapeFname args'' shapeRettype loc
+
+internaliseExp (E.LetPat pat e body loc) = do
+  (c,ks) <- tupToIdentList e
+  bindingPattern pat (certOrGiven loc c) (map I.identType ks) $ \pat' -> do
+    letBind pat' $ I.TupLit (map I.Var ks) loc
     internaliseExp body
 
-internaliseExp (E.DoLoop mergepat mergeexp i bound loopbody letbody _) = do
+internaliseExp (E.DoLoop mergepat mergeexp i bound loopbody letbody loc) = do
   bound' <- letSubExp "bound" =<< internaliseExp bound
-  mergevs <- letTupExp "merge_val" =<< internaliseExp mergeexp
+  (c,mergevs) <- tupToIdentList mergeexp
   i' <- internaliseIdent i
-  bindingPattern mergepat (map I.identType mergevs) $ \mergepat' -> do
-    loopbody' <- internaliseBody loopbody
-    loopBind (zip mergepat' $ map I.Var mergevs) i' bound' loopbody'
+  bindingPattern mergepat (certOrGiven loc c) (map I.identType mergevs) $ \mergepat' -> do
+    loopbody' <- internaliseBodyNoCertReturn loopbody
+    let (_, valuebody) = splitBody loopbody'
+    loopBind (zip mergepat' $ map I.Var mergevs) i' bound' valuebody
     internaliseExp letbody
 
 internaliseExp (E.LetWith cs name src idxcs idxs ve body loc) = do
@@ -194,11 +218,10 @@ internaliseExp (E.LetWith cs name src idxcs idxs ve body loc) = do
   c <- mergeCerts (catMaybes [c1,c2]++cs')
   let comb (dname, sname, vname) =
         letWithBind (cs'++idxcs') dname sname idxs' $ I.Var vname
-      dstt = case dsts of [dst] -> [I.identType dst]
-                          _     -> I.Basic Cert : map I.identType dsts
   mapM_ comb $ zip3 dsts srcs vnames
-  bindingPattern (E.Id name) dstt $ \pat' -> do
-    letBind pat' $ tuplit c loc (map I.Var dsts)
+  bindingPattern (E.Id name) (certOrGiven loc c)
+                             (map I.identType dsts) $ \pat' -> do
+    letBind pat' $ I.TupLit (map I.Var dsts) loc
     internaliseExp body
 
 internaliseExp (E.Replicate ne ve loc) = do
@@ -425,25 +448,28 @@ internaliseExp (E.RedomapT cs fun1 fun2 accs arrs loc) = do
 tupToIdentList :: E.Exp -> InternaliseM (Maybe I.Ident, [I.Ident])
 tupToIdentList e = do
   e' <- internaliseExp e
-  case (I.typeOf e', E.typeOf e) of
-    ([], _) -> return (Nothing, [])
-    (ct:t:ts, E.Array {}) -> do
-      cert <- fst <$> newVar loc "tup_arr_cert" ct
-      names <- mapM (liftM fst . newVar loc "tup_arr_elem") $ t:ts
-      letBind (cert : names) e'
-      return (Just cert, names)
-    ([t], _) -> case e' of
+  case I.typeOf e' of
+    [] -> return (Nothing, [])
+    [t] -> case e' of
                   I.SubExp (I.Var var) ->
                     return (Nothing, [var]) -- Just to avoid too many spurious bindings.
                   _ -> do
                     name <- fst <$> newVar loc "val" t
                     letBind [name] e'
                     return (Nothing, [name])
-    (ts, _) -> do
-      names <- mapM (liftM fst . newVar loc "tup_elem") ts
-      letBind names e'
-      return (Nothing, names)
+    ts -> do
+      vs <- mapM identForType ts
+      letBind vs e'
+      let (certvs, valuevs) = partition ((==I.Basic Cert) . I.identType) vs
+      case certvs of
+        []  -> return (Nothing, vs)
+        [c] -> return (Just c, valuevs)
+        _   -> do
+          cert <- letExp "tup_arr_cert_comb" $ I.Conjoin (map I.Var certvs) loc
+          return (Just cert, valuevs)
   where loc = srclocOf e
+        identForType (I.Basic Cert) = newIdent "tup_arr_cert" (I.Basic Cert) loc
+        identForType t              = newIdent "tup_arr_elem" t loc
 
 tupsToIdentList :: [E.Exp] -> InternaliseM [(Maybe I.Ident, [I.Ident])]
 tupsToIdentList = tupsToIdentList' []
@@ -463,12 +489,15 @@ splitCertExps l = (mapMaybe fst l,
 combCertExps :: [(Maybe I.Ident, [I.Ident])] -> [I.Ident]
 combCertExps = concatMap $ \(cert, ks) -> maybeToList cert ++ ks
 
-mergeCerts :: I.Certificates -> InternaliseM (Maybe I.Ident)
-mergeCerts [] = return Nothing
-mergeCerts [c] = return $ Just c
-mergeCerts (c:cs) = do
+mergeCerts :: [I.Ident] -> InternaliseM (Maybe I.Ident)
+mergeCerts = mergeSubExpCerts . map I.Var
+
+mergeSubExpCerts :: [I.SubExp] -> InternaliseM (Maybe I.Ident)
+mergeSubExpCerts [] = return Nothing
+mergeSubExpCerts [I.Var c] = return $ Just c
+mergeSubExpCerts (c:cs) = do
   cert <- fst <$> newVar loc "comb_cert" (I.Basic I.Cert)
-  letBind [cert] $ I.Conjoin (map I.Var $ c:cs) loc
+  letBind [cert] $ I.Conjoin (c:cs) loc
   return $ Just cert
   where loc = srclocOf c
 
@@ -496,6 +525,9 @@ given = I.Constant $ I.BasicVal I.Checked
 
 certify :: Maybe I.Ident -> I.Certificates -> I.Certificates
 certify k cs = maybeToList k ++ cs
+
+certOrGiven :: SrcLoc -> Maybe I.Ident -> SubExp
+certOrGiven loc = maybe (given loc) I.Var
 
 certifySOAC :: I.Ident -> I.Exp -> InternaliseM I.Exp
 certifySOAC c e =

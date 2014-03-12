@@ -26,8 +26,7 @@ import L0C.Tools
 
 import Prelude hiding (mapM)
 
-data Replacement = ArraySubst Ident [Ident]
-                 | TupleSubst [Ident]
+data Replacement = ArraySubst SubExp [Ident]
                  | DirectSubst Ident
                    deriving (Show)
 
@@ -37,7 +36,7 @@ type FunBinding = (E.DeclType, [E.DeclType])
 type ShapeTable = HM.HashMap VName [SubExp]
 
 data InternaliseEnv = InternaliseEnv {
-    envSubsts :: HM.HashMap VName Replacement
+    envSubsts :: HM.HashMap VName [Replacement]
   , envFtable :: HM.HashMap Name FunBinding
   }
 

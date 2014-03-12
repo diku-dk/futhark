@@ -9,6 +9,8 @@ module L0C.Internalise.Bindings
   )
   where
 
+import Debug.Trace
+
 import Control.Applicative
 import Control.Monad.State  hiding (mapM)
 import Control.Monad.Reader hiding (mapM)
@@ -30,49 +32,51 @@ import L0C.Internalise.TypesValues
 import Prelude hiding (mapM)
 
 
-data InternaliseRes shape
-  = FlatTuple [I.IdentBase I.Names shape]
-  | TupleArray I.Ident [I.IdentBase I.Names shape]
-  | Direct (I.IdentBase I.Names shape)
+data InternaliseRes shape = TupleArray I.Ident [I.IdentBase I.Names shape]
+                          | Direct (I.IdentBase I.Names shape)
+                            deriving (Show)
 
 internaliseParam :: MonadFreshNames m => E.Ident
-                 -> m (InternaliseRes I.Rank)
+                 -> m [InternaliseRes I.Rank]
 internaliseParam param =
-  case internaliseType $ E.identType param of
-   I.Basic Cert : ts@(I.Array {} : _) -> do
-      ns <- forM ts $ \t' -> newIdent base t' loc
-      cert <- newIdent ("zip_cert_" ++ base) (I.Basic Cert) loc
-      return $ TupleArray cert ns
-   [paramt] -> return $ Direct $
-               I.Ident (E.identName param) paramt (E.identSrcLoc param)
-   ts ->
-     -- We know from internaliseIdent that none of the element
-     -- types are themselves tuples.
-     FlatTuple <$> mapM (\t' -> newIdent base t' loc) ts
-  where loc = srclocOf param
+  internalise $ internaliseType $ E.identType param
+  where internalise [] = return []
+        internalise (I.Basic Cert : ts) = do
+          let (ets,restts) = span (/=I.Basic Cert) ts
+          ns <- forM ets $ \t' -> newIdent base t' loc
+          cert <- newIdent ("zip_cert_" ++ base) (I.Basic Cert) loc
+          (TupleArray cert ns:) <$> internalise restts
+        internalise ts = do
+          -- We know from internaliseIdent that none of the element
+          -- types are themselves tuples.
+          let (ets,restts) = span (/=I.Basic Cert) ts
+          params <- mapM (\t' -> Direct <$> newIdent base t' loc) ets
+          (params++) <$> internalise restts
+
+        loc = srclocOf param
         base = nameToString $ baseName $ E.identName param
 
 bindingParams :: [E.Parameter] -> ([I.Param] -> InternaliseM a) -> InternaliseM a
 bindingParams params m = do
   (params', substs) <- runWriterT $ liftM concat . forM params $ \param -> do
-    param' <- lift $ internaliseParam $ E.fromParam param
-    case param' of
-      Direct k -> do
-        (k',shape) <- lift $ paramShapes k
-        tell $ HM.singleton (E.identName param) $ DirectSubst k'
-        return $ k' : shape
-      FlatTuple ks -> do
-        ks_sizes <- lift $ mapM paramShapes ks
-        tell $ HM.singleton (E.identName param) $ TupleSubst $ map fst ks_sizes
-        return $ concatMap (uncurry (:)) ks_sizes
-      TupleArray c ks -> do
-        ks_sizes <- lift $ mapM paramShapes ks
-        tell $ HM.singleton (E.identName param) $ ArraySubst c $ map fst ks_sizes
-        return $ c:concatMap (uncurry (:)) ks_sizes
+    internalisations <- lift $ internaliseParam $ E.fromParam param
+    (params', substs) <-
+      liftM unzip $ forM internalisations $ \param' ->
+        case param' of
+          Direct k -> do
+            (k',shape) <- lift $ paramShapes k
+            return (k' : shape,
+                    DirectSubst k')
+          TupleArray c ks -> do
+            ks_sizes <- lift $ mapM paramShapes ks
+            return (c:concatMap (uncurry (:)) ks_sizes,
+                     ArraySubst (I.Var c) $ map fst ks_sizes)
+    tell $ HM.singleton (E.identName param) substs
+    return $ concat params'
   let bind env = env { envSubsts = substs `HM.union` envSubsts env }
   local bind $ m $ map I.toParam params'
 
-bindingFlatPatternAs :: ([I.Type] -> InternaliseRes Rank -> ([I.Ident], Replacement, [I.Type]))
+bindingFlatPatternAs :: ([I.Type] -> [InternaliseRes Rank] -> ([I.Ident], [Replacement], [I.Type]))
                      -> [E.Ident] -> [I.Type]
                      -> ([I.Ident] -> InternaliseM a) -> InternaliseM a
 bindingFlatPatternAs handleMapping = bindingFlatPattern' []
@@ -87,31 +91,19 @@ bindingFlatPatternAs handleMapping = bindingFlatPattern' []
       (ps, subst, rest_ts) <- handleMapping ts <$> internaliseParam p
       bindingFlatPattern' ((ps, (E.identName p, subst)) : pat) rest rest_ts m
 
-bindingFlatPattern :: [E.Ident] -> [I.Type]
-                   -> ([I.Ident] -> InternaliseM a) -> InternaliseM a
-bindingFlatPattern = bindingFlatPatternAs handleMapping
-  where handleMapping ts (Direct v) =
-          let ([v'], rest_ts) = annotateIdents [v] ts
-          in ([v'], DirectSubst v', rest_ts)
-        handleMapping ts (FlatTuple vs') =
-          let (vs'', rest_ts) = annotateIdents vs' ts
-          in (vs'', TupleSubst vs'', rest_ts)
-        handleMapping ts (TupleArray c vs') =
-          -- Drop one type, corresponding to the cert-typed 'c'.
-          let (vs'', rest_ts) = annotateIdents vs' $ drop 1 ts
-          in (c:vs'', ArraySubst c vs'', rest_ts)
-
-bindingFlatPatternWithCert :: I.Ident
+bindingFlatPatternWithCert :: I.SubExp
                            -> [E.Ident] -> [I.Type]
                            -> ([I.Ident] -> InternaliseM a) -> InternaliseM a
 bindingFlatPatternWithCert ce = bindingFlatPatternAs handleMapping
-  where handleMapping ts (Direct v) =
+  where handleMapping ts [] = ([], [], ts)
+        handleMapping ts (r:rs) =
+          let (ps, reps, ts') = handleMapping' ts r
+              (pss, repss, ts'') = handleMapping ts' rs
+          in (ps++pss, reps:repss, ts'')
+        handleMapping' ts (Direct v) =
           let ([v'], rest_ts) = annotateIdents [v] ts
           in ([v'], DirectSubst v', rest_ts)
-        handleMapping ts (FlatTuple vs') =
-          let (vs'', rest_ts) = annotateIdents vs' ts
-          in (vs'', TupleSubst vs'', rest_ts)
-        handleMapping ts (TupleArray _ vs') =
+        handleMapping' ts (TupleArray _ vs') =
           let (vs'', rest_ts) = annotateIdents vs' ts
           in (vs'', ArraySubst ce vs'', rest_ts)
 
@@ -124,7 +116,7 @@ flattenPattern (E.Id v) =
 flattenPattern (E.TupId pats _) =
   concat <$> mapM flattenPattern pats
 
-bindingPattern :: E.TupIdent -> [I.Type] -> ([I.Ident] -> InternaliseM a) -> InternaliseM a
-bindingPattern pat ts m = do
+bindingPattern :: E.TupIdent -> SubExp -> [I.Type] -> ([I.Ident] -> InternaliseM a) -> InternaliseM a
+bindingPattern pat ce ts m = do
   pat' <- flattenPattern pat
-  bindingFlatPattern pat' ts m
+  bindingFlatPatternWithCert ce pat' ts m

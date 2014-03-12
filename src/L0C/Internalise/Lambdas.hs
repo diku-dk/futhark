@@ -69,7 +69,7 @@ internaliseLambdaBody internaliseBody body = do
 lambdaBinding :: I.Ident -> [E.Parameter] -> [I.Type]
               -> InternaliseM I.Body -> InternaliseM (I.Body, [I.Param])
 lambdaBinding ce params ts m =
-  bindingFlatPatternWithCert ce (map E.fromParam params) ts $ \params' -> do
+  bindingFlatPatternWithCert (I.Var ce) (map E.fromParam params) ts $ \params' -> do
     body <- m
     return (body, map I.toParam params')
 
