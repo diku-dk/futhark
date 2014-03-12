@@ -1,9 +1,0 @@
-// The point of this test is mainly to ensure that optimisations do
-// not break it.
-fun int main(int i) =
-  let a = [9, 8, 7, 6, 5, 4, 3, 2, 1, 0] in
-  //let a = iota(10) in
-  if 0 <= i && i < 10
-  then let dummy = assert(True) in
-           a[<dummy>|i]
-  else -1
