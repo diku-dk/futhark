@@ -186,14 +186,14 @@ copyCtPropBody (Result cs es loc) =
   Result <$> copyCtPropCerts cs <*> mapM copyCtPropSubExp es <*> pure loc
 
 copyCtPropSubExp :: SubExp -> CPropM SubExp
-copyCtPropSubExp e@(Var (Ident vnm _ pos)) = do
+copyCtPropSubExp (Var ident@(Ident vnm _ pos)) = do
   bnd <- asks $ HM.lookup vnm . envVtable
   case bnd of
     Just (Value v)
       | isBasicTypeVal v  -> changed $ Constant v pos
     Just (VarId  id' tp1) -> changed $ Var (Ident id' tp1 pos) -- or tp
     Just (SymArr (SubExp se)) -> changed se
-    _                         -> return e
+    _                         -> Var <$> copyCtPropBnd ident
 copyCtPropSubExp (Constant v loc) = return $ Constant v loc
 
 copyCtPropExp :: Exp -> CPropM Exp
@@ -363,9 +363,9 @@ copyCtPropIdent :: Ident -> CPropM Ident
 copyCtPropIdent ident@(Ident vnm _ loc) = do
     bnd <- asks $ HM.lookup vnm . envVtable
     case bnd of
-      Nothing               -> return ident
       Just (VarId  id' tp1) -> changed $ Ident id' tp1 loc
-      _                     -> return ident
+      Nothing               -> copyCtPropBnd ident
+      _                     -> copyCtPropBnd ident
 
 copyCtPropCerts :: Certificates -> CPropM Certificates
 copyCtPropCerts = liftM (nub . concat) . mapM check

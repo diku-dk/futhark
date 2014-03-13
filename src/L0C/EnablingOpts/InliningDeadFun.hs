@@ -230,7 +230,7 @@ inlineInBody inlcallees (LetPat pat (Apply fname args rtp _) letbody loc) =
   in  case filter (\(nm,_,_,_,_)->fname==nm) inlcallees of
         [] -> continue $ Apply fname args rtp loc
         (_,_,fargs,body,_):_ ->
-          let revbnds = reverse (zip (map fromParam fargs) $ map fst args)
+          let revbnds = zip (map fromParam fargs) $ map fst args
           in  mapTail continue' $ foldl (addArgBnd loc) body revbnds
   where
       addArgBnd :: SrcLoc -> Body -> (Ident, SubExp) -> Body

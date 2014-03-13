@@ -118,11 +118,14 @@ deadCodeElimBody (LetPat pat e body pos) = do
   if noref
   then changed $ return body'
   else do e' <- deadCodeElimExp e
-          return $ LetPat pat e' body' pos
+          pat' <- deadCodeElimPat pat
+          return $ LetPat pat' e' body' pos
 
-deadCodeElimBody (LetWith cs nm src idxs el body pos) = do
+deadCodeElimBody (LetWith cs dest src idxs el body pos) = do
   cs' <- mapM deadCodeElimIdent cs
-  (body', noref) <- collectRes [identName nm] $ binding [identName nm] $ deadCodeElimBody body
+  (body', noref) <- collectRes [identName dest] $
+                    binding [identName dest] $
+                    deadCodeElimBody body
   if noref
   then changed $ return body'
   else do
@@ -133,7 +136,9 @@ deadCodeElimBody (LetWith cs nm src idxs el body pos) = do
           else do _ <- tell $ DCElimRes False (S.insert srcnm S.empty)
                   idxs' <- mapM deadCodeElimSubExp idxs
                   el'   <- deadCodeElimSubExp el
-                  return $ LetWith cs' nm src idxs' el' body' pos
+                  src'  <- deadCodeElimIdent src
+                  dest' <- deadCodeElimBnd dest
+                  return $ LetWith cs' dest' src' idxs' el' body' pos
 
 deadCodeElimBody (DoLoop merge idd n loopbdy letbdy pos) = do
   let (mergepat, mergeexp) = unzip merge
@@ -145,7 +150,8 @@ deadCodeElimBody (DoLoop merge idd n loopbdy letbdy pos) = do
     mergeexp' <- mapM deadCodeElimSubExp mergeexp
     n'        <- deadCodeElimSubExp n
     loopbdy'  <- binding ( identName idd : idds) $ deadCodeElimBody loopbdy
-    return $ DoLoop (zip mergepat mergeexp') idd n' loopbdy' letbdy' pos
+    mergepat' <- deadCodeElimPat mergepat
+    return $ DoLoop (zip mergepat' mergeexp') idd n' loopbdy' letbdy' pos
 
 deadCodeElimBody (Result cs es loc) =
   Result <$> mapM deadCodeElimIdent cs <*> mapM deadCodeElimSubExp es <*> pure loc
@@ -162,15 +168,28 @@ deadCodeElimExp = mapExpM mapper
                  }
 
 deadCodeElimIdent :: Ident -> DCElimM Ident
-deadCodeElimIdent ident@(Ident vnm _ pos) = do
+deadCodeElimIdent ident@(Ident vnm t pos) = do
   in_vtab <- asks $ S.member vnm . envVtable
   if not in_vtab
   then badDCElimM $ VarNotInFtab pos vnm
   else do tell $ DCElimRes False (S.insert vnm S.empty)
-          return ident
+          dims <- mapM deadCodeElimSubExp $ arrayDims t
+          return ident { identType = t `setArrayShape` Shape dims }
+
+deadCodeElimPat :: [IdentBase als Shape] -> DCElimM [IdentBase als Shape]
+deadCodeElimPat = mapM deadCodeElimBnd
+
+deadCodeElimBnd :: IdentBase als Shape -> DCElimM (IdentBase als Shape)
+deadCodeElimBnd ident = do
+  let dims = arrayDims $ identType ident
+  dims' <- mapM deadCodeElimSubExp dims
+  return $ ident { identType = identType ident
+                               `setArrayShape`
+                               Shape dims' }
 
 deadCodeElimLambda :: Lambda -> DCElimM Lambda
 deadCodeElimLambda (Lambda params body ret pos) = do
   let ids  = map identName params
   body' <- binding ids $ deadCodeElimBody body
-  return $ Lambda params body' ret pos
+  params' <- deadCodeElimPat params
+  return $ Lambda params' body' ret pos
