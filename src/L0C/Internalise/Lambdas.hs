@@ -2,7 +2,7 @@ module L0C.Internalise.Lambdas
   ( curryToLambda
   , ensureLambda
   , internaliseMapLambda
-  , internaliseReduceLambda
+  , internaliseFoldLambda
   , internaliseFilterLambda
   )
   where
@@ -125,15 +125,13 @@ bindMapShapes cs sizefun args outer_shape = do
   return (certs, inner_shapes)
   where loc = srclocOf sizefun
 
-internaliseReduceLambda :: (E.Exp -> InternaliseM Body)
+internaliseFoldLambda :: (E.Exp -> InternaliseM Body)
                         -> I.Ident
                         -> E.Lambda
-                        -> [(I.SubExp, I.SubExp)]
+                        -> [I.Type] -> [I.Type]
                         -> InternaliseM (I.Certificates, I.Lambda)
-internaliseReduceLambda internaliseBody ce lam args = do
-  let (acc,arr) = unzip args
-      rowtypes = map (I.rowType . I.subExpType) arr
-      acctypes = map I.subExpType acc
+internaliseFoldLambda internaliseBody ce lam acctypes arrtypes = do
+  let rowtypes = map I.rowType arrtypes
   (params, body, rettype) <- internaliseLambda internaliseBody ce lam $ acctypes ++ rowtypes
   let (_, value_body) = splitBody body
       (_, rettype_value) = splitType rettype

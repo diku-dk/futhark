@@ -28,8 +28,6 @@ module L0C.Internalise
   )
   where
 
-import Debug.Trace
-
 import Control.Applicative
 import Control.Monad.State  hiding (mapM)
 import Control.Monad.Reader hiding (mapM)
@@ -328,8 +326,8 @@ internaliseExp (E.Reduce lam ne arr _ loc) = do
   (c2,nes) <- tupToIdentList ne
   let cs = catMaybes [c1,c2]
   se <- conjoinCerts cs loc
-  (cs2, lam') <- internaliseReduceLambda internaliseBody se lam $
-                 zip (map I.Var nes) (map I.Var arrs)
+  (cs2, lam') <- internaliseFoldLambda internaliseBody se lam
+                 (map I.identType nes) (map I.identType arrs)
   return $ I.Reduce (cs++cs2) lam' (zip (map I.Var nes) (map I.Var arrs)) loc
 
 internaliseExp (E.Scan lam ne arr _ loc) = do
@@ -337,8 +335,8 @@ internaliseExp (E.Scan lam ne arr _ loc) = do
   (c2,nes) <- tupToIdentList ne
   let cs = catMaybes [c1,c2]
   se <- conjoinCerts cs loc
-  (cs2, lam') <- internaliseReduceLambda internaliseBody se lam $
-                 zip (map I.Var nes) (map I.Var arrs)
+  (cs2, lam') <- internaliseFoldLambda internaliseBody se lam
+                 (map I.identType nes) (map I.identType arrs)
   return $ I.Scan (cs++cs2) lam' (zip (map I.Var nes) (map I.Var arrs)) loc
 
 
@@ -349,19 +347,21 @@ internaliseExp (E.Filter lam arr _ loc) = do
   (outer_shape, lam') <- internaliseFilterLambda internaliseBody se lam $
                          map I.Var arrs
   certifySOAC se $ I.Filter cs lam' (map I.Var arrs) outer_shape loc
-{-
-internaliseExp (E.Redomap lam1 lam2 ne arr _ loc) = do
-  (c1,arrs) <- tupToIdentList arr
+
+internaliseExp (E.Redomap lam1 lam2 ne arrs _ loc) = do
+  (c1,arrs') <- tupToIdentList arrs
   (c2,nes) <- tupToIdentList ne
   let cs = catMaybes [c1,c2]
   se <- conjoinCerts cs loc
-  lam1' <- internaliseLambda se lam1
-  lam2' <- internaliseLambda se lam2
-  return $ I.Redomap cs lam1' lam2'
-           (map I.Var nes) (map I.Var arrs) loc
+  (cs2,lam1') <- internaliseFoldLambda internaliseBody se lam1
+                 (map I.identType nes) (map I.identType nes)
+  (cs3,lam2') <- internaliseFoldLambda internaliseBody se lam2
+                 (map I.identType nes) (map I.identType arrs')
+  return $ I.Redomap (cs++cs2++cs3) lam1' lam2'
+           (map I.Var nes) (map I.Var arrs') loc
 
 -- The "interesting" cases are over, now it's mostly boilerplate.
--}
+
 internaliseExp (E.Literal v loc) =
   return $ case internaliseValue v of
              [v'] -> I.SubExp $ I.Constant v' loc

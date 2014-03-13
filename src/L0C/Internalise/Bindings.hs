@@ -9,8 +9,6 @@ module L0C.Internalise.Bindings
   )
   where
 
-import Debug.Trace
-
 import Control.Applicative
 import Control.Monad.State  hiding (mapM)
 import Control.Monad.Reader hiding (mapM)
