@@ -95,13 +95,14 @@ internaliseMapLambda :: (E.Exp -> InternaliseM Body)
                      -> [I.SubExp]
                      -> InternaliseM (I.Certificates, I.Lambda)
 internaliseMapLambda internaliseBody ce lam args = do
-  let rowtypes = map (I.rowType . I.subExpType) args
+  let argtypes = map I.subExpType args
+      rowtypes = map I.rowType argtypes
   (params, body, rettype) <- internaliseLambda internaliseBody ce lam rowtypes
   let (shape_body, value_body) = splitBody body
       (rettype_shape, rettype_value) = splitType rettype
       shapefun = Lambda params shape_body
                  (replicate (length rettype_shape) $ I.Basic Int) loc
-      outer_shape = outerShape loc rowtypes
+      outer_shape = outerShape loc argtypes
   (cs,inner_shapes) <- bindMapShapes [ce] shapefun args outer_shape
   let rettype' = addTypeShapes rettype_value $
                  outer_shape : map I.Var inner_shapes
@@ -147,10 +148,11 @@ internaliseFilterLambda :: (E.Exp -> InternaliseM Body)
                      -> [I.SubExp]
                      -> InternaliseM (I.Ident, I.Lambda)
 internaliseFilterLambda internaliseBody ce lam args = do
-  let rowtypes = map (I.rowType . I.subExpType) args
+  let argtypes = map I.subExpType args
+      rowtypes = map I.rowType argtypes
   (params, body, _) <- internaliseLambda internaliseBody ce lam rowtypes
   let (_, value_body) = splitBody body
-      arg_outer_shape = outerShape loc rowtypes
+      arg_outer_shape = outerShape loc argtypes
   let filtfun = I.Lambda params value_body [I.Basic Bool] loc
   result_size <- bindFilterResultOuterShape ce filtfun args arg_outer_shape
   return (result_size, filtfun)
