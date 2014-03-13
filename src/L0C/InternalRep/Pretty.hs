@@ -86,7 +86,7 @@ instance Pretty SubExp where
 instance Pretty Body where
   ppr (LetPat pat e body _) =
     aliasComment pat $ align $
-    text "let" <+> align (ppBinding pat) <+>
+    text "let" <+> align (ppPattern pat) <+>
     (if linebreak
      then equals </> indent 2 (ppr e)
      else equals <+> align (ppr e)) <+> text "in" </>
@@ -101,19 +101,14 @@ instance Pretty Body where
                         If {} -> True
                         ArrayLit {} -> False
                         _ -> False
-  ppr (LetWith cs dest src idxs ve body _)
-    | dest == src =
-      text "let" <+> ppCertificates cs <> ppr dest <+> list (map ppr idxs) <+>
-      equals <+> align (ppr ve) <+>
-      text "in" </> ppr body
-    | otherwise =
-      text "let" <+> ppCertificates cs <> ppr dest <+> equals <+> ppr src <+>
-      text "with" <+> brackets (commasep (map ppr idxs)) <+>
-      text "<-" <+> align (ppr ve) <+>
-      text "in" </> ppr body
+  ppr (LetWith cs dest src idxs ve body _) =
+    text "let" <+> ppCertificates cs <> ppBinding dest <+> equals <+> ppr src <+>
+    text "with" <+> brackets (commasep (map ppr idxs)) <+>
+    text "<-" <+> align (ppr ve) <+>
+    text "in" </> ppr body
   ppr (DoLoop mergepat i bound loopbody letbody _) =
     aliasComment pat $
-    text "loop" <+> parens (ppBinding pat <+> equals <+> ppTuple' initexp) <+>
+    text "loop" <+> parens (ppPattern pat <+> equals <+> ppTuple' initexp) <+>
     equals <+> text "for" <+> ppr i <+> text "<" <+> align (ppr bound) <+> text "do" </>
     indent 2 (ppr loopbody) <+> text "in" </>
     ppr letbody
@@ -205,9 +200,11 @@ ppList as = case map ppr as of
               []     -> empty
               a':as' -> foldl (</>) (a' <> comma) $ map (<> comma) as'
 
-ppBinding :: [Ident] -> Doc
-ppBinding = braces . commasep . map ppTypeAndName
-  where ppTypeAndName ident = ppr (identType ident) <+> ppr ident
+ppPattern :: [Ident] -> Doc
+ppPattern = braces . commasep . map ppBinding
+
+ppBinding :: Ident -> Doc
+ppBinding ident = ppr (identType ident) <+> ppr ident
 
 ppTuple' :: Pretty a => [a] -> Doc
 ppTuple' ets = braces $ commasep $ map ppr ets
