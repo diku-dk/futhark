@@ -148,19 +148,22 @@ copyCtPropOneLambda prog lam = do
 
 copyCtPropBody :: Body -> CPropM Body
 
-copyCtPropBody (LetWith cs nm src inds el body pos) =
-  consuming src $ do
+copyCtPropBody (LetWith cs dest src inds el body pos) = do
+  src' <- copyCtPropIdent src
+  consuming src' $ do
     cs'    <- copyCtPropCerts cs
     el'    <- copyCtPropSubExp el
     inds'  <- mapM copyCtPropSubExp inds
     body'  <- copyCtPropBody body
-    return $ LetWith cs' nm src inds' el' body' pos
+    dest'  <- copyCtPropBnd dest
+    return $ LetWith cs' dest' src' inds' el' body' pos
 
 copyCtPropBody (LetPat pat e body loc) = do
+  pat' <- copyCtPropPat pat
   let continue e' = do
-        let bnds = getPropBnds pat e'
+        let bnds = getPropBnds pat' e'
         body' <- binding bnds $ copyCtPropBody body
-        return $ LetPat pat e' body' loc
+        return $ LetPat pat' e' body' loc
       continue' _ es = continue $ TupLit es loc
   e' <- copyCtPropExp e
   case e' of
@@ -172,11 +175,12 @@ copyCtPropBody (LetPat pat e body loc) = do
 
 copyCtPropBody (DoLoop merge idd n loopbdy letbdy loc) = do
   let (mergepat, mergeexp) = unzip merge
+  mergepat' <- copyCtPropPat mergepat
   mergeexp'    <- mapM copyCtPropSubExp mergeexp
   n'       <- copyCtPropSubExp n
   loopbdy' <- copyCtPropBody loopbdy
   letbdy'  <- copyCtPropBody letbdy
-  return $ DoLoop (zip mergepat mergeexp') idd n' loopbdy' letbdy' loc
+  return $ DoLoop (zip mergepat' mergeexp') idd n' loopbdy' letbdy' loc
 
 copyCtPropBody (Result cs es loc) =
   Result <$> copyCtPropCerts cs <*> mapM copyCtPropSubExp es <*> pure loc
@@ -347,6 +351,14 @@ copyCtPropExp e = mapExpM mapper e
                  , mapOnCertificates = copyCtPropCerts
                  }
 
+copyCtPropPat :: [IdentBase als Shape] -> CPropM [IdentBase als Shape]
+copyCtPropPat = mapM copyCtPropBnd
+
+copyCtPropBnd :: IdentBase als Shape -> CPropM (IdentBase als Shape)
+copyCtPropBnd (Ident vnm t loc) = do
+  dims <- mapM copyCtPropSubExp $ arrayDims t
+  return $ Ident vnm (t `setArrayShape` Shape dims) loc
+
 copyCtPropIdent :: Ident -> CPropM Ident
 copyCtPropIdent ident@(Ident vnm _ loc) = do
     bnd <- asks $ HM.lookup vnm . envVtable
@@ -366,9 +378,10 @@ copyCtPropCerts = liftM (nub . concat) . mapM check
           where loc = srclocOf idd
 
 copyCtPropLambda :: Lambda -> CPropM Lambda
-copyCtPropLambda (Lambda ids body tp loc) = do
-    body' <- copyCtPropBody body
-    return $ Lambda ids body' tp loc
+copyCtPropLambda (Lambda params body tp loc) = do
+  params' <- copyCtPropPat params
+  body' <- copyCtPropBody body
+  return $ Lambda params' body' tp loc
 
 ------------------------------------------------
 ---- Constant Folding                       ----
