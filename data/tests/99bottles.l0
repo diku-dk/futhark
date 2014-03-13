@@ -21,4 +21,7 @@ fun [[char]] bottles(int i) =
     concat(map(verse, map(op - (i), iota(i-1))), lastverse)
 
 fun [char] main() =
-    reduce(fn [char] ([char] x, [char] y) => concat(x,y), "", bottles(99))
+  let verses = bottles(99) in
+  loop (song="") = for i < size(0,verses) do
+    concat(song, verses[i]) in
+  song
