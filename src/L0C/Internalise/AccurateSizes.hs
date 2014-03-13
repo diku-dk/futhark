@@ -17,6 +17,7 @@ module L0C.Internalise.AccurateSizes
   )
   where
 
+import Control.Applicative
 import Control.Monad
 
 import Data.Loc
@@ -25,6 +26,7 @@ import Data.Monoid
 import L0C.Internalise.Monad
 import L0C.InternalRep
 import L0C.MonadFreshNames
+import L0C.Tools
 
 subExpShape :: SubExp -> [SubExp]
 subExpShape = shapeDims . arrayShape . subExpType
@@ -36,13 +38,28 @@ subExpsWithShapes = concatMap addShapes
 shapeFunctionName :: Name -> Name
 shapeFunctionName fname = fname <> nameFromString "_shape"
 
-splitFunction :: FunDec -> (FunDec, FunDec)
-splitFunction (fname,rettype,params,body,loc) =
-  ((shapeFname, map toDecl shapeRettype, params, shapeBody, loc),
-   (fname,      valueRettype,            params, valueBody, loc))
+splitFunction :: FunDec -> InternaliseM (FunDec, FunDec)
+splitFunction (fname,rettype,params,body,loc) = do
+  (params', copies) <-
+    liftM unzip $ forM params $ \param ->
+      if unique $ identType param then do
+        param' <- nonuniqueParam <$> newIdent' (++"_nonunique") param
+        return (param',
+                [([fromParam param],
+                  Copy (Var $ fromParam param') $ srclocOf param')])
+      else
+        return (param, [])
+  shapeBody' <- insertBindings $ do
+                  mapM_ (uncurry letBind) $ concat copies
+                  return shapeBody
+  return ((shapeFname, map toDecl shapeRettype, params', shapeBody', loc),
+          (fname,      valueRettype,            params,  valueBody,  loc))
   where (shapeBody,valueBody) = splitBody body
         (shapeRettype, valueRettype) = splitType rettype
         shapeFname = shapeFunctionName fname
+
+        nonuniqueParam param =
+          param { identType = identType param `setUniqueness` Nonunique }
 
 splitLambda :: ([Param], Body, [DeclType])
             -> (([Param], Body, [DeclType]),

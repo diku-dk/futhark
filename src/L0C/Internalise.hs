@@ -35,6 +35,7 @@ import Control.Monad.State  hiding (mapM)
 import Control.Monad.Reader hiding (mapM)
 
 import qualified Data.HashMap.Lazy as HM
+import qualified Data.HashSet      as HS
 import Data.Maybe
 import Data.List
 import Data.Loc
@@ -50,18 +51,19 @@ import L0C.Internalise.AccurateSizes
 import L0C.Internalise.TypesValues
 import L0C.Internalise.Bindings
 import L0C.Internalise.Lambdas
+import L0C.Substitute
 
 import Prelude hiding (mapM)
 
 -- | Convert a program in external L0 to a program in internal L0.
 internaliseProg :: E.Prog -> I.Prog
 internaliseProg prog =
-  I.Prog $ runInternaliseM prog $ liftM (concatMap split) $
-           mapM internaliseFun $ E.progFunctions prog
-  where split fun = let (sfun@(_,srettype,_,_,_), vfun) = splitFunction fun
-                    in if null srettype
-                       then [vfun]
-                       else [sfun,vfun]
+  I.Prog $ runInternaliseM prog $ liftM concat $
+           mapM (split <=< internaliseFun) $ E.progFunctions prog
+  where split fun = do (sfun@(_,srettype,_,_,_), vfun) <- splitFunction fun
+                       if null srettype
+                       then return [vfun]
+                       else return [sfun,vfun]
 
 internaliseFun :: E.FunDec -> InternaliseM I.FunDec
 internaliseFun (fname,rettype,params,body,loc) =
@@ -188,7 +190,8 @@ internaliseExp (E.Apply fname args rettype loc) = do
           | otherwise               =
             liftM (map I.Var) $
             letTupExp "fun_shape" $
-            I.Apply shapeFname args'' shapeRettype loc
+            I.Apply shapeFname [ (arg, I.Observe) | (arg, _) <- args'']
+            shapeRettype loc
 
 internaliseExp (E.LetPat pat e body loc) = do
   (c,ks) <- tupToIdentList e
@@ -368,7 +371,10 @@ internaliseExp (E.If ce te fe t loc) = do
   ce' <- letSubExp "cond" =<< internaliseExp ce
   (shape_te, value_te) <- splitBody <$> internaliseBody te
   (shape_fe, value_fe) <- splitBody <$> internaliseBody fe
-  if_shape <- letTupExp "if_shape" $ I.If ce' shape_te shape_fe (bodyType shape_te) loc
+  shape_te' <- insertBindings $ copyConsumed shape_te
+  shape_fe' <- insertBindings $ copyConsumed shape_fe
+  if_shape <- letTupExp "if_shape" $
+              I.If ce' shape_te' shape_fe' (bodyType shape_te) loc
   let t' = addTypeShapes (internaliseType t) $ map I.Var if_shape
   return $ I.If ce' value_te value_fe t' loc
 
@@ -552,3 +558,20 @@ boundsCheck v i e = do
   letExp "bounds_check" =<< eAssert check
   where bool = I.Basic Bool
         loc = srclocOf e
+
+copyConsumed :: I.Body -> InternaliseM I.Body
+copyConsumed e
+  | consumed <- HS.toList $ freeUniqueInBody e,
+    not (null consumed) = do
+      copies <- copyVariables consumed
+      let substs = HM.fromList $ zip (map I.identName consumed)
+                                     (map I.identName copies)
+      return $ substituteNames substs e
+  | otherwise = return e
+  where copyVariables = mapM copyVariable
+        copyVariable v =
+          letExp (textual (baseName $ I.identName v) ++ "_copy") $
+                 I.Copy (I.Var v) loc
+          where loc = srclocOf v
+
+        freeUniqueInBody = HS.filter (I.unique . I.identType) . I.freeInBody
