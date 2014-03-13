@@ -399,7 +399,9 @@ checkFun :: FunDec -> TypeM FunDec
 checkFun (fname, rettype, params, body, loc) = do
   params' <- checkParams
   (body', _) <-
-    collectDataflow $ binding (map fromParam params') $ checkBody body
+    collectDataflow $ binding (map fromParam params') $ do
+      checkPatSizes params'
+      checkBody body
 
   checkReturnAlias $ bodyType body'
 
@@ -899,6 +901,7 @@ checkBinding patloc pat tloc ts dflow
   | length pat == length ts = do
   (pat', idds) <-
     runStateT (zipWithM checkBinding' pat ts) []
+  checkPatSizes pat
   return (\m -> sequentially (tell dflow) (const . const $ binding idds m), pat')
   | otherwise =
   bad $ InvalidPatternError (Several pat) patloc (Several $ map toDecl ts) tloc
@@ -916,6 +919,14 @@ checkBinding patloc pat tloc ts dflow
             Nothing -> modify (ident:)
             Just (Ident name _ pos2) ->
               lift $ bad $ DupPatternError name (srclocOf ident) pos2
+
+checkPatSizes :: [IdentBase als Shape] -> TypeM ()
+checkPatSizes = mapM_ checkBndSizes
+
+checkBndSizes :: IdentBase als Shape -> TypeM ()
+checkBndSizes (Ident _ t _) = do
+  let dims = arrayDims t
+  mapM_ (require [Basic Int] <=< checkSubExp) dims
 
 validApply :: [DeclType] -> [Type] -> Bool
 validApply expected got =
