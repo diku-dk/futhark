@@ -637,17 +637,21 @@ freeWalker = identityWalker {
 
         bodyFree (LetPat pat e body _) = do
           expFree e
+          mapM_ (typeFree . identType) pat
           binding (HS.fromList pat) $ bodyFree body
         bodyFree (LetWith cs dest src idxs ve body _) = do
           mapM_ identFree cs
           identFree src
           mapM_ subExpFree idxs
+          typeFree $ identType dest
           subExpFree ve
           binding (HS.singleton dest) $ bodyFree body
-        bodyFree (DoLoop pat i boundexp loopbody letbody _) = do
-          mapM_ (subExpFree . snd) pat
+        bodyFree (DoLoop merge i boundexp loopbody letbody _) = do
+          let (mergepat, mergeexps) = unzip merge
+          mapM_ subExpFree mergeexps
           subExpFree boundexp
-          binding (i `HS.insert` HS.fromList (map fst pat)) $ do
+          mapM_ (typeFree . identType) mergepat
+          binding (i `HS.insert` HS.fromList mergepat) $ do
             bodyFree loopbody
             bodyFree letbody
         bodyFree (Result cs ses _) = do
@@ -734,7 +738,8 @@ safeExp (BinOp Mod _ _ _ _) = False
 safeExp (BinOp Pow _ _ _ _) = False
 safeExp _ = False
 
--- | Return the set of identifiers that are free in the given lambda.
+-- | Return the set of identifiers that are free in the given lambda,
+-- including shape annotations in the parameters.
 freeInLambda :: Lambda -> HS.HashSet Ident
 freeInLambda (Lambda params body _ _) =
   inParams <> inBody
