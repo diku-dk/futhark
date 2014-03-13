@@ -125,7 +125,8 @@ addTypeShapes (t:ts) shapes =
 
 addShapeAnnotations :: [IdentBase Names Rank] -> [Type] -> [Ident]
 addShapeAnnotations = zipWith addShapeAnnotation
-  where addShapeAnnotation v t = v { identType = t }
+  where addShapeAnnotation v t =
+          v { identType = identType v `setArrayShape` arrayShape t }
 
 annotateIdents :: [IdentBase Names Rank]
                -> [Type] -> ([Ident], [Type])
