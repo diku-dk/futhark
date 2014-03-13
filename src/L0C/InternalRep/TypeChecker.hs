@@ -399,9 +399,7 @@ checkFun :: FunDec -> TypeM FunDec
 checkFun (fname, rettype, params, body, loc) = do
   params' <- checkParams
   (body', _) <-
-    collectDataflow $ binding (map fromParam params') $ do
-      checkPatSizes params'
-      checkBody body
+    collectDataflow $ binding (map fromParam params') $ checkBody body
 
   checkReturnAlias $ bodyType body'
 
@@ -577,13 +575,16 @@ checkBody (DoLoop mergepat (Ident loopvar _ _)
       ununique ident =
         ident { identType = param (identType ident) Observe }
       -- Find the free variables of the loop body.
+      freeInRettype =
+        mconcat $ map (mconcat . map (freeInExp . SubExp) . arrayDims) rettype
       free = map ununique $ HS.toList $
-             freeInBody loopbody' `HS.difference` boundnames
+             (freeInBody loopbody' <> freeInRettype)
+             `HS.difference` boundnames
 
       -- These are the parameters expected by the function: All of the
       -- free variables, followed by the index, followed by the upper
       -- bound (currently not used), followed by the merge value.
-      params = free ++ [iparam, bound] ++ funparams
+  let params = free ++ [iparam, bound] ++ funparams
       bindfun env = env { envFtable = HM.insert fname
                                       (map toDecl rettype,
                                        map (toDecl . identType) params) $
@@ -698,7 +699,6 @@ checkExp (Apply fname args rettype loc) = do
                   returnType ftype (map diet paramtypes) (map subExpType args')
 
       checkFuncall (Just fname) loc paramtypes (map toDecl rettype') argflows
-
       return $ Apply fname (zip args' $ map diet paramtypes) rettype' loc
 
 checkExp (Index cs ident idxes pos) = do
@@ -901,8 +901,9 @@ checkBinding patloc pat tloc ts dflow
   | length pat == length ts = do
   (pat', idds) <-
     runStateT (zipWithM checkBinding' pat ts) []
-  checkPatSizes pat
-  return (\m -> sequentially (tell dflow) (const . const $ binding idds m), pat')
+  return (\m -> sequentially (tell dflow)
+                (const . const $ binding idds (checkPatSizes pat >> m)),
+          pat')
   | otherwise =
   bad $ InvalidPatternError (Several pat) patloc (Several $ map toDecl ts) tloc
   where checkBinding' (Ident name namet pos) t = do
