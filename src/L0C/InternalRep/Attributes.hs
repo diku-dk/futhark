@@ -695,22 +695,22 @@ consumedInBody = execWriter . bodyConsumed
         bodyConsumed (LetWith _ dest src _ _ body _) = do
           consume src
           unconsume (HS.singleton $ identName dest) $ bodyConsumed body
-        bodyConsumed (DoLoop pat i _ loopbody letbody _) =
-          unconsume (identName i `HS.insert`
-                     HS.fromList (map (identName . fst) pat)) $ do
+        bodyConsumed (DoLoop pat _ _ loopbody letbody _) =
+          unconsume (HS.fromList (map (identName . fst) pat)) $ do
             bodyConsumed loopbody
             bodyConsumed letbody
         bodyConsumed (Result {}) = return ()
 
         expConsumed = tell . consumedInExp
 
--- | Return the set of variables names consumed by the given
--- body.
+-- | Return the set of variable names consumed by the given
+-- expression.
 consumedInExp :: Exp -> HS.HashSet VName
 consumedInExp (Apply _ args _ _) =
   mconcat $ map (consumeArg . first subExpType) args
   where consumeArg (t, Consume) = aliases t
         consumeArg (_, Observe) = mempty
+consumedInExp (If _ tb fb _ _) = consumedInBody tb <> consumedInBody fb
 consumedInExp _ = mempty
 
 -- | An expression is safe if it is always well-defined (assuming that
