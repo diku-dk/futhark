@@ -45,6 +45,7 @@ module L0C.InternalRep.Attributes
   , arrayShape
   , arrayDims
   , arraySize
+  , arraysSize
   , setArrayShape
   , returnType
   , lambdaType
@@ -134,6 +135,13 @@ arraySize :: Int -> TypeBase als Shape -> SubExp
 arraySize i t = case drop i $ arrayDims t of
                   e : _ -> e
                   _     -> Constant (BasicVal $ IntVal 0) noLoc
+
+-- | Return the size of the given dimension in the first element of
+-- the given type list.  If the dimension does not exist, or no types
+-- are given, the zero constant is returned.
+arraysSize :: Int -> [TypeBase als Shape] -> SubExp
+arraysSize _ []    = Constant (BasicVal $ IntVal 0) noLoc
+arraysSize i (t:_) = arraySize i t
 
 -- | Set the dimensions of an array.  If the given type is not an
 -- array, return the type unchanged.
@@ -501,9 +509,9 @@ bodyType (Result _ ses _) = map subExpType ses
 typeOf :: Exp -> [Type]
 typeOf (SubExp e) = [subExpType e]
 typeOf (TupLit vs _) = map subExpType vs
-typeOf (ArrayLit es t _) =
+typeOf (ArrayLit es t loc) =
   [arrayOf t (Shape [n]) $ mconcat $ map (uniqueness . subExpType) es]
-  where n = Constant (BasicVal $ IntVal $ length es) noLoc
+  where n = Constant (BasicVal $ IntVal $ length es) loc
 typeOf (BinOp _ _ _ t _) = [t]
 typeOf (Not _ _) = [Basic Bool]
 typeOf (Negate e _) = [subExpType e]
@@ -535,11 +543,11 @@ typeOf (Copy e _) =
   [subExpType e `setUniqueness` Unique `setAliases` HS.empty]
 typeOf (Assert _ _) = [Basic Cert]
 typeOf (Conjoin _ _) = [Basic Cert]
-typeOf (Map _ f arrs _)
-  | arr : _     <- arrs,
-    Shape (n:_) <- arrayShape $ subExpType arr =
-    map (\x -> arrayOf x (Shape [n]) (uniqueProp x)) $ lambdaType f $ map subExpType arrs
-  | otherwise = []
+typeOf (Map _ f arrs _) =
+  [ arrayOf t (Shape [outersize]) (uniqueProp t)
+    | t <- lambdaType f arrts ]
+  where outersize = arraysSize 0 arrts
+        arrts     = map subExpType arrs
 typeOf (Reduce _ fun inputs _) =
   lambdaType fun $ map subExpType acc ++ map subExpType arrs
   where (acc, arrs) = unzip inputs

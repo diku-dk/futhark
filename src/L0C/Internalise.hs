@@ -576,7 +576,3 @@ copyConsumed e
           where loc = srclocOf v
 
         freeUniqueInBody = HS.filter (I.unique . I.identType) . I.freeInBody
-
-arraysSize :: Int -> [I.TypeBase als Shape] -> I.SubExp
-arraysSize _ []    = I.Constant (I.BasicVal $ I.IntVal 0) noLoc
-arraysSize i (t:_) = arraySize i t
