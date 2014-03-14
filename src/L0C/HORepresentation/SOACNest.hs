@@ -90,7 +90,7 @@ lambdaToBody l = fromMaybe (Fun l) $ liftM (uncurry $ flip NewNest) $ nested l
 data Combinator = Map Certificates NestBody [Nesting] SrcLoc
                 | Reduce Certificates NestBody [Nesting] [SubExp] SrcLoc
                 | Scan Certificates NestBody [Nesting] [SubExp] SrcLoc
-                | Filter Certificates NestBody [Nesting] Ident SrcLoc
+                | Filter Certificates NestBody [Nesting] SubExp SrcLoc
                 | Redomap Certificates Lambda NestBody [Nesting] [SubExp] SrcLoc
                  deriving (Show)
 

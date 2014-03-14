@@ -268,10 +268,10 @@ data Exp =
             -- checking.  If given (even as an empty list), no
             -- run-time bounds checking is done.
 
-            | Split Certificates SubExp SubExp SrcLoc
+            | Split Certificates SubExp SubExp SubExp SrcLoc
             -- ^ @split(1, [ 1, 2, 3, 4 ]) = {[1],[2, 3, 4]}@.
 
-            | Concat Certificates SubExp SubExp SrcLoc
+            | Concat Certificates SubExp SubExp SubExp SrcLoc
             -- ^ @concat([1],[2, 3, 4]) = [1, 2, 3, 4]@.
 
             | Copy SubExp SrcLoc
@@ -302,7 +302,7 @@ data Exp =
 
             | Reduce  Certificates Lambda [(SubExp, SubExp)] SrcLoc
             | Scan   Certificates Lambda [(SubExp, SubExp)] SrcLoc
-            | Filter  Certificates Lambda [SubExp] Ident SrcLoc
+            | Filter  Certificates Lambda [SubExp] SubExp SrcLoc
             -- ^ The 'Ident' should contain the outer shape of the
             -- result.
             | Redomap Certificates Lambda Lambda [SubExp] [SubExp] SrcLoc
@@ -323,8 +323,8 @@ instance Located Exp where
   locOf (Replicate _ _ pos) = locOf pos
   locOf (Reshape _ _ _ pos) = locOf pos
   locOf (Rearrange _ _ _ pos) = locOf pos
-  locOf (Split _ _ _ pos) = locOf pos
-  locOf (Concat _ _ _ pos) = locOf pos
+  locOf (Split _ _ _ _ pos) = locOf pos
+  locOf (Concat _ _ _ _ pos) = locOf pos
   locOf (Copy _ pos) = locOf pos
   locOf (Assert _ loc) = locOf loc
   locOf (Conjoin _ loc) = locOf loc

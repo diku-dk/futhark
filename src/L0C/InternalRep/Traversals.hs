@@ -153,13 +153,14 @@ mapExpM tv (Reshape cs shape arrexp loc) =
 mapExpM tv (Rearrange cs perm e loc) =
   pure Rearrange <*> mapOnCertificates tv cs <*>
        pure perm <*> mapOnSubExp tv e <*> pure loc
-mapExpM tv (Split cs nexp arrexp loc) =
+mapExpM tv (Split cs nexp arrexp size loc) =
   pure Split <*> mapOnCertificates tv cs <*>
        mapOnSubExp tv nexp <*> mapOnSubExp tv arrexp <*>
-       pure loc
-mapExpM tv (Concat cs x y loc) =
+       mapOnSubExp tv size <*> pure loc
+mapExpM tv (Concat cs x y size loc) =
   pure Concat <*> mapOnCertificates tv cs <*>
-       mapOnSubExp tv x <*> mapOnSubExp tv y <*> pure loc
+       mapOnSubExp tv x <*> mapOnSubExp tv y <*>
+       mapOnSubExp tv size <*> pure loc
 mapExpM tv (Copy e loc) =
   pure Copy <*> mapOnSubExp tv e <*> pure loc
 mapExpM tv (Assert e loc) =
@@ -186,7 +187,7 @@ mapExpM tv (Filter cs fun arrexps outer_shape loc) =
   pure Filter <*> mapOnCertificates tv cs <*>
        mapOnLambda tv fun <*>
        mapM (mapOnSubExp tv) arrexps <*>
-       mapOnIdent tv outer_shape <*> pure loc
+       mapOnSubExp tv outer_shape <*> pure loc
 mapExpM tv (Redomap cs redfun mapfun accexps arrexps loc) =
   pure Redomap <*> mapOnCertificates tv cs <*>
        mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>

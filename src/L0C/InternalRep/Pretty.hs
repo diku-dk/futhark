@@ -147,9 +147,9 @@ instance Pretty Exp where
     ppCertificates cs <> text "reshape" <> apply [apply (map ppr shape), ppr e]
   ppr (Rearrange cs perm e _) =
     ppCertificates cs <> text "rearrange" <> apply [apply (map ppr perm), ppr e]
-  ppr (Split cs e a _) =
+  ppr (Split cs e a _ _) =
     ppCertificates cs <> text "split" <> apply [ppr e, ppr a]
-  ppr (Concat cs x y _) =
+  ppr (Concat cs x y _ _) =
     ppCertificates cs <> text "concat" <> apply [ppr x, ppr y]
   ppr (Copy e _) = text "copy" <> parens (ppr e)
   ppr (Assert e _) = text "assert" <> parens (ppr e)

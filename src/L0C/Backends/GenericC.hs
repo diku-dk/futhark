@@ -708,7 +708,7 @@ compileExp' place (Rearrange _ perm arrexp _) = do
                      $stm:copy
                    }|]
 
-compileExp' place (Split _ posexp arrexp _) = do
+compileExp' place (Split _ posexp arrexp _ _) = do
   arr <- new "split_arr"
   pos <- new "split_pos"
   arrexp' <- compileSubExp (varExp arr) arrexp
@@ -733,7 +733,7 @@ compileExp' place (Split _ posexp arrexp _) = do
                      $exp:place1.shape[0] -= $id:pos;
                    }|]
 
-compileExp' place (Concat _ xarr yarr _) = do
+compileExp' place (Concat _ xarr yarr _ _) = do
   x <- new "concat_x"
   y <- new "concat_y"
   xarr' <- compileSubExp (varExp x) xarr

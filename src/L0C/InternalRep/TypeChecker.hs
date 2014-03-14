@@ -735,19 +735,21 @@ checkExp (Rearrange cs perm arrexp pos) = do
     bad $ PermutationError pos perm rank
   return $ Rearrange cs' perm arrexp' pos
 
-checkExp (Split cs splitexp arrexp pos) = do
+checkExp (Split cs splitexp arrexp secsize pos) = do
   cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
   splitexp' <- require [Basic Int] =<< checkSubExp splitexp
+  secsize' <- require [Basic Int] =<< checkSubExp secsize
   arrexp' <- checkSubExp arrexp
   _ <- rowTypeM arrexp' -- Just check that it's an array.
-  return $ Split cs' splitexp' arrexp' pos
+  return $ Split cs' splitexp' arrexp' secsize' pos
 
-checkExp (Concat cs arr1exp arr2exp pos) = do
+checkExp (Concat cs arr1exp arr2exp ressize pos) = do
   cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
   arr1exp' <- checkSubExp arr1exp
   arr2exp' <- require [subExpType arr1exp'] =<< checkSubExp arr2exp
+  ressize' <- require [Basic Int] =<< checkSubExp ressize
   _ <- rowTypeM arr2exp' -- Just check that it's an array.
-  return $ Concat cs' arr1exp' arr2exp' pos
+  return $ Concat cs' arr1exp' arr2exp' ressize' pos
 
 checkExp (Copy e pos) = do
   e' <- checkSubExp e
@@ -805,7 +807,7 @@ checkExp (Scan ass fun inputs pos) = do
 
 checkExp (Filter ass fun arrexps outer_shape pos) = do
   ass' <- mapM (requireI [Basic Cert] <=< checkIdent) ass
-  outer_shape' <- requireI [Basic Int] =<< checkIdent outer_shape
+  outer_shape' <- require [Basic Int] =<< checkSubExp outer_shape
   (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
   fun' <- checkLambda fun arrargs
   let funret = lambdaType fun' $ map argType arrargs

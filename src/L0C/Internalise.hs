@@ -280,39 +280,38 @@ internaliseExp (E.Reshape cs shape e loc) = do
 internaliseExp (E.Split cs nexp arrexp loc) = do
   let cs' = internaliseCerts cs
   nexp' <- letSubExp "n" =<< internaliseExp nexp
-  uncurry (internalise cs' nexp') =<< tupToIdentList arrexp
-  where internalise _ _ _ [] = -- Will this ever happen?
-          fail "L0C.Internalise.internaliseExp Split: Empty array"
-        internalise cs' nexp' _ [arr] =
-          return $ I.Split cs' nexp' (I.Var arr) loc
-        internalise cs' nexp' c arrs = do
-          cs'' <- mergeCerts (certify c cs')
-          partnames <- forM (map I.identType arrs) $ \et -> do
-                         a <- fst <$> newVar loc "split_a" et
-                         b <- fst <$> newVar loc "split_b" et
-                         return (a, b)
-          let cert = maybe (given loc) I.Var cs''
-              combsplit arr (a,b) =
-                letBind [a,b] $ I.Split (certify c []) nexp' (I.Var arr) loc
-              els = (cert : map (I.Var . fst) partnames) ++
-                    (cert : map (I.Var . snd) partnames)
-          zipWithM_ combsplit arrs partnames
-          return $ I.TupLit els loc
+  (c, arrs) <- tupToIdentList arrexp
+  ressize <-
+    letSubExp "size" $ I.BinOp I.Minus (arraysSize 0 $ map I.identType arrs)
+                                       nexp'
+                                       (I.Basic Int) loc
+  cs'' <- mergeCerts $ certify c cs'
+  partnames <- forM (map I.identType arrs) $ \et -> do
+                 a <- fst <$> newVar loc "split_a" et
+                 b <- fst <$> newVar loc "split_b" et
+                 return (a, b)
+  let cert = maybe (given loc) I.Var cs''
+      combsplit arr (a,b) =
+        letBind [a,b] $ I.Split (certify c []) nexp' (I.Var arr) ressize loc
+      els = (cert : map (I.Var . fst) partnames) ++
+            (cert : map (I.Var . snd) partnames)
+  zipWithM_ combsplit arrs partnames
+  return $ I.TupLit els loc
 
 internaliseExp (E.Concat cs x y loc) = do
   (xc,xs) <- tupToIdentList x
   (yc,ys) <- tupToIdentList y
   let cs' = internaliseCerts cs
-  internalise cs' xc xs yc ys
-  where internalise cs' _ [x'] _ [y'] =
-         return $ I.Concat cs' (I.Var x') (I.Var y') loc
-        internalise cs' xc xs yc ys = do
-          let certs = catMaybes [xc,yc]++cs'
-              conc xarr yarr =
-                I.Concat certs (I.Var xarr) (I.Var yarr) loc
-          c' <- mergeCerts certs
-          concs <- letSubExps "concat" $ zipWith conc xs ys
-          return $ tuplit c' loc concs
+  ressize <-
+    letSubExp "size" $ I.BinOp I.Plus (arraysSize 0 $ map I.identType xs)
+                                      (arraysSize 0 $ map I.identType ys)
+                                      (I.Basic Int) loc
+  let certs = catMaybes [xc,yc]++cs'
+      conc xarr yarr =
+        I.Concat certs (I.Var xarr) (I.Var yarr) ressize loc
+  c' <- mergeCerts certs
+  concs <- letSubExps "concat" $ zipWith conc xs ys
+  return $ tuplit c' loc concs
 
 internaliseExp (E.Map lam arr _ loc) = do
   (c,arrs) <- tupToIdentList arr
@@ -346,7 +345,7 @@ internaliseExp (E.Filter lam arr _ loc) = do
   se <- conjoinCerts cs loc
   (outer_shape, lam') <- internaliseFilterLambda internaliseBody se lam $
                          map I.Var arrs
-  certifySOAC se $ I.Filter cs lam' (map I.Var arrs) outer_shape loc
+  certifySOAC se $ I.Filter cs lam' (map I.Var arrs) (I.Var outer_shape) loc
 
 internaliseExp (E.Redomap lam1 lam2 ne arrs _ loc) = do
   (c1,arrs') <- tupToIdentList arrs
@@ -577,3 +576,7 @@ copyConsumed e
           where loc = srclocOf v
 
         freeUniqueInBody = HS.filter (I.unique . I.identType) . I.freeInBody
+
+arraysSize :: Int -> [I.TypeBase als Shape] -> I.SubExp
+arraysSize _ []    = I.Constant (I.BasicVal $ I.IntVal 0) noLoc
+arraysSize i (t:_) = arraySize i t

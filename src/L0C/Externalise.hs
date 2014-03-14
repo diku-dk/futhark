@@ -84,12 +84,12 @@ externaliseExp (I.Index cs src idxs loc) =
           (Just [])
           (map externaliseSubExp idxs)
           loc
-externaliseExp (I.Split cs ne ae loc) =
+externaliseExp (I.Split cs ne ae _ loc) =
   E.Split (externaliseCerts cs)
           (externaliseSubExp ne)
           (externaliseSubExp ae)
           loc
-externaliseExp (I.Concat cs x y loc) =
+externaliseExp (I.Concat cs x y _ loc) =
   E.Concat (externaliseCerts cs)
            (externaliseSubExp x)
            (externaliseSubExp y)

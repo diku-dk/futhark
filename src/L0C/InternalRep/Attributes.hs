@@ -142,6 +142,13 @@ setArrayShape :: ArrayShape newshape =>
 setArrayShape (Array et _ u as) ds = Array et ds u as
 setArrayShape (Basic t)  _         = Basic t
 
+-- | Replace the size of the outermost dimension of an array.  If the
+-- given type is not an array, it is returned unchanged.
+setOuterSize :: TypeBase as Shape -> SubExp -> TypeBase as Shape
+setOuterSize t e = case arrayShape t of
+                      Shape (_:es) -> t `setArrayShape` Shape (e : es)
+                      _            -> t
+
 -- | @x `subuniqueOf` y@ is true if @x@ is not less unique than @y@.
 subuniqueOf :: Uniqueness -> Uniqueness -> Bool
 subuniqueOf Nonunique Unique = False
@@ -518,10 +525,11 @@ typeOf (Reshape _ shape e _) =
 typeOf (Rearrange _ perm e _) =
   [subExpType e `setArrayShape` Shape (permuteShape perm shape)]
   where Shape shape = arrayShape $ subExpType e
-typeOf (Split _ _ e _) =
-  [subExpType e, subExpType e]
-typeOf (Concat _ x y _) =
-  [subExpType x `setUniqueness` u]
+typeOf (Split _ ne e secsize _) =
+  [subExpType e `setOuterSize` ne,
+   subExpType e `setOuterSize` secsize]
+typeOf (Concat _ x y ressize _) =
+  [subExpType x `setUniqueness` u `setOuterSize` ressize]
   where u = uniqueness (subExpType x) <> uniqueness (subExpType y)
 typeOf (Copy e _) =
   [subExpType e `setUniqueness` Unique `setAliases` HS.empty]
@@ -539,10 +547,7 @@ typeOf (Scan _ _ inputs _) =
   map ((`setUniqueness` Unique) . subExpType) arrs
   where (_, arrs) = unzip inputs
 typeOf (Filter _ _ arrs outer_shape _) =
-  map (setOuterShape . subExpType) arrs
-  where setOuterShape t =
-          let Shape dims = arrayShape t
-          in t `setArrayShape` Shape (Var outer_shape : drop 1 dims)
+  map ((`setOuterSize` outer_shape) . subExpType) arrs
 typeOf (Redomap _ outerfun innerfun acc arrs _) =
   lambdaType outerfun $ lambdaType innerfun (innerres ++ innerres)
   where innerres = lambdaType innerfun

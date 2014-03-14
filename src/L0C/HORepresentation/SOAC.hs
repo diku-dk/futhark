@@ -263,7 +263,7 @@ transposeInput k n inp =
 data SOAC = Map Certificates Lambda [Input] SrcLoc
           | Reduce  Certificates Lambda [(SubExp,Input)] SrcLoc
           | Scan Certificates Lambda [(SubExp,Input)] SrcLoc
-          | Filter Certificates Lambda [Input] Ident SrcLoc
+          | Filter Certificates Lambda [Input] SubExp SrcLoc
           | Redomap Certificates Lambda Lambda [SubExp] [Input] SrcLoc
             deriving (Show)
 

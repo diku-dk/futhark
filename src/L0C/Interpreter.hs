@@ -392,7 +392,7 @@ evalExp (Reshape _ shapeexp arrexp pos) = do
 evalExp (Rearrange _ perm arrexp _) =
   single <$> permuteArray perm <$> evalSubExp arrexp
 
-evalExp (Split _ splitexp arrexp pos) = do
+evalExp (Split _ splitexp arrexp _ pos) = do
   split <- evalSubExp splitexp
   vs <- arrToList pos =<< evalSubExp arrexp
   case split of
@@ -404,7 +404,7 @@ evalExp (Split _ splitexp arrexp pos) = do
     _ -> bad $ TypeError pos "evalExp Split"
   where rt = rowType $ subExpType arrexp
 
-evalExp (Concat _ arr1exp arr2exp pos) = do
+evalExp (Concat _ arr1exp arr2exp _ pos) = do
   elems1 <- arrToList pos =<< evalSubExp arr1exp
   elems2 <- arrToList pos =<< evalSubExp arr2exp
   return $ single $ arrayVal (elems1 ++ elems2) $ stripArray 1 $ subExpType arr1exp
