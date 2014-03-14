@@ -17,6 +17,7 @@ import Data.Loc
 import qualified Data.HashMap.Strict as HM
 
 import L0C.InternalRep
+import L0C.InternalRep.Renamer
 import L0C.MonadFreshNames
 import L0C.NeedNames
 import L0C.Tools
@@ -25,7 +26,7 @@ import L0C.Tools
 transformProg :: Prog -> Prog
 transformProg prog =
   let src = newNameSourceForProg prog
-  in Prog $ fst $ runInlinerM src $ mapM transformFun $ progFunctions prog
+  in renameProg $ Prog $ fst $ runInlinerM src $ mapM transformFun $ progFunctions prog
 
 -- | Transform just a single expression.
 transformBody :: NameSource VName -> Body -> (Body, NameSource VName)
