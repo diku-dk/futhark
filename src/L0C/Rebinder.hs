@@ -390,7 +390,8 @@ hoistInExp :: Exp -> HoistM Exp
 hoistInExp (If c e1 e2 t loc) = do
   (e1',e2') <- hoistCommon (hoistInBody e1) (hoistInBody e2)
   c' <- hoistInSubExp c
-  return $ If c' e1' e2' t loc
+  t' <- mapM hoistInType t
+  return $ If c' e1' e2' t' loc
 hoistInExp e = hoistInExpBase e
 
 hoistInExpBase :: Exp -> HoistM Exp
@@ -401,6 +402,7 @@ hoistInExpBase = mapExpM hoist
                 , mapOnSubExp = hoistInSubExp
                 , mapOnLambda = hoistInLambda
                 , mapOnIdent = hoistInIdent
+                , mapOnType = hoistInType
                 }
 
 hoistInSubExp :: SubExp -> HoistM SubExp
@@ -410,6 +412,10 @@ hoistInSubExp (Constant v loc) = return $ Constant v loc
 hoistInIdent :: Ident -> HoistM Ident
 hoistInIdent v = do boundFree $ HS.singleton $ identName v
                     return v
+
+hoistInType :: Type -> HoistM Type
+hoistInType t = do dims <- mapM hoistInSubExp $ arrayDims t
+                   return $ t `setArrayShape` Shape dims
 
 hoistInLambda :: Lambda -> HoistM Lambda
 hoistInLambda (Lambda params body rettype loc) = do
