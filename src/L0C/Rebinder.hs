@@ -373,14 +373,19 @@ hoistCommon m1 m2 = pass $ do
 
 hoistInBody :: Body -> HoistM Body
 hoistInBody (LetPat pat e body _) = do
+  pat' <- mapM hoistInIdent pat
   e' <- hoistInExp e
-  bindLet pat e' $ hoistInBody body
+  bindLet pat' e' $ hoistInBody body
 hoistInBody (LetWith cs dest src idxs ve body _) =
   bindLetWith cs dest src idxs ve $ hoistInBody body
 hoistInBody (DoLoop merge loopvar boundexp loopbody letbody _) = do
+  let (mergepat, mergeexp) = unzip merge
   loopbody' <- blockIfSeq [hasFree boundnames, isConsumed] $
                hoistInBody loopbody
-  bindLoop merge loopvar boundexp loopbody' $ hoistInBody letbody
+  mergepat' <- mapM hoistInIdent mergepat
+  mergeexp' <- mapM hoistInSubExp mergeexp
+  bindLoop (zip mergepat' mergeexp') loopvar boundexp loopbody' $
+           hoistInBody letbody
   where boundnames = identName loopvar `HS.insert` patNameSet (map fst merge)
 hoistInBody (Result cs es loc) =
   Result <$> mapM hoistInIdent cs
@@ -411,7 +416,8 @@ hoistInSubExp (Constant v loc) = return $ Constant v loc
 
 hoistInIdent :: Ident -> HoistM Ident
 hoistInIdent v = do boundFree $ HS.singleton $ identName v
-                    return v
+                    t' <- hoistInType $ identType v
+                    return v { identType = t' }
 
 hoistInType :: Type -> HoistM Type
 hoistInType t = do dims <- mapM hoistInSubExp $ arrayDims t
