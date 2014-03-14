@@ -113,12 +113,15 @@ deadCodeElimBody :: Body -> DCElimM Body
 
 deadCodeElimBody (LetPat pat e body pos) = do
   let idds = map identName pat
-  (body', noref) <- collectRes idds $ binding idds $ deadCodeElimBody body
+  ((pat',body'), noref) <-
+    collectRes idds $ binding idds $ do
+      (pat', _) <- collectRes idds $ deadCodeElimPat pat
+      body' <- deadCodeElimBody body
+      return (pat', body')
 
   if noref
   then changed $ return body'
   else do e' <- deadCodeElimExp e
-          pat' <- deadCodeElimPat pat
           return $ LetPat pat' e' body' pos
 
 deadCodeElimBody (LetWith cs dest src idxs el body pos) = do
@@ -143,14 +146,17 @@ deadCodeElimBody (LetWith cs dest src idxs el body pos) = do
 deadCodeElimBody (DoLoop merge idd n loopbdy letbdy pos) = do
   let (mergepat, mergeexp) = unzip merge
       idds = map identName mergepat
-  (letbdy',noref) <- collectRes idds $ binding idds $ deadCodeElimBody letbdy
+  ((mergepat', letbdy'),noref) <-
+    collectRes idds $ binding idds $ do
+      (mergepat', _) <- collectRes idds $ deadCodeElimPat mergepat
+      body' <- deadCodeElimBody letbdy
+      return (mergepat', body')
   if noref
   then changed $ return letbdy'
   else do
     mergeexp' <- mapM deadCodeElimSubExp mergeexp
     n'        <- deadCodeElimSubExp n
     loopbdy'  <- binding ( identName idd : idds) $ deadCodeElimBody loopbdy
-    mergepat' <- deadCodeElimPat mergepat
     return $ DoLoop (zip mergepat' mergeexp') idd n' loopbdy' letbdy' pos
 
 deadCodeElimBody (Result cs es loc) =
