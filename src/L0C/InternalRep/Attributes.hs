@@ -642,8 +642,9 @@ freeWalker = identityWalker {
              , walkOnCertificates = mapM_ identFree
              , walkOnType = typeFree
              }
-  where identFree ident =
+  where identFree ident = do
           tell $ HS.singleton ident
+          typeFree $ identType ident
 
         subExpFree (Var ident) = identFree ident
         subExpFree (Constant {})  = return ()
