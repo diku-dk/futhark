@@ -201,13 +201,13 @@ copyCtPropExp :: Exp -> CPropM Exp
 copyCtPropExp (TupLit es loc) =
   TupLit <$> mapM copyCtPropSubExp es <*> pure loc
 
-copyCtPropExp (Index cs idd@(Ident vnm tp p) inds pos) = do
+copyCtPropExp (Index cs orig_idd inds pos) = do
+  idd@(Ident vnm _ _) <- copyCtPropIdent orig_idd
   inds' <- mapM copyCtPropSubExp inds
   bnd   <- asks $ HM.lookup vnm . envVtable
   cs'   <- copyCtPropCerts cs
   case bnd of
     Nothing             -> return $ Index cs' idd inds' pos
-    Just (VarId  id' _) -> changed $ Index cs' (Ident id' tp p) inds' pos
     Just (Value v@(ArrayVal _ _))
       | Just iis <- ctIndex inds',
         length iis == length (valueShape v),
