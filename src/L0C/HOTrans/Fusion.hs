@@ -355,7 +355,7 @@ fusionGatherBody fres (LetPat pat e body _)
           (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
           greedyFuse False used_lam blres (pat, soac)
 
-        SOAC.Filter _ lam _ _ -> do
+        SOAC.Filter _ lam _ _ _ -> do
           bres  <- bindingFamily pat $ fusionGatherBody fres body
           (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
           greedyFuse False used_lam blres (pat, soac)
@@ -399,7 +399,8 @@ fusionGatherBody fres (LetPat pat (Replicate n el loc) body _) = do
   (used_set, bres') <- getUnfusableSet loc bres [SubExp n,SubExp el]
   repl_idnm <- newVName "repl_x"
   let repl_id = Ident repl_idnm (Basic Int) loc
-      repl_lam = Lambda [toParam repl_id] (Result [] [el] loc) [toDecl $ subExpType el] loc
+      repl_lam = Lambda [toParam repl_id] (Result [] [el] loc)
+                 [toConstType $ subExpType el] loc
       soac_repl= SOAC.Map [] repl_lam [SOAC.Input [] $ SOAC.Iota n] loc
   greedyFuse True used_set bres' (pat, soac_repl)
 
@@ -468,7 +469,7 @@ fusionGatherExp fres (If cond e_then e_else _ _) = do
 fusionGatherExp _ (Map     _ _ _     loc) = errorIllegal "map"    loc
 fusionGatherExp _ (Reduce  _ _ _     loc) = errorIllegal "reduce" loc
 fusionGatherExp _ (Scan    _ _ _     loc) = errorIllegal "scan"   loc
-fusionGatherExp _ (Filter  _ _ _     loc) = errorIllegal "filter" loc
+fusionGatherExp _ (Filter  _ _ _   _ loc) = errorIllegal "filter" loc
 fusionGatherExp _ (Redomap _ _ _ _ _ loc) = errorIllegal "redomap" loc
 
 -----------------------------------

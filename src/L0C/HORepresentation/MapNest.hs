@@ -118,31 +118,41 @@ toSOACNest (MapNest cs body ns inps loc) =
 fixInputs :: [(Param, SOAC.Input)] -> [(Param, SOAC.Input)]
           -> NeedNames [(Param, SOAC.Input)]
 fixInputs ourInps childInps =
-  reverse . snd <$> foldM inspect (ourInps, []) childInps
+  removeTypes . reverse . snd <$> foldM inspect (addTypes ourInps, []) (addTypes childInps)
   where
-    isParam x (y, _) = identName x == identName y
+    isParam x (y, _, _) = identName x == identName y
+
+    removeTypes l =
+      [ (p, inp) | (p, _, inp) <- l ]
+
+    addTypes l =
+      [ (p, t, inp) | ((p,inp),t) <- zip l $ SOAC.inputTypes $ map snd l ]
 
     findParam remPs v
       | ([ourP], remPs') <- partition (isParam v) remPs = Just (ourP, remPs')
       | otherwise                                       = Nothing
 
-    inspect :: ([(Param, SOAC.Input)], [(Param, SOAC.Input)])
-            -> (Param, SOAC.Input)
-            -> NeedNames ([(Param, SOAC.Input)], [(Param, SOAC.Input)])
-    inspect (remPs, newInps) (_, SOAC.Input [] (SOAC.Var v))
+    inspect :: ([(Param, Type, SOAC.Input)], [(Param, Type, SOAC.Input)])
+            -> (Param, Type, SOAC.Input)
+            -> NeedNames ([(Param, Type, SOAC.Input)], [(Param, Type, SOAC.Input)])
+    inspect (remPs, newInps) (_, _, SOAC.Input [] (SOAC.Var v))
       | Just (ourP, remPs') <- findParam remPs v =
           return (remPs', ourP:newInps)
 
-    inspect (remPs, newInps) (param, inp@(SOAC.Input ts ia)) =
+    inspect (remPs, newInps) (param, inpt, inp@(SOAC.Input ts ia)) =
       case ia of
-        SOAC.Var v | Just ((p,pInp), remPs') <- findParam remPs v ->
-          let pInp' = SOAC.transformRows ts pInp
+        SOAC.Var v | Just ((p,pInpt,pInp), remPs') <- findParam remPs v ->
+          let pInp'  = SOAC.transformRows ts pInp
+              pInpt' = SOAC.transformTypeRows ts pInpt
           in return (remPs',
-                     (p { identType = undefined $ rowType $ SOAC.inputType pInp' },
+                     (p { identType = rowType pInpt' `setAliases` () },
+                      pInpt',
                       pInp')
                      : newInps)
         _ -> do
           newParam <- Ident <$> newNameFromString (baseString (identName param) ++ "_rep")
-                            <*> pure (SOAC.inputType inp)
+                            <*> pure inpt
                             <*> pure (srclocOf inp)
-          return (remPs, (undefined newParam, SOAC.Input (ts++[SOAC.Repeat]) ia) : newInps)
+          let outer:shape = arrayDims inpt
+              inpt' = inpt `setArrayShape` Shape (outer : outer : shape)
+          return (remPs, (toParam newParam, inpt', SOAC.Input (ts++[SOAC.Repeat]) ia) : newInps)

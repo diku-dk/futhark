@@ -198,8 +198,9 @@ mapScanFusionOK outIds inp1 ker =
   length inp1 == length replacing &&
   and (zipWith subtypeOf
        (sort $ map (rowType . identType) replacing)
-       (sort $ map (rowType . SOAC.inputType) inp1))
-  where replacing = filter (`elem` outIds) $
+       (sort inpts))
+  where inpts = SOAC.inputTypes inp1
+        replacing = filter (`elem` outIds) $
                     mapMaybe SOAC.isVarInput $
                     inputs ker
 
@@ -262,11 +263,11 @@ fuseSOACwithKer outIds soac1 ker = do
       let (res_lam, new_inp) = fuseFilterIntoFold lam1 inp1_arr outPairs lam2 inp2_arr names
       success $ SOAC.Redomap (cs1++cs2) lam21 res_lam nes new_inp pos
 
-    (SOAC.Filter _ _ _ pos, SOAC.Filter {})
+    (SOAC.Filter _ _ _ ressize pos, SOAC.Filter {})
       | filterFusionOK outIds ker -> do
       name <- newVName "check"
       let (res_lam, new_inp) = fuseFilters lam1 inp1_arr outPairs lam2 inp2_arr name
-      success $ SOAC.Filter (cs1++cs2) res_lam new_inp pos
+      success $ SOAC.Filter (cs1++cs2) res_lam new_inp ressize pos
 
     -- Nothing else worked, so let's try rewriting to redomap if
     -- possible.
@@ -401,7 +402,7 @@ fixupInputs inpIds inps =
         inputRearrange _                                          = Nothing
 
         fixupInput d perm inp
-          | arrayRank (SOAC.inputType inp) > d =
+          | SOAC.inputRank inp > d =
               Just $ SOAC.addTransform (SOAC.Rearrange [] $ permuteInverse perm) inp
           | otherwise = Nothing
 
@@ -412,18 +413,19 @@ pullReshape nest (OReshape cs shape:ots)
       let loc = srclocOf nest
           inputs' = [ SOAC.Input (ts ++ [SOAC.ReshapeOuter cs shape]) ia
                       | SOAC.Input ts ia <- Nest.inputs nest ]
-          outernest i = do
-            let j  = length shape - 1 - i
-                addDims t = arrayType j t $ uniqueness t
+          inputTypes = SOAC.inputTypes inputs'
+          outernest outershape = do
+            let addDims t = arrayOf t (Shape outershape) $ uniqueness t
                 retTypes = map addDims $ Nest.returnType op
 
-            ps <- forM (zip (Nest.params op) inputs') $ \(p, inp) -> do
-                    let t = rowType (stripArray i $ SOAC.inputType inp)
+            ps <- forM (zip (Nest.params op) inputTypes) $
+                  \(p, inpt) -> do
+                    let t = rowType (stripArray (length outershape-1) inpt)
                             `setUniqueness` uniqueness (identType p)
                     newIdent "pullReshape_param" t $ srclocOf p
 
             bnds <- forM retTypes $ \t ->
-                      newIdent "pullReshape_bnd" (fromDecl t) loc
+                      fromParam <$> newIdent "pullReshape_bnd" t loc
 
             return Nest.Nesting {
                           Nest.nestingParams = ps
@@ -432,7 +434,7 @@ pullReshape nest (OReshape cs shape:ots)
                         , Nest.nestingPostBody = Result [] (map Var bnds) loc
                         , Nest.nestingReturnType = retTypes
                         }
-      outerNests <- mapM outernest [0..length shape - 2]
+      outerNests <- mapM outernest $ drop 1 $ reverse $ drop 1 $ tails shape
       let nesting' = outerNests ++ Nest.nesting op
           nest'   = Nest.SOACNest {
                       Nest.inputs    = inputs'

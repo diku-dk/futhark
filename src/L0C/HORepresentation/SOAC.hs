@@ -35,8 +35,11 @@ module L0C.HORepresentation.SOAC
   , transformFromExp
   , InputArray (..)
   , inputArray
-  , inputType
+  , inputRank
+  , inputTypes
+  , inputsWithTypes
   , transformRows
+  , transformTypeRows
   , transposeInput
   -- ** Converting to and from expressions
   , inputFromSubExp
@@ -148,9 +151,7 @@ inputFromSubExp _          = Nothing
 
 -- | Convert SOAC inputs to the corresponding expressions.
 inputsToSubExps :: [Input] -> Binder [SubExp]
-inputsToSubExps is = do
-  sizes <- dimSizes is
-  mapM (inputToExp' sizes) is
+inputsToSubExps is = mapM (inputToExp' $ dimSizes is) is
   where inputToExp' sizes (Input ts ia) = do
           ia' <- letSubExp "soac_input" $ inputArrayToExp ia
           (_, _, ia'') <- foldM transform (sizes, 0, ia') ts
@@ -181,18 +182,16 @@ inputsToSubExps is = do
           ia' <- letSubExp "reshape" $ L0.Reshape cs shape' ia $ srclocOf ia
           return (sizes, d, ia')
 
-dimSizes :: [Input] -> Binder [Maybe SubExp]
-dimSizes is =
-  map (listToMaybe . catMaybes) . transpose <$> mapM inspect is
-  where inspect :: Input -> Binder [Maybe SubExp]
-        inspect (Input ts ia) = do
-          dims <- iaDims ia
-          return $ foldl inspect' (map Just dims) ts
+dimSizes :: [Input] -> [Maybe SubExp]
+dimSizes =
+  map (listToMaybe . catMaybes) . transpose . map inspect
+  where inspect (Input ts ia) =
+          foldl inspect' (map Just $ iaDims ia) ts
 
         iaDims (Var v) =
-          return $ shapeDims $ arrayShape $ identType v
+          shapeDims $ arrayShape $ identType v
 
-        iaDims (Iota e) = return [e]
+        iaDims (Iota e) = [e]
 
         inspect' :: [Maybe SubExp] -> InputTransform -> [Maybe SubExp]
         inspect' ds (Rearrange _ perm) =
@@ -222,22 +221,43 @@ inputArrayType (Iota e)           = arrayOf (Basic Int) (Shape [e]) Unique
 
 -- | Return the array rank (dimensionality) of an input.
 inputRank :: Input -> Int
-inputRank = arrayRank . inputType
+inputRank (Input ts ia) = foldl transformType (arrayRank $ inputArrayType ia) ts
+  where transformType rank Repeat                 = rank + 1
+        transformType rank (Rearrange _ _)        = rank
+        transformType _    (Reshape _ shape)      = length shape
+        transformType rank (ReshapeOuter _ shape) = rank - 1 + length shape
+        transformType rank (ReshapeInner _ shape) = length shape + rank - 1
 
--- | Return the type of an input.
-inputType :: Input -> DeclType
-inputType (Input ts ia) = foldl transformType (toDecl $ inputArrayType ia) ts
-  where transformType t Repeat = arrayOf t (Rank 1) u
+-- | Return the types of a list of inputs.
+inputTypes :: [Input] -> [Type]
+inputTypes inps = map inputType inps
+  where sizes = dimSizes inps
+
+        dimSize i = fromMaybe zero $ join $ listToMaybe $ drop i sizes
+          where zero = Constant (BasicVal $ IntVal 0) noLoc
+
+        inputType (Input ts ia) =
+          foldl transformType (inputArrayType ia) ts
+
+        transformType t Repeat =
+          arrayOf t (Shape [dimSize $ arrayRank t + 1]) u
           where u | uniqueOrBasic t = Unique
                   | otherwise       = Nonunique
-        transformType t (Rearrange _ _) =
-          t
+        transformType t (Rearrange _ perm) =
+          let Shape oldshape = arrayShape t
+          in t `setArrayShape` Shape (permuteShape perm oldshape)
         transformType t (Reshape _ shape) =
-          t `setArrayShape` (Rank $ length shape)
+          t `setArrayShape` Shape shape
         transformType t (ReshapeOuter _ shape) =
-          t `setArrayShape` (Rank $ length shape + arrayRank t - 1)
+          let Shape oldshape = arrayShape t
+          in t `setArrayShape` Shape (shape ++ drop 1 oldshape)
         transformType t (ReshapeInner _ shape) =
-          t `setArrayShape` (Rank $ length shape + arrayRank t - 1)
+          let Shape oldshape = arrayShape t
+          in t `setArrayShape` Shape (take 1 oldshape ++ shape)
+
+-- | Tag each input with its corresponding type.
+inputsWithTypes :: [Input] -> [(Type, Input)]
+inputsWithTypes l = zip (inputTypes l) l
 
 transformRows :: [InputTransform] -> Input -> Input
 transformRows [] (Input ots ia) =
@@ -251,13 +271,28 @@ transformRows (Repeat:nts) inp =
 transformRows nts inp =
   error $ "transformRows: Cannot transform this yet:\n" ++ show nts ++ "\n" ++ show inp
 
+transformTypeRows :: [InputTransform] -> Type -> Type
+transformTypeRows = flip $ foldl transform
+  where transform t (Rearrange _ perm) =
+          t `setArrayShape` Shape (permuteShape (0:map (+1) perm) $ arrayDims t)
+        transform t (Reshape _ shape) =
+          t `setArrayShape` Shape shape
+        transform t (ReshapeOuter _ shape) =
+          let outer:oldshape = arrayDims t
+          in t `setArrayShape` Shape (outer : shape ++ drop 1 oldshape)
+        transform t (ReshapeInner _ shape) =
+          let outer:inner:_ = arrayDims t
+          in t `setArrayShape` Shape (outer : inner : shape)
+        transform t Repeat =
+          let outer:shape = arrayDims t
+          in t `setArrayShape` Shape (outer : outer : shape)
+
 -- | Add to the input a 'Rearrange' transform that performs an @(k,n)@
 -- transposition.  The new transform will be at the end of the current
 -- transformation list.
 transposeInput :: Int -> Int -> Input -> Input
 transposeInput k n inp =
-  addTransform (Rearrange [] $ transposeIndex k n [0..rank-1]) inp
-  where rank = arrayRank $ inputType inp
+  addTransform (Rearrange [] $ transposeIndex k n [0..inputRank inp-1]) inp
 
 -- | A definite representation of a SOAC expression.
 data SOAC = Map Certificates Lambda [Input] SrcLoc
