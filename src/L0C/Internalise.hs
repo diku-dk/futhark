@@ -284,10 +284,9 @@ internaliseExp (E.Split cs nexp arrexp loc) = do
   let cs' = internaliseCerts cs
   nexp' <- letSubExp "n" =<< internaliseExp nexp
   (c, arrs) <- tupToIdentList arrexp
-  ressize <-
-    letSubExp "size" $ I.BinOp I.Minus (arraysSize 0 $ map I.identType arrs)
-                                       nexp'
-                                       (I.Basic Int) loc
+  ressize <- letSubExp "split_size" $
+             I.BinOp I.Minus (arraysSize 0 $ map I.identType arrs)
+             nexp' (I.Basic Int) loc
   cs'' <- mergeCerts $ certify c cs'
   partnames <- forM (map I.identType arrs) $ \et -> do
                  a <- fst <$> newVar loc "split_a" et
@@ -305,10 +304,10 @@ internaliseExp (E.Concat cs x y loc) = do
   (xc,xs) <- tupToIdentList x
   (yc,ys) <- tupToIdentList y
   let cs' = internaliseCerts cs
-  ressize <-
-    letSubExp "size" $ I.BinOp I.Plus (arraysSize 0 $ map I.identType xs)
-                                      (arraysSize 0 $ map I.identType ys)
-                                      (I.Basic Int) loc
+  ressize <- letSubExp "concat_size" $
+             I.BinOp I.Plus (arraysSize 0 $ map I.identType xs)
+             (arraysSize 0 $ map I.identType ys)
+             (I.Basic Int) loc
   let certs = catMaybes [xc,yc]++cs'
       conc xarr yarr =
         I.Concat certs (I.Var xarr) (I.Var yarr) ressize loc
