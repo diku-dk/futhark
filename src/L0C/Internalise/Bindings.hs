@@ -4,6 +4,7 @@ module L0C.Internalise.Bindings
     internaliseParam
   , bindingParams
 
+  , flattenPattern
   , bindingPattern
   , bindingFlatPatternWithCert
   )
@@ -62,11 +63,11 @@ bindingParams params m = do
       liftM unzip $ forM internalisations $ \param' ->
         case param' of
           Direct k -> do
-            (k',shape) <- lift $ paramShapes k
+            (k',shape) <- lift $ identShapes k
             return (k' : shape,
                     DirectSubst k')
           TupleArray c ks -> do
-            ks_sizes <- lift $ mapM paramShapes ks
+            ks_sizes <- lift $ mapM identShapes ks
             return (c:concatMap (uncurry (:)) ks_sizes,
                      ArraySubst (I.Var c) $ map fst ks_sizes)
     tell $ HM.singleton (E.identName param) substs

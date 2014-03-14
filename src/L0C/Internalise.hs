@@ -201,10 +201,13 @@ internaliseExp (E.DoLoop mergepat mergeexp i bound loopbody letbody loc) = do
   bound' <- letSubExp "bound" =<< internaliseExp bound
   (c,mergevs) <- tupToIdentList mergeexp
   i' <- internaliseIdent i
-  bindingPattern mergepat (certOrGiven loc c) (map I.identType mergevs) $ \mergepat' -> do
-    loopbody' <- internaliseBodyNoCertReturn loopbody
-    let (_, valuebody) = splitBody loopbody'
-    loopBind (zip mergepat' $ map I.Var mergevs) i' bound' valuebody
+  let mergets = map I.identType mergevs
+      ce = certOrGiven loc c
+  mergeparams <- map E.toParam <$> flattenPattern mergepat
+  bindingParams mergeparams $ \mergepat' -> do
+    loopbody' <- internaliseBody loopbody
+    let mergeexp' = subExpsWithShapes $ map I.Var $ maybeToList c ++ mergevs
+    loopBind (zip (map I.fromParam mergepat') mergeexp') i' bound' loopbody'
     internaliseExp letbody
 
 internaliseExp (E.LetWith cs name src idxcs idxs ve body loc) = do

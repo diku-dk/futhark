@@ -1,7 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module L0C.Internalise.AccurateSizes
   ( subExpShape
-  , paramShapes
+  , identShapes
   , splitBody
   , shapeFunctionName
   , splitFunction
@@ -92,8 +92,9 @@ splitTyped f (x:xs) =
   in (take n xs ++ sizes, x : values)
   where n = arrayRank $ f x
 
-paramShapes :: MonadFreshNames m => IdentBase Names Rank -> m (Ident, [Ident])
-paramShapes v = do
+identShapes :: (MonadFreshNames m, ArrayShape shape) =>
+               IdentBase Names shape -> m (Ident, [Ident])
+identShapes v = do
   shape <- replicateM rank $ newIdent (base ++ "_size") (Basic Int) $ srclocOf v
   let vshape = Shape $ map Var shape
   return (v { identType = identType v `setArrayShape` vshape },

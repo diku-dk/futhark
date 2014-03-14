@@ -650,8 +650,9 @@ freeWalker = identityWalker {
 
         bodyFree (LetPat pat e body _) = do
           expFree e
-          mapM_ (typeFree . identType) pat
-          binding (HS.fromList pat) $ bodyFree body
+          binding (HS.fromList pat) $ do
+            mapM_ (typeFree . identType) pat
+            bodyFree body
         bodyFree (LetWith cs dest src idxs ve body _) = do
           mapM_ identFree cs
           identFree src
@@ -663,8 +664,8 @@ freeWalker = identityWalker {
           let (mergepat, mergeexps) = unzip merge
           mapM_ subExpFree mergeexps
           subExpFree boundexp
-          mapM_ (typeFree . identType) mergepat
           binding (i `HS.insert` HS.fromList mergepat) $ do
+            mapM_ (typeFree . identType) mergepat
             bodyFree loopbody
             bodyFree letbody
         bodyFree (Result cs ses _) = do
