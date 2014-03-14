@@ -14,6 +14,8 @@ module L0C.InternalRep.TypeChecker
   )
   where
 
+import Debug.Trace
+
 import Control.Applicative
 import Control.Monad.Reader
 import Control.Monad.Writer
@@ -575,8 +577,8 @@ checkBody (DoLoop mergepat (Ident loopvar _ _)
       ununique ident =
         ident { identType = param (identType ident) Observe }
       -- Find the free variables of the loop body.
-      freeInRettype =
-        mconcat $ map (mconcat . map (freeInExp . SubExp) . arrayDims) rettype
+      freeInType = mconcat . map (freeInExp . SubExp) . arrayDims
+      freeInRettype = mconcat $ map freeInType rettype
       free = map ununique $ HS.toList $
              (freeInBody loopbody' <> freeInRettype)
              `HS.difference` boundnames
@@ -847,7 +849,9 @@ checkSOACArrayArg e = do
 checkIdent :: Ident -> TypeM Ident
 checkIdent (Ident name t pos) = do
   vt <- lookupVar name pos
-  t' <- checkAnnotation pos ("variable " ++ textual name) t vt
+  dims <- mapM checkSubExp $ arrayDims t
+  t' <- checkAnnotation pos
+        ("variable " ++ textual name) (t `setArrayShape` Shape dims) vt
   return $ Ident name t' pos
 
 checkBinOp :: BinOp -> SubExp -> SubExp -> Type -> SrcLoc -> TypeM Exp
