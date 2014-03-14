@@ -373,8 +373,10 @@ internaliseExp (E.If ce te fe t loc) = do
   (shape_fe, value_fe) <- splitBody <$> internaliseBody fe
   shape_te' <- insertBindings $ copyConsumed shape_te
   shape_fe' <- insertBindings $ copyConsumed shape_fe
-  if_shape <- letTupExp "if_shape" $
-              I.If ce' shape_te' shape_fe' (bodyType shape_te) loc
+  if_shape <- if null $ bodyType shape_te
+              then return []
+              else letTupExp "if_shape" $
+                   I.If ce' shape_te' shape_fe' (bodyType shape_te) loc
   let t' = addTypeShapes (internaliseType t) $ map I.Var if_shape
   return $ I.If ce' value_te value_fe t' loc
 
