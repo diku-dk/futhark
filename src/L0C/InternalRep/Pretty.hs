@@ -12,6 +12,7 @@ module L0C.InternalRep.Pretty
   , ppExp
   , ppSubExp
   , ppLambda
+  , ppFun
   , ppTuple
   , prettyPrint
   )
@@ -175,13 +176,15 @@ instance Pretty Lambda where
     apply (map ppParam params) <+>
     text "=>" </> indent 2 (ppr body)
 
+instance Pretty FunDec where
+  ppr (name, rettype, args, body, _) =
+    text "fun" <+> ppTuple' rettype <+>
+    text (nameToString name) <//>
+    apply (map ppParam args) <+>
+    equals </> indent 2 (ppr body)
+
 instance Pretty Prog where
-  ppr = stack . punctuate line . map ppFun . progFunctions
-    where ppFun (name, rettype, args, body, _) =
-            text "fun" <+> ppTuple' rettype <+>
-            text (nameToString name) <//>
-            apply (map ppParam args) <+>
-            equals </> indent 2 (ppr body)
+  ppr = stack . punctuate line . map ppr . progFunctions
 
 ppParam :: Param -> Doc
 ppParam param = ppr (identType param) <+> ppr param
@@ -247,6 +250,10 @@ ppSubExp = render80
 -- | Prettyprint a lambda, wrapped to 80 characters.
 ppLambda :: Lambda -> String
 ppLambda = render80
+
+-- | Prettyprint a function definition, wrapped to 80 characters.
+ppFun :: FunDec -> String
+ppFun = render80
 
 -- | Prettyprint a list enclosed in curly braces.
 ppTuple :: Pretty a => [a] -> String
