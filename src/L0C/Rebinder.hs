@@ -401,13 +401,15 @@ hoistInExp e = hoistInExpBase e
 
 hoistInExpBase :: Exp -> HoistM Exp
 hoistInExpBase = mapExpM hoist
-  where hoist = identityMapper {
+  where hoist = Mapper {
                   mapOnExp = hoistInExp
                 , mapOnBody = hoistInBody
                 , mapOnSubExp = hoistInSubExp
                 , mapOnLambda = hoistInLambda
                 , mapOnIdent = hoistInIdent
                 , mapOnType = hoistInType
+                , mapOnValue = return
+                , mapOnCertificates = mapM hoistInIdent
                 }
 
 hoistInSubExp :: SubExp -> HoistM SubExp
