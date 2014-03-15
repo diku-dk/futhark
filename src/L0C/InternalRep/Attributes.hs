@@ -762,11 +762,13 @@ safeExp _ = False
 -- | Return the set of identifiers that are free in the given lambda,
 -- including shape annotations in the parameters.
 freeInLambda :: Lambda -> HS.HashSet Ident
-freeInLambda (Lambda params body _ _) =
-  inParams <> inBody
-  where inParams = mconcat $ map freeInParam params
-        freeInParam = mconcat . map (freeInExp . SubExp) . shapeDims . arrayShape . identType
+freeInLambda (Lambda params body rettype _) =
+  inRet <> inParams <> inBody
+  where inRet = mconcat $ map freeInType rettype
+        inParams = mconcat $ map freeInParam params
+        freeInParam = freeInType . identType
         inBody = HS.filter ((`notElem` paramnames) . identName) $ freeInBody body
+        freeInType = mconcat . map (freeInExp . SubExp) . shapeDims . arrayShape
         paramnames = map identName params
 
 -- | As 'freeInLambda', but returns the raw names rather than
