@@ -68,8 +68,10 @@ asTail (LetWithBind cs dest src idxs ve) =
     where loc = srclocOf dest
 
 requires :: BindNeed -> HS.HashSet VName
-requires (LetBind _ e alts) =
-  mconcat $ map freeNamesInExp $ e : alts
+requires (LetBind pat e alts) =
+  freeInE `mappend` freeInPat
+  where freeInE   = mconcat $ map freeNamesInExp $ e : alts
+        freeInPat = mconcat $ map (freeInType . identType) pat
 requires bnd = HS.map identName $ freeInBody $ asTail bnd
 
 provides :: BindNeed -> HS.HashSet VName
@@ -79,6 +81,9 @@ provides (LetWithBind _ dest _ _ _) = HS.singleton $ identName dest
 
 patNameSet :: [Ident] -> HS.HashSet VName
 patNameSet = HS.fromList . map identName
+
+freeInType :: Type -> HS.HashSet VName
+freeInType = mconcat . map (freeNamesInExp . SubExp) . arrayDims
 
 data Need = Need { needBindings :: NeedSet
                  , freeInBound  :: HS.HashSet VName
@@ -376,8 +381,13 @@ hoistInBody (LetPat pat e body _) = do
   pat' <- mapM hoistInIdent pat
   e' <- hoistInExp e
   bindLet pat' e' $ hoistInBody body
-hoistInBody (LetWith cs dest src idxs ve body _) =
-  bindLetWith cs dest src idxs ve $ hoistInBody body
+hoistInBody (LetWith cs dest src idxs ve body _) = do
+  cs'   <- mapM hoistInIdent cs
+  dest' <- hoistInIdent dest
+  src'  <- hoistInIdent src
+  idxs' <- mapM hoistInSubExp idxs
+  ve'   <- hoistInSubExp ve
+  bindLetWith cs' dest' src' idxs' ve' $ hoistInBody body
 hoistInBody (DoLoop merge loopvar boundexp loopbody letbody _) = do
   let (mergepat, mergeexp) = unzip merge
   loopbody' <- blockIfSeq [hasFree boundnames, isConsumed] $
@@ -421,12 +431,13 @@ hoistInIdent v = do boundFree $ HS.singleton $ identName v
                     t' <- hoistInType $ identType v
                     return v { identType = t' }
 
-hoistInType :: Type -> HoistM Type
+hoistInType :: TypeBase als Shape -> HoistM (TypeBase als Shape)
 hoistInType t = do dims <- mapM hoistInSubExp $ arrayDims t
                    return $ t `setArrayShape` Shape dims
 
 hoistInLambda :: Lambda -> HoistM Lambda
 hoistInLambda (Lambda params body rettype loc) = do
   body' <- blockIf (hasFree params' `orIf` isUniqueBinding) $ hoistInBody body
-  return $ Lambda params body' rettype loc
+  rettype' <- mapM hoistInType rettype
+  return $ Lambda params body' rettype' loc
   where params' = patNameSet $ map fromParam params
