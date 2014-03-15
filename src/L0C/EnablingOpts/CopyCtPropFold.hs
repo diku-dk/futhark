@@ -385,10 +385,11 @@ copyCtPropCerts = liftM (nub . concat) . mapM check
           where loc = srclocOf idd
 
 copyCtPropLambda :: Lambda -> CPropM Lambda
-copyCtPropLambda (Lambda params body tp loc) = do
+copyCtPropLambda (Lambda params body rettype loc) = do
   params' <- copyCtPropPat params
   body' <- copyCtPropBody body
-  return $ Lambda params' body' tp loc
+  rettype' <- mapM copyCtPropType rettype
+  return $ Lambda params' body' rettype loc
 
 ------------------------------------------------
 ---- Constant Folding                       ----

@@ -198,8 +198,9 @@ deadCodeElimType t = do
   return $ t `setArrayDims` dims
 
 deadCodeElimLambda :: Lambda -> DCElimM Lambda
-deadCodeElimLambda (Lambda params body ret pos) = do
+deadCodeElimLambda (Lambda params body rettype pos) = do
   let ids  = map identName params
   body' <- binding ids $ deadCodeElimBody body
   params' <- deadCodeElimPat params
-  return $ Lambda params' body' ret pos
+  rettype' <- mapM deadCodeElimType rettype
+  return $ Lambda params' body' rettype pos
