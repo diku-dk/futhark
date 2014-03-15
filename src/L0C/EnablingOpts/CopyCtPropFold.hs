@@ -389,7 +389,7 @@ copyCtPropLambda (Lambda params body rettype loc) = do
   params' <- copyCtPropPat params
   body' <- copyCtPropBody body
   rettype' <- mapM copyCtPropType rettype
-  return $ Lambda params' body' rettype loc
+  return $ Lambda params' body' rettype' loc
 
 ------------------------------------------------
 ---- Constant Folding                       ----
