@@ -14,8 +14,6 @@ module L0C.InternalRep.TypeChecker
   )
   where
 
-import Debug.Trace
-
 import Control.Applicative
 import Control.Monad.Reader
 import Control.Monad.Writer
@@ -846,13 +844,16 @@ checkSOACArrayArg e = do
     Nothing -> bad $ TypeError argloc "SOAC argument is not an array"
     Just rt -> return (e', (rt, dflow, argloc))
 
+checkType :: TypeBase als Shape -> TypeM (TypeBase als Shape)
+checkType t = do dims <- mapM checkSubExp $ arrayDims t
+                 return $ t `setArrayDims` dims
+
 checkIdent :: Ident -> TypeM Ident
 checkIdent (Ident name t pos) = do
   vt <- lookupVar name pos
-  dims <- mapM checkSubExp $ arrayDims t
-  t' <- checkAnnotation pos
-        ("variable " ++ textual name) (t `setArrayShape` Shape dims) vt
-  return $ Ident name t' pos
+  t' <- checkType t
+  t'' <- checkAnnotation pos ("variable " ++ textual name) t' vt
+  return $ Ident name t'' pos
 
 checkBinOp :: BinOp -> SubExp -> SubExp -> Type -> SrcLoc -> TypeM Exp
 checkBinOp Plus e1 e2 t pos = checkPolyBinOp Plus [Real, Int] e1 e2 t pos
@@ -975,9 +976,10 @@ checkFuncall fname loc paramtypes _ args = do
 
 checkLambda :: Lambda -> [Arg] -> TypeM Lambda
 checkLambda (Lambda params body ret loc) args = do
+  ret' <- mapM checkType ret
   (_, _, _, body', _) <-
-    noUnique $ checkFun (nameFromString "<anonymous>", map toDecl ret, params, body, loc)
+    noUnique $ checkFun (nameFromString "<anonymous>", map toDecl ret', params, body, loc)
   if length params == length args then do
-    checkFuncall Nothing loc (map (toDecl . identType) params) (map toDecl ret) args
-    return $ Lambda params body' ret loc
+    checkFuncall Nothing loc (map (toDecl . identType) params) (map toDecl ret') args
+    return $ Lambda params body' ret' loc
   else bad $ TypeError loc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
