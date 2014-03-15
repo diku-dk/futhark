@@ -277,12 +277,12 @@ lookupVar name pos = do
 -- that combines the aliasing of @t1@ and @t2@ is returned.  The
 -- uniqueness of the resulting type will be the least of the
 -- uniqueness of @t1@ and @t2@.
-unifyTypes :: ArrayShape shape => Type -> TypeBase Names shape -> Maybe Type
+unifyTypes :: Type -> Type -> Maybe Type
 unifyTypes (Basic t1) (Basic t2) = Basic <$> t1 `unifyBasicTypes` t2
 unifyTypes (Array t1 ds1 u1 als1) (Array t2 ds2 u2 als2)
   | shapeRank ds1 == shapeRank ds2 = do
   t <- t1 `unifyBasicTypes` t2
-  Just $ Array t ds1 (u1 <> u2) (als1 <> als2)
+  Just $ Array t ds2 (u1 <> u2) (als1 <> als2)
 unifyTypes _ _ = Nothing
 
 -- | As 'unifyTypes', but for element types.
@@ -315,8 +315,7 @@ checkAnnotation loc desc t1 t2 =
 -- | @checkTupleAnnotation loc s t1s t2s@ tries to unify the types in
 -- @t1s@ and @t2s@ with 'unifyTypes'.  If this fails, or @t1s@ and @t2s@ are not the same length, a
 -- 'BadAnnotation' is raised.
-checkTupleAnnotation :: ArrayShape shape =>
-                        SrcLoc -> String -> [Type] -> [TypeBase Names shape] -> TypeM [Type]
+checkTupleAnnotation :: SrcLoc -> String -> [Type] -> [Type] -> TypeM [Type]
 checkTupleAnnotation loc desc t1s t2s
   | length t1s == length t2s,
     Just ts <- zipWithM unifyTypes (blankAliases t1s) t2s = return ts
@@ -694,9 +693,11 @@ checkExp (Apply fname args rettype loc) = do
     Nothing -> bad $ UnknownFunctionError fname loc
     Just (ftype, paramtypes) -> do
       (args', argflows) <- unzip <$> mapM (checkArg . fst) args
+      let realType = zipWith setArrayDims
+                     (returnType ftype (map diet paramtypes) (map subExpType args'))
+                     (map arrayDims rettype++repeat [])
 
-      rettype' <- checkTupleAnnotation loc "return" rettype $
-                  returnType ftype (map diet paramtypes) (map subExpType args')
+      rettype' <- checkTupleAnnotation loc "return" rettype realType
 
       checkFuncall (Just fname) loc paramtypes (map toDecl rettype') argflows
       return $ Apply fname (zip args' $ map diet paramtypes) rettype' loc
@@ -851,8 +852,8 @@ checkType t = do dims <- mapM checkSubExp $ arrayDims t
 checkIdent :: Ident -> TypeM Ident
 checkIdent (Ident name t pos) = do
   vt <- lookupVar name pos
-  t' <- checkType t
-  t'' <- checkAnnotation pos ("variable " ++ textual name) t' vt
+  t'' <- checkAnnotation pos ("variable " ++ textual name)
+         (t `setArrayDims` arrayDims vt) vt
   return $ Ident name t'' pos
 
 checkBinOp :: BinOp -> SubExp -> SubExp -> Type -> SrcLoc -> TypeM Exp
