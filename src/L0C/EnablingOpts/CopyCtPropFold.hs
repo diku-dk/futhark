@@ -342,13 +342,15 @@ copyCtPropExp (Apply fname args tp pos) = do
 ------------------------------
 
 copyCtPropExp e = mapExpM mapper e
-  where mapper = identityMapper {
+  where mapper = Mapper {
                    mapOnExp = copyCtPropExp
                  , mapOnBody = copyCtPropBody
                  , mapOnSubExp = copyCtPropSubExp
                  , mapOnLambda = copyCtPropLambda
                  , mapOnIdent = copyCtPropIdent
                  , mapOnCertificates = copyCtPropCerts
+                 , mapOnType = copyCtPropType
+                 , mapOnValue = return
                  }
 
 copyCtPropPat :: [IdentBase als Shape] -> CPropM [IdentBase als Shape]
@@ -356,8 +358,13 @@ copyCtPropPat = mapM copyCtPropBnd
 
 copyCtPropBnd :: IdentBase als Shape -> CPropM (IdentBase als Shape)
 copyCtPropBnd (Ident vnm t loc) = do
+  t' <- copyCtPropType t
+  return $ Ident vnm t' loc
+
+copyCtPropType :: TypeBase als Shape -> CPropM (TypeBase als Shape)
+copyCtPropType t = do
   dims <- mapM copyCtPropSubExp $ arrayDims t
-  return $ Ident vnm (t `setArrayShape` Shape dims) loc
+  return $ t `setArrayDims` dims
 
 copyCtPropIdent :: Ident -> CPropM Ident
 copyCtPropIdent ident@(Ident vnm _ loc) = do

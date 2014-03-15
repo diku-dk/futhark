@@ -164,13 +164,15 @@ deadCodeElimBody (Result cs es loc) =
 
 deadCodeElimExp :: Exp -> DCElimM Exp
 deadCodeElimExp = mapExpM mapper
-  where mapper = identityMapper {
+  where mapper = Mapper {
                    mapOnExp = deadCodeElimExp
                  , mapOnBody = deadCodeElimBody
                  , mapOnSubExp = deadCodeElimSubExp
                  , mapOnLambda = deadCodeElimLambda
                  , mapOnIdent = deadCodeElimIdent
                  , mapOnCertificates = mapM deadCodeElimIdent
+                 , mapOnType = deadCodeElimType
+                 , mapOnValue = return
                  }
 
 deadCodeElimIdent :: Ident -> DCElimM Ident
@@ -187,11 +189,13 @@ deadCodeElimPat = mapM deadCodeElimBnd
 
 deadCodeElimBnd :: IdentBase als Shape -> DCElimM (IdentBase als Shape)
 deadCodeElimBnd ident = do
-  let dims = arrayDims $ identType ident
-  dims' <- mapM deadCodeElimSubExp dims
-  return $ ident { identType = identType ident
-                               `setArrayShape`
-                               Shape dims' }
+  t <- deadCodeElimType $ identType ident
+  return $ ident { identType = t }
+
+deadCodeElimType :: TypeBase als Shape -> DCElimM (TypeBase als Shape)
+deadCodeElimType t = do
+  dims <- mapM deadCodeElimSubExp $ arrayDims t
+  return $ t `setArrayDims` dims
 
 deadCodeElimLambda :: Lambda -> DCElimM Lambda
 deadCodeElimLambda (Lambda params body ret pos) = do
