@@ -41,6 +41,7 @@ import Data.Traversable (mapM)
 
 import L0C.ExternalRep as E
 import L0C.InternalRep as I
+import L0C.InternalRep.Renamer as I
 import L0C.MonadFreshNames
 import L0C.Tools
 
@@ -56,6 +57,7 @@ import Prelude hiding (mapM)
 -- | Convert a program in external L0 to a program in internal L0.
 internaliseProg :: E.Prog -> I.Prog
 internaliseProg prog =
+  I.renameProg $
   I.Prog $ runInternaliseM prog $ liftM concat $
            mapM (split <=< internaliseFun) $ E.progFunctions prog
   where split fun = do (sfun@(_,srettype,_,_,_), vfun) <- splitFunction fun
