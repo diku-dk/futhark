@@ -69,11 +69,8 @@ instance Pretty (TypeBase als Rank) where
           u' | Unique <- u = star
              | otherwise = empty
 
-instance Pretty (IdentBase als Rank) where
-  ppr ident = ppr (identType ident) <+> (text . textual . identName $ ident)
-
-instance Pretty (IdentBase als Shape) where
-  ppr ident = ppr (identType ident) <+> (text . textual . identName $ ident)
+instance Pretty (IdentBase als shape) where
+  ppr = text . textual . identName
 
 hasArrayLit :: SubExp -> Bool
 hasArrayLit (Constant val _) = hasArrayVal val
