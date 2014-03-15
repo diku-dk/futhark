@@ -277,6 +277,10 @@ internaliseExp (E.Rearrange cs perm e loc) =
   internaliseOperation "rearrange" cs e loc $ \cs' v ->
     I.Rearrange cs' perm (I.Var v) loc
 
+internaliseExp (E.Rotate cs n e loc) =
+  internaliseOperation "rotate" cs e loc $ \cs' v ->
+    I.Rotate cs' n (I.Var v) loc
+
 internaliseExp (E.Reshape cs shape e loc) = do
   shape' <- letSubExps "shape" =<< mapM internaliseExp shape
   internaliseOperation "reshape" cs e loc $ \cs' v ->

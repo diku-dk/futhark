@@ -678,6 +678,11 @@ checkExp (Rearrange cs perm arrexp pos) = do
     bad $ PermutationError pos perm rank
   return $ Rearrange cs' perm arrexp' pos
 
+checkExp (Rotate cs n arrexp pos) = do
+  cs' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) cs
+  arrexp' <- checkExp arrexp
+  return $ Rotate cs' n arrexp' pos
+
 checkExp (Transpose cs k n arrexp pos) = do
   cs' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) cs
   arrexp' <- checkExp arrexp

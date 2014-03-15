@@ -112,6 +112,11 @@ externaliseExp (I.Rearrange cs perm e loc) =
               perm
               (externaliseSubExp e)
               loc
+externaliseExp (I.Rotate cs n e loc) =
+  E.Rotate (externaliseCerts cs)
+           n
+           (externaliseSubExp e)
+           loc
 externaliseExp (I.Map cs fun es loc) =
   E.MapT (externaliseCerts cs)
          (externaliseLambda fun)

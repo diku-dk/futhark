@@ -87,6 +87,9 @@ module L0C.InternalRep.Attributes
   , permuteReach
   , permuteCompose
 
+  -- * Rotating
+  , rotateArray
+
   -- * Transposition
   , transposeArray
   , transposeIndex
@@ -440,6 +443,18 @@ permuteReach perm = case dropWhile (uncurry (/=)) $ zip (tails perm) (tails [0..
 permuteCompose :: [Int] -> [Int] -> [Int]
 permuteCompose = permuteShape
 
+-- | Rotate the elements of an array as per the L0 'rotate' command.
+-- If the value is not an array, this is a no-op.
+rotateArray :: Int -> Value -> Value
+rotateArray n (ArrayVal a t) =
+  arrayVal rotatedElems t
+  where arrelems = elems a
+        nelems = length arrelems
+        rotatedElems
+          | n > 0     = drop (nelems - n) arrelems ++ take (nelems - n) arrelems
+          | otherwise = drop (-n) arrelems ++ take (-n) arrelems
+rotateArray _ v = v
+
 -- | Array transpose generalised to multiple dimensions.  The result
 -- of @transposeArray k n a@ is an array where the element @a[i_1,
 -- ..., i_k ,i_{k+1}, ..., i_{k+n}, ..., i_q ]@ is now at index @[i_1
@@ -539,6 +554,7 @@ typeOf (Reshape _ shape e _) =
 typeOf (Rearrange _ perm e _) =
   [subExpType e `setArrayShape` Shape (permuteShape perm shape)]
   where Shape shape = arrayShape $ subExpType e
+typeOf (Rotate _ _ e _) = [subExpType e]
 typeOf (Split _ ne e secsize _) =
   [subExpType e `setOuterSize` ne,
    subExpType e `setOuterSize` secsize]

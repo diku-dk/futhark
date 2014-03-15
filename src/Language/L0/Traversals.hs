@@ -154,6 +154,9 @@ mapExpM tv (Transpose cs k n e3 loc) =
 mapExpM tv (Rearrange cs perm e loc) =
   pure Rearrange <*> mapOnCertificates tv cs <*>
        pure perm <*> mapOnExp tv e <*> pure loc
+mapExpM tv (Rotate cs n e loc) =
+  pure Rotate <*> mapOnCertificates tv cs <*>
+       pure n <*> mapOnExp tv e <*> pure loc
 mapExpM tv (Map fun e int loc) =
   pure Map <*> mapOnLambda tv fun <*> mapOnExp tv e <*>
        mapOnType tv int <*> pure loc

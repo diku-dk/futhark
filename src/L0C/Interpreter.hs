@@ -392,6 +392,9 @@ evalExp (Reshape _ shapeexp arrexp pos) = do
 evalExp (Rearrange _ perm arrexp _) =
   single <$> permuteArray perm <$> evalSubExp arrexp
 
+evalExp (Rotate _ perm arrexp _) =
+  single <$> rotateArray perm <$> evalSubExp arrexp
+
 evalExp (Split _ splitexp arrexp _ pos) = do
   split <- evalSubExp splitexp
   vs <- arrToList pos =<< evalSubExp arrexp

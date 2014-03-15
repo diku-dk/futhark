@@ -70,17 +70,24 @@ allocArray place shape basetype =
         assign :: C.Exp -> Int -> C.Stm
         assign n i = [C.cstm|$exp:place.shape[$int:i] = $exp:n;|]
 
--- | @arraySliceCopyStm to from t slice@ is a @memcpy()@ statement copying
+-- | @arraySliceCopyStm to from fromshape t slice@ is a @memcpy()@ statement copying
 -- a slice of the array @from@ to the memory pointed at by @to@.
-arraySliceCopyStm :: C.Exp -> C.Exp -> Type -> Int -> C.Stm
-arraySliceCopyStm to from t slice =
+arraySliceCopyStm :: C.Exp -> C.Exp -> C.Exp-> Type -> Int -> C.Stm
+arraySliceCopyStm to from fromshape t slice =
   [C.cstm|memcpy($exp:to,
-                 $exp:from.data,
-                 $exp:(arraySliceSizeExp from t slice)*sizeof($exp:from.data[0]));|]
+                 $exp:from,
+                 $exp:(arraySliceSizeExpGivenShape fromshape t slice)*sizeof(*$exp:from));|]
 
 -- | The size of the array of the given L0 type, as an integer.
 arraySizeExp :: C.Exp -> Type -> C.Exp
 arraySizeExp place t = arraySliceSizeExp place t 0
+
+-- | Return an expression giving the array slice size in elements.
+-- The integer argument is the number of dimensions sliced off.
+arraySliceSizeExpGivenShape :: C.Exp -> Type -> Int -> C.Exp
+arraySliceSizeExpGivenShape shape t slice =
+  foldl comb [C.cexp|1|] [slice..arrayRank t-1]
+  where comb y i = [C.cexp|$exp:shape[$int:i] * $exp:y|]
 
 -- | Return an expression giving the array slice size in elements.
 -- The integer argument is the number of dimensions sliced off.

@@ -708,6 +708,34 @@ compileExp' place (Rearrange _ perm arrexp _) = do
                      $stm:copy
                    }|]
 
+compileExp' place (Rotate _ n arrexp _) = do
+  arr <- new "rotate_arr"
+  i <- new "rotate_i"
+  intype <- typeToCType [subExpType arrexp]
+  basetype <- typeToCType [basicDecl $ elemType $ subExpType arrexp]
+  arrexp' <- compileSubExp (varExp arr) arrexp
+  let shape = arrayShapeExp (varExp arr) (subExpType arrexp)
+      alloc = allocArray place shape basetype
+      rank = arrayRank $ subExpType arrexp
+      copyStm = arraySliceCopyStm
+                [C.cexp|&($exp:place.data[($id:i+$int:n)%$id:arr.shape[0]])|]
+                [C.cexp|&($id:arr.data[$id:i])|]
+                [C.cexp|$id:arr.shape|]
+                (stripArray 1 $ subExpType arrexp)
+                (rank-1)
+      copy = [C.cstm|{
+                   int $id:i;
+                   for ($id:i = 0; $id:i < $id:arr.shape[0]; $id:i++) {
+                           $stm:copyStm
+                         }
+                 }|]
+  return $ stm [C.cstm|{
+                     $ty:intype $id:arr;
+                     $items:arrexp'
+                     $stm:alloc
+                     $stm:copy
+                   }|]
+
 compileExp' place (Split _ posexp arrexp _ _) = do
   arr <- new "split_arr"
   pos <- new "split_pos"
@@ -747,9 +775,11 @@ compileExp' place (Concat _ xarr yarr _ _) = do
                 _ -> error "Zero-dimensional array in concat."
       xsize = arraySliceSizeExp (varExp x) (subExpType xarr) 0
       copyx = arraySliceCopyStm
-              [C.cexp|$exp:place.data|] (varExp x) (subExpType xarr) 0
+              [C.cexp|$exp:place.data|] [C.cexp|$id:x|]
+              [C.cexp|$id:x.shape|] (subExpType xarr) 0
       copyy = arraySliceCopyStm
-              [C.cexp|$exp:place.data+$exp:xsize|] (varExp y) (subExpType yarr) 0
+              [C.cexp|$exp:place.data+$exp:xsize|]
+              [C.cexp|$id:y.shape|] [C.cexp|$id:y|] (subExpType yarr) 0
   return $ stm [C.cstm|{
                      $ty:arrt $id:x, $id:y;
                      $items:xarr'
@@ -769,7 +799,8 @@ compileExp' place (Copy e _) = do
   t <- typeToCType [subExpType e]
   let copy = case subExpType e of
                Array {} -> arraySliceCopyStm [C.cexp|$exp:place.data|]
-                           (varExp val) (subExpType e) 0
+                           [C.cexp|$id:val.shape|] [C.cexp|$id:val|]
+                           (subExpType e) 0
                _ -> [C.cstm|;|]
   return $ stm [C.cstm|{
                      $ty:t $id:val;
@@ -802,7 +833,9 @@ compileSubExpInPlace place e
   | t@Array {} <- subExpType e = do
   tmpplace <- new "inplace"
   e' <- compileSubExp (varExp tmpplace) e
-  let copy = arraySliceCopyStm [C.cexp|$exp:place.data|] (varExp tmpplace) t 0
+  let copy = arraySliceCopyStm [C.cexp|$exp:place.data|]
+             [C.cexp|$id:tmpplace.shape|] [C.cexp|$id:tmpplace.data|]
+             t 0
   ctype <- typeToCType [subExpType e]
   return $ stm [C.cstm|{
                      $ty:ctype $id:tmpplace;
@@ -872,7 +905,9 @@ compileExpInPlace place e
   | [t@Array {}] <- typeOf e = do
     tmpplace <- new "inplace"
     e' <- compileExp (varExp tmpplace) e
-    let copy = arraySliceCopyStm [C.cexp|$exp:place.data|] (varExp tmpplace) t 0
+    let copy = arraySliceCopyStm [C.cexp|$exp:place.data|]
+               [C.cexp|$id:tmpplace.shape|] [C.cexp|$id:tmpplace.data|]
+               t 0
     ctype <- typeToCType $ typeOf e
     return $ stm [C.cstm|{
                        $ty:ctype $id:tmpplace;

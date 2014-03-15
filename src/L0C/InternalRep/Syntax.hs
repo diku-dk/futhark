@@ -294,6 +294,11 @@ data Exp =
             -- must be a permutation of @[0,n-1]@, where @n@ is the
             -- number of dimensions in the input array.
 
+            | Rotate Certificates Int SubExp SrcLoc
+            -- ^ @rotate(n,a)@ returns a new array, where the element
+            -- @a[i]@ is at position @i+n@, cycling over to the
+            -- beginning of the array.
+
             | Map Certificates Lambda [SubExp] SrcLoc
              -- ^ @map(op +(1), {1,2,..,n}) = [2,3,..,n+1]@.
              -- 3rd arg is either a tuple of multi-dim arrays
@@ -323,6 +328,7 @@ instance Located Exp where
   locOf (Replicate _ _ pos) = locOf pos
   locOf (Reshape _ _ _ pos) = locOf pos
   locOf (Rearrange _ _ _ pos) = locOf pos
+  locOf (Rotate _ _ _ pos) = locOf pos
   locOf (Split _ _ _ _ pos) = locOf pos
   locOf (Concat _ _ _ _ pos) = locOf pos
   locOf (Copy _ pos) = locOf pos

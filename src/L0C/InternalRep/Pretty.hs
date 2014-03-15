@@ -69,8 +69,11 @@ instance Pretty (TypeBase als Rank) where
           u' | Unique <- u = star
              | otherwise = empty
 
-instance Pretty (IdentBase als shape) where
-  ppr = text . textual . identName
+instance Pretty (IdentBase als Rank) where
+  ppr ident = ppr (identType ident) <+> (text . textual . identName $ ident)
+
+instance Pretty (IdentBase als Shape) where
+  ppr ident = ppr (identType ident) <+> (text . textual . identName $ ident)
 
 hasArrayLit :: SubExp -> Bool
 hasArrayLit (Constant val _) = hasArrayVal val
@@ -148,10 +151,12 @@ instance Pretty Exp where
     ppCertificates cs <> text "reshape" <> apply [apply (map ppr shape), ppr e]
   ppr (Rearrange cs perm e _) =
     ppCertificates cs <> text "rearrange" <> apply [apply (map ppr perm), ppr e]
+  ppr (Rotate cs n e _) =
+    ppCertificates cs <> text "rotate" <> apply [ppr n, ppr e]
   ppr (Split cs e a _ _) =
     ppCertificates cs <> text "split" <> apply [ppr e, ppr a]
-  ppr (Concat cs x y _ _) =
-    ppCertificates cs <> text "concat" <> apply [ppr x, ppr y]
+  ppr (Concat cs x y size _) =
+    ppCertificates cs <> text "concat" <> apply [ppr x, ppr y] <> apply [ppr size]
   ppr (Copy e _) = text "copy" <> parens (ppr e)
   ppr (Assert e _) = text "assert" <> parens (ppr e)
   ppr (Conjoin es _) = text "conjoin" <> parens (commasep $ map ppr es)

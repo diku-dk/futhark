@@ -736,6 +736,11 @@ checkExp (Rearrange cs perm arrexp pos) = do
     bad $ PermutationError pos perm rank
   return $ Rearrange cs' perm arrexp' pos
 
+checkExp (Rotate cs n arrexp pos) = do
+  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
+  arrexp' <- checkSubExp arrexp
+  return $ Rotate cs' n arrexp' pos
+
 checkExp (Split cs splitexp arrexp secsize pos) = do
   cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
   splitexp' <- require [Basic Int] =<< checkSubExp splitexp

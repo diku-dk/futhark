@@ -116,6 +116,7 @@ import Language.L0.Parser.Lexer
       reduceT         { L $$ REDUCE2 }
       reshape         { L $$ RESHAPE }
       rearrange       { L $$ REARRANGE }
+      rotate          { L $$ ROTATE }
       transpose       { L $$ TRANSPOSE }
       zip             { L $$ ZIP }
       unzip           { L $$ UNZIP }
@@ -300,6 +301,9 @@ Exp  :: { UncheckedExp }
 
      | transpose '(' NaturalInt ',' SignedInt ',' Exp ')'
                       { Transpose [] $3 $5 $7 $1 }
+
+     | rotate '(' SignedInt ',' Exp ')'
+                      { Rotate [] $3 $5 $1 }
 
      | Certificates split '(' Exp ',' Exp ')'
                       { Split $1 $4 $6 $2 }
