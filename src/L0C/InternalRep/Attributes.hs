@@ -47,6 +47,7 @@ module L0C.InternalRep.Attributes
   , arraySize
   , arraysSize
   , setArrayShape
+  , setArrayDims
   , returnType
   , lambdaType
   , lambdaReturnType
@@ -143,12 +144,17 @@ arraysSize :: Int -> [TypeBase als Shape] -> SubExp
 arraysSize _ []    = Constant (BasicVal $ IntVal 0) noLoc
 arraysSize i (t:_) = arraySize i t
 
--- | Set the dimensions of an array.  If the given type is not an
+-- | Set the shape of an array.  If the given type is not an
 -- array, return the type unchanged.
 setArrayShape :: ArrayShape newshape =>
                  TypeBase as oldshape -> newshape -> TypeBase as newshape
 setArrayShape (Array et _ u as) ds = Array et ds u as
 setArrayShape (Basic t)  _         = Basic t
+
+-- | Set the dimensions of an array.  If the given type is not an
+-- array, return the type unchanged.
+setArrayDims :: TypeBase as oldshape -> [SubExp] -> TypeBase as Shape
+setArrayDims t dims = t `setArrayShape` Shape dims
 
 -- | Replace the size of the outermost dimension of an array.  If the
 -- given type is not an array, it is returned unchanged.
