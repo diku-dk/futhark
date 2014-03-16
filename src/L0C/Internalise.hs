@@ -88,11 +88,6 @@ internaliseBody e = insertBindings $ do
   ses <- letTupExp "norm" =<< internaliseExp e
   return $ I.Result [] (subExpsWithShapes $ map I.Var ses) $ srclocOf e
 
-internaliseBodyNoCertReturn :: E.Exp -> InternaliseM Body
-internaliseBodyNoCertReturn e = insertBindings $ do
-  (c,ses) <- tupToIdentList e
-  return $ I.Result (maybeToList c) (subExpsWithShapes $ map I.Var ses) $ srclocOf e
-
 internaliseExp :: E.Exp -> InternaliseM I.Exp
 
 internaliseExp (E.Var var) = do
@@ -199,12 +194,10 @@ internaliseExp (E.LetPat pat e body loc) = do
     letBind pat' $ I.TupLit (map I.Var ks) loc
     internaliseExp body
 
-internaliseExp (E.DoLoop mergepat mergeexp i bound loopbody letbody loc) = do
+internaliseExp (E.DoLoop mergepat mergeexp i bound loopbody letbody _) = do
   bound' <- letSubExp "bound" =<< internaliseExp bound
   (c,mergevs) <- tupToIdentList mergeexp
   i' <- internaliseIdent i
-  let mergets = map I.identType mergevs
-      ce = certOrGiven loc c
   mergeparams <- map E.toParam <$> flattenPattern mergepat
   bindingParams mergeparams $ \mergepat' -> do
     loopbody' <- internaliseBody loopbody
