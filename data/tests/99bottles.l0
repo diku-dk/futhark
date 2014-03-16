@@ -19,6 +19,6 @@ fun [char] verse(int i) =
 fun [char] main() =
   let n = 99 in
   let lastverse = "One bottle of beer on the wall, one bottle of beer.\nTake one down, pass it around, one bottle of beer on the wall.\n" in
-  loop (song="") = for i < 99 do
-    concat(song, verse(i)) in
+  loop (song="") = for i < n-1 do
+    concat(song, verse(n-i)) in
   concat(song, lastverse)
