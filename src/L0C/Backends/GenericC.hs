@@ -775,11 +775,11 @@ compileExp' place (Concat _ xarr yarr _ _) = do
                 _ -> error "Zero-dimensional array in concat."
       xsize = arraySliceSizeExp (varExp x) (subExpType xarr) 0
       copyx = arraySliceCopyStm
-              [C.cexp|$exp:place.data|] [C.cexp|$id:x|]
+              [C.cexp|$exp:place.data|] [C.cexp|$id:x.data|]
               [C.cexp|$id:x.shape|] (subExpType xarr) 0
       copyy = arraySliceCopyStm
-              [C.cexp|$exp:place.data+$exp:xsize|]
-              [C.cexp|$id:y.shape|] [C.cexp|$id:y|] (subExpType yarr) 0
+              [C.cexp|$exp:place.data+$exp:xsize|] [C.cexp|$id:y.data|]
+              [C.cexp|$id:y.shape|] (subExpType yarr) 0
   return $ stm [C.cstm|{
                      $ty:arrt $id:x, $id:y;
                      $items:xarr'
@@ -799,7 +799,7 @@ compileExp' place (Copy e _) = do
   t <- typeToCType [subExpType e]
   let copy = case subExpType e of
                Array {} -> arraySliceCopyStm [C.cexp|$exp:place.data|]
-                           [C.cexp|$id:val.shape|] [C.cexp|$id:val|]
+                           [C.cexp|$id:val.data|] [C.cexp|$id:val.shape|]
                            (subExpType e) 0
                _ -> [C.cstm|;|]
   return $ stm [C.cstm|{
@@ -834,7 +834,7 @@ compileSubExpInPlace place e
   tmpplace <- new "inplace"
   e' <- compileSubExp (varExp tmpplace) e
   let copy = arraySliceCopyStm [C.cexp|$exp:place.data|]
-             [C.cexp|$id:tmpplace.shape|] [C.cexp|$id:tmpplace.data|]
+             [C.cexp|$id:tmpplace.data|] [C.cexp|$id:tmpplace.shape|]
              t 0
   ctype <- typeToCType [subExpType e]
   return $ stm [C.cstm|{
@@ -906,7 +906,7 @@ compileExpInPlace place e
     tmpplace <- new "inplace"
     e' <- compileExp (varExp tmpplace) e
     let copy = arraySliceCopyStm [C.cexp|$exp:place.data|]
-               [C.cexp|$id:tmpplace.shape|] [C.cexp|$id:tmpplace.data|]
+               [C.cexp|$id:tmpplace.data|] [C.cexp|$id:tmpplace.shape|]
                t 0
     ctype <- typeToCType $ typeOf e
     return $ stm [C.cstm|{
