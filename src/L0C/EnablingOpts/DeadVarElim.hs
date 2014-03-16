@@ -203,4 +203,4 @@ deadCodeElimLambda (Lambda params body rettype pos) = do
   body' <- binding ids $ deadCodeElimBody body
   params' <- deadCodeElimPat params
   rettype' <- mapM deadCodeElimType rettype
-  return $ Lambda params' body' rettype pos
+  return $ Lambda params' body' rettype' pos
