@@ -315,10 +315,11 @@ copyCtPropExp (Apply fname args tp pos) = do
     then do prg <- asks program
             let vv = Interp.runFunNoTrace fname vals  prg
             case vv of
-              (Right [v]) -> changed $ SubExp $ Constant v pos
-              (Right vs) -> changed $ TupLit (map (`Constant` pos) vs) pos
-              _ -> badCPropM $ EnablingOptError pos (" Interpreting fun " ++
-                                                     nameToString fname ++ " yields error!")
+              Right [v] -> changed $ SubExp $ Constant v pos
+              Right vs  -> changed $ TupLit (map (`Constant` pos) vs) pos
+              Left e    -> badCPropM $ EnablingOptError
+                           pos (" Interpreting fun " ++ nameToString fname ++
+                                " yields error:\n" ++ show e)
     else return $ Apply fname (zip args' $ map snd args) tp pos
 
     where
