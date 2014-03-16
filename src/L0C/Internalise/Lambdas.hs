@@ -75,8 +75,8 @@ lambdaBinding ce params ts m =
     return (body, map I.toParam params')
 
 outerShape :: SrcLoc -> [I.Type] -> SubExp
-outerShape _ (t:_) | Shape (outer : _) <- arrayShape t = outer
-outerShape loc _ = I.Constant (I.BasicVal $ I.IntVal 0) loc
+outerShape _ (t:_) = arraySize 0 t
+outerShape loc _   = I.Constant (I.BasicVal $ I.IntVal 0) loc
 
 internaliseLambda :: (E.Exp -> InternaliseM Body)
                   -> I.Ident
@@ -106,7 +106,7 @@ internaliseMapLambda internaliseBody ce lam args = do
       outer_shape = outerShape loc argtypes
   (cs,inner_shapes) <- bindMapShapes [ce] shapefun args outer_shape
   let rettype' = addTypeShapes rettype_value $
-                 outer_shape : map I.Var inner_shapes
+                 map I.Var inner_shapes
   return (cs, I.Lambda params value_body rettype' loc)
   where loc = srclocOf lam
 
@@ -151,13 +151,13 @@ internaliseFilterLambda internaliseBody ce lam args = do
   (params, body, _) <- internaliseLambda internaliseBody ce lam rowtypes
   let (_, value_body) = splitBody body
       arg_outer_shape = outerShape loc argtypes
-  let filtfun = I.Lambda params value_body [I.Basic Bool] loc
+      filtfun         = I.Lambda params value_body [I.Basic Bool] loc
   result_size <- bindFilterResultOuterShape ce filtfun args arg_outer_shape
   return (result_size, filtfun)
   where loc = srclocOf lam
 
 bindFilterResultOuterShape :: I.Ident -> I.Lambda -> [I.SubExp] -> I.DimSize
-                     -> InternaliseM I.Ident
+                           -> InternaliseM I.Ident
 bindFilterResultOuterShape ce lam args input_size = do
   outershape <- newIdent "filter_size"
                 (I.Basic Int) loc
