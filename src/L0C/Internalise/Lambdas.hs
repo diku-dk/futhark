@@ -7,6 +7,7 @@ module L0C.Internalise.Lambdas
   )
   where
 
+import Control.Applicative
 import Control.Monad
 
 import Data.List
@@ -112,17 +113,14 @@ internaliseMapLambda internaliseBody ce lam args = do
 bindMapShapes :: I.Certificates -> I.Lambda -> [I.SubExp] -> SubExp
               -> InternaliseM (I.Certificates, [I.Ident])
 bindMapShapes cs sizefun args outer_shape = do
-  (inner_shapes, comp_shapes, checks) <-
-    liftM unzip3 $ replicateM (length (I.lambdaReturnType sizefun)) $ do
-      comp_shape <- newIdent "map_computed_shape"
-                    (I.arrayOf (I.Basic I.Int) (I.Shape [outer_shape]) I.Unique) loc
-      (cert, shape, all_equal) <- allEqual comp_shape
-      return (shape, comp_shape, (cert, all_equal))
-  let (certs, shape_checks) = unzip checks
-      sizecomp = if null comp_shapes
+  comp_shapes <- replicateM (length (I.lambdaReturnType sizefun)) $
+                 newIdent "map_computed_shape"
+                 (I.arrayOf (I.Basic I.Int) (I.Shape [outer_shape]) I.Unique) loc
+  let sizecomp = if null comp_shapes
                  then []
                  else [(comp_shapes, I.Map cs sizefun args loc)]
-  mapM_ (uncurry letBind) $ sizecomp ++ shape_checks
+  mapM_ (uncurry letBind) sizecomp
+  (certs, inner_shapes) <- unzip <$> mapM allEqual comp_shapes
   return (certs, inner_shapes)
   where loc = srclocOf sizefun
 

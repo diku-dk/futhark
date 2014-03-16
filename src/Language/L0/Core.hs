@@ -163,8 +163,7 @@ builtInFunctions = HM.fromList $ map namify
                    ,("sqrt", (Real, [Real]))
                    ,("log", (Real, [Real]))
                    ,("exp", (Real, [Real]))
-                   ,("op not", (Bool, [Bool]))
-                   ,("all_equal", (Int, [Int]))]
+                   ,("op not", (Bool, [Bool]))]
   where namify (k,v) = (nameFromString k, v)
 
 -- | The abstract (not really) type representing names in the L0

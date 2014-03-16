@@ -18,6 +18,7 @@ module L0C.Tools
   , eBody
 
   , binOpLambda
+  , makeLambda
 
   , MonadBinder(..)
   , Binding(..)
@@ -167,6 +168,17 @@ binOpLambda bop t loc = do
            , lambdaSrcLoc     = loc
            , lambdaBody = LetPat [res] (BinOp bop (Var x) (Var y) t loc)
                           (Result [] [Var res] loc) loc
+           }
+
+makeLambda :: MonadBinder m =>
+              [Param] -> m Body -> m Lambda
+makeLambda params body = do
+  body' <- insertBindings body
+  return Lambda {
+             lambdaParams = params
+           , lambdaSrcLoc = srclocOf body'
+           , lambdaReturnType = map (`setAliases` ()) $ bodyType body'
+           , lambdaBody = body'
            }
 
 data Binding = LoopBind [(Ident, SubExp)] Ident SubExp Body

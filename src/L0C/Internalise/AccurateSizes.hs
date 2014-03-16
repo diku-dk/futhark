@@ -107,16 +107,32 @@ typeSizes :: ArrayShape shape =>
 typeSizes = concatMap addShapeTypes
   where addShapeTypes t = t : replicate (arrayRank t) (Basic Int)
 
-allEqual :: Ident -> InternaliseM (Ident, Ident, ([Ident], Exp))
+allEqual :: Ident -> InternaliseM (Ident, Ident)
 allEqual comp_shape = do
-  let loc = srclocOf comp_shape
-  cert  <- newIdent "map_cert" (Basic Cert) loc
-  shape <- newIdent "map_shape" (Basic Int) loc
-  return (cert, shape,
-          ([cert, shape],
-           Apply (nameFromString "all_equal")
-           [(Var comp_shape, Observe)]
-           [Basic Cert, Basic Int] loc))
+  x <- newIdent "x" (Basic Int) loc
+  y <- newIdent "y" (Basic Int) loc
+  compFun <- makeLambda [toParam x, toParam y] $ eBody $
+    eTupLit [ pure $ BinOp Equal (Var x) (Var y) (Basic Bool) loc
+            , pure $ SubExp $ Var x] loc
+  bacc <- newIdent "bacc" (Basic Bool) loc
+  nacc <- newIdent "nacc" (Basic Int) loc
+  belm <- newIdent "belm" (Basic Bool) loc
+  nelm <- newIdent "nelm" (Basic Int) loc
+  checkFun <- makeLambda (map toParam [bacc,nacc,belm,nelm]) $ eBody $
+    eTupLit [ pure $ BinOp LogAnd (Var bacc) (Var belm) (Basic Bool) loc
+            , pure $ SubExp $ Var nelm ] loc
+  comp_shape_rot1 <- letExp "comp_shape_rot1" $ Rotate [] 1 (Var comp_shape) loc
+  comps <- letTupExp "map_comps" $
+           Map [] compFun [Var comp_shape, Var comp_shape_rot1] loc
+  checked <- newIdent "all_equal_checked" (Basic Bool) loc
+  shape   <- newIdent "all_equal_shape" (Basic Int) loc
+  letBind [checked, shape] $
+          Reduce [] checkFun (zip [true, zero] $ map Var comps) loc
+  cert <- letExp "all_equal_cert" $ Assert (Var checked) loc
+  return (cert, shape)
+  where loc  = srclocOf comp_shape
+        true = Constant (BasicVal $ LogVal True) loc
+        zero = Constant (BasicVal $ IntVal 0) loc
 
 data UnsizedLambda = UnsizedLambda {
     unsizedLambdaParams     :: [Param]

@@ -388,11 +388,8 @@ checkProg' checkoccurs prog = do
     addLoc (t, ts) = (t, ts, noLoc)
 
 initialFtable :: HM.HashMap Name FunBinding
-initialFtable = HM.insert (nameFromString "all_equal") all_equal $
-                HM.map addBuiltin builtInFunctions
+initialFtable = HM.map addBuiltin builtInFunctions
   where addBuiltin (t, ts) = ([Basic t], map Basic ts)
-        all_equal = ([Basic Cert, Basic Int],
-                     [arrayOf (Basic Int) (Rank 1) Nonunique])
 
 checkFun :: FunDec -> TypeM FunDec
 checkFun (fname, rettype, params, body, loc) = do
