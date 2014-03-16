@@ -48,6 +48,7 @@ module L0C.InternalRep.Attributes
   , arraysSize
   , setArrayShape
   , setArrayDims
+  , setOuterSize
   , returnType
   , lambdaType
   , lambdaReturnType

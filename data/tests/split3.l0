@@ -1,0 +1,3 @@
+// A better name would be 'take'...
+fun {[real], [real]} main(int n, [real] a) =
+  split(n, a)

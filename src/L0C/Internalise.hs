@@ -146,15 +146,14 @@ internaliseExp (E.ArrayLit es rowtype loc) = do
     [et] -> do
       ses <- letSubExps "arr_elem" $ map (tuplit Nothing loc . map I.Var) es'
       return $ I.ArrayLit ses
-               (et `setArrayShape` Shape (intlit (length es) : drop 1 rowshape))
+               (et `setArrayShape` Shape rowshape)
                loc
     ets   -> do
       let arraylit ks et = I.ArrayLit (map I.Var ks)
-                           (et `setArrayShape` Shape (intlit (length es) : rowshape))
+                           (et `setArrayShape` Shape rowshape)
                            loc
       c <- mergeCerts $ catMaybes cs
       tuplit c loc <$> letSubExps "arr_elem" (zipWith arraylit (transpose es') ets)
-  where intlit x = I.Constant (I.BasicVal $ I.IntVal x) loc
 
 internaliseExp (E.Apply fname args _ loc)
   | "trace" <- nameToString fname = do
@@ -288,14 +287,18 @@ internaliseExp (E.Split cs nexp arrexp loc) = do
              nexp' (I.Basic Int) loc
   cs'' <- mergeCerts $ certify c cs'
   partnames <- forM (map I.identType arrs) $ \et -> do
-                 a <- fst <$> newVar loc "split_a" et
-                 b <- fst <$> newVar loc "split_b" et
-                 return (a, b)
+    a <- fst <$> newVar loc "split_a" (et `setOuterSize` nexp')
+    b <- fst <$> newVar loc "split_b" (et `setOuterSize` ressize)
+    return (a, b)
   let cert = maybe (given loc) I.Var cs''
       combsplit arr (a,b) =
         letBind [a,b] $ I.Split (certify c []) nexp' (I.Var arr) ressize loc
-      els = (cert : map (I.Var . fst) partnames) ++
-            (cert : map (I.Var . snd) partnames)
+      els = case arrs of
+              []  -> []
+              [_] -> map (I.Var . fst) partnames ++
+                     map (I.Var . snd) partnames
+              _   -> (cert : map (I.Var . fst) partnames) ++
+                     (cert : map (I.Var . snd) partnames)
   zipWithM_ combsplit arrs partnames
   return $ I.TupLit els loc
 
