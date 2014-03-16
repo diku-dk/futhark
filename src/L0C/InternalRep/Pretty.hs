@@ -57,8 +57,8 @@ instance Pretty Value where
 
 instance Pretty (TypeBase als Shape) where
   ppr (Basic et) = ppr et
-  ppr (Array et (Shape ds) u _) = u' <> foldl f (ppr et) ds
-    where f s e = brackets $ s <> comma <> ppr e
+  ppr (Array et (Shape ds) u _) = u' <> foldr f (ppr et) ds
+    where f e s = brackets $ s <> comma <> ppr e
           u' | Unique <- u = star
              | otherwise = empty
 
