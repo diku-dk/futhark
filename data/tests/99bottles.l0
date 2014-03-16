@@ -16,12 +16,9 @@ fun [char] verse(int i) =
     let num = itoa(i) in
     concat(concat(concat(concat(concat(num, " bottles of beer on the wall, "), num), " bottles of beer.\nTake one down, pass it around, "), num), " bottles of beer on the wall.\n")
 
-fun [[char]] bottles(int i) =
-    let lastverse = ["One bottle of beer on the wall, one bottle of beer.\nTake one down, pass it around, one bottle of beer on the wall.\n"] in
-    concat(map(verse, map(op - (i), iota(i-1))), lastverse)
-
 fun [char] main() =
-  let verses = bottles(99) in
-  loop (song="") = for i < size(0,verses) do
-    concat(song, verses[i]) in
-  song
+  let n = 99 in
+  let lastverse = "One bottle of beer on the wall, one bottle of beer.\nTake one down, pass it around, one bottle of beer on the wall.\n" in
+  loop (song="") = for i < 99 do
+    concat(song, verse(i)) in
+  concat(song, lastverse)
