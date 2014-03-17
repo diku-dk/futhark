@@ -91,7 +91,7 @@ transformExp (Scan cs fun args loc) = do
   return $ TupLit (map Var arr) loc
   where (accexps, arrexps) = unzip args
 
-transformExp (Filter cs fun arrexps _ loc) = do
+transformExp (Filter cs fun arrexps outersize loc) = do
   arr <- letExps "arr" $ map SubExp arrexps
   let nv = size arrexps
       rowtypes = map (rowType . subExpType) arrexps
@@ -115,9 +115,8 @@ transformExp (Filter cs fun arrexps _ loc) = do
   ia <- letExp "ia" scan
   let indexia ind = eIndex cs ia [ind] loc
       sub1 e = eBinOp Minus e (pexp $ intval 1) (Basic Int) loc
-  resinit <- mapM (letExp "filter_result_empty" . SubExp) =<<
-             resultArray (map subExpType arrexps) loc
-  res <- forM (map identType resinit) $ \t -> newIdent "filter_result" t loc
+  resinit <- resultArray (map ((`setOuterSize` outersize) . subExpType) arrexps) loc
+  res <- forM (map subExpType resinit) $ \t -> newIdent "filter_result" t loc
   let resv = Result [] (map Var res) loc
   loopbody <- insertBindings $ do
     let indexi = indexia $ pexp iv
@@ -132,7 +131,7 @@ transformExp (Filter cs fun arrexps _ loc) = do
                (eBody $ eBinOp Equal indexi indexinm1 (Basic Bool) loc)
                [Basic Bool] loc)
           (pure resv) (eBody update) (bodyType resv) loc
-  loopBind (zip res $ map Var resinit) i nv loopbody
+  loopBind (zip res resinit) i nv loopbody
   return $ TupLit (map Var res) loc
   where intval x = Constant (BasicVal $ IntVal x) loc
 
