@@ -236,11 +236,19 @@ mainCall (fname,rettype,params,_,_) = do
   crettype <- typeToCType $ map fromDecl rettype
   ret <- new "main_ret"
   printRes <- printStm (varExp ret) rettype
-  (args, decls, rstms) <- liftM unzip3 . forM paramtypes $ \paramtype -> do
-    name <- new "main_arg"
-    cparamtype <- typeToCType [paramtype]
-    let rstm = readStm (varExp name) $ toDecl paramtype
-    return (varExp name, [C.cdecl|$ty:cparamtype $id:name;|], rstm)
+  let mkParam (args, decls, rstms, []) paramtype = do
+        name <- new "main_arg"
+        cparamtype <- typeToCType [paramtype]
+        let rstm = readStm (varExp name) $ toDecl paramtype
+            argshape = [ [C.cexp|$id:name.shape[$int:i]|]
+                         | i <- [0..arrayRank paramtype-1] ]
+        return (args ++ [varExp name],
+                decls ++ [[C.cdecl|$ty:cparamtype $id:name;|]],
+                rstms ++ [rstm],
+                argshape)
+      mkParam (args, decls, rstms, shape : shapes) _ =
+        return (args ++ [shape], decls, rstms, shapes)
+  (args, decls, rstms, _) <- foldM mkParam ([], [], [], []) paramtypes
   return [C.cstm|{
                $decls:decls
                $ty:crettype $id:ret;

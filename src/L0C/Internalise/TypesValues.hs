@@ -9,6 +9,7 @@ module L0C.Internalise.TypesValues
 
   -- * Internalising values
   , internaliseValue
+  , internaliseParamValues
 
   , noInfoToUnit
   )
@@ -97,6 +98,12 @@ internaliseValue (E.ArrayVal arr rt) =
         -- Above should never happen in well-typed program.
 internaliseValue (E.TupVal vs) = concatMap internaliseValue vs
 internaliseValue (E.BasicVal bv) = [I.BasicVal bv]
+
+-- | Internalise the values given as per 'internaliseValue', but also
+-- add their sizes.
+internaliseParamValues :: [E.Value] -> [I.Value]
+internaliseParamValues = concatMap (concatMap withValueShapes . internaliseValue)
+  where withValueShapes v = v : map (I.BasicVal . I.IntVal) (I.valueShape v)
 
 noInfoToUnit :: I.TypeBase (NoInfo VName) shape -> I.TypeBase () shape
 noInfoToUnit = (`I.setAliases` ())

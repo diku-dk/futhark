@@ -25,6 +25,7 @@ module L0C.Internalise
   ( internaliseProg
   , internaliseType
   , internaliseValue
+  , internaliseParamValues
   )
   where
 
