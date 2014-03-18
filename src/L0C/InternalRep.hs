@@ -25,6 +25,7 @@ newNameSourceForProg :: Prog -> VNameSource
 newNameSourceForProg = newNameSource . progNames
 
 newtype Several a = Several [a]
+  deriving (Eq, Ord, Show)
 
 instance Pretty a => Pretty (Several a) where
   ppr (Several [t]) = ppr t
