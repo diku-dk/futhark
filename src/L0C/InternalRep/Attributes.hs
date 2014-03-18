@@ -152,7 +152,9 @@ arraysSize i (t:_) = arraySize i t
 -- array, return the type unchanged.
 setArrayShape :: ArrayShape newshape =>
                  TypeBase as oldshape -> newshape -> TypeBase as newshape
-setArrayShape (Array et _ u as) ds = Array et ds u as
+setArrayShape (Array et _ u as) ds
+  | shapeRank ds == 0 = Basic et
+  | otherwise         = Array et ds u as
 setArrayShape (Basic t)  _         = Basic t
 
 -- | Set the dimensions of an array.  If the given type is not an
