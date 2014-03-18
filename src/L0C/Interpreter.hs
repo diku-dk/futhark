@@ -69,7 +69,7 @@ instance Show InterpreterError where
   show (NegativeReplicate pos n) =
     "Argument " ++ show n ++ " to replicate at " ++ locStr pos ++ " is negative."
   show (TypeError pos s) =
-    "Type error during interpretation at " ++ locStr pos ++ " in " ++ s ++ "."
+    "Type error during interpretation at " ++ locStr pos ++ " in " ++ s
   show (InvalidArrayShape pos shape newshape) =
     "Invalid array reshaping at " ++ locStr pos ++ ", from " ++ show shape ++ " to " ++ show newshape
   show (ZipError pos lengths) =
