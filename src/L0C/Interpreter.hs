@@ -35,7 +35,7 @@ data InterpreterError = MissingEntryPoint Name
                       -- ^ The specified start function does not exist.
                       | InvalidFunctionArguments Name (Maybe [DeclType]) [DeclType]
                       -- ^ The arguments given to a function were mistyped.
-                      | IndexOutOfBounds SrcLoc Int Int
+                      | IndexOutOfBounds SrcLoc String Int Int
                       -- ^ First @Int@ is array size, second is attempted index.
                       | NegativeIota SrcLoc Int
                       -- ^ Called @iota(n)@ where @n@ was negative.
@@ -61,14 +61,15 @@ instance Show InterpreterError where
     intercalate ", " (map ppType expected) ++
     " but got argument(s) of type " ++
     intercalate ", " (map ppType got) ++ "."
-  show (IndexOutOfBounds pos arrsz i) =
-    "Array index " ++ show i ++ " out of bounds of array size " ++ show arrsz ++ " at " ++ locStr pos ++ "."
+  show (IndexOutOfBounds pos var arrsz i) =
+    "Array index " ++ show i ++ " out of bounds in array '" ++
+    var ++ "', of size " ++ show arrsz ++ " at " ++ locStr pos ++ "."
   show (NegativeIota pos n) =
     "Argument " ++ show n ++ " to iota at " ++ locStr pos ++ " is negative."
   show (NegativeReplicate pos n) =
     "Argument " ++ show n ++ " to replicate at " ++ locStr pos ++ " is negative."
   show (TypeError pos s) =
-    "Type error at " ++ locStr pos ++ " in " ++ s ++ " during interpretation.  This implies a bug in the type checker."
+    "Type error during interpretation at " ++ locStr pos ++ " in " ++ s ++ "."
   show (InvalidArrayShape pos shape newshape) =
     "Invalid array reshaping at " ++ locStr pos ++ ", from " ++ show shape ++ " to " ++ show newshape
   show (ZipError pos lengths) =
@@ -223,12 +224,14 @@ evalSubExp (Constant v _) = return v
 
 evalBody :: Body -> L0M [Value]
 
-evalBody (LetPat pat e body _) = do
+evalBody (LetPat pat e body loc) = do
   v <- evalExp e
+  checkPatSizes loc pat v
   local (`bindVars` zip pat v) $ evalBody body
 
 evalBody (LetWith _ name src idxs ve body pos) = do
   v <- lookupVar src
+  checkPatSizes pos [name] [v]
   idxs' <- mapM evalSubExp idxs
   vev <- evalSubExp ve
   v' <- change v idxs' vev
@@ -239,13 +242,15 @@ evalBody (LetWith _ name src idxs ve body pos) = do
             let x = arr ! i
             x' <- change x rest to
             return $ ArrayVal (arr // [(i, x')]) t
-          | otherwise = bad $ IndexOutOfBounds pos (upper+1) i
+          | otherwise = bad $ IndexOutOfBounds pos
+                              (textual $ identName name) (upper+1) i
           where upper = snd $ bounds arr
         change _ _ _ = bad $ TypeError pos "evalBody Let Id"
 
 evalBody (DoLoop merge loopvar boundexp loopbody letbody pos) = do
   bound <- evalSubExp boundexp
   mergestart <- mapM evalSubExp mergeexp
+  checkPatSizes pos mergepat mergestart
   case bound of
     BasicVal (IntVal n) -> do
       loopresult <- foldM iteration mergestart [0..n-1]
@@ -344,7 +349,8 @@ evalExp (Index _ ident idxs pos) = do
   single <$> foldM idx v idxs'
   where idx (ArrayVal arr _) (BasicVal (IntVal i))
           | i >= 0 && i <= upper = return $ arr ! i
-          | otherwise             = bad $ IndexOutOfBounds pos (upper+1) i
+          | otherwise            =
+            bad $ IndexOutOfBounds pos (textual $ identName ident) (upper+1) i
           where upper = snd $ bounds arr
         idx _ _ = bad $ TypeError pos "evalExp Index"
 
@@ -403,7 +409,7 @@ evalExp (Split _ splitexp arrexp _ pos) = do
       | i <= length vs ->
         let (bef,aft) = splitAt i vs
         in return [arrayVal bef rt, arrayVal aft rt]
-      | otherwise        -> bad $ IndexOutOfBounds pos (length vs) i
+      | otherwise        -> bad $ IndexOutOfBounds pos (ppSubExp arrexp) (length vs) i
     _ -> bad $ TypeError pos "evalExp Split"
   where rt = rowType $ subExpType arrexp
 
@@ -499,3 +505,20 @@ evalBoolBinOp op e1 e2 loc = do
 applyLambda :: Lambda -> [Value] -> L0M [Value]
 applyLambda (Lambda params body _ _) args =
   binding (zip (map fromParam params) args) $ evalBody body
+
+checkPatSizes :: SrcLoc -> [Ident] -> [Value] -> L0M ()
+checkPatSizes loc = zipWithM_ checkSize
+  where checkSize var val = do
+          let valshape = map (BasicVal . IntVal) $ valueShape val
+              varname = textual $ identName var
+              vardims = arrayDims $ identType var
+          varshape <- mapM evalSubExp vardims
+          when (varshape /= valshape) $
+            bad $ TypeError loc $ "checkPatSizes:\n" ++
+                                  varname ++ " is specified to have shape [" ++
+                                  intercalate "," (zipWith ppDim vardims varshape) ++
+                                  "], but is being bound to value of shape [" ++
+                                  intercalate "," (map ppValue valshape) ++ "]."
+
+        ppDim (Constant v _) _ = ppValue v
+        ppDim e              v = ppExp (SubExp e) ++ "=" ++ ppValue v
