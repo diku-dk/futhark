@@ -226,7 +226,6 @@ evalBody :: Body -> L0M [Value]
 
 evalBody (LetPat pat e body loc) = do
   v <- evalExp e
-  tell [(loc, ppTuple pat ++ ": " ++ ppTuple v)]
   binding (zip pat v) $ evalBody body
 
 evalBody (LetWith _ name src idxs ve body pos) = do
