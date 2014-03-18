@@ -108,7 +108,7 @@ bindVars :: L0Env -> [(Ident, Value)] -> L0Env
 bindVars = foldl bindVar
 
 binding :: [(Ident, Value)] -> L0M a -> L0M a
-binding bnds = local (`bindVars` bnds)
+binding bnds m = local (`bindVars` bnds) $ checkPatSizes bnds >> m
 
 lookupVar :: Ident -> L0M Value
 lookupVar (Ident vname _ loc) = do
@@ -226,12 +226,10 @@ evalBody :: Body -> L0M [Value]
 
 evalBody (LetPat pat e body loc) = do
   v <- evalExp e
-  checkPatSizes loc pat v
-  local (`bindVars` zip pat v) $ evalBody body
+  binding (zip pat v) $ evalBody body
 
 evalBody (LetWith _ name src idxs ve body pos) = do
   v <- lookupVar src
-  checkPatSizes pos [name] [v]
   idxs' <- mapM evalSubExp idxs
   vev <- evalSubExp ve
   v' <- change v idxs' vev
@@ -250,16 +248,15 @@ evalBody (LetWith _ name src idxs ve body pos) = do
 evalBody (DoLoop merge loopvar boundexp loopbody letbody pos) = do
   bound <- evalSubExp boundexp
   mergestart <- mapM evalSubExp mergeexp
-  checkPatSizes pos mergepat mergestart
   case bound of
     BasicVal (IntVal n) -> do
       loopresult <- foldM iteration mergestart [0..n-1]
-      local (`bindVars` zip mergepat loopresult) $ evalBody letbody
+      binding (zip mergepat loopresult) $ evalBody letbody
     _ -> bad $ TypeError pos "evalBody DoLoop"
   where (mergepat, mergeexp) = unzip merge
         iteration mergeval i =
           binding [(loopvar, BasicVal $ IntVal i)] $
-            local (`bindVars` zip mergepat mergeval) $
+            binding (zip mergepat mergeval) $
               evalBody loopbody
 
 evalBody (Result _ es _) =
@@ -506,12 +503,13 @@ applyLambda :: Lambda -> [Value] -> L0M [Value]
 applyLambda (Lambda params body _ _) args =
   binding (zip (map fromParam params) args) $ evalBody body
 
-checkPatSizes :: SrcLoc -> [Ident] -> [Value] -> L0M ()
-checkPatSizes loc = zipWithM_ checkSize
+checkPatSizes :: [(Ident, Value)]-> L0M ()
+checkPatSizes = mapM_ $ uncurry checkSize
   where checkSize var val = do
           let valshape = map (BasicVal . IntVal) $ valueShape val
               varname = textual $ identName var
               vardims = arrayDims $ identType var
+              loc = srclocOf var
           varshape <- mapM evalSubExp vardims
           when (varshape /= valshape) $
             bad $ TypeError loc $ "checkPatSizes:\n" ++
