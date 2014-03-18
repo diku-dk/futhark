@@ -79,6 +79,7 @@ commandLineOptions =
   , eotransformOpt "e" ["enabling-optimisations"]
   , iitransformOpt []  ["inline-map-indexes"]
   , hotransformOpt "h" ["higher-order-optimizations"]
+  , inlinetransformOpt [] ["inline-functions"]
   , Option "s" ["standard"]
     (NoArg $ \opts -> opts { l0pipeline = standardPipeline ++ l0pipeline opts })
     "Use the recommended optimised pipeline."
@@ -163,9 +164,15 @@ hotransform = Pass { passName = "higher-order optimisations"
                    , passOp = liftPass highOrdTransf
                    }
 
+inlinetransform :: Pass
+inlinetransform = Pass { passName = "inline functions"
+                      , passOp = liftPass aggInlineDriver
+                      }
+
 standardPipeline :: [Pass]
 standardPipeline =
-  [ uttransform, eotransform, iitransform
+  [ uttransform, inlinetransform
+  , eotransform, iitransform
   , hoist,       hotransform, eotransform
   ]
 
@@ -202,6 +209,11 @@ hotransformOpt :: String -> [String] -> L0Option
 hotransformOpt =
   passoption "Perform higher-order optimisation, i.e., fusion."
   hotransform
+
+inlinetransformOpt :: String -> [String] -> L0Option
+inlinetransformOpt =
+  passoption "Aggressively inline and remove dead functions."
+  inlinetransform
 
 -- | Entry point.  Non-interactive, except when reading interpreter
 -- input from standard input.

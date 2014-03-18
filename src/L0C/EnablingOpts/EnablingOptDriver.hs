@@ -1,9 +1,8 @@
 module L0C.EnablingOpts.EnablingOptDriver
-  (
-   enablingOpts
+  ( enablingOpts
   , copyCtProp
   , CallGraph
-  , buildCG
+  , buildCallGraph
   , aggInlineDriver
   , deadFunElim
   , normCopyDeadOpts
@@ -27,12 +26,7 @@ import L0C.EnablingOpts.EnablingOptErrors
 
 enablingOpts :: Prog -> Either EnablingOptError Prog
 enablingOpts prog = do
-
-    prog_inl    <- aggInlineDriver prog
-
-    prog_dfe    <- deadFunElim     prog_inl
-
-    prog_enopt1 <- normCopyDeadOpts prog_dfe
+    prog_enopt1 <- normCopyDeadOpts prog
     prog_enopt2 <- normCopyDeadOpts prog_enopt1
     prog_deadf2 <- deadFunElim      prog_enopt2
     prog_flat_opt <- normCopyDeadOpts prog_deadf2

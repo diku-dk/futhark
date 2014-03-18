@@ -1,12 +1,12 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 -- | This module implements a compiler pass for inlining functions,
 -- then removing those that have become dead.
-module L0C.EnablingOpts.InliningDeadFun  (
-                        CallGraph
-                      , buildCG
-                      , aggInlineDriver
-                      , deadFunElim
-                    )
+module L0C.EnablingOpts.InliningDeadFun
+  ( CallGraph
+  , buildCallGraph
+  , aggInlineDriver
+  , deadFunElim
+  )
   where
 
 import Control.Arrow
@@ -15,128 +15,41 @@ import Control.Monad.Reader
 
 import Data.List
 import Data.Loc
+import Data.Maybe
 
 import qualified Data.HashMap.Lazy as HM
 
 import L0C.InternalRep
 
+import L0C.EnablingOpts.CallGraph
 import L0C.EnablingOpts.EnablingOptErrors
 
 import L0C.InternalRep.Renamer
 
-
-------------------------------------------------------------------------------
-------------------------------------------------------------------------------
-----  Call Graph And Inlining
-------------------------------------------------------------------------------
-------------------------------------------------------------------------------
-
--- | The Call Graph is just a Map from a function name, i.e., the caller,
--- to a three-element tuple: The first element is a list that contains the
--- (unique) function names that may be called directly from the current function,
--- i.e., ``apply'' callees. The second element is a list that contains the (unique)
--- function names that may be called via SOACs.
-type CallGraph = HM.HashMap Name ([Name],[Name])
-
 -- | The symbol table for functions
 data CGEnv = CGEnv { envFtable  :: HM.HashMap Name FunDec }
 
-newtype CGM a = CGM (ReaderT CGEnv (Either EnablingOptError) a)
-    deriving (MonadReader CGEnv, Monad, Applicative, Functor)
+type CGM = ReaderT CGEnv (Either EnablingOptError)
 
--- | Building the call grah runs in this monad.  There is no
--- mutable state.
 runCGM :: CGM a -> CGEnv -> Either EnablingOptError a
-runCGM  (CGM a) = runReaderT a
+runCGM = runReaderT
 
 badCGM :: EnablingOptError -> CGM a
-badCGM = CGM . lift . Left
-
-
--- | @buildCG prog@ build the program's Call Graph. The representation
--- is a hashtable that maps function names to a list of callee names.
-buildCG :: Prog -> Either EnablingOptError CallGraph
-buildCG prog = do
-    env <- foldM expand env0 (progFunctions prog)
-    runCGM (buildCGfun HM.empty defaultEntryPoint) env
-
-    where
-        env0 = CGEnv { envFtable = HM.empty }
-        expand :: CGEnv -> FunDec -> Either EnablingOptError CGEnv
-        expand ftab f@(name,_,_,_,pos)
-            | Just (_,_,_,_,pos2) <- HM.lookup name (envFtable ftab) =
-              Left $ DupDefinitionError name pos pos2
-            | otherwise =
-                Right CGEnv { envFtable = HM.insert name f (envFtable ftab) }
-
-
--- | @buildCG cg fname@ updates Call Graph @cg@ with the contributions of function
--- @fname@, and recursively, with the contributions of the callees of @fname@.
--- In particular, @buildCGfun HM.empty defaultEntryPoint@ should construct the Call Graph
--- of the whole program.
-buildCGfun :: CallGraph -> Name -> CGM CallGraph
-buildCGfun cg fname  = do
-  bnd <- asks $ HM.lookup fname . envFtable
-  case bnd of
-    Nothing -> badCGM $ FunctionNotInFtab fname
-    Just (caller,_,_,body,pos) ->
-      if caller == fname
-      then
-        case HM.lookup caller cg of
-          Just _  -> return cg
-          Nothing -> do let callees@(fs, soacs) = buildCGbody ([],[]) body
-
-                        let cg' = HM.insert caller callees cg
-
-                        -- recursively build the callees
-                        let fs_soacs = fs `union` soacs
-                        foldM buildCGfun cg' fs_soacs
-
-      else  badCGM $ TypeError pos  (" in buildCGfun lookup for fundec of " ++
-                                     nameToString fname ++ " resulted in " ++
-                                     nameToString caller)
-  where
-
-buildCGbody :: ([Name],[Name]) -> Body -> ([Name],[Name])
-buildCGbody = foldBody build
-  where build = identityFolder {
-                  foldOnBody = \x -> return . buildCGbody x
-                , foldOnExp  = \x -> return . buildCGexp  x
-                }
-
-buildCGexp :: ([Name],[Name]) -> Exp -> ([Name],[Name])
-
-buildCGexp callees@(fs, soacfs) (Apply fname _ _ _)  =
-    if isBuiltInFunction fname || elem fname fs
-    then callees
-    else (fname:fs, soacfs)
-
-buildCGexp callees e =
-    foldlPattern buildCGexp addLamFun callees e
-
-addLamFun :: ([Name],[Name]) -> Lambda -> ([Name],[Name])
-addLamFun callees _ = callees
+badCGM = lift . Left
 
 ------------------------------------------------------------------
 ------------------------------------------------------------------
 ------------------------------------------------------------------
 ------------------------------------------------------------------
--- | @aggInlineDriver prog@ performs aggressive inlining for all functions
--- in @prog@ by repeatedly inlining the functions with empty-apply-callee set into
--- other callers.   The functions called (indirectly) via SOACs are disregarded.
+-- | @aggInlineDriver prog@ performs aggressive inlining for all
+-- functions in @prog@ by repeatedly inlining the functions with
+-- empty-apply-callee set into other callers.  Afterwards, all dead
+-- functions are removed.
 aggInlineDriver :: Prog -> Either EnablingOptError Prog
 aggInlineDriver prog = do
-  env <- foldM expand env0 $ progFunctions prog
-  cg  <- runCGM (buildCGfun HM.empty defaultEntryPoint) env
-  renameProg <$> runCGM (aggInlining cg) env
-  where
-    env0 = CGEnv { envFtable = HM.empty }
-    expand :: CGEnv -> FunDec -> Either EnablingOptError CGEnv
-    expand ftab f@(name,_,_,_,pos)
-      | Just (_,_,_,_,pos2) <- HM.lookup name (envFtable ftab) =
-        Left $ DupDefinitionError name pos pos2
-      | otherwise =
-        Right CGEnv { envFtable = HM.insert name f (envFtable ftab) }
+  cg  <- buildCallGraph prog
+  env <- CGEnv <$> buildFunctionTable prog
+  renameProg <$> (deadFunElim =<< runCGM (aggInlining cg) env)
 
 -- | Bind a name as a common (non-merge) variable.
 bindVarFtab :: CGEnv -> (Name, FunDec) -> CGEnv
@@ -264,23 +177,9 @@ inlineInLambda inlcallees (Lambda params body ret loc) =
 -- The functions called (indirectly) via SOACs are obviously considered.
 deadFunElim :: Prog -> Either EnablingOptError Prog
 deadFunElim prog = do
-  env  <- foldM expand env0 $ progFunctions prog
-  cg   <- runCGM (buildCGfun HM.empty defaultEntryPoint) env
-  let env'  = (HM.filter (isFunInCallGraph cg) . envFtable) env
-  let prog' = HM.elems env'
-  return $ Prog prog'
+  ftable <- buildFunctionTable prog
+  cg     <- buildCallGraph prog
+  let ftable' = HM.filter (isFunInCallGraph cg) ftable
+  return $ Prog $ HM.elems ftable'
   where
-      env0 = CGEnv { envFtable = HM.empty }
-
-      expand :: CGEnv -> FunDec -> Either EnablingOptError CGEnv
-      expand ftab f@(name,_,_,_,pos)
-        | Just (_,_,_,_,pos2) <- HM.lookup name (envFtable ftab) =
-          Left $ DupDefinitionError name pos pos2
-        | otherwise =
-            Right CGEnv { envFtable = HM.insert name f (envFtable ftab) }
-
-      isFunInCallGraph :: CallGraph -> FunDec -> Bool
-      isFunInCallGraph cg (fnm,_,_,_,_) =
-        case HM.lookup fnm cg of
-            Nothing -> False
-            Just  _ -> True
+    isFunInCallGraph cg (fnm,_,_,_,_) = isJust $ HM.lookup fnm cg
