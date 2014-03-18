@@ -522,9 +522,9 @@ checkBody (LetWith cs (Ident dest destt destpos) src idxes ve body pos) = do
 -- variables in mergepat are actually consumed.  Also, any variables
 -- that are free in the loop body must be passed along as (non-unique)
 -- parameters to the function.
-checkBody (DoLoop mergepat (Ident loopvar _ _)
+checkBody (DoLoop merge (Ident loopvar _ _)
           boundexp loopbody letbody loc) = do
-  let (mergevs, es) = unzip mergepat
+  let (mergepat, es) = unzip merge
   -- First, check the bound and initial merge expression and throw
   -- away the dataflow.  The dataflow will be reconstructed later, but
   -- we need the result of this to synthesize the function.
@@ -537,8 +537,10 @@ checkBody (DoLoop mergepat (Ident loopvar _ _)
   -- Check the loop body.  We tap the dataflow before leaving scope,
   -- so we'll be able to see occurences of variables bound by
   -- mergepat.
-  (firstscope, mergevs') <-
-    checkBinding loc mergevs loc (map subExpType es') mempty
+  (firstscope, mergepat') <-
+    let mergets = zipWith setArrayDims (map subExpType es') $
+                  map (arrayDims . identType) mergepat
+    in checkBinding loc mergepat loc mergets mempty
   (loopbody', loopflow) <-
     firstscope $ collectDataflow $ binding [iparam] $ checkBody loopbody
 
@@ -561,13 +563,13 @@ checkBody (DoLoop mergepat (Ident loopvar _ _)
       -- pattern are used - if something was consumed, it has to be a
       -- unique parameter to the function.
       rettype = zipWith param (map subExpType es') $
-                patDiet mergevs' $
+                patDiet mergepat' $
                 usageOccurences loopflow
-      funparams = zipWith setIdentType mergevs' rettype
+      funparams = zipWith setIdentType mergepat' rettype
 
   result <- newIdents "merge_val" rettype loc
 
-  let boundnames = HS.insert iparam $ HS.fromList mergevs'
+  let boundnames = HS.insert iparam $ HS.fromList mergepat'
       ununique ident =
         ident { identType = param (identType ident) Observe }
       -- Find the free variables of the loop body.
@@ -621,13 +623,13 @@ checkBody (DoLoop mergepat (Ident loopvar _ _)
   -- type-checked program.
   let removeMergeVals als = als `HS.difference` HS.fromList (map identName result)
   (secondscope, _) <-
-    checkBinding loc mergevs loc
+    checkBinding loc mergepat loc
     (map (`changeAliases` removeMergeVals) $ bodyType funcall) callflow
 
   -- And then check the let-body.
   secondscope $ do
     letbody' <- checkBody letbody
-    return $ DoLoop (zip mergevs' es')
+    return $ DoLoop (zip mergepat' es')
                     (Ident loopvar (Basic Int) loc) boundexp'
                     loopbody' letbody' loc
 
@@ -676,7 +678,7 @@ checkExp (If e1 e2 e3 t pos) = do
   t' <- checkTupleAnnotation pos "branch result" t $
         map (`changeAliases` removeConsumed) $
         zipWith unifyUniqueness (bodyType e2') (bodyType e3')
-  return $ If e1' e2' e3' t' pos
+  return $ If e1' e2' e3' (zipWith setArrayDims t' $ map arrayDims t) pos
 
 checkExp (Apply fname args t pos)
   | "trace" <- nameToString fname = do
@@ -980,9 +982,13 @@ checkFuncall fname loc paramtypes _ args = do
 checkLambda :: Lambda -> [Arg] -> TypeM Lambda
 checkLambda (Lambda params body ret loc) args = do
   ret' <- mapM checkType ret
-  (_, _, _, body', _) <-
-    noUnique $ checkFun (nameFromString "<anonymous>", map toDecl ret', params, body, loc)
   if length params == length args then do
-    checkFuncall Nothing loc (map (toDecl . identType) params) (map toDecl ret') args
-    return $ Lambda params body' ret' loc
+    let setParamShape param shape =
+          param { identType = identType param `setArrayDims` shape }
+        params' = zipWith setParamShape params $
+                  map (arrayDims . argType) args
+    (_, _, _, body', _) <-
+      noUnique $ checkFun (nameFromString "<anonymous>", map toDecl ret', params', body, loc)
+    checkFuncall Nothing loc (map (toDecl . identType) params') (map toDecl ret') args
+    return $ Lambda params' body' ret' loc
   else bad $ TypeError loc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
