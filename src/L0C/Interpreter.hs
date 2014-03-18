@@ -226,6 +226,7 @@ evalBody :: Body -> L0M [Value]
 
 evalBody (LetPat pat e body loc) = do
   v <- evalExp e
+  tell [(loc, ppTuple pat ++ ": " ++ ppTuple v)]
   binding (zip pat v) $ evalBody body
 
 evalBody (LetWith _ name src idxs ve body pos) = do
@@ -500,8 +501,10 @@ evalBoolBinOp op e1 e2 loc = do
       bad $ TypeError loc $ "evalBoolBinOp " ++ ppValue v1 ++ " " ++ ppValue v2
 
 applyLambda :: Lambda -> [Value] -> L0M [Value]
-applyLambda (Lambda params body _ _) args =
-  binding (zip (map fromParam params) args) $ evalBody body
+applyLambda (Lambda params body rettype loc) args =
+  do v <- binding (zip (map fromParam params) args) $ evalBody body
+     checkReturnShapes loc rettype v
+     return v
 
 checkPatSizes :: [(Ident, Value)]-> L0M ()
 checkPatSizes = mapM_ $ uncurry checkSize
@@ -516,6 +519,22 @@ checkPatSizes = mapM_ $ uncurry checkSize
                                   varname ++ " is specified to have shape [" ++
                                   intercalate "," (zipWith ppDim vardims varshape) ++
                                   "], but is being bound to value of shape [" ++
+                                  intercalate "," (map ppValue valshape) ++ "]."
+
+        ppDim (Constant v _) _ = ppValue v
+        ppDim e              v = ppExp (SubExp e) ++ "=" ++ ppValue v
+
+checkReturnShapes :: SrcLoc -> [ConstType] -> [Value] -> L0M ()
+checkReturnShapes loc = zipWithM_ checkShape
+  where checkShape t val = do
+          let valshape = map (BasicVal . IntVal) $ valueShape val
+              retdims = arrayDims t
+          varshape <- mapM evalSubExp retdims
+          when (varshape /= valshape) $
+            bad $ TypeError loc $ "checkReturnShapes:\n" ++
+                                  "Return type specifies shape [" ++
+                                  intercalate "," (zipWith ppDim retdims varshape) ++
+                                  "], but returned value is of shape [" ++
                                   intercalate "," (map ppValue valshape) ++ "]."
 
         ppDim (Constant v _) _ = ppValue v
