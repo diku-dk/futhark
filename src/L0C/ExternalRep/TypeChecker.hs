@@ -704,56 +704,51 @@ checkExp (Unzip e _ pos) = do
     Just (Elem (Tuple ts)) -> return $ Unzip e' ts pos
     _ -> bad $ TypeError pos $ "Argument to unzip is not an array of tuples, but " ++ ppType (typeOf e') ++ "."
 
-checkExp (Map fun arrexp intype pos) = do
-  (arrexp', arg@(rt, _, _)) <- checkSOACArrayArg arrexp
+checkExp (Map fun arrexp pos) = do
+  (arrexp', arg) <- checkSOACArrayArg arrexp
   fun' <- checkLambda fun [arg]
-  intype' <- checkAnnotation pos "map input element" intype rt
-  return (Map fun' arrexp' intype' pos)
+  return (Map fun' arrexp' pos)
 
-checkExp (Reduce fun startexp arrexp intype pos) = do
+checkExp (Reduce fun startexp arrexp pos) = do
   (startexp', startarg) <- checkArg startexp
   (arrexp', arrarg@(inrowt, _, _)) <- checkSOACArrayArg arrexp
-  intype' <- checkAnnotation pos "element" intype inrowt
   fun' <- checkLambda fun [startarg, arrarg]
   let redtype = lambdaType fun' [typeOf startexp', typeOf arrexp']
   unless (typeOf startexp' `subtypeOf` redtype) $
     bad $ TypeError pos $ "Initial value is of type " ++ ppType (typeOf startexp') ++ ", but reduce function returns type " ++ ppType redtype ++ "."
-  unless (intype' `subtypeOf` redtype) $
-    bad $ TypeError pos $ "Array element value is of type " ++ ppType intype' ++ ", but reduce function returns type " ++ ppType redtype ++ "."
-  return $ Reduce fun' startexp' arrexp' intype' pos
+  unless (inrowt `subtypeOf` redtype) $
+    bad $ TypeError pos $ "Array element value is of type " ++ ppType inrowt ++ ", but reduce function returns type " ++ ppType redtype ++ "."
+  return $ Reduce fun' startexp' arrexp' pos
 
-checkExp (Scan fun startexp arrexp intype pos) = do
+checkExp (Scan fun startexp arrexp pos) = do
   (startexp', startarg) <- checkArg startexp
   (arrexp', arrarg@(inrowt, _, _)) <- checkSOACArrayArg arrexp
-  intype' <- checkAnnotation pos "element" intype inrowt
   fun' <- checkLambda fun [startarg, arrarg]
   let scantype = lambdaType fun' [typeOf startexp', typeOf arrexp']
   unless (typeOf startexp' `subtypeOf` scantype) $
     bad $ TypeError pos $ "Initial value is of type " ++ ppType (typeOf startexp') ++ ", but scan function returns type " ++ ppType scantype ++ "."
-  unless (intype' `subtypeOf` scantype) $
-    bad $ TypeError pos $ "Array element value is of type " ++ ppType intype' ++ ", but scan function returns type " ++ ppType scantype ++ "."
-  return $ Scan fun' startexp' arrexp' intype' pos
+  unless (inrowt `subtypeOf` scantype) $
+    bad $ TypeError pos $ "Array element value is of type " ++ ppType inrowt ++ ", but scan function returns type " ++ ppType scantype ++ "."
+  return $ Scan fun' startexp' arrexp' pos
 
-checkExp (Filter fun arrexp rowtype pos) = do
+checkExp (Filter fun arrexp pos) = do
   (arrexp', (rowelemt, argflow, argloc)) <- checkSOACArrayArg arrexp
   let nonunique_arg = (rowelemt `setUniqueness` Nonunique,
                        argflow, argloc)
-  rowtype' <- checkAnnotation pos "row" rowtype rowelemt
   fun' <- checkLambda fun [nonunique_arg]
-  when (lambdaType fun' [rowtype'] /= Elem (Basic Bool)) $
+  when (lambdaType fun' [rowelemt] /= Elem (Basic Bool)) $
     bad $ TypeError pos "Filter function does not return bool."
 
-  return $ Filter fun' arrexp' rowtype' pos
+  return $ Filter fun' arrexp' pos
 
-checkExp (Redomap outerfun innerfun accexp arrexp intype pos) = do
+checkExp (Redomap outerfun innerfun accexp arrexp pos) = do
   (accexp', accarg) <- checkArg accexp
   (arrexp', arrarg@(rt, _, _)) <- checkSOACArrayArg arrexp
   (outerfun', _) <- checkLambdaArg outerfun [accarg, accarg]
   innerfun' <- checkLambda innerfun [accarg, arrarg]
   let redtype = lambdaType innerfun' [typeOf accexp', rt]
   _ <- require [redtype] accexp'
-  intype' <- checkAnnotation pos "redomap input element" intype rt
-  return $ Redomap outerfun' innerfun' accexp' arrexp' intype' pos
+  return $ Redomap outerfun' innerfun' accexp' arrexp' pos
 
 checkExp (Split cs splitexp arrexp pos) = do
   cs' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) cs

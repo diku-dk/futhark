@@ -318,7 +318,7 @@ Exp  :: { UncheckedExp }
                       { Concat [] $3 $5 $1 }
 
      | reduce '(' FunAbstr ',' Exp ',' Exp ')'
-                      { Reduce $3 $5 $7 NoInfo $1 }
+                      { Reduce $3 $5 $7 $1 }
 
      | Certificates reduceT '(' TupleFunAbstr ',' DExps ')'
                       { ReduceT $1 $4 $6 $2 }
@@ -327,7 +327,7 @@ Exp  :: { UncheckedExp }
                       { ReduceT [] $3 $5 $1 }
 
      | map '(' FunAbstr ',' Exp ')'
-                      { Map $3 $5 NoInfo $1 }
+                      { Map $3 $5 $1 }
 
      | Certificates mapT '(' TupleFunAbstr ',' Exps ')'
                       { MapT $1 $4 $6 $2 }
@@ -336,7 +336,7 @@ Exp  :: { UncheckedExp }
                       { MapT [] $3 $5 $1 }
 
      | scan '(' FunAbstr ',' Exp ',' Exp ')'
-                      { Scan $3 $5 $7 NoInfo $1 }
+                      { Scan $3 $5 $7 $1 }
 
      | Certificates scanT '(' TupleFunAbstr ',' DExps ')'
                       { ScanT $1 $4 $6 $2 }
@@ -351,7 +351,7 @@ Exp  :: { UncheckedExp }
                       { Unzip $3 [] $1 }
 
      | filter '(' FunAbstr ',' Exp ')'
-                      { Filter $3 $5 NoInfo $1 }
+                      { Filter $3 $5 $1 }
 
      | Certificates filterT '(' TupleFunAbstr ',' Exps ')'
                       { FilterT $1 $4 $6 $2 }
@@ -360,7 +360,7 @@ Exp  :: { UncheckedExp }
                       { FilterT [] $3 $5 $1 }
 
      | redomap '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
-                      { Redomap $3 $5 $7 $9 NoInfo $1 }
+                      { Redomap $3 $5 $7 $9 $1 }
 
      | Certificates redomapT '(' TupleFunAbstr ',' TupleFunAbstr ',' '{' Exps '}' ',' Exps ')'
                       { RedomapT $1 $4 $6 $9 $12 $2 }

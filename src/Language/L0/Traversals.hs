@@ -157,13 +157,11 @@ mapExpM tv (Rearrange cs perm e loc) =
 mapExpM tv (Rotate cs n e loc) =
   pure Rotate <*> mapOnCertificates tv cs <*>
        pure n <*> mapOnExp tv e <*> pure loc
-mapExpM tv (Map fun e int loc) =
-  pure Map <*> mapOnLambda tv fun <*> mapOnExp tv e <*>
-       mapOnType tv int <*> pure loc
-mapExpM tv (Reduce fun startexp arrexp int loc) =
+mapExpM tv (Map fun e loc) =
+  pure Map <*> mapOnLambda tv fun <*> mapOnExp tv e <*> pure loc
+mapExpM tv (Reduce fun startexp arrexp loc) =
   pure Reduce <*> mapOnLambda tv fun <*>
-       mapOnExp tv startexp <*> mapOnExp tv arrexp <*>
-       mapOnType tv int <*> pure loc
+       mapOnExp tv startexp <*> mapOnExp tv arrexp <*> pure loc
 mapExpM tv (Zip args loc) = do
   args' <- forM args $ \(argexp, argt) -> do
                               argexp' <- mapOnExp tv argexp
@@ -172,17 +170,15 @@ mapExpM tv (Zip args loc) = do
   pure $ Zip args' loc
 mapExpM tv (Unzip e ts loc) =
   pure Unzip <*> mapOnExp tv e <*> mapM (mapOnType tv) ts <*> pure loc
-mapExpM tv (Scan fun startexp arrexp t loc) =
+mapExpM tv (Scan fun startexp arrexp loc) =
   pure Scan <*> mapOnLambda tv fun <*>
        mapOnExp tv startexp <*> mapOnExp tv arrexp <*>
-       mapOnType tv t <*> pure loc
-mapExpM tv (Filter fun arrexp t loc) =
-  pure Filter <*> mapOnLambda tv fun <*> mapOnExp tv arrexp <*>
-       mapOnType tv t <*> pure loc
-mapExpM tv (Redomap redfun mapfun accexp arrexp intype loc) =
+       pure loc
+mapExpM tv (Filter fun arrexp loc) =
+  pure Filter <*> mapOnLambda tv fun <*> mapOnExp tv arrexp <*> pure loc
+mapExpM tv (Redomap redfun mapfun accexp arrexp loc) =
   pure Redomap <*> mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
-       mapOnExp tv accexp <*> mapOnExp tv arrexp <*>
-       mapOnType tv intype <*> pure loc
+       mapOnExp tv accexp <*> mapOnExp tv arrexp <*> pure loc
 mapExpM tv (Split cs nexp arrexp loc) =
   pure Split <*> mapOnCertificates tv cs <*>
        mapOnExp tv nexp <*> mapOnExp tv arrexp <*>

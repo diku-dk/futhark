@@ -172,12 +172,12 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
         text "transpose" <> apply [text $ show k,
                                    text $ show n,
                                    ppr e]
-  pprPrec _ (Map lam a _ _) = ppSOAC "map" [lam] [a]
-  pprPrec _ (Reduce lam e a _ _) = ppSOAC "reduce" [lam] [e, a]
-  pprPrec _ (Redomap redlam maplam e a _ _) =
+  pprPrec _ (Map lam a _) = ppSOAC "map" [lam] [a]
+  pprPrec _ (Reduce lam e a _) = ppSOAC "reduce" [lam] [e, a]
+  pprPrec _ (Redomap redlam maplam e a _) =
     ppSOAC "redomap" [redlam, maplam] [e, a]
-  pprPrec _ (Scan lam e a _ _) = ppSOAC "scan" [lam] [e, a]
-  pprPrec _ (Filter lam a _ _) = ppSOAC "filter" [lam] [a]
+  pprPrec _ (Scan lam e a _) = ppSOAC "scan" [lam] [e, a]
+  pprPrec _ (Filter lam a _) = ppSOAC "filter" [lam] [a]
   pprPrec _ (Zip es _) = text "zip" <> apply (map (ppr . fst) es)
   pprPrec _ (Unzip e _ _) = text "unzip" <> parens (ppr e)
   pprPrec _ (Split cs e a _) =

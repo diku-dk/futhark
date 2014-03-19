@@ -318,14 +318,14 @@ internaliseExp (E.Concat cs x y loc) = do
   concs <- letSubExps "concat" $ zipWith conc xs ys
   return $ tuplit c' loc concs
 
-internaliseExp (E.Map lam arr _ loc) = do
+internaliseExp (E.Map lam arr loc) = do
   (c,arrs) <- tupToIdentList arr
   let cs = certify c []
   se <- conjoinCerts cs loc
   (cs2, lam') <- internaliseMapLambda internaliseBody se lam $ map I.Var arrs
   certifySOAC se $ I.Map (cs++cs2) lam' (map I.Var arrs) loc
 
-internaliseExp (E.Reduce lam ne arr _ loc) = do
+internaliseExp (E.Reduce lam ne arr loc) = do
   (c1,arrs) <- tupToIdentList arr
   (c2,nes) <- tupToIdentList ne
   let cs = catMaybes [c1,c2]
@@ -334,7 +334,7 @@ internaliseExp (E.Reduce lam ne arr _ loc) = do
                  (map I.identType nes) (map I.identType arrs)
   return $ I.Reduce (cs++cs2) lam' (zip (map I.Var nes) (map I.Var arrs)) loc
 
-internaliseExp (E.Scan lam ne arr _ loc) = do
+internaliseExp (E.Scan lam ne arr loc) = do
   (c1,arrs) <- tupToIdentList arr
   (c2,nes) <- tupToIdentList ne
   let cs = catMaybes [c1,c2]
@@ -344,7 +344,7 @@ internaliseExp (E.Scan lam ne arr _ loc) = do
   return $ I.Scan (cs++cs2) lam' (zip (map I.Var nes) (map I.Var arrs)) loc
 
 
-internaliseExp (E.Filter lam arr _ loc) = do
+internaliseExp (E.Filter lam arr loc) = do
   (c,arrs) <- tupToIdentList arr
   let cs = catMaybes [c]
   se <- conjoinCerts cs loc
@@ -352,7 +352,7 @@ internaliseExp (E.Filter lam arr _ loc) = do
                          map I.Var arrs
   certifySOAC se $ I.Filter cs lam' (map I.Var arrs) (I.Var outer_shape) loc
 
-internaliseExp (E.Redomap lam1 lam2 ne arrs _ loc) = do
+internaliseExp (E.Redomap lam1 lam2 ne arrs loc) = do
   (c1,arrs') <- tupToIdentList arrs
   (c2,nes) <- tupToIdentList ne
   let cs = catMaybes [c1,c2]

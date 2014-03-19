@@ -261,23 +261,23 @@ data ExpBase ty vn =
 
             -- Second-Order Array Combinators accept curried and
             -- anonymous functions as first params.
-            | Map (LambdaBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
+            | Map (LambdaBase ty vn) (ExpBase ty vn) SrcLoc
              -- ^ @map(op +(1), {1,2,..,n}) = [2,3,..,n+1]@.  3rd arg
              -- is the input-array row type
 
-            | Reduce (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
+            | Reduce (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
              -- ^ @reduce(op +, 0, {1,2,...,n}) = (0+1+2+...+n)@ 4th arg
              -- is the input-array element type
 
-            | Scan (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
+            | Scan (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
              -- ^ @scan(plus, 0, [ 1, 2, 3 ]) = [ 1, 3, 6 ]@.
              -- 4th arg is the row type of the input array
 
-            | Filter (LambdaBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
+            | Filter (LambdaBase ty vn) (ExpBase ty vn) SrcLoc
             -- ^ 3rd arg is the row type of the input (and
             -- result) array
 
-            | Redomap (LambdaBase ty vn) (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
+            | Redomap (LambdaBase ty vn) (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
              -- ^ @redomap(g, f, n, a) = reduce(g, n, map(f, a))@.
              -- 5th arg is the row type of the input  array.
 
@@ -330,13 +330,13 @@ instance Located (ExpBase ty vn) where
   locOf (Transpose _ _ _ _ pos) = locOf pos
   locOf (Rearrange _ _ _ pos) = locOf pos
   locOf (Rotate _ _ _ pos) = locOf pos
-  locOf (Map _ _ _ pos) = locOf pos
-  locOf (Reduce _ _ _ _ pos) = locOf pos
+  locOf (Map _ _ pos) = locOf pos
+  locOf (Reduce _ _ _ pos) = locOf pos
   locOf (Zip _ pos) = locOf pos
   locOf (Unzip _ _ pos) = locOf pos
-  locOf (Scan _ _ _ _ pos) = locOf pos
-  locOf (Filter _ _ _ pos) = locOf pos
-  locOf (Redomap _ _ _ _ _ pos) = locOf pos
+  locOf (Scan _ _ _ pos) = locOf pos
+  locOf (Filter _ _ pos) = locOf pos
+  locOf (Redomap _ _ _ _ pos) = locOf pos
   locOf (Split _ _ _ pos) = locOf pos
   locOf (Concat _ _ _ pos) = locOf pos
   locOf (Copy _ pos) = locOf pos

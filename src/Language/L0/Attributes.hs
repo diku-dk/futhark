@@ -451,18 +451,18 @@ typeOf (Transpose _ k n e _)
     (pre,d:post) <- splitAt k dims,
     (mid,end) <- splitAt n post = Array et (pre++mid++[d]++end) u als
   | otherwise = typeOf e
-typeOf (Map f arr _ _) = arrayType 1 et $ uniqueProp et
+typeOf (Map f arr _) = arrayType 1 et $ uniqueProp et
   where et = lambdaType f [rowType $ typeOf arr]
-typeOf (Reduce fun start arr _ _) =
+typeOf (Reduce fun start arr _) =
   lambdaType fun [typeOf start, rowType (typeOf arr)]
 typeOf (Zip es _) = arrayType 1 (Elem $ Tuple $ map snd es) Nonunique
 typeOf (Unzip _ ts _) =
   Elem $ Tuple $ map (\t -> arrayType 1 t $ uniqueProp t) ts
-typeOf (Scan fun start arr _ _) =
+typeOf (Scan fun start arr _) =
   arrayType 1 et Unique
     where et = lambdaType fun [typeOf start, rowType $ typeOf arr]
-typeOf (Filter _ arr _ _) = typeOf arr
-typeOf (Redomap outerfun innerfun start arr _ _ ) =
+typeOf (Filter _ arr _) = typeOf arr
+typeOf (Redomap outerfun innerfun start arr _) =
   lambdaType outerfun [innerres, innerres]
     where innerres = lambdaType innerfun [typeOf start, rowType $ typeOf arr]
 typeOf (Split _ _ e _) =
