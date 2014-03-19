@@ -18,6 +18,7 @@ module Language.L0.Core
   , nameToString
   , nameFromString
   , ID(..)
+  , baseTag
   , baseName
   , baseString
   , VName
@@ -208,6 +209,10 @@ newtype ID vn = ID (vn, Int)
 -- | Alias for a tagged 'Name'.  This is used as the name
 -- representation in most the compiler.
 type VName = ID Name
+
+-- | Return the tag contained in the 'ID'.
+baseTag :: ID vn -> Int
+baseTag (ID (_, tag)) = tag
 
 -- | Return the name contained in the 'ID'.
 baseName :: ID vn -> vn
