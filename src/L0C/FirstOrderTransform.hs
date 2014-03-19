@@ -17,6 +17,7 @@ import Control.Monad.State
 import Data.Loc
 
 import L0C.InternalRep
+import L0C.InternalRep.Renamer
 import L0C.MonadFreshNames
 import L0C.Tools
 
@@ -35,7 +36,7 @@ transformable _ = False
 -- renamer!
 transformProg :: Prog -> Prog
 transformProg prog =
-  Prog $ evalState (mapM transformFunDec $ progFunctions prog) src
+  renameProg $ Prog $ evalState (mapM transformFunDec $ progFunctions prog) src
   where src = newNameSourceForProg prog
 
 transformFunDec :: MonadFreshNames m => FunDec -> m FunDec
