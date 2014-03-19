@@ -78,7 +78,8 @@ arraySliceCopyStm to from fromshape t slice =
                  $exp:from,
                  $exp:(arraySliceSizeExpGivenShape fromshape t slice)*sizeof(*$exp:from));|]
 
--- | The size of the array of the given L0 type, as an integer.
+-- | The size of the array of the given L0 type, as an integer
+-- denoting the number of elements.
 arraySizeExp :: C.Exp -> Type -> C.Exp
 arraySizeExp place t = arraySliceSizeExp place t 0
 

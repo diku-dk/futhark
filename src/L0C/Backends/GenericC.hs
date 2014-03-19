@@ -804,16 +804,23 @@ compileExp' place (Concat _ xarr yarr _ _) = do
 compileExp' place (Copy e _) = do
   val <- new "copy_val"
   e' <- compileSubExp (varExp val) e
-  t <- typeToCType [subExpType e]
+  ct <- typeToCType [subExpType e]
   let copy = case subExpType e of
                Array {} -> arraySliceCopyStm [C.cexp|$exp:place.data|]
                            [C.cexp|$id:val.data|] [C.cexp|$id:val.shape|]
                            (subExpType e) 0
                _ -> [C.cstm|;|]
+      alloc = case subExpType e of
+                t@Array {} -> [C.cstm|$exp:place.data =
+                                 malloc($exp:(arraySizeExp (varExp val) t) *
+                                        sizeof(*$exp:place.data));
+                               |]
+                _          -> [C.cstm|;|]
   return $ stm [C.cstm|{
-                     $ty:t $id:val;
+                     $ty:ct $id:val;
                      $items:e'
                      $exp:place = $id:val;
+                     $stm:alloc
                      $stm:copy
                    }|]
 
