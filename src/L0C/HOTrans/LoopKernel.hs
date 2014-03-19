@@ -322,23 +322,29 @@ iswim _ nest ots
     Just e' <- SOAC.inputFromSubExp e,
     Nest.Nesting paramIds mapArrs bndIds postExp retTypes <- lvl,
     mapArrs == map SOAC.varInput paramIds = do
-    let toInnerAccParam idd = idd { identType = rowType $ identType idd }
-        innerAccParams = map toInnerAccParam $ take (length es) paramIds
-        innerArrParams = drop (length es) paramIds
+    let newInputs = e' : map (SOAC.transposeInput 0 1) (Nest.inputs nest)
+        inputTypes = SOAC.inputTypes newInputs
+        (accsizes, arrsizes) =
+          splitAt (length es) $ map rowType inputTypes
+        setSizeFrom p t =
+          p { identType = identType p `setArrayShape` arrayShape t }
+        innerAccParams = zipWith setSizeFrom (take (length es) paramIds) accsizes
+        innerArrParams = zipWith setSizeFrom (drop (length es) paramIds) arrsizes
     innerlam <- Nest.bodyToLambda mb
     let innerScan = Scan cs2 innerlam
                           (zip (map Var innerAccParams) (map Var innerArrParams))
                           loc1
         lam = Lambda {
                 lambdaParams = map toParam $ innerAccParams ++ innerArrParams
-              , lambdaReturnType = retTypes
+              , lambdaReturnType = zipWith setOuterSize retTypes $
+                                   map (arraySize 0) arrsizes
               , lambdaBody = Nest.letPattern bndIds innerScan postExp
               , lambdaSrcLoc = loc2
               }
         perm = case retTypes of []  -> []
                                 t:_ -> transposeIndex 0 1 [0..arrayRank t]
     return (Nest.SOACNest
-            (e' : map (SOAC.transposeInput 0 1) (Nest.inputs nest))
+            newInputs
             (Nest.Map cs1 (Nest.Fun lam) [] loc2),
             ots ++ [ORearrange cs2 perm])
 iswim _ _ _ = fail "ISWIM does not apply"
