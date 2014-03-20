@@ -224,7 +224,7 @@ evalSubExp (Constant v _) = return v
 
 evalBody :: Body -> L0M [Value]
 
-evalBody (LetPat pat e body loc) = do
+evalBody (LetPat pat e body _) = do
   v <- evalExp e
   binding (zip pat v) $ evalBody body
 
