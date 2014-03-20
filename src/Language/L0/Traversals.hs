@@ -43,10 +43,6 @@ module Language.L0.Traversals
   , Walker(..)
   , identityWalker
   , walkExpM
-
-  -- * Simple wrappers
-  , foldlPattern
-  , buildExpPattern
   )
   where
 
@@ -288,29 +284,3 @@ walkExpM f = void . mapExpM m
             , mapOnCertificates = wrap walkOnCertificates
             }
         wrap op k = op f k >> return k
-
--- | Common case of 'foldExp', where only 'Exp's and 'Lambda's are
--- taken into account.
-foldlPattern :: (a -> ExpBase ty vn    -> a) ->
-                (a -> LambdaBase ty vn -> a) ->
-                a -> ExpBase ty vn -> a
-foldlPattern expf lamf = foldExp m
-  where m = identityFolder {
-              foldOnExp = \x -> return . expf x
-            , foldOnLambda =
-              \x lam -> return $ foldl expf (lamf x lam) $ getLambdaExps lam
-            }
-        getLambdaExps (AnonymFun _ body   _ _) = [body]
-        getLambdaExps (CurryFun  _ params _ _) = params
-
--- | Common case of 'mapExp', where only 'Exp's are taken into
--- account.
-buildExpPattern :: (ExpBase ty vn -> ExpBase ty vn) -> ExpBase ty vn -> ExpBase ty vn
-buildExpPattern f = mapExp f'
-  where f' = identityMapper {
-               mapOnExp = return . f
-             , mapOnLambda = return . buildLambda
-             }
-
-        buildLambda (AnonymFun tps body  tp pos) = AnonymFun tps     (f body  ) tp pos
-        buildLambda (CurryFun  nm params tp pos) = CurryFun  nm  (map f params) tp pos
