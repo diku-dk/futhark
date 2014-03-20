@@ -65,7 +65,6 @@ data MapperBase tyf tyt vnf vnt m = Mapper {
     mapOnExp :: ExpBase tyf vnf -> m (ExpBase tyt vnt)
   , mapOnType :: tyf vnf -> m (tyt vnt)
   , mapOnLambda :: LambdaBase tyf vnf -> m (LambdaBase tyt vnt)
-  , mapOnTupleLambda :: TupleLambdaBase tyf vnf -> m (TupleLambdaBase tyt vnt)
   , mapOnPattern :: TupIdentBase tyf vnf -> m (TupIdentBase tyt vnt)
   , mapOnIdent :: IdentBase tyf vnf -> m (IdentBase tyt vnt)
   , mapOnValue :: Value -> m Value
@@ -82,7 +81,6 @@ identityMapper = Mapper {
                    mapOnExp = return
                  , mapOnType = return
                  , mapOnLambda = return
-                 , mapOnTupleLambda = return
                  , mapOnPattern = return
                  , mapOnIdent = return
                  , mapOnValue = return
@@ -196,31 +194,6 @@ mapExpM tv (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody loc) =
   pure DoLoop <*> mapOnPattern tv mergepat <*> mapOnExp tv mergeexp <*>
        mapOnIdent tv loopvar <*> mapOnExp tv boundexp <*>
        mapOnExp tv loopbody <*> mapOnExp tv letbody <*> pure loc
-mapExpM tv (MapT cs fun arrexps loc) =
-  pure MapT <*> mapOnCertificates tv cs <*>
-       mapOnTupleLambda tv fun <*> mapM (mapOnExp tv) arrexps <*>
-       pure loc
-mapExpM tv (ReduceT cs fun inputs loc) =
-  pure ReduceT <*> mapOnCertificates tv cs <*>
-       mapOnTupleLambda tv fun <*>
-       (zip <$> mapM (mapOnExp tv) startexps <*> mapM (mapOnExp tv) arrexps) <*>
-       pure loc
-  where (startexps, arrexps) = unzip inputs
-mapExpM tv (ScanT cs fun inputs loc) =
-  pure ScanT <*> mapOnCertificates tv cs <*>
-       mapOnTupleLambda tv fun <*>
-       (zip <$> mapM (mapOnExp tv) startexps <*> mapM (mapOnExp tv) arrexps) <*>
-       pure loc
-  where (startexps, arrexps) = unzip inputs
-mapExpM tv (FilterT cs fun arrexps loc) =
-  pure FilterT <*> mapOnCertificates tv cs <*>
-       mapOnTupleLambda tv fun <*>
-       mapM (mapOnExp tv) arrexps <*> pure loc
-mapExpM tv (RedomapT cs redfun mapfun accexps arrexps loc) =
-  pure RedomapT <*> mapOnCertificates tv cs <*>
-       mapOnTupleLambda tv redfun <*> mapOnTupleLambda tv mapfun <*>
-       mapM (mapOnExp tv) accexps <*> mapM (mapOnExp tv) arrexps <*>
-       pure loc
 
 -- | Like 'mapExp', but in the 'Identity' monad.
 mapExp :: Mapper ty vn Identity -> ExpBase ty vn -> ExpBase ty vn
@@ -231,7 +204,6 @@ data Folder ty vn a m = Folder {
     foldOnExp :: a -> ExpBase ty vn -> m a
   , foldOnType :: a -> ty vn -> m a
   , foldOnLambda :: a -> LambdaBase ty vn -> m a
-  , foldOnTupleLambda :: a -> TupleLambdaBase ty vn -> m a
   , foldOnPattern :: a -> TupIdentBase ty vn -> m a
   , foldOnIdent :: a -> IdentBase ty vn -> m a
   , foldOnValue :: a -> Value -> m a
@@ -244,7 +216,6 @@ identityFolder = Folder {
                    foldOnExp = const . return
                  , foldOnType = const . return
                  , foldOnLambda = const . return
-                 , foldOnTupleLambda = const . return
                  , foldOnPattern = const . return
                  , foldOnIdent = const . return
                  , foldOnValue = const . return
@@ -261,7 +232,6 @@ foldExpM f x e = execStateT (mapExpM m e) x
               mapOnExp = wrap foldOnExp
             , mapOnType = wrap foldOnType
             , mapOnLambda = wrap foldOnLambda
-            , mapOnTupleLambda = wrap foldOnTupleLambda
             , mapOnPattern = wrap foldOnPattern
             , mapOnIdent = wrap foldOnIdent
             , mapOnValue = wrap foldOnValue
@@ -283,7 +253,6 @@ data Walker ty vn m = Walker {
     walkOnExp :: ExpBase ty vn -> m ()
   , walkOnType :: ty vn -> m ()
   , walkOnLambda :: LambdaBase ty vn -> m ()
-  , walkOnTupleLambda :: TupleLambdaBase ty vn -> m ()
   , walkOnPattern :: TupIdentBase ty vn -> m ()
   , walkOnIdent :: IdentBase ty vn -> m ()
   , walkOnValue :: Value -> m ()
@@ -296,7 +265,6 @@ identityWalker = Walker {
                    walkOnExp = const $ return ()
                  , walkOnType = const $ return ()
                  , walkOnLambda = const $ return ()
-                 , walkOnTupleLambda = const $ return ()
                  , walkOnPattern = const $ return ()
                  , walkOnIdent = const $ return ()
                  , walkOnValue = const $ return ()
@@ -314,7 +282,6 @@ walkExpM f = void . mapExpM m
               mapOnExp = wrap walkOnExp
             , mapOnType = wrap walkOnType
             , mapOnLambda = wrap walkOnLambda
-            , mapOnTupleLambda = wrap walkOnTupleLambda
             , mapOnPattern = wrap walkOnPattern
             , mapOnIdent = wrap walkOnIdent
             , mapOnValue = wrap walkOnValue
@@ -322,20 +289,16 @@ walkExpM f = void . mapExpM m
             }
         wrap op k = op f k >> return k
 
--- | Common case of 'foldExp', where only 'Exp's, 'Lambda's and
--- 'TupleLambda's are taken into account.
+-- | Common case of 'foldExp', where only 'Exp's and 'Lambda's are
+-- taken into account.
 foldlPattern :: (a -> ExpBase ty vn    -> a) ->
                 (a -> LambdaBase ty vn -> a) ->
-                (a -> TupleLambdaBase ty vn -> a) ->
                 a -> ExpBase ty vn -> a
-foldlPattern expf lamf tlamf = foldExp m
+foldlPattern expf lamf = foldExp m
   where m = identityFolder {
               foldOnExp = \x -> return . expf x
             , foldOnLambda =
               \x lam -> return $ foldl expf (lamf x lam) $ getLambdaExps lam
-            , foldOnTupleLambda =
-              \x lam@(TupleLambda _ body _ _) ->
-                return $ foldl expf (tlamf x lam) [body]
             }
         getLambdaExps (AnonymFun _ body   _ _) = [body]
         getLambdaExps (CurryFun  _ params _ _) = params
@@ -347,11 +310,7 @@ buildExpPattern f = mapExp f'
   where f' = identityMapper {
                mapOnExp = return . f
              , mapOnLambda = return . buildLambda
-             , mapOnTupleLambda = return . buildTupleLambda
              }
 
         buildLambda (AnonymFun tps body  tp pos) = AnonymFun tps     (f body  ) tp pos
         buildLambda (CurryFun  nm params tp pos) = CurryFun  nm  (map f params) tp pos
-
-        buildTupleLambda (TupleLambda tps body tp loc) =
-          TupleLambda tps (f body) tp loc

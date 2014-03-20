@@ -103,11 +103,6 @@ keyword s =
     "concat"       -> CONCAT
     "filter"       -> FILTER
     "redomap"      -> REDOMAP
-    "mapT"         -> MAP2
-    "reduceT"      -> REDUCE2
-    "scanT"        -> SCAN2
-    "filterT"      -> FILTER2
-    "redomapT"     -> REDOMAP2
     "empty"        -> EMPTY
     "copy"         -> COPY
     "assert"       -> ASSERT

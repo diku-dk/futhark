@@ -26,9 +26,6 @@ module Language.L0.Attributes
   , patIdents
   , patIdentSet
 
-  -- * Operations on lambdas
-  , tupleLambdaToLambda
-
   -- * Queries on types
   , basicType
   , uniqueness
@@ -44,7 +41,6 @@ module Language.L0.Attributes
   , setArrayDims
   , returnType
   , lambdaType
-  , tupleLambdaType
   , lambdaReturnType
 
   -- * Operations on types
@@ -91,7 +87,6 @@ module Language.L0.Attributes
   , UncheckedIdent
   , UncheckedExp
   , UncheckedLambda
-  , UncheckedTupleLambda
   , UncheckedTupIdent
   , UncheckedFunDec
   , UncheckedProg
@@ -473,21 +468,6 @@ typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` HS.empty
 typeOf (Assert _ _) = Elem $ Basic Cert
 typeOf (Conjoin _ _) = Elem $ Basic Cert
 typeOf (DoLoop _ _ _ _ _ body _) = typeOf body
-typeOf (MapT _ f arrs _) =
-  Elem $ Tuple $ map (\x -> arrayType 1 x (uniqueProp x)) $
-       tupleLambdaType f $ map typeOf arrs
-typeOf (ReduceT _ fun inputs _) =
-  Elem $ Tuple $ tupleLambdaType fun $ map typeOf acc ++ map typeOf arrs
-  where (acc, arrs) = unzip inputs
-typeOf (ScanT _ _ inputs _) =
-  (Elem $ Tuple $ map typeOf arrs) `setUniqueness` Unique
-  where (_, arrs) = unzip inputs
-typeOf (FilterT _ _ arrs _) = Elem $ Tuple $ map typeOf arrs
-typeOf (RedomapT _ outerfun innerfun acc arrs _) =
-  Elem $ Tuple $ tupleLambdaType outerfun $
-       tupleLambdaType innerfun (innerres ++ innerres)
-    where innerres = tupleLambdaType innerfun
-                     (map typeOf acc ++ map (rowType . typeOf) arrs)
 
 uniqueProp :: TypeBase vn as -> Uniqueness
 uniqueProp tp = if uniqueOrBasic tp then Unique else Nonunique
@@ -508,16 +488,6 @@ expToValue _ = Nothing
 lambdaType :: (Eq vn, Hashable vn) =>
               LambdaBase CompTypeBase vn -> [CompTypeBase vn] -> CompTypeBase vn
 lambdaType lam = returnType (lambdaReturnType lam) (lambdaParamDiets lam)
-
--- | The result of applying the arguments of the given types to the
--- given tuple lambda function.
-tupleLambdaType :: (Eq vn, Hashable vn) =>
-                   TupleLambdaBase CompTypeBase vn
-                -> [CompTypeBase vn]
-                -> [CompTypeBase vn]
-tupleLambdaType (TupleLambda params _ ets _) args =
-  map (\et -> returnType et ds args) ets
-  where ds = map (diet . identType) params
 
 -- | The result of applying the arguments of the given types to a
 -- function with the given return type, consuming its parameters with
@@ -550,7 +520,6 @@ progNames = execWriter . mapM funNames . progFunctions
   where names = identityWalker {
                   walkOnExp = expNames
                 , walkOnLambda = lambdaNames
-                , walkOnTupleLambda = lambdaNames . tupleLambdaToLambda
                 , walkOnPattern = tell . patNameSet
                 }
 
@@ -583,11 +552,6 @@ mapTails f g (If c te fe t loc) =
   If c (mapTails f g te) (mapTails f g fe) (g t) loc
 mapTails f _ e = f e
 
--- | Convert a tuple-lambda to a regular lambda.
-tupleLambdaToLambda :: TupleLambdaBase ty vn -> LambdaBase ty vn
-tupleLambdaToLambda (TupleLambda params body rettype loc) =
-  AnonymFun params body (Elem $ Tuple rettype) loc
-
 -- | Return the set of identifiers that are free in the given
 -- expression.
 freeInExp :: (Eq vn, Hashable vn) => ExpBase ty vn -> HS.HashSet (IdentBase ty vn)
@@ -595,7 +559,6 @@ freeInExp = execWriter . expFree
   where names = identityWalker {
                   walkOnExp = expFree
                 , walkOnLambda = lambdaFree
-                , walkOnTupleLambda = lambdaFree . tupleLambdaToLambda
                 , walkOnIdent = identFree
                 , walkOnCertificates = mapM_ identFree
                 }
@@ -679,9 +642,6 @@ type UncheckedExp = ExpBase NoInfo Name
 
 -- | A lambda with no type annotations.
 type UncheckedLambda = LambdaBase NoInfo Name
-
--- | A tuple lambda with no type annotations.
-type UncheckedTupleLambda = TupleLambdaBase NoInfo Name
 
 -- | A pattern with no type annotations.
 type UncheckedTupIdent = TupIdentBase NoInfo Name

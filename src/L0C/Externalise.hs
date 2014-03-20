@@ -117,40 +117,74 @@ externaliseExp (I.Rotate cs n e loc) =
            n
            (externaliseSubExp e)
            loc
-externaliseExp (I.Map cs fun es loc) =
-  E.MapT (externaliseCerts cs)
-         (externaliseLambda fun)
-         (map externaliseSubExp es)
-         loc
-externaliseExp (I.Reduce cs fun inputs loc) =
-  E.ReduceT (externaliseCerts cs)
-           (externaliseLambda fun)
-           [ (externaliseSubExp ve, externaliseSubExp ae)
-             | (ve, ae) <- inputs ]
+externaliseExp (I.Map _ fun es loc) =
+  maybeUnzip $ E.Map (externaliseMapLambda fun)
+               (externaliseSOACArrayArgs es loc)
+               loc
+externaliseExp (I.Reduce _ fun inputs loc) =
+  E.Reduce (externaliseFoldLambda fun $ length inputs)
+           (maybeTupLit (map externaliseSubExp accinputs) loc)
+           (externaliseSOACArrayArgs arrinputs loc)
            loc
-externaliseExp (I.Scan cs fun inputs loc) =
-  E.ScanT (externaliseCerts cs)
-          (externaliseLambda fun)
-          [ (externaliseSubExp ve, externaliseSubExp ae)
-            | (ve, ae) <- inputs ]
-          loc
-externaliseExp (I.Filter cs fun es _ loc) =
-  E.FilterT (externaliseCerts cs)
-            (externaliseLambda fun)
-            (map externaliseSubExp es)
+  where (accinputs, arrinputs) = unzip inputs
+externaliseExp (I.Scan _ fun inputs loc) =
+  maybeUnzip $ E.Scan (externaliseFoldLambda fun $ length inputs)
+               (maybeTupLit (map externaliseSubExp accinputs) loc)
+               (externaliseSOACArrayArgs arrinputs loc)
+               loc
+  where (accinputs, arrinputs) = unzip inputs
+externaliseExp (I.Filter _ fun es _ loc) =
+  maybeUnzip $ E.Filter (externaliseMapLambda fun)
+                        (externaliseSOACArrayArgs es loc)
+                        loc
+externaliseExp (I.Redomap _ outerfun innerfun vs as loc) =
+  E.Redomap (externaliseFoldLambda outerfun $ length vs)
+            (externaliseFoldLambda innerfun $ length vs)
+            (maybeTupLit (map externaliseSubExp vs) loc)
+            (externaliseSOACArrayArgs as loc)
             loc
-externaliseExp (I.Redomap cs outerfun innerfun vs as loc) =
-  E.RedomapT (externaliseCerts cs)
-             (externaliseLambda outerfun)
-             (externaliseLambda innerfun)
-             (map externaliseSubExp vs)
-             (map externaliseSubExp as)
-             loc
 
-externaliseLambda :: I.Lambda -> E.TupleLambda
-externaliseLambda (Lambda params body ret loc) =
-  E.TupleLambda (map externaliseParam params) (externaliseBody body)
-                (map (externaliseDeclType . I.toDecl) ret) loc
+externaliseMapLambda :: I.Lambda -> E.Lambda
+externaliseMapLambda (Lambda params body ret loc) =
+  E.AnonymFun params'
+              (wrap $ externaliseBody body)
+              (externaliseDeclTypes $ map I.toDecl ret)
+              loc
+  where (params', wrap) =
+          let ps = map externaliseParam params
+          in case makeTupleParam ps of
+               Nothing     -> (ps, id)
+               Just (p, f) -> ([p], f)
+
+externaliseFoldLambda :: I.Lambda -> Int -> E.Lambda
+externaliseFoldLambda (Lambda params body ret loc) n =
+  E.AnonymFun (accparams'++arrparams')
+              (wraparr $ wrapacc $ externaliseBody body)
+              (externaliseDeclTypes $ map I.toDecl ret)
+              loc
+  where (accparams, arrparams) = splitAt n $ map externaliseParam params
+        (accparams', wrapacc) = case makeTupleParam accparams of
+                                  Nothing     -> (accparams, id)
+                                  Just (p, f) -> ([p], f)
+        (arrparams', wraparr) = case makeTupleParam arrparams of
+                                  Nothing     -> (arrparams, id)
+                                  Just (p, f) -> ([p], f)
+
+makeTupleParam :: [E.Parameter] -> Maybe (E.Parameter, E.Exp -> E.Exp)
+makeTupleParam ps@(p:_:_) =
+  -- Since an external L0 map-lambda takes only a single
+  -- argument, we have to create a new parameter, which is
+  -- then unpacked inside the function.
+  let pname = ID (nameFromString "ext_param",
+                  baseTag $ E.identName p)
+      ptype = E.Elem $ E.Tuple $ map E.identType ps
+      p'    = E.Ident pname ptype loc
+      loc   = srclocOf p
+  in Just (p',
+           \inner -> E.LetPat
+           (E.TupId (map (E.Id . E.fromParam) ps) loc)
+           (E.Var $ E.fromParam p') inner loc)
+makeTupleParam _ = Nothing
 
 externaliseDiet :: I.Diet -> E.Diet
 externaliseDiet I.Consume = E.Consume
@@ -186,6 +220,11 @@ externaliseType (I.Array et shape u als) =
   E.Array (E.Basic et) (replicate (shapeRank shape) Nothing)
           u als
 
+externaliseSOACArrayArgs :: [I.SubExp] -> SrcLoc -> E.Exp
+externaliseSOACArrayArgs [e] _   = externaliseSubExp e
+externaliseSOACArrayArgs es  loc =
+  Zip [ (e, E.typeOf e) | e <- map externaliseSubExp es ] loc
+
 externaliseSubExps :: [I.SubExp] -> SrcLoc -> E.Exp
 externaliseSubExps [e] _  = externaliseSubExp e
 externaliseSubExps es loc = E.TupLit (map externaliseSubExp es) loc
@@ -209,3 +248,14 @@ externaliseValue (I.BasicVal bv) = E.BasicVal bv
 externaliseValue (I.ArrayVal a dt) =
   E.arrayVal (map externaliseValue $ A.elems a) $
   externaliseDeclType dt
+
+maybeUnzip :: E.Exp -> E.Exp
+maybeUnzip e
+  | E.Elem (E.Tuple ts@(_:_:_))
+      <- E.rowType $ E.typeOf e = Unzip e ts loc
+  | otherwise                   = e
+  where loc = srclocOf e
+
+maybeTupLit :: [E.Exp] -> SrcLoc -> E.Exp
+maybeTupLit [e] _   = e
+maybeTupLit es  loc = E.TupLit es loc

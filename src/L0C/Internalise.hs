@@ -413,49 +413,6 @@ internaliseExp (E.Copy e loc) = do
 internaliseExp (E.Conjoin es loc) = do
   es' <- letSubExps "conjoin_arg" =<< mapM internaliseExp es
   return $ I.Conjoin es' loc
-{-
-internaliseExp (E.MapT cs fun arrs loc) = do
-  arrs' <- letSubExps "map_arg" =<< mapM internaliseExp arrs
-  let cs' = internaliseCerts cs
-  ce <- conjoinCerts cs' loc
-  fun' <- internaliseTupleLambda ce fun
-  return $ I.Map cs' fun' arrs' loc
-
-internaliseExp (E.ReduceT cs fun inputs loc) = do
-  arrs' <- letSubExps "red_arg" =<< mapM internaliseExp arrs
-  accs' <- letSubExps "red_acc" =<< mapM internaliseExp accs
-  let cs' = internaliseCerts cs
-  ce <- conjoinCerts cs' loc
-  fun' <- internaliseTupleLambda ce fun
-  return $ I.Reduce cs' fun' (zip accs' arrs') loc
-  where (accs, arrs) = unzip inputs
-
-internaliseExp (E.ScanT cs fun inputs loc) = do
-  arrs' <- letSubExps "scan_arg" =<< mapM internaliseExp arrs
-  accs' <- letSubExps "scan_acc" =<< mapM internaliseExp accs
-  let cs' = internaliseCerts cs
-  ce <- conjoinCerts cs' loc
-  fun' <- internaliseTupleLambda ce fun
-  return $ I.Scan cs' fun' (zip accs' arrs') loc
-  where (accs, arrs) = unzip inputs
-
-internaliseExp (E.FilterT cs fun arrs loc) = do
-  arrs' <- letSubExps "filter_arg" =<< mapM internaliseExp arrs
-  let cs' = internaliseCerts cs
-  ce <- conjoinCerts cs' loc
-  fun' <- internaliseTupleLambda ce fun
-  return $ I.Filter cs' fun' arrs' loc
-
-internaliseExp (E.RedomapT cs fun1 fun2 accs arrs loc) = do
-  accs' <- letSubExps "redomap_acc" =<< mapM internaliseExp accs
-  arrs' <- letSubExps "redomap_arg" =<< mapM internaliseExp arrs
-  let cs' = internaliseCerts cs
-  ce <- conjoinCerts cs' loc
-  fun1' <- internaliseTupleLambda ce fun1
-  fun2' <- internaliseTupleLambda ce fun2
-  return $ I.Redomap cs' fun1' fun2' accs' arrs' loc
-
--}
 
 tupToIdentList :: E.Exp -> InternaliseM (Maybe I.Ident, [I.Ident])
 tupToIdentList e = do

@@ -83,12 +83,6 @@ data Token = IF
            | OP
            | EMPTY
            | COPY
-           | MAP2
-           | REDUCE2
-           | SCAN2
-           | FILTER2
-           | MAPALL2
-           | REDOMAP2
            | ASSERT
            | CONJOIN
            | EOF

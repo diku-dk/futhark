@@ -49,8 +49,6 @@ type TaggedExp ty vn = ExpBase ty (ID vn)
 
 type TaggedLambda ty vn = LambdaBase ty (ID vn)
 
-type TaggedTupleLambda ty vn = TupleLambdaBase ty (ID vn)
-
 type TaggedTupIdent ty vn = TupIdentBase ty (ID vn)
 
 type TaggedFunDec ty vn = FunDecBase ty (ID vn)
@@ -881,78 +879,6 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
                     (Ident loopvar (Elem $ Basic Int) loc) boundexp'
                     loopbody' letbody' loc
 
-checkExp (MapT ass fun arrexps pos) = do
-  ass' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) ass
-  (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
-  fun'    <- checkTupleLambda fun arrargs
-  return $ MapT ass' fun' arrexps' pos
-
-checkExp (ReduceT ass fun inputs pos) = do
-  let (startexps, arrexps) = unzip inputs
-  ass' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) ass
-  (startexps', startargs) <- unzip <$> mapM checkArg startexps
-  (arrexps', arrargs)     <- unzip <$> mapM checkSOACArrayArg arrexps
-  fun'                    <- checkTupleLambda fun $ startargs ++ arrargs
-  let startt      = Elem $ Tuple $ map typeOf startexps'
-      intupletype = Elem $ Tuple $ map argType arrargs
-      funret      = Elem $ Tuple $ tupleLambdaType fun' $ map argType $ startargs ++ arrargs
-  unless (startt `subtypeOf` funret) $
-      bad $ TypeError pos $ "Accumulator is of type " ++ ppType startt ++
-                            ", but reduce function returns type " ++ ppType funret ++ "."
-  unless (intupletype `subtypeOf` funret) $
-      bad $ TypeError pos $ "Array element value is of type " ++ ppType intupletype ++
-                            ", but scan function returns type " ++ ppType funret ++ "."
-  return $ ReduceT ass' fun' (zip startexps' arrexps') pos
-
--- ScanT is exactly identical to ReduceT.  Duplicate for clarity
--- anyway.
-checkExp (ScanT ass fun inputs pos) = do
-  let (startexps, arrexps) = unzip inputs
-  ass' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) ass
-  (startexps', startargs) <- unzip <$> mapM checkArg startexps
-  (arrexps', arrargs)     <- unzip <$> mapM checkSOACArrayArg arrexps
-  fun'                    <- checkTupleLambda fun $ startargs ++ arrargs
-  let startt      = Elem $ Tuple $ map typeOf startexps'
-      intupletype = Elem $ Tuple $ map argType arrargs
-      funret      = Elem $ Tuple $ tupleLambdaType fun' $ map argType $ startargs ++ startargs
-  unless (startt `subtypeOf` funret) $
-    bad $ TypeError pos $ "Initial value is of type " ++ ppType startt ++
-                          ", but scan function returns type " ++ ppType funret ++ "."
-  unless (intupletype `subtypeOf` funret) $
-    bad $ TypeError pos $ "Array element value is of type " ++ ppType intupletype ++
-                          ", but scan function returns type " ++ ppType funret ++ "."
-  return $ ScanT ass' fun' (zip startexps' arrexps') pos
-
-checkExp (FilterT ass fun arrexps pos) = do
-  ass' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) ass
-  (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
-  fun' <- checkTupleLambda fun arrargs
-  let funret = tupleLambdaType fun' $ map argType arrargs
-  when (funret /= [Elem $ Basic Bool]) $
-    bad $ TypeError pos "FilterT function does not return bool."
-  when (any (unique . identType) $ tupleLambdaParams fun) $
-    bad $ TypeError pos "FilterT function consumes its arguments."
-  return $ FilterT ass' fun' arrexps' pos
-
-checkExp (RedomapT ass outerfun innerfun accexps arrexps pos) = do
-  ass' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) ass
-  (arrexps', arrargs)   <- unzip <$> mapM checkSOACArrayArg arrexps
-  (accexps', accargs)   <- unzip <$> mapM checkArg accexps
-  (outerfun', outerarg) <- checkTupleLambdaArg outerfun $ accargs ++ accargs
-
-  innerfun' <- checkTupleLambda innerfun $ accargs ++ arrargs
-
-  let acct = Elem $ Tuple $ map typeOf accexps'
-      innerret = Elem $ Tuple $ tupleLambdaType innerfun' $ map argType $ accargs ++ arrargs
-  unless (innerret `subtypeOf` acct) $
-    bad $ TypeError pos $ "Initial value is of type " ++ ppType acct ++
-          ", but redomapT inner reduction returns type " ++ ppType innerret ++ "."
-  unless (argType outerarg `subtypeOf` acct) $
-    bad $ TypeError pos $ "Initial value is of type " ++ ppType acct ++
-          ", but redomapT outer reduction returns type " ++ ppType (argType outerarg) ++ "."
-
-  return $ RedomapT ass' outerfun' innerfun' accexps' arrexps' pos
-
 checkSOACArrayArg :: (TypeBox ty, VarName vn) =>
                      TaggedExp ty vn -> TypeM vn (TaggedExp CompTypeBase vn, Arg vn)
 checkSOACArrayArg e = do
@@ -1092,14 +1018,6 @@ checkLambdaArg lam args = do
   let lamt = lambdaType lam' $ map argType args
   return (lam', (lamt, dflow, srclocOf lam'))
 
-checkTupleLambdaArg :: (TypeBox ty, VarName vn) =>
-                       TaggedTupleLambda ty vn -> [Arg vn]
-                    -> TypeM vn (TaggedTupleLambda CompTypeBase vn, Arg vn)
-checkTupleLambdaArg lam args = do
-  (lam', dflow) <- collectDataflow $ checkTupleLambda lam args
-  let lamt = tupleLambdaType lam' $ map argType args
-  return (lam', (Elem $ Tuple lamt, dflow, srclocOf lam'))
-
 checkFuncall :: VarName vn =>
                 Maybe Name -> SrcLoc
              -> [DeclTypeBase (ID vn)] -> DeclTypeBase (ID vn) -> [Arg vn]
@@ -1121,19 +1039,6 @@ consumeArg loc (Elem (Tuple ets)) (TupleDiet ds) =
   concat $ zipWith (consumeArg loc) ets ds
 consumeArg loc at Consume = [consumption (aliases at) loc]
 consumeArg loc at _       = [observation (aliases at) loc]
-
-checkTupleLambda :: (TypeBox ty, VarName vn) =>
-                    TaggedTupleLambda ty vn -> [Arg vn]
-                 -> TypeM vn (TaggedTupleLambda CompTypeBase vn)
-checkTupleLambda (TupleLambda params body ret loc) args = do
-  (_, ret', params', body', _) <-
-    noUnique $ checkFun (nameFromString "<anonymous>", Elem $ Tuple ret, params, body, loc)
-  if length params' == length args then do
-    checkFuncall Nothing loc (map identType params') ret' args
-    let ret'' = case ret' of Elem (Tuple ets) -> ets
-                             _                -> [ret']
-    return $ TupleLambda params body' ret'' loc
-  else bad $ TypeError loc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
 checkLambda :: (TypeBox ty, VarName vn) =>
                TaggedLambda ty vn -> [Arg vn] -> TypeM vn (TaggedLambda CompTypeBase vn)

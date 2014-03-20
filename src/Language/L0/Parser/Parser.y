@@ -4,7 +4,6 @@ module Language.L0.Parser.Parser
   , expression
   , pattern
   , lambda
-  , tupleLambda
   , l0type
   , intValue
   , realValue
@@ -41,7 +40,6 @@ import Language.L0.Parser.Lexer
 %name expression Exp
 %name pattern TupId
 %name lambda FunAbstr
-%name tupleLambda TupleFunAbstr
 %name l0type Type
 %name intValue IntValue
 %name realValue RealValue
@@ -111,9 +109,7 @@ import Language.L0.Parser.Lexer
       size            { L $$ SIZE }
       replicate       { L $$ REPLICATE }
       map             { L $$ MAP }
-      mapT            { L $$ MAP2 }
       reduce          { L $$ REDUCE }
-      reduceT         { L $$ REDUCE2 }
       reshape         { L $$ RESHAPE }
       rearrange       { L $$ REARRANGE }
       rotate          { L $$ ROTATE }
@@ -121,13 +117,10 @@ import Language.L0.Parser.Lexer
       zip             { L $$ ZIP }
       unzip           { L $$ UNZIP }
       scan            { L $$ SCAN }
-      scanT           { L $$ SCAN2 }
       split           { L $$ SPLIT }
       concat          { L $$ CONCAT }
       filter          { L $$ FILTER }
-      filterT         { L $$ FILTER2 }
       redomap         { L $$ REDOMAP }
-      redomapT        { L $$ REDOMAP2 }
       true            { L $$ TRUE }
       false           { L $$ FALSE }
       checked         { L $$ CHECKED }
@@ -320,29 +313,11 @@ Exp  :: { UncheckedExp }
      | reduce '(' FunAbstr ',' Exp ',' Exp ')'
                       { Reduce $3 $5 $7 $1 }
 
-     | Certificates reduceT '(' TupleFunAbstr ',' DExps ')'
-                      { ReduceT $1 $4 $6 $2 }
-
-     | reduceT '(' TupleFunAbstr ',' DExps ')'
-                      { ReduceT [] $3 $5 $1 }
-
      | map '(' FunAbstr ',' Exp ')'
                       { Map $3 $5 $1 }
 
-     | Certificates mapT '(' TupleFunAbstr ',' Exps ')'
-                      { MapT $1 $4 $6 $2 }
-
-     | mapT '(' TupleFunAbstr ',' Exps ')'
-                      { MapT [] $3 $5 $1 }
-
      | scan '(' FunAbstr ',' Exp ',' Exp ')'
                       { Scan $3 $5 $7 $1 }
-
-     | Certificates scanT '(' TupleFunAbstr ',' DExps ')'
-                      { ScanT $1 $4 $6 $2 }
-
-     | scanT '(' TupleFunAbstr ',' DExps ')'
-                      { ScanT [] $3 $5 $1 }
 
      | zip '(' Exps2 ')'
                       { Zip (map (\x -> (x, NoInfo)) $3) $1 }
@@ -353,20 +328,8 @@ Exp  :: { UncheckedExp }
      | filter '(' FunAbstr ',' Exp ')'
                       { Filter $3 $5 $1 }
 
-     | Certificates filterT '(' TupleFunAbstr ',' Exps ')'
-                      { FilterT $1 $4 $6 $2 }
-
-     | filterT '(' TupleFunAbstr ',' Exps ')'
-                      { FilterT [] $3 $5 $1 }
-
      | redomap '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
                       { Redomap $3 $5 $7 $9 $1 }
-
-     | Certificates redomapT '(' TupleFunAbstr ',' TupleFunAbstr ',' '{' Exps '}' ',' Exps ')'
-                      { RedomapT $1 $4 $6 $9 $12 $2 }
-
-     | redomapT '(' TupleFunAbstr ',' TupleFunAbstr ',' '{' Exps '}' ',' Exps ')'
-                      { RedomapT [] $3 $5 $8 $11 $1 }
 
      | copy '(' Exp ')' { Copy $3 $1 }
 
@@ -421,14 +384,6 @@ Exps2 : Exp ',' Exps2 { $1 : $3 }
       | Exp ',' Exp   { [$1, $3] }
 
 
-DExps   :: { [(UncheckedExp, UncheckedExp)] }
-        : '{' DExps_ { let (es, as) = $2
-                       in zip es $ reverse as }
-DExps_ :: { ([UncheckedExp], [UncheckedExp]) }
-       : Exp '}' ',' Exp         { ([$1], [$4]) }
-       | Exp ',' DExps_ ',' Exp { let (es, as) = $3
-                                  in ($1:es, $5:as) }
-
 TupleExp : '{' Exps '}' { ($2, $1) }
          | '{'      '}' { ([], $1) }
 
@@ -458,8 +413,6 @@ FunAbstr : id { let L pos (ID name) = $1 in CurryFun name [] NoInfo pos }
          | Ops '(' Exps ')'
                { let (name,pos) = $1 in CurryFun name $3 NoInfo pos }
          | fn Type '(' TypeIds ')' '=>' Exp { AnonymFun $4 $7 $2 $1 }
-
-TupleFunAbstr : fn TupleType '(' TypeIds ')' '=>' Exp { TupleLambda $4 $7 $2 $1 }
 
 Value : IntValue { $1 }
       | RealValue { $1 }

@@ -25,7 +25,6 @@ module Language.L0.Syntax
   , CertificatesBase
   , ExpBase(..)
   , LambdaBase(..)
-  , TupleLambdaBase(..)
   , TupIdentBase(..)
 
   -- * Definitions
@@ -290,24 +289,6 @@ data ExpBase ty vn =
             -- ^ Unzip that can unzip tuples of arbitrary size.  The
             -- types are the elements of the tuple.
 
-            -----------------------------------------------------
-            -- Second-Order Array Combinators
-            -- with support for n-ary multi-dim 
-            -- arrays of BASIC type (i.e., no tuples inside)
-            -- accept curried and anonymous
-            -- functions as (first) params
-            -----------------------------------------------------
-            | MapT (CertificatesBase ty vn) (TupleLambdaBase ty vn) [ExpBase ty vn] SrcLoc
-             -- ^ @map(op +(1), {1,2,..,n}) = [2,3,..,n+1]@.
-             -- 3rd arg is either a tuple of multi-dim arrays
-             --   of basic type, or a multi-dim array of basic type.
-             -- 4th arg is the input-array row types
-
-            | ReduceT  (CertificatesBase ty vn) (TupleLambdaBase ty vn) [(ExpBase ty vn, ExpBase ty vn)] SrcLoc
-            | ScanT    (CertificatesBase ty vn) (TupleLambdaBase ty vn) [(ExpBase ty vn, ExpBase ty vn)] SrcLoc
-            | FilterT  (CertificatesBase ty vn) (TupleLambdaBase ty vn) [ExpBase ty vn] SrcLoc
-            | RedomapT (CertificatesBase ty vn) (TupleLambdaBase ty vn) (TupleLambdaBase ty vn) [ExpBase ty vn] [ExpBase ty vn] SrcLoc
-
               deriving (Eq, Ord, Show)
 
 instance Located (ExpBase ty vn) where
@@ -343,11 +324,6 @@ instance Located (ExpBase ty vn) where
   locOf (Assert _ loc) = locOf loc
   locOf (Conjoin _ loc) = locOf loc
   locOf (DoLoop _ _ _ _ _ _ pos) = locOf pos
-  locOf (MapT _ _ _ pos) = locOf pos
-  locOf (ReduceT _ _ _ pos) = locOf pos
-  locOf (ScanT _ _ _ pos) = locOf pos
-  locOf (FilterT _ _ _ pos) = locOf pos
-  locOf (RedomapT _ _ _ _ _ pos) = locOf pos
 
 -- | Anonymous Function
 data LambdaBase ty vn = AnonymFun [ParamBase vn] (ExpBase ty vn) (DeclTypeBase vn) SrcLoc
@@ -358,18 +334,6 @@ data LambdaBase ty vn = AnonymFun [ParamBase vn] (ExpBase ty vn) (DeclTypeBase v
 instance Located (LambdaBase ty vn) where
   locOf (AnonymFun _ _ _ loc) = locOf loc
   locOf (CurryFun  _ _ _ loc) = locOf loc
-
--- | Anonymous function for use in a tuple-SOAC.
-data TupleLambdaBase ty vn =
-  TupleLambda { tupleLambdaParams :: [ParamBase vn]
-              , tupleLambdaBody :: ExpBase ty vn
-              , tupleLambdaReturnType :: [DeclTypeBase vn]
-              , tupleLambdaSrcLoc :: SrcLoc
-              }
-  deriving (Eq, Ord, Show)
-
-instance Located (TupleLambdaBase ty vn) where
-  locOf (TupleLambda _ _ _ loc) = locOf loc
 
 -- | Tuple IdentBaseifier, i.e., pattern matching
 data TupIdentBase ty vn = TupId [TupIdentBase ty vn] SrcLoc

@@ -20,7 +20,6 @@ module L0C.ExternalRep
   , Certificates
   , Exp
   , Lambda
-  , TupleLambda
   , TupIdent
   , FunDec
   , Prog
@@ -62,9 +61,6 @@ type Exp = ExpBase (TypeBase Names) VName
 
 -- | A lambda with type information.
 type Lambda = LambdaBase (TypeBase Names) VName
-
--- | A tuple lambda with type information.
-type TupleLambda = TupleLambdaBase (TypeBase Names) VName
 
 -- | A pattern with type information.
 type TupIdent = TupIdentBase (TypeBase Names) VName

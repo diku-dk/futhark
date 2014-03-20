@@ -8,7 +8,6 @@ module Language.L0.Pretty
   , ppValue
   , ppExp
   , ppLambda
-  , ppTupleLambda
   , ppTupId
   , prettyPrint
   )
@@ -123,11 +122,6 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
                         Filter {} -> True
                         Redomap {} -> True
                         Scan {} -> True
-                        MapT {} -> True
-                        ReduceT {} -> True
-                        FilterT {} -> True
-                        RedomapT {} -> True
-                        ScanT {} -> True
                         DoLoop {} -> True
                         LetPat {} -> True
                         LetWith {} -> True
@@ -193,20 +187,6 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
     equals <+> text "for" <+> ppr i <+> text "<" <+> align (ppr bound) <+> text "do" </>
     indent 2 (ppr loopbody) <+> text "in" </>
     ppr letbody
-  pprPrec _ (MapT cs lam as _) =
-    ppCertificates' cs <> ppSOAC "mapT" [lam] as
-  pprPrec _ (ReduceT cs lam inputs loc) =
-    ppCertificates' cs <> ppSOAC "reduceT" [lam] (TupLit es loc:as)
-    where (es, as) = unzip inputs
-  pprPrec _ (RedomapT cs outer inner es as _) =
-    ppCertificates' cs <> text "redomapT" <>
-    parens (ppr outer <> comma </> ppr inner <> comma </>
-            commasep (braces (commasep $ map ppr es) : map ppr as))
-  pprPrec _ (ScanT cs lam inputs loc) =
-    ppCertificates' cs <> ppSOAC "scanT" [lam] (TupLit es loc : as)
-    where (es, as) = unzip inputs
-  pprPrec _ (FilterT cs lam as _) =
-    ppCertificates' cs <> ppSOAC "filterT" [lam] as
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TupIdentBase ty vn) where
   ppr (Id ident)     = ppr ident
@@ -221,10 +201,6 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (LambdaBase ty vn
     text "fn" <+> ppr rettype <+>
     apply (map ppParam params) <+>
     text "=>" </> indent 2 (ppr body)
-
-instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (TupleLambdaBase ty vn) where
-  ppr (TupleLambda params body rets loc) =
-    ppr (AnonymFun params body (Elem $ Tuple rets) loc)
 
 instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ProgBase ty vn) where
   ppr = stack . punctuate line . map ppFun . progFunctions
@@ -277,10 +253,6 @@ ppCertificates :: (Eq vn, Hashable vn, TypeBox ty, Pretty vn) => CertificatesBas
 ppCertificates [] = empty
 ppCertificates cs = text "<" <> commasep (map ppr cs) <> text ">"
 
-ppCertificates' :: (Eq vn, Hashable vn, TypeBox ty, Pretty vn) => CertificatesBase ty vn -> Doc
-ppCertificates' [] = empty
-ppCertificates' cs = ppCertificates cs <> line
-
 render80 :: Pretty a => a -> String
 render80 = pretty 80 . ppr
 
@@ -299,10 +271,6 @@ ppExp = render80
 -- | Prettyprint a lambda, wrapped to 80 characters.
 ppLambda :: (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => LambdaBase ty vn -> String
 ppLambda = render80
-
--- | Prettyprint a tuple lambda, wrapped to 80 characters.
-ppTupleLambda :: (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => TupleLambdaBase ty vn -> String
-ppTupleLambda = render80
 
 -- | Prettyprint a pattern, wrapped to 80 characters.
 ppTupId :: (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => TupIdentBase ty vn -> String
