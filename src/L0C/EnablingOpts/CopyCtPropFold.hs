@@ -272,6 +272,26 @@ copyCtPropExp (Index cs orig_idd inds pos) = do
 
     _ -> return $ Index cs' idd inds' pos
 
+-- A zero-rotation is identity.
+copyCtPropExp (Rotate _ 0 e _) = changed $ SubExp e
+
+-- If asked to rotate a constant, just do it.
+copyCtPropExp (Rotate _ i (Constant val _) loc) =
+  changed $ SubExp $ Constant (rotateArray i val) loc
+
+copyCtPropExp (Rotate cs i (Var v) loc) = do
+  cs'   <- copyCtPropCerts cs
+  v'    <- copyCtPropIdent v
+  bnd   <- asks $ HM.lookup (identName v') . envVtable
+  case bnd of
+    -- Rotating a replicate is identity.
+    Just (SymArr (Replicate {})) ->
+      changed $ SubExp $ Var v
+    -- Rotating a constant, just do it.
+    Just (Value val) ->
+      changed $ SubExp $ Constant (rotateArray i val) loc
+    _ -> return $ Rotate cs' i (Var v') loc
+
 copyCtPropExp (BinOp bop e1 e2 tp pos) = do
     e1'   <- copyCtPropSubExp e1
     e2'   <- copyCtPropSubExp e2
@@ -654,6 +674,7 @@ getPropBnds [ident@(Ident var _ _)] e =
     Index   {}            -> [(var, SymArr e)]
     TupLit  [e'] _        -> getPropBnds [ident] $ SubExp e'
     Rearrange   {}        -> [(var, SymArr e)]
+    Rotate      {}        -> [(var, SymArr e)]
     Reshape   {}          -> [(var, SymArr e)]
     Conjoin {}            -> [(var, SymArr e)]
 
