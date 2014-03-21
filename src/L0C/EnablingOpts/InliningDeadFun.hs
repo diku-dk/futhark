@@ -144,7 +144,7 @@ inlineInBody inlcallees (LetPat pat (Apply fname args rtp _) letbody loc) =
         [] -> continue $ Apply fname args rtp loc
         (_,_,fargs,body,_):_ ->
           let revbnds = zip (map fromParam fargs) $ map fst args
-          in  mapTail continue' $ foldl (addArgBnd loc) body revbnds
+          in  mapResult continue' $ foldl (addArgBnd loc) body revbnds
   where
       addArgBnd :: SrcLoc -> Body -> (Ident, SubExp) -> Body
       addArgBnd ppos body (farg, aarg) =

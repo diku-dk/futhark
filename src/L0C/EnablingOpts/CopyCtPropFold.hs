@@ -168,8 +168,8 @@ copyCtPropBody (LetPat pat e body loc) = do
   e' <- copyCtPropExp e
   case e' of
     If e1 tb fb _ _
-      | isCt1 e1 -> mapTailM continue' tb
-      | isCt0 e1 -> mapTailM continue' fb
+      | isCt1 e1 -> mapResultM continue' tb
+      | isCt0 e1 -> mapResultM continue' fb
     _ -> continue e'
 
 

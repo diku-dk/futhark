@@ -598,7 +598,7 @@ checkBody (DoLoop merge (Ident loopvar _ _)
                          zip args (map (diet . subExpType) args))
                         rettype loc)
                         (Result cs (map Var result) loc) loc
-  let funbody' = mapTail recurse loopbody'
+  let funbody' = mapResult recurse loopbody'
 
   (funcall, callflow) <- collectDataflow $ local bindfun $ do
     -- Check that the function is internally consistent.

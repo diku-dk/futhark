@@ -79,9 +79,9 @@ splitType ts = let (shape_ts, value_ts) = splitTyped id ts
 
 splitBody :: Body -> (Body, Body)
 splitBody body = (shapeBody, valueBody)
-    where shapeBody = flip mapTail body $ \cs es ->
+    where shapeBody = flip mapResult body $ \cs es ->
                       Result cs (fst $ splitTyped subExpType es) loc
-          valueBody = flip mapTail body $ \cs es ->
+          valueBody = flip mapResult body $ \cs es ->
                       Result cs (snd $ splitTyped subExpType es) loc
           loc = srclocOf body
 

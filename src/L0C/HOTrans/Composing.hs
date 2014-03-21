@@ -76,7 +76,7 @@ fuseMaps lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
                , lambdaBody =
                  let bindLambda _ es = LetPat pat (TupLit es loc)
                                        (makeCopiesInner (lambdaBody lam2)) loc
-                 in makeCopies $ mapTail bindLambda $ lambdaBody lam1
+                 in makeCopies $ mapResult bindLambda $ lambdaBody lam1
                }
         loc = srclocOf lam2
 
@@ -138,7 +138,7 @@ fuseFilterInto lam1 inp1 out1 lam2 inp2 vnames falsebranch = (lam2', HM.elems in
         loc = srclocOf lam2
         residents = [ Ident vname t loc |
                       (vname, t) <- zip vnames $ bodyType falsebranch ]
-        branch = flip mapTail (lambdaBody lam1) $ \cs es ->
+        branch = flip mapResult (lambdaBody lam1) $ \cs es ->
                  let [e] = es in -- XXX
                  LetPat residents
                         (If e

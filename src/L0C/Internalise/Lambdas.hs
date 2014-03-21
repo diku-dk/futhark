@@ -55,7 +55,7 @@ internaliseLambdaBody :: (E.Exp -> InternaliseM I.Body)
                       -> E.Exp -> InternaliseM I.Body
 internaliseLambdaBody internaliseBody body = do
   body' <- internaliseBody body
-  flip mapTailM body' $ \cs es -> do
+  flip mapResultM body' $ \cs es -> do
     -- Some of the subexpressions are actually
     -- certificates... filter them out!  This is slightly hacky, as
     -- we assume that the original input program does not contain
@@ -163,7 +163,7 @@ bindFilterResultOuterShape ce lam args input_size = do
                 (I.Basic Int) loc
   markarray  <- newIdent "filter_mark"
                 (I.arrayOf (I.Basic Int) (I.Shape [input_size]) Nonunique) loc
-  markfunBody <- flip mapTailM (lambdaBody lam) $ \funcs es -> do
+  markfunBody <- flip mapResultM (lambdaBody lam) $ \funcs es -> do
                    let [ok] = es -- XXX
                        result e = Result funcs [e] loc
                    ok_int <- newIdent "ok" (I.Basic Int) loc

@@ -13,8 +13,9 @@ module L0C.InternalRep.Attributes
   , fromParam
 
   -- * Queries on expressions
-  , mapTail
-  , mapTailM
+  , bodyResult
+  , mapResult
+  , mapResultM
   , subExpType
   , bodyType
   , typeOf
@@ -640,22 +641,29 @@ progNames = execWriter . mapM funNames . progFunctions
         lambdaNames (Lambda params body _ _) =
           mapM_ one params >> bodyNames body
 
+-- | Get the 'Result' part of a 'Body'.
+bodyResult :: Body -> (Certificates, [SubExp], SrcLoc)
+bodyResult (Result cs es loc)         = (cs, es, loc)
+bodyResult (DoLoop _ _ _ _ body _)    = bodyResult body
+bodyResult (LetPat _ _ body _)        = bodyResult body
+bodyResult (LetWith _ _ _ _ _ body _) = bodyResult body
+
 -- | Change that subexpression where evaluation of the body would
 -- stop.  Also change type annotations at branches.
-mapTailM :: (Applicative m, Monad m) => (Certificates -> [SubExp] -> m Body) -> Body -> m Body
-mapTailM f (LetPat pat e body loc) =
-  LetPat pat e <$> mapTailM f body <*> pure loc
-mapTailM f (LetWith cs dest src idxs ve body loc) =
-  LetWith cs dest src idxs ve <$> mapTailM f body <*> pure loc
-mapTailM f (DoLoop pat i bound loopbody body loc) =
-  DoLoop pat i bound loopbody <$> mapTailM f body <*> pure loc
-mapTailM f (Result cs ses _) = f cs ses
+mapResultM :: (Applicative m, Monad m) => (Certificates -> [SubExp] -> m Body) -> Body -> m Body
+mapResultM f (LetPat pat e body loc) =
+  LetPat pat e <$> mapResultM f body <*> pure loc
+mapResultM f (LetWith cs dest src idxs ve body loc) =
+  LetWith cs dest src idxs ve <$> mapResultM f body <*> pure loc
+mapResultM f (DoLoop pat i bound loopbody body loc) =
+  DoLoop pat i bound loopbody <$> mapResultM f body <*> pure loc
+mapResultM f (Result cs ses _) = f cs ses
 
 -- | Change that result where evaluation of the body would stop.  Also
 -- change type annotations at branches.  This a non-monadic variant of
--- @mapTailM@.
-mapTail :: (Certificates -> [SubExp] -> Body) -> Body -> Body
-mapTail f e = runIdentity $ mapTailM (((.).(.)) return f) e
+-- @mapResultM@.
+mapResult :: (Certificates -> [SubExp] -> Body) -> Body -> Body
+mapResult f e = runIdentity $ mapResultM (((.).(.)) return f) e
 
 freeWalker :: Walker (Writer (HS.HashSet Ident))
 freeWalker = identityWalker {
