@@ -18,6 +18,10 @@ data EnablingOptError = EnablingOptError SrcLoc String
                       | DupDefinitionError Name SrcLoc SrcLoc
                       | FunctionNotInFtab  Name
                       | VarNotInFtab SrcLoc VName
+                      | SimplifyError SrcLoc String
+                      -- ^ A generic exp simplification error happened at 
+                      -- the given position and for the given reason.
+
 
 instance Show EnablingOptError where
     show (EnablingOptError pos msg) =
@@ -39,3 +43,5 @@ instance Show EnablingOptError where
         "Function " ++ nameToString fname ++ " not found in Function Symbol Table"
     show (VarNotInFtab pos name) =
         "Variable " ++ textual name ++ " not found in symbol table at " ++ locStr pos ++ "."
+    show (SimplifyError pos msg) =
+        "Generic Simplification Error at " ++ locStr pos ++ ":\n" ++ msg

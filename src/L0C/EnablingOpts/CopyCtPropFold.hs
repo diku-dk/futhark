@@ -399,6 +399,14 @@ copyCtPropLambda (Lambda params body rettype loc) = do
 binOpRes :: SrcLoc -> BasicValue -> CPropM Exp
 binOpRes loc v = changed $ SubExp $ Constant (BasicVal v) loc
 
+
+--simplExp :: Exp -> CPropM Exp
+--simplExp e = do
+--    case simplify e of
+--        Left err -> badCPropM $ err
+--        Right e' -> return e'   
+
+
 ctFoldBinOp :: Exp -> CPropM Exp
 ctFoldBinOp e@(BinOp Plus e1 e2 _ pos)
   | isCt0 e1 = changed $ SubExp e2
@@ -410,7 +418,7 @@ ctFoldBinOp e@(BinOp Plus e1 e2 _ pos)
       (Constant (BasicVal (RealVal v1)) _, Constant (BasicVal (RealVal v2)) _) ->
         binOpRes pos $ RealVal $ v1+v2
       _ -> badCPropM $ TypeError pos  " + operands not of (the same) numeral type! "
-  | otherwise = return e
+  | otherwise = return e -- simplExp e
 ctFoldBinOp e@(BinOp Minus e1 e2 _ pos)
   | isCt0 e2 = changed $ SubExp e1
   | isValue e1, isValue e2 =
