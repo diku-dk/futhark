@@ -172,15 +172,38 @@ copyCtPropBody (LetPat pat e body loc) = do
       | isCt0 e1 -> mapResultM continue' fb
     _ -> continue e'
 
-
 copyCtPropBody (DoLoop merge idd n loopbdy letbdy loc) = do
   let (mergepat, mergeexp) = unzip merge
   mergepat' <- copyCtPropPat mergepat
-  mergeexp'    <- mapM copyCtPropSubExp mergeexp
-  n'       <- copyCtPropSubExp n
-  loopbdy' <- copyCtPropBody loopbdy
-  letbdy'  <- copyCtPropBody letbdy
-  return $ DoLoop (zip mergepat' mergeexp') idd n' loopbdy' letbdy' loc
+  mergeexp' <- mapM copyCtPropSubExp mergeexp
+  n'        <- copyCtPropSubExp n
+  loopbdy'  <- copyCtPropBody loopbdy
+  -- Figure out which of the elemens of loopresult are loop-invariant,
+  -- and hoist them out.
+  let (cs, resultSubExps, resloc) = bodyResult loopbdy
+  case foldr checkInvariance ([], [], []) $
+       zip (zip mergepat' mergeexp') resultSubExps of
+    ([], _, _) -> do
+      -- Nothing is invariant.
+      letbdy' <- copyCtPropBody letbdy
+      return $ DoLoop (zip mergepat' mergeexp') idd n' loopbdy' letbdy' loc
+    (invariant, merge', resultSubExps') -> do
+      -- We have moved something invariant out of the loop - re-run
+      -- the operation with the new enclosing bindings, because
+      -- opportunities for copy propagation will have cropped up.
+      let loopbdy'' = Result cs resultSubExps' resloc `setBodyResult` loopbdy'
+      copyCtPropBody $
+        letBnds invariant $
+        DoLoop merge' idd n' loopbdy'' letbdy loc
+  where checkInvariance ((v1,initExp), Var v2) (invariant, merge', resExps)
+          | identName v1 == identName v2 =
+            ((v1, initExp):invariant, merge', resExps)
+        checkInvariance ((v1,initExp), resExp) (invariant, merge', resExps) =
+          (invariant, (v1,initExp):merge', resExp:resExps)
+
+        letBnds [] body = body
+        letBnds ((v, e):bnds) body = let body' = letBnds bnds body
+                                     in LetPat [v] (SubExp e) body' $ srclocOf body'
 
 copyCtPropBody (Result cs es loc) =
   Result <$> copyCtPropCerts cs <*> mapM copyCtPropSubExp es <*> pure loc

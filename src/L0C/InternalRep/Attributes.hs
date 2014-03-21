@@ -14,6 +14,7 @@ module L0C.InternalRep.Attributes
 
   -- * Queries on expressions
   , bodyResult
+  , setBodyResult
   , mapResult
   , mapResultM
   , subExpType
@@ -647,6 +648,11 @@ bodyResult (Result cs es loc)         = (cs, es, loc)
 bodyResult (DoLoop _ _ _ _ body _)    = bodyResult body
 bodyResult (LetPat _ _ body _)        = bodyResult body
 bodyResult (LetWith _ _ _ _ _ body _) = bodyResult body
+
+-- | @setBodyResult result body@ sets the tail end of @body@ (the
+-- 'Result' part) to @result@.
+setBodyResult :: Body -> Body -> Body
+setBodyResult result = mapResult $ \_ _ -> result
 
 -- | Change that subexpression where evaluation of the body would
 -- stop.  Also change type annotations at branches.
