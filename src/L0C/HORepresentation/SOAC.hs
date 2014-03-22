@@ -94,6 +94,10 @@ data InputArray = Var Ident
                 -- ^ @iota(e)@.
                   deriving (Show, Eq, Ord)
 
+instance Located InputArray where
+  locOf (Var v)  = locOf v
+  locOf (Iota e) = locOf e
+
 inputArrayToExp :: InputArray -> Exp
 inputArrayToExp (Var k)  = SubExp $ L0.Var k
 inputArrayToExp (Iota e) = L0.Iota e $ srclocOf e
@@ -107,8 +111,7 @@ data Input = Input [InputTransform] InputArray
              deriving (Show, Eq, Ord)
 
 instance Located Input where
-  locOf (Input _ (Var v))         = locOf v
-  locOf (Input _ (Iota e))        = locOf e
+  locOf (Input _ ia) = locOf ia
 
 instance Substitute Input where
   substituteNames m (Input ts (Var v)) =
