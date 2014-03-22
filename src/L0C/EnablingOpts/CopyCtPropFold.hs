@@ -186,34 +186,18 @@ copyCtPropBody (LetPat pat e body loc) = do
         copyCtPropBody $ insertBindings' body res
     _ -> continue e'
 
-copyCtPropBody (DoLoop merge idd n loopbdy letbdy loc) = do
+copyCtPropBody (DoLoop merge idd n loopbody letbody loc) = do
   let (mergepat, mergeexp) = unzip merge
   mergepat' <- copyCtPropPat mergepat
   mergeexp' <- mapM copyCtPropSubExp mergeexp
   n'        <- copyCtPropSubExp n
-  loopbdy'  <- copyCtPropBody loopbdy
-  -- Figure out which of the elemens of loopresult are loop-invariant,
-  -- and hoist them out.
-  let (cs, resultSubExps, resloc) = bodyResult loopbdy
-  case foldr checkInvariance ([], [], []) $
-       zip (zip mergepat' mergeexp') resultSubExps of
-    ([], _, _) -> do
-      -- Nothing is invariant.
-      letbdy' <- copyCtPropBody letbdy
-      return $ DoLoop (zip mergepat' mergeexp') idd n' loopbdy' letbdy' loc
-    (invariant, merge', resultSubExps') -> do
-      -- We have moved something invariant out of the loop - re-run
-      -- the operation with the new enclosing bindings, because
-      -- opportunities for copy propagation will have cropped up.
-      let loopbdy'' = Result cs resultSubExps' resloc `setBodyResult` loopbdy'
-      copyCtPropBody $
-        flip insertBindings' invariant $
-        DoLoop merge' idd n' loopbdy'' letbdy loc
-  where checkInvariance ((v1,initExp), Var v2) (invariant, merge', resExps)
-          | identName v1 == identName v2 =
-            (LetBind [v1] (SubExp initExp):invariant, merge', resExps)
-        checkInvariance ((v1,initExp), resExp) (invariant, merge', resExps) =
-          (invariant, (v1,initExp):merge', resExp:resExps)
+  loopbody' <- copyCtPropBody loopbody
+  look      <- varLookup
+  let merge' = zip mergepat' mergeexp'
+  case simplifyBinding look (LoopBind merge' idd n' loopbody') of
+    Nothing -> do letbody' <- copyCtPropBody letbody
+                  return $ DoLoop merge' idd n' loopbody' letbody' loc
+    Just bnds -> copyCtPropBody $ insertBindings' letbody bnds
 
 copyCtPropBody (Result cs es loc) =
   Result <$> copyCtPropCerts cs <*> mapM copyCtPropSubExp es <*> pure loc

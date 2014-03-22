@@ -49,6 +49,7 @@ type SimplificationRule = VarLookup -> Binding -> Maybe [Binding]
 simplificationRules :: [SimplificationRule]
 simplificationRules = [ liftIdentityMapping
                       , removeReplicateMapping
+                      , hoistLoopInvariantMergeVariables
                       ]
 
 liftIdentityMapping :: SimplificationRule
@@ -104,3 +105,26 @@ removeReplicateMapping look (LetBind pat (Map _ fun arrs _)) =
           | Just (Replicate n e _) <- look $ identName v = Just (n,e)
         isReplicate _                                    = Nothing
 removeReplicateMapping _ _ = Nothing
+
+hoistLoopInvariantMergeVariables :: SimplificationRule
+hoistLoopInvariantMergeVariables _ (LoopBind merge idd n loopbody) =
+    -- Figure out which of the elemens of loopresult are loop-invariant,
+  -- and hoist them out.
+  case foldr checkInvariance ([], [], []) $ zip merge resultSubExps of
+    ([], _, _) ->
+      -- Nothing is invariant.
+      Nothing
+    (invariant, merge', resultSubExps') ->
+      -- We have moved something invariant out of the loop - re-run
+      -- the operation with the new enclosing bindings, because
+      -- opportunities for copy propagation will have cropped up.
+      let loopbody' = Result cs resultSubExps' resloc `setBodyResult` loopbody
+      in Just $ invariant ++ [LoopBind merge' idd n loopbody']
+  where (cs, resultSubExps, resloc) = bodyResult loopbody
+
+        checkInvariance ((v1,initExp), Var v2) (invariant, merge', resExps)
+          | identName v1 == identName v2 =
+            (LetBind [v1] (SubExp initExp):invariant, merge', resExps)
+        checkInvariance ((v1,initExp), resExp) (invariant, merge', resExps) =
+          (invariant, (v1,initExp):merge', resExp:resExps)
+hoistLoopInvariantMergeVariables _ _ = Nothing
