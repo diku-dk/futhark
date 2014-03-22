@@ -22,6 +22,7 @@ import qualified Data.Set          as S
 
 import L0C.InternalRep
 import L0C.EnablingOpts.EnablingOptErrors
+import L0C.EnablingOpts.Simplification
 import qualified L0C.Interpreter as Interp
 
 -----------------------------------------------------------------
@@ -116,6 +117,14 @@ bindVars = foldl bindVar
 binding :: [(VName, CtOrId)] -> CPropM a -> CPropM a
 binding bnds = local (`bindVars` bnds)
 
+varLookup :: CPropM VarLookup
+varLookup = do
+  env <- ask
+  return $ \k -> asExp <$> HM.lookup k (envVtable env)
+  where asExp (SymArr e)      = e
+        asExp (VarId vname t) = SubExp $ Var $ Ident vname t noLoc
+        asExp (Value val)     = SubExp (Constant val noLoc)
+
 -- | Applies Copy/Constant Propagation and Folding to an Entire Program.
 copyCtProp :: Prog -> Either EnablingOptError (Bool, Prog)
 copyCtProp prog = do
@@ -166,10 +175,14 @@ copyCtPropBody (LetPat pat e body loc) = do
         return $ LetPat pat' e' body' loc
       continue' _ es = continue $ TupLit es loc
   e' <- copyCtPropExp e
+  look <- varLookup
   case e' of
     If e1 tb fb _ _
       | isCt1 e1 -> mapResultM continue' tb
       | isCt0 e1 -> mapResultM continue' fb
+    _
+      | Just res  <- simplifyBinding look pat e' ->
+        copyCtPropBody $ letBnds res body
     _ -> continue e'
 
 copyCtPropBody (DoLoop merge idd n loopbdy letbdy loc) = do
@@ -197,13 +210,9 @@ copyCtPropBody (DoLoop merge idd n loopbdy letbdy loc) = do
         DoLoop merge' idd n' loopbdy'' letbdy loc
   where checkInvariance ((v1,initExp), Var v2) (invariant, merge', resExps)
           | identName v1 == identName v2 =
-            ((v1, initExp):invariant, merge', resExps)
+            (([v1], SubExp initExp):invariant, merge', resExps)
         checkInvariance ((v1,initExp), resExp) (invariant, merge', resExps) =
           (invariant, (v1,initExp):merge', resExp:resExps)
-
-        letBnds [] body = body
-        letBnds ((v, e):bnds) body = let body' = letBnds bnds body
-                                     in LetPat [v] (SubExp e) body' $ srclocOf body'
 
 copyCtPropBody (Result cs es loc) =
   Result <$> copyCtPropCerts cs <*> mapM copyCtPropSubExp es <*> pure loc
@@ -708,3 +717,9 @@ getArrLitInd (SubExp (Constant arr@(ArrayVal _ _) loc)) (i:is) =
     Nothing -> Nothing
     Just v  -> Just $ SubExp $ Constant v loc
 getArrLitInd _ _ = Nothing
+
+letBnds :: [([Ident], Exp)] -> Body -> Body
+letBnds [] body = body
+letBnds ((pat, e):bnds) body =
+  let body' = letBnds bnds body
+  in LetPat pat e body' $ srclocOf body'
