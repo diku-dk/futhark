@@ -24,6 +24,7 @@ import L0C.InternalRep
 import L0C.EnablingOpts.EnablingOptErrors
 import L0C.EnablingOpts.Simplification
 import qualified L0C.Interpreter as Interp
+import L0C.Tools
 
 -----------------------------------------------------------------
 -----------------------------------------------------------------
@@ -181,8 +182,8 @@ copyCtPropBody (LetPat pat e body loc) = do
       | isCt1 e1 -> mapResultM continue' tb
       | isCt0 e1 -> mapResultM continue' fb
     _
-      | Just res  <- simplifyBinding look pat e' ->
-        copyCtPropBody $ letBnds res body
+      | Just res  <- simplifyBinding look (LetBind pat e') ->
+        copyCtPropBody $ insertBindings' body res
     _ -> continue e'
 
 copyCtPropBody (DoLoop merge idd n loopbdy letbdy loc) = do
@@ -206,11 +207,11 @@ copyCtPropBody (DoLoop merge idd n loopbdy letbdy loc) = do
       -- opportunities for copy propagation will have cropped up.
       let loopbdy'' = Result cs resultSubExps' resloc `setBodyResult` loopbdy'
       copyCtPropBody $
-        letBnds invariant $
+        flip insertBindings' invariant $
         DoLoop merge' idd n' loopbdy'' letbdy loc
   where checkInvariance ((v1,initExp), Var v2) (invariant, merge', resExps)
           | identName v1 == identName v2 =
-            (([v1], SubExp initExp):invariant, merge', resExps)
+            (LetBind [v1] (SubExp initExp):invariant, merge', resExps)
         checkInvariance ((v1,initExp), resExp) (invariant, merge', resExps) =
           (invariant, (v1,initExp):merge', resExp:resExps)
 
@@ -717,9 +718,3 @@ getArrLitInd (SubExp (Constant arr@(ArrayVal _ _) loc)) (i:is) =
     Nothing -> Nothing
     Just v  -> Just $ SubExp $ Constant v loc
 getArrLitInd _ _ = Nothing
-
-letBnds :: [([Ident], Exp)] -> Body -> Body
-letBnds [] body = body
-letBnds ((pat, e):bnds) body =
-  let body' = letBnds bnds body
-  in LetPat pat e body' $ srclocOf body'

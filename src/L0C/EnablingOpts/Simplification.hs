@@ -1,9 +1,7 @@
--- | This module implements simple simplification rules for let-bound
--- expressions.  The intent is that you pass a symbol-lookup function
--- and a binding (consisting of the output pattern and the
--- expression), and are given back a sequence of bindings, that are
--- more efficient than the original binding, yet compute the same
--- result.
+-- | This module implements simple simplification rules for bindings.
+-- The intent is that you pass a symbol-lookup function and a binding,
+-- and is given back a sequence of bindings, that are more efficient
+-- than the original binding, yet compute the same result.
 --
 -- These rewrite rules are "local", in that they do not maintain any
 -- state or look at the program as a whole.  Compare this to the
@@ -24,29 +22,29 @@ import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet      as HS
 
 import L0C.InternalRep
+import L0C.Tools
 
 -- | A function that, given a variable name, returns its definition.
 type VarLookup = VName -> Maybe Exp
 
--- | @simplifyBinding lookup pat exp@ performs simplification of the
--- expression @exp@, which is bound to @pat@ in the original program.
--- If simplification is possible, a replacement set of let-bindings is
--- returned, that bind at least the names in @pat@ (and possibly more,
--- for intermediate results).
-simplifyBinding :: VarLookup -> [Ident] -> Exp -> Maybe [([Ident], Exp)]
+-- | @simplifyBinding lookup bnd@ performs simplification of the
+-- binding @bnd@.  If simplification is possible, a replacement list
+-- of bindings is returned, that bind at least the same banes as the
+-- original binding (and possibly more, for intermediate results).
+simplifyBinding :: VarLookup -> Binding -> Maybe [Binding]
 
 simplifyBinding = applyRules simplificationRules
 
 applyRules :: [SimplificationRule]
-           -> VarLookup -> [Ident] -> Exp -> Maybe [([Ident], Exp)]
-applyRules [] _ _ _ = Nothing
-applyRules (rule:rules) look pat e =
-  (concatMap subApply <$> rule look pat e) <|>
-  applyRules rules look pat e
-  where subApply (pat', e') =
-          fromMaybe [(pat', e')] $ applyRules (rule:rules) look pat' e'
+           -> VarLookup -> Binding -> Maybe [Binding]
+applyRules []           _    _   = Nothing
+applyRules (rule:rules) look bnd =
+  (concatMap subApply <$> rule look bnd) <|>
+  applyRules rules look bnd
+  where subApply bnd' =
+          fromMaybe [bnd'] $ applyRules (rule:rules) look bnd'
 
-type SimplificationRule = VarLookup -> [Ident] -> Exp -> Maybe [([Ident], Exp)]
+type SimplificationRule = VarLookup -> Binding -> Maybe [Binding]
 
 simplificationRules :: [SimplificationRule]
 simplificationRules = [ liftIdentityMapping
@@ -54,7 +52,7 @@ simplificationRules = [ liftIdentityMapping
                       ]
 
 liftIdentityMapping :: SimplificationRule
-liftIdentityMapping _ pat (Map cs fun arrs loc) =
+liftIdentityMapping _ (LetBind pat (Map cs fun arrs loc)) =
   case foldr checkInvariance ([], [], []) $ zip3 pat resultSubExps rettype of
     ([], _, _) -> Nothing
     (invariant, mapresult, rettype') ->
@@ -63,7 +61,7 @@ liftIdentityMapping _ pat (Map cs fun arrs loc) =
           fun' = fun { lambdaBody = lambdaRes `setBodyResult` lambdaBody fun
                      , lambdaReturnType = rettype'
                      }
-      in Just $ (pat', Map cs fun' arrs loc) : invariant
+      in Just $ LetBind pat' (Map cs fun' arrs loc) : invariant
   where inputMap = HM.fromList $ zip (map identName $ lambdaParams fun) arrs
         free = freeInBody $ lambdaBody fun
         rettype = lambdaReturnType fun
@@ -75,41 +73,34 @@ liftIdentityMapping _ pat (Map cs fun arrs loc) =
 
         checkInvariance (outId, Var v, _) (invariant, mapresult, rettype')
           | Just inp <- HM.lookup (identName v) inputMap =
-            (([outId], SubExp inp) : invariant,
+            (LetBind [outId] (SubExp inp) : invariant,
              mapresult,
              rettype')
         checkInvariance (outId, e, t) (invariant, mapresult, rettype')
-          | freeOrConst e = (([outId], Replicate outersize e loc) : invariant,
+          | freeOrConst e = (LetBind [outId] (Replicate outersize e loc) : invariant,
                              mapresult,
                              rettype')
           | otherwise = (invariant,
                          (outId, e) : mapresult,
                          t : rettype')
-liftIdentityMapping _ _ _ = Nothing
+liftIdentityMapping _ _ = Nothing
 
 removeReplicateMapping :: SimplificationRule
-removeReplicateMapping look pat (Map _ fun arrs _) =
+removeReplicateMapping look (LetBind pat (Map _ fun arrs _)) =
   case mapM isReplicate arrs of
     Just arrs'@((n,_):_) ->
       -- 'n' is the size of the destination array.
-      let parameterBnds = [ ([fromParam par], SubExp e)
+      let parameterBnds = [ LetBind [fromParam par] $ SubExp e
                             | (par, (_, e)) <- zip (lambdaParams fun) arrs' ]
           (_, resultSubExps, resloc) = bodyResult $ lambdaBody fun
-          resultBnds = [ ([v], Replicate n e resloc) | (v, e) <- zip pat resultSubExps ]
+          resultBnds = [ LetBind [v] $ Replicate n e resloc
+                           | (v, e) <- zip pat resultSubExps ]
       in -- XXX: Throwing away certificates.
          Just $ parameterBnds ++
-                bodyLetBindings (lambdaBody fun) ++
+                bodyBindings (lambdaBody fun) ++
                 resultBnds
     _ -> Nothing
   where isReplicate (Var v)
           | Just (Replicate n e _) <- look $ identName v = Just (n,e)
         isReplicate _                                    = Nothing
-removeReplicateMapping _ _ _ = Nothing
-
--- A bit hacky for now - get the let-bindings of a body, and fail for
--- any loops and let-withs.  This will be fixed once I rationalise the
--- Body representation.
-bodyLetBindings :: Body -> [([Ident], Exp)]
-bodyLetBindings (LetPat pat e body _) = (pat,e) : bodyLetBindings body
-bodyLetBindings (Result {})           = []
-bodyLetBindings _                     = error "bodyLetBindings can only handle let-bindings."
+removeReplicateMapping _ _ = Nothing

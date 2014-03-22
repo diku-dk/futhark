@@ -22,6 +22,7 @@ module L0C.Tools
 
   , MonadBinder(..)
   , Binding(..)
+  , bodyBindings
   , insertBindings
   , insertBindings'
   , letBind
@@ -189,6 +190,15 @@ data Binding = LoopBind [(Ident, SubExp)] Ident SubExp Body
 class (MonadFreshNames m, Applicative m, Monad m) => MonadBinder m where
   addBinding      :: Binding -> m ()
   collectBindings :: m a -> m (a, [Binding])
+
+bodyBindings :: Body -> [Binding]
+bodyBindings (LetPat pat e body _) =
+  LetBind pat e : bodyBindings body
+bodyBindings (DoLoop merge i bound loopbody letbody _) =
+  LoopBind merge i bound loopbody : bodyBindings letbody
+bodyBindings (LetWith cs dest src is ves body _) =
+  LetWithBind cs dest src is ves : bodyBindings body
+bodyBindings (Result {})           = []
 
 letBind :: MonadBinder m => [Ident] -> Exp -> m ()
 letBind pat e =
