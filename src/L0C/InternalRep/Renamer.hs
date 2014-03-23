@@ -11,6 +11,11 @@ module L0C.InternalRep.Renamer
   (
   -- * Renaming programs
    renameProg
+  -- * Renaming parts of a program.
+  --
+  -- These all require execution in a 'MonadFreshNames' environment.
+  , renameBody
+  , renameLambda
   )
   where
 
@@ -20,19 +25,43 @@ import Control.Monad.Reader
 
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
+import Data.Maybe
 
 import L0C.InternalRep
 import L0C.FreshNames
+import L0C.MonadFreshNames (MonadFreshNames(..))
+
+runRenamer :: RenameM a -> VNameSource -> (a, VNameSource)
+runRenamer m src = runReader (runStateT m src) env
+  where env = RenameEnv HM.empty newName
 
 -- | Rename variables such that each is unique.  The semantics of the
 -- program are unaffected, under the assumption that the program was
 -- correct to begin with.  In particular, the renaming may make an
 -- invalid program valid.
 renameProg :: Prog -> Prog
-renameProg prog = Prog $ runReader (evalStateT f src) env
-  where env = RenameEnv HM.empty newName
-        src = newNameSourceForProg prog
-        f = mapM renameFun $ progFunctions prog
+renameProg prog = Prog $ fst $
+                  runRenamer (mapM renameFun $ progFunctions prog) src
+  where src = newNameSourceForProg prog
+
+-- | Rename bound variables such that each is unique.  The semantics
+-- of the body is unaffected, under the assumption that the body was
+-- correct to begin with.  Any free variables are left untouched.
+renameBody :: MonadFreshNames m => Body -> m Body
+renameBody body = do src <- getNameSource
+                     let (body',src') = runRenamer (rename body) src
+                     putNameSource src'
+                     return body'
+
+-- | Rename bound variables such that each is unique.  The semantics
+-- of the lambda is unaffected, under the assumption that the body was
+-- correct to begin with.  Any free variables are left untouched.
+-- Note in particular that the parameters of the lambda are renamed.
+renameLambda :: MonadFreshNames m => Lambda -> m Lambda
+renameLambda lam = do src <- getNameSource
+                      let (lam',src') = runRenamer (rename lam) src
+                      putNameSource src'
+                      return lam'
 
 data RenameEnv = RenameEnv {
     envNameMap :: HM.HashMap VName VName
@@ -52,7 +81,7 @@ class Rename a where
   rename :: a -> RenameM a
 
 instance Rename VName where
-  rename name = maybe (new name) return =<<
+  rename name = fromMaybe name <$>
                 asks (HM.lookup name . envNameMap)
 
 instance (Rename als, Rename shape) => Rename (IdentBase als shape) where
