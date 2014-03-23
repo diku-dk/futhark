@@ -52,6 +52,7 @@ simplificationRules = [ liftIdentityMapping
                       , removeReplicateMapping
                       , hoistLoopInvariantMergeVariables
                       , simplifyConstantRedomaps
+                      , simplifyConstantReduce
                       ]
 
 liftIdentityMapping :: SimplificationRule
@@ -136,6 +137,13 @@ simplifyConstantRedomaps _ (LetBind pat (Redomap _ _ innerfun acc _ loc)) = do
   es <- simplifyConstantFoldFun innerfun acc
   return [LetBind pat $ TupLit es loc]
 simplifyConstantRedomaps _ _ =
+  Nothing
+
+simplifyConstantReduce :: SimplificationRule
+simplifyConstantReduce _ (LetBind pat (Reduce _ fun input loc)) = do
+  es <- simplifyConstantFoldFun fun $ map fst input
+  return [LetBind pat $ TupLit es loc]
+simplifyConstantReduce _ _ =
   Nothing
 
 simplifyConstantFoldFun :: Lambda -> [SubExp] -> Maybe [SubExp]
