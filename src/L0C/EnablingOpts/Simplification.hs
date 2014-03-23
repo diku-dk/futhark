@@ -15,6 +15,7 @@ module L0C.EnablingOpts.Simplification
 where
 
 import Control.Applicative
+import Control.Monad
 
 import Data.Maybe
 
@@ -50,6 +51,7 @@ simplificationRules :: [SimplificationRule]
 simplificationRules = [ liftIdentityMapping
                       , removeReplicateMapping
                       , hoistLoopInvariantMergeVariables
+                      , simplifyConstantRedomaps
                       ]
 
 liftIdentityMapping :: SimplificationRule
@@ -128,3 +130,22 @@ hoistLoopInvariantMergeVariables _ (LoopBind merge idd n loopbody) =
         checkInvariance ((v1,initExp), resExp) (invariant, merge', resExps) =
           (invariant, (v1,initExp):merge', resExp:resExps)
 hoistLoopInvariantMergeVariables _ _ = Nothing
+
+simplifyConstantRedomaps :: SimplificationRule
+simplifyConstantRedomaps _ (LetBind pat (Redomap _ _ innerfun acc _ loc)) = do
+  es <- simplifyConstantFoldFun innerfun acc
+  return [LetBind pat $ TupLit es loc]
+simplifyConstantRedomaps _ _ =
+  Nothing
+
+simplifyConstantFoldFun :: Lambda -> [SubExp] -> Maybe [SubExp]
+simplifyConstantFoldFun lam accs =
+  zipWithM isConstResult resultSubExps $ zip (lambdaParams lam) accs
+  where (_, resultSubExps, _) = bodyResult $ lambdaBody lam
+        free = freeNamesInBody (lambdaBody lam) `HS.difference`
+               HS.fromList (map identName $ lambdaParams lam)
+        isConstResult res (p, acc) =
+          case res of Constant {}                          -> Just res
+                      Var v | identName v == identName p   -> Just acc
+                            | identName v `HS.member` free -> Just res
+                      _                                    -> Nothing
