@@ -183,7 +183,7 @@ subtypeOf :: ArrayShape shape => TypeBase as1 shape -> TypeBase as2 shape -> Boo
 subtypeOf (Array t1 shape1 u1 _) (Array t2 shape2 u2 _) =
   u1 `subuniqueOf` u2
        && t1 == t2
-       && shape1 == shape2
+       && shapeRank shape1 == shapeRank shape2
 subtypeOf (Basic t1) (Basic t2) = t1 == t2
 subtypeOf _ _ = False
 
