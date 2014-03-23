@@ -292,21 +292,11 @@ isBasicTypeVal :: Value -> Bool
 isBasicTypeVal = basicType . valueType
 
 getPropBnds :: [Ident] -> Exp -> [(VName, CtOrId)]
-getPropBnds [ident@(Ident var _ _)] e =
+getPropBnds [Ident var _ _] e =
   case e of
     SubExp (Constant v _) -> [(var, Value v)]
     SubExp (Var v)        -> [(var, VarId (identName v) (identType v))]
-    Index   {}            -> [(var, SymArr e)]
-    TupLit  [e'] _        -> getPropBnds [ident] $ SubExp e'
-    Rearrange   {}        -> [(var, SymArr e)]
-    Rotate      {}        -> [(var, SymArr e)]
-    Reshape   {}          -> [(var, SymArr e)]
-    Conjoin {}            -> [(var, SymArr e)]
-
-    Iota {}               -> [(var, SymArr e)]
-    Replicate {}          -> [(var, SymArr e)]
-    ArrayLit  {}          -> [(var, SymArr e)]
-    _                     -> []
+    _                     -> [(var, SymArr e)]
 getPropBnds ids (TupLit ts _)
   | length ids == length ts =
     concatMap (\(x,y)-> getPropBnds [x] (SubExp y)) $ zip ids ts
