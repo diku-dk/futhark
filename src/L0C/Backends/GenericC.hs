@@ -11,8 +11,6 @@ module L0C.Backends.GenericC
   , compileExpNewVar
   ) where
 
-import Debug.Trace
-
 import Control.Applicative
 import Control.Monad.Identity
 import Control.Monad.State
@@ -473,7 +471,7 @@ compileExp :: C.Exp -> Exp -> CompilerM [C.BlockItem]
 
 compileExp target e = do
   res <- join $ asks envCompileExp <*> pure target <*> pure e
-  case res of CompileBody b  -> trace ("body " ++ ppBody b) $ compileBody target b
+  case res of CompileBody b  -> compileBody target b
               CompileExp  e' -> compileExp' target e'
               CCode res'     -> return res'
 
