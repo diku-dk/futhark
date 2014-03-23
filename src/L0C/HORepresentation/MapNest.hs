@@ -139,9 +139,10 @@ fixInputs ourInps childInps =
       | Just (ourP, remPs') <- findParam remPs v =
           return (remPs', ourP:newInps)
 
-    inspect (remPs, newInps) (param, inpt, inp@(SOAC.Input ts ia)) =
+    inspect (remPs, newInps) (param, inpt, SOAC.Input ts ia) =
       case ia of
-        SOAC.Var v | Just ((p,pInpt,pInp), remPs') <- findParam remPs v ->
+        SOAC.Var v
+          | Just ((p,pInpt,pInp), remPs') <- findParam remPs v ->
           let pInp'  = SOAC.transformRows ts pInp
               pInpt' = SOAC.transformTypeRows ts pInpt
           in return (remPs',
@@ -149,10 +150,15 @@ fixInputs ourInps childInps =
                       pInpt',
                       pInp')
                      : newInps)
+          | Just ((p,pInpt,pInp), _) <- findParam newInps v -> do
+          -- The input corresponds to a variable that has already
+          -- been used.
+          p' <- newIdent' id p
+          return (remPs, (p', pInpt, pInp) : newInps)
         _ -> do
           newParam <- Ident <$> newNameFromString (baseString (identName param) ++ "_rep")
                             <*> pure inpt
-                            <*> pure (srclocOf inp)
+                            <*> pure (srclocOf ia)
           let outer:shape = arrayDims inpt
               inpt' = inpt `setArrayShape` Shape (outer : outer : shape)
           return (remPs, (toParam newParam, inpt', SOAC.Input (ts++[SOAC.Repeat]) ia) : newInps)
