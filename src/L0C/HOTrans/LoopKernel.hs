@@ -21,6 +21,7 @@ import Data.List
 import Data.Loc
 
 import L0C.InternalRep
+import L0C.InternalRep.Renamer (renameLambda)
 import L0C.MonadFreshNames
 import L0C.HORepresentation.SOAC (SOAC)
 import qualified L0C.HORepresentation.SOAC as SOAC
@@ -223,7 +224,10 @@ fuseSOACwithKer outIds soac1 ker = do
       lam2     = SOAC.lambda soac2
       success res_soac = do
         let fusedVars_new = fusedVars ker++outIds
-        return $ ker { fsoac = res_soac
+        -- Avoid name duplication, because the producer lambda is not
+        -- removed from the program until much later.
+        uniq_lam <- renameLambda $ SOAC.lambda res_soac
+        return $ ker { fsoac = uniq_lam `SOAC.setLambda` res_soac
                      , outputs = out_ids2
                      , fusedVars = fusedVars_new
                      }
