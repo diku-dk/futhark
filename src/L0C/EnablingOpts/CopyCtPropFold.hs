@@ -167,21 +167,15 @@ copyCtPropBody (LetWith cs dest src inds el body pos) = do
 
 copyCtPropBody (LetPat pat e body loc) = do
   pat' <- copyCtPropPat pat
-  let continue e' = do
-        let bnds = getPropBnds pat' e'
-        body' <- binding bnds $ copyCtPropBody body
-        return $ LetPat pat' e' body' loc
-      continue' _ es = continue $ TupLit es loc
   e' <- copyCtPropExp e
   look <- varLookup
-  case e' of
-    If e1 tb fb _ _
-      | isCt1 e1 -> mapResultM continue' tb
-      | isCt0 e1 -> mapResultM continue' fb
-    _
-      | Just res  <- simplifyBinding look (LetBind pat e') ->
-        copyCtPropBody $ insertBindings' body res
-    _ -> continue e'
+  case simplifyBinding look (LetBind pat e') of
+    Just res ->
+      copyCtPropBody $ insertBindings' body res
+    _        -> do
+      let bnds = getPropBnds pat' e'
+      body' <- binding bnds $ copyCtPropBody body
+      return $ LetPat pat' e' body' loc
 
 copyCtPropBody (DoLoop merge idd n loopbody letbody loc) = do
   let (mergepat, mergeexp) = unzip merge
@@ -293,26 +287,6 @@ copyCtPropLambda (Lambda params body rettype loc) = do
   body' <- copyCtPropBody body
   rettype' <- mapM copyCtPropType rettype
   return $ Lambda params' body' rettype' loc
-
-----------------------------------------------------
----- Helpers for Constant Folding                ---
-----------------------------------------------------
-
-isCt1 :: SubExp -> Bool
-isCt1 (Constant (BasicVal (IntVal x))  _) = x == 1
-isCt1 (Constant (BasicVal (RealVal x)) _) = x == 1
-isCt1 (Constant (BasicVal (LogVal x))  _) = x
-isCt1 _                                   = False
-
-isCt0 :: SubExp -> Bool
-isCt0 (Constant (BasicVal (IntVal x))  _) = x == 0
-isCt0 (Constant (BasicVal (RealVal x)) _) = x == 0
-isCt0 (Constant (BasicVal (LogVal x))  _) = not x
-isCt0 _                                   = False
-
-----------------------------------------------------
----- Helpers for Constant/Copy Propagation       ---
-----------------------------------------------------
 
 isBasicTypeVal :: Value -> Bool
 isBasicTypeVal = basicType . valueType

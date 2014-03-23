@@ -64,6 +64,7 @@ simplificationRules = [ liftIdentityMapping
                       , letRule simplifyAssert
                       , letRule simplifyConjoin
                       , letRule simplifyIndexing
+                      , simplifyBranch
                       ]
 
 liftIdentityMapping :: SimplificationRule
@@ -381,18 +382,6 @@ simplifyBinOp _ _ = Nothing
 binOpRes :: SrcLoc -> BasicValue -> Maybe Exp
 binOpRes loc v = Just $ SubExp $ Constant (BasicVal v) loc
 
-isCt1 :: SubExp -> Bool
-isCt1 (Constant (BasicVal (IntVal x))  _) = x == 1
-isCt1 (Constant (BasicVal (RealVal x)) _) = x == 1
-isCt1 (Constant (BasicVal (LogVal x))  _) = x
-isCt1 _                                   = False
-
-isCt0 :: SubExp -> Bool
-isCt0 (Constant (BasicVal (IntVal x))  _) = x == 0
-isCt0 (Constant (BasicVal (RealVal x)) _) = x == 0
-isCt0 (Constant (BasicVal (LogVal x))  _) = not x
-isCt0 _                                   = False
-
 simplifyNot :: LetSimplificationRule
 simplifyNot _ (Not (Constant (BasicVal (LogVal v)) _) loc) =
   Just $ SubExp $ Constant (BasicVal $ LogVal (not v)) loc
@@ -440,7 +429,7 @@ simplifyIndexing look (Index cs idd inds loc) =
     Just (SubExp (Constant v _))
       | Just iis <- ctIndex inds,
         length iis == length (valueShape v),
-        Just el <- getArrValInd v iis -> Just $ SubExp $ Constant el loc
+        Just el <- arrValInd v iis -> Just $ SubExp $ Constant el loc
 
     Just (Iota _ _)
       | [ii] <- inds -> Just $ SubExp ii
@@ -450,7 +439,7 @@ simplifyIndexing look (Index cs idd inds loc) =
 
     Just (e@ArrayLit {})
        | Just iis <- ctIndex inds,
-         Just el <- getArrLitInd e iis -> Just el
+         Just el <- arrLitInd e iis -> Just el
 
     Just (Replicate _ (Var vv) _)
       | [_]   <- inds -> Just $ SubExp $ Var vv
@@ -459,7 +448,7 @@ simplifyIndexing look (Index cs idd inds loc) =
     Just (Replicate _ (Constant arr@(ArrayVal _ _) _) _)
        | _:is' <- inds,
          Just iis <- ctIndex is',
-         Just el <- getArrValInd arr iis ->
+         Just el <- arrValInd arr iis ->
            Just $ SubExp $ Constant el loc
 
     Just (Replicate _ val@(Constant _ _) _)
@@ -474,6 +463,31 @@ simplifyIndexing look (Index cs idd inds loc) =
 
 simplifyIndexing _ _ = Nothing
 
+simplifyBranch :: SimplificationRule
+simplifyBranch _ (LetBind pat (If e1 tb fb _ _)) = do
+  branch <- if isCt1 e1
+            then Just tb
+            else if isCt0 e1
+                 then Just fb
+                 else Nothing
+  let (_, resultSubExps, resloc) = bodyResult branch
+  Just $ bodyBindings branch ++ [LetBind pat $ TupLit resultSubExps resloc]
+simplifyBranch _ _ = Nothing
+
+-- Some helper functions
+
+isCt1 :: SubExp -> Bool
+isCt1 (Constant (BasicVal (IntVal x))  _) = x == 1
+isCt1 (Constant (BasicVal (RealVal x)) _) = x == 1
+isCt1 (Constant (BasicVal (LogVal x))  _) = x
+isCt1 _                                   = False
+
+isCt0 :: SubExp -> Bool
+isCt0 (Constant (BasicVal (IntVal x))  _) = x == 0
+isCt0 (Constant (BasicVal (RealVal x)) _) = x == 0
+isCt0 (Constant (BasicVal (LogVal x))  _) = not x
+isCt0 _                                   = False
+
 ctIndex :: [SubExp] -> Maybe [Int]
 ctIndex [] = Just []
 ctIndex (Constant (BasicVal (IntVal ii)) _:is) =
@@ -482,16 +496,16 @@ ctIndex (Constant (BasicVal (IntVal ii)) _:is) =
     Just y  -> Just (ii:y)
 ctIndex _ = Nothing
 
-getArrValInd :: Value -> [Int] -> Maybe Value
-getArrValInd v [] = Just v
-getArrValInd (ArrayVal arr _) (i:is) = getArrValInd (arr ! i) is
-getArrValInd _ _ = Nothing
+arrValInd :: Value -> [Int] -> Maybe Value
+arrValInd v [] = Just v
+arrValInd (ArrayVal arr _) (i:is) = arrValInd (arr ! i) is
+arrValInd _ _ = Nothing
 
-getArrLitInd :: Exp -> [Int] -> Maybe Exp
-getArrLitInd e [] = Just e
-getArrLitInd (ArrayLit els _ _) (i:is) = getArrLitInd (SubExp $ els !! i) is
-getArrLitInd (SubExp (Constant arr@(ArrayVal _ _) loc)) (i:is) =
-  case getArrValInd arr (i:is) of
+arrLitInd :: Exp -> [Int] -> Maybe Exp
+arrLitInd e [] = Just e
+arrLitInd (ArrayLit els _ _) (i:is) = arrLitInd (SubExp $ els !! i) is
+arrLitInd (SubExp (Constant arr@(ArrayVal _ _) loc)) (i:is) =
+  case arrValInd arr (i:is) of
     Nothing -> Nothing
     Just v  -> Just $ SubExp $ Constant v loc
-getArrLitInd _ _ = Nothing
+arrLitInd _ _ = Nothing
