@@ -383,7 +383,10 @@ pullRearrange nest ots = do
   nest' <- liftMaybeNeedNames $ MapNest.fromSOACNest nest
   ORearrange cs perm:ots' <- return ots
   if permuteReach perm <= mapDepth nest' then
-    let inputs' = map (SOAC.addTransform $ SOAC.Rearrange cs perm) $ MapNest.inputs nest'
+    let -- Expand perm to cover the full extend of the input dimensionality
+        perm' inp = perm ++ [length perm..SOAC.inputRank inp-1]
+        addPerm inp = SOAC.addTransform (SOAC.Rearrange cs $ perm' inp) inp
+        inputs' = map addPerm $ MapNest.inputs nest'
     in return (inputs' `Nest.setInputs` MapNest.toSOACNest nest',
                ots')
   else fail "Cannot pull transpose"
@@ -421,8 +424,8 @@ pullReshape nest (OReshape cs shape:ots)
   | op@Nest.Map {} <- Nest.operation nest,
     all basicType $ Nest.returnType op = do
       let loc = srclocOf nest
-          inputs' = [ SOAC.Input (ts ++ [SOAC.ReshapeOuter cs shape]) ia
-                      | SOAC.Input ts ia <- Nest.inputs nest ]
+          inputs' = map (SOAC.addTransform $ SOAC.ReshapeOuter cs shape) $
+                    Nest.inputs nest
           inputTypes = SOAC.inputTypes inputs'
           outernest outershape = do
             let addDims t = arrayOf t (Shape outershape) $ uniqueness t
