@@ -177,12 +177,12 @@ inputsToSubExps is = mapM (inputToExp' $ dimSizes is) is
 
         transform (sizes, d, ia) (ReshapeOuter cs shape) = do
           let shape' = reshapeOuter shape 1 ia
-          ia' <- letSubExp "reshape" $ L0.Reshape cs shape' ia $ srclocOf ia
+          ia' <- letSubExp "reshape_outer" $ L0.Reshape cs shape' ia $ srclocOf ia
           return (sizes, d, ia')
 
         transform (sizes, d, ia) (ReshapeInner cs shape) = do
           let shape' = reshapeInner shape 1 ia
-          ia' <- letSubExp "reshape" $ L0.Reshape cs shape' ia $ srclocOf ia
+          ia' <- letSubExp "reshape_inner" $ L0.Reshape cs shape' ia $ srclocOf ia
           return (sizes, d, ia')
 
 dimSizes :: [Input] -> [Maybe SubExp]
@@ -229,7 +229,7 @@ inputRank (Input ts ia) = foldl transformType (arrayRank $ inputArrayType ia) ts
         transformType rank (Rearrange _ _)        = rank
         transformType _    (Reshape _ shape)      = length shape
         transformType rank (ReshapeOuter _ shape) = rank - 1 + length shape
-        transformType rank (ReshapeInner _ shape) = length shape + rank - 1
+        transformType rank (ReshapeInner _ shape) = 1 + length shape
 
 -- | Return the types of a list of inputs.
 inputTypes :: [Input] -> [Type]
