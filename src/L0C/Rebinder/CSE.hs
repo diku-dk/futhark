@@ -21,8 +21,7 @@ import L0C.InternalRep
 import L0C.Substitute
 
 mkSubsts :: [Ident] -> Exp -> HM.HashMap VName VName
-mkSubsts [v1] (SubExp (Var v2)) = HM.singleton (identName v1) (identName v2)
-mkSubsts pat (TupLit es _) = HM.fromList $ mapMaybe subst $ zip pat es
+mkSubsts pat (SubExps es _) = HM.fromList $ mapMaybe subst $ zip pat es
   where subst (v1, Var v2) = Just (identName v1, identName v2)
         subst _            = Nothing
 mkSubsts _ _ = HM.empty
@@ -55,7 +54,7 @@ performCSE (esubsts, nsubsts) pat e =
     Just e'' -> (e'', (esubsts, mkSubsts pat e'' `HM.union` nsubsts))
     Nothing -> (e', (M.insert e' pate esubsts, nsubsts))
   where e' = substituteNames nsubsts e
-        pate = TupLit (map Var pat) $ srclocOf e
+        pate = SubExps (map Var pat) $ srclocOf e
 
 -- | Run CSE over several expression alternatives, all of which use
 -- the same pattern.  The same state is used to perform CSE on all of

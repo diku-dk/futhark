@@ -94,9 +94,9 @@ internaliseExp :: E.Exp -> InternaliseM I.Exp
 internaliseExp (E.Var var) = do
   subst <- asks $ HM.lookup (E.identName var) . envSubsts
   case subst of
-    Nothing     -> I.SubExp <$> I.Var <$> internaliseIdent var
+    Nothing     -> I.subExp <$> I.Var <$> internaliseIdent var
     Just substs ->
-      return $ I.TupLit (concatMap insertSubst substs) $ srclocOf var
+      return $ I.SubExps (concatMap insertSubst substs) $ srclocOf var
   where insertSubst (DirectSubst v)   = [I.Var v]
         insertSubst (ArraySubst c ks) = c : map I.Var ks
 
@@ -114,11 +114,11 @@ internaliseExp (E.Index cs var csidx idxs loc) = do
       c' <- mergeSubExpCerts (c:map I.Var cs')
       csidx' <- mkCerts vs
       let index v = I.Index (certify c' csidx') v idxs' loc
-          resultTupLit [] = I.TupLit [] loc
-          resultTupLit (a:as)
-            | E.arrayRank outtype == 0 = I.TupLit (a:as) loc
+          resultSubExps [] = I.SubExps [] loc
+          resultSubExps (a:as)
+            | E.arrayRank outtype == 0 = I.SubExps (a:as) loc
             | otherwise                = tuplit c' loc $ a:as
-      resultTupLit <$> letSubExps "idx" (map index vs)
+      resultSubExps <$> letSubExps "idx" (map index vs)
     Just [DirectSubst var'] -> do
       csidx' <- mkCerts [var']
       return $ I.Index (cs'++csidx') var' idxs' loc
@@ -129,14 +129,14 @@ internaliseExp (E.Index cs var csidx idxs loc) = do
 
 internaliseExp (E.TupLit es loc) = do
   ks <- tupsToIdentList es
-  return $ I.TupLit (map I.Var $ combCertExps ks) loc
+  return $ I.SubExps (map I.Var $ combCertExps ks) loc
 
 internaliseExp (E.ArrayLit [] et loc) =
   case internaliseType et of
     [et'] -> return $ arrayLit et'
     ets -> do
       es <- letSubExps "arr_elem" $ map arrayLit ets
-      return $ I.TupLit (given loc : es) loc
+      return $ I.SubExps (given loc : es) loc
   where arrayLit et' = I.ArrayLit [] (et' `annotateArrayShape` ([],loc)) loc
 
 internaliseExp (E.ArrayLit es rowtype loc) = do
@@ -191,7 +191,7 @@ internaliseExp (E.Apply fname args rettype loc) = do
 internaliseExp (E.LetPat pat e body loc) = do
   (c,ks) <- tupToIdentList e
   bindingPattern pat (certOrGiven loc c) (map I.identType ks) $ \pat' -> do
-    letBind pat' $ I.TupLit (map I.Var ks) loc
+    letBind pat' $ I.SubExps (map I.Var ks) loc
     internaliseExp body
 
 internaliseExp (E.DoLoop mergepat mergeexp i bound loopbody letbody _) = do
@@ -220,7 +220,7 @@ internaliseExp (E.LetWith cs name src idxcs idxs ve body loc) = do
   mapM_ comb $ zip3 dsts srcs vnames
   bindingPattern (E.Id name) (certOrGiven loc c)
                              (map I.identType dsts) $ \pat' -> do
-    letBind pat' $ I.TupLit (map I.Var dsts) loc
+    letBind pat' $ I.SubExps (map I.Var dsts) loc
     internaliseExp body
 
 internaliseExp (E.Replicate ne ve loc) = do
@@ -229,24 +229,24 @@ internaliseExp (E.Replicate ne ve loc) = do
   case ves of
     [ve'] -> return $ I.Replicate ne' (I.Var ve') loc
     _ -> do reps <- letSubExps "v" [I.Replicate ne' (I.Var ve') loc | ve' <- ves ]
-            return $ I.TupLit (given loc : reps) loc
+            return $ I.SubExps (given loc : reps) loc
 
 internaliseExp (E.Size _ i e loc) = do
   (_,ks) <- tupToIdentList e
   -- XXX: Throwing away certificates?
   case ks of
-    (k:_) -> return $ I.SubExp $ I.arraySize i $ I.identType k
-    _     -> return $ I.SubExp (I.Constant (I.BasicVal $ I.IntVal 0) loc) -- Will this ever happen?
+    (k:_) -> return $ I.subExp $ I.arraySize i $ I.identType k
+    _     -> return $ I.subExp (I.Constant (I.BasicVal $ I.IntVal 0) loc) -- Will this ever happen?
 
 internaliseExp (E.Unzip e _ _) = do
   (_,ks) <- tupToIdentList e
-  return $ I.TupLit (map I.Var ks) $ srclocOf e
+  return $ I.SubExps (map I.Var ks) $ srclocOf e
 
 internaliseExp (E.Zip es loc) = do
   lst <- tupsToIdentList (map fst es)
   let (cs1, names) = splitCertExps lst
   case names of
-    [] -> return $ I.TupLit [] loc
+    [] -> return $ I.SubExps [] loc
     _ -> do
       let namevs = map I.Var names
           rows e = arraySize 0 $ I.subExpType e
@@ -301,7 +301,7 @@ internaliseExp (E.Split cs nexp arrexp loc) = do
               _   -> (cert : map (I.Var . fst) partnames) ++
                      (cert : map (I.Var . snd) partnames)
   zipWithM_ combsplit arrs partnames
-  return $ I.TupLit els loc
+  return $ I.SubExps els loc
 
 internaliseExp (E.Concat cs x y loc) = do
   (xc,xs) <- tupToIdentList x
@@ -367,9 +367,7 @@ internaliseExp (E.Redomap lam1 lam2 ne arrs loc) = do
 -- The "interesting" cases are over, now it's mostly boilerplate.
 
 internaliseExp (E.Literal v loc) =
-  return $ case internaliseValue v of
-             [v'] -> I.SubExp $ I.Constant v' loc
-             vs   -> I.TupLit (map (`I.Constant` loc) vs) loc
+  return $ I.SubExps (map (`I.Constant` loc) $ internaliseValue v) loc
 
 internaliseExp (E.If ce te fe t loc) = do
   ce' <- letSubExp "cond" =<< internaliseExp ce
@@ -408,7 +406,7 @@ internaliseExp (E.Copy e loc) = do
   case vs of
     [v] -> return $ I.Copy (I.Var v) loc
     _    -> do ses <- letSubExps "copy_res" [I.Copy (I.Var v) loc | v <- vs]
-               return $ I.TupLit ses loc
+               return $ I.SubExps ses loc
 
 internaliseExp (E.Conjoin es loc) = do
   es' <- letSubExps "conjoin_arg" =<< mapM internaliseExp es
@@ -420,7 +418,7 @@ tupToIdentList e = do
   case I.typeOf e' of
     [] -> return (Nothing, [])
     [t] -> case e' of
-                  I.SubExp (I.Var var) ->
+                  I.SubExps [I.Var var] _ ->
                     return (Nothing, [var]) -- Just to avoid too many spurious bindings.
                   _ -> do
                     name <- fst <$> newVar loc "val" t
@@ -484,9 +482,9 @@ internaliseOperation s cs e loc op = do
   return $ tuplit cs'' loc es
 
 tuplit :: Maybe I.Ident -> SrcLoc -> [I.SubExp] -> I.Exp
-tuplit _ _ [e] = SubExp e
-tuplit Nothing loc es = I.TupLit (given loc:es) loc
-tuplit (Just c) loc es = I.TupLit (I.Var c:es) loc
+tuplit _ _ [e] = subExp e
+tuplit Nothing loc es = I.SubExps (given loc:es) loc
+tuplit (Just c) loc es = I.SubExps (I.Var c:es) loc
 
 -- Name suggested by Spectrum.
 given :: SrcLoc -> SubExp
@@ -504,7 +502,7 @@ certifySOAC c e =
     [_] -> return e
     ts  -> do (ks,vs) <- unzip <$> mapM (newVar loc "soac") ts
               letBind ks e
-              return $ I.TupLit (I.Var c:vs) loc
+              return $ I.SubExps (I.Var c:vs) loc
   where loc = srclocOf e
 
 boundsChecks :: [I.Ident] -> [I.SubExp] -> InternaliseM I.Certificates

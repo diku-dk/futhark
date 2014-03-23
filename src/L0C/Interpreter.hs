@@ -264,10 +264,7 @@ evalBody (Result _ es _) =
 
 evalExp :: Exp -> L0M [Value]
 
-evalExp (SubExp se) =
-  single <$> evalSubExp se
-
-evalExp (TupLit es _) =
+evalExp (SubExps es _) =
   mapM evalSubExp es
 
 evalExp (ArrayLit es rt _) =
@@ -521,7 +518,7 @@ checkPatSizes = mapM_ $ uncurry checkSize
                                   intercalate "," (map ppValue valshape) ++ "]."
 
         ppDim (Constant v _) _ = ppValue v
-        ppDim e              v = ppExp (SubExp e) ++ "=" ++ ppValue v
+        ppDim e              v = ppExp (subExp e) ++ "=" ++ ppValue v
 
 checkReturnShapes :: SrcLoc -> [ConstType] -> [Value] -> L0M ()
 checkReturnShapes loc = zipWithM_ checkShape
@@ -537,4 +534,4 @@ checkReturnShapes loc = zipWithM_ checkShape
                                   intercalate "," (map ppValue valshape) ++ "]."
 
         ppDim (Constant v _) _ = ppValue v
-        ppDim e              v = ppExp (SubExp e) ++ "=" ++ ppValue v
+        ppDim e              v = ppExp (subExp e) ++ "=" ++ ppValue v

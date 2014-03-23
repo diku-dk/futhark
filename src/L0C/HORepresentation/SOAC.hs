@@ -99,7 +99,7 @@ instance Located InputArray where
   locOf (Iota e) = locOf e
 
 inputArrayToExp :: InputArray -> Exp
-inputArrayToExp (Var k)  = SubExp $ L0.Var k
+inputArrayToExp (Var k)  = subExp $ L0.Var k
 inputArrayToExp (Iota e) = L0.Iota e $ srclocOf e
 
 -- | One array input to a SOAC - a SOAC may have multiple inputs, but
@@ -176,12 +176,12 @@ inputsToSubExps is = mapM (inputToExp' $ dimSizes is) is
           return (sizes, d, ia')
 
         transform (sizes, d, ia) (ReshapeOuter cs shape) = do
-          shape' <- letSubExps "shape" $ reshapeOuter (map SubExp shape) 1 ia
+          let shape' = reshapeOuter shape 1 ia
           ia' <- letSubExp "reshape" $ L0.Reshape cs shape' ia $ srclocOf ia
           return (sizes, d, ia')
 
         transform (sizes, d, ia) (ReshapeInner cs shape) = do
-          shape' <- letSubExps "shape" $ reshapeInner (map SubExp shape) 1 ia
+          let shape' = reshapeInner shape 1 ia
           ia' <- letSubExp "reshape" $ L0.Reshape cs shape' ia $ srclocOf ia
           return (sizes, d, ia')
 

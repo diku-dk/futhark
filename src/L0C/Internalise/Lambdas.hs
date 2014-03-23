@@ -63,7 +63,7 @@ internaliseLambdaBody internaliseBody body = do
     -- lambda return type).
     let (certs,vals) = partition ((==I.Basic I.Cert) . subExpType) es
     insertBindings $ do
-      certs' <- letExps "lambda_cert" $ map I.SubExp certs
+      certs' <- letExps "lambda_cert" $ map I.subExp certs
       return $ I.Result (cs++certs') vals loc
   where loc = srclocOf body
 

@@ -58,48 +58,48 @@ transformExp :: Exp -> Binder Exp
 -- rest.  If the input array is empty, we simply return an empty
 -- output array.
 transformExp mape@(Map cs fun arrs loc) = do
-  inarrs <- letExps "inarr" $ map SubExp arrs
+  inarrs <- letExps "inarr" $ map subExp arrs
   (i, iv) <- newVar loc "i" $ Basic Int
   resarr <- resultArray (typeOf mape) loc
   outarr <- forM (map subExpType resarr) $ \t ->
             newIdent "map_outarr" t loc
   loopbody <- runBinder $ do
     x <- bodyBind =<< transformLambda fun (index cs inarrs iv)
-    dests <- letwith cs outarr (pexp iv) $ map SubExp x
+    dests <- letwith cs outarr (pexp iv) $ map subExp x
     return $ Result [] (map Var dests) loc
   loopBind (zip outarr resarr) i (isize inarrs) loopbody
-  return $ TupLit (map Var outarr) loc
+  return $ SubExps (map Var outarr) loc
 
 transformExp (Reduce cs fun args loc) = do
   (_, (acc, initacc), (i, iv)) <- newFold loc arrexps accexps
-  arrvs <- mapM (letExp "reduce_arr" . SubExp) arrexps
+  arrvs <- mapM (letExp "reduce_arr" . subExp) arrexps
   loopbody <- insertBindings $ transformLambda fun $
-              map (SubExp . Var) acc ++ index cs arrvs iv
+              map (subExp . Var) acc ++ index cs arrvs iv
   loopBind (zip acc initacc) i (isize arrvs) loopbody
-  return $ TupLit (map Var acc) loc
+  return $ SubExps (map Var acc) loc
   where (accexps, arrexps) = unzip args
 
 transformExp (Scan cs fun args loc) = do
   ((arr, initarr), (acc, initacc), (i, iv)) <- newFold loc arrexps accexps
   loopbody <- insertBindings $ do
     x <- bodyBind =<<
-         transformLambda fun (map (SubExp . Var) acc ++ index cs arr iv)
-    dests <- letwith cs arr (pexp iv) $ map SubExp x
+         transformLambda fun (map (subExp . Var) acc ++ index cs arr iv)
+    dests <- letwith cs arr (pexp iv) $ map subExp x
     irows <- letSubExps "row" $ index cs dests iv
     rowcopies <- letExps "copy" [ Copy irow loc | irow <- irows ]
     return $ Result [] (map Var $ rowcopies ++ dests) loc
   loopBind (zip (acc ++ arr) (initacc ++ initarr)) i (isize arr) loopbody
-  return $ TupLit (map Var arr) loc
+  return $ SubExps (map Var arr) loc
   where (accexps, arrexps) = unzip args
 
 transformExp (Filter cs fun arrexps outersize loc) = do
-  arr <- letExps "arr" $ map SubExp arrexps
+  arr <- letExps "arr" $ map subExp arrexps
   let nv = size arrexps
       rowtypes = map (rowType . subExpType) arrexps
   (xs, _) <- unzip <$> mapM (newVar loc "x") rowtypes
   (i, iv) <- newVar loc "i" $ Basic Int
   test <- insertBindings $ do
-   [check] <- bodyBind =<< transformLambda fun (map (SubExp . Var) xs) -- XXX
+   [check] <- bodyBind =<< transformLambda fun (map (subExp . Var) xs) -- XXX
    res <- letSubExp "res" $
           If check (Result [] [intval 1] loc) (Result [] [intval 0] loc) [Basic Int] loc
    return $ Result [] [res] loc
@@ -125,7 +125,7 @@ transformExp (Filter cs fun arrexps outersize loc) = do
         indexinm1 = indexia $ sub1 $ pexp iv
         update = do
           dest <- letwith cs res (sub1 indexi) indexin
-          return $ TupLit (map Var dest) loc
+          return $ SubExps (map Var dest) loc
     eBody $
       eIf (eIf (pure $ BinOp Equal iv (intval 0) (Basic Bool) loc)
                (eBody $ eBinOp Equal indexi (pexp $ intval 0) (Basic Bool) loc)
@@ -133,16 +133,16 @@ transformExp (Filter cs fun arrexps outersize loc) = do
                [Basic Bool] loc)
           (pure resv) (eBody update) (bodyType resv) loc
   loopBind (zip res resinit) i nv loopbody
-  return $ TupLit (map Var res) loc
+  return $ SubExps (map Var res) loc
   where intval x = Constant (BasicVal $ IntVal x) loc
 
 transformExp (Redomap cs _ innerfun accexps arrexps loc) = do
   (_, (acc, initacc), (i, iv)) <- newFold loc arrexps accexps
-  arrvs <- mapM (letExp "redomap_arr" . SubExp) arrexps
+  arrvs <- mapM (letExp "redomap_arr" . subExp) arrexps
   loopbody <- insertBindings $ transformLambda innerfun $
-              map (SubExp . Var) acc ++ index cs arrvs iv
+              map (subExp . Var) acc ++ index cs arrvs iv
   loopBind (zip acc initacc) i (isize arrvs) loopbody
-  return $ TupLit (map Var acc) loc
+  return $ SubExps (map Var acc) loc
 
 transformExp e = mapExpM transform e
 
@@ -166,7 +166,7 @@ newFold loc arrexps accexps = do
 -- not unique or a basic type, otherwise just returns @e@ itself.
 maybeCopy :: SubExp -> Exp
 maybeCopy e
-  | unique (subExpType e) || basicType (subExpType e) = SubExp e
+  | unique (subExpType e) || basicType (subExpType e) = subExp e
   | otherwise = Copy e $ srclocOf e
 
 index :: Certificates -> [Ident] -> SubExp -> [Exp]
@@ -202,7 +202,7 @@ size (v:_)
 size _ = Constant (BasicVal $ IntVal 0) noLoc
 
 pexp :: Applicative f => SubExp -> f Exp
-pexp = pure . SubExp
+pexp = pure . subExp
 
 transformLambda :: Lambda -> [Exp] -> Binder Body
 transformLambda (Lambda params body _ _) args = do

@@ -44,7 +44,7 @@ applyTransform (ORearrange cs perm) v =
 applyTransform (OReshape cs shape) v =
   return $ Reshape cs shape v $ srclocOf v
 applyTransform (OReshapeOuter cs shape) v = do
-  shapes <- letSubExps "shape" $ reshapeOuter (map SubExp shape) 1 v
+  let shapes = reshapeOuter shape 1 v
   return $ Reshape cs shapes v $ srclocOf v
 
 outputTransformToInputTransform :: OutputTransform -> SOAC.InputTransform

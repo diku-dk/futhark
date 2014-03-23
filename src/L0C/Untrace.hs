@@ -25,7 +25,7 @@ untraceBody = mapBody untrace
                   , mapOnLambda = return . untraceLambda
                   }
         untraceExp (Apply fname [(e,_)] _ _)
-          | "trace" <- nameToString fname = SubExp e
+          | "trace" <- nameToString fname = subExp e
         untraceExp e = mapExp untrace e
 
 

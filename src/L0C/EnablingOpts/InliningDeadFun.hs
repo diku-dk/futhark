@@ -139,7 +139,7 @@ inlineInBody :: [FunDec] -> Body -> Body
 inlineInBody inlcallees (LetPat pat (Apply fname args rtp _) letbody loc) =
   let continue e =
         LetPat pat e (inlineInBody inlcallees letbody) loc
-      continue' _ es = continue $ TupLit es loc
+      continue' _ es = continue $ SubExps es loc
   in  case filter (\(nm,_,_,_,_)->fname==nm) inlcallees of
         [] -> continue $ Apply fname args rtp loc
         (_,_,fargs,body,_):_ ->
@@ -152,7 +152,7 @@ inlineInBody inlcallees (LetPat pat (Apply fname args rtp _) letbody loc) =
               fargnm  = identName   farg
               fargpos = identSrcLoc farg
               farg' = Ident fargnm fargutp fargpos
-          in  LetPat [farg'] (SubExp aarg) body ppos
+          in  LetPat [farg'] (subExp aarg) body ppos
 inlineInBody inlcallees b = mapBody (inliner inlcallees) b
 
 inliner :: Monad m => [FunDec] -> Mapper m

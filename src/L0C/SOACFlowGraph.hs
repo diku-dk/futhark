@@ -153,8 +153,8 @@ flowForBody (DoLoop merge _ boundexp loopbody body _)
                    used <- HS.toList
                            $ mconcat (freeNamesInBody loopbody :
                                       map freeNamesInExp
-                                      (SubExp boundexp :
-                                      map (SubExp . snd) merge))
+                                      (subExp boundexp :
+                                      map (subExp . snd) merge))
                           `HS.difference` HS.fromList names
                  ]
          , soacBodyInfo = execWriter $ flowForBody loopbody

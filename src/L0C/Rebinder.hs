@@ -83,7 +83,7 @@ patNameSet :: [Ident] -> HS.HashSet VName
 patNameSet = HS.fromList . map identName
 
 freeInType :: Type -> HS.HashSet VName
-freeInType = mconcat . map (freeNamesInExp . SubExp) . arrayDims
+freeInType = mconcat . map (freeNamesInExp . subExp) . arrayDims
 
 data Need = Need { needBindings :: NeedSet
                  , freeInBound  :: HS.HashSet VName
@@ -208,8 +208,8 @@ addBindings dupes needs =
              LetWith cs dest src idxs ve inner $ srclocOf inner)
 
 score :: HM.HashMap VName Int -> Exp -> (Int, Exp)
-score m (SubExp (Var k)) =
-  (fromMaybe (-1) $ HM.lookup (identName k) m, SubExp $ Var k)
+score m (SubExps [Var k] _) =
+  (fromMaybe (-1) $ HM.lookup (identName k) m, subExp $ Var k)
 score m e =
   (HS.foldl' f 0 $ freeNamesInExp e, e)
   where f x k = case HM.lookup k m of
@@ -240,12 +240,12 @@ distances m need = HM.fromList [ (k, d+cost) | k <- HS.toList outs ]
             LetWithBind _ dest src idxs ve ->
               (HS.singleton $ identName dest,
                identName src `HS.insert`
-               mconcat (map (freeNamesInExp . SubExp) $ ve:idxs),
+               mconcat (map (freeNamesInExp . subExp) $ ve:idxs),
                1)
             LoopBind merge _ bound loopbody ->
               (patNameSet $ map fst merge,
                mconcat $ freeNamesInBody loopbody : map freeNamesInExp
-               (SubExp bound : map (SubExp . snd) merge),
+               (subExp bound : map (subExp . snd) merge),
                1)
         f x k = case HM.lookup k m of
                   Just y  -> max x y
@@ -341,9 +341,8 @@ isNotSafe _ = not . safeBnd
 
 isNotCheap :: BlockPred
 isNotCheap _ = not . cheapBnd
-  where cheap (SubExp _)   = True
-        cheap (BinOp {})   = True
-        cheap (TupLit {})  = True
+  where cheap (BinOp {})   = True
+        cheap (SubExps {}) = True
         cheap (Not {})     = True
         cheap (Negate {})  = True
         cheap _            = False

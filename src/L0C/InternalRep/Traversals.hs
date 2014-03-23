@@ -116,10 +116,8 @@ mapBody m = runIdentity . mapBodyM m
 -- the expression itself, and the mapping does not descend recursively
 -- into subexpressions.  The mapping is done left-to-right.
 mapExpM :: (Applicative m, Monad m) => Mapper m -> Exp -> m Exp
-mapExpM tv (SubExp e) =
-  pure SubExp <*> mapOnSubExp tv e
-mapExpM tv (TupLit els loc) =
-  pure TupLit <*> mapM (mapOnSubExp tv) els <*> pure loc
+mapExpM tv (SubExps els loc) =
+  pure SubExps <*> mapM (mapOnSubExp tv) els <*> pure loc
 mapExpM tv (ArrayLit els elt loc) =
   pure ArrayLit <*> mapM (mapOnSubExp tv) els <*> mapOnType tv elt <*> pure loc
 mapExpM tv (BinOp bop x y t loc) =

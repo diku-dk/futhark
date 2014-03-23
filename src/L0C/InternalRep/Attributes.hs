@@ -12,7 +12,7 @@ module L0C.InternalRep.Attributes
   , toParam
   , fromParam
 
-  -- * Queries on expressions
+  -- * Operations on expressions and bodies
   , bodyResult
   , setBodyResult
   , mapResult
@@ -27,6 +27,7 @@ module L0C.InternalRep.Attributes
   , consumedInBody
   , consumedInExp
   , safeExp
+  , subExp
 
   -- * Queries on lambdas
   , freeInLambda
@@ -507,15 +508,14 @@ shapeExps = shapeDims . arrayShape . subExpType
 
 -- | @reshapeOuter shape n src@ returns a 'Reshape' expression that
 -- replaces the outer @n@ dimensions of @src@ with @shape@.
-reshapeOuter :: [Exp] -> Int -> SubExp -> [Exp]
-reshapeOuter shape n src = shape ++ drop n (map SubExp $ shapeExps src)
+reshapeOuter :: [SubExp] -> Int -> SubExp -> [SubExp]
+reshapeOuter shape n src = shape ++ drop n (shapeExps src)
 
 -- | @reshapeInner shape n src@ returns a 'Reshape' expression that
 -- replaces the inner @m-n@ dimensions (where @m@ is the rank of
 -- @src@) of @src@ with @shape@.
-reshapeInner :: [Exp] -> Int -> SubExp -> [Exp]
-reshapeInner shape n src = take n (map SubExp $ shapeExps src) ++ shape
-
+reshapeInner :: [SubExp] -> Int -> SubExp -> [SubExp]
+reshapeInner shape n src = take n (shapeExps src) ++ shape
 
 varType :: Ident -> Type
 varType ident = identType ident `changeAliases` HS.insert (identName ident)
@@ -533,8 +533,7 @@ bodyType (Result _ ses _) = map subExpType ses
 -- | The type of an L0 term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
 typeOf :: Exp -> [Type]
-typeOf (SubExp e) = [subExpType e]
-typeOf (TupLit vs _) = map subExpType vs
+typeOf (SubExps vs _) = map subExpType vs
 typeOf (ArrayLit es t loc) =
   [arrayOf t (Shape [n]) $ mconcat $ map (uniqueness . subExpType) es]
   where n = Constant (BasicVal $ IntVal $ length es) loc
@@ -792,6 +791,10 @@ safeExp (BinOp Mod _ _ _ _) = False
 safeExp (BinOp Pow _ _ _ _) = False
 safeExp _ = False
 
+-- | Convert a 'SubExp' to an 'Exp', using the 'SubExps' constructor.
+subExp :: SubExp -> Exp
+subExp e = SubExps [e] $ srclocOf e
+
 -- | Return the set of identifiers that are free in the given lambda,
 -- including shape annotations in the parameters.
 freeInLambda :: Lambda -> HS.HashSet Ident
@@ -801,7 +804,7 @@ freeInLambda (Lambda params body rettype _) =
         inParams = mconcat $ map freeInParam params
         freeInParam = freeInType . identType
         inBody = HS.filter ((`notElem` paramnames) . identName) $ freeInBody body
-        freeInType = mconcat . map (freeInExp . SubExp) . shapeDims . arrayShape
+        freeInType = mconcat . map (freeInExp . subExp) . shapeDims . arrayShape
         paramnames = map identName params
 
 -- | As 'freeInLambda', but returns the raw names rather than

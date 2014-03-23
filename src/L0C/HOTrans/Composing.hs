@@ -74,7 +74,7 @@ fuseMaps lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
   where lam2' =
           lam2 { lambdaParams = lam2redparams ++ HM.keys inputmap
                , lambdaBody =
-                 let bindLambda _ es = LetPat pat (TupLit es loc)
+                 let bindLambda _ es = LetPat pat (SubExps es loc)
                                        (makeCopiesInner (lambdaBody lam2)) loc
                  in makeCopies $ mapResult bindLambda $ lambdaBody lam1
                }
@@ -150,7 +150,7 @@ fuseFilterInto lam1 inp1 out1 lam2 inp2 vnames falsebranch = (lam2', HM.elems in
                          loc)
                  (Result cs (map Var residents) loc)
                  loc
-        lam1tuple = TupLit (map (Var . fromParam) $ lambdaParams lam1) loc
+        lam1tuple = SubExps (map (Var . fromParam) $ lambdaParams lam1) loc
         bindins = LetPat pat lam1tuple branch loc
 
         (lam2redparams, pat, inputmap, makeCopies, makeCopiesInner) =
@@ -216,7 +216,7 @@ removeDuplicateInputs = fst . HM.foldlWithKey' comb ((HM.empty, id), M.empty)
             Just par' -> ((parmap, inner . forward par par'),
                           arrmap)
         forward to from e = LetPat [fromParam to]
-                            (SubExp $ Var $ fromParam from) e $ srclocOf e
+                            (subExp $ Var $ fromParam from) e $ srclocOf e
 
 {-
 

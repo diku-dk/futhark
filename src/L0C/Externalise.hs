@@ -50,8 +50,7 @@ externaliseBody (I.Result _ es loc) =
   externaliseSubExps es loc
 
 externaliseExp :: I.Exp -> E.Exp
-externaliseExp (SubExp e)        = externaliseSubExp e
-externaliseExp (I.TupLit es loc) = externaliseSubExps es loc
+externaliseExp (I.SubExps es loc) = externaliseSubExps es loc
 externaliseExp (I.ArrayLit [] et loc) =
   E.Copy (E.Literal (E.arrayVal [] $ E.toDecl $ externaliseType et) loc) loc
 externaliseExp (I.ArrayLit es et loc) =

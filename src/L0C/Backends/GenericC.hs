@@ -447,7 +447,7 @@ compileBody place (DoLoop merge loopvar boundexp loopbody letbody loc) = do
   mergevarR <- new $ "loop_mergevar_read"
   mergevarW <- new $ "loop_mergevar_write"
   let bindings = compilePattern mergepat (varExp mergevarR)
-  mergeexp' <- compileExp (varExp mergevarR) $ TupLit mergeexp loc
+  mergeexp' <- compileExp (varExp mergevarR) $ SubExps mergeexp loc
   mergetype <- bodyCType loopbody
   boundexp' <- compileSubExp (varExp bound) boundexp
   loopbody' <- binding ((identName loopvar, varExp loopvar') : bindings) $
@@ -467,7 +467,7 @@ compileBody place (DoLoop merge loopvar boundexp loopbody letbody loc) = do
                    }|]
 
 compileBody place (Result _ [e] _)  = compileSubExp place e
-compileBody place (Result _ es loc) = compileExp place $ TupLit es loc
+compileBody place (Result _ es loc) = compileExp place $ SubExps es loc
 
 compileExp :: C.Exp -> Exp -> CompilerM [C.BlockItem]
 
@@ -479,18 +479,15 @@ compileExp target e = do
 
 compileExp' :: C.Exp -> Exp -> CompilerM [C.BlockItem]
 
-compileExp' place (SubExp e) =
+compileExp' place (SubExps [e] _) =
   compileSubExp place e
 
-compileExp' place (TupLit [e] _) =
-  compileSubExp place e
-
-compileExp' place (TupLit es _) = do
+compileExp' place (SubExps es _) = do
   liftM concat . forM (zip es [(0::Int)..]) $ \(e, i) -> do
     var <- new $ "TupVal_" ++ show i
     e' <- compileSubExp (varExp var) e
     let field = tupleField i
-    et <- expCType $ SubExp e
+    et <- expCType $ subExp e
     return $ stm [C.cstm|{
                        $ty:et $id:var;
                        $items:e';
@@ -560,8 +557,8 @@ compileExp' place (BinOp bop e1 e2 _ _) = do
   e2_dest <- new "binop_x2"
   e1' <- compileSubExp (varExp e1_dest) e1
   e2' <- compileSubExp (varExp e2_dest) e2
-  e1t <- expCType $ SubExp e1
-  e2t <- expCType $ SubExp e2
+  e1t <- expCType $ subExp e1
+  e2t <- expCType $ subExp e2
   return $ stm [C.cstm|{
                      $ty:e1t $id:e1_dest;
                      $ty:e2t $id:e2_dest;
@@ -612,7 +609,7 @@ compileExp' place (Apply fname args _ _) = do
   (vars, args') <- liftM unzip . forM args $ \(arg, _) -> do
                      var <- new "apply_arg"
                      arg' <- compileSubExp (varExp var) arg
-                     argtype <- expCType $ SubExp arg
+                     argtype <- expCType $ subExp arg
                      return (([C.cdecl|$ty:argtype $id:var;|], varExp var), arg')
   let (vardecls, varexps) = unzip vars
   return $ stm [C.cstm|{
@@ -665,8 +662,8 @@ compileExp' place (Replicate ne ve pos) = do
   let nident = Ident nv (Basic Int) pos
       vident = Ident vv (subExpType ve) pos
       rident = Ident rr (arrayOf (subExpType ve) (Shape [Var nident]) Unique) pos
-      nlet body = LetPat [nident] (SubExp ne) body pos
-      vlet body = LetPat [vident] (SubExp ve) body pos
+      nlet body = LetPat [nident] (subExp ne) body pos
+      vlet body = LetPat [vident] (subExp ve) body pos
       rlet body = LetPat [rident] (Replicate (Var nident) (Var vident) pos) body pos
   compileBody place $ nlet $ vlet $ rlet $ Result [] [Var rident] pos
 

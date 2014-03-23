@@ -14,7 +14,7 @@ module L0C.Tools
   , eCopy
   , eAssert
   , eDoLoop
-  , eTupLit
+  , eSubExps
   , eBody
 
   , binOpLambda
@@ -51,8 +51,7 @@ import L0C.MonadFreshNames
 
 letSubExp :: MonadBinder m =>
              String -> Exp -> m SubExp
-letSubExp _ (SubExp se)     = return se
-letSubExp _ (TupLit [se] _) = return se
+letSubExp _ (SubExps [se] _) = return se
 letSubExp desc e =
   case typeOf e of
     [_] -> Var <$> letExp desc e
@@ -60,8 +59,7 @@ letSubExp desc e =
 
 letExp :: MonadBinder m =>
           String -> Exp -> m Ident
-letExp _ (SubExp (Var v))   = return v
-letExp _ (TupLit [Var v] _) = return v
+letExp _ (SubExps [Var v] _) = return v
 letExp desc e =
   case typeOf e of
     [t] -> do v <- fst <$> newVar (srclocOf e) desc t
@@ -82,9 +80,8 @@ varSubExp (Var v) = Just v
 varSubExp _       = Nothing
 
 letTupExp :: MonadBinder m => String -> Exp -> m [Ident]
-letTupExp _ (TupLit es _)
+letTupExp _ (SubExps es _)
   | Just vs <- mapM varSubExp es = return vs
-letTupExp _ (SubExp (Var v)) = return [v]
 letTupExp name e = do
   let ts  = typeOf e
       loc = srclocOf e
@@ -140,11 +137,11 @@ eDoLoop pat i boundexp loopbody body loc = do
   return $ DoLoop (zip mergepat mergeexps') i boundexp' loopbody' body' loc
   where (mergepat, mergeexps) = unzip pat
 
-eTupLit :: MonadBinder m =>
+eSubExps :: MonadBinder m =>
            [m Exp] -> SrcLoc -> m Exp
-eTupLit es loc = do
+eSubExps es loc = do
   es' <- letSubExps "tuplit_elems" =<< sequence es
-  return $ TupLit es' loc
+  return $ SubExps es' loc
 
 eBody :: MonadBinder m =>
          m Exp -> m Body

@@ -118,8 +118,8 @@ allEqual comp_shape = do
   belm <- newIdent "belm" (Basic Bool) loc
   nelm <- newIdent "nelm" (Basic Int) loc
   checkFun <- makeLambda (map toParam [bacc,nacc,belm,nelm]) $ eBody $
-    eTupLit [ pure $ BinOp LogAnd (Var bacc) (Var belm) (Basic Bool) loc
-            , pure $ SubExp $ Var nelm ] loc
+    eSubExps [ pure $ BinOp LogAnd (Var bacc) (Var belm) (Basic Bool) loc
+             , pure $ subExp $ Var nelm ] loc
   comp_shape_rot1 <- letExp "comp_shape_rot1" $ Rotate [] 1 (Var comp_shape) loc
   comp <- letExp "map_size_checks" $
           Map [] compFun [Var comp_shape, Var comp_shape_rot1] loc

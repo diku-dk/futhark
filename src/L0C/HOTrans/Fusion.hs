@@ -364,7 +364,7 @@ fusionGatherBody fres (LetPat pat e body _)
           -- a reduce always starts a new kernel
           let nes = map fst args
           bres  <- bindingFamily pat $ fusionGatherBody fres body
-          bres' <- fusionGatherExp bres $ TupLit nes loc
+          bres' <- fusionGatherExp bres $ SubExps nes loc
           (_, blres) <- fusionGatherLam (HS.empty, bres') lam
           addNewKer blres (pat, soac)
 
@@ -372,7 +372,7 @@ fusionGatherBody fres (LetPat pat e body _)
           -- a redomap always starts a new kernel
           (_, lres)  <- foldM fusionGatherLam (HS.empty, fres) [outer_red, inner_red]
           bres  <- bindingFamily pat $ fusionGatherBody lres body
-          bres' <- fusionGatherExp bres $ TupLit ne loc
+          bres' <- fusionGatherExp bres $ SubExps ne loc
           addNewKer bres' (pat, soac)
 
         SOAC.Scan _ lam args loc -> do
@@ -381,13 +381,13 @@ fusionGatherBody fres (LetPat pat e body _)
           let nes = map fst args
           bres  <- bindingFamily pat $ fusionGatherBody fres body
           (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
-          blres' <- fusionGatherExp blres $ TupLit nes loc
+          blres' <- fusionGatherExp blres $ SubExps nes loc
           greedyFuse False used_lam blres' (pat, soac)
 
 fusionGatherBody _ (LetPat _ e _ loc)
   | Left (SOAC.InvalidArrayInput inpe) <- SOAC.fromExp e =
     badFusionGM $ EnablingOptError loc
-                  ("In Fusion.hs, "++ppExp (SubExp inpe)++" is not valid array input.")
+                  ("In Fusion.hs, "++ppExp (subExp inpe)++" is not valid array input.")
 
 fusionGatherBody fres (LetPat [v] e body _)
   | Just (src,trns) <- SOAC.transformFromExp e =
@@ -396,7 +396,7 @@ fusionGatherBody fres (LetPat [v] e body _)
 fusionGatherBody fres (LetPat pat (Replicate n el loc) body _) = do
   bres <- bindingFamily pat $ fusionGatherBody fres body
   -- Implemented inplace: gets the variables in `n` and `el`
-  (used_set, bres') <- getUnfusableSet loc bres [SubExp n,SubExp el]
+  (used_set, bres') <- getUnfusableSet loc bres [subExp n, subExp el]
   repl_idnm <- newVName "repl_x"
   let repl_id = Ident repl_idnm (Basic Int) loc
       repl_lam = Lambda [toParam repl_id] (Result [] [el] loc)
@@ -405,7 +405,7 @@ fusionGatherBody fres (LetPat pat (Replicate n el loc) body _) = do
   greedyFuse True used_set bres' (pat, soac_repl)
 
 fusionGatherBody fres (LetPat pat e body _) = do
-    let pat_vars = map (SubExp . Var) pat
+    let pat_vars = map (subExp . Var) pat
     bres <- binding pat $ fusionGatherBody fres body
     foldM fusionGatherExp bres (e:pat_vars)
 

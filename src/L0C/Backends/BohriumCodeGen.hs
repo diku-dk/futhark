@@ -59,7 +59,7 @@ compileSOACtoBohrium target e
 compileInput :: C.Exp -> C.Exp -> SubExp -> CompilerM [C.BlockItem]
 
 compileInput place shape e = do
-  (arr, e') <- compileExpNewVar $ SubExp e
+  (arr, e') <- compileExpNewVar $ subExp e
   stride <- new "stride"
   let t = subExpType e
       d = arrayRank t

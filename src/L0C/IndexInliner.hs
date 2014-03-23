@@ -55,7 +55,7 @@ transformBodyM (LetPat pat e body loc) = do
               es <- transformExp env e
               case es of
                 Left e'   -> return e'
-                Right es' -> return $ TupLit es' loc
+                Right es' -> return $ SubExps es' loc
   f <$> (LetPat pat e' <$> transformBodyM body <*> pure loc)
 transformBodyM body = mapBodyM transform body
   where transform = identityMapper {
@@ -129,7 +129,7 @@ performArrayDelays pat e = do
         let loc = srclocOf fb
         runBinder $ do
           es <- bodyBind fb
-          return $ LetPat bnds (TupLit es loc) (Result [] [Var bnd] loc) loc
+          return $ LetPat bnds (SubExps es loc) (Result [] [Var bnd] loc) loc
   case performArrayDelay e of
     Nothing -> return emptyArrayIndexMap
     Just f ->
@@ -145,9 +145,8 @@ cheapExp :: Exp -> Bool
 cheapExp (BinOp {}) = True
 cheapExp (Not {}) = True
 cheapExp (Negate {}) = True
-cheapExp (TupLit {}) = True
+cheapExp (SubExps {}) = True
 cheapExp (Index {}) = True
-cheapExp (SubExp {}) = True
 cheapExp _ = False
 
 newtype InlinerM a = InlinerM (StateT (NameSource VName) (Reader ArrayIndexMap) a)
