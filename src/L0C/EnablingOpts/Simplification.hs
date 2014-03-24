@@ -19,6 +19,7 @@ import Control.Monad
 
 import Data.Array
 import Data.Bits
+import Data.Either
 import Data.Maybe
 import Data.Loc
 
@@ -101,24 +102,33 @@ liftIdentityMapping _ (LetBind pat (Map cs fun arrs loc)) =
                          t : rettype')
 liftIdentityMapping _ _ = Nothing
 
+-- | Remove all arguments to the map that are simply replicates.
+-- These can be turned into free variables instead.
 removeReplicateMapping :: SimplificationRule
-removeReplicateMapping look (LetBind pat (Map _ fun arrs _)) =
-  case mapM isReplicate arrs of
-    Just arrs'@((n,_):_) ->
-      -- 'n' is the size of the destination array.
-      let parameterBnds = [ LetBind [fromParam par] $ subExp e
-                            | (par, (_, e)) <- zip (lambdaParams fun) arrs' ]
-          (_, resultSubExps, resloc) = bodyResult $ lambdaBody fun
-          resultBnds = [ LetBind [v] $ Replicate n e resloc
-                           | (v, e) <- zip pat resultSubExps ]
-      in -- XXX: Throwing away certificates.
-         Just $ parameterBnds ++
-                bodyBindings (lambdaBody fun) ++
-                resultBnds
-    _ -> Nothing
-  where isReplicate (Var v)
-          | Just (Replicate n e _) <- look $ identName v = Just (n,e)
-        isReplicate _                                    = Nothing
+removeReplicateMapping look (LetBind pat (Map cs fun arrs loc))
+  | replicatesOrNot <- zipWith isReplicate (lambdaParams fun) arrs,
+    any isRight replicatesOrNot =
+  let (paramsAndArrs, parameterBnds) = partitionEithers replicatesOrNot
+      (params, arrs') = unzip paramsAndArrs
+      fun' = fun { lambdaParams = params }
+      -- Empty maps are not permitted, so if that would be the result,
+      -- turn the entire map into a replicate.
+      n = arraysSize 0 $ map subExpType arrs
+      (_, resultSubExps, resloc) = bodyResult $ lambdaBody fun
+      mapres = bodyBindings $ lambdaBody fun
+      mapbnds = case arrs' of
+                  [] -> mapres ++ [ LetBind [v] $ Replicate n e resloc
+                                    | (v,e) <- zip pat resultSubExps ]
+                  _  -> [LetBind pat $ Map cs fun' arrs' loc]
+  in Just $ parameterBnds ++ mapbnds
+  where isReplicate p (Var v)
+          | Just (Replicate _ e _) <- look $ identName v =
+          Right (LetBind [fromParam p] $ subExp e)
+        isReplicate p e =
+          Left  (p, e)
+
+        isRight (Right _) = True
+        isRight (Left  _) = False
 removeReplicateMapping _ _ = Nothing
 
 hoistLoopInvariantMergeVariables :: SimplificationRule
