@@ -58,6 +58,7 @@ simplificationRules = [ liftIdentityMapping
                       , hoistLoopInvariantMergeVariables
                       , letRule simplifyConstantRedomap
                       , letRule simplifyConstantReduce
+                      , letRule simplifyRearrange
                       , letRule simplifyRotate
                       , letRule simplifyBinOp
                       , letRule simplifyNot
@@ -185,6 +186,25 @@ simplifyConstantFoldFun lam accs =
                       Var v | identName v == identName p   -> Just acc
                             | identName v `HS.member` free -> Just res
                       _                                    -> Nothing
+
+simplifyRearrange :: LetSimplificationRule
+
+-- Handle identity permutation.
+simplifyRearrange _ (Rearrange _ perm e _)
+  | perm == [0..arrayRank (subExpType e) - 1] = Just $ subExp e
+
+-- If asked to rotate a constant, just do it.
+simplifyRearrange _ (Rearrange _ perm (Constant val _) loc) =
+  Just $ subExp $ Constant (permuteArray perm val) loc
+
+simplifyRearrange look (Rearrange cs perm (Var v) loc) =
+  case look $ identName v of
+    Just (Rearrange cs2 perm2 e _) ->
+      -- Rearranging a rearranging: compose the permutations.
+      Just $ Rearrange (cs++cs2) (perm `permuteCompose` perm2) e loc
+    _ -> Nothing
+
+simplifyRearrange _ _ = Nothing
 
 simplifyRotate :: LetSimplificationRule
 -- A zero-rotation is identity.
