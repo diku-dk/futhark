@@ -375,7 +375,11 @@ commonTransforms' inps =
 
 mapDepth :: MapNest -> Int
 mapDepth (MapNest.MapNest _ _ levels _ _) =
-  length (takeWhile MapNest.pureNest levels) + 1
+  length (takeWhile niceNest levels) + 1
+  where niceNest nest =
+          HS.null $ HS.fromList (MapNest.nestingParams nest)
+                    `HS.intersection`
+                    freeInBody (MapNest.nestingPostBody nest)
 
 pullRearrange :: SOACNest -> [OutputTransform] -> TryFusion (SOACNest, [OutputTransform])
 pullRearrange nest ots = do
