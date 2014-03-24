@@ -229,7 +229,7 @@ inputRank (Input ts ia) = foldl transformType (arrayRank $ inputArrayType ia) ts
         transformType rank (Rearrange _ _)        = rank
         transformType _    (Reshape _ shape)      = length shape
         transformType rank (ReshapeOuter _ shape) = rank - 1 + length shape
-        transformType rank (ReshapeInner _ shape) = 1 + length shape
+        transformType _    (ReshapeInner _ shape) = 1 + length shape
 
 -- | Return the types of a list of inputs.
 inputTypes :: [Input] -> [Type]
