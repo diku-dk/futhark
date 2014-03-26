@@ -266,11 +266,11 @@ runBinder m = do
 runBinder' :: MonadFreshNames m => Binder a -> m (a, Body -> Body)
 runBinder' m = do
   src <- getNameSource
-  let (x, f, src') = runBinderWithNameSource m src
+  let (x, bnds, src') = runBinderWithNameSource m src
   putNameSource src'
-  return (x, f)
+  return (x, flip insertBindings' bnds)
 
-runBinderWithNameSource :: Binder a -> VNameSource -> (a, Body -> Body, VNameSource)
+runBinderWithNameSource :: Binder a -> VNameSource -> (a, [Binding], VNameSource)
 runBinderWithNameSource (TransformM m) src =
   let ((x,bnds),src') = runState (runWriterT m) src
-  in (x, flip insertBindings' $ DL.toList bnds, src')
+  in (x, DL.toList bnds, src')

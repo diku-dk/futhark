@@ -7,8 +7,7 @@ module L0C.EnablingOpts.CopyCtPropFold
   where
 
 import Control.Applicative
-import Control.Monad.Reader
-import Control.Monad.Writer
+import Control.Monad.RWS
 
 import Data.List
 
@@ -22,6 +21,7 @@ import L0C.EnablingOpts.EnablingOptErrors
 import L0C.EnablingOpts.Simplification
 import qualified L0C.Interpreter as Interp
 import L0C.Tools
+import L0C.MonadFreshNames
 
 -----------------------------------------------------------------
 -----------------------------------------------------------------
@@ -62,10 +62,19 @@ instance Monoid CPropRes where
     CPropRes (c1 || c2)
   mempty = CPropRes False
 
-newtype CPropM a = CPropM (WriterT CPropRes (ReaderT CPropEnv (Either EnablingOptError)) a)
-    deriving (MonadWriter CPropRes,
-              MonadReader CPropEnv,
-              Monad, Applicative, Functor)
+newtype CPropM a = CPropM (RWST CPropEnv
+                                CPropRes
+                                VNameSource
+                                (Either EnablingOptError)
+                                a)
+  deriving (MonadReader CPropEnv,
+            MonadWriter CPropRes,
+            MonadState VNameSource,
+            Monad, Applicative, Functor)
+
+instance MonadFreshNames CPropM where
+  getNameSource = get
+  putNameSource = put
 
 -- | We changed part of the AST, and this is the result.  For
 -- convenience, use this instead of 'return'.
@@ -92,12 +101,11 @@ consuming idd m = do
 -- | The enabling optimizations run in this monad.  Note that it has no mutable
 -- state, but merely keeps track of current bindings in a 'TypeEnv'.
 -- The 'Either' monad is used for error handling.
-runCPropM :: CPropM a -> CPropEnv -> Either EnablingOptError (a, CPropRes)
-runCPropM  (CPropM a) = runReaderT (runWriterT a)
+runCPropM :: CPropM a -> CPropEnv -> VNameSource -> Either EnablingOptError (a, VNameSource, CPropRes)
+runCPropM  (CPropM a) = runRWST a
 
 badCPropM :: EnablingOptError -> CPropM a
-badCPropM = CPropM . lift . lift . Left
-
+badCPropM = CPropM . lift . Left
 
 -- | Bind a name as a common (non-merge) variable.
 bindVar :: CPropEnv -> (VName, CtOrId) -> CPropEnv
@@ -122,9 +130,10 @@ varLookup = do
 copyCtProp :: Prog -> Either EnablingOptError (Bool, Prog)
 copyCtProp prog = do
   let env = CopyPropEnv { envVtable = HM.empty, program = prog }
+      src = newNameSourceForProg prog
   -- res   <- runCPropM (mapM copyCtPropFun prog) env
   -- let (bs, rs) = unzip res
-  (rs, res) <- runCPropM (mapM copyCtPropFun $ progFunctions prog) env
+  (rs, _, res) <- runCPropM (mapM copyCtPropFun $ progFunctions prog) env src
   return (resSuccess res, Prog rs)
 
 copyCtPropFun :: FunDec -> CPropM FunDec
@@ -139,7 +148,8 @@ copyCtPropFun (fname, rettype, args, body, pos) = do
 copyCtPropOneLambda :: Prog -> Lambda -> Either EnablingOptError Lambda
 copyCtPropOneLambda prog lam = do
   let env = CopyPropEnv { envVtable = HM.empty, program = prog }
-  (res, _) <- runCPropM (copyCtPropLambda lam) env
+      src = newNameSourceForProg prog
+  (res, _, _) <- runCPropM (copyCtPropLambda lam) env src
   return res
 
 --------------------------------------------------------------------
@@ -164,10 +174,11 @@ copyCtPropBody (LetPat pat e body loc) = do
   pat' <- copyCtPropPat pat
   e' <- copyCtPropExp e
   look <- varLookup
-  case simplifyBinding look (LetBind pat e') of
-    Just res ->
-      copyCtPropBody $ insertBindings' body res
-    _        -> do
+  res <- simplifyBinding look (LetBind pat e')
+  case res of
+    Just bnds ->
+      copyCtPropBody $ insertBindings' body bnds
+    Nothing   -> do
       let bnds = getPropBnds pat' e'
       body' <- binding bnds $ copyCtPropBody body
       return $ LetPat pat' e' body' loc
@@ -180,7 +191,8 @@ copyCtPropBody (DoLoop merge idd n loopbody letbody loc) = do
   loopbody' <- copyCtPropBody loopbody
   look      <- varLookup
   let merge' = zip mergepat' mergeexp'
-  case simplifyBinding look (LoopBind merge' idd n' loopbody') of
+  res <- simplifyBinding look (LoopBind merge' idd n' loopbody')
+  case res of
     Nothing -> do letbody' <- copyCtPropBody letbody
                   return $ DoLoop merge' idd n' loopbody' letbody' loc
     Just bnds -> copyCtPropBody $ insertBindings' letbody bnds

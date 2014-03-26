@@ -18,9 +18,13 @@ import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import Data.List
+import Data.Loc
 
 import L0C.InternalRep
+import L0C.InternalRep.Renamer
 import L0C.Tools
+import L0C.NeedNames
+import L0C.MonadFreshNames
 
 -- | A function that, given a variable name, returns its definition.
 -- XXX: This duplicates something in L0C.EnablingOpts.Simplification.
@@ -57,13 +61,33 @@ Motivation:
 -- | @foldClosedForm look foldfun accargs arrargs@ determines whether
 -- each of the results of @foldfun@ can be expressed in a closed form.
 foldClosedForm :: VarLookup -> [Ident] -> Lambda -> [SubExp] -> [SubExp]
-               -> Maybe [Binding]
-foldClosedForm look pat lam accs arrs = do
-  xs <- allAreReplicate arrs
-  concat <$> zipWithM (checkResult xs) (zip pat resultSubExps) (zip accparams accs)
-  where (_, resultSubExps, _) = bodyResult $ lambdaBody lam
+               -> NeedNames (Maybe [Binding])
+foldClosedForm look pat lam accs arrs =
+  case checkResults =<< allAreReplicate arrs of
+    Nothing -> return Nothing
+    Just closedBody -> do
+      isEmpty <- newIdent "fold_input_is_empty" (Basic Bool) lamloc
+      let inputsize = arraysSize 0 $ map subExpType arrs
+          zero      = Constant (BasicVal $ IntVal 0) lamloc
+          isEmptyCheck =
+            LetBind [isEmpty] $ BinOp Leq zero inputsize (Basic Bool) lamloc
+          mkBranch  ifNonEmpty =
+            LetBind pat $ If (Var isEmpty)
+                             (Result [] accs lamloc)
+                             ifNonEmpty
+                             (map fromConstType $ lambdaReturnType lam)
+                             lamloc
+      closedBody' <- renameBody closedBody
+      return $ Just [isEmptyCheck, mkBranch closedBody']
+  where lamloc = srclocOf lam
+        (_, resultSubExps, _) = bodyResult $ lambdaBody lam
         bndMap = makeBindMap $ lambdaBody lam
         (accparams, arrparams) = splitAt (length accs) $ lambdaParams lam
+
+        checkResults xs =
+          liftM (insertBindings' (Result [] (map Var pat) lamloc)) $
+          concat <$> zipWithM (checkResult xs)
+                     (zip pat resultSubExps) (zip accparams accs)
 
         checkResult _ (p, Constant val loc) _ =
           Just [LetBind [p] $ subExp $ Constant val loc]

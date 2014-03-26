@@ -19,16 +19,18 @@ import Control.Applicative
 import Data.Array
 import Data.Bits
 import Data.Either
-import Data.Maybe
 import Data.Loc
+import Data.Maybe
 
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet      as HS
 import qualified Data.Set          as S
 
+import L0C.NeedNames
 import L0C.EnablingOpts.ClosedForm
 import L0C.InternalRep
 import L0C.Tools
+import L0C.MonadFreshNames
 
 -- | A function that, given a variable name, returns its definition.
 type VarLookup = VName -> Maybe Exp
@@ -37,20 +39,23 @@ type VarLookup = VName -> Maybe Exp
 -- binding @bnd@.  If simplification is possible, a replacement list
 -- of bindings is returned, that bind at least the same banes as the
 -- original binding (and possibly more, for intermediate results).
-simplifyBinding :: VarLookup -> Binding -> Maybe [Binding]
+simplifyBinding :: MonadFreshNames m => VarLookup -> Binding -> m (Maybe [Binding])
 
-simplifyBinding = applyRules simplificationRules
+simplifyBinding look bnd =
+  provideNames $ applyRules simplificationRules look bnd
 
 applyRules :: [SimplificationRule]
-           -> VarLookup -> Binding -> Maybe [Binding]
-applyRules []           _    _   = Nothing
-applyRules (rule:rules) look bnd =
-  (concatMap subApply <$> rule look bnd) <|>
-  applyRules rules look bnd
+           -> VarLookup -> Binding -> NeedNames (Maybe [Binding])
+applyRules []           _    _   = return Nothing
+applyRules (rule:rules) look bnd = do
+  res <- rule look bnd
+  case res of Just bnds -> do bnds' <- mapM subApply bnds
+                              return $ Just $ concat bnds'
+              Nothing   -> applyRules rules look bnd
   where subApply bnd' =
-          fromMaybe [bnd'] $ applyRules (rule:rules) look bnd'
+          fromMaybe [bnd'] <$> applyRules (rule:rules) look bnd'
 
-type SimplificationRule = VarLookup -> Binding -> Maybe [Binding]
+type SimplificationRule = VarLookup -> Binding -> NeedNames (Maybe [Binding])
 
 simplificationRules :: [SimplificationRule]
 simplificationRules = [ liftIdentityMapping
@@ -74,14 +79,14 @@ simplificationRules = [ liftIdentityMapping
 liftIdentityMapping :: SimplificationRule
 liftIdentityMapping _ (LetBind pat (Map cs fun arrs loc)) =
   case foldr checkInvariance ([], [], []) $ zip3 pat resultSubExps rettype of
-    ([], _, _) -> Nothing
+    ([], _, _) -> return Nothing
     (invariant, mapresult, rettype') ->
       let (pat', resultSubExps') = unzip mapresult
           lambdaRes = Result rescs resultSubExps' resloc
           fun' = fun { lambdaBody = lambdaRes `setBodyResult` lambdaBody fun
                      , lambdaReturnType = rettype'
                      }
-      in Just $ LetBind pat' (Map cs fun' arrs loc) : invariant
+      in return $ Just $ LetBind pat' (Map cs fun' arrs loc) : invariant
   where inputMap = HM.fromList $ zip (map identName $ lambdaParams fun) arrs
         free = freeInBody $ lambdaBody fun
         rettype = lambdaReturnType fun
@@ -103,7 +108,7 @@ liftIdentityMapping _ (LetBind pat (Map cs fun arrs loc)) =
           | otherwise = (invariant,
                          (outId, e) : mapresult,
                          t : rettype')
-liftIdentityMapping _ _ = Nothing
+liftIdentityMapping _ _ = return Nothing
 
 -- | Remove all arguments to the map that are simply replicates.
 -- These can be turned into free variables instead.
@@ -123,7 +128,7 @@ removeReplicateMapping look (LetBind pat (Map cs fun arrs loc))
                   [] -> mapres ++ [ LetBind [v] $ Replicate n e resloc
                                     | (v,e) <- zip pat resultSubExps ]
                   _  -> [LetBind pat $ Map cs fun' arrs' loc]
-  in Just $ parameterBnds ++ mapbnds
+  in return $ Just $ parameterBnds ++ mapbnds
   where isReplicate p (Var v)
           | Just (Replicate _ e _) <- look $ identName v =
           Right (LetBind [fromParam p] $ subExp e)
@@ -132,7 +137,7 @@ removeReplicateMapping look (LetBind pat (Map cs fun arrs loc))
 
         isRight (Right _) = True
         isRight (Left  _) = False
-removeReplicateMapping _ _ = Nothing
+removeReplicateMapping _ _ = return Nothing
 
 hoistLoopInvariantMergeVariables :: SimplificationRule
 hoistLoopInvariantMergeVariables _ (LoopBind merge idd n loopbody) =
@@ -141,13 +146,13 @@ hoistLoopInvariantMergeVariables _ (LoopBind merge idd n loopbody) =
   case foldr checkInvariance ([], [], []) $ zip merge resultSubExps of
     ([], _, _) ->
       -- Nothing is invariant.
-      Nothing
+      return Nothing
     (invariant, merge', resultSubExps') ->
       -- We have moved something invariant out of the loop - re-run
       -- the operation with the new enclosing bindings, because
       -- opportunities for copy propagation will have cropped up.
       let loopbody' = Result cs resultSubExps' resloc `setBodyResult` loopbody
-      in Just $ invariant ++ [LoopBind merge' idd n loopbody']
+      in return $ Just $ invariant ++ [LoopBind merge' idd n loopbody']
   where (cs, resultSubExps, resloc) = bodyResult loopbody
 
         checkInvariance ((v1,initExp), Var v2) (invariant, merge', resExps)
@@ -155,38 +160,38 @@ hoistLoopInvariantMergeVariables _ (LoopBind merge idd n loopbody) =
             (LetBind [v1] (subExp initExp):invariant, merge', resExps)
         checkInvariance ((v1,initExp), resExp) (invariant, merge', resExps) =
           (invariant, (v1,initExp):merge', resExp:resExps)
-hoistLoopInvariantMergeVariables _ _ = Nothing
+hoistLoopInvariantMergeVariables _ _ = return Nothing
 
 type LetSimplificationRule = VarLookup -> Exp -> Maybe Exp
 
 letRule :: LetSimplificationRule -> SimplificationRule
-letRule rule look (LetBind pat e) = (:[]) . LetBind pat <$> rule look e
-letRule _    _    _               = Nothing
+letRule rule look (LetBind pat e) = return $ (:[]) . LetBind pat <$> rule look e
+letRule _    _    _               = fail "Cannot simplify"
 
 simplifyConstantRedomap :: LetSimplificationRule
 simplifyConstantRedomap _ (Redomap _ _ innerfun acc _ loc) = do
   es <- foldConstantForm innerfun acc
-  return $ SubExps es loc
+  Just $ SubExps es loc
 simplifyConstantRedomap _ _ =
   Nothing
 
 simplifyConstantReduce :: LetSimplificationRule
 simplifyConstantReduce _ (Reduce _ fun input loc) = do
   es <- foldConstantForm fun $ map fst input
-  return $ SubExps es loc
+  Just $ SubExps es loc
 simplifyConstantReduce _ _ =
   Nothing
 
 simplifyClosedFormRedomap :: SimplificationRule
 simplifyClosedFormRedomap look (LetBind pat (Redomap _ _ innerfun acc arr _)) =
   foldClosedForm look pat innerfun acc arr
-simplifyClosedFormRedomap _ _ = Nothing
+simplifyClosedFormRedomap _ _ = return Nothing
 
 simplifyClosedFormReduce :: SimplificationRule
 simplifyClosedFormReduce look (LetBind pat (Reduce _ fun args _)) =
   foldClosedForm look pat fun acc arr
   where (acc, arr) = unzip args
-simplifyClosedFormReduce _ _ = Nothing
+simplifyClosedFormReduce _ _ = return Nothing
 
 simplifyRearrange :: LetSimplificationRule
 
@@ -499,15 +504,15 @@ simplifyIndexing look (Index cs idd inds loc) =
 simplifyIndexing _ _ = Nothing
 
 simplifyBranch :: SimplificationRule
-simplifyBranch _ (LetBind pat (If e1 tb fb _ _)) = do
-  branch <- if isCt1 e1
-            then Just tb
-            else if isCt0 e1
-                 then Just fb
-                 else Nothing
+simplifyBranch _ (LetBind pat (If e1 tb fb _ _))
+  | Just branch <- checkBranch =
   let (_, resultSubExps, resloc) = bodyResult branch
-  Just $ bodyBindings branch ++ [LetBind pat $ SubExps resultSubExps resloc]
-simplifyBranch _ _ = Nothing
+  in return $ Just $ bodyBindings branch ++ [LetBind pat $ SubExps resultSubExps resloc]
+  where checkBranch
+          | isCt1 e1  = Just tb
+          | isCt0 e1  = Just fb
+          | otherwise = Nothing
+simplifyBranch _ _ = return Nothing
 
 -- Some helper functions
 
