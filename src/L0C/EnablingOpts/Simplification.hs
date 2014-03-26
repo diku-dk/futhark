@@ -61,8 +61,6 @@ simplificationRules :: [SimplificationRule]
 simplificationRules = [ liftIdentityMapping
                       , removeReplicateMapping
                       , hoistLoopInvariantMergeVariables
-                      , letRule simplifyConstantRedomap
-                      , letRule simplifyConstantReduce
                       , simplifyClosedFormRedomap
                       , simplifyClosedFormReduce
                       , letRule simplifyRearrange
@@ -167,20 +165,6 @@ type LetSimplificationRule = VarLookup -> Exp -> Maybe Exp
 letRule :: LetSimplificationRule -> SimplificationRule
 letRule rule look (LetBind pat e) = return $ (:[]) . LetBind pat <$> rule look e
 letRule _    _    _               = return Nothing
-
-simplifyConstantRedomap :: LetSimplificationRule
-simplifyConstantRedomap _ (Redomap _ _ innerfun acc _ loc) = do
-  es <- foldConstantForm innerfun acc
-  Just $ SubExps es loc
-simplifyConstantRedomap _ _ =
-  Nothing
-
-simplifyConstantReduce :: LetSimplificationRule
-simplifyConstantReduce _ (Reduce _ fun input loc) = do
-  es <- foldConstantForm fun $ map fst input
-  Just $ SubExps es loc
-simplifyConstantReduce _ _ =
-  Nothing
 
 simplifyClosedFormRedomap :: SimplificationRule
 simplifyClosedFormRedomap look (LetBind pat (Redomap _ _ innerfun acc arr _)) =

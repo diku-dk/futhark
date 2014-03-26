@@ -6,8 +6,7 @@
 -- future, we would like to make it more powerful, as well as possibly
 -- also being able to analyse sequential loops.
 module L0C.EnablingOpts.ClosedForm
-  ( foldConstantForm
-  , foldClosedForm
+  ( foldClosedForm
   )
 where
 
@@ -30,20 +29,6 @@ import L0C.MonadFreshNames
 -- XXX: This duplicates something in L0C.EnablingOpts.Simplification.
 type VarLookup = VName -> Maybe Exp
 
--- | If a fold only uses its accumulator parameters and does not
--- change them, it can be converted to a constant form.
-foldConstantForm :: Lambda -> [SubExp] -> Maybe [SubExp]
-foldConstantForm lam accs =
-  zipWithM isConstResult resultSubExps $ zip (lambdaParams lam) accs
-  where (_, resultSubExps, _) = bodyResult $ lambdaBody lam
-        free = freeNamesInBody (lambdaBody lam) `HS.difference`
-               HS.fromList (map identName $ lambdaParams lam)
-        isConstResult res (p, acc) =
-          case res of Constant {}                          -> Just res
-                      Var v | identName v == identName p   -> Just acc
-                            | identName v `HS.member` free -> Just res
-                      _                                    -> Nothing
-
 {-
 Motivation:
 
@@ -62,6 +47,7 @@ Motivation:
 -- each of the results of @foldfun@ can be expressed in a closed form.
 foldClosedForm :: VarLookup -> [Ident] -> Lambda -> [SubExp] -> [SubExp]
                -> NeedNames (Maybe [Binding])
+
 foldClosedForm look pat lam accs arrs =
   case checkResults =<< allAreReplicate arrs of
     Nothing -> return Nothing
@@ -70,7 +56,7 @@ foldClosedForm look pat lam accs arrs =
       let inputsize = arraysSize 0 $ map subExpType arrs
           zero      = Constant (BasicVal $ IntVal 0) lamloc
           isEmptyCheck =
-            LetBind [isEmpty] $ BinOp Leq zero inputsize (Basic Bool) lamloc
+            LetBind [isEmpty] $ BinOp Equal inputsize zero (Basic Bool) lamloc
           mkBranch  ifNonEmpty =
             LetBind pat $ If (Var isEmpty)
                              (Result [] accs lamloc)
