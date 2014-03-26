@@ -166,7 +166,7 @@ type LetSimplificationRule = VarLookup -> Exp -> Maybe Exp
 
 letRule :: LetSimplificationRule -> SimplificationRule
 letRule rule look (LetBind pat e) = return $ (:[]) . LetBind pat <$> rule look e
-letRule _    _    _               = fail "Cannot simplify"
+letRule _    _    _               = return Nothing
 
 simplifyConstantRedomap :: LetSimplificationRule
 simplifyConstantRedomap _ (Redomap _ _ innerfun acc _ loc) = do
