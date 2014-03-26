@@ -15,7 +15,6 @@ module L0C.EnablingOpts.Simplification
 where
 
 import Control.Applicative
-import Control.Monad
 
 import Data.Array
 import Data.Bits
@@ -27,6 +26,7 @@ import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet      as HS
 import qualified Data.Set          as S
 
+import L0C.EnablingOpts.ClosedForm
 import L0C.InternalRep
 import L0C.Tools
 
@@ -58,6 +58,8 @@ simplificationRules = [ liftIdentityMapping
                       , hoistLoopInvariantMergeVariables
                       , letRule simplifyConstantRedomap
                       , letRule simplifyConstantReduce
+                      , simplifyClosedFormRedomap
+                      , simplifyClosedFormReduce
                       , letRule simplifyRearrange
                       , letRule simplifyRotate
                       , letRule simplifyBinOp
@@ -163,29 +165,28 @@ letRule _    _    _               = Nothing
 
 simplifyConstantRedomap :: LetSimplificationRule
 simplifyConstantRedomap _ (Redomap _ _ innerfun acc _ loc) = do
-  es <- simplifyConstantFoldFun innerfun acc
+  es <- foldConstantForm innerfun acc
   return $ SubExps es loc
 simplifyConstantRedomap _ _ =
   Nothing
 
 simplifyConstantReduce :: LetSimplificationRule
 simplifyConstantReduce _ (Reduce _ fun input loc) = do
-  es <- simplifyConstantFoldFun fun $ map fst input
+  es <- foldConstantForm fun $ map fst input
   return $ SubExps es loc
 simplifyConstantReduce _ _ =
   Nothing
 
-simplifyConstantFoldFun :: Lambda -> [SubExp] -> Maybe [SubExp]
-simplifyConstantFoldFun lam accs =
-  zipWithM isConstResult resultSubExps $ zip (lambdaParams lam) accs
-  where (_, resultSubExps, _) = bodyResult $ lambdaBody lam
-        free = freeNamesInBody (lambdaBody lam) `HS.difference`
-               HS.fromList (map identName $ lambdaParams lam)
-        isConstResult res (p, acc) =
-          case res of Constant {}                          -> Just res
-                      Var v | identName v == identName p   -> Just acc
-                            | identName v `HS.member` free -> Just res
-                      _                                    -> Nothing
+simplifyClosedFormRedomap :: SimplificationRule
+simplifyClosedFormRedomap look (LetBind pat (Redomap _ _ innerfun acc arr _)) =
+  foldClosedForm look pat innerfun acc arr
+simplifyClosedFormRedomap _ _ = Nothing
+
+simplifyClosedFormReduce :: SimplificationRule
+simplifyClosedFormReduce look (LetBind pat (Reduce _ fun args _)) =
+  foldClosedForm look pat fun acc arr
+  where (acc, arr) = unzip args
+simplifyClosedFormReduce _ _ = Nothing
 
 simplifyRearrange :: LetSimplificationRule
 
