@@ -316,6 +316,7 @@ simplifyBinOp _ (BinOp Band e1 e2 _ pos)
   | isCt0 e2 = Just $ subExp e2
   | isCt1 e1 = Just $ subExp e2
   | isCt1 e2 = Just $ subExp e1
+  | e1 == e2 = Just $ subExp e1
   | otherwise =
     case (e1, e2) of
       (Constant (BasicVal (IntVal v1)) _, Constant (BasicVal (IntVal v2)) _) ->
@@ -327,6 +328,7 @@ simplifyBinOp _ (BinOp Bor e1 e2 _ pos)
   | isCt0 e2 = Just $ subExp e1
   | isCt1 e1 = Just $ subExp e1
   | isCt1 e2 = Just $ subExp e2
+  | e1 == e2 = Just $ subExp e1
   | otherwise =
     case (e1, e2) of
       (Constant (BasicVal (IntVal v1)) _, Constant (BasicVal (IntVal v2)) _) ->
@@ -336,6 +338,7 @@ simplifyBinOp _ (BinOp Bor e1 e2 _ pos)
 simplifyBinOp _ (BinOp Xor e1 e2 _ pos)
   | isCt0 e1 = Just $ subExp e2
   | isCt0 e2 = Just $ subExp e1
+  | e1 == e2 = binOpRes pos $ IntVal 0
   | otherwise =
     case (e1, e2) of
       (Constant (BasicVal (IntVal v1)) _, Constant (BasicVal (IntVal v2)) _) ->
@@ -365,6 +368,7 @@ simplifyBinOp _ (BinOp LogOr e1 e2 _ pos)
       _ -> Nothing
 
 simplifyBinOp _ (BinOp Equal e1 e2 _ pos)
+  | e1 == e2 = binOpRes pos $ LogVal True
   | otherwise =
     case (e1, e2) of
       -- for numerals we could build node e1-e2, simplify and test equality with 0 or 0.0!
@@ -377,9 +381,10 @@ simplifyBinOp _ (BinOp Equal e1 e2 _ pos)
       (Constant (BasicVal (CharVal v1)) _, Constant (BasicVal (CharVal v2)) _) ->
         binOpRes pos $ LogVal $ v1==v2
       _ -> Nothing
-  | e1 == e2 = binOpRes pos $ LogVal True
 
-simplifyBinOp _ (BinOp Less e1 e2 _ pos) =
+simplifyBinOp _ (BinOp Less e1 e2 _ pos)
+  | e1 == e2 = binOpRes pos $ LogVal False
+  | otherwise =
   case (e1, e2) of
     -- for numerals we could build node e1-e2, simplify and compare with 0 or 0.0!
     (Constant (BasicVal (IntVal v1)) _, Constant (BasicVal (IntVal v2)) _) ->
@@ -392,7 +397,9 @@ simplifyBinOp _ (BinOp Less e1 e2 _ pos) =
       binOpRes pos $ LogVal $ v1<v2
     _ -> Nothing
 
-simplifyBinOp _ (BinOp Leq e1 e2 _ pos) =
+simplifyBinOp _ (BinOp Leq e1 e2 _ pos)
+  | e1 == e2 = binOpRes pos $ LogVal True
+  | otherwise =
   case (e1, e2) of
     -- for numerals we could build node e1-e2, simplify and compare with 0 or 0.0!
     (Constant (BasicVal (IntVal  v1)) _, Constant (BasicVal (IntVal  v2)) _) ->
