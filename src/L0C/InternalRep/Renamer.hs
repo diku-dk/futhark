@@ -19,6 +19,8 @@ module L0C.InternalRep.Renamer
   )
   where
 
+import Debug.Trace
+
 import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Reader
@@ -41,6 +43,7 @@ runRenamer m src = runReader (runStateT m src) env
 -- invalid program valid.
 renameProg :: Prog -> Prog
 renameProg prog = Prog $ fst $
+                  trace (show (progNames prog) ++ "\n" ++ prettyPrint prog) $
                   runRenamer (mapM renameFun $ progFunctions prog) src
   where src = newNameSourceForProg prog
 
@@ -112,36 +115,40 @@ instance Rename SubExp where
   rename (Var v)          = Var <$> rename v
   rename (Constant v loc) = return $ Constant v loc
 
+instance Rename Result where
+  rename (Result cs ses loc) =
+    Result <$> mapM rename cs <*> mapM rename ses <*> pure loc
+
 instance Rename Body where
-  rename (LetWith cs dest src idxs ve body loc) = do
+  rename (Body [] res) = Body [] <$> rename res
+  rename (Body (LetWithBind cs dest src idxs ve:bnds) res) = do
     cs' <- mapM rename cs
     src' <- rename src
     idxs' <- mapM rename idxs
     ve' <- rename ve
     bind [dest] $ do
       dest' <- rename dest
-      body' <- rename body
-      return $ LetWith cs' dest' src' idxs' ve' body' loc
-  rename (LetPat pat e body loc) = do
+      Body bnds' res' <- rename $ Body bnds res
+      return $ Body (LetWithBind cs' dest' src' idxs' ve':bnds') res'
+  rename (Body (LetBind pat e:bnds) res) = do
     e1' <- rename e
     bind pat $ do
       pat' <- mapM rename pat
-      body' <- rename body
-      return $ LetPat pat' e1' body' loc
-  rename (DoLoop merge loopvar boundexp loopbody letbody loc) = do
+      Body bnds' res' <- rename $ Body bnds res
+      return $ Body (LetBind pat' e1':bnds') res'
+  rename (Body (LoopBind merge loopvar boundexp loopbody:bnds) res) = do
     let (mergepat, mergeexp) = unzip merge
     boundexp' <- rename boundexp
     mergeexp' <- mapM rename mergeexp
     bind mergepat $ do
       mergepat' <- mapM rename mergepat
-      letbody' <- rename letbody
+      Body bnds' res' <- rename $ Body bnds res
       bind [loopvar] $ do
         loopvar'  <- rename loopvar
         loopbody' <- rename loopbody
-        return $ DoLoop (zip mergepat' mergeexp')
-                        loopvar' boundexp' loopbody' letbody' loc
-  rename (Result cs ses loc) =
-    Result <$> mapM rename cs <*> mapM rename ses <*> pure loc
+        return $ Body (LoopBind (zip mergepat' mergeexp')
+                                loopvar' boundexp' loopbody':bnds')
+                      res'
 
 instance Rename Exp where
   rename = mapExpM mapper

@@ -49,7 +49,6 @@ module L0C.InternalRep.Traversals
   , walkBodyM
 
   -- * Simple wrappers
-  , buildExpPattern
   , foldlPattern
   )
   where
@@ -90,22 +89,27 @@ identityMapper = Mapper {
                  }
 
 mapBodyM :: (Applicative m, Monad m) => Mapper m -> Body -> m Body
-mapBodyM tv (LetPat pat e body loc) =
-  pure LetPat <*> mapM (mapOnIdent tv) pat <*> mapOnExp tv e <*>
-       mapOnBody tv body <*> pure loc
-mapBodyM tv (LetWith cs dest src idxexps vexp body loc) =
-  pure LetWith <*> mapOnCertificates tv cs <*>
-       mapOnIdent tv dest <*> mapOnIdent tv src <*>
-       mapM (mapOnSubExp tv) idxexps <*> mapOnSubExp tv vexp <*>
-       mapOnBody tv body <*> pure loc
-mapBodyM tv (DoLoop mergepat loopvar boundexp loopbody letbody loc) =
-  pure DoLoop <*>
-       (zip <$> mapM (mapOnIdent tv) vs <*> mapM (mapOnSubExp tv) es) <*>
-       mapOnIdent tv loopvar <*> mapOnSubExp tv boundexp <*>
-       mapOnBody tv loopbody <*> mapOnBody tv letbody <*> pure loc
+mapBodyM tv (Body [] (Result cs ses loc)) =
+  Body [] <$> (Result <$> mapOnCertificates tv cs <*>
+               mapM (mapOnSubExp tv) ses <*> pure loc)
+mapBodyM tv (Body (LetBind pat e:bnds) res) = do
+  bnd <- LetBind <$> mapM (mapOnIdent tv) pat <*> mapOnExp tv e
+  Body bnds' res' <- mapOnBody tv $ Body bnds res
+  return $ Body (bnd:bnds') res'
+mapBodyM tv (Body (LetWithBind cs dest src idxexps vexp:bnds) res) = do
+  bnd <- LetWithBind <$> mapOnCertificates tv cs <*>
+         mapOnIdent tv dest <*> mapOnIdent tv src <*>
+         mapM (mapOnSubExp tv) idxexps <*> mapOnSubExp tv vexp
+  Body bnds' res' <- mapOnBody tv $ Body bnds res
+  return $ Body (bnd:bnds') res'
+mapBodyM tv (Body (LoopBind mergepat loopvar boundexp loopbody:bnds) res) = do
+  bnd <- LoopBind <$>
+         (zip <$> mapM (mapOnIdent tv) vs <*> mapM (mapOnSubExp tv) es) <*>
+         mapOnIdent tv loopvar <*> mapOnSubExp tv boundexp <*>
+         mapOnBody tv loopbody
+  Body bnds' res' <- mapOnBody tv $ Body bnds res
+  return $ Body (bnd:bnds') res'
   where (vs,es) = unzip mergepat
-mapBodyM tv (Result cs ses loc) =
-  Result <$> mapOnCertificates tv cs <*> mapM (mapOnSubExp tv) ses <*> pure loc
 
 -- | Like 'mapBodyM', but in the 'Identity' monad.
 mapBody :: Mapper Identity -> Body -> Body
@@ -314,19 +318,6 @@ walkBodyM f = void . mapBodyM m
 walkExpM :: (Monad m, Applicative m) => Walker m -> Exp -> m ()
 walkExpM f = void . mapExpM m
   where m = walkMapper f
-
--- | Common case of 'mapExp', where only 'Exp's are taken into
--- account.
-buildExpPattern :: (Exp -> Exp) -> Exp -> Exp
-buildExpPattern f = mapExp f'
-  where f' = identityMapper {
-               mapOnExp = return . f
-             , mapOnBody = return . mapBody f'
-             , mapOnLambda = return . buildLambda
-             }
-
-        buildLambda (Lambda tps body tp loc) =
-          Lambda tps (mapBody f' body) tp loc
 
 -- | Common case of 'foldExp', where only 'Exp's and 'Lambda's are
 -- taken into account.

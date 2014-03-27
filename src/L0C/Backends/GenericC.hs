@@ -17,6 +17,7 @@ import Control.Monad.State
 import Control.Monad.Reader
 import qualified Data.Array as A
 import qualified Data.HashMap.Lazy as HM
+import Data.Loc
 import Data.List
 
 import qualified Language.C.Syntax as C
@@ -392,19 +393,23 @@ compileSubExp place (Var (Ident name _ _)) = do
   return $ stm [C.cstm|$exp:place = $exp:name';|]
 
 compileBody :: C.Exp -> Body -> CompilerM [C.BlockItem]
-compileBody place (LetPat pat e body _) = do
+
+compileBody place (Body [] (Result _ [e] _))  = compileSubExp place e
+compileBody place (Body [] (Result _ es loc)) = compileExp place $ SubExps es loc
+
+compileBody place (Body (LetBind pat e:bnds) res) = do
   val <- new "let_value"
   e' <- compileExp (varExp val) e
   let bindings = compilePattern pat (varExp val)
-  body' <- binding bindings $ compileBody place body
+  body <- binding bindings $ compileBody place $ Body bnds res
   et <- expCType e
   return $ stm [C.cstm|{
                      $ty:et $id:val;
                      $items:e'
-                     $items:body'
+                     $items:body
                    }|]
 
-compileBody place (LetWith _ name src idxs ve body _) = do
+compileBody place (Body (LetWithBind _ name src idxs ve:bnds) res) = do
   name' <- new $ textual $ identName name
   src' <- lookupVar $ identName src
   etype <- typeToCType [identType src]
@@ -425,7 +430,7 @@ compileBody place (LetWith _ name src idxs ve body _) = do
                     [C.cstm|$exp:(indexArrayExp (varExp name')
                                   (arrayRank $ identType src) idxexps) = $id:el;|]
                   _ -> [C.cstm|$id:name' = $id:el;|])
-  body' <- binding [(identName name, varExp name')] $ compileBody place body
+  body <- binding [(identName name, varExp name')] $ compileBody place $ Body bnds res
   return $ stm [C.cstm|{
                      $ty:etype $id:name';
                      $ty:elty $id:el;
@@ -435,22 +440,22 @@ compileBody place (LetWith _ name src idxs ve body _) = do
                      $stms:elempre
                      $items:ve'
                      $stm:elempost
-                     $items:body'
+                     $items:body
                    }|]
 
-compileBody place (DoLoop merge loopvar boundexp loopbody letbody loc) = do
+compileBody place (Body (LoopBind merge loopvar boundexp loopbody:bnds) res) = do
   let (mergepat, mergeexp) = unzip merge
   loopvar' <- new $ textual $ identName loopvar
   bound <- new "loop_bound"
   mergevarR <- new $ "loop_mergevar_read"
   mergevarW <- new $ "loop_mergevar_write"
   let bindings = compilePattern mergepat (varExp mergevarR)
-  mergeexp' <- compileExp (varExp mergevarR) $ SubExps mergeexp loc
+  mergeexp' <- compileExp (varExp mergevarR) $ SubExps mergeexp (srclocOf boundexp)
   mergetype <- bodyCType loopbody
   boundexp' <- compileSubExp (varExp bound) boundexp
   loopbody' <- binding ((identName loopvar, varExp loopvar') : bindings) $
                compileBody (varExp mergevarW) loopbody
-  letbody' <- binding bindings $ compileBody place letbody
+  letbody <- binding bindings $ compileBody place $ Body bnds res
   return $ stm [C.cstm|{
                      int $id:bound, $id:loopvar';
                      $ty:mergetype $id:mergevarR;
@@ -461,11 +466,8 @@ compileBody place (DoLoop merge loopvar boundexp loopbody letbody loc) = do
                        $items:loopbody'
                        $id:mergevarR = $id:mergevarW;
                      }
-                     $items:letbody'
+                     $items:letbody
                    }|]
-
-compileBody place (Result _ [e] _)  = compileSubExp place e
-compileBody place (Result _ es loc) = compileExp place $ SubExps es loc
 
 compileExp :: C.Exp -> Exp -> CompilerM [C.BlockItem]
 
@@ -660,10 +662,10 @@ compileExp' place (Replicate ne ve pos) = do
   let nident = Ident nv (Basic Int) pos
       vident = Ident vv (subExpType ve) pos
       rident = Ident rr (arrayOf (subExpType ve) (Shape [Var nident]) Unique) pos
-      nlet body = LetPat [nident] (subExp ne) body pos
-      vlet body = LetPat [vident] (subExp ve) body pos
-      rlet body = LetPat [rident] (Replicate (Var nident) (Var vident) pos) body pos
-  compileBody place $ nlet $ vlet $ rlet $ Result [] [Var rident] pos
+      nlet = LetBind [nident] (subExp ne)
+      vlet = LetBind [vident] (subExp ve)
+      rlet = LetBind [rident] (Replicate (Var nident) (Var vident) pos)
+  compileBody place $ Body [nlet,vlet,rlet] $ Result [] [Var rident] pos
 
 compileExp' place (Reshape _ shapeexps arrexp _) = do
   shapevars <- mapM (new . ("shape_"++) . show) [0..length shapeexps-1]

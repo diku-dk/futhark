@@ -49,35 +49,35 @@ import L0C.MonadFreshNames
 
 import L0C.Rebinder.CSE
 
-data BindNeed = LoopBind [(Ident,SubExp)] Ident SubExp Body
-              | LetBind [Ident] Exp [Exp]
-              | LetWithBind Certificates Ident Ident [SubExp] SubExp
+data BindNeed = LoopNeed [(Ident,SubExp)] Ident SubExp Body
+              | LetNeed [Ident] Exp [Exp]
+              | LetWithNeed Certificates Ident Ident [SubExp] SubExp
                 deriving (Show, Eq)
 
 type NeedSet = [BindNeed]
 
 asTail :: BindNeed -> Body
-asTail (LoopBind merge i bound loopbody) =
-  DoLoop merge i bound loopbody (Result [] [] loc) loc
+asTail (LoopNeed merge i bound loopbody) =
+  Body [LoopBind merge i bound loopbody] $ Result [] [] loc
     where loc = srclocOf loopbody
-asTail (LetBind pat e _) =
-  LetPat pat e (Result [] [] loc) loc
+asTail (LetNeed pat e _) =
+  Body [LetBind pat e] $ Result [] [] loc
     where loc = srclocOf pat
-asTail (LetWithBind cs dest src idxs ve) =
-  LetWith cs dest src idxs ve (Result [] [Var dest] loc) loc
+asTail (LetWithNeed cs dest src idxs ve) =
+  Body [LetWithBind cs dest src idxs ve] $ Result [] [Var dest] loc
     where loc = srclocOf dest
 
 requires :: BindNeed -> HS.HashSet VName
-requires (LetBind pat e alts) =
+requires (LetNeed pat e alts) =
   freeInE `mappend` freeInPat
   where freeInE   = mconcat $ map freeNamesInExp $ e : alts
         freeInPat = mconcat $ map (freeInType . identType) pat
 requires bnd = HS.map identName $ freeInBody $ asTail bnd
 
 provides :: BindNeed -> HS.HashSet VName
-provides (LoopBind merge _ _ _)     = patNameSet $ map fst merge
-provides (LetBind pat _ _)          = patNameSet pat
-provides (LetWithBind _ dest _ _ _) = HS.singleton $ identName dest
+provides (LoopNeed merge _ _ _)     = patNameSet $ map fst merge
+provides (LetNeed pat _ _)          = patNameSet pat
+provides (LetWithNeed _ dest _ _ _) = HS.singleton $ identName dest
 
 patNameSet :: [Ident] -> HS.HashSet VName
 patNameSet = HS.fromList . map identName
@@ -135,7 +135,7 @@ withSeveralBindings pat e alts m = do
   ds <- asks envDupeState
   let (e', ds') = performCSE ds pat e
       (es, ds'') = performMultipleCSE ds pat alts
-  needThis $ LetBind pat e' es
+  needThis $ LetNeed pat e' es
   local (\env -> env { envDupeState = ds' <> ds''}) m
 
 bindLet :: [Ident] -> Exp -> HoistM a -> HoistM a
@@ -146,12 +146,12 @@ bindLetWith :: Certificates -> Ident -> Ident
             -> [SubExp] -> SubExp
             -> HoistM a -> HoistM a
 bindLetWith cs dest src idxs ve m = do
-  needThis $ LetWithBind cs dest src idxs ve
+  needThis $ LetWithNeed cs dest src idxs ve
   m
 
 bindLoop :: [(Ident,SubExp)] -> Ident -> SubExp -> Body -> HoistM a -> HoistM a
 bindLoop merge i bound body m = do
-  needThis $ LoopBind merge i bound body
+  needThis $ LoopNeed merge i bound body
   m
 
 -- | Run the let-hoisting algorithm on the given program.  Even if the
@@ -182,30 +182,27 @@ addBindings dupes needs =
           | otherwise =
             (inner, fs)
 
-        comb (m,ds) bnd@(LoopBind merge loopvar boundexp loopbody) =
+        comb (m,ds) bnd@(LoopNeed merge loopvar boundexp loopbody) =
           ((m `HM.union` distances m bnd, ds),
            bind bnd $
-           \inner ->
-             DoLoop merge loopvar boundexp
-             loopbody inner $ srclocOf inner)
+           \(Body bnds res) ->
+             Body (LoopBind merge loopvar boundexp loopbody:bnds) res)
 
-        comb (m,ds) (LetBind pat e alts) =
+        comb (m,ds) (LetNeed pat e alts) =
           let add e' =
                 let (e'',ds') = performCSE ds pat e'
-                    bnd       = LetBind pat e'' []
+                    bnd       = LetNeed pat e'' []
                 in ((m `HM.union` distances m bnd, ds'),
                     bind bnd $
-                    \inner ->
-                      LetPat pat e'' inner $ srclocOf inner)
+                    \(Body bnds res) -> Body (LetBind pat e'':bnds) res)
           in case map snd $ sortBy (comparing fst) $ map (score m) $ e:alts of
                e':_ -> add e'
                _    -> add e
 
-        comb (m,ds) bnd@(LetWithBind cs dest src idxs ve) =
+        comb (m,ds) bnd@(LetWithNeed cs dest src idxs ve) =
           ((m `HM.union` distances m bnd, ds),
            bind bnd $
-           \inner ->
-             LetWith cs dest src idxs ve inner $ srclocOf inner)
+           \(Body bnds res) -> Body (LetWithBind cs dest src idxs ve:bnds) res)
 
 score :: HM.HashMap VName Int -> Exp -> (Int, Exp)
 score m (SubExps [Var k] _) =
@@ -235,14 +232,14 @@ distances m need = HM.fromList [ (k, d+cost) | k <- HS.toList outs ]
   where d = HS.foldl' f 0 ins
         (outs, ins, cost) =
           case need of
-            LetBind pat e _ ->
+            LetNeed pat e _ ->
               (patNameSet pat, freeNamesInExp e, expCost e)
-            LetWithBind _ dest src idxs ve ->
+            LetWithNeed _ dest src idxs ve ->
               (HS.singleton $ identName dest,
                identName src `HS.insert`
                mconcat (map (freeNamesInExp . subExp) $ ve:idxs),
                1)
-            LoopBind merge _ bound loopbody ->
+            LoopNeed merge _ bound loopbody ->
               (patNameSet $ map fst merge,
                mconcat $ freeNamesInBody loopbody : map freeNamesInExp
                (subExp bound : map (subExp . snd) merge),
@@ -299,16 +296,16 @@ splitHoistable block body needs =
   where block' = block $ bodyInfo body
         split (blocked, hoistable, ks) need =
           case need of
-            LetBind pat e es ->
-              let bad e' = block' (LetBind pat e' []) || ks `anyIsFreeIn` e'
+            LetNeed pat e es ->
+              let bad e' = block' (LetNeed pat e' []) || ks `anyIsFreeIn` e'
               in case (bad e, filter (not . bad) es) of
                    (True, [])     ->
                      (need : blocked, hoistable,
                       patNameSet pat `HS.union` ks)
                    (True, e':es') ->
-                     (blocked, LetBind pat e' es' : hoistable, ks)
+                     (blocked, LetNeed pat e' es' : hoistable, ks)
                    (False, es')   ->
-                     (blocked, LetBind pat e es' : hoistable, ks)
+                     (blocked, LetNeed pat e es' : hoistable, ks)
             _ | requires need `intersects` ks || block' need ->
                 (need : blocked, hoistable, provides need `HS.union` ks)
               | otherwise ->
@@ -336,7 +333,7 @@ hasFree ks _ need = ks `intersects` requires need
 
 isNotSafe :: BlockPred
 isNotSafe _ = not . safeBnd
-  where safeBnd (LetBind _ e _) = safeExp e
+  where safeBnd (LetNeed _ e _) = safeExp e
         safeBnd _               = False
 
 isNotCheap :: BlockPred
@@ -346,16 +343,16 @@ isNotCheap _ = not . cheapBnd
         cheap (Not {})     = True
         cheap (Negate {})  = True
         cheap _            = False
-        cheapBnd (LetBind _ e _) = cheap e
+        cheapBnd (LetNeed _ e _) = cheap e
         cheapBnd _               = False
 
 uniqPat :: [Ident] -> Bool
 uniqPat = any $ unique . identType
 
 isUniqueBinding :: BlockPred
-isUniqueBinding _ (LoopBind merge _ _ _)     = uniqPat $ map fst merge
-isUniqueBinding _ (LetBind pat _ _)          = uniqPat pat
-isUniqueBinding _ (LetWithBind _ dest _ _ _) = unique $ identType dest
+isUniqueBinding _ (LoopNeed merge _ _ _)     = uniqPat $ map fst merge
+isUniqueBinding _ (LetNeed pat _ _)          = uniqPat pat
+isUniqueBinding _ (LetWithNeed _ dest _ _ _) = unique $ identType dest
 
 isConsumed :: BlockPred
 isConsumed body need =
@@ -376,29 +373,31 @@ hoistCommon m1 m2 = pass $ do
                      })
 
 hoistInBody :: Body -> HoistM Body
-hoistInBody (LetPat pat e body _) = do
+
+hoistInBody (Body [] (Result cs es loc)) =
+  resultBody <$> mapM hoistInIdent cs <*>
+                 mapM hoistInSubExp es <*> pure loc
+
+hoistInBody (Body (LetBind pat e:bnds) res) = do
   pat' <- mapM hoistInIdent pat
   e' <- hoistInExp e
-  bindLet pat' e' $ hoistInBody body
-hoistInBody (LetWith cs dest src idxs ve body _) = do
+  bindLet pat' e' $ hoistInBody $ Body bnds res
+hoistInBody (Body (LetWithBind cs dest src idxs ve:bnds) res) = do
   cs'   <- mapM hoistInIdent cs
   dest' <- hoistInIdent dest
   src'  <- hoistInIdent src
   idxs' <- mapM hoistInSubExp idxs
   ve'   <- hoistInSubExp ve
-  bindLetWith cs' dest' src' idxs' ve' $ hoistInBody body
-hoistInBody (DoLoop merge loopvar boundexp loopbody letbody _) = do
+  bindLetWith cs' dest' src' idxs' ve' $ hoistInBody $ Body bnds res
+hoistInBody (Body (LoopBind merge loopvar boundexp loopbody:bnds) res) = do
   let (mergepat, mergeexp) = unzip merge
   loopbody' <- blockIfSeq [hasFree boundnames, isConsumed] $
                hoistInBody loopbody
   mergepat' <- mapM hoistInIdent mergepat
   mergeexp' <- mapM hoistInSubExp mergeexp
   bindLoop (zip mergepat' mergeexp') loopvar boundexp loopbody' $
-           hoistInBody letbody
+           hoistInBody $ Body bnds res
   where boundnames = identName loopvar `HS.insert` patNameSet (map fst merge)
-hoistInBody (Result cs es loc) =
-  Result <$> mapM hoistInIdent cs
-         <*> mapM hoistInSubExp es <*> pure loc
 
 hoistInExp :: Exp -> HoistM Exp
 hoistInExp (If c e1 e2 t loc) = do

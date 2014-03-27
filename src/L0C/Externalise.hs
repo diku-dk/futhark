@@ -35,19 +35,23 @@ externaliseFunction (fname, ret, params, body, loc) =
    loc)
 
 externaliseBody :: I.Body -> E.Exp
-externaliseBody (I.LetPat pat e body loc) =
-  E.LetPat (externalisePat pat loc) (externaliseExp e) (externaliseBody body) loc
-externaliseBody (I.LetWith cs dest src idxs ve body loc) =
+externaliseBody (I.Body [] (I.Result _ es loc)) =
+  externaliseSubExps es loc
+externaliseBody (I.Body (I.LetBind pat e:bnds) res) =
+  E.LetPat (externalisePat pat loc) (externaliseExp e)
+           (externaliseBody $ I.Body bnds res) loc
+  where loc = srclocOf e
+externaliseBody (I.Body (I.LetWithBind cs dest src idxs ve:bnds) res) =
   E.LetWith (externaliseCerts cs) (externaliseIdent dest) (externaliseIdent src)
             (Just []) (map externaliseSubExp idxs)
-            (externaliseSubExp ve) (externaliseBody body) loc
-externaliseBody (I.DoLoop merge i bound loopbody letbody loc) =
+            (externaliseSubExp ve) (externaliseBody $ I.Body bnds res) $
+            srclocOf dest
+externaliseBody (I.Body (I.LoopBind merge i bound loopbody:bnds) res) =
   E.DoLoop (externalisePat mergepat loc) (externaliseSubExps mergeexp loc)
            (externaliseIdent i) (externaliseSubExp bound)
-           (externaliseBody loopbody) (externaliseBody letbody) loc
+           (externaliseBody loopbody) (externaliseBody $ I.Body bnds res) loc
   where (mergepat, mergeexp) = unzip merge
-externaliseBody (I.Result _ es loc) =
-  externaliseSubExps es loc
+        loc = srclocOf res
 
 externaliseExp :: I.Exp -> E.Exp
 externaliseExp (I.SubExps es loc) = externaliseSubExps es loc

@@ -29,6 +29,8 @@ module L0C.InternalRep.Syntax
   , Param
   , Certificates
   , SubExp(..)
+  , Binding(..)
+  , Result(..)
   , Body(..)
   , Exp(..)
   , Lambda(..)
@@ -201,28 +203,32 @@ instance Located SubExp where
   locOf (Constant _ loc) = locOf loc
   locOf (Var ident)      = locOf ident
 
+-- | A local variable binding.
+data Binding = LoopBind [(Ident, SubExp)] Ident SubExp Body
+             | LetBind [Ident] Exp
+             | LetWithBind Certificates Ident Ident [SubExp] SubExp
+               deriving (Show, Eq, Ord)
+
+-- | The result of a body - a sequence of subexpressions, possibly
+-- predicated on one or more certificates.
+data Result = Result { resultCertificates :: Certificates
+                     , resultSubExps :: [SubExp]
+                     , resultSrcLoc :: SrcLoc
+                     }
+              deriving (Eq, Ord, Show)
+
+instance Located Result where
+  locOf = locOf . resultSrcLoc
+
 -- | A body consists of a number of bindings, terminating in a result
 -- (essentially a tuple literal).
-data Body = LetPat [Ident] Exp Body SrcLoc
-          | DoLoop
-            [(Ident,SubExp)] -- Merge variable pattern and initial
-                             -- values.
-            Ident -- Iterator.
-            SubExp -- Upper bound.
-            Body -- Loop body.
-            Body -- Let-body.
-            SrcLoc
-          | LetWith Certificates Ident Ident
-            [SubExp] SubExp
-            Body SrcLoc
-          | Result Certificates [SubExp] SrcLoc
+data Body = Body { bodyBindings :: [Binding]
+                 , bodyResult :: Result
+                 }
             deriving (Eq, Ord, Show)
 
 instance Located Body where
-  locOf (LetPat _ _ _ loc)        = locOf loc
-  locOf (DoLoop _ _ _ _ _ loc)    = locOf loc
-  locOf (LetWith _ _ _ _ _ _ loc) = locOf loc
-  locOf (Result _ _ loc)          = locOf loc
+  locOf = locOf . bodyResult
 
 -- | L0 Expression Language: literals + vars + int binops + array
 -- constructors + array combinators (SOAC) + if + function calls +

@@ -12,11 +12,16 @@ module L0C.InternalRep.Attributes
   , toParam
   , fromParam
 
-  -- * Operations on expressions and bodies
+  -- * Operations on bodies
   , bodyResult
   , setBodyResult
   , mapResult
   , mapResultM
+  , insertBinding
+  , insertBindings
+  , resultBody
+
+  -- * Operations on expressions
   , subExpType
   , bodyType
   , typeOf
@@ -525,10 +530,7 @@ subExpType (Constant val _) = fromConstType $ valueType val
 subExpType (Var ident)      = varType ident
 
 bodyType :: Body -> [Type]
-bodyType (LetPat _ _ body _) = bodyType body
-bodyType (LetWith _ _ _ _ _ body _) = bodyType body
-bodyType (DoLoop _ _ _ _ body _) = bodyType body
-bodyType (Result _ ses _) = map subExpType ses
+bodyType = map subExpType . resultSubExps . bodyResult
 
 -- | The type of an L0 term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
@@ -628,47 +630,49 @@ progNames = execWriter . mapM funNames . progFunctions
         funNames (_, _, params, body, _) =
           mapM_ one params >> bodyNames body
 
-        bodyNames e@(LetWith _ dest _ _ _ _ _) =
-          one dest >> walkBodyM names e
-        bodyNames e@(LetPat pat _ _ _) =
-          mapM_ one pat >> walkBodyM names e
-        bodyNames e@(DoLoop pat i _ _ _ _) =
-          mapM_ (one . fst) pat >> one i >> walkBodyM names e
-        bodyNames e = walkBodyM names e
+        bodyNames = mapM_ bindingNames . bodyBindings
+
+        bindingNames (LetWithBind _ dest _ _ _) =
+          one dest
+        bindingNames (LetBind pat e) =
+          mapM_ one pat >> expNames e
+        bindingNames (LoopBind pat i _ loopbody) =
+          mapM_ (one . fst) pat >> one i >> bodyNames loopbody
 
         expNames = walkExpM names
 
         lambdaNames (Lambda params body _ _) =
           mapM_ one params >> bodyNames body
 
--- | Get the 'Result' part of a 'Body'.
-bodyResult :: Body -> (Certificates, [SubExp], SrcLoc)
-bodyResult (Result cs es loc)         = (cs, es, loc)
-bodyResult (DoLoop _ _ _ _ body _)    = bodyResult body
-bodyResult (LetPat _ _ body _)        = bodyResult body
-bodyResult (LetWith _ _ _ _ _ body _) = bodyResult body
-
 -- | @setBodyResult result body@ sets the tail end of @body@ (the
 -- 'Result' part) to @result@.
 setBodyResult :: Body -> Body -> Body
-setBodyResult result = mapResult $ \_ _ -> result
+setBodyResult result = mapResult $ const result
 
 -- | Change that subexpression where evaluation of the body would
--- stop.  Also change type annotations at branches.
-mapResultM :: (Applicative m, Monad m) => (Certificates -> [SubExp] -> m Body) -> Body -> m Body
-mapResultM f (LetPat pat e body loc) =
-  LetPat pat e <$> mapResultM f body <*> pure loc
-mapResultM f (LetWith cs dest src idxs ve body loc) =
-  LetWith cs dest src idxs ve <$> mapResultM f body <*> pure loc
-mapResultM f (DoLoop pat i bound loopbody body loc) =
-  DoLoop pat i bound loopbody <$> mapResultM f body <*> pure loc
-mapResultM f (Result cs ses _) = f cs ses
+-- stop.
+mapResultM :: (Applicative m, Monad m) => (Result -> m Body) -> Body -> m Body
+mapResultM f (Body bnds res) = do
+  Body bnds2 res' <- f res
+  return $ Body (bnds++bnds2) res'
+
+-- | Add a binding at the outermost level of a 'Body'.
+insertBinding :: Binding -> Body -> Body
+insertBinding bnd (Body bnds res) = Body (bnd:bnds) res
+
+-- | Add several bindings at the outermost level of a 'Body'.
+insertBindings :: [Binding] -> Body -> Body
+insertBindings bnds1 (Body bnds2 res) = Body (bnds1++bnds2) res
+
+-- | Conveniently construct a body that contains no bindings.
+resultBody :: Certificates -> [SubExp] -> SrcLoc -> Body
+resultBody cs ses loc = Body [] $ Result cs ses loc
 
 -- | Change that result where evaluation of the body would stop.  Also
 -- change type annotations at branches.  This a non-monadic variant of
 -- @mapResultM@.
-mapResult :: (Certificates -> [SubExp] -> Body) -> Body -> Body
-mapResult f e = runIdentity $ mapResultM (((.).(.)) return f) e
+mapResult :: (Result -> Body) -> Body -> Body
+mapResult f e = runIdentity $ mapResultM (return . f) e
 
 freeWalker :: Walker (Writer (HS.HashSet Ident))
 freeWalker = identityWalker {
@@ -687,29 +691,29 @@ freeWalker = identityWalker {
         subExpFree (Var ident) = identFree ident
         subExpFree (Constant {})  = return ()
 
-        bodyFree (LetPat pat e body _) = do
+        bodyFree (Body [] (Result cs ses _)) = do
+          mapM_ identFree cs
+          mapM_ subExpFree ses
+        bodyFree (Body (LetBind pat e:bnds) res) = do
           expFree e
           binding (HS.fromList pat) $ do
             mapM_ (typeFree . identType) pat
-            bodyFree body
-        bodyFree (LetWith cs dest src idxs ve body _) = do
+            bodyFree $ Body bnds res
+        bodyFree (Body (LetWithBind cs dest src idxs ve:bnds) res) = do
           mapM_ identFree cs
           identFree src
           mapM_ subExpFree idxs
           typeFree $ identType dest
           subExpFree ve
-          binding (HS.singleton dest) $ bodyFree body
-        bodyFree (DoLoop merge i boundexp loopbody letbody _) = do
+          binding (HS.singleton dest) $ bodyFree $ Body bnds res
+        bodyFree (Body (LoopBind merge i boundexp loopbody:bnds) res) = do
           let (mergepat, mergeexps) = unzip merge
           mapM_ subExpFree mergeexps
           subExpFree boundexp
           binding (i `HS.insert` HS.fromList mergepat) $ do
             mapM_ (typeFree . identType) mergepat
             bodyFree loopbody
-            bodyFree letbody
-        bodyFree (Result cs ses _) = do
-          mapM_ identFree cs
-          mapM_ subExpFree ses
+            bodyFree $ Body bnds res
 
         expFree = walkExpM freeWalker
 
@@ -746,17 +750,19 @@ consumedInBody = execWriter . bodyConsumed
         consume ident =
           tell $ identName ident `HS.insert` aliases (identType ident)
 
-        bodyConsumed (LetPat pat e body _) = do
+        bodyConsumed (Body [] _) = return ()
+        bodyConsumed (Body (LetBind pat e:bnds) res) = do
           expConsumed e
-          unconsume (HS.fromList $ map identName pat) $ bodyConsumed body
-        bodyConsumed (LetWith _ dest src _ _ body _) = do
+          unconsume (HS.fromList $ map identName pat) $
+            bodyConsumed $ Body bnds res
+        bodyConsumed (Body (LetWithBind _ dest src _ _:bnds) res) = do
           consume src
-          unconsume (HS.singleton $ identName dest) $ bodyConsumed body
-        bodyConsumed (DoLoop pat _ _ loopbody letbody _) =
+          unconsume (HS.singleton $ identName dest) $
+            bodyConsumed $ Body bnds res
+        bodyConsumed (Body (LoopBind pat _ _ loopbody:bnds) res) =
           unconsume (HS.fromList (map (identName . fst) pat)) $ do
             bodyConsumed loopbody
-            bodyConsumed letbody
-        bodyConsumed (Result {}) = return ()
+            bodyConsumed $ Body bnds res
 
         expConsumed = tell . consumedInExp
 

@@ -55,16 +55,16 @@ internaliseLambdaBody :: (E.Exp -> InternaliseM I.Body)
                       -> E.Exp -> InternaliseM I.Body
 internaliseLambdaBody internaliseBody body = do
   body' <- internaliseBody body
-  flip mapResultM body' $ \cs es -> do
+  flip mapResultM body' $ \(Result cs es _) -> do
     -- Some of the subexpressions are actually
     -- certificates... filter them out!  This is slightly hacky, as
     -- we assume that the original input program does not contain
     -- certificates (or at least, that they are not part of the
     -- lambda return type).
     let (certs,vals) = partition ((==I.Basic I.Cert) . subExpType) es
-    insertBindings $ do
+    insertBindingsM $ do
       certs' <- letExps "lambda_cert" $ map I.subExp certs
-      return $ I.Result (cs++certs') vals loc
+      return $ I.resultBody (cs++certs') vals loc
   where loc = srclocOf body
 
 lambdaBinding :: I.Ident -> [E.Parameter] -> [I.Type]
@@ -163,12 +163,15 @@ bindFilterResultOuterShape ce lam args input_size = do
                 (I.Basic Int) loc
   markarray  <- newIdent "filter_mark"
                 (I.arrayOf (I.Basic Int) (I.Shape [input_size]) Nonunique) loc
-  markfunBody <- flip mapResultM (lambdaBody lam) $ \funcs es -> do
-                   let [ok] = es -- XXX
-                       result e = Result funcs [e] loc
-                   ok_int <- newIdent "ok" (I.Basic Int) loc
-                   return $ I.LetPat [ok_int] (I.If ok (result one) (result zero) [I.Basic Int] loc)
-                            (I.Result funcs [I.Var ok_int] loc) loc
+  markfunBody <-
+    flip mapResultM (lambdaBody lam) $ \res -> do
+      let [ok] = resultSubExps res -- XXX
+          funcs = resultCertificates res
+          result e = resultBody funcs [e] loc
+      ok_int <- newIdent "ok" (I.Basic Int) loc
+      return $ Body [I.LetBind [ok_int] $
+                      I.If ok (result one) (result zero) [I.Basic Int] loc] $
+               I.Result funcs [I.Var ok_int] loc
   countfun <- binOpLambda I.Plus (I.Basic Int) loc
   let markfun = Lambda { I.lambdaParams = lambdaParams lam
                        , I.lambdaBody = markfunBody

@@ -18,7 +18,6 @@ module L0C.HORepresentation.SOACNest
   , toExp
   , fromSOAC
   , toSOAC
-  , letPattern
   , inputBindings
   , inputsPerLevel
   )
@@ -80,7 +79,7 @@ bodyToLambda (NewNest (Nesting paramIds inps bndIds postBody retTypes) op) = do
   return Lambda { lambdaSrcLoc = loc
                 , lambdaParams = map toParam paramIds
                 , lambdaReturnType = retTypes
-                , lambdaBody = f $ LetPat bndIds e postBody loc
+                , lambdaBody = f $ LetBind bndIds e `insertBinding` postBody
                 }
   where loc = srclocOf op
 
@@ -212,17 +211,16 @@ fromSOAC (SOAC.Redomap cs ol l es as loc) =
 
 nested :: Lambda -> Maybe (Combinator, Nesting)
 nested l
-  | LetPat ids e pe _ <- lambdaBody l, -- Is a let-binding...
+  | Body (LetBind ids e:bnds) res <- lambdaBody l, -- Is a let-binding...
     Right soac <- fromSOAC <$> SOAC.fromExp e, -- ...the bindee is a SOAC...
-    Just pe' <-
-      checkPostBody (map fromParam $ lambdaParams l) pe = -- ...where the body is a tuple
-                                                         -- literal of the bound variables.
+    Just postBody <-
+      checkPostBody (map fromParam $ lambdaParams l) $ Body bnds res =
       Just (operation soac,
             -- ... FIXME: need more checks here.
             Nesting { nestingParams = map fromParam $ lambdaParams l
                     , nestingInputs = inputs soac
                     , nestingResult = ids
-                    , nestingPostBody = pe'
+                    , nestingPostBody = postBody
                     , nestingReturnType = lambdaReturnType l
                     })
   | otherwise = Nothing
@@ -251,16 +249,11 @@ subLambda b comb =
     (Nesting paramIds inps bndIds postBody retTypes:rest) -> do
       (e,f) <- runBinder' $ SOAC.toExp <=< toSOAC $ SOACNest inps $ rest `setNesting` comb
       return Lambda { lambdaReturnType = retTypes
-                    , lambdaBody       = f $ LetPat bndIds e postBody loc
+                    , lambdaBody       = f $ LetBind bndIds e `insertBinding` postBody
                     , lambdaSrcLoc     = loc
                     , lambdaParams     = map toParam paramIds
                     }
   where loc = srclocOf comb
-
-letPattern :: [Ident] -> Exp -> Body -> Body
-letPattern bndIds e postBody =
-  LetPat bndIds e postBody loc
-  where loc = srclocOf e
 
 inputBindings :: SOACNest -> [[Ident]]
 inputBindings outernest =

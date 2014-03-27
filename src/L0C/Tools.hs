@@ -23,8 +23,7 @@ module L0C.Tools
   , MonadBinder(..)
   , Binding(..)
   , bodyBindings
-  , insertBindings
-  , insertBindings'
+  , insertBindingsM
   , letBind
   , letWithBind
   , loopBind
@@ -99,8 +98,8 @@ eIf :: MonadBinder m =>
        m Exp -> m Body -> m Body -> [Type] -> SrcLoc -> m Exp
 eIf ce te fe ts loc = do
   ce' <- letSubExp "cond" =<< ce
-  te' <- insertBindings te
-  fe' <- insertBindings fe
+  te' <- insertBindingsM te
+  fe' <- insertBindingsM fe
   return $ If ce' te' fe' ts loc
 
 eBinOp :: MonadBinder m =>
@@ -128,13 +127,13 @@ eAssert e = do e' <- letSubExp "assert_arg" =<< e
                return $ Assert e' $ srclocOf e'
 
 eDoLoop :: MonadBinder m =>
-           [(Ident,m Exp)] -> Ident -> m Exp -> m Body -> m Body -> SrcLoc -> m Body
-eDoLoop pat i boundexp loopbody body loc = do
+           [(Ident,m Exp)] -> Ident -> m Exp -> m Body -> m Body -> m Body
+eDoLoop pat i boundexp loopbody body = do
   mergeexps' <- letSubExps "merge_init" =<< sequence mergeexps
   boundexp' <- letSubExp "bound" =<< boundexp
-  loopbody' <- insertBindings loopbody
-  body' <- insertBindings body
-  return $ DoLoop (zip mergepat mergeexps') i boundexp' loopbody' body' loc
+  loopbody' <- insertBindingsM loopbody
+  Body bnds res <- insertBindingsM body
+  return $ Body (LoopBind (zip mergepat mergeexps') i boundexp' loopbody':bnds) res
   where (mergepat, mergeexps) = unzip pat
 
 eSubExps :: MonadBinder m =>
@@ -145,10 +144,10 @@ eSubExps es loc = do
 
 eBody :: MonadBinder m =>
          m Exp -> m Body
-eBody e = insertBindings $ do
+eBody e = insertBindingsM $ do
             e' <- e
             x <- letTupExp "x" e'
-            return $ Result [] (map Var x) $ srclocOf e'
+            return $ resultBody [] (map Var x) $ srclocOf e'
 
 -- | Create a two-parameter lambda whose body applies the given binary
 -- operation to its arguments.  It is assumed that both argument and
@@ -164,14 +163,14 @@ binOpLambda bop t loc = do
              lambdaParams     = [toParam x, toParam y]
            , lambdaReturnType = [toConstType t]
            , lambdaSrcLoc     = loc
-           , lambdaBody = LetPat [res] (BinOp bop (Var x) (Var y) t loc)
-                          (Result [] [Var res] loc) loc
+           , lambdaBody = Body [LetBind [res] (BinOp bop (Var x) (Var y) t loc)] $
+                          Result [] [Var res] loc
            }
 
 makeLambda :: MonadBinder m =>
               [Param] -> m Body -> m Lambda
 makeLambda params body = do
-  body' <- insertBindings body
+  body' <- insertBindingsM body
   return Lambda {
              lambdaParams = params
            , lambdaSrcLoc = srclocOf body'
@@ -179,23 +178,9 @@ makeLambda params body = do
            , lambdaBody = body'
            }
 
-data Binding = LoopBind [(Ident, SubExp)] Ident SubExp Body
-             | LetBind [Ident] Exp
-             | LetWithBind Certificates Ident Ident [SubExp] SubExp
-               deriving (Show, Eq)
-
 class (MonadFreshNames m, Applicative m, Monad m) => MonadBinder m where
   addBinding      :: Binding -> m ()
   collectBindings :: m a -> m (a, [Binding])
-
-bodyBindings :: Body -> [Binding]
-bodyBindings (LetPat pat e body _) =
-  LetBind pat e : bodyBindings body
-bodyBindings (DoLoop merge i bound loopbody letbody _) =
-  LoopBind merge i bound loopbody : bodyBindings letbody
-bodyBindings (LetWith cs dest src is ves body _) =
-  LetWithBind cs dest src is ves : bodyBindings body
-bodyBindings (Result {})           = []
 
 letBind :: MonadBinder m => [Ident] -> Exp -> m ()
 letBind pat e =
@@ -211,30 +196,16 @@ loopBind pat i bound loopbody =
   addBinding $ LoopBind pat i bound loopbody
 
 bodyBind :: MonadBinder m => Body -> m [SubExp]
-bodyBind (Result _ es _) = return es
-bodyBind (LetPat pat e body _) = do
-  letBind pat e
-  bodyBind body
-bodyBind (LetWith cs dest src idxs ve body _) = do
-  letWithBind cs dest src idxs ve
-  bodyBind body
-bodyBind (DoLoop merge i bound loopbody letbody _) = do
-  loopBind merge i bound loopbody
-  bodyBind letbody
+bodyBind (Body bnds (Result _ es _)) = do
+  mapM_ addBinding bnds
+  return es
 
-insertBindings :: MonadBinder m => m Body -> m Body
-insertBindings m = do
+-- | Evaluate the action, producing a body, then wrap it in all the
+-- bindings it created using 'addBinding'.
+insertBindingsM :: MonadBinder m => m Body -> m Body
+insertBindingsM m = do
   (e,bnds) <- collectBindings m
-  return $ insertBindings' e bnds
-
-insertBindings' :: Body -> [Binding] -> Body
-insertBindings' = foldr bind
-  where bind (LoopBind pat i bound loopbody) e =
-          DoLoop pat i bound loopbody e $ srclocOf e
-        bind (LetBind pat pate) e =
-          LetPat pat pate e $ srclocOf e
-        bind (LetWithBind cs dest src idxs ve) e =
-          LetWith cs dest src idxs ve e $ srclocOf e
+  return $ insertBindings bnds e
 
 addBindingWriter :: (MonadFreshNames m, Applicative m, MonadWriter (DL.DList Binding) m) =>
                     Binding -> m ()
@@ -268,7 +239,7 @@ runBinder' m = do
   src <- getNameSource
   let (x, bnds, src') = runBinderWithNameSource m src
   putNameSource src'
-  return (x, flip insertBindings' bnds)
+  return (x, insertBindings bnds)
 
 runBinderWithNameSource :: Binder a -> VNameSource -> (a, [Binding], VNameSource)
 runBinderWithNameSource (TransformM m) src =

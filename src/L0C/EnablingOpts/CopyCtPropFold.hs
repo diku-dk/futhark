@@ -20,7 +20,6 @@ import L0C.InternalRep
 import L0C.EnablingOpts.EnablingOptErrors
 import L0C.EnablingOpts.Simplification
 import qualified L0C.Interpreter as Interp
-import L0C.Tools
 import L0C.MonadFreshNames
 
 -----------------------------------------------------------------
@@ -160,30 +159,31 @@ copyCtPropOneLambda prog lam = do
 
 copyCtPropBody :: Body -> CPropM Body
 
-copyCtPropBody (LetWith cs dest src inds el body pos) = do
+copyCtPropBody (Body (LetWithBind cs dest src inds el:bnds) res) = do
   src' <- copyCtPropIdent src
   consuming src' $ do
-    cs'    <- copyCtPropCerts cs
-    el'    <- copyCtPropSubExp el
-    inds'  <- mapM copyCtPropSubExp inds
-    body'  <- copyCtPropBody body
-    dest'  <- copyCtPropBnd dest
-    return $ LetWith cs' dest' src' inds' el' body' pos
+    cs'             <- copyCtPropCerts cs
+    el'             <- copyCtPropSubExp el
+    inds'           <- mapM copyCtPropSubExp inds
+    dest'           <- copyCtPropBnd dest
+    Body bnds' res' <- copyCtPropBody $ Body bnds res
+    return $ Body (LetWithBind cs' dest' src' inds' el' :bnds') res'
 
-copyCtPropBody (LetPat pat e body loc) = do
+copyCtPropBody (Body (LetBind pat e:bnds) res) = do
   pat' <- copyCtPropPat pat
   e' <- copyCtPropExp e
   look <- varLookup
-  res <- simplifyBinding look (LetBind pat e')
-  case res of
-    Just bnds ->
-      copyCtPropBody $ insertBindings' body bnds
+  simplified <- simplifyBinding look (LetBind pat e')
+  let body = Body bnds res
+  case simplified of
+    Just newbnds ->
+      copyCtPropBody $ insertBindings newbnds body
     Nothing   -> do
-      let bnds = getPropBnds pat' e'
-      body' <- binding bnds $ copyCtPropBody body
-      return $ LetPat pat' e' body' loc
+      let patbnds = getPropBnds pat' e'
+      Body bnds' res' <- binding patbnds $ copyCtPropBody body
+      return $ Body (LetBind pat' e':bnds') res'
 
-copyCtPropBody (DoLoop merge idd n loopbody letbody loc) = do
+copyCtPropBody (Body (LoopBind merge idd n loopbody:bnds) res) = do
   let (mergepat, mergeexp) = unzip merge
   mergepat' <- copyCtPropPat mergepat
   mergeexp' <- mapM copyCtPropSubExp mergeexp
@@ -191,14 +191,15 @@ copyCtPropBody (DoLoop merge idd n loopbody letbody loc) = do
   loopbody' <- copyCtPropBody loopbody
   look      <- varLookup
   let merge' = zip mergepat' mergeexp'
-  res <- simplifyBinding look (LoopBind merge' idd n' loopbody')
-  case res of
-    Nothing -> do letbody' <- copyCtPropBody letbody
-                  return $ DoLoop merge' idd n' loopbody' letbody' loc
-    Just bnds -> copyCtPropBody $ insertBindings' letbody bnds
+      letbody = Body bnds res
+  simplified <- simplifyBinding look (LoopBind merge' idd n' loopbody')
+  case simplified of
+    Nothing -> do Body bnds' res' <- copyCtPropBody letbody
+                  return $ Body (LoopBind merge' idd n' loopbody':bnds') res'
+    Just newbnds -> copyCtPropBody $ insertBindings newbnds letbody
 
-copyCtPropBody (Result cs es loc) =
-  Result <$> copyCtPropCerts cs <*> mapM copyCtPropSubExp es <*> pure loc
+copyCtPropBody (Body [] (Result cs es loc)) =
+  resultBody <$> copyCtPropCerts cs <*> mapM copyCtPropSubExp es <*> pure loc
 
 copyCtPropSubExp :: SubExp -> CPropM SubExp
 copyCtPropSubExp (Var ident@(Ident vnm _ pos)) = do

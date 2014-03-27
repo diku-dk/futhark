@@ -224,43 +224,43 @@ evalSubExp (Constant v _) = return v
 
 evalBody :: Body -> L0M [Value]
 
-evalBody (LetPat pat e body _) = do
-  v <- evalExp e
-  binding (zip pat v) $ evalBody body
+evalBody (Body [] (Result _ es _)) =
+  mapM evalSubExp es
 
-evalBody (LetWith _ name src idxs ve body pos) = do
+evalBody (Body (LetBind pat e:bnds) res) = do
+  v <- evalExp e
+  binding (zip pat v) $ evalBody $ Body bnds res
+
+evalBody (Body (LetWithBind _ name src idxs ve:bnds) res) = do
   v <- lookupVar src
   idxs' <- mapM evalSubExp idxs
   vev <- evalSubExp ve
   v' <- change v idxs' vev
-  binding [(name, v')] $ evalBody body
+  binding [(name, v')] $ evalBody $ Body bnds res
   where change _ [] to = return to
         change (ArrayVal arr t) (BasicVal (IntVal i):rest) to
           | i >= 0 && i <= upper = do
             let x = arr ! i
             x' <- change x rest to
             return $ ArrayVal (arr // [(i, x')]) t
-          | otherwise = bad $ IndexOutOfBounds pos
+          | otherwise = bad $ IndexOutOfBounds (srclocOf name)
                               (textual $ identName name) (upper+1) i
           where upper = snd $ bounds arr
-        change _ _ _ = bad $ TypeError pos "evalBody Let Id"
+        change _ _ _ = bad $ TypeError (srclocOf name) "evalBody Let Id"
 
-evalBody (DoLoop merge loopvar boundexp loopbody letbody pos) = do
+evalBody (Body (LoopBind merge loopvar boundexp loopbody:bnds) res) = do
   bound <- evalSubExp boundexp
   mergestart <- mapM evalSubExp mergeexp
   case bound of
     BasicVal (IntVal n) -> do
       loopresult <- foldM iteration mergestart [0..n-1]
-      binding (zip mergepat loopresult) $ evalBody letbody
-    _ -> bad $ TypeError pos "evalBody DoLoop"
+      binding (zip mergepat loopresult) $ evalBody $ Body bnds res
+    _ -> bad $ TypeError (srclocOf boundexp) "evalBody DoLoop"
   where (mergepat, mergeexp) = unzip merge
         iteration mergeval i =
           binding [(loopvar, BasicVal $ IntVal i)] $
             binding (zip mergepat mergeval) $
               evalBody loopbody
-
-evalBody (Result _ es _) =
-  mapM evalSubExp es
 
 evalExp :: Exp -> L0M [Value]
 

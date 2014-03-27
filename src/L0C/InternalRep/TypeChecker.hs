@@ -36,8 +36,8 @@ type TypeError = GenTypeError VName Exp (Several DeclType) (Several Ident)
 -- | A tuple of a return type and a list of argument types.
 type FunBinding = ([DeclType], [DeclType])
 
-data Binding = Bound Type
-             | WasConsumed SrcLoc
+data VarBinding = Bound Type
+                | WasConsumed SrcLoc
 
 data Usage = Consumed SrcLoc
            | Observed SrcLoc
@@ -122,7 +122,7 @@ instance Monoid Dataflow where
 -- only initialised at the very beginning, but the variable table will
 -- be extended during type-checking when let-expressions are
 -- encountered.
-data TypeEnv = TypeEnv { envVtable :: HM.HashMap VName Binding
+data TypeEnv = TypeEnv { envVtable :: HM.HashMap VName VarBinding
                        , envFtable :: HM.HashMap Name FunBinding
                        , envCheckOccurences :: Bool
                        }
@@ -480,27 +480,29 @@ checkSubExp (Var ident) = do
 
 checkBody :: Body -> TypeM Body
 
-checkBody (Result cs es loc) =
-  Result <$> mapM (requireI [Basic Cert] <=< checkIdent) cs
-         <*> mapM checkSubExp es <*> pure loc
+checkBody (Body [] (Result cs es loc)) = do
+  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
+  es' <- mapM checkSubExp es
+  return $ resultBody cs' es' loc
 
-checkBody (LetPat pat e body loc) = do
+checkBody (Body (LetBind pat e:bnds) res) = do
   (e', dataflow) <- collectDataflow $ checkExp e
   (scope, pat') <-
-    checkBinding loc pat (srclocOf e') (typeOf e') dataflow
+    checkBinding (srclocOf e) pat (typeOf e') dataflow
   scope $ do
-    body' <- checkBody body
-    return $ LetPat pat' e' body' loc
+    Body bnds' res' <- checkBody body
+    return $ Body (LetBind pat' e':bnds') res'
+  where body = Body bnds res
 
-checkBody (LetWith cs (Ident dest destt destpos) src idxes ve body pos) = do
+checkBody (Body (LetWithBind cs (Ident dest destt destpos) src idxes ve:bnds) res) = do
   cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
   src' <- checkIdent src
   idxes' <- mapM (require [Basic Int] <=< checkSubExp) idxes
-  destt' <- checkAnnotation pos "source" destt $ identType src' `setAliases` HS.empty
+  destt' <- checkAnnotation (srclocOf src) "source" destt $ identType src' `setAliases` HS.empty
   let dest' = Ident dest destt' destpos
 
   unless (unique (identType src') || basicType (identType src')) $
-    bad $ TypeError pos $ "Source '" ++ textual (identName src) ++ "' is not unique"
+    bad $ TypeError (srclocOf src) $ "Source '" ++ textual (identName src) ++ "' is not unique"
 
   case peelArray (length idxes) (identType src') of
     Nothing -> bad $ IndexingError (identName src)
@@ -508,12 +510,12 @@ checkBody (LetWith cs (Ident dest destt destpos) src idxes ve body pos) = do
     Just elemt ->
       sequentially (require [elemt] =<< checkSubExp ve) $ \ve' _ -> do
         when (identName src `HS.member` aliases (subExpType ve')) $
-          bad $ BadLetWithValue pos
-        (scope, _) <- checkBinding (srclocOf dest') [dest']
-                                   (srclocOf dest') [destt']
+          bad $ BadLetWithValue $ srclocOf src
+        (scope, _) <- checkBinding (srclocOf dest') [dest'] [destt']
                                    mempty
-        body' <- consuming src' $ scope $ checkBody body
-        return $ LetWith cs' dest' src' idxes' ve' body' pos
+        Body bnds' res' <- consuming src' $ scope $ checkBody body
+        return $ Body (LetWithBind cs' dest' src' idxes' ve':bnds') res'
+  where body = Body bnds res
 
 -- Checking of loops is done by synthesing the (almost) equivalent
 -- function and type-checking a call to it.  The difficult part is
@@ -522,8 +524,9 @@ checkBody (LetWith cs (Ident dest destt destpos) src idxes ve body pos) = do
 -- variables in mergepat are actually consumed.  Also, any variables
 -- that are free in the loop body must be passed along as (non-unique)
 -- parameters to the function.
-checkBody (DoLoop merge (Ident loopvar _ _)
-          boundexp loopbody letbody loc) = do
+checkBody (Body (LoopBind merge (Ident loopvar _ loopvarloc)
+                          boundexp loopbody:bnds)
+           res) = do
   let (mergepat, es) = unzip merge
   -- First, check the bound and initial merge expression and throw
   -- away the dataflow.  The dataflow will be reconstructed later, but
@@ -540,7 +543,7 @@ checkBody (DoLoop merge (Ident loopvar _ _)
   (firstscope, mergepat') <-
     let mergets = zipWith setArrayDims (map subExpType es') $
                   map (arrayDims . identType) mergepat
-    in checkBinding loc mergepat loc mergets mempty
+    in checkBinding loc mergepat mergets mempty
   (loopbody', loopflow) <-
     firstscope $ collectDataflow $ binding [iparam] $ checkBody loopbody
 
@@ -590,14 +593,15 @@ checkBody (DoLoop merge (Ident loopvar _ _)
 
       -- The body of the function will be the loop body, but with all
       -- tails replaced with recursive calls.
-      recurse cs args = LetPat result
-                        (Apply fname
-                        ([(Var k, diet (identType k)) | k <- free ] ++
-                         [(Var iparam, Observe),
-                          (Var bound, Observe)] ++
-                         zip args (map (diet . subExpType) args))
-                        rettype loc)
-                        (Result cs (map Var result) loc) loc
+      recurse (Result cs args _) =
+        Body [LetBind result
+              (Apply fname
+               ([(Var k, diet (identType k)) | k <- free ] ++
+                [(Var iparam, Observe),
+                 (Var bound, Observe)] ++
+                zip args (map (diet . subExpType) args))
+               rettype loc)]
+               (Result cs (map Var result) loc)
   let funbody' = mapResult recurse loopbody'
 
   (funcall, callflow) <- collectDataflow $ local bindfun $ do
@@ -608,14 +612,14 @@ checkBody (DoLoop merge (Ident loopvar _ _)
     -- bound and initial merge value, in case they use something
     -- consumed in the call.  This reintroduces the dataflow for
     -- boundexp and mergeexp that we previously threw away.
-    checkBody $ LetPat result
-                (Apply fname
-                 ([(Var k, diet (identType k)) | k <- free ] ++
-                  [(Constant (BasicVal $ IntVal 0) loc, Observe),
-                   (boundexp', Observe)] ++
-                  zip es' (map diet rettype))
-                 rettype loc)
-                (Result [] (map Var result) loc) loc
+    checkBody $ Body [LetBind result
+                      (Apply fname
+                       ([(Var k, diet (identType k)) | k <- free ] ++
+                        [(Constant (BasicVal $ IntVal 0) loc, Observe),
+                         (boundexp', Observe)] ++
+                        zip es' (map diet rettype))
+                       rettype loc)]
+                (Result [] (map Var result) loc)
 
   -- Now we just need to bind the result of the function call to the
   -- original merge pattern.  We remove any aliasing to the merge_val
@@ -623,15 +627,19 @@ checkBody (DoLoop merge (Ident loopvar _ _)
   -- type-checked program.
   let removeMergeVals als = als `HS.difference` HS.fromList (map identName result)
   (secondscope, _) <-
-    checkBinding loc mergepat loc
+    checkBinding loc mergepat
     (map (`changeAliases` removeMergeVals) $ bodyType funcall) callflow
 
   -- And then check the let-body.
   secondscope $ do
-    letbody' <- checkBody letbody
-    return $ DoLoop (zip mergepat' es')
-                    (Ident loopvar (Basic Int) loc) boundexp'
-                    loopbody' letbody' loc
+    Body bnds' res' <- checkBody letbody
+    return $ Body (LoopBind (zip mergepat' es')
+                   (Ident loopvar (Basic Int) loopvarloc) boundexp'
+                   loopbody':bnds')
+                  res'
+  where letbody = Body bnds res
+        loc = case merge of []      -> loopvarloc
+                            (e,_):_ -> srclocOf e
 
 checkExp :: Exp -> TypeM Exp
 
@@ -904,9 +912,9 @@ sequentially m1 m2 = do
           usageOccurences m2flow
   return b
 
-checkBinding :: SrcLoc -> [Ident] -> SrcLoc -> [Type] -> Dataflow
+checkBinding :: SrcLoc -> [Ident] -> [Type] -> Dataflow
              -> TypeM (TypeM a -> TypeM a, [Ident])
-checkBinding patloc pat tloc ts dflow
+checkBinding loc pat ts dflow
   | length pat == length ts = do
   (pat', idds) <-
     runStateT (zipWithM checkBinding' pat ts) []
@@ -914,7 +922,7 @@ checkBinding patloc pat tloc ts dflow
                 (const . const $ binding idds (checkPatSizes pat >> m)),
           pat')
   | otherwise =
-  bad $ InvalidPatternError (Several pat) patloc (Several $ map toDecl ts) tloc
+  bad $ InvalidPatternError (Several pat) (Several $ map toDecl ts) loc
   where checkBinding' (Ident name namet pos) t = do
           t' <- lift $
                 checkAnnotation (srclocOf pat)

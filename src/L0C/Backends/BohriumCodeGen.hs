@@ -175,7 +175,7 @@ binOp _ _ = Nothing
 compileLambda :: Lambda -> ([Param] -> Exp -> Maybe a) -> Maybe a
 compileLambda l f =
   case lambdaBody l of
-    LetPat [k1] op (Result _ [Var k2] _) _
+    Body [LetBind [k1] op] (Result _ [Var k2] _)
       | k1 == k2 -> f (lambdaParams l) op
     _ -> Nothing
 

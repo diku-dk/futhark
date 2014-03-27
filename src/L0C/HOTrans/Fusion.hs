@@ -347,7 +347,7 @@ greedyFuse is_repl lam_used_nms res (out_idds, orig_soac) = do
 
 fusionGatherBody :: FusedRes -> Body -> FusionGM FusedRes
 
-fusionGatherBody fres (LetPat pat e body _)
+fusionGatherBody fres (Body (LetBind pat e:bnds) res)
   | Right soac <- SOAC.fromExp e =
       case soac of
         SOAC.Map _ lam _ _ -> do
@@ -383,34 +383,35 @@ fusionGatherBody fres (LetPat pat e body _)
           (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
           blres' <- fusionGatherExp blres $ SubExps nes loc
           greedyFuse False used_lam blres' (pat, soac)
+  where body = Body bnds res
 
-fusionGatherBody _ (LetPat _ e _ loc)
+fusionGatherBody _ (Body (LetBind _ e:_) _)
   | Left (SOAC.InvalidArrayInput inpe) <- SOAC.fromExp e =
-    badFusionGM $ EnablingOptError loc
+    badFusionGM $ EnablingOptError (srclocOf e)
                   ("In Fusion.hs, "++ppExp (subExp inpe)++" is not valid array input.")
 
-fusionGatherBody fres (LetPat [v] e body _)
+fusionGatherBody fres (Body (LetBind [v] e:bnds) res)
   | Just (src,trns) <- SOAC.transformFromExp e =
-    bindingTransform v src trns $ fusionGatherBody fres body
+    bindingTransform v src trns $ fusionGatherBody fres $ Body bnds res
 
-fusionGatherBody fres (LetPat pat (Replicate n el loc) body _) = do
-  bres <- bindingFamily pat $ fusionGatherBody fres body
+fusionGatherBody fres (Body (LetBind pat (Replicate n el loc):bnds) res) = do
+  bres <- bindingFamily pat $ fusionGatherBody fres $ Body bnds res
   -- Implemented inplace: gets the variables in `n` and `el`
   (used_set, bres') <- getUnfusableSet loc bres [subExp n, subExp el]
   repl_idnm <- newVName "repl_x"
   let repl_id = Ident repl_idnm (Basic Int) loc
-      repl_lam = Lambda [toParam repl_id] (Result [] [el] loc)
+      repl_lam = Lambda [toParam repl_id] (resultBody [] [el] loc)
                  [toConstType $ subExpType el] loc
       soac_repl= SOAC.Map [] repl_lam [SOAC.Input [] $ SOAC.Iota n] loc
   greedyFuse True used_set bres' (pat, soac_repl)
 
-fusionGatherBody fres (LetPat pat e body _) = do
+fusionGatherBody fres (Body (LetBind pat e:bnds) res) = do
     let pat_vars = map (subExp . Var) pat
-    bres <- binding pat $ fusionGatherBody fres body
+    bres <- binding pat $ fusionGatherBody fres $ Body bnds res
     foldM fusionGatherExp bres (e:pat_vars)
 
-fusionGatherBody fres (LetWith _ id1 id0 inds elm body _) = do
-  bres  <- binding [id1] $ fusionGatherBody fres body
+fusionGatherBody fres (Body (LetWithBind _ id1 id0 inds elm:bnds) res) = do
+  bres  <- binding [id1] $ fusionGatherBody fres $ Body bnds res
 
   let pat_vars = [Var id0, Var id1]
   fres' <- foldM fusionGatherSubExp bres (elm : inds ++ pat_vars)
@@ -425,9 +426,9 @@ fusionGatherBody fres (LetWith _ id1 id0 inds elm body _) = do
   let new_kernels = HM.fromList $ zip ker_nms kers'
   return $ fres' { kernels = new_kernels }
 
-fusionGatherBody fres (DoLoop merge _ ub loop_body let_body _) = do
+fusionGatherBody fres (Body (LoopBind merge _ ub loop_body:bnds) res) = do
   let (merge_pat, ini_val) = unzip merge
-  letbres <- binding merge_pat $ fusionGatherBody fres let_body
+  letbres <- binding merge_pat $ fusionGatherBody fres $ Body bnds res
 
   let pat_vars = map Var merge_pat
   fres' <- foldM fusionGatherSubExp letbres (ini_val++ub:pat_vars)
@@ -441,7 +442,7 @@ fusionGatherBody fres (DoLoop merge _ ub loop_body let_body _) = do
   -- merge new_res with fres'
   return $ unionFusionRes new_res' fres'
 
-fusionGatherBody fres (Result {}) =
+fusionGatherBody fres (Body [] _) =
   return fres
 
 fusionGatherExp :: FusedRes -> Exp -> FusionGM FusedRes
@@ -534,14 +535,14 @@ getUnfusableSet loc fres args = do
 
 fuseInBody :: Body -> FusionGM Body
 
-fuseInBody (LetPat pat e body loc) =
+fuseInBody (Body (LetBind pat e:bnds) res) =
   case SOAC.fromExp e of
     Right soac ->
-      replaceSOAC pat soac =<< fuseInBody body
+      replaceSOAC pat soac =<< fuseInBody (Body bnds res)
     _ -> do
-      body' <- fuseInBody body
-      e'    <- fuseInExp e
-      return $ LetPat pat e' body' loc
+      Body bnds' res' <- fuseInBody $ Body bnds res
+      e'              <- fuseInExp e
+      return $ Body (LetBind pat e':bnds') res'
 
 fuseInBody b = mapBodyM fuseIn b
 
@@ -569,7 +570,7 @@ replaceSOAC names@(Ident pat_nm _ _ : _) soac body = do
     Nothing  -> do
       (e,f) <- runBinder' $ SOAC.toExp soac
       e'    <- fuseInExp e
-      return $ f $ LetPat names e' body loc
+      return $ f $ LetBind names e' `insertBinding` body
     Just knm ->
       case HM.lookup knm (kernels fres) of
         Nothing  -> badFusionGM $ EnablingOptError loc

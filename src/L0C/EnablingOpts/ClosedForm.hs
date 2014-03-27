@@ -21,7 +21,6 @@ import Data.Monoid
 
 import L0C.InternalRep
 import L0C.InternalRep.Renamer
-import L0C.Tools
 import L0C.NeedNames
 import L0C.MonadFreshNames
 
@@ -59,21 +58,21 @@ foldClosedForm look pat lam accs arrs =
             LetBind [isEmpty] $ BinOp Equal inputsize zero (Basic Bool) lamloc
           mkBranch  ifNonEmpty =
             LetBind pat $ If (Var isEmpty)
-                             (Result [] accs lamloc)
+                             (resultBody [] accs lamloc)
                              ifNonEmpty
                              (map fromConstType $ lambdaReturnType lam)
                              lamloc
       closedBody' <- renameBody closedBody
       return $ Just [isEmptyCheck, mkBranch closedBody']
   where lamloc = srclocOf lam
-        (_, resultSubExps, _) = bodyResult $ lambdaBody lam
+        res = bodyResult $ lambdaBody lam
         bndMap = makeBindMap $ lambdaBody lam
         (accparams, _) = splitAt (length accs) $ lambdaParams lam
 
         checkResults =
-          liftM (insertBindings' (Result [] (map Var pat) lamloc)) $
+          liftM (\bnds -> Body bnds $ Result [] (map Var pat) lamloc) $
           concat <$> zipWithM checkResult
-                     (zip pat resultSubExps) (zip accparams accs)
+                     (zip pat $ resultSubExps res) (zip accparams accs)
 
         checkResult (p, e) _
           | Just e' <- asFreeSubExp e =

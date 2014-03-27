@@ -21,6 +21,6 @@ compileProg = GenericC.compileProg expCompiler
           | FOT.transformable e =
             liftM GenericC.CompileBody $ runBinder $ do
               es <- letTupExp "soac" =<< FOT.transformExp e
-              return $ Result [] (map Var es) $ srclocOf e
+              return $ resultBody [] (map Var es) $ srclocOf e
           | otherwise           =
             return $ GenericC.CompileExp e

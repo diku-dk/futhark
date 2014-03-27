@@ -341,7 +341,7 @@ iswim _ nest ots
                 lambdaParams = map toParam $ innerAccParams ++ innerArrParams
               , lambdaReturnType = zipWith setOuterSize retTypes $
                                    map (arraySize 0) arrsizes
-              , lambdaBody = Nest.letPattern bndIds innerScan postExp
+              , lambdaBody = LetBind bndIds innerScan `insertBinding` postExp
               , lambdaSrcLoc = loc2
               }
         perm = case retTypes of []  -> []
@@ -447,7 +447,7 @@ pullReshape nest (OReshape cs shape:ots)
                           Nest.nestingParams = ps
                         , Nest.nestingInputs = map SOAC.varInput ps
                         , Nest.nestingResult = bnds
-                        , Nest.nestingPostBody = Result [] (map Var bnds) loc
+                        , Nest.nestingPostBody = resultBody [] (map Var bnds) loc
                         , Nest.nestingReturnType = retTypes
                         }
       outerNests <- mapM outernest $ drop 1 $ reverse $ drop 1 $ tails shape

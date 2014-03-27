@@ -980,8 +980,8 @@ checkBinding pat et dflow = do
           t' <- lift $ checkAnnotation (srclocOf pat) "wildcard" wt t
           return $ Wildcard t' loc
         checkBinding' _ _ =
-          lift $ bad $ InvalidPatternError (untagPattern errpat) (srclocOf errpat)
-                                           (toDecl $ untagType et) $ srclocOf pat
+          lift $ bad $ InvalidPatternError
+                       (untagPattern errpat) (toDecl $ untagType et) $ srclocOf pat
 
         add ident = do
           bnd <- gets $ find (==ident)

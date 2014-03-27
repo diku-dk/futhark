@@ -66,14 +66,14 @@ transformExp mape@(Map cs fun arrs loc) = do
   loopbody <- runBinder $ do
     x <- bodyBind =<< transformLambda fun (index cs inarrs iv)
     dests <- letwith cs outarr (pexp iv) $ map subExp x
-    return $ Result [] (map Var dests) loc
+    return $ resultBody [] (map Var dests) loc
   loopBind (zip outarr resarr) i (isize inarrs) loopbody
   return $ SubExps (map Var outarr) loc
 
 transformExp (Reduce cs fun args loc) = do
   (_, (acc, initacc), (i, iv)) <- newFold loc arrexps accexps
   arrvs <- mapM (letExp "reduce_arr" . subExp) arrexps
-  loopbody <- insertBindings $ transformLambda fun $
+  loopbody <- insertBindingsM $ transformLambda fun $
               map (subExp . Var) acc ++ index cs arrvs iv
   loopBind (zip acc initacc) i (isize arrvs) loopbody
   return $ SubExps (map Var acc) loc
@@ -81,13 +81,13 @@ transformExp (Reduce cs fun args loc) = do
 
 transformExp (Scan cs fun args loc) = do
   ((arr, initarr), (acc, initacc), (i, iv)) <- newFold loc arrexps accexps
-  loopbody <- insertBindings $ do
+  loopbody <- insertBindingsM $ do
     x <- bodyBind =<<
          transformLambda fun (map (subExp . Var) acc ++ index cs arr iv)
     dests <- letwith cs arr (pexp iv) $ map subExp x
     irows <- letSubExps "row" $ index cs dests iv
     rowcopies <- letExps "copy" [ Copy irow loc | irow <- irows ]
-    return $ Result [] (map Var $ rowcopies ++ dests) loc
+    return $ resultBody [] (map Var $ rowcopies ++ dests) loc
   loopBind (zip (acc ++ arr) (initacc ++ initarr)) i (isize arr) loopbody
   return $ SubExps (map Var arr) loc
   where (accexps, arrexps) = unzip args
@@ -98,19 +98,22 @@ transformExp (Filter cs fun arrexps outersize loc) = do
       rowtypes = map (rowType . subExpType) arrexps
   (xs, _) <- unzip <$> mapM (newVar loc "x") rowtypes
   (i, iv) <- newVar loc "i" $ Basic Int
-  test <- insertBindings $ do
+  test <- insertBindingsM $ do
    [check] <- bodyBind =<< transformLambda fun (map (subExp . Var) xs) -- XXX
    res <- letSubExp "res" $
-          If check (Result [] [intval 1] loc) (Result [] [intval 0] loc) [Basic Int] loc
-   return $ Result [] [res] loc
+          If check
+             (resultBody [] [intval 1] loc)
+             (resultBody [] [intval 0] loc)
+             [Basic Int] loc
+   return $ resultBody [] [res] loc
   mape <- letExp "mape" <=< transformExp $
           Map cs (Lambda (map toParam xs) test [Basic Int] loc) (map Var arr) loc
   plus <- do
     (a,av) <- newVar loc "a" (Basic Int)
     (b,bv) <- newVar loc "b" (Basic Int)
-    body <- insertBindings $ do
+    body <- insertBindingsM $ do
       res <- letSubExp "sum" $ BinOp Plus av bv (Basic Int) loc
-      return $ Result [] [res] loc
+      return $ resultBody [] [res] loc
     return $ Lambda [toParam a, toParam b] body [Basic Int] loc
   scan <- transformExp $ Scan cs plus [(intval 0,Var mape)] loc
   ia <- letExp "ia" scan
@@ -118,8 +121,8 @@ transformExp (Filter cs fun arrexps outersize loc) = do
       sub1 e = eBinOp Minus e (pexp $ intval 1) (Basic Int) loc
   resinit <- resultArray (map ((`setOuterSize` outersize) . subExpType) arrexps) loc
   res <- forM (map subExpType resinit) $ \t -> newIdent "filter_result" t loc
-  let resv = Result [] (map Var res) loc
-  loopbody <- insertBindings $ do
+  let resv = resultBody [] (map Var res) loc
+  loopbody <- insertBindingsM $ do
     let indexi = indexia $ pexp iv
         indexin = index cs arr iv
         indexinm1 = indexia $ sub1 $ pexp iv
@@ -139,7 +142,7 @@ transformExp (Filter cs fun arrexps outersize loc) = do
 transformExp (Redomap cs _ innerfun accexps arrexps loc) = do
   (_, (acc, initacc), (i, iv)) <- newFold loc arrexps accexps
   arrvs <- mapM (letExp "redomap_arr" . subExp) arrexps
-  loopbody <- insertBindings $ transformLambda innerfun $
+  loopbody <- insertBindingsM $ transformLambda innerfun $
               map (subExp . Var) acc ++ index cs arrvs iv
   loopBind (zip acc initacc) i (isize arrvs) loopbody
   return $ SubExps (map Var acc) loc
@@ -149,7 +152,7 @@ transformExp e = mapExpM transform e
 transform :: Mapper Binder
 transform = identityMapper {
               mapOnExp = transformExp
-            , mapOnBody = insertBindings . transformBody
+            , mapOnBody = insertBindingsM . transformBody
             }
 
 newFold :: SrcLoc -> [SubExp] -> [SubExp]

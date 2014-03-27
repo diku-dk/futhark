@@ -5,12 +5,13 @@ module L0C.EnablingOpts.DeadVarElim (
                                 deadCodeElim
                             )
   where
- 
+
 import Control.Applicative
 import Control.Monad.Reader
 import Control.Monad.Writer
 
 import qualified Data.Set as S
+import Data.Loc
 
 import L0C.InternalRep
 
@@ -111,56 +112,57 @@ deadCodeElimSubExp (Constant v loc) = return $ Constant v loc
 
 deadCodeElimBody :: Body -> DCElimM Body
 
-deadCodeElimBody (LetPat pat e body pos) = do
+deadCodeElimBody (Body (LetBind pat e:bnds) res) = do
   let idds = map identName pat
-  ((pat',body'), noref) <-
+  ((pat',Body bnds' res'), noref) <-
     collectRes idds $ binding idds $ do
       (pat', _) <- collectRes idds $ deadCodeElimPat pat
-      body' <- deadCodeElimBody body
-      return (pat', body')
+      body <- deadCodeElimBody $ Body bnds res
+      return (pat', body)
 
   if noref
-  then changed $ return body'
+  then changed $ return $ Body bnds' res'
   else do e' <- deadCodeElimExp e
-          return $ LetPat pat' e' body' pos
+          return $ Body (LetBind pat' e':bnds') res'
 
-deadCodeElimBody (LetWith cs dest src idxs el body pos) = do
+deadCodeElimBody (Body (LetWithBind cs dest src idxs el:bnds) res) = do
   cs' <- mapM deadCodeElimIdent cs
-  (body', noref) <- collectRes [identName dest] $
-                    binding [identName dest] $
-                    deadCodeElimBody body
+  (Body bnds' res', noref) <- collectRes [identName dest] $
+                              binding [identName dest] $
+                              deadCodeElimBody $ Body bnds res
   if noref
-  then changed $ return body'
+  then changed $ return $ Body bnds' res'
   else do
-          let srcnm = identName src
-          in_vtab <- asks $ S.member srcnm . envVtable
-          if not in_vtab
-          then badDCElimM $ VarNotInFtab pos srcnm
-          else do _ <- tell $ DCElimRes False (S.insert srcnm S.empty)
-                  idxs' <- mapM deadCodeElimSubExp idxs
-                  el'   <- deadCodeElimSubExp el
-                  src'  <- deadCodeElimIdent src
-                  dest' <- deadCodeElimBnd dest
-                  return $ LetWith cs' dest' src' idxs' el' body' pos
+    let srcnm = identName src
+    in_vtab <- asks $ S.member srcnm . envVtable
+    if not in_vtab
+    then badDCElimM $ VarNotInFtab (srclocOf src) srcnm
+    else do _ <- tell $ DCElimRes False (S.insert srcnm S.empty)
+            idxs' <- mapM deadCodeElimSubExp idxs
+            el'   <- deadCodeElimSubExp el
+            src'  <- deadCodeElimIdent src
+            dest' <- deadCodeElimBnd dest
+            return $ Body (LetWithBind cs' dest' src' idxs' el':bnds') res'
 
-deadCodeElimBody (DoLoop merge idd n loopbdy letbdy pos) = do
+deadCodeElimBody (Body (LoopBind merge idd n loopbdy:bnds) res) = do
   let (mergepat, mergeexp) = unzip merge
       idds = map identName mergepat
-  ((mergepat', letbdy'),noref) <-
+  ((mergepat', Body bnds' res'),noref) <-
     collectRes idds $ binding idds $ do
       (mergepat', _) <- collectRes idds $ deadCodeElimPat mergepat
-      body' <- deadCodeElimBody letbdy
+      body' <- deadCodeElimBody $ Body bnds res
       return (mergepat', body')
   if noref
-  then changed $ return letbdy'
+  then changed $ return $ Body bnds' res'
   else do
     mergeexp' <- mapM deadCodeElimSubExp mergeexp
     n'        <- deadCodeElimSubExp n
     loopbdy'  <- binding ( identName idd : idds) $ deadCodeElimBody loopbdy
-    return $ DoLoop (zip mergepat' mergeexp') idd n' loopbdy' letbdy' pos
+    return $ Body (LoopBind (zip mergepat' mergeexp') idd n' loopbdy':bnds') res'
 
-deadCodeElimBody (Result cs es loc) =
-  Result <$> mapM deadCodeElimIdent cs <*> mapM deadCodeElimSubExp es <*> pure loc
+deadCodeElimBody (Body [] (Result cs es loc)) =
+  resultBody <$> mapM deadCodeElimIdent cs <*>
+                 mapM deadCodeElimSubExp es <*> pure loc
 
 deadCodeElimExp :: Exp -> DCElimM Exp
 deadCodeElimExp = mapExpM mapper

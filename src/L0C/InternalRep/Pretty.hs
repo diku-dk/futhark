@@ -85,13 +85,13 @@ instance Pretty SubExp where
   ppr (Constant v _) = ppr v
 
 instance Pretty Body where
-  ppr (LetPat pat e body _) =
+  ppr (Body (LetBind pat e:bnds) res) =
     aliasComment pat $ align $
     text "let" <+> align (ppPattern pat) <+>
     (if linebreak
      then equals </> indent 2 (ppr e)
      else equals <+> align (ppr e)) <+> text "in" </>
-    ppr body
+    ppr (Body bnds res)
     where linebreak = case e of
                         Map {} -> True
                         Reduce {} -> True
@@ -102,19 +102,19 @@ instance Pretty Body where
                         If {} -> True
                         ArrayLit {} -> False
                         _ -> False
-  ppr (LetWith cs dest src idxs ve body _) =
+  ppr (Body (LetWithBind cs dest src idxs ve:bnds) res) =
     text "let" <+> ppCertificates cs <> ppBinding dest <+> equals <+> ppr src <+>
     text "with" <+> brackets (commasep (map ppr idxs)) <+>
     text "<-" <+> align (ppr ve) <+>
-    text "in" </> ppr body
-  ppr (DoLoop mergepat i bound loopbody letbody _) =
+    text "in" </> ppr (Body bnds res)
+  ppr (Body (LoopBind mergepat i bound loopbody:bnds) res) =
     aliasComment pat $
     text "loop" <+> parens (ppPattern pat <+> equals <+> ppTuple' initexp) <+>
     equals <+> text "for" <+> ppr i <+> text "<" <+> align (ppr bound) <+> text "do" </>
     indent 2 (ppr loopbody) <+> text "in" </>
-    ppr letbody
+    ppr (Body bnds res)
     where (pat, initexp) = unzip mergepat
-  ppr (Result cs es _)
+  ppr (Body [] (Result cs es _))
     | any hasArrayLit es = ppCertificates cs <> braces (commastack $ map ppr es)
     | otherwise          = ppCertificates cs <> braces (commasep   $ map ppr es)
 

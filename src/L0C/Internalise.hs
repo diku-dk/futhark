@@ -85,9 +85,9 @@ internaliseCerts = map internaliseCert
           I.Ident name (I.Basic I.Cert) loc
 
 internaliseBody :: E.Exp -> InternaliseM Body
-internaliseBody e = insertBindings $ do
+internaliseBody e = insertBindingsM $ do
   ses <- letTupExp "norm" =<< internaliseExp e
-  return $ I.Result [] (subExpsWithShapes $ map I.Var ses) $ srclocOf e
+  return $ I.resultBody [] (subExpsWithShapes $ map I.Var ses) $ srclocOf e
 
 internaliseExp :: E.Exp -> InternaliseM I.Exp
 
@@ -114,11 +114,11 @@ internaliseExp (E.Index cs var csidx idxs loc) = do
       c' <- mergeSubExpCerts (c:map I.Var cs')
       csidx' <- mkCerts vs
       let index v = I.Index (certify c' csidx') v idxs' loc
-          resultSubExps [] = I.SubExps [] loc
-          resultSubExps (a:as)
+          certSubExps [] = I.SubExps [] loc
+          certSubExps (a:as)
             | E.arrayRank outtype == 0 = I.SubExps (a:as) loc
             | otherwise                = tuplit c' loc $ a:as
-      resultSubExps <$> letSubExps "idx" (map index vs)
+      certSubExps <$> letSubExps "idx" (map index vs)
     Just [DirectSubst var'] -> do
       csidx' <- mkCerts [var']
       return $ I.Index (cs'++csidx') var' idxs' loc
@@ -373,8 +373,8 @@ internaliseExp (E.If ce te fe t loc) = do
   ce' <- letSubExp "cond" =<< internaliseExp ce
   (shape_te, value_te) <- splitBody <$> internaliseBody te
   (shape_fe, value_fe) <- splitBody <$> internaliseBody fe
-  shape_te' <- insertBindings $ copyConsumed shape_te
-  shape_fe' <- insertBindings $ copyConsumed shape_fe
+  shape_te' <- insertBindingsM $ copyConsumed shape_te
+  shape_fe' <- insertBindingsM $ copyConsumed shape_fe
   if_shape <- if null $ bodyType shape_te
               then return []
               else letTupExp "if_shape" $

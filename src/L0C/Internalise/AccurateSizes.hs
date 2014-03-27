@@ -49,7 +49,7 @@ splitFunction (fname,rettype,params,body,loc) = do
                   Copy (Var $ fromParam param') $ srclocOf param')])
       else
         return (param, [])
-  shapeBody' <- insertBindings $ do
+  shapeBody' <- insertBindingsM $ do
                   mapM_ (uncurry letBind) $ concat copies
                   return shapeBody
   return ((shapeFname, map toDecl shapeRettype, params', shapeBody', loc),
@@ -79,10 +79,10 @@ splitType ts = let (shape_ts, value_ts) = splitTyped id ts
 
 splitBody :: Body -> (Body, Body)
 splitBody body = (shapeBody, valueBody)
-    where shapeBody = flip mapResult body $ \cs es ->
-                      Result cs (fst $ splitTyped subExpType es) loc
-          valueBody = flip mapResult body $ \cs es ->
-                      Result cs (snd $ splitTyped subExpType es) loc
+    where shapeBody = flip mapResult body $ \(Result cs es _) ->
+                      resultBody cs (fst $ splitTyped subExpType es) loc
+          valueBody = flip mapResult body $ \(Result cs es _) ->
+                      resultBody cs (snd $ splitTyped subExpType es) loc
           loc = srclocOf body
 
 splitTyped :: ArrayShape shape => (a -> TypeBase as shape) -> [a] -> ([a], [a])

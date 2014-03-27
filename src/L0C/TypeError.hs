@@ -31,7 +31,7 @@ data GenTypeError vn e t pat =
   -- ^ Two function parameters share the same name.
   | DupPatternError vn SrcLoc SrcLoc
   -- ^ Two pattern variables share the same name.
-  | InvalidPatternError pat SrcLoc t SrcLoc
+  | InvalidPatternError pat t SrcLoc
   -- ^ The pattern is not compatible with the type.
   | UnknownVariableError vn SrcLoc
   -- ^ Unknown variable of the given name referenced at the given spot.
@@ -103,9 +103,9 @@ instance (VarName vn, Pretty e, Located e, Pretty t, Pretty pat) => Show (GenTyp
   show (DupPatternError name pos1 pos2) =
     "Variable " ++ textual name ++ " bound twice in tuple pattern; at " ++
     locStr pos1 ++ " and " ++ locStr pos2 ++ "."
-  show (InvalidPatternError pat patloc t tloc) =
-    "Pattern " ++ ppr' pat ++ " at " ++ locStr patloc ++
-    " cannot match value of type " ++ ppr' t ++ " at " ++ locStr tloc ++ "."
+  show (InvalidPatternError pat t loc) =
+    "Pattern " ++ ppr' pat ++
+    " cannot match value of type " ++ ppr' t ++ " at " ++ locStr loc ++ "."
   show (UnknownVariableError name pos) =
     "Unknown variable " ++ textual name ++ " referenced at " ++ locStr pos ++ "."
   show (UnknownFunctionError fname pos) =

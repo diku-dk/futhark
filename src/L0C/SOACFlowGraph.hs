@@ -119,14 +119,14 @@ soacSeen name produced soac =
         descTransform SOAC.Repeat            = "replicate"
 
 flowForBody :: Body -> FlowM ()
-flowForBody (LetPat pat e body _)
+flowForBody (Body (LetBind pat e:bnds) res)
   | Right e' <- SOAC.fromExp e,
     names@(name:_) <- map identName pat = do
   soacSeen name names e'
-  flowForBody body
-flowForBody (LetPat pat e body _) = do
+  flowForBody $ Body bnds res
+flowForBody (Body (LetBind pat e:bnds) res) = do
   flowForExp e
-  tell $ HM.map expand $ execWriter $ flowForBody body
+  tell $ HM.map expand $ execWriter $ flowForBody $ Body bnds res
   where names = HS.fromList $ map identName pat
         freeInE = HS.toList $ freeNamesInExp e
         expand info =
@@ -139,9 +139,9 @@ flowForBody (LetPat pat e body _) = do
             [ (name, HS.map ("complex":) s) | name <- freeInE ]
           | otherwise =
             [(usedName, s)]
-flowForBody (DoLoop merge _ boundexp loopbody body _)
+flowForBody (Body (LoopBind merge _ boundexp loopbody:bnds) res)
   | names@(name:_) <- map (identName . fst) merge = do
-  flowForBody body
+  flowForBody $ Body bnds res
   tell $ HM.singleton
          (textual name)
          SOACInfo {

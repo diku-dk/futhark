@@ -74,8 +74,9 @@ fuseMaps lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
   where lam2' =
           lam2 { lambdaParams = lam2redparams ++ HM.keys inputmap
                , lambdaBody =
-                 let bindLambda _ es = LetPat pat (SubExps es loc)
-                                       (makeCopiesInner (lambdaBody lam2)) loc
+                 let bindLambda res =
+                       LetBind pat (SubExps (resultSubExps res) loc) `insertBinding`
+                       makeCopiesInner (lambdaBody lam2)
                  in makeCopies $ mapResult bindLambda $ lambdaBody lam1
                }
         loc = srclocOf lam2
@@ -95,7 +96,7 @@ fuseFilters :: Input input =>
             -> (Lambda, [input]) -- ^ The fused lambda and the inputs of the resulting SOAC.
 fuseFilters lam1 inp1 out1 lam2 inp2 vname =
   fuseFilterInto lam1 inp1 out1 lam2 inp2 [vname] false
-  where false = Result [] [Constant (BasicVal $ LogVal False) loc] loc
+  where false = resultBody [] [Constant (BasicVal $ LogVal False) loc] loc
         loc   = srclocOf lam2
 
 -- | Similar to 'fuseFilters', except the second function does not
@@ -121,7 +122,7 @@ fuseFilterIntoFold :: Input input =>
                    -> (Lambda, [input]) -- ^ The fused lambda and the inputs of the resulting SOAC.
 fuseFilterIntoFold lam1 inp1 out1 lam2 inp2 vnames =
   fuseFilterInto lam1 inp1 out1 lam2 inp2 vnames identity
-  where identity = Result [] (map (Var . fromParam) lam2redparams) $ srclocOf lam2
+  where identity = resultBody [] (map (Var . fromParam) lam2redparams) $ srclocOf lam2
         lam2redparams = take (length (lambdaParams lam2) - length inp2) $
                         lambdaParams lam2
 
@@ -138,20 +139,19 @@ fuseFilterInto lam1 inp1 out1 lam2 inp2 vnames falsebranch = (lam2', HM.elems in
         loc = srclocOf lam2
         residents = [ Ident vname t loc |
                       (vname, t) <- zip vnames $ bodyType falsebranch ]
-        branch = flip mapResult (lambdaBody lam1) $ \cs es ->
-                 let [e] = es in -- XXX
-                 LetPat residents
-                        (If e
-                         (makeCopiesInner $ lambdaBody lam2)
-                         falsebranch
-                         (zipWith unifyUniqueness
-                          (bodyType (lambdaBody lam2))
-                          (bodyType falsebranch))
-                         loc)
-                 (Result cs (map Var residents) loc)
-                 loc
+        branch = flip mapResult (lambdaBody lam1) $ \res ->
+                 let [e] = resultSubExps res in -- XXX
+                 Body [LetBind residents
+                       (If e
+                        (makeCopiesInner $ lambdaBody lam2)
+                        falsebranch
+                        (zipWith unifyUniqueness
+                         (bodyType (lambdaBody lam2))
+                         (bodyType falsebranch))
+                        loc)] $
+                 Result (resultCertificates res) (map Var residents) loc
         lam1tuple = SubExps (map (Var . fromParam) $ lambdaParams lam1) loc
-        bindins = LetPat pat lam1tuple branch loc
+        bindins = LetBind pat lam1tuple `insertBinding` branch
 
         (lam2redparams, pat, inputmap, makeCopies, makeCopiesInner) =
           fuseInputs lam1 inp1 out1 lam2 inp2
@@ -215,8 +215,9 @@ removeDuplicateInputs = fst . HM.foldlWithKey' comb ((HM.empty, id), M.empty)
                         M.insert arr par arrmap)
             Just par' -> ((parmap, inner . forward par par'),
                           arrmap)
-        forward to from e = LetPat [fromParam to]
-                            (subExp $ Var $ fromParam from) e $ srclocOf e
+        forward to from b =
+          LetBind [fromParam to] (subExp $ Var $ fromParam from)
+          `insertBinding` b
 
 {-
 

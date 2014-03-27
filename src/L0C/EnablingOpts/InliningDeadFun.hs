@@ -14,7 +14,6 @@ import Control.Applicative
 import Control.Monad.Reader
 
 import Data.List
-import Data.Loc
 import Data.Maybe
 
 import qualified Data.HashMap.Lazy as HM
@@ -136,23 +135,23 @@ doInlineInCaller (name,rtp,args,body,pos) inlcallees =
   in (name, rtp, args, body',pos)
 
 inlineInBody :: [FunDec] -> Body -> Body
-inlineInBody inlcallees (LetPat pat (Apply fname args rtp _) letbody loc) =
+inlineInBody inlcallees (Body (LetBind pat (Apply fname args rtp loc):bnds) res) =
   let continue e =
-        LetPat pat e (inlineInBody inlcallees letbody) loc
-      continue' _ es = continue $ SubExps es loc
+        LetBind pat e `insertBinding` inlineInBody inlcallees (Body bnds res)
+      continue' res' = continue $ SubExps (resultSubExps res') loc
   in  case filter (\(nm,_,_,_,_)->fname==nm) inlcallees of
         [] -> continue $ Apply fname args rtp loc
         (_,_,fargs,body,_):_ ->
           let revbnds = zip (map fromParam fargs) $ map fst args
-          in  mapResult continue' $ foldl (addArgBnd loc) body revbnds
+          in  mapResult continue' $ foldl addArgBnd body revbnds
   where
-      addArgBnd :: SrcLoc -> Body -> (Ident, SubExp) -> Body
-      addArgBnd ppos body (farg, aarg) =
+      addArgBnd :: Body -> (Ident, SubExp) -> Body
+      addArgBnd body (farg, aarg) =
           let fargutp = identType farg
               fargnm  = identName   farg
               fargpos = identSrcLoc farg
               farg' = Ident fargnm fargutp fargpos
-          in  LetPat [farg'] (subExp aarg) body ppos
+          in  LetBind [farg'] (subExp aarg) `insertBinding` body
 inlineInBody inlcallees b = mapBody (inliner inlcallees) b
 
 inliner :: Monad m => [FunDec] -> Mapper m

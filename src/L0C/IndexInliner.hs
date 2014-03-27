@@ -44,19 +44,20 @@ transformFun (fname, rettype, params, body, loc) = do
   return (fname, rettype, params, body', loc)
 
 transformBodyM :: Body -> InlinerM Body
-transformBodyM (LetPat pat e@(Map cs fun es mloc) body loc) = do
+transformBodyM (Body (LetBind pat e@(Map cs fun es mloc):bnds) res) = do
   fun' <- transformLambdaM fun
   dels <- performArrayDelays pat e
-  body' <- local (HM.union dels) $ transformBodyM body
-  return $ LetPat pat (Map cs fun' es mloc) body' loc
-transformBodyM (LetPat pat e body loc) = do
+  Body bnds' res' <- local (HM.union dels) $ transformBodyM $ Body bnds res
+  return $ Body (LetBind pat (Map cs fun' es mloc):bnds') res'
+transformBodyM (Body (LetBind pat e:bnds) res) = do
   env <- ask
   (e',f) <- runBinder' $ do
               es <- transformExp env e
               case es of
                 Left e'   -> return e'
-                Right es' -> return $ SubExps es' loc
-  f <$> (LetPat pat e' <$> transformBodyM body <*> pure loc)
+                Right es' -> return $ SubExps es' $ srclocOf e
+  f <$> ((LetBind pat e' `insertBinding`) <$>
+         transformBodyM (Body bnds res))
 transformBodyM body = mapBodyM transform body
   where transform = identityMapper {
                       mapOnBody   = mapBodyM transform
@@ -113,7 +114,7 @@ performArrayDelay' mcs fun vs cs idx =
                         [Index (mcs++cs) v [idx] $ srclocOf v
                            | v <- vs ]
   where inlineMapFun (p:ps) (ie:ies) =
-          LetPat [fromParam p] ie (inlineMapFun ps ies) $ srclocOf p
+          LetBind [fromParam p] ie `insertBinding` inlineMapFun ps ies
         inlineMapFun _ _ =
           lambdaBody fun
 
@@ -129,7 +130,8 @@ performArrayDelays pat e = do
         let loc = srclocOf fb
         runBinder $ do
           es <- bodyBind fb
-          return $ LetPat bnds (SubExps es loc) (Result [] [Var bnd] loc) loc
+          return $ Body [LetBind bnds $ SubExps es loc] $
+                   Result [] [Var bnd] loc
   case performArrayDelay e of
     Nothing -> return emptyArrayIndexMap
     Just f ->
@@ -137,9 +139,9 @@ performArrayDelays pat e = do
                              | (name,bnd) <- zip pat bnds ]
 
 cheapBody :: Body -> Bool
-cheapBody (LetPat _ e body _) = cheapExp e && cheapBody body
-cheapBody (Result {})         = True
-cheapBody _ = False
+cheapBody (Body bnds _) = all cheapBind bnds
+  where cheapBind (LetBind _ e) = cheapExp e
+        cheapBind _             = False
 
 cheapExp :: Exp -> Bool
 cheapExp (BinOp {}) = True
