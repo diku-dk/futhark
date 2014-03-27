@@ -16,8 +16,8 @@ import Control.Monad
 import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
-import Data.List
 import Data.Loc
+import Data.Monoid
 
 import L0C.InternalRep
 import L0C.InternalRep.Renamer
@@ -49,7 +49,7 @@ foldClosedForm :: VarLookup -> [Ident] -> Lambda -> [SubExp] -> [SubExp]
                -> NeedNames (Maybe [Binding])
 
 foldClosedForm look pat lam accs arrs =
-  case checkResults =<< allAreReplicate arrs of
+  case checkResults of
     Nothing -> return Nothing
     Just closedBody -> do
       isEmpty <- newIdent "fold_input_is_empty" (Basic Bool) lamloc
@@ -68,42 +68,62 @@ foldClosedForm look pat lam accs arrs =
   where lamloc = srclocOf lam
         (_, resultSubExps, _) = bodyResult $ lambdaBody lam
         bndMap = makeBindMap $ lambdaBody lam
-        (accparams, arrparams) = splitAt (length accs) $ lambdaParams lam
+        (accparams, _) = splitAt (length accs) $ lambdaParams lam
 
-        checkResults xs =
+        checkResults =
           liftM (insertBindings' (Result [] (map Var pat) lamloc)) $
-          concat <$> zipWithM (checkResult xs)
+          concat <$> zipWithM checkResult
                      (zip pat resultSubExps) (zip accparams accs)
 
-        checkResult _ (p, Constant val loc) _ =
-          Just [LetBind [p] $ subExp $ Constant val loc]
-        checkResult arrelems (p, Var v) _
-          | Just e <- v `isArrayElem` arrelems =
-          -- FIXME need branch here
-          Just [LetBind [p] $ subExp e]
-        checkResult arrelems (p, Var v) (accparam, acc) = do
-          e@(BinOp bop (Var x) (Var y) rt loc) <- HM.lookup v bndMap
+        checkResult (p, e) _
+          | Just e' <- asFreeSubExp e =
+          Just [LetBind [p] $ subExp e']
+        checkResult (p, Var v) (accparam, acc) = do
+          e@(BinOp bop x y rt loc) <- HM.lookup v bndMap
           -- One of x,y must be *this* accumulator, and the other must
-          -- be an array input.
-          el <- x `isArrayElem` arrelems <|> y `isArrayElem` arrelems
-          let isThisAccum = (==fromParam accparam)
-          if isThisAccum x || isThisAccum y then
-            case bop of
-              LogAnd -> -- FIXME need branch here
+          -- be something that is free in the body.
+          let isThisAccum = (==Var (fromParam accparam))
+          (this, el) <- case ((asFreeSubExp x, isThisAccum y),
+                              (asFreeSubExp y, isThisAccum x)) of
+                          ((Just free, True), _) -> Just (acc, free)
+                          (_, (Just free, True)) -> Just (acc, free)
+                          _                           -> Nothing
+          case bop of
+              LogAnd ->
                 Just [LetBind [v] e,
-                      LetBind [p] $ BinOp LogAnd acc el rt loc]
+                      LetBind [p] $ BinOp LogAnd this el rt loc]
               _ -> Nothing -- Um... sorry.
-          else Nothing
 
-        isArrayElem :: Ident -> [SubExp] -> Maybe SubExp
-        isArrayElem v arrelems =
-          snd <$> find ((==identName v) . identName . fst)
-                       (zip arrparams arrelems)
+        checkResult _ _ = Nothing
 
-        allAreReplicate = mapM isReplicate
-        isReplicate (Var v)
-          | Just (Replicate _ ve _) <- look $ identName v = Just ve
+        asFreeSubExp :: SubExp -> Maybe SubExp
+        asFreeSubExp (Var v)
+          | HS.member v nonFree = HM.lookup v knownBindings
+        asFreeSubExp se = Just se
+
+        knownBindings = determineKnownBindings look lam accs arrs
+
+        nonFree = boundInBody (lambdaBody lam) <>
+                  HS.fromList (map fromParam $ lambdaParams lam)
+
+determineKnownBindings :: VarLookup -> Lambda -> [SubExp] -> [SubExp]
+                       -> HM.HashMap Ident SubExp
+determineKnownBindings look lam accs arrs =
+  accBindings <> arrBindings
+  where (accparams, arrparams) =
+          splitAt (length accs) $ map fromParam $ lambdaParams lam
+        accBindings = HM.fromList $ zip accparams accs
+        arrBindings = HM.fromList $ mapMaybe isReplicate $ zip arrparams arrs
+
+        isReplicate (p, Var v)
+          | Just (Replicate _ ve _) <- look $ identName v = Just (p, ve)
         isReplicate _       = Nothing
+
+boundInBody :: Body -> HS.HashSet Ident
+boundInBody = mconcat . map bound . bodyBindings
+  where bound (LetBind pat _)            = HS.fromList pat
+        bound (LoopBind merge _ _ _)     = HS.fromList $ map fst merge
+        bound (LetWithBind _ dest _ _ _) = HS.singleton dest
 
 makeBindMap :: Body -> HM.HashMap Ident Exp
 makeBindMap = HM.fromList . mapMaybe isSingletonBinding . bodyBindings
