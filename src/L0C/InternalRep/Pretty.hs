@@ -152,8 +152,8 @@ instance Pretty Exp where
     ppCertificates cs <> text "rotate" <> apply [ppr n, ppr e]
   ppr (Split cs e a _ _) =
     ppCertificates cs <> text "split" <> apply [ppr e, ppr a]
-  ppr (Concat cs x y size _) =
-    ppCertificates cs <> text "concat" <> apply [ppr x, ppr y] <> apply [ppr size]
+  ppr (Concat cs x y _ _) =
+    ppCertificates cs <> text "concat" <> apply [ppr x, ppr y]
   ppr (Copy e _) = text "copy" <> parens (ppr e)
   ppr (Assert e _) = text "assert" <> parens (ppr e)
   ppr (Conjoin es _) = text "conjoin" <> parens (commasep $ map ppr es)
