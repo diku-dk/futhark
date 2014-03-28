@@ -44,19 +44,19 @@ transformFun (fname, rettype, params, body, loc) = do
   return (fname, rettype, params, body', loc)
 
 transformBodyM :: Body -> InlinerM Body
-transformBodyM (Body (LetBind pat e@(Map cs fun es mloc):bnds) res) = do
+transformBodyM (Body (Let pat e@(Map cs fun es mloc):bnds) res) = do
   fun' <- transformLambdaM fun
   dels <- performArrayDelays pat e
   Body bnds' res' <- local (HM.union dels) $ transformBodyM $ Body bnds res
-  return $ Body (LetBind pat (Map cs fun' es mloc):bnds') res'
-transformBodyM (Body (LetBind pat e:bnds) res) = do
+  return $ Body (Let pat (Map cs fun' es mloc):bnds') res'
+transformBodyM (Body (Let pat e:bnds) res) = do
   env <- ask
   (e',f) <- runBinder' $ do
               es <- transformExp env e
               case es of
                 Left e'   -> return e'
                 Right es' -> return $ SubExps es' $ srclocOf e
-  f <$> ((LetBind pat e' `insertBinding`) <$>
+  f <$> ((Let pat e' `insertBinding`) <$>
          transformBodyM (Body bnds res))
 transformBodyM body = mapBodyM transform body
   where transform = identityMapper {
@@ -114,7 +114,7 @@ performArrayDelay' mcs fun vs cs idx =
                         [Index (mcs++cs) v [idx] $ srclocOf v
                            | v <- vs ]
   where inlineMapFun (p:ps) (ie:ies) =
-          LetBind [fromParam p] ie `insertBinding` inlineMapFun ps ies
+          Let [fromParam p] ie `insertBinding` inlineMapFun ps ies
         inlineMapFun _ _ =
           lambdaBody fun
 
@@ -130,7 +130,7 @@ performArrayDelays pat e = do
         let loc = srclocOf fb
         runBinder $ do
           es <- bodyBind fb
-          return $ Body [LetBind bnds $ SubExps es loc] $
+          return $ Body [Let bnds $ SubExps es loc] $
                    Result [] [Var bnd] loc
   case performArrayDelay e of
     Nothing -> return emptyArrayIndexMap
@@ -140,7 +140,7 @@ performArrayDelays pat e = do
 
 cheapBody :: Body -> Bool
 cheapBody (Body bnds _) = all cheapBind bnds
-  where cheapBind (LetBind _ e) = cheapExp e
+  where cheapBind (Let _ e) = cheapExp e
         cheapBind _             = False
 
 cheapExp :: Exp -> Bool

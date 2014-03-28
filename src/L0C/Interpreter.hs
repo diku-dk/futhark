@@ -227,11 +227,11 @@ evalBody :: Body -> L0M [Value]
 evalBody (Body [] (Result _ es _)) =
   mapM evalSubExp es
 
-evalBody (Body (LetBind pat e:bnds) res) = do
+evalBody (Body (Let pat e:bnds) res) = do
   v <- evalExp e
   binding (zip pat v) $ evalBody $ Body bnds res
 
-evalBody (Body (LetWithBind _ name src idxs ve:bnds) res) = do
+evalBody (Body (LetWith _ name src idxs ve:bnds) res) = do
   v <- lookupVar src
   idxs' <- mapM evalSubExp idxs
   vev <- evalSubExp ve
@@ -248,7 +248,7 @@ evalBody (Body (LetWithBind _ name src idxs ve:bnds) res) = do
           where upper = snd $ bounds arr
         change _ _ _ = bad $ TypeError (srclocOf name) "evalBody Let Id"
 
-evalBody (Body (LoopBind merge loopvar boundexp loopbody:bnds) res) = do
+evalBody (Body (DoLoop merge loopvar boundexp loopbody:bnds) res) = do
   bound <- evalSubExp boundexp
   mergestart <- mapM evalSubExp mergeexp
   case bound of

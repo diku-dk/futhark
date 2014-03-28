@@ -341,7 +341,7 @@ iswim _ nest ots
                 lambdaParams = map toParam $ innerAccParams ++ innerArrParams
               , lambdaReturnType = zipWith setOuterSize retTypes $
                                    map (arraySize 0) arrsizes
-              , lambdaBody = LetBind bndIds innerScan `insertBinding` postExp
+              , lambdaBody = Let bndIds innerScan `insertBinding` postExp
               , lambdaSrcLoc = loc2
               }
         perm = case retTypes of []  -> []

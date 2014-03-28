@@ -204,9 +204,9 @@ instance Located SubExp where
   locOf (Var ident)      = locOf ident
 
 -- | A local variable binding.
-data Binding = LoopBind [(Ident, SubExp)] Ident SubExp Body
-             | LetBind [Ident] Exp
-             | LetWithBind Certificates Ident Ident [SubExp] SubExp
+data Binding = DoLoop [(Ident, SubExp)] Ident SubExp Body
+             | Let [Ident] Exp
+             | LetWith Certificates Ident Ident [SubExp] SubExp
                deriving (Show, Eq, Ord)
 
 -- | The result of a body - a sequence of subexpressions, possibly

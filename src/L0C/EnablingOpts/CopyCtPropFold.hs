@@ -159,7 +159,7 @@ copyCtPropOneLambda prog lam = do
 
 copyCtPropBody :: Body -> CPropM Body
 
-copyCtPropBody (Body (LetWithBind cs dest src inds el:bnds) res) = do
+copyCtPropBody (Body (LetWith cs dest src inds el:bnds) res) = do
   src' <- copyCtPropIdent src
   consuming src' $ do
     cs'             <- copyCtPropCerts cs
@@ -167,13 +167,13 @@ copyCtPropBody (Body (LetWithBind cs dest src inds el:bnds) res) = do
     inds'           <- mapM copyCtPropSubExp inds
     dest'           <- copyCtPropBnd dest
     Body bnds' res' <- copyCtPropBody $ Body bnds res
-    return $ Body (LetWithBind cs' dest' src' inds' el' :bnds') res'
+    return $ Body (LetWith cs' dest' src' inds' el' :bnds') res'
 
-copyCtPropBody (Body (LetBind pat e:bnds) res) = do
+copyCtPropBody (Body (Let pat e:bnds) res) = do
   pat' <- copyCtPropPat pat
   e' <- copyCtPropExp e
   look <- varLookup
-  simplified <- simplifyBinding look (LetBind pat e')
+  simplified <- simplifyBinding look (Let pat e')
   let body = Body bnds res
   case simplified of
     Just newbnds ->
@@ -181,9 +181,9 @@ copyCtPropBody (Body (LetBind pat e:bnds) res) = do
     Nothing   -> do
       let patbnds = getPropBnds pat' e'
       Body bnds' res' <- binding patbnds $ copyCtPropBody body
-      return $ Body (LetBind pat' e':bnds') res'
+      return $ Body (Let pat' e':bnds') res'
 
-copyCtPropBody (Body (LoopBind merge idd n loopbody:bnds) res) = do
+copyCtPropBody (Body (DoLoop merge idd n loopbody:bnds) res) = do
   let (mergepat, mergeexp) = unzip merge
   mergepat' <- copyCtPropPat mergepat
   mergeexp' <- mapM copyCtPropSubExp mergeexp
@@ -192,10 +192,10 @@ copyCtPropBody (Body (LoopBind merge idd n loopbody:bnds) res) = do
   look      <- varLookup
   let merge' = zip mergepat' mergeexp'
       letbody = Body bnds res
-  simplified <- simplifyBinding look (LoopBind merge' idd n' loopbody')
+  simplified <- simplifyBinding look (DoLoop merge' idd n' loopbody')
   case simplified of
     Nothing -> do Body bnds' res' <- copyCtPropBody letbody
-                  return $ Body (LoopBind merge' idd n' loopbody':bnds') res'
+                  return $ Body (DoLoop merge' idd n' loopbody':bnds') res'
     Just newbnds -> copyCtPropBody $ insertBindings newbnds letbody
 
 copyCtPropBody (Body [] (Result cs es loc)) =

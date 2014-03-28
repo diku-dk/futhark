@@ -184,7 +184,7 @@ bindFilterResultOuterShape ce lam args input_size = do
           funcs = resultCertificates res
           result e = resultBody funcs [e] loc
       ok_int <- newIdent "ok" (I.Basic Int) loc
-      return $ Body [I.LetBind [ok_int] $
+      return $ Body [I.Let [ok_int] $
                       I.If ok (result one) (result zero) [I.Basic Int] loc] $
                I.Result funcs [I.Var ok_int] loc
   countfun <- binOpLambda I.Plus (I.Basic Int) loc

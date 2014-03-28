@@ -485,16 +485,16 @@ checkBody (Body [] (Result cs es loc)) = do
   es' <- mapM checkSubExp es
   return $ resultBody cs' es' loc
 
-checkBody (Body (LetBind pat e:bnds) res) = do
+checkBody (Body (Let pat e:bnds) res) = do
   (e', dataflow) <- collectDataflow $ checkExp e
   (scope, pat') <-
     checkBinding (srclocOf e) pat (typeOf e') dataflow
   scope $ do
     Body bnds' res' <- checkBody body
-    return $ Body (LetBind pat' e':bnds') res'
+    return $ Body (Let pat' e':bnds') res'
   where body = Body bnds res
 
-checkBody (Body (LetWithBind cs (Ident dest destt destpos) src idxes ve:bnds) res) = do
+checkBody (Body (LetWith cs (Ident dest destt destpos) src idxes ve:bnds) res) = do
   cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
   src' <- checkIdent src
   idxes' <- mapM (require [Basic Int] <=< checkSubExp) idxes
@@ -514,7 +514,7 @@ checkBody (Body (LetWithBind cs (Ident dest destt destpos) src idxes ve:bnds) re
         (scope, _) <- checkBinding (srclocOf dest') [dest'] [destt']
                                    mempty
         Body bnds' res' <- consuming src' $ scope $ checkBody body
-        return $ Body (LetWithBind cs' dest' src' idxes' ve':bnds') res'
+        return $ Body (LetWith cs' dest' src' idxes' ve':bnds') res'
   where body = Body bnds res
 
 -- Checking of loops is done by synthesing the (almost) equivalent
@@ -524,7 +524,7 @@ checkBody (Body (LetWithBind cs (Ident dest destt destpos) src idxes ve:bnds) re
 -- variables in mergepat are actually consumed.  Also, any variables
 -- that are free in the loop body must be passed along as (non-unique)
 -- parameters to the function.
-checkBody (Body (LoopBind merge (Ident loopvar _ loopvarloc)
+checkBody (Body (DoLoop merge (Ident loopvar _ loopvarloc)
                           boundexp loopbody:bnds)
            res) = do
   let (mergepat, es) = unzip merge
@@ -594,7 +594,7 @@ checkBody (Body (LoopBind merge (Ident loopvar _ loopvarloc)
       -- The body of the function will be the loop body, but with all
       -- tails replaced with recursive calls.
       recurse (Result cs args _) =
-        Body [LetBind result
+        Body [Let result
               (Apply fname
                ([(Var k, diet (identType k)) | k <- free ] ++
                 [(Var iparam, Observe),
@@ -612,7 +612,7 @@ checkBody (Body (LoopBind merge (Ident loopvar _ loopvarloc)
     -- bound and initial merge value, in case they use something
     -- consumed in the call.  This reintroduces the dataflow for
     -- boundexp and mergeexp that we previously threw away.
-    checkBody $ Body [LetBind result
+    checkBody $ Body [Let result
                       (Apply fname
                        ([(Var k, diet (identType k)) | k <- free ] ++
                         [(Constant (BasicVal $ IntVal 0) loc, Observe),
@@ -633,7 +633,7 @@ checkBody (Body (LoopBind merge (Ident loopvar _ loopvarloc)
   -- And then check the let-body.
   secondscope $ do
     Body bnds' res' <- checkBody letbody
-    return $ Body (LoopBind (zip mergepat' es')
+    return $ Body (DoLoop (zip mergepat' es')
                    (Ident loopvar (Basic Int) loopvarloc) boundexp'
                    loopbody':bnds')
                   res'

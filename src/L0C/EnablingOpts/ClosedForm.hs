@@ -55,9 +55,9 @@ foldClosedForm look pat lam accs arrs =
       let inputsize = arraysSize 0 $ map subExpType arrs
           zero      = Constant (BasicVal $ IntVal 0) lamloc
           isEmptyCheck =
-            LetBind [isEmpty] $ BinOp Equal inputsize zero (Basic Bool) lamloc
+            Let [isEmpty] $ BinOp Equal inputsize zero (Basic Bool) lamloc
           mkBranch  ifNonEmpty =
-            LetBind pat $ If (Var isEmpty)
+            Let pat $ If (Var isEmpty)
                              (resultBody [] accs lamloc)
                              ifNonEmpty
                              (map fromConstType $ lambdaReturnType lam)
@@ -76,7 +76,7 @@ foldClosedForm look pat lam accs arrs =
 
         checkResult (p, e) _
           | Just e' <- asFreeSubExp e =
-          Just [LetBind [p] $ subExp e']
+          Just [Let [p] $ subExp e']
         checkResult (p, Var v) (accparam, acc) = do
           e@(BinOp bop x y rt loc) <- HM.lookup v bndMap
           -- One of x,y must be *this* accumulator, and the other must
@@ -89,8 +89,8 @@ foldClosedForm look pat lam accs arrs =
                           _                           -> Nothing
           case bop of
               LogAnd ->
-                Just [LetBind [v] e,
-                      LetBind [p] $ BinOp LogAnd this el rt loc]
+                Just [Let [v] e,
+                      Let [p] $ BinOp LogAnd this el rt loc]
               _ -> Nothing -- Um... sorry.
 
         checkResult _ _ = Nothing
@@ -120,11 +120,11 @@ determineKnownBindings look lam accs arrs =
 
 boundInBody :: Body -> HS.HashSet Ident
 boundInBody = mconcat . map bound . bodyBindings
-  where bound (LetBind pat _)            = HS.fromList pat
-        bound (LoopBind merge _ _ _)     = HS.fromList $ map fst merge
-        bound (LetWithBind _ dest _ _ _) = HS.singleton dest
+  where bound (Let pat _)            = HS.fromList pat
+        bound (DoLoop merge _ _ _)     = HS.fromList $ map fst merge
+        bound (LetWith _ dest _ _ _) = HS.singleton dest
 
 makeBindMap :: Body -> HM.HashMap Ident Exp
 makeBindMap = HM.fromList . mapMaybe isSingletonBinding . bodyBindings
-  where isSingletonBinding (LetBind [v] e) = Just (v,e)
+  where isSingletonBinding (Let [v] e) = Just (v,e)
         isSingletonBinding _               = Nothing

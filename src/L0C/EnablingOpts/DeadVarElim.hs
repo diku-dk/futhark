@@ -112,7 +112,7 @@ deadCodeElimSubExp (Constant v loc) = return $ Constant v loc
 
 deadCodeElimBody :: Body -> DCElimM Body
 
-deadCodeElimBody (Body (LetBind pat e:bnds) res) = do
+deadCodeElimBody (Body (Let pat e:bnds) res) = do
   let idds = map identName pat
   ((pat',Body bnds' res'), noref) <-
     collectRes idds $ binding idds $ do
@@ -123,9 +123,9 @@ deadCodeElimBody (Body (LetBind pat e:bnds) res) = do
   if noref
   then changed $ return $ Body bnds' res'
   else do e' <- deadCodeElimExp e
-          return $ Body (LetBind pat' e':bnds') res'
+          return $ Body (Let pat' e':bnds') res'
 
-deadCodeElimBody (Body (LetWithBind cs dest src idxs el:bnds) res) = do
+deadCodeElimBody (Body (LetWith cs dest src idxs el:bnds) res) = do
   cs' <- mapM deadCodeElimIdent cs
   (Body bnds' res', noref) <- collectRes [identName dest] $
                               binding [identName dest] $
@@ -142,9 +142,9 @@ deadCodeElimBody (Body (LetWithBind cs dest src idxs el:bnds) res) = do
             el'   <- deadCodeElimSubExp el
             src'  <- deadCodeElimIdent src
             dest' <- deadCodeElimBnd dest
-            return $ Body (LetWithBind cs' dest' src' idxs' el':bnds') res'
+            return $ Body (LetWith cs' dest' src' idxs' el':bnds') res'
 
-deadCodeElimBody (Body (LoopBind merge idd n loopbdy:bnds) res) = do
+deadCodeElimBody (Body (DoLoop merge idd n loopbdy:bnds) res) = do
   let (mergepat, mergeexp) = unzip merge
       idds = map identName mergepat
   ((mergepat', Body bnds' res'),noref) <-
@@ -158,7 +158,7 @@ deadCodeElimBody (Body (LoopBind merge idd n loopbdy:bnds) res) = do
     mergeexp' <- mapM deadCodeElimSubExp mergeexp
     n'        <- deadCodeElimSubExp n
     loopbdy'  <- binding ( identName idd : idds) $ deadCodeElimBody loopbdy
-    return $ Body (LoopBind (zip mergepat' mergeexp') idd n' loopbdy':bnds') res'
+    return $ Body (DoLoop (zip mergepat' mergeexp') idd n' loopbdy':bnds') res'
 
 deadCodeElimBody (Body [] (Result cs es loc)) =
   resultBody <$> mapM deadCodeElimIdent cs <*>

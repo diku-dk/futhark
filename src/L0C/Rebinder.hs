@@ -58,13 +58,13 @@ type NeedSet = [BindNeed]
 
 asTail :: BindNeed -> Body
 asTail (LoopNeed merge i bound loopbody) =
-  Body [LoopBind merge i bound loopbody] $ Result [] [] loc
+  Body [DoLoop merge i bound loopbody] $ Result [] [] loc
     where loc = srclocOf loopbody
 asTail (LetNeed pat e _) =
-  Body [LetBind pat e] $ Result [] [] loc
+  Body [Let pat e] $ Result [] [] loc
     where loc = srclocOf pat
 asTail (LetWithNeed cs dest src idxs ve) =
-  Body [LetWithBind cs dest src idxs ve] $ Result [] [Var dest] loc
+  Body [LetWith cs dest src idxs ve] $ Result [] [Var dest] loc
     where loc = srclocOf dest
 
 requires :: BindNeed -> HS.HashSet VName
@@ -186,7 +186,7 @@ addBindings dupes needs =
           ((m `HM.union` distances m bnd, ds),
            bind bnd $
            \(Body bnds res) ->
-             Body (LoopBind merge loopvar boundexp loopbody:bnds) res)
+             Body (DoLoop merge loopvar boundexp loopbody:bnds) res)
 
         comb (m,ds) (LetNeed pat e alts) =
           let add e' =
@@ -194,7 +194,7 @@ addBindings dupes needs =
                     bnd       = LetNeed pat e'' []
                 in ((m `HM.union` distances m bnd, ds'),
                     bind bnd $
-                    \(Body bnds res) -> Body (LetBind pat e'':bnds) res)
+                    \(Body bnds res) -> Body (Let pat e'':bnds) res)
           in case map snd $ sortBy (comparing fst) $ map (score m) $ e:alts of
                e':_ -> add e'
                _    -> add e
@@ -202,7 +202,7 @@ addBindings dupes needs =
         comb (m,ds) bnd@(LetWithNeed cs dest src idxs ve) =
           ((m `HM.union` distances m bnd, ds),
            bind bnd $
-           \(Body bnds res) -> Body (LetWithBind cs dest src idxs ve:bnds) res)
+           \(Body bnds res) -> Body (LetWith cs dest src idxs ve:bnds) res)
 
 score :: HM.HashMap VName Int -> Exp -> (Int, Exp)
 score m (SubExps [Var k] _) =
@@ -378,18 +378,18 @@ hoistInBody (Body [] (Result cs es loc)) =
   resultBody <$> mapM hoistInIdent cs <*>
                  mapM hoistInSubExp es <*> pure loc
 
-hoistInBody (Body (LetBind pat e:bnds) res) = do
+hoistInBody (Body (Let pat e:bnds) res) = do
   pat' <- mapM hoistInIdent pat
   e' <- hoistInExp e
   bindLet pat' e' $ hoistInBody $ Body bnds res
-hoistInBody (Body (LetWithBind cs dest src idxs ve:bnds) res) = do
+hoistInBody (Body (LetWith cs dest src idxs ve:bnds) res) = do
   cs'   <- mapM hoistInIdent cs
   dest' <- hoistInIdent dest
   src'  <- hoistInIdent src
   idxs' <- mapM hoistInSubExp idxs
   ve'   <- hoistInSubExp ve
   bindLetWith cs' dest' src' idxs' ve' $ hoistInBody $ Body bnds res
-hoistInBody (Body (LoopBind merge loopvar boundexp loopbody:bnds) res) = do
+hoistInBody (Body (DoLoop merge loopvar boundexp loopbody:bnds) res) = do
   let (mergepat, mergeexp) = unzip merge
   loopbody' <- blockIfSeq [hasFree boundnames, isConsumed] $
                hoistInBody loopbody

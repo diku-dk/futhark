@@ -85,7 +85,7 @@ instance Pretty SubExp where
   ppr (Constant v _) = ppr v
 
 instance Pretty Body where
-  ppr (Body (LetBind pat e:bnds) res) =
+  ppr (Body (Let pat e:bnds) res) =
     aliasComment pat $ align $
     text "let" <+> align (ppPattern pat) <+>
     (if linebreak
@@ -102,12 +102,12 @@ instance Pretty Body where
                         If {} -> True
                         ArrayLit {} -> False
                         _ -> False
-  ppr (Body (LetWithBind cs dest src idxs ve:bnds) res) =
+  ppr (Body (LetWith cs dest src idxs ve:bnds) res) =
     text "let" <+> ppCertificates cs <> ppBinding dest <+> equals <+> ppr src <+>
     text "with" <+> brackets (commasep (map ppr idxs)) <+>
     text "<-" <+> align (ppr ve) <+>
     text "in" </> ppr (Body bnds res)
-  ppr (Body (LoopBind mergepat i bound loopbody:bnds) res) =
+  ppr (Body (DoLoop mergepat i bound loopbody:bnds) res) =
     aliasComment pat $
     text "loop" <+> parens (ppPattern pat <+> equals <+> ppTuple' initexp) <+>
     equals <+> text "for" <+> ppr i <+> text "<" <+> align (ppr bound) <+> text "do" </>

@@ -632,11 +632,11 @@ progNames = execWriter . mapM funNames . progFunctions
 
         bodyNames = mapM_ bindingNames . bodyBindings
 
-        bindingNames (LetWithBind _ dest _ _ _) =
+        bindingNames (LetWith _ dest _ _ _) =
           one dest
-        bindingNames (LetBind pat e) =
+        bindingNames (Let pat e) =
           mapM_ one pat >> expNames e
-        bindingNames (LoopBind pat i _ loopbody) =
+        bindingNames (DoLoop pat i _ loopbody) =
           mapM_ (one . fst) pat >> one i >> bodyNames loopbody
 
         expNames = walkExpM names
@@ -694,19 +694,19 @@ freeWalker = identityWalker {
         bodyFree (Body [] (Result cs ses _)) = do
           mapM_ identFree cs
           mapM_ subExpFree ses
-        bodyFree (Body (LetBind pat e:bnds) res) = do
+        bodyFree (Body (Let pat e:bnds) res) = do
           expFree e
           binding (HS.fromList pat) $ do
             mapM_ (typeFree . identType) pat
             bodyFree $ Body bnds res
-        bodyFree (Body (LetWithBind cs dest src idxs ve:bnds) res) = do
+        bodyFree (Body (LetWith cs dest src idxs ve:bnds) res) = do
           mapM_ identFree cs
           identFree src
           mapM_ subExpFree idxs
           typeFree $ identType dest
           subExpFree ve
           binding (HS.singleton dest) $ bodyFree $ Body bnds res
-        bodyFree (Body (LoopBind merge i boundexp loopbody:bnds) res) = do
+        bodyFree (Body (DoLoop merge i boundexp loopbody:bnds) res) = do
           let (mergepat, mergeexps) = unzip merge
           mapM_ subExpFree mergeexps
           subExpFree boundexp
@@ -751,15 +751,15 @@ consumedInBody = execWriter . bodyConsumed
           tell $ identName ident `HS.insert` aliases (identType ident)
 
         bodyConsumed (Body [] _) = return ()
-        bodyConsumed (Body (LetBind pat e:bnds) res) = do
+        bodyConsumed (Body (Let pat e:bnds) res) = do
           expConsumed e
           unconsume (HS.fromList $ map identName pat) $
             bodyConsumed $ Body bnds res
-        bodyConsumed (Body (LetWithBind _ dest src _ _:bnds) res) = do
+        bodyConsumed (Body (LetWith _ dest src _ _:bnds) res) = do
           consume src
           unconsume (HS.singleton $ identName dest) $
             bodyConsumed $ Body bnds res
-        bodyConsumed (Body (LoopBind pat _ _ loopbody:bnds) res) =
+        bodyConsumed (Body (DoLoop pat _ _ loopbody:bnds) res) =
           unconsume (HS.fromList (map (identName . fst) pat)) $ do
             bodyConsumed loopbody
             bodyConsumed $ Body bnds res

@@ -118,7 +118,7 @@ instance Rename Result where
 
 instance Rename Body where
   rename (Body [] res) = Body [] <$> rename res
-  rename (Body (LetWithBind cs dest src idxs ve:bnds) res) = do
+  rename (Body (LetWith cs dest src idxs ve:bnds) res) = do
     cs' <- mapM rename cs
     src' <- rename src
     idxs' <- mapM rename idxs
@@ -126,14 +126,14 @@ instance Rename Body where
     bind [dest] $ do
       dest' <- rename dest
       Body bnds' res' <- rename $ Body bnds res
-      return $ Body (LetWithBind cs' dest' src' idxs' ve':bnds') res'
-  rename (Body (LetBind pat e:bnds) res) = do
+      return $ Body (LetWith cs' dest' src' idxs' ve':bnds') res'
+  rename (Body (Let pat e:bnds) res) = do
     e1' <- rename e
     bind pat $ do
       pat' <- mapM rename pat
       Body bnds' res' <- rename $ Body bnds res
-      return $ Body (LetBind pat' e1':bnds') res'
-  rename (Body (LoopBind merge loopvar boundexp loopbody:bnds) res) = do
+      return $ Body (Let pat' e1':bnds') res'
+  rename (Body (DoLoop merge loopvar boundexp loopbody:bnds) res) = do
     let (mergepat, mergeexp) = unzip merge
     boundexp' <- rename boundexp
     mergeexp' <- mapM rename mergeexp
@@ -143,7 +143,7 @@ instance Rename Body where
       bind [loopvar] $ do
         loopvar'  <- rename loopvar
         loopbody' <- rename loopbody
-        return $ Body (LoopBind (zip mergepat' mergeexp')
+        return $ Body (DoLoop (zip mergepat' mergeexp')
                                 loopvar' boundexp' loopbody':bnds')
                       res'
 

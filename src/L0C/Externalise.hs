@@ -37,16 +37,16 @@ externaliseFunction (fname, ret, params, body, loc) =
 externaliseBody :: I.Body -> E.Exp
 externaliseBody (I.Body [] (I.Result _ es loc)) =
   externaliseSubExps es loc
-externaliseBody (I.Body (I.LetBind pat e:bnds) res) =
+externaliseBody (I.Body (I.Let pat e:bnds) res) =
   E.LetPat (externalisePat pat loc) (externaliseExp e)
            (externaliseBody $ I.Body bnds res) loc
   where loc = srclocOf e
-externaliseBody (I.Body (I.LetWithBind cs dest src idxs ve:bnds) res) =
+externaliseBody (I.Body (I.LetWith cs dest src idxs ve:bnds) res) =
   E.LetWith (externaliseCerts cs) (externaliseIdent dest) (externaliseIdent src)
             (Just []) (map externaliseSubExp idxs)
             (externaliseSubExp ve) (externaliseBody $ I.Body bnds res) $
             srclocOf dest
-externaliseBody (I.Body (I.LoopBind merge i bound loopbody:bnds) res) =
+externaliseBody (I.Body (I.DoLoop merge i bound loopbody:bnds) res) =
   E.DoLoop (externalisePat mergepat loc) (externaliseSubExps mergeexp loc)
            (externaliseIdent i) (externaliseSubExp bound)
            (externaliseBody loopbody) (externaliseBody $ I.Body bnds res) loc

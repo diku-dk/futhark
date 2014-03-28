@@ -79,7 +79,7 @@ bodyToLambda (NewNest (Nesting paramIds inps bndIds postBody retTypes) op) = do
   return Lambda { lambdaSrcLoc = loc
                 , lambdaParams = map toParam paramIds
                 , lambdaReturnType = retTypes
-                , lambdaBody = f $ LetBind bndIds e `insertBinding` postBody
+                , lambdaBody = f $ Let bndIds e `insertBinding` postBody
                 }
   where loc = srclocOf op
 
@@ -211,7 +211,7 @@ fromSOAC (SOAC.Redomap cs ol l es as loc) =
 
 nested :: Lambda -> Maybe (Combinator, Nesting)
 nested l
-  | Body (LetBind ids e:bnds) res <- lambdaBody l, -- Is a let-binding...
+  | Body (Let ids e:bnds) res <- lambdaBody l, -- Is a let-binding...
     Right soac <- fromSOAC <$> SOAC.fromExp e, -- ...the bindee is a SOAC...
     Just postBody <-
       checkPostBody (map fromParam $ lambdaParams l) $ Body bnds res =
@@ -249,7 +249,7 @@ subLambda b comb =
     (Nesting paramIds inps bndIds postBody retTypes:rest) -> do
       (e,f) <- runBinder' $ SOAC.toExp <=< toSOAC $ SOACNest inps $ rest `setNesting` comb
       return Lambda { lambdaReturnType = retTypes
-                    , lambdaBody       = f $ LetBind bndIds e `insertBinding` postBody
+                    , lambdaBody       = f $ Let bndIds e `insertBinding` postBody
                     , lambdaSrcLoc     = loc
                     , lambdaParams     = map toParam paramIds
                     }

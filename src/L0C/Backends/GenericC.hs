@@ -397,7 +397,7 @@ compileBody :: C.Exp -> Body -> CompilerM [C.BlockItem]
 compileBody place (Body [] (Result _ [e] _))  = compileSubExp place e
 compileBody place (Body [] (Result _ es loc)) = compileExp place $ SubExps es loc
 
-compileBody place (Body (LetBind pat e:bnds) res) = do
+compileBody place (Body (Let pat e:bnds) res) = do
   val <- new "let_value"
   e' <- compileExp (varExp val) e
   let bindings = compilePattern pat (varExp val)
@@ -409,7 +409,7 @@ compileBody place (Body (LetBind pat e:bnds) res) = do
                      $items:body
                    }|]
 
-compileBody place (Body (LetWithBind _ name src idxs ve:bnds) res) = do
+compileBody place (Body (LetWith _ name src idxs ve:bnds) res) = do
   name' <- new $ textual $ identName name
   src' <- lookupVar $ identName src
   etype <- typeToCType [identType src]
@@ -443,7 +443,7 @@ compileBody place (Body (LetWithBind _ name src idxs ve:bnds) res) = do
                      $items:body
                    }|]
 
-compileBody place (Body (LoopBind merge loopvar boundexp loopbody:bnds) res) = do
+compileBody place (Body (DoLoop merge loopvar boundexp loopbody:bnds) res) = do
   let (mergepat, mergeexp) = unzip merge
   loopvar' <- new $ textual $ identName loopvar
   bound <- new "loop_bound"
@@ -662,9 +662,9 @@ compileExp' place (Replicate ne ve pos) = do
   let nident = Ident nv (Basic Int) pos
       vident = Ident vv (subExpType ve) pos
       rident = Ident rr (arrayOf (subExpType ve) (Shape [Var nident]) Unique) pos
-      nlet = LetBind [nident] (subExp ne)
-      vlet = LetBind [vident] (subExp ve)
-      rlet = LetBind [rident] (Replicate (Var nident) (Var vident) pos)
+      nlet = Let [nident] (subExp ne)
+      vlet = Let [vident] (subExp ve)
+      rlet = Let [rident] (Replicate (Var nident) (Var vident) pos)
   compileBody place $ Body [nlet,vlet,rlet] $ Result [] [Var rident] pos
 
 compileExp' place (Reshape _ shapeexps arrexp _) = do

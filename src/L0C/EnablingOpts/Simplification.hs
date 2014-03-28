@@ -74,7 +74,7 @@ simplificationRules = [ liftIdentityMapping
                       ]
 
 liftIdentityMapping :: SimplificationRule
-liftIdentityMapping _ (LetBind pat (Map cs fun arrs loc)) =
+liftIdentityMapping _ (Let pat (Map cs fun arrs loc)) =
   case foldr checkInvariance ([], [], []) $ zip3 pat ses rettype of
     ([], _, _) -> return Nothing
     (invariant, mapresult, rettype') ->
@@ -83,7 +83,7 @@ liftIdentityMapping _ (LetBind pat (Map cs fun arrs loc)) =
           fun' = fun { lambdaBody = lambdaRes `setBodyResult` lambdaBody fun
                      , lambdaReturnType = rettype'
                      }
-      in return $ Just $ LetBind pat' (Map cs fun' arrs loc) : invariant
+      in return $ Just $ Let pat' (Map cs fun' arrs loc) : invariant
   where inputMap = HM.fromList $ zip (map identName $ lambdaParams fun) arrs
         free = freeInBody $ lambdaBody fun
         rettype = lambdaReturnType fun
@@ -95,11 +95,11 @@ liftIdentityMapping _ (LetBind pat (Map cs fun arrs loc)) =
 
         checkInvariance (outId, Var v, _) (invariant, mapresult, rettype')
           | Just inp <- HM.lookup (identName v) inputMap =
-            (LetBind [outId] (subExp inp) : invariant,
+            (Let [outId] (subExp inp) : invariant,
              mapresult,
              rettype')
         checkInvariance (outId, e, t) (invariant, mapresult, rettype')
-          | freeOrConst e = (LetBind [outId] (Replicate outersize e loc) : invariant,
+          | freeOrConst e = (Let [outId] (Replicate outersize e loc) : invariant,
                              mapresult,
                              rettype')
           | otherwise = (invariant,
@@ -110,7 +110,7 @@ liftIdentityMapping _ _ = return Nothing
 -- | Remove all arguments to the map that are simply replicates.
 -- These can be turned into free variables instead.
 removeReplicateMapping :: SimplificationRule
-removeReplicateMapping look (LetBind pat (Map cs fun arrs loc))
+removeReplicateMapping look (Let pat (Map cs fun arrs loc))
   | replicatesOrNot <- zipWith isReplicate (lambdaParams fun) arrs,
     any isRight replicatesOrNot =
   let (paramsAndArrs, parameterBnds) = partitionEithers replicatesOrNot
@@ -122,13 +122,13 @@ removeReplicateMapping look (LetBind pat (Map cs fun arrs loc))
       Result _ ses resloc = bodyResult $ lambdaBody fun
       mapres = bodyBindings $ lambdaBody fun
       mapbnds = case arrs' of
-                  [] -> mapres ++ [ LetBind [v] $ Replicate n e resloc
+                  [] -> mapres ++ [ Let [v] $ Replicate n e resloc
                                     | (v,e) <- zip pat ses ]
-                  _  -> [LetBind pat $ Map cs fun' arrs' loc]
+                  _  -> [Let pat $ Map cs fun' arrs' loc]
   in return $ Just $ parameterBnds ++ mapbnds
   where isReplicate p (Var v)
           | Just (Replicate _ e _) <- look $ identName v =
-          Right (LetBind [fromParam p] $ subExp e)
+          Right (Let [fromParam p] $ subExp e)
         isReplicate p e =
           Left  (p, e)
 
@@ -137,7 +137,7 @@ removeReplicateMapping look (LetBind pat (Map cs fun arrs loc))
 removeReplicateMapping _ _ = return Nothing
 
 hoistLoopInvariantMergeVariables :: SimplificationRule
-hoistLoopInvariantMergeVariables _ (LoopBind merge idd n loopbody) =
+hoistLoopInvariantMergeVariables _ (DoLoop merge idd n loopbody) =
     -- Figure out which of the elemens of loopresult are loop-invariant,
   -- and hoist them out.
   case foldr checkInvariance ([], [], []) $ zip merge ses of
@@ -149,12 +149,12 @@ hoistLoopInvariantMergeVariables _ (LoopBind merge idd n loopbody) =
       -- the operation with the new enclosing bindings, because
       -- opportunities for copy propagation will have cropped up.
       let loopbody' = resultBody cs ses' resloc `setBodyResult` loopbody
-      in return $ Just $ invariant ++ [LoopBind merge' idd n loopbody']
+      in return $ Just $ invariant ++ [DoLoop merge' idd n loopbody']
   where Result cs ses resloc = bodyResult loopbody
 
         checkInvariance ((v1,initExp), Var v2) (invariant, merge', resExps)
           | identName v1 == identName v2 =
-            (LetBind [v1] (subExp initExp):invariant, merge', resExps)
+            (Let [v1] (subExp initExp):invariant, merge', resExps)
         checkInvariance ((v1,initExp), resExp) (invariant, merge', resExps) =
           (invariant, (v1,initExp):merge', resExp:resExps)
 hoistLoopInvariantMergeVariables _ _ = return Nothing
@@ -162,16 +162,16 @@ hoistLoopInvariantMergeVariables _ _ = return Nothing
 type LetSimplificationRule = VarLookup -> Exp -> Maybe Exp
 
 letRule :: LetSimplificationRule -> SimplificationRule
-letRule rule look (LetBind pat e) = return $ (:[]) . LetBind pat <$> rule look e
+letRule rule look (Let pat e) = return $ (:[]) . Let pat <$> rule look e
 letRule _    _    _               = return Nothing
 
 simplifyClosedFormRedomap :: SimplificationRule
-simplifyClosedFormRedomap look (LetBind pat (Redomap _ _ innerfun acc arr _)) =
+simplifyClosedFormRedomap look (Let pat (Redomap _ _ innerfun acc arr _)) =
   foldClosedForm look pat innerfun acc arr
 simplifyClosedFormRedomap _ _ = return Nothing
 
 simplifyClosedFormReduce :: SimplificationRule
-simplifyClosedFormReduce look (LetBind pat (Reduce _ fun args _)) =
+simplifyClosedFormReduce look (Let pat (Reduce _ fun args _)) =
   foldClosedForm look pat fun acc arr
   where (acc, arr) = unzip args
 simplifyClosedFormReduce _ _ = return Nothing
@@ -487,10 +487,10 @@ simplifyIndexing look (Index cs idd inds loc) =
 simplifyIndexing _ _ = Nothing
 
 simplifyBranch :: SimplificationRule
-simplifyBranch _ (LetBind pat (If e1 tb fb _ _))
+simplifyBranch _ (Let pat (If e1 tb fb _ _))
   | Just branch <- checkBranch =
   let Result _ ses resloc = bodyResult branch
-  in return $ Just $ bodyBindings branch ++ [LetBind pat $ SubExps ses resloc]
+  in return $ Just $ bodyBindings branch ++ [Let pat $ SubExps ses resloc]
   where checkBranch
           | isCt1 e1  = Just tb
           | isCt0 e1  = Just fb

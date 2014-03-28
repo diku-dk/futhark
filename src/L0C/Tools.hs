@@ -133,7 +133,7 @@ eDoLoop pat i boundexp loopbody body = do
   boundexp' <- letSubExp "bound" =<< boundexp
   loopbody' <- insertBindingsM loopbody
   Body bnds res <- insertBindingsM body
-  return $ Body (LoopBind (zip mergepat mergeexps') i boundexp' loopbody':bnds) res
+  return $ Body (DoLoop (zip mergepat mergeexps') i boundexp' loopbody':bnds) res
   where (mergepat, mergeexps) = unzip pat
 
 eSubExps :: MonadBinder m =>
@@ -163,7 +163,7 @@ binOpLambda bop t loc = do
              lambdaParams     = [toParam x, toParam y]
            , lambdaReturnType = [toConstType t]
            , lambdaSrcLoc     = loc
-           , lambdaBody = Body [LetBind [res] (BinOp bop (Var x) (Var y) t loc)] $
+           , lambdaBody = Body [Let [res] (BinOp bop (Var x) (Var y) t loc)] $
                           Result [] [Var res] loc
            }
 
@@ -184,16 +184,16 @@ class (MonadFreshNames m, Applicative m, Monad m) => MonadBinder m where
 
 letBind :: MonadBinder m => [Ident] -> Exp -> m ()
 letBind pat e =
-  addBinding $ LetBind pat e
+  addBinding $ Let pat e
 
 letWithBind :: MonadBinder m =>
                Certificates -> Ident -> Ident -> [SubExp] -> SubExp -> m ()
 letWithBind cs dest src idxs ve =
-  addBinding $ LetWithBind cs dest src idxs ve
+  addBinding $ LetWith cs dest src idxs ve
 
 loopBind :: MonadBinder m => [(Ident, SubExp)] -> Ident -> SubExp -> Body -> m ()
 loopBind pat i bound loopbody =
-  addBinding $ LoopBind pat i bound loopbody
+  addBinding $ DoLoop pat i bound loopbody
 
 bodyBind :: MonadBinder m => Body -> m [SubExp]
 bodyBind (Body bnds (Result _ es _)) = do
