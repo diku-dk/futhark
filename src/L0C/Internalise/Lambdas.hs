@@ -125,10 +125,10 @@ bindMapShapes cs sizefun args outer_shape = do
   where loc = srclocOf sizefun
 
 internaliseFoldLambda :: (E.Exp -> InternaliseM Body)
-                        -> I.Ident
-                        -> E.Lambda
-                        -> [I.Type] -> [I.Type]
-                        -> InternaliseM (I.Certificates, I.Lambda)
+                      -> I.Ident
+                      -> E.Lambda
+                      -> [I.Type] -> [I.Type]
+                      -> InternaliseM (I.Certificates, I.Lambda)
 internaliseFoldLambda internaliseBody ce lam acctypes arrtypes = do
   let rowtypes = map I.rowType arrtypes
   (params, body, rettype) <- internaliseLambda internaliseBody ce lam $ acctypes ++ rowtypes
@@ -136,8 +136,23 @@ internaliseFoldLambda internaliseBody ce lam acctypes arrtypes = do
       (_, rettype_value) = splitType rettype
       rettype' = [ t `setArrayShape` arrayShape shape
                    | (t,shape) <- zip rettype_value acctypes ]
-  -- FIXME: Check that accumulator and rows have same size.
-  return ([], I.Lambda params value_body rettype' loc)
+  -- The result of the body must have the exact same
+  -- shape as the initial accumulator.  Generate an assertion and insert
+  -- it at the end of the body.
+  value_body' <-
+    flip mapResultM value_body $ \(I.Result cs es resloc) -> do
+      let subExpChecks :: I.Type -> I.Type -> InternaliseM [I.Ident]
+          subExpChecks rest acct =
+            forM (zip (I.arrayDims rest) (I.arrayDims acct)) $ \(res_n,acc_n) -> do
+              size_cmp <- letSubExp "fold_size_cmp" $
+                          I.BinOp I.Equal res_n acc_n (I.Basic I.Bool) resloc
+              letExp "fold_size_chk" $ I.Assert size_cmp resloc
+      insertBindingsM $ do
+        cs2 <-
+          liftM concat $ zipWithM subExpChecks (map subExpType es) acctypes
+        return $ I.resultBody (cs++cs2) es resloc
+
+  return ([], I.Lambda params value_body' rettype' loc)
   where loc = srclocOf lam
 
 internaliseFilterLambda :: (E.Exp -> InternaliseM Body)
