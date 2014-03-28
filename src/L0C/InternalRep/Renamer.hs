@@ -19,8 +19,6 @@ module L0C.InternalRep.Renamer
   )
   where
 
-import Debug.Trace
-
 import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Reader
@@ -43,7 +41,6 @@ runRenamer m src = runReader (runStateT m src) env
 -- invalid program valid.
 renameProg :: Prog -> Prog
 renameProg prog = Prog $ fst $
-                  trace (show (progNames prog) ++ "\n" ++ prettyPrint prog) $
                   runRenamer (mapM renameFun $ progFunctions prog) src
   where src = newNameSourceForProg prog
 
