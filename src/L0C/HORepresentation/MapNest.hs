@@ -59,7 +59,23 @@ fromSOACNest = fromSOACNest' HS.empty
 
 fromSOACNest' :: HS.HashSet Ident -> SOACNest -> NeedNames (Maybe MapNest)
 
-fromSOACNest' bound (Nest.SOACNest inps (Nest.Map cs body [] loc)) = do
+fromSOACNest' bound (Nest.SOACNest inps
+                     (Nest.Map cs (Nest.NewNest n body@Nest.Map{}) loc)) = do
+  Just mn@(MapNest cs' body' ns' inps' _) <-
+    fromSOACNest' bound' (Nest.SOACNest (Nest.nestingInputs n) body)
+  (ps, inps'') <-
+    unzip <$> fixInputs (zip (map toParam $ Nest.nestingParams n) inps)
+                        (zip (params mn) inps')
+  let n' = Nesting {
+             nestingParams     = map fromParam ps
+           , nestingResult     = Nest.nestingResult n
+           , nestingReturnType = Nest.nestingReturnType n
+           , nestingPostBody   = Nest.nestingPostBody n
+           }
+  return $ Just $ MapNest (cs++cs') body' (n':ns') inps'' loc
+  where bound' = bound `HS.union` HS.fromList (Nest.nestingParams n)
+
+fromSOACNest' bound (Nest.SOACNest inps (Nest.Map cs body loc)) = do
   lam <- lambdaBody <$> Nest.bodyToLambda body
   let boundUsedInBody = HS.toList $ freeInBody lam `HS.intersection` bound
   newParams <- mapM (newIdent' (++"_wasfree")) boundUsedInBody
@@ -84,27 +100,15 @@ fromSOACNest' bound (Nest.SOACNest inps (Nest.Map cs body [] loc)) = do
          then MapNest cs body [] inps loc
          else MapNest cs body' [] inps' loc
 
-fromSOACNest' bound (Nest.SOACNest inps (Nest.Map cs body (n:ns) loc)) = do
-  Just mn@(MapNest cs' body' ns' inps' _) <-
-    fromSOACNest' bound' (Nest.SOACNest (Nest.nestingInputs n) (Nest.Map cs body ns loc))
-  (ps, inps'') <-
-    unzip <$> fixInputs (zip (map toParam $ Nest.nestingParams n) inps)
-                        (zip (params mn) inps')
-  let n' = Nesting {
-             nestingParams     = map fromParam ps
-           , nestingResult     = Nest.nestingResult n
-           , nestingReturnType = Nest.nestingReturnType n
-           , nestingPostBody   = Nest.nestingPostBody n
-           }
-  return $ Just $ MapNest cs' body' (n':ns') inps'' loc
-  where bound' = bound `HS.union` HS.fromList (Nest.nestingParams n)
-
 fromSOACNest' _ _ = return Nothing
 
 toSOACNest :: MapNest -> SOACNest
-toSOACNest (MapNest cs body ns inps loc) =
-  Nest.SOACNest inps $ Nest.Map cs body ns' loc
-  where ns' = map soacNesting ns
+toSOACNest (MapNest cs body [] inps loc) =
+  Nest.SOACNest inps $ Nest.Map cs body loc
+toSOACNest (MapNest cs body (n:ns) inps loc) =
+  let Nest.SOACNest _ body' = toSOACNest $ MapNest cs body ns inps loc
+  in Nest.SOACNest inps $ Nest.Map cs (Nest.NewNest n' body') loc
+  where n' = soacNesting n
         soacNesting nest =
           Nest.Nesting {
                   Nest.nestingParams = nestingParams nest

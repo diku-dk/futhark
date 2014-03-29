@@ -79,7 +79,7 @@ compileInput place shape e = do
                    }|]
 
 compileMap :: C.Exp -> SOACNest -> CompilerM (Maybe [C.BlockItem])
-compileMap target (SOACNest [SOAC.Input [] (SOAC.Var inp)] (Nest.Map _ (Nest.Fun l) _ _))
+compileMap target (SOACNest [SOAC.Input [] (SOAC.Var inp)] (Nest.Map _ (Nest.Fun l) _))
   | all (basicType . identType) $ lambdaParams l,
     Just op <- compileLambda l unOp = do
       inputName <- new "map_input"
@@ -97,7 +97,7 @@ compileMap target (SOACNest [SOAC.Input [] (SOAC.Var inp)] (Nest.Map _ (Nest.Fun
                               }|]
 compileMap target (SOACNest [SOAC.Input [] (SOAC.Var inp1),
                              SOAC.Input [] (SOAC.Var inp2)]
-                   (Nest.Map _ (Nest.Fun l) _ _))
+                   (Nest.Map _ (Nest.Fun l) _))
   | all (basicType . identType) $ lambdaParams l,
     Just op <- compileLambda l binOp = do
       inputName1 <- new "map_input_x"
@@ -119,17 +119,17 @@ compileMap target (SOACNest [SOAC.Input [] (SOAC.Var inp1),
 compileMap _ _ = return Nothing
 
 compileReduce :: C.Exp -> SOACNest -> CompilerM (Maybe [C.BlockItem])
-compileReduce _ (SOACNest _ (Nest.Reduce _ (Nest.Fun _) _ _ _)) =
+compileReduce _ (SOACNest _ (Nest.Reduce _ (Nest.Fun _) _ _)) =
   return Nothing
 compileReduce _ _ = return Nothing
 
 compileMapWithReduce :: C.Exp -> SOACNest -> CompilerM (Maybe [C.BlockItem])
-compileMapWithReduce _ (SOACNest _ (Nest.Reduce _ (Nest.NewNest _ (Nest.Map {})) _ _ _)) =
+compileMapWithReduce _ (SOACNest _ (Nest.Reduce _ (Nest.NewNest _ (Nest.Map {})) _ _)) =
   return Nothing
 compileMapWithReduce _ _ = return Nothing
 
 compileMapWithScan :: C.Exp -> SOACNest -> CompilerM (Maybe [C.BlockItem])
-compileMapWithScan _ (SOACNest _ (Nest.Scan _ (Nest.NewNest _ (Nest.Map {})) _ _ _)) =
+compileMapWithScan _ (SOACNest _ (Nest.Scan _ (Nest.NewNest _ (Nest.Map {})) _ _)) =
   return Nothing
 compileMapWithScan _ _ = return Nothing
 

@@ -320,8 +320,8 @@ optimizations = [iswim]
 
 iswim :: Maybe [Ident] -> SOACNest -> [OutputTransform] -> TryFusion (SOACNest, [OutputTransform])
 iswim _ nest ots
-  | Nest.Scan cs1 (Nest.NewNest lvl nn) [] es@[e] loc1 <- Nest.operation nest,
-    Nest.Map cs2 mb [] loc2 <- nn,
+  | Nest.Scan cs1 (Nest.NewNest lvl nn) es@[e] loc1 <- Nest.operation nest,
+    Nest.Map cs2 mb loc2 <- nn,
     Just e' <- SOAC.inputFromSubExp e,
     Nest.Nesting paramIds mapArrs bndIds postExp retTypes <- lvl,
     mapArrs == map SOAC.varInput paramIds = do
@@ -348,7 +348,7 @@ iswim _ nest ots
                                 t:_ -> transposeIndex 0 1 [0..arrayRank t]
     return (Nest.SOACNest
             newInputs
-            (Nest.Map cs1 (Nest.Fun lam) [] loc2),
+            (Nest.Map cs1 (Nest.Fun lam) loc2),
             ots ++ [ORearrange cs2 perm])
 iswim _ _ _ = fail "ISWIM does not apply"
 
@@ -430,7 +430,7 @@ pullReshape nest (OReshape cs shape:ots)
           inputs' = map (SOAC.addTransform $ SOAC.ReshapeOuter cs shape) $
                     Nest.inputs nest
           inputTypes = SOAC.inputTypes inputs'
-          outernest outershape = do
+          outernest inner outershape = do
             let addDims t = arrayOf t (Shape outershape) $ uniqueness t
                 retTypes = map addDims $ Nest.returnType op
 
@@ -443,20 +443,25 @@ pullReshape nest (OReshape cs shape:ots)
             bnds <- forM retTypes $ \t ->
                       fromParam <$> newIdent "pullReshape_bnd" t loc
 
-            return Nest.Nesting {
-                          Nest.nestingParams = ps
-                        , Nest.nestingInputs = map SOAC.varInput ps
-                        , Nest.nestingResult = bnds
-                        , Nest.nestingPostBody = resultBody [] (map Var bnds) loc
-                        , Nest.nestingReturnType = retTypes
-                        }
-      outerNests <- mapM outernest $ drop 1 $ reverse $ drop 1 $ tails shape
-      let nesting' = outerNests ++ Nest.nesting op
-          nest'   = Nest.SOACNest {
+            let nesting = Nest.Nesting {
+                            Nest.nestingParams = ps
+                          , Nest.nestingInputs = map SOAC.varInput ps
+                          , Nest.nestingResult = bnds
+                          , Nest.nestingPostBody = resultBody [] (map Var bnds) loc
+                          , Nest.nestingReturnType = retTypes
+                          }
+            return $ Nest.Map [] (Nest.NewNest nesting inner) loc
+      -- Only have the certificates on the outermost loop nest.  This
+      -- only has the significance of making the generated code look
+      -- very slightly neater.
+      op' <- foldM outernest ([] `Nest.setCombCertificates` op) $
+             drop 1 $ reverse $ drop 1 $ tails shape
+      let nest'   = Nest.SOACNest {
                       Nest.inputs    = inputs'
-                    , Nest.operation = nesting' `Nest.setNesting` op
+                    , Nest.operation =
+                      Nest.combCertificates op `Nest.setCombCertificates` op'
                     }
-      return (nest',ots)
+      return (nest', ots)
 pullReshape _ _ = fail "Cannot pull reshape"
 
 -- Tie it all together in exposeInputs (for making inputs to a
