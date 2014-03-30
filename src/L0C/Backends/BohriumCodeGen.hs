@@ -79,8 +79,9 @@ compileInput place shape e = do
                    }|]
 
 compileMap :: C.Exp -> SOACNest -> CompilerM (Maybe [C.BlockItem])
-compileMap target (SOACNest [SOAC.Input [] (SOAC.Var inp)] (Nest.Map _ (Nest.Fun l) _))
-  | all (basicType . identType) $ lambdaParams l,
+compileMap target (SOACNest [SOAC.Input ts (SOAC.Var inp)] (Nest.Map _ (Nest.Fun l) _))
+  | SOAC.nullTransforms ts,
+    all (basicType . identType) $ lambdaParams l,
     Just op <- compileLambda l unOp = do
       inputName <- new "map_input"
       outputName <- new "output"
@@ -95,10 +96,12 @@ compileMap target (SOACNest [SOAC.Input [] (SOAC.Var inp)] (Nest.Map _ (Nest.Fun
                                   bh_multi_array_int32_get_base_data
                                     (bh_multi_array_int32_get_base($id:outputName));
                               }|]
-compileMap target (SOACNest [SOAC.Input [] (SOAC.Var inp1),
-                             SOAC.Input [] (SOAC.Var inp2)]
+compileMap target (SOACNest [SOAC.Input ts1 (SOAC.Var inp1),
+                             SOAC.Input ts2 (SOAC.Var inp2)]
                    (Nest.Map _ (Nest.Fun l) _))
-  | all (basicType . identType) $ lambdaParams l,
+  | SOAC.nullTransforms ts1,
+    SOAC.nullTransforms ts2,
+    all (basicType . identType) $ lambdaParams l,
     Just op <- compileLambda l binOp = do
       inputName1 <- new "map_input_x"
       inputName2 <- new "map_input_y"

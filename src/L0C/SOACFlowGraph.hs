@@ -108,7 +108,10 @@ soacSeen name produced soac =
             SOAC.Redomap _ l1 l2 _ _ _ -> ("redomapT", [lambdaBody l1, lambdaBody l2])
 
         inspectInput (SOAC.Input ts (SOAC.Var v)) =
-          Just (identName v, HS.singleton $ map descTransform ts)
+          Just (identName v, HS.singleton $ map descTransform $ unfoldr cons ts)
+          where cons ts' = case SOAC.viewf ts' of
+                             t SOAC.:< ts'' -> Just (t, ts'')
+                             SOAC.EmptyF    -> Nothing
         inspectInput (SOAC.Input _ (SOAC.Iota _)) =
           Nothing
 

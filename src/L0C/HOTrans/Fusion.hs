@@ -8,6 +8,7 @@ import Control.Monad.Reader
 
 import Data.Hashable
 import Data.Maybe
+import Data.Monoid
 import Data.Loc
 
 import qualified Data.HashMap.Lazy as HM
@@ -24,7 +25,7 @@ import qualified L0C.HORepresentation.SOAC as SOAC
 data FusionGEnv = FusionGEnv {
     soacs      :: HM.HashMap VName [VName]
   -- ^ Mapping from variable name to its entire family.
-  , arrsInScope:: HM.HashMap VName (Maybe (Ident, [SOAC.InputTransform]))
+  , arrsInScope:: HM.HashMap VName (Maybe (Ident, SOAC.ArrayTransforms))
   , fusedRes   :: FusedRes
   , program    :: Prog
   }
@@ -41,11 +42,11 @@ instance MonadFreshNames FusionGM where
 --- Monadic Helpers: bind/new/runFusionGatherM, etc                      ---
 ------------------------------------------------------------------------
 
-arrayTransforms :: Ident -> FusionGM (Ident, [SOAC.InputTransform])
+arrayTransforms :: Ident -> FusionGM (Ident, SOAC.ArrayTransforms)
 arrayTransforms v = do
   v' <- asks $ HM.lookup (identName v) . arrsInScope
   case v' of Just (Just res) -> return res
-             _               -> return (v, [])
+             _               -> return (v, SOAC.noTransforms)
 
 -- | Binds an array name to the set of used-array vars
 bindVar :: FusionGEnv -> VName -> FusionGEnv
@@ -70,16 +71,17 @@ bindingFamily :: [Ident] -> FusionGM a -> FusionGM a
 bindingFamily pat = local $ \env -> foldl (bindingFamilyVar names) env names
   where names = map identName pat
 
-bindingTransform :: Ident -> Ident -> SOAC.InputTransform -> FusionGM a -> FusionGM a
+bindingTransform :: Ident -> Ident -> SOAC.ArrayTransform -> FusionGM a -> FusionGM a
 bindingTransform v src trns = local $ \env ->
   case HM.lookup srcname $ arrsInScope env of
     Just (Just (src', ts)) ->
       env { arrsInScope =
-              HM.insert vname (Just (src', ts++[trns])) $ arrsInScope env
+              HM.insert vname (Just (src', ts SOAC.|> trns)) $ arrsInScope env
           }
     Just Nothing ->
       env { arrsInScope =
-              HM.insert vname (Just (src, [trns])) $ arrsInScope env
+              HM.insert vname (Just (src, SOAC.singleTransform trns))
+                  $ arrsInScope env
           }
     _ -> bindVar env vname
   where vname   = identName v
@@ -230,7 +232,7 @@ addNewKerWithUnfusable res (idd, soac) ufs = do
 inlineSOACInput :: SOAC.Input -> FusionGM SOAC.Input
 inlineSOACInput (SOAC.Input ts (SOAC.Var v)) = do
   (v2, ts2) <- arrayTransforms v
-  return $ SOAC.Input (ts2++ts) (SOAC.Var v2)
+  return $ SOAC.Input (ts2<>ts) (SOAC.Var v2)
 inlineSOACInput input = return input
 
 inlineSOACInputs :: SOAC -> FusionGM SOAC
@@ -402,7 +404,7 @@ fusionGatherBody fres (Body (Let pat (Replicate n el loc):bnds) res) = do
   let repl_id = Ident repl_idnm (Basic Int) loc
       repl_lam = Lambda [toParam repl_id] (resultBody [] [el] loc)
                  [toConstType $ subExpType el] loc
-      soac_repl= SOAC.Map [] repl_lam [SOAC.Input [] $ SOAC.Iota n] loc
+      soac_repl= SOAC.Map [] repl_lam [SOAC.Input SOAC.noTransforms $ SOAC.Iota n] loc
   greedyFuse True used_set bres' (pat, soac_repl)
 
 fusionGatherBody fres (Body (Let pat e:bnds) res) = do
@@ -605,15 +607,16 @@ insertKerSOAC ker body = do
                         SOAC.setLambda lam'' new_soac
         return body
 
-transformOutput :: [OutputTransform] -> [Ident] -> SOAC -> Binder ()
-transformOutput [] outIds soac = do
-  e <- SOAC.toExp soac
-  letBind outIds e
-transformOutput (trns:trnss) outIds soac = do
-  newIds <- mapM (newIdent' id) outIds
-  transformOutput trnss newIds soac
-  es     <- mapM (applyTransform trns . Var) newIds
-  zipWithM_ letBind (map (:[]) outIds) es
+transformOutput :: SOAC.ArrayTransforms -> [Ident] -> SOAC -> Binder ()
+transformOutput ts outIds soac =
+  case SOAC.viewf ts of
+    SOAC.EmptyF -> do e <- SOAC.toExp soac
+                      letBind outIds e
+    t SOAC.:< ts' -> do
+      newIds <- mapM (newIdent' id) outIds
+      transformOutput ts' newIds soac
+      es     <- mapM (applyTransform t . Var) newIds
+      zipWithM_ letBind (map (:[]) outIds) es
 
 ---------------------------------------------------
 ---------------------------------------------------
@@ -657,8 +660,8 @@ mergeFusionRes res1 res2 = do
 --   `([a],[b])'
 getIdentArr :: [SOAC.Input] -> ([Ident], [Ident])
 getIdentArr = foldl comb ([],[])
-  where comb (vs,os) (SOAC.Input [] (SOAC.Var idd)) =
-          (idd:vs, os)
+  where comb (vs,os) (SOAC.Input ts (SOAC.Var idd))
+          | SOAC.nullTransforms ts = (idd:vs, os)
         comb (vs, os) inp =
           (vs, maybeToList (SOAC.inputArray inp)++os)
 

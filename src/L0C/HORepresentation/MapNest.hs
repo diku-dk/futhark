@@ -82,7 +82,7 @@ fromSOACNest' bound (Nest.SOACNest inps (Nest.Map cs body loc)) = do
   let subst = HM.fromList $ zip (map identName boundUsedInBody) (map identName newParams)
       size  = arraysSize 0 $ SOAC.inputTypes inps
       inps' = map (substituteNames subst) inps ++
-              map (SOAC.Input [SOAC.Replicate size] . SOAC.Var) boundUsedInBody
+              map (SOAC.addTransform (SOAC.Replicate size) . SOAC.varInput) boundUsedInBody
       body' =
         case body of
           Nest.NewNest n comb ->
@@ -142,8 +142,9 @@ fixInputs ourInps childInps =
     inspect :: ([(Param, Type, SOAC.Input)], [(Param, Type, SOAC.Input)])
             -> (Param, Type, SOAC.Input)
             -> NeedNames ([(Param, Type, SOAC.Input)], [(Param, Type, SOAC.Input)])
-    inspect (remPs, newInps) (_, _, SOAC.Input [] (SOAC.Var v))
-      | Just (ourP, remPs') <- findParam remPs v =
+    inspect (remPs, newInps) (_, _, SOAC.Input ts (SOAC.Var v))
+      | SOAC.nullTransforms ts,
+        Just (ourP, remPs') <- findParam remPs v =
           return (remPs', ourP:newInps)
 
     inspect (remPs, newInps) (param, inpt, SOAC.Input ts ia) =
@@ -168,4 +169,6 @@ fixInputs ourInps childInps =
                             <*> pure (srclocOf ia)
           let outer:shape = arrayDims inpt
               inpt' = inpt `setArrayShape` Shape (outer : outer : shape)
-          return (remPs, (toParam newParam, inpt', SOAC.Input (ts++[SOAC.Replicate ourSize]) ia) : newInps)
+          return (remPs, (toParam newParam,
+                          inpt',
+                          SOAC.Input (ts SOAC.|> SOAC.Replicate ourSize) ia) : newInps)

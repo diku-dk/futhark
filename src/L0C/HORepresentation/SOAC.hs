@@ -31,8 +31,6 @@ module L0C.HORepresentation.SOAC
   , isVarInput
   , addTransform
   , addTransforms
-  , InputTransform(..)
-  , transformFromExp
   , InputArray (..)
   , inputArray
   , inputRank
@@ -41,17 +39,35 @@ module L0C.HORepresentation.SOAC
   , transformRows
   , transformTypeRows
   , transposeInput
+  -- * Input transformations
+  , ArrayTransforms
+  , noTransforms
+  , singleTransform
+  , nullTransforms
+  , (|>)
+  , (<|)
+  , viewf
+  , ViewF(..)
+  , viewl
+  , ViewL(..)
+  , ArrayTransform(..)
+  , transformFromExp
   -- ** Converting to and from expressions
   , inputFromSubExp
   , inputsToSubExps
   )
   where
 
-import Control.Applicative
-import Control.Monad
+import Prelude hiding (foldl, foldr, and)
 
+import Control.Applicative
+
+import Data.Foldable
 import Data.Loc
+import Data.Maybe
+import Data.Monoid
 import qualified Data.HashMap.Lazy as HM
+import qualified Data.Sequence as Seq
 
 import qualified L0C.InternalRep as L0
 import L0C.InternalRep hiding (Map, Reduce, Scan, Filter, Redomap,
@@ -59,7 +75,7 @@ import L0C.InternalRep hiding (Map, Reduce, Scan, Filter, Redomap,
 import L0C.Substitute
 import L0C.Tools
 
-data InputTransform = Rearrange Certificates [Int]
+data ArrayTransform = Rearrange Certificates [Int]
                     -- ^ A permutation of an otherwise valid input.
                     | Reshape Certificates [SubExp]
                     -- ^ A reshaping of an otherwise valid input.
@@ -71,11 +87,96 @@ data InputTransform = Rearrange Certificates [Int]
                     -- ^ Replicate the rows of the array a number of times.
                       deriving (Show, Eq, Ord)
 
+-- | A sequence of array transformations, heavily inspired by
+-- "Data.Seq".  You can decompose it using 'viewF' and 'viewL', and
+-- grow it by using '|>' and '<|'.  These correspond closely to the
+-- similar operations for sequences, except that appending will try to
+-- normalise and simplify the transformation sequence.
+newtype ArrayTransforms = ArrayTransforms (Seq.Seq ArrayTransform)
+  deriving (Eq, Ord, Show)
+
+instance Monoid ArrayTransforms where
+  mempty = noTransforms
+  ts1 `mappend` ts2 =
+    case viewf ts2 of
+      t :< ts2' -> (ts1 |> t) `mappend` ts2'
+      EmptyF    -> ts1
+
+-- | The empty transformation list.
+noTransforms :: ArrayTransforms
+noTransforms = ArrayTransforms Seq.empty
+
+-- | Is it an empty transformation list?
+nullTransforms :: ArrayTransforms -> Bool
+nullTransforms (ArrayTransforms s) = Seq.null s
+
+-- | A transformation list containing just a single transformation.
+singleTransform :: ArrayTransform -> ArrayTransforms
+singleTransform = ArrayTransforms . Seq.singleton
+
+-- | Decompose the input-end of the transformation sequence.
+viewf :: ArrayTransforms -> ViewF
+viewf (ArrayTransforms s) = case Seq.viewl s of
+                              t Seq.:< s' -> t :< ArrayTransforms s'
+                              Seq.EmptyL  -> EmptyF
+
+-- | A view of the first transformation to be applied.
+data ViewF = EmptyF
+           | ArrayTransform :< ArrayTransforms
+
+-- | Decompose the output-end of the transformation sequence.
+viewl :: ArrayTransforms -> ViewL
+viewl (ArrayTransforms s) = case Seq.viewr s of
+                              s' Seq.:> t -> ArrayTransforms s' :> t
+                              Seq.EmptyR  -> EmptyL
+
+-- | A view of the last transformation to be applied.
+data ViewL = EmptyL
+           | ArrayTransforms :> ArrayTransform
+
+-- | Add a transform to the end of the transformation list.
+(|>) :: ArrayTransforms -> ArrayTransform -> ArrayTransforms
+(|>) = flip $ addTransform' extract add $ uncurry (flip (,))
+   where extract ts' = case viewl ts' of
+                         EmptyL     -> Nothing
+                         ts'' :> t' -> Just (t', ts'')
+         add t' (ArrayTransforms ts') = ArrayTransforms $ ts' Seq.|> t'
+
+-- | Add a transform at the beginning of the transformation list.
+(<|) :: ArrayTransform -> ArrayTransforms -> ArrayTransforms
+(<|) = addTransform' extract add id
+   where extract ts' = case viewf ts' of
+                         EmptyF     -> Nothing
+                         t' :< ts'' -> Just (t', ts'')
+         add t' (ArrayTransforms ts') = ArrayTransforms $ t' Seq.<| ts'
+
+addTransform' :: (ArrayTransforms -> Maybe (ArrayTransform, ArrayTransforms))
+              -> (ArrayTransform -> ArrayTransforms -> ArrayTransforms)
+              -> ((ArrayTransform,ArrayTransform) -> (ArrayTransform,ArrayTransform))
+              -> ArrayTransform -> ArrayTransforms
+              -> ArrayTransforms
+addTransform' extract add swap t ts =
+  fromMaybe (t `add` ts) $ do
+    (t', ts') <- extract ts
+    combined <- uncurry combineTransforms $ swap (t', t)
+    Just $ if identityTransform combined then ts'
+           else addTransform' extract add swap combined ts'
+
+identityTransform :: ArrayTransform -> Bool
+identityTransform (Rearrange _ perm) =
+  and $ zipWith (==) perm [0..]
+identityTransform _ = False
+
+combineTransforms :: ArrayTransform -> ArrayTransform -> Maybe ArrayTransform
+combineTransforms (Rearrange cs2 perm2) (Rearrange cs1 perm1) =
+  Just $ Rearrange (cs1++cs2) $ perm2 `permuteCompose` perm1
+combineTransforms _ _ = Nothing
+
 -- | Given an expression, determine whether the expression represents
 -- an input transformation of an array variable.  If so, return the
 -- variable and the transformation.  Only 'Rearrange' and 'Reshape'
 -- are possible to express this way.
-transformFromExp :: Exp -> Maybe (Ident, InputTransform)
+transformFromExp :: Exp -> Maybe (Ident, ArrayTransform)
 transformFromExp (L0.Rearrange cs perm (L0.Var v) _) =
   Just (v, Rearrange cs perm)
 transformFromExp (L0.Reshape cs shape (L0.Var v) _) =
@@ -102,8 +203,8 @@ inputArrayToExp (Iota e) = L0.Iota e $ srclocOf e
 -- all are of this form.  Only the array inputs are expressed with
 -- this type; other arguments, such as initial accumulator values, are
 -- plain expressions.  The transforms are done left-to-right, that is,
--- the first element of the 'InputTransform' list is applied first.
-data Input = Input [InputTransform] InputArray
+-- the first element of the 'ArrayTransform' list is applied first.
+data Input = Input ArrayTransforms InputArray
              deriving (Show, Eq, Ord)
 
 instance Located Input where
@@ -119,41 +220,36 @@ instance Substitute Input where
 
 -- | Create a plain array variable input with no transformations.
 varInput :: Ident -> Input
-varInput = Input [] . Var
+varInput = Input (ArrayTransforms Seq.empty) . Var
 
 -- | If the given input is a plain variable input, with no transforms,
 -- return the variable.
 isVarInput :: Input -> Maybe Ident
-isVarInput (Input [] (Var v)) = Just v
-isVarInput _                  = Nothing
+isVarInput (Input ts (Var v)) | nullTransforms ts = Just v
+isVarInput _                                      = Nothing
 
 -- | Add a transformation to the end of the transformation list.
-addTransform :: InputTransform -> Input -> Input
+addTransform :: ArrayTransform -> Input -> Input
 addTransform t (Input ts ia) =
-  Input ts' ia
-  -- Simplify a little bit to remove redundant transformations.
-  where ts' = case (t, reverse ts) of
-                (Rearrange cs2 perm2, Rearrange cs1 perm1 : rest) ->
-                  reverse $ Rearrange (cs1++cs2) (perm1 `permuteCompose` perm2) : rest
-                _ -> ts++[t]
+  Input (ts |> t) ia
 
 -- | Add several transformations to the end of the transformation
 -- list.
-addTransforms :: [InputTransform] -> Input -> Input
-addTransforms ts1 (Input ts2 ia) = Input (ts2++ts1) ia
+addTransforms :: ArrayTransforms -> Input -> Input
+addTransforms ts (Input ots ia) = Input (ots <> ts) ia
 
 -- | If the given expression represents a normalised SOAC input,
 -- return that input.
 inputFromSubExp :: SubExp -> Maybe Input
-inputFromSubExp (L0.Var v) = Just $ Input [] $ Var v
+inputFromSubExp (L0.Var v) = Just $ Input (ArrayTransforms Seq.empty) $ Var v
 inputFromSubExp _          = Nothing
 
 -- | Convert SOAC inputs to the corresponding expressions.
 inputsToSubExps :: [Input] -> Binder [SubExp]
 inputsToSubExps = mapM inputToExp'
-  where inputToExp' (Input ts ia) = do
+  where inputToExp' (Input (ArrayTransforms ts) ia) = do
           ia' <- letSubExp "soac_input" $ inputArrayToExp ia
-          foldM transform ia' ts
+          foldlM transform ia' ts
 
         transform ia (Replicate n) =
           letSubExp "repeat" $ L0.Replicate n ia loc
@@ -180,12 +276,13 @@ inputArray (Input _ (Var v))         = Just v
 inputArray (Input _ (Iota _))        = Nothing
 
 inputArrayType :: InputArray -> Type
-inputArrayType (Var v)            = identType v
-inputArrayType (Iota e)           = arrayOf (Basic Int) (Shape [e]) Unique
+inputArrayType (Var v)  = identType v
+inputArrayType (Iota e) = arrayOf (Basic Int) (Shape [e]) Unique
 
 -- | Return the array rank (dimensionality) of an input.
 inputRank :: Input -> Int
-inputRank (Input ts ia) = foldl transformType (arrayRank $ inputArrayType ia) ts
+inputRank (Input (ArrayTransforms ts) ia) =
+  foldl transformType (arrayRank $ inputArrayType ia) ts
   where transformType rank (Replicate _)          = rank + 1
         transformType rank (Rearrange _ _)        = rank
         transformType _    (Reshape _ shape)      = length shape
@@ -195,7 +292,7 @@ inputRank (Input ts ia) = foldl transformType (arrayRank $ inputArrayType ia) ts
 -- | Return the types of a list of inputs.
 inputTypes :: [Input] -> [Type]
 inputTypes = map inputType
-  where inputType (Input ts ia) =
+  where inputType (Input (ArrayTransforms ts) ia) =
           foldl transformType (inputArrayType ia) ts
 
         transformType t (Replicate n) =
@@ -218,20 +315,21 @@ inputTypes = map inputType
 inputsWithTypes :: [Input] -> [(Type, Input)]
 inputsWithTypes l = zip (inputTypes l) l
 
-transformRows :: [InputTransform] -> Input -> Input
-transformRows [] (Input ots ia) =
-  Input ots ia
-transformRows (Rearrange cs perm:nts) inp =
-  transformRows nts $ addTransform (Rearrange cs (0:map (+1) perm)) inp
-transformRows (Reshape cs shape:nts) inp =
-  transformRows nts $ addTransform (ReshapeInner cs shape) inp
-transformRows (Replicate n:nts) inp =
-  transformRows nts $ addTransforms [Replicate n, Rearrange [] (1:0:[2..inputRank inp])] inp
-transformRows nts inp =
-  error $ "transformRows: Cannot transform this yet:\n" ++ show nts ++ "\n" ++ show inp
+transformRows :: ArrayTransforms -> Input -> Input
+transformRows (ArrayTransforms ts) =
+  flip (foldl transformRows') ts
+  where transformRows' inp (Rearrange cs perm) =
+          addTransform (Rearrange cs (0:map (+1) perm)) inp
+        transformRows' inp (Reshape cs shape) =
+          addTransform (ReshapeInner cs shape) inp
+        transformRows' inp (Replicate n) =
+          Replicate n `addTransform`
+          (Rearrange [] (1:0:[2..inputRank inp]) `addTransform` inp)
+        transformRows' inp nts =
+          error $ "transformRows: Cannot transform this yet:\n" ++ show nts ++ "\n" ++ show inp
 
-transformTypeRows :: [InputTransform] -> Type -> Type
-transformTypeRows = flip $ foldl transform
+transformTypeRows :: ArrayTransforms -> Type -> Type
+transformTypeRows (ArrayTransforms ts) = flip (foldl transform) ts
   where transform t (Rearrange _ perm) =
           t `setArrayShape` Shape (permuteShape (0:map (+1) perm) $ arrayDims t)
         transform t (Reshape _ shape) =
