@@ -403,20 +403,24 @@ pushRearrange inpIds nest ots = do
                ots ++ [outInvPerm perm])
   else fail "Cannot push transpose"
 
+-- XXX, this function should also handle inputs that have more than
+-- one transform.  In fact, we should rewrite the entire
+-- input-transform-list things to support normalisation.
 fixupInputs :: [Ident] -> [SOAC.Input] -> Maybe ([Int], [SOAC.Input])
 fixupInputs inpIds inps =
-  case mapMaybe inputRearrange $
-       filter exposable inps of
+  case mapMaybe inputRearrange $ filter exposable inps of
     perm:_ -> do inps' <- mapM (fixupInput (permuteReach perm) perm) inps
                  return (perm, inps')
     _    -> Nothing
   where exposable = maybe False (`elem` inpIds) . SOAC.inputArray
 
-        inputRearrange (SOAC.Input (SOAC.Rearrange _ perm : _) _) = Just perm
-        inputRearrange _                                          = Nothing
+        inputRearrange (SOAC.Input [SOAC.Rearrange _ perm] _) = Just perm
+        inputRearrange _                                      = Nothing
 
+        fixupInput _ perm (SOAC.Input [SOAC.Rearrange _ perm'] ia)
+          | perm' == permuteInverse perm = Just $ SOAC.Input [] ia
         fixupInput d perm inp
-          | SOAC.inputRank inp > d =
+          | SOAC.inputRank inp >= d =
               Just $ SOAC.addTransform (SOAC.Rearrange [] $ permuteInverse perm) inp
           | otherwise = Nothing
 
