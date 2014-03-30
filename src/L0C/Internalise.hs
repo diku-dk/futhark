@@ -325,24 +325,27 @@ internaliseExp (E.Map lam arr loc) = do
   (cs2, lam') <- internaliseMapLambda internaliseBody se lam $ map I.Var arrs
   certifySOAC se $ I.Map (cs++cs2) lam' (map I.Var arrs) loc
 
-internaliseExp (E.Reduce lam ne arr loc) = do
+internaliseExp e@(E.Reduce lam ne arr loc) = do
   (c1,arrs) <- tupToIdentList arr
   (c2,nes) <- tupToIdentList ne
   let cs = catMaybes [c1,c2]
   se <- conjoinCerts cs loc
   (cs2, lam') <- internaliseFoldLambda internaliseBody se lam
                  (map I.identType nes) (map I.identType arrs)
-  return $ I.Reduce (cs++cs2) lam' (zip (map I.Var nes) (map I.Var arrs)) loc
+  certifyFoldSOAC se t $
+    I.Reduce (cs++cs2) lam' (zip (map I.Var nes) (map I.Var arrs)) loc
+  where t = internaliseType $ E.typeOf e
 
-internaliseExp (E.Scan lam ne arr loc) = do
+internaliseExp e@(E.Scan lam ne arr loc) = do
   (c1,arrs) <- tupToIdentList arr
   (c2,nes) <- tupToIdentList ne
   let cs = catMaybes [c1,c2]
   se <- conjoinCerts cs loc
   (cs2, lam') <- internaliseFoldLambda internaliseBody se lam
                  (map I.identType nes) (map I.identType arrs)
-  return $ I.Scan (cs++cs2) lam' (zip (map I.Var nes) (map I.Var arrs)) loc
-
+  certifyFoldSOAC se t $
+    I.Scan (cs++cs2) lam' (zip (map I.Var nes) (map I.Var arrs)) loc
+  where t = internaliseType $ E.typeOf e
 
 internaliseExp (E.Filter lam arr loc) = do
   (c,arrs) <- tupToIdentList arr
@@ -352,7 +355,7 @@ internaliseExp (E.Filter lam arr loc) = do
                          map I.Var arrs
   certifySOAC se $ I.Filter cs lam' (map I.Var arrs) (I.Var outer_shape) loc
 
-internaliseExp (E.Redomap lam1 lam2 ne arrs loc) = do
+internaliseExp e@(E.Redomap lam1 lam2 ne arrs loc) = do
   (c1,arrs') <- tupToIdentList arrs
   (c2,nes) <- tupToIdentList ne
   let cs = catMaybes [c1,c2]
@@ -361,8 +364,9 @@ internaliseExp (E.Redomap lam1 lam2 ne arrs loc) = do
                  (map I.identType nes) (map I.identType nes)
   (cs3,lam2') <- internaliseFoldLambda internaliseBody se lam2
                  (map I.identType nes) (map I.identType arrs')
-  return $ I.Redomap (cs++cs2++cs3) lam1' lam2'
+  certifyFoldSOAC se t $ I.Redomap (cs++cs2++cs3) lam1' lam2'
            (map I.Var nes) (map I.Var arrs') loc
+  where t = internaliseType $ E.typeOf e
 
 -- The "interesting" cases are over, now it's mostly boilerplate.
 
@@ -504,6 +508,13 @@ certifySOAC c e =
               letBind ks e
               return $ I.SubExps (I.Var c:vs) loc
   where loc = srclocOf e
+
+certifyFoldSOAC :: I.Ident -> [I.TypeBase als shape] -> I.Exp
+                -> InternaliseM I.Exp
+certifyFoldSOAC c (I.Basic I.Cert : _) e =
+  certifySOAC c e
+certifyFoldSOAC _ _ e =
+  return e
 
 boundsChecks :: [I.Ident] -> [I.SubExp] -> InternaliseM I.Certificates
 boundsChecks []    _  = return []
