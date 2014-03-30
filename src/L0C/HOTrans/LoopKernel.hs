@@ -333,22 +333,20 @@ iswim _ nest ots
           p { identType = identType p `setArrayShape` arrayShape t }
         innerAccParams = zipWith setSizeFrom (take (length es) paramIds) accsizes
         innerArrParams = zipWith setSizeFrom (drop (length es) paramIds) arrsizes
-    innerlam <- Nest.bodyToLambda mb
-    let innerScan = Scan cs2 innerlam
-                          (zip (map Var innerAccParams) (map Var innerArrParams))
-                          loc1
-        lam = Lambda {
-                lambdaParams = map toParam $ innerAccParams ++ innerArrParams
-              , lambdaReturnType = zipWith setOuterSize retTypes $
-                                   map (arraySize 0) arrsizes
-              , lambdaBody = Let bndIds innerScan `insertBinding` postExp
-              , lambdaSrcLoc = loc2
-              }
+    let innerScan = Nest.Scan cs2 mb (map Var innerAccParams) loc1
+        scanNest = Nest.Nesting {
+                     Nest.nestingInputs = map SOAC.varInput innerArrParams
+                   , Nest.nestingPostBody = postExp
+                   , Nest.nestingReturnType = zipWith setOuterSize retTypes $
+                                              map (arraySize 0) arrsizes
+                   , Nest.nestingResult = bndIds
+                   , Nest.nestingParams = innerAccParams ++ innerArrParams
+                   }
         perm = case retTypes of []  -> []
                                 t:_ -> transposeIndex 0 1 [0..arrayRank t]
     return (Nest.SOACNest
             newInputs
-            (Nest.Map cs1 (Nest.Fun lam) loc2),
+            (Nest.Map cs1 (Nest.NewNest scanNest innerScan) loc2),
             ots ++ [ORearrange cs2 perm])
 iswim _ _ _ = fail "ISWIM does not apply"
 
