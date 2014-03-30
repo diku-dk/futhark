@@ -4,6 +4,12 @@
 -- SOACs.  In contrast, this module exposes a SOAC representation that
 -- does not enable invalid representations (except for type errors).
 --
+-- Furthermore, while standard normalised L0 requires that the inputs
+-- to a SOAC are variables or constants, the representation in this
+-- module also supports various index-space transformations, like
+-- @replicate@ or @rearrange@.  This is also very convenient when
+-- implementing transformations.
+--
 -- The names exported by this module conflict with the standard L0
 -- syntax tree constructors, so you are advised to use a qualified
 -- import:
@@ -39,7 +45,10 @@ module L0C.HORepresentation.SOAC
   , transformRows
   , transformTypeRows
   , transposeInput
-  -- * Input transformations
+  -- ** Converting to and from expressions
+  , inputFromSubExp
+  , inputsToSubExps
+  -- ** Input transformations
   , ArrayTransforms
   , noTransforms
   , singleTransform
@@ -52,9 +61,6 @@ module L0C.HORepresentation.SOAC
   , ViewL(..)
   , ArrayTransform(..)
   , transformFromExp
-  -- ** Converting to and from expressions
-  , inputFromSubExp
-  , inputsToSubExps
   )
   where
 
@@ -75,6 +81,8 @@ import L0C.InternalRep hiding (Map, Reduce, Scan, Filter, Redomap,
 import L0C.Substitute
 import L0C.Tools
 
+-- | A single, simple transformation.  If you want several, don't just
+-- create a list, use 'ArrayTransforms' instead.
 data ArrayTransform = Rearrange Certificates [Int]
                     -- ^ A permutation of an otherwise valid input.
                     | Reshape Certificates [SubExp]
@@ -92,6 +100,12 @@ data ArrayTransform = Rearrange Certificates [Int]
 -- grow it by using '|>' and '<|'.  These correspond closely to the
 -- similar operations for sequences, except that appending will try to
 -- normalise and simplify the transformation sequence.
+--
+-- The data type is opaque in order to enforce normalisation
+-- invariants.  Basically, when you grow the sequence, the
+-- implementation will try to coalesce neighboring permutations, for
+-- example by composing permutations and removing identity
+-- transformations.
 newtype ArrayTransforms = ArrayTransforms (Seq.Seq ArrayTransform)
   deriving (Eq, Ord, Show)
 
@@ -315,6 +329,7 @@ inputTypes = map inputType
 inputsWithTypes :: [Input] -> [(Type, Input)]
 inputsWithTypes l = zip (inputTypes l) l
 
+-- | Apply the transformations to every row of the input.
 transformRows :: ArrayTransforms -> Input -> Input
 transformRows (ArrayTransforms ts) =
   flip (foldl transformRows') ts
@@ -328,6 +343,7 @@ transformRows (ArrayTransforms ts) =
         transformRows' inp nts =
           error $ "transformRows: Cannot transform this yet:\n" ++ show nts ++ "\n" ++ show inp
 
+-- | Get the resulting type after transforming the rows.
 transformTypeRows :: ArrayTransforms -> Type -> Type
 transformTypeRows (ArrayTransforms ts) = flip (foldl transform) ts
   where transform t (Rearrange _ perm) =
