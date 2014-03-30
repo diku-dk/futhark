@@ -116,7 +116,7 @@ soacSeen name produced soac =
         descTransform (SOAC.Reshape {})      = "reshape"
         descTransform (SOAC.ReshapeOuter {}) = "reshape"
         descTransform (SOAC.ReshapeInner {}) = "reshape"
-        descTransform SOAC.Repeat            = "replicate"
+        descTransform (SOAC.Replicate {})    = "replicate"
 
 flowForBody :: Body -> FlowM ()
 flowForBody (Body (Let pat e:bnds) res)

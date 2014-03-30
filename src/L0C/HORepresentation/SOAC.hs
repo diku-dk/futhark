@@ -50,14 +50,12 @@ module L0C.HORepresentation.SOAC
 import Control.Applicative
 import Control.Monad
 
-import Data.List
 import Data.Loc
-import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
 
 import qualified L0C.InternalRep as L0
 import L0C.InternalRep hiding (Map, Reduce, Scan, Filter, Redomap,
-                               Var, Iota, Rearrange, Reshape)
+                               Var, Iota, Rearrange, Reshape, Replicate)
 import L0C.Substitute
 import L0C.Tools
 
@@ -69,10 +67,8 @@ data InputTransform = Rearrange Certificates [Int]
                     -- ^ A reshaping of the outer dimension.
                     | ReshapeInner Certificates [SubExp]
                     -- ^ A reshaping of everything but the outer dimension.
-                    | Repeat
-                    -- ^ Replicate the input a whole number of times in order
-                    -- to match the outer size of the other inputs.  If this is
-                    -- the only input, it will be the empty array.
+                    | Replicate SubExp
+                    -- ^ Replicate the rows of the array a number of times.
                       deriving (Show, Eq, Ord)
 
 -- | Given an expression, determine whether the expression represents
@@ -154,63 +150,28 @@ inputFromSubExp _          = Nothing
 
 -- | Convert SOAC inputs to the corresponding expressions.
 inputsToSubExps :: [Input] -> Binder [SubExp]
-inputsToSubExps is = mapM (inputToExp' $ dimSizes is) is
-  where inputToExp' sizes (Input ts ia) = do
+inputsToSubExps = mapM inputToExp'
+  where inputToExp' (Input ts ia) = do
           ia' <- letSubExp "soac_input" $ inputArrayToExp ia
-          (_, _, ia'') <- foldM transform (sizes, 0, ia') ts
-          return ia''
+          foldM transform ia' ts
 
-        transform (sizes, d, ia) Repeat = do
-          ia' <- letSubExp "repeat" $ L0.Replicate sze' ia loc
-          return (sizes, d+1, ia')
-          where sze' = fromMaybe (Constant (BasicVal $ IntVal 0) loc) $
-                       join $ listToMaybe $ drop d sizes
-                loc  = srclocOf ia
+        transform ia (Replicate n) =
+          letSubExp "repeat" $ L0.Replicate n ia loc
+          where loc  = srclocOf ia
 
-        transform (sizes, d, ia) (Rearrange cs perm) = do
-          ia' <- letSubExp "rearrange" $ L0.Rearrange cs perm ia $ srclocOf ia
-          return (permuteShape perm sizes, d, ia')
+        transform ia (Rearrange cs perm) =
+          letSubExp "rearrange" $ L0.Rearrange cs perm ia $ srclocOf ia
 
-        transform (sizes, d, ia) (Reshape cs shape) = do
-          ia' <- letSubExp "reshape" $ L0.Reshape cs shape ia $ srclocOf ia
-          return (sizes, d, ia')
+        transform ia (Reshape cs shape) =
+          letSubExp "reshape" $ L0.Reshape cs shape ia $ srclocOf ia
 
-        transform (sizes, d, ia) (ReshapeOuter cs shape) = do
+        transform ia (ReshapeOuter cs shape) =
           let shape' = reshapeOuter shape 1 ia
-          ia' <- letSubExp "reshape_outer" $ L0.Reshape cs shape' ia $ srclocOf ia
-          return (sizes, d, ia')
+          in letSubExp "reshape_outer" $ L0.Reshape cs shape' ia $ srclocOf ia
 
-        transform (sizes, d, ia) (ReshapeInner cs shape) = do
+        transform ia (ReshapeInner cs shape) =
           let shape' = reshapeInner shape 1 ia
-          ia' <- letSubExp "reshape_inner" $ L0.Reshape cs shape' ia $ srclocOf ia
-          return (sizes, d, ia')
-
-dimSizes :: [Input] -> [Maybe SubExp]
-dimSizes =
-  map (listToMaybe . catMaybes) . transpose . map inspect
-  where inspect (Input ts ia) =
-          foldl inspect' (map Just $ iaDims ia) ts
-
-        iaDims (Var v) =
-          shapeDims $ arrayShape $ identType v
-
-        iaDims (Iota e) = [e]
-
-        inspect' :: [Maybe SubExp] -> InputTransform -> [Maybe SubExp]
-        inspect' ds (Rearrange _ perm) =
-          permuteShape perm ds
-
-        inspect' _ (Reshape _ shape) =
-          map Just shape
-
-        inspect' ds (ReshapeOuter _ shape) =
-          map Just shape ++ drop 1 ds
-
-        inspect' ds (ReshapeInner _ shape) =
-          take 1 ds ++ map Just shape
-
-        inspect' ds (Repeat) =
-          Nothing : ds
+          in letSubExp "reshape_inner" $ L0.Reshape cs shape' ia $ srclocOf ia
 
 -- | If the input is a (possibly rearranged, reshaped or otherwise
 -- transformed) array variable, return that variable.
@@ -225,7 +186,7 @@ inputArrayType (Iota e)           = arrayOf (Basic Int) (Shape [e]) Unique
 -- | Return the array rank (dimensionality) of an input.
 inputRank :: Input -> Int
 inputRank (Input ts ia) = foldl transformType (arrayRank $ inputArrayType ia) ts
-  where transformType rank Repeat                 = rank + 1
+  where transformType rank (Replicate _)          = rank + 1
         transformType rank (Rearrange _ _)        = rank
         transformType _    (Reshape _ shape)      = length shape
         transformType rank (ReshapeOuter _ shape) = rank - 1 + length shape
@@ -233,17 +194,12 @@ inputRank (Input ts ia) = foldl transformType (arrayRank $ inputArrayType ia) ts
 
 -- | Return the types of a list of inputs.
 inputTypes :: [Input] -> [Type]
-inputTypes inps = map inputType inps
-  where sizes = dimSizes inps
-
-        dimSize i = fromMaybe zero $ join $ listToMaybe $ drop i sizes
-          where zero = Constant (BasicVal $ IntVal 0) noLoc
-
-        inputType (Input ts ia) =
+inputTypes = map inputType
+  where inputType (Input ts ia) =
           foldl transformType (inputArrayType ia) ts
 
-        transformType t Repeat =
-          arrayOf t (Shape [dimSize $ arrayRank t + 1]) u
+        transformType t (Replicate n) =
+          arrayOf t (Shape [n]) u
           where u | uniqueOrBasic t = Unique
                   | otherwise       = Nonunique
         transformType t (Rearrange _ perm) =
@@ -269,8 +225,8 @@ transformRows (Rearrange cs perm:nts) inp =
   transformRows nts $ addTransform (Rearrange cs (0:map (+1) perm)) inp
 transformRows (Reshape cs shape:nts) inp =
   transformRows nts $ addTransform (ReshapeInner cs shape) inp
-transformRows (Repeat:nts) inp =
-  transformRows nts $ addTransforms [Repeat, Rearrange [] (1:0:[2..inputRank inp])] inp
+transformRows (Replicate n:nts) inp =
+  transformRows nts $ addTransforms [Replicate n, Rearrange [] (1:0:[2..inputRank inp])] inp
 transformRows nts inp =
   error $ "transformRows: Cannot transform this yet:\n" ++ show nts ++ "\n" ++ show inp
 
@@ -286,9 +242,9 @@ transformTypeRows = flip $ foldl transform
         transform t (ReshapeInner _ shape) =
           let outer:inner:_ = arrayDims t
           in t `setArrayShape` Shape (outer : inner : shape)
-        transform t Repeat =
+        transform t (Replicate n) =
           let outer:shape = arrayDims t
-          in t `setArrayShape` Shape (outer : outer : shape)
+          in t `setArrayShape` Shape (outer : n : shape)
 
 -- | Add to the input a 'Rearrange' transform that performs an @(k,n)@
 -- transposition.  The new transform will be at the end of the current

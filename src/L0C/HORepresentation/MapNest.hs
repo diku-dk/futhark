@@ -80,8 +80,9 @@ fromSOACNest' bound (Nest.SOACNest inps (Nest.Map cs body loc)) = do
   let boundUsedInBody = HS.toList $ freeInBody lam `HS.intersection` bound
   newParams <- mapM (newIdent' (++"_wasfree")) boundUsedInBody
   let subst = HM.fromList $ zip (map identName boundUsedInBody) (map identName newParams)
+      size  = arraysSize 0 $ SOAC.inputTypes inps
       inps' = map (substituteNames subst) inps ++
-              map (SOAC.Input [SOAC.Repeat] . SOAC.Var) boundUsedInBody
+              map (SOAC.Input [SOAC.Replicate size] . SOAC.Var) boundUsedInBody
       body' =
         case body of
           Nest.NewNest n comb ->
@@ -126,6 +127,8 @@ fixInputs ourInps childInps =
   where
     isParam x (y, _, _) = identName x == identName y
 
+    ourSize = arraysSize 0 $ SOAC.inputTypes $ map snd ourInps
+
     removeTypes l =
       [ (p, inp) | (p, _, inp) <- l ]
 
@@ -165,4 +168,4 @@ fixInputs ourInps childInps =
                             <*> pure (srclocOf ia)
           let outer:shape = arrayDims inpt
               inpt' = inpt `setArrayShape` Shape (outer : outer : shape)
-          return (remPs, (toParam newParam, inpt', SOAC.Input (ts++[SOAC.Repeat]) ia) : newInps)
+          return (remPs, (toParam newParam, inpt', SOAC.Input (ts++[SOAC.Replicate ourSize]) ia) : newInps)
