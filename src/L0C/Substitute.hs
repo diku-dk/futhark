@@ -14,6 +14,8 @@ import qualified Data.HashSet as HS
 
 import L0C.InternalRep
 
+-- | A type that is an instance of this class supports substitution of
+-- any names contained within.
 class Substitute a where
   -- | @substituteNames m e@ replaces the variable names in @e@ with
   -- new names, based on the mapping in @m@.  It is assumed that all
