@@ -303,12 +303,12 @@ optimizations = [iswim]
 
 iswim :: Maybe [Ident] -> SOACNest -> SOAC.ArrayTransforms -> TryFusion (SOACNest, SOAC.ArrayTransforms)
 iswim _ nest ots
-  | Nest.Scan cs1 (Nest.NewNest lvl nn) es@[e] loc1 <- Nest.operation nest,
+  | Nest.Scan cs1 (Nest.NewNest lvl nn) es loc1 <- Nest.operation nest,
     Nest.Map cs2 mb loc2 <- nn,
-    Just e' <- SOAC.inputFromSubExp e,
+    Just es' <- mapM SOAC.inputFromSubExp es,
     Nest.Nesting paramIds mapArrs bndIds postExp retTypes <- lvl,
     mapArrs == map SOAC.varInput paramIds = do
-    let newInputs = e' : map (SOAC.transposeInput 0 1) (Nest.inputs nest)
+    let newInputs = es' ++ map (SOAC.transposeInput 0 1) (Nest.inputs nest)
         inputTypes = SOAC.inputTypes newInputs
         (accsizes, arrsizes) =
           splitAt (length es) $ map rowType inputTypes
