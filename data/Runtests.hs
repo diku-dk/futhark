@@ -92,13 +92,12 @@ compileTest f inputf outputf = do
         ExitFailure _ -> return $ Failure gccerr
         ExitSuccess   -> do
           (progCode, output, progerr) <- readProcessWithExitCode binOutputf [] input
-          writeFile cOutputf output
+          writeFile expectedOutputf output
           case progCode of
             ExitFailure _ -> return $ Failure progerr
             ExitSuccess
               | output `compareOutput` expectedOutput -> return Success
-              | otherwise -> do
-                  writeFile expectedOutputf output
+              | otherwise ->
                   return $ Failure $ outputf ++ " and " ++ expectedOutputf ++ " do not match."
   where cOutputf = outputf `replaceExtension` "c"
         binOutputf = outputf `replaceExtension` "bin"
