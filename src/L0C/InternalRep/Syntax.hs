@@ -15,7 +15,6 @@ module L0C.InternalRep.Syntax
   , TypeBase(..)
   , Type
   , DeclType
-  , ExpType
   , ConstType
   , Diet(..)
 
@@ -134,12 +133,6 @@ type Type = TypeBase Names Shape
 
 -- | A type without aliasing information, used for declarations.
 type DeclType = TypeBase () Rank
-
--- | A type with aliasing information, but without shape information.
--- This is used when computing the type of expressions, as the shape
--- information generally cannot be deduced from the expression in
--- isolation.
-type ExpType = TypeBase Names Rank
 
 -- | A type with shape information, but no aliasing information.  Can
 -- be used for parameters and constants.

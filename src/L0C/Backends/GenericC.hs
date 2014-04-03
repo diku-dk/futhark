@@ -232,7 +232,7 @@ readStm _ t =
 
 mainCall :: FunDec -> CompilerM C.Stm
 mainCall (fname,rettype,params,_,_) = do
-  crettype <- typeToCType $ map fromDecl rettype
+  crettype <- typeToCType rettype
   ret <- new "main_ret"
   printRes <- printStm (varExp ret) rettype
   let mkParam (args, decls, rstms, []) paramtype = do
@@ -329,7 +329,7 @@ compileFun :: FunDec -> CompilerM (C.Definition, C.Func)
 compileFun (fname, rettype, args, body, _) = do
   (argexps, args') <- unzip <$> mapM compileArg args
   body' <- binding (zip (map identName args) $ argexps) $ compileFunBody body
-  crettype <- typeToCType $ map fromDecl rettype
+  crettype <- typeToCType rettype
   return ([C.cedecl|static $ty:crettype $id:(funName fname)( $params:args' );|],
           [C.cfun|static $ty:crettype $id:(funName fname)( $params:args' ) { $items:body' }|])
   where compileArg (Ident name t _) = do

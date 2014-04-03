@@ -70,7 +70,6 @@ module L0C.InternalRep.Attributes
   , rowType
   , basicDecl
   , toDecl
-  , fromDecl
   , toConstType
   , fromConstType
   , setAliases
@@ -252,11 +251,6 @@ basicDecl = Basic
 toDecl :: ArrayShape shape => TypeBase as shape -> DeclType
 toDecl (Array et sz u _) = Array et (Rank $ shapeRank sz) u ()
 toDecl (Basic et) = Basic et
-
--- | Replace no aliasing with an empty alias set.
-fromDecl :: DeclType -> ExpType
-fromDecl (Array et sz u _) = Array et sz u HS.empty
-fromDecl (Basic et) = Basic et
 
 -- | Add (empty) aliasing information to a type.
 fromConstType :: ConstType -> Type
