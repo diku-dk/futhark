@@ -11,12 +11,14 @@ module L0C.Dev
   ( name
   , ident
   , tident
+{-
   , expr
   , typ
   , value
   , lambda
   , tupleLambda
   , prog
+-}
   , fromLeft
   , fromRight
   , fromFile
@@ -31,12 +33,13 @@ import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 import System.IO.Unsafe
 
-import Language.L0.Parser
+-- import Language.L0.Parser
 
 import L0C.MonadFreshNames
-import L0C.L0
-import L0C.Renamer
-import L0C.TypeChecker
+import L0C.InternalRep
+-- import L0C.L0
+-- import L0C.Renamer
+-- import L0C.TypeChecker
 
 -- | Return a tagged name based on a string.
 name :: String -> VName
@@ -63,7 +66,7 @@ uniqueNameSource = unsafePerformIO $ newIORef newUniqueNameSource
               let s' = s `setID` i
                   m' = HM.insert (baseName s) s' m
               in (s', NameSource $ generator (i+1) m')
-
+{-
 uniqueTag :: (NameSource VName -> f -> (t, NameSource VName)) -> f -> t
 uniqueTag f x =
   x `seq` unsafePerformIO $ atomicModifyIORef' uniqueNameSource $ \src ->
@@ -95,6 +98,16 @@ prog = renameProg . uniqueTagProg . rightResult . checkProg . rightResult . pars
 -- | Parse a string to an expression.
 expr :: String -> Exp
 expr = uniqueTagExp . rightResult . checkClosedExp . rightResult . parseExp "input"
+-}
+
+-- | Parse a string to a type.
+typ :: String -> Type
+typ "int" = Basic Int
+typ "real" = Basic Real
+typ "bool" = Basic Bool
+typ _ = error "Cannot handle that type yet"
+
+{-
 
 -- | Parse a string to a type.
 typ :: String -> Type
@@ -121,7 +134,7 @@ tupleLambda = uniqueTagTupleLambda . rightResult . checkClosedTupleLambda . righ
           return $ TupleLambda params body' rettype loc
             where env = HM.fromList [ (identName param, fromDecl $ identType param)
                                      | param <- params ]
-
+-}
 -- | Return the 'Left' component of an 'Either' value.
 fromLeft :: Either a b -> a
 fromLeft (Left x)  = x
@@ -137,6 +150,6 @@ fromRight (Left _)  = error "fromRight: passed Left value."
 fromFile :: FilePath -> String
 fromFile = unsafePerformIO . readFile
 
-instance MonadFreshNames (ID Name) IO where
+instance MonadFreshNames IO where
   getNameSource = readIORef uniqueNameSource
   putNameSource = writeIORef uniqueNameSource

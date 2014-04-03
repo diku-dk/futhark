@@ -4,6 +4,8 @@ module L0C.EnablingOpts.AlgSimplify ( simplify, canSimplify )
 
 import Data.Loc
 
+import L0C.Dev (tident) -- For debugging help
+
 import qualified Data.Set as S
 import qualified Data.HashMap.Lazy as HM
 import Data.List
