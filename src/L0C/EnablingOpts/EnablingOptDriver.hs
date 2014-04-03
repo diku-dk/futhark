@@ -19,6 +19,7 @@ import L0C.EnablingOpts.InliningDeadFun
 import L0C.EnablingOpts.CopyCtPropFold
 import L0C.EnablingOpts.DeadVarElim
 import L0C.EnablingOpts.EnablingOptErrors
+import L0C.EnablingOpts.AlgSimplify
 
 --------------------------------------------------------------
 ---- Enabling Optimization Driver
