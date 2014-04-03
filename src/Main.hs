@@ -36,6 +36,7 @@ import qualified L0C.SOACFlowGraph as FG
 import L0C.Untrace
 import qualified L0C.Backends.SequentialC as SequentialC
 import qualified L0C.Backends.Bohrium as Bohrium
+import L0C.SplitAssertions
 
 newL0Config :: L0Config
 newL0Config = L0Config {
@@ -83,6 +84,7 @@ commandLineOptions =
   , Option "s" ["standard"]
     (NoArg $ \opts -> opts { l0pipeline = standardPipeline ++ l0pipeline opts })
     "Use the recommended optimised pipeline."
+  , splitasserttransformOpt [] ["split-assertions"]
   ]
 
 printAction :: Action
@@ -169,6 +171,11 @@ inlinetransform = Pass { passName = "inline functions"
                       , passOp = liftPass aggInlineDriver
                       }
 
+splitasserttransform :: Pass
+splitasserttransform = Pass { passName = "split certificates"
+                            , passOp = return . splitAssertions
+                            }
+
 standardPipeline :: [Pass]
 standardPipeline =
   [ uttransform, inlinetransform
@@ -214,6 +221,11 @@ inlinetransformOpt :: String -> [String] -> L0Option
 inlinetransformOpt =
   passoption "Aggressively inline and remove dead functions."
   inlinetransform
+
+splitasserttransformOpt :: String -> [String] -> L0Option
+splitasserttransformOpt =
+  passoption "Split certificates from main computation"
+  splitasserttransform
 
 -- | Entry point.  Non-interactive, except when reading interpreter
 -- input from standard input.

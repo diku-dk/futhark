@@ -14,6 +14,7 @@ module L0C.InternalRep.Attributes
 
   -- * Operations on bodies
   , bodyResult
+  , setBodyBindings
   , setBodyResult
   , mapResult
   , mapResultM
@@ -643,6 +644,10 @@ progNames = execWriter . mapM funNames . progFunctions
 
         lambdaNames (Lambda params body _ _) =
           mapM_ one params >> bodyNames body
+
+-- | @setBodyBindings bnds body@ sets the bindings of @body@ to @bnds@.
+setBodyBindings :: [Binding] -> Body -> Body
+setBodyBindings bnds body = body { bodyBindings = bnds }
 
 -- | @setBodyResult result body@ sets the tail end of @body@ (the
 -- 'Result' part) to @result@.
