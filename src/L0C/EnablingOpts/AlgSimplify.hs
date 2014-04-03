@@ -13,6 +13,8 @@ import Control.Monad
 import Control.Monad.Reader
 --import Control.Applicative
 
+import L0C.Dev(tident) -- tident "int x"
+
 --import Debug.Trace
 
 import L0C.InternalRep
@@ -111,8 +113,11 @@ simplify e p c = do -- Right e
 
 
 -- | Test if Simplification engine can handle this kind of expression
-canSimplify :: ScalExp -> Bool
-canSimplify _ = False
+canSimplify :: Int -> Either EnablingOptError ScalExp
+canSimplify vs = 
+    let e = if (vs == 1) then mkIntExp else Val (IntVal 33)
+    runAlgSimplifier (simplifyScal e) noLoc True HM.empty
+      
 
 -------------------------------------------------------
 --- Returns a sufficient-condition predicate for     --
@@ -1063,4 +1068,17 @@ tryDivTriv t f
     | t == f    = do one <- getPos1 =<< typeOfScal t
                      return (True, Val one)
     | otherwise = do return (True, SDivide t f)
+
+--------------------------------------------------------
+---- TESTING
+--------------------------------------------------------
+
+mkIntExp =
+    let (x',y',z',q') = (tident "int x", tident "int y", tident "int z", tident "int w")
+    let (x,y,z,q) = (Id x', Id y', Id z', Id q') 
+    let up_term1 = SMinus (STimes (Val (IntVal 6)) (STimes x (STimes y z))) 
+                          (STimes (Val (IntVal 4)) (STimes (STimes xq) z) )
+    let up_term2 = SMinus (STimes x (STimes (Val (IntVal 4)) (STimes z q)))
+                          (STimes (STimes (SPlus y q) (STimes z x) ) (Val (IntVal 3)) )
+    let dn_term  = STimes (STimes x (Val (IntVal 3))) z
 
