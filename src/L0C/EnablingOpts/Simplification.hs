@@ -28,11 +28,10 @@ import qualified Data.Set          as S
 import L0C.NeedNames
 import qualified L0C.EnablingOpts.SymbolTable as ST
 import L0C.EnablingOpts.ClosedForm
+import qualified L0C.EnablingOpts.AlgSimplify as AS
+import qualified L0C.EnablingOpts.ScalExp as SE
 import L0C.InternalRep
 import L0C.MonadFreshNames
-
--- | A function that, given a variable name, returns its definition.
-type VarLookup = VName -> Maybe Exp
 
 -- | @simplifyBinding lookup bnd@ performs simplification of the
 -- binding @bnd@.  If simplification is possible, a replacement list
@@ -41,21 +40,20 @@ type VarLookup = VName -> Maybe Exp
 simplifyBinding :: MonadFreshNames m => ST.SymbolTable -> Binding -> m (Maybe [Binding])
 
 simplifyBinding vtable bnd =
-  provideNames $ applyRules simplificationRules look bnd
-  where look = (`ST.lookupExp` vtable)
+  provideNames $ applyRules simplificationRules vtable bnd
 
 applyRules :: [SimplificationRule]
-           -> VarLookup -> Binding -> NeedNames (Maybe [Binding])
+           -> ST.SymbolTable -> Binding -> NeedNames (Maybe [Binding])
 applyRules []           _    _   = return Nothing
-applyRules (rule:rules) look bnd = do
-  res <- rule look bnd
+applyRules (rule:rules) vtable bnd = do
+  res <- rule vtable bnd
   case res of Just bnds -> do bnds' <- mapM subApply bnds
                               return $ Just $ concat bnds'
-              Nothing   -> applyRules rules look bnd
+              Nothing   -> applyRules rules vtable bnd
   where subApply bnd' =
-          fromMaybe [bnd'] <$> applyRules (rule:rules) look bnd'
+          fromMaybe [bnd'] <$> applyRules (rule:rules) vtable bnd'
 
-type SimplificationRule = VarLookup -> Binding -> NeedNames (Maybe [Binding])
+type SimplificationRule = ST.SymbolTable -> Binding -> NeedNames (Maybe [Binding])
 
 simplificationRules :: [SimplificationRule]
 simplificationRules = [ liftIdentityMapping
@@ -63,6 +61,7 @@ simplificationRules = [ liftIdentityMapping
                       , hoistLoopInvariantMergeVariables
                       , simplifyClosedFormRedomap
                       , simplifyClosedFormReduce
+                      , simplifyScalarExp
                       , letRule simplifyRearrange
                       , letRule simplifyRotate
                       , letRule simplifyBinOp
@@ -111,7 +110,7 @@ liftIdentityMapping _ _ = return Nothing
 -- | Remove all arguments to the map that are simply replicates.
 -- These can be turned into free variables instead.
 removeReplicateMapping :: SimplificationRule
-removeReplicateMapping look (Let pat (Map cs fun arrs loc))
+removeReplicateMapping vtable (Let pat (Map cs fun arrs loc))
   | replicatesOrNot <- zipWith isReplicate (lambdaParams fun) arrs,
     any isRight replicatesOrNot =
   let (paramsAndArrs, parameterBnds) = partitionEithers replicatesOrNot
@@ -128,7 +127,7 @@ removeReplicateMapping look (Let pat (Map cs fun arrs loc))
                   _  -> [Let pat $ Map cs fun' arrs' loc]
   in return $ Just $ parameterBnds ++ mapbnds
   where isReplicate p (Var v)
-          | Just (Replicate _ e _) <- look $ identName v =
+          | Just (Replicate _ e _) <- ST.lookupExp (identName v) vtable =
           Right (Let [fromParam p] $ subExp e)
         isReplicate p e =
           Left  (p, e)
@@ -160,22 +159,40 @@ hoistLoopInvariantMergeVariables _ (DoLoop merge idd n loopbody) =
           (invariant, (v1,initExp):merge', resExp:resExps)
 hoistLoopInvariantMergeVariables _ _ = return Nothing
 
+-- | A function that, given a variable name, returns its definition.
+type VarLookup = VName -> Maybe Exp
+
 type LetSimplificationRule = VarLookup -> Exp -> Maybe Exp
 
 letRule :: LetSimplificationRule -> SimplificationRule
-letRule rule look (Let pat e) = return $ (:[]) . Let pat <$> rule look e
-letRule _    _    _               = return Nothing
+letRule rule vtable (Let pat e) = return $ (:[]) . Let pat <$> rule look e
+  where look = (`ST.lookupExp` vtable)
+letRule _    _      _           = return Nothing
 
 simplifyClosedFormRedomap :: SimplificationRule
-simplifyClosedFormRedomap look (Let pat (Redomap _ _ innerfun acc arr _)) =
-  foldClosedForm look pat innerfun acc arr
+simplifyClosedFormRedomap vtable (Let pat (Redomap _ _ innerfun acc arr _)) =
+  foldClosedForm (`ST.lookupExp` vtable) pat innerfun acc arr
 simplifyClosedFormRedomap _ _ = return Nothing
 
 simplifyClosedFormReduce :: SimplificationRule
-simplifyClosedFormReduce look (Let pat (Reduce _ fun args _)) =
-  foldClosedForm look pat fun acc arr
+simplifyClosedFormReduce vtable (Let pat (Reduce _ fun args _)) =
+  foldClosedForm (`ST.lookupExp` vtable) pat fun acc arr
   where (acc, arr) = unzip args
 simplifyClosedFormReduce _ _ = return Nothing
+
+simplifyScalarExp :: SimplificationRule
+simplifyScalarExp vtable (Let [v] e)
+  | Just se <- SE.toScalExp (`ST.lookupScalExp` vtable) e,
+    Right se' <- AS.simplify se loc True, -- Cheap?  What?
+    se /= se' = do -- Only perform simplification if something
+                   -- actually changed - if 'simplify' is not
+                   -- idempotent, this is going to cause an infinite
+                   -- loop in the simplifier.
+  (e',bnds) <- SE.fromScalExp loc se'
+  return $ Just $ bnds ++ [Let [v] e']
+  where loc = srclocOf e
+
+simplifyScalarExp _ _ = return Nothing
 
 simplifyRearrange :: LetSimplificationRule
 

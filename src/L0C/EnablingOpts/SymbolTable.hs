@@ -18,7 +18,8 @@ import Control.Applicative
 import qualified Data.HashMap.Lazy as HM
 
 import L0C.InternalRep
-import L0C.EnablingOpts.ScalExp
+import L0C.EnablingOpts.ScalExp (ScalExp)
+import qualified L0C.EnablingOpts.ScalExp as SE
 
 type SymbolTable = HM.HashMap VName Entry
 
@@ -62,8 +63,8 @@ lookupVar name vtable = case lookupExp name vtable of
                           _                        -> Nothing
 
 insert :: VName -> Exp -> SymbolTable -> SymbolTable
-insert name e = HM.insert name bind
+insert name e vtable = HM.insert name bind vtable
   where bind = Entry {
                  asExp = e
-               , asScalExp = Nothing -- FIXME
+               , asScalExp = SE.toScalExp (`lookupScalExp` vtable) e
                }
