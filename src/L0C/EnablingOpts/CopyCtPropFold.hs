@@ -279,4 +279,4 @@ getPropBnds [Ident var _ _] e = [(var, e)]
 getPropBnds ids (SubExps ts _)
   | length ids == length ts =
     concatMap (\(x,y)-> getPropBnds [x] (subExp y)) $ zip ids ts
-getPropBnds _ _ = error "CopyCtPropFold.getPropBnds: invalid input program"
+getPropBnds _ _ = []
