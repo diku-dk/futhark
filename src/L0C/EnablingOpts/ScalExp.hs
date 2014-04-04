@@ -88,6 +88,10 @@ type LookupVar = VName -> Maybe ScalExp
 toScalExp :: LookupVar -> Exp -> Maybe ScalExp
 toScalExp look (SubExps [se] _)    =
   toScalExp' look se
+toScalExp look (BinOp Less x y _ _) =
+  RelExp LTH0 <$> (SMinus <$> toScalExp' look x <*> toScalExp' look y)
+toScalExp look (BinOp Leq x y _ _) =
+  RelExp LEQ0 <$> (SMinus <$> toScalExp' look x <*> toScalExp' look y)
 toScalExp look (BinOp bop x y (Basic t) _)
   | t `elem` [Int, Bool] = -- XXX: Only integers and booleans, OK?
   binOpScalExp bop <*> toScalExp' look x <*> toScalExp' look y
