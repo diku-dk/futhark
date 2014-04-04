@@ -1,6 +1,7 @@
 module L0C.EnablingOpts.ScalExp
   ( RelOp0(..)
   , ScalExp(..)
+  , ppScalExp
   , toScalExp
   , LookupVar
   , fromScalExp
@@ -11,6 +12,8 @@ import Control.Applicative
 import Control.Monad
 import Data.List
 import Data.Loc
+
+import Text.PrettyPrint.Mainland
 
 import L0C.InternalRep
 import L0C.MonadFreshNames
@@ -50,6 +53,33 @@ data ScalExp= Val     BasicValue
             | SLogAnd ScalExp ScalExp
             | SLogOr  ScalExp ScalExp
               deriving (Eq, Ord, Show)
+
+instance Pretty ScalExp where
+  pprPrec _ (Val val) = ppr $ BasicVal val
+  pprPrec _ (Id v) = ppr v
+  pprPrec _ (SNeg e) = text "-" <> pprPrec 9 e
+  pprPrec _ (SNot e) = text "-" <> pprPrec 9 e
+  pprPrec prec (SPlus x y) = ppBinOp prec "+" 4 4 x y
+  pprPrec prec (SMinus x y) = ppBinOp prec "-" 4 10 x y
+  pprPrec prec (SPow x y) = ppBinOp prec "^" 6 6 x y
+  pprPrec prec (STimes x y) = ppBinOp prec "*" 5 5 x y
+  pprPrec prec (SDivide x y) = ppBinOp prec "/" 5 10 x y
+  pprPrec prec (SLogOr x y) = ppBinOp prec "||" 0 0 x y
+  pprPrec prec (SLogAnd x y) = ppBinOp prec "&&" 1 1 x y
+  pprPrec prec (RelExp LTH0 e) = ppBinOp prec "<" 2 2 e (Val $ IntVal 0)
+  pprPrec prec (RelExp LEQ0 e) = ppBinOp prec "<=" 2 2 e (Val $ IntVal 0)
+  pprPrec _ (MaxMin True es) = text "max" <> parens (commasep $ map ppr es)
+  pprPrec _ (MaxMin False es) = text "min" <> parens (commasep $ map ppr es)
+
+ppBinOp :: Int -> String -> Int -> Int -> ScalExp -> ScalExp -> Doc
+ppBinOp p bop precedence rprecedence x y =
+  parensIf (p > precedence) $
+           pprPrec precedence x <+/>
+           text bop <+>
+           pprPrec rprecedence y
+
+ppScalExp :: ScalExp -> String
+ppScalExp = pretty 80 . ppr
 
 -- | A function that checks whether a variable name corresponds to a
 -- scalar expression.
