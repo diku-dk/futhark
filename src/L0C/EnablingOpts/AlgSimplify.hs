@@ -1,10 +1,8 @@
 {-# LANGUAGE DataKinds, GeneralizedNewtypeDeriving, NamedFieldPuns #-}
-module L0C.EnablingOpts.AlgSimplify ( simplify, canSimplify )
+module L0C.EnablingOpts.AlgSimplify ( ScalExp, simplify, canSimplify, ppScalExp )
   where
 
 import Data.Loc
-
-import L0C.Dev (tident) -- For debugging help
 
 import qualified Data.Set as S
 import qualified Data.HashMap.Lazy as HM
@@ -13,7 +11,7 @@ import Control.Monad
 import Control.Monad.Reader
 --import Control.Applicative
 
-import L0C.Dev(tident) -- tident "int x"
+import L0C.Dev(tident) -- for debugging: tident "int x"
 
 --import Debug.Trace
 
@@ -34,6 +32,7 @@ runAlgSimplifier x p c r = runReaderT x (AlgSimplifyEnv{ pos = p, cheap = c, ran
 
 badAlgSimplifyM :: EnablingOptError -> AlgSimplifyM a
 badAlgSimplifyM = lift . Left
+
 
 -----------------------------------------------------------
 -- A Scalar Expression, i.e., ScalExp, is simplified to: --
@@ -79,10 +78,9 @@ simplify e p c = do -- Right e
 
 -- | Test if Simplification engine can handle this kind of expression
 canSimplify :: Int -> Either EnablingOptError ScalExp
-canSimplify vs = do
-    let e = if (vs == 1) then undefined else Val (IntVal 33)
+canSimplify i = do
+    let e = mkIntExp i
     runAlgSimplifier (simplifyScal e) noLoc True HM.empty
-      
 
 -------------------------------------------------------
 --- Returns a sufficient-condition predicate for     --
@@ -116,14 +114,9 @@ gaussEliminateNRel _ = do
     badAlgSimplifyM $ SimplifyError pos "gaussElimNRel: unimplemented!"
 
 cheapSimplifyNRel :: BTerm -> AlgSimplifyM BTerm
-cheapSimplifyNRel e@(PosId{}) = return e
-cheapSimplifyNRel e@(NegId{}) = return e
-cheapSimplifyNRel e@(LogCt{}) = return e
 cheapSimplifyNRel (NRelExp rel (NProd [Val v] _)) = do
-    succ' <- valLTHEQ0 rel v; return $ LogCt succ' 
-cheapSimplifyNRel _ = do
-    pos <- asks pos
-    badAlgSimplifyM $ SimplifyError pos "cheapSimplifyNRel: unimplemented!"
+    succ' <- valLTHEQ0 rel v; return $ LogCt succ'
+cheapSimplifyNRel e = return e 
 
 ------------------------------------------------
 ------------------------------------------------
@@ -403,15 +396,14 @@ helperTimesDivMinMax isTimes isRev emo@(MaxMin{}) e = do
         MaxMin ismin es -> do
             e' <- simplifyScal e
             e'_sop <- toNumSofP e'
-            p' <- simplifyNRel False $ NRelExp LEQ0 e'_sop
+            p' <- simplifyNRel False $ NRelExp LTH0 e'_sop
             case p' of
                 LogCt ctbool -> do
                     let cond = (not isTimes) && isRev
                     let cond'= if ctbool then cond  else not cond
-                    let ismin'= if cond' then ismin else not ismin 
+                    let ismin'= if cond' then ismin else not ismin
                     simplifyScal $ MaxMin ismin' $ map (\x -> mkTimesDiv x e') es
                 _  -> return $ mkTimesDiv em e'
-
         _ -> simplifyScal $ mkTimesDiv em e
     where
         mkTimesDiv :: ScalExp -> ScalExp -> ScalExp
@@ -439,8 +431,15 @@ negateBTerm (LogCt v) = return $ LogCt (not v)
 negateBTerm (PosId i) = return $ NegId i
 negateBTerm (NegId i) = return $ PosId i
 negateBTerm (NRelExp rel e) = do 
-    e' <- toNumSofP =<< negateSimplified =<< fromNumSofP e; 
-    return $ NRelExp (if rel == LEQ0 then LTH0 else LEQ0) e'
+    let tp = typeOfNAlg e
+    case (tp, rel) of
+        (Int, LTH0) -> do
+            se <- fromNumSofP e
+            ne <- toNumSofP =<< simplifyScal (SNeg $ SPlus se (Val $ IntVal 1))
+            return $ NRelExp LTH0 ne 
+        _ -> do        
+            e' <- toNumSofP =<< negateSimplified =<< fromNumSofP e; 
+            return $ NRelExp (if rel == LEQ0 then LTH0 else LEQ0) e'
 
 bterm2ScalExp :: BTerm -> AlgSimplifyM ScalExp
 bterm2ScalExp (LogCt v) = return $ Val $ LogVal v
@@ -478,7 +477,7 @@ toDNF (RelExp  rel  e ) = do
     return [[nrel]]
 --
 toDNF (SNot (SNot     e)) = toDNF e
-toDNF (SNot (Val (LogVal   v))) = return $ [[LogCt $ not v]]
+toDNF (SNot (Val (LogVal v))) = return $ [[LogCt $ not v]]
 toDNF (SNot (Id     idd)) = return $ [[NegId idd]]
 toDNF (SNot (RelExp rel e)) = do
     let not_rel = if rel == LEQ0 then LTH0 else LEQ0
@@ -538,11 +537,9 @@ simplifyAndOr _ [] = do
     pos <- asks pos
     badAlgSimplifyM $ SimplifyError pos "simplifyAndOr: not a boolean expression!"
 simplifyAndOr is_and fs = do 
-    if is_and && (any (== (LogCt False)) fs)
-         -- False AND p == False
-    then return [LogCt False]
-    else if (not is_and) && (any (== (LogCt True)) fs)
-    then return [LogCt False]
+    if any (== (LogCt $ not is_and)) fs
+         -- False AND p == False 
+    then return [LogCt $ not is_and]   
                     -- (i) p AND p == p,        (ii) True AND p == p
     else do let fs' = ( S.toList . S.fromList . filter (not . (== (LogCt is_and))) ) fs
             if null fs' 
@@ -687,14 +684,21 @@ helperNegateMult e1 e2 = do
 toNumSofP :: ScalExp -> AlgSimplifyM NNumExp
 toNumSofP e@(Val  _) = do t <- typeOfScal e; return $ NProd [e] t
 toNumSofP e@(Id   _) = do t <- typeOfScal e; return $ NProd [e] t
-toNumSofP (STimes  e1 e2) = do t <- typeOfScal e1; return $ NProd [e1, e2] t 
 toNumSofP e@(SDivide{})   = do t <- typeOfScal e;  return $ NProd [e] t
 toNumSofP e@(SPow{}   )   = do t <- typeOfScal e;  return $ NProd [e] t
-toNumSofP (SMinus e1 e2)  = toNumSofP $ SPlus e1 (SNeg e2) 
-toNumSofP (SNeg e)        = -- Shouldn't it be (-1)*e ???
-    toNumSofP =<< negateSimplified e
-
-toNumSofP (SPlus e1 e2)   = do 
+toNumSofP (SMinus _ _)  = do --toNumSofP $ SPlus e1 (SNeg e2)
+    pos <- asks pos
+    badAlgSimplifyM $ SimplifyError pos "toNumSofP: SMinus is not in SofP form!"
+toNumSofP (SNeg _)        = do --toNumSofP =<< negateSimplified e -- Shouldn't it be (-1)*e ???
+    pos <- asks pos
+    badAlgSimplifyM $ SimplifyError pos "toNumSofP: SNeg is not in SofP form!"
+toNumSofP (STimes e1 e2) = do 
+    pos <- asks pos
+    e2' <- toNumSofP e2
+    case e2' of
+        NProd es2 t -> return $ NProd (e1:es2) t
+        _ -> badAlgSimplifyM $ SimplifyError pos "toNumSofP: STimes nor in SofP form!"
+toNumSofP (SPlus  e1 e2)   = do 
     t   <- typeOfScal e1 
     e1' <- toNumSofP  e1
     e2' <- toNumSofP  e2
@@ -1031,20 +1035,33 @@ tryDivTriv b (SPow a e1)
 
 tryDivTriv t f 
     | t == f    = do one <- getPos1 =<< typeOfScal t
-                     return (True, Val one)
-    | otherwise = do return (True, SDivide t f)
+                     return (True,  Val one)
+    | otherwise = do return (False, SDivide t f)
 
 --------------------------------------------------------
 ---- TESTING
 --------------------------------------------------------
-{-
-mkIntExp = do
-    let (x',y',z',q') = (tident "int x", tident "int y", tident "int z", tident "int w")
-    let (x,y,z,q) = (Id x', Id y', Id z', Id q') 
-    let up_term1 = SMinus (STimes (Val (IntVal 6)) (STimes x (STimes y z))) 
-                          (STimes (Val (IntVal 4)) (STimes (STimes xq) z) )
-    let up_term2 = SMinus (STimes x (STimes (Val (IntVal 4)) (STimes z q)))
-                          (STimes (STimes (SPlus y q) (STimes z x) ) (Val (IntVal 3)) )
-    let dn_term  = STimes (STimes x (Val (IntVal 3))) z
 
--}
+mkIntExp :: Int -> ScalExp
+mkIntExp 1 = 
+    let (x',y',z',q') = (tident "int x", tident "int y", tident "int z", tident "int q")
+        (x,y,z,q) = (Id x', Id y', Id z', Id q')
+        up_term1 = SMinus (STimes (Val (IntVal 6)) (STimes x (STimes y z))) 
+                          (STimes (Val (IntVal 4)) (STimes (STimes x q) z))
+        up_term2 = SMinus (STimes x (STimes (Val (IntVal 4)) (STimes z q)))
+                          (STimes (STimes (SPlus y q) (STimes z x) ) (Val (IntVal 3)) )
+        dn_term  = STimes (STimes x (Val (IntVal 3))) z
+    -- in dn_term
+    in SDivide (SPlus up_term1 up_term2) dn_term
+
+mkIntExp 2 = 
+    let (x',y',z',q') = (tident "int x", tident "int y", tident "int z", tident "int q")
+        (x,y,z,q) = (Id x', Id y', Id z', Id q')
+        x2m3y    = SMinus (STimes (Val (IntVal 2)) x) (STimes y (Val (IntVal 3)))
+        x2m3ylt0 = RelExp LTH0 x2m3y 
+        y3m2xle0 = RelExp LEQ0 (SMinus (STimes y (Val (IntVal 3))) (STimes (Val (IntVal 2)) x))
+    in SLogOr x2m3ylt0 $ SLogOr (Val (LogVal False)) $ SLogAnd z y3m2xle0
+    -- SLogAnd (SLogAnd (SLogAnd x2m3ylt0 z) (SLogAnd q y3m2xle0)) (Val (LogVal True))
+
+mkIntExp _ = Val (IntVal 3)
+
