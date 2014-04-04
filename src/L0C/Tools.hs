@@ -10,6 +10,8 @@ module L0C.Tools
 
   , eIf
   , eBinOp
+  , eNegate
+  , eNot
   , eIndex
   , eCopy
   , eAssert
@@ -32,6 +34,7 @@ module L0C.Tools
   , Binder
   , runBinder
   , runBinder'
+  , runBinder''
   , runBinderWithNameSource
   -- * Writer convenience interface
   , addBindingWriter
@@ -108,6 +111,18 @@ eBinOp op x y t loc = do
   x' <- letSubExp "x" =<< x
   y' <- letSubExp "y" =<< y
   return $ BinOp op x' y' t loc
+
+eNegate :: MonadBinder m =>
+           m Exp -> SrcLoc -> m Exp
+eNegate e loc = do
+  e' <- letSubExp "negate_arg" =<< e
+  return $ Negate e' loc
+
+eNot :: MonadBinder m =>
+        m Exp -> SrcLoc -> m Exp
+eNot e loc = do
+  e' <- letSubExp "not_arg" =<< e
+  return $ Not e' loc
 
 eIndex :: MonadBinder m =>
           Certificates -> Ident -> [m Exp] -> SrcLoc
@@ -236,10 +251,15 @@ runBinder m = do
 
 runBinder' :: MonadFreshNames m => Binder a -> m (a, Body -> Body)
 runBinder' m = do
+  (x, bnds) <- runBinder'' m
+  return (x, insertBindings bnds)
+
+runBinder'' :: MonadFreshNames m => Binder a -> m (a, [Binding])
+runBinder'' m = do
   src <- getNameSource
   let (x, bnds, src') = runBinderWithNameSource m src
   putNameSource src'
-  return (x, insertBindings bnds)
+  return (x, bnds)
 
 runBinderWithNameSource :: Binder a -> VNameSource -> (a, [Binding], VNameSource)
 runBinderWithNameSource (TransformM m) src =
