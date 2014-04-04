@@ -18,6 +18,7 @@ import qualified Data.HashSet      as HS
 
 import L0C.InternalRep
 import L0C.EnablingOpts.EnablingOptErrors
+import qualified L0C.EnablingOpts.SymbolTable as ST
 import L0C.EnablingOpts.Simplification
 import qualified L0C.Interpreter as Interp
 import L0C.MonadFreshNames
@@ -28,25 +29,9 @@ import L0C.MonadFreshNames
 -----------------------------------------------------------------
 -----------------------------------------------------------------
 
------------------------------------------------
--- The data to be stored in vtable           --
---   the third param (Bool) indicates if the --
---   binding is to be removed from program   --
------------------------------------------------
-
-data CtOrId  = Value Value
-             -- ^ value for constant propagation
-
-             | VarId VName Type
-             -- ^ Variable id for copy propagation
-
-             | SymArr Exp
-             -- ^ Various other opportunities for copy propagation.
-               deriving (Show)
-
 data CPropEnv = CopyPropEnv {
-    envVtable  :: HM.HashMap VName CtOrId,
-    program    :: Prog
+    envVtable  :: ST.SymbolTable
+  , program    :: Prog
   }
 
 
@@ -93,9 +78,7 @@ consuming idd m = do
   where als = identName idd `HS.insert` aliases (identType idd)
         spartition f s = let s' = HM.filter f s
                          in (s', s `HM.difference` s')
-        ok (Value {})  = True
-        ok (VarId k _) = not $ k `HS.member` als
-        ok (SymArr e)  = HS.null $ als `HS.intersection` freeNamesInExp e
+        ok entry  = HS.null $ als `HS.intersection` freeNamesInExp (ST.asExp entry)
 
 -- | The enabling optimizations run in this monad.  Note that it has no mutable
 -- state, but merely keeps track of current bindings in a 'TypeEnv'.
@@ -107,23 +90,15 @@ badCPropM :: EnablingOptError -> CPropM a
 badCPropM = CPropM . lift . Left
 
 -- | Bind a name as a common (non-merge) variable.
-bindVar :: CPropEnv -> (VName, CtOrId) -> CPropEnv
-bindVar env (name,val) =
-  env { envVtable = HM.insert name val $ envVtable env }
+bindVar :: CPropEnv -> (VName, Exp) -> CPropEnv
+bindVar env (name,e) =
+  env { envVtable = ST.insert name e $ envVtable env }
 
-bindVars :: CPropEnv -> [(VName, CtOrId)] -> CPropEnv
+bindVars :: CPropEnv -> [(VName, Exp)] -> CPropEnv
 bindVars = foldl bindVar
 
-binding :: [(VName, CtOrId)] -> CPropM a -> CPropM a
+binding :: [(VName, Exp)] -> CPropM a -> CPropM a
 binding bnds = local (`bindVars` bnds)
-
-varLookup :: CPropM VarLookup
-varLookup = do
-  env <- ask
-  return $ \k -> asExp <$> HM.lookup k (envVtable env)
-  where asExp (SymArr e)      = e
-        asExp (VarId vname t) = subExp $ Var $ Ident vname t noLoc
-        asExp (Value val)     = subExp (Constant val noLoc)
 
 -- | Applies Copy/Constant Propagation and Folding to an Entire Program.
 copyCtProp :: Prog -> Either EnablingOptError (Bool, Prog)
@@ -172,8 +147,8 @@ copyCtPropBody (Body (LetWith cs dest src inds el:bnds) res) = do
 copyCtPropBody (Body (Let pat e:bnds) res) = do
   pat' <- copyCtPropPat pat
   e' <- copyCtPropExp e
-  look <- varLookup
-  simplified <- simplifyBinding look (Let pat e')
+  vtable <- asks envVtable
+  simplified <- simplifyBinding vtable (Let pat e')
   let body = Body bnds res
   case simplified of
     Just newbnds ->
@@ -189,10 +164,10 @@ copyCtPropBody (Body (DoLoop merge idd n loopbody:bnds) res) = do
   mergeexp' <- mapM copyCtPropSubExp mergeexp
   n'        <- copyCtPropSubExp n
   loopbody' <- copyCtPropBody loopbody
-  look      <- varLookup
   let merge' = zip mergepat' mergeexp'
       letbody = Body bnds res
-  simplified <- simplifyBinding look (DoLoop merge' idd n' loopbody')
+  vtable <- asks envVtable
+  simplified <- simplifyBinding vtable $ DoLoop merge' idd n' loopbody'
   case simplified of
     Nothing -> do Body bnds' res' <- copyCtPropBody letbody
                   return $ Body (DoLoop merge' idd n' loopbody':bnds') res'
@@ -203,13 +178,13 @@ copyCtPropBody (Body [] (Result cs es loc)) =
 
 copyCtPropSubExp :: SubExp -> CPropM SubExp
 copyCtPropSubExp (Var ident@(Ident vnm _ pos)) = do
-  bnd <- asks $ HM.lookup vnm . envVtable
+  bnd <- asks $ ST.lookup vnm . envVtable
   case bnd of
-    Just (Value v)
+    Just (ST.Value v)
       | isBasicTypeVal v  -> changed $ Constant v pos
-    Just (VarId  id' tp1) -> changed $ Var (Ident id' tp1 pos) -- or tp
-    Just (SymArr (SubExps [se] _)) -> changed se
-    _                              -> Var <$> copyCtPropBnd ident
+    Just (ST.VarId  id' tp1) -> changed $ Var (Ident id' tp1 pos) -- or tp
+    Just (ST.SymExp (SubExps [se] _)) -> changed se
+    _                                 -> Var <$> copyCtPropBnd ident
 copyCtPropSubExp (Constant v loc) = return $ Constant v loc
 
 copyCtPropExp :: Exp -> CPropM Exp
@@ -238,9 +213,9 @@ copyCtPropExp (Apply fname args tp pos) = do
                 Constant v _ -> do (res, vals) <- allArgsAreValues as
                                    if res then return (True,  v:vals)
                                           else return (False, []    )
-                Var idd   -> do vv <- asks $ HM.lookup (identName idd) . envVtable
+                Var idd   -> do vv <- asks $ ST.lookup (identName idd) . envVtable
                                 case vv of
-                                  Just (Value v) -> do
+                                  Just (ST.Value v) -> do
                                     (res, vals) <- allArgsAreValues as
                                     if res then return (True,  v:vals)
                                            else return (False, []    )
@@ -273,19 +248,19 @@ copyCtPropType t = do
 
 copyCtPropIdent :: Ident -> CPropM Ident
 copyCtPropIdent ident@(Ident vnm _ loc) = do
-    bnd <- asks $ HM.lookup vnm . envVtable
+    bnd <- asks $ ST.lookup vnm . envVtable
     case bnd of
-      Just (VarId  id' tp1) -> changed $ Ident id' tp1 loc
-      Nothing               -> copyCtPropBnd ident
-      _                     -> copyCtPropBnd ident
+      Just (ST.VarId  id' tp1) -> changed $ Ident id' tp1 loc
+      Nothing                  -> copyCtPropBnd ident
+      _                        -> copyCtPropBnd ident
 
 copyCtPropCerts :: Certificates -> CPropM Certificates
 copyCtPropCerts = liftM (nub . concat) . mapM check
   where check idd = do
-          vv <- asks $ HM.lookup (identName idd) . envVtable
+          vv <- asks $ ST.lookup (identName idd) . envVtable
           case vv of
-            Just (Value (BasicVal Checked)) -> changed []
-            Just (VarId  id' tp1)           -> changed [Ident id' tp1 loc]
+            Just (ST.Value (BasicVal Checked)) -> changed []
+            Just (ST.VarId  id' tp1)           -> changed [Ident id' tp1 loc]
             _ -> return [idd]
           where loc = srclocOf idd
 
@@ -299,13 +274,9 @@ copyCtPropLambda (Lambda params body rettype loc) = do
 isBasicTypeVal :: Value -> Bool
 isBasicTypeVal = basicType . valueType
 
-getPropBnds :: [Ident] -> Exp -> [(VName, CtOrId)]
-getPropBnds [Ident var _ _] e =
-  case e of
-    SubExps [Constant v _] _ -> [(var, Value v)]
-    SubExps [Var v]        _ -> [(var, VarId (identName v) (identType v))]
-    _                        -> [(var, SymArr e)]
+getPropBnds :: [Ident] -> Exp -> [(VName, Exp)]
+getPropBnds [Ident var _ _] e = [(var, e)]
 getPropBnds ids (SubExps ts _)
   | length ids == length ts =
     concatMap (\(x,y)-> getPropBnds [x] (subExp y)) $ zip ids ts
-getPropBnds _ _ = []
+getPropBnds _ _ = error "CopyCtPropFold.getPropBnds: invalid input program"

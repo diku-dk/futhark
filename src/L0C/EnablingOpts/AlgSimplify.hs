@@ -19,7 +19,7 @@ import L0C.Dev(tident) -- tident "int x"
 
 import L0C.InternalRep
 import L0C.EnablingOpts.EnablingOptErrors
---import L0C.EnablingOpts.Simplification
+import L0C.EnablingOpts.ScalExp
 
 type RangesRep = HM.HashMap VName (ScalExp, ScalExp)
 
@@ -34,41 +34,6 @@ runAlgSimplifier x p c r = runReaderT x (AlgSimplifyEnv{ pos = p, cheap = c, ran
 
 badAlgSimplifyM :: EnablingOptError -> AlgSimplifyM a
 badAlgSimplifyM = lift . Left
-
------------------------------------------------------------------
--- BINARY OPERATORS for Numbers                                --
--- Note that MOD, BAND, XOR, BOR, SHIFTR, SHIFTL not supported --
---   `a SHIFTL/SHIFTR p' can be translated if desired as as    --
---   `a * 2^p' or `a / 2^p                                     --
------------------------------------------------------------------ 
-
--- Relational Operators
-data RelOp0 = LTH0
-            | LEQ0
-         -- | EQL0
-             deriving (Eq, Ord, Enum, Bounded, Show)
-
------------------------------------------------------------
--- Representation of a scalar expression, which is:      --
---    (i) an algebraic expression, e.g.,  min(a+b, a*b), --
---   (ii) a relational expression: a+b < 5,              --
---  (iii) a logical expression: e1 and (not (a+b>5)      --
------------------------------------------------------------
-data ScalExp= Val     BasicValue        
-            | Id      Ident
-            | SNeg    ScalExp        
-            | SNot    ScalExp
-            | SPlus   ScalExp ScalExp
-            | SMinus  ScalExp ScalExp
-            | STimes  ScalExp ScalExp
-            | SPow    ScalExp ScalExp
-            | SDivide ScalExp ScalExp
-            | MaxMin  Bool   [ScalExp] 
-            | RelExp  RelOp0  ScalExp
-            | SLogAnd ScalExp ScalExp
-            | SLogOr  ScalExp ScalExp
-              deriving (Eq, Ord, Show)
-
 
 -----------------------------------------------------------
 -- A Scalar Expression, i.e., ScalExp, is simplified to: --
@@ -114,8 +79,8 @@ simplify e p c = do -- Right e
 
 -- | Test if Simplification engine can handle this kind of expression
 canSimplify :: Int -> Either EnablingOptError ScalExp
-canSimplify vs = 
-    let e = if (vs == 1) then mkIntExp else Val (IntVal 33)
+canSimplify vs = do
+    let e = if (vs == 1) then undefined else Val (IntVal 33)
     runAlgSimplifier (simplifyScal e) noLoc True HM.empty
       
 
@@ -1072,8 +1037,8 @@ tryDivTriv t f
 --------------------------------------------------------
 ---- TESTING
 --------------------------------------------------------
-
-mkIntExp =
+{-
+mkIntExp = do
     let (x',y',z',q') = (tident "int x", tident "int y", tident "int z", tident "int w")
     let (x,y,z,q) = (Id x', Id y', Id z', Id q') 
     let up_term1 = SMinus (STimes (Val (IntVal 6)) (STimes x (STimes y z))) 
@@ -1082,3 +1047,4 @@ mkIntExp =
                           (STimes (STimes (SPlus y q) (STimes z x) ) (Val (IntVal 3)) )
     let dn_term  = STimes (STimes x (Val (IntVal 3))) z
 
+-}

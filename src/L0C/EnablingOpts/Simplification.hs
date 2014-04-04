@@ -1,7 +1,7 @@
 -- | This module implements simple simplification rules for bindings.
--- The intent is that you pass a symbol-lookup function and a binding,
--- and is given back a sequence of bindings, that are more efficient
--- than the original binding, yet compute the same result.
+-- The intent is that you pass a symbol table and a binding, and is
+-- given back a sequence of bindings, that are more efficient than the
+-- original binding, yet compute the same result.
 --
 -- These rewrite rules are "local", in that they do not maintain any
 -- state or look at the program as a whole.  Compare this to the
@@ -9,7 +9,6 @@
 -- as its own pass.
 module L0C.EnablingOpts.Simplification
   ( simplifyBinding
-  , VarLookup
   )
 
 where
@@ -27,6 +26,7 @@ import qualified Data.HashSet      as HS
 import qualified Data.Set          as S
 
 import L0C.NeedNames
+import qualified L0C.EnablingOpts.SymbolTable as ST
 import L0C.EnablingOpts.ClosedForm
 import L0C.InternalRep
 import L0C.MonadFreshNames
@@ -38,10 +38,11 @@ type VarLookup = VName -> Maybe Exp
 -- binding @bnd@.  If simplification is possible, a replacement list
 -- of bindings is returned, that bind at least the same banes as the
 -- original binding (and possibly more, for intermediate results).
-simplifyBinding :: MonadFreshNames m => VarLookup -> Binding -> m (Maybe [Binding])
+simplifyBinding :: MonadFreshNames m => ST.SymbolTable -> Binding -> m (Maybe [Binding])
 
-simplifyBinding look bnd =
+simplifyBinding vtable bnd =
   provideNames $ applyRules simplificationRules look bnd
+  where look = (`ST.lookupExp` vtable)
 
 applyRules :: [SimplificationRule]
            -> VarLookup -> Binding -> NeedNames (Maybe [Binding])
