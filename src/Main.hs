@@ -111,12 +111,10 @@ interpret prog =
     Nothing -> do hPutStrLn stderr "Interpreter error: no main function."
                   exitWith $ ExitFailure 2
     Just _ -> do
-      inputLines <- liftM lines getContents
-      args <- forM inputLines $ \line ->
-                case parseValue "<stdin>" line of
-                  Left e -> do hPutStrLn stderr $ "Read error: " ++ show e
-                               exitWith $ ExitFailure 2
-                  Right v -> return v
+      parseres <- liftM (parseValues "<stdin>") getContents
+      args <- case parseres of Left e -> do hPutStrLn stderr $ "Read error: " ++ show e
+                                            exitWith $ ExitFailure 2
+                               Right vs -> return vs
       let (res, trace) = runFun I.defaultEntryPoint (internaliseParamValues args) prog
       forM_ trace $ \(loc, what) ->
         hPutStrLn stderr $ locStr loc ++ ": " ++ what

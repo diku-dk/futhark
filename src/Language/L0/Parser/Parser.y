@@ -13,11 +13,14 @@ module Language.L0.Parser.Parser
   , certValue
   , arrayValue
   , tupleValue
+  , anyValue
+  , anyValues
   , ParserMonad
   , ReadLineMonad(..)
   , getLinesFromIO
   , getLinesFromStrings
-  , getNoLines)
+  , getNoLines
+  )
   where
 
 import Control.Applicative
@@ -49,6 +52,8 @@ import Language.L0.Parser.Lexer
 %name stringValue StringValue
 %name arrayValue ArrayValue
 %name tupleValue TupleValue
+%name anyValue Value
+%name anyValues CatValues
 
 %tokentype { L Token }
 %error { parseError }
@@ -422,6 +427,9 @@ Value : IntValue { $1 }
       | ArrayValue { $1 }
       | TupleValue { $1 }
 
+CatValues : Value CatValues { $1 : $2 }
+          |                 { [] }
+
 SignedInt :     intlit { let L _ (INTLIT num) = $1 in num  }
           | '-' intlit { let L _ (INTLIT num) = $2 in -num }
 
@@ -433,7 +441,9 @@ NaturalInts :: { [Int] }
            | intlit ',' NaturalInts { let L _ (INTLIT num) = $1 in num : $3  }
 
 IntValue : intlit        { let L pos (INTLIT num) = $1 in BasicVal $ IntVal num }
+         | '-' intlit    { let L pos (INTLIT num) = $2 in BasicVal $ IntVal (-num) }
 RealValue : reallit      { let L pos (REALLIT num) = $1 in BasicVal $ RealVal num }
+          | '-' reallit      { let L pos (REALLIT num) = $2 in BasicVal $ RealVal (-num) }
 CharValue : charlit      { let L pos (CHARLIT char) = $1 in BasicVal $ CharVal char }
 StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in ArrayVal (arrayFromList $ map (BasicVal . CharVal) s) $ Elem $ Basic Char }
 LogValue : true          { BasicVal $ LogVal True }

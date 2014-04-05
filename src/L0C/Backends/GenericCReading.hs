@@ -45,6 +45,11 @@ readerFunctions =
       int c = getchar();
       if (isspace(c)) {
         skipspaces();
+      } else if (c == '/') {
+        // Skip to end of line.
+        for (; c != '\n' && c != EOF; c = getchar());
+        // Next line may have more spaces.
+        skipspaces();
       } else if (c != EOF) {
         ungetc(c, stdin);
       }
@@ -187,6 +192,7 @@ readerFunctions =
     }
 
     int read_int(void* dest) {
+      skipspaces();
       if (scanf("%d", (int*)dest) == 1) {
         return 0;
       } else {
@@ -195,6 +201,7 @@ readerFunctions =
     }
 
     int read_char(void* dest) {
+      skipspaces();
       if (scanf("%c", (char*)dest) == 1) {
         return 0;
       } else {
@@ -203,6 +210,7 @@ readerFunctions =
     }
 
     int read_double(void* dest) {
+      skipspaces();
       if (scanf("%lf", (double*)dest) == 1) {
         return 0;
       } else {
