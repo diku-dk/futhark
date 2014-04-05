@@ -9,6 +9,7 @@ import Control.Applicative
 import Control.Monad.RWS
 
 import Data.List
+import Data.Maybe
 
 import Data.Loc
 
@@ -93,7 +94,13 @@ binding :: [(VName, Exp)] -> CPropM a -> CPropM a
 binding = localVtable . flip (foldr $ uncurry ST.insert)
 
 bindParams :: [Param] -> CPropM a -> CPropM a
-bindParams = localVtable . flip (foldr ST.insert') . map identName
+bindParams params =
+  localVtable $ \vtable ->
+    let vtable' = foldr (ST.insert' . identName) vtable params
+    in foldr ST.cannotBeNegative vtable' sizevars
+  where sizevars = mapMaybe isVar $ concatMap (arrayDims . identType) params
+        isVar (Var v) = Just $ identName v
+        isVar _       = Nothing
 
 bindLoopVar :: Ident -> SubExp -> CPropM a -> CPropM a
 bindLoopVar var upper =

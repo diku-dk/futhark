@@ -12,6 +12,7 @@ module L0C.EnablingOpts.SymbolTable
   , Bounds
   , insertBounded
   , updateBounds
+  , cannotBeNegative
   , lookup
   , CtOrId(..)
   )
@@ -155,6 +156,12 @@ setUpperBound name bound vtable =
 
 setLowerBound :: VName -> ScalExp -> SymbolTable -> SymbolTable
 setLowerBound name bound vtable =
-  vtable { bindings = HM.adjust setUpperBound' name $ bindings vtable }
-  where setUpperBound' bind =
+  vtable { bindings = HM.adjust setLowerBound' name $ bindings vtable }
+  where setLowerBound' bind =
           bind { valueRange = (Just bound, snd $ valueRange bind) }
+
+cannotBeNegative :: VName -> SymbolTable -> SymbolTable
+cannotBeNegative name vtable =
+  vtable { bindings = HM.adjust cannotBeNegative' name $ bindings vtable }
+  where cannotBeNegative' bind =
+          bind { valueRange = (Just $ Val (IntVal 0), snd $ valueRange bind) }
