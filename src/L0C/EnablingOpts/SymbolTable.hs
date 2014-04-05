@@ -3,13 +3,15 @@ module L0C.EnablingOpts.SymbolTable
   , empty
   , filter
   , Entry (asExp)
-  , Bounds
   , lookupExp
   , lookupScalExp
   , lookupValue
   , lookupVar
   , insert
+  , insert'
+  , Bounds
   , insertBounded
+  , updateBounds
   , lookup
   , CtOrId(..)
   )
@@ -17,16 +19,16 @@ module L0C.EnablingOpts.SymbolTable
 
 import Prelude hiding (lookup, filter)
 
+import Control.Applicative hiding (empty)
 import qualified Data.HashMap.Lazy as HM
 
 import L0C.InternalRep
-import L0C.EnablingOpts.ScalExp (ScalExp)
-import qualified L0C.EnablingOpts.ScalExp as SE
+import L0C.EnablingOpts.ScalExp
 
 data SymbolTable = SymbolTable {
     curDepth :: Int
   , bindings :: HM.HashMap VName Entry
-  }
+  } deriving (Eq, Show)
 
 empty :: SymbolTable
 empty = SymbolTable 0 HM.empty
@@ -34,14 +36,12 @@ empty = SymbolTable 0 HM.empty
 filter :: (Entry -> Bool) -> SymbolTable -> SymbolTable
 filter p vtable = vtable { bindings = HM.filter p $ bindings vtable }
 
-type Bounds = (Maybe ScalExp, Maybe ScalExp)
-
 data Entry = Entry {
     asExp :: Maybe Exp
   , asScalExp :: Maybe ScalExp
   , bindingDepth :: Int
-  , valueRange :: Bounds
-  }
+  , valueRange :: (Maybe ScalExp, Maybe ScalExp)
+  } deriving (Eq, Show)
 
 data CtOrId  = Value Value
              -- ^ A plain value for constant propagation.
@@ -84,19 +84,70 @@ insert name e vtable =
          }
   where bind = Entry {
                  asExp = Just e
-               , asScalExp = SE.toScalExp (`lookupScalExp` vtable) e
+               , asScalExp = toScalExp (`lookupScalExp` vtable) e
                , valueRange = (Nothing, Nothing)
                , bindingDepth = curDepth vtable
                }
 
-insertBounded :: VName -> Bounds -> SymbolTable -> SymbolTable
-insertBounded name bounds vtable =
+insert' :: VName -> SymbolTable -> SymbolTable
+insert' name vtable =
   vtable { bindings = HM.insert name bind $ bindings vtable
          , curDepth = curDepth vtable + 1
          }
   where bind = Entry {
                  asExp = Nothing
                , asScalExp = Nothing
-               , valueRange = bounds
+               , valueRange = (Nothing, Nothing)
                , bindingDepth = curDepth vtable
                }
+
+type Bounds = (Maybe SubExp, Maybe SubExp)
+
+insertBounded :: VName -> Bounds -> SymbolTable -> SymbolTable
+insertBounded name (lower,upper) vtable =
+  vtable { bindings = HM.insert name bind $ bindings vtable
+         , curDepth = curDepth vtable + 1
+         }
+  where bind = Entry {
+                 asExp = Nothing
+               , asScalExp = Nothing
+               , valueRange = (lower', upper')
+               , bindingDepth = curDepth vtable
+               }
+        look = (`lookupScalExp` vtable)
+        lower' = toScalExp look =<< (subExp <$> lower)
+        upper' = toScalExp look =<< (subExp <$> upper)
+
+updateBounds :: Bool -> SubExp -> SymbolTable -> SymbolTable
+updateBounds isTrue cond vtable =
+  case toScalExp (`lookupScalExp` vtable) $ subExp cond of
+    Nothing    -> vtable
+    Just cond' ->
+      let cond'' | isTrue    = cond'
+                 | otherwise = SNot cond'
+      in updateBounds' cond'' vtable
+
+updateBounds' :: ScalExp -> SymbolTable -> SymbolTable
+updateBounds' (RelExp LTH0 (Id v)) vtable =
+  setUpperBound (identName v) (Val $ IntVal (-1)) vtable
+updateBounds' (RelExp LEQ0 (Id v)) vtable =
+  setUpperBound (identName v) (Val $ IntVal 0) vtable
+updateBounds' (RelExp LTH0 (lower `SMinus` Id v)) vtable =
+  setLowerBound (identName v) (lower `SPlus` (Val $ IntVal 1)) vtable
+updateBounds' (RelExp LEQ0 (lower `SMinus` Id v)) vtable =
+  setLowerBound (identName v) lower vtable
+
+-- FIXME: We need more cases here, probably.  Maybe simplify first?
+updateBounds' _ vtable = vtable
+
+setUpperBound :: VName -> ScalExp -> SymbolTable -> SymbolTable
+setUpperBound name bound vtable =
+  vtable { bindings = HM.adjust setUpperBound' name $ bindings vtable }
+  where setUpperBound' bind =
+          bind { valueRange = (fst $ valueRange bind, Just bound) }
+
+setLowerBound :: VName -> ScalExp -> SymbolTable -> SymbolTable
+setLowerBound name bound vtable =
+  vtable { bindings = HM.adjust setUpperBound' name $ bindings vtable }
+  where setUpperBound' bind =
+          bind { valueRange = (Just bound, snd $ valueRange bind) }
