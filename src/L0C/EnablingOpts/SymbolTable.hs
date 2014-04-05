@@ -1,19 +1,21 @@
 module L0C.EnablingOpts.SymbolTable
   ( SymbolTable
+  , empty
+  , filter
   , Entry (asExp)
+  , Bounds
   , lookupExp
   , lookupScalExp
   , lookupValue
   , lookupVar
   , insert
+  , insertBounded
   , lookup
   , CtOrId(..)
   )
   where
 
-import Prelude hiding (lookup)
-
-import Control.Applicative
+import Prelude hiding (lookup, filter)
 
 import qualified Data.HashMap.Lazy as HM
 
@@ -21,11 +23,24 @@ import L0C.InternalRep
 import L0C.EnablingOpts.ScalExp (ScalExp)
 import qualified L0C.EnablingOpts.ScalExp as SE
 
-type SymbolTable = HM.HashMap VName Entry
+data SymbolTable = SymbolTable {
+    curDepth :: Int
+  , bindings :: HM.HashMap VName Entry
+  }
+
+empty :: SymbolTable
+empty = SymbolTable 0 HM.empty
+
+filter :: (Entry -> Bool) -> SymbolTable -> SymbolTable
+filter p vtable = vtable { bindings = HM.filter p $ bindings vtable }
+
+type Bounds = (Maybe ScalExp, Maybe ScalExp)
 
 data Entry = Entry {
-    asExp :: Exp
+    asExp :: Maybe Exp
   , asScalExp :: Maybe ScalExp
+  , bindingDepth :: Int
+  , valueRange :: Bounds
   }
 
 data CtOrId  = Value Value
@@ -47,10 +62,10 @@ lookup name vtable = do
     _                          -> Just $ SymExp e
 
 lookupExp :: VName -> SymbolTable -> Maybe Exp
-lookupExp name vtable = asExp <$> HM.lookup name vtable
+lookupExp name vtable = asExp =<< HM.lookup name (bindings vtable)
 
 lookupScalExp :: VName -> SymbolTable -> Maybe ScalExp
-lookupScalExp name vtable = asScalExp =<< HM.lookup name vtable
+lookupScalExp name vtable = asScalExp =<< HM.lookup name (bindings vtable)
 
 lookupValue :: VName -> SymbolTable -> Maybe Value
 lookupValue name vtable = case lookupExp name vtable of
@@ -63,8 +78,25 @@ lookupVar name vtable = case lookupExp name vtable of
                           _                        -> Nothing
 
 insert :: VName -> Exp -> SymbolTable -> SymbolTable
-insert name e vtable = HM.insert name bind vtable
+insert name e vtable =
+  vtable { bindings = HM.insert name bind $ bindings vtable
+         , curDepth = curDepth vtable + 1
+         }
   where bind = Entry {
-                 asExp = e
+                 asExp = Just e
                , asScalExp = SE.toScalExp (`lookupScalExp` vtable) e
+               , valueRange = (Nothing, Nothing)
+               , bindingDepth = curDepth vtable
+               }
+
+insertBounded :: VName -> Bounds -> SymbolTable -> SymbolTable
+insertBounded name bounds vtable =
+  vtable { bindings = HM.insert name bind $ bindings vtable
+         , curDepth = curDepth vtable + 1
+         }
+  where bind = Entry {
+                 asExp = Nothing
+               , asScalExp = Nothing
+               , valueRange = bounds
+               , bindingDepth = curDepth vtable
                }

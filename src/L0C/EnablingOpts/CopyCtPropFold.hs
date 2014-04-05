@@ -13,7 +13,6 @@ import Data.List
 
 import Data.Loc
 
-import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet      as HS
 
 import L0C.InternalRep
@@ -73,12 +72,11 @@ changed x = do
 -- from the symbol table.
 consuming :: Ident -> CPropM a -> CPropM a
 consuming idd m = do
-  (vtable, _) <- spartition ok <$> asks envVtable
+  vtable <- ST.filter ok <$> asks envVtable
   local (\e -> e { envVtable = vtable }) m
   where als = identName idd `HS.insert` aliases (identType idd)
-        spartition f s = let s' = HM.filter f s
-                         in (s', s `HM.difference` s')
-        ok entry  = HS.null $ als `HS.intersection` freeNamesInExp (ST.asExp entry)
+        ok entry  = HS.null $ als `HS.intersection`
+                    maybe HS.empty freeNamesInExp (ST.asExp entry)
 
 -- | The enabling optimizations run in this monad.  Note that it has no mutable
 -- state, but merely keeps track of current bindings in a 'TypeEnv'.
@@ -103,7 +101,7 @@ binding bnds = local (`bindVars` bnds)
 -- | Applies Copy/Constant Propagation and Folding to an Entire Program.
 copyCtProp :: Prog -> Either EnablingOptError (Bool, Prog)
 copyCtProp prog = do
-  let env = CopyPropEnv { envVtable = HM.empty, program = prog }
+  let env = CopyPropEnv { envVtable = ST.empty, program = prog }
       src = newNameSourceForProg prog
   -- res   <- runCPropM (mapM copyCtPropFun prog) env
   -- let (bs, rs) = unzip res
@@ -121,7 +119,7 @@ copyCtPropFun (fname, rettype, args, body, pos) = do
 
 copyCtPropOneLambda :: Prog -> Lambda -> Either EnablingOptError Lambda
 copyCtPropOneLambda prog lam = do
-  let env = CopyPropEnv { envVtable = HM.empty, program = prog }
+  let env = CopyPropEnv { envVtable = ST.empty, program = prog }
       src = newNameSourceForProg prog
   (res, _, _) <- runCPropM (copyCtPropLambda lam) env src
   return res
