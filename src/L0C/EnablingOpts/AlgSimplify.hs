@@ -19,7 +19,7 @@ import L0C.InternalRep
 import L0C.EnablingOpts.EnablingOptErrors
 import L0C.EnablingOpts.ScalExp
 
-type RangesRep = HM.HashMap VName (ScalExp, ScalExp)
+type RangesRep = HM.HashMap VName (Int, Maybe ScalExp, Maybe ScalExp)
 
 -- | environment recording the position and 
 --   a list of variable-to-range bindings.
@@ -108,16 +108,52 @@ simplifyNRel only_half inp_term = do
         isTrivialNRel  _                            = True
                      
 
-gaussEliminateNRel :: BTerm -> AlgSimplifyM DNF
-gaussEliminateNRel _ = do
-    pos <- asks pos
-    badAlgSimplifyM $ SimplifyError pos "gaussElimNRel: unimplemented!"
-
 cheapSimplifyNRel :: BTerm -> AlgSimplifyM BTerm
 cheapSimplifyNRel (NRelExp rel (NProd [Val v] _)) = do
     succ' <- valLTHEQ0 rel v; return $ LogCt succ'
 cheapSimplifyNRel e = return e 
 
+
+gaussEliminateNRel :: BTerm -> AlgSimplifyM DNF 
+gaussEliminateNRel _ = do
+    pos <- asks pos
+    badAlgSimplifyM $ SimplifyError pos "gaussElimNRel: unimplemented!"
+{-
+gaussAllLTH0 :: ScalExp -> AlgSimplify DNF
+gaussAllLTH0 e0 =
+    pos<- asks pos 
+    tp <- typeOfScal e
+    e <- if not (tp == Int) 
+         then badAlgSimplifyM $ SimplifyError pos "gaussLTH: not an Int expression!"
+         else return e0
+    ranges <- asks ranges
+    let ids     = getIds e
+    let id_cands= filter (\i->(Just True) == (lookup i ranges)) ids
+    
+gaussOneLTH0 :: Ident -> ScalExp -> AlgSimplify DNF
+gaussOneLTH0 i e = do
+    (e_dnfs, es) <- predSimplifyScal i [] e
+    return $ NRelExp LTH0 e
+
+predSimplifyScal :: Ident -> ScalExp -> AlgSimplify ([([ScalExp], ScalExp)])
+predSimplifyScal i e@(Val _) = return ([[], e])
+predSimplifyScal i e@(Id  _) = return ([[], e])
+predSimplifyScal i (SNeg e) = 
+    pse' <- predSimplifyScal i e
+    return map (\(ps,e)->case e of 
+                          MinMax m es -> ps, SNeg e)
+predSimplifyScal i ps (SPlus x y) =
+    (psx, ex) <- predSimplifyScal i x
+    (psy, ey) <- predSimplifyScal i y
+    case (ex, ey) of
+        (MinMax ismin exs, _) -> 
+            (ps', e) <- predSimplifyScal $ MinMax ismin $ map (\x -> SPlus x ey) exs
+            return (psx++psy++ps', e
+predSimplifyScal i ps _ =  
+    pos <- asks pos
+    badAlgSimplifyM $ SimplifyError pos (
+      "predSimplifyScal: found bool exp")
+-}
 ------------------------------------------------
 ------------------------------------------------
 -- Main Helper Function: takes a scalar exp,  --
@@ -523,13 +559,18 @@ toDNF _            = do
 ---      e1 < 0 => e2 < 0 if e2 <= e1              ---
 ------------------------------------------------------
 simplifyDNF :: DNF -> AlgSimplifyM DNF
-simplifyDNF terms = do
-    terms' <- mapM (simplifyAndOr True) terms
-    let len1terms = (foldl (&&) True . map (\x -> 1 == length x)) terms
-    if not len1terms then return terms'
-    else do let terms_flat = foldl (++) [] terms'
-            terms'' <- simplifyAndOr False terms_flat
-            return $ map (\x->[x]) terms''
+simplifyDNF terms0 = do
+    terms1 <- mapM (simplifyAndOr True) terms0
+    let terms' = if any (== [LogCt True]) terms1 then [[LogCt True]] 
+                 else S.toList $ S.fromList $
+                        filter (not . (== [LogCt False])) terms1
+    if null terms' then return [[LogCt False]] 
+    else do
+        let len1terms = (foldl (&&) True . map (\x -> 1 == length x)) terms'
+        if not len1terms then return terms'
+        else do let terms_flat = foldl (++) [] terms'
+                terms'' <- simplifyAndOr False terms_flat
+                return $ map (\x->[x]) terms''
 
 -- big helper function for simplifyDNF
 simplifyAndOr :: Bool -> [BTerm] -> AlgSimplifyM [BTerm]
@@ -543,7 +584,7 @@ simplifyAndOr is_and fs = do
                     -- (i) p AND p == p,        (ii) True AND p == p
     else do let fs' = ( S.toList . S.fromList . filter (not . (== (LogCt is_and))) ) fs
             if null fs' 
-            then if is_and then return [LogCt True] else return [LogCt False]
+            then return [LogCt is_and]
             else do    -- IF p1 => p2 THEN   p1 AND p2 --> p1
                 fs''<- foldM (\l x-> do (addx, l') <- trimImplies is_and x l
                                         if addx then return (x:l') else return l'
@@ -1052,7 +1093,8 @@ mkIntExp 1 =
                           (STimes (STimes (SPlus y q) (STimes z x) ) (Val (IntVal 3)) )
         dn_term  = STimes (STimes x (Val (IntVal 3))) z
     -- in dn_term
-    in SDivide (SPlus up_term1 up_term2) dn_term
+    -- in SPlus x  $ STimes (Val (IntVal (-1))) y 
+    in  SDivide (SPlus up_term1 up_term2) dn_term
 
 mkIntExp 2 = 
     let (x',y',z',q') = (tident "int x", tident "int y", tident "int z", tident "int q")
@@ -1061,7 +1103,7 @@ mkIntExp 2 =
         x2m3ylt0 = RelExp LTH0 x2m3y 
         y3m2xle0 = RelExp LEQ0 (SMinus (STimes y (Val (IntVal 3))) (STimes (Val (IntVal 2)) x))
     in SLogOr x2m3ylt0 $ SLogOr (Val (LogVal False)) $ SLogAnd z y3m2xle0
-    -- SLogAnd (SLogAnd (SLogAnd x2m3ylt0 z) (SLogAnd q y3m2xle0)) (Val (LogVal True))
+    --in SLogAnd (SLogAnd (SLogAnd x2m3ylt0 z) (SLogAnd q y3m2xle0)) (Val (LogVal True))
 
 mkIntExp _ = Val (IntVal 3)
 

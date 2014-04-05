@@ -5,6 +5,7 @@ module L0C.EnablingOpts.ScalExp
   , toScalExp
   , LookupVar
   , fromScalExp
+  , getIds
   )
 where
 
@@ -152,3 +153,24 @@ fromScalExp loc = runBinder'' . convert
           in eIf cmp (eBody $ pure pick) (eBody $ pure discard) [t] loc
 
         zero = subExp $ Constant (BasicVal $ IntVal 0) loc
+
+------------------------
+--- Helper Functions ---
+------------------------
+getIds :: ScalExp -> [Ident]
+getIds (Val   _) = []
+getIds (Id    i) = [i]
+getIds (SNeg  e) = getIds e
+getIds (SNot  e) = getIds e
+getIds (SPlus x y)   = foldl (\l e->l++(getIds e)) [] [x,y]
+getIds (SMinus x y)  = foldl (\l e->l++(getIds e)) [] [x,y]
+getIds (SPow x y)    = foldl (\l e->l++(getIds e)) [] [x,y]
+getIds (STimes x y)  = foldl (\l e->l++(getIds e)) [] [x,y]
+getIds (SDivide x y) = foldl (\l e->l++(getIds e)) [] [x,y]
+getIds (SLogOr x y)  = foldl (\l e->l++(getIds e)) [] [x,y]
+getIds (SLogAnd x y) = foldl (\l e->l++(getIds e)) [] [x,y]
+getIds (RelExp LTH0 e) = getIds e
+getIds (RelExp LEQ0 e) = getIds e
+getIds (MaxMin True  es) = foldl (\l e->l++(getIds e)) [] es
+getIds (MaxMin False es) = foldl (\l e->l++(getIds e)) [] es
+
