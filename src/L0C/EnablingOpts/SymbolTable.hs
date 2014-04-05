@@ -17,8 +17,6 @@ module L0C.EnablingOpts.SymbolTable
   )
   where
 
-import Debug.Trace
-
 import Prelude hiding (lookup, filter)
 
 import Control.Applicative hiding (empty)
