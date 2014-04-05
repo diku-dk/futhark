@@ -60,7 +60,7 @@ instance Pretty ScalExp where
   pprPrec _ (Val val) = ppr $ BasicVal val
   pprPrec _ (Id v) = ppr v
   pprPrec _ (SNeg e) = text "-" <> pprPrec 9 e
-  pprPrec _ (SNot e) = text "-" <> pprPrec 9 e
+  pprPrec _ (SNot e) = text "not" <+> pprPrec 9 e
   pprPrec prec (SPlus x y) = ppBinOp prec "+" 4 4 x y
   pprPrec prec (SMinus x y) = ppBinOp prec "-" 4 10 x y
   pprPrec prec (SPow x y) = ppBinOp prec "^" 6 6 x y
