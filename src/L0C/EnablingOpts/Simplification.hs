@@ -19,7 +19,6 @@ import Data.Array
 import Data.Bits
 import Data.Either
 import Data.Loc
-import Data.Maybe
 
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet      as HS
@@ -47,11 +46,8 @@ applyRules :: [SimplificationRule]
 applyRules []           _    _   = return Nothing
 applyRules (rule:rules) vtable bnd = do
   res <- rule vtable bnd
-  case res of Just bnds -> do bnds' <- mapM subApply bnds
-                              return $ Just $ concat bnds'
+  case res of Just bnds -> return $ Just bnds
               Nothing   -> applyRules rules vtable bnd
-  where subApply bnd' =
-          fromMaybe [bnd'] <$> applyRules (rule:rules) vtable bnd'
 
 type SimplificationRule = ST.SymbolTable -> Binding -> NeedNames (Maybe [Binding])
 
