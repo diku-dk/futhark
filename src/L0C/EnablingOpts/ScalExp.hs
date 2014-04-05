@@ -128,8 +128,9 @@ toScalExp _ _ = Nothing
 -- | "Smart constructor" that checks whether we are subtracting zero,
 -- and if so just returns the first argument.
 sminus :: ScalExp -> ScalExp -> ScalExp
-sminus x (Val (IntVal 0)) = x
-sminus x y                = x `SMinus` y
+sminus x (Val (IntVal 0))  = x
+sminus x (Val (RealVal 0)) = x
+sminus x y                 = x `SMinus` y
 
 binOpScalExp :: BinOp -> Maybe (ScalExp -> ScalExp -> ScalExp)
 binOpScalExp bop = liftM snd $ find ((==bop) . fst)
