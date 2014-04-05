@@ -17,6 +17,8 @@ module L0C.EnablingOpts.SymbolTable
   )
   where
 
+import Debug.Trace
+
 import Prelude hiding (lookup, filter)
 
 import Control.Applicative hiding (empty)
@@ -135,6 +137,13 @@ updateBounds' (RelExp LEQ0 (Id v)) vtable =
 updateBounds' (RelExp LTH0 (lower `SMinus` Id v)) vtable =
   setLowerBound (identName v) (lower `SPlus` (Val $ IntVal 1)) vtable
 updateBounds' (RelExp LEQ0 (lower `SMinus` Id v)) vtable =
+  setLowerBound (identName v) lower vtable
+
+-- XXX: The following should probably be handled through some form of
+-- simplification.
+updateBounds' (RelExp LTH0 (lower `SPlus` (Val (IntVal (-1)) `STimes` Id v))) vtable =
+  setLowerBound (identName v) (lower `SPlus` (Val $ IntVal 1)) vtable
+updateBounds' (RelExp LEQ0 (lower `SPlus` (Val (IntVal (-1)) `STimes` Id v))) vtable =
   setLowerBound (identName v) lower vtable
 
 -- FIXME: We need more cases here, probably.  Maybe simplify first?
