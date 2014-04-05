@@ -90,14 +90,20 @@ toScalExp :: LookupVar -> Exp -> Maybe ScalExp
 toScalExp look (SubExps [se] _)    =
   toScalExp' look se
 toScalExp look (BinOp Less x y _ _) =
-  RelExp LTH0 <$> (SMinus <$> toScalExp' look x <*> toScalExp' look y)
+  RelExp LTH0 <$> (sminus <$> toScalExp' look x <*> toScalExp' look y)
 toScalExp look (BinOp Leq x y _ _) =
-  RelExp LEQ0 <$> (SMinus <$> toScalExp' look x <*> toScalExp' look y)
+  RelExp LEQ0 <$> (sminus <$> toScalExp' look x <*> toScalExp' look y)
 toScalExp look (BinOp bop x y (Basic t) _)
   | t `elem` [Int, Bool] = -- XXX: Only integers and booleans, OK?
   binOpScalExp bop <*> toScalExp' look x <*> toScalExp' look y
 
 toScalExp _ _ = Nothing
+
+-- | "Smart constructor" that checks whether we are subtracting zero,
+-- and if so just returns the first argument.
+sminus :: ScalExp -> ScalExp -> ScalExp
+sminus x (Val (IntVal 0)) = x
+sminus x y                = x `SMinus` y
 
 binOpScalExp :: BinOp -> Maybe (ScalExp -> ScalExp -> ScalExp)
 binOpScalExp bop = liftM snd $ find ((==bop) . fst)
