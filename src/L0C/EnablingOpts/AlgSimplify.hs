@@ -1,5 +1,11 @@
 {-# LANGUAGE DataKinds, GeneralizedNewtypeDeriving, NamedFieldPuns #-}
-module L0C.EnablingOpts.AlgSimplify ( ScalExp, simplify, canSimplify, ppScalExp )
+module L0C.EnablingOpts.AlgSimplify
+  ( ScalExp
+  , simplify
+  , canSimplify
+  , RangesRep
+  , ppScalExp
+  )
   where
 
 import Data.Loc
@@ -71,9 +77,8 @@ type DNF     = [NAnd ]
 -----------------------------------------------
 
 -- | Applies Simplification at Expression level:
-simplify :: ScalExp -> SrcLoc -> Bool -> Either EnablingOptError ScalExp
-simplify e p c = do -- Right e
-    runAlgSimplifier (simplifyScal e) p c HM.empty
+simplify :: ScalExp -> SrcLoc -> Bool -> RangesRep -> Either EnablingOptError ScalExp
+simplify e p c rm = runAlgSimplifier (simplifyScal e) p c rm
 
 
 -- | Test if Simplification engine can handle this kind of expression

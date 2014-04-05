@@ -1,8 +1,8 @@
 module L0C.EnablingOpts.SymbolTable
-  ( SymbolTable
+  ( SymbolTable (bindings)
   , empty
   , filter
-  , Entry (asExp)
+  , Entry (asExp, bindingDepth, valueRange)
   , lookupExp
   , lookupScalExp
   , lookupValue

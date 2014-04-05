@@ -179,7 +179,7 @@ simplifyClosedFormReduce _ _ = return Nothing
 simplifyScalarExp :: SimplificationRule
 simplifyScalarExp vtable (Let [v] e)
   | Just se <- SE.toScalExp (`ST.lookupScalExp` vtable) e,
-    Right se' <- AS.simplify se loc True, -- Cheap?  What?
+    Right se' <- AS.simplify se loc True (rangesRep vtable), -- Cheap?  What?
     se /= se' = do -- Only perform simplification if something
                    -- actually changed - if 'simplify' is not
                    -- idempotent, this is going to cause an infinite
@@ -189,6 +189,12 @@ simplifyScalarExp vtable (Let [v] e)
   where loc = srclocOf e
 
 simplifyScalarExp _ _ = return Nothing
+
+rangesRep :: ST.SymbolTable -> AS.RangesRep
+rangesRep = HM.map toRep . ST.bindings
+  where toRep entry =
+          (ST.bindingDepth entry, lower, upper)
+          where (lower, upper) = ST.valueRange entry
 
 simplifyRearrange :: LetSimplificationRule
 
