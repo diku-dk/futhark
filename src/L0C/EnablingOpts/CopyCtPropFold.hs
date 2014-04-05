@@ -105,7 +105,7 @@ bindParams params =
 bindLoopVar :: Ident -> SubExp -> CPropM a -> CPropM a
 bindLoopVar var upper =
   localVtable $ ST.insertBounded (identName var) (Just one, Just upper)
-  where one = Constant (BasicVal $ RealVal 1) $ srclocOf var
+  where one = Constant (BasicVal $ IntVal 1) $ srclocOf var
 
 -- | Applies Copy/Constant Propagation and Folding to an Entire Program.
 copyCtProp :: Prog -> Either EnablingOptError (Bool, Prog)
