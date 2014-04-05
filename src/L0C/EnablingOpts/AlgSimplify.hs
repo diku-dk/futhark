@@ -122,7 +122,7 @@ gaussEliminateNRel _ = do
 gaussAllLTH0 :: ScalExp -> AlgSimplify DNF
 gaussAllLTH0 e0 =
     pos<- asks pos 
-    tp <- typeOfScal e
+    let tp = scalExpType e
     e <- if not (tp == Int) 
          then badAlgSimplifyM $ SimplifyError pos "gaussLTH: not an Int expression!"
          else return e0
@@ -218,7 +218,7 @@ simplifyScal (SPlus e1o e2o) = do
     where
       normalPlus :: ScalExp -> ScalExp -> AlgSimplifyM ScalExp
       normalPlus e1 e2 = do
-        tp  <- typeOfScal e1
+        let tp = scalExpType e1
         e1' <- toNumSofP e1
         e2' <- toNumSofP e2
         let terms = getTerms e1' ++ getTerms e2'
@@ -238,12 +238,13 @@ simplifyScal (SPlus e1o e2o) = do
 
 simplifyScal (SMinus e1 e2) = do
     if e1 == e2 
-    then do tp <- typeOfScal e1; zero <- getZero tp; return $ Val zero  
-    else do min_1 <- getNeg1 =<< typeOfScal e1
+    then do zero <- getZero tp; return $ Val zero  
+    else do min_1 <- getNeg1 $ scalExpType e1
             simplifyScal $ SPlus e1 $ STimes (Val min_1) e2
+  where tp = scalExpType e1
 
 simplifyScal (SNeg e) = do
-    negOne <- getNeg1 =<< typeOfScal e
+    negOne <- getNeg1 $ scalExpType e
     simplifyScal $ STimes (Val negOne) e
 
 ---------------------------------------------------
@@ -261,7 +262,7 @@ simplifyScal (STimes e1o e2o) = do
     where
       normalTimes :: ScalExp -> ScalExp -> AlgSimplifyM ScalExp
       normalTimes e1 e2 = do
-        tp  <- typeOfScal e1
+        let tp = scalExpType e1
         e1' <- toNumSofP e1
         e2' <- toNumSofP e2
         case (e1', e2') of
@@ -317,9 +318,9 @@ simplifyScal (SDivide e1o e2o) = do
     where
       normalDivide :: ScalExp -> ScalExp -> AlgSimplifyM ScalExp
       normalDivide e1 e2 
-        | (e1 == e2)                  = do one <- getPos1 =<< typeOfScal e1
+        | (e1 == e2)                  = do one <- getPos1 $ scalExpType e1
                                            return $ Val one
---        | e1 == (negateSimplified e2) = do mone<- getNeg1 =<< typeOfScal e1
+--        | e1 == (negateSimplified e2) = do mone<- getNeg1 $ scalExpType e1
 --                                           return $ Val mone
         | otherwise = do
             e1' <- toNumSofP e1
@@ -357,7 +358,7 @@ simplifyScal (SDivide e1o e2o) = do
 -- cannot handle 0^a, because if a < 0 then it's an error.
 -- Could be extented to handle negative exponents better, if needed
 simplifyScal (SPow e1 e2) = do
-    tp  <- typeOfScal e1
+    let tp = scalExpType e1
     e1' <- simplifyScal e1
     e2' <- simplifyScal e2
 
@@ -504,7 +505,7 @@ toDNF :: ScalExp -> AlgSimplifyM DNF
 toDNF (Val  (LogVal v)) = return $ [[LogCt v]]
 toDNF (Id      idd    ) = return $ [[PosId idd]]
 toDNF (RelExp  rel  e ) = do
-    btp   <- typeOfScal e
+    let btp = scalExpType e
     (e', rel')<- if (btp == Int) && (rel == LEQ0) 
                  then do m1 <- getNeg1 Int; return (SPlus e $ Val m1, LTH0)
                  else return (e, rel)   
@@ -678,10 +679,10 @@ negateSimplified :: ScalExp -> AlgSimplifyM ScalExp
 negateSimplified (SNeg e) = return e
 negateSimplified (SNot e) = return e
 negateSimplified e@(Val v) = do 
-    tp <- typeOfScal e; m1 <- getNeg1 tp
+    m1 <- getNeg1 $ scalExpType e
     v' <- mulVals m1 v; return $ Val v'
 negateSimplified e@(Id{}) = do  
-    tp <- typeOfScal e; m1 <- getNeg1 tp
+    m1 <- getNeg1 $ scalExpType e
     return $ STimes (Val m1) e
 negateSimplified (SMinus e1 e2) = do -- return $ SMinus e2 e1
     e1' <- negateSimplified e1
@@ -691,7 +692,7 @@ negateSimplified (SPlus e1 e2) = do
     e2' <- negateSimplified e2
     return $ SPlus e1' e2'
 negateSimplified e@(SPow _ _) = do 
-    tp <- typeOfScal e; m1 <- getNeg1 tp
+    m1 <- getNeg1 $ scalExpType e
     return $ STimes (Val m1) e
 negateSimplified (STimes  e1 e2) = do 
     (e1', e2') <- helperNegateMult e1 e2; return $ STimes  e1' e2'
@@ -723,10 +724,10 @@ helperNegateMult e1 e2 = do
 
 
 toNumSofP :: ScalExp -> AlgSimplifyM NNumExp
-toNumSofP e@(Val  _) = do t <- typeOfScal e; return $ NProd [e] t
-toNumSofP e@(Id   _) = do t <- typeOfScal e; return $ NProd [e] t
-toNumSofP e@(SDivide{})   = do t <- typeOfScal e;  return $ NProd [e] t
-toNumSofP e@(SPow{}   )   = do t <- typeOfScal e;  return $ NProd [e] t
+toNumSofP e@(Val  _) = return $ NProd [e] $ scalExpType e
+toNumSofP e@(Id   _) = return $ NProd [e] $ scalExpType e
+toNumSofP e@(SDivide{})   = return $ NProd [e] $ scalExpType e
+toNumSofP e@(SPow{}   )   = return $ NProd [e] $ scalExpType e
 toNumSofP (SMinus _ _)  = do --toNumSofP $ SPlus e1 (SNeg e2)
     pos <- asks pos
     badAlgSimplifyM $ SimplifyError pos "toNumSofP: SMinus is not in SofP form!"
@@ -740,7 +741,7 @@ toNumSofP (STimes e1 e2) = do
         NProd es2 t -> return $ NProd (e1:es2) t
         _ -> badAlgSimplifyM $ SimplifyError pos "toNumSofP: STimes nor in SofP form!"
 toNumSofP (SPlus  e1 e2)   = do 
-    t   <- typeOfScal e1 
+    let t = scalExpType e1
     e1' <- toNumSofP  e1
     e2' <- toNumSofP  e2
     case (e1', e2') of
@@ -935,48 +936,6 @@ canDivValsEvenly e1 e2 = do
 ---- Helpers for the ScalExp and NNumRelLogExp Datatypes ----
 -------------------------------------------------------------
 -------------------------------------------------------------
-typeOfScal :: ScalExp -> AlgSimplifyM BasicType
-
-typeOfScal (Val ( IntVal _) ) = return Int
-typeOfScal (Val (RealVal _) ) = return Real
-typeOfScal (Val ( LogVal _) ) = return Bool
-typeOfScal (Val (CharVal _) ) = 
-  do pos <- asks pos
-     badAlgSimplifyM $ SimplifyError pos (
-      "typeOfScal: scalar exp cannot have Char type (only bool/numeric)!")
-typeOfScal (Val Checked     ) = 
-  do pos <- asks pos
-     badAlgSimplifyM $ SimplifyError pos (
-      "typeOfScal: scalar exp cannot have Cert type (only bool/numeric)!")
-typeOfScal (Id  idd) =
-  case identType idd of
-    Basic bt -> if (bt == Int) || (bt == Real) || (bt == Bool) 
-                then do return bt
-                else do pos <- asks pos
-                        badAlgSimplifyM $ SimplifyError pos (
-                          "typeOfScal: scalar exp ident can only have "++
-                          "bool/numeric types. Received: "++ppBType bt)
-    _        -> do pos <- asks pos
-                   let tp = identType idd
-                   badAlgSimplifyM $ SimplifyError pos (
-                     "typeOfScal: scalar exp cannot have non-basic type: "++ppType tp)
-typeOfScal (SNeg  e) = typeOfScal e
-typeOfScal (SNot  _) = return Bool
-
-typeOfScal (SPlus   e _) = typeOfScal e
-typeOfScal (SMinus  e _) = typeOfScal e
-typeOfScal (STimes  e _) = typeOfScal e
-typeOfScal (SDivide e _) = typeOfScal e
-typeOfScal (SPow    e _) = typeOfScal e
-
-typeOfScal (SLogAnd _ _) = return Bool
-typeOfScal (SLogOr  _ _) = return Bool 
-typeOfScal (RelExp  _ _) = return Bool
-typeOfScal (MaxMin _ []) = do
-  pos <- asks pos
-  badAlgSimplifyM $ SimplifyError pos (
-    "typeOfScal: MinMax scalar expression with empty arglist!")
-typeOfScal (MaxMin _ (e:_)) = typeOfScal e 
 
 --posOfScal :: ScalExp -> AlgSimplifyM SrcLoc
 --posOfScal _ = do pos <- asks pos
@@ -1041,10 +1000,10 @@ tryDivProdByOneFact _ (NSum _ _, _) = do
 
 tryDivTriv :: ScalExp -> ScalExp -> AlgSimplifyM (Bool, ScalExp)
 tryDivTriv (SPow a e1) (SPow d e2)
-    | (a == d) && (e1 == e2) = do one <- getPos1 =<< typeOfScal a
+    | (a == d) && (e1 == e2) = do one <- getPos1 $ scalExpType a
                                   return $ (True, Val one)
     | (a == d) = do
-          tp  <- typeOfScal a
+          let tp = scalExpType a
           one <- getPos1 tp
           e1me2 <- simplifyScal $ SMinus e1 e2
           case (tp, e1me2) of
@@ -1065,17 +1024,17 @@ tryDivTriv (SPow a e1) (SPow d e2)
     | otherwise = return $ (False, SDivide (SPow a e1) (SPow d e2))
 
 tryDivTriv (SPow a e1) b 
-    | a == b = do one <- getPos1 =<< typeOfScal a
+    | a == b = do one <- getPos1 $ scalExpType a
                   tryDivTriv (SPow a e1) (SPow a (Val one))
     | otherwise = return (False, SDivide (SPow a e1) b)
 
 tryDivTriv b (SPow a e1)
-    | a == b = do one <- getPos1 =<< typeOfScal a
+    | a == b = do one <- getPos1 $ scalExpType a
                   tryDivTriv (SPow a (Val one)) (SPow a e1)
     | otherwise = return (False, SDivide b (SPow a e1))
 
 tryDivTriv t f 
-    | t == f    = do one <- getPos1 =<< typeOfScal t
+    | t == f    = do one <- getPos1 $ scalExpType t
                      return (True,  Val one)
     | otherwise = do return (False, SDivide t f)
 
