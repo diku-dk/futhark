@@ -77,4 +77,7 @@ instance Substitute Lambda where
            (map (substituteNames substs) rettype) loc
 
 instance Substitute Ident where
-  substituteNames substs v = v { identName = substituteNames substs $ identName v }
+  substituteNames substs v =
+    v { identName = substituteNames substs $ identName v
+      , identType = substituteNames substs $ identType v
+      }
