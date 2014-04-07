@@ -70,8 +70,8 @@ instance Pretty ScalExp where
   pprPrec prec (SLogAnd x y) = ppBinOp prec "&&" 1 1 x y
   pprPrec prec (RelExp LTH0 e) = ppBinOp prec "<" 2 2 e (Val $ IntVal 0)
   pprPrec prec (RelExp LEQ0 e) = ppBinOp prec "<=" 2 2 e (Val $ IntVal 0)
-  pprPrec _ (MaxMin True es) = text "max" <> parens (commasep $ map ppr es)
-  pprPrec _ (MaxMin False es) = text "min" <> parens (commasep $ map ppr es)
+  pprPrec _ (MaxMin True es) = text "min" <> parens (commasep $ map ppr es)
+  pprPrec _ (MaxMin False es) = text "max" <> parens (commasep $ map ppr es)
 
 ppBinOp :: Int -> String -> Int -> Int -> ScalExp -> ScalExp -> Doc
 ppBinOp p bop precedence rprecedence x y =
@@ -81,7 +81,7 @@ ppBinOp p bop precedence rprecedence x y =
            pprPrec rprecedence y
 
 ppScalExp :: ScalExp -> String
-ppScalExp = pretty 80 . ppr
+ppScalExp = pretty 160 . ppr
 
 scalExpType :: ScalExp -> BasicType
 scalExpType (Val ( IntVal _) ) = Int
