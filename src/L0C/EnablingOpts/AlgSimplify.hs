@@ -13,7 +13,7 @@ import Control.Monad.Reader
 
 import L0C.Dev(tident) -- for debugging: tident "int x"
 
---import Debug.Trace
+import Debug.Trace
 
 import L0C.InternalRep
 import L0C.EnablingOpts.EnablingOptErrors
@@ -79,8 +79,10 @@ simplify e p c = do -- Right e
 -- | Test if Simplification engine can handle this kind of expression
 canSimplify :: Int -> Either EnablingOptError ScalExp
 canSimplify i = do
-    let e = mkIntExp i
-    runAlgSimplifier (simplifyScal e) noLoc True HM.empty
+    let (h,e1,e2) = mkRelExp i
+    runAlgSimplifier (gaussElimRel e2) noLoc True h
+    -- let e = mkIntExp i
+    -- runAlgSimplifier (simplifyScal e) noLoc True HM.empty
 
 -------------------------------------------------------
 --- Returns a sufficient-condition predicate for     --
@@ -118,42 +120,199 @@ gaussEliminateNRel :: BTerm -> AlgSimplifyM DNF
 gaussEliminateNRel _ = do
     pos <- asks pos
     badAlgSimplifyM $ SimplifyError pos "gaussElimNRel: unimplemented!"
-{-
-gaussAllLTH0 :: ScalExp -> AlgSimplify DNF
-gaussAllLTH0 e0 =
-    pos<- asks pos 
-    tp <- typeOfScal e
-    e <- if not (tp == Int) 
-         then badAlgSimplifyM $ SimplifyError pos "gaussLTH: not an Int expression!"
-         else return e0
-    ranges <- asks ranges
-    let ids     = getIds e
-    let id_cands= filter (\i->(Just True) == (lookup i ranges)) ids
-    
-gaussOneLTH0 :: Ident -> ScalExp -> AlgSimplify DNF
-gaussOneLTH0 i e = do
-    (e_dnfs, es) <- predSimplifyScal i [] e
-    return $ NRelExp LTH0 e
 
-predSimplifyScal :: Ident -> ScalExp -> AlgSimplify ([([ScalExp], ScalExp)])
-predSimplifyScal i e@(Val _) = return ([[], e])
-predSimplifyScal i e@(Id  _) = return ([[], e])
-predSimplifyScal i (SNeg e) = 
-    pse' <- predSimplifyScal i e
-    return map (\(ps,e)->case e of 
-                          MinMax m es -> ps, SNeg e)
-predSimplifyScal i ps (SPlus x y) =
-    (psx, ex) <- predSimplifyScal i x
-    (psy, ey) <- predSimplifyScal i y
-    case (ex, ey) of
-        (MinMax ismin exs, _) -> 
-            (ps', e) <- predSimplifyScal $ MinMax ismin $ map (\x -> SPlus x ey) exs
-            return (psx++psy++ps', e
-predSimplifyScal i ps _ =  
+
+gaussElimRel :: ScalExp -> AlgSimplifyM ScalExp
+gaussElimRel (RelExp LTH0 e) = do
     pos <- asks pos
-    badAlgSimplifyM $ SimplifyError pos (
-      "predSimplifyScal: found bool exp")
--}
+    tp  <- typeOfScal e
+    e_sofp <- if (tp == Int) then toNumSofP =<< simplifyScal e
+              else badAlgSimplifyM $ SimplifyError pos "gaussElimRel: only Int relations please!"
+    pred_lth0 <- gaussAllLTH0 S.empty e_sofp
+    simplifyScal pred_lth0
+gaussElimRel _ = do
+    pos <- asks pos
+    badAlgSimplifyM $ SimplifyError pos "gaussElimRel: only LTH0 Int relations please!"
+
+
+type Prod = [ScalExp]
+gaussAllLTH0 :: S.Set VName -> NNumExp -> AlgSimplifyM ScalExp
+gaussAllLTH0 syms sofp = do
+    pos <- asks pos
+    let tp = typeOfNAlg sofp
+    -- sofp<- toNumSofP =<< simplifyScal e_lth0
+    (jmm, fs, terms) <- findMinMaxTerm sofp
+    case jmm of
+        Just (MaxMin ismin mmts) -> do
+            mone <- getNeg1 tp
+
+            fs_lth0 <- if null fs then return $ Val (LogVal False) 
+                       else gaussAllLTH0 syms (NProd fs tp)
+
+            mfsm1   <- toNumSofP =<< simplifyScal =<< fromNumSofP
+                         ( NSum [NProd ((Val mone):fs) tp,NProd [Val mone] tp] tp )
+
+            fs_geq0 <- gaussAllLTH0 syms mfsm1
+            mm_terms<- mapM (\t -> toNumSofP =<< simplifyScal =<< fromNumSofP 
+                                         (NSum ((NProd (t:fs) tp):terms) tp) ) mmts
+            mms     <- mapM (gaussAllLTH0 syms) mm_terms
+            let mm_geq0 = foldl (\r x-> if ismin then SLogOr  r x else SLogAnd r x)
+                                (Val (LogVal      ismin )) mms
+            let mm_lth0 = foldl (\r x-> if ismin then SLogAnd r x else SLogOr  r x) 
+                                (Val (LogVal (not ismin))) mms 
+            return $ SLogOr (SLogAnd fs_geq0 mm_geq0) (SLogAnd fs_lth0 mm_lth0)
+             
+        Just _ -> badAlgSimplifyM $ SimplifyError pos "gaussOneLTH0: (Just MinMax) invariant violated!"
+        Nothing-> gaussOneDefaultLTH0 syms sofp
+    where 
+        findMinMaxTerm :: NNumExp -> AlgSimplifyM (Maybe ScalExp, Prod, [NNumExp])
+        findMinMaxTerm (NSum  [] _) = return (Nothing, [], [])
+        findMinMaxTerm t@(NProd{}  ) = do (mm, fs) <- findMinMaxFact t; return (mm, fs, [])
+        findMinMaxTerm (NSum (t:ts) tp)= do
+            f <- findMinMaxFact t
+            case f of 
+                (Just mm, fs) -> return (Just mm, fs, ts)
+                (Nothing, _ ) -> do (mm, fs', ts') <- findMinMaxTerm (NSum ts tp) 
+                                    return (mm, fs', t:ts')
+
+        findMinMaxFact :: NNumExp -> AlgSimplifyM (Maybe ScalExp, Prod)
+        findMinMaxFact (NProd []     _ ) = return (Nothing, [])
+        findMinMaxFact (NProd (f:fs) tp) = do
+            case f of
+                MaxMin ismin ts -> do
+                        ranges <- asks ranges 
+                        let ids = S.toList $ S.fromList $ (foldl (++) [] (map getIds ts))
+                        let ids'= filter (\s -> S.member (identName s) syms) ids
+                        if any (\x -> case HM.lookup (identName x) ranges of
+                                          Just _ -> True
+                                          Nothing-> False               ) ids'
+                        then return (Just (MaxMin ismin ts), fs)
+                        else do (mm, fs') <- findMinMaxFact (NProd fs tp)
+                                return (mm, f:fs')   
+                _ -> do (mm, fs') <- findMinMaxFact (NProd fs tp)
+                        return (mm, f:fs')
+        findMinMaxFact (NSum [f] _) = findMinMaxFact f
+        findMinMaxFact (NSum _ _) = do
+            pos <- asks pos
+            badAlgSimplifyM $ SimplifyError pos "findMinMaxFact: NSum argument illegal!"
+
+gaussOneDefaultLTH0 :: S.Set VName -> NNumExp -> AlgSimplifyM ScalExp
+gaussOneDefaultLTH0 elsyms e = do
+    pos  <- asks pos
+    mi   <- pickSymToElim elsyms e
+    case mi of
+      Nothing -> do e_scal <- fromNumSofP e
+                    return $ RelExp LTH0 e_scal
+      Just i  -> do
+            aipb <- linearForm i e
+            case aipb of
+                Nothing     -> gaussAllLTH0 (S.insert (identName i) elsyms) e
+                Just (a, b) -> do
+                    ranges <- asks ranges
+                    one    <- getPos1 (typeOfNAlg e)
+                    ascal  <- fromNumSofP a
+                    mam1   <- toNumSofP =<< simplifyScal (SNeg (SPlus ascal (Val one)))
+
+                    case HM.lookup (identName i) ranges of
+                        Nothing -> 
+                            badAlgSimplifyM $ SimplifyError pos 
+                                              "gaussOneDefaultLTH0: sym not in ranges!"
+                        Just (_, Nothing, Nothing) -> 
+                            badAlgSimplifyM $ SimplifyError pos 
+                                              "gaussOneDefaultLTH0: both bounds are undefined!"
+                        Just (_, Just lb, Nothing) -> do
+                            alth0    <- gaussAllLTH0  elsyms a
+                            alpblth0 <- gaussElimHalf elsyms lb a b
+                            return $ SLogAnd alth0 alpblth0
+                        Just (_, Nothing, Just ub) -> do
+                            ageq0    <- gaussAllLTH0 elsyms mam1
+                            aupblth0 <- gaussElimHalf elsyms ub a b
+                            return $ SLogAnd ageq0 aupblth0
+                        Just (_, Just lb, Just ub) -> do
+                            alth0    <- gaussAllLTH0  elsyms a
+                            alpblth0 <- gaussElimHalf elsyms lb a b
+                            ageq0    <- gaussAllLTH0 elsyms mam1
+                            aupblth0 <- gaussElimHalf elsyms ub a b
+
+                            e_scal <- fromNumSofP e
+                            alth00 <- trace ("ElimSym: "++(ppScalExp (Id i))++" Exp: "++(ppScalExp e_scal)++" < 0 IS: ") 
+                                            (return alth0)
+
+                            -- let alth000 = trace (" a < 0: "++(ppScalExp alth0)++" a >= 0: "++(ppScalExp ageq0)++
+                            --                    " a*l+b < 0: " ++ (ppScalExp alpblth0) ++ 
+                            --                    " a*u+b < 0: " ++ (ppScalExp aupblth0) ) alth00
+
+                            all_simpl <- simplifyScal $ SLogOr (SLogAnd alth00 alpblth0) (SLogAnd ageq0 aupblth0)
+                            all_simpl0<- trace ( ppScalExp all_simpl ) (return all_simpl)
+                            return all_simpl0
+    where
+        linearForm :: Ident -> NNumExp -> AlgSimplifyM (Maybe (NNumExp, NNumExp))
+        linearForm _ (NProd [] _) = do
+            pos <- asks pos
+            badAlgSimplifyM $ SimplifyError pos "linearForm: empty Prod!"
+        linearForm idd ee@(NProd{}) = linearForm idd (NSum [ee] (typeOfNAlg ee))
+        linearForm _ (NSum [] _) = do
+            pos <- asks pos
+            badAlgSimplifyM $ SimplifyError pos "linearForm: empty Sum!"
+        linearForm idd (NSum terms tp) = do
+            terms_d_idd <- mapM  (\t -> do t0 <- case t of
+                                                    NProd (_:_) _ -> return t
+                                                    _ -> do
+                                                        pos <- asks pos
+                                                        badAlgSimplifyM $ SimplifyError pos "linearForm: ILLEGAL!!!!"
+                                           t_scal <- fromNumSofP t0 
+                                           simplifyScal $ SDivide t_scal (Id idd)
+                                 ) terms
+            let myiota  = [1..(length terms)]
+            let ia_terms= filter (\(_,t) -> case t of
+                                              SDivide _ _ -> False
+                                              _           -> True
+                                 ) (zip myiota terms_d_idd)
+            let (a_inds, a_terms) = unzip ia_terms
+
+            let (_, b_terms) = unzip $ filter (\(i,_) -> not (elem i a_inds)) 
+                                              (zip myiota terms)
+            if null a_terms 
+            then return Nothing
+            else do let a_scal = foldl (\a x -> SPlus a x) (head a_terms) (tail a_terms) 
+                    a_terms_sofp <- toNumSofP =<< simplifyScal a_scal
+                    -- b_scal <- if null b_terms then do zero <- getZero tp; return $ Val zero
+                    --          else return $ foldl (\a x -> SPlus a x) (head b_terms) (tail b_terms) 
+                    -- b_terms_sofp <- toNumSofP =<< simplifyScal b_scal
+                    b_terms_sofp <- if null b_terms 
+                                    then do zero <- getZero tp; return $ NProd [Val zero] tp
+                                    else return $ NSum b_terms tp 
+                    return $ Just (a_terms_sofp, b_terms_sofp)
+
+        pickSymToElim :: S.Set VName -> NNumExp -> AlgSimplifyM (Maybe Ident) 
+        pickSymToElim elsyms0 e0 = do
+            ranges <- asks ranges
+            e_scal <- fromNumSofP e0
+            let ids0= (S.toList . S.fromList . getIds) e_scal
+            let ids1= filter (\s -> not (S.member (identName s) elsyms0)) ids0
+            let ids2= filter (\s -> case HM.lookup (identName s) ranges of
+                                        Nothing -> False
+                                        Just _  -> True        
+                             ) ids1
+            let ids = sortBy (\n1 n2 -> let n1p = HM.lookup (identName n1) ranges
+                                            n2p = HM.lookup (identName n2) ranges
+                                        in case (n1p, n2p) of
+                                             (Just (p1,_,_), Just (p2,_,_)) -> compare (-p1) (-p2)
+                                             (_            , _            ) -> compare (1::Int) (1::Int)
+                             ) ids2
+            if null ids then return Nothing
+                        else return $ Just (head ids)            
+    
+        gaussElimHalf :: S.Set VName -> ScalExp -> NNumExp -> NNumExp -> AlgSimplifyM ScalExp
+        gaussElimHalf elsyms0 q a b = do
+            a_scal <- fromNumSofP a
+            b_scal <- fromNumSofP b
+            e_num  <- toNumSofP =<< simplifyScal (SPlus (STimes a_scal q) b_scal)
+            gaussAllLTH0 elsyms0 e_num
+
+--    pos <- asks pos
+--    badAlgSimplifyM $ SimplifyError pos "gaussOneDefaultLTH0: unimplemented!"
+
 ------------------------------------------------
 ------------------------------------------------
 -- Main Helper Function: takes a scalar exp,  --
@@ -748,9 +907,12 @@ toNumSofP (SPlus  e1 e2)   = do
         (NSum es1 _, NProd{}) -> return $ NSum (es1++[e2']) t
         (NProd{}, NSum es2 _) -> return $ NSum (e1':es2)    t
         (NProd{}, NProd{}   ) -> return $ NSum [e1', e2']   t
-toNumSofP _ = do 
+toNumSofP me@(MaxMin{}) = do
+    tp <- typeOfScal me
+    return $ NProd [me] tp
+toNumSofP s_e = do 
     pos <- asks pos
-    badAlgSimplifyM $ SimplifyError pos "toNumSofP: unimplemented!"
+    badAlgSimplifyM $ SimplifyError pos ("toNumSofP: unimplemented!"++(ppScalExp s_e))
 
 
 fromNumSofP :: NNumExp -> AlgSimplifyM ScalExp
@@ -1019,6 +1181,7 @@ tryDivProdByOneFact (Val f) (e, v) = do
 tryDivProdByOneFact _ pev@(NProd [] _, _) = return (False, pev)
 tryDivProdByOneFact f pev@(NProd (t:tfs) tp, v) = do
     (succc, newt) <- tryDivTriv t f
+    one <- getPos1 tp
     if not succc 
     then do (succ', (tfs', v')) <- tryDivProdByOneFact f (NProd tfs tp, v)
             case (succ', tfs') of
@@ -1030,7 +1193,9 @@ tryDivProdByOneFact f pev@(NProd (t:tfs) tp, v) = do
     else do -- success 
             case (newt, tfs) of
                 (Val vv, _) -> do vres <- mulVals vv v
-                                  return $ (True, (NProd tfs tp, vres))
+                                  if null tfs
+                                  then return $ (True, (NProd [Val one] tp, vres))
+                                  else return $ (True, (NProd tfs tp, vres))
                 (_,      _) -> return $ (True, (NProd (newt:tfs) tp, v)) 
 
 tryDivProdByOneFact _ (NSum _ _, _) = do
@@ -1104,6 +1269,36 @@ mkIntExp 2 =
         y3m2xle0 = RelExp LEQ0 (SMinus (STimes y (Val (IntVal 3))) (STimes (Val (IntVal 2)) x))
     in SLogOr x2m3ylt0 $ SLogOr (Val (LogVal False)) $ SLogAnd z y3m2xle0
     --in SLogAnd (SLogAnd (SLogAnd x2m3ylt0 z) (SLogAnd q y3m2xle0)) (Val (LogVal True))
+mkIntExp _ = Val (IntVal 33)
 
-mkIntExp _ = Val (IntVal 3)
+mkRelExp :: Int -> (RangesRep, ScalExp, ScalExp)
+mkRelExp 1 = 
+    let (i',j',n',p',m') = (tident "int i", tident "int j", tident "int n", tident "int p", tident "int m")
+        (i,j,n,p,m) = (Id i', Id j', Id n', Id p', Id m')
+        one = Val (IntVal 1)
+        min_p_nm1 = MaxMin True [p, SMinus n one]
+        hash = HM.fromList $ [ (identName n', ( 1::Int, Just (Val (IntVal 1)), Nothing ) )
+                             , (identName i', ( 5::Int, Just (Val (IntVal 0)), Just min_p_nm1 ) )
+                             , (identName j', ( 9::Int, Just (Val (IntVal 0)), Just i ) )
+                             ] -- HM.HashMap VName (Int, Maybe ScalExp, Maybe ScalExp)
+        ij_p_j_p_1_m_m = SMinus (SPlus (STimes i j) (SPlus j one)) m
+        rel1 = RelExp LTH0 ij_p_j_p_1_m_m
+        m_ij_m_j_m_2 = SNeg ( SPlus (STimes i j) (SPlus j (Val (IntVal 2))) )
+        rel2 = RelExp LTH0 m_ij_m_j_m_2
+
+    in (hash, rel1, rel2)
+mkRelExp 2 = 
+    let (i',a',b',l',u') = (tident "int i", tident "int a", tident "int b", tident "int l", tident "int u")
+        (i,a,b,l,u) = (Id i', Id a', Id b', Id l', Id u')
+        hash = HM.fromList $ [ (identName i', ( 5::Int, Just l, Just u ) ) ] 
+        ai_p_b = SPlus (STimes a i) b
+        rel1 = RelExp LTH0 ai_p_b
+
+    in (hash, rel1, rel1)
+
+
+mkRelExp _ = let hash = HM.empty
+                 rel  = RelExp LTH0 (Val (IntVal (-1)))
+             in  (hash, rel, rel)
+
 

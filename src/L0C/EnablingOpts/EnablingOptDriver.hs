@@ -28,7 +28,7 @@ import Debug.Trace
 
 enablingOpts :: Prog -> Either EnablingOptError Prog
 enablingOpts prog0 = do
-    scal <- canSimplify 2
+    scal <- canSimplify 1
     let str = ppScalExp scal
     let prog = trace str prog0  
     prog_enopt1 <- normCopyDeadOpts prog
