@@ -13,8 +13,6 @@ import Data.Maybe
 
 import Data.Loc
 
-import qualified Data.HashSet      as HS
-
 import Futhark.InternalRep
 import Futhark.EnablingOpts.EnablingOptErrors
 import qualified Futhark.EnablingOpts.SymbolTable as ST
@@ -66,18 +64,6 @@ changed x = do
   tell $ CPropRes True
   return x
 
--- | The identifier was consumed, and should not be used within the
--- body, so mark it and any aliases as nonremovable (with
--- 'nonRemovable') and delete any expressions using it or an alias
--- from the symbol table.
-consuming :: Ident -> CPropM a -> CPropM a
-consuming idd m = do
-  vtable <- ST.filter ok <$> asks envVtable
-  local (\e -> e { envVtable = vtable }) m
-  where als = identName idd `HS.insert` aliases (identType idd)
-        ok entry  = HS.null $ als `HS.intersection`
-                    maybe HS.empty freeNamesInExp (ST.asExp entry)
-
 -- | The enabling optimizations run in this monad.  Note that it has no mutable
 -- state, but merely keeps track of current bindings in a 'TypeEnv'.
 -- The 'Either' monad is used for error handling.
@@ -97,15 +83,21 @@ bindParams :: [Param] -> CPropM a -> CPropM a
 bindParams params =
   localVtable $ \vtable ->
     let vtable' = foldr (ST.insert' . identName) vtable params
-    in foldr ST.cannotBeNegative vtable' sizevars
+    in foldr (`ST.isAtLeast` 0) vtable' sizevars
   where sizevars = mapMaybe isVar $ concatMap (arrayDims . identType) params
         isVar (Var v) = Just $ identName v
         isVar _       = Nothing
 
 bindLoopVar :: Ident -> SubExp -> CPropM a -> CPropM a
 bindLoopVar var upper =
-  localVtable $ ST.insertBounded (identName var) (Just one, Just upper)
-  where one = Constant (BasicVal $ IntVal 1) $ srclocOf var
+  localVtable $ clampUpper . clampVar
+  where -- If we enter the loop, then 'var' is at least zero, and at
+        -- most 'upper'-1 (so this is not completely tight - FIXME).
+        clampVar = ST.insertBounded (identName var) (Just zero, Just upper)
+        -- If we enter the loop, then 'upper' is at least one.
+        clampUpper = case upper of Var v -> ST.isAtLeast (identName v) 1
+                                   _     -> id
+        zero = Constant (BasicVal $ IntVal 0) $ srclocOf var
 
 -- | Applies Copy/Constant Propagation and Folding to an Entire Program.
 copyCtProp :: Prog -> Either EnablingOptError (Bool, Prog)
@@ -140,16 +132,6 @@ copyCtPropOneLambda prog lam = do
 --------------------------------------------------------------------
 
 copyCtPropBody :: Body -> CPropM Body
-
-copyCtPropBody (Body (LetWith cs dest src inds el:bnds) res) = do
-  src' <- copyCtPropIdent src
-  consuming src' $ do
-    cs'             <- copyCtPropCerts cs
-    el'             <- copyCtPropSubExp el
-    inds'           <- mapM copyCtPropSubExp inds
-    dest'           <- copyCtPropBnd dest
-    Body bnds' res' <- copyCtPropBody $ Body bnds res
-    return $ Body (LetWith cs' dest' src' inds' el' :bnds') res'
 
 copyCtPropBody (Body (Let pat e:bnds) res) = do
   pat' <- copyCtPropPat pat

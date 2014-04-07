@@ -29,7 +29,7 @@ import Data.Maybe
 
 import Futhark.InternalRep
 import Futhark.FreshNames
-import Futhark.MonadFreshNames (MonadFreshNames(..))
+import Futhark.MonadFreshNames (MonadFreshNames(..), modifyNameSource)
 
 runRenamer :: RenameM a -> VNameSource -> (a, VNameSource)
 runRenamer m src = runReader (runStateT m src) env
@@ -48,20 +48,14 @@ renameProg prog = Prog $ fst $
 -- of the body is unaffected, under the assumption that the body was
 -- correct to begin with.  Any free variables are left untouched.
 renameBody :: MonadFreshNames m => Body -> m Body
-renameBody body = do src <- getNameSource
-                     let (body',src') = runRenamer (rename body) src
-                     putNameSource src'
-                     return body'
+renameBody = modifyNameSource . runRenamer . rename
 
 -- | Rename bound variables such that each is unique.  The semantics
 -- of the lambda is unaffected, under the assumption that the body was
 -- correct to begin with.  Any free variables are left untouched.
 -- Note in particular that the parameters of the lambda are renamed.
 renameLambda :: MonadFreshNames m => Lambda -> m Lambda
-renameLambda lam = do src <- getNameSource
-                      let (lam',src') = runRenamer (rename lam) src
-                      putNameSource src'
-                      return lam'
+renameLambda = modifyNameSource . runRenamer . rename
 
 data RenameEnv = RenameEnv {
     envNameMap :: HM.HashMap VName VName
@@ -118,15 +112,6 @@ instance Rename Result where
 
 instance Rename Body where
   rename (Body [] res) = Body [] <$> rename res
-  rename (Body (LetWith cs dest src idxs ve:bnds) res) = do
-    cs' <- mapM rename cs
-    src' <- rename src
-    idxs' <- mapM rename idxs
-    ve' <- rename ve
-    bind [dest] $ do
-      dest' <- rename dest
-      Body bnds' res' <- rename $ Body bnds res
-      return $ Body (LetWith cs' dest' src' idxs' ve':bnds') res'
   rename (Body (Let pat e:bnds) res) = do
     e1' <- rename e
     bind pat $ do

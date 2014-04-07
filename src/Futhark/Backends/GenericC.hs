@@ -409,40 +409,6 @@ compileBody place (Body (Let pat e:bnds) res) = do
                      $items:body
                    }|]
 
-compileBody place (Body (LetWith _ name src idxs ve:bnds) res) = do
-  name' <- new $ textual $ identName name
-  src' <- lookupVar $ identName src
-  etype <- typeToCType [identType src]
-  idxvars <- mapM (const $ new "letwith_index") [1..length idxs]
-  let idxexps = map varExp idxvars
-  idxs' <- concat <$> zipWithM compileSubExp idxexps idxs
-  el <- new "letwith_el"
-  elty <- typeToCType [subExpType ve]
-  ve' <- compileSubExpInPlace (varExp el) ve
-  let idxdecls = [[C.cdecl|int $id:idxvar;|] | idxvar <- idxvars]
-      (elempre, elempost) =
-        case subExpType ve of
-          Array {} -> (indexArrayElemStms (varExp el) (varExp name') (identType src) idxexps,
-                       [C.cstm|;|])
-          _ -> ([[C.cstm|;|]],
-                case identType src of
-                  Array {} ->
-                    [C.cstm|$exp:(indexArrayExp (varExp name')
-                                  (arrayRank $ identType src) idxexps) = $id:el;|]
-                  _ -> [C.cstm|$id:name' = $id:el;|])
-  body <- binding [(identName name, varExp name')] $ compileBody place $ Body bnds res
-  return $ stm [C.cstm|{
-                     $ty:etype $id:name';
-                     $ty:elty $id:el;
-                     $decls:idxdecls
-                     $id:name' = $exp:src';
-                     $items:idxs'
-                     $stms:elempre
-                     $items:ve'
-                     $stm:elempost
-                     $items:body
-                   }|]
-
 compileBody place (Body (DoLoop merge loopvar boundexp loopbody:bnds) res) = do
   let (mergepat, mergeexp) = unzip merge
   loopvar' <- new $ textual $ identName loopvar
@@ -629,6 +595,35 @@ compileExp' place (Index _ var idxs _) = do
                      $decls:vardecls
                      $items:idxs'
                      $stms:index
+                   }|]
+
+compileExp' place (Update _ src idxs ve _) = do
+  src' <- lookupVar $ identName src
+  idxvars <- mapM (const $ new "letwith_index") [1..length idxs]
+  let idxexps = map varExp idxvars
+  idxs' <- concat <$> zipWithM compileSubExp idxexps idxs
+  el <- new "letwith_el"
+  elty <- typeToCType [subExpType ve]
+  ve' <- compileSubExpInPlace (varExp el) ve
+  let idxdecls = [[C.cdecl|int $id:idxvar;|] | idxvar <- idxvars]
+      (elempre, elempost) =
+        case subExpType ve of
+          Array {} -> (indexArrayElemStms (varExp el) place (identType src) idxexps,
+                       [C.cstm|;|])
+          _ -> ([[C.cstm|;|]],
+                case identType src of
+                  Array {} ->
+                    [C.cstm|$exp:(indexArrayExp place
+                                  (arrayRank $ identType src) idxexps) = $id:el;|]
+                  _ -> [C.cstm|$exp:place = $id:el;|])
+  return $ stm [C.cstm|{
+                     $ty:elty $id:el;
+                     $decls:idxdecls
+                     $exp:place = $exp:src';
+                     $items:idxs'
+                     $stms:elempre
+                     $items:ve'
+                     $stm:elempost
                    }|]
 
 compileExp' place e@(Iota se _) = do

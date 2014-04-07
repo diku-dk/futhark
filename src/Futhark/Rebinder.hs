@@ -51,7 +51,6 @@ import Futhark.Rebinder.CSE
 
 data BindNeed = LoopNeed [(Ident,SubExp)] Ident SubExp Body
               | LetNeed [Ident] Exp [Exp]
-              | LetWithNeed Certificates Ident Ident [SubExp] SubExp
                 deriving (Show, Eq)
 
 type NeedSet = [BindNeed]
@@ -63,9 +62,6 @@ asTail (LoopNeed merge i bound loopbody) =
 asTail (LetNeed pat e _) =
   Body [Let pat e] $ Result [] [] loc
     where loc = srclocOf pat
-asTail (LetWithNeed cs dest src idxs ve) =
-  Body [LetWith cs dest src idxs ve] $ Result [] [Var dest] loc
-    where loc = srclocOf dest
 
 requires :: BindNeed -> HS.HashSet VName
 requires (LetNeed pat e alts) =
@@ -77,7 +73,6 @@ requires bnd = HS.map identName $ freeInBody $ asTail bnd
 provides :: BindNeed -> HS.HashSet VName
 provides (LoopNeed merge _ _ _)     = patNameSet $ map fst merge
 provides (LetNeed pat _ _)          = patNameSet pat
-provides (LetWithNeed _ dest _ _ _) = HS.singleton $ identName dest
 
 patNameSet :: [Ident] -> HS.HashSet VName
 patNameSet = HS.fromList . map identName
@@ -142,13 +137,6 @@ bindLet :: [Ident] -> Exp -> HoistM a -> HoistM a
 
 bindLet = withBinding
 
-bindLetWith :: Certificates -> Ident -> Ident
-            -> [SubExp] -> SubExp
-            -> HoistM a -> HoistM a
-bindLetWith cs dest src idxs ve m = do
-  needThis $ LetWithNeed cs dest src idxs ve
-  m
-
 bindLoop :: [(Ident,SubExp)] -> Ident -> SubExp -> Body -> HoistM a -> HoistM a
 bindLoop merge i bound body m = do
   needThis $ LoopNeed merge i bound body
@@ -199,11 +187,6 @@ addBindings dupes needs =
                e':_ -> add e'
                _    -> add e
 
-        comb (m,ds) bnd@(LetWithNeed cs dest src idxs ve) =
-          ((m `HM.union` distances m bnd, ds),
-           bind bnd $
-           \(Body bnds res) -> Body (LetWith cs dest src idxs ve:bnds) res)
-
 score :: HM.HashMap VName Int -> Exp -> (Int, Exp)
 score m (SubExps [Var k] _) =
   (fromMaybe (-1) $ HM.lookup (identName k) m, subExp $ Var k)
@@ -234,11 +217,6 @@ distances m need = HM.fromList [ (k, d+cost) | k <- HS.toList outs ]
           case need of
             LetNeed pat e _ ->
               (patNameSet pat, freeNamesInExp e, expCost e)
-            LetWithNeed _ dest src idxs ve ->
-              (HS.singleton $ identName dest,
-               identName src `HS.insert`
-               mconcat (map (freeNamesInExp . subExp) $ ve:idxs),
-               1)
             LoopNeed merge _ bound loopbody ->
               (patNameSet $ map fst merge,
                mconcat $ freeNamesInBody loopbody : map freeNamesInExp
@@ -352,7 +330,6 @@ uniqPat = any $ unique . identType
 isUniqueBinding :: BlockPred
 isUniqueBinding _ (LoopNeed merge _ _ _)     = uniqPat $ map fst merge
 isUniqueBinding _ (LetNeed pat _ _)          = uniqPat pat
-isUniqueBinding _ (LetWithNeed _ dest _ _ _) = unique $ identType dest
 
 isConsumed :: BlockPred
 isConsumed body need =
@@ -382,13 +359,6 @@ hoistInBody (Body (Let pat e:bnds) res) = do
   pat' <- mapM hoistInIdent pat
   e' <- hoistInExp e
   bindLet pat' e' $ hoistInBody $ Body bnds res
-hoistInBody (Body (LetWith cs dest src idxs ve:bnds) res) = do
-  cs'   <- mapM hoistInIdent cs
-  dest' <- hoistInIdent dest
-  src'  <- hoistInIdent src
-  idxs' <- mapM hoistInSubExp idxs
-  ve'   <- hoistInSubExp ve
-  bindLetWith cs' dest' src' idxs' ve' $ hoistInBody $ Body bnds res
 hoistInBody (Body (DoLoop merge loopvar boundexp loopbody:bnds) res) = do
   let (mergepat, mergeexp) = unzip merge
   loopbody' <- blockIfSeq [hasFree boundnames, isConsumed] $

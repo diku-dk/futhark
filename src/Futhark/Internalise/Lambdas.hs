@@ -130,8 +130,6 @@ sanitiseValueSlice resShapes (I.Body bnds res) = do
           mergepat' <- mapM renameShapeBinding mergepat
           return $ I.DoLoop (zip mergepat' mergeexps) i bound body
           where (mergepat, mergeexps) = unzip merge
-        renameShapeBindings bnd@(I.LetWith {}) =
-          return bnd
 
         renameShapeBinding var
           | isShapeBinding var = newIdent' (const "unused_shape") var
@@ -157,7 +155,6 @@ removeSOACCerts (Body bnds res) = Body (map removeCert bnds) res
                     _ -> e
     removeCert (I.DoLoop merge i bound body) =
       I.DoLoop merge i bound $ removeSOACCerts body
-    removeCert bnd = bnd
 
 bindMapShapes :: I.Certificates -> I.Lambda -> [I.SubExp] -> SubExp
               -> InternaliseM (I.Certificates, [I.Ident])

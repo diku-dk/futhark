@@ -173,16 +173,6 @@ observe (Ident nm t loc)
 consume :: SrcLoc -> Names -> TypeM ()
 consume loc als = occur [consumption als loc]
 
--- | Proclaim that we have written to the given variable, and mark
--- accesses to it and all of its aliases as invalid inside the given
--- computation.
-consuming :: Ident -> TypeM a -> TypeM a
-consuming (Ident name t loc) m = do
-  consume loc $ aliases t
-  local consume' m
-  where consume' env =
-          env { envVtable = HM.insert name (WasConsumed loc) $ envVtable env }
-
 collectDataflow :: TypeM a -> TypeM (a, Dataflow)
 collectDataflow m = pass $ do
   (x, dataflow) <- listen m
@@ -494,29 +484,6 @@ checkBody (Body (Let pat e:bnds) res) = do
     return $ Body (Let pat' e':bnds') res'
   where body = Body bnds res
 
-checkBody (Body (LetWith cs (Ident dest destt destpos) src idxes ve:bnds) res) = do
-  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
-  src' <- checkIdent src
-  idxes' <- mapM (require [Basic Int] <=< checkSubExp) idxes
-  destt' <- checkAnnotation (srclocOf src) "source" destt $ identType src' `setAliases` HS.empty
-  let dest' = Ident dest destt' destpos
-
-  unless (unique (identType src') || basicType (identType src')) $
-    bad $ TypeError (srclocOf src) $ "Source '" ++ textual (identName src) ++ "' is not unique"
-
-  case peelArray (length idxes) (identType src') of
-    Nothing -> bad $ IndexingError (identName src)
-                     (arrayRank $ identType src') (length idxes) (srclocOf src)
-    Just elemt ->
-      sequentially (require [elemt] =<< checkSubExp ve) $ \ve' _ -> do
-        when (identName src `HS.member` aliases (subExpType ve')) $
-          bad $ BadLetWithValue $ srclocOf src
-        (scope, _) <- checkBinding (srclocOf dest') [dest'] [destt']
-                                   mempty
-        Body bnds' res' <- consuming src' $ scope $ checkBody body
-        return $ Body (LetWith cs' dest' src' idxes' ve':bnds') res'
-  where body = Body bnds res
-
 -- Checking of loops is done by synthesing the (almost) equivalent
 -- function and type-checking a call to it.  The difficult part is
 -- assigning uniqueness attributes to the parameters of the function -
@@ -716,6 +683,25 @@ checkExp (Index cs ident idxes pos) = do
           (arrayRank vt) (length idxes) pos
   idxes' <- mapM (require [Basic Int] <=< checkSubExp) idxes
   return $ Index cs' ident' idxes' pos
+
+checkExp (Update cs src idxes ve loc) = do
+  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
+  src' <- checkIdent src
+  idxes' <- mapM (require [Basic Int] <=< checkSubExp) idxes
+  ve' <- checkSubExp ve
+
+  unless (unique (identType src') || basicType (identType src')) $
+    bad $ TypeError loc $ "Source '" ++ textual (identName src) ++ "' is not unique"
+
+  when (identName src `HS.member` aliases (subExpType ve')) $
+    bad $ BadLetWithValue loc
+
+  consume loc $ aliases $ identType src'
+
+  case peelArray (length idxes) (identType src') of
+    Nothing -> bad $ IndexingError (identName src)
+                     (arrayRank $ identType src') (length idxes) loc
+    Just _ -> return $ Update cs' src' idxes' ve' loc
 
 checkExp (Iota e pos) = do
   e' <- require [Basic Int] =<< checkSubExp e

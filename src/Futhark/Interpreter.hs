@@ -231,23 +231,6 @@ evalBody (Body (Let pat e:bnds) res) = do
   v <- evalExp e
   binding (zip pat v) $ evalBody $ Body bnds res
 
-evalBody (Body (LetWith _ name src idxs ve:bnds) res) = do
-  v <- lookupVar src
-  idxs' <- mapM evalSubExp idxs
-  vev <- evalSubExp ve
-  v' <- change v idxs' vev
-  binding [(name, v')] $ evalBody $ Body bnds res
-  where change _ [] to = return to
-        change (ArrayVal arr t) (BasicVal (IntVal i):rest) to
-          | i >= 0 && i <= upper = do
-            let x = arr ! i
-            x' <- change x rest to
-            return $ ArrayVal (arr // [(i, x')]) t
-          | otherwise = bad $ IndexOutOfBounds (srclocOf name)
-                              (textual $ identName name) (upper+1) i
-          where upper = snd $ bounds arr
-        change _ _ _ = bad $ TypeError (srclocOf name) "evalBody Let Id"
-
 evalBody (Body (DoLoop merge loopvar boundexp loopbody:bnds) res) = do
   bound <- evalSubExp boundexp
   mergestart <- mapM evalSubExp mergeexp
@@ -347,6 +330,22 @@ evalExp (Index _ ident idxs pos) = do
             bad $ IndexOutOfBounds pos (textual $ identName ident) (upper+1) i
           where upper = snd $ bounds arr
         idx _ _ = bad $ TypeError pos "evalExp Index"
+
+evalExp (Update _ src idxs ve loc) = do
+  v <- lookupVar src
+  idxs' <- mapM evalSubExp idxs
+  vev <- evalSubExp ve
+  single <$> change v idxs' vev
+  where change _ [] to = return to
+        change (ArrayVal arr t) (BasicVal (IntVal i):rest) to
+          | i >= 0 && i <= upper = do
+            let x = arr ! i
+            x' <- change x rest to
+            return $ ArrayVal (arr // [(i, x')]) t
+          | otherwise = bad $ IndexOutOfBounds loc
+                              (textual $ identName src) (upper+1) i
+          where upper = snd $ bounds arr
+        change _ _ _ = bad $ TypeError loc "evalBody Let Id"
 
 evalExp (Iota e pos) = do
   v <- evalSubExp e

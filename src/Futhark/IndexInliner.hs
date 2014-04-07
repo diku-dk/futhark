@@ -163,8 +163,4 @@ runInlinerM :: NameSource VName -> InlinerM a -> (a, NameSource VName)
 runInlinerM src (InlinerM m) = runReader (runStateT m src) emptyArrayIndexMap
 
 runInlinerM' :: MonadFreshNames m => InlinerM a -> m a
-runInlinerM' m = do
-  src <- getNameSource
-  let (x, src') = runInlinerM src m
-  putNameSource src'
-  return x
+runInlinerM' = modifyNameSource . flip runInlinerM

@@ -199,7 +199,6 @@ instance Located SubExp where
 -- | A local variable binding.
 data Binding = DoLoop [(Ident, SubExp)] Ident SubExp Body
              | Let [Ident] Exp
-             | LetWith Certificates Ident Ident [SubExp] SubExp
                deriving (Show, Eq, Ord)
 
 -- | The result of a body - a sequence of subexpressions, possibly
@@ -267,6 +266,9 @@ data Exp =
             -- checking.  If given (even as an empty list), no
             -- run-time bounds checking is done.
 
+            | Update Certificates Ident [SubExp] SubExp SrcLoc
+            -- ^ @a with [i1,i2,i3] <- v@.
+
             | Split Certificates SubExp SubExp SubExp SrcLoc
             -- ^ @split(1, [ 1, 2, 3, 4 ]) = {[1],[2, 3, 4]}@.
 
@@ -322,6 +324,7 @@ instance Located Exp where
   locOf (If _ _ _ _ pos) = locOf pos
   locOf (Apply _ _ _ pos) = locOf pos
   locOf (Index _ _ _ pos) = locOf pos
+  locOf (Update _ _ _ _ loc) = locOf loc
   locOf (Iota _ pos) = locOf pos
   locOf (Replicate _ _ pos) = locOf pos
   locOf (Reshape _ _ _ pos) = locOf pos

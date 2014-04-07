@@ -24,13 +24,10 @@ instance MonadFreshNames TryFusion where
   putNameSource = put
 
 tryFusion :: MonadFreshNames m => TryFusion a -> m (Maybe a)
-tryFusion (TryFusion m) = do
-  src <- getNameSource
+tryFusion (TryFusion m) = modifyNameSource $ \src ->
   case runStateT m src of
-    Just (x, src') -> do
-      putNameSource src'
-      return $ Just x
-    Nothing -> return Nothing
+    Just (x, src') -> (Just x, src')
+    Nothing        -> (Nothing, src)
 
 liftMaybe :: Maybe a -> TryFusion a
 liftMaybe Nothing = fail "Nothing"

@@ -7,6 +7,7 @@
 -- functions exported by this module.
 module Futhark.MonadFreshNames
   ( MonadFreshNames (..)
+  , modifyNameSource
   , newName
   , newNameFromString
   , newID
@@ -48,12 +49,18 @@ instance (Applicative im, Monad im) => MonadFreshNames (Control.Monad.State.Stri
   getNameSource = Control.Monad.State.Strict.get
   putNameSource = Control.Monad.State.Strict.put
 
+-- | Run a computation needing a fresh name source and returning a new
+-- one, using 'getNameSource' and 'putNameSource' before and after the
+-- computation.
+modifyNameSource :: MonadFreshNames m => (VNameSource -> (a, VNameSource)) -> m a
+modifyNameSource m = do src <- getNameSource
+                        let (x,src') = m src
+                        putNameSource src'
+                        return x
+
 -- | Produce a fresh name, using the given name as a template.
 newName :: MonadFreshNames m => VName -> m VName
-newName s = do src <- getNameSource
-               let (s', src') = FreshNames.newName src s
-               putNameSource src'
-               return s'
+newName = modifyNameSource . flip FreshNames.newName
 
 -- | As @newName@, but takes a 'String' for the name template.
 newNameFromString :: MonadFreshNames m => String -> m VName

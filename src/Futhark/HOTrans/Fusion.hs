@@ -407,12 +407,7 @@ fusionGatherBody fres (Body (Let pat (Replicate n el loc):bnds) res) = do
       soac_repl= SOAC.Map [] repl_lam [SOAC.Input SOAC.noTransforms $ SOAC.Iota n] loc
   greedyFuse True used_set bres' (pat, soac_repl)
 
-fusionGatherBody fres (Body (Let pat e:bnds) res) = do
-    let pat_vars = map (subExp . Var) pat
-    bres <- binding pat $ fusionGatherBody fres $ Body bnds res
-    foldM fusionGatherExp bres (e:pat_vars)
-
-fusionGatherBody fres (Body (LetWith _ id1 id0 inds elm:bnds) res) = do
+fusionGatherBody fres (Body (Let [id1] (Update _ id0 inds elm _):bnds) res) = do
   bres  <- binding [id1] $ fusionGatherBody fres $ Body bnds res
 
   let pat_vars = [Var id0, Var id1]
@@ -427,6 +422,11 @@ fusionGatherBody fres (Body (LetWith _ id1 id0 inds elm:bnds) res) = do
                   ) kers
   let new_kernels = HM.fromList $ zip ker_nms kers'
   return $ fres' { kernels = new_kernels }
+
+fusionGatherBody fres (Body (Let pat e:bnds) res) = do
+    let pat_vars = map (subExp . Var) pat
+    bres <- binding pat $ fusionGatherBody fres $ Body bnds res
+    foldM fusionGatherExp bres (e:pat_vars)
 
 fusionGatherBody fres (Body (DoLoop merge _ ub loop_body:bnds) res) = do
   let (merge_pat, ini_val) = unzip merge

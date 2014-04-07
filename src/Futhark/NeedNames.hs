@@ -15,14 +15,14 @@ import Futhark.InternalRep
 import Futhark.MonadFreshNames
 
 -- | The central monad itself.
-data NeedNames a = NeedName (NameSource VName -> (NameSource VName, NeedNames a))
+data NeedNames a = NeedName (NameSource VName -> (NeedNames a, NameSource VName))
                  | Done     a
 
 instance Monad NeedNames where
   return = Done
   Done m >>= f = f m
-  NeedName g >>= f = NeedName $ \src -> let (src', m) = g src
-                                        in (src', f =<< m)
+  NeedName g >>= f = NeedName $ \src -> let (m, src') = g src
+                                        in (f =<< m, src')
 
 instance Functor NeedNames where
   f `fmap` x = do x' <- x
@@ -35,17 +35,14 @@ instance Applicative NeedNames where
                return $ f' x'
 
 instance MonadFreshNames NeedNames where
-  getNameSource     = NeedName $ \src -> (src, return src)
-  putNameSource src = NeedName $ \_   -> (src, return ())
+  getNameSource     = NeedName $ \src -> (return src, src)
+  putNameSource src = NeedName $ \_   -> (return (), src)
 
 -- | Provide whichever names are needed, then return the result.
 provideNames :: MonadFreshNames m => NeedNames a -> m a
 provideNames (Done x)       = return x
-provideNames (NeedName f) = do
-  src <- getNameSource
-  let (src', m) = f src
-  putNameSource src'
-  provideNames m
+provideNames (NeedName f) =
+  modifyNameSource f >>= provideNames
 
 -- | If the computation can produce a result without needing names,
 -- return that result.
