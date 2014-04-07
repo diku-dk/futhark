@@ -45,13 +45,10 @@ instance Alternative Simplify where
                             return x'
 
 simplify :: MonadFreshNames m => Simplify [Binding] -> m (Maybe [Binding])
-simplify (Simplify m) = do
-  src <- getNameSource
+simplify (Simplify m) = modifyNameSource $ \src ->
   case runBinderWithNameSource (runMaybeT m) src of
-    (Just bnds, extrabnds, src') -> do
-      putNameSource src'
-      return $ Just $ extrabnds ++ bnds
-    (Nothing, _, _) -> return Nothing
+    ((Just bnds, extrabnds), src') -> (Just $ extrabnds ++ bnds, src')
+    ((Nothing, _), _)              -> (Nothing, src)
 
 cannotSimplify :: Simplify a
 cannotSimplify = fail "Cannot simplify"

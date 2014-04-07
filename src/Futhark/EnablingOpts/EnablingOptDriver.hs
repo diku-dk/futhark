@@ -46,12 +46,8 @@ normCopyDeadOpts prog = do
 
 normCopyOneLambda :: MonadFreshNames m => Prog -> Lambda ->
                      m (Either EnablingOptError Lambda)
-normCopyOneLambda prog lam = do
-  nmsrc <- getNameSource
+normCopyOneLambda prog lam = modifyNameSource $ \src ->
   let res = do lam' <- copyCtPropOneLambda prog  lam
-               let (lam'', nmsrc') = II.transformLambda nmsrc lam'
-               return (lam'', nmsrc')
-  case res of Left e -> return $ Left e
-              Right (normLam, nmsrc') -> do
-                putNameSource nmsrc'
-                return $ Right normLam
+               return $ II.transformLambda src lam'
+  in case res of Left e                -> (Left e, src)
+                 Right (normLam, src') -> (Right normLam, src')
