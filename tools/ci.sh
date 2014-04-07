@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# The L0C continuous integration tool.  Enjoy.
+# The Futhark continuous integration tool.  Enjoy.
 #
 # Hardcoded to only send email when running as 'concieggs' user.
 
@@ -14,12 +14,12 @@ maxtesttime=$((60 * 20)) # The length of time the test suite is
 mail=athas@sigkill.dk # Where to send error reports.
 
 if ! [ $# = 1 ]; then
-    echo "Usage: $0 <l0dir>"
+    echo "Usage: $0 <futharkdir>"
     exit 1
 fi
 
-l0dir=$1
-lockfile="$l0dir/ci.lock"
+futharkdir=$1
+lockfile="$futharkdir/ci.lock"
 outfile=$(mktemp) || exit 1 # Hm, silent failure...
 
 ulimit -m $memlimit
@@ -41,7 +41,7 @@ build() {
 }
 
 runtests() {
-    PATH=dist/build/l0c/:$PATH cmd timeout $maxtesttime data/runtests.sh
+    PATH=dist/build/futhark/:$PATH cmd timeout $maxtesttime data/runtests.sh
     status=$?
     if [ $status = 124 ]; then
         echo "Test suite exceeded permitted run time"
@@ -53,7 +53,7 @@ ci() {
     (
         flock -n 9 || exit 1
         # We now have an exclusive lock!
-        cd "$l0dir" &&
+        cd "$futharkdir" &&
         update &&
         build &&
         runtests
@@ -67,7 +67,7 @@ mail() {
         echo
         cat
     else
-        mailx -s "L0C integration error" "$mail" -- -r concieggs@eggsml.dk
+        mailx -s "FutharkC integration error" "$mail" -- -r concieggs@eggsml.dk
     fi
 }
 

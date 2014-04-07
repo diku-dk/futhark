@@ -1,0 +1,1192 @@
+\documentclass[oneside]{memoir}
+\usepackage{alltt}
+\usepackage{amsmath}
+\usepackage[capitalise,noabbrev]{cleveref}
+\usepackage{fancyvrb}
+\usepackage{color}
+
+% Remove chapter numbering, as we only use one chapter in this
+% document.
+\counterwithout{section}{chapter}
+
+\newcommand\boolt[0]{\texttt{bool}}
+\newcommand\realt[0]{\texttt{real}}
+\newcommand\chart[0]{\texttt{char}}
+\newcommand\intt[0]{\texttt{int}}
+\newcommand\aliases[1]{\textrm{aliases}(#1)}
+\renewcommand\tilde[0]{{\raise.17ex\hbox{$\scriptstyle\sim$}}}
+\newcommand{\LO}{$\mathcal{L}_0$}
+
+% The colorcode environment lets us use colour markup inside verbatim blocks.
+\DefineVerbatimEnvironment{colorcode}%
+        {Verbatim}{fontsize=\small,commandchars=\\\{\}}
+
+\definecolor{DikuRed}{RGB}{130,50,32}
+\newcommand{\emp}[1]{\textcolor{DikuRed}{ #1}}
+\definecolor{CosGreen}{RGB}{10,100,70}
+\newcommand{\emphh}[1]{\textcolor{CosGreen}{ #1}}
+
+\title{The \LO{} Programming Language}
+\date{\today}
+\author{Troels Henriksen (athas@sigkill.dk)}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+This document has been prepared as an informal overview of the Futhark
+(formerly \LO{}) language.  In time, we hope to develop it into a
+formal specification, with accompanying proofs of correctness, but for
+now, words will have to suffice where formulae would be ideal.
+
+Futhark is an eagerly evaluated, purely functional language with built-in
+arrays and second-order array combinators, which is intended for use
+as an \emph{intermediate language} (sometimes called a \emph{core
+  language}) with a focus towards efficient execution on vector
+hardware (GPUs).  While Futhark is not designed to be a pleasant
+programming experience for humans, it does have a textual syntax to
+facilitate the writing of benchmark programs.
+
+Section \ref{sec:futhark-overview} gives a cursory tour of the Futhark language.
+
+Section \ref{sec:futhark-reference} proceeds with a syntax-oriented
+description of every language construct in Futhark.
+
+Section \ref{sec:futhark-uniqueness-types} describes the \emph{uniqueness
+  types} of Futhark; a type system feature that permits in-place
+modification of arrays as long as it can be proven that referential
+transparency is upheld.
+
+\section{Language overview}
+\label{sec:futhark-overview}
+
+The \LO{} programming language is a purely functional, call-by-value,
+mostly first-order language that permits bulk operations on arrays
+using \textit{second-order array combinators} (SOACs).
+
+The primary idea behind \LO{} is to design a language that has enough
+expressive power to conveniently express complex programs, yet is also
+amenable to aggressive optimisation and parallelisation.
+Unfortunately, as the expressive power of a language grows, the
+difficulty of optimisation often rises likewise.  For example, we
+support nested parallelism, despite the complexities of efficiently
+mapping to the flat parallelism supported by hardware, as a great many
+programs depend on this feature.  On the other hand, we do not support
+non-regular arrays, as they complicate size analysis a great deal.
+The fact that \LO{} is purely functional is intended to give an
+optimising compiler more leeway in rearranging the code and performing
+high-level optimisations.  It is also the plan to eventually design a
+rigorous cost model for \LO{}, although this work has not yet been
+completed.
+
+\subsection{First-order \LO{}}
+\label{sec:fo-futhark}
+
+\begin{figure}[bt]
+\begin{tabular}{lrll}
+$t$ & $::=$ & \texttt{int} & (Integers) \\
+& $|$ & \texttt{real} & (Floats) \\
+& $|$ & \texttt{bool} & (Booleans) \\
+& $|$ & \texttt{char} & (Characters) \\
+& $|$ & \texttt{\{$t_{1}$, \ldots, $t_{n}$\}} & (Tuples) \\
+& $|$ & \texttt{[$t$]} & (Arrays) \\
+& $|$ & \texttt{*[$t$]} & (Unique arrays) \\
+\\
+$k$ & $::=$ & $n$ & (Integer)\\
+& $|$ & $x$ & (Decimal number) \\
+& $|$ & $b$ & (Boolean)\\
+& $|$ & $c$ & (Character)\\
+& $|$ & \texttt{\{$v_{1},\ldots,v_{n}$\}} & (Tuple) \\
+& $|$ & \texttt{[$v_{1},\ldots,v_{n}$]} & (Array) \\
+\\
+$p$ & $::=$ & \texttt{\textbf{id}} & (Name pattern)\\
+& $|$ & \texttt{\{$p_{1}$, \ldots, $p_{n}$\}} & (Tuple pattern) \\
+\end{tabular}
+\caption{\LO{} syntax}
+\label{fig:fo-syntax}
+\end{figure}
+
+\begin{figure}[bt]
+\begin{tabular}{lrll}
+$e$ & $::=$ & $k$ & (Constant)\\
+& $|$ & $v$ & (Variable)\\
+& $|$ & \texttt{\{$e_{1}$,\ldots,$e_{n}$\}} & (Tuple expression) \\
+& $|$ & \texttt{[$e_{1}$,\ldots,$e_{n}$]} & (Array expression) \\
+& $|$ & $e_{1} \odot{} e_{2}$ & (Binary operator) \\
+& $|$ & \texttt{-$e$} & (Prefix minus) \\
+& $|$ & \texttt{not $e$} & (Logical negation) \\
+& $|$ & \texttt{if $e_{1}$ then $e_{2}$ else $e_{3}$} & (Branching) \\
+& $|$ & \texttt{$v$[$e_{1}$, \ldots, $e_{n}$]} & (Indexing) \\
+& $|$ & \texttt{$v$($e_{1}$, \ldots, $e_{n}$)} & (Function call) \\
+& $|$ & \texttt{let $p$ = $e_{1}$ in $e_{2}$} & (Pattern binding) \\
+& $|$ & \texttt{zip($e_{1}$, \ldots, $e_{n}$)} & (Zipping) \\
+& $|$ & \texttt{unzip($e$)} & (Unzipping) \\
+& $|$ & \texttt{iota($e$)} & (Range) \\
+& $|$ & \texttt{replicate($e_{n}$, $e_{v}$)} & (Replication) \\
+& $|$ & \texttt{size($e$)} & (Array length) \\
+& $|$ & \texttt{reshape(($e_{1}$,\ldots,$e_{n}$), $e$)} & (Array reshape) \\
+& $|$ & \texttt{rearrange(($k_{1}$, \ldots, $k_{n}$), $e$)} & (Transposition) \\
+& $|$ & \texttt{transpose($k$, $n$, $e$)} & (Transposition) \\
+& $|$ & \texttt{split($e_{1}$, $e_{2}$)} & (Split $e_{2}$ at index $e_{1}$) \\
+& $|$ & \texttt{concat($e_{1}$, $e_{2}$)} & (Concatenation) \\
+& $|$ & \texttt{let $v_{1}$ = $v_{2}$ with} & (In-place update) \\
+&     & \texttt{\ \ [$e_{1}$,\ldots,$e_{n}$] <- $e_{v}$} \\
+&     & \texttt{in $e_{b}$} \\
+& $|$ & \texttt{loop ($p$ = $e_{1}$) =} & (Loop) \\
+&     & \texttt{\ \ for $v$ < $e_{2}$ do $e_{3}$} \\
+&     & \texttt{in $e_{4}$} \\
+\end{tabular}
+\\
+\begin{tabular}{lrll}
+$fun$ & $::=$ & \texttt{fun $t$ $v$($t_{1}$ $v_{1}$,\ldots $t_{n}$ $v_{n}$) = $e$} \\
+\\
+$prog$ & $::=$ & $\epsilon$ \\
+       & $|$   & $fun$ $prog$
+\end{tabular}
+\caption{\LO{} syntax, continued}
+\label{fig:fo-syntax-continued}
+\end{figure}
+
+The syntax of \LO{}, as seen on \cref{fig:fo-syntax} and
+\cref{fig:fo-syntax-continued}, is heavily inspired by Haskell and
+Standard ML.  An identifier starts with a letter, followed by any
+number of letters, digits and underscores.  Numeric, string and
+character literals use the same notation as Haskell (which is very
+similar to C), including all escape characters.  Comments are
+indicated with \texttt{//} and span to end of line.
+
+An \LO{} program consists of a sequence of \emph{function
+  definitions}, of the following form.
+
+\begin{colorcode}
+  fun \textit{return-type} \textit{name}(\textit{params...}) = \textit{body}
+\end{colorcode}
+
+A function must declare both its return type and the types of all its
+parameters.  All functions (except for inline anonymous functions; see
+below) are defined globally.  \LO{} does not use type inference.
+Symbolic constants are not supported, although 0-ary functions can be
+defined.  As a concrete example, here is the recursive definition of
+the factorial function in \LO{}.
+\begin{colorcode}
+  fun int fact(int n) =
+    if n = 0 then 1
+             else n * fact(n-1)
+\end{colorcode}
+Indentation has no syntactical significance in \LO{}, but recommended for
+readability.
+
+The syntax for tuple types is a comma-separated list of types or
+values enclosed in braces, so \texttt{\{int, real\}} is a pair of an
+integer and a floating-point number.  Both single-element and empty
+tuples are permitted.  Array types are written as the element type
+surrounded by brackets, meaning that \texttt{[int]} is a
+one-dimensional array of integers, and \texttt{[[[\{int, real\}]]]} is a
+three-dimensional array of tuples of integers and floats.  An
+immediate array is written as a sequence of elements enclosed by
+brackets.
+\begin{colorcode}
+  [1, 2, 3]       // Array of type [int].
+  [[1], [2], [3]] // Array of type [[int]].
+\end{colorcode}
+All arrays must be \emph{regular} (often termed \emph{full}) - for
+example, all rows of a two-dimensional array must have the same number
+of elements.
+\begin{colorcode}
+  [[1, 2], [3]]      // Compile-time error.
+  [iota(1), iota(2)] // A run-time error if reached.
+\end{colorcode}
+The restriction to regular arrays simplifies size analysis and
+optimisation.
+
+Arrays are indexed using the common row-major notation, e.g.,
+\texttt{a[i1, i2, i3...]}.  An indexing is said to be \textit{full} if
+the number of given indexes is equal to the dimensionality of the
+array.
+
+A \texttt{let}-expression can be used to refer to the result of a
+subexpression:
+\begin{colorcode}
+  let z = x + y in ...
+\end{colorcode}
+Recall that \LO{} is eagerly evaluated, so the right-hand side of the
+\texttt{let} is evaluated exactly once, at the time it is first
+encountered.
+
+Two-way \texttt{if-then-else} is the only branching construct in \LO{}.
+Pattern matching is supported in a limited way for taking apart
+tuples, but this can only be done in \texttt{let}-bindings, and not
+directly in a function argument list.  Specifically, the following
+function definition is not valid.
+\begin{colorcode}
+  fun int sumpair(\{int, int\} \{x, y\}) = x + y // WRONG!
+\end{colorcode}
+Instead, we must use a let-binding explicitly, as follows.
+\begin{colorcode}
+  fun int sumpair(\{int, int\} t) =
+    let \{x,y\} = t in x + y
+\end{colorcode}
+Pattern-matching in a binding is the only way to access the components
+of a tuple.
+
+Function calls are written as the function name followed by the
+arguments enclosed in parentheses.  All function calls must be fully
+saturated - currying is only permitted in SOACs (see
+\cref{sec:soacs}).
+
+\subsubsection{Sequential loops}
+\label{sec:sequential-loops}
+
+\LO{} has a built-in syntax for expressing certain tail-recursive
+functions.  Consider the following tail-recursive formulation of a
+function for computing the Fibonacci numbers.
+\begin{colorcode}
+  fun int fib(int n) = fibhelper(1,1,n)
+
+  fun int fibhelper(int x, int y, int n) =
+    if n = 1 then x else fibhelper(y, x+y, n-1)
+\end{colorcode}
+We can rewrite this using the \texttt{loop} construct.
+\begin{colorcode}
+  fun int fib(int n) =
+    loop (\{x, y\} = \{1,1\}) = for i < n do
+                              \{y, x+y\}
+    in x
+\end{colorcode}
+The semantics of this is precisely as in the tail-recursive function
+formulation.  In general, a loop
+\begin{colorcode}
+  loop (\emph{pat} = \emph{initial}) = for \emph{i} < \emph{bound} do \emph{loopbody}
+  in \emph{body}
+\end{colorcode}
+has the following semantics:
+
+\begin{enumerate}
+  \item Bind \textit{pat} to the initial values given in \textit{initial}.
+  \item While $\textit{i} < \textit{bound}$, evaluate
+    \textit{loopbody}, rebinding \textit{pat} to be the value returned
+    by the body.  At the end of each iteration, increment \textit{i}
+    by one.
+  \item Evaluate \textit{body} with \textit{pat} bound to its final
+    value.
+\end{enumerate}
+Semantically, a \texttt{loop} expression is completely equivalent to a
+call to its corresponding tail-recursive function.  For example,
+denoting by \texttt{t} the type of \texttt{x}, the loop in
+\cref{fig:loop-recursion} has the semantics of a call to the
+tail-recursive function on the right-hand side.
+
+The purpose of \texttt{loop} is partly to render some sequential
+computations slightly more convenient, but primarily to express
+certain very specific forms of recursive functions, specifically those
+with a fixed iteration count.  This property can eventually be used
+for analysis and optimisation, although the current \LO{} compiler
+does not yet exploit this.
+
+\begin{figure}
+\begin{center}
+\begin{minipage}{0.3\columnwidth}
+\begin{colorcode}
+loop (x = a) =
+  for i < n do
+    g(x)
+in body
+\end{colorcode}
+\end{minipage}
+\begin{minipage}{0.05\columnwidth}
+$\Rightarrow$
+\end{minipage}
+\begin{minipage}{0.4\columnwidth}
+\begin{colorcode}
+fun t f(int i, int n, t x) =
+  if i >= n then x
+     else f(i+1, n, g(x))
+
+let x = f(i, n, a)
+in body
+\end{colorcode}
+\end{minipage}
+\end{center}
+\caption{Equivalence between loops and recursive functions}
+\label{fig:loop-recursion}
+\end{figure}
+
+\subsubsection{In-place updates}
+\label{sec:in-place-updates}
+
+In an array-oriented programming language, a common task is to modify
+some elements of an array.  In a pure language, we cannot permit free
+mutation, but we can permit the creation of a duplicate array, where
+some elements have been changed.  General modification of array
+elements is done using the \texttt{let-with} construct.  In its most
+general form, it looks as follows.
+\begin{colorcode}
+  let \textit{dest} = \textit{src} with [\textit{indexes}] <- \textit{value}
+  in \textit{body}
+\end{colorcode}
+This evaluates \textit{body} with \textit{dest} bound to the value of
+\textit{src}, except that the element(s) at the position given by
+\textit{indexes} take on the new value \textit{value}.\footnote{Yes,
+  this is the \emph{third} binding construct in the language, ignoring
+  function abstraction!}  The given indexes need not be complete, but
+in that case, \textit{value} must be an array of the proper size.  As
+an example, here's how we could replace the third row of an $n\times3$
+array.
+\begin{colorcode}
+  let b = a with [2] <- [1,2,3] in b
+\end{colorcode}
+Whenever $\textit{dest} = \textit{src}$, we can write
+\begin{colorcode}
+  let \textit{dest}[\textit{indexes}] = \textit{value} in \textit{body}
+\end{colorcode}
+as a shortcut.  Note that this has no special semantic meaning, but is
+simply a case of normal name shadowing.
+
+For example, the loop given below implements the ``imperative''
+version of matrix multiplication of two $N\times N$ matrices.
+
+\begin{colorcode}
+fun *[[int]] matmultImp(int N, [[int]] a, [[int]] b) =
+    let res = replicate(N, iota(N)) in
+    loop (res) = for i < N do
+        loop (res) = for j < N do
+            let partsum =
+                let res = 0 in
+                loop (res) = for k < N do
+                    let res = res + a[i,k] * b[k,j]
+                    in  res
+                in res
+            in let res[i,j] = partsum in res
+        in res
+    in res
+\end{colorcode}
+
+With the naive implementation based on copying the source array,
+executing the \texttt{let-with} expression would require memory
+proportional to the entire source array, rather than proportional to
+the slice we are changing.  This is not ideal.  Therefore, the
+\texttt{let-with} construct has some unusual restrictions to permit
+in-place modification of the \textit{src} array, as described in
+\cref{sec:futhark-uniqueness-types}.  Simply put, we track that
+\textit{src} is never used again.  The consequence is that we can
+guarantee that the execution of a \texttt{let-with} expression does
+not involve any copying of the source array in order to create the
+newly bound array, and therefore the time required for the update is
+proportional to the section of the array we are updating, not the
+entire array.  We can think of this as similar to array modification
+in an imperative language.
+
+\subsection{SOACs}
+\label{sec:soacs}
+
+The language presented in the previous section is in some sense
+``sufficient'', in that it is Turing-complete, and can express
+imperative-style loops in a natural way with \texttt{do}-loops.
+However, \LO{} is not intended to be used in such a way - bulk
+operations on arrays should be expressed via the four
+\textit{second-order array combinators} (SOACs) shown in
+\cref{fig:soacs}, as the optimisations covered in later chapters are
+expressed as transformations on these.
+
+\begin{figure}[bt]
+\begin{tabular}{lrll}
+$l$ & $::=$ & \texttt{fn $t$ ($t_{1}$ $v_{1}$, \ldots, $t_{n}$ $v_{n}$) => $e$} & (Anonymous function) \\
+& $|$ & \texttt{\textbf{id} ($e_{1}$, \ldots, $e_{n}$)} & (Curried function) \\
+& $|$ & \texttt{op $\odot$ ($e_{1}$, \ldots, $e_{n}$)} & (Curried operator) \\
+\\
+$e$ & $::=$ & \texttt{map($l$, $e$)} \\
+    & $|$ & \texttt{filter($l$, $e$)} \\
+    & $|$ & \texttt{reduce($l$, $x$, $e$)} \\
+    & $|$ & \texttt{scan($l$, $x$, $e$)} \\
+    & $|$ & \texttt{redomap($l_{r}$, $l_{m}$, $x$, $e$)} \\
+\end{tabular}
+\caption{Second-order array combinators}
+\label{fig:soacs}
+\end{figure}
+
+The semantics of the \textsc{soac}s is identical to the similarly-named
+higher-order functions found in many functional languages, but we
+reproduce it here for completeness.  The types given are not \LO{}
+types, but a Haskell-inspired notation, since the \textsc{soac}s cannot
+be typed in \LO{} itself.
+\begin{align*}
+\texttt{map($f$,$a$)}
+& :: (\alpha\rightarrow\beta)\rightarrow[\alpha]\rightarrow[\beta] \\
+& \equiv \texttt{\{$f$($a$[0]), \ldots, $f$($a$[n])\}}
+\end{align*}
+\begin{align*}
+\texttt{ filter}
+& :: (\alpha\rightarrow\texttt{bool})\rightarrow[\alpha]\rightarrow[\alpha] \\
+\texttt{ filter($f$,$a$)} & \equiv \texttt{\{$a$[i] | $f$($a$[i]) = \texttt{True }\}}
+\end{align*}
+\begin{align*}
+\texttt{ reduce}
+& :: (\alpha\rightarrow\alpha\rightarrow\alpha)\rightarrow\alpha\rightarrow[\alpha]\rightarrow\alpha \\
+\texttt{ reduce($f$,$x$,$a$)} & \equiv \texttt{ $f$(\ldots($f$($f$($x$,$a$[0]), $a$[1])\ldots), $a$[n])}
+\end{align*}
+\begin{align*}
+\texttt{ scan}
+& :: (\alpha\rightarrow\alpha\rightarrow\alpha)\rightarrow\alpha\rightarrow[\alpha]\rightarrow[\alpha] \\
+\texttt{ scan($f$,$x$,$a$)} & \equiv \texttt{\{$f$($x$,$a$[0]), $f$($f$($x$,$a$[0]),$a$[1]),\ldots\}}
+\end{align*}
+
+\texttt{scan} is an inclusive prefix scan, and returns an array of the
+same outer size as the original array.  The functions given to
+\texttt{reduce} and \texttt{scan} must be binary associative
+operators, and the value given as the initial value of the accumulator
+must be the neutral element for the function.  These properties are
+not checked by the \LO{} compiler, and are the responsibility of the
+programmer.
+
+\texttt{redomap} is a special case -- it is not intended for use by
+the programmer, but used internally for fusing \texttt{reduce} and
+\texttt{map}.  Its semantics is as follows.
+\begin{align*}
+\texttt{redomap}
+& :: (\alpha\rightarrow\alpha\rightarrow\alpha)\rightarrow(\alpha\rightarrow\beta\rightarrow\alpha)\\
+& \quad\rightarrow\alpha\rightarrow[\beta]\rightarrow\alpha \\
+\texttt{redomap($\odot$,$g$,$x$,$v$)} & \equiv \texttt{foldl($g$, $x$, $v$)}
+\end{align*}
+Note that the runtime semantics is a left-fold, not a normal \LO{}
+\texttt{reduce}.  In particular, $g$ need not be associative.  We use
+a Haskell-like syntax to explain the
+rationale behind \texttt{redomap}:\\
+$(\texttt{reduce}\ \odot\ e)\ \circ\ (\texttt{map}\ f)$ can be
+formally transformed, via the list homomorphism (\textsc{lh})
+promotion lemma, to an
+equivalent form:  \\
+$(\texttt{reduce}\ \odot\ e)\ \circ\ (\texttt{map}\ f)\
+\emphh{\equiv}\ \texttt{reduce}\ \odot\
+e\ \circ\ \texttt{map}\ (\emp{\texttt{reduce}\ \odot\ e\ \circ\ \texttt{map}\ f})\ \circ\ \texttt{split}_{p}$\\
+where the original list is distributed to $p$ parallel processors,
+each of which execute the original map-reduce computation sequentially
+and, at the end, reduce in parallel the per-processor result using the
+operator $\odot$.  Hence, the \textit{inner} map-reduce can be
+rewritten as a left-fold:\\
+$(\texttt{reduce}\ \odot\ e)\ \circ\ (\texttt{map}\ f)\
+\emphh{\equiv}\ \texttt{reduce}\ \odot\
+e\ \circ \texttt{map} \ (\emp{\texttt{foldl}\ g\ e})\ \circ\ \texttt{split}_{p}$\\
+Where $g$ is a function generated from the composition of $f$ and
+$\odot$.  It follows that in order to generate parallel code for \\
+\texttt{(reduce $\odot$ $e$) $\circ$ (map $f$)} it is sufficient to
+record either $\odot$ and $f$, or $\odot$ and $g$. We choose the
+latter, i.e., \texttt{redomap($\odot$, $g$, $e$)}, because it allows a
+richer compositional algebra for fusion.  In particular, it allows us
+to fuse \texttt{reduce~$\circ$~map~$\circ$~filter} into a
+\texttt{redomap} without duplicating computation.
+
+\section{Language reference}
+\label{sec:futhark-reference}
+
+The builtin types in \LO{} are \intt{}, \realt{}, \boolt{} and \chart{}, as
+well as their combination in tuples and arrays.
+
+The following list describes every syntactical language construct in
+the language.
+
+\begin{description}
+  \item[\textit{constant}]\hfill\\
+    Evaluates to itself.
+
+  \item[\textit{var}]\hfill\\
+    Evaluates to its value in the environment.
+
+  \item[\texttt{\textit{x} \textbf{arithop} \textit{y}}] \hfill\\
+    Evaluate the binary operator on its operands, which must both be
+    of either type \intt{} or \realt.  The following operators are
+    supported: \texttt{+}, \texttt{*}, \texttt{-}, \texttt{/},
+    \texttt{\%}, \texttt{=}, \texttt{<}, \texttt{<=}, \texttt{pow}.
+
+  \item[\texttt{\textit{x} \textbf{bitop} \textit{y}}] \hfill\\
+    Evaluate the binary operator on its operands, which must both be
+    of type \intt.  The following operators are supported:
+    \texttt{\^}, \texttt{\&}, \texttt{|}, \texttt{$>>$}, \texttt{$<<$},
+    i.e., bitwise xor, and, or, and arithmetic shift right and left.
+
+  \item[\texttt{\textit{x} \&\& \textit{y}}]\hfill\\
+    Logical conjunction; both operands must be of type \boolt.  Not
+    short-circuiting, as this complicates program transformation.  If
+    short-circuiting behaviour is desired, the programmer can use
+    \texttt{if} explicitly.
+
+  \item[\texttt{\textit{x} || \textit{y}}]\hfill\\
+    Logical disjunction; both operands must be of type \boolt.  As
+    with \texttt{\&\&}, not short-circuiting.
+
+  \item[\texttt{not \textit{x}}]\hfill\\
+    Logical negation of \textit{x}, which must be of type \boolt.
+
+  \item[\texttt{-\textit{x}}]\hfill\\
+    Numerical negation of \textit{x}, which must be of type \realt{} or \intt.
+
+  \item[\texttt{a[i]}]\hfill\\
+    Return the element at the given position in the array.  The index
+    may be a comma-separated list of indexes.
+
+  \item[\texttt{zip($a_1, \ldots, a_n$)}]\hfill\\
+    Zips together the elements of the outer dimensions of arrays $a_1,
+    \ldots, a_n$.  Static or runtime check is required to check that
+    the sizes of the outermost dimension of arrays $a_1, \ldots, a_n$
+    are the same.  If this invariant does not hold, program execution
+    stops with an error.
+
+  \item[\texttt{unzip($a$)}]\hfill\\
+    If the type of $a$ is $[\{t_1, \ldots, t_n\}]$, the result is a
+    tuple of $n$ arrays, i.e., $\{[t_1], \ldots, [t_n]\}$, otherwise
+    it is a type error.
+
+  \item[\texttt{iota(\textit{n})}]\hfill\\
+    An array of the integers from $0$ to \textit{n}.
+
+  \item[\texttt{replicate(\textit{n}, \textit{a})}]\hfill\\
+    An array consisting of \textit{n} copies of \textit{a}.
+
+  \item[\texttt{size($k$, \textit{a})}]\hfill\\
+    The size of dimension $k$ of array \textit{a}.  $k$ must be a
+    static integral constant.
+
+  \item[\texttt{split(\textit{n}, \textit{a})}]\hfill\\
+    Partitions the given array into two disjoint arrays
+    \texttt{\textit{a}[$0\ldots{}n$]},
+    \texttt{\textit{a}[$n+1\ldots{}$]}, returned as a tuple.
+
+  \item[\texttt{concat(\textit{a}, \textit{b})}]\hfill\\
+    Concatenate the rows/elements of one array with another.  The
+    shape of the two arrays must be identical in all but the first
+    dimension.
+
+  \item[\texttt{copy(\textit{x})}]\hfill\\
+    Return a deep copy of the argument.  Semantically, this is just
+    the identity function, but it has special semantics related to
+    uniqueness types as described in \cref{sec:futhark-uniqueness-types}.
+
+  \item[\texttt{reshape((\textit{dim}$_{1}$, \ldots, \textit{dim}$_{n}$), a)}]\hfill\\
+    Reshape the elements of the given array into the specified shape.
+    The number of elements in \textit{a} must be equal to
+    $\texttt{dim}_{1}\times\ldots\times\texttt{dim}_{n}$.
+
+  \item[\texttt{rearrange((\textit{k}$_{1}$, \ldots, \textit{k}$_{n}$), a)}]\hfill\\
+    Permute the dimensions in the array, returning a new array.
+
+  \item[\texttt{transpose(k,n,a)}]\hfill\\
+    Return the generalised transpose of \textit{a}.  If
+    \texttt{$b$=transpose($k$,$n$,$a$)}, then
+    \[
+    \texttt{a}[i_1, \ldots, i_k, i_{k+1}, \ldots, i_{k+n}, \ldots, i_q ]
+    =
+    \texttt{b}[i_1 , \ldots, i_{k+1} , \ldots, i_{k+n}, i_k, \ldots, i_q ].
+    \]
+    We will call this an operation an \textit{$(k,n)$-transposition}.
+    Note that \texttt{transpose(0,1,a)} is the common two-dimensional
+    transpose.
+
+    Be aware that $k$ and $n$ must be static integer literals, and
+    $k+n$ must be non-negative and smaller than the rank of
+    \texttt{a}, or it is considered a type error.
+
+    This operation is merely syntactical sugar for the equivalent
+    \texttt{rearrange} operation.
+
+  \item[\texttt{transpose(a)}]\hfill\\
+    Return the transpose of \textit{a}.  Syntactical sugar for
+    \texttt{transpose(0,1,a)}.
+
+  \item[\texttt{let \textit{pat} = \textit{e} in \textit{body}}]\hfill\\
+    While evaluating \textit{body}, bind the names mentioned in
+    \textit{pat} to the components in the corresponding positions of
+    the value of \textit{e}.  We will refer to the expression
+    \textit{e} as the ``right-hand side'' (or RHS).
+
+  \item[\texttt{let \textit{dest} = \textit{src} with [\textit{index}] <- \textit{v} in \textit{body}}] \hfill \\
+    Evaluate \textit{body} with \textit{dest} bound to the value of
+    \textit{src}, except that the element(s) at the position given by
+    the index take on the value of \textit{v}.  The given index need
+    not be complete, but in that case, the value of \textit{v} must be
+    an array of the proper size.
+
+  \item[\texttt{if \textit{c} then \textit{a} else \textit{b}}]\hfill\\
+    If \textit{c} evaluates to \textit{True}, evaluate \textit{a},
+    else evaluate \textit{b}.
+
+  \item[\texttt{loop (\textit{pat} = \textit{initial}) = for \textit{i} < \textit{bound} do \textit{loopbody} in \textit{body}}]\hfill
+    \begin{enumerate}
+    \item Bind \textit{pat} to the initial values given in \textit{initial}.
+    \item While $\textit{i} < \textit{bound}$, evaluate \textit{loopbody},
+      rebinding \textit{pat} to be the value returned by the body.
+    \item Evaluate \textit{body} with \textit{pat} bound to its final
+      value.
+    \end{enumerate}
+
+  \item[\texttt{map(\textit{f}, \textit{a})}]\hfill\\
+    Apply \textit{f} to every element of \textit{a} and return the resulting array.
+
+  \item[\texttt{reduce(\textit{f}, \textit{x}, \textit{a})}]\hfill\\
+    Left-reduction with \textit{f} across the elements of \textit{a},
+    with \textit{x} as the neutral element for \textit{f}.  \textit{f}
+    must be associative, as the evaluation order is not otherwise
+    specified.
+
+  \item[\texttt{scan(\textit{f}, \textit{x}, \textit{a})}]\hfill\\
+    Inclusive prefix-scan.
+
+  \item[\texttt{filter(\textit{f}, \textit{a})}]\hfill\\
+    Remove all those elements of \textit{a} that do not satisfy the
+    predicate \textit{f}.
+
+\end{description}
+
+\subsection{Tuple shimming}
+
+In a SOAC, if the given function expects $n$ arguments of types
+$t_{1}, \ldots, t_{n}$, but the SOAC will call the function with a
+single argument of type \texttt{\{$t_{1}, \ldots, t_{n}$\}} (that is,
+a tuple), the \LO{} compiler will automatically generate an anonymous
+unwrapping function.  This allows the following expression to
+type-check (and run):
+
+\begin{colorcode}
+  map(op +, zip(as, bs))
+\end{colorcode}
+
+Without the tuple shimming, the above would cause an error, as
+\texttt{op +} is a function that takes two arguments, but is passed a
+two-element tuple by \texttt{map}.
+
+\subsection{Arrays of tuples}
+
+For reasons related to fusion, arrays of tuples are in a sense merely
+syntactic sugar for tuples of arrays.  The type \texttt{[\{int,
+  real\}]} is transformed to \texttt{\{[int], [real]\}} during the
+compilation process, and all code interacting with arrays of tuples is
+likewise transformed.  In most cases, this is fully transparent to the
+programmer, but there are edge cases where the transformation is not
+trivially an isomorphism.
+
+Consider the type \texttt{[\{[int], [real]\}]}, which is transformed
+into \texttt{\{[[int]], [[real]]\}}.  These two types are not
+isomorphic, as the latter has more stringent demands as to the
+fullness of arrays.  For example,
+\begin{colorcode}
+[
+ \{[1],   [1.0]\},
+ \{[2,3], [2.0]\}
+]
+\end{colorcode}
+is a value of the former, but the first element of the
+corresponding transformed tuple
+\begin{colorcode}
+\{
+ [[1],   [2, 3]],
+ [[1.0], [2.0]]
+\}
+\end{colorcode}
+is not a full array.  Hence, when determining whether a program
+generates full arrays, we must hence look at the \textit{transformed}
+values - in a sense, the fullness requirement ``transcends'' the
+tuples.
+
+\section{Uniqueness Types}
+\label{sec:futhark-uniqueness-types}
+
+While \LO{} is through and through a pure functional language, it may
+occasionally prove useful to express certain algorithms in an
+imperative style.  Consider a function for computing the $n$ first
+Fibonacci numbers:
+
+\begin{colorcode}
+fun [int] fib(int n) =
+  // Create "empty" array.
+  let arr = iota(n) in
+  // Fill array with Fibonacci numbers.
+  loop (arr) = for i < n-2 do
+                 let arr[i+2] = arr[i] + arr[i+1]
+                 in arr
+  in arr
+\end{colorcode}
+
+If the array \texttt{arr} is copied for each iteration of the loop, we
+are going to put enormous pressure on memory, and spend a lot of time
+moving around data, even though it is clear in this case that the
+``old'' value of \texttt{arr} will never be used again.  Precisely,
+what should be an algorithm with complexity $O(n)$ becomes $O(n^2)$,
+due to copying the size $n$ array (an $O(n)$ operation) for each of
+the $n$ iterations of the loop.
+
+To prevent this, we will want to update the array \textit{in-place},
+that is, with a static guarantee that the operation will not require
+any additional memory allocation, such as copying the array.  With an
+in-place modification, a \texttt{let-with} can modify the array in
+time proportional to the slice being updated ($O(1)$ in the case of
+the Fibonacci function), rather than time proportional to the size of
+the final array, as would the case if we perform a copy.  In order to
+perform the update without violating referential transparency, we need
+to know that no other references to the array exists, or at least that
+such references will not be used on any execution path following the
+in-place update.
+
+In \LO{}, this is done through a type system feature called
+\textit{uniqueness types}, similar to, although simpler, than the
+uniqueness types of Clean.  Alongside a (relatively) simple aliasing
+analysis in the type checker, this is sufficient to determine at
+compile time whether an in-place modification is safe, and signal a
+compile time error if \texttt{let-with} is used in way where safety
+cannot be guaranteed.  This means that \texttt{let-with} must
+\textit{always} be efficient, and its use is not permitted otherwise.
+
+The simplest way to introduce uniqueness types is through examples.
+To that end, let us consider the following function definition.
+
+\begin{colorcode}
+fun \emp{*}[int] modify(\emp{*}[int] a, int i, int x) =
+  let b = a with [i] <- a[i] + x in
+  b
+\end{colorcode}
+
+The function call \texttt{modify($a$,$i$,$x$)} returns $a$, but where
+the element at index \texttt{i} has been increased by $x$.  Note the
+\emp{asterisks}: in the parameter declaration \texttt{*[int] a}, this
+means that the function \texttt{modify} has been given ``ownership''
+of the array $a$, meaning that any caller of \texttt{modify} will
+never reference array $a$ after the call again.  In particular,
+\texttt{modify} can change the element at index \texttt{i} without
+first copying the array, i.e. \texttt{modify} is free to do an
+in-place modification.  Furthermore, the return value of
+\texttt{modify} is also unique - this means that the result of the
+call to \texttt{modify} does not share elements with any other visible
+variables.
+
+Let us consider a call to \texttt{modify}, which might look as
+follows.
+
+\begin{colorcode}
+let \(b\) = modify(\(a\), \(i\), \(x\)) in
+...
+\end{colorcode}
+
+Under which circumstances is this call valid?  Two things must hold:
+\begin{enumerate}
+\item The type of \texttt{$a$} must be \texttt{*[int]}, of course.
+
+\item Neither \texttt{$a$} or any variable that \textit{aliases}
+  \texttt{$a$} may be used on any execution path following the call to
+  \texttt{modify}.
+\end{enumerate}
+
+In general, when a value is passed as a unique-typed argument in a
+function call, we consider that value to be \textit{consumed}, and
+neither it nor any of its aliases can be used again.  Otherwise, we
+would break the contract that gives the function liberty to manipulate
+the argument however it wants.  Note that it is the type in the
+argument declaration that must be unique - it is permissible to pass a
+unique-typed variable as a non-unique argument (that is, a unique type
+is a subtype of the corresponding nonunique type).
+
+A variable $v$ aliases $a$ if they may share some elements,
+i.e. overlap in memory.  As the most trivial case, after evaluating
+the binding \texttt{let b = a}, the variable \texttt{b} will alias
+\texttt{$a$}.  As another example, if we extract a row from a
+two-dimensional array, the row will alias its source:
+\begin{colorcode}
+let b = a[0] in
+... // b is aliased to a (assuming a is not one-dimensional)
+\end{colorcode}
+\Cref{sec:futhark-sharing} will cover sharing and sharing analysis in
+greater detail.
+
+Let us consider the definition of a function returning a unique array:
+
+\begin{colorcode}
+fun *[int] f([int] a) = \(e\)
+\end{colorcode}
+
+Note that the argument, \texttt{$a$}, is non-unique, and hence we
+cannot modify it.  There is another restriction as well: \texttt{$a$}
+must not be aliased to our return value, as the uniqueness contract
+requires us to ensure that there are no other references to the unique
+return value.  This requirement would be violated if we permitted the
+return value in a unique-returning function to alias its (non-unique)
+parameters.
+
+To summarise: \textit{values are consumed by being the source in a
+  \texttt{let-with}, or by being passed as a \textit{unique} parameter
+  in a function call}.  We can crystallise valid usage in the form of
+three principal rules:
+
+\begin{description}
+\item[Uniqueness Rule 1] When a value is passed in the place of a
+  unique parameter in a function call, or used as the source in a
+  \texttt{let-with} expression, neither that value, nor any value that
+  aliases it, may be used on any execution path following the function
+  call.  A violation of this rule is illustrated on
+  \cref{fig:uniqueness-rule-1-violation}.
+
+\item[Uniqueness Rule 2] If a function definition is declared to
+  return a unique value, the return value (that is, the result of the
+  body of the function) must not share memory with any non-unique
+  arguments to the function.  As a consequence, at the time of
+  execution, the result of a call to the function is the only
+  reference to that value.  A violation of this rule is illustrated on
+  \cref{fig:uniqueness-rule-2-violation}.
+
+\item[Uniqueness Rule 3] If a function call yields a unique return
+  value, the caller has exclusive access to that value.  At
+  \textit{the point the call returns}, the return value may not share
+  memory with any variable used in any execution path following the
+  function call.  This rule is particularly subtle, but can be
+  considered a rephrasing of Uniqueness Rule 2 from the ``calling
+  side''.
+\end{description}
+
+\begin{figure}
+\centering
+\begin{colorcode}
+let b = a with [i] <- 2 in
+f(b,a) // \emp{Error:} a used after being source in a let-with
+\end{colorcode}
+\caption{Violation of Uniqueness Rule 1}
+\label{fig:uniqueness-rule-1-violation}
+\end{figure}
+
+\begin{figure}
+\centering
+\begin{colorcode}
+fun *[int] broken([[int]] a, int i) =
+  a[i] // Return value aliased with 'a'.
+\end{colorcode}
+\caption{Violation of Uniqueness Rule 2}
+\label{fig:uniqueness-rule-2-violation}
+\end{figure}
+
+Finally, it is worth emphasising that everything in this chapter is
+used as part of a static analysis.  \textit{All} violations of the
+uniqueness rules will be discovered at compile time (in fact, during
+type-checking), thus leaving the code generator and runtime system at
+liberty to exploit them for low-level optimisation.
+
+\subsection{Sharing analysis}
+\label{sec:futhark-sharing}
+
+Whenever the memory regions for two values overlap, we say that they
+are \textit{aliased}, or that \textit{sharing} is present.  As an
+example, if you have a two-dimensional array \texttt{a} and extract
+its first row as the one-dimensional array \texttt{b}, we say that
+\texttt{a} and \texttt{b} are aliased.  While the \LO{} compiler may
+do a deep copy if it wishes\footnote{At some point, a proper cost
+  model for \LO{} will be developed, and it is very likely that we
+  require such indexing to be $O(1)$.}, it is not required, and this
+operation thus holds the potential for sharing memory.  Sharing
+analysis is necessarily conservative, and merely imposes an upper
+bound on the amount of sharing happening at runtime.  The sharing
+analysis in \LO{} has been carefully designed to make the bound as
+tight as possible, but still easily computable.
+
+In \LO{}, the only values that can have any sharing are arrays -
+everything else is considered ``primitive''.  Tuples are special, in
+that they are not considered to have any identity beyond their
+elements.  Therefore, when we store sharing information for a
+tuple-typed expression, we do it for each of its element types, rather
+than the tuple value as a whole.
+
+To be precise, sharing information for an expression $e$, written
+$\aliases{e}$, can take one of two forms:
+
+\begin{enumerate}
+\item $l$, where $l$ is a subset of the variables in scope at $e$.
+  This means that $e$ may share data with some of the variables in
+  $l$.  This is the sharing information when the type of $e$ is not a
+  tuple.
+
+\item $\langle l_{1}, \ldots, l_{n} \rangle$, which requires that the
+  type of $e$ is a tuple $\{t_{1}, \ldots, t_{n}\}$, and denotes that
+  the sharing of the $i$th component is $l_{i}$.  This is the shape of
+  the sharing information when the type of $e$ is a tuple.
+\end{enumerate}
+
+We need a way to combine sharing information.  The typical case is
+computing sharing information for the expression \texttt{if c then e1
+  else e2}, where the sharing of the resulting value is the
+``combination'' of the sharing in both \texttt{e1} and \texttt{e2}.
+We make this combination precise by the associative, commutative
+operation $s_{1} \oplus s_{2}$, which is defined by the following
+equation.
+
+\begin{align*}
+  l_{1} \oplus l_{2} &= l_{1} \cup l_{2} \\
+  \langle l_{1}, \ldots, l_{n} \rangle \oplus \langle l_{n+1}, \ldots, l_{2n} \rangle &= \langle l_{1} \oplus l_{n+1}, \ldots, l_{n} \oplus l_{2n} \rangle \\
+\end{align*}
+
+Now we can define
+\[
+\aliases{\texttt{if c then e1 else e2}} = \aliases{\texttt{e1}} \oplus \aliases{\texttt{e2}}.
+\]
+
+We will often treat sharing information as a set and write things such
+as $\forall v\in\aliases{e}.p(v)$ -- in these cases, the set elements
+are all variables contained anywhere in the sharing information.
+
+Aliasing is transitive -- if $v\in\aliases{e}$ and $v'\in\aliases{e}$,
+then $v\in\aliases{v'}$.  Aliasing is mostly intuitive - during
+type-checking, the symbol table contains not only the type of each
+variable, but also which other variables it may alias.  Hence, we can
+define an aliasing rule for variables:
+
+\begin{align*}
+  \aliases{\texttt{$v$}} &= \{v\} \cup \{\textrm{Any variable in scope that aliases \(v\)}\} \\
+\end{align*}
+
+The aliasing rules for other expressions are mostly intuitive, but a
+few interesting cases are presented here:
+
+\begin{align*}
+  \aliases{\texttt{$e$}} &= \emptyset\ (\text{Whenever $e$ has a basic type\footnote{A basic type is a type that is not contain an array anywhere.}}) \\
+  \aliases{\texttt{$a$[i]}} &= \aliases{a} \\
+  \aliases{\texttt{copy($e$)}} &= \emptyset \\
+  \aliases{\texttt{if $c$ then ${e}_{1}$ else ${e}_{2}$}} &= \aliases{e_{1}} \oplus \aliases{e_{2}} \\
+  \aliases{\texttt{transpose($e$)}} &= \aliases(e) \\
+\end{align*}
+
+Note that \texttt{transpose} introduces aliasing - this is to permit
+an implementation where the transposed array is never actually
+manifested in memory, but is merely an index space transformation of
+the underlying array resolved at compile-time.  The operations
+\texttt{reshape}, \texttt{split}, etc. have a similar rule.
+
+The rule for function application is more complicated.  To begin with,
+and this was indeed the original rule in \LO{}, we can state that the
+return value of a function call aliases all of its arguments.
+
+\begin{align*}
+  \aliases{\textit{f}(e_{1}, \ldots, e_{n})} &= \bigcup_{1 \leq i \leq n} \aliases{e_{i}} & \textit{(--Too restrictive!)}
+\end{align*}
+
+However, it turns out that this is far too restrictive.  Consider a
+call \texttt{f1($a$)} to the function \texttt{f1} whose type is shown
+on \cref{fig:unique-arguments} - if the return value aliased the
+argument $a$, then we could never use the return value at all, as it
+would alias something that has been consumed, namely the parameter
+$a$:
+
+\begin{colorcode}
+let x = f1(a) in // Now 'x' would alias 'a'.
+x                // Violates Uniqueness Rule 1,
+                 // as something aliasing 'a' is accessed
+\end{colorcode}
+
+Hence, a first elaboration is that the return value should only alias
+those function arguments that are not consumed:
+
+\begin{align*}
+  \aliases{\textit{f}(e_{1}, \ldots, e_{n})} &= \bigcup_{1 \leq i \leq n, \text{$e_{i}$ is not consumed}} \aliases{e_{i}}  & \textit{(--Still too restrictive!)}
+\end{align*}
+
+The argument for the soundness of this rule is as follows: even if the
+return value may at runtime alias a consumed argument, we do not need
+to record it, as that argument will never be accessed elsewhere.
+
+Unfortunately, the above rule is still too restrictive, as can be
+illustrated by function \texttt{f2} from \cref{fig:unique-arguments}.
+Consider a call \texttt{f2($a$)} - by the above rule, the return value
+would be aliased to $a$, which would violate Uniqueness Rule 3, as $a$
+may be used again.
+
+Hence, we add another elaboration, wherein the alias set is empty if
+the return value is unique.
+
+\begin{align*}
+  \aliases{f(e_{1}, \ldots, e_{n})} &=
+  \begin{cases}
+    \emptyset & \mbox{If $f$ returns an unique value}\\
+    \bigcup_{\overset{1 \leq i \leq n}{\text{$e_{i}$ is not consumed}}} \aliases{e_{i}} & \mbox{Otherwise}
+  \end{cases}
+\end{align*}
+
+The final rule is essentially correct, except that it ignores tuples.
+As mentioned earlier, sharing information for tuples is represented
+element-wise.  Hence, we can simply apply the above rule piecewise for
+each element in the tuple.
+
+\begin{figure}
+\begin{center}
+\begin{colorcode}
+fun [int] f1(*[int] a) = ...
+
+fun *[int] f2([int] a) = ...
+\end{colorcode}
+\end{center}
+\caption{Unique arguments}
+\label{fig:unique-arguments}
+\end{figure}
+
+Although the current aliasing rules for function calls have proven
+sufficient for now, there are cases where it is too conservative.
+Consider the following function.
+
+\begin{colorcode}
+fun [int] contrived([[int]] src, [int] indexes, int i) =
+  src[indexes[i]]
+\end{colorcode}
+
+In a call \texttt{contrived(src,indexes,i)}, by the above rules, we
+would consider the return value to be aliased to \textit{both}
+\texttt{src} and \texttt{indexes}, as both are non-consumed
+parameters.  Yet, it is clear by inspecting the actual function
+definition that the return value will only index the \texttt{src}
+parameter.
+
+This problem is not solvable merely through refinement of the aliasing
+rules - either the user must annotate each function with information
+about which of the parameters may be aliased by the return value, or
+the compiler could deduce it using some sharing inference algorithm.
+As the latter would add a great deal of complexity, and the former
+require a language change, we have postponed tackling this problem
+until it becomes a problem in practice.
+
+\subsection{Tracking uniqueness}
+\label{sec:futhark-tracking-uniqueness}
+
+Let us summarise:
+
+\begin{itemize}
+\item If the type of an array parameter is preceded by a single
+  asterisk, it denotes that the array is unique, i.e., that it will
+  never be reused outside of the current function.
+
+\item The source operand to a \texttt{let-with} \textit{must} be
+  unique.  If it is not, it is reported as a type error.
+\end{itemize}
+
+Let-with and function calls are the only places in which variable
+consumption can happen.  As a first example, let us consider a
+function that replaces the value at a given position in an integer
+array.
+
+\begin{colorcode}
+  fun *[int] replace(*[int] arr, int i, int x) =
+    let arr[i] = x in arr
+\end{colorcode}
+
+The type of this function expresses the fact that it consumes its
+array argument, and also returns a unique array.  This permits
+composition - \texttt{replace(replace(a, i1, x), i2, y)} is a valid
+application.  Defining \texttt{replace} as
+\begin{colorcode}
+  fun [int] replace2(*[int] arr, int i, int x) =
+    let arr[i] = x in arr
+\end{colorcode}
+would still be type correct (a unique array can be used anywhere a
+nonunique is expected), but the composition
+\texttt{replace2(replace2(a, i1, x), i2, y)} would no longer be well
+typed.
+
+Checking that uniqueness invariants are being upheld is far subtler
+than normal type checking.  In particular, detailed sharing analysis
+has to be performed, in order to ensure that after an array $a$ is
+consumed, it becomes an error to use any value that may refer to
+(parts of) the old value of the array.  Whenever we consume a variable
+$a$, we mark as inaccessible all of its aliases, as illustrated on
+\cref{fig:consumption}.
+
+\begin{figure}
+\begin{center}
+\begin{colorcode}
+  let b = a in               // Now \(\texttt{b}\in\aliases{\texttt{a}}\).
+  let c = a with [i] <- x in // \(\forall{}v\in\aliases{\texttt{a}}\Rightarrow\textrm{Mark \(v\) as consumed.}\)
+  b                          // Error, because \(\texttt{b}\in\aliases{\texttt{a}}\)!
+\end{colorcode}
+\end{center}
+\caption{Example of array consumption}
+\label{fig:consumption}
+\end{figure}
+
+A key principle is that of \textit{sequence points} that lexically
+checkpoint the use of variables.  As an example, assume that we are
+given a function \texttt{f} of type \texttt{*[int]~->~int}.  That is,
+\texttt{f} consumes an array and returns an integer.  The expression
+\begin{colorcode}
+  f(a) + a[i]
+\end{colorcode}
+is invalid because a consumption and observation of the same variable
+happens within the same \textit{sequence}.  It is valid for a sequence
+to contain multiple observations of the same variable, but if a
+variable is consumed, that must be the only occurrence of the variable
+(or any of its aliases) within the sequence.  Binding constructs
+(lets, let-withs and loops) create sequence points that delimit
+sequences.  If we rewrite the expression to coordinate the consumption
+into its own sequence, all will be well.
+\begin{colorcode}
+  let c = a[i] // Since a[i] is of primitive type,
+               // c does not alias a.
+  in f(a) + c
+\end{colorcode}
+
+The reason for this rule is to enable simpler code generation, as any
+necessary order of operations is evident in the code.  It does require
+a certain amount of care when doing program transformations, as for
+example expression reordering may result in an invalid program, as
+shown on \cref{fig:reordering-uniqueness-violation}.
+
+\begin{figure}
+\centering
+\begin{minipage}{0.25\columnwidth}
+\begin{colorcode}
+let x = a[0] in
+let b = a with
+  [i] <- y in
+x + b[1]
+\end{colorcode}
+\end{minipage}
+\begin{minipage}{0.05\columnwidth}
+$\Rightarrow$
+\end{minipage}
+\begin{minipage}{0.6\columnwidth}
+\begin{colorcode}
+let b = a with [i] <- y in
+let x = a[0] in // \emp{Error}:
+                // violates Uniqueness Rule 1
+x + b[1]
+\end{colorcode}
+\end{minipage}
+\caption{Expression reordering causing violation of uniqueness rules}
+\label{fig:reordering-uniqueness-violation}
+\end{figure}
+
+In the previous examples, function arguments that were consumed were
+all simple variables, making it easy to describe what was being
+consumed.  But in general, we might have an expression
+\begin{colorcode}
+  replace(e, i, x)
+\end{colorcode}
+where \texttt{e} is some arbitrary expression.  In this case, we mark
+as consumed all variables in $\aliases{\texttt{e}}$.
+
+Constant, literal arrays are not considered unique, as the compiler
+may put them in read-only memory and return the same reference every
+time they are accessed.  For example, the following program is
+invalid.
+\begin{colorcode}
+  fun [int] fibs(int i, int x) =
+    let a = [1, 1, 2, 3, 5, 8, 13] in
+    let a[i] = x in a
+\end{colorcode}
+Since \texttt{a} is not unique, its use in the let-with is a type
+error.  However, we can use \texttt{copy} to create a unique duplicate
+of the array.
+\begin{colorcode}
+  fun [int] fibs(int i, int x) =
+    let a = copy([1, 1, 2, 3, 5, 8, 13]) in
+    let a[i] = x in a
+\end{colorcode}
+
+If we have a function such as
+\begin{colorcode}
+  fun int f(*[int] a, int x) = x
+\end{colorcode}
+then it is not valid to curry it in such a way that we provide values
+for the consumed parameters.  For example, \texttt{map(f ($a$), b)}
+would be an error.  The reason for this is that \texttt{f} may be
+called an arbitrary number of times during the mapping, but $a$ can
+only be consumed once.
+
+\end{document}
