@@ -85,7 +85,7 @@ simplify e p c rm = runAlgSimplifier (simplifyScal e) p c rm
 canSimplify :: Int -> Either EnablingOptError ScalExp
 canSimplify i = do
     let (h,e1,e2) = mkRelExp i
-    runAlgSimplifier (gaussElimRel e2) noLoc True h
+    runAlgSimplifier (gaussElimRel e1) noLoc True h
     -- let e = mkIntExp i
     -- runAlgSimplifier (simplifyScal e) noLoc True HM.empty
 
@@ -146,6 +146,8 @@ gaussAllLTH0 syms sofp = do
     pos <- asks pos
     let tp = typeOfNAlg sofp
     -- sofp<- toNumSofP =<< simplifyScal e_lth0
+    -- e_scal <- fromNumSofP sofp
+    -- sofp' <- trace ("gaussAllLTH0: "++ppScalExp e_scal++" < 0") (return sofp) 
     (jmm, fs, terms) <- findMinMaxTerm sofp
     case jmm of
         Just (MaxMin ismin mmts) -> do
@@ -168,7 +170,9 @@ gaussAllLTH0 syms sofp = do
             return $ SLogOr (SLogAnd fs_geq0 mm_geq0) (SLogAnd fs_lth0 mm_lth0)
              
         Just _ -> badAlgSimplifyM $ SimplifyError pos "gaussOneLTH0: (Just MinMax) invariant violated!"
-        Nothing-> gaussOneDefaultLTH0 syms sofp
+        Nothing-> do  e_scal <- fromNumSofP sofp
+                      sofp' <- trace ("Not MinMax: "++ppScalExp e_scal) (return sofp)
+                      gaussOneDefaultLTH0 syms sofp
     where 
         findMinMaxTerm :: NNumExp -> AlgSimplifyM (Maybe ScalExp, Prod, [NNumExp])
         findMinMaxTerm (NSum  [] _) = return (Nothing, [], [])
@@ -260,24 +264,35 @@ gaussOneDefaultLTH0 elsyms e = do
             pos <- asks pos
             badAlgSimplifyM $ SimplifyError pos "linearForm: empty Sum!"
         linearForm idd (NSum terms tp) = do
+            pos <- asks pos
+            terms' <- trace ("linearForm terms: ") (return terms)
             terms_d_idd <- mapM  (\t -> do t0 <- case t of
                                                     NProd (_:_) _ -> return t
                                                     _ -> do
-                                                        pos <- asks pos
-                                                        badAlgSimplifyM $ SimplifyError pos "linearForm: ILLEGAL!!!!"
+                                                        badAlgSimplifyM $ SimplifyError pos "linearForm: ILLEGAL111!!!!"
                                            t_scal <- fromNumSofP t0 
                                            simplifyScal $ SDivide t_scal (Id idd)
-                                 ) terms
+                                 ) terms'
             let myiota  = [1..(length terms)]
-            let ia_terms= filter (\(_,t) -> case t of
-                                              SDivide _ _ -> False
-                                              _           -> True
+            let ia_terms= filter (\(_,t)-> let t' = trace ("linearForm term: "++ppScalExp t) t
+                                           in  case t' of
+                                                 SDivide _ _ -> False
+                                                 _           -> True
                                  ) (zip myiota terms_d_idd)
             let (a_inds, a_terms) = unzip ia_terms
 
             let (_, b_terms) = unzip $ filter (\(i,_) -> not (elem i a_inds)) 
                                               (zip myiota terms)
-            if null a_terms 
+            -- check that b_terms do not contain idd
+            b_succ <- foldM (\acc x -> 
+                                case x of 
+                                  NProd fs _ -> do let fs_scal = foldl (\a x -> STimes a x) (Val (IntVal 1)) fs
+                                                   let b_ids = getIds fs_scal
+                                                   return $ acc && (not $ elem idd b_ids)
+                                  _          -> badAlgSimplifyM $ SimplifyError pos "linearForm: ILLEGAL222!!!!"
+                            ) True b_terms
+
+            if (null a_terms) || (not b_succ)
             then return Nothing
             else do let a_scal = foldl (\a x -> SPlus a x) (head a_terms) (tail a_terms) 
                     a_terms_sofp <- toNumSofP =<< simplifyScal a_scal
@@ -305,6 +320,8 @@ gaussOneDefaultLTH0 elsyms e = do
                                              (Just (p1,_,_), Just (p2,_,_)) -> compare (-p1) (-p2)
                                              (_            , _            ) -> compare (1::Int) (1::Int)
                              ) ids2
+            --let ids_print = foldl (\s x -> s ++ " " ++ ppScalExp (Id x)) ("Candidate Ids for "++ppScalExp e_scal++" are: ") ids
+            --ids' <- trace ids_print (return ids)
             if null ids then return Nothing
                         else return $ Just (head ids)            
     
@@ -312,7 +329,9 @@ gaussOneDefaultLTH0 elsyms e = do
         gaussElimHalf elsyms0 q a b = do
             a_scal <- fromNumSofP a
             b_scal <- fromNumSofP b
-            e_num  <- toNumSofP =<< simplifyScal (SPlus (STimes a_scal q) b_scal)
+            e_num_scal <- simplifyScal (SPlus (STimes a_scal q) b_scal)
+            e_num <- toNumSofP e_num_scal
+            -- e_num'<- trace ("gaussElimHalf res: "++ppScalExp e_num_scal) (return e_num) 
             gaussAllLTH0 elsyms0 e_num
 
 --    pos <- asks pos
@@ -592,6 +611,7 @@ helperMultMinMax _ = do
 
 helperTimesDivMinMax :: Bool -> Bool -> ScalExp -> ScalExp -> AlgSimplifyM ScalExp
 helperTimesDivMinMax isTimes isRev emo@(MaxMin{}) e = do
+    pos <- asks pos
     em <- simplifyScal emo
     case em of 
         MaxMin ismin es -> do
@@ -604,13 +624,26 @@ helperTimesDivMinMax isTimes isRev emo@(MaxMin{}) e = do
                     let cond'= if ctbool then cond  else not cond
                     let ismin'= if cond' then ismin else not ismin
                     simplifyScal $ MaxMin ismin' $ map (\x -> mkTimesDiv x e') es
-                _  -> return $ mkTimesDiv em e'
+                _  -> if not isTimes then return $ mkTimesDiv em e'
+                      else -- e' * MaxMin{...}
+                        case e'_sop of
+                            NProd fs tp -> return $ mkTimesDiv em e' -- simplifyScal =<< fromNumSofP (NProd (em:fs) tp)
+                            NSum  ts tp -> do 
+                                new_ts <- 
+                                    mapM (\x -> case x of
+                                                  NProd fs _ -> return $ NProd (em:fs) tp 
+                                                  _          -> badAlgSimplifyM $ 
+                                                                  SimplifyError pos 
+                                                                  "helperTimesDivMinMax: SofP invariant violated!"
+                                         ) ts
+                                simplifyScal =<< fromNumSofP ( NSum new_ts tp )
         _ -> simplifyScal $ mkTimesDiv em e
     where
         mkTimesDiv :: ScalExp -> ScalExp -> ScalExp
-        mkTimesDiv e1 e2 = if isTimes 
-                           then if isRev then STimes  e2 e1 else STimes  e1 e2 
-                           else if isRev then SDivide e2 e1 else SDivide e1 e2
+        mkTimesDiv e1 e2 = 
+            if not isTimes 
+            then if isRev then SDivide e2 e1 else SDivide e1 e2
+            else if isRev then STimes  e2 e1 else STimes  e1 e2 
 
 helperTimesDivMinMax _ _ _ _ = do
     pos <- asks pos
@@ -1146,7 +1179,8 @@ tryDivProdByOneFact _ pev@(NProd [] _, _) = return (False, pev)
 tryDivProdByOneFact f pev@(NProd (t:tfs) tp, v) = do
     (succc, newt) <- tryDivTriv t f
     one <- getPos1 tp
-    if not succc 
+    --succc' <- trace ("DivBy: "++ppScalExp t) (return succc)
+    if not succc
     then do (succ', (tfs', v')) <- tryDivProdByOneFact f (NProd tfs tp, v)
             case (succ', tfs') of
                 (True,  NProd ((Val vv):tfs'') _) -> do 
@@ -1241,8 +1275,8 @@ mkRelExp 1 =
         (i,j,n,p,m) = (Id i', Id j', Id n', Id p', Id m')
         one = Val (IntVal 1)
         min_p_nm1 = MaxMin True [p, SMinus n one]
-        hash = HM.fromList $ [ (identName n', ( 1::Int, Just (Val (IntVal 1)), Nothing ) )
-                             , (identName i', ( 5::Int, Just (Val (IntVal 0)), Just min_p_nm1 ) )
+        hash = HM.fromList $ [ -- (identName n', ( 1::Int, Just (Val (IntVal 1)), Nothing ) ),
+                               (identName i', ( 5::Int, Just (Val (IntVal 0)), Just min_p_nm1 ) )
                              , (identName j', ( 9::Int, Just (Val (IntVal 0)), Just i ) )
                              ] -- HM.HashMap VName (Int, Maybe ScalExp, Maybe ScalExp)
         ij_p_j_p_1_m_m = SMinus (SPlus (STimes i j) (SPlus j one)) m
