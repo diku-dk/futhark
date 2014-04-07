@@ -1,7 +1,9 @@
 Since the paper "A T2 Graph-Reduction Approach To Fusion" was written,
-the L0-language and compiler has changed.  This file attempts to
+the Futhark language and compiler has changed.  This file attempts to
 document the changes in order for the paper to remain a usable
 resource.
+
+(Most notably, the language was called "L0" in the paper.)
 
 Language changes
 ---
@@ -13,7 +15,7 @@ Language changes
     syntax has likewise changed: the type of the just mentioned tuple
     would be {int,int,int}.  This is motivated by enabling
     singleton-tuples, which makes some transformations more
-    convenience.
+    convenient.
 
   * map2, reduce2, filter2, scan2 and redomap2 are now named mapT,
     reduceT, filterT, scanT, redomapT.  The old nomenclature was

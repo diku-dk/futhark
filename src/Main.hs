@@ -1,4 +1,4 @@
--- | L0 Compiler Driver
+-- | Futhark Compiler Driver
 module Main (main) where
 
 import Control.Monad
@@ -13,70 +13,70 @@ import System.IO
 
 import Text.Printf
 
-import Language.L0.Core
-import Language.L0.Parser
-import L0C.Internalise
-import L0C.Externalise
-import L0C.Pipeline
+import Language.Futhark.Core
+import Language.Futhark.Parser
+import Futhark.Internalise
+import Futhark.Externalise
+import Futhark.Pipeline
 
-import qualified L0C.ExternalRep as E
-import qualified L0C.ExternalRep.TypeChecker as E
-import qualified L0C.ExternalRep.Renamer as E
+import qualified Futhark.ExternalRep as E
+import qualified Futhark.ExternalRep.TypeChecker as E
+import qualified Futhark.ExternalRep.Renamer as E
 
-import qualified L0C.InternalRep as I
-import qualified L0C.InternalRep.TypeChecker as I
+import qualified Futhark.InternalRep as I
+import qualified Futhark.InternalRep.TypeChecker as I
 
-import L0C.Interpreter
-import L0C.EnablingOpts.EnablingOptDriver
-import L0C.HOTrans.HOTransDriver
-import qualified L0C.FirstOrderTransform as FOT
-import qualified L0C.Rebinder as RB
-import qualified L0C.IndexInliner as II
-import qualified L0C.SOACFlowGraph as FG
-import L0C.Untrace
-import qualified L0C.Backends.SequentialC as SequentialC
-import qualified L0C.Backends.Bohrium as Bohrium
-import L0C.SplitAssertions
+import Futhark.Interpreter
+import Futhark.EnablingOpts.EnablingOptDriver
+import Futhark.HOTrans.HOTransDriver
+import qualified Futhark.FirstOrderTransform as FOT
+import qualified Futhark.Rebinder as RB
+import qualified Futhark.IndexInliner as II
+import qualified Futhark.SOACFlowGraph as FG
+import Futhark.Untrace
+import qualified Futhark.Backends.SequentialC as SequentialC
+import qualified Futhark.Backends.Bohrium as Bohrium
+import Futhark.SplitAssertions
 
-newL0Config :: L0Config
-newL0Config = L0Config {
-                l0pipeline = []
-              , l0action = printAction
-              , l0checkAliases = True
-              , l0verbose = Nothing
-              , l0boundsCheck = True
+newFutharkonfig :: Futharkonfig
+newFutharkonfig = Futharkonfig {
+                futharkpipeline = []
+              , futharkaction = printAction
+              , futharkcheckAliases = True
+              , futharkverbose = Nothing
+              , futharkboundsCheck = True
               }
 
-type L0Option = OptDescr (L0Config -> L0Config)
+type FutharkOption = OptDescr (Futharkonfig -> Futharkonfig)
 
-commandLineOptions :: [L0Option]
+commandLineOptions :: [FutharkOption]
 commandLineOptions =
   [ Option "V" ["verbose"]
-    (OptArg (\file opts -> opts { l0verbose = Just file }) "FILE")
+    (OptArg (\file opts -> opts { futharkverbose = Just file }) "FILE")
     "Print verbose output on standard error; wrong program to FILE."
   , Option [] ["inhibit-uniqueness-checking"]
-    (NoArg $ \opts -> opts { l0checkAliases = False })
+    (NoArg $ \opts -> opts { futharkcheckAliases = False })
     "Don't check that uniqueness constraints are being upheld."
   , Option [] ["compile-sequential"]
-    (NoArg $ \opts -> opts { l0action = seqCodegenAction })
+    (NoArg $ \opts -> opts { futharkaction = seqCodegenAction })
     "Translate program into sequential C and write it on standard output."
   , Option [] ["compile-bohrium"]
-    (NoArg $ \opts -> opts { l0action = bohriumCodegenAction })
+    (NoArg $ \opts -> opts { futharkaction = bohriumCodegenAction })
     "Translate program into C using Bohrium and write it on standard output."
   , Option [] ["generate-flow-graph"]
-    (NoArg $ \opts -> opts { l0action = flowGraphAction })
+    (NoArg $ \opts -> opts { futharkaction = flowGraphAction })
     "Print the SOAC flow graph of the final program."
   , Option "p" ["print"]
-    (NoArg $ \opts -> opts { l0action = printAction })
+    (NoArg $ \opts -> opts { futharkaction = printAction })
     "Prettyprint the resulting internal representation on standard output (default action)."
   , Option "i" ["interpret"]
-    (NoArg $ \opts -> opts { l0action = interpretAction })
+    (NoArg $ \opts -> opts { futharkaction = interpretAction })
     "Run the program via an interpreter."
   , Option [] ["externalise"]
-    (NoArg $ \opts -> opts { l0action = externaliseAction})
+    (NoArg $ \opts -> opts { futharkaction = externaliseAction})
     "Prettyprint the resulting external representation on standard output."
   , Option [] ["no-bounds-checking"]
-    (NoArg $ \opts -> opts { l0boundsCheck = False })
+    (NoArg $ \opts -> opts { futharkboundsCheck = False })
     "Do not perform bounds checking in the generated program."
   , hoistOpt "o" ["hoist"]
   , uttransformOpt "u" ["untrace"]
@@ -86,7 +86,7 @@ commandLineOptions =
   , hotransformOpt "h" ["higher-order-optimizations"]
   , inlinetransformOpt [] ["inline-functions"]
   , Option "s" ["standard"]
-    (NoArg $ \opts -> opts { l0pipeline = standardPipeline ++ l0pipeline opts })
+    (NoArg $ \opts -> opts { futharkpipeline = standardPipeline ++ futharkpipeline opts })
     "Use the recommended optimised pipeline."
   , splitasserttransformOpt [] ["split-assertions"]
   ]
@@ -185,46 +185,46 @@ standardPipeline =
   , hoist,       hotransform, eotransform
   ]
 
-passoption :: String -> Pass -> String -> [String] -> L0Option
+passoption :: String -> Pass -> String -> [String] -> FutharkOption
 passoption desc pass short long =
   Option short long
-  (NoArg $ \opts -> opts { l0pipeline = pass : l0pipeline opts })
+  (NoArg $ \opts -> opts { futharkpipeline = pass : futharkpipeline opts })
   desc
 
-hoistOpt :: String -> [String] -> L0Option
+hoistOpt :: String -> [String] -> FutharkOption
 hoistOpt =
   passoption "Rebinder - hoisting, CSE, dependency graph compression." hoist
 
-fotransformOpt :: String -> [String] -> L0Option
+fotransformOpt :: String -> [String] -> FutharkOption
 fotransformOpt =
   passoption "Transform all second-order array combinators to for-loops."
   fotransform
 
-uttransformOpt :: String -> [String] -> L0Option
+uttransformOpt :: String -> [String] -> FutharkOption
 uttransformOpt =
   passoption "Remove debugging annotations from program." uttransform
 
-eotransformOpt :: String -> [String] -> L0Option
+eotransformOpt :: String -> [String] -> FutharkOption
 eotransformOpt =
   passoption "Perform simple enabling optimisations."
   eotransform
 
-iitransformOpt :: String -> [String] -> L0Option
+iitransformOpt :: String -> [String] -> FutharkOption
 iitransformOpt =
   passoption "Inline indexing into maps."
   iitransform
 
-hotransformOpt :: String -> [String] -> L0Option
+hotransformOpt :: String -> [String] -> FutharkOption
 hotransformOpt =
   passoption "Perform higher-order optimisation, i.e., fusion."
   hotransform
 
-inlinetransformOpt :: String -> [String] -> L0Option
+inlinetransformOpt :: String -> [String] -> FutharkOption
 inlinetransformOpt =
   passoption "Aggressively inline and remove dead functions."
   inlinetransform
 
-splitasserttransformOpt :: String -> [String] -> L0Option
+splitasserttransformOpt :: String -> [String] -> FutharkOption
 splitasserttransformOpt =
   passoption "Split certificates from main computation"
   splitasserttransform
@@ -234,7 +234,7 @@ splitasserttransformOpt =
 main :: IO ()
 main = do args <- getArgs
           case getOpt RequireOrder commandLineOptions args of
-            (opts, [file], []) -> compiler (foldl (.) id opts newL0Config) file
+            (opts, [file], []) -> compiler (foldl (.) id opts newFutharkonfig) file
             (_, _, errs)       -> usage errs
 
 usage :: [String] -> IO ()
@@ -245,53 +245,53 @@ usage errs = do
   hPutStr stderr $ usageInfo (prog ++ " [options] <file>") commandLineOptions
   exitWith $ ExitFailure 1
 
-compiler :: L0Config -> FilePath -> IO ()
+compiler :: Futharkonfig -> FilePath -> IO ()
 compiler config file = do
   contents <- readFile file
-  let (msgs, res) = l0c config file contents
+  let (msgs, res) = futharkc config file contents
   hPutStr stderr msgs
   case res of
     Left err -> do
       hPutStrLn stderr $ errorDesc err
-      case (errorProg err, l0verbose config) of
+      case (errorProg err, futharkverbose config) of
         (Just prog, Just outfile) ->
           maybe (hPutStr stderr) writeFile outfile $
             I.prettyPrint prog ++ "\n"
         _ -> return ()
       exitWith $ ExitFailure 2
     Right prog -> do
-      let (actiondesc, action) = l0action config
+      let (actiondesc, action) = futharkaction config
       when (verbose config) $
         hPutStrLn stderr $ "Running " ++ actiondesc ++ "."
       action prog
 
 typeCheck :: (prog -> Either err prog')
           -> (prog -> Either err prog')
-          -> L0Config
+          -> Futharkonfig
           -> prog -> Either err prog'
 typeCheck checkProg checkProgNoUniqueness config
-  | l0checkAliases config = checkProg
+  | futharkcheckAliases config = checkProg
   | otherwise             = checkProgNoUniqueness
 
-l0c :: L0Config -> FilePath -> String -> (String, Either CompileError I.Prog)
-l0c config filename srccode =
-  case runWriter (runErrorT l0c') of
+futharkc :: Futharkonfig -> FilePath -> String -> (String, Either CompileError I.Prog)
+futharkc config filename srccode =
+  case runWriter (runErrorT futharkc') of
     (Left err, msgs) -> (msgs, Left err)
     (Right prog, msgs) -> (msgs, Right prog)
-  where l0c' = do
-          parsed_prog <- canFail "" Nothing $ parseL0 filename srccode
+  where futharkc' = do
+          parsed_prog <- canFail "" Nothing $ parseFuthark filename srccode
           ext_prog    <- canFail "" Nothing $
                          typeCheck E.checkProg E.checkProgNoUniqueness config
                          parsed_prog
-          let int_prog = internaliseProg (l0boundsCheck config) $ E.tagProg ext_prog
+          let int_prog = internaliseProg (futharkboundsCheck config) $ E.tagProg ext_prog
           int_prog_checked <- canFail "After internalisation:\n" (Just int_prog) $
                               typeCheck I.checkProg I.checkProgNoUniqueness config
                               int_prog
           runPasses config int_prog_checked
 
-canFail :: Show err => String -> Maybe I.Prog -> Either err a -> L0CM a
+canFail :: Show err => String -> Maybe I.Prog -> Either err a -> FutharkM a
 canFail d p (Left err) = compileError (d ++ show err) p
 canFail _ _ (Right v)  = return v
 
-liftPass :: Show err => (I.Prog -> Either err a) -> I.Prog -> L0CM a
+liftPass :: Show err => (I.Prog -> Either err a) -> I.Prog -> FutharkM a
 liftPass f p = canFail "" (Just p) (f p)

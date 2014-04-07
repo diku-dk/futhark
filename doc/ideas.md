@@ -1,4 +1,4 @@
-Put ideas for L0 extensions/optimisations here.
+Put ideas for Futhark extensions/optimisations here.
 
 Shift operation
 ---------------

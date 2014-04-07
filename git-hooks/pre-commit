@@ -1,12 +1,12 @@
 #!/bin/sh
 #
-# l0c pre-commit hook for quality-checking the commit.
+# Futhark pre-commit hook for quality-checking the commit.
 #
 # This hook checks the following:
 #
 #   * Trailing whitespace.
 #   * Runs hlint.
-#   * Tries to compile l0c.
+#   * Tries to compile Futhark.
 #
 # It also yells at you to run the test suite, although it doesn't do
 # it by itself.
@@ -31,7 +31,7 @@ hlintable() {
     ! egrep -q '{-# LANGUAGE.*QuasiQuotes' $1
 }
 
-l0_hlint() {
+futhark_hlint() {
     # Some hlint-suggestions are terrible, so ignore them here.
     hlint -i "Reduce duplication" -i "Use import/export shortcut" "$@"
 }
@@ -41,7 +41,7 @@ for file in $(git diff-index --cached --name-only HEAD | egrep '\.l?hsc?$'); do
     if [ -f $file ]; then
         if hlintable $file; then
             echo "Checking $file with hlint:"
-            if ! l0_hlint "$file"; then
+            if ! futhark_hlint "$file"; then
                 fail
             fi
         fi
