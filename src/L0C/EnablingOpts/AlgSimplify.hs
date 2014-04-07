@@ -162,9 +162,9 @@ gaussAllLTH0 syms sofp = do
                                          (NSum ((NProd (t:fs) tp):terms) tp) ) mmts
             mms     <- mapM (gaussAllLTH0 syms) mm_terms
             let mm_geq0 = foldl (\r x-> if ismin then SLogOr  r x else SLogAnd r x)
-                                (Val (LogVal      ismin )) mms
+                                (Val (LogVal (not ismin))) mms
             let mm_lth0 = foldl (\r x-> if ismin then SLogAnd r x else SLogOr  r x) 
-                                (Val (LogVal (not ismin))) mms 
+                                (Val (LogVal      ismin )) mms 
             return $ SLogOr (SLogAnd fs_geq0 mm_geq0) (SLogAnd fs_lth0 mm_lth0)
              
         Just _ -> badAlgSimplifyM $ SimplifyError pos "gaussOneLTH0: (Just MinMax) invariant violated!"
