@@ -97,15 +97,21 @@ bindParams :: [Param] -> CPropM a -> CPropM a
 bindParams params =
   localVtable $ \vtable ->
     let vtable' = foldr (ST.insert' . identName) vtable params
-    in foldr ST.cannotBeNegative vtable' sizevars
+    in foldr (`ST.isAtLeast` 0) vtable' sizevars
   where sizevars = mapMaybe isVar $ concatMap (arrayDims . identType) params
         isVar (Var v) = Just $ identName v
         isVar _       = Nothing
 
 bindLoopVar :: Ident -> SubExp -> CPropM a -> CPropM a
 bindLoopVar var upper =
-  localVtable $ ST.insertBounded (identName var) (Just one, Just upper)
-  where one = Constant (BasicVal $ IntVal 1) $ srclocOf var
+  localVtable $ clampUpper . clampVar
+  where -- If we enter the loop, then 'var' is at least zero, and at
+        -- most 'upper'-1 (so this is not completely tight - FIXME).
+        clampVar = ST.insertBounded (identName var) (Just zero, Just upper)
+        -- If we enter the loop, then 'upper' is at least one.
+        clampUpper = case upper of Var v -> ST.isAtLeast (identName v) 1
+                                   _     -> id
+        zero = Constant (BasicVal $ IntVal 0) $ srclocOf var
 
 -- | Applies Copy/Constant Propagation and Folding to an Entire Program.
 copyCtProp :: Prog -> Either EnablingOptError (Bool, Prog)

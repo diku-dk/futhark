@@ -12,7 +12,7 @@ module Futhark.EnablingOpts.SymbolTable
   , Bounds
   , insertBounded
   , updateBounds
-  , cannotBeNegative
+  , isAtLeast
   , lookup
   , CtOrId(..)
   )
@@ -168,8 +168,6 @@ setLowerBound name bound vtable =
                        oldUpperBound)
                   }
 
-cannotBeNegative :: VName -> SymbolTable -> SymbolTable
-cannotBeNegative name vtable =
-  vtable { bindings = HM.adjust cannotBeNegative' name $ bindings vtable }
-  where cannotBeNegative' bind =
-          bind { valueRange = (Just $ Val (IntVal 0), snd $ valueRange bind) }
+isAtLeast :: VName -> Int -> SymbolTable -> SymbolTable
+isAtLeast name x =
+  setLowerBound name $ Val $ IntVal x
