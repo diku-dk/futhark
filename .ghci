@@ -1,1 +1,1 @@
-:set -isrc -idist/build/autogen -idist/build/l0c/l0c-tmp/ -optP-include -optPdist/build/autogen/cabal_macros.h -hide-package language-c -hide-package monads-tf -fdefer-type-errors
+:set -isrc -idist/build/autogen -idist/build/futhark/futhark-tmp/ -optP-include -optPdist/build/autogen/cabal_macros.h -hide-package language-c -hide-package monads-tf -fdefer-type-errors
