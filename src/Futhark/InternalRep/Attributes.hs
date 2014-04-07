@@ -542,6 +542,8 @@ typeOf (Apply _ _ t _) = t
 typeOf (Index _ ident idx _) =
   [stripArray (length idx) (varType ident)
    `changeAliases` HS.insert (identName ident)]
+typeOf (Update _ src _ _ _) =
+  [identType src `setAliases` HS.empty]
 typeOf (Iota ne _) =
   [arrayOf (Basic Int) (Shape [ne]) Unique]
 typeOf (Replicate ne e _) =
@@ -627,8 +629,6 @@ progNames = execWriter . mapM funNames . progFunctions
 
         bodyNames = mapM_ bindingNames . bodyBindings
 
-        bindingNames (LetWith _ dest _ _ _) =
-          one dest
         bindingNames (Let pat e) =
           mapM_ one pat >> expNames e
         bindingNames (DoLoop pat i _ loopbody) =
@@ -698,13 +698,6 @@ freeWalker = identityWalker {
           binding (HS.fromList pat) $ do
             mapM_ (typeFree . identType) pat
             bodyFree $ Body bnds res
-        bodyFree (Body (LetWith cs dest src idxs ve:bnds) res) = do
-          mapM_ identFree cs
-          identFree src
-          mapM_ subExpFree idxs
-          typeFree $ identType dest
-          subExpFree ve
-          binding (HS.singleton dest) $ bodyFree $ Body bnds res
         bodyFree (Body (DoLoop merge i boundexp loopbody:bnds) res) = do
           let (mergepat, mergeexps) = unzip merge
           mapM_ subExpFree mergeexps
@@ -746,17 +739,10 @@ consumedInBody :: Body -> HS.HashSet VName
 consumedInBody = execWriter . bodyConsumed
   where unconsume s = censor (`HS.difference` s)
 
-        consume ident =
-          tell $ identName ident `HS.insert` aliases (identType ident)
-
         bodyConsumed (Body [] _) = return ()
         bodyConsumed (Body (Let pat e:bnds) res) = do
           expConsumed e
           unconsume (HS.fromList $ map identName pat) $
-            bodyConsumed $ Body bnds res
-        bodyConsumed (Body (LetWith _ dest src _ _:bnds) res) = do
-          consume src
-          unconsume (HS.singleton $ identName dest) $
             bodyConsumed $ Body bnds res
         bodyConsumed (Body (DoLoop pat _ _ loopbody:bnds) res) =
           unconsume (HS.fromList (map (identName . fst) pat)) $ do
@@ -772,6 +758,8 @@ consumedInExp (Apply _ args _ _) =
   mconcat $ map (consumeArg . first subExpType) args
   where consumeArg (t, Consume) = aliases t
         consumeArg (_, Observe) = mempty
+consumedInExp (Update _ src _ _ _) =
+  identName src `HS.insert` aliases (identType src)
 consumedInExp (If _ tb fb _ _) = consumedInBody tb <> consumedInBody fb
 consumedInExp _ = mempty
 

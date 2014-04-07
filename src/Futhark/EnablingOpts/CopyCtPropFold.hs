@@ -13,8 +13,6 @@ import Data.Maybe
 
 import Data.Loc
 
-import qualified Data.HashSet      as HS
-
 import Futhark.InternalRep
 import Futhark.EnablingOpts.EnablingOptErrors
 import qualified Futhark.EnablingOpts.SymbolTable as ST
@@ -65,18 +63,6 @@ changed :: a -> CPropM a
 changed x = do
   tell $ CPropRes True
   return x
-
--- | The identifier was consumed, and should not be used within the
--- body, so mark it and any aliases as nonremovable (with
--- 'nonRemovable') and delete any expressions using it or an alias
--- from the symbol table.
-consuming :: Ident -> CPropM a -> CPropM a
-consuming idd m = do
-  vtable <- ST.filter ok <$> asks envVtable
-  local (\e -> e { envVtable = vtable }) m
-  where als = identName idd `HS.insert` aliases (identType idd)
-        ok entry  = HS.null $ als `HS.intersection`
-                    maybe HS.empty freeNamesInExp (ST.asExp entry)
 
 -- | The enabling optimizations run in this monad.  Note that it has no mutable
 -- state, but merely keeps track of current bindings in a 'TypeEnv'.
@@ -146,16 +132,6 @@ copyCtPropOneLambda prog lam = do
 --------------------------------------------------------------------
 
 copyCtPropBody :: Body -> CPropM Body
-
-copyCtPropBody (Body (LetWith cs dest src inds el:bnds) res) = do
-  src' <- copyCtPropIdent src
-  consuming src' $ do
-    cs'             <- copyCtPropCerts cs
-    el'             <- copyCtPropSubExp el
-    inds'           <- mapM copyCtPropSubExp inds
-    dest'           <- copyCtPropBnd dest
-    Body bnds' res' <- copyCtPropBody $ Body bnds res
-    return $ Body (LetWith cs' dest' src' inds' el' :bnds') res'
 
 copyCtPropBody (Body (Let pat e:bnds) res) = do
   pat' <- copyCtPropPat pat

@@ -102,11 +102,6 @@ instance Pretty Body where
                         If {} -> True
                         ArrayLit {} -> False
                         _ -> False
-  ppr (Body (LetWith cs dest src idxs ve:bnds) res) =
-    text "let" <+> ppCertificates cs <> ppBinding dest <+> equals <+> ppr src <+>
-    text "with" <+> brackets (commasep (map ppr idxs)) <+>
-    text "<-" <+> align (ppr ve) <+>
-    text "in" </> ppr (Body bnds res)
   ppr (Body (DoLoop mergepat i bound loopbody:bnds) res) =
     aliasComment pat $
     text "loop" <+> parens (ppPattern pat <+> equals <+> ppTuple' initexp) <+>
@@ -141,6 +136,10 @@ instance Pretty Exp where
   ppr (Index cs v idxs _) =
     ppCertificates cs <> ppr v <>
     brackets (commasep (map ppr idxs))
+  ppr (Update cs src idxs ve _) =
+    ppCertificates cs <> ppr src <+>
+    text "with" <+> brackets (commasep (map ppr idxs)) <+>
+    text "<-" <+> align (ppr ve)
   ppr (Iota e _) = text "iota" <> parens (ppr e)
   ppr (Replicate ne ve _) =
     text "replicate" <> apply [ppr ne, align (ppr ve)]

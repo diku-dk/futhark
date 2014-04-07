@@ -204,7 +204,7 @@ letBind pat e =
 letWithBind :: MonadBinder m =>
                Certificates -> Ident -> Ident -> [SubExp] -> SubExp -> m ()
 letWithBind cs dest src idxs ve =
-  addBinding $ LetWith cs dest src idxs ve
+  addBinding $ Let [dest] $ Update cs src idxs ve $ srclocOf src
 
 loopBind :: MonadBinder m => [(Ident, SubExp)] -> Ident -> SubExp -> Body -> m ()
 loopBind pat i bound loopbody =

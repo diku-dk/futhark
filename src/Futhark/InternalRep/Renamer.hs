@@ -112,15 +112,6 @@ instance Rename Result where
 
 instance Rename Body where
   rename (Body [] res) = Body [] <$> rename res
-  rename (Body (LetWith cs dest src idxs ve:bnds) res) = do
-    cs' <- mapM rename cs
-    src' <- rename src
-    idxs' <- mapM rename idxs
-    ve' <- rename ve
-    bind [dest] $ do
-      dest' <- rename dest
-      Body bnds' res' <- rename $ Body bnds res
-      return $ Body (LetWith cs' dest' src' idxs' ve':bnds') res'
   rename (Body (Let pat e:bnds) res) = do
     e1' <- rename e
     bind pat $ do

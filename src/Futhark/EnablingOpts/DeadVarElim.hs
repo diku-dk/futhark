@@ -11,7 +11,6 @@ import Control.Monad.Reader
 import Control.Monad.Writer
 
 import qualified Data.Set as S
-import Data.Loc
 
 import Futhark.InternalRep
 
@@ -124,25 +123,6 @@ deadCodeElimBody (Body (Let pat e:bnds) res) = do
   then changed $ return $ Body bnds' res'
   else do e' <- deadCodeElimExp e
           return $ Body (Let pat' e':bnds') res'
-
-deadCodeElimBody (Body (LetWith cs dest src idxs el:bnds) res) = do
-  cs' <- mapM deadCodeElimIdent cs
-  (Body bnds' res', noref) <- collectRes [identName dest] $
-                              binding [identName dest] $
-                              deadCodeElimBody $ Body bnds res
-  if noref
-  then changed $ return $ Body bnds' res'
-  else do
-    let srcnm = identName src
-    in_vtab <- asks $ S.member srcnm . envVtable
-    if not in_vtab
-    then badDCElimM $ VarNotInFtab (srclocOf src) srcnm
-    else do _ <- tell $ DCElimRes False (S.insert srcnm S.empty)
-            idxs' <- mapM deadCodeElimSubExp idxs
-            el'   <- deadCodeElimSubExp el
-            src'  <- deadCodeElimIdent src
-            dest' <- deadCodeElimBnd dest
-            return $ Body (LetWith cs' dest' src' idxs' el':bnds') res'
 
 deadCodeElimBody (Body (DoLoop merge idd n loopbdy:bnds) res) = do
   let (mergepat, mergeexp) = unzip merge

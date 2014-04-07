@@ -41,11 +41,6 @@ externaliseBody (I.Body (I.Let pat e:bnds) res) =
   E.LetPat (externalisePat pat loc) (externaliseExp e)
            (externaliseBody $ I.Body bnds res) loc
   where loc = srclocOf e
-externaliseBody (I.Body (I.LetWith cs dest src idxs ve:bnds) res) =
-  E.LetWith (externaliseCerts cs) (externaliseIdent dest) (externaliseIdent src)
-            (Just []) (map externaliseSubExp idxs)
-            (externaliseSubExp ve) (externaliseBody $ I.Body bnds res) $
-            srclocOf dest
 externaliseBody (I.Body (I.DoLoop merge i bound loopbody:bnds) res) =
   E.DoLoop (externalisePat mergepat loc) (externaliseSubExps mergeexp loc)
            (externaliseIdent i) (externaliseSubExp bound)
@@ -87,6 +82,11 @@ externaliseExp (I.Index cs src idxs loc) =
           (Just [])
           (map externaliseSubExp idxs)
           loc
+externaliseExp (I.Update cs src idxs ve loc) =
+  E.LetWith (externaliseCerts cs) (externaliseIdent src) (externaliseIdent src)
+            (Just []) (map externaliseSubExp idxs)
+            (externaliseSubExp ve) (E.Var $ externaliseIdent src)
+            loc
 externaliseExp (I.Split cs ne ae _ loc) =
   E.Split (externaliseCerts cs)
           (externaliseSubExp ne)

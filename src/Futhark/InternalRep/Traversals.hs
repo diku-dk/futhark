@@ -96,12 +96,6 @@ mapBodyM tv (Body (Let pat e:bnds) res) = do
   bnd <- Let <$> mapM (mapOnIdent tv) pat <*> mapOnExp tv e
   Body bnds' res' <- mapOnBody tv $ Body bnds res
   return $ Body (bnd:bnds') res'
-mapBodyM tv (Body (LetWith cs dest src idxexps vexp:bnds) res) = do
-  bnd <- LetWith <$> mapOnCertificates tv cs <*>
-         mapOnIdent tv dest <*> mapOnIdent tv src <*>
-         mapM (mapOnSubExp tv) idxexps <*> mapOnSubExp tv vexp
-  Body bnds' res' <- mapOnBody tv $ Body bnds res
-  return $ Body (bnd:bnds') res'
 mapBodyM tv (Body (DoLoop mergepat loopvar boundexp loopbody:bnds) res) = do
   bnd <- DoLoop <$>
          (zip <$> mapM (mapOnIdent tv) vs <*> mapM (mapOnSubExp tv) es) <*>
@@ -144,6 +138,11 @@ mapExpM tv (Index cs arr idxexps loc) =
        mapOnIdent tv arr <*>
        mapM (mapOnSubExp tv) idxexps <*>
        pure loc
+mapExpM tv (Update cs src idxexps vexp loc) =
+  Update <$> mapOnCertificates tv cs <*>
+         mapOnIdent tv src <*>
+         mapM (mapOnSubExp tv) idxexps <*> mapOnSubExp tv vexp <*>
+         pure loc
 mapExpM tv (Iota nexp loc) =
   pure Iota <*> mapOnSubExp tv nexp <*> pure loc
 mapExpM tv (Replicate nexp vexp loc) =
