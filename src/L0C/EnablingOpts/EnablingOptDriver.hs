@@ -29,7 +29,7 @@ import Debug.Trace
 enablingOpts :: Prog -> Either EnablingOptError Prog
 enablingOpts prog0 = do
     scal <- canSimplify 1
-    let str = ppScalExp scal
+    let str = "Predicate Result is: "++ppScalExp scal
     let prog = trace str prog0  
     prog_enopt1 <- normCopyDeadOpts prog
     prog_enopt2 <- normCopyDeadOpts prog_enopt1
