@@ -44,6 +44,7 @@ newL0Config = L0Config {
               , l0action = printAction
               , l0checkAliases = True
               , l0verbose = Nothing
+              , l0boundsCheck = True
               }
 
 type L0Option = OptDescr (L0Config -> L0Config)
@@ -74,6 +75,9 @@ commandLineOptions =
   , Option [] ["externalise"]
     (NoArg $ \opts -> opts { l0action = externaliseAction})
     "Prettyprint the resulting external representation on standard output."
+  , Option [] ["no-bounds-checking"]
+    (NoArg $ \opts -> opts { l0boundsCheck = False })
+    "Do not perform bounds checking in the generated program."
   , hoistOpt "o" ["hoist"]
   , uttransformOpt "u" ["untrace"]
   , fotransformOpt "f" ["first-order-transform"]
@@ -111,12 +115,10 @@ interpret prog =
     Nothing -> do hPutStrLn stderr "Interpreter error: no main function."
                   exitWith $ ExitFailure 2
     Just _ -> do
-      inputLines <- liftM lines getContents
-      args <- forM inputLines $ \line ->
-                case parseValue "<stdin>" line of
-                  Left e -> do hPutStrLn stderr $ "Read error: " ++ show e
-                               exitWith $ ExitFailure 2
-                  Right v -> return v
+      parseres <- liftM (parseValues "<stdin>") getContents
+      args <- case parseres of Left e -> do hPutStrLn stderr $ "Read error: " ++ show e
+                                            exitWith $ ExitFailure 2
+                               Right vs -> return vs
       let (res, trace) = runFun I.defaultEntryPoint (internaliseParamValues args) prog
       forM_ trace $ \(loc, what) ->
         hPutStrLn stderr $ locStr loc ++ ": " ++ what
@@ -281,7 +283,7 @@ l0c config filename srccode =
           ext_prog    <- canFail "" Nothing $
                          typeCheck E.checkProg E.checkProgNoUniqueness config
                          parsed_prog
-          let int_prog = internaliseProg $ E.tagProg ext_prog
+          let int_prog = internaliseProg (l0boundsCheck config) $ E.tagProg ext_prog
           int_prog_checked <- canFail "After internalisation:\n" (Just int_prog) $
                               typeCheck I.checkProg I.checkProgNoUniqueness config
                               int_prog

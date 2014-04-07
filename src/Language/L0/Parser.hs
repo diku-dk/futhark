@@ -14,6 +14,7 @@ module Language.L0.Parser
   , parseArray
   , parseTuple
   , parseValue
+  , parseValues
 
   , parseExpIncr
   , parseExpIncrIO
@@ -134,11 +135,10 @@ parseArray = parse arrayValue
 -- | Parse any L0 value from the given 'String', using the 'FilePath'
 -- as the source name for error messages.
 parseValue :: FilePath -> String -> Either ParseError Value
-parseValue file s = msum $ map (\f -> f file s)
-                    [parseInt,
-                     parseReal,
-                     parseBool,
-                     parseChar,
-                     parseString,
-                     parseArray,
-                     parseTuple]
+parseValue = parse anyValue
+
+-- | Parse several L0 values (separated by anything) from the given
+-- 'String', using the 'FilePath' as the source name for error
+-- messages.
+parseValues :: FilePath -> String -> Either ParseError [Value]
+parseValues = parse anyValues

@@ -55,11 +55,13 @@ import L0C.Substitute
 
 import Prelude hiding (mapM)
 
--- | Convert a program in external L0 to a program in internal L0.
-internaliseProg :: E.Prog -> I.Prog
-internaliseProg prog =
+-- | Convert a program in external L0 to a program in internal L0.  If
+-- the boolean parameter is false, do not add bounds checks to array
+-- indexing.
+internaliseProg :: Bool -> E.Prog -> I.Prog
+internaliseProg doBoundsCheck prog =
   I.renameProg $
-  I.Prog $ runInternaliseM prog $ liftM concat $
+  I.Prog $ runInternaliseM doBoundsCheck prog $ liftM concat $
            mapM (split <=< internaliseFun) $ E.progFunctions prog
   where split fun = do (sfun@(_,srettype,_,_,_), vfun) <- splitFunction fun
                        if null srettype
@@ -518,7 +520,11 @@ certifyFoldSOAC _ _ e =
 
 boundsChecks :: [I.Ident] -> [I.SubExp] -> InternaliseM I.Certificates
 boundsChecks []    _  = return []
-boundsChecks (v:_) es = zipWithM (boundsCheck v) [0..] es
+boundsChecks (v:_) es = do
+  doBoundsChecks <- asks envDoBoundsChecks
+  if doBoundsChecks
+  then zipWithM (boundsCheck v) [0..] es
+  else return []
 
 boundsCheck :: I.Ident -> Int -> I.SubExp -> InternaliseM I.Ident
 boundsCheck v i e = do

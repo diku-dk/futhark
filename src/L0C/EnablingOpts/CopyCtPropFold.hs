@@ -1,5 +1,4 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-
 module L0C.EnablingOpts.CopyCtPropFold
   ( copyCtProp
   , copyCtPropOneLambda
@@ -10,10 +9,10 @@ import Control.Applicative
 import Control.Monad.RWS
 
 import Data.List
+import Data.Maybe
 
 import Data.Loc
 
-import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet      as HS
 
 import L0C.InternalRep
@@ -73,12 +72,11 @@ changed x = do
 -- from the symbol table.
 consuming :: Ident -> CPropM a -> CPropM a
 consuming idd m = do
-  (vtable, _) <- spartition ok <$> asks envVtable
+  vtable <- ST.filter ok <$> asks envVtable
   local (\e -> e { envVtable = vtable }) m
   where als = identName idd `HS.insert` aliases (identType idd)
-        spartition f s = let s' = HM.filter f s
-                         in (s', s `HM.difference` s')
-        ok entry  = HS.null $ als `HS.intersection` freeNamesInExp (ST.asExp entry)
+        ok entry  = HS.null $ als `HS.intersection`
+                    maybe HS.empty freeNamesInExp (ST.asExp entry)
 
 -- | The enabling optimizations run in this monad.  Note that it has no mutable
 -- state, but merely keeps track of current bindings in a 'TypeEnv'.
@@ -89,21 +87,30 @@ runCPropM  (CPropM a) = runRWST a
 badCPropM :: EnablingOptError -> CPropM a
 badCPropM = CPropM . lift . Left
 
--- | Bind a name as a common (non-merge) variable.
-bindVar :: CPropEnv -> (VName, Exp) -> CPropEnv
-bindVar env (name,e) =
-  env { envVtable = ST.insert name e $ envVtable env }
-
-bindVars :: CPropEnv -> [(VName, Exp)] -> CPropEnv
-bindVars = foldl bindVar
+localVtable :: (ST.SymbolTable -> ST.SymbolTable) -> CPropM a -> CPropM a
+localVtable f = local $ \env -> env { envVtable = f $ envVtable env }
 
 binding :: [(VName, Exp)] -> CPropM a -> CPropM a
-binding bnds = local (`bindVars` bnds)
+binding = localVtable . flip (foldr $ uncurry ST.insert)
+
+bindParams :: [Param] -> CPropM a -> CPropM a
+bindParams params =
+  localVtable $ \vtable ->
+    let vtable' = foldr (ST.insert' . identName) vtable params
+    in foldr ST.cannotBeNegative vtable' sizevars
+  where sizevars = mapMaybe isVar $ concatMap (arrayDims . identType) params
+        isVar (Var v) = Just $ identName v
+        isVar _       = Nothing
+
+bindLoopVar :: Ident -> SubExp -> CPropM a -> CPropM a
+bindLoopVar var upper =
+  localVtable $ ST.insertBounded (identName var) (Just one, Just upper)
+  where one = Constant (BasicVal $ IntVal 1) $ srclocOf var
 
 -- | Applies Copy/Constant Propagation and Folding to an Entire Program.
 copyCtProp :: Prog -> Either EnablingOptError (Bool, Prog)
 copyCtProp prog = do
-  let env = CopyPropEnv { envVtable = HM.empty, program = prog }
+  let env = CopyPropEnv { envVtable = ST.empty, program = prog }
       src = newNameSourceForProg prog
   -- res   <- runCPropM (mapM copyCtPropFun prog) env
   -- let (bs, rs) = unzip res
@@ -111,9 +118,9 @@ copyCtProp prog = do
   return (resSuccess res, Prog rs)
 
 copyCtPropFun :: FunDec -> CPropM FunDec
-copyCtPropFun (fname, rettype, args, body, pos) = do
-  body' <- copyCtPropBody body
-  return (fname, rettype, args, body', pos)
+copyCtPropFun (fname, rettype, params, body, pos) = do
+  body' <- bindParams params $ copyCtPropBody body
+  return (fname, rettype, params, body', pos)
 
 -----------------------------------------------------------------
 ---- Run on Lambda Only!
@@ -121,7 +128,7 @@ copyCtPropFun (fname, rettype, args, body, pos) = do
 
 copyCtPropOneLambda :: Prog -> Lambda -> Either EnablingOptError Lambda
 copyCtPropOneLambda prog lam = do
-  let env = CopyPropEnv { envVtable = HM.empty, program = prog }
+  let env = CopyPropEnv { envVtable = ST.empty, program = prog }
       src = newNameSourceForProg prog
   (res, _, _) <- runCPropM (copyCtPropLambda lam) env src
   return res
@@ -163,7 +170,7 @@ copyCtPropBody (Body (DoLoop merge idd n loopbody:bnds) res) = do
   mergepat' <- copyCtPropPat mergepat
   mergeexp' <- mapM copyCtPropSubExp mergeexp
   n'        <- copyCtPropSubExp n
-  loopbody' <- copyCtPropBody loopbody
+  loopbody' <- bindLoopVar idd n $ copyCtPropBody loopbody
   let merge' = zip mergepat' mergeexp'
       letbody = Body bnds res
   vtable <- asks envVtable
@@ -188,6 +195,17 @@ copyCtPropSubExp (Var ident@(Ident vnm _ pos)) = do
 copyCtPropSubExp (Constant v loc) = return $ Constant v loc
 
 copyCtPropExp :: Exp -> CPropM Exp
+
+copyCtPropExp (If cond tbranch fbranch t loc) = do
+  -- Here, we have to check whether 'cond' puts a bound on some free
+  -- variable, and if so, chomp it.
+  cond' <- copyCtPropSubExp cond
+  tbranch' <- localVtable (ST.updateBounds True cond) $
+              copyCtPropBody tbranch
+  fbranch' <- localVtable (ST.updateBounds False cond) $
+              copyCtPropBody fbranch
+  t' <- mapM copyCtPropType t
+  return $ If cond' tbranch' fbranch' t' loc
 
 -- The simplification engine cannot handle Apply, because it requires
 -- access to the full program.
@@ -267,7 +285,7 @@ copyCtPropCerts = liftM (nub . concat) . mapM check
 copyCtPropLambda :: Lambda -> CPropM Lambda
 copyCtPropLambda (Lambda params body rettype loc) = do
   params' <- copyCtPropPat params
-  body' <- copyCtPropBody body
+  body' <- bindParams params' $ copyCtPropBody body
   rettype' <- mapM copyCtPropType rettype
   return $ Lambda params' body' rettype' loc
 

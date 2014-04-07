@@ -12,11 +12,14 @@ import Control.Monad
 
 import Data.List
 import Data.Loc
+import Data.Maybe
+import qualified Data.HashMap.Lazy as HM
 
 import L0C.ExternalRep as E
 import L0C.InternalRep as I
 import L0C.MonadFreshNames
 import L0C.Tools
+import L0C.Substitute
 
 import L0C.Internalise.Monad
 import L0C.Internalise.AccurateSizes
@@ -107,8 +110,54 @@ internaliseMapLambda internaliseBody ce lam args = do
   (cs,inner_shapes) <- bindMapShapes [ce] shapefun args outer_shape
   let rettype' = addTypeShapes rettype_value $
                  map I.Var inner_shapes
-  return (cs, I.Lambda params value_body rettype' loc)
+  value_body' <- sanitiseValueSlice inner_shapes value_body
+  return (cs, I.Lambda params value_body' rettype' loc)
   where loc = srclocOf lam
+
+sanitiseValueSlice :: [I.Ident] -> I.Body -> InternaliseM I.Body
+sanitiseValueSlice resShapes (I.Body bnds res) = do
+  -- First, we rename any bindings of the currently computed shapes.
+  bnds' <- mapM renameShapeBindings bnds
+  -- Then, we replace any use of the old names.
+  return $ removeSOACCerts $ substituteNames substs $ I.Body bnds' res
+  where substs = HM.fromList $ mapMaybe (uncurry shapeSubst) $
+                 zip resShapes $
+                 concatMap subExpShape (resultSubExps res)
+
+        renameShapeBindings (I.Let pat e) =
+          Let <$> mapM renameShapeBinding pat <*> pure e
+        renameShapeBindings (I.DoLoop merge i bound body) = do
+          mergepat' <- mapM renameShapeBinding mergepat
+          return $ I.DoLoop (zip mergepat' mergeexps) i bound body
+          where (mergepat, mergeexps) = unzip merge
+        renameShapeBindings bnd@(I.LetWith {}) =
+          return bnd
+
+        renameShapeBinding var
+          | isShapeBinding var = newIdent' (const "unused_shape") var
+          | otherwise          = return var
+
+        isShapeBinding = (`HM.member` substs) . I.identName
+
+        shapeSubst resShape (I.Var v) = Just (I.identName v,
+                                              I.identName resShape)
+        shapeSubst _        _         = Nothing
+
+removeSOACCerts :: Body -> Body
+removeSOACCerts (Body bnds res) = Body (map removeCert bnds) res
+  where
+    removeCert (I.Let pat e) =
+      I.Let pat $ case e of
+                    I.Map _ fun arrs loc -> I.Map [] fun arrs loc
+                    I.Reduce _ fun input loc -> I.Reduce [] fun input loc
+                    I.Scan _ fun input loc -> I.Scan [] fun input loc
+                    I.Filter _ fun arrs size loc -> I.Filter [] fun arrs size loc
+                    I.Redomap _ outerfun innerfun acc arrs loc ->
+                      I.Redomap [] outerfun innerfun acc arrs loc
+                    _ -> e
+    removeCert (I.DoLoop merge i bound body) =
+      I.DoLoop merge i bound $ removeSOACCerts body
+    removeCert bnd = bnd
 
 bindMapShapes :: I.Certificates -> I.Lambda -> [I.SubExp] -> SubExp
               -> InternaliseM (I.Certificates, [I.Ident])
