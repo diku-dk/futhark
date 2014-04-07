@@ -169,10 +169,10 @@ fromScalExp loc = runBinder'' . convert
         convert (RelExp LEQ0 x) = eBinOp Leq (convert x) (pure $ zero $ scalExpType x)
                                   (Basic Bool) loc
         convert (MaxMin _ []) = fail "ScalExp.fromScalExp: MaxMin empty list"
-        convert (MaxMin maxOrMin (e:es)) = do
+        convert (MaxMin isMin (e:es)) = do
           e'  <- convert e
           es' <- mapM convert es
-          foldM (select (scalExpType e) maxOrMin) e' es'
+          foldM (select (scalExpType e) isMin) e' es'
 
         arithBinOp bop x y = do
           x' <- convert x
@@ -181,11 +181,11 @@ fromScalExp loc = runBinder'' . convert
           where t = Basic $ scalExpType x
 
         select :: BasicType -> Bool -> Exp -> Exp -> Binder Exp
-        select t getMax cur next =
+        select t isMin cur next =
           let cmp = eBinOp Less (pure cur) (pure next) (Basic t) loc
               (pick, discard)
-                | getMax    = (next, cur)
-                | otherwise = (cur, next)
+                | isMin     = (cur, next)
+                | otherwise = (next, cur)
           in eIf cmp (eBody $ pure pick) (eBody $ pure discard) [Basic t] loc
 
         zero Int = subExp $ Constant (BasicVal $ IntVal 0) loc
@@ -208,5 +208,4 @@ getIds (SLogOr x y)  = getIds x ++ getIds y
 getIds (SLogAnd x y) = getIds x ++ getIds y
 getIds (RelExp LTH0 e) = getIds e
 getIds (RelExp LEQ0 e) = getIds e
-getIds (MaxMin True  es) = concatMap getIds es
-getIds (MaxMin False es) = concatMap getIds es
+getIds (MaxMin _  es) = concatMap getIds es

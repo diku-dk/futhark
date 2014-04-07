@@ -155,7 +155,7 @@ setUpperBound name bound vtable =
           let (oldLowerBound, oldUpperBound) = valueRange bind
           in bind { valueRange =
                       (oldLowerBound,
-                       Just $ maybe bound (MaxMin False . (:[bound])) oldUpperBound)
+                       Just $ maybe bound (MaxMin True . (:[bound])) oldUpperBound)
                   }
 
 setLowerBound :: VName -> ScalExp -> SymbolTable -> SymbolTable
@@ -164,7 +164,7 @@ setLowerBound name bound vtable =
   where setLowerBound' bind =
           let (oldLowerBound, oldUpperBound) = valueRange bind
           in bind { valueRange =
-                      (Just $ maybe bound (MaxMin True . (:[bound])) oldLowerBound,
+                      (Just $ maybe bound (MaxMin False . (:[bound])) oldLowerBound,
                        oldUpperBound)
                   }
 
