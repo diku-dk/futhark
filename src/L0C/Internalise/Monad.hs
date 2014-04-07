@@ -38,6 +38,7 @@ type ShapeTable = HM.HashMap VName [SubExp]
 data InternaliseEnv = InternaliseEnv {
     envSubsts :: HM.HashMap VName [Replacement]
   , envFtable :: HM.HashMap Name FunBinding
+  , envDoBoundsChecks :: Bool
   }
 
 initialFtable :: HM.HashMap Name FunBinding
@@ -55,12 +56,13 @@ instance MonadBinder InternaliseM where
   addBinding      = addBindingWriter
   collectBindings = collectBindingsWriter
 
-runInternaliseM :: E.Prog -> InternaliseM a -> a
-runInternaliseM prog m = fst $ evalState (runReaderT (runWriterT m) newEnv) newState
+runInternaliseM :: Bool -> E.Prog -> InternaliseM a -> a
+runInternaliseM boundsCheck prog m = fst $ evalState (runReaderT (runWriterT m) newEnv) newState
   where newState = E.newNameSourceForProg prog
         newEnv = InternaliseEnv {
                    envSubsts = HM.empty
                  , envFtable = initialFtable `HM.union` ftable
+                 , envDoBoundsChecks = boundsCheck
                  }
         ftable = HM.fromList
                  [ (fname,(rettype, map E.identType params)) |

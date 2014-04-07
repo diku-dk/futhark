@@ -62,6 +62,7 @@ data L0Config = L0Config {
   , l0action :: Action
   , l0checkAliases :: Bool
   , l0verbose :: Maybe (Maybe FilePath)
+  , l0boundsCheck :: Bool
 }
 
 verbose :: L0Config -> Bool
