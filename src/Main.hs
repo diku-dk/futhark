@@ -49,6 +49,12 @@ newFutharkonfig = Futharkonfig {
 
 type FutharkOption = OptDescr (Futharkonfig -> Futharkonfig)
 
+passoption :: String -> Pass -> String -> [String] -> FutharkOption
+passoption desc pass short long =
+  Option short long
+  (NoArg $ \opts -> opts { futharkpipeline = pass : futharkpipeline opts })
+  desc
+
 commandLineOptions :: [FutharkOption]
 commandLineOptions =
   [ Option "V" ["verbose"]
@@ -78,17 +84,24 @@ commandLineOptions =
   , Option [] ["no-bounds-checking"]
     (NoArg $ \opts -> opts { futharkboundsCheck = False })
     "Do not perform bounds checking in the generated program."
-  , hoistOpt "o" ["hoist"]
-  , uttransformOpt "u" ["untrace"]
-  , fotransformOpt "f" ["first-order-transform"]
-  , eotransformOpt "e" ["enabling-optimisations"]
-  , iitransformOpt []  ["inline-map-indexes"]
-  , hotransformOpt "h" ["higher-order-optimizations"]
-  , inlinetransformOpt [] ["inline-functions"]
+  , passoption "Rebinder - hoisting, CSE, dependency graph compression." hoist
+    "o" ["hoist"]
+  , passoption "Remove debugging annotations from program." uttransform
+    "u" ["untrace"]
+  , passoption "Transform all second-order array combinators to for-loops." fotransform
+    "f" ["first-order-transform"]
+  , passoption "Perform simple enabling optimisations." eotransform
+                 "e" ["enabling-optimisations"]
+  , passoption "Inline indexing into maps." iitransform
+    []  ["inline-map-indexes"]
+  , passoption "Perform higher-order optimisation, i.e., fusion." hotransform
+    "h" ["higher-order-optimizations"]
+  , passoption "Aggressively inline and remove dead functions." inlinetransform
+    [] ["inline-functions"]
+  , passoption "Split certificates from main computation" splitasserttransform [] ["split-assertions"]
   , Option "s" ["standard"]
     (NoArg $ \opts -> opts { futharkpipeline = standardPipeline ++ futharkpipeline opts })
     "Use the recommended optimised pipeline."
-  , splitasserttransformOpt [] ["split-assertions"]
   ]
 
 printAction :: Action
@@ -184,50 +197,6 @@ standardPipeline =
   , eotransform, iitransform
   , hoist,       hotransform, eotransform
   ]
-
-passoption :: String -> Pass -> String -> [String] -> FutharkOption
-passoption desc pass short long =
-  Option short long
-  (NoArg $ \opts -> opts { futharkpipeline = pass : futharkpipeline opts })
-  desc
-
-hoistOpt :: String -> [String] -> FutharkOption
-hoistOpt =
-  passoption "Rebinder - hoisting, CSE, dependency graph compression." hoist
-
-fotransformOpt :: String -> [String] -> FutharkOption
-fotransformOpt =
-  passoption "Transform all second-order array combinators to for-loops."
-  fotransform
-
-uttransformOpt :: String -> [String] -> FutharkOption
-uttransformOpt =
-  passoption "Remove debugging annotations from program." uttransform
-
-eotransformOpt :: String -> [String] -> FutharkOption
-eotransformOpt =
-  passoption "Perform simple enabling optimisations."
-  eotransform
-
-iitransformOpt :: String -> [String] -> FutharkOption
-iitransformOpt =
-  passoption "Inline indexing into maps."
-  iitransform
-
-hotransformOpt :: String -> [String] -> FutharkOption
-hotransformOpt =
-  passoption "Perform higher-order optimisation, i.e., fusion."
-  hotransform
-
-inlinetransformOpt :: String -> [String] -> FutharkOption
-inlinetransformOpt =
-  passoption "Aggressively inline and remove dead functions."
-  inlinetransform
-
-splitasserttransformOpt :: String -> [String] -> FutharkOption
-splitasserttransformOpt =
-  passoption "Split certificates from main computation"
-  splitasserttransform
 
 -- | Entry point.  Non-interactive, except when reading interpreter
 -- input from standard input.
