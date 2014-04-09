@@ -6,14 +6,13 @@ where
 
 import Control.Applicative
 import Control.Monad.State
-import Control.Monad.Writer
 
 import Data.Loc
-import Data.Maybe
 
 import Futhark.InternalRep
 import Futhark.InternalRep.Renamer
 import Futhark.MonadFreshNames
+import Futhark.Tools
 
 splitAssertions :: Prog -> Prog
 splitAssertions prog =
@@ -38,60 +37,73 @@ splitBodyAssertions body = do
 
 splitBndAssertions :: Binding -> SplitM [Binding]
 
-splitBndAssertions (Let out (Map cs fun arrs loc)) = do
-  -- We need to pick out any boolean bindings in 'fun' that are passed
-  -- to an 'assert' in 'fun'.
-  let (certs, predbody, valbody) = getAssertions $ lambdaBody fun
-      outersize = arraysSize 0 (map subExpType arrs)
-  predbody' <- renameBody predbody
-  split_preds <- newIdents "split_predicate"
-                 [arrayOf t (Shape [outersize]) Nonunique
-                  | t <- bodyType predbody']
-                 loc
-  andfun <- makeAndFun (length split_preds) loc
-  anded_preds <- newIdents "anded_predicate" (bodyType $ lambdaBody andfun) loc
-  let predfun = fun { lambdaBody = predbody'
-                    , lambdaReturnType = map toConstType $ bodyType predbody'
-                    }
-      split_pred_comp =
-        Let split_preds $ Map cs predfun arrs loc
-      and_preds_comp =
-        Let anded_preds $
-          Reduce [] andfun [(Constant (BasicVal $ LogVal True) loc,
-                             Var split_pred)
-                              | split_pred <- split_preds ]
-          loc
-      assertions =
-        [ Let [cert] (Assert (Var predicate) loc)
-            | (cert, predicate) <- zip certs anded_preds ]
-      val_comp =
-        Let out $ Map cs fun { lambdaBody = valbody } arrs loc
-  return $ [split_pred_comp, and_preds_comp] ++ assertions ++ [val_comp]
+splitBndAssertions (DoLoop merge i bound body) = do
+  -- XXX gross hack
+  (Body [DoLoop merge' i' _ body'] _) <-
+    renameBody $ Body [DoLoop merge i bound body] nullRes
+  (certmergepat, certbody, allBoundsChecks) <-
+    splitLoopBody merge' body'
+  allBoundsChecksCert  <-
+    newIdent "loop_bounds_cert" (Basic Cert) loc
+  let certmerge = zip (allBoundsChecks:certmergepat)
+                      (Constant (BasicVal $ LogVal True) loc:map snd merge)
+      certloop = DoLoop certmerge i' bound certbody
+      valbody = replaceBoundsCerts allBoundsChecksCert body
+      valloop = DoLoop merge i bound valbody
+  Body certbnds _ <- runBinder $ copyConsumed $ Body [certloop] nullRes
+  return $ certbnds ++
+           [Let [allBoundsChecksCert] (Assert (Var allBoundsChecks) loc),
+            valloop]
+  where loc = srclocOf body
+        nullRes = Result [] [] $ srclocOf body
 splitBndAssertions bnd = return [bnd]
 
-getAssertions :: Body -> ([Ident], Body, Body)
-getAssertions (Body bnds res) =
-  let (bnds', asserts) = runWriter $ catMaybes <$> mapM getAssertion bnds
-      (certs, preds)   = unzip asserts
-  in (certs,
-      Body bnds $ Result [] preds $ srclocOf res,
-      Body bnds' res)
-  where getAssertion (Let [v] (Assert e _)) = do tell [(v,e)]
-                                                 return Nothing
-        getAssertion bnd                    = return $ Just bnd
+splitLoopBody :: [(Ident,SubExp)] -> Body -> SplitM ([Ident], Body, Ident)
+splitLoopBody merge body = do
+  allBoundsChecks  <- newIdent "loop_bounds_checks" (Basic Bool) $ srclocOf body
+  certbody <- returnChecksInBody (Var allBoundsChecks) body
+  return (map fst merge, certbody, allBoundsChecks)
 
--- | 'makeAndFun n' loc creates a reduce function that applies @&&@ to @n@
--- array inputs.
-makeAndFun :: Int -> SrcLoc -> SplitM Lambda
-makeAndFun n loc = do
-  xs <- replicateM n $ newIdent "x" (Basic Bool) loc
-  ys <- replicateM n $ newIdent "y" (Basic Bool) loc
-  zs <- replicateM n $ newIdent "z" (Basic Bool) loc
-  let bnds = [ Let [z] (BinOp LogAnd (Var x) (Var y) (Basic Bool) loc)
-                 | (x,y,z) <- zip3 xs ys zs ]
-  return Lambda {
-           lambdaParams     = map toParam $ xs ++ ys
-         , lambdaReturnType = map (toConstType . identType) zs
-         , lambdaSrcLoc     = loc
-         , lambdaBody = Body bnds $ Result [] (map Var zs) loc
-         }
+returnChecksInBody :: SubExp -> Body -> SplitM Body
+returnChecksInBody startcert (Body bnds (Result cs es loc)) = do
+  (bnds', bndchecks) <- unzip <$> mapM returnChecksInBinding bnds
+  c <- newIdent "body_bounds_checks" (Basic Bool) loc
+  (check, checkbnds) <-
+    runBinder'' $ foldBinOp LogAnd startcert (concat bndchecks) (Basic Bool)
+  return $ Body (bnds'++checkbnds++[Let [c] check]) $
+           Result cs (Var c:es) loc
+
+-- XXX? We assume that all assertions are bound checks.
+returnChecksInBinding :: Binding -> SplitM (Binding, [SubExp])
+returnChecksInBinding (Let pat (If cond tbranch fbranch t loc)) = do
+  tbranch' <- returnChecksInBody (true loc) tbranch
+  fbranch' <- returnChecksInBody (true loc) fbranch
+  cert <- newIdent "if_bounds_check" (Basic Bool) loc
+  return (Let (cert:pat) $ If cond tbranch' fbranch' (Basic Bool:t) loc,
+          [Var cert])
+returnChecksInBinding (Let pat e@(Assert prop _)) =
+  return (Let pat e, [prop])
+returnChecksInBinding (Let pat e) =
+  return (Let pat e, []) -- XXX what if 'e' is a SOAC or something?
+returnChecksInBinding (DoLoop merge i bound body) = do
+  (certmergepat, certbody, allBoundsChecks) <-
+    splitLoopBody merge body
+  let certmerge = zip (allBoundsChecks:certmergepat)
+                  (Constant (BasicVal $ LogVal True) loc:map snd merge)
+      certloop = DoLoop certmerge i bound certbody
+  return (certloop, [Var allBoundsChecks])
+  where loc = srclocOf body
+
+replaceBoundsCerts :: Ident -> Body -> Body
+replaceBoundsCerts c = mapBody replace
+  where replace = identityMapper {
+                    mapOnBody = return . replaceBoundsCerts c
+                  , mapOnExp = return . replaceInExp
+                  , mapOnCertificates = const $ return [c]
+                  }
+        replaceInExp (Index _ v idxs loc)      = Index [c] v idxs loc
+        replaceInExp (Update _ v idxs val loc) = Update [c] v idxs val loc
+        replaceInExp e                         = mapExp replace e
+
+true :: SrcLoc -> SubExp
+true = Constant $ BasicVal $ LogVal True
