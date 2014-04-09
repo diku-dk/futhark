@@ -19,6 +19,7 @@ module Futhark.Tools
   , eSubExps
   , eBody
 
+  , foldBinOp
   , binOpLambda
   , makeLambda
 
@@ -151,6 +152,13 @@ eBody e = insertBindingsM $ do
             e' <- e
             x <- letTupExp "x" e'
             return $ resultBody [] (map Var x) $ srclocOf e'
+
+-- | Apply a binary operator to several subexpressions.  A left-fold.
+foldBinOp :: MonadBinder m =>
+             BinOp -> SubExp -> [SubExp] -> Type -> m Exp
+foldBinOp _ ne [] _   = return $ subExp ne
+foldBinOp bop ne (e:es) t =
+  eBinOp bop (pure $ subExp e) (foldBinOp bop ne es t) t $ srclocOf e
 
 -- | Create a two-parameter lambda whose body applies the given binary
 -- operation to its arguments.  It is assumed that both argument and
