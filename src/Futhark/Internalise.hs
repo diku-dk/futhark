@@ -34,7 +34,6 @@ import Control.Monad.State  hiding (mapM)
 import Control.Monad.Reader hiding (mapM)
 
 import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet      as HS
 import Data.Maybe
 import Data.List
 import Data.Loc
@@ -51,7 +50,6 @@ import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.TypesValues
 import Futhark.Internalise.Bindings
 import Futhark.Internalise.Lambdas
-import Futhark.Substitute
 
 import Prelude hiding (mapM)
 
@@ -536,20 +534,3 @@ boundsCheck v i e = do
   letExp "bounds_check" =<< eAssert check
   where bool = I.Basic Bool
         loc = srclocOf e
-
-copyConsumed :: I.Body -> InternaliseM I.Body
-copyConsumed e
-  | consumed <- HS.toList $ freeUniqueInBody e,
-    not (null consumed) = do
-      copies <- copyVariables consumed
-      let substs = HM.fromList $ zip (map I.identName consumed)
-                                     (map I.identName copies)
-      return $ substituteNames substs e
-  | otherwise = return e
-  where copyVariables = mapM copyVariable
-        copyVariable v =
-          letExp (textual (baseName $ I.identName v) ++ "_copy") $
-                 I.Copy (I.Var v) loc
-          where loc = srclocOf v
-
-        freeUniqueInBody = HS.filter (I.unique . I.identType) . I.freeInBody
