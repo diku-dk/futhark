@@ -427,14 +427,14 @@ binOpRes loc v = Just $ subExp $ Constant (BasicVal v) loc
 
 simplifyNot :: LetSimplificationRule
 simplifyNot _ (Not (Constant (BasicVal (LogVal v)) _) loc) =
-  Just $ subExp $ Constant (BasicVal $ LogVal (not v)) loc
+  Just $ subExp $ constant (not v) loc
 simplifyNot _ _ = Nothing
 
 simplifyNegate :: LetSimplificationRule
 simplifyNegate _ (Negate (Constant (BasicVal (IntVal  v)) _) pos) =
-  Just $ subExp $ Constant (BasicVal $ IntVal (-v)) pos
+  Just $ subExp $ constant (negate v) pos
 simplifyNegate _ (Negate (Constant (BasicVal (RealVal  v)) _) pos) =
-  Just $ subExp $ Constant (BasicVal $ RealVal (0.0-v)) pos
+  Just $ subExp $ constant (negate v) pos
 simplifyNegate _ _ =
   Nothing
 

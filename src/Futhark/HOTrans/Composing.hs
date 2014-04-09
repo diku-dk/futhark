@@ -96,7 +96,7 @@ fuseFilters :: Input input =>
             -> (Lambda, [input]) -- ^ The fused lambda and the inputs of the resulting SOAC.
 fuseFilters lam1 inp1 out1 lam2 inp2 vname =
   fuseFilterInto lam1 inp1 out1 lam2 inp2 [vname] false
-  where false = resultBody [] [Constant (BasicVal $ LogVal False) loc] loc
+  where false = resultBody [] [constant False loc] loc
         loc   = srclocOf lam2
 
 -- | Similar to 'fuseFilters', except the second function does not

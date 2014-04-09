@@ -188,8 +188,8 @@ fromScalExp loc = runBinder'' . convert
                 | otherwise = (next, cur)
           in eIf cmp (eBody $ pure pick) (eBody $ pure discard) [Basic t] loc
 
-        zero Int = subExp $ Constant (BasicVal $ IntVal 0) loc
-        zero _   = subExp $ Constant (BasicVal $ RealVal 0) loc
+        zero Int = subExp $ intconst 0 loc
+        zero _   = subExp $ constant (0::Double) loc
 
 ------------------------
 --- Helper Functions ---

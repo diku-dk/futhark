@@ -93,11 +93,11 @@ bindLoopVar var upper =
   localVtable $ clampUpper . clampVar
   where -- If we enter the loop, then 'var' is at least zero, and at
         -- most 'upper'-1 (so this is not completely tight - FIXME).
-        clampVar = ST.insertBounded (identName var) (Just zero, Just upper)
+        clampVar = ST.insertBounded (identName var) (Just $ intconst 0 $ srclocOf var,
+                                                     Just upper)
         -- If we enter the loop, then 'upper' is at least one.
         clampUpper = case upper of Var v -> ST.isAtLeast (identName v) 1
                                    _     -> id
-        zero = Constant (BasicVal $ IntVal 0) $ srclocOf var
 
 -- | Applies Copy/Constant Propagation and Folding to an Entire Program.
 copyCtProp :: Prog -> Either EnablingOptError (Bool, Prog)

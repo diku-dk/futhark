@@ -126,12 +126,11 @@ allEqual comp_shape = do
   checked <- newIdent "all_equal_checked" (Basic Bool) loc
   shape   <- newIdent "all_equal_shape" (Basic Int) loc
   letBind [checked, shape] $
-          Reduce [] checkFun [(true,Var comp), (zero,Var comp_shape)] loc
+          Reduce [] checkFun [(constant True loc,Var comp),
+                              (intconst 0 loc,Var comp_shape)] loc
   cert <- letExp "all_equal_cert" $ Assert (Var checked) loc
   return (cert, shape)
   where loc  = srclocOf comp_shape
-        true = Constant (BasicVal $ LogVal True) loc
-        zero = Constant (BasicVal $ IntVal 0) loc
 
 data UnsizedLambda = UnsizedLambda {
     unsizedLambdaParams     :: [Param]
@@ -144,8 +143,7 @@ data UnsizedLambda = UnsizedLambda {
 annotateArrayShape :: ArrayShape shape =>
                       TypeBase als shape -> ([Int], SrcLoc) -> TypeBase als Shape
 annotateArrayShape t (newshape, loc) =
-  t `setArrayShape` Shape (take (arrayRank t) (map intlit $ newshape ++ repeat 0))
-  where intlit x = Constant (BasicVal $ IntVal x) loc
+  t `setArrayShape` Shape (take (arrayRank t) (map (`intconst` loc) $ newshape ++ repeat 0))
 
 addTypeShapes :: [TypeBase als Rank]
               -> [SubExp]

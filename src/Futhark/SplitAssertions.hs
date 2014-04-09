@@ -46,7 +46,7 @@ splitBndAssertions (DoLoop merge i bound body) = do
   allBoundsChecksCert  <-
     newIdent "loop_bounds_cert" (Basic Cert) loc
   let certmerge = zip (allBoundsChecks:certmergepat)
-                      (Constant (BasicVal $ LogVal True) loc:map snd merge)
+                      (constant True loc:map snd merge)
       certloop = DoLoop certmerge i' bound certbody
       valbody = replaceBoundsCerts allBoundsChecksCert body
       valloop = DoLoop merge i bound valbody
@@ -76,8 +76,8 @@ returnChecksInBody startcert (Body bnds (Result cs es loc)) = do
 -- XXX? We assume that all assertions are bound checks.
 returnChecksInBinding :: Binding -> SplitM (Binding, [SubExp])
 returnChecksInBinding (Let pat (If cond tbranch fbranch t loc)) = do
-  tbranch' <- returnChecksInBody (true loc) tbranch
-  fbranch' <- returnChecksInBody (true loc) fbranch
+  tbranch' <- returnChecksInBody (constant True loc) tbranch
+  fbranch' <- returnChecksInBody (constant True loc) fbranch
   cert <- newIdent "if_bounds_check" (Basic Bool) loc
   return (Let (cert:pat) $ If cond tbranch' fbranch' (Basic Bool:t) loc,
           [Var cert])
@@ -89,7 +89,7 @@ returnChecksInBinding (DoLoop merge i bound body) = do
   (certmergepat, certbody, allBoundsChecks) <-
     splitLoopBody merge body
   let certmerge = zip (allBoundsChecks:certmergepat)
-                  (Constant (BasicVal $ LogVal True) loc:map snd merge)
+                  (constant True loc:map snd merge)
       certloop = DoLoop certmerge i bound certbody
   return (certloop, [Var allBoundsChecks])
   where loc = srclocOf body
@@ -104,6 +104,3 @@ replaceBoundsCerts c = mapBody replace
         replaceInExp (Index _ v idxs loc)      = Index [c] v idxs loc
         replaceInExp (Update _ v idxs val loc) = Update [c] v idxs val loc
         replaceInExp e                         = mapExp replace e
-
-true :: SrcLoc -> SubExp
-true = Constant $ BasicVal $ LogVal True

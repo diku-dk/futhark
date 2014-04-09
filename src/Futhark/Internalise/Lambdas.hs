@@ -79,7 +79,7 @@ lambdaBinding ce params ts m =
 
 outerShape :: SrcLoc -> [I.Type] -> SubExp
 outerShape _ (t:_) = arraySize 0 t
-outerShape loc _   = I.Constant (I.BasicVal $ I.IntVal 0) loc
+outerShape loc _   = I.intconst 0 loc
 
 internaliseLambda :: (E.Exp -> InternaliseM Body)
                   -> I.Ident
@@ -245,5 +245,5 @@ bindFilterResultOuterShape ce lam args input_size = do
   letBind [outershape] countcomp
   return outershape
   where loc = srclocOf lam
-        zero = I.Constant (I.BasicVal $ I.IntVal 0) loc
-        one  = I.Constant (I.BasicVal $ I.IntVal 1) loc
+        zero = I.intconst 0 loc
+        one  = I.intconst 1 loc

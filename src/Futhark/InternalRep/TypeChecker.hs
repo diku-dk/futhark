@@ -582,7 +582,7 @@ checkBody (Body (DoLoop merge (Ident loopvar _ loopvarloc)
     checkBody $ Body [Let result
                       (Apply fname
                        ([(Var k, diet (identType k)) | k <- free ] ++
-                        [(Constant (BasicVal $ IntVal 0) loc, Observe),
+                        [(intconst 0 loc, Observe),
                          (boundexp', Observe)] ++
                         zip es' (map diet rettype))
                        rettype loc)]
