@@ -31,7 +31,7 @@ import qualified Data.HashSet as HS
 
 import Futhark.InternalRep hiding (Map, Reduce, Scan, Filter, Redomap, returnType)
 import Futhark.MonadFreshNames
-import Futhark.Tools
+import Futhark.Binder
 import Futhark.HORepresentation.SOAC (SOAC)
 import qualified Futhark.HORepresentation.SOAC as SOAC
 import Futhark.Substitute

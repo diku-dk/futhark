@@ -19,7 +19,7 @@ import Futhark.MonadFreshNames
 import Futhark.EnablingOpts.EnablingOptDriver
 import Futhark.HOTrans.LoopKernel
 import Futhark.HORepresentation.SOAC (SOAC)
-import Futhark.Tools
+import Futhark.Binder
 import qualified Futhark.HORepresentation.SOAC as SOAC
 
 data FusionGEnv = FusionGEnv {
@@ -606,17 +606,6 @@ insertKerSOAC ker body = do
         transformOutput (outputTransform ker) (outputs ker) $
                         SOAC.setLambda lam'' new_soac
         return body
-
-transformOutput :: SOAC.ArrayTransforms -> [Ident] -> SOAC -> Binder ()
-transformOutput ts outIds soac =
-  case SOAC.viewf ts of
-    SOAC.EmptyF -> do e <- SOAC.toExp soac
-                      letBind outIds e
-    t SOAC.:< ts' -> do
-      newIds <- mapM (newIdent' id) outIds
-      transformOutput ts' newIds soac
-      es     <- mapM (applyTransform t . Var) newIds
-      zipWithM_ letBind (map (:[]) outIds) es
 
 ---------------------------------------------------
 ---------------------------------------------------

@@ -4,7 +4,7 @@ module Futhark.HOTrans.LoopKernel
   , inputs
   , setInputs
   , arrInputs
-  , applyTransform
+  , transformOutput
   , attemptFusion
   )
   where
@@ -32,6 +32,17 @@ import qualified Futhark.HORepresentation.MapNest as MapNest
 import Futhark.HOTrans.TryFusion
 import Futhark.HOTrans.Composing
 import Futhark.Tools
+
+transformOutput :: SOAC.ArrayTransforms -> [Ident] -> SOAC -> Binder ()
+transformOutput ts outIds soac =
+  case SOAC.viewf ts of
+    SOAC.EmptyF -> do e <- SOAC.toExp soac
+                      letBind outIds e
+    t SOAC.:< ts' -> do
+      newIds <- mapM (newIdent' id) outIds
+      transformOutput ts' newIds soac
+      es     <- mapM (applyTransform t . Var) newIds
+      zipWithM_ letBind (map (:[]) outIds) es
 
 applyTransform :: SOAC.ArrayTransform -> SubExp -> Binder Exp
 applyTransform (SOAC.Rearrange cs perm) v =
