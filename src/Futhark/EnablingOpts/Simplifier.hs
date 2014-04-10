@@ -137,6 +137,9 @@ needThis need = tell $ Need [need] HS.empty
 boundFree :: HS.HashSet VName -> SimpleM ()
 boundFree fs = tell $ Need [] fs
 
+usedName :: VName -> SimpleM ()
+usedName = boundFree . HS.singleton
+
 localVtable :: (ST.SymbolTable -> ST.SymbolTable) -> SimpleM a -> SimpleM a
 localVtable f = local $ \env -> env { envVtable = f $ envVtable env }
 
@@ -193,32 +196,47 @@ bindLoop merge i bound body m = do
   needThis $ LoopNeed merge i bound body
   m
 
-addBindings :: DupeState -> [BindNeed] -> Body -> HS.HashSet VName
-            -> (Body, HS.HashSet VName)
-addBindings dupes needs =
-  curry $ foldl (.) id $ snd $
-          mapAccumL comb (HM.empty, dupes) needs
-  where bind bnd binder (inner, fs)
-          | provides bnd `intersects` fs =
-            (binder inner,
-             (fs `HS.difference` provides bnd)
-             `HS.union` requires bnd)
+addBindings :: MonadFreshNames m =>
+               DupeState -> [BindNeed] -> Body -> HS.HashSet VName
+            -> m (Body, HS.HashSet VName)
+addBindings dupes needs body uses = do
+  (uses',bnds) <- simplifyBindings uses $ snd $ mapAccumL pick (HM.empty, dupes) needs
+  return (insertBindings bnds body, uses')
+  where simplifyBindings uses' = foldM comb (uses',[]) . reverse
+
+        -- Do not actually insert binding if it is not used.
+        comb (uses',bnds) (bnd, provs, reqs)
+          | provs `intersects` uses' = do
+            res <- bottomUpSimplifyBinding uses' bnd
+            case res of
+              Nothing    -> return ((uses' `HS.difference` provs) `HS.union` reqs,
+                                    bnd:bnds)
+              Just optimbnds -> do
+                (uses'',optimbnds') <-
+                  simplifyBindings uses' $ map attachUsage optimbnds
+                return (uses'', optimbnds'++bnds)
           | otherwise =
-            (inner, fs)
+            return (uses', bnds)
 
-        comb (m,ds) bnd@(LoopNeed merge loopvar boundexp loopbody) =
+        attachUsage bnd = (bnd, providedByBnd bnd, usedInBnd bnd)
+        providedByBnd (Let pat _) =
+          HS.fromList $ map identName pat
+        providedByBnd (DoLoop merge _ _ _) =
+          HS.fromList $ map (identName . fst) merge
+        usedInBnd bnd = freeNamesInBody $ Body [bnd] $ Result [] [] noLoc
+
+        pick (m,ds) bnd@(LoopNeed merge loopvar boundexp loopbody) =
           ((m `HM.union` distances m bnd, ds),
-           bind bnd $
-           \(Body bnds res) ->
-             Body (DoLoop merge loopvar boundexp loopbody:bnds) res)
+           (DoLoop merge loopvar boundexp loopbody,
+            provides bnd, requires bnd))
 
-        comb (m,ds) (LetNeed pat e alts) =
+        pick (m,ds) (LetNeed pat e alts) =
           let add e' =
                 let (e'',ds') = performCSE ds pat e'
                     bnd       = LetNeed pat e'' []
                 in ((m `HM.union` distances m bnd, ds'),
-                    bind bnd $
-                    \(Body bnds res) -> Body (Let pat e'':bnds) res)
+                    (Let pat e'',
+                     provides bnd, requires bnd))
           in case map snd $ sortBy (comparing fst) $ map (score m) $ e:alts of
                e':_ -> add e'
                _    -> add e
@@ -333,7 +351,7 @@ blockIf block m = pass $ do
   (body, needs) <- listen m
   ds <- asks envDupeState
   let (blocked, hoistable) = splitHoistable block body $ needBindings needs
-      (e, fs) = addBindings ds blocked body $ freeInBound needs
+  (e, fs) <- addBindings ds blocked body $ freeInBound needs
   return (e,
           const Need { needBindings = hoistable
                      , freeInBound  = fs
@@ -378,8 +396,8 @@ hoistCommon m1 m2 = pass $ do
   let splitOK = splitHoistable $ isNotSafe `orIf` isNotCheap
       (needs1', safe1) = splitOK body1 $ needBindings needs1
       (needs2', safe2) = splitOK body2 $ needBindings needs2
-      (e1, f1) = addBindings newDupeState needs1' body1 $ freeInBound needs1
-      (e2, f2) = addBindings newDupeState needs2' body2 $ freeInBound needs2
+  (e1, f1) <- addBindings newDupeState needs1' body1 $ freeInBound needs1
+  (e2, f2) <- addBindings newDupeState needs2' body2 $ freeInBound needs2
   return ((e1, e2),
           const Need { needBindings = safe1 <> safe2
                      , freeInBound = f1 <> f2
@@ -392,10 +410,10 @@ simplifyBody (Body [] (Result cs es loc)) =
                  mapM simplifySubExp es <*> pure loc
 
 simplifyBody (Body (Let pat e:bnds) res) = do
-  pat' <- mapM simplifyIdent pat
+  pat' <- mapM simplifyIdentBinding pat
   e' <- simplifyExp e
   vtable <- asks envVtable
-  simplified <- simplifyBinding vtable (Let pat e')
+  simplified <- topDownSimplifyBinding vtable (Let pat e')
   case simplified of
     Just newbnds ->
       simplifyBody $ Body (newbnds++bnds) res
@@ -404,7 +422,7 @@ simplifyBody (Body (Let pat e:bnds) res) = do
 
 simplifyBody (Body (DoLoop merge loopvar boundexp loopbody:bnds) res) = do
   let (mergepat, mergeexp) = unzip merge
-  mergepat' <- mapM simplifyIdent mergepat
+  mergepat' <- mapM simplifyIdentBinding mergepat
   mergeexp' <- mapM simplifySubExp mergeexp
   boundexp' <- simplifySubExp boundexp
   loopbody' <- blockIfSeq [hasFree boundnames, isConsumed] $
@@ -413,7 +431,7 @@ simplifyBody (Body (DoLoop merge loopvar boundexp loopbody:bnds) res) = do
   let merge' = zip mergepat' mergeexp'
       letbody = Body bnds res
   vtable <- asks envVtable
-  simplified <- simplifyBinding vtable $ DoLoop merge' loopvar boundexp' loopbody'
+  simplified <- topDownSimplifyBinding vtable $ DoLoop merge' loopvar boundexp' loopbody'
   case simplified of
     Nothing -> bindLoop merge' loopvar boundexp' loopbody' $
                simplifyBody $ Body bnds res
@@ -467,15 +485,21 @@ simplifySubExp (Var ident@(Ident vnm _ pos)) = do
   case bnd of
     Just (ST.Value v)
       | isBasicTypeVal v  -> return $ Constant v pos
-    Just (ST.VarId  id' tp1) -> return $ Var $ Ident id' tp1 pos
+    Just (ST.VarId  id' tp1) -> do usedName id'
+                                   return $ Var $ Ident id' tp1 pos
     Just (ST.SymExp (SubExps [se] _)) -> return se
     _                                 -> Var <$> simplifyIdent ident
   where isBasicTypeVal = basicType . valueType
 simplifySubExp (Constant v loc) = return $ Constant v loc
 
+simplifyIdentBinding :: Ident -> SimpleM Ident
+simplifyIdentBinding v = do
+  t' <- simplifyType $ identType v
+  return v { identType = t' }
+
 simplifyIdent :: Ident -> SimpleM Ident
 simplifyIdent v = do
-  boundFree $ HS.singleton $ identName v
+  usedName $ identName v
   t' <- simplifyType $ identType v
   return v { identType = t' }
 
@@ -496,6 +520,8 @@ simplifyCerts = liftM (nub . concat) . mapM check
           vv <- asks $ ST.lookup (identName idd) . envVtable
           case vv of
             Just (ST.Value (BasicVal Checked)) -> return []
-            Just (ST.VarId  id' tp1)           -> return [Ident id' tp1 loc]
-            _ -> return [idd]
+            Just (ST.VarId  id' tp1) -> do usedName id'
+                                           return [Ident id' tp1 loc]
+            _ -> do usedName $ identName idd
+                    return [idd]
           where loc = srclocOf idd

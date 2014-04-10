@@ -8,7 +8,8 @@
 -- fusion algorithm in @Futhark.HOTrans.Fusion@, which must be implemented
 -- as its own pass.
 module Futhark.EnablingOpts.Simplifier.Rules
-  ( simplifyBinding
+  ( topDownSimplifyBinding
+  , bottomUpSimplifyBinding
   )
 
 where
@@ -36,40 +37,55 @@ import Futhark.MonadFreshNames
 -- binding @bnd@.  If simplification is possible, a replacement list
 -- of bindings is returned, that bind at least the same banes as the
 -- original binding (and possibly more, for intermediate results).
-simplifyBinding :: MonadFreshNames m => ST.SymbolTable -> Binding -> m (Maybe [Binding])
+topDownSimplifyBinding :: MonadFreshNames m => ST.SymbolTable -> Binding -> m (Maybe [Binding])
+topDownSimplifyBinding vtable bnd =
+  provideNames $ applyRules topDownRules vtable bnd
 
-simplifyBinding vtable bnd =
-  provideNames $ applyRules simplificationRules vtable bnd
+-- | @simplifyBinding uses bnd@ performs simplification of the binding
+-- @bnd@.  If simplification is possible, a replacement list of
+-- bindings is returned, that bind at least the same banes as the
+-- original binding (and possibly more, for intermediate results).
+-- The first argument is the set of names used after this binding.
+bottomUpSimplifyBinding :: MonadFreshNames m => HS.HashSet VName -> Binding -> m (Maybe [Binding])
+bottomUpSimplifyBinding used bnd =
+  provideNames $ applyRules bottomUpRules used bnd
 
-applyRules :: [SimplificationRule]
-           -> ST.SymbolTable -> Binding -> NeedNames (Maybe [Binding])
+applyRules :: [SimplificationRule a]
+           -> a -> Binding -> NeedNames (Maybe [Binding])
 applyRules []           _    _   = return Nothing
-applyRules (rule:rules) vtable bnd = do
-  res <- rule vtable bnd
+applyRules (rule:rules) context bnd = do
+  res <- rule context bnd
   case res of Just bnds -> return $ Just bnds
-              Nothing   -> applyRules rules vtable bnd
+              Nothing   -> applyRules rules context bnd
 
-type SimplificationRule = ST.SymbolTable -> Binding -> NeedNames (Maybe [Binding])
+type SimplificationRule a = a -> Binding -> NeedNames (Maybe [Binding])
 
-simplificationRules :: [SimplificationRule]
-simplificationRules = [ liftIdentityMapping
-                      , removeReplicateMapping
-                      , hoistLoopInvariantMergeVariables
-                      , simplifyClosedFormRedomap
-                      , simplifyClosedFormReduce
-                      , simplifyScalarExp
-                      , letRule simplifyRearrange
-                      , letRule simplifyRotate
-                      , letRule simplifyBinOp
-                      , letRule simplifyNot
-                      , letRule simplifyNegate
-                      , letRule simplifyAssert
-                      , letRule simplifyConjoin
-                      , letRule simplifyIndexing
-                      , simplifyBranch
-                      ]
+type TopDownRule = SimplificationRule ST.SymbolTable
 
-liftIdentityMapping :: SimplificationRule
+type BottomUpRule = SimplificationRule (HS.HashSet VName)
+
+topDownRules :: [TopDownRule]
+topDownRules = [ liftIdentityMapping
+               , removeReplicateMapping
+               , hoistLoopInvariantMergeVariables
+               , simplifyClosedFormRedomap
+               , simplifyClosedFormReduce
+               , simplifyScalarExp
+               , letRule simplifyRearrange
+               , letRule simplifyRotate
+               , letRule simplifyBinOp
+               , letRule simplifyNot
+               , letRule simplifyNegate
+               , letRule simplifyAssert
+               , letRule simplifyConjoin
+               , letRule simplifyIndexing
+               , simplifyBranch
+               ]
+
+bottomUpRules :: [BottomUpRule]
+bottomUpRules = [ removeDeadMapping ]
+
+liftIdentityMapping :: TopDownRule
 liftIdentityMapping _ (Let pat (Map cs fun arrs loc)) =
   case foldr checkInvariance ([], [], []) $ zip3 pat ses rettype of
     ([], _, _) -> return Nothing
@@ -105,7 +121,7 @@ liftIdentityMapping _ _ = return Nothing
 
 -- | Remove all arguments to the map that are simply replicates.
 -- These can be turned into free variables instead.
-removeReplicateMapping :: SimplificationRule
+removeReplicateMapping :: TopDownRule
 removeReplicateMapping vtable (Let pat (Map cs fun arrs loc))
   | replicatesOrNot <- zipWith isReplicate (lambdaParams fun) arrs,
     any isRight replicatesOrNot =
@@ -132,7 +148,21 @@ removeReplicateMapping vtable (Let pat (Map cs fun arrs loc))
         isRight (Left  _) = False
 removeReplicateMapping _ _ = return Nothing
 
-hoistLoopInvariantMergeVariables :: SimplificationRule
+removeDeadMapping :: BottomUpRule
+removeDeadMapping used (Let pat (Map cs fun arrs loc)) = return $
+  let Result rcs ses resloc = bodyResult $ lambdaBody fun
+      isUsed (v, _, _) = (`HS.member` used) $ identName v
+      (pat',ses', ts') = unzip3 $ filter isUsed $ zip3 pat ses $ lambdaReturnType fun
+      fun' = fun { lambdaBody = resultBody rcs ses' resloc `setBodyResult`
+                                lambdaBody fun
+                 , lambdaReturnType = ts'
+                 }
+  in if pat /= pat'
+     then Just [Let pat' $ Map cs fun' arrs loc]
+     else Nothing
+removeDeadMapping _ _ = return Nothing
+
+hoistLoopInvariantMergeVariables :: TopDownRule
 hoistLoopInvariantMergeVariables _ (DoLoop merge idd n loopbody) =
     -- Figure out which of the elemens of loopresult are loop-invariant,
   -- and hoist them out.
@@ -158,25 +188,25 @@ hoistLoopInvariantMergeVariables _ _ = return Nothing
 -- | A function that, given a variable name, returns its definition.
 type VarLookup = VName -> Maybe Exp
 
-type LetSimplificationRule = VarLookup -> Exp -> Maybe Exp
+type LetTopDownRule = VarLookup -> Exp -> Maybe Exp
 
-letRule :: LetSimplificationRule -> SimplificationRule
+letRule :: LetTopDownRule -> TopDownRule
 letRule rule vtable (Let pat e) = return $ (:[]) . Let pat <$> rule look e
   where look = (`ST.lookupExp` vtable)
 letRule _    _      _           = return Nothing
 
-simplifyClosedFormRedomap :: SimplificationRule
+simplifyClosedFormRedomap :: TopDownRule
 simplifyClosedFormRedomap vtable (Let pat (Redomap _ _ innerfun acc arr _)) =
   foldClosedForm (`ST.lookupExp` vtable) pat innerfun acc arr
 simplifyClosedFormRedomap _ _ = return Nothing
 
-simplifyClosedFormReduce :: SimplificationRule
+simplifyClosedFormReduce :: TopDownRule
 simplifyClosedFormReduce vtable (Let pat (Reduce _ fun args _)) =
   foldClosedForm (`ST.lookupExp` vtable) pat fun acc arr
   where (acc, arr) = unzip args
 simplifyClosedFormReduce _ _ = return Nothing
 
-simplifyScalarExp :: SimplificationRule
+simplifyScalarExp :: TopDownRule
 simplifyScalarExp vtable (Let [v] e)
   | Just se <- SE.toScalExp (`ST.lookupScalExp` vtable) e,
     Right se' <- AS.simplify se loc True (rangesRep vtable), -- Cheap?  What?
@@ -196,7 +226,7 @@ rangesRep = HM.map toRep . ST.bindings
           (ST.bindingDepth entry, lower, upper)
           where (lower, upper) = ST.valueRange entry
 
-simplifyRearrange :: LetSimplificationRule
+simplifyRearrange :: LetTopDownRule
 
 -- Handle identity permutation.
 simplifyRearrange _ (Rearrange _ perm e _)
@@ -215,7 +245,7 @@ simplifyRearrange look (Rearrange cs perm (Var v) loc) =
 
 simplifyRearrange _ _ = Nothing
 
-simplifyRotate :: LetSimplificationRule
+simplifyRotate :: LetTopDownRule
 -- A zero-rotation is identity.
 simplifyRotate _ (Rotate _ 0 e _) =
   Just $ subExp e
@@ -235,7 +265,7 @@ simplifyRotate look (Rotate _ _ (Var v) _) = do
 
 simplifyRotate _ _ = Nothing
 
-simplifyBinOp :: LetSimplificationRule
+simplifyBinOp :: LetTopDownRule
 
 simplifyBinOp _ (BinOp Plus e1 e2 _ pos)
   | isCt0 e1 = Just $ subExp e2
@@ -425,12 +455,12 @@ simplifyBinOp _ _ = Nothing
 binOpRes :: SrcLoc -> BasicValue -> Maybe Exp
 binOpRes loc v = Just $ subExp $ Constant (BasicVal v) loc
 
-simplifyNot :: LetSimplificationRule
+simplifyNot :: LetTopDownRule
 simplifyNot _ (Not (Constant (BasicVal (LogVal v)) _) loc) =
   Just $ subExp $ constant (not v) loc
 simplifyNot _ _ = Nothing
 
-simplifyNegate :: LetSimplificationRule
+simplifyNegate :: LetTopDownRule
 simplifyNegate _ (Negate (Constant (BasicVal (IntVal  v)) _) pos) =
   Just $ subExp $ constant (negate v) pos
 simplifyNegate _ (Negate (Constant (BasicVal (RealVal  v)) _) pos) =
@@ -439,13 +469,13 @@ simplifyNegate _ _ =
   Nothing
 
 -- If expression is true then just replace assertion.
-simplifyAssert :: LetSimplificationRule
+simplifyAssert :: LetTopDownRule
 simplifyAssert _ (Assert (Constant (BasicVal (LogVal True)) _) loc) =
   Just $ subExp $ Constant (BasicVal Checked) loc
 simplifyAssert _ _ =
   Nothing
 
-simplifyConjoin :: LetSimplificationRule
+simplifyConjoin :: LetTopDownRule
 simplifyConjoin look (Conjoin es loc) =
   -- Remove trivial certificates.
   let check seen (Constant (BasicVal Checked) _) = seen
@@ -464,7 +494,7 @@ simplifyConjoin look (Conjoin es loc) =
          | otherwise         -> Nothing
 simplifyConjoin _ _ = Nothing
 
-simplifyIndexing :: LetSimplificationRule
+simplifyIndexing :: LetTopDownRule
 simplifyIndexing look (Index cs idd inds loc) =
   case look $ identName idd of
     Nothing -> Nothing
@@ -506,7 +536,7 @@ simplifyIndexing look (Index cs idd inds loc) =
 
 simplifyIndexing _ _ = Nothing
 
-simplifyBranch :: SimplificationRule
+simplifyBranch :: TopDownRule
 simplifyBranch _ (Let pat (If e1 tb fb _ _))
   | Just branch <- checkBranch =
   let Result _ ses resloc = bodyResult branch
