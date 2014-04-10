@@ -190,6 +190,7 @@ filterFoldFusionOK outIds ker =
 
 mapScanFusionOK :: [Ident] -> [SOAC.Input] -> FusedKer -> Bool
 mapScanFusionOK outIds inp1 ker =
+  length inp1 == length replacing &&
   and (zipWith subtypeOf
        (sort $ map identType replacing)
        (sort inpts))
