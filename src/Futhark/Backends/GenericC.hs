@@ -206,6 +206,8 @@ readFun Real = Just "read_double"
 readFun _    = Nothing
 
 readStm :: C.Exp -> DeclType -> C.Stm
+readStm place (Basic Cert) =
+  [C.cstm|$exp:place = 1;|]
 readStm place t@(Basic et)
   | Just f <- readFun et =
     [C.cstm|if ($id:f(&$exp:place) != 0) {
