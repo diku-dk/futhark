@@ -20,6 +20,8 @@ import Data.Array
 import Data.Bits
 import Data.Either
 import Data.Loc
+import Data.Maybe
+import Data.Monoid
 
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet      as HS
@@ -30,6 +32,7 @@ import qualified Futhark.EnablingOpts.SymbolTable as ST
 import Futhark.EnablingOpts.ClosedForm
 import qualified Futhark.EnablingOpts.AlgSimplify as AS
 import qualified Futhark.EnablingOpts.ScalExp as SE
+import Futhark.EnablingOpts.Simplifier.DataDependencies
 import Futhark.InternalRep
 import Futhark.MonadFreshNames
 
@@ -83,7 +86,9 @@ topDownRules = [ liftIdentityMapping
                ]
 
 bottomUpRules :: [BottomUpRule]
-bottomUpRules = [ removeDeadMapping ]
+bottomUpRules = [ removeDeadMapping
+                , removeUnusedLoopResult
+                ]
 
 liftIdentityMapping :: TopDownRule
 liftIdentityMapping _ (Let pat (Map cs fun arrs loc)) =
@@ -161,6 +166,34 @@ removeDeadMapping used (Let pat (Map cs fun arrs loc)) = return $
      then Just [Let pat' $ Map cs fun' arrs loc]
      else Nothing
 removeDeadMapping _ _ = return Nothing
+
+-- This next one is tricky - it's easy enough to determine that some
+-- loop variable is not used after the loop, but we must also make
+-- sure that it has no influence on control flow in the loop, nor that
+-- it affects any other values.  Fortunately, the latter restriction
+-- is enough.  I do not claim that the current implementation of this
+-- rule is perfect, but it should suffice for many cases.
+removeUnusedLoopResult :: BottomUpRule
+removeUnusedLoopResult used (DoLoop merge i bound body)
+  | not $ all usedAfterwards mergepat = return $
+  let Result cs es loc = bodyResult body
+      necessary = map snd $ filter (usedAfterwards . fst) $ zip mergepat es
+      necessary' = mconcat $ used : map dependencies necessary
+      resIsNecessary (v, _, _) = identName v `HS.member` necessary'
+      (mergepat', mergeexp', es') =
+        unzip3 $ filter resIsNecessary $ zip3 mergepat mergeexp es
+      merge' = zip mergepat' mergeexp'
+      body' = resultBody cs es' loc `setBodyResult` body
+  in Just [DoLoop merge' i bound body']
+  where (mergepat, mergeexp) = unzip merge
+        usedAfterwards = (`HS.member` used). identName
+
+        allDependencies = dataDependencies body
+        dependencies (Constant _ _) = HS.empty
+        dependencies (Var v)        =
+          fromMaybe HS.empty $ HM.lookup (identName v) allDependencies
+removeUnusedLoopResult _ _ =
+  return Nothing
 
 hoistLoopInvariantMergeVariables :: TopDownRule
 hoistLoopInvariantMergeVariables _ (DoLoop merge idd n loopbody) =

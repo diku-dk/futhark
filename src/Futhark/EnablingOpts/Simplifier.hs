@@ -140,6 +140,12 @@ boundFree fs = tell $ Need [] fs
 usedName :: VName -> SimpleM ()
 usedName = boundFree . HS.singleton
 
+collectFreeOccurences :: SimpleM a -> SimpleM (a, HS.HashSet VName)
+collectFreeOccurences m = pass $ do
+  (x, needs) <- listen m
+  return ((x, freeInBound needs),
+          const needs { freeInBound  = HS.empty })
+
 localVtable :: (ST.SymbolTable -> ST.SymbolTable) -> SimpleM a -> SimpleM a
 localVtable f = local $ \env -> env { envVtable = f $ envVtable env }
 
@@ -425,17 +431,19 @@ simplifyBody (Body (DoLoop merge loopvar boundexp loopbody:bnds) res) = do
   mergepat' <- mapM simplifyIdentBinding mergepat
   mergeexp' <- mapM simplifySubExp mergeexp
   boundexp' <- simplifySubExp boundexp
-  loopbody' <- blockIfSeq [hasFree boundnames, isConsumed] $
-               bindLoopVar loopvar boundexp' $
-               simplifyBody loopbody
+  -- XXX our loop representation is retarded (see collectFreeOccurences).
+  (loopbody', _) <- collectFreeOccurences $
+                    blockIfSeq [hasFree boundnames, isConsumed] $
+                    bindLoopVar loopvar boundexp' $
+                    simplifyBody loopbody
   let merge' = zip mergepat' mergeexp'
-      letbody = Body bnds res
   vtable <- asks envVtable
-  simplified <- topDownSimplifyBinding vtable $ DoLoop merge' loopvar boundexp' loopbody'
+  simplified <- topDownSimplifyBinding vtable $
+                DoLoop merge' loopvar boundexp' loopbody'
   case simplified of
     Nothing -> bindLoop merge' loopvar boundexp' loopbody' $
                simplifyBody $ Body bnds res
-    Just newbnds -> simplifyBody $ insertBindings newbnds letbody
+    Just newbnds -> simplifyBody $ Body (newbnds++bnds) res
   where boundnames = identName loopvar `HS.insert` patNameSet (map fst merge)
 
 simplifyExp :: Exp -> SimpleM Exp
