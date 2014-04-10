@@ -1,31 +1,20 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 -- |
 --
--- Perform a range of loosely connected low-level transformations
--- based on data dependency information.  This module will:
+-- Perform general rule-based simplification based on data dependency
+-- information.  This module will:
 --
 --    * Perform common-subexpression elimination (CSE).
---
---    * Rewrite expressions such that the dependecy path from the root
---    variables (the arguments to the function containing the
---    expression) is as short as possible.  For example, @size(0,b)@
---    will be rewritten to @size(0,a)@ if @b@ is the result of a @map@
---    on @a@, as @a@ and @b@ will in that case have the same number of
---    rows.
 --
 --    * Hoist expressions out of loops (including lambdas) and
 --    branches.  This is done as aggressively as possible.
 --
--- For this module to work properly, the input program should be fully
--- normalised; this can be accomplished through use of
--- "Futhark.FullNormalizer".
+--    * Apply simplification rules (see
+--    "Futhark.EnablingOpts.Simplification").
 --
--- CSE (and other transformations) may also create many bindings of
--- the form @let a=b@, so it is recommended to run copy propagation
--- after the rebinder.
---
-module Futhark.Rebinder
-  ( transformProg
+module Futhark.EnablingOpts.Simplifier
+  ( simplifyProg
+  , simplifyOneLambda
   )
   where
 
@@ -46,8 +35,34 @@ import qualified Data.HashSet as HS
 
 import Futhark.InternalRep
 import Futhark.MonadFreshNames
+import Futhark.EnablingOpts.Simplifier.CSE
+import qualified Futhark.EnablingOpts.SymbolTable as ST
+import Futhark.EnablingOpts.Simplifier.Rules
+import Futhark.EnablingOpts.Simplifier.Apply
 
-import Futhark.Rebinder.CSE
+-- | Simplify the given program.  Even if the output differs from the
+-- output, meaningful simplification may not have taken place - the
+-- order of bindings may simply have been rearranged.  The function is
+-- idempotent, however.
+simplifyProg :: Prog -> Prog
+simplifyProg prog =
+  Prog $ fst $ runSimpleM (mapM simplifyFun $ progFunctions prog)
+               (emptyEnv prog) namesrc
+  where namesrc = newNameSourceForProg prog
+
+-- | Simplify just a single 'Lambda'.
+simplifyOneLambda :: MonadFreshNames m => Prog -> Lambda -> m Lambda
+simplifyOneLambda prog lam = do
+  let simplifyOneLambda' = blockAllHoisting $
+                           bindParams (lambdaParams lam) $
+                           simplifyBody $ lambdaBody lam
+  body' <- modifyNameSource $ runSimpleM simplifyOneLambda' $ emptyEnv prog
+  return $ lam { lambdaBody = body' }
+
+simplifyFun :: FunDec -> SimpleM FunDec
+simplifyFun (fname, rettype, params, body, loc) = do
+  body' <- blockAllHoisting $ bindParams params $ simplifyBody body
+  return (fname, rettype, params, body', loc)
 
 data BindNeed = LoopNeed [(Ident,SubExp)] Ident SubExp Body
               | LetNeed [Ident] Exp [Exp]
@@ -89,14 +104,18 @@ instance Monoid Need where
   mempty = Need [] HS.empty
 
 data Env = Env { envDupeState :: DupeState
+               , envVtable  :: ST.SymbolTable
+               , envProgram   :: Prog
                }
 
-emptyEnv :: Env
-emptyEnv = Env {
-             envDupeState = newDupeState
-           }
+emptyEnv :: Prog -> Env
+emptyEnv prog = Env {
+                  envDupeState = newDupeState
+                , envVtable = ST.empty
+                , envProgram = prog
+                }
 
-newtype HoistM a = HoistM (RWS
+newtype SimpleM a = SimpleM (RWS
                            Env                -- Reader
                            Need               -- Writer
                            (NameSource VName) -- State
@@ -104,58 +123,75 @@ newtype HoistM a = HoistM (RWS
   deriving (Applicative, Functor, Monad,
             MonadWriter Need, MonadReader Env, MonadState (NameSource VName))
 
-instance MonadFreshNames HoistM where
+instance MonadFreshNames SimpleM where
   getNameSource = get
   putNameSource = put
 
-runHoistM :: HoistM a -> NameSource VName -> Env -> a
-runHoistM (HoistM m) src env = let (x, _, _) = runRWS m env src
-                               in x
+runSimpleM :: SimpleM a -> Env -> VNameSource -> (a, VNameSource)
+runSimpleM (SimpleM m) env src = let (x, src', _) = runRWS m env src
+                                 in (x, src')
 
-needThis :: BindNeed -> HoistM ()
+needThis :: BindNeed -> SimpleM ()
 needThis need = tell $ Need [need] HS.empty
 
-boundFree :: HS.HashSet VName -> HoistM ()
+boundFree :: HS.HashSet VName -> SimpleM ()
 boundFree fs = tell $ Need [] fs
 
-withBinding :: [Ident] -> Exp -> HoistM a -> HoistM a
-withBinding = withSingleBinding
+localVtable :: (ST.SymbolTable -> ST.SymbolTable) -> SimpleM a -> SimpleM a
+localVtable f = local $ \env -> env { envVtable = f $ envVtable env }
 
-withSingleBinding :: [Ident] -> Exp -> HoistM a -> HoistM a
-withSingleBinding pat e = withSeveralBindings pat e []
+binding :: [(VName, Exp)] -> SimpleM a -> SimpleM a
+binding = localVtable . flip (foldr $ uncurry ST.insert)
+
+bindParams :: [Param] -> SimpleM a -> SimpleM a
+bindParams params =
+  localVtable $ \vtable ->
+    let vtable' = foldr (ST.insert' . identName) vtable params
+    in foldr (`ST.isAtLeast` 0) vtable' sizevars
+  where sizevars = mapMaybe isVar $ concatMap (arrayDims . identType) params
+        isVar (Var v) = Just $ identName v
+        isVar _       = Nothing
+
+bindLoopVar :: Ident -> SubExp -> SimpleM a -> SimpleM a
+bindLoopVar var upper =
+  localVtable $ clampUpper . clampVar
+  where -- If we enter the loop, then 'var' is at least zero, and at
+        -- most 'upper'-1 (so this is not completely tight - FIXME).
+        clampVar = ST.insertBounded (identName var) (Just $ intconst 0 $ srclocOf var,
+                                                     Just upper)
+        -- If we enter the loop, then 'upper' is at least one.
+        clampUpper = case upper of Var v -> ST.isAtLeast (identName v) 1
+                                   _     -> id
+
+withBinding :: [Ident] -> Exp -> SimpleM a -> SimpleM a
+withBinding pat e = withSeveralBindings pat e []
 
 withSeveralBindings :: [Ident] -> Exp -> [Exp]
-                    -> HoistM a -> HoistM a
+                    -> SimpleM a -> SimpleM a
 withSeveralBindings pat e alts m = do
   ds <- asks envDupeState
   let (e', ds') = performCSE ds pat e
       (es, ds'') = performMultipleCSE ds pat alts
+      patbnds = getPropBnds pat e'
   needThis $ LetNeed pat e' es
-  local (\env -> env { envDupeState = ds' <> ds''}) m
+  binding patbnds $
+    local (\env -> env { envDupeState = ds' <> ds''}) m
 
-bindLet :: [Ident] -> Exp -> HoistM a -> HoistM a
+getPropBnds :: [Ident] -> Exp -> [(VName, Exp)]
+getPropBnds [Ident var _ _] e = [(var, e)]
+getPropBnds ids (SubExps ts _)
+  | length ids == length ts =
+    concatMap (\(x,y)-> getPropBnds [x] (subExp y)) $ zip ids ts
+getPropBnds _ _ = []
+
+bindLet :: [Ident] -> Exp -> SimpleM a -> SimpleM a
 
 bindLet = withBinding
 
-bindLoop :: [(Ident,SubExp)] -> Ident -> SubExp -> Body -> HoistM a -> HoistM a
+bindLoop :: [(Ident,SubExp)] -> Ident -> SubExp -> Body -> SimpleM a -> SimpleM a
 bindLoop merge i bound body m = do
   needThis $ LoopNeed merge i bound body
   m
-
--- | Run the let-hoisting algorithm on the given program.  Even if the
--- output differs from the output, meaningful hoisting may not have
--- taken place - the order of bindings may simply have been
--- rearranged.  The function is idempotent, however.
-transformProg :: Prog -> Prog
-transformProg prog =
-  Prog $ runHoistM (mapM transformFun $ progFunctions prog) namesrc env
-  where namesrc = newNameSourceForProg prog
-        env = emptyEnv
-
-transformFun :: FunDec -> HoistM FunDec
-transformFun (fname, rettype, params, body, loc) = do
-  body' <- blockAllHoisting $ hoistInBody body
-  return (fname, rettype, params, body', loc)
 
 addBindings :: DupeState -> [BindNeed] -> Body -> HS.HashSet VName
             -> (Body, HS.HashSet VName)
@@ -289,10 +325,10 @@ splitHoistable block body needs =
               | otherwise ->
                 (blocked, need : hoistable, ks)
 
-blockIfSeq :: [BlockPred] -> HoistM Body -> HoistM Body
+blockIfSeq :: [BlockPred] -> SimpleM Body -> SimpleM Body
 blockIfSeq ps m = foldl (flip blockIf) m ps
 
-blockIf :: BlockPred -> HoistM Body -> HoistM Body
+blockIf :: BlockPred -> SimpleM Body -> SimpleM Body
 blockIf block m = pass $ do
   (body, needs) <- listen m
   ds <- asks envDupeState
@@ -303,7 +339,7 @@ blockIf block m = pass $ do
                      , freeInBound  = fs
                      })
 
-blockAllHoisting :: HoistM Body -> HoistM Body
+blockAllHoisting :: SimpleM Body -> SimpleM Body
 blockAllHoisting = blockIf $ \_ _ -> True
 
 hasFree :: HS.HashSet VName -> BlockPred
@@ -335,7 +371,7 @@ isConsumed :: BlockPred
 isConsumed body need =
   provides need `intersects` bodyConsumes body
 
-hoistCommon :: HoistM Body -> HoistM Body -> HoistM (Body, Body)
+hoistCommon :: SimpleM Body -> SimpleM Body -> SimpleM (Body, Body)
 hoistCommon m1 m2 = pass $ do
   (body1, needs1) <- listen m1
   (body2, needs2) <- listen m2
@@ -349,63 +385,117 @@ hoistCommon m1 m2 = pass $ do
                      , freeInBound = f1 <> f2
                      })
 
-hoistInBody :: Body -> HoistM Body
+simplifyBody :: Body -> SimpleM Body
 
-hoistInBody (Body [] (Result cs es loc)) =
-  resultBody <$> mapM hoistInIdent cs <*>
-                 mapM hoistInSubExp es <*> pure loc
+simplifyBody (Body [] (Result cs es loc)) =
+  resultBody <$> simplifyCerts cs <*>
+                 mapM simplifySubExp es <*> pure loc
 
-hoistInBody (Body (Let pat e:bnds) res) = do
-  pat' <- mapM hoistInIdent pat
-  e' <- hoistInExp e
-  bindLet pat' e' $ hoistInBody $ Body bnds res
-hoistInBody (Body (DoLoop merge loopvar boundexp loopbody:bnds) res) = do
+simplifyBody (Body (Let pat e:bnds) res) = do
+  pat' <- mapM simplifyIdent pat
+  e' <- simplifyExp e
+  vtable <- asks envVtable
+  simplified <- simplifyBinding vtable (Let pat e')
+  case simplified of
+    Just newbnds ->
+      simplifyBody $ Body (newbnds++bnds) res
+    Nothing      ->
+      bindLet pat' e' $ simplifyBody $ Body bnds res
+
+simplifyBody (Body (DoLoop merge loopvar boundexp loopbody:bnds) res) = do
   let (mergepat, mergeexp) = unzip merge
+  mergepat' <- mapM simplifyIdent mergepat
+  mergeexp' <- mapM simplifySubExp mergeexp
+  boundexp' <- simplifySubExp boundexp
   loopbody' <- blockIfSeq [hasFree boundnames, isConsumed] $
-               hoistInBody loopbody
-  mergepat' <- mapM hoistInIdent mergepat
-  mergeexp' <- mapM hoistInSubExp mergeexp
-  bindLoop (zip mergepat' mergeexp') loopvar boundexp loopbody' $
-           hoistInBody $ Body bnds res
+               bindLoopVar loopvar boundexp' $
+               simplifyBody loopbody
+  let merge' = zip mergepat' mergeexp'
+      letbody = Body bnds res
+  vtable <- asks envVtable
+  simplified <- simplifyBinding vtable $ DoLoop merge' loopvar boundexp' loopbody'
+  case simplified of
+    Nothing -> bindLoop merge' loopvar boundexp' loopbody' $
+               simplifyBody $ Body bnds res
+    Just newbnds -> simplifyBody $ insertBindings newbnds letbody
   where boundnames = identName loopvar `HS.insert` patNameSet (map fst merge)
 
-hoistInExp :: Exp -> HoistM Exp
-hoistInExp (If c e1 e2 t loc) = do
-  (e1',e2') <- hoistCommon (hoistInBody e1) (hoistInBody e2)
-  c' <- hoistInSubExp c
-  t' <- mapM hoistInType t
-  return $ If c' e1' e2' t' loc
-hoistInExp e = hoistInExpBase e
+simplifyExp :: Exp -> SimpleM Exp
 
-hoistInExpBase :: Exp -> HoistM Exp
-hoistInExpBase = mapExpM hoist
+simplifyExp (If cond tbranch fbranch t loc) = do
+  -- Here, we have to check whether 'cond' puts a bound on some free
+  -- variable, and if so, chomp it.  We also try to do CSE across
+  -- branches.
+  cond' <- simplifySubExp cond
+  let simplifyT = localVtable (ST.updateBounds True cond) $
+                  simplifyBody tbranch
+      simplifyF = localVtable (ST.updateBounds False cond) $
+                  simplifyBody fbranch
+  (tbranch',fbranch') <- hoistCommon simplifyT simplifyF
+  t' <- mapM simplifyType t
+  return $ If cond' tbranch' fbranch' t' loc
+
+-- The simplification rules cannot handle Apply, because it requires
+-- access to the full program.
+simplifyExp (Apply fname args tp loc) = do
+  args' <- mapM (simplifySubExp . fst) args
+  tp' <- mapM simplifyType tp
+  prog <- asks envProgram
+  vtable <- asks envVtable
+  case simplifyApply prog vtable fname args loc of
+    Just e  -> return e
+    Nothing -> return $ Apply fname (zip args' $ map snd args) tp' loc
+
+simplifyExp e = simplifyExpBase e
+
+simplifyExpBase :: Exp -> SimpleM Exp
+simplifyExpBase = mapExpM hoist
   where hoist = Mapper {
-                  mapOnExp = hoistInExp
-                , mapOnBody = hoistInBody
-                , mapOnSubExp = hoistInSubExp
-                , mapOnLambda = hoistInLambda
-                , mapOnIdent = hoistInIdent
-                , mapOnType = hoistInType
+                  mapOnExp = simplifyExp
+                , mapOnBody = simplifyBody
+                , mapOnSubExp = simplifySubExp
+                , mapOnLambda = simplifyLambda
+                , mapOnIdent = simplifyIdent
+                , mapOnType = simplifyType
                 , mapOnValue = return
-                , mapOnCertificates = mapM hoistInIdent
+                , mapOnCertificates = simplifyCerts
                 }
 
-hoistInSubExp :: SubExp -> HoistM SubExp
-hoistInSubExp (Var v)          = Var <$> hoistInIdent v
-hoistInSubExp (Constant v loc) = return $ Constant v loc
+simplifySubExp :: SubExp -> SimpleM SubExp
+simplifySubExp (Var ident@(Ident vnm _ pos)) = do
+  bnd <- asks $ ST.lookup vnm . envVtable
+  case bnd of
+    Just (ST.Value v)
+      | isBasicTypeVal v  -> return $ Constant v pos
+    Just (ST.VarId  id' tp1) -> return $ Var $ Ident id' tp1 pos
+    Just (ST.SymExp (SubExps [se] _)) -> return se
+    _                                 -> Var <$> simplifyIdent ident
+  where isBasicTypeVal = basicType . valueType
+simplifySubExp (Constant v loc) = return $ Constant v loc
 
-hoistInIdent :: Ident -> HoistM Ident
-hoistInIdent v = do boundFree $ HS.singleton $ identName v
-                    t' <- hoistInType $ identType v
-                    return v { identType = t' }
+simplifyIdent :: Ident -> SimpleM Ident
+simplifyIdent v = do
+  boundFree $ HS.singleton $ identName v
+  t' <- simplifyType $ identType v
+  return v { identType = t' }
 
-hoistInType :: TypeBase als Shape -> HoistM (TypeBase als Shape)
-hoistInType t = do dims <- mapM hoistInSubExp $ arrayDims t
-                   return $ t `setArrayShape` Shape dims
+simplifyType :: TypeBase als Shape -> SimpleM (TypeBase als Shape)
+simplifyType t = do dims <- mapM simplifySubExp $ arrayDims t
+                    return $ t `setArrayShape` Shape dims
 
-hoistInLambda :: Lambda -> HoistM Lambda
-hoistInLambda (Lambda params body rettype loc) = do
-  body' <- blockIf (hasFree params' `orIf` isUniqueBinding) $ hoistInBody body
-  rettype' <- mapM hoistInType rettype
+simplifyLambda :: Lambda -> SimpleM Lambda
+simplifyLambda (Lambda params body rettype loc) = do
+  body' <- blockIf (hasFree params' `orIf` isUniqueBinding) $ simplifyBody body
+  rettype' <- mapM simplifyType rettype
   return $ Lambda params body' rettype' loc
   where params' = patNameSet $ map fromParam params
+
+simplifyCerts :: Certificates -> SimpleM Certificates
+simplifyCerts = liftM (nub . concat) . mapM check
+  where check idd = do
+          vv <- asks $ ST.lookup (identName idd) . envVtable
+          case vv of
+            Just (ST.Value (BasicVal Checked)) -> return []
+            Just (ST.VarId  id' tp1)           -> return [Ident id' tp1 loc]
+            _ -> return [idd]
+          where loc = srclocOf idd

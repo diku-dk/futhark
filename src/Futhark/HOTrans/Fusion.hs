@@ -594,18 +594,14 @@ insertKerSOAC :: FusedKer -> Body -> FusionGM Body
 insertKerSOAC ker body = do
   prog <- asks program
   let new_soac = fsoac ker
-  tryLam <- normCopyOneLambda prog $ SOAC.lambda new_soac
-
-  case tryLam of
-    Left err   -> badFusionGM err
-    Right lam' -> do
-      (_, nfres) <- fusionGatherLam (HS.empty, mkFreshFusionRes) lam'
-      let nfres' =  cleanFusionResult nfres
-      lam''      <- bindRes nfres' $ fuseInLambda lam'
-      runBinder $ do
-        transformOutput (outputTransform ker) (outputs ker) $
-                        SOAC.setLambda lam'' new_soac
-        return body
+  lam' <- normCopyOneLambda prog $ SOAC.lambda new_soac
+  (_, nfres) <- fusionGatherLam (HS.empty, mkFreshFusionRes) lam'
+  let nfres' =  cleanFusionResult nfres
+  lam''      <- bindRes nfres' $ fuseInLambda lam'
+  runBinder $ do
+    transformOutput (outputTransform ker) (outputs ker) $
+                    SOAC.setLambda lam'' new_soac
+    return body
 
 ---------------------------------------------------
 ---------------------------------------------------

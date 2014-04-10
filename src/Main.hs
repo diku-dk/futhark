@@ -30,7 +30,6 @@ import Futhark.Interpreter
 import Futhark.EnablingOpts.EnablingOptDriver
 import Futhark.HOTrans.HOTransDriver
 import qualified Futhark.FirstOrderTransform as FOT
-import qualified Futhark.Rebinder as RB
 import qualified Futhark.IndexInliner as II
 import qualified Futhark.SOACFlowGraph as FG
 import Futhark.Untrace
@@ -84,8 +83,6 @@ commandLineOptions =
   , Option [] ["no-bounds-checking"]
     (NoArg $ \opts -> opts { futharkboundsCheck = False })
     "Do not perform bounds checking in the generated program."
-  , passoption "Rebinder - hoisting, CSE, dependency graph compression." hoist
-    "o" ["hoist"]
   , passoption "Remove debugging annotations from program." uttransform
     "u" ["untrace"]
   , passoption "Transform all second-order array combinators to for-loops." fotransform
@@ -151,11 +148,6 @@ interpret prog =
           | [] <- elems a = "empty(" ++ I.ppType t ++ ")"
           | otherwise     = "[" ++ intercalate ", " (map ppOutput' $ elems a) ++ "]"
 
-hoist :: Pass
-hoist = Pass { passName = "rebinder"
-             , passOp = return . RB.transformProg
-             }
-
 fotransform :: Pass
 fotransform = Pass { passName = "first-order transform"
                    , passOp = return . FOT.transformProg
@@ -195,7 +187,7 @@ standardPipeline :: [Pass]
 standardPipeline =
   [ uttransform, inlinetransform
   , eotransform, iitransform
-  , hoist,       hotransform, eotransform
+  , hotransform, eotransform
   ]
 
 -- | Entry point.  Non-interactive, except when reading interpreter

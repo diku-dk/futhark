@@ -7,7 +7,7 @@
 -- state or look at the program as a whole.  Compare this to the
 -- fusion algorithm in @Futhark.HOTrans.Fusion@, which must be implemented
 -- as its own pass.
-module Futhark.EnablingOpts.Simplification
+module Futhark.EnablingOpts.Simplifier.Rules
   ( simplifyBinding
   )
 
