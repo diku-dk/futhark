@@ -367,12 +367,20 @@ commonTransforms' inps =
         inspect (mot, prev) inp = Just (mot,inp:prev)
 
 mapDepth :: MapNest -> Int
-mapDepth (MapNest.MapNest _ _ levels _ _) =
-  length (takeWhile niceNest levels) + 1
+mapDepth (MapNest.MapNest _ body levels _ _) =
+  min resDims (length (takeWhile niceNest levels)) + 1
   where niceNest nest =
           HS.null $ HS.fromList (MapNest.nestingParams nest)
                     `HS.intersection`
                     freeInBody (MapNest.nestingPostBody nest)
+        resDims = minDim $ case levels of
+                    [] -> case body of Nest.Fun lam ->
+                                         lambdaReturnType lam
+                                       Nest.NewNest nest _ ->
+                                         Nest.nestingReturnType nest
+                    nest:_ -> MapNest.nestingReturnType nest
+        minDim [] = 0
+        minDim (t:ts) = foldl min (arrayRank t) $ map arrayRank ts
 
 pullRearrange :: SOACNest -> SOAC.ArrayTransforms -> TryFusion (SOACNest, SOAC.ArrayTransforms)
 pullRearrange nest ots = do
