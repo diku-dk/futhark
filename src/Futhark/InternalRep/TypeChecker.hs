@@ -178,13 +178,6 @@ collectDataflow m = pass $ do
   (x, dataflow) <- listen m
   return ((x, dataflow), const mempty)
 
-patDiet :: [Ident] -> Occurences -> [Diet]
-patDiet pat occs = map patDiet' pat
-  where cons =  allConsumed occs
-        patDiet' k
-          | identName k `HS.member` cons = Consume
-          | otherwise                    = Observe
-
 maybeCheckOccurences :: Occurences -> TypeM ()
 maybeCheckOccurences us = do
   check <- asks envCheckOccurences
@@ -484,130 +477,6 @@ checkBody (Body (Let pat e:bnds) res) = do
     return $ Body (Let pat' e':bnds') res'
   where body = Body bnds res
 
--- Checking of loops is done by synthesing the (almost) equivalent
--- function and type-checking a call to it.  The difficult part is
--- assigning uniqueness attributes to the parameters of the function -
--- we'll do this by inspecting the loop body, and look at which of the
--- variables in mergepat are actually consumed.  Also, any variables
--- that are free in the loop body must be passed along as (non-unique)
--- parameters to the function.
-checkBody (Body (DoLoop merge (Ident loopvar _ loopvarloc)
-                          boundexp loopbody:bnds)
-           res) = do
-  let (mergepat, es) = unzip merge
-  -- First, check the bound and initial merge expression and throw
-  -- away the dataflow.  The dataflow will be reconstructed later, but
-  -- we need the result of this to synthesize the function.
-  ((boundexp', es'), _) <-
-    collectDataflow $ do boundexp' <- require [Basic Int] =<< checkSubExp boundexp
-                         es'       <- mapM checkSubExp es
-                         return (boundexp', es')
-  let iparam = Ident loopvar (Basic Int) loc
-
-  -- Check the loop body.  We tap the dataflow before leaving scope,
-  -- so we'll be able to see occurences of variables bound by
-  -- mergepat.
-  (firstscope, mergepat') <-
-    let mergets = zipWith setArrayDims (map subExpType es') $
-                  map (arrayDims . identType) mergepat
-    in checkBinding loc mergepat mergets mempty
-  (loopbody', loopflow) <-
-    firstscope $ collectDataflow $ binding [iparam] $ checkBody loopbody
-
-  -- We can use the name generator in a slightly hacky way to generate
-  -- a unique Name for the function.
-  bound <- newIdent "loop_bound" (Basic Int) loc
-  fname <- newFname "loop_fun"
-
-  let -- | Change the uniqueness attribute of a type to reflect how it
-      -- was used.
-      param (Array et sz _ als) con = Array et sz u als
-        where u = case con of Consume     -> Unique
-                              Observe     -> Nonunique
-      param (Basic bt) _ = Basic bt
-
-      setIdentType v t = v { identType = t }
-
-      -- We use the type of the merge expression, but with uniqueness
-      -- attributes reflected to show how the parts of the merge
-      -- pattern are used - if something was consumed, it has to be a
-      -- unique parameter to the function.
-      rettype = zipWith param (map subExpType es') $
-                patDiet mergepat' $
-                usageOccurences loopflow
-      funparams = zipWith setIdentType mergepat' rettype
-
-  result <- newIdents "merge_val" rettype loc
-
-  let boundnames = HS.insert iparam $ HS.fromList mergepat'
-      ununique ident =
-        ident { identType = param (identType ident) Observe }
-      -- Find the free variables of the loop body.
-      freeInType = mconcat . map (freeInExp . subExp) . arrayDims
-      freeInRettype = mconcat $ map freeInType rettype
-      free = map ununique $ HS.toList $
-             (freeInBody loopbody' <> freeInRettype)
-             `HS.difference` boundnames
-
-      -- These are the parameters expected by the function: All of the
-      -- free variables, followed by the index, followed by the upper
-      -- bound (currently not used), followed by the merge value.
-  let params = free ++ [iparam, bound] ++ funparams
-      bindfun env = env { envFtable = HM.insert fname
-                                      (map toDecl rettype,
-                                       map (toDecl . identType) params) $
-                                      envFtable env }
-
-      -- The body of the function will be the loop body, but with all
-      -- tails replaced with recursive calls.
-      recurse (Result cs args _) =
-        Body [Let result
-              (Apply fname
-               ([(Var k, diet (identType k)) | k <- free ] ++
-                [(Var iparam, Observe),
-                 (Var bound, Observe)] ++
-                zip args (map (diet . subExpType) args))
-               rettype loc)]
-               (Result cs (map Var result) loc)
-  let funbody' = mapResult recurse loopbody'
-
-  (funcall, callflow) <- collectDataflow $ local bindfun $ do
-    -- Check that the function is internally consistent.
-    _ <- unbinding $ checkFun (fname, map toDecl rettype,
-                               map toParam params, funbody', loc)
-    -- Check the actual function call - we start by computing the
-    -- bound and initial merge value, in case they use something
-    -- consumed in the call.  This reintroduces the dataflow for
-    -- boundexp and mergeexp that we previously threw away.
-    checkBody $ Body [Let result
-                      (Apply fname
-                       ([(Var k, diet (identType k)) | k <- free ] ++
-                        [(intconst 0 loc, Observe),
-                         (boundexp', Observe)] ++
-                        zip es' (map diet rettype))
-                       rettype loc)]
-                (Result [] (map Var result) loc)
-
-  -- Now we just need to bind the result of the function call to the
-  -- original merge pattern.  We remove any aliasing to the merge_val
-  -- variables we generated, as they will not actually appear in the
-  -- type-checked program.
-  let removeMergeVals als = als `HS.difference` HS.fromList (map identName result)
-  (secondscope, _) <-
-    checkBinding loc mergepat
-    (map (`changeAliases` removeMergeVals) $ bodyType funcall) callflow
-
-  -- And then check the let-body.
-  secondscope $ do
-    Body bnds' res' <- checkBody letbody
-    return $ Body (DoLoop (zip mergepat' es')
-                   (Ident loopvar (Basic Int) loopvarloc) boundexp'
-                   loopbody':bnds')
-                  res'
-  where letbody = Body bnds res
-        loc = case merge of []      -> loopvarloc
-                            (e,_):_ -> srclocOf e
-
 checkExp :: Exp -> TypeM Exp
 
 checkExp (SubExps es pos) = do
@@ -723,8 +592,10 @@ checkExp (Rearrange cs perm arrexp pos) = do
   arrexp' <- checkSubExp arrexp
   let rank = arrayRank $ subExpType arrexp'
   when (length perm /= rank || sort perm /= [0..rank-1]) $
-    bad $ PermutationError pos perm rank
+    bad $ PermutationError pos perm rank name
   return $ Rearrange cs' perm arrexp' pos
+  where name = case arrexp of Var v -> Just $ identName v
+                              _     -> Nothing
 
 checkExp (Rotate cs n arrexp pos) = do
   cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
@@ -758,6 +629,101 @@ checkExp (Assert e pos) = do
 checkExp (Conjoin es pos) = do
   es' <- mapM (require [Basic Cert] <=< checkSubExp) es
   return $ Conjoin es' pos
+
+-- Checking of loops is done by synthesing the (almost) equivalent
+-- function and type-checking a call to it.  The difficult part is
+-- assigning uniqueness attributes to the parameters of the function -
+-- we'll do this by inspecting the loop body, and look at which of the
+-- variables in mergepat are actually consumed.  Also, any variables
+-- that are free in the loop body must be passed along as (non-unique)
+-- parameters to the function.
+checkExp (DoLoop merge (Ident loopvar _ loopvarloc)
+                 boundexp loopbody loc) = do
+  let (mergepat, es) = unzip merge
+  -- First, check the bound and initial merge expression and throw
+  -- away the dataflow.  The dataflow will be reconstructed later, but
+  -- we need the result of this to synthesize the function.
+  ((boundexp', es'), _) <-
+    collectDataflow $ do boundexp' <- require [Basic Int] =<< checkSubExp boundexp
+                         es'       <- mapM checkSubExp es
+                         return (boundexp', es')
+  let iparam = Ident loopvar (Basic Int) loc
+
+  -- Check the loop body.  We tap the dataflow before leaving scope,
+  -- so we'll be able to see occurences of variables bound by
+  -- mergepat.
+  (firstscope, mergepat') <-
+    let mergets = zipWith setArrayDims (map subExpType es') $
+                  map (arrayDims . identType) mergepat
+    in checkBinding loc mergepat mergets mempty
+  (loopbody', _) <-
+    firstscope $ collectDataflow $ binding [iparam] $ checkBody loopbody
+
+  -- We can use the name generator in a slightly hacky way to generate
+  -- a unique Name for the function.
+  bound <- newIdent "loop_bound" (Basic Int) loc
+  fname <- newFname "loop_fun"
+
+  let setIdentType v t = v { identType = t }
+      upd t1 t2 = (t1 `setAliases` aliases t2)
+                  `setArrayDims` arrayDims t2
+      rettype = zipWith upd (map identType mergepat')
+                            (map subExpType es')
+      funparams = zipWith setIdentType mergepat' rettype
+
+  result <- newIdents "merge_val" rettype loc
+
+  let boundnames = HS.insert iparam $ HS.fromList mergepat'
+      ununique ident =
+        ident { identType = identType ident `setUniqueness` Nonunique }
+      -- Find the free variables of the loop body.
+      freeInType = mconcat . map (freeInExp . subExp) . arrayDims
+      freeInRettype = mconcat $ map freeInType rettype
+      free = map ununique $ HS.toList $
+             (freeInBody loopbody' <> freeInRettype)
+             `HS.difference` boundnames
+
+      -- These are the parameters expected by the function: All of the
+      -- free variables, followed by the index, followed by the upper
+      -- bound (currently not used), followed by the merge value.
+  let params = free ++ [iparam, bound] ++ funparams
+      bindfun env = env { envFtable = HM.insert fname
+                                      (map toDecl rettype,
+                                       map (toDecl . identType) params) $
+                                      envFtable env }
+
+      -- The body of the function will be the loop body, but with all
+      -- tails replaced with recursive calls.
+      recurse (Result cs args _) =
+        Body [Let result
+              (Apply fname
+               ([(Var k, diet (identType k)) | k <- free ] ++
+                [(Var iparam, Observe),
+                 (Var bound, Observe)] ++
+                zip args (map (diet . subExpType) args))
+               rettype loc)]
+               (Result cs (map Var result) loc)
+  let funbody' = mapResult recurse loopbody'
+  funcall <- local bindfun $ do
+    -- Check that the function is internally consistent.
+    _ <- unbinding $ checkFun (fname, map toDecl rettype,
+                               map toParam params, funbody', loc)
+    -- Check the actual function call - we start by computing the
+    -- bound and initial merge value, in case they use something
+    -- consumed in the call.  This reintroduces the dataflow for
+    -- boundexp and mergeexp that we previously threw away.
+    checkBody $ Body [Let result
+                      (Apply fname
+                       ([(Var k, diet (identType k)) | k <- free ] ++
+                        [(intconst 0 loc, Observe),
+                         (boundexp', Observe)] ++
+                        zip es' (map diet rettype))
+                       rettype loc)]
+                (Result [] (map Var result) loc)
+  let mergepat'' = zipWith setIdentType mergepat' $ bodyType funcall
+  return $ DoLoop (zip mergepat'' es')
+                  (Ident loopvar (Basic Int) loopvarloc) boundexp'
+                  loopbody' loc
 
 checkExp (Map ass fun arrexps pos) = do
   ass' <- mapM (requireI [Basic Cert] <=< checkIdent) ass
@@ -914,8 +880,8 @@ checkBinding loc pat ts dflow
                 checkAnnotation (srclocOf pat)
                 ("binding of variable " ++ textual name) namet t
           let t'' = subExpType $ Var $ Ident name t' pos
-          add $ Ident name t'' pos
-          return $ Ident name t'' pos
+          add $ Ident name (namet `setAliases` aliases t'') pos
+          return $ Ident name (namet `setAliases` aliases t'') pos
 
         add ident = do
           bnd <- gets $ find (==ident)

@@ -411,32 +411,6 @@ compileBody place (Body (Let pat e:bnds) res) = do
                      $items:body
                    }|]
 
-compileBody place (Body (DoLoop merge loopvar boundexp loopbody:bnds) res) = do
-  let (mergepat, mergeexp) = unzip merge
-  loopvar' <- new $ textual $ identName loopvar
-  bound <- new "loop_bound"
-  mergevarR <- new $ "loop_mergevar_read"
-  mergevarW <- new $ "loop_mergevar_write"
-  let bindings = compilePattern mergepat (varExp mergevarR)
-  mergeexp' <- compileExp (varExp mergevarR) $ SubExps mergeexp (srclocOf boundexp)
-  mergetype <- bodyCType loopbody
-  boundexp' <- compileSubExp (varExp bound) boundexp
-  loopbody' <- binding ((identName loopvar, varExp loopvar') : bindings) $
-               compileBody (varExp mergevarW) loopbody
-  letbody <- binding bindings $ compileBody place $ Body bnds res
-  return $ stm [C.cstm|{
-                     int $id:bound, $id:loopvar';
-                     $ty:mergetype $id:mergevarR;
-                     $ty:mergetype $id:mergevarW;
-                     $items:mergeexp'
-                     $items:boundexp'
-                     for ($id:loopvar' = 0; $id:loopvar' < $id:bound; $id:loopvar'++) {
-                       $items:loopbody'
-                       $id:mergevarR = $id:mergevarW;
-                     }
-                     $items:letbody
-                   }|]
-
 compileExp :: C.Exp -> Exp -> CompilerM [C.BlockItem]
 
 compileExp target e = do
@@ -830,6 +804,28 @@ compileExp' place (Assert e loc) = do
                    }|]
 
 compileExp' _ (Conjoin _ _) = return []
+
+compileExp' place (DoLoop merge loopvar boundexp loopbody _) = do
+  let (mergepat, mergeexp) = unzip merge
+  loopvar' <- new $ textual $ identName loopvar
+  bound <- new "loop_bound"
+  mergevarW <- new $ "loop_mergevar_write"
+  let bindings = compilePattern mergepat place
+  mergeexp' <- compileExp place $ SubExps mergeexp (srclocOf boundexp)
+  mergetype <- bodyCType loopbody
+  boundexp' <- compileSubExp (varExp bound) boundexp
+  loopbody' <- binding ((identName loopvar, varExp loopvar') : bindings) $
+               compileBody (varExp mergevarW) loopbody
+  return $ stm [C.cstm|{
+                     int $id:bound, $id:loopvar';
+                     $ty:mergetype $id:mergevarW;
+                     $items:mergeexp'
+                     $items:boundexp'
+                     for ($id:loopvar' = 0; $id:loopvar' < $id:bound; $id:loopvar'++) {
+                       $items:loopbody'
+                       $exp:place = $id:mergevarW;
+                     }
+                   }|]
 
 compileExp' _ (Map {}) = soacError
 compileExp' _ (Reduce {}) = soacError

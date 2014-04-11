@@ -96,14 +96,6 @@ mapBodyM tv (Body (Let pat e:bnds) res) = do
   bnd <- Let <$> mapM (mapOnIdent tv) pat <*> mapOnExp tv e
   Body bnds' res' <- mapOnBody tv $ Body bnds res
   return $ Body (bnd:bnds') res'
-mapBodyM tv (Body (DoLoop mergepat loopvar boundexp loopbody:bnds) res) = do
-  bnd <- DoLoop <$>
-         (zip <$> mapM (mapOnIdent tv) vs <*> mapM (mapOnSubExp tv) es) <*>
-         mapOnIdent tv loopvar <*> mapOnSubExp tv boundexp <*>
-         mapOnBody tv loopbody
-  Body bnds' res' <- mapOnBody tv $ Body bnds res
-  return $ Body (bnd:bnds') res'
-  where (vs,es) = unzip mergepat
 
 -- | Like 'mapBodyM', but in the 'Identity' monad.
 mapBody :: Mapper Identity -> Body -> Body
@@ -171,6 +163,11 @@ mapExpM tv (Assert e loc) =
   pure Assert <*> mapOnSubExp tv e <*> pure loc
 mapExpM tv (Conjoin es loc) =
   pure Conjoin <*> mapM (mapOnSubExp tv) es <*> pure loc
+mapExpM tv (DoLoop mergepat loopvar boundexp loopbody loc) =
+  DoLoop <$> (zip <$> mapM (mapOnIdent tv) vs <*> mapM (mapOnSubExp tv) es) <*>
+             mapOnIdent tv loopvar <*> mapOnSubExp tv boundexp <*>
+             mapOnBody tv loopbody <*> pure loc
+  where (vs,es) = unzip mergepat
 mapExpM tv (Map cs fun arrexps loc) =
   pure Map <*> mapOnCertificates tv cs <*>
        mapOnLambda tv fun <*> mapM (mapOnSubExp tv) arrexps <*>

@@ -173,20 +173,31 @@ removeDeadMapping _ _ = return Nothing
 -- it affects any other values.  Fortunately, the latter restriction
 -- is enough.  I do not claim that the current implementation of this
 -- rule is perfect, but it should suffice for many cases.
+--
+-- FIXME: Also, we technically generate a bunch of undefined variables
+-- this way... fortunately, the dead code eliminator will remove the
+-- bindings containing them before we get to the code generator, but
+-- it's still pretty ugly.
 removeUnusedLoopResult :: BottomUpRule
-removeUnusedLoopResult used (DoLoop merge i bound body)
-  | not $ all usedAfterwards mergepat = return $
-  let Result cs es loc = bodyResult body
-      necessary = map snd $ filter (usedAfterwards . fst) $ zip mergepat es
-      necessary' = mconcat $ used : map dependencies necessary
-      resIsNecessary (v, _, _) = identName v `HS.member` necessary'
-      (mergepat', mergeexp', es') =
-        unzip3 $ filter resIsNecessary $ zip3 mergepat mergeexp es
-      merge' = zip mergepat' mergeexp'
-      body' = resultBody cs es' loc `setBodyResult` body
-  in Just [DoLoop merge' i bound body']
-  where (mergepat, mergeexp) = unzip merge
-        usedAfterwards = (`HS.member` used). identName
+removeUnusedLoopResult used (Let pat (DoLoop merge i bound body loc))
+  | not $ all usedAfterwards pat = return $
+  let Result cs es resloc = bodyResult body
+      usedResults = map snd $ filter (usedAfterwards . fst) $ zip pat es
+      necessary' = mconcat $ map dependencies usedResults
+      resIsNecessary ((v,_), out, _) =
+        identName v `HS.member` necessary' ||
+        usedAfterwards out ||
+        usedInPatType v
+      (merge', pat', es') =
+        unzip3 $ filter resIsNecessary $ zip3 merge pat es
+      body' = resultBody cs es' resloc `setBodyResult` body
+  in if pat == pat' || True
+     then Nothing
+     else Just [Let pat' $ DoLoop merge' i bound body' loc]
+  where usedAfterwards = (`HS.member` used) . identName
+        patDimNames = mconcat $ map freeNamesInExp $
+                      concatMap (map subExp . arrayDims . identType) pat
+        usedInPatType = (`HS.member` patDimNames) . identName
 
         allDependencies = dataDependencies body
         dependencies (Constant _ _) = HS.empty
@@ -196,26 +207,29 @@ removeUnusedLoopResult _ _ =
   return Nothing
 
 hoistLoopInvariantMergeVariables :: TopDownRule
-hoistLoopInvariantMergeVariables _ (DoLoop merge idd n loopbody) =
+hoistLoopInvariantMergeVariables _ (Let pat (DoLoop merge idd n loopbody loc)) =
     -- Figure out which of the elemens of loopresult are loop-invariant,
   -- and hoist them out.
-  case foldr checkInvariance ([], [], []) $ zip merge ses of
-    ([], _, _) ->
+  case foldr checkInvariance ([], [], [], []) $ zip3 pat merge ses of
+    ([], _, _, _) ->
       -- Nothing is invariant.
       return Nothing
-    (invariant, merge', ses') ->
-      -- We have moved something invariant out of the loop - re-run
-      -- the operation with the new enclosing bindings, because
-      -- opportunities for copy propagation will have cropped up.
+    (invariant, pat', merge', ses') ->
+      -- We have moved something invariant out of the loop.
       let loopbody' = resultBody cs ses' resloc `setBodyResult` loopbody
-      in return $ Just $ invariant ++ [DoLoop merge' idd n loopbody']
+      in return $ Just $ invariant ++ [Let pat' $ DoLoop merge' idd n loopbody' loc]
   where Result cs ses resloc = bodyResult loopbody
 
-        checkInvariance ((v1,initExp), Var v2) (invariant, merge', resExps)
-          | identName v1 == identName v2 =
-            (Let [v1] (subExp initExp):invariant, merge', resExps)
-        checkInvariance ((v1,initExp), resExp) (invariant, merge', resExps) =
-          (invariant, (v1,initExp):merge', resExp:resExps)
+        patDimNames = mconcat $ map freeNamesInExp $
+                      concatMap (map subExp . arrayDims . identType) pat
+        usedInPatType = (`HS.member` patDimNames) . identName
+
+        checkInvariance (v0, (v1,initExp), Var v2) (invariant, pat', merge', resExps)
+          | identName v1 == identName v2 && not (usedInPatType v0) =
+          (Let [v0] (subExp initExp):Let [v1] (subExp initExp):invariant,
+           pat', merge', resExps)
+        checkInvariance (v0, (v1,initExp), resExp) (invariant, pat', merge', resExps) =
+          (invariant, v0:pat', (v1,initExp):merge', resExp:resExps)
 hoistLoopInvariantMergeVariables _ _ = return Nothing
 
 -- | A function that, given a variable name, returns its definition.
@@ -224,9 +238,9 @@ type VarLookup = VName -> Maybe Exp
 type LetTopDownRule = VarLookup -> Exp -> Maybe Exp
 
 letRule :: LetTopDownRule -> TopDownRule
-letRule rule vtable (Let pat e) = return $ (:[]) . Let pat <$> rule look e
+letRule rule vtable (Let pat e) =
+  return $ (:[]) . Let pat <$> rule look e
   where look = (`ST.lookupExp` vtable)
-letRule _    _      _           = return Nothing
 
 simplifyClosedFormRedomap :: TopDownRule
 simplifyClosedFormRedomap vtable (Let pat (Redomap _ _ innerfun acc arr _)) =

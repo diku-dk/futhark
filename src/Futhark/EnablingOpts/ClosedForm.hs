@@ -121,7 +121,6 @@ determineKnownBindings look lam accs arrs =
 boundInBody :: Body -> HS.HashSet Ident
 boundInBody = mconcat . map bound . bodyBindings
   where bound (Let pat _)            = HS.fromList pat
-        bound (DoLoop merge _ _ _)   = HS.fromList $ map fst merge
 
 makeBindMap :: Body -> HM.HashMap Ident Exp
 makeBindMap = HM.fromList . mapMaybe isSingletonBinding . bodyBindings

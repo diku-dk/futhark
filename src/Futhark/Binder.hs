@@ -46,7 +46,7 @@ letWithBind cs dest src idxs ve =
 
 loopBind :: MonadBinder m => [(Ident, SubExp)] -> Ident -> SubExp -> Body -> m ()
 loopBind pat i bound loopbody =
-  addBinding $ DoLoop pat i bound loopbody
+  addBinding $ Let (map fst pat) $ DoLoop pat i bound loopbody $ srclocOf i
 
 bodyBind :: MonadBinder m => Body -> m [SubExp]
 bodyBind (Body bnds (Result _ es _)) = do

@@ -37,25 +37,25 @@ splitBodyAssertions body = do
 
 splitBndAssertions :: Binding -> SplitM [Binding]
 
-splitBndAssertions (DoLoop merge i bound body) = do
-  -- XXX gross hack
-  (Body [DoLoop merge' i' _ body'] _) <-
-    renameBody $ Body [DoLoop merge i bound body] nullRes
+splitBndAssertions (Let pat (DoLoop merge i bound body loc)) = do
+  -- XXX slightly gross hack
+  DoLoop merge' i' _ body' _ <-
+    renameExp $ DoLoop merge i bound body loc
   (certmergepat, certbody, allBoundsChecks) <-
     splitLoopBody merge' body'
   allBoundsChecksCert  <-
     newIdent "loop_bounds_cert" (Basic Cert) loc
+  pat' <- mapM (newIdent' id) pat
   let certmerge = zip (allBoundsChecks:certmergepat)
                       (constant True loc:map snd merge)
-      certloop = DoLoop certmerge i' bound certbody
+      certloop = Let pat' $ DoLoop certmerge i' bound certbody loc
       valbody = replaceBoundsCerts allBoundsChecksCert body
-      valloop = DoLoop merge i bound valbody
+      valloop = Let pat $ DoLoop merge i bound valbody loc
   Body certbnds _ <- runBinder $ copyConsumed $ Body [certloop] nullRes
   return $ certbnds ++
            [Let [allBoundsChecksCert] (Assert (Var allBoundsChecks) loc),
             valloop]
-  where loc = srclocOf body
-        nullRes = Result [] [] $ srclocOf body
+  where nullRes = Result [] [] $ srclocOf body
 splitBndAssertions bnd = return [bnd]
 
 splitLoopBody :: [(Ident,SubExp)] -> Body -> SplitM ([Ident], Body, Ident)
@@ -83,16 +83,15 @@ returnChecksInBinding (Let pat (If cond tbranch fbranch t loc)) = do
           [Var cert])
 returnChecksInBinding (Let pat e@(Assert prop _)) =
   return (Let pat e, [prop])
-returnChecksInBinding (Let pat e) =
-  return (Let pat e, []) -- XXX what if 'e' is a SOAC or something?
-returnChecksInBinding (DoLoop merge i bound body) = do
+returnChecksInBinding (Let pat (DoLoop merge i bound body loc)) = do
   (certmergepat, certbody, allBoundsChecks) <-
     splitLoopBody merge body
   let certmerge = zip (allBoundsChecks:certmergepat)
                   (constant True loc:map snd merge)
-      certloop = DoLoop certmerge i bound certbody
-  return (certloop, [Var allBoundsChecks])
-  where loc = srclocOf body
+      certloop = DoLoop certmerge i bound certbody loc
+  return (Let pat certloop, [Var allBoundsChecks])
+returnChecksInBinding (Let pat e) =
+  return (Let pat e, []) -- XXX what if 'e' is a SOAC or something?
 
 replaceBoundsCerts :: Ident -> Body -> Body
 replaceBoundsCerts c = mapBody replace

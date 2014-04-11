@@ -231,20 +231,6 @@ evalBody (Body (Let pat e:bnds) res) = do
   v <- evalExp e
   binding (zip pat v) $ evalBody $ Body bnds res
 
-evalBody (Body (DoLoop merge loopvar boundexp loopbody:bnds) res) = do
-  bound <- evalSubExp boundexp
-  mergestart <- mapM evalSubExp mergeexp
-  case bound of
-    BasicVal (IntVal n) -> do
-      loopresult <- foldM iteration mergestart [0..n-1]
-      binding (zip mergepat loopresult) $ evalBody $ Body bnds res
-    _ -> bad $ TypeError (srclocOf boundexp) "evalBody DoLoop"
-  where (mergepat, mergeexp) = unzip merge
-        iteration mergeval i =
-          binding [(loopvar, BasicVal $ IntVal i)] $
-            binding (zip mergepat mergeval) $
-              evalBody loopbody
-
 evalExp :: Exp -> FutharkM [Value]
 
 evalExp (SubExps es _) =
@@ -421,6 +407,19 @@ evalExp (Assert e loc) = do
               bad $ AssertFailed loc
 
 evalExp (Conjoin _ _) = return [BasicVal Checked]
+
+evalExp (DoLoop merge loopvar boundexp loopbody loc) = do
+  bound <- evalSubExp boundexp
+  mergestart <- mapM evalSubExp mergeexp
+  case bound of
+    BasicVal (IntVal n) ->
+      foldM iteration mergestart [0..n-1]
+    _ -> bad $ TypeError loc "evalBody DoLoop"
+  where (mergepat, mergeexp) = unzip merge
+        iteration mergeval i =
+          binding [(loopvar, BasicVal $ IntVal i)] $
+            binding (zip mergepat mergeval) $
+              evalBody loopbody
 
 evalExp (Map _ fun arrexps loc) = do
   vss <- mapM (arrToList loc <=< evalSubExp) arrexps

@@ -142,9 +142,12 @@ flowForBody (Body (Let pat e:bnds) res) = do
             [ (name, HS.map ("complex":) s) | name <- freeInE ]
           | otherwise =
             [(usedName, s)]
-flowForBody (Body (DoLoop merge _ boundexp loopbody:bnds) res)
-  | names@(name:_) <- map (identName . fst) merge = do
-  flowForBody $ Body bnds res
+
+flowForBody b = walkBodyM flow b
+
+flowForExp :: Exp -> FlowM ()
+flowForExp (DoLoop merge _ boundexp loopbody _)
+  | names@(name:_) <- map (identName . fst) merge =
   tell $ HM.singleton
          (textual name)
          SOACInfo {
@@ -162,11 +165,7 @@ flowForBody (Body (DoLoop merge _ boundexp loopbody:bnds) res)
                  ]
          , soacBodyInfo = execWriter $ flowForBody loopbody
          }
-
-flowForBody b = walkBodyM flow b
-
-flowForExp :: Exp -> FlowM ()
-flowForExp = walkExpM flow
+flowForExp e = walkExpM flow e
 
 flow :: Walker FlowM
 flow = identityWalker {

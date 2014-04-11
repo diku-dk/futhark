@@ -41,12 +41,6 @@ externaliseBody (I.Body (I.Let pat e:bnds) res) =
   E.LetPat (externalisePat pat loc) (externaliseExp e)
            (externaliseBody $ I.Body bnds res) loc
   where loc = srclocOf e
-externaliseBody (I.Body (I.DoLoop merge i bound loopbody:bnds) res) =
-  E.DoLoop (externalisePat mergepat loc) (externaliseSubExps mergeexp loc)
-           (externaliseIdent i) (externaliseSubExp bound)
-           (externaliseBody loopbody) (externaliseBody $ I.Body bnds res) loc
-  where (mergepat, mergeexp) = unzip merge
-        loc = srclocOf res
 
 externaliseExp :: I.Exp -> E.Exp
 externaliseExp (I.SubExps es loc) = externaliseSubExps es loc
@@ -120,6 +114,12 @@ externaliseExp (I.Rotate cs n e loc) =
            n
            (externaliseSubExp e)
            loc
+externaliseExp (I.DoLoop merge i bound loopbody loc) =
+  E.DoLoop (externalisePat mergepat loc) (externaliseSubExps mergeexp loc)
+           (externaliseIdent i) (externaliseSubExp bound)
+           (externaliseBody loopbody)
+           (E.TupLit (map (E.Var . externaliseIdent) mergepat) loc) loc
+  where (mergepat, mergeexp) = unzip merge
 externaliseExp (I.Map _ fun es loc) =
   maybeUnzip $ E.Map (externaliseMapLambda fun)
                (externaliseSOACArrayArgs es loc)

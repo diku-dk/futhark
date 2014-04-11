@@ -141,7 +141,6 @@ performArrayDelays pat e = do
 cheapBody :: Body -> Bool
 cheapBody (Body bnds _) = all cheapBind bnds
   where cheapBind (Let _ e) = cheapExp e
-        cheapBind _             = False
 
 cheapExp :: Exp -> Bool
 cheapExp (BinOp {}) = True

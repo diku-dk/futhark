@@ -64,29 +64,22 @@ simplifyFun (fname, rettype, params, body, loc) = do
   body' <- blockAllHoisting $ bindParams params $ simplifyBody body
   return (fname, rettype, params, body', loc)
 
-data BindNeed = LoopNeed [(Ident,SubExp)] Ident SubExp Body
-              | LetNeed [Ident] Exp [Exp]
+data BindNeed = LetNeed [Ident] Exp [Exp]
                 deriving (Show, Eq)
 
 type NeedSet = [BindNeed]
 
 asTail :: BindNeed -> Body
-asTail (LoopNeed merge i bound loopbody) =
-  Body [DoLoop merge i bound loopbody] $ Result [] [] loc
-    where loc = srclocOf loopbody
-asTail (LetNeed pat e _) =
-  Body [Let pat e] $ Result [] [] loc
-    where loc = srclocOf pat
+asTail (LetNeed pat e _) = Body [Let pat e] $ Result [] [] loc
+  where loc = srclocOf pat
 
 requires :: BindNeed -> HS.HashSet VName
 requires (LetNeed pat e alts) =
   freeInE `mappend` freeInPat
   where freeInE   = mconcat $ map freeNamesInExp $ e : alts
         freeInPat = mconcat $ map (freeInType . identType) pat
-requires bnd = HS.map identName $ freeInBody $ asTail bnd
 
 provides :: BindNeed -> HS.HashSet VName
-provides (LoopNeed merge _ _ _)     = patNameSet $ map fst merge
 provides (LetNeed pat _ _)          = patNameSet pat
 
 patNameSet :: [Ident] -> HS.HashSet VName
@@ -140,12 +133,6 @@ boundFree fs = tell $ Need [] fs
 usedName :: VName -> SimpleM ()
 usedName = boundFree . HS.singleton
 
-collectFreeOccurences :: SimpleM a -> SimpleM (a, HS.HashSet VName)
-collectFreeOccurences m = pass $ do
-  (x, needs) <- listen m
-  return ((x, freeInBound needs),
-          const needs { freeInBound  = HS.empty })
-
 localVtable :: (ST.SymbolTable -> ST.SymbolTable) -> SimpleM a -> SimpleM a
 localVtable f = local $ \env -> env { envVtable = f $ envVtable env }
 
@@ -197,11 +184,6 @@ bindLet :: [Ident] -> Exp -> SimpleM a -> SimpleM a
 
 bindLet = withBinding
 
-bindLoop :: [(Ident,SubExp)] -> Ident -> SubExp -> Body -> SimpleM a -> SimpleM a
-bindLoop merge i bound body m = do
-  needThis $ LoopNeed merge i bound body
-  m
-
 addBindings :: MonadFreshNames m =>
                DupeState -> [BindNeed] -> Body -> HS.HashSet VName
             -> m (Body, HS.HashSet VName)
@@ -227,14 +209,7 @@ addBindings dupes needs body uses = do
         attachUsage bnd = (bnd, providedByBnd bnd, usedInBnd bnd)
         providedByBnd (Let pat _) =
           HS.fromList $ map identName pat
-        providedByBnd (DoLoop merge _ _ _) =
-          HS.fromList $ map (identName . fst) merge
         usedInBnd bnd = freeNamesInBody $ Body [bnd] $ Result [] [] noLoc
-
-        pick (m,ds) bnd@(LoopNeed merge loopvar boundexp loopbody) =
-          ((m `HM.union` distances m bnd, ds),
-           (DoLoop merge loopvar boundexp loopbody,
-            provides bnd, requires bnd))
 
         pick (m,ds) (LetNeed pat e alts) =
           let add e' =
@@ -271,17 +246,9 @@ expCost (Replicate {}) = 1
 expCost _ = 0
 
 distances :: HM.HashMap VName Int -> BindNeed -> HM.HashMap VName Int
-distances m need = HM.fromList [ (k, d+cost) | k <- HS.toList outs ]
+distances m (LetNeed pat e _) = HM.fromList [ (k, d+cost) | k <- HS.toList outs ]
   where d = HS.foldl' f 0 ins
-        (outs, ins, cost) =
-          case need of
-            LetNeed pat e _ ->
-              (patNameSet pat, freeNamesInExp e, expCost e)
-            LoopNeed merge _ bound loopbody ->
-              (patNameSet $ map fst merge,
-               mconcat $ freeNamesInBody loopbody : map freeNamesInExp
-               (subExp bound : map (subExp . snd) merge),
-               1)
+        (outs, ins, cost) = (patNameSet pat, freeNamesInExp e, expCost e)
         f x k = case HM.lookup k m of
                   Just y  -> max x y
                   Nothing -> x
@@ -332,22 +299,16 @@ splitHoistable block body needs =
         foldl split ([], [], HS.empty) $ inDepOrder needs
   in (reverse blocked, hoistable)
   where block' = block $ bodyInfo body
-        split (blocked, hoistable, ks) need =
-          case need of
-            LetNeed pat e es ->
-              let bad e' = block' (LetNeed pat e' []) || ks `anyIsFreeIn` e'
-              in case (bad e, filter (not . bad) es) of
-                   (True, [])     ->
-                     (need : blocked, hoistable,
-                      patNameSet pat `HS.union` ks)
-                   (True, e':es') ->
-                     (blocked, LetNeed pat e' es' : hoistable, ks)
-                   (False, es')   ->
-                     (blocked, LetNeed pat e es' : hoistable, ks)
-            _ | requires need `intersects` ks || block' need ->
-                (need : blocked, hoistable, provides need `HS.union` ks)
-              | otherwise ->
-                (blocked, need : hoistable, ks)
+        split (blocked, hoistable, ks) need@(LetNeed pat e es) =
+          let bad e' = block' (LetNeed pat e' []) || ks `anyIsFreeIn` e'
+          in case (bad e, filter (not . bad) es) of
+               (True, [])     ->
+                 (need : blocked, hoistable,
+                  patNameSet pat `HS.union` ks)
+               (True, e':es') ->
+                 (blocked, LetNeed pat e' es' : hoistable, ks)
+               (False, es')   ->
+                 (blocked, LetNeed pat e es' : hoistable, ks)
 
 blockIfSeq :: [BlockPred] -> SimpleM Body -> SimpleM Body
 blockIfSeq ps m = foldl (flip blockIf) m ps
@@ -370,9 +331,7 @@ hasFree :: HS.HashSet VName -> BlockPred
 hasFree ks _ need = ks `intersects` requires need
 
 isNotSafe :: BlockPred
-isNotSafe _ = not . safeBnd
-  where safeBnd (LetNeed _ e _) = safeExp e
-        safeBnd _               = False
+isNotSafe _ (LetNeed _ e _) = not $ safeExp e
 
 isNotCheap :: BlockPred
 isNotCheap _ = not . cheapBnd
@@ -382,18 +341,12 @@ isNotCheap _ = not . cheapBnd
         cheap (Negate {})  = True
         cheap _            = False
         cheapBnd (LetNeed _ e _) = cheap e
-        cheapBnd _               = False
 
 uniqPat :: [Ident] -> Bool
 uniqPat = any $ unique . identType
 
 isUniqueBinding :: BlockPred
-isUniqueBinding _ (LoopNeed merge _ _ _)     = uniqPat $ map fst merge
 isUniqueBinding _ (LetNeed pat _ _)          = uniqPat pat
-
-isConsumed :: BlockPred
-isConsumed body need =
-  provides need `intersects` bodyConsumes body
 
 hoistCommon :: SimpleM Body -> SimpleM Body -> SimpleM (Body, Body)
 hoistCommon m1 m2 = pass $ do
@@ -426,27 +379,23 @@ simplifyBody (Body (Let pat e:bnds) res) = do
     Nothing      ->
       bindLet pat' e' $ simplifyBody $ Body bnds res
 
-simplifyBody (Body (DoLoop merge loopvar boundexp loopbody:bnds) res) = do
+simplifyExp :: Exp -> SimpleM Exp
+
+simplifyExp (DoLoop merge loopvar boundexp loopbody loc) = do
   let (mergepat, mergeexp) = unzip merge
   mergepat' <- mapM simplifyIdentBinding mergepat
   mergeexp' <- mapM simplifySubExp mergeexp
   boundexp' <- simplifySubExp boundexp
-  -- XXX our loop representation is retarded (see collectFreeOccurences).
-  (loopbody', _) <- collectFreeOccurences $
-                    blockIfSeq [hasFree boundnames, isConsumed] $
-                    bindLoopVar loopvar boundexp' $
-                    simplifyBody loopbody
+  -- Blocking hoisting of all unique bindings is probably too
+  -- conservative, but there is currently no nice way to mark
+  -- consumption of the loop body result.
+  loopbody' <- blockIfSeq [hasFree boundnames, isUniqueBinding] $
+               bindLoopVar loopvar boundexp' $
+               simplifyBody loopbody
   let merge' = zip mergepat' mergeexp'
-  vtable <- asks envVtable
-  simplified <- topDownSimplifyBinding vtable $
-                DoLoop merge' loopvar boundexp' loopbody'
-  case simplified of
-    Nothing -> bindLoop merge' loopvar boundexp' loopbody' $
-               simplifyBody $ Body bnds res
-    Just newbnds -> simplifyBody $ Body (newbnds++bnds) res
-  where boundnames = identName loopvar `HS.insert` patNameSet (map fst merge)
-
-simplifyExp :: Exp -> SimpleM Exp
+  return $ DoLoop merge' loopvar boundexp' loopbody' loc
+  where boundnames = identName loopvar `HS.insert`
+                     patNameSet (map fst merge)
 
 simplifyExp (If cond tbranch fbranch t loc) = do
   -- Here, we have to check whether 'cond' puts a bound on some free
