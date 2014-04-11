@@ -45,10 +45,10 @@ splitBndAssertions (Let pat (DoLoop merge i bound body loc)) = do
     splitLoopBody merge' body'
   allBoundsChecksCert  <-
     newIdent "loop_bounds_cert" (Basic Cert) loc
-  pat' <- mapM (newIdent' id) pat
+  pat' <- mapM (newIdent' id) certmergepat
   let certmerge = zip (allBoundsChecks:certmergepat)
                       (constant True loc:map snd merge)
-      certloop = Let (allBoundsChecksCert:pat') $
+      certloop = Let (allBoundsChecks:pat') $
                  DoLoop certmerge i' bound certbody loc
       valbody = replaceBoundsCerts allBoundsChecksCert body
       valloop = Let pat $ DoLoop merge i bound valbody loc
