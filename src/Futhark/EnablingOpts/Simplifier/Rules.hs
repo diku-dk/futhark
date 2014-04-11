@@ -82,7 +82,8 @@ topDownRules = [ liftIdentityMapping
                , letRule simplifyAssert
                , letRule simplifyConjoin
                , letRule simplifyIndexing
-               , simplifyBranch
+               , evaluateBranch
+               , hoistBranchInvariant
                ]
 
 bottomUpRules :: [BottomUpRule]
@@ -583,8 +584,8 @@ simplifyIndexing look (Index cs idd inds loc) =
 
 simplifyIndexing _ _ = Nothing
 
-simplifyBranch :: TopDownRule
-simplifyBranch _ (Let pat (If e1 tb fb _ _))
+evaluateBranch :: TopDownRule
+evaluateBranch _ (Let pat (If e1 tb fb _ _))
   | Just branch <- checkBranch =
   let Result _ ses resloc = bodyResult branch
   in return $ Just $ bodyBindings branch ++ [Let pat $ SubExps ses resloc]
@@ -592,7 +593,25 @@ simplifyBranch _ (Let pat (If e1 tb fb _ _))
           | isCt1 e1  = Just tb
           | isCt0 e1  = Just fb
           | otherwise = Nothing
-simplifyBranch _ _ = return Nothing
+evaluateBranch _ _ = return Nothing
+
+hoistBranchInvariant :: TopDownRule
+hoistBranchInvariant _ (Let pat (If e1 tb fb ts loc)) = return $
+  let Result tcs tses tresloc = bodyResult tb
+      Result fcs fses fresloc = bodyResult fb
+      (pat', res, invariant) =
+        foldl branchInvariant ([], [], []) $
+        zip pat (zip3 tses fses ts)
+      (tses', fses', ts') = unzip3 res
+      tb' = resultBody tcs tses' tresloc `setBodyResult` tb
+      fb' = resultBody fcs fses' fresloc `setBodyResult` fb
+  in if null invariant
+     then Nothing
+     else Just $ invariant ++ [Let pat' $ If e1 tb' fb' ts' loc]
+  where branchInvariant (pat', res, invariant) (v, (tse, fse, t))
+          | tse == fse = (pat', res, Let [v] (subExp tse) : invariant)
+          | otherwise  = (v:pat', (tse,fse,t):res, invariant)
+hoistBranchInvariant _ _ = return Nothing
 
 -- Some helper functions
 
