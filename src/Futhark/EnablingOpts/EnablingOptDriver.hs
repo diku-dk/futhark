@@ -1,6 +1,5 @@
 module Futhark.EnablingOpts.EnablingOptDriver
   ( enablingOpts
-  , copyCtProp
   , CallGraph
   , buildCallGraph
   , aggInlineDriver
@@ -16,7 +15,7 @@ import Futhark.MonadFreshNames
 import qualified Futhark.IndexInliner as II
 
 import Futhark.EnablingOpts.InliningDeadFun
-import Futhark.EnablingOpts.CopyCtPropFold
+import Futhark.EnablingOpts.Simplifier
 import Futhark.EnablingOpts.DeadVarElim
 import Futhark.EnablingOpts.EnablingOptErrors
 import Futhark.EnablingOpts.AlgSimplify
@@ -40,14 +39,12 @@ enablingOpts prog = do
 
 normCopyDeadOpts :: Prog -> Either EnablingOptError Prog
 normCopyDeadOpts prog = do
-    (_,prog_cp)    <- copyCtProp      prog
-    (_, prog_dce)  <- deadCodeElim    prog_cp
-    return prog_dce
+  let prog_cp    =  simplifyProg prog
+  (_, prog_dce)  <- deadCodeElim prog_cp
+  return prog_dce
 
 normCopyOneLambda :: MonadFreshNames m => Prog -> Lambda ->
-                     m (Either EnablingOptError Lambda)
-normCopyOneLambda prog lam = modifyNameSource $ \src ->
-  let res = do lam' <- copyCtPropOneLambda prog  lam
-               return $ II.transformLambda src lam'
-  in case res of Left e                -> (Left e, src)
-                 Right (normLam, src') -> (Right normLam, src')
+                     m Lambda
+normCopyOneLambda prog lam = do
+  lam' <- simplifyOneLambda prog lam
+  modifyNameSource $ flip II.transformLambda lam'

@@ -19,7 +19,7 @@ import Futhark.MonadFreshNames
 import Futhark.EnablingOpts.EnablingOptDriver
 import Futhark.HOTrans.LoopKernel
 import Futhark.HORepresentation.SOAC (SOAC)
-import Futhark.Tools
+import Futhark.Binder
 import qualified Futhark.HORepresentation.SOAC as SOAC
 
 data FusionGEnv = FusionGEnv {
@@ -594,29 +594,14 @@ insertKerSOAC :: FusedKer -> Body -> FusionGM Body
 insertKerSOAC ker body = do
   prog <- asks program
   let new_soac = fsoac ker
-  tryLam <- normCopyOneLambda prog $ SOAC.lambda new_soac
-
-  case tryLam of
-    Left err   -> badFusionGM err
-    Right lam' -> do
-      (_, nfres) <- fusionGatherLam (HS.empty, mkFreshFusionRes) lam'
-      let nfres' =  cleanFusionResult nfres
-      lam''      <- bindRes nfres' $ fuseInLambda lam'
-      runBinder $ do
-        transformOutput (outputTransform ker) (outputs ker) $
-                        SOAC.setLambda lam'' new_soac
-        return body
-
-transformOutput :: SOAC.ArrayTransforms -> [Ident] -> SOAC -> Binder ()
-transformOutput ts outIds soac =
-  case SOAC.viewf ts of
-    SOAC.EmptyF -> do e <- SOAC.toExp soac
-                      letBind outIds e
-    t SOAC.:< ts' -> do
-      newIds <- mapM (newIdent' id) outIds
-      transformOutput ts' newIds soac
-      es     <- mapM (applyTransform t . Var) newIds
-      zipWithM_ letBind (map (:[]) outIds) es
+  lam' <- normCopyOneLambda prog $ SOAC.lambda new_soac
+  (_, nfres) <- fusionGatherLam (HS.empty, mkFreshFusionRes) lam'
+  let nfres' =  cleanFusionResult nfres
+  lam''      <- bindRes nfres' $ fuseInLambda lam'
+  runBinder $ do
+    transformOutput (outputTransform ker) (outputs ker) $
+                    SOAC.setLambda lam'' new_soac
+    return body
 
 ---------------------------------------------------
 ---------------------------------------------------

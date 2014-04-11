@@ -454,7 +454,7 @@ ArrayValue :  '[' Values ']'
                   Nothing -> throwError "Invalid array value"
                   Just ts -> return $ ArrayVal (arrayFromList $2) $ removeNames ts
              }
-TupleValue : '(' Values2 ')' { TupVal $2 }
+TupleValue : '{' Values2 '}' { TupVal $2 }
 
 Values : Value ',' Values { $1 : $3 }
        | Value            { [$1] }

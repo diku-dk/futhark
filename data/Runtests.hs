@@ -18,7 +18,7 @@ import System.IO
 import System.Process
 
 futharkFlags :: String
-futharkFlags = "-sfoe"
+futharkFlags = "-sfe"
 
 -- | Number of tests to run concurrently.
 concurrency :: Int

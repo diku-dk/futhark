@@ -34,6 +34,8 @@ module Futhark.InternalRep.Attributes
   , consumedInExp
   , safeExp
   , subExp
+  , constant
+  , intconst
 
   -- * Queries on lambdas
   , freeInLambda
@@ -88,6 +90,7 @@ module Futhark.InternalRep.Attributes
   , arrayVal
   , emptyArray
   , flattenArray
+  , IsValue(..)
 
   -- * Rearranging
   , permuteShape
@@ -147,13 +150,13 @@ arrayDims = shapeDims . arrayShape
 arraySize :: Int -> TypeBase als Shape -> SubExp
 arraySize i t = case drop i $ arrayDims t of
                   e : _ -> e
-                  _     -> Constant (BasicVal $ IntVal 0) noLoc
+                  _     -> intconst 0 noLoc
 
 -- | Return the size of the given dimension in the first element of
 -- the given type list.  If the dimension does not exist, or no types
 -- are given, the zero constant is returned.
 arraysSize :: Int -> [TypeBase als Shape] -> SubExp
-arraysSize _ []    = Constant (BasicVal $ IntVal 0) noLoc
+arraysSize _ []    = intconst 0 noLoc
 arraysSize i (t:_) = arraySize i t
 
 -- | Set the shape of an array.  If the given type is not an
@@ -353,18 +356,36 @@ blankValue (Basic Char) = BasicVal $ CharVal '\0'
 blankValue (Basic Cert) = BasicVal Checked
 blankValue (Array et (Rank 1) _ _)  = arrayVal [] (Basic et :: TypeBase as Rank)
 blankValue (Array et (Rank n) u as) = arrayVal [] rt
-  where rt = Array et (Shape $ replicate (n-1) zero) u as
-        zero = Constant (BasicVal $ IntVal 0) noLoc
+  where rt = Array et (Shape $ replicate (n-1) $ intconst 0 noLoc) u as
+
+-- | If a Haskell type is an instance of 'IsValue', it means that a
+-- value of that type can be converted to a Futhark 'Value'.  This is
+-- intended to cut down on boilerplate when writing compiler code -
+-- for example, you'll quickly grow tired of writing @Constant
+-- (BasicVal $ LogVal True) loc@.
+class IsValue a where
+  value :: a -> Value
+
+instance IsValue Int where
+  value = BasicVal . IntVal
+
+instance IsValue Double where
+  value = BasicVal . RealVal
+
+instance IsValue Bool where
+  value = BasicVal . LogVal
+
+instance IsValue Char where
+  value = BasicVal . CharVal
 
 valueType :: Value -> ConstType
 valueType (BasicVal v) =
   Basic $ basicValueType v
 valueType v@(ArrayVal _ (Basic et)) =
   Array et (Shape [n]) Nonunique ()
-  where n = Constant (BasicVal $ IntVal $ valueSize v) noLoc
+  where n = constant (valueSize v) noLoc
 valueType v@(ArrayVal _ (Array et _ _ _)) =
-  Array et (Shape $ map intconst $ valueShape v) Nonunique ()
-  where intconst x = Constant (BasicVal $ IntVal x) noLoc
+  Array et (Shape $ map (`intconst` noLoc) $ valueShape v) Nonunique ()
 
 -- | Return a list of the sizes of an array (the shape, in other
 -- terms).  For non-arrays, this is the empty list.  A two-dimensional
@@ -533,7 +554,7 @@ typeOf :: Exp -> [Type]
 typeOf (SubExps vs _) = map subExpType vs
 typeOf (ArrayLit es t loc) =
   [arrayOf t (Shape [n]) $ mconcat $ map (uniqueness . subExpType) es]
-  where n = Constant (BasicVal $ IntVal $ length es) loc
+  where n = constant (length es) loc
 typeOf (BinOp _ _ _ t _) = [t]
 typeOf (Not _ _) = [Basic Bool]
 typeOf (Negate e _) = [subExpType e]
@@ -787,6 +808,14 @@ safeExp _ = False
 -- | Convert a 'SubExp' to an 'Exp', using the 'SubExps' constructor.
 subExp :: SubExp -> Exp
 subExp e = SubExps [e] $ srclocOf e
+
+-- | Create a 'Constant' 'SubExp' containing the given value.
+constant :: IsValue v => v -> SrcLoc -> SubExp
+constant = Constant . value
+
+-- | For reasons of type ambiguity, a specialised 'constant' for integers is defined.
+intconst :: Int -> SrcLoc -> SubExp
+intconst = constant
 
 -- | Return the set of identifiers that are free in the given lambda,
 -- including shape annotations in the parameters.

@@ -137,7 +137,7 @@ transformExp (Filter cs fun arrexps outersize loc) = do
           (pure resv) (eBody update) (bodyType resv) loc
   loopBind (zip res resinit) i nv loopbody
   return $ SubExps (map Var res) loc
-  where intval x = Constant (BasicVal $ IntVal x) loc
+  where intval x = intconst x loc
 
 transformExp (Redomap cs _ innerfun accexps arrexps loc) = do
   (_, (acc, initacc), (i, iv)) <- newFold loc arrexps accexps
@@ -202,7 +202,7 @@ isize = size . map Var
 size :: [SubExp] -> SubExp
 size (v:_)
   | se : _ <- shapeDims $ arrayShape $ subExpType v = se
-size _ = Constant (BasicVal $ IntVal 0) noLoc
+size _ = intconst 0 noLoc
 
 pexp :: Applicative f => SubExp -> f Exp
 pexp = pure . subExp

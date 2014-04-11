@@ -4,7 +4,7 @@ module Futhark.HOTrans.LoopKernel
   , inputs
   , setInputs
   , arrInputs
-  , applyTransform
+  , transformOutput
   , attemptFusion
   )
   where
@@ -32,6 +32,17 @@ import qualified Futhark.HORepresentation.MapNest as MapNest
 import Futhark.HOTrans.TryFusion
 import Futhark.HOTrans.Composing
 import Futhark.Tools
+
+transformOutput :: SOAC.ArrayTransforms -> [Ident] -> SOAC -> Binder ()
+transformOutput ts outIds soac =
+  case SOAC.viewf ts of
+    SOAC.EmptyF -> do e <- SOAC.toExp soac
+                      letBind outIds e
+    t SOAC.:< ts' -> do
+      newIds <- mapM (newIdent' id) outIds
+      transformOutput ts' newIds soac
+      es     <- mapM (applyTransform t . Var) newIds
+      zipWithM_ letBind (map (:[]) outIds) es
 
 applyTransform :: SOAC.ArrayTransform -> SubExp -> Binder Exp
 applyTransform (SOAC.Rearrange cs perm) v =
@@ -179,6 +190,7 @@ filterFoldFusionOK outIds ker =
 
 mapScanFusionOK :: [Ident] -> [SOAC.Input] -> FusedKer -> Bool
 mapScanFusionOK outIds inp1 ker =
+  length inp1 == length replacing &&
   and (zipWith subtypeOf
        (sort $ map identType replacing)
        (sort inpts))
@@ -355,12 +367,20 @@ commonTransforms' inps =
         inspect (mot, prev) inp = Just (mot,inp:prev)
 
 mapDepth :: MapNest -> Int
-mapDepth (MapNest.MapNest _ _ levels _ _) =
-  length (takeWhile niceNest levels) + 1
+mapDepth (MapNest.MapNest _ body levels _ _) =
+  min resDims (length (takeWhile niceNest levels)) + 1
   where niceNest nest =
           HS.null $ HS.fromList (MapNest.nestingParams nest)
                     `HS.intersection`
                     freeInBody (MapNest.nestingPostBody nest)
+        resDims = minDim $ case levels of
+                    [] -> case body of Nest.Fun lam ->
+                                         lambdaReturnType lam
+                                       Nest.NewNest nest _ ->
+                                         Nest.nestingReturnType nest
+                    nest:_ -> MapNest.nestingReturnType nest
+        minDim [] = 0
+        minDim (t:ts) = foldl min (arrayRank t) $ map arrayRank ts
 
 pullRearrange :: SOACNest -> SOAC.ArrayTransforms -> TryFusion (SOACNest, SOAC.ArrayTransforms)
 pullRearrange nest ots = do

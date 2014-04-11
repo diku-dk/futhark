@@ -79,7 +79,7 @@ lambdaBinding ce params ts m =
 
 outerShape :: SrcLoc -> [I.Type] -> SubExp
 outerShape _ (t:_) = arraySize 0 t
-outerShape loc _   = I.Constant (I.BasicVal $ I.IntVal 0) loc
+outerShape loc _   = I.intconst 0 loc
 
 internaliseLambda :: (E.Exp -> InternaliseM Body)
                   -> I.Ident
@@ -104,15 +104,35 @@ internaliseMapLambda internaliseBody ce lam args = do
   (params, body, rettype) <- internaliseLambda internaliseBody ce lam rowtypes
   let (shape_body, value_body) = splitBody body
       (rettype_shape, rettype_value) = splitType rettype
-      shapefun = Lambda params shape_body
-                 (replicate (length rettype_shape) $ I.Basic Int) loc
       outer_shape = outerShape loc argtypes
+  shapefun <- makeShapeFun params shape_body
+              (replicate (length rettype_shape) $ I.Basic Int) loc
   (cs,inner_shapes) <- bindMapShapes [ce] shapefun args outer_shape
   let rettype' = addTypeShapes rettype_value $
                  map I.Var inner_shapes
   value_body' <- sanitiseValueSlice inner_shapes value_body
   return (cs, I.Lambda params value_body' rettype' loc)
   where loc = srclocOf lam
+
+makeShapeFun :: MonadFreshNames m =>
+                [I.Param] -> I.Body -> [I.ConstType] -> SrcLoc -> m I.Lambda
+makeShapeFun params body rettype loc = do
+  -- Some of 'params' may be unique, which means that the shape slice
+  -- would consume its input.  This is not acceptable - that input is
+  -- needed for the value function!  Hence, for all unique parameters,
+  -- we create a substitute non-unique parameter, and insert a
+  -- copy-binding in the body of the function.
+  (params', copybnds) <-
+    liftM unzip $ forM params $ \param ->
+      if I.unique $ I.identType param
+      then do param' <- newIdent' id
+                        param { I.identType = I.identType param
+                                              `I.setUniqueness` Nonunique }
+              return (param',
+                      Just $ I.Let [I.fromParam param] $
+                             I.Copy (I.Var $ I.fromParam param') $ srclocOf param)
+      else return (param, Nothing)
+  return $ I.Lambda params' (insertBindings (catMaybes copybnds) body) rettype loc
 
 sanitiseValueSlice :: [I.Ident] -> I.Body -> InternaliseM I.Body
 sanitiseValueSlice resShapes (I.Body bnds res) = do
@@ -245,5 +265,5 @@ bindFilterResultOuterShape ce lam args input_size = do
   letBind [outershape] countcomp
   return outershape
   where loc = srclocOf lam
-        zero = I.Constant (I.BasicVal $ I.IntVal 0) loc
-        one  = I.Constant (I.BasicVal $ I.IntVal 1) loc
+        zero = I.intconst 0 loc
+        one  = I.intconst 1 loc

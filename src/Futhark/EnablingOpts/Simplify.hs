@@ -19,7 +19,7 @@ import Control.Monad.Trans.Maybe
 import Futhark.InternalRep
 import Futhark.NeedNames
 import Futhark.MonadFreshNames
-import Futhark.Tools
+import Futhark.Binder
 
 newtype Simplify a = Simplify (MaybeT Binder a)
   deriving (Functor, Applicative,

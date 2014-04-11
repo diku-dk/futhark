@@ -67,7 +67,7 @@ mail() {
         echo
         cat
     else
-        mailx -s "FutharkC integration error" "$mail" -- -r concieggs@eggsml.dk
+        mailx -s "Futhark integration error" "$mail" -- -r concieggs@eggsml.dk
     fi
 }
 

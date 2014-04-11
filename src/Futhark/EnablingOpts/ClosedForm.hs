@@ -53,9 +53,9 @@ foldClosedForm look pat lam accs arrs =
     Just closedBody -> do
       isEmpty <- newIdent "fold_input_is_empty" (Basic Bool) lamloc
       let inputsize = arraysSize 0 $ map subExpType arrs
-          zero      = Constant (BasicVal $ IntVal 0) lamloc
           isEmptyCheck =
-            Let [isEmpty] $ BinOp Equal inputsize zero (Basic Bool) lamloc
+            Let [isEmpty] $ BinOp Equal inputsize (intconst 0 lamloc)
+                            (Basic Bool) lamloc
           mkBranch  ifNonEmpty =
             Let pat $ If (Var isEmpty)
                              (resultBody [] accs lamloc)

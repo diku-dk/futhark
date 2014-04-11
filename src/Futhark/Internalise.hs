@@ -34,7 +34,6 @@ import Control.Monad.State  hiding (mapM)
 import Control.Monad.Reader hiding (mapM)
 
 import qualified Data.HashMap.Lazy as HM
-import qualified Data.HashSet      as HS
 import Data.Maybe
 import Data.List
 import Data.Loc
@@ -51,7 +50,6 @@ import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.TypesValues
 import Futhark.Internalise.Bindings
 import Futhark.Internalise.Lambdas
-import Futhark.Substitute
 
 import Prelude hiding (mapM)
 
@@ -238,7 +236,7 @@ internaliseExp (E.Size _ i e loc) = do
   -- XXX: Throwing away certificates?
   case ks of
     (k:_) -> return $ I.subExp $ I.arraySize i $ I.identType k
-    _     -> return $ I.subExp (I.Constant (I.BasicVal $ I.IntVal 0) loc) -- Will this ever happen?
+    _     -> return $ I.subExp (I.intconst 0 loc) -- Will this ever happen?
 
 internaliseExp (E.Unzip e _ _) = do
   (_,ks) <- tupToIdentList e
@@ -530,26 +528,9 @@ boundsCheck :: I.Ident -> Int -> I.SubExp -> InternaliseM I.Ident
 boundsCheck v i e = do
   let size  = arraySize i $ I.identType v
       check = eBinOp LogAnd (pure lowerBound) (pure upperBound) bool loc
-      lowerBound = I.BinOp Leq (I.Constant (I.BasicVal $ IntVal 0) loc)
+      lowerBound = I.BinOp Leq (I.intconst 0 loc)
                                size bool loc
       upperBound = I.BinOp Less e size bool loc
   letExp "bounds_check" =<< eAssert check
   where bool = I.Basic Bool
         loc = srclocOf e
-
-copyConsumed :: I.Body -> InternaliseM I.Body
-copyConsumed e
-  | consumed <- HS.toList $ freeUniqueInBody e,
-    not (null consumed) = do
-      copies <- copyVariables consumed
-      let substs = HM.fromList $ zip (map I.identName consumed)
-                                     (map I.identName copies)
-      return $ substituteNames substs e
-  | otherwise = return e
-  where copyVariables = mapM copyVariable
-        copyVariable v =
-          letExp (textual (baseName $ I.identName v) ++ "_copy") $
-                 I.Copy (I.Var v) loc
-          where loc = srclocOf v
-
-        freeUniqueInBody = HS.filter (I.unique . I.identType) . I.freeInBody

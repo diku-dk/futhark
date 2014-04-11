@@ -504,7 +504,7 @@ applyLambda (Lambda params body rettype loc) args =
 checkPatSizes :: [(Ident, Value)]-> FutharkM ()
 checkPatSizes = mapM_ $ uncurry checkSize
   where checkSize var val = do
-          let valshape = map (BasicVal . IntVal) $ valueShape val
+          let valshape = map value $ valueShape val
               varname = textual $ identName var
               vardims = arrayDims $ identType var
               loc = srclocOf var
