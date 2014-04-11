@@ -19,6 +19,7 @@ import Control.Applicative
 import Data.Array
 import Data.Bits
 import Data.Either
+import Data.List
 import Data.Loc
 import Data.Maybe
 import Data.Monoid
@@ -174,11 +175,6 @@ removeDeadMapping _ _ = return Nothing
 -- it affects any other values.  Fortunately, the latter restriction
 -- is enough.  I do not claim that the current implementation of this
 -- rule is perfect, but it should suffice for many cases.
---
--- FIXME: Also, we technically generate a bunch of undefined variables
--- this way... fortunately, the dead code eliminator will remove the
--- bindings containing them before we get to the code generator, but
--- it's still pretty ugly.
 removeUnusedLoopResult :: BottomUpRule
 removeUnusedLoopResult used (Let pat (DoLoop merge i bound body loc))
   | not $ all usedAfterwards pat = return $
@@ -189,16 +185,27 @@ removeUnusedLoopResult used (Let pat (DoLoop merge i bound body loc))
         identName v `HS.member` necessary' ||
         usedAfterwards out ||
         usedInPatType v
-      (merge', pat', es') =
-        unzip3 $ filter resIsNecessary $ zip3 merge pat es
+      (keep, discard) = partition resIsNecessary $ zip3 merge pat es
+      (merge', pat', es') = unzip3 keep
       body' = resultBody cs es' resloc `setBodyResult` body
-  in if pat == pat' || True
+      -- We can't just remove the bindings in 'discard', since the loop
+      -- body may still use their names in (now-dead) expressions.
+      -- Hence, we add them inside the loop, fully aware that dead-code
+      -- removal will eventually get rid of them.  Some care is
+      -- necessary to handle unique bindings.
+      body'' = insertBindings (dummyBindings discard) body'
+  in if pat == pat'
      then Nothing
-     else Just [Let pat' $ DoLoop merge' i bound body' loc]
+     else Just [Let pat' $ DoLoop merge' i bound body'' loc]
   where usedAfterwards = (`HS.member` used) . identName
         patDimNames = mconcat $ map freeNamesInExp $
                       concatMap (map subExp . arrayDims . identType) pat
         usedInPatType = (`HS.member` patDimNames) . identName
+
+        dummyBindings = map dummyBinding
+        dummyBinding ((v,e), _, _)
+          | unique (identType v) = Let [v] $ Copy e $ srclocOf v
+          | otherwise            = Let [v] $ subExp e
 
         allDependencies = dataDependencies body
         dependencies (Constant _ _) = HS.empty
