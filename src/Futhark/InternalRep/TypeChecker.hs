@@ -665,8 +665,7 @@ checkExp (DoLoop merge (Ident loopvar _ loopvarloc)
   fname <- newFname "loop_fun"
 
   let setIdentType v t = v { identType = t }
-      upd t1 t2 = (t1 `setAliases` aliases t2)
-                  `setArrayDims` arrayDims t2
+      upd t1 t2 = t1 `setAliases` aliases t2
       rettype = zipWith upd (map identType mergepat')
                             (map subExpType es')
       funparams = zipWith setIdentType mergepat' rettype
@@ -712,15 +711,13 @@ checkExp (DoLoop merge (Ident loopvar _ loopvarloc)
     -- bound and initial merge value, in case they use something
     -- consumed in the call.  This reintroduces the dataflow for
     -- boundexp and mergeexp that we previously threw away.
-    checkBody $ Body [Let result
-                      (Apply fname
-                       ([(Var k, diet (identType k)) | k <- free ] ++
-                        [(intconst 0 loc, Observe),
-                         (boundexp', Observe)] ++
-                        zip es' (map diet rettype))
-                       rettype loc)]
-                (Result [] (map Var result) loc)
-  let mergepat'' = zipWith setIdentType mergepat' $ bodyType funcall
+    checkExp $ Apply fname
+                     ([(Var k, diet (identType k)) | k <- free ] ++
+                      [(intconst 0 loc, Observe),
+                       (boundexp', Observe)] ++
+                      zip es' (map diet rettype))
+                     rettype loc
+  let mergepat'' = zipWith setIdentType mergepat' $ typeOf funcall
   return $ DoLoop (zip mergepat'' es')
                   (Ident loopvar (Basic Int) loopvarloc) boundexp'
                   loopbody' loc
