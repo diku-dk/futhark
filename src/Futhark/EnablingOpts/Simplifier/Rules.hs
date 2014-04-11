@@ -90,6 +90,7 @@ topDownRules = [ liftIdentityMapping
 bottomUpRules :: [BottomUpRule]
 bottomUpRules = [ removeDeadMapping
                 , removeUnusedLoopResult
+                , removeDeadBranchResult
                 ]
 
 liftIdentityMapping :: TopDownRule
@@ -619,6 +620,29 @@ hoistBranchInvariant _ (Let pat (If e1 tb fb ts loc)) = return $
           | tse == fse = (pat', res, Let [v] (subExp tse) : invariant)
           | otherwise  = (v:pat', (tse,fse,t):res, invariant)
 hoistBranchInvariant _ _ = return Nothing
+
+-- | Remove the return values of a branch, that are not actually used
+-- after a branch.  Standard dead code removal can remove the branch
+-- if *none* of the return values are used, but this rule is more
+-- precise.
+removeDeadBranchResult :: BottomUpRule
+removeDeadBranchResult used (Let pat (If e1 tb fb ts loc))
+  | -- Figure out which of the names in 'pat' are used...
+    patused <- map ((`HS.member` used) . identName) pat,
+    -- If they are not all used, then this rule applies.
+    not (and patused) = return $
+  -- Remove the parts of the branch-results that correspond to dead
+  -- return value bindings.  Note that this leaves dead code in the
+  -- branch bodies, but that will be removed later.
+  let Result tcs tses tresloc = bodyResult tb
+      Result fcs fses fresloc = bodyResult fb
+      pick = map snd . filter fst . zip patused
+      tb' = resultBody tcs (pick tses) tresloc `setBodyResult` tb
+      fb' = resultBody fcs (pick fses) fresloc `setBodyResult` fb
+      ts' = pick ts
+      pat' = pick pat
+  in Just [Let pat' $ If e1 tb' fb' ts' loc]
+removeDeadBranchResult _ _ = return Nothing
 
 -- Some helper functions
 
