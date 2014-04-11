@@ -82,11 +82,11 @@ simplify :: ScalExp -> SrcLoc -> Bool -> RangesRep -> Either EnablingOptError Sc
 simplify e p c rm = runAlgSimplifier (simplifyScal e) p c rm
 
 -- | Extracts sufficient conditions for a LTH0 relation to hold
-mkSuffConds :: ScalExp -> SrcLoc -> RangesRep -> Either EnablingOptError ScalExp
+mkSuffConds :: ScalExp -> SrcLoc -> RangesRep -> Either EnablingOptError [[ScalExp]]
 mkSuffConds e p rm = runAlgSimplifier (gaussElimRel e) p True rm
 
 -- | Test if Simplification engine can handle this kind of expression
-canSimplify :: Int -> Either EnablingOptError ScalExp
+canSimplify :: Int -> Either EnablingOptError [[ScalExp]]
 canSimplify i = do
     let (h,e1,_) = mkRelExp i
     runAlgSimplifier (gaussElimRel e1) noLoc True h
@@ -131,13 +131,24 @@ gaussEliminateNRel _ = do
     badAlgSimplifyM $ SimplifyError pos "gaussElimNRel: unimplemented!"
 
 
-gaussElimRel :: ScalExp -> AlgSimplifyM ScalExp
+gaussElimRel :: ScalExp -> AlgSimplifyM [[ScalExp]] -- ScalExp
 gaussElimRel (RelExp LTH0 e) = do
     pos <- asks pos
     let tp = scalExpType e
     e_sofp <- if (tp == Int) then toNumSofP =<< simplifyScal e
               else badAlgSimplifyM $ SimplifyError pos "gaussElimRel: only Int relations please!"
-    simplifyScal =<< gaussAllLTH0 S.empty e_sofp
+    e_dnf <- toDNF =<< simplifyScal =<< gaussAllLTH0 S.empty e_sofp
+    mapM (\ t -> 
+            mapM (\ f -> 
+                    case f of
+                      LogCt c   -> return $ Val (LogVal c)
+                      PosId i   -> return $ Id  i
+                      NegId i   -> return $ Id  i
+                      NRelExp rel ee -> do
+                          e_scal <- fromNumSofP ee
+                          return $ RelExp rel e_scal
+                 ) t
+         ) e_dnf
 
 gaussElimRel _ = do
     pos <- asks pos
