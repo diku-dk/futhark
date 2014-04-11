@@ -48,7 +48,8 @@ splitBndAssertions (Let pat (DoLoop merge i bound body loc)) = do
   pat' <- mapM (newIdent' id) pat
   let certmerge = zip (allBoundsChecks:certmergepat)
                       (constant True loc:map snd merge)
-      certloop = Let pat' $ DoLoop certmerge i' bound certbody loc
+      certloop = Let (allBoundsChecksCert:pat') $
+                 DoLoop certmerge i' bound certbody loc
       valbody = replaceBoundsCerts allBoundsChecksCert body
       valloop = Let pat $ DoLoop merge i bound valbody loc
   Body certbnds _ <- runBinder $ copyConsumed $ Body [certloop] nullRes
@@ -89,7 +90,7 @@ returnChecksInBinding (Let pat (DoLoop merge i bound body loc)) = do
   let certmerge = zip (allBoundsChecks:certmergepat)
                   (constant True loc:map snd merge)
       certloop = DoLoop certmerge i bound certbody loc
-  return (Let pat certloop, [Var allBoundsChecks])
+  return (Let (allBoundsChecks:pat) certloop, [Var allBoundsChecks])
 returnChecksInBinding (Let pat e) =
   return (Let pat e, []) -- XXX what if 'e' is a SOAC or something?
 
