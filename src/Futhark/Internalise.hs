@@ -213,7 +213,8 @@ internaliseExp (E.DoLoop mergepat mergeexp i bound loopbody letbody loc) = do
       merge = zip mergepat' mergeexp'
       shape_merge = zip mergepat' mergeexp_cpy
   bindingPattern mergepat Nothing (map I.identType res_vals) $ \mergepat'' -> do
-    addBinding $ I.Let loop_shape $ I.DoLoop mergepat_shape shape_merge i' bound' loopbody' loc
+    unless (null loop_shape) $
+      addBinding $ I.Let loop_shape $ I.DoLoop mergepat_shape shape_merge i' bound' loopbody' loc
     addBinding $ I.Let mergepat'' $ I.DoLoop res_vals merge i' bound' loopbody' loc
     internaliseExp letbody
 
