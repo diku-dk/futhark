@@ -789,6 +789,7 @@ consumedInExp _ = mempty
 -- bounds.  On the other hand, adding two numbers cannot fail.
 safeExp :: Exp -> Bool
 safeExp (Index {}) = False
+safeExp (Update {}) = False
 safeExp (Split {}) = False
 safeExp (Assert {}) = False
 safeExp (Reshape {}) = False
@@ -802,7 +803,7 @@ safeExp (BinOp Mod _ (Constant (BasicVal (IntVal k))  _) _ _) = k /= 0
 safeExp (BinOp Mod _ (Constant (BasicVal (RealVal k)) _) _ _) = k /= 0
 safeExp (BinOp Mod _ _ _ _) = False
 safeExp (BinOp Pow _ _ _ _) = False
-safeExp _ = False
+safeExp _ = True
 
 -- | Convert a 'SubExp' to an 'Exp', using the 'SubExps' constructor.
 subExp :: SubExp -> Exp
