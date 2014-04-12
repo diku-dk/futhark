@@ -149,14 +149,11 @@ bindParams params =
         isVar _       = Nothing
 
 bindLoopVar :: Ident -> SubExp -> SimpleM a -> SimpleM a
-bindLoopVar var upper =
+bindLoopVar var bound =
   localVtable $ clampUpper . clampVar
-  where -- If we enter the loop, then 'var' is at least zero, and at
-        -- most 'upper'-1 (so this is not completely tight - FIXME).
-        clampVar = ST.insertLoopVar (identName var) (Just $ intconst 0 $ srclocOf var,
-                                                     Just upper)
-        -- If we enter the loop, then 'upper' is at least one.
-        clampUpper = case upper of Var v -> ST.isAtLeast (identName v) 1
+  where clampVar = ST.insertLoopVar (identName var) bound
+        -- If we enter the loop, then 'bound' is at least one.
+        clampUpper = case bound of Var v -> ST.isAtLeast (identName v) 1
                                    _     -> id
 
 withBinding :: [Ident] -> Exp -> SimpleM a -> SimpleM a

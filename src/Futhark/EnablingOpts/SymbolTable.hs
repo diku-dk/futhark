@@ -9,7 +9,6 @@ module Futhark.EnablingOpts.SymbolTable
   , enclosingLoopVars
   , insert
   , insert'
-  , Bounds
   , insertLoopVar
   , updateBounds
   , isAtLeast
@@ -113,23 +112,21 @@ insert' name vtable =
                , loopVariable = False
                }
 
-type Bounds = (Maybe SubExp, Maybe SubExp)
-
-insertLoopVar :: VName -> Bounds -> SymbolTable -> SymbolTable
-insertLoopVar name (lower,upper) vtable =
+insertLoopVar :: VName -> SubExp -> SymbolTable -> SymbolTable
+insertLoopVar name bound vtable =
   vtable { bindings = HM.insert name bind $ bindings vtable
          , curDepth = curDepth vtable + 1
          }
   where bind = Entry {
                  asExp = Nothing
                , asScalExp = Nothing
-               , valueRange = (lower', upper')
+               , valueRange = (Just (Val (IntVal 0)),
+                               minus1 <$> toScalExp look (subExp bound))
                , bindingDepth = curDepth vtable
                , loopVariable = True
                }
         look = (`lookupScalExp` vtable)
-        lower' = toScalExp look =<< (subExp <$> lower)
-        upper' = toScalExp look =<< (subExp <$> upper)
+        minus1 = (`SMinus` Val (IntVal 1))
 
 updateBounds :: Bool -> SubExp -> SymbolTable -> SymbolTable
 updateBounds isTrue cond vtable =
