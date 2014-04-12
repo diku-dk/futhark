@@ -340,7 +340,7 @@ isNotCheap _ = not . cheapBnd
         cheap (SubExps {}) = True
         cheap (Not {})     = True
         cheap (Negate {})  = True
-        cheap (Negate {})  = True
+        cheap (DoLoop {})  = False
         cheap _            = True -- Used to be False, but let's try
                                   -- it out.
 
