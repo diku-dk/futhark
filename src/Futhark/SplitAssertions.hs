@@ -37,10 +37,10 @@ splitBodyAssertions body = do
 
 splitBndAssertions :: Binding -> SplitM [Binding]
 
-splitBndAssertions (Let pat (DoLoop merge i bound body loc)) = do
+splitBndAssertions (Let pat (DoLoop respat merge i bound body loc)) = do
   -- XXX slightly gross hack
-  DoLoop merge' i' _ body' _ <-
-    renameExp $ DoLoop merge i bound body loc
+  DoLoop _ merge' i' _ body' _ <-
+    renameExp $ DoLoop respat merge i bound body loc
   (certmergepat, certbody, allBoundsChecks) <-
     splitLoopBody merge' body'
   allBoundsChecksCert  <-
@@ -48,10 +48,10 @@ splitBndAssertions (Let pat (DoLoop merge i bound body loc)) = do
   pat' <- mapM (newIdent' id) certmergepat
   let certmerge = zip (allBoundsChecks:certmergepat)
                       (constant True loc:map snd merge)
-      certloop = Let (allBoundsChecks:pat') $
-                 DoLoop certmerge i' bound certbody loc
+      certloop = Let [allBoundsChecks] $
+                 DoLoop [allBoundsChecks] certmerge i' bound certbody loc
       valbody = replaceBoundsCerts allBoundsChecksCert body
-      valloop = Let pat $ DoLoop merge i bound valbody loc
+      valloop = Let pat $ DoLoop respat merge i bound valbody loc
   Body certbnds _ <- runBinder $ copyConsumed $ Body [certloop] nullRes
   return $ certbnds ++
            [Let [allBoundsChecksCert] (Assert (Var allBoundsChecks) loc),
@@ -84,12 +84,12 @@ returnChecksInBinding (Let pat (If cond tbranch fbranch t loc)) = do
           [Var cert])
 returnChecksInBinding (Let pat e@(Assert prop _)) =
   return (Let pat e, [prop])
-returnChecksInBinding (Let pat (DoLoop merge i bound body loc)) = do
+returnChecksInBinding (Let pat (DoLoop respat merge i bound body loc)) = do
   (certmergepat, certbody, allBoundsChecks) <-
     splitLoopBody merge body
   let certmerge = zip (allBoundsChecks:certmergepat)
                   (constant True loc:map snd merge)
-      certloop = DoLoop certmerge i bound certbody loc
+      certloop = DoLoop (allBoundsChecks:respat) certmerge i bound certbody loc
   return (Let (allBoundsChecks:pat) certloop, [Var allBoundsChecks])
 returnChecksInBinding (Let pat e) =
   return (Let pat e, []) -- XXX what if 'e' is a SOAC or something?

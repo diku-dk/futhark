@@ -381,8 +381,9 @@ simplifyBody (Body (Let pat e:bnds) res) = do
 
 simplifyExp :: Exp -> SimpleM Exp
 
-simplifyExp (DoLoop merge loopvar boundexp loopbody loc) = do
+simplifyExp (DoLoop respat merge loopvar boundexp loopbody loc) = do
   let (mergepat, mergeexp) = unzip merge
+  respat'   <- mapM simplifyIdentBinding respat
   mergepat' <- mapM simplifyIdentBinding mergepat
   mergeexp' <- mapM simplifySubExp mergeexp
   boundexp' <- simplifySubExp boundexp
@@ -393,7 +394,7 @@ simplifyExp (DoLoop merge loopvar boundexp loopbody loc) = do
                bindLoopVar loopvar boundexp' $
                simplifyBody loopbody
   let merge' = zip mergepat' mergeexp'
-  return $ DoLoop merge' loopvar boundexp' loopbody' loc
+  return $ DoLoop respat' merge' loopvar boundexp' loopbody' loc
   where boundnames = identName loopvar `HS.insert`
                      patNameSet (map fst merge)
 

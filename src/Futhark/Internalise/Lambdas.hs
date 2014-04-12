@@ -168,8 +168,8 @@ removeSOACCerts (Body bnds res) = Body (map removeCert bnds) res
                     I.Filter _ fun arrs size loc -> I.Filter [] fun arrs size loc
                     I.Redomap _ outerfun innerfun acc arrs loc ->
                       I.Redomap [] outerfun innerfun acc arrs loc
-                    I.DoLoop merge i bound body loc ->
-                      I.DoLoop merge i bound (removeSOACCerts body) loc
+                    I.DoLoop respat merge i bound body loc ->
+                      I.DoLoop respat merge i bound (removeSOACCerts body) loc
                     _ -> e
 
 bindMapShapes :: I.Certificates -> I.Lambda -> [I.SubExp] -> SubExp

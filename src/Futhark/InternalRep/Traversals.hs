@@ -163,8 +163,9 @@ mapExpM tv (Assert e loc) =
   pure Assert <*> mapOnSubExp tv e <*> pure loc
 mapExpM tv (Conjoin es loc) =
   pure Conjoin <*> mapM (mapOnSubExp tv) es <*> pure loc
-mapExpM tv (DoLoop mergepat loopvar boundexp loopbody loc) =
-  DoLoop <$> (zip <$> mapM (mapOnIdent tv) vs <*> mapM (mapOnSubExp tv) es) <*>
+mapExpM tv (DoLoop respat mergepat loopvar boundexp loopbody loc) =
+  DoLoop <$> mapM (mapOnIdent tv) respat <*>
+             (zip <$> mapM (mapOnIdent tv) vs <*> mapM (mapOnSubExp tv) es) <*>
              mapOnIdent tv loopvar <*> mapOnSubExp tv boundexp <*>
              mapOnBody tv loopbody <*> pure loc
   where (vs,es) = unzip mergepat

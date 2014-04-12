@@ -589,7 +589,7 @@ typeOf (Copy e _) =
   [subExpType e `setUniqueness` Unique `setAliases` HS.empty]
 typeOf (Assert _ _) = [Basic Cert]
 typeOf (Conjoin _ _) = [Basic Cert]
-typeOf (DoLoop merge _ _ _ _) = map (identType . fst) merge
+typeOf (DoLoop res _ _ _ _ _) = map identType res
 typeOf (Map _ f arrs _) =
   [ arrayOf t (Shape [outersize]) (uniqueProp t)
     | t <- lambdaType f arrts ]
@@ -654,7 +654,7 @@ progNames = execWriter . mapM funNames . progFunctions
         bindingNames (Let pat e) =
           mapM_ one pat >> expNames e
 
-        expNames (DoLoop pat i _ loopbody _) =
+        expNames (DoLoop _ pat i _ loopbody _) =
           mapM_ (one . fst) pat >> one i >> bodyNames loopbody
         expNames e = walkExpM names e
 
@@ -721,7 +721,7 @@ freeWalker = identityWalker {
             mapM_ (typeFree . identType) pat
             bodyFree $ Body bnds res
 
-        expFree (DoLoop merge i boundexp loopbody _) = do
+        expFree (DoLoop _ merge i boundexp loopbody _) = do
           let (mergepat, mergeexps) = unzip merge
           mapM_ subExpFree mergeexps
           subExpFree boundexp
@@ -766,7 +766,7 @@ consumedInBody = execWriter . bodyConsumed
           unconsume (HS.fromList $ map identName pat) $
             bodyConsumed $ Body bnds res
 
-        expConsumed (DoLoop pat _ _ loopbody _) =
+        expConsumed (DoLoop _ pat _ _ loopbody _) =
           unconsume (HS.fromList (map (identName . fst) pat)) $
             bodyConsumed loopbody
         expConsumed e = tell $ consumedInExp e

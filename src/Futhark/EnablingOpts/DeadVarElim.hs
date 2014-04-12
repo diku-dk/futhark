@@ -129,14 +129,14 @@ deadCodeElimBody (Body [] (Result cs es loc)) =
                  mapM deadCodeElimSubExp es <*> pure loc
 
 deadCodeElimExp :: Exp -> DCElimM Exp
-deadCodeElimExp (DoLoop merge i bound body loc) = do
+deadCodeElimExp (DoLoop respat merge i bound body loc) = do
   let (mergepat, mergeexp) = unzip merge
   binding (identName i : map identName mergepat) $ do
     mergepat' <- mapM deadCodeElimBnd mergepat
     mergeexp' <- mapM deadCodeElimSubExp mergeexp
     bound' <- deadCodeElimSubExp bound
     body' <- deadCodeElimBody body
-    return $ DoLoop (zip mergepat' mergeexp') i bound' body' loc
+    return $ DoLoop respat (zip mergepat' mergeexp') i bound' body' loc
 deadCodeElimExp e = mapExpM mapper e
   where mapper = Mapper {
                    mapOnExp = deadCodeElimExp

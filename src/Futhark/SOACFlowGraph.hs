@@ -146,7 +146,7 @@ flowForBody (Body (Let pat e:bnds) res) = do
 flowForBody b = walkBodyM flow b
 
 flowForExp :: Exp -> FlowM ()
-flowForExp (DoLoop merge _ boundexp loopbody _)
+flowForExp (DoLoop _ merge _ boundexp loopbody _)
   | names@(name:_) <- map (identName . fst) merge =
   tell $ HM.singleton
          (textual name)

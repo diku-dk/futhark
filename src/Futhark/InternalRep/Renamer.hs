@@ -128,16 +128,17 @@ instance Rename Body where
       return $ Body (Let pat' e1':bnds') res'
 
 instance Rename Exp where
-  rename (DoLoop merge loopvar boundexp loopbody loc) = do
+  rename (DoLoop respat merge loopvar boundexp loopbody loc) = do
     let (mergepat, mergeexp) = unzip merge
     boundexp' <- rename boundexp
     mergeexp' <- mapM rename mergeexp
     bind mergepat $ do
       mergepat' <- mapM rename mergepat
+      respat' <- mapM rename respat
       bind [loopvar] $ do
         loopvar'  <- rename loopvar
         loopbody' <- rename loopbody
-        return $ DoLoop (zip mergepat' mergeexp')
+        return $ DoLoop respat' (zip mergepat' mergeexp')
                         loopvar' boundexp' loopbody' loc
   rename e = mapExpM mapper e
     where mapper = Mapper {

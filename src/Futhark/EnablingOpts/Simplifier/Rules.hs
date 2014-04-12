@@ -90,6 +90,7 @@ topDownRules = [ liftIdentityMapping
 bottomUpRules :: [BottomUpRule]
 bottomUpRules = [ removeDeadMapping
                 , removeUnusedLoopResult
+                , removeRedundantMergeVariables
                 , removeDeadBranchResult
                 ]
 
@@ -170,24 +171,32 @@ removeDeadMapping used (Let pat (Map cs fun arrs loc)) = return $
      else Nothing
 removeDeadMapping _ _ = return Nothing
 
--- This next one is tricky - it's easy enough to determine that some
--- loop variable is not used after the loop, but we must also make
--- sure that it has no influence on control flow in the loop, nor that
--- it affects any other values.  Fortunately, the latter restriction
--- is enough.  I do not claim that the current implementation of this
--- rule is perfect, but it should suffice for many cases.
 removeUnusedLoopResult :: BottomUpRule
-removeUnusedLoopResult used (Let pat (DoLoop merge i bound body loc))
-  | not $ all usedAfterwards pat = return $
+removeUnusedLoopResult used (Let pat (DoLoop respat merge i bound body loc))
+  | (pat',respat') <- unzip $ filter usedAfterwards $ zip pat respat,
+    pat' /= pat =
+  return $ Just [Let pat' $ DoLoop respat' merge i bound body loc]
+  where usedAfterwards = (`HS.member` used) . identName . fst
+removeUnusedLoopResult _ _ = return Nothing
+
+-- This next one is tricky - it's easy enough to determine that some
+-- loop result is not used after the loop (as in
+-- 'removeUnusedLoopResult'), but here, we must also make sure that it
+-- does not affect any other values.  I do not claim that the current
+-- implementation of this rule is perfect, but it should suffice for
+-- many cases.
+removeRedundantMergeVariables :: BottomUpRule
+removeRedundantMergeVariables _ (Let pat (DoLoop respat merge i bound body loc))
+  | not $ all (usedInResult . fst) merge = return $
   let Result cs es resloc = bodyResult body
-      usedResults = map snd $ filter (usedAfterwards . fst) $ zip pat es
+      usedResults = map snd $ filter (usedInResult . fst) $ zip mergepat es
       necessary' = mconcat $ map dependencies usedResults
-      resIsNecessary ((v,_), out, _) =
+      resIsNecessary ((v,_), _) =
+        usedInResult v ||
         identName v `HS.member` necessary' ||
-        usedAfterwards out ||
         usedInPatType v
-      (keep, discard) = partition resIsNecessary $ zip3 merge pat es
-      (merge', pat', es') = unzip3 keep
+      (keep, discard) = partition resIsNecessary $ zip merge es
+      (merge', es') = unzip keep
       body' = resultBody cs es' resloc `setBodyResult` body
       -- We can't just remove the bindings in 'discard', since the loop
       -- body may still use their names in (now-dead) expressions.
@@ -195,16 +204,17 @@ removeUnusedLoopResult used (Let pat (DoLoop merge i bound body loc))
       -- removal will eventually get rid of them.  Some care is
       -- necessary to handle unique bindings.
       body'' = insertBindings (dummyBindings discard) body'
-  in if pat == pat'
+  in if merge == merge'
      then Nothing
-     else Just [Let pat' $ DoLoop merge' i bound body'' loc]
-  where usedAfterwards = (`HS.member` used) . identName
+     else Just [Let pat $ DoLoop respat merge' i bound body'' loc]
+  where (mergepat, _) = unzip merge
+        usedInResult = (`elem` respat)
         patDimNames = mconcat $ map freeNamesInExp $
-                      concatMap (map subExp . arrayDims . identType) pat
+                      concatMap (map subExp . arrayDims . identType) mergepat
         usedInPatType = (`HS.member` patDimNames) . identName
 
         dummyBindings = map dummyBinding
-        dummyBinding ((v,e), _, _)
+        dummyBinding ((v,e), _)
           | unique (identType v) = Let [v] $ Copy e $ srclocOf v
           | otherwise            = Let [v] $ subExp e
 
@@ -212,33 +222,35 @@ removeUnusedLoopResult used (Let pat (DoLoop merge i bound body loc))
         dependencies (Constant _ _) = HS.empty
         dependencies (Var v)        =
           fromMaybe HS.empty $ HM.lookup (identName v) allDependencies
-removeUnusedLoopResult _ _ =
+removeRedundantMergeVariables _ _ =
   return Nothing
 
 hoistLoopInvariantMergeVariables :: TopDownRule
-hoistLoopInvariantMergeVariables _ (Let pat (DoLoop merge idd n loopbody loc)) =
-    -- Figure out which of the elemens of loopresult are loop-invariant,
-  -- and hoist them out.
-  case foldr checkInvariance ([], [], [], []) $ zip3 pat merge ses of
-    ([], _, _, _) ->
-      -- Nothing is invariant.
+hoistLoopInvariantMergeVariables _ (Let pat (DoLoop respat merge idd n loopbody loc)) =
+    -- Figure out which of the elements of loopresult are
+    -- loop-invariant, and hoist them out.
+  case foldr checkInvariance ([], pat, respat, [], []) $ zip merge ses of
+    ([], _, _, _, _) ->
+      -- Nothing is invarpiant.
       return Nothing
-    (invariant, pat', merge', ses') ->
+    (invariant, pat', respat', merge', ses') ->
       -- We have moved something invariant out of the loop.
       let loopbody' = resultBody cs ses' resloc `setBodyResult` loopbody
-      in return $ Just $ invariant ++ [Let pat' $ DoLoop merge' idd n loopbody' loc]
+      in return $ Just $ invariant ++ [Let pat' $ DoLoop respat' merge' idd n loopbody' loc]
   where Result cs ses resloc = bodyResult loopbody
 
-        patDimNames = mconcat $ map freeNamesInExp $
-                      concatMap (map subExp . arrayDims . identType) pat
-        usedInPatType = (`HS.member` patDimNames) . identName
+        removeFromResult (v,initExp) pat' respat' =
+          case partition ((==v) . snd) $ zip pat' respat' of
+            ([(resv,_)], rest) -> (Just $ Let [resv] $ subExp initExp, unzip rest)
+            (_,      _)        -> (Nothing,                            (pat', respat'))
 
-        checkInvariance (v0, (v1,initExp), Var v2) (invariant, pat', merge', resExps)
-          | identName v1 == identName v2 && not (usedInPatType v0) =
-          (Let [v0] (subExp initExp):Let [v1] (subExp initExp):invariant,
-           pat', merge', resExps)
-        checkInvariance (v0, (v1,initExp), resExp) (invariant, pat', merge', resExps) =
-          (invariant, v0:pat', (v1,initExp):merge', resExp:resExps)
+        checkInvariance ((v1,initExp), Var v2) (invariant, pat', respat', merge', resExps)
+          | identName v1 == identName v2 =
+          let (bnd, (pat'', respat'')) = removeFromResult (v1,initExp) pat' respat'
+          in (maybe id (:) bnd $ Let [v1] (subExp initExp) : invariant,
+              pat'', respat'', merge', resExps)
+        checkInvariance ((v1,initExp), resExp) (invariant, pat', respat', merge', resExps) =
+          (invariant, pat', respat', (v1,initExp):merge', resExp:resExps)
 hoistLoopInvariantMergeVariables _ _ = return Nothing
 
 -- | A function that, given a variable name, returns its definition.

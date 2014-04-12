@@ -637,7 +637,7 @@ checkExp (Conjoin es pos) = do
 -- variables in mergepat are actually consumed.  Also, any variables
 -- that are free in the loop body must be passed along as (non-unique)
 -- parameters to the function.
-checkExp (DoLoop merge (Ident loopvar _ loopvarloc)
+checkExp (DoLoop respat merge (Ident loopvar _ loopvarloc)
                  boundexp loopbody loc) = do
   let (mergepat, es) = unzip merge
   -- First, check the bound and initial merge expression and throw
@@ -718,7 +718,18 @@ checkExp (DoLoop merge (Ident loopvar _ loopvarloc)
                       zip es' (map diet rettype))
                      rettype loc
   let mergepat'' = zipWith setIdentType mergepat' $ typeOf funcall
-  return $ DoLoop (zip mergepat'' es')
+
+  respat' <-
+    forM respat $ \res ->
+      case find (==res) mergepat'' of
+        Nothing -> bad $ TypeError loc $ "Loop result variable " ++
+                                         textual (identName res) ++
+                                         " is not a merge variable."
+        Just v  -> do
+          t' <- checkType $ identType res `setAliases` aliases (identType v)
+          return res { identType = t' }
+
+  return $ DoLoop respat' (zip mergepat'' es')
                   (Ident loopvar (Basic Int) loopvarloc) boundexp'
                   loopbody' loc
 
@@ -877,8 +888,8 @@ checkBinding loc pat ts dflow
                 checkAnnotation (srclocOf pat)
                 ("binding of variable " ++ textual name) namet t
           let t'' = subExpType $ Var $ Ident name t' pos
-          add $ Ident name (namet `setAliases` aliases t'') pos
-          return $ Ident name (namet `setAliases` aliases t'') pos
+          add $ Ident name t'' pos
+          return $ Ident name t'' pos
 
         add ident = do
           bnd <- gets $ find (==ident)

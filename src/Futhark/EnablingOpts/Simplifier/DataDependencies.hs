@@ -24,12 +24,18 @@ dataDependencies = dataDependencies' HM.empty
                                                   (resultSubExps $ bodyResult fb)
           in branchdeps `HM.union` deps
 
-        grow deps (Let pat (DoLoop _ _ bound body _)) =
-          let bodydeps = dataDependencies' deps body
+        grow deps (Let pat (DoLoop respat merge _ bound body _)) =
+          let deps' = deps `HM.union` HM.fromList
+                      [ (identName v, depsOf e deps) | (v,e) <- merge ]
+              bodydeps = dataDependencies' deps' body
               bounddeps = depsOf bound deps
               comb v e =
                 (identName v, HS.unions [bounddeps, depsOf e bodydeps])
-          in HM.fromList $ zipWith comb pat $ resultSubExps $ bodyResult body
+              mergedeps = HM.fromList $ zipWith comb (map fst merge) $
+                          resultSubExps $ bodyResult body
+          in HM.fromList [ (identName v, nameDeps (identName res) mergedeps)
+                           | (v, res) <- zip pat respat ]
+             `HM.union` deps
 
         grow deps (Let pat e) =
           let free = freeNamesInExp e

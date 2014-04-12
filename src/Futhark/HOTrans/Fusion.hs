@@ -437,7 +437,7 @@ fusionGatherExp :: FusedRes -> Exp -> FusionGM FusedRes
 ---- Index/If    ----
 -----------------------------------------
 
-fusionGatherExp fres (DoLoop merge _ ub loop_body _) = do
+fusionGatherExp fres (DoLoop _ merge _ ub loop_body _) = do
   let (merge_pat, ini_val) = unzip merge
 
   let pat_vars = map Var merge_pat

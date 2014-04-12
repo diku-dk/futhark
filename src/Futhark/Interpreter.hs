@@ -408,12 +408,13 @@ evalExp (Assert e loc) = do
 
 evalExp (Conjoin _ _) = return [BasicVal Checked]
 
-evalExp (DoLoop merge loopvar boundexp loopbody loc) = do
+evalExp (DoLoop respat merge loopvar boundexp loopbody loc) = do
   bound <- evalSubExp boundexp
   mergestart <- mapM evalSubExp mergeexp
   case bound of
-    BasicVal (IntVal n) ->
-      foldM iteration mergestart [0..n-1]
+    BasicVal (IntVal n) -> do
+      vs <- foldM iteration mergestart [0..n-1]
+      binding (zip mergepat vs) $ mapM lookupVar respat
     _ -> bad $ TypeError loc "evalBody DoLoop"
   where (mergepat, mergeexp) = unzip merge
         iteration mergeval i =

@@ -114,11 +114,11 @@ externaliseExp (I.Rotate cs n e loc) =
            n
            (externaliseSubExp e)
            loc
-externaliseExp (I.DoLoop merge i bound loopbody loc) =
+externaliseExp (I.DoLoop respat merge i bound loopbody loc) =
   E.DoLoop (externalisePat mergepat loc) (externaliseSubExps mergeexp loc)
            (externaliseIdent i) (externaliseSubExp bound)
            (externaliseBody loopbody)
-           (E.TupLit (map (E.Var . externaliseIdent) mergepat) loc) loc
+           (E.TupLit (map (E.Var . externaliseIdent) respat) loc) loc
   where (mergepat, mergeexp) = unzip merge
 externaliseExp (I.Map _ fun es loc) =
   maybeUnzip $ E.Map (externaliseMapLambda fun)

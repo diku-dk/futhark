@@ -131,13 +131,13 @@ eAssert e = do e' <- letSubExp "assert_arg" =<< e
                return $ Assert e' $ srclocOf e'
 
 eDoLoop :: MonadBinder m =>
-           [(Ident,m Exp)] -> Ident -> m Exp -> m Body -> m Exp
-eDoLoop pat i boundexp loopbody = do
+           [Ident] -> [(Ident,m Exp)] -> Ident -> m Exp -> m Body -> m Exp
+eDoLoop respat merge i boundexp loopbody = do
   mergeexps' <- letSubExps "merge_init" =<< sequence mergeexps
   boundexp' <- letSubExp "bound" =<< boundexp
   loopbody' <- insertBindingsM loopbody
-  return $ DoLoop (zip mergepat mergeexps') i boundexp' loopbody' loc
-  where (mergepat, mergeexps) = unzip pat
+  return $ DoLoop respat (zip mergepat mergeexps') i boundexp' loopbody' loc
+  where (mergepat, mergeexps) = unzip merge
         loc = srclocOf i
 
 eSubExps :: MonadBinder m =>

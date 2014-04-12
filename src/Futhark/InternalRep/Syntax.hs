@@ -299,8 +299,8 @@ data Exp =
             -- @a[i]@ is at position @i+n@, cycling over to the
             -- beginning of the array.
 
-            | DoLoop [(Ident, SubExp)] Ident SubExp Body SrcLoc
-            -- ^ @loop {a} = {v} for i < n do b@.
+            | DoLoop [Ident] [(Ident, SubExp)] Ident SubExp Body SrcLoc
+            -- ^ @loop {b} <- {a} = {v} for i < n do b@.
 
             | Map Certificates Lambda [SubExp] SrcLoc
              -- ^ @map(op +(1), {1,2,..,n}) = [2,3,..,n+1]@.
@@ -337,7 +337,7 @@ instance Located Exp where
   locOf (Copy _ pos) = locOf pos
   locOf (Assert _ loc) = locOf loc
   locOf (Conjoin _ loc) = locOf loc
-  locOf (DoLoop _ _ _ _ loc) = locOf loc
+  locOf (DoLoop _ _ _ _ _ loc) = locOf loc
   locOf (Map _ _ _ pos) = locOf pos
   locOf (Reduce _ _ _ pos) = locOf pos
   locOf (Scan _ _ _ pos) = locOf pos
