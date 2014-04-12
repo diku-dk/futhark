@@ -1,16 +1,16 @@
 module Futhark.EnablingOpts.SymbolTable
   ( SymbolTable (bindings)
   , empty
-  , filter
-  , Entry (asExp, bindingDepth, valueRange)
+  , Entry (..)
   , lookupExp
   , lookupScalExp
   , lookupValue
   , lookupVar
+  , enclosingLoopVars
   , insert
   , insert'
   , Bounds
-  , insertBounded
+  , insertLoopVar
   , updateBounds
   , isAtLeast
   , lookup
@@ -18,9 +18,12 @@ module Futhark.EnablingOpts.SymbolTable
   )
   where
 
-import Prelude hiding (lookup, filter)
+import Prelude hiding (lookup)
 
 import Control.Applicative hiding (empty)
+import Data.Ord
+import Data.Maybe
+import Data.List hiding (insert, lookup)
 import qualified Data.HashMap.Lazy as HM
 
 import Futhark.InternalRep
@@ -34,14 +37,12 @@ data SymbolTable = SymbolTable {
 empty :: SymbolTable
 empty = SymbolTable 0 HM.empty
 
-filter :: (Entry -> Bool) -> SymbolTable -> SymbolTable
-filter p vtable = vtable { bindings = HM.filter p $ bindings vtable }
-
 data Entry = Entry {
     asExp :: Maybe Exp
   , asScalExp :: Maybe ScalExp
   , bindingDepth :: Int
   , valueRange :: (Maybe ScalExp, Maybe ScalExp)
+  , loopVariable :: Bool
   } deriving (Eq, Show)
 
 data CtOrId  = Value Value
@@ -78,6 +79,14 @@ lookupVar name vtable = case lookupExp name vtable of
                           Just (SubExps [Var v] _) -> Just $ identName v
                           _                        -> Nothing
 
+enclosingLoopVars :: [VName] -> SymbolTable -> [VName]
+enclosingLoopVars free vtable =
+  map fst $ reverse $
+  sortBy (comparing (bindingDepth . snd)) $
+  filter (loopVariable . snd) $ mapMaybe fetch free
+  where fetch name = do e <- HM.lookup name $ bindings vtable
+                        return (name, e)
+
 insert :: VName -> Exp -> SymbolTable -> SymbolTable
 insert name e vtable =
   vtable { bindings = HM.insert name bind $ bindings vtable
@@ -88,6 +97,7 @@ insert name e vtable =
                , asScalExp = toScalExp (`lookupScalExp` vtable) e
                , valueRange = (Nothing, Nothing)
                , bindingDepth = curDepth vtable
+               , loopVariable = False
                }
 
 insert' :: VName -> SymbolTable -> SymbolTable
@@ -100,12 +110,13 @@ insert' name vtable =
                , asScalExp = Nothing
                , valueRange = (Nothing, Nothing)
                , bindingDepth = curDepth vtable
+               , loopVariable = False
                }
 
 type Bounds = (Maybe SubExp, Maybe SubExp)
 
-insertBounded :: VName -> Bounds -> SymbolTable -> SymbolTable
-insertBounded name (lower,upper) vtable =
+insertLoopVar :: VName -> Bounds -> SymbolTable -> SymbolTable
+insertLoopVar name (lower,upper) vtable =
   vtable { bindings = HM.insert name bind $ bindings vtable
          , curDepth = curDepth vtable + 1
          }
@@ -114,6 +125,7 @@ insertBounded name (lower,upper) vtable =
                , asScalExp = Nothing
                , valueRange = (lower', upper')
                , bindingDepth = curDepth vtable
+               , loopVariable = True
                }
         look = (`lookupScalExp` vtable)
         lower' = toScalExp look =<< (subExp <$> lower)

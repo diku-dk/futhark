@@ -69,7 +69,7 @@ type TopDownRule = SimplificationRule ST.SymbolTable
 type BottomUpRule = SimplificationRule (HS.HashSet VName)
 
 topDownRules :: [TopDownRule]
-topDownRules = [ liftIdentityMapping
+topDownRules = [] {-[ liftIdentityMapping
                , removeReplicateMapping
                , hoistLoopInvariantMergeVariables
                , simplifyClosedFormRedomap
@@ -85,14 +85,14 @@ topDownRules = [ liftIdentityMapping
                , letRule simplifyIndexing
                , evaluateBranch
                , hoistBranchInvariant
-               ]
+               ]-}
 
 bottomUpRules :: [BottomUpRule]
-bottomUpRules = [ removeDeadMapping
+bottomUpRules = [] {-[ removeDeadMapping
                 , removeUnusedLoopResult
                 , removeRedundantMergeVariables
                 , removeDeadBranchResult
-                ]
+                ]-}
 
 liftIdentityMapping :: TopDownRule
 liftIdentityMapping _ (Let pat (Map cs fun arrs loc)) =
@@ -276,15 +276,22 @@ simplifyClosedFormReduce _ _ = return Nothing
 
 simplifyScalarExp :: TopDownRule
 simplifyScalarExp vtable (Let [v] e)
-  | Just se <- SE.toScalExp (`ST.lookupScalExp` vtable) e,
-    Right se' <- AS.simplify se loc True (rangesRep vtable), -- Cheap?  What?
-    se /= se' = do -- Only perform simplification if something
-                   -- actually changed - if 'simplify' is not
-                   -- idempotent, this is going to cause an infinite
-                   -- loop in the simplifier.
-  (e',bnds) <- SE.fromScalExp loc se'
+  | Just se@(SE.RelExp SE.LTH0 _) <- SE.toScalExp (`ST.lookupScalExp` vtable) e,
+    Right se' <-
+      dnfToScalExp <$> AS.mkSuffConds se loc (rangesRep vtable),
+    se' /= se,
+    freeBef  <- map identName $ SE.getIds se,
+    freePost <- map identName $ SE.getIds se',
+    lvsBef <- ST.enclosingLoopVars freeBef vtable,
+    lvsPost <- ST.enclosingLoopVars freePost vtable,
+    lvsBef /= lvsPost && lvsPost `isSuffixOf` lvsBef = do
+  (e', bnds) <- SE.fromScalExp (srclocOf e) se'
   return $ Just $ bnds ++ [Let [v] e']
   where loc = srclocOf e
+        dnfToScalExp []      = SE.Val $ LogVal True
+        dnfToScalExp (c:cs)  = foldl SE.SLogOr (conjToScalExp c) (map conjToScalExp cs)
+        conjToScalExp []     = SE.Val $ LogVal True
+        conjToScalExp (x:xs) = foldl SE.SLogOr x xs
 
 simplifyScalarExp _ _ = return Nothing
 
