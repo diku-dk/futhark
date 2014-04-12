@@ -69,7 +69,7 @@ type TopDownRule = SimplificationRule ST.SymbolTable
 type BottomUpRule = SimplificationRule (HS.HashSet VName)
 
 topDownRules :: [TopDownRule]
-topDownRules = [] {-[ liftIdentityMapping
+topDownRules = [ liftIdentityMapping
                , removeReplicateMapping
                , hoistLoopInvariantMergeVariables
                , simplifyClosedFormRedomap
@@ -85,14 +85,14 @@ topDownRules = [] {-[ liftIdentityMapping
                , letRule simplifyIndexing
                , evaluateBranch
                , hoistBranchInvariant
-               ]-}
+               ]
 
 bottomUpRules :: [BottomUpRule]
-bottomUpRules = [] {-[ removeDeadMapping
+bottomUpRules = [ removeDeadMapping
                 , removeUnusedLoopResult
                 , removeRedundantMergeVariables
                 , removeDeadBranchResult
-                ]-}
+                ]
 
 liftIdentityMapping :: TopDownRule
 liftIdentityMapping _ (Let pat (Map cs fun arrs loc)) =
