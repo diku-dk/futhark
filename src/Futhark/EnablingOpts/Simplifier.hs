@@ -335,12 +335,14 @@ isNotSafe _ (LetNeed _ e _) = not $ safeExp e
 
 isNotCheap :: BlockPred
 isNotCheap _ = not . cheapBnd
-  where cheap (BinOp {})   = True
+  where cheapBnd (LetNeed _ e _) = cheap e
+        cheap (BinOp {})   = True
         cheap (SubExps {}) = True
         cheap (Not {})     = True
         cheap (Negate {})  = True
-        cheap _            = False
-        cheapBnd (LetNeed _ e _) = cheap e
+        cheap (Negate {})  = True
+        cheap _            = True -- Used to be False, but let's try
+                                  -- it out.
 
 uniqPat :: [Ident] -> Bool
 uniqPat = any $ unique . identType
