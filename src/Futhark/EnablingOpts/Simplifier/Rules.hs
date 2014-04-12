@@ -74,6 +74,7 @@ topDownRules = [ liftIdentityMapping
                , hoistLoopInvariantMergeVariables
                , simplifyClosedFormRedomap
                , simplifyClosedFormReduce
+               , simplifyClosedFormLoop
                , simplifyScalarExp
                , letRule simplifyRearrange
                , letRule simplifyRotate
@@ -273,6 +274,11 @@ simplifyClosedFormReduce vtable (Let pat (Reduce _ fun args _)) =
   foldClosedForm (`ST.lookupExp` vtable) pat fun acc arr
   where (acc, arr) = unzip args
 simplifyClosedFormReduce _ _ = return Nothing
+
+simplifyClosedFormLoop :: TopDownRule
+simplifyClosedFormLoop _ (Let pat (DoLoop respat merge _ bound body _)) =
+  loopClosedForm pat respat merge bound body
+simplifyClosedFormLoop _ _ = return Nothing
 
 simplifyScalarExp :: TopDownRule
 simplifyScalarExp vtable (Let [v] e)

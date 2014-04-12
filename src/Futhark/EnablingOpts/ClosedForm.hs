@@ -7,6 +7,7 @@
 -- also being able to analyse sequential loops.
 module Futhark.EnablingOpts.ClosedForm
   ( foldClosedForm
+  , loopClosedForm
   )
 where
 
@@ -48,7 +49,8 @@ foldClosedForm :: VarLookup -> [Ident] -> Lambda -> [SubExp] -> [SubExp]
                -> NeedNames (Maybe [Binding])
 
 foldClosedForm look pat lam accs arrs =
-  case checkResults of
+  case checkResults pat knownBindings
+       (map fromParam $ lambdaParams lam) (lambdaBody lam) accs lamloc of
     Nothing -> return Nothing
     Just closedBody -> do
       isEmpty <- newIdent "fold_input_is_empty" (Basic Bool) lamloc
@@ -65,14 +67,52 @@ foldClosedForm look pat lam accs arrs =
       closedBody' <- renameBody closedBody
       return $ Just [isEmptyCheck, mkBranch closedBody']
   where lamloc = srclocOf lam
-        res = bodyResult $ lambdaBody lam
-        bndMap = makeBindMap $ lambdaBody lam
-        (accparams, _) = splitAt (length accs) $ lambdaParams lam
 
-        checkResults =
-          liftM (\bnds -> Body bnds $ Result [] (map Var pat) lamloc) $
-          concat <$> zipWithM checkResult
-                     (zip pat $ resultSubExps res) (zip accparams accs)
+        knownBindings = determineKnownBindings look lam accs arrs
+
+loopClosedForm :: [Ident] -> [Ident] -> [(Ident,SubExp)]
+               -> SubExp -> Body -> NeedNames (Maybe [Binding])
+loopClosedForm pat respat merge bound body
+  | respat == mergepat =
+  case checkResults respat knownBindings
+       mergepat body mergeexp bodyloc of
+    Nothing -> return Nothing
+    Just closedBody -> do
+      isEmpty <- newIdent "bound_is_zero" (Basic Bool) bodyloc
+      let isEmptyCheck =
+            Let [isEmpty] $ BinOp Leq bound (intconst 0 bodyloc)
+                            (Basic Bool) bodyloc
+          mkBranch ifNonEmpty =
+            Let pat $ If (Var isEmpty)
+                         (resultBody [] mergeexp bodyloc)
+                         ifNonEmpty
+                         (bodyType body)
+                         bodyloc
+      closedBody' <- renameBody closedBody
+      return $ Just [isEmptyCheck, mkBranch closedBody']
+  | otherwise = return Nothing
+  where (mergepat, mergeexp) = unzip merge
+        bodyloc = srclocOf body
+        knownBindings = HM.fromList merge
+
+checkResults :: [Ident]
+             -> HM.HashMap Ident SubExp
+             -> [Ident]
+             -> Body
+             -> [SubExp]
+             -> SrcLoc
+             -> Maybe Body
+checkResults pat knownBindings params body accs bodyloc =
+  liftM (\bnds -> Body bnds $ Result [] (map Var pat) bodyloc) $
+  concat <$> zipWithM checkResult
+             (zip pat $ resultSubExps res) (zip accparams accs)
+
+  where bndMap = makeBindMap body
+        (accparams, _) = splitAt (length accs) params
+        res = bodyResult body
+
+        nonFree = boundInBody body <>
+                  HS.fromList params
 
         checkResult (p, e) _
           | Just e' <- asFreeSubExp e =
@@ -81,7 +121,7 @@ foldClosedForm look pat lam accs arrs =
           e@(BinOp bop x y rt loc) <- HM.lookup v bndMap
           -- One of x,y must be *this* accumulator, and the other must
           -- be something that is free in the body.
-          let isThisAccum = (==Var (fromParam accparam))
+          let isThisAccum = (==Var accparam)
           (this, el) <- case ((asFreeSubExp x, isThisAccum y),
                               (asFreeSubExp y, isThisAccum x)) of
                           ((Just free, True), _) -> Just (acc, free)
@@ -99,11 +139,6 @@ foldClosedForm look pat lam accs arrs =
         asFreeSubExp (Var v)
           | HS.member v nonFree = HM.lookup v knownBindings
         asFreeSubExp se = Just se
-
-        knownBindings = determineKnownBindings look lam accs arrs
-
-        nonFree = boundInBody (lambdaBody lam) <>
-                  HS.fromList (map fromParam $ lambdaParams lam)
 
 determineKnownBindings :: VarLookup -> Lambda -> [SubExp] -> [SubExp]
                        -> HM.HashMap Ident SubExp
