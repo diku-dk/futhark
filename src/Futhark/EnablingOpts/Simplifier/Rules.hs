@@ -36,6 +36,7 @@ import qualified Futhark.EnablingOpts.ScalExp as SE
 import Futhark.EnablingOpts.Simplifier.DataDependencies
 import Futhark.InternalRep
 import Futhark.MonadFreshNames
+import Futhark.Tools
 
 -- | @simplifyBinding lookup bnd@ performs simplification of the
 -- binding @bnd@.  If simplification is possible, a replacement list
@@ -85,6 +86,7 @@ topDownRules = [ liftIdentityMapping
                , letRule simplifyConjoin
                , letRule simplifyIndexing
                , evaluateBranch
+               , simplifyBoolBranch
                , hoistBranchInvariant
                ]
 
@@ -633,6 +635,21 @@ evaluateBranch _ (Let pat (If e1 tb fb _ _))
           | isCt0 e1  = Just fb
           | otherwise = Nothing
 evaluateBranch _ _ = return Nothing
+
+-- IMPROVE: This rule can be generalised to work in more cases,
+-- especially when the branches have bindings, or return more than one
+-- value.
+simplifyBoolBranch :: TopDownRule
+simplifyBoolBranch _ (Let [v] (If cond tb fb ts loc))
+  | Body [] (Result [] [tres] _) <- tb,
+    Body [] (Result [] [fres] _) <- fb,
+    all (==Basic Bool) ts = do
+  (e, bnds) <-
+    runBinder'' (eBinOp LogOr (pure $ BinOp LogAnd cond tres (Basic Bool) loc)
+                              (pure $ subExp fres)
+                              (Basic Bool) loc)
+  return $ Just $ bnds ++ [Let [v] e]
+simplifyBoolBranch _ _ = return Nothing
 
 hoistBranchInvariant :: TopDownRule
 hoistBranchInvariant _ (Let pat (If e1 tb fb ts loc)) = return $
