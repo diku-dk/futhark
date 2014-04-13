@@ -20,7 +20,7 @@ import Control.Monad.Reader
 
 import Futhark.Dev(tident) -- for debugging: tident "int x"
 
---import Debug.Trace
+import Debug.Trace
 
 import Futhark.InternalRep
 import Futhark.EnablingOpts.EnablingOptErrors
@@ -137,7 +137,9 @@ gaussElimRel (RelExp LTH0 e) = do
     let tp = scalExpType e
     e_sofp <- if (tp == Int) then toNumSofP =<< simplifyScal e
               else badAlgSimplifyM $ SimplifyError pos "gaussElimRel: only Int relations please!"
-    e_dnf <- toDNF =<< simplifyScal =<< gaussAllLTH0 S.empty e_sofp
+    e_scal<- simplifyScal =<< gaussAllLTH0 S.empty e_sofp
+    e_scal' <- trace ("LALALALALAAL"++ppScalExp e_scal) (return e_scal)
+    e_dnf <- toDNF e_scal'
     mapM (\ t -> 
             mapM (\ f -> 
                     case f of
@@ -266,6 +268,7 @@ gaussOneDefaultLTH0 i elsyms e = do
             one    <- getPos1 (typeOfNAlg e)
             ascal  <- fromNumSofP a
             mam1   <- toNumSofP =<< simplifyScal (SNeg (SPlus ascal (Val one)))
+            am1    <- toNumSofP =<< simplifyScal (SMinus ascal (Val one))
 
             case HM.lookup (identName i) ranges of
                 Nothing -> 
@@ -275,7 +278,7 @@ gaussOneDefaultLTH0 i elsyms e = do
                     badAlgSimplifyM $ SimplifyError pos 
                                       "gaussOneDefaultLTH0: both bounds are undefined!"
                 Just (_, Just lb, Nothing) -> do
-                    alth0    <- gaussAllLTH0  elsyms a
+                    alth0    <- gaussAllLTH0  elsyms am1
                     alpblth0 <- gaussElimHalf elsyms lb a b
                     and_half <- simplifyScal $ SLogAnd alth0 alpblth0
                     case and_half of
@@ -300,7 +303,7 @@ gaussOneDefaultLTH0 i elsyms e = do
                         _                 -> return $ Nothing
 
                 Just (_, Just lb, Just ub) -> do
-                    alth0    <- gaussAllLTH0 elsyms a
+                    alth0    <- gaussAllLTH0 elsyms am1 --a
                     alpblth0 <- gaussElimHalf elsyms lb a b
                     ageq0    <- gaussAllLTH0 elsyms mam1
                     aupblth0 <- gaussElimHalf elsyms ub a b
@@ -1323,7 +1326,24 @@ mkRelExp 2 =
         rel1 = RelExp LTH0 ai_p_b
 
     in (hash, rel1, rel1)
+mkRelExp 3 = 
+    let (i',j',n',m') = (tident "int i", tident "int j", tident "int n", tident "int m")
+        (i,j,n,m) = (Id i', Id j', Id n', Id m')
+        one = Val (IntVal 1) 
+        two = Val (IntVal 2)
+        min_j_nm1 = MaxMin True [SMinus i (STimes two n), SMinus n one]
+        hash = HM.fromList $ [ (identName n', ( 1::Int, Just (Val (IntVal 1)), Nothing ) ),
+                               (identName m', ( 2::Int, Just (Val (IntVal 1)), Nothing ) ),
+                               (identName i', ( 5::Int, Just (Val (IntVal 0)), Just (SMinus m one) ) )
+                             , (identName j', ( 9::Int, Just (Val (IntVal 0)), Just min_j_nm1 ) )
+                             ] -- HM.HashMap VName (Int, Maybe ScalExp, Maybe ScalExp)
+        ij_m_m = SMinus (STimes i j) m
+        rel1 = RelExp LTH0 ij_m_m
+        rel3 = RelExp LTH0 (SMinus i (SPlus (STimes two n) j))
+        m_ij_m_1 = SMinus (Val (IntVal (-1))) (STimes i j)
+        rel2 = RelExp LTH0 m_ij_m_1
 
+    in (hash, rel1, rel2)
 
 mkRelExp _ = let hash = HM.empty
                  rel  = RelExp LTH0 (Val (IntVal (-1)))
