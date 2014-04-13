@@ -41,13 +41,10 @@ splitBndAssertions (Let pat (DoLoop respat merge i bound body loc)) = do
   -- XXX slightly gross hack
   DoLoop _ merge' i' _ body' _ <-
     renameExp $ DoLoop respat merge i bound body loc
-  (certmergepat, certbody, allBoundsChecks) <-
-    splitLoopBody merge' body'
+  (certbody, allBoundsChecks) <- splitLoopBody body'
   allBoundsChecksCert  <-
     newIdent "loop_bounds_cert" (Basic Cert) loc
-  pat' <- mapM (newIdent' id) certmergepat
-  let certmerge = zip (allBoundsChecks:certmergepat)
-                      (constant True loc:map snd merge)
+  let certmerge = (allBoundsChecks, constant True loc) : merge'
       certloop = Let [allBoundsChecks] $
                  DoLoop [allBoundsChecks] certmerge i' bound certbody loc
       valbody = replaceBoundsCerts allBoundsChecksCert body
@@ -57,13 +54,42 @@ splitBndAssertions (Let pat (DoLoop respat merge i bound body loc)) = do
            [Let [allBoundsChecksCert] (Assert (Var allBoundsChecks) loc),
             valloop]
   where nullRes = Result [] [] $ srclocOf body
+
+splitBndAssertions (Let pat (Map cs fun args loc)) = do
+  fun' <- splitMapFun fun
+  allBoundsChecks     <- newIdent "map_bounds_checks" boolarray loc
+  andedBoundsChecks   <- newIdent "map_comb_bounds_check" (Basic Bool) loc
+  allBoundsChecksCert <- newIdent "loop_bounds_cert"  (Basic Cert) loc
+  andfun <- binOpLambda LogAnd (Basic Bool) loc
+  let certmap = Let [allBoundsChecks] $ Map cs fun' args loc
+      valfun = fun { lambdaBody = replaceBoundsCerts allBoundsChecksCert $
+                                  lambdaBody fun
+                   }
+      valmap = Let pat $ Map cs valfun args loc
+      andbnd = Let [andedBoundsChecks] $
+               Reduce [] andfun [(constant True loc,Var allBoundsChecks)] loc
+      assertbnd = Let [allBoundsChecksCert] (Assert (Var andedBoundsChecks) loc)
+  Body certbnds _ <- runBinder $ copyConsumed $ Body [certmap] nullRes
+  return $ certbnds ++ [andbnd, assertbnd, valmap]
+  where nullRes = Result [] [] loc
+        boolarray = arrayOf (Basic Bool)
+                    (Shape [arraysSize 0 $ map subExpType args]) Unique
+
 splitBndAssertions bnd = return [bnd]
 
-splitLoopBody :: [(Ident,SubExp)] -> Body -> SplitM ([Ident], Body, Ident)
-splitLoopBody merge body = do
+splitLoopBody :: Body -> SplitM (Body, Ident)
+splitLoopBody body = do
   allBoundsChecks  <- newIdent "loop_bounds_checks" (Basic Bool) $ srclocOf body
   certbody <- returnChecksInBody (Var allBoundsChecks) body
-  return (map fst merge, certbody, allBoundsChecks)
+  return (certbody, allBoundsChecks)
+
+splitMapFun :: Lambda -> SplitM Lambda
+splitMapFun lam = do
+  Body checkbnds (Result cs es loc) <-
+    returnChecksInBody (constant True $ srclocOf lam) $ lambdaBody lam
+  return $ lam { lambdaBody = Body checkbnds $ Result cs (take 1 es) loc
+               , lambdaReturnType = [Basic Bool]
+               }
 
 returnChecksInBody :: SubExp -> Body -> SplitM Body
 returnChecksInBody startcert (Body bnds (Result cs es loc)) = do
@@ -85,10 +111,8 @@ returnChecksInBinding (Let pat (If cond tbranch fbranch t loc)) = do
 returnChecksInBinding (Let pat e@(Assert prop _)) =
   return (Let pat e, [prop])
 returnChecksInBinding (Let pat (DoLoop respat merge i bound body loc)) = do
-  (certmergepat, certbody, allBoundsChecks) <-
-    splitLoopBody merge body
-  let certmerge = zip (allBoundsChecks:certmergepat)
-                  (constant True loc:map snd merge)
+  (certbody, allBoundsChecks) <- splitLoopBody body
+  let certmerge = (allBoundsChecks, constant True loc) : merge
       certloop = DoLoop (allBoundsChecks:respat) certmerge i bound certbody loc
   return (Let (allBoundsChecks:pat) certloop, [Var allBoundsChecks])
 returnChecksInBinding (Let pat e) =
@@ -101,6 +125,9 @@ replaceBoundsCerts c = mapBody replace
                   , mapOnExp = return . replaceInExp
                   , mapOnCertificates = const $ return [c]
                   }
+        replaceInExp (Map cs fun arrs loc)     = Map cs fun' arrs loc
+          where fun' = fun { lambdaBody =
+                               replaceBoundsCerts c $ lambdaBody fun }
         replaceInExp (Index _ v idxs loc)      = Index [c] v idxs loc
         replaceInExp (Update _ v idxs val loc) = Update [c] v idxs val loc
         replaceInExp e                         = mapExp replace e
