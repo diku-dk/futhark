@@ -428,12 +428,20 @@ fusionGatherBody fres (Body (Let pat e:bnds) res) = do
     bres <- binding pat $ fusionGatherBody fres $ Body bnds res
     foldM fusionGatherExp bres (e:pat_vars)
 
-fusionGatherBody fres (Body (DoLoop merge _ ub loop_body:bnds) res) = do
+fusionGatherBody fres (Body [] _) =
+  return fres
+
+fusionGatherExp :: FusedRes -> Exp -> FusionGM FusedRes
+
+-----------------------------------------
+---- Index/If    ----
+-----------------------------------------
+
+fusionGatherExp fres (DoLoop _ merge _ ub loop_body _) = do
   let (merge_pat, ini_val) = unzip merge
-  letbres <- binding merge_pat $ fusionGatherBody fres $ Body bnds res
 
   let pat_vars = map Var merge_pat
-  fres' <- foldM fusionGatherSubExp letbres (ini_val++ub:pat_vars)
+  fres' <- foldM fusionGatherSubExp fres (ini_val++ub:pat_vars)
 
   let null_res = mkFreshFusionRes
   new_res <- binding merge_pat $ fusionGatherBody null_res loop_body
@@ -443,15 +451,6 @@ fusionGatherBody fres (Body (DoLoop merge _ ub loop_body:bnds) res) = do
   let new_res' = new_res { unfusable = foldl (flip HS.insert) (unfusable new_res) inp_arrs }
   -- merge new_res with fres'
   return $ unionFusionRes new_res' fres'
-
-fusionGatherBody fres (Body [] _) =
-  return fres
-
-fusionGatherExp :: FusedRes -> Exp -> FusionGM FusedRes
-
------------------------------------------
----- Index/If    ----
------------------------------------------
 
 fusionGatherExp fres (Index _ idd inds _) =
   foldM fusionGatherSubExp fres (Var idd : inds)

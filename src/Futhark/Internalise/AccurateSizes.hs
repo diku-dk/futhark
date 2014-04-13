@@ -7,6 +7,7 @@ module Futhark.Internalise.AccurateSizes
   , splitFunction
   , splitLambda
   , splitType
+  , splitIdents
   , typeSizes
   , subExpsWithShapes
   , allEqual
@@ -14,6 +15,7 @@ module Futhark.Internalise.AccurateSizes
   , annotateArrayShape
   , annotateIdents
   , addTypeShapes
+  , addIdentShapes
   )
   where
 
@@ -85,6 +87,9 @@ splitBody body = (shapeBody, valueBody)
                       resultBody cs (snd $ splitTyped subExpType es) loc
           loc = srclocOf body
 
+splitIdents :: [Ident] -> ([Ident], [Ident])
+splitIdents = splitTyped identType
+
 splitTyped :: ArrayShape shape => (a -> TypeBase as shape) -> [a] -> ([a], [a])
 splitTyped _ []     = ([],[])
 splitTyped f (x:xs) =
@@ -153,6 +158,16 @@ addTypeShapes (t:ts) shapes =
   let (shape,shapes') = splitAt (arrayRank t) shapes
       t' = t `setArrayShape` Shape shape
   in t' : addTypeShapes ts shapes'
+
+addIdentShapes :: ArrayShape oldshape =>
+                  [IdentBase als oldshape]
+               -> [SubExp]
+               -> [IdentBase als Shape]
+addIdentShapes [] _ = []
+addIdentShapes (v:vs) shapes =
+  let (shape,shapes') = splitAt (arrayRank $ identType v) shapes
+      t' = identType v `setArrayShape` Shape shape
+  in v { identType = t' } : addIdentShapes vs shapes'
 
 addShapeAnnotations :: [IdentBase Names Rank] -> [Type] -> [Ident]
 addShapeAnnotations = zipWith addShapeAnnotation

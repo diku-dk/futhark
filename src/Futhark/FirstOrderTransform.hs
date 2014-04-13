@@ -161,8 +161,8 @@ newFold loc arrexps accexps = do
   (i, iv) <- newVar loc "i" $ Basic Int
   initacc <- letSubExps "acc" $ map maybeCopy accexps
   arrinit <- letSubExps "arr" $ map maybeCopy arrexps
-  arr <- forM (map subExpType arrinit) $ \t -> newIdent "fold_arr" t noLoc
-  acc <- forM initacc $ \e -> newIdent "acc" (subExpType e) $ srclocOf e
+  arr <- forM arrinit $ \e -> newIdent "fold_arr" (subExpType e) $ srclocOf e
+  acc <- forM accexps $ \e -> newIdent "acc" (subExpType e) $ srclocOf e
   return ((arr, arrinit), (acc, initacc), (i, iv))
 
 -- | @maybeCopy e@ returns a copy expression containing @e@ if @e@ is

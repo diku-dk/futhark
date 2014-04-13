@@ -182,7 +182,7 @@ fromScalExp loc = runBinder'' . convert
 
         select :: BasicType -> Bool -> Exp -> Exp -> Binder Exp
         select t isMin cur next =
-          let cmp = eBinOp Less (pure cur) (pure next) (Basic t) loc
+          let cmp = eBinOp Less (pure cur) (pure next) (Basic Bool) loc
               (pick, discard)
                 | isMin     = (cur, next)
                 | otherwise = (next, cur)

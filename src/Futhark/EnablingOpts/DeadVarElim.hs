@@ -124,28 +124,20 @@ deadCodeElimBody (Body (Let pat e:bnds) res) = do
   else do e' <- deadCodeElimExp e
           return $ Body (Let pat' e':bnds') res'
 
-deadCodeElimBody (Body (DoLoop merge idd n loopbdy:bnds) res) = do
-  let (mergepat, mergeexp) = unzip merge
-      idds = map identName mergepat
-  ((mergepat', Body bnds' res'),noref) <-
-    collectRes idds $ binding idds $ do
-      (mergepat', _) <- collectRes idds $ deadCodeElimPat mergepat
-      body' <- deadCodeElimBody $ Body bnds res
-      return (mergepat', body')
-  if noref
-  then changed $ return $ Body bnds' res'
-  else do
-    mergeexp' <- mapM deadCodeElimSubExp mergeexp
-    n'        <- deadCodeElimSubExp n
-    loopbdy'  <- binding ( identName idd : idds) $ deadCodeElimBody loopbdy
-    return $ Body (DoLoop (zip mergepat' mergeexp') idd n' loopbdy':bnds') res'
-
 deadCodeElimBody (Body [] (Result cs es loc)) =
   resultBody <$> mapM deadCodeElimIdent cs <*>
                  mapM deadCodeElimSubExp es <*> pure loc
 
 deadCodeElimExp :: Exp -> DCElimM Exp
-deadCodeElimExp = mapExpM mapper
+deadCodeElimExp (DoLoop respat merge i bound body loc) = do
+  let (mergepat, mergeexp) = unzip merge
+  binding (identName i : map identName mergepat) $ do
+    mergepat' <- mapM deadCodeElimBnd mergepat
+    mergeexp' <- mapM deadCodeElimSubExp mergeexp
+    bound' <- deadCodeElimSubExp bound
+    body' <- deadCodeElimBody body
+    return $ DoLoop respat (zip mergepat' mergeexp') i bound' body' loc
+deadCodeElimExp e = mapExpM mapper e
   where mapper = Mapper {
                    mapOnExp = deadCodeElimExp
                  , mapOnBody = deadCodeElimBody

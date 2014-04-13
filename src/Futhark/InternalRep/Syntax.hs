@@ -197,8 +197,7 @@ instance Located SubExp where
   locOf (Var ident)      = locOf ident
 
 -- | A local variable binding.
-data Binding = DoLoop [(Ident, SubExp)] Ident SubExp Body
-             | Let [Ident] Exp
+data Binding = Let [Ident] Exp
                deriving (Show, Eq, Ord)
 
 -- | The result of a body - a sequence of subexpressions, possibly
@@ -300,6 +299,9 @@ data Exp =
             -- @a[i]@ is at position @i+n@, cycling over to the
             -- beginning of the array.
 
+            | DoLoop [Ident] [(Ident, SubExp)] Ident SubExp Body SrcLoc
+            -- ^ @loop {b} <- {a} = {v} for i < n do b@.
+
             | Map Certificates Lambda [SubExp] SrcLoc
              -- ^ @map(op +(1), {1,2,..,n}) = [2,3,..,n+1]@.
              -- 3rd arg is either a tuple of multi-dim arrays
@@ -335,6 +337,7 @@ instance Located Exp where
   locOf (Copy _ pos) = locOf pos
   locOf (Assert _ loc) = locOf loc
   locOf (Conjoin _ loc) = locOf loc
+  locOf (DoLoop _ _ _ _ _ loc) = locOf loc
   locOf (Map _ _ _ pos) = locOf pos
   locOf (Reduce _ _ _ pos) = locOf pos
   locOf (Scan _ _ _ pos) = locOf pos

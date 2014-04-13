@@ -7,6 +7,7 @@ module Futhark.Internalise.Bindings
   , flattenPattern
   , bindingPattern
   , bindingFlatPatternWithCert
+  , bindingFlatPatternOwnCert
   )
   where
 
@@ -106,6 +107,21 @@ bindingFlatPatternWithCert ce = bindingFlatPatternAs handleMapping
           let (vs'', rest_ts) = annotateIdents vs' ts
           in (vs'', ArraySubst ce vs'', rest_ts)
 
+bindingFlatPatternOwnCert :: [E.Ident] -> [I.Type]
+                          -> ([I.Ident] -> InternaliseM a) -> InternaliseM a
+bindingFlatPatternOwnCert = bindingFlatPatternAs handleMapping
+  where handleMapping ts [] = ([], [], ts)
+        handleMapping ts (r:rs) =
+          let (ps, reps, ts')    = handleMapping' ts r
+              (pss, repss, ts'') = handleMapping ts' rs
+          in (ps++pss, reps:repss, ts'')
+        handleMapping' ts (Direct v) =
+          let ([v'], rest_ts) = annotateIdents [v] ts
+          in ([v'], DirectSubst v', rest_ts)
+        handleMapping' ts (TupleArray c vs') =
+          let (vs'', rest_ts) = annotateIdents vs' $ drop 1 ts -- Skip the cert.
+          in (c:vs'', ArraySubst (I.Var c) vs'', rest_ts)
+
 flattenPattern :: MonadFreshNames m => E.TupIdent -> m [E.Ident]
 flattenPattern (E.Wildcard t loc) = do
   name <- newVName "nameless"
@@ -115,7 +131,8 @@ flattenPattern (E.Id v) =
 flattenPattern (E.TupId pats _) =
   concat <$> mapM flattenPattern pats
 
-bindingPattern :: E.TupIdent -> SubExp -> [I.Type] -> ([I.Ident] -> InternaliseM a) -> InternaliseM a
+bindingPattern :: E.TupIdent -> Maybe SubExp -> [I.Type] -> ([I.Ident] -> InternaliseM a) -> InternaliseM a
 bindingPattern pat ce ts m = do
   pat' <- flattenPattern pat
-  bindingFlatPatternWithCert ce pat' ts m
+  case ce of Just ce' -> bindingFlatPatternWithCert ce' pat' ts m
+             Nothing  -> bindingFlatPatternOwnCert pat' ts m

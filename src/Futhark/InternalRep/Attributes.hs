@@ -589,6 +589,7 @@ typeOf (Copy e _) =
   [subExpType e `setUniqueness` Unique `setAliases` HS.empty]
 typeOf (Assert _ _) = [Basic Cert]
 typeOf (Conjoin _ _) = [Basic Cert]
+typeOf (DoLoop res _ _ _ _ _) = map identType res
 typeOf (Map _ f arrs _) =
   [ arrayOf t (Shape [outersize]) (uniqueProp t)
     | t <- lambdaType f arrts ]
@@ -652,10 +653,10 @@ progNames = execWriter . mapM funNames . progFunctions
 
         bindingNames (Let pat e) =
           mapM_ one pat >> expNames e
-        bindingNames (DoLoop pat i _ loopbody) =
-          mapM_ (one . fst) pat >> one i >> bodyNames loopbody
 
-        expNames = walkExpM names
+        expNames (DoLoop _ pat i _ loopbody _) =
+          mapM_ (one . fst) pat >> one i >> bodyNames loopbody
+        expNames e = walkExpM names e
 
         lambdaNames (Lambda params body _ _) =
           mapM_ one params >> bodyNames body
@@ -719,16 +720,15 @@ freeWalker = identityWalker {
           binding (HS.fromList pat) $ do
             mapM_ (typeFree . identType) pat
             bodyFree $ Body bnds res
-        bodyFree (Body (DoLoop merge i boundexp loopbody:bnds) res) = do
+
+        expFree (DoLoop _ merge i boundexp loopbody _) = do
           let (mergepat, mergeexps) = unzip merge
           mapM_ subExpFree mergeexps
           subExpFree boundexp
           binding (i `HS.insert` HS.fromList mergepat) $ do
             mapM_ (typeFree . identType) mergepat
             bodyFree loopbody
-            bodyFree $ Body bnds res
-
-        expFree = walkExpM freeWalker
+        expFree e = walkExpM freeWalker e
 
         lambdaFree = tell . freeInLambda
 
@@ -765,12 +765,11 @@ consumedInBody = execWriter . bodyConsumed
           expConsumed e
           unconsume (HS.fromList $ map identName pat) $
             bodyConsumed $ Body bnds res
-        bodyConsumed (Body (DoLoop pat _ _ loopbody:bnds) res) =
-          unconsume (HS.fromList (map (identName . fst) pat)) $ do
-            bodyConsumed loopbody
-            bodyConsumed $ Body bnds res
 
-        expConsumed = tell . consumedInExp
+        expConsumed (DoLoop _ pat _ _ loopbody _) =
+          unconsume (HS.fromList (map (identName . fst) pat)) $
+            bodyConsumed loopbody
+        expConsumed e = tell $ consumedInExp e
 
 -- | Return the set of variable names consumed by the given
 -- expression.
@@ -790,6 +789,7 @@ consumedInExp _ = mempty
 -- bounds.  On the other hand, adding two numbers cannot fail.
 safeExp :: Exp -> Bool
 safeExp (Index {}) = False
+safeExp (Update {}) = False
 safeExp (Split {}) = False
 safeExp (Assert {}) = False
 safeExp (Reshape {}) = False
@@ -803,7 +803,7 @@ safeExp (BinOp Mod _ (Constant (BasicVal (IntVal k))  _) _ _) = k /= 0
 safeExp (BinOp Mod _ (Constant (BasicVal (RealVal k)) _) _ _) = k /= 0
 safeExp (BinOp Mod _ _ _ _) = False
 safeExp (BinOp Pow _ _ _ _) = False
-safeExp _ = False
+safeExp _ = True
 
 -- | Convert a 'SubExp' to an 'Exp', using the 'SubExps' constructor.
 subExp :: SubExp -> Exp

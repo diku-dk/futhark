@@ -93,6 +93,7 @@ instance Pretty Body where
      else equals <+> align (ppr e)) <+> text "in" </>
     ppr (Body bnds res)
     where linebreak = case e of
+                        DoLoop {} -> True
                         Map {} -> True
                         Reduce {} -> True
                         Filter {} -> True
@@ -102,13 +103,6 @@ instance Pretty Body where
                         If {} -> True
                         ArrayLit {} -> False
                         _ -> False
-  ppr (Body (DoLoop mergepat i bound loopbody:bnds) res) =
-    aliasComment pat $
-    text "loop" <+> parens (ppPattern pat <+> equals <+> ppTuple' initexp) <+>
-    equals <+> text "for" <+> ppr i <+> text "<" <+> align (ppr bound) <+> text "do" </>
-    indent 2 (ppr loopbody) <+> text "in" </>
-    ppr (Body bnds res)
-    where (pat, initexp) = unzip mergepat
   ppr (Body [] (Result cs es _))
     | any hasArrayLit es = ppCertificates cs <> braces (commastack $ map ppr es)
     | otherwise          = ppCertificates cs <> braces (commasep   $ map ppr es)
@@ -156,6 +150,11 @@ instance Pretty Exp where
   ppr (Copy e _) = text "copy" <> parens (ppr e)
   ppr (Assert e _) = text "assert" <> parens (ppr e)
   ppr (Conjoin es _) = text "conjoin" <> parens (commasep $ map ppr es)
+  ppr (DoLoop respat mergepat i bound loopbody _) =
+    text "loop" <+> ppPattern respat <+> text "<-" <+> ppPattern pat <+> equals <+> ppTuple' initexp </>
+    text "for" <+> ppr i <+> text "<" <+> align (ppr bound) <+> text "do" </>
+    indent 2 (ppr loopbody)
+    where (pat, initexp) = unzip mergepat
   ppr (Map cs lam as _) =
     ppCertificates' cs <> ppSOAC "mapT" [lam] Nothing as
   ppr (Reduce cs lam inputs _) =

@@ -190,19 +190,32 @@ internaliseExp (E.Apply fname args rettype loc) = do
 
 internaliseExp (E.LetPat pat e body loc) = do
   (c,ks) <- tupToIdentList e
-  bindingPattern pat (certOrGiven loc c) (map I.identType ks) $ \pat' -> do
+  bindingPattern pat (Just $ certOrGiven loc c) (map I.identType ks) $ \pat' -> do
     letBind pat' $ I.SubExps (map I.Var ks) loc
     internaliseExp body
 
-internaliseExp (E.DoLoop mergepat mergeexp i bound loopbody letbody _) = do
+internaliseExp (E.DoLoop mergepat mergeexp i bound loopbody letbody loc) = do
   bound' <- letSubExp "bound" =<< internaliseExp bound
   (c,mergevs) <- tupToIdentList mergeexp
   i' <- internaliseIdent i
   mergeparams <- map E.toParam <$> flattenPattern mergepat
-  bindingParams mergeparams $ \mergepat' -> do
+  (loopbody', mergepat') <- bindingParams mergeparams $ \mergepat' -> do
     loopbody' <- internaliseBody loopbody
-    let mergeexp' = subExpsWithShapes $ map I.Var $ maybeToList c ++ mergevs
-    loopBind (zip (map I.fromParam mergepat') mergeexp') i' bound' loopbody'
+    return (loopbody', map I.fromParam mergepat')
+  let (mergepat_shape, mergepat_vals) = splitIdents mergepat'
+  loop_shape <- newIdents "loop_shape" (map I.identType mergepat_shape) loc
+  let mergeexp' = subExpsWithShapes $ map I.Var $ maybeToList c ++ mergevs
+  mergeexp_cpy <- forM (zip mergepat' mergeexp') $ \(v, e) ->
+                    if I.unique (I.identType v)
+                    then letSubExp "loop_merge_cpy" $ I.Copy e $ srclocOf e
+                    else return e
+  let res_vals = addIdentShapes mergepat_vals $ map I.Var loop_shape
+      merge = zip mergepat' mergeexp'
+      shape_merge = zip mergepat' mergeexp_cpy
+  bindingPattern mergepat Nothing (map I.identType res_vals) $ \mergepat'' -> do
+    unless (null loop_shape) $
+      addBinding $ I.Let loop_shape $ I.DoLoop mergepat_shape shape_merge i' bound' loopbody' loc
+    addBinding $ I.Let mergepat'' $ I.DoLoop res_vals merge i' bound' loopbody' loc
     internaliseExp letbody
 
 internaliseExp (E.LetWith cs name src idxcs idxs ve body loc) = do
@@ -218,7 +231,7 @@ internaliseExp (E.LetWith cs name src idxcs idxs ve body loc) = do
   let comb (dname, sname, vname) =
         letWithBind (cs'++idxcs') dname sname idxs' $ I.Var vname
   mapM_ comb $ zip3 dsts srcs vnames
-  bindingPattern (E.Id name) (certOrGiven loc c)
+  bindingPattern (E.Id name) (Just $ certOrGiven loc c)
                              (map I.identType dsts) $ \pat' -> do
     letBind pat' $ I.SubExps (map I.Var dsts) loc
     internaliseExp body

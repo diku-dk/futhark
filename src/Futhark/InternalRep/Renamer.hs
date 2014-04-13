@@ -14,6 +14,7 @@ module Futhark.InternalRep.Renamer
   -- * Renaming parts of a program.
   --
   -- These all require execution in a 'MonadFreshNames' environment.
+  , renameExp
   , renameBody
   , renameLambda
   )
@@ -43,6 +44,13 @@ renameProg :: Prog -> Prog
 renameProg prog = Prog $ fst $
                   runRenamer (mapM renameFun $ progFunctions prog) src
   where src = newNameSourceForProg prog
+
+-- | Rename bound variables such that each is unique.  The semantics
+-- of the expression is unaffected, under the assumption that the
+-- expression was correct to begin with.  Any free variables are left
+-- untouched.
+renameExp :: MonadFreshNames m => Exp -> m Exp
+renameExp = modifyNameSource . runRenamer . rename
 
 -- | Rename bound variables such that each is unique.  The semantics
 -- of the body is unaffected, under the assumption that the body was
@@ -118,22 +126,21 @@ instance Rename Body where
       pat' <- mapM rename pat
       Body bnds' res' <- rename $ Body bnds res
       return $ Body (Let pat' e1':bnds') res'
-  rename (Body (DoLoop merge loopvar boundexp loopbody:bnds) res) = do
+
+instance Rename Exp where
+  rename (DoLoop respat merge loopvar boundexp loopbody loc) = do
     let (mergepat, mergeexp) = unzip merge
     boundexp' <- rename boundexp
     mergeexp' <- mapM rename mergeexp
     bind mergepat $ do
       mergepat' <- mapM rename mergepat
-      Body bnds' res' <- rename $ Body bnds res
+      respat' <- mapM rename respat
       bind [loopvar] $ do
         loopvar'  <- rename loopvar
         loopbody' <- rename loopbody
-        return $ Body (DoLoop (zip mergepat' mergeexp')
-                                loopvar' boundexp' loopbody':bnds')
-                      res'
-
-instance Rename Exp where
-  rename = mapExpM mapper
+        return $ DoLoop respat' (zip mergepat' mergeexp')
+                        loopvar' boundexp' loopbody' loc
+  rename e = mapExpM mapper e
     where mapper = Mapper {
                       mapOnExp = rename
                     , mapOnBody = rename

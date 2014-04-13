@@ -673,8 +673,10 @@ checkExp (Rearrange cs perm arrexp pos) = do
   arrexp' <- checkExp arrexp
   let rank = arrayRank $ typeOf arrexp'
   when (length perm /= rank || sort perm /= [0..rank-1]) $
-    bad $ PermutationError pos perm rank
+    bad $ PermutationError pos perm rank name
   return $ Rearrange cs' perm arrexp' pos
+  where name = case arrexp of Var v -> Just $ baseName $ identName v
+                              _     -> Nothing
 
 checkExp (Rotate cs n arrexp pos) = do
   cs' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) cs
