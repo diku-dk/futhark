@@ -282,7 +282,7 @@ simplifyClosedFormLoop _ _ = return Nothing
 
 simplifyScalarExp :: TopDownRule
 simplifyScalarExp vtable (Let [v] e)
-  | Just se@(SE.RelExp SE.LTH0 _) <- SE.toScalExp (`ST.lookupScalExp` vtable) e,
+  | Just se <- optimisable =<< SE.toScalExp (`ST.lookupScalExp` vtable) e,
     Right se' <-
       dnfToScalExp <$> AS.mkSuffConds se loc (rangesRep vtable),
     se' /= se,
@@ -290,7 +290,8 @@ simplifyScalarExp vtable (Let [v] e)
     freePost <- map identName $ SE.getIds se',
     lvsBef <- ST.enclosingLoopVars freeBef vtable,
     lvsPost <- ST.enclosingLoopVars freePost vtable,
-    lvsBef /= lvsPost && lvsPost `isSuffixOf` lvsBef = do
+    (lvsBef /= lvsPost && lvsPost `isSuffixOf` lvsBef) ||
+    (freeBef /= freePost && null lvsPost) = do
   (e', bnds) <- SE.fromScalExp (srclocOf e) se'
   return $ Just $ bnds ++ [Let [v] e']
   where loc = srclocOf e
@@ -298,6 +299,11 @@ simplifyScalarExp vtable (Let [v] e)
         dnfToScalExp (c:cs)  = foldl SE.SLogOr (conjToScalExp c) (map conjToScalExp cs)
         conjToScalExp []     = SE.Val $ LogVal True
         conjToScalExp (x:xs) = foldl SE.SLogOr x xs
+
+        optimisable se@(SE.RelExp SE.LTH0 _) = Just se
+        optimisable (SE.RelExp SE.LEQ0 x) =
+          Just $ SE.RelExp SE.LTH0 (x `SE.SMinus` SE.Val (IntVal 1))
+        optimisable _ = Nothing
 
 simplifyScalarExp _ _ = return Nothing
 
