@@ -5,7 +5,6 @@ module Futhark.EnablingOpts.AlgSimplify
   , mkSuffConds
   , RangesRep
   , ppScalExp
-  , mkRelExp
   )
   where
 
@@ -17,8 +16,6 @@ import Data.List
 import Control.Monad
 import Control.Monad.Reader
 --import Control.Applicative
-
-import Futhark.Dev(tident) -- for debugging: tident "int x"
 
 import Futhark.InternalRep
 import Futhark.EnablingOpts.EnablingOptErrors
@@ -1256,80 +1253,3 @@ tryDivTriv t f
     | t == f    = do one <- getPos1 $ scalExpType t
                      return (True,  Val one)
     | otherwise = do return (False, SDivide t f)
-
---------------------------------------------------------
----- TESTING
---------------------------------------------------------
-{-
-mkIntExp :: Int -> ScalExp
-mkIntExp 1 = 
-    let (x',y',z',q') = (tident "int x", tident "int y", tident "int z", tident "int q")
-        (x,y,z,q) = (Id x', Id y', Id z', Id q')
-        up_term1 = SMinus (STimes (Val (IntVal 6)) (STimes x (STimes y z))) 
-                          (STimes (Val (IntVal 4)) (STimes (STimes x q) z))
-        up_term2 = SMinus (STimes x (STimes (Val (IntVal 4)) (STimes z q)))
-                          (STimes (STimes (SPlus y q) (STimes z x) ) (Val (IntVal 3)) )
-        dn_term  = STimes (STimes x (Val (IntVal 3))) z
-    -- in dn_term
-    -- in SPlus x  $ STimes (Val (IntVal (-1))) y 
-    in  SDivide (SPlus up_term1 up_term2) dn_term
-
-mkIntExp 2 = 
-    let (x',y',z',q') = (tident "int x", tident "int y", tident "int z", tident "int q")
-        (x,y,z,q) = (Id x', Id y', Id z', Id q')
-        x2m3y    = SMinus (STimes (Val (IntVal 2)) x) (STimes y (Val (IntVal 3)))
-        x2m3ylt0 = RelExp LTH0 x2m3y 
-        y3m2xle0 = RelExp LEQ0 (SMinus (STimes y (Val (IntVal 3))) (STimes (Val (IntVal 2)) x))
-    -- in SLogOr x2m3ylt0 $ SLogOr (Val (LogVal False)) $ SLogAnd z y3m2xle0
-    in SLogAnd (SLogAnd (SLogAnd x2m3ylt0 z) (SLogAnd q y3m2xle0)) (Val (LogVal True))
-mkIntExp _ = Val (IntVal 33)
--}
-
-mkRelExp :: Int -> (RangesRep, ScalExp, ScalExp)
-mkRelExp 1 = 
-    let (i',j',n',p',m') = (tident "int i", tident "int j", tident "int n", tident "int p", tident "int m")
-        (i,j,n,p,m) = (Id i', Id j', Id n', Id p', Id m')
-        one = Val (IntVal 1)
-        min_p_nm1 = MaxMin True [p, SMinus n one]
-        hash = HM.fromList $ [ (identName n', ( 1::Int, Just (Val (IntVal 1)), Nothing ) ),
-                               (identName p', ( 1::Int, Just (Val (IntVal 0)), Nothing ) ),
-                               (identName i', ( 5::Int, Just (Val (IntVal 0)), Just min_p_nm1 ) )
-                             , (identName j', ( 9::Int, Just (Val (IntVal 0)), Just i ) )
-                             ] -- HM.HashMap VName (Int, Maybe ScalExp, Maybe ScalExp)
-        ij_p_j_p_1_m_m = SMinus (SPlus (STimes i j) (SPlus j one)) m
-        rel1 = RelExp LTH0 ij_p_j_p_1_m_m
-        m_ij_m_j_m_2 = SNeg ( SPlus (STimes i j) (SPlus j (Val (IntVal 2))) )
-        rel2 = RelExp LTH0 m_ij_m_j_m_2
-
-    in (hash, rel1, rel2)
-mkRelExp 2 = 
-    let (i',a',b',l',u') = (tident "int i", tident "int a", tident "int b", tident "int l", tident "int u")
-        (i,a,b,l,u) = (Id i', Id a', Id b', Id l', Id u')
-        hash = HM.fromList $ [ (identName i', ( 5::Int, Just l, Just u ) ) ] 
-        ai_p_b = SPlus (STimes a i) b
-        rel1 = RelExp LTH0 ai_p_b
-
-    in (hash, rel1, rel1)
-mkRelExp 3 = 
-    let (i',j',n',m') = (tident "int i", tident "int j", tident "int n", tident "int m")
-        (i,j,n,m) = (Id i', Id j', Id n', Id m')
-        one = Val (IntVal 1) 
-        two = Val (IntVal 2)
-        min_j_nm1 = MaxMin True [SMinus i (STimes two n), SMinus n one]
-        hash = HM.fromList $ [ (identName n', ( 1::Int, Just (Val (IntVal 1)), Nothing ) ),
-                               (identName m', ( 2::Int, Just (Val (IntVal 1)), Nothing ) ),
-                               (identName i', ( 5::Int, Just (Val (IntVal 0)), Just (SMinus m one) ) )
-                             , (identName j', ( 9::Int, Just (Val (IntVal 0)), Just min_j_nm1 ) )
-                             ] -- HM.HashMap VName (Int, Maybe ScalExp, Maybe ScalExp)
-        ij_m_m = SMinus (STimes i j) m
-        rel1 = RelExp LTH0 ij_m_m
-        m_ij_m_1 = SMinus (Val (IntVal (-1))) (STimes i j)
-        rel2 = RelExp LTH0 m_ij_m_1
-
-    in (hash, rel1, rel2)
-
-mkRelExp _ = let hash = HM.empty
-                 rel  = RelExp LTH0 (Val (IntVal (-1)))
-             in  (hash, rel, rel)
-
-
