@@ -88,6 +88,9 @@ identityMapper = Mapper {
                  , mapOnCertificates = return
                  }
 
+-- | Map a monadic action across the immediate children of a body.
+-- Importantly, the 'mapOnBody' action is not invoked for the body
+-- itself.  The mapping is done left-to-right.
 mapBodyM :: (Applicative m, Monad m) => Mapper m -> Body -> m Body
 mapBodyM tv (Body [] (Result cs ses loc)) =
   Body [] <$> (Result <$> mapOnCertificates tv cs <*>
