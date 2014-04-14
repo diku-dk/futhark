@@ -9,10 +9,7 @@ Build-type:          Simple
 -- Constraint on the version of Cabal needed to build this package.
 Cabal-version:       >=1.10
 
-
-Executable futhark
-  Main-is: Main.hs
-
+Library
   -- Packages needed in order to build this package.
   Build-depends: base >= 4 && < 5,
                  array >= 0.4,
@@ -28,16 +25,101 @@ Executable futhark
                  dlist >= 0.6.0.1,
                  text
 
-  -- We have to mention these explicitly, or alex and happy won't be
-  -- run to generate them.
+  Exposed-modules: Language.Futhark
+                   Language.Futhark.Pretty
+                   Language.Futhark.Core
+                   Language.Futhark.Traversals
+                   Language.Futhark.Attributes
+                   Language.Futhark.Syntax
+                   Language.Futhark.Parser
+                   Futhark.MonadFreshNames
+                   Futhark.FirstOrderTransform
+                   Futhark.Externalise
+                   Futhark.Binder
+                   Futhark.SplitAssertions
+                   Futhark.Dev
+                   Futhark.Substitute
+                   Futhark.Internalise
+                   Futhark.IndexInliner
+                   Futhark.InternalRep
+                   Futhark.ExternalRep.Renamer
+                   Futhark.ExternalRep.TypeChecker
+                   Futhark.SOACFlowGraph
+                   Futhark.HOTrans.HOTransDriver
+                   Futhark.HOTrans.Composing
+                   Futhark.HOTrans.Fusion
+                   Futhark.HOTrans.TryFusion
+                   Futhark.HOTrans.LoopKernel
+                   Futhark.Pipeline
+                   Futhark.EnablingOpts.InliningDeadFun
+                   Futhark.EnablingOpts.ClosedForm
+                   Futhark.EnablingOpts.ScalExp
+                   Futhark.EnablingOpts.Simplify
+                   Futhark.EnablingOpts.Simplifier
+                   Futhark.EnablingOpts.EnablingOptDriver
+                   Futhark.EnablingOpts.DeadVarElim
+                   Futhark.EnablingOpts.EnablingOptErrors
+                   Futhark.EnablingOpts.CallGraph
+                   Futhark.EnablingOpts.Simplifier.Apply
+                   Futhark.EnablingOpts.Simplifier.Rules
+                   Futhark.EnablingOpts.Simplifier.DataDependencies
+                   Futhark.EnablingOpts.Simplifier.CSE
+                   Futhark.EnablingOpts.AlgSimplify
+                   Futhark.EnablingOpts.SymbolTable
+                   Futhark.TypeError
+                   Futhark.FreshNames
+                   Futhark.Tools
+                   Futhark.Internalise.TypesValues
+                   Futhark.Internalise.Monad
+                   Futhark.Internalise.Lambdas
+                   Futhark.Internalise.AccurateSizes
+                   Futhark.Internalise.Bindings
+                   Futhark.InternalRep.Pretty
+                   Futhark.InternalRep.Traversals
+                   Futhark.InternalRep.Attributes
+                   Futhark.InternalRep.Syntax
+                   Futhark.InternalRep.Renamer
+                   Futhark.InternalRep.TypeChecker
+                   Futhark.Backends.GenericCReading
+                   Futhark.Backends.BohriumCodeGen
+                   Futhark.Backends.Bohrium
+                   Futhark.Backends.SimpleRepresentation
+                   Futhark.Backends.GenericC
+                   Futhark.Backends.SequentialC
+                   Futhark.NeedNames
+                   Futhark.Untrace
+                   Futhark.Interpreter
+                   Futhark.Passes
+                   Futhark.HORepresentation.SOACNest
+                   Futhark.HORepresentation.MapNest
+                   Futhark.HORepresentation.SOAC
+                   Futhark.ExternalRep
+
   Other-modules: Language.Futhark.Parser.Parser,
-                 Language.Futhark.Parser.Lexer
+                 Language.Futhark.Parser.Lexer,
+                 Language.Futhark.Parser.Tokens
 
   -- Directories other than the root containing source files.
   hs-source-dirs:      src
 
   -- Extra tools (e.g. alex, hsc2hs, ...) needed to build the source.
   Build-tools:         alex, happy
+
+  Default-Language:   Haskell2010
+
+  Ghc-Options:        -Wall
+
+  Ghc-Prof-Options:   -prof -auto-all -rtsopts
+
+
+Executable futhark
+  Main-is: src/futhark.hs
+
+  -- Packages needed in order to build this package.
+  Build-depends: base >= 4 && < 5,
+                 array >= 0.4,
+                 mtl >= 2.1,
+                 futhark
 
   Default-Language:   Haskell2010
 
@@ -47,36 +129,28 @@ Executable futhark
 
 
 Executable futharki
-  Main-is: futharki.hs
+  Main-is: src/futharki.hs
 
   -- Packages needed in order to build this package.
   Build-depends: base >= 4 && < 5,
                  array >= 0.4,
-                 containers >= 0.5,
                  mtl >= 2.1,
-                 transformers >= 0.3,
-                 srcloc >= 0.4,
-                 language-c-quote >= 0.7.1,
-                 mainland-pretty >= 0.2.5,
-                 monad-loops >= 0.4.2,
-                 hashable >= 1.2.1.0,
-                 unordered-containers >= 0.2.3.3,
-                 dlist >= 0.6.0.1,
-                 text
-
-  -- We have to mention these explicitly, or alex and happy won't be
-  -- run to generate them.
-  Other-modules: Language.Futhark.Parser.Parser,
-                 Language.Futhark.Parser.Lexer
-
-  -- Directories other than the root containing source files.
-  hs-source-dirs:      src
-
-  -- Extra tools (e.g. alex, hsc2hs, ...) needed to build the source.
-  Build-tools:         alex, happy
+                 futhark
 
   Default-Language:   Haskell2010
 
   Ghc-Options:        -Wall
 
   Ghc-Prof-Options:   -prof -auto-all -rtsopts
+
+Test-suite unit
+  Type:              exitcode-stdio-1.0
+
+  hs-source-dirs:    tests
+  Main-is:           futhark_tests.hs
+  Default-language:  Haskell2010
+  GHC-options:       -Wall -fno-warn-missing-signatures
+  Build-Depends:     base >=4, QuickCheck >= 2, test-framework >= 0.4.0,
+                     test-framework-quickcheck2, HUnit,
+                     test-framework-hunit, unordered-containers,
+                     futhark

@@ -18,6 +18,7 @@ import Language.Futhark.Parser
 import Futhark.Internalise
 import Futhark.Externalise
 import Futhark.Pipeline
+import Futhark.Passes
 
 import qualified Futhark.ExternalRep as E
 import qualified Futhark.ExternalRep.TypeChecker as E
@@ -27,15 +28,9 @@ import qualified Futhark.InternalRep as I
 import qualified Futhark.InternalRep.TypeChecker as I
 
 import Futhark.Interpreter
-import Futhark.EnablingOpts.EnablingOptDriver
-import Futhark.HOTrans.HOTransDriver
-import qualified Futhark.FirstOrderTransform as FOT
-import qualified Futhark.IndexInliner as II
 import qualified Futhark.SOACFlowGraph as FG
-import Futhark.Untrace
 import qualified Futhark.Backends.SequentialC as SequentialC
 import qualified Futhark.Backends.Bohrium as Bohrium
-import Futhark.SplitAssertions
 
 newFutharkonfig :: Futharkonfig
 newFutharkonfig = Futharkonfig {
@@ -148,41 +143,6 @@ interpret prog =
           | [] <- elems a = "empty(" ++ I.ppType t ++ ")"
           | otherwise     = "[" ++ intercalate ", " (map ppOutput' $ elems a) ++ "]"
 
-fotransform :: Pass
-fotransform = Pass { passName = "first-order transform"
-                   , passOp = return . FOT.transformProg
-                   }
-
-uttransform :: Pass
-uttransform = Pass { passName = "debugging annotation removal"
-                   , passOp = return . untraceProg
-                   }
-
-eotransform :: Pass
-eotransform = Pass { passName = "enabling optimations"
-                   , passOp = liftPass enablingOpts
-                   }
-
-iitransform :: Pass
-iitransform = Pass { passName = "inlining map indexing"
-                   , passOp = return . II.transformProg
-                   }
-
-hotransform :: Pass
-hotransform = Pass { passName = "higher-order optimisations"
-                   , passOp = liftPass highOrdTransf
-                   }
-
-inlinetransform :: Pass
-inlinetransform = Pass { passName = "inline functions"
-                      , passOp = liftPass aggInlineDriver
-                      }
-
-splitasserttransform :: Pass
-splitasserttransform = Pass { passName = "split certificates"
-                            , passOp = return . splitAssertions
-                            }
-
 standardPipeline :: [Pass]
 standardPipeline =
   [ uttransform, inlinetransform
@@ -249,10 +209,3 @@ futharkc config filename srccode =
                               typeCheck I.checkProg I.checkProgNoUniqueness config
                               int_prog
           runPasses config int_prog_checked
-
-canFail :: Show err => String -> Maybe I.Prog -> Either err a -> FutharkM a
-canFail d p (Left err) = compileError (d ++ show err) p
-canFail _ _ (Right v)  = return v
-
-liftPass :: Show err => (I.Prog -> Either err a) -> I.Prog -> FutharkM a
-liftPass f p = canFail "" (Just p) (f p)

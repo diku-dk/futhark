@@ -4,6 +4,8 @@ module Futhark.Pipeline
     runPasses
   , FutharkM
   , Pass(..)
+  , canFail
+  , liftPass
   , CompileError(..)
   , compileError
   , Action
@@ -75,3 +77,10 @@ typeCheck :: Futharkonfig -> Prog -> Either TypeError Prog
 typeCheck config
   | futharkcheckAliases config = checkProg
   | otherwise             = checkProgNoUniqueness
+
+canFail :: Show err => String -> Maybe Prog -> Either err a -> FutharkM a
+canFail d p (Left err) = compileError (d ++ show err) p
+canFail _ _ (Right v)  = return v
+
+liftPass :: Show err => (Prog -> Either err a) -> Prog -> FutharkM a
+liftPass f p = canFail "" (Just p) (f p)
