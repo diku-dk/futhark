@@ -18,18 +18,13 @@ import Futhark.EnablingOpts.InliningDeadFun
 import Futhark.EnablingOpts.Simplifier
 import Futhark.EnablingOpts.DeadVarElim
 import Futhark.EnablingOpts.EnablingOptErrors
-import Futhark.EnablingOpts.AlgSimplify
 
-import Debug.Trace
 --------------------------------------------------------------
 ---- Enabling Optimization Driver
 --------------------------------------------------------------
 
 enablingOpts :: Prog -> Either EnablingOptError Prog
 enablingOpts prog = do
-    scal <- canSimplify 3
-    -- let str = "Predicate Result is: "++ppScalExp scal
-    -- let prog = trace str prog0  
     prog_enopt1 <- normCopyDeadOpts prog
     prog_enopt2 <- normCopyDeadOpts prog_enopt1
     prog_deadf2 <- deadFunElim      prog_enopt2

@@ -2,10 +2,10 @@
 module Futhark.EnablingOpts.AlgSimplify
   ( ScalExp
   , simplify
-  , canSimplify
   , mkSuffConds
   , RangesRep
   , ppScalExp
+  , mkRelExp
   )
   where
 
@@ -19,8 +19,6 @@ import Control.Monad.Reader
 --import Control.Applicative
 
 import Futhark.Dev(tident) -- for debugging: tident "int x"
-
-import Debug.Trace
 
 import Futhark.InternalRep
 import Futhark.EnablingOpts.EnablingOptErrors
@@ -72,11 +70,6 @@ type DNF     = [NAnd ]
 --type NOr     = [BTerm]
 --type CNF     = [NOr  ]
 
------------------------------------------------
---- Publicly exposed functions:             ---
---- simplify, canSimplify                   ---
------------------------------------------------
-
 -- | Applies Simplification at Expression level:
 simplify :: ScalExp -> SrcLoc -> Bool -> RangesRep -> Either EnablingOptError ScalExp
 simplify e p c rm = runAlgSimplifier (simplifyScal e) p c rm
@@ -84,14 +77,6 @@ simplify e p c rm = runAlgSimplifier (simplifyScal e) p c rm
 -- | Extracts sufficient conditions for a LTH0 relation to hold
 mkSuffConds :: ScalExp -> SrcLoc -> RangesRep -> Either EnablingOptError [[ScalExp]]
 mkSuffConds e p rm = runAlgSimplifier (gaussElimRel e) p True rm
-
--- | Test if Simplification engine can handle this kind of expression
-canSimplify :: Int -> Either EnablingOptError [[ScalExp]]
-canSimplify i = do
-    let (h,e1,_) = mkRelExp i
-    runAlgSimplifier (gaussElimRel e1) noLoc True h
-    -- let e = mkIntExp i
-    -- runAlgSimplifier (simplifyScal e) noLoc True HM.empty
 
 -------------------------------------------------------
 --- Returns a sufficient-condition predicate for     --
@@ -138,8 +123,7 @@ gaussElimRel (RelExp LTH0 e) = do
     e_sofp <- if (tp == Int) then toNumSofP =<< simplifyScal e
               else badAlgSimplifyM $ SimplifyError pos "gaussElimRel: only Int relations please!"
     e_scal<- simplifyScal =<< gaussAllLTH0 S.empty e_sofp
-    e_scal' <- trace ("LALALALALAAL"++ppScalExp e_scal) (return e_scal)
-    e_dnf <- toDNF e_scal'
+    e_dnf <- toDNF e_scal
     mapM (\ t -> 
             mapM (\ f -> 
                     case f of
@@ -147,8 +131,8 @@ gaussElimRel (RelExp LTH0 e) = do
                       PosId i   -> return $ Id  i
                       NegId i   -> return $ Id  i
                       NRelExp rel ee -> do
-                          e_scal <- fromNumSofP ee
-                          return $ RelExp rel e_scal
+                          e_scal' <- fromNumSofP ee
+                          return $ RelExp rel e_scal'
                  ) t
          ) e_dnf
 
@@ -1339,7 +1323,6 @@ mkRelExp 3 =
                              ] -- HM.HashMap VName (Int, Maybe ScalExp, Maybe ScalExp)
         ij_m_m = SMinus (STimes i j) m
         rel1 = RelExp LTH0 ij_m_m
-        rel3 = RelExp LTH0 (SMinus i (SPlus (STimes two n) j))
         m_ij_m_1 = SMinus (Val (IntVal (-1))) (STimes i j)
         rel2 = RelExp LTH0 m_ij_m_1
 
