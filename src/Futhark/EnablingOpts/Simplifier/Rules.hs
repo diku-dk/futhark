@@ -646,7 +646,8 @@ simplifyBoolBranch _ (Let [v] (If cond tb fb ts loc))
     all (==Basic Bool) ts = do
   (e, bnds) <-
     runBinder'' (eBinOp LogOr (pure $ BinOp LogAnd cond tres (Basic Bool) loc)
-                              (pure $ subExp fres)
+                              (eBinOp LogAnd (pure $ Not cond loc)
+                                             (pure $ subExp fres) (Basic Bool) loc)
                               (Basic Bool) loc)
   return $ Just $ bnds ++ [Let [v] e]
 simplifyBoolBranch _ _ = return Nothing
