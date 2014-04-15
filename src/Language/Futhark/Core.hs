@@ -106,7 +106,7 @@ data BasicType = Int
                | Char
                | Real
                | Cert
-                 deriving (Eq, Ord, Show)
+                 deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | Non-array values.
 data BasicValue = IntVal !Int

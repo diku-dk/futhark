@@ -149,8 +149,10 @@ Test-suite unit
   hs-source-dirs:    tests
   Main-is:           futhark_tests.hs
   Default-language:  Haskell2010
-  GHC-options:       -Wall -fno-warn-missing-signatures
+  GHC-options:       -Wall
   Build-Depends:     base >=4, QuickCheck >= 2, test-framework >= 0.4.0,
                      test-framework-quickcheck2, HUnit,
                      test-framework-hunit, unordered-containers,
+                     array,
+                     srcloc,
                      futhark
