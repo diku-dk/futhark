@@ -6,12 +6,16 @@ import Control.Monad.Writer.Strict (runWriter)
 import Control.Monad.Error
 import Data.Array
 import Data.List
+import Data.Version
 import System.Console.GetOpt
 import System.Environment (getArgs, getProgName)
-import System.Exit (exitWith, ExitCode(..))
+import System.Exit (exitWith, exitSuccess, ExitCode(..))
 import System.IO
 
 import Text.Printf
+
+import qualified Paths_futhark
+import Build_futhark
 
 import Language.Futhark.Core
 import Language.Futhark.Parser
@@ -32,6 +36,11 @@ import qualified Futhark.SOACFlowGraph as FG
 import qualified Futhark.Backends.SequentialC as SequentialC
 import qualified Futhark.Backends.Bohrium as Bohrium
 
+version :: Version
+version = Paths_futhark.version
+          { versionTags = versionTags Paths_futhark.version ++ [gitCommit]
+          }
+
 newFutharkonfig :: Futharkonfig
 newFutharkonfig = Futharkonfig {
                 futharkpipeline = []
@@ -41,42 +50,48 @@ newFutharkonfig = Futharkonfig {
               , futharkboundsCheck = True
               }
 
-type FutharkOption = OptDescr (Futharkonfig -> Futharkonfig)
+type FutharkOption = OptDescr (Either (IO ()) (Futharkonfig -> Futharkonfig))
 
 passoption :: String -> Pass -> String -> [String] -> FutharkOption
 passoption desc pass short long =
   Option short long
-  (NoArg $ \opts -> opts { futharkpipeline = pass : futharkpipeline opts })
+  (NoArg $ Right $ \opts -> opts { futharkpipeline = pass : futharkpipeline opts })
   desc
 
 commandLineOptions :: [FutharkOption]
 commandLineOptions =
-  [ Option "V" ["verbose"]
-    (OptArg (\file opts -> opts { futharkverbose = Just file }) "FILE")
+  [ Option "v" ["version"]
+    (NoArg $ Left $ do putStrLn $ "Futhark " ++ showVersion version
+                       putStrLn "(C) HIPERFIT research centre"
+                       putStrLn "Department of Computer Science, University of Copenhagen (DIKU)"
+                       exitSuccess)
+    "Print version information and exit."
+  , Option "V" ["verbose"]
+    (OptArg (\file -> Right $ \opts -> opts { futharkverbose = Just file }) "FILE")
     "Print verbose output on standard error; wrong program to FILE."
   , Option [] ["inhibit-uniqueness-checking"]
-    (NoArg $ \opts -> opts { futharkcheckAliases = False })
+    (NoArg $ Right $ \opts -> opts { futharkcheckAliases = False })
     "Don't check that uniqueness constraints are being upheld."
   , Option [] ["compile-sequential"]
-    (NoArg $ \opts -> opts { futharkaction = seqCodegenAction })
+    (NoArg $ Right $ \opts -> opts { futharkaction = seqCodegenAction })
     "Translate program into sequential C and write it on standard output."
   , Option [] ["compile-bohrium"]
-    (NoArg $ \opts -> opts { futharkaction = bohriumCodegenAction })
+    (NoArg $ Right $ \opts -> opts { futharkaction = bohriumCodegenAction })
     "Translate program into C using Bohrium and write it on standard output."
   , Option [] ["generate-flow-graph"]
-    (NoArg $ \opts -> opts { futharkaction = flowGraphAction })
+    (NoArg $ Right $ \opts -> opts { futharkaction = flowGraphAction })
     "Print the SOAC flow graph of the final program."
   , Option "p" ["print"]
-    (NoArg $ \opts -> opts { futharkaction = printAction })
+    (NoArg $ Right $ \opts -> opts { futharkaction = printAction })
     "Prettyprint the resulting internal representation on standard output (default action)."
   , Option "i" ["interpret"]
-    (NoArg $ \opts -> opts { futharkaction = interpretAction })
+    (NoArg $ Right $ \opts -> opts { futharkaction = interpretAction })
     "Run the program via an interpreter."
   , Option [] ["externalise"]
-    (NoArg $ \opts -> opts { futharkaction = externaliseAction})
+    (NoArg $ Right $ \opts -> opts { futharkaction = externaliseAction})
     "Prettyprint the resulting external representation on standard output."
   , Option [] ["no-bounds-checking"]
-    (NoArg $ \opts -> opts { futharkboundsCheck = False })
+    (NoArg $ Right $ \opts -> opts { futharkboundsCheck = False })
     "Do not perform bounds checking in the generated program."
   , passoption "Remove debugging annotations from program." uttransform
     "u" ["untrace"]
@@ -92,7 +107,7 @@ commandLineOptions =
     [] ["inline-functions"]
   , passoption "Split certificates from main computation" splitasserttransform [] ["split-assertions"]
   , Option "s" ["standard"]
-    (NoArg $ \opts -> opts { futharkpipeline = standardPipeline ++ futharkpipeline opts })
+    (NoArg $ Right $ \opts -> opts { futharkpipeline = standardPipeline ++ futharkpipeline opts })
     "Use the recommended optimised pipeline."
   ]
 
@@ -154,17 +169,39 @@ standardPipeline =
 -- input from standard input.
 main :: IO ()
 main = do args <- getArgs
-          case getOpt RequireOrder commandLineOptions args of
-            (opts, [file], []) -> compiler (foldl (.) id opts newFutharkonfig) file
-            (_, _, errs)       -> usage errs
+          case getOpt' RequireOrder commandLineOptions args of
+            (opts, nonopts, [], []) ->
+              case applyOpts opts of
+                Right conf | [file] <- nonopts -> compiler conf file
+                           | otherwise         -> invalid nonopts [] []
+                Left m     -> m
+            (_, nonopts, unrecs, errs) -> invalid nonopts unrecs errs
 
-usage :: [String] -> IO ()
-usage errs = do
+  where applyOpts :: [Either (IO ()) (Futharkonfig -> Futharkonfig)]
+                  -> Either (IO ()) Futharkonfig
+        applyOpts opts = do fs <- sequence opts
+                            return $ foldl (.) id fs newFutharkonfig
+
+        invalid nonopts unrecs errs = do usage <- usageStr commandLineOptions
+                                         badOptions usage nonopts errs unrecs
+
+
+usageStr :: [OptDescr a] -> IO String
+usageStr opts = do
   prog <- getProgName
-  mapM_ (hPutStr stderr) errs
-  hPutStr stderr "\n"
-  hPutStr stderr $ usageInfo (prog ++ " [options] <file>") commandLineOptions
+  let header = "Help for " ++ prog ++ " (Futhark " ++ showVersion version ++ ")"
+  return $ usageInfo header opts
+
+badOptions :: String -> [String] -> [String] -> [String] -> IO ()
+badOptions usage nonopts errs unrecs = do
+  mapM_ (errput . ("Junk argument: " ++)) nonopts
+  mapM_ (errput . ("Unrecognised argument: " ++)) unrecs
+  hPutStr stderr $ concat errs ++ usage
   exitWith $ ExitFailure 1
+
+-- | Short-hand for 'liftIO . hPutStrLn stderr'
+errput :: MonadIO m => String -> m ()
+errput = liftIO . hPutStrLn stderr
 
 compiler :: Futharkonfig -> FilePath -> IO ()
 compiler config file = do
