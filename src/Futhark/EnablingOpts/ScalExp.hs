@@ -31,7 +31,6 @@ import Futhark.Tools
 -- | Relational operators.
 data RelOp0 = LTH0
             | LEQ0
-         -- | EQFuthark
              deriving (Eq, Ord, Enum, Bounded, Show)
 
 -- | Representation of a scalar expression, which is:
