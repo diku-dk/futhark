@@ -37,6 +37,7 @@ import Futhark.InternalRep
 import Futhark.MonadFreshNames
 import Futhark.EnablingOpts.Simplifier.CSE
 import qualified Futhark.EnablingOpts.SymbolTable as ST
+import qualified Futhark.EnablingOpts.UsageTable as UT
 import Futhark.EnablingOpts.Simplifier.Rules
 import Futhark.EnablingOpts.Simplifier.Apply
 
@@ -89,12 +90,12 @@ freeInType :: Type -> HS.HashSet VName
 freeInType = mconcat . map (freeNamesInExp . subExp) . arrayDims
 
 data Need = Need { needBindings :: NeedSet
-                 , freeInBound  :: HS.HashSet VName
+                 , freeInBound  :: UT.UsageTable
                  }
 
 instance Monoid Need where
   Need b1 f1 `mappend` Need b2 f2 = Need (b1 <> b2) (f1 <> f2)
-  mempty = Need [] HS.empty
+  mempty = Need [] UT.empty
 
 data Env = Env { envDupeState :: DupeState
                , envVtable  :: ST.SymbolTable
@@ -125,10 +126,10 @@ runSimpleM (SimpleM m) env src = let (x, src', _) = runRWS m env src
                                  in (x, src')
 
 needThis :: BindNeed -> SimpleM ()
-needThis need = tell $ Need [need] HS.empty
+needThis need = tell $ Need [need] UT.empty
 
 boundFree :: HS.HashSet VName -> SimpleM ()
-boundFree fs = tell $ Need [] fs
+boundFree fs = tell $ Need [] $ UT.usages fs
 
 usedName :: VName -> SimpleM ()
 usedName = boundFree . HS.singleton
@@ -182,8 +183,8 @@ bindLet :: [Ident] -> Exp -> SimpleM a -> SimpleM a
 bindLet = withBinding
 
 addBindings :: MonadFreshNames m =>
-               DupeState -> [BindNeed] -> Body -> HS.HashSet VName
-            -> m (Body, HS.HashSet VName)
+               DupeState -> [BindNeed] -> Body -> UT.UsageTable
+            -> m (Body, UT.UsageTable)
 addBindings dupes needs body uses = do
   (uses',bnds) <- simplifyBindings uses $ snd $ mapAccumL pick (HM.empty, dupes) needs
   return (insertBindings bnds body, uses')
@@ -191,22 +192,27 @@ addBindings dupes needs body uses = do
 
         -- Do not actually insert binding if it is not used.
         comb (uses',bnds) (bnd, provs, reqs)
-          | provs `intersects` uses' = do
+          | uses' `UT.contains` provs = do
             res <- bottomUpSimplifyBinding uses' bnd
             case res of
-              Nothing    -> return ((uses' `HS.difference` provs) `HS.union` reqs,
-                                    bnd:bnds)
+              Nothing ->
+                return ((uses' <> reqs) `UT.without` provs,
+                        bnd:bnds)
               Just optimbnds -> do
                 (uses'',optimbnds') <-
                   simplifyBindings uses' $ map attachUsage optimbnds
                 return (uses'', optimbnds'++bnds)
-          | otherwise =
+          | otherwise = -- Dead binding.
             return (uses', bnds)
 
         attachUsage bnd = (bnd, providedByBnd bnd, usedInBnd bnd)
-        providedByBnd (Let pat _) =
-          HS.fromList $ map identName pat
-        usedInBnd bnd = freeNamesInBody $ Body [bnd] $ Result [] [] noLoc
+        providedByBnd (Let pat _) = HS.fromList $ map identName pat
+        usedInBnd (Let _ e) = usedInExp e
+        usedInExp e = extra <> UT.usages (freeNamesInExp e)
+          where extra =
+                  case e of Assert (Var v) _ -> UT.predicateUsage $ identName v
+                            _                -> UT.empty
+
 
         pick (m,ds) (LetNeed pat e alts) =
           let add e' =
@@ -214,7 +220,8 @@ addBindings dupes needs body uses = do
                     bnd       = LetNeed pat e'' []
                 in ((m `HM.union` distances m bnd, ds'),
                     (Let pat e'',
-                     provides bnd, requires bnd))
+                     patNameSet pat,
+                     usedInExp e''))
           in case map snd $ sortBy (comparing fst) $ map (score m) $ e:alts of
                e':_ -> add e'
                _    -> add e

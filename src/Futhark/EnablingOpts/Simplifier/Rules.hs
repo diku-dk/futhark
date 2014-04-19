@@ -30,6 +30,7 @@ import qualified Data.Set          as S
 
 import Futhark.NeedNames
 import qualified Futhark.EnablingOpts.SymbolTable as ST
+import qualified Futhark.EnablingOpts.UsageTable as UT
 import Futhark.EnablingOpts.ClosedForm
 import qualified Futhark.EnablingOpts.AlgSimplify as AS
 import qualified Futhark.EnablingOpts.ScalExp as SE
@@ -51,7 +52,8 @@ topDownSimplifyBinding vtable bnd =
 -- bindings is returned, that bind at least the same banes as the
 -- original binding (and possibly more, for intermediate results).
 -- The first argument is the set of names used after this binding.
-bottomUpSimplifyBinding :: MonadFreshNames m => HS.HashSet VName -> Binding -> m (Maybe [Binding])
+bottomUpSimplifyBinding :: MonadFreshNames m =>
+                           UT.UsageTable -> Binding -> m (Maybe [Binding])
 bottomUpSimplifyBinding used bnd =
   provideNames $ applyRules bottomUpRules used bnd
 
@@ -67,7 +69,7 @@ type SimplificationRule a = a -> Binding -> NeedNames (Maybe [Binding])
 
 type TopDownRule = SimplificationRule ST.SymbolTable
 
-type BottomUpRule = SimplificationRule (HS.HashSet VName)
+type BottomUpRule = SimplificationRule UT.UsageTable
 
 topDownRules :: [TopDownRule]
 topDownRules = [ liftIdentityMapping
@@ -163,7 +165,7 @@ removeReplicateMapping _ _ = return Nothing
 removeDeadMapping :: BottomUpRule
 removeDeadMapping used (Let pat (Map cs fun arrs loc)) = return $
   let Result rcs ses resloc = bodyResult $ lambdaBody fun
-      isUsed (v, _, _) = (`HS.member` used) $ identName v
+      isUsed (v, _, _) = (`UT.used` used) $ identName v
       (pat',ses', ts') = unzip3 $ filter isUsed $ zip3 pat ses $ lambdaReturnType fun
       fun' = fun { lambdaBody = resultBody rcs ses' resloc `setBodyResult`
                                 lambdaBody fun
@@ -179,7 +181,7 @@ removeUnusedLoopResult used (Let pat (DoLoop respat merge i bound body loc))
   | (pat',respat') <- unzip $ filter usedAfterwards $ zip pat respat,
     pat' /= pat =
   return $ Just [Let pat' $ DoLoop respat' merge i bound body loc]
-  where usedAfterwards = (`HS.member` used) . identName . fst
+  where usedAfterwards = (`UT.used` used) . identName . fst
 removeUnusedLoopResult _ _ = return Nothing
 
 -- This next one is tricky - it's easy enough to determine that some
@@ -677,7 +679,7 @@ hoistBranchInvariant _ _ = return Nothing
 removeDeadBranchResult :: BottomUpRule
 removeDeadBranchResult used (Let pat (If e1 tb fb ts loc))
   | -- Figure out which of the names in 'pat' are used...
-    patused <- map ((`HS.member` used) . identName) pat,
+    patused <- map ((`UT.used` used) . identName) pat,
     -- If they are not all used, then this rule applies.
     not (and patused) = return $
   -- Remove the parts of the branch-results that correspond to dead

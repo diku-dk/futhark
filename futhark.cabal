@@ -66,6 +66,7 @@ Library
                    Futhark.EnablingOpts.Simplifier.CSE
                    Futhark.EnablingOpts.AlgSimplify
                    Futhark.EnablingOpts.SymbolTable
+                   Futhark.EnablingOpts.UsageTable
                    Futhark.TypeError
                    Futhark.FreshNames
                    Futhark.Tools
