@@ -53,9 +53,10 @@ topDownSimplifyBinding vtable bnd =
 -- original binding (and possibly more, for intermediate results).
 -- The first argument is the set of names used after this binding.
 bottomUpSimplifyBinding :: MonadFreshNames m =>
-                           UT.UsageTable -> Binding -> m (Maybe [Binding])
-bottomUpSimplifyBinding used bnd =
-  provideNames $ applyRules bottomUpRules used bnd
+                           (ST.SymbolTable, UT.UsageTable)
+                        -> Binding -> m (Maybe [Binding])
+bottomUpSimplifyBinding x bnd =
+  provideNames $ applyRules bottomUpRules x bnd
 
 applyRules :: [SimplificationRule a]
            -> a -> Binding -> NeedNames (Maybe [Binding])
@@ -69,7 +70,7 @@ type SimplificationRule a = a -> Binding -> NeedNames (Maybe [Binding])
 
 type TopDownRule = SimplificationRule ST.SymbolTable
 
-type BottomUpRule = SimplificationRule UT.UsageTable
+type BottomUpRule = SimplificationRule (ST.SymbolTable, UT.UsageTable)
 
 topDownRules :: [TopDownRule]
 topDownRules = [ liftIdentityMapping
@@ -78,7 +79,6 @@ topDownRules = [ liftIdentityMapping
                , simplifyClosedFormRedomap
                , simplifyClosedFormReduce
                , simplifyClosedFormLoop
-               , simplifyScalarExp
                , letRule simplifyRearrange
                , letRule simplifyRotate
                , letRule simplifyBinOp
@@ -97,6 +97,7 @@ bottomUpRules = [ removeDeadMapping
                 , removeUnusedLoopResult
                 , removeRedundantMergeVariables
                 , removeDeadBranchResult
+                , simplifyScalarExp
                 ]
 
 liftIdentityMapping :: TopDownRule
@@ -163,7 +164,7 @@ removeReplicateMapping vtable (Let pat (Map cs fun arrs loc))
 removeReplicateMapping _ _ = return Nothing
 
 removeDeadMapping :: BottomUpRule
-removeDeadMapping used (Let pat (Map cs fun arrs loc)) = return $
+removeDeadMapping (_, used) (Let pat (Map cs fun arrs loc)) = return $
   let Result rcs ses resloc = bodyResult $ lambdaBody fun
       isUsed (v, _, _) = (`UT.used` used) $ identName v
       (pat',ses', ts') = unzip3 $ filter isUsed $ zip3 pat ses $ lambdaReturnType fun
@@ -177,7 +178,7 @@ removeDeadMapping used (Let pat (Map cs fun arrs loc)) = return $
 removeDeadMapping _ _ = return Nothing
 
 removeUnusedLoopResult :: BottomUpRule
-removeUnusedLoopResult used (Let pat (DoLoop respat merge i bound body loc))
+removeUnusedLoopResult (_, used) (Let pat (DoLoop respat merge i bound body loc))
   | (pat',respat') <- unzip $ filter usedAfterwards $ zip pat respat,
     pat' /= pat =
   return $ Just [Let pat' $ DoLoop respat' merge i bound body loc]
@@ -284,8 +285,8 @@ simplifyClosedFormLoop _ (Let pat (DoLoop respat merge _ bound body _)) =
   loopClosedForm pat respat merge bound body
 simplifyClosedFormLoop _ _ = return Nothing
 
-simplifyScalarExp :: TopDownRule
-simplifyScalarExp vtable (Let [v] e)
+simplifyScalarExp :: BottomUpRule
+simplifyScalarExp (vtable, _) (Let [v] e)
   | Just se <- optimisable =<< SE.toScalExp (`ST.lookupScalExp` vtable) e,
     Right se' <-
       dnfToScalExp <$> AS.mkSuffConds se loc (rangesRep vtable),
@@ -677,7 +678,7 @@ hoistBranchInvariant _ _ = return Nothing
 -- if *none* of the return values are used, but this rule is more
 -- precise.
 removeDeadBranchResult :: BottomUpRule
-removeDeadBranchResult used (Let pat (If e1 tb fb ts loc))
+removeDeadBranchResult (_, used) (Let pat (If e1 tb fb ts loc))
   | -- Figure out which of the names in 'pat' are used...
     patused <- map ((`UT.used` used) . identName) pat,
     -- If they are not all used, then this rule applies.

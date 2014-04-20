@@ -183,24 +183,29 @@ bindLet :: [Ident] -> Exp -> SimpleM a -> SimpleM a
 bindLet = withBinding
 
 addBindings :: MonadFreshNames m =>
-               DupeState -> [BindNeed] -> Body -> UT.UsageTable
+               ST.SymbolTable -> DupeState -> [BindNeed] -> Body -> UT.UsageTable
             -> m (Body, UT.UsageTable)
-addBindings dupes needs body uses = do
-  (uses',bnds) <- simplifyBindings uses $ snd $ mapAccumL pick (HM.empty, dupes) needs
+addBindings vtable dupes needs body uses = do
+  (uses',bnds) <- simplifyBindings vtable uses $ snd $ mapAccumL pick (HM.empty, dupes) needs
   return (insertBindings bnds body, uses')
-  where simplifyBindings uses' = foldM comb (uses',[]) . reverse
+  where simplifyBindings vtable' uses' bnds =
+          foldM comb (uses',[]) $ reverse $ zip bnds vtables
+            where vtables = scanl insertBnd vtable' bnds
+                  insertBnd vtable'' (Let [v] e, _, _) =
+                    ST.insert (identName v) e vtable''
+                  insertBnd vtable'' _ = vtable''
 
         -- Do not actually insert binding if it is not used.
-        comb (uses',bnds) (bnd, provs, reqs)
+        comb (uses',bnds) ((bnd, provs, reqs), vtable')
           | uses' `UT.contains` provs = do
-            res <- bottomUpSimplifyBinding uses' bnd
+            res <- bottomUpSimplifyBinding (vtable', uses') bnd
             case res of
               Nothing ->
                 return ((uses' <> reqs) `UT.without` provs,
                         bnd:bnds)
               Just optimbnds -> do
                 (uses'',optimbnds') <-
-                  simplifyBindings uses' $ map attachUsage optimbnds
+                  simplifyBindings vtable' uses' $ map attachUsage optimbnds
                 return (uses'', optimbnds'++bnds)
           | otherwise = -- Dead binding.
             return (uses', bnds)
@@ -321,8 +326,9 @@ blockIf :: BlockPred -> SimpleM Body -> SimpleM Body
 blockIf block m = pass $ do
   (body, needs) <- listen m
   ds <- asks envDupeState
+  vtable <- asks envVtable
   let (blocked, hoistable) = splitHoistable block body $ needBindings needs
-  (e, fs) <- addBindings ds blocked body $ freeInBound needs
+  (e, fs) <- addBindings vtable ds blocked body $ freeInBound needs
   return (e,
           const Need { needBindings = hoistable
                      , freeInBound  = fs
@@ -354,15 +360,18 @@ uniqPat = any $ unique . identType
 isUniqueBinding :: BlockPred
 isUniqueBinding _ (LetNeed pat _ _)          = uniqPat pat
 
-hoistCommon :: SimpleM Body -> SimpleM Body -> SimpleM (Body, Body)
-hoistCommon m1 m2 = pass $ do
-  (body1, needs1) <- listen m1
-  (body2, needs2) <- listen m2
+hoistCommon :: SimpleM Body -> (ST.SymbolTable -> ST.SymbolTable)
+            -> SimpleM Body -> (ST.SymbolTable -> ST.SymbolTable)
+            -> SimpleM (Body, Body)
+hoistCommon m1 vtablef1 m2 vtablef2 = pass $ do
+  (body1, needs1) <- listen $ localVtable vtablef1 m1
+  (body2, needs2) <- listen $ localVtable vtablef2 m2
   let splitOK = splitHoistable $ isNotSafe `orIf` isNotCheap
       (needs1', safe1) = splitOK body1 $ needBindings needs1
       (needs2', safe2) = splitOK body2 $ needBindings needs2
-  (e1, f1) <- addBindings newDupeState needs1' body1 $ freeInBound needs1
-  (e2, f2) <- addBindings newDupeState needs2' body2 $ freeInBound needs2
+  vtable <- asks envVtable
+  (e1, f1) <- localVtable vtablef1 $ addBindings vtable newDupeState needs1' body1 $ freeInBound needs1
+  (e2, f2) <- localVtable vtablef2 $ addBindings vtable newDupeState needs2' body2 $ freeInBound needs2
   return ((e1, e2),
           const Need { needBindings = safe1 <> safe2
                      , freeInBound = f1 <> f2
@@ -396,8 +405,8 @@ simplifyExp (DoLoop respat merge loopvar boundexp loopbody loc) = do
   -- Blocking hoisting of all unique bindings is probably too
   -- conservative, but there is currently no nice way to mark
   -- consumption of the loop body result.
-  loopbody' <- blockIfSeq [hasFree boundnames, isUniqueBinding] $
-               bindLoopVar loopvar boundexp' $
+  loopbody' <- bindLoopVar loopvar boundexp' $
+               blockIfSeq [hasFree boundnames, isUniqueBinding] $
                simplifyBody loopbody
   let merge' = zip mergepat' mergeexp'
   return $ DoLoop respat' merge' loopvar boundexp' loopbody' loc
@@ -409,11 +418,9 @@ simplifyExp (If cond tbranch fbranch t loc) = do
   -- variable, and if so, chomp it.  We also try to do CSE across
   -- branches.
   cond' <- simplifySubExp cond
-  let simplifyT = localVtable (ST.updateBounds True cond) $
-                  simplifyBody tbranch
-      simplifyF = localVtable (ST.updateBounds False cond) $
-                  simplifyBody fbranch
-  (tbranch',fbranch') <- hoistCommon simplifyT simplifyF
+  (tbranch',fbranch') <-
+    hoistCommon (simplifyBody tbranch) (ST.updateBounds True cond)
+                (simplifyBody fbranch) (ST.updateBounds False cond)
   t' <- mapM simplifyType t
   return $ If cond' tbranch' fbranch' t' loc
 
