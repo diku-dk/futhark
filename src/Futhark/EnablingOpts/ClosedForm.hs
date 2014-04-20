@@ -70,6 +70,8 @@ foldClosedForm look pat lam accs arrs =
 
         knownBindings = determineKnownBindings look lam accs arrs
 
+-- | @loopClosedForm pat respat merge bound bodys@ determines whether
+-- the do-loop can be expressed in a closed form.
 loopClosedForm :: [Ident] -> [Ident] -> [(Ident,SubExp)]
                -> SubExp -> Body -> NeedNames (Maybe [Binding])
 loopClosedForm pat respat merge bound body
