@@ -18,8 +18,8 @@ while true; do
 done
 
 tests() {
-    find $testdir/tests/ -name '*l0'
-    find $testdir/benchmarks/ -name '*l0'
+    find $testdir/tests/ -name '*fut'
+    find $testdir/benchmarks/ -name '*fut'
 }
 
 # You can control exactly which tests to run by passing their names as
