@@ -42,16 +42,18 @@ splitBndAssertions (Let pat (DoLoop respat merge i bound body loc)) = do
   DoLoop _ merge' i' _ body' _ <-
     renameExp $ DoLoop respat merge i bound body loc
   (certbody, allBoundsChecks) <- splitLoopBody body'
+  allBoundsChecksRes  <-
+    newIdent "loop_bounds_cert_res" (Basic Bool) loc
   allBoundsChecksCert  <-
     newIdent "loop_bounds_cert" (Basic Cert) loc
   let certmerge = (allBoundsChecks, constant True loc) : merge'
-      certloop = Let [allBoundsChecks] $
+      certloop = Let [allBoundsChecksRes] $
                  DoLoop [allBoundsChecks] certmerge i' bound certbody loc
       valbody = replaceBoundsCerts allBoundsChecksCert body
       valloop = Let pat $ DoLoop respat merge i bound valbody loc
   Body certbnds _ <- runBinder $ copyConsumed $ Body [certloop] nullRes
   return $ certbnds ++
-           [Let [allBoundsChecksCert] (Assert (Var allBoundsChecks) loc),
+           [Let [allBoundsChecksCert] (Assert (Var allBoundsChecksRes) loc),
             valloop]
   where nullRes = Result [] [] $ srclocOf body
 
