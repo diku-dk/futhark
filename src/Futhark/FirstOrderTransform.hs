@@ -50,13 +50,6 @@ transformBody = mapBodyM transform
 -- | Transform a single expression.
 transformExp :: Exp -> Binder Exp
 
--- We sometimes have to allocate new arrays up front.  This is a bit
--- tricky, as in case the new array is multidimensional, we need to
--- compute the first element in order to get the proper size.  For
--- example, in the case for map, we evaluate the function on the first
--- element of the array and use that to construct the array for the
--- rest.  If the input array is empty, we simply return an empty
--- output array.
 transformExp mape@(Map cs fun arrs loc) = do
   inarrs <- letExps "inarr" $ map subExp arrs
   (i, iv) <- newVar loc "i" $ Basic Int
