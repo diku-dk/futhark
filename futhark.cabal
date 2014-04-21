@@ -1,6 +1,7 @@
 Name:                futhark
 Version:             0.1
 Synopsis:            An optimising compiler for a functional, array-oriented language.
+Homepage:            https://github.com/HIPERFIT/futhark
 Category:            Language
 License:             BSD3
 License-file:        LICENSE
@@ -8,6 +9,10 @@ Build-type:          Custom
 
 -- Constraint on the version of Cabal needed to build this package.
 Cabal-version:       >=1.10
+
+source-repository head
+  type:     git
+  location: git@github.com:HIPERFIT/futhark.git
 
 Library
   -- Packages needed in order to build this package.
