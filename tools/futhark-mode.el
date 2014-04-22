@@ -32,7 +32,7 @@
   :type '(integer))
 
 ;;;###autoload
-(add-to-list 'auto-mode-alist '("\\.l0\\'" . futhark-mode))
+(add-to-list 'auto-mode-alist '("\\.fut\\'" . futhark-mode))
 
 (defconst futhark-keywords
   '("if" "then" "else" "let" "loop" "in" "with" "int" "real" "bool" "char"
