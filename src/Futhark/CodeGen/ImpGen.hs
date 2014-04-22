@@ -1,8 +1,15 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Futhark.CodeGen.ImpGen
   ( compileProg
+  -- * Pluggable compiler
   , ExpCompiler
   , ExpCompilerResult (..)
+  -- * Monadic compiler interface
+  , ImpM
+  , declareVar
+  , declareVars
+  , compileSubExp
+  , expAsName
   )
   where
 
@@ -20,10 +27,10 @@ import Futhark.MonadFreshNames
 
 -- | A substitute expression compiler, tried before the main
 -- expression compilation function.
-type ExpCompiler = [Ident] -> Exp -> ImpM ExpCompilerResult
+type ExpCompiler op = [Ident] -> Exp -> ImpM op (ExpCompilerResult op)
 
 -- | The result of the substitute expression compiler.
-data ExpCompilerResult =
+data ExpCompilerResult op =
       CompileBindings [Binding]
     -- ^ New bindings.  Note that the bound expressions will
     -- themselves be compiled using the expression compiler.
@@ -31,36 +38,38 @@ data ExpCompilerResult =
     -- ^ A new expression (or possibly the same as the input) - this
     -- will not be passed back to the expression compiler, but instead
     -- processed with the default action.
-    | Code Imp.Code
-    -- ^ Compiled imperative code.
+    | Done
+    -- ^ Some code was added via the monadic interface.
 
-data Env = Env {
+data Env op = Env {
     envVtable :: HM.HashMap VName Type
-  , envExpCompiler :: ExpCompiler
+  , envExpCompiler :: ExpCompiler op
   }
 
-newEnv :: ExpCompiler -> Env
+newEnv :: ExpCompiler op -> Env op
 newEnv ec = Env { envVtable = HM.empty
                 , envExpCompiler = ec
                 }
 
-newtype ImpM a = ImpM (RWS Env Imp.Code VNameSource a)
+newtype ImpM op a = ImpM (RWS (Env op) (Imp.Code op) VNameSource a)
   deriving (Functor, Applicative, Monad,
-            MonadState VNameSource, MonadReader Env, MonadWriter Imp.Code)
+            MonadState VNameSource,
+            MonadReader (Env op),
+            MonadWriter (Imp.Code op))
 
-instance MonadFreshNames ImpM where
+instance MonadFreshNames (ImpM op) where
   getNameSource = get
   putNameSource = put
 
-runImpM :: ImpM a -> ExpCompiler -> VNameSource -> (a, VNameSource, Imp.Code)
+runImpM :: ImpM op a -> ExpCompiler op -> VNameSource -> (a, VNameSource, Imp.Code op)
 runImpM (ImpM m) = runRWS m . newEnv
 
-collect :: ImpM () -> ImpM Imp.Code
+collect :: ImpM op () -> ImpM op (Imp.Code op)
 collect m = pass $ do
   ((), code) <- listen m
   return (code, const mempty)
 
-compileProg :: ExpCompiler -> Prog -> Imp.Program
+compileProg :: ExpCompiler op -> Prog -> Imp.Program op
 compileProg ec prog = snd $ mapAccumL (compileFunDec ec) src $ progFunctions prog
   where src = newNameSourceForProg prog
 
@@ -79,7 +88,7 @@ compileParam p = Imp.Param (identName p) $ compileType $ identType p
 compileParams :: [Param] -> [Imp.Param]
 compileParams = map compileParam
 
-compileFunDec :: ExpCompiler -> VNameSource -> FunDec -> (VNameSource, (Name, Imp.Function))
+compileFunDec :: ExpCompiler op -> VNameSource -> FunDec -> (VNameSource, (Name, Imp.Function op))
 compileFunDec ec src (fname, rettype, params, body, _) =
   let (outs, src', body') = runImpM compile ec src
   in (src', (fname, Imp.Function outs (compileParams params) body'))
@@ -88,26 +97,26 @@ compileFunDec ec src (fname, rettype, params, body, _) =
           compileBody outs body
           return $ zipWith Imp.Param outs $ map compileType $ bodyType body
 
-compileBody :: [VName] -> Body -> ImpM ()
+compileBody :: [VName] -> Body -> ImpM op ()
 compileBody targets (Body bnds (Result _ ses _)) = do
   mapM_ compileBinding bnds
   zipWithM_ compileSubExpTo targets ses
 
-compileBinding :: Binding -> ImpM ()
+compileBinding :: Binding -> ImpM op ()
 compileBinding (Let pat e) =
   compileExp pat e
 
-compileExp :: [Ident] -> Exp -> ImpM ()
+compileExp :: [Ident] -> Exp -> ImpM op ()
 compileExp pat e = do
   ec <- asks envExpCompiler
   res <- ec pat e
   case res of
     CompileBindings bnds -> mapM_ compileBinding bnds
-    CompileExp e'        -> do makeVars pat
+    CompileExp e'        -> do declareVars pat
                                defCompileExp (map identName pat) e'
-    Code code            -> tell code
+    Done                 -> return ()
 
-defCompileExp :: [VName] -> Exp -> ImpM ()
+defCompileExp :: [VName] -> Exp -> ImpM op ()
 
 defCompileExp targets (SubExps ses _) =
   zipWithM_ compileSubExpTo targets ses
@@ -121,7 +130,7 @@ defCompileExp targets (Apply fname args _ _) =
   tell $ Imp.Call targets fname $ map (compileSubExp . fst) args
 
 defCompileExp targets (DoLoop res merge i bound body _) = do
-  makeVars mergepat
+  declareVars mergepat
   zipWithM_ compileSubExpTo mergenames mergeinit
   body' <- collect $ compileBody mergenames body
   tell $ Imp.For (identName i) (compileSubExp bound) body'
@@ -178,7 +187,7 @@ defCompileExp [target] (Reshape _ shape src _) = do
   let shape' = map compileSubExp shape
       srcshape' = map compileSubExp $ arrayDims $ subExpType src
   n <- newVName "n"
-  makeVar $ Ident n (Basic Int) noLoc
+  declareVar $ Ident n (Basic Int) noLoc
   writeExp n $ foldl (Imp.BinOp Imp.Times) one shape'
   i <- newVName "i"
   let mult    = Imp.BinOp Imp.Times
@@ -256,28 +265,28 @@ defCompileExp [] _ = return () -- No arms, no cake.
 
 defCompileExp (_:_:_) _ = fail "ImpGen.compileExp: Incorrect number of targets"
 
-soacError :: ImpM a
+soacError :: ImpM op a
 soacError = fail "SOAC encountered in code generator; should have been removed by first-order transform."
 
-writeExp :: VName -> Imp.Exp -> ImpM ()
+writeExp :: VName -> Imp.Exp -> ImpM op ()
 writeExp target = tell . Imp.Write target []
 
-allocate :: VName -> ImpM ()
+allocate :: VName -> ImpM op ()
 allocate target = tell $ Imp.Allocate target
 
 var :: VName -> Imp.Exp
 var v = Imp.Read v []
 
-makeVars :: [Ident] -> ImpM ()
-makeVars = mapM_ makeVar
+declareVars :: [Ident] -> ImpM op ()
+declareVars = mapM_ declareVar
 
-makeVar :: Ident -> ImpM ()
-makeVar v = do
+declareVar :: Ident -> ImpM op ()
+declareVar v = do
   shape <- mapM (expAsDimSize . compileSubExp) $ arrayDims t
   tell $ Imp.Declare (identName v) (elemType t) shape
   where t = identType v
 
-compileSubExpTo :: VName -> SubExp -> ImpM ()
+compileSubExpTo :: VName -> SubExp -> ImpM op ()
 compileSubExpTo target se =
   tell $ Imp.Write target [] $ compileSubExp se
 
@@ -293,7 +302,7 @@ compileSubExp (Constant val@(ArrayVal arr rt) _) =
 compileSubExp (Var v) =
   Imp.Read (identName v) []
 
-expAsDimSize :: Imp.Exp -> ImpM Imp.DimSize
+expAsDimSize :: Imp.Exp -> ImpM op Imp.DimSize
 expAsDimSize (Imp.Read v []) =
   return $ Imp.VarSize v
 expAsDimSize (Imp.Constant (Imp.BasicVal (IntVal x))) =
@@ -302,11 +311,11 @@ expAsDimSize e = do
   size <- expAsName e
   return $ Imp.VarSize size
 
-expAsName :: Imp.Exp -> ImpM VName
+expAsName :: Imp.Exp -> ImpM op VName
 expAsName (Imp.Read v []) =
   return v
 expAsName e = do
   size <- newIdent "size" (Basic Int) noLoc
-  makeVar size
+  declareVar size
   writeExp (identName size) e
   return $ identName size

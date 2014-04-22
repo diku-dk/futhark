@@ -2,13 +2,17 @@
 -- | C code generator framework.
 module Futhark.CodeGen.Backends.GenericC
   ( compileProg
-  , ExpCompiler
-  , ExpCompilerResult(..)
+  -- * Pluggable compiler
+  , OpCompiler
+  , OpCompilerResult(..)
+  -- * Monadic compiler interface
   , CompilerM
   , lookupVar
---  , compileExp
---  , compileSubExp
---  , compileExpNewVar
+  , compileExp
+  , item
+  , stm
+  , stms
+  , decl
   ) where
 
 import Control.Applicative
@@ -49,26 +53,20 @@ newCompilerState src = CompilerState {
 
 
 -- | A substitute expression compiler, tried before the main
--- expression compilation function.
-type ExpCompiler = C.Exp -> Exp -> CompilerM ExpCompilerResult
+-- compilation function.
+type OpCompiler op = op -> CompilerM op (OpCompilerResult op)
 
 -- | The result of the substitute expression compiler.
-data ExpCompilerResult = CompileBody Code
-                       -- ^ New bindings.  Note that the bound
-                       -- expressions will themselves be compiled
-                       -- using the expression compiler.
-                       | CompileExp Exp -- ^ A new expression (or
-                                        -- possibly the same as the
-                                        -- input).
-                       | CCode [C.BlockItem] -- ^ Compiled C code.
+data OpCompilerResult op = CompileCode (Code op) -- ^ Equivalent to this code.
+                         | Done -- ^ Code added via monadic interface.
 
-data CompilerEnv = CompilerEnv {
-    envCompileExp :: ExpCompiler
+data CompilerEnv op = CompilerEnv {
+    envOpCompiler :: OpCompiler op
   }
 
-newCompilerEnv :: ExpCompiler -> CompilerEnv
+newCompilerEnv :: OpCompiler op -> CompilerEnv op
 newCompilerEnv ec = CompilerEnv {
-                      envCompileExp = ec
+                      envOpCompiler = ec
                     }
 
 -- | Return a list of struct definitions for the tuples and arrays
@@ -78,17 +76,17 @@ newCompilerEnv ec = CompilerEnv {
 typeDefinitions :: CompilerState -> [C.Definition]
 typeDefinitions = reverse . map (snd . snd) . compTypeStructs
 
-newtype CompilerM a = CompilerM (RWS CompilerEnv [C.BlockItem] CompilerState a)
+newtype CompilerM op a = CompilerM (RWS (CompilerEnv op) [C.BlockItem] CompilerState a)
   deriving (Functor, Applicative, Monad,
             MonadState CompilerState,
-            MonadReader CompilerEnv,
+            MonadReader (CompilerEnv op),
             MonadWriter [C.BlockItem])
 
-instance MonadFreshNames CompilerM where
+instance MonadFreshNames (CompilerM op) where
   getNameSource = gets compNameSrc
   putNameSource src = modify $ \s -> s { compNameSrc = src }
 
-runCompilerM :: ExpCompiler -> VNameSource -> CompilerM a -> (a, CompilerState)
+runCompilerM :: OpCompiler op -> VNameSource -> CompilerM op a -> (a, CompilerState)
 runCompilerM ec src (CompilerM m) =
   let (x, s, _) = runRWS m (newCompilerEnv ec) (newCompilerState src)
   in (x, s)
@@ -98,31 +96,31 @@ collect m = pass $ do
   ((), w) <- listen m
   return (w, const mempty)
 
-item :: C.BlockItem -> CompilerM ()
+item :: C.BlockItem -> CompilerM op ()
 item x = tell [x]
 
-stm :: C.Stm -> CompilerM ()
+stm :: C.Stm -> CompilerM op ()
 stm (C.Block items _) = mapM_ item items
 stm (C.Default s _) = stm s
 stm s = item [C.citem|$stm:s|]
 
-stms :: [C.Stm] -> CompilerM ()
+stms :: [C.Stm] -> CompilerM op ()
 stms = mapM_ stm
 
-decl :: C.InitGroup -> CompilerM ()
+decl :: C.InitGroup -> CompilerM op ()
 decl x = item [C.citem|$decl:x;|]
 
-newVar :: VName -> Type -> CompilerM ()
+newVar :: VName -> Type -> CompilerM op ()
 newVar k t = modify $ \s -> s { compVtable = HM.insert k t $ compVtable s }
 
-lookupVar :: VName -> CompilerM Type
+lookupVar :: VName -> CompilerM op Type
 lookupVar k = do t <- gets $ HM.lookup k . compVtable
                  case t of
                    Nothing -> fail $ "Uknown variable " ++ textual k ++ " in code generator."
                    Just t' -> return t'
 
 -- | 'new s' returns a fresh variable name, with 's' prepended to it.
-new :: String -> CompilerM String
+new :: String -> CompilerM op String
 new = liftM textual . newVName
 
 typeName' :: Type -> String
@@ -138,7 +136,7 @@ typeName :: [Type] -> String
 typeName [t] = typeName' t
 typeName ts  = "tuple_" ++ intercalate "_" (map typeName' ts)
 
-typeToCType :: [Type] -> CompilerM C.Type
+typeToCType :: [Type] -> CompilerM op C.Type
 typeToCType [Type Int  []] = return [C.cty|int|]
 typeToCType [Type Bool []] = return [C.cty|int|]
 typeToCType [Type Char []] = return [C.cty|char|]
@@ -173,7 +171,7 @@ typeToCType t = do
                 return [C.csdecl|$ty:ct $id:(tupleField i);|]
 
 -- | Return a statement printing the given value.
-printStm :: C.Exp -> [Type] -> CompilerM C.Stm
+printStm :: C.Exp -> [Type] -> CompilerM op C.Stm
 printStm place [Type Int []]  = return [C.cstm|printf("%d", $exp:place);|]
 printStm place [Type Char []] = return [C.cstm|printf("%c", $exp:place);|]
 printStm place [Type Bool []] =
@@ -249,7 +247,7 @@ readStm _ t =
         exit(1);
       }|]
 
-mainCall :: Name -> Function -> CompilerM C.Stm
+mainCall :: Name -> Function op -> CompilerM op C.Stm
 mainCall fname (Function outputs inputs _) = do
   crettype <- typeToCType $ map paramType outputs
   ret <- new "main_ret"
@@ -277,9 +275,9 @@ mainCall fname (Function outputs inputs _) = do
              }|]
   where paramtypes = map paramType inputs
 
--- | Compile Futhark program to a C program.  Always uses the function
--- named "main" as entry point, so make sure it is defined.
-compileProg :: ExpCompiler -> Program -> String
+-- | Compile imperative program to a C program.  Always uses the
+-- function named "main" as entry point, so make sure it is defined.
+compileProg :: OpCompiler op -> Program op -> String
 compileProg ec prog =
   let ((prototypes, definitions, main), endstate) =
         runCompilerM ec blankNameSource compileProg'
@@ -339,7 +337,7 @@ int main() {
                         C.OldFunc _ _ _ _ _ _ l -> l
                         C.Func _ _ _ _ _ l      -> l
 
-compileFun :: (Name, Function) -> CompilerM (C.Definition, C.Func)
+compileFun :: (Name, Function op) -> CompilerM op (C.Definition, C.Func)
 compileFun (fname, Function outputs inputs body) = do
   args' <- mapM compileInput inputs
   body' <- collect $ do
@@ -376,7 +374,7 @@ compileBasicValue (CharVal c) =
 compileBasicValue Checked =
   [C.cexp|0|]
 
-compileValue :: Value -> CompilerM C.Exp
+compileValue :: Value -> CompilerM op C.Exp
 
 compileValue (BasicVal bv) =
   return $ compileBasicValue bv
@@ -410,7 +408,7 @@ dimSizeToExp :: DimSize -> Exp
 dimSizeToExp (ConstSize x) = Constant $ BasicVal $ IntVal x
 dimSizeToExp (VarSize v) = Read v []
 
-compileExp :: Exp -> CompilerM C.Exp
+compileExp :: Exp -> CompilerM op C.Exp
 
 compileExp (Constant val) = compileValue val
 
@@ -478,7 +476,13 @@ compileExp (BinOp bop x y) = do
              Less -> [C.cexp|$exp:x' < $exp:y'|]
              Leq -> [C.cexp|$exp:x' <= $exp:y'|]
 
-compileCode :: Code -> CompilerM ()
+compileCode :: Code op -> CompilerM op ()
+
+compileCode (Op op) = do
+  opc <- asks envOpCompiler
+  res <- opc op
+  case res of Done             -> return ()
+              CompileCode code -> compileCode code
 
 compileCode Skip = return ()
 
@@ -554,7 +558,7 @@ compileCode (Call results fname args) = do
       forM_ (zip [0..] results) $ \(i,result) ->
         stm [C.cstm|$id:(textual result) = $exp:(tupleFieldExp (varExp ret) i);|]
 
-compileFunBody :: [Param] -> Code -> CompilerM ()
+compileFunBody :: [Param] -> Code op -> CompilerM op ()
 compileFunBody outputs code = do
   retval <- new "retval"
   bodytype <- typeToCType $ map paramType outputs

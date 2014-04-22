@@ -42,20 +42,21 @@ data Param = Param { paramName :: VName
                    }
              deriving (Show)
 
-type Program = [(Name, Function)]
+type Program a = [(Name, Function a)]
 
-data Function = Function [Param] [Param] Code
-                deriving (Show)
+data Function a = Function [Param] [Param] (Code a)
+                  deriving (Show)
 
-data Code = Skip
-          | Code :>>: Code
-          | For VName Exp Code
-          | Declare VName BasicType [DimSize]
-          | Allocate VName
-          | Write VName [Exp] Exp
-          | Call [VName] Name [Exp]
-          | If Exp Code Code
-          | Assert Exp SrcLoc
+data Code a = Skip
+            | Code a :>>: Code a
+            | For VName Exp (Code a)
+            | Declare VName BasicType [DimSize]
+            | Allocate VName
+            | Write VName [Exp] Exp
+            | Call [VName] Name [Exp]
+            | If Exp (Code a) (Code a)
+            | Assert Exp SrcLoc
+            | Op a
             deriving (Show)
 
 data Exp = Constant Value
@@ -73,7 +74,7 @@ data UnOp = Not
           | Negate
             deriving (Show)
 
-instance Monoid Code where
+instance Monoid (Code a) where
   mempty = Skip
   Skip `mappend` y    = y
   x    `mappend` Skip = x
