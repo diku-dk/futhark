@@ -788,6 +788,7 @@ consumedInExp _ = mempty
 -- example, array indexing is not safe, as the index may be out of
 -- bounds.  On the other hand, adding two numbers cannot fail.
 safeExp :: Exp -> Bool
+safeExp e | not $ HS.null $ consumedInExp e = False
 safeExp (Index {}) = False
 safeExp (Update {}) = False
 safeExp (Split {}) = False
