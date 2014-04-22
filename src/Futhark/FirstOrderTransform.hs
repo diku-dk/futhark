@@ -60,16 +60,14 @@ transformExp mape@(Map cs fun arrs loc) = do
     x <- bodyBind =<< transformLambda fun (index cs inarrs iv)
     dests <- letwith cs outarr (pexp iv) $ map subExp x
     return $ resultBody [] (map Var dests) loc
-  loopBind (zip outarr resarr) i (isize inarrs) loopbody
-  return $ SubExps (map Var outarr) loc
+  return $ DoLoop outarr (zip outarr resarr) i (isize inarrs) loopbody loc
 
 transformExp (Reduce cs fun args loc) = do
   (_, (acc, initacc), (i, iv)) <- newFold loc arrexps accexps
   arrvs <- mapM (letExp "reduce_arr" . subExp) arrexps
   loopbody <- insertBindingsM $ transformLambda fun $
               map (subExp . Var) acc ++ index cs arrvs iv
-  loopBind (zip acc initacc) i (isize arrvs) loopbody
-  return $ SubExps (map Var acc) loc
+  return $ DoLoop acc (zip acc initacc) i (isize arrvs) loopbody loc
   where (accexps, arrexps) = unzip args
 
 transformExp (Scan cs fun args loc) = do
@@ -81,8 +79,7 @@ transformExp (Scan cs fun args loc) = do
     irows <- letSubExps "row" $ index cs dests iv
     rowcopies <- letExps "copy" [ Copy irow loc | irow <- irows ]
     return $ resultBody [] (map Var $ rowcopies ++ dests) loc
-  loopBind (zip (acc ++ arr) (initacc ++ initarr)) i (isize arr) loopbody
-  return $ SubExps (map Var arr) loc
+  return $ DoLoop arr (zip (acc ++ arr) (initacc ++ initarr)) i (isize arr) loopbody loc
   where (accexps, arrexps) = unzip args
 
 transformExp (Filter cs fun arrexps outersize loc) = do
@@ -128,8 +125,7 @@ transformExp (Filter cs fun arrexps outersize loc) = do
                (eBody $ eBinOp Equal indexi indexinm1 (Basic Bool) loc)
                [Basic Bool] loc)
           (pure resv) (eBody update) (bodyType resv) loc
-  loopBind (zip res resinit) i nv loopbody
-  return $ SubExps (map Var res) loc
+  return $ DoLoop res (zip res resinit) i nv loopbody loc
   where intval x = intconst x loc
 
 transformExp (Redomap cs _ innerfun accexps arrexps loc) = do
@@ -137,8 +133,7 @@ transformExp (Redomap cs _ innerfun accexps arrexps loc) = do
   arrvs <- mapM (letExp "redomap_arr" . subExp) arrexps
   loopbody <- insertBindingsM $ transformLambda innerfun $
               map (subExp . Var) acc ++ index cs arrvs iv
-  loopBind (zip acc initacc) i (isize arrvs) loopbody
-  return $ SubExps (map Var acc) loc
+  return $ DoLoop acc (zip acc initacc) i (isize arrvs) loopbody loc
 
 transformExp e = mapExpM transform e
 
