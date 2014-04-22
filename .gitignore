@@ -38,3 +38,6 @@ data/**/*c
 
 # Ignore core dumps.
 core
+
+# Ignore flymake-files created by Emacs.
+*flymake*
