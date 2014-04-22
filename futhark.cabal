@@ -31,14 +31,16 @@ Library
                  text
 
   Exposed-modules: Futhark.Binder
---                   Futhark.CodeGen.Backends.Bohrium
---                   Futhark.CodeGen.Backends.BohriumCodeGen
+                   Futhark.CodeGen.Backends.Bohrium
+                   Futhark.CodeGen.Backends.BohriumOp
+                   Futhark.CodeGen.Backends.BohriumCodeGen
                    Futhark.CodeGen.Backends.GenericC
                    Futhark.CodeGen.Backends.GenericCReading
                    Futhark.CodeGen.Backends.SequentialC
                    Futhark.CodeGen.Backends.SimpleRepresentation
                    Futhark.CodeGen.ImpCode
                    Futhark.CodeGen.ImpGen
+                   Futhark.CodeGen.FirstOrderSOACS
                    Futhark.Dev
                    Futhark.EnablingOpts.AlgSimplify
                    Futhark.EnablingOpts.CallGraph

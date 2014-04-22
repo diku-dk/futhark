@@ -9,6 +9,7 @@ module Futhark.CodeGen.ImpGen
   , declareVar
   , declareVars
   , compileSubExp
+  , compileType
   , expAsName
   )
   where

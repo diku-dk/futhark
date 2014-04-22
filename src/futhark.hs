@@ -34,7 +34,7 @@ import qualified Futhark.InternalRep.TypeChecker as I
 import Futhark.Interpreter
 import qualified Futhark.SOACFlowGraph as FG
 import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
--- import qualified Futhark.Backends.Bohrium as Bohrium
+import qualified Futhark.CodeGen.Backends.Bohrium as Bohrium
 
 version :: Version
 version = Paths_futhark.version
@@ -75,9 +75,9 @@ commandLineOptions =
   , Option [] ["compile-sequential"]
     (NoArg $ Right $ \opts -> opts { futharkaction = seqCodegenAction })
     "Translate program into sequential C and write it on standard output."
---  , Option [] ["compile-bohrium"]
---    (NoArg $ Right $ \opts -> opts { futharkaction = bohriumCodegenAction })
---    "Translate program into C using Bohrium and write it on standard output."
+  , Option [] ["compile-bohrium"]
+    (NoArg $ Right $ \opts -> opts { futharkaction = bohriumCodegenAction })
+    "Translate program into C using Bohrium and write it on standard output."
   , Option [] ["generate-flow-graph"]
     (NoArg $ Right $ \opts -> opts { futharkaction = flowGraphAction })
     "Print the SOAC flow graph of the final program."
@@ -123,8 +123,8 @@ interpretAction = ("interpreter", interpret)
 seqCodegenAction :: Action
 seqCodegenAction = ("sequential code generator", putStrLn . SequentialC.compileProg)
 
--- bohriumCodegenAction :: Action
--- bohriumCodegenAction = ("Bohrium code generator", putStrLn . Bohrium.compileProg)
+bohriumCodegenAction :: Action
+bohriumCodegenAction = ("Bohrium code generator", putStrLn . Bohrium.compileProg)
 
 flowGraphAction :: Action
 flowGraphAction = ("SOAC flow graph", putStrLn . FG.makeFlowGraphString)

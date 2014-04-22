@@ -14,25 +14,15 @@ import Control.Monad.Writer
 import qualified Language.C.Quote.C as C
 
 import Futhark.InternalRep
-import qualified Futhark.FirstOrderTransform as FOT
-import Futhark.Tools
 
 import qualified Futhark.CodeGen.ImpCode as Imp
 import qualified Futhark.CodeGen.ImpGen as ImpGen
 import qualified Futhark.CodeGen.Backends.GenericC as GenericC
+import Futhark.CodeGen.FirstOrderSOACS
 
 compileProgBadly :: Prog -> String
 compileProgBadly = GenericC.compileProg codeCompiler . ImpGen.compileProg firstOrderSOACS
-  where firstOrderSOACS :: ImpGen.ExpCompiler ()
-        firstOrderSOACS targets e
-          | FOT.transformable e =
-            liftM ImpGen.CompileBindings $ do
-              (e',bnds) <- runBinder'' $ FOT.transformExp e
-              return $ bnds ++ [Let targets e']
-          | otherwise           =
-            return $ ImpGen.CompileExp e
-
-        codeCompiler :: GenericC.OpCompiler ()
+  where codeCompiler :: GenericC.OpCompiler ()
         codeCompiler () = return GenericC.Done
 
 -- Some operations can be implemented to more efficient C than with
@@ -58,13 +48,7 @@ compileProg = GenericC.compileProg codeCompiler . ImpGen.compileProg compileExp
           ImpGen.declareVar target2
           tell $ Imp.Op $ SplitOp (identName target1) (identName target2) n' e'
           return ImpGen.Done
-        compileExp targets e
-          | FOT.transformable e =
-            liftM ImpGen.CompileBindings $ do
-              (e',bnds) <- runBinder'' $ FOT.transformExp e
-              return $ bnds ++ [Let targets e']
-          | otherwise           =
-            return $ ImpGen.CompileExp e
+        compileExp targets e = firstOrderSOACS targets e
 
         codeCompiler :: GenericC.OpCompiler ArrayOp
         codeCompiler (ReshapeOp target shape src) = do
