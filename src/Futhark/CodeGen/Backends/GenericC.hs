@@ -501,8 +501,8 @@ compileCode (Declare name et shape) = do
   decl [C.cdecl|$ty:ct $id:(textual name);|]
 
 compileCode (Allocate name) = do
-  ty@(Type _ shape) <- lookupVar name
-  ct <- typeToCType [ty]
+  (Type bt shape) <- lookupVar name
+  ct <- typeToCType [Type bt []]
   shape' <- mapM (compileExp . dimSizeToExp) shape
   unless (null shape) $
     stm $ allocArray (varExp $ textual name) shape' ct
@@ -535,7 +535,7 @@ compileCode (Write dest idxs src) = do
       let to = indexArrayExp dest' rank idxs'
       in stm [C.cstm|$exp:to = $exp:src';|]
       | otherwise            ->
-      let to = indexArrayExp dest' (typeRank destt) idxs'
+      let to = [C.cexp|&$exp:(indexArrayExp dest' (typeRank destt) idxs')|]
           from = [C.cexp|$exp:src'.data|]
           fromshape = [C.cexp|$exp:src'.shape|]
       in stm $ arraySliceCopyStm to from fromshape elty 0
