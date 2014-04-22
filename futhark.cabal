@@ -30,76 +30,78 @@ Library
                  dlist >= 0.6.0.1,
                  text
 
-  Exposed-modules: Language.Futhark
-                   Language.Futhark.Pretty
-                   Language.Futhark.Core
-                   Language.Futhark.Traversals
-                   Language.Futhark.Attributes
-                   Language.Futhark.Syntax
-                   Language.Futhark.Parser
-                   Futhark.MonadFreshNames
-                   Futhark.FirstOrderTransform
-                   Futhark.Externalise
-                   Futhark.Binder
-                   Futhark.SplitAssertions
+  Exposed-modules: Futhark.Binder
+--                   Futhark.CodeGen.Backends.Bohrium
+--                   Futhark.CodeGen.Backends.BohriumCodeGen
+                   Futhark.CodeGen.Backends.GenericC
+                   Futhark.CodeGen.Backends.GenericCReading
+                   Futhark.CodeGen.Backends.SequentialC
+                   Futhark.CodeGen.Backends.SimpleRepresentation
+                   Futhark.CodeGen.ImpCode
+                   Futhark.CodeGen.ImpGen
                    Futhark.Dev
-                   Futhark.Substitute
-                   Futhark.Internalise
-                   Futhark.IndexInliner
-                   Futhark.InternalRep
-                   Futhark.ExternalRep.Renamer
-                   Futhark.ExternalRep.TypeChecker
-                   Futhark.SOACFlowGraph
-                   Futhark.HOTrans.HOTransDriver
-                   Futhark.HOTrans.Composing
-                   Futhark.HOTrans.Fusion
-                   Futhark.HOTrans.TryFusion
-                   Futhark.HOTrans.LoopKernel
-                   Futhark.Pipeline
-                   Futhark.EnablingOpts.InliningDeadFun
-                   Futhark.EnablingOpts.ClosedForm
-                   Futhark.EnablingOpts.ScalExp
-                   Futhark.EnablingOpts.Simplify
-                   Futhark.EnablingOpts.Simplifier
-                   Futhark.EnablingOpts.EnablingOptDriver
-                   Futhark.EnablingOpts.DeadVarElim
-                   Futhark.EnablingOpts.EnablingOptErrors
-                   Futhark.EnablingOpts.CallGraph
-                   Futhark.EnablingOpts.Simplifier.Apply
-                   Futhark.EnablingOpts.Simplifier.Rules
-                   Futhark.EnablingOpts.Simplifier.DataDependencies
-                   Futhark.EnablingOpts.Simplifier.CSE
                    Futhark.EnablingOpts.AlgSimplify
+                   Futhark.EnablingOpts.CallGraph
+                   Futhark.EnablingOpts.ClosedForm
+                   Futhark.EnablingOpts.DeadVarElim
+                   Futhark.EnablingOpts.EnablingOptDriver
+                   Futhark.EnablingOpts.EnablingOptErrors
+                   Futhark.EnablingOpts.InliningDeadFun
+                   Futhark.EnablingOpts.ScalExp
+                   Futhark.EnablingOpts.Simplifier
+                   Futhark.EnablingOpts.Simplifier.Apply
+                   Futhark.EnablingOpts.Simplifier.CSE
+                   Futhark.EnablingOpts.Simplifier.DataDependencies
+                   Futhark.EnablingOpts.Simplifier.Rules
+                   Futhark.EnablingOpts.Simplify
                    Futhark.EnablingOpts.SymbolTable
                    Futhark.EnablingOpts.UsageTable
-                   Futhark.TypeError
+                   Futhark.Externalise
+                   Futhark.ExternalRep
+                   Futhark.ExternalRep.Renamer
+                   Futhark.ExternalRep.TypeChecker
+                   Futhark.FirstOrderTransform
                    Futhark.FreshNames
-                   Futhark.Tools
-                   Futhark.Internalise.TypesValues
-                   Futhark.Internalise.Monad
-                   Futhark.Internalise.Lambdas
-                   Futhark.Internalise.AccurateSizes
-                   Futhark.Internalise.Bindings
-                   Futhark.InternalRep.Pretty
-                   Futhark.InternalRep.Traversals
-                   Futhark.InternalRep.Attributes
-                   Futhark.InternalRep.Syntax
-                   Futhark.InternalRep.Renamer
-                   Futhark.InternalRep.TypeChecker
-                   Futhark.Backends.GenericCReading
-                   Futhark.Backends.BohriumCodeGen
-                   Futhark.Backends.Bohrium
-                   Futhark.Backends.SimpleRepresentation
-                   Futhark.Backends.GenericC
-                   Futhark.Backends.SequentialC
-                   Futhark.NeedNames
-                   Futhark.Untrace
-                   Futhark.Interpreter
-                   Futhark.Passes
-                   Futhark.HORepresentation.SOACNest
                    Futhark.HORepresentation.MapNest
                    Futhark.HORepresentation.SOAC
-                   Futhark.ExternalRep
+                   Futhark.HORepresentation.SOACNest
+                   Futhark.HOTrans.Composing
+                   Futhark.HOTrans.Fusion
+                   Futhark.HOTrans.HOTransDriver
+                   Futhark.HOTrans.LoopKernel
+                   Futhark.HOTrans.TryFusion
+                   Futhark.IndexInliner
+                   Futhark.Internalise
+                   Futhark.Internalise.AccurateSizes
+                   Futhark.Internalise.Bindings
+                   Futhark.Internalise.Lambdas
+                   Futhark.Internalise.Monad
+                   Futhark.Internalise.TypesValues
+                   Futhark.InternalRep
+                   Futhark.InternalRep.Attributes
+                   Futhark.InternalRep.Pretty
+                   Futhark.InternalRep.Renamer
+                   Futhark.InternalRep.Syntax
+                   Futhark.InternalRep.Traversals
+                   Futhark.InternalRep.TypeChecker
+                   Futhark.Interpreter
+                   Futhark.MonadFreshNames
+                   Futhark.NeedNames
+                   Futhark.Passes
+                   Futhark.Pipeline
+                   Futhark.SOACFlowGraph
+                   Futhark.SplitAssertions
+                   Futhark.Substitute
+                   Futhark.Tools
+                   Futhark.TypeError
+                   Futhark.Untrace
+                   Language.Futhark
+                   Language.Futhark.Attributes
+                   Language.Futhark.Core
+                   Language.Futhark.Parser
+                   Language.Futhark.Pretty
+                   Language.Futhark.Syntax
+                   Language.Futhark.Traversals
 
   Other-modules: Language.Futhark.Parser.Parser,
                  Language.Futhark.Parser.Lexer,

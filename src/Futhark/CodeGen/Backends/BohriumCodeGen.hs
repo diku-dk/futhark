@@ -19,7 +19,7 @@
 -- arrays can be translated, nothing else.  Also significantly, arrays
 -- are copied to Bohrium space before every operation, and back when
 -- it's done.  This is massively wasteful.
-module Futhark.Backends.BohriumCodeGen (compileSOACtoBohrium) where
+module Futhark.CodeGen.Backends.BohriumCodeGen (compileSOACtoBohrium) where
 
 import Control.Monad
 

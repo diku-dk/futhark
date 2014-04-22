@@ -2,7 +2,7 @@
 -- | C code for reading Futhark values from standard input.  Put here in
 -- order not to clutter the main code generation module with a huge
 -- block of C.
-module Futhark.Backends.GenericCReading
+module Futhark.CodeGen.Backends.GenericCReading
   ( readerFunctions
   ) where
 

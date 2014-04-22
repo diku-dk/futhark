@@ -3,7 +3,7 @@
 -- Interesting stuff does in "Futhark.Backends.BohriumCodeGen".
 --
 
-module Futhark.Backends.Bohrium (compileProg) where
+module Futhark.CodeGen.Backends.Bohrium (compileProg) where
 
 import Control.Monad
 
