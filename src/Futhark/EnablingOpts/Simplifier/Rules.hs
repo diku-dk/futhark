@@ -287,7 +287,8 @@ simplifyClosedFormLoop _ _ = return Nothing
 
 simplifyScalarExp :: BottomUpRule
 simplifyScalarExp (vtable, _) (Let [v] e)
-  | Just se <- optimisable =<< SE.toScalExp (`ST.lookupScalExp` vtable) e,
+  | False, -- FIXME: disabled for now, as it causes many problems.
+    Just se <- optimisable =<< SE.toScalExp (`ST.lookupScalExp` vtable) e,
     Right se' <-
       dnfToScalExp <$> AS.mkSuffConds se loc (rangesRep vtable),
     se' /= se,
