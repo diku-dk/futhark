@@ -277,20 +277,27 @@ internaliseExp (E.Transpose cs k n e loc) =
   internaliseOperation "transpose" cs e loc $ \cs' v ->
     let rank = I.arrayRank $ I.identType v
         perm = transposeIndex k n [0..rank-1]
-    in  I.Rearrange cs' perm (I.Var v) loc
+    in  return $ I.Rearrange cs' perm (I.Var v) loc
 
 internaliseExp (E.Rearrange cs perm e loc) =
   internaliseOperation "rearrange" cs e loc $ \cs' v ->
-    I.Rearrange cs' perm (I.Var v) loc
+    return $ I.Rearrange cs' perm (I.Var v) loc
 
 internaliseExp (E.Rotate cs n e loc) =
   internaliseOperation "rotate" cs e loc $ \cs' v ->
-    I.Rotate cs' n (I.Var v) loc
+    return $ I.Rotate cs' n (I.Var v) loc
 
 internaliseExp (E.Reshape cs shape e loc) = do
   shape' <- letSubExps "shape" =<< mapM internaliseExp shape
-  internaliseOperation "reshape" cs e loc $ \cs' v ->
-    I.Reshape cs' shape' (I.Var v) loc
+  internaliseOperation "reshape" cs e loc $ \cs' v -> do
+    -- The resulting shape needs to have the same number of elements
+    -- as the original shape.
+    shapeOk <- letExp "shape_ok" =<<
+               eAssert (eBinOp I.Equal (prod $ I.arrayDims $ I.identType v)
+                                       (prod shape')
+                                       (I.Basic I.Bool) loc)
+    return $ I.Reshape (shapeOk:cs') shape' (I.Var v) loc
+  where prod l = foldBinOp I.Times (intconst 1 loc) l $ I.Basic I.Int
 
 internaliseExp (E.Split cs nexp arrexp loc) = do
   let cs' = internaliseCerts cs
@@ -489,13 +496,13 @@ internaliseOperation :: String
                      -> E.Certificates
                      -> E.Exp
                      -> SrcLoc
-                     -> (I.Certificates -> I.Ident -> I.Exp)
+                     -> (I.Certificates -> I.Ident -> InternaliseM I.Exp)
                      -> InternaliseM I.Exp
 internaliseOperation s cs e loc op = do
   (c,vs) <- tupToIdentList e
   let cs' = internaliseCerts cs
   cs'' <- mergeCerts (certify c cs')
-  es <- letSubExps s $ map (op (certify c cs')) vs
+  es <- letSubExps s =<< mapM (op (certify c cs')) vs
   return $ tuplit cs'' loc es
 
 tuplit :: Maybe I.Ident -> SrcLoc -> [I.SubExp] -> I.Exp
