@@ -23,6 +23,7 @@ import Futhark.Substitute
 
 import Futhark.Internalise.Monad
 import Futhark.Internalise.AccurateSizes
+import Futhark.Internalise.Splitting
 import Futhark.Internalise.TypesValues
 import Futhark.Internalise.Bindings
 

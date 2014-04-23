@@ -46,6 +46,7 @@ import Futhark.MonadFreshNames
 import Futhark.Tools
 
 import Futhark.Internalise.Monad
+import Futhark.Internalise.Splitting
 import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.TypesValues
 import Futhark.Internalise.Bindings

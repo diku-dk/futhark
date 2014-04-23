@@ -79,6 +79,7 @@ Library
                    Futhark.Internalise.Bindings
                    Futhark.Internalise.Lambdas
                    Futhark.Internalise.Monad
+                   Futhark.Internalise.Splitting
                    Futhark.Internalise.TypesValues
                    Futhark.InternalRep
                    Futhark.InternalRep.Attributes
