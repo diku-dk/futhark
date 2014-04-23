@@ -9,11 +9,10 @@ import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.C as C
 
 import Futhark.MonadFreshNames
-import Futhark.CodeGen.Backends.SimpleRepresentation
+
 import Futhark.CodeGen.Backends.GenericC
-
+import qualified Futhark.CodeGen.Backends.CUtils as C
 import Futhark.CodeGen.ImpCode
-
 import Futhark.CodeGen.Backends.BohriumOp
 
 new :: MonadFreshNames m => String -> m String
@@ -23,7 +22,7 @@ bohriumCompiler :: OpCompiler (C.Exp, BohriumOp)
 bohriumCompiler (target, UnOpMap op input) = do
   inputName <- new "map_input"
   outputName <- new "output"
-  inp' <- compileInput (varExp inputName) [C.cexp|$exp:target.elem_0.dims|] input
+  inp' <- compileInput (C.var inputName) [C.cexp|$exp:target.elem_0.dims|] input
   stm [C.cstm|{
             typename bh_multi_array_int32_p $id:inputName;
             typename bh_multi_array_int32_p $id:outputName;
@@ -40,8 +39,8 @@ bohriumCompiler (target, BinOpMap op input1 input2) = do
   inputName1 <- new "map_input_x"
   inputName2 <- new "map_input_y"
   outputName <- new "output"
-  inp1' <- compileInput (varExp inputName1) [C.cexp|$exp:target.elem_0.dims|] input1
-  inp2' <- compileInput (varExp inputName2) [C.cexp|$exp:target.elem_0.dims|] input2
+  inp1' <- compileInput (C.var inputName1) [C.cexp|$exp:target.elem_0.dims|] input1
+  inp2' <- compileInput (C.var inputName2) [C.cexp|$exp:target.elem_0.dims|] input2
   stm [C.cstm|{
             typename bh_multi_array_int32_p $id:inputName1;
             typename bh_multi_array_int32_p $id:inputName2;
@@ -65,13 +64,13 @@ compileInput place shape (inp,t) = do
       strideStm i = [C.cexp|$exp:shape[$int:i-1] * $id:stride[$int:d-$int:i]|]
       shapeStms = concat [ [[C.cstm|$exp:shape[$int:i] = $exp:se;|],
                             [C.cstm|$id:stride[$int:d-$int:i-1] = $exp:(strideStm i);|]]
-                           | (i, se) <- zip [(0::Int)..] $ arrayShapeExp (varExp inp') t ]
+                           | (i, se) <- zip [(0::Int)..] $ typeShape t ]
   return [C.cstm|{
                typename int64_t $id:stride[$int:d];
                $stms:shapeStms
                $exp:place = bh_multi_array_int32_new_from_view
                             (bh_multi_array_int32_create_base
-                             ($id:inp'.data, $exp:(arraySizeExp (varExp inp') t)),
+                             ($id:inp'.data, $exp:(C.product $ typeShape t)),
                              $int:d, 0, $exp:shape, $id:stride);
              }|]
 

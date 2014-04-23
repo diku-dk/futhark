@@ -13,6 +13,8 @@ module Futhark.CodeGen.Backends.GenericC
   , stm
   , stms
   , decl
+  -- * General utilities
+  , typeShape
   ) where
 
 import Control.Applicative
@@ -33,6 +35,7 @@ import Futhark.CodeGen.ImpCode
 import Futhark.MonadFreshNames
 import Futhark.CodeGen.Backends.SimpleRepresentation
 import Futhark.CodeGen.Backends.GenericCReading
+import qualified Futhark.CodeGen.Backends.CUtils as C
 
 data CompilerState = CompilerState {
     compTypeStructs :: [([Type], (C.Type, C.Definition))]
@@ -119,6 +122,14 @@ lookupVar k = do t <- gets $ HM.lookup k . compVtable
                    Nothing -> fail $ "Uknown variable " ++ textual k ++ " in code generator."
                    Just t' -> return t'
 
+lookupShape :: VName -> CompilerM op [C.Exp]
+lookupShape = liftM typeShape . lookupVar
+
+typeShape :: Type -> [C.Exp]
+typeShape (Type _ shape) = map asExp shape
+  where asExp (ConstSize x) = [C.cexp|$int:x|]
+        asExp (VarSize v)   = [C.cexp|$id:(textual v)|]
+
 -- | 'new s' returns a fresh variable name, with 's' prepended to it.
 new :: String -> CompilerM op String
 new = liftM textual . newVName
@@ -184,8 +195,9 @@ printStm place [t@(Type bt (_:rest))] = do
   i <- new "print_i"
   v <- new "print_elem"
   et' <- typeToCType [Type bt rest]
-  pstm <- printStm (varExp v) [Type bt rest]
-  let indexi = indexArrayElemStms (varExp v) place t [varExp i]
+  pstm <- printStm (C.var v) [Type bt rest]
+  let placeshape = [ [C.cexp|$exp:place.shape[$int:j]|] | j <- [0..typeRank t-1] ]
+      indexi = indexArrayElemStms (C.var v) place placeshape [C.var i]
   return [C.cstm|{
                int $id:i;
                $ty:et' $id:v;
@@ -251,14 +263,14 @@ mainCall :: Name -> Function op -> CompilerM op C.Stm
 mainCall fname (Function outputs inputs _) = do
   crettype <- typeToCType $ map paramType outputs
   ret <- new "main_ret"
-  printRes <- printStm (varExp ret) $ map paramType outputs
+  printRes <- printStm (C.var ret) $ map paramType outputs
   let mkParam (args, decls, rstms, []) paramtype = do
         name <- new "main_arg"
         cparamtype <- typeToCType [paramtype]
-        let rstm = readStm (varExp name) paramtype
+        let rstm = readStm (C.var name) paramtype
             argshape = [ [C.cexp|$id:name.shape[$int:i]|]
                          | i <- [0..typeRank paramtype-1] ]
-        return (args ++ [varExp name],
+        return (args ++ [C.var name],
                 decls ++ [[C.cdecl|$ty:cparamtype $id:name;|]],
                 rstms ++ [rstm],
                 argshape)
@@ -418,34 +430,34 @@ compileExp (Read src []) =
 compileExp (Read src idxs) = do
   srctype@(Type srcbt srcshape) <- lookupVar src
   idxs' <- mapM compileExp idxs
-  let src' = varExp $ textual src
+  let src' = C.var $ textual src
   case drop (length idxs') srcshape of
-    [] -> return $ indexArrayExp src' (length srcshape) idxs'
+    [] -> return $ indexArrayExp src' (typeShape srctype) idxs'
     resshape -> do
       name <- new "dest"
       let restype = Type srcbt resshape
-          dest    = varExp name
+          dest    = C.var name
       crestype <- typeToCType [restype]
       decl [C.cdecl|$ty:crestype $id:name;|]
-      stms $ indexArrayElemStms dest src' srctype idxs'
+      stms $ indexArrayElemStms dest src' (typeShape srctype) idxs'
       return dest
 
 compileExp (Copy src) = do
   dest <- new "copy_dst"
   t <- lookupVar src
   ct <- typeToCType [t]
-  let src' = varExp $ textual src
+  let src' = C.var $ textual src
       copy = arraySliceCopyStm [C.cexp|$id:dest.data|]
-             [C.cexp|$exp:src'.data|] [C.cexp|$exp:src'.shape|]
-             t 0
+             [C.cexp|$exp:src'.data|] (typeShape t)
+             0
       alloc = [C.cstm|$id:dest.data =
-                 malloc($exp:(arraySizeExp src' t) * sizeof(*$id:dest.data));
+                 calloc($exp:(C.product $ typeShape t), sizeof(*$id:dest.data));
                |]
   decl [C.cdecl|$ty:ct $id:dest;|]
   stm [C.cstm|$id:dest = $exp:src';|]
   stm alloc
   stm copy
-  return $ varExp dest
+  return $ C.var dest
 
 compileExp (UnOp Negate x) = do
   x' <- compileExp x
@@ -509,7 +521,7 @@ compileCode (Allocate name) = do
   ct <- typeToCType [Type bt []]
   shape' <- mapM (compileExp . dimSizeToExp) shape
   unless (null shape) $
-    stm $ allocArray (varExp $ textual name) shape' ct
+    stm $ allocArray (C.var $ textual name) shape' ct
 
 compileCode (For i bound body) = do
   let i' = textual i
@@ -529,20 +541,18 @@ compileCode (If cond tbranch fbranch) = do
 compileCode (Write dest idxs src) = do
   src' <- compileExp src
   idxs' <- mapM compileExp idxs
-  destt@(Type bt shape) <- lookupVar dest
-  let dest' = varExp $ textual dest
-      rank = typeRank destt
-      elty = Type bt $ drop (length idxs') shape
+  toshape <- lookupShape dest
+  let dest' = C.var $ textual dest
+      rank = length toshape
   case idxs' of
     [] -> stm [C.cstm|$exp:dest' = $exp:src';|]
     _ | rank == length idxs' ->
-      let to = indexArrayExp dest' rank idxs'
+      let to = indexArrayExp dest' toshape idxs'
       in stm [C.cstm|$exp:to = $exp:src';|]
       | otherwise            ->
-      let to = [C.cexp|&$exp:(indexArrayExp dest' (typeRank destt) idxs')|]
+      let to = [C.cexp|&$exp:(indexArrayExp dest' toshape idxs')|]
           from = [C.cexp|$exp:src'.data|]
-          fromshape = [C.cexp|$exp:src'.shape|]
-      in stm $ arraySliceCopyStm to from fromshape elty 0
+      in stm $ arraySliceCopyStm to from toshape (length idxs')
 
 compileCode (Call results fname args) = do
   args' <- mapM compileExp args
@@ -556,7 +566,7 @@ compileCode (Call results fname args) = do
       decl [C.cdecl|$ty:crestype $id:ret;|]
       stm [C.cstm|$id:ret = $id:(funName fname)($args:args');|]
       forM_ (zip [0..] results) $ \(i,result) ->
-        stm [C.cstm|$id:(textual result) = $exp:(tupleFieldExp (varExp ret) i);|]
+        stm [C.cstm|$id:(textual result) = $exp:(tupleFieldExp (C.var ret) i);|]
 
 compileFunBody :: [Param] -> Code op -> CompilerM op ()
 compileFunBody outputs code = do
@@ -566,7 +576,7 @@ compileFunBody outputs code = do
   decl [C.cdecl|$ty:bodytype $id:retval;|]
   let name = textual . paramName
       setRetVal' i output =
-        stm [C.cstm|$exp:(tupleFieldExp (varExp retval) i) = $id:(name output);|]
+        stm [C.cstm|$exp:(tupleFieldExp (C.var retval) i) = $id:(name output);|]
   case outputs of
     [output] -> stm [C.cstm|$id:retval = $id:(name output);|]
     _        -> zipWithM_ setRetVal' [0..] outputs

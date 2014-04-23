@@ -34,6 +34,7 @@ Library
                    Futhark.CodeGen.Backends.Bohrium
                    Futhark.CodeGen.Backends.BohriumOp
                    Futhark.CodeGen.Backends.BohriumCodeGen
+                   Futhark.CodeGen.Backends.CUtils
                    Futhark.CodeGen.Backends.GenericC
                    Futhark.CodeGen.Backends.GenericCReading
                    Futhark.CodeGen.Backends.SequentialC

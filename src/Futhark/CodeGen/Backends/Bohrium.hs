@@ -27,6 +27,7 @@ import Futhark.InternalRep
 import qualified Futhark.CodeGen.ImpCode as Imp
 import qualified Futhark.CodeGen.ImpGen as ImpGen
 import qualified Futhark.CodeGen.Backends.GenericC as GenericC
+import qualified Futhark.CodeGen.Backends.CUtils as C
 import Futhark.CodeGen.Backends.SimpleRepresentation
 import Futhark.CodeGen.Backends.BohriumCodeGen
 import Futhark.CodeGen.Backends.BohriumOp
@@ -36,7 +37,7 @@ compileProg :: Prog -> String
 compileProg = addHeader . GenericC.compileProg bohriumCompiler. ImpGen.compileProg expCompiler
   where expCompiler [target] e
           | Just op <- compileSOACtoBohrium e = do
-          tell $ Imp.Op (varExp $ textual $ identName target, op)
+          tell $ Imp.Op (C.var $ textual $ identName target, op)
           return ImpGen.Done
         expCompiler targets e =
           firstOrderSOACS targets e
