@@ -30,7 +30,6 @@ import Data.IORef
 import Data.Loc
 import Data.Maybe
 import qualified Data.HashMap.Strict as HM
-import qualified Data.HashSet as HS
 import System.IO.Unsafe
 
 -- import Language.Futhark.Parser

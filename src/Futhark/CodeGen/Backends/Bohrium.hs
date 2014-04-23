@@ -28,7 +28,6 @@ import qualified Futhark.CodeGen.ImpCode as Imp
 import qualified Futhark.CodeGen.ImpGen as ImpGen
 import qualified Futhark.CodeGen.Backends.GenericC as GenericC
 import qualified Futhark.CodeGen.Backends.CUtils as C
-import Futhark.CodeGen.Backends.SimpleRepresentation
 import Futhark.CodeGen.Backends.BohriumCodeGen
 import Futhark.CodeGen.Backends.BohriumOp
 import Futhark.CodeGen.FirstOrderSOACS
