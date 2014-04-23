@@ -332,10 +332,16 @@ internaliseExp (E.Concat cs x y loc) = do
              (arraysSize 0 $ map I.identType ys)
              (I.Basic Int) loc
   let certs = catMaybes [xc,yc]++cs'
-      conc xarr yarr =
-        I.Concat certs (I.Var xarr) (I.Var yarr) ressize loc
+      conc xarr yarr = do
+        -- The inner sizes must match.
+        let matches n m =
+              letExp "match" =<<
+              eAssert (pure $ I.BinOp I.Equal n m (I.Basic I.Bool) loc)
+        matchcs <- zipWithM matches (drop 1 $ I.arrayDims $ I.identType xarr)
+                                    (drop 1 $ I.arrayDims $ I.identType yarr)
+        return $ I.Concat (matchcs++certs) (I.Var xarr) (I.Var yarr) ressize loc
   c' <- mergeCerts certs
-  concs <- letSubExps "concat" $ zipWith conc xs ys
+  concs <- letSubExps "concat" =<< zipWithM conc xs ys
   return $ tuplit c' loc concs
 
 internaliseExp (E.Map lam arr loc) = do
