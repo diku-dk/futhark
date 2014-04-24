@@ -12,6 +12,9 @@ maxtesttime=$((60 * 20)) # The length of time the test suite is
                          # permitted to run for (in seconds).
 
 mail=athas@sigkill.dk # Where to send error reports.
+frommail=concieggs@eggsml.dk # The sender of said reports.
+
+docdir=/var/www/futhark.sigkill.dk
 
 if ! [ $# = 1 ]; then
     echo "Usage: $0 <futharkdir>"
@@ -23,6 +26,11 @@ lockfile="$futharkdir/ci.lock"
 outfile=$(mktemp) || exit 1 # Hm, silent failure...
 
 ulimit -m $memlimit
+
+isBot () {
+    [ $(whoami) = concieggs ]
+}
+
 
 cmd() {
     echo "% $@"
@@ -61,13 +69,13 @@ ci() {
 }
 
 mail() {
-    if [ $(whoami) != concieggs ] ; then
+    if isBot; then
+        mailx -s "Futhark integration error" "$mail" -- -r $frommail
+    else
         echo "Build failed, but since I am not concieggs, I will not send any email."
         echo "The contents of the email would have been as follows."
         echo
         cat
-    else
-        mailx -s "Futhark integration error" "$mail" -- -r concieggs@eggsml.dk
     fi
 }
 
@@ -80,6 +88,16 @@ if ! ci; then
         echo
         cat $outfile
     ) | mail
+else
+    if isBot; then
+        (
+            cd "$futharkdir" && \
+                cabal haddock --html --hyperlink-source && \
+                cp -r dist/doc/html/futhark/* $docdir
+        )
+    else
+        echo "Not concieggs, so not building documentation."
+    fi
 fi
 
 rm $outfile
