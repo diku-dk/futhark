@@ -1,3 +1,6 @@
+// Test various abuse of tuples - specifically, the flattening done by
+// internalisation.
+
 fun {int,int} f({int,int} x) = x
 
 fun {int,int} main() =
