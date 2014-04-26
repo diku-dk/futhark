@@ -99,8 +99,6 @@ commandLineOptions =
     "f" ["first-order-transform"]
   , passoption "Perform simple enabling optimisations." eotransform
                  "e" ["enabling-optimisations"]
-  , passoption "Inline indexing into maps." iitransform
-    []  ["inline-map-indexes"]
   , passoption "Perform higher-order optimisation, i.e., fusion." hotransform
     "h" ["higher-order-optimizations"]
   , passoption "Aggressively inline and remove dead functions." inlinetransform
@@ -160,9 +158,11 @@ interpret prog =
 
 standardPipeline :: [Pass]
 standardPipeline =
-  [ uttransform, inlinetransform
-  , eotransform, iitransform
-  , hotransform, eotransform
+  [ uttransform
+  , inlinetransform
+  , eotransform
+  , hotransform
+  , eotransform
   ]
 
 -- | Entry point.  Non-interactive, except when reading interpreter

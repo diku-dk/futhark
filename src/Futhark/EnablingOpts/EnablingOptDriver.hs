@@ -12,7 +12,6 @@ module Futhark.EnablingOpts.EnablingOptDriver
 
 import Futhark.InternalRep
 import Futhark.MonadFreshNames
-import qualified Futhark.IndexInliner as II
 
 import Futhark.EnablingOpts.InliningDeadFun
 import Futhark.EnablingOpts.Simplifier
@@ -40,6 +39,4 @@ normCopyDeadOpts prog = do
 
 normCopyOneLambda :: MonadFreshNames m => Prog -> Lambda ->
                      m Lambda
-normCopyOneLambda prog lam = do
-  lam' <- simplifyOneLambda prog lam
-  modifyNameSource $ flip II.transformLambda lam'
+normCopyOneLambda = simplifyOneLambda

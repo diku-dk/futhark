@@ -7,7 +7,6 @@ module Futhark.Passes
   , fotransform
   , uttransform
   , eotransform
-  , iitransform
   , hotransform
   , inlinetransform
   , splitasserttransform
@@ -17,7 +16,6 @@ where
 import Futhark.EnablingOpts.EnablingOptDriver
 import Futhark.HOTrans.HOTransDriver
 import qualified Futhark.FirstOrderTransform as FOT
-import qualified Futhark.IndexInliner as II
 import Futhark.Untrace
 import Futhark.SplitAssertions
 import Futhark.Pipeline
@@ -35,11 +33,6 @@ uttransform = Pass { passName = "debugging annotation removal"
 eotransform :: Pass
 eotransform = Pass { passName = "enabling optimations"
                    , passOp = liftPass enablingOpts
-                   }
-
-iitransform :: Pass
-iitransform = Pass { passName = "inlining map indexing"
-                   , passOp = return . II.transformProg
                    }
 
 hotransform :: Pass

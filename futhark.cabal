@@ -73,7 +73,6 @@ Library
                    Futhark.HOTrans.HOTransDriver
                    Futhark.HOTrans.LoopKernel
                    Futhark.HOTrans.TryFusion
-                   Futhark.IndexInliner
                    Futhark.Internalise
                    Futhark.Internalise.AccurateSizes
                    Futhark.Internalise.Bindings
