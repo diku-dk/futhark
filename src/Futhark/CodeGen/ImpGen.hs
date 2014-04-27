@@ -180,21 +180,21 @@ defCompileExp [target] (Copy e _)
   | arrayRank (subExpType e) == 0 =
   writeExp target $ compileSubExp e
   | otherwise =
-  writeExp target =<< Imp.Copy <$> expAsName (compileSubExp e)
+  writeExp target =<< Imp.Copy <$> expAsName (subExpType e) (compileSubExp e)
 
 defCompileExp [target] (Reshape _ shape src _) = do
   allocate target
-  src' <- expAsName $ compileSubExp src
+  src' <- expAsName srct $ compileSubExp src
   let shape' = map compileSubExp shape
-      srcshape' = map compileSubExp $ arrayDims $ subExpType src
+      srcshape' = map compileSubExp $ arrayDims srct
   n <- newVName "n"
   declareVar $ Ident n (Basic Int) noLoc
   writeExp n $ foldl (Imp.BinOp Imp.Times) one shape'
   i <- newVName "i"
   let mult    = Imp.BinOp Imp.Times
       impProd = foldl mult one
-  targetsizes <- mapM (expAsName . impProd) $ drop 1 $ tails shape'
-  srcsizes <- mapM (expAsName . impProd) $ drop 1 $ tails srcshape'
+  targetsizes <- mapM (expAsName (Basic Int) . impProd) $ drop 1 $ tails shape'
+  srcsizes <- mapM (expAsName (Basic Int) . impProd) $ drop 1 $ tails srcshape'
   -- Some of these index calculations may duplicate computation a
   -- little bit.
   let idxs asizes ashape =
@@ -204,24 +204,27 @@ defCompileExp [target] (Reshape _ shape src _) = do
       srcidxs    = idxs srcsizes srcshape'
   tell $ Imp.For i (var n) $ Imp.Write target targetidxs $ Imp.Read src' srcidxs
   where one = Imp.Constant $ Imp.BasicVal $ IntVal 1
+        srct = subExpType src
 
 defCompileExp [target] (Concat _ x y _ _) = do
   allocate target
-  x' <- expAsName $ compileSubExp x
-  y' <- expAsName $ compileSubExp y
-  let xsize = compileSubExp $ arraySize 0 $ subExpType x
-      ysize = compileSubExp $ arraySize 0 $ subExpType y
+  x' <- expAsName xt $ compileSubExp x
+  y' <- expAsName yt $ compileSubExp y
+  let xsize = compileSubExp $ arraySize 0 xt
+      ysize = compileSubExp $ arraySize 0 yt
   i <- newVName "i"
   tell $ Imp.For i xsize $ Imp.Write target [var i] $
          Imp.Read x' [var i]
   j <- newVName "j"
   tell $ Imp.For j ysize $ Imp.Write target [Imp.BinOp Imp.Plus xsize $ var j] $
          Imp.Read y' [var j]
+  where xt = subExpType x
+        yt = subExpType x
 
 defCompileExp [target1, target2] (Split _ n x restsize _) = do
   allocate target1
   allocate target2
-  x' <- expAsName $ compileSubExp x
+  x' <- expAsName xt $ compileSubExp x
   let n' = compileSubExp n
       restsize' = compileSubExp restsize
   i <- newVName "i"
@@ -230,27 +233,30 @@ defCompileExp [target1, target2] (Split _ n x restsize _) = do
   j <- newVName "i"
   tell $ Imp.For j restsize' $ Imp.Write target2 [var j] $
          Imp.Read x' [Imp.BinOp Imp.Plus n' $ var j]
+  where xt = subExpType x
 
 defCompileExp _ (Split {}) = fail "ImpGen.compileExp: Incorrect number of targets to split"
 
 defCompileExp [target] (Rearrange _ perm e _) = do
   allocate target
-  e' <- expAsName $ compileSubExp e
+  e' <- expAsName et $ compileSubExp e
   is <- replicateM (length perm) $ newVName "i"
-  let sizes = map compileSubExp $ arrayDims $ subExpType e
+  let sizes = map compileSubExp $ arrayDims et
   tell $ foldl (.) id (zipWith Imp.For is sizes) $
          Imp.Write target (permuteShape perm $ map var is) $
          Imp.Read e' $ map var is
+  where et = subExpType e
 
 defCompileExp [target] (Rotate _ n e _) = do
   allocate target
-  e' <- expAsName $ compileSubExp e
-  let size = compileSubExp $ arraySize 0 $ subExpType e
+  e' <- expAsName et $ compileSubExp e
+  let size = compileSubExp $ arraySize 0 et
       n'   = Imp.Constant $ Imp.BasicVal $ IntVal n
   i <- newVName "i"
   tell $ Imp.For i size $
          Imp.Write target [Imp.BinOp Mod (Imp.BinOp Plus n' $ var i) size] $
          Imp.Read e' [var i]
+  where et = subExpType e
 
 defCompileExp [_] (Map {}) = soacError
 
@@ -309,14 +315,14 @@ expAsDimSize (Imp.Read v []) =
 expAsDimSize (Imp.Constant (Imp.BasicVal (IntVal x))) =
   return $ Imp.ConstSize x
 expAsDimSize e = do
-  size <- expAsName e
+  size <- expAsName (Basic Int) e
   return $ Imp.VarSize size
 
-expAsName :: Imp.Exp -> ImpM op VName
-expAsName (Imp.Read v []) =
+expAsName :: Type -> Imp.Exp -> ImpM op VName
+expAsName _ (Imp.Read v []) =
   return v
-expAsName e = do
-  size <- newIdent "size" (Basic Int) noLoc
+expAsName t e = do
+  size <- newIdent "size" t noLoc
   declareVar size
   writeExp (identName size) e
   return $ identName size
