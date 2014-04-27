@@ -476,22 +476,34 @@ simplifyBinOp _ (BinOp Xor e1 e2 _ pos)
         binOpRes pos $ IntVal $ v1 `xor` v2
       _ -> Nothing
 
-simplifyBinOp _ (BinOp LogAnd e1 e2 _ pos)
+simplifyBinOp look (BinOp LogAnd e1 e2 _ pos)
   | isCt0 e1 = Just $ subExp e1
   | isCt0 e2 = Just $ subExp e2
   | isCt1 e1 = Just $ subExp e2
   | isCt1 e2 = Just $ subExp e1
+  | Var v <- e1,
+    Just (Not e1' _) <- look $ identName v,
+    e1' == e2 = binOpRes pos $ LogVal False
+  | Var v <- e2,
+    Just (Not e2' _) <- look $ identName v,
+    e2' == e1 = binOpRes pos $ LogVal False
   | otherwise =
     case (e1, e2) of
       (Constant (BasicVal (LogVal  v1)) _, Constant (BasicVal (LogVal v2)) _) ->
         binOpRes pos $ LogVal $ v1 && v2
       _ -> Nothing
 
-simplifyBinOp _ (BinOp LogOr e1 e2 _ pos)
+simplifyBinOp look (BinOp LogOr e1 e2 _ pos)
   | isCt0 e1 = Just $ subExp e2
   | isCt0 e2 = Just $ subExp e1
   | isCt1 e1 = Just $ subExp e1
   | isCt1 e2 = Just $ subExp e2
+  | Var v <- e1,
+    Just (Not e1' _) <- look $ identName v,
+    e1' == e2 = binOpRes pos $ LogVal True
+  | Var v <- e2,
+    Just (Not e2' _) <- look $ identName v,
+    e2' == e1 = binOpRes pos $ LogVal True
   | otherwise =
     case (e1, e2) of
       (Constant (BasicVal (LogVal v1)) _, Constant (BasicVal (LogVal v2)) _) ->
