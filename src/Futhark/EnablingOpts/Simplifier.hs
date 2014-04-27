@@ -431,8 +431,16 @@ simplifyExp (Apply fname args tp loc) = do
   tp' <- mapM simplifyType tp
   prog <- asks envProgram
   vtable <- asks envVtable
-  case simplifyApply prog vtable fname args loc of
-    Just e  -> return e
+  case simplifyApply prog vtable fname args of
+    -- Array values are non-unique, so we may need to copy them.
+    Just vs -> do es <- forM (zip vs tp') $ \(v,t) ->
+                    case uniqueness t of
+                      Unique    -> do
+                        fun_copy <- newIdent "fun_copy" t loc
+                        needThis $ LetNeed [fun_copy] (Copy (Constant v loc) loc) []
+                        return $ Var fun_copy
+                      Nonunique -> return $ Constant v loc
+                  return $ SubExps es loc
     Nothing -> return $ Apply fname (zip args' $ map snd args) tp' loc
 
 simplifyExp e = simplifyExpBase e

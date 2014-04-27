@@ -8,18 +8,14 @@ module Futhark.EnablingOpts.Simplifier.Apply
   )
   where
 
-import Data.Loc
-
 import Futhark.InternalRep
 import qualified Futhark.Interpreter as Interp
 import qualified Futhark.EnablingOpts.SymbolTable as ST
 
-simplifyApply :: Prog -> ST.SymbolTable -> Name -> [(SubExp,Diet)] -> SrcLoc -> Maybe Exp
-simplifyApply program vtable fname args loc = do
+simplifyApply :: Prog -> ST.SymbolTable -> Name -> [(SubExp,Diet)] -> Maybe [Value]
+simplifyApply program vtable fname args = do
   vals <- allArgsAreValues $ map fst args
-  case Interp.runFunNoTrace fname vals program of
-    Right vs  -> Just $ SubExps (map (`Constant` loc) vs) loc
-    Left _    -> Nothing
+  either (const Nothing) Just $ Interp.runFunNoTrace fname vals program
   where allArgsAreValues = mapM argIsValue
 
         argIsValue (Constant val _) = Just val
