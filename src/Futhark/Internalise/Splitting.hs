@@ -1,53 +1,82 @@
 module Futhark.Internalise.Splitting
   ( splitBody
   , shapeFunctionName
-  , predFunctionName
+  , predicateFunctionName
+  , valueFunctionName
   , splitFunction
   , splitLambda
   , splitType
   , splitIdents
+  , splitFuncall
   )
   where
 
-import Control.Applicative
 import Control.Monad
 
 import Data.Loc
 import Data.Monoid
 
 import Futhark.Internalise.Monad
+import Futhark.Internalise.AccurateSizes
+import qualified Futhark.Internalise.GenPredicate as GenPredicate
 import Futhark.InternalRep
-import Futhark.MonadFreshNames
 import Futhark.Tools
 
 shapeFunctionName :: Name -> Name
 shapeFunctionName fname = fname <> nameFromString "_shape"
 
-predFunctionName :: Name -> Name
-predFunctionName fname = fname <> nameFromString "_shape"
+predicateFunctionName :: Name -> Name
+predicateFunctionName fname = fname <> nameFromString "_pred"
 
-splitFunction :: FunDec -> InternaliseM (FunDec, FunDec)
-splitFunction (fname,rettype,params,body,loc) = do
-  (params', copies) <-
-    liftM unzip $ forM params $ \param ->
-      if unique $ identType param then do
-        param' <- nonuniqueParam <$> newIdent' (++"_nonunique") param
-        return (param',
-                [([fromParam param],
-                  Copy (Var $ fromParam param') $ srclocOf param')])
-      else
-        return (param, [])
+valueFunctionName :: Name -> Name
+valueFunctionName fname = fname <> nameFromString "_val"
+
+sliceNames :: Name -> (Name, Name, Name)
+sliceNames fname = (predicateFunctionName fname,
+                    shapeFunctionName fname,
+                    valueFunctionName fname)
+
+-- | Returns f, f_pred, f_shape, f_value.
+splitFunction :: FunDec -> InternaliseM (FunDec, FunDec, FunDec, FunDec)
+splitFunction fundec@(fname,rettype,origparams,_,loc) = do
+  (f_pred, (_,_,params,body,_)) <-
+    GenPredicate.splitFunction predFname fname fundec
+  let (shapeBody,valueBody) = splitBody body
+  (params', copies) <- nonuniqueParams params
   shapeBody' <- insertBindingsM $ do
-                  mapM_ (uncurry letBind) $ concat copies
+                  mapM_ addBinding copies
                   return shapeBody
-  return ((shapeFname, map toDecl shapeRettype, params', shapeBody', loc),
-          (fname,      valueRettype,            params,  valueBody,  loc))
-  where (shapeBody,valueBody) = splitBody body
-        (shapeRettype, valueRettype) = splitType rettype
-        shapeFname = shapeFunctionName fname
+  fBody <- makeFullBody
+  let f       = (fname, valueRettype, origparams, fBody, loc)
+      f_shape = (shapeFname, map toDecl shapeRettype, params', shapeBody', loc)
+      f_value = (valueFname, valueRettype, params, valueBody, loc)
+  return (f, f_pred, f_shape, f_value)
+  where (shapeRettype, valueRettype) = splitType rettype
+        (predFname,shapeFname,valueFname) = sliceNames fname
 
-        nonuniqueParam param =
-          param { identType = identType param `setUniqueness` Nonunique }
+        makeFullBody = runBinder $ do
+          let args = [ (Var $ fromParam arg, Observe) | arg <- origparams ]
+          eBody $ splitFuncall fname args (map (`setAliases` mempty) valueRettype) loc
+
+splitFuncall :: MonadBinder m =>
+                Name -> [(SubExp, Diet)] -> [TypeBase Names Rank] -> SrcLoc
+             -> m Exp
+splitFuncall fname args rettype loc = do
+  ok <- letSubExp "pred" $ Apply predFname args [Basic Bool] loc
+  cert <- letSubExp "cert" $ Assert ok loc
+  result_shape <- resultShape cert
+  let valueRettype' = addTypeShapes valueRettype result_shape
+  return $ Apply valueFname ((cert, Observe):args) valueRettype' loc
+  where (shapeRettype, valueRettype) = splitType $ typeSizes rettype
+        (predFname,shapeFname,valueFname) = sliceNames fname
+
+        resultShape cert
+          | []      <- shapeRettype = return []
+          | otherwise               =
+            liftM (map Var) $
+            letTupExp "fun_shapes" $
+            Apply shapeFname ((cert,Observe) : [ (arg, Observe) | (arg, _) <- args])
+            shapeRettype loc
 
 splitLambda :: ([Param], Body, [DeclType])
             -> (([Param], Body, [DeclType]),

@@ -79,6 +79,7 @@ Library
                    Futhark.Internalise.Lambdas
                    Futhark.Internalise.Monad
                    Futhark.Internalise.Splitting
+                   Futhark.Internalise.GenPredicate
                    Futhark.Internalise.TypesValues
                    Futhark.InternalRep
                    Futhark.InternalRep.Attributes
@@ -93,7 +94,6 @@ Library
                    Futhark.Passes
                    Futhark.Pipeline
                    Futhark.SOACFlowGraph
-                   Futhark.SplitAssertions
                    Futhark.Substitute
                    Futhark.Tools
                    Futhark.TypeError

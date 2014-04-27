@@ -24,6 +24,7 @@ module Futhark.Tools
   , makeLambda
 
   , copyConsumed
+  , nonuniqueParams
 
   , module Futhark.Binder
   )
@@ -205,3 +206,18 @@ copyConsumed e
           where loc = srclocOf v
 
         freeUniqueInBody = HS.filter (unique . identType) . freeInBody
+
+nonuniqueParams :: MonadFreshNames m =>
+                   [Param] -> m ([Param], [Binding])
+nonuniqueParams params = do
+  (params', bnds) <- liftM unzip $ forM params $ \param ->
+    if unique $ identType param then do
+      param' <- nonuniqueParam <$> newIdent' (++"_nonunique") param
+      return (param',
+              [Let [fromParam param] $
+               Copy (Var $ fromParam param') $ srclocOf param'])
+    else
+      return (param, [])
+  return (params', concat bnds)
+  where nonuniqueParam param =
+          param { identType = identType param `setUniqueness` Nonunique }

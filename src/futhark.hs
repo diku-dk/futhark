@@ -103,7 +103,6 @@ commandLineOptions =
     "h" ["higher-order-optimizations"]
   , passoption "Aggressively inline and remove dead functions." inlinetransform
     [] ["inline-functions"]
-  , passoption "Split certificates from main computation" splitasserttransform [] ["split-assertions"]
   , Option "s" ["standard"]
     (NoArg $ Right $ \opts -> opts { futharkpipeline = standardPipeline ++ futharkpipeline opts })
     "Use the recommended optimised pipeline."
@@ -159,6 +158,7 @@ interpret prog =
 standardPipeline :: [Pass]
 standardPipeline =
   [ uttransform
+  , eotransform
   , inlinetransform
   , eotransform
   , hotransform

@@ -62,10 +62,8 @@ internaliseProg doBoundsCheck prog =
   I.renameProg $
   I.Prog $ runInternaliseM doBoundsCheck prog $ liftM concat $
            mapM (split <=< internaliseFun) $ E.progFunctions prog
-  where split fun = do (sfun@(_,srettype,_,_,_), vfun) <- splitFunction fun
-                       if null srettype
-                       then return [vfun]
-                       else return [sfun,vfun]
+  where split fun = do (cfun, pfun, sfun, vfun) <- splitFunction fun
+                       return [cfun, pfun, sfun, vfun]
 
 internaliseFun :: E.FunDec -> InternaliseM I.FunDec
 internaliseFun (fname,rettype,params,body,loc) =
@@ -164,30 +162,24 @@ internaliseExp (E.Apply fname args _ loc)
   return $ I.Apply fname args'' (map (subExpType . fst) args'')  loc
   where tag (_,vs) = [ (I.Var v, I.Observe) | v <- vs ]
 
+internaliseExp (E.Apply fname args _ loc)
+  | Just (rettype, _) <- HM.lookup fname builtInFunctions = do
+  args' <- tupsToIdentList $ map fst args
+  let args'' = concatMap tag args'
+  return $ I.Apply fname args'' [I.Basic rettype]  loc
+  where tag (_,vs) = [ (I.Var v, I.Observe) | v <- vs ]
+
 internaliseExp (E.Apply fname args rettype loc) = do
   args' <- tupsToIdentList $ map fst args
   args'' <- concat <$> mapM flatten args'
-  result_shape <- resultShape args''
-  let valueRettype' = addTypeShapes valueRettype result_shape
-  return $ I.Apply fname args'' valueRettype' loc
-  where (shapeRettype, valueRettype) = splitType $ typeSizes $ internaliseType rettype
-        shapeFname = shapeFunctionName fname
-
-        flatten (c,vs) = do
+  splitFuncall fname args'' (internaliseType rettype) loc
+  where flatten (c,vs) = do
           vs' <- liftM concat $ forM vs $ \v -> do
                    let shape = subExpShape $ I.Var v
                    -- Diet wrong, but will be fixed by type-checker.
                    return [ (arg, I.Observe) | arg <- I.Var v : shape ]
           return $ (case c of Just c' -> [(I.Var c', I.Observe)]
                               Nothing -> []) ++ vs'
-
-        resultShape args''
-          | []      <- shapeRettype = return []
-          | otherwise               =
-            liftM (map I.Var) $
-            letTupExp "fun_shape" $
-            I.Apply shapeFname [ (arg, I.Observe) | (arg, _) <- args'']
-            shapeRettype loc
 
 internaliseExp (E.LetPat pat e body loc) = do
   (c,ks) <- tupToIdentList e
@@ -556,7 +548,7 @@ boundsCheck v i e = do
   let size  = arraySize i $ I.identType v
       check = eBinOp LogAnd (pure lowerBound) (pure upperBound) bool loc
       lowerBound = I.BinOp Leq (I.intconst 0 loc)
-                               size bool loc
+                               e bool loc
       upperBound = I.BinOp Less e size bool loc
   letExp "bounds_check" =<< eAssert check
   where bool = I.Basic Bool

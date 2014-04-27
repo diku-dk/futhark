@@ -9,7 +9,6 @@ module Futhark.Passes
   , eotransform
   , hotransform
   , inlinetransform
-  , splitasserttransform
   )
 where
 
@@ -17,7 +16,6 @@ import Futhark.EnablingOpts.EnablingOptDriver
 import Futhark.HOTrans.HOTransDriver
 import qualified Futhark.FirstOrderTransform as FOT
 import Futhark.Untrace
-import Futhark.SplitAssertions
 import Futhark.Pipeline
 
 fotransform :: Pass
@@ -44,8 +42,3 @@ inlinetransform :: Pass
 inlinetransform = Pass { passName = "inline functions"
                       , passOp = liftPass aggInlineDriver
                       }
-
-splitasserttransform :: Pass
-splitasserttransform = Pass { passName = "split certificates"
-                            , passOp = return . splitAssertions
-                            }

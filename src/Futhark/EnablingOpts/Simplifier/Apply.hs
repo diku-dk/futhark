@@ -18,7 +18,6 @@ simplifyApply :: Prog -> ST.SymbolTable -> Name -> [(SubExp,Diet)] -> SrcLoc -> 
 simplifyApply program vtable fname args loc = do
   vals <- allArgsAreValues $ map fst args
   case Interp.runFunNoTrace fname vals program of
-    Right [v] -> Just $ subExp $ Constant v loc
     Right vs  -> Just $ SubExps (map (`Constant` loc) vs) loc
     Left _    -> Nothing
   where allArgsAreValues = mapM argIsValue
