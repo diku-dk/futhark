@@ -17,8 +17,8 @@ module Futhark.Dev
   , value
   , lambda
   , tupleLambda
-  , prog
 -}
+  , prog
   , fromLeft
   , fromRight
   , fromFile
@@ -32,13 +32,14 @@ import Data.Maybe
 import qualified Data.HashMap.Strict as HM
 import System.IO.Unsafe
 
--- import Language.Futhark.Parser
+import Language.Futhark.Parser
 
 import Futhark.MonadFreshNames
 import Futhark.InternalRep
+import Futhark.Internalise
 -- import Futhark.Futhark
--- import Futhark.Renamer
--- import Futhark.TypeChecker
+import qualified Futhark.ExternalRep.Renamer as E
+import qualified Futhark.ExternalRep.TypeChecker as E
 
 -- | Return a tagged name based on a string.
 name :: String -> VName
@@ -87,13 +88,15 @@ uniqueTagLambda = uniqueTag tagLambda'
 uniqueTagTupleLambda :: TypeBox ty => TupleLambdaBase ty Name -> TupleLambdaBase ty VName
 uniqueTagTupleLambda = uniqueTag tagTupleLambda'
 
+-}
+
 rightResult :: Show a => Either a b -> b
 rightResult = either (error . show) id
 
 -- | Parse a string to a program.
 prog :: String -> Prog
-prog = renameProg . uniqueTagProg . rightResult . checkProg . rightResult . parseFuthark "input"
-
+prog = internaliseProg True . E.tagProg . rightResult . E.checkProg . rightResult . parseFuthark "input"
+{-
 -- | Parse a string to an expression.
 expr :: String -> Exp
 expr = uniqueTagExp . rightResult . checkClosedExp . rightResult . parseExp "input"
