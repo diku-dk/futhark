@@ -33,3 +33,23 @@ An algebra for index space transformations, and how it relates to
 traditional fusion!
 
 APL must have this already.
+
+`filtomap`
+----------
+
+A redomap-like construct integrating filter and map.  Semantics:
+
+  filter f . map g ==
+  filtomap(\x -> let y = g(x) in
+                 if f(y) then (true, y)
+                         else (false, y)
+
+Interestingly, it also works the other way around:
+
+  map g . filter f ==
+  filtomap(\x -> if f(x) then (true, f(x))
+                         else (false, dummy)
+
+Importantly, 'filter . map . filter' can be fused to one filtomap.
+
+It is pretty much mapMaybe from Haskell.
