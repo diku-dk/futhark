@@ -123,17 +123,8 @@ makeShapeFun params body rettype loc = do
   -- needed for the value function!  Hence, for all unique parameters,
   -- we create a substitute non-unique parameter, and insert a
   -- copy-binding in the body of the function.
-  (params', copybnds) <-
-    liftM unzip $ forM params $ \param ->
-      if I.unique $ I.identType param
-      then do param' <- newIdent' id
-                        param { I.identType = I.identType param
-                                              `I.setUniqueness` Nonunique }
-              return (param',
-                      Just $ I.Let [I.fromParam param] $
-                             I.Copy (I.Var $ I.fromParam param') $ srclocOf param)
-      else return (param, Nothing)
-  return $ I.Lambda params' (insertBindings (catMaybes copybnds) body) rettype loc
+  (params', copybnds) <- nonuniqueParams params
+  return $ I.Lambda params' (insertBindings copybnds body) rettype loc
 
 sanitiseValueSlice :: [I.Ident] -> I.Body -> InternaliseM I.Body
 sanitiseValueSlice resShapes (I.Body bnds res) = do
