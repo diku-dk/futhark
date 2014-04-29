@@ -59,13 +59,13 @@ splitBinding cert_ident bnd@(Let pat (Assert se loc)) =
 
 splitBinding cert_ident bnd@(Let pat (Map cs fun args loc)) = do
   (predbody, valfun, ok) <- splitMap cert_ident cs fun args loc
-  return (bnd : predbody,
+  return (predbody ++ [bnd],
           Let pat $ Map cs valfun args loc,
           ok)
 
 splitBinding cert_ident bnd@(Let pat (Filter cs fun args ressize loc)) = do
   (predbnds, valfun, ok) <- splitMap cert_ident cs fun args loc
-  return (bnd : predbnds,
+  return (predbnds ++ [bnd],
           Let pat $ Filter cs valfun args ressize loc,
           ok)
 
@@ -110,10 +110,10 @@ splitMapLambda :: MonadFreshNames m => Ident -> Lambda -> m (Lambda, Lambda)
 splitMapLambda cert_ident lam = do
   (Body predbnds predres, valbody) <- splitFunBody cert_ident $ lambdaBody lam
   (pred_params, cpybnds) <- nonuniqueParams $ lambdaParams lam
-  let predbody = Body (predbnds <> cpybnds) predres
+  let predbody = Body (cpybnds <> predbnds) predres
       predlam = lam { lambdaBody = predbody
-                           , lambdaReturnType = [Basic Bool]
-                           , lambdaParams = pred_params
-                           }
+                    , lambdaReturnType = [Basic Bool]
+                    , lambdaParams = pred_params
+                    }
       vallam = lam { lambdaBody = valbody }
   return (predlam, vallam)
