@@ -178,6 +178,9 @@ collectDataflow m = pass $ do
   (x, dataflow) <- listen m
   return ((x, dataflow), const mempty)
 
+noDataflow :: TypeM a -> TypeM a
+noDataflow = censor $ const mempty
+
 maybeCheckOccurences :: Occurences -> TypeM ()
 maybeCheckOccurences us = do
   check <- asks envCheckOccurences
@@ -349,7 +352,7 @@ checkProg' checkoccurs prog = do
                         }
 
   liftM Prog $ runTypeM typeenv src $
-        mapM checkFun $ progFunctions prog
+        mapM (noDataflow . checkFun) $ progFunctions prog
   where
     src = newNameSourceForProg prog
     -- To build the ftable we loop through the list of function
@@ -377,8 +380,7 @@ initialFtable = HM.map addBuiltin builtInFunctions
 checkFun :: FunDec -> TypeM FunDec
 checkFun (fname, rettype, params, body, loc) = do
   params' <- checkParams
-  (body', _) <-
-    collectDataflow $ binding (map fromParam params') $ checkBody body
+  body' <- binding (map fromParam params') $ checkBody body
 
   checkReturnAlias $ bodyType body'
 
@@ -952,8 +954,8 @@ checkLambda (Lambda params body ret loc) args = do
           param { identType = identType param `setArrayDims` shape }
         params' = zipWith setParamShape params $
                   map (arrayDims . argType) args
+    checkFuncall Nothing loc (map (toDecl . identType) params') (map toDecl ret') args
     (_, _, _, body', _) <-
       noUnique $ checkFun (nameFromString "<anonymous>", map toDecl ret', params', body, loc)
-    checkFuncall Nothing loc (map (toDecl . identType) params') (map toDecl ret') args
     return $ Lambda params' body' ret' loc
   else bad $ TypeError loc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."

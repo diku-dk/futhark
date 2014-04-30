@@ -224,6 +224,9 @@ collectDataflow m = pass $ do
   (x, dataflow) <- listen m
   return ((x, dataflow), const mempty)
 
+noDataflow :: VarName vn => TypeM vn a -> TypeM vn a
+noDataflow = censor $ const mempty
+
 patDiet :: TaggedTupIdent CompTypeBase vn -> Occurences vn -> Diet
 patDiet pat occs = patDiet' pat
   where cons =  allConsumed occs
@@ -410,7 +413,7 @@ checkProg' checkoccurs prog = do
                         }
 
   liftM (untagProg . Prog) $
-          runTypeM typeenv src $ mapM checkFun $ progFunctions prog'
+          runTypeM typeenv src $ mapM (noDataflow . checkFun) $ progFunctions prog'
   where
     (prog', src) = tagProg' blankNameSource prog
     -- To build the ftable we loop through the list of function
@@ -439,8 +442,7 @@ checkFun :: (TypeBox ty, VarName vn) =>
             TaggedFunDec ty vn -> TypeM vn (TaggedFunDec CompTypeBase vn)
 checkFun (fname, rettype, params, body, loc) = do
   params' <- checkParams
-  (body', _) <-
-    collectDataflow $ binding (map fromParam params') $ checkExp body
+  body' <- binding (map fromParam params') $ checkExp body
 
   checkReturnAlias $ typeOf body'
 
@@ -1044,18 +1046,20 @@ consumeArg loc at _       = [observation (aliases at) loc]
 
 checkLambda :: (TypeBox ty, VarName vn) =>
                TaggedLambda ty vn -> [Arg vn] -> TypeM vn (TaggedLambda CompTypeBase vn)
-checkLambda (AnonymFun params body ret pos) args = do
-  (_, ret', params', body', _) <-
-    noUnique $ checkFun (nameFromString "<anonymous>", ret, params, body, pos)
+checkLambda (AnonymFun params body ret pos) args =
   case () of
-    _ | length params' == length args -> do
-          checkFuncall Nothing pos (map identType params') ret' args
-          return $ AnonymFun params body' ret' pos
+    _ | length params == length args -> do
+          checkFuncall Nothing pos (map identType params) ret args
+          (_, ret', params', body', _) <-
+            noUnique $ checkFun (nameFromString "<anonymous>", ret, params, body, pos)
+          return $ AnonymFun params' body' ret' pos
       | [(Elem (Tuple ets), _, _)] <- args,
         validApply (map identType params) ets -> do
           -- The function expects N parameters, but the argument is a
           -- single N-tuple whose types match the parameters.
           -- Generate a shim to make it fit.
+          (_, ret', _, body', _) <-
+            noUnique $ checkFun (nameFromString "<anonymous>", ret, params, body, pos)
           tupparam <- newIdent "tup_shim" (Elem (Tuple $ map (fromDecl . identType) params)) pos
           let tupfun = AnonymFun [toParam tupparam] tuplet ret pos
               tuplet = LetPat (TupId (map (Id . fromParam) params) pos)
