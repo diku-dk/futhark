@@ -6,8 +6,6 @@ module Futhark.EnablingOpts.Simplifier.Simplify
   , simplify
   , cannotSimplify
   , liftMaybe
-  , liftNeedNames
-  , liftMaybeNeedNames
   )
 
 where
@@ -17,7 +15,6 @@ import Control.Monad.State
 import Control.Monad.Trans.Maybe
 
 import Futhark.InternalRep
-import Futhark.NeedNames
 import Futhark.MonadFreshNames
 import Futhark.Binder
 
@@ -56,10 +53,3 @@ cannotSimplify = fail "Cannot simplify"
 liftMaybe :: Maybe a -> Simplify a
 liftMaybe Nothing = fail "Nothing"
 liftMaybe (Just x) = return x
-
-liftNeedNames :: NeedNames a -> Simplify a
-liftNeedNames = provideNames
-
-liftMaybeNeedNames :: NeedNames (Maybe a) -> Simplify a
-liftMaybeNeedNames m = do x <- liftNeedNames m
-                          liftMaybe x

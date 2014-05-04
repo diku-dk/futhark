@@ -28,7 +28,6 @@ import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet      as HS
 import qualified Data.Set          as S
 
-import Futhark.NeedNames
 import qualified Futhark.EnablingOpts.SymbolTable as ST
 import qualified Futhark.EnablingOpts.UsageTable as UT
 import Futhark.EnablingOpts.ClosedForm
@@ -45,8 +44,7 @@ import Futhark.Tools
 -- of bindings is returned, that bind at least the same banes as the
 -- original binding (and possibly more, for intermediate results).
 topDownSimplifyBinding :: MonadFreshNames m => ST.SymbolTable -> Binding -> m (Maybe [Binding])
-topDownSimplifyBinding vtable bnd =
-  provideNames $ applyRules topDownRules vtable bnd
+topDownSimplifyBinding = applyRules topDownRules
 
 -- | @simplifyBinding uses bnd@ performs simplification of the binding
 -- @bnd@.  If simplification is possible, a replacement list of
@@ -56,12 +54,11 @@ topDownSimplifyBinding vtable bnd =
 bottomUpSimplifyBinding :: MonadFreshNames m =>
                            (ST.SymbolTable, UT.UsageTable)
                         -> Binding -> m (Maybe [Binding])
-bottomUpSimplifyBinding x bnd =
-  provideNames $ applyRules bottomUpRules x bnd
+bottomUpSimplifyBinding = applyRules bottomUpRules
 
-applyRules :: [SimplificationRule a]
-           -> a -> Binding -> NeedNames (Maybe [Binding])
-applyRules []           _    _   = return Nothing
+applyRules :: MonadFreshNames m =>
+              [SimplificationRule a] -> a -> Binding -> m (Maybe [Binding])
+applyRules []           _    _      = return Nothing
 applyRules (rule:rules) context bnd = do
   res <- simplify $ rule context bnd
   case res of Just bnds -> return $ Just bnds
