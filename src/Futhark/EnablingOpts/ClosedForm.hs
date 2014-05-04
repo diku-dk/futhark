@@ -22,8 +22,8 @@ import Data.Monoid
 
 import Futhark.InternalRep
 import Futhark.InternalRep.Renamer
-import Futhark.NeedNames
 import Futhark.MonadFreshNames
+import Futhark.EnablingOpts.Simplifier.Simplify
 
 -- | A function that, given a variable name, returns its definition.
 -- XXX: This duplicates something in Futhark.EnablingOpts.Simplification.
@@ -46,12 +46,12 @@ Motivation:
 -- | @foldClosedForm look foldfun accargs arrargs@ determines whether
 -- each of the results of @foldfun@ can be expressed in a closed form.
 foldClosedForm :: VarLookup -> [Ident] -> Lambda -> [SubExp] -> [SubExp]
-               -> NeedNames (Maybe [Binding])
+               -> Simplify [Binding]
 
 foldClosedForm look pat lam accs arrs =
   case checkResults pat knownBindings
        (map fromParam $ lambdaParams lam) (lambdaBody lam) accs lamloc of
-    Nothing -> return Nothing
+    Nothing -> cannotSimplify
     Just closedBody -> do
       isEmpty <- newIdent "fold_input_is_empty" (Basic Bool) lamloc
       let inputsize = arraysSize 0 $ map subExpType arrs
@@ -65,7 +65,7 @@ foldClosedForm look pat lam accs arrs =
                              (map fromConstType $ lambdaReturnType lam)
                              lamloc
       closedBody' <- renameBody closedBody
-      return $ Just [isEmptyCheck, mkBranch closedBody']
+      return [isEmptyCheck, mkBranch closedBody']
   where lamloc = srclocOf lam
 
         knownBindings = determineKnownBindings look lam accs arrs
@@ -73,26 +73,24 @@ foldClosedForm look pat lam accs arrs =
 -- | @loopClosedForm pat respat merge bound bodys@ determines whether
 -- the do-loop can be expressed in a closed form.
 loopClosedForm :: [Ident] -> [Ident] -> [(Ident,SubExp)]
-               -> SubExp -> Body -> NeedNames (Maybe [Binding])
+               -> SubExp -> Body -> Simplify [Binding]
 loopClosedForm pat respat merge bound body
-  | respat == mergepat =
-  case checkResults respat knownBindings
-       mergepat body mergeexp bodyloc of
-    Nothing -> return Nothing
-    Just closedBody -> do
-      isEmpty <- newIdent "bound_is_zero" (Basic Bool) bodyloc
-      let isEmptyCheck =
-            Let [isEmpty] $ BinOp Leq bound (intconst 0 bodyloc)
-                            (Basic Bool) bodyloc
-          mkBranch ifNonEmpty =
-            Let pat $ If (Var isEmpty)
-                         (resultBody [] mergeexp bodyloc)
-                         ifNonEmpty
-                         (bodyType body)
-                         bodyloc
-      closedBody' <- renameBody closedBody
-      return $ Just [isEmptyCheck, mkBranch closedBody']
-  | otherwise = return Nothing
+  | respat == mergepat,
+    Just closedBody <- checkResults respat knownBindings
+                       mergepat body mergeexp bodyloc = do
+  isEmpty <- newIdent "bound_is_zero" (Basic Bool) bodyloc
+  let isEmptyCheck =
+        Let [isEmpty] $ BinOp Leq bound (intconst 0 bodyloc)
+                       (Basic Bool) bodyloc
+      mkBranch ifNonEmpty =
+        Let pat $ If (Var isEmpty)
+                     (resultBody [] mergeexp bodyloc)
+                     ifNonEmpty
+                     (bodyType body)
+                     bodyloc
+  closedBody' <- renameBody closedBody
+  return [isEmptyCheck, mkBranch closedBody']
+  | otherwise = cannotSimplify
   where (mergepat, mergeexp) = unzip merge
         bodyloc = srclocOf body
         knownBindings = HM.fromList merge

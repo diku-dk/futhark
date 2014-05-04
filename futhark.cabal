@@ -56,7 +56,7 @@ Library
                    Futhark.EnablingOpts.Simplifier.CSE
                    Futhark.EnablingOpts.Simplifier.DataDependencies
                    Futhark.EnablingOpts.Simplifier.Rules
-                   Futhark.EnablingOpts.Simplify
+                   Futhark.EnablingOpts.Simplifier.Simplify
                    Futhark.EnablingOpts.SymbolTable
                    Futhark.EnablingOpts.UsageTable
                    Futhark.Externalise

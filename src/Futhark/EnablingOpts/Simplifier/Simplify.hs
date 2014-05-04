@@ -1,7 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 -- | This module exports 'Simplify', the monad used for writing
 -- simplification rules.
-module Futhark.EnablingOpts.Simplify
+module Futhark.EnablingOpts.Simplifier.Simplify
   ( Simplify
   , simplify
   , cannotSimplify
