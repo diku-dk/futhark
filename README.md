@@ -27,17 +27,18 @@ Where `<file>` is an .l0 file (say, one of the example programs from
 the `data/` directory) and the options which passes and final action
 to perform.  If no options are given, the default action is to
 pretty-print (`-p`) the program after type-checking.  It is also
-possible to instruct `futhark` to interpret the program, by using the `-i`
-option.  If the `--compile-sequential` flag is given, the program will
-be compiled to C and printed on standard output.  Note, however, that
-for the C code generator to work, you must manually run the
-first-order transform (with `-f`) and the tuple-array transform
-(`-t`).  In total, the command for compiling a program is:
+possible to instruct `futhark` to interpret the program, by using the
+`-i` option.  If the `--compile-sequential` flag is given, the program
+will be compiled to C and printed on standard output.  Note, however,
+that for the C code generator to work, you must manually run the
+first-order transform (with `-f`), although this pass is automatically
+run when using the "standard" pipeline (`-s`).  In total, the command
+for compiling a program is:
 
-    futhark -f -t --compile-sequential<program.l0 > program.c
+    futhark -s --compile-sequential program.l0 > program.c
 
-The order of passes (`-f` then `-t`) is significant.  Run `futhark`
-with no arguments to see a list of possible passes.
+Run `futhark` with no arguments to see a list of possible passes and
+other options.
 
 When executing a program, Futhark will start by reading (from standard
 input) the arguments to the main() function.  Each argument must be
