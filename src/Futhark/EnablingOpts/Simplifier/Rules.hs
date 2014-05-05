@@ -1,15 +1,8 @@
--- | This module implements simple simplification rules for bindings.
--- The intent is that you pass a symbol table and a binding, and is
--- given back a sequence of bindings, that are more efficient than the
--- original binding, yet compute the same result.
---
--- These rewrite rules are "local", in that they do not maintain any
--- state or look at the program as a whole.  Compare this to the
--- fusion algorithm in @Futhark.HOTrans.Fusion@, which must be implemented
--- as its own pass.
+-- | This module defines a collection of simplification rules, as per
+-- "Futhark.EnablingOpts.Simplifier.Rule".  They are used in the
+-- simplifier.
 module Futhark.EnablingOpts.Simplifier.Rules
-  ( topDownSimplifyBinding
-  , bottomUpSimplifyBinding
+  ( standardRules
   )
 
 where
@@ -33,44 +26,13 @@ import qualified Futhark.EnablingOpts.UsageTable as UT
 import Futhark.EnablingOpts.ClosedForm
 import qualified Futhark.EnablingOpts.AlgSimplify as AS
 import qualified Futhark.EnablingOpts.ScalExp as SE
+import Futhark.EnablingOpts.Simplifier.Rule
 import Futhark.EnablingOpts.Simplifier.Simplify
 import Futhark.EnablingOpts.Simplifier.DataDependencies
 import Futhark.InternalRep
-import Futhark.MonadFreshNames
 import Futhark.Tools
 
--- | @simplifyBinding lookup bnd@ performs simplification of the
--- binding @bnd@.  If simplification is possible, a replacement list
--- of bindings is returned, that bind at least the same banes as the
--- original binding (and possibly more, for intermediate results).
-topDownSimplifyBinding :: MonadFreshNames m => ST.SymbolTable -> Binding -> m (Maybe [Binding])
-topDownSimplifyBinding = applyRules topDownRules
-
--- | @simplifyBinding uses bnd@ performs simplification of the binding
--- @bnd@.  If simplification is possible, a replacement list of
--- bindings is returned, that bind at least the same banes as the
--- original binding (and possibly more, for intermediate results).
--- The first argument is the set of names used after this binding.
-bottomUpSimplifyBinding :: MonadFreshNames m =>
-                           (ST.SymbolTable, UT.UsageTable)
-                        -> Binding -> m (Maybe [Binding])
-bottomUpSimplifyBinding = applyRules bottomUpRules
-
-applyRules :: MonadFreshNames m =>
-              [SimplificationRule a] -> a -> Binding -> m (Maybe [Binding])
-applyRules []           _    _      = return Nothing
-applyRules (rule:rules) context bnd = do
-  res <- simplify $ rule context bnd
-  case res of Just bnds -> return $ Just bnds
-              Nothing   -> applyRules rules context bnd
-
-type SimplificationRule a = a -> Binding -> Simplify [Binding]
-
-type TopDownRule = SimplificationRule ST.SymbolTable
-
-type BottomUpRule = SimplificationRule (ST.SymbolTable, UT.UsageTable)
-
-topDownRules :: [TopDownRule]
+topDownRules :: TopDownRules
 topDownRules = [ liftIdentityMapping
                , removeReplicateMapping
                , hoistLoopInvariantMergeVariables
@@ -90,13 +52,16 @@ topDownRules = [ liftIdentityMapping
                , hoistBranchInvariant
                ]
 
-bottomUpRules :: [BottomUpRule]
+bottomUpRules :: BottomUpRules
 bottomUpRules = [ removeDeadMapping
                 , removeUnusedLoopResult
                 , removeRedundantMergeVariables
                 , removeDeadBranchResult
                 , simplifyScalarExp
                 ]
+
+standardRules :: RuleBook
+standardRules = (topDownRules, bottomUpRules)
 
 liftIdentityMapping :: TopDownRule
 liftIdentityMapping _ (Let pat (Map cs fun arrs loc)) =
