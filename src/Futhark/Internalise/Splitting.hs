@@ -106,8 +106,10 @@ splitIdents :: [Ident] -> ([Ident], [Ident])
 splitIdents = splitTyped identType
 
 splitTyped :: ArrayShape shape => (a -> TypeBase as shape) -> [a] -> ([a], [a])
-splitTyped _ []     = ([],[])
-splitTyped f (x:xs) =
-  let (sizes, values) = splitTyped f (drop n xs)
-  in (take n xs ++ sizes, x : values)
-  where n = arrayRank $ f x
+splitTyped f l = let (sizes,values) = splitTyped' $ reverse l
+                 in (reverse sizes, reverse values)
+  where splitTyped' []    = ([],[])
+        splitTyped' (x:xs) =
+          let (sizes, values) = splitTyped' $ drop n xs
+          in (take n xs ++ sizes, x : values)
+          where n = arrayRank $ f x

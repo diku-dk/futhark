@@ -64,17 +64,18 @@ bindingParams params m = do
       liftM unzip $ forM internalisations $ \param' ->
         case param' of
           Direct k -> do
-            (k',shape) <- lift $ identShapes k
-            return (k' : shape,
+            (k',k_shape) <- lift $ identShapes k
+            return (identWithShape k' k_shape,
                     DirectSubst k')
           TupleArray c ks -> do
             ks_sizes <- lift $ mapM identShapes ks
-            return (c:concatMap (uncurry (:)) ks_sizes,
+            return (c:concatMap (uncurry identWithShape) ks_sizes,
                      ArraySubst (I.Var c) $ map fst ks_sizes)
     tell $ HM.singleton (E.identName param) substs
     return $ concat params'
   let bind env = env { envSubsts = substs `HM.union` envSubsts env }
   local bind $ m $ map I.toParam params'
+  where identWithShape k shape = shape ++ [k]
 
 bindingFlatPatternAs :: ([I.Type] -> [InternaliseRes Rank] -> ([I.Ident], [Replacement], [I.Type]))
                      -> [E.Ident] -> [I.Type]

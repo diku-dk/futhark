@@ -171,15 +171,14 @@ internaliseExp (E.Apply fname args _ loc)
 
 internaliseExp (E.Apply fname args rettype loc) = do
   args' <- tupsToIdentList $ map fst args
-  args'' <- concat <$> mapM flatten args'
+  let args'' = concatMap flatten args'
   splitFuncall fname args'' (internaliseType rettype) loc
-  where flatten (c,vs) = do
-          vs' <- liftM concat $ forM vs $ \v -> do
-                   let shape = subExpShape $ I.Var v
-                   -- Diet wrong, but will be fixed by type-checker.
-                   return [ (arg, I.Observe) | arg <- I.Var v : shape ]
-          return $ (case c of Just c' -> [(I.Var c', I.Observe)]
-                              Nothing -> []) ++ vs'
+  where flatten (c,vs) =
+          let vs' = flip concatMap vs $ \v ->
+                -- Diet wrong, but will be fixed by type-checker.
+                [ (arg, I.Observe) | arg <- subExpWithShape $ I.Var v ]
+          in (case c of Just c' -> [(I.Var c', I.Observe)]
+                        Nothing -> []) ++ vs'
 
 internaliseExp (E.LetPat pat e body loc) = do
   (c,ks) <- tupToIdentList e

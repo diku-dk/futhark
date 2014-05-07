@@ -143,10 +143,10 @@ inlineInBody inlcallees (Body (Let pat (Apply fname args rtp loc):bnds) res) =
         [] -> continue $ Apply fname args rtp loc
         (_,_,fargs,body,_):_ ->
           let revbnds = zip (map fromParam fargs) $ map fst args
-          in  mapResult continue' $ foldl addArgBnd body revbnds
+          in  mapResult continue' $ foldr addArgBnd body revbnds
   where
-      addArgBnd :: Body -> (Ident, SubExp) -> Body
-      addArgBnd body (farg, aarg) =
+      addArgBnd :: (Ident, SubExp) -> Body -> Body
+      addArgBnd (farg, aarg) body =
           let fargutp = identType farg
               fargnm  = identName   farg
               fargpos = identSrcLoc farg

@@ -2,6 +2,7 @@ module Futhark.Internalise.AccurateSizes
   ( subExpShape
   , identShapes
   , typeSizes
+  , subExpWithShape
   , subExpsWithShapes
   , allEqual
   , UnsizedLambda(..)
@@ -25,9 +26,11 @@ import Futhark.Tools
 subExpShape :: SubExp -> [SubExp]
 subExpShape = shapeDims . arrayShape . subExpType
 
+subExpWithShape :: SubExp -> [SubExp]
+subExpWithShape se = subExpShape se ++ [se]
+
 subExpsWithShapes :: [SubExp] -> [SubExp]
-subExpsWithShapes = concatMap addShapes
-  where addShapes se = se : subExpShape se
+subExpsWithShapes = concatMap subExpWithShape
 
 identShapes :: (MonadFreshNames m, ArrayShape shape) =>
                IdentBase Names shape -> m (Ident, [Ident])
@@ -42,7 +45,7 @@ identShapes v = do
 typeSizes :: ArrayShape shape =>
              [TypeBase als shape] -> [TypeBase als shape]
 typeSizes = concatMap addShapeTypes
-  where addShapeTypes t = t : replicate (arrayRank t) (Basic Int)
+  where addShapeTypes t = replicate (arrayRank t) (Basic Int) ++ [t]
 
 allEqual :: Ident -> InternaliseM (Ident, Ident)
 allEqual comp_shape = do
