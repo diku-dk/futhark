@@ -103,7 +103,7 @@ internaliseValue (E.BasicVal bv) = [I.BasicVal bv]
 -- add their sizes.
 internaliseParamValues :: [E.Value] -> [I.Value]
 internaliseParamValues = concatMap (concatMap withValueShapes . internaliseValue)
-  where withValueShapes v = v : map (I.BasicVal . I.IntVal) (I.valueShape v)
+  where withValueShapes v = map (I.BasicVal . I.IntVal) (I.valueShape v) ++ [v]
 
 noInfoToUnit :: I.TypeBase (NoInfo VName) shape -> I.TypeBase () shape
 noInfoToUnit = (`I.setAliases` ())
