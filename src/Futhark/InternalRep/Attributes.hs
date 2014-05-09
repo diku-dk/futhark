@@ -781,6 +781,8 @@ consumedInExp (Apply _ args _ _) =
 consumedInExp (Update _ src _ _ _) =
   identName src `HS.insert` aliases (identType src)
 consumedInExp (If _ tb fb _ _) = consumedInBody tb <> consumedInBody fb
+consumedInExp (DoLoop _ merge _ _ _ _) =
+  mconcat $ map (aliases . subExpType . snd) $ filter (unique . identType . fst) merge
 consumedInExp _ = mempty
 
 -- | An expression is safe if it is always well-defined (assuming that
