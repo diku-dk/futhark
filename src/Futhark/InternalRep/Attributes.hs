@@ -766,10 +766,7 @@ consumedInBody = execWriter . bodyConsumed
           unconsume (HS.fromList $ map identName pat) $
             bodyConsumed $ Body bnds res
 
-        expConsumed (DoLoop _ pat _ _ loopbody _) =
-          unconsume (HS.fromList (map (identName . fst) pat)) $
-            bodyConsumed loopbody
-        expConsumed e = tell $ consumedInExp e
+        expConsumed = tell . consumedInExp
 
 -- | Return the set of variable names consumed by the given
 -- expression.
