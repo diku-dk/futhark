@@ -33,8 +33,8 @@ enablingOpts prog = do
 
 normCopyDeadOpts :: Prog -> Either EnablingOptError Prog
 normCopyDeadOpts prog = do
-  let prog_cp    =  simplifyProg prog
-  (_, prog_dce)  <- deadCodeElim prog_cp
+  let prog_cp  =  simplifyProg prog
+  let prog_dce = deadCodeElim prog_cp
   return prog_dce
 
 normCopyOneLambda :: MonadFreshNames m => Prog -> Lambda ->
