@@ -14,9 +14,6 @@ import System.IO
 
 import Text.Printf
 
-import qualified Paths_futhark
-import Build_futhark
-
 import Language.Futhark.Core
 import Language.Futhark.Parser
 import Futhark.Internalise
@@ -35,11 +32,7 @@ import Futhark.Interpreter
 import qualified Futhark.SOACFlowGraph as FG
 import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
 import qualified Futhark.CodeGen.Backends.Bohrium as Bohrium
-
-version :: Version
-version = Paths_futhark.version
-          { versionTags = versionTags Paths_futhark.version ++ [gitCommit]
-          }
+import Futhark.Version
 
 newFutharkonfig :: Futharkonfig
 newFutharkonfig = Futharkonfig {

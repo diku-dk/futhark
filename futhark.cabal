@@ -100,6 +100,7 @@ Library
                    Futhark.Tools
                    Futhark.TypeError
                    Futhark.Untrace
+                   Futhark.Version
                    Language.Futhark
                    Language.Futhark.Attributes
                    Language.Futhark.Core
@@ -108,9 +109,12 @@ Library
                    Language.Futhark.Syntax
                    Language.Futhark.Traversals
 
-  Other-modules: Language.Futhark.Parser.Parser,
-                 Language.Futhark.Parser.Lexer,
+  Other-modules: Language.Futhark.Parser.Parser
+                 Language.Futhark.Parser.Lexer
                  Language.Futhark.Parser.Tokens
+                 Paths_futhark
+                 Build_futhark
+
 
   -- Directories other than the root containing source files.
   hs-source-dirs:      src
