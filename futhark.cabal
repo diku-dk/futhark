@@ -24,7 +24,6 @@ Library
                  srcloc >= 0.4,
                  language-c-quote >= 0.7.1,
                  mainland-pretty >= 0.2.5,
-                 monad-loops >= 0.4.2,
                  hashable >= 1.2.1.0,
                  unordered-containers >= 0.2.3.3,
                  dlist >= 0.6.0.1,
