@@ -24,8 +24,6 @@ import qualified Data.Set          as S
 import qualified Futhark.EnablingOpts.SymbolTable as ST
 import qualified Futhark.EnablingOpts.UsageTable as UT
 import Futhark.EnablingOpts.ClosedForm
-import qualified Futhark.EnablingOpts.AlgSimplify as AS
-import qualified Futhark.EnablingOpts.ScalExp as SE
 import Futhark.EnablingOpts.Simplifier.Rule
 import Futhark.EnablingOpts.Simplifier.Simplify
 import Futhark.EnablingOpts.Simplifier.DataDependencies
@@ -57,7 +55,6 @@ bottomUpRules = [ removeDeadMapping
                 , removeUnusedLoopResult
                 , removeRedundantMergeVariables
                 , removeDeadBranchResult
-                , simplifyScalarExp
                 ]
 
 standardRules :: RuleBook
@@ -247,40 +244,6 @@ simplifyClosedFormLoop :: TopDownRule
 simplifyClosedFormLoop _ (Let pat (DoLoop respat merge _ bound body _)) =
   loopClosedForm pat respat merge bound body
 simplifyClosedFormLoop _ _ = cannotSimplify
-
-simplifyScalarExp :: BottomUpRule
-simplifyScalarExp (vtable, _) (Let [v] e)
-  | False, -- FIXME: disabled for now, as it causes many problems.
-    Just se <- optimisable =<< SE.toScalExp (`ST.lookupScalExp` vtable) e,
-    Right se' <-
-      dnfToScalExp <$> AS.mkSuffConds se loc (rangesRep vtable),
-    se' /= se,
-    freeBef  <- map identName $ SE.getIds se,
-    freePost <- map identName $ SE.getIds se',
-    lvsBef <- ST.enclosingLoopVars freeBef vtable,
-    lvsPost <- ST.enclosingLoopVars freePost vtable,
-    (lvsBef /= lvsPost && lvsPost `isSuffixOf` lvsBef) ||
-    (freeBef /= freePost && null lvsPost) = do
-  (e', bnds) <- SE.fromScalExp (srclocOf e) se'
-  return $ bnds ++ [Let [v] e']
-  where loc = srclocOf e
-        dnfToScalExp []      = SE.Val $ LogVal True
-        dnfToScalExp (c:cs)  = foldl SE.SLogOr (conjToScalExp c) (map conjToScalExp cs)
-        conjToScalExp []     = SE.Val $ LogVal True
-        conjToScalExp (x:xs) = foldl SE.SLogOr x xs
-
-        optimisable se@(SE.RelExp SE.LTH0 _) = Just se
-        optimisable (SE.RelExp SE.LEQ0 x) =
-          Just $ SE.RelExp SE.LTH0 (x `SE.SMinus` SE.Val (IntVal 1))
-        optimisable _ = Nothing
-
-simplifyScalarExp _ _ = cannotSimplify
-
-rangesRep :: ST.SymbolTable -> AS.RangesRep
-rangesRep = HM.map toRep . ST.bindings
-  where toRep entry =
-          (ST.bindingDepth entry, lower, upper)
-          where (lower, upper) = ST.valueRange entry
 
 simplifyRearrange :: LetTopDownRule
 
