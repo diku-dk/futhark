@@ -92,74 +92,120 @@ buildSCTableForExp vtable (Redomap _ outerfun innerfun _ _ _) =
          buildSCTable vtable HM.empty (lambdaBody outerfun)
 buildSCTableForExp _ _ = Nothing
 
-data VarianceTable
+type VarianceTable = HM.HashMap VName Loops
 
-variantIn :: VName -> VarianceTable -> HS.HashSet VName
-variantIn = undefined
+type Loops = HS.HashSet VName
 
-atMostVariantIn :: VName -> [VName] -> VarianceTable -> Bool
-atMostVariantIn = undefined
+variantIn :: VName -> VarianceTable -> Loops
+variantIn name = fromMaybe HS.empty . HM.lookup name
+
+atMostVariantIn :: VName -> Loops -> VarianceTable -> Bool
+atMostVariantIn name loops vartable =
+  HS.null $ (name `variantIn` vartable) `HS.difference` loops
 
 generatePredicates :: MonadFreshNames m =>
                       FunDec -> VarianceTable -> SCTable -> m [FunDec]
-generatePredicates fundec vartable sctable = do
-  o1pred <- generatePredicates' fundec vartable sctable []
-  onpred <- generatePredicates' fundec vartable sctable alloutermostloops
+generatePredicates fundec@(_,_,_,body,_) vartable sctable = do
+  o1pred <- generatePredicates' fundec vartable sctable HS.empty
+  onpred <- generatePredicates' fundec vartable sctable $ allOutermostLoops body
   return $ catMaybes [o1pred, onpred]
-  where alloutermostloops = undefined
 
 generatePredicates' :: MonadFreshNames m =>
-                       FunDec -> VarianceTable -> SCTable -> [VName] -> m (Maybe FunDec)
+                       FunDec -> VarianceTable -> SCTable -> Loops -> m (Maybe FunDec)
 generatePredicates' (fname, rettype, params, body, loc) vartable sctable loops = do
   res <- bodyVariantIn vartable sctable loops body
   case res of
     Just body' -> return $ Just (fname', rettype, params, body', loc)
     _          -> return Nothing
-  where fname' = undefined fname
+  where fname' = fname <> nameFromString ("_" <> show (HS.size loops))
 
 bodyVariantIn :: MonadFreshNames m =>
-                 VarianceTable -> SCTable -> [VName] -> Body -> m (Maybe Body)
+                 VarianceTable -> SCTable -> Loops -> Body -> m (Maybe Body)
 bodyVariantIn vartable sctable loops (Body bnds res) = do
   resbnds <- mapM (bindingVariantIn vartable sctable loops) bnds
   case sequence resbnds of
     Nothing    -> return Nothing
-    Just bnds' -> return $ Just $ Body bnds' res
+    Just bnds' -> return $ Just $ Body (concat bnds') res
 
 bindingVariantIn :: MonadFreshNames m =>
-                    VarianceTable -> SCTable -> [VName] -> Binding -> m (Maybe Binding)
+                    VarianceTable -> SCTable -> Loops -> Binding -> m (Maybe [Binding])
 
 bindingVariantIn vartable sctable loops (Let [v] e)
   | atMostVariantIn (identName v) loops vartable =
-    return $ Just $ Let [v] e
+    return $ Just [Let [v] e]
   | Just (SufficientCond suff) <- HM.lookup (identName v) sctable =
-    case filter (conjIsAtMostVariantIn vartable) suff of
-      []    -> return Nothing
-      suff' -> undefined suff' -- Or the suffs together.
+    case filter (scalExpIsAtMostVariantIn loops vartable) $ map mkConj suff of
+      []   -> return Nothing
+      x:xs -> do (e', bnds) <- SE.fromScalExp loc $ foldl SE.SLogOr x xs
+                 return $ Just $ bnds ++ [Let [v] e']
+  where mkConj []     = SE.Val $ LogVal True
+        mkConj (x:xs) = foldl SE.SLogAnd x xs
+        loc = srclocOf e
 
 bindingVariantIn vartable sctable loops (Let pat (If (Var v) tbranch fbranch t loc)) = do
   tbranch' <- fromJust <$> bodyVariantIn vartable sctable loops tbranch
   fbranch' <- fromJust <$> bodyVariantIn vartable sctable loops fbranch
   if atMostVariantIn (identName v) loops vartable then
-    return $ Just $ Let pat $ If (Var v) tbranch' fbranch' t loc
+    return $ Just [Let pat $ If (Var v) tbranch' fbranch' t loc]
     else
     -- FIXME: Check that tbranch and fbranch are safe.  We can do
     -- something smarter if 'v' actually comes from an 'or'.  Also,
     -- currently only handles case where pat is a singleton boolean.
-    case pat of
-      [p] | Basic Bool <- identType p ->
-        undefined -- Finish this.  The two branches should be anded together.
+    case (tbranch', fbranch') of
+      (Body tbnds (Result _ [tres] _),
+       Body fbnds (Result _ [fres] _))
+        | Basic Bool <- subExpType tres,
+          Basic Bool <- subExpType fres,
+          all safeBnd tbnds, all safeBnd fbnds ->
+        return $ Just $ tbnds ++ fbnds ++
+                        [Let pat $ BinOp LogAnd tres fres (Basic Bool) loc]
       _ -> return Nothing
+  where safeBnd (Let _ e) = safeExp e
 
 -- We assume that a SOAC contributes only if it returns exactly a
 -- single (boolean) value.
 bindingVariantIn vartable sctable loops (Let [v] e)
   | Just (SCTable eSCTable) <- HM.lookup (identName v) sctable =
     case e of Map cs fun args loc -> do
-                body <- bodyVariantIn vartable sctable loops $ lambdaBody fun
+                body <- bodyVariantIn vartable eSCTable loops $ lambdaBody fun
                 case body of
                   Just body' ->
-                    return $ Just $ Let [v] $ Map cs fun { lambdaBody = body' } args loc
+                    return $ Just [Let [v] $ Map cs fun { lambdaBody = body' } args loc]
                   Nothing -> return Nothing
+              DoLoop res merge i bound body loc -> do
+                body' <- bodyVariantIn vartable eSCTable loops body
+                case body' of
+                  Just body'' ->
+                    return $ Just [Let [v] $ DoLoop res merge i bound body'' loc]
+                  Nothing -> return Nothing
+              Redomap cs outerfun innerfun acc args loc -> do
+                outerbody <- bodyVariantIn vartable eSCTable loops $ lambdaBody outerfun
+                innerbody <- bodyVariantIn vartable eSCTable loops $ lambdaBody innerfun
+                case (outerbody, innerbody) of
+                  (Just outerbody', Just innerbody') ->
+                    return $ Just [Let [v] $ Redomap cs
+                                   outerfun { lambdaBody = outerbody' }
+                                   innerfun { lambdaBody = innerbody' }
+                                   acc args loc]
+                  _ -> return Nothing
+              _ -> return Nothing -- Should not happen.
 
-conjIsAtMostVariantIn :: VarianceTable -> [ScalExp] -> Bool
-conjIsAtMostVariantIn = undefined
+-- Nothing we can do about this one, then.
+bindingVariantIn _ _ _ _ = return Nothing
+
+scalExpIsAtMostVariantIn :: Loops -> VarianceTable -> ScalExp -> Bool
+scalExpIsAtMostVariantIn loops vartable = all (ok . identName) . SE.getIds
+  where ok x = atMostVariantIn x loops vartable
+
+allOutermostLoops :: Body -> Loops
+allOutermostLoops (Body bnds _) =
+  HS.fromList $ map identName $ mapMaybe loopIdentifier bnds
+  where loopIdentifier (Let (v:_) e) =
+          case e of DoLoop {}  -> Just v
+                    Map {}     -> Just v
+                    Redomap {} -> Just v
+                    Reduce {}  -> Just v
+                    Filter {}  -> Just v
+                    Apply {}   -> Just v -- Treat funcalls as recurrences.
+                    _          -> Nothing
+        loopIdentifier (Let _ _) = Nothing
