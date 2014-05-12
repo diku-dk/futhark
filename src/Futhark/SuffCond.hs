@@ -7,11 +7,13 @@ module Futhark.SuffCond
 -- FIXME: We are not dealing properly with ranges (iota etc) yet.
 
 import Control.Applicative
+import Control.Arrow (second)
 import Data.Loc
 import Data.Maybe
-import Control.Monad.State
-import Control.Monad.Trans.Maybe
 import Data.Monoid
+import Control.Monad.State
+import Control.Monad.Writer
+import Control.Monad.Trans.Maybe
 import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
 
@@ -89,8 +91,8 @@ generatePredicates' :: MonadFreshNames m =>
 generatePredicates' (fname, rettype, params, body, loc) suff sctable loops = do
   res <- runVariantM $ bodyVariantIn mempty sctable loops body
   case res of
-    Just body' -> return $ Just (fname', rettype, params, body', loc)
-    _          -> return Nothing
+    (Just body', True) -> return $ Just (fname', rettype, params, body', loc)
+    _                  -> return Nothing
   where fname' = fname <> nameFromString suff
 
 data SCEntry = SufficientCond [[ScalExp]]
@@ -162,10 +164,14 @@ analyseExp _ _ = Nothing
 analyseExpBody :: ST.SymbolTable -> Body -> SCTable
 analyseExpBody vtable = analyseBody vtable mempty
 
-type VariantM = MaybeT
+type VariantM m = MaybeT (WriterT Any m)
 
-runVariantM :: VariantM m a -> m (Maybe a)
-runVariantM = runMaybeT
+runVariantM :: Functor m => VariantM m a -> m (Maybe a, Bool)
+runVariantM = fmap (second getAny) . runWriterT . runMaybeT
+
+-- | We actually changed something to a sufficient condition.
+sufficiented :: Monad m => VariantM m ()
+sufficiented = tell $ Any True
 
 bodyVariantIn :: MonadFreshNames m =>
                  ForbiddenTable -> SCTable -> Loops -> Body -> VariantM m Body
@@ -240,7 +246,8 @@ bindingVariantIn ftable sctable _ (Let [v] e)
   | Just (SufficientCond suff) <- HM.lookup (identName v) sctable =
     case filter (scalExpIsAtMostVariantIn ftable) $ map mkConj suff of
       []   -> fail "Cannot generate invariant sufficient condition"
-      x:xs -> do (e', bnds) <- lift $ SE.fromScalExp loc $ foldl SE.SLogOr x xs
+      x:xs -> do (e', bnds) <- lift $ lift $ SE.fromScalExp loc $ foldl SE.SLogOr x xs
+                 sufficiented
                  return $ bnds ++ [Let [v] e']
   where mkConj []     = SE.Val $ LogVal True
         mkConj (x:xs) = foldl SE.SLogAnd x xs
