@@ -99,6 +99,7 @@ Library
                    Futhark.Tools
                    Futhark.TypeError
                    Futhark.Untrace
+                   Futhark.SuffCond
                    Futhark.Version
                    Language.Futhark
                    Language.Futhark.Attributes

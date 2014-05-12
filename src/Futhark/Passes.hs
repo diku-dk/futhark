@@ -9,6 +9,7 @@ module Futhark.Passes
   , eotransform
   , hotransform
   , inlinetransform
+  , optimisePredicates
   )
 where
 
@@ -17,6 +18,7 @@ import Futhark.HOTrans.HOTransDriver
 import qualified Futhark.FirstOrderTransform as FOT
 import Futhark.Untrace
 import Futhark.Pipeline
+import qualified Futhark.SuffCond
 
 fotransform :: Pass
 fotransform = Pass { passName = "first-order transform"
@@ -42,3 +44,8 @@ inlinetransform :: Pass
 inlinetransform = Pass { passName = "inline functions"
                       , passOp = liftPass aggInlineDriver
                       }
+
+optimisePredicates :: Pass
+optimisePredicates = Pass { passName = "optimise predicates"
+                          , passOp = return . Futhark.SuffCond.optimiseProg
+                          }

@@ -21,18 +21,60 @@ import qualified Futhark.EnablingOpts.SymbolTable as ST
 import Futhark.EnablingOpts.ScalExp (ScalExp)
 import qualified Futhark.EnablingOpts.ScalExp as SE
 import qualified Futhark.EnablingOpts.AlgSimplify as AS
+import Futhark.Tools
 
 optimiseProg :: Prog -> Prog
 optimiseProg prog =
-  let m = Prog <$> concat <$> mapM maybeOptimiseFun (progFunctions prog)
+  let m = do optimPreds <- mapM maybeOptimiseFun origfuns
+             let newfuns = concat optimPreds
+                 subst = HM.fromList $
+                         zip (map funName origfuns) $
+                         map (map funName) optimPreds
+             insertPredicateCalls subst $ Prog $ origfuns ++ newfuns
   in evalState m $ newNameSourceForProg prog
+  where origfuns = progFunctions prog
+        funName (fname,_,_,_,_) = fname
+
+insertPredicateCalls :: MonadFreshNames m =>
+                        HM.HashMap Name [Name] -> Prog -> m Prog
+insertPredicateCalls subst prog =
+  Prog <$> mapM treatFunction (progFunctions prog)
+  where treatFunction (fname,rettype,params,fbody,loc) = do
+          fbody' <- treatBody fbody
+          return (fname,rettype,params,fbody',loc)
+        treatBody (Body bnds res) = do
+          bnds' <- mapM treatBinding bnds
+          return $ Body (concat bnds') res
+        treatLambda lam = do
+          body <- treatBody $ lambdaBody lam
+          return $ lam { lambdaBody = body }
+        treatBinding (Let pat e) = do
+          (e', bnds) <- treatExp e
+          return $ bnds ++ [Let pat e']
+        treatExp e@(Apply predf predargs predt predloc)
+          | Just preds <- HM.lookup predf subst =
+            runBinder'' $ callPreds predt preds e $ \predf' ->
+            Apply predf' predargs predt predloc
+        treatExp e = do
+          e' <- mapExpM mapper e
+          return (e', [])
+          where mapper = identityMapper { mapOnBody = treatBody
+                                        , mapOnLambda = treatLambda
+                                        }
+        callPreds _ [] e _            = return e
+        callPreds predt (f:fs) e call = do
+          c <- letSubExp (nameToString f ++ "_result") $ call f
+          let predloc = srclocOf c
+          eIf (pure $ subExp c)
+            (eBody $ pure $ subExp $ constant True predloc)
+            (eBody $ callPreds predt fs e call)
+            predt predloc
 
 maybeOptimiseFun :: MonadFreshNames m => FunDec -> m [FunDec]
 maybeOptimiseFun fundec@(_,[Basic Bool],_,body,_) = do
-  let (sctable, _) = analyseBody ST.empty mempty body
-  preds <- generatePredicates fundec sctable
-  return $ fundec : preds
-maybeOptimiseFun fundec = return [fundec]
+  let sctable = analyseBody ST.empty mempty body
+  generatePredicates fundec sctable
+maybeOptimiseFun _ = return []
 
 generatePredicates :: MonadFreshNames m =>
                       FunDec -> SCTable -> m [FunDec]
@@ -57,42 +99,26 @@ data SCEntry = SufficientCond [[ScalExp]]
 
 type SCTable = HM.HashMap VName SCEntry
 
-type VarianceTable = HM.HashMap VName Loops
+type Loops = Names
 
-type Loops = HS.HashSet VName
-
-type AnalysisResult = (SCTable, VarianceTable)
-
-variantIn :: VName -> VarianceTable -> Loops
-variantIn name = fromMaybe HS.empty . HM.lookup name
-
-analyseBody :: ST.SymbolTable -> AnalysisResult -> Body -> AnalysisResult
-analyseBody vtable (sctable,vartable) (Body [] res) =
-  (mconcat $ map tableForSubExp $ resultSubExps res,
-   vartable)
+analyseBody :: ST.SymbolTable -> SCTable -> Body -> SCTable
+analyseBody vtable sctable (Body [] res) =
+  mconcat $ map tableForSubExp $ resultSubExps res
   where ranges = rangesRep vtable
         tableForSubExp (Var v)       = generateSCTable v vtable sctable ranges
         tableForSubExp (Constant {}) = mempty
-analyseBody vtable (sctable,vartable) (Body (Let [v] e:bnds) res) =
+analyseBody vtable sctable (Body (Let [v] e:bnds) res) =
   let vtable' = ST.insert name e vtable
       -- Construct a new sctable for recurrences.
-      (sctable',vartable') = case analyseExp (identName v) vtable e of
-        Nothing ->
-          (sctable,
-           HM.insert name (freeVariant vartable e) vartable)
-        Just (eSCTable,variance) ->
-          (HM.insert name (SCTable eSCTable) sctable,
-           HM.insert name variance vartable)
-  in analyseBody vtable' (sctable',vartable') $ Body bnds res
+      sctable' = case analyseExp vtable e of
+        Nothing       -> sctable
+        Just eSCTable -> HM.insert name (SCTable eSCTable) sctable
+  in analyseBody vtable' sctable' $ Body bnds res
   where name = identName v
 analyseBody vtable sctable (Body (Let _ _:bnds) res) =
   -- Not adding to symbol table here - this leaves a hole, but this
   -- looks like a weird binding anyway.
   analyseBody vtable sctable $ Body bnds res
-
-freeVariant :: VarianceTable -> Exp -> Loops
-freeVariant vartable =
-  mconcat . mapMaybe (`HM.lookup` vartable) . HS.toList . freeNamesInExp
 
 generateSCTable :: Ident -> ST.SymbolTable -> SCTable -> AS.RangesRep -> SCTable
 generateSCTable ident vtable sctable ranges =
@@ -118,45 +144,23 @@ rangesRep = HM.filter nonEmptyRange . HM.map toRep . ST.bindings
           where (lower, upper) = ST.valueRange entry
         nonEmptyRange (_, lower, upper) = isJust lower || isJust upper
 
-analyseExp :: VName -> ST.SymbolTable -> Exp -> Maybe (SCTable, Loops)
-analyseExp loop vtable (DoLoop _ merge i bound body _) =
-  Just $ analyseExpBody vtable' vartable body
+analyseExp :: ST.SymbolTable -> Exp -> Maybe SCTable
+analyseExp vtable (DoLoop _ _ i bound body _) =
+  Just $ analyseExpBody vtable' body
   where vtable' = clampLower $ clampUpper vtable
-        vartable = boundnames `makeVariantIn` loop
-        boundnames = identName i : map (identName . fst) merge
         clampUpper = ST.insertLoopVar (identName i) bound
         -- If we enter the loop, then 'bound' is at least one.
         clampLower = case bound of Var v -> identName v `ST.isAtLeast` 1
                                    _     -> id
-analyseExp loop vtable (Map _ fun _ _) =
-  Just $ analyseExpBody vtable (paramsVariantIn fun loop) $ lambdaBody fun
-analyseExp loop vtable (Redomap _ outerfun innerfun _ _ _) =
-  Just $ analyseExpBody vtable innervartable (lambdaBody innerfun) <>
-         analyseExpBody vtable outervartable (lambdaBody outerfun)
-  where innervartable = innerfun `paramsVariantIn` loop
-        outervartable = outerfun `paramsVariantIn` loop
-analyseExp _ _ _ = Nothing
+analyseExp vtable (Map _ fun _ _) =
+  Just $ analyseExpBody vtable $ lambdaBody fun
+analyseExp vtable (Redomap _ outerfun innerfun _ _ _) =
+  Just $ analyseExpBody vtable (lambdaBody innerfun) <>
+         analyseExpBody vtable (lambdaBody outerfun)
+analyseExp _ _ = Nothing
 
-paramsVariantIn :: Lambda -> VName -> VarianceTable
-paramsVariantIn fun name =
-  map identName (lambdaParams fun) `makeVariantIn` name
-
-makeVariantIn :: [VName] -> VName -> VarianceTable
-makeVariantIn names loop =
-  HM.fromList [ (name, HS.singleton loop) | name <- names ]
-
-analyseExpBody :: ST.SymbolTable -> VarianceTable -> Body -> (SCTable, Loops)
-analyseExpBody vtable vartable body =
-  let (sctable, vartable') = analyseBody vtable (mempty,vartable) body
-  in (sctable, varianceOfBodyResult vartable' body)
-
-varianceOfBodyResult :: VarianceTable -> Body -> Loops
-varianceOfBodyResult vartable =
-  mconcat . map (varianceOfSubExp vartable) . resultSubExps . bodyResult
-
-varianceOfSubExp :: VarianceTable -> SubExp -> Loops
-varianceOfSubExp vartable (Var v)        = identName v `variantIn` vartable
-varianceOfSubExp _        (Constant _ _) = mempty
+analyseExpBody :: ST.SymbolTable -> Body -> SCTable
+analyseExpBody vtable = analyseBody vtable mempty
 
 type VariantM = MaybeT
 

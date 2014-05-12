@@ -96,6 +96,8 @@ commandLineOptions =
     "h" ["higher-order-optimizations"]
   , passoption "Aggressively inline and remove dead functions." inlinetransform
     [] ["inline-functions"]
+  , passoption "Optimise predicates" optimisePredicates
+    [] ["optimise-predicates"]
   , Option "s" ["standard"]
     (NoArg $ Right $ \opts -> opts { futharkpipeline = standardPipeline ++ futharkpipeline opts })
     "Use the recommended optimised pipeline."
