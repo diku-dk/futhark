@@ -102,40 +102,28 @@ type SCTable = HM.HashMap VName SCEntry
 type Loops = Names
 
 analyseBody :: ST.SymbolTable -> SCTable -> Body -> SCTable
-analyseBody vtable sctable (Body [] res) =
-  mconcat $ map tableForSubExp $ resultSubExps res
-  where ranges = rangesRep vtable
-        tableForSubExp (Var v)       = generateSCTable v vtable sctable ranges
-        tableForSubExp (Constant {}) = mempty
+analyseBody _ sctable (Body [] _) =
+  sctable
 analyseBody vtable sctable (Body (Let [v] e:bnds) res) =
   let vtable' = ST.insert name e vtable
       -- Construct a new sctable for recurrences.
-      sctable' = case analyseExp vtable e of
-        Nothing       -> sctable
-        Just eSCTable -> HM.insert name (SCTable eSCTable) sctable
+      sctable' = case (analyseExp vtable e,
+                       simplify <$> ST.lookupScalExp name vtable') of
+        (Nothing, Just (Right se@(SE.RelExp SE.LTH0 _))) ->
+          case AS.mkSuffConds se loc ranges of
+            Left err  -> error $ show err -- Why can this even fail?
+            Right ses -> HM.insert name (SufficientCond ses) sctable
+        (Just eSCTable, _) -> sctable <> eSCTable
+        _                  -> sctable
   in analyseBody vtable' sctable' $ Body bnds res
   where name = identName v
+        ranges = rangesRep vtable
+        loc = srclocOf e
+        simplify se = AS.simplify se loc True ranges
 analyseBody vtable sctable (Body (Let _ _:bnds) res) =
   -- Not adding to symbol table here - this leaves a hole, but this
   -- looks like a weird binding anyway.
   analyseBody vtable sctable $ Body bnds res
-
-generateSCTable :: Ident -> ST.SymbolTable -> SCTable -> AS.RangesRep -> SCTable
-generateSCTable ident vtable sctable ranges =
-  case (ST.lookupExp name vtable, simplify <$> ST.lookupScalExp name vtable) of
-    (Just (BinOp LogAnd (Var x) (Var y) _ _), _) ->
-      generateSCTable x vtable sctable ranges <>
-      generateSCTable y vtable sctable ranges
-    (_, Just (Right se@(SE.RelExp SE.LTH0 _))) ->
-      case AS.mkSuffConds se loc ranges of
-        Left err  -> error $ show err -- Why can this even fail?
-        Right ses -> HM.singleton name $ SufficientCond ses
-    (_, _) ->
-      if name `HM.member` sctable then sctable
-      else HM.singleton name $ SufficientCond []
-  where loc = srclocOf ident
-        name = identName ident
-        simplify se = AS.simplify se loc True ranges
 
 rangesRep :: ST.SymbolTable -> AS.RangesRep
 rangesRep = HM.filter nonEmptyRange . HM.map toRep . ST.bindings
@@ -150,8 +138,8 @@ analyseExp vtable (DoLoop _ _ i bound body _) =
   where vtable' = clampLower $ clampUpper vtable
         clampUpper = ST.insertLoopVar (identName i) bound
         -- If we enter the loop, then 'bound' is at least one.
-        clampLower = case bound of Var v -> identName v `ST.isAtLeast` 1
-                                   _     -> id
+        clampLower = case bound of Var v       -> identName v `ST.isAtLeast` 1
+                                   Constant {} -> id
 analyseExp vtable (Map _ fun arrs _) =
   Just $ analyseExpBody vtable' $ lambdaBody fun
   where vtable' = foldr (uncurry ST.insertArrayParam) vtable $ zip params arrs
@@ -161,6 +149,9 @@ analyseExp vtable (Redomap _ outerfun innerfun acc arrs _) =
          analyseExpBody vtable (lambdaBody outerfun)
   where vtable' = foldr (uncurry ST.insertArrayParam) vtable $ zip arrparams arrs
         arrparams = drop (length acc) $ lambdaParams innerfun
+analyseExp vtable (If _ tbranch fbranch _ _) =
+  Just $ analyseExpBody vtable tbranch <>
+         analyseExpBody vtable fbranch
 analyseExp _ _ = Nothing
 
 analyseExpBody :: ST.SymbolTable -> Body -> SCTable
@@ -175,12 +166,6 @@ runVariantM = fmap (second getAny) . runWriterT . runMaybeT
 sufficiented :: Monad m => VariantM m ()
 sufficiented = tell $ Any True
 
-bodyVariantIn :: MonadFreshNames m =>
-                 ForbiddenTable -> SCTable -> Loops -> Body -> VariantM m Body
-bodyVariantIn ftable sctable loops (Body bnds res) = do
-  bnds' <- mapM (bindingVariantIn ftable sctable loops) bnds
-  return $ Body (concat bnds') res
-
 type ForbiddenTable = Names
 
 noneForbidden :: ForbiddenTable -> Names -> Bool
@@ -194,39 +179,62 @@ forbidNames names loop loops ftable
 forbidParams :: [Param] -> VName -> Loops -> ForbiddenTable -> ForbiddenTable
 forbidParams = forbidNames . map identName
 
+bodyVariantIn :: MonadFreshNames m =>
+                 ForbiddenTable -> SCTable -> Loops -> Body -> VariantM m Body
+bodyVariantIn ftable sctable loops (Body bnds res) = do
+  (ftable', bnds') <- foldM inspect (ftable,[]) bnds
+  checkResult ftable' res
+  return $ Body bnds' res
+  where inspect (ftable', bnds') bnd@(Let pat _) = do
+          optim <- bindingVariantIn ftable' sctable loops bnd
+          case optim of
+            Nothing ->
+              return (ftable' `HS.union` HS.fromList (map identName pat),
+                      bnds'++[bnd])
+            Just newbnds ->
+              return (ftable',
+                      bnds'++newbnds)
+
+checkResult :: Monad m => ForbiddenTable -> Result -> VariantM m ()
+checkResult ftable (Result _ ses _)
+  | noneForbidden ftable names = return ()
+  | otherwise = fail "Result is not sufficiently invariant"
+  where names = HS.fromList $ mapMaybe asName ses
+        asName (Var v)       = Just $ identName v
+        asName (Constant {}) = Nothing
+
 bindingVariantIn :: MonadFreshNames m =>
-                    ForbiddenTable -> SCTable -> Loops -> Binding -> VariantM m [Binding]
+                    ForbiddenTable -> SCTable -> Loops -> Binding -> VariantM m (Maybe [Binding])
 
 -- We assume that a SOAC contributes only if it returns exactly a
 -- single (boolean) value.
-bindingVariantIn ftable sctable loops (Let [v] e)
-  | Just (SCTable eSCTable) <- HM.lookup (identName v) sctable =
-    case e of Map cs fun args loc -> do
-                body <- bodyVariantIn (forbidParams (lambdaParams fun) name loops ftable)
-                        eSCTable loops $ lambdaBody fun
-                return [Let [v] $ Map cs fun { lambdaBody = body } args loc]
-              DoLoop res merge i bound body loc -> do
-                let names = identName i : map (identName . fst) merge
-                body' <- bodyVariantIn (forbidNames names name loops ftable)
-                         eSCTable loops body
-                return [Let [v] $ DoLoop res merge i bound body' loc]
-              Redomap cs outerfun innerfun acc args loc -> do
-                outerbody <- bodyVariantIn ftable eSCTable loops $ lambdaBody outerfun
-                let forbiddenParams = drop (length acc) $ lambdaParams innerfun
-                innerbody <- bodyVariantIn (forbidParams forbiddenParams name loops ftable)
-                             eSCTable loops $ lambdaBody innerfun
-                return [Let [v] $ Redomap cs
-                        outerfun { lambdaBody = outerbody }
-                        innerfun { lambdaBody = innerbody }
-                        acc args loc]
-              _ -> fail "Binding has own SCTable, but is not recognised as recurrence.  Bug?"
+bindingVariantIn ftable sctable loops (Let [v] (Map cs fun args loc)) = do
+  body <- bodyVariantIn (forbidParams (lambdaParams fun) name loops ftable)
+          sctable loops $ lambdaBody fun
+  return $ Just [Let [v] $ Map cs fun { lambdaBody = body } args loc]
+  where name = identName v
+bindingVariantIn ftable sctable loops (Let [v] (DoLoop res merge i bound body loc)) = do
+  let names = identName i : map (identName . fst) merge
+  body' <- bodyVariantIn (forbidNames names name loops ftable)
+           sctable loops body
+  return $ Just [Let [v] $ DoLoop res merge i bound body' loc]
+  where name = identName v
+bindingVariantIn ftable sctable loops (Let [v] (Redomap cs outerfun innerfun acc args loc)) = do
+  outerbody <- bodyVariantIn ftable sctable loops $ lambdaBody outerfun
+  let forbiddenParams = drop (length acc) $ lambdaParams innerfun
+  innerbody <- bodyVariantIn (forbidParams forbiddenParams name loops ftable)
+               sctable loops $ lambdaBody innerfun
+  return $ Just [Let [v] $ Redomap cs
+                 outerfun { lambdaBody = outerbody }
+                 innerfun { lambdaBody = innerbody }
+                 acc args loc]
   where name = identName v
 
 bindingVariantIn ftable sctable loops (Let pat (If (Var v) tbranch fbranch t loc)) = do
   tbranch' <- bodyVariantIn ftable sctable loops tbranch
   fbranch' <- bodyVariantIn ftable sctable loops fbranch
   if noneForbidden ftable $ HS.singleton $ identName v then
-    return [Let pat $ If (Var v) tbranch' fbranch' t loc]
+    return $ Just [Let pat $ If (Var v) tbranch' fbranch' t loc]
     else
     -- FIXME: Check that tbranch and fbranch are safe.  We can do
     -- something smarter if 'v' actually comes from an 'or'.  Also,
@@ -237,26 +245,26 @@ bindingVariantIn ftable sctable loops (Let pat (If (Var v) tbranch fbranch t loc
         | Basic Bool <- subExpType tres,
           Basic Bool <- subExpType fres,
           all safeBnd tbnds, all safeBnd fbnds ->
-        return $ tbnds ++ fbnds ++
-                 [Let pat $ BinOp LogAnd tres fres (Basic Bool) loc]
-      _ -> fail "Branch is insufficiently invariant"
+        return $ Just $ tbnds ++ fbnds ++
+                        [Let pat $ BinOp LogAnd tres fres (Basic Bool) loc]
+      _ -> return Nothing
   where safeBnd (Let _ e) = safeExp e
 
 bindingVariantIn ftable sctable _ (Let [v] e)
   | noneForbidden ftable $ freeNamesInExp e =
-    return [Let [v] e]
+    return $ Just [Let [v] e]
   | Just (SufficientCond suff) <- HM.lookup (identName v) sctable =
     case filter (scalExpIsAtMostVariantIn ftable) $ map mkConj suff of
-      []   -> fail "Cannot generate invariant sufficient condition"
+      []   -> return Nothing
       x:xs -> do (e', bnds) <- lift $ lift $ SE.fromScalExp loc $ foldl SE.SLogOr x xs
                  sufficiented
-                 return $ bnds ++ [Let [v] e']
+                 return $ Just $ bnds ++ [Let [v] e']
   where mkConj []     = SE.Val $ LogVal True
         mkConj (x:xs) = foldl SE.SLogAnd x xs
         loc = srclocOf e
 
 -- Nothing we can do about this one, then.
-bindingVariantIn _ _ _ _ = fail "Expression is too variant"
+bindingVariantIn _ _ _ _ = return Nothing
 
 scalExpIsAtMostVariantIn :: ForbiddenTable -> ScalExp -> Bool
 scalExpIsAtMostVariantIn ftable =
