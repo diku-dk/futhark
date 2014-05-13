@@ -4,8 +4,6 @@ module Futhark.SuffCond
        )
        where
 
--- FIXME: We are not dealing properly with ranges (iota etc) yet.
-
 import Control.Applicative
 import Control.Arrow (second)
 import Data.Loc
@@ -154,11 +152,15 @@ analyseExp vtable (DoLoop _ _ i bound body _) =
         -- If we enter the loop, then 'bound' is at least one.
         clampLower = case bound of Var v -> identName v `ST.isAtLeast` 1
                                    _     -> id
-analyseExp vtable (Map _ fun _ _) =
-  Just $ analyseExpBody vtable $ lambdaBody fun
-analyseExp vtable (Redomap _ outerfun innerfun _ _ _) =
-  Just $ analyseExpBody vtable (lambdaBody innerfun) <>
+analyseExp vtable (Map _ fun arrs _) =
+  Just $ analyseExpBody vtable' $ lambdaBody fun
+  where vtable' = foldr (uncurry ST.insertArrayParam) vtable $ zip params arrs
+        params = lambdaParams fun
+analyseExp vtable (Redomap _ outerfun innerfun acc arrs _) =
+  Just $ analyseExpBody vtable' (lambdaBody innerfun) <>
          analyseExpBody vtable (lambdaBody outerfun)
+  where vtable' = foldr (uncurry ST.insertArrayParam) vtable $ zip arrparams arrs
+        arrparams = drop (length acc) $ lambdaParams innerfun
 analyseExp _ _ = Nothing
 
 analyseExpBody :: ST.SymbolTable -> Body -> SCTable
@@ -189,8 +191,8 @@ forbidNames names loop loops ftable
   | loop `HS.member` loops = ftable
   | otherwise              = foldr HS.insert ftable names
 
-forbidParams :: Lambda -> VName -> Loops -> ForbiddenTable -> ForbiddenTable
-forbidParams = forbidNames . map identName . lambdaParams
+forbidParams :: [Param] -> VName -> Loops -> ForbiddenTable -> ForbiddenTable
+forbidParams = forbidNames . map identName
 
 bindingVariantIn :: MonadFreshNames m =>
                     ForbiddenTable -> SCTable -> Loops -> Binding -> VariantM m [Binding]
@@ -200,7 +202,7 @@ bindingVariantIn :: MonadFreshNames m =>
 bindingVariantIn ftable sctable loops (Let [v] e)
   | Just (SCTable eSCTable) <- HM.lookup (identName v) sctable =
     case e of Map cs fun args loc -> do
-                body <- bodyVariantIn (forbidParams fun name loops ftable)
+                body <- bodyVariantIn (forbidParams (lambdaParams fun) name loops ftable)
                         eSCTable loops $ lambdaBody fun
                 return [Let [v] $ Map cs fun { lambdaBody = body } args loc]
               DoLoop res merge i bound body loc -> do
@@ -209,9 +211,9 @@ bindingVariantIn ftable sctable loops (Let [v] e)
                          eSCTable loops body
                 return [Let [v] $ DoLoop res merge i bound body' loc]
               Redomap cs outerfun innerfun acc args loc -> do
-                outerbody <- bodyVariantIn (forbidParams outerfun name loops ftable)
-                             eSCTable loops $ lambdaBody outerfun
-                innerbody <- bodyVariantIn (forbidParams outerfun name loops ftable)
+                outerbody <- bodyVariantIn ftable eSCTable loops $ lambdaBody outerfun
+                let forbiddenParams = drop (length acc) $ lambdaParams innerfun
+                innerbody <- bodyVariantIn (forbidParams forbiddenParams name loops ftable)
                              eSCTable loops $ lambdaBody innerfun
                 return [Let [v] $ Redomap cs
                         outerfun { lambdaBody = outerbody }
