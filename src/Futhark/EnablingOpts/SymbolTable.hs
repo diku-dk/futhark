@@ -116,6 +116,9 @@ insert name e vtable = insertEntry name bind vtable
             subExpRange se vtable
           Index _ v _ _ ->
             lookupRange (identName v) vtable
+          Filter _ _ [Var v] _ _ ->
+            lookupRange (identName v) vtable -- FIXME: Support filters
+                                             -- with more outputs.
           _ -> (Nothing, Nothing)
         zero = Val $ IntVal 0
 
