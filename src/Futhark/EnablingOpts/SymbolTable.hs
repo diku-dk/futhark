@@ -9,6 +9,8 @@ module Futhark.EnablingOpts.SymbolTable
   , enclosingLoopVars
   , insert
   , insert'
+  , insertParam
+  , insertArrayParam
   , insertLoopVar
   , updateBounds
   , isAtLeast
@@ -40,9 +42,11 @@ data Entry = Entry {
     asExp :: Maybe Exp
   , asScalExp :: Maybe ScalExp
   , bindingDepth :: Int
-  , valueRange :: (Maybe ScalExp, Maybe ScalExp)
+  , valueRange :: Range
   , loopVariable :: Bool
   } deriving (Eq, Show)
+
+type Range = (Maybe ScalExp, Maybe ScalExp)
 
 data CtOrId  = Value Value
              -- ^ A plain value for constant propagation.
@@ -78,6 +82,10 @@ lookupVar name vtable = case lookupExp name vtable of
                           Just (SubExps [Var v] _) -> Just $ identName v
                           _                        -> Nothing
 
+lookupRange :: VName -> SymbolTable -> Range
+lookupRange name vtable =
+  maybe (Nothing, Nothing) valueRange $ HM.lookup name (bindings vtable)
+
 enclosingLoopVars :: [VName] -> SymbolTable -> [VName]
 enclosingLoopVars free vtable =
   map fst $ reverse $
@@ -87,23 +95,51 @@ enclosingLoopVars free vtable =
                         return (name, e)
 
 insert :: VName -> Exp -> SymbolTable -> SymbolTable
-insert name e vtable =
-  vtable { bindings = HM.insert name bind $ bindings vtable
-         , curDepth = curDepth vtable + 1
-         }
+insert name e vtable = insertEntry name bind vtable
   where bind = Entry {
                  asExp = Just e
                , asScalExp = toScalExp (`lookupScalExp` vtable) e
-               , valueRange = (Nothing, Nothing)
+               , valueRange = range
                , bindingDepth = curDepth vtable
                , loopVariable = False
                }
+        range = case e of
+          SubExps [se] _ ->
+            subExpRange se vtable
+          Iota n _ ->
+            (Just zero, subExpToScalExp n)
+          Replicate _ v _ ->
+            subExpRange v vtable
+          Split _ se _ _ _ ->
+            subExpRange se vtable
+          Copy se _ ->
+            subExpRange se vtable
+          Index _ v _ _ ->
+            lookupRange (identName v) vtable
+          _ -> (Nothing, Nothing)
+        zero = Val $ IntVal 0
 
-insert' :: VName -> SymbolTable -> SymbolTable
-insert' name vtable =
-  vtable { bindings = HM.insert name bind $ bindings vtable
+subExpRange :: SubExp -> SymbolTable -> Range
+subExpRange (Var v) vtable =
+  lookupRange (identName v) vtable
+subExpRange (Constant (BasicVal bv) _) _ =
+  (Just $ Val bv, Just $ Val bv)
+subExpRange (Constant (ArrayVal _ _) _) _ =
+  (Nothing, Nothing)
+
+subExpToScalExp :: SubExp -> Maybe ScalExp
+subExpToScalExp (Var v)                    = Just $ Id v
+subExpToScalExp (Constant (BasicVal bv) _) = Just $ Val bv
+subExpToScalExp _                          = Nothing
+
+insertEntry :: VName -> Entry -> SymbolTable -> SymbolTable
+insertEntry name entry vtable =
+  vtable { bindings = HM.insert name entry $ bindings vtable
          , curDepth = curDepth vtable + 1
          }
+
+insert' :: VName -> SymbolTable -> SymbolTable
+insert' name vtable = insertEntry name bind vtable
   where bind = Entry {
                  asExp = Nothing
                , asScalExp = Nothing
@@ -112,11 +148,41 @@ insert' name vtable =
                , loopVariable = False
                }
 
+insertParamWithRange :: Param -> Range -> SymbolTable -> SymbolTable
+insertParamWithRange param range vtable =
+  -- We know that the sizes in the type of param are at least zero,
+  -- since they are array sizes.
+  let vtable' = insertEntry name bind vtable
+  in foldr (`isAtLeast` 0) vtable' sizevars
+  where bind = Entry {
+                 asExp = Nothing
+               , asScalExp = Nothing
+               , valueRange = range
+               , bindingDepth = curDepth vtable
+               , loopVariable = False
+               }
+        name = identName param
+        sizevars = mapMaybe isVar $ arrayDims $ identType param
+        isVar (Var v) = Just $ identName v
+        isVar _       = Nothing
+
+insertParam :: Param -> SymbolTable -> SymbolTable
+insertParam param =
+  insertParamWithRange param (Nothing, Nothing)
+
+insertArrayParam :: Param -> SubExp -> SymbolTable -> SymbolTable
+insertArrayParam param array vtable =
+  -- We now know that the outer size of 'array' is at least one, and
+  -- that the inner sizes are at least zero, since they are array
+  -- sizes.
+  let vtable' = insertParamWithRange param (subExpRange array vtable) vtable
+  in case arrayDims $ subExpType array of
+    Var v:_ -> (identName v `isAtLeast` 1) vtable
+    _       -> vtable'
+
+
 insertLoopVar :: VName -> SubExp -> SymbolTable -> SymbolTable
-insertLoopVar name bound vtable =
-  vtable { bindings = HM.insert name bind $ bindings vtable
-         , curDepth = curDepth vtable + 1
-         }
+insertLoopVar name bound vtable = insertEntry name bind vtable
   where bind = Entry {
                  asExp = Nothing
                , asScalExp = Nothing

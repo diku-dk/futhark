@@ -154,11 +154,12 @@ binding = localVtable . flip (foldr $ uncurry ST.insert)
 bindParams :: [Param] -> SimpleM a -> SimpleM a
 bindParams params =
   localVtable $ \vtable ->
-    let vtable' = foldr (ST.insert' . identName) vtable params
-    in foldr (`ST.isAtLeast` 0) vtable' sizevars
-  where sizevars = mapMaybe isVar $ concatMap (arrayDims . identType) params
-        isVar (Var v) = Just $ identName v
-        isVar _       = Nothing
+    foldr ST.insertParam vtable params
+
+bindArrayParams :: [(Param,SubExp)] -> SimpleM a -> SimpleM a
+bindArrayParams params =
+  localVtable $ \vtable ->
+    foldr (uncurry ST.insertArrayParam) vtable params
 
 bindLoopVar :: Ident -> SubExp -> SimpleM a -> SimpleM a
 bindLoopVar var bound =
@@ -457,6 +458,43 @@ simplifyExp (Apply fname args tp loc) = do
                   return $ SubExps es loc
     Nothing -> return $ Apply fname (zip args' $ map snd args) tp' loc
 
+simplifyExp (Map cs fun arrs loc) = do
+  cs' <- simplifyCerts cs
+  arrs' <- mapM simplifySubExp arrs
+  fun' <- simplifyLambda fun arrs'
+  return $ Map cs' fun' arrs' loc
+
+simplifyExp (Filter cs fun arrs size loc) = do
+  cs' <- simplifyCerts cs
+  arrs' <- mapM simplifySubExp arrs
+  fun' <- simplifyLambda fun arrs'
+  size' <- simplifySubExp size
+  return $ Filter cs' fun' arrs' size' loc
+
+simplifyExp (Reduce cs fun input loc) = do
+  let (acc, arrs) = unzip input
+  cs' <- simplifyCerts cs
+  acc' <- mapM simplifySubExp acc
+  arrs' <- mapM simplifySubExp arrs
+  fun' <- simplifyLambda fun arrs'
+  return $ Reduce cs' fun' (zip acc' arrs') loc
+
+simplifyExp (Scan cs fun input loc) = do
+  let (acc, arrs) = unzip input
+  cs' <- simplifyCerts cs
+  acc' <- mapM simplifySubExp acc
+  arrs' <- mapM simplifySubExp arrs
+  fun' <- simplifyLambda fun arrs'
+  return $ Scan cs' fun' (zip acc' arrs') loc
+
+simplifyExp (Redomap cs outerfun innerfun acc arrs loc) = do
+  cs' <- simplifyCerts cs
+  acc' <- mapM simplifySubExp acc
+  arrs' <- mapM simplifySubExp arrs
+  outerfun' <- simplifyLambda outerfun []
+  innerfun' <- simplifyLambda innerfun arrs
+  return $ Redomap cs' outerfun' innerfun' acc' arrs' loc
+
 simplifyExp e = simplifyExpBase e
 
 simplifyExpBase :: Exp -> SimpleM Exp
@@ -465,7 +503,9 @@ simplifyExpBase = mapExpM hoist
                   mapOnExp = simplifyExp
                 , mapOnBody = simplifyBody
                 , mapOnSubExp = simplifySubExp
-                , mapOnLambda = simplifyLambda
+                -- Lambdas are handled explicitly because we need to
+                -- bind their parameters.
+                , mapOnLambda = fail "Unhandled lambda in simplification engine."
                 , mapOnIdent = simplifyIdent
                 , mapOnType = simplifyType
                 , mapOnValue = return
@@ -500,12 +540,17 @@ simplifyType :: TypeBase als Shape -> SimpleM (TypeBase als Shape)
 simplifyType t = do dims <- mapM simplifySubExp $ arrayDims t
                     return $ t `setArrayShape` Shape dims
 
-simplifyLambda :: Lambda -> SimpleM Lambda
-simplifyLambda (Lambda params body rettype loc) = do
-  body' <- blockIf (hasFree params' `orIf` isUniqueBinding) $ simplifyBody body
+simplifyLambda :: Lambda -> [SubExp] -> SimpleM Lambda
+simplifyLambda (Lambda params body rettype loc) arrs = do
+  body' <- blockIf (hasFree params' `orIf` isUniqueBinding) $
+           bindParams nonarrayparams $
+           bindArrayParams (zip arrayparams arrs) $
+           simplifyBody body
   rettype' <- mapM simplifyType rettype
   return $ Lambda params body' rettype' loc
   where params' = patNameSet $ map fromParam params
+        (nonarrayparams, arrayparams) =
+          splitAt (length params - length arrs) params
 
 simplifyCerts :: Certificates -> SimpleM Certificates
 simplifyCerts = liftM (nub . concat) . mapM check
