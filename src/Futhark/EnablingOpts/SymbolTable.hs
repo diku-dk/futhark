@@ -177,9 +177,8 @@ insertArrayParam param array vtable =
   -- sizes.
   let vtable' = insertParamWithRange param (subExpRange array vtable) vtable
   in case arrayDims $ subExpType array of
-    Var v:_ -> (identName v `isAtLeast` 1) vtable
+    Var v:_ -> (identName v `isAtLeast` 1) vtable'
     _       -> vtable'
-
 
 insertLoopVar :: VName -> SubExp -> SymbolTable -> SymbolTable
 insertLoopVar name bound vtable = insertEntry name bind vtable
