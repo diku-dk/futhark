@@ -62,8 +62,8 @@ internaliseProg doBoundsCheck prog =
   I.renameProg $
   I.Prog $ runInternaliseM doBoundsCheck prog $ liftM concat $
            mapM (split <=< internaliseFun) $ E.progFunctions prog
-  where split fun = do (cfun, pfun, sfun, vfun) <- splitFunction fun
-                       return [cfun, pfun, sfun, vfun]
+  where split fun = do (vfun, sfun) <- splitFunction fun
+                       return [vfun, sfun]
 
 internaliseFun :: E.FunDec -> InternaliseM I.FunDec
 internaliseFun (fname,rettype,params,body,loc) =

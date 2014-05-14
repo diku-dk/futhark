@@ -1,7 +1,7 @@
 -- | This module exports functionality for splitting a function into
 -- predicate and value function.
-module Futhark.Internalise.GenPredicate
-  ( splitFunction
+module Futhark.SuffCond.GenPredicates
+  ( genPredicate
   )
   where
 
@@ -15,17 +15,25 @@ import Futhark.InternalRep
 import Futhark.MonadFreshNames
 import Futhark.Tools
 
-splitFunction :: MonadFreshNames m =>
-                 Name -> Name -> FunDec -> m (FunDec, FunDec)
-splitFunction pred_fname val_fname (_,rettype,params,body,loc) = do
+predicateFunctionName :: Name -> Name
+predicateFunctionName fname = fname <> nameFromString "_pred"
+
+genPredicate :: MonadFreshNames m =>
+                FunDec -> m (FunDec, FunDec)
+genPredicate (fname,rettype,params,body,loc) = do
+  pred_ident <- newIdent "pred" (Basic Bool) loc
   cert_ident <- newIdent "pred_cert" (Basic Cert) loc
   (pred_params, bnds) <- nonuniqueParams params
-  (pred_body, val_body) <- splitFunBody cert_ident body
-  let pred_fun = (pred_fname, [Basic Bool], pred_params,
+  (pred_body, Body val_bnds val_res) <- splitFunBody cert_ident body
+  let pred_args = [ (Var $ fromParam arg, Observe) | arg <- params ]
+      pred_bnd = Let [pred_ident] $ Apply predFname pred_args [Basic Bool] loc
+      cert_bnd = Let [cert_ident] $ Assert (Var pred_ident) loc
+      val_fun = (fname, rettype, params,
+                 Body (pred_bnd:cert_bnd:val_bnds) val_res, loc)
+      pred_fun = (predFname, [Basic Bool], pred_params,
                   bnds `insertBindings` pred_body, loc)
-      val_fun = (val_fname, rettype, toParam cert_ident : params,
-                 val_body, loc)
   return (pred_fun, val_fun)
+  where predFname = predicateFunctionName fname
 
 splitFunBody :: MonadFreshNames m => Ident -> Body -> m (Body, Body)
 splitFunBody cert_ident body = do
@@ -94,17 +102,25 @@ splitMap :: MonadFreshNames m =>
          -> m ([Binding], Lambda, Maybe SubExp)
 splitMap cert_ident cs fun args loc = do
   (predfun, valfun) <- splitMapLambda cert_ident fun
-  allchecks <- newIdent "allchecks" boolarray loc
   andchecks <- newIdent "checks" (Basic Bool) loc
   andfun <- binOpLambda LogAnd (Basic Bool) loc
-  let checksbnd = Let [allchecks] $ Map cs predfun args loc
-      andbnd = Let [andchecks] $
-               Reduce [] andfun [(constant True loc,Var allchecks)] loc
-  return ([checksbnd,andbnd],
+  innerfun <- predConjFun predfun
+  let andbnd = Let [andchecks] $
+               Redomap cs andfun innerfun [constant True loc] args loc
+  return ([andbnd],
           valfun,
           Just $ Var andchecks)
-  where boolarray = arrayOf (Basic Bool)
-                    (Shape [arraysSize 0 $ map subExpType args]) Unique
+  where predConjFun predfun = do
+          acc <- newIdent "acc" (Basic Bool) loc
+          res <- newIdent "res" (Basic Bool) loc
+          let Body predbnds (Result _ [se] _) = lambdaBody predfun -- XXX
+              andbnd = Let [res] $ BinOp LogAnd (Var acc) se (Basic Bool) loc
+              body = Body (predbnds++[andbnd]) $ Result [] [Var res] loc
+          return Lambda { lambdaSrcLoc = srclocOf predfun
+                        , lambdaParams = toParam acc : lambdaParams predfun
+                        , lambdaReturnType = [Basic Bool]
+                        , lambdaBody = body
+                        }
 
 splitMapLambda :: MonadFreshNames m => Ident -> Lambda -> m (Lambda, Lambda)
 splitMapLambda cert_ident lam = do

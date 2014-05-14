@@ -80,7 +80,6 @@ Library
                    Futhark.Internalise.Lambdas
                    Futhark.Internalise.Monad
                    Futhark.Internalise.Splitting
-                   Futhark.Internalise.GenPredicate
                    Futhark.Internalise.TypesValues
                    Futhark.InternalRep
                    Futhark.InternalRep.Attributes
@@ -99,6 +98,8 @@ Library
                    Futhark.Tools
                    Futhark.TypeError
                    Futhark.Untrace
+                   Futhark.SuffCond.GenPredicates
+                   Futhark.SuffCond.OptPredicates
                    Futhark.SuffCond
                    Futhark.Version
                    Language.Futhark

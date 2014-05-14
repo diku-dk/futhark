@@ -1,8 +1,6 @@
 module Futhark.Internalise.Splitting
   ( splitBody
   , shapeFunctionName
-  , predicateFunctionName
-  , valueFunctionName
   , splitFunction
   , splitLambda
   , splitType
@@ -18,64 +16,42 @@ import Data.Monoid
 
 import Futhark.Internalise.Monad
 import Futhark.Internalise.AccurateSizes
-import qualified Futhark.Internalise.GenPredicate as GenPredicate
 import Futhark.InternalRep
 import Futhark.Tools
 
 shapeFunctionName :: Name -> Name
 shapeFunctionName fname = fname <> nameFromString "_shape"
 
-predicateFunctionName :: Name -> Name
-predicateFunctionName fname = fname <> nameFromString "_pred"
-
-valueFunctionName :: Name -> Name
-valueFunctionName fname = fname <> nameFromString "_val"
-
-sliceNames :: Name -> (Name, Name, Name)
-sliceNames fname = (predicateFunctionName fname,
-                    shapeFunctionName fname,
-                    valueFunctionName fname)
-
--- | Returns f, f_pred, f_shape, f_value.
-splitFunction :: FunDec -> InternaliseM (FunDec, FunDec, FunDec, FunDec)
-splitFunction fundec@(fname,rettype,origparams,_,loc) = do
-  (f_pred, (_,_,params,body,_)) <-
-    GenPredicate.splitFunction predFname fname fundec
+-- | Returns f, f_shape.
+splitFunction :: FunDec -> InternaliseM (FunDec, FunDec)
+splitFunction (fname,rettype,params,body,loc) = do
   let (shapeBody,valueBody) = splitBody body
   (params', copies) <- nonuniqueParams params
   shapeBody' <- insertBindingsM $ do
                   mapM_ addBinding copies
                   return shapeBody
-  fBody <- makeFullBody
-  let f       = (fname, valueRettype, origparams, fBody, loc)
-      f_shape = (shapeFname, map toDecl shapeRettype, params', shapeBody', loc)
-      f_value = (valueFname, valueRettype, params, valueBody, loc)
-  return (f, f_pred, f_shape, f_value)
+  let f_shape = (shapeFname, map toDecl shapeRettype, params', shapeBody', loc)
+      f       = (fname, valueRettype, params, valueBody, loc)
+  return (f, f_shape)
   where (shapeRettype, valueRettype) = splitType rettype
-        (predFname,shapeFname,valueFname) = sliceNames fname
-
-        makeFullBody = runBinder $ do
-          let args = [ (Var $ fromParam arg, Observe) | arg <- origparams ]
-          eBody $ splitFuncall fname args (map (`setAliases` mempty) valueRettype) loc
+        shapeFname = shapeFunctionName fname
 
 splitFuncall :: MonadBinder m =>
                 Name -> [(SubExp, Diet)] -> [TypeBase Names Rank] -> SrcLoc
              -> m Exp
 splitFuncall fname args rettype loc = do
-  ok <- letSubExp "pred" $ Apply predFname args [Basic Bool] loc
-  cert <- letSubExp "cert" $ Assert ok loc
-  result_shape <- resultShape cert
+  result_shape <- resultShape
   let valueRettype' = addTypeShapes valueRettype result_shape
-  return $ Apply valueFname ((cert, Observe):args) valueRettype' loc
+  return $ Apply fname args valueRettype' loc
   where (shapeRettype, valueRettype) = splitType $ typeSizes rettype
-        (predFname,shapeFname,valueFname) = sliceNames fname
+        shapeFname = shapeFunctionName fname
 
-        resultShape cert
+        resultShape
           | []      <- shapeRettype = return []
           | otherwise               =
             liftM (map Var) $
             letTupExp "fun_shapes" $
-            Apply shapeFname ((cert,Observe) : [ (arg, Observe) | (arg, _) <- args])
+            Apply shapeFname [ (arg, Observe) | (arg, _) <- args]
             shapeRettype loc
 
 splitLambda :: ([Param], Body, [DeclType])
