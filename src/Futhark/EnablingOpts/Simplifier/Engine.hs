@@ -14,6 +14,7 @@
 --
 module Futhark.EnablingOpts.Simplifier.Engine
        ( simplifyProg
+       , simplifyOneFun
        , simplifyOneLambda
        , simplifyOneBody
        ) where
@@ -50,6 +51,15 @@ simplifyProg rules prog =
   Prog $ fst $ runSimpleM (mapM simplifyFun $ progFunctions prog)
                (emptyEnv rules $ Just prog) namesrc
   where namesrc = newNameSourceForProg prog
+
+-- | Simplify the given function.  Even if the output differs from the
+-- output, meaningful simplification may not have taken place - the
+-- order of bindings may simply have been rearranged.  The function is
+-- idempotent, however.
+simplifyOneFun :: MonadFreshNames m =>
+                  RuleBook -> FunDec -> m FunDec
+simplifyOneFun rules fundec =
+  modifyNameSource $ runSimpleM (simplifyFun fundec) (emptyEnv rules Nothing)
 
 -- | Simplify just a single 'Lambda'.
 simplifyOneLambda :: MonadFreshNames m => RuleBook -> Maybe Prog -> Lambda -> m Lambda

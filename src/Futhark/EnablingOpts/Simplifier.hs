@@ -7,6 +7,7 @@
 --
 module Futhark.EnablingOpts.Simplifier
   ( simplifyProg
+  , simplifyFun
   , simplifyOneLambda
   )
   where
@@ -22,6 +23,10 @@ import qualified Futhark.EnablingOpts.Simplifier.Engine as Engine
 -- idempotent, however.
 simplifyProg :: Prog -> Prog
 simplifyProg = Engine.simplifyProg standardRules
+
+-- | Simplify just a single function declaration.
+simplifyFun :: MonadFreshNames m => FunDec -> m FunDec
+simplifyFun = Engine.simplifyOneFun standardRules
 
 -- | Simplify just a single 'Lambda'.
 simplifyOneLambda :: MonadFreshNames m => Prog -> Lambda -> m Lambda
