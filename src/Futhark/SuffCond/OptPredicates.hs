@@ -4,8 +4,6 @@ module Futhark.SuffCond.OptPredicates
        )
        where
 
-import Debug.Trace
-
 import Control.Applicative
 import Control.Arrow (second)
 import Data.Loc
