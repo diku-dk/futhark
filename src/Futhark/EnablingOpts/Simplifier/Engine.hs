@@ -277,9 +277,9 @@ expCost (Replicate {}) = 1
 expCost _ = 0
 
 distances :: HM.HashMap VName Int -> BindNeed -> HM.HashMap VName Int
-distances m (LetNeed pat e _) = HM.fromList [ (k, d+cost) | k <- HS.toList outs ]
+distances m (LetNeed pat e _) = HM.fromList [ (k, d+cost) | k <- map identName pat ]
   where d = HS.foldl' f 0 ins
-        (outs, ins, cost) = (patNameSet pat, freeNamesInExp e, expCost e)
+        (ins, cost) = (freeNamesInExp e, expCost e)
         f x k = case HM.lookup k m of
                   Just y  -> max x y
                   Nothing -> x
