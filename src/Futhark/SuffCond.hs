@@ -7,6 +7,7 @@ module Futhark.SuffCond
 import Control.Monad.State
 
 import Futhark.InternalRep
+import Futhark.InternalRep.Renamer
 import Futhark.MonadFreshNames
 import Futhark.SuffCond.OptPredicates
 import Futhark.SuffCond.GenPredicates
@@ -28,5 +29,6 @@ extractPredicates =
           -- is horrible.
           predf' <- return . deadCodeElimFun =<< simplifyFun =<<
                     return . deadCodeElimFun =<< simplifyFun =<<
-                    return . deadCodeElimFun =<< simplifyFun predf
+                    return . deadCodeElimFun =<< simplifyFun =<<
+                    renameFun predf
           return [predf',valf]
