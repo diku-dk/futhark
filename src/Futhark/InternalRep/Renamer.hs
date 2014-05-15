@@ -17,6 +17,7 @@ module Futhark.InternalRep.Renamer
   , renameExp
   , renameBody
   , renameLambda
+  , renameFun
   )
   where
 
@@ -42,7 +43,7 @@ runRenamer m src = runReader (runStateT m src) env
 -- invalid program valid.
 renameProg :: Prog -> Prog
 renameProg prog = Prog $ fst $
-                  runRenamer (mapM renameFun $ progFunctions prog) src
+                  runRenamer (mapM rename $ progFunctions prog) src
   where src = newNameSourceForProg prog
 
 -- | Rename bound variables such that each is unique.  The semantics
@@ -64,6 +65,13 @@ renameBody = modifyNameSource . runRenamer . rename
 -- Note in particular that the parameters of the lambda are renamed.
 renameLambda :: MonadFreshNames m => Lambda -> m Lambda
 renameLambda = modifyNameSource . runRenamer . rename
+
+-- | Rename bound variables such that each is unique.  The semantics
+-- of the function is unaffected, under the assumption that the body
+-- was correct to begin with.  Any free variables are left untouched.
+-- Note in particular that the parameters of the lambda are renamed.
+renameFun :: MonadFreshNames m => FunDec -> m FunDec
+renameFun = modifyNameSource . runRenamer . rename
 
 data RenameEnv = RenameEnv {
     envNameMap :: HM.HashMap VName VName
@@ -102,13 +110,13 @@ bind vars body = do
         bind' vars' env = env { envNameMap = HM.fromList (zip varnames vars')
                                              `HM.union` envNameMap env }
 
-renameFun :: FunDec -> RenameM FunDec
-renameFun (fname, ret, params, body, loc) =
-  bind params $ do
-    params' <- mapM rename params
-    body' <- rename body
-    ret' <- mapM rename ret
-    return (fname, ret', params', body', loc)
+instance Rename FunDec where
+  rename (fname, ret, params, body, loc) =
+    bind params $ do
+      params' <- mapM rename params
+      body' <- rename body
+      ret' <- mapM rename ret
+      return (fname, ret', params', body', loc)
 
 instance Rename SubExp where
   rename (Var v)          = Var <$> rename v
