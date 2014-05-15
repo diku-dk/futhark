@@ -84,23 +84,26 @@ simplifyFun (fname, rettype, params, body, loc) = do
   body' <- blockAllHoisting $ bindParams params $ simplifyBody body
   return (fname, rettype, params, body', loc)
 
-data BindNeed = LetNeed [Ident] Exp [Exp]
+data BindNeed = LetNeed ([Ident],[VName]) (Exp, Names) [(Exp,Names)]
+                -- The [VName] is just the names of the idents, as a
+                -- cache.  Similarly, the expressions are tagged with
+                -- what is free in them.
                 deriving (Show, Eq)
 
 type NeedSet = [BindNeed]
 
 asTail :: BindNeed -> Body
-asTail (LetNeed pat e _) = Body [Let pat e] $ Result [] [] loc
+asTail (LetNeed (pat,_) (e,_) _) = Body [Let pat e] $ Result [] [] loc
   where loc = srclocOf pat
 
 requires :: BindNeed -> HS.HashSet VName
-requires (LetNeed pat e alts) =
-  freeInE `mappend` freeInPat
-  where freeInE   = mconcat $ map freeNamesInExp $ e : alts
-        freeInPat = mconcat $ map (freeInType . identType) pat
+requires (LetNeed (pat,_) (_,freeInE) alts) =
+  freeInE `mappend` freeInAlts `mappend` freeInPat
+  where freeInAlts = mconcat $ map snd alts
+        freeInPat  = mconcat $ map (freeInType . identType) pat
 
-provides :: BindNeed -> HS.HashSet VName
-provides (LetNeed pat _ _)          = patNameSet pat
+provides :: BindNeed -> [VName]
+provides (LetNeed (_,provs) _ _) = provs
 
 patNameSet :: [Ident] -> HS.HashSet VName
 patNameSet = HS.fromList . map identName
@@ -149,6 +152,11 @@ runSimpleM (SimpleM m) env src = let (x, src', _) = runRWS m env src
 needThis :: BindNeed -> SimpleM ()
 needThis need = tell $ Need [need] UT.empty
 
+letNeed :: [Ident] -> Exp -> [Exp] -> SimpleM ()
+letNeed pat e es =
+  needThis $ LetNeed (pat, map identName pat) (e, freeNamesInExp e) $ map tagFree es
+  where tagFree e' = (e', freeNamesInExp e')
+
 boundFree :: HS.HashSet VName -> SimpleM ()
 boundFree fs = tell $ Need [] $ UT.usages fs
 
@@ -189,7 +197,7 @@ withSeveralBindings pat e alts m = do
   let (e', ds') = performCSE ds pat e
       (es, ds'') = performMultipleCSE ds pat alts
       patbnds = getPropBnds pat e'
-  needThis $ LetNeed pat e' es
+  letNeed pat e' es
   binding patbnds $
     local (\env -> env { envDupeState = ds' <> ds''}) m
 
@@ -233,7 +241,7 @@ addBindings rules vtable dupes needs body uses = do
             return (uses', bnds)
 
         attachUsage bnd = (bnd, providedByBnd bnd, usedInBnd bnd)
-        providedByBnd (Let pat _) = HS.fromList $ map identName pat
+        providedByBnd (Let pat _) = map identName pat
         usedInBnd (Let _ e) = usedInExp e
         usedInExp e = extra <> UT.usages (freeNamesInExp e)
           where extra =
@@ -241,23 +249,24 @@ addBindings rules vtable dupes needs body uses = do
                             _                -> UT.empty
 
 
-        pick (m,ds) (LetNeed pat e alts) =
-          let add e' =
+        pick (m,ds) (LetNeed (pat,provs) e alts) =
+          let add (e',_) =
                 let (e'',ds') = performCSE ds pat e'
-                    bnd       = LetNeed pat e'' []
+                    free''    = freeNamesInExp e''
+                    bnd       = LetNeed (pat,provs) (e'',free'') []
                 in ((m `HM.union` distances m bnd, ds'),
                     (Let pat e'',
-                     patNameSet pat,
+                     provs,
                      usedInExp e''))
           in case map snd $ sortBy (comparing fst) $ map (score m) $ e:alts of
                e':_ -> add e'
                _    -> add e
 
-score :: HM.HashMap VName Int -> Exp -> (Int, Exp)
-score m (SubExps [Var k] _) =
-  (fromMaybe (-1) $ HM.lookup (identName k) m, subExp $ Var k)
-score m e =
-  (HS.foldl' f 0 $ freeNamesInExp e, e)
+score :: HM.HashMap VName Int -> (Exp,Names) -> (Int, (Exp,Names))
+score m (SubExps [Var k] _,free) =
+  (fromMaybe (-1) $ HM.lookup (identName k) m, (subExp $ Var k,free))
+score m (e,free) =
+  (HS.foldl' f 0 free, (e,free))
   where f x k = case HM.lookup k m of
                   Just y  -> max x y
                   Nothing -> x
@@ -277,9 +286,9 @@ expCost (Replicate {}) = 1
 expCost _ = 0
 
 distances :: HM.HashMap VName Int -> BindNeed -> HM.HashMap VName Int
-distances m (LetNeed pat e _) = HM.fromList [ (k, d+cost) | k <- map identName pat ]
+distances m (LetNeed (_,provs) (e,free) _) = HM.fromList [ (k, d+cost) | k <- provs ]
   where d = HS.foldl' f 0 ins
-        (ins, cost) = (freeNamesInExp e, expCost e)
+        (ins, cost) = (free, expCost e)
         f x k = case HM.lookup k m of
                   Just y  -> max x y
                   Nothing -> x
@@ -295,18 +304,16 @@ inDepOrder = flattenSCCs . stronglyConnComp . buildGraph
         -- As all names are unique, a pattern can be uniquely
         -- represented by any of its names.  If the pattern has no
         -- names, then it doesn't matter anyway.
-        representative s = case HS.toList s of
-                             x:_ -> Just x
-                             []  -> Nothing
+        representative []    = Nothing
+        representative (x:_) = Just x
 
 mustPrecede :: BindNeed -> BindNeed -> Bool
 bnd1 `mustPrecede` bnd2 =
-  not $ HS.null $ (provides bnd1 `HS.intersection` requires bnd2) `HS.union`
+  not $ HS.null $ HS.fromList (filter (`HS.member` req2) $ provides bnd1)
+                  `HS.union`
                   (consumedInBody e2 `HS.intersection` requires bnd1)
   where e2 = asTail bnd2
-
-anyIsFreeIn :: HS.HashSet VName -> Exp -> Bool
-anyIsFreeIn ks = (ks `intersects`) . HS.map identName . freeInExp
+        req2 = requires bnd2
 
 intersects :: (Eq a, Hashable a) => HS.HashSet a -> HS.HashSet a -> Bool
 intersects a b = not $ HS.null $ a `HS.intersection` b
@@ -330,16 +337,17 @@ splitHoistable block body needs =
         foldl split ([], [], HS.empty) $ inDepOrder needs
   in (reverse blocked, hoistable)
   where block' = block $ bodyInfo body
-        split (blocked, hoistable, ks) need@(LetNeed pat e es) =
-          let bad e' = block' (LetNeed pat e' []) || ks `anyIsFreeIn` e'
+        split (blocked, hoistable, ks) need@(LetNeed (pat,provs) e es) =
+          let bad (e',free) = block' (LetNeed (pat,provs) (e',free) []) ||
+                              ks `intersects` free
           in case (bad e, filter (not . bad) es) of
                (True, [])     ->
                  (need : blocked, hoistable,
-                  patNameSet pat `HS.union` ks)
+                  HS.fromList provs `HS.union` ks)
                (True, e':es') ->
-                 (blocked, LetNeed pat e' es' : hoistable, ks)
+                 (blocked, LetNeed (pat,provs) e' es' : hoistable, ks)
                (False, es')   ->
-                 (blocked, LetNeed pat e es' : hoistable, ks)
+                 (blocked, LetNeed (pat,provs) e  es' : hoistable, ks)
 
 blockIfSeq :: [BlockPred] -> SimpleM Body -> SimpleM Body
 blockIfSeq ps m = foldl (flip blockIf) m ps
@@ -364,11 +372,11 @@ hasFree :: HS.HashSet VName -> BlockPred
 hasFree ks _ need = ks `intersects` requires need
 
 isNotSafe :: BlockPred
-isNotSafe _ (LetNeed _ e _) = not $ safeExp e
+isNotSafe _ (LetNeed _ (e,_) _) = not $ safeExp e
 
 isNotCheap :: BlockPred
 isNotCheap _ = not . cheapBnd
-  where cheapBnd (LetNeed _ e _) = cheap e
+  where cheapBnd (LetNeed _ (e,_) _) = cheap e
         cheap (BinOp {})   = True
         cheap (SubExps {}) = True
         cheap (Not {})     = True
@@ -381,7 +389,7 @@ uniqPat :: [Ident] -> Bool
 uniqPat = any $ unique . identType
 
 isUniqueBinding :: BlockPred
-isUniqueBinding _ (LetNeed pat _ _)          = uniqPat pat
+isUniqueBinding _ (LetNeed (pat,_) _ _) = uniqPat pat
 
 hoistCommon :: SimpleM Body -> (ST.SymbolTable -> ST.SymbolTable)
             -> SimpleM Body -> (ST.SymbolTable -> ST.SymbolTable)
@@ -462,7 +470,7 @@ simplifyExp (Apply fname args tp loc) = do
                     case uniqueness t of
                       Unique    -> do
                         fun_copy <- newIdent "fun_copy" t loc
-                        needThis $ LetNeed [fun_copy] (Copy (Constant v loc) loc) []
+                        letNeed [fun_copy] (Copy (Constant v loc) loc) []
                         return $ Var fun_copy
                       Nonunique -> return $ Constant v loc
                   return $ SubExps es loc

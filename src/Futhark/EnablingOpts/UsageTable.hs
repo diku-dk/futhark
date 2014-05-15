@@ -29,10 +29,10 @@ type UsageTable = HM.HashMap VName Usages
 empty :: UsageTable
 empty = HM.empty
 
-contains :: UsageTable -> HS.HashSet VName -> Bool
+contains :: UsageTable -> [VName] -> Bool
 contains table = any (`HM.member` table)
 
-without :: UsageTable -> HS.HashSet VName -> UsageTable
+without :: UsageTable -> [VName] -> UsageTable
 without = foldl (flip HM.delete)
 
 lookup :: VName -> UsageTable -> Maybe Usages
