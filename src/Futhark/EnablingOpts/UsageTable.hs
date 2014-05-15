@@ -15,8 +15,9 @@ module Futhark.EnablingOpts.UsageTable
   )
   where
 
-import Prelude hiding (lookup)
+import Prelude hiding (lookup, any)
 
+import Data.Foldable
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import qualified Data.Set as S
@@ -29,8 +30,7 @@ empty :: UsageTable
 empty = HM.empty
 
 contains :: UsageTable -> HS.HashSet VName -> Bool
-contains table names = not $ HS.null $ names `HS.intersection` keys
-  where keys = HS.fromList $ HM.keys table
+contains table = any (`HM.member` table)
 
 without :: UsageTable -> HS.HashSet VName -> UsageTable
 without table names = table `HM.difference` usages names
