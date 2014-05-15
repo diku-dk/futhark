@@ -219,7 +219,7 @@ defCompileExp [target] (Concat _ x y _ _) = do
   tell $ Imp.For j ysize $ Imp.Write target [Imp.BinOp Imp.Plus xsize $ var j] $
          Imp.Read y' [var j]
   where xt = subExpType x
-        yt = subExpType x
+        yt = subExpType y
 
 defCompileExp [target1, target2] (Split _ n x restsize _) = do
   allocate target1
