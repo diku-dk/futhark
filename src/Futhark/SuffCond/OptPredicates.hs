@@ -108,7 +108,8 @@ analyseBody vtable sctable (Body (Let [v] e:bnds) res) =
       -- Construct a new sctable for recurrences.
       sctable' = case (analyseExp vtable e,
                        simplify <$> ST.lookupScalExp name vtable') of
-        (Nothing, Just (Right se@(SE.RelExp SE.LTH0 _))) ->
+        (Nothing, Just (Right se@(SE.RelExp SE.LTH0 ine)))
+          | Int <- SE.scalExpType ine ->
           case AS.mkSuffConds se loc ranges of
             Left err  -> error $ show err -- Why can this even fail?
             Right ses -> HM.insert name (SufficientCond ses) sctable
