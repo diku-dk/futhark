@@ -52,23 +52,22 @@ allEqual comp_shape = do
   x <- newIdent "x" (Basic Int) loc
   y <- newIdent "y" (Basic Int) loc
   compFun <- makeLambda [toParam x, toParam y] $ eBody $
-    pure $ BinOp Equal (Var x) (Var y) (Basic Bool) loc
-  bacc <- newIdent "bacc" (Basic Bool) loc
+    eAssert $ pure $ BinOp Equal (Var x) (Var y) (Basic Bool) loc
+  bacc <- newIdent "bacc" (Basic Cert) loc
   nacc <- newIdent "nacc" (Basic Int) loc
-  belm <- newIdent "belm" (Basic Bool) loc
+  belm <- newIdent "belm" (Basic Cert) loc
   nelm <- newIdent "nelm" (Basic Int) loc
   checkFun <- makeLambda (map toParam [bacc,nacc,belm,nelm]) $ eBody $
-    eSubExps [ pure $ BinOp LogAnd (Var bacc) (Var belm) (Basic Bool) loc
+    eSubExps [ pure $ Conjoin [Var bacc, Var belm] loc
              , pure $ subExp $ Var nelm ] loc
   comp_shape_rot1 <- letExp "comp_shape_rot1" $ Rotate [] 1 (Var comp_shape) loc
   comp <- letExp "map_size_checks" $
           Map [] compFun [Var comp_shape, Var comp_shape_rot1] loc
-  checked <- newIdent "all_equal_checked" (Basic Bool) loc
-  shape   <- newIdent "all_equal_shape" (Basic Int) loc
-  letBind [checked, shape] $
-          Reduce [] checkFun [(constant True loc,Var comp),
+  cert <- newIdent "all_equal_cert" (Basic Cert) loc
+  shape <- newIdent "all_equal_shape" (Basic Int) loc
+  letBind [cert, shape] $
+          Reduce [] checkFun [(Constant (BasicVal Checked) loc,Var comp),
                               (intconst 0 loc,Var comp_shape)] loc
-  cert <- letExp "all_equal_cert" $ Assert (Var checked) loc
   return (cert, shape)
   where loc  = srclocOf comp_shape
 
