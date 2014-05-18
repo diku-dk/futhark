@@ -227,7 +227,7 @@ instance Located Body where
 -- double, long int, etc.
 data Exp =
             -- Core language
-              SubExps [SubExp] SrcLoc
+              SubExp SubExp
             -- ^ Subexpressions, doubling as tuple literals if the
             -- list has anything but a single element.
 
@@ -318,7 +318,7 @@ data Exp =
               deriving (Eq, Ord, Show)
 
 instance Located Exp where
-  locOf (SubExps _ loc) = locOf loc
+  locOf (SubExp se) = locOf se
   locOf (ArrayLit _ _ pos) = locOf pos
   locOf (BinOp _ _ _ _ pos) = locOf pos
   locOf (Not _ pos) = locOf pos

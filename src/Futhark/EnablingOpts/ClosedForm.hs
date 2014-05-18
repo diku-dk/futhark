@@ -116,7 +116,7 @@ checkResults pat knownBindings params body accs bodyloc =
 
         checkResult (p, e) _
           | Just e' <- asFreeSubExp e =
-          Just [Let [p] $ subExp e']
+          Just [Let [p] $ SubExp e']
         checkResult (p, Var v) (accparam, acc) = do
           e@(BinOp bop x y rt loc) <- HM.lookup v bndMap
           -- One of x,y must be *this* accumulator, and the other must

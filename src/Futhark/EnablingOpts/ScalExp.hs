@@ -112,7 +112,7 @@ scalExpType (MaxMin _ (e:_)) = scalExpType e
 type LookupVar = VName -> Maybe ScalExp
 
 toScalExp :: LookupVar -> Exp -> Maybe ScalExp
-toScalExp look (SubExps [se] _)    =
+toScalExp look (SubExp se)    =
   toScalExp' look se
 toScalExp look (BinOp Less x y _ _) =
   RelExp LTH0 <$> (sminus <$> toScalExp' look x <*> toScalExp' look y)
@@ -152,8 +152,8 @@ toScalExp' _ _ = Nothing
 fromScalExp :: MonadFreshNames m => SrcLoc -> ScalExp -> m (Exp, [Binding])
 fromScalExp loc = runBinder'' . convert
   where convert :: ScalExp -> Binder Exp
-        convert (Val val) = return $ subExp $ Constant (BasicVal val) loc
-        convert (Id v)    = return $ subExp $ Var v
+        convert (Val val) = return $ SubExp $ Constant (BasicVal val) loc
+        convert (Id v)    = return $ SubExp $ Var v
         convert (SNeg se) = eNegate (convert se) loc
         convert (SNot se) = eNot (convert se) loc
         convert (SPlus x y) = arithBinOp Plus x y
@@ -185,10 +185,10 @@ fromScalExp loc = runBinder'' . convert
               (pick, discard)
                 | isMin     = (cur, next)
                 | otherwise = (next, cur)
-          in eIf cmp (eBody $ pure pick) (eBody $ pure discard) [Basic t] loc
+          in eIf cmp (eBody [pure pick]) (eBody [pure discard]) [Basic t] loc
 
-        zero Int = subExp $ intconst 0 loc
-        zero _   = subExp $ constant (0::Double) loc
+        zero Int = SubExp $ intconst 0 loc
+        zero _   = SubExp $ constant (0::Double) loc
 
 ------------------------
 --- Helper Functions ---

@@ -62,9 +62,9 @@ lookup :: VName -> SymbolTable -> Maybe CtOrId
 lookup name vtable = do
   e <- lookupExp name vtable
   case e of
-    SubExps [Constant val _] _ -> Just $ Value val
-    SubExps [Var v] _          -> Just $ VarId (identName v) (identType v)
-    _                          -> Just $ SymExp e
+    SubExp (Constant val _) -> Just $ Value val
+    SubExp (Var v)          -> Just $ VarId (identName v) (identType v)
+    _                       -> Just $ SymExp e
 
 lookupExp :: VName -> SymbolTable -> Maybe Exp
 lookupExp name vtable = asExp =<< HM.lookup name (bindings vtable)
@@ -74,13 +74,13 @@ lookupScalExp name vtable = asScalExp =<< HM.lookup name (bindings vtable)
 
 lookupValue :: VName -> SymbolTable -> Maybe Value
 lookupValue name vtable = case lookupExp name vtable of
-                            Just (SubExps [Constant val _] _) -> Just val
-                            _                                 -> Nothing
+                            Just (SubExp (Constant val _)) -> Just val
+                            _                              -> Nothing
 
 lookupVar :: VName -> SymbolTable -> Maybe VName
 lookupVar name vtable = case lookupExp name vtable of
-                          Just (SubExps [Var v] _) -> Just $ identName v
-                          _                        -> Nothing
+                          Just (SubExp (Var v)) -> Just $ identName v
+                          _                     -> Nothing
 
 lookupRange :: VName -> SymbolTable -> Range
 lookupRange name vtable =
@@ -104,7 +104,7 @@ insert name e vtable = insertEntry name bind vtable
                , loopVariable = False
                }
         range = case e of
-          SubExps [se] _ ->
+          SubExp se ->
             subExpRange se vtable
           Iota n _ ->
             (Just zero, subExpToScalExp n)
@@ -189,7 +189,7 @@ insertLoopVar name bound vtable = insertEntry name bind vtable
                  asExp = Nothing
                , asScalExp = Nothing
                , valueRange = (Just (Val (IntVal 0)),
-                               minus1 <$> toScalExp look (subExp bound))
+                               minus1 <$> toScalExp look (SubExp bound))
                , bindingDepth = curDepth vtable
                , loopVariable = True
                }
@@ -198,7 +198,7 @@ insertLoopVar name bound vtable = insertEntry name bind vtable
 
 updateBounds :: Bool -> SubExp -> SymbolTable -> SymbolTable
 updateBounds isTrue cond vtable =
-  case toScalExp (`lookupScalExp` vtable) $ subExp cond of
+  case toScalExp (`lookupScalExp` vtable) $ SubExp cond of
     Nothing    -> vtable
     Just cond' ->
       let cond'' | isTrue    = cond'

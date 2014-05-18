@@ -99,7 +99,7 @@ instance Pretty Body where
                         Filter {} -> True
                         Redomap {} -> True
                         Scan {} -> True
-                        SubExps [Constant (ArrayVal {}) _] _ -> False
+                        SubExp (Constant (ArrayVal {}) _) -> False
                         If {} -> True
                         ArrayLit {} -> False
                         _ -> False
@@ -108,10 +108,7 @@ instance Pretty Body where
     | otherwise          = ppCertificates cs <> braces (commasep   $ map ppr es)
 
 instance Pretty Exp where
-  ppr (SubExps [se] _)   = ppr se
-  ppr (SubExps es _)
-    | any hasArrayLit es = braces $ commastack $ map ppr es
-    | otherwise          = braces $ commasep $ map ppr es
+  ppr (SubExp se) = ppr se
   ppr (ArrayLit [] rt _) =
     text "empty" <> parens (ppr rt)
   ppr (ArrayLit es rt _) =

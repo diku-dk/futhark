@@ -60,9 +60,9 @@ splitBody cert_ident (Body bnds valres) = do
 
 splitBinding :: MonadFreshNames m => Ident -> Binding -> m ([Binding], Binding, Maybe SubExp)
 
-splitBinding cert_ident bnd@(Let pat (Assert se loc)) =
+splitBinding cert_ident bnd@(Let pat (Assert se _)) =
   return ([bnd],
-          Let pat $ SubExps [Var cert_ident] loc,
+          Let pat $ SubExp (Var cert_ident),
           Just se)
 
 splitBinding cert_ident bnd@(Let pat (Map cs fun args loc)) = do

@@ -210,7 +210,7 @@ instance Located InputArray where
   locOf (Iota e) = locOf e
 
 inputArrayToExp :: InputArray -> Exp
-inputArrayToExp (Var k)  = subExp $ Futhark.Var k
+inputArrayToExp (Var k)  = SubExp $ Futhark.Var k
 inputArrayToExp (Iota e) = Futhark.Iota e $ srclocOf e
 
 -- | One array input to a SOAC - a SOAC may have multiple inputs, but

@@ -33,7 +33,6 @@ module Futhark.InternalRep.Attributes
   , consumedInBody
   , consumedInExp
   , safeExp
-  , subExp
   , constant
   , intconst
 
@@ -551,7 +550,7 @@ bodyType = map subExpType . resultSubExps . bodyResult
 -- | The type of an Futhark term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
 typeOf :: Exp -> [Type]
-typeOf (SubExps vs _) = map subExpType vs
+typeOf (SubExp se) = [subExpType se]
 typeOf (ArrayLit es t loc) =
   [arrayOf t (Shape [n]) $ mconcat $ map (uniqueness . subExpType) es]
   where n = constant (length es) loc
@@ -805,10 +804,6 @@ safeExp (BinOp Mod _ _ _ _) = False
 safeExp (BinOp Pow _ _ _ _) = False
 safeExp _ = True
 
--- | Convert a 'SubExp' to an 'Exp', using the 'SubExps' constructor.
-subExp :: SubExp -> Exp
-subExp e = SubExps [e] $ srclocOf e
-
 -- | Create a 'Constant' 'SubExp' containing the given value.
 constant :: IsValue v => v -> SrcLoc -> SubExp
 constant = Constant . value
@@ -826,7 +821,7 @@ freeInLambda (Lambda params body rettype _) =
         inParams = mconcat $ map freeInParam params
         freeInParam = freeInType . identType
         inBody = HS.filter ((`notElem` paramnames) . identName) $ freeInBody body
-        freeInType = mconcat . map (freeInExp . subExp) . shapeDims . arrayShape
+        freeInType = mconcat . map (freeInExp . SubExp) . shapeDims . arrayShape
         paramnames = map identName params
 
 -- | As 'freeInLambda', but returns the raw names rather than

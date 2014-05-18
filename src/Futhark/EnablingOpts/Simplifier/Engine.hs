@@ -30,8 +30,6 @@ import Data.Hashable
 import Data.List
 import Data.Loc
 import Data.Maybe
-import qualified Data.HashMap.Strict as HM
-import Data.Ord
 import qualified Data.HashSet as HS
 
 import Futhark.InternalRep
@@ -84,32 +82,31 @@ simplifyFun (fname, rettype, params, body, loc) = do
   body' <- blockAllHoisting $ bindParams params $ simplifyBody body
   return (fname, rettype, params, body', loc)
 
-data BindNeed = LetNeed ([Ident],[VName]) (Exp, Names) [(Exp,Names)]
+data BindNeed = LetNeed ([Ident],[VName]) (Exp, Names)
                 -- The [VName] is just the names of the idents, as a
-                -- cache.  Similarly, the expressions are tagged with
-                -- what is free in them.
+                -- cache.  Similarly, the expression is tagged with
+                -- what is free in it.
                 deriving (Show, Eq)
 
 type NeedSet = [BindNeed]
 
 asTail :: BindNeed -> Body
-asTail (LetNeed (pat,_) (e,_) _) = Body [Let pat e] $ Result [] [] loc
+asTail (LetNeed (pat,_) (e,_)) = Body [Let pat e] $ Result [] [] loc
   where loc = srclocOf pat
 
 requires :: BindNeed -> HS.HashSet VName
-requires (LetNeed (pat,_) (_,freeInE) alts) =
-  freeInE `mappend` freeInAlts `mappend` freeInPat
-  where freeInAlts = mconcat $ map snd alts
-        freeInPat  = mconcat $ map (freeInType . identType) pat
+requires (LetNeed (pat,_) (_,freeInE)) =
+  freeInE `mappend` freeInPat
+  where freeInPat  = mconcat $ map (freeInType . identType) pat
 
 provides :: BindNeed -> [VName]
-provides (LetNeed (_,provs) _ _) = provs
+provides (LetNeed (_,provs) _) = provs
 
 patNameSet :: [Ident] -> HS.HashSet VName
 patNameSet = HS.fromList . map identName
 
 freeInType :: Type -> HS.HashSet VName
-freeInType = mconcat . map (freeNamesInExp . subExp) . arrayDims
+freeInType = mconcat . map (freeNamesInExp . SubExp) . arrayDims
 
 data Need = Need { needBindings :: NeedSet
                  , freeInBound  :: UT.UsageTable
@@ -149,13 +146,9 @@ runSimpleM :: SimpleM a -> Env -> VNameSource -> (a, VNameSource)
 runSimpleM (SimpleM m) env src = let (x, src', _) = runRWS m env src
                                  in (x, src')
 
-needThis :: BindNeed -> SimpleM ()
-needThis need = tell $ Need [need] UT.empty
-
-letNeed :: [Ident] -> Exp -> [Exp] -> SimpleM ()
-letNeed pat e es =
-  needThis $ LetNeed (pat, map identName pat) (e, freeNamesInExp e) $ map tagFree es
-  where tagFree e' = (e', freeNamesInExp e')
+needThis :: Binding -> SimpleM ()
+needThis (Let pat e) = tell $ Need [need] UT.empty
+  where need = LetNeed (pat, map identName pat) (e, freeNamesInExp e)
 
 boundFree :: HS.HashSet VName -> SimpleM ()
 boundFree fs = tell $ Need [] $ UT.usages fs
@@ -187,26 +180,19 @@ bindLoopVar var bound =
         clampUpper = case bound of Var v -> ST.isAtLeast (identName v) 1
                                    _     -> id
 
-withBinding :: [Ident] -> Exp -> SimpleM a -> SimpleM a
-withBinding pat e = withSeveralBindings pat e []
-
-withSeveralBindings :: [Ident] -> Exp -> [Exp]
-                    -> SimpleM a -> SimpleM a
-withSeveralBindings pat e alts m = do
+withBinding :: [Ident] -> Exp
+               -> SimpleM a -> SimpleM a
+withBinding pat e m = do
   ds <- asks envDupeState
-  let (e', ds') = performCSE ds pat e
-      (es, ds'') = performMultipleCSE ds pat alts
-      patbnds = getPropBnds pat e'
-  letNeed pat e' es
+  let (bnds, ds') = performCSE ds pat e
+      patbnds = mapMaybe varBnd bnds
+  mapM_ needThis bnds
   binding patbnds $
-    local (\env -> env { envDupeState = ds' <> ds''}) m
+    local (\env -> env { envDupeState = ds'}) m
 
-getPropBnds :: [Ident] -> Exp -> [(VName, Exp)]
-getPropBnds [Ident var _ _] e = [(var, e)]
-getPropBnds ids (SubExps ts _)
-  | length ids == length ts =
-    concatMap (\(x,y)-> getPropBnds [x] (subExp y)) $ zip ids ts
-getPropBnds _ _ = []
+varBnd :: Binding -> Maybe (VName, Exp)
+varBnd (Let [Ident var _ _] e) = Just (var, e)
+varBnd _                       = Nothing
 
 bindLet :: [Ident] -> Exp -> SimpleM a -> SimpleM a
 
@@ -216,7 +202,8 @@ addBindings :: MonadFreshNames m =>
                RuleBook -> ST.SymbolTable -> DupeState -> [BindNeed] -> Body -> UT.UsageTable
             -> m (Body, UT.UsageTable)
 addBindings rules vtable dupes needs body uses = do
-  (uses',bnds) <- simplifyBindings vtable uses $ snd $ mapAccumL pick (HM.empty, dupes) needs
+  (uses',bnds) <- simplifyBindings vtable uses $
+                  concat $ snd $ mapAccumL pick dupes needs
   return (insertBindings bnds body, uses')
   where simplifyBindings vtable' uses' bnds =
           foldM comb (uses',[]) $ reverse $ zip bnds vtables
@@ -249,49 +236,13 @@ addBindings rules vtable dupes needs body uses = do
                             _                -> UT.empty
 
 
-        pick (m,ds) (LetNeed (pat,provs) e alts) =
-          let add (e',_) =
-                let (e'',ds') = performCSE ds pat e'
-                    free''    = freeNamesInExp e''
-                    bnd       = LetNeed (pat,provs) (e'',free'') []
-                in ((m `HM.union` distances m bnd, ds'),
-                    (Let pat e'',
-                     provs,
-                     usedInExp e''))
-          in case map snd $ sortBy (comparing fst) $ map (score m) $ e:alts of
-               e':_ -> add e'
-               _    -> add e
-
-score :: HM.HashMap VName Int -> (Exp,Names) -> (Int, (Exp,Names))
-score m (SubExps [Var k] _,free) =
-  (fromMaybe (-1) $ HM.lookup (identName k) m, (subExp $ Var k,free))
-score m (e,free) =
-  (HS.foldl' f 0 free, (e,free))
-  where f x k = case HM.lookup k m of
-                  Just y  -> max x y
-                  Nothing -> x
-
-expCost :: Exp -> Int
-expCost (Map {}) = 1
-expCost (Filter {}) = 1
-expCost (Reduce {}) = 1
-expCost (Scan {}) = 1
-expCost (Redomap {}) = 1
-expCost (Rearrange {}) = 1
-expCost (Copy {}) = 1
-expCost (Concat {}) = 1
-expCost (Split {}) = 1
-expCost (Reshape {}) = 1
-expCost (Replicate {}) = 1
-expCost _ = 0
-
-distances :: HM.HashMap VName Int -> BindNeed -> HM.HashMap VName Int
-distances m (LetNeed (_,provs) (e,free) _) = HM.fromList [ (k, d+cost) | k <- provs ]
-  where d = HS.foldl' f 0 ins
-        (ins, cost) = (free, expCost e)
-        f x k = case HM.lookup k m of
-                  Just y  -> max x y
-                  Nothing -> x
+        pick ds (LetNeed (pat,_) (e,_)) =
+          let (bnds,ds') = performCSE ds pat e
+          in (ds',
+              [ (Let pat' e',
+                 map identName pat,
+                 usedInExp e')
+              | Let pat' e' <- bnds ])
 
 inDepOrder :: [BindNeed] -> [BindNeed]
 inDepOrder = flattenSCCs . stronglyConnComp . buildGraph
@@ -337,17 +288,14 @@ splitHoistable block body needs =
         foldl split ([], [], HS.empty) $ inDepOrder needs
   in (reverse blocked, hoistable)
   where block' = block $ bodyInfo body
-        split (blocked, hoistable, ks) need@(LetNeed (pat,provs) e es) =
-          let bad (e',free) = block' (LetNeed (pat,provs) (e',free) []) ||
+        split (blocked, hoistable, ks) need@(LetNeed (pat,provs) e) =
+          let bad (e',free) = block' (LetNeed (pat,provs) (e',free)) ||
                               ks `intersects` free
-          in case (bad e, filter (not . bad) es) of
-               (True, [])     ->
-                 (need : blocked, hoistable,
-                  HS.fromList provs `HS.union` ks)
-               (True, e':es') ->
-                 (blocked, LetNeed (pat,provs) e' es' : hoistable, ks)
-               (False, es')   ->
-                 (blocked, LetNeed (pat,provs) e  es' : hoistable, ks)
+          in if bad e
+             then (need : blocked, hoistable,
+                   HS.fromList provs `HS.union` ks)
+             else (blocked, LetNeed (pat,provs) e : hoistable,
+                   ks)
 
 blockIfSeq :: [BlockPred] -> SimpleM Body -> SimpleM Body
 blockIfSeq ps m = foldl (flip blockIf) m ps
@@ -372,13 +320,13 @@ hasFree :: HS.HashSet VName -> BlockPred
 hasFree ks _ need = ks `intersects` requires need
 
 isNotSafe :: BlockPred
-isNotSafe _ (LetNeed _ (e,_) _) = not $ safeExp e
+isNotSafe _ (LetNeed _ (e,_)) = not $ safeExp e
 
 isNotCheap :: BlockPred
 isNotCheap _ = not . cheapBnd
-  where cheapBnd (LetNeed _ (e,_) _) = cheap e
+  where cheapBnd (LetNeed _ (e,_)) = cheap e
         cheap (BinOp {})   = True
-        cheap (SubExps {}) = True
+        cheap (SubExp {})  = True
         cheap (Not {})     = True
         cheap (Negate {})  = True
         cheap (DoLoop {})  = False
@@ -389,7 +337,7 @@ uniqPat :: [Ident] -> Bool
 uniqPat = any $ unique . identType
 
 isUniqueBinding :: BlockPred
-isUniqueBinding _ (LetNeed (pat,_) _ _) = uniqPat pat
+isUniqueBinding _ (LetNeed (pat,_) _) = uniqPat pat
 
 hoistCommon :: SimpleM Body -> (ST.SymbolTable -> ST.SymbolTable)
             -> SimpleM Body -> (ST.SymbolTable -> ST.SymbolTable)
@@ -414,6 +362,24 @@ simplifyBody :: Body -> SimpleM Body
 simplifyBody (Body [] (Result cs es loc)) =
   resultBody <$> simplifyCerts cs <*>
                  mapM simplifySubExp es <*> pure loc
+
+-- The simplification rules cannot handle Apply, because it requires
+-- access to the full program.
+simplifyBody (Body (Let pat (Apply fname args tp loc):bnds) res) = do
+  pat' <- mapM simplifyIdentBinding pat
+  args' <- mapM (simplifySubExp . fst) args
+  tp' <- mapM simplifyType tp
+  prog <- asks envProgram
+  vtable <- asks envVtable
+  case join $ pure simplifyApply <*> prog <*> pure vtable <*> pure fname <*> pure args of
+    -- Array values are non-unique, so we may need to copy them.
+    Just vs -> do let newbnds = flip map (zip3 pat vs tp') $ \(p,v,t) ->
+                        case uniqueness t of
+                          Unique    -> Let [p] $ Copy (Constant v loc) loc
+                          Nonunique -> Let [p] $ SubExp $ Constant v loc
+                  simplifyBody $ Body (newbnds++bnds) res
+    Nothing -> let e' = Apply fname (zip args' $ map snd args) tp' loc
+               in bindLet pat' e' $ simplifyBody $ Body bnds res
 
 simplifyBody (Body (Let pat e:bnds) res) = do
   pat' <- mapM simplifyIdentBinding pat
@@ -456,25 +422,6 @@ simplifyExp (If cond tbranch fbranch t loc) = do
                 (simplifyBody fbranch) (ST.updateBounds False cond)
   t' <- mapM simplifyType t
   return $ If cond' tbranch' fbranch' t' loc
-
--- The simplification rules cannot handle Apply, because it requires
--- access to the full program.
-simplifyExp (Apply fname args tp loc) = do
-  args' <- mapM (simplifySubExp . fst) args
-  tp' <- mapM simplifyType tp
-  prog <- asks envProgram
-  vtable <- asks envVtable
-  case join $ pure simplifyApply <*> prog <*> pure vtable <*> pure fname <*> pure args of
-    -- Array values are non-unique, so we may need to copy them.
-    Just vs -> do es <- forM (zip vs tp') $ \(v,t) ->
-                    case uniqueness t of
-                      Unique    -> do
-                        fun_copy <- newIdent "fun_copy" t loc
-                        letNeed [fun_copy] (Copy (Constant v loc) loc) []
-                        return $ Var fun_copy
-                      Nonunique -> return $ Constant v loc
-                  return $ SubExps es loc
-    Nothing -> return $ Apply fname (zip args' $ map snd args) tp' loc
 
 simplifyExp (Map cs fun arrs loc) = do
   cs' <- simplifyCerts cs
@@ -538,8 +485,8 @@ simplifySubExp (Var ident@(Ident vnm _ pos)) = do
       | isBasicTypeVal v  -> return $ Constant v pos
     Just (ST.VarId  id' tp1) -> do usedName id'
                                    return $ Var $ Ident id' tp1 pos
-    Just (ST.SymExp (SubExps [se] _)) -> return se
-    _                                 -> Var <$> simplifyIdent ident
+    Just (ST.SymExp (SubExp se)) -> return se
+    _                            -> Var <$> simplifyIdent ident
   where isBasicTypeVal = basicType . valueType
 simplifySubExp (Constant v loc) = return $ Constant v loc
 

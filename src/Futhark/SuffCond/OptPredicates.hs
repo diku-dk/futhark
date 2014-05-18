@@ -64,9 +64,9 @@ insertPredicateCalls subst prog =
         callPreds predt (f:fs) e call = do
           c <- letSubExp (nameToString f ++ "_result") $ call f
           let predloc = srclocOf c
-          eIf (pure $ subExp c)
-            (eBody $ pure $ subExp $ constant True predloc)
-            (eBody $ callPreds predt fs e call)
+          eIf (pure $ SubExp c)
+            (eBody [pure $ SubExp $ constant True predloc])
+            (eBody [callPreds predt fs e call])
             predt predloc
 
 maybeOptimiseFun :: MonadFreshNames m => FunDec -> m [FunDec]

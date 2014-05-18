@@ -5,6 +5,7 @@ module Futhark.Tools
   , letExp
   , letExps
   , letTupExp
+  , letTupExp'
 
   , newVar
 
@@ -16,7 +17,6 @@ module Futhark.Tools
   , eCopy
   , eAssert
   , eDoLoop
-  , eSubExps
   , eBody
 
   , foldBinOp
@@ -43,7 +43,7 @@ import Futhark.Binder
 
 letSubExp :: MonadBinder m =>
              String -> Exp -> m SubExp
-letSubExp _ (SubExps [se] _) = return se
+letSubExp _ (SubExp se) = return se
 letSubExp desc e =
   case typeOf e of
     [_] -> Var <$> letExp desc e
@@ -51,7 +51,7 @@ letSubExp desc e =
 
 letExp :: MonadBinder m =>
           String -> Exp -> m Ident
-letExp _ (SubExps [Var v] _) = return v
+letExp _ (SubExp (Var v)) = return v
 letExp desc e =
   case typeOf e of
     [t] -> do v <- fst <$> newVar (srclocOf e) desc t
@@ -67,19 +67,19 @@ letExps :: MonadBinder m =>
            String -> [Exp] -> m [Ident]
 letExps desc = mapM $ letExp desc
 
-varSubExp :: SubExp -> Maybe Ident
-varSubExp (Var v) = Just v
-varSubExp _       = Nothing
-
 letTupExp :: MonadBinder m => String -> Exp -> m [Ident]
-letTupExp _ (SubExps es _)
-  | Just vs <- mapM varSubExp es = return vs
+letTupExp _ (SubExp (Var v)) = return [v]
 letTupExp name e = do
   let ts  = typeOf e
       loc = srclocOf e
   names <- mapM (liftM fst . newVar loc name) ts
   letBind names e
   return names
+
+letTupExp' :: MonadBinder m => String -> Exp -> m [SubExp]
+letTupExp' _ (SubExp se) = return [se]
+letTupExp' name ses = do vs <- letTupExp name ses
+                         return $ map Var vs
 
 newVar :: MonadFreshNames m =>
           SrcLoc -> String -> Type -> m (Ident, SubExp)
@@ -141,25 +141,21 @@ eDoLoop respat merge i boundexp loopbody = do
   where (mergepat, mergeexps) = unzip merge
         loc = srclocOf i
 
-eSubExps :: MonadBinder m =>
-           [m Exp] -> SrcLoc -> m Exp
-eSubExps es loc = do
-  es' <- letSubExps "tuplit_elems" =<< sequence es
-  return $ SubExps es' loc
-
 eBody :: MonadBinder m =>
-         m Exp -> m Body
-eBody e = insertBindingsM $ do
-            e' <- e
-            x <- letTupExp "x" e'
-            return $ resultBody [] (map Var x) $ srclocOf e'
+         [m Exp] -> m Body
+eBody es = insertBindingsM $ do
+            es' <- sequence es
+            xs <- mapM (letTupExp "x") es'
+            let loc = case es' of []  -> noLoc
+                                  e:_ -> srclocOf e
+            return $ resultBody [] (map Var $ concat xs) loc
 
 -- | Apply a binary operator to several subexpressions.  A left-fold.
 foldBinOp :: MonadBinder m =>
              BinOp -> SubExp -> [SubExp] -> Type -> m Exp
-foldBinOp _ ne [] _   = return $ subExp ne
+foldBinOp _ ne [] _   = return $ SubExp ne
 foldBinOp bop ne (e:es) t =
-  eBinOp bop (pure $ subExp e) (foldBinOp bop ne es t) t $ srclocOf e
+  eBinOp bop (pure $ SubExp e) (foldBinOp bop ne es t) t $ srclocOf e
 
 -- | Create a two-parameter lambda whose body applies the given binary
 -- operation to its arguments.  It is assumed that both argument and

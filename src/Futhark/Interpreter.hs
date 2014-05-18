@@ -233,8 +233,8 @@ evalBody (Body (Let pat e:bnds) res) = do
 
 evalExp :: Exp -> FutharkM [Value]
 
-evalExp (SubExps es _) =
-  mapM evalSubExp es
+evalExp (SubExp se) =
+  single <$> evalSubExp se
 
 evalExp (ArrayLit es rt _) =
   single <$> (arrayVal <$> mapM evalSubExp es <*> pure rt)
@@ -517,7 +517,7 @@ checkPatSizes = mapM_ $ uncurry checkSize
                                   intercalate "," (map ppValue valshape) ++ "]."
 
         ppDim (Constant v _) _ = ppValue v
-        ppDim e              v = ppExp (subExp e) ++ "=" ++ ppValue v
+        ppDim e              v = ppSubExp e ++ "=" ++ ppValue v
 
 checkReturnShapes :: SrcLoc -> [ConstType] -> [Value] -> FutharkM ()
 checkReturnShapes loc = zipWithM_ checkShape
@@ -533,4 +533,4 @@ checkReturnShapes loc = zipWithM_ checkShape
                                   intercalate "," (map ppValue valshape) ++ "]."
 
         ppDim (Constant v _) _ = ppValue v
-        ppDim e              v = ppExp (subExp e) ++ "=" ++ ppValue v
+        ppDim e              v = ppSubExp e ++ "=" ++ ppValue v

@@ -51,15 +51,16 @@ allEqual :: Ident -> InternaliseM (Ident, Ident)
 allEqual comp_shape = do
   x <- newIdent "x" (Basic Int) loc
   y <- newIdent "y" (Basic Int) loc
-  compFun <- makeLambda [toParam x, toParam y] $ eBody $
-    eAssert $ pure $ BinOp Equal (Var x) (Var y) (Basic Bool) loc
+  compFun <- makeLambda [toParam x, toParam y] $
+             eBody [eAssert $ pure $
+                    BinOp Equal (Var x) (Var y) (Basic Bool) loc]
   bacc <- newIdent "bacc" (Basic Cert) loc
   nacc <- newIdent "nacc" (Basic Int) loc
   belm <- newIdent "belm" (Basic Cert) loc
   nelm <- newIdent "nelm" (Basic Int) loc
-  checkFun <- makeLambda (map toParam [bacc,nacc,belm,nelm]) $ eBody $
-    eSubExps [ pure $ Conjoin [Var bacc, Var belm] loc
-             , pure $ subExp $ Var nelm ] loc
+  checkFun <- makeLambda (map toParam [bacc,nacc,belm,nelm]) $ eBody
+              [ pure $ Conjoin [Var bacc, Var belm] loc
+              , pure $ SubExp $ Var nelm ]
   comp_shape_rot1 <- letExp "comp_shape_rot1" $ Rotate [] 1 (Var comp_shape) loc
   comp <- letExp "map_size_checks" $
           Map [] compFun [Var comp_shape, Var comp_shape_rot1] loc

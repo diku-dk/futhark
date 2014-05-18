@@ -82,7 +82,7 @@ liftIdentityMapping _ (Let pat (Map cs fun arrs loc)) =
 
         checkInvariance (outId, Var v, _) (invariant, mapresult, rettype')
           | Just inp <- HM.lookup (identName v) inputMap =
-            (Let [outId] (subExp inp) : invariant,
+            (Let [outId] (SubExp inp) : invariant,
              mapresult,
              rettype')
         checkInvariance (outId, e, t) (invariant, mapresult, rettype')
@@ -115,7 +115,7 @@ removeReplicateMapping vtable (Let pat (Map cs fun arrs loc))
   in return $ parameterBnds ++ mapbnds
   where isReplicate p (Var v)
           | Just (Replicate _ e _) <- ST.lookupExp (identName v) vtable =
-          Right (Let [fromParam p] $ subExp e)
+          Right (Let [fromParam p] $ SubExp e)
         isReplicate p e =
           Left  (p, e)
 
@@ -176,13 +176,13 @@ removeRedundantMergeVariables _ (Let pat (DoLoop respat merge i bound body loc))
   where (mergepat, _) = unzip merge
         usedInResult = (`elem` respat)
         patDimNames = mconcat $ map freeNamesInExp $
-                      concatMap (map subExp . arrayDims . identType) mergepat
+                      concatMap (map SubExp . arrayDims . identType) mergepat
         usedInPatType = (`HS.member` patDimNames) . identName
 
         dummyBindings = map dummyBinding
         dummyBinding ((v,e), _)
           | unique (identType v) = Let [v] $ Copy e $ srclocOf v
-          | otherwise            = Let [v] $ subExp e
+          | otherwise            = Let [v] $ SubExp e
 
         allDependencies = dataDependencies body
         dependencies (Constant _ _) = HS.empty
@@ -207,13 +207,13 @@ hoistLoopInvariantMergeVariables _ (Let pat (DoLoop respat merge idd n loopbody 
 
         removeFromResult (v,initExp) pat' respat' =
           case partition ((==v) . snd) $ zip pat' respat' of
-            ([(resv,_)], rest) -> (Just $ Let [resv] $ subExp initExp, unzip rest)
+            ([(resv,_)], rest) -> (Just $ Let [resv] $ SubExp initExp, unzip rest)
             (_,      _)        -> (Nothing,                            (pat', respat'))
 
         checkInvariance ((v1,initExp), Var v2) (invariant, pat', respat', merge', resExps)
           | identName v1 == identName v2 =
           let (bnd, (pat'', respat'')) = removeFromResult (v1,initExp) pat' respat'
-          in (maybe id (:) bnd $ Let [v1] (subExp initExp) : invariant,
+          in (maybe id (:) bnd $ Let [v1] (SubExp initExp) : invariant,
               pat'', respat'', merge', resExps)
         checkInvariance ((v1,initExp), resExp) (invariant, pat', respat', merge', resExps) =
           (invariant, pat', respat', (v1,initExp):merge', resExp:resExps)
@@ -249,11 +249,11 @@ simplifyRearrange :: LetTopDownRule
 
 -- Handle identity permutation.
 simplifyRearrange _ (Rearrange _ perm e _)
-  | perm == [0..arrayRank (subExpType e) - 1] = Just $ subExp e
+  | perm == [0..arrayRank (subExpType e) - 1] = Just $ SubExp e
 
 -- If asked to rotate a constant, just do it.
 simplifyRearrange _ (Rearrange _ perm (Constant val _) loc) =
-  Just $ subExp $ Constant (permuteArray perm val) loc
+  Just $ SubExp $ Constant (permuteArray perm val) loc
 
 simplifyRearrange look (Rearrange cs perm (Var v) loc) =
   case look $ identName v of
@@ -267,18 +267,18 @@ simplifyRearrange _ _ = Nothing
 simplifyRotate :: LetTopDownRule
 -- A zero-rotation is identity.
 simplifyRotate _ (Rotate _ 0 e _) =
-  Just $ subExp e
+  Just $ SubExp e
 
 -- If asked to rotate a constant, just do it.
 simplifyRotate _ (Rotate _ i (Constant val _) loc) =
-  Just $ subExp $ Constant (rotateArray i val) loc
+  Just $ SubExp $ Constant (rotateArray i val) loc
 
 simplifyRotate look (Rotate _ _ (Var v) _) = do
   bnd <- look $ identName v
   case bnd of
     -- Rotating a replicate is identity.
     Replicate {} ->
-      Just $ subExp $ Var v
+      Just $ SubExp $ Var v
     _ ->
       Nothing
 
@@ -287,8 +287,8 @@ simplifyRotate _ _ = Nothing
 simplifyBinOp :: LetTopDownRule
 
 simplifyBinOp _ (BinOp Plus e1 e2 _ pos)
-  | isCt0 e1 = Just $ subExp e2
-  | isCt0 e2 = Just $ subExp e1
+  | isCt0 e1 = Just $ SubExp e2
+  | isCt0 e2 = Just $ SubExp e1
   | otherwise =
     case (e1, e2) of
       (Constant (BasicVal (IntVal v1)) _,  Constant (BasicVal (IntVal v2)) _) ->
@@ -298,7 +298,7 @@ simplifyBinOp _ (BinOp Plus e1 e2 _ pos)
       _ -> Nothing
 
 simplifyBinOp _ (BinOp Minus e1 e2 _ pos)
-  | isCt0 e2 = Just $ subExp e1
+  | isCt0 e2 = Just $ SubExp e1
   | otherwise =
     case (e1, e2) of
       (Constant (BasicVal (IntVal v1)) _, Constant (BasicVal (IntVal v2)) _) ->
@@ -308,10 +308,10 @@ simplifyBinOp _ (BinOp Minus e1 e2 _ pos)
       _ -> Nothing
 
 simplifyBinOp _ (BinOp Times e1 e2 _ pos)
-  | isCt0 e1 = Just $ subExp e1
-  | isCt0 e2 = Just $ subExp e2
-  | isCt1 e1 = Just $ subExp e2
-  | isCt1 e2 = Just $ subExp e1
+  | isCt0 e1 = Just $ SubExp e1
+  | isCt0 e2 = Just $ SubExp e2
+  | isCt1 e1 = Just $ SubExp e2
+  | isCt1 e2 = Just $ SubExp e1
   | otherwise =
     case (e1, e2) of
       (Constant (BasicVal (IntVal v1)) _, Constant (BasicVal (IntVal v2)) _) ->
@@ -321,8 +321,8 @@ simplifyBinOp _ (BinOp Times e1 e2 _ pos)
       _ -> Nothing
 
 simplifyBinOp _ (BinOp Divide e1 e2 _ pos)
-  | isCt0 e1 = Just $ subExp e1
-  | isCt1 e2 = Just $ subExp e1
+  | isCt0 e1 = Just $ SubExp e1
+  | isCt1 e2 = Just $ SubExp e1
   | otherwise =
     case (e1, e2) of
       (Constant (BasicVal (IntVal v1)) _, Constant (BasicVal (IntVal v2)) _) ->
@@ -343,7 +343,7 @@ simplifyBinOp _ (BinOp Pow e1 e2 _ pos)
       Basic Int  -> binOpRes pos $ IntVal 1
       Basic Real -> binOpRes pos $ RealVal 1.0
       _          -> Nothing
-  | isCt0 e1 || isCt1 e1 || isCt1 e2 = Just $ subExp e1
+  | isCt0 e1 || isCt1 e1 || isCt1 e2 = Just $ SubExp e1
   | otherwise =
     case (e1, e2) of
       (Constant (BasicVal (IntVal v1)) _, Constant (BasicVal (IntVal v2)) _) ->
@@ -353,7 +353,7 @@ simplifyBinOp _ (BinOp Pow e1 e2 _ pos)
       _ -> Nothing
 
 simplifyBinOp _ (BinOp ShiftL e1 e2 _ pos)
-  | isCt0 e2 = Just $ subExp e1
+  | isCt0 e2 = Just $ SubExp e1
   | otherwise =
     case (e1, e2) of
       (Constant (BasicVal (IntVal v1)) _, Constant (BasicVal (IntVal v2)) _) ->
@@ -361,7 +361,7 @@ simplifyBinOp _ (BinOp ShiftL e1 e2 _ pos)
       _ -> Nothing
 
 simplifyBinOp _ (BinOp ShiftR e1 e2 _ pos)
-  | isCt0 e2 = Just $ subExp e1
+  | isCt0 e2 = Just $ SubExp e1
   | otherwise =
     case (e1, e2) of
       (Constant (BasicVal (IntVal v1)) _, Constant (BasicVal (IntVal v2)) _) ->
@@ -369,11 +369,11 @@ simplifyBinOp _ (BinOp ShiftR e1 e2 _ pos)
       _ -> Nothing
 
 simplifyBinOp _ (BinOp Band e1 e2 _ pos)
-  | isCt0 e1 = Just $ subExp e1
-  | isCt0 e2 = Just $ subExp e2
-  | isCt1 e1 = Just $ subExp e2
-  | isCt1 e2 = Just $ subExp e1
-  | e1 == e2 = Just $ subExp e1
+  | isCt0 e1 = Just $ SubExp e1
+  | isCt0 e2 = Just $ SubExp e2
+  | isCt1 e1 = Just $ SubExp e2
+  | isCt1 e2 = Just $ SubExp e1
+  | e1 == e2 = Just $ SubExp e1
   | otherwise =
     case (e1, e2) of
       (Constant (BasicVal (IntVal v1)) _, Constant (BasicVal (IntVal v2)) _) ->
@@ -381,11 +381,11 @@ simplifyBinOp _ (BinOp Band e1 e2 _ pos)
       _ -> Nothing
 
 simplifyBinOp _ (BinOp Bor e1 e2 _ pos)
-  | isCt0 e1 = Just $ subExp e2
-  | isCt0 e2 = Just $ subExp e1
-  | isCt1 e1 = Just $ subExp e1
-  | isCt1 e2 = Just $ subExp e2
-  | e1 == e2 = Just $ subExp e1
+  | isCt0 e1 = Just $ SubExp e2
+  | isCt0 e2 = Just $ SubExp e1
+  | isCt1 e1 = Just $ SubExp e1
+  | isCt1 e2 = Just $ SubExp e2
+  | e1 == e2 = Just $ SubExp e1
   | otherwise =
     case (e1, e2) of
       (Constant (BasicVal (IntVal v1)) _, Constant (BasicVal (IntVal v2)) _) ->
@@ -393,8 +393,8 @@ simplifyBinOp _ (BinOp Bor e1 e2 _ pos)
       _ -> Nothing
 
 simplifyBinOp _ (BinOp Xor e1 e2 _ pos)
-  | isCt0 e1 = Just $ subExp e2
-  | isCt0 e2 = Just $ subExp e1
+  | isCt0 e1 = Just $ SubExp e2
+  | isCt0 e2 = Just $ SubExp e1
   | e1 == e2 = binOpRes pos $ IntVal 0
   | otherwise =
     case (e1, e2) of
@@ -403,10 +403,10 @@ simplifyBinOp _ (BinOp Xor e1 e2 _ pos)
       _ -> Nothing
 
 simplifyBinOp look (BinOp LogAnd e1 e2 _ pos)
-  | isCt0 e1 = Just $ subExp e1
-  | isCt0 e2 = Just $ subExp e2
-  | isCt1 e1 = Just $ subExp e2
-  | isCt1 e2 = Just $ subExp e1
+  | isCt0 e1 = Just $ SubExp e1
+  | isCt0 e2 = Just $ SubExp e2
+  | isCt1 e1 = Just $ SubExp e2
+  | isCt1 e2 = Just $ SubExp e1
   | Var v <- e1,
     Just (Not e1' _) <- look $ identName v,
     e1' == e2 = binOpRes pos $ LogVal False
@@ -420,10 +420,10 @@ simplifyBinOp look (BinOp LogAnd e1 e2 _ pos)
       _ -> Nothing
 
 simplifyBinOp look (BinOp LogOr e1 e2 _ pos)
-  | isCt0 e1 = Just $ subExp e2
-  | isCt0 e2 = Just $ subExp e1
-  | isCt1 e1 = Just $ subExp e1
-  | isCt1 e2 = Just $ subExp e2
+  | isCt0 e1 = Just $ SubExp e2
+  | isCt0 e2 = Just $ SubExp e1
+  | isCt1 e1 = Just $ SubExp e1
+  | isCt1 e2 = Just $ SubExp e2
   | Var v <- e1,
     Just (Not e1' _) <- look $ identName v,
     e1' == e2 = binOpRes pos $ LogVal True
@@ -484,25 +484,25 @@ simplifyBinOp _ (BinOp Leq e1 e2 _ pos)
 simplifyBinOp _ _ = Nothing
 
 binOpRes :: SrcLoc -> BasicValue -> Maybe Exp
-binOpRes loc v = Just $ subExp $ Constant (BasicVal v) loc
+binOpRes loc v = Just $ SubExp $ Constant (BasicVal v) loc
 
 simplifyNot :: LetTopDownRule
 simplifyNot _ (Not (Constant (BasicVal (LogVal v)) _) loc) =
-  Just $ subExp $ constant (not v) loc
+  Just $ SubExp $ constant (not v) loc
 simplifyNot _ _ = Nothing
 
 simplifyNegate :: LetTopDownRule
 simplifyNegate _ (Negate (Constant (BasicVal (IntVal  v)) _) pos) =
-  Just $ subExp $ constant (negate v) pos
+  Just $ SubExp $ constant (negate v) pos
 simplifyNegate _ (Negate (Constant (BasicVal (RealVal  v)) _) pos) =
-  Just $ subExp $ constant (negate v) pos
+  Just $ SubExp $ constant (negate v) pos
 simplifyNegate _ _ =
   Nothing
 
 -- If expression is true then just replace assertion.
 simplifyAssert :: LetTopDownRule
 simplifyAssert _ (Assert (Constant (BasicVal (LogVal True)) _) loc) =
-  Just $ subExp $ Constant (BasicVal Checked) loc
+  Just $ SubExp $ Constant (BasicVal Checked) loc
 simplifyAssert _ _ =
   Nothing
 
@@ -519,8 +519,8 @@ simplifyConjoin look (Conjoin es loc) =
       newset = foldl check S.empty es
       es' = S.toList newset
   in case es' of
-       []                    -> Just $ subExp $ Constant (BasicVal Checked) loc
-       [c]                   -> Just $ subExp c
+       []                    -> Just $ SubExp $ Constant (BasicVal Checked) loc
+       [c]                   -> Just $ SubExp c
        _ | origset /= newset -> Just $ Conjoin es' loc
          | otherwise         -> Nothing
 simplifyConjoin _ _ = Nothing
@@ -530,13 +530,13 @@ simplifyIndexing look (Index cs idd inds loc) =
   case look $ identName idd of
     Nothing -> Nothing
 
-    Just (SubExps [Constant v _] _)
+    Just (SubExp (Constant v _))
       | Just iis <- ctIndex inds,
         length iis == length (valueShape v),
-        Just el <- arrValInd v iis -> Just $ subExp $ Constant el loc
+        Just el <- arrValInd v iis -> Just $ SubExp $ Constant el loc
 
     Just (Iota _ _)
-      | [ii] <- inds -> Just $ subExp ii
+      | [ii] <- inds -> Just $ SubExp ii
 
     Just (Index cs2 aa ais _) ->
       Just $ Index (cs++cs2) aa (ais ++ inds) loc
@@ -546,17 +546,17 @@ simplifyIndexing look (Index cs idd inds loc) =
          Just el <- arrLitInd e iis -> Just el
 
     Just (Replicate _ (Var vv) _)
-      | [_]   <- inds -> Just $ subExp $ Var vv
+      | [_]   <- inds -> Just $ SubExp $ Var vv
       | _:is' <- inds -> Just $ Index cs vv is' loc
 
     Just (Replicate _ (Constant arr@(ArrayVal _ _) _) _)
        | _:is' <- inds,
          Just iis <- ctIndex is',
          Just el <- arrValInd arr iis ->
-           Just $ subExp $ Constant el loc
+           Just $ SubExp $ Constant el loc
 
     Just (Replicate _ val@(Constant _ _) _)
-      | [_] <- inds -> Just $ subExp val
+      | [_] <- inds -> Just $ SubExp val
 
     Just (Rearrange cs2 perm (Var src) _)
        | permuteReach perm < length inds ->
@@ -570,8 +570,9 @@ simplifyIndexing _ _ = Nothing
 evaluateBranch :: TopDownRule
 evaluateBranch _ (Let pat (If e1 tb fb _ _))
   | Just branch <- checkBranch =
-  let Result _ ses resloc = bodyResult branch
-  in return $ bodyBindings branch ++ [Let pat $ SubExps ses resloc]
+  let ses = resultSubExps $ bodyResult branch
+  in return $ bodyBindings branch ++ [Let [p] $ SubExp se
+                                     | (p,se) <- zip pat ses]
   where checkBranch
           | isCt1 e1  = Just tb
           | isCt0 e1  = Just fb
@@ -589,7 +590,7 @@ simplifyBoolBranch _ (Let [v] (If cond tb fb ts loc))
   (e, bnds) <-
     runBinder'' (eBinOp LogOr (pure $ BinOp LogAnd cond tres (Basic Bool) loc)
                               (eBinOp LogAnd (pure $ Not cond loc)
-                                             (pure $ subExp fres) (Basic Bool) loc)
+                                             (pure $ SubExp fres) (Basic Bool) loc)
                               (Basic Bool) loc)
   return $ bnds ++ [Let [v] e]
 simplifyBoolBranch _ _ = cannotSimplify
@@ -608,7 +609,7 @@ hoistBranchInvariant _ (Let pat (If e1 tb fb ts loc)) =
      then cannotSimplify
      else return $ invariant ++ [Let pat' $ If e1 tb' fb' ts' loc]
   where branchInvariant (pat', res, invariant) (v, (tse, fse, t))
-          | tse == fse = (pat', res, Let [v] (subExp tse) : invariant)
+          | tse == fse = (pat', res, Let [v] (SubExp tse) : invariant)
           | otherwise  = (v:pat', (tse,fse,t):res, invariant)
 hoistBranchInvariant _ _ = cannotSimplify
 
@@ -664,9 +665,9 @@ arrValInd _ _ = Nothing
 
 arrLitInd :: Exp -> [Int] -> Maybe Exp
 arrLitInd e [] = Just e
-arrLitInd (ArrayLit els _ _) (i:is) = arrLitInd (subExp $ els !! i) is
-arrLitInd (SubExps [Constant arr@(ArrayVal _ _) loc] _) (i:is) =
+arrLitInd (ArrayLit els _ _) (i:is) = arrLitInd (SubExp $ els !! i) is
+arrLitInd (SubExp (Constant arr@(ArrayVal _ _) loc)) (i:is) =
   case arrValInd arr (i:is) of
     Nothing -> Nothing
-    Just v  -> Just $ subExp $ Constant v loc
+    Just v  -> Just $ SubExp $ Constant v loc
 arrLitInd _ _ = Nothing

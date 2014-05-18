@@ -43,7 +43,7 @@ externaliseBody (I.Body (I.Let pat e:bnds) res) =
   where loc = srclocOf e
 
 externaliseExp :: I.Exp -> E.Exp
-externaliseExp (I.SubExps es loc) = externaliseSubExps es loc
+externaliseExp (I.SubExp se) = externaliseSubExp se
 externaliseExp (I.ArrayLit [] et loc) =
   E.Copy (E.Literal (E.arrayVal [] $ E.toDecl $ externaliseType et) loc) loc
 externaliseExp (I.ArrayLit es et loc) =

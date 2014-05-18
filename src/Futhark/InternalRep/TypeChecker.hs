@@ -282,8 +282,8 @@ unifyBasicTypes t1 t2
 -- one of them.
 unifySubExpTypes :: SubExp -> SubExp -> TypeM Type
 unifySubExpTypes e1 e2 =
-  maybe (bad $ UnifyError (subExp e1) (justOne $ toDecl t1)
-                          (subExp e2) (justOne $ toDecl t2)) return $
+  maybe (bad $ UnifyError (SubExp e1) (justOne $ toDecl t1)
+                          (SubExp e2) (justOne $ toDecl t2)) return $
   unifyTypes t1 t2
   where t1 = subExpType e1
         t2 = subExpType e2
@@ -315,7 +315,7 @@ checkTupleAnnotation loc desc t1s t2s
 require :: [Type] -> SubExp -> TypeM SubExp
 require ts e
   | any (subExpType e `similarTo`) ts = return e
-  | otherwise = bad $ UnexpectedType (subExp e)
+  | otherwise = bad $ UnexpectedType (SubExp e)
                       (justOne $ toDecl $ subExpType e)
                       (map (justOne . toDecl) ts)
 
@@ -323,13 +323,13 @@ require ts e
 requireI :: [Type] -> Ident -> TypeM Ident
 requireI ts ident
   | any (identType ident `similarTo`) ts = return ident
-  | otherwise = bad $ UnexpectedType (subExp $ Var ident)
+  | otherwise = bad $ UnexpectedType (SubExp $ Var ident)
                       (justOne $ toDecl $ identType ident)
                       (map (justOne . toDecl) ts)
 
 rowTypeM :: SubExp -> TypeM Type
 rowTypeM e = maybe wrong return $ peelArray 1 $ subExpType e
-  where wrong = bad $ NotAnArray (srclocOf e) (subExp e) $
+  where wrong = bad $ NotAnArray (srclocOf e) (SubExp e) $
                       justOne $ toDecl $ subExpType e
 
 -- | Type check a program containing arbitrary type information,
@@ -481,9 +481,8 @@ checkBody (Body (Let pat e:bnds) res) = do
 
 checkExp :: Exp -> TypeM Exp
 
-checkExp (SubExps es pos) = do
-  es' <- mapM checkSubExp es
-  return $ SubExps es' pos
+checkExp (SubExp es) =
+  SubExp <$> checkSubExp es
 
 checkExp (ArrayLit es t loc) = do
   es' <- mapM checkSubExp es
@@ -678,7 +677,7 @@ checkExp (DoLoop respat merge (Ident loopvar _ loopvarloc)
       ununique ident =
         ident { identType = identType ident `setUniqueness` Nonunique }
       -- Find the free variables of the loop body.
-      freeInType = mconcat . map (freeInExp . subExp) . arrayDims
+      freeInType = mconcat . map (freeInExp . SubExp) . arrayDims
       freeInRettype = mconcat $ map freeInType rettype
       free = map ununique $ HS.toList $
              (freeInBody loopbody' <> freeInRettype)

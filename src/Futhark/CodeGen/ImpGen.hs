@@ -119,8 +119,8 @@ compileExp pat e = do
 
 defCompileExp :: [VName] -> Exp -> ImpM op ()
 
-defCompileExp targets (SubExps ses _) =
-  zipWithM_ compileSubExpTo targets ses
+defCompileExp [target] (SubExp se) =
+  compileSubExpTo target se
 
 defCompileExp targets (If cond tbranch fbranch _ _) = do
   tcode <- collect $ compileBody targets tbranch

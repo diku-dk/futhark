@@ -136,11 +136,12 @@ doInlineInCaller (name,rtp,args,body,pos) inlcallees =
 
 inlineInBody :: [FunDec] -> Body -> Body
 inlineInBody inlcallees (Body (Let pat (Apply fname args rtp loc):bnds) res) =
-  let continue e =
-        Let pat e `insertBinding` inlineInBody inlcallees (Body bnds res)
-      continue' res' = continue $ SubExps (resultSubExps res') loc
+  let continue callbnds =
+        callbnds `insertBindings` inlineInBody inlcallees (Body bnds res)
+      continue' res' = continue [ Let [v] $ SubExp e'
+                                | (v,e') <- zip pat $ resultSubExps res' ]
   in  case filter (\(nm,_,_,_,_)->fname==nm) inlcallees of
-        [] -> continue $ Apply fname args rtp loc
+        [] -> continue [Let pat $ Apply fname args rtp loc]
         (_,_,fargs,body,_):_ ->
           let revbnds = zip (map fromParam fargs) $ map fst args
           in  mapResult continue' $ foldr addArgBnd body revbnds
@@ -151,7 +152,7 @@ inlineInBody inlcallees (Body (Let pat (Apply fname args rtp loc):bnds) res) =
               fargnm  = identName   farg
               fargpos = identSrcLoc farg
               farg' = Ident fargnm fargutp fargpos
-          in  Let [farg'] (subExp aarg) `insertBinding` body
+          in  Let [farg'] (SubExp aarg) `insertBinding` body
 inlineInBody inlcallees b = mapBody (inliner inlcallees) b
 
 inliner :: Monad m => [FunDec] -> Mapper m

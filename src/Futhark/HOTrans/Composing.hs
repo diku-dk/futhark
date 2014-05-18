@@ -74,12 +74,12 @@ fuseMaps lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
   where lam2' =
           lam2 { lambdaParams = lam2redparams ++ HM.keys inputmap
                , lambdaBody =
-                 let bindLambda res =
-                       Let pat (SubExps (resultSubExps res) loc) `insertBinding`
-                       makeCopiesInner (lambdaBody lam2)
+                 let bnds res = [ Let [p] $ SubExp e
+                                | (p,e) <- zip pat $ resultSubExps res]
+                     bindLambda res =
+                       bnds res `insertBindings` makeCopiesInner (lambdaBody lam2)
                  in makeCopies $ mapResult bindLambda $ lambdaBody lam1
                }
-        loc = srclocOf lam2
 
         (lam2redparams, pat, inputmap, makeCopies, makeCopiesInner) =
           fuseInputs lam1 inp1 out1 lam2 inp2
@@ -150,8 +150,9 @@ fuseFilterInto lam1 inp1 out1 lam2 inp2 vnames falsebranch = (lam2', HM.elems in
                          (bodyType falsebranch))
                         loc)] $
                  Result (resultCertificates res) (map Var residents) loc
-        lam1tuple = SubExps (map (Var . fromParam) $ lambdaParams lam1) loc
-        bindins = Let pat lam1tuple `insertBinding` branch
+        lam1tuple = [ Let [v] $ SubExp $ Var $ fromParam p
+                    | (v,p) <- zip pat $ lambdaParams lam1 ]
+        bindins = lam1tuple `insertBindings` branch
 
         (lam2redparams, pat, inputmap, makeCopies, makeCopiesInner) =
           fuseInputs lam1 inp1 out1 lam2 inp2
@@ -216,7 +217,7 @@ removeDuplicateInputs = fst . HM.foldlWithKey' comb ((HM.empty, id), M.empty)
             Just par' -> ((parmap, inner . forward par par'),
                           arrmap)
         forward to from b =
-          Let [fromParam to] (subExp $ Var $ fromParam from)
+          Let [fromParam to] (SubExp $ Var $ fromParam from)
           `insertBinding` b
 
 {-

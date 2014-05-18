@@ -362,35 +362,35 @@ fusionGatherBody fres (Body (Let pat e:bnds) res)
           (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
           greedyFuse False used_lam blres (pat, soac)
 
-        SOAC.Reduce _ lam args loc -> do
+        SOAC.Reduce _ lam args _ -> do
           -- a reduce always starts a new kernel
           let nes = map fst args
           bres  <- bindingFamily pat $ fusionGatherBody fres body
-          bres' <- fusionGatherExp bres $ SubExps nes loc
+          bres' <- foldM fusionGatherExp bres $ map SubExp nes
           (_, blres) <- fusionGatherLam (HS.empty, bres') lam
           addNewKer blres (pat, soac)
 
-        SOAC.Redomap _ outer_red inner_red ne _ loc -> do
+        SOAC.Redomap _ outer_red inner_red nes _ _ -> do
           -- a redomap always starts a new kernel
           (_, lres)  <- foldM fusionGatherLam (HS.empty, fres) [outer_red, inner_red]
           bres  <- bindingFamily pat $ fusionGatherBody lres body
-          bres' <- fusionGatherExp bres $ SubExps ne loc
+          bres' <- foldM fusionGatherExp bres $ map SubExp nes
           addNewKer bres' (pat, soac)
 
-        SOAC.Scan _ lam args loc -> do
+        SOAC.Scan _ lam args _ -> do
           -- NOT FUSABLE (probably), but still add as kernel, as
           -- optimisations like ISWIM may make it fusable.
           let nes = map fst args
           bres  <- bindingFamily pat $ fusionGatherBody fres body
           (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
-          blres' <- fusionGatherExp blres $ SubExps nes loc
+          blres' <- foldM fusionGatherExp blres $ map SubExp nes
           greedyFuse False used_lam blres' (pat, soac)
   where body = Body bnds res
 
 fusionGatherBody _ (Body (Let _ e:_) _)
   | Left (SOAC.InvalidArrayInput inpe) <- SOAC.fromExp e =
     badFusionGM $ EnablingOptError (srclocOf e)
-                  ("In Fusion.hs, "++ppExp (subExp inpe)++" is not valid array input.")
+                  ("In Fusion.hs, "++ppSubExp inpe++" is not valid array input.")
 
 fusionGatherBody fres (Body (Let [v] e:bnds) res)
   | Just (src,trns) <- SOAC.transformFromExp e =
@@ -399,7 +399,7 @@ fusionGatherBody fres (Body (Let [v] e:bnds) res)
 fusionGatherBody fres (Body (Let pat (Replicate n el loc):bnds) res) = do
   bres <- bindingFamily pat $ fusionGatherBody fres $ Body bnds res
   -- Implemented inplace: gets the variables in `n` and `el`
-  (used_set, bres') <- getUnfusableSet loc bres [subExp n, subExp el]
+  (used_set, bres') <- getUnfusableSet loc bres [SubExp n, SubExp el]
   repl_idnm <- newVName "repl_x"
   let repl_id = Ident repl_idnm (Basic Int) loc
       repl_lam = Lambda [toParam repl_id] (resultBody [] [el] loc)
@@ -424,7 +424,7 @@ fusionGatherBody fres (Body (Let [id1] (Update _ id0 inds elm _):bnds) res) = do
   return $ fres' { kernels = new_kernels }
 
 fusionGatherBody fres (Body (Let pat e:bnds) res) = do
-    let pat_vars = map (subExp . Var) pat
+    let pat_vars = map (SubExp . Var) pat
     bres <- binding pat $ fusionGatherBody fres $ Body bnds res
     foldM fusionGatherExp bres (e:pat_vars)
 
