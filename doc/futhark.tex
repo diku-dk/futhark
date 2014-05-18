@@ -172,8 +172,8 @@ defined.  As a concrete example, here is the recursive definition of
 the factorial function in \LO{}.
 \begin{colorcode}
   fun int fact(int n) =
-    if n = 0 then 1
-             else n * fact(n-1)
+    if n == 0 then 1
+              else n * fact(n-1)
 \end{colorcode}
 Indentation has no syntactical significance in \LO{}, but recommended for
 readability.
@@ -246,7 +246,7 @@ function for computing the Fibonacci numbers.
   fun int fib(int n) = fibhelper(1,1,n)
 
   fun int fibhelper(int x, int y, int n) =
-    if n = 1 then x else fibhelper(y, x+y, n-1)
+    if n == 1 then x else fibhelper(y, x+y, n-1)
 \end{colorcode}
 We can rewrite this using the \texttt{loop} construct.
 \begin{colorcode}
@@ -419,7 +419,7 @@ be typed in \LO{} itself.
 \begin{align*}
 \texttt{ filter}
 & :: (\alpha\rightarrow\texttt{bool})\rightarrow[\alpha]\rightarrow[\alpha] \\
-\texttt{ filter($f$,$a$)} & \equiv \texttt{\{$a$[i] | $f$($a$[i]) = \texttt{True }\}}
+\texttt{ filter($f$,$a$)} & \equiv \texttt{\{$a$[i] | $f$($a$[i]) == \texttt{True }\}}
 \end{align*}
 \begin{align*}
 \texttt{ reduce}
@@ -497,7 +497,7 @@ the language.
     Evaluate the binary operator on its operands, which must both be
     of either type \intt{} or \realt.  The following operators are
     supported: \texttt{+}, \texttt{*}, \texttt{-}, \texttt{/},
-    \texttt{\%}, \texttt{=}, \texttt{<}, \texttt{<=}, \texttt{pow}.
+    \texttt{\%}, \texttt{==}, \texttt{<}, \texttt{<=}, \texttt{pow}.
 
   \item[\texttt{\textit{x} \textbf{bitop} \textit{y}}] \hfill\\
     Evaluate the binary operator on its operands, which must both be
@@ -572,7 +572,7 @@ the language.
 
   \item[\texttt{transpose(k,n,a)}]\hfill\\
     Return the generalised transpose of \textit{a}.  If
-    \texttt{$b$=transpose($k$,$n$,$a$)}, then
+    \texttt{$b$==transpose($k$,$n$,$a$)}, then
     \[
     \texttt{a}[i_1, \ldots, i_k, i_{k+1}, \ldots, i_{k+n}, \ldots, i_q ]
     =

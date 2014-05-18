@@ -5,7 +5,7 @@ fun int main() =
   let n = 10 in
   let inarr  = replicate (n , 0) in
   loop ( outarr  = inarr ) = for i < n  do
-      if i = 0
+      if i == 0
       then outarr
       else let outarr[i] = i in outarr
   in 0

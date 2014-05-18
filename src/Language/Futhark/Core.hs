@@ -79,7 +79,7 @@ opStr Xor = "^"
 opStr Bor = "|"
 opStr LogAnd = "&&"
 opStr LogOr = "||"
-opStr Equal = "="
+opStr Equal = "=="
 opStr Less = "<"
 opStr Leq = "<="
 

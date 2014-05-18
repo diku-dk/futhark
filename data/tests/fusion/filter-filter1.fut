@@ -1,6 +1,6 @@
-fun bool div2(int x) = x % 2 = 0
+fun bool div2(int x) = x % 2 == 0
 
-fun bool div3(int x) = x % 3 = 0
+fun bool div3(int x) = x % 3 == 0
 
 fun [int] main([int] a, [int] b) =
   let {c1,c2} = unzip(filter(fn bool (int x, int y) =>

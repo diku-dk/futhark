@@ -86,6 +86,7 @@ import Language.Futhark.Parser.Lexer
       '/'             { L $$ DIVIDE }
       '%'             { L $$ MOD }
       '='             { L $$ EQU }
+      '=='            { L $$ EQU2 }
       '<'             { L $$ LTH }
       '>'             { L $$ GTH }
       '<='            { L $$ LEQ }
@@ -143,7 +144,7 @@ import Language.Futhark.Parser.Lexer
 %left '||'
 %left '&&'
 %left '&' '^' '|'
-%left '<=' '<' '='
+%left '<=' '<' '=='
 
 %left '<<' '>>'
 %left '+' '-'
@@ -163,7 +164,7 @@ Ops : op '+'     { (nameFromString "op +", $1) }
     | op '-'     { (nameFromString "op -", $1) }
     | op '/'     { (nameFromString "op /", $1) }
     | op '%'     { (nameFromString "op %", $1) }
-    | op '='     { (nameFromString "op =", $1) }
+    | op '=='    { (nameFromString "op ==", $1) }
     | op '<'     { (nameFromString "op <", $1) }
     | op '<='    { (nameFromString "op <=", $1) }
     | op '&&'    { (nameFromString "op &&", $1) }
@@ -255,7 +256,7 @@ Exp  :: { UncheckedExp }
      | Exp '|' Exp    { BinOp Bor $1 $3 NoInfo $2 }
      | Exp '^' Exp    { BinOp Xor $1 $3 NoInfo $2 }
 
-     | Exp '=' Exp    { BinOp Equal $1 $3 NoInfo $2 }
+     | Exp '==' Exp   { BinOp Equal $1 $3 NoInfo $2 }
      | Exp '<' Exp    { BinOp Less $1 $3 NoInfo $2 }
      | Exp '<=' Exp   { BinOp Leq  $1 $3 NoInfo $2 }
 

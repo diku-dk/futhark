@@ -28,7 +28,7 @@
 fun {[real],[real]} tridag(  int  nn,
                             *[real] b, *[real] d,
                             [real] a, [real] c ) =
-    if (nn = 1)
+    if (nn == 1)
     //then ( b, zipWith(fn real (real x, real y) => x / y, d, b) )
     then {b, [d[0]/b[0]]}
     else

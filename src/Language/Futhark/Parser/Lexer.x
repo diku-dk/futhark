@@ -39,6 +39,7 @@ tokens :-
   "/"                      { const DIVIDE }
   "%"                      { const MOD }
   "="                      { const EQU }
+  "=="                     { const EQU2 }
   "<"                      { const LTH }
   ">"                      { const GTH }
   "&"                      { const BAND }

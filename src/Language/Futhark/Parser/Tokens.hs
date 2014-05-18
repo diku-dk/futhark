@@ -33,6 +33,7 @@ data Token = IF
            | DIVIDE
            | MOD
            | EQU
+           | EQU2
            | LTH
            | GTH
            | LEQ
