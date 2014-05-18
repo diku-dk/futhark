@@ -1,6 +1,6 @@
 -- | This module exports functionality for splitting a function into
 -- predicate and value function.
-module Futhark.SuffCond.GenPredicates
+module Futhark.Optimise.SuffCond.GenPredicates
   ( genPredicate
   )
   where

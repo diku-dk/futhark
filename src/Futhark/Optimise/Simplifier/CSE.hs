@@ -3,7 +3,7 @@
 -- Implementation of common-subexpression elimination for the
 -- rebinder.
 --
-module Futhark.EnablingOpts.Simplifier.CSE
+module Futhark.Optimise.Simplifier.CSE
   ( DupeState
   , newDupeState
   , performCSE

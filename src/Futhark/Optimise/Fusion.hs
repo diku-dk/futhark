@@ -1,5 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-module Futhark.HOTrans.Fusion ( fuseProg )
+module Futhark.Optimise.Fusion ( fuseProg )
   where
 
 import Control.Monad.State
@@ -16,8 +16,8 @@ import qualified Data.HashSet      as HS
 
 import Futhark.InternalRep
 import Futhark.MonadFreshNames
-import Futhark.EnablingOpts.EnablingOptDriver
-import Futhark.HOTrans.LoopKernel
+import Futhark.Optimise.SimpleOpts
+import Futhark.Optimise.Fusion.LoopKernel
 import Futhark.HORepresentation.SOAC (SOAC)
 import Futhark.Binder
 import qualified Futhark.HORepresentation.SOAC as SOAC
@@ -30,7 +30,7 @@ data FusionGEnv = FusionGEnv {
   , program    :: Prog
   }
 
-newtype FusionGM a = FusionGM (StateT VNameSource (ReaderT FusionGEnv (Either EnablingOptError)) a)
+newtype FusionGM a = FusionGM (StateT VNameSource (ReaderT FusionGEnv (Either Error)) a)
   deriving (Monad, Applicative, Functor,
             MonadState VNameSource, MonadReader FusionGEnv)
 
@@ -95,11 +95,11 @@ bindRes rrr = local (\x -> x { fusedRes = rrr })
 -- state refers to the fresh-names engine.
 -- The reader hides the vtable that associates ... to ... (fill in, please).
 -- The 'Either' monad is used for error handling.
-runFusionGatherM :: VNameSource -> FusionGM a -> FusionGEnv -> Either EnablingOptError (a, VNameSource)
+runFusionGatherM :: VNameSource -> FusionGM a -> FusionGEnv -> Either Error (a, VNameSource)
 runFusionGatherM src (FusionGM a) =
   runReaderT (runStateT a src)
 
-badFusionGM :: EnablingOptError -> FusionGM a
+badFusionGM :: Error -> FusionGM a
 badFusionGM = FusionGM . lift . lift . Left
 
 ------------------------------------------------------------------------
@@ -107,7 +107,7 @@ badFusionGM = FusionGM . lift . lift . Left
 ---    and fuse them in a second pass!                               ---
 ------------------------------------------------------------------------
 
-fuseProg :: Prog -> Either EnablingOptError (Bool, Prog)
+fuseProg :: Prog -> Either Error Prog
 fuseProg prog = do
   let env  = FusionGEnv { soacs = HM.empty
                         , arrsInScope = HM.empty
@@ -120,9 +120,9 @@ fuseProg prog = do
   let ks'    = map cleanFusionResult ks
   let succc = any rsucc ks'
   if not succc
-  then return (False, prog)
+  then return prog
   else do (funs',_) <- runFusionGatherM src' (zipWithM fuseInFun ks' funs) env
-          return (True, Prog funs')
+          return $ Prog funs'
 
 fusionGatherFun :: FunDec -> FusionGM FusedRes
 fusionGatherFun (_, _, _, body, _) = fusionGatherBody mkFreshFusionRes body
@@ -257,7 +257,7 @@ greedyFuse is_repl lam_used_nms res (out_idds, orig_soac) = do
       to_fuse_knmSet = getKersWithInpArrs res out_nms
       to_fuse_knms   = HS.toList to_fuse_knmSet
       lookup_kern k  = case HM.lookup k (kernels res) of
-                         Nothing  -> badFusionGM $ EnablingOptError (srclocOf soac)
+                         Nothing  -> badFusionGM $ Error (srclocOf soac)
                                      ("In Fusion.hs, greedyFuse, comp of to_fuse_kers: "
                                       ++ "kernel name not found in kernels field!")
                          Just ker -> return ker
@@ -389,7 +389,7 @@ fusionGatherBody fres (Body (Let pat e:bnds) res)
 
 fusionGatherBody _ (Body (Let _ e:_) _)
   | Left (SOAC.InvalidArrayInput inpe) <- SOAC.fromExp e =
-    badFusionGM $ EnablingOptError (srclocOf e)
+    badFusionGM $ Error (srclocOf e)
                   ("In Fusion.hs, "++ppSubExp inpe++" is not valid array input.")
 
 fusionGatherBody fres (Body (Let [v] e:bnds) res)
@@ -521,7 +521,7 @@ getUnfusableSet loc fres args = do
     new_res <- foldM fusionGatherExp null_res args
     if not (HM.null (outArr  new_res)) || not (HM.null (inpArr new_res)) ||
        not (HM.null (kernels new_res)) || rsucc new_res
-    then badFusionGM $ EnablingOptError loc $
+    then badFusionGM $ Error loc $
                         "In Fusion.hs, getUnfusableSet, broken invariant!"
                         ++ " Unnormalized program: " ++ concatMap ppExp args
     else return ( unfusable new_res,
@@ -574,16 +574,16 @@ replaceSOAC names@(Ident pat_nm _ _ : _) soac body = do
       return $ f $ Let names e' `insertBinding` body
     Just knm ->
       case HM.lookup knm (kernels fres) of
-        Nothing  -> badFusionGM $ EnablingOptError loc
+        Nothing  -> badFusionGM $ Error loc
                                    ("In Fusion.hs, replaceSOAC, outArr in ker_name "
                                     ++"which is not in Res: "++textual (unKernName knm))
         Just ker -> do
           when (names /= outputs ker) $
-            badFusionGM $ EnablingOptError loc
+            badFusionGM $ Error loc
                           ("In Fusion.hs, replaceSOAC, "
                            ++" pat does not match kernel's pat: "++ppTuple names)
           when (null $ fusedVars ker) $
-            badFusionGM $ EnablingOptError loc
+            badFusionGM $ Error loc
                           ("In Fusion.hs, replaceSOAC, unfused kernel "
                           ++"still in result: "++ppTuple names)
 
@@ -662,5 +662,5 @@ cleanFusionResult fres =
 
 errorIllegal :: String -> SrcLoc -> FusionGM FusedRes
 errorIllegal soac_name loc =
-    badFusionGM $ EnablingOptError loc
+    badFusionGM $ Error loc
                   ("In Fusion.hs, soac "++soac_name++" appears illegally in pgm!")

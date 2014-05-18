@@ -1,6 +1,6 @@
 -- | A usage-table is sort of a bottom-up symbol table, describing how
 -- (and if) a variable is used.
-module Futhark.EnablingOpts.UsageTable
+module Futhark.Optimise.UsageTable
   ( UsageTable
   , empty
   , contains

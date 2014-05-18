@@ -1,9 +1,10 @@
 -- | This module implements a compiler pass that removes unused
 -- @let@-bindings.
-module Futhark.EnablingOpts.DeadVarElim ( deadCodeElim
-                                        , deadCodeElimFun
-                                        , deadCodeElimBody
-                                        )
+module Futhark.Optimise.DeadVarElim
+       ( deadCodeElim
+       , deadCodeElimFun
+       , deadCodeElimBody
+       )
   where
 
 import Control.Applicative

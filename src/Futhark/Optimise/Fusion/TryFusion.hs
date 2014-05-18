@@ -1,5 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-module Futhark.HOTrans.TryFusion
+module Futhark.Optimise.Fusion.TryFusion
   ( TryFusion
   , tryFusion
   , liftMaybe

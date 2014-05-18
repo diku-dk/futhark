@@ -1,4 +1,4 @@
-module Futhark.EnablingOpts.SymbolTable
+module Futhark.Optimise.SymbolTable
   ( SymbolTable (bindings)
   , empty
   , Entry (..)
@@ -28,7 +28,7 @@ import Data.List hiding (insert, lookup)
 import qualified Data.HashMap.Lazy as HM
 
 import Futhark.InternalRep
-import Futhark.EnablingOpts.ScalExp
+import Futhark.Optimise.ScalExp
 
 data SymbolTable = SymbolTable {
     curDepth :: Int

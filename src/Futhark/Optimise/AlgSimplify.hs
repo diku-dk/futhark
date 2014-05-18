@@ -1,5 +1,5 @@
 {-# LANGUAGE DataKinds, GeneralizedNewtypeDeriving, NamedFieldPuns #-}
-module Futhark.EnablingOpts.AlgSimplify
+module Futhark.Optimise.AlgSimplify
   ( ScalExp
   , simplify
   , mkSuffConds
@@ -17,8 +17,8 @@ import Control.Monad
 import Control.Monad.Reader
 
 import Futhark.InternalRep
-import Futhark.EnablingOpts.EnablingOptErrors
-import Futhark.EnablingOpts.ScalExp
+import Futhark.Optimise.Errors
+import Futhark.Optimise.ScalExp
 
 type RangesRep = HM.HashMap VName (Int, Maybe ScalExp, Maybe ScalExp)
 
@@ -26,9 +26,9 @@ type RangesRep = HM.HashMap VName (Int, Maybe ScalExp, Maybe ScalExp)
 --   a list of variable-to-range bindings.
 data AlgSimplifyEnv = AlgSimplifyEnv { pos :: SrcLoc, cheap :: Bool, ranges :: RangesRep }
 
-type AlgSimplifyM = ReaderT AlgSimplifyEnv (Either EnablingOptError)
+type AlgSimplifyM = ReaderT AlgSimplifyEnv (Either Error)
 
-runAlgSimplifier :: AlgSimplifyM a -> SrcLoc -> Bool -> RangesRep -> Either EnablingOptError a
+runAlgSimplifier :: AlgSimplifyM a -> SrcLoc -> Bool -> RangesRep -> Either Error a
 runAlgSimplifier x p c r = runReaderT x env
   where env = AlgSimplifyEnv{ pos = p, cheap = c, ranges = r }
 
@@ -65,11 +65,11 @@ type DNF     = [NAnd ]
 --type CNF     = [NOr  ]
 
 -- | Applies Simplification at Expression level:
-simplify :: ScalExp -> SrcLoc -> Bool -> RangesRep -> Either EnablingOptError ScalExp
+simplify :: ScalExp -> SrcLoc -> Bool -> RangesRep -> Either Error ScalExp
 simplify = runAlgSimplifier . simplifyScal
 
 -- | Extracts sufficient conditions for a LTH0 relation to hold
-mkSuffConds :: ScalExp -> SrcLoc -> RangesRep -> Either EnablingOptError [[ScalExp]]
+mkSuffConds :: ScalExp -> SrcLoc -> RangesRep -> Either Error [[ScalExp]]
 mkSuffConds e p = runAlgSimplifier (gaussElimRel e) p True
 
 -------------------------------------------------------

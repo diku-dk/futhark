@@ -1,4 +1,4 @@
-module Futhark.EnablingOpts.ScalExp
+module Futhark.Optimise.ScalExp
   ( RelOp0(..)
   , ScalExp(..)
   , scalExpType

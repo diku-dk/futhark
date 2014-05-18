@@ -5,9 +5,9 @@
 --
 -- These rewrite rules are "local", in that they do not maintain any
 -- state or look at the program as a whole.  Compare this to the
--- fusion algorithm in @Futhark.HOTrans.Fusion@, which must be implemented
+-- fusion algorithm in @Futhark.Optimise.Fusion.Fusion@, which must be implemented
 -- as its own pass.
-module Futhark.EnablingOpts.Simplifier.Rule
+module Futhark.Optimise.Simplifier.Rule
        ( -- * Rule definition
          TopDownRule
        , TopDownRules
@@ -19,9 +19,9 @@ module Futhark.EnablingOpts.Simplifier.Rule
        , bottomUpSimplifyBinding
        ) where
 
-import qualified Futhark.EnablingOpts.SymbolTable as ST
-import qualified Futhark.EnablingOpts.UsageTable as UT
-import Futhark.EnablingOpts.Simplifier.Simplify
+import qualified Futhark.Optimise.SymbolTable as ST
+import qualified Futhark.Optimise.UsageTable as UT
+import Futhark.Optimise.Simplifier.Simplify
 import Futhark.InternalRep
 import Futhark.MonadFreshNames
 

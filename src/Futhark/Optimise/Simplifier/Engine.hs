@@ -10,9 +10,9 @@
 --    branches.  This is done as aggressively as possible.
 --
 --    * Apply simplification rules (see
---    "Futhark.EnablingOpts.Simplification.Rules").
+--    "Futhark.Optimise.Simplification.Rules").
 --
-module Futhark.EnablingOpts.Simplifier.Engine
+module Futhark.Optimise.Simplifier.Engine
        ( simplifyProg
        , simplifyOneFun
        , simplifyOneLambda
@@ -34,11 +34,11 @@ import qualified Data.HashSet as HS
 
 import Futhark.InternalRep
 import Futhark.MonadFreshNames
-import Futhark.EnablingOpts.Simplifier.CSE
-import Futhark.EnablingOpts.Simplifier.Rule
-import qualified Futhark.EnablingOpts.SymbolTable as ST
-import qualified Futhark.EnablingOpts.UsageTable as UT
-import Futhark.EnablingOpts.Simplifier.Apply
+import Futhark.Optimise.Simplifier.CSE
+import Futhark.Optimise.Simplifier.Rule
+import qualified Futhark.Optimise.SymbolTable as ST
+import qualified Futhark.Optimise.UsageTable as UT
+import Futhark.Optimise.Simplifier.Apply
 
 -- | Simplify the given program.  Even if the output differs from the
 -- output, meaningful simplification may not have taken place - the

@@ -3,14 +3,14 @@
 -- rule, as it requires access to the function table.  It is put in a
 -- separate module, in order to not clutter the main simplification
 -- engine.
-module Futhark.EnablingOpts.Simplifier.Apply
+module Futhark.Optimise.Simplifier.Apply
   ( simplifyApply
   )
   where
 
 import Futhark.InternalRep
 import qualified Futhark.Interpreter as Interp
-import qualified Futhark.EnablingOpts.SymbolTable as ST
+import qualified Futhark.Optimise.SymbolTable as ST
 
 simplifyApply :: Prog -> ST.SymbolTable -> Name -> [(SubExp,Diet)] -> Maybe [Value]
 simplifyApply program vtable fname args = do

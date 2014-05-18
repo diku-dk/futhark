@@ -31,35 +31,17 @@ Library
 
   Exposed-modules: Futhark.Binder
                    Futhark.CodeGen.Backends.Bohrium
-                   Futhark.CodeGen.Backends.BohriumOp
                    Futhark.CodeGen.Backends.BohriumCodeGen
+                   Futhark.CodeGen.Backends.BohriumOp
                    Futhark.CodeGen.Backends.CUtils
                    Futhark.CodeGen.Backends.GenericC
                    Futhark.CodeGen.Backends.GenericCReading
                    Futhark.CodeGen.Backends.SequentialC
                    Futhark.CodeGen.Backends.SimpleRepresentation
+                   Futhark.CodeGen.FirstOrderSOACS
                    Futhark.CodeGen.ImpCode
                    Futhark.CodeGen.ImpGen
-                   Futhark.CodeGen.FirstOrderSOACS
                    Futhark.Dev
-                   Futhark.EnablingOpts.AlgSimplify
-                   Futhark.EnablingOpts.CallGraph
-                   Futhark.EnablingOpts.ClosedForm
-                   Futhark.EnablingOpts.DeadVarElim
-                   Futhark.EnablingOpts.EnablingOptDriver
-                   Futhark.EnablingOpts.EnablingOptErrors
-                   Futhark.EnablingOpts.InliningDeadFun
-                   Futhark.EnablingOpts.ScalExp
-                   Futhark.EnablingOpts.Simplifier
-                   Futhark.EnablingOpts.Simplifier.Apply
-                   Futhark.EnablingOpts.Simplifier.CSE
-                   Futhark.EnablingOpts.Simplifier.DataDependencies
-                   Futhark.EnablingOpts.Simplifier.Engine
-                   Futhark.EnablingOpts.Simplifier.Rule
-                   Futhark.EnablingOpts.Simplifier.Rules
-                   Futhark.EnablingOpts.Simplifier.Simplify
-                   Futhark.EnablingOpts.SymbolTable
-                   Futhark.EnablingOpts.UsageTable
                    Futhark.Externalise
                    Futhark.ExternalRep
                    Futhark.ExternalRep.Renamer
@@ -69,11 +51,6 @@ Library
                    Futhark.HORepresentation.MapNest
                    Futhark.HORepresentation.SOAC
                    Futhark.HORepresentation.SOACNest
-                   Futhark.HOTrans.Composing
-                   Futhark.HOTrans.Fusion
-                   Futhark.HOTrans.HOTransDriver
-                   Futhark.HOTrans.LoopKernel
-                   Futhark.HOTrans.TryFusion
                    Futhark.Internalise
                    Futhark.Internalise.AccurateSizes
                    Futhark.Internalise.Bindings
@@ -91,6 +68,31 @@ Library
                    Futhark.Interpreter
                    Futhark.MonadFreshNames
                    Futhark.NeedNames
+                   Futhark.Optimise.CallGraph
+                   Futhark.Optimise.DeadVarElim
+                   Futhark.Optimise.Errors
+                   Futhark.Optimise.Fusion
+                   Futhark.Optimise.Fusion.Composing
+                   Futhark.Optimise.Fusion.LoopKernel
+                   Futhark.Optimise.Fusion.TryFusion
+                   Futhark.Optimise.InliningDeadFun
+                   Futhark.Optimise.SimpleOpts
+                   Futhark.Optimise.Simplifier
+                   Futhark.Optimise.Simplifier.Apply
+                   Futhark.Optimise.Simplifier.ClosedForm
+                   Futhark.Optimise.Simplifier.CSE
+                   Futhark.Optimise.Simplifier.DataDependencies
+                   Futhark.Optimise.Simplifier.Engine
+                   Futhark.Optimise.Simplifier.Rule
+                   Futhark.Optimise.Simplifier.Rules
+                   Futhark.Optimise.Simplifier.Simplify
+                   Futhark.Optimise.AlgSimplify
+                   Futhark.Optimise.UsageTable
+                   Futhark.Optimise.ScalExp
+                   Futhark.Optimise.SymbolTable
+                   Futhark.Optimise.SuffCond
+                   Futhark.Optimise.SuffCond.GenPredicates
+                   Futhark.Optimise.SuffCond.OptPredicates
                    Futhark.Passes
                    Futhark.Pipeline
                    Futhark.SOACFlowGraph
@@ -98,9 +100,6 @@ Library
                    Futhark.Tools
                    Futhark.TypeError
                    Futhark.Untrace
-                   Futhark.SuffCond.GenPredicates
-                   Futhark.SuffCond.OptPredicates
-                   Futhark.SuffCond
                    Futhark.Version
                    Language.Futhark
                    Language.Futhark.Attributes

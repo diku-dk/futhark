@@ -1,7 +1,7 @@
 -- | This module defines a collection of simplification rules, as per
--- "Futhark.EnablingOpts.Simplifier.Rule".  They are used in the
+-- "Futhark.Optimise.Simplifier.Rule".  They are used in the
 -- simplifier.
-module Futhark.EnablingOpts.Simplifier.Rules
+module Futhark.Optimise.Simplifier.Rules
   ( standardRules
   )
 
@@ -21,12 +21,12 @@ import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet      as HS
 import qualified Data.Set          as S
 
-import qualified Futhark.EnablingOpts.SymbolTable as ST
-import qualified Futhark.EnablingOpts.UsageTable as UT
-import Futhark.EnablingOpts.ClosedForm
-import Futhark.EnablingOpts.Simplifier.Rule
-import Futhark.EnablingOpts.Simplifier.Simplify
-import Futhark.EnablingOpts.Simplifier.DataDependencies
+import qualified Futhark.Optimise.SymbolTable as ST
+import qualified Futhark.Optimise.UsageTable as UT
+import Futhark.Optimise.Simplifier.ClosedForm
+import Futhark.Optimise.Simplifier.Rule
+import Futhark.Optimise.Simplifier.Simplify
+import Futhark.Optimise.Simplifier.DataDependencies
 import Futhark.InternalRep
 import Futhark.Tools
 

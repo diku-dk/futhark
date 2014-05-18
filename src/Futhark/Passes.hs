@@ -13,12 +13,12 @@ module Futhark.Passes
   )
 where
 
-import Futhark.EnablingOpts.EnablingOptDriver
-import Futhark.HOTrans.HOTransDriver
+import Futhark.Optimise.SimpleOpts
+import Futhark.Optimise.Fusion
 import qualified Futhark.FirstOrderTransform as FOT
 import Futhark.Untrace
 import Futhark.Pipeline
-import qualified Futhark.SuffCond
+import qualified Futhark.Optimise.SuffCond
 
 fotransform :: Pass
 fotransform = Pass { passName = "first-order transform"
@@ -32,12 +32,12 @@ uttransform = Pass { passName = "debugging annotation removal"
 
 eotransform :: Pass
 eotransform = Pass { passName = "enabling optimations"
-                   , passOp = liftPass enablingOpts
+                   , passOp = liftPass simpleOpts
                    }
 
 hotransform :: Pass
 hotransform = Pass { passName = "higher-order optimisations"
-                   , passOp = liftPass highOrdTransf
+                   , passOp = liftPass fuseProg
                    }
 
 inlinetransform :: Pass
@@ -47,5 +47,5 @@ inlinetransform = Pass { passName = "inline functions"
 
 optimisePredicates :: Pass
 optimisePredicates = Pass { passName = "optimise predicates"
-                          , passOp = return . Futhark.SuffCond.optimiseProg
+                          , passOp = return . Futhark.Optimise.SuffCond.optimiseProg
                           }

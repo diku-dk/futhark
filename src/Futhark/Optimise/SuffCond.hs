@@ -1,4 +1,4 @@
-module Futhark.SuffCond
+module Futhark.Optimise.SuffCond
        (
          optimiseProg
        )
@@ -9,10 +9,10 @@ import Control.Monad.State
 import Futhark.InternalRep
 import Futhark.InternalRep.Renamer
 import Futhark.MonadFreshNames
-import Futhark.SuffCond.OptPredicates
-import Futhark.SuffCond.GenPredicates
-import Futhark.EnablingOpts.Simplifier
-import Futhark.EnablingOpts.DeadVarElim
+import Futhark.Optimise.SuffCond.OptPredicates
+import Futhark.Optimise.SuffCond.GenPredicates
+import Futhark.Optimise.Simplifier
+import Futhark.Optimise.DeadVarElim
 
 optimiseProg :: Prog -> Prog
 optimiseProg prog =

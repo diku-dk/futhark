@@ -10,7 +10,7 @@
 -- that the given SOACs are immediately compatible.
 --
 -- The module will, however, remove duplicate inputs after fusion.
-module Futhark.HOTrans.Composing
+module Futhark.Optimise.Fusion.Composing
   ( fuseMaps
   , fuseFilters
   , fuseFilterIntoFold

@@ -1,6 +1,6 @@
 -- | This module exports functionality for generating a call graph of
 -- an Futhark program.
-module Futhark.EnablingOpts.CallGraph
+module Futhark.Optimise.CallGraph
   ( CallGraph
   , buildCallGraph
   , FunctionTable
@@ -14,11 +14,11 @@ import Data.List
 import qualified Data.HashMap.Lazy as HM
 
 import Futhark.InternalRep
-import Futhark.EnablingOpts.EnablingOptErrors
+import Futhark.Optimise.Errors
 
 type FunctionTable = HM.HashMap Name FunDec
 
-buildFunctionTable :: Prog -> Either EnablingOptError FunctionTable
+buildFunctionTable :: Prog -> Either Error FunctionTable
 buildFunctionTable prog =
   foldM expand HM.empty (progFunctions prog)
   where
@@ -30,14 +30,14 @@ buildFunctionTable prog =
 -- | The symbol table for functions
 data CGEnv = CGEnv { envFtable  :: FunctionTable }
 
-type CGM = ReaderT CGEnv (Either EnablingOptError)
+type CGM = ReaderT CGEnv (Either Error)
 
 -- | Building the call grah runs in this monad.  There is no
 -- mutable state.
-runCGM :: CGM a -> CGEnv -> Either EnablingOptError a
+runCGM :: CGM a -> CGEnv -> Either Error a
 runCGM = runReaderT
 
-badCGM :: EnablingOptError -> CGM a
+badCGM :: Error -> CGM a
 badCGM = lift . Left
 
 -- | The call graph is just a mapping from a function name, i.e., the
@@ -50,7 +50,7 @@ type CallGraph = HM.HashMap Name ([Name],[Name])
 
 -- | @buildCallGraph prog@ build the program's Call Graph. The representation
 -- is a hashtable that maps function names to a list of callee names.
-buildCallGraph :: Prog -> Either EnablingOptError CallGraph
+buildCallGraph :: Prog -> Either Error CallGraph
 buildCallGraph prog = do
   ftable <- buildFunctionTable prog
   runCGM (buildCGfun HM.empty defaultEntryPoint) $ CGEnv ftable

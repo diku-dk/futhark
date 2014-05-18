@@ -1,4 +1,4 @@
-module Futhark.HOTrans.LoopKernel
+module Futhark.Optimise.Fusion.LoopKernel
   ( FusedKer(..)
   , newKernel
   , inputs
@@ -29,8 +29,8 @@ import Futhark.HORepresentation.SOACNest (SOACNest)
 import qualified Futhark.HORepresentation.SOACNest as Nest
 import Futhark.HORepresentation.MapNest (MapNest)
 import qualified Futhark.HORepresentation.MapNest as MapNest
-import Futhark.HOTrans.TryFusion
-import Futhark.HOTrans.Composing
+import Futhark.Optimise.Fusion.TryFusion
+import Futhark.Optimise.Fusion.Composing
 import Futhark.Tools
 
 transformOutput :: SOAC.ArrayTransforms -> [Ident] -> SOAC -> Binder ()

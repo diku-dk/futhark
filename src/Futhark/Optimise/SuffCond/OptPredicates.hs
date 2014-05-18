@@ -1,4 +1,4 @@
-module Futhark.SuffCond.OptPredicates
+module Futhark.Optimise.SuffCond.OptPredicates
        (
          optimisePredicates
        )
@@ -17,10 +17,10 @@ import qualified Data.HashMap.Lazy as HM
 
 import Futhark.InternalRep
 import Futhark.MonadFreshNames
-import qualified Futhark.EnablingOpts.SymbolTable as ST
-import Futhark.EnablingOpts.ScalExp (ScalExp)
-import qualified Futhark.EnablingOpts.ScalExp as SE
-import qualified Futhark.EnablingOpts.AlgSimplify as AS
+import qualified Futhark.Optimise.SymbolTable as ST
+import Futhark.Optimise.ScalExp (ScalExp)
+import qualified Futhark.Optimise.ScalExp as SE
+import qualified Futhark.Optimise.AlgSimplify as AS
 import Futhark.Tools
 
 optimisePredicates :: MonadFreshNames m => Prog -> m Prog

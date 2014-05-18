@@ -1,29 +1,25 @@
-module Futhark.EnablingOpts.EnablingOptDriver
-  ( enablingOpts
+module Futhark.Optimise.SimpleOpts
+  ( simpleOpts
   , CallGraph
   , buildCallGraph
   , aggInlineDriver
   , deadFunElim
   , normCopyDeadOpts
   , normCopyOneLambda
-  , EnablingOptError(..)
+  , Error(..)
   )
   where
 
 import Futhark.InternalRep
 import Futhark.MonadFreshNames
 
-import Futhark.EnablingOpts.InliningDeadFun
-import Futhark.EnablingOpts.Simplifier
-import Futhark.EnablingOpts.DeadVarElim
-import Futhark.EnablingOpts.EnablingOptErrors
+import Futhark.Optimise.InliningDeadFun
+import Futhark.Optimise.Simplifier
+import Futhark.Optimise.DeadVarElim
+import Futhark.Optimise.Errors
 
---------------------------------------------------------------
----- Enabling Optimization Driver
---------------------------------------------------------------
-
-enablingOpts :: Prog -> Either EnablingOptError Prog
-enablingOpts prog = do
+simpleOpts :: Prog -> Either Error Prog
+simpleOpts prog = do
   let prog_enopt1 = normCopyDeadOpts prog
   let prog_enopt2 = normCopyDeadOpts prog_enopt1
   prog_deadf2 <- deadFunElim      prog_enopt2

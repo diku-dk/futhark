@@ -2,10 +2,10 @@
 -- |
 --
 -- Apply the simplification engine
--- ("Futhark.EnablingOpts.Simplifier.Engine") to an entire program,
+-- ("Futhark.Optimise.Simplifier.Engine") to an entire program,
 -- using the default simplification rules.
 --
-module Futhark.EnablingOpts.Simplifier
+module Futhark.Optimise.Simplifier
   ( simplifyProg
   , simplifyFun
   , simplifyOneLambda
@@ -14,8 +14,8 @@ module Futhark.EnablingOpts.Simplifier
 
 import Futhark.InternalRep
 import Futhark.MonadFreshNames
-import Futhark.EnablingOpts.Simplifier.Rules
-import qualified Futhark.EnablingOpts.Simplifier.Engine as Engine
+import Futhark.Optimise.Simplifier.Rules
+import qualified Futhark.Optimise.Simplifier.Engine as Engine
 
 -- | Simplify the given program.  Even if the output differs from the
 -- output, meaningful simplification may not have taken place - the

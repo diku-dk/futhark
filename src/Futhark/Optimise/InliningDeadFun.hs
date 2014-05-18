@@ -1,7 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 -- | This module implements a compiler pass for inlining functions,
 -- then removing those that have become dead.
-module Futhark.EnablingOpts.InliningDeadFun
+module Futhark.Optimise.InliningDeadFun
   ( CallGraph
   , buildCallGraph
   , aggInlineDriver
@@ -19,21 +19,19 @@ import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
 
 import Futhark.InternalRep
-
-import Futhark.EnablingOpts.CallGraph
-import Futhark.EnablingOpts.EnablingOptErrors
-
 import Futhark.InternalRep.Renamer
+import Futhark.Optimise.CallGraph
+import Futhark.Optimise.Errors
 
 -- | The symbol table for functions
 data CGEnv = CGEnv { envFtable  :: HM.HashMap Name FunDec }
 
-type CGM = ReaderT CGEnv (Either EnablingOptError)
+type CGM = ReaderT CGEnv (Either Error)
 
-runCGM :: CGM a -> CGEnv -> Either EnablingOptError a
+runCGM :: CGM a -> CGEnv -> Either Error a
 runCGM = runReaderT
 
-badCGM :: EnablingOptError -> CGM a
+badCGM :: Error -> CGM a
 badCGM = lift . Left
 
 ------------------------------------------------------------------
@@ -44,7 +42,7 @@ badCGM = lift . Left
 -- functions in @prog@ by repeatedly inlining the functions with
 -- empty-apply-callee set into other callers.  Afterwards, all dead
 -- functions are removed.
-aggInlineDriver :: Prog -> Either EnablingOptError Prog
+aggInlineDriver :: Prog -> Either Error Prog
 aggInlineDriver prog = do
   cg  <- buildCallGraph prog
   env <- CGEnv <$> buildFunctionTable prog
@@ -175,7 +173,7 @@ inlineInLambda inlcallees (Lambda params body ret loc) =
 -- | @deadFunElim prog@ removes the functions that are unreachable from
 -- the main function from the program.
 -- The functions called (indirectly) via SOACs are obviously considered.
-deadFunElim :: Prog -> Either EnablingOptError Prog
+deadFunElim :: Prog -> Either Error Prog
 deadFunElim prog = do
   ftable <- buildFunctionTable prog
   cg     <- buildCallGraph prog
