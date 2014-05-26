@@ -132,8 +132,13 @@ flattenPattern (E.Id v) =
 flattenPattern (E.TupId pats _) =
   concat <$> mapM flattenPattern pats
 
-bindingPattern :: E.TupIdent -> Maybe SubExp -> [I.Type] -> ([I.Ident] -> InternaliseM a) -> InternaliseM a
+bindingPattern :: E.TupIdent -> Maybe SubExp -> ResType -> ([I.Ident] -> InternaliseM a) -> InternaliseM a
 bindingPattern pat ce ts m = do
   pat' <- flattenPattern pat
-  case ce of Just ce' -> bindingFlatPatternWithCert ce' pat' ts m
-             Nothing  -> bindingFlatPatternOwnCert pat' ts m
+  (ts',shapes) <- runWriterT $ instantiateResType instantiate ts
+  let addShapeBindings pat'' = m $ shapes ++ pat''
+  case ce of Just ce' -> bindingFlatPatternWithCert ce' pat' ts' addShapeBindings
+             Nothing  -> bindingFlatPatternOwnCert pat' ts' addShapeBindings
+  where instantiate = do v <- lift $ newIdent "size" (I.Basic I.Int) $ srclocOf pat
+                         tell [v]
+                         return $ I.Var v

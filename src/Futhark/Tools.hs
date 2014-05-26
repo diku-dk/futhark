@@ -53,10 +53,10 @@ letExp :: MonadBinder m =>
           String -> Exp -> m Ident
 letExp _ (SubExp (Var v)) = return v
 letExp desc e =
-  case typeOf e of
-    [t] -> do v <- fst <$> newVar (srclocOf e) desc t
-              letBind [v] e
-              return v
+  case isClosedResult $ typeOf e of
+    Just [t] -> do v <- fst <$> newVar (srclocOf e) desc t
+                   letBind [v] e
+                   return v
     _   -> fail $ "letExp: tuple-typed expression given:\n" ++ ppExp e
 
 letSubExps :: MonadBinder m =>
@@ -67,14 +67,21 @@ letExps :: MonadBinder m =>
            String -> [Exp] -> m [Ident]
 letExps desc = mapM $ letExp desc
 
-letTupExp :: MonadBinder m => String -> Exp -> m [Ident]
-letTupExp _ (SubExp (Var v)) = return [v]
-letTupExp name e = do
-  let ts  = typeOf e
-      loc = srclocOf e
+letShapedExp :: MonadBinder m => String -> Exp
+                -> m ([Ident], [Ident])
+letShapedExp _ (SubExp (Var v)) = return ([], [v])
+letShapedExp name e = do
+  (ts, shapes) <- runWriterT $ instantiateResType instantiate $ typeOf e
   names <- mapM (liftM fst . newVar loc name) ts
-  letBind names e
-  return names
+  letBind (shapes++names) e
+  return (shapes, names)
+  where loc = srclocOf e
+        instantiate = do v <- lift $ newIdent "size" (Basic Int) loc
+                         tell [v]
+                         return $ Var v
+
+letTupExp :: MonadBinder m => String -> Exp -> m [Ident]
+letTupExp name e = snd <$> letShapedExp name e
 
 letTupExp' :: MonadBinder m => String -> Exp -> m [SubExp]
 letTupExp' _ (SubExp se) = return [se]
@@ -88,7 +95,7 @@ newVar loc name tp = do
   return (Ident x tp loc, Var $ Ident x tp loc)
 
 eIf :: MonadBinder m =>
-       m Exp -> m Body -> m Body -> [Type] -> SrcLoc -> m Exp
+       m Exp -> m Body -> m Body -> ResType -> SrcLoc -> m Exp
 eIf ce te fe ts loc = do
   ce' <- letSubExp "cond" =<< ce
   te' <- insertBindingsM te
@@ -179,12 +186,15 @@ makeLambda :: MonadBinder m =>
               [Param] -> m Body -> m Lambda
 makeLambda params body = do
   body' <- insertBindingsM body
-  return Lambda {
-             lambdaParams = params
-           , lambdaSrcLoc = srclocOf body'
-           , lambdaReturnType = map (`setAliases` ()) $ bodyType body'
-           , lambdaBody = body'
-           }
+  case isClosedResult $ bodyType body' of
+    Nothing -> fail "Body passed to makeLambda has open type"
+    Just ts ->
+      return Lambda {
+        lambdaParams = params
+        , lambdaSrcLoc = srclocOf body'
+        , lambdaReturnType = map (`setAliases` ()) ts
+        , lambdaBody = body'
+        }
 
 copyConsumed :: MonadBinder m => Body -> m Body
 copyConsumed e

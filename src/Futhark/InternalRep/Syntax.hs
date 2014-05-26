@@ -10,6 +10,8 @@ module Futhark.InternalRep.Syntax
   , Uniqueness(..)
   , DimSize
   , Shape(..)
+  , ExtDimSize(..)
+  , ExtShape(..)
   , Rank(..)
   , ArrayShape(..)
   , TypeBase(..)
@@ -32,6 +34,7 @@ module Futhark.InternalRep.Syntax
   , Result(..)
   , Body(..)
   , Exp(..)
+  , ResType
   , Lambda(..)
 
   -- * Definitions
@@ -68,6 +71,22 @@ instance Eq Shape where
 instance Ord Shape where
   compare = comparing shapeRank
 
+-- | The size of this dimension.
+data ExtDimSize = Free DimSize -- ^ A free variable or constant.
+                | Ext Int -- ^ Existentially quantified.
+                deriving (Show)
+
+-- | Like 'Shape' but some of its elements may be bound in a local
+-- environment instead.  These are denoted with integral indices.
+newtype ExtShape = ExtShape { extShapeDims :: [ExtDimSize] }
+  deriving (Show)
+
+instance Eq ExtShape where
+  ExtShape l1 == ExtShape l2 = length l1 == length l2
+
+instance Ord ExtShape where
+  compare = comparing shapeRank
+
 -- | The size of an array type as merely the number of dimensions,
 -- with no further information.
 data Rank = Rank Int
@@ -88,6 +107,14 @@ instance Monoid Shape where
 instance ArrayShape Shape where
   shapeRank (Shape l) = length l
   stripDims n (Shape dims) = Shape $ drop n dims
+
+instance Monoid ExtShape where
+  mempty = ExtShape mempty
+  ExtShape l1 `mappend` ExtShape l2 = ExtShape $ l1 `mappend` l2
+
+instance ArrayShape ExtShape where
+  shapeRank (ExtShape l) = length l
+  stripDims n (ExtShape dims) = ExtShape $ drop n dims
 
 instance Monoid Rank where
   mempty = Rank 0
@@ -236,9 +263,9 @@ data Exp =
             -- Second arg is the type of of the rows of the array (not
             -- the element type).
 
-            | If     SubExp Body Body [Type] SrcLoc
+            | If     SubExp Body Body ResType SrcLoc
 
-            | Apply  Name [(SubExp, Diet)] [Type] SrcLoc
+            | Apply  Name [(SubExp, Diet)] ResType SrcLoc
 
             -- Scalar operations
             | BinOp BinOp SubExp SubExp Type SrcLoc
@@ -343,6 +370,12 @@ instance Located Exp where
   locOf (Scan _ _ _ pos) = locOf pos
   locOf (Filter _ _ _ _ pos) = locOf pos
   locOf (Redomap _ _ _ _ _ pos) = locOf pos
+
+-- | A type denoting the return type of a function call.  If a
+-- function returns an array, we can either know the size in advance
+-- ('Known'), or receive it as part of the return value ('Existential'
+-- - refers to the type being dependent).
+type ResType = [TypeBase Names ExtShape]
 
 -- | Anonymous function for use in a tuple-SOAC.
 data Lambda =

@@ -368,7 +368,7 @@ simplifyBody (Body [] (Result cs es loc)) =
 simplifyBody (Body (Let pat (Apply fname args tp loc):bnds) res) = do
   pat' <- mapM simplifyIdentBinding pat
   args' <- mapM (simplifySubExp . fst) args
-  tp' <- mapM simplifyType tp
+  tp' <- mapM simplifyExtType tp
   prog <- asks envProgram
   vtable <- asks envVtable
   case join $ pure simplifyApply <*> prog <*> pure vtable <*> pure fname <*> pure args of
@@ -420,7 +420,7 @@ simplifyExp (If cond tbranch fbranch t loc) = do
   (tbranch',fbranch') <-
     hoistCommon (simplifyBody tbranch) (ST.updateBounds True cond)
                 (simplifyBody fbranch) (ST.updateBounds False cond)
-  t' <- mapM simplifyType t
+  t' <- mapM simplifyExtType t
   return $ If cond' tbranch' fbranch' t' loc
 
 simplifyExp (Map cs fun arrs loc) = do
@@ -500,6 +500,12 @@ simplifyIdent v = do
   usedName $ identName v
   t' <- simplifyType $ identType v
   return v { identType = t' }
+
+simplifyExtType :: TypeBase als ExtShape -> SimpleM (TypeBase als ExtShape)
+simplifyExtType t = do dims <- mapM simplifyDim $ extShapeDims $ arrayShape t
+                       return $ t `setArrayShape` ExtShape dims
+  where simplifyDim (Free se) = Free <$> simplifySubExp se
+        simplifyDim (Ext x)   = return $ Ext x
 
 simplifyType :: TypeBase als Shape -> SimpleM (TypeBase als Shape)
 simplifyType t = do dims <- mapM simplifySubExp $ arrayDims t

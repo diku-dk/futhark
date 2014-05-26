@@ -1,9 +1,10 @@
 module Futhark.Internalise.AccurateSizes
   ( subExpShape
   , identShapes
-  , typeSizes
-  , subExpWithShape
-  , subExpsWithShapes
+  , typeShapes
+  , prefixTypeShapes
+  , extShapes
+  , prefixSubExpShapes
   , allEqual
   , UnsizedLambda(..)
   , annotateArrayShape
@@ -15,6 +16,7 @@ module Futhark.Internalise.AccurateSizes
 
 import Control.Applicative
 import Control.Monad
+import Control.Monad.State
 
 import Data.Loc
 
@@ -26,11 +28,8 @@ import Futhark.Tools
 subExpShape :: SubExp -> [SubExp]
 subExpShape = shapeDims . arrayShape . subExpType
 
-subExpWithShape :: SubExp -> [SubExp]
-subExpWithShape se = subExpShape se ++ [se]
-
-subExpsWithShapes :: [SubExp] -> [SubExp]
-subExpsWithShapes = concatMap subExpWithShape
+prefixSubExpShapes :: [SubExp] -> [SubExp]
+prefixSubExpShapes ses = concatMap subExpShape ses ++ ses
 
 identShapes :: (MonadFreshNames m, ArrayShape shape) =>
                IdentBase Names shape -> m (Ident, [Ident])
@@ -42,10 +41,23 @@ identShapes v = do
   where base = textual $ baseName $ identName v
         rank = arrayRank $ identType v
 
-typeSizes :: ArrayShape shape =>
-             [TypeBase als shape] -> [TypeBase als shape]
-typeSizes = concatMap addShapeTypes
-  where addShapeTypes t = replicate (arrayRank t) (Basic Int) ++ [t]
+typeShapes :: ArrayShape shape1 =>
+              [TypeBase als1 shape1] -> [TypeBase als2 shape2]
+typeShapes  = (`replicate` Basic Int) . sum . map arrayRank
+
+prefixTypeShapes :: ArrayShape shape =>
+                    [TypeBase als shape] -> [TypeBase als shape]
+prefixTypeShapes ts = typeShapes ts ++ ts
+
+extShapes :: ArrayShape shape =>
+             [TypeBase als shape] -> [TypeBase als ExtShape]
+extShapes ts = evalState (mapM extShapes' ts) 0
+  where extShapes' t =
+          setArrayShape t <$> ExtShape <$> replicateM (arrayRank t) newExt
+        newExt = do
+          x <- get
+          put $ x + 1
+          return $ Ext x
 
 allEqual :: Ident -> InternaliseM (Ident, Ident)
 allEqual comp_shape = do
@@ -85,7 +97,8 @@ annotateArrayShape :: ArrayShape shape =>
 annotateArrayShape t (newshape, loc) =
   t `setArrayShape` Shape (take (arrayRank t) (map (`intconst` loc) $ newshape ++ repeat 0))
 
-addTypeShapes :: [TypeBase als Rank]
+addTypeShapes :: ArrayShape oldshape =>
+                 [TypeBase als oldshape]
               -> [SubExp]
               -> [TypeBase als Shape]
 addTypeShapes [] _ = []

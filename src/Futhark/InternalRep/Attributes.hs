@@ -25,6 +25,12 @@ module Futhark.InternalRep.Attributes
   -- * Operations on expressions
   , subExpType
   , bodyType
+  , loopResultType
+  , mapType
+  , reduceType
+  , scanType
+  , filterType
+  , redomapType
   , typeOf
   , freeInBody
   , freeNamesInBody
@@ -62,6 +68,7 @@ module Futhark.InternalRep.Attributes
   , returnType
   , lambdaType
   , lambdaReturnType
+  , isClosedResult
 
   -- * Operations on types
   , stripArray
@@ -77,6 +84,9 @@ module Futhark.InternalRep.Attributes
   , changeAliases
   , setUniqueness
   , unifyUniqueness
+  , combineResTypes
+  , closedResult
+  , instantiateResType
 
   -- * Queries on values
   , valueShape
@@ -117,12 +127,14 @@ import Control.Applicative
 import Control.Arrow (first)
 import Control.Monad.Writer
 import Control.Monad.Identity
+import Control.Monad.State
 
 import Data.Array
 import Data.Ord
 import Data.List
 import Data.Loc
 import qualified Data.HashSet as HS
+import qualified Data.HashMap.Lazy as HM
 
 import Futhark.InternalRep.Syntax
 import Futhark.InternalRep.Traversals
@@ -344,6 +356,22 @@ unifyUniqueness (Array et dims u1 als1) (Array _ _ u2 als2) =
   Array et dims (u1 <> u2) (als1 <> als2)
 unifyUniqueness t1 _ = t1
 
+combineResTypes :: ResType -> ResType -> ResType
+combineResTypes rt1 rt2 =
+  evalState (zipWithM unifyExtShapes rt1 rt2) 0
+  where unifyExtShapes t1 t2 =
+          unifyUniqueness <$>
+          (setArrayShape t1 <$> ExtShape <$>
+           zipWithM unifyExtDims
+           (extShapeDims $ arrayShape t1)
+           (extShapeDims $ arrayShape t2)) <*>
+          pure t2
+        unifyExtDims (Free se1) (Free se2)
+          | se1 == se2 = return $ Free se1 -- Arbitrary
+        unifyExtDims _ _ = do x <- get
+                              put $ x + 1
+                              return $ Ext x
+
 -- | A "blank" value of the given type - this is zero, or whatever is
 -- close to it.  Don't depend on this value, but use it for creating
 -- arrays to be populated by do-loops.
@@ -544,68 +572,157 @@ subExpType :: SubExp -> Type
 subExpType (Constant val _) = fromConstType $ valueType val
 subExpType (Var ident)      = varType ident
 
-bodyType :: Body -> [Type]
-bodyType = map subExpType . resultSubExps . bodyResult
+bodyType :: Body -> ResType
+bodyType (Body bnds res) =
+  evalState (mapM makeBoundShapesFree $
+             closedResult $ map subExpType $ resultSubExps res)
+  (0, HM.empty, HM.empty)
+  where boundInLet (Let pat _) = map identName pat
+        bound = HS.fromList $ concatMap boundInLet bnds
+        makeBoundShapesFree t = do
+          shape <- mapM checkDim $ extShapeDims $ arrayShape t
+          return $ t `setArrayShape` ExtShape shape
+        checkDim (Free (Var v))
+          | identName v `HS.member` bound =
+            replaceVar $ identName v
+        checkDim (Free se) = return $ Free se
+        checkDim (Ext x)   = replaceExt x
+        replaceExt x = do
+          (n, extmap, varmap) <- get
+          case HM.lookup x extmap of
+            Nothing -> do put (n+1, HM.insert x (Ext n) extmap, varmap)
+                          return $ Ext $ n+1
+            Just replacement -> return replacement
+        replaceVar name = do
+          (n, extmap, varmap) <- get
+          case HM.lookup name varmap of
+            Nothing -> do put (n+1, extmap, HM.insert name (Ext n) varmap)
+                          return $ Ext $ n+1
+            Just replacement -> return replacement
 
--- | The type of an Futhark term.  The aliasing will refer to itself, if
--- the term is a non-tuple-typed variable.
-typeOf :: Exp -> [Type]
-typeOf (SubExp se) = [subExpType se]
-typeOf (ArrayLit es t loc) =
-  [arrayOf t (Shape [n]) $ mconcat $ map (uniqueness . subExpType) es]
-  where n = constant (length es) loc
-typeOf (BinOp _ _ _ t _) = [t]
-typeOf (Not _ _) = [Basic Bool]
-typeOf (Negate e _) = [subExpType e]
-typeOf (If _ _ _ t _) = t
-typeOf (Apply _ _ t _) = t
-typeOf (Index _ ident idx _) =
-  [stripArray (length idx) (varType ident)
-   `changeAliases` HS.insert (identName ident)]
-typeOf (Update _ src _ _ _) =
-  [identType src `setAliases` HS.empty]
-typeOf (Iota ne _) =
-  [arrayOf (Basic Int) (Shape [ne]) Unique]
-typeOf (Replicate ne e _) =
-  [arrayOf (subExpType e) (Shape [ne]) u]
-  where u | uniqueOrBasic (subExpType e) = Unique
-          | otherwise = Nonunique
-typeOf (Reshape _ [] e _) =
-  [Basic $ elemType $ subExpType e]
-typeOf (Reshape _ shape e _) =
-  [subExpType e `setArrayShape` Shape shape]
-typeOf (Rearrange _ perm e _) =
-  [subExpType e `setArrayShape` Shape (permuteShape perm shape)]
-  where Shape shape = arrayShape $ subExpType e
-typeOf (Rotate _ _ e _) = [subExpType e]
-typeOf (Split _ ne e secsize _) =
-  [subExpType e `setOuterSize` ne,
-   subExpType e `setOuterSize` secsize]
-typeOf (Concat _ x y ressize _) =
-  [subExpType x `setUniqueness` u `setOuterSize` ressize]
-  where u = uniqueness (subExpType x) <> uniqueness (subExpType y)
-typeOf (Copy e _) =
-  [subExpType e `setUniqueness` Unique `setAliases` HS.empty]
-typeOf (Assert _ _) = [Basic Cert]
-typeOf (Conjoin _ _) = [Basic Cert]
-typeOf (DoLoop res _ _ _ _ _) = map identType res
-typeOf (Map _ f arrs _) =
-  [ arrayOf t (Shape [outersize]) (uniqueProp t)
-    | t <- lambdaType f arrts ]
+loopResultType :: [Type] -> [(Ident,SubExp)] -> ResType
+loopResultType restypes merge = evalState (mapM inspect restypes) 0
+  where bound = map (identName . fst) merge
+        inspect t = do
+          shape <- mapM inspectShape $ arrayDims t
+          return $ t `setArrayShape` ExtShape shape
+        inspectShape (Var v)
+          | identName v `elem` bound = do
+            i <- get
+            put $ i + 1
+            return $ Ext i
+        inspectShape se = return $ Free se
+
+closedResult :: [Type] -> ResType
+closedResult = map closedResult'
+  where closedResult' (Basic bt) =
+          Basic bt
+        closedResult' (Array bt (Shape shape) u als) =
+          Array bt (ExtShape $ map Free shape) u als
+
+instantiateResType :: Monad m => m SubExp -> ResType -> m [Type]
+instantiateResType f ts = evalStateT (mapM instantiate ts) HM.empty
+  where instantiate t = do
+          shape <- mapM instantiate' $ extShapeDims $ arrayShape t
+          return $ t `setArrayShape` Shape shape
+        instantiate' (Ext x) = do
+          m <- get
+          case HM.lookup x m of
+            Just se -> return se
+            Nothing -> do se <- lift f
+                          put $ HM.insert x se m
+                          return se
+        instantiate' (Free se) = return se
+
+isClosedResult :: ResType -> Maybe [Type]
+isClosedResult = mapM isClosedResult'
+  where isClosedResult' (Basic bt) =
+          Just $ Basic bt
+        isClosedResult' (Array bt (ExtShape shape) u als) =
+          Array bt <$> (Shape <$> mapM isFree shape) <*> pure u <*> pure als
+        isFree (Free s) = Just s
+        isFree (Ext _)  = Nothing
+
+mapType :: Lambda -> [SubExp] -> [Type]
+mapType f arrs = [ arrayOf t (Shape [outersize]) (uniqueProp t)
+                 | t <- lambdaType f arrts ]
   where outersize = arraysSize 0 arrts
         arrts     = map subExpType arrs
-typeOf (Reduce _ fun inputs _) =
+
+reduceType :: Lambda -> [(SubExp, SubExp)] -> [Type]
+reduceType fun inputs =
   lambdaType fun $ map subExpType acc ++ map subExpType arrs
   where (acc, arrs) = unzip inputs
-typeOf (Scan _ _ inputs _) =
+
+scanType :: Lambda -> [(SubExp, SubExp)] -> [Type]
+scanType _ inputs =
   map ((`setUniqueness` Unique) . subExpType) arrs
   where (_, arrs) = unzip inputs
-typeOf (Filter _ _ arrs outer_shape _) =
-  map ((`setOuterSize` outer_shape) . subExpType) arrs
-typeOf (Redomap _ outerfun innerfun acc arrs _) =
+
+filterType :: Lambda -> [SubExp] -> SubExp -> [Type]
+filterType _ arrs outerShape =
+  map ((`setOuterSize` outerShape) . subExpType) arrs
+
+redomapType:: Lambda -> Lambda -> [SubExp] -> [SubExp] -> [Type]
+redomapType outerfun innerfun acc arrs =
   lambdaType outerfun $ lambdaType innerfun (innerres ++ innerres)
   where innerres = lambdaType innerfun
                    (map subExpType acc ++ map (rowType . subExpType) arrs)
+
+-- | The type of an Futhark term.  The aliasing will refer to itself, if
+-- the term is a non-tuple-typed variable.
+typeOf :: Exp -> ResType
+typeOf (SubExp se) = closedResult [subExpType se]
+typeOf (ArrayLit es t loc) =
+  closedResult [arrayOf t (Shape [n]) $ mconcat $ map (uniqueness . subExpType) es]
+  where n = constant (length es) loc
+typeOf (BinOp _ _ _ t _) = closedResult [t]
+typeOf (Not _ _) = closedResult [Basic Bool]
+typeOf (Negate e _) = closedResult [subExpType e]
+typeOf (If _ _ _ t _) = t
+typeOf (Apply _ _ t _) = t
+typeOf (Index _ ident idx _) =
+  closedResult [stripArray (length idx) (varType ident)
+              `changeAliases` HS.insert (identName ident)]
+typeOf (Update _ src _ _ _) =
+  closedResult [identType src `setAliases` HS.empty]
+typeOf (Iota ne _) =
+  closedResult [arrayOf (Basic Int) (Shape [ne]) Unique]
+typeOf (Replicate ne e _) =
+  closedResult [arrayOf (subExpType e) (Shape [ne]) u]
+  where u | uniqueOrBasic (subExpType e) = Unique
+          | otherwise = Nonunique
+typeOf (Reshape _ [] e _) =
+  closedResult [Basic $ elemType $ subExpType e]
+typeOf (Reshape _ shape e _) =
+  closedResult [subExpType e `setArrayShape` Shape shape]
+typeOf (Rearrange _ perm e _) =
+  closedResult [subExpType e `setArrayShape` Shape (permuteShape perm shape)]
+  where Shape shape = arrayShape $ subExpType e
+typeOf (Rotate _ _ e _) = closedResult [subExpType e]
+typeOf (Split _ ne e secsize _) =
+  closedResult [subExpType e `setOuterSize` ne,
+              subExpType e `setOuterSize` secsize]
+typeOf (Concat _ x y ressize _) =
+  closedResult [subExpType x `setUniqueness` u `setOuterSize` ressize]
+  where u = uniqueness (subExpType x) <> uniqueness (subExpType y)
+typeOf (Copy e _) =
+  closedResult [subExpType e `setUniqueness` Unique `setAliases` HS.empty]
+typeOf (Assert _ _) =
+  closedResult [Basic Cert]
+typeOf (Conjoin _ _) =
+  closedResult [Basic Cert]
+typeOf (DoLoop res merge _ _ _ _) = loopResultType (map identType res) merge
+typeOf (Map _ f arrs _) =
+  closedResult $ mapType f arrs
+typeOf (Reduce _ fun inputs _) =
+  closedResult $ reduceType fun inputs
+typeOf (Scan _ fun inputs _) =
+  closedResult $ scanType fun inputs
+typeOf (Filter _ f arrs outerShape _) =
+  closedResult $ filterType f arrs outerShape
+typeOf (Redomap _ outerfun innerfun acc arrs _) =
+  closedResult $ redomapType outerfun innerfun acc arrs
 
 uniqueProp :: TypeBase as shape -> Uniqueness
 uniqueProp tp = if uniqueOrBasic tp then Unique else Nonunique

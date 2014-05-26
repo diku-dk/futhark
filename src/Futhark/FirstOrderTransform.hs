@@ -50,10 +50,10 @@ transformBody = mapBodyM transform
 -- | Transform a single expression.
 transformExp :: Exp -> Binder Exp
 
-transformExp mape@(Map cs fun arrs loc) = do
+transformExp (Map cs fun arrs loc) = do
   inarrs <- letExps "inarr" $ map SubExp arrs
   (i, iv) <- newVar loc "i" $ Basic Int
-  resarr <- resultArray (typeOf mape) loc
+  resarr <- resultArray (lambdaReturnType fun) loc
   outarr <- forM (map subExpType resarr) $ \t ->
             newIdent "map_outarr" t loc
   loopbody <- runBinder $ do
@@ -163,7 +163,7 @@ index :: Certificates -> [Ident] -> SubExp -> [Exp]
 index cs arrs i = flip map arrs $ \arr ->
                   Index cs arr [i] $ srclocOf i
 
-resultArray :: [Type] -> SrcLoc -> Binder [SubExp]
+resultArray :: [TypeBase als Shape] -> SrcLoc -> Binder [SubExp]
 resultArray ts loc = mapM arrayOfShape ts
   where arrayOfShape t = arrayOfShape' $ arrayDims t
           where arrayOfShape' [] =

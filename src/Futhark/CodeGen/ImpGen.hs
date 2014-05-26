@@ -89,14 +89,16 @@ compileParam p = Imp.Param (identName p) $ compileType $ identType p
 compileParams :: [Param] -> [Imp.Param]
 compileParams = map compileParam
 
-compileFunDec :: ExpCompiler op -> VNameSource -> FunDec -> (VNameSource, (Name, Imp.Function op))
+compileFunDec :: ExpCompiler op -> VNameSource -> FunDec
+              -> (VNameSource, (Name, Imp.Function op))
 compileFunDec ec src (fname, rettype, params, body, _) =
   let (outs, src', body') = runImpM compile ec src
   in (src', (fname, Imp.Function outs (compileParams params) body'))
   where compile = do
           outs <- replicateM (length rettype) $ newVName "out"
           compileBody outs body
-          return $ zipWith Imp.Param outs $ map compileType $ bodyType body
+          return $ zipWith Imp.Param outs $ map (compileType . subExpType) $
+            resultSubExps $ bodyResult body
 
 compileBody :: [VName] -> Body -> ImpM op ()
 compileBody targets (Body bnds (Result _ ses _)) = do

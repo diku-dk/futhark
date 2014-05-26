@@ -137,8 +137,9 @@ fuseFilterInto lam1 inp1 out1 lam2 inp2 vnames falsebranch = (lam2', HM.elems in
                , lambdaBody = makeCopies bindins
                }
         loc = srclocOf lam2
-        residents = [ Ident vname t loc |
-                      (vname, t) <- zip vnames $ bodyType falsebranch ]
+        restype = zipWith setAliases
+                  (lambdaReturnType lam2) (map aliases $ bodyType falsebranch)
+        residents = [ Ident vname t loc | (vname, t) <- zip vnames restype ]
         branch = flip mapResult (lambdaBody lam1) $ \res ->
                  let [e] = resultSubExps res in -- XXX
                  Body [Let residents

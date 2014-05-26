@@ -206,7 +206,8 @@ externaliseDeclTypes ts =
     [t]  -> t
     ts'  -> E.Elem $ E.Tuple ts'
 
-externaliseTypes :: [I.Type] -> E.Type
+externaliseTypes :: ArrayShape shape =>
+                    [I.TypeBase I.Names shape] -> E.Type
 externaliseTypes ts =
   case map externaliseType ts of
     [t]  -> t
@@ -217,7 +218,8 @@ externaliseDeclType (I.Basic t) = E.Elem $ E.Basic t
 externaliseDeclType (I.Array et shape u ()) =
   E.Array (E.Basic et) (replicate (shapeRank shape) Nothing) u NoInfo
 
-externaliseType :: I.Type -> E.Type
+externaliseType :: ArrayShape shape =>
+                   I.TypeBase I.Names shape -> E.Type
 externaliseType (I.Basic t) = E.Elem $ E.Basic t
 externaliseType (I.Array et shape u als) =
   E.Array (E.Basic et) (replicate (shapeRank shape) Nothing)

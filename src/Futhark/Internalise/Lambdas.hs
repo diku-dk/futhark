@@ -92,7 +92,7 @@ internaliseLambda internaliseBody ce lam rowtypes = do
   (body', params') <- lambdaBinding ce params rowtypes $
                       internaliseLambdaBody internaliseBody body
   return (params', body',
-          typeSizes $ map noInfoToUnit $ internaliseType' rettype)
+          prefixTypeShapes $ map noInfoToUnit $ internaliseType' rettype)
 
 internaliseMapLambda :: (E.Exp -> InternaliseM Body)
                      -> I.Ident

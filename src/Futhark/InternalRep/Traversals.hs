@@ -123,11 +123,12 @@ mapExpM tv (Negate x loc) =
   pure Negate <*> mapOnSubExp tv x <*> pure loc
 mapExpM tv (If c texp fexp t loc) =
   pure If <*> mapOnSubExp tv c <*> mapOnBody tv texp <*> mapOnBody tv fexp <*>
-       mapM (mapOnType tv) t <*> pure loc
-mapExpM tv (Apply fname args t loc) = do
+       mapOnResType tv t <*> pure loc
+mapExpM tv (Apply fname args ret loc) = do
   args' <- forM args $ \(arg, d) ->
              (,) <$> mapOnSubExp tv arg <*> pure d
-  pure (Apply fname) <*> pure args' <*> mapM (mapOnType tv) t <*> pure loc
+  pure (Apply fname) <*> pure args' <*>
+    mapOnResType tv ret <*> pure loc
 mapExpM tv (Index cs arr idxexps loc) =
   pure Index <*> mapOnCertificates tv cs <*>
        mapOnIdent tv arr <*>
@@ -198,6 +199,16 @@ mapExpM tv (Redomap cs redfun mapfun accexps arrexps loc) =
        mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
        mapM (mapOnSubExp tv) accexps <*> mapM (mapOnSubExp tv) arrexps <*>
        pure loc
+
+mapOnResType :: (Monad m, Applicative m) =>
+                Mapper m -> ResType -> m ResType
+mapOnResType tv = mapM mapOnResType'
+  where mapOnResType' (Array bt (ExtShape shape) u als) =
+          Array bt <$> (ExtShape <$> mapM mapOnExtSize shape) <*>
+          return u <*> return als
+        mapOnResType' (Basic bt) = return $ Basic bt
+        mapOnExtSize (Ext x)   = return $ Ext x
+        mapOnExtSize (Free se) = Free <$> mapOnSubExp tv se
 
 -- | Like 'mapExp', but in the 'Identity' monad.
 mapExp :: Mapper Identity -> Exp -> Exp

@@ -62,7 +62,8 @@ foldClosedForm look pat lam accs arrs =
             Let pat $ If (Var isEmpty)
                              (resultBody [] accs lamloc)
                              ifNonEmpty
-                             (map fromConstType $ lambdaReturnType lam)
+                             (closedResult $ map fromConstType $
+                              lambdaReturnType lam)
                              lamloc
       closedBody' <- renameBody closedBody
       return [isEmptyCheck, mkBranch closedBody']

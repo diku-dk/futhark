@@ -41,9 +41,9 @@ splitFuncall :: MonadBinder m =>
              -> m Exp
 splitFuncall fname args rettype loc = do
   result_shape <- resultShape
-  let valueRettype' = addTypeShapes valueRettype result_shape
-  return $ Apply fname args valueRettype' loc
-  where (shapeRettype, valueRettype) = splitType $ typeSizes rettype
+  let valueRettype' = addTypeShapes rettype result_shape
+  return $ Apply fname args (closedResult valueRettype') loc
+  where shapeRettype = typeShapes rettype
         shapeFname = shapeFunctionName fname
 
         resultShape
@@ -52,7 +52,7 @@ splitFuncall fname args rettype loc = do
             liftM (map Var) $
             letTupExp "fun_shapes" $
             Apply shapeFname [ (arg, Observe) | (arg, _) <- args]
-            shapeRettype loc
+            (closedResult shapeRettype) loc
 
 splitLambda :: ([Param], Body, [DeclType])
             -> (([Param], Body, [DeclType]),
