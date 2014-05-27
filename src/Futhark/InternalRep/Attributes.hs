@@ -613,7 +613,7 @@ loopResultType restypes merge = evalState (mapM inspect restypes) 0
             return $ Ext i
         inspectShape se = return $ Free se
 
-closedResult :: [Type] -> ResType
+closedResult :: [TypeBase als Shape] -> [TypeBase als ExtShape]
 closedResult = map closedResult'
   where closedResult' (Basic bt) =
           Basic bt

@@ -30,7 +30,8 @@ splitFunction (fname,rettype,params,body,loc) = do
   shapeBody' <- insertBindingsM $ do
                   mapM_ addBinding copies
                   return shapeBody
-  let f_shape = (shapeFname, map toDecl shapeRettype, params', shapeBody', loc)
+  let f_shape = (shapeFname, closedResult $ map (`setAliases` ()) shapeRettype,
+                 params', shapeBody', loc)
       f       = (fname, valueRettype, params, valueBody, loc)
   return (f, f_shape)
   where (shapeRettype, valueRettype) = splitType rettype

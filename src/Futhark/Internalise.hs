@@ -65,9 +65,9 @@ internaliseProg doBoundsCheck prog =
 internaliseFun :: E.FunDec -> InternaliseM I.FunDec
 internaliseFun (fname,rettype,params,body,loc) =
   bindingParams params $ \params' -> do
-    body' <- internaliseBodyWithShapes body
+    body' <- internaliseBody body
     return (fname, rettype', params', body', loc)
-  where rettype' = map I.toDecl $ prefixTypeShapes $ internaliseType rettype
+  where rettype' = extShapes $ map I.toDecl $ internaliseType rettype
 
 internaliseIdent :: E.Ident -> InternaliseM I.Ident
 internaliseIdent (E.Ident name tp loc) =
@@ -79,11 +79,6 @@ internaliseCerts :: E.Certificates -> I.Certificates
 internaliseCerts = map internaliseCert
   where internaliseCert (E.Ident name _ loc) =
           I.Ident name (I.Basic I.Cert) loc
-
-internaliseBodyWithShapes :: E.Exp -> InternaliseM Body
-internaliseBodyWithShapes e = insertBindingsM $ do
-  ses <- internaliseExp "res" e
-  return $ I.resultBody [] (prefixSubExpShapes ses) $ srclocOf e
 
 internaliseBody :: E.Exp -> InternaliseM Body
 internaliseBody e = insertBindingsM $ do

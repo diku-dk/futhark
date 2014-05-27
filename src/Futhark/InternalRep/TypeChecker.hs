@@ -19,9 +19,10 @@ import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.State
 import Control.Monad.RWS
+
 import Data.List
 import Data.Loc
-
+import Data.Maybe
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 
@@ -32,8 +33,9 @@ import Futhark.TypeError
 -- | Information about an error that occured during type checking.
 type TypeError = GenTypeError VName Exp (Several DeclType) (Several Ident)
 
--- | A tuple of a return type and a list of argument types.
-type FunBinding = ([DeclType], [DeclType])
+-- | A tuple of a return type and a list of parameters, possibly
+-- named.
+type FunBinding = (RetType, [(Maybe VName, DeclType)])
 
 data VarBinding = Bound Type
                 | WasConsumed SrcLoc
@@ -248,6 +250,25 @@ lookupVar name pos = do
     Just (Bound t) -> return t
     Just (WasConsumed wloc) -> bad $ UseAfterConsume name pos wloc
 
+lookupFun :: SrcLoc -> Name -> [SubExp] -> TypeM (RetType, [DeclType])
+lookupFun loc fname args = do
+  bnd <- asks $ HM.lookup fname . envFtable
+  case bnd of
+    Nothing -> bad $ UnknownFunctionError fname loc
+    Just (ftype, params) -> do
+      -- Create arg->param substitution map, then substitute shapes in
+      -- type.
+      let (paramnames, paramtypes) = unzip params
+          sub (Just p, a) = Just (p, a)
+          sub _           = Nothing
+          substs = HM.fromList $ mapMaybe sub $ zip paramnames args
+          substInType t = t `setArrayShape` substInShape (arrayShape t)
+          substInShape = ExtShape . map substInDim . extShapeDims
+          substInDim (Free (Var v))
+            | Just se <- HM.lookup (identName v) substs = Free se
+          substInDim dim                                = dim
+      return (map substInType ftype, paramtypes)
+
 -- | @t1 `unifyTypes` t2@ attempts to unify @t2@ and @t2@.  If
 -- unification cannot happen, 'Nothing' is returned, otherwise a type
 -- that combines the aliasing of @t1@ and @t2@ is returned.  The
@@ -293,10 +314,10 @@ checkAnnotation loc desc t1 t2 =
 -- @t2s@ are not the same length, a 'BadAnnotation' is raised.
 checkResAnnotation :: SrcLoc -> String -> ResType -> ResType -> TypeM ResType
 checkResAnnotation loc desc rt1 rt2
-  | length rt1 /= length rt2 = bad $ BadAnnotation loc desc
-                               (Several $ map toDecl rt1)
-                               (Several $ map toDecl rt2)
-  | otherwise = return $ combineResTypes rt1 rt2
+  | rt1 == rt2 = return rt2
+  | otherwise = bad $ BadAnnotation loc desc
+                (Several $ map toDecl rt1)
+                (Several $ map toDecl rt2)
 
 -- | @require ts e@ causes a '(TypeError vn)' if the type of @e@ does
 -- not unify with one of the types in @ts@.  Otherwise, simply returns
@@ -358,13 +379,14 @@ checkProg' checkoccurs prog = do
         Left $ DupDefinitionError name pos pos2
       | otherwise =
         let argtypes = map (toDecl . identType) args -- Throw away argument names.
-        in Right $ HM.insert name (ret,argtypes,pos) ftable
+            argnames = map (Just . identName) args
+        in Right $ HM.insert name (ret,zip argnames argtypes,pos) ftable
     rmLoc (ret,args,_) = (ret,args)
     addLoc (t, ts) = (t, ts, noLoc)
 
 initialFtable :: HM.HashMap Name FunBinding
 initialFtable = HM.map addBuiltin builtInFunctions
-  where addBuiltin (t, ts) = ([Basic t], map Basic ts)
+  where addBuiltin (t, ts) = ([Basic t], zip (repeat Nothing) $ map Basic ts)
 
 checkFun :: FunDec -> TypeM FunDec
 checkFun (fname, rettype, params, body, loc) = do
@@ -373,10 +395,10 @@ checkFun (fname, rettype, params, body, loc) = do
 
   checkReturnAlias $ bodyType body'
 
-  if map toDecl (bodyType body') `subtypesOf` rettype then
+  if map toDecl (bodyType body') `subtypesOf` map toDecl rettype then
     return (fname, rettype, params', body', loc)
   else bad $ ReturnTypeError loc fname
-             (Several rettype)
+             (Several $ map toDecl rettype)
              (Several $ map toDecl $ bodyType body')
 
   where checkParams = reverse <$> foldM expand [] params
@@ -508,7 +530,7 @@ checkExp (If e1 e2 e3 t pos) = do
   let removeConsumed = (`HS.difference` allConsumed (usageOccurences dflow))
   t' <- checkResAnnotation pos "branch result" t $
         map (`changeAliases` removeConsumed) $
-        zipWith unifyUniqueness (bodyType e2') (bodyType e3')
+        combineResTypes (bodyType e2') (bodyType e3')
   return $ If e1' e2' e3' t' pos
 
 checkExp (Apply fname args t pos)
@@ -519,19 +541,14 @@ checkExp (Apply fname args t pos)
   return $ Apply fname [(arg, Observe) | arg <- args'] t' pos
 
 checkExp (Apply fname args rettype loc) = do
-  bnd <- asks $ HM.lookup fname . envFtable
-  case bnd of
-    Nothing -> bad $ UnknownFunctionError fname loc
-    Just (ftype, paramtypes) -> do
-      (args', argflows) <- unzip <$> mapM (checkArg . fst) args
-      let realType = zipWith setArrayShape
-                     (returnType ftype (map diet paramtypes) (map subExpType args'))
-                     (map arrayShape rettype++repeat mempty)
+  (ftype, paramtypes) <- lookupFun loc fname $ map fst args
+  (args', argflows) <- unzip <$> mapM (checkArg . fst) args
+  let realType = returnType ftype (map diet paramtypes) (map subExpType args')
 
-      rettype' <- checkResAnnotation loc "return" rettype realType
+  rettype' <- checkResAnnotation loc "return" rettype realType
 
-      checkFuncall (Just fname) loc paramtypes (map toDecl rettype') argflows
-      return $ Apply fname (zip args' $ map diet paramtypes) rettype' loc
+  checkFuncall (Just fname) loc paramtypes (map toDecl rettype') argflows
+  return $ Apply fname (zip args' $ map diet paramtypes) rettype' loc
 
 checkExp (Index cs ident idxes pos) = do
   cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
@@ -636,7 +653,7 @@ checkExp (DoLoop respat merge (Ident loopvar loopvart loopvarloc)
       mergepat' = undefined mergepat returnts
   checkFuncall Nothing loc paramts paramts mergeargs
   (_, _, _, loopbody', _) <-
-    noUnique $ checkFun (nameFromString "<loop body>", paramts, funparams, loopbody, loc)
+    noUnique $ checkFun (nameFromString "<loop body>", undefined paramts, funparams, loopbody, loc)
 
   respat' <-
     forM respat $ \res ->
@@ -793,16 +810,15 @@ sequentially m1 m2 = do
 
 checkBinding :: SrcLoc -> [Ident] -> ResType -> Dataflow
              -> TypeM (TypeM a -> TypeM a, [Ident])
-checkBinding loc pat ts dflow
-  | length pat /= length ts =
-    bad $ InvalidPatternError (Several pat) (Several $ map toDecl ts) loc
-  | otherwise = do
+checkBinding loc pat ts dflow = do
   (ts', restpat, shapepat) <- extractContext loc pat ts
-  (restpat', idds) <-
-    runStateT (zipWithM checkBinding' restpat ts') []
+  unless (length restpat == length ts') $
+    bad $ InvalidPatternError (Several pat) (Several $ map toDecl ts) loc
+  restpat' <-
+    evalStateT (zipWithM checkBinding' restpat ts') []
   let pat' = shapepat ++ restpat'
   return (\m -> sequentially (tell dflow)
-                (const . const $ binding idds (checkPatSizes pat' >> m)),
+                (const . const $ binding pat' (checkPatSizes pat' >> m)),
           pat')
   where checkBinding' (Ident name namet pos) t = do
           t' <- lift $
@@ -894,6 +910,6 @@ checkLambda (Lambda params body ret loc) args = do
                   map (arrayDims . argType) args
     checkFuncall Nothing loc (map (toDecl . identType) params') (map toDecl ret') args
     (_, _, _, body', _) <-
-      noUnique $ checkFun (nameFromString "<anonymous>", map toDecl ret', params', body, loc)
+      noUnique $ checkFun (nameFromString "<anonymous>", closedResult ret', params', body, loc)
     return $ Lambda params' body' ret' loc
   else bad $ TypeError loc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."

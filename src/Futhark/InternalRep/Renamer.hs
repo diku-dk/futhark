@@ -184,5 +184,12 @@ instance Rename Rank where
 instance Rename Shape where
   rename (Shape l) = Shape <$> mapM rename l
 
+instance Rename ExtShape where
+  rename (ExtShape l) = ExtShape <$> mapM rename l
+
+instance Rename ExtDimSize where
+  rename (Free se) = Free <$> rename se
+  rename (Ext x)   = return $ Ext x
+
 instance Rename () where
   rename = return

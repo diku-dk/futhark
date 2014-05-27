@@ -29,7 +29,7 @@ externaliseProg (I.Prog funs) =
 externaliseFunction :: I.FunDec -> E.FunDec
 externaliseFunction (fname, ret, params, body, loc) =
   (fname,
-   externaliseDeclTypes ret,
+   externaliseRetType ret,
    map externaliseParam params,
    externaliseBody body,
    loc)
@@ -199,6 +199,9 @@ externaliseCerts = map externaliseIdent
 externalisePat :: [I.Ident] -> SrcLoc -> E.TupIdent
 externalisePat [v] _  = Id $ externaliseIdent v
 externalisePat vs loc = TupId (map (Id . externaliseIdent) vs) loc
+
+externaliseRetType :: I.RetType -> E.DeclType
+externaliseRetType = externaliseDeclTypes . map I.toDecl
 
 externaliseDeclTypes :: [I.DeclType] -> E.DeclType
 externaliseDeclTypes ts =

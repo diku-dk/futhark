@@ -35,6 +35,7 @@ module Futhark.InternalRep.Syntax
   , Body(..)
   , Exp(..)
   , ResType
+  , RetType
   , Lambda(..)
 
   -- * Definitions
@@ -377,6 +378,10 @@ instance Located Exp where
 -- - refers to the type being dependent).
 type ResType = [TypeBase Names ExtShape]
 
+-- | A type for declaring the return of a function.  Only the function
+-- parameters are in scope within the type.
+type RetType = [TypeBase () ExtShape]
+
 -- | Anonymous function for use in a tuple-SOAC.
 data Lambda =
   Lambda { lambdaParams     :: [Param]
@@ -391,7 +396,7 @@ instance Located Lambda where
 
 -- | Function Declarations
 type FunDec = (Name,
-               [DeclType],
+               RetType,
                [Param],
                Body,
                SrcLoc)

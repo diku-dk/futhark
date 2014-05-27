@@ -47,6 +47,10 @@ aliasComment pat d = case concatMap aliasComment' pat of
           where clean = filter (/= identName ident)
                 oneline s = text $ displayS (renderCompact s) ""
 
+instance Pretty Uniqueness where
+  ppr Unique = star
+  ppr Nonunique = empty
+
 instance Pretty Value where
   ppr (BasicVal bv) = ppr bv
   ppr v@(ArrayVal a t)
@@ -57,10 +61,15 @@ instance Pretty Value where
 
 instance Pretty (TypeBase als Shape) where
   ppr (Basic et) = ppr et
-  ppr (Array et (Shape ds) u _) = u' <> foldr f (ppr et) ds
+  ppr (Array et (Shape ds) u _) = ppr u <> foldr f (ppr et) ds
     where f e s = brackets $ s <> comma <> ppr e
-          u' | Unique <- u = star
-             | otherwise = empty
+
+instance Pretty (TypeBase als ExtShape) where
+  ppr (Basic et) = ppr et
+  ppr (Array et (ExtShape ds) u _) = ppr u <> foldr f (ppr et) ds
+    where f (Free e) s = brackets $ s <> comma <> ppr e
+          f (Ext x)  s = brackets $ s <> comma <>
+                         text "<" <> text (show x) <> text ">"
 
 instance Pretty (TypeBase als Rank) where
   ppr (Basic et) = ppr et
@@ -175,7 +184,7 @@ instance Pretty Lambda where
 
 instance Pretty FunDec where
   ppr (name, rettype, args, body, _) =
-    text "fun" <+> ppTuple' rettype <+>
+    text "fun" <+> ppRetType rettype <+>
     text (nameToString name) <//>
     apply (map ppParam args) <+>
     equals </> indent 2 (ppr body)
@@ -205,6 +214,9 @@ ppPattern = braces . commasep . map ppBinding
 
 ppBinding :: Ident -> Doc
 ppBinding ident = ppr (identType ident) <+> ppr ident
+
+ppRetType :: RetType -> Doc
+ppRetType = braces . commasep . map ppr
 
 ppTuple' :: Pretty a => [a] -> Doc
 ppTuple' ets = braces $ commasep $ map ppr ets
