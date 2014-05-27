@@ -63,6 +63,14 @@ instance Substitute Shape where
   substituteNames substs (Shape es) =
     Shape $ map (substituteNames substs) es
 
+instance Substitute ExtShape where
+  substituteNames substs (ExtShape es) =
+    ExtShape $ map (substituteNames substs) es
+
+instance Substitute ExtDimSize where
+  substituteNames substs (Free se) = Free $ substituteNames substs se
+  substituteNames _      (Ext x)   = Ext x
+
 instance Substitute Names where
   substituteNames = HS.map . substituteNames
 
