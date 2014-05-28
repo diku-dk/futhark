@@ -136,9 +136,10 @@ inlineInBody :: [FunDec] -> Body -> Body
 inlineInBody inlcallees (Body (Let pat (Apply fname args rtp loc):bnds) res) =
   let continue callbnds =
         callbnds `insertBindings` inlineInBody inlcallees (Body bnds res)
-      continue' res' = continue [ Let [v] $ SubExp e'
-                                | (v,e') <- zip pat $ resultSubExps res' ]
-  in  case filter (\(nm,_,_,_,_)->fname==nm) inlcallees of
+      continue' res' =
+        continue [ Let [v] $ SubExp e'
+                 | (v,e') <- zip pat $ withShapes $ resultSubExps res' ]
+  in  case filter (\(nm,_,_,_,_)-> fname == nm) inlcallees of
         [] -> continue [Let pat $ Apply fname args rtp loc]
         (_,_,fargs,body,_):_ ->
           let revbnds = zip (map fromParam fargs) $ map fst args
@@ -146,11 +147,8 @@ inlineInBody inlcallees (Body (Let pat (Apply fname args rtp loc):bnds) res) =
   where
       addArgBnd :: (Ident, SubExp) -> Body -> Body
       addArgBnd (farg, aarg) body =
-          let fargutp = identType farg
-              fargnm  = identName   farg
-              fargpos = identSrcLoc farg
-              farg' = Ident fargnm fargutp fargpos
-          in  Let [farg'] (SubExp aarg) `insertBinding` body
+          Let [farg] (SubExp aarg) `insertBinding` body
+      withShapes ses = existentialShapes rtp (map subExpType ses) ++ ses
 inlineInBody inlcallees b = mapBody (inliner inlcallees) b
 
 inliner :: Monad m => [FunDec] -> Mapper m

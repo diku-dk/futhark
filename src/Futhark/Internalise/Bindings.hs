@@ -135,7 +135,7 @@ flattenPattern (E.TupId pats _) =
 bindingPattern :: E.TupIdent -> Maybe SubExp -> ResType -> ([I.Ident] -> InternaliseM a) -> InternaliseM a
 bindingPattern pat ce ts m = do
   pat' <- flattenPattern pat
-  (ts',shapes) <- runWriterT $ instantiateResType instantiate ts
+  (ts',shapes) <- runWriterT $ instantiateShapes instantiate ts
   let addShapeBindings pat'' = m $ shapes ++ pat''
   case ce of Just ce' -> bindingFlatPatternWithCert ce' pat' ts' addShapeBindings
              Nothing  -> bindingFlatPatternOwnCert pat' ts' addShapeBindings

@@ -537,7 +537,7 @@ checkExp (Apply fname args t pos)
   | "trace" <- nameToString fname = do
   args' <- mapM (checkSubExp . fst) args
   t'    <- checkResAnnotation pos "return" t $
-           closedResult $ map subExpType args'
+           staticShapes $ map subExpType args'
   return $ Apply fname [(arg, Observe) | arg <- args'] t' pos
 
 checkExp (Apply fname args rettype loc) = do
@@ -910,6 +910,6 @@ checkLambda (Lambda params body ret loc) args = do
                   map (arrayDims . argType) args
     checkFuncall Nothing loc (map (toDecl . identType) params') (map toDecl ret') args
     (_, _, _, body', _) <-
-      noUnique $ checkFun (nameFromString "<anonymous>", closedResult ret', params', body, loc)
+      noUnique $ checkFun (nameFromString "<anonymous>", staticShapes ret', params', body, loc)
     return $ Lambda params' body' ret' loc
   else bad $ TypeError loc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."

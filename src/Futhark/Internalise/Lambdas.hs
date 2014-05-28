@@ -12,14 +12,11 @@ import Control.Monad
 
 import Data.List
 import Data.Loc
-import Data.Maybe
-import qualified Data.HashMap.Lazy as HM
 
 import Futhark.ExternalRep as E
 import Futhark.InternalRep as I
 import Futhark.MonadFreshNames
 import Futhark.Tools
-import Futhark.Substitute
 
 import Futhark.Internalise.Monad
 import Futhark.Internalise.AccurateSizes
@@ -92,27 +89,26 @@ internaliseLambda internaliseBody ce lam rowtypes = do
   (body', params') <- lambdaBinding ce params rowtypes $
                       internaliseLambdaBody internaliseBody body
   return (params', body',
-          prefixTypeShapes $ map noInfoToUnit $ internaliseType' rettype)
+          map noInfoToUnit $ internaliseType' rettype)
 
 internaliseMapLambda :: (E.Exp -> InternaliseM Body)
                      -> I.Ident
                      -> E.Lambda
                      -> [I.SubExp]
-                     -> InternaliseM (I.Certificates, I.Lambda)
+                     -> InternaliseM I.Lambda
 internaliseMapLambda internaliseBody ce lam args = do
   let argtypes = map I.subExpType args
       rowtypes = map I.rowType argtypes
   (params, body, rettype) <- internaliseLambda internaliseBody ce lam rowtypes
-  let (shape_body, value_body) = splitBody body
-      (rettype_shape, rettype_value) = splitType rettype
+  let rettype_shape = typeShapes rettype
       outer_shape = outerShape loc argtypes
-  shapefun <- makeShapeFun params shape_body
+  shapefun <- makeShapeFun params (shapeBody body)
               (replicate (length rettype_shape) $ I.Basic Int) loc
-  (cs,inner_shapes) <- bindMapShapes [ce] shapefun args outer_shape
-  let rettype' = addTypeShapes rettype_value $
+  inner_shapes <- bindMapShapes [ce] shapefun args outer_shape
+  let rettype' = addTypeShapes rettype $
                  map I.Var inner_shapes
-  value_body' <- sanitiseValueSlice inner_shapes value_body
-  return (cs, I.Lambda params value_body' rettype' loc)
+  body' <- assertResultShape inner_shapes body
+  return $ I.Lambda params body' rettype' loc
   where loc = srclocOf lam
 
 makeShapeFun :: MonadFreshNames m =>
@@ -126,75 +122,60 @@ makeShapeFun params body rettype loc = do
   (params', copybnds) <- nonuniqueParams params
   return $ I.Lambda params' (insertBindings copybnds body) rettype loc
 
-sanitiseValueSlice :: [I.Ident] -> I.Body -> InternaliseM I.Body
-sanitiseValueSlice resShapes (I.Body bnds res) = do
-  -- First, we rename any bindings of the currently computed shapes.
-  bnds' <- mapM renameShapeBindings bnds
-  -- Then, we replace any use of the old names.
-  return $ removeSOACCerts $ substituteNames substs $ I.Body bnds' res
-  where substs = HM.fromList $ mapMaybe (uncurry shapeSubst) $
-                 zip resShapes $
-                 concatMap subExpShape (resultSubExps res)
-
-        renameShapeBindings (I.Let pat e) =
-          Let <$> mapM renameShapeBinding pat <*> pure e
-
-        renameShapeBinding var
-          | isShapeBinding var = newIdent' (const "unused_shape") var
-          | otherwise          = return var
-
-        isShapeBinding = (`HM.member` substs) . I.identName
-
-        shapeSubst resShape (I.Var v) = Just (I.identName v,
-                                              I.identName resShape)
-        shapeSubst _        _         = Nothing
-
-removeSOACCerts :: Body -> Body
-removeSOACCerts (Body bnds res) = Body (map removeCert bnds) res
-  where
-    removeCert (I.Let pat e) =
-      I.Let pat $ case e of
-                    I.Map _ fun arrs loc -> I.Map [] fun arrs loc
-                    I.Reduce _ fun input loc -> I.Reduce [] fun input loc
-                    I.Scan _ fun input loc -> I.Scan [] fun input loc
-                    I.Filter _ fun arrs size loc -> I.Filter [] fun arrs size loc
-                    I.Redomap _ outerfun innerfun acc arrs loc ->
-                      I.Redomap [] outerfun innerfun acc arrs loc
-                    I.DoLoop respat merge i bound body loc ->
-                      I.DoLoop respat merge i bound (removeSOACCerts body) loc
-                    _ -> e
+assertResultShape :: [I.Ident] -> I.Body -> InternaliseM I.Body
+assertResultShape desiredShapes (I.Body bnds res) = do
+  certs <- replicateM (length desiredShapes) $
+           newIdent "shape_cert" (I.Basic I.Cert) loc
+  checks <- replicateM (length desiredShapes) $
+            newIdent "shape_check" (I.Basic I.Bool) loc
+  let check desired computed = I.BinOp I.Equal (I.Var desired) computed
+                               (I.Basic I.Bool) loc
+      cmps = zipWith Let (map pure checks) $
+             zipWith check desiredShapes computedShapes
+      asserts = zipWith Let (map pure certs) $
+                map ((`I.Assert` loc) . I.Var) checks
+  return $ I.Body (bnds++cmps++asserts)
+    res { resultCertificates =
+             resultCertificates res ++ certs
+        }
+  where computedShapes = concatMap subExpShape $ resultSubExps res
+        loc = srclocOf res
 
 bindMapShapes :: I.Certificates -> I.Lambda -> [I.SubExp] -> SubExp
-              -> InternaliseM (I.Certificates, [I.Ident])
-bindMapShapes cs sizefun args outer_shape = do
-  comp_shapes <- replicateM (length (I.lambdaReturnType sizefun)) $
-                 newIdent "map_computed_shape"
-                 (I.arrayOf (I.Basic I.Int) (I.Shape [outer_shape]) I.Unique) loc
-  let sizecomp = if null comp_shapes
-                 then []
-                 else [(comp_shapes, I.Map cs sizefun args loc)]
-  mapM_ (uncurry letBind) sizecomp
-  (certs, inner_shapes) <- unzip <$> mapM allEqual comp_shapes
-  return (certs, inner_shapes)
+              -> InternaliseM [I.Ident]
+bindMapShapes cs sizefun args outer_shape
+  | null $ I.lambdaReturnType sizefun = return []
+  | otherwise =
+    letTupExp "shape" =<< eIf isempty emptybranch nonemptybranch rt loc
   where loc = srclocOf sizefun
+        zero = intconst 0 loc
+        rt = map (const $ I.Basic I.Int) $ I.lambdaReturnType sizefun
+        isempty = eBinOp I.Equal (pure $ I.SubExp outer_shape) (pure $ SubExp zero)
+                  (I.Basic I.Bool) loc
+        emptybranch =
+          pure $ resultBody
+          [] (map (const zero) $ I.lambdaReturnType sizefun) loc
+        nonemptybranch = insertBindingsM $ do
+          resultBody [] <$> (eLambda sizefun =<< mapM index0 args) <*> pure loc
+        index0 arg = do
+          arg' <- letExp "arg" $ I.SubExp arg
+          letSubExp "elem" $ I.Index cs arg' [intconst 0 loc] loc
 
 internaliseFoldLambda :: (E.Exp -> InternaliseM Body)
                       -> I.Ident
                       -> E.Lambda
                       -> [I.Type] -> [I.Type]
-                      -> InternaliseM (I.Certificates, I.Lambda)
+                      -> InternaliseM I.Lambda
 internaliseFoldLambda internaliseBody ce lam acctypes arrtypes = do
   let rowtypes = map I.rowType arrtypes
   (params, body, rettype) <- internaliseLambda internaliseBody ce lam $ acctypes ++ rowtypes
-  let (_, value_body) = splitBody body
-      (_, rettype_value) = splitType rettype
-      rettype' = [ t `setArrayShape` arrayShape shape
-                   | (t,shape) <- zip rettype_value acctypes ]
+  let rettype' = [ t `setArrayShape` arrayShape shape
+                   | (t,shape) <- zip rettype acctypes ]
   -- The result of the body must have the exact same
   -- shape as the initial accumulator.  Generate an assertion and insert
   -- it at the end of the body.
-  value_body' <-
-    flip mapResultM value_body $ \(I.Result cs es resloc) -> do
+  body' <-
+    flip mapResultM body $ \(I.Result cs es resloc) -> do
       let subExpChecks :: I.Type -> I.Type -> InternaliseM [I.Ident]
           subExpChecks rest acct =
             forM (zip (I.arrayDims rest) (I.arrayDims acct)) $ \(res_n,acc_n) -> do
@@ -206,7 +187,7 @@ internaliseFoldLambda internaliseBody ce lam acctypes arrtypes = do
           liftM concat $ zipWithM subExpChecks (map subExpType es) acctypes
         return $ I.resultBody (cs++cs2) es resloc
 
-  return ([], I.Lambda params value_body' rettype' loc)
+  return $ I.Lambda params body' rettype' loc
   where loc = srclocOf lam
 
 internaliseFilterLambda :: (E.Exp -> InternaliseM Body)

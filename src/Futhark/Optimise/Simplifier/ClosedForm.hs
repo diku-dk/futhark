@@ -62,7 +62,7 @@ foldClosedForm look pat lam accs arrs =
             Let pat $ If (Var isEmpty)
                              (resultBody [] accs lamloc)
                              ifNonEmpty
-                             (closedResult $ map fromConstType $
+                             (staticShapes $ map fromConstType $
                               lambdaReturnType lam)
                              lamloc
       closedBody' <- renameBody closedBody

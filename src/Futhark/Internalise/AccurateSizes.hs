@@ -4,6 +4,7 @@ module Futhark.Internalise.AccurateSizes
   , typeShapes
   , prefixTypeShapes
   , extShapes
+  , shapeBody
   , prefixSubExpShapes
   , allEqual
   , UnsizedLambda(..)
@@ -58,6 +59,11 @@ extShapes ts = evalState (mapM extShapes' ts) 0
           x <- get
           put $ x + 1
           return $ Ext x
+
+shapeBody :: Body -> Body
+shapeBody (Body bnds (Result cs ses loc)) =
+  Body bnds $ Result cs shapes loc
+  where shapes = concatMap subExpShape ses
 
 allEqual :: Ident -> InternaliseM (Ident, Ident)
 allEqual comp_shape = do

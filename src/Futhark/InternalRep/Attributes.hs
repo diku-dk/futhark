@@ -68,7 +68,7 @@ module Futhark.InternalRep.Attributes
   , returnType
   , lambdaType
   , lambdaReturnType
-  , isClosedResult
+  , hasStaticShape
 
   -- * Operations on types
   , stripArray
@@ -85,8 +85,9 @@ module Futhark.InternalRep.Attributes
   , setUniqueness
   , unifyUniqueness
   , combineResTypes
-  , closedResult
-  , instantiateResType
+  , staticShapes
+  , instantiateShapes
+  , existentialShapes
 
   -- * Queries on values
   , valueShape
@@ -133,6 +134,7 @@ import Data.Array
 import Data.Ord
 import Data.List
 import Data.Loc
+import Data.Maybe
 import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
 
@@ -575,7 +577,7 @@ subExpType (Var ident)      = varType ident
 bodyType :: Body -> ResType
 bodyType (Body bnds res) =
   evalState (mapM makeBoundShapesFree $
-             closedResult $ map subExpType $ resultSubExps res)
+             staticShapes $ map subExpType $ resultSubExps res)
   (0, HM.empty, HM.empty)
   where boundInLet (Let pat _) = map identName pat
         bound = HS.fromList $ concatMap boundInLet bnds
@@ -613,15 +615,15 @@ loopResultType restypes merge = evalState (mapM inspect restypes) 0
             return $ Ext i
         inspectShape se = return $ Free se
 
-closedResult :: [TypeBase als Shape] -> [TypeBase als ExtShape]
-closedResult = map closedResult'
-  where closedResult' (Basic bt) =
+staticShapes :: [TypeBase als Shape] -> [TypeBase als ExtShape]
+staticShapes = map staticShapes'
+  where staticShapes' (Basic bt) =
           Basic bt
-        closedResult' (Array bt (Shape shape) u als) =
+        staticShapes' (Array bt (Shape shape) u als) =
           Array bt (ExtShape $ map Free shape) u als
 
-instantiateResType :: Monad m => m SubExp -> ResType -> m [Type]
-instantiateResType f ts = evalStateT (mapM instantiate ts) HM.empty
+instantiateShapes :: Monad m => m SubExp -> ResType -> m [Type]
+instantiateShapes f ts = evalStateT (mapM instantiate ts) HM.empty
   where instantiate t = do
           shape <- mapM instantiate' $ extShapeDims $ arrayShape t
           return $ t `setArrayShape` Shape shape
@@ -634,11 +636,20 @@ instantiateResType f ts = evalStateT (mapM instantiate ts) HM.empty
                           return se
         instantiate' (Free se) = return se
 
-isClosedResult :: ResType -> Maybe [Type]
-isClosedResult = mapM isClosedResult'
-  where isClosedResult' (Basic bt) =
+existentialShapes :: [TypeBase als1 ExtShape] -> [TypeBase als2 Shape] -> [SubExp]
+existentialShapes t1s t2s  = concat $ zipWith concreteShape' t1s t2s
+  where concreteShape' t1 t2 =
+          catMaybes $ zipWith concretise
+          (extShapeDims $ arrayShape t1)
+          (shapeDims $ arrayShape t2)
+        concretise (Ext _) se  = Just se
+        concretise (Free _) _ = Nothing
+
+hasStaticShape :: ResType -> Maybe [Type]
+hasStaticShape = mapM hasStaticShape'
+  where hasStaticShape' (Basic bt) =
           Just $ Basic bt
-        isClosedResult' (Array bt (ExtShape shape) u als) =
+        hasStaticShape' (Array bt (ExtShape shape) u als) =
           Array bt <$> (Shape <$> mapM isFree shape) <*> pure u <*> pure als
         isFree (Free s) = Just s
         isFree (Ext _)  = Nothing
@@ -672,57 +683,57 @@ redomapType outerfun innerfun acc arrs =
 -- | The type of an Futhark term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
 typeOf :: Exp -> ResType
-typeOf (SubExp se) = closedResult [subExpType se]
+typeOf (SubExp se) = staticShapes [subExpType se]
 typeOf (ArrayLit es t loc) =
-  closedResult [arrayOf t (Shape [n]) $ mconcat $ map (uniqueness . subExpType) es]
+  staticShapes [arrayOf t (Shape [n]) $ mconcat $ map (uniqueness . subExpType) es]
   where n = constant (length es) loc
-typeOf (BinOp _ _ _ t _) = closedResult [t]
-typeOf (Not _ _) = closedResult [Basic Bool]
-typeOf (Negate e _) = closedResult [subExpType e]
+typeOf (BinOp _ _ _ t _) = staticShapes [t]
+typeOf (Not _ _) = staticShapes [Basic Bool]
+typeOf (Negate e _) = staticShapes [subExpType e]
 typeOf (If _ _ _ t _) = t
 typeOf (Apply _ _ t _) = t
 typeOf (Index _ ident idx _) =
-  closedResult [stripArray (length idx) (varType ident)
+  staticShapes [stripArray (length idx) (varType ident)
               `changeAliases` HS.insert (identName ident)]
 typeOf (Update _ src _ _ _) =
-  closedResult [identType src `setAliases` HS.empty]
+  staticShapes [identType src `setAliases` HS.empty]
 typeOf (Iota ne _) =
-  closedResult [arrayOf (Basic Int) (Shape [ne]) Unique]
+  staticShapes [arrayOf (Basic Int) (Shape [ne]) Unique]
 typeOf (Replicate ne e _) =
-  closedResult [arrayOf (subExpType e) (Shape [ne]) u]
+  staticShapes [arrayOf (subExpType e) (Shape [ne]) u]
   where u | uniqueOrBasic (subExpType e) = Unique
           | otherwise = Nonunique
 typeOf (Reshape _ [] e _) =
-  closedResult [Basic $ elemType $ subExpType e]
+  staticShapes [Basic $ elemType $ subExpType e]
 typeOf (Reshape _ shape e _) =
-  closedResult [subExpType e `setArrayShape` Shape shape]
+  staticShapes [subExpType e `setArrayShape` Shape shape]
 typeOf (Rearrange _ perm e _) =
-  closedResult [subExpType e `setArrayShape` Shape (permuteShape perm shape)]
+  staticShapes [subExpType e `setArrayShape` Shape (permuteShape perm shape)]
   where Shape shape = arrayShape $ subExpType e
-typeOf (Rotate _ _ e _) = closedResult [subExpType e]
+typeOf (Rotate _ _ e _) = staticShapes [subExpType e]
 typeOf (Split _ ne e secsize _) =
-  closedResult [subExpType e `setOuterSize` ne,
+  staticShapes [subExpType e `setOuterSize` ne,
               subExpType e `setOuterSize` secsize]
 typeOf (Concat _ x y ressize _) =
-  closedResult [subExpType x `setUniqueness` u `setOuterSize` ressize]
+  staticShapes [subExpType x `setUniqueness` u `setOuterSize` ressize]
   where u = uniqueness (subExpType x) <> uniqueness (subExpType y)
 typeOf (Copy e _) =
-  closedResult [subExpType e `setUniqueness` Unique `setAliases` HS.empty]
+  staticShapes [subExpType e `setUniqueness` Unique `setAliases` HS.empty]
 typeOf (Assert _ _) =
-  closedResult [Basic Cert]
+  staticShapes [Basic Cert]
 typeOf (Conjoin _ _) =
-  closedResult [Basic Cert]
+  staticShapes [Basic Cert]
 typeOf (DoLoop res merge _ _ _ _) = loopResultType (map identType res) merge
 typeOf (Map _ f arrs _) =
-  closedResult $ mapType f arrs
+  staticShapes $ mapType f arrs
 typeOf (Reduce _ fun inputs _) =
-  closedResult $ reduceType fun inputs
+  staticShapes $ reduceType fun inputs
 typeOf (Scan _ fun inputs _) =
-  closedResult $ scanType fun inputs
+  staticShapes $ scanType fun inputs
 typeOf (Filter _ f arrs outerShape _) =
-  closedResult $ filterType f arrs outerShape
+  staticShapes $ filterType f arrs outerShape
 typeOf (Redomap _ outerfun innerfun acc arrs _) =
-  closedResult $ redomapType outerfun innerfun acc arrs
+  staticShapes $ redomapType outerfun innerfun acc arrs
 
 uniqueProp :: TypeBase as shape -> Uniqueness
 uniqueProp tp = if uniqueOrBasic tp then Unique else Nonunique

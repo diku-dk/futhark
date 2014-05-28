@@ -154,7 +154,7 @@ internaliseExp desc (E.Apply fname args _ loc)
   | "trace" <- nameToString fname = do
   args' <- tupsToIdentList "arg" $ map fst args
   let args'' = concatMap tag args'
-  letTupExp' desc $ I.Apply fname args'' (I.closedResult $ map (subExpType . fst) args'')  loc
+  letTupExp' desc $ I.Apply fname args'' (I.staticShapes $ map (subExpType . fst) args'')  loc
   where tag (_,vs) = [ (I.Var v, I.Observe) | v <- vs ]
 
 internaliseExp desc (E.Apply fname args _ loc)
@@ -180,7 +180,7 @@ internaliseExp desc (E.LetPat pat e body loc) = do
   (c,ks) <- tupToIdentList desc e
   bindingPattern pat
     (Just $ certOrGiven loc c)
-    (closedResult $ map I.identType ks) $ \pat' -> do
+    (staticShapes $ map I.identType ks) $ \pat' -> do
     forM_ (zip pat' $ map I.Var ks) $ \(p,se) ->
       letBind [p] $ I.SubExp se
     internaliseExp desc body
@@ -217,7 +217,7 @@ internaliseExp desc (E.LetWith cs name src idxcs idxs ve body loc) = do
         letWithBind (cs'++idxcs') dname sname idxs' $ I.Var vname
   mapM_ comb $ zip3 dsts srcs vnames
   bindingPattern (E.Id name) (Just $ certOrGiven loc c)
-                             (I.closedResult $ map I.identType dsts) $ \pat' -> do
+                             (I.staticShapes $ map I.identType dsts) $ \pat' -> do
     forM_ (zip pat' dsts) $ \(p,dst) ->
       letBind [p] $ I.SubExp $ I.Var dst
     internaliseExp desc body
@@ -330,20 +330,20 @@ internaliseExp desc (E.Map lam arr loc) = do
   (c,arrs) <- tupToIdentList "map_arr" arr
   let cs = certify c []
   se <- conjoinCerts cs loc
-  (cs2, lam') <- internaliseMapLambda internaliseBody se lam $ map I.Var arrs
+  lam' <- internaliseMapLambda internaliseBody se lam $ map I.Var arrs
   certifySOAC desc se (I.mapType lam' $ map I.Var arrs) $
-    I.Map (cs++cs2) lam' (map I.Var arrs) loc
+    I.Map cs lam' (map I.Var arrs) loc
 
 internaliseExp desc e@(E.Reduce lam ne arr loc) = do
   (c1,arrs) <- tupToIdentList "reduce_arr" arr
   (c2,nes) <- tupToIdentList "reduce_ne" ne
   let cs = catMaybes [c1,c2]
   se <- conjoinCerts cs loc
-  (cs2, lam') <- internaliseFoldLambda internaliseBody se lam
-                 (map I.identType nes) (map I.identType arrs)
+  lam' <- internaliseFoldLambda internaliseBody se lam
+          (map I.identType nes) (map I.identType arrs)
   let input = zip (map I.Var nes) (map I.Var arrs)
   certifyFoldSOAC desc se t (reduceType lam' input) $
-    I.Reduce (cs++cs2) lam' input loc
+    I.Reduce cs lam' input loc
   where t = internaliseType $ E.typeOf e
 
 internaliseExp desc e@(E.Scan lam ne arr loc) = do
@@ -351,11 +351,11 @@ internaliseExp desc e@(E.Scan lam ne arr loc) = do
   (c2,nes) <- tupToIdentList "scan_ne" ne
   let cs = catMaybes [c1,c2]
   se <- conjoinCerts cs loc
-  (cs2, lam') <- internaliseFoldLambda internaliseBody se lam
-                 (map I.identType nes) (map I.identType arrs)
+  lam' <- internaliseFoldLambda internaliseBody se lam
+          (map I.identType nes) (map I.identType arrs)
   let input = zip (map I.Var nes) (map I.Var arrs)
   certifyFoldSOAC desc se t (scanType lam' input) $
-    I.Scan (cs++cs2) lam' input loc
+    I.Scan cs lam' input loc
   where t = internaliseType $ E.typeOf e
 
 internaliseExp desc (E.Filter lam arr loc) = do
@@ -372,13 +372,13 @@ internaliseExp desc e@(E.Redomap lam1 lam2 ne arrs loc) = do
   (c2,nes) <- tupToIdentList "redomap_ne" ne
   let cs = catMaybes [c1,c2]
   se <- conjoinCerts cs loc
-  (cs2,lam1') <- internaliseFoldLambda internaliseBody se lam1
-                 (map I.identType nes) (map I.identType nes)
-  (cs3,lam2') <- internaliseFoldLambda internaliseBody se lam2
-                 (map I.identType nes) (map I.identType arrs')
+  lam1' <- internaliseFoldLambda internaliseBody se lam1
+           (map I.identType nes) (map I.identType nes)
+  lam2' <- internaliseFoldLambda internaliseBody se lam2
+           (map I.identType nes) (map I.identType arrs')
   certifyFoldSOAC desc se t (I.redomapType lam1' lam2'
                              (map I.Var nes) (map I.Var arrs')) $
-    I.Redomap (cs++cs2++cs3) lam1' lam2' (map I.Var nes) (map I.Var arrs') loc
+    I.Redomap cs lam1' lam2' (map I.Var nes) (map I.Var arrs') loc
   where t = internaliseType $ E.typeOf e
 
 -- The "interesting" cases are over, now it's mostly boilerplate.

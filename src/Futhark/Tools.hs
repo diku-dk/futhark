@@ -18,6 +18,7 @@ module Futhark.Tools
   , eAssert
   , eDoLoop
   , eBody
+  , eLambda
 
   , foldBinOp
   , binOpLambda
@@ -53,7 +54,7 @@ letExp :: MonadBinder m =>
           String -> Exp -> m Ident
 letExp _ (SubExp (Var v)) = return v
 letExp desc e =
-  case isClosedResult $ typeOf e of
+  case hasStaticShape $ typeOf e of
     Just [t] -> do v <- fst <$> newVar (srclocOf e) desc t
                    letBind [v] e
                    return v
@@ -71,7 +72,7 @@ letShapedExp :: MonadBinder m => String -> Exp
                 -> m ([Ident], [Ident])
 letShapedExp _ (SubExp (Var v)) = return ([], [v])
 letShapedExp name e = do
-  (ts, shapes) <- runWriterT $ instantiateResType instantiate $ typeOf e
+  (ts, shapes) <- runWriterT $ instantiateShapes instantiate $ typeOf e
   names <- mapM (liftM fst . newVar loc name) ts
   letBind (shapes++names) e
   return (shapes, names)
@@ -157,6 +158,12 @@ eBody es = insertBindingsM $ do
                                   e:_ -> srclocOf e
             return $ resultBody [] (map Var $ concat xs) loc
 
+eLambda :: MonadBinder m =>
+           Lambda -> [SubExp] -> m [SubExp]
+eLambda lam args = do zipWithM_ letBind params $ map SubExp args
+                      bodyBind $ lambdaBody lam
+  where params = map (pure . fromParam) $ lambdaParams lam
+
 -- | Apply a binary operator to several subexpressions.  A left-fold.
 foldBinOp :: MonadBinder m =>
              BinOp -> SubExp -> [SubExp] -> Type -> m Exp
@@ -186,7 +193,7 @@ makeLambda :: MonadBinder m =>
               [Param] -> m Body -> m Lambda
 makeLambda params body = do
   body' <- insertBindingsM body
-  case isClosedResult $ bodyType body' of
+  case hasStaticShape $ bodyType body' of
     Nothing -> fail "Body passed to makeLambda has open type"
     Just ts ->
       return Lambda {

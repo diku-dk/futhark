@@ -25,14 +25,14 @@ shapeFunctionName fname = fname <> nameFromString "_shape"
 -- | Returns f, f_shape.
 splitFunction :: FunDec -> InternaliseM (FunDec, FunDec)
 splitFunction (fname,rettype,params,body,loc) = do
-  let (shapeBody,valueBody) = splitBody body
+  let (shape_body,value_body) = splitBody body
   (params', copies) <- nonuniqueParams params
-  shapeBody' <- insertBindingsM $ do
+  shape_body' <- insertBindingsM $ do
                   mapM_ addBinding copies
-                  return shapeBody
-  let f_shape = (shapeFname, closedResult $ map (`setAliases` ()) shapeRettype,
-                 params', shapeBody', loc)
-      f       = (fname, valueRettype, params, valueBody, loc)
+                  return shape_body
+  let f_shape = (shapeFname, staticShapes $ map (`setAliases` ()) shapeRettype,
+                 params', shape_body', loc)
+      f       = (fname, valueRettype, params, value_body, loc)
   return (f, f_shape)
   where (shapeRettype, valueRettype) = splitType rettype
         shapeFname = shapeFunctionName fname
@@ -43,7 +43,7 @@ splitFuncall :: MonadBinder m =>
 splitFuncall fname args rettype loc = do
   result_shape <- resultShape
   let valueRettype' = addTypeShapes rettype result_shape
-  return $ Apply fname args (closedResult valueRettype') loc
+  return $ Apply fname args (staticShapes valueRettype') loc
   where shapeRettype = typeShapes rettype
         shapeFname = shapeFunctionName fname
 
@@ -53,15 +53,15 @@ splitFuncall fname args rettype loc = do
             liftM (map Var) $
             letTupExp "fun_shapes" $
             Apply shapeFname [ (arg, Observe) | (arg, _) <- args]
-            (closedResult shapeRettype) loc
+            (staticShapes shapeRettype) loc
 
 splitLambda :: ([Param], Body, [DeclType])
             -> (([Param], Body, [DeclType]),
                 ([Param], Body, [DeclType]))
 splitLambda (params, body, rettype) =
-  ((params, shapeBody, map toDecl sizeRettype),
-   (params, valueBody, valueRettype))
-    where (shapeBody,valueBody) = splitBody body
+  ((params, shape_body, map toDecl sizeRettype),
+   (params, value_body, valueRettype))
+    where (shape_body,value_body) = splitBody body
           (sizeRettype, valueRettype) = splitType rettype
 
 splitType :: ArrayShape shape =>
@@ -72,11 +72,11 @@ splitType ts = let (shape_ts, value_ts) = splitTyped id ts
         asType _          = error "Non-basic shape type"
 
 splitBody :: Body -> (Body, Body)
-splitBody body = (shapeBody, valueBody)
-    where shapeBody = flip mapResult body $ \(Result cs es _) ->
-                      resultBody cs (fst $ splitTyped subExpType es) loc
-          valueBody = flip mapResult body $ \(Result cs es _) ->
-                      resultBody cs (snd $ splitTyped subExpType es) loc
+splitBody body = (shape_body, value_body)
+    where shape_body = flip mapResult body $ \(Result cs es _) ->
+            resultBody cs (fst $ splitTyped subExpType es) loc
+          value_body = flip mapResult body $ \(Result cs es _) ->
+            resultBody cs (snd $ splitTyped subExpType es) loc
           loc = srclocOf body
 
 splitIdents :: [Ident] -> ([Ident], [Ident])
