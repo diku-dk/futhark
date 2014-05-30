@@ -314,10 +314,24 @@ checkAnnotation loc desc t1 t2 =
 -- @t2s@ are not the same length, a 'BadAnnotation' is raised.
 checkResAnnotation :: SrcLoc -> String -> ResType -> ResType -> TypeM ResType
 checkResAnnotation loc desc rt1 rt2
-  | rt1 == rt2 = return rt2
+  | rt1 == rt2 =
+    -- Anywhere rt1 is existentially quantified, so we must make rt2.
+    evalStateT (zipWithM generalise rt1 rt2) (0, HM.empty)
   | otherwise = bad $ BadAnnotation loc desc
                 (Several $ map toDecl rt1)
                 (Several $ map toDecl rt2)
+  where generalise t1 t2 =
+          setArrayShape t2 <$> ExtShape <$>
+          zipWithM generalise'
+          (extShapeDims $ arrayShape t1)
+          (extShapeDims $ arrayShape t2)
+        generalise' (Ext x)   _ = Ext <$> getExt x
+        generalise' (Free se) _ = return $ Free se
+        getExt x = do (n,m) <- get
+                      case HM.lookup x m of
+                        Nothing -> do put (n + 1, HM.insert x n m)
+                                      return n
+                        Just y  -> return y
 
 -- | @require ts e@ causes a '(TypeError vn)' if the type of @e@ does
 -- not unify with one of the types in @ts@.  Otherwise, simply returns
@@ -530,7 +544,7 @@ checkExp (If e1 e2 e3 t pos) = do
   let removeConsumed = (`HS.difference` allConsumed (usageOccurences dflow))
   t' <- checkResAnnotation pos "branch result" t $
         map (`changeAliases` removeConsumed) $
-        combineResTypes (bodyType e2') (bodyType e3')
+        generaliseResTypes (bodyType e2') (bodyType e3')
   return $ If e1' e2' e3' t' pos
 
 checkExp (Apply fname args t pos)
