@@ -84,7 +84,7 @@ module Futhark.InternalRep.Attributes
   , changeAliases
   , setUniqueness
   , unifyUniqueness
-  , combineResTypes
+  , generaliseResTypes
   , staticShapes
   , instantiateShapes
   , existentialShapes
@@ -358,9 +358,11 @@ unifyUniqueness (Array et dims u1 als1) (Array _ _ u2 als2) =
   Array et dims (u1 <> u2) (als1 <> als2)
 unifyUniqueness t1 _ = t1
 
-combineResTypes :: ResType -> ResType -> ResType
-combineResTypes rt1 rt2 =
-  evalState (zipWithM unifyExtShapes rt1 rt2) 0
+-- | Compute the most specific generalisation of two types with
+-- existentially quantified shapes.
+generaliseResTypes :: ResType -> ResType -> ResType
+generaliseResTypes rt1 rt2 =
+  evalState (zipWithM unifyExtShapes rt1 rt2) (0, HM.empty)
   where unifyExtShapes t1 t2 =
           unifyUniqueness <$>
           (setArrayShape t1 <$> ExtShape <$>
@@ -370,9 +372,17 @@ combineResTypes rt1 rt2 =
           pure t2
         unifyExtDims (Free se1) (Free se2)
           | se1 == se2 = return $ Free se1 -- Arbitrary
-        unifyExtDims _ _ = do x <- get
-                              put $ x + 1
-                              return $ Ext x
+          | otherwise  = do (n,m) <- get
+                            put (n + 1, m)
+                            return $ Ext n
+        unifyExtDims (Ext x) (Ext y)
+          | x == y = Ext <$> (maybe (new x) return =<<
+                              gets (HM.lookup x . snd))
+        unifyExtDims (Ext x) _ = Ext <$> new x
+        unifyExtDims _ (Ext x) = Ext <$> new x
+        new x = do (n,m) <- get
+                   put (n + 1, HM.insert x n m)
+                   return n
 
 -- | A "blank" value of the given type - this is zero, or whatever is
 -- close to it.  Don't depend on this value, but use it for creating
