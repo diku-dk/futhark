@@ -53,7 +53,7 @@ transformExp :: Exp -> Binder Exp
 transformExp (Map cs fun arrs loc) = do
   inarrs <- letExps "inarr" $ map SubExp arrs
   (i, iv) <- newVar loc "i" $ Basic Int
-  resarr <- resultArray (lambdaReturnType fun) loc
+  resarr <- resultArray (mapType fun arrs) loc
   outarr <- forM (map subExpType resarr) $ \t ->
             newIdent "map_outarr" t loc
   loopbody <- runBinder $ do

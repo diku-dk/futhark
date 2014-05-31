@@ -405,14 +405,15 @@ initialFtable = HM.map addBuiltin builtInFunctions
 checkFun :: FunDec -> TypeM FunDec
 checkFun (fname, rettype, params, body, loc) = do
   params' <- checkParams
-  body' <- binding (map fromParam params') $ checkBody body
+  (rettype',body') <- binding (map fromParam params') $
+    (,) <$> mapM checkExtType rettype <*> checkBody body
 
   checkReturnAlias $ bodyType body'
 
-  if map toDecl (bodyType body') `subtypesOf` map toDecl rettype then
-    return (fname, rettype, params', body', loc)
+  if map toDecl (bodyType body') `subtypesOf` map toDecl rettype' then
+    return (fname, rettype', params', body', loc)
   else bad $ ReturnTypeError loc fname
-             (Several $ map toDecl rettype)
+             (Several $ map toDecl rettype')
              (Several $ map toDecl $ bodyType body')
 
   where checkParams = reverse <$> foldM expand [] params
@@ -659,25 +660,31 @@ checkExp (DoLoop respat merge (Ident loopvar loopvart loopvarloc)
     bad $ TypeError loopvarloc "Type annotation of loop variable is not int"
   (boundexp', boundarg) <- checkArg boundexp
   (mergeexps', mergeargs) <- unzip <$> mapM checkArg mergeexps
-  let funparams :: [Param]
-      funparams = undefined
+  let mergeparams :: [Param]
+      mergeparams = map toParam mergepat
+      funparams :: [Param]
+      funparams = Ident loopvar (Basic Int) loopvarloc : mergeparams
       paramts   = map (toDecl . identType) funparams
-      returnts  = returnType paramts (map diet paramts) $
+      rettype   = map identType mergeparams
+      returnts  = returnType rettype (map diet paramts) $
                   map argType $ boundarg : mergeargs
-      mergepat' = undefined mergepat returnts
-  checkFuncall Nothing loc paramts paramts mergeargs
-  (_, _, _, loopbody', _) <-
-    noUnique $ checkFun (nameFromString "<loop body>", undefined paramts, funparams, loopbody, loc)
+      setIdentType v t = v { identType = t }
+      mergepat' = zipWith setIdentType mergepat returnts
+  checkFuncall Nothing loc paramts paramts $ boundarg : mergeargs
 
+  (_, _, _, loopbody', _) <-
+    noUnique $ checkFun (nameFromString "<loop body>",
+                         staticShapes rettype,
+                         funparams,
+                         loopbody,
+                         loc)
   respat' <-
     forM respat $ \res ->
       case find ((==identName res) . identName) mergepat' of
         Nothing -> bad $ TypeError loc $ "Loop result variable " ++
                                          textual (identName res) ++
                                          " is not a merge variable."
-        Just v  -> do
-          t' <- checkType $ identType res `setAliases` aliases (identType v)
-          return res { identType = t' }
+        Just v  -> return res { identType = identType v }
 
   return $ DoLoop respat' (zip mergepat' mergeexps')
                   (Ident loopvar (Basic Int) loopvarloc) boundexp'
@@ -767,6 +774,12 @@ checkSOACArrayArg e = do
 checkType :: TypeBase als Shape -> TypeM (TypeBase als Shape)
 checkType t = do dims <- mapM checkSubExp $ arrayDims t
                  return $ t `setArrayDims` dims
+
+checkExtType :: TypeBase als ExtShape -> TypeM (TypeBase als ExtShape)
+checkExtType t = do shape <- mapM checkExtDim $ extShapeDims $ arrayShape t
+                    return $ t `setArrayShape` ExtShape shape
+  where checkExtDim (Free se) = Free <$> checkSubExp se
+        checkExtDim (Ext x)   = return $ Ext x
 
 checkIdent :: Ident -> TypeM Ident
 checkIdent (Ident name t pos) = do

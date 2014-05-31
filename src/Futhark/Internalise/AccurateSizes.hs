@@ -1,11 +1,12 @@
 module Futhark.Internalise.AccurateSizes
   ( subExpShape
-  , identShapes
+  , identWithShapes
   , typeShapes
   , prefixTypeShapes
   , extShapes
   , shapeBody
   , prefixSubExpShapes
+  , prefixArgShapes
   , allEqual
   , UnsizedLambda(..)
   , annotateArrayShape
@@ -32,9 +33,15 @@ subExpShape = shapeDims . arrayShape . subExpType
 prefixSubExpShapes :: [SubExp] -> [SubExp]
 prefixSubExpShapes ses = concatMap subExpShape ses ++ ses
 
-identShapes :: (MonadFreshNames m, ArrayShape shape) =>
+prefixArgShapes :: [(SubExp, Diet)] -> [(SubExp,Diet)]
+prefixArgShapes args =
+  [ (shape, Observe) |
+    shape <- concatMap (subExpShape . fst) args ] ++
+  args
+
+identWithShapes :: (MonadFreshNames m, ArrayShape shape) =>
                IdentBase Names shape -> m (Ident, [Ident])
-identShapes v = do
+identWithShapes v = do
   shape <- replicateM rank $ newIdent (base ++ "_size") (Basic Int) $ srclocOf v
   let vshape = Shape $ map Var shape
   return (v { identType = identType v `setArrayShape` vshape },

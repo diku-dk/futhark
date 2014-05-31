@@ -157,7 +157,8 @@ instance Pretty Exp where
   ppr (Assert e _) = text "assert" <> parens (ppr e)
   ppr (Conjoin es _) = text "conjoin" <> parens (commasep $ map ppr es)
   ppr (DoLoop respat mergepat i bound loopbody _) =
-    text "loop" <+> ppPattern respat <+> text "<-" <+> ppPattern pat <+> equals <+> ppTuple' initexp </>
+    text "loop" <+> ppPattern respat <+>
+    text "<-" <+> ppPattern pat <+> equals <+> ppTuple' initexp </>
     text "for" <+> ppr i <+> text "<" <+> align (ppr bound) <+> text "do" </>
     indent 2 (ppr loopbody)
     where (pat, initexp) = unzip mergepat

@@ -47,8 +47,6 @@ internaliseParam param =
           cert <- newIdent ("zip_cert_" ++ base) (I.Basic Cert) loc
           (TupleArray cert ns:) <$> internalise restts
         internalise ts = do
-          -- We know from internaliseIdent that none of the element
-          -- types are themselves tuples.
           let (ets,restts) = span (/=I.Basic Cert) ts
           params <- mapM (\t' -> Direct <$> newIdent base t' loc) ets
           (params++) <$> internalise restts
@@ -56,26 +54,29 @@ internaliseParam param =
         loc = srclocOf param
         base = nameToString $ baseName $ E.identName param
 
-bindingParams :: [E.Parameter] -> ([I.Param] -> InternaliseM a) -> InternaliseM a
+bindingParams :: [E.Parameter] -> ([I.Param] -> [I.Param] -> InternaliseM a) -> InternaliseM a
 bindingParams params m = do
-  (params', substs) <- runWriterT $ liftM concat . forM params $ \param -> do
-    internalisations <- lift $ internaliseParam $ E.fromParam param
-    (params', substs) <-
-      liftM unzip $ forM internalisations $ \param' ->
-        case param' of
-          Direct k -> do
-            (k',k_shape) <- lift $ identShapes k
-            return (identWithShape k' k_shape,
-                    DirectSubst k')
-          TupleArray c ks -> do
-            ks_sizes <- lift $ mapM identShapes ks
-            return (c:concatMap (uncurry identWithShape) ks_sizes,
-                     ArraySubst (I.Var c) $ map fst ks_sizes)
-    tell $ HM.singleton (E.identName param) substs
-    return $ concat params'
+  ((paramshapes, params'), substs) <-
+    runWriterT $ liftM unzip $ forM params $ \param -> do
+      internalisations <- lift $ internaliseParam $ E.fromParam param
+      (paramshapes, params', substs) <-
+        liftM unzip3 $ forM internalisations $ \param' ->
+          case param' of
+            Direct k -> do
+              (k',k_shape) <- lift $ identWithShapes k
+              return (k_shape,
+                      [k'],
+                      DirectSubst k')
+            TupleArray c ks -> do
+              (ks',ks_shapes) <- unzip <$> lift (mapM identWithShapes ks)
+              return (concat ks_shapes,
+                      c:ks',
+                      ArraySubst (I.Var c) ks')
+      tell $ HM.singleton (E.identName param) substs
+      return (concat paramshapes, concat params')
   let bind env = env { envSubsts = substs `HM.union` envSubsts env }
-  local bind $ m $ map I.toParam params'
-  where identWithShape k shape = shape ++ [k]
+      toParams = map I.toParam . concat
+  local bind $ m (toParams paramshapes) (toParams params')
 
 bindingFlatPatternAs :: ([I.Type] -> [InternaliseRes Rank] -> ([I.Ident], [Replacement], [I.Type]))
                      -> [E.Ident] -> [I.Type]

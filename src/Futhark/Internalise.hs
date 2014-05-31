@@ -45,7 +45,6 @@ import Futhark.MonadFreshNames
 import Futhark.Tools
 
 import Futhark.Internalise.Monad
-import Futhark.Internalise.Splitting
 import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.TypesValues
 import Futhark.Internalise.Bindings
@@ -64,9 +63,9 @@ internaliseProg doBoundsCheck prog =
 
 internaliseFun :: E.FunDec -> InternaliseM I.FunDec
 internaliseFun (fname,rettype,params,body,loc) =
-  bindingParams params $ \params' -> do
+  bindingParams params $ \shapeparams params' -> do
     body' <- internaliseBody body
-    return (fname, rettype', params', body', loc)
+    return (fname, rettype', shapeparams ++ params', body', loc)
   where rettype' = extShapes $ map I.toDecl $ internaliseType rettype
 
 internaliseIdent :: E.Ident -> InternaliseM I.Ident
@@ -168,12 +167,12 @@ internaliseExp desc (E.Apply fname args rettype loc) = do
   args' <- tupsToIdentList "arg" $ map fst args
   let args''   = concatMap addCertsAndShapes args'
       rettype' = extShapes $ internaliseType rettype
-  letTupExp' desc $ I.Apply fname args'' rettype' loc
+  letTupExp' desc $ I.Apply fname (prefixArgShapes args'') rettype' loc
   where addCertsAndShapes (c,vs) =
-          let vs' = flip concatMap vs $ \v ->
-                -- Diet wrong, but will be fixed by type-checker.
-                [ (arg, I.Observe) | arg <- subExpShape (I.Var v) ++ [I.Var v] ]
-          in (case c of Just c' -> [(I.Var c', I.Observe)]
+          -- Diet wrong, but will be fixed by type-checker.
+          let observe v = (v, I.Observe)
+              vs' = map (observe . I.Var) vs
+          in (case c of Just c' -> [observe $ I.Var c']
                         Nothing -> []) ++ vs'
 
 internaliseExp desc (E.LetPat pat e body loc) = do
@@ -190,15 +189,18 @@ internaliseExp desc (E.DoLoop mergepat mergeexp i bound loopbody letbody loc) = 
   (c,mergevs) <- tupToIdentList "loop_init" mergeexp
   i' <- internaliseIdent i
   mergeparams <- map E.toParam <$> flattenPattern mergepat
-  (loopbody', mergepat') <- bindingParams mergeparams $ \mergepat' -> do
+  (loopbody', mergepat', respat) <- bindingParams mergeparams $ \shapepat mergepat' -> do
     loopbody' <- internaliseBody loopbody
-    return (loopbody', map I.fromParam mergepat')
-  let (mergepat_shape, mergepat_vals) = splitIdents mergepat'
-  loop_shape <- newIdents "loop_shape" (map I.identType mergepat_shape) loc
+    let Result cs ses resloc = bodyResult loopbody'
+        loopbody'' = setBodyResult
+                     (resultBody cs (concatMap subExpShape ses++ses) resloc)
+                     loopbody'
+    return (loopbody'',
+            map I.fromParam $ shapepat ++ mergepat',
+            map I.fromParam mergepat')
   let mergeexp' = prefixSubExpShapes $ map I.Var $ maybeToList c ++ mergevs
-  let res_vals = addIdentShapes mergepat_vals $ map I.Var loop_shape
       merge = zip mergepat' mergeexp'
-      loop = I.DoLoop res_vals merge i' bound' loopbody' loc
+      loop = I.DoLoop respat merge i' bound' loopbody' loc
   bindingPattern mergepat Nothing (I.typeOf loop) $ \mergepat'' -> do
     addBinding $ I.Let mergepat'' loop
     internaliseExp desc letbody
