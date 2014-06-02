@@ -26,6 +26,7 @@ module Futhark.InternalRep.Attributes
   , subExpType
   , bodyType
   , loopResultType
+  , loopResult
   , mapType
   , reduceType
   , scanType
@@ -624,6 +625,16 @@ loopResultType restypes merge = evalState (mapM inspect restypes) 0
             put $ i + 1
             return $ Ext i
         inspectShape se = return $ Free se
+
+loopResult :: [Ident] -> [Ident] -> [Ident]
+loopResult res merge = resShapes ++ res
+  where notInRes (Constant _ _) = Nothing
+        notInRes (Var v)
+          | v `notElem` res,
+            v `elem` merge = Just v
+          | otherwise       = Nothing
+        resShapes =
+          nub $ concatMap (mapMaybe notInRes . arrayDims . identType) res
 
 staticShapes :: [TypeBase als Shape] -> [TypeBase als ExtShape]
 staticShapes = map staticShapes'
