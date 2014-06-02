@@ -8,6 +8,7 @@ module Futhark.InternalRep.Pretty
   ( ppType
   , ppValue
   , ppValues
+  , ppBinding
   , ppBody
   , ppExp
   , ppSubExp
@@ -94,13 +95,19 @@ instance Pretty SubExp where
   ppr (Constant v _) = ppr v
 
 instance Pretty Body where
-  ppr (Body (Let pat e:bnds) res) =
+  ppr (Body (bnd:bnds) res) =
+    ppr bnd <+> text "in" </> ppr (Body bnds res)
+  ppr (Body [] (Result cs es _))
+    | any hasArrayLit es = ppCertificates cs <> braces (commastack $ map ppr es)
+    | otherwise          = ppCertificates cs <> braces (commasep   $ map ppr es)
+
+instance Pretty Binding where
+  ppr (Let pat e) =
     aliasComment pat $ align $
     text "let" <+> align (ppPattern pat) <+>
     (if linebreak
      then equals </> indent 2 (ppr e)
-     else equals <+> align (ppr e)) <+> text "in" </>
-    ppr (Body bnds res)
+     else equals <+> align (ppr e))
     where linebreak = case e of
                         DoLoop {} -> True
                         Map {} -> True
@@ -112,9 +119,6 @@ instance Pretty Body where
                         If {} -> True
                         ArrayLit {} -> False
                         _ -> False
-  ppr (Body [] (Result cs es _))
-    | any hasArrayLit es = ppCertificates cs <> braces (commastack $ map ppr es)
-    | otherwise          = ppCertificates cs <> braces (commasep   $ map ppr es)
 
 instance Pretty Exp where
   ppr (SubExp se) = ppr se
@@ -211,10 +215,10 @@ ppList as = case map ppr as of
               a':as' -> foldl (</>) (a' <> comma) $ map (<> comma) as'
 
 ppPattern :: [Ident] -> Doc
-ppPattern = braces . commasep . map ppBinding
+ppPattern = braces . commasep . map ppBind
 
-ppBinding :: Ident -> Doc
-ppBinding ident = ppr (identType ident) <+> ppr ident
+ppBind :: Ident -> Doc
+ppBind ident = ppr (identType ident) <+> ppr ident
 
 ppRetType :: RetType -> Doc
 ppRetType = braces . commasep . map ppr
@@ -248,6 +252,10 @@ ppType = render80
 -- | Prettyprint a body, wrapped to 80 characters.
 ppBody :: Body -> String
 ppBody = render80
+
+-- | Prettyprint a binding, wrapped to 80 characters.
+ppBinding :: Binding -> String
+ppBinding = render80
 
 -- | Prettyprint an expression, wrapped to 80 characters.
 ppExp :: Exp -> String
