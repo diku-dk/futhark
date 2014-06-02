@@ -137,7 +137,7 @@ defCompileExp targets (DoLoop res merge i bound body _) = do
   zipWithM_ compileSubExpTo mergenames mergeinit
   body' <- collect $ compileBody mergenames body
   tell $ Imp.For (identName i) (compileSubExp bound) body'
-  zipWithM_ compileSubExpTo targets $ map Var res
+  zipWithM_ compileSubExpTo targets $ map Var $ loopResult res $ map fst merge
   where (mergepat, mergeinit) = unzip merge
         mergenames = map identName mergepat
 
