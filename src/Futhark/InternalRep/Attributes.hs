@@ -626,6 +626,10 @@ loopResultType restypes merge = evalState (mapM inspect restypes) 0
             return $ Ext i
         inspectShape se = return $ Free se
 
+-- | A loop returns not only the values indicated in the result
+-- pattern, but also any non-static shapes of arrays.  Thus,
+-- @loopResult res merge@ returns @res@ prefixed with with those
+-- variables in @merge@ that constitute the shape context.
 loopResult :: [Ident] -> [Ident] -> [Ident]
 loopResult res merge = resShapes ++ res
   where notInRes (Constant _ _) = Nothing
