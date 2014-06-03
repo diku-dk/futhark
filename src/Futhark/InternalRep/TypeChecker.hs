@@ -838,7 +838,7 @@ sequentially m1 m2 = do
 checkBinding :: SrcLoc -> [Ident] -> ResType -> Dataflow
              -> TypeM (TypeM a -> TypeM a, [Ident])
 checkBinding loc pat ts dflow = do
-  (ts', restpat, shapepat) <- extractContext loc pat ts
+  (ts', restpat, shapepat) <- patternContext loc pat ts
   unless (length restpat == length ts') $
     bad $ InvalidPatternError (Several pat) (Several $ map toDecl ts) loc
   restpat' <-
@@ -862,8 +862,8 @@ checkBinding loc pat ts dflow = do
             Just (Ident name _ pos2) ->
               lift $ bad $ DupPatternError name (srclocOf ident) pos2
 
-extractContext :: SrcLoc -> [Ident] -> ResType -> TypeM ([Type], [Ident], [Ident])
-extractContext loc pat rt = do
+patternContext :: SrcLoc -> [Ident] -> ResType -> TypeM ([Type], [Ident], [Ident])
+patternContext loc pat rt = do
   (rt', (restpat,_), shapepat) <- runRWST (mapM extract rt) () (pat, HM.empty)
   return (rt', restpat, shapepat)
   where extract t = setArrayShape t <$> Shape <$>

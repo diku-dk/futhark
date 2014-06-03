@@ -365,20 +365,21 @@ simplifyBody (Body [] (Result cs es loc)) =
 
 -- The simplification rules cannot handle Apply, because it requires
 -- access to the full program.
-simplifyBody (Body (Let pat (Apply fname args tp loc):bnds) res) = do
+simplifyBody (Body (Let pat (Apply fname args rettype loc):bnds) res) = do
   pat' <- mapM simplifyIdentBinding pat
   args' <- mapM (simplifySubExp . fst) args
-  tp' <- mapM simplifyExtType tp
+  rettype' <- mapM simplifyExtType rettype
   prog <- asks envProgram
   vtable <- asks envVtable
   case join $ pure simplifyApply <*> prog <*> pure vtable <*> pure fname <*> pure args of
     -- Array values are non-unique, so we may need to copy them.
-    Just vs -> do let newbnds = flip map (zip3 pat vs tp') $ \(p,v,t) ->
-                        case uniqueness t of
+    Just vs -> do let vs' = valueShapeContext rettype vs ++ vs
+                      newbnds = flip map (zip pat vs') $ \(p,v) ->
+                        case uniqueness $ identType p of
                           Unique    -> Let [p] $ Copy (Constant v loc) loc
                           Nonunique -> Let [p] $ SubExp $ Constant v loc
                   simplifyBody $ Body (newbnds++bnds) res
-    Nothing -> let e' = Apply fname (zip args' $ map snd args) tp' loc
+    Nothing -> let e' = Apply fname (zip args' $ map snd args) rettype' loc
                in bindLet pat' e' $ simplifyBody $ Body bnds res
 
 simplifyBody (Body (Let pat e:bnds) res) = do

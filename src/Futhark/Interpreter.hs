@@ -81,9 +81,9 @@ instance Show InterpreterError where
 instance Error InterpreterError where
   strMsg = TypeError noLoc
 
-data FutharkEnv = FutharkEnv { envVtable  :: HM.HashMap VName Value
-                   , envFtable  :: HM.HashMap Name ([Value] -> FutharkM [Value])
-                   }
+data FutharkEnv = FutharkEnv { envVtable :: HM.HashMap VName Value
+                             , envFtable :: HM.HashMap Name ([Value] -> FutharkM [Value])
+                             }
 
 -- | A list of places where @trace@ was called, alongside the
 -- prettyprinted value that was passed to it.
@@ -291,11 +291,12 @@ evalExp (Negate e pos) = do
             BasicVal (RealVal x) -> return [BasicVal $ RealVal (-x)]
             _                      -> bad $ TypeError pos "evalExp Negate"
 
-evalExp (If e1 e2 e3 _ pos) = do
+evalExp (If e1 e2 e3 rettype pos) = do
   v <- evalSubExp e1
-  case v of BasicVal (LogVal True)  -> evalBody e2
-            BasicVal (LogVal False) -> evalBody e3
-            _                       -> bad $ TypeError pos "evalExp If"
+  vs <- case v of BasicVal (LogVal True)  -> evalBody e2
+                  BasicVal (LogVal False) -> evalBody e3
+                  _                       -> bad $ TypeError pos "evalExp If"
+  return $ valueShapeContext rettype vs ++ vs
 
 evalExp (Apply fname args _ loc)
   | "trace" <- nameToString fname = do
@@ -303,8 +304,9 @@ evalExp (Apply fname args _ loc)
   tell [(loc, ppValues vs)]
   return vs
 
-evalExp (Apply fname args _ _) =
-  evalFuncall fname $ map fst args
+evalExp (Apply fname args rettype _) = do
+  vs <- evalFuncall fname $ map fst args
+  return $ valueShapeContext rettype vs ++ vs
 
 evalExp (Index _ ident idxs pos) = do
   v <- lookupVar ident

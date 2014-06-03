@@ -89,6 +89,8 @@ module Futhark.InternalRep.Attributes
   , staticShapes
   , instantiateShapes
   , existentialShapes
+  , shapeContext
+  , valueShapeContext
 
   -- * Queries on values
   , valueShape
@@ -669,6 +671,22 @@ existentialShapes t1s t2s  = concat $ zipWith concreteShape' t1s t2s
           (shapeDims $ arrayShape t2)
         concretise (Ext _) se  = Just se
         concretise (Free _) _ = Nothing
+
+shapeContext :: [TypeBase als ExtShape] -> [[a]] -> [a]
+shapeContext ts shapes =
+  evalState (concat <$> zipWithM extract ts shapes) HS.empty
+  where extract t shape =
+          catMaybes <$> zipWithM extract' (extShapeDims $ arrayShape t) shape
+        extract' (Ext x) v = do
+          seen <- gets $ HS.member x
+          return $ if seen
+                   then Nothing
+                   else Just v
+        extract' (Free _) _ = return Nothing
+
+valueShapeContext :: [TypeBase als ExtShape] -> [Value] -> [Value]
+valueShapeContext rettype values =
+  map value $ shapeContext rettype $ map valueShape values
 
 hasStaticShape :: ResType -> Maybe [Type]
 hasStaticShape = mapM hasStaticShape'
