@@ -25,12 +25,14 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.RWS
 
+import Data.Either
 import Data.Graph
 import Data.Hashable
 import Data.List
 import Data.Loc
 import Data.Maybe
 import qualified Data.HashSet as HS
+import Data.Foldable (traverse_)
 
 import Futhark.InternalRep
 import Futhark.MonadFreshNames
@@ -109,7 +111,7 @@ freeInType :: Type -> HS.HashSet VName
 freeInType = mconcat . map (freeNamesInExp . SubExp) . arrayDims
 
 data Need = Need { needBindings :: NeedSet
-                 , freeInBound  :: UT.UsageTable
+                 , usageTable  :: UT.UsageTable
                  }
 
 instance Monoid Need where
@@ -147,14 +149,22 @@ runSimpleM (SimpleM m) env src = let (x, src', _) = runRWS m env src
                                  in (x, src')
 
 needThis :: Binding -> SimpleM ()
-needThis (Let pat e) = tell $ Need [need] UT.empty
-  where need = LetNeed (pat, map identName pat) (e, freeNamesInExp e)
+needThis bnd = tell $ Need [letNeed bnd] UT.empty
+
+letNeed :: Binding -> BindNeed
+letNeed (Let pat e) = LetNeed (pat, map identName pat) (e, freeNamesInExp e)
+
+needToBinding :: BindNeed -> Binding
+needToBinding (LetNeed (pat, _) (e, _)) = Let pat e
 
 boundFree :: HS.HashSet VName -> SimpleM ()
 boundFree fs = tell $ Need [] $ UT.usages fs
 
 usedName :: VName -> SimpleM ()
 usedName = boundFree . HS.singleton
+
+consumedName :: VName -> SimpleM ()
+consumedName = tell . Need [] . UT.consumedUsage
 
 localVtable :: (ST.SymbolTable -> ST.SymbolTable) -> SimpleM a -> SimpleM a
 localVtable f = local $ \env -> env { envVtable = f $ envVtable env }
@@ -181,7 +191,7 @@ bindLoopVar var bound =
                                    _     -> id
 
 withBinding :: [Ident] -> Exp
-               -> SimpleM a -> SimpleM a
+            -> SimpleM a -> SimpleM a
 withBinding pat e m = do
   ds <- asks envDupeState
   let (bnds, ds') = performCSE ds pat e
@@ -198,51 +208,116 @@ bindLet :: [Ident] -> Exp -> SimpleM a -> SimpleM a
 
 bindLet = withBinding
 
-addBindings :: MonadFreshNames m =>
-               RuleBook -> ST.SymbolTable -> DupeState -> [BindNeed] -> Body -> UT.UsageTable
-            -> m (Body, UT.UsageTable)
-addBindings rules vtable dupes needs body uses = do
-  (uses',bnds) <- simplifyBindings vtable uses $
-                  concat $ snd $ mapAccumL pick dupes needs
-  return (insertBindings bnds body, uses')
-  where simplifyBindings vtable' uses' bnds =
-          foldM comb (uses',[]) $ reverse $ zip bnds vtables
+hoistBindings :: MonadFreshNames m =>
+               RuleBook -> BlockPred
+            -> ST.SymbolTable -> UT.UsageTable -> DupeState
+            -> [BindNeed] -> Body
+            -> m (Body, [BindNeed], UT.UsageTable)
+hoistBindings rules block vtable uses dupes needs body = do
+  (uses', blocked, hoisted) <-
+    simplifyBindings vtable uses $
+    concat $ snd $ mapAccumL pick dupes $ inDepOrder needs
+  return (insertBindings blocked body, hoisted, uses')
+  where simplifyBindings :: MonadFreshNames m =>
+                            ST.SymbolTable -> UT.UsageTable -> [(Binding, [VName], UT.UsageTable)]
+                         -> m (UT.UsageTable, [Binding], [BindNeed])
+        simplifyBindings vtable' uses' bnds = do
+          (uses'', bnds') <- simplifyBindings' vtable' uses' bnds
+          let (blocked, hoisted) = partitionEithers $ blockUnhoistedDeps bnds'
+          -- We need to do a final pass to ensure that nothing is
+          -- hoisted past something that it depends on.
+          return (uses'', map needToBinding blocked, hoisted)
+
+        simplifyBindings' :: MonadFreshNames m =>
+                             ST.SymbolTable -> UT.UsageTable -> [(Binding, [VName], UT.UsageTable)]
+                         -> m (UT.UsageTable, [Either BindNeed BindNeed])
+        simplifyBindings' vtable' uses' bnds =
+          foldM hoistable (uses',[]) (reverse $ zip bnds vtables)
             where vtables = scanl insertBnd vtable' bnds
                   insertBnd vtable'' (Let [v] e, _, _) =
                     ST.insert (identName v) e vtable''
                   insertBnd vtable'' _ = vtable''
 
-        -- Do not actually insert binding if it is not used.
-        comb (uses',bnds) ((bnd, provs, reqs), vtable')
-          | uses' `UT.contains` provs = do
-            res <- bottomUpSimplifyBinding rules (vtable', uses') bnd
-            case res of
-              Nothing ->
-                return ((uses' <> reqs) `UT.without` provs,
-                        bnd:bnds)
-              Just optimbnds -> do
-                (uses'',optimbnds') <-
-                  simplifyBindings vtable' uses' $ map attachUsage optimbnds
-                return (uses'', optimbnds'++bnds)
-          | otherwise = -- Dead binding.
+        hoistable :: MonadFreshNames m =>
+                     (UT.UsageTable, [Either BindNeed BindNeed])
+                  -> ((Binding, [VName], UT.UsageTable), ST.SymbolTable)
+                  -> m (UT.UsageTable, [Either BindNeed BindNeed])
+        hoistable (uses',bnds) ((bnd, provs, reqs), vtable')
+          | not $ uses' `UT.contains` provs = -- Dead binding.
             return (uses', bnds)
+          | otherwise = do
+            res <- bottomUpSimplifyBinding rules (vtable', uses') bnd
+            let need = letNeed bnd
+            case res of
+              Nothing -- Nothing to optimise - see if hoistable.
+                | block uses' need ->
+                  return ((uses' <> reqs) `UT.without` provs,
+                          Left need : bnds)
+                | otherwise ->
+                  return (uses' <> reqs, Right need : bnds)
+              Just optimbnds -> do
+                (uses'',bnds') <-
+                  simplifyBindings' vtable' uses' $ map attachUsage optimbnds
+                return (uses'', bnds'++bnds)
 
         attachUsage bnd = (bnd, providedByBnd bnd, usedInBnd bnd)
         providedByBnd (Let pat _) = map identName pat
-        usedInBnd (Let _ e) = usedInExp e
-        usedInExp e = extra <> UT.usages (freeNamesInExp e)
-          where extra =
-                  case e of Assert (Var v) _ -> UT.predicateUsage $ identName v
-                            _                -> UT.empty
-
+        usedInBnd (Let _ e) = usageInExp e <> UT.usages (freeNamesInExp e)
 
         pick ds (LetNeed (pat,_) (e,_)) =
           let (bnds,ds') = performCSE ds pat e
           in (ds',
               [ (Let pat' e',
-                 map identName pat,
-                 usedInExp e')
+                 map identName pat',
+                 usedInBnd (Let pat' e'))
               | Let pat' e' <- bnds ])
+
+blockUnhoistedDeps :: [Either BindNeed BindNeed] -> [Either BindNeed BindNeed]
+blockUnhoistedDeps = snd . mapAccumL block HS.empty
+  where block blocked (Left need@(LetNeed (_,prov) _)) =
+          (blocked <> HS.fromList prov, Left need)
+        block blocked (Right need@(LetNeed (_,prov) (_,needs)))
+          | blocked `intersects` needs =
+            (blocked <> HS.fromList prov, Left need)
+          | otherwise =
+            (blocked, Right need)
+
+usageInExp :: Exp -> UT.UsageTable
+usageInExp (Assert (Var v) _) = UT.predicateUsage $ identName v
+usageInExp (Update _ src _ _ _) =
+  mconcat $ map UT.consumedUsage $
+  identName src : HS.toList (aliases $ identType src)
+usageInExp (Apply fname args _ _) =
+  mconcat [ mconcat $ map UT.consumedUsage $
+            HS.toList $ aliases $ subExpType arg
+          | (arg,d) <- args, d == Consume ]
+usageInExp (DoLoop _ merge _ _ _ _) =
+  mconcat [ mconcat $ map UT.consumedUsage $
+            HS.toList $ aliases $ subExpType se
+          | (v,se) <- merge, unique $ identType v ]
+usageInExp (Map _ f args _) =
+  mconcat [ mconcat $ map UT.consumedUsage $
+            HS.toList $ aliases $ subExpType se
+          | (v,se) <- zip (lambdaParams f) args,
+            unique $ identType v ]
+usageInExp (Reduce _ f args _) =
+  mconcat [ mconcat $ map UT.consumedUsage $ HS.toList als
+          | (v,als) <- zip (lambdaParams f) $
+                       map (aliases . subExpType) $ acc ++ arr,
+            unique $ identType v ]
+  where (acc, arr) = unzip args
+usageInExp (Scan _ f args _) =
+  mconcat [ mconcat $ map UT.consumedUsage $ HS.toList als
+          | (v,als) <- zip (lambdaParams f) $
+                       map (aliases . subExpType) $ acc ++ arr,
+            unique $ identType v ]
+  where (acc, arr) = unzip args
+usageInExp (Redomap _ _ f acc arr _) =
+  mconcat [ mconcat $ map UT.consumedUsage $ HS.toList als
+          | (v,als) <- zip (lambdaParams f) $
+                       map (aliases . subExpType) $ acc ++ arr,
+            unique $ identType v ]
+usageInExp _ = UT.empty
 
 inDepOrder :: [BindNeed] -> [BindNeed]
 inDepOrder = flattenSCCs . stronglyConnComp . buildGraph
@@ -269,33 +344,10 @@ bnd1 `mustPrecede` bnd2 =
 intersects :: (Eq a, Hashable a) => HS.HashSet a -> HS.HashSet a -> Bool
 intersects a b = not $ HS.null $ a `HS.intersection` b
 
-data BodyInfo = BodyInfo { bodyConsumes :: HS.HashSet VName
-                         }
-
-bodyInfo :: Body -> BodyInfo
-bodyInfo b = BodyInfo {
-               bodyConsumes = consumedInBody b
-             }
-
-type BlockPred = BodyInfo -> BindNeed -> Bool
+type BlockPred = UT.UsageTable -> BindNeed -> Bool
 
 orIf :: BlockPred -> BlockPred -> BlockPred
 orIf p1 p2 body need = p1 body need || p2 body need
-
-splitHoistable :: BlockPred -> Body -> NeedSet -> ([BindNeed], NeedSet)
-splitHoistable block body needs =
-  let (blocked, hoistable, _) =
-        foldl split ([], [], HS.empty) $ inDepOrder needs
-  in (reverse blocked, hoistable)
-  where block' = block $ bodyInfo body
-        split (blocked, hoistable, ks) need@(LetNeed (pat,provs) e) =
-          let bad (e',free) = block' (LetNeed (pat,provs) (e',free)) ||
-                              ks `intersects` free
-          in if bad e
-             then (need : blocked, hoistable,
-                   HS.fromList provs `HS.union` ks)
-             else (blocked, LetNeed (pat,provs) e : hoistable,
-                   ks)
 
 blockIfSeq :: [BlockPred] -> SimpleM Body -> SimpleM Body
 blockIfSeq ps m = foldl (flip blockIf) m ps
@@ -306,11 +358,11 @@ blockIf block m = pass $ do
   ds <- asks envDupeState
   vtable <- asks envVtable
   rules <- asks envRules
-  let (blocked, hoistable) = splitHoistable block body $ needBindings needs
-  (e, fs) <- addBindings rules vtable ds blocked body $ freeInBound needs
+  (e, hoistable, usages) <-
+    hoistBindings rules block vtable (usageTable needs) ds (needBindings needs) body
   return (e,
           const Need { needBindings = hoistable
-                     , freeInBound  = fs
+                     , usageTable  = usages
                      })
 
 blockAllHoisting :: SimpleM Body -> SimpleM Body
@@ -333,11 +385,9 @@ isNotCheap _ = not . cheapBnd
         cheap _            = True -- Used to be False, but let's try
                                   -- it out.
 
-uniqPat :: [Ident] -> Bool
-uniqPat = any $ unique . identType
-
-isUniqueBinding :: BlockPred
-isUniqueBinding _ (LetNeed (pat,_) _) = uniqPat pat
+isConsumed :: BlockPred
+isConsumed uses (LetNeed (pat,_) _) =
+  any ((`UT.isConsumed` uses) . identName) pat
 
 hoistCommon :: SimpleM Body -> (ST.SymbolTable -> ST.SymbolTable)
             -> SimpleM Body -> (ST.SymbolTable -> ST.SymbolTable)
@@ -345,16 +395,20 @@ hoistCommon :: SimpleM Body -> (ST.SymbolTable -> ST.SymbolTable)
 hoistCommon m1 vtablef1 m2 vtablef2 = pass $ do
   (body1, needs1) <- listen $ localVtable vtablef1 m1
   (body2, needs2) <- listen $ localVtable vtablef2 m2
-  let splitOK = splitHoistable $ isNotSafe `orIf` isNotCheap
-      (needs1', safe1) = splitOK body1 $ needBindings needs1
-      (needs2', safe2) = splitOK body2 $ needBindings needs2
+  let block = isNotSafe `orIf` isNotCheap
   vtable <- asks envVtable
   rules <- asks envRules
-  (e1, f1) <- localVtable vtablef1 $ addBindings rules vtable newDupeState needs1' body1 $ freeInBound needs1
-  (e2, f2) <- localVtable vtablef2 $ addBindings rules vtable newDupeState needs2' body2 $ freeInBound needs2
-  return ((e1, e2),
+  (body1', safe1, f1) <-
+    localVtable vtablef1 $
+    hoistBindings rules block vtable (usageTable needs1)
+    newDupeState (needBindings needs1) body1
+  (body2', safe2, f2) <-
+    localVtable vtablef2 $
+    hoistBindings rules block vtable (usageTable needs2)
+    newDupeState (needBindings needs2) body2
+  return ((body1', body2'),
           const Need { needBindings = safe1 <> safe2
-                     , freeInBound = f1 <> f2
+                     , usageTable = f1 <> f2
                      })
 
 simplifyBody :: Body -> SimpleM Body
@@ -406,9 +460,11 @@ simplifyExp (DoLoop respat merge loopvar boundexp loopbody loc) = do
   -- conservative, but there is currently no nice way to mark
   -- consumption of the loop body result.
   loopbody' <- bindLoopVar loopvar boundexp' $
-               blockIfSeq [hasFree boundnames, isUniqueBinding] $
+               blockIfSeq [hasFree boundnames, isConsumed] $
                simplifyBody loopbody
   let merge' = zip mergepat' mergeexp'
+  consumeResult $ zip (map identType mergepat') $
+    resultSubExps $ bodyResult loopbody'
   return $ DoLoop respat' merge' loopvar boundexp' loopbody' loc
   where boundnames = identName loopvar `HS.insert`
                      patNameSet (map fst merge)
@@ -514,15 +570,23 @@ simplifyType t = do dims <- mapM simplifySubExp $ arrayDims t
 
 simplifyLambda :: Lambda -> [SubExp] -> SimpleM Lambda
 simplifyLambda (Lambda params body rettype loc) arrs = do
-  body' <- blockIf (hasFree params' `orIf` isUniqueBinding) $
-           bindParams nonarrayparams $
-           bindArrayParams (zip arrayparams arrs) $
-           simplifyBody body
+  body' <-
+    blockIf (hasFree params' `orIf` isConsumed) $
+    bindParams nonarrayparams $
+    bindArrayParams (zip arrayparams arrs) $ do
+      consumeResult $ zip rettype $ resultSubExps $ bodyResult body
+      simplifyBody body
   rettype' <- mapM simplifyType rettype
   return $ Lambda params body' rettype' loc
   where params' = patNameSet $ map fromParam params
         (nonarrayparams, arrayparams) =
           splitAt (length params - length arrs) params
+
+consumeResult :: [(TypeBase als shape, SubExp)] -> SimpleM ()
+consumeResult = mapM_ inspect
+  where inspect (t, se)
+          | unique t = traverse_ consumedName $ aliases $ subExpType se
+          | otherwise = return ()
 
 simplifyCerts :: Certificates -> SimpleM Certificates
 simplifyCerts = liftM (nub . concat) . mapM check

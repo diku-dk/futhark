@@ -6,37 +6,46 @@ module Futhark.Optimise.UsageTable
   , contains
   , without
   , lookup
+  , keys
   , used
-  , usedAsPredicate
+  , isPredicate
+  , isConsumed
   , usages
   , predicateUsage
+  , consumedUsage
   , Usages
-  , isPredicate
   )
   where
 
 import Prelude hiding (lookup, any, foldl)
 
 import Data.Foldable
+import Data.Monoid
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import qualified Data.Set as S
 
 import Futhark.InternalRep
 
-type UsageTable = HM.HashMap VName Usages
+newtype UsageTable = UsageTable (HM.HashMap VName Usages)
+                   deriving (Eq, Show)
+
+instance Monoid UsageTable where
+  mempty = empty
+  UsageTable table1 `mappend` UsageTable table2 =
+    UsageTable $ HM.unionWith S.union table1 table2
 
 empty :: UsageTable
-empty = HM.empty
+empty = UsageTable HM.empty
 
 contains :: UsageTable -> [VName] -> Bool
-contains table = any (`HM.member` table)
+contains (UsageTable table) = any (`HM.member` table)
 
 without :: UsageTable -> [VName] -> UsageTable
-without = foldl (flip HM.delete)
+without (UsageTable table) = UsageTable . foldl (flip HM.delete) table
 
 lookup :: VName -> UsageTable -> Maybe Usages
-lookup = HM.lookup
+lookup name (UsageTable table) = HM.lookup name table
 
 lookupPred :: (Usages -> Bool) -> VName -> UsageTable -> Bool
 lookupPred f name = maybe False f . lookup name
@@ -44,19 +53,26 @@ lookupPred f name = maybe False f . lookup name
 used :: VName -> UsageTable -> Bool
 used = lookupPred $ const True
 
-usedAsPredicate :: VName -> UsageTable -> Bool
-usedAsPredicate = lookupPred isPredicate
+keys :: UsageTable -> [VName]
+keys (UsageTable table) = HM.keys table
+
+isPredicate :: VName -> UsageTable -> Bool
+isPredicate = lookupPred $ S.member Predicate
+
+isConsumed :: VName -> UsageTable -> Bool
+isConsumed = lookupPred $ S.member Consumed
 
 usages :: HS.HashSet VName -> UsageTable
-usages names = HM.fromList [ (name, S.empty) | name <- HS.toList names ]
+usages names = UsageTable $ HM.fromList [ (name, S.empty) | name <- HS.toList names ]
 
 predicateUsage :: VName -> UsageTable
-predicateUsage name = HM.singleton name $ S.singleton Predicate
+predicateUsage name = UsageTable $ HM.singleton name $ S.singleton Predicate
+
+consumedUsage :: VName -> UsageTable
+consumedUsage name = UsageTable $ HM.singleton name $ S.singleton Consumed
 
 type Usages = S.Set Usage
 
 data Usage = Predicate
+           | Consumed
              deriving (Eq, Ord, Show)
-
-isPredicate :: Usages -> Bool
-isPredicate = S.member Predicate
