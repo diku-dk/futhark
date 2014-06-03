@@ -20,7 +20,6 @@ import Futhark.Tools
 
 import Futhark.Internalise.Monad
 import Futhark.Internalise.AccurateSizes
-import Futhark.Internalise.Splitting
 import Futhark.Internalise.TypesValues
 import Futhark.Internalise.Bindings
 
@@ -155,7 +154,7 @@ bindMapShapes cs sizefun args outer_shape
         emptybranch =
           pure $ resultBody
           [] (map (const zero) $ I.lambdaReturnType sizefun) loc
-        nonemptybranch = insertBindingsM $ do
+        nonemptybranch = insertBindingsM $
           resultBody [] <$> (eLambda sizefun =<< mapM index0 args) <*> pure loc
         index0 arg = do
           arg' <- letExp "arg" $ I.SubExp arg
@@ -199,9 +198,8 @@ internaliseFilterLambda internaliseBody ce lam args = do
   let argtypes = map I.subExpType args
       rowtypes = map I.rowType argtypes
   (params, body, _) <- internaliseLambda internaliseBody ce lam rowtypes
-  let (_, value_body) = splitBody body
-      arg_outer_shape = outerShape loc argtypes
-      filtfun         = I.Lambda params value_body [I.Basic Bool] loc
+  let arg_outer_shape = outerShape loc argtypes
+      filtfun         = I.Lambda params body [I.Basic Bool] loc
   result_size <- bindFilterResultOuterShape ce filtfun args arg_outer_shape
   return (result_size, filtfun)
   where loc = srclocOf lam
