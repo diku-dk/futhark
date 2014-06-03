@@ -264,7 +264,7 @@ mainCall fname (Function outputs inputs _) = do
   crettype <- typeToCType $ map paramType outputs
   ret <- new "main_ret"
   printRes <- printStm (C.var ret) $ map paramType outputs
-  let mkParam (args, decls, rstms, []) paramtype = do
+  let mkParam (args, decls, rstms, shapeargs) paramtype = do
         name <- new "main_arg"
         cparamtype <- typeToCType [paramtype]
         let rstm = readStm (C.var name) paramtype
@@ -273,20 +273,18 @@ mainCall fname (Function outputs inputs _) = do
         return (C.var name : args,
                 [C.cdecl|$ty:cparamtype $id:name;|] : decls,
                 rstm : rstms,
-                reverse argshape)
-      mkParam (args, decls, rstms, shape : shapes) _ =
-        return (shape : args, decls, rstms, shapes)
-  (args, decls, rstms, _) <-
+                shapeargs ++ argshape)
+  (valargs, decls, rstms, shapeargs) <-
     foldM mkParam ([], [], [], []) $ reverse paramtypes
   return [C.cstm|{
                $decls:decls
                $ty:crettype $id:ret;
                $stms:rstms
-               $id:ret = $id:(funName fname)($args:args);
+               $id:ret = $id:(funName fname)($args:shapeargs, $args:valargs);
                $stm:printRes
                printf("\n");
              }|]
-  where paramtypes = map paramType inputs
+  where paramtypes = entryPointInput inputs
 
 -- | Compile imperative program to a C program.  Always uses the
 -- function named "main" as entry point, so make sure it is defined.

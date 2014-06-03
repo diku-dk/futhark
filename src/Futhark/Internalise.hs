@@ -52,9 +52,9 @@ import Futhark.Internalise.Lambdas
 
 import Prelude hiding (mapM)
 
--- | Convert a program in external Futhark to a program in internal Futhark.  If
--- the boolean parameter is false, do not add bounds checks to array
--- indexing.
+-- | Convert a program in external Futhark to a program in internal
+-- Futhark.  If the boolean parameter is false, do not add bounds
+-- checks to array indexing.
 internaliseProg :: Bool -> E.Prog -> I.Prog
 internaliseProg doBoundsCheck prog =
   I.renameProg $

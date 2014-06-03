@@ -11,6 +11,7 @@ module Futhark.CodeGen.ImpCode
   , Value (..)
   , UnOp (..)
   , ppType
+  , entryPointInput
   -- * Re-exports from other modules.
   , module Language.Futhark.Core
   )
@@ -18,6 +19,7 @@ module Futhark.CodeGen.ImpCode
 
 import qualified Data.Array as A
 import Data.Char (toLower)
+import Data.Maybe
 import Data.Monoid
 import Data.Loc
 
@@ -27,7 +29,9 @@ data DimSize = ConstSize Int
              | VarSize VName
                deriving (Show)
 
-data Type = Type BasicType [DimSize]
+data Type = Type { typeBasic :: BasicType
+                 , typeDims :: [DimSize]
+                 }
             deriving (Show)
 
 typeRank :: Type -> Int
@@ -79,3 +83,16 @@ instance Monoid (Code a) where
   Skip `mappend` y    = y
   x    `mappend` Skip = x
   x    `mappend` y    = x :>>: y
+
+-- | Return the types of values to be read from input, if a function
+-- taken the given parameters is used as the entry point of the
+-- program.
+entryPointInput :: [Param] -> [Type]
+entryPointInput params =
+  -- We assume that every parameter that is a dimension of another
+  -- parameter is not read as input.  This is a hack until we get a
+  -- better idea of what we need.
+  map paramType $ filter ((`notElem` shapes) . paramName) params
+  where shapes = concatMap (mapMaybe isVar . typeDims . paramType) params
+        isVar (VarSize v)    = Just v
+        isVar (ConstSize {}) = Nothing
