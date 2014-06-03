@@ -270,12 +270,12 @@ mainCall fname (Function outputs inputs _) = do
         let rstm = readStm (C.var name) paramtype
             argshape = [ [C.cexp|$id:name.shape[$int:i]|]
                          | i <- [0..typeRank paramtype-1] ]
-        return (C.var name : args,
-                [C.cdecl|$ty:cparamtype $id:name;|] : decls,
-                rstm : rstms,
+        return (args ++ [C.var name],
+                decls ++ [[C.cdecl|$ty:cparamtype $id:name;|]],
+                rstms ++ [rstm],
                 shapeargs ++ argshape)
   (valargs, decls, rstms, shapeargs) <-
-    foldM mkParam ([], [], [], []) $ reverse paramtypes
+    foldM mkParam ([], [], [], []) paramtypes
   return [C.cstm|{
                $decls:decls
                $ty:crettype $id:ret;

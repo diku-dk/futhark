@@ -91,6 +91,7 @@ module Futhark.InternalRep.Attributes
   , existentialShapes
   , shapeContext
   , valueShapeContext
+  , subExpShapeContext
 
   -- * Queries on values
   , valueShape
@@ -687,6 +688,10 @@ shapeContext ts shapes =
 valueShapeContext :: [TypeBase als ExtShape] -> [Value] -> [Value]
 valueShapeContext rettype values =
   map value $ shapeContext rettype $ map valueShape values
+
+subExpShapeContext :: [TypeBase als ExtShape] -> [SubExp] -> [SubExp]
+subExpShapeContext rettype ses =
+  shapeContext rettype $ map (arrayDims . subExpType) ses
 
 hasStaticShape :: ResType -> Maybe [Type]
 hasStaticShape = mapM hasStaticShape'

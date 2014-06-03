@@ -94,16 +94,28 @@ compileFunDec :: ExpCompiler op -> VNameSource -> FunDec
 compileFunDec ec src (fname, rettype, params, body, _) =
   let (outs, src', body') = runImpM compile ec src
   in (src', (fname, Imp.Function outs (compileParams params) body'))
-  where compile = do
-          outs <- replicateM (length rettype) $ newVName "out"
-          compileBody outs body
-          return $ zipWith Imp.Param outs $ map (compileType . subExpType) $
-            resultSubExps $ bodyResult body
+  where compile
+          | fname == defaultEntryPoint = do
+            outs <- replicateM (length ses) $ newVName "out"
+            compileBody outs body
+            return $ zipWith Imp.Param outs $ map (compileType . subExpType) ses
+          | otherwise = do
+            outs <- replicateM (length ses') $ newVName "out"
+            compileExtBody rettype outs body
+            return $ zipWith Imp.Param outs $ map (compileType . subExpType) ses'
+        ses = resultSubExps $ bodyResult body
+        ses' = subExpShapeContext rettype ses ++ ses
 
 compileBody :: [VName] -> Body -> ImpM op ()
-compileBody targets (Body bnds (Result _ ses _)) = do
+compileBody targets body = compileExtBody rettype targets body
+  where rettype = staticShapes $ map subExpType $
+                  resultSubExps $ bodyResult body
+
+compileExtBody :: [TypeBase als ExtShape] -> [VName] -> Body -> ImpM op ()
+compileExtBody rettype targets (Body bnds (Result _ ses _)) = do
   mapM_ compileBinding bnds
-  zipWithM_ compileSubExpTo targets ses
+  zipWithM_ compileSubExpTo targets $
+    subExpShapeContext rettype ses ++ ses
 
 compileBinding :: Binding -> ImpM op ()
 compileBinding (Let pat e) =
@@ -124,9 +136,9 @@ defCompileExp :: [VName] -> Exp -> ImpM op ()
 defCompileExp [target] (SubExp se) =
   compileSubExpTo target se
 
-defCompileExp targets (If cond tbranch fbranch _ _) = do
-  tcode <- collect $ compileBody targets tbranch
-  fcode <- collect $ compileBody targets fbranch
+defCompileExp targets (If cond tbranch fbranch rettype _) = do
+  tcode <- collect $ compileExtBody rettype targets tbranch
+  fcode <- collect $ compileExtBody rettype targets fbranch
   tell $ Imp.If (compileSubExp cond) tcode fcode
 
 defCompileExp targets (Apply fname args _ _) =
