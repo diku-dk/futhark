@@ -70,7 +70,7 @@ instance Pretty (TypeBase als ExtShape) where
   ppr (Array et (ExtShape ds) u _) = ppr u <> foldr f (ppr et) ds
     where f (Free e) s = brackets $ s <> comma <> ppr e
           f (Ext x)  s = brackets $ s <> comma <>
-                         text "<" <> text (show x) <> text ">"
+                         text "?" <> text (show x)
 
 instance Pretty (TypeBase als Rank) where
   ppr (Basic et) = ppr et
