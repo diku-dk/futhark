@@ -1,6 +1,6 @@
 -- | This module exports functionality for generating a call graph of
 -- an Futhark program.
-module Futhark.Optimise.CallGraph
+module Futhark.Analysis.CallGraph
   ( CallGraph
   , buildCallGraph
   , FunctionTable

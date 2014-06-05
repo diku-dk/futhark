@@ -23,12 +23,12 @@ import Data.Loc
 import Futhark.InternalRep
 import Futhark.InternalRep.Renamer (renameLambda)
 import Futhark.MonadFreshNames
-import Futhark.HORepresentation.SOAC (SOAC)
-import qualified Futhark.HORepresentation.SOAC as SOAC
-import Futhark.HORepresentation.SOACNest (SOACNest)
-import qualified Futhark.HORepresentation.SOACNest as Nest
-import Futhark.HORepresentation.MapNest (MapNest)
-import qualified Futhark.HORepresentation.MapNest as MapNest
+import Futhark.Analysis.HORepresentation.SOAC (SOAC)
+import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
+import Futhark.Analysis.HORepresentation.SOACNest (SOACNest)
+import qualified Futhark.Analysis.HORepresentation.SOACNest as Nest
+import Futhark.Analysis.HORepresentation.MapNest (MapNest)
+import qualified Futhark.Analysis.HORepresentation.MapNest as MapNest
 import Futhark.Optimise.Fusion.TryFusion
 import Futhark.Optimise.Fusion.Composing
 import Futhark.Tools

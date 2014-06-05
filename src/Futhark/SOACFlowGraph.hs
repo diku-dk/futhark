@@ -19,8 +19,8 @@ import Data.List
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 
-import Futhark.HORepresentation.SOAC (SOAC)
-import qualified Futhark.HORepresentation.SOAC as SOAC
+import Futhark.Analysis.HORepresentation.SOAC (SOAC)
+import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import Futhark.InternalRep
 
 newtype FlowGraph = FlowGraph (HM.HashMap Name ExpFlowGraph)

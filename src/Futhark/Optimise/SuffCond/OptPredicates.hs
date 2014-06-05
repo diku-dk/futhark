@@ -17,9 +17,9 @@ import qualified Data.HashMap.Lazy as HM
 
 import Futhark.InternalRep
 import Futhark.MonadFreshNames
-import qualified Futhark.Optimise.SymbolTable as ST
-import Futhark.Optimise.ScalExp (ScalExp)
-import qualified Futhark.Optimise.ScalExp as SE
+import qualified Futhark.Analysis.SymbolTable as ST
+import Futhark.Analysis.ScalExp (ScalExp)
+import qualified Futhark.Analysis.ScalExp as SE
 import qualified Futhark.Optimise.AlgSimplify as AS
 import Futhark.Tools
 

@@ -18,7 +18,7 @@ import Control.Monad.Reader
 
 import Futhark.InternalRep
 import Futhark.Optimise.Errors
-import Futhark.Optimise.ScalExp
+import Futhark.Analysis.ScalExp
 
 type RangesRep = HM.HashMap VName (Int, Maybe ScalExp, Maybe ScalExp)
 

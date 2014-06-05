@@ -24,7 +24,7 @@ import qualified Data.HashMap.Lazy as HM
 import qualified Data.Map as M
 import Data.Maybe
 
-import qualified Futhark.HORepresentation.SOAC as SOAC
+import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 
 import Futhark.InternalRep
 

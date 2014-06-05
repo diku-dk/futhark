@@ -19,8 +19,8 @@ module Futhark.Optimise.Simplifier.Rule
        , bottomUpSimplifyBinding
        ) where
 
-import qualified Futhark.Optimise.SymbolTable as ST
-import qualified Futhark.Optimise.UsageTable as UT
+import qualified Futhark.Analysis.SymbolTable as ST
+import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Optimise.Simplifier.Simplify
 import Futhark.InternalRep
 import Futhark.MonadFreshNames

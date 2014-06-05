@@ -1,4 +1,4 @@
-module Futhark.Optimise.ScalExp
+module Futhark.Analysis.ScalExp
   ( RelOp0(..)
   , ScalExp(..)
   , scalExpType

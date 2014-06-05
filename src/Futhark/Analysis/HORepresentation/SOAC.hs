@@ -15,10 +15,10 @@
 -- import:
 --
 -- @
--- import Futhark.HORepresentation.SOAC (SOAC)
--- import qualified Futhark.HORepresentation.SOAC as SOAC
+-- import Futhark.Analysis.HORepresentation.SOAC (SOAC)
+-- import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 -- @
-module Futhark.HORepresentation.SOAC
+module Futhark.Analysis.HORepresentation.SOAC
   (
    -- * SOACs
     SOAC (..)

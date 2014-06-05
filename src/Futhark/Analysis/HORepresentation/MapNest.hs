@@ -1,4 +1,4 @@
-module Futhark.HORepresentation.MapNest
+module Futhark.Analysis.HORepresentation.MapNest
   ( Nesting (..)
   , pureNest
   , MapNest (..)
@@ -18,9 +18,9 @@ import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 
 import Futhark.NeedNames
-import qualified Futhark.HORepresentation.SOAC as SOAC
-import Futhark.HORepresentation.SOACNest (SOACNest)
-import qualified Futhark.HORepresentation.SOACNest as Nest
+import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
+import Futhark.Analysis.HORepresentation.SOACNest (SOACNest)
+import qualified Futhark.Analysis.HORepresentation.SOACNest as Nest
 import Futhark.Substitute
 import Futhark.InternalRep
 import Futhark.MonadFreshNames

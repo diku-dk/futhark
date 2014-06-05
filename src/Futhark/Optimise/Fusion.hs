@@ -18,9 +18,9 @@ import Futhark.InternalRep
 import Futhark.MonadFreshNames
 import Futhark.Optimise.SimpleOpts
 import Futhark.Optimise.Fusion.LoopKernel
-import Futhark.HORepresentation.SOAC (SOAC)
+import Futhark.Analysis.HORepresentation.SOAC (SOAC)
 import Futhark.Binder
-import qualified Futhark.HORepresentation.SOAC as SOAC
+import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 
 data FusionGEnv = FusionGEnv {
     soacs      :: HM.HashMap VName [VName]

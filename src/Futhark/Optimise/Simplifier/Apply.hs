@@ -10,7 +10,7 @@ module Futhark.Optimise.Simplifier.Apply
 
 import Futhark.InternalRep
 import qualified Futhark.Interpreter as Interp
-import qualified Futhark.Optimise.SymbolTable as ST
+import qualified Futhark.Analysis.SymbolTable as ST
 
 simplifyApply :: Prog -> ST.SymbolTable -> Name -> [(SubExp,Diet)] -> Maybe [Value]
 simplifyApply program vtable fname args = do

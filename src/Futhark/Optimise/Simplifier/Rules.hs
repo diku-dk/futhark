@@ -21,12 +21,12 @@ import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet      as HS
 import qualified Data.Set          as S
 
-import qualified Futhark.Optimise.SymbolTable as ST
-import qualified Futhark.Optimise.UsageTable as UT
+import qualified Futhark.Analysis.SymbolTable as ST
+import qualified Futhark.Analysis.UsageTable as UT
+import Futhark.Analysis.DataDependencies
 import Futhark.Optimise.Simplifier.ClosedForm
 import Futhark.Optimise.Simplifier.Rule
 import Futhark.Optimise.Simplifier.Simplify
-import Futhark.Optimise.Simplifier.DataDependencies
 import Futhark.InternalRep
 import Futhark.Tools
 

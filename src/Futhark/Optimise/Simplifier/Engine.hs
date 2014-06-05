@@ -38,8 +38,8 @@ import Futhark.InternalRep
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplifier.CSE
 import Futhark.Optimise.Simplifier.Rule
-import qualified Futhark.Optimise.SymbolTable as ST
-import qualified Futhark.Optimise.UsageTable as UT
+import qualified Futhark.Analysis.SymbolTable as ST
+import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Optimise.Simplifier.Apply
 
 -- | Simplify the given program.  Even if the output differs from the

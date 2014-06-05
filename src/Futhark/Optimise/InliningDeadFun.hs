@@ -20,7 +20,7 @@ import qualified Data.HashMap.Lazy as HM
 
 import Futhark.InternalRep
 import Futhark.InternalRep.Renamer
-import Futhark.Optimise.CallGraph
+import Futhark.Analysis.CallGraph
 import Futhark.Optimise.Errors
 
 -- | The symbol table for functions

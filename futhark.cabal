@@ -48,9 +48,6 @@ Library
                    Futhark.ExternalRep.TypeChecker
                    Futhark.FirstOrderTransform
                    Futhark.FreshNames
-                   Futhark.HORepresentation.MapNest
-                   Futhark.HORepresentation.SOAC
-                   Futhark.HORepresentation.SOACNest
                    Futhark.Internalise
                    Futhark.Internalise.AccurateSizes
                    Futhark.Internalise.Bindings
@@ -67,7 +64,14 @@ Library
                    Futhark.Interpreter
                    Futhark.MonadFreshNames
                    Futhark.NeedNames
-                   Futhark.Optimise.CallGraph
+                   Futhark.Analysis.CallGraph
+                   Futhark.Analysis.DataDependencies
+                   Futhark.Analysis.HORepresentation.MapNest
+                   Futhark.Analysis.HORepresentation.SOAC
+                   Futhark.Analysis.HORepresentation.SOACNest
+                   Futhark.Analysis.ScalExp
+                   Futhark.Analysis.SymbolTable
+                   Futhark.Analysis.UsageTable
                    Futhark.Optimise.DeadVarElim
                    Futhark.Optimise.Errors
                    Futhark.Optimise.Fusion
@@ -80,15 +84,11 @@ Library
                    Futhark.Optimise.Simplifier.Apply
                    Futhark.Optimise.Simplifier.ClosedForm
                    Futhark.Optimise.Simplifier.CSE
-                   Futhark.Optimise.Simplifier.DataDependencies
                    Futhark.Optimise.Simplifier.Engine
                    Futhark.Optimise.Simplifier.Rule
                    Futhark.Optimise.Simplifier.Rules
                    Futhark.Optimise.Simplifier.Simplify
                    Futhark.Optimise.AlgSimplify
-                   Futhark.Optimise.UsageTable
-                   Futhark.Optimise.ScalExp
-                   Futhark.Optimise.SymbolTable
                    Futhark.Optimise.SuffCond
                    Futhark.Optimise.SuffCond.GenPredicates
                    Futhark.Optimise.SuffCond.OptPredicates

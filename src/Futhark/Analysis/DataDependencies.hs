@@ -1,4 +1,4 @@
-module Futhark.Optimise.Simplifier.DataDependencies
+module Futhark.Analysis.DataDependencies
   ( dataDependencies
   )
   where
