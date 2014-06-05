@@ -812,7 +812,7 @@ funDecByName :: Name -> Prog -> Maybe FunDec
 funDecByName fname = find (\(fname',_,_,_,_) -> fname == fname') . progFunctions
 
 -- | Return the set of all variable names bound in a program.
-progNames :: Prog -> HS.HashSet VName
+progNames :: Prog -> Names
 progNames = execWriter . mapM funNames . progFunctions
   where names = identityWalker {
                   walkOnExp = expNames
@@ -917,7 +917,7 @@ freeInBody :: Body -> HS.HashSet Ident
 freeInBody = execWriter . walkOnBody freeWalker
 
 -- | As 'freeInBody', but returns the raw names rather than 'Ident's.
-freeNamesInBody :: Body -> HS.HashSet VName
+freeNamesInBody :: Body -> Names
 freeNamesInBody = HS.map identName . freeInBody
 
 -- | Return the set of identifiers that are free in the given
@@ -926,12 +926,12 @@ freeInExp :: Exp -> HS.HashSet Ident
 freeInExp = execWriter . walkOnExp freeWalker
 
 -- | As 'freeInExp', but returns the raw names rather than 'Ident's.
-freeNamesInExp :: Exp -> HS.HashSet VName
+freeNamesInExp :: Exp -> Names
 freeNamesInExp = HS.map identName . freeInExp
 
 -- | Return the set of variables names consumed by the given
 -- body.
-consumedInBody :: Body -> HS.HashSet VName
+consumedInBody :: Body -> Names
 consumedInBody = execWriter . bodyConsumed
   where unconsume s = censor (`HS.difference` s)
 
@@ -945,7 +945,7 @@ consumedInBody = execWriter . bodyConsumed
 
 -- | Return the set of variable names consumed by the given
 -- expression.
-consumedInExp :: Exp -> HS.HashSet VName
+consumedInExp :: Exp -> Names
 consumedInExp (Apply _ args _ _) =
   mconcat $ map (consumeArg . first subExpType) args
   where consumeArg (t, Consume) = aliases t
@@ -1002,7 +1002,7 @@ freeInLambda (Lambda params body rettype _) =
 
 -- | As 'freeInLambda', but returns the raw names rather than
 -- 'IdentBase's.
-freeNamesInLambda :: Lambda -> HS.HashSet VName
+freeNamesInLambda :: Lambda -> Names
 freeNamesInLambda = HS.map identName . freeInLambda
 
 -- | Convert an identifier to a 'ParamBase'.

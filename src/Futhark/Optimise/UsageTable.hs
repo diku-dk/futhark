@@ -62,7 +62,7 @@ isPredicate = lookupPred $ S.member Predicate
 isConsumed :: VName -> UsageTable -> Bool
 isConsumed = lookupPred $ S.member Consumed
 
-usages :: HS.HashSet VName -> UsageTable
+usages :: Names -> UsageTable
 usages names = UsageTable $ HM.fromList [ (name, S.empty) | name <- HS.toList names ]
 
 predicateUsage :: VName -> UsageTable

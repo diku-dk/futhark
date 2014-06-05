@@ -161,7 +161,7 @@ data FusedRes = FusedRes {
   -- SOAC kernels that uses it. These sets include
   -- only the SOAC input arrays used as full variables, i.e., no `a[i]'.
 
-  , unfusable  :: HS.HashSet VName
+  , unfusable  :: Names
   -- ^ the (names of) arrays that are not fusable, i.e.,
   --
   --   1. they are either used other than input to SOAC kernels, or
@@ -215,7 +215,7 @@ addNewKer res (idd, soac) = do
 
   addNewKerWithUnfusable res (idd, soac) ufs
 
-addNewKerWithUnfusable :: FusedRes -> ([Ident], SOAC) -> HS.HashSet VName -> FusionGM FusedRes
+addNewKerWithUnfusable :: FusedRes -> ([Ident], SOAC) -> Names -> FusionGM FusedRes
 addNewKerWithUnfusable res (idd, soac) ufs = do
   nm_ker <- KernName <$> newVName "ker"
   let new_ker = newKernel idd soac
@@ -241,7 +241,7 @@ inlineSOACInputs soac = do
   return $ inputs' `SOAC.setInputs` soac
 
 -- map, reduce, redomap
-greedyFuse :: Bool -> HS.HashSet VName -> FusedRes -> ([Ident], SOAC) -> FusionGM FusedRes
+greedyFuse :: Bool -> Names -> FusedRes -> ([Ident], SOAC) -> FusionGM FusedRes
 greedyFuse is_repl lam_used_nms res (out_idds, orig_soac) = do
   soac <- inlineSOACInputs orig_soac
   -- Assumption: the free vars in lambda are already in
@@ -498,7 +498,7 @@ addIdentToUnfusable fres _ =
 
 -- Lambdas create a new scope.  Disallow fusing from outside lambda by
 -- adding inp_arrs to the unfusable set.
-fusionGatherLam :: (HS.HashSet VName, FusedRes) -> Lambda -> FusionGM (HS.HashSet VName, FusedRes)
+fusionGatherLam :: (Names, FusedRes) -> Lambda -> FusionGM (HS.HashSet VName, FusedRes)
 fusionGatherLam (u_set,fres) (Lambda idds body _ _) = do
     let null_res = mkFreshFusionRes
     new_res <- binding (map fromParam idds) $ fusionGatherBody null_res body
@@ -513,7 +513,7 @@ fusionGatherLam (u_set,fres) (Lambda idds body _ _) = do
     -- merge new_res with fres'
     return (u_set `HS.union` unfus', unionFusionRes new_res' fres)
 
-getUnfusableSet :: SrcLoc -> FusedRes -> [Exp] -> FusionGM (HS.HashSet VName, FusedRes)
+getUnfusableSet :: SrcLoc -> FusedRes -> [Exp] -> FusionGM (Names, FusedRes)
 getUnfusableSet loc fres args = do
     -- assuming program is normalized then args
     -- can only contribute to the unfusable set

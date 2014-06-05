@@ -71,7 +71,7 @@ data FusedKer = FusedKer {
   , outputs    :: [Ident]
   -- ^ The names bound to the outputs of the SOAC.
 
-  , inplace    :: HS.HashSet VName
+  , inplace    :: Names
   -- ^ every kernel maintains a set of variables
   -- that alias vars used in in-place updates,
   -- such that fusion is prevented to move

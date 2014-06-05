@@ -63,7 +63,7 @@ makeFlowGraph = FlowGraph . HM.fromList . map flowForFun . progFunctions
 
 data SOACInfo = SOACInfo {
     soacType     :: String
-  , soacProduced :: HS.HashSet VName
+  , soacProduced :: Names
   , soacConsumed :: HM.HashMap VName (HS.HashSet [String])
   , soacBodyInfo :: AccFlow
   }

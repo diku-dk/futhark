@@ -10,7 +10,7 @@ import qualified Data.HashSet as HS
 
 import Futhark.InternalRep
 
-dataDependencies :: Body -> HM.HashMap VName (HS.HashSet VName)
+dataDependencies :: Body -> HM.HashMap VName Names
 dataDependencies = dataDependencies' HM.empty
   where dataDependencies' deps = foldl grow deps . bodyBindings
         grow deps (Let pat (If c tb fb _ _)) =

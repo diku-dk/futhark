@@ -96,7 +96,7 @@ asTail :: BindNeed -> Body
 asTail (LetNeed (pat,_) (e,_)) = Body [Let pat e] $ Result [] [] loc
   where loc = srclocOf pat
 
-requires :: BindNeed -> HS.HashSet VName
+requires :: BindNeed -> Names
 requires (LetNeed (pat,_) (_,freeInE)) =
   freeInE `mappend` freeInPat
   where freeInPat  = mconcat $ map (freeInType . identType) pat
@@ -104,10 +104,10 @@ requires (LetNeed (pat,_) (_,freeInE)) =
 provides :: BindNeed -> [VName]
 provides (LetNeed (_,provs) _) = provs
 
-patNameSet :: [Ident] -> HS.HashSet VName
+patNameSet :: [Ident] -> Names
 patNameSet = HS.fromList . map identName
 
-freeInType :: Type -> HS.HashSet VName
+freeInType :: Type -> Names
 freeInType = mconcat . map (freeNamesInExp . SubExp) . arrayDims
 
 data Need = Need { needBindings :: NeedSet
@@ -157,7 +157,7 @@ letNeed (Let pat e) = LetNeed (pat, map identName pat) (e, freeNamesInExp e)
 needToBinding :: BindNeed -> Binding
 needToBinding (LetNeed (pat, _) (e, _)) = Let pat e
 
-boundFree :: HS.HashSet VName -> SimpleM ()
+boundFree :: Names -> SimpleM ()
 boundFree fs = tell $ Need [] $ UT.usages fs
 
 usedName :: VName -> SimpleM ()
@@ -368,7 +368,7 @@ blockIf block m = pass $ do
 blockAllHoisting :: SimpleM Body -> SimpleM Body
 blockAllHoisting = blockIf $ \_ _ -> True
 
-hasFree :: HS.HashSet VName -> BlockPred
+hasFree :: Names -> BlockPred
 hasFree ks _ need = ks `intersects` requires need
 
 isNotSafe :: BlockPred
