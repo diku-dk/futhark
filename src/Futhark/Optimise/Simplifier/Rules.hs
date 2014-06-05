@@ -27,6 +27,8 @@ import Futhark.Analysis.DataDependencies
 import Futhark.Optimise.Simplifier.ClosedForm
 import Futhark.Optimise.Simplifier.Rule
 import Futhark.Optimise.Simplifier.Simplify
+import qualified Futhark.Optimise.AlgSimplify as AS
+import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.InternalRep
 import Futhark.Tools
 
@@ -48,6 +50,7 @@ topDownRules = [ liftIdentityMapping
                , evaluateBranch
                , simplifyBoolBranch
                , hoistBranchInvariant
+               , simplifyScalExp
                ]
 
 bottomUpRules :: BottomUpRules
@@ -633,6 +636,20 @@ hoistBranchInvariant _ (Let pat (If e1 tb fb ts loc)) =
           | tse == fse = (pat', res, Let [v] (SubExp tse) : invariant)
           | otherwise  = (v:pat', (tse,fse,t):res, invariant)
 hoistBranchInvariant _ _ = cannotSimplify
+
+simplifyScalExp :: TopDownRule
+simplifyScalExp vtable (Let pat e)
+  | Just orig <- SE.toScalExp (`ST.lookupScalExp` vtable) e,
+    Right new@(SE.Val _) <- AS.simplify orig loc True ranges,
+    orig /= new = do
+      (e', bnds) <- SE.fromScalExp loc new
+      return $ bnds ++ [Let pat e']
+  where loc = srclocOf e
+        ranges = HM.filter nonEmptyRange $ HM.map toRep $ ST.bindings vtable
+        toRep entry = (ST.bindingDepth entry, lower, upper)
+          where (lower, upper) = ST.valueRange entry
+        nonEmptyRange (_, lower, upper) = isJust lower || isJust upper
+simplifyScalExp _ _ = cannotSimplify
 
 -- | Remove the return values of a branch, that are not actually used
 -- after a branch.  Standard dead code removal can remove the branch
