@@ -610,7 +610,8 @@ simplifyBoolBranch :: TopDownRule
 simplifyBoolBranch _ (Let [v] (If cond tb fb ts loc))
   | Body [] (Result [] [tres] _) <- tb,
     Body [] (Result [] [fres] _) <- fb,
-    all (==Basic Bool) ts = do
+    all (==Basic Bool) ts,
+    False = do
   (e, bnds) <-
     runBinder'' (eBinOp LogOr (pure $ BinOp LogAnd cond tres (Basic Bool) loc)
                               (eBinOp LogAnd (pure $ Not cond loc)
