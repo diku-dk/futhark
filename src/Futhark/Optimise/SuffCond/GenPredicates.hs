@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleInstances #-}
 -- | This module exports functionality for splitting a function into
 -- predicate and value function.
 module Futhark.Optimise.SuffCond.GenPredicates
@@ -10,21 +11,44 @@ import Control.Applicative
 import Data.Loc
 import Data.Maybe
 import Data.Monoid
+import Control.Monad.Reader
+import Control.Monad.State
+import qualified Data.HashSet as HS
+import qualified Data.HashMap.Lazy as HM
 
+import Futhark.Analysis.DataDependencies
 import Futhark.InternalRep
 import Futhark.MonadFreshNames
 import Futhark.Tools
 
+type Blacklist = Names
+
+data GenEnv = GenEnv Ident Dependencies Blacklist
+
+type GenM = ReaderT GenEnv (State VNameSource)
+
+runGenM :: MonadFreshNames m => GenEnv -> GenM a -> m a
+runGenM env m = modifyNameSource $ runState (runReaderT m env)
+
+instance MonadFreshNames GenM where
+  getNameSource = get
+  putNameSource = put
+
+banning :: Names -> GenM a -> GenM a
+banning = local . banning'
+  where banning' names (GenEnv cert deps blacklist) =
+          GenEnv cert deps $ blacklist <> names
+
 predicateFunctionName :: Name -> Name
 predicateFunctionName fname = fname <> nameFromString "_pred"
 
-genPredicate :: MonadFreshNames m =>
-                FunDec -> m (FunDec, FunDec)
+genPredicate :: MonadFreshNames m => FunDec -> m (FunDec, FunDec)
 genPredicate (fname,rettype,params,body,loc) = do
   pred_ident <- newIdent "pred" (Basic Bool) loc
   cert_ident <- newIdent "pred_cert" (Basic Cert) loc
   (pred_params, bnds) <- nonuniqueParams params
-  (pred_body, Body val_bnds val_res) <- splitFunBody cert_ident body
+  let env = GenEnv cert_ident (dataDependencies body) mempty
+  (pred_body, Body val_bnds val_res) <- runGenM env $ splitFunBody body
   let pred_args = [ (Var $ fromParam arg, Observe) | arg <- params ]
       pred_bnd = Let [pred_ident] $ Apply predFname pred_args [Basic Bool] loc
       cert_bnd = Let [cert_ident] $ Assert (Var pred_ident) loc
@@ -35,18 +59,18 @@ genPredicate (fname,rettype,params,body,loc) = do
   return (pred_fun, val_fun)
   where predFname = predicateFunctionName fname
 
-splitFunBody :: MonadFreshNames m => Ident -> Body -> m (Body, Body)
-splitFunBody cert_ident body = do
-  (pred_body, val_body) <- splitBody cert_ident body
+splitFunBody :: Body -> GenM (Body, Body)
+splitFunBody body = do
+  (pred_body, val_body) <- splitBody body
   let onlyCert res = Body [] $ case resultSubExps res of
         []  -> res  -- Does this ever happen?
         c:_ -> res { resultSubExps = [c] }
   return (mapResult onlyCert pred_body,
           val_body)
 
-splitBody :: MonadFreshNames m => Ident -> Body -> m (Body, Body)
-splitBody cert_ident (Body bnds valres) = do
-  (pred_bnds, val_bnds, preds) <- unzip3 <$> mapM (splitBinding cert_ident) bnds
+splitBody :: Body -> GenM (Body, Body)
+splitBody (Body bnds valres) = do
+  (pred_bnds, val_bnds, preds) <- unzip3 <$> mapM splitBinding bnds
   (conjoined_preds, conj_bnds) <-
     runBinder'' $ letSubExp "conjoined_preds" =<<
     foldBinOp LogAnd (constant True loc) (catMaybes preds) (Basic Bool)
@@ -58,27 +82,50 @@ splitBody cert_ident (Body bnds valres) = do
   return (predbody, valbody)
   where loc = srclocOf valres
 
-splitBinding :: MonadFreshNames m => Ident -> Binding -> m ([Binding], Binding, Maybe SubExp)
+splitBinding :: Binding -> GenM ([Binding], Binding, Maybe SubExp)
 
-splitBinding cert_ident bnd@(Let pat (Assert se _)) =
-  return ([bnd],
-          Let pat $ SubExp (Var cert_ident),
-          Just se)
+splitBinding bnd@(Let pat (Assert (Var v) _)) = do
+  GenEnv cert_ident deps blacklist <- ask
+  let forbidden =
+        not $ HS.null $ maybe HS.empty (HS.intersection blacklist) $
+        HM.lookup (identName v) deps
+  return $ if forbidden then ([bnd], bnd, Nothing)
+           else ([bnd],
+                 Let pat $ SubExp (Var cert_ident),
+                 Just $ Var v)
 
-splitBinding cert_ident bnd@(Let pat (Map cs fun args loc)) = do
-  (predbody, valfun, ok) <- splitMap cert_ident cs fun args loc
+splitBinding bnd@(Let pat (Map cs fun args loc)) = do
+  (predbody, valfun, ok) <- splitMap cs fun args loc
   return (predbody ++ [bnd],
           Let pat $ Map cs valfun args loc,
           ok)
 
-splitBinding cert_ident bnd@(Let pat (Filter cs fun args ressize loc)) = do
-  (predbnds, valfun, ok) <- splitMap cert_ident cs fun args loc
+splitBinding bnd@(Let pat (Filter cs fun args ressize loc)) = do
+  (predbnds, valfun, ok) <- splitMap cs fun args loc
   return (predbnds ++ [bnd],
           Let pat $ Filter cs valfun args ressize loc,
           ok)
 
-splitBinding cert_ident (Let pat (DoLoop respat merge i bound body loc)) = do
-  (predbody, valbody) <- splitBody cert_ident body
+splitBinding bnd@(Let pat (Reduce cs fun args loc)) = do
+  (predbody, valfun, ok) <- splitReduce cs fun args loc
+  return (predbody ++ [bnd],
+          Let pat $ Reduce cs valfun args loc,
+          ok)
+
+splitBinding bnd@(Let pat (Scan cs fun args loc)) = do
+  (predbody, valfun, ok) <- splitReduce cs fun args loc
+  return (predbody ++ [bnd],
+          Let pat $ Scan cs valfun args loc,
+          ok)
+
+splitBinding bnd@(Let pat (Redomap cs outerfun innerfun acc arr loc)) = do
+  (predbody, valfun, ok) <- splitRedomap cs innerfun acc arr loc
+  return (predbody ++ [bnd],
+          Let pat $ Redomap cs outerfun valfun acc arr loc,
+          ok)
+
+splitBinding (Let pat (DoLoop respat merge i bound body loc)) = do
+  (predbody, valbody) <- splitBody body
   ok <- newIdent "loop_ok" (Basic Bool) loc
   let predloop = DoLoop (ok:respat)
                  ((ok,constant True loc):merge) i bound predbody loc
@@ -87,30 +134,83 @@ splitBinding cert_ident (Let pat (DoLoop respat merge i bound body loc)) = do
           Let pat valloop,
           Just $ Var ok)
 
-splitBinding cert_ident (Let pat (If cond tbranch fbranch t loc)) = do
-  (tbranch_pred, tbranch_val) <- splitBody cert_ident tbranch
-  (fbranch_pred, fbranch_val) <- splitBody cert_ident fbranch
+splitBinding (Let pat (If cond tbranch fbranch t loc)) = do
+  (tbranch_pred, tbranch_val) <- splitBody tbranch
+  (fbranch_pred, fbranch_val) <- splitBody fbranch
   ok <- newIdent "if_ok" (Basic Bool) loc
   return ([Let (ok:pat) $ If cond tbranch_pred fbranch_pred (Basic Bool:t) loc],
           Let pat $ If cond tbranch_val fbranch_val t loc,
           Just $ Var ok)
 
-splitBinding _ bnd = return ([bnd], bnd, Nothing)
+splitBinding bnd = return ([bnd], bnd, Nothing)
 
-splitMap :: MonadFreshNames m =>
-            Ident -> [Ident] -> Lambda -> [SubExp] -> SrcLoc
-         -> m ([Binding], Lambda, Maybe SubExp)
-splitMap cert_ident cs fun args loc = do
-  (predfun, valfun) <- splitMapLambda cert_ident fun
-  andchecks <- newIdent "checks" (Basic Bool) loc
-  andfun <- binOpLambda LogAnd (Basic Bool) loc
-  innerfun <- predConjFun predfun
-  let andbnd = Let [andchecks] $
-               Redomap cs andfun innerfun [constant True loc] args loc
+splitMap :: [Ident] -> Lambda -> [SubExp] -> SrcLoc
+         -> GenM ([Binding], Lambda, Maybe SubExp)
+splitMap cs fun args loc = do
+  (predfun, valfun) <- splitMapLambda fun
+  (andbnd, andcheck) <- allTrue cs predfun args loc
   return ([andbnd],
           valfun,
-          Just $ Var andchecks)
-  where predConjFun predfun = do
+          Just andcheck)
+
+splitReduce :: [Ident] -> Lambda -> [(SubExp,SubExp)] -> SrcLoc
+            -> GenM ([Binding], Lambda, Maybe SubExp)
+splitReduce cs fun args loc = do
+  (predfun, valfun) <- splitFoldLambda fun $ map fst args
+  (andbnd, andcheck) <- allTrue cs predfun (map snd args) loc
+  return ([andbnd],
+          valfun,
+          Just andcheck)
+
+splitRedomap :: [Ident] -> Lambda -> [SubExp] -> [SubExp] -> SrcLoc
+             -> GenM ([Binding], Lambda, Maybe SubExp)
+splitRedomap cs fun acc arr loc = do
+  (predfun, valfun) <- splitFoldLambda fun acc
+  (andbnd, andcheck) <- allTrue cs predfun arr loc
+  return ([andbnd],
+          valfun,
+          Just andcheck)
+
+splitMapLambda :: Lambda -> GenM (Lambda, Lambda)
+splitMapLambda lam = do
+  (Body predbnds predres, valbody) <- splitFunBody $ lambdaBody lam
+  (pred_params, cpybnds) <- nonuniqueParams $ lambdaParams lam
+  let predbody = Body (cpybnds <> predbnds) predres
+      predlam = lam { lambdaBody = predbody
+                    , lambdaReturnType = [Basic Bool]
+                    , lambdaParams = pred_params
+                    }
+      vallam = lam { lambdaBody = valbody }
+  return (predlam, vallam)
+
+splitFoldLambda :: Lambda -> [SubExp] -> GenM (Lambda, Lambda)
+splitFoldLambda lam acc = do
+  (Body predbnds predres, valbody) <-
+    banning (HS.fromList $ map identName accParams) $
+    splitFunBody $ lambdaBody lam
+  (pred_params, cpybnds) <- nonuniqueParams arrParams
+  let predbody = Body (accbnds <> cpybnds <> predbnds) predres
+      predlam = lam { lambdaBody = predbody
+                    , lambdaReturnType = [Basic Bool]
+                    , lambdaParams = pred_params
+                    }
+      vallam = lam { lambdaBody = valbody }
+  return (predlam, vallam)
+  where (accParams,arrParams) = splitAt (length acc) $ lambdaParams lam
+        accbnds = [ Let [fromParam p] $ SubExp e
+                  | (p,e) <- zip accParams acc ]
+
+allTrue :: Certificates -> Lambda -> [SubExp] -> SrcLoc
+        -> GenM (Binding, SubExp)
+allTrue cs predfun args loc = do
+  andchecks <- newIdent "checks" (Basic Bool) loc
+  andfun <- binOpLambda LogAnd (Basic Bool) loc
+  innerfun <- predConjFun
+  let andbnd = Let [andchecks] $
+               Redomap cs andfun innerfun [constant True loc] args loc
+  return (andbnd,
+          Var andchecks)
+  where predConjFun = do
           acc <- newIdent "acc" (Basic Bool) loc
           res <- newIdent "res" (Basic Bool) loc
           let Body predbnds (Result _ [se] _) = lambdaBody predfun -- XXX
@@ -121,15 +221,3 @@ splitMap cert_ident cs fun args loc = do
                         , lambdaReturnType = [Basic Bool]
                         , lambdaBody = body
                         }
-
-splitMapLambda :: MonadFreshNames m => Ident -> Lambda -> m (Lambda, Lambda)
-splitMapLambda cert_ident lam = do
-  (Body predbnds predres, valbody) <- splitFunBody cert_ident $ lambdaBody lam
-  (pred_params, cpybnds) <- nonuniqueParams $ lambdaParams lam
-  let predbody = Body (cpybnds <> predbnds) predres
-      predlam = lam { lambdaBody = predbody
-                    , lambdaReturnType = [Basic Bool]
-                    , lambdaParams = pred_params
-                    }
-      vallam = lam { lambdaBody = valbody }
-  return (predlam, vallam)
