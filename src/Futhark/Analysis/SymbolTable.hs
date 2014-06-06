@@ -107,7 +107,7 @@ insert name e vtable = insertEntry name bind vtable
           SubExp se ->
             subExpRange se vtable
           Iota n _ ->
-            (Just zero, subExpToScalExp n)
+            (Just zero, (`SMinus` one) <$> subExpToScalExp n)
           Replicate _ v _ ->
             subExpRange v vtable
           Split _ se _ _ _ ->
@@ -121,6 +121,7 @@ insert name e vtable = insertEntry name bind vtable
                                              -- with more outputs.
           _ -> (Nothing, Nothing)
         zero = Val $ IntVal 0
+        one = Val $ IntVal 1
 
 subExpRange :: SubExp -> SymbolTable -> Range
 subExpRange (Var v) vtable =
