@@ -144,14 +144,22 @@ removeDeadMapping _ _ = cannotSimplify
 -- shape bindings.
 removeUnusedLoopResult :: BottomUpRule
 removeUnusedLoopResult (_, used) (Let pat (DoLoop respat merge i bound body loc))
-  | explpat' <- filter usedAfterwards explpat,
+  | explpat' <- filter (usedAfterwards . fst) explpat,
     explpat' /= explpat =
   let shapes = concatMap (arrayDims . identType) $ map snd explpat'
       implpat' = filter ((`elem` shapes) . Var . snd) implpat
       pat' = map fst $ implpat'++explpat'
       respat' = map snd explpat'
   in return [Let pat' $ DoLoop respat' merge i bound body loc]
-  where usedAfterwards = (`UT.used` used) . identName . fst
+  where -- | Check whether the variable binding is used afterwards.
+        -- But also, check whether one of the shapes is used!  FIXME:
+        -- This is in fact too conservative, as we only need to
+        -- preserve one binding with this shape.
+        usedAfterwards v =
+          identName v `UT.used` used ||
+          any (`UT.used` used) (concatMap varDim $ arrayDims $ identType v)
+        varDim (Var v)       = [identName v]
+        varDim (Constant {}) = []
         taggedpat = zip pat $ loopResult respat $ map fst merge
         (implpat, explpat) = splitAt (length taggedpat - length respat) taggedpat
 removeUnusedLoopResult _ _ = cannotSimplify
