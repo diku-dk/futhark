@@ -62,7 +62,7 @@ genPredicate (fname,rettype,params,body,loc) = do
 splitFunBody :: Body -> GenM (Body, Body)
 splitFunBody body = do
   (pred_body, val_body) <- splitBody body
-  let onlyCert res = Body [] $ case resultSubExps res of
+  let onlyCert res = Body [] $ case reverse $ resultSubExps res of
         []  -> res  -- Does this ever happen?
         c:_ -> res { resultSubExps = [c] }
   return (mapResult onlyCert pred_body,
@@ -76,7 +76,7 @@ splitBody (Body bnds valres) = do
     foldBinOp LogAnd (constant True loc) (catMaybes preds) (Basic Bool)
   let predbody = Body (concat pred_bnds <> conj_bnds) $
                  valres { resultSubExps =
-                             conjoined_preds : resultSubExps valres
+                             resultSubExps valres ++ [conjoined_preds]
                         }
       valbody = Body val_bnds valres
   return (predbody, valbody)
@@ -127,10 +127,10 @@ splitBinding bnd@(Let pat (Redomap cs outerfun innerfun acc arr loc)) = do
 splitBinding (Let pat (DoLoop respat merge i bound body loc)) = do
   (predbody, valbody) <- splitBody body
   ok <- newIdent "loop_ok" (Basic Bool) loc
-  let predloop = DoLoop (ok:respat)
-                 ((ok,constant True loc):merge) i bound predbody loc
+  let predloop = DoLoop (respat++[ok])
+                 (merge++[(ok,constant True loc)]) i bound predbody loc
       valloop = DoLoop respat merge i bound valbody loc
-  return ([Let (ok:pat) predloop],
+  return ([Let (pat++[ok]) predloop],
           Let pat valloop,
           Just $ Var ok)
 
@@ -138,7 +138,7 @@ splitBinding (Let pat (If cond tbranch fbranch t loc)) = do
   (tbranch_pred, tbranch_val) <- splitBody tbranch
   (fbranch_pred, fbranch_val) <- splitBody fbranch
   ok <- newIdent "if_ok" (Basic Bool) loc
-  return ([Let (ok:pat) $ If cond tbranch_pred fbranch_pred (Basic Bool:t) loc],
+  return ([Let (pat++[ok]) $ If cond tbranch_pred fbranch_pred (t++[Basic Bool]) loc],
           Let pat $ If cond tbranch_val fbranch_val t loc,
           Just $ Var ok)
 
