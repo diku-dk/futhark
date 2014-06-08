@@ -463,8 +463,7 @@ simplifyExp (DoLoop respat merge loopvar boundexp loopbody loc) = do
                blockIfSeq [hasFree boundnames, isConsumed] $
                simplifyBody loopbody
   let merge' = zip mergepat' mergeexp'
-  consumeResult $ zip (map identType mergepat') $
-    resultSubExps $ bodyResult loopbody'
+  consumeResult $ zip (map identType mergepat') mergeexp'
   return $ DoLoop respat' merge' loopvar boundexp' loopbody' loc
   where boundnames = identName loopvar `HS.insert`
                      patNameSet (map fst merge)
