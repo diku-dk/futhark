@@ -156,8 +156,10 @@ removeUnusedLoopResult (_, used) (Let pat (DoLoop respat merge i bound body loc)
         -- This is in fact too conservative, as we only need to
         -- preserve one binding with this shape.
         usedAfterwards v =
-          identName v `UT.used` used ||
-          any (`UT.used` used) (concatMap varDim $ arrayDims $ identType v)
+          identName v `UT.used` used  ||
+          any isUsedImplRes (concatMap varDim $ arrayDims $ identType v)
+        isUsedImplRes v =
+          v `UT.used` used && v `elem` map identName pat
         varDim (Var v)       = [identName v]
         varDim (Constant {}) = []
         taggedpat = zip pat $ loopResult respat $ map fst merge
