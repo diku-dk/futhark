@@ -58,6 +58,7 @@ bottomUpRules = [ removeDeadMapping
                 , removeUnusedLoopResult
                 , removeRedundantMergeVariables
                 , removeDeadBranchResult
+                , removeUnnecessaryCopy
                 ]
 
 standardRules :: RuleBook
@@ -660,6 +661,13 @@ simplifyScalExp vtable (Let pat e)
           where (lower, upper) = ST.valueRange entry
         nonEmptyRange (_, lower, upper) = isJust lower || isJust upper
 simplifyScalExp _ _ = cannotSimplify
+
+removeUnnecessaryCopy :: BottomUpRule
+removeUnnecessaryCopy (_,used) (Let [v] (Copy se _))
+  | not $ any (`UT.isConsumed` used) $
+    identName v : HS.toList (aliases $ subExpType se) =
+    return [Let [v] $ SubExp se]
+removeUnnecessaryCopy _ _ = cannotSimplify
 
 -- | Remove the return values of a branch, that are not actually used
 -- after a branch.  Standard dead code removal can remove the branch
