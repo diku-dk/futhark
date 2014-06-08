@@ -564,6 +564,9 @@ simplifyIndexing look (Index cs idd inds loc) =
   case look $ identName idd of
     Nothing -> Nothing
 
+    Just (SubExp (Var v)) ->
+      return $ Index cs v inds loc
+
     Just (SubExp (Constant v _))
       | Just iis <- ctIndex inds,
         length iis == length (valueShape v),
