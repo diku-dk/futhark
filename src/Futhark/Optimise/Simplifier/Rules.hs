@@ -101,10 +101,8 @@ liftIdentityMapping _ _ = cannotSimplify
 -- These can be turned into free variables instead.
 removeReplicateMapping :: TopDownRule
 removeReplicateMapping vtable (Let pat (Map cs fun arrs loc))
-  | replicatesOrNot <- zipWith isReplicate (lambdaParams fun) arrs,
-    any isRight replicatesOrNot =
-  let (paramsAndArrs, parameterBnds) = partitionEithers replicatesOrNot
-      (params, arrs') = unzip paramsAndArrs
+  | not $ null parameterBnds =
+  let (params, arrs') = unzip paramsAndArrs
       fun' = fun { lambdaParams = params }
       -- Empty maps are not permitted, so if that would be the result,
       -- turn the entire map into a replicate.
@@ -116,14 +114,15 @@ removeReplicateMapping vtable (Let pat (Map cs fun arrs loc))
                                     | (v,e) <- zip pat ses ]
                   _  -> [Let pat $ Map cs fun' arrs' loc]
   in return $ parameterBnds ++ mapbnds
-  where isReplicate p (Var v)
+  where (paramsAndArrs, parameterBnds) =
+          partitionEithers $ zipWith isReplicate (lambdaParams fun) arrs
+
+        isReplicate p (Var v)
           | Just (Replicate _ e _) <- ST.lookupExp (identName v) vtable =
           Right (Let [fromParam p] $ SubExp e)
         isReplicate p e =
           Left  (p, e)
 
-        isRight (Right _) = True
-        isRight (Left  _) = False
 removeReplicateMapping _ _ = cannotSimplify
 
 removeDeadMapping :: BottomUpRule
