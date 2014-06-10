@@ -287,7 +287,7 @@ usageInExp (Assert (Var v) _) = UT.predicateUsage $ identName v
 usageInExp (Update _ src _ _ _) =
   mconcat $ map UT.consumedUsage $
   identName src : HS.toList (aliases $ identType src)
-usageInExp (Apply fname args _ _) =
+usageInExp (Apply _ args _ _) =
   mconcat [ mconcat $ map UT.consumedUsage $
             HS.toList $ aliases $ subExpType arg
           | (arg,d) <- args, d == Consume ]
