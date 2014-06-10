@@ -654,7 +654,7 @@ hoistBranchInvariant _ _ = cannotSimplify
 simplifyScalExp :: TopDownRule
 simplifyScalExp vtable (Let pat e)
   | Just orig <- SE.toScalExp (`ST.lookupScalExp` vtable) e,
-    Right new@(SE.Val _) <- AS.simplify orig loc True ranges,
+    Right new@(SE.Val _) <- AS.simplify orig loc ranges,
     orig /= new = do
       (e', bnds) <- SE.fromScalExp loc new
       return $ bnds ++ [Let pat e']

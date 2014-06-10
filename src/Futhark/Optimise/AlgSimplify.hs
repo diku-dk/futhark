@@ -24,13 +24,13 @@ type RangesRep = HM.HashMap VName (Int, Maybe ScalExp, Maybe ScalExp)
 
 -- | environment recording the position and
 --   a list of variable-to-range bindings.
-data AlgSimplifyEnv = AlgSimplifyEnv { pos :: SrcLoc, cheap :: Bool, ranges :: RangesRep }
+data AlgSimplifyEnv = AlgSimplifyEnv { pos :: SrcLoc, static :: Bool, ranges :: RangesRep }
 
 type AlgSimplifyM = ReaderT AlgSimplifyEnv (Either Error)
 
-runAlgSimplifier :: AlgSimplifyM a -> SrcLoc -> Bool -> RangesRep -> Either Error a
-runAlgSimplifier x p c r = runReaderT x env
-  where env = AlgSimplifyEnv{ pos = p, cheap = c, ranges = r }
+runAlgSimplifier :: Bool -> AlgSimplifyM a -> SrcLoc -> RangesRep -> Either Error a
+runAlgSimplifier s x p r = runReaderT x env
+  where env = AlgSimplifyEnv{ pos = p, static = s, ranges = r }
 
 badAlgSimplifyM :: String -> AlgSimplifyM a
 badAlgSimplifyM s = do
@@ -65,12 +65,12 @@ type DNF     = [NAnd ]
 --type CNF     = [NOr  ]
 
 -- | Applies Simplification at Expression level:
-simplify :: ScalExp -> SrcLoc -> Bool -> RangesRep -> Either Error ScalExp
-simplify = runAlgSimplifier . simplifyScal
+simplify :: ScalExp -> SrcLoc -> RangesRep -> Either Error ScalExp
+simplify e = runAlgSimplifier True (simplifyScal e) 
 
 -- | Extracts sufficient conditions for a LTH0 relation to hold
 mkSuffConds :: ScalExp -> SrcLoc -> RangesRep -> Either Error [[ScalExp]]
-mkSuffConds e p = runAlgSimplifier (gaussElimRel e) p True
+mkSuffConds e = runAlgSimplifier False (gaussElimRel e)
 
 -------------------------------------------------------
 --- Returns a sufficient-condition predicate for     --
@@ -79,7 +79,7 @@ mkSuffConds e p = runAlgSimplifier (gaussElimRel e) p True
 -------------------------------------------------------
 simplifyNRel :: Bool -> BTerm -> AlgSimplifyM BTerm
 simplifyNRel only_half inp_term = do
-    not_aggr <- asks cheap
+    not_aggr <- asks static
     term <- cheapSimplifyNRel inp_term
     if not_aggr || isTrivialNRel term
     then return term
@@ -132,6 +132,31 @@ gaussElimRel _ =
 --ppSyms :: S.Set VName -> String
 --ppSyms ss = foldl (\s x -> s ++ " " ++ (baseString x)) "ElimSyms: " (S.toList ss)
 
+-----------------------------------------------------------
+-----------------------------------------------------------
+-----------------------------------------------------------
+--- `gaussAllLTH'                                       ---
+---     `el_syms': the list of already eliminated       ---
+---                 symbols, initialy empty             ---
+---     `sofp':    the expression e in sum-of-product   ---
+---                 form that is compared to 0,         ---
+---                 i.e., e < 0                         ---
+---     Result:    is a ScalExp expression, which is    ---
+---                 actually a predicate in DNF form,   ---
+---                 that is a sufficient condition      ---
+---                 for e < 0!                          ---
+---                                                     ---
+---     The `static' field of the environment dictates  ---
+---         whether only a True/False answer is required---
+---         or a symbolic sufficient-cond predicate!    ---
+---                                                     ---
+--- gaussAllLTH0 is implementing the tracking of Min/Max---
+---              terms, and uses `gaussOneDefaultLTH0'  ---
+---              to implement gaussian-like elimination ---
+---              to solve the a*i + b < 0 problem.      ---
+-----------------------------------------------------------
+-----------------------------------------------------------
+-----------------------------------------------------------
 type Prod = [ScalExp]
 gaussAllLTH0 :: S.Set VName -> NNumExp -> AlgSimplifyM ScalExp
 gaussAllLTH0 el_syms sofp = do
@@ -227,8 +252,10 @@ gaussAllLTH0 el_syms sofp = do
         findMinMaxFact _  (NSum _ _) =
             badAlgSimplifyM "findMinMaxFact: NSum argument illegal!"
 
+
+
 gaussOneDefaultLTH0 :: Ident -> S.Set VName -> NNumExp -> AlgSimplifyM (Maybe ScalExp)
-gaussOneDefaultLTH0 i elsyms e = do
+gaussOneDefaultLTH0  i elsyms e = do
     aipb <- linearForm i e
     case aipb of
         Nothing     -> return Nothing
@@ -245,7 +272,7 @@ gaussOneDefaultLTH0 i elsyms e = do
                 Just (_, Nothing, Nothing) ->
                     badAlgSimplifyM "gaussOneDefaultLTH0: both bounds are undefined!"
                 Just (_, Just lb, Nothing) -> do
-                    alth0    <- gaussAllLTH0  elsyms am1
+                    alth0    <- gaussAllLTH0 elsyms am1
                     alpblth0 <- gaussElimHalf elsyms lb a b
                     and_half <- simplifyScal $ SLogAnd alth0 alpblth0
                     case and_half of

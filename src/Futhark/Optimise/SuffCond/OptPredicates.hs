@@ -119,7 +119,7 @@ analyseBody vtable sctable (Body (Let [v] e:bnds) res) =
   where name = identName v
         ranges = rangesRep vtable
         loc = srclocOf e
-        simplify se = AS.simplify se loc True ranges
+        simplify se = AS.simplify se loc ranges
 analyseBody vtable sctable (Body (Let _ _:bnds) res) =
   -- Not adding to symbol table here - this leaves a hole, but this
   -- looks like a weird binding anyway.
