@@ -35,7 +35,7 @@ constantFoldTests =
   , cfoldTest "x/x" "1"
   ]
   where vars = declareVars [("x", Int)]
-        simplify'' e = simplify' vars e True []
+        simplify'' e = simplify' vars e []
         scalExp = parseScalExp' vars
 
         cfoldTest input expected =
@@ -50,7 +50,7 @@ suffCondTests =
   , suffCondTest "i-(m-1) <= 0" [["9<m"]]
   ]
   where suffsort = sort . map sort
-        simplify'' e = simplify' vars e True ranges
+        simplify'' e = simplify' vars e ranges
 
         suffCondTest input expected =
           testCase ("sufficient conditions for " ++ input) $
@@ -90,8 +90,8 @@ instantiateRanges varinfo r =
         fixBound "" = Nothing
         fixBound s  = Just $ parseScalExp' varinfo s
 
-simplify' :: VarInfo -> String -> Bool -> RangesRep' -> ScalExp
-simplify' varinfo s b r = case simplify e noLoc b r' of
+simplify' :: VarInfo -> String -> RangesRep' -> ScalExp
+simplify' varinfo s r = case simplify e noLoc r' of
   Left err -> error $ show err
   Right e' -> e'
   where e = parseScalExp' varinfo s
@@ -99,7 +99,7 @@ simplify' varinfo s b r = case simplify e noLoc b r' of
 
 mkSuffConds' :: VarInfo -> String -> SrcLoc -> RangesRep' -> [[ScalExp]]
 mkSuffConds' varinfo s loc r =
-  case simplify e loc True r' of
+  case simplify e loc r' of
     Left err -> error $ show err
     Right e' ->
       case mkSuffConds e' loc r' of
