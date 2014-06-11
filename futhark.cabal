@@ -166,9 +166,16 @@ Test-suite unit
   Main-is:           futhark_tests.hs
   Default-language:  Haskell2010
   GHC-options:       -Wall
-  Build-Depends:     base >=4, QuickCheck >= 2, test-framework >= 0.4.0,
-                     test-framework-quickcheck2, HUnit,
-                     test-framework-hunit, unordered-containers,
+  Build-Depends:     base >=4,
+                     QuickCheck >= 2,
+                     test-framework >= 0.4.0,
+                     parsec >= 3,
+                     test-framework-quickcheck2,
+                     HUnit,
+                     test-framework-hunit,
+                     unordered-containers,
                      array,
                      srcloc,
+                     mtl >= 2.1,
+                     containers >= 0.5,
                      futhark
