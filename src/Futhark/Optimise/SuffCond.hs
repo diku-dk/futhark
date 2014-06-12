@@ -30,5 +30,8 @@ extractPredicates =
           predf' <- return . deadCodeElimFun =<< simplifyFun =<<
                     return . deadCodeElimFun =<< simplifyFun =<<
                     return . deadCodeElimFun =<< simplifyFun =<<
+                    return . deadCodeElimFun =<< simplifyFun =<<
+                    return . deadCodeElimFun =<< simplifyFun =<<
+                    return . deadCodeElimFun =<< simplifyFun =<<
                     renameFun predf
           return [predf',valf]
