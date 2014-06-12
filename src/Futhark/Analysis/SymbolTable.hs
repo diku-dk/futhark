@@ -110,6 +110,8 @@ insert name e vtable = insertEntry name bind vtable
             (Just zero, (`SMinus` one) <$> subExpToScalExp n)
           Replicate _ v _ ->
             subExpRange v vtable
+          Rearrange _ _ v _ ->
+            subExpRange v vtable
           Split _ se _ _ _ ->
             subExpRange se vtable
           Copy se _ ->
