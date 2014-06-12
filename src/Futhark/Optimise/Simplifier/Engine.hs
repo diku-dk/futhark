@@ -166,6 +166,10 @@ usedName = boundFree . HS.singleton
 consumedName :: VName -> SimpleM ()
 consumedName = tell . Need [] . UT.consumedUsage
 
+tapUsage :: SimpleM a -> SimpleM (a, UT.UsageTable)
+tapUsage m = do (x,needs) <- listen m
+                return (x, usageTable needs)
+
 localVtable :: (ST.SymbolTable -> ST.SymbolTable) -> SimpleM a -> SimpleM a
 localVtable f = local $ \env -> env { envVtable = f $ envVtable env }
 
@@ -513,8 +517,15 @@ simplifyExp (Redomap cs outerfun innerfun acc arrs loc) = do
   acc' <- mapM simplifySubExp acc
   arrs' <- mapM simplifySubExp arrs
   outerfun' <- simplifyLambda outerfun []
-  innerfun' <- simplifyLambda innerfun arrs
-  return $ Redomap cs' outerfun' innerfun' acc' arrs' loc
+  (innerfun', used) <- tapUsage $ simplifyLambda innerfun arrs
+  let (innerfun'', arrs'') = removeUnusedParams used innerfun' arrs'
+  return $ Redomap cs' outerfun' innerfun'' acc' arrs'' loc
+  where removeUnusedParams used lam arrinps =
+          let (accparams, arrparams) = splitAt (length acc) $ lambdaParams lam
+              (arrparams', arrinps') =
+                unzip $ filter ((`UT.used` used) . identName . fst) $
+                zip arrparams arrinps
+          in (lam { lambdaParams = accparams ++ arrparams' }, arrinps')
 
 simplifyExp e = simplifyExpBase e
 
