@@ -185,15 +185,15 @@ bodyVariantIn ftable sctable loops (Body bnds res) = do
   (ftable', bnds') <- foldM inspect (ftable,[]) bnds
   checkResult ftable' res
   return $ Body bnds' res
-  where inspect (ftable', bnds') bnd@(Let pat _) = do
-          optim <- bindingVariantIn ftable' sctable loops bnd
-          case optim of
-            Nothing ->
-              return (ftable' `HS.union` HS.fromList (map identName pat),
-                      bnds'++[bnd])
-            Just newbnds ->
-              return (ftable',
-                      bnds'++newbnds)
+  where inspect (ftable', bnds') bnd@(Let pat _) =
+          (couldSimplify <$> bindingVariantIn ftable' sctable loops bnd) <|>
+          couldNotSimplify
+          where couldNotSimplify =
+                  return (ftable' `HS.union` HS.fromList (map identName pat),
+                          bnds'++[bnd])
+                couldSimplify newbnds =
+                  (ftable',
+                   bnds'++newbnds)
 
 checkResult :: Monad m => ForbiddenTable -> Result -> VariantM m ()
 checkResult ftable (Result _ ses _)
@@ -204,27 +204,27 @@ checkResult ftable (Result _ ses _)
         asName (Constant {}) = Nothing
 
 bindingVariantIn :: MonadFreshNames m =>
-                    ForbiddenTable -> SCTable -> Loops -> Binding -> VariantM m (Maybe [Binding])
+                    ForbiddenTable -> SCTable -> Loops -> Binding -> VariantM m [Binding]
 
 -- We assume that a SOAC contributes only if it returns exactly a
 -- single (boolean) value.
 bindingVariantIn ftable sctable loops (Let [v] (Map cs fun args loc)) = do
   body <- bodyVariantIn (forbidParams (lambdaParams fun) name loops ftable)
           sctable loops $ lambdaBody fun
-  return $ Just [Let [v] $ Map cs fun { lambdaBody = body } args loc]
+  return [Let [v] $ Map cs fun { lambdaBody = body } args loc]
   where name = identName v
 bindingVariantIn ftable sctable loops (Let [v] (DoLoop res merge i bound body loc)) = do
   let names = identName i : map (identName . fst) merge
   body' <- bodyVariantIn (forbidNames names name loops ftable)
            sctable loops body
-  return $ Just [Let [v] $ DoLoop res merge i bound body' loc]
+  return [Let [v] $ DoLoop res merge i bound body' loc]
   where name = identName v
 bindingVariantIn ftable sctable loops (Let [v] (Redomap cs outerfun innerfun acc args loc)) = do
   outerbody <- bodyVariantIn ftable sctable loops $ lambdaBody outerfun
   let forbiddenParams = drop (length acc) $ lambdaParams innerfun
   innerbody <- bodyVariantIn (forbidParams forbiddenParams name loops ftable)
                sctable loops $ lambdaBody innerfun
-  return $ Just [Let [v] $ Redomap cs
+  return [Let [v] $ Redomap cs
                  outerfun { lambdaBody = outerbody }
                  innerfun { lambdaBody = innerbody }
                  acc args loc]
@@ -234,7 +234,7 @@ bindingVariantIn ftable sctable loops (Let pat (If (Var v) tbranch fbranch t loc
   tbranch' <- bodyVariantIn ftable sctable loops tbranch
   fbranch' <- bodyVariantIn ftable sctable loops fbranch
   if noneForbidden ftable $ HS.singleton $ identName v then
-    return $ Just [Let pat $ If (Var v) tbranch' fbranch' t loc]
+    return [Let pat $ If (Var v) tbranch' fbranch' t loc]
     else
     -- FIXME: Check that tbranch and fbranch are safe.  We can do
     -- something smarter if 'v' actually comes from an 'or'.  Also,
@@ -245,26 +245,26 @@ bindingVariantIn ftable sctable loops (Let pat (If (Var v) tbranch fbranch t loc
         | Basic Bool <- subExpType tres,
           Basic Bool <- subExpType fres,
           all safeBnd tbnds, all safeBnd fbnds ->
-        return $ Just $ tbnds ++ fbnds ++
-                        [Let pat $ BinOp LogAnd tres fres (Basic Bool) loc]
-      _ -> return Nothing
+        return $ tbnds ++ fbnds ++
+                 [Let pat $ BinOp LogAnd tres fres (Basic Bool) loc]
+      _ -> fail "Branch not sufficiently invariant"
   where safeBnd (Let _ e) = safeExp e
 
 bindingVariantIn ftable sctable _ (Let [v] e)
   | noneForbidden ftable $ freeNamesInExp e =
-    return $ Just [Let [v] e]
+    return [Let [v] e]
   | Just (SufficientCond suff) <- HM.lookup (identName v) sctable =
     case filter (scalExpIsAtMostVariantIn ftable) $ map mkConj suff of
-      []   -> return Nothing
+      []   -> fail "Binding not sufficiently invariant"
       x:xs -> do (e', bnds) <- lift $ lift $ SE.fromScalExp loc $ foldl SE.SLogOr x xs
                  sufficiented
-                 return $ Just $ bnds ++ [Let [v] e']
+                 return $ bnds ++ [Let [v] e']
   where mkConj []     = SE.Val $ LogVal True
         mkConj (x:xs) = foldl SE.SLogAnd x xs
         loc = srclocOf e
 
 -- Nothing we can do about this one, then.
-bindingVariantIn _ _ _ _ = return Nothing
+bindingVariantIn _ _ _ _ = fail "Binding not sufficiently invariant"
 
 scalExpIsAtMostVariantIn :: ForbiddenTable -> ScalExp -> Bool
 scalExpIsAtMostVariantIn ftable =
