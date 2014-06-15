@@ -5,6 +5,7 @@ module Futhark.Optimise.AlgSimplify
   , mkSuffConds
   , RangesRep
   , ppScalExp
+  , canSimplify
   )
   where
 
@@ -20,22 +21,34 @@ import Futhark.InternalRep
 import Futhark.Optimise.Errors
 import Futhark.Analysis.ScalExp
 
+import Futhark.Dev(tident) -- for debugging: tident "int x"
+--import Debug.Trace
+
 type RangesRep = HM.HashMap VName (Int, Maybe ScalExp, Maybe ScalExp)
 
 -- | environment recording the position and
 --   a list of variable-to-range bindings.
-data AlgSimplifyEnv = AlgSimplifyEnv { pos :: SrcLoc, static :: Bool, ranges :: RangesRep }
+data AlgSimplifyEnv = AlgSimplifyEnv { pos :: SrcLoc, inSolveLTH0 :: Bool, ranges :: RangesRep }
 
 type AlgSimplifyM = ReaderT AlgSimplifyEnv (Either Error)
 
 runAlgSimplifier :: Bool -> AlgSimplifyM a -> SrcLoc -> RangesRep -> Either Error a
 runAlgSimplifier s x p r = runReaderT x env
-  where env = AlgSimplifyEnv{ pos = p, static = s, ranges = r }
+  where env = AlgSimplifyEnv{ pos = p, inSolveLTH0 = s, ranges = r }
 
 badAlgSimplifyM :: String -> AlgSimplifyM a
 badAlgSimplifyM s = do
   loc <- asks pos
   lift $ Left $ SimplifyError loc s
+
+-- | Binds an array name to the set of used-array vars
+markInSolve :: AlgSimplifyEnv -> AlgSimplifyEnv
+markInSolve env =
+  env { inSolveLTH0 = True }
+
+markGaussLTH0 :: AlgSimplifyM a -> AlgSimplifyM a
+markGaussLTH0 = local markInSolve
+--  where namesOfArrays = map identName . filter (not . basicType . identType)
 
 -----------------------------------------------------------
 -- A Scalar Expression, i.e., ScalExp, is simplified to: --
@@ -66,47 +79,61 @@ type DNF     = [NAnd ]
 
 -- | Applies Simplification at Expression level:
 simplify :: ScalExp -> SrcLoc -> RangesRep -> Either Error ScalExp
-simplify e = runAlgSimplifier True (simplifyScal e) 
+simplify e = runAlgSimplifier False (simplifyScal e) 
 
 -- | Extracts sufficient conditions for a LTH0 relation to hold
 mkSuffConds :: ScalExp -> SrcLoc -> RangesRep -> Either Error [[ScalExp]]
-mkSuffConds e = runAlgSimplifier False (gaussElimRel e)
+mkSuffConds e = runAlgSimplifier True (gaussElimRel e)
 
+
+-- | Test if Simplification engine can handle this kind of expression
+canSimplify :: Int -> Either Error ScalExp --[[ScalExp]]
+canSimplify i = do
+    let (h,_,e2) = mkRelExp i
+    case e2 of
+        (RelExp LTH0 _) -> do
+              -- let e1' = trace (ppScalExp e1) e1
+              simplify e2 noLoc h
+--            runAlgSimplifier False (gaussAllLTH0 False S.empty =<< toNumSofP =<< simplifyScal e) noLoc h
+        _ -> simplify e2 noLoc h-- badAlgSimplifyM "canSimplify: unimplemented!"
 -------------------------------------------------------
---- Returns a sufficient-condition predicate for     --
----    the given relational expression; unimplemented--
---- Assumes the input scalar expression is simplified--
+--- Assumes the relational expression is simplified  --
+--- All uses of gaussiam elimination from simplify   --
+---  must use simplifyNRel, which calls markGaussLTH0--
+---  to set the inSolveLTH0 environment var, so that --
+---  we do not enter an infinite recurssion!         --
+--- Returns True or False or the input replation,i.e.--
+---    static-only simplification!                   --
 -------------------------------------------------------
-simplifyNRel :: Bool -> BTerm -> AlgSimplifyM BTerm
-simplifyNRel only_half inp_term = do
-    not_aggr <- asks static
+simplifyNRel :: BTerm -> AlgSimplifyM BTerm
+simplifyNRel inp_term@(NRelExp LTH0 inp_sofp) = do
     term <- cheapSimplifyNRel inp_term
-    if not_aggr || isTrivialNRel term
+    in_gauss <- asks inSolveLTH0
+
+    if in_gauss || isTrivialNRel term
     then return term
-    else do ednf <- gaussEliminateNRel term
-            if isTrueDNF ednf
-            then return $ LogCt True
-            else if only_half then return term
-            else do nterm <- negateBTerm term
-                    nednf <- gaussEliminateNRel nterm
-                    if isTrueDNF nednf
-                    then return $ LogCt False
-                    else return term
+    else do let tp = typeOfNAlg inp_sofp  
+            if  tp == Int
+            then do ednf <- markGaussLTH0 $ gaussAllLTH0 True S.empty inp_sofp
+                    case ednf of
+                        Val (LogVal c) -> return $ LogCt c
+                        _              -> return $ term
+            else badAlgSimplifyM "simplifyNRel: NOT a LTH0 relation on ints!"
     where
         isTrivialNRel (NRelExp _ (NProd [Val _] _)) = True
-        isTrivialNRel (NRelExp{}                  ) = True -- False
-        isTrivialNRel  _                            = True
+        isTrivialNRel (NRelExp{}                  ) = False
+        isTrivialNRel  _                            = False
 
+        cheapSimplifyNRel :: BTerm -> AlgSimplifyM BTerm
+        cheapSimplifyNRel (NRelExp rel (NProd [Val v] _)) = do
+            succ' <- valLTHEQ0 rel v; return $ LogCt succ'
+        cheapSimplifyNRel e = return e
+simplifyNRel _ = 
+    badAlgSimplifyM "simplifyNRel: implemented only for relational LTH0 on ints!"
 
-cheapSimplifyNRel :: BTerm -> AlgSimplifyM BTerm
-cheapSimplifyNRel (NRelExp rel (NProd [Val v] _)) = do
-    succ' <- valLTHEQ0 rel v; return $ LogCt succ'
-cheapSimplifyNRel e = return e
-
-
-gaussEliminateNRel :: BTerm -> AlgSimplifyM DNF
-gaussEliminateNRel _ =
-    badAlgSimplifyM "gaussElimNRel: unimplemented!"
+--gaussEliminateNRel :: BTerm -> AlgSimplifyM DNF
+--gaussEliminateNRel _ =
+--    badAlgSimplifyM "gaussElimNRel: unimplemented!"
 
 
 gaussElimRel :: ScalExp -> AlgSimplifyM [[ScalExp]] -- ScalExp
@@ -114,7 +141,7 @@ gaussElimRel (RelExp LTH0 e) = do
     let tp = scalExpType e
     e_sofp <- if tp == Int then toNumSofP =<< simplifyScal e
               else badAlgSimplifyM "gaussElimRel: only Int relations please!"
-    e_scal<- simplifyScal =<< gaussAllLTH0 S.empty e_sofp
+    e_scal<- simplifyScal =<< gaussAllLTH0 False S.empty e_sofp
     e_dnf <- toDNF e_scal
     mapM (mapM (\f ->
                   case f of
@@ -132,34 +159,42 @@ gaussElimRel _ =
 --ppSyms :: S.Set VName -> String
 --ppSyms ss = foldl (\s x -> s ++ " " ++ (baseString x)) "ElimSyms: " (S.toList ss)
 
+
+basicScalExpLTH0 :: ScalExp -> Bool
+basicScalExpLTH0 (Val (IntVal v)) = v < 0
+basicScalExpLTH0 _                = False
 -----------------------------------------------------------
 -----------------------------------------------------------
 -----------------------------------------------------------
---- `gaussAllLTH'                                       ---
+---`gaussAllLTH'                                        ---
+---  `static_only':whether only a True/False answer is  ---
+---                 required or actual a sufficient cond---
 ---     `el_syms': the list of already eliminated       ---
 ---                 symbols, initialy empty             ---
 ---     `sofp':    the expression e in sum-of-product   ---
 ---                 form that is compared to 0,         ---
----                 i.e., e < 0                         ---
+---                 i.e., e < 0. sofp assumed simplified---
 ---     Result:    is a ScalExp expression, which is    ---
 ---                 actually a predicate in DNF form,   ---
 ---                 that is a sufficient condition      ---
 ---                 for e < 0!                          ---
 ---                                                     ---
----     The `static' field of the environment dictates  ---
----         whether only a True/False answer is required---
----         or a symbolic sufficient-cond predicate!    ---
----                                                     ---
 --- gaussAllLTH0 is implementing the tracking of Min/Max---
 ---              terms, and uses `gaussOneDefaultLTH0'  ---
 ---              to implement gaussian-like elimination ---
 ---              to solve the a*i + b < 0 problem.      ---
+---                                                     ---
+--- IMPORTANT: before calling gaussAllLTH0 from outside ---
+---            make sure to set insideSolveLTH0 env     ---
+---            member to True, via markGaussLTH0;       ---
+---            otherwise infinite recursion might happen---
+---            w.r.t. `simplifyScal'                    --- 
 -----------------------------------------------------------
 -----------------------------------------------------------
 -----------------------------------------------------------
 type Prod = [ScalExp]
-gaussAllLTH0 :: S.Set VName -> NNumExp -> AlgSimplifyM ScalExp
-gaussAllLTH0 el_syms sofp = do
+gaussAllLTH0 :: Bool -> S.Set VName -> NNumExp -> AlgSimplifyM ScalExp
+gaussAllLTH0 static_only el_syms sofp = do
     let tp = typeOfNAlg sofp
     --e_scal <- fromNumSofP sofp
     --sofp' <- trace ("BEGIN gaussAllLTH0   : "++ppScalExp e_scal++" < 0") (return sofp)
@@ -167,35 +202,95 @@ gaussAllLTH0 el_syms sofp = do
     mi <- pickSymToElim el_syms sofp
     case mi of
       Nothing -> do e_scal <- fromNumSofP sofp
-                    return $ RelExp LTH0 e_scal
+                    if basicScalExpLTH0 e_scal 
+                    then return $  Val (LogVal True)
+                    else return $  RelExp LTH0 e_scal
       Just i  -> do
-        (jmm, fs, terms) <- findMinMaxTerm i sofp
+        (jmm, fs0, terms) <- findMinMaxTerm i sofp
+        -- i.e., sofp == fs0 * jmm + terms, where 
+        --       i appears in jmm and jmm = MinMax ... 
+
+        fs <- if not (null fs0) then return fs0 
+              else do one <- getPos1 tp; return [Val one]
+
         case jmm of
+          ------------------------------------------------------------------------
+          -- A MinMax expression which uses to-be-eliminated symbol i was found --
+          ------------------------------------------------------------------------
+          Just (MaxMin _     []  ) ->
+                badAlgSimplifyM "gaussAllLTH0: Empty MinMax Node!"
           Just (MaxMin ismin mmts) -> do
             mone <- getNeg1 tp
 
-            fs_lth0 <- if null fs then return $ Val (LogVal False)
-                       else gaussAllLTH0 el_syms (NProd fs tp)
-
+            -- fs_lth0 => fs < 0
+--            fs_lth0 <- if null fs then return $ Val (LogVal False)
+--                       else gaussAllLTH0 static_only el_syms (NProd fs tp)
+            fsm1    <- toNumSofP =<< simplifyScal =<< fromNumSofP
+                         ( NSum [NProd fs tp, NProd [Val mone] tp] tp ) 
+            fs_leq0 <- gaussAllLTH0 static_only el_syms fsm1  -- fs <= 0
+            -- mfsm1 = - fs - 1, fs_geq0 => (fs >= 0), 
+            --             i.e., fs_geq0 => (-fs - 1 < 0)
             mfsm1   <- toNumSofP =<< simplifyScal =<< fromNumSofP
                          ( NSum [NProd (Val mone:fs) tp,NProd [Val mone] tp] tp )
+            fs_geq0 <- gaussAllLTH0 static_only el_syms mfsm1
 
-            fs_geq0 <- gaussAllLTH0 el_syms mfsm1
+            -- mm_terms are the simplified terms of the MinMax obtained
+            -- after inlining everything inside the MinMax, i.e., intially
+            -- terms + fs * MinMax ismin [t1,..,tn] -> [fs*t1+terms, ..., fs*tn+terms]
             mm_terms<- mapM (\t -> toNumSofP =<< simplifyScal =<< fromNumSofP
-                                         (NSum (NProd (t:fs) tp:terms) tp) ) mmts
-            mms     <- mapM (gaussAllLTH0 el_syms) mm_terms
-            let mm_geq0 = foldl (if ismin then SLogOr else SLogAnd)
-                                (Val (LogVal (not ismin))) mms
-            let mm_lth0 = foldl (if ismin then SLogAnd else SLogOr)
-                                (Val (LogVal      ismin )) mms
-            return $ SLogOr (SLogAnd fs_geq0 mm_geq0) (SLogAnd fs_lth0 mm_lth0)
+                                         (NSum ( (NProd (t:fs) tp):terms ) tp) ) mmts
+
+            -- for every (simplified) `term_i' of the inline MinMax exp,
+            --  get the sufficient conditions for `term_i < 0'  
+            mms     <- mapM (gaussAllLTH0 static_only el_syms) mm_terms
+
+            if static_only
+            --------------------------------------------------------------------
+            -- returns either Val (LogVal True) or the original ScalExp relat --
+            --------------------------------------------------------------------
+            then if ( fs_geq0 == Val (LogVal True) &&      ismin ) ||
+                    ( fs_leq0 == Val (LogVal True) && (not ismin))
+                 -- at least one term should be < 0! 
+                 then do let bools_T = map (\m -> if m == Val (LogVal True ) then True else False) mms
+                         let bools_F = map (\m -> if m == Val (LogVal False) then True else False) mms
+                         let  is_one_true  = foldl (||) False bools_T
+                         let are_all_false = foldl (&&) True  bools_F
+                         if       is_one_true  then return $ Val (LogVal True)
+                         else if are_all_false then return $ Val (LogVal False)
+                         else do e_scal <- fromNumSofP sofp
+                                 return $ RelExp LTH0 e_scal 
+                 -- otherwise all terms should be all true!
+                 else do let bools_T = map (\m -> if m == Val (LogVal True ) then True else False) mms
+                         let bools_F = map (\m -> if m == Val (LogVal False) then True else False) mms
+                         let are_all_true = foldl (&&) True  bools_T
+                         let is_one_false = foldl (||) False bools_F
+                         if      are_all_true then return $ Val (LogVal True )
+                         else if is_one_false then return $ Val (LogVal False)
+                         else do e_scal <- fromNumSofP sofp
+                                 return $ RelExp LTH0 e_scal
+            --------------------------------------------------------------------
+            -- returns sufficient conditions for the ScalExp relation to hold --
+            --------------------------------------------------------------------
+            else do
+                let mm_fsgeq0 = foldl (if ismin then SLogOr else SLogAnd)
+                                      (Val (LogVal (not ismin))) mms
+                let mm_fslth0 = foldl (if ismin then SLogAnd else SLogOr)
+                                      (Val (LogVal      ismin )) mms
+                -- the sufficient condition for the original expression, e.g.,
+                -- terms + fs * Min [t1,..,tn] < 0 is
+                -- (fs >= 0 && (fs*t_1+terms < 0 || ... || fs*t_n+terms < 0) ) ||
+                -- (fs <  0 && (fs*t_1+terms < 0 && ... && fs*t_n+terms < 0) )
+                return $ SLogOr (SLogAnd fs_geq0 mm_fsgeq0) (SLogAnd fs_leq0 mm_fslth0)
 
           Just _ -> badAlgSimplifyM "gaussOneLTH0: (Just MinMax) invariant violated!"
+          ------------------------------------------------------------------------
+          -- A MinMax expression which uses (to-be-elim) symbol i was NOT found --
+          ------------------------------------------------------------------------
           Nothing-> do
-            m_sofp <- gaussOneDefaultLTH0 i el_syms sofp
+            m_sofp <- gaussOneDefaultLTH0 static_only i el_syms sofp
             case m_sofp of
-                Nothing -> gaussAllLTH0 (S.insert (identName i) el_syms) sofp
-                Just res_eofp -> return res_eofp
+                Nothing -> gaussAllLTH0 static_only (S.insert (identName i) el_syms) sofp
+                Just res_eofp -> return $ res_eofp
     where
         pickSymToElim :: S.Set VName -> NNumExp -> AlgSimplifyM (Maybe Ident)
         pickSymToElim elsyms0 e0 = do
@@ -254,8 +349,8 @@ gaussAllLTH0 el_syms sofp = do
 
 
 
-gaussOneDefaultLTH0 :: Ident -> S.Set VName -> NNumExp -> AlgSimplifyM (Maybe ScalExp)
-gaussOneDefaultLTH0  i elsyms e = do
+gaussOneDefaultLTH0 :: Bool -> Ident -> S.Set VName -> NNumExp -> AlgSimplifyM (Maybe ScalExp)
+gaussOneDefaultLTH0  static_only i elsyms e = do
     aipb <- linearForm i e
     case aipb of
         Nothing     -> return Nothing
@@ -265,44 +360,73 @@ gaussOneDefaultLTH0  i elsyms e = do
             ascal  <- fromNumSofP a
             mam1   <- toNumSofP =<< simplifyScal (SNeg (SPlus ascal (Val one)))
             am1    <- toNumSofP =<< simplifyScal (SMinus ascal (Val one))
+            ma     <- toNumSofP =<< simplifyScal (SNeg ascal)
+
+            b_scal<- fromNumSofP b
+            mbm1  <- toNumSofP =<< simplifyScal (SNeg (SPlus b_scal (Val one)))
+
+            aleq0 <- simplifyScal =<< gaussAllLTH0 static_only elsyms am1
+            ageq0 <- simplifyScal =<< gaussAllLTH0 static_only elsyms mam1
 
             case HM.lookup (identName i) ranges of
                 Nothing ->
                     badAlgSimplifyM "gaussOneDefaultLTH0: sym not in ranges!"
                 Just (_, Nothing, Nothing) ->
                     badAlgSimplifyM "gaussOneDefaultLTH0: both bounds are undefined!"
+
+                -- only the lower-bound of i is known!
                 Just (_, Just lb, Nothing) -> do
-                    alth0    <- gaussAllLTH0 elsyms am1
-                    alpblth0 <- gaussElimHalf elsyms lb a b
-                    and_half <- simplifyScal $ SLogAnd alth0 alpblth0
-                    case and_half of
-                        Val (LogVal True) -> return $ Just and_half
---                        _                 -> return $ Nothing
-                        _ -> do ageq0 <- gaussAllLTH0 elsyms mam1
-                                ma    <- toNumSofP =<< simplifyScal (SNeg ascal)
-                                b_scal<- fromNumSofP b
-                                mbm1  <- toNumSofP =<< simplifyScal (SNeg (SPlus b_scal (Val one)))
-                                malmbm1lth0 <- gaussElimHalf elsyms lb ma mbm1
-                                other_half <- simplifyScal $ SLogAnd ageq0 malmbm1lth0
-                                case other_half of
-                                    Val (LogVal True) -> return $ Just (Val (LogVal False))
-                                    _                 -> return Nothing
+                    alpblth0 <- gaussElimHalf static_only elsyms lb a b
+                    and_half <- simplifyScal alpblth0
+                    case (and_half, aleq0) of
+                        (Val (LogVal True), Val (LogVal True)) -> 
+                                return $ Just and_half
+                        _ -> do malmbm1lth0 <- gaussElimHalf static_only elsyms lb ma mbm1
+                                other_half  <- simplifyScal malmbm1lth0
+                                case (other_half, ageq0) of
+                                    (Val (LogVal True), Val (LogVal True)) -> 
+                                            return $ Just (Val (LogVal False))
+                                    _  ->   return Nothing
 
                 Just (_, Nothing, Just ub) -> do
-                    ageq0    <- gaussAllLTH0 elsyms mam1
-                    aupblth0 <- gaussElimHalf elsyms ub a b
-                    and_half <- simplifyScal $ SLogAnd ageq0 aupblth0
-                    case and_half of
-                        Val (LogVal True) -> return $ Just and_half
-                        _                 -> return Nothing
+                    aupblth0 <- gaussElimHalf static_only elsyms ub a b
+                    and_half <- simplifyScal aupblth0
+                    case (and_half, ageq0) of
+                        (Val (LogVal True), Val (LogVal True)) -> 
+                                return $ Just and_half
+                        _ -> do 
+                                maumbm1    <- gaussElimHalf static_only elsyms ub ma mbm1
+                                other_half <- simplifyScal maumbm1
+                                case (other_half, aleq0) of
+                                    (Val (LogVal True), Val (LogVal True)) -> 
+                                            return $ Just (Val (LogVal False))
+                                    _  ->   return Nothing
 
-                Just (_, Just lb, Just ub) -> do
-                    alth0    <- gaussAllLTH0 elsyms am1 --a
-                    alpblth0 <- gaussElimHalf elsyms lb a b
-                    ageq0    <- gaussAllLTH0 elsyms mam1
-                    aupblth0 <- gaussElimHalf elsyms ub a b
-                    res <- simplifyScal $ SLogOr (SLogAnd alth0 alpblth0) (SLogAnd ageq0 aupblth0)
-                    return $ Just res
+                Just (_, Just lb, Just ub) ->
+                    if static_only
+                    then do
+                            if aleq0 == (Val (LogVal True)) 
+                            then do alpblth0 <- simplifyScal =<< gaussElimHalf static_only elsyms lb a b
+                                    if alpblth0 == (Val (LogVal True)) 
+                                    then return $ Just (Val (LogVal True))
+                                    else do maubmbm1 <- simplifyScal =<< gaussElimHalf static_only elsyms ub ma mbm1
+                                            if maubmbm1 == (Val (LogVal True)) 
+                                            then return $ Just (Val (LogVal False))
+                                            else return $ Nothing
+                            else if ageq0 == (Val (LogVal True))
+                            then do aupblth0 <- simplifyScal =<< gaussElimHalf static_only elsyms ub a b
+                                    if aupblth0 == (Val (LogVal True))
+                                    then return $ Just (Val (LogVal True))
+                                    else do malbmbm1 <- simplifyScal =<< gaussElimHalf static_only elsyms lb ma mbm1
+                                            if malbmbm1 == (Val (LogVal True)) 
+                                            then return $ Just (Val (LogVal False))
+                                            else return $ Nothing
+                            else return Nothing
+                    else do 
+                            alpblth0 <- gaussElimHalf static_only elsyms lb a b
+                            aupblth0 <- gaussElimHalf static_only elsyms ub a b
+                            res <- simplifyScal $ SLogOr (SLogAnd aleq0 alpblth0) (SLogAnd ageq0 aupblth0)
+                            return $ Just res
 
     where
         linearForm :: Ident -> NNumExp -> AlgSimplifyM (Maybe (NNumExp, NNumExp))
@@ -346,13 +470,13 @@ gaussOneDefaultLTH0  i elsyms e = do
                 return $ Just (a_terms_sofp, b_terms_sofp)
               _ -> return Nothing
 
-        gaussElimHalf :: S.Set VName -> ScalExp -> NNumExp -> NNumExp -> AlgSimplifyM ScalExp
-        gaussElimHalf elsyms0 q a b = do
+        gaussElimHalf :: Bool -> S.Set VName -> ScalExp -> NNumExp -> NNumExp -> AlgSimplifyM ScalExp
+        gaussElimHalf only_static elsyms0 q a b = do
             a_scal <- fromNumSofP a
             b_scal <- fromNumSofP b
             e_num_scal <- simplifyScal (SPlus (STimes a_scal q) b_scal)
             e_num <- toNumSofP e_num_scal
-            gaussAllLTH0 elsyms0 e_num
+            gaussAllLTH0 only_static elsyms0 e_num
 
 --    pos <- asks pos
 --    badAlgSimplifyM "gaussOneDefaultLTH0: unimplemented!"
@@ -529,10 +653,10 @@ simplifyScal (SDivide e1o e2o) = do
                   _   -> do (fs', e1Split')  <- trySimplifyDivRec fs [] e1Split
                             if length fs' == length fs
                             then turnBackAndDiv e1' e2' -- insuccess
-                            else do terms_e1' <- mapM joinTerm e1Split'
+                            else do terms_e1' <- mapM joinTerm e1Split' 
                                     e1'' <- fromNumSofP $ NSum terms_e1' tp
                                     case fs' of
-                                      [] -> return e1''
+                                      [] -> return $ e1''
                                       _  -> do e2'' <- fromNumSofP $ NProd fs' tp
                                                return $ SDivide e1'' e2''
 
@@ -622,7 +746,7 @@ helperTimesDivMinMax isTimes isRev emo@(MaxMin{}) e = do
         MaxMin ismin es -> do
             e' <- simplifyScal e
             e'_sop <- toNumSofP e'
-            p' <- simplifyNRel False $ NRelExp LTH0 e'_sop
+            p' <- simplifyNRel $ NRelExp LTH0 e'_sop
             case p' of
                 LogCt ctbool -> do
                     let cond = not isTimes && isRev
@@ -659,9 +783,15 @@ helperTimesDivMinMax _ _ _ _ =
 --- disjunctive normal form: toDNF, simplifyDNF ---
 ---------------------------------------------------
 ---------------------------------------------------
-isTrueDNF :: DNF -> Bool
-isTrueDNF [[LogCt True]] = True
-isTrueDNF _              = False
+--isTrueDNF :: DNF -> Bool
+--isTrueDNF [[LogCt True]] = True
+--isTrueDNF _              = False
+--
+--getValueDNF :: DNF -> Maybe Bool
+--getValueDNF [[LogCt True]]  = Just True
+--getValueDNF [[LogCt False]] = Just True
+--getValueDNF _               = Nothing
+
 
 negateBTerm :: BTerm -> AlgSimplifyM BTerm
 negateBTerm (LogCt v) = return $ LogCt (not v)
@@ -702,11 +832,11 @@ toDNF (Val  (LogVal v)) = return [[LogCt v]]
 toDNF (Id      idd    ) = return [[PosId idd]]
 toDNF (RelExp  rel  e ) = do
     let btp = scalExpType e
-    (e', rel')<- if (btp == Int) && (rel == LEQ0)
-                 then do m1 <- getNeg1 Int; return (SPlus e $ Val m1, LTH0)
-                 else return (e, rel)
+    e' <- if (btp == Int) && (rel == LEQ0)
+          then do m1 <- getNeg1 Int; return $ SPlus e $ Val m1
+          else return e
     ne    <- toNumSofP =<< simplifyScal e'
-    nrel  <- simplifyNRel False $ NRelExp rel' ne
+    nrel  <- simplifyNRel $ NRelExp LTH0 ne  -- False
     return [[nrel]]
 --
 toDNF (SNot (SNot     e)) = toDNF e
@@ -782,7 +912,7 @@ simplifyAndOr is_and fs =
                 fs''<- foldM (\l x-> do (addx, l') <- trimImplies is_and x l
                                         if addx then return (x:l') else return l'
                              ) [] fs'
-                       -- IF if p1 => not p2 THEN p1 AND p2 == False
+                       -- IF p1 => not p2 THEN p1 AND p2 == False
                 isF <- foldM (\b x -> if b then return b
                                       else do notx <- negateBTerm x
                                               impliesAny is_and x notx fs''
@@ -796,10 +926,10 @@ simplifyAndOr is_and fs =
         impliesRel (LogCt False) _ = return True
         impliesRel _ (LogCt  True) = return True
         impliesRel (LogCt True)  e = do
-            e' <- simplifyNRel True e
+            e' <- return e -- simplifyNRel e
             if e' == LogCt True then return True else return False
         impliesRel e (LogCt False) = do
-            e' <- simplifyNRel True =<< negateBTerm e
+            e' <- negateBTerm e -- simplifyNRel =<< negateBTerm e
             if e' == LogCt True then return True else return False
         impliesRel (NRelExp rel1 e1) (NRelExp rel2 e2) = do
         -- ToDo: implement implies relation!
@@ -811,13 +941,13 @@ simplifyAndOr is_and fs =
             case (rel1, rel2, btp) of
                 (LTH0, LTH0, Int) -> do
                     e2me1m1 <- toNumSofP =<< simplifyScal (SMinus e2' $ SPlus e1' $ Val one)
-                    diffrel <- simplifyNRel True $ NRelExp LTH0 e2me1m1
+                    diffrel <- simplifyNRel $ NRelExp LTH0 e2me1m1  
                     if diffrel == LogCt True then return True else return False
                 (_, _, Int) -> badAlgSimplifyM "impliesRel: LEQ0 for Int!"
                 (_, _, Real)-> do
                     e2me1 <- toNumSofP =<< simplifyScal (SMinus e2' e1')
                     let rel = if (rel1,rel2) == (LEQ0, LTH0) then LTH0 else LEQ0
-                    diffrel <- simplifyNRel True $ NRelExp rel e2me1
+                    diffrel <- simplifyNRel $ NRelExp rel e2me1    
                     if diffrel == LogCt True then return True else return False
                 (_, _, _) -> badAlgSimplifyM "impliesRel: exp of illegal type!"
         impliesRel p1 p2
@@ -843,9 +973,9 @@ simplifyAndOr is_and fs =
                     else do (addx, newps) <- trimImplies and_case x ps
                             return (addx, p:newps)
 
-        -- collapseImplies(true,  x, notx, l) performs:
+        -- impliesAny(true,  x, notx, l) performs:
         --   x AND p == False if p => not x, where p in l,
-        -- collapseImplies(true,  x, notx, l) performs:
+        -- impliesAny(true,  x, notx, l) performs:
         --   x OR p == True if not x => p
         -- BUT only when p != x, i.e., avoids comparing x with notx
         impliesAny :: Bool -> BTerm -> BTerm -> [BTerm] -> AlgSimplifyM Bool
@@ -1163,7 +1293,7 @@ tryDivTriv (SPow a e1) (SPow d e2)
             (Int, Val (IntVal 1)) -> return (True, a)
             (Int, _) -> do e2me1 <- negateSimplified e1me2
                            e2me1_sop <- toNumSofP e2me1
-                           p' <- simplifyNRel True $ NRelExp LTH0 e2me1_sop
+                           p' <- simplifyNRel $ NRelExp LTH0 e2me1_sop  -- True 
                            if p' == LogCt True
                            then return (True,  SPow a e1me2)
                            else return (False, SDivide (SPow a e1) (SPow d e2))
@@ -1189,3 +1319,57 @@ tryDivTriv t f
     | t == f    = do one <- getPos1 $ scalExpType t
                      return (True,  Val one)
     | otherwise = return (False, SDivide t f)
+
+
+
+mkRelExp :: Int -> (RangesRep, ScalExp, ScalExp)
+mkRelExp 1 =
+    let (i',j',n',p',m') = (tident "int i", tident "int j", tident "int n", tident "int p", tident "int m")
+        (i,j,n,p,m) = (Id i', Id j', Id n', Id p', Id m')
+        one = Val (IntVal 1)
+        min_p_nm1 = MaxMin True [p, SMinus n one]
+        hash = HM.fromList $ [ (identName n', ( 1::Int, Just (Val (IntVal 1)), Nothing ) ),
+                               (identName p', ( 1::Int, Just (Val (IntVal 0)), Nothing ) ),
+                               (identName i', ( 5::Int, Just (Val (IntVal 0)), Just min_p_nm1 ) )
+                             , (identName j', ( 9::Int, Just (Val (IntVal 0)), Just i ) )
+                             ] -- HM.HashMap VName (Int, Maybe ScalExp, Maybe ScalExp)
+        ij_p_j_p_1_m_m = SMinus (SPlus (STimes i j) (SPlus j one)) m
+        rel1 = RelExp LTH0 ij_p_j_p_1_m_m
+        m_ij_m_j_m_2 = SNeg ( SPlus (STimes i j) (SPlus j (Val (IntVal 2))) )
+        rel2 = RelExp LTH0 m_ij_m_j_m_2
+
+    in (hash, rel1, rel2)
+mkRelExp 2 =
+    let (i',a',b',l',u') = (tident "int i", tident "int a", tident "int b", tident "int l", tident "int u")
+        (i,a,b,l,u) = (Id i', Id a', Id b', Id l', Id u')
+        hash = HM.fromList $ [ (identName i', ( 5::Int, Just l, Just u ) ) ]
+        ai_p_b = SPlus (STimes a i) b
+        rel1 = RelExp LTH0 ai_p_b
+
+    in (hash, rel1, rel1)
+mkRelExp 3 =
+    let (i',j',n',m') = (tident "int i", tident "int j", tident "int n", tident "int m")
+        (i,j,n,m) = (Id i', Id j', Id n', Id m')
+        one = Val (IntVal 1)
+        two = Val (IntVal 2)
+        min_j_nm1 = MaxMin True [MaxMin False [Val (IntVal 0), SMinus i (STimes two n)], SMinus n one]
+        hash = HM.fromList $ [ (identName n', ( 1::Int, Just (Val (IntVal 1)), Nothing ) ),
+                               (identName m', ( 2::Int, Just (Val (IntVal 1)), Nothing ) ),
+                               (identName i', ( 5::Int, Just (Val (IntVal 0)), Just (SMinus m one) ) )
+                             , (identName j', ( 9::Int, Just (Val (IntVal 0)), Just min_j_nm1 ) )
+                             ] -- HM.HashMap VName (Int, Maybe ScalExp, Maybe ScalExp)
+        ij_m_m = SMinus (STimes i j) m
+        rel1 = RelExp LTH0 ij_m_m
+--        rel3 = RelExp LTH0 (SMinus i (SPlus (STimes two n) j))
+        m_ij_m_1 = SMinus (Val (IntVal (-1))) (STimes i j)
+        rel2 = RelExp LTH0 m_ij_m_1
+
+--        simpl_exp = SDivide (MaxMin True [SMinus (Val (IntVal 0)) (STimes i j), SNeg (STimes i n) ])
+--                         (STimes i j) 
+--        rel4 = RelExp LTH0 simpl_exp
+
+    in (hash, rel1, rel2)
+
+mkRelExp _ = let hash = HM.empty
+                 rel = RelExp LTH0 (Val (IntVal (-1)))
+             in (hash, rel, rel)
