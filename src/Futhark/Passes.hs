@@ -10,6 +10,7 @@ module Futhark.Passes
   , hotransform
   , inlinetransform
   , optimisePredicates
+  , optimiseShapes
   )
 where
 
@@ -19,6 +20,7 @@ import qualified Futhark.FirstOrderTransform as FOT
 import Futhark.Untrace
 import Futhark.Pipeline
 import qualified Futhark.Optimise.SuffCond
+import qualified Futhark.Optimise.SplitShapes
 
 fotransform :: Pass
 fotransform = Pass { passName = "first-order transform"
@@ -49,3 +51,8 @@ optimisePredicates :: Pass
 optimisePredicates = Pass { passName = "optimise predicates"
                           , passOp = return . Futhark.Optimise.SuffCond.optimiseProg
                           }
+
+optimiseShapes :: Pass
+optimiseShapes = Pass { passName = "optimise shape analysis"
+                      , passOp = return . Futhark.Optimise.SplitShapes.splitShapes
+                      }

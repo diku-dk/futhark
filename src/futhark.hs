@@ -98,6 +98,8 @@ commandLineOptions =
     [] ["inline-functions"]
   , passoption "Optimise predicates" optimisePredicates
     [] ["optimise-predicates"]
+  , passoption "Optimise shape computation" optimiseShapes
+    [] ["optimise-shapes"]
   , Option "s" ["standard"]
     (NoArg $ Right $ \opts -> opts { futharkpipeline = standardPipeline ++ futharkpipeline opts })
     "Use the recommended optimised pipeline."

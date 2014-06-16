@@ -650,7 +650,7 @@ staticShapes = map staticShapes'
         staticShapes' (Array bt (Shape shape) u als) =
           Array bt (ExtShape $ map Free shape) u als
 
-instantiateShapes :: Monad m => m SubExp -> ResType -> m [Type]
+instantiateShapes :: Monad m => m SubExp -> [TypeBase als ExtShape] -> m [TypeBase als Shape]
 instantiateShapes f ts = evalStateT (mapM instantiate ts) HM.empty
   where instantiate t = do
           shape <- mapM instantiate' $ extShapeDims $ arrayShape t

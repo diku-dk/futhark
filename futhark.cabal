@@ -73,6 +73,7 @@ Library
                    Futhark.Analysis.SymbolTable
                    Futhark.Analysis.UsageTable
                    Futhark.Optimise.DeadVarElim
+                   Futhark.Optimise.SplitShapes
                    Futhark.Optimise.Errors
                    Futhark.Optimise.Fusion
                    Futhark.Optimise.Fusion.Composing
