@@ -605,11 +605,12 @@ simplifyIndexing look (Index cs idd inds loc) =
 simplifyIndexing _ _ = Nothing
 
 evaluateBranch :: TopDownRule
-evaluateBranch _ (Let pat (If e1 tb fb _ _))
+evaluateBranch _ (Let pat (If e1 tb fb t _))
   | Just branch <- checkBranch =
   let ses = resultSubExps $ bodyResult branch
+      ses' = subExpShapeContext t ses ++ ses
   in return $ bodyBindings branch ++ [Let [p] $ SubExp se
-                                     | (p,se) <- zip pat ses]
+                                     | (p,se) <- zip pat ses']
   where checkBranch
           | isCt1 e1  = Just tb
           | isCt0 e1  = Just fb
