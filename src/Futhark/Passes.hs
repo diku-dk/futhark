@@ -9,6 +9,7 @@ module Futhark.Passes
   , eotransform
   , hotransform
   , inlinetransform
+  , removeDeadFunctions
   , optimisePredicates
   , optimiseShapes
   )
@@ -19,6 +20,7 @@ import Futhark.Optimise.Fusion
 import qualified Futhark.FirstOrderTransform as FOT
 import Futhark.Untrace
 import Futhark.Pipeline
+import Futhark.Optimise.InliningDeadFun
 import qualified Futhark.Optimise.SuffCond
 import qualified Futhark.Optimise.SplitShapes
 
@@ -46,6 +48,11 @@ inlinetransform :: Pass
 inlinetransform = Pass { passName = "inline functions"
                       , passOp = liftPass aggInlineDriver
                       }
+
+removeDeadFunctions :: Pass
+removeDeadFunctions = Pass { passName = "Remove dead functions"
+                           , passOp = liftPass deadFunElim
+                           }
 
 optimisePredicates :: Pass
 optimisePredicates = Pass { passName = "optimise predicates"

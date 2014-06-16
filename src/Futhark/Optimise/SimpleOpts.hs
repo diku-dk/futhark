@@ -3,7 +3,6 @@ module Futhark.Optimise.SimpleOpts
   , CallGraph
   , buildCallGraph
   , aggInlineDriver
-  , deadFunElim
   , normCopyDeadOpts
   , normCopyOneLambda
   , Error(..)
@@ -26,10 +25,9 @@ simpleOpts :: Prog -> Either Error Prog
 simpleOpts prog = do
 --  esc <- AS.canSimplify 3
 --  let prog' = trace (ScExp.ppScalExp esc) prog
-  let prog_enopt1 = normCopyDeadOpts prog
-  let prog_enopt2 = normCopyDeadOpts prog_enopt1
-  prog_deadf2 <- deadFunElim      prog_enopt2
-  let prog_flat_opt = normCopyDeadOpts prog_deadf2
+  let prog_enopt1   = normCopyDeadOpts prog
+      prog_enopt2   = normCopyDeadOpts prog_enopt1
+      prog_flat_opt = normCopyDeadOpts prog_enopt2
 
   return $ normCopyDeadOpts prog_flat_opt
 

@@ -96,6 +96,8 @@ commandLineOptions =
     "h" ["higher-order-optimizations"]
   , passoption "Aggressively inline and remove dead functions." inlinetransform
     [] ["inline-functions"]
+  , passoption "Remove dead functions." removeDeadFunctions
+    [] ["remove-dead-functions"]
   , passoption "Optimise predicates" optimisePredicates
     [] ["optimise-predicates"]
   , passoption "Optimise shape computation" optimiseShapes
@@ -160,6 +162,7 @@ standardPipeline =
   , eotransform
   , hotransform
   , eotransform
+  , removeDeadFunctions
   ]
 
 -- | Entry point.  Non-interactive, except when reading interpreter
