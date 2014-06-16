@@ -518,14 +518,32 @@ simplifyExp (Redomap cs outerfun innerfun acc arrs loc) = do
   arrs' <- mapM simplifySubExp arrs
   outerfun' <- simplifyLambda outerfun []
   (innerfun', used) <- tapUsage $ simplifyLambda innerfun arrs
-  let (innerfun'', arrs'') = removeUnusedParams used innerfun' arrs'
+  (innerfun'', arrs'') <- removeUnusedParams used innerfun' arrs'
   return $ Redomap cs' outerfun' innerfun'' acc' arrs'' loc
-  where removeUnusedParams used lam arrinps =
-          let (accparams, arrparams) = splitAt (length acc) $ lambdaParams lam
-              (arrparams', arrinps') =
-                unzip $ filter ((`UT.used` used) . identName . fst) $
-                zip arrparams arrinps
-          in (lam { lambdaParams = accparams ++ arrparams' }, arrinps')
+  where removeUnusedParams used lam arrinps
+          | (accparams, arrparams@(firstparam:_)) <-
+            splitAt (length acc) $ lambdaParams lam,
+            firstarr : _ <- arrinps =
+              case unzip $ filter ((`UT.used` used) . identName . fst) $
+                   zip arrparams arrinps of
+               ([],[]) -> do
+                 -- Avoid having zero inputs to redomap, as that would
+                 -- set the number of iterations to zero, possibly
+                 -- changing semantics.  Ideally, we should pick the
+                 -- "simplest" size instead of just the one of the
+                 -- first array, but I do not think it matters much.
+                 let outerSize = arraySize 0 $ subExpType firstarr
+                 input <- newIdent "unused_input"
+                          (arrayOf (Basic Int) (Shape [outerSize]) Nonunique) $
+                          srclocOf firstarr
+                 needThis $ Let [input] $ Iota outerSize $ srclocOf firstarr
+                 return (lam { lambdaParams =
+                                  accparams ++
+                                  [firstparam { identType = Basic Int }] },
+                         [Var input])
+               (arrparams', arrinps') ->
+                 return (lam { lambdaParams = accparams ++ arrparams' }, arrinps')
+          | otherwise = return (lam, arrinps)
 
 simplifyExp e = simplifyExpBase e
 
