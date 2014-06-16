@@ -261,11 +261,11 @@ fuseSOACwithKer outIds soac1 ker = do
       let (res_lam, new_inp) = fuseFilterIntoFold lam1 inp1_arr outPairs lam2 inp2_arr names
       success $ SOAC.Redomap (cs1++cs2) lam21 res_lam nes new_inp pos
 
-    (SOAC.Filter _ _ _ ressize pos, SOAC.Filter {})
+    (SOAC.Filter _ _ _ pos, SOAC.Filter {})
       | filterFusionOK outIds ker -> do
       name <- newVName "check"
       let (res_lam, new_inp) = fuseFilters lam1 inp1_arr outPairs lam2 inp2_arr name
-      success $ SOAC.Filter (cs1++cs2) res_lam new_inp ressize pos
+      success $ SOAC.Filter (cs1++cs2) res_lam new_inp pos
 
     -- Nothing else worked, so let's try rewriting to redomap if
     -- possible.

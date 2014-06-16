@@ -447,7 +447,7 @@ evalExp (Scan _ fun inputs loc) = do
             acc' <- applyLambda fun $ acc ++ x
             return (acc', acc' : l)
 
-evalExp e@(Filter _ fun arrexp _ loc) = do
+evalExp e@(Filter _ fun arrexp loc) = do
   vss <- mapM (arrToList loc <=< evalSubExp) arrexp
   vss' <- filterM filt $ transpose vss
   return $ arrays (typeOf e) vss'

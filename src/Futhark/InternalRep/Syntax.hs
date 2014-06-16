@@ -338,9 +338,7 @@ data Exp =
 
             | Reduce  Certificates Lambda [(SubExp, SubExp)] SrcLoc
             | Scan   Certificates Lambda [(SubExp, SubExp)] SrcLoc
-            | Filter  Certificates Lambda [SubExp] SubExp SrcLoc
-            -- ^ The 'Ident' should contain the outer shape of the
-            -- result.
+            | Filter  Certificates Lambda [SubExp] SrcLoc
             | Redomap Certificates Lambda Lambda [SubExp] [SubExp] SrcLoc
 
               deriving (Eq, Ord, Show)
@@ -369,7 +367,7 @@ instance Located Exp where
   locOf (Map _ _ _ pos) = locOf pos
   locOf (Reduce _ _ _ pos) = locOf pos
   locOf (Scan _ _ _ pos) = locOf pos
-  locOf (Filter _ _ _ _ pos) = locOf pos
+  locOf (Filter _ _ _ pos) = locOf pos
   locOf (Redomap _ _ _ _ _ pos) = locOf pos
 
 -- | A type denoting the return type of a function call.  If a

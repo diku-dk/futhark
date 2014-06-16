@@ -88,7 +88,7 @@ lambdaToBody l = fromMaybe (Fun l) $ liftM (uncurry $ flip NewNest) $ nested l
 data Combinator = Map Certificates NestBody SrcLoc
                 | Reduce Certificates NestBody [SubExp] SrcLoc
                 | Scan Certificates NestBody [SubExp] SrcLoc
-                | Filter Certificates NestBody SubExp SrcLoc
+                | Filter Certificates NestBody SrcLoc
                 | Redomap Certificates Lambda NestBody [SubExp] SrcLoc
                  deriving (Show)
 
@@ -96,7 +96,7 @@ instance Located Combinator where
   locOf (Map _ _ loc) = locOf loc
   locOf (Reduce _ _ _ loc) = locOf loc
   locOf (Scan _ _ _ loc) = locOf loc
-  locOf (Filter _ _ _ loc) = locOf loc
+  locOf (Filter _ _ loc) = locOf loc
   locOf (Redomap _ _ _ _ loc) = locOf loc
 
 instance Substitute Combinator where
@@ -111,14 +111,14 @@ body :: Combinator -> NestBody
 body (Map _ b _) = b
 body (Reduce _ b _ _) = b
 body (Scan _ b _ _) = b
-body (Filter _ b _ _) = b
+body (Filter _ b _) = b
 body (Redomap _ _ b _ _) = b
 
 setBody :: NestBody -> Combinator -> Combinator
 setBody b (Map cs _ loc) = Map cs b loc
 setBody b (Reduce cs _ es loc) = Reduce cs b es loc
 setBody b (Scan cs _ es loc) = Scan cs b es loc
-setBody b (Filter cs _ outer_shape loc) = Filter cs b outer_shape loc
+setBody b (Filter cs _ loc) = Filter cs b loc
 setBody b (Redomap cs l _ es loc) = Redomap cs l b es loc
 
 combinatorFirstLoop :: Combinator -> ([Param], [ConstType])
@@ -162,7 +162,7 @@ combCertificates :: Combinator -> Certificates
 combCertificates (Map     cs _     _) = cs
 combCertificates (Reduce  cs _   _ _) = cs
 combCertificates (Scan    cs _   _ _) = cs
-combCertificates (Filter  cs _   _ _) = cs
+combCertificates (Filter  cs _     _) = cs
 combCertificates (Redomap cs _ _ _ _) = cs
 
 -- | Sets the certificates used in a 'Combinator'.
@@ -170,7 +170,7 @@ setCombCertificates :: Certificates -> Combinator -> Combinator
 setCombCertificates cs (Map     _ bdy     loc) = Map    cs bdy     loc
 setCombCertificates cs (Reduce  _ bdy acc loc) = Reduce cs bdy acc loc
 setCombCertificates cs (Scan    _ bdy acc loc) = Scan   cs bdy acc loc
-setCombCertificates cs (Filter  _ bdy siz loc) = Filter cs bdy siz loc
+setCombCertificates cs (Filter  _ bdy     loc) = Filter cs bdy loc
 setCombCertificates cs (Redomap _ fun bdy acc loc) = Redomap cs fun bdy acc loc
 
 fromExp :: Exp -> Either SOAC.NotSOAC SOACNest
@@ -188,8 +188,8 @@ fromSOAC (SOAC.Reduce cs l args loc) =
 fromSOAC (SOAC.Scan cs l args loc) =
   SOACNest (map snd args) $
   Scan cs (lambdaToBody l) (map fst args) loc
-fromSOAC (SOAC.Filter cs l as outer_shape loc) =
-  SOACNest as $ Filter cs (lambdaToBody l) outer_shape loc
+fromSOAC (SOAC.Filter cs l as loc) =
+  SOACNest as $ Filter cs (lambdaToBody l) loc
 fromSOAC (SOAC.Redomap cs ol l es as loc) =
   -- Never nested, because we need a way to test alpha-equivalence of
   -- the outer combining function.
@@ -223,7 +223,7 @@ toSOAC (SOACNest as (Reduce cs b es loc)) =
   SOAC.Reduce cs <$> bodyToLambda b <*> pure (zip es as) <*> pure loc
 toSOAC (SOACNest as (Scan cs b es loc)) =
   SOAC.Scan cs <$> bodyToLambda b <*> pure (zip es as) <*> pure loc
-toSOAC (SOACNest as (Filter cs b outer_shape loc)) =
-  SOAC.Filter cs <$> bodyToLambda b <*> pure as <*> pure outer_shape <*> pure loc
+toSOAC (SOACNest as (Filter cs b loc)) =
+  SOAC.Filter cs <$> bodyToLambda b <*> pure as <*> pure loc
 toSOAC (SOACNest as (Redomap cs l b es loc)) =
   SOAC.Redomap cs l <$> bodyToLambda b <*> pure es <*> pure as <*> pure loc

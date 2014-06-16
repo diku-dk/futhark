@@ -333,8 +333,7 @@ internaliseExp desc (E.Map lam arr loc) = do
   let cs = certify c []
   se <- conjoinCerts cs loc
   lam' <- internaliseMapLambda internaliseBody se lam $ map I.Var arrs
-  certifySOAC desc se (I.mapType lam' $ map I.Var arrs) $
-    I.Map cs lam' (map I.Var arrs) loc
+  certifySOAC desc se $ I.Map cs lam' (map I.Var arrs) loc
 
 internaliseExp desc e@(E.Reduce lam ne arr loc) = do
   (c1,arrs) <- tupToIdentList "reduce_arr" arr
@@ -344,8 +343,7 @@ internaliseExp desc e@(E.Reduce lam ne arr loc) = do
   lam' <- internaliseFoldLambda internaliseBody se lam
           (map I.identType nes) (map I.identType arrs)
   let input = zip (map I.Var nes) (map I.Var arrs)
-  certifyFoldSOAC desc se t (reduceType lam' input) $
-    I.Reduce cs lam' input loc
+  certifyFoldSOAC desc se t $ I.Reduce cs lam' input loc
   where t = internaliseType $ E.typeOf e
 
 internaliseExp desc e@(E.Scan lam ne arr loc) = do
@@ -356,18 +354,15 @@ internaliseExp desc e@(E.Scan lam ne arr loc) = do
   lam' <- internaliseFoldLambda internaliseBody se lam
           (map I.identType nes) (map I.identType arrs)
   let input = zip (map I.Var nes) (map I.Var arrs)
-  certifyFoldSOAC desc se t (scanType lam' input) $
-    I.Scan cs lam' input loc
+  certifyFoldSOAC desc se t $ I.Scan cs lam' input loc
   where t = internaliseType $ E.typeOf e
 
 internaliseExp desc (E.Filter lam arr loc) = do
   (c,arrs) <- tupToIdentList "filter_arr" arr
   let cs = catMaybes [c]
   se <- conjoinCerts cs loc
-  (outer_shape, lam') <- internaliseFilterLambda internaliseBody se lam $
-                         map I.Var arrs
-  certifySOAC desc se (I.filterType lam' (map I.Var arrs) (I.Var outer_shape)) $
-    I.Filter cs lam' (map I.Var arrs) (I.Var outer_shape) loc
+  lam' <- internaliseFilterLambda internaliseBody se lam $ map I.Var arrs
+  certifySOAC desc se $ I.Filter cs lam' (map I.Var arrs) loc
 
 internaliseExp desc e@(E.Redomap lam1 lam2 ne arrs loc) = do
   (c1,arrs') <- tupToIdentList "redomap_arr" arrs
@@ -378,8 +373,7 @@ internaliseExp desc e@(E.Redomap lam1 lam2 ne arrs loc) = do
            (map I.identType nes) (map I.identType nes)
   lam2' <- internaliseFoldLambda internaliseBody se lam2
            (map I.identType nes) (map I.identType arrs')
-  certifyFoldSOAC desc se t (I.redomapType lam1' lam2'
-                             (map I.Var nes) (map I.Var arrs')) $
+  certifyFoldSOAC desc se t $
     I.Redomap cs lam1' lam2' (map I.Var nes) (map I.Var arrs') loc
   where t = internaliseType $ E.typeOf e
 
@@ -514,18 +508,18 @@ certify k cs = maybeToList k ++ cs
 certOrGiven :: SrcLoc -> Maybe I.Ident -> SubExp
 certOrGiven loc = maybe (given loc) I.Var
 
-certifySOAC :: String -> I.Ident -> [I.Type] -> I.Exp -> InternaliseM [I.SubExp]
-certifySOAC desc _ [_] e = letSubExps desc [e]
-certifySOAC desc c ts e  = do (ks,vs) <- unzip <$> mapM (newVar loc desc) ts
-                              letBind ks e
-                              return $ I.Var c:vs
-  where loc = srclocOf e
+certifySOAC :: String -> I.Ident -> I.Exp
+            -> InternaliseM [I.SubExp]
+certifySOAC desc c e  = do vs <- letTupExp desc e
+                           case vs of
+                             [v] -> return [I.Var v]
+                             _   -> return $ map I.Var $ c:vs
 
-certifyFoldSOAC :: String -> I.Ident -> [I.TypeBase als shape] -> [I.Type] -> I.Exp
+certifyFoldSOAC :: String -> I.Ident -> [I.TypeBase als shape] -> I.Exp
                 -> InternaliseM [I.SubExp]
-certifyFoldSOAC desc c (I.Basic I.Cert : _) ts e =
-  certifySOAC desc c ts e
-certifyFoldSOAC desc _ _ _ e =
+certifyFoldSOAC desc c (I.Basic I.Cert : _) e =
+  certifySOAC desc c e
+certifyFoldSOAC desc _ _ e =
   map I.Var <$> letTupExp desc e
 
 boundsChecks :: [I.Ident] -> [I.SubExp] -> InternaliseM I.Certificates

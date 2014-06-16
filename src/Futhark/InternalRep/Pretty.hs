@@ -178,7 +178,7 @@ instance Pretty Exp where
   ppr (Scan cs lam inputs _) =
     ppCertificates' cs <> ppSOAC "scanT" [lam] (Just es) as
     where (es, as) = unzip inputs
-  ppr (Filter cs lam as _ _) =
+  ppr (Filter cs lam as _) =
     ppCertificates' cs <> ppSOAC "filterT" [lam] Nothing as
 
 instance Pretty Lambda where

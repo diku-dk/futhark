@@ -136,7 +136,7 @@ externaliseExp (I.Scan _ fun inputs loc) =
                (externaliseSOACArrayArgs arrinputs loc)
                loc
   where (accinputs, arrinputs) = unzip inputs
-externaliseExp (I.Filter _ fun es _ loc) =
+externaliseExp (I.Filter _ fun es loc) =
   maybeUnzip $ E.Filter (externaliseMapLambda fun)
                         (externaliseSOACArrayArgs es loc)
                         loc

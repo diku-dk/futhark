@@ -718,9 +718,13 @@ scanType _ inputs =
   map ((`setUniqueness` Unique) . subExpType) arrs
   where (_, arrs) = unzip inputs
 
-filterType :: Lambda -> [SubExp] -> SubExp -> [Type]
-filterType _ arrs outerShape =
-  map ((`setOuterSize` outerShape) . subExpType) arrs
+filterType :: Lambda -> [SubExp] -> ResType
+filterType _ =
+  map (extOuterDim . subExpType)
+  where extOuterDim t =
+          t `setArrayShape` ExtShape (extOuterDim' $ arrayShape t)
+        extOuterDim' (Shape dims) =
+          Ext 0 : map Free (drop 1 dims)
 
 redomapType:: Lambda -> Lambda -> [SubExp] -> [SubExp] -> [Type]
 redomapType outerfun innerfun acc arrs =
@@ -778,8 +782,8 @@ typeOf (Reduce _ fun inputs _) =
   staticShapes $ reduceType fun inputs
 typeOf (Scan _ fun inputs _) =
   staticShapes $ scanType fun inputs
-typeOf (Filter _ f arrs outerShape _) =
-  staticShapes $ filterType f arrs outerShape
+typeOf (Filter _ f arrs _) =
+  filterType f arrs
 typeOf (Redomap _ outerfun innerfun acc arrs _) =
   staticShapes $ redomapType outerfun innerfun acc arrs
 

@@ -371,7 +371,7 @@ transposeInput k n inp =
 data SOAC = Map Certificates Lambda [Input] SrcLoc
           | Reduce  Certificates Lambda [(SubExp,Input)] SrcLoc
           | Scan Certificates Lambda [(SubExp,Input)] SrcLoc
-          | Filter Certificates Lambda [Input] SubExp SrcLoc
+          | Filter Certificates Lambda [Input] SrcLoc
           | Redomap Certificates Lambda Lambda [SubExp] [Input] SrcLoc
             deriving (Show)
 
@@ -379,7 +379,7 @@ instance Located SOAC where
   locOf (Map _ _ _ loc) = locOf loc
   locOf (Reduce _ _ _ loc) = locOf loc
   locOf (Scan _ _ _ loc) = locOf loc
-  locOf (Filter _ _ _ _ loc) = locOf loc
+  locOf (Filter _ _ _ loc) = locOf loc
   locOf (Redomap _ _ _ _ _ loc) = locOf loc
 
 -- | Returns the inputs used in a SOAC.
@@ -387,7 +387,7 @@ inputs :: SOAC -> [Input]
 inputs (Map _     _     arrs   _) = arrs
 inputs (Reduce  _ _     args   _) = map snd args
 inputs (Scan    _ _     args   _) = map snd args
-inputs (Filter  _ _     arrs _ _) = arrs
+inputs (Filter  _ _     arrs   _) = arrs
 inputs (Redomap _ _ _ _ arrs   _) = arrs
 
 -- | Set the inputs to a SOAC.
@@ -398,8 +398,8 @@ setInputs arrs (Reduce cs lam args loc) =
   Reduce cs lam (zip (map fst args) arrs) loc
 setInputs arrs (Scan cs lam args loc) =
   Scan cs lam (zip (map fst args) arrs) loc
-setInputs arrs (Filter cs lam _ outer_shape loc) =
-  Filter cs lam arrs outer_shape loc
+setInputs arrs (Filter cs lam _ loc) =
+  Filter cs lam arrs loc
 setInputs arrs (Redomap cs lam1 lam ne _ loc) =
   Redomap cs lam1 lam ne arrs loc
 
@@ -408,7 +408,7 @@ lambda :: SOAC -> Lambda
 lambda (Map     _ lam _        _) = lam
 lambda (Reduce  _ lam _        _) = lam
 lambda (Scan    _ lam _        _) = lam
-lambda (Filter  _ lam _      _ _) = lam
+lambda (Filter  _ lam _        _) = lam
 lambda (Redomap _ _   lam2 _ _ _) = lam2
 
 -- | Set the lambda used in the SOAC.
@@ -419,8 +419,8 @@ setLambda lam (Reduce cs _ args loc) =
   Reduce cs lam args loc
 setLambda lam (Scan cs _ args loc) =
   Scan cs lam args loc
-setLambda lam (Filter cs _ arrs outer_shape loc) =
-  Filter cs lam arrs outer_shape loc
+setLambda lam (Filter cs _ arrs loc) =
+  Filter cs lam arrs loc
 setLambda lam (Redomap cs lam1 _ ne arrs loc) =
   Redomap cs lam1 lam ne arrs loc
 
@@ -429,7 +429,7 @@ certificates :: SOAC -> Certificates
 certificates (Map     cs _     _ _) = cs
 certificates (Reduce  cs _ _     _) = cs
 certificates (Scan    cs _ _     _) = cs
-certificates (Filter  cs _   _ _ _) = cs
+certificates (Filter  cs _   _   _) = cs
 certificates (Redomap cs _ _ _ _ _) = cs
 
 -- | Convert a SOAC to the corresponding expression.
@@ -442,8 +442,8 @@ toExp (Reduce cs l args loc) =
 toExp (Scan cs l args loc) =
   Futhark.Scan cs l <$> (zip es <$> inputsToSubExps as) <*> pure loc
   where (es, as) = unzip args
-toExp (Filter cs l as outer_shape loc) =
-  Futhark.Filter cs l <$> inputsToSubExps as <*> pure outer_shape <*> pure loc
+toExp (Filter cs l as loc) =
+  Futhark.Filter cs l <$> inputsToSubExps as <*> pure loc
 toExp (Redomap cs l1 l2 es as loc) =
   Futhark.Redomap cs l1 l2 es <$> inputsToSubExps as <*> pure loc
 
@@ -473,9 +473,9 @@ fromExp (Futhark.Scan cs l args loc) = do
   let (es,as) = unzip args
   as' <- mapM inputFromSubExp' as
   Right $ Scan cs l (zip es as') loc
-fromExp (Futhark.Filter cs l as outer_shape loc) = do
+fromExp (Futhark.Filter cs l as loc) = do
   as' <- mapM inputFromSubExp' as
-  Right $ Filter cs l as' outer_shape loc
+  Right $ Filter cs l as' loc
 fromExp (Futhark.Redomap cs l1 l2 es as loc) = do
   as' <- mapM inputFromSubExp' as
   Right $ Redomap cs l1 l2 es as' loc

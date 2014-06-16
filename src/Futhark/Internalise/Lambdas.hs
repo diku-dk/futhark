@@ -193,44 +193,10 @@ internaliseFilterLambda :: (E.Exp -> InternaliseM Body)
                      -> I.Ident
                      -> E.Lambda
                      -> [I.SubExp]
-                     -> InternaliseM (I.Ident, I.Lambda)
+                     -> InternaliseM I.Lambda
 internaliseFilterLambda internaliseBody ce lam args = do
   let argtypes = map I.subExpType args
       rowtypes = map I.rowType argtypes
   (params, body, _) <- internaliseLambda internaliseBody ce lam rowtypes
-  let arg_outer_shape = outerShape loc argtypes
-      filtfun         = I.Lambda params body [I.Basic Bool] loc
-  result_size <- bindFilterResultOuterShape ce filtfun args arg_outer_shape
-  return (result_size, filtfun)
+  return $ I.Lambda params body [I.Basic Bool] loc
   where loc = srclocOf lam
-
-bindFilterResultOuterShape :: I.Ident -> I.Lambda -> [I.SubExp] -> I.DimSize
-                           -> InternaliseM I.Ident
-bindFilterResultOuterShape ce lam args input_size = do
-  outershape <- newIdent "filter_size"
-                (I.Basic Int) loc
-  markarray  <- newIdent "filter_mark"
-                (I.arrayOf (I.Basic Int) (I.Shape [input_size]) Nonunique) loc
-  markfunBody <-
-    flip mapResultM (lambdaBody lam) $ \res -> do
-      let [ok] = resultSubExps res -- XXX
-          funcs = resultCertificates res
-          result e = resultBody funcs [e] loc
-      ok_int <- newIdent "ok" (I.Basic Int) loc
-      return $ Body [I.Let [ok_int] $
-                      I.If ok (result one) (result zero) [I.Basic Int] loc] $
-               I.Result funcs [I.Var ok_int] loc
-  countfun <- binOpLambda I.Plus (I.Basic Int) loc
-  let markfun = Lambda { I.lambdaParams = lambdaParams lam
-                       , I.lambdaBody = markfunBody
-                       , I.lambdaReturnType = [I.Basic Int]
-                       , I.lambdaSrcLoc = loc
-                       }
-      markmap = I.Map [ce] markfun args loc
-      countcomp = I.Reduce [ce] countfun [(zero, I.Var markarray)] loc
-  letBind [markarray] markmap
-  letBind [outershape] countcomp
-  return outershape
-  where loc = srclocOf lam
-        zero = I.intconst 0 loc
-        one  = I.intconst 1 loc

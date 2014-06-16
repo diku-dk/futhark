@@ -170,6 +170,11 @@ tapUsage :: SimpleM a -> SimpleM (a, UT.UsageTable)
 tapUsage m = do (x,needs) <- listen m
                 return (x, usageTable needs)
 
+blockUsage :: SimpleM a -> SimpleM a
+blockUsage m = pass $ do
+  (x, _) <- listen m
+  return (x, const mempty)
+
 localVtable :: (ST.SymbolTable -> ST.SymbolTable) -> SimpleM a -> SimpleM a
 localVtable f = local $ \env -> env { envVtable = f $ envVtable env }
 
@@ -266,7 +271,13 @@ hoistBindings rules block vtable uses dupes needs body = do
 
         attachUsage bnd = (bnd, providedByBnd bnd, usedInBnd bnd)
         providedByBnd (Let pat _) = map identName pat
-        usedInBnd (Let _ e) = usageInExp e <> UT.usages (freeNamesInExp e)
+        usedInBnd (Let pat e) =
+          usageInPat pat <> usageInExp e <> UT.usages (freeNamesInExp e)
+        usageInPat =
+          UT.usages . HS.fromList . mapMaybe subExpUsage .
+          concatMap (arrayDims . identType)
+        subExpUsage (Var v)       = Just $ identName v
+        subExpUsage (Constant {}) = Nothing
 
         pick ds (LetNeed (pat,_) (e,_)) =
           let (bnds,ds') = performCSE ds pat e
@@ -424,7 +435,7 @@ simplifyBody (Body [] (Result cs es loc)) =
 -- The simplification rules cannot handle Apply, because it requires
 -- access to the full program.
 simplifyBody (Body (Let pat (Apply fname args rettype loc):bnds) res) = do
-  pat' <- mapM simplifyIdentBinding pat
+  pat' <- blockUsage $ mapM simplifyIdentBinding pat
   args' <- mapM (simplifySubExp . fst) args
   rettype' <- mapM simplifyExtType rettype
   prog <- asks envProgram
@@ -441,7 +452,7 @@ simplifyBody (Body (Let pat (Apply fname args rettype loc):bnds) res) = do
                in bindLet pat' e' $ simplifyBody $ Body bnds res
 
 simplifyBody (Body (Let pat e:bnds) res) = do
-  pat' <- mapM simplifyIdentBinding pat
+  pat' <- blockUsage $ mapM simplifyIdentBinding pat
   e' <- simplifyExp e
   vtable <- asks envVtable
   rules <- asks envRules
@@ -489,12 +500,11 @@ simplifyExp (Map cs fun arrs loc) = do
   fun' <- simplifyLambda fun arrs'
   return $ Map cs' fun' arrs' loc
 
-simplifyExp (Filter cs fun arrs size loc) = do
+simplifyExp (Filter cs fun arrs loc) = do
   cs' <- simplifyCerts cs
   arrs' <- mapM simplifySubExp arrs
   fun' <- simplifyLambda fun arrs'
-  size' <- simplifySubExp size
-  return $ Filter cs' fun' arrs' size' loc
+  return $ Filter cs' fun' arrs' loc
 
 simplifyExp (Reduce cs fun input loc) = do
   let (acc, arrs) = unzip input

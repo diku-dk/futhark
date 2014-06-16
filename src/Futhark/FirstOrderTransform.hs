@@ -82,7 +82,7 @@ transformExp (Scan cs fun args loc) = do
   return $ DoLoop arr (zip (acc ++ arr) (initacc ++ initarr)) i (isize arr) loopbody loc
   where (accexps, arrexps) = unzip args
 
-transformExp (Filter cs fun arrexps outersize loc) = do
+transformExp (Filter cs fun arrexps loc) = do
   arr <- letExps "arr" $ map SubExp arrexps
   let nv = size arrexps
       rowtypes = map (rowType . subExpType) arrexps
@@ -109,22 +109,26 @@ transformExp (Filter cs fun arrexps outersize loc) = do
   ia <- letExp "ia" scan
   let indexia ind = eIndex cs ia [ind] loc
       sub1 e = eBinOp Minus e (pexp $ intval 1) (Basic Int) loc
+      indexi = indexia $ pexp iv
+      indexin = index cs arr iv
+      indexinm1 = indexia $ sub1 $ pexp iv
+  outersize <- letSubExp "filter_result_size" =<< indexia (sub1 $ pexp nv)
   resinit <- resultArray (map ((`setOuterSize` outersize) . subExpType) arrexps) loc
   res <- forM (map subExpType resinit) $ \t -> newIdent "filter_result" t loc
-  let resv = resultBody [] (map Var res) loc
+  mergesize <- newIdent "mergesize" (Basic Int) loc
+  let resv = resultBody [] (map Var $ mergesize : res) loc
   loopbody <- insertBindingsM $ do
-    let indexi = indexia $ pexp iv
-        indexin = index cs arr iv
-        indexinm1 = indexia $ sub1 $ pexp iv
-        update = insertBindingsM $ do
+    let update = insertBindingsM $ do
           dest <- letwith cs res (sub1 indexi) indexin
-          return $ resultBody [] (map Var dest) loc
+          return $ resultBody [] (map Var $ mergesize:dest) loc
     eBody [eIf (eIf (pure $ BinOp Equal iv (intval 0) (Basic Bool) loc)
                (eBody [eBinOp Equal indexi (pexp $ intval 0) (Basic Bool) loc])
                (eBody [eBinOp Equal indexi indexinm1 (Basic Bool) loc])
                [Basic Bool] loc)
            (pure resv) update (bodyType resv) loc]
-  return $ DoLoop res (zip res resinit) i nv loopbody loc
+  return $ DoLoop (mergesize:res)
+    (zip (mergesize:res) (outersize:resinit))
+    i nv loopbody loc
   where intval x = intconst x loc
 
 transformExp (Redomap cs _ innerfun accexps arrexps loc) = do

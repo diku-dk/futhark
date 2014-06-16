@@ -100,10 +100,10 @@ splitBinding bnd@(Let pat (Map cs fun args loc)) = do
           Let pat $ Map cs valfun args loc,
           ok)
 
-splitBinding bnd@(Let pat (Filter cs fun args ressize loc)) = do
+splitBinding bnd@(Let pat (Filter cs fun args loc)) = do
   (predbnds, valfun, ok) <- splitMap cs fun args loc
   return (predbnds ++ [bnd],
-          Let pat $ Filter cs valfun args ressize loc,
+          Let pat $ Filter cs valfun args loc,
           ok)
 
 splitBinding bnd@(Let pat (Reduce cs fun args loc)) = do

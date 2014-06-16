@@ -57,13 +57,12 @@ dataDependencies' startdeps = foldl grow startdeps . bodyBindings
                         lambdaDeps deps' fun
           in resdeps `HM.union` deps'
 
-        grow deps (Let pat (Filter cs fun arrs outersize _)) =
+        grow deps (Let pat (Filter cs fun arrs _)) =
           let pardeps = mkDeps (lambdaParams fun) $
                         soacArgDeps deps cs $ map (depsOf deps) arrs
               deps' = dataDependencies' (pardeps `HM.union` deps) $
                       lambdaBody fun
-              resdeps = mkDeps pat $ repeat $ HS.unions $
-                        depsOf deps outersize : lambdaDeps deps' fun
+              resdeps = mkDeps pat $ repeat $ HS.unions $ lambdaDeps deps' fun
           in resdeps `HM.union` deps'
 
         grow deps (Let pat (Reduce cs fun args _)) =

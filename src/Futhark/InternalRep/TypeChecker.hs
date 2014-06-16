@@ -732,17 +732,16 @@ checkExp (Scan ass fun inputs pos) = do
                           ", but scan function returns type " ++ ppTuple funret ++ "."
   return $ Scan ass' fun' (zip startexps' arrexps') pos
 
-checkExp (Filter ass fun arrexps outer_shape pos) = do
+checkExp (Filter ass fun arrexps loc) = do
   ass' <- mapM (requireI [Basic Cert] <=< checkIdent) ass
-  outer_shape' <- require [Basic Int] =<< checkSubExp outer_shape
   (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
   fun' <- checkLambda fun arrargs
   let funret = lambdaType fun' $ map argType arrargs
   when (funret /= [Basic Bool]) $
-    bad $ TypeError pos "Filter function does not return bool."
+    bad $ TypeError loc "Filter function does not return bool."
   when (any (unique . identType) $ lambdaParams fun) $
-    bad $ TypeError pos "Filter function consumes its arguments."
-  return $ Filter ass' fun' arrexps' outer_shape' pos
+    bad $ TypeError loc "Filter function consumes its arguments."
+  return $ Filter ass' fun' arrexps' loc
 
 checkExp (Redomap ass outerfun innerfun accexps arrexps pos) = do
   ass' <- mapM (requireI [Basic Cert] <=< checkIdent) ass
