@@ -171,10 +171,13 @@ type ForbiddenTable = Names
 noneForbidden :: ForbiddenTable -> Names -> Bool
 noneForbidden ftable = HS.null . HS.intersection ftable
 
+forbid :: [VName] -> ForbiddenTable -> ForbiddenTable
+forbid names ftable = foldr HS.insert ftable names
+
 forbidNames :: [VName] -> VName -> Loops -> ForbiddenTable -> ForbiddenTable
 forbidNames names loop loops ftable
   | loop `HS.member` loops = ftable
-  | otherwise              = foldr HS.insert ftable names
+  | otherwise              = forbid names ftable
 
 forbidParams :: [Param] -> VName -> Loops -> ForbiddenTable -> ForbiddenTable
 forbidParams = forbidNames . map identName
@@ -189,7 +192,7 @@ bodyVariantIn ftable sctable loops (Body bnds res) = do
           (couldSimplify <$> bindingVariantIn ftable' sctable loops bnd) <|>
           couldNotSimplify
           where couldNotSimplify =
-                  return (ftable' `HS.union` HS.fromList (map identName pat),
+                  return (forbid (map identName pat) ftable',
                           bnds'++[bnd])
                 couldSimplify newbnds =
                   (ftable',
