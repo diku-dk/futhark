@@ -16,16 +16,34 @@ import Data.Maybe
 import Futhark.InternalRep
 import Futhark.Tools
 import Futhark.MonadFreshNames
+import Futhark.InternalRep.Renamer
 import Futhark.Substitute
+import Futhark.Optimise.Simplifier
+import Futhark.Optimise.DeadVarElim
 
 -- | Perform the transformation on a program.
 splitShapes :: Prog -> Prog
 splitShapes prog =
-  Prog $ progFunctions prog ++ evalState m (newNameSourceForProg prog)
-  where m :: State VNameSource [FunDec]
-        m = do (fShapes, fValues) <-
-                 unzip <$> mapM functionSlices (progFunctions prog)
-               return $ fShapes ++ fValues
+  Prog { progFunctions = evalState m (newNameSourceForProg prog) }
+  where m = do let origfuns = progFunctions prog
+               (substs, newfuns) <-
+                 unzip <$> map extract <$>
+                 makeFunSubsts origfuns
+               mapM (substCalls substs) $ origfuns ++ concat newfuns
+        extract (fname, (shapefun, valfun)) =
+          ((fname, (funDecName shapefun, funDecRetType shapefun,
+                    funDecName valfun, funDecRetType valfun)),
+           [shapefun, valfun])
+
+makeFunSubsts :: MonadFreshNames m =>
+                 [FunDec] -> m [(Name, (FunDec, FunDec))]
+makeFunSubsts fundecs =
+  cheapSubsts <$>
+  zip (map funDecName fundecs) <$>
+  mapM (simplifyShapeFun' <=< functionSlices) fundecs
+  where simplifyShapeFun' (shapefun, valfun) = do
+          shapefun' <- simplifyShapeFun shapefun
+          return (shapefun', valfun)
 
 -- | Returns shape slice and value slice.  The shape slice duplicates
 -- the entire value slice - you should try to simplify it, and see if
@@ -79,3 +97,59 @@ substituteExtResultShapes rettype (Body bnds res) = do
         substInBnd' v
           | identName v `HM.member` subst = newIdent' (<>"unused") v
           | otherwise                     = return v
+
+simplifyShapeFun :: MonadFreshNames m => FunDec -> m FunDec
+simplifyShapeFun shapef = return . deadCodeElimFun =<< simplifyFun =<<
+                          return . deadCodeElimFun =<< simplifyFun =<<
+                          return . deadCodeElimFun =<< simplifyFun =<<
+                          return . deadCodeElimFun =<< simplifyFun =<<
+                          return . deadCodeElimFun =<< simplifyFun =<<
+                          return . deadCodeElimFun =<< simplifyFun =<<
+                          renameFun shapef
+
+cheapFun :: FunDec -> Bool
+cheapFun  = cheapBody . funDecBody
+  where cheapBody (Body bnds _) = all cheapBinding bnds
+        cheapBinding (Let _ e) = cheap e
+        cheap (DoLoop {}) = False
+        cheap (Map {}) = False
+        cheap (Apply {}) = False
+        cheap (Reduce {}) = False
+        cheap (Scan {}) = False
+        cheap (Redomap {}) = False
+        cheap (If _ tbranch fbranch _ _) = cheapBody tbranch && cheapBody fbranch
+        cheap _ = True
+
+cheapSubsts :: [(Name, (FunDec, FunDec))] -> [(Name, (FunDec, FunDec))]
+cheapSubsts = filter (cheapFun . fst . snd)
+              -- Probably too simple.  We might want to inline first.
+
+substCalls :: MonadFreshNames m => [(Name, (Name, RetType, Name, RetType))] -> FunDec -> m FunDec
+substCalls subst (origFname,origRettype,params,fbody,origloc) = do
+  fbody' <- treatBody fbody
+  return (origFname, origRettype, params, fbody', origloc)
+  where treatBody (Body bnds res) = do
+          bnds' <- mapM treatBinding bnds
+          return $ Body (concat bnds') res
+        treatLambda lam = do
+          body <- treatBody $ lambdaBody lam
+          return $ lam { lambdaBody = body }
+
+        treatBinding (Let pat (Apply fname args _ loc))
+          | Just (shapefun,shapetype,valfun,valtype) <- lookup fname subst =
+            liftM snd . runBinder'' $ do
+              let (vs,vals) = splitAt (length shapetype) pat
+                  shapeargs = [ (arg, Observe) | (arg,_) <- args ]
+                  shapetype' = returnType shapetype (repeat Observe) $
+                               map (subExpType . fst) shapeargs
+                  valtype' = returnType valtype (map snd args) $
+                             map (subExpType . fst) args
+              letBind vs $ Apply shapefun args shapetype' loc
+              letBind vals $ Apply valfun ([(Var v,Observe) | v <- vs]++args) valtype' loc
+
+        treatBinding (Let pat e) = do
+          e' <- mapExpM mapper e
+          return [Let pat e']
+          where mapper = identityMapper { mapOnBody = treatBody
+                                        , mapOnLambda = treatLambda
+                                        }

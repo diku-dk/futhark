@@ -40,6 +40,9 @@ module Futhark.InternalRep.Syntax
 
   -- * Definitions
   , FunDec
+  , funDecName
+  , funDecBody
+  , funDecRetType
   , Prog(..)
 
   -- * Miscellaneous
@@ -398,6 +401,15 @@ type FunDec = (Name,
                [Param],
                Body,
                SrcLoc)
+
+funDecName :: FunDec -> Name
+funDecName (fname,_,_,_,_) = fname
+
+funDecBody :: FunDec -> Body
+funDecBody (_,_,_,body,_) = body
+
+funDecRetType :: FunDec -> RetType
+funDecRetType (_,rettype,_,_,_) = rettype
 
 -- | An entire Futhark program.
 newtype Prog = Prog { progFunctions :: [FunDec] }

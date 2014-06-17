@@ -325,8 +325,9 @@ checkResAnnotation loc desc rt1 rt2
           zipWithM generalise'
           (extShapeDims $ arrayShape t1)
           (extShapeDims $ arrayShape t2)
-        generalise' (Ext x)   _ = Ext <$> getExt x
-        generalise' (Free se) _ = return $ Free se
+        generalise' (Ext x)   _         = Ext <$> getExt x
+        generalise' (Free _)  (Free se) = return $ Free se
+        generalise' (Free se) (Ext _)   = return $ Free se
         getExt x = do (n,m) <- get
                       case HM.lookup x m of
                         Nothing -> do put (n + 1, HM.insert x n m)
