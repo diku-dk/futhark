@@ -247,7 +247,8 @@ bindingVariantIn ftable sctable loops (Let pat (If (Var v) tbranch fbranch t loc
        Body fbnds (Result _ [fres] _))
         | Basic Bool <- subExpType tres,
           Basic Bool <- subExpType fres,
-          all safeBnd tbnds, all safeBnd fbnds ->
+          all safeBnd tbnds, all safeBnd fbnds -> do
+        sufficiented
         return $ tbnds ++ fbnds ++
                  [Let pat $ BinOp LogAnd tres fres (Basic Bool) loc]
       _ -> fail "Branch not sufficiently invariant"
