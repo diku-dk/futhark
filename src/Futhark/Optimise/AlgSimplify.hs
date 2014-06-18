@@ -79,7 +79,7 @@ type DNF     = [NAnd ]
 
 -- | Applies Simplification at Expression level:
 simplify :: ScalExp -> SrcLoc -> RangesRep -> Either Error ScalExp
-simplify e = runAlgSimplifier False (simplifyScal e) 
+simplify e = runAlgSimplifier False (simplifyScal e)
 
 -- | Extracts sufficient conditions for a LTH0 relation to hold
 mkSuffConds :: ScalExp -> SrcLoc -> RangesRep -> Either Error [[ScalExp]]
@@ -749,10 +749,16 @@ helperTimesDivMinMax isTimes isRev emo@(MaxMin{}) e = do
             p' <- simplifyNRel $ NRelExp LTH0 e'_sop
             case p' of
                 LogCt ctbool -> do
-                    let cond = not isTimes && isRev
-                    let cond'= if ctbool then cond  else not cond
-                    let ismin'= if cond' then ismin else not ismin
+--                    let cond = not isTimes && isRev
+--                    let cond'= if ctbool then cond  else not cond
+--                    let ismin'= if cond' then ismin else not ismin
+
+                    let cond =  (      isTimes                 && (not ctbool) ) ||
+                                ( (not isTimes) && (not isRev) && (not ctbool) ) ||
+                                ( (not isTimes) &&      isRev  &&      ctbool  )
+                    let ismin' = if cond then ismin else not ismin
                     simplifyScal $ MaxMin ismin' $ map (`mkTimesDiv` e') es
+
                 _  -> if not isTimes then return $ mkTimesDiv em e'
                       else -- e' * MaxMin{...}
                         case e'_sop of
@@ -831,13 +837,18 @@ toDNF :: ScalExp -> AlgSimplifyM DNF
 toDNF (Val  (LogVal v)) = return [[LogCt v]]
 toDNF (Id      idd    ) = return [[PosId idd]]
 toDNF (RelExp  rel  e ) = do
-    let btp = scalExpType e
-    e' <- if (btp == Int) && (rel == LEQ0)
-          then do m1 <- getNeg1 Int; return $ SPlus e $ Val m1
-          else return e
-    ne    <- toNumSofP =<< simplifyScal e'
-    nrel  <- simplifyNRel $ NRelExp LTH0 ne  -- False
-    return [[nrel]]
+    case scalExpType e of
+        Int -> do e' <- if (rel == LEQ0)
+                        then do m1 <- getNeg1 Int; return $ SPlus e $ Val m1
+                        else return e
+
+                  ne   <- toNumSofP =<< simplifyScal e'
+                  nrel <- simplifyNRel $ NRelExp LTH0 ne  -- False
+                  return [[nrel]]
+
+        _   -> do ne   <- toNumSofP =<< simplifyScal e
+                  nrel <- markGaussLTH0 $ simplifyNRel $ NRelExp rel ne
+                  return [[nrel]]
 --
 toDNF (SNot (SNot     e)) = toDNF e
 toDNF (SNot (Val (LogVal v))) = return [[LogCt $ not v]]
