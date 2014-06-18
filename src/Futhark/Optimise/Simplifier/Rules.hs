@@ -244,13 +244,16 @@ hoistLoopInvariantMergeVariables _ (Let pat (DoLoop respat merge idd n loopbody 
             ([(resv,_)], rest) -> (Just (resv, initExp), rest)
             (_,      _)        -> (Nothing,              explpat')
 
-        checkInvariance ((v1,initExp), Var v2) (invariant, explpat', merge', resExps)
-          | identName v1 == identName v2 =
+        checkInvariance ((v1,initExp), resExp) (invariant, explpat', merge', resExps)
+          | theSame v1 initExp resExp =
           let (bnd, explpat'') = removeFromResult (v1,initExp) explpat'
           in (maybe id (:) bnd $ (v1, initExp) : invariant,
               explpat'', merge', resExps)
         checkInvariance ((v1,initExp), resExp) (invariant, explpat', merge', resExps) =
           (invariant, explpat', (v1,initExp):merge', resExp:resExps)
+
+        theSame v1 initExp (Var v2) = identName v1 == identName v2
+        theSame _  initExp resExp   = initExp      == resExp
 hoistLoopInvariantMergeVariables _ _ = cannotSimplify
 
 -- | A function that, given a variable name, returns its definition.
