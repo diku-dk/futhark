@@ -127,12 +127,24 @@ splitBinding bnd@(Let pat (Redomap cs outerfun innerfun acc arr loc)) = do
 splitBinding (Let pat (DoLoop respat merge i bound body loc)) = do
   (predbody, valbody) <- splitBody body
   ok <- newIdent "loop_ok" (Basic Bool) loc
+  predbody' <- conjoinLoopBody ok predbody
   let predloop = DoLoop (respat++[ok])
-                 (merge++[(ok,constant True loc)]) i bound predbody loc
+                 (merge++[(ok,constant True loc)]) i bound
+                 predbody' loc
       valloop = DoLoop respat merge i bound valbody loc
   return ([Let (pat++[ok]) predloop],
           Let pat valloop,
           Just $ Var ok)
+  where
+    conjoinLoopBody ok (Body bnds res) = do
+      ok' <- newIdent "loop_ok_res" (Basic Bool) loc
+      case reverse $ resultSubExps res of
+        []   -> fail "conjoinLoopBody: null loop"
+        x:xs ->
+          let res' = res { resultSubExps = reverse $ Var ok':xs }
+              bnds' = bnds ++
+                      [Let [ok'] $ BinOp LogAnd x (Var ok) (Basic Bool) loc]
+          in return $ Body bnds' res'
 
 splitBinding (Let pat (If cond tbranch fbranch t loc)) = do
   (tbranch_pred, tbranch_val) <- splitBody tbranch
