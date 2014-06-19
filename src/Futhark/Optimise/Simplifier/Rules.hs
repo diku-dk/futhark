@@ -723,12 +723,14 @@ ctIndex _ = Nothing
 
 arrValInd :: Value -> [Int] -> Maybe Value
 arrValInd v [] = Just v
-arrValInd (ArrayVal arr _) (i:is) = arrValInd (arr ! i) is
+arrValInd v@(ArrayVal arr _) (i:is)
+  | i >= 0, i < valueSize v = arrValInd (arr ! i) is
 arrValInd _ _ = Nothing
 
 arrLitInd :: Exp -> [Int] -> Maybe Exp
 arrLitInd e [] = Just e
-arrLitInd (ArrayLit els _ _) (i:is) = arrLitInd (SubExp $ els !! i) is
+arrLitInd (ArrayLit els _ _) (i:is)
+  | i >= 0, i < length els = arrLitInd (SubExp $ els !! i) is
 arrLitInd (SubExp (Constant arr@(ArrayVal _ _) loc)) (i:is) =
   case arrValInd arr (i:is) of
     Nothing -> Nothing

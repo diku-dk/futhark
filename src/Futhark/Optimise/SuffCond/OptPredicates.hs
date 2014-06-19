@@ -149,9 +149,9 @@ analyseExp vtable (Redomap _ outerfun innerfun acc arrs _) =
          analyseExpBody vtable (lambdaBody outerfun)
   where vtable' = foldr (uncurry ST.insertArrayParam) vtable $ zip arrparams arrs
         arrparams = drop (length acc) $ lambdaParams innerfun
-analyseExp vtable (If _ tbranch fbranch _ _) =
-  Just $ analyseExpBody vtable tbranch <>
-         analyseExpBody vtable fbranch
+analyseExp vtable (If cond tbranch fbranch _ _) =
+  Just $ analyseExpBody (ST.updateBounds True cond vtable) tbranch <>
+         analyseExpBody (ST.updateBounds False cond vtable) fbranch
 analyseExp _ _ = Nothing
 
 analyseExpBody :: ST.SymbolTable -> Body -> SCTable

@@ -118,6 +118,10 @@ toScalExp look (BinOp Less x y _ _) =
   RelExp LTH0 <$> (sminus <$> toScalExp' look x <*> toScalExp' look y)
 toScalExp look (BinOp Leq x y _ _) =
   RelExp LEQ0 <$> (sminus <$> toScalExp' look x <*> toScalExp' look y)
+toScalExp look (BinOp Equal x y (Basic Int) _) = do
+  x' <- toScalExp' look x
+  y' <- toScalExp' look y
+  return $ RelExp LEQ0 (x' `sminus` y') `SLogAnd` RelExp LEQ0 (y' `sminus` x')
 toScalExp look (Negate e _) =
   SNeg <$> toScalExp' look e
 toScalExp look (Not e _) =
