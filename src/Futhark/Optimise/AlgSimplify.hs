@@ -4,7 +4,8 @@ module Futhark.Optimise.AlgSimplify
   , simplify
   , mkSuffConds
   , RangesRep
-  , ppScalExp
+  , linFormScalE
+  , pickSymToElim
   , canSimplify
   )
   where
@@ -81,10 +82,14 @@ type DNF     = [NAnd ]
 simplify :: ScalExp -> SrcLoc -> RangesRep -> Either Error ScalExp
 simplify e = runAlgSimplifier False (simplifyScal e)
 
+-- | Given a symbol i and a scalar expression e, it decomposes 
+--   e = a*i + b and returns (a,b) if possible, otherwise Nothing.
+linFormScalE :: Ident -> ScalExp -> SrcLoc -> RangesRep -> Either Error (Maybe (ScalExp,ScalExp))
+linFormScalE i e = runAlgSimplifier False (linearFormScalExp i e)
+
 -- | Extracts sufficient conditions for a LTH0 relation to hold
 mkSuffConds :: ScalExp -> SrcLoc -> RangesRep -> Either Error [[ScalExp]]
 mkSuffConds e = runAlgSimplifier True (gaussElimRel e)
-
 
 -- | Test if Simplification engine can handle this kind of expression
 canSimplify :: Int -> Either Error ScalExp --[[ScalExp]]
@@ -109,16 +114,14 @@ simplifyNRel :: BTerm -> AlgSimplifyM BTerm
 simplifyNRel inp_term@(NRelExp LTH0 inp_sofp) = do
     term <- cheapSimplifyNRel inp_term
     in_gauss <- asks inSolveLTH0
+    let tp = typeOfNAlg inp_sofp  
 
-    if in_gauss || isTrivialNRel term
+    if in_gauss || isTrivialNRel term || (not (tp == Int))
     then return term
-    else do let tp = typeOfNAlg inp_sofp  
-            if  tp == Int
-            then do ednf <- markGaussLTH0 $ gaussAllLTH0 True S.empty inp_sofp
-                    case ednf of
-                        Val (LogVal c) -> return $ LogCt c
-                        _              -> return $ term
-            else badAlgSimplifyM "simplifyNRel: NOT a LTH0 relation on ints!"
+    else do ednf <- markGaussLTH0 $ gaussAllLTH0 True S.empty inp_sofp
+            case ednf of
+                Val (LogVal c) -> return $ LogCt c
+                _              -> return $ term
     where
         isTrivialNRel (NRelExp _ (NProd [Val _] _)) = True
         isTrivialNRel (NRelExp{}                  ) = False
@@ -195,14 +198,13 @@ basicScalExpLTH0 _                = False
 type Prod = [ScalExp]
 gaussAllLTH0 :: Bool -> S.Set VName -> NNumExp -> AlgSimplifyM ScalExp
 gaussAllLTH0 static_only el_syms sofp = do
-    let tp = typeOfNAlg sofp
-    --e_scal <- fromNumSofP sofp
-    --sofp' <- trace ("BEGIN gaussAllLTH0   : "++ppScalExp e_scal++" < 0") (return sofp)
+    let tp  = typeOfNAlg sofp
+    ranges <- asks ranges
+    e_scal <- fromNumSofP sofp
+    let mi  = pickSymToElim ranges el_syms e_scal
 
-    mi <- pickSymToElim el_syms sofp
     case mi of
-      Nothing -> do e_scal <- fromNumSofP sofp
-                    if basicScalExpLTH0 e_scal 
+      Nothing -> do if basicScalExpLTH0 e_scal 
                     then return $  Val (LogVal True)
                     else return $  RelExp LTH0 e_scal
       Just i  -> do
@@ -257,8 +259,7 @@ gaussAllLTH0 static_only el_syms sofp = do
                          let are_all_false = foldl (&&) True  bools_F
                          if       is_one_true  then return $ Val (LogVal True)
                          else if are_all_false then return $ Val (LogVal False)
-                         else do e_scal <- fromNumSofP sofp
-                                 return $ RelExp LTH0 e_scal 
+                         else return $ RelExp LTH0 e_scal 
                  -- otherwise all terms should be all true!
                  else do let bools_T = map (\m -> if m == Val (LogVal True ) then True else False) mms
                          let bools_F = map (\m -> if m == Val (LogVal False) then True else False) mms
@@ -266,8 +267,7 @@ gaussAllLTH0 static_only el_syms sofp = do
                          let is_one_false = foldl (||) False bools_F
                          if      are_all_true then return $ Val (LogVal True )
                          else if is_one_false then return $ Val (LogVal False)
-                         else do e_scal <- fromNumSofP sofp
-                                 return $ RelExp LTH0 e_scal
+                         else return $ RelExp LTH0 e_scal
             --------------------------------------------------------------------
             -- returns sufficient conditions for the ScalExp relation to hold --
             --------------------------------------------------------------------
@@ -292,25 +292,6 @@ gaussAllLTH0 static_only el_syms sofp = do
                 Nothing -> gaussAllLTH0 static_only (S.insert (identName i) el_syms) sofp
                 Just res_eofp -> return $ res_eofp
     where
-        pickSymToElim :: S.Set VName -> NNumExp -> AlgSimplifyM (Maybe Ident)
-        pickSymToElim elsyms0 e0 = do
-            ranges <- asks ranges
-            e_scal <- fromNumSofP e0
-            let ids0= (S.toList . S.fromList . getIds) e_scal
-            let ids1= filter (\s -> not (S.member (identName s) elsyms0)) ids0
-            let ids2= filter (\s -> case HM.lookup (identName s) ranges of
-                                        Nothing -> False
-                                        Just _  -> True
-                             ) ids1
-            let ids = sortBy (\n1 n2 -> let n1p = HM.lookup (identName n1) ranges
-                                            n2p = HM.lookup (identName n2) ranges
-                                        in case (n1p, n2p) of
-                                             (Just (p1,_,_), Just (p2,_,_)) -> compare (-p1) (-p2)
-                                             (_            , _            ) -> compare (1::Int) (1::Int)
-                             ) ids2
-            case ids of []  -> return Nothing
-                        v:_ -> return $ Just v
-
         findMinMaxTerm :: Ident -> NNumExp -> AlgSimplifyM (Maybe ScalExp, Prod, [NNumExp])
         findMinMaxTerm _  (NSum  [] _) = return (Nothing, [], [])
         findMinMaxTerm _  (NSum  [NProd [MaxMin ismin e] _] _) =
@@ -429,47 +410,6 @@ gaussOneDefaultLTH0  static_only i elsyms e = do
                             return $ Just res
 
     where
-        linearForm :: Ident -> NNumExp -> AlgSimplifyM (Maybe (NNumExp, NNumExp))
-        linearForm _ (NProd [] _) =
-            badAlgSimplifyM "linearForm: empty Prod!"
-        linearForm idd ee@(NProd{}) = linearForm idd (NSum [ee] (typeOfNAlg ee))
-        linearForm _ (NSum [] _) =
-            badAlgSimplifyM "linearForm: empty Sum!"
-        linearForm idd (NSum terms tp) = do
-            terms_d_idd <- mapM  (\t -> do t0 <- case t of
-                                                    NProd (_:_) _ -> return t
-                                                    _ -> badAlgSimplifyM "linearForm: ILLEGAL111!!!!"
-                                           t_scal <- fromNumSofP t0
-                                           simplifyScal $ SDivide t_scal (Id idd)
-                                 ) terms
-            let myiota  = [1..(length terms)]
-            let ia_terms= filter (\(_,t)-> case t of
-                                             SDivide _ _ -> False
-                                             _           -> True
-                                 ) (zip myiota terms_d_idd)
-            let (a_inds, a_terms) = unzip ia_terms
-
-            let (_, b_terms) = unzip $ filter (\(iii,_) -> iii `notElem` a_inds)
-                                              (zip myiota terms)
-            -- check that b_terms do not contain idd
-            b_succ <- foldM (\acc x ->
-                                case x of
-                                  NProd fs _ -> do let fs_scal = foldl STimes (Val (IntVal 1)) fs
-                                                   let b_ids = getIds fs_scal
-                                                   return $ acc && idd `notElem` b_ids
-                                  _          -> badAlgSimplifyM "linearForm: ILLEGAL222!!!!"
-                            ) True b_terms
-
-            case a_terms of
-              t:ts | b_succ -> do
-                let a_scal = foldl SPlus t ts
-                a_terms_sofp <- toNumSofP =<< simplifyScal a_scal
-                b_terms_sofp <- if null b_terms
-                                then do zero <- getZero tp; return $ NProd [Val zero] tp
-                                else return $ NSum b_terms tp
-                return $ Just (a_terms_sofp, b_terms_sofp)
-              _ -> return Nothing
-
         gaussElimHalf :: Bool -> S.Set VName -> ScalExp -> NNumExp -> NNumExp -> AlgSimplifyM ScalExp
         gaussElimHalf only_static elsyms0 q a b = do
             a_scal <- fromNumSofP a
@@ -480,6 +420,86 @@ gaussOneDefaultLTH0  static_only i elsyms e = do
 
 --    pos <- asks pos
 --    badAlgSimplifyM "gaussOneDefaultLTH0: unimplemented!"
+
+----------------------------------------------------------
+--- Pick a Symbol to Eliminate & Bring To Linear Form  ---
+----------------------------------------------------------
+
+pickSymToElim :: RangesRep -> S.Set VName -> ScalExp -> Maybe Ident
+pickSymToElim ranges elsyms0 e_scal =
+--    ranges <- asks ranges
+--    e_scal <- fromNumSofP e0
+    let ids0= (S.toList . S.fromList . getIds) e_scal
+        ids1= filter (\s -> not (S.member (identName s) elsyms0)) ids0
+        ids2= filter (\s -> case HM.lookup (identName s) ranges of
+                                Nothing -> False
+                                Just _  -> True
+                     ) ids1
+        ids = sortBy (\n1 n2 -> let n1p = HM.lookup (identName n1) ranges
+                                    n2p = HM.lookup (identName n2) ranges
+                                in case (n1p, n2p) of
+                                     (Just (p1,_,_), Just (p2,_,_)) -> compare (-p1) (-p2)
+                                     (_            , _            ) -> compare (1::Int) (1::Int)
+                     ) ids2
+    in  case ids of 
+            []  -> Nothing
+            v:_ -> Just v
+
+
+linearFormScalExp :: Ident -> ScalExp -> AlgSimplifyM (Maybe (ScalExp, ScalExp))
+linearFormScalExp sym scl_exp = do
+    sofp <- toNumSofP =<< simplifyScal scl_exp
+    ab   <- linearForm sym sofp
+    case ab of
+        Just (a_sofp, b_sofp) -> do 
+            a <- fromNumSofP a_sofp
+            b <- fromNumSofP b_sofp
+            a'<- simplifyScal a
+            b'<- simplifyScal b
+            return $ Just (a', b')
+        Nothing -> 
+            return Nothing
+
+linearForm :: Ident -> NNumExp -> AlgSimplifyM (Maybe (NNumExp, NNumExp))
+linearForm _ (NProd [] _) =
+    badAlgSimplifyM "linearForm: empty Prod!"
+linearForm idd ee@(NProd{}) = linearForm idd (NSum [ee] (typeOfNAlg ee))
+linearForm _ (NSum [] _) =
+    badAlgSimplifyM "linearForm: empty Sum!"
+linearForm idd (NSum terms tp) = do
+    terms_d_idd <- mapM  (\t -> do t0 <- case t of
+                                            NProd (_:_) _ -> return t
+                                            _ -> badAlgSimplifyM "linearForm: ILLEGAL111!!!!"
+                                   t_scal <- fromNumSofP t0
+                                   simplifyScal $ SDivide t_scal (Id idd)
+                         ) terms
+    let myiota  = [1..(length terms)]
+    let ia_terms= filter (\(_,t)-> case t of
+                                     SDivide _ _ -> False
+                                     _           -> True
+                         ) (zip myiota terms_d_idd)
+    let (a_inds, a_terms) = unzip ia_terms
+
+    let (_, b_terms) = unzip $ filter (\(iii,_) -> iii `notElem` a_inds)
+                                      (zip myiota terms)
+    -- check that b_terms do not contain idd
+    b_succ <- foldM (\acc x ->
+                        case x of
+                           NProd fs _ -> do let fs_scal = foldl STimes (Val (IntVal 1)) fs
+                                            let b_ids = getIds fs_scal
+                                            return $ acc && idd `notElem` b_ids
+                           _          -> badAlgSimplifyM "linearForm: ILLEGAL222!!!!"
+                    ) True b_terms
+
+    case a_terms of
+        t:ts | b_succ -> do
+            let a_scal = foldl SPlus t ts
+            a_terms_sofp <- toNumSofP =<< simplifyScal a_scal
+            b_terms_sofp <- if null b_terms
+                            then do zero <- getZero tp; return $ NProd [Val zero] tp
+                            else return $ NSum b_terms tp
+            return $ Just (a_terms_sofp, b_terms_sofp)
+        _ -> return Nothing
 
 ------------------------------------------------
 ------------------------------------------------
@@ -855,7 +875,8 @@ toDNF (SNot (Val (LogVal v))) = return [[LogCt $ not v]]
 toDNF (SNot (Id     idd)) = return [[NegId idd]]
 toDNF (SNot (RelExp rel e)) = do
     let not_rel = if rel == LEQ0 then LTH0 else LEQ0
-    toDNF $ RelExp not_rel (SNeg e)
+    neg_e <- simplifyScal (SNeg e)
+    toDNF $ RelExp not_rel neg_e
 --
 toDNF (SLogOr  e1 e2  ) = do
     e1s <- toDNF e1
@@ -946,21 +967,24 @@ simplifyAndOr is_and fs =
         -- ToDo: implement implies relation!
             --not_aggr <- asks cheap
             let btp = typeOfNAlg e1
-            one <- getPos1    btp
-            e1' <- fromNumSofP e1
-            e2' <- fromNumSofP e2
-            case (rel1, rel2, btp) of
-                (LTH0, LTH0, Int) -> do
-                    e2me1m1 <- toNumSofP =<< simplifyScal (SMinus e2' $ SPlus e1' $ Val one)
-                    diffrel <- simplifyNRel $ NRelExp LTH0 e2me1m1  
-                    if diffrel == LogCt True then return True else return False
-                (_, _, Int) -> badAlgSimplifyM "impliesRel: LEQ0 for Int!"
-                (_, _, Real)-> do
-                    e2me1 <- toNumSofP =<< simplifyScal (SMinus e2' e1')
-                    let rel = if (rel1,rel2) == (LEQ0, LTH0) then LTH0 else LEQ0
-                    diffrel <- simplifyNRel $ NRelExp rel e2me1    
-                    if diffrel == LogCt True then return True else return False
-                (_, _, _) -> badAlgSimplifyM "impliesRel: exp of illegal type!"
+            if not (btp == typeOfNAlg e2) 
+            then return False
+            else do
+                one <- getPos1    btp
+                e1' <- fromNumSofP e1
+                e2' <- fromNumSofP e2
+                case (rel1, rel2, btp) of
+                    (LTH0, LTH0, Int) -> do
+                        e2me1m1 <- toNumSofP =<< simplifyScal (SMinus e2' $ SPlus e1' $ Val one)
+                        diffrel <- simplifyNRel $ NRelExp LTH0 e2me1m1  
+                        if diffrel == LogCt True then return True else return False
+                    (_, _, Int) -> badAlgSimplifyM "impliesRel: LEQ0 for Int!"
+                    (_, _, Real)-> do
+                        e2me1 <- toNumSofP =<< simplifyScal (SMinus e2' e1')
+                        let rel = if (rel1,rel2) == (LEQ0, LTH0) then LTH0 else LEQ0
+                        diffrel <- simplifyNRel $ NRelExp rel e2me1    
+                        if diffrel == LogCt True then return True else return False
+                    (_, _, _) -> badAlgSimplifyM "impliesRel: exp of illegal type!"
         impliesRel p1 p2
             | p1 == p2  = return True
             | otherwise = return False
@@ -1209,8 +1233,8 @@ addVals _ _ =
 mulVals :: BasicValue -> BasicValue -> AlgSimplifyM BasicValue
 mulVals (IntVal v1)  (IntVal v2)  = return $ IntVal (v1*v2)
 mulVals (RealVal v1) (RealVal v2) = return $ RealVal (v1*v2)
-mulVals _ _ =
-  badAlgSimplifyM "mulVals: operands not of (the same) numeral type! "
+mulVals v1 v2 =
+  badAlgSimplifyM $ "mulVals: operands not of (the same) numeral type! "++ppValue (BasicVal v1)++" "++ppValue (BasicVal v2)
 
 divVals :: BasicValue -> BasicValue -> AlgSimplifyM BasicValue
 divVals (IntVal v1)  (IntVal v2)  = return $ IntVal (v1 `div` v2)
