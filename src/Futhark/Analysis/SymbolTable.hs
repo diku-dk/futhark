@@ -209,15 +209,15 @@ updateBounds isTrue cond vtable =
   case toScalExp (`lookupScalExp` vtable) $ SubExp cond of
     Nothing    -> vtable
     Just cond' ->
---      let cond'' | isTrue    = SNot cond'
---                 | otherwise = cond'
---      in updateBoundsTuned (srclocOf cond) cond'' vtable
+      let cond'' | isTrue    = SNot cond'
+                 | otherwise = cond'
+      in updateBoundsTuned (srclocOf cond) cond'' vtable
 -- trace ("IF condition is: "++ppScalExp cond') $ updateBoundsTuned (srclocOf cond) cond'' vtable
 
 --  -- BELOW IS THE OLD VERSION!
-      let cond'' | isTrue    = cond'
-                 | otherwise = SNot cond'
-      in updateBounds' cond'' vtable
+--      let cond'' | isTrue    = cond'
+--                 | otherwise = SNot cond'
+--      in updateBounds' cond'' vtable
 
 -----------------------------------------
 --- Cosmin's version of Update Bounds ---
