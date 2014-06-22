@@ -6,7 +6,7 @@ module Futhark.Optimise.AlgSimplify
   , RangesRep
   , linFormScalE
   , pickSymToElim
-  , canSimplify
+--  , canSimplify
   )
   where
 
@@ -22,7 +22,6 @@ import Futhark.InternalRep
 import Futhark.Optimise.Errors
 import Futhark.Analysis.ScalExp
 
-import Futhark.Dev(tident) -- for debugging: tident "int x"
 import Debug.Trace
 
 type RangesRep = HM.HashMap VName (Int, Maybe ScalExp, Maybe ScalExp)
@@ -91,6 +90,7 @@ linFormScalE i e = runAlgSimplifier False (linearFormScalExp i e)
 mkSuffConds :: ScalExp -> SrcLoc -> RangesRep -> Either Error [[ScalExp]]
 mkSuffConds e = runAlgSimplifier True (gaussElimRel e)
 
+{-
 -- | Test if Simplification engine can handle this kind of expression
 canSimplify :: Int -> Either Error ScalExp --[[ScalExp]]
 canSimplify i = do
@@ -101,6 +101,7 @@ canSimplify i = do
               simplify e2 noLoc h
 --            runAlgSimplifier False (gaussAllLTH0 False S.empty =<< toNumSofP =<< simplifyScal e) noLoc h
         _ -> simplify e2 noLoc h-- badAlgSimplifyM "canSimplify: unimplemented!"
+-}
 -------------------------------------------------------
 --- Assumes the relational expression is simplified  --
 --- All uses of gaussiam elimination from simplify   --
@@ -1356,7 +1357,7 @@ tryDivTriv t f
     | otherwise = return (False, SDivide t f)
 
 
-
+{-
 mkRelExp :: Int -> (RangesRep, ScalExp, ScalExp)
 mkRelExp 1 =
     let (i',j',n',p',m') = (tident "int i", tident "int j", tident "int n", tident "int p", tident "int m")
@@ -1408,3 +1409,4 @@ mkRelExp 3 =
 mkRelExp _ = let hash = HM.empty
                  rel = RelExp LTH0 (Val (IntVal (-1)))
              in (hash, rel, rel)
+-}
