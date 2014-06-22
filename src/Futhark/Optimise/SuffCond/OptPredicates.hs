@@ -92,8 +92,7 @@ generatePredicates' (fname, rettype, params, body, loc) suff sctable loops = do
     _                  -> return Nothing
   where fname' = fname <> nameFromString suff
 
-data SCEntry = SufficientCond [[ScalExp]]
-             | SCTable SCTable
+data SCEntry = SufficientCond [[ScalExp]] ScalExp
              deriving (Eq, Show)
 
 type SCTable = HM.HashMap VName SCEntry
@@ -112,7 +111,7 @@ analyseBody vtable sctable (Body (Let [v] e:bnds) res) =
           | Int <- SE.scalExpType ine ->
           case AS.mkSuffConds se loc ranges of
             Left err  -> error $ show err -- Why can this even fail?
-            Right ses -> HM.insert name (SufficientCond ses) sctable
+            Right ses -> HM.insert name (SufficientCond ses se) sctable
         (Just eSCTable, _) -> sctable <> eSCTable
         _                  -> sctable
   in analyseBody vtable' sctable' $ Body bnds res
@@ -236,8 +235,10 @@ bindingVariantIn ftable sctable loops (Let [v] (Redomap cs outerfun innerfun acc
 bindingVariantIn ftable sctable loops (Let pat (If (Var v) tbranch fbranch t loc)) = do
   tbranch' <- bodyVariantIn ftable sctable loops tbranch
   fbranch' <- bodyVariantIn ftable sctable loops fbranch
-  if noneForbidden ftable $ HS.singleton $ identName v then
-    return [Let pat $ If (Var v) tbranch' fbranch' t loc]
+  let se = exactBinding sctable v
+  if scalExpIsAtMostVariantIn ftable se then do
+    (exbnds,v') <- lift $ lift $ scalExpToIdent v se
+    return $ exbnds ++ [Let pat $ If (Var v') tbranch' fbranch' t loc]
     else
     -- FIXME: Check that tbranch and fbranch are safe.  We can do
     -- something smarter if 'v' actually comes from an 'or'.  Also,
@@ -257,7 +258,7 @@ bindingVariantIn ftable sctable loops (Let pat (If (Var v) tbranch fbranch t loc
 bindingVariantIn ftable sctable _ (Let [v] e)
   | noneForbidden ftable $ freeNamesInExp e =
     return [Let [v] e]
-  | Just (SufficientCond suff) <- HM.lookup (identName v) sctable =
+  | Just (SufficientCond suff _) <- HM.lookup (identName v) sctable =
     case filter (scalExpIsAtMostVariantIn ftable) $ map mkConj suff of
       []   -> fail "Binding not sufficiently invariant"
       x:xs -> do (e', bnds) <- lift $ lift $ SE.fromScalExp loc $ foldl SE.SLogOr x xs
@@ -269,6 +270,20 @@ bindingVariantIn ftable sctable _ (Let [v] e)
 
 -- Nothing we can do about this one, then.
 bindingVariantIn _ _ _ _ = fail "Binding not sufficiently invariant"
+
+exactBinding :: SCTable -> Ident -> ScalExp
+exactBinding sctable v
+  | Just (SufficientCond _ exact) <- HM.lookup (identName v) sctable =
+    exact
+  | otherwise =
+    SE.Id v
+
+scalExpToIdent :: MonadFreshNames m =>
+                  Ident -> ScalExp -> m ([Binding], Ident)
+scalExpToIdent v se = do
+  (e', bnds) <- SE.fromScalExp (srclocOf v) se
+  v' <- newIdent' (++"exact") v
+  return (bnds ++ [Let [v'] e'], v')
 
 scalExpIsAtMostVariantIn :: ForbiddenTable -> ScalExp -> Bool
 scalExpIsAtMostVariantIn ftable =
