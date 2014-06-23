@@ -89,7 +89,7 @@ Library
                    Futhark.Optimise.Simplifier.Rule
                    Futhark.Optimise.Simplifier.Rules
                    Futhark.Optimise.Simplifier.Simplify
-                   Futhark.Optimise.AlgSimplify
+                   Futhark.Analysis.AlgSimplify
                    Futhark.Optimise.SuffCond
                    Futhark.Optimise.SuffCond.GenPredicates
                    Futhark.Optimise.SuffCond.OptPredicates

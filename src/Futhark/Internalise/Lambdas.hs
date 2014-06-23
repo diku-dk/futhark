@@ -149,8 +149,12 @@ bindMapShapes cs sizefun args outer_shape
   where loc = srclocOf sizefun
         zero = intconst 0 loc
         rt = map (const $ I.Basic I.Int) $ I.lambdaReturnType sizefun
-        isempty = eBinOp I.Equal (pure $ I.SubExp outer_shape) (pure $ SubExp zero)
-                  (I.Basic I.Bool) loc
+        -- Cosmin introduced the next two lines and commented the next two
+        --        to simplify size analysis -> the complexity in the predicate
+        fals = constant False loc
+        isempty = pure $ SubExp fals
+--        isempty = eBinOp I.Equal (pure $ I.SubExp outer_shape) (pure $ SubExp zero)
+--                  (I.Basic I.Bool) loc
         emptybranch =
           pure $ resultBody
           [] (map (const zero) $ I.lambdaReturnType sizefun) loc
