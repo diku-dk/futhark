@@ -22,6 +22,7 @@ import Futhark.Analysis.ScalExp (ScalExp)
 import qualified Futhark.Analysis.ScalExp as SE
 import qualified Futhark.Optimise.AlgSimplify as AS
 import Futhark.Tools
+--import Debug.Trace
 
 optimisePredicates :: MonadFreshNames m => Prog -> m Prog
 optimisePredicates prog = do
@@ -102,6 +103,19 @@ type Loops = Names
 analyseBody :: ST.SymbolTable -> SCTable -> Body -> SCTable
 analyseBody _ sctable (Body [] _) =
   sctable
+
+-- Cosmin added case for filter since its dependent size
+--        will not match the previous pattern. He just inlined some of
+--        the code from below since I need an easy fix for filter!
+analyseBody vtable sctable (Body ( (Let vs e@(Filter _ _ [_] _)):bnds ) res) =
+  let vtable'  = ST.insert name e vtable
+  -- Construct a new sctable for recurrences.
+      sctable' = case analyseExp vtable e of
+        Nothing       -> sctable
+        Just eSCTable -> sctable <> eSCTable
+  in analyseBody vtable' sctable' $ Body bnds res 
+  where name = identName $ last vs        
+
 analyseBody vtable sctable (Body (Let [v] e:bnds) res) =
   let vtable' = ST.insert name e vtable
       -- Construct a new sctable for recurrences.
