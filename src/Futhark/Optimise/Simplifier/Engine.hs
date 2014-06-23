@@ -410,8 +410,7 @@ hoistCommon :: SimpleM Body -> (ST.SymbolTable -> ST.SymbolTable)
 hoistCommon m1 vtablef1 m2 vtablef2 = pass $ do
   (body1, needs1) <- listen $ localVtable vtablef1 m1
   (body2, needs2) <- listen $ localVtable vtablef2 m2
-  let isAnything _ _ = True -- XXX: never hoist out of branches!
-      block = isNotSafe `orIf` isNotCheap `orIf` isAnything
+  let block = isNotSafe `orIf` isNotCheap
   vtable <- asks envVtable
   rules <- asks envRules
   (body1', safe1, f1) <-
