@@ -22,7 +22,7 @@ import Futhark.InternalRep
 import Futhark.Optimise.Errors
 import Futhark.Analysis.ScalExp
 
-import Debug.Trace
+--import Debug.Trace
 
 type RangesRep = HM.HashMap VName (Int, Maybe ScalExp, Maybe ScalExp)
 
@@ -146,7 +146,7 @@ gaussElimRel (RelExp LTH0 e) = do
     e_sofp <- if tp == Int then toNumSofP =<< simplifyScal e
               else badAlgSimplifyM "gaussElimRel: only Int relations please!"
     e_scal<- simplifyScal =<< gaussAllLTH0 False S.empty e_sofp
-    e_dnf <- trace ("SUFF CONDS for "++ppScalExp e++" < 0    IS: "++ppScalExp e_scal) toDNF e_scal
+    e_dnf <- toDNF e_scal
     mapM (mapM (\f ->
                   case f of
                     LogCt c   -> return $ Val (LogVal c)
@@ -405,7 +405,7 @@ gaussOneDefaultLTH0  static_only i elsyms e = do
                                             else return $ Nothing
                             else return Nothing
                     else do 
-                            alpblth0 <- trace ("Bounds: "++ppScalExp lb++", "++ppScalExp ub++" exp: "++ppScalExp ascal++" *i + "++ ppScalExp b_scal) $ gaussElimHalf static_only elsyms lb a b
+                            alpblth0 <- gaussElimHalf static_only elsyms lb a b
                             aupblth0 <- gaussElimHalf static_only elsyms ub a b
                             res <- simplifyScal $ SLogOr (SLogAnd aleq0 alpblth0) (SLogAnd ageq0 aupblth0)
                             return $ Just res

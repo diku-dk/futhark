@@ -209,14 +209,10 @@ updateBounds isTrue cond vtable =
   case toScalExp (`lookupScalExp` vtable) $ SubExp cond of
     Nothing    -> vtable
     Just cond' ->
-      let cond'' | isTrue    = SNot cond'
-                 | otherwise = cond'
+      let cond'' | isTrue    = cond'
+                 | otherwise = SNot cond'
       in updateBoundsTuned (srclocOf cond) cond'' vtable
--- trace ("IF condition is: "++ppScalExp cond') $ updateBoundsTuned (srclocOf cond) cond'' vtable
-
 --  -- BELOW IS THE OLD VERSION!
---      let cond'' | isTrue    = cond'
---                 | otherwise = SNot cond'
 --      in updateBounds' cond'' vtable
 
 -----------------------------------------
@@ -225,23 +221,21 @@ updateBounds isTrue cond vtable =
 
 -- | Refines the ranges in the symbol table with
 --     ranges extracted from branch conditions.
---   IMPORTANT: the second argument is the negation
---              of the branch condition! 
+--     `cond' is the condition of the if-branch.
 updateBoundsTuned :: SrcLoc -> ScalExp -> SymbolTable -> SymbolTable
-updateBoundsTuned loc not_cond sym_tab = 
-    let err_not_cond_dnf = AS.simplify not_cond loc ranges
+updateBoundsTuned loc cond sym_tab = 
+    let not_cond = SNot cond
+        err_not_cond_dnf = AS.simplify not_cond loc ranges
         cond_factors = case err_not_cond_dnf of
-                        Left  _            -> [] -- trace ("ERROR in SIMPLIFY!! "++ppScalExp not_cond++" "++show err) []
+                        Left  _            -> [] 
                         Right not_cond_dnf -> getNotFactorsLEQ0 not_cond_dnf 
-                                              --  trace ("Not_Cond: "++ppScalExp not_cond_dnf) getNotFactorsLEQ0 not_cond_dnf
+
         bounds = map solve_leq0 cond_factors
 
     in  foldl (\stab new_bound ->
                         case new_bound of
                             Just (sym,True ,bound) -> setUpperBound (identName sym) bound stab
---trace ("update UPPER bound with: "++ppScalExp bound) $ setUpperBound (identName sym) bound stab
                             Just (sym,False,bound) -> setLowerBound (identName sym) bound stab
---trace ("update LOWER bound with: "++ppScalExp bound) $ setLowerBound (identName sym) bound stab
                             _                      -> stab
               ) sym_tab bounds
 
