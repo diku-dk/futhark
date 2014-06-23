@@ -252,8 +252,9 @@ hoistLoopInvariantMergeVariables _ (Let pat (DoLoop respat merge idd n loopbody 
         checkInvariance ((v1,initExp), resExp) (invariant, explpat', merge', resExps) =
           (invariant, explpat', (v1,initExp):merge', resExp:resExps)
 
-        theSame v1 _       (Var v2) = identName v1 == identName v2
-        theSame _  initExp resExp   = initExp      == resExp
+        theSame v1 _       (Var v2)
+          | identName v1 == identName v2 = True
+        theSame _  initExp resExp        = initExp == resExp
 hoistLoopInvariantMergeVariables _ _ = cannotSimplify
 
 -- | A function that, given a variable name, returns its definition.
