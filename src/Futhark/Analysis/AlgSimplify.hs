@@ -1,5 +1,5 @@
 {-# LANGUAGE DataKinds, GeneralizedNewtypeDeriving, NamedFieldPuns #-}
-module Futhark.Optimise.AlgSimplify
+module Futhark.Analysis.AlgSimplify
   ( ScalExp
   , simplify
   , mkSuffConds

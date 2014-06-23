@@ -31,9 +31,7 @@ import qualified Data.HashMap.Lazy as HM
 import Data.Loc
 import Futhark.InternalRep
 import Futhark.Analysis.ScalExp
-import qualified Futhark.Optimise.AlgSimplify as AS
-
---import Debug.Trace
+import qualified Futhark.Analysis.AlgSimplify as AS
 
 data SymbolTable = SymbolTable {
     curDepth :: Int
@@ -211,116 +209,61 @@ updateBounds isTrue cond vtable =
     Just cond' ->
       let cond'' | isTrue    = SNot cond'
                  | otherwise = cond'
-      in updateBoundsTuned (srclocOf cond) cond'' vtable
--- trace ("IF condition is: "++ppScalExp cond') $ updateBoundsTuned (srclocOf cond) cond'' vtable
-
---  -- BELOW IS THE OLD VERSION!
---      let cond'' | isTrue    = cond'
---                 | otherwise = SNot cond'
---      in updateBounds' cond'' vtable
-
------------------------------------------
---- Cosmin's version of Update Bounds ---
------------------------------------------
+      in updateBounds' (srclocOf cond) cond'' vtable
 
 -- | Refines the ranges in the symbol table with
 --     ranges extracted from branch conditions.
 --   IMPORTANT: the second argument is the negation
---              of the branch condition! 
-updateBoundsTuned :: SrcLoc -> ScalExp -> SymbolTable -> SymbolTable
-updateBoundsTuned loc not_cond sym_tab = 
-    let err_not_cond_dnf = AS.simplify not_cond loc ranges
-        cond_factors = case err_not_cond_dnf of
-                        Left  _            -> [] -- trace ("ERROR in SIMPLIFY!! "++ppScalExp not_cond++" "++show err) []
-                        Right not_cond_dnf -> getNotFactorsLEQ0 not_cond_dnf 
-                                              --  trace ("Not_Cond: "++ppScalExp not_cond_dnf) getNotFactorsLEQ0 not_cond_dnf
-        bounds = map solve_leq0 cond_factors
-
-    in  foldl (\stab new_bound ->
-                        case new_bound of
-                            Just (sym,True ,bound) -> setUpperBound (identName sym) bound stab
---trace ("update UPPER bound with: "++ppScalExp bound) $ setUpperBound (identName sym) bound stab
-                            Just (sym,False,bound) -> setLowerBound (identName sym) bound stab
---trace ("update LOWER bound with: "++ppScalExp bound) $ setLowerBound (identName sym) bound stab
-                            _                      -> stab
-              ) sym_tab bounds
-
+--              of the branch condition!
+updateBounds' :: SrcLoc -> ScalExp -> SymbolTable -> SymbolTable
+updateBounds' loc not_cond sym_tab =
+  foldr updateBound sym_tab $ mapMaybe solve_leq0 $
+  either (const []) getNotFactorsLEQ0 $ AS.simplify not_cond loc ranges
     where
-        ranges = HM.filter nonEmptyRange $ HM.map toRep $ bindings sym_tab
-        toRep entry = (bindingDepth entry, lower, upper)
-          where (lower, upper) = valueRange entry
-        nonEmptyRange (_, lower, upper) = isJust lower || isJust upper
+      updateBound (sym,True ,bound) = setUpperBound (identName sym) bound
+      updateBound (sym,False,bound) = setLowerBound (identName sym) bound
 
-        -- | Input: a bool exp in DNF form, named `cond' 
-        --   It gets the terms of the argument, 
-        --         i.e., cond = c1 || ... || cn
-        --   and negates them.
-        --   Returns [not c1, ..., not cn], i.e., the factors 
-        --   of `not cond' in CNF form: not cond = (not c1) && ... && (not cn)
-        getNotFactorsLEQ0 :: ScalExp -> [ScalExp]
-        getNotFactorsLEQ0 (RelExp rel e_scal) = 
-            if not (scalExpType e_scal == Int) then []
-            else let leq0_escal = if rel == LTH0 
-                                  then SMinus (Val (IntVal 0)) e_scal -- SNeg e_scal
-                                  else SMinus (Val (IntVal 1)) e_scal
+      ranges = HM.filter nonEmptyRange $ HM.map toRep $ bindings sym_tab
+      toRep entry = (bindingDepth entry, lower, upper)
+        where (lower, upper) = valueRange entry
+      nonEmptyRange (_, lower, upper) = isJust lower || isJust upper
 
-                     err_m_e_scal = AS.simplify leq0_escal loc ranges
-                 in  case err_m_e_scal of
-                        Left  _        -> []
-                        Right m_e_scal -> [m_e_scal] -- trace ("Success: "++ppScalExp m_e_scal) [m_e_scal]
-        getNotFactorsLEQ0 (SLogOr  e1 e2) = getNotFactorsLEQ0 e1 ++ getNotFactorsLEQ0 e2
-        getNotFactorsLEQ0 _ = []
+      -- | Input: a bool exp in DNF form, named `cond'
+      --   It gets the terms of the argument,
+      --         i.e., cond = c1 || ... || cn
+      --   and negates them.
+      --   Returns [not c1, ..., not cn], i.e., the factors
+      --   of `not cond' in CNF form: not cond = (not c1) && ... && (not cn)
+      getNotFactorsLEQ0 :: ScalExp -> [ScalExp]
+      getNotFactorsLEQ0 (RelExp rel e_scal) =
+          if scalExpType e_scal /= Int then []
+          else let leq0_escal = if rel == LTH0
+                                then SMinus (Val (IntVal 0)) e_scal
+                                else SMinus (Val (IntVal 1)) e_scal
 
-        -- | Argument is scalar expression `e'.
-        --    Implementation finds the symbol defined at
-        --    the highest depth in expression `e', call it `i',
-        --    and decomposes e = a*i + b.  If `a' and `b' are
-        --    free of `i', AND `a == 1 or -1' THEN the upper/lower
-        --    bound can be improved. Otherwise Nothing.
-        --
-        --  Returns: Nothing or 
-        --  Just (i, a == 1, -a*b), i.e., (symbol, isUpperBound, bound)
-        solve_leq0 :: ScalExp -> Maybe (Ident, Bool, ScalExp)
-        solve_leq0 e_scal = 
-            let maybe_sym = AS.pickSymToElim ranges S.empty e_scal
-            in  case maybe_sym of 
-                  Nothing -> Nothing
-                  Just sym->
-                    case AS.linFormScalE sym e_scal loc ranges of
-                      Left  _          -> Nothing
-                      Right Nothing    -> Nothing 
-                      Right (Just(a,b))->
-                        case a of
-                            Val (IntVal (-1)) -> Just (sym, False, b)  
-                            Val (IntVal 1)    ->
-                                let err_mb = AS.simplify (SMinus (Val (IntVal 0)) b) loc ranges
-                                in  case err_mb of
-                                        Right mb -> Just (sym, True, mb)
-                                        Left  _  -> Nothing
-                            _ -> Nothing
+               in  either (const []) (:[]) $ AS.simplify leq0_escal loc ranges
+      getNotFactorsLEQ0 (SLogOr  e1 e2) = getNotFactorsLEQ0 e1 ++ getNotFactorsLEQ0 e2
+      getNotFactorsLEQ0 _ = []
 
------------------------------------------
------------------------------------------
-
-updateBounds' :: ScalExp -> SymbolTable -> SymbolTable
-updateBounds' (RelExp LTH0 (Id v)) vtable =
-  setUpperBound (identName v) (Val $ IntVal (-1)) vtable
-updateBounds' (RelExp LEQ0 (Id v)) vtable =
-  setUpperBound (identName v) (Val $ IntVal 0) vtable
-updateBounds' (RelExp LTH0 (lower `SMinus` Id v)) vtable =
-  setLowerBound (identName v) (lower `SPlus` (Val $ IntVal 1)) vtable
-updateBounds' (RelExp LEQ0 (lower `SMinus` Id v)) vtable =
-  setLowerBound (identName v) lower vtable
-
--- XXX: The following should probably be handled through some form of
--- simplification.
-updateBounds' (RelExp LTH0 (lower `SPlus` (Val (IntVal (-1)) `STimes` Id v))) vtable =
-  setLowerBound (identName v) (lower `SPlus` (Val $ IntVal 1)) vtable
-updateBounds' (RelExp LEQ0 (lower `SPlus` (Val (IntVal (-1)) `STimes` Id v))) vtable =
-  setLowerBound (identName v) lower vtable
-
--- FIXME: We need more cases here, probably.  Maybe simplify first?
-updateBounds' _ vtable = vtable
+      -- | Argument is scalar expression `e'.
+      --    Implementation finds the symbol defined at
+      --    the highest depth in expression `e', call it `i',
+      --    and decomposes e = a*i + b.  If `a' and `b' are
+      --    free of `i', AND `a == 1 or -1' THEN the upper/lower
+      --    bound can be improved. Otherwise Nothing.
+      --
+      --  Returns: Nothing or
+      --  Just (i, a == 1, -a*b), i.e., (symbol, isUpperBound, bound)
+      solve_leq0 :: ScalExp -> Maybe (Ident, Bool, ScalExp)
+      solve_leq0 e_scal = do
+        sym <- AS.pickSymToElim ranges S.empty e_scal
+        (a,b) <- either (const Nothing) id $ AS.linFormScalE sym e_scal loc ranges
+        case a of
+          Val (IntVal (-1)) -> Just (sym, False, b)
+          Val (IntVal 1)    -> do
+            mb <- either (const Nothing) Just $ AS.simplify (SMinus (Val (IntVal 0)) b) loc ranges
+            Just (sym, True, mb)
+          _ -> Nothing
 
 setUpperBound :: VName -> ScalExp -> SymbolTable -> SymbolTable
 setUpperBound name bound vtable =

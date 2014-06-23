@@ -20,7 +20,7 @@ import Futhark.MonadFreshNames
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Analysis.ScalExp (ScalExp)
 import qualified Futhark.Analysis.ScalExp as SE
-import qualified Futhark.Optimise.AlgSimplify as AS
+import qualified Futhark.Analysis.AlgSimplify as AS
 import Futhark.Tools
 
 optimisePredicates :: MonadFreshNames m => Prog -> m Prog
