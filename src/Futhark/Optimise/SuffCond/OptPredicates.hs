@@ -22,6 +22,7 @@ import Futhark.Analysis.ScalExp (ScalExp)
 import qualified Futhark.Analysis.ScalExp as SE
 import qualified Futhark.Analysis.AlgSimplify as AS
 import Futhark.Tools
+import Futhark.Optimise.DeadVarElim (deadCodeElimBody)
 
 optimisePredicates :: MonadFreshNames m => Prog -> m Prog
 optimisePredicates prog = do
@@ -238,8 +239,10 @@ bindingVariantIn ftable sctable loops (Let [v] (Redomap cs outerfun innerfun acc
   where name = identName v
 
 bindingVariantIn ftable sctable loops (Let pat (If (Var v) tbranch fbranch t loc)) = do
-  tbranch' <- bodyVariantIn ftable sctable loops tbranch
-  fbranch' <- bodyVariantIn ftable sctable loops fbranch
+  tbranch' <-
+    deadCodeElimBody <$> bodyVariantIn ftable sctable loops tbranch
+  fbranch' <-
+    deadCodeElimBody <$> bodyVariantIn ftable sctable loops fbranch
   let se = exactBinding sctable v
   if scalExpIsAtMostVariantIn ftable se then do
     (exbnds,v') <- lift $ lift $ scalExpToIdent v se
