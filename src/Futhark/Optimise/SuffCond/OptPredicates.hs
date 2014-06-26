@@ -104,20 +104,8 @@ analyseBody :: ST.SymbolTable -> SCTable -> Body -> SCTable
 analyseBody _ sctable (Body [] _) =
   sctable
 
--- Cosmin added case for filter since its dependent size
---        will not match the previous pattern. He just inlined some of
---        the code from below since I need an easy fix for filter!
-analyseBody vtable sctable (Body ( (Let vs e@(Filter _ _ [_] _)):bnds ) res) =
-  let vtable'  = ST.insert name e vtable
-  -- Construct a new sctable for recurrences.
-      sctable' = case analyseExp vtable e of
-        Nothing       -> sctable
-        Just eSCTable -> sctable <> eSCTable
-  in analyseBody vtable' sctable' $ Body bnds res 
-  where name = identName $ last vs        
-
 analyseBody vtable sctable (Body (Let [v] e:bnds) res) =
-  let vtable' = ST.insert name e vtable
+  let vtable' = ST.insertOne name e vtable
       -- Construct a new sctable for recurrences.
       sctable' = case (analyseExp vtable e,
                        simplify <$> ST.lookupScalExp name vtable') of
@@ -133,10 +121,8 @@ analyseBody vtable sctable (Body (Let [v] e:bnds) res) =
         ranges = rangesRep vtable
         loc = srclocOf e
         simplify se = AS.simplify se loc ranges
-analyseBody vtable sctable (Body (Let _ _:bnds) res) =
-  -- Not adding to symbol table here - this leaves a hole, but this
-  -- looks like a weird binding anyway.
-  analyseBody vtable sctable $ Body bnds res
+analyseBody vtable sctable (Body (Let pat e:bnds) res) =
+  analyseBody (ST.insert (map identName pat) e vtable) sctable $ Body bnds res
 
 rangesRep :: ST.SymbolTable -> AS.RangesRep
 rangesRep = HM.filter nonEmptyRange . HM.map toRep . ST.bindings
