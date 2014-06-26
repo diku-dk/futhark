@@ -1,3 +1,7 @@
+fun int grayCode(int x) = (x >> 1) ^ x
+
+fun int index([int] arr, int i) = arr[i]
+
 fun bool testBit(int n, int ind) =
     let t = (1 << ind) in (n & t) == t
 
@@ -14,7 +18,7 @@ fun [real] sobolIndR( int bits_num, [[int]] dir_vs, int n ) =
     let arri    = sobolIndI( bits_num, dir_vs, n ) in
         map( fn real (int x) => toReal(x) / divisor, arri )
 
-fun real main( int num_mc_it, [[int]] dir_vs ) =
+fun [[real]] main( int num_mc_it, [[int]] dir_vs ) =
     let num_bits  = size(1, dir_vs) in
     let sobol_mat = map ( sobolIndR(num_bits, dir_vs), 
                           map(fn int (int x) => x + 1, iota(num_mc_it)) )
