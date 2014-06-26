@@ -967,13 +967,8 @@ consumedInExp _ = mempty
 -- bounds.  On the other hand, adding two numbers cannot fail.
 safeExp :: Exp -> Bool
 safeExp e | not $ HS.null $ consumedInExp e = False
-safeExp (Index {}) = False
-safeExp (Update {}) = False
-safeExp (Split {}) = False
 safeExp (Assert {}) = False
-safeExp (Reshape {}) = False
 safeExp (ArrayLit {}) = False
-safeExp (Concat {}) = False
 safeExp (Apply {}) = False
 safeExp (BinOp Divide _ (Constant (BasicVal (IntVal k))  _) _ _) = k /= 0
 safeExp (BinOp Divide _ (Constant (BasicVal (RealVal k)) _) _ _) = k /= 0
