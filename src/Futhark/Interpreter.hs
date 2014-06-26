@@ -450,7 +450,7 @@ evalExp (Scan _ fun inputs loc) = do
 evalExp e@(Filter _ fun arrexp loc) = do
   vss <- mapM (arrToList loc <=< evalSubExp) arrexp
   vss' <- filterM filt $ transpose vss
-  return $ arrays (typeOf e) vss'
+  return $ BasicVal (IntVal $ length vss') : arrays (typeOf e) vss'
   where filt x = do
           res <- applyLambda fun x
           case res of [BasicVal (LogVal True)] -> return True
