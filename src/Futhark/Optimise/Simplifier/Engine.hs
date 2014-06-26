@@ -179,7 +179,7 @@ localVtable :: (ST.SymbolTable -> ST.SymbolTable) -> SimpleM a -> SimpleM a
 localVtable f = local $ \env -> env { envVtable = f $ envVtable env }
 
 binding :: [(VName, Exp)] -> SimpleM a -> SimpleM a
-binding = localVtable . flip (foldr $ uncurry ST.insert)
+binding = localVtable . flip (foldr $ uncurry ST.insertOne)
 
 bindParams :: [Param] -> SimpleM a -> SimpleM a
 bindParams params =
@@ -244,7 +244,7 @@ hoistBindings rules block vtable uses dupes needs body = do
           foldM hoistable (uses',[]) (reverse $ zip bnds vtables)
             where vtables = scanl insertBnd vtable' bnds
                   insertBnd vtable'' (Let [v] e, _, _) =
-                    ST.insert (identName v) e vtable''
+                    ST.insertOne (identName v) e vtable''
                   insertBnd vtable'' _ = vtable''
 
         hoistable :: MonadFreshNames m =>

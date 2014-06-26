@@ -7,8 +7,8 @@ module Futhark.Analysis.SymbolTable
   , lookupValue
   , lookupVar
   , enclosingLoopVars
+  , insertOne
   , insert
-  , insert'
   , insertParam
   , insertArrayParam
   , insertLoopVar
@@ -97,14 +97,25 @@ enclosingLoopVars free vtable =
   where fetch name = do e <- HM.lookup name $ bindings vtable
                         return (name, e)
 
-insert :: VName -> Exp -> SymbolTable -> SymbolTable
-insert name e vtable = insertEntry name bind vtable
-  where bind = Entry {
+defBnd :: SymbolTable -> Entry
+defBnd vtable = Entry {
+    asExp = Nothing
+  , asScalExp = Nothing
+  , valueRange = (Nothing, Nothing)
+  , bindingDepth = curDepth vtable
+  , loopVariable = False
+  }
+
+insertOne :: VName -> Exp -> SymbolTable -> SymbolTable
+insertOne name = insert [name]
+
+insert :: [VName] -> Exp -> SymbolTable -> SymbolTable
+-- First, handle single-name bindings.  These are the most common.
+insert [name] e vtable = insertEntry name bind vtable
+  where bind = (defBnd vtable) {
                  asExp = Just e
                , asScalExp = toScalExp (`lookupScalExp` vtable) e
                , valueRange = range
-               , bindingDepth = curDepth vtable
-               , loopVariable = False
                }
         range = case e of
           SubExp se ->
@@ -121,12 +132,17 @@ insert name e vtable = insertEntry name bind vtable
             subExpRange se vtable
           Index _ v _ _ ->
             lookupRange (identName v) vtable
-          Filter _ _ [Var v] _ ->
-            lookupRange (identName v) vtable -- FIXME: Support filters
-                                             -- with more outputs.
           _ -> (Nothing, Nothing)
         zero = Val $ IntVal 0
         one = Val $ IntVal 1
+-- Then, handle others.  For now, this is only filter.
+insert (_:names) (Filter _ _ inps _) vtable =
+  insertEntries (zip names $ map makeBnd inps) vtable
+  where makeBnd (Var v) =
+          (defBnd vtable) { valueRange = lookupRange (identName v) vtable }
+        makeBnd _ =
+          defBnd vtable
+insert _ _ vtable = vtable
 
 subExpRange :: SubExp -> SymbolTable -> Range
 subExpRange (Var v) vtable =
@@ -142,20 +158,14 @@ subExpToScalExp (Constant (BasicVal bv) _) = Just $ Val bv
 subExpToScalExp _                          = Nothing
 
 insertEntry :: VName -> Entry -> SymbolTable -> SymbolTable
-insertEntry name entry vtable =
-  vtable { bindings = HM.insert name entry $ bindings vtable
+insertEntry name entry =
+  insertEntries [(name,entry)]
+
+insertEntries :: [(VName, Entry)] -> SymbolTable -> SymbolTable
+insertEntries entries vtable =
+  vtable { bindings = foldr (uncurry HM.insert) (bindings vtable) entries
          , curDepth = curDepth vtable + 1
          }
-
-insert' :: VName -> SymbolTable -> SymbolTable
-insert' name vtable = insertEntry name bind vtable
-  where bind = Entry {
-                 asExp = Nothing
-               , asScalExp = Nothing
-               , valueRange = (Nothing, Nothing)
-               , bindingDepth = curDepth vtable
-               , loopVariable = False
-               }
 
 insertParamWithRange :: Param -> Range -> SymbolTable -> SymbolTable
 insertParamWithRange param range vtable =

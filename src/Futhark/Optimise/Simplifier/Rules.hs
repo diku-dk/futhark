@@ -625,11 +625,19 @@ evaluateBranch _ _ = cannotSimplify
 -- especially when the branches have bindings, or return more than one
 -- value.
 simplifyBoolBranch :: TopDownRule
+-- if c then True else False == c
+simplifyBoolBranch _
+  (Let [v] (If cond
+            (Body [] (Result _ [Constant (BasicVal (LogVal True)) _] _))
+            (Body [] (Result _ [Constant (BasicVal (LogVal False)) _] _))
+            _ loc)) =
+  return [Let [v] $ SubExp cond]
+-- When typeOf(x)==bool, if c then x else y == (c && x) || (!c && y)
 simplifyBoolBranch _ (Let [v] (If cond tb fb ts loc))
   | Body [] (Result [] [tres] _) <- tb,
     Body [] (Result [] [fres] _) <- fb,
     all (==Basic Bool) ts,
-    False = do
+    False = do -- FIXME: disable because algebraic optimiser cannot handle it.
   (e, bnds) <-
     runBinder'' (eBinOp LogOr (pure $ BinOp LogAnd cond tres (Basic Bool) loc)
                               (eBinOp LogAnd (pure $ Not cond loc)
