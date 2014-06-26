@@ -22,7 +22,6 @@ import Futhark.Analysis.ScalExp (ScalExp)
 import qualified Futhark.Analysis.ScalExp as SE
 import qualified Futhark.Analysis.AlgSimplify as AS
 import Futhark.Tools
---import Debug.Trace
 
 optimisePredicates :: MonadFreshNames m => Prog -> m Prog
 optimisePredicates prog = do
@@ -165,13 +164,19 @@ runVariantM = fmap (second getAny) . runWriterT . runMaybeT
 sufficiented :: Monad m => VariantM m ()
 sufficiented = tell $ Any True
 
-type ForbiddenTable = Names
+newtype ForbiddenTable = ForbiddenTable Names
+
+instance Monoid ForbiddenTable where
+  ForbiddenTable x `mappend` ForbiddenTable y = ForbiddenTable $ x <> y
+  mempty = ForbiddenTable mempty
 
 noneForbidden :: ForbiddenTable -> Names -> Bool
-noneForbidden ftable = HS.null . HS.intersection ftable
+noneForbidden (ForbiddenTable ftable) =
+  HS.null . HS.intersection ftable
 
 forbid :: [VName] -> ForbiddenTable -> ForbiddenTable
-forbid names ftable = foldr HS.insert ftable names
+forbid names (ForbiddenTable ftable) =
+  ForbiddenTable $ foldr HS.insert ftable names
 
 forbidNames :: [VName] -> VName -> Loops -> ForbiddenTable -> ForbiddenTable
 forbidNames names loop loops ftable
