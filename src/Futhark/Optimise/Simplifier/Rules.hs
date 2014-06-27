@@ -630,7 +630,7 @@ simplifyBoolBranch _
   (Let [v] (If cond
             (Body [] (Result _ [Constant (BasicVal (LogVal True)) _] _))
             (Body [] (Result _ [Constant (BasicVal (LogVal False)) _] _))
-            _ loc)) =
+            _ _)) =
   return [Let [v] $ SubExp cond]
 -- When typeOf(x)==bool, if c then x else y == (c && x) || (!c && y)
 simplifyBoolBranch _ (Let [v] (If cond tb fb ts loc))
