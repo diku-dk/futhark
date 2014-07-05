@@ -12,13 +12,11 @@ import Futhark.InternalRep
 import qualified Futhark.Interpreter as Interp
 import qualified Futhark.Analysis.SymbolTable as ST
 
-simplifyApply :: Prog -> ST.SymbolTable -> Name -> [(SubExp,Diet)] -> Maybe [Value]
+simplifyApply :: Prog -> ST.SymbolTable a -> Name -> [(SubExp,Diet)] -> Maybe [Value]
 simplifyApply program vtable fname args = do
   vals <- allArgsAreValues $ map fst args
   either (const Nothing) Just $ Interp.runFunNoTrace fname vals program
   where allArgsAreValues = mapM argIsValue
 
         argIsValue (Constant val _) = Just val
-        argIsValue (Var v)          = case ST.lookup (identName v) vtable of
-                                        Just (ST.Value val) -> Just val
-                                        _                   -> Nothing
+        argIsValue (Var v)          = ST.lookupValue (identName v) vtable

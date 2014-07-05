@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, MultiParamTypeClasses, FlexibleInstances, FunctionalDependencies #-}
 -- |
 --
 -- Perform general rule-based simplification based on data dependency
@@ -12,14 +12,27 @@
 --    * Apply simplification rules (see
 --    "Futhark.Optimise.Simplification.Rules").
 --
+-- If you just want to run the simplifier as simply as possible, you
+-- may prefer to use the "Futhark.Optimise.Simplifier" module.
+--
 module Futhark.Optimise.Simplifier.Engine
-       ( simplifyProg
+       ( -- * Monadic interface
+         MonadEngine(..)
+       , Env (envVtable)
+       , Need
+       , emptyEnv
+       , asksEngineEnv
+       , insertAllBindings
+       , defaultSimplifyBody
+       , simplifyBinding
+       , simplifyResult
+       , bindLet
+       , bindLetWith
+         -- * Simple interface
+       , simplifyProg
        , simplifyOneFun
        , simplifyOneLambda
        , simplifyOneBody
-         -- * Monad
-       , MonadEngine(..)
-       , asksEngineEnv
        ) where
 
 import Control.Applicative
@@ -45,46 +58,9 @@ import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Optimise.Simplifier.Apply
 
--- | Simplify the given program.  Even if the output differs from the
--- output, meaningful simplification may not have taken place - the
--- order of bindings may simply have been rearranged.  The function is
--- idempotent, however.
-simplifyProg :: RuleBook -> Prog -> Prog
-simplifyProg rules prog =
-  Prog $ fst $ runSimpleM (mapM simplifyFun $ progFunctions prog)
-               (emptyEnv rules $ Just prog) namesrc
-  where namesrc = newNameSourceForProg prog
-
--- | Simplify the given function.  Even if the output differs from the
--- output, meaningful simplification may not have taken place - the
--- order of bindings may simply have been rearranged.  The function is
--- idempotent, however.
-simplifyOneFun :: MonadFreshNames m =>
-                  RuleBook -> FunDec -> m FunDec
-simplifyOneFun rules fundec =
-  modifyNameSource $ runSimpleM (simplifyFun fundec) (emptyEnv rules Nothing)
-
--- | Simplify just a single 'Lambda'.
-simplifyOneLambda :: MonadFreshNames m => RuleBook -> Maybe Prog -> Lambda -> m Lambda
-simplifyOneLambda rules prog lam = do
-  let simplifyOneLambda' = blockAllHoisting $
-                           bindParams (lambdaParams lam) $
-                           simplifyBody $ lambdaBody lam
-  body' <- modifyNameSource $ runSimpleM simplifyOneLambda' $ emptyEnv rules prog
-  return $ lam { lambdaBody = body' }
-
--- | Simplify the given body.  Even if the output differs from the
--- output, meaningful simplification may not have taken place - the
--- order of bindings may simply have been rearranged.  The function is
--- idempotent, however.
-simplifyOneBody :: MonadFreshNames m => RuleBook -> Maybe Prog -> Body -> m Body
-simplifyOneBody rules prog body =
-  modifyNameSource $
-  runSimpleM (blockAllHoisting $ simplifyBody body) (emptyEnv rules prog)
-
-simplifyFun :: FunDec -> SimpleM FunDec
+simplifyFun :: FunDec -> SimpleM u FunDec
 simplifyFun (fname, rettype, params, body, loc) = do
-  body' <- blockAllHoisting $ bindParams params $ simplifyBody body
+  body' <- insertAllBindings $ bindParams params $ simplifyBody body
   return (fname, rettype, params, body', loc)
 
 data BindNeed = LetNeed ([Ident],[VName]) (Exp, Names)
@@ -121,13 +97,14 @@ instance Monoid Need where
   Need b1 f1 `mappend` Need b2 f2 = Need (b1 <> b2) (f1 <> f2)
   mempty = Need [] UT.empty
 
-data Env = Env { envDupeState :: DupeState
-               , envVtable    :: ST.SymbolTable
-               , envProgram   :: Maybe Prog
-               , envRules     :: RuleBook
-               }
+data Env u = Env { envDupeState :: DupeState
+                 , envVtable    :: ST.SymbolTable u
+                 , envProgram   :: Maybe Prog
+                 , envRules     :: RuleBook u
+                 }
 
-emptyEnv :: RuleBook -> Maybe Prog -> Env
+emptyEnv :: ST.UserAnnotation u =>
+            RuleBook u -> Maybe Prog -> Env u
 emptyEnv rules prog =
   Env { envDupeState = newDupeState
       , envVtable = ST.empty
@@ -135,17 +112,22 @@ emptyEnv rules prog =
       , envRules = rules
       }
 
-class MonadFreshNames m => MonadEngine m where
-  askEngineEnv :: m Env
-  localEngineEnv :: (Env -> Env) -> m a -> m a
+class MonadFreshNames m => MonadEngine u m | m -> u where
+  askEngineEnv :: m (Env u)
+  localEngineEnv :: (Env u -> Env u) -> m a -> m a
   tellNeed :: Need -> m ()
   listenNeed :: m a -> m (a, Need)
   passNeed :: m (a, Need -> Need) -> m a
 
-asksEngineEnv :: MonadEngine m => (Env -> a) -> m a
+  simplifyBody :: MonadEngine u m => Body -> m Body
+
+asksEngineEnv :: MonadEngine u m => (Env u -> a) -> m a
 asksEngineEnv f = f <$> askEngineEnv
 
-needThis :: MonadEngine m => Binding -> m ()
+descendIntoLoop :: MonadEngine u m => m a -> m a
+descendIntoLoop = localEngineEnv $ \env -> env { envVtable = ST.deepen $ envVtable env }
+
+needThis :: MonadEngine u m => Binding -> m ()
 needThis bnd = tellNeed $ Need [letNeed bnd] UT.empty
 
 letNeed :: Binding -> BindNeed
@@ -154,45 +136,45 @@ letNeed (Let pat e) = LetNeed (pat, map identName pat) (e, freeNamesInExp e)
 needToBinding :: BindNeed -> Binding
 needToBinding (LetNeed (pat, _) (e, _)) = Let pat e
 
-boundFree :: MonadEngine m => Names -> m ()
+boundFree :: MonadEngine u m => Names -> m ()
 boundFree fs = tellNeed $ Need [] $ UT.usages fs
 
-usedName :: MonadEngine m => VName -> m ()
+usedName :: MonadEngine u m => VName -> m ()
 usedName = boundFree . HS.singleton
 
-consumedName :: MonadEngine m => VName -> m ()
+consumedName :: MonadEngine u m => VName -> m ()
 consumedName = tellNeed . Need [] . UT.consumedUsage
 
-tapUsage :: MonadEngine m => m a -> m (a, UT.UsageTable)
+tapUsage :: MonadEngine u m => m a -> m (a, UT.UsageTable)
 tapUsage m = do (x,needs) <- listenNeed m
                 return (x, usageTable needs)
 
-blockUsage :: MonadEngine m => m a -> m a
+blockUsage :: MonadEngine u m => m a -> m a
 blockUsage m = passNeed $ do
   (x, _) <- listenNeed m
   return (x, const mempty)
 
-localVtable :: MonadEngine m =>
-               (ST.SymbolTable -> ST.SymbolTable) -> m a -> m a
+localVtable :: MonadEngine u m =>
+               (ST.SymbolTable u -> ST.SymbolTable u) -> m a -> m a
 localVtable f = localEngineEnv $ \env -> env { envVtable = f $ envVtable env }
 
-binding :: MonadEngine m =>
-           [(VName, Exp)] -> m a -> m a
-binding = localVtable . flip (foldr $ uncurry ST.insertOne)
+binding :: MonadEngine u m =>
+           [Binding] -> m a -> m a
+binding = localVtable . flip (foldr ST.insertBinding)
 
-bindParams :: MonadEngine m =>
+bindParams :: MonadEngine u m =>
               [Param] -> m a -> m a
 bindParams params =
   localVtable $ \vtable ->
     foldr ST.insertParam vtable params
 
-bindArrayParams :: MonadEngine m =>
+bindArrayParams :: MonadEngine u m =>
                    [(Param,SubExp)] -> m a -> m a
 bindArrayParams params =
   localVtable $ \vtable ->
     foldr (uncurry ST.insertArrayParam) vtable params
 
-bindLoopVar :: MonadEngine m => Ident -> SubExp -> m a -> m a
+bindLoopVar :: MonadEngine u m => Ident -> SubExp -> m a -> m a
 bindLoopVar var bound =
   localVtable $ clampUpper . clampVar
   where clampVar = ST.insertLoopVar (identName var) bound
@@ -200,28 +182,30 @@ bindLoopVar var bound =
         clampUpper = case bound of Var v -> ST.isAtLeast (identName v) 1
                                    _     -> id
 
-withBinding :: MonadEngine m =>
-               [Ident] -> Exp
-            -> m a -> m a
-withBinding pat e m = do
+bindLet :: MonadEngine u m => [Ident] -> Exp -> m a -> m a
+
+bindLet pat e m = do
   ds <- asksEngineEnv envDupeState
   let (bnds, ds') = performCSE ds pat e
-      patbnds = mapMaybe varBnd bnds
   mapM_ needThis bnds
-  binding patbnds $
+  binding bnds $
     localEngineEnv (\env -> env { envDupeState = ds'}) m
 
-varBnd :: Binding -> Maybe (VName, Exp)
-varBnd (Let [Ident var _ _] e) = Just (var, e)
-varBnd _                       = Nothing
-
-bindLet :: MonadEngine m => [Ident] -> Exp -> m a -> m a
-
-bindLet = withBinding
+-- | As 'bindLet', but use a different annotation function in the
+-- symbol table when creating just this binding.
+bindLetWith :: MonadEngine u m =>
+               (ST.Entry () -> u) -> [Ident] -> Exp -> m a -> m a
+bindLetWith f pat e m = do
+  origAnnotationFun <- asksEngineEnv $ ST.annotationFunction . envVtable
+  localEngineEnv (setAnnotationFun f) $
+    bindLet pat e $
+    localEngineEnv (setAnnotationFun origAnnotationFun) m
+  where setAnnotationFun g env =
+          env { envVtable = (envVtable env) { ST.annotationFunction = g } }
 
 hoistBindings :: MonadFreshNames m =>
-                 RuleBook -> BlockPred
-              -> ST.SymbolTable -> UT.UsageTable -> DupeState
+                 RuleBook u -> BlockPred
+              -> ST.SymbolTable u -> UT.UsageTable -> DupeState
               -> [BindNeed] -> Body
               -> m (Body, [BindNeed], UT.UsageTable)
 hoistBindings rules block vtable uses dupes needs body = do
@@ -229,30 +213,19 @@ hoistBindings rules block vtable uses dupes needs body = do
     simplifyBindings vtable uses $
     concat $ snd $ mapAccumL pick dupes $ inDepOrder needs
   return (insertBindings blocked body, hoisted, uses')
-  where simplifyBindings :: MonadFreshNames m =>
-                            ST.SymbolTable -> UT.UsageTable -> [(Binding, [VName], UT.UsageTable)]
-                         -> m (UT.UsageTable, [Binding], [BindNeed])
-        simplifyBindings vtable' uses' bnds = do
+  where simplifyBindings vtable' uses' bnds = do
           (uses'', bnds') <- simplifyBindings' vtable' uses' bnds
           let (blocked, hoisted) = partitionEithers $ blockUnhoistedDeps bnds'
           -- We need to do a final pass to ensure that nothing is
           -- hoisted past something that it depends on.
           return (uses'', map needToBinding blocked, hoisted)
 
-        simplifyBindings' :: MonadFreshNames m =>
-                             ST.SymbolTable -> UT.UsageTable -> [(Binding, [VName], UT.UsageTable)]
-                         -> m (UT.UsageTable, [Either BindNeed BindNeed])
         simplifyBindings' vtable' uses' bnds =
           foldM hoistable (uses',[]) (reverse $ zip bnds vtables)
             where vtables = scanl insertBnd vtable' bnds
-                  insertBnd vtable'' (Let [v] e, _, _) =
-                    ST.insertOne (identName v) e vtable''
-                  insertBnd vtable'' _ = vtable''
+                  insertBnd vtable'' (bnd, _, _) =
+                    ST.insertBinding bnd vtable''
 
-        hoistable :: MonadFreshNames m =>
-                     (UT.UsageTable, [Either BindNeed BindNeed])
-                  -> ((Binding, [VName], UT.UsageTable), ST.SymbolTable)
-                  -> m (UT.UsageTable, [Either BindNeed BindNeed])
         hoistable (uses',bnds) ((bnd, provs, reqs), vtable')
           | not $ uses' `UT.contains` provs = -- Dead binding.
             return (uses', bnds)
@@ -366,10 +339,10 @@ type BlockPred = UT.UsageTable -> BindNeed -> Bool
 orIf :: BlockPred -> BlockPred -> BlockPred
 orIf p1 p2 body need = p1 body need || p2 body need
 
-blockIfSeq :: MonadEngine m => [BlockPred] -> m Body -> m Body
+blockIfSeq :: MonadEngine u m => [BlockPred] -> m Body -> m Body
 blockIfSeq ps m = foldl (flip blockIf) m ps
 
-blockIf :: MonadEngine m => BlockPred -> m Body -> m Body
+blockIf :: MonadEngine u m => BlockPred -> m Body -> m Body
 blockIf block m = passNeed $ do
   (body, needs) <- listenNeed m
   ds <- asksEngineEnv envDupeState
@@ -382,8 +355,8 @@ blockIf block m = passNeed $ do
                      , usageTable  = usages
                      })
 
-blockAllHoisting :: MonadEngine m => m Body -> m Body
-blockAllHoisting = blockIf $ \_ _ -> True
+insertAllBindings :: MonadEngine u m => m Body -> m Body
+insertAllBindings = blockIf $ \_ _ -> True
 
 hasFree :: Names -> BlockPred
 hasFree ks _ need = ks `intersects` requires need
@@ -406,9 +379,9 @@ isConsumed :: BlockPred
 isConsumed uses (LetNeed (pat,_) _) =
   any ((`UT.isConsumed` uses) . identName) pat
 
-hoistCommon :: MonadEngine m =>
-               m Body -> (ST.SymbolTable -> ST.SymbolTable)
-            -> m Body -> (ST.SymbolTable -> ST.SymbolTable)
+hoistCommon :: MonadEngine u m =>
+               m Body -> (ST.SymbolTable u -> ST.SymbolTable u)
+            -> m Body -> (ST.SymbolTable u -> ST.SymbolTable u)
             -> m (Body, Body)
 hoistCommon m1 vtablef1 m2 vtablef2 = passNeed $ do
   (body1, needs1) <- listenNeed $ localVtable vtablef1 m1
@@ -429,15 +402,33 @@ hoistCommon m1 vtablef1 m2 vtablef2 = passNeed $ do
                      , usageTable = f1 <> f2
                      })
 
-simplifyBody :: MonadEngine m => Body -> m Body
+-- | Simplify a single 'Body' inside an arbitrary 'MonadEngine'.
+defaultSimplifyBody :: MonadEngine u m => Body -> m Body
 
-simplifyBody (Body [] (Result cs es loc)) =
-  resultBody <$> simplifyCerts cs <*>
-                 mapM simplifySubExp es <*> pure loc
+defaultSimplifyBody (Body [] res) =
+  Body [] <$> simplifyResult res
+
+defaultSimplifyBody (Body (bnd:bnds) res) = do
+  simplified <- simplifyBinding bnd
+  case simplified of
+    Left newbnds ->
+      simplifyBody $ Body (newbnds++bnds) res
+    Right (Let pat' e') ->
+      bindLet pat' e' $ simplifyBody $ Body bnds res
+
+-- | Simplify a single 'Result' inside an arbitrary 'MonadEngine'.
+simplifyResult :: MonadEngine u m => Result -> m Result
+
+simplifyResult (Result cs es loc) =
+  Result <$> simplifyCerts cs <*>
+             mapM simplifySubExp es <*> pure loc
+
+simplifyBinding :: MonadEngine u m =>
+                   Binding -> m (Either [Binding] Binding)
 
 -- The simplification rules cannot handle Apply, because it requires
 -- access to the full program.
-simplifyBody (Body (Let pat (Apply fname args rettype loc):bnds) res) = do
+simplifyBinding (Let pat (Apply fname args rettype loc)) = do
   pat' <- blockUsage $ mapM simplifyIdentBinding pat
   args' <- mapM (simplifySubExp . fst) args
   rettype' <- mapM simplifyExtType rettype
@@ -450,23 +441,21 @@ simplifyBody (Body (Let pat (Apply fname args rettype loc):bnds) res) = do
                         case uniqueness $ identType p of
                           Unique    -> Let [p] $ Copy (Constant v loc) loc
                           Nonunique -> Let [p] $ SubExp $ Constant v loc
-                  simplifyBody $ Body (newbnds++bnds) res
+                  return $ Left newbnds
     Nothing -> let e' = Apply fname (zip args' $ map snd args) rettype' loc
-               in bindLet pat' e' $ simplifyBody $ Body bnds res
+               in return $ Right $ Let pat' e'
 
-simplifyBody (Body (Let pat e:bnds) res) = do
+simplifyBinding (Let pat e) = do
   pat' <- blockUsage $ mapM simplifyIdentBinding pat
   e' <- simplifyExp e
   vtable <- asksEngineEnv envVtable
   rules <- asksEngineEnv envRules
   simplified <- topDownSimplifyBinding rules vtable (Let pat e')
   case simplified of
-    Just newbnds ->
-      simplifyBody $ Body (newbnds++bnds) res
-    Nothing      ->
-      bindLet pat' e' $ simplifyBody $ Body bnds res
+    Just newbnds -> return $ Left newbnds
+    Nothing      -> return $ Right $ Let pat' e'
 
-simplifyExp :: MonadEngine m => Exp -> m Exp
+simplifyExp :: MonadEngine u m => Exp -> m Exp
 
 simplifyExp (DoLoop respat merge loopvar boundexp loopbody loc) = do
   let (mergepat, mergeexp) = unzip merge
@@ -477,7 +466,7 @@ simplifyExp (DoLoop respat merge loopvar boundexp loopbody loc) = do
   -- Blocking hoisting of all unique bindings is probably too
   -- conservative, but there is currently no nice way to mark
   -- consumption of the loop body result.
-  loopbody' <- bindLoopVar loopvar boundexp' $
+  loopbody' <- descendIntoLoop $ bindLoopVar loopvar boundexp' $
                blockIfSeq [hasFree boundnames, isConsumed] $
                simplifyBody loopbody
   let merge' = zip mergepat' mergeexp'
@@ -560,7 +549,7 @@ simplifyExp (Redomap cs outerfun innerfun acc arrs loc) = do
 
 simplifyExp e = simplifyExpBase e
 
-simplifyExpBase :: MonadEngine m => Exp -> m Exp
+simplifyExpBase :: MonadEngine u m => Exp -> m Exp
 simplifyExpBase = mapExpM hoist
   where hoist = Mapper {
                   mapOnExp = simplifyExp
@@ -575,47 +564,47 @@ simplifyExpBase = mapExpM hoist
                 , mapOnCertificates = simplifyCerts
                 }
 
-simplifySubExp :: MonadEngine m => SubExp -> m SubExp
-simplifySubExp (Var ident@(Ident vnm _ pos)) = do
-  bnd <- asksEngineEnv $ ST.lookup vnm . envVtable
+simplifySubExp :: MonadEngine u m => SubExp -> m SubExp
+simplifySubExp (Var ident@(Ident vnm _ loc)) = do
+  bnd <- asksEngineEnv $ ST.lookupSubExp vnm . envVtable
   case bnd of
-    Just (ST.Value v)
-      | isBasicTypeVal v  -> return $ Constant v pos
-    Just (ST.VarId  id' tp1) -> do usedName id'
-                                   return $ Var $ Ident id' tp1 pos
-    Just (ST.SymExp (SubExp se)) -> return se
-    _                            -> Var <$> simplifyIdent ident
+    Just (Constant v _)
+      | isBasicTypeVal v  -> return $ Constant v loc
+    Just (Var id') -> do usedName $ identName id'
+                         return $ Var id'
+    _              -> Var <$> simplifyIdent ident
   where isBasicTypeVal = basicType . valueType
 simplifySubExp (Constant v loc) = return $ Constant v loc
 
-simplifyIdentBinding :: MonadEngine m => Ident -> m Ident
+simplifyIdentBinding :: MonadEngine u m => Ident -> m Ident
 simplifyIdentBinding v = do
   t' <- simplifyType $ identType v
   return v { identType = t' }
 
-simplifyIdent :: MonadEngine m => Ident -> m Ident
+simplifyIdent :: MonadEngine u m => Ident -> m Ident
 simplifyIdent v = do
   usedName $ identName v
   t' <- simplifyType $ identType v
   return v { identType = t' }
 
-simplifyExtType :: MonadEngine m =>
+simplifyExtType :: MonadEngine u m =>
                    TypeBase als ExtShape -> m (TypeBase als ExtShape)
 simplifyExtType t = do dims <- mapM simplifyDim $ extShapeDims $ arrayShape t
                        return $ t `setArrayShape` ExtShape dims
   where simplifyDim (Free se) = Free <$> simplifySubExp se
         simplifyDim (Ext x)   = return $ Ext x
 
-simplifyType :: MonadEngine m =>
+simplifyType :: MonadEngine u m =>
                 TypeBase als Shape -> m (TypeBase als Shape)
 simplifyType t = do dims <- mapM simplifySubExp $ arrayDims t
                     return $ t `setArrayShape` Shape dims
 
-simplifyLambda :: MonadEngine m =>
+simplifyLambda :: MonadEngine u m =>
                   Lambda -> [SubExp] -> m Lambda
 simplifyLambda (Lambda params body rettype loc) arrs = do
   body' <-
     blockIf (hasFree params' `orIf` isConsumed) $
+    descendIntoLoop $
     bindParams nonarrayparams $
     bindArrayParams (zip arrayparams arrs) $ do
       consumeResult $ zip rettype $ resultSubExps $ bodyResult body
@@ -626,47 +615,89 @@ simplifyLambda (Lambda params body rettype loc) arrs = do
         (nonarrayparams, arrayparams) =
           splitAt (length params - length arrs) params
 
-consumeResult :: MonadEngine m =>
+consumeResult :: MonadEngine u m =>
                  [(TypeBase als shape, SubExp)] -> m ()
 consumeResult = mapM_ inspect
   where inspect (t, se)
           | unique t = traverse_ consumedName $ aliases $ subExpType se
           | otherwise = return ()
 
-simplifyCerts :: MonadEngine m =>
+simplifyCerts :: MonadEngine u m =>
                  Certificates -> m Certificates
 simplifyCerts = liftM (nub . concat) . mapM check
   where check idd = do
-          vv <- asksEngineEnv $ ST.lookup (identName idd) . envVtable
+          vv <- asksEngineEnv $ ST.lookupSubExp (identName idd) . envVtable
           case vv of
-            Just (ST.Value (BasicVal Checked)) -> return []
-            Just (ST.VarId  id' tp1) -> do usedName id'
-                                           return [Ident id' tp1 loc]
+            Just (Constant (BasicVal Checked) _) -> return []
+            Just (Var idd') -> do usedName $ identName idd'
+                                  return [idd']
             _ -> do usedName $ identName idd
                     return [idd]
-          where loc = srclocOf idd
 
--- Simple implementation of the MonadEngine class.
+-- Simple implementation of the MonadEngine class, and simple
+-- interface to running the simplifier on various things.
 
-newtype SimpleM a = SimpleM (RWS
-                           Env                -- Reader
-                           Need               -- Writer
-                           (NameSource VName) -- State
-                           a)
+newtype SimpleM u a = SimpleM (RWS
+                               (Env u)                -- Reader
+                               Need               -- Writer
+                               (NameSource VName) -- State
+                               a)
   deriving (Applicative, Functor, Monad,
-            MonadWriter Need, MonadReader Env, MonadState (NameSource VName))
+            MonadWriter Need,
+            MonadReader (Env u),
+            MonadState (NameSource VName))
 
-instance MonadFreshNames SimpleM where
+instance MonadFreshNames (SimpleM u) where
   getNameSource = get
   putNameSource = put
 
-instance MonadEngine SimpleM where
+instance MonadEngine u (SimpleM u) where
   askEngineEnv = ask
   localEngineEnv = local
   tellNeed = tell
   listenNeed = listen
   passNeed = pass
+  simplifyBody = defaultSimplifyBody
 
-runSimpleM :: SimpleM a -> Env -> VNameSource -> (a, VNameSource)
+runSimpleM :: SimpleM u a -> Env u -> VNameSource -> (a, VNameSource)
 runSimpleM (SimpleM m) env src = let (x, src', _) = runRWS m env src
                                  in (x, src')
+
+-- | Simplify the given program.  Even if the output differs from the
+-- output, meaningful simplification may not have taken place - the
+-- order of bindings may simply have been rearranged.  The function is
+-- idempotent, however.
+simplifyProg :: ST.UserAnnotation u => RuleBook u -> Prog -> Prog
+simplifyProg rules prog =
+  Prog $ fst $ runSimpleM (mapM simplifyFun $ progFunctions prog)
+               (emptyEnv rules $ Just prog) namesrc
+  where namesrc = newNameSourceForProg prog
+
+-- | Simplify the given function.  Even if the output differs from the
+-- output, meaningful simplification may not have taken place - the
+-- order of bindings may simply have been rearranged.  The function is
+-- idempotent, however.
+simplifyOneFun :: (ST.UserAnnotation u, MonadFreshNames m) =>
+                  RuleBook u -> FunDec -> m FunDec
+simplifyOneFun rules fundec =
+  modifyNameSource $ runSimpleM (simplifyFun fundec) (emptyEnv rules Nothing)
+
+-- | Simplify just a single 'Lambda'.
+simplifyOneLambda :: (ST.UserAnnotation u, MonadFreshNames m) =>
+                     RuleBook u -> Maybe Prog -> Lambda -> m Lambda
+simplifyOneLambda rules prog lam = do
+  let simplifyOneLambda' = insertAllBindings $
+                           bindParams (lambdaParams lam) $
+                           simplifyBody $ lambdaBody lam
+  body' <- modifyNameSource $ runSimpleM simplifyOneLambda' $ emptyEnv rules prog
+  return $ lam { lambdaBody = body' }
+
+-- | Simplify the given body.  Even if the output differs from the
+-- output, meaningful simplification may not have taken place - the
+-- order of bindings may simply have been rearranged.  The function is
+-- idempotent, however.
+simplifyOneBody :: ST.UserAnnotation u =>
+                   MonadFreshNames m => RuleBook u -> Maybe Prog -> Body -> m Body
+simplifyOneBody rules prog body =
+  modifyNameSource $
+  runSimpleM (insertAllBindings $ simplifyBody body) (emptyEnv rules prog)

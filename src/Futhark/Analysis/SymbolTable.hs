@@ -1,21 +1,25 @@
 module Futhark.Analysis.SymbolTable
-  ( SymbolTable (bindings)
+  ( SymbolTable (bindings, annotationFunction)
   , empty
   , Entry (..)
+  , lookup
   , lookupExp
+  , lookupSubExp
   , lookupScalExp
   , lookupValue
   , lookupVar
+  , deepen
+  , depth
   , enclosingLoopVars
   , insertOne
   , insert
+  , insertBinding
   , insertParam
   , insertArrayParam
   , insertLoopVar
   , updateBounds
   , isAtLeast
-  , lookup
-  , CtOrId(..)
+  , UserAnnotation (..)
   )
   where
 
@@ -29,90 +33,100 @@ import qualified Data.Set as S
 import qualified Data.HashMap.Lazy as HM
 
 import Data.Loc
-import Futhark.InternalRep
+import Futhark.InternalRep hiding (insertBinding)
 import Futhark.Analysis.ScalExp
 import qualified Futhark.Analysis.AlgSimplify as AS
 
-data SymbolTable = SymbolTable {
-    curDepth :: Int
-  , bindings :: HM.HashMap VName Entry
-  } deriving (Eq, Show)
+data SymbolTable a = SymbolTable {
+    loopDepth :: Int
+  , bindings :: HM.HashMap VName (Entry a)
+  , annotationFunction :: Entry () -> a
+  }
 
-empty :: SymbolTable
-empty = SymbolTable 0 HM.empty
+empty :: UserAnnotation a => SymbolTable a
+empty = SymbolTable 0 HM.empty annotationFor
 
-data Entry = Entry {
+deepen :: SymbolTable a -> SymbolTable a
+deepen vtable = vtable { loopDepth = loopDepth vtable + 1 }
+
+depth :: SymbolTable a -> Int
+depth = loopDepth
+
+class UserAnnotation a where
+  annotationFor :: Entry () -> a
+
+instance UserAnnotation () where
+  annotationFor = const ()
+
+data Entry a = Entry {
     asExp :: Maybe Exp
   , asScalExp :: Maybe ScalExp
   , bindingDepth :: Int
   , valueRange :: Range
   , loopVariable :: Bool
+  , userAnnotation :: a
   } deriving (Eq, Show)
 
 type Range = (Maybe ScalExp, Maybe ScalExp)
 
-data CtOrId  = Value Value
-             -- ^ A plain value for constant propagation.
+lookup :: VName -> SymbolTable u -> Maybe (Entry u)
+lookup name = HM.lookup name . bindings
 
-             | VarId VName Type
-             -- ^ Variable id for copy propagation
+lookupExp :: VName -> SymbolTable a -> Maybe Exp
+lookupExp name vtable = asExp =<< lookup name vtable
 
-             | SymExp Exp
-             -- ^ Various other opportunities for simplification.
-               deriving (Show)
-
-lookup :: VName -> SymbolTable -> Maybe CtOrId
-lookup name vtable = do
+lookupSubExp :: VName -> SymbolTable a -> Maybe SubExp
+lookupSubExp name vtable = do
   e <- lookupExp name vtable
   case e of
-    SubExp (Constant val _) -> Just $ Value val
-    SubExp (Var v)          -> Just $ VarId (identName v) (identType v)
-    _                       -> Just $ SymExp e
+    SubExp se -> Just se
+    _         -> Nothing
 
-lookupExp :: VName -> SymbolTable -> Maybe Exp
-lookupExp name vtable = asExp =<< HM.lookup name (bindings vtable)
+lookupScalExp :: VName -> SymbolTable a -> Maybe ScalExp
+lookupScalExp name vtable = asScalExp =<< lookup name vtable
 
-lookupScalExp :: VName -> SymbolTable -> Maybe ScalExp
-lookupScalExp name vtable = asScalExp =<< HM.lookup name (bindings vtable)
+lookupValue :: VName -> SymbolTable a -> Maybe Value
+lookupValue name vtable = case lookupSubExp name vtable of
+                            Just (Constant val _) -> Just val
+                            _                     -> Nothing
 
-lookupValue :: VName -> SymbolTable -> Maybe Value
-lookupValue name vtable = case lookupExp name vtable of
-                            Just (SubExp (Constant val _)) -> Just val
-                            _                              -> Nothing
+lookupVar :: VName -> SymbolTable a -> Maybe VName
+lookupVar name vtable = case lookupSubExp name vtable of
+                          Just (Var v) -> Just $ identName v
+                          _            -> Nothing
 
-lookupVar :: VName -> SymbolTable -> Maybe VName
-lookupVar name vtable = case lookupExp name vtable of
-                          Just (SubExp (Var v)) -> Just $ identName v
-                          _                     -> Nothing
-
-lookupRange :: VName -> SymbolTable -> Range
+lookupRange :: VName -> SymbolTable a -> Range
 lookupRange name vtable =
-  maybe (Nothing, Nothing) valueRange $ HM.lookup name (bindings vtable)
+  maybe (Nothing, Nothing) valueRange $ lookup name vtable
 
-enclosingLoopVars :: [VName] -> SymbolTable -> [VName]
+enclosingLoopVars :: [VName] -> SymbolTable a -> [VName]
 enclosingLoopVars free vtable =
   map fst $ reverse $
   sortBy (comparing (bindingDepth . snd)) $
   filter (loopVariable . snd) $ mapMaybe fetch free
-  where fetch name = do e <- HM.lookup name $ bindings vtable
+  where fetch name = do e <- lookup name vtable
                         return (name, e)
 
-defBnd :: SymbolTable -> Entry
-defBnd vtable = Entry {
+defEntry :: SymbolTable a -> Entry ()
+defEntry vtable = Entry {
     asExp = Nothing
   , asScalExp = Nothing
   , valueRange = (Nothing, Nothing)
-  , bindingDepth = curDepth vtable
+  , bindingDepth = loopDepth vtable
   , loopVariable = False
+  , userAnnotation = ()
   }
 
-insertOne :: VName -> Exp -> SymbolTable -> SymbolTable
+insertOne :: VName -> Exp -> SymbolTable a -> SymbolTable a
 insertOne name = insert [name]
 
-insert :: [VName] -> Exp -> SymbolTable -> SymbolTable
+insertBinding :: Binding -> SymbolTable a -> SymbolTable a
+insertBinding (Let pat e) = insert (map identName pat) e
+
+insert :: [VName] -> Exp -> SymbolTable a -> SymbolTable a
 -- First, handle single-name bindings.  These are the most common.
 insert [name] e vtable = insertEntry name bind vtable
-  where bind = (defBnd vtable) {
+  where bind = (defEntry vtable) {
                  asExp = Just e
                , asScalExp = toScalExp (`lookupScalExp` vtable) e
                , valueRange = range
@@ -139,12 +153,12 @@ insert [name] e vtable = insertEntry name bind vtable
 insert (_:names) (Filter _ _ inps _) vtable =
   insertEntries (zip names $ map makeBnd inps) vtable
   where makeBnd (Var v) =
-          (defBnd vtable) { valueRange = lookupRange (identName v) vtable }
+          (defEntry vtable) { valueRange = lookupRange (identName v) vtable }
         makeBnd _ =
-          defBnd vtable
+          defEntry vtable
 insert _ _ vtable = vtable
 
-subExpRange :: SubExp -> SymbolTable -> Range
+subExpRange :: SubExp -> SymbolTable a -> Range
 subExpRange (Var v) vtable =
   lookupRange (identName v) vtable
 subExpRange (Constant (BasicVal bv) _) _ =
@@ -157,39 +171,37 @@ subExpToScalExp (Var v)                    = Just $ Id v
 subExpToScalExp (Constant (BasicVal bv) _) = Just $ Val bv
 subExpToScalExp _                          = Nothing
 
-insertEntry :: VName -> Entry -> SymbolTable -> SymbolTable
+insertEntry :: VName -> Entry () -> SymbolTable a -> SymbolTable a
 insertEntry name entry =
   insertEntries [(name,entry)]
 
-insertEntries :: [(VName, Entry)] -> SymbolTable -> SymbolTable
+insertEntries :: [(VName, Entry ())] -> SymbolTable a -> SymbolTable a
 insertEntries entries vtable =
-  vtable { bindings = foldr (uncurry HM.insert) (bindings vtable) entries
-         , curDepth = curDepth vtable + 1
+  vtable { bindings = foldl insertWithAnno (bindings vtable) entries
          }
+  where insertWithAnno bnds (name, entry) =
+          let entry' = entry { userAnnotation = annotationFunction vtable entry }
+          in HM.insert name entry' bnds
 
-insertParamWithRange :: Param -> Range -> SymbolTable -> SymbolTable
+insertParamWithRange :: Param -> Range -> SymbolTable a -> SymbolTable a
 insertParamWithRange param range vtable =
   -- We know that the sizes in the type of param are at least zero,
   -- since they are array sizes.
   let vtable' = insertEntry name bind vtable
   in foldr (`isAtLeast` 0) vtable' sizevars
-  where bind = Entry {
-                 asExp = Nothing
-               , asScalExp = Nothing
-               , valueRange = range
-               , bindingDepth = curDepth vtable
-               , loopVariable = False
-               }
+  where bind = (defEntry vtable) { valueRange = range
+                               , loopVariable = True
+                               }
         name = identName param
         sizevars = mapMaybe isVar $ arrayDims $ identType param
         isVar (Var v) = Just $ identName v
         isVar _       = Nothing
 
-insertParam :: Param -> SymbolTable -> SymbolTable
+insertParam :: Param -> SymbolTable a -> SymbolTable a
 insertParam param =
   insertParamWithRange param (Nothing, Nothing)
 
-insertArrayParam :: Param -> SubExp -> SymbolTable -> SymbolTable
+insertArrayParam :: Param -> SubExp -> SymbolTable a -> SymbolTable a
 insertArrayParam param array vtable =
   -- We now know that the outer size of 'array' is at least one, and
   -- that the inner sizes are at least zero, since they are array
@@ -199,20 +211,17 @@ insertArrayParam param array vtable =
     Var v:_ -> (identName v `isAtLeast` 1) vtable'
     _       -> vtable'
 
-insertLoopVar :: VName -> SubExp -> SymbolTable -> SymbolTable
+insertLoopVar :: VName -> SubExp -> SymbolTable a -> SymbolTable a
 insertLoopVar name bound vtable = insertEntry name bind vtable
-  where bind = Entry {
-                 asExp = Nothing
-               , asScalExp = Nothing
-               , valueRange = (Just (Val (IntVal 0)),
-                               minus1 <$> toScalExp look (SubExp bound))
-               , bindingDepth = curDepth vtable
-               , loopVariable = True
-               }
+  where bind = (defEntry vtable) {
+            valueRange = (Just (Val (IntVal 0)),
+                        minus1 <$> toScalExp look (SubExp bound))
+          , loopVariable = True
+          }
         look = (`lookupScalExp` vtable)
         minus1 = (`SMinus` Val (IntVal 1))
 
-updateBounds :: Bool -> SubExp -> SymbolTable -> SymbolTable
+updateBounds :: Bool -> SubExp -> SymbolTable a -> SymbolTable a
 updateBounds isTrue cond vtable =
   case toScalExp (`lookupScalExp` vtable) $ SubExp cond of
     Nothing    -> vtable
@@ -223,7 +232,7 @@ updateBounds isTrue cond vtable =
 -- | Refines the ranges in the symbol table with
 --     ranges extracted from branch conditions.
 --   `cond' is the condition of the if-branch.
-updateBounds' :: SrcLoc -> ScalExp -> SymbolTable -> SymbolTable
+updateBounds' :: SrcLoc -> ScalExp -> SymbolTable a -> SymbolTable a
 updateBounds' loc cond sym_tab =
   foldr updateBound sym_tab $ mapMaybe solve_leq0 $
   either (const []) getNotFactorsLEQ0 $ AS.simplify (SNot cond) loc ranges
@@ -273,7 +282,7 @@ updateBounds' loc cond sym_tab =
             Just (sym, True, mb)
           _ -> Nothing
 
-setUpperBound :: VName -> ScalExp -> SymbolTable -> SymbolTable
+setUpperBound :: VName -> ScalExp -> SymbolTable a -> SymbolTable a
 setUpperBound name bound vtable =
   vtable { bindings = HM.adjust setUpperBound' name $ bindings vtable }
   where setUpperBound' bind =
@@ -283,7 +292,7 @@ setUpperBound name bound vtable =
                        Just $ maybe bound (MaxMin True . (:[bound])) oldUpperBound)
                   }
 
-setLowerBound :: VName -> ScalExp -> SymbolTable -> SymbolTable
+setLowerBound :: VName -> ScalExp -> SymbolTable a -> SymbolTable a
 setLowerBound name bound vtable =
   vtable { bindings = HM.adjust setLowerBound' name $ bindings vtable }
   where setLowerBound' bind =
@@ -293,6 +302,6 @@ setLowerBound name bound vtable =
                        oldUpperBound)
                   }
 
-isAtLeast :: VName -> Int -> SymbolTable -> SymbolTable
+isAtLeast :: VName -> Int -> SymbolTable a -> SymbolTable a
 isAtLeast name x =
   setLowerBound name $ Val $ IntVal x

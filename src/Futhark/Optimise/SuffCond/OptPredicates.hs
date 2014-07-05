@@ -1,3 +1,4 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleInstances, MultiParamTypeClasses #-}
 module Futhark.Optimise.SuffCond.OptPredicates
        (
          optimisePredicates
@@ -7,11 +8,12 @@ module Futhark.Optimise.SuffCond.OptPredicates
 import Control.Applicative
 import Control.Arrow (second)
 import Data.Loc
+import Data.Foldable (any)
 import Data.Maybe
 import Data.Monoid
 import Control.Monad.State
 import Control.Monad.Writer
-import Control.Monad.Trans.Maybe
+import Control.Monad.Reader
 import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
 
@@ -22,11 +24,15 @@ import Futhark.Analysis.ScalExp (ScalExp)
 import qualified Futhark.Analysis.ScalExp as SE
 import qualified Futhark.Analysis.AlgSimplify as AS
 import Futhark.Tools
-import Futhark.Optimise.DeadVarElim (deadCodeElimBody)
+import qualified Futhark.Optimise.Simplifier.Engine as Simplify
+import Futhark.Optimise.Simplifier.Rule (RuleBook)
 
-optimisePredicates :: MonadFreshNames m => Prog -> m Prog
-optimisePredicates prog = do
-  optimPreds <- mapM maybeOptimiseFun origfuns
+import Prelude hiding (any)
+
+optimisePredicates :: MonadFreshNames m =>
+                      RuleBook Forbidden -> Prog -> m Prog
+optimisePredicates rules prog = do
+  optimPreds <- mapM (maybeOptimiseFun rules) origfuns
   let newfuns = concat optimPreds
       subst = HM.fromList $
               zip (map funName origfuns) $
@@ -70,37 +76,40 @@ insertPredicateCalls subst prog =
             (eBody [callPreds predt fs e call])
             predt predloc
 
-maybeOptimiseFun :: MonadFreshNames m => FunDec -> m [FunDec]
-maybeOptimiseFun fundec@(_,[Basic Bool],_,body,_) = do
-  let sctable = analyseBody ST.empty mempty body
-  generatePredicates fundec sctable
-maybeOptimiseFun _ = return []
+maybeOptimiseFun :: MonadFreshNames m =>
+                    RuleBook Forbidden -> FunDec -> m [FunDec]
+maybeOptimiseFun rules fundec@(_,[Basic Bool],_,body,_) = do
+  let sctable = analyseBody (ST.empty :: ST.SymbolTable ()) mempty body
+  generateOptimisedPredicates rules fundec sctable
+maybeOptimiseFun _ _ = return []
 
-generatePredicates :: MonadFreshNames m =>
-                      FunDec -> SCTable -> m [FunDec]
-generatePredicates fundec@(_,_,_,body,_) sctable = do
-  o1pred <- generatePredicates' fundec "_0" sctable HS.empty
-  onpred <- generatePredicates' fundec "_1" sctable $ allOutermostLoops body
+generateOptimisedPredicates :: MonadFreshNames m =>
+                      RuleBook Forbidden -> FunDec -> SCTable -> m [FunDec]
+generateOptimisedPredicates rules fundec sctable = do
+  o1pred <- generateOptimisedPredicates' rules fundec "_0" sctable 0
+  onpred <- generateOptimisedPredicates' rules fundec "_1" sctable 1
   return $ catMaybes [o1pred , onpred]
 
-generatePredicates' :: MonadFreshNames m =>
-                       FunDec -> String
-                    -> SCTable -> Loops -> m (Maybe FunDec)
-generatePredicates' (fname, rettype, params, body, loc) suff sctable loops = do
-  res <- runVariantM $ bodyVariantIn mempty sctable loops body
+generateOptimisedPredicates' :: MonadFreshNames m =>
+                       RuleBook Forbidden -> FunDec -> String
+                    -> SCTable -> Int -> m (Maybe FunDec)
+generateOptimisedPredicates' rules (fname, rettype, params, body, loc) suff sctable depth = do
+  res <- runVariantM env $ Simplify.insertAllBindings $ Simplify.simplifyBody body
   case res of
-    (Just body', True) -> return $ Just (fname', rettype, params, body', loc)
-    _                  -> return Nothing
+    (body', True) -> return $ Just (fname', rettype, params, body', loc)
+    _             -> return Nothing
   where fname' = fname <> nameFromString suff
+        env = Env { envSimplifyEnv = Simplify.emptyEnv rules Nothing
+                  , envSCTable = sctable
+                  , envMaxLoops = depth
+                  }
 
 data SCEntry = SufficientCond [[ScalExp]] ScalExp
              deriving (Eq, Show)
 
 type SCTable = HM.HashMap VName SCEntry
 
-type Loops = Names
-
-analyseBody :: ST.SymbolTable -> SCTable -> Body -> SCTable
+analyseBody :: ST.SymbolTable u -> SCTable -> Body -> SCTable
 analyseBody _ sctable (Body [] _) =
   sctable
 
@@ -121,17 +130,17 @@ analyseBody vtable sctable (Body (Let [v] e:bnds) res) =
         ranges = rangesRep vtable
         loc = srclocOf e
         simplify se = AS.simplify se loc ranges
-analyseBody vtable sctable (Body (Let pat e:bnds) res) =
-  analyseBody (ST.insert (map identName pat) e vtable) sctable $ Body bnds res
+analyseBody vtable sctable (Body (bnd:bnds) res) =
+  analyseBody (ST.insertBinding bnd vtable) sctable $ Body bnds res
 
-rangesRep :: ST.SymbolTable -> AS.RangesRep
+rangesRep :: ST.SymbolTable u -> AS.RangesRep
 rangesRep = HM.filter nonEmptyRange . HM.map toRep . ST.bindings
   where toRep entry =
           (ST.bindingDepth entry, lower, upper)
           where (lower, upper) = ST.valueRange entry
         nonEmptyRange (_, lower, upper) = isJust lower || isJust upper
 
-analyseExp :: ST.SymbolTable -> Exp -> Maybe SCTable
+analyseExp :: ST.SymbolTable u -> Exp -> Maybe SCTable
 analyseExp vtable (DoLoop _ _ i bound body _) =
   Just $ analyseExpBody vtable' body
   where vtable' = clampLower $ clampUpper vtable
@@ -153,131 +162,160 @@ analyseExp vtable (If cond tbranch fbranch _ _) =
          analyseExpBody (ST.updateBounds False cond vtable) fbranch
 analyseExp _ _ = Nothing
 
-analyseExpBody :: ST.SymbolTable -> Body -> SCTable
+analyseExpBody :: ST.SymbolTable u -> Body -> SCTable
 analyseExpBody vtable = analyseBody vtable mempty
 
-type VariantM m = MaybeT (WriterT Any m)
+newtype Forbidden = Forbidden { isForbidden :: Bool }
+                    deriving (Eq, Ord, Show)
 
-runVariantM :: Functor m => VariantM m a -> m (Maybe a, Bool)
-runVariantM = fmap (second getAny) . runWriterT . runMaybeT
+instance ST.UserAnnotation Forbidden where
+  annotationFor = const $ Forbidden False
+
+data Env = Env { envSimplifyEnv :: Simplify.Env Forbidden
+               , envSCTable :: SCTable
+               , envMaxLoops :: Int
+               }
+
+data Res = Res { resNeed :: Simplify.Need
+               , resSufficiented :: Any
+               , resInvariant :: All
+               }
+
+instance Monoid Res where
+  Res n1 s1 i1 `mappend` Res n2 s2 i2 = Res (n1<>n2) (s1<>s2) (i1<>i2)
+  mempty = Res mempty mempty mempty
+
+forbiddenIn :: VName -> Env -> Bool
+forbiddenIn name env =
+  maybe False bad $ ST.lookup name $ Simplify.envVtable $ envSimplifyEnv env
+  where bad entry = (ST.loopVariable entry &&
+                     ST.bindingDepth entry > envMaxLoops env) ||
+                    isForbidden (ST.userAnnotation entry)
+
+newtype VariantM m a = VariantM (ReaderT Env
+                                    (WriterT Res m)
+                                   a)
+                      deriving (Applicative, Functor, Monad, Alternative,
+                                MonadReader Env,
+                                MonadWriter Res)
+
+collectInvariance :: Monad m => VariantM m a -> VariantM m (a, Bool)
+collectInvariance m = pass $ do
+  (x, res) <- listen m
+  return ((x, getAll $ resInvariant res),
+          const $ res { resInvariant = All True })
+
+notInvariant :: Monad m => VariantM m ()
+notInvariant = tell $ mempty { resInvariant = All False }
+
+instance MonadFreshNames m => MonadFreshNames (VariantM m) where
+  getNameSource = VariantM . lift . lift $ getNameSource
+  putNameSource = VariantM . lift . lift . putNameSource
+
+runVariantM :: Functor m => Env -> VariantM m a
+             -> m (a, Bool)
+runVariantM env (VariantM m) =
+  second (getAny . resSufficiented) <$> runWriterT (runReaderT m env)
 
 -- | We actually changed something to a sufficient condition.
 sufficiented :: Monad m => VariantM m ()
-sufficiented = tell $ Any True
+sufficiented = tell $ mempty { resSufficiented = Any True }
 
-newtype ForbiddenTable = ForbiddenTable Names
+instance MonadFreshNames m =>
+         Simplify.MonadEngine Forbidden (VariantM m) where
+  askEngineEnv = asks envSimplifyEnv
+  localEngineEnv f = local $ \env ->
+    env { envSimplifyEnv = f $ envSimplifyEnv env }
+  tellNeed need = tell $ Res need mempty mempty
+  listenNeed = liftM (second resNeed) . listen
 
-instance Monoid ForbiddenTable where
-  ForbiddenTable x `mappend` ForbiddenTable y = ForbiddenTable $ x <> y
-  mempty = ForbiddenTable mempty
+  passNeed m = pass $ do (x, f) <- m
+                         return (x, \(Res need suff inv) -> Res (f need) suff inv)
 
-noneForbidden :: ForbiddenTable -> Names -> Bool
-noneForbidden (ForbiddenTable ftable) =
-  HS.null . HS.intersection ftable
+  simplifyBody (Body [] res) = do
+    env <- ask
+    when (any (`forbiddenIn` env) names) notInvariant
+    Body [] <$> Simplify.simplifyResult res
+    where names = mapMaybe asName $ resultSubExps res
+          asName (Var v)       = Just $ identName v
+          asName (Constant {}) = Nothing
 
-forbid :: [VName] -> ForbiddenTable -> ForbiddenTable
-forbid names (ForbiddenTable ftable) =
-  ForbiddenTable $ foldr HS.insert ftable names
+  simplifyBody (Body (bnd:bnds) res) = do
+    (bnd',invariant) <-
+      collectInvariance $
+      either (return . Left) checkVariance =<<
+      Simplify.simplifyBinding bnd
+    case bnd' of
+      Left newbnds ->
+        Simplify.simplifyBody $ Body (newbnds++bnds) res
+      Right (Let pat' e') ->
+        Simplify.bindLetWith (const $ Forbidden $ not invariant) pat' e' $
+        Simplify.simplifyBody $ Body bnds res
 
-forbidNames :: [VName] -> VName -> Loops -> ForbiddenTable -> ForbiddenTable
-forbidNames names loop loops ftable
-  | loop `HS.member` loops = ftable
-  | otherwise              = forbid names ftable
+checkVariance :: MonadFreshNames m => Binding -> VariantM m (Either [Binding] Binding)
+checkVariance (Let pat e)
+  | isLoop e = do
+    maxLoops <- asks envMaxLoops
+    depth <- Simplify.asksEngineEnv $ ST.depth . Simplify.envVtable
+    when (depth >= maxLoops) notInvariant
+    return $ Right $ Let pat e
+  | otherwise = do
+    let names = freeNamesInExp e
+    env <- ask
+    if any (`forbiddenIn` env) names then
+      makeInvariant env $ Let pat e
+    else return $ Right $ Let pat e
+  where isLoop (Redomap {}) = True
+        isLoop (Reduce {}) = True
+        isLoop (DoLoop {}) = True
+        isLoop (Scan {}) = True
+        isLoop (Filter {}) = True
+        isLoop (Map {}) = True
+        isLoop (Apply {}) = True -- Treat funcalls as recurrences.
+        isLoop _ = False
 
-forbidParams :: [Param] -> VName -> Loops -> ForbiddenTable -> ForbiddenTable
-forbidParams = forbidNames . map identName
-
-bodyVariantIn :: MonadFreshNames m =>
-                 ForbiddenTable -> SCTable -> Loops -> Body -> VariantM m Body
-bodyVariantIn ftable sctable loops (Body bnds res) = do
-  (ftable', bnds') <- foldM inspect (ftable,[]) bnds
-  checkResult ftable' res
-  return $ Body bnds' res
-  where inspect (ftable', bnds') bnd@(Let pat _) =
-          (couldSimplify <$> bindingVariantIn ftable' sctable loops bnd) <|>
-          couldNotSimplify
-          where couldNotSimplify =
-                  return (forbid (map identName pat) ftable',
-                          bnds'++[bnd])
-                couldSimplify newbnds =
-                  (ftable',
-                   bnds'++newbnds)
-
-checkResult :: Monad m => ForbiddenTable -> Result -> VariantM m ()
-checkResult ftable (Result _ ses _)
-  | noneForbidden ftable names = return ()
-  | otherwise = fail "Result is not sufficiently invariant"
-  where names = HS.fromList $ mapMaybe asName ses
-        asName (Var v)       = Just $ identName v
-        asName (Constant {}) = Nothing
-
-bindingVariantIn :: MonadFreshNames m =>
-                    ForbiddenTable -> SCTable -> Loops -> Binding -> VariantM m [Binding]
-
--- We assume that a SOAC contributes only if it returns exactly a
--- single (boolean) value.
-bindingVariantIn ftable sctable loops (Let [v] (Map cs fun args loc)) = do
-  body <- bodyVariantIn (forbidParams (lambdaParams fun) name loops ftable)
-          sctable loops $ lambdaBody fun
-  return [Let [v] $ Map cs fun { lambdaBody = body } args loc]
-  where name = identName v
-bindingVariantIn ftable sctable loops (Let [v] (DoLoop res merge i bound body loc)) = do
-  let names = identName i : map (identName . fst) merge
-  body' <- bodyVariantIn (forbidNames names name loops ftable)
-           sctable loops body
-  return [Let [v] $ DoLoop res merge i bound body' loc]
-  where name = identName v
-bindingVariantIn ftable sctable loops (Let [v] (Redomap cs outerfun innerfun acc args loc)) = do
-  outerbody <- bodyVariantIn ftable sctable loops $ lambdaBody outerfun
-  let forbiddenParams = drop (length acc) $ lambdaParams innerfun
-  innerbody <- bodyVariantIn (forbidParams forbiddenParams name loops ftable)
-               sctable loops $ lambdaBody innerfun
-  return [Let [v] $ Redomap cs
-                 outerfun { lambdaBody = outerbody }
-                 innerfun { lambdaBody = innerbody }
-                 acc args loc]
-  where name = identName v
-
-bindingVariantIn ftable sctable loops (Let pat (If (Var v) tbranch fbranch t loc)) = do
-  tbranch' <-
-    deadCodeElimBody <$> bodyVariantIn ftable sctable loops tbranch
-  fbranch' <-
-    deadCodeElimBody <$> bodyVariantIn ftable sctable loops fbranch
-  let se = exactBinding sctable v
-  if scalExpIsAtMostVariantIn ftable se then do
-    (exbnds,v') <- lift $ lift $ scalExpToIdent v se
-    return $ exbnds ++ [Let pat $ If (Var v') tbranch' fbranch' t loc]
+makeInvariant :: MonadFreshNames m =>
+                 Env
+              -> Binding -> VariantM m (Either [Binding] Binding)
+makeInvariant env (Let [v] e)
+  | Just (Right se@(SE.RelExp SE.LTH0 ine)) <- -- Why can this fail?
+      simplify <$> SE.toScalExp (`ST.lookupScalExp` vtable) e,
+    Int <- SE.scalExpType ine,
+    Right suff <- AS.mkSuffConds se loc ranges,
+    x:xs <- filter (scalExpUsesNoForbidden env) $ map mkConj suff = do
+      (e', bnds) <- SE.fromScalExp loc $ foldl SE.SLogOr x xs
+      sufficiented
+      return $ Left $ bnds ++ [Let [v] e']
+  where mkConj []     = SE.Val $ LogVal True
+        mkConj (x:xs) = foldl SE.SLogAnd x xs
+        loc = srclocOf e
+        ranges = rangesRep vtable
+        vtable = Simplify.envVtable $ envSimplifyEnv env
+        simplify se = AS.simplify se loc ranges
+makeInvariant env bnd@(Let pat (If (Var v) tbranch fbranch t loc)) = do
+  let se = exactBinding (envSCTable env) v
+  if scalExpUsesNoForbidden env se then do
+    (exbnds,v') <- scalExpToIdent v se
+    return $ Left $ exbnds ++ [Let pat $ If (Var v') tbranch fbranch t loc]
     else
     -- FIXME: Check that tbranch and fbranch are safe.  We can do
     -- something smarter if 'v' actually comes from an 'or'.  Also,
     -- currently only handles case where pat is a singleton boolean.
-    case (tbranch', fbranch') of
+    case (tbranch, fbranch) of
       (Body tbnds (Result _ [tres] _),
        Body fbnds (Result _ [fres] _))
         | Basic Bool <- subExpType tres,
           Basic Bool <- subExpType fres,
           all safeBnd tbnds, all safeBnd fbnds -> do
         sufficiented
-        return $ tbnds ++ fbnds ++
+        return $ Left $ tbnds ++ fbnds ++
                  [Let pat $ BinOp LogAnd tres fres (Basic Bool) loc]
-      _ -> fail "Branch not sufficiently invariant"
+      _ -> do notInvariant
+              return $ Right bnd
   where safeBnd (Let _ e) = safeExp e
-
-bindingVariantIn ftable sctable _ (Let [v] e)
-  | noneForbidden ftable $ freeNamesInExp e =
-    return [Let [v] e]
-  | Just (SufficientCond suff _) <- HM.lookup (identName v) sctable =
-    case filter (scalExpIsAtMostVariantIn ftable) $ map mkConj suff of
-      []   -> fail "Binding not sufficiently invariant"
-      x:xs -> do (e', bnds) <- lift $ lift $ SE.fromScalExp loc $ foldl SE.SLogOr x xs
-                 sufficiented
-                 return $ bnds ++ [Let [v] e']
-  where mkConj []     = SE.Val $ LogVal True
-        mkConj (x:xs) = foldl SE.SLogAnd x xs
-        loc = srclocOf e
-
--- Nothing we can do about this one, then.
-bindingVariantIn _ _ _ _ = fail "Binding not sufficiently invariant"
+makeInvariant _ (Let pat e) = do
+  notInvariant
+  return $ Right $ Let pat e
 
 exactBinding :: SCTable -> Ident -> ScalExp
 exactBinding sctable v
@@ -293,19 +331,6 @@ scalExpToIdent v se = do
   v' <- newIdent' (++"exact") v
   return (bnds ++ [Let [v'] e'], v')
 
-scalExpIsAtMostVariantIn :: ForbiddenTable -> ScalExp -> Bool
-scalExpIsAtMostVariantIn ftable =
-  noneForbidden ftable . HS.fromList . map identName . SE.getIds
-
-allOutermostLoops :: Body -> Loops
-allOutermostLoops (Body bnds _) =
-  HS.fromList $ map identName $ mapMaybe loopIdentifier bnds
-  where loopIdentifier (Let (v:_) e) =
-          case e of DoLoop {}  -> Just v
-                    Map {}     -> Just v
-                    Redomap {} -> Just v
-                    Reduce {}  -> Just v
-                    Filter {}  -> Just v
-                    Apply {}   -> Just v -- Treat funcalls as recurrences.
-                    _          -> Nothing
-        loopIdentifier (Let _ _) = Nothing
+scalExpUsesNoForbidden :: Env -> ScalExp -> Bool
+scalExpUsesNoForbidden env =
+  not . any (`forbiddenIn` env) . HS.fromList . map identName . SE.getIds

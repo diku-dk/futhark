@@ -6,7 +6,8 @@
 -- using the default simplification rules.
 --
 module Futhark.Optimise.Simplifier
-  ( simplifyProg
+  ( -- * Simple interface
+    simplifyProg
   , simplifyFun
   , simplifyOneLambda
   )
@@ -14,6 +15,7 @@ module Futhark.Optimise.Simplifier
 
 import Futhark.InternalRep
 import Futhark.MonadFreshNames
+import Futhark.Optimise.Simplifier.Rule
 import Futhark.Optimise.Simplifier.Rules
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 
@@ -22,12 +24,15 @@ import qualified Futhark.Optimise.Simplifier.Engine as Engine
 -- order of bindings may simply have been rearranged.  The function is
 -- idempotent, however.
 simplifyProg :: Prog -> Prog
-simplifyProg = Engine.simplifyProg standardRules
+simplifyProg = Engine.simplifyProg unitStandardRules
 
 -- | Simplify just a single function declaration.
 simplifyFun :: MonadFreshNames m => FunDec -> m FunDec
-simplifyFun = Engine.simplifyOneFun standardRules
+simplifyFun = Engine.simplifyOneFun unitStandardRules
 
 -- | Simplify just a single 'Lambda'.
 simplifyOneLambda :: MonadFreshNames m => Prog -> Lambda -> m Lambda
-simplifyOneLambda = Engine.simplifyOneLambda standardRules . Just
+simplifyOneLambda = Engine.simplifyOneLambda unitStandardRules . Just
+
+unitStandardRules :: RuleBook ()
+unitStandardRules = standardRules

@@ -72,7 +72,7 @@ splitBody :: Body -> GenM (Body, Body)
 splitBody (Body bnds valres) = do
   (pred_bnds, val_bnds, preds) <- unzip3 <$> mapM splitBinding bnds
   (conjoined_preds, conj_bnds) <-
-    runBinder'' $ letSubExp "conjoined_preds" =<<
+    runBinder'' $ letSubExp "conjPreds" =<<
     foldBinOp LogAnd (constant True loc) (catMaybes preds) (Basic Bool)
   let predbody = Body (concat pred_bnds <> conj_bnds) $
                  valres { resultSubExps =
@@ -215,7 +215,7 @@ splitFoldLambda lam acc = do
 allTrue :: Certificates -> Lambda -> [SubExp] -> SrcLoc
         -> GenM (Binding, SubExp)
 allTrue cs predfun args loc = do
-  andchecks <- newIdent "checks" (Basic Bool) loc
+  andchecks <- newIdent "allTrue" (Basic Bool) loc
   andfun <- binOpLambda LogAnd (Basic Bool) loc
   innerfun <- predConjFun
   let andbnd = Let [andchecks] $

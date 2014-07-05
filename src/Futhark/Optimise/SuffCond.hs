@@ -13,10 +13,11 @@ import Futhark.Optimise.SuffCond.OptPredicates
 import Futhark.Optimise.SuffCond.GenPredicates
 import Futhark.Optimise.Simplifier
 import Futhark.Optimise.DeadVarElim
+import Futhark.Optimise.Simplifier.Rules
 
 optimiseProg :: Prog -> Prog
 optimiseProg prog =
-  let m = optimisePredicates =<< extractPredicates prog
+  let m = optimisePredicates standardRules =<< extractPredicates prog
   in evalState m $ newNameSourceForProg prog
 
 extractPredicates :: MonadFreshNames m => Prog -> m Prog

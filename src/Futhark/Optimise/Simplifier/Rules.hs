@@ -32,7 +32,7 @@ import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.InternalRep
 import Futhark.Tools
 
-topDownRules :: TopDownRules
+topDownRules :: TopDownRules u
 topDownRules = [ liftIdentityMapping
                , removeReplicateMapping
                , hoistLoopInvariantMergeVariables
@@ -53,7 +53,7 @@ topDownRules = [ liftIdentityMapping
                , simplifyScalExp
                ]
 
-bottomUpRules :: BottomUpRules
+bottomUpRules :: BottomUpRules u
 bottomUpRules = [ removeDeadMapping
                 , removeUnusedLoopResult
                 , removeRedundantMergeVariables
@@ -61,10 +61,10 @@ bottomUpRules = [ removeDeadMapping
                 , removeUnnecessaryCopy
                 ]
 
-standardRules :: RuleBook
+standardRules :: RuleBook u
 standardRules = (topDownRules, bottomUpRules)
 
-liftIdentityMapping :: TopDownRule
+liftIdentityMapping :: TopDownRule u
 liftIdentityMapping _ (Let pat (Map cs fun arrs loc)) =
   case foldr checkInvariance ([], [], []) $ zip3 pat ses rettype of
     ([], _, _) -> cannotSimplify
@@ -100,7 +100,7 @@ liftIdentityMapping _ _ = cannotSimplify
 
 -- | Remove all arguments to the map that are simply replicates.
 -- These can be turned into free variables instead.
-removeReplicateMapping :: TopDownRule
+removeReplicateMapping :: TopDownRule u
 removeReplicateMapping vtable (Let pat (Map cs fun arrs loc))
   | not $ null parameterBnds =
   let (params, arrs') = unzip paramsAndArrs
@@ -126,7 +126,7 @@ removeReplicateMapping vtable (Let pat (Map cs fun arrs loc))
 
 removeReplicateMapping _ _ = cannotSimplify
 
-removeDeadMapping :: BottomUpRule
+removeDeadMapping :: BottomUpRule u
 removeDeadMapping (_, used) (Let pat (Map cs fun arrs loc)) =
   let Result rcs ses resloc = bodyResult $ lambdaBody fun
       isUsed (v, _, _) = (`UT.used` used) $ identName v
@@ -142,7 +142,7 @@ removeDeadMapping _ _ = cannotSimplify
 
 -- After removing a result, we may also have to remove some of the
 -- shape bindings.
-removeUnusedLoopResult :: BottomUpRule
+removeUnusedLoopResult :: BottomUpRule u
 removeUnusedLoopResult (_, used) (Let pat (DoLoop respat merge i bound body loc))
   | explpat' <- filter (usedAfterwards . fst) explpat,
     explpat' /= explpat =
@@ -174,7 +174,7 @@ removeUnusedLoopResult _ _ = cannotSimplify
 -- I do not claim that the current implementation of this rule is
 -- perfect, but it should suffice for many cases, and should never
 -- generate wrong code.
-removeRedundantMergeVariables :: BottomUpRule
+removeRedundantMergeVariables :: BottomUpRule u
 removeRedundantMergeVariables _ (Let pat (DoLoop respat merge i bound body loc))
   | not $ all (usedInResult . fst) merge =
   let Result cs es resloc = bodyResult body
@@ -216,7 +216,7 @@ removeRedundantMergeVariables _ _ =
 
 -- We may change the type of the loop if we hoist out a shape
 -- annotation, in which case we also need to tweak the bound pattern.
-hoistLoopInvariantMergeVariables :: TopDownRule
+hoistLoopInvariantMergeVariables :: TopDownRule u
 hoistLoopInvariantMergeVariables _ (Let pat (DoLoop respat merge idd n loopbody loc)) =
     -- Figure out which of the elements of loopresult are
     -- loop-invariant, and hoist them out.
@@ -260,30 +260,30 @@ hoistLoopInvariantMergeVariables _ _ = cannotSimplify
 -- | A function that, given a variable name, returns its definition.
 type VarLookup = VName -> Maybe Exp
 
-type LetTopDownRule = VarLookup -> Exp -> Maybe Exp
+type LetTopDownRule u = VarLookup -> Exp -> Maybe Exp
 
-letRule :: LetTopDownRule -> TopDownRule
+letRule :: LetTopDownRule u -> TopDownRule u
 letRule rule vtable (Let pat e) =
   liftMaybe $ (:[]) . Let pat <$> rule look e
   where look = (`ST.lookupExp` vtable)
 
-simplifyClosedFormRedomap :: TopDownRule
+simplifyClosedFormRedomap :: TopDownRule u
 simplifyClosedFormRedomap vtable (Let pat (Redomap _ _ innerfun acc arr _)) =
   foldClosedForm (`ST.lookupExp` vtable) pat innerfun acc arr
 simplifyClosedFormRedomap _ _ = cannotSimplify
 
-simplifyClosedFormReduce :: TopDownRule
+simplifyClosedFormReduce :: TopDownRule u
 simplifyClosedFormReduce vtable (Let pat (Reduce _ fun args _)) =
   foldClosedForm (`ST.lookupExp` vtable) pat fun acc arr
   where (acc, arr) = unzip args
 simplifyClosedFormReduce _ _ = cannotSimplify
 
-simplifyClosedFormLoop :: TopDownRule
+simplifyClosedFormLoop :: TopDownRule u
 simplifyClosedFormLoop _ (Let pat (DoLoop respat merge _ bound body _)) =
   loopClosedForm pat respat merge bound body
 simplifyClosedFormLoop _ _ = cannotSimplify
 
-simplifyRearrange :: LetTopDownRule
+simplifyRearrange :: LetTopDownRule u
 
 -- Handle identity permutation.
 simplifyRearrange _ (Rearrange _ perm e _)
@@ -302,7 +302,7 @@ simplifyRearrange look (Rearrange cs perm (Var v) loc) =
 
 simplifyRearrange _ _ = Nothing
 
-simplifyRotate :: LetTopDownRule
+simplifyRotate :: LetTopDownRule u
 -- A zero-rotation is identity.
 simplifyRotate _ (Rotate _ 0 e _) =
   Just $ SubExp e
@@ -322,7 +322,7 @@ simplifyRotate look (Rotate _ _ (Var v) _) = do
 
 simplifyRotate _ _ = Nothing
 
-simplifyBinOp :: LetTopDownRule
+simplifyBinOp :: LetTopDownRule u
 
 simplifyBinOp _ (BinOp Plus e1 e2 _ pos)
   | isCt0 e1 = Just $ SubExp e2
@@ -524,12 +524,12 @@ simplifyBinOp _ _ = Nothing
 binOpRes :: SrcLoc -> BasicValue -> Maybe Exp
 binOpRes loc v = Just $ SubExp $ Constant (BasicVal v) loc
 
-simplifyNot :: LetTopDownRule
+simplifyNot :: LetTopDownRule u
 simplifyNot _ (Not (Constant (BasicVal (LogVal v)) _) loc) =
   Just $ SubExp $ constant (not v) loc
 simplifyNot _ _ = Nothing
 
-simplifyNegate :: LetTopDownRule
+simplifyNegate :: LetTopDownRule u
 simplifyNegate _ (Negate (Constant (BasicVal (IntVal  v)) _) pos) =
   Just $ SubExp $ constant (negate v) pos
 simplifyNegate _ (Negate (Constant (BasicVal (RealVal  v)) _) pos) =
@@ -538,13 +538,13 @@ simplifyNegate _ _ =
   Nothing
 
 -- If expression is true then just replace assertion.
-simplifyAssert :: LetTopDownRule
+simplifyAssert :: LetTopDownRule u
 simplifyAssert _ (Assert (Constant (BasicVal (LogVal True)) _) loc) =
   Just $ SubExp $ Constant (BasicVal Checked) loc
 simplifyAssert _ _ =
   Nothing
 
-simplifyConjoin :: LetTopDownRule
+simplifyConjoin :: LetTopDownRule u
 simplifyConjoin look (Conjoin es loc) =
   -- Remove trivial certificates.
   let check seen (Constant (BasicVal Checked) _) = seen
@@ -563,7 +563,7 @@ simplifyConjoin look (Conjoin es loc) =
          | otherwise         -> Nothing
 simplifyConjoin _ _ = Nothing
 
-simplifyIndexing :: LetTopDownRule
+simplifyIndexing :: LetTopDownRule u
 simplifyIndexing look (Index cs idd inds loc) =
   case look $ identName idd of
     Nothing -> Nothing
@@ -608,7 +608,7 @@ simplifyIndexing look (Index cs idd inds loc) =
 
 simplifyIndexing _ _ = Nothing
 
-evaluateBranch :: TopDownRule
+evaluateBranch :: TopDownRule u
 evaluateBranch _ (Let pat (If e1 tb fb t _))
   | Just branch <- checkBranch =
   let ses = resultSubExps $ bodyResult branch
@@ -624,7 +624,7 @@ evaluateBranch _ _ = cannotSimplify
 -- IMPROVE: This rule can be generalised to work in more cases,
 -- especially when the branches have bindings, or return more than one
 -- value.
-simplifyBoolBranch :: TopDownRule
+simplifyBoolBranch :: TopDownRule u
 -- if c then True else False == c
 simplifyBoolBranch _
   (Let [v] (If cond
@@ -646,7 +646,7 @@ simplifyBoolBranch _ (Let [v] (If cond tb fb ts loc))
   return $ bnds ++ [Let [v] e]
 simplifyBoolBranch _ _ = cannotSimplify
 
-hoistBranchInvariant :: TopDownRule
+hoistBranchInvariant :: TopDownRule u
 hoistBranchInvariant _ (Let pat (If e1 tb fb ts loc)) =
   let Result tcs tses tresloc = bodyResult tb
       Result fcs fses fresloc = bodyResult fb
@@ -664,7 +664,7 @@ hoistBranchInvariant _ (Let pat (If e1 tb fb ts loc)) =
           | otherwise  = (v:pat', (tse,fse,t):res, invariant)
 hoistBranchInvariant _ _ = cannotSimplify
 
-simplifyScalExp :: TopDownRule
+simplifyScalExp :: TopDownRule u
 simplifyScalExp vtable (Let pat e)
   | Just orig <- SE.toScalExp (`ST.lookupScalExp` vtable) e,
     Right new@(SE.Val _) <- AS.simplify orig loc ranges,
@@ -678,7 +678,7 @@ simplifyScalExp vtable (Let pat e)
         nonEmptyRange (_, lower, upper) = isJust lower || isJust upper
 simplifyScalExp _ _ = cannotSimplify
 
-removeUnnecessaryCopy :: BottomUpRule
+removeUnnecessaryCopy :: BottomUpRule u
 removeUnnecessaryCopy (_,used) (Let [v] (Copy se _))
   | not $ any (`UT.isConsumed` used) $
     identName v : HS.toList (aliases $ subExpType se) =
@@ -689,7 +689,7 @@ removeUnnecessaryCopy _ _ = cannotSimplify
 -- after a branch.  Standard dead code removal can remove the branch
 -- if *none* of the return values are used, but this rule is more
 -- precise.
-removeDeadBranchResult :: BottomUpRule
+removeDeadBranchResult :: BottomUpRule u
 removeDeadBranchResult (_, used) (Let pat (If e1 tb fb ts loc))
   | -- Figure out which of the names in 'pat' are used...
     patused <- map ((`UT.used` used) . identName) pat,
