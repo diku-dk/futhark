@@ -19,6 +19,7 @@ import Text.PrettyPrint.Mainland
 
 import Futhark.InternalRep
 import Futhark.MonadFreshNames
+import Futhark.Substitute
 import Futhark.Tools
 
 -----------------------------------------------------------------
@@ -81,6 +82,22 @@ ppBinOp p bop precedence rprecedence x y =
 
 ppScalExp :: ScalExp -> String
 ppScalExp = pretty 160 . ppr
+
+instance Substitute ScalExp where
+  substituteNames subst e =
+    case e of Id v -> Id $ substituteNames subst v
+              Val v -> Val v
+              SNeg x -> SNeg $ substituteNames subst x
+              SNot x -> SNot $ substituteNames subst x
+              SPlus x y -> substituteNames subst x `SPlus` substituteNames subst y
+              SMinus x y -> substituteNames subst x `SMinus` substituteNames subst y
+              SPow x y -> substituteNames subst x `SPow` substituteNames subst y
+              STimes x y -> substituteNames subst x `STimes` substituteNames subst y
+              SDivide x y -> substituteNames subst x `SDivide` substituteNames subst y
+              MaxMin m es -> MaxMin m $ map (substituteNames subst) es
+              RelExp r x -> RelExp r $ substituteNames subst x
+              SLogAnd x y -> substituteNames subst x `SLogAnd` substituteNames subst y
+              SLogOr x y -> substituteNames subst x `SLogOr` substituteNames subst y
 
 scalExpType :: ScalExp -> BasicType
 scalExpType (Val ( IntVal _) ) = Int

@@ -22,6 +22,7 @@ module Futhark.Optimise.Simplifier.Engine
        , Need
        , emptyEnv
        , asksEngineEnv
+       , localVtable
        , insertAllBindings
        , defaultSimplifyBody
        , simplifyBinding
@@ -46,7 +47,6 @@ import Data.Graph
 import Data.Hashable
 import Data.List
 import Data.Loc
-import Data.Maybe
 import qualified Data.HashSet as HS
 import Data.Foldable (traverse_)
 
@@ -57,43 +57,19 @@ import Futhark.Optimise.Simplifier.Rule
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Optimise.Simplifier.Apply
+import Futhark.Optimise.Simplifier.TaggedBinding
+import Futhark.Substitute
 
-simplifyFun :: FunDec -> SimpleM u FunDec
-simplifyFun (fname, rettype, params, body, loc) = do
-  body' <- insertAllBindings $ bindParams params $ simplifyBody body
-  return (fname, rettype, params, body', loc)
-
-data BindNeed = LetNeed ([Ident],[VName]) (Exp, Names)
-                -- The [VName] is just the names of the idents, as a
-                -- cache.  Similarly, the expression is tagged with
-                -- what is free in it.
-                deriving (Show, Eq)
-
-type NeedSet = [BindNeed]
-
-asTail :: BindNeed -> Body
-asTail (LetNeed (pat,_) (e,_)) = Body [Let pat e] $ Result [] [] loc
-  where loc = srclocOf pat
-
-requires :: BindNeed -> Names
-requires (LetNeed (pat,_) (_,freeInE)) =
-  freeInE `mappend` freeInPat
-  where freeInPat  = mconcat $ map (freeInType . identType) pat
-
-provides :: BindNeed -> [VName]
-provides (LetNeed (_,provs) _) = provs
+type NeedSet u = [TaggedBinding u]
 
 patNameSet :: [Ident] -> Names
 patNameSet = HS.fromList . map identName
 
-freeInType :: Type -> Names
-freeInType = mconcat . map (freeNamesInExp . SubExp) . arrayDims
+data Need u = Need { needBindings :: NeedSet u
+                   , usageTable  :: UT.UsageTable
+                   }
 
-data Need = Need { needBindings :: NeedSet
-                 , usageTable  :: UT.UsageTable
-                 }
-
-instance Monoid Need where
+instance Monoid (Need u) where
   Need b1 f1 `mappend` Need b2 f2 = Need (b1 <> b2) (f1 <> f2)
   mempty = Need [] UT.empty
 
@@ -112,12 +88,12 @@ emptyEnv rules prog =
       , envRules = rules
       }
 
-class MonadFreshNames m => MonadEngine u m | m -> u where
+class (MonadFreshNames m, ST.UserAnnotation u) => MonadEngine u m | m -> u where
   askEngineEnv :: m (Env u)
   localEngineEnv :: (Env u -> Env u) -> m a -> m a
-  tellNeed :: Need -> m ()
-  listenNeed :: m a -> m (a, Need)
-  passNeed :: m (a, Need -> Need) -> m a
+  tellNeed :: Need u -> m ()
+  listenNeed :: m a -> m (a, Need u)
+  passNeed :: m (a, Need u -> Need u) -> m a
 
   simplifyBody :: MonadEngine u m => Body -> m Body
 
@@ -127,14 +103,16 @@ asksEngineEnv f = f <$> askEngineEnv
 descendIntoLoop :: MonadEngine u m => m a -> m a
 descendIntoLoop = localEngineEnv $ \env -> env { envVtable = ST.deepen $ envVtable env }
 
-needThis :: MonadEngine u m => Binding -> m ()
-needThis bnd = tellNeed $ Need [letNeed bnd] UT.empty
+needTagged :: MonadEngine u m => TaggedBinding u -> m ()
+needTagged bnd = tellNeed $ Need [bnd] UT.empty
 
-letNeed :: Binding -> BindNeed
-letNeed (Let pat e) = LetNeed (pat, map identName pat) (e, freeNamesInExp e)
+needUntagged :: MonadEngine u m => Binding -> m ()
+needUntagged bnd = do
+  vtable <- asksEngineEnv envVtable
+  needTagged $ tagBinding vtable bnd
 
-needToBinding :: BindNeed -> Binding
-needToBinding (LetNeed (pat, _) (e, _)) = Let pat e
+needToBinding :: TaggedBinding u -> Binding
+needToBinding (TaggedLet (pat, _) (e, _)) = Let pat e
 
 boundFree :: MonadEngine u m => Names -> m ()
 boundFree fs = tellNeed $ Need [] $ UT.usages fs
@@ -159,8 +137,9 @@ localVtable :: MonadEngine u m =>
 localVtable f = localEngineEnv $ \env -> env { envVtable = f $ envVtable env }
 
 binding :: MonadEngine u m =>
-           [Binding] -> m a -> m a
-binding = localVtable . flip (foldr ST.insertBinding)
+           [TaggedBinding u] -> m a -> m a
+binding bnds =
+  localVtable $ ST.insertEntries $ concatMap bindingEntries bnds
 
 bindParams :: MonadEngine u m =>
               [Param] -> m a -> m a
@@ -186,8 +165,9 @@ bindLet :: MonadEngine u m => [Ident] -> Exp -> m a -> m a
 
 bindLet pat e m = do
   ds <- asksEngineEnv envDupeState
-  let (bnds, ds') = performCSE ds pat e
-  mapM_ needThis bnds
+  vtable <- asksEngineEnv envVtable
+  let (bnds, ds') = performCSE ds $ tagBinding vtable $ Let pat e
+  mapM_ needTagged bnds
   binding bnds $
     localEngineEnv (\env -> env { envDupeState = ds'}) m
 
@@ -203,11 +183,11 @@ bindLetWith f pat e m = do
   where setAnnotationFun g env =
           env { envVtable = (envVtable env) { ST.annotationFunction = g } }
 
-hoistBindings :: MonadFreshNames m =>
-                 RuleBook u -> BlockPred
+hoistBindings :: (Substitute u, MonadFreshNames m) =>
+                 RuleBook u -> BlockPred u
               -> ST.SymbolTable u -> UT.UsageTable -> DupeState
-              -> [BindNeed] -> Body
-              -> m (Body, [BindNeed], UT.UsageTable)
+              -> [TaggedBinding u] -> Body
+              -> m (Body, [TaggedBinding u], UT.UsageTable)
 hoistBindings rules block vtable uses dupes needs body = do
   (uses', blocked, hoisted) <-
     simplifyBindings vtable uses $
@@ -223,93 +203,42 @@ hoistBindings rules block vtable uses dupes needs body = do
         simplifyBindings' vtable' uses' bnds =
           foldM hoistable (uses',[]) (reverse $ zip bnds vtables)
             where vtables = scanl insertBnd vtable' bnds
-                  insertBnd vtable'' (bnd, _, _) =
-                    ST.insertBinding bnd vtable''
+                  insertBnd vtable'' bnd =
+                    ST.insertBinding (untagBinding bnd) vtable''
 
-        hoistable (uses',bnds) ((bnd, provs, reqs), vtable')
-          | not $ uses' `UT.contains` provs = -- Dead binding.
+        hoistable (uses',bnds) (bnd, vtable')
+          | not $ uses' `UT.contains` provides bnd = -- Dead binding.
             return (uses', bnds)
           | otherwise = do
-            res <- bottomUpSimplifyBinding rules (vtable', uses') bnd
-            let need = letNeed bnd
+            res <- bottomUpSimplifyBinding rules (vtable', uses') $ untagBinding bnd
             case res of
               Nothing -- Nothing to optimise - see if hoistable.
-                | block uses' need ->
-                  return ((uses' <> reqs) `UT.without` provs,
-                          Left need : bnds)
+                | block uses' bnd ->
+                  return ((uses' <> usage bnd) `UT.without` provides bnd,
+                          Left bnd : bnds)
                 | otherwise ->
-                  return (uses' <> reqs, Right need : bnds)
+                  return (uses' <> usage bnd, Right bnd : bnds)
               Just optimbnds -> do
                 (uses'',bnds') <-
-                  simplifyBindings' vtable' uses' $ map attachUsage optimbnds
+                  simplifyBindings' vtable' uses' $ map (tagBinding vtable') optimbnds
                 return (uses'', bnds'++bnds)
 
-        attachUsage bnd = (bnd, providedByBnd bnd, usedInBnd bnd)
-        providedByBnd (Let pat _) = map identName pat
-        usedInBnd (Let pat e) =
-          usageInPat pat <> usageInExp e <> UT.usages (freeNamesInExp e)
-        usageInPat =
-          UT.usages . HS.fromList . mapMaybe subExpUsage .
-          concatMap (arrayDims . identType)
-        subExpUsage (Var v)       = Just $ identName v
-        subExpUsage (Constant {}) = Nothing
+        pick ds bnd =
+          let (bnds,ds') = performCSE ds bnd
+          in (ds', bnds)
 
-        pick ds (LetNeed (pat,_) (e,_)) =
-          let (bnds,ds') = performCSE ds pat e
-          in (ds',
-              [ (Let pat' e',
-                 map identName pat',
-                 usedInBnd (Let pat' e'))
-              | Let pat' e' <- bnds ])
-
-blockUnhoistedDeps :: [Either BindNeed BindNeed] -> [Either BindNeed BindNeed]
+blockUnhoistedDeps :: [Either (TaggedBinding u) (TaggedBinding u)]
+                   -> [Either (TaggedBinding u) (TaggedBinding u)]
 blockUnhoistedDeps = snd . mapAccumL block HS.empty
-  where block blocked (Left need@(LetNeed (_,prov) _)) =
-          (blocked <> HS.fromList prov, Left need)
-        block blocked (Right need@(LetNeed (_,prov) (_,needs)))
-          | blocked `intersects` needs =
-            (blocked <> HS.fromList prov, Left need)
+  where block blocked (Left need) =
+          (blocked <> HS.fromList (provides need), Left need)
+        block blocked (Right need)
+          | blocked `intersects` requires need =
+            (blocked <> HS.fromList (provides need), Left need)
           | otherwise =
             (blocked, Right need)
 
-usageInExp :: Exp -> UT.UsageTable
-usageInExp (Assert (Var v) _) = UT.predicateUsage $ identName v
-usageInExp (Update _ src _ _ _) =
-  mconcat $ map UT.consumedUsage $
-  identName src : HS.toList (aliases $ identType src)
-usageInExp (Apply _ args _ _) =
-  mconcat [ mconcat $ map UT.consumedUsage $
-            HS.toList $ aliases $ subExpType arg
-          | (arg,d) <- args, d == Consume ]
-usageInExp (DoLoop _ merge _ _ _ _) =
-  mconcat [ mconcat $ map UT.consumedUsage $
-            HS.toList $ aliases $ subExpType se
-          | (v,se) <- merge, unique $ identType v ]
-usageInExp (Map _ f args _) =
-  mconcat [ mconcat $ map UT.consumedUsage $
-            HS.toList $ aliases $ subExpType se
-          | (v,se) <- zip (lambdaParams f) args,
-            unique $ identType v ]
-usageInExp (Reduce _ f args _) =
-  mconcat [ mconcat $ map UT.consumedUsage $ HS.toList als
-          | (v,als) <- zip (lambdaParams f) $
-                       map (aliases . subExpType) $ acc ++ arr,
-            unique $ identType v ]
-  where (acc, arr) = unzip args
-usageInExp (Scan _ f args _) =
-  mconcat [ mconcat $ map UT.consumedUsage $ HS.toList als
-          | (v,als) <- zip (lambdaParams f) $
-                       map (aliases . subExpType) $ acc ++ arr,
-            unique $ identType v ]
-  where (acc, arr) = unzip args
-usageInExp (Redomap _ _ f acc arr _) =
-  mconcat [ mconcat $ map UT.consumedUsage $ HS.toList als
-          | (v,als) <- zip (lambdaParams f) $
-                       map (aliases . subExpType) $ acc ++ arr,
-            unique $ identType v ]
-usageInExp _ = UT.empty
-
-inDepOrder :: [BindNeed] -> [BindNeed]
+inDepOrder :: [TaggedBinding u] -> [TaggedBinding u]
 inDepOrder = flattenSCCs . stronglyConnComp . buildGraph
   where buildGraph bnds =
           [ (bnd, representative $ provides bnd, deps) |
@@ -323,7 +252,7 @@ inDepOrder = flattenSCCs . stronglyConnComp . buildGraph
         representative []    = Nothing
         representative (x:_) = Just x
 
-mustPrecede :: BindNeed -> BindNeed -> Bool
+mustPrecede :: TaggedBinding u -> TaggedBinding u -> Bool
 bnd1 `mustPrecede` bnd2 =
   not $ HS.null $ HS.fromList (filter (`HS.member` req2) $ provides bnd1)
                   `HS.union`
@@ -334,15 +263,15 @@ bnd1 `mustPrecede` bnd2 =
 intersects :: (Eq a, Hashable a) => HS.HashSet a -> HS.HashSet a -> Bool
 intersects a b = not $ HS.null $ a `HS.intersection` b
 
-type BlockPred = UT.UsageTable -> BindNeed -> Bool
+type BlockPred u = UT.UsageTable -> TaggedBinding u -> Bool
 
-orIf :: BlockPred -> BlockPred -> BlockPred
+orIf :: BlockPred u -> BlockPred u -> BlockPred u
 orIf p1 p2 body need = p1 body need || p2 body need
 
-blockIfSeq :: MonadEngine u m => [BlockPred] -> m Body -> m Body
+blockIfSeq :: MonadEngine u m => [BlockPred u] -> m Body -> m Body
 blockIfSeq ps m = foldl (flip blockIf) m ps
 
-blockIf :: MonadEngine u m => BlockPred -> m Body -> m Body
+blockIf :: MonadEngine u m => BlockPred u -> m Body -> m Body
 blockIf block m = passNeed $ do
   (body, needs) <- listenNeed m
   ds <- asksEngineEnv envDupeState
@@ -358,15 +287,15 @@ blockIf block m = passNeed $ do
 insertAllBindings :: MonadEngine u m => m Body -> m Body
 insertAllBindings = blockIf $ \_ _ -> True
 
-hasFree :: Names -> BlockPred
+hasFree :: Names -> BlockPred u
 hasFree ks _ need = ks `intersects` requires need
 
-isNotSafe :: BlockPred
-isNotSafe _ (LetNeed _ (e,_)) = not $ safeExp e
+isNotSafe :: BlockPred u
+isNotSafe _ (TaggedLet _ (e,_)) = not $ safeExp e
 
-isNotCheap :: BlockPred
+isNotCheap :: BlockPred u
 isNotCheap _ = not . cheapBnd
-  where cheapBnd (LetNeed _ (e,_)) = cheap e
+  where cheapBnd (TaggedLet _ (e,_)) = cheap e
         cheap (BinOp {})   = True
         cheap (SubExp {})  = True
         cheap (Not {})     = True
@@ -375,8 +304,8 @@ isNotCheap _ = not . cheapBnd
         cheap _            = True -- Used to be False, but let's try
                                   -- it out.
 
-isConsumed :: BlockPred
-isConsumed uses (LetNeed (pat,_) _) =
+isConsumed :: BlockPred u
+isConsumed uses (TaggedLet (pat,_) _) =
   any ((`UT.isConsumed` uses) . identName) pat
 
 hoistCommon :: MonadEngine u m =>
@@ -409,12 +338,13 @@ defaultSimplifyBody (Body [] res) =
   Body [] <$> simplifyResult res
 
 defaultSimplifyBody (Body (bnd:bnds) res) = do
-  simplified <- simplifyBinding bnd
-  case simplified of
-    Left newbnds ->
-      simplifyBody $ Body (newbnds++bnds) res
-    Right (Let pat' e') ->
-      bindLet pat' e' $ simplifyBody $ Body bnds res
+  (hoisted, simplified) <- simplifyBinding bnd
+  localVtable (ST.insertEntries hoisted) $
+    case simplified of
+      Left newbnds ->
+        simplifyBody $ Body (newbnds++bnds) res
+      Right (Let pat' e') ->
+        bindLet pat' e' $ simplifyBody $ Body bnds res
 
 -- | Simplify a single 'Result' inside an arbitrary 'MonadEngine'.
 simplifyResult :: MonadEngine u m => Result -> m Result
@@ -423,12 +353,22 @@ simplifyResult (Result cs es loc) =
   Result <$> simplifyCerts cs <*>
              mapM simplifySubExp es <*> pure loc
 
+-- | Simplify the binding, but also return anything that has been
+-- hoisted out (as a 'Left' value).
 simplifyBinding :: MonadEngine u m =>
+                   Binding -> m ([(VName, ST.Entry u)],
+                                 Either [Binding] Binding)
+simplifyBinding bnd = do
+  (bnd', need) <- listenNeed $ simplifyBinding' bnd
+  return (concatMap bindingEntries $ needBindings need,
+          bnd')
+
+simplifyBinding' :: MonadEngine u m =>
                    Binding -> m (Either [Binding] Binding)
 
 -- The simplification rules cannot handle Apply, because it requires
 -- access to the full program.
-simplifyBinding (Let pat (Apply fname args rettype loc)) = do
+simplifyBinding' (Let pat (Apply fname args rettype loc)) = do
   pat' <- blockUsage $ mapM simplifyIdentBinding pat
   args' <- mapM (simplifySubExp . fst) args
   rettype' <- mapM simplifyExtType rettype
@@ -445,7 +385,7 @@ simplifyBinding (Let pat (Apply fname args rettype loc)) = do
     Nothing -> let e' = Apply fname (zip args' $ map snd args) rettype' loc
                in return $ Right $ Let pat' e'
 
-simplifyBinding (Let pat e) = do
+simplifyBinding' (Let pat e) = do
   pat' <- blockUsage $ mapM simplifyIdentBinding pat
   e' <- simplifyExp e
   vtable <- asksEngineEnv envVtable
@@ -538,7 +478,7 @@ simplifyExp (Redomap cs outerfun innerfun acc arrs loc) = do
                  input <- newIdent "unused_input"
                           (arrayOf (Basic Int) (Shape [outerSize]) Nonunique) $
                           srclocOf firstarr
-                 needThis $ Let [input] $ Iota outerSize $ srclocOf firstarr
+                 needUntagged $ Let [input] $ Iota outerSize $ srclocOf firstarr
                  return (lam { lambdaParams =
                                   accparams ++
                                   [firstparam { identType = Basic Int }] },
@@ -638,12 +578,12 @@ simplifyCerts = liftM (nub . concat) . mapM check
 -- interface to running the simplifier on various things.
 
 newtype SimpleM u a = SimpleM (RWS
-                               (Env u)                -- Reader
-                               Need               -- Writer
+                               (Env u)            -- Reader
+                               (Need u)           -- Writer
                                (NameSource VName) -- State
                                a)
   deriving (Applicative, Functor, Monad,
-            MonadWriter Need,
+            MonadWriter (Need u),
             MonadReader (Env u),
             MonadState (NameSource VName))
 
@@ -651,7 +591,7 @@ instance MonadFreshNames (SimpleM u) where
   getNameSource = get
   putNameSource = put
 
-instance MonadEngine u (SimpleM u) where
+instance ST.UserAnnotation u => MonadEngine u (SimpleM u) where
   askEngineEnv = ask
   localEngineEnv = local
   tellNeed = tell
@@ -672,6 +612,11 @@ simplifyProg rules prog =
   Prog $ fst $ runSimpleM (mapM simplifyFun $ progFunctions prog)
                (emptyEnv rules $ Just prog) namesrc
   where namesrc = newNameSourceForProg prog
+
+simplifyFun :: ST.UserAnnotation u => FunDec -> SimpleM u FunDec
+simplifyFun (fname, rettype, params, body, loc) = do
+  body' <- insertAllBindings $ bindParams params $ simplifyBody body
+  return (fname, rettype, params, body', loc)
 
 -- | Simplify the given function.  Even if the output differs from the
 -- output, meaningful simplification may not have taken place - the

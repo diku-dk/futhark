@@ -26,6 +26,7 @@ import qualified Futhark.Analysis.AlgSimplify as AS
 import Futhark.Tools
 import qualified Futhark.Optimise.Simplifier.Engine as Simplify
 import Futhark.Optimise.Simplifier.Rule (RuleBook)
+import Futhark.Substitute
 
 import Prelude hiding (any)
 
@@ -113,8 +114,8 @@ analyseBody :: ST.SymbolTable u -> SCTable -> Body -> SCTable
 analyseBody _ sctable (Body [] _) =
   sctable
 
-analyseBody vtable sctable (Body (Let [v] e:bnds) res) =
-  let vtable' = ST.insertOne name e vtable
+analyseBody vtable sctable (Body (bnd@(Let [v] e):bnds) res) =
+  let vtable' = ST.insertBinding bnd vtable
       -- Construct a new sctable for recurrences.
       sctable' = case (analyseExp vtable e,
                        simplify <$> ST.lookupScalExp name vtable') of
@@ -168,6 +169,9 @@ analyseExpBody vtable = analyseBody vtable mempty
 newtype Forbidden = Forbidden { isForbidden :: Bool }
                     deriving (Eq, Ord, Show)
 
+instance Substitute Forbidden where
+  substituteNames _ x = x
+
 instance ST.UserAnnotation Forbidden where
   annotationFor = const $ Forbidden False
 
@@ -176,7 +180,7 @@ data Env = Env { envSimplifyEnv :: Simplify.Env Forbidden
                , envMaxLoops :: Int
                }
 
-data Res = Res { resNeed :: Simplify.Need
+data Res = Res { resNeed :: Simplify.Need Forbidden
                , resSufficiented :: Any
                , resInvariant :: All
                }
@@ -215,7 +219,10 @@ instance MonadFreshNames m => MonadFreshNames (VariantM m) where
 runVariantM :: Functor m => Env -> VariantM m a
              -> m (a, Bool)
 runVariantM env (VariantM m) =
-  second (getAny . resSufficiented) <$> runWriterT (runReaderT m env)
+  -- FIXME: We should also check resInvariant, but that's still
+  -- hopelessly broken.
+  second (getAny . resSufficiented) <$>
+  runWriterT (runReaderT m env)
 
 -- | We actually changed something to a sufficient condition.
 sufficiented :: Monad m => VariantM m ()
@@ -241,16 +248,19 @@ instance MonadFreshNames m =>
           asName (Constant {}) = Nothing
 
   simplifyBody (Body (bnd:bnds) res) = do
-    (bnd',invariant) <-
+    ((hoisted, bnd'),invariant) <-
       collectInvariance $
-      either (return . Left) checkVariance =<<
-      Simplify.simplifyBinding bnd
-    case bnd' of
-      Left newbnds ->
-        Simplify.simplifyBody $ Body (newbnds++bnds) res
-      Right (Let pat' e') ->
-        Simplify.bindLetWith (const $ Forbidden $ not invariant) pat' e' $
-        Simplify.simplifyBody $ Body bnds res
+      inspect =<< Simplify.simplifyBinding bnd
+    Simplify.localVtable (ST.insertEntries hoisted) $
+      case bnd' of
+        Left newbnds ->
+          Simplify.simplifyBody $ Body (newbnds++bnds) res
+        Right (Let pat' e') ->
+          Simplify.bindLetWith (const $ Forbidden $ not invariant) pat' e' $
+          Simplify.simplifyBody $ Body bnds res
+    where inspect (wrap, bnd') = do
+            bnd'' <- either (return . Left) checkVariance bnd'
+            return (wrap, bnd'')
 
 checkVariance :: MonadFreshNames m => Binding -> VariantM m (Either [Binding] Binding)
 checkVariance (Let pat e)
@@ -294,9 +304,13 @@ makeInvariant env (Let [v] e)
         simplify se = AS.simplify se loc ranges
 makeInvariant env bnd@(Let pat (If (Var v) tbranch fbranch t loc)) = do
   let se = exactBinding (envSCTable env) v
-  if scalExpUsesNoForbidden env se then do
-    (exbnds,v') <- scalExpToIdent v se
-    return $ Left $ exbnds ++ [Let pat $ If (Var v') tbranch fbranch t loc]
+  if scalExpUsesNoForbidden env se then
+    case se of
+      SE.Id v'
+        | v' == v ->
+          return $ Right $ Let pat $ If (Var v) tbranch fbranch t loc
+      _ -> do (exbnds,v') <- scalExpToIdent v se
+              return $ Left $ exbnds ++ [Let pat $ If (Var v') tbranch fbranch t loc]
     else
     -- FIXME: Check that tbranch and fbranch are safe.  We can do
     -- something smarter if 'v' actually comes from an 'or'.  Also,

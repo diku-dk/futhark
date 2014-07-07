@@ -28,6 +28,10 @@ class Substitute a where
 instance Substitute a => Substitute [a] where
   substituteNames substs = map $ substituteNames substs
 
+instance (Substitute a, Substitute b) => Substitute (a,b) where
+  substituteNames substs (x,y) =
+    (substituteNames substs x, substituteNames substs y)
+
 instance Substitute VName where
   substituteNames substs k = fromMaybe k $ HM.lookup k substs
 

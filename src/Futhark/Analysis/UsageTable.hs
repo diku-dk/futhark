@@ -19,12 +19,14 @@ module Futhark.Analysis.UsageTable
 
 import Prelude hiding (lookup, any, foldl)
 
+import Control.Arrow (first)
 import Data.Foldable
 import Data.Monoid
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import qualified Data.Set as S
 
+import Futhark.Substitute
 import Futhark.InternalRep
 
 newtype UsageTable = UsageTable (HM.HashMap VName Usages)
@@ -34,6 +36,13 @@ instance Monoid UsageTable where
   mempty = empty
   UsageTable table1 `mappend` UsageTable table2 =
     UsageTable $ HM.unionWith S.union table1 table2
+
+instance Substitute UsageTable where
+  substituteNames subst (UsageTable table)
+    | not $ HM.null $ subst `HM.intersection` table =
+      UsageTable $ HM.fromList $
+      map (first $ substituteNames subst) $ HM.toList table
+    | otherwise = UsageTable table
 
 empty :: UsageTable
 empty = UsageTable HM.empty

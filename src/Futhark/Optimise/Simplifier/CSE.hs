@@ -12,10 +12,13 @@ module Futhark.Optimise.Simplifier.CSE
 
 import Data.Monoid
 import qualified Data.HashMap.Lazy as HM
+import qualified Data.HashSet as HS
 import qualified Data.Map.Lazy as M
 
 import Futhark.InternalRep
 import Futhark.Substitute
+import Futhark.Optimise.Simplifier.TaggedBinding
+import qualified Futhark.Analysis.UsageTable as UT
 
 mkSubsts :: [Ident] -> [Ident] -> HM.HashMap VName VName
 mkSubsts pat vs = HM.fromList $ zip (map identName pat) (map identName vs)
@@ -33,19 +36,26 @@ newDupeState = (M.empty, HM.empty)
 -- bindings and a new state.  The function will look in the state to
 -- determine whether the expression can be replaced with something
 -- bound previously.
-performCSE :: DupeState -> [Ident] -> Exp
-           -> ([Binding], DupeState)
+performCSE :: Substitute a =>
+              DupeState -> TaggedBinding a
+           -> ([TaggedBinding a], DupeState)
 -- Arrays may be consumed, so don't eliminate expressions producing
 -- unique arrays.  This is perhaps a bit too conservative - we could
 -- track exactly which are being consumed and keep a blacklist.
-performCSE (esubsts, nsubsts) pat e
+performCSE (esubsts, nsubsts) bnd@(TaggedLet (pat,_) _)
   | any (getAll . uniqArray) pat =
-    ([Let pat e], (esubsts, nsubsts))
+    ([bnd], (esubsts, nsubsts))
   where uniqArray = All . not . basicType . identType <>
                     All . unique . identType
-performCSE (esubsts, nsubsts) pat e =
+performCSE (esubsts, nsubsts) (TaggedLet (pat,patdata) (e,enames)) =
   case M.lookup e' esubsts of
-    Just vs -> (substPat vs, (esubsts, mkSubsts pat vs `HM.union` nsubsts))
-    Nothing -> ([Let pat e'], (M.insert e' pat esubsts, nsubsts))
+    Just vs -> (substLets vs, (esubsts, mkSubsts pat vs `HM.union` nsubsts))
+    Nothing -> ([TaggedLet (pat,patdata') (e',enames')],
+                (M.insert e' pat esubsts, nsubsts))
   where e' = substituteNames nsubsts e
-        substPat vs = [ Let [p] (SubExp $ Var v) | (p,v) <- zip pat vs ]
+        enames' = substituteNames nsubsts enames
+        patdata' = substituteNames nsubsts patdata
+        substLets vs = [ TaggedLet ([p],[d])
+                                   (SubExp $ Var v,
+                                    UT.usages $ HS.singleton $ identName v) |
+                         (p,d,v) <- zip3 pat patdata vs ]

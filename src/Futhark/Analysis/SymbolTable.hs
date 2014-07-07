@@ -11,12 +11,13 @@ module Futhark.Analysis.SymbolTable
   , deepen
   , depth
   , enclosingLoopVars
-  , insertOne
-  , insert
+  , bindingEntries
   , insertBinding
+  , insertBindingWith
   , insertParam
   , insertArrayParam
   , insertLoopVar
+  , insertEntries
   , updateBounds
   , isAtLeast
   , UserAnnotation (..)
@@ -35,6 +36,7 @@ import qualified Data.HashMap.Lazy as HM
 import Data.Loc
 import Futhark.InternalRep hiding (insertBinding)
 import Futhark.Analysis.ScalExp
+import Futhark.Substitute
 import qualified Futhark.Analysis.AlgSimplify as AS
 
 data SymbolTable a = SymbolTable {
@@ -52,8 +54,8 @@ deepen vtable = vtable { loopDepth = loopDepth vtable + 1 }
 depth :: SymbolTable a -> Int
 depth = loopDepth
 
-class UserAnnotation a where
-  annotationFor :: Entry () -> a
+class Substitute u => UserAnnotation u where
+  annotationFor :: Entry () -> u
 
 instance UserAnnotation () where
   annotationFor = const ()
@@ -66,6 +68,13 @@ data Entry a = Entry {
   , loopVariable :: Bool
   , userAnnotation :: a
   } deriving (Eq, Show)
+
+instance Substitute a => Substitute (Entry a) where
+  substituteNames substs entry =
+    entry { asExp = substituteNames substs <$> asExp entry
+          , asScalExp = substituteNames substs <$> asScalExp entry
+          , userAnnotation = userAnnotation entry
+          }
 
 type Range = (Maybe ScalExp, Maybe ScalExp)
 
@@ -117,20 +126,18 @@ defEntry vtable = Entry {
   , userAnnotation = ()
   }
 
-insertOne :: VName -> Exp -> SymbolTable a -> SymbolTable a
-insertOne name = insert [name]
+annotateEntry :: Entry () -> SymbolTable a -> Entry a
+annotateEntry entry vtable =
+  entry { userAnnotation = annotationFunction vtable entry }
 
-insertBinding :: Binding -> SymbolTable a -> SymbolTable a
-insertBinding (Let pat e) = insert (map identName pat) e
-
-insert :: [VName] -> Exp -> SymbolTable a -> SymbolTable a
+bindingEntries :: Binding -> SymbolTable a -> [Entry a]
 -- First, handle single-name bindings.  These are the most common.
-insert [name] e vtable = insertEntry name bind vtable
-  where bind = (defEntry vtable) {
-                 asExp = Just e
-               , asScalExp = toScalExp (`lookupScalExp` vtable) e
-               , valueRange = range
-               }
+bindingEntries (Let [_] e) vtable = [annotateEntry entry vtable]
+  where entry = (defEntry vtable)
+                { asExp = Just e
+                , asScalExp = toScalExp (`lookupScalExp` vtable) e
+                , valueRange = range
+                }
         range = case e of
           SubExp se ->
             subExpRange se vtable
@@ -150,13 +157,25 @@ insert [name] e vtable = insertEntry name bind vtable
         zero = Val $ IntVal 0
         one = Val $ IntVal 1
 -- Then, handle others.  For now, this is only filter.
-insert (_:names) (Filter _ _ inps _) vtable =
-  insertEntries (zip names $ map makeBnd inps) vtable
+bindingEntries (Let _ (Filter _ _ inps _)) vtable =
+  map (`annotateEntry` vtable) $ defEntry vtable : map makeBnd inps
   where makeBnd (Var v) =
           (defEntry vtable) { valueRange = lookupRange (identName v) vtable }
         makeBnd _ =
           defEntry vtable
-insert _ _ vtable = vtable
+bindingEntries (Let names _) vtable =
+  map ((`annotateEntry` vtable) . const (defEntry vtable)) names
+
+insertBinding :: Binding -> SymbolTable a -> SymbolTable a
+-- First, handle single-name bindings.  These are the most common.
+insertBinding bnd@(Let pat _) vtable =
+  insertEntries (zip names $ bindingEntries bnd vtable) vtable
+  where names = map identName pat
+
+insertBindingWith :: (Entry () -> a) -> Binding -> SymbolTable a -> SymbolTable a
+insertBindingWith f bnd vtable =
+  (insertBinding bnd vtable { annotationFunction = f })
+  { annotationFunction = annotationFunction vtable }
 
 subExpRange :: SubExp -> SymbolTable a -> Range
 subExpRange (Var v) vtable =
@@ -173,14 +192,19 @@ subExpToScalExp _                          = Nothing
 
 insertEntry :: VName -> Entry () -> SymbolTable a -> SymbolTable a
 insertEntry name entry =
-  insertEntries [(name,entry)]
+  insertEntries' [(name,entry)]
 
-insertEntries :: [(VName, Entry ())] -> SymbolTable a -> SymbolTable a
+insertEntries' :: [(VName, Entry ())] -> SymbolTable a -> SymbolTable a
+insertEntries' entries vtable =
+  insertEntries [ (name, annotateEntry entry vtable) |
+                  (name,entry) <- entries] vtable
+
+insertEntries :: [(VName, Entry a)] -> SymbolTable a -> SymbolTable a
 insertEntries entries vtable =
-  vtable { bindings = foldl insertWithAnno (bindings vtable) entries
+  vtable { bindings = foldl insertWithDepth (bindings vtable) entries
          }
-  where insertWithAnno bnds (name, entry) =
-          let entry' = entry { userAnnotation = annotationFunction vtable entry }
+  where insertWithDepth bnds (name, entry) =
+          let entry' = entry { bindingDepth = loopDepth vtable }
           in HM.insert name entry' bnds
 
 insertParamWithRange :: Param -> Range -> SymbolTable a -> SymbolTable a
