@@ -2,8 +2,8 @@
 // nasty side cases of aliasing in loops.
 
 fun int main() =
-  let arr = iota(10) in
-  let barr = iota(10) in
+  let arr = copy(iota(10)) in
+  let barr = copy(iota(10)) in
   loop (arr) = for i < 10 do
                  let arr[i] = 0 in // Consume arr and its aliases...
                  barr // Because of this, arr should be aliased to barr.

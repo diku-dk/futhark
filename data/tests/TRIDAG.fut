@@ -54,4 +54,4 @@ fun {[real],[real]} main() =
     let b = map(fn real (int x) => toReal(x) + 1.0, iota(nn)) in
     let c = map(fn real (int x) => 1.11*toReal(x) + 0.5, iota(nn)) in
     let d = map(fn real (int x) => 1.01*toReal(x) + 0.25, iota(nn)) in
-        tridag(nn, b, d, a, c)
+        tridag(nn, copy(b), copy(d), a, c)

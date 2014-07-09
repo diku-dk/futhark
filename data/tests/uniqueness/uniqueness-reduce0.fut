@@ -5,6 +5,7 @@ fun [int] main(*[int] a,[int] b) =
   let {x,y} =
     reduce(fn {*[int], [int]} ({*[int], [int]} acc, {[int], [int]} i) =>
              let {a2,b2} = acc in {a2,b2},
-           {a,b}, zip(replicate(10,iota(10)),replicate(10,iota(10)))) in
+           {a,b}, zip(copy(replicate(10,iota(10))),
+                      replicate(10,iota(10)))) in
   map(op+, zip(b, x)) // Should be OK, because only a has been
                       // consumed.

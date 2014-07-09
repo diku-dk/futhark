@@ -2,5 +2,5 @@
 // other.
 
 fun {*[int], *[int]} main(int n) =
-  let a = iota(n) in
+  let a = copy(iota(n)) in
   {a, a}

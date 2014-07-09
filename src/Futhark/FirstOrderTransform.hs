@@ -174,7 +174,7 @@ resultArray ts loc = mapM arrayOfShape ts
                   return $ blankConstant t
                 arrayOfShape' (d:ds) = do
                   elm <- arrayOfShape' ds
-                  letSubExp "result" $ Replicate d elm loc
+                  letSubExp "result" =<< eCopy (pure $ Replicate d elm loc)
 
         blankConstant t = Constant (blankValue $ basicDecl $ elemType t) loc
 

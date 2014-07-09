@@ -430,11 +430,10 @@ typeOf (LetWith _ _ _ _ _ _ body _) = typeOf body
 typeOf (Index _ ident _ idx _) =
   stripArray (length idx) (identType ident)
   `addAliases` HS.insert (identName ident)
-typeOf (Iota _ _) = arrayType 1 (Elem $ Basic Int) Unique
+typeOf (Iota _ _) = arrayType 1 (Elem $ Basic Int) Nonunique
 typeOf (Size {}) = Elem $ Basic Int
 typeOf (Replicate _ e _) = arrayType 1 (typeOf e) u
-  where u | uniqueOrBasic (typeOf e) = Unique
-          | otherwise = Nonunique
+  where u = uniqueness $ typeOf e
 typeOf (Reshape _ [] e _) =
   Elem $ elemType $ typeOf e
 typeOf (Reshape _ shape  e _) =
@@ -446,13 +445,13 @@ typeOf (Transpose _ k n e _)
     (pre,d:post) <- splitAt k dims,
     (mid,end) <- splitAt n post = Array et (pre++mid++[d]++end) u als
   | otherwise = typeOf e
-typeOf (Map f arr _) = arrayType 1 et $ uniqueProp et
+typeOf (Map f arr _) = arrayType 1 et $ uniqueness et
   where et = lambdaType f [rowType $ typeOf arr]
 typeOf (Reduce fun start arr _) =
   lambdaType fun [typeOf start, rowType (typeOf arr)]
 typeOf (Zip es _) = arrayType 1 (Elem $ Tuple $ map snd es) Nonunique
 typeOf (Unzip _ ts _) =
-  Elem $ Tuple $ map (\t -> arrayType 1 t $ uniqueProp t) ts
+  Elem $ Tuple $ map (\t -> arrayType 1 t $ uniqueness t) ts
 typeOf (Scan fun start arr _) =
   arrayType 1 et Unique
     where et = lambdaType fun [typeOf start, rowType $ typeOf arr]
@@ -468,9 +467,6 @@ typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` HS.empty
 typeOf (Assert _ _) = Elem $ Basic Cert
 typeOf (Conjoin _ _) = Elem $ Basic Cert
 typeOf (DoLoop _ _ _ _ _ body _) = typeOf body
-
-uniqueProp :: TypeBase vn as -> Uniqueness
-uniqueProp tp = if uniqueOrBasic tp then Unique else Nonunique
 
 -- | If possible, convert an expression to a value.  This is not a
 -- true constant propagator, but a quick way to convert array/tuple

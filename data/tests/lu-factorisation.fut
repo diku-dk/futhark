@@ -3,8 +3,8 @@
 fun {*[[real]], *[[real]]} lu_inplace(*[[real]] a) =
   let n = size(0, a) in
   loop ({a,l,u} = {a,
-                   replicate(n,replicate(n,0.0)),
-                   replicate(n,replicate(n,0.0))}) =
+                   copy(replicate(n,replicate(n,0.0))),
+                   copy(replicate(n,replicate(n,0.0)))}) =
     for k < n do
       let u[k,k] = a[k,k] in
       loop ({l,u}) = for i < n-k do

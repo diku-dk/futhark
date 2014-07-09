@@ -703,7 +703,7 @@ hasStaticShape = mapM hasStaticShape'
         isFree (Ext _)  = Nothing
 
 mapType :: Lambda -> [SubExp] -> [Type]
-mapType f arrs = [ arrayOf t (Shape [outersize]) (uniqueProp t)
+mapType f arrs = [ arrayOf t (Shape [outersize]) (uniqueness t)
                  | t <- lambdaType f arrts ]
   where outersize = arraysSize 0 arrts
         arrts     = map subExpType arrs
@@ -750,11 +750,10 @@ typeOf (Index _ ident idx _) =
 typeOf (Update _ src _ _ _) =
   staticShapes [identType src `setAliases` HS.empty]
 typeOf (Iota ne _) =
-  staticShapes [arrayOf (Basic Int) (Shape [ne]) Unique]
+  staticShapes [arrayOf (Basic Int) (Shape [ne]) Nonunique]
 typeOf (Replicate ne e _) =
   staticShapes [arrayOf (subExpType e) (Shape [ne]) u]
-  where u | uniqueOrBasic (subExpType e) = Unique
-          | otherwise = Nonunique
+  where u = uniqueness $ subExpType e
 typeOf (Reshape _ [] e _) =
   staticShapes [Basic $ elemType $ subExpType e]
 typeOf (Reshape _ shape e _) =
@@ -786,9 +785,6 @@ typeOf (Filter _ f arrs _) =
   filterType f arrs
 typeOf (Redomap _ outerfun innerfun acc arrs _) =
   staticShapes $ redomapType outerfun innerfun acc arrs
-
-uniqueProp :: TypeBase as shape -> Uniqueness
-uniqueProp tp = if uniqueOrBasic tp then Unique else Nonunique
 
 -- | The result of applying the arguments of the given types to the
 -- given tuple lambda function.

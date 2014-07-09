@@ -2,8 +2,8 @@ fun int f(*[[int]] a) = a[0,0]
 
 fun int main() =
     let n = 10 in
-    let a = replicate(n, iota(n)) in
-    let b = replicate(n, iota(n)) in
+    let a = copy(replicate(n, iota(n))) in
+    let b = copy(replicate(n, iota(n))) in
     loop (a) = for i < n do
                  let a[i] = b[i] in a // Does not alias a to b, because let-with is in-place!
                in

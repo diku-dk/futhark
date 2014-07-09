@@ -311,8 +311,8 @@ inputTypes = map inputType
 
         transformType t (Replicate n) =
           arrayOf t (Shape [n]) u
-          where u | uniqueOrBasic t = Unique
-                  | otherwise       = Nonunique
+          where u | unique t  = Unique
+                  | otherwise = Nonunique
         transformType t (Rearrange _ perm) =
           let Shape oldshape = arrayShape t
           in t `setArrayShape` Shape (permuteShape perm oldshape)
