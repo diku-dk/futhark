@@ -95,7 +95,8 @@ generateOptimisedPredicates' :: MonadFreshNames m =>
                        RuleBook Forbidden -> FunDec -> String
                     -> SCTable -> Int -> m (Maybe FunDec)
 generateOptimisedPredicates' rules (fname, rettype, params, body, loc) suff sctable depth = do
-  res <- runVariantM env $ Simplify.insertAllBindings $ Simplify.simplifyBody body
+  res <- runVariantM env $ Simplify.insertAllBindings $
+         Simplify.simplifyBody (map diet rettype) body
   case res of
     (body', True) -> return $ Just (fname', rettype, params, body', loc)
     _             -> return Nothing
@@ -239,25 +240,25 @@ instance MonadFreshNames m =>
   passNeed m = pass $ do (x, f) <- m
                          return (x, \(Res need suff inv) -> Res (f need) suff inv)
 
-  simplifyBody (Body [] res) = do
+  simplifyBody ds (Body [] res) = do
     env <- ask
     when (any (`forbiddenIn` env) names) notInvariant
-    Body [] <$> Simplify.simplifyResult res
+    Body [] <$> Simplify.simplifyResult ds res
     where names = mapMaybe asName $ resultSubExps res
           asName (Var v)       = Just $ identName v
           asName (Constant {}) = Nothing
 
-  simplifyBody (Body (bnd:bnds) res) = do
+  simplifyBody ds (Body (bnd:bnds) res) = do
     ((hoisted, bnd'),invariant) <-
       collectInvariance $
       inspect =<< Simplify.simplifyBinding bnd
     Simplify.localVtable (ST.insertEntries hoisted) $
       case bnd' of
         Left newbnds ->
-          Simplify.simplifyBody $ Body (newbnds++bnds) res
+          Simplify.simplifyBody ds $ Body (newbnds++bnds) res
         Right (Let pat' e') ->
           Simplify.bindLetWith (const $ Forbidden $ not invariant) pat' e' $
-          Simplify.simplifyBody $ Body bnds res
+          Simplify.simplifyBody ds $ Body bnds res
     where inspect (wrap, bnd') = do
             bnd'' <- either (return . Left) checkVariance bnd'
             return (wrap, bnd'')

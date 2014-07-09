@@ -33,7 +33,6 @@ module Futhark.Optimise.Simplifier.Engine
        , simplifyProg
        , simplifyOneFun
        , simplifyOneLambda
-       , simplifyOneBody
        ) where
 
 import Control.Applicative
@@ -95,7 +94,7 @@ class (MonadFreshNames m, ST.UserAnnotation u) => MonadEngine u m | m -> u where
   listenNeed :: m a -> m (a, Need u)
   passNeed :: m (a, Need u -> Need u) -> m a
 
-  simplifyBody :: MonadEngine u m => Body -> m Body
+  simplifyBody :: MonadEngine u m => [Diet] -> Body -> m Body
 
 asksEngineEnv :: MonadEngine u m => (Env u -> a) -> m a
 asksEngineEnv f = f <$> askEngineEnv
@@ -332,26 +331,27 @@ hoistCommon m1 vtablef1 m2 vtablef2 = passNeed $ do
                      })
 
 -- | Simplify a single 'Body' inside an arbitrary 'MonadEngine'.
-defaultSimplifyBody :: MonadEngine u m => Body -> m Body
+defaultSimplifyBody :: MonadEngine u m => [Diet] -> Body -> m Body
 
-defaultSimplifyBody (Body [] res) =
-  Body [] <$> simplifyResult res
+defaultSimplifyBody ds (Body [] res) =
+  Body [] <$> simplifyResult ds res
 
-defaultSimplifyBody (Body (bnd:bnds) res) = do
+defaultSimplifyBody ds (Body (bnd:bnds) res) = do
   (hoisted, simplified) <- simplifyBinding bnd
   localVtable (ST.insertEntries hoisted) $
     case simplified of
       Left newbnds ->
-        simplifyBody $ Body (newbnds++bnds) res
+        simplifyBody ds $ Body (newbnds++bnds) res
       Right (Let pat' e') ->
-        bindLet pat' e' $ simplifyBody $ Body bnds res
+        bindLet pat' e' $ simplifyBody ds $ Body bnds res
 
 -- | Simplify a single 'Result' inside an arbitrary 'MonadEngine'.
-simplifyResult :: MonadEngine u m => Result -> m Result
+simplifyResult :: MonadEngine u m => [Diet] -> Result -> m Result
 
-simplifyResult (Result cs es loc) =
-  Result <$> simplifyCerts cs <*>
-             mapM simplifySubExp es <*> pure loc
+simplifyResult ds (Result cs es loc) = do
+  es' <- mapM simplifySubExp es
+  consumeResult $ zip ds es'
+  Result <$> simplifyCerts cs <*> pure es' <*> pure loc
 
 -- | Simplify the binding, but also return anything that has been
 -- hoisted out (as a 'Left' value).
@@ -403,14 +403,15 @@ simplifyExp (DoLoop respat merge loopvar boundexp loopbody loc) = do
   mergepat' <- mapM simplifyIdentBinding mergepat
   mergeexp' <- mapM simplifySubExp mergeexp
   boundexp' <- simplifySubExp boundexp
+  let diets = map (diet . identType) mergepat'
   -- Blocking hoisting of all unique bindings is probably too
   -- conservative, but there is currently no nice way to mark
   -- consumption of the loop body result.
   loopbody' <- descendIntoLoop $ bindLoopVar loopvar boundexp' $
                blockIfSeq [hasFree boundnames, isConsumed] $
-               simplifyBody loopbody
+               simplifyBody diets loopbody
   let merge' = zip mergepat' mergeexp'
-  consumeResult $ zip (map identType mergepat') mergeexp'
+  consumeResult $ zip diets mergeexp'
   return $ DoLoop respat' merge' loopvar boundexp' loopbody' loc
   where boundnames = identName loopvar `HS.insert`
                      patNameSet (map fst merge)
@@ -420,10 +421,10 @@ simplifyExp (If cond tbranch fbranch t loc) = do
   -- variable, and if so, chomp it.  We also try to do CSE across
   -- branches.
   cond' <- simplifySubExp cond
-  (tbranch',fbranch') <-
-    hoistCommon (simplifyBody tbranch) (ST.updateBounds True cond)
-                (simplifyBody fbranch) (ST.updateBounds False cond)
   t' <- mapM simplifyExtType t
+  (tbranch',fbranch') <-
+    hoistCommon (simplifyBody (map diet t') tbranch) (ST.updateBounds True cond)
+                (simplifyBody (map diet t') fbranch) (ST.updateBounds False cond)
   return $ If cond' tbranch' fbranch' t' loc
 
 simplifyExp (Map cs fun arrs loc) = do
@@ -493,7 +494,9 @@ simplifyExpBase :: MonadEngine u m => Exp -> m Exp
 simplifyExpBase = mapExpM hoist
   where hoist = Mapper {
                   mapOnExp = simplifyExp
-                , mapOnBody = simplifyBody
+                -- Bodies are handled explicitly because we need to
+                -- provide their result diet.
+                , mapOnBody = fail "Unhandled body in simplification engine."
                 , mapOnSubExp = simplifySubExp
                 -- Lambdas are handled explicitly because we need to
                 -- bind their parameters.
@@ -546,9 +549,8 @@ simplifyLambda (Lambda params body rettype loc) arrs = do
     blockIf (hasFree params' `orIf` isConsumed) $
     descendIntoLoop $
     bindParams nonarrayparams $
-    bindArrayParams (zip arrayparams arrs) $ do
-      consumeResult $ zip rettype $ resultSubExps $ bodyResult body
-      simplifyBody body
+    bindArrayParams (zip arrayparams arrs) $
+      simplifyBody (map diet rettype) body
   rettype' <- mapM simplifyType rettype
   return $ Lambda params body' rettype' loc
   where params' = patNameSet $ map fromParam params
@@ -556,11 +558,11 @@ simplifyLambda (Lambda params body rettype loc) arrs = do
           splitAt (length params - length arrs) params
 
 consumeResult :: MonadEngine u m =>
-                 [(TypeBase als shape, SubExp)] -> m ()
+                 [(Diet, SubExp)] -> m ()
 consumeResult = mapM_ inspect
-  where inspect (t, se)
-          | unique t = traverse_ consumedName $ aliases $ subExpType se
-          | otherwise = return ()
+  where inspect (Consume, se) =
+          traverse_ consumedName $ aliases $ subExpType se
+        inspect (Observe, _) = return ()
 
 simplifyCerts :: MonadEngine u m =>
                  Certificates -> m Certificates
@@ -615,7 +617,8 @@ simplifyProg rules prog =
 
 simplifyFun :: ST.UserAnnotation u => FunDec -> SimpleM u FunDec
 simplifyFun (fname, rettype, params, body, loc) = do
-  body' <- insertAllBindings $ bindParams params $ simplifyBody body
+  body' <- insertAllBindings $ bindParams params $
+           simplifyBody (map diet rettype) body
   return (fname, rettype, params, body', loc)
 
 -- | Simplify the given function.  Even if the output differs from the
@@ -633,16 +636,6 @@ simplifyOneLambda :: (ST.UserAnnotation u, MonadFreshNames m) =>
 simplifyOneLambda rules prog lam = do
   let simplifyOneLambda' = insertAllBindings $
                            bindParams (lambdaParams lam) $
-                           simplifyBody $ lambdaBody lam
+                           simplifyBody (map diet $ lambdaReturnType lam) $ lambdaBody lam
   body' <- modifyNameSource $ runSimpleM simplifyOneLambda' $ emptyEnv rules prog
   return $ lam { lambdaBody = body' }
-
--- | Simplify the given body.  Even if the output differs from the
--- output, meaningful simplification may not have taken place - the
--- order of bindings may simply have been rearranged.  The function is
--- idempotent, however.
-simplifyOneBody :: ST.UserAnnotation u =>
-                   MonadFreshNames m => RuleBook u -> Maybe Prog -> Body -> m Body
-simplifyOneBody rules prog body =
-  modifyNameSource $
-  runSimpleM (insertAllBindings $ simplifyBody body) (emptyEnv rules prog)
