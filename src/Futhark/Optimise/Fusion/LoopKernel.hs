@@ -35,10 +35,10 @@ import Futhark.Tools
 
 transformOutput :: SOAC.ArrayTransforms -> [Ident] -> SOAC -> Binder ()
 transformOutput ts outIds soac =
-  case SOAC.viewf ts of
-    SOAC.EmptyF -> do e <- SOAC.toExp soac
+  case SOAC.viewl ts of
+    SOAC.EmptyL -> do e <- SOAC.toExp soac
                       letBind outIds e
-    t SOAC.:< ts' -> do
+    ts' SOAC.:> t -> do
       newIds <- mapM (newIdent' id) outIds
       transformOutput ts' newIds soac
       es     <- mapM (applyTransform t . Var) newIds

@@ -337,9 +337,14 @@ transformRows (ArrayTransforms ts) =
           addTransform (Rearrange cs (0:map (+1) perm)) inp
         transformRows' inp (Reshape cs shape) =
           addTransform (ReshapeInner cs shape) inp
-        transformRows' inp (Replicate n) =
-          Replicate n `addTransform`
-          (Rearrange [] (1:0:[2..inputRank inp-1]) `addTransform` inp)
+        transformRows' inp (Replicate n)
+          | inputRank inp == 1 =
+            Rearrange [] [1,0] `addTransform`
+            (Replicate n `addTransform` inp)
+          | otherwise =
+            Rearrange [] (1:0:[2..inputRank inp]) `addTransform`
+            (Replicate n `addTransform`
+             (Rearrange [] (1:0:[2..inputRank inp-1]) `addTransform` inp))
         transformRows' inp nts =
           error $ "transformRows: Cannot transform this yet:\n" ++ show nts ++ "\n" ++ show inp
 
