@@ -194,7 +194,7 @@ mapScanFusionOK outIds inp1 ker =
   and (zipWith subtypeOf
        (sort $ map identType replacing)
        (sort inpts))
-  where inpts = SOAC.inputTypes inp1
+  where inpts = map SOAC.inputType inp1
         replacing = filter (`elem` outIds) $
                     mapMaybe SOAC.isVarInput $
                     inputs ker
@@ -321,7 +321,7 @@ iswim _ nest ots
     Nest.Nesting paramIds mapArrs bndIds postExp retTypes <- lvl,
     mapArrs == map SOAC.varInput paramIds = do
     let newInputs = es' ++ map (SOAC.transposeInput 0 1) (Nest.inputs nest)
-        inputTypes = SOAC.inputTypes newInputs
+        inputTypes = map SOAC.inputType newInputs
         (accsizes, arrsizes) =
           splitAt (length es) $ map rowType inputTypes
         setSizeFrom p t =
@@ -401,9 +401,9 @@ pushRearrange inpIds nest ots = do
   nest' <- liftMaybeNeedNames $ MapNest.fromSOACNest nest
   (perm, inputs') <- liftMaybe $ fixupInputs inpIds $ MapNest.inputs nest'
   if permuteReach perm <= mapDepth nest' then
-    let outInvPerm = SOAC.Rearrange [] . permuteInverse
+    let invertRearrange = SOAC.Rearrange [] $ permuteInverse perm
     in return (inputs' `Nest.setInputs` MapNest.toSOACNest nest',
-               ots SOAC.|> outInvPerm perm)
+               ots SOAC.|> invertRearrange)
   else fail "Cannot push transpose"
 
 fixupInputs :: [Ident] -> [SOAC.Input] -> Maybe ([Int], [SOAC.Input])
@@ -431,7 +431,7 @@ pullReshape nest ots
   let loc = srclocOf nest
       inputs' = map (SOAC.addTransform $ SOAC.ReshapeOuter cs shape) $
                 Nest.inputs nest
-      inputTypes = SOAC.inputTypes inputs'
+      inputTypes = map SOAC.inputType inputs'
       outernest inner outershape = do
         let addDims t = arrayOf t (Shape outershape) $ uniqueness t
             retTypes = map addDims $ Nest.returnType op

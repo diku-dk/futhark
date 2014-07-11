@@ -40,8 +40,7 @@ module Futhark.Analysis.HORepresentation.SOAC
   , InputArray (..)
   , inputArray
   , inputRank
-  , inputTypes
-  , inputsWithTypes
+  , inputType
   , transformRows
   , transformTypeRows
   , transposeInput
@@ -293,23 +292,11 @@ inputArrayType :: InputArray -> Type
 inputArrayType (Var v)  = identType v
 inputArrayType (Iota e) = arrayOf (Basic Int) (Shape [e]) Unique
 
--- | Return the array rank (dimensionality) of an input.
-inputRank :: Input -> Int
-inputRank (Input (ArrayTransforms ts) ia) =
-  foldl transformType (arrayRank $ inputArrayType ia) ts
-  where transformType rank (Replicate _)          = rank + 1
-        transformType rank (Rearrange _ _)        = rank
-        transformType _    (Reshape _ shape)      = length shape
-        transformType rank (ReshapeOuter _ shape) = rank - 1 + length shape
-        transformType _    (ReshapeInner _ shape) = 1 + length shape
-
--- | Return the types of a list of inputs.
-inputTypes :: [Input] -> [Type]
-inputTypes = map inputType
-  where inputType (Input (ArrayTransforms ts) ia) =
-          foldl transformType (inputArrayType ia) ts
-
-        transformType t (Replicate n) =
+-- | Return the type of an input.
+inputType :: Input -> Type
+inputType (Input (ArrayTransforms ts) ia) =
+  foldl transformType (inputArrayType ia) ts
+  where transformType t (Replicate n) =
           arrayOf t (Shape [n]) u
           where u | unique t  = Unique
                   | otherwise = Nonunique
@@ -325,9 +312,9 @@ inputTypes = map inputType
           let Shape oldshape = arrayShape t
           in t `setArrayShape` Shape (take 1 oldshape ++ shape)
 
--- | Tag each input with its corresponding type.
-inputsWithTypes :: [Input] -> [(Type, Input)]
-inputsWithTypes l = zip (inputTypes l) l
+-- | Return the array rank (dimensionality) of an input.
+inputRank :: Input -> Int
+inputRank = arrayRank . inputType
 
 -- | Apply the transformations to every row of the input.
 transformRows :: ArrayTransforms -> Input -> Input

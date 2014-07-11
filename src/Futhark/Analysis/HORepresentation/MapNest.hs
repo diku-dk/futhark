@@ -80,7 +80,7 @@ fromSOACNest' bound (Nest.SOACNest inps (Nest.Map cs body loc)) = do
   let boundUsedInBody = HS.toList $ freeInBody lam `HS.intersection` bound
   newParams <- mapM (newIdent' (++"_wasfree")) boundUsedInBody
   let subst = HM.fromList $ zip (map identName boundUsedInBody) (map identName newParams)
-      size  = arraysSize 0 $ SOAC.inputTypes inps
+      size  = arraysSize 0 $ map SOAC.inputType inps
       inps' = map (substituteNames subst) inps ++
               map (SOAC.addTransform (SOAC.Replicate size) . SOAC.varInput) boundUsedInBody
       body' =
@@ -123,52 +123,43 @@ toSOACNest (MapNest cs body (n:ns) inps loc) =
 fixInputs :: [(Param, SOAC.Input)] -> [(Param, SOAC.Input)]
           -> NeedNames [(Param, SOAC.Input)]
 fixInputs ourInps childInps =
-  removeTypes . reverse . snd <$> foldM inspect (addTypes ourInps, []) (addTypes childInps)
+  reverse . snd <$> foldM inspect (ourInps, []) childInps
   where
-    isParam x (y, _, _) = identName x == identName y
+    isParam x (y, _) = identName x == identName y
 
-    ourSize = arraysSize 0 $ SOAC.inputTypes $ map snd ourInps
-
-    removeTypes l =
-      [ (p, inp) | (p, _, inp) <- l ]
-
-    addTypes l =
-      [ (p, t, inp) | ((p,inp),t) <- zip l $ SOAC.inputTypes $ map snd l ]
+    ourSize = arraysSize 0 $ map (SOAC.inputType . snd) ourInps
 
     findParam remPs v
       | ([ourP], remPs') <- partition (isParam v) remPs = Just (ourP, remPs')
       | otherwise                                       = Nothing
 
-    inspect :: ([(Param, Type, SOAC.Input)], [(Param, Type, SOAC.Input)])
-            -> (Param, Type, SOAC.Input)
-            -> NeedNames ([(Param, Type, SOAC.Input)], [(Param, Type, SOAC.Input)])
-    inspect (remPs, newInps) (_, _, SOAC.Input ts (SOAC.Var v))
+    inspect :: ([(Param, SOAC.Input)], [(Param, SOAC.Input)])
+            -> (Param, SOAC.Input)
+            -> NeedNames ([(Param, SOAC.Input)], [(Param, SOAC.Input)])
+    inspect (remPs, newInps) (_, SOAC.Input ts (SOAC.Var v))
       | SOAC.nullTransforms ts,
         Just (ourP, remPs') <- findParam remPs v =
           return (remPs', ourP:newInps)
 
-    inspect (remPs, newInps) (param, inpt, SOAC.Input ts ia) =
+    inspect (remPs, newInps) (param, inp@(SOAC.Input ts ia)) =
       case ia of
         SOAC.Var v
-          | Just ((p,pInpt,pInp), remPs') <- findParam remPs v ->
+          | Just ((p,pInp), remPs') <- findParam remPs v ->
           let pInp'  = SOAC.transformRows ts pInp
-              pInpt' = SOAC.transformTypeRows ts pInpt
+              pInpt' = SOAC.inputType pInp'
           in return (remPs',
                      (p { identType = rowType pInpt' `setAliases` () },
-                      pInpt',
                       pInp')
                      : newInps)
-          | Just ((p,pInpt,pInp), _) <- findParam newInps v -> do
+          | Just ((p,pInp), _) <- findParam newInps v -> do
           -- The input corresponds to a variable that has already
           -- been used.
           p' <- newIdent' id p
-          return (remPs, (p', pInpt, pInp) : newInps)
+          return (remPs, (p', pInp) : newInps)
         _ -> do
           newParam <- Ident <$> newNameFromString (baseString (identName param) ++ "_rep")
                             <*> pure inpt
                             <*> pure (srclocOf ia)
-          let outer:shape = arrayDims inpt
-              inpt' = inpt `setArrayShape` Shape (outer : outer : shape)
           return (remPs, (toParam newParam,
-                          inpt',
                           SOAC.Input (ts SOAC.|> SOAC.Replicate ourSize) ia) : newInps)
+      where inpt = SOAC.inputType inp
