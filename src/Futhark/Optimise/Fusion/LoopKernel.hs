@@ -368,12 +368,11 @@ commonTransforms' inps =
 
 mapDepth :: MapNest -> Int
 mapDepth (MapNest.MapNest _ body levels _ _) =
-  min resDims (length (takeWhile niceNest levels)) + 1
-  where niceNest nest =
-          HS.null $ HS.fromList (MapNest.nestingParams nest)
-                    `HS.intersection`
-                    freeInBody (MapNest.nestingPostBody nest)
-        resDims = minDim $ case levels of
+  -- XXX: The restriction to pure nests is conservative, but we cannot
+  -- know whether an arbitrary postbody is dependent on the exact size
+  -- of the nesting result.
+  min resDims (length (takeWhile MapNest.pureNest levels)) + 1
+  where resDims = minDim $ case levels of
                     [] -> case body of Nest.Fun lam ->
                                          lambdaReturnType lam
                                        Nest.NewNest nest _ ->

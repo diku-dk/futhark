@@ -36,7 +36,7 @@ pureNest :: Nesting -> Bool
 pureNest nest
   | Body [] (Result _ es _) <- nestingPostBody nest,
     Just vs       <- vars es =
-      vs == nestingResult nest
+      sort vs == sort (nestingResult nest)
   | otherwise = False
 
 vars :: [SubExp] -> Maybe [Ident]
