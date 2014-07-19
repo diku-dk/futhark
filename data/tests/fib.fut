@@ -1,7 +1,0 @@
-// Compute N Fibonacci numbers.
-fun [int] main(int n) =
-    let arr = copy(iota(n)) in
-    loop (arr) = for i < n-2 do
-                   let arr[i+2] = arr[i] + arr[i+1]
-                   in arr
-    in arr
