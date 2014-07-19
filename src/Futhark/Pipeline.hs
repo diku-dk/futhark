@@ -73,7 +73,7 @@ verbose = isJust . futharkverbose
 compileError :: String -> Maybe Prog -> FutharkM a
 compileError s p = throwError $ CompileError s p
 
-typeCheck :: Futharkonfig -> Prog -> Either TypeError Prog
+typeCheck :: Futharkonfig -> Prog -> Either (TypeError Basic) Prog
 typeCheck config
   | futharkcheckAliases config = checkProg
   | otherwise             = checkProgNoUniqueness

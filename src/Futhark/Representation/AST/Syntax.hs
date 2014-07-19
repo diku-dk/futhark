@@ -9,7 +9,6 @@ module Futhark.Representation.AST.Syntax
 
   -- * Types
   , Uniqueness(..)
-  , DimSize
   , ShapeT(..)
   , Shape
   , ExtDimSize(..)
@@ -69,15 +68,12 @@ import qualified Data.HashSet as HS
 import Language.Futhark.Core
 import qualified Futhark.Representation.AST.Lore as Lore
 
--- | The size of this dimension.
-type DimSize lore = SubExp lore
-
 -- | The size of an array type as a list of its dimension sizes.  If a
 -- variable, that variable must be in scope where this array is used.
 -- When compared for equality, only the number of dimensions is
 -- considered.
-newtype ShapeT lore = Shape { shapeDims :: [DimSize lore] }
-                    deriving (Show)
+newtype ShapeT lore = Shape { shapeDims :: [SubExp lore] }
+                      deriving (Show)
 
 -- | Type alias for namespace control.
 type Shape = ShapeT
@@ -89,9 +85,10 @@ instance Ord (ShapeT lore) where
   compare = comparing shapeRank
 
 -- | The size of this dimension.
-data ExtDimSize lore = Free (DimSize lore) -- ^ A free variable or constant.
+data ExtDimSize lore = Free (SubExp lore) -- ^ Some known dimension.
                      | Ext Int -- ^ Existentially quantified.
-                     deriving (Show)
+
+deriving instance Lore.Proper lore => Show (ExtDimSize lore)
 
 -- | Like 'Shape' but some of its elements may be bound in a local
 -- environment instead.  These are denoted with integral indices.
@@ -196,7 +193,7 @@ data Diet = Consume -- ^ Consumes this value.
 
 -- | Every possible value in Futhark.  Values are fully evaluated and their
 -- type is always unambiguous.
-data Value  = BasicVal BasicValue
+data Value = BasicVal BasicValue
            | ArrayVal !(Array Int Value) DeclType
              -- ^ It is assumed that the array is 0-indexed.  The type
              -- is the row type.
@@ -294,8 +291,7 @@ data ExpT lore =
 
             | ArrayLit  [SubExp lore] (Type lore) SrcLoc
             -- ^ Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
-            -- Second arg is the type of of the rows of the array (not
-            -- the element type).
+            -- Second arg is the element type of of the rows of the array.
 
             | If     (SubExp lore) (BodyT lore) (BodyT lore) (ResType lore) SrcLoc
 

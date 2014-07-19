@@ -112,8 +112,8 @@ mapExpM :: (Applicative m, Monad m) =>
            Mapper flore tlore m -> Exp flore -> m (Exp tlore)
 mapExpM tv (SubExp se) =
   SubExp <$> mapOnSubExp tv se
-mapExpM tv (ArrayLit els elt loc) =
-  pure ArrayLit <*> mapM (mapOnSubExp tv) els <*> mapOnType tv elt <*> pure loc
+mapExpM tv (ArrayLit els rowt loc) =
+  pure ArrayLit <*> mapM (mapOnSubExp tv) els <*> mapOnType tv rowt <*> pure loc
 mapExpM tv (BinOp bop x y t loc) =
   pure (BinOp bop) <*>
          mapOnSubExp tv x <*> mapOnSubExp tv y <*>

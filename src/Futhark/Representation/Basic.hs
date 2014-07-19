@@ -4,7 +4,6 @@
 module Futhark.Representation.Basic
        ( -- * The Lore definition
          Basic
-       , BasicLore(..)
          -- * Syntax types
        , Prog
        , Body
@@ -40,6 +39,8 @@ module Futhark.Representation.Basic
        )
 where
 
+import Data.Monoid
+
 import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
@@ -49,6 +50,8 @@ import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Pretty
+import Futhark.Renamer
+import qualified Futhark.TypeCheck as TypeCheck
 
 -- This module could be written much nicer if Haskell had functors
 -- like Standard ML.  Instead, we have to abuse the namespace/module
@@ -57,21 +60,9 @@ import Futhark.Representation.AST.Pretty
 -- | The lore for the basic representation.
 data Basic
 
-type instance Lore.Dimension Basic = DimSize Basic
 type instance Lore.Binding Basic = ()
 
--- | A class for lores that contain at least the amount of information
--- in the 'Basic' lore.  Most utility passes will only work on
--- programs with this lore.
-class Lore.Proper l => BasicLore l where
-  getDimSize :: Lore.Dimension l -> DimSize l
-  setDimSize :: DimSize l -> Lore.Dimension l -> Lore.Dimension l
-
 instance Lore.Proper Basic where
-
-instance BasicLore Basic where
-  getDimSize = id
-  setDimSize = const
 
 type Prog = AST.Prog Basic
 type Exp = AST.Exp Basic
@@ -91,3 +82,11 @@ type FunDec = AST.FunDec Basic
 type Param = AST.Param Basic
 type Certificates = AST.Certificates Basic
 type Result = AST.Result Basic
+
+instance Renameable Basic where
+
+instance FreeIn Basic where
+  freeInBindingLore = mempty
+
+instance TypeCheck.Checkable Basic where
+  checkBindingLore = return

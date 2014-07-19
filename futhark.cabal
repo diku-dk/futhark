@@ -38,6 +38,7 @@ Library
                    Language.Futhark.Parser
                    Futhark.Representation.External.Renamer
                    Futhark.Representation.External.TypeChecker
+                   Futhark.Representation.AST
                    Futhark.Representation.AST.Pretty
                    Futhark.Representation.AST.Lore
                    Futhark.Representation.AST.Traversals
