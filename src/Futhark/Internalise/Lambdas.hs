@@ -149,16 +149,8 @@ bindMapShapes cs sizefun args outer_shape
   where loc = srclocOf sizefun
         zero = intconst 0 loc
         rt = map (const $ I.Basic I.Int) $ I.lambdaReturnType sizefun
-        -- Cosmin this is UNSAFE!!!
-        --        but makes HiperfitEgCos.fut work!
-        --        i.e., instead of if size == 0 then 0 else inner_size
-        --        just wrote inner_size (without considering the outer size)
-        --        otherwise problems with invariant sizes being hoisted out.
-        --        Troels & Cosmin will sleep more on it!
-        fals = constant False loc
-        isempty = pure $ SubExp fals
---        isempty = eBinOp I.Equal (pure $ I.SubExp outer_shape) (pure $ SubExp zero)
---                  (I.Basic I.Bool) loc
+        isempty = eBinOp I.Equal (pure $ I.SubExp outer_shape) (pure $ SubExp zero)
+                  (I.Basic I.Bool) loc
         emptybranch =
           pure $ resultBody
           [] (map (const zero) $ I.lambdaReturnType sizefun) loc
