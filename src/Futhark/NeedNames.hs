@@ -11,7 +11,7 @@ module Futhark.NeedNames
   where
 
 import Control.Applicative
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
 
 -- | The central monad itself.

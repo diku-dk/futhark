@@ -49,7 +49,7 @@ import Data.Loc
 import qualified Data.HashSet as HS
 import Data.Foldable (traverse_)
 
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplifier.CSE
 import Futhark.Optimise.Simplifier.Rule
@@ -111,7 +111,7 @@ needUntagged bnd = do
   needTagged $ tagBinding vtable bnd
 
 needToBinding :: TaggedBinding u -> Binding
-needToBinding (TaggedLet (pat, _) (e, _)) = Let pat e
+needToBinding (TaggedLet (pat, _) (e, _)) = Let pat () e
 
 boundFree :: MonadEngine u m => Names -> m ()
 boundFree fs = tellNeed $ Need [] $ UT.usages fs
@@ -165,7 +165,7 @@ bindLet :: MonadEngine u m => [Ident] -> Exp -> m a -> m a
 bindLet pat e m = do
   ds <- asksEngineEnv envDupeState
   vtable <- asksEngineEnv envVtable
-  let (bnds, ds') = performCSE ds $ tagBinding vtable $ Let pat e
+  let (bnds, ds') = performCSE ds $ tagBinding vtable $ Let pat () e
   mapM_ needTagged bnds
   binding bnds $
     localEngineEnv (\env -> env { envDupeState = ds'}) m
@@ -342,7 +342,7 @@ defaultSimplifyBody ds (Body (bnd:bnds) res) = do
     case simplified of
       Left newbnds ->
         simplifyBody ds $ Body (newbnds++bnds) res
-      Right (Let pat' e') ->
+      Right (Let pat' () e') ->
         bindLet pat' e' $ simplifyBody ds $ Body bnds res
 
 -- | Simplify a single 'Result' inside an arbitrary 'MonadEngine'.
@@ -368,7 +368,7 @@ simplifyBinding' :: MonadEngine u m =>
 
 -- The simplification rules cannot handle Apply, because it requires
 -- access to the full program.
-simplifyBinding' (Let pat (Apply fname args rettype loc)) = do
+simplifyBinding' (Let pat () (Apply fname args rettype loc)) = do
   pat' <- blockUsage $ mapM simplifyIdentBinding pat
   args' <- mapM (simplifySubExp . fst) args
   rettype' <- mapM simplifyExtType rettype
@@ -379,21 +379,21 @@ simplifyBinding' (Let pat (Apply fname args rettype loc)) = do
     Just vs -> do let vs' = valueShapeContext rettype vs ++ vs
                       newbnds = flip map (zip pat vs') $ \(p,v) ->
                         case uniqueness $ identType p of
-                          Unique    -> Let [p] $ Copy (Constant v loc) loc
-                          Nonunique -> Let [p] $ SubExp $ Constant v loc
+                          Unique    -> Let [p] () $ Copy (Constant v loc) loc
+                          Nonunique -> Let [p] () $ SubExp $ Constant v loc
                   return $ Left newbnds
     Nothing -> let e' = Apply fname (zip args' $ map snd args) rettype' loc
-               in return $ Right $ Let pat' e'
+               in return $ Right $ Let pat' () e'
 
-simplifyBinding' (Let pat e) = do
+simplifyBinding' (Let pat () e) = do
   pat' <- blockUsage $ mapM simplifyIdentBinding pat
   e' <- simplifyExp e
   vtable <- asksEngineEnv envVtable
   rules <- asksEngineEnv envRules
-  simplified <- topDownSimplifyBinding rules vtable (Let pat e')
+  simplified <- topDownSimplifyBinding rules vtable $ Let pat () e'
   case simplified of
     Just newbnds -> return $ Left newbnds
-    Nothing      -> return $ Right $ Let pat' e'
+    Nothing      -> return $ Right $ Let pat' () e'
 
 simplifyExp :: MonadEngine u m => Exp -> m Exp
 
@@ -479,7 +479,7 @@ simplifyExp (Redomap cs outerfun innerfun acc arrs loc) = do
                  input <- newIdent "unused_input"
                           (arrayOf (Basic Int) (Shape [outerSize]) Nonunique) $
                           srclocOf firstarr
-                 needUntagged $ Let [input] $ Iota outerSize $ srclocOf firstarr
+                 needUntagged $ Let [input] () $ Iota outerSize $ srclocOf firstarr
                  return (lam { lambdaParams =
                                   accparams ++
                                   [firstparam { identType = Basic Int }] },
@@ -493,7 +493,7 @@ simplifyExp e = simplifyExpBase e
 simplifyExpBase :: MonadEngine u m => Exp -> m Exp
 simplifyExpBase = mapExpM hoist
   where hoist = Mapper {
-                  mapOnExp = simplifyExp
+                  mapOnBinding = fail "Unhandled binding in simplification engine"
                 -- Bodies are handled explicitly because we need to
                 -- provide their result diet.
                 , mapOnBody = fail "Unhandled body in simplification engine."

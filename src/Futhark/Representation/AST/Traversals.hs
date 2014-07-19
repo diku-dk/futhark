@@ -24,7 +24,7 @@
 -- how to use this facility.
 --
 -----------------------------------------------------------------------------
-module Futhark.InternalRep.Traversals
+module Futhark.Representation.AST.Traversals
   (
   -- * Mapping
     Mapper(..)
@@ -59,27 +59,27 @@ import Control.Monad.Identity
 import Control.Monad.Writer
 import Control.Monad.State
 
-import Futhark.InternalRep.Syntax
+import Futhark.Representation.AST.Syntax
 
 -- | Express a monad mapping operation on a syntax node.  Each element
 -- of this structure expresses the operation to be performed on a
 -- given child.
-data Mapper m = Mapper {
-    mapOnSubExp :: SubExp -> m SubExp
-  , mapOnBody :: Body -> m Body
-  , mapOnExp :: Exp -> m Exp
-  , mapOnType :: Type -> m Type
-  , mapOnLambda :: Lambda -> m Lambda
-  , mapOnIdent :: Ident -> m Ident
+data Mapper flore tlore m = Mapper {
+    mapOnSubExp :: SubExp flore -> m (SubExp tlore)
+  , mapOnBody :: Body flore -> m (Body tlore)
+  , mapOnBinding :: Binding flore -> m (Binding tlore)
+  , mapOnType :: Type flore -> m (Type tlore)
+  , mapOnLambda :: Lambda flore -> m (Lambda tlore)
+  , mapOnIdent :: Ident flore -> m (Ident tlore)
   , mapOnValue :: Value -> m Value
-  , mapOnCertificates :: Certificates -> m Certificates
+  , mapOnCertificates :: Certificates flore -> m (Certificates tlore)
   }
 
 -- | A mapper that simply returns the tree verbatim.
-identityMapper :: Monad m => Mapper m
+identityMapper :: Monad m => Mapper lore lore m
 identityMapper = Mapper {
                    mapOnSubExp = return
-                 , mapOnExp = return
+                 , mapOnBinding = return
                  , mapOnBody = return
                  , mapOnType = return
                  , mapOnLambda = return
@@ -91,24 +91,25 @@ identityMapper = Mapper {
 -- | Map a monadic action across the immediate children of a body.
 -- Importantly, the 'mapOnBody' action is not invoked for the body
 -- itself.  The mapping is done left-to-right.
-mapBodyM :: (Applicative m, Monad m) => Mapper m -> Body -> m Body
+mapBodyM :: (Applicative m, Monad m) => Mapper flore tlore m -> Body flore -> m (Body tlore)
 mapBodyM tv (Body [] (Result cs ses loc)) =
   Body [] <$> (Result <$> mapOnCertificates tv cs <*>
                mapM (mapOnSubExp tv) ses <*> pure loc)
-mapBodyM tv (Body (Let pat e:bnds) res) = do
-  bnd <- Let <$> mapM (mapOnIdent tv) pat <*> mapOnExp tv e
+mapBodyM tv (Body (bnd:bnds) res) = do
+  bnd' <- mapOnBinding tv bnd
   Body bnds' res' <- mapOnBody tv $ Body bnds res
-  return $ Body (bnd:bnds') res'
+  return $ Body (bnd':bnds') res'
 
 -- | Like 'mapBodyM', but in the 'Identity' monad.
-mapBody :: Mapper Identity -> Body -> Body
+mapBody :: Mapper flore tlore Identity -> Body flore -> Body tlore
 mapBody m = runIdentity . mapBodyM m
 
 -- | Map a monadic action across the immediate children of an
 -- expression.  Importantly, the 'mapOnExp' action is not invoked for
 -- the expression itself, and the mapping does not descend recursively
 -- into subexpressions.  The mapping is done left-to-right.
-mapExpM :: (Applicative m, Monad m) => Mapper m -> Exp -> m Exp
+mapExpM :: (Applicative m, Monad m) =>
+           Mapper flore tlore m -> Exp flore -> m (Exp tlore)
 mapExpM tv (SubExp se) =
   SubExp <$> mapOnSubExp tv se
 mapExpM tv (ArrayLit els elt loc) =
@@ -201,7 +202,7 @@ mapExpM tv (Redomap cs redfun mapfun accexps arrexps loc) =
        pure loc
 
 mapOnResType :: (Monad m, Applicative m) =>
-                Mapper m -> ResType -> m ResType
+                Mapper flore tlore m -> ResType flore -> m (ResType tlore)
 mapOnResType tv = mapM mapOnResType'
   where mapOnResType' (Array bt (ExtShape shape) u als) =
           Array bt <$> (ExtShape <$> mapM mapOnExtSize shape) <*>
@@ -211,27 +212,27 @@ mapOnResType tv = mapM mapOnResType'
         mapOnExtSize (Free se) = Free <$> mapOnSubExp tv se
 
 -- | Like 'mapExp', but in the 'Identity' monad.
-mapExp :: Mapper Identity -> Exp -> Exp
+mapExp :: Mapper flore tlore Identity -> Exp flore -> Exp tlore
 mapExp m = runIdentity . mapExpM m
 
 -- | Reification of a left-reduction across a syntax tree.
-data Folder a m = Folder {
-    foldOnSubExp :: a -> SubExp -> m a
-  , foldOnBody :: a -> Body -> m a
-  , foldOnExp :: a -> Exp -> m a
-  , foldOnType :: a -> Type -> m a
-  , foldOnLambda :: a -> Lambda -> m a
-  , foldOnIdent :: a -> Ident -> m a
+data Folder a lore m = Folder {
+    foldOnSubExp :: a -> SubExp lore -> m a
+  , foldOnBody :: a -> Body lore -> m a
+  , foldOnBinding :: a -> Binding lore -> m a
+  , foldOnType :: a -> Type lore -> m a
+  , foldOnLambda :: a -> Lambda lore -> m a
+  , foldOnIdent :: a -> Ident lore -> m a
   , foldOnValue :: a -> Value -> m a
-  , foldOnCertificates :: a -> Certificates -> m a
+  , foldOnCertificates :: a -> Certificates lore -> m a
   }
 
 -- | A folding operation where the accumulator is returned verbatim.
-identityFolder :: Monad m => Folder a m
+identityFolder :: Monad m => Folder a lore m
 identityFolder = Folder {
                    foldOnSubExp = const . return
                  , foldOnBody = const . return
-                 , foldOnExp = const . return
+                 , foldOnBinding = const . return
                  , foldOnType = const . return
                  , foldOnLambda = const . return
                  , foldOnIdent = const . return
@@ -239,11 +240,11 @@ identityFolder = Folder {
                  , foldOnCertificates = const . return
                  }
 
-foldMapper :: Monad m => Folder a m -> Mapper (StateT a m)
+foldMapper :: Monad m => Folder a lore m -> Mapper lore lore (StateT a m)
 foldMapper f = Mapper {
                  mapOnSubExp = wrap foldOnSubExp
                , mapOnBody = wrap foldOnBody
-               , mapOnExp = wrap foldOnExp
+               , mapOnBinding = wrap foldOnBinding
                , mapOnType = wrap foldOnType
                , mapOnLambda = wrap foldOnLambda
                , mapOnIdent = wrap foldOnIdent
@@ -259,55 +260,53 @@ foldMapper f = Mapper {
 -- body.  Importantly, the 'foldOnExp' action is not invoked for
 -- the body itself, and the reduction does not descend recursively
 -- into subterms.  The reduction is done left-to-right.
-foldBodyM :: (Monad m, Functor m) => Folder a m -> a -> Body -> m a
+foldBodyM :: (Monad m, Functor m) => Folder a lore m -> a -> Body lore -> m a
 foldBodyM f x e = execStateT (mapBodyM (foldMapper f) e) x
 
 -- | As 'foldBodyM', but in the 'Identity' monad.
-foldBody :: Folder a Identity -> a -> Body -> a
+foldBody :: Folder a lore Identity -> a -> Body lore -> a
 foldBody m x = runIdentity . foldBodyM m x
 
 -- | As 'foldBodyM', but for expressions.
-foldExpM :: (Monad m, Functor m) => Folder a m -> a -> Exp -> m a
+foldExpM :: (Monad m, Functor m) => Folder a lore m -> a -> Exp lore -> m a
 foldExpM f x e = execStateT (mapExpM (foldMapper f) e) x
 
 -- | As 'foldExpM', but in the 'Identity' monad.
-foldExp :: Folder a Identity -> a -> Exp -> a
+foldExp :: Folder a lore Identity -> a -> Exp lore -> a
 foldExp m x = runIdentity . foldExpM m x
 
 -- | Express a monad expression on a syntax node.  Each element of
 -- this structure expresses the action to be performed on a given
 -- child.
-data Walker m = Walker {
-    walkOnSubExp :: SubExp -> m ()
-  , walkOnBody :: Body -> m ()
-  , walkOnExp :: Exp -> m ()
-  , walkOnType :: Type -> m ()
-  , walkOnLambda :: Lambda -> m ()
-  , walkOnTupleLambda :: Lambda -> m ()
-  , walkOnIdent :: Ident -> m ()
+data Walker lore m = Walker {
+    walkOnSubExp :: SubExp lore -> m ()
+  , walkOnBody :: Body lore -> m ()
+  , walkOnBinding :: Binding lore -> m ()
+  , walkOnType :: Type lore -> m ()
+  , walkOnLambda :: Lambda lore -> m ()
+  , walkOnIdent :: Ident lore -> m ()
   , walkOnValue :: Value -> m ()
-  , walkOnCertificates :: Certificates -> m ()
+  , walkOnCertificates :: Certificates lore -> m ()
   }
 
 -- | A no-op traversal.
-identityWalker :: Monad m => Walker m
+identityWalker :: Monad m => Walker lore m
 identityWalker = Walker {
                    walkOnSubExp = const $ return ()
                  , walkOnBody = const $ return ()
-                 , walkOnExp = const $ return ()
+                 , walkOnBinding = const $ return ()
                  , walkOnType = const $ return ()
                  , walkOnLambda = const $ return ()
-                 , walkOnTupleLambda = const $ return ()
                  , walkOnIdent = const $ return ()
                  , walkOnValue = const $ return ()
                  , walkOnCertificates = const $ return ()
                  }
 
-walkMapper :: Monad m => Walker m -> Mapper m
+walkMapper :: Monad m => Walker lore m -> Mapper lore lore m
 walkMapper f = Mapper {
                  mapOnSubExp = wrap walkOnSubExp
                , mapOnBody = wrap walkOnBody
-               , mapOnExp = wrap walkOnExp
+               , mapOnBinding = wrap walkOnBinding
                , mapOnType = wrap walkOnType
                , mapOnLambda = wrap walkOnLambda
                , mapOnIdent = wrap walkOnIdent
@@ -321,23 +320,23 @@ walkMapper f = Mapper {
 -- the expression itself, and the traversal does not descend
 -- recursively into subexpressions.  The traversal is done
 -- left-to-right.
-walkBodyM :: (Monad m, Applicative m) => Walker m -> Body -> m ()
+walkBodyM :: (Monad m, Applicative m) => Walker lore m -> Body lore -> m ()
 walkBodyM f = void . mapBodyM m
   where m = walkMapper f
 
 -- | As 'walkBodyM', but for expressions.
-walkExpM :: (Monad m, Applicative m) => Walker m -> Exp -> m ()
+walkExpM :: (Monad m, Applicative m) => Walker lore m -> Exp lore -> m ()
 walkExpM f = void . mapExpM m
   where m = walkMapper f
 
 -- | Common case of 'foldExp', where only 'Exp's and 'Lambda's are
 -- taken into account.
-foldlPattern :: (a -> Exp    -> a) ->
-                (a -> Lambda -> a) ->
-                a -> Exp -> a
+foldlPattern :: (a -> Exp lore -> a) ->
+                (a -> Lambda lore -> a) ->
+                a -> Exp lore -> a
 foldlPattern expf lamf = foldExp m
   where m = identityFolder {
-              foldOnExp = \x -> return . expf x
+              foldOnBinding = \x (Let _ _ e) -> return $ expf x e
             , foldOnBody = \x -> return . foldBody m x
             , foldOnLambda =
               \x lam@(Lambda _ body _ _) ->

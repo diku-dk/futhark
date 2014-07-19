@@ -5,7 +5,7 @@
 -- The program does not need to have any particular properties for the
 -- type checker to function; in particular it does not need unique
 -- names.
-module Futhark.InternalRep.TypeChecker
+module Futhark.TypeCheck
   ( checkProg
   , checkProgNoUniqueness
   , checkClosedExp
@@ -26,9 +26,9 @@ import Data.Maybe
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
-import Futhark.TypeError
+import Futhark.TypeCheck.TypeError
 
 -- | Information about an error that occured during type checking.
 type TypeError = GenTypeError VName Exp (Several DeclType) (Several Ident)
@@ -497,13 +497,13 @@ checkBody (Body [] (Result cs es loc)) = do
   es' <- mapM checkSubExp es
   return $ resultBody cs' es' loc
 
-checkBody (Body (Let pat e:bnds) res) = do
+checkBody (Body (Let pat annot e:bnds) res) = do
   (e', dataflow) <- collectDataflow $ checkExp e
   (scope, pat') <-
     checkBinding (srclocOf e) pat (typeOf e') dataflow
   scope $ do
     Body bnds' res' <- checkBody body
-    return $ Body (Let pat' e':bnds') res'
+    return $ Body (Let pat' annot e':bnds') res'
   where body = Body bnds res
 
 checkExp :: Exp -> TypeM Exp

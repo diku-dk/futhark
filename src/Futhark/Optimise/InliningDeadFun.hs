@@ -18,8 +18,8 @@ import Data.Maybe
 
 import qualified Data.HashMap.Lazy as HM
 
-import Futhark.InternalRep
-import Futhark.InternalRep.Renamer
+import Futhark.Representation.Basic
+import Futhark.Renamer
 import Futhark.Analysis.CallGraph
 import Futhark.Optimise.Errors
 
@@ -133,33 +133,33 @@ doInlineInCaller (name,rtp,args,body,pos) inlcallees =
   in (name, rtp, args, body',pos)
 
 inlineInBody :: [FunDec] -> Body -> Body
-inlineInBody inlcallees (Body (Let pat (Apply fname args rtp loc):bnds) res) =
+inlineInBody inlcallees (Body (Let pat () (Apply fname args rtp loc):bnds) res) =
   let continue callbnds =
         callbnds `insertBindings` inlineInBody inlcallees (Body bnds res)
       continue' res' =
-        continue [ Let [v] $ SubExp e'
+        continue [ Let [v] () $ SubExp e'
                  | (v,e') <- zip pat $ withShapes $ resultSubExps res' ]
   in  case filter (\(nm,_,_,_,_)-> fname == nm) inlcallees of
-        [] -> continue [Let pat $ Apply fname args rtp loc]
+        [] -> continue [Let pat () $ Apply fname args rtp loc]
         (_,_,fargs,body,_):_ ->
           let revbnds = zip (map fromParam fargs) $ map fst args
           in  mapResult continue' $ foldr addArgBnd body revbnds
   where
       addArgBnd :: (Ident, SubExp) -> Body -> Body
       addArgBnd (farg, aarg) body =
-          Let [farg] (SubExp aarg) `insertBinding` body
+          Let [farg] () (SubExp aarg) `insertBinding` body
       withShapes ses = existentialShapes rtp (map subExpType ses) ++ ses
 inlineInBody inlcallees b = mapBody (inliner inlcallees) b
 
-inliner :: Monad m => [FunDec] -> Mapper m
+inliner :: Monad m => [FunDec] -> Mapper Basic Basic m
 inliner funs = identityMapper {
-                 mapOnExp  = return . inlineInExp funs
-               , mapOnLambda = return . inlineInLambda funs
+                 mapOnLambda = return . inlineInLambda funs
                , mapOnBody = return . inlineInBody funs
+               , mapOnBinding = return . inlineInBinding funs
                }
 
-inlineInExp :: [FunDec] -> Exp -> Exp
-inlineInExp inlcallees = mapExp $ inliner inlcallees
+inlineInBinding :: [FunDec] -> Binding -> Binding
+inlineInBinding inlcallees (Let pat () e) = Let pat () $ mapExp (inliner inlcallees) e
 
 inlineInLambda :: [FunDec] -> Lambda -> Lambda
 inlineInLambda inlcallees (Lambda params body ret loc) =

@@ -37,7 +37,7 @@ import Data.Loc
 import Control.Applicative
 import Control.Monad.Writer
 
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
 import Futhark.Substitute
 import Futhark.Binder
@@ -185,7 +185,7 @@ binOpLambda bop t loc = do
              lambdaParams     = [toParam x, toParam y]
            , lambdaReturnType = [toConstType t]
            , lambdaSrcLoc     = loc
-           , lambdaBody = Body [Let [res] (BinOp bop (Var x) (Var y) t loc)] $
+           , lambdaBody = Body [Let [res] mempty (BinOp bop (Var x) (Var y) t loc)] $
                           Result [] [Var res] loc
            }
 
@@ -227,7 +227,7 @@ nonuniqueParams params = do
     if unique $ identType param then do
       param' <- nonuniqueParam <$> newIdent' (++"_nonunique") param
       return (param',
-              [Let [fromParam param] $
+              [Let [fromParam param] mempty $
                Copy (Var $ fromParam param') $ srclocOf param'])
     else
       return (param, [])

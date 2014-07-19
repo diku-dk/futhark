@@ -13,7 +13,7 @@ import Control.Monad.Writer
 
 import qualified Language.C.Quote.C as C
 
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 
 import qualified Futhark.CodeGen.ImpCode as Imp
 import qualified Futhark.CodeGen.ImpGen as ImpGen

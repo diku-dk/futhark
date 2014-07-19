@@ -6,8 +6,8 @@ module Futhark.Optimise.SuffCond
 
 import Control.Monad.State
 
-import Futhark.InternalRep
-import Futhark.InternalRep.Renamer
+import Futhark.Representation.Basic
+import Futhark.Renamer
 import Futhark.MonadFreshNames
 import Futhark.Optimise.SuffCond.OptPredicates
 import Futhark.Optimise.SuffCond.GenPredicates

@@ -7,7 +7,7 @@ module Futhark.Untrace
   ( untraceProg )
   where
 
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 
 -- | Remove all special debugging function calls from the program.
 untraceProg :: Prog -> Prog
@@ -20,10 +20,11 @@ untraceFun (fname, ret, params, body, pos) =
 untraceBody :: Body -> Body
 untraceBody = mapBody untrace
   where untrace = identityMapper {
-                    mapOnExp = return . untraceExp
+                    mapOnBinding = return . untraceBinding
                   , mapOnBody = return .untraceBody
                   , mapOnLambda = return . untraceLambda
                   }
+        untraceBinding (Let pat () e) = Let pat () $ untraceExp e
         untraceExp (Apply fname [(e,_)] _ _)
           | "trace" <- nameToString fname = SubExp e
         untraceExp e = mapExp untrace e

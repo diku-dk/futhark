@@ -14,7 +14,7 @@ import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Trans.Maybe
 
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
 import Futhark.Binder
 

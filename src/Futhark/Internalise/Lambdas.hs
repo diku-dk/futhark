@@ -13,8 +13,8 @@ import Control.Monad
 import Data.List
 import Data.Loc
 
-import Futhark.ExternalRep as E
-import Futhark.InternalRep as I
+import Futhark.Representation.External as E
+import Futhark.Representation.Basic as I
 import Futhark.MonadFreshNames
 import Futhark.Tools
 
@@ -129,10 +129,12 @@ assertResultShape desiredShapes (I.Body bnds res) = do
             newIdent "shape_check" (I.Basic I.Bool) loc
   let check desired computed = I.BinOp I.Equal (I.Var desired) computed
                                (I.Basic I.Bool) loc
-      cmps = zipWith Let (map pure checks) $
-             zipWith check desiredShapes computedShapes
-      asserts = zipWith Let (map pure certs) $
-                map ((`I.Assert` loc) . I.Var) checks
+      cmps = [ Let [v] () e |
+               (v,e) <- zip checks $
+                        zipWith check desiredShapes computedShapes ]
+      asserts = [Let [cert] () e |
+                 (cert,e) <- zip certs $
+                            map ((`I.Assert` loc) . I.Var) checks]
   return $ I.Body (bnds++cmps++asserts)
     res { resultCertificates =
              resultCertificates res ++ certs

@@ -20,8 +20,8 @@ import Data.Maybe
 import Data.Monoid
 import Data.List
 
-import Futhark.ExternalRep as E
-import Futhark.InternalRep as I
+import Futhark.Representation.External as E
+import Futhark.Representation.Basic as I
 
 import Prelude hiding (mapM)
 

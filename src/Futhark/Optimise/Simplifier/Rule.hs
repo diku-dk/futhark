@@ -22,7 +22,7 @@ module Futhark.Optimise.Simplifier.Rule
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Optimise.Simplifier.Simplify
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
 
 type SimplificationRule a = a -> Binding -> Simplify [Binding]

@@ -23,7 +23,7 @@ import Control.Monad.State
 import Data.Loc
 
 import Futhark.Internalise.Monad
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
 import Futhark.Tools
 

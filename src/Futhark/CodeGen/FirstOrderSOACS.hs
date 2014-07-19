@@ -5,7 +5,7 @@ where
 
 import Control.Monad
 
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 import qualified Futhark.FirstOrderTransform as FOT
 import Futhark.Tools
 
@@ -18,6 +18,6 @@ firstOrderSOACS targets e
   | FOT.transformable e =
     liftM ImpGen.CompileBindings $ do
       (e',bnds) <- runBinder'' $ FOT.transformExp e
-      return $ bnds ++ [Let targets e']
+      return $ bnds ++ [Let targets () e']
   | otherwise           =
     return $ ImpGen.CompileExp e

@@ -17,7 +17,7 @@ import Control.Monad.Reader
 import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
 
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Analysis.ScalExp (ScalExp)
@@ -55,9 +55,9 @@ insertPredicateCalls subst prog =
         treatLambda lam = do
           body <- treatBody $ lambdaBody lam
           return $ lam { lambdaBody = body }
-        treatBinding (Let pat e) = do
+        treatBinding (Let pat () e) = do
           (e', bnds) <- treatExp e
-          return $ bnds ++ [Let pat e']
+          return $ bnds ++ [Let pat () e']
         treatExp e@(Apply predf predargs predt predloc)
           | Just preds <- HM.lookup predf subst =
             runBinder'' $ callPreds predt preds e $ \predf' ->
@@ -115,7 +115,7 @@ analyseBody :: ST.SymbolTable u -> SCTable -> Body -> SCTable
 analyseBody _ sctable (Body [] _) =
   sctable
 
-analyseBody vtable sctable (Body (bnd@(Let [v] e):bnds) res) =
+analyseBody vtable sctable (Body (bnd@(Let [v] () e):bnds) res) =
   let vtable' = ST.insertBinding bnd vtable
       -- Construct a new sctable for recurrences.
       sctable' = case (analyseExp vtable e,
@@ -256,7 +256,7 @@ instance MonadFreshNames m =>
       case bnd' of
         Left newbnds ->
           Simplify.simplifyBody ds $ Body (newbnds++bnds) res
-        Right (Let pat' e') ->
+        Right (Let pat' () e') ->
           Simplify.bindLetWith (const $ Forbidden $ not invariant) pat' e' $
           Simplify.simplifyBody ds $ Body bnds res
     where inspect (wrap, bnd') = do
@@ -264,18 +264,18 @@ instance MonadFreshNames m =>
             return (wrap, bnd'')
 
 checkVariance :: MonadFreshNames m => Binding -> VariantM m (Either [Binding] Binding)
-checkVariance (Let pat e)
+checkVariance (Let pat () e)
   | isLoop e = do
     maxLoops <- asks envMaxLoops
     depth <- Simplify.asksEngineEnv $ ST.depth . Simplify.envVtable
     when (depth >= maxLoops) notInvariant
-    return $ Right $ Let pat e
+    return $ Right $ Let pat () e
   | otherwise = do
     let names = freeNamesInExp e
     env <- ask
     if any (`forbiddenIn` env) names then
-      makeInvariant env $ Let pat e
-    else return $ Right $ Let pat e
+      makeInvariant env $ Let pat () e
+    else return $ Right $ Let pat () e
   where isLoop (Redomap {}) = True
         isLoop (Reduce {}) = True
         isLoop (DoLoop {}) = True
@@ -288,7 +288,7 @@ checkVariance (Let pat e)
 makeInvariant :: MonadFreshNames m =>
                  Env
               -> Binding -> VariantM m (Either [Binding] Binding)
-makeInvariant env (Let [v] e)
+makeInvariant env (Let [v] () e)
   | Just (Right se@(SE.RelExp SE.LTH0 ine)) <- -- Why can this fail?
       simplify <$> SE.toScalExp (`ST.lookupScalExp` vtable) e,
     Int <- SE.scalExpType ine,
@@ -296,22 +296,22 @@ makeInvariant env (Let [v] e)
     x:xs <- filter (scalExpUsesNoForbidden env) $ map mkConj suff = do
       (e', bnds) <- SE.fromScalExp loc $ foldl SE.SLogOr x xs
       sufficiented
-      return $ Left $ bnds ++ [Let [v] e']
+      return $ Left $ bnds ++ [Let [v] () e']
   where mkConj []     = SE.Val $ LogVal True
         mkConj (x:xs) = foldl SE.SLogAnd x xs
         loc = srclocOf e
         ranges = rangesRep vtable
         vtable = Simplify.envVtable $ envSimplifyEnv env
         simplify se = AS.simplify se loc ranges
-makeInvariant env bnd@(Let pat (If (Var v) tbranch fbranch t loc)) = do
+makeInvariant env bnd@(Let pat () (If (Var v) tbranch fbranch t loc)) = do
   let se = exactBinding (envSCTable env) v
   if scalExpUsesNoForbidden env se then
     case se of
       SE.Id v'
         | v' == v ->
-          return $ Right $ Let pat $ If (Var v) tbranch fbranch t loc
+          return $ Right $ Let pat () $ If (Var v) tbranch fbranch t loc
       _ -> do (exbnds,v') <- scalExpToIdent v se
-              return $ Left $ exbnds ++ [Let pat $ If (Var v') tbranch fbranch t loc]
+              return $ Left $ exbnds ++ [Let pat () $ If (Var v') tbranch fbranch t loc]
     else
     -- FIXME: Check that tbranch and fbranch are safe.  We can do
     -- something smarter if 'v' actually comes from an 'or'.  Also,
@@ -324,13 +324,13 @@ makeInvariant env bnd@(Let pat (If (Var v) tbranch fbranch t loc)) = do
           all safeBnd tbnds, all safeBnd fbnds -> do
         sufficiented
         return $ Left $ tbnds ++ fbnds ++
-                 [Let pat $ BinOp LogAnd tres fres (Basic Bool) loc]
+                 [Let pat () $ BinOp LogAnd tres fres (Basic Bool) loc]
       _ -> do notInvariant
               return $ Right bnd
-  where safeBnd (Let _ e) = safeExp e
-makeInvariant _ (Let pat e) = do
+  where safeBnd (Let _ _ e) = safeExp e
+makeInvariant _ (Let pat () e) = do
   notInvariant
-  return $ Right $ Let pat e
+  return $ Right $ Let pat () e
 
 exactBinding :: SCTable -> Ident -> ScalExp
 exactBinding sctable v
@@ -344,7 +344,7 @@ scalExpToIdent :: MonadFreshNames m =>
 scalExpToIdent v se = do
   (e', bnds) <- SE.fromScalExp (srclocOf v) se
   v' <- newIdent' (++"exact") v
-  return (bnds ++ [Let [v'] e'], v')
+  return (bnds ++ [Let [v'] () e'], v')
 
 scalExpUsesNoForbidden :: Env -> ScalExp -> Bool
 scalExpUsesNoForbidden env =

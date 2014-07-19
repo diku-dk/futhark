@@ -7,7 +7,7 @@
 -- The intent is that you call 'tagProg' once at some early stage,
 -- then use 'renameProg' from then on.  Functions are also provided
 -- for removing the tags again from expressions, patterns and typs.
-module Futhark.InternalRep.Renamer
+module Futhark.Renamer
   (
   -- * Renaming programs
    renameProg
@@ -29,9 +29,12 @@ import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 import Data.Maybe
 
-import Futhark.InternalRep
+import Futhark.Representation.AST.Syntax
+import Futhark.Representation.AST.Traversals
 import Futhark.FreshNames
-import Futhark.MonadFreshNames (MonadFreshNames(..), modifyNameSource)
+import Futhark.MonadFreshNames (MonadFreshNames(..),
+                                modifyNameSource,
+                                newNameSourceForProg)
 
 runRenamer :: RenameM a -> VNameSource -> (a, VNameSource)
 runRenamer m src = runReader (runStateT m src) env
@@ -41,7 +44,7 @@ runRenamer m src = runReader (runStateT m src) env
 -- program are unaffected, under the assumption that the program was
 -- correct to begin with.  In particular, the renaming may make an
 -- invalid program valid.
-renameProg :: Prog -> Prog
+renameProg :: Prog lore -> Prog lore
 renameProg prog = Prog $ fst $
                   runRenamer (mapM rename $ progFunctions prog) src
   where src = newNameSourceForProg prog
@@ -50,27 +53,27 @@ renameProg prog = Prog $ fst $
 -- of the expression is unaffected, under the assumption that the
 -- expression was correct to begin with.  Any free variables are left
 -- untouched.
-renameExp :: MonadFreshNames m => Exp -> m Exp
+renameExp :: MonadFreshNames m => Exp lore -> m (Exp lore)
 renameExp = modifyNameSource . runRenamer . rename
 
 -- | Rename bound variables such that each is unique.  The semantics
 -- of the body is unaffected, under the assumption that the body was
 -- correct to begin with.  Any free variables are left untouched.
-renameBody :: MonadFreshNames m => Body -> m Body
+renameBody :: MonadFreshNames m => Body lore -> m (Body lore)
 renameBody = modifyNameSource . runRenamer . rename
 
 -- | Rename bound variables such that each is unique.  The semantics
 -- of the lambda is unaffected, under the assumption that the body was
 -- correct to begin with.  Any free variables are left untouched.
 -- Note in particular that the parameters of the lambda are renamed.
-renameLambda :: MonadFreshNames m => Lambda -> m Lambda
+renameLambda :: MonadFreshNames m => Lambda lore -> m (Lambda lore)
 renameLambda = modifyNameSource . runRenamer . rename
 
 -- | Rename bound variables such that each is unique.  The semantics
 -- of the function is unaffected, under the assumption that the body
 -- was correct to begin with.  Any free variables are left untouched.
 -- Note in particular that the parameters of the lambda are renamed.
-renameFun :: MonadFreshNames m => FunDec -> m FunDec
+renameFun :: MonadFreshNames m => FunDec lore -> m (FunDec lore)
 renameFun = modifyNameSource . runRenamer . rename
 
 data RenameEnv = RenameEnv {
@@ -110,7 +113,7 @@ bind vars body = do
         bind' vars' env = env { envNameMap = HM.fromList (zip varnames vars')
                                              `HM.union` envNameMap env }
 
-instance Rename FunDec where
+instance Rename (FunDec lore) where
   rename (fname, ret, params, body, loc) =
     bind params $ do
       params' <- mapM rename params
@@ -118,24 +121,24 @@ instance Rename FunDec where
       ret' <- mapM rename ret
       return (fname, ret', params', body', loc)
 
-instance Rename SubExp where
+instance Rename (SubExp lore) where
   rename (Var v)          = Var <$> rename v
   rename (Constant v loc) = return $ Constant v loc
 
-instance Rename Result where
+instance Rename (Result lore) where
   rename (Result cs ses loc) =
     Result <$> mapM rename cs <*> mapM rename ses <*> pure loc
 
-instance Rename Body where
+instance Rename (Body lore) where
   rename (Body [] res) = Body [] <$> rename res
-  rename (Body (Let pat e:bnds) res) = do
+  rename (Body (Let pat annot e:bnds) res) = do
     e1' <- rename e
     bind pat $ do
       pat' <- mapM rename pat
       Body bnds' res' <- rename $ Body bnds res
-      return $ Body (Let pat' e1':bnds') res'
+      return $ Body (Let pat' annot e1':bnds') res'
 
-instance Rename Exp where
+instance Rename (Exp lore) where
   rename (DoLoop respat merge loopvar boundexp loopbody loc) = do
     let (mergepat, mergeexp) = unzip merge
     boundexp' <- rename boundexp
@@ -150,7 +153,7 @@ instance Rename Exp where
                         loopvar' boundexp' loopbody' loc
   rename e = mapExpM mapper e
     where mapper = Mapper {
-                      mapOnExp = rename
+                      mapOnBinding = fail "Unhandled binding in Renamer"
                     , mapOnBody = rename
                     , mapOnSubExp = rename
                     , mapOnIdent = rename
@@ -167,7 +170,7 @@ instance (Rename als, Rename shape) => Rename (TypeBase als shape) where
     return $ Array et size' u als'
   rename (Basic et) = return $ Basic et
 
-instance Rename Lambda where
+instance Rename (Lambda lore) where
   rename (Lambda params body ret loc) =
     bind params $ do
       params' <- mapM rename params
@@ -181,13 +184,13 @@ instance Rename Names where
 instance Rename Rank where
   rename = return
 
-instance Rename Shape where
+instance Rename (Shape lore) where
   rename (Shape l) = Shape <$> mapM rename l
 
-instance Rename ExtShape where
+instance Rename (ExtShape lore) where
   rename (ExtShape l) = ExtShape <$> mapM rename l
 
-instance Rename ExtDimSize where
+instance Rename (ExtDimSize lore) where
   rename (Free se) = Free <$> rename se
   rename (Ext x)   = return $ Ext x
 

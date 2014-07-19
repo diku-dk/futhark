@@ -29,7 +29,7 @@ import Control.Monad
 
 import Data.List
 
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import Futhark.Analysis.HORepresentation.SOACNest (SOACNest(..))
@@ -130,7 +130,7 @@ binOp _ _ = Nothing
 compileLambda :: Lambda -> ([Param] -> Exp -> Maybe a) -> Maybe a
 compileLambda l f =
   case lambdaBody l of
-    Body [Let [k1] op] (Result _ [Var k2] _)
+    Body [Let [k1] () op] (Result _ [Var k2] _)
       | k1 == k2 -> f (lambdaParams l) op
     _ -> Nothing
 

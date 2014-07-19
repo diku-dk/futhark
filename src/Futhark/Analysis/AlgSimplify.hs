@@ -18,7 +18,7 @@ import Data.List
 import Control.Monad
 import Control.Monad.Reader
 
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 import Futhark.Optimise.Errors
 import Futhark.Analysis.ScalExp
 

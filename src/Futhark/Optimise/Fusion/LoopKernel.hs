@@ -20,8 +20,8 @@ import Data.Monoid
 import Data.List
 import Data.Loc
 
-import Futhark.InternalRep
-import Futhark.InternalRep.Renamer (renameLambda)
+import Futhark.Representation.Basic
+import Futhark.Renamer (renameLambda)
 import Futhark.MonadFreshNames
 import Futhark.Analysis.HORepresentation.SOAC (SOAC)
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC

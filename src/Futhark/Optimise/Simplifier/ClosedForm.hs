@@ -20,8 +20,8 @@ import qualified Data.HashSet as HS
 import Data.Loc
 import Data.Monoid
 
-import Futhark.InternalRep
-import Futhark.InternalRep.Renamer
+import Futhark.Representation.Basic
+import Futhark.Renamer
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplifier.Simplify
 
@@ -56,15 +56,17 @@ foldClosedForm look pat lam accs arrs =
       isEmpty <- newIdent "fold_input_is_empty" (Basic Bool) lamloc
       let inputsize = arraysSize 0 $ map subExpType arrs
           isEmptyCheck =
-            Let [isEmpty] $ BinOp Equal inputsize (intconst 0 lamloc)
-                            (Basic Bool) lamloc
+            Let [isEmpty] () $
+            BinOp Equal inputsize (intconst 0 lamloc)
+            (Basic Bool) lamloc
           mkBranch  ifNonEmpty =
-            Let pat $ If (Var isEmpty)
-                             (resultBody [] accs lamloc)
-                             ifNonEmpty
-                             (staticShapes $ map fromConstType $
-                              lambdaReturnType lam)
-                             lamloc
+            Let pat () $
+            If (Var isEmpty)
+            (resultBody [] accs lamloc)
+            ifNonEmpty
+            (staticShapes $ map fromConstType $
+             lambdaReturnType lam)
+            lamloc
       closedBody' <- renameBody closedBody
       return [isEmptyCheck, mkBranch closedBody']
   where lamloc = srclocOf lam
@@ -81,14 +83,16 @@ loopClosedForm pat respat merge bound body
                        mergepat body mergeexp bodyloc = do
   isEmpty <- newIdent "bound_is_zero" (Basic Bool) bodyloc
   let isEmptyCheck =
-        Let [isEmpty] $ BinOp Leq bound (intconst 0 bodyloc)
-                       (Basic Bool) bodyloc
+        Let [isEmpty] () $
+        BinOp Leq bound (intconst 0 bodyloc)
+        (Basic Bool) bodyloc
       mkBranch ifNonEmpty =
-        Let pat $ If (Var isEmpty)
-                     (resultBody [] mergeexp bodyloc)
-                     ifNonEmpty
-                     (bodyType body)
-                     bodyloc
+        Let pat () $
+        If (Var isEmpty)
+        (resultBody [] mergeexp bodyloc)
+        ifNonEmpty
+        (bodyType body)
+        bodyloc
   closedBody' <- renameBody closedBody
   return [isEmptyCheck, mkBranch closedBody']
   | otherwise = cannotSimplify
@@ -117,7 +121,7 @@ checkResults pat knownBindings params body accs bodyloc =
 
         checkResult (p, e) _
           | Just e' <- asFreeSubExp e =
-          Just [Let [p] $ SubExp e']
+          Just [Let [p] () $ SubExp e']
         checkResult (p, Var v) (accparam, acc) = do
           e@(BinOp bop x y rt loc) <- HM.lookup v bndMap
           -- One of x,y must be *this* accumulator, and the other must
@@ -130,8 +134,8 @@ checkResults pat knownBindings params body accs bodyloc =
                           _                           -> Nothing
           case bop of
               LogAnd ->
-                Just [Let [v] e,
-                      Let [p] $ BinOp LogAnd this el rt loc]
+                Just [Let [v] () e,
+                      Let [p] () $ BinOp LogAnd this el rt loc]
               _ -> Nothing -- Um... sorry.
 
         checkResult _ _ = Nothing
@@ -156,9 +160,9 @@ determineKnownBindings look lam accs arrs =
 
 boundInBody :: Body -> HS.HashSet Ident
 boundInBody = mconcat . map bound . bodyBindings
-  where bound (Let pat _)            = HS.fromList pat
+  where bound (Let pat _ _) = HS.fromList pat
 
 makeBindMap :: Body -> HM.HashMap Ident Exp
 makeBindMap = HM.fromList . mapMaybe isSingletonBinding . bodyBindings
-  where isSingletonBinding (Let [v] e) = Just (v,e)
-        isSingletonBinding _           = Nothing
+  where isSingletonBinding (Let [v] _ e) = Just (v,e)
+        isSingletonBinding _             = Nothing

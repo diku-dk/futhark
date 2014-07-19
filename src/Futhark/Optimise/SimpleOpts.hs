@@ -9,7 +9,7 @@ module Futhark.Optimise.SimpleOpts
   )
   where
 
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
 
 import Futhark.Optimise.InliningDeadFun

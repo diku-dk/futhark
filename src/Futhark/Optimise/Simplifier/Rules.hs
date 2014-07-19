@@ -29,7 +29,7 @@ import Futhark.Optimise.Simplifier.Rule
 import Futhark.Optimise.Simplifier.Simplify
 import qualified Futhark.Analysis.AlgSimplify as AS
 import qualified Futhark.Analysis.ScalExp as SE
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 import Futhark.Tools
 
 topDownRules :: TopDownRules u
@@ -65,7 +65,7 @@ standardRules :: RuleBook u
 standardRules = (topDownRules, bottomUpRules)
 
 liftIdentityMapping :: TopDownRule u
-liftIdentityMapping _ (Let pat (Map cs fun arrs loc)) =
+liftIdentityMapping _ (Let pat () (Map cs fun arrs loc)) =
   case foldr checkInvariance ([], [], []) $ zip3 pat ses rettype of
     ([], _, _) -> cannotSimplify
     (invariant, mapresult, rettype') ->
@@ -74,7 +74,7 @@ liftIdentityMapping _ (Let pat (Map cs fun arrs loc)) =
           fun' = fun { lambdaBody = lambdaRes `setBodyResult` lambdaBody fun
                      , lambdaReturnType = rettype'
                      }
-      in return $ Let pat' (Map cs fun' arrs loc) : invariant
+      in return $ Let pat' () (Map cs fun' arrs loc) : invariant
   where inputMap = HM.fromList $ zip (map identName $ lambdaParams fun) arrs
         free = freeInBody $ lambdaBody fun
         rettype = lambdaReturnType fun
@@ -86,11 +86,11 @@ liftIdentityMapping _ (Let pat (Map cs fun arrs loc)) =
 
         checkInvariance (outId, Var v, _) (invariant, mapresult, rettype')
           | Just inp <- HM.lookup (identName v) inputMap =
-            (Let [outId] (SubExp inp) : invariant,
+            (Let [outId] () (SubExp inp) : invariant,
              mapresult,
              rettype')
         checkInvariance (outId, e, t) (invariant, mapresult, rettype')
-          | freeOrConst e = (Let [outId] (Replicate outersize e loc) : invariant,
+          | freeOrConst e = (Let [outId] () (Replicate outersize e loc) : invariant,
                              mapresult,
                              rettype')
           | otherwise = (invariant,
@@ -101,7 +101,7 @@ liftIdentityMapping _ _ = cannotSimplify
 -- | Remove all arguments to the map that are simply replicates.
 -- These can be turned into free variables instead.
 removeReplicateMapping :: TopDownRule u
-removeReplicateMapping vtable (Let pat (Map cs fun arrs loc))
+removeReplicateMapping vtable (Let pat () (Map cs fun arrs loc))
   | not $ null parameterBnds =
   let (params, arrs') = unzip paramsAndArrs
       fun' = fun { lambdaParams = params }
@@ -111,23 +111,23 @@ removeReplicateMapping vtable (Let pat (Map cs fun arrs loc))
       Result _ ses resloc = bodyResult $ lambdaBody fun
       mapres = bodyBindings $ lambdaBody fun
       mapbnds = case arrs' of
-                  [] -> mapres ++ [ Let [v] $ Replicate n e resloc
+                  [] -> mapres ++ [ Let [v] () $ Replicate n e resloc
                                     | (v,e) <- zip pat ses ]
-                  _  -> [Let pat $ Map cs fun' arrs' loc]
+                  _  -> [Let pat () $ Map cs fun' arrs' loc]
   in return $ parameterBnds ++ mapbnds
   where (paramsAndArrs, parameterBnds) =
           partitionEithers $ zipWith isReplicate (lambdaParams fun) arrs
 
         isReplicate p (Var v)
           | Just (Replicate _ e _) <- ST.lookupExp (identName v) vtable =
-          Right (Let [fromParam p] $ SubExp e)
+          Right (Let [fromParam p] () $ SubExp e)
         isReplicate p e =
           Left  (p, e)
 
 removeReplicateMapping _ _ = cannotSimplify
 
 removeDeadMapping :: BottomUpRule u
-removeDeadMapping (_, used) (Let pat (Map cs fun arrs loc)) =
+removeDeadMapping (_, used) (Let pat () (Map cs fun arrs loc)) =
   let Result rcs ses resloc = bodyResult $ lambdaBody fun
       isUsed (v, _, _) = (`UT.used` used) $ identName v
       (pat',ses', ts') = unzip3 $ filter isUsed $ zip3 pat ses $ lambdaReturnType fun
@@ -136,21 +136,21 @@ removeDeadMapping (_, used) (Let pat (Map cs fun arrs loc)) =
                  , lambdaReturnType = ts'
                  }
   in if pat /= pat'
-     then return [Let pat' $ Map cs fun' arrs loc]
+     then return [Let pat' () $ Map cs fun' arrs loc]
      else cannotSimplify
 removeDeadMapping _ _ = cannotSimplify
 
 -- After removing a result, we may also have to remove some of the
 -- shape bindings.
 removeUnusedLoopResult :: BottomUpRule u
-removeUnusedLoopResult (_, used) (Let pat (DoLoop respat merge i bound body loc))
+removeUnusedLoopResult (_, used) (Let pat () (DoLoop respat merge i bound body loc))
   | explpat' <- filter (usedAfterwards . fst) explpat,
     explpat' /= explpat =
   let shapes = concatMap (arrayDims . identType) $ map snd explpat'
       implpat' = filter ((`elem` shapes) . Var . snd) implpat
       pat' = map fst $ implpat'++explpat'
       respat' = map snd explpat'
-  in return [Let pat' $ DoLoop respat' merge i bound body loc]
+  in return [Let pat' () $ DoLoop respat' merge i bound body loc]
   where -- | Check whether the variable binding is used afterwards.
         -- But also, check whether one of the shapes is used!  FIXME:
         -- This is in fact too conservative, as we only need to
@@ -175,7 +175,7 @@ removeUnusedLoopResult _ _ = cannotSimplify
 -- perfect, but it should suffice for many cases, and should never
 -- generate wrong code.
 removeRedundantMergeVariables :: BottomUpRule u
-removeRedundantMergeVariables _ (Let pat (DoLoop respat merge i bound body loc))
+removeRedundantMergeVariables _ (Let pat () (DoLoop respat merge i bound body loc))
   | not $ all (usedInResult . fst) merge =
   let Result cs es resloc = bodyResult body
       usedResults = map snd $ filter (usedInResult . fst) $ zip mergepat es
@@ -195,7 +195,7 @@ removeRedundantMergeVariables _ (Let pat (DoLoop respat merge i bound body loc))
       body'' = insertBindings (dummyBindings discard) body'
   in if merge == merge'
      then cannotSimplify
-     else return [Let pat $ DoLoop respat merge' i bound body'' loc]
+     else return [Let pat () $ DoLoop respat merge' i bound body'' loc]
   where (mergepat, _) = unzip merge
         usedInResult = (`elem` respat)
         patDimNames = mconcat $ map freeNamesInExp $
@@ -204,8 +204,8 @@ removeRedundantMergeVariables _ (Let pat (DoLoop respat merge i bound body loc))
 
         dummyBindings = map dummyBinding
         dummyBinding ((v,e), _)
-          | unique (identType v) = Let [v] $ Copy e $ srclocOf v
-          | otherwise            = Let [v] $ SubExp e
+          | unique (identType v) = Let [v] () $ Copy e $ srclocOf v
+          | otherwise            = Let [v] () $ SubExp e
 
         allDependencies = dataDependencies body
         dependencies (Constant _ _) = HS.empty
@@ -217,7 +217,7 @@ removeRedundantMergeVariables _ _ =
 -- We may change the type of the loop if we hoist out a shape
 -- annotation, in which case we also need to tweak the bound pattern.
 hoistLoopInvariantMergeVariables :: TopDownRule u
-hoistLoopInvariantMergeVariables _ (Let pat (DoLoop respat merge idd n loopbody loc)) =
+hoistLoopInvariantMergeVariables _ (Let pat () (DoLoop respat merge idd n loopbody loc)) =
     -- Figure out which of the elements of loopresult are
     -- loop-invariant, and hoist them out.
   case foldr checkInvariance ([], explpat, [], []) $ zip merge ses of
@@ -233,9 +233,9 @@ hoistLoopInvariantMergeVariables _ (Let pat (DoLoop respat merge idd n loopbody 
           pat' = map fst $ implpat'++explpat'
           respat' = map snd explpat'
       in return $ map letPat (invariant ++ implinvariant') ++
-         [Let pat' $ DoLoop respat' merge' idd n loopbody' loc]
+         [Let pat' () $ DoLoop respat' merge' idd n loopbody' loc]
   where Result cs ses resloc = bodyResult loopbody
-        letPat (v1, v2) = Let [v1] $ SubExp v2
+        letPat (v1, v2) = Let [v1] () $ SubExp v2
         taggedpat = zip pat $ loopResult respat $ map fst merge
         (implpat, explpat) = splitAt (length taggedpat - length respat) taggedpat
 
@@ -263,23 +263,23 @@ type VarLookup = VName -> Maybe Exp
 type LetTopDownRule u = VarLookup -> Exp -> Maybe Exp
 
 letRule :: LetTopDownRule u -> TopDownRule u
-letRule rule vtable (Let pat e) =
-  liftMaybe $ (:[]) . Let pat <$> rule look e
+letRule rule vtable (Let pat () e) =
+  liftMaybe $ (:[]) . Let pat () <$> rule look e
   where look = (`ST.lookupExp` vtable)
 
 simplifyClosedFormRedomap :: TopDownRule u
-simplifyClosedFormRedomap vtable (Let pat (Redomap _ _ innerfun acc arr _)) =
+simplifyClosedFormRedomap vtable (Let pat () (Redomap _ _ innerfun acc arr _)) =
   foldClosedForm (`ST.lookupExp` vtable) pat innerfun acc arr
 simplifyClosedFormRedomap _ _ = cannotSimplify
 
 simplifyClosedFormReduce :: TopDownRule u
-simplifyClosedFormReduce vtable (Let pat (Reduce _ fun args _)) =
+simplifyClosedFormReduce vtable (Let pat () (Reduce _ fun args _)) =
   foldClosedForm (`ST.lookupExp` vtable) pat fun acc arr
   where (acc, arr) = unzip args
 simplifyClosedFormReduce _ _ = cannotSimplify
 
 simplifyClosedFormLoop :: TopDownRule u
-simplifyClosedFormLoop _ (Let pat (DoLoop respat merge _ bound body _)) =
+simplifyClosedFormLoop _ (Let pat () (DoLoop respat merge _ bound body _)) =
   loopClosedForm pat respat merge bound body
 simplifyClosedFormLoop _ _ = cannotSimplify
 
@@ -609,11 +609,11 @@ simplifyIndexing look (Index cs idd inds loc) =
 simplifyIndexing _ _ = Nothing
 
 evaluateBranch :: TopDownRule u
-evaluateBranch _ (Let pat (If e1 tb fb t _))
+evaluateBranch _ (Let pat () (If e1 tb fb t _))
   | Just branch <- checkBranch =
   let ses = resultSubExps $ bodyResult branch
       ses' = subExpShapeContext t ses ++ ses
-  in return $ bodyBindings branch ++ [Let [p] $ SubExp se
+  in return $ bodyBindings branch ++ [Let [p] () $ SubExp se
                                      | (p,se) <- zip pat ses']
   where checkBranch
           | isCt1 e1  = Just tb
@@ -627,13 +627,14 @@ evaluateBranch _ _ = cannotSimplify
 simplifyBoolBranch :: TopDownRule u
 -- if c then True else False == c
 simplifyBoolBranch _
-  (Let [v] (If cond
-            (Body [] (Result _ [Constant (BasicVal (LogVal True)) _] _))
-            (Body [] (Result _ [Constant (BasicVal (LogVal False)) _] _))
-            _ _)) =
-  return [Let [v] $ SubExp cond]
+  (Let [v] ()
+   (If cond
+    (Body [] (Result _ [Constant (BasicVal (LogVal True)) _] _))
+    (Body [] (Result _ [Constant (BasicVal (LogVal False)) _] _))
+    _ _)) =
+  return [Let [v] () $ SubExp cond]
 -- When typeOf(x)==bool, if c then x else y == (c && x) || (!c && y)
-simplifyBoolBranch _ (Let [v] (If cond tb fb ts loc))
+simplifyBoolBranch _ (Let [v] () (If cond tb fb ts loc))
   | Body [] (Result [] [tres] _) <- tb,
     Body [] (Result [] [fres] _) <- fb,
     all (==Basic Bool) ts,
@@ -643,11 +644,11 @@ simplifyBoolBranch _ (Let [v] (If cond tb fb ts loc))
                               (eBinOp LogAnd (pure $ Not cond loc)
                                              (pure $ SubExp fres) (Basic Bool) loc)
                               (Basic Bool) loc)
-  return $ bnds ++ [Let [v] e]
+  return $ bnds ++ [Let [v] () e]
 simplifyBoolBranch _ _ = cannotSimplify
 
 hoistBranchInvariant :: TopDownRule u
-hoistBranchInvariant _ (Let pat (If e1 tb fb ts loc)) =
+hoistBranchInvariant _ (Let pat () (If e1 tb fb ts loc)) =
   let Result tcs tses tresloc = bodyResult tb
       Result fcs fses fresloc = bodyResult fb
       (pat', res, invariant) =
@@ -658,19 +659,19 @@ hoistBranchInvariant _ (Let pat (If e1 tb fb ts loc)) =
       fb' = resultBody fcs fses' fresloc `setBodyResult` fb
   in if null invariant
      then cannotSimplify
-     else return $ invariant ++ [Let pat' $ If e1 tb' fb' ts' loc]
+     else return $ invariant ++ [Let pat' () $ If e1 tb' fb' ts' loc]
   where branchInvariant (pat', res, invariant) (v, (tse, fse, t))
-          | tse == fse = (pat', res, Let [v] (SubExp tse) : invariant)
+          | tse == fse = (pat', res, Let [v] () (SubExp tse) : invariant)
           | otherwise  = (v:pat', (tse,fse,t):res, invariant)
 hoistBranchInvariant _ _ = cannotSimplify
 
 simplifyScalExp :: TopDownRule u
-simplifyScalExp vtable (Let pat e)
+simplifyScalExp vtable (Let pat () e)
   | Just orig <- SE.toScalExp (`ST.lookupScalExp` vtable) e,
     Right new@(SE.Val _) <- AS.simplify orig loc ranges,
     orig /= new = do
       (e', bnds) <- SE.fromScalExp loc new
-      return $ bnds ++ [Let pat e']
+      return $ bnds ++ [Let pat () e']
   where loc = srclocOf e
         ranges = HM.filter nonEmptyRange $ HM.map toRep $ ST.bindings vtable
         toRep entry = (ST.bindingDepth entry, lower, upper)
@@ -679,10 +680,10 @@ simplifyScalExp vtable (Let pat e)
 simplifyScalExp _ _ = cannotSimplify
 
 removeUnnecessaryCopy :: BottomUpRule u
-removeUnnecessaryCopy (_,used) (Let [v] (Copy se _))
+removeUnnecessaryCopy (_,used) (Let [v] () (Copy se _))
   | not $ any (`UT.isConsumed` used) $
     identName v : HS.toList (aliases $ subExpType se) =
-    return [Let [v] $ SubExp se]
+    return [Let [v] () $ SubExp se]
 removeUnnecessaryCopy _ _ = cannotSimplify
 
 -- | Remove the return values of a branch, that are not actually used
@@ -690,7 +691,7 @@ removeUnnecessaryCopy _ _ = cannotSimplify
 -- if *none* of the return values are used, but this rule is more
 -- precise.
 removeDeadBranchResult :: BottomUpRule u
-removeDeadBranchResult (_, used) (Let pat (If e1 tb fb ts loc))
+removeDeadBranchResult (_, used) (Let pat () (If e1 tb fb ts loc))
   | -- Figure out which of the names in 'pat' are used...
     patused <- map ((`UT.used` used) . identName) pat,
     -- If they are not all used, then this rule applies.
@@ -705,7 +706,7 @@ removeDeadBranchResult (_, used) (Let pat (If e1 tb fb ts loc))
       fb' = resultBody fcs (pick fses) fresloc `setBodyResult` fb
       ts' = pick ts
       pat' = pick pat
-  in return [Let pat' $ If e1 tb' fb' ts' loc]
+  in return [Let pat' () $ If e1 tb' fb' ts' loc]
 removeDeadBranchResult _ _ = cannotSimplify
 
 -- Some helper functions

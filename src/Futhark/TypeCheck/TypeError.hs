@@ -1,6 +1,7 @@
-module Futhark.TypeError
-  (
-   GenTypeError(..)
+module Futhark.TypeCheck.TypeError
+  ( GenTypeError(..)
+  , Several(..)
+  , justOne
   )
 
 where
@@ -164,3 +165,17 @@ ppTuple ts = intercalate ", " $ map ppr' ts
 
 ppr' :: Pretty a => a -> String
 ppr' = pretty 80 . ppr
+
+-- | A list.  Its 'Pretty' instance produces a comma-separated
+-- sequence enclosed in braces if the list has anything but a single
+-- element.
+newtype Several a = Several [a]
+  deriving (Eq, Ord, Show)
+
+instance Pretty a => Pretty (Several a) where
+  ppr (Several [t]) = ppr t
+  ppr (Several ts)  = braces $ commasep $ map ppr ts
+
+-- | Turn a single value into a singleton list.
+justOne :: a -> Several a
+justOne x = Several [x]

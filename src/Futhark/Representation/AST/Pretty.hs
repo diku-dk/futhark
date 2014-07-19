@@ -1,10 +1,10 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 {-# LANGUAGE FlexibleInstances, FlexibleContexts #-}
--- | Futhark prettyprinter.  This module defines 'Pretty' instances for the
--- AST defined in "Futhark.InternalRep.Syntax", but also a number of
--- convenience functions if you don't want to use the interface from
--- 'Pretty'.
-module Futhark.InternalRep.Pretty
+-- | Futhark prettyprinter.  This module defines 'Pretty' instances
+-- for the AST defined in "Futhark.Representation.AST.Syntax",
+-- but also a number of convenience functions if you don't want to use
+-- the interface from 'Pretty'.
+module Futhark.Representation.AST.Pretty
   ( ppType
   , ppValue
   , ppValues
@@ -24,8 +24,8 @@ import qualified Data.HashSet as HS
 
 import Text.PrettyPrint.Mainland
 
-import Futhark.InternalRep.Syntax
-import Futhark.InternalRep.Attributes
+import Futhark.Representation.AST.Syntax
+import Futhark.Representation.AST.Attributes
 
 -- | The document @'apply' ds@ separates @ds@ with commas and encloses them with
 -- parentheses.
@@ -35,7 +35,7 @@ apply = encloseSep lparen rparen comma . map align
 commastack :: [Doc] -> Doc
 commastack = align . stack . punctuate comma
 
-aliasComment :: [Ident] -> Doc -> Doc
+aliasComment :: [Ident lore] -> Doc -> Doc
 aliasComment pat d = case concatMap aliasComment' pat of
                        []   -> d
                        l:ls -> foldl (</>) l ls </> d
@@ -60,12 +60,12 @@ instance Pretty Value where
     | Array {} <- t = brackets $ commastack $ map ppr $ elems a
     | otherwise     = brackets $ commasep $ map ppr $ elems a
 
-instance Pretty (TypeBase als Shape) where
+instance Pretty (TypeBase als (Shape lore)) where
   ppr (Basic et) = ppr et
   ppr (Array et (Shape ds) u _) = ppr u <> foldr f (ppr et) ds
     where f e s = brackets $ s <> comma <> ppr e
 
-instance Pretty (TypeBase als ExtShape) where
+instance Pretty (TypeBase als (ExtShape lore)) where
   ppr (Basic et) = ppr et
   ppr (Array et (ExtShape ds) u _) = ppr u <> foldr f (ppr et) ds
     where f (Free e) s = brackets $ s <> comma <> ppr e
@@ -82,7 +82,7 @@ instance Pretty (TypeBase als Rank) where
 instance Pretty (IdentBase als shape) where
   ppr = text . textual . identName
 
-hasArrayLit :: SubExp -> Bool
+hasArrayLit :: SubExp lore -> Bool
 hasArrayLit (Constant val _) = hasArrayVal val
 hasArrayLit _ = False
 
@@ -90,19 +90,19 @@ hasArrayVal :: Value -> Bool
 hasArrayVal (ArrayVal {}) = True
 hasArrayVal _ = False
 
-instance Pretty SubExp where
+instance Pretty (SubExp lore) where
   ppr (Var v)        = ppr v
   ppr (Constant v _) = ppr v
 
-instance Pretty Body where
+instance Pretty (Body lore) where
   ppr (Body (bnd:bnds) res) =
     ppr bnd <+> text "in" </> ppr (Body bnds res)
   ppr (Body [] (Result cs es _))
     | any hasArrayLit es = ppCertificates cs <> braces (commastack $ map ppr es)
     | otherwise          = ppCertificates cs <> braces (commasep   $ map ppr es)
 
-instance Pretty Binding where
-  ppr (Let pat e) =
+instance Pretty (Binding lore) where
+  ppr (Let pat _ e) =
     aliasComment pat $ align $
     text "let" <+> align (ppPattern pat) <+>
     (if linebreak
@@ -120,7 +120,7 @@ instance Pretty Binding where
                         ArrayLit {} -> False
                         _ -> False
 
-instance Pretty Exp where
+instance Pretty (Exp lore) where
   ppr (SubExp se) = ppr se
   ppr (ArrayLit [] rt _) =
     text "empty" <> parens (ppr rt)
@@ -181,29 +181,29 @@ instance Pretty Exp where
   ppr (Filter cs lam as _) =
     ppCertificates' cs <> ppSOAC "filterT" [lam] Nothing as
 
-instance Pretty Lambda where
+instance Pretty (Lambda lore) where
   ppr (Lambda params body rettype _) =
     text "fn" <+> ppTuple' rettype <+>
     apply (map ppParam params) <+>
     text "=>" </> indent 2 (ppr body)
 
-instance Pretty FunDec where
+instance Pretty (FunDec lore) where
   ppr (name, rettype, args, body, _) =
     text "fun" <+> ppRetType rettype <+>
     text (nameToString name) <//>
     apply (map ppParam args) <+>
     equals </> indent 2 (ppr body)
 
-instance Pretty Prog where
+instance Pretty (Prog lore) where
   ppr = stack . punctuate line . map ppr . progFunctions
 
-ppParam :: Param -> Doc
+ppParam :: Param lore -> Doc
 ppParam param = ppr (identType param) <+> ppr param
 
-ppBinOp :: BinOp -> SubExp -> SubExp -> Doc
+ppBinOp :: BinOp -> SubExp lore -> SubExp lore -> Doc
 ppBinOp bop x y = ppr x <+/> text (opStr bop) <+> ppr y
 
-ppSOAC :: Pretty fn => String -> [fn] -> Maybe [SubExp] -> [SubExp] -> Doc
+ppSOAC :: Pretty fn => String -> [fn] -> Maybe [SubExp lore] -> [SubExp lore] -> Doc
 ppSOAC name funs es as =
   text name <> parens (ppList funs </>
                        commasep (es' ++ map ppr as))
@@ -214,23 +214,23 @@ ppList as = case map ppr as of
               []     -> empty
               a':as' -> foldl (</>) (a' <> comma) $ map (<> comma) as'
 
-ppPattern :: [Ident] -> Doc
+ppPattern :: [Ident lore] -> Doc
 ppPattern = braces . commasep . map ppBind
 
-ppBind :: Ident -> Doc
+ppBind :: Ident lore -> Doc
 ppBind ident = ppr (identType ident) <+> ppr ident
 
-ppRetType :: RetType -> Doc
+ppRetType :: RetType lore -> Doc
 ppRetType = braces . commasep . map ppr
 
 ppTuple' :: Pretty a => [a] -> Doc
 ppTuple' ets = braces $ commasep $ map ppr ets
 
-ppCertificates :: Certificates -> Doc
+ppCertificates :: Certificates lore -> Doc
 ppCertificates [] = empty
 ppCertificates cs = text "<" <> commasep (map ppr cs) <> text ">"
 
-ppCertificates' :: Certificates -> Doc
+ppCertificates' :: Certificates lore -> Doc
 ppCertificates' [] = empty
 ppCertificates' cs = ppCertificates cs <> line
 
@@ -250,27 +250,27 @@ ppType :: Pretty (TypeBase als shape) => TypeBase als shape -> String
 ppType = render80
 
 -- | Prettyprint a body, wrapped to 80 characters.
-ppBody :: Body -> String
+ppBody :: Body lore -> String
 ppBody = render80
 
 -- | Prettyprint a binding, wrapped to 80 characters.
-ppBinding :: Binding -> String
+ppBinding :: Binding lore -> String
 ppBinding = render80
 
 -- | Prettyprint an expression, wrapped to 80 characters.
-ppExp :: Exp -> String
+ppExp :: Exp lore -> String
 ppExp = render80
 
 -- | Prettyprint a subexpression, wrapped to 80 characters.
-ppSubExp :: SubExp -> String
+ppSubExp :: SubExp lore -> String
 ppSubExp = render80
 
 -- | Prettyprint a lambda, wrapped to 80 characters.
-ppLambda :: Lambda -> String
+ppLambda :: Lambda lore -> String
 ppLambda = render80
 
 -- | Prettyprint a function definition, wrapped to 80 characters.
-ppFun :: FunDec -> String
+ppFun :: FunDec lore -> String
 ppFun = render80
 
 -- | Prettyprint a list enclosed in curly braces.
@@ -278,5 +278,5 @@ ppTuple :: Pretty a => [a] -> String
 ppTuple = pretty 80 . ppTuple'
 
 -- | Prettyprint an entire Futhark program, wrapped to 80 characters.
-prettyPrint :: Prog -> String
+prettyPrint :: Prog lore -> String
 prettyPrint = render80

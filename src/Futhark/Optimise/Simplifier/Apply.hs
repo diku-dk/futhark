@@ -8,7 +8,7 @@ module Futhark.Optimise.Simplifier.Apply
   )
   where
 
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 import qualified Futhark.Interpreter as Interp
 import qualified Futhark.Analysis.SymbolTable as ST
 

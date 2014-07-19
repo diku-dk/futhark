@@ -27,7 +27,7 @@ import qualified Data.HashSet as HS
 import qualified Data.Set as S
 
 import Futhark.Substitute
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 
 newtype UsageTable = UsageTable (HM.HashMap VName Usages)
                    deriving (Eq, Show)

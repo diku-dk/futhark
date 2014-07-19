@@ -29,7 +29,7 @@ import Data.Loc
 import Data.Maybe
 import qualified Data.HashSet as HS
 
-import Futhark.InternalRep hiding (Map, Reduce, Scan, Filter, Redomap, returnType)
+import Futhark.Representation.Basic hiding (Map, Reduce, Scan, Filter, Redomap, returnType)
 import Futhark.MonadFreshNames
 import Futhark.Binder
 import Futhark.Analysis.HORepresentation.SOAC (SOAC)
@@ -78,7 +78,7 @@ bodyToLambda (NewNest (Nesting paramIds inps bndIds postBody retTypes) op) = do
   return Lambda { lambdaSrcLoc = loc
                 , lambdaParams = map toParam paramIds
                 , lambdaReturnType = retTypes
-                , lambdaBody = f $ Let bndIds e `insertBinding` postBody
+                , lambdaBody = f $ Let bndIds () e `insertBinding` postBody
                 }
   where loc = srclocOf op
 
@@ -197,7 +197,7 @@ fromSOAC (SOAC.Redomap cs ol l es as loc) =
 
 nested :: Lambda -> Maybe (Combinator, Nesting)
 nested l
-  | Body (Let ids e:bnds) res <- lambdaBody l, -- Is a let-binding...
+  | Body (Let ids () e:bnds) res <- lambdaBody l, -- Is a let-binding...
     Right soac <- fromSOAC <$> SOAC.fromExp e, -- ...the bindee is a SOAC...
     Just postBody <-
       checkPostBody (map fromParam $ lambdaParams l) $ Body bnds res =

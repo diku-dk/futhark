@@ -22,7 +22,7 @@ module Futhark.CodeGen.Backends.Bohrium (compileProg) where
 
 import Control.Monad.Writer
 
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 
 import qualified Futhark.CodeGen.ImpCode as Imp
 import qualified Futhark.CodeGen.ImpGen as ImpGen

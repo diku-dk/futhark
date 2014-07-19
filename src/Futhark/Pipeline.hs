@@ -21,8 +21,8 @@ import Control.Monad.Writer.Strict (Writer, tell)
 import Control.Monad.Error
 import Data.Maybe (isJust)
 
-import Futhark.InternalRep
-import Futhark.InternalRep.TypeChecker
+import Futhark.Representation.Basic
+import Futhark.TypeCheck
 
 runPasses :: Futharkonfig -> Prog -> FutharkM Prog
 runPasses config = foldl comb return $ futharkpipeline config

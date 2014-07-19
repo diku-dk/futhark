@@ -15,7 +15,7 @@ import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import qualified Data.Map.Lazy as M
 
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 import Futhark.Substitute
 import Futhark.Optimise.Simplifier.TaggedBinding
 import qualified Futhark.Analysis.UsageTable as UT

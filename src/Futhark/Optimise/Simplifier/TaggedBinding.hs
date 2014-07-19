@@ -20,7 +20,7 @@ import Data.Monoid
 import Data.Loc
 import qualified Data.HashSet as HS
 
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
@@ -34,19 +34,19 @@ data TaggedBinding a = TaggedLet ([Ident],[(VName,ST.Entry a)]) (Exp, UT.UsageTa
                      deriving (Show, Eq)
 
 untagBinding :: TaggedBinding u -> Binding
-untagBinding (TaggedLet (pat,_) (e,_)) = Let pat e
+untagBinding (TaggedLet (pat,_) (e,_)) = Let pat () e
 
 tagBinding :: ST.SymbolTable u -> Binding -> TaggedBinding u
-tagBinding vtable (Let pat e) =
-  TaggedLet (pat, zip names entries) (e, usageInBinding $ Let pat e)
-  where entries = ST.bindingEntries (Let pat e) vtable
+tagBinding vtable (Let pat () e) =
+  TaggedLet (pat, zip names entries) (e, usageInBinding $ Let pat () e)
+  where entries = ST.bindingEntries (Let pat () e) vtable
         names = map identName pat
 
 bindingEntries :: TaggedBinding u -> [(VName, ST.Entry u)]
 bindingEntries (TaggedLet (_,ds) _) = ds
 
 asTail :: TaggedBinding a -> Body
-asTail (TaggedLet (pat,_) (e,_)) = Body [Let pat e] $ Result [] [] loc
+asTail (TaggedLet (pat,_) (e,_)) = Body [Let pat () e] $ Result [] [] loc
   where loc = srclocOf pat
 
 usage :: TaggedBinding a -> UT.UsageTable
@@ -64,7 +64,7 @@ freeInType :: Type -> Names
 freeInType = mconcat . map (freeNamesInExp . SubExp) . arrayDims
 
 usageInBinding :: Binding -> UT.UsageTable
-usageInBinding (Let pat e) =
+usageInBinding (Let pat () e) =
   usageInPat pat <> usageInExp e <> UT.usages (freeNamesInExp e)
   where usageInPat =
           UT.usages . HS.fromList . mapMaybe subExpUsage .

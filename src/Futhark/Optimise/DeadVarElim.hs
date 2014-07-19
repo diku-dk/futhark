@@ -12,7 +12,7 @@ import Control.Monad.Writer
 
 import qualified Data.Set as S
 
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 
 -----------------------------------------------------------------
 -----------------------------------------------------------------
@@ -81,7 +81,7 @@ deadCodeElimSubExp (Constant v loc) = return $ Constant v loc
 
 deadCodeElimBodyM :: Body -> DCElimM Body
 
-deadCodeElimBodyM (Body (Let pat e:bnds) res) = do
+deadCodeElimBodyM (Body (Let pat () e:bnds) res) = do
   let idds = map identName pat
   ((pat',Body bnds' res'), noref) <-
     collectRes idds $ do
@@ -92,7 +92,7 @@ deadCodeElimBodyM (Body (Let pat e:bnds) res) = do
   if noref
   then changed $ return $ Body bnds' res'
   else do e' <- deadCodeElimExp e
-          return $ Body (Let pat' e':bnds') res'
+          return $ Body (Let pat' () e':bnds') res'
 
 deadCodeElimBodyM (Body [] (Result cs es loc)) =
   resultBody <$> mapM deadCodeElimIdent cs <*>
@@ -108,7 +108,7 @@ deadCodeElimExp (DoLoop respat merge i bound body loc) = do
   return $ DoLoop respat (zip mergepat' mergeexp') i bound' body' loc
 deadCodeElimExp e = mapExpM mapper e
   where mapper = Mapper {
-                   mapOnExp = deadCodeElimExp
+                   mapOnBinding = return -- Handled in case for Body.
                  , mapOnBody = deadCodeElimBodyM
                  , mapOnSubExp = deadCodeElimSubExp
                  , mapOnLambda = deadCodeElimLambda

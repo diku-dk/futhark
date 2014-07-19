@@ -17,7 +17,7 @@ import Data.Loc
 
 import Text.PrettyPrint.Mainland
 
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
 import Futhark.Substitute
 import Futhark.Tools

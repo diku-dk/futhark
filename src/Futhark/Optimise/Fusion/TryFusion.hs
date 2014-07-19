@@ -11,7 +11,7 @@ module Futhark.Optimise.Fusion.TryFusion
 import Control.Applicative
 import Control.Monad.State
 
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 import Futhark.NeedNames
 import Futhark.MonadFreshNames
 

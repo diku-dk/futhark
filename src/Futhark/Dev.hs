@@ -35,11 +35,11 @@ import System.IO.Unsafe
 import Language.Futhark.Parser
 
 import Futhark.MonadFreshNames
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 import Futhark.Internalise
 -- import Futhark.Futhark
-import qualified Futhark.ExternalRep.Renamer as E
-import qualified Futhark.ExternalRep.TypeChecker as E
+import qualified Futhark.Representation.External.Renamer as E
+import qualified Futhark.Representation.External.TypeChecker as E
 
 -- | Return a tagged name based on a string.
 name :: String -> VName

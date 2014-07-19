@@ -7,7 +7,7 @@
 -- The intent is that you call 'tagProg' once at some early stage,
 -- then use 'renameProg' from then on.  Functions are also provided
 -- for removing the tags again from expressions, patterns and typs.
-module Futhark.ExternalRep.Renamer
+module Futhark.Representation.External.Renamer
   (
   -- * Renaming programs
    renameProg
@@ -38,7 +38,7 @@ import Control.Monad.Reader
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 
-import Futhark.ExternalRep
+import Futhark.Representation.External
 import Futhark.FreshNames
 
 -- | Rename variables such that each is unique.  The semantics of the

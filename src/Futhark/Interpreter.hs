@@ -28,7 +28,7 @@ import Data.List
 import Data.Loc
 import qualified Data.HashMap.Strict as HM
 
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 
 -- | An error happened during execution, and this is why.
 data InterpreterError = MissingEntryPoint Name
@@ -227,7 +227,7 @@ evalBody :: Body -> FutharkM [Value]
 evalBody (Body [] (Result _ es _)) =
   mapM evalSubExp es
 
-evalBody (Body (Let pat e:bnds) res) = do
+evalBody (Body (Let pat _ e:bnds) res) = do
   v <- evalExp e
   binding (zip pat v) $ evalBody $ Body bnds res
 

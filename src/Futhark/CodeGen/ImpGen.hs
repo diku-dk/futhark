@@ -23,7 +23,7 @@ import Data.List
 import Data.Loc
 
 import qualified Futhark.CodeGen.ImpCode as Imp
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
 
 -- | A substitute expression compiler, tried before the main
@@ -118,7 +118,7 @@ compileExtBody rettype targets (Body bnds (Result _ ses _)) = do
     subExpShapeContext rettype ses ++ ses
 
 compileBinding :: Binding -> ImpM op ()
-compileBinding (Let pat e) =
+compileBinding (Let pat _ e) =
   compileExp pat e
 
 compileExp :: [Ident] -> Exp -> ImpM op ()

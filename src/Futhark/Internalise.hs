@@ -38,9 +38,9 @@ import Data.List
 import Data.Loc
 import Data.Traversable (mapM)
 
-import Futhark.ExternalRep as E
-import Futhark.InternalRep as I
-import Futhark.InternalRep.Renamer as I
+import Futhark.Representation.External as E
+import Futhark.Representation.Basic as I
+import Futhark.Renamer as I
 import Futhark.MonadFreshNames
 import Futhark.Tools
 
@@ -202,7 +202,7 @@ internaliseExp desc (E.DoLoop mergepat mergeexp i bound loopbody letbody loc) = 
       merge = zip mergepat' mergeexp'
       loop = I.DoLoop respat merge i' bound' loopbody' loc
   bindingPattern mergepat Nothing (I.typeOf loop) $ \mergepat'' -> do
-    addBinding $ I.Let mergepat'' loop
+    addBinding $ I.Let mergepat'' () loop
     internaliseExp desc letbody
 
 internaliseExp desc (E.LetWith cs name src idxcs idxs ve body loc) = do

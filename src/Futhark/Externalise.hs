@@ -16,8 +16,8 @@ module Futhark.Externalise
 import qualified Data.Array as A
 import Data.Loc
 
-import Futhark.ExternalRep as E
-import Futhark.InternalRep as I
+import Futhark.Representation.External as E
+import Futhark.Representation.Basic as I
 
 -- | Convert a program in internal representation to the corresponding
 -- program in the external representation.  The number and names of
@@ -37,7 +37,7 @@ externaliseFunction (fname, ret, params, body, loc) =
 externaliseBody :: I.Body -> E.Exp
 externaliseBody (I.Body [] (I.Result _ es loc)) =
   externaliseSubExps es loc
-externaliseBody (I.Body (I.Let pat e:bnds) res) =
+externaliseBody (I.Body (I.Let pat () e:bnds) res) =
   E.LetPat (externalisePat pat loc) (externaliseExp e)
            (externaliseBody $ I.Body bnds res) loc
   where loc = srclocOf e

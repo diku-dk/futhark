@@ -13,7 +13,7 @@ import Control.Monad.Reader
 import Data.List
 import qualified Data.HashMap.Lazy as HM
 
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 import Futhark.Optimise.Errors
 
 type FunctionTable = HM.HashMap Name FunDec
@@ -86,7 +86,7 @@ buildCGbody :: ([Name],[Name]) -> Body -> ([Name],[Name])
 buildCGbody = foldBody build
   where build = identityFolder {
                   foldOnBody = \x -> return . buildCGbody x
-                , foldOnExp  = \x -> return . buildCGexp  x
+                , foldOnBinding  = \x -> return . buildCGexp x . bindingExp
                 }
 
 buildCGexp :: ([Name],[Name]) -> Exp -> ([Name],[Name])

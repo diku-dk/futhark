@@ -21,7 +21,7 @@ import qualified Data.HashSet as HS
 
 import Futhark.Analysis.HORepresentation.SOAC (SOAC)
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 
 newtype FlowGraph = FlowGraph (HM.HashMap Name ExpFlowGraph)
 
@@ -122,12 +122,12 @@ soacSeen name produced soac =
         descTransform (SOAC.Replicate {})    = "replicate"
 
 flowForBody :: Body -> FlowM ()
-flowForBody (Body (Let pat e:bnds) res)
+flowForBody (Body (Let pat () e:bnds) res)
   | Right e' <- SOAC.fromExp e,
     names@(name:_) <- map identName pat = do
   soacSeen name names e'
   flowForBody $ Body bnds res
-flowForBody (Body (Let pat e:bnds) res) = do
+flowForBody (Body (Let pat () e:bnds) res) = do
   flowForExp e
   tell $ HM.map expand $ execWriter $ flowForBody $ Body bnds res
   where names = HS.fromList $ map identName pat
@@ -167,9 +167,9 @@ flowForExp (DoLoop _ merge _ boundexp loopbody _)
          }
 flowForExp e = walkExpM flow e
 
-flow :: Walker FlowM
+flow :: Walker Basic FlowM
 flow = identityWalker {
-         walkOnExp = flowForExp
+         walkOnBinding = flowForExp . bindingExp
        , walkOnBody = flowForBody
        , walkOnLambda = flowForBody . lambdaBody
        }

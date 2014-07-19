@@ -16,6 +16,7 @@ module Futhark.MonadFreshNames
   , newIdent
   , newIdent'
   , newIdents
+  , newNameSourceForProg
   , module Futhark.FreshNames
   ) where
 
@@ -25,7 +26,8 @@ import qualified Control.Monad.State.Strict
 
 import Data.Loc
 
-import Futhark.InternalRep
+import Futhark.Representation.AST.Syntax
+import Futhark.Representation.AST.Attributes (progNames)
 import qualified Futhark.FreshNames as FreshNames
 import Futhark.FreshNames hiding (newName, newID, newVName)
 
@@ -101,3 +103,8 @@ newIdents :: MonadFreshNames m =>
              String -> [TypeBase als shape] -> SrcLoc -> m [IdentBase als shape]
 newIdents s ts loc =
   mapM (\t -> newIdent s t loc) ts
+
+-- | Create a new 'NameSource' that will never produce any of the
+-- names used as variables in the given program.
+newNameSourceForProg :: Prog lore -> VNameSource
+newNameSourceForProg = newNameSource . progNames

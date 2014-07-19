@@ -34,7 +34,7 @@ import qualified Data.Set as S
 import qualified Data.HashMap.Lazy as HM
 
 import Data.Loc
-import Futhark.InternalRep hiding (insertBinding)
+import Futhark.Representation.Basic hiding (insertBinding)
 import Futhark.Analysis.ScalExp
 import Futhark.Substitute
 import qualified Futhark.Analysis.AlgSimplify as AS
@@ -132,7 +132,7 @@ annotateEntry entry vtable =
 
 bindingEntries :: Binding -> SymbolTable a -> [Entry a]
 -- First, handle single-name bindings.  These are the most common.
-bindingEntries (Let [_] e) vtable = [annotateEntry entry vtable]
+bindingEntries (Let [_] () e) vtable = [annotateEntry entry vtable]
   where entry = (defEntry vtable)
                 { asExp = Just e
                 , asScalExp = toScalExp (`lookupScalExp` vtable) e
@@ -157,18 +157,18 @@ bindingEntries (Let [_] e) vtable = [annotateEntry entry vtable]
         zero = Val $ IntVal 0
         one = Val $ IntVal 1
 -- Then, handle others.  For now, this is only filter.
-bindingEntries (Let _ (Filter _ _ inps _)) vtable =
+bindingEntries (Let _ _ (Filter _ _ inps _)) vtable =
   map (`annotateEntry` vtable) $ defEntry vtable : map makeBnd inps
   where makeBnd (Var v) =
           (defEntry vtable) { valueRange = lookupRange (identName v) vtable }
         makeBnd _ =
           defEntry vtable
-bindingEntries (Let names _) vtable =
+bindingEntries (Let names _ _) vtable =
   map ((`annotateEntry` vtable) . const (defEntry vtable)) names
 
 insertBinding :: Binding -> SymbolTable a -> SymbolTable a
 -- First, handle single-name bindings.  These are the most common.
-insertBinding bnd@(Let pat _) vtable =
+insertBinding bnd@(Let pat () _) vtable =
   insertEntries (zip names $ bindingEntries bnd vtable) vtable
   where names = map identName pat
 

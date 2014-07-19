@@ -5,7 +5,7 @@
 -- The program does not need to have any particular properties for the
 -- type checker to function; in particular it does not need unique
 -- names.
-module Futhark.ExternalRep.TypeChecker
+module Futhark.Representation.External.TypeChecker
   ( checkProg
   , checkProgNoUniqueness
   , checkClosedExp
@@ -26,12 +26,13 @@ import Data.Maybe
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 
-import Futhark.ExternalRep
-import Futhark.ExternalRep.Renamer (tagProg', tagExp, tagExp', tagType',
-                                untagProg, untagExp, untagPattern, untagType)
+import Futhark.Representation.External
+import Futhark.Representation.External.Renamer
+  (tagProg', tagExp, tagExp', tagType',
+   untagProg, untagExp, untagPattern, untagType)
 import Futhark.FreshNames hiding (newID, newName)
 import qualified Futhark.FreshNames
-import Futhark.TypeError
+import Futhark.TypeCheck.TypeError
 
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.

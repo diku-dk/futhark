@@ -12,7 +12,7 @@ import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 
 -- | A type that is an instance of this class supports substitution of
 -- any names contained within.
@@ -42,15 +42,19 @@ instance Substitute SubExp where
 instance Substitute Exp where
   substituteNames substs = mapExp $ replace substs
 
+instance Substitute Binding where
+  substituteNames substs (Let pat annot e) =
+    Let (substituteNames substs pat) annot (substituteNames substs e)
+
 instance Substitute Body where
   substituteNames substs = mapBody $ replace substs
 
-replace :: HM.HashMap VName VName -> Mapper Identity
+replace :: HM.HashMap VName VName -> Mapper Basic Basic Identity
 replace substs = Mapper {
                    mapOnIdent = return . substituteNames substs
                  , mapOnSubExp = return . substituteNames substs
                  , mapOnBody = return . substituteNames substs
-                 , mapOnExp = return . substituteNames substs
+                 , mapOnBinding = return . substituteNames substs
                  , mapOnType = return . substituteNames substs
                  , mapOnValue = return
                  , mapOnLambda = return . substituteNames substs

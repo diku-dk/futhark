@@ -19,8 +19,8 @@ import qualified Data.HashMap.Lazy as HM
 import qualified Data.DList as DL
 import Data.List
 
-import qualified Futhark.ExternalRep as E
-import Futhark.InternalRep
+import qualified Futhark.Representation.External as E
+import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
 import Futhark.Tools
 

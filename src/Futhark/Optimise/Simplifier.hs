@@ -13,7 +13,7 @@ module Futhark.Optimise.Simplifier
   )
   where
 
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplifier.Rule
 import Futhark.Optimise.Simplifier.Rules

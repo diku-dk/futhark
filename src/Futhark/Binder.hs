@@ -3,7 +3,6 @@
 -- normalised programs.
 module Futhark.Binder
   ( MonadBinder(..)
-  , Binding(..)
   , bodyBindings
   , insertBindingsM
   , letBind
@@ -28,7 +27,7 @@ import Control.Applicative
 import Control.Monad.Writer
 import Control.Monad.State
 
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
 
 class (MonadFreshNames m, Applicative m, Monad m) => MonadBinder m where
@@ -37,16 +36,16 @@ class (MonadFreshNames m, Applicative m, Monad m) => MonadBinder m where
 
 letBind :: MonadBinder m => [Ident] -> Exp -> m ()
 letBind pat e =
-  addBinding $ Let pat e
+  addBinding $ Let pat mempty e
 
 letWithBind :: MonadBinder m =>
                Certificates -> Ident -> Ident -> [SubExp] -> SubExp -> m ()
 letWithBind cs dest src idxs ve =
-  addBinding $ Let [dest] $ Update cs src idxs ve $ srclocOf src
+  addBinding $ Let [dest] mempty $ Update cs src idxs ve $ srclocOf src
 
 loopBind :: MonadBinder m => [(Ident, SubExp)] -> Ident -> SubExp -> Body -> m ()
 loopBind merge i bound loopbody =
-  addBinding $ Let mergepat $
+  addBinding $ Let mergepat mempty $
                DoLoop mergepat merge i bound loopbody $ srclocOf i
   where mergepat = map fst merge
 

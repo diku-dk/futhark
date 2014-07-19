@@ -13,10 +13,10 @@ import Control.Monad.Writer
 import qualified Data.HashMap.Lazy as HM
 import Data.Maybe
 
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 import Futhark.Tools
 import Futhark.MonadFreshNames
-import Futhark.InternalRep.Renamer
+import Futhark.Renamer
 import Futhark.Substitute
 import Futhark.Optimise.Simplifier
 import Futhark.Optimise.DeadVarElim
@@ -92,8 +92,8 @@ substituteExtResultShapes rettype (Body bnds res) = do
         isSubst (Var v1, Var v2) = Just (identName v1, identName v2)
         isSubst _                = Nothing
 
-        substInBnd (Let pat e) =
-          Let <$> mapM substInBnd' pat <*> pure (substituteNames subst e)
+        substInBnd (Let pat () e) =
+          Let <$> mapM substInBnd' pat <*> pure () <*> pure (substituteNames subst e)
         substInBnd' v
           | identName v `HM.member` subst = newIdent' (<>"unused") v
           | otherwise                     = return v
@@ -110,7 +110,7 @@ simplifyShapeFun shapef = return . deadCodeElimFun =<< simplifyFun =<<
 cheapFun :: FunDec -> Bool
 cheapFun  = cheapBody . funDecBody
   where cheapBody (Body bnds _) = all cheapBinding bnds
-        cheapBinding (Let _ e) = cheap e
+        cheapBinding (Let _ _ e) = cheap e
         cheap (DoLoop {}) = False
         cheap (Map {}) = False
         cheap (Apply {}) = False
@@ -135,7 +135,7 @@ substCalls subst (origFname,origRettype,params,fbody,origloc) = do
           body <- treatBody $ lambdaBody lam
           return $ lam { lambdaBody = body }
 
-        treatBinding (Let pat (Apply fname args _ loc))
+        treatBinding (Let pat () (Apply fname args _ loc))
           | Just (shapefun,shapetype,valfun,valtype) <- lookup fname subst =
             liftM snd . runBinder'' $ do
               let (vs,vals) = splitAt (length shapetype) pat
@@ -147,9 +147,9 @@ substCalls subst (origFname,origRettype,params,fbody,origloc) = do
               letBind vs $ Apply shapefun args shapetype' loc
               letBind vals $ Apply valfun ([(Var v,Observe) | v <- vs]++args) valtype' loc
 
-        treatBinding (Let pat e) = do
+        treatBinding (Let pat () e) = do
           e' <- mapExpM mapper e
-          return [Let pat e']
+          return [Let pat () e']
           where mapper = identityMapper { mapOnBody = treatBody
                                         , mapOnLambda = treatLambda
                                         }

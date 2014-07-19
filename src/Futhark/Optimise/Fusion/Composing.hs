@@ -26,7 +26,7 @@ import Data.Maybe
 
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 
-import Futhark.InternalRep
+import Futhark.Representation.Basic
 
 -- | Something that can be used as a SOAC input.  As far as this
 -- module is concerned, this means supporting just a single operation.
@@ -74,7 +74,7 @@ fuseMaps lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
   where lam2' =
           lam2 { lambdaParams = lam2redparams ++ HM.keys inputmap
                , lambdaBody =
-                 let bnds res = [ Let [p] $ SubExp e
+                 let bnds res = [ Let [p] () $ SubExp e
                                 | (p,e) <- zip pat $ resultSubExps res]
                      bindLambda res =
                        bnds res `insertBindings` makeCopiesInner (lambdaBody lam2)
@@ -142,7 +142,7 @@ fuseFilterInto lam1 inp1 out1 lam2 inp2 vnames falsebranch = (lam2', HM.elems in
         residents = [ Ident vname t loc | (vname, t) <- zip vnames restype ]
         branch = flip mapResult (lambdaBody lam1) $ \res ->
                  let [e] = resultSubExps res in -- XXX
-                 Body [Let residents
+                 Body [Let residents ()
                        (If e
                         (makeCopiesInner $ lambdaBody lam2)
                         falsebranch
@@ -151,7 +151,7 @@ fuseFilterInto lam1 inp1 out1 lam2 inp2 vnames falsebranch = (lam2', HM.elems in
                          (bodyType falsebranch))
                         loc)] $
                  Result (resultCertificates res) (map Var residents) loc
-        lam1tuple = [ Let [v] $ SubExp $ Var $ fromParam p
+        lam1tuple = [ Let [v] () $ SubExp $ Var $ fromParam p
                     | (v,p) <- zip pat $ lambdaParams lam1 ]
         bindins = lam1tuple `insertBindings` branch
 
@@ -218,7 +218,7 @@ removeDuplicateInputs = fst . HM.foldlWithKey' comb ((HM.empty, id), M.empty)
             Just par' -> ((parmap, inner . forward par par'),
                           arrmap)
         forward to from b =
-          Let [fromParam to] (SubExp $ Var $ fromParam from)
+          Let [fromParam to] () (SubExp $ Var $ fromParam from)
           `insertBinding` b
 
 {-

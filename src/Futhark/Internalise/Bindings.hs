@@ -21,8 +21,8 @@ import Data.List
 import Data.Loc
 import Data.Traversable (mapM)
 
-import Futhark.ExternalRep as E
-import Futhark.InternalRep as I
+import Futhark.Representation.External as E
+import Futhark.Representation.Basic as I
 import Futhark.MonadFreshNames
 
 import Futhark.Internalise.Monad

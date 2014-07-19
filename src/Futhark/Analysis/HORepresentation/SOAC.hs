@@ -74,8 +74,8 @@ import Data.Monoid
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.Sequence as Seq
 
-import qualified Futhark.InternalRep as Futhark
-import Futhark.InternalRep hiding (Map, Reduce, Scan, Filter, Redomap,
+import qualified Futhark.Representation.Basic as Futhark
+import Futhark.Representation.Basic hiding (Map, Reduce, Scan, Filter, Redomap,
                                Var, Iota, Rearrange, Reshape, Replicate)
 import Futhark.Substitute
 import Futhark.Tools

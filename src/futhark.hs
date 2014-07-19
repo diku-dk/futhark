@@ -21,12 +21,12 @@ import Futhark.Externalise
 import Futhark.Pipeline
 import Futhark.Passes
 
-import qualified Futhark.ExternalRep as E
-import qualified Futhark.ExternalRep.TypeChecker as E
-import qualified Futhark.ExternalRep.Renamer as E
+import qualified Futhark.Representation.External as E
+import qualified Futhark.Representation.External.TypeChecker as E
+import qualified Futhark.Representation.External.Renamer as E
 
-import qualified Futhark.InternalRep as I
-import qualified Futhark.InternalRep.TypeChecker as I
+import qualified Futhark.Representation.Basic as I
+import qualified Futhark.TypeCheck as I
 
 import Futhark.Interpreter
 import qualified Futhark.SOACFlowGraph as FG

@@ -16,8 +16,8 @@ import Control.Monad.State
 
 import Data.Loc
 
-import Futhark.InternalRep
-import Futhark.InternalRep.Renamer
+import Futhark.Representation.Basic
+import Futhark.Renamer
 import Futhark.MonadFreshNames
 import Futhark.Tools
 
@@ -140,9 +140,12 @@ transformExp (Redomap cs _ innerfun accexps arrexps loc) = do
 
 transformExp e = mapExpM transform e
 
-transform :: Mapper Binder
+transformBinding :: Binding -> Binder Binding
+transformBinding (Let pat () e) = Let pat () <$> transformExp e
+
+transform :: Mapper Basic Basic Binder
 transform = identityMapper {
-              mapOnExp = transformExp
+              mapOnBinding = transformBinding
             , mapOnBody = insertBindingsM . transformBody
             }
 

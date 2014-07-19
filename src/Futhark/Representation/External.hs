@@ -1,6 +1,6 @@
 -- | Futhark-specific type- and class definitions built on top of the Futhark
 -- definitions in "Language.Futhark".
-module Futhark.ExternalRep
+module Futhark.Representation.External
   (
     module Language.Futhark.Syntax
   , module Language.Futhark.Attributes
