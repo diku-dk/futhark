@@ -3,7 +3,7 @@ module Futhark.Optimise.Errors ( Error(..) )
   where
 
 import Data.Loc
-import Futhark.Representation.Basic
+import Futhark.Representation.AST
 
 -- | Information about an error during enabling optimisations.  The 'Show'
 -- instance for this type produces a human-readable description.

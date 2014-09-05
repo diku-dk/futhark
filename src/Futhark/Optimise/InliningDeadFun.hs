@@ -22,6 +22,7 @@ import Futhark.Representation.Basic
 import Futhark.Renamer
 import Futhark.Analysis.CallGraph
 import Futhark.Optimise.Errors
+import Futhark.Binder (mkLetPat, mkLet)
 
 -- | The symbol table for functions
 data CGEnv = CGEnv { envFtable  :: HM.HashMap Name FunDec }
@@ -133,21 +134,21 @@ doInlineInCaller (name,rtp,args,body,pos) inlcallees =
   in (name, rtp, args, body',pos)
 
 inlineInBody :: [FunDec] -> Body -> Body
-inlineInBody inlcallees (Body (Let pat () (Apply fname args rtp loc):bnds) res) =
+inlineInBody inlcallees (Body (bnd@(Let pat _ (Apply fname args rtp _)):bnds) res) =
   let continue callbnds =
         callbnds `insertBindings` inlineInBody inlcallees (Body bnds res)
       continue' res' =
-        continue [ Let [v] () $ SubExp e'
-                 | (v,e') <- zip pat $ withShapes $ resultSubExps res' ]
+        continue [ mkLet [v] $ SubExp e'
+                 | (v,e') <- zip (patternIdents pat) $ withShapes $ resultSubExps res' ]
   in  case filter (\(nm,_,_,_,_)-> fname == nm) inlcallees of
-        [] -> continue [Let pat () $ Apply fname args rtp loc]
+        [] -> continue [bnd]
         (_,_,fargs,body,_):_ ->
           let revbnds = zip (map fromParam fargs) $ map fst args
           in  mapResult continue' $ foldr addArgBnd body revbnds
   where
       addArgBnd :: (Ident, SubExp) -> Body -> Body
       addArgBnd (farg, aarg) body =
-          Let [farg] () (SubExp aarg) `insertBinding` body
+          mkLet [farg] (SubExp aarg) `insertBinding` body
       withShapes ses = existentialShapes rtp (map subExpType ses) ++ ses
 inlineInBody inlcallees b = mapBody (inliner inlcallees) b
 
@@ -159,7 +160,7 @@ inliner funs = identityMapper {
                }
 
 inlineInBinding :: [FunDec] -> Binding -> Binding
-inlineInBinding inlcallees (Let pat () e) = Let pat () $ mapExp (inliner inlcallees) e
+inlineInBinding inlcallees (Let pat _ e) = mkLetPat pat $ mapExp (inliner inlcallees) e
 
 inlineInLambda :: [FunDec] -> Lambda -> Lambda
 inlineInLambda inlcallees (Lambda params body ret loc) =

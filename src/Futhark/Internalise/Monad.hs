@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, TypeFamilies, MultiParamTypeClasses #-}
 module Futhark.Internalise.Monad
   ( InternaliseM
   , runInternaliseM
@@ -51,6 +51,11 @@ type InternaliseM =
 instance MonadFreshNames InternaliseM where
   getNameSource = get
   putNameSource = put
+
+instance BindableM InternaliseM where
+  type Lore InternaliseM = Basic
+  loreForExpM = return . loreForExp
+  loreForBindingM = return . loreForBinding . (Const :: Ident -> Const Ident Basic)
 
 instance MonadBinder InternaliseM where
   addBinding      = addBindingWriter

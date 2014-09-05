@@ -44,11 +44,11 @@ transformFunDec (fname, rettype, params, body, loc) = do
   body' <- runBinder $ transformBody body
   return (fname, rettype, params, body', loc)
 
-transformBody :: Body -> Binder Body
+transformBody :: Body -> Binder Basic Body
 transformBody = mapBodyM transform
 
 -- | Transform a single expression.
-transformExp :: Exp -> Binder Exp
+transformExp :: Exp -> Binder Basic Exp
 
 transformExp (Map cs fun arrs loc) = do
   inarrs <- letExps "inarr" $ map SubExp arrs
@@ -140,17 +140,17 @@ transformExp (Redomap cs _ innerfun accexps arrexps loc) = do
 
 transformExp e = mapExpM transform e
 
-transformBinding :: Binding -> Binder Binding
-transformBinding (Let pat () e) = Let pat () <$> transformExp e
+transformBinding :: Binding -> Binder Basic Binding
+transformBinding (Let pat annot e) = Let pat annot <$> transformExp e
 
-transform :: Mapper Basic Basic Binder
+transform :: Mapper Basic Basic (Binder Basic)
 transform = identityMapper {
               mapOnBinding = transformBinding
             , mapOnBody = insertBindingsM . transformBody
             }
 
 newFold :: SrcLoc -> [SubExp] -> [SubExp]
-        -> Binder (([Ident], [SubExp]), ([Ident], [SubExp]), (Ident, SubExp))
+        -> Binder Basic (([Ident], [SubExp]), ([Ident], [SubExp]), (Ident, SubExp))
 newFold loc arrexps accexps = do
   (i, iv) <- newVar loc "i" $ Basic Int
   initacc <- letSubExps "acc" $ map maybeCopy accexps
@@ -170,7 +170,7 @@ index :: Certificates -> [Ident] -> SubExp -> [Exp]
 index cs arrs i = flip map arrs $ \arr ->
                   Index cs arr [i] $ srclocOf i
 
-resultArray :: [TypeBase als Shape] -> SrcLoc -> Binder [SubExp]
+resultArray :: [TypeBase als Shape] -> SrcLoc -> Binder Basic [SubExp]
 resultArray ts loc = mapM arrayOfShape ts
   where arrayOfShape t = arrayOfShape' $ arrayDims t
           where arrayOfShape' [] =
@@ -181,7 +181,7 @@ resultArray ts loc = mapM arrayOfShape ts
 
         blankConstant t = Constant (blankValue $ basicDecl $ elemType t) loc
 
-letwith :: Certificates -> [Ident] -> Binder Exp -> [Exp] -> Binder [Ident]
+letwith :: Certificates -> [Ident] -> Binder Basic Exp -> [Exp] -> Binder Basic [Ident]
 letwith cs ks i vs = do
   vs' <- letSubExps "values" vs
   i' <- letSubExp "i" =<< i
@@ -201,7 +201,7 @@ size _ = intconst 0 noLoc
 pexp :: Applicative f => SubExp -> f Exp
 pexp = pure . SubExp
 
-transformLambda :: Lambda -> [Exp] -> Binder Body
+transformLambda :: Lambda -> [Exp] -> Binder Basic Body
 transformLambda (Lambda params body _ _) args = do
   zipWithM_ letBind (map ((:[]) . fromParam) params) args
   transformBody body

@@ -1,13 +1,14 @@
 {-# LANGUAGE TypeFamilies, FlexibleContexts #-}
 module Futhark.Representation.AST.Lore
-       ( Binding
-
-       , Proper
-       )
+       ( Lore(..) )
        where
 
-type family Binding l :: *
-
-class (Show (Binding l),
-       Eq (Binding l),
-       Ord (Binding l)) => Proper l where
+class (Show (Binding l), Show (Exp l),
+       Eq (Binding l), Eq (Exp l),
+       Ord (Binding l), Ord (Exp l)) => Lore l where
+  -- | Annotation for every binding.
+  type Binding l :: *
+  type Binding l = ()
+  -- | Annotation for every expression.
+  type Exp l :: *
+  type Exp l = ()

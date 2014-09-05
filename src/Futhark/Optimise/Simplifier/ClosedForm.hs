@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 -- | This module implements facilities for determining whether a
 -- reduction or fold can be expressed in a closed form (i.e. not as a
 -- SOAC).
@@ -11,7 +12,6 @@ module Futhark.Optimise.Simplifier.ClosedForm
   )
 where
 
-import Control.Applicative
 import Control.Monad
 
 import Data.Maybe
@@ -20,14 +20,15 @@ import qualified Data.HashSet as HS
 import Data.Loc
 import Data.Monoid
 
-import Futhark.Representation.Basic
+import Futhark.Binder
+import Futhark.Representation.AST
 import Futhark.Renamer
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplifier.Simplify
 
 -- | A function that, given a variable name, returns its definition.
 -- XXX: This duplicates something in Futhark.Optimise.Simplification.
-type VarLookup = VName -> Maybe Exp
+type VarLookup lore = VName -> Maybe (Exp lore)
 
 {-
 Motivation:
@@ -45,72 +46,65 @@ Motivation:
 
 -- | @foldClosedForm look foldfun accargs arrargs@ determines whether
 -- each of the results of @foldfun@ can be expressed in a closed form.
-foldClosedForm :: VarLookup -> [Ident] -> Lambda -> [SubExp] -> [SubExp]
-               -> Simplify [Binding]
+foldClosedForm :: ProperBinder m =>
+                  VarLookup (Lore m) -> Pattern (Lore m) -> Lambda (Lore m)
+               -> [SubExp] -> [SubExp]
+               -> Simplify m ()
 
-foldClosedForm look pat lam accs arrs =
-  case checkResults pat knownBindings
-       (map fromParam $ lambdaParams lam) (lambdaBody lam) accs lamloc of
-    Nothing -> cannotSimplify
-    Just closedBody -> do
-      isEmpty <- newIdent "fold_input_is_empty" (Basic Bool) lamloc
-      let inputsize = arraysSize 0 $ map subExpType arrs
-          isEmptyCheck =
-            Let [isEmpty] () $
-            BinOp Equal inputsize (intconst 0 lamloc)
-            (Basic Bool) lamloc
-          mkBranch  ifNonEmpty =
-            Let pat () $
-            If (Var isEmpty)
-            (resultBody [] accs lamloc)
-            ifNonEmpty
-            (staticShapes $ map fromConstType $
-             lambdaReturnType lam)
-            lamloc
-      closedBody' <- renameBody closedBody
-      return [isEmptyCheck, mkBranch closedBody']
+foldClosedForm look pat lam accs arrs = do
+  closedBody <- checkResults (patternIdents pat) knownBindings
+                (map fromParam $ lambdaParams lam) (lambdaBody lam) accs lamloc
+  isEmpty <- newIdent "fold_input_is_empty" (Basic Bool) lamloc
+  let inputsize = arraysSize 0 $ map subExpType arrs
+  closedBody' <- renameBody closedBody
+  letBind [isEmpty] $ BinOp Equal inputsize (intconst 0 lamloc) (Basic Bool) lamloc
+  letBindPat pat $
+    If (Var isEmpty) (resultBody [] accs lamloc) closedBody'
+    (staticShapes $ map fromConstType $
+     lambdaReturnType lam)
+    lamloc
   where lamloc = srclocOf lam
 
         knownBindings = determineKnownBindings look lam accs arrs
 
 -- | @loopClosedForm pat respat merge bound bodys@ determines whether
 -- the do-loop can be expressed in a closed form.
-loopClosedForm :: [Ident] -> [Ident] -> [(Ident,SubExp)]
-               -> SubExp -> Body -> Simplify [Binding]
+loopClosedForm :: ProperBinder m =>
+                  Pattern (Lore m) -> [Ident] -> [(Ident,SubExp)]
+               -> SubExp -> Body (Lore m)
+               -> Simplify m ()
 loopClosedForm pat respat merge bound body
-  | respat == mergepat,
-    Just closedBody <- checkResults respat knownBindings
-                       mergepat body mergeexp bodyloc = do
-  isEmpty <- newIdent "bound_is_zero" (Basic Bool) bodyloc
-  let isEmptyCheck =
-        Let [isEmpty] () $
-        BinOp Leq bound (intconst 0 bodyloc)
-        (Basic Bool) bodyloc
-      mkBranch ifNonEmpty =
-        Let pat () $
-        If (Var isEmpty)
-        (resultBody [] mergeexp bodyloc)
-        ifNonEmpty
-        (bodyType body)
-        bodyloc
-  closedBody' <- renameBody closedBody
-  return [isEmptyCheck, mkBranch closedBody']
+  | respat == mergepat = do
+    closedBody <- checkResults respat knownBindings
+                  mergepat body mergeexp bodyloc
+    isEmpty <- newIdent "bound_is_zero" (Basic Bool) bodyloc
+    closedBody' <- renameBody closedBody
+    letBind [isEmpty] $
+      BinOp Leq bound (intconst 0 bodyloc)
+      (Basic Bool) bodyloc
+    letBindPat pat $
+      If (Var isEmpty)
+      (resultBody [] mergeexp bodyloc)
+      closedBody'
+      (bodyType body)
+      bodyloc
   | otherwise = cannotSimplify
   where (mergepat, mergeexp) = unzip merge
         bodyloc = srclocOf body
         knownBindings = HM.fromList merge
 
-checkResults :: [Ident]
+checkResults :: MonadBinder m =>
+                [Ident]
              -> HM.HashMap Ident SubExp
              -> [Ident]
-             -> Body
+             -> Body (Lore m)
              -> [SubExp]
              -> SrcLoc
-             -> Maybe Body
-checkResults pat knownBindings params body accs bodyloc =
-  liftM (\bnds -> Body bnds $ Result [] (map Var pat) bodyloc) $
-  concat <$> zipWithM checkResult
-             (zip pat $ resultSubExps res) (zip accparams accs)
+             -> Simplify m (Body (Lore m))
+checkResults pat knownBindings params body accs bodyloc = do
+  ((), bnds) <- collectBindings $
+                zipWithM_ checkResult (zip pat $ resultSubExps res) (zip accparams accs)
+  return $ Body bnds $ Result [] (map Var pat) bodyloc
 
   where bndMap = makeBindMap body
         (accparams, _) = splitAt (length accs) params
@@ -120,32 +114,32 @@ checkResults pat knownBindings params body accs bodyloc =
                   HS.fromList params
 
         checkResult (p, e) _
-          | Just e' <- asFreeSubExp e =
-          Just [Let [p] () $ SubExp e']
+          | Just e' <- asFreeSubExp e = letBind [p] $ SubExp e'
         checkResult (p, Var v) (accparam, acc) = do
-          e@(BinOp bop x y rt loc) <- HM.lookup v bndMap
+          e@(BinOp bop x y rt loc) <- liftMaybe $ HM.lookup v bndMap
           -- One of x,y must be *this* accumulator, and the other must
           -- be something that is free in the body.
           let isThisAccum = (==Var accparam)
-          (this, el) <- case ((asFreeSubExp x, isThisAccum y),
+          (this, el) <- liftMaybe $
+                        case ((asFreeSubExp x, isThisAccum y),
                               (asFreeSubExp y, isThisAccum x)) of
                           ((Just free, True), _) -> Just (acc, free)
                           (_, (Just free, True)) -> Just (acc, free)
-                          _                           -> Nothing
+                          _                      -> Nothing
           case bop of
-              LogAnd ->
-                Just [Let [v] () e,
-                      Let [p] () $ BinOp LogAnd this el rt loc]
-              _ -> Nothing -- Um... sorry.
+              LogAnd -> do
+                letBind [v] e
+                letBind [p] $ BinOp LogAnd this el rt loc
+              _ -> cannotSimplify -- Um... sorry.
 
-        checkResult _ _ = Nothing
+        checkResult _ _ = cannotSimplify
 
         asFreeSubExp :: SubExp -> Maybe SubExp
         asFreeSubExp (Var v)
           | HS.member v nonFree = HM.lookup v knownBindings
         asFreeSubExp se = Just se
 
-determineKnownBindings :: VarLookup -> Lambda -> [SubExp] -> [SubExp]
+determineKnownBindings :: VarLookup lore -> Lambda lore -> [SubExp] -> [SubExp]
                        -> HM.HashMap Ident SubExp
 determineKnownBindings look lam accs arrs =
   accBindings <> arrBindings
@@ -158,11 +152,12 @@ determineKnownBindings look lam accs arrs =
           | Just (Replicate _ ve _) <- look $ identName v = Just (p, ve)
         isReplicate _       = Nothing
 
-boundInBody :: Body -> HS.HashSet Ident
+boundInBody :: Body lore -> HS.HashSet Ident
 boundInBody = mconcat . map bound . bodyBindings
-  where bound (Let pat _ _) = HS.fromList pat
+  where bound (Let pat _ _) = HS.fromList $ patternIdents pat
 
-makeBindMap :: Body -> HM.HashMap Ident Exp
+makeBindMap :: Body lore -> HM.HashMap Ident (Exp lore)
 makeBindMap = HM.fromList . mapMaybe isSingletonBinding . bodyBindings
-  where isSingletonBinding (Let [v] _ e) = Just (v,e)
-        isSingletonBinding _             = Nothing
+  where isSingletonBinding (Let pat _ e) = case patternIdents pat of
+          [v] -> Just (v,e)
+          _   -> Nothing

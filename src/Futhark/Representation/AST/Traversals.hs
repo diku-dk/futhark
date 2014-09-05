@@ -46,6 +46,7 @@ module Futhark.Representation.AST.Traversals
   , Walker(..)
   , identityWalker
   , walkExpM
+  , walkExp
   , walkBodyM
 
   -- * Simple wrappers
@@ -65,14 +66,14 @@ import Futhark.Representation.AST.Syntax
 -- of this structure expresses the operation to be performed on a
 -- given child.
 data Mapper flore tlore m = Mapper {
-    mapOnSubExp :: SubExp flore -> m (SubExp tlore)
+    mapOnSubExp :: SubExp -> m SubExp
   , mapOnBody :: Body flore -> m (Body tlore)
   , mapOnBinding :: Binding flore -> m (Binding tlore)
-  , mapOnType :: Type flore -> m (Type tlore)
+  , mapOnType :: Type -> m Type
   , mapOnLambda :: Lambda flore -> m (Lambda tlore)
-  , mapOnIdent :: Ident flore -> m (Ident tlore)
+  , mapOnIdent :: Ident -> m Ident
   , mapOnValue :: Value -> m Value
-  , mapOnCertificates :: Certificates flore -> m (Certificates tlore)
+  , mapOnCertificates :: Certificates -> m Certificates
   }
 
 -- | A mapper that simply returns the tree verbatim.
@@ -202,7 +203,7 @@ mapExpM tv (Redomap cs redfun mapfun accexps arrexps loc) =
        pure loc
 
 mapOnResType :: (Monad m, Applicative m) =>
-                Mapper flore tlore m -> ResType flore -> m (ResType tlore)
+                Mapper flore tlore m -> ResType -> m ResType
 mapOnResType tv = mapM mapOnResType'
   where mapOnResType' (Array bt (ExtShape shape) u als) =
           Array bt <$> (ExtShape <$> mapM mapOnExtSize shape) <*>
@@ -217,14 +218,14 @@ mapExp m = runIdentity . mapExpM m
 
 -- | Reification of a left-reduction across a syntax tree.
 data Folder a lore m = Folder {
-    foldOnSubExp :: a -> SubExp lore -> m a
+    foldOnSubExp :: a -> SubExp -> m a
   , foldOnBody :: a -> Body lore -> m a
   , foldOnBinding :: a -> Binding lore -> m a
-  , foldOnType :: a -> Type lore -> m a
+  , foldOnType :: a -> Type -> m a
   , foldOnLambda :: a -> Lambda lore -> m a
-  , foldOnIdent :: a -> Ident lore -> m a
+  , foldOnIdent :: a -> Ident -> m a
   , foldOnValue :: a -> Value -> m a
-  , foldOnCertificates :: a -> Certificates lore -> m a
+  , foldOnCertificates :: a -> Certificates -> m a
   }
 
 -- | A folding operation where the accumulator is returned verbatim.
@@ -279,14 +280,14 @@ foldExp m x = runIdentity . foldExpM m x
 -- this structure expresses the action to be performed on a given
 -- child.
 data Walker lore m = Walker {
-    walkOnSubExp :: SubExp lore -> m ()
+    walkOnSubExp :: SubExp -> m ()
   , walkOnBody :: Body lore -> m ()
   , walkOnBinding :: Binding lore -> m ()
-  , walkOnType :: Type lore -> m ()
+  , walkOnType :: Type -> m ()
   , walkOnLambda :: Lambda lore -> m ()
-  , walkOnIdent :: Ident lore -> m ()
+  , walkOnIdent :: Ident -> m ()
   , walkOnValue :: Value -> m ()
-  , walkOnCertificates :: Certificates lore -> m ()
+  , walkOnCertificates :: Certificates -> m ()
   }
 
 -- | A no-op traversal.
@@ -328,6 +329,10 @@ walkBodyM f = void . mapBodyM m
 walkExpM :: (Monad m, Applicative m) => Walker lore m -> Exp lore -> m ()
 walkExpM f = void . mapExpM m
   where m = walkMapper f
+
+-- | As 'walkExp', but runs in the 'Identity' monad..
+walkExp :: Walker lore Identity -> Exp lore -> ()
+walkExp f = runIdentity . walkExpM f
 
 -- | Common case of 'foldExp', where only 'Exp's and 'Lambda's are
 -- taken into account.

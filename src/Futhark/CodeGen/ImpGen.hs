@@ -28,7 +28,7 @@ import Futhark.MonadFreshNames
 
 -- | A substitute expression compiler, tried before the main
 -- expression compilation function.
-type ExpCompiler op = [Ident] -> Exp -> ImpM op (ExpCompilerResult op)
+type ExpCompiler op = Pattern -> Exp -> ImpM op (ExpCompilerResult op)
 
 -- | The result of the substitute expression compiler.
 data ExpCompilerResult op =
@@ -121,14 +121,14 @@ compileBinding :: Binding -> ImpM op ()
 compileBinding (Let pat _ e) =
   compileExp pat e
 
-compileExp :: [Ident] -> Exp -> ImpM op ()
+compileExp :: Pattern -> Exp -> ImpM op ()
 compileExp pat e = do
   ec <- asks envExpCompiler
   res <- ec pat e
   case res of
     CompileBindings bnds -> mapM_ compileBinding bnds
-    CompileExp e'        -> do declareVars pat
-                               defCompileExp (map identName pat) e'
+    CompileExp e'        -> do declareVars $ patternIdents pat
+                               defCompileExp (patternNames pat) e'
     Done                 -> return ()
 
 defCompileExp :: [VName] -> Exp -> ImpM op ()

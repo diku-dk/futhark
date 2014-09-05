@@ -37,7 +37,7 @@ externaliseFunction (fname, ret, params, body, loc) =
 externaliseBody :: I.Body -> E.Exp
 externaliseBody (I.Body [] (I.Result _ es loc)) =
   externaliseSubExps es loc
-externaliseBody (I.Body (I.Let pat () e:bnds) res) =
+externaliseBody (I.Body (I.Let pat _ e:bnds) res) =
   E.LetPat (externalisePat pat loc) (externaliseExp e)
            (externaliseBody $ I.Body bnds res) loc
   where loc = srclocOf e
@@ -115,7 +115,7 @@ externaliseExp (I.Rotate cs n e loc) =
            (externaliseSubExp e)
            loc
 externaliseExp (I.DoLoop respat merge i bound loopbody loc) =
-  E.DoLoop (externalisePat mergepat loc) (externaliseSubExps mergeexp loc)
+  E.DoLoop (externaliseBinders mergepat loc) (externaliseSubExps mergeexp loc)
            (externaliseIdent i) (externaliseSubExp bound)
            (externaliseBody loopbody)
            (E.TupLit (map (E.Var . externaliseIdent) respat) loc) loc
@@ -196,9 +196,12 @@ externaliseDiet I.Observe = E.Observe
 externaliseCerts :: I.Certificates -> E.Certificates
 externaliseCerts = map externaliseIdent
 
-externalisePat :: [I.Ident] -> SrcLoc -> E.TupIdent
-externalisePat [v] _  = Id $ externaliseIdent v
-externalisePat vs loc = TupId (map (Id . externaliseIdent) vs) loc
+externalisePat :: I.Pattern -> SrcLoc -> E.TupIdent
+externalisePat = externaliseBinders . patternIdents
+
+externaliseBinders :: [I.Ident] -> SrcLoc -> E.TupIdent
+externaliseBinders [v] _  = Id $ externaliseIdent v
+externaliseBinders vs loc = TupId (map (Id . externaliseIdent) vs) loc
 
 externaliseRetType :: I.RetType -> E.DeclType
 externaliseRetType = externaliseDeclTypes . map I.toDecl

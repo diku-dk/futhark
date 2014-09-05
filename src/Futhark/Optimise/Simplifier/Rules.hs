@@ -6,8 +6,9 @@ module Futhark.Optimise.Simplifier.Rules
   )
 
 where
-
+import Debug.Trace
 import Control.Applicative
+import Control.Monad
 
 import Data.Array
 import Data.Bits
@@ -29,10 +30,10 @@ import Futhark.Optimise.Simplifier.Rule
 import Futhark.Optimise.Simplifier.Simplify
 import qualified Futhark.Analysis.AlgSimplify as AS
 import qualified Futhark.Analysis.ScalExp as SE
-import Futhark.Representation.Basic
+import Futhark.Representation.AST
 import Futhark.Tools
 
-topDownRules :: TopDownRules u
+topDownRules :: ProperBinder m => TopDownRules m
 topDownRules = [ liftIdentityMapping
                , removeReplicateMapping
                , hoistLoopInvariantMergeVariables
@@ -53,7 +54,7 @@ topDownRules = [ liftIdentityMapping
                , simplifyScalExp
                ]
 
-bottomUpRules :: BottomUpRules u
+bottomUpRules :: ProperBinder m => BottomUpRules m
 bottomUpRules = [ removeDeadMapping
                 , removeUnusedLoopResult
                 , removeRedundantMergeVariables
@@ -61,20 +62,21 @@ bottomUpRules = [ removeDeadMapping
                 , removeUnnecessaryCopy
                 ]
 
-standardRules :: RuleBook u
+standardRules :: ProperBinder m => RuleBook m
 standardRules = (topDownRules, bottomUpRules)
 
-liftIdentityMapping :: TopDownRule u
-liftIdentityMapping _ (Let pat () (Map cs fun arrs loc)) =
-  case foldr checkInvariance ([], [], []) $ zip3 pat ses rettype of
+liftIdentityMapping :: ProperBinder m => TopDownRule m
+liftIdentityMapping _ (Let pat _ (Map cs fun arrs loc)) =
+  case foldr checkInvariance ([], [], []) $ zip3 (patternBindees pat) ses rettype of
     ([], _, _) -> cannotSimplify
-    (invariant, mapresult, rettype') ->
+    (invariant, mapresult, rettype') -> do
       let (pat', ses') = unzip mapresult
           lambdaRes = resultBody rescs ses' resloc
           fun' = fun { lambdaBody = lambdaRes `setBodyResult` lambdaBody fun
                      , lambdaReturnType = rettype'
                      }
-      in return $ Let pat' () (Map cs fun' arrs loc) : invariant
+      mapM_ (uncurry letBindPat) invariant
+      letBindPat (Pattern pat') $ Map cs fun' arrs loc
   where inputMap = HM.fromList $ zip (map identName $ lambdaParams fun) arrs
         free = freeInBody $ lambdaBody fun
         rettype = lambdaReturnType fun
@@ -86,11 +88,11 @@ liftIdentityMapping _ (Let pat () (Map cs fun arrs loc)) =
 
         checkInvariance (outId, Var v, _) (invariant, mapresult, rettype')
           | Just inp <- HM.lookup (identName v) inputMap =
-            (Let [outId] () (SubExp inp) : invariant,
+            ((Pattern [outId], SubExp inp) : invariant,
              mapresult,
              rettype')
         checkInvariance (outId, e, t) (invariant, mapresult, rettype')
-          | freeOrConst e = (Let [outId] () (Replicate outersize e loc) : invariant,
+          | freeOrConst e = ((Pattern [outId], Replicate outersize e loc) : invariant,
                              mapresult,
                              rettype')
           | otherwise = (invariant,
@@ -100,9 +102,9 @@ liftIdentityMapping _ _ = cannotSimplify
 
 -- | Remove all arguments to the map that are simply replicates.
 -- These can be turned into free variables instead.
-removeReplicateMapping :: TopDownRule u
-removeReplicateMapping vtable (Let pat () (Map cs fun arrs loc))
-  | not $ null parameterBnds =
+removeReplicateMapping :: ProperBinder m => TopDownRule m
+removeReplicateMapping vtable (Let pat _ (Map cs fun arrs loc))
+  | not $ null parameterBnds = do
   let (params, arrs') = unzip paramsAndArrs
       fun' = fun { lambdaParams = params }
       -- Empty maps are not permitted, so if that would be the result,
@@ -110,47 +112,49 @@ removeReplicateMapping vtable (Let pat () (Map cs fun arrs loc))
       n = arraysSize 0 $ map subExpType arrs
       Result _ ses resloc = bodyResult $ lambdaBody fun
       mapres = bodyBindings $ lambdaBody fun
-      mapbnds = case arrs' of
-                  [] -> mapres ++ [ Let [v] () $ Replicate n e resloc
-                                    | (v,e) <- zip pat ses ]
-                  _  -> [Let pat () $ Map cs fun' arrs' loc]
-  in return $ parameterBnds ++ mapbnds
+  mapM_ (uncurry letBind) parameterBnds
+  case arrs' of
+    [] -> do mapM_ addBinding mapres
+             sequence_ [ letBindPat (Pattern [v]) $ Replicate n e resloc
+                       | (v,e) <- zip (patternBindees pat) ses ]
+    _  -> letBindPat pat $ Map cs fun' arrs' loc
   where (paramsAndArrs, parameterBnds) =
           partitionEithers $ zipWith isReplicate (lambdaParams fun) arrs
 
         isReplicate p (Var v)
           | Just (Replicate _ e _) <- ST.lookupExp (identName v) vtable =
-          Right (Let [fromParam p] () $ SubExp e)
+          Right ([fromParam p], SubExp e)
         isReplicate p e =
           Left  (p, e)
 
 removeReplicateMapping _ _ = cannotSimplify
 
-removeDeadMapping :: BottomUpRule u
-removeDeadMapping (_, used) (Let pat () (Map cs fun arrs loc)) =
+removeDeadMapping :: ProperBinder m => BottomUpRule m
+removeDeadMapping (_, used) (Let pat _ (Map cs fun arrs loc)) =
   let Result rcs ses resloc = bodyResult $ lambdaBody fun
-      isUsed (v, _, _) = (`UT.used` used) $ identName v
-      (pat',ses', ts') = unzip3 $ filter isUsed $ zip3 pat ses $ lambdaReturnType fun
+      isUsed (bindee, _, _) = (`UT.used` used) $ bindeeName bindee
+      (pat',ses', ts') = unzip3 $ filter isUsed $
+                         zip3 (patternBindees pat) ses $ lambdaReturnType fun
       fun' = fun { lambdaBody = resultBody rcs ses' resloc `setBodyResult`
                                 lambdaBody fun
                  , lambdaReturnType = ts'
                  }
-  in if pat /= pat'
-     then return [Let pat' () $ Map cs fun' arrs loc]
+  in if pat /= Pattern pat'
+     then letBindPat (Pattern pat') $ Map cs fun' arrs loc
      else cannotSimplify
 removeDeadMapping _ _ = cannotSimplify
 
 -- After removing a result, we may also have to remove some of the
 -- shape bindings.
-removeUnusedLoopResult :: BottomUpRule u
-removeUnusedLoopResult (_, used) (Let pat () (DoLoop respat merge i bound body loc))
-  | explpat' <- filter (usedAfterwards . fst) explpat,
+removeUnusedLoopResult :: ProperBinder m => BottomUpRule m
+removeUnusedLoopResult (_, used) (Let pat _ (DoLoop respat merge i bound body loc))
+  | explpat' <- filter (usedAfterwards . bindeeIdent . fst) explpat,
     explpat' /= explpat =
   let shapes = concatMap (arrayDims . identType) $ map snd explpat'
       implpat' = filter ((`elem` shapes) . Var . snd) implpat
       pat' = map fst $ implpat'++explpat'
       respat' = map snd explpat'
-  in return [Let pat' () $ DoLoop respat' merge i bound body loc]
+  in letBindPat (Pattern pat') $ DoLoop respat' merge i bound body loc
   where -- | Check whether the variable binding is used afterwards.
         -- But also, check whether one of the shapes is used!  FIXME:
         -- This is in fact too conservative, as we only need to
@@ -159,10 +163,10 @@ removeUnusedLoopResult (_, used) (Let pat () (DoLoop respat merge i bound body l
           identName v `UT.used` used  ||
           any isUsedImplRes (concatMap varDim $ arrayDims $ identType v)
         isUsedImplRes v =
-          v `UT.used` used && v `elem` map identName pat
+          v `UT.used` used && v `elem` patternNames pat
         varDim (Var v)       = [identName v]
         varDim (Constant {}) = []
-        taggedpat = zip pat $ loopResult respat $ map fst merge
+        taggedpat = zip (patternBindees pat) $ loopResult respat $ map fst merge
         (implpat, explpat) = splitAt (length taggedpat - length respat) taggedpat
 removeUnusedLoopResult _ _ = cannotSimplify
 
@@ -174,8 +178,8 @@ removeUnusedLoopResult _ _ = cannotSimplify
 -- I do not claim that the current implementation of this rule is
 -- perfect, but it should suffice for many cases, and should never
 -- generate wrong code.
-removeRedundantMergeVariables :: BottomUpRule u
-removeRedundantMergeVariables _ (Let pat () (DoLoop respat merge i bound body loc))
+removeRedundantMergeVariables :: ProperBinder m => BottomUpRule m
+removeRedundantMergeVariables _ (Let pat _ (DoLoop respat merge i bound body loc))
   | not $ all (usedInResult . fst) merge =
   let Result cs es resloc = bodyResult body
       usedResults = map snd $ filter (usedInResult . fst) $ zip mergepat es
@@ -187,25 +191,28 @@ removeRedundantMergeVariables _ (Let pat () (DoLoop respat merge i bound body lo
       (keep, discard) = partition resIsNecessary $ zip merge es
       (merge', es') = unzip keep
       body' = resultBody cs es' resloc `setBodyResult` body
-      -- We can't just remove the bindings in 'discard', since the loop
-      -- body may still use their names in (now-dead) expressions.
-      -- Hence, we add them inside the loop, fully aware that dead-code
-      -- removal will eventually get rid of them.  Some care is
-      -- necessary to handle unique bindings.
-      body'' = insertBindings (dummyBindings discard) body'
   in if merge == merge'
      then cannotSimplify
-     else return [Let pat () $ DoLoop respat merge' i bound body'' loc]
+     else do
+       -- We can't just remove the bindings in 'discard', since the loop
+       -- body may still use their names in (now-dead) expressions.
+       -- Hence, we add them inside the loop, fully aware that dead-code
+       -- removal will eventually get rid of them.  Some care is
+       -- necessary to handle unique bindings.
+       ((), bnds) <-
+         collectBindings $ mapM_ (uncurry letBind) $ dummyBindings discard
+       let body'' = insertBindings bnds body'
+       letBindPat pat $ DoLoop respat merge' i bound body'' loc
   where (mergepat, _) = unzip merge
         usedInResult = (`elem` respat)
-        patDimNames = mconcat $ map freeNamesInExp $
-                      concatMap (map SubExp . arrayDims . identType) mergepat
+        patDimNames = mconcat $ map freeNamesInSubExp $
+                      concatMap (arrayDims . identType) mergepat
         usedInPatType = (`HS.member` patDimNames) . identName
 
         dummyBindings = map dummyBinding
         dummyBinding ((v,e), _)
-          | unique (identType v) = Let [v] () $ Copy e $ srclocOf v
-          | otherwise            = Let [v] () $ SubExp e
+          | unique (identType v) = ([v], Copy e $ srclocOf v)
+          | otherwise            = ([v], SubExp e)
 
         allDependencies = dataDependencies body
         dependencies (Constant _ _) = HS.empty
@@ -216,11 +223,12 @@ removeRedundantMergeVariables _ _ =
 
 -- We may change the type of the loop if we hoist out a shape
 -- annotation, in which case we also need to tweak the bound pattern.
-hoistLoopInvariantMergeVariables :: TopDownRule u
-hoistLoopInvariantMergeVariables _ (Let pat () (DoLoop respat merge idd n loopbody loc)) =
+hoistLoopInvariantMergeVariables :: ProperBinder m => TopDownRule m
+hoistLoopInvariantMergeVariables _ bnd@(Let pat _ (DoLoop respat merge idd n loopbody loc)) =
     -- Figure out which of the elements of loopresult are
     -- loop-invariant, and hoist them out.
-  case foldr checkInvariance ([], explpat, [], []) $ zip merge ses of
+  case foldr checkInvariance ([], explpat, [], []) $
+       zip merge ses of
     ([], _, _, _) ->
       -- Nothing is invariant.
       cannotSimplify
@@ -232,58 +240,63 @@ hoistLoopInvariantMergeVariables _ (Let pat () (DoLoop respat merge idd n loopbo
           implinvariant' = [ (p, Var v) | (p,v) <- implinvariant ]
           pat' = map fst $ implpat'++explpat'
           respat' = map snd explpat'
-      in return $ map letPat (invariant ++ implinvariant') ++
-         [Let pat' () $ DoLoop respat' merge' idd n loopbody' loc]
+      in do invariant' <- forM invariant $ \((v,lore),se) -> do
+              lore' <- maybe (loreForBindingM v) return lore
+              return (Bindee v lore', se)
+            forM_ (invariant' ++ implinvariant') $ \(v1,v2) ->
+              letBindPat (Pattern [v1]) $ SubExp v2
+            letBindPat (Pattern pat') $ DoLoop respat' merge' idd n loopbody' loc
   where Result cs ses resloc = bodyResult loopbody
-        letPat (v1, v2) = Let [v1] () $ SubExp v2
-        taggedpat = zip pat $ loopResult respat $ map fst merge
+        taggedpat = zip (patternBindees pat) $ loopResult respat $ map fst merge
         (implpat, explpat) = splitAt (length taggedpat - length respat) taggedpat
 
         removeFromResult (v,initExp) explpat' =
           case partition ((==v) . snd) explpat' of
-            ([(resv,_)], rest) -> (Just (resv, initExp), rest)
-            (_,      _)        -> (Nothing,              explpat')
+            ([(Bindee resv lore,_)], rest) ->
+              (Just ((resv, Just lore), initExp), rest)
+            (_,      _) ->
+              (Nothing, explpat')
 
         checkInvariance ((v1,initExp), resExp) (invariant, explpat', merge', resExps)
-          | theSame v1 initExp resExp =
+          | invariantMerge v1 initExp resExp =
           let (bnd, explpat'') = removeFromResult (v1,initExp) explpat'
-          in (maybe id (:) bnd $ (v1, initExp) : invariant,
+          in (maybe id (:) bnd $ ((v1, Nothing), initExp) : invariant,
               explpat'', merge', resExps)
         checkInvariance ((v1,initExp), resExp) (invariant, explpat', merge', resExps) =
           (invariant, explpat', (v1,initExp):merge', resExp:resExps)
 
-        theSame v1 _       (Var v2)
+        invariantMerge v1 _       (Var v2)
           | identName v1 == identName v2 = True
-        theSame _  initExp resExp        = initExp == resExp
+        invariantMerge _  initExp resExp = initExp == resExp
 hoistLoopInvariantMergeVariables _ _ = cannotSimplify
 
 -- | A function that, given a variable name, returns its definition.
-type VarLookup = VName -> Maybe Exp
+type VarLookup lore = VName -> Maybe (Exp lore)
 
-type LetTopDownRule u = VarLookup -> Exp -> Maybe Exp
+type LetTopDownRule lore u = VarLookup lore -> Exp lore -> Maybe (Exp lore)
 
-letRule :: LetTopDownRule u -> TopDownRule u
-letRule rule vtable (Let pat () e) =
-  liftMaybe $ (:[]) . Let pat () <$> rule look e
+letRule :: ProperBinder m => LetTopDownRule (Lore m) u -> TopDownRule m
+letRule rule vtable (Let pat _ e) =
+  letBindPat pat =<< liftMaybe (rule look e)
   where look = (`ST.lookupExp` vtable)
 
-simplifyClosedFormRedomap :: TopDownRule u
-simplifyClosedFormRedomap vtable (Let pat () (Redomap _ _ innerfun acc arr _)) =
+simplifyClosedFormRedomap :: ProperBinder m => TopDownRule m
+simplifyClosedFormRedomap vtable (Let pat _ (Redomap _ _ innerfun acc arr _)) =
   foldClosedForm (`ST.lookupExp` vtable) pat innerfun acc arr
 simplifyClosedFormRedomap _ _ = cannotSimplify
 
-simplifyClosedFormReduce :: TopDownRule u
-simplifyClosedFormReduce vtable (Let pat () (Reduce _ fun args _)) =
+simplifyClosedFormReduce :: ProperBinder m => TopDownRule m
+simplifyClosedFormReduce vtable (Let pat _ (Reduce _ fun args _)) =
   foldClosedForm (`ST.lookupExp` vtable) pat fun acc arr
   where (acc, arr) = unzip args
 simplifyClosedFormReduce _ _ = cannotSimplify
 
-simplifyClosedFormLoop :: TopDownRule u
-simplifyClosedFormLoop _ (Let pat () (DoLoop respat merge _ bound body _)) =
+simplifyClosedFormLoop :: ProperBinder m => TopDownRule m
+simplifyClosedFormLoop _ (Let pat _ (DoLoop respat merge _ bound body _)) =
   loopClosedForm pat respat merge bound body
 simplifyClosedFormLoop _ _ = cannotSimplify
 
-simplifyRearrange :: LetTopDownRule u
+simplifyRearrange :: LetTopDownRule lore u
 
 -- Handle identity permutation.
 simplifyRearrange _ (Rearrange _ perm e _)
@@ -302,7 +315,7 @@ simplifyRearrange look (Rearrange cs perm (Var v) loc) =
 
 simplifyRearrange _ _ = Nothing
 
-simplifyRotate :: LetTopDownRule u
+simplifyRotate :: LetTopDownRule lore u
 -- A zero-rotation is identity.
 simplifyRotate _ (Rotate _ 0 e _) =
   Just $ SubExp e
@@ -322,7 +335,7 @@ simplifyRotate look (Rotate _ _ (Var v) _) = do
 
 simplifyRotate _ _ = Nothing
 
-simplifyBinOp :: LetTopDownRule u
+simplifyBinOp :: LetTopDownRule lore u
 
 simplifyBinOp _ (BinOp Plus e1 e2 _ pos)
   | isCt0 e1 = Just $ SubExp e2
@@ -521,15 +534,15 @@ simplifyBinOp _ (BinOp Leq e1 e2 _ pos)
 
 simplifyBinOp _ _ = Nothing
 
-binOpRes :: SrcLoc -> BasicValue -> Maybe Exp
+binOpRes :: SrcLoc -> BasicValue -> Maybe (Exp lore)
 binOpRes loc v = Just $ SubExp $ Constant (BasicVal v) loc
 
-simplifyNot :: LetTopDownRule u
+simplifyNot :: LetTopDownRule lore u
 simplifyNot _ (Not (Constant (BasicVal (LogVal v)) _) loc) =
   Just $ SubExp $ constant (not v) loc
 simplifyNot _ _ = Nothing
 
-simplifyNegate :: LetTopDownRule u
+simplifyNegate :: LetTopDownRule lore u
 simplifyNegate _ (Negate (Constant (BasicVal (IntVal  v)) _) pos) =
   Just $ SubExp $ constant (negate v) pos
 simplifyNegate _ (Negate (Constant (BasicVal (RealVal  v)) _) pos) =
@@ -538,13 +551,13 @@ simplifyNegate _ _ =
   Nothing
 
 -- If expression is true then just replace assertion.
-simplifyAssert :: LetTopDownRule u
+simplifyAssert :: LetTopDownRule lore u
 simplifyAssert _ (Assert (Constant (BasicVal (LogVal True)) _) loc) =
   Just $ SubExp $ Constant (BasicVal Checked) loc
 simplifyAssert _ _ =
   Nothing
 
-simplifyConjoin :: LetTopDownRule u
+simplifyConjoin :: LetTopDownRule lore u
 simplifyConjoin look (Conjoin es loc) =
   -- Remove trivial certificates.
   let check seen (Constant (BasicVal Checked) _) = seen
@@ -563,7 +576,7 @@ simplifyConjoin look (Conjoin es loc) =
          | otherwise         -> Nothing
 simplifyConjoin _ _ = Nothing
 
-simplifyIndexing :: LetTopDownRule u
+simplifyIndexing :: LetTopDownRule lore u
 simplifyIndexing look (Index cs idd inds loc) =
   case look $ identName idd of
     Nothing -> Nothing
@@ -608,13 +621,14 @@ simplifyIndexing look (Index cs idd inds loc) =
 
 simplifyIndexing _ _ = Nothing
 
-evaluateBranch :: TopDownRule u
-evaluateBranch _ (Let pat () (If e1 tb fb t _))
+evaluateBranch :: ProperBinder m => TopDownRule m
+evaluateBranch _ (Let pat _ (If e1 tb fb t _))
   | Just branch <- checkBranch =
   let ses = resultSubExps $ bodyResult branch
       ses' = subExpShapeContext t ses ++ ses
-  in return $ bodyBindings branch ++ [Let [p] () $ SubExp se
-                                     | (p,se) <- zip pat ses']
+  in do mapM_ addBinding $ bodyBindings branch
+        sequence_ [ letBindPat (Pattern [p]) $ SubExp se
+                  | (p,se) <- zip (patternBindees pat) ses']
   where checkBranch
           | isCt1 e1  = Just tb
           | isCt0 e1  = Just fb
@@ -624,54 +638,56 @@ evaluateBranch _ _ = cannotSimplify
 -- IMPROVE: This rule can be generalised to work in more cases,
 -- especially when the branches have bindings, or return more than one
 -- value.
-simplifyBoolBranch :: TopDownRule u
+simplifyBoolBranch :: ProperBinder m => TopDownRule m
 -- if c then True else False == c
 simplifyBoolBranch _
-  (Let [v] ()
+  (Let pat _
    (If cond
     (Body [] (Result _ [Constant (BasicVal (LogVal True)) _] _))
     (Body [] (Result _ [Constant (BasicVal (LogVal False)) _] _))
     _ _)) =
-  return [Let [v] () $ SubExp cond]
+  letBindPat pat $ SubExp cond
 -- When typeOf(x)==bool, if c then x else y == (c && x) || (!c && y)
-simplifyBoolBranch _ (Let [v] () (If cond tb fb ts loc))
+simplifyBoolBranch _ (Let pat _ (If cond tb fb ts loc))
   | Body [] (Result [] [tres] _) <- tb,
     Body [] (Result [] [fres] _) <- fb,
     all (==Basic Bool) ts,
     False = do -- FIXME: disable because algebraic optimiser cannot handle it.
-  (e, bnds) <-
-    runBinder'' (eBinOp LogOr (pure $ BinOp LogAnd cond tres (Basic Bool) loc)
-                              (eBinOp LogAnd (pure $ Not cond loc)
-                                             (pure $ SubExp fres) (Basic Bool) loc)
-                              (Basic Bool) loc)
-  return $ bnds ++ [Let [v] () e]
+  e <- eBinOp LogOr (pure $ BinOp LogAnd cond tres (Basic Bool) loc)
+                    (eBinOp LogAnd (pure $ Not cond loc)
+                     (pure $ SubExp fres) (Basic Bool) loc)
+       (Basic Bool) loc
+  letBindPat pat e
 simplifyBoolBranch _ _ = cannotSimplify
 
-hoistBranchInvariant :: TopDownRule u
-hoistBranchInvariant _ (Let pat () (If e1 tb fb ts loc)) =
+hoistBranchInvariant :: ProperBinder m => TopDownRule m
+hoistBranchInvariant _ (Let pat _ (If e1 tb fb ts loc)) = do
   let Result tcs tses tresloc = bodyResult tb
       Result fcs fses fresloc = bodyResult fb
-      (pat', res, invariant) =
-        foldl branchInvariant ([], [], []) $
-        zip pat (zip3 tses fses ts)
-      (tses', fses', ts') = unzip3 res
+  (pat', res, invariant) <-
+    foldM branchInvariant ([], [], False) $
+    zip (patternBindees pat) (zip3 tses fses ts)
+  let (tses', fses', ts') = unzip3 res
       tb' = resultBody tcs tses' tresloc `setBodyResult` tb
       fb' = resultBody fcs fses' fresloc `setBodyResult` fb
-  in if null invariant
-     then cannotSimplify
-     else return $ invariant ++ [Let pat' () $ If e1 tb' fb' ts' loc]
+  if invariant -- Was something hoisted?
+     then letBindPat (Pattern pat') $ If e1 tb' fb' ts' loc
+     else cannotSimplify
   where branchInvariant (pat', res, invariant) (v, (tse, fse, t))
-          | tse == fse = (pat', res, Let [v] () (SubExp tse) : invariant)
-          | otherwise  = (v:pat', (tse,fse,t):res, invariant)
+          | tse == fse = do
+            letBindPat (Pattern [v]) $ SubExp tse
+            return (pat', res, True)
+          | otherwise  =
+            return (v:pat', (tse,fse,t):res, invariant)
 hoistBranchInvariant _ _ = cannotSimplify
 
-simplifyScalExp :: TopDownRule u
-simplifyScalExp vtable (Let pat () e)
+simplifyScalExp :: ProperBinder m => TopDownRule m
+simplifyScalExp vtable (Let pat _ e)
   | Just orig <- SE.toScalExp (`ST.lookupScalExp` vtable) e,
     Right new@(SE.Val _) <- AS.simplify orig loc ranges,
     orig /= new = do
-      (e', bnds) <- SE.fromScalExp loc new
-      return $ bnds ++ [Let pat () e']
+      e' <- SE.fromScalExp' loc new
+      letBindPat pat e'
   where loc = srclocOf e
         ranges = HM.filter nonEmptyRange $ HM.map toRep $ ST.bindings vtable
         toRep entry = (ST.bindingDepth entry, lower, upper)
@@ -679,21 +695,21 @@ simplifyScalExp vtable (Let pat () e)
         nonEmptyRange (_, lower, upper) = isJust lower || isJust upper
 simplifyScalExp _ _ = cannotSimplify
 
-removeUnnecessaryCopy :: BottomUpRule u
-removeUnnecessaryCopy (_,used) (Let [v] () (Copy se _))
+removeUnnecessaryCopy :: ProperBinder m => BottomUpRule m
+removeUnnecessaryCopy (_,used) (Let (Pattern [v]) _ (Copy se _))
   | not $ any (`UT.isConsumed` used) $
-    identName v : HS.toList (aliases $ subExpType se) =
-    return [Let [v] () $ SubExp se]
+    bindeeName v : HS.toList (aliases $ subExpType se) =
+    letBind [bindeeIdent v] $ SubExp se
 removeUnnecessaryCopy _ _ = cannotSimplify
 
 -- | Remove the return values of a branch, that are not actually used
 -- after a branch.  Standard dead code removal can remove the branch
 -- if *none* of the return values are used, but this rule is more
 -- precise.
-removeDeadBranchResult :: BottomUpRule u
-removeDeadBranchResult (_, used) (Let pat () (If e1 tb fb ts loc))
+removeDeadBranchResult :: ProperBinder m => BottomUpRule m
+removeDeadBranchResult (_, used) (Let pat _ (If e1 tb fb ts loc))
   | -- Figure out which of the names in 'pat' are used...
-    patused <- map ((`UT.used` used) . identName) pat,
+    patused <- map (`UT.used` used) $ patternNames pat,
     -- If they are not all used, then this rule applies.
     not (and patused) =
   -- Remove the parts of the branch-results that correspond to dead
@@ -705,8 +721,8 @@ removeDeadBranchResult (_, used) (Let pat () (If e1 tb fb ts loc))
       tb' = resultBody tcs (pick tses) tresloc `setBodyResult` tb
       fb' = resultBody fcs (pick fses) fresloc `setBodyResult` fb
       ts' = pick ts
-      pat' = pick pat
-  in return [Let pat' () $ If e1 tb' fb' ts' loc]
+      pat' = pick $ patternIdents pat
+  in letBind pat' $ If e1 tb' fb' ts' loc
 removeDeadBranchResult _ _ = cannotSimplify
 
 -- Some helper functions
@@ -737,7 +753,7 @@ arrValInd v@(ArrayVal arr _) (i:is)
   | i >= 0, i < valueSize v = arrValInd (arr ! i) is
 arrValInd _ _ = Nothing
 
-arrLitInd :: Exp -> [Int] -> Maybe Exp
+arrLitInd :: Exp lore -> [Int] -> Maybe (Exp lore)
 arrLitInd e [] = Just e
 arrLitInd (ArrayLit els _ _) (i:is)
   | i >= 0, i < length els = arrLitInd (SubExp $ els !! i) is

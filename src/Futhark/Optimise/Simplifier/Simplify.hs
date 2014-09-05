@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleInstances, MultiParamTypeClasses, TypeFamilies, FlexibleContexts #-}
 -- | This module exports 'Simplify', the monad used for writing
 -- simplification rules.
 module Futhark.Optimise.Simplifier.Simplify
@@ -14,42 +14,48 @@ import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Trans.Maybe
 
-import Futhark.Representation.Basic
+import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 import Futhark.Binder
 
-newtype Simplify a = Simplify (MaybeT Binder a)
-  deriving (Functor, Applicative,
-            Monad, MonadState (NameSource VName))
+newtype Simplify m a = Simplify (MaybeT m a)
+  deriving (Functor, Applicative, Monad)
 
-instance MonadFreshNames Simplify where
-  getNameSource = get
-  putNameSource = put
+instance MonadFreshNames m => MonadFreshNames (Simplify m) where
+  getNameSource = Simplify . lift $ getNameSource
+  putNameSource = Simplify . lift . putNameSource
 
-instance MonadBinder Simplify where
-  addBinding                   = Simplify . lift . addBinding
+instance BindableM m => BindableM (Simplify m) where
+  type Lore (Simplify m) = Lore m
+  loreForExpM = Simplify . lift . loreForExpM
+  loreForBindingM = Simplify . lift . loreForBindingM
+
+instance MonadBinder m => MonadBinder (Simplify m) where
+  addBinding             = Simplify . lift . addBinding
   collectBindings (Simplify m) = Simplify $ MaybeT $ do
     (x, bnds) <- collectBindings $ runMaybeT m
     case x of Nothing -> return Nothing
               Just x' -> return $ Just (x', bnds)
 
-instance Alternative Simplify where
+instance MonadBinder m => Alternative (Simplify m) where
   empty = Simplify $ MaybeT $ return Nothing
   Simplify m1 <|> Simplify m2 = Simplify $ do
     (x, bnds) <- lift $ collectBindings $ runMaybeT m1
     case x of Nothing -> m2
               Just x' -> do lift $ mapM_ addBinding bnds
                             return x'
+simplify :: MonadBinder m =>
+            Simplify m a
+         -> m (Maybe (a, [Binding (Lore m)]))
+simplify (Simplify m) = do
+  (x, bnds) <- collectBindings $ runMaybeT m
+  case x of
+    Just x' -> return $ Just (x', bnds)
+    Nothing -> return Nothing
 
-simplify :: MonadFreshNames m => Simplify [Binding] -> m (Maybe [Binding])
-simplify (Simplify m) = modifyNameSource $ \src ->
-  case runBinderWithNameSource (runMaybeT m) src of
-    ((Just bnds, extrabnds), src') -> (Just $ extrabnds ++ bnds, src')
-    ((Nothing, _), _)              -> (Nothing, src)
-
-cannotSimplify :: Simplify a
+cannotSimplify :: Monad m => Simplify m a
 cannotSimplify = fail "Cannot simplify"
 
-liftMaybe :: Maybe a -> Simplify a
+liftMaybe :: Monad m => Maybe a -> Simplify m a
 liftMaybe Nothing = fail "Nothing"
 liftMaybe (Just x) = return x

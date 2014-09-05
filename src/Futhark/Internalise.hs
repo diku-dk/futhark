@@ -177,7 +177,7 @@ internaliseExp desc (E.Apply fname args rettype loc) = do
 
 internaliseExp desc (E.LetPat pat e body loc) = do
   (c,ks) <- tupToIdentList desc e
-  bindingPattern pat
+  bindingTupIdent pat
     (Just $ certOrGiven loc c)
     (staticShapes $ map I.identType ks) $ \pat' -> do
     forM_ (zip pat' $ map I.Var ks) $ \(p,se) ->
@@ -201,8 +201,8 @@ internaliseExp desc (E.DoLoop mergepat mergeexp i bound loopbody letbody loc) = 
   let mergeexp' = prefixSubExpShapes $ map I.Var $ maybeToList c ++ mergevs
       merge = zip mergepat' mergeexp'
       loop = I.DoLoop respat merge i' bound' loopbody' loc
-  bindingPattern mergepat Nothing (I.typeOf loop) $ \mergepat'' -> do
-    addBinding $ I.Let mergepat'' () loop
+  bindingTupIdent mergepat Nothing (I.typeOf loop) $ \mergepat'' -> do
+    letBind mergepat'' loop
     internaliseExp desc letbody
 
 internaliseExp desc (E.LetWith cs name src idxcs idxs ve body loc) = do
@@ -218,7 +218,7 @@ internaliseExp desc (E.LetWith cs name src idxcs idxs ve body loc) = do
   let comb (dname, sname, vname) =
         letWithBind (cs'++idxcs') dname sname idxs' $ I.Var vname
   mapM_ comb $ zip3 dsts srcs vnames
-  bindingPattern (E.Id name) (Just $ certOrGiven loc c)
+  bindingTupIdent (E.Id name) (Just $ certOrGiven loc c)
                              (I.staticShapes $ map I.identType dsts) $ \pat' -> do
     forM_ (zip pat' dsts) $ \(p,dst) ->
       letBind [p] $ I.SubExp $ I.Var dst

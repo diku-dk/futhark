@@ -110,8 +110,8 @@ internaliseMapLambda internaliseBody ce lam args = do
   return $ I.Lambda params body' rettype' loc
   where loc = srclocOf lam
 
-makeShapeFun :: MonadFreshNames m =>
-                [I.Param] -> I.Body -> [I.ConstType] -> SrcLoc -> m I.Lambda
+makeShapeFun :: [I.Param] -> I.Body -> [I.ConstType] -> SrcLoc
+             -> InternaliseM I.Lambda
 makeShapeFun params body rettype loc = do
   -- Some of 'params' may be unique, which means that the shape slice
   -- would consume its input.  This is not acceptable - that input is
@@ -129,10 +129,10 @@ assertResultShape desiredShapes (I.Body bnds res) = do
             newIdent "shape_check" (I.Basic I.Bool) loc
   let check desired computed = I.BinOp I.Equal (I.Var desired) computed
                                (I.Basic I.Bool) loc
-      cmps = [ Let [v] () e |
+      cmps = [ mkLet [v] e |
                (v,e) <- zip checks $
                         zipWith check desiredShapes computedShapes ]
-      asserts = [Let [cert] () e |
+      asserts = [mkLet [cert] e |
                  (cert,e) <- zip certs $
                             map ((`I.Assert` loc) . I.Var) checks]
   return $ I.Body (bnds++cmps++asserts)

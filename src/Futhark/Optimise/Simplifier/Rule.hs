@@ -22,55 +22,56 @@ module Futhark.Optimise.Simplifier.Rule
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Optimise.Simplifier.Simplify
-import Futhark.Representation.Basic
-import Futhark.MonadFreshNames
+import Futhark.Representation.AST
+import Futhark.Binder
 
-type SimplificationRule a = a -> Binding -> Simplify [Binding]
+type SimplificationRule m a = a -> Binding (Lore m) -> Simplify m ()
 
 -- | A rule applied during top-down traversal of the program.  Takes a
 -- symbol table as argument.
-type TopDownRule u = SimplificationRule (ST.SymbolTable u)
+type TopDownRule m = SimplificationRule m (ST.SymbolTable (Lore m))
 
 -- | A collection of top-down rules.
-type TopDownRules u = [TopDownRule u]
+type TopDownRules m = [TopDownRule m]
 
 -- | A rule applied during bottom-up traversal of the program.  Takes
 -- a symbol table and usage table as arguments.
-type BottomUpRule u = SimplificationRule (ST.SymbolTable u, UT.UsageTable)
+type BottomUpRule m = SimplificationRule m (ST.SymbolTable (Lore m), UT.UsageTable)
 
 -- | A collection of bottom-up rules.
-type BottomUpRules u = [BottomUpRule u]
+type BottomUpRules m = [BottomUpRule m]
 
 -- | A collection of both top-down and bottom-up rules.
-type RuleBook u = (TopDownRules u, BottomUpRules u)
+type RuleBook m = (TopDownRules m, BottomUpRules m)
 
 -- | @simplifyBinding lookup bnd@ performs simplification of the
 -- binding @bnd@.  If simplification is possible, a replacement list
--- of bindings is returned, that bind at least the same banes as the
+-- of bindings is returned, that bind at least the same names as the
 -- original binding (and possibly more, for intermediate results).
-topDownSimplifyBinding :: MonadFreshNames m =>
-                          RuleBook u
-                       -> ST.SymbolTable u
-                       -> Binding
-                       -> m (Maybe [Binding])
+topDownSimplifyBinding :: MonadBinder m =>
+                          RuleBook m
+                       -> ST.SymbolTable (Lore m)
+                       -> Binding (Lore m)
+                       -> m (Maybe [Binding (Lore m)])
 topDownSimplifyBinding = applyRules . fst
 
 -- | @simplifyBinding uses bnd@ performs simplification of the binding
 -- @bnd@.  If simplification is possible, a replacement list of
--- bindings is returned, that bind at least the same banes as the
+-- bindings is returned, that bind at least the same names as the
 -- original binding (and possibly more, for intermediate results).
 -- The first argument is the set of names used after this binding.
-bottomUpSimplifyBinding :: MonadFreshNames m =>
-                           RuleBook u
-                        -> (ST.SymbolTable u, UT.UsageTable)
-                        -> Binding
-                        -> m (Maybe [Binding])
+bottomUpSimplifyBinding :: MonadBinder m =>
+                           RuleBook m
+                        -> (ST.SymbolTable (Lore m), UT.UsageTable)
+                        -> Binding (Lore m)
+                        -> m (Maybe [Binding (Lore m)])
 bottomUpSimplifyBinding = applyRules . snd
 
-applyRules :: MonadFreshNames m =>
-              [SimplificationRule a] -> a -> Binding -> m (Maybe [Binding])
+applyRules :: MonadBinder m =>
+              [SimplificationRule m a] -> a -> Binding (Lore m)
+           -> m (Maybe [Binding (Lore m)])
 applyRules []           _    _      = return Nothing
 applyRules (rule:rules) context bnd = do
   res <- simplify $ rule context bnd
-  case res of Just bnds -> return $ Just bnds
-              Nothing   -> applyRules rules context bnd
+  case res of Just ((), bnds) -> return $ Just bnds
+              Nothing         -> applyRules rules context bnd

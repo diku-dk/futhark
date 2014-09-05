@@ -28,7 +28,7 @@ import Data.List
 import Data.Loc
 import qualified Data.HashMap.Strict as HM
 
-import Futhark.Representation.Basic
+import Futhark.Representation.AST
 
 -- | An error happened during execution, and this is why.
 data InterpreterError = MissingEntryPoint Name
@@ -146,7 +146,8 @@ arrays ts v =
 -- you'll get an error from the interpreter - it may just as well
 -- silently return a wrong value.  You are, however, guaranteed that
 -- the initial call to 'prog' is properly checked.
-runFun :: Name -> [Value] -> Prog -> (Either InterpreterError [Value], Trace)
+runFun :: Name -> [Value] -> Prog lore
+       -> (Either InterpreterError [Value], Trace)
 runFun fname mainargs prog = do
   let ftable = foldl expand builtins $ progFunctions prog
       futharkenv = FutharkEnv { envVtable = HM.empty
@@ -176,7 +177,7 @@ runFun fname mainargs prog = do
       in HM.insert name fun ftable
 
 -- | As 'runFun', but throws away the trace.
-runFunNoTrace :: Name -> [Value] -> Prog -> Either InterpreterError [Value]
+runFunNoTrace :: Name -> [Value] -> Prog lore -> Either InterpreterError [Value]
 runFunNoTrace = ((.) . (.) . (.)) fst runFun -- I admit this is just for fun.
 
 --------------------------------------------
@@ -222,16 +223,16 @@ evalSubExp :: SubExp -> FutharkM Value
 evalSubExp (Var ident)    = lookupVar ident
 evalSubExp (Constant v _) = return v
 
-evalBody :: Body -> FutharkM [Value]
+evalBody :: Body lore -> FutharkM [Value]
 
 evalBody (Body [] (Result _ es _)) =
   mapM evalSubExp es
 
 evalBody (Body (Let pat _ e:bnds) res) = do
   v <- evalExp e
-  binding (zip pat v) $ evalBody $ Body bnds res
+  binding (zip (patternIdents pat) v) $ evalBody $ Body bnds res
 
-evalExp :: Exp -> FutharkM [Value]
+evalExp :: Exp lore -> FutharkM [Value]
 
 evalExp (SubExp se) =
   single <$> evalSubExp se
@@ -498,7 +499,7 @@ evalBoolBinOp op e1 e2 loc = do
     _ ->
       bad $ TypeError loc $ "evalBoolBinOp " ++ ppValue v1 ++ " " ++ ppValue v2
 
-applyLambda :: Lambda -> [Value] -> FutharkM [Value]
+applyLambda :: Lambda lore -> [Value] -> FutharkM [Value]
 applyLambda (Lambda params body rettype loc) args =
   do v <- binding (zip (map fromParam params) args) $ evalBody body
      checkReturnShapes loc rettype v

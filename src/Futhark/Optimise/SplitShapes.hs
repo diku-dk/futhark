@@ -92,8 +92,9 @@ substituteExtResultShapes rettype (Body bnds res) = do
         isSubst (Var v1, Var v2) = Just (identName v1, identName v2)
         isSubst _                = Nothing
 
-        substInBnd (Let pat () e) =
-          Let <$> mapM substInBnd' pat <*> pure () <*> pure (substituteNames subst e)
+        substInBnd (Let pat _ e) =
+          mkLet <$> mapM substInBnd' (patternIdents pat) <*>
+          pure (substituteNames subst e)
         substInBnd' v
           | identName v `HM.member` subst = newIdent' (<>"unused") v
           | otherwise                     = return v
@@ -135,21 +136,23 @@ substCalls subst (origFname,origRettype,params,fbody,origloc) = do
           body <- treatBody $ lambdaBody lam
           return $ lam { lambdaBody = body }
 
-        treatBinding (Let pat () (Apply fname args _ loc))
+        treatBinding (Let pat _ (Apply fname args _ loc))
           | Just (shapefun,shapetype,valfun,valtype) <- lookup fname subst =
             liftM snd . runBinder'' $ do
-              let (vs,vals) = splitAt (length shapetype) pat
+              let (vs,vals) = splitAt (length shapetype) $ patternBindees pat
                   shapeargs = [ (arg, Observe) | (arg,_) <- args ]
                   shapetype' = returnType shapetype (repeat Observe) $
                                map (subExpType . fst) shapeargs
                   valtype' = returnType valtype (map snd args) $
                              map (subExpType . fst) args
-              letBind vs $ Apply shapefun args shapetype' loc
-              letBind vals $ Apply valfun ([(Var v,Observe) | v <- vs]++args) valtype' loc
+              letBindPat (Pattern vs) $
+                Apply shapefun args shapetype' loc
+              letBindPat (Pattern vals) $
+                Apply valfun ([(Var $ bindeeIdent v,Observe) | v <- vs]++args) valtype' loc
 
-        treatBinding (Let pat () e) = do
+        treatBinding (Let pat _ e) = do
           e' <- mapExpM mapper e
-          return [Let pat () e']
+          return [mkLetPat pat e']
           where mapper = identityMapper { mapOnBody = treatBody
                                         , mapOnLambda = treatLambda
                                         }

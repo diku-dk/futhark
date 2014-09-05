@@ -258,7 +258,7 @@ inputFromSubExp (Futhark.Var v) = Just $ Input (ArrayTransforms Seq.empty) $ Var
 inputFromSubExp _          = Nothing
 
 -- | Convert SOAC inputs to the corresponding expressions.
-inputsToSubExps :: [Input] -> Binder [SubExp]
+inputsToSubExps :: [Input] -> Binder Basic [SubExp]
 inputsToSubExps = mapM inputToExp'
   where inputToExp' (Input (ArrayTransforms ts) ia) = do
           ia' <- letSubExp "soac_input" $ inputArrayToExp ia
@@ -425,7 +425,7 @@ certificates (Filter  cs _   _   _) = cs
 certificates (Redomap cs _ _ _ _ _) = cs
 
 -- | Convert a SOAC to the corresponding expression.
-toExp :: SOAC -> Binder Exp
+toExp :: SOAC -> Binder Basic Exp
 toExp (Map cs l as loc) =
   Futhark.Map cs l <$> inputsToSubExps as <*> pure loc
 toExp (Reduce cs l args loc) =

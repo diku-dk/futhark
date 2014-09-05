@@ -13,6 +13,7 @@ import Control.Monad.Writer
 import qualified Data.Set as S
 
 import Futhark.Representation.Basic
+import Futhark.Binder (mkLetPat, mkPattern)
 
 -----------------------------------------------------------------
 -----------------------------------------------------------------
@@ -81,8 +82,8 @@ deadCodeElimSubExp (Constant v loc) = return $ Constant v loc
 
 deadCodeElimBodyM :: Body -> DCElimM Body
 
-deadCodeElimBodyM (Body (Let pat () e:bnds) res) = do
-  let idds = map identName pat
+deadCodeElimBodyM (Body (Let pat _ e:bnds) res) = do
+  let idds = patternNames pat
   ((pat',Body bnds' res'), noref) <-
     collectRes idds $ do
       (pat', _) <- collectRes idds $ deadCodeElimPat pat
@@ -92,7 +93,7 @@ deadCodeElimBodyM (Body (Let pat () e:bnds) res) = do
   if noref
   then changed $ return $ Body bnds' res'
   else do e' <- deadCodeElimExp e
-          return $ Body (Let pat' () e':bnds') res'
+          return $ Body (mkLetPat pat' e':bnds') res'
 
 deadCodeElimBodyM (Body [] (Result cs es loc)) =
   resultBody <$> mapM deadCodeElimIdent cs <*>
@@ -124,8 +125,8 @@ deadCodeElimIdent ident@(Ident vnm t _) = do
   dims <- mapM deadCodeElimSubExp $ arrayDims t
   return ident { identType = t `setArrayShape` Shape dims }
 
-deadCodeElimPat :: [IdentBase als Shape] -> DCElimM [IdentBase als Shape]
-deadCodeElimPat = mapM deadCodeElimBnd
+deadCodeElimPat :: Pattern -> DCElimM Pattern
+deadCodeElimPat = liftM mkPattern . mapM deadCodeElimBnd . patternIdents
 
 deadCodeElimBnd :: IdentBase als Shape -> DCElimM (IdentBase als Shape)
 deadCodeElimBnd ident = do
@@ -140,6 +141,6 @@ deadCodeElimType t = do
 deadCodeElimLambda :: Lambda -> DCElimM Lambda
 deadCodeElimLambda (Lambda params body rettype pos) = do
   body' <- deadCodeElimBodyM body
-  params' <- deadCodeElimPat params
+  params' <- mapM deadCodeElimBnd params
   rettype' <- mapM deadCodeElimType rettype
   return $ Lambda params' body' rettype' pos

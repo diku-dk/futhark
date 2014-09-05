@@ -130,8 +130,8 @@ binOp _ _ = Nothing
 compileLambda :: Lambda -> ([Param] -> Exp -> Maybe a) -> Maybe a
 compileLambda l f =
   case lambdaBody l of
-    Body [Let [k1] () op] (Result _ [Var k2] _)
-      | k1 == k2 -> f (lambdaParams l) op
+    Body [Let (Pattern [bindee]) _ op] (Result _ [Var k] _)
+      | bindeeIdent bindee == k -> f (lambdaParams l) op
     _ -> Nothing
 
 matches :: Ord a => [a] -> [a] -> Bool

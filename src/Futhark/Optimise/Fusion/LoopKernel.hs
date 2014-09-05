@@ -33,7 +33,8 @@ import Futhark.Optimise.Fusion.TryFusion
 import Futhark.Optimise.Fusion.Composing
 import Futhark.Tools
 
-transformOutput :: SOAC.ArrayTransforms -> [Ident] -> SOAC -> Binder ()
+transformOutput :: SOAC.ArrayTransforms -> [Ident] -> SOAC
+                -> Binder Basic ()
 transformOutput ts outIds soac =
   case SOAC.viewl ts of
     SOAC.EmptyL -> do e <- SOAC.toExp soac
@@ -44,7 +45,7 @@ transformOutput ts outIds soac =
       es     <- mapM (applyTransform t . Var) newIds
       zipWithM_ letBind (map (:[]) outIds) es
 
-applyTransform :: SOAC.ArrayTransform -> SubExp -> Binder Exp
+applyTransform :: SOAC.ArrayTransform -> SubExp -> Binder Basic Exp
 applyTransform (SOAC.Rearrange cs perm) v =
   return $ Rearrange cs perm v $ srclocOf v
 applyTransform (SOAC.Reshape cs shape) v =
@@ -267,7 +268,7 @@ fuseSOACwithKer outIds soac1 ker = do
       let (res_lam, new_inp) = fuseFilters lam1 inp1_arr outPairs lam2 inp2_arr name
       success $ SOAC.Filter (cs1++cs2) res_lam new_inp pos
 
-    -- Nothing else worked, so let's try rewriting to redomap if
+    -- Nothing else worked, so mkLets try rewriting to redomap if
     -- possible.
     (SOAC.Reduce _ lam args loc, _) | mapOrFilter soac1 -> do
        let (ne, arrs) = unzip args

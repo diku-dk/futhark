@@ -36,18 +36,18 @@ data ArrayOp = ReshapeOp VName [Imp.Exp] VName
 compileProg :: Prog -> String
 compileProg = GenericC.compileProg codeCompiler . ImpGen.compileProg compileExp
   where compileExp :: ImpGen.ExpCompiler ArrayOp
-        compileExp [target] (Reshape _ shape src _) = do
+        compileExp (Pattern [target]) (Reshape _ shape src _) = do
           let shape' = map ImpGen.compileSubExp shape
           src' <- ImpGen.expAsName (subExpType src) $ ImpGen.compileSubExp src
-          ImpGen.declareVar target
-          tell $ Imp.Op $ ReshapeOp (identName target) shape' src'
+          ImpGen.declareVar $ bindeeIdent target
+          tell $ Imp.Op $ ReshapeOp (bindeeName target) shape' src'
           return ImpGen.Done
-        compileExp [target1,target2] (Split _ n e _ _) = do
+        compileExp (Pattern [target1,target2]) (Split _ n e _ _) = do
           let n' = ImpGen.compileSubExp n
           e' <- ImpGen.expAsName (subExpType e) $ ImpGen.compileSubExp e
-          ImpGen.declareVar target1
-          ImpGen.declareVar target2
-          tell $ Imp.Op $ SplitOp (identName target1) (identName target2) n' e'
+          ImpGen.declareVar $ bindeeIdent target1
+          ImpGen.declareVar $ bindeeIdent target2
+          tell $ Imp.Op $ SplitOp (bindeeName target1) (bindeeName target2) n' e'
           return ImpGen.Done
         compileExp targets e = firstOrderSOACS targets e
 

@@ -78,7 +78,7 @@ bodyToLambda (NewNest (Nesting paramIds inps bndIds postBody retTypes) op) = do
   return Lambda { lambdaSrcLoc = loc
                 , lambdaParams = map toParam paramIds
                 , lambdaReturnType = retTypes
-                , lambdaBody = f $ Let bndIds () e `insertBinding` postBody
+                , lambdaBody = f $ mkLet bndIds e `insertBinding` postBody
                 }
   where loc = srclocOf op
 
@@ -176,7 +176,7 @@ setCombCertificates cs (Redomap _ fun bdy acc loc) = Redomap cs fun bdy acc loc
 fromExp :: Exp -> Either SOAC.NotSOAC SOACNest
 fromExp = liftM fromSOAC . SOAC.fromExp
 
-toExp :: SOACNest -> Binder Exp
+toExp :: SOACNest -> Binder Basic Exp
 toExp = SOAC.toExp <=< toSOAC
 
 fromSOAC :: SOAC -> SOACNest
@@ -197,7 +197,7 @@ fromSOAC (SOAC.Redomap cs ol l es as loc) =
 
 nested :: Lambda -> Maybe (Combinator, Nesting)
 nested l
-  | Body (Let ids () e:bnds) res <- lambdaBody l, -- Is a let-binding...
+  | Body (Let ids _ e:bnds) res <- lambdaBody l, -- Is a let-binding...
     Right soac <- fromSOAC <$> SOAC.fromExp e, -- ...the bindee is a SOAC...
     Just postBody <-
       checkPostBody (map fromParam $ lambdaParams l) $ Body bnds res =
@@ -205,7 +205,7 @@ nested l
             -- ... FIXME: need more checks here.
             Nesting { nestingParams = map fromParam $ lambdaParams l
                     , nestingInputs = inputs soac
-                    , nestingResult = ids
+                    , nestingResult = patternIdents ids
                     , nestingPostBody = postBody
                     , nestingReturnType = lambdaReturnType l
                     })

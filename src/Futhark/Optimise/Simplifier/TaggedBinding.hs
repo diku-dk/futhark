@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 -- | This module exports an extended variant of the 'Binding' type,
 -- which is tagged with extra useful information, particularly a
 -- symbol table entry corresponding to the binding.  This is a bit of
@@ -20,59 +21,63 @@ import Data.Monoid
 import Data.Loc
 import qualified Data.HashSet as HS
 
-import Futhark.Representation.Basic
+import Futhark.Representation.AST
 
+import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
+import Futhark.Binder (Proper)
 
-data TaggedBinding a = TaggedLet ([Ident],[(VName,ST.Entry a)]) (Exp, UT.UsageTable)
-                       -- The [(VName,ST.Entry a)] is just the names
-                       -- of the idents, as a cache, alongside the
-                       -- symbol table entry for each of those names.
-                       -- Similarly, the expression is tagged with
-                       -- what is free in it.
-                     deriving (Show, Eq)
+data TaggedBinding lore =
+  TaggedLet (Pattern lore,[(VName,ST.Entry lore)]) (Lore.Exp lore) (Exp lore, UT.UsageTable)
+  -- The [(VName,ST.Entry a)] is just the names
+  -- of the idents, as a cache, alongside the
+  -- symbol table entry for each of those names.
+  -- Similarly, the expression is tagged with
+  -- what is free in it.
 
-untagBinding :: TaggedBinding u -> Binding
-untagBinding (TaggedLet (pat,_) (e,_)) = Let pat () e
+untagBinding :: TaggedBinding lore -> Binding lore
+untagBinding (TaggedLet (pat,_) lore (e,_)) = Let pat lore e
 
-tagBinding :: ST.SymbolTable u -> Binding -> TaggedBinding u
-tagBinding vtable (Let pat () e) =
-  TaggedLet (pat, zip names entries) (e, usageInBinding $ Let pat () e)
-  where entries = ST.bindingEntries (Let pat () e) vtable
-        names = map identName pat
+tagBinding :: Proper lore => ST.SymbolTable lore -> Binding lore -> TaggedBinding lore
+tagBinding vtable bnd@(Let pat lore e) =
+  TaggedLet (pat, zip names entries) lore (e, usageInBinding bnd)
+  where entries = ST.bindingEntries (Let pat lore e) vtable
+        names = patternNames pat
 
-bindingEntries :: TaggedBinding u -> [(VName, ST.Entry u)]
-bindingEntries (TaggedLet (_,ds) _) = ds
+bindingEntries :: TaggedBinding lore -> [(VName, ST.Entry lore)]
+bindingEntries (TaggedLet (_,ds) _ _) = ds
 
-asTail :: TaggedBinding a -> Body
-asTail (TaggedLet (pat,_) (e,_)) = Body [Let pat () e] $ Result [] [] loc
-  where loc = srclocOf pat
+asTail :: TaggedBinding lore -> Body lore
+asTail (TaggedLet (pat,_) lore (e,_)) =
+  Body [Let pat lore e] $ Result [] [] loc
+  where loc = srclocOf e
 
-usage :: TaggedBinding a -> UT.UsageTable
-usage (TaggedLet _ (_,usedInE)) = usedInE
+usage :: TaggedBinding lore -> UT.UsageTable
+usage (TaggedLet _ _ (_,usedInE)) = usedInE
 
-requires :: TaggedBinding a -> Names
-requires (TaggedLet (pat,_) (_,usedInE)) =
-  HS.fromList (UT.keys usedInE) `mappend` freeInPat
-  where freeInPat  = mconcat $ map (freeInType . identType) pat
+requires :: FreeIn (Lore.Exp lore) => TaggedBinding lore -> Names
+requires (TaggedLet (pat,_) lore (_,usedInE)) =
+  HS.fromList (UT.keys usedInE) `mappend` freeInPat `mappend` freeNamesIn lore
+  where freeInPat  = mconcat $ map (freeInType . identType) $ patternIdents pat
 
-provides :: TaggedBinding a -> [VName]
-provides (TaggedLet (_,provs) _) = map fst provs
+provides :: TaggedBinding lore -> [VName]
+provides (TaggedLet (_,provs) _ _) = map fst provs
 
 freeInType :: Type -> Names
-freeInType = mconcat . map (freeNamesInExp . SubExp) . arrayDims
+freeInType = mconcat . map freeNamesInSubExp . arrayDims
 
-usageInBinding :: Binding -> UT.UsageTable
-usageInBinding (Let pat () e) =
-  usageInPat pat <> usageInExp e <> UT.usages (freeNamesInExp e)
+usageInBinding :: Proper lore => Binding lore -> UT.UsageTable
+usageInBinding (Let pat _ e) =
+  usageInPat pat <> usageInPatLore pat <> usageInExp e <> UT.usages (freeNamesInExp e)
   where usageInPat =
           UT.usages . HS.fromList . mapMaybe subExpUsage .
-          concatMap (arrayDims . identType)
+          concatMap (arrayDims . identType) . patternIdents
+        usageInPatLore = UT.usages . mconcat . map (freeNamesIn . bindeeLore) . patternBindees
         subExpUsage (Var v)       = Just $ identName v
         subExpUsage (Constant {}) = Nothing
 
-usageInExp :: Exp -> UT.UsageTable
+usageInExp :: Exp lore -> UT.UsageTable
 usageInExp (Assert (Var v) _) = UT.predicateUsage $ identName v
 usageInExp (Update _ src _ _ _) =
   mconcat $ map UT.consumedUsage $

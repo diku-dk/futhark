@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeFamilies, FlexibleContexts, FlexibleInstances #-}
 -- | This module provides various simple ways to query and manipulate
 -- fundamental Futhark terms, such as types and values.  The intent is to
 -- keep "Futhark.Language.Internal.Syntax" simple, and put whatever
@@ -8,6 +8,14 @@ module Futhark.Representation.AST.Attributes
   ( locStr
   , funDecByName
   , progNames
+
+  -- * Patterns
+
+  , bindeeName
+  , patternIdents
+  , patternNames
+  , patternTypes
+  , patternSize
 
   -- * Parameter handling
   , toParam
@@ -35,10 +43,13 @@ module Futhark.Representation.AST.Attributes
   , redomapType
   , typeOf
   , FreeIn (..)
+  , freeNamesIn
   , freeInBody
   , freeNamesInBody
   , freeInExp
   , freeNamesInExp
+  , freeInSubExp
+  , freeNamesInSubExp
   , consumedInBody
   , consumedInExp
   , safeExp
@@ -162,12 +173,12 @@ arrayShape _                = mempty
 
 -- | Return the dimensions of a type - for non-arrays, this is the
 -- empty list.
-arrayDims :: TypeBase als (Shape lore) -> [SubExp lore]
+arrayDims :: TypeBase als Shape -> [SubExp]
 arrayDims = shapeDims . arrayShape
 
 -- | Return the size of the given dimension.  If the dimension does
 -- not exist, the zero constant is returned.
-arraySize :: Int -> TypeBase als (Shape lore) -> SubExp lore
+arraySize :: Int -> TypeBase als Shape -> SubExp
 arraySize i t = case drop i $ arrayDims t of
                   e : _ -> e
                   _     -> intconst 0 noLoc
@@ -175,7 +186,7 @@ arraySize i t = case drop i $ arrayDims t of
 -- | Return the size of the given dimension in the first element of
 -- the given type list.  If the dimension does not exist, or no types
 -- are given, the zero constant is returned.
-arraysSize :: Int -> [TypeBase als (Shape lore)] -> SubExp lore
+arraysSize :: Int -> [TypeBase als Shape] -> SubExp
 arraysSize _ []    = intconst 0 noLoc
 arraysSize i (t:_) = arraySize i t
 
@@ -190,12 +201,12 @@ setArrayShape (Basic t)  _         = Basic t
 
 -- | Set the dimensions of an array.  If the given type is not an
 -- array, return the type unchanged.
-setArrayDims :: TypeBase as oldshape -> [SubExp lore] -> TypeBase as (Shape lore)
+setArrayDims :: TypeBase as oldshape -> [SubExp] -> TypeBase as Shape
 setArrayDims t dims = t `setArrayShape` Shape dims
 
 -- | Replace the size of the outermost dimension of an array.  If the
 -- given type is not an array, it is returned unchanged.
-setOuterSize :: TypeBase as (Shape lore) -> SubExp lore -> TypeBase as (Shape lore)
+setOuterSize :: TypeBase as Shape -> SubExp -> TypeBase as Shape
 setOuterSize t e = case arrayShape t of
                       Shape (_:es) -> t `setArrayShape` Shape (e : es)
                       _            -> t
@@ -276,11 +287,11 @@ toDecl (Array et sz u _) = Array et (Rank $ shapeRank sz) u ()
 toDecl (Basic et) = Basic et
 
 -- | Add (empty) aliasing information to a type.
-fromConstType :: ConstType lore -> Type lore
+fromConstType :: ConstType -> Type
 fromConstType t = t `setAliases` mempty
 
 -- | Remove aliasing information from a type.
-toConstType :: TypeBase als (Shape lore) -> ConstType lore
+toConstType :: TypeBase als Shape -> ConstType
 toConstType t = t `setAliases` ()
 
 -- | @peelArray n t@ returns the type resulting from peeling the first
@@ -367,8 +378,7 @@ unifyUniqueness t1 _ = t1
 
 -- | Compute the most specific generalisation of two types with
 -- existentially quantified shapes.
-generaliseResTypes :: Lore.Proper lore =>
-                      ResType lore -> ResType lore -> ResType lore
+generaliseResTypes :: ResType -> ResType -> ResType
 generaliseResTypes rt1 rt2 =
   evalState (zipWithM unifyExtShapes rt1 rt2) (0, HM.empty)
   where unifyExtShapes t1 t2 =
@@ -425,7 +435,7 @@ instance IsValue Bool where
 instance IsValue Char where
   value = BasicVal . CharVal
 
-valueType :: Value -> ConstType lore
+valueType :: Value -> ConstType
 valueType (BasicVal v) =
   Basic $ basicValueType v
 valueType v@(ArrayVal _ (Basic et)) =
@@ -459,7 +469,7 @@ arrayVal vs t = ArrayVal (listArray (0, length vs-1) vs) $
   where n = shapeRank $ arrayShape t
 
 -- | An empty array with the given row type.
-emptyArray :: TypeBase as (Shape lore) -> Value
+emptyArray :: TypeBase as Shape -> Value
 emptyArray = arrayVal []
 
 -- | If the given value is a nonempty array containing only
@@ -571,33 +581,33 @@ transposeDimension :: Int -> Int -> Int -> Int -> Int
 transposeDimension k n dim numDims =
   transposeIndex k n [0..numDims-1] !! dim
 
-shapeExps :: SubExp lore -> [SubExp lore]
+shapeExps :: SubExp -> [SubExp]
 shapeExps = shapeDims . arrayShape . subExpType
 
 -- | @reshapeOuter shape n src@ returns a 'Reshape' expression that
 -- replaces the outer @n@ dimensions of @src@ with @shape@.
-reshapeOuter :: [SubExp lore] -> Int -> SubExp lore -> [SubExp lore]
+reshapeOuter :: [SubExp] -> Int -> SubExp -> [SubExp]
 reshapeOuter shape n src = shape ++ drop n (shapeExps src)
 
 -- | @reshapeInner shape n src@ returns a 'Reshape' expression that
 -- replaces the inner @m-n@ dimensions (where @m@ is the rank of
 -- @src@) of @src@ with @shape@.
-reshapeInner :: [SubExp lore] -> Int -> SubExp lore -> [SubExp lore]
+reshapeInner :: [SubExp] -> Int -> SubExp -> [SubExp]
 reshapeInner shape n src = take n (shapeExps src) ++ shape
 
-varType :: Ident lore -> Type lore
+varType :: Ident -> Type
 varType ident = identType ident `changeAliases` HS.insert (identName ident)
 
-subExpType :: SubExp lore -> Type lore
+subExpType :: SubExp -> Type
 subExpType (Constant val _) = fromConstType $ valueType val
 subExpType (Var ident)      = varType ident
 
-bodyType :: Body lore -> ResType lore
+bodyType :: Body lore -> ResType
 bodyType (Body bnds res) =
   evalState (mapM makeBoundShapesFree $
              staticShapes $ map subExpType $ resultSubExps res)
   (0, HM.empty, HM.empty)
-  where boundInLet (Let pat _ _) = map identName pat
+  where boundInLet (Let pat _ _) = patternNames pat
         bound = HS.fromList $ concatMap boundInLet bnds
         makeBoundShapesFree t = do
           shape <- mapM checkDim $ extShapeDims $ arrayShape t
@@ -620,8 +630,8 @@ bodyType (Body bnds res) =
                           return $ Ext $ n+1
             Just replacement -> return replacement
 
-loopResultType :: SubExp lore ~ SubExp lore =>
-                  [Type lore] -> [(Ident lore, SubExp lore)] -> ResType lore
+loopResultType :: SubExp ~ SubExp =>
+                  [Type] -> [(Ident, SubExp)] -> ResType
 loopResultType restypes merge = evalState (mapM inspect restypes) 0
   where bound = map (identName . fst) merge
         inspect t = do
@@ -638,8 +648,8 @@ loopResultType restypes merge = evalState (mapM inspect restypes) 0
 -- pattern, but also any non-static shapes of arrays.  Thus,
 -- @loopResult res merge@ returns @res@ prefixed with with those
 -- variables in @merge@ that constitute the shape context.
-loopResult :: SubExp lore ~ SubExp lore =>
-              [Ident lore] -> [Ident lore] -> [Ident lore]
+loopResult :: SubExp ~ SubExp =>
+              [Ident] -> [Ident] -> [Ident]
 loopResult res merge = resShapes ++ res
   where notInRes (Constant _ _) = Nothing
         notInRes (Var v)
@@ -649,15 +659,15 @@ loopResult res merge = resShapes ++ res
         resShapes =
           nub $ concatMap (mapMaybe notInRes . arrayDims . identType) res
 
-staticShapes :: [TypeBase als (Shape lore)] -> [TypeBase als (ExtShape lore)]
+staticShapes :: [TypeBase als Shape] -> [TypeBase als ExtShape]
 staticShapes = map staticShapes'
   where staticShapes' (Basic bt) =
           Basic bt
         staticShapes' (Array bt (Shape shape) u als) =
           Array bt (ExtShape $ map Free shape) u als
 
-instantiateShapes :: Monad m => m (SubExp lore) -> [TypeBase als (ExtShape lore)]
-                  -> m [TypeBase als (Shape lore)]
+instantiateShapes :: Monad m => m SubExp -> [TypeBase als ExtShape]
+                  -> m [TypeBase als Shape]
 instantiateShapes f ts = evalStateT (mapM instantiate ts) HM.empty
   where instantiate t = do
           shape <- mapM instantiate' $ extShapeDims $ arrayShape t
@@ -671,8 +681,8 @@ instantiateShapes f ts = evalStateT (mapM instantiate ts) HM.empty
                           return se
         instantiate' (Free se) = return se
 
-existentialShapes :: [TypeBase als1 (ExtShape lore)] -> [TypeBase als2 (Shape lore)]
-                  -> [SubExp lore]
+existentialShapes :: [TypeBase als1 ExtShape] -> [TypeBase als2 Shape]
+                  -> [SubExp]
 existentialShapes t1s t2s = concat $ zipWith concreteShape' t1s t2s
   where concreteShape' t1 t2 =
           catMaybes $ zipWith concretise
@@ -681,7 +691,7 @@ existentialShapes t1s t2s = concat $ zipWith concreteShape' t1s t2s
         concretise (Ext _) se  = Just se
         concretise (Free _) _  = Nothing
 
-shapeContext :: [TypeBase als (ExtShape lore)] -> [[a]] -> [a]
+shapeContext :: [TypeBase als ExtShape] -> [[a]] -> [a]
 shapeContext ts shapes =
   evalState (concat <$> zipWithM extract ts shapes) HS.empty
   where extract t shape =
@@ -693,15 +703,15 @@ shapeContext ts shapes =
                    else Just v
         extract' (Free _) _ = return Nothing
 
-valueShapeContext :: [TypeBase als (ExtShape lore)] -> [Value] -> [Value]
+valueShapeContext :: [TypeBase als ExtShape] -> [Value] -> [Value]
 valueShapeContext rettype values =
   map value $ shapeContext rettype $ map valueShape values
 
-subExpShapeContext :: [TypeBase als (ExtShape lore)] -> [SubExp lore] -> [SubExp lore]
+subExpShapeContext :: [TypeBase als ExtShape] -> [SubExp] -> [SubExp]
 subExpShapeContext rettype ses =
   shapeContext rettype $ map (arrayDims . subExpType) ses
 
-hasStaticShape :: ResType lore -> Maybe [Type lore]
+hasStaticShape :: ResType -> Maybe [Type]
 hasStaticShape = mapM hasStaticShape'
   where hasStaticShape' (Basic bt) =
           Just $ Basic bt
@@ -710,24 +720,24 @@ hasStaticShape = mapM hasStaticShape'
         isFree (Free s) = Just s
         isFree (Ext _)  = Nothing
 
-mapType :: SubExp lore ~ SubExp lore =>
-           Lambda lore -> [SubExp lore] -> [Type lore]
+mapType :: SubExp ~ SubExp =>
+           Lambda lore -> [SubExp] -> [Type]
 mapType f arrs = [ arrayOf t (Shape [outersize]) (uniqueness t)
                  | t <- lambdaType f arrts ]
   where outersize = arraysSize 0 arrts
         arrts     = map subExpType arrs
 
-reduceType :: Lambda lore -> [(SubExp lore, SubExp lore)] -> [Type lore]
+reduceType :: Lambda lore -> [(SubExp, SubExp)] -> [Type]
 reduceType fun inputs =
   lambdaType fun $ map subExpType acc ++ map subExpType arrs
   where (acc, arrs) = unzip inputs
 
-scanType :: Lambda lore -> [(SubExp lore, SubExp lore)] -> [Type lore]
+scanType :: Lambda lore -> [(SubExp, SubExp)] -> [Type]
 scanType _ inputs =
   map ((`setUniqueness` Unique) . subExpType) arrs
   where (_, arrs) = unzip inputs
 
-filterType :: Lambda lore -> [SubExp lore] -> ResType lore
+filterType :: Lambda lore -> [SubExp] -> ResType
 filterType _ =
   map (extOuterDim . subExpType)
   where extOuterDim t =
@@ -735,7 +745,7 @@ filterType _ =
         extOuterDim' (Shape dims) =
           Ext 0 : map Free (drop 1 dims)
 
-redomapType:: Lambda lore -> Lambda lore -> [SubExp lore] -> [SubExp lore] -> [Type lore]
+redomapType:: Lambda lore -> Lambda lore -> [SubExp] -> [SubExp] -> [Type]
 redomapType outerfun innerfun acc arrs =
   lambdaType outerfun $ lambdaType innerfun (innerres ++ innerres)
   where innerres = lambdaType innerfun
@@ -743,7 +753,7 @@ redomapType outerfun innerfun acc arrs =
 
 -- | The type of an Futhark term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
-typeOf :: SubExp lore ~ SubExp lore => Exp lore -> ResType lore
+typeOf :: SubExp ~ SubExp => Exp lore -> ResType
 typeOf (SubExp se) = staticShapes [subExpType se]
 typeOf (ArrayLit es rt loc) =
   staticShapes [arrayOf rt (Shape [n]) $
@@ -798,7 +808,7 @@ typeOf (Redomap _ outerfun innerfun acc arrs _) =
 
 -- | The result of applying the arguments of the given types to the
 -- given tuple lambda function.
-lambdaType :: Lambda lore -> [Type lore] -> [Type lore]
+lambdaType :: Lambda lore -> [Type] -> [Type]
 lambdaType (Lambda params _ ets _) =
   returnType ets ds
   where ds = map (diet . identType) params
@@ -837,7 +847,7 @@ progNames = execWriter . mapM funNames . progFunctions
         bodyNames = mapM_ bindingNames . bodyBindings
 
         bindingNames (Let pat _ e) =
-          mapM_ one pat >> expNames e
+          mapM_ one (patternIdents pat) >> expNames e
 
         expNames (DoLoop _ pat i _ loopbody _) =
           mapM_ (one . fst) pat >> one i >> bodyNames loopbody
@@ -858,7 +868,7 @@ setBodyResult result = mapResult $ const result
 -- | Change that subexpression where evaluation of the body would
 -- stop.
 mapResultM :: (Applicative m, Monad m) =>
-              (Result lore -> m (Body lore)) -> Body lore -> m (Body lore)
+              (Result -> m (Body lore)) -> Body lore -> m (Body lore)
 mapResultM f (Body bnds res) = do
   Body bnds2 res' <- f res
   return $ Body (bnds++bnds2) res'
@@ -872,16 +882,36 @@ insertBindings :: [Binding lore] -> Body lore -> Body lore
 insertBindings bnds1 (Body bnds2 res) = Body (bnds1++bnds2) res
 
 -- | Conveniently construct a body that contains no bindings.
-resultBody :: Certificates lore -> [SubExp lore] -> SrcLoc -> Body lore
+resultBody :: Certificates -> [SubExp] -> SrcLoc -> Body lore
 resultBody cs ses loc = Body [] $ Result cs ses loc
 
 -- | Change that result where evaluation of the body would stop.  Also
 -- change type annotations at branches.  This a non-monadic variant of
 -- @mapResultM@.
-mapResult :: (Result lore -> Body lore) -> Body lore -> Body lore
+mapResult :: (Result -> Body lore) -> Body lore -> Body lore
 mapResult f e = runIdentity $ mapResultM (return . f) e
 
-freeWalker :: FreeIn lore => Walker lore (Writer (HS.HashSet (Ident lore)))
+-- | Returh the name bound by a 'Bindee'.
+bindeeName :: Bindee lore -> VName
+bindeeName = identName . bindeeIdent
+
+-- | Return a list of the 'Ident's bound by the 'Pattern'.
+patternIdents :: Pattern lore -> [Ident]
+patternIdents (Pattern xs) = map bindeeIdent xs
+
+-- | Return a list of the 'Name's bound by the 'Pattern'.
+patternNames :: Pattern lore -> [VName]
+patternNames = map identName . patternIdents
+
+-- | Return a list of the 'types's bound by the 'Pattern'.
+patternTypes :: Pattern lore -> [Type]
+patternTypes = map identType . patternIdents
+
+-- | Return the number of names bound by the 'Pattern'.
+patternSize :: Pattern lore -> Int
+patternSize = length . patternBindees
+
+freeWalker :: FreeIn (Lore.Exp lore) => Walker lore (Writer (HS.HashSet Ident))
 freeWalker = identityWalker {
                walkOnSubExp = subExpFree
              , walkOnBody = bodyFree
@@ -890,26 +920,30 @@ freeWalker = identityWalker {
              , walkOnIdent = identFree
              , walkOnCertificates = mapM_ identFree
              }
-  where identFree ident = do
-          tell $ HS.singleton ident
-          typeFree $ identType ident
+  where identFree = tell . freeInIdent
 
-        subExpFree (Var ident) = identFree ident
-        subExpFree (Constant {})  = return ()
+        subExpFree = tell . freeInSubExp
+
+        lambdaFree = tell . freeInLambda
+
+        typeFree = tell . freeInType
+
+        binding bound = censor (`HS.difference` bound)
 
         bodyFree (Body [] (Result cs ses _)) = do
           mapM_ identFree cs
           mapM_ subExpFree ses
-        bodyFree (Body (Let pat _ e:bnds) res) = do
+        bodyFree (Body (Let pat annot e:bnds) res) = do
           expFree e
-          binding (HS.fromList pat) $ do
-            mapM_ (typeFree . identType) pat
+          tell $ freeIn annot
+          binding (HS.fromList $ patternIdents pat) $ do
+            mapM_ typeFree $ patternTypes pat
             bodyFree $ Body bnds res
 
         bindingFree (Let pat annot e) = do
-          tell $ freeInBindingLore annot
-          binding (HS.fromList pat) $ do
-            mapM_ (typeFree . identType) pat
+          tell $ freeIn annot
+          binding (HS.fromList $ patternIdents pat) $ do
+            mapM_ typeFree $ patternTypes pat
             expFree e
 
         expFree (DoLoop _ merge i boundexp loopbody _) = do
@@ -919,30 +953,48 @@ freeWalker = identityWalker {
           binding (i `HS.insert` HS.fromList mergepat) $ do
             mapM_ (typeFree . identType) mergepat
             bodyFree loopbody
+
         expFree e = walkExpM freeWalker e
 
-        lambdaFree = tell . freeInLambda
+-- | Return the set of identifiers that are free in the given
+-- identifier (including its type).
+freeInIdent :: Ident -> HS.HashSet Ident
+freeInIdent ident =
+  ident `HS.insert`
+  mconcat (map freeInSubExp $ arrayDims $ identType ident)
 
-        typeFree = mapM_ subExpFree . shapeDims . arrayShape
+-- | Return the set of identifiers that are free in the given
+-- subexpression.
+freeInSubExp :: SubExp -> HS.HashSet Ident
+freeInSubExp (Var ident)   = freeInIdent ident
+freeInSubExp (Constant {}) = HS.empty
 
-        binding bound = censor (`HS.difference` bound)
+-- | As 'freeInSubExp', but returns the raw names rather than
+-- 'Ident's.
+freeNamesInSubExp :: SubExp -> Names
+freeNamesInSubExp = HS.map identName . freeInSubExp
+
+-- | Return the set of identifiers that are free in the given
+-- type
+freeInType :: TypeBase als Shape -> HS.HashSet Ident
+freeInType = mconcat . map freeInSubExp . arrayDims
 
 -- | Return the set of identifiers that are free in the given
 -- body.
-freeInBody :: FreeIn lore => Body lore -> HS.HashSet (Ident lore)
+freeInBody :: FreeIn (Lore.Exp lore) => Body lore -> HS.HashSet Ident
 freeInBody = execWriter . walkOnBody freeWalker
 
 -- | As 'freeInBody', but returns the raw names rather than 'Ident's.
-freeNamesInBody :: FreeIn lore => Body lore -> Names
+freeNamesInBody :: FreeIn (Lore.Exp lore) => Body lore -> Names
 freeNamesInBody = HS.map identName . freeInBody
 
 -- | Return the set of identifiers that are free in the given
 -- expression.
-freeInExp :: FreeIn lore => Exp lore -> HS.HashSet (Ident lore)
+freeInExp :: FreeIn (Lore.Exp lore) => Exp lore -> HS.HashSet Ident
 freeInExp = execWriter . walkExpM freeWalker
 
 -- | As 'freeInExp', but returns the raw names rather than 'Ident's.
-freeNamesInExp :: FreeIn lore => Exp lore -> Names
+freeNamesInExp :: FreeIn (Lore.Exp lore) => Exp lore -> Names
 freeNamesInExp = HS.map identName . freeInExp
 
 -- | Return the set of variables names consumed by the given
@@ -954,7 +1006,7 @@ consumedInBody = execWriter . bodyConsumed
         bodyConsumed (Body [] _) = return ()
         bodyConsumed (Body (Let pat _ e:bnds) res) = do
           tell $ consumedInExp e
-          unconsume (HS.fromList $ map identName pat) $
+          unconsume (HS.fromList $ map identName $ patternIdents pat) $
             bodyConsumed $ Body bnds res
 
 -- | Return the set of variable names consumed by the given
@@ -995,40 +1047,71 @@ safeExp (BinOp Pow _ _ _ _) = False
 safeExp _ = True
 
 -- | Create a 'Constant' 'SubExp' containing the given value.
-constant :: IsValue v => v -> SrcLoc -> SubExp lore
+constant :: IsValue v => v -> SrcLoc -> SubExp
 constant = Constant . value
 
 -- | For reasons of type ambiguity, a specialised 'constant' for integers is defined.
-intconst :: Int -> SrcLoc -> SubExp lore
+intconst :: Int -> SrcLoc -> SubExp
 intconst = constant
 
 -- | Return the set of identifiers that are free in the given lambda,
 -- including shape annotations in the parameters.
-freeInLambda :: FreeIn lore => Lambda lore -> HS.HashSet (Ident lore)
+freeInLambda :: FreeIn (Lore.Exp lore) => Lambda lore -> HS.HashSet Ident
 freeInLambda (Lambda params body rettype _) =
   inRet <> inParams <> inBody
   where inRet = mconcat $ map freeInType rettype
         inParams = mconcat $ map freeInParam params
         freeInParam = freeInType . identType
         inBody = HS.filter ((`notElem` paramnames) . identName) $ freeInBody body
-        freeInType = mconcat . map (freeInExp . SubExp) . shapeDims . arrayShape
         paramnames = map identName params
 
 -- | A class indicating that we can obtain free variable information
--- from the annotations created by the lore.
-class FreeIn lore where
-  freeInBindingLore :: Lore.Binding lore -> HS.HashSet (Ident lore)
+-- from values of this type.
+class FreeIn a where
+  freeIn :: a -> HS.HashSet Ident
+
+instance FreeIn () where
+  freeIn () = mempty
+
+instance (FreeIn a, FreeIn b) => FreeIn (a,b) where
+  freeIn (a,b) = freeIn a <> freeIn b
+
+instance FreeIn Bool where
+  freeIn _ = mempty
+
+instance FreeIn a => FreeIn (Maybe a) where
+  freeIn = maybe mempty freeIn
+
+instance FreeIn Ident where
+  freeIn = freeInIdent
+
+instance FreeIn SubExp where
+  freeIn (Var v) = freeIn v
+  freeIn (Constant {}) = mempty
+
+instance FreeIn Shape where
+  freeIn = mconcat . map freeIn . shapeDims
+
+instance FreeIn ExtShape where
+  freeIn = mconcat . map freeInExtDimSize . extShapeDims
+    where freeInExtDimSize (Free se) = freeIn se
+          freeInExtDimSize (Ext _)   = mempty
+
+instance (ArrayShape shape, FreeIn shape) => FreeIn (TypeBase als shape) where
+  freeIn = freeIn . arrayShape
+
+freeNamesIn :: FreeIn a => a -> Names
+freeNamesIn = HS.map identName . freeIn
 
 -- | As 'freeInLambda', but returns the raw names rather than
 -- 'IdentBase's.
-freeNamesInLambda :: FreeIn lore => Lambda lore -> Names
+freeNamesInLambda :: FreeIn (Lore.Exp lore) => Lambda lore -> Names
 freeNamesInLambda = HS.map identName . freeInLambda
 
 -- | Convert an identifier to a 'ParamBase'.
-toParam :: Ident lore -> Param lore
+toParam :: Ident -> Param
 toParam (Ident name t loc) = Ident name (t `setAliases` ()) loc
 
 -- | Convert a 'ParamBase' to an identifier.
-fromParam :: Lore.Proper lore =>
-             Param lore -> Ident lore
+fromParam :: Param -> Ident
 fromParam (Ident name t loc) = Ident name (t `setAliases` mempty) loc

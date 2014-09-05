@@ -34,9 +34,9 @@ import Futhark.CodeGen.FirstOrderSOACS
 
 compileProg :: Prog -> String
 compileProg = addHeader . GenericC.compileProg bohriumCompiler. ImpGen.compileProg expCompiler
-  where expCompiler [target] e
+  where expCompiler (Pattern [target]) e
           | Just op <- compileSOACtoBohrium e = do
-          tell $ Imp.Op (C.var $ textual $ identName target, op)
+          tell $ Imp.Op (C.var $ textual $ bindeeName target, op)
           return ImpGen.Done
         expCompiler targets e =
           firstOrderSOACS targets e

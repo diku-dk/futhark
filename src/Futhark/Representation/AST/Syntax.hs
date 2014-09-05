@@ -9,11 +9,9 @@ module Futhark.Representation.AST.Syntax
 
   -- * Types
   , Uniqueness(..)
-  , ShapeT(..)
-  , Shape
+  , Shape(..)
   , ExtDimSize(..)
-  , ExtShapeT(..)
-  , ExtShape
+  , ExtShape(..)
   , Rank(..)
   , ArrayShape(..)
   , TypeBase(..)
@@ -31,11 +29,13 @@ module Futhark.Representation.AST.Syntax
   , Ident
   , Param
   , Certificates
-  , SubExpT(..)
-  , SubExp
+  , SubExp(..)
+  , BindeeT(..)
+  , Bindee
+  , PatternT (..)
+  , Pattern
   , Binding(..)
-  , ResultT(..)
-  , Result
+  , Result(..)
   , BodyT(..)
   , Body
   , ExpT(..)
@@ -66,42 +66,36 @@ import Data.Ord
 import qualified Data.HashSet as HS
 
 import Language.Futhark.Core
+import Futhark.Representation.AST.Lore (Lore)
 import qualified Futhark.Representation.AST.Lore as Lore
 
 -- | The size of an array type as a list of its dimension sizes.  If a
 -- variable, that variable must be in scope where this array is used.
 -- When compared for equality, only the number of dimensions is
 -- considered.
-newtype ShapeT lore = Shape { shapeDims :: [SubExp lore] }
-                      deriving (Show)
+newtype Shape = Shape { shapeDims :: [SubExp] }
+              deriving (Show)
 
--- | Type alias for namespace control.
-type Shape = ShapeT
-
-instance Eq (ShapeT lore) where
+instance Eq Shape where
   Shape l1 == Shape l2 = length l1 == length l2
 
-instance Ord (ShapeT lore) where
+instance Ord Shape where
   compare = comparing shapeRank
 
 -- | The size of this dimension.
-data ExtDimSize lore = Free (SubExp lore) -- ^ Some known dimension.
-                     | Ext Int -- ^ Existentially quantified.
-
-deriving instance Lore.Proper lore => Show (ExtDimSize lore)
+data ExtDimSize = Free SubExp -- ^ Some known dimension.
+                | Ext Int -- ^ Existentially quantified.
+                  deriving (Show)
 
 -- | Like 'Shape' but some of its elements may be bound in a local
 -- environment instead.  These are denoted with integral indices.
-newtype ExtShapeT lore = ExtShape { extShapeDims :: [ExtDimSize lore] }
-                       deriving (Show)
+newtype ExtShape = ExtShape { extShapeDims :: [ExtDimSize] }
+                 deriving (Show)
 
--- | Type alias for namespace control.
-type ExtShape = ExtShapeT
-
-instance Eq (ExtShapeT lore) where
+instance Eq ExtShape where
   ExtShape l1 == ExtShape l2 = length l1 == length l2
 
-instance Ord (ExtShapeT lore) where
+instance Ord ExtShape where
   compare = comparing shapeRank
 
 -- | The size of an array type as merely the number of dimensions,
@@ -117,19 +111,19 @@ class (Monoid a, Eq a, Ord a) => ArrayShape a where
   -- @shape@.
   stripDims :: Int -> a -> a
 
-instance Monoid (ShapeT lore) where
+instance Monoid Shape where
   mempty = Shape mempty
   Shape l1 `mappend` Shape l2 = Shape $ l1 `mappend` l2
 
-instance ArrayShape (ShapeT lore) where
+instance ArrayShape Shape where
   shapeRank (Shape l) = length l
   stripDims n (Shape dims) = Shape $ drop n dims
 
-instance Monoid (ExtShapeT lore) where
+instance Monoid ExtShape where
   mempty = ExtShape mempty
   ExtShape l1 `mappend` ExtShape l2 = ExtShape $ l1 `mappend` l2
 
-instance ArrayShape (ExtShapeT lore) where
+instance ArrayShape ExtShape where
   shapeRank (ExtShape l) = length l
   stripDims n (ExtShape dims) = ExtShape $ drop n dims
 
@@ -173,14 +167,14 @@ instance ArrayShape shape => Ord (TypeBase als shape) where
 
 -- | A type with aliasing information, used for describing the type of
 -- a computation.
-type Type lore = TypeBase Names (Shape lore)
+type Type = TypeBase Names Shape
 
 -- | A type without aliasing information, used for declarations.
 type DeclType = TypeBase () Rank
 
 -- | A type with shape information, but no aliasing information.  Can
 -- be used for parameters and constants.
-type ConstType lore = TypeBase () (Shape lore)
+type ConstType = TypeBase () Shape
 
 -- | Information about which parts of a value/type are consumed.  For
 -- example, we might say that a function taking three arguments of
@@ -208,11 +202,11 @@ data IdentBase als shape = Ident { identName :: VName
                     deriving (Show)
 
 -- | A name with aliasing information.  Used for normal variables.
-type Ident lore = IdentBase Names (Shape lore)
+type Ident = IdentBase Names Shape
 
 -- | A name with no aliasing information.  These are used for function
 -- parameters.
-type Param lore = IdentBase () (Shape lore)
+type Param = IdentBase () Shape
 
 instance Eq (IdentBase als shape) where
   x == y = identName x == identName y
@@ -227,51 +221,69 @@ instance Hashable (IdentBase als shape) where
   hashWithSalt salt = hashWithSalt salt . identName
 
 -- | A list of identifiers used for certificates in some expressions.
-type Certificates lore = [Ident lore]
+type Certificates = [Ident]
 
 -- | A subexpression is either a constant or a variable.  One
 -- important property is that evaluation of a subexpression is
 -- guaranteed to complete in constant time.
-data SubExpT lore = Constant Value SrcLoc
-                  | Var      (Ident lore)
-                  deriving (Show, Eq, Ord)
+data SubExp = Constant Value SrcLoc
+            | Var      Ident
+            deriving (Show, Eq, Ord)
 
--- | Alias for 'SubExpT'.
-type SubExp = SubExpT
-
-instance Located (SubExpT lore) where
+instance Located SubExp where
   locOf (Constant _ loc) = locOf loc
   locOf (Var ident)      = locOf ident
 
+data BindeeT lore = Bindee { bindeeIdent :: Ident
+                           , bindeeLore  :: Lore.Binding lore
+                           }
+
+deriving instance Lore lore => Ord (BindeeT lore)
+deriving instance Lore lore => Show (BindeeT lore)
+deriving instance Lore lore => Eq (BindeeT lore)
+
+type Bindee = BindeeT
+
+newtype PatternT lore =
+  Pattern { patternBindees :: [BindeeT lore] }
+
+deriving instance Lore lore => Ord (PatternT lore)
+deriving instance Lore lore => Show (PatternT lore)
+deriving instance Lore lore => Eq (PatternT lore)
+
+instance Monoid (PatternT lore) where
+  mempty = Pattern []
+  Pattern l1 `mappend` Pattern l2 = Pattern $ l1 ++ l2
+
+-- | A type alias for namespace control.
+type Pattern = PatternT
+
 -- | A local variable binding.
-data Binding lore = Let { bindingVars :: [Ident lore]
-                        , bindingLore :: Lore.Binding lore
+data Binding lore = Let { bindingPattern :: Pattern lore
+                        , bindingLore :: Lore.Exp lore
                         , bindingExp :: Exp lore
                         }
 
-deriving instance Lore.Proper lore => Ord (Binding lore)
-deriving instance Lore.Proper lore => Show (Binding lore)
-deriving instance Lore.Proper lore => Eq (Binding lore)
+deriving instance Lore lore => Ord (Binding lore)
+deriving instance Lore lore => Show (Binding lore)
+deriving instance Lore lore => Eq (Binding lore)
 
 -- | The result of a body - a sequence of subexpressions, possibly
 -- predicated on one or more certificates.
-data ResultT lore = Result { resultCertificates :: Certificates lore
-                           , resultSubExps :: [SubExp lore]
-                           , resultSrcLoc :: SrcLoc
-                           }
+data Result = Result { resultCertificates :: Certificates
+                     , resultSubExps :: [SubExp]
+                     , resultSrcLoc :: SrcLoc
+                     }
                    deriving (Eq, Ord, Show)
 
--- | An alias of 'ResultT' for namespace management.
-type Result = ResultT
-
-instance Located (ResultT lore) where
+instance Located Result where
   locOf = locOf . resultSrcLoc
 
 -- | A body consists of a number of bindings, terminating in a result
 -- (essentially a tuple literal).
 data BodyT lore = Body { bodyBindings :: [Binding lore]
-                      , bodyResult :: Result lore
-                      }
+                       , bodyResult :: Result
+                       }
                  deriving (Ord, Show, Eq)
 
 type Body = BodyT
@@ -285,90 +297,90 @@ instance Located (BodyT lore) where
 -- double, long int, etc.
 data ExpT lore =
             -- Core language
-              SubExp (SubExp lore)
+              SubExp SubExp
             -- ^ Subexpressions, doubling as tuple literals if the
             -- list has anything but a single element.
 
-            | ArrayLit  [SubExp lore] (Type lore) SrcLoc
+            | ArrayLit  [SubExp] Type SrcLoc
             -- ^ Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
             -- Second arg is the element type of of the rows of the array.
 
-            | If     (SubExp lore) (BodyT lore) (BodyT lore) (ResType lore) SrcLoc
+            | If     SubExp (BodyT lore) (BodyT lore) ResType SrcLoc
 
-            | Apply  Name [(SubExp lore, Diet)] (ResType lore) SrcLoc
+            | Apply  Name [(SubExp, Diet)] ResType SrcLoc
 
             -- Scalar operations
-            | BinOp BinOp (SubExp lore) (SubExp lore) (Type lore) SrcLoc
+            | BinOp BinOp SubExp SubExp Type SrcLoc
 
             -- Unary Ops: Not for bools and Negate for ints
-            | Not    (SubExp lore) SrcLoc -- ^ E.g., @not True == False@.
-            | Negate (SubExp lore) SrcLoc -- ^ E.g., @~(~1) = 1@.
+            | Not    SubExp SrcLoc -- ^ E.g., @not True == False@.
+            | Negate SubExp SrcLoc -- ^ E.g., @~(~1) = 1@.
 
             -- Assertion management.
-            | Assert (SubExp lore) SrcLoc
+            | Assert SubExp SrcLoc
             -- ^ Turn a boolean into a certificate, halting the
             -- program if the boolean is false.
 
-            | Conjoin [SubExp lore] SrcLoc
+            | Conjoin [SubExp] SrcLoc
             -- ^ Convert several certificates into a single certificate.
 
             -- Primitive array operations
 
-            | Index (Certificates lore)
-                    (Ident lore)
-                    [SubExp lore]
+            | Index Certificates
+                    Ident
+                    [SubExp]
                     SrcLoc
             -- ^ 3rd arg are (optional) certificates for bounds
             -- checking.  If given (even as an empty list), no
             -- run-time bounds checking is done.
 
-            | Update (Certificates lore) (Ident lore) [SubExp lore] (SubExp lore) SrcLoc
+            | Update Certificates Ident [SubExp] SubExp SrcLoc
             -- ^ @a with [i1,i2,i3] <- v@.
 
-            | Split (Certificates lore) (SubExp lore) (SubExp lore) (SubExp lore) SrcLoc
+            | Split Certificates SubExp SubExp SubExp SrcLoc
             -- ^ @split(1, [ 1, 2, 3, 4 ]) = {[1],[2, 3, 4]}@.
 
-            | Concat (Certificates lore) (SubExp lore) (SubExp lore) (SubExp lore) SrcLoc
+            | Concat Certificates SubExp SubExp SubExp SrcLoc
             -- ^ @concat([1],[2, 3, 4]) = [1, 2, 3, 4]@.
 
-            | Copy (SubExp lore) SrcLoc
+            | Copy SubExp SrcLoc
             -- ^ Copy the value return by the expression.  This only
             -- makes a difference in do-loops with merge variables.
 
             -- Array construction.
-            | Iota (SubExp lore) SrcLoc
+            | Iota SubExp SrcLoc
             -- ^ @iota(n) = [0,1,..,n-1]@
-            | Replicate (SubExp lore) (SubExp lore) SrcLoc
+            | Replicate SubExp SubExp SrcLoc
             -- ^ @replicate(3,1) = [1, 1, 1]@
 
             -- Array index space transformation.
-            | Reshape (Certificates lore) [SubExp lore] (SubExp lore) SrcLoc
+            | Reshape Certificates [SubExp] SubExp SrcLoc
              -- ^ 1st arg is the new shape, 2nd arg is the input array *)
 
-            | Rearrange (Certificates lore) [Int] (SubExp lore) SrcLoc
+            | Rearrange Certificates [Int] SubExp SrcLoc
             -- ^ Permute the dimensions of the input array.  The list
             -- of integers is a list of dimensions (0-indexed), which
             -- must be a permutation of @[0,n-1]@, where @n@ is the
             -- number of dimensions in the input array.
 
-            | Rotate (Certificates lore) Int (SubExp lore) SrcLoc
+            | Rotate Certificates Int SubExp SrcLoc
             -- ^ @rotate(n,a)@ returns a new array, where the element
             -- @a[i]@ is at position @i+n@, cycling over to the
             -- beginning of the array.
 
-            | DoLoop [Ident lore] [(Ident lore, SubExp lore)] (Ident lore) (SubExp lore) (BodyT lore) SrcLoc
+            | DoLoop [Ident] [(Ident, SubExp)] Ident SubExp (BodyT lore) SrcLoc
             -- ^ @loop {b} <- {a} = {v} for i < n do b@.
 
-            | Map (Certificates lore) (LambdaT lore) [SubExp lore] SrcLoc
+            | Map Certificates (LambdaT lore) [SubExp] SrcLoc
              -- ^ @map(op +(1), {1,2,..,n}) = [2,3,..,n+1]@.
              -- 3rd arg is either a tuple of multi-dim arrays
              --   of basic type, or a multi-dim array of basic type.
              -- 4th arg is the input-array row types
 
-            | Reduce  (Certificates lore) (LambdaT lore) [(SubExp lore, SubExp lore)] SrcLoc
-            | Scan   (Certificates lore) (LambdaT lore) [(SubExp lore, SubExp lore)] SrcLoc
-            | Filter  (Certificates lore) (LambdaT lore) [SubExp lore] SrcLoc
-            | Redomap (Certificates lore) (LambdaT lore) (LambdaT lore) [SubExp lore] [SubExp lore] SrcLoc
+            | Reduce  Certificates (LambdaT lore) [(SubExp, SubExp)] SrcLoc
+            | Scan   Certificates (LambdaT lore) [(SubExp, SubExp)] SrcLoc
+            | Filter  Certificates (LambdaT lore) [SubExp] SrcLoc
+            | Redomap Certificates (LambdaT lore) (LambdaT lore) [SubExp] [SubExp] SrcLoc
               deriving (Eq, Ord, Show)
 
 -- | A type alias for namespace control.
@@ -405,17 +417,17 @@ instance Located (ExpT lore) where
 -- function returns an array, we can either know the size in advance
 -- ('Known'), or receive it as part of the return value ('Existential'
 -- - refers to the type being dependent).
-type ResType lore = [TypeBase Names (ExtShape lore)]
+type ResType = [TypeBase Names ExtShape]
 
 -- | A type for declaring the return of a function.  Only the function
 -- parameters are in scope within the type.
-type RetType lore = [TypeBase () (ExtShape lore)]
+type RetType = [TypeBase () ExtShape]
 
 -- | Anonymous function for use in a tuple-SOAC.
 data LambdaT lore =
-  Lambda { lambdaParams     :: [Param lore]
+  Lambda { lambdaParams     :: [Param]
          , lambdaBody       :: BodyT lore
-         , lambdaReturnType :: [ConstType lore]
+         , lambdaReturnType :: [ConstType]
          , lambdaSrcLoc     :: SrcLoc
          }
   deriving (Eq, Ord, Show)
@@ -427,8 +439,8 @@ instance Located (LambdaT lore) where
 
 -- | Function Declarations
 type FunDec lore = (Name,
-                    RetType lore,
-                    [Param lore],
+                    RetType,
+                    [Param],
                     BodyT lore,
                     SrcLoc)
 
@@ -438,7 +450,7 @@ funDecName (fname,_,_,_,_) = fname
 funDecBody :: FunDec lore -> BodyT lore
 funDecBody (_,_,_,body,_) = body
 
-funDecRetType :: FunDec lore -> RetType lore
+funDecRetType :: FunDec lore -> RetType
 funDecRetType (_,rettype,_,_,_) = rettype
 
 -- | An entire Futhark program.

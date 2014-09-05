@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts #-}
 -- | The type checker checks whether the program is type-consistent.
 -- Whether type annotations are already present is irrelevant, but if
 -- they are, the type checker will signal an error if they are wrong.
@@ -31,19 +31,20 @@ import Data.Maybe
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 
+import Futhark.Representation.AST.Lore (Lore)
 import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 import Futhark.TypeCheck.TypeError
 
 -- | Information about an error that occured during type checking.
-type TypeError lore = GenTypeError VName (Exp lore) (Several DeclType) (Several (Ident lore))
+type TypeError lore = GenTypeError VName (Exp lore) (Several DeclType) (Several Ident)
 
 -- | A tuple of a return type and a list of parameters, possibly
 -- named.
-type FunBinding lore = (RetType lore, [(Maybe VName, DeclType)])
+type FunBinding lore = (RetType, [(Maybe VName, DeclType)])
 
-data VarBinding lore = Bound (Type lore)
+data VarBinding lore = Bound Type
                      | WasConsumed SrcLoc
 
 data Usage = Consumed SrcLoc
@@ -165,7 +166,7 @@ occur occurs = tell Dataflow { usageOccurences = occurs }
 
 -- | Proclaim that we have made read-only use of the given variable.
 -- No-op unless the variable is array-typed.
-observe :: Ident lore -> TypeM lore ()
+observe :: Ident -> TypeM lore ()
 observe (Ident nm t loc)
   | basicType t = return ()
   | otherwise   = let als = nm `HS.insert` aliases t
@@ -204,7 +205,7 @@ noUnique = local (\env -> env { envVtable = HM.map f $ envVtable env})
         f (WasConsumed loc) = WasConsumed loc
 
 binding :: Checkable lore =>
-           [Ident lore] -> TypeM lore a -> TypeM lore a
+           [Ident] -> TypeM lore a -> TypeM lore a
 binding bnds = check . local (`bindVars` bnds)
   where bindVars = foldl bindVar
 
@@ -246,7 +247,7 @@ binding bnds = check . local (`bindVars` bnds)
                 names = HS.fromList $ map identName bnds
                 divide s = (s `HS.intersection` names, s `HS.difference` names)
 
-lookupVar :: VName -> SrcLoc -> TypeM lore (Type lore)
+lookupVar :: VName -> SrcLoc -> TypeM lore Type
 lookupVar name pos = do
   bnd <- asks $ HM.lookup name . envVtable
   case bnd of
@@ -254,8 +255,8 @@ lookupVar name pos = do
     Just (Bound t) -> return t
     Just (WasConsumed wloc) -> bad $ UseAfterConsume name pos wloc
 
-lookupFun :: SrcLoc -> Name -> [SubExp lore]
-          -> TypeM lore (RetType lore, [DeclType])
+lookupFun :: SrcLoc -> Name -> [SubExp]
+          -> TypeM lore (RetType, [DeclType])
 lookupFun loc fname args = do
   bnd <- asks $ HM.lookup fname . envFtable
   case bnd of
@@ -279,7 +280,7 @@ lookupFun loc fname args = do
 -- that combines the aliasing of @t1@ and @t2@ is returned.  The
 -- uniqueness of the resulting type will be the least of the
 -- uniqueness of @t1@ and @t2@.
-unifyTypes :: Type lore -> Type lore -> Maybe (Type lore)
+unifyTypes :: Type -> Type -> Maybe Type
 unifyTypes (Basic t1) (Basic t2) = Basic <$> t1 `unifyBasicTypes` t2
 unifyTypes (Array t1 ds1 u1 als1) (Array t2 ds2 u2 als2)
   | shapeRank ds1 == shapeRank ds2 = do
@@ -296,7 +297,7 @@ unifyBasicTypes t1 t2
 -- | Determine if two types are identical, ignoring uniqueness.
 -- Causes a '(TypeError vn)' if they fail to match, and otherwise returns
 -- one of them.
-unifySubExpTypes :: SubExp lore -> SubExp lore -> TypeM lore (Type lore)
+unifySubExpTypes :: SubExp -> SubExp -> TypeM lore Type
 unifySubExpTypes e1 e2 =
   maybe (bad $ UnifyError (SubExp e1) (justOne $ toDecl t1)
                           (SubExp e2) (justOne $ toDecl t2)) return $
@@ -307,8 +308,8 @@ unifySubExpTypes e1 e2 =
 -- | @checkAnnotation loc s t1 t2@ returns @t2@ if @t1@ contains no
 -- type, and otherwise tries to unify them with 'unifyTypes'.  If
 -- this fails, a 'BadAnnotation' is raised.
-checkAnnotation :: SrcLoc -> String -> Type lore -> Type lore
-                -> TypeM lore (Type lore)
+checkAnnotation :: SrcLoc -> String -> Type -> Type
+                -> TypeM lore Type
 checkAnnotation loc desc t1 t2 =
   case unifyTypes (t1 `setAliases` HS.empty) t2 of
     Nothing -> bad $ BadAnnotation loc desc
@@ -318,8 +319,8 @@ checkAnnotation loc desc t1 t2 =
 -- | @checkResAnnotation loc s rt1 rt2@ tries to unify the types in
 -- @rt1@ and @rt2@ with 'unifyTypes'.  If this fails, or @t1s@ and
 -- @t2s@ are not the same length, a 'BadAnnotation' is raised.
-checkResAnnotation :: SrcLoc -> String -> ResType lore -> ResType lore
-                   -> TypeM lore (ResType lore)
+checkResAnnotation :: SrcLoc -> String -> ResType -> ResType
+                   -> TypeM lore ResType
 checkResAnnotation loc desc rt1 rt2
   | rt1 == rt2 =
     -- Anywhere rt1 is existentially quantified, so we must make rt2.
@@ -344,7 +345,7 @@ checkResAnnotation loc desc rt1 rt2
 -- | @require ts e@ causes a '(TypeError vn)' if the type of @e@ does
 -- not unify with one of the types in @ts@.  Otherwise, simply returns
 -- @e@.  This function is very useful in 'checkExp'.
-require :: [Type lore] -> SubExp lore -> TypeM lore (SubExp lore)
+require :: [Type] -> SubExp -> TypeM lore SubExp
 require ts e
   | any (subExpType e `similarTo`) ts = return e
   | otherwise = bad $ UnexpectedType (SubExp e)
@@ -352,14 +353,14 @@ require ts e
                       (map (justOne . toDecl) ts)
 
 -- | Variant of 'require' working on identifiers.
-requireI :: [Type lore] -> Ident lore -> TypeM lore (Ident lore)
+requireI :: [Type] -> Ident -> TypeM lore Ident
 requireI ts ident
   | any (identType ident `similarTo`) ts = return ident
   | otherwise = bad $ UnexpectedType (SubExp $ Var ident)
                       (justOne $ toDecl $ identType ident)
                       (map (justOne . toDecl) ts)
 
-rowTypeM :: SubExp lore -> TypeM lore (Type lore)
+rowTypeM :: SubExp -> TypeM lore Type
 rowTypeM e = maybe wrong return $ peelArray 1 $ subExpType e
   where wrong = bad $ NotAnArray (srclocOf e) (SubExp e) $
                       justOne $ toDecl $ subExpType e
@@ -468,7 +469,7 @@ checkFun (fname, rettype, params, body, loc) = do
 -- functions.  Free variables are permitted, as long as they are
 -- present in the passed-in vtable.
 checkOpenExp :: Checkable lore =>
-                HM.HashMap VName (Type lore) -> Exp lore ->
+                HM.HashMap VName Type -> Exp lore ->
                 Either (TypeError lore) (Exp lore)
 checkOpenExp bnds e = runTypeM env (newNameSource frees) $ checkExp e
   where env = TypeEnv { envFtable = initialFtable
@@ -495,7 +496,7 @@ checkClosedExp e = runTypeM env src $ checkExp e
                       }
         src = newNameSource $ freeNamesInExp e
 
-checkSubExp :: Checkable lore => SubExp lore -> TypeM lore (SubExp lore)
+checkSubExp :: Checkable lore => SubExp -> TypeM lore SubExp
 checkSubExp (Constant v loc) =
   return $ Constant v loc
 checkSubExp (Var ident) = do
@@ -512,7 +513,7 @@ checkBody (Body [] (Result cs es loc)) = do
 
 checkBody (Body (Let pat annot e:bnds) res) = do
   (e', dataflow) <- collectDataflow $ checkExp e
-  annot' <- checkBindingLore annot
+  annot' <- checkExpLore annot
   (scope, pat') <-
     checkBinding (srclocOf e) pat (typeOf e') dataflow
   scope $ do
@@ -776,8 +777,8 @@ checkExp (Redomap ass outerfun innerfun accexps arrexps pos) = do
 
   return $ Redomap ass' outerfun' innerfun' accexps' arrexps' pos
 
-checkSOACArrayArg :: Checkable lore => SubExp lore
-                  -> TypeM lore (SubExp lore, Arg lore)
+checkSOACArrayArg :: Checkable lore => SubExp
+                  -> TypeM lore (SubExp, Arg)
 checkSOACArrayArg e = do
   (e', (t, dflow, argloc)) <- checkArg e
   case peelArray 1 t of
@@ -785,21 +786,21 @@ checkSOACArrayArg e = do
     Just rt -> return (e', (rt, dflow, argloc))
 
 checkType :: Checkable lore =>
-             TypeBase als (Shape lore)
-          -> TypeM lore (TypeBase als (Shape lore))
+             TypeBase als Shape
+          -> TypeM lore (TypeBase als Shape)
 checkType t = do dims <- mapM checkSubExp $ arrayDims t
                  return $ t `setArrayDims` dims
 
 checkExtType :: Checkable lore =>
-                TypeBase als (ExtShape lore)
-             -> TypeM lore (TypeBase als (ExtShape lore))
+                TypeBase als ExtShape
+             -> TypeM lore (TypeBase als ExtShape)
 checkExtType t = do shape <- mapM checkExtDim $ extShapeDims $ arrayShape t
                     return $ t `setArrayShape` ExtShape shape
   where checkExtDim (Free se) = Free <$> checkSubExp se
         checkExtDim (Ext x)   = return $ Ext x
 
 checkIdent :: Checkable lore =>
-              Ident lore -> TypeM lore (Ident lore)
+              Ident -> TypeM lore Ident
 checkIdent (Ident name t pos) = do
   vt <- lookupVar name pos
   t'' <- checkAnnotation pos ("variable " ++ textual name)
@@ -807,7 +808,7 @@ checkIdent (Ident name t pos) = do
   return $ Ident name t'' pos
 
 checkBinOp :: Checkable lore =>
-              BinOp -> SubExp lore -> SubExp lore -> Type lore -> SrcLoc
+              BinOp -> SubExp -> SubExp -> Type -> SrcLoc
            -> TypeM lore (Exp lore)
 checkBinOp Plus e1 e2 t pos = checkPolyBinOp Plus [Real, Int] e1 e2 t pos
 checkBinOp Minus e1 e2 t pos = checkPolyBinOp Minus [Real, Int] e1 e2 t pos
@@ -828,8 +829,8 @@ checkBinOp Leq e1 e2 t pos = checkRelOp Leq [Int, Real] e1 e2 t pos
 
 checkRelOp :: Checkable lore =>
               BinOp -> [BasicType]
-           -> SubExp lore -> SubExp lore
-           -> Type lore -> SrcLoc
+           -> SubExp -> SubExp
+           -> Type -> SrcLoc
            -> TypeM lore (Exp lore)
 checkRelOp op tl e1 e2 t pos = do
   e1' <- require (map Basic tl) =<< checkSubExp e1
@@ -840,7 +841,7 @@ checkRelOp op tl e1 e2 t pos = do
 
 checkPolyBinOp :: Checkable lore =>
                   BinOp -> [BasicType]
-               -> SubExp lore -> SubExp lore -> Type lore -> SrcLoc
+               -> SubExp -> SubExp -> Type -> SrcLoc
                -> TypeM lore (Exp lore)
 checkPolyBinOp op tl e1 e2 t pos = do
   e1' <- require (map Basic tl) =<< checkSubExp e1
@@ -859,25 +860,27 @@ sequentially m1 m2 = do
   return b
 
 checkBinding :: Checkable lore =>
-                SrcLoc -> [Ident lore] -> ResType lore -> Dataflow
-             -> TypeM lore (TypeM lore a -> TypeM lore a, [Ident lore])
+                SrcLoc -> Pattern lore -> ResType -> Dataflow
+             -> TypeM lore (TypeM lore a -> TypeM lore a, Pattern lore)
 checkBinding loc pat ts dflow = do
   (ts', restpat, shapepat) <- patternContext loc pat ts
-  unless (length restpat == length ts') $
-    bad $ InvalidPatternError (Several pat) (Several $ map toDecl ts) loc
+  unless (patternSize restpat == length ts') $
+    bad $ InvalidPatternError (Several $ patternIdents pat) (Several $ map toDecl ts) loc
   restpat' <-
-    evalStateT (zipWithM checkBinding' restpat ts') []
-  let pat' = shapepat ++ restpat'
+    Pattern <$> evalStateT (zipWithM checkBinding' (patternBindees restpat) ts') []
+  let pat' = shapepat <> restpat'
   return (\m -> sequentially (tell dflow)
-                (const . const $ binding pat' (checkPatSizes pat' >> m)),
+                (const . const $ binding (patternIdents pat')
+                 (checkPatSizes (patternIdents pat') >> m)),
           pat')
-  where checkBinding' (Ident name namet pos) t = do
+  where checkBinding' (Bindee (Ident name namet vloc) lore) t = do
           t' <- lift $
-                checkAnnotation (srclocOf pat)
+                checkAnnotation vloc
                 ("binding of variable " ++ textual name) namet t
-          let t'' = subExpType $ Var $ Ident name t' pos
-          add $ Ident name t'' pos
-          return $ Ident name t'' pos
+          let t'' = subExpType $ Var $ Ident name t' vloc
+          add $ Ident name t'' vloc
+          lore' <- lift $ checkBindingLore lore
+          return $ Bindee (Ident name t'' vloc) lore'
 
         add ident = do
           bnd <- gets $ find (==ident)
@@ -886,8 +889,8 @@ checkBinding loc pat ts dflow = do
             Just (Ident name _ pos2) ->
               lift $ bad $ DupPatternError name (srclocOf ident) pos2
 
-patternContext :: SrcLoc -> [Ident lore] -> ResType lore ->
-                  TypeM lore ([Type lore], [Ident lore], [Ident lore])
+patternContext :: SrcLoc -> Pattern lore -> ResType ->
+                  TypeM lore ([Type], Pattern lore, Pattern lore)
 patternContext loc pat rt = do
   (rt', (restpat,_), shapepat) <- runRWST (mapM extract rt) () (pat, HM.empty)
   return (rt', restpat, shapepat)
@@ -898,42 +901,42 @@ patternContext loc pat rt = do
         correspondingVar x = do (remnames, m) <- get
                                 case (remnames, HM.lookup x m) of
                                   (_, Just v)    -> return $ Var v
-                                  (v:vs, Nothing)
-                                    | Basic Int <- identType v -> do
-                                      tell [v]
-                                      put (vs, HM.insert x v m)
-                                      return $ Var v
+                                  (Pattern (v:vs), Nothing)
+                                    | Basic Int <- identType $ bindeeIdent v -> do
+                                      tell $ Pattern [v]
+                                      put (Pattern vs, HM.insert x (bindeeIdent v) m)
+                                      return $ Var $ bindeeIdent v
                                   (_, Nothing) ->
                                     lift $ bad $ TypeError loc "Pattern cannot match context"
 
 checkPatSizes :: Checkable lore =>
-                 [IdentBase als (Shape lore)] -> TypeM lore ()
+                 [IdentBase als Shape] -> TypeM lore ()
 checkPatSizes = mapM_ checkBndSizes
 
 checkBndSizes :: Checkable lore =>
-                 IdentBase als (Shape lore) -> TypeM lore ()
+                 IdentBase als Shape -> TypeM lore ()
 checkBndSizes (Ident _ t _) = do
   let dims = arrayDims t
   mapM_ (require [Basic Int] <=< checkSubExp) dims
 
-validApply :: [DeclType] -> [Type lore] -> Bool
+validApply :: [DeclType] -> [Type] -> Bool
 validApply expected got =
   length got == length expected &&
   all id (zipWith subtypeOf (map toDecl got) expected)
 
-type Arg lore = (Type lore, Dataflow, SrcLoc)
+type Arg = (Type, Dataflow, SrcLoc)
 
-argType :: Arg lore -> Type lore
+argType :: Arg -> Type
 argType (t, _, _) = t
 
 checkArg :: Checkable lore =>
-            SubExp lore -> TypeM lore (SubExp lore, Arg lore)
+            SubExp -> TypeM lore (SubExp, Arg)
 checkArg arg = do (arg', dflow) <- collectDataflow $ checkSubExp arg
                   return (arg', (subExpType arg', dflow, srclocOf arg'))
 
 checkLambdaArg :: Checkable lore =>
-                  Lambda lore -> [Arg lore]
-               -> TypeM lore (Lambda lore, [Arg lore])
+                  Lambda lore -> [Arg]
+               -> TypeM lore (Lambda lore, [Arg])
 checkLambdaArg lam args = do
   (lam', dflow) <- collectDataflow $ checkLambda lam args
   let lamt = lambdaType lam' $ map argType args
@@ -941,7 +944,7 @@ checkLambdaArg lam args = do
 
 checkFuncall :: Checkable lore =>
                 Maybe Name -> SrcLoc
-             -> [DeclType] -> [DeclType] -> [Arg lore]
+             -> [DeclType] -> [DeclType] -> [Arg]
              -> TypeM lore ()
 checkFuncall fname loc paramtypes _ args = do
   let argts = map argType args
@@ -958,7 +961,7 @@ checkFuncall fname loc paramtypes _ args = do
         consumeArg _  Observe = HS.empty
 
 checkLambda :: Checkable lore =>
-               Lambda lore -> [Arg lore] -> TypeM lore (Lambda lore)
+               Lambda lore -> [Arg] -> TypeM lore (Lambda lore)
 checkLambda (Lambda params body ret loc) args = do
   ret' <- mapM checkType ret
   if length params == length args then do
@@ -973,5 +976,8 @@ checkLambda (Lambda params body ret loc) args = do
   else bad $ TypeError loc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
 -- | The class of lores that can be type-checked.
-class (FreeIn lore, Lore.Proper lore) => Checkable lore where
+class (FreeIn (Lore.Exp lore),
+       FreeIn (Lore.Binding lore),
+       Lore lore) => Checkable lore where
+  checkExpLore :: Lore.Exp lore -> TypeM lore (Lore.Exp lore)
   checkBindingLore :: Lore.Binding lore -> TypeM lore (Lore.Binding lore)

@@ -6,6 +6,7 @@ module Futhark.Analysis.ScalExp
   , toScalExp
   , LookupVar
   , fromScalExp
+  , fromScalExp'
   , getIds
   )
 where
@@ -17,7 +18,7 @@ import Data.Loc
 
 import Text.PrettyPrint.Mainland
 
-import Futhark.Representation.Basic
+import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 import Futhark.Substitute
 import Futhark.Tools
@@ -128,7 +129,7 @@ scalExpType (MaxMin _ (e:_)) = scalExpType e
 -- scalar expression.
 type LookupVar = VName -> Maybe ScalExp
 
-toScalExp :: LookupVar -> Exp -> Maybe ScalExp
+toScalExp :: LookupVar -> Exp lore -> Maybe ScalExp
 toScalExp look (SubExp se)    =
   toScalExp' look se
 toScalExp look (BinOp Less x y _ _) =
@@ -174,10 +175,14 @@ toScalExp' _ (Constant (BasicVal val) _) =
   Just $ Val val
 toScalExp' _ _ = Nothing
 
-fromScalExp :: MonadFreshNames m => SrcLoc -> ScalExp -> m (Exp, [Binding])
-fromScalExp loc = runBinder'' . convert
-  where convert :: ScalExp -> Binder Exp
-        convert (Val val) = return $ SubExp $ Constant (BasicVal val) loc
+fromScalExp :: (Proper lore, Bindable lore, MonadFreshNames m) => SrcLoc -> ScalExp
+            -> m (Exp lore, [Binding lore])
+fromScalExp loc e = runBinder'' $ fromScalExp' loc e
+
+fromScalExp' :: MonadBinder m => SrcLoc -> ScalExp
+             -> m (Exp (Lore m))
+fromScalExp' loc = convert
+  where convert (Val val) = return $ SubExp $ Constant (BasicVal val) loc
         convert (Id v)    = return $ SubExp $ Var v
         convert (SNeg se) = eNegate (convert se) loc
         convert (SNot se) = eNot (convert se) loc
@@ -204,7 +209,6 @@ fromScalExp loc = runBinder'' . convert
           eBinOp bop (pure x') (pure y') t loc
           where t = Basic $ scalExpType x
 
-        select :: BasicType -> Bool -> Exp -> Exp -> Binder Exp
         select t isMin cur next =
           let cmp = eBinOp Less (pure cur) (pure next) (Basic Bool) loc
               (pick, discard)

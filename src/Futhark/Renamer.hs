@@ -33,8 +33,9 @@ import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 import Data.Maybe
 
-import Futhark.Representation.AST.Lore as Lore
+import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Representation.AST.Syntax
+import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Traversals
 import Futhark.FreshNames
 import Futhark.MonadFreshNames (MonadFreshNames(..),
@@ -106,6 +107,18 @@ instance Rename VName where
   rename name = fromMaybe name <$>
                 asks (HM.lookup name . envNameMap)
 
+instance Rename a => Rename [a] where
+  rename = mapM rename
+
+instance (Rename a, Rename b) => Rename (a,b) where
+  rename (a,b) = (,) <$> rename a <*> rename b
+
+instance Rename a => Rename (Maybe a) where
+  rename = maybe (return Nothing) (liftM Just . rename)
+
+instance Rename Bool where
+  rename = return
+
 instance (Rename als, Rename shape) =>
          Rename (IdentBase als shape) where
   rename (Ident name tp loc) = do
@@ -131,22 +144,29 @@ instance Renameable lore => Rename (FunDec lore) where
       ret' <- mapM rename ret
       return (fname, ret', params', body', loc)
 
-instance Renameable lore => Rename (SubExp lore) where
+instance Rename SubExp where
   rename (Var v)          = Var <$> rename v
   rename (Constant v loc) = return $ Constant v loc
 
-instance Renameable lore => Rename (Result lore) where
+instance Rename Result where
   rename (Result cs ses loc) =
     Result <$> mapM rename cs <*> mapM rename ses <*> pure loc
 
+instance Renameable lore => Rename (Bindee lore) where
+  rename (Bindee ident lore) = Bindee <$> rename ident <*> rename lore
+
+instance Renameable lore => Rename (Pattern lore) where
+  rename (Pattern l) = Pattern <$> rename l
+
 instance Renameable lore => Rename (Body lore) where
   rename (Body [] res) = Body [] <$> rename res
-  rename (Body (Let pat annot e:bnds) res) = do
+  rename (Body (Let pat lore e:bnds) res) = do
     e1' <- rename e
-    bind pat $ do
-      pat' <- mapM rename pat
+    lore' <- rename lore
+    bind (patternIdents pat) $ do
+      pat' <- rename pat
       Body bnds' res' <- rename $ Body bnds res
-      return $ Body (Let pat' annot e1':bnds') res'
+      return $ Body (Let pat' lore' e1':bnds') res'
 
 instance Renameable lore => Rename (Exp lore) where
   rename (DoLoop respat merge loopvar boundexp loopbody loc) = do
@@ -195,13 +215,13 @@ instance Rename Names where
 instance Rename Rank where
   rename = return
 
-instance Renameable lore => Rename (Shape lore) where
+instance Rename Shape where
   rename (Shape l) = Shape <$> mapM rename l
 
-instance Renameable lore => Rename (ExtShape lore) where
+instance Rename ExtShape where
   rename (ExtShape l) = ExtShape <$> mapM rename l
 
-instance Renameable lore => Rename (ExtDimSize lore) where
+instance Rename ExtDimSize where
   rename (Free se) = Free <$> rename se
   rename (Ext x)   = return $ Ext x
 
@@ -209,5 +229,6 @@ instance Rename () where
   rename = return
 
 -- | A class for lores in which all annotations are renameable.
-class (Rename (Lore.Binding lore)) =>
+class (Rename (Lore.Binding lore),
+       Rename (Lore.Exp lore)) =>
       Renameable lore where

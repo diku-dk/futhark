@@ -15,7 +15,6 @@ module Futhark.Optimise.Simplifier
 
 import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
-import Futhark.Optimise.Simplifier.Rule
 import Futhark.Optimise.Simplifier.Rules
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 
@@ -24,15 +23,12 @@ import qualified Futhark.Optimise.Simplifier.Engine as Engine
 -- order of bindings may simply have been rearranged.  The function is
 -- idempotent, however.
 simplifyProg :: Prog -> Prog
-simplifyProg = Engine.simplifyProg unitStandardRules
+simplifyProg = Engine.simplifyProg standardRules
 
 -- | Simplify just a single function declaration.
 simplifyFun :: MonadFreshNames m => FunDec -> m FunDec
-simplifyFun = Engine.simplifyOneFun unitStandardRules
+simplifyFun = Engine.simplifyOneFun standardRules
 
 -- | Simplify just a single 'Lambda'.
 simplifyOneLambda :: MonadFreshNames m => Prog -> Lambda -> m Lambda
-simplifyOneLambda = Engine.simplifyOneLambda unitStandardRules . Just
-
-unitStandardRules :: RuleBook ()
-unitStandardRules = standardRules
+simplifyOneLambda = Engine.simplifyOneLambda standardRules . Just

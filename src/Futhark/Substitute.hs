@@ -1,10 +1,12 @@
-{-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, FlexibleContexts #-}
 -- |
 --
 -- This module contains exports a single function, 'substituteNames',
 -- for performing name substitution in an Futhark expression.
 module Futhark.Substitute
-  (Substitute(..))
+  (Substitutions,
+   Substitute(..),
+   Substitutable)
   where
 
 import Control.Monad.Identity
@@ -12,7 +14,12 @@ import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 
-import Futhark.Representation.Basic
+import qualified Futhark.Representation.AST.Lore as Lore
+import Futhark.Representation.AST
+
+-- | The substitutions to be made are given by a mapping from names to
+-- names.
+type Substitutions = HM.HashMap VName VName
 
 -- | A type that is an instance of this class supports substitution of
 -- any names contained within.
@@ -32,6 +39,12 @@ instance (Substitute a, Substitute b) => Substitute (a,b) where
   substituteNames substs (x,y) =
     (substituteNames substs x, substituteNames substs y)
 
+instance Substitute a => Substitute (Maybe a) where
+  substituteNames substs = fmap $ substituteNames substs
+
+instance Substitute Bool where
+  substituteNames = flip const
+
 instance Substitute VName where
   substituteNames substs k = fromMaybe k $ HM.lookup k substs
 
@@ -39,17 +52,28 @@ instance Substitute SubExp where
   substituteNames substs (Var v)     = Var $ substituteNames substs v
   substituteNames _ (Constant v loc) = Constant v loc
 
-instance Substitute Exp where
+instance Substitutable lore => Substitute (Exp lore) where
   substituteNames substs = mapExp $ replace substs
 
-instance Substitute Binding where
-  substituteNames substs (Let pat annot e) =
-    Let (substituteNames substs pat) annot (substituteNames substs e)
+instance Substitutable lore => Substitute (Bindee lore) where
+  substituteNames substs (Bindee ident lore) =
+    Bindee (substituteNames substs ident) (substituteNames substs lore)
 
-instance Substitute Body where
+instance Substitutable lore => Substitute (Pattern lore) where
+  substituteNames substs (Pattern l) =
+    Pattern $ substituteNames substs l
+
+instance Substitutable lore => Substitute (Binding lore) where
+  substituteNames substs (Let pat annot e) =
+    Let
+    (substituteNames substs pat)
+    (substituteNames substs annot)
+    (substituteNames substs e)
+
+instance Substitutable lore => Substitute (Body lore) where
   substituteNames substs = mapBody $ replace substs
 
-replace :: HM.HashMap VName VName -> Mapper Basic Basic Identity
+replace :: Substitutable lore => HM.HashMap VName VName -> Mapper lore lore Identity
 replace substs = Mapper {
                    mapOnIdent = return . substituteNames substs
                  , mapOnSubExp = return . substituteNames substs
@@ -87,7 +111,7 @@ instance (Substitute als, Substitute shape) => Substitute (TypeBase als shape) w
   substituteNames substs (Array et sz u als) =
     Array et (substituteNames substs sz) u (substituteNames substs als)
 
-instance Substitute Lambda where
+instance Substitutable lore => Substitute (Lambda lore) where
   substituteNames substs (Lambda params body rettype loc) =
     Lambda params (substituteNames substs body)
            (map (substituteNames substs) rettype) loc
@@ -97,3 +121,9 @@ instance Substitute Ident where
     v { identName = substituteNames substs $ identName v
       , identType = substituteNames substs $ identType v
       }
+
+-- | The class of lores in which all annotations support name
+-- substitution.
+class (Substitute (Lore.Exp lore),
+       Substitute (Lore.Binding lore)) =>
+      Substitutable lore where
