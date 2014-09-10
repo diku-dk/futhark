@@ -249,13 +249,6 @@ fuseSOACwithKer outIds soac1 ker = do
       success $ SOAC.Scan (cs1++cs2) res_lam new_inps loc
 
     -- The Fusions that are semantically filter fusions:
-    (SOAC.Reduce _ _ args pos, SOAC.Filter {})
-      | filterFusionOK outIds ker -> do
-      let ne = map fst args
-      names <- replicateM (length $ lambdaReturnType lam2) $ newVName "check"
-      let (res_lam, new_inp) = fuseFilterIntoFold lam1 inp1_arr outPairs lam2 inp2_arr names
-      success $ SOAC.Reduce (cs1++cs2) res_lam (zip ne new_inp) pos
-
     (SOAC.Redomap _ lam21 _ nes _ pos, SOAC.Filter {})
       | filterFoldFusionOK outIds ker-> do
       names <- replicateM (length $ lambdaReturnType lam21) $ newVName "check"
