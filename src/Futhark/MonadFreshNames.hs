@@ -23,6 +23,8 @@ module Futhark.MonadFreshNames
 import Control.Applicative
 import qualified Control.Monad.State.Lazy
 import qualified Control.Monad.State.Strict
+import Control.Monad.Trans
+import Control.Monad.Trans.Maybe
 
 import Data.Loc
 
@@ -50,6 +52,10 @@ instance (Applicative im, Monad im) => MonadFreshNames (Control.Monad.State.Lazy
 instance (Applicative im, Monad im) => MonadFreshNames (Control.Monad.State.Strict.StateT VNameSource im) where
   getNameSource = Control.Monad.State.Strict.get
   putNameSource = Control.Monad.State.Strict.put
+
+instance (MonadFreshNames im) => MonadFreshNames (MaybeT im) where
+  getNameSource = lift $ getNameSource
+  putNameSource = lift . putNameSource
 
 -- | Run a computation needing a fresh name source and returning a new
 -- one, using 'getNameSource' and 'putNameSource' before and after the
@@ -82,7 +88,7 @@ newVName = newID . nameFromString
 
 -- | Produce a fresh 'Ident', using the given name as a template.
 newIdent :: MonadFreshNames m =>
-            String -> TypeBase als shape -> SrcLoc -> m (IdentBase als shape)
+            String -> TypeBase shape -> SrcLoc -> m (IdentBase shape)
 newIdent s t loc = do
   s' <- newID $ varName s Nothing
   return $ Ident s' t loc
@@ -91,7 +97,7 @@ newIdent s t loc = do
 -- but possibly modifying the name.
 newIdent' :: MonadFreshNames m =>
              (String -> String)
-          -> IdentBase als shape -> m (IdentBase als shape)
+          -> IdentBase shape -> m (IdentBase shape)
 newIdent' f ident =
   newIdent (f $ nameToString $ baseName $ identName ident)
            (identType ident) $
@@ -100,7 +106,7 @@ newIdent' f ident =
 -- | Produce several 'Ident's, using the given name as a template,
 -- based on a list of types.
 newIdents :: MonadFreshNames m =>
-             String -> [TypeBase als shape] -> SrcLoc -> m [IdentBase als shape]
+             String -> [TypeBase shape] -> SrcLoc -> m [IdentBase shape]
 newIdents s ts loc =
   mapM (\t -> newIdent s t loc) ts
 

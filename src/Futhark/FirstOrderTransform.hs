@@ -24,11 +24,11 @@ import Futhark.Tools
 -- | Return 'True' if the given expression is a SOAC that can be
 -- first-order transformed.
 transformable :: Exp -> Bool
-transformable (Map {}) = True
-transformable (Reduce {}) = True
-transformable (Redomap {}) = True
-transformable (Scan {}) = True
-transformable (Filter {}) = True
+transformable (LoopOp (Map {})) = True
+transformable (LoopOp (Reduce {})) = True
+transformable (LoopOp (Redomap {})) = True
+transformable (LoopOp (Scan {})) = True
+transformable (LoopOp (Filter {})) = True
 transformable _ = False
 
 -- | Perform the first-order transformation on an Futhark program.  The
@@ -50,46 +50,46 @@ transformBody = mapBodyM transform
 -- | Transform a single expression.
 transformExp :: Exp -> Binder Basic Exp
 
-transformExp (Map cs fun arrs loc) = do
-  inarrs <- letExps "inarr" $ map SubExp arrs
+transformExp (LoopOp (Map cs fun arrs loc)) = do
+  inarrs <- letExps "inarr" $ map (PrimOp . SubExp) arrs
   (i, iv) <- newVar loc "i" $ Basic Int
-  resarr <- resultArray (mapType fun arrs) loc
+  resarr <- resultArray (mapType fun $ map subExpType arrs) loc
   outarr <- forM (map subExpType resarr) $ \t ->
             newIdent "map_outarr" t loc
   loopbody <- runBinder $ do
     x <- bodyBind =<< transformLambda fun (index cs inarrs iv)
-    dests <- letwith cs outarr (pexp iv) $ map SubExp x
+    dests <- letwith cs outarr (pexp iv) $ map (PrimOp . SubExp) x
     return $ resultBody [] (map Var dests) loc
-  return $ DoLoop outarr (zip outarr resarr) i (isize inarrs) loopbody loc
+  return $ LoopOp $ DoLoop outarr (zip outarr resarr) i (isize inarrs) loopbody loc
 
-transformExp (Reduce cs fun args loc) = do
+transformExp (LoopOp (Reduce cs fun args loc)) = do
   (_, (acc, initacc), (i, iv)) <- newFold loc arrexps accexps
-  arrvs <- mapM (letExp "reduce_arr" . SubExp) arrexps
+  arrvs <- mapM (letExp "reduce_arr" . PrimOp . SubExp) arrexps
   loopbody <- insertBindingsM $ transformLambda fun $
-              map (SubExp . Var) acc ++ index cs arrvs iv
-  return $ DoLoop acc (zip acc initacc) i (isize arrvs) loopbody loc
+              map (PrimOp . SubExp . Var) acc ++ index cs arrvs iv
+  return $ LoopOp $ DoLoop acc (zip acc initacc) i (isize arrvs) loopbody loc
   where (accexps, arrexps) = unzip args
 
-transformExp (Scan cs fun args loc) = do
+transformExp (LoopOp (Scan cs fun args loc)) = do
   ((arr, initarr), (acc, initacc), (i, iv)) <- newFold loc arrexps accexps
   loopbody <- insertBindingsM $ do
     x <- bodyBind =<<
-         transformLambda fun (map (SubExp . Var) acc ++ index cs arr iv)
-    dests <- letwith cs arr (pexp iv) $ map SubExp x
+         transformLambda fun (map (PrimOp . SubExp . Var) acc ++ index cs arr iv)
+    dests <- letwith cs arr (pexp iv) $ map (PrimOp . SubExp) x
     irows <- letSubExps "row" $ index cs dests iv
-    rowcopies <- letExps "copy" [ Copy irow loc | irow <- irows ]
+    rowcopies <- letExps "copy" [ PrimOp $ Copy irow loc | irow <- irows ]
     return $ resultBody [] (map Var $ rowcopies ++ dests) loc
-  return $ DoLoop arr (zip (acc ++ arr) (initacc ++ initarr)) i (isize arr) loopbody loc
+  return $ LoopOp $ DoLoop arr (zip (acc ++ arr) (initacc ++ initarr)) i (isize arr) loopbody loc
   where (accexps, arrexps) = unzip args
 
-transformExp (Filter cs fun arrexps loc) = do
-  arr <- letExps "arr" $ map SubExp arrexps
+transformExp (LoopOp (Filter cs fun arrexps loc)) = do
+  arr <- letExps "arr" $ map (PrimOp . SubExp) arrexps
   let nv = size arrexps
       rowtypes = map (rowType . subExpType) arrexps
   (xs, _) <- unzip <$> mapM (newVar loc "x") rowtypes
   (i, iv) <- newVar loc "i" $ Basic Int
   test <- insertBindingsM $ do
-   [check] <- bodyBind =<< transformLambda fun (map (SubExp . Var) xs) -- XXX
+   [check] <- bodyBind =<< transformLambda fun (map (PrimOp . SubExp . Var) xs) -- XXX
    res <- letSubExp "res" $
           If check
              (resultBody [] [intval 1] loc)
@@ -97,15 +97,15 @@ transformExp (Filter cs fun arrexps loc) = do
              [Basic Int] loc
    return $ resultBody [] [res] loc
   mape <- letExp "mape" <=< transformExp $
-          Map cs (Lambda (map toParam xs) test [Basic Int] loc) (map Var arr) loc
+          LoopOp $ Map cs (Lambda xs test [Basic Int] loc) (map Var arr) loc
   plus <- do
     (a,av) <- newVar loc "a" (Basic Int)
     (b,bv) <- newVar loc "b" (Basic Int)
     body <- insertBindingsM $ do
-      res <- letSubExp "sum" $ BinOp Plus av bv (Basic Int) loc
+      res <- letSubExp "sum" $ PrimOp $ BinOp Plus av bv (Basic Int) loc
       return $ resultBody [] [res] loc
-    return $ Lambda [toParam a, toParam b] body [Basic Int] loc
-  scan <- transformExp $ Scan cs plus [(intval 0,Var mape)] loc
+    return $ Lambda [a, b] body [Basic Int] loc
+  scan <- transformExp $ LoopOp $ Scan cs plus [(intval 0,Var mape)] loc
   ia <- letExp "ia" scan
   let indexia ind = eIndex cs ia [ind] loc
       sub1 e = eBinOp Minus e (pexp $ intval 1) (Basic Int) loc
@@ -121,22 +121,22 @@ transformExp (Filter cs fun arrexps loc) = do
     let update = insertBindingsM $ do
           dest <- letwith cs res (sub1 indexi) indexin
           return $ resultBody [] (map Var $ mergesize:dest) loc
-    eBody [eIf (eIf (pure $ BinOp Equal iv (intval 0) (Basic Bool) loc)
+    eBody [eIf (eIf (pure $ PrimOp $ BinOp Equal iv (intval 0) (Basic Bool) loc)
                (eBody [eBinOp Equal indexi (pexp $ intval 0) (Basic Bool) loc])
                (eBody [eBinOp Equal indexi indexinm1 (Basic Bool) loc])
                [Basic Bool] loc)
            (pure resv) update (bodyType resv) loc]
-  return $ DoLoop (mergesize:res)
+  return $ LoopOp $ DoLoop (mergesize:res)
     (zip (mergesize:res) (outersize:resinit))
     i nv loopbody loc
   where intval x = intconst x loc
 
-transformExp (Redomap cs _ innerfun accexps arrexps loc) = do
+transformExp (LoopOp (Redomap cs _ innerfun accexps arrexps loc)) = do
   (_, (acc, initacc), (i, iv)) <- newFold loc arrexps accexps
-  arrvs <- mapM (letExp "redomap_arr" . SubExp) arrexps
+  arrvs <- mapM (letExp "redomap_arr" . PrimOp . SubExp) arrexps
   loopbody <- insertBindingsM $ transformLambda innerfun $
-              map (SubExp . Var) acc ++ index cs arrvs iv
-  return $ DoLoop acc (zip acc initacc) i (isize arrvs) loopbody loc
+              map (PrimOp . SubExp . Var) acc ++ index cs arrvs iv
+  return $ LoopOp $ DoLoop acc (zip acc initacc) i (isize arrvs) loopbody loc
 
 transformExp e = mapExpM transform e
 
@@ -163,21 +163,21 @@ newFold loc arrexps accexps = do
 -- not unique or a basic type, otherwise just returns @e@ itself.
 maybeCopy :: SubExp -> Exp
 maybeCopy e
-  | unique (subExpType e) || basicType (subExpType e) = SubExp e
-  | otherwise = Copy e $ srclocOf e
+  | unique (subExpType e) || basicType (subExpType e) = PrimOp $ SubExp e
+  | otherwise = PrimOp $ Copy e $ srclocOf e
 
 index :: Certificates -> [Ident] -> SubExp -> [Exp]
 index cs arrs i = flip map arrs $ \arr ->
-                  Index cs arr [i] $ srclocOf i
+  PrimOp $ Index cs arr [i] $ srclocOf i
 
-resultArray :: [TypeBase als Shape] -> SrcLoc -> Binder Basic [SubExp]
+resultArray :: [TypeBase Shape] -> SrcLoc -> Binder Basic [SubExp]
 resultArray ts loc = mapM arrayOfShape ts
   where arrayOfShape t = arrayOfShape' $ arrayDims t
           where arrayOfShape' [] =
                   return $ blankConstant t
                 arrayOfShape' (d:ds) = do
                   elm <- arrayOfShape' ds
-                  letSubExp "result" =<< eCopy (pure $ Replicate d elm loc)
+                  letSubExp "result" =<< eCopy (pure $ PrimOp $ Replicate d elm loc)
 
         blankConstant t = Constant (blankValue $ basicDecl $ elemType t) loc
 
@@ -199,9 +199,9 @@ size (v:_)
 size _ = intconst 0 noLoc
 
 pexp :: Applicative f => SubExp -> f Exp
-pexp = pure . SubExp
+pexp = pure . PrimOp . SubExp
 
 transformLambda :: Lambda -> [Exp] -> Binder Basic Body
 transformLambda (Lambda params body _ _) args = do
-  zipWithM_ letBind (map ((:[]) . fromParam) params) args
+  zipWithM_ letBind (map pure params) args
   transformBody body

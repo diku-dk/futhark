@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE FlexibleContexts, GeneralizedNewtypeDeriving, ScopedTypeVariables #-}
 module Futhark.Tools
   ( letSubExp
   , letSubExps
@@ -20,6 +20,13 @@ module Futhark.Tools
   , eBody
   , eLambda
 
+  , resultBody
+  , resultBodyM
+  , insertBindingsM
+  , mapResultM
+  , mapResult
+  , setBodyResult
+
   , foldBinOp
   , binOpLambda
   , makeLambda
@@ -35,6 +42,7 @@ import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
 import Data.Loc
 import Control.Applicative
+import Control.Monad.Identity
 import Control.Monad.Writer
 
 import Futhark.Representation.AST
@@ -44,7 +52,7 @@ import Futhark.Binder
 
 letSubExp :: MonadBinder m =>
              String -> Exp (Lore m) -> m SubExp
-letSubExp _ (SubExp se) = return se
+letSubExp _ (PrimOp (SubExp se)) = return se
 letSubExp desc e =
   case typeOf e of
     [_] -> Var <$> letExp desc e
@@ -52,7 +60,7 @@ letSubExp desc e =
 
 letExp :: MonadBinder m =>
           String -> Exp (Lore m) -> m Ident
-letExp _ (SubExp (Var v)) = return v
+letExp _ (PrimOp (SubExp (Var v))) = return v
 letExp desc e =
   case hasStaticShape $ typeOf e of
     Just [t] -> do v <- fst <$> newVar (srclocOf e) desc t
@@ -70,7 +78,7 @@ letExps desc = mapM $ letExp desc
 
 letShapedExp :: MonadBinder m => String -> Exp (Lore m)
              -> m ([Ident], [Ident])
-letShapedExp _ (SubExp (Var v)) = return ([], [v])
+letShapedExp _ (PrimOp (SubExp (Var v))) = return ([], [v])
 letShapedExp name e = do
   (ts, shapes) <- runWriterT $ instantiateShapes instantiate $ typeOf e
   names <- mapM (liftM fst . newVar loc name) ts
@@ -87,7 +95,7 @@ letTupExp name e = snd <$> letShapedExp name e
 
 letTupExp' :: MonadBinder m => String -> Exp (Lore m)
            -> m [SubExp]
-letTupExp' _ (SubExp se) = return [se]
+letTupExp' _ (PrimOp (SubExp se)) = return [se]
 letTupExp' name ses = do vs <- letTupExp name ses
                          return $ map Var vs
 
@@ -97,7 +105,7 @@ newVar loc name tp = do
   x <- newVName name
   return (Ident x tp loc, Var $ Ident x tp loc)
 
-eIf :: MonadBinder m =>
+eIf :: (MonadBinder m) =>
        m (Exp (Lore m)) -> m (Body (Lore m)) -> m (Body (Lore m)) -> ResType -> SrcLoc
     -> m (Exp (Lore m))
 eIf ce te fe ts loc = do
@@ -112,38 +120,38 @@ eBinOp :: MonadBinder m =>
 eBinOp op x y t loc = do
   x' <- letSubExp "x" =<< x
   y' <- letSubExp "y" =<< y
-  return $ BinOp op x' y' t loc
+  return $ PrimOp $ BinOp op x' y' t loc
 
 eNegate :: MonadBinder m =>
            m (Exp (Lore m)) -> SrcLoc -> m (Exp (Lore m))
 eNegate e loc = do
   e' <- letSubExp "negate_arg" =<< e
-  return $ Negate e' loc
+  return $ PrimOp $ Negate e' loc
 
 eNot :: MonadBinder m =>
         m (Exp (Lore m)) -> SrcLoc -> m (Exp (Lore m))
 eNot e loc = do
   e' <- letSubExp "not_arg" =<< e
-  return $ Not e' loc
+  return $ PrimOp $ Not e' loc
 
 eIndex :: MonadBinder m =>
           Certificates -> Ident -> [m (Exp (Lore m))] -> SrcLoc
        -> m (Exp (Lore m))
 eIndex cs a idxs loc = do
   idxs' <- letSubExps "i" =<< sequence idxs
-  return $ Index cs a idxs' loc
+  return $ PrimOp $ Index cs a idxs' loc
 
 eCopy :: MonadBinder m =>
          m (Exp (Lore m)) -> m (Exp (Lore m))
 eCopy e = do e' <- letSubExp "copy_arg" =<< e
-             return $ Copy e' $ srclocOf e'
+             return $ PrimOp $ Copy e' $ srclocOf e'
 
 eAssert :: MonadBinder m =>
          m (Exp (Lore m)) -> m (Exp (Lore m))
 eAssert e = do e' <- letSubExp "assert_arg" =<< e
-               return $ Assert e' $ srclocOf e'
+               return $ PrimOp $ Assert e' $ srclocOf e'
 
-eDoLoop :: MonadBinder m =>
+eDoLoop :: (Bindable (Lore m), MonadBinder m) =>
            [Ident] -> [(Ident, m (Exp (Lore m)))]
         -> Ident -> m (Exp (Lore m)) -> m (Body (Lore m))
         -> m (Exp (Lore m))
@@ -151,11 +159,11 @@ eDoLoop respat merge i boundexp loopbody = do
   mergeexps' <- letSubExps "merge_init" =<< sequence mergeexps
   boundexp' <- letSubExp "bound" =<< boundexp
   loopbody' <- insertBindingsM loopbody
-  return $ DoLoop respat (zip mergepat mergeexps') i boundexp' loopbody' loc
+  return $ LoopOp $ DoLoop respat (zip mergepat mergeexps') i boundexp' loopbody' loc
   where (mergepat, mergeexps) = unzip merge
         loc = srclocOf i
 
-eBody :: MonadBinder m =>
+eBody :: (MonadBinder m) =>
          [m (Exp (Lore m))]
       -> m (Body (Lore m))
 eBody es = insertBindingsM $ do
@@ -163,20 +171,20 @@ eBody es = insertBindingsM $ do
              xs <- mapM (letTupExp "x") es'
              let loc = case es' of []  -> noLoc
                                    e:_ -> srclocOf e
-             return $ resultBody [] (map Var $ concat xs) loc
+             mkBodyM [] $ Result [] (map Var $ concat xs) loc
 
 eLambda :: MonadBinder m =>
            Lambda (Lore m) -> [SubExp] -> m [SubExp]
-eLambda lam args = do zipWithM_ letBind params $ map SubExp args
+eLambda lam args = do zipWithM_ letBind params $ map (PrimOp . SubExp) args
                       bodyBind $ lambdaBody lam
-  where params = map (pure . fromParam) $ lambdaParams lam
+  where params = map pure $ lambdaParams lam
 
 -- | Apply a binary operator to several subexpressions.  A left-fold.
 foldBinOp :: MonadBinder m =>
              BinOp -> SubExp -> [SubExp] -> Type -> m (Exp (Lore m))
-foldBinOp _ ne [] _   = return $ SubExp ne
+foldBinOp _ ne [] _   = return $ PrimOp $ SubExp ne
 foldBinOp bop ne (e:es) t =
-  eBinOp bop (pure $ SubExp e) (foldBinOp bop ne es t) t $ srclocOf e
+  eBinOp bop (pure $ PrimOp $ SubExp e) (foldBinOp bop ne es t) t (srclocOf e)
 
 -- | Create a two-parameter lambda whose body applies the given binary
 -- operation to its arguments.  It is assumed that both argument and
@@ -188,15 +196,15 @@ binOpLambda bop t loc = do
   x   <- newIdent "x"   t loc
   y   <- newIdent "y"   t loc
   res <- newIdent "res" t loc
+  let bnds = [mkLet [res] $ PrimOp $ BinOp bop (Var x) (Var y) t loc]
   return Lambda {
-             lambdaParams     = [toParam x, toParam y]
-           , lambdaReturnType = [toConstType t]
+             lambdaParams     = [x, y]
+           , lambdaReturnType = [t]
            , lambdaSrcLoc     = loc
-           , lambdaBody = Body [mkLet [res] (BinOp bop (Var x) (Var y) t loc)] $
-                          Result [] [Var res] loc
+           , lambdaBody = mkBody bnds $ Result [] [Var res] loc
            }
 
-makeLambda :: MonadBinder m =>
+makeLambda :: (Bindable (Lore m), MonadBinder m) =>
               [Param] -> m (Body (Lore m)) -> m (Lambda (Lore m))
 makeLambda params body = do
   body' <- insertBindingsM body
@@ -206,9 +214,51 @@ makeLambda params body = do
       return Lambda {
         lambdaParams = params
         , lambdaSrcLoc = srclocOf body'
-        , lambdaReturnType = map (`setAliases` ()) ts
+        , lambdaReturnType = ts
         , lambdaBody = body'
         }
+
+-- | Conveniently construct a body that contains no bindings.
+resultBody :: forall lore.Bindable lore => Certificates -> [SubExp] -> SrcLoc -> Body lore
+resultBody cs ses loc = mkBody bnds $ Result cs ses loc
+  where bnds :: [Binding lore]
+        bnds = []
+
+-- | Conveniently construct a body that contains no bindings - but
+-- this time, monadically!
+resultBodyM :: MonadBinder m => Certificates -> [SubExp] -> SrcLoc -> m (Body (Lore m))
+resultBodyM cs ses loc =
+  mkBodyM [] $ Result cs ses loc
+
+-- | Evaluate the action, producing a body, then wrap it in all the
+-- bindings it created using 'addBinding'.
+insertBindingsM :: (MonadBinder m) =>
+                   m (Body (Lore m)) -> m (Body (Lore m))
+insertBindingsM m = do
+  (Body _ bnds res, otherbnds) <- collectBindings m
+  mkBodyM (otherbnds <> bnds) res
+
+-- | Change that subexpression where evaluation of the body would
+-- stop.
+mapResultM :: MonadBinder m =>
+              (Result -> m (Body (Lore m))) -> Body (Lore m) -> m (Body (Lore m))
+mapResultM f (Body _ bnds res) = do
+  Body _ bnds2 res' <- f res
+  mkBodyM (bnds++bnds2) res'
+
+-- | Change that result where evaluation of the body would stop.  Also
+-- change type annotations at branches.  This a non-monadic variant of
+-- @mapResultM@.
+mapResult :: Bindable lore =>
+             (Result -> Body lore) -> Body lore -> Body lore
+mapResult f (Body _ bnds res) =
+  let Body _ bnds2 newres = f res
+  in mkBody (bnds<>bnds2) newres
+
+-- | @setBodyResult result body@ sets the tail end of @body@ (the
+-- 'Result' part) to @result@.
+setBodyResult :: Bindable lore => Body lore -> Body lore -> Body lore
+setBodyResult result = mapResult $ const result
 
 copyConsumed :: (Proper (Lore m), MonadBinder m) => Body (Lore m) -> m (Body (Lore m))
 copyConsumed e
@@ -222,7 +272,7 @@ copyConsumed e
   where copyVariables = mapM copyVariable
         copyVariable v =
           letExp (textual (baseName $ identName v) ++ "_copy") $
-                 Copy (Var v) loc
+                 PrimOp $ Copy (Var v) loc
           where loc = srclocOf v
 
         freeUniqueInBody = HS.filter (unique . identType) . freeInBody
@@ -234,8 +284,8 @@ nonuniqueParams params = do
     if unique $ identType param then do
       param' <- nonuniqueParam <$> newIdent' (++"_nonunique") param
       return (param',
-              [mkLet [fromParam param] $
-               Copy (Var $ fromParam param') $ srclocOf param'])
+              [mkLet [param] $
+               PrimOp $ Copy (Var param') $ srclocOf param'])
     else
       return (param, [])
   return (params', concat bnds)

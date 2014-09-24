@@ -8,7 +8,7 @@ module Futhark.Untrace
   where
 
 import Futhark.Representation.Basic
-import Futhark.Binder (mkLetPat)
+import Futhark.Binder (mkLet)
 
 -- | Remove all special debugging function calls from the program.
 untraceProg :: Prog -> Prog
@@ -25,9 +25,11 @@ untraceBody = mapBody untrace
                   , mapOnBody = return .untraceBody
                   , mapOnLambda = return . untraceLambda
                   }
-        untraceBinding (Let pat _ e) = mkLetPat pat $ untraceExp e
+        untraceBinding bnd@(Let _ _ (PrimOp _)) = bnd
+        untraceBinding (Let pat _ e) =
+          mkLet (patternIdents pat) $ untraceExp e
         untraceExp (Apply fname [(e,_)] _ _)
-          | "trace" <- nameToString fname = SubExp e
+          | "trace" <- nameToString fname = PrimOp $ SubExp e
         untraceExp e = mapExp untrace e
 
 

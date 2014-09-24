@@ -13,22 +13,26 @@ module Futhark.Optimise.Simplifier
   )
   where
 
+import Control.Monad
+import Futhark.Representation.Aliases
+  (removeProgAliases, removeFunDecAliases, removeLambdaAliases)
 import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplifier.Rules
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
+
 
 -- | Simplify the given program.  Even if the output differs from the
 -- output, meaningful simplification may not have taken place - the
 -- order of bindings may simply have been rearranged.  The function is
 -- idempotent, however.
 simplifyProg :: Prog -> Prog
-simplifyProg = Engine.simplifyProg standardRules
+simplifyProg = removeProgAliases . Engine.simplifyProg standardRules
 
 -- | Simplify just a single function declaration.
 simplifyFun :: MonadFreshNames m => FunDec -> m FunDec
-simplifyFun = Engine.simplifyOneFun standardRules
+simplifyFun = liftM removeFunDecAliases . Engine.simplifyOneFun standardRules
 
 -- | Simplify just a single 'Lambda'.
 simplifyOneLambda :: MonadFreshNames m => Prog -> Lambda -> m Lambda
-simplifyOneLambda = Engine.simplifyOneLambda standardRules . Just
+simplifyOneLambda prog = liftM removeLambdaAliases . Engine.simplifyOneLambda standardRules (Just prog)

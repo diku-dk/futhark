@@ -6,6 +6,7 @@ where
 import Control.Monad
 
 import qualified Futhark.FirstOrderTransform as FOT
+import Futhark.Representation.AST.Attributes.Patterns (patternIdents)
 import Futhark.Tools
 
 import qualified Futhark.CodeGen.ImpGen as ImpGen
@@ -17,6 +18,6 @@ firstOrderSOACS targets e
   | FOT.transformable e =
     liftM ImpGen.CompileBindings $ do
       (e',bnds) <- runBinder'' $ FOT.transformExp e
-      return $ bnds ++ [mkLetPat targets e']
+      return $ bnds ++ [mkLet (patternIdents targets) e']
   | otherwise           =
     return $ ImpGen.CompileExp e

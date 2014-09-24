@@ -51,21 +51,25 @@ import Data.Graph
 import Data.Hashable
 import Data.List
 import Data.Loc
+import Data.Maybe
+import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import Data.Foldable (traverse_)
 
 import Futhark.Representation.AST
-import qualified Futhark.Representation.AST.Lore as Lore
+import Futhark.Representation.Aliases (Aliases)
+import qualified Futhark.Representation.Aliases as Aliases
+import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplifier.CSE
 import Futhark.Optimise.Simplifier.Rule
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
+import Futhark.Analysis.Usage
 import Futhark.Optimise.Simplifier.Apply
-import Futhark.Optimise.Simplifier.TaggedBinding
-import Futhark.Binder
+import Futhark.Tools
 
-type NeedSet lore = [TaggedBinding lore]
+type NeedSet lore = [Binding lore]
 
 patNameSet :: [Ident] -> Names
 patNameSet = HS.fromList . map identName
@@ -78,18 +82,22 @@ instance Monoid (Need lore) where
   Need b1 f1 `mappend` Need b2 f2 = Need (b1 <> b2) (f1 <> f2)
   mempty = Need [] UT.empty
 
+type AliasMap = HM.HashMap VName Names
+
 data Env m = Env { envDupeState :: DupeState (Lore m)
-                 , envProgram   :: Maybe (Prog (Lore m))
+                 , envProgram   :: Maybe (Prog (InnerLore m))
                  , envRules     :: RuleBook m
+                 , envAliases   :: AliasMap
                  }
 
 emptyEnv :: MonadEngine m =>
             RuleBook m
-         -> Maybe (Prog (Lore m)) -> Env m
+         -> Maybe (Prog (InnerLore m)) -> Env m
 emptyEnv rules prog =
   Env { envDupeState = newDupeState
       , envProgram = prog
       , envRules = rules
+      , envAliases = mempty
       }
 
 data State m = State { stateVtable :: ST.SymbolTable (Lore m)
@@ -98,7 +106,9 @@ data State m = State { stateVtable :: ST.SymbolTable (Lore m)
 emptyState :: State m
 emptyState = State { stateVtable = ST.empty }
 
-class (Proper (Lore m), MonadBinder m) => MonadEngine m where
+class (Proper (Lore m), MonadBinder m,
+       Lore m ~ Aliases (InnerLore m)) => MonadEngine m where
+  type InnerLore m
   askEngineEnv :: m (Env m)
   localEngineEnv :: (Env m -> Env m) -> m a -> m a
   tellNeed :: Need (Lore m) -> m ()
@@ -115,15 +125,14 @@ class (Proper (Lore m), MonadBinder m) => MonadEngine m where
 addBindingEngine :: MonadEngine m =>
                     Binding (Lore m) -> m ()
 addBindingEngine bnd = do
-  vtable <- getVtable
   modifyVtable $ ST.insertBinding bnd
-  needTagged $ tagBinding vtable bnd
+  needBinding bnd
 
 collectBindingsEngine :: MonadEngine m =>
                          m a -> m (a, [Binding (Lore m)])
 collectBindingsEngine m = passNeed $ do
   (x, need) <- listenNeed m
-  return ((x, map untagBinding $ needBindings need),
+  return ((x, needBindings need),
           const mempty)
 
 asksEngineEnv :: MonadEngine m => (Env m -> a) -> m a
@@ -136,11 +145,8 @@ modifyEngineState :: MonadEngine m => (State m -> State m) -> m ()
 modifyEngineState f = do x <- getEngineState
                          putEngineState $ f x
 
-needTagged :: MonadEngine m => TaggedBinding (Lore m) -> m ()
-needTagged bnd = tellNeed $ Need [bnd] UT.empty
-
-needToBinding :: TaggedBinding lore -> Binding lore
-needToBinding (TaggedLet (pat, _) lore (e, _)) = Let pat lore e
+needBinding :: MonadEngine m => Binding (Lore m) -> m ()
+needBinding bnd = tellNeed $ Need [bnd] UT.empty
 
 boundFree :: MonadEngine m => Names -> m ()
 boundFree fs = tellNeed $ Need [] $ UT.usages fs
@@ -207,51 +213,54 @@ bindLoopVar var bound =
 hoistBindings :: MonadEngine m =>
                  RuleBook m -> BlockPred (Lore m)
               -> ST.SymbolTable (Lore m) -> UT.UsageTable -> DupeState (Lore m)
-              -> [TaggedBinding (Lore m)] -> Body (Lore m)
+              -> [Binding (Lore m)] -> Body (Lore m)
               -> m (Body (Lore m),
-                    [TaggedBinding (Lore m)],
+                    [Binding (Lore m)],
                     UT.UsageTable)
 hoistBindings rules block vtable uses dupes needs body = do
   (uses', blocked, hoisted) <-
     simplifyBindings vtable uses $
     concat $ snd $ mapAccumL pick dupes $ inDepOrder needs
-  return (insertBindings blocked body, hoisted, uses')
+  body' <- insertBindingsM $ do
+    mapM_ addBinding blocked
+    return body
+  return (body', hoisted, uses')
   where simplifyBindings vtable' uses' bnds = do
           (uses'', bnds') <- simplifyBindings' vtable' uses' bnds
           let (blocked, hoisted) = partitionEithers $ blockUnhoistedDeps bnds'
           -- We need to do a final pass to ensure that nothing is
           -- hoisted past something that it depends on.
-          return (uses'', map needToBinding blocked, hoisted)
+          return (uses'', blocked, hoisted)
 
         simplifyBindings' vtable' uses' bnds =
           foldM hoistable (uses',[]) (reverse $ zip bnds vtables)
             where vtables = scanl insertBnd vtable' bnds
                   insertBnd vtable'' bnd =
-                    ST.insertBinding (untagBinding bnd) vtable''
+                    ST.insertBinding bnd vtable''
 
         hoistable (uses',bnds) (bnd, vtable')
           | not $ uses' `UT.contains` provides bnd = -- Dead binding.
             return (uses', bnds)
           | otherwise = do
-            res <- bottomUpSimplifyBinding rules (vtable', uses') $ untagBinding bnd
+            res <- bottomUpSimplifyBinding rules (vtable', uses') bnd
             case res of
               Nothing -- Nothing to optimise - see if hoistable.
                 | block uses' bnd ->
-                  return ((uses' <> usage bnd) `UT.without` provides bnd,
+                  return (expandUsage uses' bnd `UT.without` provides bnd,
                           Left bnd : bnds)
                 | otherwise ->
-                  return (uses' <> usage bnd, Right bnd : bnds)
+                  return (expandUsage uses' bnd, Right bnd : bnds)
               Just optimbnds -> do
                 (uses'',bnds') <-
-                  simplifyBindings' vtable' uses' $ map (tagBinding vtable') optimbnds
+                  simplifyBindings' vtable' uses' optimbnds
                 return (uses'', bnds'++bnds)
 
         pick ds bnd =
           (ds,[bnd])
 
-blockUnhoistedDeps :: FreeIn (Lore.Exp lore) =>
-                      [Either (TaggedBinding lore) (TaggedBinding lore)]
-                   -> [Either (TaggedBinding lore) (TaggedBinding lore)]
+blockUnhoistedDeps :: Proper lore =>
+                      [Either (Binding lore) (Binding lore)]
+                   -> [Either (Binding lore) (Binding lore)]
 blockUnhoistedDeps = snd . mapAccumL block HS.empty
   where block blocked (Left need) =
           (blocked <> HS.fromList (provides need), Left need)
@@ -261,7 +270,8 @@ blockUnhoistedDeps = snd . mapAccumL block HS.empty
           | otherwise =
             (blocked, Right need)
 
-inDepOrder :: Proper lore => [TaggedBinding lore] -> [TaggedBinding lore]
+inDepOrder :: (Proper lore, Aliased lore) =>
+              [Binding lore] -> [Binding lore]
 inDepOrder = flattenSCCs . stronglyConnComp . buildGraph
   where buildGraph bnds =
           [ (bnd, representative $ provides bnd, deps) |
@@ -275,18 +285,43 @@ inDepOrder = flattenSCCs . stronglyConnComp . buildGraph
         representative []    = Nothing
         representative (x:_) = Just x
 
-mustPrecede :: FreeIn (Lore.Exp lore) => TaggedBinding lore -> TaggedBinding lore -> Bool
+mustPrecede :: (Proper lore, Aliased lore) =>
+               Binding lore -> Binding lore -> Bool
 bnd1 `mustPrecede` bnd2 =
   not $ HS.null $ HS.fromList (filter (`HS.member` req2) $ provides bnd1)
                   `HS.union`
-                  (consumedInBody e2 `HS.intersection` requires bnd1)
-  where e2 = asTail bnd2
-        req2 = requires bnd2
+                  (consumedInExp (bindingExp bnd2) `HS.intersection`
+                   requires bnd1)
+  where req2 = requires bnd2
+
+provides :: Proper lore => Binding lore -> [VName]
+provides = patternNames . bindingPattern
+
+requires :: Proper lore => Binding lore -> Names
+requires bnd =
+  (mconcat (map freeNamesIn $ patternIdents $ bindingPattern bnd)
+  `HS.difference` HS.fromList (provides bnd)) <>
+  freeNamesInExp (bindingExp bnd)
+
+usage :: (Proper lore, Aliased lore) => Binding lore -> UT.UsageTable
+usage = usageInBinding
+
+expandUsage :: (Proper lore, Aliased lore) =>
+               UT.UsageTable -> Binding lore -> UT.UsageTable
+expandUsage utable bnd = utable <> usage bnd <> usageThroughAliases
+  where e = bindingExp bnd
+        aliases = aliasesOf $ bindingExp bnd
+        tagged = zip (drop (contextSize $ typeOf e) $ provides bnd) aliases
+        usageThroughAliases = mconcat $ catMaybes $ do
+          (name,als) <- tagged
+          return $ do uses <- UT.lookup name utable
+                      return $ mconcat $ map (`UT.usage` uses) $ HS.toList als
+
 
 intersects :: (Eq a, Hashable a) => HS.HashSet a -> HS.HashSet a -> Bool
 intersects a b = not $ HS.null $ a `HS.intersection` b
 
-type BlockPred lore = UT.UsageTable -> TaggedBinding lore -> Bool
+type BlockPred lore = UT.UsageTable -> Binding lore -> Bool
 
 orIf :: BlockPred lore -> BlockPred lore -> BlockPred lore
 orIf p1 p2 body need = p1 body need || p2 body need
@@ -303,7 +338,7 @@ blockIf block m = passNeed $ do
   rules <- asksEngineEnv envRules
   (e, hoistable, usages) <-
     hoistBindings rules block vtable (usageTable needs) ds (needBindings needs) body
-  putVtable $ foldl (flip ST.insertBinding) vtable $ map untagBinding hoistable
+  putVtable $ foldl (flip ST.insertBinding) vtable hoistable
   return (e,
           const Need { needBindings = hoistable
                      , usageTable  = usages
@@ -312,26 +347,26 @@ blockIf block m = passNeed $ do
 insertAllBindings :: MonadEngine m => m (Body (Lore m)) -> m (Body (Lore m))
 insertAllBindings = blockIf $ \_ _ -> True
 
-hasFree :: FreeIn (Lore.Exp lore) => Names -> BlockPred lore
+hasFree :: Proper lore => Names -> BlockPred lore
 hasFree ks _ need = ks `intersects` requires need
 
 isNotSafe :: BlockPred m
-isNotSafe _ (TaggedLet _ _ (e,_)) = not $ safeExp e
+isNotSafe _ = not . safeExp . bindingExp
 
 isNotCheap :: BlockPred m
 isNotCheap _ = not . cheapBnd
-  where cheapBnd (TaggedLet _ _ (e,_)) = cheap e
-        cheap (BinOp {})   = True
-        cheap (SubExp {})  = True
-        cheap (Not {})     = True
-        cheap (Negate {})  = True
-        cheap (DoLoop {})  = False
-        cheap _            = True -- Used to be False, but mkLets try
-                                  -- it out.
+  where cheapBnd = cheap . bindingExp
+        cheap (PrimOp (BinOp {}))   = True
+        cheap (PrimOp (SubExp {}))  = True
+        cheap (PrimOp (Not {}))     = True
+        cheap (PrimOp (Negate {}))  = True
+        cheap (LoopOp {})           = False
+        cheap _                     = True -- Used to be False, but
+                                           -- let's try it out.
 
 isConsumed :: BlockPred lore
-isConsumed uses (TaggedLet (pat,_) _ _) =
-  any (`UT.isConsumed` uses) $ patternNames pat
+isConsumed uses =
+  any (`UT.isConsumed` uses) . patternNames . bindingPattern
 
 hoistCommon :: MonadEngine m =>
                m (Body (Lore m))
@@ -356,7 +391,7 @@ hoistCommon m1 vtablef1 m2 vtablef2 = passNeed $ do
     hoistBindings rules block vtable (usageTable needs2)
     newDupeState (needBindings needs2) body2
   let hoistable = safe1 <> safe2
-  putVtable $ foldl (flip ST.insertBinding) vtable $ map untagBinding hoistable
+  putVtable $ foldl (flip ST.insertBinding) vtable hoistable
   return ((body1', body2'),
           const Need { needBindings = hoistable
                      , usageTable = f1 <> f2
@@ -366,12 +401,12 @@ hoistCommon m1 vtablef1 m2 vtablef2 = passNeed $ do
 defaultSimplifyBody :: MonadEngine m =>
                        [Diet] -> Body lore -> m (Body (Lore m))
 
-defaultSimplifyBody ds (Body [] res) =
-  Body [] <$> simplifyResult ds res
+defaultSimplifyBody ds (Body _ [] res) =
+  mkBodyM [] =<< simplifyResult ds res
 
-defaultSimplifyBody ds (Body (bnd:bnds) res) = do
+defaultSimplifyBody ds (Body lore (bnd:bnds) res) = do
   simplifyBinding bnd
-  simplifyBody ds $ Body bnds res
+  simplifyBody ds $ Body lore bnds res
 
 -- | Simplify a single 'Result' inside an arbitrary 'MonadEngine'.
 simplifyResult :: MonadEngine m =>
@@ -389,7 +424,6 @@ simplifyBinding :: MonadEngine m =>
 -- The simplification rules cannot handle Apply, because it requires
 -- access to the full program.  This is a bit of a hack.
 simplifyBinding (Let pat _ (Apply fname args rettype loc)) = do
-  pat' <- blockUsage $ simplifyPattern pat
   args' <- mapM (simplifySubExp . fst) args
   rettype' <- mapM simplifyExtType rettype
   prog <- asksEngineEnv envProgram
@@ -399,18 +433,17 @@ simplifyBinding (Let pat _ (Apply fname args rettype loc)) = do
     Just vs -> do let vs' = valueShapeContext rettype vs ++ vs
                   bnds <- forM (zip (patternIdents pat) vs') $ \(p,v) ->
                     case uniqueness $ identType p of
-                      Unique    -> mkLetM [p] $ Copy (Constant v loc) loc
-                      Nonunique -> mkLetM [p] $ SubExp $ Constant v loc
-                  mapM_ inspectBinding bnds
+                      Unique    -> mkLetM [p] $ PrimOp $ Copy (Constant v loc) loc
+                      Nonunique -> mkLetM [p] $ PrimOp $ SubExp $ Constant v loc
+                  mapM_ simplifyBinding bnds
     Nothing -> do let e' = Apply fname (zip args' $ map snd args) rettype' loc
-                  lore <- loreForExpM e'
-                  inspectBinding $ Let pat' lore e'
+                  pat' <- blockUsage $ simplifyPattern pat
+                  inspectBinding =<< mkLetM pat' e'
 
 simplifyBinding (Let pat _ e) = do
-  pat' <- blockUsage $ simplifyPattern pat
   e' <- simplifyExp e
-  lore <- loreForExpM e'
-  inspectBinding $ Let pat' lore e'
+  pat' <- blockUsage $ simplifyPattern pat
+  inspectBinding =<< mkLetM pat' e'
 
 defaultInspectBinding :: MonadEngine m =>
                          Binding (Lore m) -> m ()
@@ -425,7 +458,41 @@ defaultInspectBinding bnd = do
 
 simplifyExp :: MonadEngine m => Exp lore -> m (Exp (Lore m))
 
-simplifyExp (DoLoop respat merge loopvar boundexp loopbody loc) = do
+simplifyExp (If cond tbranch fbranch t loc) = do
+  -- Here, we have to check whether 'cond' puts a bound on some free
+  -- variable, and if so, chomp it.  We also try to do CSE across
+  -- branches.
+  cond' <- simplifySubExp cond
+  t' <- mapM simplifyExtType t
+  (tbranch',fbranch') <-
+    hoistCommon (simplifyBody (map diet t') tbranch) (ST.updateBounds True cond)
+                (simplifyBody (map diet t') fbranch) (ST.updateBounds False cond)
+  return $ If cond' tbranch' fbranch' t' loc
+
+simplifyExp (LoopOp op) = LoopOp <$> simplifyLoopOp op
+
+simplifyExp e = simplifyExpBase e
+
+simplifyExpBase :: MonadEngine m => Exp lore -> m (Exp (Lore m))
+simplifyExpBase = mapExpM hoist
+  where hoist = Mapper {
+                  mapOnBinding = fail "Unhandled binding in simplification engine"
+                -- Bodies are handled explicitly because we need to
+                -- provide their result diet.
+                , mapOnBody = fail "Unhandled body in simplification engine."
+                , mapOnSubExp = simplifySubExp
+                -- Lambdas are handled explicitly because we need to
+                -- bind their parameters.
+                , mapOnLambda = fail "Unhandled lambda in simplification engine."
+                , mapOnIdent = simplifyIdent
+                , mapOnType = simplifyType
+                , mapOnValue = return
+                , mapOnCertificates = simplifyCerts
+                }
+
+simplifyLoopOp :: MonadEngine m => LoopOp lore -> m (LoopOp (Lore m))
+
+simplifyLoopOp (DoLoop respat merge loopvar boundexp loopbody loc) = do
   let (mergepat, mergeexp) = unzip merge
   respat'   <- mapM simplifyIdentBinding respat
   mergepat' <- mapM simplifyIdentBinding mergepat
@@ -444,30 +511,19 @@ simplifyExp (DoLoop respat merge loopvar boundexp loopbody loc) = do
   where boundnames = identName loopvar `HS.insert`
                      patNameSet (map fst merge)
 
-simplifyExp (If cond tbranch fbranch t loc) = do
-  -- Here, we have to check whether 'cond' puts a bound on some free
-  -- variable, and if so, chomp it.  We also try to do CSE across
-  -- branches.
-  cond' <- simplifySubExp cond
-  t' <- mapM simplifyExtType t
-  (tbranch',fbranch') <-
-    hoistCommon (simplifyBody (map diet t') tbranch) (ST.updateBounds True cond)
-                (simplifyBody (map diet t') fbranch) (ST.updateBounds False cond)
-  return $ If cond' tbranch' fbranch' t' loc
-
-simplifyExp (Map cs fun arrs loc) = do
+simplifyLoopOp (Map cs fun arrs loc) = do
   cs' <- simplifyCerts cs
   arrs' <- mapM simplifySubExp arrs
   fun' <- simplifyLambda fun arrs'
   return $ Map cs' fun' arrs' loc
 
-simplifyExp (Filter cs fun arrs loc) = do
+simplifyLoopOp (Filter cs fun arrs loc) = do
   cs' <- simplifyCerts cs
   arrs' <- mapM simplifySubExp arrs
   fun' <- simplifyLambda fun arrs'
   return $ Filter cs' fun' arrs' loc
 
-simplifyExp (Reduce cs fun input loc) = do
+simplifyLoopOp (Reduce cs fun input loc) = do
   let (acc, arrs) = unzip input
   cs' <- simplifyCerts cs
   acc' <- mapM simplifySubExp acc
@@ -475,7 +531,7 @@ simplifyExp (Reduce cs fun input loc) = do
   fun' <- simplifyLambda fun arrs'
   return $ Reduce cs' fun' (zip acc' arrs') loc
 
-simplifyExp (Scan cs fun input loc) = do
+simplifyLoopOp (Scan cs fun input loc) = do
   let (acc, arrs) = unzip input
   cs' <- simplifyCerts cs
   acc' <- mapM simplifySubExp acc
@@ -483,7 +539,7 @@ simplifyExp (Scan cs fun input loc) = do
   fun' <- simplifyLambda fun arrs'
   return $ Scan cs' fun' (zip acc' arrs') loc
 
-simplifyExp (Redomap cs outerfun innerfun acc arrs loc) = do
+simplifyLoopOp (Redomap cs outerfun innerfun acc arrs loc) = do
   cs' <- simplifyCerts cs
   acc' <- mapM simplifySubExp acc
   arrs' <- mapM simplifySubExp arrs
@@ -507,7 +563,7 @@ simplifyExp (Redomap cs outerfun innerfun acc arrs loc) = do
                  input <- newIdent "unused_input"
                           (arrayOf (Basic Int) (Shape [outerSize]) Nonunique) $
                           srclocOf firstarr
-                 letBind [input] $ Iota outerSize $ srclocOf firstarr
+                 letBind [input] $ PrimOp $ Iota outerSize $ srclocOf firstarr
                  return (lam { lambdaParams =
                                   accparams ++
                                   [firstparam { identType = Basic Int }] },
@@ -515,25 +571,6 @@ simplifyExp (Redomap cs outerfun innerfun acc arrs loc) = do
                (arrparams', arrinps') ->
                  return (lam { lambdaParams = accparams ++ arrparams' }, arrinps')
           | otherwise = return (lam, arrinps)
-
-simplifyExp e = simplifyExpBase e
-
-simplifyExpBase :: MonadEngine m => Exp lore -> m (Exp (Lore m))
-simplifyExpBase = mapExpM hoist
-  where hoist = Mapper {
-                  mapOnBinding = fail "Unhandled binding in simplification engine"
-                -- Bodies are handled explicitly because we need to
-                -- provide their result diet.
-                , mapOnBody = fail "Unhandled body in simplification engine."
-                , mapOnSubExp = simplifySubExp
-                -- Lambdas are handled explicitly because we need to
-                -- bind their parameters.
-                , mapOnLambda = fail "Unhandled lambda in simplification engine."
-                , mapOnIdent = simplifyIdent
-                , mapOnType = simplifyType
-                , mapOnValue = return
-                , mapOnCertificates = simplifyCerts
-                }
 
 simplifySubExp :: MonadEngine m => SubExp -> m SubExp
 simplifySubExp (Var ident@(Ident vnm _ loc)) = do
@@ -547,9 +584,9 @@ simplifySubExp (Var ident@(Ident vnm _ loc)) = do
   where isBasicTypeVal = basicType . valueType
 simplifySubExp (Constant v loc) = return $ Constant v loc
 
-simplifyPattern :: MonadEngine m => Pattern lore -> m (Pattern (Lore m))
+simplifyPattern :: MonadEngine m => Pattern lore -> m [Ident]
 simplifyPattern pat =
-  mkPatternM =<< mapM simplifyIdentBinding (patternIdents pat)
+  mapM simplifyIdentBinding (patternIdents pat)
 
 simplifyIdentBinding :: MonadEngine m => Ident -> m Ident
 simplifyIdentBinding v = do
@@ -563,14 +600,13 @@ simplifyIdent v = do
   return v { identType = t' }
 
 simplifyExtType :: MonadEngine m =>
-                   TypeBase als ExtShape -> m (TypeBase als ExtShape)
+                   TypeBase ExtShape -> m (TypeBase ExtShape)
 simplifyExtType t = do dims <- mapM simplifyDim $ extShapeDims $ arrayShape t
                        return $ t `setArrayShape` ExtShape dims
   where simplifyDim (Free se) = Free <$> simplifySubExp se
         simplifyDim (Ext x)   = return $ Ext x
 
-simplifyType :: MonadEngine m =>
-                TypeBase als Shape -> m (TypeBase als Shape)
+simplifyType :: MonadEngine m => Type -> m Type
 simplifyType t = do dims <- mapM simplifySubExp $ arrayDims t
                     return $ t `setArrayShape` Shape dims
 
@@ -585,7 +621,7 @@ simplifyLambda (Lambda params body rettype loc) arrs = do
       simplifyBody (map diet rettype) body
   rettype' <- mapM simplifyType rettype
   return $ Lambda params body' rettype' loc
-  where params' = patNameSet $ map fromParam params
+  where params' = patNameSet params
         (nonarrayparams, arrayparams) =
           splitAt (length params - length arrs) params
 
@@ -593,7 +629,7 @@ consumeResult :: MonadEngine m =>
                  [(Diet, SubExp)] -> m ()
 consumeResult = mapM_ inspect
   where inspect (Consume, se) =
-          traverse_ consumedName $ aliases $ subExpType se
+          traverse_ consumedName $ subExpAliases se
         inspect (Observe, _) = return ()
 
 simplifyCerts :: MonadEngine m =>
@@ -612,12 +648,12 @@ simplifyCerts = liftM (nub . concat) . mapM check
 -- interface to running the simplifier on various things.
 
 newtype SimpleM lore a = SimpleM (RWS
-                                  (Env (SimpleM lore)) -- Reader
-                                  (Need lore)          -- Writer
-                                  (State (SimpleM lore), NameSource VName)   -- State
+                                  (Env (SimpleM lore))                     -- Reader
+                                  (Need (Aliases lore))                    -- Writer
+                                  (State (SimpleM lore), NameSource VName) -- State
                                   a)
   deriving (Applicative, Functor, Monad,
-            MonadWriter (Need lore),
+            MonadWriter (Need (Aliases lore)),
             MonadReader (Env (SimpleM lore)),
             MonadState (State (SimpleM lore), NameSource VName))
 
@@ -630,7 +666,9 @@ instance (Proper lore, Bindable lore) =>
   addBinding      = addBindingEngine
   collectBindings = collectBindingsEngine
 
-instance (Proper lore, Bindable lore) => MonadEngine (SimpleM lore) where
+instance (Proper lore, Bindable lore) =>
+         MonadEngine (SimpleM lore) where
+  type InnerLore (SimpleM lore) = lore
   askEngineEnv = ask
   localEngineEnv = local
   tellNeed = tell
@@ -640,12 +678,14 @@ instance (Proper lore, Bindable lore) => MonadEngine (SimpleM lore) where
   passNeed = pass
   simplifyBody = defaultSimplifyBody
 
-instance (Proper lore, Bindable lore) => ProperBinder (SimpleM lore) where
-
 instance (Proper lore, Bindable lore) => BindableM (SimpleM lore) where
-  type Lore (SimpleM lore) = lore
-  loreForExpM = return . loreForExp
-  loreForBindingM = return . loreForBinding . (Const :: Ident -> Const Ident lore)
+  type Lore (SimpleM lore) = Aliases lore
+  mkLetM pat e = do
+    let Let pat' explore _ = mkLet pat $ Aliases.removeExpAliases e
+    return $ Aliases.mkAliasedLetBinding pat' explore e
+  mkBodyM bnds res = do
+    let Body bodylore _ _ = mkBody (map Aliases.removeBindingAliases bnds) res
+    return $ Aliases.mkAliasedBody bodylore bnds res
 
 runSimpleM :: SimpleM lore a
            -> Env (SimpleM lore)
@@ -660,14 +700,14 @@ runSimpleM (SimpleM m) env src = let (x, (_, src'), _) = runRWS m env (emptyStat
 -- idempotent, however.
 simplifyProg :: (Proper lore, Bindable lore) =>
                 RuleBook (SimpleM lore)
-             -> Prog lore -> Prog lore
+             -> Prog lore -> Prog (Aliases lore)
 simplifyProg rules prog =
   Prog $ fst $ runSimpleM (mapM simplifyFun $ progFunctions prog)
                (emptyEnv rules $ Just prog) namesrc
   where namesrc = newNameSourceForProg prog
 
 simplifyFun :: (Proper lore, Bindable lore) =>
-               FunDec oldlore -> SimpleM lore (FunDec lore)
+               FunDec oldlore -> SimpleM lore (FunDec (Aliases lore))
 simplifyFun (fname, rettype, params, body, loc) = do
   body' <- insertAllBindings $ bindParams params $
            simplifyBody (map diet rettype) body
@@ -677,17 +717,19 @@ simplifyFun (fname, rettype, params, body, loc) = do
 -- output, meaningful simplification may not have taken place - the
 -- order of bindings may simply have been rearranged.  The function is
 -- idempotent, however.
-simplifyOneFun :: (MonadFreshNames m, Proper lore, Bindable lore) =>
+simplifyOneFun :: (MonadFreshNames m, Proper lore,
+                   Bindable lore) =>
                   RuleBook (SimpleM lore)
-               -> FunDec oldlore -> m (FunDec lore)
+               -> FunDec oldlore -> m (FunDec (Aliases lore))
 simplifyOneFun rules fundec =
   modifyNameSource $ runSimpleM (simplifyFun fundec) (emptyEnv rules Nothing)
 
 -- | Simplify just a single 'Lambda'.
-simplifyOneLambda :: (MonadFreshNames m, Proper lore, Bindable lore) =>
+simplifyOneLambda :: (MonadFreshNames m,
+                      Proper lore, Bindable lore) =>
                      RuleBook (SimpleM lore)
                   -> Maybe (Prog lore) -> Lambda oldlore
-                  -> m (Lambda lore)
+                  -> m (Lambda (Aliases lore))
 simplifyOneLambda rules prog lam = do
   let simplifyOneLambda' = insertAllBindings $
                            bindParams (lambdaParams lam) $

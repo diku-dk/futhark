@@ -119,14 +119,14 @@ instance Rename a => Rename (Maybe a) where
 instance Rename Bool where
   rename = return
 
-instance (Rename als, Rename shape) =>
-         Rename (IdentBase als shape) where
+instance (Rename shape) =>
+         Rename (IdentBase shape) where
   rename (Ident name tp loc) = do
     name' <- rename name
     tp' <- rename tp
     return $ Ident name' tp' loc
 
-bind :: [IdentBase als shape] -> RenameM a -> RenameM a
+bind :: [IdentBase shape] -> RenameM a -> RenameM a
 bind vars body = do
   vars' <- mapM new varnames
   -- This works because map union prefers elements from left
@@ -159,17 +159,18 @@ instance Renameable lore => Rename (Pattern lore) where
   rename (Pattern l) = Pattern <$> rename l
 
 instance Renameable lore => Rename (Body lore) where
-  rename (Body [] res) = Body [] <$> rename res
-  rename (Body (Let pat lore e:bnds) res) = do
+  rename (Body lore [] res) =
+    Body <$> rename lore <*> pure [] <*> rename res
+  rename (Body blore (Let pat elore e:bnds) res) = do
     e1' <- rename e
-    lore' <- rename lore
+    elore' <- rename elore
     bind (patternIdents pat) $ do
       pat' <- rename pat
-      Body bnds' res' <- rename $ Body bnds res
-      return $ Body (Let pat' lore' e1':bnds') res'
+      Body blore' bnds' res' <- rename $ Body blore bnds res
+      return $ Body blore' (Let pat' elore' e1':bnds') res'
 
 instance Renameable lore => Rename (Exp lore) where
-  rename (DoLoop respat merge loopvar boundexp loopbody loc) = do
+  rename (LoopOp (DoLoop respat merge loopvar boundexp loopbody loc)) = do
     let (mergepat, mergeexp) = unzip merge
     boundexp' <- rename boundexp
     mergeexp' <- mapM rename mergeexp
@@ -179,8 +180,8 @@ instance Renameable lore => Rename (Exp lore) where
       bind [loopvar] $ do
         loopvar'  <- rename loopvar
         loopbody' <- rename loopbody
-        return $ DoLoop respat' (zip mergepat' mergeexp')
-                        loopvar' boundexp' loopbody' loc
+        return $ LoopOp $ DoLoop respat' (zip mergepat' mergeexp')
+                          loopvar' boundexp' loopbody' loc
   rename e = mapExpM mapper e
     where mapper = Mapper {
                       mapOnBinding = fail "Unhandled binding in Renamer"
@@ -193,12 +194,11 @@ instance Renameable lore => Rename (Exp lore) where
                     , mapOnCertificates = mapM rename
                     }
 
-instance (Rename als, Rename shape) =>
-         Rename (TypeBase als shape) where
-  rename (Array et size u als) = do
-    als' <- rename als
+instance (Rename shape) =>
+         Rename (TypeBase shape) where
+  rename (Array et size u) = do
     size' <- rename size
-    return $ Array et size' u als'
+    return $ Array et size' u
   rename (Basic et) = return $ Basic et
 
 instance Renameable lore => Rename (Lambda lore) where
@@ -230,5 +230,6 @@ instance Rename () where
 
 -- | A class for lores in which all annotations are renameable.
 class (Rename (Lore.Binding lore),
-       Rename (Lore.Exp lore)) =>
+       Rename (Lore.Exp lore),
+       Rename (Lore.Body lore)) =>
       Renameable lore where

@@ -63,8 +63,8 @@ internaliseLambdaBody internaliseBody body = do
     -- lambda return type).
     let (certs,vals) = partition ((==I.Basic I.Cert) . subExpType) es
     insertBindingsM $ do
-      certs' <- letExps "lambda_cert" $ map I.SubExp certs
-      return $ I.resultBody (cs++certs') vals loc
+      certs' <- letExps "lambda_cert" $ map (I.PrimOp . I.SubExp) certs
+      return $ resultBody (cs++certs') vals loc
   where loc = srclocOf body
 
 lambdaBinding :: I.Ident -> [E.Parameter] -> [I.Type]
@@ -72,7 +72,7 @@ lambdaBinding :: I.Ident -> [E.Parameter] -> [I.Type]
 lambdaBinding ce params ts m =
   bindingFlatPatternWithCert (I.Var ce) (map E.fromParam params) ts $ \params' -> do
     body <- m
-    return (body, map I.toParam params')
+    return (body, params')
 
 outerShape :: SrcLoc -> [I.Type] -> SubExp
 outerShape _ (t:_) = arraySize 0 t
@@ -87,8 +87,7 @@ internaliseLambda internaliseBody ce lam rowtypes = do
   (params, body, rettype, _) <- ensureLambda lam
   (body', params') <- lambdaBinding ce params rowtypes $
                       internaliseLambdaBody internaliseBody body
-  return (params', body',
-          map noInfoToUnit $ internaliseType' rettype)
+  return (params', body', internaliseType' rettype)
 
 internaliseMapLambda :: (E.Exp -> InternaliseM Body)
                      -> I.Ident
@@ -110,7 +109,7 @@ internaliseMapLambda internaliseBody ce lam args = do
   return $ I.Lambda params body' rettype' loc
   where loc = srclocOf lam
 
-makeShapeFun :: [I.Param] -> I.Body -> [I.ConstType] -> SrcLoc
+makeShapeFun :: [I.Param] -> I.Body -> [I.Type] -> SrcLoc
              -> InternaliseM I.Lambda
 makeShapeFun params body rettype loc = do
   -- Some of 'params' may be unique, which means that the shape slice
@@ -122,20 +121,21 @@ makeShapeFun params body rettype loc = do
   return $ I.Lambda params' (insertBindings copybnds body) rettype loc
 
 assertResultShape :: [I.Ident] -> I.Body -> InternaliseM I.Body
-assertResultShape desiredShapes (I.Body bnds res) = do
+assertResultShape desiredShapes (I.Body () bnds res) = do
   certs <- replicateM (length desiredShapes) $
            newIdent "shape_cert" (I.Basic I.Cert) loc
   checks <- replicateM (length desiredShapes) $
             newIdent "shape_check" (I.Basic I.Bool) loc
-  let check desired computed = I.BinOp I.Equal (I.Var desired) computed
+  let check desired computed = I.PrimOp $
+                               I.BinOp I.Equal (I.Var desired) computed
                                (I.Basic I.Bool) loc
       cmps = [ mkLet [v] e |
                (v,e) <- zip checks $
                         zipWith check desiredShapes computedShapes ]
       asserts = [mkLet [cert] e |
                  (cert,e) <- zip certs $
-                            map ((`I.Assert` loc) . I.Var) checks]
-  return $ I.Body (bnds++cmps++asserts)
+                            map (I.PrimOp . (`I.Assert` loc) . I.Var) checks]
+  return $ I.Body () (bnds++cmps++asserts)
     res { resultCertificates =
              resultCertificates res ++ certs
         }
@@ -151,7 +151,9 @@ bindMapShapes cs sizefun args outer_shape
   where loc = srclocOf sizefun
         zero = intconst 0 loc
         rt = map (const $ I.Basic I.Int) $ I.lambdaReturnType sizefun
-        isempty = eBinOp I.Equal (pure $ I.SubExp outer_shape) (pure $ SubExp zero)
+        isempty = eBinOp I.Equal
+                  (pure $ I.PrimOp $ I.SubExp outer_shape)
+                  (pure $ I.PrimOp $ SubExp zero)
                   (I.Basic I.Bool) loc
         emptybranch =
           pure $ resultBody
@@ -159,8 +161,8 @@ bindMapShapes cs sizefun args outer_shape
         nonemptybranch = insertBindingsM $
           resultBody [] <$> (eLambda sizefun =<< mapM index0 args) <*> pure loc
         index0 arg = do
-          arg' <- letExp "arg" $ I.SubExp arg
-          letSubExp "elem" $ I.Index cs arg' [intconst 0 loc] loc
+          arg' <- letExp "arg" $ I.PrimOp $ I.SubExp arg
+          letSubExp "elem" $ I.PrimOp $ I.Index cs arg' [intconst 0 loc] loc
 
 internaliseFoldLambda :: (E.Exp -> InternaliseM Body)
                       -> I.Ident
@@ -181,12 +183,12 @@ internaliseFoldLambda internaliseBody ce lam acctypes arrtypes = do
           subExpChecks rest acct =
             forM (zip (I.arrayDims rest) (I.arrayDims acct)) $ \(res_n,acc_n) -> do
               size_cmp <- letSubExp "fold_size_cmp" $
-                          I.BinOp I.Equal res_n acc_n (I.Basic I.Bool) resloc
-              letExp "fold_size_chk" $ I.Assert size_cmp resloc
+                          I.PrimOp $ I.BinOp I.Equal res_n acc_n (I.Basic I.Bool) resloc
+              letExp "fold_size_chk" $ I.PrimOp $ I.Assert size_cmp resloc
       insertBindingsM $ do
         cs2 <-
           liftM concat $ zipWithM subExpChecks (map subExpType es) acctypes
-        return $ I.resultBody (cs++cs2) es resloc
+        return $ resultBody (cs++cs2) es resloc
 
   return $ I.Lambda params body' rettype' loc
   where loc = srclocOf lam

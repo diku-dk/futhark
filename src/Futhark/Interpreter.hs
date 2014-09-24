@@ -126,7 +126,7 @@ arrToList :: SrcLoc -> Value -> FutharkM [Value]
 arrToList _ (ArrayVal l _) = return $ elems l
 arrToList loc _ = bad $ TypeError loc "arrToList"
 
-arrays :: ArrayShape shape => [TypeBase als shape] -> [[Value]] -> [Value]
+arrays :: ArrayShape shape => [TypeBase shape] -> [[Value]] -> [Value]
 arrays [rowtype] vs = [arrayVal (concat vs) rowtype]
 arrays ts v =
   zipWith arrayVal (arrays' v) ts
@@ -173,7 +173,7 @@ runFun fname mainargs prog = do
     -- We assume that the program already passed the type checker, so
     -- we don't check for duplicate definitions.
     expand ftable (name,_,params,body,_) =
-      let fun args = binding (zip (map fromParam params) args) $ evalBody body
+      let fun args = binding (zip params args) $ evalBody body
       in HM.insert name fun ftable
 
 -- | As 'runFun', but throws away the trace.
@@ -225,91 +225,94 @@ evalSubExp (Constant v _) = return v
 
 evalBody :: Body lore -> FutharkM [Value]
 
-evalBody (Body [] (Result _ es _)) =
+evalBody (Body _ [] (Result _ es _)) =
   mapM evalSubExp es
 
-evalBody (Body (Let pat _ e:bnds) res) = do
+evalBody (Body lore (Let pat _ e:bnds) res) = do
   v <- evalExp e
-  binding (zip (patternIdents pat) v) $ evalBody $ Body bnds res
+  binding (zip (patternIdents pat) v) $ evalBody $ Body lore bnds res
 
 evalExp :: Exp lore -> FutharkM [Value]
-
-evalExp (SubExp se) =
-  single <$> evalSubExp se
-
-evalExp (ArrayLit es rt _) =
-  single <$> (arrayVal <$> mapM evalSubExp es <*> pure rt)
-
-evalExp (BinOp Plus e1 e2 (Basic Int) pos) = evalIntBinOp (+) e1 e2 pos
-evalExp (BinOp Plus e1 e2 (Basic Real) pos) = evalRealBinOp (+) e1 e2 pos
-evalExp (BinOp Minus e1 e2 (Basic Int) pos) = evalIntBinOp (-) e1 e2 pos
-evalExp (BinOp Minus e1 e2 (Basic Real) pos) = evalRealBinOp (-) e1 e2 pos
-evalExp (BinOp Pow e1 e2 (Basic Int) pos) = evalIntBinOp pow e1 e2 pos
-  -- Haskell (^) cannot handle negative exponents, so check for that
-  -- explicitly.
-  where pow x y | y < 0, x == 0 = error "Negative exponential with zero base"
-                | y < 0         = 1 `div` (x ^ (-y))
-                | otherwise     = x ^ y
-evalExp (BinOp Pow e1 e2 (Basic Real) pos) = evalRealBinOp (**) e1 e2 pos
-evalExp (BinOp Times e1 e2 (Basic Int) pos) = evalIntBinOp (*) e1 e2 pos
-evalExp (BinOp Times e1 e2 (Basic Real) pos) = evalRealBinOp (*) e1 e2 pos
-evalExp (BinOp Divide e1 e2 (Basic Int) pos) = evalIntBinOp div e1 e2 pos
-evalExp (BinOp Mod e1 e2 (Basic Int) pos) = evalIntBinOp mod e1 e2 pos
-evalExp (BinOp Divide e1 e2 (Basic Real) pos) = evalRealBinOp (/) e1 e2 pos
-evalExp (BinOp ShiftR e1 e2 _ pos) = evalIntBinOp shiftR e1 e2 pos
-evalExp (BinOp ShiftL e1 e2 _ pos) = evalIntBinOp shiftL e1 e2 pos
-evalExp (BinOp Band e1 e2 _ pos) = evalIntBinOp (.&.) e1 e2 pos
-evalExp (BinOp Xor e1 e2 _ pos) = evalIntBinOp xor e1 e2 pos
-evalExp (BinOp Bor e1 e2 _ pos) = evalIntBinOp (.|.) e1 e2 pos
-evalExp (BinOp LogAnd e1 e2 _ pos) = evalBoolBinOp (&&) e1 e2 pos
-evalExp (BinOp LogOr e1 e2 _ pos) = evalBoolBinOp (||) e1 e2 pos
-
-evalExp (BinOp Equal e1 e2 _ _) = do
-  v1 <- evalSubExp e1
-  v2 <- evalSubExp e2
-  return [BasicVal $ LogVal (v1==v2)]
-
-evalExp (BinOp Less e1 e2 _ _) = do
-  v1 <- evalSubExp e1
-  v2 <- evalSubExp e2
-  return [BasicVal $ LogVal (v1<v2)]
-
-evalExp (BinOp Leq e1 e2 _ _) = do
-  v1 <- evalSubExp e1
-  v2 <- evalSubExp e2
-  return [BasicVal $ LogVal (v1<=v2)]
-
-evalExp (BinOp _ _ _ _ pos) = bad $ TypeError pos "evalExp Binop"
-
-evalExp (Not e pos) = do
-  v <- evalSubExp e
-  case v of BasicVal (LogVal b) -> return [BasicVal $ LogVal (not b)]
-            _                     -> bad $ TypeError pos "evalExp Not"
-
-evalExp (Negate e pos) = do
-  v <- evalSubExp e
-  case v of BasicVal (IntVal x)  -> return [BasicVal $ IntVal (-x)]
-            BasicVal (RealVal x) -> return [BasicVal $ RealVal (-x)]
-            _                      -> bad $ TypeError pos "evalExp Negate"
-
 evalExp (If e1 e2 e3 rettype pos) = do
   v <- evalSubExp e1
   vs <- case v of BasicVal (LogVal True)  -> evalBody e2
                   BasicVal (LogVal False) -> evalBody e3
                   _                       -> bad $ TypeError pos "evalExp If"
   return $ valueShapeContext rettype vs ++ vs
-
 evalExp (Apply fname args _ loc)
   | "trace" <- nameToString fname = do
   vs <- mapM (evalSubExp . fst) args
   tell [(loc, ppValues vs)]
   return vs
-
 evalExp (Apply fname args rettype _) = do
   vs <- evalFuncall fname $ map fst args
   return $ valueShapeContext rettype vs ++ vs
+evalExp (PrimOp op) = evalPrimOp op
+evalExp (LoopOp op) = evalLoopOp op
 
-evalExp (Index _ ident idxs pos) = do
+evalPrimOp :: PrimOp lore -> FutharkM [Value]
+
+evalPrimOp (SubExp se) =
+  single <$> evalSubExp se
+
+evalPrimOp (ArrayLit es rt _) =
+  single <$> (arrayVal <$> mapM evalSubExp es <*> pure rt)
+
+evalPrimOp (BinOp Plus e1 e2 (Basic Int) pos) = evalIntBinOp (+) e1 e2 pos
+evalPrimOp (BinOp Plus e1 e2 (Basic Real) pos) = evalRealBinOp (+) e1 e2 pos
+evalPrimOp (BinOp Minus e1 e2 (Basic Int) pos) = evalIntBinOp (-) e1 e2 pos
+evalPrimOp (BinOp Minus e1 e2 (Basic Real) pos) = evalRealBinOp (-) e1 e2 pos
+evalPrimOp (BinOp Pow e1 e2 (Basic Int) pos) = evalIntBinOp pow e1 e2 pos
+  -- Haskell (^) cannot handle negative exponents, so check for that
+  -- explicitly.
+  where pow x y | y < 0, x == 0 = error "Negative exponential with zero base"
+                | y < 0         = 1 `div` (x ^ (-y))
+                | otherwise     = x ^ y
+evalPrimOp (BinOp Pow e1 e2 (Basic Real) pos) = evalRealBinOp (**) e1 e2 pos
+evalPrimOp (BinOp Times e1 e2 (Basic Int) pos) = evalIntBinOp (*) e1 e2 pos
+evalPrimOp (BinOp Times e1 e2 (Basic Real) pos) = evalRealBinOp (*) e1 e2 pos
+evalPrimOp (BinOp Divide e1 e2 (Basic Int) pos) = evalIntBinOp div e1 e2 pos
+evalPrimOp (BinOp Mod e1 e2 (Basic Int) pos) = evalIntBinOp mod e1 e2 pos
+evalPrimOp (BinOp Divide e1 e2 (Basic Real) pos) = evalRealBinOp (/) e1 e2 pos
+evalPrimOp (BinOp ShiftR e1 e2 _ pos) = evalIntBinOp shiftR e1 e2 pos
+evalPrimOp (BinOp ShiftL e1 e2 _ pos) = evalIntBinOp shiftL e1 e2 pos
+evalPrimOp (BinOp Band e1 e2 _ pos) = evalIntBinOp (.&.) e1 e2 pos
+evalPrimOp (BinOp Xor e1 e2 _ pos) = evalIntBinOp xor e1 e2 pos
+evalPrimOp (BinOp Bor e1 e2 _ pos) = evalIntBinOp (.|.) e1 e2 pos
+evalPrimOp (BinOp LogAnd e1 e2 _ pos) = evalBoolBinOp (&&) e1 e2 pos
+evalPrimOp (BinOp LogOr e1 e2 _ pos) = evalBoolBinOp (||) e1 e2 pos
+
+evalPrimOp (BinOp Equal e1 e2 _ _) = do
+  v1 <- evalSubExp e1
+  v2 <- evalSubExp e2
+  return [BasicVal $ LogVal (v1==v2)]
+
+evalPrimOp (BinOp Less e1 e2 _ _) = do
+  v1 <- evalSubExp e1
+  v2 <- evalSubExp e2
+  return [BasicVal $ LogVal (v1<v2)]
+
+evalPrimOp (BinOp Leq e1 e2 _ _) = do
+  v1 <- evalSubExp e1
+  v2 <- evalSubExp e2
+  return [BasicVal $ LogVal (v1<=v2)]
+
+evalPrimOp (BinOp _ _ _ _ pos) = bad $ TypeError pos "evalPrimOp Binop"
+
+evalPrimOp (Not e pos) = do
+  v <- evalSubExp e
+  case v of BasicVal (LogVal b) -> return [BasicVal $ LogVal (not b)]
+            _                     -> bad $ TypeError pos "evalPrimOp Not"
+
+evalPrimOp (Negate e pos) = do
+  v <- evalSubExp e
+  case v of BasicVal (IntVal x)  -> return [BasicVal $ IntVal (-x)]
+            BasicVal (RealVal x) -> return [BasicVal $ RealVal (-x)]
+            _                      -> bad $ TypeError pos "evalPrimOp Negate"
+
+
+
+evalPrimOp (Index _ ident idxs pos) = do
   v <- lookupVar ident
   idxs' <- mapM evalSubExp idxs
   single <$> foldM idx v idxs'
@@ -318,9 +321,9 @@ evalExp (Index _ ident idxs pos) = do
           | otherwise            =
             bad $ IndexOutOfBounds pos (textual $ identName ident) (upper+1) i
           where upper = snd $ bounds arr
-        idx _ _ = bad $ TypeError pos "evalExp Index"
+        idx _ _ = bad $ TypeError pos "evalPrimOp Index"
 
-evalExp (Update _ src idxs ve loc) = do
+evalPrimOp (Update _ src idxs ve loc) = do
   v <- lookupVar src
   idxs' <- mapM evalSubExp idxs
   vev <- evalSubExp ve
@@ -336,7 +339,7 @@ evalExp (Update _ src idxs ve loc) = do
           where upper = snd $ bounds arr
         change _ _ _ = bad $ TypeError loc "evalBody Let Id"
 
-evalExp (Iota e pos) = do
+evalPrimOp (Iota e pos) = do
   v <- evalSubExp e
   case v of
     BasicVal (IntVal x)
@@ -345,9 +348,9 @@ evalExp (Iota e pos) = do
                          (Basic Int :: DeclType)]
       | otherwise ->
         bad $ NegativeIota pos x
-    _ -> bad $ TypeError pos "evalExp Iota"
+    _ -> bad $ TypeError pos "evalPrimOp Iota"
 
-evalExp (Replicate e1 e2 pos) = do
+evalPrimOp (Replicate e1 e2 pos) = do
   v1 <- evalSubExp e1
   v2 <- evalSubExp e2
   case v1 of
@@ -355,9 +358,9 @@ evalExp (Replicate e1 e2 pos) = do
       | x >= 0    ->
         return [arrayVal (replicate x v2) $ valueType v2]
       | otherwise -> bad $ NegativeReplicate pos x
-    _   -> bad $ TypeError pos "evalExp Replicate"
+    _   -> bad $ TypeError pos "evalPrimOp Replicate"
 
-evalExp (Reshape _ shapeexp arrexp pos) = do
+evalPrimOp (Reshape _ shapeexp arrexp pos) = do
   shape <- mapM (asInt <=< evalSubExp) shapeexp
   arr <- evalSubExp arrexp
   let arrt = toDecl $ subExpType arrexp
@@ -375,15 +378,15 @@ evalExp (Reshape _ shapeexp arrexp pos) = do
         chunk i l = let (a,b) = splitAt i l
                     in a : chunk i b
         asInt (BasicVal (IntVal x)) = return x
-        asInt _ = bad $ TypeError pos "evalExp Reshape asInt"
+        asInt _ = bad $ TypeError pos "evalPrimOp Reshape asInt"
 
-evalExp (Rearrange _ perm arrexp _) =
+evalPrimOp (Rearrange _ perm arrexp _) =
   single <$> permuteArray perm <$> evalSubExp arrexp
 
-evalExp (Rotate _ perm arrexp _) =
+evalPrimOp (Rotate _ perm arrexp _) =
   single <$> rotateArray perm <$> evalSubExp arrexp
 
-evalExp (Split _ splitexp arrexp _ pos) = do
+evalPrimOp (Split _ splitexp arrexp _ pos) = do
   split <- evalSubExp splitexp
   vs <- arrToList pos =<< evalSubExp arrexp
   case split of
@@ -392,26 +395,28 @@ evalExp (Split _ splitexp arrexp _ pos) = do
         let (bef,aft) = splitAt i vs
         in return [arrayVal bef rt, arrayVal aft rt]
       | otherwise        -> bad $ IndexOutOfBounds pos (ppSubExp arrexp) (length vs) i
-    _ -> bad $ TypeError pos "evalExp Split"
+    _ -> bad $ TypeError pos "evalPrimOp Split"
   where rt = rowType $ subExpType arrexp
 
-evalExp (Concat _ arr1exp arr2exp _ pos) = do
+evalPrimOp (Concat _ arr1exp arr2exp _ pos) = do
   elems1 <- arrToList pos =<< evalSubExp arr1exp
   elems2 <- arrToList pos =<< evalSubExp arr2exp
   return $ single $ arrayVal (elems1 ++ elems2) $ stripArray 1 $ subExpType arr1exp
 
-evalExp (Copy e _) = single <$> evalSubExp e
+evalPrimOp (Copy e _) = single <$> evalSubExp e
 
-evalExp (Assert e loc) = do
+evalPrimOp (Assert e loc) = do
   v <- evalSubExp e
   case v of BasicVal (LogVal True) ->
               return [BasicVal Checked]
             _ ->
               bad $ AssertFailed loc
 
-evalExp (Conjoin _ _) = return [BasicVal Checked]
+evalPrimOp (Conjoin _ _) = return [BasicVal Checked]
 
-evalExp (DoLoop respat merge loopvar boundexp loopbody loc) = do
+evalLoopOp :: LoopOp lore -> FutharkM [Value]
+
+evalLoopOp (DoLoop respat merge loopvar boundexp loopbody loc) = do
   bound <- evalSubExp boundexp
   mergestart <- mapM evalSubExp mergeexp
   case bound of
@@ -426,19 +431,19 @@ evalExp (DoLoop respat merge loopvar boundexp loopbody loc) = do
             binding (zip mergepat mergeval) $
               evalBody loopbody
 
-evalExp (Map _ fun arrexps loc) = do
+evalLoopOp (Map _ fun arrexps loc) = do
   vss <- mapM (arrToList loc <=< evalSubExp) arrexps
   vs' <- mapM (applyLambda fun) $ transpose vss
   return $ arrays (lambdaReturnType fun) vs'
 
-evalExp (Reduce _ fun inputs loc) = do
+evalLoopOp (Reduce _ fun inputs loc) = do
   let (accexps, arrexps) = unzip inputs
   startaccs <- mapM evalSubExp accexps
   vss <- mapM (arrToList loc <=< evalSubExp) arrexps
   let foldfun acc x = applyLambda fun $ acc ++ x
   foldM foldfun startaccs (transpose vss)
 
-evalExp (Scan _ fun inputs loc) = do
+evalLoopOp (Scan _ fun inputs loc) = do
   let (accexps, arrexps) = unzip inputs
   startvals <- mapM evalSubExp accexps
   vss <- mapM (arrToList loc <=< evalSubExp) arrexps
@@ -448,16 +453,16 @@ evalExp (Scan _ fun inputs loc) = do
             acc' <- applyLambda fun $ acc ++ x
             return (acc', acc' : l)
 
-evalExp e@(Filter _ fun arrexp loc) = do
+evalLoopOp e@(Filter _ fun arrexp loc) = do
   vss <- mapM (arrToList loc <=< evalSubExp) arrexp
   vss' <- filterM filt $ transpose vss
-  return $ BasicVal (IntVal $ length vss') : arrays (typeOf e) vss'
+  return $ BasicVal (IntVal $ length vss') : arrays (loopOpType e) vss'
   where filt x = do
           res <- applyLambda fun x
           case res of [BasicVal (LogVal True)] -> return True
                       _                          -> return False
 
-evalExp (Redomap _ _ innerfun accexp arrexps loc) = do
+evalLoopOp (Redomap _ _ innerfun accexp arrexps loc) = do
   startaccs <- mapM evalSubExp accexp
   vss <- mapM (arrToList loc <=< evalSubExp) arrexps
   let foldfun acc x = applyLambda innerfun $ acc ++ x
@@ -501,7 +506,7 @@ evalBoolBinOp op e1 e2 loc = do
 
 applyLambda :: Lambda lore -> [Value] -> FutharkM [Value]
 applyLambda (Lambda params body rettype loc) args =
-  do v <- binding (zip (map fromParam params) args) $ evalBody body
+  do v <- binding (zip params args) $ evalBody body
      checkReturnShapes loc rettype v
      return v
 
@@ -523,7 +528,7 @@ checkPatSizes = mapM_ $ uncurry checkSize
         ppDim (Constant v _) _ = ppValue v
         ppDim e              v = ppSubExp e ++ "=" ++ ppValue v
 
-checkReturnShapes :: SrcLoc -> [ConstType] -> [Value] -> FutharkM ()
+checkReturnShapes :: SrcLoc -> [Type] -> [Value] -> FutharkM ()
 checkReturnShapes loc = zipWithM_ checkShape
   where checkShape t val = do
           let valshape = map (BasicVal . IntVal) $ valueShape val

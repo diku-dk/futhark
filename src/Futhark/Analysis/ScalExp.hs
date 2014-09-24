@@ -130,21 +130,21 @@ scalExpType (MaxMin _ (e:_)) = scalExpType e
 type LookupVar = VName -> Maybe ScalExp
 
 toScalExp :: LookupVar -> Exp lore -> Maybe ScalExp
-toScalExp look (SubExp se)    =
+toScalExp look (PrimOp (SubExp se))    =
   toScalExp' look se
-toScalExp look (BinOp Less x y _ _) =
+toScalExp look (PrimOp (BinOp Less x y _ _)) =
   RelExp LTH0 <$> (sminus <$> toScalExp' look x <*> toScalExp' look y)
-toScalExp look (BinOp Leq x y _ _) =
+toScalExp look (PrimOp (BinOp Leq x y _ _)) =
   RelExp LEQ0 <$> (sminus <$> toScalExp' look x <*> toScalExp' look y)
-toScalExp look (BinOp Equal x y (Basic Int) _) = do
+toScalExp look (PrimOp (BinOp Equal x y (Basic Int) _)) = do
   x' <- toScalExp' look x
   y' <- toScalExp' look y
   return $ RelExp LEQ0 (x' `sminus` y') `SLogAnd` RelExp LEQ0 (y' `sminus` x')
-toScalExp look (Negate e _) =
+toScalExp look (PrimOp (Negate e _)) =
   SNeg <$> toScalExp' look e
-toScalExp look (Not e _) =
+toScalExp look (PrimOp (Not e _)) =
   SNot <$> toScalExp' look e
-toScalExp look (BinOp bop x y (Basic t) _)
+toScalExp look (PrimOp (BinOp bop x y (Basic t) _))
   | t `elem` [Int, Bool] = -- XXX: Only integers and booleans, OK?
   binOpScalExp bop <*> toScalExp' look x <*> toScalExp' look y
 
@@ -182,8 +182,8 @@ fromScalExp loc e = runBinder'' $ fromScalExp' loc e
 fromScalExp' :: MonadBinder m => SrcLoc -> ScalExp
              -> m (Exp (Lore m))
 fromScalExp' loc = convert
-  where convert (Val val) = return $ SubExp $ Constant (BasicVal val) loc
-        convert (Id v)    = return $ SubExp $ Var v
+  where convert (Val val) = return $ PrimOp $ SubExp $ Constant (BasicVal val) loc
+        convert (Id v)    = return $ PrimOp $  SubExp $ Var v
         convert (SNeg se) = eNegate (convert se) loc
         convert (SNot se) = eNot (convert se) loc
         convert (SPlus x y) = arithBinOp Plus x y
@@ -216,8 +216,8 @@ fromScalExp' loc = convert
                 | otherwise = (next, cur)
           in eIf cmp (eBody [pure pick]) (eBody [pure discard]) [Basic t] loc
 
-        zero Int = SubExp $ intconst 0 loc
-        zero _   = SubExp $ constant (0::Double) loc
+        zero Int = PrimOp $ SubExp $ intconst 0 loc
+        zero _   = PrimOp $ SubExp $ constant (0::Double) loc
 
 ------------------------
 --- Helper Functions ---

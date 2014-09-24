@@ -32,8 +32,8 @@ import Futhark.Internalise.TypesValues
 import Prelude hiding (mapM)
 
 
-data InternaliseRes shape = TupleArray I.Ident [I.IdentBase I.Names shape]
-                          | Direct (I.IdentBase I.Names shape)
+data InternaliseRes shape = TupleArray I.Ident [I.IdentBase shape]
+                          | Direct (I.IdentBase shape)
                             deriving (Show)
 
 internaliseParam :: MonadFreshNames m => E.Ident
@@ -75,8 +75,7 @@ bindingParams params m = do
       tell $ HM.singleton (E.identName param) substs
       return (concat paramshapes, concat params')
   let bind env = env { envSubsts = substs `HM.union` envSubsts env }
-      toParams = map I.toParam . concat
-  local bind $ m (toParams paramshapes) (toParams params')
+  local bind $ m (concat paramshapes) (concat params')
 
 bindingFlatPatternAs :: ([I.Type] -> [InternaliseRes Rank] -> ([I.Ident], [Replacement], [I.Type]))
                      -> [E.Ident] -> [I.Type]

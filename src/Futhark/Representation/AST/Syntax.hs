@@ -17,7 +17,6 @@ module Futhark.Representation.AST.Syntax
   , TypeBase(..)
   , Type
   , DeclType
-  , ConstType
   , Diet(..)
 
   -- * Values
@@ -38,10 +37,11 @@ module Futhark.Representation.AST.Syntax
   , Result(..)
   , BodyT(..)
   , Body
+  , PrimOp (..)
+  , LoopOp (..)
   , ExpT(..)
   , Exp
   , ResType
-  , RetType
   , LambdaT(..)
   , Lambda
 
@@ -138,23 +138,23 @@ instance ArrayShape Rank where
 -- | An Futhark type is either an array or an element type.  When comparing
 -- types for equality with '==', aliases are ignored, as are
 -- dimension sizes (but not the number of dimensions themselves).
-data TypeBase as shape = Basic BasicType
-                       | Array BasicType shape Uniqueness as
-                         -- ^ 1st arg: array's element type, 2nd arg:
-                         -- lengths of dimensions, 3rd arg: uniqueness
-                         -- attribute, 4th arg: aliasing information.
-                         deriving (Show)
+data TypeBase shape = Basic BasicType
+                    | Array BasicType shape Uniqueness
+                      -- ^ 1st arg: array's element type, 2nd arg:
+                      -- lengths of dimensions, 3rd arg: uniqueness
+                      -- attribute
+                    deriving (Show)
 
-instance ArrayShape shape => Eq (TypeBase als shape) where
+instance ArrayShape shape => Eq (TypeBase shape) where
   Basic et1 == Basic et2 = et1 == et2
-  Array et1 dims1 u1 _ == Array et2 dims2 u2 _ =
+  Array et1 dims1 u1 == Array et2 dims2 u2 =
     et1 == et2 && u1 == u2 && dims1 == dims2
   _ == _ = False
 
-instance ArrayShape shape => Ord (TypeBase als shape) where
+instance ArrayShape shape => Ord (TypeBase shape) where
   Basic et1 <= Basic et2 =
     et1 <= et2
-  Array et1 dims1 u1 _ <= Array et2 dims2 u2 _
+  Array et1 dims1 u1 <= Array et2 dims2 u2
     | et1 < et2                   = True
     | et1 > et2                   = False
     | dims1 < dims2 = True
@@ -165,16 +165,12 @@ instance ArrayShape shape => Ord (TypeBase als shape) where
   Basic {} <= Array {} = True
   Array {} <= Basic {} = False
 
--- | A type with aliasing information, used for describing the type of
+-- | A type with shape information, used for describing the type of
 -- a computation.
-type Type = TypeBase Names Shape
+type Type = TypeBase Shape
 
--- | A type without aliasing information, used for declarations.
-type DeclType = TypeBase () Rank
-
--- | A type with shape information, but no aliasing information.  Can
--- be used for parameters and constants.
-type ConstType = TypeBase () Shape
+-- | A type without shape information, used for declarations.
+type DeclType = TypeBase Rank
 
 -- | Information about which parts of a value/type are consumed.  For
 -- example, we might say that a function taking three arguments of
@@ -195,29 +191,29 @@ data Value = BasicVal BasicValue
 
 -- | An identifier consists of its name and the type of the value
 -- bound to the identifier.
-data IdentBase als shape = Ident { identName :: VName
-                                 , identType :: TypeBase als shape
-                                 , identSrcLoc :: SrcLoc
-                                 }
+data IdentBase shape = Ident { identName :: VName
+                             , identType :: TypeBase shape
+                             , identSrcLoc :: SrcLoc
+                             }
                     deriving (Show)
 
 -- | A name with aliasing information.  Used for normal variables.
-type Ident = IdentBase Names Shape
+type Ident = IdentBase Shape
 
 -- | A name with no aliasing information.  These are used for function
 -- parameters.
-type Param = IdentBase () Shape
+type Param = IdentBase Shape
 
-instance Eq (IdentBase als shape) where
+instance Eq (IdentBase shape) where
   x == y = identName x == identName y
 
-instance Ord (IdentBase als shape) where
+instance Ord (IdentBase shape) where
   x `compare` y = identName x `compare` identName y
 
-instance Located (IdentBase als shape) where
+instance Located (IdentBase shape) where
   locOf = locOf . identSrcLoc
 
-instance Hashable (IdentBase als shape) where
+instance Hashable (IdentBase shape) where
   hashWithSalt salt = hashWithSalt salt . identName
 
 -- | A list of identifiers used for certificates in some expressions.
@@ -281,119 +277,95 @@ instance Located Result where
 
 -- | A body consists of a number of bindings, terminating in a result
 -- (essentially a tuple literal).
-data BodyT lore = Body { bodyBindings :: [Binding lore]
+data BodyT lore = Body { bodyLore :: Lore.Body lore
+                       , bodyBindings :: [Binding lore]
                        , bodyResult :: Result
                        }
-                 deriving (Ord, Show, Eq)
+
+deriving instance Lore lore => Ord (BodyT lore)
+deriving instance Lore lore => Show (BodyT lore)
+deriving instance Lore lore => Eq (BodyT lore)
 
 type Body = BodyT
 
 instance Located (BodyT lore) where
   locOf = locOf . bodyResult
 
--- | Futhark Expression Language: literals + vars + int binops + array
--- constructors + array combinators (SOAC) + if + function calls +
--- let + tuples (literals & identifiers) TODO: please add float,
--- double, long int, etc.
-data ExpT lore =
-            -- Core language
-              SubExp SubExp
-            -- ^ Subexpressions, doubling as tuple literals if the
-            -- list has anything but a single element.
+data PrimOp lore
+  = SubExp SubExp
+    -- ^ Subexpressions, doubling as tuple literals if the
+    -- list has anything but a single element.
 
-            | ArrayLit  [SubExp] Type SrcLoc
-            -- ^ Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
-            -- Second arg is the element type of of the rows of the array.
+  | ArrayLit  [SubExp] Type SrcLoc
+    -- ^ Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
+    -- Second arg is the element type of of the rows of the array.
+    -- Scalar operations
 
-            | If     SubExp (BodyT lore) (BodyT lore) ResType SrcLoc
+  | BinOp BinOp SubExp SubExp Type SrcLoc
 
-            | Apply  Name [(SubExp, Diet)] ResType SrcLoc
+  -- Unary Ops: Not for bools and Negate for ints
+  | Not    SubExp SrcLoc -- ^ E.g., @not True == False@.
+  | Negate SubExp SrcLoc -- ^ E.g., @~(~1) = 1@.
 
-            -- Scalar operations
-            | BinOp BinOp SubExp SubExp Type SrcLoc
+  -- Assertion management.
+  | Assert SubExp SrcLoc
+  -- ^ Turn a boolean into a certificate, halting the
+  -- program if the boolean is false.
 
-            -- Unary Ops: Not for bools and Negate for ints
-            | Not    SubExp SrcLoc -- ^ E.g., @not True == False@.
-            | Negate SubExp SrcLoc -- ^ E.g., @~(~1) = 1@.
+  | Conjoin [SubExp] SrcLoc
+  -- ^ Convert several certificates into a single certificate.
 
-            -- Assertion management.
-            | Assert SubExp SrcLoc
-            -- ^ Turn a boolean into a certificate, halting the
-            -- program if the boolean is false.
+  -- Primitive array operations
 
-            | Conjoin [SubExp] SrcLoc
-            -- ^ Convert several certificates into a single certificate.
+  | Index Certificates
+          Ident
+          [SubExp]
+          SrcLoc
+  -- ^ 3rd arg are (optional) certificates for bounds
+  -- checking.  If given (even as an empty list), no
+  -- run-time bounds checking is done.
 
-            -- Primitive array operations
+  | Update Certificates Ident [SubExp] SubExp SrcLoc
+  -- ^ @a with [i1,i2,i3] <- v@.
 
-            | Index Certificates
-                    Ident
-                    [SubExp]
-                    SrcLoc
-            -- ^ 3rd arg are (optional) certificates for bounds
-            -- checking.  If given (even as an empty list), no
-            -- run-time bounds checking is done.
+  | Split Certificates SubExp SubExp SubExp SrcLoc
+  -- ^ @split(1, [ 1, 2, 3, 4 ]) = {[1],[2, 3, 4]}@.
 
-            | Update Certificates Ident [SubExp] SubExp SrcLoc
-            -- ^ @a with [i1,i2,i3] <- v@.
+  | Concat Certificates SubExp SubExp SubExp SrcLoc
+  -- ^ @concat([1],[2, 3, 4]) = [1, 2, 3, 4]@.
 
-            | Split Certificates SubExp SubExp SubExp SrcLoc
-            -- ^ @split(1, [ 1, 2, 3, 4 ]) = {[1],[2, 3, 4]}@.
+  | Copy SubExp SrcLoc
+  -- ^ Copy the value return by the expression.  This only
+  -- makes a difference in do-loops with merge variables.
 
-            | Concat Certificates SubExp SubExp SubExp SrcLoc
-            -- ^ @concat([1],[2, 3, 4]) = [1, 2, 3, 4]@.
+  -- Array construction.
+  | Iota SubExp SrcLoc
+  -- ^ @iota(n) = [0,1,..,n-1]@
+  | Replicate SubExp SubExp SrcLoc
+  -- ^ @replicate(3,1) = [1, 1, 1]@
 
-            | Copy SubExp SrcLoc
-            -- ^ Copy the value return by the expression.  This only
-            -- makes a difference in do-loops with merge variables.
+  -- Array index space transformation.
+  | Reshape Certificates [SubExp] SubExp SrcLoc
+   -- ^ 1st arg is the new shape, 2nd arg is the input array *)
 
-            -- Array construction.
-            | Iota SubExp SrcLoc
-            -- ^ @iota(n) = [0,1,..,n-1]@
-            | Replicate SubExp SubExp SrcLoc
-            -- ^ @replicate(3,1) = [1, 1, 1]@
+  | Rearrange Certificates [Int] SubExp SrcLoc
+  -- ^ Permute the dimensions of the input array.  The list
+  -- of integers is a list of dimensions (0-indexed), which
+  -- must be a permutation of @[0,n-1]@, where @n@ is the
+  -- number of dimensions in the input array.
 
-            -- Array index space transformation.
-            | Reshape Certificates [SubExp] SubExp SrcLoc
-             -- ^ 1st arg is the new shape, 2nd arg is the input array *)
+  | Rotate Certificates Int SubExp SrcLoc
+  -- ^ @rotate(n,a)@ returns a new array, where the element
+  -- @a[i]@ is at position @i+n@, cycling over to the
+  -- beginning of the array.
+  deriving (Eq, Ord, Show)
 
-            | Rearrange Certificates [Int] SubExp SrcLoc
-            -- ^ Permute the dimensions of the input array.  The list
-            -- of integers is a list of dimensions (0-indexed), which
-            -- must be a permutation of @[0,n-1]@, where @n@ is the
-            -- number of dimensions in the input array.
-
-            | Rotate Certificates Int SubExp SrcLoc
-            -- ^ @rotate(n,a)@ returns a new array, where the element
-            -- @a[i]@ is at position @i+n@, cycling over to the
-            -- beginning of the array.
-
-            | DoLoop [Ident] [(Ident, SubExp)] Ident SubExp (BodyT lore) SrcLoc
-            -- ^ @loop {b} <- {a} = {v} for i < n do b@.
-
-            | Map Certificates (LambdaT lore) [SubExp] SrcLoc
-             -- ^ @map(op +(1), {1,2,..,n}) = [2,3,..,n+1]@.
-             -- 3rd arg is either a tuple of multi-dim arrays
-             --   of basic type, or a multi-dim array of basic type.
-             -- 4th arg is the input-array row types
-
-            | Reduce  Certificates (LambdaT lore) [(SubExp, SubExp)] SrcLoc
-            | Scan   Certificates (LambdaT lore) [(SubExp, SubExp)] SrcLoc
-            | Filter  Certificates (LambdaT lore) [SubExp] SrcLoc
-            | Redomap Certificates (LambdaT lore) (LambdaT lore) [SubExp] [SubExp] SrcLoc
-              deriving (Eq, Ord, Show)
-
--- | A type alias for namespace control.
-type Exp = ExpT
-
-instance Located (ExpT lore) where
+instance Located (PrimOp lore) where
   locOf (SubExp se) = locOf se
   locOf (ArrayLit _ _ pos) = locOf pos
   locOf (BinOp _ _ _ _ pos) = locOf pos
   locOf (Not _ pos) = locOf pos
   locOf (Negate _ pos) = locOf pos
-  locOf (If _ _ _ _ pos) = locOf pos
-  locOf (Apply _ _ _ pos) = locOf pos
   locOf (Index _ _ _ pos) = locOf pos
   locOf (Update _ _ _ _ loc) = locOf loc
   locOf (Iota _ pos) = locOf pos
@@ -406,6 +378,24 @@ instance Located (ExpT lore) where
   locOf (Copy _ pos) = locOf pos
   locOf (Assert _ loc) = locOf loc
   locOf (Conjoin _ loc) = locOf loc
+
+data LoopOp lore
+  = DoLoop [Ident] [(Ident, SubExp)] Ident SubExp (BodyT lore) SrcLoc
+    -- ^ @loop {b} <- {a} = {v} for i < n do b@.
+
+  | Map Certificates (LambdaT lore) [SubExp] SrcLoc
+    -- ^ @map(op +(1), {1,2,..,n}) = [2,3,..,n+1]@.
+    -- 3rd arg is either a tuple of multi-dim arrays
+    --   of basic type, or a multi-dim array of basic type.
+    -- 4th arg is the input-array row types
+
+  | Reduce  Certificates (LambdaT lore) [(SubExp, SubExp)] SrcLoc
+  | Scan   Certificates (LambdaT lore) [(SubExp, SubExp)] SrcLoc
+  | Filter  Certificates (LambdaT lore) [SubExp] SrcLoc
+  | Redomap Certificates (LambdaT lore) (LambdaT lore) [SubExp] [SubExp] SrcLoc
+  deriving (Eq, Ord, Show)
+
+instance Located (LoopOp lore) where
   locOf (DoLoop _ _ _ _ _ loc) = locOf loc
   locOf (Map _ _ _ pos) = locOf pos
   locOf (Reduce _ _ _ pos) = locOf pos
@@ -413,21 +403,41 @@ instance Located (ExpT lore) where
   locOf (Filter _ _ _ pos) = locOf pos
   locOf (Redomap _ _ _ _ _ pos) = locOf pos
 
--- | A type denoting the return type of a function call.  If a
--- function returns an array, we can either know the size in advance
--- ('Known'), or receive it as part of the return value ('Existential'
--- - refers to the type being dependent).
-type ResType = [TypeBase Names ExtShape]
+-- | Futhark Expression Language: literals + vars + int binops + array
+-- constructors + array combinators (SOAC) + if + function calls +
+-- let + tuples (literals & identifiers) TODO: please add float,
+-- double, long int, etc.
+data ExpT lore
+  = PrimOp (PrimOp lore)
+    -- ^ A simple (non-recursive) operation.
 
--- | A type for declaring the return of a function.  Only the function
--- parameters are in scope within the type.
-type RetType = [TypeBase () ExtShape]
+  | LoopOp (LoopOp lore)
+
+  | Apply  Name [(SubExp, Diet)] ResType SrcLoc
+
+  | If     SubExp (BodyT lore) (BodyT lore) ResType SrcLoc
+  deriving (Eq, Ord, Show)
+
+-- | A type alias for namespace control.
+type Exp = ExpT
+
+instance Located (ExpT lore) where
+  locOf (PrimOp op) = locOf op
+  locOf (LoopOp op) = locOf op
+  locOf (Apply _ _ _ pos) = locOf pos
+  locOf (If _ _ _ _ pos) = locOf pos
+
+-- | A type denoting the return type of an expression or function
+-- call.  If a function returns an array, we can either know the size
+-- in advance ('Known'), or receive it as part of the return value
+-- ('Existential' - refers to the type being dependent).
+type ResType = [TypeBase ExtShape]
 
 -- | Anonymous function for use in a tuple-SOAC.
 data LambdaT lore =
   Lambda { lambdaParams     :: [Param]
          , lambdaBody       :: BodyT lore
-         , lambdaReturnType :: [ConstType]
+         , lambdaReturnType :: [Type]
          , lambdaSrcLoc     :: SrcLoc
          }
   deriving (Eq, Ord, Show)
@@ -439,7 +449,7 @@ instance Located (LambdaT lore) where
 
 -- | Function Declarations
 type FunDec lore = (Name,
-                    RetType,
+                    ResType,
                     [Param],
                     BodyT lore,
                     SrcLoc)
@@ -450,7 +460,7 @@ funDecName (fname,_,_,_,_) = fname
 funDecBody :: FunDec lore -> BodyT lore
 funDecBody (_,_,_,body,_) = body
 
-funDecRetType :: FunDec lore -> RetType
+funDecRetType :: FunDec lore -> ResType
 funDecRetType (_,rettype,_,_,_) = rettype
 
 -- | An entire Futhark program.

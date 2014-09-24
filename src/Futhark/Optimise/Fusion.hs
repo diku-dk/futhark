@@ -18,9 +18,9 @@ import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
 import Futhark.Optimise.SimpleOpts
 import Futhark.Optimise.Fusion.LoopKernel
-import Futhark.Analysis.HORepresentation.SOAC (SOAC)
 import Futhark.Binder
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
+import Futhark.Renamer
 
 data FusionGEnv = FusionGEnv {
     soacs      :: HM.HashMap VName [VName]
@@ -125,7 +125,7 @@ fuseProg prog = do
   if not succc
   then return prog
   else do (funs',_) <- runFusionGatherM src' (zipWithM fuseInFun ks' funs) env
-          return $ Prog funs'
+          return $ renameProg $ Prog funs'
 
 fusionGatherFun :: FunDec -> FusionGM FusedRes
 fusionGatherFun (_, _, _, body, _) = fusionGatherBody mkFreshFusionRes body
@@ -221,7 +221,7 @@ addNewKer res (idd, soac) = do
 addNewKerWithUnfusable :: FusedRes -> ([Ident], SOAC) -> Names -> FusionGM FusedRes
 addNewKerWithUnfusable res (idd, soac) ufs = do
   nm_ker <- KernName <$> newVName "ker"
-  let new_ker = newKernel idd soac
+  let new_ker = newKernel soac
       out_nms = map identName idd
       comb    = HM.unionWith HS.union
       os' = HM.fromList [(arr,nm_ker) | arr <- out_nms]
@@ -352,7 +352,7 @@ greedyFuse is_repl lam_used_nms res (out_idds, orig_soac) = do
 
 fusionGatherBody :: FusedRes -> Body -> FusionGM FusedRes
 
-fusionGatherBody fres (Body (Let pat _ e:bnds) res)
+fusionGatherBody fres (Body _ (Let pat _ e:bnds) res)
   | Right soac <- SOAC.fromExp e =
       case soac of
         SOAC.Map _ lam _ _ -> do
@@ -370,7 +370,7 @@ fusionGatherBody fres (Body (Let pat _ e:bnds) res)
           -- a reduce always starts a new kernel
           let nes = map fst args
           bres  <- bindingFamily pat $ fusionGatherBody fres body
-          bres' <- foldM fusionGatherExp bres $ map SubExp nes
+          bres' <- foldM fusionGatherSubExp bres nes
           (_, blres) <- fusionGatherLam (HS.empty, bres') lam
           addNewKer blres (patternIdents pat, soac)
 
@@ -378,7 +378,7 @@ fusionGatherBody fres (Body (Let pat _ e:bnds) res)
           -- a redomap always starts a new kernel
           (_, lres)  <- foldM fusionGatherLam (HS.empty, fres) [outer_red, inner_red]
           bres  <- bindingFamily pat $ fusionGatherBody lres body
-          bres' <- foldM fusionGatherExp bres $ map SubExp nes
+          bres' <- foldM fusionGatherSubExp bres nes
           addNewKer bres' (patternIdents pat, soac)
 
         SOAC.Scan _ lam args _ -> do
@@ -387,33 +387,34 @@ fusionGatherBody fres (Body (Let pat _ e:bnds) res)
           let nes = map fst args
           bres  <- bindingFamily pat $ fusionGatherBody fres body
           (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
-          blres' <- foldM fusionGatherExp blres $ map SubExp nes
+          blres' <- foldM fusionGatherSubExp blres nes
           greedyFuse False used_lam blres' (pat, soac)
-  where body = Body bnds res
+  where body = mkBody bnds res
 
-fusionGatherBody _ (Body (Let _ _ e:_) _)
+fusionGatherBody _ (Body _ (Let _ _ e:_) _)
   | Left (SOAC.InvalidArrayInput inpe) <- SOAC.fromExp e =
     badFusionGM $ Error (srclocOf e)
                   ("In Fusion.hs, "++ppSubExp inpe++" is not valid array input.")
 
-fusionGatherBody fres (Body (Let (Pattern [v]) _ e:bnds) res)
+fusionGatherBody fres (Body _ (Let (Pattern [v]) _ e:bnds) res)
   | Just (src,trns) <- SOAC.transformFromExp e =
-    bindingTransform (bindeeIdent v) src trns $ fusionGatherBody fres $ Body bnds res
+    bindingTransform (bindeeIdent v) src trns $ fusionGatherBody fres $ mkBody bnds res
 
-fusionGatherBody fres (Body (Let pat _ (Replicate n el loc):bnds) res) = do
-  bres <- bindingFamily pat $ fusionGatherBody fres $ Body bnds res
+fusionGatherBody fres (Body _ (Let pat _ (PrimOp (Replicate n el loc)):bnds) res) = do
+  bres <- bindingFamily pat $ fusionGatherBody fres $ mkBody bnds res
   -- Implemented inplace: gets the variables in `n` and `el`
-  (used_set, bres') <- getUnfusableSet loc bres [SubExp n, SubExp el]
+  (used_set, bres') <-
+    getUnfusableSet loc bres [PrimOp $ SubExp n, PrimOp $ SubExp el]
   repl_idnm <- newVName "repl_x"
   let repl_id = Ident repl_idnm (Basic Int) loc
-      repl_lam = Lambda [toParam repl_id] (resultBody [] [el] loc)
-                 [toConstType $ subExpType el] loc
+      repl_lam = Lambda [repl_id] (mkBody [] $ Result [] [el] loc)
+                 [subExpType el] loc
       soac_repl= SOAC.Map [] repl_lam [SOAC.Input SOAC.noTransforms $ SOAC.Iota n] loc
   greedyFuse True used_set bres' (pat, soac_repl)
 
-fusionGatherBody fres (Body (Let (Pattern [bindee]) _ (Update _ id0 inds elm _):bnds) res) = do
+fusionGatherBody fres (Body _ (Let (Pattern [bindee]) _ (PrimOp (Update _ id0 inds elm _)):bnds) res) = do
   let id1 = bindeeIdent bindee
-  bres  <- binding [id1] $ fusionGatherBody fres $ Body bnds res
+  bres  <- binding [id1] $ fusionGatherBody fres $ mkBody bnds res
 
   let pat_vars = [Var id0, Var id1]
   fres' <- foldM fusionGatherSubExp bres (elm : inds ++ pat_vars)
@@ -421,19 +422,19 @@ fusionGatherBody fres (Body (Let (Pattern [bindee]) _ (Update _ id0 inds elm _):
 
   -- Now add the aliases of id0 (itself included) to the `inplace'
   -- field of any existent kernel.
-  let inplace_aliases = HS.toList $ aliases $ subExpType $ Var id0
+  let inplace_aliases = [identName id0]
   let kers' = map (\ k -> let inplace' = foldl (flip HS.insert) (inplace k) inplace_aliases
                           in  k { inplace = inplace' }
                   ) kers
   let new_kernels = HM.fromList $ zip ker_nms kers'
   return $ fres' { kernels = new_kernels }
 
-fusionGatherBody fres (Body (Let pat _ e:bnds) res) = do
-    let pat_vars = map (SubExp . Var) $ patternIdents pat
-    bres <- bindingPat pat $ fusionGatherBody fres $ Body bnds res
+fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
+    let pat_vars = map (PrimOp . SubExp . Var) $ patternIdents pat
+    bres <- bindingPat pat $ fusionGatherBody fres $ mkBody bnds res
     foldM fusionGatherExp bres (e:pat_vars)
 
-fusionGatherBody fres (Body [] _) =
+fusionGatherBody fres (Body _ [] _) =
   return fres
 
 fusionGatherExp :: FusedRes -> Exp -> FusionGM FusedRes
@@ -442,7 +443,7 @@ fusionGatherExp :: FusedRes -> Exp -> FusionGM FusedRes
 ---- Index/If    ----
 -----------------------------------------
 
-fusionGatherExp fres (DoLoop _ merge _ ub loop_body _) = do
+fusionGatherExp fres (LoopOp (DoLoop _ merge _ ub loop_body _)) = do
   let (merge_pat, ini_val) = unzip merge
 
   let pat_vars = map Var merge_pat
@@ -457,7 +458,7 @@ fusionGatherExp fres (DoLoop _ merge _ ub loop_body _) = do
   -- merge new_res with fres'
   return $ unionFusionRes new_res' fres'
 
-fusionGatherExp fres (Index _ idd inds _) =
+fusionGatherExp fres (PrimOp (Index _ idd inds _)) =
   foldM fusionGatherSubExp fres (Var idd : inds)
 
 fusionGatherExp fres (If cond e_then e_else _ _) = do
@@ -473,11 +474,11 @@ fusionGatherExp fres (If cond e_then e_else _ _) = do
 --- directly in let exp, i.e., let x = e)
 -----------------------------------------------------------------------------------
 
-fusionGatherExp _ (Map     _ _ _     loc) = errorIllegal "map"    loc
-fusionGatherExp _ (Reduce  _ _ _     loc) = errorIllegal "reduce" loc
-fusionGatherExp _ (Scan    _ _ _     loc) = errorIllegal "scan"   loc
-fusionGatherExp _ (Filter  _ _ _     loc) = errorIllegal "filter" loc
-fusionGatherExp _ (Redomap _ _ _ _ _ loc) = errorIllegal "redomap" loc
+fusionGatherExp _ (LoopOp (Map     _ _ _     loc)) = errorIllegal "map"    loc
+fusionGatherExp _ (LoopOp (Reduce  _ _ _     loc)) = errorIllegal "reduce" loc
+fusionGatherExp _ (LoopOp (Scan    _ _ _     loc)) = errorIllegal "scan"   loc
+fusionGatherExp _ (LoopOp (Filter  _ _ _     loc)) = errorIllegal "filter" loc
+fusionGatherExp _ (LoopOp (Redomap _ _ _ _ _ loc)) = errorIllegal "redomap" loc
 
 -----------------------------------
 ---- Generic Traversal         ----
@@ -506,7 +507,7 @@ addIdentToUnfusable fres _ =
 fusionGatherLam :: (Names, FusedRes) -> Lambda -> FusionGM (HS.HashSet VName, FusedRes)
 fusionGatherLam (u_set,fres) (Lambda idds body _ _) = do
     let null_res = mkFreshFusionRes
-    new_res <- binding (map fromParam idds) $ fusionGatherBody null_res body
+    new_res <- binding idds $ fusionGatherBody null_res body
     -- make the inpArr unfusable, so that they
     -- cannot be fused from outside the lambda:
     let inp_arrs = HS.fromList $ HM.keys $ inpArr new_res
@@ -541,14 +542,14 @@ getUnfusableSet loc fres args = do
 
 fuseInBody :: Body -> FusionGM Body
 
-fuseInBody (Body (Let pat lore e:bnds) res) =
+fuseInBody (Body _ (Let pat lore e:bnds) res) =
   case SOAC.fromExp e of
     Right soac ->
-      replaceSOAC pat soac =<< fuseInBody (Body bnds res)
+      replaceSOAC pat soac =<< fuseInBody (mkBody bnds res)
     _ -> do
-      Body bnds' res' <- fuseInBody $ Body bnds res
-      e'              <- fuseInExp e
-      return $ Body (Let pat lore e':bnds') res'
+      Body _ bnds' res' <- fuseInBody $ mkBody bnds res
+      e'                <- fuseInExp e
+      return $ mkBody (Let pat lore e':bnds') res'
 
 fuseInBody b = mapBodyM fuseIn b
 
@@ -588,29 +589,29 @@ replaceSOAC pat@(Pattern (bindee : _)) soac body = do
                                    ("In Fusion.hs, replaceSOAC, outArr in ker_name "
                                     ++"which is not in Res: "++textual (unKernName knm))
         Just ker -> do
-          when (names /= outputs ker) $
-            badFusionGM $ Error loc
-                          ("In Fusion.hs, replaceSOAC, "
-                           ++" pat does not match kernel's pat: "++ppTuple names)
           when (null $ fusedVars ker) $
             badFusionGM $ Error loc
-                          ("In Fusion.hs, replaceSOAC, unfused kernel "
-                          ++"still in result: "++ppTuple names)
+            ("In Fusion.hs, replaceSOAC, unfused kernel "
+             ++"still in result: "++ppTuple names)
+          insertKerSOAC (patternNames pat) ker body
 
-          insertKerSOAC ker body
-
-insertKerSOAC :: FusedKer -> Body -> FusionGM Body
-insertKerSOAC ker body = do
+insertKerSOAC :: [VName] -> FusedKer -> Body -> FusionGM Body
+insertKerSOAC names ker body = do
   prog <- asks program
   let new_soac = fsoac ker
   lam' <- normCopyOneLambda prog $ SOAC.lambda new_soac
   (_, nfres) <- fusionGatherLam (HS.empty, mkFreshFusionRes) lam'
   let nfres' =  cleanFusionResult nfres
   lam''      <- bindRes nfres' $ fuseInLambda lam'
-  runBinder $ do
-    transformOutput (outputTransform ker) (outputs ker) $
-                    SOAC.setLambda lam'' new_soac
-    return body
+  trns <- transformOutput (outputTransform ker) names $
+          SOAC.setLambda lam'' new_soac
+  case trns of
+    Nothing -> badFusionGM $ Error (srclocOf new_soac)
+               ("In Fusion.hs, replaceSOAC, "
+                ++" pat does not match kernel's pat: "++ppTuple names)
+    Just m -> runBinder $ do
+      m
+      return body
 
 ---------------------------------------------------
 ---------------------------------------------------

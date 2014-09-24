@@ -20,6 +20,7 @@ import Futhark.Internalise
 import Futhark.Externalise
 import Futhark.Pipeline
 import Futhark.Passes
+import Futhark.Analysis.Alias
 
 import qualified Futhark.Representation.External as E
 import qualified Futhark.Representation.External.TypeChecker as E
@@ -91,7 +92,7 @@ commandLineOptions =
   , passoption "Transform all second-order array combinators to for-loops." fotransform
     "f" ["first-order-transform"]
   , passoption "Perform simple enabling optimisations." eotransform
-                 "e" ["enabling-optimisations"]
+    "e" ["enabling-optimisations"]
   , passoption "Perform higher-order optimisation, i.e., fusion." hotransform
     "h" ["higher-order-optimizations"]
   , passoption "Aggressively inline and remove dead functions." inlinetransform
@@ -108,7 +109,7 @@ commandLineOptions =
   ]
 
 printAction :: Action
-printAction = ("prettyprinter", putStrLn . I.prettyPrint)
+printAction = ("prettyprinter", putStrLn . I.prettyPrint . aliasAnalysis)
 
 externaliseAction :: Action
 externaliseAction = ("externalise", putStrLn . E.prettyPrint . externaliseProg)
@@ -214,7 +215,7 @@ compiler config file = do
       case (errorProg err, futharkverbose config) of
         (Just prog, Just outfile) ->
           maybe (hPutStr stderr) writeFile outfile $
-            I.prettyPrint prog ++ "\n"
+            I.prettyPrint (aliasAnalysis prog) ++ "\n"
         _ -> return ()
       exitWith $ ExitFailure 2
     Right prog -> do
@@ -229,7 +230,7 @@ typeCheck :: (prog -> Either err prog')
           -> prog -> Either err prog'
 typeCheck checkProg checkProgNoUniqueness config
   | futharkcheckAliases config = checkProg
-  | otherwise             = checkProgNoUniqueness
+  | otherwise                  = checkProgNoUniqueness
 
 futharkc :: Futharkonfig -> FilePath -> String -> (String, Either CompileError I.Prog)
 futharkc config filename srccode =
@@ -242,7 +243,7 @@ futharkc config filename srccode =
                          typeCheck E.checkProg E.checkProgNoUniqueness config
                          parsed_prog
           let int_prog = internaliseProg (futharkboundsCheck config) $ E.tagProg ext_prog
-          int_prog_checked <- canFail "After internalisation:\n" (Just int_prog) $
-                              typeCheck I.checkProg I.checkProgNoUniqueness config
-                              int_prog
+          int_prog_checked <- canFail "After internalisation:\n" (Just int_prog)
+                              (typeCheck I.checkProg I.checkProgNoUniqueness config
+                              int_prog >> return int_prog)
           runPasses config int_prog_checked

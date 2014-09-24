@@ -30,7 +30,8 @@ data Replacement = ArraySubst SubExp [Ident]
                  | DirectSubst Ident
                    deriving (Show)
 
--- | A tuple of a return type and a list of argument types.
+-- | A tuple of a return type, a list of argument types, and the
+-- argument types of the internalised function.
 type FunBinding = (E.DeclType, [E.DeclType])
 
 type ShapeTable = HM.HashMap VName [SubExp]
@@ -54,8 +55,8 @@ instance MonadFreshNames InternaliseM where
 
 instance BindableM InternaliseM where
   type Lore InternaliseM = Basic
-  loreForExpM = return . loreForExp
-  loreForBindingM = return . loreForBinding . (Const :: Ident -> Const Ident Basic)
+  mkLetM pat e = return $ mkLet pat e
+  mkBodyM bnds res = return $ mkBody bnds res
 
 instance MonadBinder InternaliseM where
   addBinding      = addBindingWriter

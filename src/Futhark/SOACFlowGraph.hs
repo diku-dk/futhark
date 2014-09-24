@@ -87,7 +87,7 @@ flowForFun (fname, _, _, fbody, _) =
 
 type FlowM = Writer AccFlow
 
-soacSeen :: VName -> [VName] -> SOAC -> FlowM ()
+soacSeen :: VName -> [VName] -> SOAC Basic -> FlowM ()
 soacSeen name produced soac =
   tell $ HM.singleton
        (textual name)
@@ -122,14 +122,14 @@ soacSeen name produced soac =
         descTransform (SOAC.Replicate {})    = "replicate"
 
 flowForBody :: Body -> FlowM ()
-flowForBody (Body (Let pat _ e:bnds) res)
+flowForBody (Body lore (Let pat _ e:bnds) res)
   | Right e' <- SOAC.fromExp e,
     names@(name:_) <- patternNames pat = do
   soacSeen name names e'
-  flowForBody $ Body bnds res
-flowForBody (Body (Let pat _ e:bnds) res) = do
+  flowForBody $ Body lore bnds res
+flowForBody (Body lore (Let pat _ e:bnds) res) = do
   flowForExp e
-  tell $ HM.map expand $ execWriter $ flowForBody $ Body bnds res
+  tell $ HM.map expand $ execWriter $ flowForBody $ Body lore bnds res
   where names = HS.fromList $ patternNames pat
         freeInE = HS.toList $ freeNamesInExp e
         expand info =
@@ -146,7 +146,7 @@ flowForBody (Body (Let pat _ e:bnds) res) = do
 flowForBody b = walkBodyM flow b
 
 flowForExp :: Exp -> FlowM ()
-flowForExp (DoLoop _ merge _ boundexp loopbody _)
+flowForExp (LoopOp (DoLoop _ merge _ boundexp loopbody _))
   | names@(name:_) <- map (identName . fst) merge =
   tell $ HM.singleton
          (textual name)

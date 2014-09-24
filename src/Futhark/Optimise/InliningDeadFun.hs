@@ -22,7 +22,7 @@ import Futhark.Representation.Basic
 import Futhark.Renamer
 import Futhark.Analysis.CallGraph
 import Futhark.Optimise.Errors
-import Futhark.Binder (mkLetPat, mkLet)
+import Futhark.Binder
 
 -- | The symbol table for functions
 data CGEnv = CGEnv { envFtable  :: HM.HashMap Name FunDec }
@@ -134,21 +134,22 @@ doInlineInCaller (name,rtp,args,body,pos) inlcallees =
   in (name, rtp, args, body',pos)
 
 inlineInBody :: [FunDec] -> Body -> Body
-inlineInBody inlcallees (Body (bnd@(Let pat _ (Apply fname args rtp _)):bnds) res) =
+inlineInBody inlcallees (Body _ (bnd@(Let pat _ (Apply fname args rtp _)):bnds) res) =
   let continue callbnds =
-        callbnds `insertBindings` inlineInBody inlcallees (Body bnds res)
-      continue' res' =
-        continue [ mkLet [v] $ SubExp e'
-                 | (v,e') <- zip (patternIdents pat) $ withShapes $ resultSubExps res' ]
+        callbnds `insertBindings` inlineInBody inlcallees (mkBody bnds res)
+      continue' (Body _ callbnds res') =
+        continue $ callbnds ++
+        [ mkLet [v] $ PrimOp $ SubExp e'
+        | (v,e') <- zip (patternIdents pat) $ withShapes $ resultSubExps res' ]
   in  case filter (\(nm,_,_,_,_)-> fname == nm) inlcallees of
         [] -> continue [bnd]
         (_,_,fargs,body,_):_ ->
-          let revbnds = zip (map fromParam fargs) $ map fst args
-          in  mapResult continue' $ foldr addArgBnd body revbnds
+          let revbnds = zip fargs $ map fst args
+          in  continue' $ foldr addArgBnd body revbnds
   where
       addArgBnd :: (Ident, SubExp) -> Body -> Body
       addArgBnd (farg, aarg) body =
-          mkLet [farg] (SubExp aarg) `insertBinding` body
+          [mkLet [farg] $ PrimOp $ SubExp aarg] `insertBindings` body
       withShapes ses = existentialShapes rtp (map subExpType ses) ++ ses
 inlineInBody inlcallees b = mapBody (inliner inlcallees) b
 

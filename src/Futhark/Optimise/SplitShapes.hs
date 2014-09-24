@@ -49,7 +49,7 @@ makeFunSubsts fundecs =
 -- the entire value slice - you should try to simplify it, and see if
 -- it's "cheap", in some sense.
 functionSlices :: MonadFreshNames m => FunDec -> m (FunDec, FunDec)
-functionSlices (fname, rettype, params, body@(Body bodybnds bodyres), loc) = do
+functionSlices (fname, rettype, params, body@(Body _ bodybnds bodyres), loc) = do
   -- The shape function should not consume its arguments - if it wants
   -- to do in-place stuff, it needs to copy them first.  In most
   -- cases, these copies will be removed by the simplifier.
@@ -58,18 +58,18 @@ functionSlices (fname, rettype, params, body@(Body bodybnds bodyres), loc) = do
   -- Give names to the existentially quantified sizes of the return
   -- type.  These will be passed as parameters to the value function.
   (staticRettype, shapeidents) <-
-    runWriterT $ map (`setAliases` ()) <$> instantiateShapes instantiate rettype
+    runWriterT $ instantiateShapes instantiate rettype
 
   valueBody <- substituteExtResultShapes staticRettype body
 
   let valueRettype = staticShapes staticRettype
-      valueParams = map toParam shapeidents ++ params
-      shapeBody = Body (cpybnds <> bodybnds) bodyres { resultSubExps = shapes }
+      valueParams = shapeidents ++ params
+      shapeBody = mkBody (cpybnds <> bodybnds) bodyres { resultSubExps = shapes }
       fShape = (shapeFname, shapeRettype, shapeParams, shapeBody, loc)
       fValue = (valueFname, valueRettype, valueParams, valueBody, loc)
   return (fShape, fValue)
   where shapes = subExpShapeContext rettype $ resultSubExps bodyres
-        shapeRettype = staticShapes $ map ((`setAliases` ()) . subExpType) shapes
+        shapeRettype = staticShapes $ map subExpType shapes
         shapeFname = fname <> nameFromString "_shape"
         valueFname = fname <> nameFromString "_value"
 
@@ -77,13 +77,13 @@ functionSlices (fname, rettype, params, body@(Body bodybnds bodyres), loc) = do
                          tell [v]
                          return $ Var v
 
-substituteExtResultShapes :: MonadFreshNames m => [ConstType] -> Body -> m Body
-substituteExtResultShapes rettype (Body bnds res) = do
+substituteExtResultShapes :: MonadFreshNames m => [Type] -> Body -> m Body
+substituteExtResultShapes rettype (Body _ bnds res) = do
   bnds' <- mapM substInBnd bnds
   let res' = res { resultSubExps = map (substituteNames subst) $
                                    resultSubExps res
                  }
-  return $ Body bnds' res'
+  return $ mkBody bnds' res'
   where typesShapes = concatMap (shapeDims . arrayShape)
         compshapes =
           typesShapes $ map subExpType $ resultSubExps res
@@ -110,14 +110,10 @@ simplifyShapeFun shapef = return . deadCodeElimFun =<< simplifyFun =<<
 
 cheapFun :: FunDec -> Bool
 cheapFun  = cheapBody . funDecBody
-  where cheapBody (Body bnds _) = all cheapBinding bnds
+  where cheapBody (Body _ bnds _) = all cheapBinding bnds
         cheapBinding (Let _ _ e) = cheap e
-        cheap (DoLoop {}) = False
-        cheap (Map {}) = False
+        cheap (LoopOp {}) = False
         cheap (Apply {}) = False
-        cheap (Reduce {}) = False
-        cheap (Scan {}) = False
-        cheap (Redomap {}) = False
         cheap (If _ tbranch fbranch _ _) = cheapBody tbranch && cheapBody fbranch
         cheap _ = True
 
@@ -125,13 +121,13 @@ cheapSubsts :: [(Name, (FunDec, FunDec))] -> [(Name, (FunDec, FunDec))]
 cheapSubsts = filter (cheapFun . fst . snd)
               -- Probably too simple.  We might want to inline first.
 
-substCalls :: MonadFreshNames m => [(Name, (Name, RetType, Name, RetType))] -> FunDec -> m FunDec
+substCalls :: MonadFreshNames m => [(Name, (Name, ResType, Name, ResType))] -> FunDec -> m FunDec
 substCalls subst (origFname,origRettype,params,fbody,origloc) = do
   fbody' <- treatBody fbody
   return (origFname, origRettype, params, fbody', origloc)
-  where treatBody (Body bnds res) = do
+  where treatBody (Body _ bnds res) = do
           bnds' <- mapM treatBinding bnds
-          return $ Body (concat bnds') res
+          return $ mkBody (concat bnds') res
         treatLambda lam = do
           body <- treatBody $ lambdaBody lam
           return $ lam { lambdaBody = body }
@@ -140,15 +136,10 @@ substCalls subst (origFname,origRettype,params,fbody,origloc) = do
           | Just (shapefun,shapetype,valfun,valtype) <- lookup fname subst =
             liftM snd . runBinder'' $ do
               let (vs,vals) = splitAt (length shapetype) $ patternBindees pat
-                  shapeargs = [ (arg, Observe) | (arg,_) <- args ]
-                  shapetype' = returnType shapetype (repeat Observe) $
-                               map (subExpType . fst) shapeargs
-                  valtype' = returnType valtype (map snd args) $
-                             map (subExpType . fst) args
               letBindPat (Pattern vs) $
-                Apply shapefun args shapetype' loc
+                Apply shapefun args shapetype loc
               letBindPat (Pattern vals) $
-                Apply valfun ([(Var $ bindeeIdent v,Observe) | v <- vs]++args) valtype' loc
+                Apply valfun ([(Var $ bindeeIdent v,Observe) | v <- vs]++args) valtype loc
 
         treatBinding (Let pat _ e) = do
           e' <- mapExpM mapper e

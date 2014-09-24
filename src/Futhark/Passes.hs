@@ -46,8 +46,8 @@ hotransform = Pass { passName = "higher-order optimisations"
 
 inlinetransform :: Pass
 inlinetransform = Pass { passName = "inline functions"
-                      , passOp = liftPass aggInlineDriver
-                      }
+                       , passOp = liftPass aggInlineDriver
+                       }
 
 removeDeadFunctions :: Pass
 removeDeadFunctions = Pass { passName = "Remove dead functions"

@@ -13,7 +13,7 @@ import Control.Monad.Writer
 import qualified Data.Set as S
 
 import Futhark.Representation.Basic
-import Futhark.Binder (mkLetPat, mkPattern)
+import Futhark.Binder
 
 -----------------------------------------------------------------
 -----------------------------------------------------------------
@@ -82,31 +82,31 @@ deadCodeElimSubExp (Constant v loc) = return $ Constant v loc
 
 deadCodeElimBodyM :: Body -> DCElimM Body
 
-deadCodeElimBodyM (Body (Let pat _ e:bnds) res) = do
+deadCodeElimBodyM (Body () (Let pat _ e:bnds) res) = do
   let idds = patternNames pat
-  ((pat',Body bnds' res'), noref) <-
+  ((pat',Body () bnds' res'), noref) <-
     collectRes idds $ do
       (pat', _) <- collectRes idds $ deadCodeElimPat pat
-      body <- deadCodeElimBodyM $ Body bnds res
+      body <- deadCodeElimBodyM $ Body () bnds res
       return (pat', body)
 
   if noref
-  then changed $ return $ Body bnds' res'
+  then changed $ return $ Body () bnds' res'
   else do e' <- deadCodeElimExp e
-          return $ Body (mkLetPat pat' e':bnds') res'
+          return $ Body () (mkLet pat' e':bnds') res'
 
-deadCodeElimBodyM (Body [] (Result cs es loc)) =
-  resultBody <$> mapM deadCodeElimIdent cs <*>
-                 mapM deadCodeElimSubExp es <*> pure loc
+deadCodeElimBodyM (Body () [] (Result cs es loc)) =
+  Body () [] <$> (Result <$> mapM deadCodeElimIdent cs <*>
+                  mapM deadCodeElimSubExp es <*> pure loc)
 
 deadCodeElimExp :: Exp -> DCElimM Exp
-deadCodeElimExp (DoLoop respat merge i bound body loc) = do
+deadCodeElimExp (LoopOp (DoLoop respat merge i bound body loc)) = do
   let (mergepat, mergeexp) = unzip merge
   mergepat' <- mapM deadCodeElimBnd mergepat
   mergeexp' <- mapM deadCodeElimSubExp mergeexp
   bound' <- deadCodeElimSubExp bound
   body' <- deadCodeElimBodyM body
-  return $ DoLoop respat (zip mergepat' mergeexp') i bound' body' loc
+  return $ LoopOp $ DoLoop respat (zip mergepat' mergeexp') i bound' body' loc
 deadCodeElimExp e = mapExpM mapper e
   where mapper = Mapper {
                    mapOnBinding = return -- Handled in case for Body.
@@ -125,15 +125,15 @@ deadCodeElimIdent ident@(Ident vnm t _) = do
   dims <- mapM deadCodeElimSubExp $ arrayDims t
   return ident { identType = t `setArrayShape` Shape dims }
 
-deadCodeElimPat :: Pattern -> DCElimM Pattern
-deadCodeElimPat = liftM mkPattern . mapM deadCodeElimBnd . patternIdents
+deadCodeElimPat :: Pattern -> DCElimM [Ident]
+deadCodeElimPat = mapM deadCodeElimBnd . patternIdents
 
-deadCodeElimBnd :: IdentBase als Shape -> DCElimM (IdentBase als Shape)
+deadCodeElimBnd :: Ident -> DCElimM Ident
 deadCodeElimBnd ident = do
   t <- deadCodeElimType $ identType ident
   return $ ident { identType = t }
 
-deadCodeElimType :: TypeBase als Shape -> DCElimM (TypeBase als Shape)
+deadCodeElimType :: Type -> DCElimM Type
 deadCodeElimType t = do
   dims <- mapM deadCodeElimSubExp $ arrayDims t
   return $ t `setArrayDims` dims

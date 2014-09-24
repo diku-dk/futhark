@@ -4,8 +4,12 @@ module Futhark.Optimise.Fusion.LoopKernel
   , inputs
   , setInputs
   , arrInputs
+  , kernelType
   , transformOutput
   , attemptFusion
+  , SOAC
+  , SOACNest
+  , MapNest
   )
   where
 
@@ -23,41 +27,58 @@ import Data.Loc
 import Futhark.Representation.Basic
 import Futhark.Renamer (renameLambda)
 import Futhark.MonadFreshNames
-import Futhark.Analysis.HORepresentation.SOAC (SOAC)
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
-import Futhark.Analysis.HORepresentation.SOACNest (SOACNest)
 import qualified Futhark.Analysis.HORepresentation.SOACNest as Nest
-import Futhark.Analysis.HORepresentation.MapNest (MapNest)
 import qualified Futhark.Analysis.HORepresentation.MapNest as MapNest
 import Futhark.Optimise.Fusion.TryFusion
 import Futhark.Optimise.Fusion.Composing
 import Futhark.Tools
 
-transformOutput :: SOAC.ArrayTransforms -> [Ident] -> SOAC
-                -> Binder Basic ()
-transformOutput ts outIds soac =
-  case SOAC.viewl ts of
-    SOAC.EmptyL -> do e <- SOAC.toExp soac
-                      letBind outIds e
-    ts' SOAC.:> t -> do
-      newIds <- mapM (newIdent' id) outIds
-      transformOutput ts' newIds soac
-      es     <- mapM (applyTransform t . Var) newIds
-      zipWithM_ letBind (map (:[]) outIds) es
+type SOAC = SOAC.SOAC Basic
+type SOACNest = Nest.SOACNest Basic
+type MapNest = MapNest.MapNest Basic
 
-applyTransform :: SOAC.ArrayTransform -> SubExp -> Binder Basic Exp
+-- XXX: This function is very gross.
+transformOutput :: MonadFreshNames m =>
+                   SOAC.ArrayTransforms -> [VName] -> SOAC
+                -> m (Maybe (Binder Basic ()))
+transformOutput ts names soac = do
+  let (ctx,val) = splitAt (contextSize soact) names
+      descend ts' validents =
+        case SOAC.viewf ts' of
+          SOAC.EmptyF ->
+            forM_ (zip val validents) $ \(k, valident) ->
+            letBind [Ident k (identType valident) loc] $
+            PrimOp $ SubExp $ Var valident
+          t SOAC.:< ts'' -> do
+            let es = map (applyTransform t . Var) validents
+            newIds <- forM (zip val $ concatMap primOpType es) $ \(k, opt) ->
+              newIdent (baseString k) opt loc
+            zipWithM_ letBind (map pure newIds) $ map PrimOp es
+            descend ts'' newIds
+  val' <- mapM (newVName . baseString) val
+  case instantiatePattern loc (ctx<>val') soact of
+    Nothing -> return Nothing
+    Just (ctxidents,validents) -> return $ Just $ do
+      e <- SOAC.toExp soac
+      letBind (ctxidents<>validents) e
+      descend ts validents
+  where loc = srclocOf soac
+        soact = SOAC.typeOf soac
+
+applyTransform :: SOAC.ArrayTransform -> SubExp -> PrimOp
 applyTransform (SOAC.Rearrange cs perm) v =
-  return $ Rearrange cs perm v $ srclocOf v
+  Rearrange cs perm v $ srclocOf v
 applyTransform (SOAC.Reshape cs shape) v =
-  return $ Reshape cs shape v $ srclocOf v
-applyTransform (SOAC.ReshapeOuter cs shape) v = do
+  Reshape cs shape v $ srclocOf v
+applyTransform (SOAC.ReshapeOuter cs shape) v =
   let shapes = reshapeOuter shape 1 v
-  return $ Reshape cs shapes v $ srclocOf v
-applyTransform (SOAC.ReshapeInner cs shape) v = do
+  in Reshape cs shapes v $ srclocOf v
+applyTransform (SOAC.ReshapeInner cs shape) v =
   let shapes = reshapeInner shape 1 v
-  return $ Reshape cs shapes v $ srclocOf v
+  in Reshape cs shapes v $ srclocOf v
 applyTransform (SOAC.Replicate n) v =
-  return $ Replicate n v $ srclocOf v
+  Replicate n v $ srclocOf v
 
 inputToOutput :: SOAC.Input -> Maybe (SOAC.ArrayTransform, SOAC.Input)
 inputToOutput (SOAC.Input ts ia) =
@@ -68,9 +89,6 @@ inputToOutput (SOAC.Input ts ia) =
 data FusedKer = FusedKer {
     fsoac      :: SOAC
   -- ^ the SOAC expression, e.g., mapT( f(a,b), x, y )
-
-  , outputs    :: [Ident]
-  -- ^ The names bound to the outputs of the SOAC.
 
   , inplace    :: Names
   -- ^ every kernel maintains a set of variables
@@ -85,10 +103,9 @@ data FusedKer = FusedKer {
   }
                 deriving (Show)
 
-newKernel :: [Ident] -> SOAC -> FusedKer
-newKernel idds soac =
+newKernel :: SOAC -> FusedKer
+newKernel soac =
   FusedKer { fsoac = soac
-           , outputs = idds
            , inplace = HS.empty
            , fusedVars = []
            , outputTransform = SOAC.noTransforms
@@ -102,6 +119,9 @@ inputs = SOAC.inputs . fsoac
 
 setInputs :: [SOAC.Input] -> FusedKer -> FusedKer
 setInputs inps ker = ker { fsoac = inps `SOAC.setInputs` fsoac ker }
+
+kernelType :: FusedKer -> ResType
+kernelType = SOAC.typeOf . fsoac
 
 tryOptimizeSOAC :: [Ident] -> SOAC -> FusedKer -> TryFusion FusedKer
 tryOptimizeSOAC outIds soac ker = do
@@ -210,7 +230,6 @@ fuseSOACwithKer outIds soac1 ker = do
   -- We are fusing soac1 into soac2, i.e, the output of soac1 is going
   -- into soac2.
   let soac2 = fsoac ker
-      out_ids2 = outputs ker
       cs1      = SOAC.certificates soac1
       cs2      = SOAC.certificates soac2
       inp1_arr = SOAC.inputs soac1
@@ -223,7 +242,6 @@ fuseSOACwithKer outIds soac1 ker = do
         -- removed from the program until much later.
         uniq_lam <- renameLambda $ SOAC.lambda res_soac
         return $ ker { fsoac = uniq_lam `SOAC.setLambda` res_soac
-                     , outputs = out_ids2
                      , fusedVars = fusedVars_new
                      }
   outPairs <- forM outIds $ \outId -> do
@@ -267,7 +285,7 @@ fuseSOACwithKer outIds soac1 ker = do
        let (ne, arrs) = unzip args
            soac2' = SOAC.Redomap (cs1++cs2) lam lam ne arrs loc
            ker'   = ker { fsoac = soac2'
-                        , outputs = out_ids2 }
+                        }
        fuseSOACwithKer outIds soac1 ker'
 
     _ -> fail "Cannot fuse"
@@ -312,24 +330,23 @@ iswim _ nest ots
   | Nest.Scan cs1 (Nest.NewNest lvl nn) es loc1 <- Nest.operation nest,
     Nest.Map cs2 mb loc2 <- nn,
     Just es' <- mapM SOAC.inputFromSubExp es,
-    Nest.Nesting paramIds mapArrs bndIds postExp retTypes <- lvl,
-    mapArrs == map SOAC.varInput paramIds = do
+    Nest.Nesting paramIds mapArrs bndIds certs retTypes <- lvl,
+    mapM (liftM identName . isVarInput) mapArrs == Just paramIds = do
     let newInputs = es' ++ map (SOAC.transposeInput 0 1) (Nest.inputs nest)
         inputTypes = map SOAC.inputType newInputs
         (accsizes, arrsizes) =
           splitAt (length es) $ map rowType inputTypes
-        setSizeFrom p t =
-          p { identType = identType p `setArrayShape` arrayShape t }
-        innerAccParams = zipWith setSizeFrom (take (length es) paramIds) accsizes
-        innerArrParams = zipWith setSizeFrom (drop (length es) paramIds) arrsizes
+        mkParam name t = Ident name t loc1
+        innerAccParams = zipWith mkParam (take (length es) paramIds) accsizes
+        innerArrParams = zipWith mkParam (drop (length es) paramIds) arrsizes
     let innerScan = Nest.Scan cs2 mb (map Var innerAccParams) loc1
         scanNest = Nest.Nesting {
                      Nest.nestingInputs = map SOAC.varInput innerArrParams
-                   , Nest.nestingPostBody = postExp
+                   , Nest.nestingCertificates = certs
                    , Nest.nestingReturnType = zipWith setOuterSize retTypes $
                                               map (arraySize 0) arrsizes
                    , Nest.nestingResult = bndIds
-                   , Nest.nestingParams = innerAccParams ++ innerArrParams
+                   , Nest.nestingParamNames = paramIds
                    }
         perm = case retTypes of []  -> []
                                 t:_ -> transposeIndex 0 1 [0..arrayRank t]
@@ -365,7 +382,7 @@ mapDepth (MapNest.MapNest _ body levels _ _) =
   -- XXX: The restriction to pure nests is conservative, but we cannot
   -- know whether an arbitrary postbody is dependent on the exact size
   -- of the nesting result.
-  min resDims (length (takeWhile MapNest.pureNest levels)) + 1
+  min resDims (length levels) + 1
   where resDims = minDim $ case levels of
                     [] -> case body of Nest.Fun lam ->
                                          lambdaReturnType lam
@@ -380,11 +397,11 @@ pullRearrange nest ots = do
   nest' <- liftMaybeNeedNames $ MapNest.fromSOACNest nest
   SOAC.Rearrange cs perm SOAC.:< ots' <- return $ SOAC.viewf ots
   if permuteReach perm <= mapDepth nest' then
-    let -- Expand perm to cover the full extend of the input dimensionality
+    let -- Expand perm to cover the full extent of the input dimensionality
         perm' inp = perm ++ [length perm..SOAC.inputRank inp-1]
         addPerm inp = SOAC.addTransform (SOAC.Rearrange cs $ perm' inp) inp
         inputs' = map addPerm $ MapNest.inputs nest'
-    in return (inputs' `Nest.setInputs` MapNest.toSOACNest nest',
+    in return (MapNest.toSOACNest $ inputs' `MapNest.setInputs` nest',
                ots')
   else fail "Cannot pull transpose"
 
@@ -435,14 +452,14 @@ pullReshape nest ots
                         `setUniqueness` uniqueness (identType p)
                 newIdent "pullReshape_param" t $ srclocOf p
 
-        bnds <- forM retTypes $ \t ->
-                  fromParam <$> newIdent "pullReshape_bnd" t loc
+        bnds <- forM retTypes $ \_ ->
+                  newNameFromString "pullReshape_bnd"
 
         let nesting = Nest.Nesting {
-                        Nest.nestingParams = ps
+                        Nest.nestingParamNames = map identName ps
                       , Nest.nestingInputs = map SOAC.varInput ps
                       , Nest.nestingResult = bnds
-                      , Nest.nestingPostBody = resultBody [] (map Var bnds) loc
+                      , Nest.nestingCertificates = []
                       , Nest.nestingReturnType = retTypes
                       }
         return $ Nest.Map [] (Nest.NewNest nesting inner) loc

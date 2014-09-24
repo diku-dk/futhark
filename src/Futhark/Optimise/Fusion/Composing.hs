@@ -26,8 +26,10 @@ import Data.Maybe
 
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 
-import Futhark.Representation.Basic
-import Futhark.Binder (mkLet)
+import Futhark.Representation.AST
+import Futhark.Binder
+  (Bindable, mkLet, insertBinding, insertBindings, mkBody)
+import Futhark.Tools (mapResult)
 
 -- | Something that can be used as a SOAC input.  As far as this
 -- module is concerned, this means supporting just a single operation.
@@ -59,23 +61,23 @@ instance (Show a, Ord a, Input inp) => Input (a, inp) where
 --
 -- The result is the fused function, and a list of the array inputs
 -- expected by the SOAC containing the fused function.
-fuseMaps :: Input input =>
-            Lambda -- ^ Function of SOAC to be fused.
+fuseMaps :: (Input input, Bindable lore) =>
+            Lambda lore -- ^ Function of SOAC to be fused.
          -> [input] -- ^ Input of SOAC to be fused.
          -> [(Ident,Ident)] -- ^ Output of SOAC to be fused.  The
                             -- first identifier is the name of the
                             -- actual output, where the second output
                             -- is an identifier that can be used to
                             -- bind a single element of that output.
-         -> Lambda -- ^ Function to be fused with.
+         -> Lambda lore -- ^ Function to be fused with.
          -> [input] -- ^ Input of SOAC to be fused with.
-         -> (Lambda, [input]) -- ^ The fused lambda and the inputs of
+         -> (Lambda lore, [input]) -- ^ The fused lambda and the inputs of
                               -- the resulting SOAC.
 fuseMaps lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
   where lam2' =
           lam2 { lambdaParams = lam2redparams ++ HM.keys inputmap
                , lambdaBody =
-                 let bnds res = [ mkLet [p] $ SubExp e
+                 let bnds res = [ mkLet [p] $ PrimOp $ SubExp e
                                 | (p,e) <- zip pat $ resultSubExps res]
                      bindLambda res =
                        bnds res `insertBindings` makeCopiesInner (lambdaBody lam2)
@@ -87,17 +89,17 @@ fuseMaps lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
 
 -- | Similar to 'fuseMaps', although the two functions must be
 -- predicates returning @{bool}@.  Returns a new predicate function.
-fuseFilters :: Input input =>
-               Lambda -- ^ Function of SOAC to be fused.
+fuseFilters :: (Input input, Bindable lore) =>
+               Lambda lore -- ^ Function of SOAC to be fused.
             -> [input] -- ^ Input of SOAC to be fused.
             -> [(Ident,Ident)] -- ^ Output of SOAC to be fused.
-            -> Lambda -- ^ Function to be fused with.
+            -> Lambda lore -- ^ Function to be fused with.
             -> [input] -- ^ Input of SOAC to be fused with.
             -> VName -- ^ A fresh name (used internally).
-            -> (Lambda, [input]) -- ^ The fused lambda and the inputs of the resulting SOAC.
+            -> (Lambda lore, [input]) -- ^ The fused lambda and the inputs of the resulting SOAC.
 fuseFilters lam1 inp1 out1 lam2 inp2 vname =
   fuseFilterInto lam1 inp1 out1 lam2 inp2 [vname] false
-  where false = resultBody [] [constant False loc] loc
+  where false = mkBody [] $ Result [] [constant False loc] loc
         loc   = srclocOf lam2
 
 -- | Similar to 'fuseFilters', except the second function does not
@@ -113,37 +115,36 @@ fuseFilters lam1 inp1 out1 lam2 inp2 vname =
 --                   then f2(acc,args)
 --                   else acc
 -- @
-fuseFilterIntoFold :: Input input =>
-                      Lambda -- ^ Function of SOAC to be fused.
+fuseFilterIntoFold :: (Input input, Bindable lore) =>
+                      Lambda lore -- ^ Function of SOAC to be fused.
                    -> [input] -- ^ Input of SOAC to be fused.
                    -> [(Ident,Ident)] -- ^ Output of SOAC to be fused.
-                   -> Lambda -- ^ Function to be fused with.
+                   -> Lambda lore -- ^ Function to be fused with.
                    -> [input] -- ^ Input of SOAC to be fused with.
                    -> [VName] -- ^ A fresh name (used internally).
-                   -> (Lambda, [input]) -- ^ The fused lambda and the inputs of the resulting SOAC.
+                   -> (Lambda lore, [input]) -- ^ The fused lambda and the inputs of the resulting SOAC.
 fuseFilterIntoFold lam1 inp1 out1 lam2 inp2 vnames =
   fuseFilterInto lam1 inp1 out1 lam2 inp2 vnames identity
-  where identity = resultBody [] (map (Var . fromParam) lam2redparams) $ srclocOf lam2
+  where identity = mkBody [] $ Result [] (map Var lam2redparams) $ srclocOf lam2
         lam2redparams = take (length (lambdaParams lam2) - length inp2) $
                         lambdaParams lam2
 
-fuseFilterInto :: Input input =>
-                  Lambda -> [input] -> [(Ident,Ident)]
-               -> Lambda -> [input]
-               -> [VName] -> Body
-               -> (Lambda, [input])
+fuseFilterInto :: (Input input, Bindable lore) =>
+                  Lambda lore -> [input] -> [(Ident,Ident)]
+               -> Lambda lore -> [input]
+               -> [VName] -> Body lore
+               -> (Lambda lore, [input])
 fuseFilterInto lam1 inp1 out1 lam2 inp2 vnames falsebranch = (lam2', HM.elems inputmap)
   where lam2' =
           lam2 { lambdaParams = lam2redparams ++ HM.keys inputmap
                , lambdaBody = makeCopies bindins
                }
         loc = srclocOf lam2
-        restype = zipWith setAliases
-                  (lambdaReturnType lam2) (map aliases $ bodyType falsebranch)
+        restype = lambdaReturnType lam2
         residents = [ Ident vname t loc | (vname, t) <- zip vnames restype ]
         branch = flip mapResult (lambdaBody lam1) $ \res ->
                  let [e] = resultSubExps res in -- XXX
-                 Body [mkLet residents $
+                 mkBody [mkLet residents $
                        If e
                        (makeCopiesInner $ lambdaBody lam2)
                        falsebranch
@@ -152,20 +153,20 @@ fuseFilterInto lam1 inp1 out1 lam2 inp2 vnames falsebranch = (lam2', HM.elems in
                         (bodyType falsebranch))
                        loc] $
                  Result (resultCertificates res) (map Var residents) loc
-        lam1tuple = [ mkLet [v] $ SubExp $ Var $ fromParam p
+        lam1tuple = [ mkLet [v] $ PrimOp $ SubExp $ Var p
                     | (v,p) <- zip pat $ lambdaParams lam1 ]
         bindins = lam1tuple `insertBindings` branch
 
         (lam2redparams, pat, inputmap, makeCopies, makeCopiesInner) =
           fuseInputs lam1 inp1 out1 lam2 inp2
 
-fuseInputs :: Input input =>
-              Lambda -> [input] -> [(Ident,Ident)]
-           -> Lambda -> [input]
+fuseInputs :: (Input input, Bindable lore) =>
+              Lambda lore -> [input] -> [(Ident,Ident)]
+           -> Lambda lore -> [input]
            -> ([Param],
                [Ident],
                HM.HashMap Param input,
-               Body -> Body, Body -> Body)
+               Body lore -> Body lore, Body lore -> Body lore)
 fuseInputs lam1 inp1 out1 lam2 inp2 =
   (lam2redparams, outbnds, inputmap, makeCopies, makeCopiesInner)
   where (lam2redparams, lam2arrparams) =
@@ -199,7 +200,7 @@ filterOutParams out1 outins =
   where outUsage = HM.foldlWithKey' add M.empty outins
           where add m p inp =
                   case isVarInput inp of
-                    Just v  -> M.insertWith (++) v [fromParam p] m
+                    Just v  -> M.insertWith (++) v [p] m
                     Nothing -> m
 
         checkUsed m (a,ra) =
@@ -208,9 +209,9 @@ filterOutParams out1 outins =
             _           -> (m, ra)
 
 
-removeDuplicateInputs :: Input input =>
+removeDuplicateInputs :: (Input input, Bindable lore) =>
                          HM.HashMap Param input
-                      -> (HM.HashMap Param input, Body -> Body)
+                      -> (HM.HashMap Param input, Body lore -> Body lore)
 removeDuplicateInputs = fst . HM.foldlWithKey' comb ((HM.empty, id), M.empty)
   where comb ((parmap, inner), arrmap) par arr =
           case M.lookup arr arrmap of
@@ -219,7 +220,7 @@ removeDuplicateInputs = fst . HM.foldlWithKey' comb ((HM.empty, id), M.empty)
             Just par' -> ((parmap, inner . forward par par'),
                           arrmap)
         forward to from b =
-          mkLet [fromParam to] (SubExp $ Var $ fromParam from)
+          mkLet [to] (PrimOp $ SubExp $ Var from)
           `insertBinding` b
 
 {-

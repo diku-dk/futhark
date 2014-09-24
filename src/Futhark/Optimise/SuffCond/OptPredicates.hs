@@ -33,6 +33,9 @@ import Futhark.Optimise.Simplifier.Rule (RuleBook)
 import Futhark.Substitute
 import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as S
+import Futhark.Representation.AST.Attributes.Aliases
+import Futhark.Representation.Aliases
+  (Aliases, mkAliasedBody, mkAliasedLetBinding, removeFunDecAliases)
 
 import Prelude hiding (any)
 
@@ -55,9 +58,9 @@ insertPredicateCalls subst prog =
   where treatFunction (fname,rettype,params,fbody,loc) = do
           fbody' <- treatBody fbody
           return (fname,rettype,params,fbody',loc)
-        treatBody (Body bnds res) = do
+        treatBody (Body _ bnds res) = do
           bnds' <- mapM treatBinding bnds
-          return $ Body (concat bnds') res
+          return $ mkBody (concat bnds') res
         treatLambda lam = do
           body <- treatBody $ lambdaBody lam
           return $ lam { lambdaBody = body }
@@ -78,8 +81,8 @@ insertPredicateCalls subst prog =
         callPreds predt (f:fs) e call = do
           c <- letSubExp (nameToString f ++ "_result") $ call f
           let predloc = srclocOf c
-          eIf (pure $ SubExp c)
-            (eBody [pure $ SubExp $ constant True predloc])
+          eIf (pure $ PrimOp $ SubExp c)
+            (eBody [pure $ PrimOp $ SubExp $ constant True predloc])
             (eBody [callPreds predt fs e call])
             predt predloc
 
@@ -106,8 +109,8 @@ generateOptimisedPredicates' rules (fname, rettype, params, body, loc) suff scta
   case res of
     (body', _) -> do
       fun <- Simplify.simplifyOneFun mempty (fname', rettype, params, body', loc)
-      return $ Just fun
-    _             -> return Nothing
+      return $ Just $ removeFunDecAliases fun
+    _          -> return Nothing
   where fname' = fname <> nameFromString suff
         env = Env { envSimplifyEnv = Simplify.emptyEnv rules Nothing
                   , envSCTable = sctable
@@ -121,10 +124,10 @@ data SCEntry = SufficientCond [[ScalExp]]
 type SCTable = HM.HashMap VName SCEntry
 
 analyseBody :: ST.SymbolTable Basic -> SCTable -> Body -> SCTable
-analyseBody _ sctable (Body [] _) =
+analyseBody _ sctable (Body _ [] _) =
   sctable
 
-analyseBody vtable sctable (Body (bnd@(Let (Pattern [bindee]) _ e):bnds) res) =
+analyseBody vtable sctable (Body bodylore (bnd@(Let (Pattern [bindee]) _ e):bnds) res) =
   let vtable' = ST.insertBinding bnd vtable
       -- Construct a new sctable for recurrences.
       sctable' = case (analyseExp vtable e,
@@ -136,13 +139,13 @@ analyseBody vtable sctable (Body (bnd@(Let (Pattern [bindee]) _ e):bnds) res) =
             Right ses -> HM.insert name (SufficientCond ses) sctable
         (Just eSCTable, _) -> sctable <> eSCTable
         _                  -> sctable
-  in analyseBody vtable' sctable' $ Body bnds res
+  in analyseBody vtable' sctable' $ Body bodylore bnds res
   where name = bindeeName bindee
         ranges = rangesRep vtable
         loc = srclocOf e
         simplify se = AS.simplify se loc ranges
-analyseBody vtable sctable (Body (bnd:bnds) res) =
-  analyseBody (ST.insertBinding bnd vtable) sctable $ Body bnds res
+analyseBody vtable sctable (Body bodylore (bnd:bnds) res) =
+  analyseBody (ST.insertBinding bnd vtable) sctable $ Body bodylore bnds res
 
 rangesRep :: ST.SymbolTable lore -> AS.RangesRep
 rangesRep = HM.filter nonEmptyRange . HM.map toRep . ST.bindings
@@ -152,18 +155,18 @@ rangesRep = HM.filter nonEmptyRange . HM.map toRep . ST.bindings
         nonEmptyRange (_, lower, upper) = isJust lower || isJust upper
 
 analyseExp :: ST.SymbolTable Basic -> Exp -> Maybe SCTable
-analyseExp vtable (DoLoop _ _ i bound body _) =
+analyseExp vtable (LoopOp (DoLoop _ _ i bound body _)) =
   Just $ analyseExpBody vtable' body
   where vtable' = clampLower $ clampUpper vtable
         clampUpper = ST.insertLoopVar (identName i) bound
         -- If we enter the loop, then 'bound' is at least one.
         clampLower = case bound of Var v       -> identName v `ST.isAtLeast` 1
                                    Constant {} -> id
-analyseExp vtable (Map _ fun arrs _) =
+analyseExp vtable (LoopOp (Map _ fun arrs _)) =
   Just $ analyseExpBody vtable' $ lambdaBody fun
   where vtable' = foldr (uncurry ST.insertArrayParam) vtable $ zip params arrs
         params = lambdaParams fun
-analyseExp vtable (Redomap _ outerfun innerfun acc arrs _) =
+analyseExp vtable (LoopOp (Redomap _ outerfun innerfun acc arrs _)) =
   Just $ analyseExpBody vtable' (lambdaBody innerfun) <>
          analyseExpBody vtable (lambdaBody outerfun)
   where vtable' = foldr (uncurry ST.insertArrayParam) vtable $ zip arrparams arrs
@@ -201,7 +204,7 @@ forbiddenIn name (env, vtable) =
   maybe False bad $ ST.lookup name vtable
   where bad entry = (ST.loopVariable entry &&
                      ST.bindingDepth entry > envMaxLoops env) ||
-                    maybe False (isForbidden . bindingLore . snd) (ST.entryBinding entry)
+                    maybe False (isForbidden . snd . bindingLore . snd) (ST.entryBinding entry)
 
 newtype VariantM m a = VariantM (RWST
                                  (Env m)
@@ -261,6 +264,7 @@ instance MonadFreshNames m => MonadBinder (VariantM m) where
 
 instance MonadFreshNames m =>
          Simplify.MonadEngine (VariantM m) where
+  type InnerLore (VariantM m) = Invariance'
   askEngineEnv = asks envSimplifyEnv
   localEngineEnv f = local $ \env ->
     env { envSimplifyEnv = f $ envSimplifyEnv env }
@@ -272,11 +276,11 @@ instance MonadFreshNames m =>
   passNeed m = pass $ do (x, f) <- m
                          return (x, \(Res need suff inv) -> Res (f need) suff inv)
 
-  simplifyBody ds (Body [] res) = do
+  simplifyBody ds (Body _ [] res) = do
     res' <- Simplify.simplifyResult ds res
     suff <- generatingSuff
     if not suff
-      then return $ Body [] res'
+      then mkBodyM [] res'
       else do
       let inspect se
             | True = liftM pure $ sufficientSubExp se
@@ -284,12 +288,12 @@ instance MonadFreshNames m =>
                              return [se, se']
       ses <- liftM concat $ mapM inspect $ resultSubExps res
       res'' <- Simplify.simplifyResult ds res' { resultSubExps = ses }
-      return $ Body [] res''
+      mkBodyM [] res''
 
-  simplifyBody ds (Body (bnd:bnds) res) = do
+  simplifyBody ds (Body bodylore (bnd:bnds) res) = do
     --trace ("body " ++ show (patternIdents $ bindingPattern bnd)) $
     generating Exact $ Simplify.simplifyBinding bnd
-    Simplify.simplifyBody ds $ Body bnds res
+    Simplify.simplifyBody ds $ Body bodylore bnds res
 
   inspectBinding bnd@(Let pat lore e) = do
     -- If the binding has any boolean bindees, we need to try to
@@ -300,13 +304,13 @@ instance MonadFreshNames m =>
       then Simplify.defaultInspectBinding bnd
       else do
         vs <- mapM (newIdent' (<>"_suff")) $ patternIdents pat
-        suffpat <- mkPatternM vs
         let pat' = pat { patternBindees =
                             zipWith tagBindee (patternBindees pat) vs
                        }
-            tagBindee bindee v = bindee { bindeeLore = Just v }
+            tagBindee bindee v =
+              bindee { bindeeLore = (fst $ bindeeLore bindee, Just v) }
         suffe <- generating Sufficient $ Simplify.simplifyExp =<< renameExp e
-        makeSufficientBinding $ Let suffpat lore suffe
+        makeSufficientBinding =<< mkLetM vs suffe
         Simplify.defaultInspectBinding $ Let pat' lore e
 
 makeSufficientBinding :: MonadFreshNames m => S.Binding Invariance -> VariantM m ()
@@ -328,23 +332,23 @@ makeSufficientBinding' context@(_,vtable) (Let pat _ e)
         loc = srclocOf e
         mkConj []     = SE.Val $ LogVal True
         mkConj (x:xs) = foldl SE.SLogAnd x xs
-makeSufficientBinding' _ (Let pat _ (BinOp LogAnd x y t loc)) = do
+makeSufficientBinding' _ (Let pat _ (PrimOp (BinOp LogAnd x y t loc))) = do
   x' <- sufficientSubExp x
   y' <- sufficientSubExp y
-  letBindPat pat $ BinOp LogAnd x' y' t loc
+  letBindPat pat $ PrimOp $ BinOp LogAnd x' y' t loc
 makeSufficientBinding' env (Let pat _ (If (Var v) tbranch fbranch _ loc))
   | identName v `forbiddenIn` env,
     -- FIXME: Check that tbranch and fbranch are safe.  We can do
     -- something smarter if 'v' actually comes from an 'or'.  Also,
     -- currently only handles case where pat is a singleton boolean.
-    Body tbnds (Result _ [tres] _) <- tbranch,
-    Body fbnds (Result _ [fres] _) <- fbranch,
+    Body _ tbnds (Result _ [tres] _) <- tbranch,
+    Body _ fbnds (Result _ [fres] _) <- fbranch,
     Basic Bool <- subExpType tres,
     Basic Bool <- subExpType fres,
     all safeBnd tbnds, all safeBnd fbnds = do
   mapM_ addBinding tbnds
   mapM_ addBinding fbnds
-  letBindPat pat $ BinOp LogAnd tres fres (Basic Bool) loc
+  letBindPat pat $ PrimOp $ BinOp LogAnd tres fres (Basic Bool) loc
   where safeBnd = safeExp . bindingExp
 makeSufficientBinding' _ bnd = Simplify.defaultInspectBinding bnd
 
@@ -352,8 +356,8 @@ makeSufficientBinding' _ bnd = Simplify.defaultInspectBinding bnd
 suffScalExp :: VName -> ST.SymbolTable Invariance -> Maybe ScalExp
 suffScalExp name vtable = asSuffScalExp =<< ST.lookup name vtable
   where asSuffScalExp entry
-          | Just (Just suff, _) <- ST.entryBinding entry,
-            Just se             <- suffScalExp (identName suff) vtable =
+          | Just ((_, Just suff), _) <- ST.entryBinding entry,
+            Just se                  <- suffScalExp (identName suff) vtable =
               Just se
           | otherwise = ST.asScalExp entry
 
@@ -361,7 +365,7 @@ sufficientSubExp :: MonadFreshNames m => SubExp -> VariantM m SubExp
 sufficientSubExp se@(Constant {}) = return se
 sufficientSubExp (Var v) =
   maybe (Var v) Var .
-  (fst <=< ST.entryBinding <=< ST.lookup (identName v)) <$>
+  (snd . fst <=< ST.entryBinding <=< ST.lookup (identName v)) <$>
   Simplify.getVtable
 
 scalExpUsesNoForbidden :: Context m -> ScalExp -> Bool
@@ -384,31 +388,35 @@ isForbidden :: Variance -> Bool
 isForbidden Invariant = False
 isForbidden TooVariant = True
 
-data Invariance
-instance Lore.Lore Invariance where
-  type Binding Invariance = Maybe Ident
-  type Exp Invariance = Variance
+data Invariance'
+instance Lore.Lore Invariance' where
+  type Binding Invariance' = Maybe Ident
+  type Exp Invariance' = Variance
+instance PrettyLore Invariance' where
+instance Substitutable Invariance' where
+instance Renameable Invariance' where
+instance Proper Invariance' where
 
-instance Substitutable Invariance where
-instance Renameable Invariance where
-instance Proper Invariance where
-instance MonadFreshNames m => ProperBinder (VariantM m) where
+type Invariance = Aliases Invariance'
 
 instance MonadFreshNames m => BindableM (VariantM m) where
   type Lore (VariantM m) = Invariance
-  loreForBindingM = const $ return Nothing
-  loreForExpM e = do
+  mkLetM pat e = do
     context <- getContext
-    if forbiddenExp context e
-      then return TooVariant
-      else return Invariant
+    let explore = if forbiddenExp context e
+                  then TooVariant
+                  else Invariant
+        pat' = Pattern $ zipWith Bindee pat $ repeat Nothing
+    return $ mkAliasedLetBinding pat' explore e
+  mkBodyM bnds res =
+    return $ mkAliasedBody () bnds res
 
 forbiddenExp :: Context m -> S.Exp Invariance -> Bool
 forbiddenExp context = isNothing . walkExpM walk
   where walk = Walker { walkOnSubExp  = checkIf forbiddenSubExp
                       , walkOnType    = checkIf forbiddenType
                       , walkOnBody    = checkIf forbiddenBody
-                      , walkOnBinding = checkIf $ isForbidden . bindingLore
+                      , walkOnBinding = checkIf $ isForbidden . snd . bindingLore
                       , walkOnIdent   = checkIf forbiddenIdent
                       , walkOnValue   = const $ return ()
                       , walkOnCertificates = mapM_ $ checkIf forbiddenIdent
@@ -425,4 +433,4 @@ forbiddenExp context = isNothing . walkExpM walk
 
         forbiddenType t = any (`forbiddenIn` context) $ freeNamesIn t
 
-        forbiddenBody = any (isForbidden . bindingLore) . bodyBindings
+        forbiddenBody = any (isForbidden . snd . bindingLore) . bodyBindings

@@ -74,7 +74,7 @@ compileProg :: ExpCompiler op -> Prog -> Imp.Program op
 compileProg ec prog = snd $ mapAccumL (compileFunDec ec) src $ progFunctions prog
   where src = newNameSourceForProg prog
 
-compileType :: TypeBase als Shape -> Imp.Type
+compileType :: TypeBase Shape -> Imp.Type
 compileType t = Imp.Type (elemType t) $ map asImpSize $ arrayDims t
   where asImpSize (Constant (BasicVal (IntVal x)) _) =
           Imp.ConstSize x
@@ -111,8 +111,8 @@ compileBody targets body = compileExtBody rettype targets body
   where rettype = staticShapes $ map subExpType $
                   resultSubExps $ bodyResult body
 
-compileExtBody :: [TypeBase als ExtShape] -> [VName] -> Body -> ImpM op ()
-compileExtBody rettype targets (Body bnds (Result _ ses _)) = do
+compileExtBody :: [TypeBase ExtShape] -> [VName] -> Body -> ImpM op ()
+compileExtBody rettype targets (Body _ bnds (Result _ ses _)) = do
   mapM_ compileBinding bnds
   zipWithM_ compileSubExpTo targets $
     subExpShapeContext rettype ses ++ ses
@@ -133,9 +133,6 @@ compileExp pat e = do
 
 defCompileExp :: [VName] -> Exp -> ImpM op ()
 
-defCompileExp [target] (SubExp se) =
-  compileSubExpTo target se
-
 defCompileExp targets (If cond tbranch fbranch rettype _) = do
   tcode <- collect $ compileExtBody rettype targets tbranch
   fcode <- collect $ compileExtBody rettype targets fbranch
@@ -144,59 +141,59 @@ defCompileExp targets (If cond tbranch fbranch rettype _) = do
 defCompileExp targets (Apply fname args _ _) =
   tell $ Imp.Call targets fname $ map (compileSubExp . fst) args
 
-defCompileExp targets (DoLoop res merge i bound body _) = do
-  declareVars mergepat
-  zipWithM_ compileSubExpTo mergenames mergeinit
-  body' <- collect $ compileBody mergenames body
-  tell $ Imp.For (identName i) (compileSubExp bound) body'
-  zipWithM_ compileSubExpTo targets $ map Var $ loopResult res $ map fst merge
-  where (mergepat, mergeinit) = unzip merge
-        mergenames = map identName mergepat
+defCompileExp targets (PrimOp op) = defCompilePrimOp targets op
 
-defCompileExp [target] (Not e _) =
+defCompileExp targets (LoopOp op) = defCompileLoopOp targets op
+
+defCompilePrimOp :: [VName] -> PrimOp -> ImpM op ()
+
+defCompilePrimOp [target] (SubExp se) =
+  compileSubExpTo target se
+
+defCompilePrimOp [target] (Not e _) =
   writeExp target $ Imp.UnOp Imp.Not $ compileSubExp e
 
-defCompileExp [target] (Negate e _) =
+defCompilePrimOp [target] (Negate e _) =
   writeExp target $ Imp.UnOp Imp.Negate $ compileSubExp e
 
-defCompileExp [target] (BinOp bop x y _ _) =
+defCompilePrimOp [target] (BinOp bop x y _ _) =
   writeExp target $ Imp.BinOp bop (compileSubExp x) (compileSubExp y)
 
-defCompileExp [_] (Assert e loc) =
+defCompilePrimOp [_] (Assert e loc) =
   tell $ Imp.Assert (compileSubExp e) loc
 
-defCompileExp [target] (Index _ src idxs _) =
+defCompilePrimOp [target] (Index _ src idxs _) =
   writeExp target $ Imp.Read (identName src) $ map compileSubExp idxs
 
-defCompileExp [_] (Conjoin {}) =
+defCompilePrimOp [_] (Conjoin {}) =
   return ()
 
-defCompileExp [target] (ArrayLit es _ _) = do
+defCompilePrimOp [target] (ArrayLit es _ _) = do
   allocate target
   forM_ (zip [0..] es) $ \(i,e) ->
     tell $ Imp.Write target [Imp.Constant $ Imp.BasicVal $ IntVal i] $ compileSubExp e
 
-defCompileExp [target] (Update _ src idxs val _) = do
+defCompilePrimOp [target] (Update _ src idxs val _) = do
   writeExp target $ var $ identName src
   tell $ Imp.Write target (map compileSubExp idxs) $ compileSubExp val
 
-defCompileExp [target] (Iota n _) = do
+defCompilePrimOp [target] (Iota n _) = do
   i <- newVName "i"
   allocate target
   tell $ Imp.For i (compileSubExp n) $ Imp.Write target [var i] $ var i
 
-defCompileExp [target] (Replicate n v _) = do
+defCompilePrimOp [target] (Replicate n v _) = do
   i <- newVName "i"
   allocate target
   tell $ Imp.For i (compileSubExp n) $ Imp.Write target [var i] $ compileSubExp v
 
-defCompileExp [target] (Copy e _)
+defCompilePrimOp [target] (Copy e _)
   | arrayRank (subExpType e) == 0 =
   writeExp target $ compileSubExp e
   | otherwise =
   writeExp target =<< Imp.Copy <$> expAsName (subExpType e) (compileSubExp e)
 
-defCompileExp [target] (Reshape _ shape src _) = do
+defCompilePrimOp [target] (Reshape _ shape src _) = do
   allocate target
   src' <- expAsName srct $ compileSubExp src
   let shape' = map compileSubExp shape
@@ -220,7 +217,7 @@ defCompileExp [target] (Reshape _ shape src _) = do
   where one = Imp.Constant $ Imp.BasicVal $ IntVal 1
         srct = subExpType src
 
-defCompileExp [target] (Concat _ x y _ _) = do
+defCompilePrimOp [target] (Concat _ x y _ _) = do
   allocate target
   x' <- expAsName xt $ compileSubExp x
   y' <- expAsName yt $ compileSubExp y
@@ -235,7 +232,7 @@ defCompileExp [target] (Concat _ x y _ _) = do
   where xt = subExpType x
         yt = subExpType y
 
-defCompileExp [target1, target2] (Split _ n x restsize _) = do
+defCompilePrimOp [target1, target2] (Split _ n x restsize _) = do
   allocate target1
   allocate target2
   x' <- expAsName xt $ compileSubExp x
@@ -249,9 +246,9 @@ defCompileExp [target1, target2] (Split _ n x restsize _) = do
          Imp.Read x' [Imp.BinOp Imp.Plus n' $ var j]
   where xt = subExpType x
 
-defCompileExp _ (Split {}) = fail "ImpGen.compileExp: Incorrect number of targets to split"
+defCompilePrimOp _ (Split {}) = fail "ImpGen.compileExp: Incorrect number of targets to split"
 
-defCompileExp [target] (Rearrange _ perm e _) = do
+defCompilePrimOp [target] (Rearrange _ perm e _) = do
   allocate target
   e' <- expAsName et $ compileSubExp e
   is <- replicateM (length perm) $ newVName "i"
@@ -261,7 +258,7 @@ defCompileExp [target] (Rearrange _ perm e _) = do
          Imp.Read e' $ map var is
   where et = subExpType e
 
-defCompileExp [target] (Rotate _ n e _) = do
+defCompilePrimOp [target] (Rotate _ n e _) = do
   allocate target
   e' <- expAsName et $ compileSubExp e
   let size = compileSubExp $ arraySize 0 et
@@ -272,19 +269,34 @@ defCompileExp [target] (Rotate _ n e _) = do
          Imp.Read e' [var i]
   where et = subExpType e
 
-defCompileExp [_] (Map {}) = soacError
+defCompilePrimOp [] _ = return () -- No arms, no cake.
 
-defCompileExp [_] (Filter {}) = soacError
+defCompilePrimOp (_:_:_) _ = fail "ImpGen.compilePrimOp: Incorrect number of targets"
 
-defCompileExp [_] (Reduce {}) = soacError
+defCompileLoopOp :: [VName] -> LoopOp -> ImpM op ()
 
-defCompileExp [_] (Scan {}) = soacError
+defCompileLoopOp targets (DoLoop res merge i bound body _) = do
+  declareVars mergepat
+  zipWithM_ compileSubExpTo mergenames mergeinit
+  body' <- collect $ compileBody mergenames body
+  tell $ Imp.For (identName i) (compileSubExp bound) body'
+  zipWithM_ compileSubExpTo targets $ map Var $ loopResult res $ map fst merge
+  where (mergepat, mergeinit) = unzip merge
+        mergenames = map identName mergepat
 
-defCompileExp [_] (Redomap {}) = soacError
+defCompileLoopOp [_] (Map {}) = soacError
 
-defCompileExp [] _ = return () -- No arms, no cake.
+defCompileLoopOp [_] (Filter {}) = soacError
 
-defCompileExp (_:_:_) _ = fail "ImpGen.compileExp: Incorrect number of targets"
+defCompileLoopOp [_] (Reduce {}) = soacError
+
+defCompileLoopOp [_] (Scan {}) = soacError
+
+defCompileLoopOp [_] (Redomap {}) = soacError
+
+defCompileLoopOp [] _ = return () -- No arms, no cake.
+
+defCompileLoopOp (_:_:_) _ = fail "ImpGen.compileLoopOp: Incorrect number of targets"
 
 soacError :: ImpM op a
 soacError = fail "SOAC encountered in code generator; should have been removed by first-order transform."

@@ -106,10 +106,10 @@ instance Substitute ExtDimSize where
 instance Substitute Names where
   substituteNames = HS.map . substituteNames
 
-instance (Substitute als, Substitute shape) => Substitute (TypeBase als shape) where
+instance (Substitute shape) => Substitute (TypeBase shape) where
   substituteNames _ (Basic et) = Basic et
-  substituteNames substs (Array et sz u als) =
-    Array et (substituteNames substs sz) u (substituteNames substs als)
+  substituteNames substs (Array et sz u) =
+    Array et (substituteNames substs sz) u
 
 instance Substitutable lore => Substitute (Lambda lore) where
   substituteNames substs (Lambda params body rettype loc) =

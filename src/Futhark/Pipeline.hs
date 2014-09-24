@@ -74,9 +74,9 @@ compileError :: String -> Maybe Prog -> FutharkM a
 compileError s p = throwError $ CompileError s p
 
 typeCheck :: Futharkonfig -> Prog -> Either (TypeError Basic) Prog
-typeCheck config
-  | futharkcheckAliases config = checkProg
-  | otherwise             = checkProgNoUniqueness
+typeCheck config prog = either Left (const $ Right prog) $ check prog
+  where check | futharkcheckAliases config = checkProg
+              | otherwise                  = checkProgNoUniqueness
 
 canFail :: Show err => String -> Maybe Prog -> Either err a -> FutharkM a
 canFail d p (Left err) = compileError (d ++ show err) p

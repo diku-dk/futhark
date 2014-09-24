@@ -40,7 +40,7 @@ prefixArgShapes args =
   args
 
 identWithShapes :: (MonadFreshNames m, ArrayShape shape) =>
-               IdentBase Names shape -> m (Ident, [Ident])
+                   IdentBase shape -> m (Ident, [Ident])
 identWithShapes v = do
   shape <- replicateM rank $ newIdent (base ++ "_size") (Basic Int) $ srclocOf v
   let vshape = Shape $ map Var shape
@@ -50,15 +50,15 @@ identWithShapes v = do
         rank = arrayRank $ identType v
 
 typeShapes :: ArrayShape shape1 =>
-              [TypeBase als1 shape1] -> [TypeBase als2 shape2]
+              [TypeBase shape1] -> [TypeBase shape2]
 typeShapes  = (`replicate` Basic Int) . sum . map arrayRank
 
 prefixTypeShapes :: ArrayShape shape =>
-                    [TypeBase als shape] -> [TypeBase als shape]
+                    [TypeBase shape] -> [TypeBase shape]
 prefixTypeShapes ts = typeShapes ts ++ ts
 
 extShapes :: ArrayShape shape =>
-             [TypeBase als shape] -> [TypeBase als ExtShape]
+             [TypeBase shape] -> [TypeBase ExtShape]
 extShapes ts = evalState (mapM extShapes' ts) 0
   where extShapes' t =
           setArrayShape t <$> ExtShape <$> replicateM (arrayRank t) newExt
@@ -68,32 +68,32 @@ extShapes ts = evalState (mapM extShapes' ts) 0
           return $ Ext x
 
 shapeBody :: Body -> Body
-shapeBody (Body bnds (Result cs ses loc)) =
-  Body bnds $ Result cs shapes loc
+shapeBody (Body () bnds (Result cs ses loc)) =
+  Body () bnds $ Result cs shapes loc
   where shapes = concatMap subExpShape ses
 
 allEqual :: Ident -> InternaliseM (Ident, Ident)
 allEqual comp_shape = do
   x <- newIdent "x" (Basic Int) loc
   y <- newIdent "y" (Basic Int) loc
-  compFun <- makeLambda [toParam x, toParam y] $
+  compFun <- makeLambda [x, y] $
              eBody [eAssert $ pure $
-                    BinOp Equal (Var x) (Var y) (Basic Bool) loc]
+                    PrimOp $ BinOp Equal (Var x) (Var y) (Basic Bool) loc]
   bacc <- newIdent "bacc" (Basic Cert) loc
   nacc <- newIdent "nacc" (Basic Int) loc
   belm <- newIdent "belm" (Basic Cert) loc
   nelm <- newIdent "nelm" (Basic Int) loc
-  checkFun <- makeLambda (map toParam [bacc,nacc,belm,nelm]) $ eBody
-              [ pure $ Conjoin [Var bacc, Var belm] loc
-              , pure $ SubExp $ Var nelm ]
-  comp_shape_rot1 <- letExp "comp_shape_rot1" $ Rotate [] 1 (Var comp_shape) loc
+  checkFun <- makeLambda [bacc,nacc,belm,nelm] $ eBody
+              [ pure $ PrimOp $ Conjoin [Var bacc, Var belm] loc
+              , pure $ PrimOp $ SubExp $ Var nelm ]
+  comp_shape_rot1 <- letExp "comp_shape_rot1" $ PrimOp $ Rotate [] 1 (Var comp_shape) loc
   comp <- letExp "map_size_checks" $
-          Map [] compFun [Var comp_shape, Var comp_shape_rot1] loc
+          LoopOp $ Map [] compFun [Var comp_shape, Var comp_shape_rot1] loc
   cert <- newIdent "all_equal_cert" (Basic Cert) loc
   shape <- newIdent "all_equal_shape" (Basic Int) loc
   letBind [cert, shape] $
-          Reduce [] checkFun [(Constant (BasicVal Checked) loc,Var comp),
-                              (intconst 0 loc,Var comp_shape)] loc
+    LoopOp $ Reduce [] checkFun [(Constant (BasicVal Checked) loc,Var comp),
+                                 (intconst 0 loc,Var comp_shape)] loc
   return (cert, shape)
   where loc  = srclocOf comp_shape
 
@@ -106,14 +106,14 @@ data UnsizedLambda = UnsizedLambda {
   deriving (Eq, Ord, Show)
 
 annotateArrayShape :: ArrayShape shape =>
-                      TypeBase als shape -> ([Int], SrcLoc) -> TypeBase als Shape
+                      TypeBase shape -> ([Int], SrcLoc) -> TypeBase Shape
 annotateArrayShape t (newshape, loc) =
   t `setArrayShape` Shape (take (arrayRank t) (map (`intconst` loc) $ newshape ++ repeat 0))
 
 addTypeShapes :: ArrayShape oldshape =>
-                 [TypeBase als oldshape]
+                 [TypeBase oldshape]
               -> [SubExp]
-              -> [TypeBase als Shape]
+              -> [TypeBase Shape]
 addTypeShapes [] _ = []
 addTypeShapes (t:ts) shapes =
   let (shape,shapes') = splitAt (arrayRank t) shapes
@@ -121,21 +121,21 @@ addTypeShapes (t:ts) shapes =
   in t' : addTypeShapes ts shapes'
 
 addIdentShapes :: ArrayShape oldshape =>
-                  [IdentBase als oldshape]
+                  [IdentBase oldshape]
                -> [SubExp]
-               -> [IdentBase als Shape]
+               -> [IdentBase Shape]
 addIdentShapes [] _ = []
 addIdentShapes (v:vs) shapes =
   let (shape,shapes') = splitAt (arrayRank $ identType v) shapes
       t' = identType v `setArrayShape` Shape shape
   in v { identType = t' } : addIdentShapes vs shapes'
 
-addShapeAnnotations :: [IdentBase Names Rank] -> [Type] -> [Ident]
+addShapeAnnotations :: [IdentBase Rank] -> [Type] -> [Ident]
 addShapeAnnotations = zipWith addShapeAnnotation
   where addShapeAnnotation v t =
           v { identType = identType v `setArrayShape` arrayShape t }
 
-annotateIdents :: [IdentBase Names Rank]
+annotateIdents :: [IdentBase Rank]
                -> [Type] -> ([Ident], [Type])
 annotateIdents vs ts =
   let (ts', rest_ts) = splitAt (length vs) ts

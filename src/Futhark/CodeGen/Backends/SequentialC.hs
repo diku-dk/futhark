@@ -25,7 +25,7 @@ compileProgBadly = GenericC.compileProg codeCompiler . ImpGen.compileProg firstO
   where codeCompiler :: GenericC.OpCompiler ()
         codeCompiler () = return GenericC.Done
 
--- Some operations can be implemented to more efficient C than with
+-- Some operations can be implemented with more efficient C than with
 -- the default ImpCode.
 
 -- TODO: maybe add rearrange and others?
@@ -36,13 +36,13 @@ data ArrayOp = ReshapeOp VName [Imp.Exp] VName
 compileProg :: Prog -> String
 compileProg = GenericC.compileProg codeCompiler . ImpGen.compileProg compileExp
   where compileExp :: ImpGen.ExpCompiler ArrayOp
-        compileExp (Pattern [target]) (Reshape _ shape src _) = do
+        compileExp (Pattern [target]) (PrimOp (Reshape _ shape src _)) = do
           let shape' = map ImpGen.compileSubExp shape
           src' <- ImpGen.expAsName (subExpType src) $ ImpGen.compileSubExp src
           ImpGen.declareVar $ bindeeIdent target
           tell $ Imp.Op $ ReshapeOp (bindeeName target) shape' src'
           return ImpGen.Done
-        compileExp (Pattern [target1,target2]) (Split _ n e _ _) = do
+        compileExp (Pattern [target1,target2]) (PrimOp (Split _ n e _ _)) = do
           let n' = ImpGen.compileSubExp n
           e' <- ImpGen.expAsName (subExpType e) $ ImpGen.compileSubExp e
           ImpGen.declareVar $ bindeeIdent target1

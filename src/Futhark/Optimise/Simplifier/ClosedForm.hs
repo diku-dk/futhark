@@ -20,7 +20,7 @@ import qualified Data.HashSet as HS
 import Data.Loc
 import Data.Monoid
 
-import Futhark.Binder
+import Futhark.Tools
 import Futhark.Representation.AST
 import Futhark.Renamer
 import Futhark.MonadFreshNames
@@ -46,22 +46,22 @@ Motivation:
 
 -- | @foldClosedForm look foldfun accargs arrargs@ determines whether
 -- each of the results of @foldfun@ can be expressed in a closed form.
-foldClosedForm :: ProperBinder m =>
+foldClosedForm :: MonadBinder m =>
                   VarLookup (Lore m) -> Pattern (Lore m) -> Lambda (Lore m)
                -> [SubExp] -> [SubExp]
                -> Simplify m ()
 
 foldClosedForm look pat lam accs arrs = do
   closedBody <- checkResults (patternIdents pat) knownBindings
-                (map fromParam $ lambdaParams lam) (lambdaBody lam) accs lamloc
+                (lambdaParams lam) (lambdaBody lam) accs lamloc
   isEmpty <- newIdent "fold_input_is_empty" (Basic Bool) lamloc
   let inputsize = arraysSize 0 $ map subExpType arrs
   closedBody' <- renameBody closedBody
-  letBind [isEmpty] $ BinOp Equal inputsize (intconst 0 lamloc) (Basic Bool) lamloc
-  letBindPat pat $
-    If (Var isEmpty) (resultBody [] accs lamloc) closedBody'
-    (staticShapes $ map fromConstType $
-     lambdaReturnType lam)
+  letBind [isEmpty] $ PrimOp $ BinOp Equal inputsize (intconst 0 lamloc) (Basic Bool) lamloc
+  tb <- resultBodyM [] accs lamloc
+  letBind (patternIdents pat) $
+    If (Var isEmpty) tb closedBody'
+    (staticShapes $ lambdaReturnType lam)
     lamloc
   where lamloc = srclocOf lam
 
@@ -69,7 +69,7 @@ foldClosedForm look pat lam accs arrs = do
 
 -- | @loopClosedForm pat respat merge bound bodys@ determines whether
 -- the do-loop can be expressed in a closed form.
-loopClosedForm :: ProperBinder m =>
+loopClosedForm :: MonadBinder m =>
                   Pattern (Lore m) -> [Ident] -> [(Ident,SubExp)]
                -> SubExp -> Body (Lore m)
                -> Simplify m ()
@@ -80,11 +80,12 @@ loopClosedForm pat respat merge bound body
     isEmpty <- newIdent "bound_is_zero" (Basic Bool) bodyloc
     closedBody' <- renameBody closedBody
     letBind [isEmpty] $
-      BinOp Leq bound (intconst 0 bodyloc)
+      PrimOp $ BinOp Leq bound (intconst 0 bodyloc)
       (Basic Bool) bodyloc
-    letBindPat pat $
+    tb <- resultBodyM [] mergeexp bodyloc
+    letBind (patternIdents pat) $
       If (Var isEmpty)
-      (resultBody [] mergeexp bodyloc)
+      tb
       closedBody'
       (bodyType body)
       bodyloc
@@ -104,7 +105,7 @@ checkResults :: MonadBinder m =>
 checkResults pat knownBindings params body accs bodyloc = do
   ((), bnds) <- collectBindings $
                 zipWithM_ checkResult (zip pat $ resultSubExps res) (zip accparams accs)
-  return $ Body bnds $ Result [] (map Var pat) bodyloc
+  mkBodyM bnds $ Result [] (map Var pat) bodyloc
 
   where bndMap = makeBindMap body
         (accparams, _) = splitAt (length accs) params
@@ -114,9 +115,9 @@ checkResults pat knownBindings params body accs bodyloc = do
                   HS.fromList params
 
         checkResult (p, e) _
-          | Just e' <- asFreeSubExp e = letBind [p] $ SubExp e'
+          | Just e' <- asFreeSubExp e = letBind [p] $ PrimOp $ SubExp e'
         checkResult (p, Var v) (accparam, acc) = do
-          e@(BinOp bop x y rt loc) <- liftMaybe $ HM.lookup v bndMap
+          e@(PrimOp (BinOp bop x y rt loc)) <- liftMaybe $ HM.lookup v bndMap
           -- One of x,y must be *this* accumulator, and the other must
           -- be something that is free in the body.
           let isThisAccum = (==Var accparam)
@@ -128,8 +129,8 @@ checkResults pat knownBindings params body accs bodyloc = do
                           _                      -> Nothing
           case bop of
               LogAnd -> do
-                letBind [v] e
-                letBind [p] $ BinOp LogAnd this el rt loc
+                letBind [v] $ e
+                letBind [p] $ PrimOp $ BinOp LogAnd this el rt loc
               _ -> cannotSimplify -- Um... sorry.
 
         checkResult _ _ = cannotSimplify
@@ -144,12 +145,12 @@ determineKnownBindings :: VarLookup lore -> Lambda lore -> [SubExp] -> [SubExp]
 determineKnownBindings look lam accs arrs =
   accBindings <> arrBindings
   where (accparams, arrparams) =
-          splitAt (length accs) $ map fromParam $ lambdaParams lam
+          splitAt (length accs) $ lambdaParams lam
         accBindings = HM.fromList $ zip accparams accs
         arrBindings = HM.fromList $ mapMaybe isReplicate $ zip arrparams arrs
 
         isReplicate (p, Var v)
-          | Just (Replicate _ ve _) <- look $ identName v = Just (p, ve)
+          | Just (PrimOp (Replicate _ ve _)) <- look $ identName v = Just (p, ve)
         isReplicate _       = Nothing
 
 boundInBody :: Body lore -> HS.HashSet Ident

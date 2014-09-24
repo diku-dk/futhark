@@ -68,7 +68,7 @@ compileSOACtoBohrium e
 input :: Ident -> (VName, Imp.Type)
 input v = (identName v, ImpGen.compileType $ identType v)
 
-compileMap :: SOACNest -> Maybe BohriumOp
+compileMap :: SOACNest Basic -> Maybe BohriumOp
 
 compileMap (SOACNest [SOAC.Input ts (SOAC.Var inp)] (Nest.Map _ (Nest.Fun l) _))
   | SOAC.nullTransforms ts,
@@ -87,31 +87,31 @@ compileMap (SOACNest [SOAC.Input ts1 (SOAC.Var inp1),
 
 compileMap _ = Nothing
 
-compileReduce :: SOACNest -> Maybe BohriumOp
+compileReduce :: SOACNest lore -> Maybe BohriumOp
 compileReduce (SOACNest _ (Nest.Reduce _ (Nest.Fun _) _ _)) =
   Nothing
 compileReduce _ = Nothing
 
-compileMapWithReduce :: SOACNest -> Maybe BohriumOp
+compileMapWithReduce :: SOACNest lore -> Maybe BohriumOp
 compileMapWithReduce (SOACNest _ (Nest.Reduce _ (Nest.NewNest _ (Nest.Map {})) _ _)) =
   Nothing
 compileMapWithReduce _ = Nothing
 
-compileMapWithScan :: SOACNest -> Maybe BohriumOp
+compileMapWithScan :: SOACNest lore -> Maybe BohriumOp
 compileMapWithScan (SOACNest _ (Nest.Scan _ (Nest.NewNest _ (Nest.Map {})) _ _)) =
   Nothing
 compileMapWithScan _ = Nothing
 
 unOp :: [Param] -> Exp -> Maybe BohriumUnOp
-unOp ps (BinOp Plus (Constant (BasicVal (IntVal x)) _) (Var p1) _ _)
-  | [toParam p1] == ps = Just $ BohrIntInc x
-unOp ps (BinOp Plus (Var p1) (Constant (BasicVal (IntVal x)) _) _ _)
-  | [toParam p1] == ps = Just $ BohrIntInc x
+unOp ps (PrimOp (BinOp Plus (Constant (BasicVal (IntVal x)) _) (Var p1) _ _))
+  | [p1] == ps = Just $ BohrIntInc x
+unOp ps (PrimOp (BinOp Plus (Var p1) (Constant (BasicVal (IntVal x)) _) _ _))
+  | [p1] == ps = Just $ BohrIntInc x
 unOp _ _ = Nothing
 
 binOp :: [Param] -> Exp -> Maybe BohriumBinOp
-binOp ps (BinOp op (Var p1) (Var p2) _ _)
-  | [toParam p1, toParam p2] `matches` ps = op'
+binOp ps (PrimOp (BinOp op (Var p1) (Var p2) _ _))
+  | [p1, p2] `matches` ps = op'
   where op' = liftM snd $ find ((==op) . fst)
               [(Plus,BohrIntSum),
                (Minus, BohrIntSub),
@@ -130,7 +130,7 @@ binOp _ _ = Nothing
 compileLambda :: Lambda -> ([Param] -> Exp -> Maybe a) -> Maybe a
 compileLambda l f =
   case lambdaBody l of
-    Body [Let (Pattern [bindee]) _ op] (Result _ [Var k] _)
+    Body _ [Let (Pattern [bindee]) _ op] (Result _ [Var k] _)
       | bindeeIdent bindee == k -> f (lambdaParams l) op
     _ -> Nothing
 

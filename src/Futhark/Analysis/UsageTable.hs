@@ -10,7 +10,9 @@ module Futhark.Analysis.UsageTable
   , used
   , isPredicate
   , isConsumed
+  , allConsumed
   , usages
+  , usage
   , predicateUsage
   , consumedUsage
   , Usages
@@ -71,8 +73,15 @@ isPredicate = lookupPred $ S.member Predicate
 isConsumed :: VName -> UsageTable -> Bool
 isConsumed = lookupPred $ S.member Consumed
 
+allConsumed :: UsageTable -> Names
+allConsumed (UsageTable m) =
+  HS.fromList . map fst . filter (S.member Consumed . snd) $ HM.toList m
+
 usages :: Names -> UsageTable
 usages names = UsageTable $ HM.fromList [ (name, S.empty) | name <- HS.toList names ]
+
+usage :: VName -> Usages -> UsageTable
+usage name uses = UsageTable $ HM.singleton name uses
 
 predicateUsage :: VName -> UsageTable
 predicateUsage name = UsageTable $ HM.singleton name $ S.singleton Predicate

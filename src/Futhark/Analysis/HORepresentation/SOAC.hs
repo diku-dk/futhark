@@ -27,6 +27,7 @@ module Futhark.Analysis.HORepresentation.SOAC
   , lambda
   , setLambda
   , certificates
+  , typeOf
   -- ** Converting to and from expressions
   , NotSOAC (..)
   , fromExp
@@ -74,9 +75,11 @@ import Data.Monoid
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.Sequence as Seq
 
-import qualified Futhark.Representation.Basic as Futhark
-import Futhark.Representation.Basic hiding (Map, Reduce, Scan, Filter, Redomap,
-                               Var, Iota, Rearrange, Reshape, Replicate)
+import qualified Futhark.Representation.AST as Futhark
+import Futhark.Representation.AST
+  hiding (Map, Reduce, Scan, Filter, Redomap,
+          Var, Iota, Rearrange, Reshape, Replicate,
+          typeOf)
 import Futhark.Substitute
 import Futhark.Tools
 
@@ -189,10 +192,10 @@ combineTransforms _ _ = Nothing
 -- an input transformation of an array variable.  If so, return the
 -- variable and the transformation.  Only 'Rearrange' and 'Reshape'
 -- are possible to express this way.
-transformFromExp :: Exp -> Maybe (Ident, ArrayTransform)
-transformFromExp (Futhark.Rearrange cs perm (Futhark.Var v) _) =
+transformFromExp :: Exp lore -> Maybe (Ident, ArrayTransform)
+transformFromExp (PrimOp (Futhark.Rearrange cs perm (Futhark.Var v) _)) =
   Just (v, Rearrange cs perm)
-transformFromExp (Futhark.Reshape cs shape (Futhark.Var v) _) =
+transformFromExp (PrimOp (Futhark.Reshape cs shape (Futhark.Var v) _)) =
   Just (v, Reshape cs shape)
 transformFromExp _ = Nothing
 
@@ -208,9 +211,9 @@ instance Located InputArray where
   locOf (Var v)  = locOf v
   locOf (Iota e) = locOf e
 
-inputArrayToExp :: InputArray -> Exp
-inputArrayToExp (Var k)  = SubExp $ Futhark.Var k
-inputArrayToExp (Iota e) = Futhark.Iota e $ srclocOf e
+inputArrayToExp :: InputArray -> Exp lore
+inputArrayToExp (Var k)  = PrimOp $ SubExp $ Futhark.Var k
+inputArrayToExp (Iota e) = PrimOp $ Futhark.Iota e $ srclocOf e
 
 -- | One array input to a SOAC - a SOAC may have multiple inputs, but
 -- all are of this form.  Only the array inputs are expressed with
@@ -258,29 +261,30 @@ inputFromSubExp (Futhark.Var v) = Just $ Input (ArrayTransforms Seq.empty) $ Var
 inputFromSubExp _          = Nothing
 
 -- | Convert SOAC inputs to the corresponding expressions.
-inputsToSubExps :: [Input] -> Binder Basic [SubExp]
+inputsToSubExps :: (MonadBinder m) =>
+                   [Input] -> m [SubExp]
 inputsToSubExps = mapM inputToExp'
   where inputToExp' (Input (ArrayTransforms ts) ia) = do
           ia' <- letSubExp "soac_input" $ inputArrayToExp ia
           foldlM transform ia' ts
 
         transform ia (Replicate n) =
-          letSubExp "repeat" $ Futhark.Replicate n ia loc
+          letSubExp "repeat" $ PrimOp $ Futhark.Replicate n ia loc
           where loc  = srclocOf ia
 
         transform ia (Rearrange cs perm) =
-          letSubExp "rearrange" $ Futhark.Rearrange cs perm ia $ srclocOf ia
+          letSubExp "rearrange" $ PrimOp $ Futhark.Rearrange cs perm ia $ srclocOf ia
 
         transform ia (Reshape cs shape) =
-          letSubExp "reshape" $ Futhark.Reshape cs shape ia $ srclocOf ia
+          letSubExp "reshape" $ PrimOp $ Futhark.Reshape cs shape ia $ srclocOf ia
 
         transform ia (ReshapeOuter cs shape) =
           let shape' = reshapeOuter shape 1 ia
-          in letSubExp "reshape_outer" $ Futhark.Reshape cs shape' ia $ srclocOf ia
+          in letSubExp "reshape_outer" $ PrimOp $ Futhark.Reshape cs shape' ia $ srclocOf ia
 
         transform ia (ReshapeInner cs shape) =
           let shape' = reshapeInner shape 1 ia
-          in letSubExp "reshape_inner" $ Futhark.Reshape cs shape' ia $ srclocOf ia
+          in letSubExp "reshape_inner" $ PrimOp $ Futhark.Reshape cs shape' ia $ srclocOf ia
 
 -- | If the input is a (possibly rearranged, reshaped or otherwise
 -- transformed) array variable, return that variable.
@@ -360,14 +364,14 @@ transposeInput k n inp =
   addTransform (Rearrange [] $ transposeIndex k n [0..inputRank inp-1]) inp
 
 -- | A definite representation of a SOAC expression.
-data SOAC = Map Certificates Lambda [Input] SrcLoc
-          | Reduce  Certificates Lambda [(SubExp,Input)] SrcLoc
-          | Scan Certificates Lambda [(SubExp,Input)] SrcLoc
-          | Filter Certificates Lambda [Input] SrcLoc
-          | Redomap Certificates Lambda Lambda [SubExp] [Input] SrcLoc
+data SOAC lore = Map Certificates (Lambda lore) [Input] SrcLoc
+               | Reduce  Certificates (Lambda lore) [(SubExp,Input)] SrcLoc
+               | Scan Certificates (Lambda lore) [(SubExp,Input)] SrcLoc
+               | Filter Certificates (Lambda lore) [Input] SrcLoc
+               | Redomap Certificates (Lambda lore) (Lambda lore) [SubExp] [Input] SrcLoc
             deriving (Show)
 
-instance Located SOAC where
+instance Located (SOAC lore) where
   locOf (Map _ _ _ loc) = locOf loc
   locOf (Reduce _ _ _ loc) = locOf loc
   locOf (Scan _ _ _ loc) = locOf loc
@@ -375,7 +379,7 @@ instance Located SOAC where
   locOf (Redomap _ _ _ _ _ loc) = locOf loc
 
 -- | Returns the inputs used in a SOAC.
-inputs :: SOAC -> [Input]
+inputs :: SOAC lore -> [Input]
 inputs (Map _     _     arrs   _) = arrs
 inputs (Reduce  _ _     args   _) = map snd args
 inputs (Scan    _ _     args   _) = map snd args
@@ -383,7 +387,7 @@ inputs (Filter  _ _     arrs   _) = arrs
 inputs (Redomap _ _ _ _ arrs   _) = arrs
 
 -- | Set the inputs to a SOAC.
-setInputs :: [Input] -> SOAC -> SOAC
+setInputs :: [Input] -> SOAC lore -> SOAC lore
 setInputs arrs (Map cs lam _ loc) =
   Map cs lam arrs loc
 setInputs arrs (Reduce cs lam args loc) =
@@ -396,7 +400,7 @@ setInputs arrs (Redomap cs lam1 lam ne _ loc) =
   Redomap cs lam1 lam ne arrs loc
 
 -- | The lambda used in a given SOAC.
-lambda :: SOAC -> Lambda
+lambda :: SOAC lore -> Lambda lore
 lambda (Map     _ lam _        _) = lam
 lambda (Reduce  _ lam _        _) = lam
 lambda (Scan    _ lam _        _) = lam
@@ -404,7 +408,7 @@ lambda (Filter  _ lam _        _) = lam
 lambda (Redomap _ _   lam2 _ _ _) = lam2
 
 -- | Set the lambda used in the SOAC.
-setLambda :: Lambda -> SOAC -> SOAC
+setLambda :: Lambda lore -> SOAC lore -> SOAC lore
 setLambda lam (Map cs _ arrs loc) =
   Map cs lam    arrs loc
 setLambda lam (Reduce cs _ args loc) =
@@ -417,27 +421,40 @@ setLambda lam (Redomap cs lam1 _ ne arrs loc) =
   Redomap cs lam1 lam ne arrs loc
 
 -- | Returns the certificates used in a SOAC.
-certificates :: SOAC -> Certificates
+certificates :: SOAC lore -> Certificates
 certificates (Map     cs _     _ _) = cs
 certificates (Reduce  cs _ _     _) = cs
 certificates (Scan    cs _ _     _) = cs
 certificates (Filter  cs _   _   _) = cs
 certificates (Redomap cs _ _ _ _ _) = cs
 
+typeOf :: SOAC lore -> ResType
+typeOf (Map _ lam inps _) =
+  staticShapes $ mapType lam $ map inputType inps
+typeOf (Reduce _ lam _ _) =
+  staticShapes $ lambdaReturnType lam
+typeOf (Scan _ _ input _) =
+  staticShapes $ scanType $ map (inputType . snd) input
+typeOf (Redomap _ _ lam _ _ _) =
+  staticShapes $ lambdaReturnType lam
+typeOf (Filter _ lam inp _) =
+  filterType lam $ map inputType inp
+
 -- | Convert a SOAC to the corresponding expression.
-toExp :: SOAC -> Binder Basic Exp
+toExp :: (MonadBinder m) =>
+         SOAC (Lore m) -> m (Exp (Lore m))
 toExp (Map cs l as loc) =
-  Futhark.Map cs l <$> inputsToSubExps as <*> pure loc
+  LoopOp <$> (Futhark.Map cs l <$> inputsToSubExps as <*> pure loc)
 toExp (Reduce cs l args loc) =
-  Futhark.Reduce cs l <$> (zip es <$> inputsToSubExps as) <*> pure loc
+  LoopOp <$> (Futhark.Reduce cs l <$> (zip es <$> inputsToSubExps as) <*> pure loc)
   where (es, as) = unzip args
 toExp (Scan cs l args loc) =
-  Futhark.Scan cs l <$> (zip es <$> inputsToSubExps as) <*> pure loc
+  LoopOp <$> (Futhark.Scan cs l <$> (zip es <$> inputsToSubExps as) <*> pure loc)
   where (es, as) = unzip args
 toExp (Filter cs l as loc) =
-  Futhark.Filter cs l <$> inputsToSubExps as <*> pure loc
+  LoopOp <$> (Futhark.Filter cs l <$> inputsToSubExps as <*> pure loc)
 toExp (Redomap cs l1 l2 es as loc) =
-  Futhark.Redomap cs l1 l2 es <$> inputsToSubExps as <*> pure loc
+  LoopOp <$> (Futhark.Redomap cs l1 l2 es <$> inputsToSubExps as <*> pure loc)
 
 -- | The reason why some expression cannot be converted to a 'SOAC'
 -- value.
@@ -453,22 +470,22 @@ inputFromSubExp' e = maybe (Left $ InvalidArrayInput e) Right $ inputFromSubExp 
 -- | Either convert an expression to the normalised SOAC
 -- representation, or a reason why the expression does not have the
 -- valid form.
-fromExp :: Exp -> Either NotSOAC SOAC
-fromExp (Futhark.Map cs l as loc) = do
+fromExp :: Exp lore -> Either NotSOAC (SOAC lore)
+fromExp (LoopOp (Futhark.Map cs l as loc)) = do
   as' <- mapM inputFromSubExp' as
   Right $ Map cs l as' loc
-fromExp (Futhark.Reduce cs l args loc) = do
+fromExp (LoopOp (Futhark.Reduce cs l args loc)) = do
   let (es,as) = unzip args
   as' <- mapM inputFromSubExp' as
   Right $ Reduce cs l (zip es as') loc
-fromExp (Futhark.Scan cs l args loc) = do
+fromExp (LoopOp (Futhark.Scan cs l args loc)) = do
   let (es,as) = unzip args
   as' <- mapM inputFromSubExp' as
   Right $ Scan cs l (zip es as') loc
-fromExp (Futhark.Filter cs l as loc) = do
+fromExp (LoopOp (Futhark.Filter cs l as loc)) = do
   as' <- mapM inputFromSubExp' as
   Right $ Filter cs l as' loc
-fromExp (Futhark.Redomap cs l1 l2 es as loc) = do
+fromExp (LoopOp (Futhark.Redomap cs l1 l2 es as loc)) = do
   as' <- mapM inputFromSubExp' as
   Right $ Redomap cs l1 l2 es as' loc
 fromExp _ = Left NotSOAC

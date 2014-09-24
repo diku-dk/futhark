@@ -33,7 +33,7 @@ import qualified Data.Set as S
 import qualified Data.HashMap.Lazy as HM
 
 import Data.Loc
-import Futhark.Representation.AST hiding (insertBinding)
+import Futhark.Representation.AST
 import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Analysis.ScalExp
 import Futhark.Substitute
@@ -83,8 +83,8 @@ lookupSubExp :: VName -> SymbolTable lore -> Maybe SubExp
 lookupSubExp name vtable = do
   e <- lookupExp name vtable
   case e of
-    SubExp se -> Just se
-    _         -> Nothing
+    PrimOp (SubExp se) -> Just se
+    _                  -> Nothing
 
 lookupScalExp :: VName -> SymbolTable lore -> Maybe ScalExp
 lookupScalExp name vtable = asScalExp =<< lookup name vtable
@@ -132,25 +132,25 @@ bindingEntries bnd@(Let (Pattern [bindee]) _ e) vtable = [entry]
                 , valueRange = range
                 }
         range = case e of
-          SubExp se ->
+          PrimOp (SubExp se) ->
             subExpRange se vtable
-          Iota n _ ->
+          PrimOp (Iota n _) ->
             (Just zero, (`SMinus` one) <$> subExpToScalExp n)
-          Replicate _ v _ ->
+          PrimOp (Replicate _ v _) ->
             subExpRange v vtable
-          Rearrange _ _ v _ ->
+          PrimOp (Rearrange _ _ v _) ->
             subExpRange v vtable
-          Split _ se _ _ _ ->
+          PrimOp (Split _ se _ _ _) ->
             subExpRange se vtable
-          Copy se _ ->
+          PrimOp (Copy se _) ->
             subExpRange se vtable
-          Index _ v _ _ ->
+          PrimOp (Index _ v _ _) ->
             lookupRange (identName v) vtable
           _ -> (Nothing, Nothing)
         zero = Val $ IntVal 0
         one = Val $ IntVal 1
 -- Then, handle others.  For now, this is only filter.
-bindingEntries bnd@(Let (Pattern (x:xs)) _ (Filter _ _ inps _)) vtable =
+bindingEntries bnd@(Let (Pattern (x:xs)) _ (LoopOp (Filter _ _ inps _))) vtable =
   defBndEntry vtable x bnd : zipWith makeBnd xs inps
   where makeBnd bindee (Var v) =
           (defBndEntry vtable bindee bnd) { valueRange = lookupRange (identName v) vtable }
@@ -225,7 +225,7 @@ insertLoopVar :: VName -> SubExp -> SymbolTable lore -> SymbolTable lore
 insertLoopVar name bound vtable = insertEntry name bind vtable
   where bind = (defEntry vtable) {
             valueRange = (Just (Val (IntVal 0)),
-                        minus1 <$> toScalExp look (SubExp bound))
+                        minus1 <$> toScalExp look (PrimOp $ SubExp bound))
           , loopVariable = True
           }
         look = (`lookupScalExp` vtable)
@@ -233,7 +233,7 @@ insertLoopVar name bound vtable = insertEntry name bind vtable
 
 updateBounds :: Bool -> SubExp -> SymbolTable lore -> SymbolTable lore
 updateBounds isTrue cond vtable =
-  case toScalExp (`lookupScalExp` vtable) $ SubExp cond of
+  case toScalExp (`lookupScalExp` vtable) $ PrimOp $ SubExp cond of
     Nothing    -> vtable
     Just cond' ->
       let cond'' | isTrue    = cond'

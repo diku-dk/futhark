@@ -27,11 +27,11 @@ instance MonadFreshNames m => MonadFreshNames (Simplify m) where
 
 instance BindableM m => BindableM (Simplify m) where
   type Lore (Simplify m) = Lore m
-  loreForExpM = Simplify . lift . loreForExpM
-  loreForBindingM = Simplify . lift . loreForBindingM
+  mkLetM pat e = Simplify $ lift $ mkLetM pat e
+  mkBodyM bnds res = Simplify $ lift $ mkBodyM bnds res
 
 instance MonadBinder m => MonadBinder (Simplify m) where
-  addBinding             = Simplify . lift . addBinding
+  addBinding                   = Simplify . lift . addBinding
   collectBindings (Simplify m) = Simplify $ MaybeT $ do
     (x, bnds) <- collectBindings $ runMaybeT m
     case x of Nothing -> return Nothing
