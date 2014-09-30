@@ -179,7 +179,7 @@ resultArray ts loc = mapM arrayOfShape ts
                   elm <- arrayOfShape' ds
                   letSubExp "result" =<< eCopy (pure $ PrimOp $ Replicate d elm loc)
 
-        blankConstant t = Constant (blankValue $ basicDecl $ elemType t) loc
+        blankConstant t = Constant (BasicVal $ blankBasicValue $ elemType t) loc
 
 letwith :: Certificates -> [Ident] -> Binder Basic Exp -> [Exp] -> Binder Basic [Ident]
 letwith cs ks i vs = do

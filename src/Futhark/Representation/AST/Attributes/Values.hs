@@ -6,7 +6,6 @@ module Futhark.Representation.AST.Attributes.Values
        , arrayVal
        , IsValue (..)
        , intconst
-       , blankValue
 
          -- * Rearranging
        , permuteShape
@@ -150,16 +149,3 @@ arrayString (ArrayVal arr _)
   where asChar (BasicVal (CharVal c)) = Just c
         asChar _                        = Nothing
 arrayString _ = Nothing
-
--- | A "blank" value of the given type - this is zero, or whatever is
--- close to it.  Don't depend on this value, but use it for creating
--- arrays to be populated by do-loops.
-blankValue :: DeclType -> Value
-blankValue (Basic Int) = BasicVal $ IntVal 0
-blankValue (Basic Real) = BasicVal $ RealVal 0.0
-blankValue (Basic Bool) = BasicVal $ LogVal False
-blankValue (Basic Char) = BasicVal $ CharVal '\0'
-blankValue (Basic Cert) = BasicVal Checked
-blankValue (Array et (Rank 1) _)  = arrayVal [] (Basic et :: TypeBase Rank)
-blankValue (Array et (Rank n) u) = arrayVal [] rt
-  where rt = Array et (Shape $ replicate (n-1) $ intconst 0 noLoc) u
