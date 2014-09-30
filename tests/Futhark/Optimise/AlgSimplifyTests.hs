@@ -10,10 +10,10 @@ import Data.Loc
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.Map as M
 
-import Futhark.InternalRep
+import Futhark.Representation.AST
 import Futhark.Analysis.ScalExp
 import Futhark.Analysis.ScalExpTests (parseScalExp')
-import Futhark.Optimise.AlgSimplify
+import Futhark.Analysis.AlgSimplify
 
 tests :: [Test]
 tests = constantFoldTests ++ suffCondTests

@@ -9,7 +9,7 @@ import Test.Framework
 import Test.Framework.Providers.QuickCheck2 (testProperty)
 
 import Futhark.InternalRep.SyntaxTests ()
-import Futhark.InternalRep.Attributes
+import Futhark.Representation.AST.Attributes
 
 tests :: [Test]
 tests = [ toParamFromParamIsIdent ]
