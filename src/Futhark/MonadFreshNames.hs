@@ -23,8 +23,6 @@ module Futhark.MonadFreshNames
 import Control.Applicative
 import qualified Control.Monad.State.Lazy
 import qualified Control.Monad.State.Strict
-import Control.Monad.Trans
-import Control.Monad.Trans.Maybe
 
 import Data.Loc
 
@@ -52,10 +50,6 @@ instance (Applicative im, Monad im) => MonadFreshNames (Control.Monad.State.Lazy
 instance (Applicative im, Monad im) => MonadFreshNames (Control.Monad.State.Strict.StateT VNameSource im) where
   getNameSource = Control.Monad.State.Strict.get
   putNameSource = Control.Monad.State.Strict.put
-
-instance (MonadFreshNames im) => MonadFreshNames (MaybeT im) where
-  getNameSource = lift $ getNameSource
-  putNameSource = lift . putNameSource
 
 -- | Run a computation needing a fresh name source and returning a new
 -- one, using 'getNameSource' and 'putNameSource' before and after the
