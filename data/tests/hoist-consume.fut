@@ -6,4 +6,4 @@ fun *[int] fib(*[int] a, int i, int n) =
   else if i < 2 then fib(a,i+1,n)
                 else fib(a,i+1,n)
 
-fun [int] main(int n) = fib(copy(replicate(n,0)),0,n)
+fun [int] main(int n) = fib(copy(replicate(n,42)),0,n)
