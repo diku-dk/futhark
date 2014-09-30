@@ -143,27 +143,7 @@ data TypeBase shape = Basic BasicType
                       -- ^ 1st arg: array's element type, 2nd arg:
                       -- lengths of dimensions, 3rd arg: uniqueness
                       -- attribute
-                    deriving (Show)
-
-instance ArrayShape shape => Eq (TypeBase shape) where
-  Basic et1 == Basic et2 = et1 == et2
-  Array et1 dims1 u1 == Array et2 dims2 u2 =
-    et1 == et2 && u1 == u2 && dims1 == dims2
-  _ == _ = False
-
-instance ArrayShape shape => Ord (TypeBase shape) where
-  Basic et1 <= Basic et2 =
-    et1 <= et2
-  Array et1 dims1 u1 <= Array et2 dims2 u2
-    | et1 < et2                   = True
-    | et1 > et2                   = False
-    | dims1 < dims2 = True
-    | dims1 > dims2 = False
-    | u1 < u2                     = True
-    | u1 > u2                     = False
-    | otherwise                   = True
-  Basic {} <= Array {} = True
-  Array {} <= Basic {} = False
+                    deriving (Show, Eq, Ord)
 
 -- | A type with shape information, used for describing the type of
 -- a computation.
