@@ -103,7 +103,7 @@ mkSuffConds' varinfo s loc r =
     Left err -> error $ show err
     Right e' ->
       case mkSuffConds e' loc r' of
-        Left err -> error $ show err
+        Left _ -> [[e']]
         Right sc -> sc
   where e = parseScalExp' varinfo s
         r' = instantiateRanges varinfo r
