@@ -57,6 +57,15 @@ runtests() {
     return $status
 }
 
+cabaltests() {
+    cmd cabal test
+    status=$?
+    if [ $status = 124 ]; then
+        echo "Cabal test suite exceeded permitted run time"
+    fi
+    return $status
+}
+
 ci() {
     (
         flock -n 9 || exit 1
@@ -64,7 +73,8 @@ ci() {
         cd "$futharkdir" &&
         update &&
         build &&
-        runtests
+        runtests &&
+        cabaltests
     ) 9>$lockfile >>$outfile 2>&1
 }
 
