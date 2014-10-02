@@ -110,6 +110,8 @@ instance (Substitute shape) => Substitute (TypeBase shape) where
   substituteNames _ (Basic et) = Basic et
   substituteNames substs (Array et sz u) =
     Array et (substituteNames substs sz) u
+  substituteNames substs (Mem sz) =
+    Mem $ substituteNames substs sz
 
 instance Substitutable lore => Substitute (Lambda lore) where
   substituteNames substs (Lambda params body rettype loc) =

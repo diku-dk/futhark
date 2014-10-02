@@ -102,6 +102,8 @@ primOpType (Assert _ _) =
   [Basic Cert]
 primOpType (Conjoin _ _) =
   [Basic Cert]
+primOpType (Alloc e _) =
+  [Mem e]
 
 loopOpType :: LoopOp lore -> ResType
 loopOpType (DoLoop res merge _ _ _ _) =

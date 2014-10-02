@@ -21,6 +21,7 @@ import Futhark.Externalise
 import Futhark.Pipeline
 import Futhark.Passes
 import Futhark.Analysis.Alias
+import Futhark.ExplicitAllocations
 
 import qualified Futhark.Representation.External as E
 import qualified Futhark.Representation.External.TypeChecker as E
@@ -78,6 +79,9 @@ commandLineOptions =
   , Option "p" ["print"]
     (NoArg $ Right $ \opts -> opts { futharkaction = printAction })
     "Prettyprint the resulting internal representation on standard output (default action)."
+  , Option "a" ["print-alloced"]
+    (NoArg $ Right $ \opts -> opts { futharkaction = printAllocedAction })
+    "Prettyprint with explicit allocations on standard output."
   , Option "i" ["interpret"]
     (NoArg $ Right $ \opts -> opts { futharkaction = interpretAction })
     "Run the program via an interpreter."
@@ -110,6 +114,9 @@ commandLineOptions =
 
 printAction :: Action
 printAction = ("prettyprinter", putStrLn . I.prettyPrint . aliasAnalysis)
+
+printAllocedAction :: Action
+printAllocedAction = ("prettyprinter", putStrLn . I.prettyPrint . aliasAnalysis . explicitAllocations)
 
 externaliseAction :: Action
 externaliseAction = ("externalise", putStrLn . E.prettyPrint . externaliseProg)

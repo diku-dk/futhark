@@ -54,6 +54,7 @@ Library
                    Futhark.CodeGen.ImpCode
                    Futhark.CodeGen.ImpGen
                    Futhark.Dev
+                   Futhark.ExplicitAllocations
                    Futhark.Externalise
                    Futhark.FirstOrderTransform
                    Futhark.FreshNames
@@ -104,6 +105,7 @@ Library
                    Futhark.Representation.AST.Syntax
                    Futhark.Representation.AST.Traversals
                    Futhark.Representation.Basic
+                   Futhark.Representation.ExplicitMemory
                    Futhark.Representation.External
                    Futhark.Representation.External.Renamer
                    Futhark.Representation.External.TypeChecker

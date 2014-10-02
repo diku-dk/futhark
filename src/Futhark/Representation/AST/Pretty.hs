@@ -56,6 +56,7 @@ instance Pretty (TypeBase Shape) where
   ppr (Basic et) = ppr et
   ppr (Array et (Shape ds) u) = ppr u <> foldr f (ppr et) ds
     where f e s = brackets $ s <> comma <> ppr e
+  ppr (Mem s) = text "mem" <> parens (ppr s)
 
 instance Pretty (TypeBase ExtShape) where
   ppr (Basic et) = ppr et
@@ -63,6 +64,7 @@ instance Pretty (TypeBase ExtShape) where
     where f (Free e) s = brackets $ s <> comma <> ppr e
           f (Ext x)  s = brackets $ s <> comma <>
                          text "?" <> text (show x)
+  ppr (Mem s) = text "mem" <> parens (ppr s)
 
 instance Pretty (TypeBase Rank) where
   ppr (Basic et) = ppr et
@@ -70,6 +72,7 @@ instance Pretty (TypeBase Rank) where
     where f s _ = brackets s
           u' | Unique <- u = star
              | otherwise = empty
+  ppr (Mem s) = text "mem" <> parens (ppr s)
 
 instance Pretty (IdentBase shape) where
   ppr = text . textual . identName
@@ -147,6 +150,7 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
   ppr (Copy e _) = text "copy" <> parens (ppr e)
   ppr (Assert e _) = text "assert" <> parens (ppr e)
   ppr (Conjoin es _) = text "conjoin" <> parens (commasep $ map ppr es)
+  ppr (Alloc e _) = text "alloc" <> apply [ppr e]
 
 instance PrettyLore lore => Pretty (LoopOp lore) where
   ppr (DoLoop respat mergepat i bound loopbody _) =

@@ -166,6 +166,8 @@ mapExpM tv (PrimOp (Concat cs x y size loc)) =
                  mapOnSubExp tv size <*> pure loc)
 mapExpM tv (PrimOp (Copy e loc)) =
   PrimOp <$> (pure Copy <*> mapOnSubExp tv e <*> pure loc)
+mapExpM tv (PrimOp (Alloc e loc)) =
+  PrimOp <$> (pure Alloc <*> mapOnSubExp tv e <*> pure loc)
 mapExpM tv (PrimOp (Assert e loc)) =
   PrimOp <$> (pure Assert <*> mapOnSubExp tv e <*> pure loc)
 mapExpM tv (PrimOp (Conjoin es loc)) =
@@ -210,6 +212,7 @@ mapOnResType tv = mapM mapOnResType'
           Array bt <$> (ExtShape <$> mapM mapOnExtSize shape) <*>
           return u
         mapOnResType' (Basic bt) = return $ Basic bt
+        mapOnResType' (Mem size) = return $ Mem size
         mapOnExtSize (Ext x)   = return $ Ext x
         mapOnExtSize (Free se) = Free <$> mapOnSubExp tv se
 

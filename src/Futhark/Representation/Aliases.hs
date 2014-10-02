@@ -111,13 +111,13 @@ instance Aliased (Aliases lore) where
   bodyAliases = map unNames . fst . fst . bodyLore
   consumedInBody = unNames . snd . fst . bodyLore
 
-instance PrettyLore (Aliases lore) where
+instance PrettyLore lore => PrettyLore (Aliases lore) where
   ppBindingLore binding =
-    case (bindeeAnnots, expAnnot) of
-      (Just x, Just y)   -> Just $ x PP.</> y
-      (Just x, Nothing)  -> Just x
-      (Nothing, Just y)  -> Just y
-      (Nothing, Nothing) -> Nothing
+    case catMaybes [bindeeAnnots,
+                    expAnnot,
+                    ppBindingLore $ removeBindingAliases binding] of
+      [] -> Nothing
+      ls -> Just $ PP.folddoc (PP.</>) ls
     where expAnnot = case HS.toList $ consumedInExp $ bindingExp binding of
             []  -> Nothing
             als -> Just $ oneline $

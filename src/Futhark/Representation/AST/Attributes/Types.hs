@@ -62,6 +62,7 @@ basicDecl = Basic
 toDecl :: ArrayShape shape => TypeBase shape -> DeclType
 toDecl (Array et sz u) = Array et (Rank $ shapeRank sz) u
 toDecl (Basic et) = Basic et
+toDecl (Mem size) = Mem size
 
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
@@ -109,11 +110,15 @@ staticShapes = map staticShapes'
           Basic bt
         staticShapes' (Array bt (Shape shape) u) =
           Array bt (ExtShape $ map Free shape) u
+        staticShapes' (Mem size) =
+          Mem size
 
 hasStaticShape :: ResType -> Maybe [Type]
 hasStaticShape = mapM hasStaticShape'
   where hasStaticShape' (Basic bt) =
           Just $ Basic bt
+        hasStaticShape' (Mem size) =
+          Just $ Mem size
         hasStaticShape' (Array bt (ExtShape shape) u) =
           Array bt <$> (Shape <$> mapM isFree shape) <*> pure u
         isFree (Free s) = Just s
@@ -163,6 +168,8 @@ arrayOf (Array et size1 _) size2 u =
   Array et (size2 <> size1) u
 arrayOf (Basic et) size u =
   Array et size u
+arrayOf (Mem {}) _ _ =
+  error "arrayOf Mem"
 
 -- | Set the shape of an array.  If the given type is not an
 -- array, return the type unchanged.
@@ -172,6 +179,7 @@ setArrayShape (Array et _ u) ds
   | shapeRank ds == 0 = Basic et
   | otherwise         = Array et ds u
 setArrayShape (Basic t)  _         = Basic t
+setArrayShape (Mem {}) _ = error "setArrayShape Mem"
 
 -- | Set the dimensions of an array.  If the given type is not an
 -- array, return the type unchanged.
@@ -240,6 +248,7 @@ basicType _ = True
 elemType :: TypeBase shape -> BasicType
 elemType (Array t _ _) = t
 elemType (Basic t)     = t
+elemType (Mem {})      = error "elemType Mem"
 
 -- | @diet t@ returns a description of how a function parameter of
 -- type @t@ might consume its argument.
@@ -247,6 +256,7 @@ diet :: TypeBase shape -> Diet
 diet (Basic _) = Observe
 diet (Array _ _ Unique) = Consume
 diet (Array _ _ Nonunique) = Observe
+diet (Mem _) = error "diet Mem"
 
 -- | @t `dietingAs` d@ modifies the uniqueness attributes of @t@ to
 -- reflect how it is consumed according to @d@ - if it is consumed, it

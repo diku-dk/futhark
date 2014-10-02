@@ -706,8 +706,8 @@ simplifyProg rules prog =
                (emptyEnv rules $ Just prog) namesrc
   where namesrc = newNameSourceForProg prog
 
-simplifyFun :: (Proper lore, Bindable lore) =>
-               FunDec oldlore -> SimpleM lore (FunDec (Aliases lore))
+simplifyFun :: MonadEngine m =>
+               FunDec oldlore -> m (FunDec (Lore m))
 simplifyFun (fname, rettype, params, body, loc) = do
   body' <- insertAllBindings $ bindParams params $
            simplifyBody (map diet rettype) body

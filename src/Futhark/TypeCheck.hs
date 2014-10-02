@@ -634,6 +634,9 @@ checkPrimOp (Conjoin es pos) = do
   es' <- mapM (require [Basic Cert] <=< checkSubExp) es
   return $ Conjoin es' pos
 
+checkPrimOp (Alloc e loc) =
+  Alloc <$> (require [Basic Int] =<< checkSubExp e) <*> pure loc
+
 checkLoopOp :: Checkable lore =>
                LoopOp lore -> TypeM lore (LoopOp lore)
 

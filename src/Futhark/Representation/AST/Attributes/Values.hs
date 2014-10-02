@@ -41,6 +41,8 @@ valueType v@(ArrayVal _ (Basic et)) =
   where n = constant (valueSize v) noLoc
 valueType v@(ArrayVal _ (Array et _ _)) =
   Array et (Shape $ map (`intconst` noLoc) $ valueShape v) Nonunique
+valueType (ArrayVal _ (Mem {})) =
+  error "valueType Mem"
 
 -- | Return the size of the first dimension of an array, or zero for
 -- non-arrays.

@@ -140,6 +140,7 @@ instance ArrayShape Rank where
 -- dimension sizes (but not the number of dimensions themselves).
 data TypeBase shape = Basic BasicType
                     | Array BasicType shape Uniqueness
+                    | Mem SubExp
                       -- ^ 1st arg: array's element type, 2nd arg:
                       -- lengths of dimensions, 3rd arg: uniqueness
                       -- attribute
@@ -338,6 +339,10 @@ data PrimOp lore
   -- ^ @rotate(n,a)@ returns a new array, where the element
   -- @a[i]@ is at position @i+n@, cycling over to the
   -- beginning of the array.
+
+  | Alloc SubExp SrcLoc
+    -- ^ Allocate a memory block.  This really should not be an
+    -- expression, but what are you gonna do...
   deriving (Eq, Ord, Show)
 
 instance Located (PrimOp lore) where
@@ -358,6 +363,7 @@ instance Located (PrimOp lore) where
   locOf (Copy _ pos) = locOf pos
   locOf (Assert _ loc) = locOf loc
   locOf (Conjoin _ loc) = locOf loc
+  locOf (Alloc _ loc) = locOf loc
 
 data LoopOp lore
   = DoLoop [Ident] [(Ident, SubExp)] Ident SubExp (BodyT lore) SrcLoc

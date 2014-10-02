@@ -59,6 +59,8 @@ primOpAliases (Assert _ _) =
   [mempty]
 primOpAliases (Conjoin _ _) =
   [mempty]
+primOpAliases (Alloc _ _) =
+  [mempty]
 
 loopOpAliases :: (Aliased lore) => LoopOp lore -> [Names]
 loopOpAliases (DoLoop res merge _ _ loopbody _) =
@@ -102,6 +104,8 @@ returnAliases rts args = map returnType' rts
           mempty
         returnType' (Basic _) =
           mempty
+        returnType' (Mem {}) =
+          error "returnAliases Mem"
 
 maskAliases :: Names -> Diet -> Names
 maskAliases _   Consume = mempty

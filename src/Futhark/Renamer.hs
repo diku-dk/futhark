@@ -200,6 +200,7 @@ instance (Rename shape) =>
     size' <- rename size
     return $ Array et size' u
   rename (Basic et) = return $ Basic et
+  rename (Mem e) = Mem <$> rename e
 
 instance Renameable lore => Rename (Lambda lore) where
   rename (Lambda params body ret loc) =
