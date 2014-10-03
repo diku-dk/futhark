@@ -1,4 +1,4 @@
-{-# LANGUAGE RankNTypes, ScopedTypeVariables, DataKinds, FlexibleContexts, ExistentialQuantification, GADTs, TypeOperators, AllowAmbiguousTypes #-}
+{-# LANGUAGE RankNTypes, ScopedTypeVariables, DataKinds, FlexibleContexts, ExistentialQuantification, TypeOperators, AllowAmbiguousTypes, TypeFamilies #-}
 module Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
        (
          IxFun
@@ -12,6 +12,7 @@ module Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
        )
        where
 
+import Data.Type.Monomorphic
 import Data.Constraint (Dict(..))
 import Data.Type.Natural
 import Data.Vector.Sized hiding (index, map, unsafeFromInt)
@@ -45,31 +46,33 @@ offset (IxFun n f) se =
 
 permute :: IxFun -> [Int] -> IxFun
 permute (IxFun n f) perm =
-  IxFun n $ Safe.permute f $ unsafeFromList n perm
+  IxFun n $ Safe.permute f $ buildPermutation perm
+  where buildPermutation :: [Int] -> Safe.Permutation n
+        buildPermutation = undefined
 
 applyInd :: IxFun -> Indices -> IxFun
-applyInd (IxFun (snnat::SNat (S n)) (f::Safe.IxFun (S n))) is = case toSing m of
-  SomeSing (mnat::SNat m) ->
-    case mnat %:<<= nnat of
-      STrue  ->
-        let k :: SNat (S (n :- m))
-            k = SS $ nnat %- mnat
-            nmnat :: SNat (n :- m)
-            nmnat = nnat %- mnat
-            is' :: Safe.Indices m
-            is' = unsafeFromList mnat is
-            proof :: S n :=: (m :+: S (n :- m))
-            proof = sym $
-                    trans (succPlusR mnat nmnat)
-                    (succCongEq (minusPlusEqR nnat mnat))
-            f' :: Safe.IxFun (m :+: S (n :- m))
-            f' = coerce proof f
-            ixfun :: Safe.IxFun (S (n :- m))
-            ixfun = Safe.applyInd f' is'
-        in IxFun k ixfun
-      SFalse -> error "IndexFunction.Unsafe.applyInd: Too many indices given."
-  where m = intToNat $ Prelude.length is
-        nnat :: SNat n
+applyInd (IxFun (snnat::SNat (S n)) (f::Safe.IxFun (S n))) is =
+  case promote (Prelude.length is) :: Monomorphic (Sing :: Nat -> *) of
+    Monomorphic (mnat::SNat m) ->
+      case mnat %:<<= nnat of
+        STrue ->
+          let k :: SNat (S (n :- m))
+              k = SS $ nnat %- mnat
+              nmnat :: SNat (n :- m)
+              nmnat = nnat %- mnat
+              is' :: Safe.Indices m
+              is' = unsafeFromList mnat is
+              proof :: S n :=: (m :+: S (n :- m))
+              proof = sym $
+                      trans (succPlusR mnat nmnat)
+                      (succCongEq (minusPlusEqR nnat mnat))
+              f' :: Safe.IxFun (m :+: S (n :- m))
+              f' = coerce proof f
+              ixfun :: Safe.IxFun (S (n :- m))
+              ixfun = Safe.applyInd f' is'
+          in IxFun k ixfun
+        SFalse -> error "IndexFunction.Unsafe.applyInd: Too many indices given."
+  where nnat :: SNat n
         nnat = snnat %- sOne
 
 codomain :: IxFun -> SymSet

@@ -11,15 +11,16 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
        , applyInd
        , codomain
        , SymSet
+         -- * Permutations
+       , Swap (..)
+       , Permutation (..)
+       , applyPermutation
        )
        where
 
-import Data.Constraint
 import Data.Type.Natural
 import Data.Vector.Sized hiding (index, map, unsafeFromInt)
 import qualified Data.Vector.Sized as Vec
-import Data.Singletons.Prelude
-import Data.Type.Monomorphic
 import Proof.Equational
 
 import Futhark.Analysis.ScalExp
@@ -30,7 +31,7 @@ type Indices = Vector ScalExp
 data IxFun :: Nat -> * where
   Direct :: Shape n -> IxFun n
   Offset :: IxFun n -> ScalExp -> IxFun n
-  Permute :: IxFun n -> Vector Int n -> IxFun n
+  Permute :: IxFun n -> Permutation n -> IxFun n
   Index :: IxFun (m:+:n) -> Indices m -> IxFun n
 
 instance Show (IxFun n) where
@@ -55,13 +56,7 @@ index (Offset fun k) vec =
   index fun vec `SPlus` k
 
 index (Permute fun perm) is =
-  case singInstance $ sLength is %- sOne of
-    SingInstance ->
-      case propToBoolLeq $ leqRefl (sing :: SNat n) of
-        Dict ->
-          let perm' :: Vector (SNat n) (S n)
-              perm' = Vec.map unsafeFromInt perm
-          in index fun $ Vec.map (is Vec.!!) perm'
+  index fun $ applyPermutation perm is
 
 index (Index fun (is1::Indices m)) is2 =
   case (singInstance $ sLength is1,
@@ -81,7 +76,7 @@ iota = Direct
 offset :: IxFun n -> ScalExp -> IxFun n
 offset = Offset
 
-permute :: IxFun n -> Vector Int n -> IxFun n
+permute :: IxFun n -> Permutation n -> IxFun n
 permute = Permute
 
 applyInd :: IxFun (m:+:n) -> Indices m -> IxFun n
@@ -90,12 +85,25 @@ applyInd = Index
 codomain :: IxFun n -> SymSet
 codomain = undefined
 
-unsafeFromInt :: forall n. SingI n => Int -> SNat n
-unsafeFromInt n =
-  case promote n of
-    Monomorphic sn ->
-      case SS sn %:<<= (sing :: SNat n) of
-        STrue -> sing
-        SFalse -> error "Bound over!"
-
 data SymSet
+
+data Swap :: Nat -> * where
+  (:->) :: Ordinal n -> Ordinal n -> Swap n
+
+infixr 4 :->
+
+instance Show (Swap n) where
+  show (n :-> m) = show n ++ " :-> " ++ show m
+
+data Permutation :: Nat -> * where
+  Identity :: Permutation n
+  (:%>%:) :: Swap n -> Permutation n -> Permutation n
+
+infixr 5 :%>%:
+
+instance Show (Permutation n) where
+  show Identity = "Identity"
+  show (s :%>%: perm) = show s ++ ":%>%:" ++ show perm
+
+applyPermutation :: Permutation n -> Vector a n -> Vector a n
+applyPermutation = undefined
