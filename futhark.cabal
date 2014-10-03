@@ -27,7 +27,13 @@ Library
                  hashable >= 1.2.1.0,
                  unordered-containers >= 0.2.3.3,
                  dlist >= 0.6.0.1,
-                 text
+                 text,
+                 constraints >= 0.4,
+                 type-natural >= 0.2,
+                 sized-vector >= 1.4,
+                 singletons >= 1.0,
+                 monomorphic >= 0.0.3,
+                 equational-reasoning >= 0.0.2
 
   Exposed-modules: Futhark.Analysis.AlgSimplify
                    Futhark.Analysis.Alias
