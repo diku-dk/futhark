@@ -106,6 +106,8 @@ Library
                    Futhark.Representation.AST.Traversals
                    Futhark.Representation.Basic
                    Futhark.Representation.ExplicitMemory
+                   Futhark.Representation.ExplicitMemory.IndexFunction
+                   Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
                    Futhark.Representation.External
                    Futhark.Representation.External.Renamer
                    Futhark.Representation.External.TypeChecker
