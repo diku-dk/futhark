@@ -88,9 +88,9 @@ codomain = undefined
 data SymSet
 
 data Swap :: Nat -> * where
-  (:->) :: Ordinal n -> Ordinal n -> Swap n
+  (:->) :: Index n -> Index n -> Swap n
 
-infixr 4 :->
+infixr 5 :->
 
 instance Show (Swap n) where
   show (n :-> m) = show n ++ " :-> " ++ show m
@@ -99,11 +99,22 @@ data Permutation :: Nat -> * where
   Identity :: Permutation n
   (:%>%:) :: Swap n -> Permutation n -> Permutation n
 
-infixr 5 :%>%:
+infixr 4 :%>%:
 
 instance Show (Permutation n) where
   show Identity = "Identity"
   show (s :%>%: perm) = show s ++ " :%>%: " ++ show perm
 
-applyPermutation :: Permutation n -> Vector a n -> Vector a n
-applyPermutation = undefined
+applyPermutation :: forall a n.Permutation n -> Vector a n -> Vector a n
+applyPermutation Identity vec = vec
+applyPermutation (from :-> to :%>%: perm) vec =
+  applyPermutation perm $ update 0 vec
+  where from' = ordToInt from
+        to'   = ordToInt to
+        fromV = vec %!! from
+        toV   = vec %!! to
+        update :: Int -> Vector a m -> Vector a m
+        update _ Nil = Nil
+        update i (x :- xs) | i == from' = toV   :- update (i+1) xs
+                           | i == to'   = fromV :- update (i+1) xs
+                           | otherwise  = x     :- update (i+1) xs
