@@ -44,7 +44,7 @@ update() {
 build() {
     cmd cabal install --only-dependencies &&
     cmd cabal clean &&
-    cmd cabal configure &&
+    cmd cabal configure --enable-tests &&
     cmd cabal build
 }
 
