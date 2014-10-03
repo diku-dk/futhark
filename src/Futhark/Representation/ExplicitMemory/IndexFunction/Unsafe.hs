@@ -15,9 +15,7 @@ module Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
 import Data.Constraint (Dict(..))
 import Data.Type.Natural
 import Data.Vector.Sized hiding (index, map, unsafeFromInt)
-import qualified Data.Vector.Sized as Vec
 import Data.Singletons.Prelude
-import Data.Type.Monomorphic
 import Proof.Equational
 
 import Futhark.Analysis.ScalExp
@@ -79,17 +77,18 @@ codomain (IxFun _ f) = Safe.codomain f
 
 type SymSet = Safe.SymSet
 
+-- FIXME: I cannot figure out how to prove this yet.
 swapPlusMinus :: forall x y z.(z :<<= (x:+:y)) ~ True =>
                  SNat x -> SNat y -> SNat z
               -> (x :+: (y :-: z)) :=: ((x :+: y) :-: z)
 swapPlusMinus _ _ SZ = Refl `trans` Refl
 swapPlusMinus SZ _ _ = Refl `trans` Refl
 swapPlusMinus x SZ z = case boolToPropLeq z (x %+ SZ) of
-  ZeroLeq _ -> undefined
+  ZeroLeq _ -> Refl `trans` Refl -- if z is zero
   SuccLeqSucc _ -> undefined
-swapPlusMinus (SS x) (SS y) (SS z) =
+swapPlusMinus (SS _) (SS _) (SS _) =
   undefined
 
 minusPlusEqR :: SNat n -> SNat m -> (m :+: (n :-: m)) :=: n
 minusPlusEqR n m = case propToBoolLeq $ plusLeqL m n of
-  Dict -> trans (swapPlusMinus m n m) (plusMinusEqR n m)
+  Dict -> swapPlusMinus m n m `trans` plusMinusEqR n m

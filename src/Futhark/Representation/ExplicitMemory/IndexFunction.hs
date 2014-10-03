@@ -72,7 +72,7 @@ index (Index fun (is1::Indices m)) is2 =
           outer = succPlusR (sing :: SNat m) (sing :: SNat n)
           proof :: (m :+ S n) :=: S (m :+ n)
           proof = succPlusR (sing :: SNat m) (sing :: SNat n)
-      in case singInstance (coerce proof $ sLength is) %:- sOne of
+      in case singInstance $ coerce proof (sLength is) %:- sOne of
         SingInstance -> index (coerce outer fun) (coerce outer is)
 
 iota :: Shape n -> IxFun n
