@@ -2,6 +2,8 @@
 module Futhark.Representation.ExplicitMemory.IndexFunction
        (
          IxFun
+       , Shape
+       , Indices
        , index
        , iota
        , offset
@@ -31,6 +33,12 @@ data IxFun :: Nat -> * where
   Permute :: IxFun n -> Vector Int n -> IxFun n
   Index :: IxFun (m:+:n) -> Indices m -> IxFun n
 
+instance Show (IxFun n) where
+  show (Direct shape) = "Direct (" ++ show shape ++ ")"
+  show (Offset fun k) = "Offset (" ++ show fun ++ ", " ++ show k ++ ")"
+  show (Permute fun perm) = "Permute (" ++ show fun ++ ", " ++ show perm ++ ")"
+  show (Index fun is) = "Index (" ++ show fun ++ ", " ++ show is ++ ")"
+
 index :: forall (n::Nat).
          IxFun (S n) -> Indices (S n) -> ScalExp
 
@@ -47,15 +55,13 @@ index (Offset fun k) vec =
   index fun vec `SPlus` k
 
 index (Permute fun perm) is =
-  case singInstance $ sLength is of
+  case singInstance $ sLength is %- sOne of
     SingInstance ->
-      case singInstance $ sLength is %- sOne of
-        SingInstance ->
-          case propToBoolLeq $ leqRefl (sing :: SNat n) of
-            Dict ->
-              let perm' :: Vector (SNat n) (S n)
-                  perm' = Vec.map unsafeFromInt perm
-              in index fun $ Vec.map (is Vec.!!) perm'
+      case propToBoolLeq $ leqRefl (sing :: SNat n) of
+        Dict ->
+          let perm' :: Vector (SNat n) (S n)
+              perm' = Vec.map unsafeFromInt perm
+          in index fun $ Vec.map (is Vec.!!) perm'
 
 index (Index fun (is1::Indices m)) is2 =
   case (singInstance $ sLength is1,
@@ -66,7 +72,7 @@ index (Index fun (is1::Indices m)) is2 =
           outer = succPlusR (sing :: SNat m) (sing :: SNat n)
           proof :: (m :+ S n) :=: S (m :+ n)
           proof = succPlusR (sing :: SNat m) (sing :: SNat n)
-      in case singInstance $ (coerce proof $ sLength is) %:- sOne of
+      in case singInstance (coerce proof $ sLength is) %:- sOne of
         SingInstance -> index (coerce outer fun) (coerce outer is)
 
 iota :: Shape n -> IxFun n
