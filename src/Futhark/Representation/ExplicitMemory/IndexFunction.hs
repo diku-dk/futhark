@@ -103,7 +103,7 @@ infixr 5 :%>%:
 
 instance Show (Permutation n) where
   show Identity = "Identity"
-  show (s :%>%: perm) = show s ++ ":%>%:" ++ show perm
+  show (s :%>%: perm) = show s ++ " :%>%: " ++ show perm
 
 applyPermutation :: Permutation n -> Vector a n -> Vector a n
 applyPermutation = undefined
