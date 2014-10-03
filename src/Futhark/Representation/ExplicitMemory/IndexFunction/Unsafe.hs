@@ -12,11 +12,13 @@ module Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
        )
        where
 
-import Data.Type.Monomorphic
 import Data.Constraint (Dict(..))
-import Data.Type.Natural
-import Data.Vector.Sized hiding (index, map, unsafeFromInt)
+import Data.List (sort)
 import Data.Singletons.Prelude
+import Data.Type.Monomorphic
+import Data.Type.Natural
+import Data.Type.Ordinal
+import Data.Vector.Sized hiding (index, map, unsafeFromInt)
 import Proof.Equational
 
 import Futhark.Analysis.ScalExp
@@ -45,10 +47,17 @@ offset (IxFun n f) se =
   IxFun n $ Safe.offset f se
 
 permute :: IxFun -> [Int] -> IxFun
-permute (IxFun n f) perm =
-  IxFun n $ Safe.permute f $ buildPermutation perm
-  where buildPermutation :: [Int] -> Safe.Permutation n
-        buildPermutation = undefined
+permute (IxFun (n::SNat (S n)) f) perm
+  | sort perm /= [0..sNatToInt n-1] =
+    error "IndexFunction.Unsafe.permute: invalid permutation"
+  | otherwise =
+    IxFun n $ Safe.permute f $
+    Prelude.foldr buildPermutation Safe.Identity (Prelude.zip [0..] perm)
+  where buildPermutation (to,from) perm' =
+          let sw :: Safe.Swap (S n)
+              sw = withSingI n $
+                   unsafeFromInt from Safe.:-> unsafeFromInt to
+          in sw Safe.:%>%: perm'
 
 applyInd :: IxFun -> Indices -> IxFun
 applyInd (IxFun (snnat::SNat (S n)) (f::Safe.IxFun (S n))) is =
