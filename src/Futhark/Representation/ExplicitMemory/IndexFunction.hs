@@ -10,11 +10,6 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
        , permute
        , applyInd
        , codomain
-       , SymSet
-         -- * Permutations
-       , Swap (..)
-       , Permutation (..)
-       , applyPermutation
        )
        where
 
@@ -25,13 +20,16 @@ import Proof.Equational
 
 import Futhark.Analysis.ScalExp
 
+import qualified Futhark.Representation.ExplicitMemory.Permutation as Perm
+import Futhark.Representation.ExplicitMemory.SymSet (SymSet)
+
 type Shape = Vector ScalExp
 type Indices = Vector ScalExp
 
 data IxFun :: Nat -> * where
   Direct :: Shape n -> IxFun n
   Offset :: IxFun n -> ScalExp -> IxFun n
-  Permute :: IxFun n -> Permutation n -> IxFun n
+  Permute :: IxFun n -> Perm.Permutation n -> IxFun n
   Index :: IxFun (m:+:n) -> Indices m -> IxFun n
 
 instance Show (IxFun n) where
@@ -56,7 +54,7 @@ index (Offset fun k) vec =
   index fun vec `SPlus` k
 
 index (Permute fun perm) is =
-  index fun $ applyPermutation perm is
+  index fun $ Perm.apply perm is
 
 index (Index fun (is1::Indices m)) is2 =
   case (singInstance $ sLength is1,
@@ -76,45 +74,11 @@ iota = Direct
 offset :: IxFun n -> ScalExp -> IxFun n
 offset = Offset
 
-permute :: IxFun n -> Permutation n -> IxFun n
+permute :: IxFun n -> Perm.Permutation n -> IxFun n
 permute = Permute
 
 applyInd :: IxFun (m:+:n) -> Indices m -> IxFun n
 applyInd = Index
 
-codomain :: IxFun n -> SymSet
+codomain :: IxFun n -> SymSet n
 codomain = undefined
-
-data SymSet
-
-data Swap :: Nat -> * where
-  (:->) :: Index n -> Index n -> Swap n
-
-infixr 5 :->
-
-instance Show (Swap n) where
-  show (n :-> m) = show n ++ " :-> " ++ show m
-
-data Permutation :: Nat -> * where
-  Identity :: Permutation n
-  (:%>%:) :: Swap n -> Permutation n -> Permutation n
-
-infixr 4 :%>%:
-
-instance Show (Permutation n) where
-  show Identity = "Identity"
-  show (s :%>%: perm) = show s ++ " :%>%: " ++ show perm
-
-applyPermutation :: forall a n.Permutation n -> Vector a n -> Vector a n
-applyPermutation Identity vec = vec
-applyPermutation (from :-> to :%>%: perm) vec =
-  applyPermutation perm $ update 0 vec
-  where from' = ordToInt from
-        to'   = ordToInt to
-        fromV = vec %!! from
-        toV   = vec %!! to
-        update :: Int -> Vector a m -> Vector a m
-        update _ Nil = Nil
-        update i (x :- xs) | i == from' = toV   :- update (i+1) xs
-                           | i == to'   = fromV :- update (i+1) xs
-                           | otherwise  = x     :- update (i+1) xs

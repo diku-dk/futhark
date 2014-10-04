@@ -114,6 +114,8 @@ Library
                    Futhark.Representation.ExplicitMemory
                    Futhark.Representation.ExplicitMemory.IndexFunction
                    Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
+                   Futhark.Representation.ExplicitMemory.Permutation
+                   Futhark.Representation.ExplicitMemory.SymSet
                    Futhark.Representation.External
                    Futhark.Representation.External.Renamer
                    Futhark.Representation.External.TypeChecker

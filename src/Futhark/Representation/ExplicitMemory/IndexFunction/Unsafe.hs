@@ -23,7 +23,10 @@ import Proof.Equational
 
 import Futhark.Analysis.ScalExp
 
+import Futhark.Representation.ExplicitMemory.Permutation
+  (Swap (..), Permutation (..))
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as Safe
+import qualified Futhark.Representation.ExplicitMemory.SymSet as SymSet
 
 data IxFun = forall n . IxFun (SNat (S n)) (Safe.IxFun (S n))
 
@@ -52,12 +55,12 @@ permute (IxFun (n::SNat (S n)) f) perm
     error "IndexFunction.Unsafe.permute: invalid permutation"
   | otherwise =
     IxFun n $ Safe.permute f $
-    Prelude.foldr buildPermutation Safe.Identity (Prelude.zip [0..] perm)
+    Prelude.foldr buildPermutation Identity (Prelude.zip [0..] perm)
   where buildPermutation (to,from) perm' =
-          let sw :: Safe.Swap (S n)
+          let sw :: Swap (S n)
               sw = withSingI n $
-                   unsafeFromInt from Safe.:-> unsafeFromInt to
-          in sw Safe.:%>%: perm'
+                   unsafeFromInt from :<->: unsafeFromInt to
+          in sw :>>: perm'
 
 applyInd :: IxFun -> Indices -> IxFun
 applyInd (IxFun (snnat::SNat (S n)) (f::Safe.IxFun (S n))) is =
@@ -85,9 +88,10 @@ applyInd (IxFun (snnat::SNat (S n)) (f::Safe.IxFun (S n))) is =
         nnat = snnat %- sOne
 
 codomain :: IxFun -> SymSet
-codomain (IxFun _ f) = Safe.codomain f
+codomain (IxFun n f) =
+  SymSet n $ Safe.codomain f
 
-type SymSet = Safe.SymSet
+data SymSet = forall n . SymSet (SNat n) (SymSet.SymSet n)
 
 -- FIXME: I cannot figure out how to prove this yet.
 swapPlusMinus :: forall x y z.(z :<<= (x:+:y)) ~ True =>
