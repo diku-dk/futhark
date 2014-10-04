@@ -300,7 +300,7 @@ instance MonadFreshNames m =>
     -- compute a sufficient binding (if we are not already doing
     -- that).  XXX: this is pretty slow.
     suff <- generatingSuff
-    if suff || Basic Bool `notElem` patternTypes pat || not (HS.null $ consumedInExp e) -- || any ("suff" `isInfixOf`) (map (textual . identName) $ patternIdents pat)
+    if suff || Basic Bool `notElem` patternTypes pat || not (HS.null $ consumedInExp e) --  || any ("suff" `isInfixOf`) (map (textual . identName) $ patternIdents pat)
       then Simplify.defaultInspectBinding bnd
       else do
         vs <- mapM (newIdent' (<>"_suff")) $ patternIdents pat
