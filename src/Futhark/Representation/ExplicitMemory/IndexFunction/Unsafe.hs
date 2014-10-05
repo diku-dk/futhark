@@ -8,7 +8,8 @@ module Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
        , permute
        , applyInd
        , codomain
-       , SymSet
+         -- * Utility
+       , shapeFromSubExps
        )
        where
 
@@ -22,6 +23,7 @@ import Data.Vector.Sized hiding (index, map, unsafeFromInt)
 import Proof.Equational
 
 import Futhark.Analysis.ScalExp
+import Futhark.Representation.AST.Syntax (SubExp(..), Value(..))
 
 import Futhark.Representation.ExplicitMemory.Permutation
   (Swap (..), Permutation (..))
@@ -35,6 +37,12 @@ instance Show IxFun where
 
 type Indices = [ScalExp]
 type Shape   = [ScalExp]
+
+shapeFromSubExps :: [SubExp] -> Shape
+shapeFromSubExps = map fromSubExp
+  where fromSubExp (Var v)                   = Id v
+        fromSubExp (Constant (BasicVal v) _) = Val v
+        fromSubExp _                         = error "Not a basic value"
 
 index :: IxFun -> Indices -> ScalExp
 index f is = case f of

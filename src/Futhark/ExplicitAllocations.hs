@@ -5,54 +5,82 @@ where
 
 import Control.Applicative
 import Control.Monad.State
+import Control.Monad.Reader
 import Control.Monad.Writer
 import qualified Data.DList as DL
 import Data.Loc
+import qualified Data.HashMap.Lazy as HM
 
 import qualified Futhark.Representation.Basic as In
 import Futhark.MonadFreshNames
 import Futhark.Representation.ExplicitMemory
+import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 import Futhark.Tools
 
-newtype AllocM a = AllocM (Binder ExplicitMemory a)
+newtype AllocM a = AllocM (ReaderT (HM.HashMap VName MemSummary)
+                           (Binder ExplicitMemory)
+                           a)
                  deriving (Applicative, Functor, Monad,
-                           MonadFreshNames,
+                           MonadReader (HM.HashMap VName MemSummary),
                            MonadWriter (DL.DList Binding))
 
 instance MonadBinder AllocM where
   addBinding = addBindingWriter
   collectBindings = collectBindingsWriter
 
+instance MonadFreshNames AllocM where
+  getNameSource = AllocM $ lift getNameSource
+  putNameSource = AllocM . lift . putNameSource
+
 instance BindableM AllocM where
   type Lore AllocM = ExplicitMemory
-  mkLetM pat e = do
-    let (ctx,_) = splitAt (contextSize $ typeOf e) pat
-        boundInCtx = flip elem (map identName ctx) . identName
-        extDim (Var v)       = boundInCtx v
-        extDim (Constant {}) = False
-    attr' <- forM pat $ \ident ->
-      case identType ident of
-        Mem _    -> return Scalar
-        Basic _  -> return Scalar
-        Array {}
-          | any extDim $ arrayDims $ identType ident ->
-            error "Cannot deal with existential memory just yet"
-          | otherwise -> do
-            size <-
-              computeSize loc
-              (intconst (basicSize $ elemType $ identType ident) loc) $
-              arrayDims $ identType ident
-            m <- letExp "mem" $ PrimOp $ Alloc size loc
-            return $ MemSummary m Identity
-    let pat' = Pattern $ zipWith Bindee pat attr'
-    return $ Let pat' () e
-    where loc = srclocOf e
+
+  mkLetM [v] e@(PrimOp (Rearrange _ perm (Var orig) _)) = do
+    res <- lookupSummary orig
+    case res of
+      Just (MemSummary m origfun) -> do
+        let ixfun = IxFun.permute origfun perm
+            pat' = Pattern [Bindee v $ MemSummary m ixfun]
+        return $ Let pat' () e
+      _ -> basicMkLetM [v] e
+
+  mkLetM pat e = basicMkLetM pat e
 
   mkBodyM bnds res = return $ Body () bnds res
 
+basicMkLetM :: [Ident]
+            -> Exp
+            -> AllocM Binding
+basicMkLetM pat e = do
+  let (ctx,_) = splitAt (contextSize $ typeOf e) pat
+      boundInCtx = flip elem (map identName ctx) . identName
+      extDim (Var v)       = boundInCtx v
+      extDim (Constant {}) = False
+  attr' <- forM pat $ \ident ->
+    case identType ident of
+      Mem _    -> return Scalar
+      Basic _  -> return Scalar
+      t@(Array {})
+        | any extDim $ arrayDims t ->
+          error "Cannot deal with existential memory just yet"
+        | otherwise -> do
+          size <-
+            computeSize loc
+            (intconst (basicSize $ elemType t) loc) $
+            arrayDims t
+          m <- letExp "mem" $ PrimOp $ Alloc size loc
+          return $ MemSummary m $
+            IxFun.iota $ IxFun.shapeFromSubExps $ arrayDims t
+  let pat' = Pattern $ zipWith Bindee pat attr'
+  return $ Let pat' () e
+  where loc = srclocOf e
+
+lookupSummary :: Ident -> AllocM (Maybe MemSummary)
+lookupSummary = asks . HM.lookup . identName
+
 runAllocM :: MonadFreshNames m => AllocM Body -> m Body
 runAllocM (AllocM m) = do
-  (Body () bnds res, morebnds) <- runBinder'' m
+  (Body () bnds res, morebnds) <- runBinder'' $ runReaderT m HM.empty
   return $ Body () (morebnds<>bnds) res
 
 explicitAllocations :: In.Prog -> Prog
@@ -66,10 +94,22 @@ allocInFun (fname,rettype,params,body,loc) = do
   return (fname,rettype,params,body',loc)
 
 allocInBody :: In.Body -> AllocM Body
-allocInBody (Body _ bnds res) = do
-  bnds' <- concat <$> mapM allocInBinding' bnds
-  return $ Body () bnds' res
-  where allocInBinding' bnd = do
+allocInBody (Body _ bnds res) =
+  allocInBindings bnds [] $ \bnds' ->
+    return $ Body () bnds' res
+
+  where allocInBindings [] bnds' m =
+          m bnds'
+        allocInBindings (x:xs) bnds' m = do
+          allocbnds <- allocInBinding' x
+          let summaries =
+                HM.fromList
+                [(bindeeName bindee, bindeeLore bindee) |
+                 bindee <- concatMap (patternBindees . bindingPattern) allocbnds ]
+          local (`HM.union` summaries) $
+            allocInBindings xs (bnds'++allocbnds) m
+
+        allocInBinding' bnd = do
           (bnd',bnds') <- collectBindings $ allocInBinding bnd
           return $ bnds'<>[bnd']
 

@@ -2,7 +2,6 @@
 module Futhark.Representation.ExplicitMemory
        ( -- * The Lore definition
          ExplicitMemory
-       , IndexFunction (..)
        , MemSummary (..)
          -- * Syntax types
        , Prog
@@ -45,6 +44,7 @@ import Futhark.Renamer
 import Futhark.Binder
 import Futhark.Substitute
 import qualified Futhark.TypeCheck as TypeCheck
+import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 
 -- | A lore containing explicit memory information.
 data ExplicitMemory
@@ -59,12 +59,15 @@ type Pattern = AST.Pattern ExplicitMemory
 type Lambda = AST.Lambda ExplicitMemory
 type FunDec = AST.FunDec ExplicitMemory
 
-data IndexFunction = Identity
-                   deriving (Eq, Ord, Show)
-
-data MemSummary = MemSummary Ident IndexFunction
+data MemSummary = MemSummary Ident IxFun.IxFun
                 | Scalar
-                deriving (Eq, Ord, Show)
+                deriving (Show)
+
+instance Eq MemSummary where
+  _ == _ = True
+
+instance Ord MemSummary where
+  _ `compare` _ = EQ
 
 instance FreeIn MemSummary where
   freeIn (MemSummary ident _) = HS.singleton ident
@@ -101,11 +104,13 @@ instance PrettyLore ExplicitMemory where
       annots  -> Just $ PP.folddoc (PP.</>) annots
     where annot bindee =
             case bindeeLore bindee of
-              MemSummary ident _ ->
+              MemSummary ident fun ->
                 Just $
                 PP.text "// " <>
                 PP.ppr (bindeeName bindee) <>
                 PP.text "@" <>
-                PP.ppr (identName ident)
+                PP.ppr (identName ident) <>
+                PP.text "->" <>
+                PP.text (show fun)
               Scalar ->
                 Nothing
