@@ -16,6 +16,7 @@ import Futhark.MonadFreshNames
 import Futhark.Representation.ExplicitMemory
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 import Futhark.Tools
+import qualified Futhark.Analysis.ScalExp as SE
 
 newtype AllocM a = AllocM (ReaderT (HM.HashMap VName MemSummary)
                            (Binder ExplicitMemory)
@@ -118,7 +119,30 @@ allocInBinding (Let pat _ e) =
   mkLetM (patternIdents pat) =<< allocInExp e
 
 allocInExp :: In.Exp -> AllocM Exp
-allocInExp = mapExpM alloc
+allocInExp (LoopOp (Map cs f arrs loc)) = do
+  let size = arraysSize 0 $ map subExpType arrs
+  is <- newIdent "is" (arrayOf (Basic Int) (Shape [size]) Nonunique) loc
+  letBind [is] $ PrimOp $ Iota size loc
+  i  <- newIdent "i" (Basic Int) loc
+  summaries <- liftM (HM.fromList . concat) $
+               forM (zip (lambdaParams f) arrs) $ \(p,arr) ->
+    if basicType $ identType p then return []
+    else
+      case arr of
+        Constant {} -> return []
+        Var v -> do
+          res <- lookupSummary v
+          case res of
+            Just (MemSummary m origfun) ->
+              return [(identName p,
+                       MemSummary m $ IxFun.applyInd origfun [SE.Id i])]
+            _ -> return []
+  f' <- local (HM.union summaries) $
+        allocInLambda
+        f { lambdaParams = i : lambdaParams f
+          }
+  return $ LoopOp $ Map cs f' (Var is:arrs) loc
+allocInExp e = mapExpM alloc e
   where alloc = identityMapper { mapOnBinding = allocInBinding
                                , mapOnBody = allocInBody
                                , mapOnLambda = allocInLambda
