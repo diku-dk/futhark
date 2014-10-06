@@ -13,7 +13,6 @@ module Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
        )
        where
 
-import Data.Constraint (Dict(..))
 import Data.List (sort)
 import Data.Singletons.Prelude
 import Data.Type.Monomorphic
@@ -24,6 +23,7 @@ import Proof.Equational
 
 import Futhark.Analysis.ScalExp
 import Futhark.Representation.AST.Syntax (SubExp(..), Value(..))
+import Futhark.Util.Truths
 
 import Futhark.Representation.ExplicitMemory.Permutation
   (Swap (..), Permutation (..))
@@ -101,29 +101,7 @@ codomain (IxFun n f) =
 
 data SymSet = forall n . SymSet (SNat n) (SymSet.SymSet n)
 
-swapPlusMinus :: forall x y z.(z :<<= y) ~ True =>
-                 SNat x -> SNat y -> SNat z
-              -> (x :+: (y :-: z)) :=: ((x :+: y) :-: z)
-swapPlusMinus _ _ SZ = Refl `trans` Refl
-swapPlusMinus SZ _ _ = Refl `trans` Refl
-swapPlusMinus _ SZ z = case boolToPropLeq z SZ of
-  ZeroLeq _ -> Refl
-swapPlusMinus (SS (x' :: SNat x')) y z =
-  case propToBoolLeq prop of
-    Dict ->
-      let p1 :: (S x' :+: (y :-: z)) :=: S (x' :+: (y :-: z))
-          p1 = succPlusL x' (y %- z)
-          p2 :: S (x' :+: (y :-: z)) :=: S ((x' :+: y) :-: z)
-          p2 = eqPreservesS $ swapPlusMinus x' y z
-          p3 :: S ((x' :+: y) :-: z) :=: (S (x' :+: y) :-: z)
-          p3 = sym $ eqSuccMinus (x' %+ y) z
-          p4 :: (S (x' :+: y) :-: z) :=: ((S x' :+: y) :-: z)
-          p4 = minusCongEq (sym $ succPlusL x' y) z
-      in p1 `trans` p2 `trans` p3 `trans` p4
-  where prop :: Leq z (x' :+: y)
-        prop = plusMonotone (ZeroLeq x') (boolToPropLeq z y)
-
 minusPlusEqR :: (m :<<= n) ~ True =>
                 SNat n -> SNat m -> (m :+: (n :-: m)) :=: n
 minusPlusEqR n m =
-  swapPlusMinus m n m `trans` plusMinusEqR n m
+  plusMinusCommutes m n m `trans` plusMinusEqR n m

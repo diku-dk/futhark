@@ -126,6 +126,7 @@ Library
                    Futhark.TypeCheck.TypeError
                    Futhark.Untrace
                    Futhark.Version
+                   Futhark.Util.Truths
                    Language.Futhark
                    Language.Futhark.Attributes
                    Language.Futhark.Core
