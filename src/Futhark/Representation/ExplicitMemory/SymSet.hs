@@ -138,10 +138,33 @@ fix i replacement (SetOp op (n::SNat n) x (m::SNat m) y) =
           error "Bug in mathematics"
 
 -- Cannot figure out how to prove this one yet.
-plusMinusCommutesL :: (k :<<= n) ~ True =>
-                     SNat n -> SNat m -> SNat k
-                  -> ((n :+: m) :-: k) :=: ((n :-: k) :+: m)
-plusMinusCommutesL = undefined
+plusMinusCommutesL :: forall n m k.
+                      (k :<<= n) ~ True =>
+                      SNat n -> SNat m -> SNat k
+                   -> ((n :+: m) :-: k) :=: ((n :-: k) :+: m)
+plusMinusCommutesL SZ _ k = case boolToPropLeq k SZ of
+  ZeroLeq _ -> Refl
+plusMinusCommutesL _ _ SZ = Refl
+plusMinusCommutesL n SZ k = p1 `trans` p2
+  where p1 :: ((n :+: m) :-: k) :=: (n :-: k)
+        p1 = minusCongEq (plusZR n) k
+        p2 :: (n :-: k) :=: ((n :-: k) :+: m)
+        p2 = sym $ plusZR (n %- k)
+plusMinusCommutesL n (SS (m' :: SNat m')) k =
+  case propToBoolLeq prop of
+    Dict ->
+      let p0 :: ((n :+: m) :-: k) :=: (S (n :+: m') :-: k)
+          p0 = minusCongEq (succPlusR n m') k
+          p1 :: (S (n :+: m') :-: k) :=: S ((n :+: m') :-: k)
+          p1 = eqSuccMinus (n %+ m') k
+          p2 :: S ((n :+: m') :-: k) :=: S ((n :-: k) :+: m')
+          p2 = eqPreservesS $ plusMinusCommutesL n m' k
+          p3 :: S ((n :-: k) :+: m') :=: ((n :-: k) :+: m)
+          p3 = sym $ succPlusR (n %- k) m'
+      in p0 `trans` p1 `trans` p2 `trans` p3
+  where prop :: Leq k (n :+: m')
+        prop = plusLeqL k sZero `leqTrans`
+               plusMonotone (boolToPropLeq k n) (ZeroLeq m')
 
 -- Or this one.
 plusMinusCommutesR :: (k :<<= m) ~ True =>
