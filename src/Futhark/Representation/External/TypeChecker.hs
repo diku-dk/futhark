@@ -1003,7 +1003,7 @@ checkBinding pat et dflow = do
 validApply :: [DeclTypeBase (ID vn)] -> [TaggedType vn] -> Bool
 validApply expected got =
   length got == length expected &&
-  all id (zipWith subtypeOf (map toDecl got) expected)
+  and (zipWith subtypeOf (map toDecl got) expected)
 
 type Arg vn = (TaggedType vn, Dataflow vn, SrcLoc)
 

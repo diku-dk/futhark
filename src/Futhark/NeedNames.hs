@@ -36,7 +36,7 @@ instance Applicative NeedNames where
 
 instance MonadFreshNames NeedNames where
   getNameSource     = NeedName $ \src -> (return src, src)
-  putNameSource src = NeedName $ \_   -> (return (), src)
+  putNameSource src = NeedName $ const (return (), src)
 
 -- | Provide whichever names are needed, then return the result.
 provideNames :: MonadFreshNames m => NeedNames a -> m a

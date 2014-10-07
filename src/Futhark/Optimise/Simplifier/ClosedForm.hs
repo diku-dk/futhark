@@ -129,7 +129,7 @@ checkResults pat knownBindings params body accs bodyloc = do
                           _                      -> Nothing
           case bop of
               LogAnd -> do
-                letBind [v] $ e
+                letBind [v] e
                 letBind [p] $ PrimOp $ BinOp LogAnd this el rt loc
               _ -> cannotSimplify -- Um... sorry.
 

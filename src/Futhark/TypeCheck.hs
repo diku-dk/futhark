@@ -931,7 +931,7 @@ checkBndSizes (Ident _ t _) = do
 validApply :: [DeclType] -> [Type] -> Bool
 validApply expected got =
   length got == length expected &&
-  all id (zipWith subtypeOf (map toDecl got) expected)
+  and (zipWith subtypeOf (map toDecl got) expected)
 
 type Arg = (Type, Names, Dataflow, SrcLoc)
 

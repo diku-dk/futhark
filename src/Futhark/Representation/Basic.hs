@@ -76,7 +76,7 @@ instance Proper Basic where
 
 instance Bindable Basic where
   mkBody = AST.Body ()
-  mkLet pat = AST.Let (AST.Pattern $ zipWith Bindee pat $ repeat ()) ()
+  mkLet pat = AST.Let (AST.Pattern $ map (`Bindee` ()) pat) ()
 
 instance PrettyLore Basic where
 

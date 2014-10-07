@@ -1,4 +1,3 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 -- | This module implements a compiler pass for inlining functions,
 -- then removing those that have become dead.
 module Futhark.Optimise.InliningDeadFun
