@@ -117,7 +117,7 @@ class (Proper (Lore m), MonadBinder m,
   putEngineState :: State m -> m ()
   passNeed :: m (a, Need (Lore m) -> Need (Lore m)) -> m a
 
-  simplifyBody :: [Diet] -> Body lore -> m (Body (Lore m))
+  simplifyBody :: [Diet] -> Body (InnerLore m) -> m (Body (Lore m))
   simplifyBody = defaultSimplifyBody
   inspectBinding :: Binding (Lore m) -> m ()
   inspectBinding = defaultInspectBinding
@@ -399,7 +399,7 @@ hoistCommon m1 vtablef1 m2 vtablef2 = passNeed $ do
 
 -- | Simplify a single 'Body' inside an arbitrary 'MonadEngine'.
 defaultSimplifyBody :: MonadEngine m =>
-                       [Diet] -> Body lore -> m (Body (Lore m))
+                       [Diet] -> Body (InnerLore m) -> m (Body (Lore m))
 
 defaultSimplifyBody ds (Body _ [] res) =
   mkBodyM [] =<< simplifyResult ds res
@@ -419,7 +419,7 @@ simplifyResult ds (Result cs es loc) = do
 
 -- | Simplify the binding, adding it to the program being constructed.
 simplifyBinding :: MonadEngine m =>
-                   Binding lore
+                   Binding (InnerLore m)
                 -> m ()
 -- The simplification rules cannot handle Apply, because it requires
 -- access to the full program.  This is a bit of a hack.
@@ -435,7 +435,7 @@ simplifyBinding (Let pat _ (Apply fname args rettype loc)) = do
                     case uniqueness $ identType p of
                       Unique    -> mkLetM [p] $ PrimOp $ Copy (Constant v loc) loc
                       Nonunique -> mkLetM [p] $ PrimOp $ SubExp $ Constant v loc
-                  mapM_ simplifyBinding bnds
+                  mapM_ (simplifyBinding . Aliases.removeBindingAliases) bnds
     Nothing -> do let e' = Apply fname (zip args' $ map snd args) rettype' loc
                   pat' <- blockUsage $ simplifyPattern pat
                   inspectBinding =<< mkLetM pat' e'
@@ -456,7 +456,7 @@ defaultInspectBinding bnd = do
     Just newbnds -> mapM_ inspectBinding newbnds
     Nothing      -> addBinding bnd
 
-simplifyExp :: MonadEngine m => Exp lore -> m (Exp (Lore m))
+simplifyExp :: MonadEngine m => Exp (InnerLore m) -> m (Exp (Lore m))
 
 simplifyExp (If cond tbranch fbranch t loc) = do
   -- Here, we have to check whether 'cond' puts a bound on some free
@@ -473,7 +473,7 @@ simplifyExp (LoopOp op) = LoopOp <$> simplifyLoopOp op
 
 simplifyExp e = simplifyExpBase e
 
-simplifyExpBase :: MonadEngine m => Exp lore -> m (Exp (Lore m))
+simplifyExpBase :: MonadEngine m => Exp (InnerLore m) -> m (Exp (Lore m))
 simplifyExpBase = mapExpM hoist
   where hoist = Mapper {
                   mapOnBinding = fail "Unhandled binding in simplification engine"
@@ -490,7 +490,7 @@ simplifyExpBase = mapExpM hoist
                 , mapOnCertificates = simplifyCerts
                 }
 
-simplifyLoopOp :: MonadEngine m => LoopOp lore -> m (LoopOp (Lore m))
+simplifyLoopOp :: MonadEngine m => LoopOp (InnerLore m) -> m (LoopOp (Lore m))
 
 simplifyLoopOp (DoLoop respat merge loopvar boundexp loopbody loc) = do
   let (mergepat, mergeexp) = unzip merge
@@ -611,7 +611,8 @@ simplifyType t = do dims <- mapM simplifySubExp $ arrayDims t
                     return $ t `setArrayShape` Shape dims
 
 simplifyLambda :: MonadEngine m =>
-                  Lambda lore -> [SubExp] -> m (Lambda (Lore m))
+                  Lambda (InnerLore m) -> [SubExp]
+               -> m (Lambda (Lore m))
 simplifyLambda (Lambda params body rettype loc) arrs = do
   body' <-
     blockIf (hasFree params' `orIf` isConsumed) $
@@ -707,7 +708,7 @@ simplifyProg rules prog =
   where namesrc = newNameSourceForProg prog
 
 simplifyFun :: MonadEngine m =>
-               FunDec oldlore -> m (FunDec (Lore m))
+               FunDec (InnerLore m) -> m (FunDec (Lore m))
 simplifyFun (fname, rettype, params, body, loc) = do
   body' <- insertAllBindings $ bindParams params $
            simplifyBody (map diet rettype) body
@@ -720,7 +721,7 @@ simplifyFun (fname, rettype, params, body, loc) = do
 simplifyOneFun :: (MonadFreshNames m, Proper lore,
                    Bindable lore) =>
                   RuleBook (SimpleM lore)
-               -> FunDec oldlore -> m (FunDec (Aliases lore))
+               -> FunDec lore -> m (FunDec (Aliases lore))
 simplifyOneFun rules fundec =
   modifyNameSource $ runSimpleM (simplifyFun fundec) (emptyEnv rules Nothing)
 
@@ -728,7 +729,7 @@ simplifyOneFun rules fundec =
 simplifyOneLambda :: (MonadFreshNames m,
                       Proper lore, Bindable lore) =>
                      RuleBook (SimpleM lore)
-                  -> Maybe (Prog lore) -> Lambda oldlore
+                  -> Maybe (Prog lore) -> Lambda lore
                   -> m (Lambda (Aliases lore))
 simplifyOneLambda rules prog lam = do
   let simplifyOneLambda' = insertAllBindings $

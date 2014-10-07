@@ -30,12 +30,14 @@ import qualified Futhark.Analysis.AlgSimplify as AS
 import Futhark.Tools
 import qualified Futhark.Optimise.Simplifier.Engine as Simplify
 import Futhark.Optimise.Simplifier.Rule (RuleBook)
+import Futhark.Optimise.Simplifier (simplifyFun)
 import Futhark.Substitute
+import Futhark.Analysis.Rephrase
 import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as S
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.Aliases
-  (Aliases, mkAliasedBody, mkAliasedLetBinding, removeFunDecAliases)
+  (Aliases, mkAliasedBody, mkAliasedLetBinding, removeExpAliases)
 
 import Prelude hiding (any)
 
@@ -105,11 +107,12 @@ generateOptimisedPredicates' :: MonadFreshNames m =>
                              -> SCTable -> Int -> m (Maybe FunDec)
 generateOptimisedPredicates' rules (fname, rettype, params, body, loc) suff sctable depth = do
   res <- runVariantM env $ Simplify.insertAllBindings $
-         Simplify.simplifyBody (map diet rettype) body
+         Simplify.simplifyBody (map diet rettype) $
+         rephraseWithInvariance body
   case res of
     (body', _) -> do
-      fun <- Simplify.simplifyOneFun mempty (fname', rettype, params, body', loc)
-      return $ Just $ removeFunDecAliases fun
+      fundec <- simplifyFun (fname', rettype, params, removeBodyLore body', loc)
+      return $ Just fundec
     _          -> return Nothing
   where fname' = fname <> nameFromString suff
         env = Env { envSimplifyEnv = Simplify.emptyEnv rules Nothing
@@ -117,6 +120,13 @@ generateOptimisedPredicates' rules (fname, rettype, params, body, loc) suff scta
                   , envMaxLoops = depth
                   , envGeneratingSuff = Sufficient
                   }
+
+rephraseWithInvariance :: Body -> S.Body Invariance'
+rephraseWithInvariance = rephraseBody rephraser
+  where rephraser = Rephraser { rephraseExpLore = const TooVariant
+                              , rephraseBindeeLore = const Nothing
+                              , rephraseBodyLore = const ()
+                              }
 
 data SCEntry = SufficientCond [[ScalExp]]
              deriving (Eq, Show)
@@ -309,7 +319,8 @@ instance MonadFreshNames m =>
                        }
             tagBindee bindee v =
               bindee { bindeeLore = (fst $ bindeeLore bindee, Just v) }
-        suffe <- generating Sufficient $ Simplify.simplifyExp =<< renameExp e
+        suffe <- generating Sufficient $
+                 Simplify.simplifyExp =<< renameExp (removeExpAliases e)
         makeSufficientBinding =<< mkLetM vs suffe
         Simplify.defaultInspectBinding $ Let pat' lore e
 
@@ -406,7 +417,7 @@ instance MonadFreshNames m => BindableM (VariantM m) where
     let explore = if forbiddenExp context e
                   then TooVariant
                   else Invariant
-        pat' = Pattern $ zipWith Bindee pat $ repeat Nothing
+        pat' = Pattern $ map (`Bindee` Nothing) pat
     return $ mkAliasedLetBinding pat' explore e
   mkBodyM bnds res =
     return $ mkAliasedBody () bnds res

@@ -28,6 +28,7 @@ module Futhark.Representation.Basic
          -- Removing lore
        , removeProgLore
        , removeFunDecLore
+       , removeBodyLore
        )
 where
 
@@ -90,3 +91,6 @@ removeProgLore = rephraseProg removeLore
 
 removeFunDecLore :: AST.FunDec lore -> FunDec
 removeFunDecLore = rephraseFunDec removeLore
+
+removeBodyLore :: AST.Body lore -> Body
+removeBodyLore = rephraseBody removeLore
