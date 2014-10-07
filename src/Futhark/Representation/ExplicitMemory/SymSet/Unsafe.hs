@@ -13,20 +13,13 @@ module Futhark.Representation.ExplicitMemory.SymSet.Unsafe
 
 import Prelude hiding (null)
 
-import Data.Constraint hiding (trans)
 import Data.Singletons.Prelude
 import Data.Type.Monomorphic
-import Data.Monoid
 import Data.Type.Natural hiding (n1, n2)
 import Data.Type.Ordinal
 import qualified Data.HashSet as HS
-import qualified Data.HashMap.Lazy as HM
-import qualified Data.Vector.Sized as Vec
-import Proof.Equational
 
 import Language.Futhark.Core
-import Futhark.Util.Truths
-import Futhark.Representation.AST.Syntax (identName)
 import Futhark.Analysis.ScalExp
 
 import qualified Futhark.Representation.ExplicitMemory.SymSet as Safe
