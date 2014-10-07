@@ -7,6 +7,7 @@ module Futhark.Representation.ExplicitMemory.SymSet
        , union
        , null
        , freeVars
+       , Range
        , fix
        )
        where
