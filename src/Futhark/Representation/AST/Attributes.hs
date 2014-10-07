@@ -35,7 +35,7 @@ import Data.List
 
 -- | Find the function of the given name in the Futhark program.
 funDecByName :: Name -> Prog lore -> Maybe (FunDec lore)
-funDecByName fname = find (\(fname',_,_,_,_) -> fname == fname') . progFunctions
+funDecByName fname = find ((fname ==) . funDecName) . progFunctions
 
 shapeExps :: SubExp -> [SubExp]
 shapeExps = shapeDims . arrayShape . subExpType

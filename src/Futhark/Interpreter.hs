@@ -157,13 +157,13 @@ runFun fname mainargs prog = do
       runmain =
         case (funDecByName fname prog, HM.lookup fname ftable) of
           (Nothing, Nothing) -> bad $ MissingEntryPoint fname
-          (Just (_,_,fparams,_,_), _)
+          (Just (FunDec _ _ fparams _ _), _)
             | length argtypes == length fparams &&
-              and (zipWith subtypeOf argtypes $ map identType fparams) ->
+              and (zipWith subtypeOf argtypes $ map bindeeType fparams) ->
               evalFuncall fname [ Constant v noLoc | v <- mainargs ]
             | otherwise ->
               bad $ InvalidFunctionArguments fname
-                    (Just (map (toDecl . identType) fparams))
+                    (Just (map (toDecl . bindeeType) fparams))
                     (map toDecl argtypes)
           (_ , Just fun) -> -- It's a builtin function, it'll
                             -- do its own error checking.
@@ -172,8 +172,8 @@ runFun fname mainargs prog = do
   where
     -- We assume that the program already passed the type checker, so
     -- we don't check for duplicate definitions.
-    expand ftable (name,_,params,body,_) =
-      let fun args = binding (zip params args) $ evalBody body
+    expand ftable (FunDec name _ params body _) =
+      let fun args = binding (zip (map bindeeIdent params) args) $ evalBody body
       in HM.insert name fun ftable
 
 -- | As 'runFun', but throws away the trace.

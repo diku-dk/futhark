@@ -128,13 +128,12 @@ fuseProg prog = do
           return $ renameProg $ Prog funs'
 
 fusionGatherFun :: FunDec -> FusionGM FusedRes
-fusionGatherFun (_, _, _, body, _) = fusionGatherBody mkFreshFusionRes body
+fusionGatherFun = fusionGatherBody mkFreshFusionRes . funDecBody
 
 fuseInFun :: FusedRes -> FunDec -> FusionGM FunDec
-fuseInFun res (fnm, rtp, idds, body, loc) = do
-  body' <- bindRes res $ fuseInBody body
-  return (fnm, rtp, idds, body', loc)
-
+fuseInFun res fundec = do
+  body' <- bindRes res $ fuseInBody $ funDecBody fundec
+  return $ fundec { funDecBody = body' }
 
 ---------------------------------------------------
 ---------------------------------------------------

@@ -62,9 +62,9 @@ deadCodeElim = Prog . map deadCodeElimFun . progFunctions
 
 -- | Applies Dead-Code Elimination to just a single function.
 deadCodeElimFun :: FunDec -> FunDec
-deadCodeElimFun (fname, rettype, args, body, loc) =
+deadCodeElimFun (FunDec fname rettype args body loc) =
   let body' = deadCodeElimBody body
-  in (fname, rettype, args, body', loc)
+  in FunDec fname rettype args body' loc
 
 -- | Applies Dead-Code Elimination to just a single body.
 deadCodeElimBody :: Body -> Body

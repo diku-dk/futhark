@@ -47,10 +47,9 @@ module Futhark.Representation.AST.Syntax
   , Lambda
 
   -- * Definitions
+  , FParam
+  , FunDecT (..)
   , FunDec
-  , funDecName
-  , funDecBody
-  , funDecRetType
   , ProgT(..)
   , Prog
 
@@ -438,25 +437,29 @@ type Lambda = LambdaT
 instance Located (LambdaT lore) where
   locOf (Lambda _ _ _ loc) = locOf loc
 
+-- | A (non-lambda) function parameter.
+type FParam lore = Bindee (Lore.FParam lore)
+
 -- | Function Declarations
-type FunDec lore = (Name,
-                    ResType,
-                    [Param],
-                    BodyT lore,
-                    SrcLoc)
+data FunDecT lore = FunDec { funDecName :: Name
+                           , funDecRetType :: ResType
+                           , funDecParams :: [FParam lore]
+                           , funDecBody :: BodyT lore
+                           , funDecSrcLoc :: SrcLoc
+                           }
 
-funDecName :: FunDec lore -> Name
-funDecName (fname,_,_,_,_) = fname
+deriving instance Lore lore => Eq (FunDecT lore)
+deriving instance Lore lore => Show (FunDecT lore)
+deriving instance Lore lore => Ord (FunDecT lore)
 
-funDecBody :: FunDec lore -> BodyT lore
-funDecBody (_,_,_,body,_) = body
+type FunDec = FunDecT
 
-funDecRetType :: FunDec lore -> ResType
-funDecRetType (_,rettype,_,_,_) = rettype
+instance Located (FunDecT lore) where
+  locOf = locOf . funDecSrcLoc
 
 -- | An entire Futhark program.
 newtype ProgT lore = Prog { progFunctions :: [FunDec lore] }
-                   deriving (Eq)
+                     deriving (Eq, Ord, Show)
 
 type Prog = ProgT
 

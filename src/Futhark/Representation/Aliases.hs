@@ -27,6 +27,7 @@ module Futhark.Representation.Aliases
        , AST.ProgT(Prog)
        , AST.ExpT(PrimOp)
        , AST.ExpT(LoopOp)
+       , AST.FunDecT(FunDec)
          -- * Adding aliases
        , addAliasesToPattern
        , mkAliasedLetBinding
@@ -92,6 +93,7 @@ instance Lore.Lore lore => Lore.Lore (Aliases lore) where
   type Binding (Aliases lore) = (Names', Lore.Binding lore)
   type Exp (Aliases lore) = (Names', Lore.Exp lore)
   type Body (Aliases lore) = (([Names'], Names'), Lore.Body lore)
+  type FParam (Aliases lore) = Lore.FParam lore
 
 type Prog lore = AST.Prog (Aliases lore)
 type PrimOp lore = AST.PrimOp (Aliases lore)
@@ -138,6 +140,7 @@ removeAliases :: Rephraser (Aliases lore) lore
 removeAliases = Rephraser { rephraseExpLore = snd
                           , rephraseBindeeLore = snd
                           , rephraseBodyLore = snd
+                          , rephraseFParamLore = id
                           }
 
 removeProgAliases :: AST.Prog (Aliases lore) -> AST.Prog lore

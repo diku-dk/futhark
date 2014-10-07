@@ -129,9 +129,9 @@ aggInlining cg = do
 -- tail-recursive function to a do or while loop, should do the transformation
 -- first and then do the inlining.
 doInlineInCaller :: FunDec ->  [FunDec] -> FunDec
-doInlineInCaller (name,rtp,args,body,pos) inlcallees =
+doInlineInCaller (FunDec name rtp args body loc) inlcallees =
   let body' = inlineInBody inlcallees body
-  in (name, rtp, args, body',pos)
+  in FunDec name rtp args body' loc
 
 inlineInBody :: [FunDec] -> Body -> Body
 inlineInBody inlcallees (Body _ (bnd@(Let pat _ (Apply fname args rtp _)):bnds) res) =
@@ -141,10 +141,10 @@ inlineInBody inlcallees (Body _ (bnd@(Let pat _ (Apply fname args rtp _)):bnds) 
         continue $ callbnds ++
         [ mkLet [v] $ PrimOp $ SubExp e'
         | (v,e') <- zip (patternIdents pat) $ withShapes $ resultSubExps res' ]
-  in  case filter (\(nm,_,_,_,_)-> fname == nm) inlcallees of
+  in  case filter ((== fname) . funDecName) inlcallees of
         [] -> continue [bnd]
-        (_,_,fargs,body,_):_ ->
-          let revbnds = zip fargs $ map fst args
+        FunDec _ _ fargs body _:_ ->
+          let revbnds = zip (map bindeeIdent fargs) $ map fst args
           in  continue' $ foldr addArgBnd body revbnds
   where
       addArgBnd :: (Ident, SubExp) -> Body -> Body
@@ -180,4 +180,4 @@ deadFunElim prog = do
   let ftable' = HM.filter (isFunInCallGraph cg) ftable
   return $ Prog $ HM.elems ftable'
   where
-    isFunInCallGraph cg (fnm,_,_,_,_) = isJust $ HM.lookup fnm cg
+    isFunInCallGraph cg fundec = isJust $ HM.lookup (funDecName fundec) cg

@@ -11,6 +11,7 @@ module Futhark.Analysis.CallGraph
 import Control.Monad.Reader
 
 import Data.List
+import Data.Loc
 import qualified Data.HashMap.Lazy as HM
 
 import Futhark.Representation.Basic
@@ -22,9 +23,9 @@ buildFunctionTable :: Prog -> Either Error FunctionTable
 buildFunctionTable prog =
   foldM expand HM.empty (progFunctions prog)
   where
-    expand ftab f@(name,_,_,_,pos)
-      | Just (_,_,_,_,pos2) <- HM.lookup name ftab =
-        Left $ DupDefinitionError name pos pos2
+    expand ftab f@(FunDec name _ _ _ loc)
+      | Just fundec2 <- HM.lookup name ftab =
+        Left $ DupDefinitionError name loc $ srclocOf fundec2
       | otherwise = Right $ HM.insert name f ftab
 
 -- | The symbol table for functions
@@ -64,7 +65,7 @@ buildCGfun cg fname  = do
   bnd <- asks $ HM.lookup fname . envFtable
   case bnd of
     Nothing -> badCGM $ FunctionNotInFtab fname
-    Just (caller,_,_,body,pos) ->
+    Just (FunDec caller _ _ body pos) ->
       if caller == fname
       then
         case HM.lookup caller cg of

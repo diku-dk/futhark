@@ -10,8 +10,8 @@ aliasAnalysis :: In.Prog lore -> Out.Prog lore
 aliasAnalysis = Out.Prog . map analyseFun . In.progFunctions
 
 analyseFun :: In.FunDec lore -> Out.FunDec lore
-analyseFun (fname,rettype,params,body,loc) =
-  (fname,rettype,params,body',loc)
+analyseFun (In.FunDec fname rettype params body loc) =
+  Out.FunDec fname rettype params body' loc
   where body' = analyseBody body
 
 analyseBody :: In.Body lore -> Out.Body lore

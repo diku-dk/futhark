@@ -28,10 +28,10 @@ externaliseProg (I.Prog funs) =
   E.Prog $ map externaliseFunction funs
 
 externaliseFunction :: I.FunDec -> E.FunDec
-externaliseFunction (fname, ret, params, body, loc) =
+externaliseFunction (FunDec fname ret params body loc) =
   (fname,
    externaliseDeclTypes $ map I.toDecl ret,
-   map externaliseParam params,
+   map (externaliseParam . bindeeIdent) params,
    externaliseBody body,
    loc)
 

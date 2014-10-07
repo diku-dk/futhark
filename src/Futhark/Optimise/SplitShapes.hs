@@ -49,11 +49,11 @@ makeFunSubsts fundecs =
 -- the entire value slice - you should try to simplify it, and see if
 -- it's "cheap", in some sense.
 functionSlices :: MonadFreshNames m => FunDec -> m (FunDec, FunDec)
-functionSlices (fname, rettype, params, body@(Body _ bodybnds bodyres), loc) = do
+functionSlices (FunDec fname rettype params body@(Body _ bodybnds bodyres) loc) = do
   -- The shape function should not consume its arguments - if it wants
   -- to do in-place stuff, it needs to copy them first.  In most
   -- cases, these copies will be removed by the simplifier.
-  (shapeParams, cpybnds) <- nonuniqueParams params
+  (shapeParams, cpybnds) <- nonuniqueParams $ map bindeeIdent params
 
   -- Give names to the existentially quantified sizes of the return
   -- type.  These will be passed as parameters to the value function.
@@ -63,10 +63,14 @@ functionSlices (fname, rettype, params, body@(Body _ bodybnds bodyres), loc) = d
   valueBody <- substituteExtResultShapes staticRettype body
 
   let valueRettype = staticShapes staticRettype
-      valueParams = shapeidents ++ params
-      shapeBody = mkBody (cpybnds <> bodybnds) bodyres { resultSubExps = shapes }
-      fShape = (shapeFname, shapeRettype, shapeParams, shapeBody, loc)
-      fValue = (valueFname, valueRettype, valueParams, valueBody, loc)
+      valueParams = shapeidents ++ map bindeeIdent params
+      shapeBody = mkBody (cpybnds <> bodybnds)
+                  bodyres { resultSubExps = shapes }
+      mkFParam = flip Bindee ()
+      fShape = FunDec shapeFname shapeRettype (map mkFParam shapeParams)
+               shapeBody loc
+      fValue = FunDec valueFname valueRettype (map mkFParam valueParams)
+               valueBody loc
   return (fShape, fValue)
   where shapes = subExpShapeContext rettype $ resultSubExps bodyres
         shapeRettype = staticShapes $ map subExpType shapes
@@ -122,9 +126,9 @@ cheapSubsts = filter (cheapFun . fst . snd)
               -- Probably too simple.  We might want to inline first.
 
 substCalls :: MonadFreshNames m => [(Name, (Name, ResType, Name, ResType))] -> FunDec -> m FunDec
-substCalls subst (origFname,origRettype,params,fbody,origloc) = do
-  fbody' <- treatBody fbody
-  return (origFname, origRettype, params, fbody', origloc)
+substCalls subst fundec = do
+  fbody' <- treatBody $ funDecBody fundec
+  return fundec { funDecBody = fbody' }
   where treatBody (Body _ bnds res) = do
           bnds' <- mapM treatBinding bnds
           return $ mkBody (concat bnds') res

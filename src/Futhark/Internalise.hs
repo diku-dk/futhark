@@ -65,7 +65,11 @@ internaliseFun :: E.FunDec -> InternaliseM I.FunDec
 internaliseFun (fname,rettype,params,body,loc) =
   bindingParams params $ \shapeparams params' -> do
     body' <- internaliseBody body
-    return (fname, rettype', shapeparams ++ params', body', loc)
+    let mkFParam = flip Bindee ()
+    return $ FunDec
+      fname rettype'
+      (map mkFParam $ shapeparams ++ params')
+      body' loc
   where rettype' = extShapes $ map I.toDecl $ internaliseType rettype
 
 internaliseIdent :: E.Ident -> InternaliseM I.Ident

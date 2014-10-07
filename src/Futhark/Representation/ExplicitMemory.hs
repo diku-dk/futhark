@@ -24,6 +24,7 @@ module Futhark.Representation.ExplicitMemory
        , AST.ProgT(Prog)
        , AST.ExpT(PrimOp)
        , AST.ExpT(LoopOp)
+       , AST.FunDecT(FunDec)
        )
 where
 

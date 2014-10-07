@@ -417,12 +417,12 @@ checkProg' checkoccurs prog = do
     buildFtable = HM.map rmLoc <$>
                   foldM expand (HM.map addLoc initialFtable)
                   (progFunctions prog)
-    expand ftable (name,ret,args,_,pos)
+    expand ftable (FunDec name ret args _ pos)
       | Just (_,_,pos2) <- HM.lookup name ftable =
         Left $ DupDefinitionError name pos pos2
       | otherwise =
-        let argtypes = map (toDecl . identType) args -- Throw away argument names.
-            argnames = map (Just . identName) args
+        let argtypes = map (toDecl . bindeeType) args -- Throw away argument names.
+            argnames = map (Just . bindeeName) args
         in Right $ HM.insert name (ret,zip argnames argtypes,pos) ftable
     rmLoc (ret,args,_) = (ret,args)
     addLoc (t, ts) = (t, ts, noLoc)
@@ -433,7 +433,15 @@ initialFtable = HM.map addBuiltin builtInFunctions
 
 checkFun :: Checkable lore =>
             FunDec lore -> TypeM lore (FunDec lore)
-checkFun (fname, rettype, params, body, loc) = do
+checkFun (FunDec fname rettype params body loc) = do
+  (rettype', body') <-
+    checkFun' (fname, rettype, map bindeeIdent params, body, loc)
+  return $ FunDec fname rettype' params body' loc
+
+checkFun' :: Checkable lore =>
+            (Name, ResType, [Ident], BodyT (Aliases lore), SrcLoc)
+          -> TypeM lore (ResType, BodyT (Aliases lore))
+checkFun' (fname, rettype, params, body, loc) = do
   params' <- checkParams
   (rettype',body') <- binding (zip params' $ repeat mempty) $
     (,) <$> mapM checkExtType rettype <*> checkBody body
@@ -441,7 +449,7 @@ checkFun (fname, rettype, params, body, loc) = do
   checkReturnAlias $ bodyAliases body'
 
   if map toDecl (bodyType body') `subtypesOf` map toDecl rettype' then
-    return (fname, rettype', params', body', loc)
+    return (rettype', body')
   else bad $ ReturnTypeError loc fname
              (Several $ map toDecl rettype')
              (Several $ map toDecl $ bodyType body')
@@ -655,12 +663,12 @@ checkLoopOp (DoLoop respat merge (Ident loopvar loopvart loopvarloc)
       mergepat' = zipWith setIdentType mergepat rettype
   checkFuncall Nothing loc paramts paramts $ boundarg : mergeargs
 
-  (_, _, _, loopbody', _) <-
-    noUnique $ checkFun (nameFromString "<loop body>",
-                         staticShapes rettype,
-                         funparams,
-                         loopbody,
-                         loc)
+  (_, loopbody') <-
+    noUnique $ checkFun' (nameFromString "<loop body>",
+                          staticShapes rettype,
+                          funparams,
+                          loopbody,
+                          loc)
   respat' <-
     forM respat $ \res ->
       case find ((==identName res) . identName) mergepat' of
@@ -963,8 +971,8 @@ checkLambda (Lambda params body ret loc) args = do
         params' = zipWith setParamShape params $
                   map (arrayDims . argType) args
     checkFuncall Nothing loc (map (toDecl . identType) params') (map toDecl ret') args
-    (_, _, _, body', _) <-
-      noUnique $ checkFun (nameFromString "<anonymous>", staticShapes ret', params', body, loc)
+    (_, body') <-
+      noUnique $ checkFun' (nameFromString "<anonymous>", staticShapes ret', params', body, loc)
     return $ Lambda params' body' ret' loc
   else bad $ TypeError loc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
 

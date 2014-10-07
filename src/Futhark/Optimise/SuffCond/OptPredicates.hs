@@ -47,19 +47,18 @@ optimisePredicates rules prog = do
   optimPreds <- mapM (maybeOptimiseFun rules) origfuns
   let newfuns = concat optimPreds
       subst = HM.fromList $
-              zip (map funName origfuns) $
-              map (map funName) optimPreds
+              zip (map funDecName origfuns) $
+              map (map funDecName) optimPreds
   insertPredicateCalls subst $ Prog $ origfuns ++ newfuns
   where origfuns = progFunctions prog
-        funName (fname,_,_,_,_) = fname
 
 insertPredicateCalls :: MonadFreshNames m =>
                         HM.HashMap Name [Name] -> Prog -> m Prog
 insertPredicateCalls subst prog =
   Prog <$> mapM treatFunction (progFunctions prog)
-  where treatFunction (fname,rettype,params,fbody,loc) = do
-          fbody' <- treatBody fbody
-          return (fname,rettype,params,fbody',loc)
+  where treatFunction fundec = do
+          fbody' <- treatBody $ funDecBody fundec
+          return fundec { funDecBody = fbody' }
         treatBody (Body _ bnds res) = do
           bnds' <- mapM treatBinding bnds
           return $ mkBody (concat bnds') res
@@ -90,7 +89,7 @@ insertPredicateCalls subst prog =
 
 maybeOptimiseFun :: MonadFreshNames m =>
                     RuleBook (VariantM m) -> FunDec -> m [FunDec]
-maybeOptimiseFun rules fundec@(_,[Basic Bool],_,body,_) = do
+maybeOptimiseFun rules fundec@(FunDec _ [Basic Bool] _ body _) = do
   let sctable = analyseBody (ST.empty :: ST.SymbolTable Basic) mempty body
   generateOptimisedPredicates rules fundec sctable
 maybeOptimiseFun _ _ = return []
@@ -105,13 +104,15 @@ generateOptimisedPredicates rules fundec sctable = do
 generateOptimisedPredicates' :: MonadFreshNames m =>
                                 RuleBook (VariantM m) -> FunDec -> String
                              -> SCTable -> Int -> m (Maybe FunDec)
-generateOptimisedPredicates' rules (fname, rettype, params, body, loc) suff sctable depth = do
+generateOptimisedPredicates'
+  rules (FunDec fname rettype params body loc) suff sctable depth = do
   res <- runVariantM env $ Simplify.insertAllBindings $
          Simplify.simplifyBody (map diet rettype) $
          rephraseWithInvariance body
   case res of
     (body', _) -> do
-      fundec <- simplifyFun (fname', rettype, params, removeBodyLore body', loc)
+      fundec <- simplifyFun $
+                FunDec fname' rettype params (removeBodyLore body') loc
       return $ Just fundec
     _          -> return Nothing
   where fname' = fname <> nameFromString suff

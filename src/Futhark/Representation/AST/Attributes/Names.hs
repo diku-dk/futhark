@@ -184,18 +184,21 @@ progNames = execWriter . mapM funNames . progFunctions
                 , walkOnLambda = lambdaNames
                 }
 
-        one = tell . HS.singleton . identName
-        funNames (_, _, params, body, _) =
-          mapM_ one params >> bodyNames body
+        one = tell . HS.singleton
+        funNames fundec = do
+          mapM_ (one . bindeeName) $ funDecParams fundec
+          bodyNames $ funDecBody fundec
 
         bodyNames = mapM_ bindingNames . bodyBindings
 
         bindingNames (Let pat _ e) =
-          mapM_ one (patternIdents pat) >> expNames e
+          mapM_ one (patternNames pat) >> expNames e
 
-        expNames (LoopOp (DoLoop _ pat i _ loopbody _)) =
-          mapM_ (one . fst) pat >> one i >> bodyNames loopbody
+        expNames (LoopOp (DoLoop _ pat i _ loopbody _)) = do
+          mapM_ (one . identName . fst) pat
+          one $ identName i
+          bodyNames loopbody
         expNames e = walkExpM names e
 
         lambdaNames (Lambda params body _ _) =
-          mapM_ one params >> bodyNames body
+          mapM_ (one . identName) params >> bodyNames body

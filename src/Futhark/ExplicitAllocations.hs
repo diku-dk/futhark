@@ -90,9 +90,9 @@ explicitAllocations prog =
   where free = newNameSourceForProg prog
 
 allocInFun :: MonadFreshNames m => In.FunDec -> m FunDec
-allocInFun (fname,rettype,params,body,loc) = do
+allocInFun (In.FunDec fname rettype params body loc) = do
   body' <- runAllocM $ allocInBody body
-  return (fname,rettype,params,body',loc)
+  return $ FunDec fname rettype params body' loc
 
 allocInBody :: In.Body -> AllocM Body
 allocInBody (Body _ bnds res) =

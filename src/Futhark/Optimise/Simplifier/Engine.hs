@@ -709,10 +709,10 @@ simplifyProg rules prog =
 
 simplifyFun :: MonadEngine m =>
                FunDec (InnerLore m) -> m (FunDec (Lore m))
-simplifyFun (fname, rettype, params, body, loc) = do
-  body' <- insertAllBindings $ bindParams params $
+simplifyFun (FunDec fname rettype params body loc) = do
+  body' <- insertAllBindings $ bindParams (map bindeeIdent params) $
            simplifyBody (map diet rettype) body
-  return (fname, rettype, params, body', loc)
+  return $ FunDec fname rettype params body' loc
 
 -- | Simplify the given function.  Even if the output differs from the
 -- output, meaningful simplification may not have taken place - the

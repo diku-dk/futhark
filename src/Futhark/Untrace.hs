@@ -15,8 +15,8 @@ untraceProg :: Prog -> Prog
 untraceProg = Prog . map untraceFun . progFunctions
 
 untraceFun :: FunDec -> FunDec
-untraceFun (fname, ret, params, body, pos) =
-  (fname, ret, params, untraceBody body, pos)
+untraceFun (FunDec fname ret params body loc) =
+  FunDec fname ret params (untraceBody body) loc
 
 untraceBody :: Body -> Body
 untraceBody = mapBody untrace

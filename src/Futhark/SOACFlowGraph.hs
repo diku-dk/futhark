@@ -71,7 +71,7 @@ data SOACInfo = SOACInfo {
 type AccFlow = HM.HashMap String SOACInfo
 
 flowForFun :: FunDec -> (Name, ExpFlowGraph)
-flowForFun (fname, _, _, fbody, _) =
+flowForFun (FunDec fname _ _ fbody _) =
   let allInfos = execWriter $ flowForBody fbody
       usages name (consumer, info) =
         case HM.lookup name $ soacConsumed info of

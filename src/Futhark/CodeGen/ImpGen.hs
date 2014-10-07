@@ -91,9 +91,11 @@ compileParams = map compileParam
 
 compileFunDec :: ExpCompiler op -> VNameSource -> FunDec
               -> (VNameSource, (Name, Imp.Function op))
-compileFunDec ec src (fname, rettype, params, body, _) =
+compileFunDec ec src (FunDec fname rettype params body _) =
   let (outs, src', body') = runImpM compile ec src
-  in (src', (fname, Imp.Function outs (compileParams params) body'))
+  in (src',
+      (fname,
+       Imp.Function outs (compileParams $ map bindeeIdent params) body'))
   where compile
           | fname == defaultEntryPoint = do
             outs <- replicateM (length ses) $ newVName "out"

@@ -137,12 +137,12 @@ bind vars body = do
                                              `HM.union` envNameMap env }
 
 instance Renameable lore => Rename (FunDec lore) where
-  rename (fname, ret, params, body, loc) =
-    bind params $ do
+  rename (FunDec fname ret params body loc) =
+    bind (map bindeeIdent params) $ do
       params' <- mapM rename params
       body' <- rename body
       ret' <- mapM rename ret
-      return (fname, ret', params', body', loc)
+      return $ FunDec fname ret' params' body' loc
 
 instance Rename SubExp where
   rename (Var v)          = Var <$> rename v
@@ -232,5 +232,6 @@ instance Rename () where
 -- | A class for lores in which all annotations are renameable.
 class (Rename (Lore.Binding lore),
        Rename (Lore.Exp lore),
-       Rename (Lore.Body lore)) =>
+       Rename (Lore.Body lore),
+       Rename (Lore.FParam lore)) =>
       Renameable lore where

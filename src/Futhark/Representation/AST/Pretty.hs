@@ -190,10 +190,10 @@ instance PrettyLore lore => Pretty (Lambda lore) where
     text "=>" </> indent 2 (ppr body)
 
 instance PrettyLore lore => Pretty (FunDec lore) where
-  ppr (name, rettype, args, body, _) =
+  ppr (FunDec name rettype args body _) =
     text "fun" <+> ppResType rettype <+>
     text (nameToString name) <//>
-    apply (map ppParam args) <+>
+    apply (map (ppParam . bindeeIdent) args) <+>
     equals </> indent 2 (ppr body)
 
 instance PrettyLore lore => Pretty (Prog lore) where

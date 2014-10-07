@@ -25,6 +25,7 @@ module Futhark.Representation.Basic
        , AST.ProgT(Prog)
        , AST.ExpT(PrimOp)
        , AST.ExpT(LoopOp)
+       , AST.FunDecT(FunDec)
          -- Removing lore
        , removeProgLore
        , removeFunDecLore
@@ -62,7 +63,7 @@ type Body = AST.Body Basic
 type Binding = AST.Binding Basic
 type Pattern = AST.Pattern Basic
 type Lambda = AST.Lambda Basic
-type FunDec = AST.FunDec Basic
+type FunDec = AST.FunDecT Basic
 
 instance TypeCheck.Checkable Basic where
   checkExpLore = return
@@ -84,6 +85,7 @@ removeLore =
   Rephraser { rephraseExpLore = const ()
             , rephraseBindeeLore = const ()
             , rephraseBodyLore = const ()
+            , rephraseFParamLore = const ()
             }
 
 removeProgLore :: AST.Prog lore -> Prog

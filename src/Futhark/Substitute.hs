@@ -127,5 +127,6 @@ instance Substitute Ident where
 -- | The class of lores in which all annotations support name
 -- substitution.
 class (Substitute (Lore.Exp lore),
-       Substitute (Lore.Binding lore)) =>
+       Substitute (Lore.Binding lore),
+       Substitute (Lore.FParam lore)) =>
       Substitutable lore where
