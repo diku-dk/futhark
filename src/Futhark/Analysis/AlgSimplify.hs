@@ -199,9 +199,9 @@ type Prod = [ScalExp]
 gaussAllLTH0 :: Bool -> S.Set VName -> NNumExp -> AlgSimplifyM ScalExp
 gaussAllLTH0 static_only el_syms sofp = do
     let tp  = typeOfNAlg sofp
-    ranges <- asks ranges
+    rangesrep <- asks ranges
     e_scal <- fromNumSofP sofp
-    let mi  = pickSymToElim ranges el_syms e_scal
+    let mi  = pickSymToElim rangesrep el_syms e_scal
 
     case mi of
       Nothing -> return $ if basicScalExpLTH0 e_scal
@@ -297,8 +297,8 @@ gaussAllLTH0 static_only el_syms sofp = do
 
         findMinMaxTerm ii t@(NProd{}  ) = do (mm, fs) <- findMinMaxFact ii t; return (mm, fs, [])
         findMinMaxTerm ii (NSum (t:ts) tp)= do
-            ranges <- asks ranges
-            case HM.lookup (identName ii) ranges of
+            rangesrep <- asks ranges
+            case HM.lookup (identName ii) rangesrep of
                 Just (_, Just _, Just _) -> do
                     f <- findMinMaxFact ii t
                     case f of
@@ -332,7 +332,7 @@ gaussOneDefaultLTH0  static_only i elsyms e = do
     case aipb of
         Nothing     -> return Nothing
         Just (a, b) -> do
-            ranges <- asks ranges
+            rangesrep <- asks ranges
             one    <- getPos1 (typeOfNAlg e)
             ascal  <- fromNumSofP a
             mam1   <- toNumSofP =<< simplifyScal (SNeg (SPlus ascal (Val one)))
@@ -345,7 +345,7 @@ gaussOneDefaultLTH0  static_only i elsyms e = do
             aleq0 <- simplifyScal =<< gaussAllLTH0 static_only elsyms am1
             ageq0 <- simplifyScal =<< gaussAllLTH0 static_only elsyms mam1
 
-            case HM.lookup (identName i) ranges of
+            case HM.lookup (identName i) rangesrep of
                 Nothing ->
                     badAlgSimplifyM "gaussOneDefaultLTH0: sym not in ranges!"
                 Just (_, Nothing, Nothing) ->
@@ -421,17 +421,17 @@ gaussOneDefaultLTH0  static_only i elsyms e = do
 ----------------------------------------------------------
 
 pickSymToElim :: RangesRep -> S.Set VName -> ScalExp -> Maybe Ident
-pickSymToElim ranges elsyms0 e_scal =
+pickSymToElim rangesrep elsyms0 e_scal =
 --    ranges <- asks ranges
 --    e_scal <- fromNumSofP e0
     let ids0= (S.toList . S.fromList . getIds) e_scal
         ids1= filter (\s -> not (S.member (identName s) elsyms0)) ids0
-        ids2= filter (\s -> case HM.lookup (identName s) ranges of
+        ids2= filter (\s -> case HM.lookup (identName s) rangesrep of
                                 Nothing -> False
                                 Just _  -> True
                      ) ids1
-        ids = sortBy (\n1 n2 -> let n1p = HM.lookup (identName n1) ranges
-                                    n2p = HM.lookup (identName n2) ranges
+        ids = sortBy (\n1 n2 -> let n1p = HM.lookup (identName n1) rangesrep
+                                    n2p = HM.lookup (identName n2) rangesrep
                                 in case (n1p, n2p) of
                                      (Just (p1,_,_), Just (p2,_,_)) -> compare (-p1) (-p2)
                                      (_            , _            ) -> compare (1::Int) (1::Int)
