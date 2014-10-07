@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, FlexibleContexts, StandaloneDeriving #-}
+{-# LANGUAGE TypeFamilies, FlexibleContexts, FlexibleInstances, StandaloneDeriving #-}
 -- | This Is an ever-changing abstract syntax for Futhark.  Some types,
 -- such as @Exp@, are parametrised by type and name representation.
 -- See the @doc/@ subdirectory in the Futhark repository for a language
@@ -31,6 +31,7 @@ module Futhark.Representation.AST.Syntax
   , SubExp(..)
   , BindeeT(..)
   , Bindee
+  , PatBindee
   , PatternT (..)
   , Pattern
   , Binding(..)
@@ -211,18 +212,22 @@ instance Located SubExp where
   locOf (Constant _ loc) = locOf loc
   locOf (Var ident)      = locOf ident
 
-data BindeeT lore = Bindee { bindeeIdent :: Ident
-                           , bindeeLore  :: Lore.Binding lore
-                           }
+data BindeeT annot = Bindee { bindeeIdent :: Ident
+                            , bindeeLore  :: annot
+                            }
 
-deriving instance Lore lore => Ord (BindeeT lore)
-deriving instance Lore lore => Show (BindeeT lore)
-deriving instance Lore lore => Eq (BindeeT lore)
+deriving instance Ord annot => Ord (BindeeT annot)
+deriving instance Show annot => Show (BindeeT annot)
+deriving instance Eq annot => Eq (BindeeT annot)
 
 type Bindee = BindeeT
 
+-- | The kind of 'Bindee' used in a 'Pattern'.
+type PatBindee lore = Bindee (Lore.Binding lore)
+
+-- | A pattern is conceptually just a list of names and their types.
 newtype PatternT lore =
-  Pattern { patternBindees :: [BindeeT lore] }
+  Pattern { patternBindees :: [PatBindee lore] }
 
 deriving instance Lore lore => Ord (PatternT lore)
 deriving instance Lore lore => Show (PatternT lore)
@@ -451,7 +456,7 @@ funDecRetType (_,rettype,_,_,_) = rettype
 
 -- | An entire Futhark program.
 newtype ProgT lore = Prog { progFunctions :: [FunDec lore] }
-                  deriving (Show)
+                   deriving (Eq)
 
 type Prog = ProgT
 

@@ -87,6 +87,13 @@ liftIdentityMapping _ (Let pat _ (LoopOp (Map cs fun arrs loc))) =
         freeOrConst (Var v)       = v `HS.member` free
         freeOrConst (Constant {}) = True
 
+        checkInvariance :: (PatBindee lore, SubExp, Type)
+                        -> ([(Pattern lore, Exp lore)],
+                            [(PatBindee lore, SubExp)],
+                            [Type])
+                        -> ([(Pattern lore, Exp lore)],
+                            [(PatBindee lore, SubExp)],
+                            [Type])
         checkInvariance (outId, Var v, _) (invariant, mapresult, rettype')
           | Just inp <- HM.lookup (identName v) inputMap =
             ((Pattern [outId], PrimOp $ SubExp inp) : invariant,
@@ -116,8 +123,8 @@ removeReplicateMapping vtable (Let pat _ (LoopOp (Map cs fun arrs loc)))
   mapM_ (uncurry letBind) parameterBnds
   case arrs' of
     [] -> do mapM_ addBinding mapres
-             sequence_ [ letBindPat (Pattern [v]) $ PrimOp $ Replicate n e resloc
-                       | (v,e) <- zip (patternBindees pat) ses ]
+             sequence_ [ letBindPat p $ PrimOp $ Replicate n e resloc
+                       | (p,e) <- zip (splitPattern pat) ses ]
     _  -> letBindPat pat $ LoopOp $ Map cs fun' arrs' loc
   where (paramsAndArrs, parameterBnds) =
           partitionEithers $ zipWith isReplicate (lambdaParams fun) arrs

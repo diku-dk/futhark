@@ -6,6 +6,7 @@ module Futhark.Representation.AST.Attributes.Patterns
        , patternNames
        , patternTypes
        , patternSize
+       , splitPattern
        )
        where
 
@@ -34,3 +35,8 @@ patternTypes = map identType . patternIdents
 -- | Return the number of names bound by the 'Pattern'.
 patternSize :: Pattern lore -> Int
 patternSize = length . patternBindees
+
+-- | Split given pattern into a list of single-bindee patterns.  Do
+-- not do this if the pattern has an existential context.
+splitPattern :: Pattern lore -> [Pattern lore]
+splitPattern = map (Pattern . (:[])) . patternBindees

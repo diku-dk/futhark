@@ -55,7 +55,7 @@ instance Substitute SubExp where
 instance Substitutable lore => Substitute (Exp lore) where
   substituteNames substs = mapExp $ replace substs
 
-instance Substitutable lore => Substitute (Bindee lore) where
+instance Substitute annot => Substitute (Bindee annot) where
   substituteNames substs (Bindee ident lore) =
     Bindee (substituteNames substs ident) (substituteNames substs lore)
 

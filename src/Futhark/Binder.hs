@@ -80,7 +80,7 @@ letBind :: MonadBinder m =>
 letBind pat e = addBinding =<< mkLetM pat e
 
 letBindPat :: MonadBinder m =>
-              Pattern anylore -> Exp (Lore m) -> m ()
+              Pattern (Lore m) -> Exp (Lore m) -> m ()
 letBindPat = letBind . patternIdents
 
 letWithBind :: MonadBinder m =>

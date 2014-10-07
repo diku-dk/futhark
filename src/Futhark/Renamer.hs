@@ -152,7 +152,7 @@ instance Rename Result where
   rename (Result cs ses loc) =
     Result <$> mapM rename cs <*> mapM rename ses <*> pure loc
 
-instance Renameable lore => Rename (Bindee lore) where
+instance Rename annot => Rename (Bindee annot) where
   rename (Bindee ident lore) = Bindee <$> rename ident <*> rename lore
 
 instance Renameable lore => Rename (Pattern lore) where

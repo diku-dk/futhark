@@ -120,7 +120,7 @@ defEntry vtable = Entry {
   , entryBinding = Nothing
   }
 
-defBndEntry :: SymbolTable lore -> Bindee lore -> Binding lore -> Entry lore
+defBndEntry :: SymbolTable lore -> PatBindee lore -> Binding lore -> Entry lore
 defBndEntry vtable bindee bnd =
   (defEntry vtable) { entryBinding = Just (bindeeLore bindee, bnd) }
 
