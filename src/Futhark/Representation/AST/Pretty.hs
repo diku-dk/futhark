@@ -31,6 +31,8 @@ import Futhark.Representation.AST.Attributes
 class PrettyLore lore where
   ppBindingLore :: Binding lore -> Maybe Doc
   ppBindingLore = const Nothing
+  ppFunDecLore :: FunDec lore -> Maybe Doc
+  ppFunDecLore = const Nothing
 
 -- | The document @'apply' ds@ separates @ds@ with commas and encloses them with
 -- parentheses.
@@ -190,7 +192,8 @@ instance PrettyLore lore => Pretty (Lambda lore) where
     text "=>" </> indent 2 (ppr body)
 
 instance PrettyLore lore => Pretty (FunDec lore) where
-  ppr (FunDec name rettype args body _) =
+  ppr fundec@(FunDec name rettype args body _) =
+    maybe id (</>) (ppFunDecLore fundec) $
     text "fun" <+> ppResType rettype <+>
     text (nameToString name) <//>
     apply (map (ppParam . bindeeIdent) args) <+>
