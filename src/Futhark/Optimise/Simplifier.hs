@@ -23,8 +23,7 @@ import qualified Futhark.Optimise.Simplifier.Engine as Engine
 
 -- | Simplify the given program.  Even if the output differs from the
 -- output, meaningful simplification may not have taken place - the
--- order of bindings may simply have been rearranged.  The function is
--- idempotent, however.
+-- order of bindings may simply have been rearranged.
 simplifyProg :: Prog -> Prog
 simplifyProg = removeProgAliases . Engine.simplifyProg standardRules
 

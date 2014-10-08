@@ -697,8 +697,7 @@ runSimpleM (SimpleM m) env src = let (x, (_, src'), _) = runRWS m env (emptyStat
 
 -- | Simplify the given program.  Even if the output differs from the
 -- output, meaningful simplification may not have taken place - the
--- order of bindings may simply have been rearranged.  The function is
--- idempotent, however.
+-- order of bindings may simply have been rearranged.
 simplifyProg :: (Proper lore, Bindable lore) =>
                 RuleBook (SimpleM lore)
              -> Prog lore -> Prog (Aliases lore)
@@ -716,8 +715,7 @@ simplifyFun (FunDec fname rettype params body loc) = do
 
 -- | Simplify the given function.  Even if the output differs from the
 -- output, meaningful simplification may not have taken place - the
--- order of bindings may simply have been rearranged.  The function is
--- idempotent, however.
+-- order of bindings may simply have been rearranged.
 simplifyOneFun :: (MonadFreshNames m, Proper lore,
                    Bindable lore) =>
                   RuleBook (SimpleM lore)
