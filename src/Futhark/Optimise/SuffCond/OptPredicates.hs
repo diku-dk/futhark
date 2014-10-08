@@ -126,6 +126,7 @@ rephraseWithInvariance :: Body -> S.Body Invariance'
 rephraseWithInvariance = rephraseBody rephraser
   where rephraser = Rephraser { rephraseExpLore = const TooVariant
                               , rephraseBindeeLore = const Nothing
+                              , rephraseFParamLore = const ()
                               , rephraseBodyLore = const ()
                               }
 
