@@ -219,6 +219,9 @@ deriving instance Ord annot => Ord (BindeeT annot)
 deriving instance Show annot => Show (BindeeT annot)
 deriving instance Eq annot => Eq (BindeeT annot)
 
+instance Located (BindeeT annot) where
+  locOf = locOf . bindeeIdent
+
 type Bindee = BindeeT
 
 -- | The kind of 'Bindee' used in a 'Pattern'.
