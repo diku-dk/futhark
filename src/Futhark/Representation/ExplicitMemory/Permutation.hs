@@ -32,7 +32,7 @@ instance Show (Swap n) where
 instance Eq (Swap n) where
   (x1 :<->: y1) == (x2 :<->: y2) =
     (x1 == x2 && y1 == y2) ||
-    (y1 == x2 && y2 == x2)
+    (y1 == x2 && y2 == x1)
 
 -- | A permutation is conceptually a sequence of 'Swap's.  It may even
 -- be infinite - although it's not clear what this means.  More
