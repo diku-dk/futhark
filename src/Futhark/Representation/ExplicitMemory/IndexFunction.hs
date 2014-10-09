@@ -10,6 +10,7 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
        , permute
        , applyInd
        , codomain
+       , isLinear
        )
        where
 
@@ -82,3 +83,7 @@ applyInd = Index
 
 codomain :: IxFun n -> SymSet n
 codomain = undefined
+
+isLinear :: IxFun n -> Bool
+isLinear (Direct _) = True
+isLinear _          = False

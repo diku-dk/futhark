@@ -13,6 +13,7 @@ module Futhark.Representation.ExplicitMemory
        , Exp
        , Lambda
        , FunDec
+       , FParam
          -- * Module re-exports
        , module Futhark.Representation.AST.Attributes
        , module Futhark.Representation.AST.Traversals
@@ -37,7 +38,8 @@ import qualified Text.PrettyPrint.Mainland as PP
 import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
-  hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding, Pattern, Lambda, FunDec)
+  hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
+          Pattern, Lambda, FunDec, FParam)
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Pretty
@@ -59,6 +61,7 @@ type Binding = AST.Binding ExplicitMemory
 type Pattern = AST.Pattern ExplicitMemory
 type Lambda = AST.Lambda ExplicitMemory
 type FunDec = AST.FunDec ExplicitMemory
+type FParam = AST.FParam ExplicitMemory
 
 data MemSummary = MemSummary Ident IxFun.IxFun
                 | Scalar
@@ -88,6 +91,7 @@ instance Rename MemSummary where
 
 instance Lore.Lore ExplicitMemory where
   type Binding ExplicitMemory = MemSummary
+  type FParam  ExplicitMemory = MemSummary
 
 instance TypeCheck.Checkable ExplicitMemory where
   checkExpLore = return
@@ -100,18 +104,24 @@ instance Proper ExplicitMemory where
 
 instance PrettyLore ExplicitMemory where
   ppBindingLore binding =
-    case mapMaybe annot $ patternBindees $ bindingPattern binding of
-      []      -> Nothing
-      annots  -> Just $ PP.folddoc (PP.</>) annots
-    where annot bindee =
-            case bindeeLore bindee of
-              MemSummary ident fun ->
-                Just $
-                PP.text "// " <>
-                PP.ppr (bindeeName bindee) <>
-                PP.text "@" <>
-                PP.ppr (identName ident) <>
-                PP.text "->" <>
-                PP.text (show fun)
-              Scalar ->
-                Nothing
+    case mapMaybe bindeeAnnotation $ patternBindees $ bindingPattern binding of
+      []     -> Nothing
+      annots -> Just $ PP.folddoc (PP.</>) annots
+  ppFunDecLore fundec =
+    case mapMaybe bindeeAnnotation $ funDecParams fundec of
+      []     -> Nothing
+      annots -> Just $ PP.folddoc (PP.</>) annots
+
+bindeeAnnotation :: Bindee MemSummary -> Maybe PP.Doc
+bindeeAnnotation bindee =
+  case bindeeLore bindee of
+    MemSummary ident fun ->
+      Just $
+      PP.text "// " <>
+      PP.ppr (bindeeName bindee) <>
+      PP.text "@" <>
+      PP.ppr (identName ident) <>
+      PP.text "->" <>
+      PP.text (show fun)
+    Scalar ->
+      Nothing

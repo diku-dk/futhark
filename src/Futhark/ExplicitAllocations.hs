@@ -65,24 +65,114 @@ basicMkLetM pat e = do
         | any extDim $ arrayDims t ->
           error "Cannot deal with existential memory just yet"
         | otherwise -> do
-          size <-
-            computeSize loc
-            (intconst (basicSize $ elemType t) loc) $
-            arrayDims t
-          m <- letExp "mem" $ PrimOp $ Alloc size loc
-          return $ MemSummary m $
-            IxFun.iota $ IxFun.shapeFromSubExps $ arrayDims t
+          (_,m) <- allocForArray t loc
+          return $ directIndexFunction m t
   let pat' = Pattern $ zipWith Bindee pat attr'
   return $ Let pat' () e
   where loc = srclocOf e
 
+allocForArray :: Type -> SrcLoc -> AllocM (SubExp, Ident)
+allocForArray t loc = do
+  size <-
+    computeSize loc
+    (intconst (basicSize $ elemType t) loc) $
+    arrayDims t
+  m <- letExp "mem" $ PrimOp $ Alloc size loc
+  return (size, m)
+
+directIndexFunction :: Ident -> Type -> MemSummary
+directIndexFunction mem t =
+  MemSummary mem $ IxFun.iota $ IxFun.shapeFromSubExps $ arrayDims t
+
+basicSize :: BasicType -> Int
+basicSize Int = 4
+basicSize Bool = 1
+basicSize Char = 1
+basicSize Real = 8
+basicSize Cert = 1
+
+computeSize :: MonadBinder m => SrcLoc -> SubExp -> [SubExp] -> m SubExp
+computeSize _ current [] = return current
+computeSize loc current (x:xs) = do
+  let pexp = pure . PrimOp . SubExp
+  e <- eBinOp Times (pexp current) (pexp x) (Basic Int) loc
+  v <- letSubExp "x" e
+  computeSize loc v xs
+
 lookupSummary :: Ident -> AllocM (Maybe MemSummary)
 lookupSummary = asks . HM.lookup . identName
 
-runAllocM :: MonadFreshNames m => AllocM Body -> m Body
+bindeeSummary :: BindeeT MemSummary -> (VName, MemSummary)
+bindeeSummary bindee = (bindeeName bindee, bindeeLore bindee)
+
+bindeesSummary :: [BindeeT MemSummary] -> HM.HashMap VName MemSummary
+bindeesSummary = HM.fromList . map bindeeSummary
+
+runAllocM :: MonadFreshNames m => AllocM FunDec -> m FunDec
 runAllocM (AllocM m) = do
-  (Body () bnds res, morebnds) <- runBinder'' $ runReaderT m HM.empty
-  return $ Body () (morebnds<>bnds) res
+  (fundec, morebnds) <- runBinder'' $ runReaderT m HM.empty
+  return fundec { funDecBody =
+                     let Body () bnds res = funDecBody fundec
+                     in Body () (morebnds<>bnds) res
+                }
+
+allocInFParams :: [In.FParam] -> ([FParam] -> AllocM a)
+               -> AllocM a
+allocInFParams params m = do
+  (valparams, memparams) <- runWriterT $ forM params $ \param ->
+    case bindeeType param of
+      Array {} -> do
+        let memname = baseString (bindeeName param) <> "_mem"
+            loc = srclocOf param
+        size <- lift $ newIdent (memname <> "_size") (Basic Int) loc
+        mem <- lift $ newIdent memname (Mem $ Var size) loc
+        tell [Bindee size Scalar, Bindee mem Scalar]
+        return
+          param { bindeeLore =
+                     directIndexFunction mem $ bindeeType param
+                }
+      _ -> return param { bindeeLore = Scalar }
+  let summary = bindeesSummary valparams
+      params' = memparams <> valparams
+  local (summary `HM.union`) $ m params'
+
+ensureLinearArray :: SubExp -> AllocM (SubExp, Ident, SubExp)
+ensureLinearArray (Var v) = do
+  res <- lookupSummary v
+  case res of
+    Just (MemSummary mem ixfun)
+      | Mem size <- identType mem,
+        IxFun.isLinear ixfun ->
+      return (size, mem, Var v)
+    _ ->
+      -- We need to do a new allocation, copy 'v', and make a new
+      -- binding for the size of the memory block.
+      allocLinearArray (baseString $ identName v) $ Var v
+ensureLinearArray (Constant val loc) =
+  allocLinearArray "const_array" $ Constant val loc
+
+allocLinearArray :: String
+                 -> SubExp -> AllocM (SubExp, Ident, SubExp)
+allocLinearArray s se = do
+  (size, mem) <- allocForArray t loc
+  v' <- newIdent s t loc
+  let pat = Pattern [Bindee v' $ directIndexFunction mem t]
+  addBinding $ Let pat () $ PrimOp $ SubExp se
+  return (size, mem, Var v')
+  where loc = srclocOf se
+        t   = subExpType se
+
+funcallArgs :: [(SubExp,Diet)] -> AllocM [(SubExp,Diet)]
+funcallArgs args = do
+  (valargs, memargs) <- runWriterT $ forM args $ \(arg,d) ->
+    case subExpType arg of
+      Array {} -> do
+        (size, mem, arg') <- lift $ ensureLinearArray arg
+        tell [(size, Observe), (Var mem, Observe)]
+        return (arg', d)
+      _ ->
+        return (arg, d)
+  return $ memargs <> valargs
 
 explicitAllocations :: In.Prog -> Prog
 explicitAllocations prog =
@@ -90,9 +180,10 @@ explicitAllocations prog =
   where free = newNameSourceForProg prog
 
 allocInFun :: MonadFreshNames m => In.FunDec -> m FunDec
-allocInFun (In.FunDec fname rettype params body loc) = do
-  body' <- runAllocM $ allocInBody body
-  return $ FunDec fname rettype params body' loc
+allocInFun (In.FunDec fname rettype params body loc) =
+  runAllocM $ allocInFParams params $ \params' -> do
+    body' <- insertBindingsM $ allocInBody body
+    return $ FunDec fname rettype params' body' loc
 
 allocInBody :: In.Body -> AllocM Body
 allocInBody (Body _ bnds res) =
@@ -104,9 +195,8 @@ allocInBody (Body _ bnds res) =
         allocInBindings (x:xs) bnds' m = do
           allocbnds <- allocInBinding' x
           let summaries =
-                HM.fromList
-                [(bindeeName bindee, bindeeLore bindee) |
-                 bindee <- concatMap (patternBindees . bindingPattern) allocbnds ]
+                bindeesSummary $
+                concatMap (patternBindees . bindingPattern) allocbnds
           local (`HM.union` summaries) $
             allocInBindings xs (bnds'++allocbnds) m
 
@@ -142,6 +232,9 @@ allocInExp (LoopOp (Map cs f arrs loc)) = do
         f { lambdaParams = i : lambdaParams f
           }
   return $ LoopOp $ Map cs f' (Var is:arrs) loc
+allocInExp (Apply fname args rettype loc) = do
+  args' <- funcallArgs args
+  return $ Apply fname args' rettype loc
 allocInExp e = mapExpM alloc e
   where alloc = identityMapper { mapOnBinding = allocInBinding
                                , mapOnBody = allocInBody
@@ -152,18 +245,3 @@ allocInLambda :: In.Lambda -> AllocM Lambda
 allocInLambda lam = do
   body <- allocInBody $ lambdaBody lam
   return $ lam { lambdaBody = body }
-
-basicSize :: BasicType -> Int
-basicSize Int = 4
-basicSize Bool = 1
-basicSize Char = 1
-basicSize Real = 8
-basicSize Cert = 1
-
-computeSize :: MonadBinder m => SrcLoc -> SubExp -> [SubExp] -> m SubExp
-computeSize _ current [] = return current
-computeSize loc current (x:xs) = do
-  let pexp = pure . PrimOp . SubExp
-  e <- eBinOp Times (pexp current) (pexp x) (Basic Int) loc
-  v <- letSubExp "x" e
-  computeSize loc v xs

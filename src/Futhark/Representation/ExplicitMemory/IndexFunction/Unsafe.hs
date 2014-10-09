@@ -8,6 +8,7 @@ module Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
        , permute
        , applyInd
        , codomain
+       , isLinear
          -- * Utility
        , shapeFromSubExps
        , shapeFromInts
@@ -111,6 +112,9 @@ applyInd (IxFun (snnat::SNat (S n)) (f::Safe.IxFun (S n))) is =
 codomain :: IxFun -> SymSet
 codomain (IxFun n f) =
   SymSet n $ Safe.codomain f
+
+isLinear :: IxFun -> Bool
+isLinear (IxFun _ ixfun) = Safe.isLinear ixfun
 
 data SymSet = forall n . SymSet (SNat n) (SymSet.SymSet n)
 
