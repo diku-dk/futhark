@@ -29,6 +29,11 @@ infixr 5 :<->:
 instance Show (Swap n) where
   show (n :<->: m) = show n ++ " :<->: " ++ show m
 
+instance Eq (Swap n) where
+  (x1 :<->: y1) == (x2 :<->: y2) =
+    (x1 == x2 && y1 == y2) ||
+    (y1 == x2 && y2 == x2)
+
 -- | A permutation is conceptually a sequence of 'Swap's.  It may even
 -- be infinite - although it's not clear what this means.  More
 -- importantly, the 'Permutation' may not be the shortest possible
