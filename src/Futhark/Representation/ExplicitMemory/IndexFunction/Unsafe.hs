@@ -10,10 +10,12 @@ module Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
        , codomain
          -- * Utility
        , shapeFromSubExps
+       , shapeFromInts
        )
        where
 
 import Data.List (sort)
+import Data.Loc
 import Data.Singletons.Prelude
 import Data.Type.Monomorphic
 import Data.Type.Natural
@@ -29,6 +31,7 @@ import Futhark.Representation.ExplicitMemory.Permutation
   (Swap (..), Permutation (..))
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as Safe
 import qualified Futhark.Representation.ExplicitMemory.SymSet as SymSet
+import Language.Futhark.Core
 
 data IxFun = forall n . IxFun (SNat (S n)) (Safe.IxFun (S n))
 
@@ -43,6 +46,9 @@ shapeFromSubExps = map fromSubExp
   where fromSubExp (Var v)                   = Id v
         fromSubExp (Constant (BasicVal v) _) = Val v
         fromSubExp _                         = error "Not a basic value"
+
+shapeFromInts :: [Int] -> Shape
+shapeFromInts = shapeFromSubExps . map (flip Constant noLoc . BasicVal . IntVal)
 
 index :: IxFun -> Indices -> ScalExp
 index f is = case f of
