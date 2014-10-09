@@ -65,16 +65,23 @@ offset (IxFun n f) se =
 
 permute :: IxFun -> [Int] -> IxFun
 permute (IxFun (n::SNat (S n)) f) perm
-  | sort perm /= [0..sNatToInt n-1] =
+  | sort perm /= [0..n'-1] =
     error "IndexFunction.Unsafe.permute: invalid permutation"
   | otherwise =
     IxFun n $ Safe.permute f $
-    Prelude.foldr buildPermutation Identity (Prelude.zip [0..] perm)
+    Prelude.foldr (:>>:) Identity $
+    Prelude.foldr buildPermutation [] $
+    Prelude.zip [0..] perm
+    -- This is fairly hacky - a better way would be to find the cycles
+    -- in the permutation.
   where buildPermutation (to,from) perm' =
           let sw :: Swap (S n)
               sw = withSingI n $
                    unsafeFromInt from :<->: unsafeFromInt to
-          in sw :>>: perm'
+          in if sw `Prelude.notElem` perm' && from /= to
+             then sw : perm'
+             else perm'
+        n' = sNatToInt n
 
 applyInd :: IxFun -> Indices -> IxFun
 applyInd (IxFun (snnat::SNat (S n)) (f::Safe.IxFun (S n))) is =
