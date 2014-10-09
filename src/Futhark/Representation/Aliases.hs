@@ -135,6 +135,7 @@ instance PrettyLore lore => PrettyLore (Aliases lore) where
                      PP.text "// " <> PP.ppr (bindeeName bindee) <> PP.text " aliases " <>
                      PP.commasep (map PP.ppr als)
           oneline s = PP.text $ PP.displayS (PP.renderCompact s) ""
+  ppFunDecLore = ppFunDecLore . removeFunDecAliases
 
 removeAliases :: Rephraser (Aliases lore) lore
 removeAliases = Rephraser { rephraseExpLore = snd
