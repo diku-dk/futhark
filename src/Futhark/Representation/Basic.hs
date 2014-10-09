@@ -14,6 +14,7 @@ module Futhark.Representation.Basic
        , Exp
        , Lambda
        , FunDec
+       , FParam
          -- * Module re-exports
        , module Futhark.Representation.AST.Attributes
        , module Futhark.Representation.AST.Traversals
@@ -36,7 +37,8 @@ where
 import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
-  hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding, Pattern, Lambda, FunDec)
+  hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
+          Pattern, Lambda, FunDec, FParam)
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Pretty
@@ -64,6 +66,7 @@ type Binding = AST.Binding Basic
 type Pattern = AST.Pattern Basic
 type Lambda = AST.Lambda Basic
 type FunDec = AST.FunDecT Basic
+type FParam = AST.FParam Basic
 
 instance TypeCheck.Checkable Basic where
   checkExpLore = return
