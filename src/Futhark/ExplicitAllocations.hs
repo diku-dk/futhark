@@ -53,23 +53,8 @@ basicMkLetM :: [Ident]
             -> Exp
             -> AllocM Binding
 basicMkLetM pat e = do
-  let (ctx,_) = splitAt (contextSize $ typeOf e) pat
-      boundInCtx = flip elem (map identName ctx) . identName
-      extDim (Var v)       = boundInCtx v
-      extDim (Constant {}) = False
-  attr' <- forM pat $ \ident ->
-    case identType ident of
-      Mem _    -> return Scalar
-      Basic _  -> return Scalar
-      t@(Array {})
-        | any extDim $ arrayDims t ->
-          error "Cannot deal with existential memory just yet"
-        | otherwise -> do
-          (_,m) <- allocForArray t loc
-          return $ directIndexFunction m t
-  let pat' = Pattern $ zipWith Bindee pat attr'
+  pat' <- Pattern <$> allocsForPattern pat
   return $ Let pat' () e
-  where loc = srclocOf e
 
 allocForArray :: Type -> SrcLoc -> AllocM (SubExp, Ident)
 allocForArray t loc = do
@@ -79,6 +64,39 @@ allocForArray t loc = do
     arrayDims t
   m <- letExp "mem" $ PrimOp $ Alloc size loc
   return (size, m)
+
+allocsForPattern :: [Ident] -> AllocM [Bindee MemSummary]
+allocsForPattern pat = do
+  (vals,allocs) <- runWriterT $ forM pat $ \ident ->
+    let loc = srclocOf ident in
+    case identType ident of
+      Mem _    -> return $ Bindee ident Scalar
+      Basic _  -> return $ Bindee ident Scalar
+      t@(Array {})
+        | ext t     -> do
+          (allocs,ident') <- lift $ memForBindee ident
+          tell allocs
+          return ident'
+        | otherwise -> do
+          (_, m) <- lift $ allocForArray (identType ident) loc
+          return $ Bindee ident $ directIndexFunction m t
+  return $ allocs <> vals
+  where boundHere = map identName pat
+        isBoundHere (Constant {}) = False
+        isBoundHere (Var v) = identName v `elem` boundHere
+        ext = any isBoundHere . arrayDims
+
+memForBindee :: (MonadFreshNames m) =>
+                Ident
+             -> m ([BindeeT MemSummary], BindeeT MemSummary)
+memForBindee ident = do
+  size <- newIdent (memname <> "_size") (Basic Int) loc
+  mem <- newIdent memname (Mem $ Var size) loc
+  return ([Bindee size Scalar, Bindee mem Scalar],
+          Bindee ident $ directIndexFunction mem t)
+  where  memname = baseString (identName ident) <> "_mem"
+         t       = identType ident
+         loc     = srclocOf ident
 
 directIndexFunction :: Ident -> Type -> MemSummary
 directIndexFunction mem t =
@@ -122,15 +140,9 @@ allocInFParams params m = do
   (valparams, memparams) <- runWriterT $ forM params $ \param ->
     case bindeeType param of
       Array {} -> do
-        let memname = baseString (bindeeName param) <> "_mem"
-            loc = srclocOf param
-        size <- lift $ newIdent (memname <> "_size") (Basic Int) loc
-        mem <- lift $ newIdent memname (Mem $ Var size) loc
-        tell [Bindee size Scalar, Bindee mem Scalar]
-        return
-          param { bindeeLore =
-                     directIndexFunction mem $ bindeeType param
-                }
+        (allocs,param') <- lift $ memForBindee $ bindeeIdent param
+        tell allocs
+        return param'
       _ -> return param { bindeeLore = Scalar }
   let summary = bindeesSummary valparams
       params' = memparams <> valparams
