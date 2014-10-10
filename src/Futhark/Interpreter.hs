@@ -414,6 +414,10 @@ evalPrimOp (Assert e loc) = do
 
 evalPrimOp (Conjoin _ _) = return [BasicVal Checked]
 
+-- Alloc is not used in the interpreter, so just return whatever
+evalPrimOp (Alloc se _) =
+  single <$> evalSubExp se
+
 evalLoopOp :: LoopOp lore -> FutharkM [Value]
 
 evalLoopOp (DoLoop respat merge loopvar boundexp loopbody loc) = do
