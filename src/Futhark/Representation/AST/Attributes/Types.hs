@@ -113,6 +113,8 @@ staticShapes = map staticShapes'
         staticShapes' (Mem size) =
           Mem size
 
+-- | If all dimensions of the given 'ResType' are statically known,
+-- return the corresponding list of 'Type'.
 hasStaticShape :: ResType -> Maybe [Type]
 hasStaticShape = mapM hasStaticShape'
   where hasStaticShape' (Basic bt) =
@@ -124,7 +126,11 @@ hasStaticShape = mapM hasStaticShape'
         isFree (Free s) = Just s
         isFree (Ext _)  = Nothing
 
-instantiateShapes :: Monad m => m SubExp -> [TypeBase ExtShape]
+-- | Instantiate all existential parts dimensions of the given
+-- 'ResType', using a monadic action to create the necessary
+-- 'SubExp's.  You should call this function within some monad that
+-- allows you to collect the actions performed (say, 'Writer').
+instantiateShapes :: Monad m => m SubExp -> ResType
                   -> m [TypeBase Shape]
 instantiateShapes f ts = evalStateT (mapM instantiate ts) HM.empty
   where instantiate t = do
@@ -139,7 +145,10 @@ instantiateShapes f ts = evalStateT (mapM instantiate ts) HM.empty
                           return se
         instantiate' (Free se) = return se
 
-instantiatePattern :: SrcLoc -> [VName] -> ResType -> Maybe ([Ident], [Ident])
+-- | Instantiate a pattern, returning the resulting context-'Ident's
+-- and value-'Ident's.
+instantiatePattern :: SrcLoc -> [VName] -> ResType
+                   -> Maybe ([Ident], [Ident])
 instantiatePattern loc names ts
   | let n = contextSize ts,
     n + length ts == length names = do
