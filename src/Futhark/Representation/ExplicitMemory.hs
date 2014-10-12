@@ -31,7 +31,9 @@ where
 
 import Control.Applicative
 import qualified Data.HashSet as HS
+import Data.Foldable (traverse_)
 import Data.Maybe
+import Data.Loc
 import Data.Monoid
 import qualified Text.PrettyPrint.Mainland as PP
 
@@ -95,9 +97,26 @@ instance Lore.Lore ExplicitMemory where
 
 instance TypeCheck.Checkable ExplicitMemory where
   checkExpLore = return
-  checkBindingLore = return
+  checkBindingLore = checkMemSummary
   checkBodyLore = return
-  checkFParamLore = const $ return ()
+  checkFParamLore = checkMemSummary
+
+checkMemSummary :: MemSummary
+                -> TypeCheck.TypeM ExplicitMemory ()
+checkMemSummary Scalar = return ()
+checkMemSummary (MemSummary v ixfun) = do
+  _ <- checkMemIdent v
+  traverse_ TypeCheck.checkIdent $ freeIn ixfun
+  where checkMemIdent ident = do
+          _ <- TypeCheck.checkIdent ident
+          case identType ident of
+            Mem size ->
+              TypeCheck.require [Basic Int] <$> TypeCheck.checkSubExp size
+            t        ->
+              TypeCheck.bad $ TypeCheck.TypeError (srclocOf ident) $
+              "Variable " ++ textual (identName v) ++
+              " used as memory block, but is of type " ++
+              ppType t ++ "."
 
 instance Renameable ExplicitMemory where
 instance Substitutable ExplicitMemory where

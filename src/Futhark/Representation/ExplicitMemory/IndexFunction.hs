@@ -18,11 +18,14 @@ import Data.Type.Natural
 import Data.Vector.Sized hiding (index, map, unsafeFromInt)
 import qualified Data.Vector.Sized as Vec
 import Proof.Equational
+import Data.Monoid
+import qualified Data.HashSet as HS
 
 import Futhark.Analysis.ScalExp
 
 import qualified Futhark.Representation.ExplicitMemory.Permutation as Perm
 import Futhark.Representation.ExplicitMemory.SymSet (SymSet)
+import Futhark.Representation.AST.Attributes.Names
 
 type Shape = Vector ScalExp
 type Indices = Vector ScalExp
@@ -87,3 +90,10 @@ codomain = undefined
 isLinear :: IxFun n -> Bool
 isLinear (Direct _) = True
 isLinear _          = False
+
+instance FreeIn (IxFun n) where
+  freeIn (Direct shape) = HS.fromList $ concatMap getIds $ toList shape
+  freeIn (Offset ixfun e) = freeIn ixfun <> HS.fromList (getIds e)
+  freeIn (Permute ixfun _) = freeIn ixfun
+  freeIn (Index ixfun is) =
+    freeIn ixfun <> HS.fromList (concatMap getIds $ toList is)

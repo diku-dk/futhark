@@ -9,6 +9,12 @@ module Futhark.TypeCheck
   , TypeM
   , bad
   , Checkable (..)
+  , module Futhark.TypeCheck.TypeError
+    -- * Checkers
+  , require
+  , requireI
+  , checkSubExp
+  , checkIdent
   )
   where
 
@@ -900,8 +906,8 @@ checkBinding loc pat ts dflow = do
                 checkAnnotation vloc
                 ("binding of variable " ++ textual name) namet t
           add $ Ident name t' vloc
-          lore' <- lift $ checkBindingLore lore
-          return $ Bindee (Ident name t' vloc) (als,lore')
+          lift $ checkBindingLore lore
+          return $ Bindee (Ident name t' vloc) (als,lore)
 
         add ident = do
           bnd <- gets $ find (==ident)
@@ -998,5 +1004,5 @@ class (FreeIn (Lore.Exp lore),
        Lore lore) => Checkable lore where
   checkExpLore :: Lore.Exp lore -> TypeM lore (Lore.Exp lore)
   checkBodyLore :: Lore.Body lore -> TypeM lore (Lore.Body lore)
-  checkBindingLore :: Lore.Binding lore -> TypeM lore (Lore.Binding lore)
+  checkBindingLore :: Lore.Binding lore -> TypeM lore ()
   checkFParamLore :: Lore.FParam lore -> TypeM lore ()

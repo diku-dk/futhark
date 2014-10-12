@@ -27,7 +27,7 @@ import Proof.Equational
 import Futhark.Analysis.ScalExp
 import Futhark.Representation.AST.Syntax (SubExp(..), Value(..))
 import Futhark.Util.Truths
-
+import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.ExplicitMemory.Permutation
   (Swap (..), Permutation (..))
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as Safe
@@ -122,3 +122,6 @@ minusPlusEqR :: (m :<<= n) ~ True =>
                 SNat n -> SNat m -> (m :+: (n :-: m)) :=: n
 minusPlusEqR n m =
   plusMinusCommutes m n m `trans` plusMinusEqR n m
+
+instance FreeIn IxFun where
+  freeIn (IxFun _ ixfun) = freeIn ixfun
