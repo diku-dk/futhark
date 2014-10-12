@@ -72,6 +72,7 @@ instance TypeCheck.Checkable Basic where
   checkExpLore = return
   checkBindingLore = return
   checkBodyLore = return
+  checkFParamLore = return
 
 instance Renameable Basic where
 instance Substitutable Basic where

@@ -97,6 +97,7 @@ instance TypeCheck.Checkable ExplicitMemory where
   checkExpLore = return
   checkBindingLore = return
   checkBodyLore = return
+  checkFParamLore = const $ return ()
 
 instance Renameable ExplicitMemory where
 instance Substitutable ExplicitMemory where

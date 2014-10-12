@@ -8,7 +8,7 @@ module Futhark.TypeCheck
     -- * Extensionality
   , TypeM
   , bad
-  , Checkable(..)
+  , Checkable (..)
   )
   where
 
@@ -435,16 +435,30 @@ checkFun :: Checkable lore =>
             FunDec lore -> TypeM lore (FunDec lore)
 checkFun (FunDec fname rettype params body loc) = do
   (rettype', body') <-
-    checkFun' (fname, rettype, map bindeeIdent params, body, loc)
+    checkFun' (fname, rettype, map bindeeIdent params, body, loc) $ do
+      mapM_ (checkFParamLore . bindeeLore) params
+      checkFunBody rettype body
   return $ FunDec fname rettype' params body' loc
 
-checkFun' :: Checkable lore =>
-            (Name, ResType, [Ident], BodyT (Aliases lore), SrcLoc)
+checkFunBody :: Checkable lore =>
+                ResType -> BodyT (Aliases lore)
+             -> TypeM lore (ResType, BodyT (Aliases lore))
+checkFunBody rettype body =
+  (,) <$> mapM checkExtType rettype <*> checkBody body
+
+checkAnonymousFun :: Checkable lore =>
+                     (Name, ResType, [Ident], BodyT (Aliases lore), SrcLoc)
+                  -> TypeM lore (ResType, BodyT (Aliases lore))
+checkAnonymousFun fundec@(_, rettype, _, body, _) =
+  checkFun' fundec $ checkFunBody rettype body
+
+checkFun' :: (Checkable lore) =>
+             (Name, ResType, [Ident], BodyT (Aliases lore), SrcLoc)
           -> TypeM lore (ResType, BodyT (Aliases lore))
-checkFun' (fname, rettype, params, body, loc) = do
+          -> TypeM lore (ResType, BodyT (Aliases lore))
+checkFun' (fname, rettype, params, _, loc) check = do
   params' <- checkParams
-  (rettype',body') <- binding (zip params' $ repeat mempty) $
-    (,) <$> mapM checkExtType rettype <*> checkBody body
+  (rettype',body') <- binding (zip params' $ repeat mempty) check
 
   checkReturnAlias $ bodyAliases body'
 
@@ -664,11 +678,11 @@ checkLoopOp (DoLoop respat merge (Ident loopvar loopvart loopvarloc)
   checkFuncall Nothing loc paramts paramts $ boundarg : mergeargs
 
   (_, loopbody') <-
-    noUnique $ checkFun' (nameFromString "<loop body>",
-                          staticShapes rettype,
-                          funparams,
-                          loopbody,
-                          loc)
+    noUnique $ checkAnonymousFun (nameFromString "<loop body>",
+                                  staticShapes rettype,
+                                  funparams,
+                                  loopbody,
+                                  loc)
   respat' <-
     forM respat $ \res ->
       case find ((==identName res) . identName) mergepat' of
@@ -972,7 +986,8 @@ checkLambda (Lambda params body ret loc) args = do
                   map (arrayDims . argType) args
     checkFuncall Nothing loc (map (toDecl . identType) params') (map toDecl ret') args
     (_, body') <-
-      noUnique $ checkFun' (nameFromString "<anonymous>", staticShapes ret', params', body, loc)
+      noUnique $ checkAnonymousFun
+      (nameFromString "<anonymous>", staticShapes ret', params', body, loc)
     return $ Lambda params' body' ret' loc
   else bad $ TypeError loc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
@@ -984,3 +999,4 @@ class (FreeIn (Lore.Exp lore),
   checkExpLore :: Lore.Exp lore -> TypeM lore (Lore.Exp lore)
   checkBodyLore :: Lore.Body lore -> TypeM lore (Lore.Body lore)
   checkBindingLore :: Lore.Binding lore -> TypeM lore (Lore.Binding lore)
+  checkFParamLore :: Lore.FParam lore -> TypeM lore ()
