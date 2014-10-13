@@ -109,6 +109,7 @@ Library
                    Futhark.Representation.AST.Lore
                    Futhark.Representation.AST.Pretty
                    Futhark.Representation.AST.Syntax
+                   Futhark.Representation.AST.Syntax.Core
                    Futhark.Representation.AST.Traversals
                    Futhark.Representation.Basic
                    Futhark.Representation.ExplicitMemory
