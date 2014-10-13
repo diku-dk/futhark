@@ -289,6 +289,7 @@ subtypeOf (Array t1 shape1 u1) (Array t2 shape2 u2) =
        && t1 == t2
        && shapeRank shape1 == shapeRank shape2
 subtypeOf (Basic t1) (Basic t2) = t1 == t2
+subtypeOf (Mem _) (Mem _) = True
 subtypeOf _ _ = False
 
 -- | @xs \`subtypesOf\` ys@ is true if @xs@ is the same size as @ys@,
