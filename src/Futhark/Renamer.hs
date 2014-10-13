@@ -230,7 +230,7 @@ instance Rename () where
   rename = return
 
 -- | A class for lores in which all annotations are renameable.
-class (Rename (Lore.Binding lore),
+class (Rename (Lore.LetBound lore),
        Rename (Lore.Exp lore),
        Rename (Lore.Body lore),
        Rename (Lore.FParam lore)) =>

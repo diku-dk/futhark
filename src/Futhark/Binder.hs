@@ -45,7 +45,7 @@ import Futhark.Renamer (Renameable)
 class (Lore.Lore lore, PrettyLore lore,
        Renameable lore, Substitutable lore,
        FreeIn (Lore.Exp lore),
-       FreeIn (Lore.Binding lore),
+       FreeIn (Lore.LetBound lore),
        FreeIn (Lore.Body lore)) => Proper lore where
 
 -- | The class of lores that can be constructed solely from an

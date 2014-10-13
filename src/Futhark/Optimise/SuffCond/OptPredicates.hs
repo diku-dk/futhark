@@ -403,7 +403,7 @@ isForbidden TooVariant = True
 
 data Invariance'
 instance Lore.Lore Invariance' where
-  type Binding Invariance' = Maybe Ident
+  type LetBound Invariance' = Maybe Ident
   type Exp Invariance' = Variance
 instance PrettyLore Invariance' where
 instance Substitutable Invariance' where

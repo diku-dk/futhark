@@ -90,7 +90,7 @@ instance FreeIn Names' where
   freeIn = const mempty
 
 instance Lore.Lore lore => Lore.Lore (Aliases lore) where
-  type Binding (Aliases lore) = (Names', Lore.Binding lore)
+  type LetBound (Aliases lore) = (Names', Lore.LetBound lore)
   type Exp (Aliases lore) = (Names', Lore.Exp lore)
   type Body (Aliases lore) = (([Names'], Names'), Lore.Body lore)
   type FParam (Aliases lore) = Lore.FParam lore

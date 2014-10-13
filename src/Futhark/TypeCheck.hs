@@ -999,10 +999,10 @@ checkLambda (Lambda params body ret loc) args = do
 
 -- | The class of lores that can be type-checked.
 class (FreeIn (Lore.Exp lore),
-       FreeIn (Lore.Binding lore),
+       FreeIn (Lore.LetBound lore),
        FreeIn (Lore.Body lore),
        Lore lore) => Checkable lore where
   checkExpLore :: Lore.Exp lore -> TypeM lore (Lore.Exp lore)
   checkBodyLore :: Lore.Body lore -> TypeM lore (Lore.Body lore)
-  checkBindingLore :: Lore.Binding lore -> TypeM lore ()
+  checkBindingLore :: Lore.LetBound lore -> TypeM lore ()
   checkFParamLore :: Lore.FParam lore -> TypeM lore ()

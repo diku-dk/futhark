@@ -225,7 +225,7 @@ instance Located (BindeeT annot) where
 type Bindee = BindeeT
 
 -- | The kind of 'Bindee' used in a 'Pattern'.
-type PatBindee lore = Bindee (Lore.Binding lore)
+type PatBindee lore = Bindee (Lore.LetBound lore)
 
 -- | A pattern is conceptually just a list of names and their types.
 newtype PatternT lore =

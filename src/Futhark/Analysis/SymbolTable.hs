@@ -58,7 +58,7 @@ data Entry lore = Entry {
   , bindingDepth :: Int
   , valueRange :: Range
   , loopVariable :: Bool
-  , entryBinding :: Maybe (Lore.Binding lore, Binding lore)
+  , entryBinding :: Maybe (Lore.LetBound lore, Binding lore)
   }
 
 asExp :: Entry lore -> Maybe (Exp lore)

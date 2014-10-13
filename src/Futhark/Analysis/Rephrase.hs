@@ -16,7 +16,7 @@ import qualified Futhark.Representation.AST.Lore as Lore
 
 data Rephraser from to
   = Rephraser { rephraseExpLore :: Lore.Exp from -> Lore.Exp to
-              , rephraseBindeeLore :: Lore.Binding from -> Lore.Binding to
+              , rephraseBindeeLore :: Lore.LetBound from -> Lore.LetBound to
               , rephraseFParamLore :: Lore.FParam from -> Lore.FParam to
               , rephraseBodyLore :: Lore.Body from -> Lore.Body to
               }

@@ -92,8 +92,8 @@ instance Rename MemSummary where
     return Scalar
 
 instance Lore.Lore ExplicitMemory where
-  type Binding ExplicitMemory = MemSummary
-  type FParam  ExplicitMemory = MemSummary
+  type LetBound ExplicitMemory = MemSummary
+  type FParam   ExplicitMemory = MemSummary
 
 instance TypeCheck.Checkable ExplicitMemory where
   checkExpLore = return
