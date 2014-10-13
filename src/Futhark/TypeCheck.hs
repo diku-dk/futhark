@@ -291,7 +291,7 @@ lookupFun loc fname args = do
           sub (Just p, a) = Just (p, a)
           sub _           = Nothing
           substs = HM.fromList $ mapMaybe sub $ zip paramnames args
-          substInType t = t `setArrayShape` substInShape (arrayShape t)
+          substInType = modifyArrayShape substInShape
           substInShape = ExtShape . map substInDim . extShapeDims
           substInDim (Free (Var v))
             | Just se <- HM.lookup (identName v) substs = Free se

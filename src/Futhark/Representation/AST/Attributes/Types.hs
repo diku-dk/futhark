@@ -2,6 +2,8 @@ module Futhark.Representation.AST.Attributes.Types
        (
          arrayRank
        , arrayShape
+       , modifyArrayShape
+       , setArrayShape
        , uniqueness
        , setUniqueness
        , unifyUniqueness
@@ -16,7 +18,6 @@ module Futhark.Representation.AST.Attributes.Types
 
        , arrayOf
        , setOuterSize
-       , setArrayShape
        , setArrayDims
        , peelArray
        , stripArray
@@ -75,6 +76,22 @@ arrayRank = shapeRank . arrayShape
 arrayShape :: ArrayShape shape => TypeBase shape -> shape
 arrayShape (Array _ ds _) = ds
 arrayShape _              = mempty
+
+-- | Modify the shape of an array - for non-arrays, this does nothing.
+modifyArrayShape :: ArrayShape newshape =>
+                    (oldshape -> newshape) -> TypeBase oldshape -> TypeBase newshape
+modifyArrayShape f (Array t ds u)
+  | shapeRank ds' == 0 = Basic t
+  | otherwise          = Array t (f ds) u
+  where ds' = f ds
+modifyArrayShape _ (Basic t)      = Basic t
+modifyArrayShape _ (Mem size)     = Mem size
+
+-- | Set the shape of an array.  If the given type is not an
+-- array, return the type unchanged.
+setArrayShape :: ArrayShape newshape =>
+                 TypeBase oldshape -> newshape -> TypeBase newshape
+setArrayShape t ds = modifyArrayShape (const ds) t
 
 -- | Return the uniqueness of a type.
 uniqueness :: TypeBase shape -> Uniqueness
@@ -179,16 +196,6 @@ arrayOf (Basic et) size u =
   Array et size u
 arrayOf (Mem {}) _ _ =
   error "arrayOf Mem"
-
--- | Set the shape of an array.  If the given type is not an
--- array, return the type unchanged.
-setArrayShape :: ArrayShape newshape =>
-                 TypeBase oldshape -> newshape -> TypeBase newshape
-setArrayShape (Array et _ u) ds
-  | shapeRank ds == 0 = Basic et
-  | otherwise         = Array et ds u
-setArrayShape (Basic t)  _         = Basic t
-setArrayShape (Mem {}) _ = error "setArrayShape Mem"
 
 -- | Set the dimensions of an array.  If the given type is not an
 -- array, return the type unchanged.
