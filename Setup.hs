@@ -3,6 +3,8 @@
 import Distribution.Simple
 import Distribution.Simple.Setup
 import Distribution.PackageDescription
+import Distribution.Simple.BuildPaths
+import Distribution.Simple.LocalBuildInfo
 import System.Directory (createDirectoryIfMissing)
 import System.Process (readProcess)
 
@@ -12,18 +14,18 @@ import System.Process (readProcess)
 
 main :: IO ()
 main = defaultMainWithHooks myHooks
-  where myHooks = simpleUserHooks { preBuild = myPreBuild }
+  where myHooks = simpleUserHooks { postConf = generateBuildInfoModule }
 
-myPreBuild :: Args -> BuildFlags -> IO HookedBuildInfo
-myPreBuild _ _ = do
-  putStrLn "Generating dist/build/autogen/Build_futhark..."
+generateBuildInfoModule :: Args -> ConfigFlags -> PackageDescription -> LocalBuildInfo -> IO ()
+generateBuildInfoModule _ _ _ buildinfo = do
+  let build_futhark_filename = autogenModulesDir buildinfo ++ "/Build_futhark.hs"
+  putStrLn $ "Generating " ++ build_futhark_filename
   createDirectoryIfMissing True "dist/build/autogen/"
 
   desc <- readProcess "git" ["describe", "--dirty=-modified", "--always"] ""
 
-  writeFile "dist/build/autogen/Build_futhark.hs" $ unlines
+  writeFile build_futhark_filename $ unlines
     [ "module Build_futhark where"
     , "gitCommit :: String"
     , "gitCommit = " ++ show (init desc)
     ]
-  return emptyHookedBuildInfo
