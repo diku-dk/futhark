@@ -13,7 +13,6 @@ module Futhark.Binder
   , letBind
   , letBindPat
   , letWithBind
-  , loopBind
   , bodyBind
   -- * A concrete @Binder@ monad.
   , BinderT
@@ -87,13 +86,6 @@ letWithBind :: MonadBinder m =>
                Certificates -> Ident -> Ident -> [SubExp] -> SubExp -> m ()
 letWithBind cs dest src idxs ve =
   letBind [dest] $ PrimOp $ Update cs src idxs ve $ srclocOf src
-
-loopBind :: MonadBinder m =>
-            [(Ident, SubExp)] -> Ident -> SubExp -> Body (Lore m) -> m ()
-loopBind merge i bound loopbody =
-  letBind mergepat $ LoopOp $
-  DoLoop mergepat merge i bound loopbody $ srclocOf i
-  where mergepat = map fst merge
 
 bodyBind :: MonadBinder m => Body (Lore m) -> m [SubExp]
 bodyBind (Body _ bnds (Result _ es _)) = do

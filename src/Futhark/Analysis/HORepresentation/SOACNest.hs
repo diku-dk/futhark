@@ -31,6 +31,7 @@ import Data.Maybe
 import Futhark.Representation.AST hiding (Map, Reduce, Scan, Filter, Redomap)
 import Futhark.MonadFreshNames
 import Futhark.Binder
+import Futhark.Tools (instantiateExtTypes)
 import Futhark.Analysis.HORepresentation.SOAC (SOAC)
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import Futhark.Substitute
@@ -93,9 +94,8 @@ bodyToLambda inpts (NewNest (Nesting paramNames inps bndIds resCerts retTypes) o
            , lambdaParams = zipWith mkIdents paramNames $ map rowType inpts
            , lambdaReturnType = retTypes
            , lambdaBody =
-             let idents = case instantiatePattern loc bndIds $ typeOf e of
-                   Nothing -> error "Big problem somewhere in SOACNest.bodyToLambda" -- XXX
-                   Just (x,y) -> x ++ y
+             let idents = instantiateExtTypes loc bndIds $
+                          resTypeValues $ typeOf e
              in f $ mkBody [mkLet idents e] $
                 Result resCerts (map Var idents) loc
            }

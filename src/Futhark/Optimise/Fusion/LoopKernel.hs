@@ -43,21 +43,21 @@ transformOutput :: MonadFreshNames m =>
                    SOAC.ArrayTransforms -> [VName] -> SOAC
                 -> m (Maybe (Binder Basic ()))
 transformOutput ts names soac = do
-  let (ctx,val) = splitAt (contextSize soact) names
+  let (ctxnames,valnames) = splitAt (shapeContextSize soact) names
       descend ts' validents =
         case SOAC.viewf ts' of
           SOAC.EmptyF ->
-            forM_ (zip val validents) $ \(k, valident) ->
+            forM_ (zip valnames validents) $ \(k, valident) ->
             letBind [Ident k (identType valident) loc] $
             PrimOp $ SubExp $ Var valident
           t SOAC.:< ts'' -> do
             let es = map (applyTransform t . Var) validents
-            newIds <- forM (zip val $ concatMap primOpType es) $ \(k, opt) ->
+            newIds <- forM (zip valnames $ concatMap primOpType es) $ \(k, opt) ->
               newIdent (baseString k) opt loc
             zipWithM_ letBind (map pure newIds) $ map PrimOp es
             descend ts'' newIds
-  val' <- mapM (newVName . baseString) val
-  case instantiatePattern loc (ctx<>val') soact of
+  valnames' <- mapM (newVName . baseString) valnames
+  case instantiateIdents loc (ctxnames<>valnames') soact of
     Nothing -> return Nothing
     Just (ctxidents,validents) -> return $ Just $ do
       e <- SOAC.toExp soac
@@ -120,7 +120,7 @@ inputs = SOAC.inputs . fsoac
 setInputs :: [SOAC.Input] -> FusedKer -> FusedKer
 setInputs inps ker = ker { fsoac = inps `SOAC.setInputs` fsoac ker }
 
-kernelType :: FusedKer -> ResType
+kernelType :: FusedKer -> [ExtType]
 kernelType = SOAC.typeOf . fsoac
 
 tryOptimizeSOAC :: [Ident] -> SOAC -> FusedKer -> TryFusion FusedKer

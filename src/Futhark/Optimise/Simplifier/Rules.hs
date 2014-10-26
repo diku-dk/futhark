@@ -631,7 +631,7 @@ evaluateBranch :: MonadBinder m => TopDownRule m
 evaluateBranch _ (Let pat _ (If e1 tb fb t _))
   | Just branch <- checkBranch =
   let ses = resultSubExps $ bodyResult branch
-      ses' = subExpShapeContext t ses ++ ses
+      ses' = subExpShapeContext (resTypeValues t) ses ++ ses
   in do mapM_ addBinding $ bodyBindings branch
         sequence_ [ letBindPat (Pattern [p]) $ PrimOp $ SubExp se
                   | (p,se) <- zip (patternBindees pat) ses']
@@ -657,7 +657,8 @@ simplifyBoolBranch _
 simplifyBoolBranch _ (Let pat _ (If cond tb fb ts loc))
   | Body _ [] (Result [] [tres] _) <- tb,
     Body _ [] (Result [] [fres] _) <- fb,
-    all (==Basic Bool) ts,
+    contextSize ts == 0,
+    all (==Basic Bool) $ resTypeValues ts,
     False = do -- FIXME: disable because algebraic optimiser cannot handle it.
   e <- eBinOp LogOr (pure $ PrimOp $ BinOp LogAnd cond tres (Basic Bool) loc)
                     (eBinOp LogAnd (pure $ PrimOp $ Not cond loc)
@@ -672,12 +673,12 @@ hoistBranchInvariant _ (Let pat _ (If e1 tb fb ts loc)) = do
       Result fcs fses fresloc = bodyResult fb
   (pat', res, invariant) <-
     foldM branchInvariant ([], [], False) $
-    zip (patternBindees pat) (zip3 tses fses ts)
+    zip (patternBindees pat) (zip3 tses fses $ resTypeElems ts)
   let (tses', fses', ts') = unzip3 res
       tb' = tb { bodyResult = Result tcs tses' tresloc }
       fb' = fb { bodyResult = Result fcs fses' fresloc }
   if invariant -- Was something hoisted?
-     then letBindPat (Pattern pat') $ If e1 tb' fb' ts' loc
+     then letBindPat (Pattern pat') $ If e1 tb' fb' (ResType ts') loc
      else cannotSimplify
   where branchInvariant (pat', res, invariant) (v, (tse, fse, t))
           | tse == fse = do
@@ -729,9 +730,9 @@ removeDeadBranchResult (_, used) (Let pat _ (If e1 tb fb ts loc))
       pick = map snd . filter fst . zip patused
       tb' = tb { bodyResult = Result tcs (pick tses) tresloc }
       fb' = fb { bodyResult = Result fcs (pick fses) fresloc }
-      ts' = pick ts
+      ts' = pick $ resTypeElems ts
       pat' = pick $ patternIdents pat
-  in letBind pat' $ If e1 tb' fb' ts' loc
+  in letBind pat' $ If e1 tb' fb' (ResType ts') loc
 removeDeadBranchResult _ _ = cannotSimplify
 
 -- Some helper functions

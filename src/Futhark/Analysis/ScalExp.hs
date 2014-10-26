@@ -214,7 +214,8 @@ fromScalExp' loc = convert
               (pick, discard)
                 | isMin     = (cur, next)
                 | otherwise = (next, cur)
-          in eIf cmp (eBody [pure pick]) (eBody [pure discard]) [Basic t] loc
+          in eIf cmp (eBody [pure pick]) (eBody [pure discard])
+             (staticResType [Basic t]) loc
 
         zero Int = PrimOp $ SubExp $ intconst 0 loc
         zero _   = PrimOp $ SubExp $ constant (0::Double) loc

@@ -15,6 +15,7 @@ module Futhark.Representation.Basic
        , Lambda
        , FunDec
        , FParam
+       , ResType
          -- * Module re-exports
        , module Futhark.Representation.AST.Attributes
        , module Futhark.Representation.AST.Traversals
@@ -27,6 +28,7 @@ module Futhark.Representation.Basic
        , AST.ExpT(PrimOp)
        , AST.ExpT(LoopOp)
        , AST.FunDecT(FunDec)
+       , AST.ResTypeT(ResType)
          -- Removing lore
        , removeProgLore
        , removeFunDecLore
@@ -38,12 +40,13 @@ import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
-          Pattern, Lambda, FunDec, FParam)
+          Pattern, Lambda, FunDec, FParam, ResType)
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Pretty
 import Futhark.Renamer
 import Futhark.Binder
+-- import Futhark.Tools (instantiateExtTypes)
 import Futhark.Substitute
 import qualified Futhark.TypeCheck as TypeCheck
 import Futhark.Analysis.Rephrase
@@ -56,6 +59,13 @@ import Futhark.Analysis.Rephrase
 data Basic
 
 instance Lore.Lore Basic where
+  resTypeContext =
+    flip replicate (Basic Int) . shapeContextSize . resTypeValues
+  extResType ts = AST.ResType [ (t, ()) | t <- ts]
+  rt1 `generaliseResTypes` rt2 =
+    extResType $ resTypeValues rt1 `generaliseExtTypes` resTypeValues rt2
+  doLoopResType res merge =
+    extResType $ loopResultType (map identType res) merge
 
 type Prog = AST.Prog Basic
 type PrimOp = AST.PrimOp Basic
@@ -67,12 +77,16 @@ type Pattern = AST.Pattern Basic
 type Lambda = AST.Lambda Basic
 type FunDec = AST.FunDecT Basic
 type FParam = AST.FParam Basic
+type ResType = AST.ResType Basic
 
 instance TypeCheck.Checkable Basic where
   checkExpLore = return
   checkBindingLore = return
   checkBodyLore = return
   checkFParamLore = return
+  checkResType = mapM_ TypeCheck.checkExtType . resTypeValues
+  matchPattern loc pat rt =
+    TypeCheck.matchExtPattern loc (patternIdents pat) (resTypeValues rt)
 
 instance Renameable Basic where
 instance Substitutable Basic where
@@ -80,7 +94,8 @@ instance Proper Basic where
 
 instance Bindable Basic where
   mkBody = AST.Body ()
-  mkLet pat = AST.Let (AST.Pattern $ map (`Bindee` ()) pat) ()
+  mkLet idents =
+    AST.Let (AST.Pattern $ map (`Bindee` ()) idents) ()
 
 instance PrettyLore Basic where
 
@@ -90,6 +105,7 @@ removeLore =
             , rephraseBindeeLore = const ()
             , rephraseBodyLore = const ()
             , rephraseFParamLore = const ()
+            , rephraseResTypeLore = const ()
             }
 
 removeProgLore :: AST.Prog lore -> Prog

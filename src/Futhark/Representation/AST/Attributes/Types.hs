@@ -1,3 +1,4 @@
+{-# LANGUAGE ScopedTypeVariables, AllowAmbiguousTypes #-}
 module Futhark.Representation.AST.Attributes.Types
        (
          arrayRank
@@ -9,9 +10,6 @@ module Futhark.Representation.AST.Attributes.Types
        , unifyUniqueness
        , unique
        , staticShapes
-       , hasStaticShape
-       , instantiateShapes
-       , instantiatePattern
        , basicType
        , basicDecl
        , toDecl
@@ -35,10 +33,18 @@ module Futhark.Representation.AST.Attributes.Types
        , subtypesOf
        , similarTo
 
-       , generaliseResTypes
        , existentialShapes
-       , shapeContext
+       , extractShapeContext
+       , shapeContextSize
        , contextSize
+       , Lore.resTypeValues
+       , Lore.resTypeContext
+       , Lore.extResType
+       , Lore.doLoopResType
+       , Lore.generaliseResTypes
+       , staticResType
+       , hasStaticShape
+       , generaliseExtTypes
        )
        where
 
@@ -47,10 +53,12 @@ import Control.Monad.State
 import Data.Loc
 import Data.Maybe
 import Data.Monoid
-import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
+import qualified Data.HashMap.Lazy as HM
 
 import Futhark.Representation.AST.Syntax
+import Futhark.Representation.AST.Lore (Lore)
+import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Representation.AST.Attributes.Constants
 
 -- | Given a basic type, construct a type without aliasing and shape
@@ -129,58 +137,6 @@ staticShapes = map staticShapes'
           Array bt (ExtShape $ map Free shape) u
         staticShapes' (Mem size) =
           Mem size
-
--- | If all dimensions of the given 'ResType' are statically known,
--- return the corresponding list of 'Type'.
-hasStaticShape :: ResType -> Maybe [Type]
-hasStaticShape = mapM hasStaticShape'
-  where hasStaticShape' (Basic bt) =
-          Just $ Basic bt
-        hasStaticShape' (Mem size) =
-          Just $ Mem size
-        hasStaticShape' (Array bt (ExtShape shape) u) =
-          Array bt <$> (Shape <$> mapM isFree shape) <*> pure u
-        isFree (Free s) = Just s
-        isFree (Ext _)  = Nothing
-
--- | Instantiate all existential parts dimensions of the given
--- 'ResType', using a monadic action to create the necessary
--- 'SubExp's.  You should call this function within some monad that
--- allows you to collect the actions performed (say, 'Writer').
-instantiateShapes :: Monad m => m SubExp -> ResType
-                  -> m [TypeBase Shape]
-instantiateShapes f ts = evalStateT (mapM instantiate ts) HM.empty
-  where instantiate t = do
-          shape <- mapM instantiate' $ extShapeDims $ arrayShape t
-          return $ t `setArrayShape` Shape shape
-        instantiate' (Ext x) = do
-          m <- get
-          case HM.lookup x m of
-            Just se -> return se
-            Nothing -> do se <- lift f
-                          put $ HM.insert x se m
-                          return se
-        instantiate' (Free se) = return se
-
--- | Instantiate a pattern, returning the resulting context-'Ident's
--- and value-'Ident's.
-instantiatePattern :: SrcLoc -> [VName] -> ResType
-                   -> Maybe ([Ident], [Ident])
-instantiatePattern loc names ts
-  | let n = contextSize ts,
-    n + length ts == length names = do
-    let (context, vals) = splitAt n names
-        mkIdent name t = Ident name t loc
-        nextShape = do
-          (context', remaining) <- get
-          case remaining of []   -> lift Nothing
-                            x:xs -> do let ident = Ident x (Basic Int) loc
-                                       put (context'++[ident], xs)
-                                       return $ Var ident
-    (ts', (context', _)) <-
-      runStateT (instantiateShapes nextShape ts) ([],context)
-    return (context', zipWith mkIdent vals ts')
-  | otherwise = Nothing
 
 -- | @arrayOf t s u@ constructs an array type.  The convenience
 -- compared to using the 'Array' constructor directly is that @t@ can
@@ -292,9 +248,9 @@ subuniqueOf _ _ = True
 -- @y@), meaning @x@ is valid whenever @y@ is.
 subtypeOf :: ArrayShape shape => TypeBase shape -> TypeBase shape -> Bool
 subtypeOf (Array t1 shape1 u1) (Array t2 shape2 u2) =
-  u1 `subuniqueOf` u2
-       && t1 == t2
-       && shapeRank shape1 == shapeRank shape2
+  u1 `subuniqueOf` u2 &&
+  t1 == t2 &&
+  shapeRank shape1 == shapeRank shape2
 subtypeOf (Basic t1) (Basic t2) = t1 == t2
 subtypeOf (Mem _) (Mem _) = True
 subtypeOf _ _ = False
@@ -311,10 +267,57 @@ subtypesOf xs ys = length xs == length ys &&
 similarTo :: ArrayShape shape => TypeBase shape -> TypeBase shape -> Bool
 similarTo t1 t2 = t1 `subtypeOf` t2 || t2 `subtypeOf` t1
 
--- | Compute the most specific generalisation of two types with
--- existentially quantified shapes.
-generaliseResTypes :: ResType -> ResType -> ResType
-generaliseResTypes rt1 rt2 =
+existentialShapes :: [TypeBase ExtShape] -> [TypeBase Shape]
+                  -> [SubExp]
+existentialShapes t1s t2s = concat $ zipWith concreteShape' t1s t2s
+  where concreteShape' t1 t2 =
+          catMaybes $ zipWith concretise
+          (extShapeDims $ arrayShape t1)
+          (shapeDims $ arrayShape t2)
+        concretise (Ext _) se  = Just se
+        concretise (Free _) _  = Nothing
+
+extractShapeContext :: [ExtType] -> [[a]] -> [a]
+extractShapeContext ts shapes =
+  evalState (concat <$> zipWithM extract ts shapes) HS.empty
+  where extract t shape =
+          catMaybes <$> zipWithM extract' (extShapeDims $ arrayShape t) shape
+        extract' (Ext x) v = do
+          seen <- gets $ HS.member x
+          if seen then return Nothing
+            else do modify $ HS.insert x
+                    return $ Just v
+        extract' (Free _) _ = return Nothing
+
+shapeContextSize :: [ExtType] -> Int
+shapeContextSize = HS.size
+                   . HS.fromList
+                   . concatMap (mapMaybe existential . extShapeDims . arrayShape)
+  where existential (Ext x)  = Just x
+        existential (Free _) = Nothing
+
+-- | Return the number of distinct variables in the existential context.
+contextSize :: Lore lore => ResType lore -> Int
+contextSize = length . Lore.resTypeContext
+
+-- | Create a ResType from a list of types with known shape.
+staticResType :: Lore l => [Type] -> ResType l
+staticResType = Lore.extResType . staticShapes
+
+-- | If all dimensions of the given 'ResType' are statically known,
+-- return the corresponding list of 'Type'.
+hasStaticShape :: ExtType -> Maybe Type
+hasStaticShape (Basic bt) =
+  Just $ Basic bt
+hasStaticShape (Mem size) =
+  Just $ Mem size
+hasStaticShape (Array bt (ExtShape shape) u) =
+  Array bt <$> (Shape <$> mapM isFree shape) <*> pure u
+  where isFree (Free s) = Just s
+        isFree (Ext _)  = Nothing
+
+generaliseExtTypes :: [ExtType] -> [ExtType] -> [ExtType]
+generaliseExtTypes rt1 rt2 =
   evalState (zipWithM unifyExtShapes rt1 rt2) (0, HM.empty)
   where unifyExtShapes t1 t2 =
           unifyUniqueness <$>
@@ -336,33 +339,3 @@ generaliseResTypes rt1 rt2 =
         new x = do (n,m) <- get
                    put (n + 1, HM.insert x n m)
                    return n
-
-existentialShapes :: [TypeBase ExtShape] -> [TypeBase Shape]
-                  -> [SubExp]
-existentialShapes t1s t2s = concat $ zipWith concreteShape' t1s t2s
-  where concreteShape' t1 t2 =
-          catMaybes $ zipWith concretise
-          (extShapeDims $ arrayShape t1)
-          (shapeDims $ arrayShape t2)
-        concretise (Ext _) se  = Just se
-        concretise (Free _) _  = Nothing
-
-shapeContext :: ResType -> [[a]] -> [a]
-shapeContext ts shapes =
-  evalState (concat <$> zipWithM extract ts shapes) HS.empty
-  where extract t shape =
-          catMaybes <$> zipWithM extract' (extShapeDims $ arrayShape t) shape
-        extract' (Ext x) v = do
-          seen <- gets $ HS.member x
-          if seen then return Nothing
-            else do modify $ HS.insert x
-                    return $ Just v
-        extract' (Free _) _ = return Nothing
-
--- | Return the number of distinct variables in the existential context.
-contextSize :: ResType -> Int
-contextSize = HS.size
-              . HS.fromList
-              . concatMap (mapMaybe existential . extShapeDims . arrayShape)
-  where existential (Ext x)  = Just x
-        existential (Free _) = Nothing

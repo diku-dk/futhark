@@ -23,6 +23,7 @@ import Data.Traversable (mapM)
 
 import Futhark.Representation.External as E
 import Futhark.Representation.Basic as I
+import Futhark.Tools as I
 import Futhark.MonadFreshNames
 
 import Futhark.Internalise.Monad
@@ -135,7 +136,7 @@ flattenPattern (E.TupId pats _) =
 bindingTupIdent :: E.TupIdent -> Maybe SubExp -> ResType -> ([I.Ident] -> InternaliseM a) -> InternaliseM a
 bindingTupIdent pat ce ts m = do
   pat' <- flattenPattern pat
-  (ts',shapes) <- runWriterT $ instantiateShapes instantiate ts
+  (ts',shapes) <- runWriterT $ I.instantiateShapes instantiate $ resTypeValues ts
   let addShapeBindings pat'' = m $ shapes ++ pat''
   case ce of Just ce' -> bindingFlatPatternWithCert ce' pat' ts' addShapeBindings
              Nothing  -> bindingFlatPatternOwnCert pat' ts' addShapeBindings

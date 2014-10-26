@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, FlexibleInstances, MultiParamTypeClasses #-}
+{-# LANGUAGE TypeFamilies, FlexibleInstances, MultiParamTypeClasses, ScopedTypeVariables #-}
 -- | A representation where all bindings are annotated with aliasing
 -- information.
 module Futhark.Representation.Aliases
@@ -16,6 +16,7 @@ module Futhark.Representation.Aliases
        , Exp
        , Lambda
        , FunDec
+       , ResType
          -- * Module re-exports
        , module Futhark.Representation.AST.Attributes
        , module Futhark.Representation.AST.Traversals
@@ -28,6 +29,7 @@ module Futhark.Representation.Aliases
        , AST.ExpT(PrimOp)
        , AST.ExpT(LoopOp)
        , AST.FunDecT(FunDec)
+       , Lore.ResTypeT(ResType)
          -- * Adding aliases
        , addAliasesToPattern
        , mkAliasedLetBinding
@@ -52,7 +54,8 @@ import qualified Text.PrettyPrint.Mainland as PP
 import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
-  hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding, Pattern, Lambda, FunDec)
+  hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
+          Pattern, Lambda, FunDec, ResType)
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.AST.Traversals
@@ -94,6 +97,17 @@ instance Lore.Lore lore => Lore.Lore (Aliases lore) where
   type Exp (Aliases lore) = (Names', Lore.Exp lore)
   type Body (Aliases lore) = (([Names'], Names'), Lore.Body lore)
   type FParam (Aliases lore) = Lore.FParam lore
+  type ResTypeElem (Aliases lore) = Lore.ResTypeElem lore
+  resTypeContext = resTypeContext . removeResTypeAliases
+  generaliseResTypes rt1 rt2 =
+    addAliasesToResType $
+    removeResTypeAliases rt1 `Lore.generaliseResTypes`
+    removeResTypeAliases rt2
+  extResType = addAliasesToResType . Lore.extResType
+  doLoopResType res merge = extResType $ loopResultType (map identType res) merge
+
+addAliasesToResType :: Lore.ResType lore -> Lore.ResType (Aliases lore)
+addAliasesToResType (AST.ResType ts) = AST.ResType ts
 
 type Prog lore = AST.Prog (Aliases lore)
 type PrimOp lore = AST.PrimOp (Aliases lore)
@@ -104,6 +118,7 @@ type Binding lore = AST.Binding (Aliases lore)
 type Pattern lore = AST.Pattern (Aliases lore)
 type Lambda lore = AST.Lambda (Aliases lore)
 type FunDec lore = AST.FunDec (Aliases lore)
+type ResType lore = Lore.ResType (Aliases lore)
 
 instance Renameable lore => Renameable (Aliases lore) where
 instance Substitutable lore => Substitutable (Aliases lore) where
@@ -142,6 +157,7 @@ removeAliases = Rephraser { rephraseExpLore = snd
                           , rephraseBindeeLore = snd
                           , rephraseBodyLore = snd
                           , rephraseFParamLore = id
+                          , rephraseResTypeLore = id
                           }
 
 removeProgAliases :: AST.Prog (Aliases lore) -> AST.Prog lore
@@ -162,7 +178,11 @@ removeBindingAliases = rephraseBinding removeAliases
 removeLambdaAliases :: AST.Lambda (Aliases lore) -> AST.Lambda lore
 removeLambdaAliases = rephraseLambda removeAliases
 
-addAliasesToPattern :: AST.Pattern lore -> Exp lore -> Pattern lore
+removeResTypeAliases :: AST.ResType (Aliases lore) -> AST.ResType lore
+removeResTypeAliases (AST.ResType ts) = AST.ResType ts
+
+addAliasesToPattern :: Lore.Lore lore =>
+                       AST.Pattern lore -> Exp lore -> Pattern lore
 addAliasesToPattern pat e =
   -- Some part of the pattern may be the context, which is not
   -- aliased.
@@ -177,7 +197,8 @@ addAliasesToPattern pat e =
                   | basicType $ bindeeType bindee = mempty
                   | otherwise                     = names
 
-mkAliasedBody :: Lore.Body lore -> [Binding lore] -> Result -> Body lore
+mkAliasedBody :: Lore.Lore lore =>
+                 Lore.Body lore -> [Binding lore] -> Result -> Body lore
 mkAliasedBody innerlore bnds res =
   -- We need to remove the names that are bound in bnds from the alias
   -- and consumption sets.  We do this by computing the transitive
@@ -205,7 +226,8 @@ mkAliasedBody innerlore bnds res =
           names `HS.union` mconcat (map look $ HS.toList names)
           where look k = HM.lookupDefault mempty k aliasmap
 
-mkAliasedLetBinding :: AST.Pattern lore -> Lore.Exp lore -> Exp lore -> Binding lore
+mkAliasedLetBinding :: Lore.Lore lore =>
+                       AST.Pattern lore -> Lore.Exp lore -> Exp lore -> Binding lore
 mkAliasedLetBinding pat explore e =
   Let (addAliasesToPattern pat e) (Names' $ consumedInExp e, explore) e
 

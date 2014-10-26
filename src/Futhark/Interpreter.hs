@@ -238,7 +238,7 @@ evalExp (If e1 e2 e3 rettype pos) = do
   vs <- case v of BasicVal (LogVal True)  -> evalBody e2
                   BasicVal (LogVal False) -> evalBody e3
                   _                       -> bad $ TypeError pos "evalExp If"
-  return $ valueShapeContext rettype vs ++ vs
+  return $ valueShapeContext (resTypeValues rettype) vs ++ vs
 evalExp (Apply fname args _ loc)
   | "trace" <- nameToString fname = do
   vs <- mapM (evalSubExp . fst) args
@@ -246,7 +246,7 @@ evalExp (Apply fname args _ loc)
   return vs
 evalExp (Apply fname args rettype _) = do
   vs <- evalFuncall fname $ map fst args
-  return $ valueShapeContext rettype vs ++ vs
+  return $ valueShapeContext (resTypeValues rettype) vs ++ vs
 evalExp (PrimOp op) = evalPrimOp op
 evalExp (LoopOp op) = evalLoopOp op
 
@@ -457,10 +457,12 @@ evalLoopOp (Scan _ fun inputs loc) = do
             acc' <- applyLambda fun $ acc ++ x
             return (acc', acc' : l)
 
-evalLoopOp e@(Filter _ fun arrexp loc) = do
+evalLoopOp (Filter _ fun arrexp loc) = do
   vss <- mapM (arrToList loc <=< evalSubExp) arrexp
   vss' <- filterM filt $ transpose vss
-  return $ BasicVal (IntVal $ length vss') : arrays (loopOpType e) vss'
+  return $
+    BasicVal (IntVal $ length vss') :
+    arrays (filterType fun $ map subExpType arrexp) vss'
   where filt x = do
           res <- applyLambda fun x
           case res of [BasicVal (LogVal True)] -> return True

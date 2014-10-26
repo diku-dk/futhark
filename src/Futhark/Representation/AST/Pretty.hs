@@ -6,6 +6,7 @@
 -- the interface from 'Pretty'.
 module Futhark.Representation.AST.Pretty
   ( ppType
+  , ppResType
   , ppValue
   , ppValues
   , ppBinding
@@ -78,6 +79,9 @@ instance Pretty (TypeBase Rank) where
 
 instance Pretty (IdentBase shape) where
   ppr = text . textual . identName
+
+instance PrettyLore lore => Pretty (ResType lore) where
+  ppr = braces . commasep . map ppr . resTypeValues
 
 hasArrayLit :: SubExp -> Bool
 hasArrayLit (Constant val _) = hasArrayVal val
@@ -155,8 +159,8 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
   ppr (Alloc e _) = text "alloc" <> apply [ppr e]
 
 instance PrettyLore lore => Pretty (LoopOp lore) where
-  ppr (DoLoop respat mergepat i bound loopbody _) =
-    text "loop" <+> ppPattern respat <+>
+  ppr (DoLoop res mergepat i bound loopbody _) =
+    text "loop" <+> ppPattern res <+>
     text "<-" <+> ppPattern pat <+> equals <+> ppTuple' initexp </>
     text "for" <+> ppr i <+> text "<" <+> align (ppr bound) <+> text "do" </>
     indent 2 (ppr loopbody)
@@ -194,7 +198,7 @@ instance PrettyLore lore => Pretty (Lambda lore) where
 instance PrettyLore lore => Pretty (FunDec lore) where
   ppr fundec@(FunDec name rettype args body _) =
     maybe id (</>) (ppFunDecLore fundec) $
-    text "fun" <+> ppResType rettype <+>
+    text "fun" <+> ppr rettype <+>
     text (nameToString name) <//>
     apply (map (ppParam . bindeeIdent) args) <+>
     equals </> indent 2 (ppr body)
@@ -224,9 +228,6 @@ ppPattern = braces . commasep . map ppBind
 
 ppBind :: Ident -> Doc
 ppBind ident = ppr (identType ident) <+> ppr ident
-
-ppResType :: ResType -> Doc
-ppResType = braces . commasep . map ppr
 
 ppTuple' :: Pretty a => [a] -> Doc
 ppTuple' ets = braces $ commasep $ map ppr ets
@@ -281,6 +282,10 @@ ppFun = render80
 -- | Prettyprint a list enclosed in curly braces.
 ppTuple :: Pretty a => [a] -> String
 ppTuple = pretty 80 . ppTuple'
+
+-- | Prettyprint a 'ResType', wrapped to 80 characters.
+ppResType :: PrettyLore lore => ResType lore -> String
+ppResType = render80
 
 -- | Prettyprint an entire Futhark program, wrapped to 80 characters.
 prettyPrint :: PrettyLore lore => Prog lore -> String

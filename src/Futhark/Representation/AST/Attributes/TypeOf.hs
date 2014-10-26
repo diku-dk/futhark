@@ -8,6 +8,7 @@ module Futhark.Representation.AST.Attributes.TypeOf
        , mapType
        , scanType
        , filterType
+       , loopResultType
        , valueShapeContext
        , subExpShapeContext
        , loopResult
@@ -22,6 +23,7 @@ import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
 
 import Futhark.Representation.AST.Syntax
+import Futhark.Representation.AST.Lore (Lore)
 import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Values
@@ -38,7 +40,7 @@ mapType f arrts = [ arrayOf t (Shape [outersize]) (uniqueness t)
 scanType :: [Type] -> [Type]
 scanType = map (`setUniqueness` Unique)
 
-filterType :: Lambda lore -> [Type] -> ResType
+filterType :: Lambda lore -> [Type] -> [ExtType]
 filterType _ =
   map extOuterDim
   where extOuterDim t =
@@ -46,9 +48,9 @@ filterType _ =
         extOuterDim' (Shape dims) =
           Ext 0 : map Free (drop 1 dims)
 
-loopResultType :: [Type] -> [(Ident, SubExp)] -> ResType
+loopResultType :: [Type] -> [Ident] -> [ExtType]
 loopResultType restypes merge = evalState (mapM inspect restypes) 0
-  where bound = map (identName . fst) merge
+  where bound = map identName merge
         inspect t = do
           shape <- mapM inspectShape $ arrayDims t
           return $ t `setArrayShape` ExtShape shape
@@ -105,29 +107,29 @@ primOpType (Conjoin _ _) =
 primOpType (Alloc e _) =
   [Mem e]
 
-loopOpType :: LoopOp lore -> ResType
+loopOpType :: Lore lore => LoopOp lore -> ResType lore
 loopOpType (DoLoop res merge _ _ _ _) =
-  loopResultType (map identType res) merge
+  doLoopResType res $ map fst merge
 loopOpType (Map _ f arrs _) =
-  staticShapes $ mapType f $ map subExpType arrs
+  staticResType $ mapType f $ map subExpType arrs
 loopOpType (Reduce _ fun _ _) =
-  staticShapes $ lambdaReturnType fun
+  staticResType $ lambdaReturnType fun
 loopOpType (Scan _ _ inputs _) =
-  staticShapes $ scanType $ map (subExpType . snd) inputs
+  staticResType $ scanType $ map (subExpType . snd) inputs
 loopOpType (Filter _ f arrs _) =
-  filterType f $ map subExpType arrs
+  extResType $ filterType f $ map subExpType arrs
 loopOpType (Redomap _ outerfun _ _ _ _) =
-  staticShapes $ lambdaReturnType outerfun
+  staticResType $ lambdaReturnType outerfun
 
 -- | The type of a Futhark term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
-typeOf :: Exp lore -> ResType
-typeOf (PrimOp op) = staticShapes $ primOpType op
+typeOf :: Lore lore => Exp lore -> ResType lore
+typeOf (PrimOp op) = staticResType $ primOpType op
 typeOf (LoopOp op) = loopOpType op
 typeOf (If _ _ _ t _) = t
 typeOf (Apply _ _ t _) = t
 
-bodyType :: Body lore -> ResType
+bodyType :: Body lore -> [ExtType]
 bodyType (Body _ bnds res) =
   evalState (mapM makeBoundShapesFree $
              staticShapes $ map subExpType $ resultSubExps res)
@@ -155,13 +157,13 @@ bodyType (Body _ bnds res) =
                           return $ Ext $ n+1
             Just replacement -> return replacement
 
-valueShapeContext :: [TypeBase ExtShape] -> [Value] -> [Value]
+valueShapeContext :: [ExtType] -> [Value] -> [Value]
 valueShapeContext rettype values =
-  map value $ shapeContext rettype $ map valueShape values
+  map value $ extractShapeContext rettype $ map valueShape values
 
-subExpShapeContext :: [TypeBase ExtShape] -> [SubExp] -> [SubExp]
+subExpShapeContext :: [ExtType] -> [SubExp] -> [SubExp]
 subExpShapeContext rettype ses =
-  shapeContext rettype $ map (arrayDims . subExpType) ses
+  extractShapeContext rettype $ map (arrayDims . subExpType) ses
 
 -- | A loop returns not only the values indicated in the result
 -- pattern, but also any non-static shapes of arrays.  Thus,

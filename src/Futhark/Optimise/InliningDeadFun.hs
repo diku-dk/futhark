@@ -149,7 +149,8 @@ inlineInBody inlcallees (Body _ (bnd@(Let pat _ (Apply fname args rtp _)):bnds) 
       addArgBnd :: (Ident, SubExp) -> Body -> Body
       addArgBnd (farg, aarg) body =
           [mkLet [farg] $ PrimOp $ SubExp aarg] `insertBindings` body
-      withShapes ses = existentialShapes rtp (map subExpType ses) ++ ses
+      withShapes ses = existentialShapes (resTypeValues rtp)
+                       (map subExpType ses) ++ ses
 inlineInBody inlcallees b = mapBody (inliner inlcallees) b
 
 inliner :: Monad m => [FunDec] -> Mapper Basic Basic m

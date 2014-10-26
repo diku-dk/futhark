@@ -51,11 +51,14 @@ genPredicate (FunDec fname rettype params body loc) = do
   (pred_body, Body _ val_bnds val_res) <- runGenM env $ splitFunBody body
   let mkFParam = flip Bindee ()
       pred_args = [ (Var arg, Observe) | arg <- map bindeeIdent params ]
-      pred_bnd = mkLet [pred_ident] $ Apply predFname pred_args [Basic Bool] loc
-      cert_bnd = mkLet [cert_ident] $ PrimOp $ Assert (Var pred_ident) loc
+      pred_bnd = mkLet [pred_ident] $
+                 Apply predFname pred_args (staticResType [Basic Bool]) loc
+      cert_bnd = mkLet [cert_ident] $
+                 PrimOp $ Assert (Var pred_ident) loc
       val_fun = FunDec fname rettype params
                 (mkBody (pred_bnd:cert_bnd:val_bnds) val_res) loc
-      pred_fun = FunDec predFname [Basic Bool] (map mkFParam pred_params)
+      pred_fun = FunDec predFname (staticResType [Basic Bool])
+                 (map mkFParam pred_params)
                  (bnds `insertBindings` pred_body) loc
   return (pred_fun, val_fun)
   where predFname = predicateFunctionName fname
@@ -152,7 +155,8 @@ splitBinding (Let pat _ (If cond tbranch fbranch t loc)) = do
   (fbranch_pred, fbranch_val) <- splitBody fbranch
   ok <- newIdent "if_ok" (Basic Bool) loc
   return ([mkLet (patternIdents pat<>[ok]) $
-           If cond tbranch_pred fbranch_pred (t++[Basic Bool]) loc],
+           If cond tbranch_pred fbranch_pred
+           (t<>staticResType [Basic Bool]) loc],
           mkLetPat pat $ If cond tbranch_val fbranch_val t loc,
           Just $ Var ok)
 

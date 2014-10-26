@@ -61,7 +61,7 @@ foldClosedForm look pat lam accs arrs = do
   tb <- resultBodyM [] accs lamloc
   letBind (patternIdents pat) $
     If (Var isEmpty) tb closedBody'
-    (staticShapes $ lambdaReturnType lam)
+    (staticResType $ lambdaReturnType lam)
     lamloc
   where lamloc = srclocOf lam
 
@@ -87,7 +87,7 @@ loopClosedForm pat respat merge bound body
       If (Var isEmpty)
       tb
       closedBody'
-      (bodyType body)
+      (extResType $ bodyType body)
       bodyloc
   | otherwise = cannotSimplify
   where (mergepat, mergeexp) = unzip merge

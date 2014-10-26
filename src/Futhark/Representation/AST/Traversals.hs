@@ -74,6 +74,7 @@ data Mapper flore tlore m = Mapper {
   , mapOnIdent :: Ident -> m Ident
   , mapOnValue :: Value -> m Value
   , mapOnCertificates :: Certificates -> m Certificates
+  , mapOnResType :: ResType flore -> m (ResType tlore)
   }
 
 -- | A mapper that simply returns the tree verbatim.
@@ -87,6 +88,7 @@ identityMapper = Mapper {
                  , mapOnIdent = return
                  , mapOnValue = return
                  , mapOnCertificates = return
+                 , mapOnResType = return
                  }
 
 -- | Map a monadic action across the immediate children of a body.
@@ -172,8 +174,8 @@ mapExpM tv (PrimOp (Assert e loc)) =
   PrimOp <$> (pure Assert <*> mapOnSubExp tv e <*> pure loc)
 mapExpM tv (PrimOp (Conjoin es loc)) =
   PrimOp <$> (pure Conjoin <*> mapM (mapOnSubExp tv) es <*> pure loc)
-mapExpM tv (LoopOp (DoLoop respat mergepat loopvar boundexp loopbody loc)) =
-  LoopOp <$> (DoLoop <$> mapM (mapOnIdent tv) respat <*>
+mapExpM tv (LoopOp (DoLoop res mergepat loopvar boundexp loopbody loc)) =
+  LoopOp <$> (DoLoop <$> mapM (mapOnIdent tv) res <*>
               (zip <$> mapM (mapOnIdent tv) vs <*> mapM (mapOnSubExp tv) es) <*>
               mapOnIdent tv loopvar <*> mapOnSubExp tv boundexp <*>
               mapOnBody tv loopbody <*> pure loc)
@@ -205,17 +207,6 @@ mapExpM tv (LoopOp (Redomap cs redfun mapfun accexps arrexps loc)) =
               mapM (mapOnSubExp tv) accexps <*> mapM (mapOnSubExp tv) arrexps <*>
               pure loc)
 
-mapOnResType :: (Monad m, Applicative m) =>
-                Mapper flore tlore m -> ResType -> m ResType
-mapOnResType tv = mapM mapOnResType'
-  where mapOnResType' (Array bt (ExtShape shape) u) =
-          Array bt <$> (ExtShape <$> mapM mapOnExtSize shape) <*>
-          return u
-        mapOnResType' (Basic bt) = return $ Basic bt
-        mapOnResType' (Mem size) = return $ Mem size
-        mapOnExtSize (Ext x)   = return $ Ext x
-        mapOnExtSize (Free se) = Free <$> mapOnSubExp tv se
-
 -- | Like 'mapExp', but in the 'Identity' monad.
 mapExp :: Mapper flore tlore Identity -> Exp flore -> Exp tlore
 mapExp m = runIdentity . mapExpM m
@@ -230,6 +221,7 @@ data Folder a lore m = Folder {
   , foldOnIdent :: a -> Ident -> m a
   , foldOnValue :: a -> Value -> m a
   , foldOnCertificates :: a -> Certificates -> m a
+  , foldOnResType :: a -> ResType lore -> m a
   }
 
 -- | A folding operation where the accumulator is returned verbatim.
@@ -243,6 +235,7 @@ identityFolder = Folder {
                  , foldOnIdent = const . return
                  , foldOnValue = const . return
                  , foldOnCertificates = const . return
+                 , foldOnResType = const . return
                  }
 
 foldMapper :: Monad m => Folder a lore m -> Mapper lore lore (StateT a m)
@@ -255,6 +248,7 @@ foldMapper f = Mapper {
                , mapOnIdent = wrap foldOnIdent
                , mapOnValue = wrap foldOnValue
                , mapOnCertificates = wrap foldOnCertificates
+               , mapOnResType = wrap foldOnResType
                }
   where wrap op k = do
           v <- get
@@ -292,6 +286,7 @@ data Walker lore m = Walker {
   , walkOnIdent :: Ident -> m ()
   , walkOnValue :: Value -> m ()
   , walkOnCertificates :: Certificates -> m ()
+  , walkOnResType :: ResType lore -> m ()
   }
 
 -- | A no-op traversal.
@@ -305,6 +300,7 @@ identityWalker = Walker {
                  , walkOnIdent = const $ return ()
                  , walkOnValue = const $ return ()
                  , walkOnCertificates = const $ return ()
+                 , walkOnResType = const $ return ()
                  }
 
 walkMapper :: Monad m => Walker lore m -> Mapper lore lore m
@@ -317,6 +313,7 @@ walkMapper f = Mapper {
                , mapOnIdent = wrap walkOnIdent
                , mapOnValue = wrap walkOnValue
                , mapOnCertificates = wrap walkOnCertificates
+               , mapOnResType = wrap walkOnResType
                }
   where wrap op k = op f k >> return k
 

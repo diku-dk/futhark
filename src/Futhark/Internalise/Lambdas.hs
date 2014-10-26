@@ -150,7 +150,8 @@ bindMapShapes cs sizefun args outer_shape
     letTupExp "shape" =<< eIf isempty emptybranch nonemptybranch rt loc
   where loc = srclocOf sizefun
         zero = intconst 0 loc
-        rt = map (const $ I.Basic I.Int) $ I.lambdaReturnType sizefun
+        rt = staticResType $
+             map (const $ I.Basic I.Int) $ I.lambdaReturnType sizefun
         isempty = eBinOp I.Equal
                   (pure $ I.PrimOp $ I.SubExp outer_shape)
                   (pure $ I.PrimOp $ SubExp zero)

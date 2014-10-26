@@ -12,6 +12,7 @@ module Futhark.Representation.AST.Syntax.Core
          , TypeBase(..)
          , Type
          , DeclType
+         , ExtType
          , Diet(..)
 
          -- * Values
@@ -123,6 +124,11 @@ type Type = TypeBase Shape
 
 -- | A type without shape information, used for declarations.
 type DeclType = TypeBase Rank
+
+-- | A type with existentially quantified shapes - used as part of
+-- function (and function-like) return types.  Generally only makes
+-- sense when used in a list.
+type ExtType = TypeBase ExtShape
 
 -- | Information about which parts of a value/type are consumed.  For
 -- example, we might say that a function taking three arguments of

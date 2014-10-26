@@ -117,7 +117,12 @@ deadCodeElimExp e = mapExpM mapper e
                  , mapOnCertificates = mapM deadCodeElimIdent
                  , mapOnType = deadCodeElimType
                  , mapOnValue = return
+                 , mapOnResType = deadCodeElimResType
                  }
+
+deadCodeElimResType :: ResType -> DCElimM ResType
+deadCodeElimResType =
+  liftM extResType . mapM deadCodeElimExtType . resTypeValues
 
 deadCodeElimIdent :: Ident -> DCElimM Ident
 deadCodeElimIdent ident@(Ident vnm t _) = do
@@ -132,6 +137,13 @@ deadCodeElimBnd :: Ident -> DCElimM Ident
 deadCodeElimBnd ident = do
   t <- deadCodeElimType $ identType ident
   return $ ident { identType = t }
+
+deadCodeElimExtType :: ExtType -> DCElimM ExtType
+deadCodeElimExtType t = do
+  dims <- mapM deadCodeElimExtDim $ extShapeDims $ arrayShape t
+  return $ t `setArrayShape` ExtShape dims
+  where deadCodeElimExtDim (Free se) = Free <$> deadCodeElimSubExp se
+        deadCodeElimExtDim (Ext k)   = return $ Ext k
 
 deadCodeElimType :: Type -> DCElimM Type
 deadCodeElimType t = do

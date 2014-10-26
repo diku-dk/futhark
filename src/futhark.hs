@@ -116,7 +116,12 @@ printAction :: Action
 printAction = ("prettyprinter", putStrLn . I.prettyPrint . aliasAnalysis)
 
 printAllocedAction :: Action
-printAllocedAction = ("prettyprinter", putStrLn . I.prettyPrint . aliasAnalysis . explicitAllocations)
+printAllocedAction = ("prettyprinter", act)
+  where act prog =
+          let prog' = explicitAllocations prog in
+          case I.checkProg prog' of
+            Left err    -> error $ "Type error with explicit allocations:\n" ++ show err ++ "\n" ++ I.prettyPrint prog'
+            Right prog'' -> putStrLn $ I.prettyPrint prog''
 
 externaliseAction :: Action
 externaliseAction = ("externalise", putStrLn . E.prettyPrint . externaliseProg)

@@ -35,6 +35,12 @@ module Futhark.Tools
   , nonuniqueParams
 
   , module Futhark.Binder
+
+  -- * Result types
+  , instantiateShapes
+  , instantiateShapesFromIdentList
+  , instantiateExtTypes
+  , instantiateIdents
   )
 where
 
@@ -43,29 +49,36 @@ import qualified Data.HashMap.Lazy as HM
 import Data.Loc
 import Control.Applicative
 import Control.Monad.Identity
+import Control.Monad.State
 import Control.Monad.Writer
 
 import Futhark.Representation.AST
+import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.MonadFreshNames
 import Futhark.Substitute
 import Futhark.Binder
+
+simpleType :: Lore.Lore lore => ResType lore -> Maybe Type
+simpleType rt = case (resTypeContext rt, resTypeValues rt) of
+  ([], [t]) -> hasStaticShape t
+  _         -> Nothing
 
 letSubExp :: MonadBinder m =>
              String -> Exp (Lore m) -> m SubExp
 letSubExp _ (PrimOp (SubExp se)) = return se
 letSubExp desc e =
-  case typeOf e of
-    [_] -> Var <$> letExp desc e
-    _   -> fail $ "letSubExp: tuple-typed expression given for " ++ desc ++ ":\n" ++ ppExp e
+  case simpleType $ typeOf e of
+    Just _ -> Var <$> letExp desc e
+    _      -> fail $ "letSubExp: tuple-typed expression given for " ++ desc ++ ":\n" ++ ppExp e
 
 letExp :: MonadBinder m =>
           String -> Exp (Lore m) -> m Ident
 letExp _ (PrimOp (SubExp (Var v))) = return v
 letExp desc e =
-  case hasStaticShape $ typeOf e of
-    Just [t] -> do v <- fst <$> newVar (srclocOf e) desc t
-                   letBind [v] e
-                   return v
+  case simpleType $ typeOf e of
+    Just t -> do v <- fst <$> newVar (srclocOf e) desc t
+                 letBind [v] e
+                 return v
     _   -> fail $ "letExp: tuple-typed expression given:\n" ++ ppExp e
 
 letSubExps :: MonadBinder m =>
@@ -76,11 +89,12 @@ letExps :: MonadBinder m =>
            String -> [Exp (Lore m)] -> m [Ident]
 letExps desc = mapM $ letExp desc
 
-letShapedExp :: MonadBinder m => String -> Exp (Lore m)
+letShapedExp :: (MonadBinder m) =>
+                String -> Exp (Lore m)
              -> m ([Ident], [Ident])
 letShapedExp _ (PrimOp (SubExp (Var v))) = return ([], [v])
 letShapedExp name e = do
-  (ts, shapes) <- runWriterT $ instantiateShapes instantiate $ typeOf e
+  (ts, shapes) <- runWriterT $ instantiateShapes instantiate $ resTypeValues $ typeOf e
   names <- mapM (liftM fst . newVar loc name) ts
   letBind (shapes++names) e
   return (shapes, names)
@@ -89,11 +103,13 @@ letShapedExp name e = do
                          tell [v]
                          return $ Var v
 
-letTupExp :: MonadBinder m => String -> Exp (Lore m)
+letTupExp :: (MonadBinder m) =>
+             String -> Exp (Lore m)
           -> m [Ident]
 letTupExp name e = snd <$> letShapedExp name e
 
-letTupExp' :: MonadBinder m => String -> Exp (Lore m)
+letTupExp' :: (MonadBinder m) =>
+              String -> Exp (Lore m)
            -> m [SubExp]
 letTupExp' _ (PrimOp (SubExp se)) = return [se]
 letTupExp' name ses = do vs <- letTupExp name ses
@@ -106,7 +122,9 @@ newVar loc name tp = do
   return (Ident x tp loc, Var $ Ident x tp loc)
 
 eIf :: (MonadBinder m) =>
-       m (Exp (Lore m)) -> m (Body (Lore m)) -> m (Body (Lore m)) -> ResType -> SrcLoc
+       m (Exp (Lore m)) -> m (Body (Lore m)) -> m (Body (Lore m))
+    -> ResType (Lore m)
+    -> SrcLoc
     -> m (Exp (Lore m))
 eIf ce te fe ts loc = do
   ce' <- letSubExp "cond" =<< ce
@@ -175,7 +193,8 @@ eBody es = insertBindingsM $ do
 
 eLambda :: MonadBinder m =>
            Lambda (Lore m) -> [SubExp] -> m [SubExp]
-eLambda lam args = do zipWithM_ letBind params $ map (PrimOp . SubExp) args
+eLambda lam args = do zipWithM_ letBind params $
+                        map (PrimOp . SubExp) args
                       bodyBind $ lambdaBody lam
   where params = map pure $ lambdaParams lam
 
@@ -196,7 +215,8 @@ binOpLambda bop t loc = do
   x   <- newIdent "x"   t loc
   y   <- newIdent "y"   t loc
   res <- newIdent "res" t loc
-  let bnds = [mkLet [res] $ PrimOp $ BinOp bop (Var x) (Var y) t loc]
+  let bnds = [mkLet [res] $
+              PrimOp $ BinOp bop (Var x) (Var y) t loc]
   return Lambda {
              lambdaParams     = [x, y]
            , lambdaReturnType = [t]
@@ -208,11 +228,11 @@ makeLambda :: (Bindable (Lore m), MonadBinder m) =>
               [Param] -> m (Body (Lore m)) -> m (Lambda (Lore m))
 makeLambda params body = do
   body' <- insertBindingsM body
-  case hasStaticShape $ bodyType body' of
+  case mapM hasStaticShape $ bodyType body' of
     Nothing -> fail "Body passed to makeLambda has open type"
     Just ts ->
       return Lambda {
-        lambdaParams = params
+          lambdaParams = params
         , lambdaSrcLoc = srclocOf body'
         , lambdaReturnType = ts
         , lambdaBody = body'
@@ -291,3 +311,58 @@ nonuniqueParams params = do
   return (params', concat bnds)
   where nonuniqueParam param =
           param { identType = identType param `setUniqueness` Nonunique }
+
+-- | Instantiate all existential parts dimensions of the given
+-- 'ResType', using a monadic action to create the necessary
+-- 'SubExp's.  You should call this function within some monad that
+-- allows you to collect the actions performed (say, 'Writer').
+instantiateShapes :: Monad m => m SubExp -> [TypeBase ExtShape]
+                  -> m [TypeBase Shape]
+instantiateShapes f ts = evalStateT (mapM instantiate ts) HM.empty
+  where instantiate t = do
+          shape <- mapM instantiate' $ extShapeDims $ arrayShape t
+          return $ t `setArrayShape` Shape shape
+        instantiate' (Ext x) = do
+          m <- get
+          case HM.lookup x m of
+            Just se -> return se
+            Nothing -> do se <- lift f
+                          put $ HM.insert x se m
+                          return se
+        instantiate' (Free se) = return se
+
+instantiateShapesFromIdentList :: [Ident] -> [ExtType] -> [Type]
+instantiateShapesFromIdentList idents ts =
+  evalState (instantiateShapes instantiate ts) idents
+  where instantiate = do
+          idents' <- get
+          case idents' of
+            [] -> fail "instantiateShapesFromIdentList: insufficiently sized context"
+            ident:idents'' -> do put idents''
+                                 return $ Var ident
+
+instantiateExtTypes :: SrcLoc -> [VName] -> [ExtType] -> [Ident]
+instantiateExtTypes loc names rt =
+  let (shapenames,valnames) = splitAt (shapeContextSize rt) names
+      shapes = [ Ident name (Basic Int) loc | name <- shapenames ]
+      valts  = instantiateShapesFromIdentList shapes rt
+      vals   = [ Ident name t loc | (name,t) <- zip valnames valts ]
+  in shapes ++ vals
+
+instantiateIdents :: SrcLoc -> [VName] -> [ExtType]
+                  -> Maybe ([Ident], [Ident])
+instantiateIdents loc names ts
+  | let n = shapeContextSize ts,
+    n + length ts == length names = do
+    let (context, vals) = splitAt n names
+        mkIdent name t = Ident name t loc
+        nextShape = do
+          (context', remaining) <- get
+          case remaining of []   -> lift Nothing
+                            x:xs -> do let ident = Ident x (Basic Int) loc
+                                       put (context'++[ident], xs)
+                                       return $ Var ident
+    (ts', (context', _)) <-
+      runStateT (instantiateShapes nextShape ts) ([],context)
+    return (context', zipWith mkIdent vals ts')
+  | otherwise = Nothing

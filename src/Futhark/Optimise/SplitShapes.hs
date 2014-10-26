@@ -58,21 +58,25 @@ functionSlices (FunDec fname rettype params body@(Body _ bodybnds bodyres) loc) 
   -- Give names to the existentially quantified sizes of the return
   -- type.  These will be passed as parameters to the value function.
   (staticRettype, shapeidents) <-
-    runWriterT $ instantiateShapes instantiate rettype
+    runWriterT $
+    instantiateShapes instantiate $ resTypeValues rettype
 
   valueBody <- substituteExtResultShapes staticRettype body
 
-  let valueRettype = staticShapes staticRettype
+  let valueRettype = staticResType staticRettype
       valueParams = shapeidents ++ map bindeeIdent params
       shapeBody = mkBody (cpybnds <> bodybnds)
                   bodyres { resultSubExps = shapes }
       mkFParam = flip Bindee ()
-      fShape = FunDec shapeFname shapeRettype (map mkFParam shapeParams)
+      fShape = FunDec shapeFname (extResType shapeRettype)
+               (map mkFParam shapeParams)
                shapeBody loc
-      fValue = FunDec valueFname valueRettype (map mkFParam valueParams)
+      fValue = FunDec valueFname valueRettype
+               (map mkFParam valueParams)
                valueBody loc
   return (fShape, fValue)
-  where shapes = subExpShapeContext rettype $ resultSubExps bodyres
+  where shapes = subExpShapeContext (resTypeValues rettype) $
+                 resultSubExps bodyres
         shapeRettype = staticShapes $ map subExpType shapes
         shapeFname = fname <> nameFromString "_shape"
         valueFname = fname <> nameFromString "_value"
@@ -139,7 +143,9 @@ substCalls subst fundec = do
         treatBinding (Let pat _ (Apply fname args _ loc))
           | Just (shapefun,shapetype,valfun,valtype) <- lookup fname subst =
             liftM snd . runBinder'' $ do
-              let (vs,vals) = splitAt (length shapetype) $ patternBindees pat
+              let (vs,vals) =
+                    splitAt (length $ resTypeElems shapetype) $
+                    patternBindees pat
               letBindPat (Pattern vs) $
                 Apply shapefun args shapetype loc
               letBindPat (Pattern vals) $

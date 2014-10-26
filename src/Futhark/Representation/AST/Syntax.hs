@@ -17,6 +17,7 @@ module Futhark.Representation.AST.Syntax
   , TypeBase(..)
   , Type
   , DeclType
+  , ExtType
   , Diet(..)
 
   -- * Values
@@ -42,6 +43,7 @@ module Futhark.Representation.AST.Syntax
   , LoopOp (..)
   , ExpT(..)
   , Exp
+  , ResTypeT (..)
   , ResType
   , LambdaT(..)
   , Lambda
@@ -62,7 +64,7 @@ import Data.Loc
 import Data.Monoid
 
 import Language.Futhark.Core
-import Futhark.Representation.AST.Lore (Lore)
+import Futhark.Representation.AST.Lore (Lore, ResType, ResTypeT)
 import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Representation.AST.Syntax.Core
 
@@ -228,7 +230,10 @@ data LoopOp lore
   | Scan   Certificates (LambdaT lore) [(SubExp, SubExp)] SrcLoc
   | Filter  Certificates (LambdaT lore) [SubExp] SrcLoc
   | Redomap Certificates (LambdaT lore) (LambdaT lore) [SubExp] [SubExp] SrcLoc
-  deriving (Eq, Ord, Show)
+
+deriving instance Lore lore => Eq (LoopOp lore)
+deriving instance Lore lore => Show (LoopOp lore)
+deriving instance Lore lore => Ord (LoopOp lore)
 
 instance Located (LoopOp lore) where
   locOf (DoLoop _ _ _ _ _ loc) = locOf loc
@@ -248,10 +253,13 @@ data ExpT lore
 
   | LoopOp (LoopOp lore)
 
-  | Apply  Name [(SubExp, Diet)] ResType SrcLoc
+  | Apply  Name [(SubExp, Diet)] (ResType lore) SrcLoc
 
-  | If     SubExp (BodyT lore) (BodyT lore) ResType SrcLoc
-  deriving (Eq, Ord, Show)
+  | If     SubExp (BodyT lore) (BodyT lore) (ResType lore) SrcLoc
+
+deriving instance Lore lore => Eq (ExpT lore)
+deriving instance Lore lore => Show (ExpT lore)
+deriving instance Lore lore => Ord (ExpT lore)
 
 -- | A type alias for namespace control.
 type Exp = ExpT
@@ -261,12 +269,6 @@ instance Located (ExpT lore) where
   locOf (LoopOp op) = locOf op
   locOf (Apply _ _ _ pos) = locOf pos
   locOf (If _ _ _ _ pos) = locOf pos
-
--- | A type denoting the return type of an expression or function
--- call.  If a function returns an array, we can either know the size
--- in advance ('Known'), or receive it as part of the return value
--- ('Existential' - refers to the type being dependent).
-type ResType = [TypeBase ExtShape]
 
 -- | Anonymous function for use in a tuple-SOAC.
 data LambdaT lore =
@@ -287,7 +289,7 @@ type FParam lore = Bindee (Lore.FParam lore)
 
 -- | Function Declarations
 data FunDecT lore = FunDec { funDecName :: Name
-                           , funDecRetType :: ResType
+                           , funDecRetType :: ResType lore
                            , funDecParams :: [FParam lore]
                            , funDecBody :: BodyT lore
                            , funDecSrcLoc :: SrcLoc

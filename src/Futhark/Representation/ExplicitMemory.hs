@@ -14,6 +14,7 @@ module Futhark.Representation.ExplicitMemory
        , Lambda
        , FunDec
        , FParam
+       , ResType
          -- * Module re-exports
        , module Futhark.Representation.AST.Attributes
        , module Futhark.Representation.AST.Traversals
@@ -26,6 +27,7 @@ module Futhark.Representation.ExplicitMemory
        , AST.ExpT(PrimOp)
        , AST.ExpT(LoopOp)
        , AST.FunDecT(FunDec)
+       , AST.ResTypeT(ResType)
        )
 where
 
@@ -41,7 +43,7 @@ import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
-          Pattern, Lambda, FunDec, FParam)
+          Pattern, Lambda, FunDec, FParam, ResType)
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Pretty
@@ -64,6 +66,7 @@ type Pattern = AST.Pattern ExplicitMemory
 type Lambda = AST.Lambda ExplicitMemory
 type FunDec = AST.FunDec ExplicitMemory
 type FParam = AST.FParam ExplicitMemory
+type ResType = AST.ResType ExplicitMemory
 
 data MemSummary = MemSummary Ident IxFun.IxFun
                 | Scalar

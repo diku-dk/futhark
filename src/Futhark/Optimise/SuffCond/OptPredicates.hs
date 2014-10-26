@@ -89,7 +89,8 @@ insertPredicateCalls subst prog =
 
 maybeOptimiseFun :: MonadFreshNames m =>
                     RuleBook (VariantM m) -> FunDec -> m [FunDec]
-maybeOptimiseFun rules fundec@(FunDec _ [Basic Bool] _ body _) = do
+maybeOptimiseFun rules fundec@(FunDec _ ret _ body _)
+  | [Basic Bool] <- resTypeValues ret = do
   let sctable = analyseBody (ST.empty :: ST.SymbolTable Basic) mempty body
   generateOptimisedPredicates rules fundec sctable
 maybeOptimiseFun _ _ = return []
@@ -107,7 +108,7 @@ generateOptimisedPredicates' :: MonadFreshNames m =>
 generateOptimisedPredicates'
   rules (FunDec fname rettype params body loc) suff sctable depth = do
   res <- runVariantM env $ Simplify.insertAllBindings $
-         Simplify.simplifyBody (map diet rettype) $
+         Simplify.simplifyBody (map diet $ resTypeValues rettype) $
          rephraseWithInvariance body
   case res of
     (body', _) -> do

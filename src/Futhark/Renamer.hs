@@ -141,8 +141,14 @@ instance Renameable lore => Rename (FunDec lore) where
     bind (map bindeeIdent params) $ do
       params' <- mapM rename params
       body' <- rename body
-      ret' <- mapM rename ret
+      ret' <- rename ret
       return $ FunDec fname ret' params' body' loc
+
+instance Renameable lore => Rename (ResTypeT lore) where
+  rename (ResType ts) = liftM ResType $ forM ts $ \(t,attr) -> do
+    t'    <- rename t
+    attr' <- rename attr
+    return (t', attr')
 
 instance Rename SubExp where
   rename (Var v)          = Var <$> rename v
@@ -192,6 +198,7 @@ instance Renameable lore => Rename (Exp lore) where
                     , mapOnType = rename
                     , mapOnValue = return
                     , mapOnCertificates = mapM rename
+                    , mapOnResType = rename
                     }
 
 instance (Rename shape) =>
@@ -233,5 +240,6 @@ instance Rename () where
 class (Rename (Lore.LetBound lore),
        Rename (Lore.Exp lore),
        Rename (Lore.Body lore),
-       Rename (Lore.FParam lore)) =>
+       Rename (Lore.FParam lore),
+       Rename (Lore.ResTypeElem lore)) =>
       Renameable lore where

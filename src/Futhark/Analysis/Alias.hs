@@ -3,30 +3,34 @@ module Futhark.Analysis.Alias
        )
        where
 
+import Futhark.Representation.AST.Lore (Lore)
 import qualified Futhark.Representation.AST.Syntax as In
 import qualified Futhark.Representation.Aliases as Out
 
-aliasAnalysis :: In.Prog lore -> Out.Prog lore
+aliasAnalysis :: Lore lore => In.Prog lore -> Out.Prog lore
 aliasAnalysis = Out.Prog . map analyseFun . In.progFunctions
 
-analyseFun :: In.FunDec lore -> Out.FunDec lore
-analyseFun (In.FunDec fname rettype params body loc) =
-  Out.FunDec fname rettype params body' loc
+analyseFun :: Lore lore => In.FunDec lore -> Out.FunDec lore
+analyseFun (In.FunDec fname restype params body loc) =
+  Out.FunDec fname (analyseResType restype) params body' loc
   where body' = analyseBody body
 
-analyseBody :: In.Body lore -> Out.Body lore
+analyseBody :: Lore lore => In.Body lore -> Out.Body lore
 analyseBody (In.Body lore origbnds result) =
   let bnds' = map analyseBinding origbnds
   in Out.mkAliasedBody lore bnds' result
 
-analyseBinding :: In.Binding lore -> Out.Binding lore
+analyseBinding :: Lore lore => In.Binding lore -> Out.Binding lore
 analyseBinding (In.Let pat lore e) =
   let e' = analyseExp e
       pat' = Out.addAliasesToPattern pat e'
       lore' = (Out.Names' $ Out.consumedInExp e', lore)
   in Out.Let pat' lore' e'
 
-analyseExp :: In.Exp lore -> Out.Exp lore
+analyseResType :: Lore lore => In.ResType lore -> Out.ResType lore
+analyseResType (In.ResType ts) = Out.ResType ts
+
+analyseExp :: Lore lore => In.Exp lore -> Out.Exp lore
 analyseExp (Out.LoopOp (In.Map cs lam args loc)) =
   Out.LoopOp $
   Out.Map cs (analyseLambda lam) args loc
@@ -55,9 +59,10 @@ analyseExp e = Out.mapExp traverse e
                      , Out.mapOnBody = return . analyseBody
                      , Out.mapOnBinding = return . analyseBinding
                      , Out.mapOnLambda = error "Improperly handled lambda in alias analysis"
+                     , Out.mapOnResType = return .analyseResType
                      }
 
-analyseLambda :: In.Lambda lore -> Out.Lambda lore
+analyseLambda :: Lore lore => In.Lambda lore -> Out.Lambda lore
 analyseLambda lam =
   let body = analyseBody $ In.lambdaBody lam
   in lam { Out.lambdaBody = body }

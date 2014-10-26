@@ -145,13 +145,13 @@ fuseFilterInto lam1 inp1 out1 lam2 inp2 vnames falsebranch = (lam2', HM.elems in
         branch = flip mapResult (lambdaBody lam1) $ \res ->
                  let [e] = resultSubExps res in -- XXX
                  mkBody [mkLet residents $
-                       If e
-                       (makeCopiesInner $ lambdaBody lam2)
-                       falsebranch
-                       (zipWith unifyUniqueness
-                        (bodyType (lambdaBody lam2))
-                        (bodyType falsebranch))
-                       loc] $
+                         If e
+                         (makeCopiesInner $ lambdaBody lam2)
+                         falsebranch
+                         (extResType (bodyType (lambdaBody lam2))
+                          `generaliseResTypes`
+                          extResType (bodyType falsebranch))
+                         loc] $
                  Result (resultCertificates res) (map Var residents) loc
         lam1tuple = [ mkLet [v] $ PrimOp $ SubExp $ Var p
                     | (v,p) <- zip pat $ lambdaParams lam1 ]

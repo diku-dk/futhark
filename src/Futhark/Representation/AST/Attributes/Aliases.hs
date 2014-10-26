@@ -94,7 +94,7 @@ aliasesOf (If _ tb fb _ _) =
 aliasesOf (PrimOp op) = primOpAliases op
 aliasesOf (LoopOp op) = loopOpAliases op
 aliasesOf (Apply _ args t _) =
-  funcallAliases args $ map toDecl t
+  funcallAliases args $ map toDecl $ resTypeValues t
 
 returnAliases :: [TypeBase shape1] -> [(Names, Diet)] -> [Names]
 returnAliases rts args = map returnType' rts

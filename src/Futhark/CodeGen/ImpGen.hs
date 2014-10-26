@@ -106,18 +106,18 @@ compileFunDec ec src (FunDec fname rettype params body _) =
             compileExtBody rettype outs body
             return $ zipWith Imp.Param outs $ map (compileType . subExpType) ses'
         ses = resultSubExps $ bodyResult body
-        ses' = subExpShapeContext rettype ses ++ ses
+        ses' = subExpShapeContext (resTypeValues rettype) ses ++ ses
 
 compileBody :: [VName] -> Body -> ImpM op ()
 compileBody targets body = compileExtBody rettype targets body
-  where rettype = staticShapes $ map subExpType $
+  where rettype = staticResType $ map subExpType $
                   resultSubExps $ bodyResult body
 
-compileExtBody :: [TypeBase ExtShape] -> [VName] -> Body -> ImpM op ()
+compileExtBody :: ResType -> [VName] -> Body -> ImpM op ()
 compileExtBody rettype targets (Body _ bnds (Result _ ses _)) = do
   mapM_ compileBinding bnds
   zipWithM_ compileSubExpTo targets $
-    subExpShapeContext rettype ses ++ ses
+    subExpShapeContext (resTypeValues rettype) ses ++ ses
 
 compileBinding :: Binding -> ImpM op ()
 compileBinding (Let pat _ e) =

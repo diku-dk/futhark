@@ -191,11 +191,14 @@ explicitAllocations prog =
   Prog $ evalState (mapM allocInFun $ In.progFunctions prog) free
   where free = newNameSourceForProg prog
 
+memoryInResType :: In.ResType -> ResType
+memoryInResType = undefined
+
 allocInFun :: MonadFreshNames m => In.FunDec -> m FunDec
 allocInFun (In.FunDec fname rettype params body loc) =
   runAllocM $ allocInFParams params $ \params' -> do
     body' <- insertBindingsM $ allocInBody body
-    return $ FunDec fname rettype params' body' loc
+    return $ FunDec fname (memoryInResType rettype) params' body' loc
 
 allocInBody :: In.Body -> AllocM Body
 allocInBody (Body _ bnds res) =
@@ -246,11 +249,12 @@ allocInExp (LoopOp (Map cs f arrs loc)) = do
   return $ LoopOp $ Map cs f' (Var is:arrs) loc
 allocInExp (Apply fname args rettype loc) = do
   args' <- funcallArgs args
-  return $ Apply fname args' rettype loc
+  return $ Apply fname args' (memoryInResType rettype) loc
 allocInExp e = mapExpM alloc e
   where alloc = identityMapper { mapOnBinding = allocInBinding
                                , mapOnBody = allocInBody
                                , mapOnLambda = allocInLambda
+                               , mapOnResType = return . memoryInResType
                                }
 
 allocInLambda :: In.Lambda -> AllocM Lambda

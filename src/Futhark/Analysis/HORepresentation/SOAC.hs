@@ -428,7 +428,7 @@ certificates (Scan    cs _ _     _) = cs
 certificates (Filter  cs _   _   _) = cs
 certificates (Redomap cs _ _ _ _ _) = cs
 
-typeOf :: SOAC lore -> ResType
+typeOf :: SOAC lore -> [ExtType]
 typeOf (Map _ lam inps _) =
   staticShapes $ mapType lam $ map inputType inps
 typeOf (Reduce _ lam _ _) =

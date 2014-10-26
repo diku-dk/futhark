@@ -425,12 +425,12 @@ simplifyBinding :: MonadEngine m =>
 -- access to the full program.  This is a bit of a hack.
 simplifyBinding (Let pat _ (Apply fname args rettype loc)) = do
   args' <- mapM (simplifySubExp . fst) args
-  rettype' <- mapM simplifyExtType rettype
+  rettype' <- simplifyResType rettype
   prog <- asksEngineEnv envProgram
   vtable <- getVtable
   case join $ pure simplifyApply <*> prog <*> pure vtable <*> pure fname <*> pure args of
     -- Array values are non-unique, so we may need to copy them.
-    Just vs -> do let vs' = valueShapeContext rettype vs ++ vs
+    Just vs -> do let vs' = valueShapeContext (resTypeValues rettype) vs ++ vs
                   bnds <- forM (zip (patternIdents pat) vs') $ \(p,v) ->
                     case uniqueness $ identType p of
                       Unique    -> mkLetM [p] $ PrimOp $ Copy (Constant v loc) loc
@@ -463,10 +463,11 @@ simplifyExp (If cond tbranch fbranch t loc) = do
   -- variable, and if so, chomp it.  We also try to do CSE across
   -- branches.
   cond' <- simplifySubExp cond
-  t' <- mapM simplifyExtType t
+  t' <- simplifyResType t
+  let ds = map diet $ resTypeValues t'
   (tbranch',fbranch') <-
-    hoistCommon (simplifyBody (map diet t') tbranch) (ST.updateBounds True cond)
-                (simplifyBody (map diet t') fbranch) (ST.updateBounds False cond)
+    hoistCommon (simplifyBody ds tbranch) (ST.updateBounds True cond)
+                (simplifyBody ds fbranch) (ST.updateBounds False cond)
   return $ If cond' tbranch' fbranch' t' loc
 
 simplifyExp (LoopOp op) = LoopOp <$> simplifyLoopOp op
@@ -488,6 +489,7 @@ simplifyExpBase = mapExpM hoist
                 , mapOnType = simplifyType
                 , mapOnValue = return
                 , mapOnCertificates = simplifyCerts
+                , mapOnResType = simplifyResType
                 }
 
 simplifyLoopOp :: MonadEngine m => LoopOp (InnerLore m) -> m (LoopOp (Lore m))
@@ -599,6 +601,13 @@ simplifyIdent v = do
   t' <- simplifyType $ identType v
   return v { identType = t' }
 
+simplifyResType :: MonadEngine m =>
+                   ResType (InnerLore m) -> m (ResType (Lore m))
+simplifyResType (ResType rts) =
+  liftM ResType $ forM rts $ \(t, annot) -> do
+    t' <- simplifyExtType t
+    return (t', annot)
+
 simplifyExtType :: MonadEngine m =>
                    TypeBase ExtShape -> m (TypeBase ExtShape)
 simplifyExtType t = do dims <- mapM simplifyDim $ extShapeDims $ arrayShape t
@@ -709,9 +718,10 @@ simplifyProg rules prog =
 simplifyFun :: MonadEngine m =>
                FunDec (InnerLore m) -> m (FunDec (Lore m))
 simplifyFun (FunDec fname rettype params body loc) = do
+  rettype' <- simplifyResType rettype
   body' <- insertAllBindings $ bindParams (map bindeeIdent params) $
-           simplifyBody (map diet rettype) body
-  return $ FunDec fname rettype params body' loc
+           simplifyBody (map diet $ resTypeValues rettype') body
+  return $ FunDec fname rettype' params body' loc
 
 -- | Simplify the given function.  Even if the output differs from the
 -- output, meaningful simplification may not have taken place - the

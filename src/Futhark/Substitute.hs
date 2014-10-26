@@ -83,6 +83,7 @@ replace substs = Mapper {
                  , mapOnValue = return
                  , mapOnLambda = return . substituteNames substs
                  , mapOnCertificates = return . map (substituteNames substs)
+                 , mapOnResType = return . substituteNames substs
                  }
 
 instance Substitute Rank where
@@ -113,6 +114,10 @@ instance (Substitute shape) => Substitute (TypeBase shape) where
   substituteNames substs (Mem sz) =
     Mem $ substituteNames substs sz
 
+instance Substitutable lore => Substitute (ResType lore) where
+  substituteNames substs (ResType ts) =
+    ResType $ map (substituteNames substs) ts
+
 instance Substitutable lore => Substitute (Lambda lore) where
   substituteNames substs (Lambda params body rettype loc) =
     Lambda params (substituteNames substs body)
@@ -128,5 +133,6 @@ instance Substitute Ident where
 -- substitution.
 class (Substitute (Lore.Exp lore),
        Substitute (Lore.LetBound lore),
-       Substitute (Lore.FParam lore)) =>
+       Substitute (Lore.FParam lore),
+       Substitute (Lore.ResTypeElem lore)) =>
       Substitutable lore where
