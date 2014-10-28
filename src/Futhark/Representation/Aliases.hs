@@ -97,17 +97,7 @@ instance Lore.Lore lore => Lore.Lore (Aliases lore) where
   type Exp (Aliases lore) = (Names', Lore.Exp lore)
   type Body (Aliases lore) = (([Names'], Names'), Lore.Body lore)
   type FParam (Aliases lore) = Lore.FParam lore
-  type ResTypeElem (Aliases lore) = Lore.ResTypeElem lore
-  resTypeContext = resTypeContext . removeResTypeAliases
-  generaliseResTypes rt1 rt2 =
-    addAliasesToResType $
-    removeResTypeAliases rt1 `Lore.generaliseResTypes`
-    removeResTypeAliases rt2
-  extResType = addAliasesToResType . Lore.extResType
-  doLoopResType res merge = extResType $ loopResultType (map identType res) merge
-
-addAliasesToResType :: Lore.ResType lore -> Lore.ResType (Aliases lore)
-addAliasesToResType (AST.ResType ts) = AST.ResType ts
+  type ResTypeAttr (Aliases lore) = Lore.ResTypeAttr lore
 
 type Prog lore = AST.Prog (Aliases lore)
 type PrimOp lore = AST.PrimOp (Aliases lore)
@@ -118,17 +108,17 @@ type Binding lore = AST.Binding (Aliases lore)
 type Pattern lore = AST.Pattern (Aliases lore)
 type Lambda lore = AST.Lambda (Aliases lore)
 type FunDec lore = AST.FunDec (Aliases lore)
-type ResType lore = Lore.ResType (Aliases lore)
+type ResType lore = AST.ResType (Aliases lore)
 
 instance Renameable lore => Renameable (Aliases lore) where
 instance Substitutable lore => Substitutable (Aliases lore) where
 instance Proper lore => Proper (Aliases lore) where
 
-instance Aliased (Aliases lore) where
+instance Lore.Lore lore => Aliased (Aliases lore) where
   bodyAliases = map unNames . fst . fst . bodyLore
   consumedInBody = unNames . snd . fst . bodyLore
 
-instance PrettyLore lore => PrettyLore (Aliases lore) where
+instance (PrettyLore lore) => PrettyLore (Aliases lore) where
   ppBindingLore binding =
     case catMaybes [bindeeAnnots,
                     expAnnot,
@@ -157,7 +147,7 @@ removeAliases = Rephraser { rephraseExpLore = snd
                           , rephraseBindeeLore = snd
                           , rephraseBodyLore = snd
                           , rephraseFParamLore = id
-                          , rephraseResTypeLore = id
+                          , rephraseResType = id
                           }
 
 removeProgAliases :: AST.Prog (Aliases lore) -> AST.Prog lore
@@ -178,17 +168,14 @@ removeBindingAliases = rephraseBinding removeAliases
 removeLambdaAliases :: AST.Lambda (Aliases lore) -> AST.Lambda lore
 removeLambdaAliases = rephraseLambda removeAliases
 
-removeResTypeAliases :: AST.ResType (Aliases lore) -> AST.ResType lore
-removeResTypeAliases (AST.ResType ts) = AST.ResType ts
-
 addAliasesToPattern :: Lore.Lore lore =>
                        AST.Pattern lore -> Exp lore -> Pattern lore
 addAliasesToPattern pat e =
   -- Some part of the pattern may be the context, which is not
   -- aliased.
-  let patternAliases = replicate (contextSize $ typeOf e) mempty
-  in AST.Pattern $ zipWith annotateBindee (patternBindees pat) $
-     patternAliases <> aliasesOf e
+  let als = aliasesOf e
+      als' = replicate (patternSize pat - length als) mempty <> als
+  in AST.Pattern $ zipWith annotateBindee (patternBindees pat) als'
   where annotateBindee bindee names =
           bindee { bindeeLore =
                       (Names' names', bindeeLore bindee)
@@ -215,11 +202,12 @@ mkAliasedBody innerlore bnds res =
           (map (aliasClosure aliasmap . subExpAliases) $ resultSubExps res,
            consumed)
         delve (aliasmap, consumed) (bnd:bnds') =
-          let e = bindingExp bnd
-              aliases =
-                replicate (contextSize $ typeOf e) mempty <> aliasesOf e
+          let pat = bindingPattern bnd
+              e = bindingExp bnd
+              als = aliasesOf e
+              als' = replicate (patternSize pat - length als) mempty <> als
               names = patternNames $ bindingPattern bnd
-              aliasmap' = HM.fromList (zip names aliases) <> aliasmap
+              aliasmap' = HM.fromList (zip names als') <> aliasmap
               consumed' = consumed <> aliasClosure aliasmap (consumedInExp e)
           in delve (aliasmap', consumed') bnds'
         aliasClosure aliasmap names =

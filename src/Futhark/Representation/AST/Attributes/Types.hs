@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables, AllowAmbiguousTypes #-}
+{-# LANGUAGE ScopedTypeVariables, AllowAmbiguousTypes, FlexibleInstances #-}
 module Futhark.Representation.AST.Attributes.Types
        (
          arrayRank
@@ -35,16 +35,11 @@ module Futhark.Representation.AST.Attributes.Types
 
        , existentialShapes
        , extractShapeContext
+       , shapeContext
        , shapeContextSize
-       , contextSize
-       , Lore.resTypeValues
-       , Lore.resTypeContext
-       , Lore.extResType
-       , Lore.doLoopResType
-       , Lore.generaliseResTypes
-       , staticResType
        , hasStaticShape
        , generaliseExtTypes
+       , module ResType
        )
        where
 
@@ -57,8 +52,8 @@ import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
 
 import Futhark.Representation.AST.Syntax
-import Futhark.Representation.AST.Lore (Lore)
-import qualified Futhark.Representation.AST.Lore as Lore
+import Futhark.Representation.AST.ResType hiding (ResType)
+import qualified Futhark.Representation.AST.ResType as ResType
 import Futhark.Representation.AST.Attributes.Constants
 
 -- | Given a basic type, construct a type without aliasing and shape
@@ -228,7 +223,7 @@ diet :: TypeBase shape -> Diet
 diet (Basic _) = Observe
 diet (Array _ _ Unique) = Consume
 diet (Array _ _ Nonunique) = Observe
-diet (Mem _) = error "diet Mem"
+diet (Mem _) = Observe -- error "diet Mem"
 
 -- | @t `dietingAs` d@ modifies the uniqueness attributes of @t@ to
 -- reflect how it is consumed according to @d@ - if it is consumed, it
@@ -289,20 +284,16 @@ extractShapeContext ts shapes =
                     return $ Just v
         extract' (Free _) _ = return Nothing
 
-shapeContextSize :: [ExtType] -> Int
-shapeContextSize = HS.size
-                   . HS.fromList
-                   . concatMap (mapMaybe existential . extShapeDims . arrayShape)
+-- | The set of identifiers used for the shape context in the given
+-- 'ExtType's.
+shapeContext :: [ExtType] -> HS.HashSet Int
+shapeContext = HS.fromList
+               . concatMap (mapMaybe existential . extShapeDims . arrayShape)
   where existential (Ext x)  = Just x
         existential (Free _) = Nothing
 
--- | Return the number of distinct variables in the existential context.
-contextSize :: Lore lore => ResType lore -> Int
-contextSize = length . Lore.resTypeContext
-
--- | Create a ResType from a list of types with known shape.
-staticResType :: Lore l => [Type] -> ResType l
-staticResType = Lore.extResType . staticShapes
+shapeContextSize :: [ExtType] -> Int
+shapeContextSize = HS.size . shapeContext
 
 -- | If all dimensions of the given 'ResType' are statically known,
 -- return the corresponding list of 'Type'.
@@ -339,3 +330,31 @@ generaliseExtTypes rt1 rt2 =
         new x = do (n,m) <- get
                    put (n + 1, HM.insert x n m)
                    return n
+
+instance Monoid (ResTypeT ()) where
+  mempty = ResType mempty
+  ResType xs `mappend` ResType ys =
+    ResType $ xs <> ys
+
+instance ResType.ResType (ResTypeT ()) where
+  simpleType = mapM hasStaticShape . resTypeValues
+  rt1 `generaliseResTypes` rt2 =
+    extResType $ resTypeValues rt1 `generaliseExtTypes` resTypeValues rt2
+  extResType ts = ResType [ (t, ()) | t <- ts]
+  doLoopResType res merge =
+    extResType $ loopResultType (map identType res) merge
+  staticResType = extResType . staticShapes
+  resTypeValues (ResType ts) = map fst ts
+
+loopResultType :: [Type] -> [Ident] -> [ExtType]
+loopResultType restypes merge = evalState (mapM inspect restypes) 0
+  where bound = map identName merge
+        inspect t = do
+          shape <- mapM inspectShape $ arrayDims t
+          return $ t `setArrayShape` ExtShape shape
+        inspectShape (Var v)
+          | identName v `elem` bound = do
+            i <- get
+            put $ i + 1
+            return $ Ext i
+        inspectShape se = return $ Free se

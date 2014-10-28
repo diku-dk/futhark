@@ -8,11 +8,14 @@ module Futhark.Optimise.Simplifier.Apply
   )
   where
 
+import Futhark.Representation.AST.Lore (Lore)
 import Futhark.Representation.AST
 import qualified Futhark.Interpreter as Interp
 import qualified Futhark.Analysis.SymbolTable as ST
 
-simplifyApply :: Prog lore -> ST.SymbolTable anylore -> Name -> [(SubExp,Diet)] -> Maybe [Value]
+simplifyApply :: Lore lore =>
+                 Prog lore -> ST.SymbolTable anylore -> Name -> [(SubExp,Diet)]
+              -> Maybe [Value]
 simplifyApply program vtable fname args = do
   vals <- allArgsAreValues $ map fst args
   either (const Nothing) Just $ Interp.runFunNoTrace fname vals program

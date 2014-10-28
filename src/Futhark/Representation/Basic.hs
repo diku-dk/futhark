@@ -59,13 +59,6 @@ import Futhark.Analysis.Rephrase
 data Basic
 
 instance Lore.Lore Basic where
-  resTypeContext =
-    flip replicate (Basic Int) . shapeContextSize . resTypeValues
-  extResType ts = AST.ResType [ (t, ()) | t <- ts]
-  rt1 `generaliseResTypes` rt2 =
-    extResType $ resTypeValues rt1 `generaliseExtTypes` resTypeValues rt2
-  doLoopResType res merge =
-    extResType $ loopResultType (map identType res) merge
 
 type Prog = AST.Prog Basic
 type PrimOp = AST.PrimOp Basic
@@ -105,7 +98,7 @@ removeLore =
             , rephraseBindeeLore = const ()
             , rephraseBodyLore = const ()
             , rephraseFParamLore = const ()
-            , rephraseResTypeLore = const ()
+            , rephraseResType = removeResTypeLore
             }
 
 removeProgLore :: AST.Prog lore -> Prog
@@ -116,3 +109,7 @@ removeFunDecLore = rephraseFunDec removeLore
 
 removeBodyLore :: AST.Body lore -> Body
 removeBodyLore = rephraseBody removeLore
+
+removeResTypeLore :: ResTypeT attr -> ResTypeT ()
+removeResTypeLore (AST.ResType ts)  =
+  AST.ResType [ (t, ()) | (t, _) <- ts ]

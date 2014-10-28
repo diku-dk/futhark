@@ -389,7 +389,7 @@ checkProg' checkoccurs prog = do
     -- duplicate function definitions.  The position information is
     -- removed at the end.
     buildFtable = HM.map rmLoc <$>
-                  foldM expand (HM.map addLoc initialFtable)
+                  foldM expand (HM.map addLoc (initialFtable prog'))
                   (progFunctions prog')
     expand ftable (FunDec name ret args _ pos)
       | Just (_,_,pos2) <- HM.lookup name ftable =
@@ -401,8 +401,9 @@ checkProg' checkoccurs prog = do
     rmLoc (ret,args,_) = (ret,args)
     addLoc (t, ts) = (t, ts, noLoc)
 
-initialFtable :: Lore lore => HM.HashMap Name (FunBinding lore)
-initialFtable = HM.map addBuiltin builtInFunctions
+-- The prog argument is just to disambiguate the lore.
+initialFtable :: Lore lore => Prog lore -> HM.HashMap Name (FunBinding lore)
+initialFtable _ = HM.map addBuiltin builtInFunctions
   where addBuiltin (t, ts) = (staticResType [Basic t],
                               zip (repeat Nothing) $ map Basic ts)
 
@@ -438,7 +439,7 @@ checkFun' (fname, rettype, params, _, loc) check = do
 
   checkReturnAlias $ bodyAliases body'
 
-  if bodyType body' == resTypeValues rettype' then
+  if bodyType body' `subtypesOf` resTypeValues rettype' then
     return (rettype', body')
   else bad $ ReturnTypeError loc fname
              (Several $ map toDecl $ resTypeValues rettype')
@@ -756,8 +757,8 @@ checkExp (If e1 e2 e3 t pos) = do
   e1' <- require [Basic Bool] =<< checkSubExp e1
   ((e2', e3'), dflow) <- collectDataflow $ checkBody e2 `alternative` checkBody e3
   tell dflow
-  let t' = Lore.extResType (bodyType e2') `Lore.generaliseResTypes`
-           Lore.extResType (bodyType e3') `Lore.generaliseResTypes`
+  let t' = extResType (bodyType e2') `generaliseResTypes`
+           extResType (bodyType e3') `generaliseResTypes`
            t
   when (t' /= t) $
     bad $ TypeError pos $ "Expected if result type " ++ ppResType t

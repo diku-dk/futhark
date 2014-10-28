@@ -12,7 +12,7 @@ aliasAnalysis = Out.Prog . map analyseFun . In.progFunctions
 
 analyseFun :: Lore lore => In.FunDec lore -> Out.FunDec lore
 analyseFun (In.FunDec fname restype params body loc) =
-  Out.FunDec fname (analyseResType restype) params body' loc
+  Out.FunDec fname restype params body' loc
   where body' = analyseBody body
 
 analyseBody :: Lore lore => In.Body lore -> Out.Body lore
@@ -26,9 +26,6 @@ analyseBinding (In.Let pat lore e) =
       pat' = Out.addAliasesToPattern pat e'
       lore' = (Out.Names' $ Out.consumedInExp e', lore)
   in Out.Let pat' lore' e'
-
-analyseResType :: Lore lore => In.ResType lore -> Out.ResType lore
-analyseResType (In.ResType ts) = Out.ResType ts
 
 analyseExp :: Lore lore => In.Exp lore -> Out.Exp lore
 analyseExp (Out.LoopOp (In.Map cs lam args loc)) =
@@ -59,7 +56,7 @@ analyseExp e = Out.mapExp traverse e
                      , Out.mapOnBody = return . analyseBody
                      , Out.mapOnBinding = return . analyseBinding
                      , Out.mapOnLambda = error "Improperly handled lambda in alias analysis"
-                     , Out.mapOnResType = return .analyseResType
+                     , Out.mapOnResType = return
                      }
 
 analyseLambda :: Lore lore => In.Lambda lore -> Out.Lambda lore

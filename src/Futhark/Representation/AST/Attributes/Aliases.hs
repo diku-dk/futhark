@@ -16,9 +16,10 @@ import Data.Monoid
 import qualified Data.HashSet as HS
 
 import Futhark.Representation.AST.Syntax
+import Futhark.Representation.AST.Lore (Lore)
 import Futhark.Representation.AST.Attributes.Types
 
-class Aliased lore where
+class Lore lore => Aliased lore where
   bodyAliases :: Body lore -> [Names]
   consumedInBody :: Body lore -> Names
 

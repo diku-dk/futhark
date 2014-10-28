@@ -144,7 +144,7 @@ instance Renameable lore => Rename (FunDec lore) where
       ret' <- rename ret
       return $ FunDec fname ret' params' body' loc
 
-instance Renameable lore => Rename (ResTypeT lore) where
+instance Rename attr => Rename (ResTypeT attr) where
   rename (ResType ts) = liftM ResType $ forM ts $ \(t,attr) -> do
     t'    <- rename t
     attr' <- rename attr
@@ -241,5 +241,5 @@ class (Rename (Lore.LetBound lore),
        Rename (Lore.Exp lore),
        Rename (Lore.Body lore),
        Rename (Lore.FParam lore),
-       Rename (Lore.ResTypeElem lore)) =>
+       Rename (Lore.ResTypeAttr lore)) =>
       Renameable lore where

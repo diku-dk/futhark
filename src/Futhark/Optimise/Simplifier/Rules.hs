@@ -657,8 +657,8 @@ simplifyBoolBranch _
 simplifyBoolBranch _ (Let pat _ (If cond tb fb ts loc))
   | Body _ [] (Result [] [tres] _) <- tb,
     Body _ [] (Result [] [fres] _) <- fb,
-    contextSize ts == 0,
-    all (==Basic Bool) $ resTypeValues ts,
+    Just ts' <- simpleType ts,
+    all (==Basic Bool) ts',
     False = do -- FIXME: disable because algebraic optimiser cannot handle it.
   e <- eBinOp LogOr (pure $ PrimOp $ BinOp LogAnd cond tres (Basic Bool) loc)
                     (eBinOp LogAnd (pure $ PrimOp $ Not cond loc)

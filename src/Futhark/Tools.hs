@@ -53,32 +53,26 @@ import Control.Monad.State
 import Control.Monad.Writer
 
 import Futhark.Representation.AST
-import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.MonadFreshNames
 import Futhark.Substitute
 import Futhark.Binder
-
-simpleType :: Lore.Lore lore => ResType lore -> Maybe Type
-simpleType rt = case (resTypeContext rt, resTypeValues rt) of
-  ([], [t]) -> hasStaticShape t
-  _         -> Nothing
 
 letSubExp :: MonadBinder m =>
              String -> Exp (Lore m) -> m SubExp
 letSubExp _ (PrimOp (SubExp se)) = return se
 letSubExp desc e =
   case simpleType $ typeOf e of
-    Just _ -> Var <$> letExp desc e
-    _      -> fail $ "letSubExp: tuple-typed expression given for " ++ desc ++ ":\n" ++ ppExp e
+    Just [_] -> Var <$> letExp desc e
+    _        -> fail $ "letSubExp: tuple-typed expression given for " ++ desc ++ ":\n" ++ ppExp e
 
 letExp :: MonadBinder m =>
           String -> Exp (Lore m) -> m Ident
 letExp _ (PrimOp (SubExp (Var v))) = return v
 letExp desc e =
   case simpleType $ typeOf e of
-    Just t -> do v <- fst <$> newVar (srclocOf e) desc t
-                 letBind [v] e
-                 return v
+    Just [t] -> do v <- fst <$> newVar (srclocOf e) desc t
+                   letBind [v] e
+                   return v
     _   -> fail $ "letExp: tuple-typed expression given:\n" ++ ppExp e
 
 letSubExps :: MonadBinder m =>

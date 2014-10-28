@@ -94,15 +94,60 @@ instance Rename MemSummary where
   rename Scalar =
     return Scalar
 
+data MemReturn = ReturnsInBlock Ident
+               | ReturnsNewBlock
+               | ReturnsScalar
+               deriving (Eq, Ord, Show)
+
+instance Lore.ResType (ResTypeT MemReturn) where
+  resTypeValues = map fst . resTypeElems
+  simpleType = mapM simple . resTypeElems
+    where simple (_, ReturnsNewBlock) = Nothing
+          simple (t, _)               = hasStaticShape t
+  staticResType = extResType . staticShapes
+  generaliseResTypes rt1 rt2 =
+    let (ts1,attrs1) = unzip $ resTypeElems rt1
+        (ts2,attrs2) = unzip $ resTypeElems rt2
+    in AST.ResType $ zip (generaliseExtTypes ts1 ts2) $
+       zipWith generaliseMemReturn attrs1 attrs2
+    where generaliseMemReturn ReturnsNewBlock _ = ReturnsNewBlock
+          generaliseMemReturn _ ReturnsNewBlock = ReturnsNewBlock
+          generaliseMemReturn r               _ = r
+  extResType = AST.ResType . map addAttr
+    where addAttr (Basic t) = (Basic t, ReturnsScalar)
+          addAttr (Mem sz)  = (Mem sz,  ReturnsScalar)
+          addAttr t         = (t,       ReturnsNewBlock)
+
+instance Monoid (ResTypeT MemReturn) where
+  mempty = AST.ResType []
+  AST.ResType xs `mappend` AST.ResType ys =
+    AST.ResType $ xs <> ys
+
+instance Rename MemReturn where
+  rename = return
+
+instance Substitute MemReturn where
+  substituteNames = const id
+
+instance PP.Pretty (ResTypeT MemReturn) where
+  ppr = PP.braces . PP.commasep . map pp . resTypeElems
+    where pp (t, ReturnsScalar)    = PP.ppr t
+          pp (t, ReturnsInBlock v) = PP.ppr t <> PP.parens (PP.text $ textual $identName v)
+          pp (t, ReturnsNewBlock)  = PP.ppr t <> PP.parens (PP.text "allocs")
+
 instance Lore.Lore ExplicitMemory where
   type LetBound ExplicitMemory = MemSummary
   type FParam   ExplicitMemory = MemSummary
+  type ResTypeAttr ExplicitMemory = MemReturn
 
 instance TypeCheck.Checkable ExplicitMemory where
   checkExpLore = return
   checkBindingLore = checkMemSummary
   checkBodyLore = return
   checkFParamLore = checkMemSummary
+  checkResType = mapM_ TypeCheck.checkExtType . resTypeValues
+  matchPattern loc pat ts =
+    return ()
 
 checkMemSummary :: MemSummary
                 -> TypeCheck.TypeM ExplicitMemory ()

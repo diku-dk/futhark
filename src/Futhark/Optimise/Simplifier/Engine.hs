@@ -56,6 +56,7 @@ import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import Data.Foldable (traverse_)
 
+import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Representation.AST
 import Futhark.Representation.Aliases (Aliases)
 import qualified Futhark.Representation.Aliases as Aliases
@@ -107,7 +108,8 @@ emptyState :: State m
 emptyState = State { stateVtable = ST.empty }
 
 class (Proper (Lore m), MonadBinder m,
-       Lore m ~ Aliases (InnerLore m)) => MonadEngine m where
+       Lore m ~ Aliases (InnerLore m),
+       Lore.Lore (InnerLore m)) => MonadEngine m where
   type InnerLore m
   askEngineEnv :: m (Env m)
   localEngineEnv :: (Env m -> Env m) -> m a -> m a
@@ -311,7 +313,10 @@ expandUsage :: (Proper lore, Aliased lore) =>
 expandUsage utable bnd = utable <> usage bnd <> usageThroughAliases
   where e = bindingExp bnd
         aliases = aliasesOf $ bindingExp bnd
-        tagged = zip (drop (contextSize $ typeOf e) $ provides bnd) aliases
+        (_,valbnd) = splitAt (length (provides bnd) -
+                              length (resTypeValues (typeOf e))) $
+                     provides bnd
+        tagged = zip valbnd aliases
         usageThroughAliases = mconcat $ catMaybes $ do
           (name,als) <- tagged
           return $ do uses <- UT.lookup name utable

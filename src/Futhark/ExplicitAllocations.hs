@@ -192,7 +192,7 @@ explicitAllocations prog =
   where free = newNameSourceForProg prog
 
 memoryInResType :: In.ResType -> ResType
-memoryInResType = undefined
+memoryInResType = extResType . resTypeValues
 
 allocInFun :: MonadFreshNames m => In.FunDec -> m FunDec
 allocInFun (In.FunDec fname rettype params body loc) =

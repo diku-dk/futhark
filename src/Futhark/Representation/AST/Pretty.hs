@@ -25,11 +25,12 @@ import Data.Array
 
 import Text.PrettyPrint.Mainland
 
+import Futhark.Representation.AST.Lore (Lore)
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes
 
 -- | The class of lores whose annotations can be prettyprinted.
-class PrettyLore lore where
+class (Lore lore, Pretty (ResType lore)) => PrettyLore lore where
   ppBindingLore :: Binding lore -> Maybe Doc
   ppBindingLore = const Nothing
   ppFunDecLore :: FunDec lore -> Maybe Doc
@@ -77,11 +78,11 @@ instance Pretty (TypeBase Rank) where
              | otherwise = empty
   ppr (Mem s) = text "mem" <> parens (ppr s)
 
+instance Pretty (ResTypeT ()) where
+  ppr = braces . commasep . map ppr . resTypeValues
+
 instance Pretty (IdentBase shape) where
   ppr = text . textual . identName
-
-instance PrettyLore lore => Pretty (ResType lore) where
-  ppr = braces . commasep . map ppr . resTypeValues
 
 hasArrayLit :: SubExp -> Bool
 hasArrayLit (Constant val _) = hasArrayVal val
@@ -255,6 +256,10 @@ ppValues = pretty 80 . ppTuple'
 ppType :: Pretty (TypeBase shape) => TypeBase shape -> String
 ppType = render80
 
+-- | Prettyprint a result type, wrapped to 80 characters.
+ppResType :: Pretty (ResTypeT attr) => ResTypeT attr -> String
+ppResType = render80
+
 -- | Prettyprint a body, wrapped to 80 characters.
 ppBody :: PrettyLore lore => Body lore -> String
 ppBody = render80
@@ -282,10 +287,6 @@ ppFun = render80
 -- | Prettyprint a list enclosed in curly braces.
 ppTuple :: Pretty a => [a] -> String
 ppTuple = pretty 80 . ppTuple'
-
--- | Prettyprint a 'ResType', wrapped to 80 characters.
-ppResType :: PrettyLore lore => ResType lore -> String
-ppResType = render80
 
 -- | Prettyprint an entire Futhark program, wrapped to 80 characters.
 prettyPrint :: PrettyLore lore => Prog lore -> String

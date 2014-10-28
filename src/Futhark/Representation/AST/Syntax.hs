@@ -43,10 +43,10 @@ module Futhark.Representation.AST.Syntax
   , LoopOp (..)
   , ExpT(..)
   , Exp
-  , ResTypeT (..)
-  , ResType
   , LambdaT(..)
   , Lambda
+  , ResType
+  , Lore.ResTypeT(..)
 
   -- * Definitions
   , FParam
@@ -64,9 +64,11 @@ import Data.Loc
 import Data.Monoid
 
 import Language.Futhark.Core
-import Futhark.Representation.AST.Lore (Lore, ResType, ResTypeT)
+import Futhark.Representation.AST.Lore (Lore)
 import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Representation.AST.Syntax.Core
+
+type ResType lore = Lore.ResTypeT (Lore.ResTypeAttr lore)
 
 -- | The kind of 'Bindee' used in a 'Pattern'.
 type PatBindee lore = Bindee (Lore.LetBound lore)

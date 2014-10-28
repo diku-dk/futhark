@@ -20,7 +20,7 @@ data Rephraser from to
               , rephraseBindeeLore :: Lore.LetBound from -> Lore.LetBound to
               , rephraseFParamLore :: Lore.FParam from -> Lore.FParam to
               , rephraseBodyLore :: Lore.Body from -> Lore.Body to
-              , rephraseResTypeLore :: Lore.ResTypeElem from -> Lore.ResTypeElem to
+              , rephraseResType :: ResType from -> ResType to
               }
 
 rephraseProg :: Rephraser from to -> Prog from -> Prog to
@@ -65,11 +65,6 @@ rephraseBody rephraser (Body lore bnds res) =
 rephraseLambda :: Rephraser from to -> Lambda from -> Lambda to
 rephraseLambda rephraser lam =
   lam { lambdaBody = rephraseBody rephraser $ lambdaBody lam }
-
-rephraseResType :: Rephraser from to -> ResType from -> ResType to
-rephraseResType rephraser (ResType ts) =
-  ResType $ map rephrase ts
-  where rephrase (t,attr) = (t, rephraseResTypeLore rephraser attr)
 
 mapper :: Rephraser from to -> Mapper from to Identity
 mapper rephraser = identityMapper { mapOnBinding = return . rephraseBinding rephraser

@@ -1,3 +1,4 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 module Futhark.Representation.AST.Attributes.TypeOf
        (
          subExpType
@@ -8,7 +9,6 @@ module Futhark.Representation.AST.Attributes.TypeOf
        , mapType
        , scanType
        , filterType
-       , loopResultType
        , valueShapeContext
        , subExpShapeContext
        , loopResult
@@ -47,19 +47,6 @@ filterType _ =
           t `setArrayShape` ExtShape (extOuterDim' $ arrayShape t)
         extOuterDim' (Shape dims) =
           Ext 0 : map Free (drop 1 dims)
-
-loopResultType :: [Type] -> [Ident] -> [ExtType]
-loopResultType restypes merge = evalState (mapM inspect restypes) 0
-  where bound = map identName merge
-        inspect t = do
-          shape <- mapM inspectShape $ arrayDims t
-          return $ t `setArrayShape` ExtShape shape
-        inspectShape (Var v)
-          | identName v `elem` bound = do
-            i <- get
-            put $ i + 1
-            return $ Ext i
-        inspectShape se = return $ Free se
 
 primOpType :: PrimOp lore -> [Type]
 primOpType (SubExp se) =
@@ -107,7 +94,7 @@ primOpType (Conjoin _ _) =
 primOpType (Alloc e _) =
   [Mem e]
 
-loopOpType :: Lore lore => LoopOp lore -> ResType lore
+loopOpType :: forall lore . Lore lore => LoopOp lore -> ResType lore
 loopOpType (DoLoop res merge _ _ _ _) =
   doLoopResType res $ map fst merge
 loopOpType (Map _ f arrs _) =

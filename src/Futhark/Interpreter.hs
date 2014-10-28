@@ -28,6 +28,7 @@ import Data.List
 import Data.Loc
 import qualified Data.HashMap.Strict as HM
 
+import Futhark.Representation.AST.Lore (Lore)
 import Futhark.Representation.AST
 
 -- | An error happened during execution, and this is why.
@@ -146,7 +147,7 @@ arrays ts v =
 -- you'll get an error from the interpreter - it may just as well
 -- silently return a wrong value.  You are, however, guaranteed that
 -- the initial call to 'prog' is properly checked.
-runFun :: Name -> [Value] -> Prog lore
+runFun :: Lore lore => Name -> [Value] -> Prog lore
        -> (Either InterpreterError [Value], Trace)
 runFun fname mainargs prog = do
   let ftable = foldl expand builtins $ progFunctions prog
@@ -177,7 +178,7 @@ runFun fname mainargs prog = do
       in HM.insert name fun ftable
 
 -- | As 'runFun', but throws away the trace.
-runFunNoTrace :: Name -> [Value] -> Prog lore -> Either InterpreterError [Value]
+runFunNoTrace :: Lore lore => Name -> [Value] -> Prog lore -> Either InterpreterError [Value]
 runFunNoTrace = ((.) . (.) . (.)) fst runFun -- I admit this is just for fun.
 
 --------------------------------------------
@@ -223,7 +224,7 @@ evalSubExp :: SubExp -> FutharkM Value
 evalSubExp (Var ident)    = lookupVar ident
 evalSubExp (Constant v _) = return v
 
-evalBody :: Body lore -> FutharkM [Value]
+evalBody :: Lore lore => Body lore -> FutharkM [Value]
 
 evalBody (Body _ [] (Result _ es _)) =
   mapM evalSubExp es
@@ -232,7 +233,7 @@ evalBody (Body lore (Let pat _ e:bnds) res) = do
   v <- evalExp e
   binding (zip (patternIdents pat) v) $ evalBody $ Body lore bnds res
 
-evalExp :: Exp lore -> FutharkM [Value]
+evalExp :: Lore lore => Exp lore -> FutharkM [Value]
 evalExp (If e1 e2 e3 rettype pos) = do
   v <- evalSubExp e1
   vs <- case v of BasicVal (LogVal True)  -> evalBody e2
@@ -418,7 +419,7 @@ evalPrimOp (Conjoin _ _) = return [BasicVal Checked]
 evalPrimOp (Alloc se _) =
   single <$> evalSubExp se
 
-evalLoopOp :: LoopOp lore -> FutharkM [Value]
+evalLoopOp :: Lore lore => LoopOp lore -> FutharkM [Value]
 
 evalLoopOp (DoLoop respat merge loopvar boundexp loopbody loc) = do
   bound <- evalSubExp boundexp
@@ -510,7 +511,7 @@ evalBoolBinOp op e1 e2 loc = do
     _ ->
       bad $ TypeError loc $ "evalBoolBinOp " ++ ppValue v1 ++ " " ++ ppValue v2
 
-applyLambda :: Lambda lore -> [Value] -> FutharkM [Value]
+applyLambda :: Lore lore => Lambda lore -> [Value] -> FutharkM [Value]
 applyLambda (Lambda params body rettype loc) args =
   do v <- binding (zip params args) $ evalBody body
      checkReturnShapes loc rettype v

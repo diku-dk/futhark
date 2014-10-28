@@ -73,7 +73,7 @@ instance Substitutable lore => Substitute (Binding lore) where
 instance Substitutable lore => Substitute (Body lore) where
   substituteNames substs = mapBody $ replace substs
 
-replace :: Substitutable lore => HM.HashMap VName VName -> Mapper lore lore Identity
+replace :: (Substitutable lore) => HM.HashMap VName VName -> Mapper lore lore Identity
 replace substs = Mapper {
                    mapOnIdent = return . substituteNames substs
                  , mapOnSubExp = return . substituteNames substs
@@ -114,7 +114,7 @@ instance (Substitute shape) => Substitute (TypeBase shape) where
   substituteNames substs (Mem sz) =
     Mem $ substituteNames substs sz
 
-instance Substitutable lore => Substitute (ResType lore) where
+instance Substitute attr => Substitute (ResTypeT attr) where
   substituteNames substs (ResType ts) =
     ResType $ map (substituteNames substs) ts
 
@@ -134,5 +134,5 @@ instance Substitute Ident where
 class (Substitute (Lore.Exp lore),
        Substitute (Lore.LetBound lore),
        Substitute (Lore.FParam lore),
-       Substitute (Lore.ResTypeElem lore)) =>
+       Substitute (Lore.ResTypeAttr lore)) =>
       Substitutable lore where
