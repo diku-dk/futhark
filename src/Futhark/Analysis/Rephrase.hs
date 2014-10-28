@@ -6,6 +6,7 @@ module Futhark.Analysis.Rephrase
        , rephraseBody
        , rephraseBinding
        , rephraseLambda
+       , rephrasePattern
        , Rephraser (..)
        )
 where
