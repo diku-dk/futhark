@@ -868,7 +868,7 @@ checkBinding :: Checkable lore =>
                 SrcLoc -> Pattern lore -> ResType lore -> Dataflow
              -> TypeM lore (TypeM lore a -> TypeM lore a, Pattern lore)
 checkBinding loc pat ts dflow = do
-  matchPattern loc pat ts
+  matchPattern loc (removePatternAliases pat) ts
   return (\m -> sequentially (tell dflow)
                 (const . const $
                  binding (zip (patternIdents pat)
@@ -880,7 +880,7 @@ matchExtPattern :: SrcLoc -> [Ident] -> [ExtType] -> TypeM lore ()
 matchExtPattern loc pat ts = do
   (ts', restpat, _) <- patternContext loc pat ts
   unless (length restpat == length ts') $
-    bad $ InvalidPatternError (Several pat) (Several $ map toDecl ts) loc
+    bad $ InvalidPatternError (Several pat) (Several $ map toDecl ts) Nothing loc
   evalStateT (zipWithM_ checkBinding' restpat ts') []
   where checkBinding' (Ident name namet vloc) t = do
           t' <- lift $
@@ -985,6 +985,6 @@ class (FreeIn (Lore.Exp lore),
   checkBodyLore :: Lore.Body lore -> TypeM lore (Lore.Body lore)
   checkBindingLore :: Lore.LetBound lore -> TypeM lore ()
   checkFParamLore :: Lore.FParam lore -> TypeM lore ()
-  checkResType :: ResType lore -> TypeM lore ()
-  matchPattern :: SrcLoc -> Pattern lore -> ResType lore ->
+  checkResType :: AST.ResType lore -> TypeM lore ()
+  matchPattern :: SrcLoc -> AST.Pattern lore -> AST.ResType lore ->
                   TypeM lore ()

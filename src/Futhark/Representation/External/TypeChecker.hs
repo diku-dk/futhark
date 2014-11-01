@@ -986,7 +986,8 @@ checkBinding pat et dflow = do
           return $ Wildcard t' loc
         checkBinding' _ _ =
           lift $ bad $ InvalidPatternError
-                       (untagPattern errpat) (toDecl $ untagType et) $ srclocOf pat
+                       (untagPattern errpat) (toDecl $ untagType et)
+                       Nothing $ srclocOf pat
 
         add ident = do
           bnd <- gets $ find (==ident)

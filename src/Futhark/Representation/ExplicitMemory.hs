@@ -32,6 +32,7 @@ module Futhark.Representation.ExplicitMemory
 where
 
 import Control.Applicative
+import Control.Monad.State
 import qualified Data.HashSet as HS
 import Data.Foldable (traverse_)
 import Data.Maybe
@@ -44,6 +45,8 @@ import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
           Pattern, Lambda, FunDec, FParam, ResType)
+
+import Futhark.TypeCheck.TypeError
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Pretty
@@ -95,28 +98,41 @@ instance Rename MemSummary where
     return Scalar
 
 data MemReturn = ReturnsInBlock Ident
-               | ReturnsNewBlock
+               | ReturnsNewBlock Int
                | ReturnsScalar
                deriving (Eq, Ord, Show)
 
 instance Lore.ResType (ResTypeT MemReturn) where
   resTypeValues = map fst . resTypeElems
   simpleType = mapM simple . resTypeElems
-    where simple (_, ReturnsNewBlock) = Nothing
-          simple (t, _)               = hasStaticShape t
+    where simple (_, ReturnsNewBlock {}) = Nothing
+          simple (t, _)                  = hasStaticShape t
   staticResType = extResType . staticShapes
   generaliseResTypes rt1 rt2 =
     let (ts1,attrs1) = unzip $ resTypeElems rt1
         (ts2,attrs2) = unzip $ resTypeElems rt2
-    in AST.ResType $ zip (generaliseExtTypes ts1 ts2) $
-       zipWith generaliseMemReturn attrs1 attrs2
-    where generaliseMemReturn ReturnsNewBlock _ = ReturnsNewBlock
-          generaliseMemReturn _ ReturnsNewBlock = ReturnsNewBlock
-          generaliseMemReturn r               _ = r
-  extResType = AST.ResType . map addAttr
-    where addAttr (Basic t) = (Basic t, ReturnsScalar)
-          addAttr (Mem sz)  = (Mem sz,  ReturnsScalar)
-          addAttr t         = (t,       ReturnsNewBlock)
+        ts = generaliseExtTypes ts1 ts2
+        i = startOfFreeIDRange ts
+        attrs = evalState (zipWithM generaliseMemReturn attrs1 attrs2) i
+    in AST.ResType $ zip ts attrs
+    where generaliseMemReturn (ReturnsNewBlock _) _ = newBlock
+          generaliseMemReturn _ (ReturnsNewBlock _) = newBlock
+          generaliseMemReturn r               _     = return r
+  extResType ts =
+    AST.ResType $ evalState (mapM addAttr ts) $ startOfFreeIDRange ts
+    where addAttr (Basic t) = return (Basic t, ReturnsScalar)
+          addAttr (Mem sz)  = return (Mem sz,  ReturnsScalar)
+          addAttr t         = do attr <- newBlock
+                                 return (t, attr)
+
+startOfFreeIDRange :: [ExtType] -> Int
+startOfFreeIDRange = (1+) . HS.foldl' max 0 . shapeContext
+
+newBlock :: State Int MemReturn
+newBlock = do
+  i <- get
+  put (i+1)
+  return $ ReturnsNewBlock i
 
 instance Monoid (ResTypeT MemReturn) where
   mempty = AST.ResType []
@@ -131,9 +147,9 @@ instance Substitute MemReturn where
 
 instance PP.Pretty (ResTypeT MemReturn) where
   ppr = PP.braces . PP.commasep . map pp . resTypeElems
-    where pp (t, ReturnsScalar)    = PP.ppr t
-          pp (t, ReturnsInBlock v) = PP.ppr t <> PP.parens (PP.text $ textual $identName v)
-          pp (t, ReturnsNewBlock)  = PP.ppr t <> PP.parens (PP.text "allocs")
+    where pp (t, ReturnsScalar)     = PP.ppr t
+          pp (t, ReturnsInBlock v)  = PP.ppr t <> PP.parens (PP.text $ textual $identName v)
+          pp (t, ReturnsNewBlock i) = PP.ppr t <> PP.text "@" <> PP.text (show i)
 
 instance Lore.Lore ExplicitMemory where
   type LetBound ExplicitMemory = MemSummary
@@ -146,8 +162,122 @@ instance TypeCheck.Checkable ExplicitMemory where
   checkBodyLore = return
   checkFParamLore = checkMemSummary
   checkResType = mapM_ TypeCheck.checkExtType . resTypeValues
-  matchPattern loc pat ts =
-    return ()
+  matchPattern loc pat rt = do
+    let (nmemsizes, nmems, nvalsizes) = analyseResType rt
+        (memsizes, mems, valsizes,
+         AST.Pattern valbindees) = dividePattern pat nmemsizes nmems nvalsizes
+    checkMems memsizes mems
+    checkVals mems valsizes valbindees
+    where wrong s = TypeCheck.bad $ InvalidPatternError
+                    (Several $ patternIdents pat)
+                    (Several $ map toDecl $ resTypeValues rt)
+                    (Just s)
+                    loc
+          mustBeEmpty _ [] = return ()
+          mustBeEmpty s  _ = wrong $ "unused " ++ s ++ "bindees"
+          checkMems mems memsizes =
+            mustBeEmpty "memory block size" =<<
+            execStateT (mapM_ checkMem mems) memsizes
+          checkVals mems valsizes valbindees = do
+            ((mems', _), (valsizes', _)) <-
+              execStateT
+              (zipWithM_ checkVal valbindees $ resTypeElems rt)
+              ((mems, []), (valsizes, []))
+            mustBeEmpty "memory block" mems'
+            mustBeEmpty "value size"  valsizes'
+          checkMem ident
+            | Mem (Var size) <- identType ident = do
+              memsizes <- get
+              case extract size memsizes of
+                Nothing        ->
+                  lift $ wrong $ "No memory block size " ++ sname ++ "."
+                Just memsizes' ->
+                  put memsizes'
+            | otherwise = lift $ wrong $ sname ++ " is not a memory block."
+            where sname = ppIdent ident
+          checkVal valbindee (t,attr) = do
+            zipWithM_ checkShape
+              (shapeDims $ arrayShape $ bindeeType valbindee)
+              (extShapeDims $ arrayShape t)
+            checkMemReturn (bindeeType valbindee) (bindeeLore valbindee) attr
+
+          -- If the return size is existentially quantified, then the
+          -- size must be bound in the pattern itself.
+          checkShape (Var v)       (Ext i) = isPatternBoundSize v i
+          -- If the return size is free, then the bound size must be
+          -- identical.
+          checkShape se1 (Free se2) | se1 == se2 = return ()
+          -- Otherwise we have an error.
+          checkShape _ _ = lift $ wrong "Shape of binding is nonsensical."
+
+          isPatternBoundSize v i = do
+            (mems, (valsizes, seen)) <- get
+            -- Either 'i' has been seen before or 'v' must be in
+            -- 'valsizes'.
+            case (lookup i seen, extract v valsizes) of
+              -- Hasn't been seen before, and not remaining in pattern.
+              (Nothing, Nothing) -> lift $ wrong $ "Unknown size variable " ++
+                                    ppIdent v
+              -- Has been seen before, although possibly with another
+              -- existential identifier.
+              (Just iv, _)
+                | iv /= v   ->
+                   -- Inconsistent use of 'i'!
+                  lift $ wrong $ ppIdent v ++ " and " ++
+                  ppIdent iv ++ " used to refer to same size."
+                | otherwise -> put (mems, (valsizes, (i, v) : seen))
+              -- Was remaining in pattern.
+              (_, Just valsizes') -> put (mems, (valsizes', (i, v) : seen))
+
+          checkMemReturn (Mem _) Scalar ReturnsScalar = return ()
+          checkMemReturn (Basic _) Scalar ReturnsScalar = return ()
+          checkMemReturn (Array {}) (MemSummary memv1 ixfun) (ReturnsInBlock memv2)
+            | memv1 == memv2,
+              IxFun.isLinear ixfun = return ()
+          checkMemReturn (Array {}) (MemSummary memv ixfun) (ReturnsNewBlock i)
+            | IxFun.isLinear ixfun = do
+            ((mems, seen), sizes) <- get
+            case (lookup i seen, extract memv mems) of
+              (Just _, _) ->
+                -- Cannot store multiple arrays in same block.
+                lift $ wrong "Trying to store multiple arrays in same block"
+              (_, Nothing) ->
+                -- memv is not bound in this pattern.
+                lift $ wrong $ ppIdent memv ++ " is not bound in this pattern."
+              (Nothing, Just mems') -> put ((mems', (i,memv) : seen), sizes)
+          checkMemReturn _ _ _ = lift $ wrong "Nonsensical memory summary"
+
+extract :: Eq a => a -> [a] -> Maybe [a]
+extract _ [] = Nothing
+extract x (y:ys)
+  | x == y    = Just ys
+  | otherwise = (y:) <$> extract x ys
+
+analyseResType :: ResType -> (Int, Int, Int)
+analyseResType rt =
+  let (memsizes, mems, valsizes) =
+        foldl sumtriple (mempty,mempty,mempty) . map analyse . resTypeElems $ rt
+  in (HS.size memsizes, HS.size mems, HS.size valsizes)
+  where sumtriple (x1,y1,z1) (x2,y2,z2) = (x1 `mappend` x2,
+                                           y1 `mappend` y2,
+                                           z1 `mappend` z2)
+        analyse (t,attr) = let (memsize,mem) = analyseAttr attr
+                           in (memsize, mem, analyseType t)
+        analyseType t = shapeContext [t]
+        analyseAttr (ReturnsInBlock _)  = (mempty, mempty)
+        analyseAttr (ReturnsNewBlock i) = (HS.singleton i, HS.singleton i)
+        analyseAttr ReturnsScalar       = (mempty, mempty)
+
+dividePattern :: Pattern -> Int -> Int -> Int
+              -> ([Ident], [Ident], [Ident], Pattern)
+dividePattern (AST.Pattern bindees) memsizes mems valsizes =
+  let (memsizebindees, bindees') = splitAt memsizes bindees
+      (membindees, bindees'') = splitAt mems bindees'
+      (valsizebindees, valbindees) = splitAt valsizes bindees''
+  in (map bindeeIdent memsizebindees,
+      map bindeeIdent membindees,
+      map bindeeIdent valsizebindees,
+      AST.Pattern valbindees)
 
 checkMemSummary :: MemSummary
                 -> TypeCheck.TypeM ExplicitMemory ()
