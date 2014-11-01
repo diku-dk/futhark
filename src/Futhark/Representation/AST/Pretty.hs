@@ -16,6 +16,7 @@ module Futhark.Representation.AST.Pretty
   , ppLambda
   , ppFun
   , ppTuple
+  , ppIdent
   , prettyPrint
   , PrettyLore (..)
   )
@@ -287,6 +288,10 @@ ppFun = render80
 -- | Prettyprint a list enclosed in curly braces.
 ppTuple :: Pretty a => [a] -> String
 ppTuple = pretty 80 . ppTuple'
+
+-- | Prettyprint the name of an ident.
+ppIdent :: Ident -> String
+ppIdent = render80
 
 -- | Prettyprint an entire Futhark program, wrapped to 80 characters.
 prettyPrint :: PrettyLore lore => Prog lore -> String
