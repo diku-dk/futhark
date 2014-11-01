@@ -68,7 +68,7 @@ functionSlices (FunDec fname rettype params body@(Body _ bodybnds bodyres) loc) 
       shapeBody = mkBody (cpybnds <> bodybnds)
                   bodyres { resultSubExps = shapes }
       mkFParam = flip Bindee ()
-      fShape = FunDec shapeFname (extResType shapeRettype)
+      fShape = FunDec shapeFname (staticResType shapetypes)
                (map mkFParam shapeParams)
                shapeBody loc
       fValue = FunDec valueFname valueRettype
@@ -77,7 +77,7 @@ functionSlices (FunDec fname rettype params body@(Body _ bodybnds bodyres) loc) 
   return (fShape, fValue)
   where shapes = subExpShapeContext (resTypeValues rettype) $
                  resultSubExps bodyres
-        shapeRettype = staticShapes $ map subExpType shapes
+        shapetypes = map subExpType shapes
         shapeFname = fname <> nameFromString "_shape"
         valueFname = fname <> nameFromString "_value"
 
