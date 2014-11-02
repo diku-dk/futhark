@@ -96,7 +96,7 @@ canSimplify i = do
     let (h,_,e2) = mkRelExp i
     case e2 of
         (RelExp LTH0 _) -> do
-              -- let e1' = trace (ppScalExp e1) e1
+              -- let e1' = trace (pretty e1) e1
               simplify e2 noLoc h
 --            runAlgSimplifier False (gaussAllLTH0 False S.empty =<< toNumSofP =<< simplifyScal e) noLoc h
         _ -> simplify e2 noLoc h-- badAlgSimplifyM "canSimplify: unimplemented!"
@@ -1095,7 +1095,7 @@ toNumSofP (SPlus  e1 e2)   = do
 toNumSofP me@(MaxMin{}) = do
     let tp = scalExpType me
     return $ NProd [me] tp
-toNumSofP s_e = badAlgSimplifyM $ "toNumSofP: unimplemented!"++ppScalExp s_e
+toNumSofP s_e = badAlgSimplifyM $ "toNumSofP: unimplemented!"++pretty s_e
 
 
 fromNumSofP :: NNumExp -> AlgSimplifyM ScalExp
@@ -1177,7 +1177,7 @@ discriminate e@((k,v):t) (k', v') =
 ------------------------------------------------------
 
 ppBType :: BasicType -> String
-ppBType = ppType . basicDecl
+ppBType = pretty . basicDecl
 
 getZero :: BasicType -> AlgSimplifyM BasicValue
 getZero Int  = return $ IntVal 0
@@ -1230,7 +1230,7 @@ mulVals :: BasicValue -> BasicValue -> AlgSimplifyM BasicValue
 mulVals (IntVal v1)  (IntVal v2)  = return $ IntVal (v1*v2)
 mulVals (RealVal v1) (RealVal v2) = return $ RealVal (v1*v2)
 mulVals v1 v2 =
-  badAlgSimplifyM $ "mulVals: operands not of (the same) numeral type! "++ppValue (BasicVal v1)++" "++ppValue (BasicVal v2)
+  badAlgSimplifyM $ "mulVals: operands not of (the same) numeral type! "++pretty (BasicVal v1)++" "++pretty (BasicVal v2)
 
 divVals :: BasicValue -> BasicValue -> AlgSimplifyM BasicValue
 divVals (IntVal v1)  (IntVal v2)  = return $ IntVal (v1 `div` v2)

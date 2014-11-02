@@ -116,7 +116,7 @@ checkMemSummary (MemSummary v ixfun) = do
               TypeCheck.bad $ TypeCheck.TypeError (srclocOf ident) $
               "Variable " ++ textual (identName v) ++
               " used as memory block, but is of type " ++
-              ppType t ++ "."
+              pretty t ++ "."
 
 instance Renameable ExplicitMemory where
 instance Substitutable ExplicitMemory where

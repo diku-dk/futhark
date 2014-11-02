@@ -56,7 +56,7 @@ letSubExp _ (PrimOp (SubExp se)) = return se
 letSubExp desc e =
   case typeOf e of
     [_] -> Var <$> letExp desc e
-    _   -> fail $ "letSubExp: tuple-typed expression given for " ++ desc ++ ":\n" ++ ppExp e
+    _   -> fail $ "letSubExp: tuple-typed expression given for " ++ desc ++ ":\n" ++ pretty e
 
 letExp :: MonadBinder m =>
           String -> Exp (Lore m) -> m Ident
@@ -66,7 +66,7 @@ letExp desc e =
     Just [t] -> do v <- fst <$> newVar (srclocOf e) desc t
                    letBind [v] e
                    return v
-    _   -> fail $ "letExp: tuple-typed expression given:\n" ++ ppExp e
+    _   -> fail $ "letExp: tuple-typed expression given:\n" ++ pretty e
 
 letSubExps :: MonadBinder m =>
               String -> [Exp (Lore m)] -> m [SubExp]

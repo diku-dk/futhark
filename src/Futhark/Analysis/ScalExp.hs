@@ -2,7 +2,6 @@ module Futhark.Analysis.ScalExp
   ( RelOp0(..)
   , ScalExp(..)
   , scalExpType
-  , ppScalExp
   , toScalExp
   , LookupVar
   , fromScalExp
@@ -16,7 +15,7 @@ import Control.Monad
 import Data.List
 import Data.Loc
 
-import Text.PrettyPrint.Mainland
+import Text.PrettyPrint.Mainland hiding (pretty)
 
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames
@@ -81,9 +80,6 @@ ppBinOp p bop precedence rprecedence x y =
            text bop <+>
            pprPrec rprecedence y
 
-ppScalExp :: ScalExp -> String
-ppScalExp = pretty 160 . ppr
-
 instance Substitute ScalExp where
   substituteNames subst e =
     case e of Id v -> Id $ substituteNames subst v
@@ -106,12 +102,12 @@ scalExpType (Val (RealVal _) ) = Real
 scalExpType (Val ( LogVal _) ) = Bool
 scalExpType (Val val) =
   error $ "scalExpType: scalar exp cannot have type " ++
-          ppType (basicDecl $ basicValueType val) ++ "."
+          pretty (basicDecl $ basicValueType val) ++ "."
 scalExpType (Id  idd) =
   case identType idd of
     Basic bt -> bt
     t        -> error $ "scalExpType: var in scalar exp cannot have type " ++
-                         ppType t ++ "."
+                         pretty t ++ "."
 scalExpType (SNeg  e) = scalExpType e
 scalExpType (SNot  _) = Bool
 scalExpType (SPlus   e _) = scalExpType e

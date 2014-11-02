@@ -393,7 +393,7 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res)
 fusionGatherBody _ (Body _ (Let _ _ e:_) _)
   | Left (SOAC.InvalidArrayInput inpe) <- SOAC.fromExp e =
     badFusionGM $ Error (srclocOf e)
-                  ("In Fusion.hs, "++ppSubExp inpe++" is not valid array input.")
+                  ("In Fusion.hs, "++pretty inpe++" is not valid array input.")
 
 fusionGatherBody fres (Body _ (Let (Pattern [v]) _ e:bnds) res)
   | Just (src,trns) <- SOAC.transformFromExp e =
@@ -528,7 +528,7 @@ getUnfusableSet loc fres args = do
        not (HM.null (kernels new_res)) || rsucc new_res
     then badFusionGM $ Error loc $
                         "In Fusion.hs, getUnfusableSet, broken invariant!"
-                        ++ " Unnormalized program: " ++ concatMap ppExp args
+                        ++ " Unnormalized program: " ++ concatMap pretty args
     else return ( unfusable new_res,
                   fres { unfusable = unfusable fres `HS.union` unfusable new_res }
                 )
@@ -591,7 +591,7 @@ replaceSOAC pat@(Pattern (bindee : _)) soac body = do
           when (null $ fusedVars ker) $
             badFusionGM $ Error loc
             ("In Fusion.hs, replaceSOAC, unfused kernel "
-             ++"still in result: "++ppTuple names)
+             ++"still in result: "++pretty names)
           insertKerSOAC (patternNames pat) ker body
 
 insertKerSOAC :: [VName] -> FusedKer -> Body -> FusionGM Body
@@ -607,7 +607,7 @@ insertKerSOAC names ker body = do
   case trns of
     Nothing -> badFusionGM $ Error (srclocOf new_soac)
                ("In Fusion.hs, replaceSOAC, "
-                ++" pat does not match kernel's pat: "++ppTuple names)
+                ++" pat does not match kernel's pat: "++pretty names)
     Just m -> runBinder $ do
       m
       return body

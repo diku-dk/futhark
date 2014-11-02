@@ -558,7 +558,7 @@ checkPrimOp (ArrayLit es t loc) = do
                   | Just elemt' <- elemt `unifyTypes` subExpType eleme =
                     return elemt'
                   | otherwise =
-                    bad $ TypeError loc $ ppType (subExpType eleme) ++ " is not of expected type " ++ ppType elemt ++ "."
+                    bad $ TypeError loc $ pretty (subExpType eleme) ++ " is not of expected type " ++ pretty elemt ++ "."
             in foldM check (subExpType e) es''
 
   -- Unify that type with the one given for the array literal.
@@ -719,11 +719,11 @@ checkLoopOp (Reduce ass fun inputs pos) = do
       intupletype = map argType arrargs
       funret      = lambdaReturnType fun'
   unless (startt `subtypesOf` funret) $
-      bad $ TypeError pos $ "Accumulator is of type " ++ ppTuple startt ++
-                            ", but reduce function returns type " ++ ppTuple funret ++ "."
+      bad $ TypeError pos $ "Accumulator is of type " ++ prettyTuple startt ++
+                            ", but reduce function returns type " ++ prettyTuple funret ++ "."
   unless (intupletype `subtypesOf` funret) $
-      bad $ TypeError pos $ "Array element value is of type " ++ ppTuple intupletype ++
-                            ", but scan function returns type " ++ ppTuple funret ++ "."
+      bad $ TypeError pos $ "Array element value is of type " ++ prettyTuple intupletype ++
+                            ", but scan function returns type " ++ prettyTuple funret ++ "."
   return $ Reduce ass' fun' (zip startexps' arrexps') pos
 
 -- ScanT is exactly identical to ReduceT.  Duplicate for clarity
@@ -738,11 +738,11 @@ checkLoopOp (Scan ass fun inputs pos) = do
       intupletype = map argType arrargs
       funret      = lambdaReturnType fun'
   unless (startt `subtypesOf` funret) $
-    bad $ TypeError pos $ "Initial value is of type " ++ ppTuple startt ++
-                          ", but scan function returns type " ++ ppTuple funret ++ "."
+    bad $ TypeError pos $ "Initial value is of type " ++ prettyTuple startt ++
+                          ", but scan function returns type " ++ prettyTuple funret ++ "."
   unless (intupletype `subtypesOf` funret) $
-    bad $ TypeError pos $ "Array element value is of type " ++ ppTuple intupletype ++
-                          ", but scan function returns type " ++ ppTuple funret ++ "."
+    bad $ TypeError pos $ "Array element value is of type " ++ prettyTuple intupletype ++
+                          ", but scan function returns type " ++ prettyTuple funret ++ "."
   return $ Scan ass' fun' (zip startexps' arrexps') pos
 
 checkLoopOp (Filter ass fun arrexps loc) = do
@@ -768,11 +768,11 @@ checkLoopOp (Redomap ass outerfun innerfun accexps arrexps pos) = do
   let acct = map subExpType accexps'
       outerRetType = lambdaReturnType outerfun'
   unless (innerRetType `subtypesOf` acct) $
-    bad $ TypeError pos $ "Initial value is of type " ++ ppTuple acct ++
-          ", but redomapT inner reduction returns type " ++ ppTuple innerRetType ++ "."
+    bad $ TypeError pos $ "Initial value is of type " ++ prettyTuple acct ++
+          ", but redomapT inner reduction returns type " ++ prettyTuple innerRetType ++ "."
   unless (outerRetType `subtypesOf` acct) $
-    bad $ TypeError pos $ "Initial value is of type " ++ ppTuple acct ++
-          ", but redomapT outer reduction returns type " ++ ppTuple outerRetType ++ "."
+    bad $ TypeError pos $ "Initial value is of type " ++ prettyTuple acct ++
+          ", but redomapT outer reduction returns type " ++ prettyTuple outerRetType ++ "."
 
   return $ Redomap ass' outerfun' innerfun' accexps' arrexps' pos
 
