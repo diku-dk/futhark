@@ -538,7 +538,7 @@ simplifyScal (MaxMin ismin es) = do -- helperMinMax ismin  es pos
     where
         flatop :: [ScalExp] -> ScalExp -> [ScalExp]
         flatop a e@(MaxMin ismin' ses) =
-            if ismin == ismin' then a++ses else a++[e]
+            a ++ if ismin == ismin' then ses else [e]
         flatop a e = a++[e]
         remDups :: [ScalExp] -> [ScalExp]
         remDups l = S.toList (S.fromList l)
