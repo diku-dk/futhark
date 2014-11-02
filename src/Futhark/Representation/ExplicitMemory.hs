@@ -98,6 +98,7 @@ instance Rename MemSummary where
     return Scalar
 
 data MemReturn = ReturnsInBlock Ident
+               | ReturnsInAnyBlock
                | ReturnsNewBlock Int
                | ReturnsScalar
                deriving (Eq, Ord, Show)
@@ -122,8 +123,7 @@ instance Lore.ResType (ResTypeT MemReturn) where
     AST.ResType $ evalState (mapM addAttr ts) $ startOfFreeIDRange ts
     where addAttr (Basic t) = return (Basic t, ReturnsScalar)
           addAttr (Mem sz)  = return (Mem sz,  ReturnsScalar)
-          addAttr t         = do attr <- newBlock
-                                 return (t, attr)
+          addAttr t         = return (t,       ReturnsInAnyBlock)
 
 startOfFreeIDRange :: [ExtType] -> Int
 startOfFreeIDRange = (1+) . HS.foldl' max 0 . shapeContext
@@ -148,7 +148,8 @@ instance Substitute MemReturn where
 instance PP.Pretty (ResTypeT MemReturn) where
   ppr = PP.braces . PP.commasep . map pp . resTypeElems
     where pp (t, ReturnsScalar)     = PP.ppr t
-          pp (t, ReturnsInBlock v)  = PP.ppr t <> PP.parens (PP.text $ textual $identName v)
+          pp (t, ReturnsInBlock v)  = PP.ppr t <> PP.parens (PP.text $ ppIdent v)
+          pp (t, ReturnsInAnyBlock) = PP.ppr t <> PP.text "@" <> PP.text "!"
           pp (t, ReturnsNewBlock i) = PP.ppr t <> PP.text "@" <> PP.text (show i)
 
 instance Lore.Lore ExplicitMemory where
@@ -234,18 +235,20 @@ instance TypeCheck.Checkable ExplicitMemory where
           checkMemReturn (Array {}) (MemSummary memv1 ixfun) (ReturnsInBlock memv2)
             | memv1 == memv2,
               IxFun.isLinear ixfun = return ()
+          checkMemReturn (Array {}) (MemSummary {}) ReturnsInAnyBlock =
+            return ()
           checkMemReturn (Array {}) (MemSummary memv ixfun) (ReturnsNewBlock i)
             | IxFun.isLinear ixfun = do
-            ((mems, seen), sizes) <- get
-            case (lookup i seen, extract memv mems) of
-              (Just _, _) ->
-                -- Cannot store multiple arrays in same block.
-                lift $ wrong "Trying to store multiple arrays in same block"
-              (_, Nothing) ->
-                -- memv is not bound in this pattern.
-                lift $ wrong $ ppIdent memv ++ " is not bound in this pattern."
-              (Nothing, Just mems') -> put ((mems', (i,memv) : seen), sizes)
-          checkMemReturn _ _ _ = lift $ wrong "Nonsensical memory summary"
+              ((mems, seen), sizes) <- get
+              case (i `elem` seen, extract memv mems) of
+                (True, _) ->
+                  -- Cannot store multiple arrays in same block.
+                  lift $ wrong "Trying to store multiple arrays in same block"
+                (_, Nothing) ->
+                  -- memv is not bound in this pattern.
+                  lift $ wrong $ ppIdent memv ++ " is not bound or available in this pattern."
+                (False, Just mems') -> put ((mems', i : seen), sizes)
+          checkMemReturn _ _ _ = lift $ wrong $ "Nonsensical memory summary\n" ++ show rt
 
 extract :: Eq a => a -> [a] -> Maybe [a]
 extract _ [] = Nothing
@@ -265,8 +268,9 @@ analyseResType rt =
                            in (memsize, mem, analyseType t)
         analyseType t = shapeContext [t]
         analyseAttr (ReturnsInBlock _)  = (mempty, mempty)
+        analyseAttr (ReturnsInAnyBlock) = (mempty, mempty)
         analyseAttr (ReturnsNewBlock i) = (HS.singleton i, HS.singleton i)
-        analyseAttr ReturnsScalar       = (mempty, mempty)
+        analyseAttr ReturnsScalar       =   (mempty, mempty)
 
 dividePattern :: Pattern -> Int -> Int -> Int
               -> ([Ident], [Ident], [Ident], Pattern)
