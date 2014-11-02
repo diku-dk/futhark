@@ -11,6 +11,7 @@ module Futhark.Representation.AST.Attributes
   , module Futhark.Representation.AST.Attributes.TypeOf
   , module Futhark.Representation.AST.Attributes.Patterns
   , module Futhark.Representation.AST.Attributes.Names
+  , module Futhark.Representation.AST.ResType
 
   -- * Extra tools
   , funDecByName
@@ -28,7 +29,7 @@ import Futhark.Representation.AST.Attributes.Constants
 import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Attributes.TypeOf
-
+import Futhark.Representation.AST.ResType hiding (ResType)
 import Futhark.Representation.AST.Syntax
 
 import Data.List

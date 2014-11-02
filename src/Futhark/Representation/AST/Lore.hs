@@ -1,18 +1,21 @@
-{-# LANGUAGE TypeFamilies, FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies, FlexibleContexts, FlexibleInstances #-}
 module Futhark.Representation.AST.Lore
        ( Lore(..)
-       , ResType.ResType
+       , ResType (..)
        , ResTypeT (..)
        )
        where
 
+import Data.Monoid
+
 import Futhark.Representation.AST.Syntax.Core
-import qualified Futhark.Representation.AST.ResType as ResType
+import Futhark.Representation.AST.ResType
+import Futhark.Representation.AST.Attributes.Types
 
 class (Show (LetBound l), Show (Exp l), Show (Body l), Show (FParam l),
        Eq (LetBound l), Eq (Exp l), Eq (Body l), Eq (FParam l),
        Ord (LetBound l), Ord (Exp l), Ord (Body l), Ord (FParam l),
-       ResType.ResType (ResTypeT (ResTypeAttr l)))
+       ResType (ResTypeT (ResTypeAttr l)))
       => Lore l where
   -- | Annotation for every binding.
   type LetBound l :: *
@@ -35,3 +38,18 @@ class (Show (LetBound l), Show (Exp l), Show (Body l), Show (FParam l),
 newtype ResTypeT annot =
   ResType { resTypeElems :: [(ExtType, annot)] }
   deriving (Eq, Ord, Show)
+
+instance Monoid (ResTypeT ()) where
+  mempty = ResType mempty
+  ResType xs `mappend` ResType ys =
+    ResType $ xs <> ys
+
+instance ResType (ResTypeT ()) where
+  simpleType = mapM hasStaticShape . resTypeValues
+  rt1 `generaliseResTypes` rt2 =
+    extResType $ resTypeValues rt1 `generaliseExtTypes` resTypeValues rt2
+  extResType ts = ResType [ (t, ()) | t <- ts]
+  doLoopResType res merge =
+    extResType $ loopResultExtType (map identType res) merge
+  staticResType = extResType . staticShapes
+  resTypeValues (ResType ts) = map fst ts

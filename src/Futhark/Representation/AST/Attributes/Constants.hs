@@ -8,7 +8,7 @@ module Futhark.Representation.AST.Attributes.Constants
 
 import Data.Loc
 
-import Futhark.Representation.AST.Syntax
+import Futhark.Representation.AST.Syntax.Core
 
 -- | If a Haskell type is an instance of 'IsValue', it means that a
 -- value of that type can be converted to a Futhark 'Value'.  This is

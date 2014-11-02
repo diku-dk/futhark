@@ -24,6 +24,7 @@ import qualified Data.HashMap.Lazy as HM
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Lore (Lore)
+import Futhark.Representation.AST.ResType hiding (ResType)
 import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Values

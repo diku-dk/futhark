@@ -39,7 +39,7 @@ module Futhark.Representation.AST.Attributes.Types
        , shapeContextSize
        , hasStaticShape
        , generaliseExtTypes
-       , module ResType
+       , loopResultExtType
        )
        where
 
@@ -51,9 +51,7 @@ import Data.Monoid
 import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
 
-import Futhark.Representation.AST.Syntax
-import Futhark.Representation.AST.ResType hiding (ResType)
-import qualified Futhark.Representation.AST.ResType as ResType
+import Futhark.Representation.AST.Syntax.Core
 import Futhark.Representation.AST.Attributes.Constants
 
 -- | Given a basic type, construct a type without aliasing and shape
@@ -331,23 +329,8 @@ generaliseExtTypes rt1 rt2 =
                    put (n + 1, HM.insert x n m)
                    return n
 
-instance Monoid (ResTypeT ()) where
-  mempty = ResType mempty
-  ResType xs `mappend` ResType ys =
-    ResType $ xs <> ys
-
-instance ResType.ResType (ResTypeT ()) where
-  simpleType = mapM hasStaticShape . resTypeValues
-  rt1 `generaliseResTypes` rt2 =
-    extResType $ resTypeValues rt1 `generaliseExtTypes` resTypeValues rt2
-  extResType ts = ResType [ (t, ()) | t <- ts]
-  doLoopResType res merge =
-    extResType $ loopResultType (map identType res) merge
-  staticResType = extResType . staticShapes
-  resTypeValues (ResType ts) = map fst ts
-
-loopResultType :: [Type] -> [Ident] -> [ExtType]
-loopResultType restypes merge = evalState (mapM inspect restypes) 0
+loopResultExtType :: [Type] -> [Ident] -> [ExtType]
+loopResultExtType restypes merge = evalState (mapM inspect restypes) 0
   where bound = map identName merge
         inspect t = do
           shape <- mapM inspectShape $ arrayDims t
