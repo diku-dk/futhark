@@ -5,26 +5,16 @@
 -- but also a number of convenience functions if you don't want to use
 -- the interface from 'Pretty'.
 module Futhark.Representation.AST.Pretty
-  ( ppType
-  , ppResType
-  , ppValue
-  , ppValues
-  , ppBinding
-  , ppBody
-  , ppExp
-  , ppSubExp
-  , ppLambda
-  , ppFun
-  , ppTuple
-  , ppIdent
-  , prettyPrint
+  ( prettyTuple
+  , pretty
   , PrettyLore (..)
   )
   where
 
 import Data.Array
 
-import Text.PrettyPrint.Mainland
+import Text.PrettyPrint.Mainland hiding (pretty)
+import qualified Text.PrettyPrint.Mainland as PP
 
 import Futhark.Representation.AST.Lore (Lore)
 import Futhark.Representation.AST.Syntax
@@ -242,57 +232,10 @@ ppCertificates' :: Certificates -> Doc
 ppCertificates' [] = empty
 ppCertificates' cs = ppCertificates cs <> line
 
-render80 :: Pretty a => a -> String
-render80 = pretty 80 . ppr
+-- | Prettyprint a list enclosed in curly braces.
+prettyTuple :: Pretty a => [a] -> String
+prettyTuple = PP.pretty 80 . ppTuple'
 
 -- | Prettyprint a value, wrapped to 80 characters.
-ppValue :: Value -> String
-ppValue = render80
-
--- | Prettyprint several values, wrapped to 80 characters.
-ppValues :: [Value] -> String
-ppValues = pretty 80 . ppTuple'
-
--- | Prettyprint a type, wrapped to 80 characters.
-ppType :: Pretty (TypeBase shape) => TypeBase shape -> String
-ppType = render80
-
--- | Prettyprint a result type, wrapped to 80 characters.
-ppResType :: Pretty (ResTypeT attr) => ResTypeT attr -> String
-ppResType = render80
-
--- | Prettyprint a body, wrapped to 80 characters.
-ppBody :: PrettyLore lore => Body lore -> String
-ppBody = render80
-
--- | Prettyprint a binding, wrapped to 80 characters.
-ppBinding :: PrettyLore lore => Binding lore -> String
-ppBinding = render80
-
--- | Prettyprint an expression, wrapped to 80 characters.
-ppExp :: PrettyLore lore => Exp lore -> String
-ppExp = render80
-
--- | Prettyprint a subexpression, wrapped to 80 characters.
-ppSubExp :: SubExp -> String
-ppSubExp = render80
-
--- | Prettyprint a lambda, wrapped to 80 characters.
-ppLambda :: PrettyLore lore => Lambda lore -> String
-ppLambda = render80
-
--- | Prettyprint a function definition, wrapped to 80 characters.
-ppFun :: PrettyLore lore => FunDec lore -> String
-ppFun = render80
-
--- | Prettyprint a list enclosed in curly braces.
-ppTuple :: Pretty a => [a] -> String
-ppTuple = pretty 80 . ppTuple'
-
--- | Prettyprint the name of an ident.
-ppIdent :: Ident -> String
-ppIdent = render80
-
--- | Prettyprint an entire Futhark program, wrapped to 80 characters.
-prettyPrint :: PrettyLore lore => Prog lore -> String
-prettyPrint = render80
+pretty :: Pretty a => a -> String
+pretty = PP.pretty 80 . ppr

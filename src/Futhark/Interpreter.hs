@@ -56,12 +56,12 @@ instance Show InterpreterError where
     "Program entry point '" ++ nameToString fname ++ "' not defined."
   show (InvalidFunctionArguments fname Nothing got) =
     "Function '" ++ nameToString fname ++ "' did not expect argument(s) of type " ++
-    intercalate ", " (map ppType got) ++ "."
+    intercalate ", " (map pretty got) ++ "."
   show (InvalidFunctionArguments fname (Just expected) got) =
     "Function '" ++ nameToString fname ++ "' expected argument(s) of type " ++
-    intercalate ", " (map ppType expected) ++
+    intercalate ", " (map pretty expected) ++
     " but got argument(s) of type " ++
-    intercalate ", " (map ppType got) ++ "."
+    intercalate ", " (map pretty got) ++ "."
   show (IndexOutOfBounds pos var arrsz i) =
     "Array index " ++ show i ++ " out of bounds in array '" ++
     var ++ "', of size " ++ show arrsz ++ " at " ++ locStr pos ++ "."
@@ -243,7 +243,7 @@ evalExp (If e1 e2 e3 rettype pos) = do
 evalExp (Apply fname args _ loc)
   | "trace" <- nameToString fname = do
   vs <- mapM (evalSubExp . fst) args
-  tell [(loc, ppValues vs)]
+  tell [(loc, pretty vs)]
   return vs
 evalExp (Apply fname args rettype _) = do
   vs <- evalFuncall fname $ map fst args
@@ -395,7 +395,7 @@ evalPrimOp (Split _ splitexp arrexp _ pos) = do
       | i <= length vs ->
         let (bef,aft) = splitAt i vs
         in return [arrayVal bef rt, arrayVal aft rt]
-      | otherwise        -> bad $ IndexOutOfBounds pos (ppSubExp arrexp) (length vs) i
+      | otherwise        -> bad $ IndexOutOfBounds pos (pretty arrexp) (length vs) i
     _ -> bad $ TypeError pos "evalPrimOp Split"
   where rt = rowType $ subExpType arrexp
 
@@ -499,7 +499,7 @@ evalRealBinOp op e1 e2 loc = do
     (BasicVal (RealVal x), BasicVal (RealVal y)) ->
       return [BasicVal $ RealVal (op x y)]
     _ ->
-      bad $ TypeError loc $ "evalRealBinOp " ++ ppValue v1 ++ " " ++ ppValue v2
+      bad $ TypeError loc $ "evalRealBinOp " ++ pretty v1 ++ " " ++ pretty v2
 
 evalBoolBinOp :: (Bool -> Bool -> Bool) -> SubExp -> SubExp -> SrcLoc -> FutharkM [Value]
 evalBoolBinOp op e1 e2 loc = do
@@ -509,7 +509,7 @@ evalBoolBinOp op e1 e2 loc = do
     (BasicVal (LogVal x), BasicVal (LogVal y)) ->
       return [BasicVal $ LogVal (op x y)]
     _ ->
-      bad $ TypeError loc $ "evalBoolBinOp " ++ ppValue v1 ++ " " ++ ppValue v2
+      bad $ TypeError loc $ "evalBoolBinOp " ++ pretty v1 ++ " " ++ pretty v2
 
 applyLambda :: Lore lore => Lambda lore -> [Value] -> FutharkM [Value]
 applyLambda (Lambda params body rettype loc) args =
@@ -530,10 +530,10 @@ checkPatSizes = mapM_ $ uncurry checkSize
                                   varname ++ " is specified to have shape [" ++
                                   intercalate "," (zipWith ppDim vardims varshape) ++
                                   "], but is being bound to value of shape [" ++
-                                  intercalate "," (map ppValue valshape) ++ "]."
+                                  intercalate "," (map pretty valshape) ++ "]."
 
-        ppDim (Constant v _) _ = ppValue v
-        ppDim e              v = ppSubExp e ++ "=" ++ ppValue v
+        ppDim (Constant v _) _ = pretty v
+        ppDim e              v = pretty e ++ "=" ++ pretty v
 
 checkReturnShapes :: SrcLoc -> [Type] -> [Value] -> FutharkM ()
 checkReturnShapes loc = zipWithM_ checkShape
@@ -546,7 +546,7 @@ checkReturnShapes loc = zipWithM_ checkShape
                                   "Return type specifies shape [" ++
                                   intercalate "," (zipWith ppDim retdims varshape) ++
                                   "], but returned value is of shape [" ++
-                                  intercalate "," (map ppValue valshape) ++ "]."
+                                  intercalate "," (map pretty valshape) ++ "]."
 
-        ppDim (Constant v _) _ = ppValue v
-        ppDim e              v = ppSubExp e ++ "=" ++ ppValue v
+        ppDim (Constant v _) _ = pretty v
+        ppDim e              v = pretty e ++ "=" ++ pretty v

@@ -113,15 +113,15 @@ commandLineOptions =
   ]
 
 printAction :: Action
-printAction = ("prettyprinter", putStrLn . I.prettyPrint . aliasAnalysis)
+printAction = ("prettyprinter", putStrLn . I.pretty . aliasAnalysis)
 
 printAllocedAction :: Action
 printAllocedAction = ("prettyprinter", act)
   where act prog =
           let prog' = explicitAllocations prog in
           case I.checkProg prog' of
-            Left err    -> error $ "Type error with explicit allocations:\n" ++ show err ++ "\n" ++ I.prettyPrint prog'
-            Right prog'' -> putStrLn $ I.prettyPrint prog''
+            Left err    -> error $ "Type error with explicit allocations:\n" ++ show err ++ "\n" ++ I.pretty prog'
+            Right prog'' -> putStrLn $ I.pretty prog''
 
 externaliseAction :: Action
 externaliseAction = ("externalise", putStrLn . E.prettyPrint . externaliseProg)
@@ -164,7 +164,7 @@ interpret prog =
         ppOutput' (I.BasicVal (I.LogVal b))  = show b
         ppOutput' (I.BasicVal I.Checked) = "Checked"
         ppOutput' (I.ArrayVal a t)
-          | [] <- elems a = "empty(" ++ I.ppType t ++ ")"
+          | [] <- elems a = "empty(" ++ I.pretty t ++ ")"
           | otherwise     = "[" ++ intercalate ", " (map ppOutput' $ elems a) ++ "]"
 
 standardPipeline :: [Pass]
@@ -227,7 +227,7 @@ compiler config file = do
       case (errorProg err, futharkverbose config) of
         (Just prog, Just outfile) ->
           maybe (hPutStr stderr) writeFile outfile $
-            I.prettyPrint (aliasAnalysis prog) ++ "\n"
+            I.pretty (aliasAnalysis prog) ++ "\n"
         _ -> return ()
       exitWith $ ExitFailure 2
     Right prog -> do

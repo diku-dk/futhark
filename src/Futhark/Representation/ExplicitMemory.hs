@@ -148,7 +148,7 @@ instance Substitute MemReturn where
 instance PP.Pretty (ResTypeT MemReturn) where
   ppr = PP.braces . PP.commasep . map pp . resTypeElems
     where pp (t, ReturnsScalar)     = PP.ppr t
-          pp (t, ReturnsInBlock v)  = PP.ppr t <> PP.parens (PP.text $ ppIdent v)
+          pp (t, ReturnsInBlock v)  = PP.ppr t <> PP.parens (PP.text $ pretty v)
           pp (t, ReturnsInAnyBlock) = PP.ppr t <> PP.text "@" <> PP.text "!"
           pp (t, ReturnsNewBlock i) = PP.ppr t <> PP.text "@" <> PP.text (show i)
 
@@ -195,7 +195,7 @@ instance TypeCheck.Checkable ExplicitMemory where
                 Just memsizes' ->
                   put memsizes'
             | otherwise = lift $ wrong $ sname ++ " is not a memory block."
-            where sname = ppIdent ident
+            where sname = pretty ident
           checkVal valbindee (t,attr) = do
             zipWithM_ checkShape
               (shapeDims $ arrayShape $ bindeeType valbindee)
@@ -218,14 +218,14 @@ instance TypeCheck.Checkable ExplicitMemory where
             case (lookup i seen, extract v valsizes) of
               -- Hasn't been seen before, and not remaining in pattern.
               (Nothing, Nothing) -> lift $ wrong $ "Unknown size variable " ++
-                                    ppIdent v
+                                    pretty v
               -- Has been seen before, although possibly with another
               -- existential identifier.
               (Just iv, _)
                 | iv /= v   ->
                    -- Inconsistent use of 'i'!
-                  lift $ wrong $ ppIdent v ++ " and " ++
-                  ppIdent iv ++ " used to refer to same size."
+                  lift $ wrong $ pretty v ++ " and " ++
+                  pretty iv ++ " used to refer to same size."
                 | otherwise -> put (mems, (valsizes, (i, v) : seen))
               -- Was remaining in pattern.
               (_, Just valsizes') -> put (mems, (valsizes', (i, v) : seen))
@@ -246,7 +246,7 @@ instance TypeCheck.Checkable ExplicitMemory where
                   lift $ wrong "Trying to store multiple arrays in same block"
                 (_, Nothing) ->
                   -- memv is not bound in this pattern.
-                  lift $ wrong $ ppIdent memv ++ " is not bound or available in this pattern."
+                  lift $ wrong $ pretty memv ++ " is not bound or available in this pattern."
                 (False, Just mems') -> put ((mems', i : seen), sizes)
           checkMemReturn _ _ _ = lift $ wrong $ "Nonsensical memory summary\n" ++ show rt
 
@@ -298,7 +298,7 @@ checkMemSummary (MemSummary v ixfun) = do
               TypeCheck.bad $ TypeCheck.TypeError (srclocOf ident) $
               "Variable " ++ textual (identName v) ++
               " used as memory block, but is of type " ++
-              ppType t ++ "."
+              pretty t ++ "."
 
 instance Renameable ExplicitMemory where
 instance Substitutable ExplicitMemory where
