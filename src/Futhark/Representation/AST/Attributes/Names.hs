@@ -166,6 +166,9 @@ instance FreeIn ExtShape where
 instance (ArrayShape shape, FreeIn shape) => FreeIn (TypeBase shape) where
   freeIn = freeIn . arrayShape
 
+instance FreeIn attr => FreeIn (ResTypeT attr) where
+  freeIn = freeIn . resTypeElems
+
 freeNamesIn :: FreeIn a => a -> Names
 freeNamesIn = HS.map identName . freeIn
 
