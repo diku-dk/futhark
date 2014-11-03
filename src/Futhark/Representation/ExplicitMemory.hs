@@ -124,7 +124,11 @@ instance Lore.ResType (ResTypeT MemReturn) where
     AST.ResType $ evalState (mapM addAttr ts) $ startOfFreeIDRange ts
     where addAttr (Basic t) = return (Basic t, ReturnsScalar)
           addAttr (Mem sz)  = return (Mem sz,  ReturnsScalar)
-          addAttr t         = return (t,       ReturnsInAnyBlock)
+          addAttr t
+            | existential t = do i <- get
+                                 put $ i + 1
+                                 return (t, ReturnsNewBlock i)
+            | otherwise = return (t, ReturnsInAnyBlock)
   existentialiseType inaccessible (AST.ResType xs) =
     let (ts,attrs) = unzip xs
         ts'        = existentialiseExtTypes inaccessible ts
@@ -176,7 +180,7 @@ instance PP.Pretty (ResTypeT MemReturn) where
   ppr = PP.braces . PP.commasep . map pp . resTypeElems
     where pp (t, ReturnsScalar)     = PP.ppr t
           pp (t, ReturnsInBlock v)  = PP.ppr t <> PP.parens (PP.text $ pretty v)
-          pp (t, ReturnsInAnyBlock) = PP.ppr t <> PP.text "@" <> PP.text "!"
+          pp (t, ReturnsInAnyBlock) = PP.ppr t <> PP.text "@" <> PP.text "any"
           pp (t, ReturnsNewBlock i) = PP.ppr t <> PP.text "@" <> PP.text (show i)
 
 instance Lore.Lore ExplicitMemory where
@@ -196,14 +200,12 @@ instance TypeCheck.Checkable ExplicitMemory where
          AST.Pattern valbindees) = dividePattern pat nmemsizes nmems nvalsizes
     checkMems memsizes mems
     checkVals mems valsizes valbindees
-    where wrong s = TypeCheck.bad $ InvalidPatternError
-                    (Several $ patternIdents pat)
-                    (Several $ map toDecl $ resTypeValues rt)
-                    (Just s)
-                    loc
+    where wrong s = TypeCheck.bad $ TypeError loc $
+                    "Pattern\n" ++ pretty pat ++ "\ncannot match result type\n" ++
+                    pretty rt ++ ":\n" ++ s
           mustBeEmpty _ [] = return ()
           mustBeEmpty s  _ = wrong $ "unused " ++ s ++ "bindees"
-          checkMems mems memsizes =
+          checkMems memsizes mems =
             mustBeEmpty "memory block size" =<<
             execStateT (mapM_ checkMem mems) memsizes
           checkVals mems valsizes valbindees = do
