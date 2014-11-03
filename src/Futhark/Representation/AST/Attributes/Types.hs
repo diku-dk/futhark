@@ -5,6 +5,7 @@ module Futhark.Representation.AST.Attributes.Types
        , arrayShape
        , modifyArrayShape
        , setArrayShape
+       , existential
        , uniqueness
        , setUniqueness
        , unifyUniqueness
@@ -94,6 +95,12 @@ modifyArrayShape _ (Mem size)     = Mem size
 setArrayShape :: ArrayShape newshape =>
                  TypeBase oldshape -> newshape -> TypeBase newshape
 setArrayShape t ds = modifyArrayShape (const ds) t
+
+-- | True if the given type has a dimension that is existentially sized.
+existential :: ExtType -> Bool
+existential = any ext . extShapeDims . arrayShape
+  where ext (Ext _)  = True
+        ext (Free _) = False
 
 -- | Return the uniqueness of a type.
 uniqueness :: TypeBase shape -> Uniqueness
@@ -287,9 +294,9 @@ extractShapeContext ts shapes =
 -- 'ExtType's.
 shapeContext :: [ExtType] -> HS.HashSet Int
 shapeContext = HS.fromList
-               . concatMap (mapMaybe existential . extShapeDims . arrayShape)
-  where existential (Ext x)  = Just x
-        existential (Free _) = Nothing
+               . concatMap (mapMaybe ext . extShapeDims . arrayShape)
+  where ext (Ext x)  = Just x
+        ext (Free _) = Nothing
 
 shapeContextSize :: [ExtType] -> Int
 shapeContextSize = HS.size . shapeContext
