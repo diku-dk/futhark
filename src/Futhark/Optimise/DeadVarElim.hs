@@ -10,7 +10,7 @@ module Futhark.Optimise.DeadVarElim
 import Control.Applicative
 import Control.Monad.Writer
 
-import qualified Data.Set as S
+import qualified Data.HashSet as HS
 
 import Futhark.Representation.Basic
 import Futhark.Binder
@@ -24,15 +24,14 @@ import Futhark.Binder
 data DCElimRes = DCElimRes {
     resSuccess :: Bool
   -- ^ Whether we have changed something.
-  , resMap     :: S.Set VName
+  , resMap     :: Names
   -- ^ The hashtable recording the uses
-  --, has_io     :: Bool
   }
 
 instance Monoid DCElimRes where
   DCElimRes s1 m1 `mappend` DCElimRes s2 m2 =
-    DCElimRes (s1 || s2) (m1 `S.union` m2) --(io1 || io2)
-  mempty = DCElimRes False S.empty -- False
+    DCElimRes (s1 || s2) (m1 `HS.union` m2) --(io1 || io2)
+  mempty = DCElimRes False HS.empty -- False
 
 type DCElimM = Writer DCElimRes
 
@@ -42,7 +41,7 @@ runDCElimM = runWriter
 collectRes :: [VName] -> DCElimM a -> DCElimM (a, Bool)
 collectRes mvars m = pass collect
   where wasNotUsed hashtab vnm =
-          return $ not (S.member vnm hashtab)
+          return $ not (HS.member vnm hashtab)
 
         collect = do
           (x,res) <- listen m
@@ -121,12 +120,13 @@ deadCodeElimExp e = mapExpM mapper e
                  }
 
 deadCodeElimResType :: ResType -> DCElimM ResType
-deadCodeElimResType =
-  liftM extResType . mapM deadCodeElimExtType . resTypeValues
+deadCodeElimResType rt = do
+  tell $ DCElimRes False $ freeNamesIn rt
+  return rt
 
 deadCodeElimIdent :: Ident -> DCElimM Ident
 deadCodeElimIdent ident@(Ident vnm t _) = do
-  tell $ DCElimRes False (S.insert vnm S.empty)
+  tell $ DCElimRes False $ HS.singleton vnm
   dims <- mapM deadCodeElimSubExp $ arrayDims t
   return ident { identType = t `setArrayShape` Shape dims }
 
@@ -137,13 +137,6 @@ deadCodeElimBnd :: Ident -> DCElimM Ident
 deadCodeElimBnd ident = do
   t <- deadCodeElimType $ identType ident
   return $ ident { identType = t }
-
-deadCodeElimExtType :: ExtType -> DCElimM ExtType
-deadCodeElimExtType t = do
-  dims <- mapM deadCodeElimExtDim $ extShapeDims $ arrayShape t
-  return $ t `setArrayShape` ExtShape dims
-  where deadCodeElimExtDim (Free se) = Free <$> deadCodeElimSubExp se
-        deadCodeElimExtDim (Ext k)   = return $ Ext k
 
 deadCodeElimType :: Type -> DCElimM Type
 deadCodeElimType t = do
