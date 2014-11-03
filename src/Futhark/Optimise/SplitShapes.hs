@@ -104,8 +104,9 @@ substituteExtResultShapes rettype (Body _ bnds res) = do
           mkLet <$> mapM substInBnd' (patternIdents pat) <*>
           pure (substituteNames subst e)
         substInBnd' v
-          | identName v `HM.member` subst = newIdent' (<>"unused") v
-          | otherwise                     = return v
+          | identName v' `HM.member` subst = newIdent' (<>"unused") v'
+          | otherwise                      = return v'
+          where v' = v { identType = substituteNames subst $ identType v }
 
 simplifyShapeFun :: MonadFreshNames m => FunDec -> m FunDec
 simplifyShapeFun shapef = return . deadCodeElimFun =<< simplifyFun =<<
@@ -129,7 +130,9 @@ cheapSubsts :: [(Name, (FunDec, FunDec))] -> [(Name, (FunDec, FunDec))]
 cheapSubsts = filter (cheapFun . fst . snd)
               -- Probably too simple.  We might want to inline first.
 
-substCalls :: MonadFreshNames m => [(Name, (Name, ResType, Name, ResType))] -> FunDec -> m FunDec
+substCalls :: MonadFreshNames m =>
+              [(Name, (Name, ResType, Name, ResType))]
+           -> FunDec -> m FunDec
 substCalls subst fundec = do
   fbody' <- treatBody $ funDecBody fundec
   return fundec { funDecBody = fbody' }
@@ -141,7 +144,7 @@ substCalls subst fundec = do
           return $ lam { lambdaBody = body }
 
         treatBinding (Let pat _ (Apply fname args _ loc))
-          | Just (shapefun,shapetype,valfun,valtype) <- lookup fname subst =
+          | Just (shapefun,shapetype,valfun,_) <- lookup fname subst =
             liftM snd . runBinder'' $ do
               let (vs,vals) =
                     splitAt (length $ resTypeElems shapetype) $
@@ -149,7 +152,8 @@ substCalls subst fundec = do
               letBindPat (Pattern vs) $
                 Apply shapefun args shapetype loc
               letBindPat (Pattern vals) $
-                Apply valfun ([(Var $ bindeeIdent v,Observe) | v <- vs]++args) valtype loc
+                Apply valfun ([(Var $ bindeeIdent v,Observe) | v <- vs]++args)
+                (staticResType $ map bindeeType vals)  loc
 
         treatBinding (Let pat _ e) = do
           e' <- mapExpM mapper e
