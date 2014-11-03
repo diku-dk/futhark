@@ -21,7 +21,7 @@ import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes
 
 -- | The class of lores whose annotations can be prettyprinted.
-class (Lore lore, Pretty (ResType lore)) => PrettyLore lore where
+class (Lore lore, Pretty (ResType lore), Pretty (Pattern lore)) => PrettyLore lore where
   ppBindingLore :: Binding lore -> Maybe Doc
   ppBindingLore = const Nothing
   ppFunDecLore :: FunDec lore -> Maybe Doc
@@ -99,6 +99,9 @@ bindingAnnotation bnd doc =
   case ppBindingLore bnd of
     Nothing    -> doc
     Just annot -> annot </> doc
+
+instance Pretty (PatternT lore) where
+  ppr = ppPattern . patternIdents
 
 instance PrettyLore lore => Pretty (Binding lore) where
   ppr bnd@(Let pat _ e) =
