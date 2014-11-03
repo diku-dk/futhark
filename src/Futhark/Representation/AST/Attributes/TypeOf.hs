@@ -15,12 +15,10 @@ module Futhark.Representation.AST.Attributes.TypeOf
        )
        where
 
-import Control.Monad.State
 import Data.List
 import Data.Maybe
 import Data.Monoid
 import qualified Data.HashSet as HS
-import qualified Data.HashMap.Lazy as HM
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Lore (Lore)
@@ -117,33 +115,12 @@ typeOf (LoopOp op) = loopOpType op
 typeOf (If _ _ _ t _) = t
 typeOf (Apply _ _ t _) = t
 
-bodyType :: Body lore -> [ExtType]
+bodyType :: Lore lore => Body lore -> ResType lore
 bodyType (Body _ bnds res) =
-  evalState (mapM makeBoundShapesFree $
-             staticShapes $ map subExpType $ resultSubExps res)
-  (0, HM.empty, HM.empty)
+  existentialiseType bound $
+  staticResType $ map subExpType $ resultSubExps res
   where boundInLet (Let pat _ _) = patternNames pat
         bound = HS.fromList $ concatMap boundInLet bnds
-        makeBoundShapesFree t = do
-          shape <- mapM checkDim $ extShapeDims $ arrayShape t
-          return $ t `setArrayShape` ExtShape shape
-        checkDim (Free (Var v))
-          | identName v `HS.member` bound =
-            replaceVar $ identName v
-        checkDim (Free se) = return $ Free se
-        checkDim (Ext x)   = replaceExt x
-        replaceExt x = do
-          (n, extmap, varmap) <- get
-          case HM.lookup x extmap of
-            Nothing -> do put (n+1, HM.insert x (Ext n) extmap, varmap)
-                          return $ Ext $ n+1
-            Just replacement -> return replacement
-        replaceVar name = do
-          (n, extmap, varmap) <- get
-          case HM.lookup name varmap of
-            Nothing -> do put (n+1, extmap, HM.insert name (Ext n) varmap)
-                          return $ Ext $ n+1
-            Just replacement -> return replacement
 
 valueShapeContext :: [ExtType] -> [Value] -> [Value]
 valueShapeContext rettype values =

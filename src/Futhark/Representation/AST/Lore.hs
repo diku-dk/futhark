@@ -46,10 +46,12 @@ instance Monoid (ResTypeT ()) where
 
 instance ResType (ResTypeT ()) where
   simpleType = mapM hasStaticShape . resTypeValues
+  extResType ts = ResType [ (t, ()) | t <- ts]
   rt1 `generaliseResTypes` rt2 =
     extResType $ resTypeValues rt1 `generaliseExtTypes` resTypeValues rt2
-  extResType ts = ResType [ (t, ()) | t <- ts]
   doLoopResType res merge =
     extResType $ loopResultExtType (map identType res) merge
   staticResType = extResType . staticShapes
   resTypeValues (ResType ts) = map fst ts
+  existentialiseType inaccessible ts =
+    extResType $ existentialiseExtTypes inaccessible $ resTypeValues ts

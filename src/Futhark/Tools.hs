@@ -222,7 +222,7 @@ makeLambda :: (Bindable (Lore m), MonadBinder m) =>
               [Param] -> m (Body (Lore m)) -> m (Lambda (Lore m))
 makeLambda params body = do
   body' <- insertBindingsM body
-  case mapM hasStaticShape $ bodyType body' of
+  case simpleType $ bodyType body' of
     Nothing -> fail "Body passed to makeLambda has open type"
     Just ts ->
       return Lambda {

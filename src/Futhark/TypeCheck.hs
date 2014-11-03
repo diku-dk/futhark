@@ -439,11 +439,11 @@ checkFun' (fname, rettype, params, _, loc) check = do
 
   checkReturnAlias $ bodyAliases body'
 
-  if bodyType body' `subtypesOf` resTypeValues rettype' then
+  if resTypeValues (bodyType body') `subtypesOf` resTypeValues rettype' then
     return (rettype', body')
   else bad $ ReturnTypeError loc fname
              (Several $ map toDecl $ resTypeValues rettype')
-             (Several $ map toDecl $ bodyType body')
+             (Several $ map toDecl $ resTypeValues $ bodyType body')
 
   where checkParams = reverse <$> foldM expand [] params
 
@@ -757,8 +757,8 @@ checkExp (If e1 e2 e3 t pos) = do
   e1' <- require [Basic Bool] =<< checkSubExp e1
   ((e2', e3'), dflow) <- collectDataflow $ checkBody e2 `alternative` checkBody e3
   tell dflow
-  let t' = extResType (bodyType e2') `generaliseResTypes`
-           extResType (bodyType e3') `generaliseResTypes`
+  let t' = bodyType e2' `generaliseResTypes`
+           bodyType e3' `generaliseResTypes`
            t
   when (t' /= t) $
     bad $ TypeError pos $ "Expected if result type " ++ pretty t

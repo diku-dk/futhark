@@ -87,7 +87,7 @@ loopClosedForm pat respat merge bound body
       If (Var isEmpty)
       tb
       closedBody'
-      (extResType $ bodyType body)
+      (bodyType body)
       bodyloc
   | otherwise = cannotSimplify
   where (mergepat, mergeexp) = unzip merge

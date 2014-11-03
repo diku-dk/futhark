@@ -125,7 +125,7 @@ transformExp (LoopOp (Filter cs fun arrexps loc)) = do
                (eBody [eBinOp Equal indexi (pexp $ intval 0) (Basic Bool) loc])
                (eBody [eBinOp Equal indexi indexinm1 (Basic Bool) loc])
                (staticResType [Basic Bool]) loc)
-           (pure resv) update (extResType $ bodyType resv) loc]
+           (pure resv) update (bodyType resv) loc]
   return $ LoopOp $ DoLoop (mergesize:res)
     (zip (mergesize:res) (outersize:resinit))
     i nv loopbody loc

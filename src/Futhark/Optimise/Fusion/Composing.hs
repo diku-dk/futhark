@@ -148,9 +148,9 @@ fuseFilterInto lam1 inp1 out1 lam2 inp2 vnames falsebranch = (lam2', HM.elems in
                          If e
                          (makeCopiesInner $ lambdaBody lam2)
                          falsebranch
-                         (extResType (bodyType (lambdaBody lam2))
+                         (bodyType (lambdaBody lam2)
                           `generaliseResTypes`
-                          extResType (bodyType falsebranch))
+                          bodyType falsebranch)
                          loc] $
                  Result (resultCertificates res) (map Var residents) loc
         lam1tuple = [ mkLet [v] $ PrimOp $ SubExp $ Var p

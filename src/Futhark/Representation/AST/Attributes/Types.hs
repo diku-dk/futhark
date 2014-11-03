@@ -40,6 +40,7 @@ module Futhark.Representation.AST.Attributes.Types
        , hasStaticShape
        , generaliseExtTypes
        , loopResultExtType
+       , existentialiseExtTypes
        )
        where
 
@@ -341,3 +342,29 @@ loopResultExtType restypes merge = evalState (mapM inspect restypes) 0
             put $ i + 1
             return $ Ext i
         inspectShape se = return $ Free se
+
+existentialiseExtTypes :: Names -> [ExtType] -> [ExtType]
+existentialiseExtTypes inaccessible ts =
+  evalState (mapM makeBoundShapesFree ts)
+  (firstavail, HM.empty, HM.empty)
+  where firstavail = 1 + HS.foldl' max (-1) (shapeContext ts)
+        makeBoundShapesFree t = do
+          shape <- mapM checkDim $ extShapeDims $ arrayShape t
+          return $ t `setArrayShape` ExtShape shape
+        checkDim (Free (Var v))
+          | identName v `HS.member` inaccessible =
+            replaceVar $ identName v
+        checkDim (Free se) = return $ Free se
+        checkDim (Ext x)   = replaceExt x
+        replaceExt x = do
+          (n, extmap, varmap) <- get
+          case HM.lookup x extmap of
+            Nothing -> do put (n+1, HM.insert x (Ext n) extmap, varmap)
+                          return $ Ext $ n+1
+            Just replacement -> return replacement
+        replaceVar name = do
+          (n, extmap, varmap) <- get
+          case HM.lookup name varmap of
+            Nothing -> do put (n+1, extmap, HM.insert name (Ext n) varmap)
+                          return $ Ext $ n+1
+            Just replacement -> return replacement

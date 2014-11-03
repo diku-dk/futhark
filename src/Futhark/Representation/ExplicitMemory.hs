@@ -33,6 +33,7 @@ where
 
 import Control.Applicative
 import Control.Monad.State
+import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import Data.Foldable (traverse_)
 import Data.Maybe
@@ -124,6 +125,32 @@ instance Lore.ResType (ResTypeT MemReturn) where
     where addAttr (Basic t) = return (Basic t, ReturnsScalar)
           addAttr (Mem sz)  = return (Mem sz,  ReturnsScalar)
           addAttr t         = return (t,       ReturnsInAnyBlock)
+  existentialiseType inaccessible (AST.ResType xs) =
+    let (ts,attrs) = unzip xs
+        ts'        = existentialiseExtTypes inaccessible ts
+        attrs'     = evalState (mapM replaceAttr attrs) (0,HM.empty,HM.empty)
+    in AST.ResType $ zip ts' attrs'
+    where replaceAttr (ReturnsInBlock v)
+            | identName v `HS.member` inaccessible =
+              replaceVar $ identName v
+            | otherwise =
+              return $ ReturnsInBlock v
+          replaceAttr ReturnsInAnyBlock =
+            return ReturnsInAnyBlock
+          replaceAttr ReturnsScalar =
+            return ReturnsScalar
+          replaceAttr (ReturnsNewBlock j) = do
+            (i, extmap, varmap) <- get
+            case HM.lookup j extmap of
+              Nothing   -> do put (i+1, HM.insert j i extmap, varmap)
+                              return $ ReturnsNewBlock i
+              Just repl -> return $ ReturnsNewBlock repl
+          replaceVar name = do
+            (i, extmap, varmap) <- get
+            case HM.lookup name varmap of
+              Nothing   -> do put (i+1, extmap, HM.insert name i varmap)
+                              return $ ReturnsNewBlock i
+              Just repl -> return $ ReturnsNewBlock repl
 
 startOfFreeIDRange :: [ExtType] -> Int
 startOfFreeIDRange = (1+) . HS.foldl' max 0 . shapeContext
