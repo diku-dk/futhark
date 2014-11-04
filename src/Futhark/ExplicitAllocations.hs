@@ -67,20 +67,20 @@ allocForArray t loc = do
 
 allocsForPattern :: [Ident] -> AllocM [Bindee MemSummary]
 allocsForPattern pat = do
-  (vals,allocs) <- runWriterT $ forM pat $ \ident ->
+  (vals,(memsizes,mems)) <- runWriterT $ forM pat $ \ident ->
     let loc = srclocOf ident in
     case identType ident of
       Mem _    -> return $ Bindee ident Scalar
       Basic _  -> return $ Bindee ident Scalar
       t@(Array {})
         | ext t     -> do
-          (allocs,ident') <- lift $ memForBindee ident
-          tell allocs
+          (memsize,mem,ident') <- lift $ memForBindee ident
+          tell ([memsize], [mem])
           return ident'
         | otherwise -> do
           (_, m) <- lift $ allocForArray (identType ident) loc
           return $ Bindee ident $ directIndexFunction m t
-  return $ allocs <> vals
+  return $ memsizes <> mems <> vals
   where boundHere = map identName pat
         isBoundHere (Constant {}) = False
         isBoundHere (Var v) = identName v `elem` boundHere
@@ -88,11 +88,12 @@ allocsForPattern pat = do
 
 memForBindee :: (MonadFreshNames m) =>
                 Ident
-             -> m ([BindeeT MemSummary], BindeeT MemSummary)
+             -> m (BindeeT MemSummary, BindeeT MemSummary, BindeeT MemSummary)
 memForBindee ident = do
   size <- newIdent (memname <> "_size") (Basic Int) loc
   mem <- newIdent memname (Mem $ Var size) loc
-  return ([Bindee size Scalar, Bindee mem Scalar],
+  return (Bindee size Scalar,
+          Bindee mem Scalar,
           Bindee ident $ directIndexFunction mem t)
   where  memname = baseString (identName ident) <> "_mem"
          t       = identType ident
@@ -137,15 +138,15 @@ runAllocM (AllocM m) = do
 allocInFParams :: [In.FParam] -> ([FParam] -> AllocM a)
                -> AllocM a
 allocInFParams params m = do
-  (valparams, memparams) <- runWriterT $ forM params $ \param ->
+  (valparams, (memsizeparams, memparams)) <- runWriterT $ forM params $ \param ->
     case bindeeType param of
       Array {} -> do
-        (allocs,param') <- lift $ memForBindee $ bindeeIdent param
-        tell allocs
+        (memsize,mem,param') <- lift $ memForBindee $ bindeeIdent param
+        tell ([memsize], [mem])
         return param'
       _ -> return param { bindeeLore = Scalar }
   let summary = bindeesSummary valparams
-      params' = memparams <> valparams
+      params' = memsizeparams <> memparams <> valparams
   local (summary `HM.union`) $ m params'
 
 ensureLinearArray :: SubExp -> AllocM (SubExp, Ident, SubExp)
@@ -176,15 +177,15 @@ allocLinearArray s se = do
 
 funcallArgs :: [(SubExp,Diet)] -> AllocM [(SubExp,Diet)]
 funcallArgs args = do
-  (valargs, memargs) <- runWriterT $ forM args $ \(arg,d) ->
+  (valargs, (memsizeargs, memargs)) <- runWriterT $ forM args $ \(arg,d) ->
     case subExpType arg of
       Array {} -> do
         (size, mem, arg') <- lift $ ensureLinearArray arg
-        tell [(size, Observe), (Var mem, Observe)]
+        tell ([(size, Observe)], [(Var mem, Observe)])
         return (arg', d)
       _ ->
         return (arg, d)
-  return $ memargs <> valargs
+  return $ memsizeargs <> memargs <> valargs
 
 explicitAllocations :: In.Prog -> Prog
 explicitAllocations prog =
