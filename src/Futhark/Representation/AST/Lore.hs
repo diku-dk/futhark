@@ -49,8 +49,6 @@ instance ResType (ResTypeT ()) where
   extResType ts = ResType [ (t, ()) | t <- ts]
   rt1 `generaliseResTypes` rt2 =
     extResType $ resTypeValues rt1 `generaliseExtTypes` resTypeValues rt2
-  doLoopResType res merge =
-    extResType $ loopResultExtType (map identType res) merge
   staticResType = extResType . staticShapes
   resTypeValues (ResType ts) = map fst ts
   existentialiseType inaccessible ts =

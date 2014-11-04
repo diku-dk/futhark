@@ -40,7 +40,6 @@ module Futhark.Representation.AST.Attributes.Types
        , shapeContextSize
        , hasStaticShape
        , generaliseExtTypes
-       , loopResultExtType
        , existentialiseExtTypes
        )
        where
@@ -336,19 +335,6 @@ generaliseExtTypes rt1 rt2 =
         new x = do (n,m) <- get
                    put (n + 1, HM.insert x n m)
                    return n
-
-loopResultExtType :: [Type] -> [Ident] -> [ExtType]
-loopResultExtType restypes merge = evalState (mapM inspect restypes) 0
-  where bound = map identName merge
-        inspect t = do
-          shape <- mapM inspectShape $ arrayDims t
-          return $ t `setArrayShape` ExtShape shape
-        inspectShape (Var v)
-          | identName v `elem` bound = do
-            i <- get
-            put $ i + 1
-            return $ Ext i
-        inspectShape se = return $ Free se
 
 existentialiseExtTypes :: Names -> [ExtType] -> [ExtType]
 existentialiseExtTypes inaccessible ts =

@@ -22,8 +22,6 @@ class (Show rt, Eq rt, Ord rt, Monoid rt) => ResType rt where
   -- | Create a ResType from a list of types with existential shape.
   extResType :: [ExtType] -> rt
 
-  doLoopResType :: [Ident] -> [Ident] -> rt
-
   -- | Create a ResType from a list of types with known shape.
   staticResType :: [Type] -> rt
 

@@ -93,9 +93,10 @@ primOpType (Conjoin _ _) =
 primOpType (Alloc e _) =
   [Mem e]
 
-loopOpType :: forall lore . Lore lore => LoopOp lore -> ResType lore
+loopOpType :: Lore lore => LoopOp lore -> ResType lore
 loopOpType (DoLoop res merge _ _ _ _) =
-  doLoopResType res $ map fst merge
+  existentialiseType bound $ staticResType $ map identType res
+  where bound = HS.fromList $ map (identName . fst) merge
 loopOpType (Map _ f arrs _) =
   staticResType $ mapType f $ map subExpType arrs
 loopOpType (Reduce _ fun _ _) =

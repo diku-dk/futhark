@@ -132,18 +132,23 @@ instance Lore.ResType (ResTypeT MemReturn) where
   existentialiseType inaccessible (AST.ResType xs) =
     let (ts,attrs) = unzip xs
         ts'        = existentialiseExtTypes inaccessible ts
-        attrs'     = evalState (mapM replaceAttr attrs) (0,HM.empty,HM.empty)
+        attrs'     = evalState (zipWithM replaceAttr ts' attrs) (0,HM.empty,HM.empty)
     in AST.ResType $ zip ts' attrs'
-    where replaceAttr (ReturnsInBlock v)
+    where replaceAttr _ (ReturnsInBlock v)
             | identName v `HS.member` inaccessible =
               replaceVar $ identName v
             | otherwise =
               return $ ReturnsInBlock v
-          replaceAttr ReturnsInAnyBlock =
-            return ReturnsInAnyBlock
-          replaceAttr ReturnsScalar =
+          replaceAttr t ReturnsInAnyBlock
+            | existential t = do
+              (i, extmap, varmap) <- get
+              put (i+1, extmap, varmap)
+              return $ ReturnsNewBlock i
+            | otherwise =
+              return ReturnsInAnyBlock
+          replaceAttr _ ReturnsScalar =
             return ReturnsScalar
-          replaceAttr (ReturnsNewBlock j) = do
+          replaceAttr _ (ReturnsNewBlock j) = do
             (i, extmap, varmap) <- get
             case HM.lookup j extmap of
               Nothing   -> do put (i+1, HM.insert j i extmap, varmap)
