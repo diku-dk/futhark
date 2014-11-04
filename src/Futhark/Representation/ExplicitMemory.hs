@@ -240,8 +240,8 @@ instance TypeCheck.Checkable ExplicitMemory where
           -- size must be bound in the pattern itself.
           checkShape (Var v)       (Ext i) = isPatternBoundSize v i
           -- If the return size is free, then the bound size must be
-          -- identical.
-          checkShape se1 (Free se2) | se1 == se2 = return ()
+          -- the same a runtime, but we cannot check this statically.
+          checkShape _ (Free _) = return ()
           -- Otherwise we have an error.
           checkShape _ _ = lift $ wrong "Shape of binding is nonsensical."
 
