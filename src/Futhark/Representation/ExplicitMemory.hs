@@ -8,6 +8,7 @@ module Futhark.Representation.ExplicitMemory
        , Body
        , Binding
        , Pattern
+       , PatBindee
        , PrimOp
        , LoopOp
        , Exp
@@ -45,7 +46,7 @@ import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
-          Pattern, Lambda, FunDec, FParam, ResType)
+          Pattern, PatBindee, Lambda, FunDec, FParam, ResType)
 
 import Futhark.TypeCheck.TypeError
 import Futhark.Representation.AST.Attributes
@@ -67,6 +68,7 @@ type Exp = AST.Exp ExplicitMemory
 type Body = AST.Body ExplicitMemory
 type Binding = AST.Binding ExplicitMemory
 type Pattern = AST.Pattern ExplicitMemory
+type PatBindee = AST.PatBindee ExplicitMemory
 type Lambda = AST.Lambda ExplicitMemory
 type FunDec = AST.FunDec ExplicitMemory
 type FParam = AST.FParam ExplicitMemory
@@ -348,7 +350,7 @@ instance PrettyLore ExplicitMemory where
       []     -> Nothing
       annots -> Just $ PP.folddoc (PP.</>) annots
 
-bindeeAnnotation :: Bindee MemSummary -> Maybe PP.Doc
+bindeeAnnotation :: PatBindee -> Maybe PP.Doc
 bindeeAnnotation bindee =
   case bindeeLore bindee of
     MemSummary ident fun ->
