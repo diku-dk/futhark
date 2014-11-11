@@ -17,6 +17,7 @@ module Futhark.Tools
   , eCopy
   , eAssert
   , eDoLoop
+  , eValue
   , eBody
   , eLambda
 
@@ -44,6 +45,7 @@ module Futhark.Tools
   )
 where
 
+import qualified Data.Array as A
 import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
 import Data.Loc
@@ -174,6 +176,16 @@ eDoLoop respat merge i boundexp loopbody = do
   return $ LoopOp $ DoLoop respat (zip mergepat mergeexps') i boundexp' loopbody' loc
   where (mergepat, mergeexps) = unzip merge
         loc = srclocOf i
+
+eValue :: MonadBinder m => Value -> SrcLoc -> m (Exp (Lore m))
+eValue (BasicVal bv) loc =
+  return $ PrimOp $ SubExp $ Constant bv loc
+eValue (ArrayVal a t) loc = do
+  let fullshape = [ Constant (IntVal d) loc
+                  | d <- valueShape (ArrayVal a t)
+                  ]
+  ses <- mapM (letSubExp "array_elem" <=< (`eValue` loc)) $ A.elems a
+  return $ PrimOp $ ArrayLit ses (t `setArrayDims` fullshape) loc
 
 eBody :: (MonadBinder m) =>
          [m (Exp (Lore m))]

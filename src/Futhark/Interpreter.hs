@@ -161,7 +161,7 @@ runFun fname mainargs prog = do
           (Just (FunDec _ _ fparams _ _), _)
             | length argtypes == length fparams &&
               and (zipWith subtypeOf argtypes $ map bindeeType fparams) ->
-              evalFuncall fname [ Constant v noLoc | v <- mainargs ]
+              evalFuncall fname mainargs
             | otherwise ->
               bad $ InvalidFunctionArguments fname
                     (Just (map (toDecl . bindeeType) fparams))
@@ -222,7 +222,7 @@ single v = [v]
 
 evalSubExp :: SubExp -> FutharkM Value
 evalSubExp (Var ident)    = lookupVar ident
-evalSubExp (Constant v _) = return v
+evalSubExp (Constant v _) = return $ BasicVal v
 
 evalBody :: Lore lore => Body lore -> FutharkM [Value]
 
@@ -246,7 +246,8 @@ evalExp (Apply fname args _ loc)
   tell [(loc, pretty vs)]
   return vs
 evalExp (Apply fname args rettype _) = do
-  vs <- evalFuncall fname $ map fst args
+  args' <- mapM (evalSubExp . fst) args
+  vs <- evalFuncall fname args'
   return $ valueShapeContext (resTypeValues rettype) vs ++ vs
 evalExp (PrimOp op) = evalPrimOp op
 evalExp (LoopOp op) = evalLoopOp op
@@ -475,11 +476,10 @@ evalLoopOp (Redomap _ _ innerfun accexp arrexps loc) = do
   let foldfun acc x = applyLambda innerfun $ acc ++ x
   foldM foldfun startaccs $ transpose vss
 
-evalFuncall :: Name -> [SubExp] -> FutharkM [Value]
+evalFuncall :: Name -> [Value] -> FutharkM [Value]
 evalFuncall fname args = do
   fun <- lookupFun fname
-  args' <- mapM evalSubExp args
-  fun args'
+  fun args
 
 evalIntBinOp :: (Int -> Int -> Int) -> SubExp -> SubExp -> SrcLoc -> FutharkM [Value]
 evalIntBinOp op e1 e2 loc = do
@@ -520,7 +520,7 @@ applyLambda (Lambda params body rettype loc) args =
 checkPatSizes :: [(Ident, Value)]-> FutharkM ()
 checkPatSizes = mapM_ $ uncurry checkSize
   where checkSize var val = do
-          let valshape = map value $ valueShape val
+          let valshape = map (BasicVal . value) $ valueShape val
               varname = textual $ identName var
               vardims = arrayDims $ identType var
               loc = srclocOf var

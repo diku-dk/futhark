@@ -103,9 +103,9 @@ compileMapWithScan (SOACNest _ (Nest.Scan _ (Nest.NewNest _ (Nest.Map {})) _ _))
 compileMapWithScan _ = Nothing
 
 unOp :: [Param] -> Exp -> Maybe BohriumUnOp
-unOp ps (PrimOp (BinOp Plus (Constant (BasicVal (IntVal x)) _) (Var p1) _ _))
+unOp ps (PrimOp (BinOp Plus (Constant (IntVal x) _) (Var p1) _ _))
   | [p1] == ps = Just $ BohrIntInc x
-unOp ps (PrimOp (BinOp Plus (Var p1) (Constant (BasicVal (IntVal x)) _) _ _))
+unOp ps (PrimOp (BinOp Plus (Var p1) (Constant (IntVal x) _) _ _))
   | [p1] == ps = Just $ BohrIntInc x
 unOp _ _ = Nothing
 

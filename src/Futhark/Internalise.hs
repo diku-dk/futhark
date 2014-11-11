@@ -394,7 +394,7 @@ internaliseExp desc (E.Iota e loc) = do
   letTupExp' desc $ I.PrimOp $ I.Iota e' loc
 
 internaliseExp _ (E.Literal v loc) =
-  return $ map (`I.Constant` loc) $ internaliseValue v
+  mapM (letSubExp "literal" <=< (`eValue` loc)) $ internaliseValue v
 
 internaliseExp desc (E.If ce te fe t loc) = do
   ce' <- internaliseExp1 "cond" ce
@@ -512,7 +512,7 @@ tuplit (Just c) _ es = I.Var c:es
 
 -- Name suggested by Spectrum.
 given :: SrcLoc -> SubExp
-given = I.Constant $ I.BasicVal I.Checked
+given = I.Constant I.Checked
 
 certify :: Maybe I.Ident -> I.Certificates -> I.Certificates
 certify k cs = maybeToList k ++ cs

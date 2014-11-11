@@ -91,7 +91,7 @@ lookupScalExp name vtable = asScalExp =<< lookup name vtable
 
 lookupValue :: VName -> SymbolTable lore -> Maybe Value
 lookupValue name vtable = case lookupSubExp name vtable of
-                            Just (Constant val _) -> Just val
+                            Just (Constant val _) -> Just $ BasicVal val
                             _                     -> Nothing
 
 lookupVar :: VName -> SymbolTable lore -> Maybe VName
@@ -135,7 +135,7 @@ bindingEntries bnd@(Let (Pattern [bindee]) _ e) vtable = [entry]
           PrimOp (SubExp se) ->
             subExpRange se vtable
           PrimOp (Iota n _) ->
-            (Just zero, (`SMinus` one) <$> subExpToScalExp n)
+            (Just zero, Just $ subExpToScalExp n `SMinus` one)
           PrimOp (Replicate _ v _) ->
             subExpRange v vtable
           PrimOp (Rearrange _ _ v _) ->
@@ -168,15 +168,12 @@ insertBinding bnd vtable =
 subExpRange :: SubExp -> SymbolTable lore -> Range
 subExpRange (Var v) vtable =
   lookupRange (identName v) vtable
-subExpRange (Constant (BasicVal bv) _) _ =
+subExpRange (Constant bv _) _ =
   (Just $ Val bv, Just $ Val bv)
-subExpRange (Constant (ArrayVal _ _) _) _ =
-  (Nothing, Nothing)
 
-subExpToScalExp :: SubExp -> Maybe ScalExp
-subExpToScalExp (Var v)                    = Just $ Id v
-subExpToScalExp (Constant (BasicVal bv) _) = Just $ Val bv
-subExpToScalExp _                          = Nothing
+subExpToScalExp :: SubExp -> ScalExp
+subExpToScalExp (Var v)         = Id v
+subExpToScalExp (Constant bv _) = Val bv
 
 insertEntry :: VName -> Entry lore -> SymbolTable lore
             -> SymbolTable lore

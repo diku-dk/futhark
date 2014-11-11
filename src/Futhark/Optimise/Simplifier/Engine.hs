@@ -438,8 +438,8 @@ simplifyBinding (Let pat _ (Apply fname args rettype loc)) = do
     Just vs -> do let vs' = valueShapeContext (resTypeValues rettype) vs ++ vs
                   bnds <- forM (zip (patternIdents pat) vs') $ \(p,v) ->
                     case uniqueness $ identType p of
-                      Unique    -> mkLetM [p] $ PrimOp $ Copy (Constant v loc) loc
-                      Nonunique -> mkLetM [p] $ PrimOp $ SubExp $ Constant v loc
+                      Unique    -> mkLetM [p] =<< eCopy (eValue v loc)
+                      Nonunique -> mkLetM [p] =<< eValue v loc
                   mapM_ (simplifyBinding . Aliases.removeBindingAliases) bnds
     Nothing -> do let e' = Apply fname (zip args' $ map snd args) rettype' loc
                   pat' <- blockUsage $ simplifyPattern pat
@@ -583,12 +583,10 @@ simplifySubExp :: MonadEngine m => SubExp -> m SubExp
 simplifySubExp (Var ident@(Ident vnm _ loc)) = do
   bnd <- getsEngineState $ ST.lookupSubExp vnm . stateVtable
   case bnd of
-    Just (Constant v _)
-      | isBasicTypeVal v  -> return $ Constant v loc
+    Just (Constant v _) -> return $ Constant v loc
     Just (Var id') -> do usedName $ identName id'
                          return $ Var id'
     _              -> Var <$> simplifyIdent ident
-  where isBasicTypeVal = basicType . valueType
 simplifySubExp (Constant v loc) = return $ Constant v loc
 
 simplifyPattern :: MonadEngine m => Pattern lore -> m [Ident]
@@ -653,7 +651,7 @@ simplifyCerts = liftM (nub . concat) . mapM check
   where check idd = do
           vv <- getsEngineState $ ST.lookupSubExp (identName idd) . stateVtable
           case vv of
-            Just (Constant (BasicVal Checked) _) -> return []
+            Just (Constant Checked _) -> return []
             Just (Var idd') -> do usedName $ identName idd'
                                   return [idd']
             _ -> do usedName $ identName idd

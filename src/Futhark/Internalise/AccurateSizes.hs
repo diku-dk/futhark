@@ -92,7 +92,7 @@ allEqual comp_shape = do
   cert <- newIdent "all_equal_cert" (Basic Cert) loc
   shape <- newIdent "all_equal_shape" (Basic Int) loc
   letBind [cert, shape] $
-    LoopOp $ Reduce [] checkFun [(Constant (BasicVal Checked) loc,Var comp),
+    LoopOp $ Reduce [] checkFun [(Constant Checked loc,Var comp),
                                  (intconst 0 loc,Var comp_shape)] loc
   return (cert, shape)
   where loc  = srclocOf comp_shape

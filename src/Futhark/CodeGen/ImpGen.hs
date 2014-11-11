@@ -17,7 +17,6 @@ module Futhark.CodeGen.ImpGen
 import Control.Applicative
 import Control.Monad.RWS
 
-import qualified Data.Array as A
 import qualified Data.HashMap.Lazy as HM
 import Data.List
 import Data.Loc
@@ -76,7 +75,7 @@ compileProg ec prog = snd $ mapAccumL (compileFunDec ec) src $ progFunctions pro
 
 compileType :: TypeBase Shape -> Imp.Type
 compileType t = Imp.Type (elemType t) $ map asImpSize $ arrayDims t
-  where asImpSize (Constant (BasicVal (IntVal x)) _) =
+  where asImpSize (Constant (IntVal x) _) =
           Imp.ConstSize x
         asImpSize (Constant _ _) =
           error "Futhark.CodeGen.ImpGen.compileType: dimension size is a non-integer constant"
@@ -326,14 +325,8 @@ compileSubExpTo target se =
   tell $ Imp.Write target [] $ compileSubExp se
 
 compileSubExp :: SubExp -> Imp.Exp
-compileSubExp (Constant (BasicVal v) _) =
+compileSubExp (Constant v _) =
   Imp.Constant $ Imp.BasicVal v
-compileSubExp (Constant val@(ArrayVal arr rt) _) =
-  let vs = concatMap flatten $ A.elems arr
-      arr' = A.listArray (0,length vs-1) vs
-  in Imp.Constant $ Imp.ArrayVal (valueShape val) arr' $ elemType rt
-  where flatten (ArrayVal arr' _) = concatMap flatten $ A.elems arr'
-        flatten (BasicVal v) = [v]
 compileSubExp (Var v) =
   Imp.Read (identName v) []
 

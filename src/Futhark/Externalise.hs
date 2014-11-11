@@ -251,7 +251,7 @@ externaliseSubExp :: I.SubExp -> E.Exp
 externaliseSubExp (I.Var v) =
   E.Var $ externaliseIdent v
 externaliseSubExp (I.Constant v loc) =
-  E.Literal (externaliseValue v) loc
+  E.Literal (E.BasicVal v) loc
 
 externaliseParam :: I.Param -> E.Parameter
 externaliseParam (I.Ident name t loc) =

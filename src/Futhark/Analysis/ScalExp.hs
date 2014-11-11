@@ -167,9 +167,8 @@ binOpScalExp bop = liftM snd $ find ((==bop) . fst)
 toScalExp' :: LookupVar -> SubExp -> Maybe ScalExp
 toScalExp' look (Var v) =
   look (identName v) <|> Just (Id v)
-toScalExp' _ (Constant (BasicVal val) _) =
+toScalExp' _ (Constant val _) =
   Just $ Val val
-toScalExp' _ _ = Nothing
 
 fromScalExp :: (Proper lore, Bindable lore, MonadFreshNames m) => SrcLoc -> ScalExp
             -> m (Exp lore, [Binding lore])
@@ -178,8 +177,8 @@ fromScalExp loc e = runBinder'' $ fromScalExp' loc e
 fromScalExp' :: MonadBinder m => SrcLoc -> ScalExp
              -> m (Exp (Lore m))
 fromScalExp' loc = convert
-  where convert (Val val) = return $ PrimOp $ SubExp $ Constant (BasicVal val) loc
-        convert (Id v)    = return $ PrimOp $  SubExp $ Var v
+  where convert (Val val) = return $ PrimOp $ SubExp $ Constant val loc
+        convert (Id v)    = return $ PrimOp $ SubExp $ Var v
         convert (SNeg se) = eNegate (convert se) loc
         convert (SNot se) = eNot (convert se) loc
         convert (SPlus x y) = arithBinOp Plus x y

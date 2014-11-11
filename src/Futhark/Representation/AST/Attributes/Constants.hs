@@ -11,24 +11,24 @@ import Data.Loc
 import Futhark.Representation.AST.Syntax.Core
 
 -- | If a Haskell type is an instance of 'IsValue', it means that a
--- value of that type can be converted to a Futhark 'Value'.  This is
--- intended to cut down on boilerplate when writing compiler code -
--- for example, you'll quickly grow tired of writing @Constant
--- (BasicVal $ LogVal True) loc@.
+-- value of that type can be converted to a Futhark 'BasicValue'.
+-- This is intended to cut down on boilerplate when writing compiler
+-- code - for example, you'll quickly grow tired of writing @Constant
+-- (LogVal True) loc@.
 class IsValue a where
-  value :: a -> Value
+  value :: a -> BasicValue
 
 instance IsValue Int where
-  value = BasicVal . IntVal
+  value = IntVal
 
 instance IsValue Double where
-  value = BasicVal . RealVal
+  value = RealVal
 
 instance IsValue Bool where
-  value = BasicVal . LogVal
+  value = LogVal
 
 instance IsValue Char where
-  value = BasicVal . CharVal
+  value = CharVal
 
 -- | Create a 'Constant' 'SubExp' containing the given value.
 constant :: IsValue v => v -> SrcLoc -> SubExp

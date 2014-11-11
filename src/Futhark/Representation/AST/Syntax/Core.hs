@@ -177,10 +177,10 @@ instance Hashable (IdentBase shape) where
 -- | A list of identifiers used for certificates in some expressions.
 type Certificates = [Ident]
 
--- | A subexpression is either a constant or a variable.  One
+-- | A subexpression is either a scalar constant or a variable.  One
 -- important property is that evaluation of a subexpression is
 -- guaranteed to complete in constant time.
-data SubExp = Constant Value SrcLoc
+data SubExp = Constant BasicValue SrcLoc
             | Var      Ident
             deriving (Show, Eq, Ord)
 

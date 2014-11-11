@@ -75,14 +75,6 @@ instance Pretty (ResTypeT ()) where
 instance Pretty (IdentBase shape) where
   ppr = text . textual . identName
 
-hasArrayLit :: SubExp -> Bool
-hasArrayLit (Constant val _) = hasArrayVal val
-hasArrayLit _ = False
-
-hasArrayVal :: Value -> Bool
-hasArrayVal (ArrayVal {}) = True
-hasArrayVal _ = False
-
 instance Pretty SubExp where
   ppr (Var v)        = ppr v
   ppr (Constant v _) = ppr v
@@ -90,9 +82,8 @@ instance Pretty SubExp where
 instance PrettyLore lore => Pretty (Body lore) where
   ppr (Body lore (bnd:bnds) res) =
     ppr bnd <+> text "in" </> ppr (Body lore bnds res)
-  ppr (Body _ [] (Result cs es _))
-    | any hasArrayLit es = ppCertificates cs <> braces (commastack $ map ppr es)
-    | otherwise          = ppCertificates cs <> braces (commasep   $ map ppr es)
+  ppr (Body _ [] (Result cs es _)) =
+    ppCertificates cs <> braces (commasep   $ map ppr es)
 
 bindingAnnotation :: PrettyLore lore => Binding lore -> Doc -> Doc
 bindingAnnotation bnd doc =
@@ -113,7 +104,6 @@ instance PrettyLore lore => Pretty (Binding lore) where
     where linebreak = case e of
                         LoopOp {} -> True
                         If {} -> True
-                        PrimOp (SubExp (Constant (ArrayVal {}) _)) -> False
                         PrimOp (ArrayLit {}) -> False
                         _ -> False
 

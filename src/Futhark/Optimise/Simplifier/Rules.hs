@@ -10,7 +10,6 @@ where
 import Control.Applicative
 import Control.Monad
 
-import Data.Array
 import Data.Bits
 import Data.Either
 import Data.List
@@ -308,10 +307,6 @@ simplifyRearrange :: LetTopDownRule lore u
 simplifyRearrange _ (Rearrange _ perm e _)
   | perm == [0..arrayRank (subExpType e) - 1] = Just $ SubExp e
 
--- If asked to rotate a constant, just do it.
-simplifyRearrange _ (Rearrange _ perm (Constant val _) loc) =
-  Just $ SubExp $ Constant (permuteArray perm val) loc
-
 simplifyRearrange look (Rearrange cs perm (Var v) loc) =
   case asPrimOp =<< look (identName v) of
     Just (Rearrange cs2 perm2 e _) ->
@@ -325,10 +320,6 @@ simplifyRotate :: LetTopDownRule lore u
 -- A zero-rotation is identity.
 simplifyRotate _ (Rotate _ 0 e _) =
   Just $ SubExp e
-
--- If asked to rotate a constant, just do it.
-simplifyRotate _ (Rotate _ i (Constant val _) loc) =
-  Just $ SubExp $ Constant (rotateArray i val) loc
 
 simplifyRotate look (Rotate _ _ (Var v) _) = do
   bnd <- asPrimOp =<< look (identName v)
@@ -348,9 +339,9 @@ simplifyBinOp _ (BinOp Plus e1 e2 _ pos)
   | isCt0 e2 = Just $ SubExp e1
   | otherwise =
     case (e1, e2) of
-      (Constant (BasicVal (IntVal v1)) _,  Constant (BasicVal (IntVal v2)) _) ->
+      (Constant (IntVal v1) _,  Constant (IntVal v2) _) ->
         binOpRes pos $ IntVal $ v1+v2
-      (Constant (BasicVal (RealVal v1)) _, Constant (BasicVal (RealVal v2)) _) ->
+      (Constant (RealVal v1) _, Constant (RealVal v2) _) ->
         binOpRes pos $ RealVal $ v1+v2
       _ -> Nothing
 
@@ -358,9 +349,9 @@ simplifyBinOp _ (BinOp Minus e1 e2 _ pos)
   | isCt0 e2 = Just $ SubExp e1
   | otherwise =
     case (e1, e2) of
-      (Constant (BasicVal (IntVal v1)) _, Constant (BasicVal (IntVal v2)) _) ->
+      (Constant (IntVal v1) _, Constant (IntVal v2) _) ->
         binOpRes pos $ IntVal $ v1-v2
-      (Constant (BasicVal (RealVal v1)) _, Constant (BasicVal (RealVal v2)) _) ->
+      (Constant (RealVal v1) _, Constant (RealVal v2) _) ->
         binOpRes pos $ RealVal $ v1-v2
       _ -> Nothing
 
@@ -371,9 +362,9 @@ simplifyBinOp _ (BinOp Times e1 e2 _ pos)
   | isCt1 e2 = Just $ SubExp e1
   | otherwise =
     case (e1, e2) of
-      (Constant (BasicVal (IntVal v1)) _, Constant (BasicVal (IntVal v2)) _) ->
+      (Constant (IntVal v1) _, Constant (IntVal v2) _) ->
         binOpRes pos $ IntVal $ v1*v2
-      (Constant (BasicVal (RealVal v1)) _, Constant (BasicVal (RealVal v2)) _) ->
+      (Constant (RealVal v1) _, Constant (RealVal v2) _) ->
         binOpRes pos $ RealVal $ v1*v2
       _ -> Nothing
 
@@ -382,15 +373,15 @@ simplifyBinOp _ (BinOp Divide e1 e2 _ pos)
   | isCt1 e2 = Just $ SubExp e1
   | otherwise =
     case (e1, e2) of
-      (Constant (BasicVal (IntVal v1)) _, Constant (BasicVal (IntVal v2)) _) ->
+      (Constant (IntVal v1) _, Constant (IntVal v2) _) ->
         binOpRes pos $ IntVal $ v1 `div` v2
-      (Constant (BasicVal (RealVal v1)) _, Constant (BasicVal (RealVal v2)) _) ->
+      (Constant (RealVal v1) _, Constant (RealVal v2) _) ->
         binOpRes pos $ RealVal $ v1 / v2
       _ -> Nothing
 
 simplifyBinOp _ (BinOp Mod e1 e2 _ pos) =
   case (e1, e2) of
-    (Constant (BasicVal (IntVal v1)) _, Constant (BasicVal (IntVal v2)) _) ->
+    (Constant (IntVal v1) _, Constant (IntVal v2) _) ->
       binOpRes pos $ IntVal $ v1 `mod` v2
     _ -> Nothing
 
@@ -403,9 +394,9 @@ simplifyBinOp _ (BinOp Pow e1 e2 _ pos)
   | isCt0 e1 || isCt1 e1 || isCt1 e2 = Just $ SubExp e1
   | otherwise =
     case (e1, e2) of
-      (Constant (BasicVal (IntVal v1)) _, Constant (BasicVal (IntVal v2)) _) ->
+      (Constant (IntVal v1) _, Constant (IntVal v2) _) ->
         binOpRes pos $ IntVal $ v1 ^ v2
-      (Constant (BasicVal (RealVal v1)) _, Constant (BasicVal (RealVal v2)) _) ->
+      (Constant (RealVal v1) _, Constant (RealVal v2) _) ->
         binOpRes pos $ RealVal $ v1**v2
       _ -> Nothing
 
@@ -413,7 +404,7 @@ simplifyBinOp _ (BinOp ShiftL e1 e2 _ pos)
   | isCt0 e2 = Just $ SubExp e1
   | otherwise =
     case (e1, e2) of
-      (Constant (BasicVal (IntVal v1)) _, Constant (BasicVal (IntVal v2)) _) ->
+      (Constant (IntVal v1) _, Constant (IntVal v2) _) ->
         binOpRes pos $ IntVal $ v1 `shiftL` v2
       _ -> Nothing
 
@@ -421,7 +412,7 @@ simplifyBinOp _ (BinOp ShiftR e1 e2 _ pos)
   | isCt0 e2 = Just $ SubExp e1
   | otherwise =
     case (e1, e2) of
-      (Constant (BasicVal (IntVal v1)) _, Constant (BasicVal (IntVal v2)) _) ->
+      (Constant (IntVal v1) _, Constant (IntVal v2) _) ->
         binOpRes pos $ IntVal $ v1 `shiftR` v2
       _ -> Nothing
 
@@ -433,7 +424,7 @@ simplifyBinOp _ (BinOp Band e1 e2 _ pos)
   | e1 == e2 = Just $ SubExp e1
   | otherwise =
     case (e1, e2) of
-      (Constant (BasicVal (IntVal v1)) _, Constant (BasicVal (IntVal v2)) _) ->
+      (Constant (IntVal v1) _, Constant (IntVal v2) _) ->
         binOpRes pos $ IntVal $ v1 .&. v2
       _ -> Nothing
 
@@ -445,7 +436,7 @@ simplifyBinOp _ (BinOp Bor e1 e2 _ pos)
   | e1 == e2 = Just $ SubExp e1
   | otherwise =
     case (e1, e2) of
-      (Constant (BasicVal (IntVal v1)) _, Constant (BasicVal (IntVal v2)) _) ->
+      (Constant (IntVal v1) _, Constant (IntVal v2) _) ->
         binOpRes pos $ IntVal $ v1 .|. v2
       _ -> Nothing
 
@@ -455,7 +446,7 @@ simplifyBinOp _ (BinOp Xor e1 e2 _ pos)
   | e1 == e2 = binOpRes pos $ IntVal 0
   | otherwise =
     case (e1, e2) of
-      (Constant (BasicVal (IntVal v1)) _, Constant (BasicVal (IntVal v2)) _) ->
+      (Constant (IntVal v1) _, Constant (IntVal v2) _) ->
         binOpRes pos $ IntVal $ v1 `xor` v2
       _ -> Nothing
 
@@ -472,7 +463,7 @@ simplifyBinOp look (BinOp LogAnd e1 e2 _ pos)
     e2' == e1 = binOpRes pos $ LogVal False
   | otherwise =
     case (e1, e2) of
-      (Constant (BasicVal (LogVal  v1)) _, Constant (BasicVal (LogVal v2)) _) ->
+      (Constant (LogVal  v1) _, Constant (LogVal v2) _) ->
         binOpRes pos $ LogVal $ v1 && v2
       _ -> Nothing
 
@@ -489,7 +480,7 @@ simplifyBinOp look (BinOp LogOr e1 e2 _ pos)
     e2' == e1 = binOpRes pos $ LogVal True
   | otherwise =
     case (e1, e2) of
-      (Constant (BasicVal (LogVal v1)) _, Constant (BasicVal (LogVal v2)) _) ->
+      (Constant (LogVal v1) _, Constant (LogVal v2) _) ->
         binOpRes pos $ LogVal $ v1 || v2
       _ -> Nothing
 
@@ -498,13 +489,13 @@ simplifyBinOp _ (BinOp Equal e1 e2 _ pos)
   | otherwise =
     case (e1, e2) of
       -- for numerals we could build node e1-e2, simplify and test equality with 0 or 0.0!
-      (Constant (BasicVal (IntVal v1)) _, Constant (BasicVal (IntVal v2)) _) ->
+      (Constant (IntVal v1) _, Constant (IntVal v2) _) ->
         binOpRes pos $ LogVal $ v1==v2
-      (Constant (BasicVal (RealVal v1)) _, Constant (BasicVal (RealVal v2)) _) ->
+      (Constant (RealVal v1) _, Constant (RealVal v2) _) ->
         binOpRes pos $ LogVal $ v1==v2
-      (Constant (BasicVal (LogVal  v1)) _, Constant (BasicVal (LogVal v2)) _) ->
+      (Constant (LogVal  v1) _, Constant (LogVal v2) _) ->
         binOpRes pos $ LogVal $ v1==v2
-      (Constant (BasicVal (CharVal v1)) _, Constant (BasicVal (CharVal v2)) _) ->
+      (Constant (CharVal v1) _, Constant (CharVal v2) _) ->
         binOpRes pos $ LogVal $ v1==v2
       _ -> Nothing
 
@@ -513,13 +504,13 @@ simplifyBinOp _ (BinOp Less e1 e2 _ pos)
   | otherwise =
   case (e1, e2) of
     -- for numerals we could build node e1-e2, simplify and compare with 0 or 0.0!
-    (Constant (BasicVal (IntVal v1)) _, Constant (BasicVal (IntVal v2)) _) ->
+    (Constant (IntVal v1) _, Constant (IntVal v2) _) ->
       binOpRes pos $ LogVal $ v1<v2
-    (Constant (BasicVal (RealVal v1)) _, Constant (BasicVal (RealVal v2)) _) ->
+    (Constant (RealVal v1) _, Constant (RealVal v2) _) ->
       binOpRes pos $ LogVal $ v1<v2
-    (Constant (BasicVal (LogVal  v1)) _, Constant (BasicVal (LogVal v2)) _) ->
+    (Constant (LogVal  v1) _, Constant (LogVal v2) _) ->
       binOpRes pos $ LogVal $ v1<v2
-    (Constant (BasicVal (CharVal v1)) _, Constant (BasicVal (CharVal v2)) _) ->
+    (Constant (CharVal v1) _, Constant (CharVal v2) _) ->
       binOpRes pos $ LogVal $ v1<v2
     _ -> Nothing
 
@@ -528,45 +519,45 @@ simplifyBinOp _ (BinOp Leq e1 e2 _ pos)
   | otherwise =
   case (e1, e2) of
     -- for numerals we could build node e1-e2, simplify and compare with 0 or 0.0!
-    (Constant (BasicVal (IntVal  v1)) _, Constant (BasicVal (IntVal  v2)) _) ->
+    (Constant (IntVal  v1) _, Constant (IntVal  v2) _) ->
       binOpRes pos $ LogVal $ v1<=v2
-    (Constant (BasicVal (RealVal v1)) _, Constant (BasicVal (RealVal v2)) _) ->
+    (Constant (RealVal v1) _, Constant (RealVal v2) _) ->
       binOpRes pos $ LogVal $ v1<=v2
-    (Constant (BasicVal (LogVal  v1)) _, Constant (BasicVal (LogVal  v2)) _) ->
+    (Constant (LogVal  v1) _, Constant (LogVal  v2) _) ->
       binOpRes pos $ LogVal $ v1<=v2
-    (Constant (BasicVal (CharVal v1)) _, Constant (BasicVal (CharVal v2 )) _) ->
+    (Constant (CharVal v1) _, Constant (CharVal v2 ) _) ->
       binOpRes pos $ LogVal $ v1<=v2
     _ -> Nothing
 
 simplifyBinOp _ _ = Nothing
 
 binOpRes :: SrcLoc -> BasicValue -> Maybe (PrimOp lore)
-binOpRes loc v = Just $ SubExp $ Constant (BasicVal v) loc
+binOpRes loc v = Just $ SubExp $ Constant v loc
 
 simplifyNot :: LetTopDownRule lore u
-simplifyNot _ (Not (Constant (BasicVal (LogVal v)) _) loc) =
+simplifyNot _ (Not (Constant (LogVal v) _) loc) =
   Just $ SubExp $ constant (not v) loc
 simplifyNot _ _ = Nothing
 
 simplifyNegate :: LetTopDownRule lore u
-simplifyNegate _ (Negate (Constant (BasicVal (IntVal  v)) _) pos) =
+simplifyNegate _ (Negate (Constant (IntVal  v) _) pos) =
   Just $ SubExp $ constant (negate v) pos
-simplifyNegate _ (Negate (Constant (BasicVal (RealVal  v)) _) pos) =
+simplifyNegate _ (Negate (Constant (RealVal  v) _) pos) =
   Just $ SubExp $ constant (negate v) pos
 simplifyNegate _ _ =
   Nothing
 
 -- If expression is true then just replace assertion.
 simplifyAssert :: LetTopDownRule lore u
-simplifyAssert _ (Assert (Constant (BasicVal (LogVal True)) _) loc) =
-  Just $ SubExp $ Constant (BasicVal Checked) loc
+simplifyAssert _ (Assert (Constant (LogVal True) _) loc) =
+  Just $ SubExp $ Constant Checked loc
 simplifyAssert _ _ =
   Nothing
 
 simplifyConjoin :: LetTopDownRule lore u
 simplifyConjoin look (Conjoin es loc) =
   -- Remove trivial certificates.
-  let check seen (Constant (BasicVal Checked) _) = seen
+  let check seen (Constant Checked _) = seen
       check seen (Var idd) =
         case asPrimOp =<< look (identName idd) of
           Just (Conjoin es2 _) -> seen `S.union` S.fromList es2
@@ -576,7 +567,7 @@ simplifyConjoin look (Conjoin es loc) =
       newset = foldl check S.empty es
       es' = S.toList newset
   in case es' of
-       []                    -> Just $ SubExp $ Constant (BasicVal Checked) loc
+       []                    -> Just $ SubExp $ Constant Checked loc
        [c]                   -> Just $ SubExp c
        _ | origset /= newset -> Just $ Conjoin es' loc
          | otherwise         -> Nothing
@@ -589,11 +580,6 @@ simplifyIndexing look (Index cs idd inds loc) =
 
     Just (SubExp (Var v)) ->
       return $ Index cs v inds loc
-
-    Just (SubExp (Constant v _))
-      | Just iis <- ctIndex inds,
-        length iis == length (valueShape v),
-        Just el <- arrValInd v iis -> Just $ SubExp $ Constant el loc
 
     Just (Iota _ _)
       | [ii] <- inds -> Just $ SubExp ii
@@ -608,12 +594,6 @@ simplifyIndexing look (Index cs idd inds loc) =
     Just (Replicate _ (Var vv) _)
       | [_]   <- inds -> Just $ SubExp $ Var vv
       | _:is' <- inds -> Just $ Index cs vv is' loc
-
-    Just (Replicate _ (Constant arr@(ArrayVal _ _) _) _)
-       | _:is' <- inds,
-         Just iis <- ctIndex is',
-         Just el <- arrValInd arr iis ->
-           Just $ SubExp $ Constant el loc
 
     Just (Replicate _ val@(Constant _ _) _)
       | [_] <- inds -> Just $ SubExp val
@@ -649,8 +629,8 @@ simplifyBoolBranch :: MonadBinder m => TopDownRule m
 simplifyBoolBranch _
   (Let pat _
    (If cond
-    (Body _ [] (Result _ [Constant (BasicVal (LogVal True)) _] _))
-    (Body _ [] (Result _ [Constant (BasicVal (LogVal False)) _] _))
+    (Body _ [] (Result _ [Constant (LogVal True) _] _))
+    (Body _ [] (Result _ [Constant (LogVal False) _] _))
     _ _)) =
   letBindPat pat $ PrimOp $ SubExp cond
 -- When typeOf(x)==bool, if c then x else y == (c && x) || (!c && y)
@@ -738,37 +718,27 @@ removeDeadBranchResult _ _ = cannotSimplify
 -- Some helper functions
 
 isCt1 :: SubExp -> Bool
-isCt1 (Constant (BasicVal (IntVal x))  _) = x == 1
-isCt1 (Constant (BasicVal (RealVal x)) _) = x == 1
-isCt1 (Constant (BasicVal (LogVal x))  _) = x
+isCt1 (Constant (IntVal x)  _) = x == 1
+isCt1 (Constant (RealVal x) _) = x == 1
+isCt1 (Constant (LogVal x)  _) = x
 isCt1 _                                   = False
 
 isCt0 :: SubExp -> Bool
-isCt0 (Constant (BasicVal (IntVal x))  _) = x == 0
-isCt0 (Constant (BasicVal (RealVal x)) _) = x == 0
-isCt0 (Constant (BasicVal (LogVal x))  _) = not x
+isCt0 (Constant (IntVal x)  _) = x == 0
+isCt0 (Constant (RealVal x) _) = x == 0
+isCt0 (Constant (LogVal x)  _) = not x
 isCt0 _                                   = False
 
 ctIndex :: [SubExp] -> Maybe [Int]
 ctIndex [] = Just []
-ctIndex (Constant (BasicVal (IntVal ii)) _:is) =
+ctIndex (Constant (IntVal ii) _:is) =
   case ctIndex is of
     Nothing -> Nothing
     Just y  -> Just (ii:y)
 ctIndex _ = Nothing
 
-arrValInd :: Value -> [Int] -> Maybe Value
-arrValInd v [] = Just v
-arrValInd v@(ArrayVal arr _) (i:is)
-  | i >= 0, i < valueSize v = arrValInd (arr ! i) is
-arrValInd _ _ = Nothing
-
 arrLitInd :: PrimOp lore -> [Int] -> Maybe (PrimOp lore)
 arrLitInd e [] = Just e
 arrLitInd (ArrayLit els _ _) (i:is)
   | i >= 0, i < length els = arrLitInd (SubExp $ els !! i) is
-arrLitInd (SubExp (Constant arr@(ArrayVal _ _) loc)) (i:is) =
-  case arrValInd arr (i:is) of
-    Nothing -> Nothing
-    Just v  -> Just $ SubExp $ Constant v loc
 arrLitInd _ _ = Nothing

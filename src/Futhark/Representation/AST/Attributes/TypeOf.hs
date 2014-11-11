@@ -28,7 +28,7 @@ import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Values
 
 subExpType :: SubExp -> Type
-subExpType (Constant val _) = valueType val
+subExpType (Constant val _) = Basic $ basicValueType val
 subExpType (Var ident)      = identType ident
 
 mapType :: Lambda lore -> [Type] -> [Type]
@@ -125,7 +125,7 @@ bodyType (Body _ bnds res) =
 
 valueShapeContext :: [ExtType] -> [Value] -> [Value]
 valueShapeContext rettype values =
-  map value $ extractShapeContext rettype $ map valueShape values
+  map (BasicVal . value) $ extractShapeContext rettype $ map valueShape values
 
 subExpShapeContext :: [ExtType] -> [SubExp] -> [SubExp]
 subExpShapeContext rettype ses =
