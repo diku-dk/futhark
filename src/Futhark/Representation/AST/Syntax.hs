@@ -219,7 +219,7 @@ instance Located (PrimOp lore) where
   locOf (Alloc _ loc) = locOf loc
 
 data LoopOp lore
-  = DoLoop [Ident] [(Ident, SubExp)] Ident SubExp (BodyT lore) SrcLoc
+  = DoLoop [Ident] [(FParam lore, SubExp)] Ident SubExp (BodyT lore) SrcLoc
     -- ^ @loop {b} <- {a} = {v} for i < n do b@.
 
   | Map Certificates (LambdaT lore) [SubExp] SrcLoc

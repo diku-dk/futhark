@@ -19,6 +19,7 @@ import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Lore (Lore)
 import Futhark.Representation.AST.ResType
 import Futhark.Representation.AST.Attributes.Types
+import Futhark.Representation.AST.Attributes.Patterns
 
 class Lore lore => Aliased lore where
   bodyAliases :: Body lore -> [Names]
@@ -66,7 +67,7 @@ primOpAliases (Alloc _ _) =
 
 loopOpAliases :: (Aliased lore) => LoopOp lore -> [Names]
 loopOpAliases (DoLoop res merge _ _ loopbody _) =
-  map snd $ filter fst $ zip (map ((`elem` res) . fst) merge) (bodyAliases loopbody)
+  map snd $ filter fst $ zip (map ((`elem` res) . bindeeIdent . fst) merge) (bodyAliases loopbody)
 loopOpAliases (Map _ f _ _) =
   bodyAliases $ lambdaBody f
 loopOpAliases (Reduce _ f _ _) =
@@ -123,5 +124,5 @@ consumedInExp (PrimOp (Update _ src _ _ _)) =
 consumedInExp (If _ tb fb _ _) =
   consumedInBody tb <> consumedInBody fb
 consumedInExp (LoopOp (DoLoop _ merge _ _ _ _)) =
-  mconcat $ map (subExpAliases . snd) $ filter (unique . identType . fst) merge
+  mconcat $ map (subExpAliases . snd) $ filter (unique . bindeeType . fst) merge
 consumedInExp _ = mempty

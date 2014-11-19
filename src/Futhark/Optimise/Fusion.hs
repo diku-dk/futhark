@@ -445,11 +445,11 @@ fusionGatherExp :: FusedRes -> Exp -> FusionGM FusedRes
 fusionGatherExp fres (LoopOp (DoLoop _ merge _ ub loop_body _)) = do
   let (merge_pat, ini_val) = unzip merge
 
-  let pat_vars = map Var merge_pat
+  let pat_vars = map (Var . bindeeIdent)  merge_pat
   fres' <- foldM fusionGatherSubExp fres (ini_val++ub:pat_vars)
 
   let null_res = mkFreshFusionRes
-  new_res <- binding merge_pat $ fusionGatherBody null_res loop_body
+  new_res <- binding (map bindeeIdent merge_pat) $ fusionGatherBody null_res loop_body
   -- make the inpArr unfusable, so that they
   -- cannot be fused from outside the loop:
   let (inp_arrs, _) = unzip $ HM.toList $ inpArr new_res

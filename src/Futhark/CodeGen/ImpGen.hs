@@ -277,13 +277,13 @@ defCompilePrimOp (_:_:_) _ = fail "ImpGen.compilePrimOp: Incorrect number of tar
 defCompileLoopOp :: [VName] -> LoopOp -> ImpM op ()
 
 defCompileLoopOp targets (DoLoop res merge i bound body _) = do
-  declareVars mergepat
+  declareVars $ map bindeeIdent mergepat
   zipWithM_ compileSubExpTo mergenames mergeinit
   body' <- collect $ compileBody mergenames body
   tell $ Imp.For (identName i) (compileSubExp bound) body'
-  zipWithM_ compileSubExpTo targets $ map Var $ loopResult res $ map fst merge
+  zipWithM_ compileSubExpTo targets $ map Var $ loopResult res $ map bindeeIdent mergepat
   where (mergepat, mergeinit) = unzip merge
-        mergenames = map identName mergepat
+        mergenames = map bindeeName mergepat
 
 defCompileLoopOp [_] (Map {}) = soacError
 

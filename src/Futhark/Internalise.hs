@@ -205,7 +205,8 @@ internaliseExp desc (E.DoLoop mergepat mergeexp i bound loopbody letbody loc) = 
             shapepat ++ mergepat',
             mergepat')
   let mergeexp' = prefixSubExpShapes $ map I.Var $ maybeToList c ++ mergevs
-      merge = zip mergepat' mergeexp'
+      merge = [ (Bindee ident (), e) |
+                (ident, e) <- zip mergepat' mergeexp' ]
       loop = I.LoopOp $ I.DoLoop respat merge i' bound' loopbody' loc
   bindingTupIdent mergepat Nothing (I.typeOf loop) $ \mergepat'' -> do
     letBind mergepat'' loop

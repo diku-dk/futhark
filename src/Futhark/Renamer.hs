@@ -180,7 +180,7 @@ instance Renameable lore => Rename (Exp lore) where
     let (mergepat, mergeexp) = unzip merge
     boundexp' <- rename boundexp
     mergeexp' <- mapM rename mergeexp
-    bind mergepat $ do
+    bind (map bindeeIdent mergepat) $ do
       mergepat' <- mapM rename mergepat
       respat' <- mapM rename respat
       bind [loopvar] $ do
@@ -199,6 +199,7 @@ instance Renameable lore => Rename (Exp lore) where
                     , mapOnValue = return
                     , mapOnCertificates = mapM rename
                     , mapOnResType = rename
+                    , mapOnFParam = rename
                     }
 
 instance (Rename shape) =>

@@ -35,7 +35,7 @@ usageInExp (Apply _ args _ _) =
 usageInExp (LoopOp (DoLoop _ merge _ _ _ _)) =
   mconcat [ mconcat $ map UT.consumedUsage $
             HS.toList $ subExpAliases se
-          | (v,se) <- merge, unique $ identType v ]
+          | (v,se) <- merge, unique $ bindeeType v ]
 usageInExp (LoopOp (Map _ f args _)) =
   mconcat [ mconcat $ map UT.consumedUsage $
             HS.toList $ subExpAliases se

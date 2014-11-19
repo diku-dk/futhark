@@ -12,7 +12,8 @@ import Control.Monad
 
 import Data.Bits
 import Data.Either
-import Data.List
+import Data.Foldable (any)
+import Data.List hiding (any)
 import Data.Loc
 import Data.Maybe
 import Data.Monoid
@@ -33,13 +34,15 @@ import Futhark.Representation.AST
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Tools
 
+import Prelude hiding (any)
+
 topDownRules :: MonadBinder m => TopDownRules m
 topDownRules = [ liftIdentityMapping
                , removeReplicateMapping
-               , hoistLoopInvariantMergeVariables
+--               , hoistLoopInvariantMergeVariables
                , simplifyClosedFormRedomap
                , simplifyClosedFormReduce
-               , simplifyClosedFormLoop
+--               , simplifyClosedFormLoop
                , letRule simplifyRearrange
                , letRule simplifyRotate
                , letRule simplifyBinOp
@@ -56,8 +59,8 @@ topDownRules = [ liftIdentityMapping
 
 bottomUpRules :: MonadBinder m => BottomUpRules m
 bottomUpRules = [ removeDeadMapping
-                , removeUnusedLoopResult
-                , removeRedundantMergeVariables
+--                , removeUnusedLoopResult
+--                , removeRedundantMergeVariables
                 , removeDeadBranchResult
                 , removeUnnecessaryCopy
                 ]
@@ -150,28 +153,33 @@ removeDeadMapping (_, used) (Let pat _ (LoopOp (Map cs fun arrs loc))) =
      else cannotSimplify
 removeDeadMapping _ _ = cannotSimplify
 
+{-
 -- After removing a result, we may also have to remove some of the
 -- shape bindings.
 removeUnusedLoopResult :: MonadBinder m => BottomUpRule m
 removeUnusedLoopResult (_, used) (Let pat _ (LoopOp (DoLoop respat merge i bound body loc)))
-  | explpat' <- filter (usedAfterwards . bindeeIdent . fst) explpat,
+  | explpat' <- filter (keep . fst) explpat,
     explpat' /= explpat =
   let shapes = concatMap (arrayDims . identType) $ map snd explpat'
       implpat' = filter ((`elem` shapes) . Var . snd) implpat
       pat' = map fst $ implpat'++explpat'
       respat' = map snd explpat'
   in letBindPat (Pattern pat') $ LoopOp $ DoLoop respat' merge i bound body loc
-  where -- | Check whether the variable binding is used afterwards.
-        -- But also, check whether one of the shapes is used!  FIXME:
-        -- This is in fact too conservative, as we only need to
-        -- preserve one binding with this shape.
-        usedAfterwards v =
-          identName v `UT.used` used  ||
-          any isUsedImplRes (concatMap varDim $ arrayDims $ identType v)
-        isUsedImplRes v =
-          v `UT.used` used && v `elem` patternNames pat
+  where -- | Check whether the variable binding is used afterwards OR
+        -- is responsible for some used existential part.
+        keep bindee =
+          bindeeName bindee `elem` nonremovablePatternNames
+        patNames :: [VName]
+        patNames = patternNames pat
+        nonremovablePatternNames =
+          filter (`UT.used` used) patNames <>
+          map bindeeName (filter interestingBindee $ patternBindees pat)
+        interestingBindee bindee =
+          any (`elem` patNames) $
+          freeNamesIn (bindeeLore bindee) <> freeNamesIn (bindeeType bindee)
         varDim (Var v)       = [identName v]
         varDim (Constant {}) = []
+        taggedpat :: [(FParam (Lore m), SubExp)]
         taggedpat = zip (patternBindees pat) $ loopResult respat $ map fst merge
         (implpat, explpat) = splitAt (length taggedpat - length respat) taggedpat
 removeUnusedLoopResult _ _ = cannotSimplify
@@ -272,6 +280,7 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge idd n
           | identName v1 == identName v2 = True
         invariantMerge _  initExp resExp = initExp == resExp
 hoistLoopInvariantMergeVariables _ _ = cannotSimplify
+-}
 
 -- | A function that, given a variable name, returns its definition.
 type VarLookup lore = VName -> Maybe (Exp lore)
@@ -296,12 +305,14 @@ simplifyClosedFormReduce vtable (Let pat _ (LoopOp (Reduce _ fun args _))) =
   where (acc, arr) = unzip args
 simplifyClosedFormReduce _ _ = cannotSimplify
 
+{-
 simplifyClosedFormLoop :: MonadBinder m => TopDownRule m
 simplifyClosedFormLoop _ (Let pat _ (LoopOp (DoLoop respat merge _ bound body _))) =
   loopClosedForm pat respat merge bound body
 simplifyClosedFormLoop _ _ = cannotSimplify
 
 simplifyRearrange :: LetTopDownRule lore u
+-}
 
 -- Handle identity permutation.
 simplifyRearrange _ (Rearrange _ perm e _)

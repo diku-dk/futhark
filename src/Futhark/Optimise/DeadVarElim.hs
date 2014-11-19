@@ -83,16 +83,14 @@ deadCodeElimBodyM :: Body -> DCElimM Body
 
 deadCodeElimBodyM (Body () (Let pat _ e:bnds) res) = do
   let idds = patternNames pat
-  ((pat',Body () bnds' res'), noref) <-
+  (Body () bnds' res', noref) <-
     collectRes idds $ do
-      (pat', _) <- collectRes idds $ deadCodeElimPat pat
-      body <- deadCodeElimBodyM $ Body () bnds res
-      return (pat', body)
-
+      _ <- collectRes idds $ deadCodeElimPat pat
+      deadCodeElimBodyM $ Body () bnds res
   if noref
   then changed $ return $ Body () bnds' res'
   else do e' <- deadCodeElimExp e
-          return $ Body () (mkLet pat' e':bnds') res'
+          return $ Body () (mkLet (patternIdents pat) e':bnds') res'
 
 deadCodeElimBodyM (Body () [] (Result cs es loc)) =
   Body () [] <$> (Result <$> mapM deadCodeElimIdent cs <*>
@@ -101,11 +99,11 @@ deadCodeElimBodyM (Body () [] (Result cs es loc)) =
 deadCodeElimExp :: Exp -> DCElimM Exp
 deadCodeElimExp (LoopOp (DoLoop respat merge i bound body loc)) = do
   let (mergepat, mergeexp) = unzip merge
-  mergepat' <- mapM deadCodeElimBnd mergepat
-  mergeexp' <- mapM deadCodeElimSubExp mergeexp
+  mapM_ (deadCodeElimBnd . bindeeIdent) mergepat
+  mapM_ deadCodeElimSubExp mergeexp
   bound' <- deadCodeElimSubExp bound
   body' <- deadCodeElimBodyM body
-  return $ LoopOp $ DoLoop respat (zip mergepat' mergeexp') i bound' body' loc
+  return $ LoopOp $ DoLoop respat merge i bound' body' loc
 deadCodeElimExp e = mapExpM mapper e
   where mapper = Mapper {
                    mapOnBinding = return -- Handled in case for Body.
@@ -117,7 +115,13 @@ deadCodeElimExp e = mapExpM mapper e
                  , mapOnType = deadCodeElimType
                  , mapOnValue = return
                  , mapOnResType = deadCodeElimResType
+                 , mapOnFParam = deadCodeElimFParam
                  }
+
+deadCodeElimFParam :: FParam -> DCElimM FParam
+deadCodeElimFParam fparam = do
+  tell $ DCElimRes False $ freeNamesIn fparam
+  return fparam
 
 deadCodeElimResType :: ResType -> DCElimM ResType
 deadCodeElimResType rt = do
@@ -130,13 +134,11 @@ deadCodeElimIdent ident@(Ident vnm t _) = do
   dims <- mapM deadCodeElimSubExp $ arrayDims t
   return ident { identType = t `setArrayShape` Shape dims }
 
-deadCodeElimPat :: Pattern -> DCElimM [Ident]
-deadCodeElimPat = mapM deadCodeElimBnd . patternIdents
+deadCodeElimPat :: Pattern -> DCElimM ()
+deadCodeElimPat = mapM_ deadCodeElimBnd . patternIdents
 
-deadCodeElimBnd :: Ident -> DCElimM Ident
-deadCodeElimBnd ident = do
-  t <- deadCodeElimType $ identType ident
-  return $ ident { identType = t }
+deadCodeElimBnd :: Ident -> DCElimM ()
+deadCodeElimBnd = void . deadCodeElimType . identType
 
 deadCodeElimType :: Type -> DCElimM Type
 deadCodeElimType t = do
@@ -146,6 +148,6 @@ deadCodeElimType t = do
 deadCodeElimLambda :: Lambda -> DCElimM Lambda
 deadCodeElimLambda (Lambda params body rettype pos) = do
   body' <- deadCodeElimBodyM body
-  params' <- mapM deadCodeElimBnd params
-  rettype' <- mapM deadCodeElimType rettype
-  return $ Lambda params' body' rettype' pos
+  mapM_ deadCodeElimBnd params
+  mapM_ deadCodeElimType rettype
+  return $ Lambda params body' rettype pos

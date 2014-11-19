@@ -65,8 +65,8 @@ freeWalker = identityWalker {
           let (mergepat, mergeexps) = unzip merge
           mapM_ subExpFree mergeexps
           subExpFree boundexp
-          binding (i `HS.insert` HS.fromList mergepat) $ do
-            mapM_ (typeFree . identType) mergepat
+          binding (i `HS.insert` HS.fromList (map bindeeIdent mergepat)) $ do
+            mapM_ (typeFree . bindeeType) mergepat
             bodyFree loopbody
 
         expFree e = walkExpM freeWalker e
@@ -169,6 +169,10 @@ instance (ArrayShape shape, FreeIn shape) => FreeIn (TypeBase shape) where
 instance FreeIn attr => FreeIn (ResTypeT attr) where
   freeIn = freeIn . resTypeElems
 
+instance FreeIn attr => FreeIn (Bindee attr) where
+  freeIn (Bindee ident attr) =
+    freeIn ident <> freeIn attr
+
 freeNamesIn :: FreeIn a => a -> Names
 freeNamesIn = HS.map identName . freeIn
 
@@ -198,7 +202,7 @@ progNames = execWriter . mapM funNames . progFunctions
           mapM_ one (patternNames pat) >> expNames e
 
         expNames (LoopOp (DoLoop _ pat i _ loopbody _)) = do
-          mapM_ (one . identName . fst) pat
+          mapM_ (one . bindeeName . fst) pat
           one $ identName i
           bodyNames loopbody
         expNames e = walkExpM names e

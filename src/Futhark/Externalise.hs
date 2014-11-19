@@ -126,7 +126,8 @@ externalisePrimOp (I.Rotate cs n e loc) =
 externaliseLoopOp :: I.LoopOp -> E.Exp
 
 externaliseLoopOp (I.DoLoop respat merge i bound loopbody loc) =
-  E.DoLoop (externaliseBinders mergepat loc) (externaliseSubExps mergeexp loc)
+  E.DoLoop (externaliseBinders (map bindeeIdent mergepat) loc)
+           (externaliseSubExps mergeexp loc)
            (externaliseIdent i) (externaliseSubExp bound)
            (externaliseBody loopbody)
            (E.TupLit (map (E.Var . externaliseIdent) respat) loc) loc

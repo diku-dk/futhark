@@ -256,6 +256,7 @@ allocInExp e = mapExpM alloc e
                                , mapOnBody = allocInBody
                                , mapOnLambda = allocInLambda
                                , mapOnResType = return . memoryInResType
+                               , mapOnFParam = undefined
                                }
 
 allocInLambda :: In.Lambda -> AllocM Lambda

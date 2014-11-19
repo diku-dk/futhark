@@ -133,7 +133,7 @@ splitBinding (Let pat _ (LoopOp (DoLoop respat merge i bound body loc))) = do
   ok <- newIdent "loop_ok" (Basic Bool) loc
   predbody' <- conjoinLoopBody ok predbody
   let predloop = LoopOp $ DoLoop (respat++[ok])
-                 (merge++[(ok,constant True loc)]) i bound
+                 (merge++[(Bindee ok (),constant True loc)]) i bound
                  predbody' loc
       valloop = LoopOp $ DoLoop respat merge i bound valbody loc
   return ([mkLet (patternIdents pat<>[ok]) predloop],

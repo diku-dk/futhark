@@ -96,7 +96,7 @@ primOpType (Alloc e _) =
 loopOpType :: Lore lore => LoopOp lore -> ResType lore
 loopOpType (DoLoop res merge _ _ _ _) =
   existentialiseType bound $ staticResType $ map identType res
-  where bound = HS.fromList $ map (identName . fst) merge
+  where bound = HS.fromList $ map (bindeeName . fst) merge
 loopOpType (Map _ f arrs _) =
   staticResType $ mapType f $ map subExpType arrs
 loopOpType (Reduce _ fun _ _) =

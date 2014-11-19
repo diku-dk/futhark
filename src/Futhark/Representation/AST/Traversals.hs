@@ -75,6 +75,7 @@ data Mapper flore tlore m = Mapper {
   , mapOnValue :: Value -> m Value
   , mapOnCertificates :: Certificates -> m Certificates
   , mapOnResType :: ResType flore -> m (ResType tlore)
+  , mapOnFParam :: FParam flore -> m (FParam tlore)
   }
 
 -- | A mapper that simply returns the tree verbatim.
@@ -89,6 +90,7 @@ identityMapper = Mapper {
                  , mapOnValue = return
                  , mapOnCertificates = return
                  , mapOnResType = return
+                 , mapOnFParam = return
                  }
 
 -- | Map a monadic action across the immediate children of a body.
@@ -176,7 +178,7 @@ mapExpM tv (PrimOp (Conjoin es loc)) =
   PrimOp <$> (pure Conjoin <*> mapM (mapOnSubExp tv) es <*> pure loc)
 mapExpM tv (LoopOp (DoLoop res mergepat loopvar boundexp loopbody loc)) =
   LoopOp <$> (DoLoop <$> mapM (mapOnIdent tv) res <*>
-              (zip <$> mapM (mapOnIdent tv) vs <*> mapM (mapOnSubExp tv) es) <*>
+              (zip <$> mapM (mapOnFParam tv) vs <*> mapM (mapOnSubExp tv) es) <*>
               mapOnIdent tv loopvar <*> mapOnSubExp tv boundexp <*>
               mapOnBody tv loopbody <*> pure loc)
   where (vs,es) = unzip mergepat
@@ -222,6 +224,7 @@ data Folder a lore m = Folder {
   , foldOnValue :: a -> Value -> m a
   , foldOnCertificates :: a -> Certificates -> m a
   , foldOnResType :: a -> ResType lore -> m a
+  , foldOnFParam :: a -> FParam lore -> m a
   }
 
 -- | A folding operation where the accumulator is returned verbatim.
@@ -236,6 +239,7 @@ identityFolder = Folder {
                  , foldOnValue = const . return
                  , foldOnCertificates = const . return
                  , foldOnResType = const . return
+                 , foldOnFParam = const . return
                  }
 
 foldMapper :: Monad m => Folder a lore m -> Mapper lore lore (StateT a m)
@@ -249,6 +253,7 @@ foldMapper f = Mapper {
                , mapOnValue = wrap foldOnValue
                , mapOnCertificates = wrap foldOnCertificates
                , mapOnResType = wrap foldOnResType
+               , mapOnFParam = wrap foldOnFParam
                }
   where wrap op k = do
           v <- get
@@ -287,6 +292,7 @@ data Walker lore m = Walker {
   , walkOnValue :: Value -> m ()
   , walkOnCertificates :: Certificates -> m ()
   , walkOnResType :: ResType lore -> m ()
+  , walkOnFParam :: FParam lore -> m ()
   }
 
 -- | A no-op traversal.
@@ -301,6 +307,7 @@ identityWalker = Walker {
                  , walkOnValue = const $ return ()
                  , walkOnCertificates = const $ return ()
                  , walkOnResType = const $ return ()
+                 , walkOnFParam = const $ return ()
                  }
 
 walkMapper :: Monad m => Walker lore m -> Mapper lore lore m
@@ -314,6 +321,7 @@ walkMapper f = Mapper {
                , mapOnValue = wrap walkOnValue
                , mapOnCertificates = wrap walkOnCertificates
                , mapOnResType = wrap walkOnResType
+               , mapOnFParam = wrap walkOnFParam
                }
   where wrap op k = op f k >> return k
 

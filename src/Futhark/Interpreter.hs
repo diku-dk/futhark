@@ -428,13 +428,13 @@ evalLoopOp (DoLoop respat merge loopvar boundexp loopbody loc) = do
   case bound of
     BasicVal (IntVal n) -> do
       vs <- foldM iteration mergestart [0..n-1]
-      binding (zip mergepat vs) $
-        mapM lookupVar $ loopResult respat $ map fst merge
+      binding (zip (map bindeeIdent mergepat) vs) $
+        mapM lookupVar $ loopResult respat $ map bindeeIdent mergepat
     _ -> bad $ TypeError loc "evalBody DoLoop"
   where (mergepat, mergeexp) = unzip merge
         iteration mergeval i =
           binding [(loopvar, BasicVal $ IntVal i)] $
-            binding (zip mergepat mergeval) $
+            binding (zip (map bindeeIdent mergepat) mergeval) $
               evalBody loopbody
 
 evalLoopOp (Map _ fun arrexps loc) = do

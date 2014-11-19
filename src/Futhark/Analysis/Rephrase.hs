@@ -67,8 +67,10 @@ rephraseLambda rephraser lam =
   lam { lambdaBody = rephraseBody rephraser $ lambdaBody lam }
 
 mapper :: Rephraser from to -> Mapper from to Identity
-mapper rephraser = identityMapper { mapOnBinding = return . rephraseBinding rephraser
-                                  , mapOnBody = return . rephraseBody rephraser
-                                  , mapOnLambda = return . rephraseLambda rephraser
-                                  , mapOnResType = return . rephraseResType rephraser
-                                  }
+mapper rephraser = identityMapper {
+    mapOnBinding = return . rephraseBinding rephraser
+  , mapOnBody = return . rephraseBody rephraser
+  , mapOnLambda = return . rephraseLambda rephraser
+  , mapOnResType = return . rephraseResType rephraser
+  , mapOnFParam = return . rephraseBindee (rephraseFParamLore rephraser)
+  }

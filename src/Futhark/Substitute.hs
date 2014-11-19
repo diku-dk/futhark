@@ -84,6 +84,7 @@ replace substs = Mapper {
                  , mapOnLambda = return . substituteNames substs
                  , mapOnCertificates = return . map (substituteNames substs)
                  , mapOnResType = return . substituteNames substs
+                 , mapOnFParam = return . substituteNames substs
                  }
 
 instance Substitute Rank where

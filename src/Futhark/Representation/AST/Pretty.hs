@@ -146,7 +146,7 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
 instance PrettyLore lore => Pretty (LoopOp lore) where
   ppr (DoLoop res mergepat i bound loopbody _) =
     text "loop" <+> ppPattern res <+>
-    text "<-" <+> ppPattern pat <+> equals <+> ppTuple' initexp </>
+    text "<-" <+> ppPattern (map bindeeIdent pat) <+> equals <+> ppTuple' initexp </>
     text "for" <+> ppr i <+> text "<" <+> align (ppr bound) <+> text "do" </>
     indent 2 (ppr loopbody)
     where (pat, initexp) = unzip mergepat

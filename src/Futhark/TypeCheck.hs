@@ -641,18 +641,16 @@ checkLoopOp :: Checkable lore =>
                LoopOp lore -> TypeM lore (LoopOp lore)
 
 checkLoopOp (DoLoop respat merge (Ident loopvar loopvart loopvarloc)
-                 boundexp loopbody loc) = do
+             boundexp loopbody loc) = do
   let (mergepat, mergeexps) = unzip merge
   unless (loopvart == Basic Int) $
     bad $ TypeError loopvarloc "Type annotation of loop variable is not int"
   (boundexp', boundarg) <- checkArg boundexp
   (mergeexps', mergeargs) <- unzip <$> mapM checkArg mergeexps
-  let mergeparams = mergepat
+  let mergeparams = map bindeeIdent mergepat
       funparams = Ident loopvar (Basic Int) loopvarloc : mergeparams
       paramts   = map (toDecl . identType) funparams
       rettype   = map identType mergeparams
-      setIdentType v t = v { identType = t }
-      mergepat' = zipWith setIdentType mergepat rettype
   checkFuncall Nothing loc paramts $ boundarg : mergeargs
 
   (_, loopbody') <-
@@ -663,13 +661,13 @@ checkLoopOp (DoLoop respat merge (Ident loopvar loopvart loopvarloc)
                                   loc)
   respat' <-
     forM respat $ \res ->
-      case find ((==identName res) . identName) mergepat' of
+      case find ((==identName res) . bindeeName) mergepat of
         Nothing -> bad $ TypeError loc $ "Loop result variable " ++
                                          textual (identName res) ++
                                          " is not a merge variable."
-        Just v  -> return res { identType = identType v }
+        Just v  -> return res { identType = bindeeType v }
 
-  return $ DoLoop respat' (zip mergepat' mergeexps')
+  return $ DoLoop respat' (zip mergepat mergeexps')
                   (Ident loopvar (Basic Int) loopvarloc) boundexp'
                   loopbody' loc
 

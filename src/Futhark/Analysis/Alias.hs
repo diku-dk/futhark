@@ -57,6 +57,7 @@ analyseExp e = Out.mapExp traverse e
                      , Out.mapOnBinding = return . analyseBinding
                      , Out.mapOnLambda = error "Improperly handled lambda in alias analysis"
                      , Out.mapOnResType = return
+                     , Out.mapOnFParam = return
                      }
 
 analyseLambda :: Lore lore => In.Lambda lore -> Out.Lambda lore

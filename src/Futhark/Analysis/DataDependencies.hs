@@ -41,12 +41,12 @@ dataDependencies' startdeps = foldl grow startdeps . bodyBindings
 
         grow deps (Let pat _ (LoopOp (DoLoop respat merge _ bound body _))) =
           let deps' = deps `HM.union` HM.fromList
-                      [ (identName v, depsOf deps e) | (v,e) <- merge ]
+                      [ (bindeeName v, depsOf deps e) | (v,e) <- merge ]
               bodydeps = dataDependencies' deps' body
               bounddeps = depsOf deps bound
               comb v e =
                 (identName v, HS.unions [bounddeps, depsOf bodydeps e])
-              mergedeps = HM.fromList $ zipWith comb (map fst merge) $
+              mergedeps = HM.fromList $ zipWith comb (map (bindeeIdent . fst) merge) $
                           resultSubExps $ bodyResult body
           in HM.fromList [ (name, nameDeps (identName res) mergedeps)
                            | (name, res) <- zip (patternNames pat) respat ]

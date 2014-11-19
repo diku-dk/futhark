@@ -16,7 +16,6 @@ module Futhark.Tools
   , eIndex
   , eCopy
   , eAssert
-  , eDoLoop
   , eValue
   , eBody
   , eLambda
@@ -164,18 +163,6 @@ eAssert :: MonadBinder m =>
          m (Exp (Lore m)) -> m (Exp (Lore m))
 eAssert e = do e' <- letSubExp "assert_arg" =<< e
                return $ PrimOp $ Assert e' $ srclocOf e'
-
-eDoLoop :: (Bindable (Lore m), MonadBinder m) =>
-           [Ident] -> [(Ident, m (Exp (Lore m)))]
-        -> Ident -> m (Exp (Lore m)) -> m (Body (Lore m))
-        -> m (Exp (Lore m))
-eDoLoop respat merge i boundexp loopbody = do
-  mergeexps' <- letSubExps "merge_init" =<< sequence mergeexps
-  boundexp' <- letSubExp "bound" =<< boundexp
-  loopbody' <- insertBindingsM loopbody
-  return $ LoopOp $ DoLoop respat (zip mergepat mergeexps') i boundexp' loopbody' loc
-  where (mergepat, mergeexps) = unzip merge
-        loc = srclocOf i
 
 eValue :: MonadBinder m => Value -> SrcLoc -> m (Exp (Lore m))
 eValue (BasicVal bv) loc =

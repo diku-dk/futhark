@@ -495,6 +495,8 @@ simplifyExpBase = mapExpM hoist
                 , mapOnValue = return
                 , mapOnCertificates = simplifyCerts
                 , mapOnResType = simplifyResType
+                , mapOnFParam =
+                  fail "Unhandled FParam in simplification engine."
                 }
 
 simplifyLoopOp :: MonadEngine m => LoopOp (InnerLore m) -> m (LoopOp (Lore m))
@@ -502,10 +504,10 @@ simplifyLoopOp :: MonadEngine m => LoopOp (InnerLore m) -> m (LoopOp (Lore m))
 simplifyLoopOp (DoLoop respat merge loopvar boundexp loopbody loc) = do
   let (mergepat, mergeexp) = unzip merge
   respat'   <- mapM simplifyIdentBinding respat
-  mergepat' <- mapM simplifyIdentBinding mergepat
+  mergepat' <- mapM simplifyFParam mergepat
   mergeexp' <- mapM simplifySubExp mergeexp
   boundexp' <- simplifySubExp boundexp
-  let diets = map (diet . identType) mergepat'
+  let diets = map (diet . bindeeType) mergepat'
   -- Blocking hoisting of all unique bindings is probably too
   -- conservative, but there is currently no nice way to mark
   -- consumption of the loop body result.
@@ -516,7 +518,10 @@ simplifyLoopOp (DoLoop respat merge loopvar boundexp loopbody loc) = do
   consumeResult $ zip diets mergeexp'
   return $ DoLoop respat' merge' loopvar boundexp' loopbody' loc
   where boundnames = identName loopvar `HS.insert`
-                     patNameSet (map fst merge)
+                     HS.fromList (map (bindeeName . fst) merge)
+        simplifyFParam bindee = do
+          ident <- simplifyIdentBinding $ bindeeIdent bindee
+          return $ bindee { bindeeIdent = ident }
 
 simplifyLoopOp (Map cs fun arrs loc) = do
   cs' <- simplifyCerts cs

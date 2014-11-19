@@ -60,14 +60,14 @@ transformExp (LoopOp (Map cs fun arrs loc)) = do
     x <- bodyBind =<< transformLambda fun (index cs inarrs iv)
     dests <- letwith cs outarr (pexp iv) $ map (PrimOp . SubExp) x
     return $ resultBody [] (map Var dests) loc
-  return $ LoopOp $ DoLoop outarr (zip outarr resarr) i (isize inarrs) loopbody loc
+  return $ LoopOp $ DoLoop outarr (loopMerge outarr resarr) i (isize inarrs) loopbody loc
 
 transformExp (LoopOp (Reduce cs fun args loc)) = do
   (_, (acc, initacc), (i, iv)) <- newFold loc arrexps accexps
   arrvs <- mapM (letExp "reduce_arr" . PrimOp . SubExp) arrexps
   loopbody <- insertBindingsM $ transformLambda fun $
               map (PrimOp . SubExp . Var) acc ++ index cs arrvs iv
-  return $ LoopOp $ DoLoop acc (zip acc initacc) i (isize arrvs) loopbody loc
+  return $ LoopOp $ DoLoop acc (loopMerge acc initacc) i (isize arrvs) loopbody loc
   where (accexps, arrexps) = unzip args
 
 transformExp (LoopOp (Scan cs fun args loc)) = do
@@ -79,7 +79,7 @@ transformExp (LoopOp (Scan cs fun args loc)) = do
     irows <- letSubExps "row" $ index cs dests iv
     rowcopies <- letExps "copy" [ PrimOp $ Copy irow loc | irow <- irows ]
     return $ resultBody [] (map Var $ rowcopies ++ dests) loc
-  return $ LoopOp $ DoLoop arr (zip (acc ++ arr) (initacc ++ initarr)) i (isize arr) loopbody loc
+  return $ LoopOp $ DoLoop arr (loopMerge (acc ++ arr) (initacc ++ initarr)) i (isize arr) loopbody loc
   where (accexps, arrexps) = unzip args
 
 transformExp (LoopOp (Filter cs fun arrexps loc)) = do
@@ -127,7 +127,7 @@ transformExp (LoopOp (Filter cs fun arrexps loc)) = do
                (staticResType [Basic Bool]) loc)
            (pure resv) update (bodyType resv) loc]
   return $ LoopOp $ DoLoop (mergesize:res)
-    (zip (mergesize:res) (outersize:resinit))
+    (loopMerge (mergesize:res) (outersize:resinit))
     i nv loopbody loc
   where intval x = intconst x loc
 
@@ -136,7 +136,7 @@ transformExp (LoopOp (Redomap cs _ innerfun accexps arrexps loc)) = do
   arrvs <- mapM (letExp "redomap_arr" . PrimOp . SubExp) arrexps
   loopbody <- insertBindingsM $ transformLambda innerfun $
               map (PrimOp . SubExp . Var) acc ++ index cs arrvs iv
-  return $ LoopOp $ DoLoop acc (zip acc initacc) i (isize arrvs) loopbody loc
+  return $ LoopOp $ DoLoop acc (loopMerge acc initacc) i (isize arrvs) loopbody loc
 
 transformExp e = mapExpM transform e
 
@@ -205,3 +205,6 @@ transformLambda :: Lambda -> [Exp] -> Binder Basic Body
 transformLambda (Lambda params body _ _) args = do
   zipWithM_ letBind (map pure params) args
   transformBody body
+
+loopMerge :: [Ident] -> [SubExp] -> [(FParam, SubExp)]
+loopMerge vars vals = [ (Bindee var (), val) | (var,val) <- zip vars vals ]
