@@ -33,7 +33,7 @@ import Futhark.CodeGen.Backends.BohriumOp
 import Futhark.CodeGen.FirstOrderSOACS
 
 compileProg :: Prog -> String
-compileProg = addHeader . GenericC.compileProg bohriumCompiler. ImpGen.compileProg expCompiler
+compileProg = undefined {- addHeader . GenericC.compileProg bohriumCompiler. ImpGen.compileProg expCompiler
   where expCompiler (Pattern [target]) e
           | Just op <- compileSOACtoBohrium e = do
           tell $ Imp.Op (C.var $ textual $ bindeeName target, op)
@@ -42,3 +42,4 @@ compileProg = addHeader . GenericC.compileProg bohriumCompiler. ImpGen.compilePr
           firstOrderSOACS targets e
 
         addHeader = ("#include <bh_c.h>\n"++)
+-}

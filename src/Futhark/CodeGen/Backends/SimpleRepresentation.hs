@@ -30,8 +30,10 @@ sameRepresentation ets1 ets2
   | otherwise = False
 
 sameRepresentation' :: Type -> Type -> Bool
-sameRepresentation' (Type et1 shape1) (Type et2 shape2) =
-  length shape1 == length shape2 && et1 == et2
+sameRepresentation' (Value (Type et1 shape1)) (Value (Type et2 shape2)) =
+    length shape1 == length shape2 && et1 == et2
+sameRepresentation' (Mem _) (Mem _) = True
+sameRepresentation' _ _ = False
 
 -- | @tupleField i@ is the name of field number @i@ in a tuple.
 tupleField :: Int -> String

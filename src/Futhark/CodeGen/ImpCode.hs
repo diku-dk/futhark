@@ -1,14 +1,15 @@
 -- | Inspired by the paper "Defunctionalizing Push Arrays".
 module Futhark.CodeGen.ImpCode
-  ( Program
+  ( Program (..)
   , Function (..)
   , Param (..)
   , DimSize (..)
   , Type (..)
+  , ValueType (..)
   , typeRank
   , Code (..)
+  , MemLocation (..)
   , Exp (..)
-  , Value (..)
   , UnOp (..)
   , ppType
   , entryPointInput
@@ -25,37 +26,60 @@ import Data.Loc
 
 import Language.Futhark.Core
 
+import Text.PrettyPrint.Mainland
+
 data DimSize = ConstSize Int
              | VarSize VName
                deriving (Show)
 
-data Type = Type { typeBasic :: BasicType
-                 , typeDims :: [DimSize]
-                 }
+data ValueType = Type { typeBasic :: BasicType
+                      , typeDims :: [DimSize]
+                      }
+               deriving (Show)
+
+data Type = Value ValueType
+          | Mem DimSize
             deriving (Show)
 
-typeRank :: Type -> Int
+typeRank :: ValueType -> Int
 typeRank (Type _ shape) = length shape
 
 ppType :: Type -> String
-ppType (Type bt [])    = map toLower $ show bt
-ppType (Type bt (_:rest)) = "[" ++ ppType (Type bt rest) ++ "]"
+ppType (Value (Type bt [])) =
+  map toLower $ show bt
+ppType (Value (Type bt (_:rest))) =
+  "[" ++ ppType (Value (Type bt rest)) ++ "]"
+ppType (Mem size) =
+  "mem"
 
 data Param = Param { paramName :: VName
                    , paramType :: Type
                    }
              deriving (Show)
 
-type Program a = [(Name, Function a)]
+newtype Program a = Program [(Name, Function a)]
 
 data Function a = Function [Param] [Param] (Code a)
                   deriving (Show)
 
+-- | When an array is declared, this is where it is stored.
+data MemLocation = MemLocation
+                   VName -- ^ Name of memory block.
+                   DimSize -- ^ Offset into block.
+                   deriving (Show)
+
 data Code a = Skip
             | Code a :>>: Code a
             | For VName Exp (Code a)
-            | Declare VName BasicType [DimSize]
+            | DeclareMem VName DimSize
+            | DeclareArray VName BasicType [DimSize]
+            | DeclareScalar VName BasicType
             | Allocate VName
+            | BackArray VName MemLocation
+            | Copy VName Exp VName Exp Exp
+              -- ^ Destination, offset in destination, source, offset
+              -- in source, number of bytes.
+            | Free VName
             | Write VName [Exp] Exp
             | Call [VName] Name [Exp]
             | If Exp (Code a) (Code a)
@@ -63,16 +87,11 @@ data Code a = Skip
             | Op a
             deriving (Show)
 
-data Exp = Constant Value
+data Exp = Constant BasicValue
          | BinOp BinOp Exp Exp
          | UnOp UnOp Exp
          | Read VName [Exp]
-         | Copy VName
            deriving (Show)
-
-data Value = ArrayVal [Int] (A.Array Int BasicValue) BasicType
-           | BasicVal BasicValue
-             deriving (Show)
 
 data UnOp = Not
           | Negate
@@ -88,11 +107,88 @@ instance Monoid (Code a) where
 -- taken the given parameters is used as the entry point of the
 -- program.
 entryPointInput :: [Param] -> [Type]
-entryPointInput params =
+entryPointInput params = []
+{-
   -- We assume that every parameter that is a dimension of another
   -- parameter is not read as input.  This is a hack until we get a
   -- better idea of what we need.
-  map paramType $ filter ((`notElem` shapes) . paramName) params
+  mapMaybe paramType $ filter ((`notElem` shapes) . paramName) params
   where shapes = concatMap (mapMaybe isVar . typeDims . paramType) params
         isVar (VarSize v)    = Just v
         isVar (ConstSize {}) = Nothing
+        paramType p = case paramKind p of
+          ValueParam t -> Just t
+          MemParam   _ -> Nothing
+-}
+
+-- Prettyprinting definitions.
+
+instance Pretty (Program op) where
+  ppr (Program funs) = stack $ map ppFun funs
+    where ppFun (name, fun) =
+            text "Function " <> ppr name <> colon </> indent 2 (ppr fun)
+
+instance Pretty (Function op) where
+  ppr (Function outs ins body) =
+    text "Outputs:" </> indent 2 ppOutputs </>
+    text "Inputs:" </> indent 2 ppInputs </>
+    text "Body:" </> indent 2 (ppr body)
+    where ppOutputs = stack $ map ppr outs
+          ppInputs = stack $ map ppr ins
+
+instance Pretty Param where
+  ppr (Param name ptype) =
+    ppr ptype <+> ppr name
+
+instance Pretty Type where
+  ppr (Value vt) = ppr vt
+  ppr (Mem size) = text "memory of" <+> ppr size <+> text "bytes"
+
+instance Pretty ValueType where
+  ppr (Type t ds) = foldr f (ppr t) ds
+    where f e s = brackets $ s <> comma <> ppr e
+
+instance Pretty DimSize where
+  ppr (ConstSize x) = ppr x
+  ppr (VarSize v)   = ppr v
+
+instance Pretty (Code op) where
+  ppr (Op _) = text "#<foreign operation>"
+  ppr Skip   = text "skip"
+  ppr (c1 :>>: c2) = ppr c1 </> ppr c2
+  ppr (For i limit body) =
+    text "for" <+> ppr i <+> langle <+> ppr limit <> colon </>
+    indent 2 (ppr body)
+  ppr (DeclareMem name size) =
+    text "declare" <+> ppr name <+> text "as memory of size" <+> ppr size
+  ppr (DeclareArray name bt shape) =
+    text "declare" <+> ppr name <+> text "as array of type" <+> ppr (Type bt shape)
+  ppr (DeclareScalar name t) =
+    text "declare" <+> ppr name <+> text "as scalar of type" <+> ppr t
+  ppr (Allocate name) =
+    text "allocate" <+> ppr name
+  ppr (BackArray arr mem) =
+    ppr arr <> text ".memory" <+> text "<-" <+> ppr mem
+  ppr (Write name [] val) =
+    ppr name <+> text "<-" <+> ppr val
+  ppr (Write name is val) =
+    ppr name <> brackets (commasep $ map ppr is) <+> text "<-" <+> ppr val
+  ppr (Assert e _) =
+    text "assert" <> ppr e
+
+instance Pretty Exp where
+  ppr (Constant v) = ppr v
+  ppr (BinOp op x y) =
+    ppr x <+> text (opStr op) <+> ppr y
+  ppr (UnOp Not x) =
+    text "not" <+> ppr x
+  ppr (UnOp Negate x) =
+    text "-" <+> ppr x
+  ppr (Read v []) =
+    ppr v
+  ppr (Read v is) =
+    ppr v <> brackets (commasep $ map ppr is)
+
+instance Pretty MemLocation where
+  ppr (MemLocation name offset) =
+    ppr name <+> text "+" <+> ppr offset

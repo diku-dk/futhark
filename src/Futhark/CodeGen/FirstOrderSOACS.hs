@@ -14,10 +14,11 @@ import qualified Futhark.CodeGen.ImpGen as ImpGen
 -- | A generic expression compiler that turns SOACs into do-loops,
 -- since ImpGen itself cannot handle them.
 firstOrderSOACS :: ImpGen.ExpCompiler a
-firstOrderSOACS targets e
+firstOrderSOACS targets e = undefined {-
   | FOT.transformable e =
     liftM ImpGen.CompileBindings $ do
       (e',bnds) <- runBinder'' $ FOT.transformExp e
       return $ bnds ++ [mkLet (patternIdents targets) e']
   | otherwise           =
     return $ ImpGen.CompileExp e
+-}

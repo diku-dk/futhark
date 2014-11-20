@@ -13,17 +13,20 @@ import Control.Monad.Writer
 
 import qualified Language.C.Quote.C as C
 
-import Futhark.Representation.Basic
+import Futhark.Representation.ExplicitMemory
 
 import qualified Futhark.CodeGen.ImpCode as Imp
 import qualified Futhark.CodeGen.ImpGen as ImpGen
 import qualified Futhark.CodeGen.Backends.GenericC as GenericC
-import Futhark.CodeGen.FirstOrderSOACS
+-- import Futhark.CodeGen.FirstOrderSOACS
+import Debug.Trace
 
 compileProgBadly :: Prog -> String
-compileProgBadly = GenericC.compileProg codeCompiler . ImpGen.compileProg firstOrderSOACS
+compileProgBadly = (\code -> trace (pretty code) GenericC.compileProg codeCompiler code) . ImpGen.compileProg firstOrderSOACS
   where codeCompiler :: GenericC.OpCompiler ()
         codeCompiler () = return GenericC.Done
+        firstOrderSOACS :: ImpGen.ExpCompiler ()
+        firstOrderSOACS _ = return . ImpGen.CompileExp
 
 -- Some operations can be implemented with more efficient C than with
 -- the default ImpCode.
@@ -34,6 +37,8 @@ data ArrayOp = ReshapeOp VName [Imp.Exp] VName
                deriving (Show)
 
 compileProg :: Prog -> String
+compileProg = compileProgBadly
+{-
 compileProg = GenericC.compileProg codeCompiler . ImpGen.compileProg compileExp
   where compileExp :: ImpGen.ExpCompiler ArrayOp
         compileExp (Pattern [target]) (PrimOp (Reshape _ shape src _)) = do
@@ -71,3 +76,4 @@ compileProg = GenericC.compileProg codeCompiler . ImpGen.compileProg compileExp
           GenericC.stm [C.cstm|$id:target2'.data  += $exp:n';|]
           GenericC.stm [C.cstm|$id:target2'.shape[0] -= $exp:n';|]
           return GenericC.Done
+-}
