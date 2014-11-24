@@ -20,7 +20,6 @@ import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import Data.Maybe
 import Data.List
-import Data.Loc
 
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.Representation.ExplicitMemory
@@ -168,7 +167,11 @@ compileOutParams (ResType ts) ses =
                 tell $ Imp.SetMem memout mem
               tell [Imp.MemParam memout $ Imp.VarSize sizeout]
               return $ Imp.ArrayValue memout t resultshape
-        mkParamAndCopy (Array {}, _) se =
+            ReturnsInBlock memout ->
+              return $ Imp.ArrayValue (identName memout) t resultshape
+            _ ->
+              fail $ "Nonsensical lore for array return: " ++ show lore
+        mkParamAndCopy (Array {}, _) _ =
           fail "Non-variable array subexpression - impossible."
         mkParamAndCopy (Mem _, _) _ =
           fail "Functions are not allowed to explicitly return memory blocks!"
@@ -200,7 +203,7 @@ compileOutParams (ResType ts) ses =
 
 compileFunDec :: ExpCompiler op -> VNameSource -> FunDec
               -> (VNameSource, (Name, Imp.Function op))
-compileFunDec ec src (FunDec fname rettype params body loc) =
+compileFunDec ec src (FunDec fname rettype params body _) =
   let ((outparams, inparams, results, args), src', body') =
         runImpM compile ec src
   in (src',
@@ -213,13 +216,6 @@ compileFunDec ec src (FunDec fname rettype params body loc) =
             compileBindings (bodyBindings body) $
             compileOutParams rettype $ resultSubExps $ bodyResult body
           return (outparams, inparams, results, args)
-        ses = resultSubExps $ bodyResult body
-        ses' = subExpShapeContext (resTypeValues rettype) ses ++ ses
-
-compileBody :: [VName] -> Body -> ImpM op ()
-compileBody targets body = compileExtBody rettype targets body
-  where rettype = staticResType $ map subExpType $
-                  resultSubExps $ bodyResult body
 
 compileExtBody :: ResType -> [VName] -> Body -> ImpM op ()
 compileExtBody rettype targets (Body _ bnds (Result _ ses _)) =
@@ -489,9 +485,6 @@ declaringVar bindee m =
   where name = bindeeName bindee
         bind entry env =
             env { envVtable = HM.insert name entry $ envVtable env }
-
-declareBasicVar :: VName -> BasicType -> ImpM op ()
-declareBasicVar name bt = tell $ Imp.DeclareScalar name bt
 
 subExpToDimSize :: SubExp -> ImpM op Imp.DimSize
 subExpToDimSize (Var v) =
