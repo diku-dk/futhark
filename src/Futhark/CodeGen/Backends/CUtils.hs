@@ -27,5 +27,5 @@ sum (e:es) = foldl add e es
   where add x y = [C.cexp|$exp:x + $exp:y|]
 
 -- | Turn a name into a C expression consisting of just that name.
-var :: String -> C.Exp
+var :: C.ToIdent a => a -> C.Exp
 var k = [C.cexp|$id:k|]

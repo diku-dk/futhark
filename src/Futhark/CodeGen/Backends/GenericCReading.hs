@@ -14,7 +14,7 @@ import qualified Language.C.Quote.C as C
 --
 -- @
 -- int read_array(typename int64_t elem_size, int (*elem_reader)(void*),
---                void **data, typename int64_t **shape, typename int64_t dims)
+--                void **data, typename int64_t *shape, typename int64_t dims)
 --
 -- int read_int(void* dest)
 --

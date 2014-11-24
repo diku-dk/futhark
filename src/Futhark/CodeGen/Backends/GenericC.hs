@@ -1,4 +1,5 @@
-{-# LANGUAGE QuasiQuotes, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE QuasiQuotes, GeneralizedNewtypeDeriving, TypeSynonymInstances, FlexibleInstances #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 -- | C code generator framework.
 module Futhark.CodeGen.Backends.GenericC
   ( compileProg
@@ -7,24 +8,23 @@ module Futhark.CodeGen.Backends.GenericC
   , OpCompilerResult(..)
   -- * Monadic compiler interface
   , CompilerM
-  , lookupVar
   , compileExp
   , item
   , stm
   , stms
   , decl
   -- * General utilities
-  , typeShape
   ) where
 
 import Control.Applicative
 import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Reader
+import Control.Monad.Writer
 import Control.Monad.RWS
-import qualified Data.Array as A
 import qualified Data.HashMap.Lazy as HM
 import Data.List
+import Data.Maybe
 
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.C as C
@@ -42,7 +42,6 @@ data CompilerState = CompilerState {
   , compVarDefinitions :: [C.Definition]
   , compInit :: [C.Stm]
   , compNameSrc :: VNameSource
-  , compVtable :: HM.HashMap VName ValueType
   }
 
 newCompilerState :: VNameSource -> CompilerState
@@ -51,7 +50,6 @@ newCompilerState src = CompilerState {
                        , compVarDefinitions = []
                        , compInit = []
                        , compNameSrc = src
-                       , compVtable = HM.empty
                        }
 
 
@@ -102,6 +100,9 @@ collect m = pass $ do
 item :: C.BlockItem -> CompilerM op ()
 item x = tell [x]
 
+instance C.ToIdent VName where
+  toIdent = C.toIdent . textual
+
 stm :: C.Stm -> CompilerM op ()
 stm (C.Block items _) = mapM_ item items
 stm (C.Default s _) = stm s
@@ -113,53 +114,28 @@ stms = mapM_ stm
 decl :: C.InitGroup -> CompilerM op ()
 decl x = item [C.citem|$decl:x;|]
 
-newVar :: VName -> ValueType -> CompilerM op ()
-newVar k t = modify $ \s -> s { compVtable = HM.insert k t $ compVtable s }
-
-lookupVar :: VName -> CompilerM op ValueType
-lookupVar k = do t <- gets $ HM.lookup k . compVtable
-                 case t of
-                   Nothing -> fail $ "Uknown variable " ++ textual k ++ " in code generator."
-                   Just t' -> return t'
-
-lookupShape :: VName -> CompilerM op [C.Exp]
-lookupShape = liftM typeShape . lookupVar
-
-typeShape :: ValueType -> [C.Exp]
-typeShape (Type _ shape) = map asExp shape
-  where asExp (ConstSize x) = [C.cexp|$int:x|]
-        asExp (VarSize v)   = [C.cexp|$id:(textual v)|]
-
--- | 'new s' returns a fresh variable name, with 's' prepended to it.
-new :: String -> CompilerM op String
-new = liftM textual . newVName
-
-valueTypeName :: ValueType -> String
-valueTypeName (Type Int  []) = "int"
-valueTypeName (Type Bool []) = "bool"
-valueTypeName (Type Char []) = "char"
-valueTypeName (Type Real []) = "real"
-valueTypeName (Type Cert []) = "cert"
-valueTypeName (Type bt   shape) =
-  valueTypeName (Type bt []) ++ show (length shape) ++ "d"
+valueTypeName :: Type -> String
+valueTypeName (Scalar Int)  = "int"
+valueTypeName (Scalar Bool) = "bool"
+valueTypeName (Scalar Char) = "char"
+valueTypeName (Scalar Real) = "real"
+valueTypeName (Scalar Cert) = "cert"
+valueTypeName (Mem _)       = "mem"
 
 typeName :: [Type] -> String
-typeName [Value vt] = valueTypeName vt
-typeName [Mem _]    = "mem"
+typeName [t] = valueTypeName t
 typeName ts  = "tuple_" ++ intercalate "_" (map (typeName . pure) ts)
 
-valueTypeToCType :: ValueType -> C.Type
-valueTypeToCType (Type Int  []) = [C.cty|int|]
-valueTypeToCType (Type Bool []) = [C.cty|int|]
-valueTypeToCType (Type Char []) = [C.cty|char|]
-valueTypeToCType (Type Real []) = [C.cty|double|]
-valueTypeToCType (Type Cert []) = [C.cty|int|]
-valueTypeToCType (Type bt _) =
-  let ct = valueTypeToCType $ Type bt []
-  in [C.cty|$ty:ct*|]
+valueTypeToCType :: Type -> C.Type
+valueTypeToCType (Scalar Int)  = [C.cty|int|]
+valueTypeToCType (Scalar Bool) = [C.cty|int|]
+valueTypeToCType (Scalar Char) = [C.cty|char|]
+valueTypeToCType (Scalar Real) = [C.cty|double|]
+valueTypeToCType (Scalar Cert) = [C.cty|int|]
+valueTypeToCType (Mem _)       = [C.cty|unsigned char*|]
 
 typeToCType :: [Type] -> CompilerM op C.Type
-typeToCType [Value vt] = return $ valueTypeToCType vt
+typeToCType [vt] = return $ valueTypeToCType vt
 typeToCType t = do
   ty <- gets $ find (sameRepresentation t . fst) . compTypeStructs
   case ty of
@@ -175,53 +151,39 @@ typeToCType t = do
                 ct <- typeToCType [et]
                 return [C.csdecl|$ty:ct $id:(tupleField i);|]
 
+printBasicStm :: C.Exp -> BasicType -> C.Stm
+printBasicStm val Int = [C.cstm|printf("%d", $exp:val);|]
+printBasicStm val Char = [C.cstm|printf("%c", $exp:val);|]
+printBasicStm val Bool = [C.cstm|printf($exp:val ? "True" : "False");|]
+printBasicStm val Real = [C.cstm|printf("%.6f", $exp:val);|]
+printBasicStm _ Cert = [C.cstm|printf("Checked");|]
+
 -- | Return a statement printing the given value.
-printStm :: C.Exp -> [Type] -> CompilerM op C.Stm
-printStm place [Value (Type Int [])] =
-  return [C.cstm|printf("%d", $exp:place);|]
-printStm place [Value (Type Char [])] =
- return [C.cstm|printf("%c", $exp:place);|]
-printStm place [Value (Type Bool [])] =
-  return [C.cstm|printf($exp:place ? "True" : "False");|]
-printStm place [Value (Type Real [])] =
- return [C.cstm|printf("%.6f", $exp:place);|]
-printStm _     [Value (Type Cert [])] =
- return [C.cstm|printf("Checked");|]
-printStm place [Value (Type Char [_])] =
-  return [C.cstm|printf("%s", $exp:place.data);|]
-printStm place [(Value t@(Type bt (_:rest)))] = do
-  i <- new "print_i"
-  v <- new "print_elem"
-  let et' = valueTypeToCType $ Type bt rest
-  pstm <- printStm (C.var v) [Value (Type bt rest)]
-  let placeshape = [ [C.cexp|$exp:place.shape[$int:j]|] | j <- [0..typeRank t-1] ]
-      indexi = indexArrayElemStms (C.var v) place placeshape [C.var i]
+printStm :: ValueDecl -> CompilerM op C.Stm
+printStm (ScalarValue bt name) =
+  return $ printBasicStm (C.var name) bt
+printStm (ArrayValue mem bt []) =
+  return $ printBasicStm val bt
+  where val = [C.cexp|*($ty:bt'*) $id:mem|]
+        bt' = valueTypeToCType $ Scalar bt
+printStm (ArrayValue mem bt (dim:shape)) = do
+  i <- newVName "print_i"
+  v <- newVName "print_elem"
+  let dim' = dimSizeToExp dim
+      bt'  = valueTypeToCType $ Scalar bt
+  printelem <- printStm $ ArrayValue v bt shape
   return [C.cstm|{
-               int $id:i;
-               $ty:et' $id:v;
-               if ($exp:place.shape[0] == 0) {
-                   printf("empty(%s)", $exp:(ppType $ Value $ Type bt rest));
+               if ($exp:dim' == 0) {
+                   printf("empty(%s)", $exp:(ppArrayType bt (length shape)));
                } else {
+                   int $id:i;
                    putchar('[');
-                   for ($id:i = 0; $id:i < $exp:place.shape[0]; $id:i++) {
-                           $stms:indexi;
-                           $stm:pstm
-                           if ($id:i != $exp:place.shape[0]-1) {
-                                  putchar(',');
-                                  putchar(' ');
-                           }
+                   for ($id:i = 0; $id:i < $exp:dim'; $id:i++) {
+                           unsigned char *$id:v = $id:mem + $id:i * sizeof($ty:bt');
+                           $stm:printelem
                    }
                putchar(']');
                }
-             }|]
-printStm place ets = do
-  prints <- forM (zip [(0::Int)..] ets) $ \(i, et) ->
-              printStm [C.cexp|$exp:place.$id:(tupleField i)|] [et]
-  let prints' = intercalate [[C.cstm|{putchar(','); putchar(' ');}|]] $ map (:[]) prints
-  return [C.cstm|{
-               putchar('{');
-               $stms:prints'
-               putchar('}');
              }|]
 
 readFun :: BasicType -> Maybe String
@@ -230,59 +192,112 @@ readFun Char = Just "read_char"
 readFun Real = Just "read_double"
 readFun _    = Nothing
 
-readStm :: C.Exp -> ValueType -> C.Stm
-readStm place (Type Cert []) =
-  [C.cstm|$exp:place = 1;|]
-readStm place t@(Type et [])
-  | Just f <- readFun et =
+paramsTypes :: [Param] -> [Type]
+paramsTypes = map paramType
+  where paramType (MemParam _ size) = Mem size
+        paramType (ScalarParam _ t) = Scalar t
+
+type MemSizeVars = HM.HashMap VName VName
+
+sizeVars :: [Param] -> MemSizeVars
+sizeVars = mconcat . map sizeVars'
+  where sizeVars' (MemParam parname (VarSize memsizename)) =
+          HM.singleton parname memsizename
+        sizeVars' _ =
+          HM.empty
+
+readBasicStm :: C.Exp -> BasicType -> C.Stm
+readBasicStm place t
+  | Just f <- readFun t =
     [C.cstm|if ($id:f(&$exp:place) != 0) {
-          fprintf(stderr, "Syntax error when reading %s.\n", $string:(ppType $ Value t));
+          fprintf(stderr, "Syntax error when reading %s.\n", $string:(prettyPrint t));
                  exit(1);
         }|]
-readStm place t@(Type et shape)
-  | Just f <- readFun et =
-    [C.cstm|if (read_array(sizeof(*$exp:place.data),
-                           $id:f,
-                           (void**)&$exp:place.data,
-                           $exp:place.shape,
-                           $int:rank)
-                != 0) {
-       fprintf(stderr, "Syntax error when reading %s.\n", $string:(ppType (Value t)));
-       exit(1);
-     }|]
-  where rank = length shape
-readStm _ t =
+readBasicStm _ t =
   [C.cstm|{
-        fprintf(stderr, "Cannot read %s yet.\n", $string:(ppType (Value t)));
+        fprintf(stderr, "Cannot read %s.\n", $string:(prettyPrint t));
         exit(1);
       }|]
 
+readInput :: MemSizeVars -> [ValueDecl] -> [C.Stm]
+readInput memsizes = map readInput'
+  where readInput' (ScalarValue t name) =
+          readBasicStm (C.var name) t
+        readInput' (ArrayValue name t shape) =
+          -- We need to create an array for the array parser to put
+          -- the shapes.
+          let t' = valueTypeToCType $ Scalar t
+              rank = length shape
+              maybeCopyDim (ConstSize _) _ =
+                Nothing
+              maybeCopyDim (VarSize dimname) i =
+                Just [C.cstm|$id:dimname = shape[$int:i];|]
+              copyshape = catMaybes $ zipWith maybeCopyDim shape [0..rank-1]
+              memsize = C.product $ [C.cexp|sizeof($ty:t')|] :
+                                     [ [C.cexp|shape[$int:i]|] |
+                                      i <- [0..rank-1] ]
+              copymemsize = case HM.lookup name memsizes of
+                Nothing -> []
+                Just sizevar -> [[C.cstm|$id:sizevar = $exp:memsize;|]]
+          in case readFun t of
+            Just f ->
+              [C.cstm|{
+                  typename int64_t shape[$int:rank];
+                  if (read_array(sizeof($ty:t'),
+                                 $id:f,
+                                 (void**)& $id:name,
+                                 shape,
+                                 $int:(length shape))
+                      != 0) {
+                    fprintf(stderr, "Syntax error when reading %s.\n", $string:(ppArrayType t rank));
+                    exit(1);
+                  }
+                  $stms:copyshape
+                  $stms:copymemsize
+              }|]
+            Nothing ->
+              [C.cstm|{
+                 fprintf(stderr, "Cannot read %s.\n", $string:(prettyPrint t));
+                 exit(1);
+              }|]
+
+printResult :: [ValueDecl] -> CompilerM op [C.Stm]
+printResult = mapM printStm
+
+unpackResults :: VName -> [Param] -> [C.Stm]
+unpackResults ret [ScalarParam name _] =
+  [[C.cstm|$id:name = $id:ret;|]]
+unpackResults ret [MemParam name _] =
+ [[C.cstm|$id:name = $id:ret;|]]
+unpackResults ret outparams = zipWith assign outparams [0..]
+  where assign param i =
+          let e = tupleFieldExp (C.var ret) i
+          in [C.cstm|$id:(paramName param) = $exp:e;|]
+
 mainCall :: Name -> Function op -> CompilerM op C.Stm
-mainCall fname (Function outputs inputs _) = do
-  crettype <- typeToCType $ map paramType outputs
-  ret <- new "main_ret"
-  printRes <- printStm (C.var ret) $ map paramType outputs
-  let mkParam (args, decls, rstms, shapeargs) (Value paramtype) = do
-        name <- new "main_arg"
-        let cparamtype = valueTypeToCType paramtype
-            rstm = readStm (C.var name) paramtype
-            argshape = [ [C.cexp|$id:name.shape[$int:i]|]
-                         | i <- [0..typeRank paramtype-1] ]
-        return (args ++ [C.var name],
-                decls ++ [[C.cdecl|$ty:cparamtype $id:name;|]],
-                rstms ++ [rstm],
-                shapeargs ++ argshape)
-  (valargs, decls, rstms, shapeargs) <-
-    foldM mkParam ([], [], [], []) paramtypes
+mainCall fname (Function outputs inputs _ results args) = do
+  crettype <- typeToCType $ paramsTypes outputs
+  ret <- newVName "main_ret"
+  let argexps = map (C.var . paramName) inputs
+      paramdecls = map paramDecl outputs ++ map paramDecl inputs
+      memsizevars = sizeVars inputs
+      unpackstms = unpackResults ret outputs
+      readstms = readInput memsizevars args
+  printstms <- printResult results
   return [C.cstm|{
-               $decls:decls
+               $decls:paramdecls
                $ty:crettype $id:ret;
-               $stms:rstms
-               $id:ret = $id:(funName fname)($args:shapeargs, $args:valargs);
-               $stm:printRes
+               $stms:readstms
+               $id:ret = $id:(funName fname)($args:argexps);
+               $stms:unpackstms
+               $stms:printstms
                printf("\n");
              }|]
-  where paramtypes = entryPointInput inputs
+  where paramDecl (MemParam name _) =
+          [C.cdecl|unsigned char* $id:name;|]
+        paramDecl (ScalarParam name ty) =
+          let ty' = valueTypeToCType $ Scalar ty
+          in [C.cdecl|$ty:ty' $id:name;|]
 
 -- | Compile imperative program to a C program.  Always uses the
 -- function named "main" as entry point, so make sure it is defined.
@@ -347,22 +362,25 @@ int main() {
                         C.Func _ _ _ _ _ l      -> l
 
 compileFun :: (Name, Function op) -> CompilerM op (C.Definition, C.Func)
-compileFun (fname, Function outputs inputs body) = do
-  args' <- mapM compileInput inputs
+compileFun (fname, Function outputs inputs body _ _) = do
+  let args' = map compileInput inputs
   body' <- collect $ do
              mapM_ compileOutput outputs
              compileFunBody outputs body
-  crettype <- typeToCType $ map paramType outputs
+  crettype <- typeToCType $ paramsTypes outputs
   return ([C.cedecl|static $ty:crettype $id:(funName fname)( $params:args' );|],
           [C.cfun|static $ty:crettype $id:(funName fname)( $params:args' ) { $items:body' }|])
-  where compileInput (Param name (Value t)) = do
-          let ctp = valueTypeToCType t
-          newVar name t
-          return [C.cparam|$ty:ctp $id:(textual name)|]
-        compileOutput (Param name (Value t)) = do
-          let ctp = valueTypeToCType t
-          newVar name t
-          decl [C.cdecl|$ty:ctp $id:(textual name);|]
+  where compileInput (ScalarParam name bt) =
+          let ctp = valueTypeToCType $ Scalar bt
+          in [C.cparam|$ty:ctp $id:name|]
+        compileInput (MemParam name _) =
+          [C.cparam|unsigned char *$id:name|]
+
+        compileOutput (ScalarParam name bt) = do
+          let ctp = valueTypeToCType $ Scalar bt
+          decl [C.cdecl|$ty:ctp $id:name;|]
+        compileOutput (MemParam name _) =
+          decl [C.cdecl|unsigned char *$id:name;|]
 
 compileBasicValue :: BasicValue -> C.Exp
 
@@ -383,31 +401,21 @@ compileBasicValue (CharVal c) =
 compileBasicValue Checked =
   [C.cexp|0|]
 
-dimSizeToExp :: DimSize -> Exp
-dimSizeToExp (ConstSize x) = Constant $ IntVal x
-dimSizeToExp (VarSize v) = Read v []
+dimSizeToExp :: DimSize -> C.Exp
+dimSizeToExp (ConstSize x) = [C.cexp|$int:x|]
+dimSizeToExp (VarSize v)   = C.var v
 
 compileExp :: Exp -> CompilerM op C.Exp
 
 compileExp (Constant val) = return $ compileBasicValue val
 
-compileExp (Read src []) =
-  return [C.cexp|$id:(textual src)|]
+compileExp (ScalarVar src) =
+  return [C.cexp|$id:src|]
 
-compileExp (Read src idxs) = do
-  srctype@(Type srcbt srcshape) <- lookupVar src
-  idxs' <- mapM compileExp idxs
-  let src' = C.var $ textual src
-  case drop (length idxs') srcshape of
-    [] -> return $ indexArrayExp src' (typeShape srctype) idxs'
-    resshape -> do
-      name <- new "dest"
-      let restype = Type srcbt resshape
-          dest    = C.var name
-          crestype = valueTypeToCType restype
-      decl [C.cdecl|$ty:crestype $id:name;|]
-      stms $ indexArrayElemStms dest src' (typeShape srctype) idxs'
-      return dest
+compileExp (Index src iexp restype) = do
+  iexp' <- compileExp iexp
+  let restype' = valueTypeToCType $ Scalar restype
+  return [C.cexp|(($ty:restype'*)$id:src)[$exp:iexp']|]
 
 compileExp (UnOp Negate x) = do
   x' <- compileExp x
@@ -438,6 +446,10 @@ compileExp (BinOp bop x y) = do
              Less -> [C.cexp|$exp:x' < $exp:y'|]
              Leq -> [C.cexp|$exp:x' <= $exp:y'|]
 
+compileExp (SizeOf t) =
+  return [C.cexp|(sizeof($ty:t'))|]
+  where t' = valueTypeToCType $ Scalar t
+
 compileCode :: Code op -> CompilerM op ()
 
 compileCode (Op op) = do
@@ -455,23 +467,14 @@ compileCode (Assert e loc) = do
   stm [C.cstm|{
             if (!$exp:e') {
                    fprintf(stderr, "Assertion %s at %s failed.\n",
-                                   $string:(show e), $string:(locStr loc));
+                                   $string:(prettyPrint e), $string:(locStr loc));
                    abort();
                  }
           }|]
 
-compileCode (DeclareArray name et shape) = do
-  let ty = Type et shape
-  let ct = valueTypeToCType ty
-  newVar name ty
-  decl [C.cdecl|$ty:ct $id:(textual name);|]
-
-compileCode (Allocate name) = do
-  (Type bt shape) <- lookupVar name
-  let ct = valueTypeToCType $ Type bt []
-  shape' <- mapM (compileExp . dimSizeToExp) shape
-  unless (null shape) $
-    stm $ allocArray (C.var $ textual name) shape' ct
+compileCode (Allocate name e) = do
+  size' <- compileExp e
+  stm [C.cstm|$id:name = malloc($exp:size');|]
 
 compileCode (For i bound body) = do
   let i' = textual i
@@ -489,41 +492,34 @@ compileCode (If cond tbranch fbranch) = do
   stm [C.cstm|if ($exp:cond') { $items:tbranch' } else { $items:fbranch' }|]
 
 compileCode (Copy dest destoffset src srcoffset size) = do
-  undefined
-  {-
-  dest <- new "copy_dst"
-  t <- lookupVar src
-  ct <- typeToCType [t]
-  let src' = C.var $ textual src
-      copy = arraySliceCopyStm [C.cexp|$id:dest.data|]
-             [C.cexp|$exp:src'.data|] (typeShape t)
-             0
-      alloc = [C.cstm|$id:dest.data =
-                 calloc($exp:(C.product $ typeShape t), sizeof(*$id:dest.data));
-               |]
-  decl [C.cdecl|$ty:ct $id:dest;|]
-  stm [C.cstm|$id:dest = $exp:src';|]
-  stm alloc
-  stm copy
-  return $ C.var dest
--}
+  destoffset' <- compileExp destoffset
+  srcoffset' <- compileExp srcoffset
+  size' <- compileExp size
+  stm [C.cstm|memcpy($id:dest + $exp:destoffset',
+                     $id:src + $exp:srcoffset',
+                     $exp:size');|]
 
-compileCode (Write dest idxs src) = do
+compileCode (Write dest idx elemtype elemexp) = do
+  idx' <- compileExp idx
+  elemexp' <- compileExp elemexp
+  let elemtype' = valueTypeToCType $ Scalar elemtype
+  stm [C.cstm|(($ty:elemtype'*)$id:dest)[$exp:idx'] = $exp:elemexp';|]
+
+compileCode (DeclareMem name) =
+  decl [C.cdecl|unsigned char* $id:name;|]
+
+compileCode (DeclareScalar name t) = do
+  let ct = valueTypeToCType $ Scalar t
+  decl [C.cdecl|$ty:ct $id:name;|]
+
+compileCode (SetScalar dest src) = do
   src' <- compileExp src
-  idxs' <- mapM compileExp idxs
-  toshape <- lookupShape dest
-  let dest' = C.var $ textual dest
-      rank = length toshape
-  case idxs' of
-    [] -> stm [C.cstm|$exp:dest' = $exp:src';|]
-    _ | rank == length idxs' ->
-      let to = indexArrayExp dest' toshape idxs'
-      in stm [C.cstm|$exp:to = $exp:src';|]
-      | otherwise            ->
-      let to = [C.cexp|&$exp:(indexArrayExp dest' toshape idxs')|]
-          from = [C.cexp|$exp:src'.data|]
-      in stm $ arraySliceCopyStm to from toshape (length idxs')
+  stm [C.cstm|$id:dest = $exp:src';|]
 
+compileCode (SetMem dest src) =
+  stm [C.cstm|$id:dest = $id:src;|]
+
+{-
 compileCode (Call results fname args) = do
   args' <- mapM compileExp args
   restypes <- mapM lookupVar results
@@ -537,17 +533,24 @@ compileCode (Call results fname args) = do
       stm [C.cstm|$id:ret = $id:(funName fname)($args:args');|]
       forM_ (zip [0..] results) $ \(i,result) ->
         stm [C.cstm|$id:(textual result) = $exp:(tupleFieldExp (C.var ret) i);|]
+-}
 
 compileFunBody :: [Param] -> Code op -> CompilerM op ()
 compileFunBody outputs code = do
-  retval <- new "retval"
-  bodytype <- typeToCType $ map paramType outputs
+  retval <- newVName "retval"
+  bodytype <- typeToCType $ paramsTypes outputs
   compileCode code
   decl [C.cdecl|$ty:bodytype $id:retval;|]
-  let name = textual . paramName
-      setRetVal' i output =
-        stm [C.cstm|$exp:(tupleFieldExp (C.var retval) i) = $id:(name output);|]
+  let setRetVal' i output =
+        stm [C.cstm|$exp:(tupleFieldExp (C.var retval) i) = $id:(paramName output);|]
   case outputs of
-    [output] -> stm [C.cstm|$id:retval = $id:(name output);|]
+    [output] -> stm [C.cstm|$id:retval = $id:(paramName output);|]
     _        -> zipWithM_ setRetVal' [0..] outputs
   stm [C.cstm|return $id:retval;|]
+
+prettyPrint :: Pretty a => a -> String
+prettyPrint x = displayS (renderCompact $ ppr x) ""
+
+ppArrayType :: BasicType -> Int -> String
+ppArrayType t 0 = prettyPrint t
+ppArrayType t n = "[" ++ ppArrayType t (n-1) ++ "]"

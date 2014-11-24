@@ -30,8 +30,8 @@ sameRepresentation ets1 ets2
   | otherwise = False
 
 sameRepresentation' :: Type -> Type -> Bool
-sameRepresentation' (Value (Type et1 shape1)) (Value (Type et2 shape2)) =
-    length shape1 == length shape2 && et1 == et2
+sameRepresentation' (Scalar t1) (Scalar t2) =
+  t1 == t2
 sameRepresentation' (Mem _) (Mem _) = True
 sameRepresentation' _ _ = False
 

@@ -6,14 +6,18 @@ module Futhark.CodeGen.ImpGen
   , ExpCompilerResult (..)
   -- * Monadic compiler interface
   , ImpM
-  , compileType
   )
   where
 
 import Control.Applicative
 import Control.Monad.RWS
+import Control.Monad.State
+import Control.Monad.Writer
 
+import Data.Either
 import qualified Data.HashMap.Lazy as HM
+import qualified Data.HashSet as HS
+import Data.Maybe
 import Data.List
 import Data.Loc
 
@@ -44,8 +48,15 @@ data ArrayEntry = ArrayEntry {
   , entryArrayShape :: [Imp.DimSize]
   }
 
+data MemEntry = MemEntry {
+    entryMemSize :: Imp.DimSize
+  }
+
+data VarEntry = ArrayVar ArrayEntry
+              | MemVar MemEntry
+
 data Env op = Env {
-    envVtable :: HM.HashMap VName ArrayEntry
+    envVtable :: HM.HashMap VName VarEntry
   , envExpCompiler :: ExpCompiler op
   }
 
@@ -77,46 +88,126 @@ compileProg ec prog =
   Imp.Program $ snd $ mapAccumL (compileFunDec ec) src $ progFunctions prog
   where src = newNameSourceForProg prog
 
-compileType :: TypeBase Shape -> ImpM op Imp.Type
-compileType (Mem size) =
-  Imp.Mem <$> subExpToDimSize size
-compileType t =
-  return $ Imp.Value $ Imp.Type (elemType t) $ map asImpSize $ arrayDims t
-  where asImpSize (Constant (IntVal x) _) =
-          Imp.ConstSize x
-        asImpSize (Constant _ _) =
-          error "Futhark.CodeGen.ImpGen.compileType: dimension size is a non-integer constant"
-        asImpSize (Var v) =
-          Imp.VarSize $ identName v
+compileParam :: FParam -> ImpM op (Either Imp.Param ArrayDecl)
+compileParam fparam = case t of
+  Basic bt -> return $ Left $ Imp.ScalarParam name bt
+  Mem size -> Left <$> Imp.MemParam name <$> subExpToDimSize size
+  Array bt shape _ -> do
+    unless (IxFun.isLinear ixfun) $
+      fail "Can only handle linear (simple) allocation for now."
+    shape' <- mapM subExpToDimSize $ shapeDims shape
+    return $ Right $ ArrayDecl name bt shape' $
+      Imp.MemLocation (identName mem) $ Imp.ConstSize 0
+  where name = bindeeName fparam
+        t    = bindeeType fparam
+        MemSummary mem ixfun = bindeeLore fparam
 
-compileParam :: Param -> ImpM op Imp.Param
-compileParam p = Imp.Param (identName p) <$> compileType (identType p)
+data ArrayDecl = ArrayDecl VName BasicType [Imp.DimSize] Imp.MemLocation
 
-compileParams :: [Param] -> ImpM op [Imp.Param]
-compileParams = mapM compileParam
+fparamSizes :: FParam -> HS.HashSet VName
+fparamSizes fparam
+  | Mem (Var size) <- bindeeType fparam = HS.singleton $ identName size
+  | otherwise = HS.fromList $ mapMaybe name $ arrayDims $ bindeeType fparam
+  where name (Var v) = Just $ identName v
+        name _       = Nothing
+
+compileParams :: [FParam]
+              -> ImpM op ([Imp.Param], [ArrayDecl], [Imp.ValueDecl])
+compileParams params = do
+  (inparams, arraydecls) <- liftM partitionEithers $ mapM compileParam params
+  let findArray x = find (isArray x) arraydecls
+      sizes = mconcat $ map fparamSizes params
+      mkArg fparam =
+        case (findArray $ bindeeName fparam, bindeeType fparam) of
+          (Just (ArrayDecl _ bt shape (Imp.MemLocation mem _)), _) ->
+            Just $ Imp.ArrayValue mem bt shape
+          (_, Basic bt)
+            | bindeeName fparam `HS.member` sizes ->
+              Nothing
+            | otherwise ->
+              Just $ Imp.ScalarValue bt $ bindeeName fparam
+          _ ->
+            Nothing
+      args = mapMaybe mkArg params
+  return (inparams, arraydecls, args)
+  where isArray x (ArrayDecl y _ _ _) = x == y
+
+compileOutParams :: ResType -> [SubExp]
+                 -> ImpM op ([Imp.ValueDecl], [Imp.Param])
+compileOutParams (ResType ts) ses =
+  runWriterT $ evalStateT
+  (zipWithM mkParamAndCopy ts ses)
+  (HM.empty, HM.empty)
+  where imp = lift . lift
+
+        mkParamAndCopy (Basic t, _) se = do
+          out <- imp $ newVName "scalar_out"
+          imp $ tell $ Imp.SetScalar out $ compileSubExp se
+          tell [Imp.ScalarParam out t]
+          return $ Imp.ScalarValue t out
+        mkParamAndCopy (Array t shape _, lore) (Var v) = do
+          resultshape <-
+            zipWithM inspectExtDimSize (extShapeDims shape)
+            (arrayDims $ identType v)
+          case lore of
+            ReturnsNewBlock x -> do
+              memout <- imp $ newVName "out_mem"
+              sizeout <- ensureMemSizeOut x
+              imp $ do
+                Imp.MemLocation mem memoffset <-
+                  arrayLocation $ identName v
+                unless (memoffset == Imp.ConstSize 0) $
+                  fail "Array to be returned has offset."
+                memsize <- entryMemSize <$> lookupMemory mem
+                tell $ Imp.SetScalar sizeout $ dimSizeToExp memsize
+                tell $ Imp.SetMem memout mem
+              tell [Imp.MemParam memout $ Imp.VarSize sizeout]
+              return $ Imp.ArrayValue memout t resultshape
+        mkParamAndCopy (Array {}, _) se =
+          fail "Non-variable array subexpression - impossible."
+        mkParamAndCopy (Mem _, _) _ =
+          fail "Functions are not allowed to explicitly return memory blocks!"
+
+        inspectExtDimSize (Ext x) se = do
+          (memseen,arrseen) <- get
+          case HM.lookup x arrseen of
+            Nothing -> do
+              out <- imp $ newVName "out_arrsize"
+              tell [Imp.ScalarParam out Int]
+              imp $ tell $ Imp.SetScalar out $ compileSubExp se
+              put (memseen, HM.insert x out arrseen)
+              return $ Imp.VarSize out
+            Just out ->
+              return $ Imp.VarSize out
+        inspectExtDimSize (Free se) _ =
+          imp $ subExpToDimSize se
+
+        -- | Return the name of the out-parameter for the memory size
+        -- 'x', creating it if it does not already exist.
+        ensureMemSizeOut x = do
+          (memseen, arrseen) <- get
+          case HM.lookup x memseen of
+            Nothing      -> do sizeout <- imp $ newVName "out_memsize"
+                               tell [Imp.ScalarParam sizeout Int]
+                               put (HM.insert x sizeout memseen, arrseen)
+                               return sizeout
+            Just sizeout -> return sizeout
 
 compileFunDec :: ExpCompiler op -> VNameSource -> FunDec
               -> (VNameSource, (Name, Imp.Function op))
-compileFunDec ec src (FunDec fname rettype params body _) =
-  let ((params', outs), src', body') = runImpM compile ec src
+compileFunDec ec src (FunDec fname rettype params body loc) =
+  let ((outparams, inparams, results, args), src', body') =
+        runImpM compile ec src
   in (src',
       (fname,
-       Imp.Function outs params' body'))
-  where compile
-          | fname == defaultEntryPoint = do
-            outs <- replicateM (length ses) $ newVName "out"
-            compileBody outs body
-            params' <- compileParams $ map bindeeIdent params
-            outs' <- zipWith Imp.Param outs <$>
-                     mapM (compileType . subExpType) ses
-            return (params', outs')
-          | otherwise = do
-            outs <- replicateM (length ses') $ newVName "out"
-            compileExtBody rettype outs body
-            params' <- compileParams $ map bindeeIdent params
-            outs' <- zipWith Imp.Param outs <$>
-                     mapM (compileType . subExpType) ses'
-            return (params', outs')
+       Imp.Function outparams inparams body' results args))
+  where compile = do
+          (inparams, arraydecls, args) <- compileParams params
+          (results, outparams) <-
+            withArrays arraydecls $
+            compileBindings (bodyBindings body) $
+            compileOutParams rettype $ resultSubExps $ bodyResult body
+          return (outparams, inparams, results, args)
         ses = resultSubExps $ bodyResult body
         ses' = subExpShapeContext (resTypeValues rettype) ses ++ ses
 
@@ -180,15 +271,24 @@ defCompilePrimOp [target] (BinOp bop x y _ _) =
 defCompilePrimOp [_] (Assert e loc) =
   tell $ Imp.Assert (compileSubExp e) loc
 
+defCompilePrimOp [target] (Alloc e _) =
+  tell $ Imp.Allocate target $ compileSubExp e
+
 defCompilePrimOp [target] (Index _ src idxs _)
-  | length idxs == arrayRank (identType src) =
-    tell $ Imp.Write target [] $
-      Imp.Read (identName src) $ map compileSubExp idxs
+  | length idxs == arrayRank t = do
+    (srcmem, srcoffset, _) <- indexArray (identName src) $ map compileSubExp idxs
+    tell $ Imp.SetScalar target $ Imp.Index srcmem srcoffset $ elemType t
+    where t = identType src
 
 defCompilePrimOp [target] (Index _ src idxs _) = do
   Imp.MemLocation destmem destoffset <- arrayLocation target
   (srcmem, srcoffset, size) <- indexArray (identName src) $ map compileSubExp idxs
-  tell $ Imp.Copy destmem (dimSizeToExp destoffset) srcmem srcoffset size
+  tell $ Imp.Copy
+    destmem (multElSize $ dimSizeToExp destoffset)
+    srcmem (multElSize srcoffset)
+    (multElSize size)
+  where et = elemType $ identType src
+        multElSize = impTimes (Imp.SizeOf et)
 
 {-
 defCompilePrimOp [_] (Conjoin {}) =
@@ -337,13 +437,21 @@ soacError :: ImpM op a
 soacError = fail "SOAC encountered in code generator; should have been removed by first-order transform."
 
 writeExp :: VName -> Imp.Exp -> ImpM op ()
-writeExp target = tell . Imp.Write target []
+writeExp target = tell . Imp.SetScalar target
 
-allocate :: VName -> ImpM op ()
-allocate target = tell $ Imp.Allocate target
+withArray :: ArrayDecl -> ImpM op a -> ImpM op a
+withArray (ArrayDecl name bt shape location) m = do
+  let entry = ArrayVar ArrayEntry {
+          entryArrayLocation = location
+        , entryArrayElemType = bt
+        , entryArrayShape    = shape
+        }
+      bind env =
+        env { envVtable = HM.insert name entry $ envVtable env }
+  local bind m
 
-var :: VName -> Imp.Exp
-var v = Imp.Read v []
+withArrays :: [ArrayDecl] -> ImpM op a -> ImpM op a
+withArrays = flip $ foldr withArray
 
 declaringVars :: [PatBindee] -> ImpM op a -> ImpM op a
 declaringVars bs m = foldr declaringVar m bs
@@ -355,33 +463,27 @@ declaringVar bindee m =
       tell $ Imp.DeclareScalar name bt
       m
     Mem size -> do
-      tell . Imp.DeclareMem name =<< subExpToDimSize size
-      m
+      size' <- subExpToDimSize size
+      tell $ Imp.DeclareMem name
+      let entry = MemVar MemEntry {
+            entryMemSize = size'
+            }
+      local (bind entry) m
     Array bt shape _ -> do
       shape' <- mapM subExpToDimSize $ shapeDims shape
       let MemSummary mem ixfun = bindeeLore bindee
           location = Imp.MemLocation (identName mem) $ Imp.ConstSize 0
-          entry = ArrayEntry {
+          entry = ArrayVar ArrayEntry {
               entryArrayLocation = location
             , entryArrayElemType = bt
             , entryArrayShape    = shape'
             }
-          bind env =
-            env { envVtable = HM.insert name entry $ envVtable env }
       unless (IxFun.isLinear ixfun) $
         fail "Can only handle linear (simple) allocation for now."
-      tell $ Imp.DeclareArray name bt shape'
-      local bind m
+      local (bind entry) m
   where name = bindeeName bindee
-
-declareVars :: [PatBindee] -> ImpM op ()
-declareVars = mapM_ declareVar
-
-declareVar :: PatBindee -> ImpM op ()
-declareVar v =
-  case bindeeType v of
-    Mem size ->
-      tell =<< (Imp.DeclareMem (bindeeName v) <$> subExpToDimSize size)
+        bind entry env =
+            env { envVtable = HM.insert name entry $ envVtable env }
 
 declareBasicVar :: VName -> BasicType -> ImpM op ()
 declareBasicVar name bt = tell $ Imp.DeclareScalar name bt
@@ -395,62 +497,61 @@ subExpToDimSize (Constant {}) =
   fail "Size subexp is not a non-integer constant."
 
 dimSizeToExp :: Imp.DimSize -> Imp.Exp
-dimSizeToExp (Imp.VarSize v)   = Imp.Read v []
+dimSizeToExp (Imp.VarSize v)   = Imp.ScalarVar v
 dimSizeToExp (Imp.ConstSize x) = Imp.Constant $ IntVal x
 
 compileSubExpTo :: VName -> SubExp -> ImpM op ()
 compileSubExpTo target se =
-  tell $ Imp.Write target [] $ compileSubExp se
+  tell $ Imp.SetScalar target $ compileSubExp se
 
 compileSubExp :: SubExp -> Imp.Exp
 compileSubExp (Constant v _) =
   Imp.Constant v
 compileSubExp (Var v) =
-  Imp.Read (identName v) []
-
-{-
-expAsName :: Type -> Imp.Exp -> ImpM op VName
-expAsName _ (Imp.Read v []) =
-  return v
-expAsName t e = do
-  size <- newIdent "size" t noLoc
-  declareVar size
-  writeExp (identName size) e
-  return $ identName size
--}
+  Imp.ScalarVar (identName v)
 
 lookupArray :: VName -> ImpM op ArrayEntry
 lookupArray name = do
   res <- asks $ HM.lookup name . envVtable
   case res of
-    Nothing    -> fail $ "Unknown array: " ++ textual name
-    Just entry -> return entry
+    Just (ArrayVar entry) -> return entry
+    _                    -> fail $ "Unknown array: " ++ textual name
 
 arrayLocation :: VName -> ImpM op Imp.MemLocation
 arrayLocation name = entryArrayLocation <$> lookupArray name
 
+lookupMemory :: VName -> ImpM op MemEntry
+lookupMemory name = do
+  res <- asks $ HM.lookup name . envVtable
+  case res of
+    Just (MemVar entry) -> return entry
+    _                   -> fail $ "Unknown memory block: " ++ textual name
+
 indexArray :: VName -> [Imp.Exp] -> ImpM op (VName, Imp.Exp, Imp.Exp)
 indexArray name indices = do
   entry <- lookupArray name
-  let elemSizeExp = Imp.Constant $ IntVal $
-                    basicSize $ entryArrayElemType entry
-      arrshape = map dimSizeToExp $ entryArrayShape entry
-      expProduct = foldl (Imp.BinOp Times) elemSizeExp
-      expSum = foldl (Imp.BinOp Plus) $ Imp.Constant $ IntVal 0
+  let arrshape = map dimSizeToExp $ entryArrayShape entry
+      expProduct = foldl impTimes $ Imp.Constant $ IntVal 1
+      expSum = foldl impPlus $ Imp.Constant $ IntVal 0
       dimsizes = map expProduct $ drop 1 $ tails arrshape
-      ixoffset = expSum $ zipWith (Imp.BinOp Times) indices dimsizes
+      ixoffset = expSum $ zipWith impTimes indices dimsizes
       Imp.MemLocation arrmem arroffset = entryArrayLocation entry
   return (arrmem,
-          Imp.BinOp Plus (dimSizeToExp arroffset) ixoffset,
+          impPlus (dimSizeToExp arroffset) ixoffset,
           expProduct $ drop (length indices) arrshape)
-
-basicSize :: BasicType -> Int
-basicSize Int = 4
-basicSize Bool = 1
-basicSize Char = 1
-basicSize Real = 8
-basicSize Cert = 1
 
 loopResultWrites :: [VName] -> [Ident] -> [FParam]
                  -> [(VName, VName)]
 loopResultWrites = undefined
+
+impTimes :: Imp.Exp -> Imp.Exp -> Imp.Exp
+impTimes (Imp.Constant (IntVal 1)) e = e
+impTimes e (Imp.Constant (IntVal 1)) = e
+impTimes (Imp.Constant (IntVal 0)) _ = Imp.Constant $ IntVal 0
+impTimes _ (Imp.Constant (IntVal 0)) = Imp.Constant $ IntVal 0
+impTimes x y                         = Imp.BinOp Times x y
+
+impPlus :: Imp.Exp -> Imp.Exp -> Imp.Exp
+impPlus (Imp.Constant (IntVal 0)) e = e
+impPlus e (Imp.Constant (IntVal 0)) = e
+impPlus x y                         = Imp.BinOp Plus x y

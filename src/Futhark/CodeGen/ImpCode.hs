@@ -2,25 +2,20 @@
 module Futhark.CodeGen.ImpCode
   ( Program (..)
   , Function (..)
+  , ValueDecl (..)
   , Param (..)
+  , paramName
   , DimSize (..)
   , Type (..)
-  , ValueType (..)
-  , typeRank
   , Code (..)
   , MemLocation (..)
   , Exp (..)
   , UnOp (..)
-  , ppType
-  , entryPointInput
   -- * Re-exports from other modules.
   , module Language.Futhark.Core
   )
   where
 
-import qualified Data.Array as A
-import Data.Char (toLower)
-import Data.Maybe
 import Data.Monoid
 import Data.Loc
 
@@ -30,36 +25,25 @@ import Text.PrettyPrint.Mainland
 
 data DimSize = ConstSize Int
              | VarSize VName
-               deriving (Show)
+               deriving (Eq, Show)
 
-data ValueType = Type { typeBasic :: BasicType
-                      , typeDims :: [DimSize]
-                      }
-               deriving (Show)
+data Type = Scalar BasicType | Mem DimSize
 
-data Type = Value ValueType
-          | Mem DimSize
-            deriving (Show)
-
-typeRank :: ValueType -> Int
-typeRank (Type _ shape) = length shape
-
-ppType :: Type -> String
-ppType (Value (Type bt [])) =
-  map toLower $ show bt
-ppType (Value (Type bt (_:rest))) =
-  "[" ++ ppType (Value (Type bt rest)) ++ "]"
-ppType (Mem size) =
-  "mem"
-
-data Param = Param { paramName :: VName
-                   , paramType :: Type
-                   }
+data Param = MemParam VName DimSize
+           | ScalarParam VName BasicType
              deriving (Show)
+
+paramName :: Param -> VName
+paramName (MemParam name _) = name
+paramName (ScalarParam name _) = name
 
 newtype Program a = Program [(Name, Function a)]
 
-data Function a = Function [Param] [Param] (Code a)
+data ValueDecl = ArrayValue VName BasicType [DimSize]
+               | ScalarValue BasicType VName
+               deriving (Show)
+
+data Function a = Function [Param] [Param] (Code a) [ValueDecl] [ValueDecl]
                   deriving (Show)
 
 -- | When an array is declared, this is where it is stored.
@@ -71,16 +55,15 @@ data MemLocation = MemLocation
 data Code a = Skip
             | Code a :>>: Code a
             | For VName Exp (Code a)
-            | DeclareMem VName DimSize
-            | DeclareArray VName BasicType [DimSize]
+            | DeclareMem VName
             | DeclareScalar VName BasicType
-            | Allocate VName
-            | BackArray VName MemLocation
+            | Allocate VName Exp
             | Copy VName Exp VName Exp Exp
               -- ^ Destination, offset in destination, source, offset
               -- in source, number of bytes.
-            | Free VName
-            | Write VName [Exp] Exp
+            | Write VName Exp BasicType Exp
+            | SetScalar VName Exp
+            | SetMem VName VName
             | Call [VName] Name [Exp]
             | If Exp (Code a) (Code a)
             | Assert Exp SrcLoc
@@ -90,7 +73,9 @@ data Code a = Skip
 data Exp = Constant BasicValue
          | BinOp BinOp Exp Exp
          | UnOp UnOp Exp
-         | Read VName [Exp]
+         | Index VName Exp BasicType
+         | ScalarVar VName
+         | SizeOf BasicType
            deriving (Show)
 
 data UnOp = Not
@@ -103,24 +88,6 @@ instance Monoid (Code a) where
   x    `mappend` Skip = x
   x    `mappend` y    = x :>>: y
 
--- | Return the types of values to be read from input, if a function
--- taken the given parameters is used as the entry point of the
--- program.
-entryPointInput :: [Param] -> [Type]
-entryPointInput params = []
-{-
-  -- We assume that every parameter that is a dimension of another
-  -- parameter is not read as input.  This is a hack until we get a
-  -- better idea of what we need.
-  mapMaybe paramType $ filter ((`notElem` shapes) . paramName) params
-  where shapes = concatMap (mapMaybe isVar . typeDims . paramType) params
-        isVar (VarSize v)    = Just v
-        isVar (ConstSize {}) = Nothing
-        paramType p = case paramKind p of
-          ValueParam t -> Just t
-          MemParam   _ -> Nothing
--}
-
 -- Prettyprinting definitions.
 
 instance Pretty (Program op) where
@@ -129,23 +96,26 @@ instance Pretty (Program op) where
             text "Function " <> ppr name <> colon </> indent 2 (ppr fun)
 
 instance Pretty (Function op) where
-  ppr (Function outs ins body) =
-    text "Outputs:" </> indent 2 ppOutputs </>
-    text "Inputs:" </> indent 2 ppInputs </>
+  ppr (Function outs ins body results args) =
+    text "Inputs:" </> block ins </>
+    text "Outputs:" </> block outs </>
+    text "Arguments:" </> block args </>
+    text "Result:" </> block results </>
     text "Body:" </> indent 2 (ppr body)
-    where ppOutputs = stack $ map ppr outs
-          ppInputs = stack $ map ppr ins
+    where block :: Pretty a => [a] -> Doc
+          block = indent 2 . stack . map ppr
 
 instance Pretty Param where
-  ppr (Param name ptype) =
+  ppr (ScalarParam name ptype) =
     ppr ptype <+> ppr name
+  ppr (MemParam name size) =
+    text "mem" <> parens (ppr size) <+> ppr name
 
-instance Pretty Type where
-  ppr (Value vt) = ppr vt
-  ppr (Mem size) = text "memory of" <+> ppr size <+> text "bytes"
-
-instance Pretty ValueType where
-  ppr (Type t ds) = foldr f (ppr t) ds
+instance Pretty ValueDecl where
+  ppr (ScalarValue t name) =
+    ppr t <+> ppr name
+  ppr (ArrayValue mem et shape) =
+    foldr f (ppr et) shape <+> text "at" <+> ppr mem
     where f e s = brackets $ s <> comma <> ppr e
 
 instance Pretty DimSize where
@@ -159,22 +129,36 @@ instance Pretty (Code op) where
   ppr (For i limit body) =
     text "for" <+> ppr i <+> langle <+> ppr limit <> colon </>
     indent 2 (ppr body)
-  ppr (DeclareMem name size) =
-    text "declare" <+> ppr name <+> text "as memory of size" <+> ppr size
-  ppr (DeclareArray name bt shape) =
-    text "declare" <+> ppr name <+> text "as array of type" <+> ppr (Type bt shape)
+  ppr (DeclareMem name) =
+    text "declare" <+> ppr name <+> text "as memory block"
   ppr (DeclareScalar name t) =
     text "declare" <+> ppr name <+> text "as scalar of type" <+> ppr t
-  ppr (Allocate name) =
-    text "allocate" <+> ppr name
-  ppr (BackArray arr mem) =
-    ppr arr <> text ".memory" <+> text "<-" <+> ppr mem
-  ppr (Write name [] val) =
+  ppr (Allocate name e) =
+    text "allocate" <> parens (ppr name <> comma <+> ppr e)
+  ppr (Write name i bt val) =
+    ppr name <> langle <> ppr bt <> rangle <> brackets (ppr i) <+>
+    text "<-" <+> ppr val
+  ppr (SetScalar name val) =
     ppr name <+> text "<-" <+> ppr val
-  ppr (Write name is val) =
-    ppr name <> brackets (commasep $ map ppr is) <+> text "<-" <+> ppr val
+  ppr (SetMem dest from) =
+    ppr dest <+> text "<-" <+> ppr from
   ppr (Assert e _) =
     text "assert" <> ppr e
+  ppr (Copy dest destoffset src srcoffset size) =
+    text "memcpy" <> parens (ppMemLoc dest destoffset <> comma <+>
+                             ppMemLoc src srcoffset <> comma <+>
+                             ppr size)
+    where ppMemLoc base offset =
+            ppr base <+> text "+" <+> ppr offset
+  ppr (If cond tbranch fbranch) =
+    text "if" <+> ppr cond <+> text "then {" </>
+    indent 2 (ppr tbranch) </>
+    text "} else {" </>
+    indent 2 (ppr fbranch) </>
+    text "}"
+  ppr (Call dests fname args) =
+    commasep (map ppr dests) <+> text "<-" <+>
+    ppr fname <> parens (commasep $ map ppr args)
 
 instance Pretty Exp where
   ppr (Constant v) = ppr v
@@ -184,10 +168,12 @@ instance Pretty Exp where
     text "not" <+> ppr x
   ppr (UnOp Negate x) =
     text "-" <+> ppr x
-  ppr (Read v []) =
+  ppr (ScalarVar v) =
     ppr v
-  ppr (Read v is) =
-    ppr v <> brackets (commasep $ map ppr is)
+  ppr (Index v is bt) =
+    ppr v <> langle <> ppr bt <> rangle <> brackets (ppr is)
+  ppr (SizeOf t) =
+    text "sizeof" <> parens (ppr t)
 
 instance Pretty MemLocation where
   ppr (MemLocation name offset) =
