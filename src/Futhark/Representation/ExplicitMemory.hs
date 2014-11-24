@@ -3,6 +3,7 @@ module Futhark.Representation.ExplicitMemory
        ( -- * The Lore definition
          ExplicitMemory
        , MemSummary (..)
+       , MemReturn (..)
          -- * Syntax types
        , Prog
        , Body
