@@ -48,15 +48,11 @@ Library
                    Futhark.Analysis.UsageTable
                    Futhark.Analysis.Usage
                    Futhark.Binder
---                   Futhark.CodeGen.Backends.Bohrium
---                   Futhark.CodeGen.Backends.BohriumCodeGen
---                   Futhark.CodeGen.Backends.BohriumOp
                    Futhark.CodeGen.Backends.CUtils
                    Futhark.CodeGen.Backends.GenericC
                    Futhark.CodeGen.Backends.GenericCReading
                    Futhark.CodeGen.Backends.SequentialC
                    Futhark.CodeGen.Backends.SimpleRepresentation
-                   Futhark.CodeGen.FirstOrderSOACS
                    Futhark.CodeGen.ImpCode
                    Futhark.CodeGen.ImpGen
                    Futhark.Dev

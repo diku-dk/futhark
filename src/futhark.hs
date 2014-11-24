@@ -139,9 +139,6 @@ seqCodegenAction = ("sequential code generator", putStrLn . SequentialC.compileP
 impCodegenAction :: Action
 impCodegenAction = ("imperative code generator", putStrLn . I.pretty . ImpGen.compileProgSimply . explicitAllocations)
 
--- bohriumCodegenAction :: Action
--- bohriumCodegenAction = ("Bohrium code generator", putStrLn . Bohrium.compileProg)
-
 flowGraphAction :: Action
 flowGraphAction = ("SOAC flow graph", putStrLn . FG.makeFlowGraphString)
 
