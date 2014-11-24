@@ -32,6 +32,7 @@ import qualified Futhark.TypeCheck as I
 
 import Futhark.Interpreter
 import qualified Futhark.SOACFlowGraph as FG
+import qualified Futhark.CodeGen.ImpGen as ImpGen
 import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
 -- import qualified Futhark.CodeGen.Backends.Bohrium as Bohrium
 import Futhark.Version
@@ -76,6 +77,9 @@ commandLineOptions =
   , Option [] ["generate-flow-graph"]
     (NoArg $ Right $ \opts -> opts { futharkaction = flowGraphAction })
     "Print the SOAC flow graph of the final program."
+  , Option [] ["compile-imperative"]
+    (NoArg $ Right $ \opts -> opts { futharkaction = impCodegenAction })
+    "Translate program into the imperative IL and write it on standard output."
   , Option "p" ["print"]
     (NoArg $ Right $ \opts -> opts { futharkaction = printAction })
     "Prettyprint the resulting internal representation on standard output (default action)."
@@ -131,6 +135,9 @@ interpretAction = ("interpreter", interpret)
 
 seqCodegenAction :: Action
 seqCodegenAction = ("sequential code generator", putStrLn . SequentialC.compileProg . explicitAllocations)
+
+impCodegenAction :: Action
+impCodegenAction = ("imperative code generator", putStrLn . I.pretty . ImpGen.compileProgSimply . explicitAllocations)
 
 -- bohriumCodegenAction :: Action
 -- bohriumCodegenAction = ("Bohrium code generator", putStrLn . Bohrium.compileProg)

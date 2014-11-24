@@ -1,6 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Futhark.CodeGen.ImpGen
   ( compileProg
+  , compileProgSimply
   -- * Pluggable compiler
   , ExpCompiler
   , ExpCompilerResult (..)
@@ -87,6 +88,10 @@ compileProg :: ExpCompiler op -> Prog -> Imp.Program op
 compileProg ec prog =
   Imp.Program $ snd $ mapAccumL (compileFunDec ec) src $ progFunctions prog
   where src = newNameSourceForProg prog
+
+-- | 'compileProg' with an 'ExpCompiler' that always returns 'CompileExp'.
+compileProgSimply :: Prog -> Imp.Program op
+compileProgSimply = compileProg $ const $ return . CompileExp
 
 compileParam :: FParam -> ImpM op (Either Imp.Param ArrayDecl)
 compileParam fparam = case t of
