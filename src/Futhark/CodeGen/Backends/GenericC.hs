@@ -197,15 +197,6 @@ paramsTypes = map paramType
   where paramType (MemParam _ size) = Mem size
         paramType (ScalarParam _ t) = Scalar t
 
-type MemSizeVars = HM.HashMap VName VName
-
-sizeVars :: [Param] -> MemSizeVars
-sizeVars = mconcat . map sizeVars'
-  where sizeVars' (MemParam parname (VarSize memsizename)) =
-          HM.singleton parname memsizename
-        sizeVars' _ =
-          HM.empty
-
 readBasicStm :: C.Exp -> BasicType -> C.Stm
 readBasicStm place t
   | Just f <- readFun t =
@@ -219,47 +210,56 @@ readBasicStm _ t =
         exit(1);
       }|]
 
-readInput :: MemSizeVars -> [ValueDecl] -> [C.Stm]
-readInput memsizes = map readInput'
-  where readInput' (ScalarValue t name) =
-          readBasicStm (C.var name) t
-        readInput' (ArrayValue name t shape) =
-          -- We need to create an array for the array parser to put
-          -- the shapes.
-          let t' = valueTypeToCType $ Scalar t
-              rank = length shape
-              maybeCopyDim (ConstSize _) _ =
-                Nothing
-              maybeCopyDim (VarSize dimname) i =
-                Just [C.cstm|$id:dimname = shape[$int:i];|]
-              copyshape = catMaybes $ zipWith maybeCopyDim shape [0..rank-1]
-              memsize = C.product $ [C.cexp|sizeof($ty:t')|] :
-                                     [ [C.cexp|shape[$int:i]|] |
-                                      i <- [0..rank-1] ]
-              copymemsize = case HM.lookup name memsizes of
-                Nothing -> []
-                Just sizevar -> [[C.cstm|$id:sizevar = $exp:memsize;|]]
-          in case readFun t of
-            Just f ->
-              [C.cstm|{
-                  typename int64_t shape[$int:rank];
-                  if (read_array(sizeof($ty:t'),
-                                 $id:f,
-                                 (void**)& $id:name,
-                                 shape,
-                                 $int:(length shape))
-                      != 0) {
-                    fprintf(stderr, "Syntax error when reading %s.\n", $string:(ppArrayType t rank));
-                    exit(1);
-                  }
-                  $stms:copyshape
-                  $stms:copymemsize
-              }|]
-            Nothing ->
-              [C.cstm|{
-                 fprintf(stderr, "Cannot read %s.\n", $string:(prettyPrint t));
-                 exit(1);
-              }|]
+sizeVars :: [Param] -> HM.HashMap VName VName
+sizeVars = mconcat . map sizeVars'
+  where sizeVars' (MemParam parname (VarSize memsizename)) =
+          HM.singleton parname memsizename
+        sizeVars' _ =
+          HM.empty
+
+readInput :: HM.HashMap VName VName -> ValueDecl -> C.Stm
+readInput _ (ScalarValue t name) =
+  readBasicStm (C.var name) t
+readInput memsizes (ArrayValue name t shape)
+  | Just f <- readFun t =
+  -- We need to create an array for the array parser to put
+  -- the shapes.
+  let t' = valueTypeToCType $ Scalar t
+      rank = length shape
+      maybeCopyDim (ConstSize _) _ =
+        Nothing
+      maybeCopyDim (VarSize dimname) i =
+        Just [C.cstm|$id:dimname = shape[$int:i];|]
+      copyshape = catMaybes $ zipWith maybeCopyDim shape [0..rank-1]
+      memsize = C.product $ [C.cexp|sizeof($ty:t')|] :
+                             [ [C.cexp|shape[$int:i]|] |
+                              i <- [0..rank-1] ]
+      copymemsize = case HM.lookup name memsizes of
+        Nothing -> []
+        Just sizevar -> [[C.cstm|$id:sizevar = $exp:memsize;|]]
+  in [C.cstm|{
+        typename int64_t shape[$int:rank];
+        if (read_array(sizeof($ty:t'),
+                       $id:f,
+                       (void**)& $id:name,
+                       shape,
+                       $int:(length shape))
+            != 0) {
+          fprintf(stderr, "Syntax error when reading %s.\n", $string:(ppArrayType t rank));
+          exit(1);
+        }
+        $stms:copyshape
+        $stms:copymemsize
+      }|]
+  | otherwise =
+    [C.cstm|{
+       fprintf(stderr, "Cannot read %s.\n", $string:(prettyPrint t));
+               exit(1);
+    }|]
+
+readInputs :: [Param] -> [ValueDecl] -> [C.Stm]
+readInputs inputparams = map $ readInput memsizes
+  where memsizes = sizeVars inputparams
 
 printResult :: [ValueDecl] -> CompilerM op [C.Stm]
 printResult = mapM printStm
@@ -280,9 +280,8 @@ mainCall fname (Function outputs inputs _ results args) = do
   ret <- newVName "main_ret"
   let argexps = map (C.var . paramName) inputs
       paramdecls = map paramDecl outputs ++ map paramDecl inputs
-      memsizevars = sizeVars inputs
       unpackstms = unpackResults ret outputs
-      readstms = readInput memsizevars args
+      readstms = readInputs inputs args
   printstms <- printResult results
   return [C.cstm|{
                $decls:paramdecls
