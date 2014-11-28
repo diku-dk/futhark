@@ -42,8 +42,14 @@ data ExpCompilerResult op =
     | Done
     -- ^ Some code was added via the monadic interface.
 
+-- | When an array is declared, this is where it is stored.
+data MemLocation = MemLocation
+                   VName -- ^ Name of memory block.
+                   Imp.DimSize -- ^ Offset into block.
+                   deriving (Show)
+
 data ArrayEntry = ArrayEntry {
-    entryArrayLocation :: Imp.MemLocation
+    entryArrayLocation :: MemLocation
   , entryArrayElemType :: BasicType
   , entryArrayShape :: [Imp.DimSize]
   }
@@ -52,8 +58,17 @@ data MemEntry = MemEntry {
     entryMemSize :: Imp.DimSize
   }
 
+-- ^ Every non-scalar variable must be associated with an entry.
 data VarEntry = ArrayVar ArrayEntry
               | MemVar MemEntry
+
+-- ^ When compiling a body, this is a description of where the result
+-- should end up.
+newtype Destination = Destination [ValueDestination]
+
+data ValueDestination = ScalarDestination VName
+                      | MemoryDestination VName (Maybe VName)
+                      | ArrayDestination (Maybe VName) [Maybe VName]
 
 data Env op = Env {
     envVtable :: HM.HashMap VName VarEntry
@@ -101,12 +116,12 @@ compileParam fparam = case t of
       fail "Can only handle linear (simple) allocation for now."
     shape' <- mapM subExpToDimSize $ shapeDims shape
     return $ Right $ ArrayDecl name bt shape' $
-      Imp.MemLocation (identName mem) $ Imp.ConstSize 0
+      MemLocation (identName mem) $ Imp.ConstSize 0
   where name = bindeeName fparam
         t    = bindeeType fparam
         MemSummary mem ixfun = bindeeLore fparam
 
-data ArrayDecl = ArrayDecl VName BasicType [Imp.DimSize] Imp.MemLocation
+data ArrayDecl = ArrayDecl VName BasicType [Imp.DimSize] MemLocation
 
 fparamSizes :: FParam -> HS.HashSet VName
 fparamSizes fparam
@@ -119,11 +134,11 @@ compileParams :: [FParam]
               -> ImpM op ([Imp.Param], [ArrayDecl], [Imp.ValueDecl])
 compileParams params = do
   (inparams, arraydecls) <- liftM partitionEithers $ mapM compileParam params
-  let findArray x = find (isArray x) arraydecls
+  let findArray x = find (isArrayDecl x) arraydecls
       sizes = mconcat $ map fparamSizes params
       mkArg fparam =
         case (findArray $ bindeeName fparam, bindeeType fparam) of
-          (Just (ArrayDecl _ bt shape (Imp.MemLocation mem _)), _) ->
+          (Just (ArrayDecl _ bt shape (MemLocation mem _)), _) ->
             Just $ Imp.ArrayValue mem bt shape
           (_, Basic bt)
             | bindeeName fparam `HS.member` sizes ->
@@ -134,7 +149,7 @@ compileParams params = do
             Nothing
       args = mapMaybe mkArg params
   return (inparams, arraydecls, args)
-  where isArray x (ArrayDecl y _ _ _) = x == y
+  where isArrayDecl x (ArrayDecl y _ _ _) = x == y
 
 compileOutParams :: ResType -> [SubExp]
                  -> ImpM op ([Imp.ValueDecl], [Imp.Param])
@@ -150,15 +165,12 @@ compileOutParams (ResType ts) ses =
           tell [Imp.ScalarParam out t]
           return $ Imp.ScalarValue t out
         mkParamAndCopy (Array t shape _, lore) (Var v) = do
-          resultshape <-
-            zipWithM inspectExtDimSize (extShapeDims shape)
-            (arrayDims $ identType v)
-          case lore of
+          memout <- case lore of
             ReturnsNewBlock x -> do
               memout <- imp $ newVName "out_mem"
               sizeout <- ensureMemSizeOut x
               imp $ do
-                Imp.MemLocation mem memoffset <-
+                MemLocation mem memoffset <-
                   arrayLocation $ identName v
                 unless (memoffset == Imp.ConstSize 0) $
                   fail "Array to be returned has offset."
@@ -166,11 +178,16 @@ compileOutParams (ResType ts) ses =
                 tell $ Imp.SetScalar sizeout $ dimSizeToExp memsize
                 tell $ Imp.SetMem memout mem
               tell [Imp.MemParam memout $ Imp.VarSize sizeout]
-              return $ Imp.ArrayValue memout t resultshape
+              return memout
             ReturnsInBlock memout ->
-              return $ Imp.ArrayValue (identName memout) t resultshape
+              return $ identName memout
             _ ->
               fail $ "Nonsensical lore for array return: " ++ show lore
+          resultshape <-
+            zipWithM inspectExtDimSize (extShapeDims shape)
+            (arrayDims $ identType v)
+          return $ Imp.ArrayValue memout t resultshape
+
         mkParamAndCopy (Array {}, _) _ =
           fail "Non-variable array subexpression - impossible."
         mkParamAndCopy (Mem _, _) _ =
@@ -217,11 +234,32 @@ compileFunDec ec src (FunDec fname rettype params body _) =
             compileOutParams rettype $ resultSubExps $ bodyResult body
           return (outparams, inparams, results, args)
 
-compileExtBody :: ResType -> [VName] -> Body -> ImpM op ()
-compileExtBody rettype targets (Body _ bnds (Result _ ses _)) =
-  compileBindings bnds $
-  zipWithM_ compileSubExpTo targets $
-  subExpShapeContext (resTypeValues rettype) ses ++ ses
+compileExtBody :: Destination -> Body -> ImpM op ()
+compileExtBody (Destination dest) (Body _ bnds (Result _ ses _)) =
+  compileBindings bnds $ zipWithM_ compileResultSubExp dest ses
+
+compileResultSubExp :: ValueDestination -> SubExp -> ImpM op ()
+compileResultSubExp (ScalarDestination name) se =
+  compileSubExpTo name se
+compileResultSubExp (MemoryDestination mem memsizetarget) (Var v) = do
+  MemEntry memsize <- lookupMemory vname
+  tell $ Imp.SetMem mem $ identName v
+  case memsizetarget of
+    Nothing ->
+      return ()
+    Just memsizetarget' ->
+      tell $ Imp.SetScalar memsizetarget' $ dimSizeToExp memsize
+  where vname = identName v
+compileResultSubExp (ArrayDestination mem shape) (Var v) = do
+  arr <- lookupArray $ identName v
+  let MemLocation arrmem _ = entryArrayLocation arr
+  case mem of Nothing   -> return ()
+              Just mem' -> tell $ Imp.SetMem mem' arrmem
+  zipWithM_ maybeSetShape shape $ entryArrayShape arr
+  where maybeSetShape Nothing _ =
+          return ()
+        maybeSetShape (Just dim) size =
+          tell $ Imp.SetScalar dim $ dimSizeToExp size
 
 compileBindings :: [Binding] -> ImpM op a -> ImpM op a
 compileBindings []     m = m
@@ -244,12 +282,18 @@ compileExp targets e m = do
 defCompileExp :: [VName] -> Exp -> ImpM op ()
 
 defCompileExp targets (If cond tbranch fbranch rettype _) = do
-  tcode <- collect $ compileExtBody rettype targets tbranch
-  fcode <- collect $ compileExtBody rettype targets fbranch
+  dest <- destinationFromTargets targets rettype
+  tcode <- collect $ compileExtBody dest tbranch
+  fcode <- collect $ compileExtBody dest fbranch
   tell $ Imp.If (compileSubExp cond) tcode fcode
 
-defCompileExp targets (Apply fname args _ _) =
-  tell $ Imp.Call targets fname $ map (compileSubExp . fst) args
+defCompileExp targets (Apply fname args _ _) = do
+  targets' <- sanitiseTargets targets
+  tell $ Imp.Call targets' fname $
+    map compileSubExp $ filter notArray $ map fst args
+  where notArray se = case subExpType se of
+          Array {} -> False
+          _        -> True
 
 defCompileExp targets (PrimOp op) = defCompilePrimOp targets op
 
@@ -282,7 +326,7 @@ defCompilePrimOp [target] (Index _ src idxs _)
     where t = identType src
 
 defCompilePrimOp [target] (Index _ src idxs _) = do
-  Imp.MemLocation destmem destoffset <- arrayLocation target
+  MemLocation destmem destoffset <- arrayLocation target
   (srcmem, srcoffset, size) <- indexArray (identName src) $ map compileSubExp idxs
   tell $ Imp.Copy
     destmem (multElSize $ dimSizeToExp destoffset)
@@ -291,28 +335,60 @@ defCompilePrimOp [target] (Index _ src idxs _) = do
   where et = elemType $ identType src
         multElSize = impTimes (Imp.SizeOf et)
 
-{-
 defCompilePrimOp [_] (Conjoin {}) =
   return ()
 
+defCompilePrimOp [target] (Update _ src idxs val _) = do
+  srcentry <- lookupArray $ identName src
+  MemLocation destmem destoffset <- arrayLocation target
+  let MemLocation srcmem srcoffset = entryArrayLocation srcentry
+  (_, elemoffset, size) <- indexArray (identName src) $ map compileSubExp idxs
+  unless (destmem == srcmem && destoffset == srcoffset) $
+    -- Not in-place, so we have to copy all of src to target...
+    tell $ Imp.Copy
+      destmem (dimSizeToExp destoffset)
+      srcmem (dimSizeToExp srcoffset) $
+      foldl impTimes (Imp.SizeOf $ elemType srct) $
+      map dimSizeToExp $ entryArrayShape srcentry
+  if length idxs == arrayRank srct then
+    tell $ Imp.Write destmem elemoffset (elemType srct) $ compileSubExp val
+    else fail "Update can only write scalars so far."
+  where srct = identType src
+
+defCompilePrimOp [target] (Replicate n v _) = do
+  i <- newVName "i"
+  (targetmem, elemoffset, _) <- indexArray target [Imp.ScalarVar i]
+  tell $ Imp.For i (compileSubExp n) $
+    Imp.Write targetmem elemoffset Int $ compileSubExp v
+
+defCompilePrimOp [target] (Iota n _) = do
+  i <- newVName "i"
+  (targetmem, elemoffset, _) <- indexArray target [Imp.ScalarVar i]
+  tell $ Imp.For i (compileSubExp n) $
+    Imp.Write targetmem elemoffset Int $ Imp.ScalarVar i
+
+defCompilePrimOp [target] (Copy src@(Constant {}) _) =
+  compileSubExpTo target src
+
+defCompilePrimOp [target] (Copy (Var src) _)
+  | basicType srct =
+    compileSubExpTo target $ Var src
+  | otherwise = do
+    srcentry <- lookupArray $ identName src
+    MemLocation destmem destoffset <- arrayLocation target
+    let MemLocation srcmem srcoffset = entryArrayLocation srcentry
+    tell $ Imp.Copy
+      destmem (dimSizeToExp destoffset)
+      srcmem (dimSizeToExp srcoffset) $
+      foldl impTimes (Imp.SizeOf $ elemType srct) $
+      map dimSizeToExp $ entryArrayShape srcentry
+  where srct = identType src
+
+{-
 defCompilePrimOp [target] (ArrayLit es _ _) = do
   allocate target
   forM_ (zip [0..] es) $ \(i,e) ->
     tell $ Imp.Write target [Imp.Constant $ Imp.BasicVal $ IntVal i] $ compileSubExp e
-
-defCompilePrimOp [target] (Update _ src idxs val _) = do
-  writeExp target $ var $ identName src
-  tell $ Imp.Write target (map compileSubExp idxs) $ compileSubExp val
-
-defCompilePrimOp [target] (Iota n _) = do
-  i <- newVName "i"
-  allocate target
-  tell $ Imp.For i (compileSubExp n) $ Imp.Write target [var i] $ var i
-
-defCompilePrimOp [target] (Replicate n v _) = do
-  i <- newVName "i"
-  allocate target
-  tell $ Imp.For i (compileSubExp n) $ Imp.Write target [var i] $ compileSubExp v
 
 defCompilePrimOp [target] (Copy e _)
   | arrayRank (subExpType e) == 0 =
@@ -473,7 +549,7 @@ declaringVar bindee m =
     Array bt shape _ -> do
       shape' <- mapM subExpToDimSize $ shapeDims shape
       let MemSummary mem ixfun = bindeeLore bindee
-          location = Imp.MemLocation (identName mem) $ Imp.ConstSize 0
+          location = MemLocation (identName mem) $ Imp.ConstSize 0
           entry = ArrayVar ArrayEntry {
               entryArrayLocation = location
             , entryArrayElemType = bt
@@ -485,6 +561,10 @@ declaringVar bindee m =
   where name = bindeeName bindee
         bind entry env =
             env { envVtable = HM.insert name entry $ envVtable env }
+
+-- | Remove the array targets.
+sanitiseTargets :: [VName] -> ImpM op [VName]
+sanitiseTargets = filterM $ liftM not . isArray
 
 subExpToDimSize :: SubExp -> ImpM op Imp.DimSize
 subExpToDimSize (Var v) =
@@ -500,13 +580,20 @@ dimSizeToExp (Imp.ConstSize x) = Imp.Constant $ IntVal x
 
 compileSubExpTo :: VName -> SubExp -> ImpM op ()
 compileSubExpTo target se =
-  tell $ Imp.SetScalar target $ compileSubExp se
+  writeExp target $ compileSubExp se
 
 compileSubExp :: SubExp -> Imp.Exp
 compileSubExp (Constant v _) =
   Imp.Constant v
 compileSubExp (Var v) =
   Imp.ScalarVar (identName v)
+
+isArray :: VName -> ImpM op Bool
+isArray name = do
+  res <- asks $ HM.lookup name . envVtable
+  case res of
+    Just (ArrayVar {}) -> return True
+    _                  -> return False
 
 lookupArray :: VName -> ImpM op ArrayEntry
 lookupArray name = do
@@ -515,7 +602,7 @@ lookupArray name = do
     Just (ArrayVar entry) -> return entry
     _                    -> fail $ "Unknown array: " ++ textual name
 
-arrayLocation :: VName -> ImpM op Imp.MemLocation
+arrayLocation :: VName -> ImpM op MemLocation
 arrayLocation name = entryArrayLocation <$> lookupArray name
 
 lookupMemory :: VName -> ImpM op MemEntry
@@ -525,6 +612,28 @@ lookupMemory name = do
     Just (MemVar entry) -> return entry
     _                   -> fail $ "Unknown memory block: " ++ textual name
 
+destinationFromTargets :: [VName] -> ResType -> ImpM op Destination
+destinationFromTargets targets (ResType ts) =
+  Destination <$> mapM inspect valtargets
+  where (ctxtargets,valtargets) = splitAt (length targets - length ts) targets
+        isctx = (`elem` ctxtargets)
+        inspect name = do
+          entry <- asks $ HM.lookup name . envVtable
+          case entry of
+            Just (ArrayVar (ArrayEntry (MemLocation mem _) _ shape)) ->
+              let nullifyFreeDim (Imp.ConstSize _) = Nothing
+                  nullifyFreeDim (Imp.VarSize v)   = Just v
+                  mem' = if isctx mem then Just mem else Nothing
+                  shape' = map nullifyFreeDim shape
+              in return $ ArrayDestination mem' shape'
+            Just (MemVar (MemEntry memsize))
+              | Imp.VarSize memsize' <- memsize, isctx memsize' ->
+                return $ MemoryDestination name $ Just memsize'
+              | otherwise ->
+                return $ MemoryDestination name Nothing
+            Nothing ->
+              return $ ScalarDestination name
+
 indexArray :: VName -> [Imp.Exp] -> ImpM op (VName, Imp.Exp, Imp.Exp)
 indexArray name indices = do
   entry <- lookupArray name
@@ -533,7 +642,7 @@ indexArray name indices = do
       expSum = foldl impPlus $ Imp.Constant $ IntVal 0
       dimsizes = map expProduct $ drop 1 $ tails arrshape
       ixoffset = expSum $ zipWith impTimes indices dimsizes
-      Imp.MemLocation arrmem arroffset = entryArrayLocation entry
+      MemLocation arrmem arroffset = entryArrayLocation entry
   return (arrmem,
           impPlus (dimSizeToExp arroffset) ixoffset,
           expProduct $ drop (length indices) arrshape)

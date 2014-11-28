@@ -63,12 +63,16 @@ data OpCompilerResult op = CompileCode (Code op) -- ^ Equivalent to this code.
 
 data CompilerEnv op = CompilerEnv {
     envOpCompiler :: OpCompiler op
+  , envFtable     :: HM.HashMap Name [Type]
   }
 
-newCompilerEnv :: OpCompiler op -> CompilerEnv op
-newCompilerEnv ec = CompilerEnv {
-                      envOpCompiler = ec
-                    }
+newCompilerEnv :: Program op -> OpCompiler op -> CompilerEnv op
+newCompilerEnv (Program funs) ec = CompilerEnv { envOpCompiler = ec
+                                               , envFtable = ftable
+                                               }
+  where ftable = HM.fromList $ map funReturn funs
+        funReturn (name, Function outparams _ _ _ _) =
+          (name, paramsTypes outparams)
 
 -- | Return a list of struct definitions for the tuples and arrays
 -- seen during compilation.  The list is sorted according to
@@ -87,15 +91,23 @@ instance MonadFreshNames (CompilerM op) where
   getNameSource = gets compNameSrc
   putNameSource src = modify $ \s -> s { compNameSrc = src }
 
-runCompilerM :: OpCompiler op -> VNameSource -> CompilerM op a -> (a, CompilerState)
-runCompilerM ec src (CompilerM m) =
-  let (x, s, _) = runRWS m (newCompilerEnv ec) (newCompilerState src)
+runCompilerM :: Program op -> OpCompiler op -> VNameSource -> CompilerM op a
+             -> (a, CompilerState)
+runCompilerM prog ec src (CompilerM m) =
+  let (x, s, _) = runRWS m (newCompilerEnv prog ec) (newCompilerState src)
   in (x, s)
 
 collect :: MonadWriter w m => m () -> m w
 collect m = pass $ do
   ((), w) <- listen m
   return (w, const mempty)
+
+lookupFunction :: Name -> CompilerM op [Type]
+lookupFunction name = do
+  res <- asks $ HM.lookup name . envFtable
+  case res of
+    Nothing -> fail $ "Function " ++ nameToString name ++ " not found."
+    Just ts -> return ts
 
 item :: C.BlockItem -> CompilerM op ()
 item x = tell [x]
@@ -181,6 +193,9 @@ printStm (ArrayValue mem bt (dim:shape)) = do
                    for ($id:i = 0; $id:i < $exp:dim'; $id:i++) {
                            unsigned char *$id:v = $id:mem + $id:i * sizeof($ty:bt');
                            $stm:printelem
+                           if ($id:i != $exp:dim'-1) {
+                             printf(", ");
+                           }
                    }
                putchar(']');
                }
@@ -301,9 +316,9 @@ mainCall fname (Function outputs inputs _ results args) = do
 -- | Compile imperative program to a C program.  Always uses the
 -- function named "main" as entry point, so make sure it is defined.
 compileProg :: OpCompiler op -> Program op -> String
-compileProg ec (Program prog) =
+compileProg ec prog@(Program funs) =
   let ((prototypes, definitions, main), endstate) =
-        runCompilerM ec blankNameSource compileProg'
+        runCompilerM prog ec blankNameSource compileProg'
       funName' = funName . nameFromString
   in pretty 80 $ ppr [C.cunit|
 $esc:("#include <stdio.h>")
@@ -349,9 +364,9 @@ int main() {
 
 |]
   where compileProg' = do
-          (prototypes, definitions) <- unzip <$> mapM compileFun prog
+          (prototypes, definitions) <- unzip <$> mapM compileFun funs
           let mainname = nameFromString "main"
-          main <- case lookup mainname prog of
+          main <- case lookup mainname funs of
                     Nothing   -> fail "GenericC.compileProg: No main function"
                     Just func -> mainCall mainname func
           return (prototypes, definitions, main)
@@ -518,21 +533,19 @@ compileCode (SetScalar dest src) = do
 compileCode (SetMem dest src) =
   stm [C.cstm|$id:dest = $id:src;|]
 
-{-
-compileCode (Call results fname args) = do
+compileCode (Call dests fname args) = do
   args' <- mapM compileExp args
-  restypes <- mapM lookupVar results
-  crestype <- typeToCType $ map Value restypes
-  case results of
-    [result] ->
-      stm [C.cstm|$id:(textual result) = $id:(funName fname)($args:args');|]
+  outtypes <- lookupFunction fname
+  crestype <- typeToCType outtypes
+  case dests of
+    [dest] ->
+      stm [C.cstm|$id:dest = $id:(funName fname)($args:args');|]
     _        -> do
-      ret <- new "call_ret"
+      ret <- newVName "call_ret"
       decl [C.cdecl|$ty:crestype $id:ret;|]
       stm [C.cstm|$id:ret = $id:(funName fname)($args:args');|]
-      forM_ (zip [0..] results) $ \(i,result) ->
-        stm [C.cstm|$id:(textual result) = $exp:(tupleFieldExp (C.var ret) i);|]
--}
+      forM_ (zip [0..] dests) $ \(i,dest) ->
+        stm [C.cstm|$id:dest = $exp:(tupleFieldExp (C.var ret) i);|]
 
 compileFunBody :: [Param] -> Code op -> CompilerM op ()
 compileFunBody outputs code = do

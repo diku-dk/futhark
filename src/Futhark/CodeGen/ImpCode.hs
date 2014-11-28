@@ -8,7 +8,6 @@ module Futhark.CodeGen.ImpCode
   , DimSize (..)
   , Type (..)
   , Code (..)
-  , MemLocation (..)
   , Exp (..)
   , UnOp (..)
   -- * Re-exports from other modules.
@@ -45,12 +44,6 @@ data ValueDecl = ArrayValue VName BasicType [DimSize]
 
 data Function a = Function [Param] [Param] (Code a) [ValueDecl] [ValueDecl]
                   deriving (Show)
-
--- | When an array is declared, this is where it is stored.
-data MemLocation = MemLocation
-                   VName -- ^ Name of memory block.
-                   DimSize -- ^ Offset into block.
-                   deriving (Show)
 
 data Code a = Skip
             | Code a :>>: Code a
@@ -127,8 +120,9 @@ instance Pretty (Code op) where
   ppr Skip   = text "skip"
   ppr (c1 :>>: c2) = ppr c1 </> ppr c2
   ppr (For i limit body) =
-    text "for" <+> ppr i <+> langle <+> ppr limit <> colon </>
-    indent 2 (ppr body)
+    text "for" <+> ppr i <+> langle <+> ppr limit <+> text "{" </>
+    indent 2 (ppr body) </>
+    text "}"
   ppr (DeclareMem name) =
     text "declare" <+> ppr name <+> text "as memory block"
   ppr (DeclareScalar name t) =
@@ -174,7 +168,3 @@ instance Pretty Exp where
     ppr v <> langle <> ppr bt <> rangle <> brackets (ppr is)
   ppr (SizeOf t) =
     text "sizeof" <> parens (ppr t)
-
-instance Pretty MemLocation where
-  ppr (MemLocation name offset) =
-    ppr name <+> text "+" <+> ppr offset
