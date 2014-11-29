@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleInstances #-}
 module Futhark.Representation.AST.ResType
        ( ResType (..)
        )
