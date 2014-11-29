@@ -155,16 +155,43 @@ instance Pretty (Code op) where
     ppr fname <> parens (commasep $ map ppr args)
 
 instance Pretty Exp where
-  ppr (Constant v) = ppr v
-  ppr (BinOp op x y) =
-    ppr x <+> text (opStr op) <+> ppr y
-  ppr (UnOp Not x) =
+  ppr = pprPrec (-1)
+  pprPrec _ (Constant v) = ppr v
+  pprPrec p (BinOp op x y) =
+    parensIf (p >= precedence op) $
+    pprPrec (precedence op) x <+/>
+    text (opStr op) <+>
+    pprPrec (rprecedence op) y
+  pprPrec _ (UnOp Not x) =
     text "not" <+> ppr x
-  ppr (UnOp Negate x) =
+  pprPrec _ (UnOp Negate x) =
     text "-" <+> ppr x
-  ppr (ScalarVar v) =
+  pprPrec _ (ScalarVar v) =
     ppr v
-  ppr (Index v is bt) =
+  pprPrec _ (Index v is bt) =
     ppr v <> langle <> ppr bt <> rangle <> brackets (ppr is)
-  ppr (SizeOf t) =
+  pprPrec _ (SizeOf t) =
     text "sizeof" <> parens (ppr t)
+
+precedence :: BinOp -> Int
+precedence LogAnd = 0
+precedence LogOr = 0
+precedence Band = 1
+precedence Bor = 1
+precedence Xor = 1
+precedence Equal = 2
+precedence Less = 2
+precedence Leq = 2
+precedence ShiftL = 3
+precedence ShiftR = 3
+precedence Plus = 4
+precedence Minus = 4
+precedence Times = 5
+precedence Divide = 5
+precedence Mod = 5
+precedence Pow = 6
+
+rprecedence :: BinOp -> Int
+rprecedence Minus = 10
+rprecedence Divide = 10
+rprecedence op = precedence op
