@@ -227,6 +227,12 @@ compileExtBody :: Destination -> Body -> ImpM op ()
 compileExtBody (Destination dest) (Body _ bnds (Result _ ses _)) =
   compileBindings bnds $ zipWithM_ compileResultSubExp dest ses
 
+compileBody :: [VName] -> Body -> ImpM op ()
+compileBody targets (Body _ bnds (Result _ ses _)) =
+  compileBindings bnds $ forM_ (zip targets ses) $ \(d,se) ->
+    when (subExpNotArray se) $
+    compileSubExpTo d se
+
 compileResultSubExp :: ValueDestination -> SubExp -> ImpM op ()
 compileResultSubExp (ScalarDestination name) se =
   compileSubExpTo name se
@@ -287,10 +293,7 @@ defCompileExp targets (If cond tbranch fbranch rettype _) = do
 defCompileExp targets (Apply fname args _ _) = do
   targets' <- sanitiseTargets targets
   tell $ Imp.Call targets' fname $
-    map compileSubExp $ filter notArray $ map fst args
-  where notArray se = case subExpType se of
-          Array {} -> False
-          _        -> True
+    map compileSubExp $ filter subExpNotArray $ map fst args
 
 defCompileExp targets (PrimOp op) = defCompilePrimOp targets op
 
@@ -377,27 +380,50 @@ defCompilePrimOp [target] (Copy (Var src) _)
     tell $ Imp.Copy
       destmem (dimSizeToExp destoffset)
       srcmem (dimSizeToExp srcoffset) $
-      foldl impTimes (Imp.SizeOf $ elemType srct) $
-      map dimSizeToExp $ entryArrayShape srcentry
+      arrayByteSizeExp srcentry
   where srct = identType src
 
-{-
-defCompilePrimOp [target] (ArrayLit es _ _) = do
-  allocate target
+defCompilePrimOp [target] (Concat _ (Var x) (Var y) _ _) = do
+  xentry <- lookupArray $ identName x
+  let MemLocation xmem xoffset = entryArrayLocation xentry
+  yentry <- lookupArray $ identName y
+  let MemLocation ymem yoffset = entryArrayLocation yentry
+  MemLocation destmem destoffset <- arrayLocation target
+  tell $ Imp.Copy
+    destmem (dimSizeToExp destoffset)
+    xmem (dimSizeToExp xoffset) $
+    arrayByteSizeExp xentry
+  tell $ Imp.Copy
+    destmem (Imp.BinOp Plus (dimSizeToExp destoffset) $
+             arrayByteSizeExp xentry)
+    ymem (dimSizeToExp yoffset) $
+    arrayByteSizeExp yentry
+
+defCompilePrimOp [target] (ArrayLit es rt _) = do
+  targetEntry <- lookupArray target
+  let MemLocation mem offset = entryArrayLocation targetEntry
+  unless (offset == Imp.ConstSize 0) $
+    fail "Cannot handle offset in ArrayLit"
   forM_ (zip [0..] es) $ \(i,e) ->
-    tell $ Imp.Write target [Imp.Constant $ Imp.BasicVal $ IntVal i] $ compileSubExp e
-
-defCompilePrimOp [target] (Copy e _)
-  | arrayRank (subExpType e) == 0 =
-  writeExp target $ compileSubExp e
-  | otherwise = do
-    mem <- arraySubExpLocation e
-    let elsize = basicSize $ elemType $ subExpType e
-        arraysize = foldl (Imp.BinOp Times)
-                    (Imp.Constant $ Imp.BasicVal $ IntVal elsize)
-                    $ map compileSubExp $ arrayDims $ subExpType e
-    tell $ Imp.Copy target mem arraysize
-
+    if basicType rt then
+      tell $ Imp.Write mem (Imp.Constant $ IntVal i) et $ compileSubExp e
+    else case e of
+      Constant {} ->
+        fail "defCompilePrimOp ArrayLit: Cannot have array constants."
+      Var v -> do
+        let bytesPerElem = foldl impTimes (Imp.SizeOf et) $
+                           map dimSizeToExp $ drop 1 $
+                           entryArrayShape targetEntry
+        ventry <- lookupArray $ identName v
+        let MemLocation vmem voffset = entryArrayLocation ventry
+        tell $ Imp.Copy
+          mem (dimSizeToExp offset `impPlus`
+               (Imp.Constant (IntVal i) `impTimes`
+                bytesPerElem))
+          vmem (dimSizeToExp voffset)
+          bytesPerElem
+  where et = elemType rt
+{-
 defCompilePrimOp [target] (Reshape _ shape src _) = do
   allocate target
   src' <- expAsName srct $ compileSubExp src
@@ -421,21 +447,6 @@ defCompilePrimOp [target] (Reshape _ shape src _) = do
   tell $ Imp.For i (var n) $ Imp.Write target targetidxs $ Imp.Read src' srcidxs
   where one = Imp.Constant $ Imp.BasicVal $ IntVal 1
         srct = subExpType src
-
-defCompilePrimOp [target] (Concat _ x y _ _) = do
-  allocate target
-  x' <- expAsName xt $ compileSubExp x
-  y' <- expAsName yt $ compileSubExp y
-  let xsize = compileSubExp $ arraySize 0 xt
-      ysize = compileSubExp $ arraySize 0 yt
-  i <- newVName "i"
-  tell $ Imp.For i xsize $ Imp.Write target [var i] $
-         Imp.Read x' [var i]
-  j <- newVName "j"
-  tell $ Imp.For j ysize $ Imp.Write target [Imp.BinOp Imp.Plus xsize $ var j] $
-         Imp.Read y' [var j]
-  where xt = subExpType x
-        yt = subExpType y
 
 defCompilePrimOp [target1, target2] (Split _ n x restsize _) = do
   allocate target1
@@ -480,18 +491,17 @@ defCompilePrimOp (_:_:_) _ = fail "ImpGen.compilePrimOp: Incorrect number of tar
 -}
 defCompileLoopOp :: [VName] -> LoopOp -> ImpM op ()
 
-{-
-defCompileLoopOp targets (DoLoop res merge i bound body _) = do
-  declareVars mergepat
-  zipWithM_ compileSubExpTo mergenames mergeinit
-  body' <- collect $ compileBody mergenames body
-  tell $ Imp.For (identName i) (compileSubExp bound) body'
-  let writes = loopResultWrites targets res (map fst merge)
-  forM_ writes $ \(from, to) ->
-    tell $ Imp.Write to [] $ Imp.Read from []
-  where (mergepat, mergeinit) = unzip merge
-        mergenames = map bindeeName mergepat
--}
+defCompileLoopOp targets (DoLoop res merge i bound body _) =
+  declaringVars mergepat $ do
+    forM_ merge $ \(p, se) ->
+      when (subExpNotArray se) $ compileSubExpTo (bindeeName p) se
+    body' <- collect $ compileBody mergenames body
+    tell $ Imp.For (identName i) (compileSubExp bound) body'
+    let restype = extResType $ staticShapes $ map identType res
+    Destination dest <- destinationFromTargets targets restype
+    zipWithM_ compileResultSubExp dest $ map Var res
+    where mergepat = map fst merge
+          mergenames = map bindeeName mergepat
 
 defCompileLoopOp [_] (Map {}) = soacError
 
@@ -659,10 +669,6 @@ indexArray name indices = do
           impPlus (dimSizeToExp arroffset) ixoffset,
           expProduct $ drop (length indices) arrshape)
 
-loopResultWrites :: [VName] -> [Ident] -> [FParam]
-                 -> [(VName, VName)]
-loopResultWrites = undefined
-
 impTimes :: Imp.Exp -> Imp.Exp -> Imp.Exp
 impTimes (Imp.Constant (IntVal 1)) e = e
 impTimes e (Imp.Constant (IntVal 1)) = e
@@ -674,3 +680,13 @@ impPlus :: Imp.Exp -> Imp.Exp -> Imp.Exp
 impPlus (Imp.Constant (IntVal 0)) e = e
 impPlus e (Imp.Constant (IntVal 0)) = e
 impPlus x y                         = Imp.BinOp Plus x y
+
+subExpNotArray :: SubExp -> Bool
+subExpNotArray se = case subExpType se of
+  Array {} -> False
+  _        -> True
+
+arrayByteSizeExp :: ArrayEntry -> Imp.Exp
+arrayByteSizeExp entry =
+  foldl impTimes (Imp.SizeOf $ entryArrayElemType entry) $
+  map dimSizeToExp $ entryArrayShape entry
