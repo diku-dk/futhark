@@ -490,27 +490,36 @@ checkSubExp (Var ident) = do
   observe ident'
   return $ Var ident'
 
-checkBody :: Checkable lore =>
-             Body lore -> TypeM lore (Body lore)
-
-checkBody (Body (als,lore) origbnds (Result cs es loc)) = do
-  (bnds', res) <- delve origbnds
-  -- We need to remove the names that are bound in bnds' from the
-  -- alias sets.
-  lore' <- checkBodyLore lore
-  return $ Body (als,lore') bnds' res
+checkBindings :: Checkable lore =>
+                 [Binding lore] -> TypeM lore a
+              -> TypeM lore ([Binding lore], a)
+checkBindings origbnds m = delve origbnds
   where delve (Let pat (eals,annot) e:bnds) = do
           (e', dataflow) <- collectDataflow $ checkExp e
           annot' <- checkExpLore annot
           (scope, pat') <-
             checkBinding (srclocOf e) pat (typeOf e') dataflow
           scope $ do
-            (bnds', res') <- delve bnds
-            return (Let pat' (eals,annot') e' : bnds', res')
+            (bnds', res) <- delve bnds
+            return (Let pat' (eals,annot') e' : bnds', res)
         delve [] = do
-          cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
-          es' <- mapM checkSubExp es
-          return ([], Result cs' es' loc)
+          res <- m
+          return ([], res)
+
+checkResult :: Checkable lore =>
+               Result -> TypeM lore Result
+checkResult (Result cs es loc) = do
+  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
+  es' <- mapM checkSubExp es
+  return $ Result cs' es' loc
+
+checkBody :: Checkable lore =>
+             Body lore -> TypeM lore (Body lore)
+
+checkBody (Body (als,lore) bnds res) = do
+  (bnds', res') <- checkBindings bnds $ checkResult res
+  lore' <- checkBodyLore lore
+  return $ Body (als,lore') bnds' res'
 
 checkPrimOp :: Checkable lore =>
                PrimOp lore -> TypeM lore (PrimOp lore)
