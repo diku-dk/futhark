@@ -42,7 +42,7 @@ interpretAction = basicAction "interpreter" . interpret
 
 seqCodegenAction :: Action
 seqCodegenAction = explicitMemoryAction "sequential code generator" $
-                   putStrLn . pretty . SequentialC.compileProg
+                   putStrLn . SequentialC.compileProg
 
 impCodeGenAction :: Action
 impCodeGenAction = explicitMemoryAction "imperative code generator" $
