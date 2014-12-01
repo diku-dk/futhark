@@ -203,28 +203,45 @@ allocInFun (In.FunDec fname rettype params body loc) =
 
 allocInBody :: In.Body -> AllocM Body
 allocInBody (Body _ bnds res) =
-  allocInBindings bnds [] $ \bnds' ->
+  allocInBindings bnds $ \bnds' ->
     return $ Body () bnds' res
 
-  where allocInBindings [] bnds' m =
+allocInBindings :: [In.Binding] -> ([Binding] -> AllocM a)
+                -> AllocM a
+allocInBindings origbnds m = allocInBindings' origbnds []
+  where allocInBindings' [] bnds' =
           m bnds'
-        allocInBindings (x:xs) bnds' m = do
+        allocInBindings' (x:xs) bnds' = do
           allocbnds <- allocInBinding' x
           let summaries =
                 bindeesSummary $
                 concatMap (patternBindees . bindingPattern) allocbnds
           local (`HM.union` summaries) $
-            allocInBindings xs (bnds'++allocbnds) m
-
+            allocInBindings' xs (bnds'++allocbnds)
         allocInBinding' bnd = do
           (bnd',bnds') <- collectBindings $ allocInBinding bnd
-          return $ bnds'<>[bnd']
+          return $ bnds' <> [bnd']
 
 allocInBinding :: In.Binding -> AllocM Binding
 allocInBinding (Let pat _ e) =
   mkLetM (patternIdents pat) =<< allocInExp e
 
+funcallSubExps :: [SubExp] -> AllocM [SubExp]
+funcallSubExps ses = map fst <$>
+                     funcallArgs [ (se, Observe) | se <- ses ]
+
 allocInExp :: In.Exp -> AllocM Exp
+allocInExp (LoopOp (DoLoop res merge i bound
+                    (Body () bodybnds bodyres) loc)) =
+  allocInFParams mergeparams $ \mergeparams' -> do
+    mergeinit' <- funcallSubExps mergeinit
+    body' <- insertBindingsM $ allocInBindings bodybnds $ \bodybnds' -> do
+      ses <- funcallSubExps $ resultSubExps bodyres
+      let res' = bodyres { resultSubExps = ses }
+      return $ Body () bodybnds' res'
+    return $ LoopOp $
+      DoLoop res (zip mergeparams' mergeinit') i bound body' loc
+  where (mergeparams, mergeinit) = unzip merge
 allocInExp (LoopOp (Map cs f arrs loc)) = do
   let size = arraysSize 0 $ map subExpType arrs
   is <- newIdent "is" (arrayOf (Basic Int) (Shape [size]) Nonunique) loc
@@ -248,6 +265,14 @@ allocInExp (LoopOp (Map cs f arrs loc)) = do
         f { lambdaParams = i : lambdaParams f
           }
   return $ LoopOp $ Map cs f' (Var is:arrs) loc
+allocInExp (LoopOp (Reduce {})) =
+  fail "Cannot put explicit allocations in reduce yet."
+allocInExp (LoopOp (Scan {})) =
+  fail "Cannot put explicit allocations in scan yet."
+allocInExp (LoopOp (Redomap {})) =
+  fail "Cannot put explicit allocations in redomap yet."
+allocInExp (LoopOp (Filter {})) =
+  fail "Cannot put explicit allocations in filter yet."
 allocInExp (Apply fname args rettype loc) = do
   args' <- funcallArgs args
   return $ Apply fname args' (memoryInResType rettype) loc
@@ -256,7 +281,7 @@ allocInExp e = mapExpM alloc e
                                , mapOnBody = allocInBody
                                , mapOnLambda = allocInLambda
                                , mapOnResType = return . memoryInResType
-                               , mapOnFParam = undefined
+                               , mapOnFParam = fail "Unhandled fparam in ExplicitAllocations"
                                }
 
 allocInLambda :: In.Lambda -> AllocM Lambda
