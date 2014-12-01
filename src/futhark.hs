@@ -4,49 +4,35 @@ module Main (main) where
 import Control.Monad
 import Control.Monad.Writer.Strict (runWriter)
 import Control.Monad.Error
-import Data.Array
-import Data.List
 import Data.Version
 import System.Console.GetOpt
 import System.Environment (getArgs, getProgName)
 import System.Exit (exitWith, exitSuccess, ExitCode(..))
 import System.IO
 
-import Text.Printf
-
-import Language.Futhark.Core
 import Language.Futhark.Parser
 import Futhark.Internalise
-import Futhark.Externalise
 import Futhark.Pipeline
 import Futhark.Passes
-import Futhark.Analysis.Alias
-import Futhark.ExplicitAllocations
+import Futhark.Actions
 
-import qualified Futhark.Representation.External as E
 import qualified Futhark.Representation.External.TypeChecker as E
 import qualified Futhark.Representation.External.Renamer as E
 
 import qualified Futhark.Representation.Basic as I
 import qualified Futhark.TypeCheck as I
 
-import Futhark.Interpreter
-import qualified Futhark.SOACFlowGraph as FG
-import qualified Futhark.CodeGen.ImpGen as ImpGen
-import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
--- import qualified Futhark.CodeGen.Backends.Bohrium as Bohrium
 import Futhark.Version
 
-newFutharkonfig :: Futharkonfig
-newFutharkonfig = Futharkonfig {
-                futharkpipeline = []
-              , futharkaction = printAction
-              , futharkcheckAliases = True
-              , futharkverbose = Nothing
-              , futharkboundsCheck = True
-              }
+newFutharkConfig :: FutharkConfig
+newFutharkConfig = FutharkConfig { futharkpipeline = []
+                                 , futharkaction = printAction
+                                 , futharkcheckAliases = True
+                                 , futharkverbose = Nothing
+                                 , futharkboundsCheck = True
+                                 }
 
-type FutharkOption = OptDescr (Either (IO ()) (Futharkonfig -> Futharkonfig))
+type FutharkOption = OptDescr (Either (IO ()) (FutharkConfig -> FutharkConfig))
 
 passoption :: String -> Pass -> String -> [String] -> FutharkOption
 passoption desc pass short long =
@@ -71,23 +57,17 @@ commandLineOptions =
   , Option [] ["compile-sequential"]
     (NoArg $ Right $ \opts -> opts { futharkaction = seqCodegenAction })
     "Translate program into sequential C and write it on standard output."
---  , Option [] ["compile-bohrium"]
---    (NoArg $ Right $ \opts -> opts { futharkaction = bohriumCodegenAction })
---    "Translate program into C using Bohrium and write it on standard output."
   , Option [] ["generate-flow-graph"]
     (NoArg $ Right $ \opts -> opts { futharkaction = flowGraphAction })
     "Print the SOAC flow graph of the final program."
   , Option [] ["compile-imperative"]
-    (NoArg $ Right $ \opts -> opts { futharkaction = impCodegenAction })
+    (NoArg $ Right $ \opts -> opts { futharkaction = impCodeGenAction })
     "Translate program into the imperative IL and write it on standard output."
   , Option "p" ["print"]
     (NoArg $ Right $ \opts -> opts { futharkaction = printAction })
     "Prettyprint the resulting internal representation on standard output (default action)."
-  , Option "a" ["print-alloced"]
-    (NoArg $ Right $ \opts -> opts { futharkaction = printAllocedAction })
-    "Prettyprint with explicit allocations on standard output."
   , Option "i" ["interpret"]
-    (NoArg $ Right $ \opts -> opts { futharkaction = interpretAction })
+    (NoArg $ Right $ \opts -> opts { futharkaction = interpretAction' })
     "Run the program via an interpreter."
   , Option [] ["externalise"]
     (NoArg $ Right $ \opts -> opts { futharkaction = externaliseAction})
@@ -99,6 +79,8 @@ commandLineOptions =
     "u" ["untrace"]
   , passoption "Transform all second-order array combinators to for-loops." fotransform
     "f" ["first-order-transform"]
+  , passoption "Transform program to explicit memory representation" explicitMemory
+    "a" ["explicit-allocations"]
   , passoption "Perform simple enabling optimisations." eotransform
     "e" ["enabling-optimisations"]
   , passoption "Perform higher-order optimisation, i.e., fusion." hotransform
@@ -116,60 +98,11 @@ commandLineOptions =
     "Use the recommended optimised pipeline."
   ]
 
-printAction :: Action
-printAction = ("prettyprinter", putStrLn . I.pretty . aliasAnalysis)
-
-printAllocedAction :: Action
-printAllocedAction = ("prettyprinter", act)
-  where act prog =
-          let prog' = explicitAllocations prog in
-          case I.checkProg prog' of
-            Left err    -> error $ "Type error with explicit allocations:\n" ++ show err ++ "\n" ++ I.pretty prog'
-            Right prog'' -> putStrLn $ I.pretty prog''
-
-externaliseAction :: Action
-externaliseAction = ("externalise", putStrLn . E.prettyPrint . externaliseProg)
-
-interpretAction :: Action
-interpretAction = ("interpreter", interpret)
-
-seqCodegenAction :: Action
-seqCodegenAction = ("sequential code generator", putStrLn . SequentialC.compileProg . explicitAllocations)
-
-impCodegenAction :: Action
-impCodegenAction = ("imperative code generator", putStrLn . I.pretty . ImpGen.compileProgSimply . explicitAllocations)
-
-flowGraphAction :: Action
-flowGraphAction = ("SOAC flow graph", putStrLn . FG.makeFlowGraphString)
-
-interpret :: I.Prog -> IO ()
-interpret prog =
-  case I.funDecByName I.defaultEntryPoint prog of
-    Nothing -> do hPutStrLn stderr "Interpreter error: no main function."
-                  exitWith $ ExitFailure 2
-    Just _ -> do
-      parseres <- liftM (parseValues "<stdin>") getContents
-      args <- case parseres of Left e -> do hPutStrLn stderr $ "Read error: " ++ show e
-                                            exitWith $ ExitFailure 2
-                               Right vs -> return vs
-      let (res, trace) = runFun I.defaultEntryPoint (internaliseParamValues args) prog
-      forM_ trace $ \(loc, what) ->
-        hPutStrLn stderr $ locStr loc ++ ": " ++ what
-      case res of
-        Left err -> do hPutStrLn stderr $ "Interpreter error:\n" ++ show err
-                       exitWith $ ExitFailure 2
-        Right val  -> putStrLn $ ppOutput val
-  where ppOutput [v] = ppOutput' v
-        ppOutput vs = "{" ++ intercalate ", " (map ppOutput' vs) ++ "}"
-        ppOutput' val | Just s <- I.arrayString val = s
-        ppOutput' (I.BasicVal (I.RealVal x)) = printf "%.6f" x
-        ppOutput' (I.BasicVal (I.IntVal x))  = show x
-        ppOutput' (I.BasicVal (I.CharVal c)) = show c
-        ppOutput' (I.BasicVal (I.LogVal b))  = show b
-        ppOutput' (I.BasicVal I.Checked) = "Checked"
-        ppOutput' (I.ArrayVal a t)
-          | [] <- elems a = "empty(" ++ I.pretty t ++ ")"
-          | otherwise     = "[" ++ intercalate ", " (map ppOutput' $ elems a) ++ "]"
+interpretAction' :: Action
+interpretAction' = interpretAction parseValues'
+  where parseValues' :: FilePath -> String -> Either ParseError [I.Value]
+        parseValues' path s =
+          liftM internaliseParamValues $ parseValues path s
 
 standardPipeline :: [Pass]
 standardPipeline =
@@ -194,14 +127,13 @@ main = do args <- getArgs
                 Left m     -> m
             (_, nonopts, unrecs, errs) -> invalid nonopts unrecs errs
 
-  where applyOpts :: [Either (IO ()) (Futharkonfig -> Futharkonfig)]
-                  -> Either (IO ()) Futharkonfig
+  where applyOpts :: [Either (IO ()) (FutharkConfig -> FutharkConfig)]
+                  -> Either (IO ()) FutharkConfig
         applyOpts opts = do fs <- sequence opts
-                            return $ foldl (.) id fs newFutharkonfig
+                            return $ foldl (.) id fs newFutharkConfig
 
         invalid nonopts unrecs errs = do usage <- usageStr commandLineOptions
                                          badOptions usage nonopts errs unrecs
-
 
 usageStr :: [OptDescr a] -> IO String
 usageStr opts = do
@@ -220,7 +152,7 @@ badOptions usage nonopts errs unrecs = do
 errput :: MonadIO m => String -> m ()
 errput = liftIO . hPutStrLn stderr
 
-compiler :: Futharkonfig -> FilePath -> IO ()
+compiler :: FutharkConfig -> FilePath -> IO ()
 compiler config file = do
   contents <- readFile file
   let (msgs, res) = futharkc config file contents
@@ -228,27 +160,28 @@ compiler config file = do
   case res of
     Left err -> do
       hPutStrLn stderr $ errorDesc err
-      case (errorProg err, futharkverbose config) of
-        (Just prog, Just outfile) ->
+      case (errorState err, futharkverbose config) of
+        (Just s, Just outfile) ->
           maybe (hPutStr stderr) writeFile outfile $
-            I.pretty (aliasAnalysis prog) ++ "\n"
+            I.pretty s ++ "\n"
         _ -> return ()
       exitWith $ ExitFailure 2
-    Right prog -> do
-      let (actiondesc, action) = futharkaction config
+    Right s -> do
+      let action = futharkaction config
       when (verbose config) $
-        hPutStrLn stderr $ "Running " ++ actiondesc ++ "."
-      action prog
+        hPutStrLn stderr $ "Running " ++ actionDescription action ++ "."
+      applyAction action s
 
 typeCheck :: (prog -> Either err prog')
           -> (prog -> Either err prog')
-          -> Futharkonfig
+          -> FutharkConfig
           -> prog -> Either err prog'
 typeCheck checkProg checkProgNoUniqueness config
   | futharkcheckAliases config = checkProg
   | otherwise                  = checkProgNoUniqueness
 
-futharkc :: Futharkonfig -> FilePath -> String -> (String, Either CompileError I.Prog)
+futharkc :: FutharkConfig -> FilePath -> String
+         -> (String, Either CompileError PipelineState)
 futharkc config filename srccode =
   case runWriter (runErrorT futharkc') of
     (Left err, msgs) -> (msgs, Left err)
@@ -259,7 +192,7 @@ futharkc config filename srccode =
                          typeCheck E.checkProg E.checkProgNoUniqueness config
                          parsed_prog
           let int_prog = internaliseProg (futharkboundsCheck config) $ E.tagProg ext_prog
-          int_prog_checked <- canFail "After internalisation:\n" (Just int_prog)
-                              (typeCheck I.checkProg I.checkProgNoUniqueness config
-                              int_prog >> return int_prog)
-          runPasses config int_prog_checked
+          _ <-
+            canFail "After internalisation:\n" (Just $ Basic int_prog)
+            (typeCheck I.checkProg I.checkProgNoUniqueness config int_prog)
+          runPasses config $ Basic int_prog

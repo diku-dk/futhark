@@ -35,7 +35,8 @@ Library
                  monomorphic >= 0.0.3,
                  equational-reasoning >= 0.0.2
 
-  Exposed-modules: Futhark.Analysis.AlgSimplify
+  Exposed-modules: Futhark.Actions
+                   Futhark.Analysis.AlgSimplify
                    Futhark.Analysis.Alias
                    Futhark.Analysis.CallGraph
                    Futhark.Analysis.DataDependencies

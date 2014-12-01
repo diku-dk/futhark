@@ -12,6 +12,7 @@ module Futhark.Passes
   , removeDeadFunctions
   , optimisePredicates
   , optimiseShapes
+  , explicitMemory
   )
 where
 
@@ -23,43 +24,42 @@ import Futhark.Pipeline
 import Futhark.Optimise.InliningDeadFun
 import qualified Futhark.Optimise.SuffCond
 import qualified Futhark.Optimise.SplitShapes
+import qualified Futhark.ExplicitAllocations
 
 fotransform :: Pass
-fotransform = Pass { passName = "first-order transform"
-                   , passOp = return . FOT.transformProg
-                   }
+fotransform = unfailableBasicPass "first-order transform"
+              FOT.transformProg
 
 uttransform :: Pass
-uttransform = Pass { passName = "debugging annotation removal"
-                   , passOp = return . untraceProg
-                   }
+uttransform = unfailableBasicPass "debugging annotation removal"
+              untraceProg
 
 eotransform :: Pass
-eotransform = Pass { passName = "enabling optimations"
-                   , passOp = liftPass simpleOpts
-                   }
+eotransform = basicPass "enabling optimations"
+              simpleOpts
 
 hotransform :: Pass
-hotransform = Pass { passName = "higher-order optimisations"
-                   , passOp = liftPass fuseProg
-                   }
+hotransform = basicPass "higher-order optimisations"
+              fuseProg
 
 inlinetransform :: Pass
-inlinetransform = Pass { passName = "inline functions"
-                       , passOp = liftPass aggInlineDriver
-                       }
+inlinetransform = basicPass "inline functions"
+                  aggInlineDriver
 
 removeDeadFunctions :: Pass
-removeDeadFunctions = Pass { passName = "Remove dead functions"
-                           , passOp = liftPass deadFunElim
-                           }
+removeDeadFunctions = basicPass "Remove dead functions"
+                      deadFunElim
 
 optimisePredicates :: Pass
-optimisePredicates = Pass { passName = "optimise predicates"
-                          , passOp = return . Futhark.Optimise.SuffCond.optimiseProg
-                          }
+optimisePredicates = unfailableBasicPass "optimise predicates"
+                     Futhark.Optimise.SuffCond.optimiseProg
 
 optimiseShapes :: Pass
-optimiseShapes = Pass { passName = "optimise shape analysis"
-                      , passOp = return . Futhark.Optimise.SplitShapes.splitShapes
-                      }
+optimiseShapes = unfailableBasicPass "optimise shape analysis"
+                 Futhark.Optimise.SplitShapes.splitShapes
+
+explicitMemory :: Pass
+explicitMemory = polyPass "insert explicit allocations" op
+  where op s = do prog <- basicProg s
+                  return $ ExplicitMemory $
+                    Futhark.ExplicitAllocations.explicitAllocations prog
