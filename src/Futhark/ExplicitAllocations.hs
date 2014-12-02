@@ -35,7 +35,7 @@ instance MonadFreshNames AllocM where
 
 instance BindableM AllocM where
   type Lore AllocM = ExplicitMemory
-
+{-
   mkLetM [v] e@(PrimOp (Rearrange _ perm (Var orig) _)) = do
     res <- lookupSummary orig
     case res of
@@ -44,7 +44,7 @@ instance BindableM AllocM where
             pat' = Pattern [Bindee v $ MemSummary m ixfun]
         return $ Let pat' () e
       _ -> basicMkLetM [v] e
-
+-}
   mkLetM pat e = basicMkLetM pat e
 
   mkBodyM bnds res = return $ Body () bnds res
