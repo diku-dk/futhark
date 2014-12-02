@@ -610,7 +610,7 @@ simplifyIndexing look (Index cs idd inds loc) =
       | [_] <- inds -> Just $ SubExp val
 
     Just (Rearrange cs2 perm (Var src) _)
-       | permuteReach perm < length inds ->
+       | permuteReach perm <= length inds ->
          let inds' = permuteShape (take (length inds) perm) inds
          in Just $ Index (cs++cs2) src inds' loc
 
