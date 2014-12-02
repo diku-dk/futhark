@@ -68,7 +68,10 @@ newtype Destination = Destination [ValueDestination]
 
 data ValueDestination = ScalarDestination VName
                       | MemoryDestination VName (Maybe VName)
-                      | ArrayDestination (Maybe VName) (Maybe VName) [Maybe VName]
+                      | ArrayDestination ArrayMemoryDestination [Maybe VName]
+
+data ArrayMemoryDestination = SetMemory VName (Maybe VName)
+                            | CopyIntoMemory VName
 
 data Env op = Env {
     envVtable :: HM.HashMap VName VarEntry
@@ -164,20 +167,20 @@ compileOutParams (ResType ts) = do
           tell [Imp.ScalarParam out t]
           return (Imp.ScalarValue t out, ScalarDestination out)
         mkParam (Array t shape _, lore) = do
-          (memout, destmemout, destmemsize) <- case lore of
+          (memout, memdest) <- case lore of
             ReturnsNewBlock x -> do
               memout <- imp $ newVName "out_mem"
               (sizeout, destmemsize) <- ensureMemSizeOut x
               tell [Imp.MemParam memout $ Imp.VarSize sizeout]
-              return (memout, Just memout, destmemsize)
+              return (memout, SetMemory memout destmemsize)
             ReturnsInBlock memout ->
-              return (identName memout, Nothing, Nothing)
+              return (identName memout, CopyIntoMemory $ identName memout)
             _ ->
               fail $ "Nonsensical lore for array return: " ++ show lore
           (resultshape, destresultshape) <-
             mapAndUnzipM inspectExtDimSize $ extShapeDims shape
           return (Imp.ArrayValue memout t resultshape,
-                  ArrayDestination destmemout destmemsize destresultshape)
+                  ArrayDestination memdest destresultshape)
 
         mkParam (Mem _, _) =
           fail "Functions are not allowed to explicitly return memory blocks!"
@@ -247,15 +250,20 @@ compileResultSubExp (MemoryDestination mem memsizetarget) (Var v) = do
   where vname = identName v
 compileResultSubExp (MemoryDestination {}) (Constant {}) =
   fail "Memory destination result subexpression cannot be a constant."
-compileResultSubExp (ArrayDestination mem memsize shape) (Var v) = do
+compileResultSubExp (ArrayDestination memdest shape) (Var v) = do
   arr <- lookupArray $ identName v
-  let MemLocation arrmem _ = entryArrayLocation arr
+  let MemLocation arrmem arroffset = entryArrayLocation arr
   arrmemsize <- entryMemSize <$> lookupMemory arrmem
-  case mem of Nothing   -> return ()
-              Just mem' -> tell $ Imp.SetMem mem' arrmem
-  case memsize of Nothing -> return ()
-                  Just memsize' -> tell $ Imp.SetScalar memsize' $
-                                   dimSizeToExp arrmemsize
+  case memdest of
+    CopyIntoMemory mem -> when (mem /= arrmem) $ tell $
+      Imp.Copy mem (Imp.Constant $ IntVal 0)
+               arrmem (dimSizeToExp arroffset) $
+               dimSizeToExp arrmemsize
+    SetMemory mem memsize -> do
+      tell $ Imp.SetMem mem arrmem
+      case memsize of Nothing -> return ()
+                      Just memsize' -> tell $ Imp.SetScalar memsize' $
+                                       dimSizeToExp arrmemsize
   zipWithM_ maybeSetShape shape $ entryArrayShape arr
   where maybeSetShape Nothing _ =
           return ()
@@ -329,11 +337,9 @@ defCompilePrimOp [target] (Index _ src idxs _) = do
   MemLocation destmem destoffset <- arrayLocation target
   (srcmem, srcoffset, size) <- indexArray (identName src) $ map compileSubExp idxs
   tell $ Imp.Copy
-    destmem (multElSize $ dimSizeToExp destoffset)
-    srcmem (multElSize srcoffset)
-    (multElSize size)
-  where et = elemType $ identType src
-        multElSize = impTimes (Imp.SizeOf et)
+    destmem (dimSizeToExp destoffset)
+    srcmem (srcoffset `impTimes` Imp.SizeOf (elemType (identType src)))
+    size
 
 defCompilePrimOp [_] (Conjoin {}) =
   return ()
@@ -348,8 +354,7 @@ defCompilePrimOp [target] (Update _ src idxs val _) = do
     tell $ Imp.Copy
       destmem (dimSizeToExp destoffset)
       srcmem (dimSizeToExp srcoffset) $
-      foldl impTimes (Imp.SizeOf $ elemType srct) $
-      map dimSizeToExp $ entryArrayShape srcentry
+      arrayByteSizeExp srcentry
   if length idxs == arrayRank srct then
     tell $ Imp.Write destmem elemoffset (elemType srct) $ compileSubExp val
     else case val of
@@ -358,9 +363,9 @@ defCompilePrimOp [target] (Update _ src idxs val _) = do
       valentry <- lookupArray $ identName v
       let MemLocation valmem valoffset = entryArrayLocation valentry
       tell $ Imp.Copy
-        destmem elemoffset
-        valmem (dimSizeToExp valoffset) $
-        arrayByteSizeExp valentry
+        destmem (elemoffset `impTimes` Imp.SizeOf (elemType srct))
+        valmem (dimSizeToExp valoffset)
+        size
   where srct = identType src
 
 defCompilePrimOp [target] (Replicate n se _) = do
@@ -413,7 +418,7 @@ defCompilePrimOp [target] (Concat _ (Var x) (Var y) _ _) = do
     xmem (dimSizeToExp xoffset) $
     arrayByteSizeExp xentry
   tell $ Imp.Copy
-    destmem (Imp.BinOp Plus (dimSizeToExp destoffset) $
+    destmem (dimSizeToExp destoffset `impPlus`
              arrayByteSizeExp xentry)
     ymem (dimSizeToExp yoffset) $
     arrayByteSizeExp yentry
@@ -663,10 +668,11 @@ destinationFromTargets targets (ResType ts) =
                     | isctx v   = Just v
                     | otherwise = Nothing
               memsize <- entryMemSize <$> lookupMemory mem
-              let mem' = if isctx mem then Just mem else Nothing
-                  memsize' = nullifyFreeDim memsize
-                  shape' = map nullifyFreeDim shape
-              return $ ArrayDestination mem' memsize' shape'
+              let shape' = map nullifyFreeDim shape
+                  memdest
+                    | isctx mem = SetMemory mem $ nullifyFreeDim memsize
+                    | otherwise = CopyIntoMemory mem
+              return $ ArrayDestination memdest shape'
             Just (MemVar (MemEntry memsize))
               | Imp.VarSize memsize' <- memsize, isctx memsize' ->
                 return $ MemoryDestination name $ Just memsize'
@@ -686,7 +692,9 @@ indexArray name indices = do
       MemLocation arrmem arroffset = entryArrayLocation entry
   return (arrmem,
           impPlus (dimSizeToExp arroffset) ixoffset,
-          expProduct $ drop (length indices) arrshape)
+          expProduct $
+            Imp.SizeOf (entryArrayElemType entry) :
+            drop (length indices) arrshape)
 
 impTimes :: Imp.Exp -> Imp.Exp -> Imp.Exp
 impTimes (Imp.Constant (IntVal 1)) e = e
