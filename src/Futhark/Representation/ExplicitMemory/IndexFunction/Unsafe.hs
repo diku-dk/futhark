@@ -24,6 +24,8 @@ import Data.Type.Ordinal
 import Data.Vector.Sized hiding (index, map, unsafeFromInt)
 import Proof.Equational
 
+import Text.PrettyPrint.Mainland
+
 import Futhark.Analysis.ScalExp
 import Futhark.Representation.AST.Syntax (SubExp(..))
 import Futhark.Util.Truths
@@ -38,6 +40,9 @@ data IxFun = forall n . IxFun (SNat (S n)) (Safe.IxFun (S n))
 
 instance Show IxFun where
   show (IxFun _ fun) = show fun
+
+instance Pretty IxFun where
+  ppr (IxFun _ fun) = ppr fun
 
 type Indices = [ScalExp]
 type Shape   = [ScalExp]

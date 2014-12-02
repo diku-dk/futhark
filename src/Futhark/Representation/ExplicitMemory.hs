@@ -361,6 +361,6 @@ bindeeAnnotation bindee =
       PP.text "@" <>
       PP.ppr (identName ident) <>
       PP.text "->" <>
-      PP.text (show fun)
+      PP.ppr fun
     Scalar ->
       Nothing

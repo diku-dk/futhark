@@ -15,9 +15,9 @@ module Futhark.Representation.ExplicitMemory.Permutation
        )
        where
 
-
 import Data.Type.Natural
 import Data.Vector.Sized
+import Text.PrettyPrint.Mainland
 
 -- | The value 'i :<->: j' represents the action of swapping the
 -- elements at index 'i' and 'i'.
@@ -50,6 +50,13 @@ infixr 4 :>>:
 instance Show (Permutation n) where
   show Identity = "Identity"
   show (s :>>: perm) = show s ++ " :>>: " ++ show perm
+
+instance Pretty (Permutation n) where
+  ppr origperm = text "<" <> commasep (ppr' origperm) <> text ">"
+    where ppr' (swap :>>: perm') =
+            text (show swap) : ppr' perm'
+          ppr' Identity =
+            []
 
 -- | Apply a permutation to a vector, yielding a new vector.
 apply :: forall a n.Permutation n -> Vector a n -> Vector a n

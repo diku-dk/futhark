@@ -27,6 +27,8 @@ import qualified Futhark.Representation.ExplicitMemory.Permutation as Perm
 import Futhark.Representation.ExplicitMemory.SymSet (SymSet)
 import Futhark.Representation.AST.Attributes.Names
 
+import Text.PrettyPrint.Mainland
+
 type Shape = Vector ScalExp
 type Indices = Vector ScalExp
 
@@ -41,6 +43,12 @@ instance Show (IxFun n) where
   show (Offset fun k) = "Offset (" ++ show fun ++ ", " ++ show k ++ ")"
   show (Permute fun perm) = "Permute (" ++ show fun ++ ", " ++ show perm ++ ")"
   show (Index fun is) = "Index (" ++ show fun ++ ", " ++ show is ++ ")"
+
+instance Pretty (IxFun n) where
+  ppr (Direct _) = text "0"
+  ppr (Offset fun k) = ppr fun <+> text "+" <+> ppr k
+  ppr (Permute fun perm) = ppr fun <> ppr perm
+  ppr (Index fun is) = ppr fun <> brackets (commasep $ map ppr $ Vec.toList is)
 
 index :: forall (n::Nat).
          IxFun (S n) -> Indices (S n) -> ScalExp
