@@ -176,12 +176,13 @@ printStm (ScalarValue bt name) =
   return $ printBasicStm (C.var name) bt
 printStm (ArrayValue mem bt []) =
   return $ printBasicStm val bt
-  where val = [C.cexp|*($ty:bt'*) $id:mem|]
+  where val = [C.cexp|*$id:mem|]
         bt' = valueTypeToCType $ Scalar bt
 printStm (ArrayValue mem bt (dim:shape)) = do
   i <- newVName "print_i"
   v <- newVName "print_elem"
   let dim' = dimSizeToExp dim
+      shape' = C.product $ map dimSizeToExp shape
       bt'  = valueTypeToCType $ Scalar bt
   printelem <- printStm $ ArrayValue v bt shape
   return [C.cstm|{
@@ -191,7 +192,7 @@ printStm (ArrayValue mem bt (dim:shape)) = do
                    int $id:i;
                    putchar('[');
                    for ($id:i = 0; $id:i < $exp:dim'; $id:i++) {
-                           unsigned char *$id:v = $id:mem + $id:i * sizeof($ty:bt');
+                           $ty:bt' *$id:v = (($ty:bt'*) $id:mem) + $id:i * $exp:shape';
                            $stm:printelem
                            if ($id:i != $exp:dim'-1) {
                              printf(", ");
