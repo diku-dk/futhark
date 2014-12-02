@@ -352,14 +352,33 @@ defCompilePrimOp [target] (Update _ src idxs val _) = do
       map dimSizeToExp $ entryArrayShape srcentry
   if length idxs == arrayRank srct then
     tell $ Imp.Write destmem elemoffset (elemType srct) $ compileSubExp val
-    else fail "Update can only write scalars so far."
+    else case val of
+    Constant {} -> fail "Array-value in update cannot be constant."
+    Var v -> do
+      valentry <- lookupArray $ identName v
+      let MemLocation valmem valoffset = entryArrayLocation valentry
+      tell $ Imp.Copy
+        destmem elemoffset
+        valmem (dimSizeToExp valoffset) $
+        arrayByteSizeExp valentry
   where srct = identType src
 
-defCompilePrimOp [target] (Replicate n v _) = do
+defCompilePrimOp [target] (Replicate n se _) = do
   i <- newVName "i"
-  (targetmem, elemoffset, _) <- indexArray target [Imp.ScalarVar i]
-  tell $ Imp.For i (compileSubExp n) $
-    Imp.Write targetmem elemoffset Int $ compileSubExp v
+  (targetmem, elemoffset, rowsize) <- indexArray target [Imp.ScalarVar i]
+  if basicType $ subExpType se then
+    tell $ Imp.For i (compileSubExp n) $
+    Imp.Write targetmem elemoffset Int $ compileSubExp se
+    else case se of
+    Constant {} ->
+      fail "Array value in replicate cannot be constant."
+    Var v -> do
+      MemLocation vmem voffset <- arrayLocation $ identName v
+      tell $ Imp.For i (compileSubExp n) $
+        Imp.Copy
+        targetmem elemoffset
+        vmem (dimSizeToExp voffset)
+        rowsize
 
 defCompilePrimOp [target] (Iota n _) = do
   i <- newVName "i"
