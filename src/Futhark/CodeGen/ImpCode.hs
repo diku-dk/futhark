@@ -128,7 +128,7 @@ instance Pretty (Code op) where
   ppr (DeclareScalar name t) =
     text "declare" <+> ppr name <+> text "as scalar of type" <+> ppr t
   ppr (Allocate name e) =
-    text "allocate" <> parens (ppr name <> comma <+> ppr e)
+    ppr name <+> text "<-" <+> text "malloc" <> parens (ppr e)
   ppr (Write name i bt val) =
     ppr name <> langle <> ppr bt <> rangle <> brackets (ppr i) <+>
     text "<-" <+> ppr val
