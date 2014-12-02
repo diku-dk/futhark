@@ -168,11 +168,11 @@ eValue :: MonadBinder m => Value -> SrcLoc -> m (Exp (Lore m))
 eValue (BasicVal bv) loc =
   return $ PrimOp $ SubExp $ Constant bv loc
 eValue (ArrayVal a t) loc = do
-  let fullshape = [ Constant (IntVal d) loc
-                  | d <- valueShape (ArrayVal a t)
-                  ]
+  let rowshape = [ Constant (IntVal d) loc
+                 | d <- drop 1 $ valueShape (ArrayVal a t)
+                 ]
   ses <- mapM (letSubExp "array_elem" <=< (`eValue` loc)) $ A.elems a
-  return $ PrimOp $ ArrayLit ses (t `setArrayDims` fullshape) loc
+  return $ PrimOp $ ArrayLit ses (t `setArrayDims` rowshape) loc
 
 eBody :: (MonadBinder m) =>
          [m (Exp (Lore m))]
