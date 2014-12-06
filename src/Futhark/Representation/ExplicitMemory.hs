@@ -212,7 +212,7 @@ instance TypeCheck.Checkable ExplicitMemory where
                     "Pattern\n" ++ pretty pat ++ "\ncannot match result type\n" ++
                     pretty rt ++ ":\n" ++ s
           mustBeEmpty _ [] = return ()
-          mustBeEmpty s  _ = wrong $ "unused " ++ s ++ "bindees"
+          mustBeEmpty s  _ = wrong $ "unused " ++ s ++ " bindees"
           checkMems memsizes mems =
             mustBeEmpty "memory block size" =<<
             execStateT (mapM_ checkMem mems) memsizes
