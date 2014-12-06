@@ -53,7 +53,7 @@ basicMkLetM :: [Ident]
             -> Exp
             -> AllocM Binding
 basicMkLetM pat e = do
-  pat' <- Pattern <$> allocsForPattern pat
+  pat' <- Pattern <$> allocsForPattern pat (typeOf e)
   return $ Let pat' () e
 
 allocForArray :: Type -> SrcLoc -> AllocM (SubExp, Ident)
@@ -65,26 +65,32 @@ allocForArray t loc = do
   m <- letExp "mem" $ PrimOp $ Alloc size loc
   return (size, m)
 
-allocsForPattern :: [Ident] -> AllocM [Bindee MemSummary]
-allocsForPattern pat = do
-  (vals,(memsizes,mems)) <- runWriterT $ forM pat $ \ident ->
+allocsForPattern :: [Ident] -> ResType -> AllocM [Bindee MemSummary]
+allocsForPattern pat (ResType ts) = do
+  let (ctxpat,valpat) = splitAt (length pat - length ts) pat
+      ctxpat' = [ Bindee ident Scalar | ident <- ctxpat ]
+  (vals,(memsizes,mems)) <- runWriterT $ forM (zip valpat ts) $ \(ident, (t, memret)) ->
     let loc = srclocOf ident in
-    case identType ident of
-      Mem _    -> return $ Bindee ident Scalar
-      Basic _  -> return $ Bindee ident Scalar
-      t@(Array {})
-        | ext t     -> do
-          (memsize,mem,ident') <- lift $ memForBindee ident
-          tell ([memsize], [mem])
-          return ident'
-        | otherwise -> do
-          (_, m) <- lift $ allocForArray (identType ident) loc
-          return $ Bindee ident $ directIndexFunction m t
-  return $ memsizes <> mems <> vals
+    case memret of
+      ReturnsScalar -> return $ Bindee ident Scalar
+      ReturnsInBlock mem ->
+        return $ Bindee ident $ directIndexFunction mem $ identType ident
+      ReturnsInAnyBlock
+        | Just shape <- knownShape $ arrayShape t-> do
+        (_, m) <- lift $ allocForArray (identType ident `setArrayShape` Shape shape) loc
+        return $ Bindee ident $ directIndexFunction m $ identType ident
+      _ -> do
+        (memsize,mem,ident') <- lift $ memForBindee ident
+        tell ([memsize], [mem])
+        return ident'
+  return $ memsizes <> mems <> ctxpat' <> vals
   where boundHere = map identName pat
         isBoundHere (Constant {}) = False
         isBoundHere (Var v) = identName v `elem` boundHere
         ext = any isBoundHere . arrayDims
+        knownShape = mapM known . extShapeDims
+        known (Free v) = Just v
+        known (Ext {}) = Nothing
 
 memForBindee :: (MonadFreshNames m) =>
                 Ident
