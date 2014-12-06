@@ -509,10 +509,11 @@ defCompilePrimOp [target] (Rotate _ n e _) = do
          Imp.Read e' [var i]
   where et = subExpType e
 
-defCompilePrimOp [] _ = return () -- No arms, no cake.
-
 defCompilePrimOp (_:_:_) _ = fail "ImpGen.compilePrimOp: Incorrect number of targets"
 -}
+
+defCompilePrimOp [] _ = return () -- No arms, no cake.
+
 defCompileLoopOp :: [VName] -> LoopOp -> ImpM op ()
 
 defCompileLoopOp targets (DoLoop res merge i bound body _) =
