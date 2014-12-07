@@ -277,7 +277,9 @@ readInputs inputparams = map $ readInput memsizes
   where memsizes = sizeVars inputparams
 
 printResult :: [ValueDecl] -> CompilerM op [C.Stm]
-printResult = mapM printStm
+printResult vs = liftM concat $ forM vs $ \v -> do
+  p <- printStm v
+  return [p, [C.cstm|printf("\n");|]]
 
 unpackResults :: VName -> [Param] -> [C.Stm]
 unpackResults ret [ScalarParam name _] =
@@ -305,7 +307,6 @@ mainCall fname (Function outputs inputs _ results args) = do
                $id:ret = $id:(funName fname)($args:argexps);
                $stms:unpackstms
                $stms:printstms
-               printf("\n");
              }|]
   where paramDecl (MemParam name _) =
           [C.cdecl|unsigned char* $id:name;|]
