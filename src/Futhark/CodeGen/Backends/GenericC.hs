@@ -177,7 +177,6 @@ printStm (ScalarValue bt name) =
 printStm (ArrayValue mem bt []) =
   return $ printBasicStm val bt
   where val = [C.cexp|*$id:mem|]
-        bt' = valueTypeToCType $ Scalar bt
 printStm (ArrayValue mem bt (dim:shape)) = do
   i <- newVName "print_i"
   v <- newVName "print_elem"
