@@ -71,8 +71,7 @@ interpret parseValues prog =
         Left err -> do hPutStrLn stderr $ "Interpreter error:\n" ++ show err
                        exitWith $ ExitFailure 2
         Right val  -> putStrLn $ ppOutput val
-  where ppOutput [v] = ppOutput' v
-        ppOutput vs = "{" ++ intercalate ", " (map ppOutput' vs) ++ "}"
+  where ppOutput vs = intercalate "\n" $ map ppOutput' vs
         ppOutput' val | Just s <- arrayString val = s
         ppOutput' (BasicVal (RealVal x)) = printf "%.6f" x
         ppOutput' (BasicVal (IntVal x))  = show x
