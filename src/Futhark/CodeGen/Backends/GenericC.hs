@@ -219,12 +219,8 @@ printStm place [t@(Type bt (_:rest))] = do
 printStm place ets = do
   prints <- forM (zip [(0::Int)..] ets) $ \(i, et) ->
               printStm [C.cexp|$exp:place.$id:(tupleField i)|] [et]
-  let prints' = intercalate [[C.cstm|{putchar(','); putchar(' ');}|]] $ map (:[]) prints
-  return [C.cstm|{
-               putchar('{');
-               $stms:prints'
-               putchar('}');
-             }|]
+  let prints' = intercalate [[C.cstm|{putchar('\n');}|]] $ map (:[]) prints
+  return [C.cstm|{$stms:prints'}|]
 
 readFun :: BasicType -> Maybe String
 readFun Int  = Just "read_int"

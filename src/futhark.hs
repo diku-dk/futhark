@@ -150,8 +150,7 @@ interpret prog =
         Left err -> do hPutStrLn stderr $ "Interpreter error:\n" ++ show err
                        exitWith $ ExitFailure 2
         Right val  -> putStrLn $ ppOutput val
-  where ppOutput [v] = ppOutput' v
-        ppOutput vs = "{" ++ intercalate ", " (map ppOutput' vs) ++ "}"
+  where ppOutput vs = intercalate "\n" (map ppOutput' vs)
         ppOutput' val | Just s <- I.arrayString val = s
         ppOutput' (I.BasicVal (I.RealVal x)) = printf "%.6f" x
         ppOutput' (I.BasicVal (I.IntVal x))  = show x
