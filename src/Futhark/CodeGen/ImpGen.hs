@@ -625,10 +625,11 @@ compileSubExpTo target (Var v)
   | not (basicType $ identType v) = do
     MemLocation targetmem targetoffset <- arrayLocation target
     MemLocation srcmem srcoffset <- arrayLocation $ identName v
-    when (targetoffset /= srcoffset) $
-      fail $ "Mismatching offsets when compiling subexp " ++ pretty (identName v) ++
-      " to " ++ pretty target
-    tell $ Imp.SetMem targetmem srcmem
+    if targetmem == srcmem then
+       unless (targetoffset /= srcoffset) $
+         fail $ "Mismatching offsets when compiling subexp " ++ pretty (identName v) ++
+         " to " ++ pretty target
+      else defCompilePrimOp [target] $ Copy (Var v) $ identSrcLoc v
 compileSubExpTo target se =
   writeExp target $ compileSubExp se
 
