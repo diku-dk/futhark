@@ -231,6 +231,8 @@ readBasicStm place t
           fprintf(stderr, "Syntax error when reading %s.\n", $string:(prettyPrint t));
                  exit(1);
         }|]
+readBasicStm _ Cert =
+  [C.cstm|;|]
 readBasicStm _ t =
   [C.cstm|{
         fprintf(stderr, "Cannot read %s.\n", $string:(prettyPrint t));
