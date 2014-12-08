@@ -417,6 +417,24 @@ defCompilePrimOp [target] (Copy (Var src) _)
       arrayByteSizeExp srcentry
   where srct = identType src
 
+defCompilePrimOp [target1, target2] (Split _ n (Var src) restsize _) = do
+  srcentry <- lookupArray $ identName src
+  let MemLocation srcmem srcoffset = entryArrayLocation srcentry
+  MemLocation target1mem target1offset <- arrayLocation target1
+  MemLocation target2mem target2offset <- arrayLocation target2
+  let n' = compileSubExp n
+      rowsize = arrayRowByteSizeExp srcentry
+      restsize' = compileSubExp restsize
+  tell $ Imp.Copy
+    target1mem (dimSizeToExp target1offset)
+    srcmem (dimSizeToExp srcoffset) $
+    rowsize `impTimes` n'
+  tell $ Imp.Copy
+    target2mem (dimSizeToExp target2offset)
+    srcmem (dimSizeToExp srcoffset `impPlus`
+            (rowsize `impTimes` n')) $
+    rowsize `impTimes` restsize'
+
 defCompilePrimOp [target] (Concat _ (Var x) (Var y) _ _) = do
   xentry <- lookupArray $ identName x
   let MemLocation xmem xoffset = entryArrayLocation xentry
@@ -457,6 +475,7 @@ defCompilePrimOp [target] (ArrayLit es rt _) = do
           vmem (dimSizeToExp voffset)
           bytesPerElem
   where et = elemType rt
+
 {-
 defCompilePrimOp [target] (Reshape _ shape src _) = do
   allocate target
@@ -481,20 +500,6 @@ defCompilePrimOp [target] (Reshape _ shape src _) = do
   tell $ Imp.For i (var n) $ Imp.Write target targetidxs $ Imp.Read src' srcidxs
   where one = Imp.Constant $ Imp.BasicVal $ IntVal 1
         srct = subExpType src
-
-defCompilePrimOp [target1, target2] (Split _ n x restsize _) = do
-  allocate target1
-  allocate target2
-  x' <- expAsName xt $ compileSubExp x
-  let n' = compileSubExp n
-      restsize' = compileSubExp restsize
-  i <- newVName "i"
-  tell $ Imp.For i n' $ Imp.Write target1 [var i] $
-         Imp.Read x' [var i]
-  j <- newVName "i"
-  tell $ Imp.For j restsize' $ Imp.Write target2 [var j] $
-         Imp.Read x' [Imp.BinOp Imp.Plus n' $ var j]
-  where xt = subExpType x
 
 defCompilePrimOp _ (Split {}) = fail "ImpGen.compileExp: Incorrect number of targets to split"
 
@@ -635,6 +640,14 @@ dimSizeToExp (Imp.VarSize v)   = Imp.ScalarVar v
 dimSizeToExp (Imp.ConstSize x) = Imp.Constant $ IntVal x
 
 compileSubExpTo :: VName -> SubExp -> ImpM op ()
+compileSubExpTo target (Var v)
+  | not (basicType $ identType v) = do
+    MemLocation targetmem targetoffset <- arrayLocation target
+    MemLocation srcmem srcoffset <- arrayLocation $ identName v
+    when (targetoffset /= srcoffset) $
+      fail $ "Mismatching offsets when compiling subexp " ++ pretty (identName v) ++
+      " to " ++ pretty target
+    tell $ Imp.SetMem targetmem srcmem
 compileSubExpTo target se =
   writeExp target $ compileSubExp se
 
@@ -731,3 +744,8 @@ arrayByteSizeExp :: ArrayEntry -> Imp.Exp
 arrayByteSizeExp entry =
   foldl impTimes (Imp.SizeOf $ entryArrayElemType entry) $
   map dimSizeToExp $ entryArrayShape entry
+
+arrayRowByteSizeExp :: ArrayEntry -> Imp.Exp
+arrayRowByteSizeExp entry =
+  foldl impTimes (Imp.SizeOf $ entryArrayElemType entry) $
+  drop 1 $ map dimSizeToExp $ entryArrayShape entry
