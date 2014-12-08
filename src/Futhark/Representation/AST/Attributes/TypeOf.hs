@@ -108,8 +108,7 @@ loopOpType (Filter _ f arrs _) =
 loopOpType (Redomap _ outerfun _ _ _ _) =
   staticResType $ lambdaReturnType outerfun
 
--- | The type of a Futhark term.  The aliasing will refer to itself, if
--- the term is a non-tuple-typed variable.
+-- | The type of a Futhark term.
 typeOf :: Lore lore => Exp lore -> ResType lore
 typeOf (PrimOp op) = staticResType $ primOpType op
 typeOf (LoopOp op) = loopOpType op
