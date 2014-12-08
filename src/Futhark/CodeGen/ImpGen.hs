@@ -491,18 +491,19 @@ defCompilePrimOp [target] (Rearrange _ perm (Var src) _) = do
 defCompilePrimOp [target] (Reshape _ _ src loc) =
   defCompilePrimOp [target] $ Copy src loc
 
-{-
-defCompilePrimOp [target] (Rotate _ n e _) = do
-  allocate target
-  e' <- expAsName et $ compileSubExp e
-  let size = compileSubExp $ arraySize 0 et
-      n'   = Imp.Constant $ Imp.BasicVal $ IntVal n
+defCompilePrimOp [target] (Rotate _ n (Var src) _) = do
+  let size = compileSubExp $ arraySize 0 srct
+      n'   = Imp.Constant $ IntVal n
   i <- newVName "i"
+  (destmem, destoffset, rowsize) <-
+    indexArray target [Imp.BinOp Mod (Imp.BinOp Plus n' $ Imp.ScalarVar i) size]
+  (srcmem, srcoffset, _) <-
+    indexArray (identName src) [Imp.ScalarVar i]
   tell $ Imp.For i size $
-         Imp.Write target [Imp.BinOp Mod (Imp.BinOp Plus n' $ var i) size] $
-         Imp.Read e' [var i]
-  where et = subExpType e
--}
+         Imp.Copy destmem (destoffset `impTimes` Imp.SizeOf (elemType srct))
+         srcmem (srcoffset `impTimes` Imp.SizeOf (elemType srct))
+         rowsize
+  where srct = identType src
 
 defCompilePrimOp targets@(_:_) e =
   fail $ "ImpGen.defCompilePrimOp: Incorrect number of targets\n  " ++
