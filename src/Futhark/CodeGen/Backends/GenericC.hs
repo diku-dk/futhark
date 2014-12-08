@@ -67,12 +67,15 @@ data CompilerEnv op = CompilerEnv {
   }
 
 newCompilerEnv :: Program op -> OpCompiler op -> CompilerEnv op
-newCompilerEnv (Program funs) ec = CompilerEnv { envOpCompiler = ec
-                                               , envFtable = ftable
-                                               }
+newCompilerEnv (Program funs) ec =
+  CompilerEnv { envOpCompiler = ec
+              , envFtable = ftable <> builtinFtable
+              }
   where ftable = HM.fromList $ map funReturn funs
         funReturn (name, Function outparams _ _ _ _) =
           (name, paramsTypes outparams)
+        builtinFtable =
+          HM.map (map Scalar . snd) builtInFunctions
 
 -- | Return a list of struct definitions for the tuples and arrays
 -- seen during compilation.  The list is sorted according to
