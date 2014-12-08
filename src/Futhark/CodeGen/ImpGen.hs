@@ -476,6 +476,18 @@ defCompilePrimOp [target] (ArrayLit es rt _) = do
           bytesPerElem
   where et = elemType rt
 
+defCompilePrimOp [target] (Rearrange _ perm (Var src) _) = do
+  is <- replicateM (length perm) (newVName "i")
+  let ivars = map Imp.ScalarVar is
+  (mem, offset, _) <- indexArray target $ permuteShape perm ivars
+  (srcmem, srcoffset, _) <- indexArray (identName src) ivars
+  let sizes = map compileSubExp $ arrayDims srct
+  tell $ foldl (.) id (zipWith Imp.For is sizes) $
+         Imp.Write mem offset et $
+         Imp.Index srcmem srcoffset et
+  where srct = identType src
+        et = elemType srct
+
 {-
 defCompilePrimOp [target] (Reshape _ shape src _) = do
   allocate target
@@ -500,18 +512,6 @@ defCompilePrimOp [target] (Reshape _ shape src _) = do
   tell $ Imp.For i (var n) $ Imp.Write target targetidxs $ Imp.Read src' srcidxs
   where one = Imp.Constant $ Imp.BasicVal $ IntVal 1
         srct = subExpType src
-
-defCompilePrimOp _ (Split {}) = fail "ImpGen.compileExp: Incorrect number of targets to split"
-
-defCompilePrimOp [target] (Rearrange _ perm e _) = do
-  allocate target
-  e' <- expAsName et $ compileSubExp e
-  is <- replicateM (length perm) $ newVName "i"
-  let sizes = map compileSubExp $ arrayDims et
-  tell $ foldl (.) id (zipWith Imp.For is sizes) $
-         Imp.Write target (permuteShape perm $ map var is) $
-         Imp.Read e' $ map var is
-  where et = subExpType e
 
 defCompilePrimOp [target] (Rotate _ n e _) = do
   allocate target
