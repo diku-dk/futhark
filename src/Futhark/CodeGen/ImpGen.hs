@@ -381,7 +381,7 @@ defCompilePrimOp [target] (Update _ src idxs val _) = do
 defCompilePrimOp [target] (Replicate n se _) = do
   i <- newVName "i"
   (targetmem, elemoffset, rowsize) <- indexArray target [Imp.ScalarVar i]
-  if basicType $ subExpType se then
+  if basicType set then
     tell $ Imp.For i (compileSubExp n) $
     Imp.Write targetmem elemoffset Int $ compileSubExp se
     else case se of
@@ -391,9 +391,10 @@ defCompilePrimOp [target] (Replicate n se _) = do
       MemLocation vmem voffset <- arrayLocation $ identName v
       tell $ Imp.For i (compileSubExp n) $
         Imp.Copy
-        targetmem elemoffset
+        targetmem (elemoffset `impTimes` Imp.SizeOf (elemType set))
         vmem (dimSizeToExp voffset)
         rowsize
+  where set = subExpType se
 
 defCompilePrimOp [target] (Iota n _) = do
   i <- newVName "i"
