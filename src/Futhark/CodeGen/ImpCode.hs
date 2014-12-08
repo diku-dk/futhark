@@ -16,6 +16,7 @@ module Futhark.CodeGen.ImpCode
   where
 
 import Data.Monoid
+import Data.List
 import Data.Loc
 
 import Language.Futhark.Core
@@ -84,7 +85,7 @@ instance Monoid (Code a) where
 -- Prettyprinting definitions.
 
 instance Pretty (Program op) where
-  ppr (Program funs) = stack $ map ppFun funs
+  ppr (Program funs) = stack $ intersperse mempty $ map ppFun funs
     where ppFun (name, fun) =
             text "Function " <> ppr name <> colon </> indent 2 (ppr fun)
 
