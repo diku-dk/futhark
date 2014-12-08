@@ -180,6 +180,15 @@ printStm (ScalarValue bt name) =
 printStm (ArrayValue mem bt []) =
   return $ printBasicStm val bt
   where val = [C.cexp|*$id:mem|]
+printStm (ArrayValue mem Char [size]) = do
+  i <- newVName "print_i"
+  let size' = dimSizeToExp size
+  return [C.cstm|{
+          int $id:i;
+          for ($id:i = 0; $id:i < $exp:size'; $id:i++) {
+            printf("%c", ((char*)$id:mem)[$id:i]);
+          }
+          }|]
 printStm (ArrayValue mem bt (dim:shape)) = do
   i <- newVName "print_i"
   v <- newVName "print_elem"
