@@ -42,11 +42,11 @@ interpretAction = basicAction "interpreter" . interpret
 
 seqCodegenAction :: Action
 seqCodegenAction = explicitMemoryAction "sequential code generator" $
-                   putStrLn . SequentialC.compileProg
+                   either error putStrLn . SequentialC.compileProg
 
 impCodeGenAction :: Action
 impCodeGenAction = explicitMemoryAction "imperative code generator" $
-                   putStrLn . pretty . ImpGen.compileProgSimply
+                   either error (putStrLn . pretty) . ImpGen.compileProgSimply
 
 flowGraphAction :: Action
 flowGraphAction = basicAction "SOAC flow graph" $

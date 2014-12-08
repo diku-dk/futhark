@@ -83,7 +83,7 @@ newEnv ec = Env { envVtable = HM.empty
                 , envExpCompiler = ec
                 }
 
-newtype ImpM op a = ImpM (RWS (Env op) (Imp.Code op) VNameSource a)
+newtype ImpM op a = ImpM (RWST (Env op) (Imp.Code op) VNameSource (Either String) a)
   deriving (Functor, Applicative, Monad,
             MonadState VNameSource,
             MonadReader (Env op),
@@ -93,21 +93,31 @@ instance MonadFreshNames (ImpM op) where
   getNameSource = get
   putNameSource = put
 
-runImpM :: ImpM op a -> ExpCompiler op -> VNameSource -> (a, VNameSource, Imp.Code op)
-runImpM (ImpM m) = runRWS m . newEnv
+runImpM :: ImpM op a -> ExpCompiler op -> VNameSource -> Either String (a, VNameSource, Imp.Code op)
+runImpM (ImpM m) = runRWST m . newEnv
+
+-- bad :: String -> ImpM op a
 
 collect :: ImpM op () -> ImpM op (Imp.Code op)
 collect m = pass $ do
   ((), code) <- listen m
   return (code, const mempty)
 
-compileProg :: ExpCompiler op -> Prog -> Imp.Program op
+mapAccumLM :: Monad m =>
+              (acc -> x -> m (acc, y)) -> acc -> [x] -> m (acc, [y])
+mapAccumLM _ acc [] = return (acc, [])
+mapAccumLM f acc (x:xs) = do
+  (acc', x') <- f acc x
+  (acc'', xs') <- mapAccumLM f acc' xs
+  return (acc'', x':xs')
+
+compileProg :: ExpCompiler op -> Prog -> Either String (Imp.Program op)
 compileProg ec prog =
-  Imp.Program $ snd $ mapAccumL (compileFunDec ec) src $ progFunctions prog
+  Imp.Program <$> snd <$> mapAccumLM (compileFunDec ec) src (progFunctions prog)
   where src = newNameSourceForProg prog
 
 -- | 'compileProg' with an 'ExpCompiler' that always returns 'CompileExp'.
-compileProgSimply :: Prog -> Imp.Program op
+compileProgSimply :: Prog -> Either String (Imp.Program op)
 compileProgSimply = compileProg $ const $ return . CompileExp
 
 compileInParam :: FParam -> ImpM op (Either Imp.Param ArrayDecl)
@@ -211,13 +221,13 @@ compileOutParams (ResType ts) = do
             Just sizeout -> return (sizeout, Nothing)
 
 compileFunDec :: ExpCompiler op -> VNameSource -> FunDec
-              -> (VNameSource, (Name, Imp.Function op))
-compileFunDec ec src (FunDec fname rettype params body _) =
-  let ((outparams, inparams, results, args), src', body') =
-        runImpM compile ec src
-  in (src',
-      (fname,
-       Imp.Function outparams inparams body' results args))
+              -> Either String (VNameSource, (Name, Imp.Function op))
+compileFunDec ec src (FunDec fname rettype params body _) = do
+  ((outparams, inparams, results, args), src', body') <-
+    runImpM compile ec src
+  return (src',
+          (fname,
+           Imp.Function outparams inparams body' results args))
   where compile = do
           (inparams, arraydecls, args) <- compileInParams params
           (results, outparams, dests) <- compileOutParams rettype
@@ -508,9 +518,12 @@ defCompilePrimOp [target] (Rotate _ n e _) = do
          Imp.Write target [Imp.BinOp Mod (Imp.BinOp Plus n' $ var i) size] $
          Imp.Read e' [var i]
   where et = subExpType e
-
-defCompilePrimOp (_:_:_) _ = fail "ImpGen.compilePrimOp: Incorrect number of targets"
 -}
+
+defCompilePrimOp targets@(_:_) e =
+  fail $ "ImpGen.defCompilePrimOp: Incorrect number of targets\n  " ++
+  intercalate ", " (map pretty targets) ++
+  "\nfor expression\n  " ++ pretty e
 
 defCompilePrimOp [] _ = return () -- No arms, no cake.
 

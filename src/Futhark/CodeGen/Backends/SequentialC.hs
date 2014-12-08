@@ -12,8 +12,8 @@ import Futhark.Representation.ExplicitMemory
 import qualified Futhark.CodeGen.ImpGen as ImpGen
 import qualified Futhark.CodeGen.Backends.GenericC as GenericC
 
-compileProg :: Prog -> String
-compileProg = GenericC.compileProg codeCompiler . ImpGen.compileProg firstOrderSOACS
+compileProg :: Prog -> Either String String
+compileProg = fmap (GenericC.compileProg codeCompiler) . ImpGen.compileProg firstOrderSOACS
   where codeCompiler :: GenericC.OpCompiler ()
         codeCompiler () = return GenericC.Done
         firstOrderSOACS :: ImpGen.ExpCompiler ()
