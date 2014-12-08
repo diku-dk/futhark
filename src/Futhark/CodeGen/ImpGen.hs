@@ -383,7 +383,7 @@ defCompilePrimOp [target] (Replicate n se _) = do
   (targetmem, elemoffset, rowsize) <- indexArray target [Imp.ScalarVar i]
   if basicType set then
     tell $ Imp.For i (compileSubExp n) $
-    Imp.Write targetmem elemoffset Int $ compileSubExp se
+    Imp.Write targetmem elemoffset (elemType set) $ compileSubExp se
     else case se of
     Constant {} ->
       fail "Array value in replicate cannot be constant."
