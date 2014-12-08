@@ -488,31 +488,10 @@ defCompilePrimOp [target] (Rearrange _ perm (Var src) _) = do
   where srct = identType src
         et = elemType srct
 
-{-
-defCompilePrimOp [target] (Reshape _ shape src _) = do
-  allocate target
-  src' <- expAsName srct $ compileSubExp src
-  let shape' = map compileSubExp shape
-      srcshape' = map compileSubExp $ arrayDims srct
-  n <- newVName "n"
-  declareBasicVar n Int
-  writeExp n $ foldl (Imp.BinOp Imp.Times) one shape'
-  i <- newVName "i"
-  let mult    = Imp.BinOp Imp.Times
-      impProd = foldl mult one
-  targetsizes <- mapM (expAsName (Basic Int) . impProd) $ drop 1 $ tails shape'
-  srcsizes <- mapM (expAsName (Basic Int) . impProd) $ drop 1 $ tails srcshape'
-  -- Some of these index calculations may duplicate computation a
-  -- little bit.
-  let idxs asizes ashape =
-        [ Imp.BinOp Imp.Mod (Imp.BinOp Imp.Divide (var i) (var slicesize)) dimsize
-          | (slicesize,dimsize) <- zip asizes ashape ]
-      targetidxs = idxs targetsizes shape'
-      srcidxs    = idxs srcsizes srcshape'
-  tell $ Imp.For i (var n) $ Imp.Write target targetidxs $ Imp.Read src' srcidxs
-  where one = Imp.Constant $ Imp.BasicVal $ IntVal 1
-        srct = subExpType src
+defCompilePrimOp [target] (Reshape _ _ src loc) =
+  defCompilePrimOp [target] $ Copy src loc
 
+{-
 defCompilePrimOp [target] (Rotate _ n e _) = do
   allocate target
   e' <- expAsName et $ compileSubExp e
