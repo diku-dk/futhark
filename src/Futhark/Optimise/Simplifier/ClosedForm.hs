@@ -70,13 +70,13 @@ foldClosedForm look pat lam accs arrs = do
 -- | @loopClosedForm pat respat merge bound bodys@ determines whether
 -- the do-loop can be expressed in a closed form.
 loopClosedForm :: MonadBinder m =>
-                  Pattern (Lore m) -> [Ident] -> [(Ident,SubExp)]
+                  Pattern (Lore m) -> [Ident] -> [(FParam (Lore m),SubExp)]
                -> SubExp -> Body (Lore m)
                -> Simplify m ()
 loopClosedForm pat respat merge bound body
-  | respat == mergepat = do
+  | respat == mergeidents = do
     closedBody <- checkResults respat knownBindings
-                  mergepat body mergeexp bodyloc
+                  mergeidents body mergeexp bodyloc
     isEmpty <- newIdent "bound_is_zero" (Basic Bool) bodyloc
     closedBody' <- renameBody closedBody
     letBind [isEmpty] $
@@ -91,8 +91,9 @@ loopClosedForm pat respat merge bound body
       bodyloc
   | otherwise = cannotSimplify
   where (mergepat, mergeexp) = unzip merge
+        mergeidents = map bindeeIdent mergepat
         bodyloc = srclocOf body
-        knownBindings = HM.fromList merge
+        knownBindings = HM.fromList $ zip mergeidents mergeexp
 
 checkResults :: MonadBinder m =>
                 [Ident]

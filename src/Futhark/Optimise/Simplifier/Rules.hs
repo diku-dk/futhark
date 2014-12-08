@@ -42,7 +42,7 @@ topDownRules = [ liftIdentityMapping
 --               , hoistLoopInvariantMergeVariables
                , simplifyClosedFormRedomap
                , simplifyClosedFormReduce
---               , simplifyClosedFormLoop
+               , simplifyClosedFormLoop
                , letRule simplifyRearrange
                , letRule simplifyRotate
                , letRule simplifyBinOp
@@ -305,14 +305,12 @@ simplifyClosedFormReduce vtable (Let pat _ (LoopOp (Reduce _ fun args _))) =
   where (acc, arr) = unzip args
 simplifyClosedFormReduce _ _ = cannotSimplify
 
-{-
 simplifyClosedFormLoop :: MonadBinder m => TopDownRule m
 simplifyClosedFormLoop _ (Let pat _ (LoopOp (DoLoop respat merge _ bound body _))) =
   loopClosedForm pat respat merge bound body
 simplifyClosedFormLoop _ _ = cannotSimplify
 
 simplifyRearrange :: LetTopDownRule lore u
--}
 
 -- Handle identity permutation.
 simplifyRearrange _ (Rearrange _ perm e _)
