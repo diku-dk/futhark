@@ -163,6 +163,9 @@ instance MonadFreshNames (TypeM lore) where
 liftEither :: Either (TypeError lore) a -> TypeM lore a
 liftEither = either bad return
 
+liftEitherS :: SrcLoc -> Either String a -> TypeM lore a
+liftEitherS loc = either (bad . TypeError loc) return
+
 occur :: Occurences -> TypeM lore ()
 occur occurs = tell Dataflow { usageOccurences = occurs }
 
@@ -885,7 +888,7 @@ checkBinding loc pat ts dflow = do
 
 matchExtPattern :: SrcLoc -> [Ident] -> [ExtType] -> TypeM lore ()
 matchExtPattern loc pat ts = do
-  (ts', restpat, _) <- patternContext loc pat ts
+  (ts', restpat, _) <- liftEitherS loc $ patternContext pat ts
   unless (length restpat == length ts') $
     bad $ InvalidPatternError (Several pat) (Several $ map toDecl ts) Nothing loc
   evalStateT (zipWithM_ checkBinding' restpat ts') []
@@ -903,9 +906,9 @@ matchExtPattern loc pat ts = do
             Just (Ident name _ pos2) ->
               lift $ bad $ DupPatternError name (srclocOf ident) pos2
 
-patternContext :: SrcLoc -> [Ident] -> [ExtType] ->
-                  TypeM lore ([Type], [Ident], [Ident])
-patternContext loc pat rt = do
+patternContext :: [Ident] -> [ExtType] ->
+                  Either String ([Type], [Ident], [Ident])
+patternContext pat rt = do
   (rt', (restpat,_), shapepat) <- runRWST (mapM extract rt) () (pat, HM.empty)
   return (rt', restpat, shapepat)
   where extract t = setArrayShape t <$> Shape <$>
@@ -922,7 +925,7 @@ patternContext loc pat rt = do
                 put (vs, HM.insert x v m)
                 return $ Var v
             (_, Nothing) ->
-              lift $ bad $ TypeError loc "Pattern cannot match context"
+              lift $ Left "Pattern cannot match context"
 
 checkPatSizes :: Checkable lore =>
                  [IdentBase Shape] -> TypeM lore ()
