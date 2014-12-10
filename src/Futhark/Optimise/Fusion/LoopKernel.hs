@@ -209,17 +209,6 @@ filterFoldFusionOK outIds ker =
     Nothing       -> False
     Just inputIds -> all (`elem` outIds) inputIds
 
-mapScanFusionOK :: [Ident] -> [SOAC.Input] -> FusedKer -> Bool
-mapScanFusionOK outIds inp1 ker =
-  length inp1 == length replacing &&
-  and (zipWith subtypeOf
-       (sort $ map identType replacing)
-       (sort inpts))
-  where inpts = map SOAC.inputType inp1
-        replacing = filter (`elem` outIds) $
-                    mapMaybe SOAC.isVarInput $
-                    inputs ker
-
 mapOrFilter :: SOAC -> Bool
 mapOrFilter (SOAC.Filter {}) = True
 mapOrFilter (SOAC.Map {})    = True
@@ -259,12 +248,6 @@ fuseSOACwithKer outIds soac1 ker = do
       | mapFusionOK outIds ker -> do
       let (res_lam, new_inp) = fuseMaps lam1 inp1_arr outPairs lam2 inp2_arr
       success $ SOAC.Redomap (cs1++cs2) lam21 res_lam ne new_inp pos
-
-    (SOAC.Scan _ _ inps2 loc, SOAC.Map _ _ inps1 _)
-      | mapScanFusionOK outIds inp1_arr ker -> do
-      let (res_lam, new_inps) =
-            fuseMaps lam1 (zip (map fst inps2) inps1) outPairs lam2 inps2
-      success $ SOAC.Scan (cs1++cs2) res_lam new_inps loc
 
     -- The Fusions that are semantically filter fusions:
     (SOAC.Redomap _ lam21 _ nes _ pos, SOAC.Filter {})
