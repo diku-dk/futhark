@@ -1,3 +1,4 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 -- | This module defines a collection of simplification rules, as per
 -- "Futhark.Optimise.Simplifier.Rule".  They are used in the
 -- simplifier.
@@ -39,7 +40,7 @@ import Prelude hiding (any)
 topDownRules :: MonadBinder m => TopDownRules m
 topDownRules = [ liftIdentityMapping
                , removeReplicateMapping
---               , hoistLoopInvariantMergeVariables
+               , hoistLoopInvariantMergeVariables
                , simplifyClosedFormRedomap
                , simplifyClosedFormReduce
                , simplifyClosedFormLoop
@@ -59,8 +60,8 @@ topDownRules = [ liftIdentityMapping
 
 bottomUpRules :: MonadBinder m => BottomUpRules m
 bottomUpRules = [ removeDeadMapping
---                , removeUnusedLoopResult
---                , removeRedundantMergeVariables
+                , removeUnusedLoopResult
+                , removeRedundantMergeVariables
                 , removeDeadBranchResult
                 , removeUnnecessaryCopy
                 ]
@@ -153,15 +154,13 @@ removeDeadMapping (_, used) (Let pat _ (LoopOp (Map cs fun arrs loc))) =
      else cannotSimplify
 removeDeadMapping _ _ = cannotSimplify
 
-{-
--- After removing a result, we may also have to remove some of the
--- shape bindings.
-removeUnusedLoopResult :: MonadBinder m => BottomUpRule m
+-- After removing a result, we may also have to remove some existential bindings.
+removeUnusedLoopResult :: forall m.MonadBinder m => BottomUpRule m
 removeUnusedLoopResult (_, used) (Let pat _ (LoopOp (DoLoop respat merge i bound body loc)))
   | explpat' <- filter (keep . fst) explpat,
     explpat' /= explpat =
-  let shapes = concatMap (arrayDims . identType) $ map snd explpat'
-      implpat' = filter ((`elem` shapes) . Var . snd) implpat
+  let ctxrefs = concatMap references $ map snd explpat'
+      implpat' = filter ((`elem` ctxrefs) . identName . snd) implpat
       pat' = map fst $ implpat'++explpat'
       respat' = map snd explpat'
   in letBindPat (Pattern pat') $ LoopOp $ DoLoop respat' merge i bound body loc
@@ -169,7 +168,6 @@ removeUnusedLoopResult (_, used) (Let pat _ (LoopOp (DoLoop respat merge i bound
         -- is responsible for some used existential part.
         keep bindee =
           bindeeName bindee `elem` nonremovablePatternNames
-        patNames :: [VName]
         patNames = patternNames pat
         nonremovablePatternNames =
           filter (`UT.used` used) patNames <>
@@ -177,11 +175,13 @@ removeUnusedLoopResult (_, used) (Let pat _ (LoopOp (DoLoop respat merge i bound
         interestingBindee bindee =
           any (`elem` patNames) $
           freeNamesIn (bindeeLore bindee) <> freeNamesIn (bindeeType bindee)
-        varDim (Var v)       = [identName v]
-        varDim (Constant {}) = []
-        taggedpat :: [(FParam (Lore m), SubExp)]
-        taggedpat = zip (patternBindees pat) $ loopResult respat $ map fst merge
+        taggedpat = zip (patternBindees pat) $
+                    loopResultContext (representative :: Lore m) respat (map fst merge) ++
+                    respat
         (implpat, explpat) = splitAt (length taggedpat - length respat) taggedpat
+        references ident = maybe [] (HS.toList . freeNamesIn . bindeeLore) $
+                           find ((identName ident==) . bindeeName) $
+                           map fst merge
 removeUnusedLoopResult _ _ = cannotSimplify
 
 -- This next one is tricky - it's easy enough to determine that some
@@ -200,7 +200,7 @@ removeRedundantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge i bound 
       necessary' = mconcat $ map dependencies usedResults
       resIsNecessary ((v,_), _) =
         usedInResult v ||
-        identName v `HS.member` necessary' ||
+        bindeeName v `HS.member` necessary' ||
         usedInPatType v
       (keep, discard) = partition resIsNecessary $ zip merge es
       (merge', es') = unzip keep
@@ -218,15 +218,15 @@ removeRedundantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge i bound 
          return body'
        letBindPat pat $ LoopOp $ DoLoop respat merge' i bound body'' loc
   where (mergepat, _) = unzip merge
-        usedInResult = (`elem` respat)
+        usedInResult = (`elem` respat) . bindeeIdent
         patDimNames = mconcat $ map freeNamesInSubExp $
-                      concatMap (arrayDims . identType) mergepat
-        usedInPatType = (`HS.member` patDimNames) . identName
+                      concatMap (arrayDims . bindeeType) mergepat
+        usedInPatType = (`HS.member` patDimNames) . bindeeName
 
         dummyBindings = map dummyBinding
         dummyBinding ((v,e), _)
-          | unique (identType v) = ([v], PrimOp $ Copy e $ srclocOf v)
-          | otherwise            = ([v], PrimOp $ SubExp e)
+          | unique (bindeeType v) = ([bindeeIdent v], PrimOp $ Copy e $ srclocOf v)
+          | otherwise             = ([bindeeIdent v], PrimOp $ SubExp e)
 
         allDependencies = dataDependencies body
         dependencies (Constant _ _) = HS.empty
@@ -237,7 +237,7 @@ removeRedundantMergeVariables _ _ =
 
 -- We may change the type of the loop if we hoist out a shape
 -- annotation, in which case we also need to tweak the bound pattern.
-hoistLoopInvariantMergeVariables :: MonadBinder m => TopDownRule m
+hoistLoopInvariantMergeVariables :: forall m.MonadBinder m => TopDownRule m
 hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge idd n loopbody loc))) =
     -- Figure out which of the elements of loopresult are
     -- loop-invariant, and hoist them out.
@@ -249,16 +249,21 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge idd n
     (invariant, explpat', merge', ses') ->
       -- We have moved something invariant out of the loop.
       let loopbody' = loopbody { bodyResult = Result cs ses' resloc }
-          invariantShape (_, shapemerge) = shapemerge `elem` map fst merge'
+          invariantShape :: (a, Ident) -> Bool
+          invariantShape (_, shapemerge) = shapemerge `elem`
+                                           map (bindeeIdent . fst) merge'
           (implpat',implinvariant) = partition invariantShape implpat
           implinvariant' = [ (bindeeIdent p, Var v) | (p,v) <- implinvariant ]
           pat' = map fst $ implpat'++explpat'
           respat' = map snd explpat'
       in do forM_ (invariant ++ implinvariant') $ \(v1,v2) ->
               letBind [v1] $ PrimOp $ SubExp v2
-            letBindPat (Pattern pat') $ LoopOp $ DoLoop respat' merge' idd n loopbody' loc
+            letBindPat (Pattern pat') $
+              LoopOp $ DoLoop respat' merge' idd n loopbody' loc
   where Result cs ses resloc = bodyResult loopbody
-        taggedpat = zip (patternBindees pat) $ loopResult respat $ map fst merge
+        taggedpat = zip (patternBindees pat) $
+                    loopResultContext (representative :: Lore m)
+                    respat (map fst merge) ++ respat
         (implpat, explpat) = splitAt (length taggedpat - length respat) taggedpat
 
         removeFromResult (v,initExp) explpat' =
@@ -268,19 +273,24 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge idd n
             (_,      _) ->
               (Nothing, explpat')
 
+        checkInvariance :: ((FParam (Lore m), SubExp), SubExp)
+                        -> ([(Ident, SubExp)], [(PatBindee (Lore m), Ident)],
+                            [(FParam (Lore m), SubExp)], [SubExp])
+                        -> ([(Ident, SubExp)], [(PatBindee (Lore m), Ident)],
+                            [(FParam (Lore m), SubExp)], [SubExp])
         checkInvariance ((v1,initExp), resExp) (invariant, explpat', merge', resExps)
           | invariantMerge v1 initExp resExp =
-          let (bnd, explpat'') = removeFromResult (v1,initExp) explpat'
-          in (maybe id (:) bnd $ (v1, initExp) : invariant,
+          let (bnd, explpat'') =
+                removeFromResult (bindeeIdent v1,initExp) explpat'
+          in (maybe id (:) bnd $ (bindeeIdent v1, initExp) : invariant,
               explpat'', merge', resExps)
         checkInvariance ((v1,initExp), resExp) (invariant, explpat', merge', resExps) =
           (invariant, explpat', (v1,initExp):merge', resExp:resExps)
 
         invariantMerge v1 _       (Var v2)
-          | identName v1 == identName v2 = True
+          | bindeeName v1 == identName v2 = True
         invariantMerge _  initExp resExp = initExp == resExp
 hoistLoopInvariantMergeVariables _ _ = cannotSimplify
--}
 
 -- | A function that, given a variable name, returns its definition.
 type VarLookup lore = VName -> Maybe (Exp lore)
