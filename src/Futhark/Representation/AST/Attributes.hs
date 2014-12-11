@@ -13,6 +13,9 @@ module Futhark.Representation.AST.Attributes
   , module Futhark.Representation.AST.Attributes.Names
   , module Futhark.Representation.AST.ResType
 
+  , representative
+  , loopResultContext
+
   -- * Extra tools
   , funDecByName
   , reshapeOuter
@@ -31,8 +34,21 @@ import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Attributes.TypeOf
 import Futhark.Representation.AST.ResType hiding (ResType)
 import Futhark.Representation.AST.Syntax
+import qualified Futhark.Representation.AST.Lore as Lore
 
 import Data.List
+
+-- | A constant used to disambiguate method calls.  XXX, this is a
+-- hack.
+representative :: Lore.Lore l => l
+representative = Lore.representative
+
+-- | A loop returns not only the values indicated in the result list
+-- @res@, but may also have an existential context.  Thus,
+-- @loopResult res merge@ returns those variables in @merge@ that
+-- constitute the context.
+loopResultContext :: Lore.Lore l => l -> [Ident] -> [FParam l] -> [Ident]
+loopResultContext = Lore.loopResultContext
 
 -- | Find the function of the given name in the Futhark program.
 funDecByName :: Name -> Prog lore -> Maybe (FunDec lore)

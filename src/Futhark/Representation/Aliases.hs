@@ -67,7 +67,7 @@ import Futhark.Substitute
 import Futhark.Analysis.Rephrase
 
 -- | The lore for the basic representation.
-data Aliases lore
+data Aliases lore = Aliases lore
 
 -- | A wrapper around 'Names' to get around the fact that we need an
 -- 'Ord' instance, which 'Names' does not have.
@@ -99,6 +99,11 @@ instance Lore.Lore lore => Lore.Lore (Aliases lore) where
   type Body (Aliases lore) = (([Names'], Names'), Lore.Body lore)
   type FParam (Aliases lore) = Lore.FParam lore
   type ResTypeAttr (Aliases lore) = Lore.ResTypeAttr lore
+
+  representative = Aliases Lore.representative
+
+  loopResultContext (Aliases lore) res merge =
+    Lore.loopResultContext lore res $ map (removeFParamAliases $ Aliases lore) merge
 
 type Prog lore = AST.Prog (Aliases lore)
 type PrimOp lore = AST.PrimOp (Aliases lore)
@@ -171,6 +176,10 @@ removeLambdaAliases = rephraseLambda removeAliases
 
 removePatternAliases :: AST.Pattern (Aliases lore) -> AST.Pattern lore
 removePatternAliases = rephrasePattern removeAliases
+
+removeFParamAliases :: Aliases lore -> FParam (Aliases lore) -> FParam lore
+removeFParamAliases _ (Bindee ident lore) =
+  Bindee ident lore
 
 addAliasesToPattern :: Lore.Lore lore =>
                        AST.Pattern lore -> Exp lore -> Pattern lore

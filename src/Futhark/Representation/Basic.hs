@@ -56,9 +56,13 @@ import Futhark.Analysis.Rephrase
 -- system.
 
 -- | The lore for the basic representation.
-data Basic
+data Basic = Basic
 
 instance Lore.Lore Basic where
+  representative = Futhark.Representation.Basic.Basic
+
+  loopResultContext _ res merge =
+    loopShapeContext res $ map bindeeIdent merge
 
 type Prog = AST.Prog Basic
 type PrimOp = AST.PrimOp Basic

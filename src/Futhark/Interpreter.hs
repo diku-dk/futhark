@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, ScopedTypeVariables #-}
 -- | A nonoptimising interpreter for Futhark.  It makes no assumptions of
 -- the form of the input program, and in particular permits shadowing.
 -- This interpreter should be considered the primary benchmark for
@@ -420,7 +420,7 @@ evalPrimOp (Conjoin _ _) = return [BasicVal Checked]
 evalPrimOp (Alloc se _) =
   single <$> evalSubExp se
 
-evalLoopOp :: Lore lore => LoopOp lore -> FutharkM [Value]
+evalLoopOp :: forall lore . Lore lore => LoopOp lore -> FutharkM [Value]
 
 evalLoopOp (DoLoop respat merge loopvar boundexp loopbody loc) = do
   bound <- evalSubExp boundexp
@@ -429,7 +429,8 @@ evalLoopOp (DoLoop respat merge loopvar boundexp loopbody loc) = do
     BasicVal (IntVal n) -> do
       vs <- foldM iteration mergestart [0..n-1]
       binding (zip (map bindeeIdent mergepat) vs) $
-        mapM lookupVar $ loopResult respat $ map bindeeIdent mergepat
+        mapM lookupVar $
+        loopResultContext (representative :: lore) respat mergepat ++ respat
     _ -> bad $ TypeError loc "evalBody DoLoop"
   where (mergepat, mergeexp) = unzip merge
         iteration mergeval i =

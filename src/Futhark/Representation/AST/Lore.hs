@@ -33,6 +33,17 @@ class (Show (LetBound l), Show (Exp l), Show (Body l), Show (FParam l),
   type ResTypeAttr l :: *
   type ResTypeAttr l = ()
 
+  -- | A constant used to disambiguate method calls.  XXX, this is a
+  -- hack to get around mising type application in Haskell, sometimes
+  -- resulting in ambiguous types.
+  representative :: l
+
+  -- | A loop returns not only the values indicated in the result list
+  -- @res@, but may also have an existential context.  Thus,
+  -- @loopResult res merge@ returns those variables in @merge@ that
+  -- constitute the context.
+  loopResultContext :: l -> [Ident] -> [Bindee (FParam l)] -> [Ident]
+
 -- | A simple 'ResType' structure that is just a list of pairs of
 -- shape-existential types and annotations.
 newtype ResTypeT annot =

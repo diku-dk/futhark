@@ -11,7 +11,7 @@ module Futhark.Representation.AST.Attributes.TypeOf
        , filterType
        , valueShapeContext
        , subExpShapeContext
-       , loopResult
+       , loopShapeContext
        )
        where
 
@@ -131,15 +131,14 @@ subExpShapeContext rettype ses =
   extractShapeContext rettype $ map (arrayDims . subExpType) ses
 
 -- | A loop returns not only the values indicated in the result
--- pattern, but also any non-static shapes of arrays.  Thus,
--- @loopResult res merge@ returns @res@ prefixed with with those
--- variables in @merge@ that constitute the shape context.
-loopResult :: [Ident] -> [Ident] -> [Ident]
-loopResult res merge = resShapes ++ res
-  where notInRes (Constant _ _) = Nothing
-        notInRes (Var v)
-          | v `notElem` res,
-            v `elem` merge = Just v
-          | otherwise       = Nothing
+-- pattern, but also any shapes of arrays that are merge variables.
+-- Thus, @loopResult res merge@ returns those variables in @merge@
+-- that constitute the shape context.
+loopShapeContext :: [Ident] -> [Ident] -> [Ident]
+loopShapeContext res merge = resShapes
+  where isMergeVar (Constant _ _) = Nothing
+        isMergeVar (Var v)
+          | v `elem` merge = Just v
+          | otherwise      = Nothing
         resShapes =
-          nub $ concatMap (mapMaybe notInRes . arrayDims . identType) res
+          nub $ concatMap (mapMaybe isMergeVar . arrayDims . identType) res
