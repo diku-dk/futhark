@@ -39,6 +39,7 @@ import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import Data.Foldable (traverse_)
 import Data.Maybe
+import Data.List
 import Data.Loc
 import Data.Monoid
 import qualified Text.PrettyPrint.Mainland as PP
@@ -60,7 +61,7 @@ import qualified Futhark.TypeCheck as TypeCheck
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 
 -- | A lore containing explicit memory information.
-data ExplicitMemory
+data ExplicitMemory = ExplicitMemory
 
 type Prog = AST.Prog ExplicitMemory
 type PrimOp = AST.PrimOp ExplicitMemory
@@ -195,6 +196,20 @@ instance Lore.Lore ExplicitMemory where
   type LetBound ExplicitMemory = MemSummary
   type FParam   ExplicitMemory = MemSummary
   type ResTypeAttr ExplicitMemory = MemReturn
+  representative = ExplicitMemory
+  loopResultContext _ res mergevars =
+    let shapeContextIdents = loopShapeContext res $ map bindeeIdent mergevars
+        memContextIdents = nub $ mapMaybe memIfNecessary res
+        memSizeContextIdents = nub $ mapMaybe memSizeIfNecessary memContextIdents
+    in memSizeContextIdents <> memContextIdents <> shapeContextIdents
+    where memIfNecessary ident =
+            case find ((==ident) . bindeeIdent) mergevars of
+              Just fparam | MemSummary mem _ <- bindeeLore fparam ->
+                Just mem
+              _ ->
+                Nothing
+          memSizeIfNecessary ident =
+            bindeeIdent <$> find ((==ident) . bindeeIdent) mergevars
 
 instance TypeCheck.Checkable ExplicitMemory where
   checkExpLore = return
