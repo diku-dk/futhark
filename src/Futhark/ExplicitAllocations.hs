@@ -35,16 +35,23 @@ instance MonadFreshNames AllocM where
 
 instance BindableM AllocM where
   type Lore AllocM = ExplicitMemory
-{-
-  mkLetM [v] e@(PrimOp (Rearrange _ perm (Var orig) _)) = do
-    res <- lookupSummary orig
+
+  mkLetM [v] e@(PrimOp (Update _ src _ _ _)) = do
+    res <- lookupSummary src
     case res of
       Just (MemSummary m origfun) -> do
-        let ixfun = IxFun.permute origfun perm
-            pat' = Pattern [Bindee v $ MemSummary m ixfun]
+        let pat' = Pattern [Bindee v $ MemSummary m origfun]
         return $ Let pat' () e
       _ -> basicMkLetM [v] e
--}
+
+  mkLetM [v] e@(PrimOp (SubExp (Var src))) = do
+    res <- lookupSummary src
+    case res of
+      Just (MemSummary m origfun) -> do
+        let pat' = Pattern [Bindee v $ MemSummary m origfun]
+        return $ Let pat' () e
+      _ -> basicMkLetM [v] e
+
   mkLetM pat e = basicMkLetM pat e
 
   mkBodyM bnds res = return $ Body () bnds res
@@ -84,11 +91,7 @@ allocsForPattern pat (ResType ts) = do
         tell ([memsize], [mem])
         return ident'
   return $ memsizes <> mems <> ctxpat' <> vals
-  where boundHere = map identName pat
-        isBoundHere (Constant {}) = False
-        isBoundHere (Var v) = identName v `elem` boundHere
-        ext = any isBoundHere . arrayDims
-        knownShape = mapM known . extShapeDims
+  where knownShape = mapM known . extShapeDims
         known (Free v) = Just v
         known (Ext {}) = Nothing
 
