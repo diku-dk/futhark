@@ -38,7 +38,10 @@ externaliseAction = basicAction "externalise" $
 
 interpretAction :: Show error => (FilePath -> String -> Either error [Value])
                 -> Action
-interpretAction = basicAction "interpreter" . interpret
+interpretAction = polyAction "interpreter" . act
+  where act parser (ExplicitMemory prog) = interpret parser prog
+        act parser (Basic prog)          = interpret parser prog
+
 
 seqCodegenAction :: Action
 seqCodegenAction = explicitMemoryAction "sequential code generator" $
