@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, MultiParamTypeClasses, FlexibleInstances, TypeFamilies, FlexibleContexts, ScopedTypeVariables #-}
+{-# LANGUAGE MultiParamTypeClasses, FlexibleInstances, TypeFamilies, FlexibleContexts, ScopedTypeVariables #-}
 -- |
 --
 -- Perform general rule-based simplification based on data dependency
@@ -13,7 +13,8 @@
 --    "Futhark.Optimise.Simplification.Rules").
 --
 -- If you just want to run the simplifier as simply as possible, you
--- may prefer to use the "Futhark.Optimise.Simplifier" module.
+-- may prefer to use the "Futhark.Optimise.Simplifier" or
+-- "Futhark.Optimise.Simplifier.Simplifiable" modules.
 --
 module Futhark.Optimise.Simplifier.Engine
        ( -- * Monadic interface
@@ -33,18 +34,13 @@ module Futhark.Optimise.Simplifier.Engine
        , simplifyBinding
        , simplifyResult
        , simplifyExp
+       , simplifyFun
+       , simplifyLambda
        , defaultInspectBinding
-         -- * Simple interface
-       , simplifyProg
-       , simplifyOneFun
-       , simplifyOneLambda
        ) where
 
 import Control.Applicative
 import Control.Monad.Writer
-import Control.Monad.Reader
-import Control.Monad.State hiding (State)
-import Control.Monad.RWS
 
 import Data.Either
 import Data.Graph
@@ -199,7 +195,7 @@ bindParams params =
     foldr ST.insertParam vtable params
 
 bindArrayParams :: MonadEngine m =>
-                   [(Param,SubExp)] -> m a -> m a
+                   [(Param,Maybe SubExp)] -> m a -> m a
 bindArrayParams params =
   localVtable $ \vtable ->
     foldr (uncurry ST.insertArrayParam) vtable params
@@ -276,16 +272,16 @@ inDepOrder :: (Proper lore, Aliased lore) =>
               [Binding lore] -> [Binding lore]
 inDepOrder = flattenSCCs . stronglyConnComp . buildGraph
   where buildGraph bnds =
-          [ (bnd, representative $ provides bnd, deps) |
+          [ (bnd, rep $ provides bnd, deps) |
             bnd <- bnds,
-            let deps = [ representative $ provides dep
+            let deps = [ rep $ provides dep
                          | dep <- bnds, dep `mustPrecede` bnd ] ]
 
         -- As all names are unique, a pattern can be uniquely
         -- represented by any of its names.  If the pattern has no
         -- names, then it doesn't matter anyway.
-        representative []    = Nothing
-        representative (x:_) = Just x
+        rep []    = Nothing
+        rep (x:_) = Just x
 
 mustPrecede :: (Proper lore, Aliased lore) =>
                Binding lore -> Binding lore -> Bool
@@ -526,13 +522,13 @@ simplifyLoopOp (DoLoop respat merge loopvar boundexp loopbody loc) = do
 simplifyLoopOp (Map cs fun arrs loc) = do
   cs' <- simplifyCerts cs
   arrs' <- mapM simplifySubExp arrs
-  fun' <- simplifyLambda fun arrs'
+  fun' <- simplifyLambda fun $ map Just arrs'
   return $ Map cs' fun' arrs' loc
 
 simplifyLoopOp (Filter cs fun arrs loc) = do
   cs' <- simplifyCerts cs
   arrs' <- mapM simplifySubExp arrs
-  fun' <- simplifyLambda fun arrs'
+  fun' <- simplifyLambda fun $ map Just arrs'
   return $ Filter cs' fun' arrs' loc
 
 simplifyLoopOp (Reduce cs fun input loc) = do
@@ -540,7 +536,7 @@ simplifyLoopOp (Reduce cs fun input loc) = do
   cs' <- simplifyCerts cs
   acc' <- mapM simplifySubExp acc
   arrs' <- mapM simplifySubExp arrs
-  fun' <- simplifyLambda fun arrs'
+  fun' <- simplifyLambda fun $ map Just arrs'
   return $ Reduce cs' fun' (zip acc' arrs') loc
 
 simplifyLoopOp (Scan cs fun input loc) = do
@@ -548,15 +544,16 @@ simplifyLoopOp (Scan cs fun input loc) = do
   cs' <- simplifyCerts cs
   acc' <- mapM simplifySubExp acc
   arrs' <- mapM simplifySubExp arrs
-  fun' <- simplifyLambda fun arrs'
+  fun' <- simplifyLambda fun $ map Just arrs'
   return $ Scan cs' fun' (zip acc' arrs') loc
 
 simplifyLoopOp (Redomap cs outerfun innerfun acc arrs loc) = do
   cs' <- simplifyCerts cs
   acc' <- mapM simplifySubExp acc
   arrs' <- mapM simplifySubExp arrs
-  outerfun' <- simplifyLambda outerfun []
-  (innerfun', used) <- tapUsage $ simplifyLambda innerfun arrs
+  outerfun' <- simplifyLambda outerfun $
+               replicate (length $ lambdaParams outerfun) Nothing
+  (innerfun', used) <- tapUsage $ simplifyLambda innerfun $ map Just arrs
   (innerfun'', arrs'') <- removeUnusedParams used innerfun' arrs'
   return $ Redomap cs' outerfun' innerfun'' acc' arrs'' loc
   where removeUnusedParams used lam arrinps
@@ -628,7 +625,7 @@ simplifyType t = do dims <- mapM simplifySubExp $ arrayDims t
                     return $ t `setArrayShape` Shape dims
 
 simplifyLambda :: MonadEngine m =>
-                  Lambda (InnerLore m) -> [SubExp]
+                  Lambda (InnerLore m) -> [Maybe SubExp]
                -> m (Lambda (Lore m))
 simplifyLambda (Lambda params body rettype loc) arrs = do
   body' <-
@@ -662,67 +659,6 @@ simplifyCerts = liftM (nub . concat) . mapM check
             _ -> do usedName $ identName idd
                     return [idd]
 
--- Simple implementation of the MonadEngine class, and simple
--- interface to running the simplifier on various things.
-
-newtype SimpleM lore a = SimpleM (RWS
-                                  (Env (SimpleM lore))                     -- Reader
-                                  (Need (Aliases lore))                    -- Writer
-                                  (State (SimpleM lore), NameSource VName) -- State
-                                  a)
-  deriving (Applicative, Functor, Monad,
-            MonadWriter (Need (Aliases lore)),
-            MonadReader (Env (SimpleM lore)),
-            MonadState (State (SimpleM lore), NameSource VName))
-
-instance MonadFreshNames (SimpleM lore) where
-  getNameSource   = snd <$> get
-  putNameSource y = modify $ \(x, _) -> (x,y)
-
-instance (Proper lore, Bindable lore) =>
-         MonadBinder (SimpleM lore) where
-  addBinding      = addBindingEngine
-  collectBindings = collectBindingsEngine
-
-instance (Proper lore, Bindable lore) =>
-         MonadEngine (SimpleM lore) where
-  type InnerLore (SimpleM lore) = lore
-  askEngineEnv = ask
-  localEngineEnv = local
-  tellNeed = tell
-  listenNeed = listen
-  getEngineState   = fst <$> get
-  putEngineState x = modify $ \(_, y) -> (x,y)
-  passNeed = pass
-  simplifyBody = defaultSimplifyBody
-
-instance (Proper lore, Bindable lore) => BindableM (SimpleM lore) where
-  type Lore (SimpleM lore) = Aliases lore
-  mkLetM pat e = do
-    let Let pat' explore _ = mkLet pat $ Aliases.removeExpAliases e
-    return $ Aliases.mkAliasedLetBinding pat' explore e
-  mkBodyM bnds res = do
-    let Body bodylore _ _ = mkBody (map Aliases.removeBindingAliases bnds) res
-    return $ Aliases.mkAliasedBody bodylore bnds res
-
-runSimpleM :: SimpleM lore a
-           -> Env (SimpleM lore)
-           -> VNameSource
-           -> (a, VNameSource)
-runSimpleM (SimpleM m) env src = let (x, (_, src'), _) = runRWS m env (emptyState, src)
-                                 in (x, src')
-
--- | Simplify the given program.  Even if the output differs from the
--- output, meaningful simplification may not have taken place - the
--- order of bindings may simply have been rearranged.
-simplifyProg :: (Proper lore, Bindable lore) =>
-                RuleBook (SimpleM lore)
-             -> Prog lore -> Prog (Aliases lore)
-simplifyProg rules prog =
-  Prog $ fst $ runSimpleM (mapM simplifyFun $ progFunctions prog)
-               (emptyEnv rules $ Just prog) namesrc
-  where namesrc = newNameSourceForProg prog
-
 simplifyFun :: MonadEngine m =>
                FunDec (InnerLore m) -> m (FunDec (Lore m))
 simplifyFun (FunDec fname rettype params body loc) = do
@@ -730,26 +666,3 @@ simplifyFun (FunDec fname rettype params body loc) = do
   body' <- insertAllBindings $ bindParams (map bindeeIdent params) $
            simplifyBody (map diet $ resTypeValues rettype') body
   return $ FunDec fname rettype' params body' loc
-
--- | Simplify the given function.  Even if the output differs from the
--- output, meaningful simplification may not have taken place - the
--- order of bindings may simply have been rearranged.
-simplifyOneFun :: (MonadFreshNames m, Proper lore,
-                   Bindable lore) =>
-                  RuleBook (SimpleM lore)
-               -> FunDec lore -> m (FunDec (Aliases lore))
-simplifyOneFun rules fundec =
-  modifyNameSource $ runSimpleM (simplifyFun fundec) (emptyEnv rules Nothing)
-
--- | Simplify just a single 'Lambda'.
-simplifyOneLambda :: (MonadFreshNames m,
-                      Proper lore, Bindable lore) =>
-                     RuleBook (SimpleM lore)
-                  -> Maybe (Prog lore) -> Lambda lore
-                  -> m (Lambda (Aliases lore))
-simplifyOneLambda rules prog lam = do
-  let simplifyOneLambda' = insertAllBindings $
-                           bindParams (lambdaParams lam) $
-                           simplifyBody (map diet $ lambdaReturnType lam) $ lambdaBody lam
-  body' <- modifyNameSource $ runSimpleM simplifyOneLambda' $ emptyEnv rules prog
-  return $ lam { lambdaBody = body' }

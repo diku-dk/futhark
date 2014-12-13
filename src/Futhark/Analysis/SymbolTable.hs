@@ -208,8 +208,8 @@ insertParam :: Param -> SymbolTable lore -> SymbolTable lore
 insertParam param =
   insertParamWithRange param (Nothing, Nothing)
 
-insertArrayParam :: Param -> SubExp -> SymbolTable lore -> SymbolTable lore
-insertArrayParam param array vtable =
+insertArrayParam :: Param -> Maybe SubExp -> SymbolTable lore -> SymbolTable lore
+insertArrayParam param (Just array) vtable =
   -- We now know that the outer size of 'array' is at least one, and
   -- that the inner sizes are at least zero, since they are array
   -- sizes.
@@ -217,6 +217,9 @@ insertArrayParam param array vtable =
   in case arrayDims $ subExpType array of
     Var v:_ -> (identName v `isAtLeast` 1) vtable'
     _       -> vtable'
+insertArrayParam param Nothing vtable =
+  -- Well, we still know that it's a param...
+  insertParam param vtable
 
 insertLoopVar :: VName -> SubExp -> SymbolTable lore -> SymbolTable lore
 insertLoopVar name bound vtable = insertEntry name bind vtable

@@ -34,6 +34,6 @@ simpleOpts prog = do
 normCopyDeadOpts :: Prog -> Prog
 normCopyDeadOpts = deadCodeElim . simplifyProg
 
-normCopyOneLambda :: MonadFreshNames m => Prog -> Lambda ->
+normCopyOneLambda :: MonadFreshNames m => Prog -> Lambda -> [Maybe SubExp] ->
                      m Lambda
 normCopyOneLambda = simplifyOneLambda

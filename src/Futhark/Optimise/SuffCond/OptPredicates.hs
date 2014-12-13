@@ -177,12 +177,14 @@ analyseExp vtable (LoopOp (DoLoop _ _ i bound body _)) =
                                    Constant {} -> id
 analyseExp vtable (LoopOp (Map _ fun arrs _)) =
   Just $ analyseExpBody vtable' $ lambdaBody fun
-  where vtable' = foldr (uncurry ST.insertArrayParam) vtable $ zip params arrs
+  where vtable' = foldr (uncurry ST.insertArrayParam) vtable $
+                  zip params $ map Just arrs
         params = lambdaParams fun
 analyseExp vtable (LoopOp (Redomap _ outerfun innerfun acc arrs _)) =
   Just $ analyseExpBody vtable' (lambdaBody innerfun) <>
          analyseExpBody vtable (lambdaBody outerfun)
-  where vtable' = foldr (uncurry ST.insertArrayParam) vtable $ zip arrparams arrs
+  where vtable' = foldr (uncurry ST.insertArrayParam) vtable $
+                  zip arrparams $ map Just arrs
         arrparams = drop (length acc) $ lambdaParams innerfun
 analyseExp vtable (If cond tbranch fbranch _ _) =
   Just $ analyseExpBody (ST.updateBounds True cond vtable) tbranch <>
