@@ -49,7 +49,6 @@ import Futhark.Binder
 import Futhark.Substitute
 import qualified Futhark.TypeCheck as TypeCheck
 import Futhark.Analysis.Rephrase
-import qualified Futhark.Optimise.Simplifier.Simplifiable
 
 -- This module could be written much nicer if Haskell had functors
 -- like Standard ML.  Instead, we have to abuse the namespace/module
@@ -88,10 +87,6 @@ instance TypeCheck.Checkable Basic where
 instance Renameable Basic where
 instance Substitutable Basic where
 instance Proper Basic where
-
-instance Futhark.Optimise.Simplifier.Simplifiable.Simplifiable Basic where
-  mkLetS _ pat e = return $ mkLet pat e
-  mkBodyS _ bnds res = return $ mkBody bnds res
 
 instance Bindable Basic where
   mkBody = AST.Body ()
