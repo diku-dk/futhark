@@ -108,6 +108,10 @@ data MemReturn = ReturnsInBlock Ident
                | ReturnsScalar
                deriving (Eq, Ord, Show)
 
+instance FreeIn MemReturn where
+  freeIn (ReturnsInBlock v) = HS.singleton v
+  freeIn _                  = mempty
+
 instance Lore.ResType (ResTypeT MemReturn) where
   resTypeValues = map fst . resTypeElems
   simpleType = mapM simple . resTypeElems

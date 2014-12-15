@@ -1,6 +1,8 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, TypeFamilies #-}
 module Futhark.ExplicitAllocations
-       ( explicitAllocations )
+       ( explicitAllocations
+       , simplifiable
+       )
 where
 
 import Control.Applicative
@@ -8,15 +10,20 @@ import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Writer
 import qualified Data.DList as DL
+import Data.Maybe
 import Data.Loc
 import qualified Data.HashMap.Lazy as HM
 
 import qualified Futhark.Representation.Basic as In
+import Futhark.Representation.Aliases
+  (mkAliasedBody, mkAliasedLetBinding, removeExpAliases)
 import Futhark.MonadFreshNames
 import Futhark.Representation.ExplicitMemory
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 import Futhark.Tools
+import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.ScalExp as SE
+import Futhark.Optimise.Simplifier (Simplifiable (..))
 
 newtype AllocM a = AllocM (ReaderT (HM.HashMap VName MemSummary)
                            (Binder ExplicitMemory)
@@ -136,13 +143,14 @@ bindeeSummary bindee = (bindeeName bindee, bindeeLore bindee)
 bindeesSummary :: [BindeeT MemSummary] -> HM.HashMap VName MemSummary
 bindeesSummary = HM.fromList . map bindeeSummary
 
-runAllocM :: MonadFreshNames m => AllocM FunDec -> m FunDec
-runAllocM (AllocM m) = do
-  (fundec, morebnds) <- runBinder'' $ runReaderT m HM.empty
-  return fundec { funDecBody =
-                     let Body () bnds res = funDecBody fundec
-                     in Body () (morebnds<>bnds) res
-                }
+runAllocM :: MonadFreshNames m => AllocM a -> m a
+runAllocM = runAllocMWithEnv HM.empty
+
+runAllocMWithEnv :: MonadFreshNames m =>
+                    HM.HashMap VName MemSummary
+                 -> AllocM a
+                 -> m a
+runAllocMWithEnv env (AllocM m) = liftM fst $ runBinder'' $ runReaderT m env
 
 allocInFParams :: [In.FParam] -> ([FParam] -> AllocM a)
                -> AllocM a
@@ -297,3 +305,15 @@ allocInLambda :: In.Lambda -> AllocM Lambda
 allocInLambda lam = do
   body <- allocInBody $ lambdaBody lam
   return $ lam { lambdaBody = body }
+
+simplifiable :: Simplifiable ExplicitMemory
+simplifiable = Simplifiable mkLetS' mkBodyS'
+  where mkLetS' vtable pat e = do
+          Let pat' lore _ <- runAllocMWithEnv env (mkLetM pat $ removeExpAliases e)
+          return $ mkAliasedLetBinding pat' lore e
+          where env = HM.fromList $ mapMaybe entryToMemSummary $
+                      HM.toList $ ST.bindings vtable
+                entryToMemSummary (k,entry) = do
+                  ((_, summary), _) <- ST.entryBinding entry
+                  return (k, summary)
+        mkBodyS' _ bnds res = return $ mkAliasedBody () bnds res

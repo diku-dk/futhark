@@ -30,7 +30,8 @@ import qualified Futhark.Analysis.AlgSimplify as AS
 import Futhark.Tools
 import qualified Futhark.Optimise.Simplifier.Engine as Simplify
 import Futhark.Optimise.Simplifier.Rule (RuleBook)
-import Futhark.Optimise.Simplifier (simplifyFun)
+import Futhark.Optimise.Simplifier
+  (simplifyFunWithStandardRules, bindableSimplifiable)
 import Futhark.Substitute
 import Futhark.Analysis.Rephrase
 import qualified Futhark.Representation.AST.Lore as Lore
@@ -112,7 +113,7 @@ generateOptimisedPredicates'
          rephraseWithInvariance body
   case res of
     (body', _) -> do
-      fundec <- simplifyFun $
+      fundec <- simplifyFunWithStandardRules bindableSimplifiable $
                 FunDec fname' rettype params (removeBodyLore body') loc
       return $ Just fundec
     _          -> return Nothing

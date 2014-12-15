@@ -46,7 +46,8 @@ class (Lore.Lore lore, PrettyLore lore,
        FreeIn (Lore.Exp lore),
        FreeIn (Lore.LetBound lore),
        FreeIn (Lore.Body lore),
-       FreeIn (Lore.FParam lore)) => Proper lore where
+       FreeIn (Lore.FParam lore),
+       FreeIn (Lore.ResTypeAttr lore)) => Proper lore where
 
 -- | The class of lores that can be constructed solely from an
 -- expression, within some monad.  Very important: the methods should

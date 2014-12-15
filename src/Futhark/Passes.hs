@@ -16,6 +16,8 @@ module Futhark.Passes
   )
 where
 
+import Control.Applicative
+
 import Futhark.Optimise.SimpleOpts
 import Futhark.Optimise.Fusion
 import qualified Futhark.FirstOrderTransform as FOT
@@ -35,8 +37,11 @@ uttransform = unfailableBasicPass "debugging annotation removal"
               untraceProg
 
 eotransform :: Pass
-eotransform = basicPass "enabling optimations"
-              simpleOpts
+eotransform = polyPass "enabling optimations" op
+  where op (Basic prog)          = canFail "" (Just $ Basic prog) $
+                                   Basic <$> simpleOpts bindableSimplifiable prog
+        op (ExplicitMemory prog) = canFail "" (Just $ ExplicitMemory prog) $
+                                   ExplicitMemory <$> simpleOpts Futhark.ExplicitAllocations.simplifiable prog
 
 hotransform :: Pass
 hotransform = basicPass "higher-order optimisations"

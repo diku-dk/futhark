@@ -6,11 +6,15 @@ module Futhark.Optimise.SimpleOpts
   , normCopyDeadOpts
   , normCopyOneLambda
   , Error(..)
+    -- * Re-exports
+  , bindableSimplifiable
   )
   where
 
-import Futhark.Representation.Basic
+import Futhark.Representation.AST
+import qualified Futhark.Representation.Basic as Basic
 import Futhark.MonadFreshNames
+import Futhark.Binder (Proper)
 
 import Futhark.Optimise.InliningDeadFun
 import Futhark.Optimise.Simplifier
@@ -21,19 +25,24 @@ import Futhark.Optimise.Errors
 --import qualified Futhark.Analysis.ScalExp as ScExp
 --import Debug.Trace
 
-simpleOpts :: Prog -> Either Error Prog
-simpleOpts prog = do
+simpleOpts :: Proper lore =>
+              Simplifiable lore -> Prog lore -> Either Error (Prog lore)
+simpleOpts simpl prog = do
 --  esc <- AS.canSimplify 3
 --  let prog' = trace (ScExp.ppScalExp esc) prog
-  let prog_enopt1   = normCopyDeadOpts prog
-      prog_enopt2   = normCopyDeadOpts prog_enopt1
-      prog_flat_opt = normCopyDeadOpts prog_enopt2
+  let prog_enopt1   = normCopyDeadOpts simpl prog
+      prog_enopt2   = normCopyDeadOpts simpl prog_enopt1
+      prog_flat_opt = normCopyDeadOpts simpl prog_enopt2
 
-  return $ normCopyDeadOpts prog_flat_opt
+  return $ normCopyDeadOpts simpl prog_flat_opt
 
-normCopyDeadOpts :: Prog -> Prog
-normCopyDeadOpts = deadCodeElim . simplifyProg
+normCopyDeadOpts :: Proper lore =>
+                    Simplifiable lore -> Prog lore -> Prog lore
+normCopyDeadOpts simpl = deadCodeElim . simplifyProgWithStandardRules simpl
 
-normCopyOneLambda :: MonadFreshNames m => Prog -> Lambda -> [Maybe SubExp] ->
-                     m Lambda
-normCopyOneLambda = simplifyOneLambda
+normCopyOneLambda :: MonadFreshNames m =>
+                     Basic.Prog
+                  -> Basic.Lambda
+                  -> [Maybe SubExp]
+                  -> m Basic.Lambda
+normCopyOneLambda = simplifyLambdaWithStandardRules bindableSimplifiable
