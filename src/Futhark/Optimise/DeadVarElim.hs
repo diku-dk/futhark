@@ -12,7 +12,7 @@ import Control.Monad.Writer
 
 import qualified Data.HashSet as HS
 
-import Futhark.Representation.Basic
+import Futhark.Representation.AST
 import Futhark.Binder
 
 -----------------------------------------------------------------
@@ -56,17 +56,17 @@ changed m = pass collect
         return (x, const $ res { resSuccess = True })
 
 -- | Applies Dead-Code Elimination to an entire program.
-deadCodeElim :: Prog -> Prog
+deadCodeElim :: Proper lore => Prog lore -> Prog lore
 deadCodeElim = Prog . map deadCodeElimFun . progFunctions
 
 -- | Applies Dead-Code Elimination to just a single function.
-deadCodeElimFun :: FunDec -> FunDec
+deadCodeElimFun :: Proper lore => FunDec lore -> FunDec lore
 deadCodeElimFun (FunDec fname rettype args body loc) =
   let body' = deadCodeElimBody body
   in FunDec fname rettype args body' loc
 
 -- | Applies Dead-Code Elimination to just a single body.
-deadCodeElimBody :: Body -> Body
+deadCodeElimBody :: Proper lore => Body lore -> Body lore
 deadCodeElimBody = fst . runDCElimM . deadCodeElimBodyM
 
 --------------------------------------------------------------------
@@ -79,24 +79,28 @@ deadCodeElimSubExp :: SubExp -> DCElimM SubExp
 deadCodeElimSubExp (Var ident)      = Var <$> deadCodeElimIdent ident
 deadCodeElimSubExp (Constant v loc) = return $ Constant v loc
 
-deadCodeElimBodyM :: Body -> DCElimM Body
+deadCodeElimBodyM :: Proper lore => Body lore -> DCElimM (Body lore)
 
-deadCodeElimBodyM (Body () (Let pat _ e:bnds) res) = do
+deadCodeElimBodyM (Body bodylore (Let pat explore e:bnds) res) = do
   let idds = patternNames pat
-  (Body () bnds' res', noref) <-
+  seen $ freeNamesIn explore
+  (Body _ bnds' res', noref) <-
     collectRes idds $ do
       _ <- collectRes idds $ deadCodeElimPat pat
-      deadCodeElimBodyM $ Body () bnds res
+      deadCodeElimBodyM $ Body bodylore bnds res
   if noref
-  then changed $ return $ Body () bnds' res'
+  then changed $ return $ Body bodylore bnds' res'
   else do e' <- deadCodeElimExp e
-          return $ Body () (mkLet (patternIdents pat) e':bnds') res'
+          return $ Body bodylore
+                   (Let pat explore e':bnds') res'
 
-deadCodeElimBodyM (Body () [] (Result cs es loc)) =
-  Body () [] <$> (Result <$> mapM deadCodeElimIdent cs <*>
-                  mapM deadCodeElimSubExp es <*> pure loc)
+deadCodeElimBodyM (Body bodylore [] (Result cs es loc)) = do
+  seen $ freeNamesIn bodylore
+  Body bodylore [] <$>
+    (Result <$> mapM deadCodeElimIdent cs <*>
+     mapM deadCodeElimSubExp es <*> pure loc)
 
-deadCodeElimExp :: Exp -> DCElimM Exp
+deadCodeElimExp :: Proper lore => Exp lore -> DCElimM (Exp lore)
 deadCodeElimExp (LoopOp (DoLoop respat merge i bound body loc)) = do
   let (mergepat, mergeexp) = unzip merge
   mapM_ (deadCodeElimBnd . bindeeIdent) mergepat
@@ -114,19 +118,13 @@ deadCodeElimExp e = mapExpM mapper e
                  , mapOnCertificates = mapM deadCodeElimIdent
                  , mapOnType = deadCodeElimType
                  , mapOnValue = return
-                 , mapOnResType = deadCodeElimResType
-                 , mapOnFParam = deadCodeElimFParam
+                 , mapOnResType = \rt -> do
+                   seen $ freeNamesIn rt
+                   return rt
+                 , mapOnFParam = \fparam -> do
+                   seen $ freeNamesIn fparam
+                   return fparam
                  }
-
-deadCodeElimFParam :: FParam -> DCElimM FParam
-deadCodeElimFParam fparam = do
-  tell $ DCElimRes False $ freeNamesIn fparam
-  return fparam
-
-deadCodeElimResType :: ResType -> DCElimM ResType
-deadCodeElimResType rt = do
-  tell $ DCElimRes False $ freeNamesIn rt
-  return rt
 
 deadCodeElimIdent :: Ident -> DCElimM Ident
 deadCodeElimIdent ident@(Ident vnm t _) = do
@@ -134,7 +132,7 @@ deadCodeElimIdent ident@(Ident vnm t _) = do
   dims <- mapM deadCodeElimSubExp $ arrayDims t
   return ident { identType = t `setArrayShape` Shape dims }
 
-deadCodeElimPat :: Pattern -> DCElimM ()
+deadCodeElimPat :: Pattern lore -> DCElimM ()
 deadCodeElimPat = mapM_ deadCodeElimBnd . patternIdents
 
 deadCodeElimBnd :: Ident -> DCElimM ()
@@ -145,9 +143,13 @@ deadCodeElimType t = do
   dims <- mapM deadCodeElimSubExp $ arrayDims t
   return $ t `setArrayDims` dims
 
-deadCodeElimLambda :: Lambda -> DCElimM Lambda
+deadCodeElimLambda :: Proper lore =>
+                      Lambda lore -> DCElimM (Lambda lore)
 deadCodeElimLambda (Lambda params body rettype pos) = do
   body' <- deadCodeElimBodyM body
   mapM_ deadCodeElimBnd params
   mapM_ deadCodeElimType rettype
   return $ Lambda params body' rettype pos
+
+seen :: Names -> DCElimM ()
+seen = tell . DCElimRes False
