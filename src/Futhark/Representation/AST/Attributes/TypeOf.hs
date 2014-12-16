@@ -12,6 +12,7 @@ module Futhark.Representation.AST.Attributes.TypeOf
        , valueShapeContext
        , subExpShapeContext
        , loopShapeContext
+       , loopExtType
        )
        where
 
@@ -21,7 +22,7 @@ import Data.Monoid
 import qualified Data.HashSet as HS
 
 import Futhark.Representation.AST.Syntax
-import Futhark.Representation.AST.Lore (Lore)
+import Futhark.Representation.AST.Lore (Lore, loopResType, representative)
 import Futhark.Representation.AST.ResType hiding (ResType)
 import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Patterns
@@ -93,10 +94,9 @@ primOpType (Conjoin _ _) =
 primOpType (Alloc e _) =
   [Mem e]
 
-loopOpType :: Lore lore => LoopOp lore -> ResType lore
+loopOpType :: forall lore.Lore lore => LoopOp lore -> ResType lore
 loopOpType (DoLoop res merge _ _ _ _) =
-  existentialiseType bound $ staticResType $ map identType res
-  where bound = HS.fromList $ map (bindeeName . fst) merge
+  loopResType (representative :: lore) res $ map fst merge
 loopOpType (Map _ f arrs _) =
   staticResType $ mapType f $ map subExpType arrs
 loopOpType (Reduce _ fun _ _) =
@@ -117,7 +117,7 @@ typeOf (Apply _ _ t _) = t
 
 bodyType :: Lore lore => Body lore -> ResType lore
 bodyType (Body _ bnds res) =
-  existentialiseType bound $
+  bodyResType bound $
   staticResType $ map subExpType $ resultSubExps res
   where boundInLet (Let pat _ _) = patternNames pat
         bound = HS.fromList $ concatMap boundInLet bnds
@@ -142,3 +142,8 @@ loopShapeContext res merge = resShapes
           | otherwise      = Nothing
         resShapes =
           nub $ concatMap (mapMaybe isMergeVar . arrayDims . identType) res
+
+loopExtType :: [Ident] -> [Ident] -> [ExtType]
+loopExtType res merge =
+  existentialiseExtTypes inaccessible $ staticShapes $ map identType res
+  where inaccessible = HS.fromList $ map identName merge

@@ -44,6 +44,8 @@ class (Show (LetBound l), Show (Exp l), Show (Body l), Show (FParam l),
   -- constitute the context.
   loopResultContext :: l -> [Ident] -> [Bindee (FParam l)] -> [Ident]
 
+  loopResType :: l -> [Ident] -> [Bindee (FParam l)] -> ResTypeT (ResTypeAttr l)
+
 -- | A simple 'ResType' structure that is just a list of pairs of
 -- shape-existential types and annotations.
 newtype ResTypeT annot =
@@ -62,5 +64,5 @@ instance ResType (ResTypeT ()) where
     extResType $ resTypeValues rt1 `generaliseExtTypes` resTypeValues rt2
   staticResType = extResType . staticShapes
   resTypeValues (ResType ts) = map fst ts
-  existentialiseType inaccessible ts =
+  bodyResType inaccessible ts =
     extResType $ existentialiseExtTypes inaccessible $ resTypeValues ts

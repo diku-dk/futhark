@@ -104,6 +104,8 @@ instance Lore.Lore lore => Lore.Lore (Aliases lore) where
 
   loopResultContext (Aliases lore) res merge =
     Lore.loopResultContext lore res $ map (removeFParamAliases $ Aliases lore) merge
+  loopResType (Aliases lore) res merge =
+    Lore.loopResType lore res $ map (removeFParamAliases $ Aliases lore) merge
 
 type Prog lore = AST.Prog (Aliases lore)
 type PrimOp lore = AST.PrimOp (Aliases lore)

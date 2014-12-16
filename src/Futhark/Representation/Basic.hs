@@ -62,6 +62,8 @@ instance Lore.Lore Basic where
 
   loopResultContext _ res merge =
     loopShapeContext res $ map bindeeIdent merge
+  loopResType _ res merge =
+    AST.ResType [ (t, ()) | t <- loopExtType res $ map bindeeIdent merge ]
 
 type Prog = AST.Prog Basic
 type PrimOp = AST.PrimOp Basic

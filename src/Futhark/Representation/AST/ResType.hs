@@ -27,4 +27,4 @@ class (Show rt, Eq rt, Ord rt, Monoid rt) => ResType rt where
   -- | Return the non-context types in the 'ResType'.
   resTypeValues :: rt -> [ExtType]
 
-  existentialiseType :: Names -> rt -> rt
+  bodyResType :: Names -> rt -> rt

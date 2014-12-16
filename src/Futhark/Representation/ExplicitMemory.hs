@@ -114,10 +114,13 @@ instance FreeIn MemReturn where
 
 instance Lore.ResType (ResTypeT MemReturn) where
   resTypeValues = map fst . resTypeElems
+
   simpleType = mapM simple . resTypeElems
     where simple (_, ReturnsNewBlock {}) = Nothing
           simple (t, _)                  = hasStaticShape t
+
   staticResType = extResType . staticShapes
+
   generaliseResTypes rt1 rt2 =
     let (ts1,attrs1) = unzip $ resTypeElems rt1
         (ts2,attrs2) = unzip $ resTypeElems rt2
@@ -128,6 +131,7 @@ instance Lore.ResType (ResTypeT MemReturn) where
     where generaliseMemReturn (ReturnsNewBlock _) _ = newBlock
           generaliseMemReturn _ (ReturnsNewBlock _) = newBlock
           generaliseMemReturn r               _     = return r
+
   extResType ts =
     AST.ResType $ evalState (mapM addAttr ts) $ startOfFreeIDRange ts
     where addAttr (Basic t) = return (Basic t, ReturnsScalar)
@@ -137,7 +141,8 @@ instance Lore.ResType (ResTypeT MemReturn) where
                                  put $ i + 1
                                  return (t, ReturnsNewBlock i)
             | otherwise = return (t, ReturnsInAnyBlock)
-  existentialiseType inaccessible (AST.ResType xs) =
+
+  bodyResType inaccessible (AST.ResType xs) =
     let (ts,attrs) = unzip xs
         ts'        = existentialiseExtTypes inaccessible ts
         attrs'     = evalState (zipWithM replaceAttr ts' attrs) (0,HM.empty,HM.empty)
@@ -200,7 +205,9 @@ instance Lore.Lore ExplicitMemory where
   type LetBound ExplicitMemory = MemSummary
   type FParam   ExplicitMemory = MemSummary
   type ResTypeAttr ExplicitMemory = MemReturn
+
   representative = ExplicitMemory
+
   loopResultContext _ res mergevars =
     let shapeContextIdents = loopShapeContext res $ map bindeeIdent mergevars
         memContextIdents = nub $ mapMaybe memIfNecessary res
@@ -214,6 +221,23 @@ instance Lore.Lore ExplicitMemory where
                 Nothing
           memSizeIfNecessary ident =
             bindeeIdent <$> find ((==ident) . bindeeIdent) mergevars
+
+  loopResType _ res mergevars =
+    AST.ResType $ evalState (mapM typeWithAttr $
+                             zip (map identName res) $
+                             loopExtType res $ map bindeeIdent mergevars) 0
+    where typeWithAttr (resname, t) =
+            case (t,
+                  bindeeLore <$> find ((==resname) . bindeeName) mergevars) of
+              (Array {}, Just (MemSummary mem _))
+                | isMergeVar resname -> do
+                  i <- get
+                  put $ i + 1
+                  return (t, ReturnsNewBlock i)
+                | otherwise ->
+                  return (t, ReturnsInBlock mem)
+              _ -> return (t, ReturnsScalar)
+          isMergeVar = flip elem $ map bindeeName mergevars
 
 instance TypeCheck.Checkable ExplicitMemory where
   checkExpLore = return
