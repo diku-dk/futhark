@@ -17,11 +17,16 @@ import Text.PrettyPrint.Mainland hiding (pretty)
 import qualified Text.PrettyPrint.Mainland as PP
 
 import Futhark.Representation.AST.Lore (Lore)
+import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes
 
 -- | The class of lores whose annotations can be prettyprinted.
-class (Lore lore, Pretty (ResType lore), Pretty (Pattern lore)) => PrettyLore lore where
+class (Lore lore,
+       Pretty (ResType lore),
+       Pretty (Pattern lore),
+       Pretty (Lore.LetBound lore),
+       Pretty (Lore.FParam lore)) => PrettyLore lore where
   ppBindingLore :: Binding lore -> Maybe Doc
   ppBindingLore = const Nothing
   ppFunDecLore :: FunDec lore -> Maybe Doc
@@ -93,6 +98,11 @@ bindingAnnotation bnd doc =
 
 instance Pretty (PatternT lore) where
   ppr = ppPattern . patternIdents
+
+instance Pretty annot => Pretty (BindeeT annot) where
+  ppr bindee = ppr (bindeeType bindee) <+>
+               ppr (bindeeIdent bindee) <+>
+               parens (ppr $ bindeeLore bindee)
 
 instance PrettyLore lore => Pretty (Binding lore) where
   ppr bnd@(Let pat _ e) =

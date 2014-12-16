@@ -102,6 +102,11 @@ instance Rename MemSummary where
   rename Scalar =
     return Scalar
 
+instance PP.Pretty MemSummary where
+  ppr Scalar = PP.text "scalar"
+  ppr (MemSummary mem ixfun) =
+    PP.ppr (identName mem) <> PP.text "->" <> PP.ppr ixfun
+
 data MemReturn = ReturnsInBlock Ident
                | ReturnsInAnyBlock
                | ReturnsNewBlock Int

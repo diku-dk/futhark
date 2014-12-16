@@ -93,6 +93,9 @@ instance Substitute Names' where
 instance FreeIn Names' where
   freeIn = const mempty
 
+instance PP.Pretty Names' where
+  ppr = PP.commasep . map PP.ppr . HS.toList . unNames
+
 instance Lore.Lore lore => Lore.Lore (Aliases lore) where
   type LetBound (Aliases lore) = (Names', Lore.LetBound lore)
   type Exp (Aliases lore) = (Names', Lore.Exp lore)
