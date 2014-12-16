@@ -25,7 +25,6 @@ module Futhark.Tools
   , insertBindingsM
   , mapResultM
   , mapResult
-  , setBodyResult
 
   , foldBinOp
   , binOpLambda
@@ -267,11 +266,6 @@ mapResult :: Bindable lore =>
 mapResult f (Body _ bnds res) =
   let Body _ bnds2 newres = f res
   in mkBody (bnds<>bnds2) newres
-
--- | @setBodyResult result body@ sets the tail end of @body@ (the
--- 'Result' part) to @result@.
-setBodyResult :: Bindable lore => Body lore -> Body lore -> Body lore
-setBodyResult result = mapResult $ const result
 
 copyConsumed :: (Proper (Lore m), MonadBinder m) => Body (Lore m) -> m (Body (Lore m))
 copyConsumed e

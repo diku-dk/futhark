@@ -198,9 +198,10 @@ internaliseExp desc (E.DoLoop mergepat mergeexp i bound loopbody letbody loc) = 
   (loopbody', mergepat', respat) <- bindingParams mergeparams $ \shapepat mergepat' -> do
     loopbody' <- internaliseBody loopbody
     let Result cs ses resloc = bodyResult loopbody'
-        loopbody'' = setBodyResult
-                     (resultBody cs (concatMap subExpShape ses++ses) resloc)
-                     loopbody'
+        loopbody'' =
+          loopbody' {
+            bodyResult = Result cs (concatMap subExpShape ses++ses) resloc
+            }
     return (loopbody'',
             shapepat ++ mergepat',
             mergepat')
