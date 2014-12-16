@@ -80,7 +80,7 @@ ci() {
 
 mail() {
     if isBot; then
-        mailx -s "Futhark integration error" "$mail" -- -r $frommail
+        mailx -s "Futhark integration error" "$mail" -f $frommail
     else
         echo "Build failed, but since I am not concieggs, I will not send any email."
         echo "The contents of the email would have been as follows."
