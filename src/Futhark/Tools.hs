@@ -231,10 +231,8 @@ makeLambda params body = do
         }
 
 -- | Conveniently construct a body that contains no bindings.
-resultBody :: forall lore.Bindable lore => Certificates -> [SubExp] -> SrcLoc -> Body lore
-resultBody cs ses loc = mkBody bnds $ Result cs ses loc
-  where bnds :: [Binding lore]
-        bnds = []
+resultBody :: Bindable lore => Certificates -> [SubExp] -> SrcLoc -> Body lore
+resultBody cs ses loc = mkBody [] $ Result cs ses loc
 
 -- | Conveniently construct a body that contains no bindings - but
 -- this time, monadically!
