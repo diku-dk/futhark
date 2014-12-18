@@ -51,7 +51,7 @@ performCSE _ (esubsts, nsubsts) (Let pat lore e) =
 
     Just subpat -> do
       lets <-
-        forM (zip (patternIdents pat) $ patternIdents subpat) $ \(p,v) ->
-          mkLetM [p] $ PrimOp $ SubExp $ Var v
+        forM (zip (patternNames pat) $ patternIdents subpat) $ \(p,v) ->
+          mkLetNamesM [p] $ PrimOp $ SubExp $ Var v
       return (lets, (esubsts, mkSubsts pat subpat `HM.union` nsubsts))
   where e' = substituteNames nsubsts e

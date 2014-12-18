@@ -161,7 +161,7 @@ inliner funs = identityMapper {
                }
 
 inlineInBinding :: [FunDec] -> Binding -> Binding
-inlineInBinding inlcallees (Let pat _ e) = mkLetPat pat $ mapExp (inliner inlcallees) e
+inlineInBinding inlcallees (Let pat () e) = Let pat () $ mapExp (inliner inlcallees) e
 
 inlineInLambda :: [FunDec] -> Lambda -> Lambda
 inlineInLambda inlcallees (Lambda params body ret loc) =

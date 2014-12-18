@@ -238,9 +238,13 @@ mkAliasedLetBinding pat explore e =
   Let (addAliasesToPattern pat e) (Names' $ consumedInExp e, explore) e
 
 instance Bindable lore => Bindable (Aliases lore) where
-  mkLet vs e =
-    let Let pat explore _ = mkLet vs $ removeExpAliases e
-    in mkAliasedLetBinding pat explore e
+  mkLet pat e =
+    let Let pat' explore _ = mkLet pat $ removeExpAliases e
+    in mkAliasedLetBinding pat' explore e
+
+  mkLetNames names e = do
+    Let pat explore _ <- mkLetNames names $ removeExpAliases e
+    return $ mkAliasedLetBinding pat explore e
 
   mkBody bnds res =
     let AST.Body bodylore _ _ = mkBody (map removeBindingAliases bnds) res

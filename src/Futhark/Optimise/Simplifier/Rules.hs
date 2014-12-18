@@ -79,8 +79,8 @@ liftIdentityMapping _ (Let pat _ (LoopOp (Map cs fun arrs loc))) =
           fun' = fun { lambdaBody = (lambdaBody fun) { bodyResult = lambdaRes }
                      , lambdaReturnType = rettype'
                      }
-      mapM_ (uncurry letBindPat) invariant
-      letBind (map bindeeIdent pat') $ LoopOp $ Map cs fun' arrs loc
+      mapM_ (uncurry letBind) invariant
+      letBindNames_ (map bindeeName pat') $ LoopOp $ Map cs fun' arrs loc
   where inputMap = HM.fromList $ zip (map identName $ lambdaParams fun) arrs
         free = freeInBody $ lambdaBody fun
         rettype = lambdaReturnType fun
@@ -123,18 +123,18 @@ removeReplicateMapping vtable (Let pat _ (LoopOp (Map cs fun arrs loc)))
       n = arraysSize 0 $ map subExpType arrs
       Result _ ses resloc = bodyResult $ lambdaBody fun
       mapres = bodyBindings $ lambdaBody fun
-  mapM_ (uncurry letBind) parameterBnds
+  mapM_ (uncurry letBindNames) parameterBnds
   case arrs' of
     [] -> do mapM_ addBinding mapres
-             sequence_ [ letBindPat p $ PrimOp $ Replicate n e resloc
+             sequence_ [ letBind p $ PrimOp $ Replicate n e resloc
                        | (p,e) <- zip (splitPattern pat) ses ]
-    _  -> letBindPat pat $ LoopOp $ Map cs fun' arrs' loc
+    _  -> letBind_ pat $ LoopOp $ Map cs fun' arrs' loc
   where (paramsAndArrs, parameterBnds) =
           partitionEithers $ zipWith isReplicate (lambdaParams fun) arrs
 
         isReplicate p (Var v)
           | Just (Replicate _ e _) <- asPrimOp =<< ST.lookupExp (identName v) vtable =
-          Right ([p], PrimOp $ SubExp e)
+          Right ([identName p], PrimOp $ SubExp e)
         isReplicate p e =
           Left  (p, e)
 
@@ -150,7 +150,7 @@ removeDeadMapping (_, used) (Let pat _ (LoopOp (Map cs fun arrs loc))) =
                  , lambdaReturnType = ts'
                  }
   in if pat /= Pattern pat'
-     then letBindPat (Pattern pat') $ LoopOp $ Map cs fun' arrs loc
+     then letBind_ (Pattern pat') $ LoopOp $ Map cs fun' arrs loc
      else cannotSimplify
 removeDeadMapping _ _ = cannotSimplify
 
@@ -163,7 +163,7 @@ removeUnusedLoopResult (_, used) (Let pat _ (LoopOp (DoLoop respat merge i bound
       implpat' = filter ((`elem` ctxrefs) . identName . snd) implpat
       pat' = map fst $ implpat'++explpat'
       respat' = map snd explpat'
-  in letBindPat (Pattern pat') $ LoopOp $ DoLoop respat' merge i bound body loc
+  in letBind_ (Pattern pat') $ LoopOp $ DoLoop respat' merge i bound body loc
   where -- | Check whether the variable binding is used afterwards OR
         -- is responsible for some used existential part.
         keep bindee =
@@ -214,9 +214,9 @@ removeRedundantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge i bound 
        -- removal will eventually get rid of them.  Some care is
        -- necessary to handle unique bindings.
        body'' <- insertBindingsM $ do
-         mapM_ (uncurry letBind) $ dummyBindings discard
+         mapM_ (uncurry letBindNames) $ dummyBindings discard
          return body'
-       letBindPat pat $ LoopOp $ DoLoop respat merge' i bound body'' loc
+       letBind_ pat $ LoopOp $ DoLoop respat merge' i bound body'' loc
   where (mergepat, _) = unzip merge
         usedInResult = (`elem` respat) . bindeeIdent
         patDimNames = mconcat $ map freeNamesInSubExp $
@@ -225,8 +225,8 @@ removeRedundantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge i bound 
 
         dummyBindings = map dummyBinding
         dummyBinding ((v,e), _)
-          | unique (bindeeType v) = ([bindeeIdent v], PrimOp $ Copy e $ srclocOf v)
-          | otherwise             = ([bindeeIdent v], PrimOp $ SubExp e)
+          | unique (bindeeType v) = ([bindeeName v], PrimOp $ Copy e $ srclocOf v)
+          | otherwise             = ([bindeeName v], PrimOp $ SubExp e)
 
         allDependencies = dataDependencies body
         dependencies (Constant _ _) = HS.empty
@@ -257,8 +257,8 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge idd n
           pat' = map fst $ implpat'++explpat'
           respat' = map snd explpat'
       in do forM_ (invariant ++ implinvariant') $ \(v1,v2) ->
-              letBind [v1] $ PrimOp $ SubExp v2
-            letBindPat (Pattern pat') $
+              letBindNames_ [identName v1] $ PrimOp $ SubExp v2
+            letBind_ (Pattern pat')
               LoopOp $ DoLoop respat' merge' idd n loopbody' loc
   where Result cs ses resloc = bodyResult loopbody
         taggedpat = zip (patternBindees pat) $
@@ -299,7 +299,7 @@ type LetTopDownRule lore u = VarLookup lore -> PrimOp lore -> Maybe (PrimOp lore
 
 letRule :: MonadBinder m => LetTopDownRule (Lore m) u -> TopDownRule m
 letRule rule vtable (Let pat _ (PrimOp op)) =
-  letBindPat pat =<< liftMaybe (PrimOp <$> rule look op)
+  letBind_ pat =<< liftMaybe (PrimOp <$> rule look op)
   where look = (`ST.lookupExp` vtable)
 letRule _ _ _ =
   cannotSimplify
@@ -632,7 +632,7 @@ evaluateBranch _ (Let pat _ (If e1 tb fb t _))
   let ses = resultSubExps $ bodyResult branch
       ses' = subExpShapeContext (resTypeValues t) ses ++ ses
   in do mapM_ addBinding $ bodyBindings branch
-        sequence_ [ letBindPat (Pattern [p]) $ PrimOp $ SubExp se
+        sequence_ [ letBind (Pattern [p]) $ PrimOp $ SubExp se
                   | (p,se) <- zip (patternBindees pat) ses']
   where checkBranch
           | isCt1 e1  = Just tb
@@ -651,7 +651,7 @@ simplifyBoolBranch _
     (Body _ [] (Result _ [Constant (LogVal True) _] _))
     (Body _ [] (Result _ [Constant (LogVal False) _] _))
     _ _)) =
-  letBindPat pat $ PrimOp $ SubExp cond
+  letBind_ pat $ PrimOp $ SubExp cond
 -- When typeOf(x)==bool, if c then x else y == (c && x) || (!c && y)
 simplifyBoolBranch _ (Let pat _ (If cond tb fb ts loc))
   | Body _ [] (Result [] [tres] _) <- tb,
@@ -663,7 +663,7 @@ simplifyBoolBranch _ (Let pat _ (If cond tb fb ts loc))
                     (eBinOp LogAnd (pure $ PrimOp $ Not cond loc)
                      (pure $ PrimOp $ SubExp fres) (Basic Bool) loc)
        (Basic Bool) loc
-  letBindPat pat e
+  letBind_ pat e
 simplifyBoolBranch _ _ = cannotSimplify
 
 hoistBranchInvariant :: MonadBinder m => TopDownRule m
@@ -677,11 +677,11 @@ hoistBranchInvariant _ (Let pat _ (If e1 tb fb ts loc)) = do
       tb' = tb { bodyResult = Result tcs tses' tresloc }
       fb' = fb { bodyResult = Result fcs fses' fresloc }
   if invariant -- Was something hoisted?
-     then letBindPat (Pattern pat') $ If e1 tb' fb' (ResType ts') loc
+     then letBind_ (Pattern pat') $ If e1 tb' fb' (ResType ts') loc
      else cannotSimplify
   where branchInvariant (pat', res, invariant) (v, (tse, fse, t))
           | tse == fse = do
-            letBindPat (Pattern [v]) $ PrimOp $ SubExp tse
+            letBind_ (Pattern [v]) $ PrimOp $ SubExp tse
             return (pat', res, True)
           | otherwise  =
             return (v:pat', (tse,fse,t):res, invariant)
@@ -693,7 +693,7 @@ simplifyScalExp vtable (Let pat _ e)
     Right new@(SE.Val _) <- AS.simplify orig loc ranges,
     orig /= new = do
       e' <- SE.fromScalExp' loc new
-      letBindPat pat e'
+      letBind_ pat e'
   where loc = srclocOf e
         ranges = HM.filter nonEmptyRange $ HM.map toRep $ ST.bindings vtable
         toRep entry = (ST.bindingDepth entry, lower, upper)
@@ -708,7 +708,7 @@ removeUnnecessaryCopy (_,used) (Let (Pattern [v]) _ (PrimOp (Copy se _)))
     -- FIXME: This needs to be fixed, but it is trickier than one
     -- might think...
     False =
-    letBind [bindeeIdent v] $ PrimOp $ SubExp se
+    letBindNames_ [bindeeName v] $ PrimOp $ SubExp se
 removeUnnecessaryCopy _ _ = cannotSimplify
 
 -- | Remove the return values of a branch, that are not actually used
@@ -730,8 +730,8 @@ removeDeadBranchResult (_, used) (Let pat _ (If e1 tb fb ts loc))
       tb' = tb { bodyResult = Result tcs (pick tses) tresloc }
       fb' = fb { bodyResult = Result fcs (pick fses) fresloc }
       ts' = pick $ resTypeElems ts
-      pat' = pick $ patternIdents pat
-  in letBind pat' $ If e1 tb' fb' (ResType ts') loc
+      pat' = pick $ patternBindees pat
+  in letBind_ (Pattern pat') $ If e1 tb' fb' (ResType ts') loc
 removeDeadBranchResult _ _ = cannotSimplify
 
 -- Some helper functions

@@ -28,6 +28,7 @@ instance MonadFreshNames m => MonadFreshNames (Simplify m) where
 instance BindableM m => BindableM (Simplify m) where
   type Lore (Simplify m) = Lore m
   mkLetM pat e = Simplify $ lift $ mkLetM pat e
+  mkLetNamesM names e = Simplify $ lift $ mkLetNamesM names e
   mkBodyM bnds res = Simplify $ lift $ mkBodyM bnds res
 
 instance MonadBinder m => MonadBinder (Simplify m) where

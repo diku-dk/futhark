@@ -16,7 +16,11 @@ import qualified Data.HashMap.Lazy as HM
 
 import qualified Futhark.Representation.Basic as In
 import Futhark.Representation.Aliases
-  (mkAliasedBody, mkAliasedLetBinding, removeExpAliases)
+  (Aliases,
+   mkAliasedBody,
+   mkAliasedLetBinding,
+   removeExpAliases,
+   removePatternAliases)
 import Futhark.MonadFreshNames
 import Futhark.Representation.ExplicitMemory
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
@@ -43,32 +47,40 @@ instance MonadFreshNames AllocM where
 instance BindableM AllocM where
   type Lore AllocM = ExplicitMemory
 
-  mkLetM [v] e@(PrimOp (Update _ src _ _ _)) = do
+  mkLetM pat e = return $ Let pat () e
+
+  mkLetNamesM [name] e@(PrimOp (Update _ src _ _ _)) = do
     res <- lookupSummary src
     case res of
       Just (MemSummary m origfun) -> do
-        let pat' = Pattern [Bindee v $ MemSummary m origfun]
+        let ident = Ident name (identType src) $ srclocOf src
+            pat' = Pattern [Bindee ident $ MemSummary m origfun]
         return $ Let pat' () e
-      _ -> basicMkLetM [v] e
+      _ -> basicMkLetM [name] e
 
-  mkLetM [v] e@(PrimOp (SubExp (Var src))) = do
+  mkLetNamesM [name] e@(PrimOp (SubExp (Var src))) = do
     res <- lookupSummary src
     case res of
       Just (MemSummary m origfun) -> do
-        let pat' = Pattern [Bindee v $ MemSummary m origfun]
+        let ident = Ident name (identType src) $ srclocOf src
+            pat' = Pattern [Bindee ident $ MemSummary m origfun]
         return $ Let pat' () e
-      _ -> basicMkLetM [v] e
+      _ -> basicMkLetM [name] e
 
-  mkLetM pat e = basicMkLetM pat e
+  mkLetNamesM names e = basicMkLetM names e
 
   mkBodyM bnds res = return $ Body () bnds res
 
-basicMkLetM :: [Ident]
+basicMkLetM :: [VName]
             -> Exp
             -> AllocM Binding
-basicMkLetM pat e = do
-  pat' <- Pattern <$> allocsForPattern pat (typeOf e)
+basicMkLetM names e = do
+  (ts',sizes) <- instantiateShapes' loc $ resTypeValues et
+  let vals = [ Ident name t loc | (name, t) <- zip names ts' ]
+  pat' <- Pattern <$> allocsForPattern sizes vals et
   return $ Let pat' () e
+  where loc = srclocOf e
+        et = typeOf e
 
 allocForArray :: Type -> SrcLoc -> AllocM (SubExp, Ident)
 allocForArray t loc = do
@@ -79,25 +91,24 @@ allocForArray t loc = do
   m <- letExp "mem" $ PrimOp $ Alloc size loc
   return (size, m)
 
-allocsForPattern :: [Ident] -> ResType -> AllocM [Bindee MemSummary]
-allocsForPattern pat (ResType ts) = do
-  let (ctxpat,valpat) = splitAt (length pat - length ts) pat
-      ctxpat' = [ Bindee ident Scalar | ident <- ctxpat ]
-  (vals,(memsizes,mems)) <- runWriterT $ forM (zip valpat ts) $ \(ident, (t, memret)) ->
+allocsForPattern :: [Ident] -> [Ident] -> ResType -> AllocM [Bindee MemSummary]
+allocsForPattern sizeidents validents (ResType ts) = do
+  let sizes' = [ Bindee size Scalar | size <- sizeidents ]
+  (vals,(memsizes,mems)) <- runWriterT $ forM (zip validents ts) $ \(ident, (t, memret)) ->
     let loc = srclocOf ident in
     case memret of
       ReturnsScalar -> return $ Bindee ident Scalar
       ReturnsInBlock mem ->
         return $ Bindee ident $ directIndexFunction mem $ identType ident
       ReturnsInAnyBlock
-        | Just shape <- knownShape $ arrayShape t-> do
+        | Just shape <- knownShape $ arrayShape t -> do
         (_, m) <- lift $ allocForArray (identType ident `setArrayShape` Shape shape) loc
         return $ Bindee ident $ directIndexFunction m $ identType ident
       _ -> do
         (memsize,mem,ident') <- lift $ memForBindee ident
         tell ([memsize], [mem])
         return ident'
-  return $ memsizes <> mems <> ctxpat' <> vals
+  return $ memsizes <> mems <> sizes' <> vals
   where knownShape = mapM known . extShapeDims
         known (Free v) = Just v
         known (Ext {}) = Nothing
@@ -240,8 +251,14 @@ allocInBindings origbnds m = allocInBindings' origbnds []
           return $ bnds' <> [bnd']
 
 allocInBinding :: In.Binding -> AllocM Binding
-allocInBinding (Let pat _ e) =
-  mkLetM (patternIdents pat) =<< allocInExp e
+allocInBinding (Let pat _ e) = do
+  e' <- allocInExp e
+  let t = typeOf e'
+      (sizeidents, validents) =
+        splitAt (patternSize pat - length (resTypeValues t)) $
+        patternIdents pat
+  pat' <- Pattern <$> allocsForPattern sizeidents validents t
+  mkLetM pat' e'
 
 funcallSubExps :: [SubExp] -> AllocM [SubExp]
 funcallSubExps ses = map fst <$>
@@ -261,8 +278,7 @@ allocInExp (LoopOp (DoLoop res merge i bound
   where (mergeparams, mergeinit) = unzip merge
 allocInExp (LoopOp (Map cs f arrs loc)) = do
   let size = arraysSize 0 $ map subExpType arrs
-  is <- newIdent "is" (arrayOf (Basic Int) (Shape [size]) Nonunique) loc
-  letBind [is] $ PrimOp $ Iota size loc
+  is <- letSubExp "is" $ PrimOp $ Iota size loc
   i  <- newIdent "i" (Basic Int) loc
   summaries <- liftM (HM.fromList . concat) $
                forM (zip (lambdaParams f) arrs) $ \(p,arr) ->
@@ -281,7 +297,7 @@ allocInExp (LoopOp (Map cs f arrs loc)) = do
         allocInLambda
         f { lambdaParams = i : lambdaParams f
           }
-  return $ LoopOp $ Map cs f' (Var is:arrs) loc
+  return $ LoopOp $ Map cs f' (is:arrs) loc
 allocInExp (LoopOp (Reduce {})) =
   fail "Cannot put explicit allocations in reduce yet."
 allocInExp (LoopOp (Scan {})) =
@@ -306,14 +322,25 @@ allocInLambda lam = do
   body <- allocInBody $ lambdaBody lam
   return $ lam { lambdaBody = body }
 
+vtableToAllocEnv :: ST.SymbolTable (Aliases ExplicitMemory)
+                 -> HM.HashMap VName MemSummary
+vtableToAllocEnv = HM.fromList . mapMaybe entryToMemSummary .
+                   HM.toList . ST.bindings
+  where entryToMemSummary (k,entry) = do
+          ((_, summary), _) <- ST.entryBinding entry
+          return (k, summary)
+
 simplifiable :: Simplifiable ExplicitMemory
-simplifiable = Simplifiable mkLetS' mkBodyS'
+simplifiable = Simplifiable mkLetS' mkBodyS' mkLetNamesS'
   where mkLetS' vtable pat e = do
-          Let pat' lore _ <- runAllocMWithEnv env (mkLetM pat $ removeExpAliases e)
+          Let pat' lore _ <- runAllocMWithEnv env $
+                             mkLetM (removePatternAliases pat) $
+                             removeExpAliases e
           return $ mkAliasedLetBinding pat' lore e
-          where env = HM.fromList $ mapMaybe entryToMemSummary $
-                      HM.toList $ ST.bindings vtable
-                entryToMemSummary (k,entry) = do
-                  ((_, summary), _) <- ST.entryBinding entry
-                  return (k, summary)
+          where env = vtableToAllocEnv vtable
         mkBodyS' _ bnds res = return $ mkAliasedBody () bnds res
+        mkLetNamesS' vtable names e = do
+          Let pat' lore _ <-
+            runAllocMWithEnv env $ mkLetNamesM names $ removeExpAliases e
+          return $ mkAliasedLetBinding pat' lore e
+          where env = vtableToAllocEnv vtable

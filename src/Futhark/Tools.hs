@@ -37,6 +37,7 @@ module Futhark.Tools
 
   -- * Result types
   , instantiateShapes
+  , instantiateShapes'
   , instantiateShapesFromIdentList
   , instantiateExtTypes
   , instantiateIdents
@@ -61,19 +62,19 @@ letSubExp :: MonadBinder m =>
              String -> Exp (Lore m) -> m SubExp
 letSubExp _ (PrimOp (SubExp se)) = return se
 letSubExp desc e =
-  case simpleType $ typeOf e of
-    Just [_] -> Var <$> letExp desc e
-    _        -> fail $ "letSubExp: tuple-typed expression given for " ++ desc ++ ":\n" ++ pretty e
+  case resTypeValues $ typeOf e of
+    [_] -> Var <$> letExp desc e
+    _   -> fail $ "letSubExp: tuple-typed expression given for " ++ desc ++ ":\n" ++ pretty e
 
 letExp :: MonadBinder m =>
           String -> Exp (Lore m) -> m Ident
 letExp _ (PrimOp (SubExp (Var v))) = return v
-letExp desc e =
-  case simpleType $ typeOf e of
-    Just [t] -> do v <- fst <$> newVar (srclocOf e) desc t
-                   letBind [v] e
-                   return v
-    _   -> fail $ "letExp: tuple-typed expression given:\n" ++ pretty e
+letExp desc e = do
+  v <- newVName desc
+  idents <- letBindNames [v] e
+  case idents of
+    [ident] -> return ident
+    _       -> fail $ "letExp: tuple-typed expression given:\n" ++ pretty e
 
 letSubExps :: MonadBinder m =>
               String -> [Exp (Lore m)] -> m [SubExp]
@@ -88,14 +89,10 @@ letShapedExp :: (MonadBinder m) =>
              -> m ([Ident], [Ident])
 letShapedExp _ (PrimOp (SubExp (Var v))) = return ([], [v])
 letShapedExp name e = do
-  (ts, shapes) <- runWriterT $ instantiateShapes instantiate $ resTypeValues $ typeOf e
-  names <- mapM (liftM fst . newVar loc name) ts
-  letBind (shapes++names) e
-  return (shapes, names)
-  where loc = srclocOf e
-        instantiate = do v <- lift $ newIdent "size" (Basic Int) loc
-                         tell [v]
-                         return $ Var v
+  names <- replicateM numValues $ newVName name
+  idents <- letBindNames names e
+  return $ splitAt (length idents - numValues) idents
+  where numValues = length $ resTypeValues $ typeOf e
 
 letTupExp :: (MonadBinder m) =>
              String -> Exp (Lore m)
@@ -185,10 +182,10 @@ eBody es = insertBindingsM $ do
 
 eLambda :: MonadBinder m =>
            Lambda (Lore m) -> [SubExp] -> m [SubExp]
-eLambda lam args = do zipWithM_ letBind params $
+eLambda lam args = do zipWithM_ letBindNames params $
                         map (PrimOp . SubExp) args
                       bodyBind $ lambdaBody lam
-  where params = map pure $ lambdaParams lam
+  where params = map (pure . identName) $ lambdaParams lam
 
 -- | Apply a binary operator to several subexpressions.  A left-fold.
 foldBinOp :: MonadBinder m =>
@@ -201,19 +198,21 @@ foldBinOp bop ne (e:es) t =
 -- operation to its arguments.  It is assumed that both argument and
 -- result types are the same.  (This assumption should be fixed at
 -- some point.)
-binOpLambda :: (Bindable lore, MonadFreshNames m) =>
+binOpLambda :: (MonadFreshNames m, Bindable lore) =>
                BinOp -> Type -> SrcLoc -> m (Lambda lore)
 binOpLambda bop t loc = do
   x   <- newIdent "x"   t loc
   y   <- newIdent "y"   t loc
   res <- newIdent "res" t loc
-  let bnds = [mkLet [res] $
-              PrimOp $ BinOp bop (Var x) (Var y) t loc]
+  body <- runBinder $ do
+    bnds <- mkLetNamesM [identName res] $
+            PrimOp $ BinOp bop (Var x) (Var y) t loc
+    mkBodyM [bnds] $ Result [] [Var res] loc
   return Lambda {
              lambdaParams     = [x, y]
            , lambdaReturnType = [t]
            , lambdaSrcLoc     = loc
-           , lambdaBody = mkBody bnds $ Result [] [Var res] loc
+           , lambdaBody       = body
            }
 
 makeLambda :: (Bindable (Lore m), MonadBinder m) =>
@@ -282,18 +281,16 @@ copyConsumed e
 
         freeUniqueInBody = HS.filter (unique . identType) . freeInBody
 
-nonuniqueParams :: (Bindable lore, MonadFreshNames m) =>
+nonuniqueParams :: (MonadFreshNames m, Bindable lore) =>
                    [Param] -> m ([Param], [Binding lore])
-nonuniqueParams params = do
-  (params', bnds) <- liftM unzip $ forM params $ \param ->
-    if unique $ identType param then do
-      param' <- nonuniqueParam <$> newIdent' (++"_nonunique") param
-      return (param',
-              [mkLet [param] $
-               PrimOp $ Copy (Var param') $ srclocOf param'])
-    else
-      return (param, [])
-  return (params', concat bnds)
+nonuniqueParams params = runBinder'' $ forM params $ \param ->
+  if unique $ identType param then do
+    param' <- nonuniqueParam <$> newIdent' (++"_nonunique") param
+    _ <- mkLetNamesM [identName param] $
+         PrimOp $ Copy (Var param') $ srclocOf param'
+    return param'
+  else
+    return param
   where nonuniqueParam param =
           param { identType = identType param `setUniqueness` Nonunique }
 
@@ -315,6 +312,16 @@ instantiateShapes f ts = evalStateT (mapM instantiate ts) HM.empty
                           put $ HM.insert x se m
                           return se
         instantiate' (Free se) = return se
+
+instantiateShapes' :: MonadFreshNames m =>
+                      SrcLoc
+                   -> [TypeBase ExtShape]
+                   -> m ([TypeBase Shape], [Ident])
+instantiateShapes' loc ts =
+  runWriterT $ instantiateShapes instantiate ts
+  where instantiate = do v <- lift $ newIdent "size" (Basic Int) loc
+                         tell [v]
+                         return $ Var v
 
 instantiateShapesFromIdentList :: [Ident] -> [ExtType] -> [Type]
 instantiateShapesFromIdentList idents ts =

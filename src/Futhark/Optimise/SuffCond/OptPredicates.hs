@@ -38,7 +38,7 @@ import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as S
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.Aliases
-  (Aliases, mkAliasedBody, mkAliasedLetBinding, removeExpAliases)
+  (Aliases, mkAliasedBody, mkAliasedLetBinding, removeExpAliases, addAliasesToPattern)
 
 import Prelude hiding (any)
 
@@ -320,14 +320,15 @@ instance MonadFreshNames m =>
       then Simplify.defaultInspectBinding bnd
       else do
         vs <- mapM (newIdent' (<>"_suff")) $ patternIdents pat
+        suffe <- generating Sufficient $
+                 Simplify.simplifyExp =<< renameExp (removeExpAliases e)
         let pat' = pat { patternBindees =
                             zipWith tagBindee (patternBindees pat) vs
                        }
             tagBindee bindee v =
               bindee { bindeeLore = (fst $ bindeeLore bindee, Just v) }
-        suffe <- generating Sufficient $
-                 Simplify.simplifyExp =<< renameExp (removeExpAliases e)
-        makeSufficientBinding =<< mkLetM vs suffe
+            suffpat = Pattern (map (`Bindee` Nothing) vs)
+        makeSufficientBinding =<< mkLetM (addAliasesToPattern suffpat suffe) suffe
         Simplify.defaultInspectBinding $ Let pat' lore e
 
 makeSufficientBinding :: MonadFreshNames m => S.Binding Invariance -> VariantM m ()
@@ -343,7 +344,7 @@ makeSufficientBinding' context@(_,vtable) (Let pat _ e)
     Right suff <- AS.mkSuffConds se loc ranges,
     x:xs <- filter (scalExpUsesNoForbidden context) $ map mkConj suff = do
   suffe <- SE.fromScalExp' (srclocOf e) $ foldl SE.SLogOr x xs
-  letBindPat pat suffe
+  letBind_ pat suffe
   where ranges = rangesRep vtable
         simplify se = AS.simplify se loc ranges
         loc = srclocOf e
@@ -352,7 +353,7 @@ makeSufficientBinding' context@(_,vtable) (Let pat _ e)
 makeSufficientBinding' _ (Let pat _ (PrimOp (BinOp LogAnd x y t loc))) = do
   x' <- sufficientSubExp x
   y' <- sufficientSubExp y
-  letBindPat pat $ PrimOp $ BinOp LogAnd x' y' t loc
+  letBind_ pat $ PrimOp $ BinOp LogAnd x' y' t loc
 makeSufficientBinding' env (Let pat _ (If (Var v) tbranch fbranch _ loc))
   | identName v `forbiddenIn` env,
     -- FIXME: Check that tbranch and fbranch are safe.  We can do
@@ -365,7 +366,7 @@ makeSufficientBinding' env (Let pat _ (If (Var v) tbranch fbranch _ loc))
     all safeBnd tbnds, all safeBnd fbnds = do
   mapM_ addBinding tbnds
   mapM_ addBinding fbnds
-  letBindPat pat $ PrimOp $ BinOp LogAnd tres fres (Basic Bool) loc
+  letBind_ pat $ PrimOp $ BinOp LogAnd tres fres (Basic Bool) loc
   where safeBnd = safeExp . bindingExp
 makeSufficientBinding' _ bnd = Simplify.defaultInspectBinding bnd
 
@@ -423,7 +424,7 @@ instance MonadFreshNames m => BindableM (VariantM m) where
     let explore = if forbiddenExp context e
                   then TooVariant
                   else Invariant
-        pat' = Pattern $ map (`Bindee` Nothing) pat
+        pat' = Pattern $ map (`Bindee` Nothing) $ patternIdents pat
     return $ mkAliasedLetBinding pat' explore e
   mkBodyM bnds res =
     return $ mkAliasedBody () bnds res

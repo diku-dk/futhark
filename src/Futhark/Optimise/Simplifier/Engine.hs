@@ -434,17 +434,19 @@ simplifyBinding (Let pat _ (Apply fname args rettype loc)) = do
     Just vs -> do let vs' = valueShapeContext (resTypeValues rettype) vs ++ vs
                   bnds <- forM (zip (patternIdents pat) vs') $ \(p,v) ->
                     case uniqueness $ identType p of
-                      Unique    -> mkLetM [p] =<< eCopy (eValue v loc)
-                      Nonunique -> mkLetM [p] =<< eValue v loc
+                      Unique    -> mkLetNamesM [identName p] =<< eCopy (eValue v loc)
+                      Nonunique -> mkLetNamesM [identName p] =<< eValue v loc
                   mapM_ (simplifyBinding . Aliases.removeBindingAliases) bnds
     Nothing -> do let e' = Apply fname (zip args' $ map snd args) rettype' loc
                   pat' <- blockUsage $ simplifyPattern pat
-                  inspectBinding =<< mkLetM pat' e'
+                  inspectBinding =<<
+                    mkLetM (Aliases.addAliasesToPattern pat' e') e'
 
 simplifyBinding (Let pat _ e) = do
   e' <- simplifyExp e
   pat' <- blockUsage $ simplifyPattern pat
-  inspectBinding =<< mkLetM pat' e'
+  inspectBinding =<<
+    mkLetM (Aliases.addAliasesToPattern pat' e') e'
 
 defaultInspectBinding :: MonadEngine m =>
                          Binding (Lore m) -> m ()
@@ -572,7 +574,8 @@ simplifyLoopOp (Redomap cs outerfun innerfun acc arrs loc) = do
                  input <- newIdent "unused_input"
                           (arrayOf (Basic Int) (Shape [outerSize]) Nonunique) $
                           srclocOf firstarr
-                 letBind [input] $ PrimOp $ Iota outerSize $ srclocOf firstarr
+                 letBindNames_ [identName input] $
+                   PrimOp $ Iota outerSize $ srclocOf firstarr
                  return (lam { lambdaParams =
                                   accparams ++
                                   [firstparam { identType = Basic Int }] },
@@ -591,9 +594,12 @@ simplifySubExp (Var ident@(Ident vnm _ loc)) = do
     _              -> Var <$> simplifyIdent ident
 simplifySubExp (Constant v loc) = return $ Constant v loc
 
-simplifyPattern :: MonadEngine m => Pattern lore -> m [Ident]
-simplifyPattern pat =
-  mapM simplifyIdentBinding (patternIdents pat)
+simplifyPattern :: MonadEngine m => Pattern lore -> m (Pattern lore)
+simplifyPattern =
+  liftM Pattern . mapM inspect . patternBindees
+  where inspect (Bindee ident lore) = do
+          ident' <- simplifyIdentBinding ident
+          return $ Bindee ident' lore
 
 simplifyIdentBinding :: MonadEngine m => Ident -> m Ident
 simplifyIdentBinding v = do

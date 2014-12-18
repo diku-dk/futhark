@@ -57,9 +57,10 @@ foldClosedForm look pat lam accs arrs = do
   isEmpty <- newIdent "fold_input_is_empty" (Basic Bool) lamloc
   let inputsize = arraysSize 0 $ map subExpType arrs
   closedBody' <- renameBody closedBody
-  letBind [isEmpty] $ PrimOp $ BinOp Equal inputsize (intconst 0 lamloc) (Basic Bool) lamloc
+  letBindNames_ [identName isEmpty] $
+    PrimOp $ BinOp Equal inputsize (intconst 0 lamloc) (Basic Bool) lamloc
   tb <- resultBodyM [] accs lamloc
-  letBind (patternIdents pat) $
+  letBind_ pat $
     If (Var isEmpty) tb closedBody'
     (staticResType $ lambdaReturnType lam)
     lamloc
@@ -79,11 +80,11 @@ loopClosedForm pat respat merge bound body
                   mergeidents body mergeexp bodyloc
     isEmpty <- newIdent "bound_is_zero" (Basic Bool) bodyloc
     closedBody' <- renameBody closedBody
-    letBind [isEmpty] $
+    letBindNames_ [identName isEmpty] $
       PrimOp $ BinOp Leq bound (intconst 0 bodyloc)
       (Basic Bool) bodyloc
     tb <- resultBodyM [] mergeexp bodyloc
-    letBind (patternIdents pat) $
+    letBindNames_ (patternNames pat) $
       If (Var isEmpty)
       tb
       closedBody'
@@ -116,7 +117,7 @@ checkResults pat knownBindings params body accs bodyloc = do
                   HS.fromList params
 
         checkResult (p, e) _
-          | Just e' <- asFreeSubExp e = letBind [p] $ PrimOp $ SubExp e'
+          | Just e' <- asFreeSubExp e = letBindNames_ [identName p] $ PrimOp $ SubExp e'
         checkResult (p, Var v) (accparam, acc) = do
           e@(PrimOp (BinOp bop x y rt loc)) <- liftMaybe $ HM.lookup v bndMap
           -- One of x,y must be *this* accumulator, and the other must
@@ -130,8 +131,8 @@ checkResults pat knownBindings params body accs bodyloc = do
                           _                      -> Nothing
           case bop of
               LogAnd -> do
-                letBind [v] e
-                letBind [p] $ PrimOp $ BinOp LogAnd this el rt loc
+                letBindNames_ [identName v] e
+                letBindNames_ [identName p] $ PrimOp $ BinOp LogAnd this el rt loc
               _ -> cannotSimplify -- Um... sorry.
 
         checkResult _ _ = cannotSimplify

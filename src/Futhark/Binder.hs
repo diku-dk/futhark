@@ -5,14 +5,14 @@ module Futhark.Binder
   ( Proper
   , BindableM (..)
   , Bindable (..)
-  , mkLetPat
   , MonadBinder (..)
   , bodyBindings
   , insertBindings
   , insertBinding
   , letBind
-  , letBindPat
-  , letWithBind
+  , letBind_
+  , letBindNames
+  , letBindNames_
   , bodyBind
   -- * A concrete @Binder@ monad.
   , BinderT
@@ -29,7 +29,6 @@ module Futhark.Binder
 where
 
 import qualified Data.DList as DL
-import Data.Loc
 import Control.Applicative
 import Control.Monad.Writer
 import Control.Monad.State
@@ -58,14 +57,18 @@ class (Lore.Lore lore, PrettyLore lore,
 class (Monad m, Applicative m) =>
       BindableM m where
   type Lore m :: *
-  mkLetM :: [Ident] -> Exp (Lore m) -> m (Binding (Lore m))
+  mkLetM :: Pattern (Lore m) -> Exp (Lore m) -> m (Binding (Lore m))
   mkBodyM :: [Binding (Lore m)] -> Result -> m (Body (Lore m))
+
+  mkLetNamesM :: [VName] -> Exp (Lore m) -> m (Binding (Lore m))
 
 -- | The class of lores that can be constructed solely from an
 -- expression, non-monadically.
 class Proper lore => Bindable lore where
   mkLet :: [Ident] -> Exp lore -> Binding lore
   mkBody :: [Binding lore] -> Result -> Body lore
+  mkLetNames :: MonadFreshNames m =>
+                [VName] -> Exp lore -> m (Binding lore)
 
 class (BindableM m, Proper (Lore m),
        MonadFreshNames m, Applicative m, Monad m) =>
@@ -73,21 +76,33 @@ class (BindableM m, Proper (Lore m),
   addBinding      :: Binding (Lore m) -> m ()
   collectBindings :: m a -> m (a, [Binding (Lore m)])
 
-mkLetPat :: Bindable lore => Pattern anylore -> Exp lore -> Binding lore
-mkLetPat = mkLet . patternIdents
+valueIdents :: Lore.ResType rt => Pattern lore -> rt -> [Ident]
+valueIdents pat rt =
+  snd $
+  splitAt (patternSize pat - length (resTypeValues rt)) $
+  patternIdents pat
 
 letBind :: MonadBinder m =>
-           [Ident] -> Exp (Lore m) -> m ()
-letBind pat e = addBinding =<< mkLetM pat e
+           Pattern (Lore m) -> Exp (Lore m) -> m [Ident]
+letBind pat e = do
+  bnd <- mkLetM pat e
+  addBinding bnd
+  return $ valueIdents (bindingPattern bnd) $ typeOf e
 
-letBindPat :: MonadBinder m =>
-              Pattern (Lore m) -> Exp (Lore m) -> m ()
-letBindPat = letBind . patternIdents
+letBind_ :: MonadBinder m =>
+            Pattern (Lore m) -> Exp (Lore m) -> m ()
+letBind_ pat e = void $ letBind pat e
 
-letWithBind :: MonadBinder m =>
-               Certificates -> Ident -> Ident -> [SubExp] -> SubExp -> m ()
-letWithBind cs dest src idxs ve =
-  letBind [dest] $ PrimOp $ Update cs src idxs ve $ srclocOf src
+letBindNames :: MonadBinder m =>
+                [VName] -> Exp (Lore m) -> m [Ident]
+letBindNames names e = do
+  bnd <- mkLetNamesM names e
+  addBinding bnd
+  return $ valueIdents (bindingPattern bnd) $ typeOf e
+
+letBindNames_ :: MonadBinder m =>
+                [VName] -> Exp (Lore m) -> m ()
+letBindNames_ names e = void $ letBindNames names e
 
 bodyBind :: MonadBinder m => Body (Lore m) -> m [SubExp]
 bodyBind (Body _ bnds (Result _ es _)) = do
@@ -131,10 +146,11 @@ instance MonadFreshNames m => MonadFreshNames (BinderT lore m) where
   getNameSource = BinderT . lift $ getNameSource
   putNameSource = BinderT . lift . putNameSource
 
-instance (Proper lore, Bindable lore, Monad m, Applicative m) => BindableM (BinderT lore m) where
+instance (Proper lore, Bindable lore, MonadFreshNames m) => BindableM (BinderT lore m) where
   type Lore (BinderT lore m) = lore
   mkBodyM bnds res = return $ mkBody bnds res
-  mkLetM pat e = return $ mkLet pat e
+  mkLetM pat e = return $ mkLet (patternIdents pat) e
+  mkLetNamesM = mkLetNames
 
 instance (Proper lore, Bindable lore, MonadFreshNames m) => MonadBinder (BinderT lore m) where
   addBinding      = addBindingWriter

@@ -69,17 +69,21 @@ simplifyLambdaWithStandardRules simpl prog lam args =
 
 data Simplifiable lore =
   Simplifiable { mkLetS :: ST.SymbolTable (Aliases lore)
-                        -> [Ident] -> Aliases.Exp lore
+                        -> Aliases.Pattern lore -> Aliases.Exp lore
                         -> Binder (Aliases lore) (Aliases.Binding lore)
                , mkBodyS :: ST.SymbolTable (Aliases lore)
                          -> [Aliases.Binding lore] -> Result
                          -> Binder (Aliases lore) (Aliases.Body lore)
+               , mkLetNamesS :: ST.SymbolTable (Aliases lore)
+                             -> [VName] -> Aliases.Exp lore
+                             -> Binder (Aliases lore) (Aliases.Binding lore)
                }
 
 bindableSimplifiable :: Bindable lore => Simplifiable lore
-bindableSimplifiable = Simplifiable mkLetS' mkBodyS'
-  where mkLetS' _ pat e = return $ mkLet pat e
+bindableSimplifiable = Simplifiable mkLetS' mkBodyS' mkLetNamesS'
+  where mkLetS' _ pat e = return $ mkLet (patternIdents pat) e
         mkBodyS' _ bnds res = return $ mkBody bnds res
+        mkLetNamesS' _ = mkLetNames
 
 newtype SimpleM lore a = SimpleM (RWS
                                   (Simplifiable lore, Engine.Env (SimpleM lore))   -- Reader
@@ -124,6 +128,12 @@ instance Proper lore => BindableM (SimpleM lore) where
     (body, newbnds) <- runBinder'' $ mkBodyS simpl vtable bnds res
     mapM_ addBinding newbnds
     return body
+  mkLetNamesM names e = do
+    vtable <- Engine.getVtable
+    simpl <- fst <$> ask
+    (bnd, newbnds) <- runBinder'' $ mkLetNamesS simpl vtable names e
+    mapM_ addBinding newbnds
+    return bnd
 
 runSimpleM :: SimpleM lore a
            -> Simplifiable lore

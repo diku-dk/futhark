@@ -55,8 +55,9 @@ instance MonadFreshNames InternaliseM where
 
 instance BindableM InternaliseM where
   type Lore InternaliseM = Basic
-  mkLetM pat e = return $ mkLet pat e
+  mkLetM pat e = return $ mkLet (patternIdents pat) e
   mkBodyM bnds res = return $ mkBody bnds res
+  mkLetNamesM = mkLetNames
 
 instance MonadBinder InternaliseM where
   addBinding      = addBindingWriter

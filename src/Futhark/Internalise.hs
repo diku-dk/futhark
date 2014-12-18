@@ -186,8 +186,8 @@ internaliseExp desc (E.LetPat pat e body loc) = do
   bindingTupIdent pat
     (Just $ certOrGiven loc c)
     (I.staticResType $ map I.identType ks) $ \pat' -> do
-    forM_ (zip pat' $ map I.Var ks) $ \(p,se) ->
-      letBind [p] $ I.PrimOp $ I.SubExp se
+    forM_ (zip (patternIdents pat') $ map I.Var ks) $ \(p,se) ->
+      letBind (basicPattern [p]) $ I.PrimOp $ I.SubExp se
     internaliseExp desc body
 
 internaliseExp desc (E.DoLoop mergepat mergeexp i bound loopbody letbody loc) = do
@@ -210,7 +210,7 @@ internaliseExp desc (E.DoLoop mergepat mergeexp i bound loopbody letbody loc) = 
                 (ident, e) <- zip mergepat' mergeexp' ]
       loop = I.LoopOp $ I.DoLoop respat merge i' bound' loopbody' loc
   bindingTupIdent mergepat Nothing (I.typeOf loop) $ \mergepat'' -> do
-    letBind mergepat'' loop
+    letBind_ mergepat'' loop
     internaliseExp desc letbody
 
 internaliseExp desc (E.LetWith cs name src idxcs idxs ve body loc) = do
@@ -221,15 +221,15 @@ internaliseExp desc (E.LetWith cs name src idxcs idxs ve body loc) = do
   idxcs' <- case idxcs of
               Just idxcs' -> return $ internaliseCerts idxcs'
               Nothing     -> boundsChecks srcs idxs'
-  dsts <- map fst <$> mapM (newVar loc "letwith_dst" . I.identType) srcs
   c <- mergeCerts (catMaybes [c1,c2]++cs')
-  let comb (dname, sname, vname) =
-        letWithBind (cs'++idxcs') dname sname idxs' $ I.Var vname
-  mapM_ comb $ zip3 dsts srcs vnames
+  let comb sname vname =
+        letExp "letwith_dst" $
+        I.PrimOp $ I.Update (cs'++idxcs') sname idxs' (I.Var vname) loc
+  dsts <- zipWithM comb srcs vnames
   bindingTupIdent (E.Id name) (Just $ certOrGiven loc c)
     (I.staticResType $ map I.identType dsts) $ \pat' -> do
-    forM_ (zip pat' dsts) $ \(p,dst) ->
-      letBind [p] $ I.PrimOp $ I.SubExp $ I.Var dst
+    forM_ (zip (patternIdents pat') dsts) $ \(p,dst) ->
+      letBind (basicPattern [p]) $ I.PrimOp $ I.SubExp $ I.Var dst
     internaliseExp desc body
 
 internaliseExp desc (E.Replicate ne ve loc) = do
@@ -307,7 +307,7 @@ internaliseExp _ (E.Split cs nexp arrexp loc) = do
     return (a, b)
   let cert = maybe (given loc) I.Var cs''
       combsplit arr (a,b) =
-        letBind [a,b] $
+        letBind_ (basicPattern [a,b]) $
         PrimOp $ I.Split (certify c []) nexp' (I.Var arr) ressize loc
       els = case arrs of
               []  -> []
@@ -445,13 +445,12 @@ tupToIdentList desc e = do
   case ses of
     [] -> return (Nothing, [])
     [I.Var var] -> return (Nothing, [var]) -- Just to avoid too many spurious bindings.
-    [e'] -> do name <- fst <$> newVar loc "val" (subExpType e')
-               letBind [name] $ PrimOp $ SubExp e'
+    [e'] -> do name <- letExp "val" $ PrimOp $ SubExp e'
                return (Nothing, [name])
     _ -> do
       let ts = map subExpType ses
       vs <- mapM identForType ts
-      zipWithM_ letBind (map (:[]) vs) $ map (I.PrimOp . SubExp) ses
+      zipWithM_ letBind (map (I.basicPattern . (:[])) vs) $ map (I.PrimOp . SubExp) ses
       let (certvs, valuevs) = partition ((==I.Basic Cert) . I.identType) vs
       case certvs of
         []  -> return (Nothing, vs)
@@ -488,10 +487,8 @@ mergeCerts = mergeSubExpCerts . map I.Var
 mergeSubExpCerts :: [I.SubExp] -> InternaliseM (Maybe I.Ident)
 mergeSubExpCerts [] = return Nothing
 mergeSubExpCerts [I.Var c] = return $ Just c
-mergeSubExpCerts (c:cs) = do
-  cert <- fst <$> newVar loc "comb_cert" (I.Basic I.Cert)
-  letBind [cert] $ I.PrimOp $ I.Conjoin (c:cs) loc
-  return $ Just cert
+mergeSubExpCerts (c:cs) =
+  Just <$> letExp "cert" (I.PrimOp $ I.Conjoin (c:cs) loc)
   where loc = srclocOf c
 
 internaliseOperation :: String

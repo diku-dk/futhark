@@ -109,14 +109,14 @@ substituteExtResultShapes rettype (Body _ bnds res) = do
           where v' = v { identType = substituteNames subst $ identType v }
 
 simplifyShapeFun :: MonadFreshNames m => FunDec -> m FunDec
-simplifyShapeFun shapef = return . deadCodeElimFun =<< simplifyFun =<<
-                          return . deadCodeElimFun =<< simplifyFun =<<
-                          return . deadCodeElimFun =<< simplifyFun =<<
-                          return . deadCodeElimFun =<< simplifyFun =<<
-                          return . deadCodeElimFun =<< simplifyFun =<<
-                          return . deadCodeElimFun =<< simplifyFun =<<
+simplifyShapeFun shapef = return . deadCodeElimFun =<< simplifyFun' =<<
+                          return . deadCodeElimFun =<< simplifyFun' =<<
+                          return . deadCodeElimFun =<< simplifyFun' =<<
+                          return . deadCodeElimFun =<< simplifyFun' =<<
+                          return . deadCodeElimFun =<< simplifyFun' =<<
+                          return . deadCodeElimFun =<< simplifyFun' =<<
                           renameFun shapef
-  where simplifyFun = simplifyFunWithStandardRules bindableSimplifiable
+  where simplifyFun' = simplifyFunWithStandardRules bindableSimplifiable
 
 cheapFun :: FunDec -> Bool
 cheapFun  = cheapBody . funDecBody
@@ -150,15 +150,15 @@ substCalls subst fundec = do
               let (vs,vals) =
                     splitAt (length $ resTypeElems shapetype) $
                     patternBindees pat
-              letBindPat (Pattern vs) $
+              letBind_ (Pattern vs) $
                 Apply shapefun args shapetype loc
-              letBindPat (Pattern vals) $
+              letBind_ (Pattern vals) $
                 Apply valfun ([(Var $ bindeeIdent v,Observe) | v <- vs]++args)
                 (staticResType $ map bindeeType vals)  loc
 
         treatBinding (Let pat _ e) = do
           e' <- mapExpM mapper e
-          return [mkLetPat pat e']
+          return [mkLet (patternIdents pat) e']
           where mapper = identityMapper { mapOnBody = treatBody
                                         , mapOnLambda = treatLambda
                                         }

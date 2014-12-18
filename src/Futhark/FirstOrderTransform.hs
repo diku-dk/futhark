@@ -60,7 +60,8 @@ transformExp (LoopOp (Map cs fun arrs loc)) = do
     x <- bodyBind =<< transformLambda fun (index cs inarrs iv)
     dests <- letwith cs outarr (pexp iv) $ map (PrimOp . SubExp) x
     return $ resultBody [] (map Var dests) loc
-  return $ LoopOp $ DoLoop outarr (loopMerge outarr resarr) i (isize inarrs) loopbody loc
+  return $ LoopOp $
+    DoLoop outarr (loopMerge outarr resarr) i (isize inarrs) loopbody loc
 
 transformExp (LoopOp (Reduce cs fun args loc)) = do
   (_, (acc, initacc), (i, iv)) <- newFold loc arrexps accexps
@@ -185,10 +186,10 @@ letwith :: Certificates -> [Ident] -> Binder Basic Exp -> [Exp] -> Binder Basic 
 letwith cs ks i vs = do
   vs' <- letSubExps "values" vs
   i' <- letSubExp "i" =<< i
-  dests <- mapM (newIdent' (const "letwith_dest")) ks
-  let update (dest, k, v) = letWithBind cs dest k [i'] v
-  mapM_ update $ zip3 dests ks vs'
-  return dests
+  let update k v =
+        letExp "lw_dest" $
+        PrimOp $ Update cs k [i'] v $ srclocOf k
+  zipWithM update ks vs'
 
 isize :: [Ident] -> SubExp
 isize = size . map Var
@@ -203,7 +204,7 @@ pexp = pure . PrimOp . SubExp
 
 transformLambda :: Lambda -> [Exp] -> Binder Basic Body
 transformLambda (Lambda params body _ _) args = do
-  zipWithM_ letBind (map pure params) args
+  zipWithM_ letBindNames (map (pure . identName) params) args
   transformBody body
 
 loopMerge :: [Ident] -> [SubExp] -> [(FParam, SubExp)]

@@ -95,37 +95,42 @@ splitBinding bnd@(Let pat _ (PrimOp (Assert (Var v) _))) = do
         HM.lookup (identName v) deps
   return $ if forbidden then ([bnd], bnd, Nothing)
            else ([bnd],
-                 mkLetPat pat $ PrimOp $ SubExp (Var cert_ident),
+                 mkLet (patternIdents pat) $ PrimOp $ SubExp (Var cert_ident),
                  Just $ Var v)
 
 splitBinding bnd@(Let pat _ (LoopOp (Map cs fun args loc))) = do
   (predbody, valfun, ok) <- splitMap cs fun args loc
   return (predbody ++ [bnd],
-          mkLetPat pat $ LoopOp $ Map cs valfun args loc,
+          mkLet (patternIdents pat) $
+          LoopOp $ Map cs valfun args loc,
           ok)
 
 splitBinding bnd@(Let pat _ (LoopOp (Filter cs fun args loc))) = do
   (predbnds, valfun, ok) <- splitMap cs fun args loc
   return (predbnds ++ [bnd],
-          mkLetPat pat $ LoopOp $ Filter cs valfun args loc,
+          mkLet (patternIdents pat) $
+          LoopOp $ Filter cs valfun args loc,
           ok)
 
 splitBinding bnd@(Let pat _ (LoopOp (Reduce cs fun args loc))) = do
   (predbody, valfun, ok) <- splitReduce cs fun args loc
   return (predbody ++ [bnd],
-          mkLetPat pat $ LoopOp $ Reduce cs valfun args loc,
+          mkLet (patternIdents pat) $
+          LoopOp $ Reduce cs valfun args loc,
           ok)
 
 splitBinding bnd@(Let pat _ (LoopOp (Scan cs fun args loc))) = do
   (predbody, valfun, ok) <- splitReduce cs fun args loc
   return (predbody ++ [bnd],
-          mkLetPat pat $ LoopOp $ Scan cs valfun args loc,
+          mkLet (patternIdents pat) $
+          LoopOp $ Scan cs valfun args loc,
           ok)
 
 splitBinding bnd@(Let pat _ (LoopOp (Redomap cs outerfun innerfun acc arr loc))) = do
   (predbody, valfun, ok) <- splitRedomap cs innerfun acc arr loc
   return (predbody ++ [bnd],
-          mkLetPat pat $ LoopOp $ Redomap cs outerfun valfun acc arr loc,
+          mkLet (patternIdents pat) $
+          LoopOp $ Redomap cs outerfun valfun acc arr loc,
           ok)
 
 splitBinding (Let pat _ (LoopOp (DoLoop respat merge i bound body loc))) = do
@@ -136,10 +141,11 @@ splitBinding (Let pat _ (LoopOp (DoLoop respat merge i bound body loc))) = do
                  (merge++[(Bindee ok (),constant True loc)]) i bound
                  predbody' loc
       valloop = LoopOp $ DoLoop respat merge i bound valbody loc
-  return ([mkLet (patternIdents pat<>[ok]) predloop],
-          mkLetPat pat valloop,
+  return ([mkLet (idents<>[ok]) predloop],
+          mkLet idents valloop,
           Just $ Var ok)
   where
+    idents = patternIdents pat
     conjoinLoopBody ok (Body _ bnds res) = do
       ok' <- newIdent "loop_ok_res" (Basic Bool) loc
       case reverse $ resultSubExps res of
@@ -154,11 +160,12 @@ splitBinding (Let pat _ (If cond tbranch fbranch t loc)) = do
   (tbranch_pred, tbranch_val) <- splitBody tbranch
   (fbranch_pred, fbranch_val) <- splitBody fbranch
   ok <- newIdent "if_ok" (Basic Bool) loc
-  return ([mkLet (patternIdents pat<>[ok]) $
+  return ([mkLet (idents<>[ok]) $
            If cond tbranch_pred fbranch_pred
            (t<>staticResType [Basic Bool]) loc],
-          mkLetPat pat $ If cond tbranch_val fbranch_val t loc,
+          mkLet idents $ If cond tbranch_val fbranch_val t loc,
           Just $ Var ok)
+  where idents = patternIdents pat
 
 splitBinding bnd = return ([bnd], bnd, Nothing)
 

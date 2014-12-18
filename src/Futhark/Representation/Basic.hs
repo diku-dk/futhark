@@ -29,12 +29,16 @@ module Futhark.Representation.Basic
        , AST.ExpT(LoopOp)
        , AST.FunDecT(FunDec)
        , AST.ResTypeT(ResType)
+         -- Utility
+       , basicPattern
          -- Removing lore
        , removeProgLore
        , removeFunDecLore
        , removeBodyLore
        )
 where
+
+import Data.Loc
 
 import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
@@ -46,6 +50,7 @@ import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Pretty
 import Futhark.Renamer
 import Futhark.Binder
+import Futhark.Tools
 import Futhark.Substitute
 import qualified Futhark.TypeCheck as TypeCheck
 import Futhark.Analysis.Rephrase
@@ -94,8 +99,16 @@ instance Bindable Basic where
   mkBody = AST.Body ()
   mkLet idents =
     AST.Let (AST.Pattern $ map (`Bindee` ()) idents) ()
+  mkLetNames names e = do
+    (ts, shapes) <- instantiateShapes' loc $ resTypeValues $ typeOf e
+    let idents = [ Ident name t loc | (name, t) <- zip names ts ]
+    return $ mkLet (shapes++idents) e
+    where loc = srclocOf e
 
 instance PrettyLore Basic where
+
+basicPattern :: [Ident] -> Pattern
+basicPattern = AST.Pattern . map (`Bindee` ())
 
 removeLore :: Rephraser lore Basic
 removeLore =
