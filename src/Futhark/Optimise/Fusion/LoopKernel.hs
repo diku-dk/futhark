@@ -62,7 +62,7 @@ transformOutput ts names soac = do
     Nothing -> return Nothing
     Just (ctxidents,validents) -> return $ Just $ do
       e <- SOAC.toExp soac
-      letBind (Pattern [ Bindee ident () | ident <- ctxidents<>validents ]) e
+      letBind_ (basicPattern $ ctxidents<>validents) e
       descend ts validents
   where loc = srclocOf soac
         soact = SOAC.typeOf soac
