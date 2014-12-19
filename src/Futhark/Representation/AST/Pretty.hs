@@ -31,6 +31,8 @@ class (Lore lore,
   ppBindingLore = const Nothing
   ppFunDecLore :: FunDec lore -> Maybe Doc
   ppFunDecLore = const Nothing
+  ppExpLore :: Exp lore -> Maybe Doc
+  ppExpLore = const Nothing
 
 -- | The document @'apply' ds@ separates @ds@ with commas and encloses them with
 -- parentheses.
@@ -108,10 +110,15 @@ instance PrettyLore lore => Pretty (Binding lore) where
   ppr bnd@(Let pat _ e) =
     bindingAnnotation bnd $ align $
     text "let" <+> align (ppPattern $ patternIdents pat) <+>
-    (if linebreak
-     then equals </> indent 2 (ppr e)
-     else equals <+> align (ppr e))
-    where linebreak = case e of
+    case (linebreak, ppExpLore e) of
+      (True, Nothing) -> equals </>
+                         indent 2 e'
+      (_, Just annot) -> equals </>
+                         indent 2 (annot </>
+                                   e')
+      (False, Nothing) -> equals <+> align e'
+    where e' = ppr e
+          linebreak = case e of
                         LoopOp {} -> True
                         If {} -> True
                         PrimOp (ArrayLit {}) -> False

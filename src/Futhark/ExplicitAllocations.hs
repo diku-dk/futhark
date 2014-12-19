@@ -49,38 +49,46 @@ instance BindableM AllocM where
 
   mkLetM pat e = return $ Let pat () e
 
-  mkLetNamesM [name] e@(PrimOp (Update _ src _ _ _)) = do
-    res <- lookupSummary src
-    case res of
-      Just (MemSummary m origfun) -> do
-        let ident = Ident name (identType src) $ srclocOf src
-            pat' = Pattern [Bindee ident $ MemSummary m origfun]
-        return $ Let pat' () e
-      _ -> basicMkLetM [name] e
-
-  mkLetNamesM [name] e@(PrimOp (SubExp (Var src))) = do
-    res <- lookupSummary src
-    case res of
-      Just (MemSummary m origfun) -> do
-        let ident = Ident name (identType src) $ srclocOf src
-            pat' = Pattern [Bindee ident $ MemSummary m origfun]
-        return $ Let pat' () e
-      _ -> basicMkLetM [name] e
-
-  mkLetNamesM names e = basicMkLetM names e
+  mkLetNamesM names e = do
+    (ts',sizes) <- instantiateShapes' loc $ resTypeValues et
+    let vals = [ Ident name t loc | (name, t) <- zip names ts' ]
+    res <- specialisedMkLetM sizes vals e
+    case res of Just bnd -> return bnd
+                Nothing  -> basicMkLetM sizes vals e
+    where loc = srclocOf e
+          et = typeOf e
 
   mkBodyM bnds res = return $ Body () bnds res
 
-basicMkLetM :: [VName]
+basicMkLetM :: [Ident]
+            -> [Ident]
             -> Exp
             -> AllocM Binding
-basicMkLetM names e = do
-  (ts',sizes) <- instantiateShapes' loc $ resTypeValues et
-  let vals = [ Ident name t loc | (name, t) <- zip names ts' ]
+basicMkLetM sizes vals e = do
   pat' <- Pattern <$> allocsForPattern sizes vals et
   return $ Let pat' () e
-  where loc = srclocOf e
-        et = typeOf e
+  where et = typeOf e
+
+specialisedMkLetM :: [Ident] -> [Ident] -> Exp -> AllocM (Maybe Binding)
+specialisedMkLetM [] [Ident name _ _] e@(PrimOp (Update _ src _ _ _)) = do
+  res <- lookupSummary src
+  case res of
+    Just (MemSummary m origfun) -> do
+      let ident = Ident name (identType src) $ srclocOf src
+          pat' = Pattern [Bindee ident $ MemSummary m origfun]
+      return $ Just $ Let pat' () e
+    _ -> return Nothing
+
+specialisedMkLetM [] [Ident name _ _] e@(PrimOp (SubExp (Var src))) = do
+  res <- lookupSummary src
+  case res of
+    Just (MemSummary m origfun) -> do
+      let ident = Ident name (identType src) $ srclocOf src
+          pat' = Pattern [Bindee ident $ MemSummary m origfun]
+      return $ Just $ Let pat' () e
+    _ -> return Nothing
+
+specialisedMkLetM _ _ _ = return Nothing
 
 allocForArray :: Type -> SrcLoc -> AllocM (SubExp, Ident)
 allocForArray t loc = do
@@ -257,8 +265,12 @@ allocInBinding (Let pat _ e) = do
       (sizeidents, validents) =
         splitAt (patternSize pat - length (resTypeValues t)) $
         patternIdents pat
-  pat' <- Pattern <$> allocsForPattern sizeidents validents t
-  mkLetM pat' e'
+  res <- specialisedMkLetM sizeidents validents e'
+  case res of
+    Just bnd -> return bnd
+    Nothing -> do
+      pat' <- Pattern <$> allocsForPattern sizeidents validents t
+      mkLetM pat' e'
 
 funcallSubExps :: [SubExp] -> AllocM [SubExp]
 funcallSubExps ses = map fst <$>

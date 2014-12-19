@@ -90,6 +90,8 @@ instance TypeCheck.Checkable Basic where
   checkResType = mapM_ TypeCheck.checkExtType . resTypeValues
   matchPattern loc pat rt =
     TypeCheck.matchExtPattern loc (patternIdents pat) (resTypeValues rt)
+  basicFParam name t loc =
+    return $ Bindee (Ident name (AST.Basic t) loc) ()
 
 instance Renameable Basic where
 instance Substitutable Basic where

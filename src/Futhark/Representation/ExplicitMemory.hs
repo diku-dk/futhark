@@ -250,6 +250,8 @@ instance TypeCheck.Checkable ExplicitMemory where
   checkBodyLore = return
   checkFParamLore = checkMemSummary
   checkResType = mapM_ TypeCheck.checkExtType . resTypeValues
+  basicFParam name t loc =
+    return $ Bindee (Ident name (AST.Basic t) loc) Scalar
   matchPattern loc pat rt = do
     let (nmemsizes, nmems, nvalsizes) = analyseResType rt
         (memsizes, mems, valsizes,
@@ -398,6 +400,11 @@ instance PrettyLore ExplicitMemory where
     case mapMaybe bindeeAnnotation $ funDecParams fundec of
       []     -> Nothing
       annots -> Just $ PP.folddoc (PP.</>) annots
+  ppExpLore (AST.LoopOp (DoLoop _ merge _ _ _ _)) =
+    case mapMaybe (bindeeAnnotation . fst) merge of
+      []     -> Nothing
+      annots -> Just $ PP.folddoc (PP.</>) annots
+  ppExpLore _ = Nothing
 
 bindeeAnnotation :: PatBindee -> Maybe PP.Doc
 bindeeAnnotation bindee =

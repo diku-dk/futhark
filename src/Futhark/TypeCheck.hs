@@ -659,18 +659,19 @@ checkLoopOp (DoLoop respat merge (Ident loopvar loopvart loopvarloc)
     bad $ TypeError loopvarloc "Type annotation of loop variable is not int"
   (boundexp', boundarg) <- checkArg boundexp
   (mergeexps', mergeargs) <- unzip <$> mapM checkArg mergeexps
-  let mergeparams = map bindeeIdent mergepat
-      funparams = Ident loopvar (Basic Int) loopvarloc : mergeparams
-      paramts   = map (toDecl . identType) funparams
-      rettype   = map identType mergeparams
+  iparam <- basicFParam loopvar Int loopvarloc
+  let funparams = iparam : mergepat
+      paramts   = map (toDecl . bindeeType) funparams
+      rettype   = map bindeeType mergepat
   checkFuncall Nothing loc paramts $ boundarg : mergeargs
 
-  (_, loopbody') <-
-    noUnique $ checkAnonymousFun (nameFromString "<loop body>",
-                                  staticResType rettype,
-                                  funparams,
-                                  loopbody,
-                                  loc)
+  fun' <-
+    noUnique $ checkFun $ FunDec (nameFromString "<loop body>")
+                                 (staticResType rettype)
+                                 funparams
+                                 loopbody
+                                 loc
+  let loopbody' = funDecBody fun'
   respat' <-
     forM respat $ \res ->
       case find ((==identName res) . bindeeName) mergepat of
@@ -998,3 +999,4 @@ class (FreeIn (Lore.Exp lore),
   checkResType :: AST.ResType lore -> TypeM lore ()
   matchPattern :: SrcLoc -> AST.Pattern lore -> AST.ResType lore ->
                   TypeM lore ()
+  basicFParam :: VName -> BasicType -> SrcLoc -> TypeM lore (AST.FParam lore)
