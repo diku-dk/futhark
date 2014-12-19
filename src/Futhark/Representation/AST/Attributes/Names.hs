@@ -40,7 +40,7 @@ freeWalker = identityWalker {
 
         lambdaFree = tell . freeInLambda
 
-        typeFree = tell . freeInType
+        typeFree = tell . freeIn
 
         binding bound = censor (`HS.difference` bound)
 
@@ -90,11 +90,6 @@ freeNamesInSubExp :: SubExp -> Names
 freeNamesInSubExp = HS.map identName . freeInSubExp
 
 -- | Return the set of identifiers that are free in the given
--- type
-freeInType :: TypeBase Shape -> HS.HashSet Ident
-freeInType = mconcat . map freeInSubExp . arrayDims
-
--- | Return the set of identifiers that are free in the given
 -- body.
 freeInBody :: (FreeIn (Lore.Exp lore), FreeIn (Lore.Body lore)) =>
               Body lore -> HS.HashSet Ident
@@ -122,9 +117,9 @@ freeInLambda :: (FreeIn (Lore.Exp lore), FreeIn (Lore.Body lore)) =>
                 Lambda lore -> HS.HashSet Ident
 freeInLambda (Lambda params body rettype _) =
   inRet <> inParams <> inBody
-  where inRet = mconcat $ map freeInType rettype
+  where inRet = mconcat $ map freeIn rettype
         inParams = mconcat $ map freeInParam params
-        freeInParam = freeInType . identType
+        freeInParam = freeIn . identType
         inBody = HS.filter ((`notElem` paramnames) . identName) $ freeInBody body
         paramnames = map identName params
 
@@ -164,7 +159,9 @@ instance FreeIn ExtShape where
           freeInExtDimSize (Ext _)   = mempty
 
 instance (ArrayShape shape, FreeIn shape) => FreeIn (TypeBase shape) where
-  freeIn = freeIn . arrayShape
+  freeIn (Array _ shape _) = freeIn shape
+  freeIn (Mem size)        = freeIn size
+  freeIn (Basic _)         = mempty
 
 instance FreeIn attr => FreeIn (ResTypeT attr) where
   freeIn = freeIn . resTypeElems
