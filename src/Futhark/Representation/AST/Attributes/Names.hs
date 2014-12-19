@@ -7,8 +7,6 @@ module Futhark.Representation.AST.Attributes.Names
          , freeNamesInBody
          , freeInExp
          , freeNamesInExp
-         , freeInSubExp
-         , freeNamesInSubExp
          , freeInLambda
          , freeNamesInLambda
          , progNames
@@ -21,10 +19,12 @@ import qualified Data.HashSet as HS
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Traversals
 import qualified Futhark.Representation.AST.Lore as Lore
-import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Patterns
 
-freeWalker :: (FreeIn (Lore.Exp lore), FreeIn (Lore.Body lore)) =>
+freeWalker :: (FreeIn (Lore.Exp lore),
+               FreeIn (Lore.Body lore),
+               FreeIn (Lore.FParam lore),
+               FreeIn (Lore.LetBound lore)) =>
               Walker lore (Writer (HS.HashSet Ident))
 freeWalker = identityWalker {
                walkOnSubExp = subExpFree
@@ -34,9 +34,9 @@ freeWalker = identityWalker {
              , walkOnIdent = identFree
              , walkOnCertificates = mapM_ identFree
              }
-  where identFree = tell . freeInIdent
+  where identFree = tell . freeIn
 
-        subExpFree = tell . freeInSubExp
+        subExpFree = tell . freeIn
 
         lambdaFree = tell . freeInLambda
 
@@ -58,7 +58,7 @@ freeWalker = identityWalker {
         bindingFree (Let pat annot e) = do
           tell $ freeIn annot
           binding (HS.fromList $ patternIdents pat) $ do
-            mapM_ typeFree $ patternTypes pat
+            mapM_ (tell . freeIn) $ patternBindees pat
             expFree e
 
         expFree (LoopOp (DoLoop _ merge i boundexp loopbody _)) = do
@@ -66,54 +66,51 @@ freeWalker = identityWalker {
           mapM_ subExpFree mergeexps
           subExpFree boundexp
           binding (i `HS.insert` HS.fromList (map bindeeIdent mergepat)) $ do
-            mapM_ (typeFree . bindeeType) mergepat
+            mapM_ (tell . freeIn) mergepat
             bodyFree loopbody
 
         expFree e = walkExpM freeWalker e
 
 -- | Return the set of identifiers that are free in the given
--- identifier (including its type).
-freeInIdent :: Ident -> HS.HashSet Ident
-freeInIdent ident =
-  ident `HS.insert`
-  mconcat (map freeInSubExp $ arrayDims $ identType ident)
-
--- | Return the set of identifiers that are free in the given
--- subexpression.
-freeInSubExp :: SubExp -> HS.HashSet Ident
-freeInSubExp (Var ident)   = freeInIdent ident
-freeInSubExp (Constant {}) = HS.empty
-
--- | As 'freeInSubExp', but returns the raw names rather than
--- 'Ident's.
-freeNamesInSubExp :: SubExp -> Names
-freeNamesInSubExp = HS.map identName . freeInSubExp
-
--- | Return the set of identifiers that are free in the given
 -- body.
-freeInBody :: (FreeIn (Lore.Exp lore), FreeIn (Lore.Body lore)) =>
+freeInBody :: (FreeIn (Lore.Exp lore),
+               FreeIn (Lore.Body lore),
+               FreeIn (Lore.FParam lore),
+               FreeIn (Lore.LetBound lore)) =>
               Body lore -> HS.HashSet Ident
 freeInBody = execWriter . walkOnBody freeWalker
 
 -- | As 'freeInBody', but returns the raw names rather than 'Ident's.
-freeNamesInBody :: (FreeIn (Lore.Exp lore), FreeIn (Lore.Body lore)) =>
+freeNamesInBody :: (FreeIn (Lore.Exp lore),
+                    FreeIn (Lore.Body lore),
+                    FreeIn (Lore.FParam lore),
+                    FreeIn (Lore.LetBound lore)) =>
                    Body lore -> Names
 freeNamesInBody = HS.map identName . freeInBody
 
 -- | Return the set of identifiers that are free in the given
 -- expression.
-freeInExp :: (FreeIn (Lore.Exp lore), FreeIn (Lore.Body lore)) =>
+freeInExp :: (FreeIn (Lore.Exp lore),
+              FreeIn (Lore.Body lore),
+              FreeIn (Lore.FParam lore),
+              FreeIn (Lore.LetBound lore)) =>
              Exp lore -> HS.HashSet Ident
 freeInExp = execWriter . walkExpM freeWalker
 
 -- | As 'freeInExp', but returns the raw names rather than 'Ident's.
-freeNamesInExp :: (FreeIn (Lore.Exp lore), FreeIn (Lore.Body lore)) =>
+freeNamesInExp :: (FreeIn (Lore.Exp lore),
+                   FreeIn (Lore.Body lore),
+                   FreeIn (Lore.FParam lore),
+                   FreeIn (Lore.LetBound lore)) =>
                   Exp lore -> Names
 freeNamesInExp = HS.map identName . freeInExp
 
 -- | Return the set of identifiers that are free in the given lambda,
 -- including shape annotations in the parameters.
-freeInLambda :: (FreeIn (Lore.Exp lore), FreeIn (Lore.Body lore)) =>
+freeInLambda :: (FreeIn (Lore.Exp lore),
+                 FreeIn (Lore.Body lore),
+                 FreeIn (Lore.FParam lore),
+                 FreeIn (Lore.LetBound lore)) =>
                 Lambda lore -> HS.HashSet Ident
 freeInLambda (Lambda params body rettype _) =
   inRet <> inParams <> inBody
@@ -144,7 +141,7 @@ instance FreeIn a => FreeIn (Maybe a) where
   freeIn = maybe mempty freeIn
 
 instance FreeIn Ident where
-  freeIn = freeInIdent
+  freeIn ident = ident `HS.insert` freeIn (identType ident)
 
 instance FreeIn SubExp where
   freeIn (Var v) = freeIn v
@@ -175,7 +172,10 @@ freeNamesIn = HS.map identName . freeIn
 
 -- | As 'freeInLambda', but returns the raw names rather than
 -- 'IdentBase's.
-freeNamesInLambda :: (FreeIn (Lore.Exp lore), FreeIn (Lore.Body lore)) =>
+freeNamesInLambda :: (FreeIn (Lore.Exp lore),
+                      FreeIn (Lore.Body lore),
+                      FreeIn (Lore.FParam lore),
+                      FreeIn (Lore.LetBound lore)) =>
                      Lambda lore -> Names
 freeNamesInLambda = HS.map identName . freeInLambda
 

@@ -86,7 +86,7 @@ deadCodeElimBodyM (Body bodylore (Let pat explore e:bnds) res) = do
   seen $ freeNamesIn explore
   (Body _ bnds' res', noref) <-
     collectRes idds $ do
-      _ <- collectRes idds $ deadCodeElimPat pat
+      deadCodeElimPat pat
       deadCodeElimBodyM $ Body bodylore bnds res
   if noref
   then changed $ return $ Body bodylore bnds' res'
@@ -103,7 +103,7 @@ deadCodeElimBodyM (Body bodylore [] (Result cs es loc)) = do
 deadCodeElimExp :: Proper lore => Exp lore -> DCElimM (Exp lore)
 deadCodeElimExp (LoopOp (DoLoop respat merge i bound body loc)) = do
   let (mergepat, mergeexp) = unzip merge
-  mapM_ (deadCodeElimBnd . bindeeIdent) mergepat
+  mapM_ deadCodeElimBindee mergepat
   mapM_ deadCodeElimSubExp mergeexp
   bound' <- deadCodeElimSubExp bound
   body' <- deadCodeElimBodyM body
@@ -132,8 +132,12 @@ deadCodeElimIdent ident@(Ident vnm t _) = do
   dims <- mapM deadCodeElimSubExp $ arrayDims t
   return ident { identType = t `setArrayShape` Shape dims }
 
-deadCodeElimPat :: Pattern lore -> DCElimM ()
-deadCodeElimPat = mapM_ deadCodeElimBnd . patternIdents
+deadCodeElimPat :: Proper lore => Pattern lore -> DCElimM ()
+deadCodeElimPat = mapM_ deadCodeElimBindee . patternBindees
+
+deadCodeElimBindee :: FreeIn annot => Bindee annot -> DCElimM ()
+deadCodeElimBindee bindee =
+  seen $ bindeeName bindee `HS.delete` freeNamesIn bindee
 
 deadCodeElimBnd :: Ident -> DCElimM ()
 deadCodeElimBnd = void . deadCodeElimType . identType

@@ -4,7 +4,6 @@ module Futhark.Analysis.Usage
        )
        where
 
-import Data.Maybe
 import Data.Monoid
 import qualified Data.HashSet as HS
 
@@ -14,14 +13,14 @@ import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Binder (Proper)
 
 usageInBinding :: (Proper lore, Aliased lore) => Binding lore -> UT.UsageTable
-usageInBinding (Let pat _ e) =
-  usageInPat pat <> usageInPatLore pat <> usageInExp e <> UT.usages (freeNamesInExp e)
+usageInBinding (Let pat lore e) =
+  usageInPat pat <> usageInExpLore <> usageInExp e <> UT.usages (freeNamesInExp e)
   where usageInPat =
-          UT.usages . HS.fromList . mapMaybe subExpUsage .
-          concatMap (arrayDims . identType) . patternIdents
-        usageInPatLore = UT.usages . mconcat . map (freeNamesIn . bindeeLore) . patternBindees
-        subExpUsage (Var v)       = Just $ identName v
-        subExpUsage (Constant {}) = Nothing
+          UT.usages . mconcat . map bindeeUsage . patternBindees
+        usageInExpLore =
+          UT.usages $ freeNamesIn lore
+        bindeeUsage bindee = bindeeName bindee `HS.delete`
+                             freeNamesIn bindee
 
 usageInExp :: Aliased lore => Exp lore -> UT.UsageTable
 usageInExp (PrimOp (Assert (Var v) _)) =

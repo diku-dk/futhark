@@ -158,7 +158,7 @@ flowForExp (LoopOp (DoLoop _ merge _ boundexp loopbody _))
                  [ (used, HS.singleton []) |
                    used <- HS.toList
                            $ mconcat (freeNamesInBody loopbody :
-                                      map freeNamesInSubExp
+                                      map freeNamesIn
                                       (boundexp : map snd merge))
                           `HS.difference` HS.fromList names
                  ]

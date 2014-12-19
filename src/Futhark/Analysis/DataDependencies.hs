@@ -13,6 +13,7 @@ import qualified Data.HashSet as HS
 
 import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Representation.AST
+import Futhark.Binder (Proper)
 
 -- | A mapping from a variable name @v@, to those variables on which
 -- the value of @v@ is dependent.  The intuition is that we could
@@ -21,10 +22,10 @@ import Futhark.Representation.AST
 type Dependencies = HM.HashMap VName Names
 
 -- | Compute the data dependencies for an entire body.
-dataDependencies :: (FreeIn (Lore.Exp lore), FreeIn (Lore.Body lore)) => Body lore -> Dependencies
+dataDependencies :: Proper lore => Body lore -> Dependencies
 dataDependencies = dataDependencies' HM.empty
 
-dataDependencies' :: (FreeIn (Lore.Exp lore), FreeIn (Lore.Body lore)) =>
+dataDependencies' :: Proper lore =>
                      Dependencies -> Body lore -> Dependencies
 dataDependencies' startdeps = foldl grow startdeps . bodyBindings
   where grow deps (Let pat _ (If c tb fb _ _)) =
@@ -90,7 +91,8 @@ dataDependencies' startdeps = foldl grow startdeps . bodyBindings
               freeDeps = HS.unions $ map (`nameDeps` deps) $ HS.toList free
           in HM.fromList [ (name, freeDeps) | name <- patternNames pat ] `HM.union` deps
 
-foldDeps' :: (FreeIn (Lore.Exp lore), FreeIn (Lore.Body lore)) => Dependencies
+foldDeps' :: Proper lore =>
+             Dependencies
           -> [Ident] -> Lambda lore -> [Names] -> [Names]
           -> (Dependencies, [Names])
 foldDeps' deps cs fun acc arr =
@@ -99,7 +101,7 @@ foldDeps' deps cs fun acc arr =
       deps' = dataDependencies' (pardeps `HM.union` deps) $ lambdaBody fun
   in (deps', lambdaDeps deps' fun)
 
-foldDeps :: (FreeIn (Lore.Exp lore), FreeIn (Lore.Body lore)) =>
+foldDeps :: Proper lore =>
             Dependencies
          -> Pattern lore -> [Ident] -> Lambda lore -> [SubExp] -> [SubExp]
          -> HM.HashMap VName Names
