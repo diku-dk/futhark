@@ -28,6 +28,7 @@ import Futhark.Tools
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.Optimise.Simplifier (Simplifiable (..))
+import qualified Futhark.Optimise.Simplifier.Engine as Engine
 
 newtype AllocM a = AllocM (ReaderT (HM.HashMap VName MemSummary)
                            (Binder ExplicitMemory)
@@ -342,8 +343,11 @@ vtableToAllocEnv = HM.fromList . mapMaybe entryToMemSummary .
           ((_, summary), _) <- ST.entryBinding entry
           return (k, summary)
 
-simplifiable :: Simplifiable ExplicitMemory
-simplifiable = Simplifiable mkLetS' mkBodyS' mkLetNamesS'
+simplifiable :: (Engine.MonadEngine m,
+                 Engine.InnerLore m ~ ExplicitMemory) =>
+                Simplifiable m
+simplifiable =
+  Simplifiable mkLetS' mkBodyS' mkLetNamesS' simplifyMemSummary simplifyMemSummary
   where mkLetS' vtable pat e = do
           Let pat' lore _ <- runAllocMWithEnv env $
                              mkLetM (removePatternAliases pat) $
@@ -356,3 +360,7 @@ simplifiable = Simplifiable mkLetS' mkBodyS' mkLetNamesS'
             runAllocMWithEnv env $ mkLetNamesM names $ removeExpAliases e
           return $ mkAliasedLetBinding pat' lore e
           where env = vtableToAllocEnv vtable
+        simplifyMemSummary Scalar = return Scalar
+        simplifyMemSummary (MemSummary ident ixfun) = do
+          vtable <- Engine.getVtable
+          MemSummary <$> Engine.simplifyIdent ident <*> pure ixfun

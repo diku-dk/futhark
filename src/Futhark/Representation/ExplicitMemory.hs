@@ -235,7 +235,7 @@ instance Lore.Lore ExplicitMemory where
             case (t,
                   bindeeLore <$> find ((==resname) . bindeeName) mergevars) of
               (Array {}, Just (MemSummary mem _))
-                | isMergeVar resname -> do
+                | isMergeVar $ identName mem -> do
                   i <- get
                   put $ i + 1
                   return (t, ReturnsNewBlock i)
@@ -259,10 +259,10 @@ instance TypeCheck.Checkable ExplicitMemory where
     checkMems memsizes mems
     checkVals mems valsizes valbindees
     where wrong s = TypeCheck.bad $ TypeError loc $
-                    "Pattern\n" ++ pretty pat ++ "\ncannot match result type\n" ++
-                    pretty rt ++ ":\n" ++ s
+                    "Pattern\n  " ++ pretty pat ++ "\ncannot match result type\n  " ++
+                    pretty rt ++ "\n" ++ s
           mustBeEmpty _ [] = return ()
-          mustBeEmpty s  _ = wrong $ "unused " ++ s ++ " bindees"
+          mustBeEmpty s  _ = wrong $ "Guess: unused " ++ s ++ " bindees"
           checkMems memsizes mems =
             mustBeEmpty "memory block size" =<<
             execStateT (mapM_ checkMem mems) memsizes

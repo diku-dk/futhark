@@ -36,6 +36,8 @@ module Futhark.Optimise.Simplifier.Engine
        , simplifyExp
        , simplifyFun
        , simplifyLambda
+       , simplifySubExp
+       , simplifyIdent
        , defaultInspectBinding
        ) where
 
@@ -119,6 +121,10 @@ class (Proper (Lore m), MonadBinder m,
   simplifyBody = defaultSimplifyBody
   inspectBinding :: Binding (Lore m) -> m ()
   inspectBinding = defaultInspectBinding
+  simplifyLetBoundLore :: Lore.LetBound (InnerLore m)
+                       -> m (Lore.LetBound (InnerLore m))
+  simplifyFParamLore :: Lore.FParam (InnerLore m)
+                        -> m (Lore.FParam (InnerLore m))
 
 addBindingEngine :: MonadEngine m =>
                     Binding (Lore m) -> m ()
@@ -297,7 +303,7 @@ provides = patternNames . bindingPattern
 
 requires :: Proper lore => Binding lore -> Names
 requires bnd =
-  (mconcat (map freeNamesIn $ patternIdents $ bindingPattern bnd)
+  (mconcat (map freeNamesIn $ patternBindees $ bindingPattern bnd)
   `HS.difference` HS.fromList (provides bnd)) <>
   freeNamesInExp (bindingExp bnd)
 
@@ -444,7 +450,7 @@ simplifyBinding (Let pat _ (Apply fname args rettype loc)) = do
 
 simplifyBinding (Let pat _ e) = do
   e' <- simplifyExp e
-  pat' <- blockUsage $ simplifyPattern pat
+  pat' <- simplifyPattern pat
   inspectBinding =<<
     mkLetM (Aliases.addAliasesToPattern pat' e') e'
 
@@ -517,9 +523,10 @@ simplifyLoopOp (DoLoop respat merge loopvar boundexp loopbody loc) = do
   return $ DoLoop respat' merge' loopvar boundexp' loopbody' loc
   where boundnames = identName loopvar `HS.insert`
                      HS.fromList (map (bindeeName . fst) merge)
-        simplifyFParam bindee = do
-          ident <- simplifyIdentBinding $ bindeeIdent bindee
-          return $ bindee { bindeeIdent = ident }
+        simplifyFParam (Bindee ident lore) = do
+          ident' <- simplifyIdentBinding ident
+          lore' <- simplifyFParamLore lore
+          return $ Bindee ident' lore'
 
 simplifyLoopOp (Map cs fun arrs loc) = do
   cs' <- simplifyCerts cs
@@ -594,12 +601,15 @@ simplifySubExp (Var ident@(Ident vnm _ loc)) = do
     _              -> Var <$> simplifyIdent ident
 simplifySubExp (Constant v loc) = return $ Constant v loc
 
-simplifyPattern :: MonadEngine m => Pattern lore -> m (Pattern lore)
+simplifyPattern :: MonadEngine m =>
+                   Pattern (InnerLore m)
+                -> m (Pattern (InnerLore m))
 simplifyPattern =
   liftM Pattern . mapM inspect . patternBindees
   where inspect (Bindee ident lore) = do
           ident' <- simplifyIdentBinding ident
-          return $ Bindee ident' lore
+          lore'  <- simplifyLetBoundLore lore
+          return $ Bindee ident' lore'
 
 simplifyIdentBinding :: MonadEngine m => Ident -> m Ident
 simplifyIdentBinding v = do
@@ -608,9 +618,13 @@ simplifyIdentBinding v = do
 
 simplifyIdent :: MonadEngine m => Ident -> m Ident
 simplifyIdent v = do
-  usedName $ identName v
-  t' <- simplifyType $ identType v
-  return v { identType = t' }
+  se <- ST.lookupSubExp (identName v) <$> getVtable
+  case se of
+    Just (Var v') -> do usedName $ identName v'
+                        return v' { identSrcLoc = srclocOf v }
+    _             -> do usedName $ identName v
+                        t' <- simplifyType $ identType v
+                        return v { identType = t' }
 
 simplifyResType :: MonadEngine m =>
                    ResType (InnerLore m) -> m (ResType (Lore m))

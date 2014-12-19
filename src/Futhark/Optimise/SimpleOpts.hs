@@ -26,7 +26,8 @@ import Futhark.Optimise.Errors
 --import Debug.Trace
 
 simpleOpts :: Proper lore =>
-              Simplifiable lore -> Prog lore -> Either Error (Prog lore)
+              Simplifiable (SimpleM lore)
+              -> Prog lore -> Either Error (Prog lore)
 simpleOpts simpl prog = do
 --  esc <- AS.canSimplify 3
 --  let prog' = trace (ScExp.ppScalExp esc) prog
@@ -37,7 +38,8 @@ simpleOpts simpl prog = do
   return $ normCopyDeadOpts simpl prog_flat_opt
 
 normCopyDeadOpts :: Proper lore =>
-                    Simplifiable lore -> Prog lore -> Prog lore
+                    Simplifiable (SimpleM lore)
+                 -> Prog lore -> Prog lore
 normCopyDeadOpts simpl = deadCodeElim . simplifyProgWithStandardRules simpl
 
 normCopyOneLambda :: MonadFreshNames m =>

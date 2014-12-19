@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, TypeFamilies #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, TypeFamilies, FlexibleContexts #-}
 -- |
 --
 -- Apply the simplification engine
@@ -12,6 +12,7 @@ module Futhark.Optimise.Simplifier
   , simplifyLambdaWithStandardRules
     -- * More generic interface
   , Simplifiable (..)
+  , SimpleM
   , bindableSimplifiable
   , simplifyProg
   , simplifyFun
@@ -26,7 +27,7 @@ import Control.Monad.State hiding (State)
 import Control.Monad.RWS
 import Control.Arrow (second)
 
-import qualified Futhark.Representation.Aliases as Aliases
+import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 import Futhark.Binder
@@ -41,7 +42,7 @@ import Futhark.Optimise.Simplifier.Rules
 -- output, meaningful simplification may not have taken place - the
 -- order of bindings may simply have been rearranged.
 simplifyProgWithStandardRules :: Proper lore =>
-                                 Simplifiable lore
+                                 Simplifiable (SimpleM lore)
                               -> Prog lore -> Prog lore
 simplifyProgWithStandardRules simpl =
   removeProgAliases .
@@ -49,7 +50,7 @@ simplifyProgWithStandardRules simpl =
 
 -- | Simplify just a single function declaration.
 simplifyFunWithStandardRules :: (MonadFreshNames m, Proper lore) =>
-                                Simplifiable lore
+                                Simplifiable (SimpleM lore)
                              -> FunDec lore
                              -> m (FunDec lore)
 simplifyFunWithStandardRules simpl =
@@ -58,7 +59,7 @@ simplifyFunWithStandardRules simpl =
 
 -- | Simplify just a single 'Lambda'.
 simplifyLambdaWithStandardRules :: (MonadFreshNames m, Proper lore) =>
-                                   Simplifiable lore
+                                   Simplifiable (SimpleM lore)
                                 -> Prog lore
                                 -> Lambda lore
                                 -> [Maybe SubExp]
@@ -67,32 +68,42 @@ simplifyLambdaWithStandardRules simpl prog lam args =
   liftM removeLambdaAliases $
   simplifyLambda simpl standardRules (Just prog) lam args
 
-data Simplifiable lore =
-  Simplifiable { mkLetS :: ST.SymbolTable (Aliases lore)
-                        -> Aliases.Pattern lore -> Aliases.Exp lore
-                        -> Binder (Aliases lore) (Aliases.Binding lore)
-               , mkBodyS :: ST.SymbolTable (Aliases lore)
-                         -> [Aliases.Binding lore] -> Result
-                         -> Binder (Aliases lore) (Aliases.Body lore)
-               , mkLetNamesS :: ST.SymbolTable (Aliases lore)
-                             -> [VName] -> Aliases.Exp lore
-                             -> Binder (Aliases lore) (Aliases.Binding lore)
+data Simplifiable m =
+  Simplifiable { mkLetS :: ST.SymbolTable (Lore m)
+                        -> Pattern (Lore m) -> Exp (Lore m)
+                        -> m (Binding (Lore m))
+               , mkBodyS :: ST.SymbolTable (Lore m)
+                         -> [Binding (Lore m)] -> Result
+                         -> m (Body (Lore m))
+               , mkLetNamesS :: ST.SymbolTable (Lore m)
+                             -> [VName] -> Exp (Lore m)
+                             -> m (Binding (Lore m))
+               , simplifyLetBoundLore :: Lore.LetBound (Engine.InnerLore m)
+                                      -> m (Lore.LetBound (Engine.InnerLore m))
+               , simplifyFParamLore :: Lore.FParam (Engine.InnerLore m)
+                                       -> m (Lore.FParam (Engine.InnerLore m))
+
                }
 
-bindableSimplifiable :: Bindable lore => Simplifiable lore
-bindableSimplifiable = Simplifiable mkLetS' mkBodyS' mkLetNamesS'
+bindableSimplifiable :: (Engine.MonadEngine m,
+                         Bindable (Engine.InnerLore m),
+                         Lore.LetBound (Engine.InnerLore m) ~ (),
+                         Lore.FParam (Engine.InnerLore m) ~ ()) =>
+                        Simplifiable m
+bindableSimplifiable =
+  Simplifiable mkLetS' mkBodyS' mkLetNamesS' return return
   where mkLetS' _ pat e = return $ mkLet (patternIdents pat) e
         mkBodyS' _ bnds res = return $ mkBody bnds res
         mkLetNamesS' _ = mkLetNames
 
 newtype SimpleM lore a = SimpleM (RWS
-                                  (Simplifiable lore, Engine.Env (SimpleM lore))   -- Reader
+                                  (Simplifiable (SimpleM lore), Engine.Env (SimpleM lore))   -- Reader
                                   (Engine.Need (Aliases lore))                     -- Writer
                                   (Engine.State (SimpleM lore), NameSource VName)  -- State
                                   a)
   deriving (Applicative, Functor, Monad,
             MonadWriter (Engine.Need (Aliases lore)),
-            MonadReader (Simplifiable lore, Engine.Env (SimpleM lore)),
+            MonadReader (Simplifiable (SimpleM lore), Engine.Env (SimpleM lore)),
             MonadState (Engine.State (SimpleM lore), NameSource VName))
 
 instance MonadFreshNames (SimpleM lore) where
@@ -113,30 +124,30 @@ instance Proper lore => Engine.MonadEngine (SimpleM lore) where
   putEngineState x = modify $ \(_, y) -> (x,y)
   passNeed = pass
   simplifyBody = Engine.defaultSimplifyBody
+  simplifyLetBoundLore lore = do
+    simpl <- fst <$> ask
+    simplifyLetBoundLore simpl lore
+  simplifyFParamLore lore = do
+    simpl <- fst <$> ask
+    simplifyFParamLore simpl lore
 
 instance Proper lore => BindableM (SimpleM lore) where
   type Lore (SimpleM lore) = Aliases lore
   mkLetM pat e = do
     vtable <- Engine.getVtable
     simpl <- fst <$> ask
-    (bnd, newbnds) <- runBinder'' $ mkLetS simpl vtable pat e
-    mapM_ addBinding newbnds
-    return bnd
+    mkLetS simpl vtable pat e
   mkBodyM bnds res = do
     vtable <- Engine.getVtable
     simpl <- fst <$> ask
-    (body, newbnds) <- runBinder'' $ mkBodyS simpl vtable bnds res
-    mapM_ addBinding newbnds
-    return body
+    mkBodyS simpl vtable bnds res
   mkLetNamesM names e = do
     vtable <- Engine.getVtable
     simpl <- fst <$> ask
-    (bnd, newbnds) <- runBinder'' $ mkLetNamesS simpl vtable names e
-    mapM_ addBinding newbnds
-    return bnd
+    mkLetNamesS simpl vtable names e
 
 runSimpleM :: SimpleM lore a
-           -> Simplifiable lore
+           -> Simplifiable (SimpleM lore)
            -> Engine.Env (SimpleM lore)
            -> VNameSource
            -> (a, VNameSource)
@@ -148,7 +159,7 @@ runSimpleM (SimpleM m) simpl env src =
 -- output, meaningful simplification may not have taken place - the
 -- order of bindings may simply have been rearranged.
 simplifyProg :: Proper lore =>
-                Simplifiable lore
+                Simplifiable (SimpleM lore)
              -> RuleBook (SimpleM lore)
              -> Prog lore
              -> Prog (Aliases lore)
@@ -161,7 +172,7 @@ simplifyProg simpl rules prog =
 -- output, meaningful simplification may not have taken place - the
 -- order of bindings may simply have been rearranged.
 simplifyFun :: (MonadFreshNames m, Proper lore) =>
-               Simplifiable lore
+               Simplifiable (SimpleM lore)
             -> RuleBook (SimpleM lore)
             -> FunDec lore
             -> m (FunDec (Aliases lore))
@@ -171,7 +182,7 @@ simplifyFun simpl rules fundec =
 
 -- | Simplify just a single 'Lambda'.
 simplifyLambda :: (MonadFreshNames m, Proper lore) =>
-                  Simplifiable lore
+                  Simplifiable (SimpleM lore)
                -> RuleBook (SimpleM lore)
                -> Maybe (Prog lore) -> Lambda lore -> [Maybe SubExp]
                -> m (Lambda (Aliases lore))
