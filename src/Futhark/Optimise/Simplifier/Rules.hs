@@ -194,14 +194,14 @@ removeUnusedLoopResult _ _ = cannotSimplify
 -- generate wrong code.
 removeRedundantMergeVariables :: MonadBinder m => BottomUpRule m
 removeRedundantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge i bound body loc)))
-  | not $ all (usedInResult . fst) merge =
+  | not $ all (explicitlyReturned . fst) merge =
   let Result cs es resloc = bodyResult body
-      usedResults = map snd $ filter (usedInResult . fst) $ zip mergepat es
-      necessary' = mconcat $ map dependencies usedResults
+      returnedResultSubExps = map snd $ filter (explicitlyReturned . fst) $ zip mergepat es
+      necessaryForReturned = mconcat $ map dependencies returnedResultSubExps
       resIsNecessary ((v,_), _) =
-        usedInResult v ||
-        bindeeName v `HS.member` necessary' ||
-        usedInPatType v
+        explicitlyReturned v ||
+        bindeeName v `HS.member` necessaryForReturned ||
+        referencedInPat v
       (keep, discard) = partition resIsNecessary $ zip merge es
       (merge', es') = unzip keep
       body' = body { bodyResult = Result cs es' resloc }
@@ -218,10 +218,11 @@ removeRedundantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge i bound 
          return body'
        letBind_ pat $ LoopOp $ DoLoop respat merge' i bound body'' loc
   where (mergepat, _) = unzip merge
-        usedInResult = (`elem` respat) . bindeeIdent
-        patDimNames = mconcat $ map freeNamesInSubExp $
-                      concatMap (arrayDims . bindeeType) mergepat
-        usedInPatType = (`HS.member` patDimNames) . bindeeName
+        explicitlyReturned = (`elem` respat) . bindeeIdent
+        patAnnotNames = mconcat [ freeNamesIn (bindeeType bindee) <>
+                                  freeNamesIn (bindeeLore bindee)
+                                | bindee <- mergepat ]
+        referencedInPat = (`HS.member` patAnnotNames) . bindeeName
 
         dummyBindings = map dummyBinding
         dummyBinding ((v,e), _)
