@@ -86,11 +86,15 @@ instance Pretty SubExp where
   ppr (Var v)        = ppr v
   ppr (Constant v _) = ppr v
 
+instance Pretty Result where
+  ppr (Result cs es _) =
+    ppCertificates cs <> braces (commasep   $ map ppr es)
+
 instance PrettyLore lore => Pretty (Body lore) where
   ppr (Body lore (bnd:bnds) res) =
     ppr bnd <+> text "in" </> ppr (Body lore bnds res)
-  ppr (Body _ [] (Result cs es _)) =
-    ppCertificates cs <> braces (commasep   $ map ppr es)
+  ppr (Body _ [] res) =
+    ppr res
 
 bindingAnnotation :: PrettyLore lore => Binding lore -> Doc -> Doc
 bindingAnnotation bnd doc =
