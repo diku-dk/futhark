@@ -224,8 +224,11 @@ instance Lore.Lore ExplicitMemory where
                 Just mem
               _ ->
                 Nothing
-          memSizeIfNecessary ident =
-            bindeeIdent <$> find ((==ident) . bindeeIdent) mergevars
+          memSizeIfNecessary ident
+            | Mem (Var sizeident) <- identType ident =
+              bindeeIdent <$> find ((==sizeident) . bindeeIdent) mergevars
+            | otherwise =
+              Nothing
 
   loopResType _ res mergevars =
     AST.ResType $ evalState (mapM typeWithAttr $
