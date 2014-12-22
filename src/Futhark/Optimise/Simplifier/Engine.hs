@@ -107,7 +107,7 @@ emptyState = State { stateVtable = ST.empty }
 
 class (Proper (Lore m), MonadBinder m,
        Lore m ~ Aliases (InnerLore m),
-       Lore.Lore (InnerLore m)) => MonadEngine m where
+       Proper (InnerLore m)) => MonadEngine m where
   type InnerLore m
   askEngineEnv :: m (Env m)
   localEngineEnv :: (Env m -> Env m) -> m a -> m a
@@ -592,13 +592,15 @@ simplifyLoopOp (Redomap cs outerfun innerfun acc arrs loc) = do
           | otherwise = return (lam, arrinps)
 
 simplifySubExp :: MonadEngine m => SubExp -> m SubExp
-simplifySubExp (Var ident@(Ident vnm _ loc)) = do
+simplifySubExp (Var (Ident vnm t loc)) = do
   bnd <- getsEngineState $ ST.lookupSubExp vnm . stateVtable
   case bnd of
     Just (Constant v _) -> return $ Constant v loc
     Just (Var id') -> do usedName $ identName id'
                          return $ Var id'
-    _              -> Var <$> simplifyIdent ident
+    _              -> do usedName vnm
+                         t' <- simplifyType t
+                         return $ Var $ Ident vnm t' loc
 simplifySubExp (Constant v loc) = return $ Constant v loc
 
 simplifyPattern :: MonadEngine m =>
@@ -641,8 +643,13 @@ simplifyExtType t = do dims <- mapM simplifyDim $ extShapeDims $ arrayShape t
         simplifyDim (Ext x)   = return $ Ext x
 
 simplifyType :: MonadEngine m => Type -> m Type
-simplifyType t = do dims <- mapM simplifySubExp $ arrayDims t
-                    return $ t `setArrayShape` Shape dims
+simplifyType (Array et shape u) = do
+  dims <- mapM simplifySubExp $ shapeDims shape
+  return $ Array et (Shape dims) u
+simplifyType (Mem size) =
+  Mem <$> simplifySubExp size
+simplifyType (Basic bt) =
+  return $ Basic bt
 
 simplifyLambda :: MonadEngine m =>
                   Lambda (InnerLore m) -> [Maybe SubExp]
