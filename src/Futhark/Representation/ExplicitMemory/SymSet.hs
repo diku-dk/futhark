@@ -1,4 +1,4 @@
-{-# LANGUAGE GADTs, DataKinds, TypeOperators, KindSignatures, ScopedTypeVariables, AllowAmbiguousTypes #-}
+{-# LANGUAGE GADTs, DataKinds, TypeOperators, KindSignatures, ScopedTypeVariables #-}
 module Futhark.Representation.ExplicitMemory.SymSet
        ( SymSet
        , singleton

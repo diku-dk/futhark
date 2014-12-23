@@ -1,4 +1,4 @@
-{-# LANGUAGE RankNTypes, ScopedTypeVariables, DataKinds, FlexibleContexts, ExistentialQuantification, TypeOperators, AllowAmbiguousTypes, TypeFamilies #-}
+{-# LANGUAGE RankNTypes, ScopedTypeVariables, DataKinds, FlexibleContexts, ExistentialQuantification, TypeOperators, TypeFamilies #-}
 module Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
        (
          IxFun

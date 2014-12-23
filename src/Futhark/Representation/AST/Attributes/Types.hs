@@ -1,4 +1,3 @@
-{-# LANGUAGE ScopedTypeVariables, AllowAmbiguousTypes, FlexibleInstances #-}
 module Futhark.Representation.AST.Attributes.Types
        (
          arrayRank
