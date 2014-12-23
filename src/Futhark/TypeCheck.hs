@@ -5,9 +5,11 @@ module Futhark.TypeCheck
     checkProg
   , checkProgNoUniqueness
   , TypeError
+  , ErrorCase
     -- * Extensionality
   , TypeM
   , bad
+  , context
   , Checkable (..)
   , module Futhark.TypeCheck.TypeError
     -- * Checkers
@@ -30,6 +32,7 @@ import Data.List
 import Data.Loc
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
+import qualified Text.PrettyPrint.Mainland as PP
 
 import Futhark.Representation.AST.Lore (Lore)
 import qualified Futhark.Representation.AST.Lore as Lore
@@ -40,7 +43,17 @@ import Futhark.TypeCheck.TypeError
 import Futhark.Analysis.Alias
 
 -- | Information about an error that occured during type checking.
-type TypeError lore = GenTypeError VName (Exp lore) (Several DeclType) (Several Ident)
+data TypeError lore = Error [String] (ErrorCase lore)
+
+-- | What went wrong.
+type ErrorCase lore =
+  GenTypeError VName (Exp lore) (Several DeclType) (Several Ident)
+
+instance PrettyLore lore => Show (TypeError lore) where
+  show (Error [] err) =
+    show err
+  show (Error msgs err) =
+    intercalate "\n" msgs ++ "\n" ++ show err
 
 -- | A tuple of a return type and a list of parameters, possibly
 -- named.
@@ -82,7 +95,8 @@ usageMap = foldl comb HM.empty
           in HS.foldl' (ins $ Consumed loc) m' cons
         ins v m k = HM.insertWith (++) k [v] m
 
-combineOccurences :: VName -> Usage -> Usage -> Either (TypeError lore) Usage
+combineOccurences :: VName -> Usage -> Usage
+                  -> Either (ErrorCase lore) Usage
 combineOccurences _ (Observed loc) (Observed _) = Right $ Observed loc
 combineOccurences name (Consumed wloc) (Observed rloc) =
   Left $ UseAfterConsume name rloc wloc
@@ -91,7 +105,8 @@ combineOccurences name (Observed rloc) (Consumed wloc) =
 combineOccurences name (Consumed loc1) (Consumed loc2) =
   Left $ UseAfterConsume name (max loc1 loc2) (min loc1 loc2)
 
-checkOccurences :: Occurences -> Either (TypeError lore) ()
+checkOccurences :: Occurences
+                -> Either (ErrorCase lore) ()
 checkOccurences = void . HM.traverseWithKey comb . usageMap
   where comb _    []     = Right ()
         comb name (u:us) = foldM_ (combineOccurences name) u us
@@ -135,6 +150,7 @@ data TypeEnv lore =
   TypeEnv { envVtable :: HM.HashMap VName VarBinding
           , envFtable :: HM.HashMap Name (FunBinding lore)
           , envCheckOccurences :: Bool
+          , envContext :: [String]
           }
 
 -- | The type checker runs in this monad.
@@ -153,14 +169,30 @@ runTypeM :: TypeEnv lore -> NameSource VName -> TypeM lore a
          -> Either (TypeError lore) a
 runTypeM env src (TypeM m) = fst <$> evalRWST m env src
 
-bad :: TypeError lore -> TypeM lore a
-bad = TypeM . lift . Left
+bad :: ErrorCase lore -> TypeM lore a
+bad e = do
+  messages <- asks envContext
+  TypeM $ lift $ Left $ Error (reverse messages) e
+
+-- | Add information about what is being type-checked to the current
+-- context.  Liberal use of this combinator makes it easier to track
+-- type errors, as the strings are added to type errors signalled via
+-- 'bad'.
+context :: String
+          -> TypeM lore a
+          -> TypeM lore a
+context s = local $ \env -> env { envContext = s : envContext env}
+
+message :: PP.Pretty a =>
+              String -> a -> String
+message s x = PP.pretty 80 $
+                 PP.text s PP.<+> PP.align (PP.ppr x)
 
 instance MonadFreshNames (TypeM lore) where
   getNameSource = get
   putNameSource = put
 
-liftEither :: Either (TypeError lore) a -> TypeM lore a
+liftEither :: Either (ErrorCase lore) a -> TypeM lore a
 liftEither = either bad return
 
 liftEitherS :: SrcLoc -> Either String a -> TypeM lore a
@@ -378,6 +410,7 @@ checkProg' checkoccurs prog = do
   let typeenv = TypeEnv { envVtable = HM.empty
                         , envFtable = ftable
                         , envCheckOccurences = checkoccurs
+                        , envContext = []
                         }
 
   liftM Prog $ runTypeM typeenv src $
@@ -396,7 +429,7 @@ checkProg' checkoccurs prog = do
                   (progFunctions prog')
     expand ftable (FunDec name ret args _ pos)
       | Just (_,_,pos2) <- HM.lookup name ftable =
-        Left $ DupDefinitionError name pos pos2
+        Left $ Error [] $ DupDefinitionError name pos pos2
       | otherwise =
         let argtypes = map (toDecl . bindeeType) args -- Throw away argument names.
             argnames = map (Just . bindeeName) args
@@ -412,12 +445,15 @@ initialFtable _ = HM.map addBuiltin builtInFunctions
 
 checkFun :: Checkable lore =>
             FunDec lore -> TypeM lore (FunDec lore)
-checkFun (FunDec fname rettype params body loc) = do
-  (rettype', body') <-
-    checkFun' (fname, rettype, map bindeeIdent params, body, loc) $ do
-      mapM_ (checkFParamLore . bindeeLore) params
-      checkFunBody rettype body
-  return $ FunDec fname rettype' params body' loc
+checkFun (FunDec fname rettype params body loc) =
+  context ("In function " ++ nameToString fname) $ do
+    (rettype', body') <-
+      checkFun' (fname, rettype, map bindeeIdent params, body, loc) $ do
+        forM_ params $ \param ->
+          context ("In function parameter " ++ pretty param) $
+          checkFParamLore $ bindeeLore param
+        checkFunBody rettype body
+    return $ FunDec fname rettype' params body' loc
 
 checkFunBody :: Checkable lore =>
                 ResType lore -> BodyT (Aliases lore)
@@ -488,7 +524,7 @@ checkFun' (fname, rettype, params, _, loc) check = do
 checkSubExp :: Checkable lore => SubExp -> TypeM lore SubExp
 checkSubExp (Constant v loc) =
   return $ Constant v loc
-checkSubExp (Var ident) = do
+checkSubExp (Var ident) = context ("In subexp " ++ pretty ident) $ do
   ident' <- checkIdent ident
   observe ident'
   return $ Var ident'
@@ -498,7 +534,10 @@ checkBindings :: Checkable lore =>
               -> TypeM lore ([Binding lore], a)
 checkBindings origbnds m = delve origbnds
   where delve (Let pat (eals,annot) e:bnds) = do
-          (e', dataflow) <- collectDataflow $ checkExp e
+          (e', dataflow) <-
+            collectDataflow $
+            context (message "In expression " e) $
+            checkExp e
           annot' <- checkExpLore annot
           (scope, pat') <-
             checkBinding (srclocOf e) pat (typeOf e') dataflow
@@ -818,10 +857,11 @@ checkExtType t = mapM_ checkExtDim $ extShapeDims $ arrayShape t
 
 checkIdent :: Checkable lore =>
               Ident -> TypeM lore Ident
-checkIdent (Ident name t pos) = do
-  vt <- lookupType name pos
-  t'' <- checkAnnotation pos ("variable " ++ textual name) t vt
-  return $ Ident name t'' pos
+checkIdent (Ident name t pos) =
+  context ("In ident " ++ pretty t ++ " " ++ pretty name) $ do
+    vt <- lookupType name pos
+    t'' <- checkAnnotation pos ("variable " ++ textual name) t vt
+    return $ Ident name t'' pos
 
 checkBinOp :: Checkable lore =>
               BinOp -> SubExp -> SubExp -> Type -> SrcLoc
@@ -878,14 +918,16 @@ sequentially m1 m2 = do
 checkBinding :: Checkable lore =>
                 SrcLoc -> Pattern lore -> ResType lore -> Dataflow
              -> TypeM lore (TypeM lore a -> TypeM lore a, Pattern lore)
-checkBinding loc pat ts dflow = do
-  matchPattern loc (removePatternAliases pat) ts
-  return (\m -> sequentially (tell dflow)
-                (const . const $
-                 binding (zip (patternIdents pat)
-                          (map (unNames . fst . bindeeLore) $ patternBindees pat))
-                 (checkPatSizes (patternIdents pat) >> m)),
-          pat)
+checkBinding loc pat ts dflow =
+  context ("When matching " ++ pretty pat ++ " with " ++ pretty ts) $ do
+    matchPattern loc (removePatternAliases pat) ts
+    return (\m -> sequentially (tell dflow)
+                  (const . const $
+                   binding (zip (patternIdents pat)
+                            (map (unNames . fst . bindeeLore) $
+                             patternBindees pat))
+                   (checkPatSizes (patternIdents pat) >> m)),
+            pat)
 
 matchExtPattern :: SrcLoc -> [Ident] -> [ExtType] -> TypeM lore ()
 matchExtPattern loc pat ts = do
