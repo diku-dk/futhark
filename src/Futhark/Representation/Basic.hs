@@ -84,7 +84,6 @@ type ResType = AST.ResType Basic
 
 instance TypeCheck.Checkable Basic where
   checkExpLore = return
-  checkBindingLore = return
   checkBodyLore = return
   checkFParamLore = return
   checkResType = mapM_ TypeCheck.checkExtType . resTypeValues

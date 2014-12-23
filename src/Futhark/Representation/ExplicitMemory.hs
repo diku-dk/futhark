@@ -249,7 +249,6 @@ instance Lore.Lore ExplicitMemory where
 
 instance TypeCheck.Checkable ExplicitMemory where
   checkExpLore = return
-  checkBindingLore = checkMemSummary
   checkBodyLore = return
   checkFParamLore = checkMemSummary
   checkResType = mapM_ TypeCheck.checkExtType . resTypeValues

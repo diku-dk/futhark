@@ -1036,7 +1036,6 @@ class (FreeIn (Lore.Exp lore),
        Lore lore, PrettyLore lore) => Checkable lore where
   checkExpLore :: Lore.Exp lore -> TypeM lore (Lore.Exp lore)
   checkBodyLore :: Lore.Body lore -> TypeM lore (Lore.Body lore)
-  checkBindingLore :: Lore.LetBound lore -> TypeM lore ()
   checkFParamLore :: Lore.FParam lore -> TypeM lore ()
   checkResType :: AST.ResType lore -> TypeM lore ()
   matchPattern :: SrcLoc -> AST.Pattern lore -> AST.ResType lore ->
