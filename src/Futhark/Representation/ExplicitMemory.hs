@@ -87,8 +87,8 @@ instance Ord MemSummary where
   _ `compare` _ = EQ
 
 instance FreeIn MemSummary where
-  freeIn (MemSummary ident _) = HS.singleton ident
-  freeIn Scalar               = HS.empty
+  freeIn (MemSummary ident ixfun) = HS.singleton ident <> freeIn ixfun
+  freeIn Scalar                   = HS.empty
 
 instance Substitute MemSummary where
   substituteNames subst (MemSummary name f) =
