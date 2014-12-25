@@ -13,8 +13,8 @@ import Control.Monad
 
 import Data.Bits
 import Data.Either
-import Data.Foldable (any)
-import Data.List hiding (any)
+import Data.Foldable (any, all)
+import Data.List hiding (any, all)
 import Data.Loc
 import Data.Maybe
 import Data.Monoid
@@ -35,7 +35,7 @@ import Futhark.Representation.AST
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Tools
 
-import Prelude hiding (any)
+import Prelude hiding (any, all)
 
 topDownRules :: MonadBinder m => TopDownRules m
 topDownRules = [ liftIdentityMapping
@@ -267,10 +267,10 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge idd n
                     respat (map fst merge) ++ respat
         (implpat, explpat) = splitAt (length taggedpat - length respat) taggedpat
 
-        removeFromResult (v,initExp) explpat' =
-          case partition ((==v) . snd) explpat' of
+        removeFromResult (mergeParam,mergeInit) explpat' =
+          case partition ((==bindeeIdent mergeParam) . snd) explpat' of
             ([(Bindee resv _,_)], rest) ->
-              (Just (resv, initExp), rest)
+              (Just (resv, mergeInit), rest)
             (_,      _) ->
               (Nothing, explpat')
 
@@ -279,18 +279,35 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge idd n
                             [(FParam (Lore m), SubExp)], [SubExp])
                         -> ([(Ident, SubExp)], [(PatBindee (Lore m), Ident)],
                             [(FParam (Lore m), SubExp)], [SubExp])
-        checkInvariance ((v1,initExp), resExp) (invariant, explpat', merge', resExps)
-          | invariantMerge v1 initExp resExp =
+        checkInvariance
+          ((mergeParam,mergeInit), resExp)
+          (invariant, explpat', merge', resExps)
+          | isInvariant resExp =
           let (bnd, explpat'') =
-                removeFromResult (bindeeIdent v1,initExp) explpat'
-          in (maybe id (:) bnd $ (bindeeIdent v1, initExp) : invariant,
+                removeFromResult (mergeParam,mergeInit) explpat'
+          in (maybe id (:) bnd $ (bindeeIdent mergeParam, mergeInit) : invariant,
               explpat'', merge', resExps)
-        checkInvariance ((v1,initExp), resExp) (invariant, explpat', merge', resExps) =
-          (invariant, explpat', (v1,initExp):merge', resExp:resExps)
+          where
+            -- A merge variable is invariant if the corresponding
+            -- subexp in the result is EITHER:
+            --
+            --  (0) a variable of the same name as the parameter, where
+            --  all existential parameters are already known to be
+            --  invariant
+            isInvariant (Var v2)
+              | bindeeName mergeParam == identName v2 =
+                allExistentialInvariant
+                (HS.fromList $ map (identName . fst) invariant) mergeParam
+            --  (1) or identical to the initial value of the parameter.
+            isInvariant _ = mergeInit == resExp
 
-        invariantMerge v1 _       (Var v2)
-          | bindeeName v1 == identName v2 = True
-        invariantMerge _  initExp resExp = initExp == resExp
+        checkInvariance ((mergeParam,mergeInit), resExp) (invariant, explpat', merge', resExps) =
+          (invariant, explpat', (mergeParam,mergeInit):merge', resExp:resExps)
+
+        allExistentialInvariant namesOfInvariant mergeParam =
+          all (`HS.member` namesOfInvariant)
+          (bindeeName mergeParam `HS.delete` freeNamesIn mergeParam)
+
 hoistLoopInvariantMergeVariables _ _ = cannotSimplify
 
 -- | A function that, given a variable name, returns its definition.
