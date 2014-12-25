@@ -267,6 +267,8 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge idd n
                     respat (map fst merge) ++ respat
         (implpat, explpat) = splitAt (length taggedpat - length respat) taggedpat
 
+        namesOfMergeParams = HS.fromList $ map (bindeeName . fst) merge
+
         removeFromResult (mergeParam,mergeInit) explpat' =
           case partition ((==bindeeIdent mergeParam) . snd) explpat' of
             ([(Bindee resv _,_)], rest) ->
@@ -305,8 +307,11 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge idd n
           (invariant, explpat', (mergeParam,mergeInit):merge', resExp:resExps)
 
         allExistentialInvariant namesOfInvariant mergeParam =
-          all (`HS.member` namesOfInvariant)
+          all (invariantOrNotMergeParam namesOfInvariant)
           (bindeeName mergeParam `HS.delete` freeNamesIn mergeParam)
+        invariantOrNotMergeParam namesOfInvariant name =
+          not (name `HS.member` namesOfMergeParams) ||
+          name `HS.member` namesOfInvariant
 
 hoistLoopInvariantMergeVariables _ _ = cannotSimplify
 
