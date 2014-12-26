@@ -375,6 +375,10 @@ isConsumed :: BlockPred lore
 isConsumed uses =
   any (`UT.isConsumed` uses) . patternNames . bindingPattern
 
+isAlloc :: BlockPred lore
+isAlloc _ (Let _ _ (PrimOp (Alloc {}))) = True
+isAlloc _ _                             = False
+
 hoistCommon :: MonadEngine m =>
                m (Body (Lore m))
             -> (ST.SymbolTable (Lore m)
@@ -515,7 +519,7 @@ simplifyLoopOp (DoLoop respat merge loopvar boundexp loopbody loc) = do
   -- Blocking hoisting of all unique bindings is probably too
   -- conservative, but there is currently no nice way to mark
   -- consumption of the loop body result.
-  loopbody' <- blockIfSeq [hasFree boundnames, isConsumed] $
+  loopbody' <- blockIfSeq [hasFree boundnames, isConsumed, isAlloc] $
                descendIntoLoop $ bindLoopVar loopvar boundexp' $
                simplifyBody diets loopbody
   let merge' = zip mergepat' mergeexp'
@@ -656,7 +660,7 @@ simplifyLambda :: MonadEngine m =>
                -> m (Lambda (Lore m))
 simplifyLambda (Lambda params body rettype loc) arrs = do
   body' <-
-    blockIf (hasFree params' `orIf` isConsumed) $
+    blockIf (hasFree params' `orIf` isConsumed `orIf` isAlloc) $
     descendIntoLoop $
     bindParams nonarrayparams $
     bindArrayParams (zip arrayparams arrs) $
