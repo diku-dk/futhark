@@ -259,7 +259,7 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge idd n
           respat' = map snd explpat'
       in do forM_ (invariant ++ implinvariant') $ \(v1,v2) ->
               letBindNames_ [identName v1] $ PrimOp $ SubExp v2
-            letBind_ (Pattern pat')
+            letBind_ (Pattern pat') $
               LoopOp $ DoLoop respat' merge' idd n loopbody' loc
   where Result cs ses resloc = bodyResult loopbody
         taggedpat = zip (patternBindees pat) $
