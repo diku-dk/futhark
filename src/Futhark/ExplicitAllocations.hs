@@ -361,6 +361,5 @@ simplifiable =
           return $ mkAliasedLetBinding pat' lore e
           where env = vtableToAllocEnv vtable
         simplifyMemSummary Scalar = return Scalar
-        simplifyMemSummary (MemSummary ident ixfun) = do
-          vtable <- Engine.getVtable
+        simplifyMemSummary (MemSummary ident ixfun) =
           MemSummary <$> Engine.simplifyIdent ident <*> pure ixfun
