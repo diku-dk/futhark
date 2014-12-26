@@ -220,15 +220,19 @@ instance Lore.Lore ExplicitMemory where
     in memSizeContextIdents <> memContextIdents <> shapeContextIdents
     where memIfNecessary ident =
             case find ((==ident) . bindeeIdent) mergevars of
-              Just fparam | MemSummary mem _ <- bindeeLore fparam ->
+              Just fparam | MemSummary mem _ <- bindeeLore fparam,
+                            isMergeParam mem ->
                 Just mem
               _ ->
                 Nothing
           memSizeIfNecessary ident
-            | Mem (Var sizeident) <- identType ident =
-              bindeeIdent <$> find ((==sizeident) . bindeeIdent) mergevars
+            | Mem (Var sizeident) <- identType ident,
+              isMergeParam sizeident =
+              Just sizeident
             | otherwise =
               Nothing
+          isMergeParam ident =
+            any ((==ident) . bindeeIdent) mergevars
 
   loopResType _ res mergevars =
     AST.ResType $ evalState (mapM typeWithAttr $
