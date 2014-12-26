@@ -31,7 +31,7 @@ Library
                  constraints >= 0.4,
                  type-natural >= 0.2,
                  sized-vector >= 1.4,
-                 singletons >= 0.8,
+                 singletons >= 0.9,
                  monomorphic >= 0.0.3,
                  equational-reasoning >= 0.0.2
 
