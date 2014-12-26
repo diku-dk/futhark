@@ -81,7 +81,7 @@ compileTest :: FilePath -> FilePath -> FilePath -> IO TestResult
 compileTest f inputf outputf = do
   input <- readFile inputf
   expectedOutput <- readFile outputf
-  (futcode, l0prog, l0err) <- readProcessWithExitCode "futhark" [futharkFlags, "-fsa", "--compile-sequential", f] ""
+  (futcode, l0prog, l0err) <- readProcessWithExitCode "futhark" [futharkFlags, "-fsae", "--compile-sequential", f] ""
   writeFile cOutputf l0prog
   case futcode of
     ExitFailure 127 -> return $ Failure futharkNotFound
