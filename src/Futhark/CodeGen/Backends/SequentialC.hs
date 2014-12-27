@@ -1,4 +1,3 @@
-{-# LANGUAGE QuasiQuotes #-}
 -- | C code generator.  This module can convert a correct ImpCode
 -- program to an equivalent C program. The C code is strictly
 -- sequential and leaks memory like a sieve, so it's not very useful
