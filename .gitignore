@@ -42,3 +42,6 @@ core.*
 
 # Ignore flymake-files created by Emacs.
 *flymake*
+
+# Ignore temporary backup directories.
+*-backup
