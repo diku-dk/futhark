@@ -172,6 +172,8 @@ compileOutParams rts = do
   return (valdecls, outparams, Destination dests)
   where imp = lift . lift
 
+        mkParam (ReturnsMemory _) =
+          fail "Functions may not explicitly return memory blocks."
         mkParam (ReturnsScalar t) = do
           out <- imp $ newVName "scalar_out"
           tell [Imp.ScalarParam out t]
