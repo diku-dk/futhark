@@ -166,17 +166,17 @@ compileInParams params = do
 
 compileOutParams :: ResType
                  -> ImpM op ([Imp.ValueDecl], [Imp.Param], Destination)
-compileOutParams (ResType ts) = do
+compileOutParams rts = do
   ((valdecls, dests), outparams) <-
-    runWriterT $ evalStateT (mapAndUnzipM mkParam ts) (HM.empty, HM.empty)
+    runWriterT $ evalStateT (mapAndUnzipM mkParam rts) (HM.empty, HM.empty)
   return (valdecls, outparams, Destination dests)
   where imp = lift . lift
 
-        mkParam (Basic t, _) = do
+        mkParam (ReturnsScalar t) = do
           out <- imp $ newVName "scalar_out"
           tell [Imp.ScalarParam out t]
           return (Imp.ScalarValue t out, ScalarDestination out)
-        mkParam (Array t shape _, lore) = do
+        mkParam (ReturnsArray t shape _ lore) = do
           (memout, memdest) <- case lore of
             ReturnsNewBlock x -> do
               memout <- imp $ newVName "out_mem"
@@ -185,15 +185,10 @@ compileOutParams (ResType ts) = do
               return (memout, SetMemory memout destmemsize)
             ReturnsInBlock memout ->
               return (identName memout, CopyIntoMemory $ identName memout)
-            _ ->
-              fail $ "Nonsensical lore for array return: " ++ show lore
           (resultshape, destresultshape) <-
             mapAndUnzipM inspectExtDimSize $ extShapeDims shape
           return (Imp.ArrayValue memout t resultshape,
                   ArrayDestination memdest destresultshape)
-
-        mkParam (Mem _, _) =
-          fail "Functions are not allowed to explicitly return memory blocks!"
 
         inspectExtDimSize (Ext x) = do
           (memseen,arrseen) <- get
@@ -302,8 +297,8 @@ compileExp targets e m = do
 
 defCompileExp :: [VName] -> Exp -> ImpM op ()
 
-defCompileExp targets (If cond tbranch fbranch rettype _) = do
-  dest <- destinationFromTargets targets rettype
+defCompileExp targets (If cond tbranch fbranch restype _) = do
+  dest <- destinationFromTargets targets $ resTypeValues restype
   tcode <- collect $ compileExtBody dest tbranch
   fcode <- collect $ compileExtBody dest fbranch
   tell $ Imp.If (compileSubExp cond) tcode fcode
@@ -515,13 +510,13 @@ defCompilePrimOp [] _ = return () -- No arms, no cake.
 
 defCompileLoopOp :: [VName] -> LoopOp -> ImpM op ()
 
-defCompileLoopOp targets (DoLoop res merge i bound body _) =
+defCompileLoopOp targets loop@(DoLoop res merge i bound body _) =
   declaringVars mergepat $ do
     forM_ merge $ \(p, se) ->
       when (subExpNotArray se) $ compileSubExpTo (bindeeName p) se
     body' <- collect $ compileBody mergenames body
     tell $ Imp.For (identName i) (compileSubExp bound) body'
-    let restype = extResType $ staticShapes $ map identType res
+    let restype = expExtType $ LoopOp loop
     Destination dest <- destinationFromTargets targets restype
     zipWithM_ compileResultSubExp dest $ map Var res
     where mergepat = map fst merge
@@ -665,8 +660,8 @@ lookupMemory name = do
     Just (MemVar entry) -> return entry
     _                   -> fail $ "Unknown memory block: " ++ textual name
 
-destinationFromTargets :: [VName] -> ResType -> ImpM op Destination
-destinationFromTargets targets (ResType ts) =
+destinationFromTargets :: [VName] -> [ExtType] -> ImpM op Destination
+destinationFromTargets targets ts =
   Destination <$> mapM inspect valtargets
   where (ctxtargets,valtargets) = splitAt (length targets - length ts) targets
         isctx = (`elem` ctxtargets)

@@ -89,7 +89,7 @@ bodyToLambda :: (Bindable lore, MonadFreshNames m) =>
 bodyToLambda _ (Fun l) = return l
 bodyToLambda inpts (NewNest (Nesting paramNames inps bndIds resCerts retTypes) op) = do
   (e,f) <- runBinder' $ SOAC.toExp =<< toSOAC (SOACNest inps op)
-  let idents = instantiateExtTypes loc bndIds $ resTypeValues $ typeOf e
+  let idents = instantiateExtTypes loc bndIds $ expExtType e
   bnd <- mkLetNames (map identName idents) e
   return
     Lambda { lambdaSrcLoc = loc

@@ -690,24 +690,26 @@ simplifyBoolBranch _ (Let pat _ (If cond tb fb ts loc))
 simplifyBoolBranch _ _ = cannotSimplify
 
 hoistBranchInvariant :: MonadBinder m => TopDownRule m
-hoistBranchInvariant _ (Let pat _ (If e1 tb fb ts loc)) = do
+hoistBranchInvariant _ (Let pat _ (If e1 tb fb ret loc))
+  | Just _ <- simpleType ret = do
   let Result tcs tses tresloc = bodyResult tb
       Result fcs fses fresloc = bodyResult fb
   (pat', res, invariant) <-
     foldM branchInvariant ([], [], False) $
-    zip (patternBindees pat) (zip3 tses fses $ resTypeElems ts)
-  let (tses', fses', ts') = unzip3 res
+    zip (patternBindees pat) (zip tses fses)
+  let (tses', fses') = unzip res
       tb' = tb { bodyResult = Result tcs tses' tresloc }
       fb' = fb { bodyResult = Result fcs fses' fresloc }
   if invariant -- Was something hoisted?
-     then letBind_ (Pattern pat') $ If e1 tb' fb' (ResType ts') loc
+     then letBind_ (Pattern pat') =<<
+          eIf (eSubExp e1) (pure tb') (pure fb') loc
      else cannotSimplify
-  where branchInvariant (pat', res, invariant) (v, (tse, fse, t))
+  where branchInvariant (pat', res, invariant) (v, (tse, fse))
           | tse == fse = do
             letBind_ (Pattern [v]) $ PrimOp $ SubExp tse
             return (pat', res, True)
           | otherwise  =
-            return (v:pat', (tse,fse,t):res, invariant)
+            return (v:pat', (tse,fse):res, invariant)
 hoistBranchInvariant _ _ = cannotSimplify
 
 simplifyScalExp :: MonadBinder m => TopDownRule m
@@ -739,8 +741,10 @@ removeUnnecessaryCopy _ _ = cannotSimplify
 -- if *none* of the return values are used, but this rule is more
 -- precise.
 removeDeadBranchResult :: MonadBinder m => BottomUpRule m
-removeDeadBranchResult (_, used) (Let pat _ (If e1 tb fb ts loc))
-  | -- Figure out which of the names in 'pat' are used...
+removeDeadBranchResult (_, used) (Let pat _ (If e1 tb fb rettype loc))
+  | -- Only if things are understandable...
+    Just _ <- simpleType rettype,
+    -- Figure out which of the names in 'pat' are used...
     patused <- map (`UT.used` used) $ patternNames pat,
     -- If they are not all used, then this rule applies.
     not (and patused) =
@@ -752,9 +756,9 @@ removeDeadBranchResult (_, used) (Let pat _ (If e1 tb fb ts loc))
       pick = map snd . filter fst . zip patused
       tb' = tb { bodyResult = Result tcs (pick tses) tresloc }
       fb' = fb { bodyResult = Result fcs (pick fses) fresloc }
-      ts' = pick $ resTypeElems ts
       pat' = pick $ patternBindees pat
-  in letBind_ (Pattern pat') $ If e1 tb' fb' (ResType ts') loc
+  in letBind_ (Pattern pat') =<<
+     eIf (eSubExp e1) (pure tb') (pure fb') loc
 removeDeadBranchResult _ _ = cannotSimplify
 
 -- Some helper functions

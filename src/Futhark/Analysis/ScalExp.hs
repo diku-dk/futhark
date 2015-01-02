@@ -196,7 +196,7 @@ fromScalExp' loc = convert
         convert (MaxMin isMin (e:es)) = do
           e'  <- convert e
           es' <- mapM convert es
-          foldM (select (scalExpType e) isMin) e' es'
+          foldM (select isMin) e' es'
 
         arithBinOp bop x y = do
           x' <- convert x
@@ -204,13 +204,12 @@ fromScalExp' loc = convert
           eBinOp bop (pure x') (pure y') t loc
           where t = Basic $ scalExpType x
 
-        select t isMin cur next =
+        select isMin cur next =
           let cmp = eBinOp Less (pure cur) (pure next) (Basic Bool) loc
               (pick, discard)
                 | isMin     = (cur, next)
                 | otherwise = (next, cur)
-          in eIf cmp (eBody [pure pick]) (eBody [pure discard])
-             (staticResType [Basic t]) loc
+          in eIf cmp (eBody [pure pick]) (eBody [pure discard]) loc
 
         zero Int = PrimOp $ SubExp $ intconst 0 loc
         zero _   = PrimOp $ SubExp $ constant (0::Double) loc

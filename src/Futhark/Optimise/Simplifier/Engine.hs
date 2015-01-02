@@ -31,6 +31,8 @@ module Futhark.Optimise.Simplifier.Engine
        , localVtable
        , insertAllBindings
        , defaultSimplifyBody
+       , defaultInspectBinding
+         -- * Building blocks
        , simplifyBinding
        , simplifyResult
        , simplifyExp
@@ -38,7 +40,8 @@ module Futhark.Optimise.Simplifier.Engine
        , simplifyLambda
        , simplifySubExp
        , simplifyIdent
-       , defaultInspectBinding
+       , simplifyExtType
+       , simplifyExtShape
        ) where
 
 import Control.Applicative
@@ -105,7 +108,8 @@ data State m = State { stateVtable :: ST.SymbolTable (Lore m)
 emptyState :: State m
 emptyState = State { stateVtable = ST.empty }
 
-class (Proper (Lore m), MonadBinder m,
+class (MonadBinder m,
+       Proper (Lore m),
        Lore m ~ Aliases (InnerLore m),
        Proper (InnerLore m)) => MonadEngine m where
   type InnerLore m
@@ -124,7 +128,9 @@ class (Proper (Lore m), MonadBinder m,
   simplifyLetBoundLore :: Lore.LetBound (InnerLore m)
                        -> m (Lore.LetBound (InnerLore m))
   simplifyFParamLore :: Lore.FParam (InnerLore m)
-                        -> m (Lore.FParam (InnerLore m))
+                     -> m (Lore.FParam (InnerLore m))
+  simplifyResType :: Lore.ResType (InnerLore m)
+                  -> m (Lore.ResType (InnerLore m))
 
 addBindingEngine :: MonadEngine m =>
                     Binding (Lore m) -> m ()
@@ -315,9 +321,7 @@ expandUsage :: (Proper lore, Aliased lore) =>
 expandUsage utable bnd = utable <> usage bnd <> usageThroughAliases
   where e = bindingExp bnd
         aliases = aliasesOf $ bindingExp bnd
-        (_,valbnd) = splitAt (length (provides bnd) -
-                              length (resTypeValues (typeOf e))) $
-                     provides bnd
+        valbnd = map identName $ valueIdents (bindingPattern bnd) e
         tagged = zip valbnd aliases
         usageThroughAliases = mconcat $ catMaybes $ do
           (name,als) <- tagged
@@ -632,17 +636,13 @@ simplifyIdent v = do
                         t' <- simplifyType $ identType v
                         return v { identType = t' }
 
-simplifyResType :: MonadEngine m =>
-                   ResType (InnerLore m) -> m (ResType (Lore m))
-simplifyResType (ResType rts) =
-  liftM ResType $ forM rts $ \(t, annot) -> do
-    t' <- simplifyExtType t
-    return (t', annot)
-
 simplifyExtType :: MonadEngine m =>
                    TypeBase ExtShape -> m (TypeBase ExtShape)
-simplifyExtType t = do dims <- mapM simplifyDim $ extShapeDims $ arrayShape t
-                       return $ t `setArrayShape` ExtShape dims
+simplifyExtType t = do shape <- simplifyExtShape $ arrayShape t
+                       return $ t `setArrayShape` shape
+simplifyExtShape :: MonadEngine m =>
+                    ExtShape -> m ExtShape
+simplifyExtShape = liftM ExtShape . mapM simplifyDim . extShapeDims
   where simplifyDim (Free se) = Free <$> simplifySubExp se
         simplifyDim (Ext x)   = return $ Ext x
 

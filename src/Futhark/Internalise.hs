@@ -70,8 +70,7 @@ internaliseFun (fname,rettype,params,body,loc) =
       fname rettype'
       (map mkFParam $ shapeparams ++ params')
       body' loc
-  where rettype' =
-          extResType $ extShapes $ map I.toDecl $ internaliseType rettype
+  where rettype' = extShapes $ map I.toDecl $ internaliseType rettype
 
 internaliseIdent :: E.Ident -> InternaliseM I.Ident
 internaliseIdent (E.Ident name tp loc) =
@@ -159,21 +158,22 @@ internaliseExp desc (E.Apply fname args _ loc)
   | "trace" <- nameToString fname = do
   args' <- tupsToIdentList "arg" $ map fst args
   let args'' = concatMap tag args'
-  letTupExp' desc $ I.Apply fname args'' (staticResType $ map (subExpType . fst) args'')  loc
+  letTupExp' desc $
+    I.Apply fname args'' (staticShapes $ map (subExpType . fst) args'')  loc
   where tag (_,vs) = [ (I.Var v, I.Observe) | v <- vs ]
 
 internaliseExp desc (E.Apply fname args _ loc)
   | Just (rettype, _) <- HM.lookup fname builtInFunctions = do
   args' <- tupsToIdentList "arg" $ map fst args
   let args'' = concatMap tag args'
-  letTupExp' desc $ I.Apply fname args'' (staticResType [I.Basic rettype]) loc
+  letTupExp' desc $ I.Apply fname args'' [I.Basic rettype] loc
   where tag (_,vs) = [ (I.Var v, I.Observe) | v <- vs ]
 
 internaliseExp desc (E.Apply fname args rettype loc) = do
   args' <- tupsToIdentList "arg" $ map fst args
   paramts <- lookupFunctionParams fname
   let args''   = concatMap addCertsAndShapes $ zip args' $ map I.diet paramts
-      rettype' = extResType $ extShapes $ internaliseType rettype
+      rettype' = extShapes $ internaliseType rettype
   letTupExp' desc $ I.Apply fname (prefixArgShapes args'') rettype' loc
   where addCertsAndShapes ((c,vs),d) =
           let observe v = (v, d)
@@ -185,7 +185,7 @@ internaliseExp desc (E.LetPat pat e body loc) = do
   (c,ks) <- tupToIdentList desc e
   bindingTupIdent pat
     (Just $ certOrGiven loc c)
-    (I.staticResType $ map I.identType ks) $ \pat' -> do
+    (I.staticShapes $ map I.identType ks) $ \pat' -> do
     forM_ (zip (patternIdents pat') $ map I.Var ks) $ \(p,se) ->
       letBind (basicPattern [p]) $ I.PrimOp $ I.SubExp se
     internaliseExp desc body
@@ -209,7 +209,7 @@ internaliseExp desc (E.DoLoop mergepat mergeexp i bound loopbody letbody loc) = 
       merge = [ (Bindee ident (), e) |
                 (ident, e) <- zip mergepat' mergeexp' ]
       loop = I.LoopOp $ I.DoLoop respat merge i' bound' loopbody' loc
-  bindingTupIdent mergepat Nothing (I.typeOf loop) $ \mergepat'' -> do
+  bindingTupIdent mergepat Nothing (I.expExtType loop) $ \mergepat'' -> do
     letBind_ mergepat'' loop
     internaliseExp desc letbody
 
@@ -227,7 +227,7 @@ internaliseExp desc (E.LetWith cs name src idxcs idxs ve body loc) = do
         I.PrimOp $ I.Update (cs'++idxcs') sname idxs' (I.Var vname) loc
   dsts <- zipWithM comb srcs vnames
   bindingTupIdent (E.Id name) (Just $ certOrGiven loc c)
-    (I.staticResType $ map I.identType dsts) $ \pat' -> do
+    (I.staticShapes $ map I.identType dsts) $ \pat' -> do
     forM_ (zip (patternIdents pat') dsts) $ \(p,dst) ->
       letBind (basicPattern [p]) $ I.PrimOp $ I.SubExp $ I.Var dst
     internaliseExp desc body
@@ -402,7 +402,7 @@ internaliseExp desc (E.If ce te fe t loc) = do
   ce' <- internaliseExp1 "cond" ce
   te' <- internaliseBody te
   fe' <- internaliseBody fe
-  let t' = extResType $ extShapes $ internaliseType t
+  let t' = extShapes $ internaliseType t
   letTupExp' desc $ I.If ce' te' fe' t' loc
 
 internaliseExp desc (E.BinOp bop xe ye t loc) = do

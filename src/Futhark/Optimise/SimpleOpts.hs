@@ -18,6 +18,7 @@ import Futhark.Binder (Proper)
 
 import Futhark.Optimise.InliningDeadFun
 import Futhark.Optimise.Simplifier
+import Futhark.Optimise.Simplifier.Simplifiable
 import Futhark.Optimise.DeadVarElim
 import Futhark.Optimise.Errors
 

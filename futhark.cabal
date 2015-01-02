@@ -86,6 +86,7 @@ Library
                    Futhark.Optimise.Simplifier.Rule
                    Futhark.Optimise.Simplifier.Rules
                    Futhark.Optimise.Simplifier.Simplify
+                   Futhark.Optimise.Simplifier.Simplifiable
                    Futhark.Optimise.SplitShapes
                    Futhark.Optimise.SuffCond
                    Futhark.Optimise.SuffCond.GenPredicates

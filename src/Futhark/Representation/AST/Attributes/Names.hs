@@ -160,9 +160,6 @@ instance (ArrayShape shape, FreeIn shape) => FreeIn (TypeBase shape) where
   freeIn (Mem size)        = freeIn size
   freeIn (Basic _)         = mempty
 
-instance FreeIn attr => FreeIn (ResTypeT attr) where
-  freeIn = freeIn . resTypeElems
-
 instance FreeIn attr => FreeIn (Bindee attr) where
   freeIn (Bindee ident attr) =
     freeIn ident <> freeIn attr

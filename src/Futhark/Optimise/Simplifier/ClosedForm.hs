@@ -56,16 +56,14 @@ foldClosedForm look pat lam accs arrs = do
                 (lambdaParams lam) (lambdaBody lam) accs lamloc
   isEmpty <- newIdent "fold_input_is_empty" (Basic Bool) lamloc
   let inputsize = arraysSize 0 $ map subExpType arrs
-  closedBody' <- renameBody closedBody
   letBindNames_ [identName isEmpty] $
     PrimOp $ BinOp Equal inputsize (intconst 0 lamloc) (Basic Bool) lamloc
-  tb <- resultBodyM [] accs lamloc
-  letBind_ pat $
-    If (Var isEmpty) tb closedBody'
-    (staticResType $ lambdaReturnType lam)
+  letBind_ pat =<<
+    eIf (eSubExp $ Var isEmpty)
+    (resultBodyM [] accs lamloc)
+    (renameBody closedBody)
     lamloc
   where lamloc = srclocOf lam
-
         knownBindings = determineKnownBindings look lam accs arrs
 
 -- | @loopClosedForm pat respat merge bound bodys@ determines whether
@@ -79,16 +77,13 @@ loopClosedForm pat respat merge bound body
     closedBody <- checkResults respat knownBindings
                   mergeidents body mergeexp bodyloc
     isEmpty <- newIdent "bound_is_zero" (Basic Bool) bodyloc
-    closedBody' <- renameBody closedBody
     letBindNames_ [identName isEmpty] $
       PrimOp $ BinOp Leq bound (intconst 0 bodyloc)
       (Basic Bool) bodyloc
-    tb <- resultBodyM [] mergeexp bodyloc
-    letBindNames_ (patternNames pat) $
-      If (Var isEmpty)
-      tb
-      closedBody'
-      (bodyType body)
+    letBindNames_ (patternNames pat) =<<
+      eIf (eSubExp $ Var isEmpty)
+      (resultBodyM [] mergeexp bodyloc)
+      (renameBody closedBody)
       bodyloc
   | otherwise = cannotSimplify
   where (mergepat, mergeexp) = unzip merge

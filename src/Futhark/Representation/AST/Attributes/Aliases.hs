@@ -1,4 +1,4 @@
-{-# Language FlexibleInstances #-}
+{-# Language FlexibleInstances, FlexibleContexts #-}
 module Futhark.Representation.AST.Attributes.Aliases
        ( identAliases
        , subExpAliases
@@ -89,7 +89,7 @@ funcallAliases :: [(SubExp, Diet)] -> [DeclType] -> [Names]
 funcallAliases args t =
   returnAliases t [(subExpAliases se, d) | (se,d) <- args ]
 
-aliasesOf :: (Aliased lore) => Exp lore -> [Names]
+aliasesOf :: Aliased lore => Exp lore -> [Names]
 aliasesOf (If _ tb fb _ _) =
   ifAliases
   (bodyAliases tb, consumedInBody tb)

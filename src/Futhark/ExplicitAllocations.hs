@@ -13,6 +13,7 @@ import qualified Data.DList as DL
 import Data.Maybe
 import Data.Loc
 import qualified Data.HashMap.Lazy as HM
+import qualified Data.HashSet as HS
 
 import qualified Futhark.Representation.Basic as In
 import Futhark.Representation.Aliases
@@ -20,6 +21,7 @@ import Futhark.Representation.Aliases
    mkAliasedBody,
    mkAliasedLetBinding,
    removeExpAliases,
+   removeBodyAliases,
    removePatternAliases)
 import Futhark.MonadFreshNames
 import Futhark.Representation.ExplicitMemory
@@ -27,7 +29,7 @@ import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as I
 import Futhark.Tools
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.ScalExp as SE
-import Futhark.Optimise.Simplifier (Simplifiable (..))
+import Futhark.Optimise.Simplifier.Simplifiable (Simplifiable (..))
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 
 newtype AllocM a = AllocM (ReaderT (HM.HashMap VName MemSummary)
@@ -51,24 +53,125 @@ instance BindableM AllocM where
   mkLetM pat e = return $ Let pat () e
 
   mkLetNamesM names e = do
-    (ts',sizes) <- instantiateShapes' loc $ resTypeValues et
+    (ts',sizes) <- instantiateShapes' loc $ expExtType e
     let vals = [ Ident name t loc | (name, t) <- zip names ts' ]
     res <- specialisedMkLetM sizes vals e
     case res of Just bnd -> return bnd
                 Nothing  -> basicMkLetM sizes vals e
     where loc = srclocOf e
-          et = typeOf e
 
   mkBodyM bnds res = return $ Body () bnds res
+
+  branchReturnTypeM b1 b2 = do
+    b1t <- bodyReturnType b1
+    b2t <- bodyReturnType b2
+    return $ generaliseReturns b1t b2t
+
+bodyReturnType :: Body -> AllocM [FunReturns]
+bodyReturnType body@(Body _ bnds res) = do
+  let boundHere = boundInBindings bnds
+      inspect _ (Constant val _) =
+        return $ ReturnsScalar $ basicValueType val
+      inspect (Basic bt) (Var _) =
+        return $ ReturnsScalar bt
+      inspect (Mem _) (Var _) =
+        -- FIXME
+        fail "bodyReturnType: cannot handle bodies returning memory yet."
+      inspect (Array et shape u) (Var v) = do
+        let name = identName v
+
+        memsummary <- do
+          summary <- case HM.lookup name boundHere of
+            Nothing -> lift $ lookupSummary' name
+            Just bindee -> return $ bindeeLore bindee
+
+          case summary of
+            Scalar ->
+              fail "bodyReturnType: inconsistent memory summary"
+
+            MemSummary mem ixfun -> do
+              let memname = identName mem
+
+              unless (IxFun.isLinear ixfun) $
+                fail "bodyReturnType: cannot handle non-linear index function yet."
+
+              if memname `HM.member` boundHere then do
+                (i, memmap) <- get
+
+                case HM.lookup memname memmap of
+                  Nothing -> do
+                    put (i+1, HM.insert memname (i+1) memmap)
+                    return $ ReturnsNewBlock i
+
+                  Just _ ->
+                    fail "bodyReturnType: same memory block used multiple times."
+              else return $ ReturnsInBlock mem
+        return $ ReturnsArray et shape u memsummary
+  evalStateT (zipWithM inspect (bodyExtType body) $ resultSubExps res)
+    (0, HM.empty)
+
+boundInBindings :: [Binding] -> HM.HashMap VName PatBindee
+boundInBindings [] = HM.empty
+boundInBindings (bnd:bnds) =
+  boundInBinding `HM.union` boundInBindings bnds
+  where boundInBinding =
+          HM.fromList
+          [ (bindeeName bindee, bindee)
+          | bindee <- patternBindees $ bindingPattern bnd
+          ]
+
+generaliseReturns :: [FunReturns] -> [FunReturns] -> [FunReturns]
+generaliseReturns r1s r2s =
+  evalState (zipWithM generaliseReturns' r1s r2s) (0, HM.empty, HM.empty)
+  where generaliseReturns'
+          (ReturnsArray bt shape1 u1 summary1)
+          (ReturnsArray _  shape2 u2 summary2) =
+            ReturnsArray bt
+            <$>
+            (ExtShape <$>
+             zipWithM unifyExtDims
+             (extShapeDims shape1)
+             (extShapeDims shape2))
+            <*>
+            pure (u1 <> u2)
+            <*>
+            generaliseSummaries summary1 summary2
+        generaliseReturns' t1 _ =
+          return t1 -- Must be basic then.
+
+        unifyExtDims (Free se1) (Free se2)
+          | se1 == se2 = return $ Free se1 -- Arbitrary
+          | otherwise  = do (i, sizemap, memmap) <- get
+                            put (i + 1, sizemap, memmap)
+                            return $ Ext i
+        unifyExtDims (Ext x) _ = Ext <$> newSize x
+        unifyExtDims _ (Ext x) = Ext <$> newSize x
+
+        generaliseSummaries (ReturnsInBlock mem1) (ReturnsInBlock mem2)
+          | mem1 == mem2 = return $ ReturnsInBlock mem1 -- Arbitrary
+          | otherwise = do (i, sizemap, memmap) <- get
+                           put (i + 1, sizemap, memmap)
+                           return $ ReturnsNewBlock i
+        generaliseSummaries (ReturnsNewBlock x) _ =
+          ReturnsNewBlock <$> newMem x
+        generaliseSummaries _ (ReturnsNewBlock x) =
+          ReturnsNewBlock <$> newMem x
+
+        newSize x = do (i, sizemap, memmap) <- get
+                       put (i + 1, HM.insert x i sizemap, memmap)
+                       return i
+        newMem x = do (i, sizemap, memmap) <- get
+                      put (i + 1, sizemap, HM.insert x i memmap)
+                      return i
 
 basicMkLetM :: [Ident]
             -> [Ident]
             -> Exp
             -> AllocM Binding
 basicMkLetM sizes vals e = do
-  pat' <- Pattern <$> allocsForPattern sizes vals et
+  t <- expReturns lookupSummary' e
+  pat' <- Pattern <$> allocsForPattern sizes vals t
   return $ Let pat' () e
-  where et = typeOf e
 
 specialisedMkLetM :: [Ident] -> [Ident] -> Exp -> AllocM (Maybe Binding)
 specialisedMkLetM [] [Ident name _ _] e@(PrimOp (Update _ src _ _ _)) = do
@@ -100,17 +203,18 @@ allocForArray t loc = do
   m <- letExp "mem" $ PrimOp $ Alloc size loc
   return (size, m)
 
-allocsForPattern :: [Ident] -> [Ident] -> ResType -> AllocM [Bindee MemSummary]
-allocsForPattern sizeidents validents (ResType ts) = do
+allocsForPattern :: [Ident] -> [Ident] -> [ExpReturns] -> AllocM [Bindee MemSummary]
+allocsForPattern sizeidents validents rts = do
   let sizes' = [ Bindee size Scalar | size <- sizeidents ]
-  (vals,(memsizes,mems)) <- runWriterT $ forM (zip validents ts) $ \(ident, (t, memret)) ->
+  (vals,(memsizes,mems)) <- runWriterT $ forM (zip validents rts) $ \(ident, rt) ->
     let loc = srclocOf ident in
-    case memret of
-      ReturnsScalar -> return $ Bindee ident Scalar
-      ReturnsInBlock mem ->
+    case rt of
+      ReturnsScalar _ -> return $ Bindee ident Scalar
+      ReturnsMemory _ -> return $ Bindee ident Scalar
+      ReturnsArray _ _ _ (Just (ReturnsInBlock mem)) ->
         return $ Bindee ident $ directIndexFunction mem $ identType ident
-      ReturnsInAnyBlock
-        | Just shape <- knownShape $ arrayShape t -> do
+      ReturnsArray _ extshape _ Nothing
+        | Just shape <- knownShape extshape -> do
         (_, m) <- lift $ allocForArray (identType ident `setArrayShape` Shape shape) loc
         return $ Bindee ident $ directIndexFunction m $ identType ident
       _ -> do
@@ -156,6 +260,14 @@ computeSize loc current (x:xs) = do
 
 lookupSummary :: Ident -> AllocM (Maybe MemSummary)
 lookupSummary = asks . HM.lookup . identName
+
+lookupSummary' :: VName -> AllocM MemSummary
+lookupSummary' name = do
+  res <- asks $ HM.lookup name
+  case res of
+    Just summary -> return summary
+    Nothing ->
+      fail $ "No memory summary for variable " ++ pretty name
 
 bindeeSummary :: BindeeT MemSummary -> (VName, MemSummary)
 bindeeSummary bindee = (bindeeName bindee, bindeeLore bindee)
@@ -230,7 +342,17 @@ explicitAllocations prog =
   where free = newNameSourceForProg prog
 
 memoryInResType :: In.ResType -> ResType
-memoryInResType = extResType . resTypeValues
+memoryInResType ts =
+  evalState (mapM addAttr ts) $ startOfFreeIDRange ts
+  where addAttr (Basic t) = return $ ReturnsScalar t
+        addAttr (Mem _)  = fail "memoryInResType: too much memory"
+        addAttr (Array bt shape u) = do
+          i <- get
+          put $ i + 1
+          return $ ReturnsArray bt shape u $ ReturnsNewBlock i
+
+startOfFreeIDRange :: [ExtType] -> Int
+startOfFreeIDRange = (1+) . HS.foldl' max 0 . shapeContext
 
 allocInFun :: MonadFreshNames m => In.FunDec -> m FunDec
 allocInFun (In.FunDec fname rettype params body loc) =
@@ -262,9 +384,9 @@ allocInBindings origbnds m = allocInBindings' origbnds []
 allocInBinding :: In.Binding -> AllocM Binding
 allocInBinding (Let pat _ e) = do
   e' <- allocInExp e
-  let t = typeOf e'
-      (sizeidents, validents) =
-        splitAt (patternSize pat - length (resTypeValues t)) $
+  t <- expReturns lookupSummary' e'
+  let (sizeidents, validents) =
+        splitAt (patternSize pat - length (expExtType e)) $
         patternIdents pat
   res <- specialisedMkLetM sizeidents validents e'
   case res of
@@ -347,19 +469,46 @@ simplifiable :: (Engine.MonadEngine m,
                  Engine.InnerLore m ~ ExplicitMemory) =>
                 Simplifiable m
 simplifiable =
-  Simplifiable mkLetS' mkBodyS' mkLetNamesS' simplifyMemSummary simplifyMemSummary
+  Simplifiable mkLetS' mkBodyS' mkLetNamesS'
+  simplifyMemSummary simplifyMemSummary
+  simplifyResType' computeBranchReturnType'
   where mkLetS' vtable pat e = do
           Let pat' lore _ <- runAllocMWithEnv env $
                              mkLetM (removePatternAliases pat) $
                              removeExpAliases e
           return $ mkAliasedLetBinding pat' lore e
           where env = vtableToAllocEnv vtable
+
         mkBodyS' _ bnds res = return $ mkAliasedBody () bnds res
+
         mkLetNamesS' vtable names e = do
           Let pat' lore _ <-
             runAllocMWithEnv env $ mkLetNamesM names $ removeExpAliases e
           return $ mkAliasedLetBinding pat' lore e
           where env = vtableToAllocEnv vtable
+
         simplifyMemSummary Scalar = return Scalar
         simplifyMemSummary (MemSummary ident ixfun) =
           MemSummary <$> Engine.simplifyIdent ident <*> pure ixfun
+
+        simplifyResType' = mapM simplifyReturns
+          where simplifyReturns (ReturnsScalar bt) =
+                  return $ ReturnsScalar bt
+                simplifyReturns (ReturnsArray bt shape u ret) =
+                  ReturnsArray bt <$>
+                  Engine.simplifyExtShape shape <*>
+                  pure u <*>
+                  simplifyMemReturn ret
+                simplifyReturns (ReturnsMemory size) =
+                  ReturnsMemory <$> Engine.simplifySubExp size
+                simplifyMemReturn (ReturnsNewBlock i) =
+                  return $ ReturnsNewBlock i
+                simplifyMemReturn (ReturnsInBlock v) =
+                  ReturnsInBlock <$> Engine.simplifyIdent v
+
+        computeBranchReturnType' b1 b2 = do
+          vtable <- Engine.getVtable
+          runAllocMWithEnv (vtableToAllocEnv vtable) $
+            branchReturnTypeM
+            (removeBodyAliases b1)
+            (removeBodyAliases b2)

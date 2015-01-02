@@ -95,7 +95,7 @@ transformExp (LoopOp (Filter cs fun arrexps loc)) = do
           If check
              (resultBody [] [intval 1] loc)
              (resultBody [] [intval 0] loc)
-             (staticResType [Basic Int]) loc
+             (basicResType Int) loc
    return $ resultBody [] [res] loc
   mape <- letExp "mape" <=< transformExp $
           LoopOp $ Map cs (Lambda xs test [Basic Int] loc) (map Var arr) loc
@@ -125,8 +125,8 @@ transformExp (LoopOp (Filter cs fun arrexps loc)) = do
     eBody [eIf (eIf (pure $ PrimOp $ BinOp Equal iv (intval 0) (Basic Bool) loc)
                (eBody [eBinOp Equal indexi (pexp $ intval 0) (Basic Bool) loc])
                (eBody [eBinOp Equal indexi indexinm1 (Basic Bool) loc])
-               (staticResType [Basic Bool]) loc)
-           (pure resv) update (bodyType resv) loc]
+               loc)
+           (pure resv) update loc]
   return $ LoopOp $ DoLoop (mergesize:res)
     (loopMerge (mergesize:res) (outersize:resinit))
     i nv loopbody loc

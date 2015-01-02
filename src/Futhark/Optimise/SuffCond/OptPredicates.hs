@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleInstances, MultiParamTypeClasses, TypeFamilies #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleInstances, TypeFamilies #-}
 module Futhark.Optimise.SuffCond.OptPredicates
        (
          optimisePredicates
@@ -28,12 +28,14 @@ import Futhark.Analysis.ScalExp (ScalExp)
 import qualified Futhark.Analysis.ScalExp as SE
 import qualified Futhark.Analysis.AlgSimplify as AS
 import Futhark.Tools
+import Futhark.Analysis.Rephrase
 import qualified Futhark.Optimise.Simplifier.Engine as Simplify
 import Futhark.Optimise.Simplifier.Rule (RuleBook)
 import Futhark.Optimise.Simplifier
-  (simplifyFunWithStandardRules, bindableSimplifiable)
+  (simplifyFunWithStandardRules)
+import Futhark.Optimise.Simplifier.Simplifiable
+  (bindableSimplifiable)
 import Futhark.Substitute
-import Futhark.Analysis.Rephrase
 import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as S
 import Futhark.Representation.AST.Attributes.Aliases
@@ -86,7 +88,7 @@ insertPredicateCalls subst prog =
           eIf (pure $ PrimOp $ SubExp c)
             (eBody [pure $ PrimOp $ SubExp $ constant True predloc])
             (eBody [callPreds predt fs e call])
-            predt predloc
+            predloc
 
 maybeOptimiseFun :: MonadFreshNames m =>
                     RuleBook (VariantM m) -> FunDec -> m [FunDec]
@@ -406,16 +408,26 @@ isForbidden :: Variance -> Bool
 isForbidden Invariant = False
 isForbidden TooVariant = True
 
-data Invariance'
+data Invariance' = Invariance'
 instance Lore.Lore Invariance' where
   type LetBound Invariance' = Maybe Ident
   type Exp Invariance' = Variance
+  representative = Invariance'
+  loopResultContext _ = loopResultContext (representative :: Basic)
 instance PrettyLore Invariance' where
 instance Substitutable Invariance' where
 instance Renameable Invariance' where
 instance Proper Invariance' where
 
 type Invariance = Aliases Invariance'
+
+removeInvariance :: Rephraser Invariance' Basic
+removeInvariance = Rephraser { rephraseExpLore = const ()
+                             , rephraseBindeeLore = const ()
+                             , rephraseBodyLore = const ()
+                             , rephraseFParamLore = const ()
+                             , rephraseResType = id
+                             }
 
 instance MonadFreshNames m => BindableM (VariantM m) where
   type Lore (VariantM m) = Invariance

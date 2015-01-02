@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, FlexibleInstances, MultiParamTypeClasses #-}
+{-# LANGUAGE TypeFamilies #-}
 -- | A simple representation with known shapes, but no other
 -- particular information.
 module Futhark.Representation.Basic
@@ -28,7 +28,6 @@ module Futhark.Representation.Basic
        , AST.ExpT(PrimOp)
        , AST.ExpT(LoopOp)
        , AST.FunDecT(FunDec)
-       , AST.ResTypeT(ResType)
          -- Utility
        , basicPattern
          -- Removing lore
@@ -67,8 +66,6 @@ instance Lore.Lore Basic where
 
   loopResultContext _ res merge =
     loopShapeContext res $ map bindeeIdent merge
-  loopResType _ res merge =
-    AST.ResType [ (t, ()) | t <- loopExtType res $ map bindeeIdent merge ]
 
 type Prog = AST.Prog Basic
 type PrimOp = AST.PrimOp Basic
@@ -87,10 +84,14 @@ instance TypeCheck.Checkable Basic where
   checkBodyLore = return
   checkFParamLore = return
   checkResType = mapM_ TypeCheck.checkExtType . resTypeValues
-  matchPattern loc pat rt =
-    TypeCheck.matchExtPattern loc (patternIdents pat) (resTypeValues rt)
+  matchPattern loc pat e =
+    TypeCheck.matchExtPattern loc (patternIdents pat) (expExtType e)
   basicFParam name t loc =
     return $ Bindee (Ident name (AST.Basic t) loc) ()
+  checkReturnType rettype body
+    | bodyt `subtypesOf` rettype = Nothing
+    | otherwise                  = Just $ "Body has type\n " ++ pretty bodyt
+    where bodyt = bodyExtType body
 
 instance Renameable Basic where
 instance Substitutable Basic where
@@ -101,17 +102,19 @@ instance Bindable Basic where
   mkLet idents =
     AST.Let (AST.Pattern $ map (`Bindee` ()) idents) ()
   mkLetNames names e = do
-    (ts, shapes) <- instantiateShapes' loc $ resTypeValues $ typeOf e
+    (ts, shapes) <- instantiateShapes' loc $ expExtType e
     let idents = [ Ident name t loc | (name, t) <- zip names ts ]
     return $ mkLet (shapes++idents) e
     where loc = srclocOf e
+  branchReturnType b1 b2 =
+    bodyExtType b1 `generaliseExtTypes` bodyExtType b2
 
 instance PrettyLore Basic where
 
 basicPattern :: [Ident] -> Pattern
 basicPattern = AST.Pattern . map (`Bindee` ())
 
-removeLore :: Rephraser lore Basic
+removeLore :: Lore.Lore lore => Rephraser lore Basic
 removeLore =
   Rephraser { rephraseExpLore = const ()
             , rephraseBindeeLore = const ()
@@ -120,15 +123,14 @@ removeLore =
             , rephraseResType = removeResTypeLore
             }
 
-removeProgLore :: AST.Prog lore -> Prog
+removeProgLore :: Lore.Lore lore => AST.Prog lore -> Prog
 removeProgLore = rephraseProg removeLore
 
-removeFunDecLore :: AST.FunDec lore -> FunDec
+removeFunDecLore :: Lore.Lore lore => AST.FunDec lore -> FunDec
 removeFunDecLore = rephraseFunDec removeLore
 
-removeBodyLore :: AST.Body lore -> Body
+removeBodyLore :: Lore.Lore lore => AST.Body lore -> Body
 removeBodyLore = rephraseBody removeLore
 
-removeResTypeLore :: ResTypeT attr -> ResTypeT ()
-removeResTypeLore (AST.ResType ts)  =
-  AST.ResType [ (t, ()) | (t, _) <- ts ]
+removeResTypeLore :: IsResType rt => rt -> ResType
+removeResTypeLore = resTypeValues

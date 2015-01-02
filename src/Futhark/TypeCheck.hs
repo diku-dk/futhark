@@ -12,6 +12,8 @@ module Futhark.TypeCheck
   , context
   , Checkable (..)
   , module Futhark.TypeCheck.TypeError
+  , lookupVar
+  , VarBindingLore (..)
     -- * Checkers
   , require
   , requireI
@@ -59,8 +61,12 @@ instance PrettyLore lore => Show (TypeError lore) where
 -- named.
 type FunBinding lore = (ResType lore, [(Maybe VName, DeclType)])
 
-data VarBinding = Bound Type Names
-                | WasConsumed SrcLoc
+data VarBindingLore lore = LetBound (Lore.LetBound lore)
+                         | FunBound (Lore.FParam lore)
+                         | LambdaBound
+
+data VarBinding lore = Bound Type (VarBindingLore lore) Names
+                     | WasConsumed SrcLoc
 
 data Usage = Consumed SrcLoc
            | Observed SrcLoc
@@ -147,7 +153,7 @@ instance Monoid Dataflow where
 -- variable table will be extended during type-checking when
 -- let-expressions are encountered.
 data TypeEnv lore =
-  TypeEnv { envVtable :: HM.HashMap VName VarBinding
+  TypeEnv { envVtable :: HM.HashMap VName (VarBinding lore)
           , envFtable :: HM.HashMap Name (FunBinding lore)
           , envCheckOccurences :: Bool
           , envContext :: [String]
@@ -238,8 +244,8 @@ alternative m1 m2 = pass $ do
 -- | Make all bindings nonunique.
 noUnique :: TypeM lore a -> TypeM lore a
 noUnique = local (\env -> env { envVtable = HM.map f $ envVtable env})
-  where f (Bound t names)   = Bound (t `setUniqueness` Nonunique) names
-        f (WasConsumed loc) = WasConsumed loc
+  where f (Bound t attr names) = Bound (t `setUniqueness` Nonunique) attr names
+        f (WasConsumed loc)    = WasConsumed loc
 
 -- | Given the immediate aliases, compute the full transitive alias
 -- set (including the immediate aliases).
@@ -247,25 +253,29 @@ expandAliases :: Names -> TypeEnv lore -> Names
 expandAliases names env = names `HS.union` aliasesOfAliases
   where aliasesOfAliases =  mconcat . map look . HS.toList $ names
         look k = case HM.lookup k $ envVtable env of
-          Just (Bound _ als) -> als
-          _                  -> mempty
+          Just (Bound _ _ als) -> als
+          _                    -> mempty
 
 binding :: Checkable lore =>
-           [(Ident, Names)] -> TypeM lore a -> TypeM lore a
+           [((Ident, VarBindingLore lore), Names)]
+        -> TypeM lore a
+        -> TypeM lore a
 binding bnds = check . local (`bindVars` bnds)
   where bindVars = foldl bindVar
-        boundnames = map (identName . fst) bnds
+        boundnames = map (identName . fst . fst) bnds
         boundnameset = HS.fromList boundnames
 
-        bindVar env (Ident name tp _, immediate) =
+        bindVar env ((Ident name tp _, attr), immediate) =
           let names = expandAliases immediate env
               inedges = HS.toList names
-              update (Bound tp' thesenames) =
-                Bound tp' $ HS.insert name thesenames
+              update (Bound tp' thisattr thesenames) =
+                Bound tp' thisattr $ HS.insert name thesenames
               update b = b
-          in env { envVtable = HM.insert name (Bound tp names) $
-                               adjustSeveral update inedges $
-                               envVtable env }
+          in env { envVtable =
+                      HM.insert name (Bound tp attr names) $
+                      adjustSeveral update inedges $
+                      envVtable env
+                 }
 
         adjustSeveral f = flip $ foldl $ flip $ HM.adjust f
 
@@ -273,10 +283,10 @@ binding bnds = check . local (`bindVars` bnds)
         -- within their scope.
         check m = do
           already_bound <- asks envVtable
-          case filter ((`HM.member` already_bound) . identName . fst) bnds of
+          case filter ((`HM.member` already_bound) . identName . fst . fst) bnds of
             []  -> return ()
-            (v,_):_ -> bad $ TypeError (srclocOf v) $
-                       "Variable " ++ textual (identName v) ++ " being redefined."
+            ((v, _),_):_ -> bad $ TypeError (srclocOf v) $
+                            "Variable " ++ pretty v ++ " being redefined."
           (a, usages) <- collectOccurences m
           maybeCheckOccurences usages
           return a
@@ -296,19 +306,21 @@ binding bnds = check . local (`bindVars` bnds)
                 divide s = (s `HS.intersection` boundnameset,
                             s `HS.difference` boundnameset)
 
-lookupVar :: VName -> SrcLoc -> TypeM lore (Type, Names)
-lookupVar name pos = do
+lookupVar :: VName -> SrcLoc -> TypeM lore (Type, VarBindingLore lore, Names)
+lookupVar name loc = do
   bnd <- asks $ HM.lookup name . envVtable
   case bnd of
-    Nothing -> bad $ UnknownVariableError name pos
-    Just (Bound t names) -> return (t, names)
-    Just (WasConsumed wloc) -> bad $ UseAfterConsume name pos wloc
+    Nothing -> bad $ UnknownVariableError name loc
+    Just (Bound t lore names) -> return (t, lore, names)
+    Just (WasConsumed wloc) -> bad $ UseAfterConsume name loc wloc
 
 lookupType :: VName -> SrcLoc -> TypeM lore Type
-lookupType name loc = fst <$> lookupVar name loc
+lookupType name loc = do (t, _, _) <- lookupVar name loc
+                         return t
 
 lookupAliases :: VName -> SrcLoc -> TypeM lore Names
-lookupAliases name loc = HS.insert name <$> snd <$> lookupVar name loc
+lookupAliases name loc = do (_, _, als) <- lookupVar name loc
+                            return $ HS.insert name als
 
 subExpAliasesM :: SubExp -> TypeM lore Names
 subExpAliasesM (Constant {}) = return mempty
@@ -440,51 +452,72 @@ checkProg' checkoccurs prog = do
 -- The prog argument is just to disambiguate the lore.
 initialFtable :: Lore lore => Prog lore -> HM.HashMap Name (FunBinding lore)
 initialFtable _ = HM.map addBuiltin builtInFunctions
-  where addBuiltin (t, ts) = (staticResType [Basic t],
+  where addBuiltin (t, ts) = (basicResType t,
                               zip (repeat Nothing) $ map Basic ts)
 
 checkFun :: Checkable lore =>
             FunDec lore -> TypeM lore (FunDec lore)
 checkFun (FunDec fname rettype params body loc) =
   context ("In function " ++ nameToString fname) $ do
-    (rettype', body') <-
-      checkFun' (fname, rettype, map bindeeIdent params, body, loc) $ do
-        forM_ params $ \param ->
-          context ("In function parameter " ++ pretty param) $
-          checkFParamLore $ bindeeLore param
-        checkFunBody rettype body
-    return $ FunDec fname rettype' params body' loc
+    body' <-
+      checkFun' (fname,
+                 resTypeValues rettype,
+                 funParamsToIdentsAndLores params,
+                 body,
+                 loc) $ do
+        checkFunParams params
+        checkResType rettype
+        checkBody body
+    return $ FunDec fname rettype params body' loc
 
-checkFunBody :: Checkable lore =>
-                ResType lore -> BodyT (Aliases lore)
-             -> TypeM lore (ResType lore, BodyT (Aliases lore))
-checkFunBody rettype body = do
-  checkResType rettype
-  (,) <$> pure rettype <*> checkBody body
+funParamsToIdentsAndLores :: Checkable lore =>
+                             [FParam lore]
+                          -> [(Ident, VarBindingLore lore)]
+funParamsToIdentsAndLores = map identAndLore
+  where identAndLore fparam = (bindeeIdent fparam,
+                               FunBound $ bindeeLore fparam)
+
+checkFunParams :: Checkable lore =>
+                  [FParam lore] -> TypeM lore ()
+checkFunParams = mapM_ $ \param ->
+  context ("In function parameter " ++ pretty param) $
+  checkFParamLore $ bindeeLore param
 
 checkAnonymousFun :: Checkable lore =>
-                     (Name, ResType lore, [Ident], BodyT (Aliases lore), SrcLoc)
-                  -> TypeM lore (ResType lore, BodyT (Aliases lore))
-checkAnonymousFun fundec@(_, rettype, _, body, _) =
-  checkFun' fundec $ checkFunBody rettype body
+                     (Name, [Type], [Ident], BodyT (Aliases lore), SrcLoc)
+                  -> TypeM lore (BodyT (Aliases lore))
+checkAnonymousFun (fname, rettype, params, body, loc) =
+  checkFun' (fname,
+             staticShapes rettype,
+             [ (param, LambdaBound) | param <- params ],
+             body,
+             loc) $ do
+    mapM_ checkType rettype
+    checkBody body
 
 checkFun' :: (Checkable lore) =>
-             (Name, ResType lore, [Ident], BodyT (Aliases lore), SrcLoc)
-          -> TypeM lore (ResType lore, BodyT (Aliases lore))
-          -> TypeM lore (ResType lore, BodyT (Aliases lore))
-checkFun' (fname, rettype, params, _, loc) check = do
-  params' <- checkParams
-  (rettype',body') <- binding (zip params' $ repeat mempty) check
+             (Name,
+              [ExtType],
+              [(Ident, VarBindingLore lore)],
+              BodyT (Aliases lore),
+              SrcLoc)
+          -> TypeM lore (BodyT (Aliases lore))
+          -> TypeM lore (BodyT (Aliases lore))
+checkFun' (fname, rettype, paramsWithLore, _, loc) check = do
+  checkParams
+  body' <- binding (zip paramsWithLore $ repeat mempty) check
 
   checkReturnAlias $ bodyAliases body'
 
-  if resTypeValues (bodyType body') `subtypesOf` resTypeValues rettype' then
-    return (rettype', body')
+  if bodyExtType body' `subtypesOf` rettype then
+    return body'
   else bad $ ReturnTypeError loc fname
-             (Several $ map toDecl $ resTypeValues rettype')
-             (Several $ map toDecl $ resTypeValues $ bodyType body')
+             (Several $ map toDecl rettype)
+             (Several $ map toDecl $ bodyExtType body')
 
-  where checkParams = reverse <$> foldM expand [] params
+  where params = map fst paramsWithLore
+
+        checkParams = foldM_ expand [] params
 
         expand params' ident@(Ident pname _ _)
           | Just _ <- find ((==identName ident) . identName) params' =
@@ -502,7 +535,7 @@ checkFun' (fname, rettype, params, _, loc) check = do
         -- non-consumed parameter.
         checkReturnAlias =
           foldM_ checkReturnAlias' HS.empty .
-          returnAliasing (resTypeValues rettype)
+          returnAliasing rettype
 
         checkReturnAlias' seen (Unique, names)
           | any (`HS.member` HS.map snd seen) $ HS.toList names =
@@ -540,7 +573,7 @@ checkBindings origbnds m = delve origbnds
             checkExp e
           annot' <- checkExpLore annot
           (scope, pat') <-
-            checkBinding (srclocOf e) pat (typeOf e') dataflow
+            checkBinding (srclocOf e) pat e' dataflow
           scope $ do
             (bnds', res) <- delve bnds
             return (Let pat' (eals,annot') e' : bnds', res)
@@ -704,13 +737,14 @@ checkLoopOp (DoLoop respat merge (Ident loopvar loopvart loopvarloc)
       rettype   = map bindeeType mergepat
   checkFuncall Nothing loc paramts $ boundarg : mergeargs
 
-  fun' <-
-    noUnique $ checkFun $ FunDec (nameFromString "<loop body>")
-                                 (staticResType rettype)
-                                 funparams
-                                 loopbody
-                                 loc
-  let loopbody' = funDecBody fun'
+  loopbody' <-
+    noUnique $ checkFun' (nameFromString "<loop body>",
+                          staticShapes rettype,
+                          funParamsToIdentsAndLores funparams,
+                          loopbody,
+                          loc) $ do
+      checkFunParams funparams
+      checkBody loopbody
   respat' <-
     forM respat $ \res ->
       case find ((==identName res) . bindeeName) mergepat of
@@ -807,22 +841,18 @@ checkExp (If e1 e2 e3 t pos) = do
   e1' <- require [Basic Bool] =<< checkSubExp e1
   ((e2', e3'), dflow) <- collectDataflow $ checkBody e2 `alternative` checkBody e3
   tell dflow
-  let t' = bodyType e2' `generaliseResTypes`
-           bodyType e3' `generaliseResTypes`
-           t
-  when (t' /= t) $
-    bad $ TypeError pos $ "Expected if result type " ++ pretty t
-    ++ " but got " ++ pretty t'
-  return $ If e1' e2' e3' t' pos
+  checkReturnType' t $ removeBodyAliases e2'
+  checkReturnType' t $ removeBodyAliases e3'
+  return $ If e1' e2' e3' t pos
 
 checkExp (Apply fname args t loc)
   | "trace" <- nameToString fname = do
   args' <- mapM (checkSubExp . fst) args
-  let t' = staticResType $ map subExpType args'
-  when (t' /= t) $
+  let t' = map subExpType args'
+  when (staticShapes t' /= resTypeValues t) $
     bad $ TypeError loc $ "Expected apply result type " ++ pretty t
     ++ " but got " ++ pretty t'
-  return $ Apply fname [(arg, Observe) | arg <- args'] t' loc
+  return $ Apply fname [(arg, Observe) | arg <- args'] t loc
 
 checkExp (Apply fname args rettype loc) = do
   checkResType rettype
@@ -916,18 +946,20 @@ sequentially m1 m2 = do
   return b
 
 checkBinding :: Checkable lore =>
-                SrcLoc -> Pattern lore -> ResType lore -> Dataflow
+                SrcLoc -> Pattern lore -> Exp lore -> Dataflow
              -> TypeM lore (TypeM lore a -> TypeM lore a, Pattern lore)
-checkBinding loc pat ts dflow =
-  context ("When matching " ++ pretty pat ++ " with " ++ pretty ts) $ do
-    matchPattern loc (removePatternAliases pat) ts
+checkBinding loc pat e dflow =
+  context ("When matching " ++ pretty pat ++ " with " ++ pretty e) $ do
+    matchPattern loc (removePatternAliases pat) (removeExpAliases e)
     return (\m -> sequentially (tell dflow)
                   (const . const $
-                   binding (zip (patternIdents pat)
+                   binding (zip (identsAndLore pat)
                             (map (unNames . fst . bindeeLore) $
                              patternBindees pat))
                    (checkPatSizes (patternIdents pat) >> m)),
             pat)
+  where identsAndLore = map identAndLore . patternBindees . removePatternAliases
+        identAndLore bindee = (bindeeIdent bindee, LetBound $ bindeeLore bindee)
 
 matchExtPattern :: SrcLoc -> [Ident] -> [ExtType] -> TypeM lore ()
 matchExtPattern loc pat ts = do
@@ -1023,11 +1055,23 @@ checkLambda (Lambda params body ret loc) args = do
         params' = zipWith setParamShape params $
                   map (arrayDims . argType) args
     checkFuncall Nothing loc (map (toDecl . identType) params') args
-    (_, body') <-
+    body' <-
       noUnique $ checkAnonymousFun
-      (nameFromString "<anonymous>", staticResType ret', params', body, loc)
+      (nameFromString "<anonymous>", ret', params', body, loc)
     return $ Lambda params' body' ret' loc
   else bad $ TypeError loc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
+
+checkReturnType' :: Checkable lore =>
+                    AST.ResType lore -> AST.Body lore -> TypeM lore ()
+checkReturnType' rettype body =
+  case checkReturnType rettype body of
+    Just problem ->
+      bad $ TypeError (srclocOf body) $
+      "Body result\n  " ++ pretty (bodyResult body) ++
+      "\ncannot match return type\n  " ++ pretty rettype ++
+      problem
+    Nothing ->
+      return ()
 
 -- | The class of lores that can be type-checked.
 class (FreeIn (Lore.Exp lore),
@@ -1038,6 +1082,7 @@ class (FreeIn (Lore.Exp lore),
   checkBodyLore :: Lore.Body lore -> TypeM lore (Lore.Body lore)
   checkFParamLore :: Lore.FParam lore -> TypeM lore ()
   checkResType :: AST.ResType lore -> TypeM lore ()
-  matchPattern :: SrcLoc -> AST.Pattern lore -> AST.ResType lore ->
+  matchPattern :: SrcLoc -> AST.Pattern lore -> AST.Exp lore ->
                   TypeM lore ()
   basicFParam :: VName -> BasicType -> SrcLoc -> TypeM lore (AST.FParam lore)
+  checkReturnType :: AST.ResType lore -> AST.Body lore -> Maybe String

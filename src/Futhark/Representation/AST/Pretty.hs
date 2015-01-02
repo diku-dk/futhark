@@ -76,9 +76,6 @@ instance Pretty (TypeBase Rank) where
              | otherwise = empty
   ppr (Mem s) = text "mem" <> parens (ppr s)
 
-instance Pretty (ResTypeT ()) where
-  ppr = braces . commasep . map ppr . resTypeValues
-
 instance Pretty (IdentBase shape) where
   ppr = text . textual . identName
 

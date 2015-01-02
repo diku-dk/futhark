@@ -115,10 +115,6 @@ instance (Substitute shape) => Substitute (TypeBase shape) where
   substituteNames substs (Mem sz) =
     Mem $ substituteNames substs sz
 
-instance Substitute attr => Substitute (ResTypeT attr) where
-  substituteNames substs (ResType ts) =
-    ResType $ map (substituteNames substs) ts
-
 instance Substitutable lore => Substitute (Lambda lore) where
   substituteNames substs (Lambda params body rettype loc) =
     Lambda params (substituteNames substs body)
@@ -135,5 +131,5 @@ instance Substitute Ident where
 class (Substitute (Lore.Exp lore),
        Substitute (Lore.LetBound lore),
        Substitute (Lore.FParam lore),
-       Substitute (Lore.ResTypeAttr lore)) =>
+       Substitute (Lore.ResType lore)) =>
       Substitutable lore where

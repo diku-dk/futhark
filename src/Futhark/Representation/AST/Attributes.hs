@@ -32,7 +32,7 @@ import Futhark.Representation.AST.Attributes.Constants
 import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Attributes.TypeOf
-import Futhark.Representation.AST.ResType hiding (ResType)
+import Futhark.Representation.AST.ResType
 import Futhark.Representation.AST.Syntax
 import qualified Futhark.Representation.AST.Lore as Lore
 

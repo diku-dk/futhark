@@ -78,8 +78,7 @@ import qualified Data.Sequence as Seq
 import qualified Futhark.Representation.AST as Futhark
 import Futhark.Representation.AST
   hiding (Map, Reduce, Scan, Filter, Redomap,
-          Var, Iota, Rearrange, Reshape, Replicate,
-          typeOf)
+          Var, Iota, Rearrange, Reshape, Replicate)
 import Futhark.Substitute
 import Futhark.Tools
 

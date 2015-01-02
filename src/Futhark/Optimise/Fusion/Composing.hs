@@ -28,7 +28,7 @@ import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 
 import Futhark.Representation.AST
 import Futhark.Binder
-  (Bindable, mkLet, insertBinding, insertBindings, mkBody)
+  (Bindable(..), insertBinding, insertBindings, mkBody)
 import Futhark.Tools (mapResult)
 
 -- | Something that can be used as a SOAC input.  As far as this
@@ -143,15 +143,14 @@ fuseFilterInto lam1 inp1 out1 lam2 inp2 vnames falsebranch = (lam2', HM.elems in
         restype = lambdaReturnType lam2
         residents = [ Ident vname t loc | (vname, t) <- zip vnames restype ]
         branch = flip mapResult (lambdaBody lam1) $ \res ->
-                 let [e] = resultSubExps res in -- XXX
-                 mkBody [mkLet residents $
-                         If e
-                         (makeCopiesInner $ lambdaBody lam2)
-                         falsebranch
-                         (bodyType (lambdaBody lam2)
-                          `generaliseResTypes`
-                          bodyType falsebranch)
-                         loc] $
+                 let [e] = resultSubExps res -- XXX
+                     tbranch = makeCopiesInner $ lambdaBody lam2
+                 in mkBody [mkLet residents $
+                            If e
+                            tbranch
+                            falsebranch
+                            (branchReturnType tbranch falsebranch)
+                            loc] $
                  Result (resultCertificates res) (map Var residents) loc
         lam1tuple = [ mkLet [v] $ PrimOp $ SubExp $ Var p
                     | (v,p) <- zip pat $ lambdaParams lam1 ]

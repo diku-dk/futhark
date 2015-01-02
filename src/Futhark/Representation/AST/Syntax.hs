@@ -45,8 +45,7 @@ module Futhark.Representation.AST.Syntax
   , Exp
   , LambdaT(..)
   , Lambda
-  , ResType
-  , Lore.ResTypeT(..)
+  , Lore.ResType
 
   -- * Definitions
   , FParam
@@ -67,8 +66,6 @@ import Language.Futhark.Core
 import Futhark.Representation.AST.Lore (Lore)
 import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Representation.AST.Syntax.Core
-
-type ResType lore = Lore.ResTypeT (Lore.ResTypeAttr lore)
 
 -- | The kind of 'Bindee' used in a 'Pattern'.
 type PatBindee lore = Bindee (Lore.LetBound lore)
@@ -255,9 +252,9 @@ data ExpT lore
 
   | LoopOp (LoopOp lore)
 
-  | Apply  Name [(SubExp, Diet)] (ResType lore) SrcLoc
+  | Apply  Name [(SubExp, Diet)] (Lore.ResType lore) SrcLoc
 
-  | If     SubExp (BodyT lore) (BodyT lore) (ResType lore) SrcLoc
+  | If     SubExp (BodyT lore) (BodyT lore) (Lore.ResType lore) SrcLoc
 
 deriving instance Lore lore => Eq (ExpT lore)
 deriving instance Lore lore => Show (ExpT lore)
@@ -291,7 +288,7 @@ type FParam lore = Bindee (Lore.FParam lore)
 
 -- | Function Declarations
 data FunDecT lore = FunDec { funDecName :: Name
-                           , funDecRetType :: ResType lore
+                           , funDecRetType :: Lore.ResType lore
                            , funDecParams :: [FParam lore]
                            , funDecBody :: BodyT lore
                            , funDecSrcLoc :: SrcLoc

@@ -1,4 +1,4 @@
-{-# LANGUAGE MultiParamTypeClasses, FlexibleContexts, FlexibleInstances, GeneralizedNewtypeDeriving, TypeFamilies, ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleContexts, GeneralizedNewtypeDeriving, TypeFamilies #-}
 -- | This module defines a convenience monad/typeclass for creating
 -- normalised programs.
 module Futhark.Binder
@@ -9,6 +9,7 @@ module Futhark.Binder
   , bodyBindings
   , insertBindings
   , insertBinding
+  , valueIdents
   , letBind
   , letBind_
   , letBindNames
@@ -46,7 +47,8 @@ class (Lore.Lore lore, PrettyLore lore,
        FreeIn (Lore.LetBound lore),
        FreeIn (Lore.Body lore),
        FreeIn (Lore.FParam lore),
-       FreeIn (Lore.ResTypeAttr lore)) => Proper lore where
+       FreeIn (Lore.ResType lore),
+       IsResType (ResType lore)) => Proper lore where
 
 -- | The class of lores that can be constructed solely from an
 -- expression, within some monad.  Very important: the methods should
@@ -62,6 +64,8 @@ class (Monad m, Applicative m) =>
 
   mkLetNamesM :: [VName] -> Exp (Lore m) -> m (Binding (Lore m))
 
+  branchReturnTypeM :: Body (Lore m) -> Body (Lore m) -> m (ResType (Lore m))
+
 -- | The class of lores that can be constructed solely from an
 -- expression, non-monadically.
 class Proper lore => Bindable lore where
@@ -69,6 +73,7 @@ class Proper lore => Bindable lore where
   mkBody :: [Binding lore] -> Result -> Body lore
   mkLetNames :: MonadFreshNames m =>
                 [VName] -> Exp lore -> m (Binding lore)
+  branchReturnType :: Body lore -> Body lore -> ResType lore
 
 class (BindableM m, Proper (Lore m),
        MonadFreshNames m, Applicative m, Monad m) =>
@@ -76,10 +81,10 @@ class (BindableM m, Proper (Lore m),
   addBinding      :: Binding (Lore m) -> m ()
   collectBindings :: m a -> m (a, [Binding (Lore m)])
 
-valueIdents :: Lore.ResType rt => Pattern lore -> rt -> [Ident]
-valueIdents pat rt =
+valueIdents :: Proper lore => Pattern lore -> Exp lore -> [Ident]
+valueIdents pat e =
   snd $
-  splitAt (patternSize pat - length (resTypeValues rt)) $
+  splitAt (patternSize pat - length (expExtType e)) $
   patternIdents pat
 
 letBind :: MonadBinder m =>
@@ -87,7 +92,7 @@ letBind :: MonadBinder m =>
 letBind pat e = do
   bnd <- mkLetM pat e
   addBinding bnd
-  return $ valueIdents (bindingPattern bnd) $ typeOf e
+  return $ valueIdents (bindingPattern bnd) e
 
 letBind_ :: MonadBinder m =>
             Pattern (Lore m) -> Exp (Lore m) -> m ()
@@ -98,7 +103,7 @@ letBindNames :: MonadBinder m =>
 letBindNames names e = do
   bnd <- mkLetNamesM names e
   addBinding bnd
-  return $ valueIdents (bindingPattern bnd) $ typeOf e
+  return $ valueIdents (bindingPattern bnd) e
 
 letBindNames_ :: MonadBinder m =>
                 [VName] -> Exp (Lore m) -> m ()
@@ -151,6 +156,7 @@ instance (Proper lore, Bindable lore, MonadFreshNames m) => BindableM (BinderT l
   mkBodyM bnds res = return $ mkBody bnds res
   mkLetM pat e = return $ mkLet (patternIdents pat) e
   mkLetNamesM = mkLetNames
+  branchReturnTypeM b1 b2 = return $ branchReturnType b1 b2
 
 instance (Proper lore, Bindable lore, MonadFreshNames m) => MonadBinder (BinderT lore m) where
   addBinding      = addBindingWriter

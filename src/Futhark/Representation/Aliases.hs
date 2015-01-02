@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, FlexibleInstances, MultiParamTypeClasses, ScopedTypeVariables #-}
+{-# LANGUAGE TypeFamilies #-}
 -- | A representation where all bindings are annotated with aliasing
 -- information.
 module Futhark.Representation.Aliases
@@ -29,7 +29,6 @@ module Futhark.Representation.Aliases
        , AST.ExpT(PrimOp)
        , AST.ExpT(LoopOp)
        , AST.FunDecT(FunDec)
-       , Lore.ResTypeT(ResType)
          -- * Adding aliases
        , addAliasesToPattern
        , mkAliasedLetBinding
@@ -101,14 +100,12 @@ instance Lore.Lore lore => Lore.Lore (Aliases lore) where
   type Exp (Aliases lore) = (Names', Lore.Exp lore)
   type Body (Aliases lore) = (([Names'], Names'), Lore.Body lore)
   type FParam (Aliases lore) = Lore.FParam lore
-  type ResTypeAttr (Aliases lore) = Lore.ResTypeAttr lore
+  type ResType (Aliases lore) = Lore.ResType lore
 
   representative = Aliases Lore.representative
 
   loopResultContext (Aliases lore) res merge =
     Lore.loopResultContext lore res $ map (removeFParamAliases $ Aliases lore) merge
-  loopResType (Aliases lore) res merge =
-    Lore.loopResType lore res $ map (removeFParamAliases $ Aliases lore) merge
 
 type Prog lore = AST.Prog (Aliases lore)
 type PrimOp lore = AST.PrimOp (Aliases lore)
@@ -235,7 +232,8 @@ mkAliasedBody innerlore bnds res =
           where look k = HM.lookupDefault mempty k aliasmap
 
 mkAliasedLetBinding :: Lore.Lore lore =>
-                       AST.Pattern lore -> Lore.Exp lore -> Exp lore -> Binding lore
+                       AST.Pattern lore -> Lore.Exp lore -> Exp lore
+                    -> Binding lore
 mkAliasedLetBinding pat explore e =
   Let (addAliasesToPattern pat e) (Names' $ consumedInExp e, explore) e
 
@@ -251,3 +249,6 @@ instance Bindable lore => Bindable (Aliases lore) where
   mkBody bnds res =
     let AST.Body bodylore _ _ = mkBody (map removeBindingAliases bnds) res
     in mkAliasedBody bodylore bnds res
+
+  branchReturnType b1 b2 =
+    branchReturnType (removeBodyAliases b1) (removeBodyAliases b2)

@@ -1,11 +1,11 @@
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleContexts #-}
 module Futhark.Representation.AST.Attributes.TypeOf
        (
-         subExpType
-       , bodyType
+         expExtType
+       , subExpType
+       , bodyExtType
        , primOpType
-       , loopOpType
-       , typeOf
+       , loopOpExtType
        , mapType
        , scanType
        , filterType
@@ -13,6 +13,7 @@ module Futhark.Representation.AST.Attributes.TypeOf
        , subExpShapeContext
        , loopShapeContext
        , loopExtType
+       , module Futhark.Representation.AST.ResType
        )
        where
 
@@ -22,11 +23,10 @@ import Data.Monoid
 import qualified Data.HashSet as HS
 
 import Futhark.Representation.AST.Syntax
-import Futhark.Representation.AST.Lore (Lore, loopResType, representative)
-import Futhark.Representation.AST.ResType hiding (ResType)
 import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Values
+import Futhark.Representation.AST.ResType
 
 subExpType :: SubExp -> Type
 subExpType (Constant val _) = Basic $ basicValueType val
@@ -94,31 +94,30 @@ primOpType (Conjoin _ _) =
 primOpType (Alloc e _) =
   [Mem e]
 
-loopOpType :: forall lore.Lore lore => LoopOp lore -> ResType lore
-loopOpType (DoLoop res merge _ _ _ _) =
-  loopResType (representative :: lore) res $ map fst merge
-loopOpType (Map _ f arrs _) =
-  staticResType $ mapType f $ map subExpType arrs
-loopOpType (Reduce _ fun _ _) =
-  staticResType $ lambdaReturnType fun
-loopOpType (Scan _ _ inputs _) =
-  staticResType $ scanType $ map (subExpType . snd) inputs
-loopOpType (Filter _ f arrs _) =
-  extResType $ filterType f $ map subExpType arrs
-loopOpType (Redomap _ outerfun _ _ _ _) =
-  staticResType $ lambdaReturnType outerfun
+loopOpExtType :: LoopOp lore -> [ExtType]
+loopOpExtType (DoLoop res merge _ _ _ _) =
+  loopExtType res $ map (bindeeIdent . fst) merge
+loopOpExtType (Map _ f arrs _) =
+  staticShapes $ mapType f $ map subExpType arrs
+loopOpExtType (Reduce _ fun _ _) =
+  staticShapes $ lambdaReturnType fun
+loopOpExtType (Scan _ _ inputs _) =
+  staticShapes $ scanType $ map (subExpType . snd) inputs
+loopOpExtType (Filter _ f arrs _) =
+  filterType f $ map subExpType arrs
+loopOpExtType (Redomap _ outerfun _ _ _ _) =
+  staticShapes $ lambdaReturnType outerfun
 
--- | The type of a Futhark term.
-typeOf :: Lore lore => Exp lore -> ResType lore
-typeOf (PrimOp op) = staticResType $ primOpType op
-typeOf (LoopOp op) = loopOpType op
-typeOf (If _ _ _ t _) = t
-typeOf (Apply _ _ t _) = t
+expExtType :: IsResType (ResType lore) => Exp lore -> [ExtType]
+expExtType (Apply _ _ rt _) = resTypeValues rt
+expExtType (If _ _ _ rt _)  = resTypeValues rt
+expExtType (LoopOp op)      = loopOpExtType op
+expExtType (PrimOp op)      = staticShapes $ primOpType op
 
-bodyType :: Lore lore => Body lore -> ResType lore
-bodyType (Body _ bnds res) =
-  bodyResType bound $
-  staticResType $ map subExpType $ resultSubExps res
+bodyExtType :: Body lore -> [ExtType]
+bodyExtType (Body _ bnds res) =
+  existentialiseExtTypes bound $
+  staticShapes $ map subExpType $ resultSubExps res
   where boundInLet (Let pat _ _) = patternNames pat
         bound = HS.fromList $ concatMap boundInLet bnds
 

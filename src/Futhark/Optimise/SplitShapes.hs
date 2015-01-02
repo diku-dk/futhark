@@ -19,6 +19,7 @@ import Futhark.MonadFreshNames
 import Futhark.Renamer
 import Futhark.Substitute
 import Futhark.Optimise.Simplifier
+import Futhark.Optimise.Simplifier.Simplifiable
 import Futhark.Optimise.DeadVarElim
 
 -- | Perform the transformation on a program.
@@ -63,12 +64,12 @@ functionSlices (FunDec fname rettype params body@(Body _ bodybnds bodyres) loc) 
 
   valueBody <- substituteExtResultShapes staticRettype body
 
-  let valueRettype = staticResType staticRettype
+  let valueRettype = staticShapes staticRettype
       valueParams = shapeidents ++ map bindeeIdent params
       shapeBody = mkBody (cpybnds <> bodybnds)
                   bodyres { resultSubExps = shapes }
       mkFParam = flip Bindee ()
-      fShape = FunDec shapeFname (staticResType shapetypes)
+      fShape = FunDec shapeFname (staticShapes shapetypes)
                (map mkFParam shapeParams)
                shapeBody loc
       fValue = FunDec valueFname valueRettype
@@ -148,13 +149,13 @@ substCalls subst fundec = do
           | Just (shapefun,shapetype,valfun,_) <- lookup fname subst =
             liftM snd . runBinder'' $ do
               let (vs,vals) =
-                    splitAt (length $ resTypeElems shapetype) $
+                    splitAt (length shapetype) $
                     patternBindees pat
               letBind_ (Pattern vs) $
                 Apply shapefun args shapetype loc
               letBind_ (Pattern vals) $
                 Apply valfun ([(Var $ bindeeIdent v,Observe) | v <- vs]++args)
-                (staticResType $ map bindeeType vals)  loc
+                (staticShapes $ map bindeeType vals)  loc
 
         treatBinding (Let pat _ e) = do
           e' <- mapExpM mapper e

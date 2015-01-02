@@ -12,6 +12,7 @@ import Futhark.MonadFreshNames
 import Futhark.Optimise.SuffCond.OptPredicates
 import Futhark.Optimise.SuffCond.GenPredicates
 import Futhark.Optimise.Simplifier
+import Futhark.Optimise.Simplifier.Simplifiable (bindableSimplifiable)
 import Futhark.Optimise.DeadVarElim
 import Futhark.Optimise.Simplifier.Rules
 

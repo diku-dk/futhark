@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts, ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleContexts #-}
 module Futhark.Tools
   ( letSubExp
   , letSubExps
@@ -9,6 +9,7 @@ module Futhark.Tools
 
   , newVar
 
+  , eSubExp
   , eIf
   , eBinOp
   , eNegate
@@ -62,7 +63,7 @@ letSubExp :: MonadBinder m =>
              String -> Exp (Lore m) -> m SubExp
 letSubExp _ (PrimOp (SubExp se)) = return se
 letSubExp desc e =
-  case resTypeValues $ typeOf e of
+  case expExtType e of
     [_] -> Var <$> letExp desc e
     _   -> fail $ "letSubExp: tuple-typed expression given for " ++ desc ++ ":\n" ++ pretty e
 
@@ -92,7 +93,7 @@ letShapedExp name e = do
   names <- replicateM numValues $ newVName name
   idents <- letBindNames names e
   return $ splitAt (length idents - numValues) idents
-  where numValues = length $ resTypeValues $ typeOf e
+  where numValues = length $ expExtType e
 
 letTupExp :: (MonadBinder m) =>
              String -> Exp (Lore m)
@@ -112,16 +113,20 @@ newVar loc name tp = do
   x <- newVName name
   return (Ident x tp loc, Var $ Ident x tp loc)
 
-eIf :: (MonadBinder m) =>
+eSubExp :: MonadBinder m =>
+           SubExp -> m (Exp (Lore m))
+eSubExp = pure . PrimOp . SubExp
+
+eIf :: MonadBinder m =>
        m (Exp (Lore m)) -> m (Body (Lore m)) -> m (Body (Lore m))
-    -> ResType (Lore m)
     -> SrcLoc
     -> m (Exp (Lore m))
-eIf ce te fe ts loc = do
+eIf ce te fe loc = do
   ce' <- letSubExp "cond" =<< ce
   te' <- insertBindingsM te
   fe' <- insertBindingsM fe
-  return $ If ce' te' fe' ts loc
+  rt <- branchReturnTypeM te' fe'
+  return $ If ce' te' fe' rt loc
 
 eBinOp :: MonadBinder m =>
           BinOp -> m (Exp (Lore m)) -> m (Exp (Lore m)) -> Type -> SrcLoc
@@ -219,15 +224,18 @@ makeLambda :: (Bindable (Lore m), MonadBinder m) =>
               [Param] -> m (Body (Lore m)) -> m (Lambda (Lore m))
 makeLambda params body = do
   body' <- insertBindingsM body
-  case simpleType $ bodyType body' of
-    Nothing -> fail "Body passed to makeLambda has open type"
+  case allBasic $ bodyExtType body' of
+    Nothing -> fail "Body passed to makeLambda has non-basic type"
     Just ts ->
       return Lambda {
           lambdaParams = params
         , lambdaSrcLoc = srclocOf body'
-        , lambdaReturnType = ts
+        , lambdaReturnType = map Basic ts
         , lambdaBody = body'
         }
+  where allBasic = mapM isBasic
+        isBasic (Basic t) = Just t
+        isBasic _         = Nothing
 
 -- | Conveniently construct a body that contains no bindings.
 resultBody :: Bindable lore => Certificates -> [SubExp] -> SrcLoc -> Body lore
@@ -235,7 +243,11 @@ resultBody cs ses loc = mkBody [] $ Result cs ses loc
 
 -- | Conveniently construct a body that contains no bindings - but
 -- this time, monadically!
-resultBodyM :: MonadBinder m => Certificates -> [SubExp] -> SrcLoc -> m (Body (Lore m))
+resultBodyM :: MonadBinder m =>
+               Certificates
+            -> [SubExp]
+            -> SrcLoc
+            -> m (Body (Lore m))
 resultBodyM cs ses loc =
   mkBodyM [] $ Result cs ses loc
 

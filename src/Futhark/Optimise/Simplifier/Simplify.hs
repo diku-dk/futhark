@@ -30,6 +30,7 @@ instance BindableM m => BindableM (Simplify m) where
   mkLetM pat e = Simplify $ lift $ mkLetM pat e
   mkLetNamesM names e = Simplify $ lift $ mkLetNamesM names e
   mkBodyM bnds res = Simplify $ lift $ mkBodyM bnds res
+  branchReturnTypeM b1 b2 = Simplify $ lift $ branchReturnTypeM b1 b2
 
 instance MonadBinder m => MonadBinder (Simplify m) where
   addBinding                   = Simplify . lift . addBinding
