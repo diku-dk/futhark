@@ -200,17 +200,23 @@ localVtable f m = do
 descendIntoLoop :: MonadEngine m => m a -> m a
 descendIntoLoop = localVtable ST.deepen
 
-bindParams :: MonadEngine m =>
-              [Param] -> m a -> m a
-bindParams params =
+bindFParams :: MonadEngine m =>
+               [FParam (Lore m)] -> m a -> m a
+bindFParams params =
   localVtable $ \vtable ->
-    foldr ST.insertParam vtable params
+    foldr ST.insertFParam vtable params
 
-bindArrayParams :: MonadEngine m =>
-                   [(Param,Maybe SubExp)] -> m a -> m a
-bindArrayParams params =
+bindLParams :: MonadEngine m =>
+               [Param] -> m a -> m a
+bindLParams params =
   localVtable $ \vtable ->
-    foldr (uncurry ST.insertArrayParam) vtable params
+    foldr ST.insertLParam vtable params
+
+bindArrayLParams :: MonadEngine m =>
+                    [(Param,Maybe SubExp)] -> m a -> m a
+bindArrayLParams params =
+  localVtable $ \vtable ->
+    foldr (uncurry ST.insertArrayLParam) vtable params
 
 bindLoopVar :: MonadEngine m => Ident -> SubExp -> m a -> m a
 bindLoopVar var bound =
@@ -524,6 +530,7 @@ simplifyLoopOp (DoLoop respat merge loopvar boundexp loopbody loc) = do
   -- conservative, but there is currently no nice way to mark
   -- consumption of the loop body result.
   loopbody' <- blockIfSeq [hasFree boundnames, isConsumed, isAlloc] $
+               bindFParams mergepat' $
                descendIntoLoop $ bindLoopVar loopvar boundexp' $
                simplifyBody diets loopbody
   let merge' = zip mergepat' mergeexp'
@@ -662,8 +669,8 @@ simplifyLambda (Lambda params body rettype loc) arrs = do
   body' <-
     blockIf (hasFree params' `orIf` isConsumed `orIf` isAlloc) $
     descendIntoLoop $
-    bindParams nonarrayparams $
-    bindArrayParams (zip arrayparams arrs) $
+    bindLParams nonarrayparams $
+    bindArrayLParams (zip arrayparams arrs) $
       simplifyBody (map diet rettype) body
   rettype' <- mapM simplifyType rettype
   return $ Lambda params body' rettype' loc
@@ -694,6 +701,6 @@ simplifyFun :: MonadEngine m =>
                FunDec (InnerLore m) -> m (FunDec (Lore m))
 simplifyFun (FunDec fname rettype params body loc) = do
   rettype' <- simplifyResType rettype
-  body' <- insertAllBindings $ bindParams (map bindeeIdent params) $
+  body' <- insertAllBindings $ bindFParams params $
            simplifyBody (map diet $ resTypeValues rettype') body
   return $ FunDec fname rettype' params body' loc

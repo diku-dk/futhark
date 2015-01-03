@@ -462,7 +462,8 @@ vtableToAllocEnv :: ST.SymbolTable (Aliases ExplicitMemory)
 vtableToAllocEnv = HM.fromList . mapMaybe entryToMemSummary .
                    HM.toList . ST.bindings
   where entryToMemSummary (k,entry) = do
-          ((_, summary), _) <- ST.entryBinding entry
+          summary <- (snd <$> ST.entryLetBoundLore entry) <|>
+                     ST.entryFParamLore entry
           return (k, summary)
 
 simplifiable :: (Engine.MonadEngine m,

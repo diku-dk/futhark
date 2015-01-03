@@ -180,13 +180,13 @@ analyseExp vtable (LoopOp (DoLoop _ _ i bound body _)) =
                                    Constant {} -> id
 analyseExp vtable (LoopOp (Map _ fun arrs _)) =
   Just $ analyseExpBody vtable' $ lambdaBody fun
-  where vtable' = foldr (uncurry ST.insertArrayParam) vtable $
+  where vtable' = foldr (uncurry ST.insertArrayLParam) vtable $
                   zip params $ map Just arrs
         params = lambdaParams fun
 analyseExp vtable (LoopOp (Redomap _ outerfun innerfun acc arrs _)) =
   Just $ analyseExpBody vtable' (lambdaBody innerfun) <>
          analyseExpBody vtable (lambdaBody outerfun)
-  where vtable' = foldr (uncurry ST.insertArrayParam) vtable $
+  where vtable' = foldr (uncurry ST.insertArrayLParam) vtable $
                   zip arrparams $ map Just arrs
         arrparams = drop (length acc) $ lambdaParams innerfun
 analyseExp vtable (If cond tbranch fbranch _ _) =
@@ -222,7 +222,8 @@ forbiddenIn name (env, vtable) =
   maybe False bad $ ST.lookup name vtable
   where bad entry = (ST.loopVariable entry &&
                      ST.bindingDepth entry > envMaxLoops env) ||
-                    maybe False (isForbidden . snd . bindingLore . snd) (ST.entryBinding entry)
+                    maybe False (isForbidden . snd . bindingLore)
+                    (ST.entryBinding entry)
 
 newtype VariantM m a = VariantM (RWST
                                  (Env m)
@@ -376,8 +377,8 @@ makeSufficientBinding' _ bnd = Simplify.defaultInspectBinding bnd
 suffScalExp :: VName -> ST.SymbolTable Invariance -> Maybe ScalExp
 suffScalExp name vtable = asSuffScalExp =<< ST.lookup name vtable
   where asSuffScalExp entry
-          | Just ((_, Just suff), _) <- ST.entryBinding entry,
-            Just se                  <- suffScalExp (identName suff) vtable =
+          | Just (_, Just suff) <- ST.entryLetBoundLore entry,
+            Just se             <- suffScalExp (identName suff) vtable =
               Just se
           | otherwise = ST.asScalExp entry
 
@@ -385,7 +386,7 @@ sufficientSubExp :: MonadFreshNames m => SubExp -> VariantM m SubExp
 sufficientSubExp se@(Constant {}) = return se
 sufficientSubExp (Var v) =
   maybe (Var v) Var .
-  (snd . fst <=< ST.entryBinding <=< ST.lookup (identName v)) <$>
+  (snd <=< ST.entryLetBoundLore <=< ST.lookup (identName v)) <$>
   Simplify.getVtable
 
 scalExpUsesNoForbidden :: Context m -> ScalExp -> Bool
