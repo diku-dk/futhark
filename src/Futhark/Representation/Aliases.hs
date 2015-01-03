@@ -249,6 +249,3 @@ instance Bindable lore => Bindable (Aliases lore) where
   mkBody bnds res =
     let AST.Body bodylore _ _ = mkBody (map removeBindingAliases bnds) res
     in mkAliasedBody bodylore bnds res
-
-  branchReturnType b1 b2 =
-    branchReturnType (removeBodyAliases b1) (removeBodyAliases b2)

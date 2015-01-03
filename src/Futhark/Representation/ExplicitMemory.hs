@@ -8,7 +8,9 @@ module Futhark.Representation.ExplicitMemory
        , ExpReturns
        , FunReturns
        , expReturns
+       , bodyReturns
        , returnsToType
+       , generaliseReturns
          -- * Syntax types
        , Prog
        , Body
@@ -40,6 +42,7 @@ where
 import Control.Applicative
 import Control.Monad.State
 import qualified Data.HashSet as HS
+import qualified Data.HashMap.Lazy as HM
 import Data.Foldable (traverse_)
 import Data.Maybe
 import Data.List
@@ -223,6 +226,50 @@ funReturnsToExpReturns (ReturnsScalar bt) =
 funReturnsToExpReturns (ReturnsMemory size) =
   ReturnsMemory size
 
+generaliseReturns :: [FunReturns] -> [FunReturns] -> [FunReturns]
+generaliseReturns r1s r2s =
+  evalState (zipWithM generaliseReturns' r1s r2s) (0, HM.empty, HM.empty)
+  where generaliseReturns'
+          (ReturnsArray bt shape1 u1 summary1)
+          (ReturnsArray _  shape2 u2 summary2) =
+            ReturnsArray bt
+            <$>
+            (ExtShape <$>
+             zipWithM unifyExtDims
+             (extShapeDims shape1)
+             (extShapeDims shape2))
+            <*>
+            pure (u1 <> u2)
+            <*>
+            generaliseSummaries summary1 summary2
+        generaliseReturns' t1 _ =
+          return t1 -- Must be basic then.
+
+        unifyExtDims (Free se1) (Free se2)
+          | se1 == se2 = return $ Free se1 -- Arbitrary
+          | otherwise  = do (i, sizemap, memmap) <- get
+                            put (i + 1, sizemap, memmap)
+                            return $ Ext i
+        unifyExtDims (Ext x) _ = Ext <$> newSize x
+        unifyExtDims _ (Ext x) = Ext <$> newSize x
+
+        generaliseSummaries (ReturnsInBlock mem1) (ReturnsInBlock mem2)
+          | mem1 == mem2 = return $ ReturnsInBlock mem1 -- Arbitrary
+          | otherwise = do (i, sizemap, memmap) <- get
+                           put (i + 1, sizemap, memmap)
+                           return $ ReturnsNewBlock i
+        generaliseSummaries (ReturnsNewBlock x) _ =
+          ReturnsNewBlock <$> newMem x
+        generaliseSummaries _ (ReturnsNewBlock x) =
+          ReturnsNewBlock <$> newMem x
+
+        newSize x = do (i, sizemap, memmap) <- get
+                       put (i + 1, HM.insert x i sizemap, memmap)
+                       return i
+        newMem x = do (i, sizemap, memmap) <- get
+                      put (i + 1, sizemap, HM.insert x i memmap)
+                      return i
+
 instance TypeCheck.Checkable ExplicitMemory where
   checkExpLore = return
   checkBodyLore = return
@@ -327,12 +374,9 @@ instance TypeCheck.Checkable ExplicitMemory where
                 (False, Just mems') -> put ((mems', i : seen), sizes)
           checkMemReturn _ _ _ = lift $ wrong "Nonsensical memory summary"
 
-  -- FIXME: this doesn't check anywhere close to what we need.
-  checkReturnType rettype body
-    | bodyt `subtypesOf` rettype' = Nothing
-    | otherwise                   = Just $ "Body has type\n " ++ pretty bodyt
-    where bodyt = bodyExtType body
-          rettype' = map returnsToType rettype
+  matchReturnType fname rettype =
+    TypeCheck.matchExtReturnType fname ts
+    where ts = map returnsToType rettype
 
 varMemSummary :: SrcLoc -> VName -> TypeCheck.TypeM ExplicitMemory MemSummary
 varMemSummary loc name = do
@@ -509,5 +553,65 @@ expReturns _ (AST.LoopOp op) =
 expReturns _ (Apply _ _ ret _) =
   return $ map funReturnsToExpReturns ret
 
-expReturns _ (If _ _ _ ret _) =
-  return $ map funReturnsToExpReturns ret
+expReturns look (If _ b1 b2 _ _) = do
+  b1t <- bodyReturns look b1
+  b2t <- bodyReturns look b2
+  return $
+    map funReturnsToExpReturns $
+    generaliseReturns b1t b2t
+
+bodyReturns :: Monad m =>
+               (VName -> m MemSummary)
+            -> Body
+            -> m [FunReturns]
+bodyReturns look body@(AST.Body _ bnds res) = do
+  let boundHere = boundInBindings bnds
+      inspect _ (Constant val _) =
+        return $ ReturnsScalar $ basicValueType val
+      inspect (Basic bt) (Var _) =
+        return $ ReturnsScalar bt
+      inspect (Mem _) (Var _) =
+        -- FIXME
+        fail "bodyReturns: cannot handle bodies returning memory yet."
+      inspect (Array et shape u) (Var v) = do
+        let name = identName v
+
+        memsummary <- do
+          summary <- case HM.lookup name boundHere of
+            Nothing -> lift $ look name
+            Just bindee -> return $ bindeeLore bindee
+
+          case summary of
+            Scalar ->
+              fail "bodyReturns: inconsistent memory summary"
+
+            MemSummary mem ixfun -> do
+              let memname = identName mem
+
+              unless (IxFun.isLinear ixfun) $
+                fail "bodyReturns: cannot handle non-linear index function yet."
+
+              if memname `HM.member` boundHere then do
+                (i, memmap) <- get
+
+                case HM.lookup memname memmap of
+                  Nothing -> do
+                    put (i+1, HM.insert memname (i+1) memmap)
+                    return $ ReturnsNewBlock i
+
+                  Just _ ->
+                    fail "bodyReturns: same memory block used multiple times."
+              else return $ ReturnsInBlock mem
+        return $ ReturnsArray et shape u memsummary
+  evalStateT (zipWithM inspect (bodyExtType body) $ resultSubExps res)
+    (0, HM.empty)
+
+boundInBindings :: [Binding] -> HM.HashMap VName PatBindee
+boundInBindings [] = HM.empty
+boundInBindings (bnd:bnds) =
+  boundInBinding `HM.union` boundInBindings bnds
+  where boundInBinding =
+          HM.fromList
+          [ (bindeeName bindee, bindee)
+          | bindee <- patternBindees $ bindingPattern bnd
+          ]

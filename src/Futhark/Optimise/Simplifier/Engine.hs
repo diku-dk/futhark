@@ -481,17 +481,17 @@ defaultInspectBinding bnd = do
 
 simplifyExp :: MonadEngine m => Exp (InnerLore m) -> m (Exp (Lore m))
 
-simplifyExp (If cond tbranch fbranch t loc) = do
+simplifyExp (If cond tbranch fbranch ts loc) = do
   -- Here, we have to check whether 'cond' puts a bound on some free
-  -- variable, and if so, chomp it.  We also try to do CSE across
-  -- branches.
+  -- variable, and if so, chomp it.  We should also try to do CSE
+  -- across branches.
   cond' <- simplifySubExp cond
-  t' <- simplifyResType t
-  let ds = map diet $ resTypeValues t'
+  ts' <- mapM simplifyExtType ts
+  let ds = map diet ts'
   (tbranch',fbranch') <-
     hoistCommon (simplifyBody ds tbranch) (ST.updateBounds True cond)
                 (simplifyBody ds fbranch) (ST.updateBounds False cond)
-  return $ If cond' tbranch' fbranch' t' loc
+  return $ If cond' tbranch' fbranch' ts' loc
 
 simplifyExp (LoopOp op) = LoopOp <$> simplifyLoopOp op
 

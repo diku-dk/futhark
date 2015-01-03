@@ -88,10 +88,7 @@ instance TypeCheck.Checkable Basic where
     TypeCheck.matchExtPattern loc (patternIdents pat) (expExtType e)
   basicFParam name t loc =
     return $ Bindee (Ident name (AST.Basic t) loc) ()
-  checkReturnType rettype body
-    | bodyt `subtypesOf` rettype = Nothing
-    | otherwise                  = Just $ "Body has type\n " ++ pretty bodyt
-    where bodyt = bodyExtType body
+  matchReturnType = TypeCheck.matchExtReturnType
 
 instance Renameable Basic where
 instance Substitutable Basic where
@@ -106,8 +103,6 @@ instance Bindable Basic where
     let idents = [ Ident name t loc | (name, t) <- zip names ts ]
     return $ mkLet (shapes++idents) e
     where loc = srclocOf e
-  branchReturnType b1 b2 =
-    bodyExtType b1 `generaliseExtTypes` bodyExtType b2
 
 instance PrettyLore Basic where
 

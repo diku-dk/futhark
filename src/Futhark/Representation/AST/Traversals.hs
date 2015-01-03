@@ -128,9 +128,9 @@ mapExpM tv (PrimOp (Not x loc)) =
   PrimOp <$> (pure Not <*> mapOnSubExp tv x <*> pure loc)
 mapExpM tv (PrimOp (Negate x loc)) =
   PrimOp <$> (pure Negate <*> mapOnSubExp tv x <*> pure loc)
-mapExpM tv (If c texp fexp t loc) =
+mapExpM tv (If c texp fexp ts loc) =
   pure If <*> mapOnSubExp tv c <*> mapOnBody tv texp <*> mapOnBody tv fexp <*>
-       mapOnResType tv t <*> pure loc
+       mapM (mapOnExtType tv) ts <*> pure loc
 mapExpM tv (Apply fname args ret loc) = do
   args' <- forM args $ \(arg, d) ->
              (,) <$> mapOnSubExp tv arg <*> pure d
@@ -208,6 +208,16 @@ mapExpM tv (LoopOp (Redomap cs redfun mapfun accexps arrexps loc)) =
               mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
               mapM (mapOnSubExp tv) accexps <*> mapM (mapOnSubExp tv) arrexps <*>
               pure loc)
+
+mapOnExtType :: (Monad m, Applicative m) =>
+                Mapper flore tlore m -> ExtType -> m ExtType
+mapOnExtType tv (Array bt (ExtShape shape) u) =
+  Array bt <$> (ExtShape <$> mapM mapOnExtSize shape) <*>
+  return u
+  where mapOnExtSize (Ext x)   = return $ Ext x
+        mapOnExtSize (Free se) = Free <$> mapOnSubExp tv se
+mapOnExtType _ (Basic bt) = return $ Basic bt
+mapOnExtType tv (Mem size) = Mem <$> mapOnSubExp tv size
 
 -- | Like 'mapExp', but in the 'Identity' monad.
 mapExp :: Mapper flore tlore Identity -> Exp flore -> Exp tlore

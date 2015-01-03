@@ -64,8 +64,6 @@ class (Monad m, Applicative m) =>
 
   mkLetNamesM :: [VName] -> Exp (Lore m) -> m (Binding (Lore m))
 
-  branchReturnTypeM :: Body (Lore m) -> Body (Lore m) -> m (ResType (Lore m))
-
 -- | The class of lores that can be constructed solely from an
 -- expression, non-monadically.
 class Proper lore => Bindable lore where
@@ -73,7 +71,6 @@ class Proper lore => Bindable lore where
   mkBody :: [Binding lore] -> Result -> Body lore
   mkLetNames :: MonadFreshNames m =>
                 [VName] -> Exp lore -> m (Binding lore)
-  branchReturnType :: Body lore -> Body lore -> ResType lore
 
 class (BindableM m, Proper (Lore m),
        MonadFreshNames m, Applicative m, Monad m) =>
@@ -156,7 +153,6 @@ instance (Proper lore, Bindable lore, MonadFreshNames m) => BindableM (BinderT l
   mkBodyM bnds res = return $ mkBody bnds res
   mkLetM pat e = return $ mkLet (patternIdents pat) e
   mkLetNamesM = mkLetNames
-  branchReturnTypeM b1 b2 = return $ branchReturnType b1 b2
 
 instance (Proper lore, Bindable lore, MonadFreshNames m) => MonadBinder (BinderT lore m) where
   addBinding      = addBindingWriter

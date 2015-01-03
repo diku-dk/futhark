@@ -125,8 +125,8 @@ eIf ce te fe loc = do
   ce' <- letSubExp "cond" =<< ce
   te' <- insertBindingsM te
   fe' <- insertBindingsM fe
-  rt <- branchReturnTypeM te' fe'
-  return $ If ce' te' fe' rt loc
+  let ts = bodyExtType te' `generaliseExtTypes` bodyExtType fe'
+  return $ If ce' te' fe' ts loc
 
 eBinOp :: MonadBinder m =>
           BinOp -> m (Exp (Lore m)) -> m (Exp (Lore m)) -> Type -> SrcLoc

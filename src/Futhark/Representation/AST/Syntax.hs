@@ -254,7 +254,7 @@ data ExpT lore
 
   | Apply  Name [(SubExp, Diet)] (Lore.ResType lore) SrcLoc
 
-  | If     SubExp (BodyT lore) (BodyT lore) (Lore.ResType lore) SrcLoc
+  | If     SubExp (BodyT lore) (BodyT lore) [ExtType] SrcLoc
 
 deriving instance Lore lore => Eq (ExpT lore)
 deriving instance Lore lore => Show (ExpT lore)

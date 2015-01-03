@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, TypeFamilies, MultiParamTypeClasses #-}
+{-# LANGUAGE FlexibleInstances, TypeFamilies #-}
 module Futhark.Internalise.Monad
   ( InternaliseM
   , runInternaliseM
@@ -58,7 +58,6 @@ instance BindableM InternaliseM where
   mkLetM pat e = return $ mkLet (patternIdents pat) e
   mkBodyM bnds res = return $ mkBody bnds res
   mkLetNamesM = mkLetNames
-  branchReturnTypeM b1 b2 = return $ branchReturnType b1 b2
 
 instance MonadBinder InternaliseM where
   addBinding      = addBindingWriter

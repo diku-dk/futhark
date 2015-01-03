@@ -41,8 +41,6 @@ data Simplifiable m =
                                     -> m (Lore.FParam (Engine.InnerLore m))
                , simplifyResType :: Lore.ResType (Engine.InnerLore m)
                                  -> m (Lore.ResType (Engine.InnerLore m))
-               , computeBranchReturnType :: Body (Lore m) -> Body (Lore m)
-                                         -> m (ResType (Engine.InnerLore m))
                }
 
 bindableSimplifiable :: (Engine.MonadEngine m,
@@ -53,12 +51,10 @@ bindableSimplifiable :: (Engine.MonadEngine m,
                         Simplifiable m
 bindableSimplifiable =
   Simplifiable mkLetS' mkBodyS' mkLetNamesS'
-  return return (mapM Engine.simplifyExtType) computeBranchReturnType'
+  return return (mapM Engine.simplifyExtType)
   where mkLetS' _ pat e = return $ mkLet (patternIdents pat) e
         mkBodyS' _ bnds res = return $ mkBody bnds res
         mkLetNamesS' _ = mkLetNames
-        computeBranchReturnType' b1 b2 =
-          return $ bodyExtType b1 `generaliseExtTypes` bodyExtType b2
 
 newtype SimpleM lore a =
   SimpleM (RWS
@@ -113,9 +109,6 @@ instance Proper lore => BindableM (SimpleM lore) where
     vtable <- Engine.getVtable
     simpl <- fst <$> ask
     mkLetNamesS simpl vtable names e
-  branchReturnTypeM b1 b2 = do
-    simpl <- fst <$> ask
-    computeBranchReturnType simpl b1 b2
 
 runSimpleM :: SimpleM lore a
            -> Simplifiable (SimpleM lore)

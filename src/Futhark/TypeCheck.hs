@@ -21,6 +21,7 @@ module Futhark.TypeCheck
   , checkIdent
   , checkExtType
   , matchExtPattern
+  , matchExtReturnType
   )
   where
 
@@ -467,7 +468,7 @@ checkFun (FunDec fname rettype params body loc) =
                  loc) $ do
         checkFunParams params
         checkResType rettype
-        checkBody body
+        checkFunBody fname rettype body
     return $ FunDec fname rettype params body' loc
 
 funParamsToIdentsAndLores :: Checkable lore =>
@@ -588,9 +589,21 @@ checkResult (Result cs es loc) = do
   es' <- mapM checkSubExp es
   return $ Result cs' es' loc
 
+checkFunBody :: Checkable lore =>
+                Name
+             -> ResType lore
+             -> Body lore
+             -> TypeM lore (Body lore)
+checkFunBody fname rt (Body (als,lore) bnds res) = do
+  (bnds', res') <- checkBindings bnds $ do
+    res' <- checkResult res
+    matchReturnType fname rt res'
+    return res'
+  lore' <- checkBodyLore lore
+  return $ Body (als,lore') bnds' res'
+
 checkBody :: Checkable lore =>
              Body lore -> TypeM lore (Body lore)
-
 checkBody (Body (als,lore) bnds res) = do
   (bnds', res') <- checkBindings bnds $ checkResult res
   lore' <- checkBodyLore lore
@@ -837,13 +850,21 @@ checkExp (PrimOp op) = PrimOp <$> checkPrimOp op
 
 checkExp (LoopOp op) = LoopOp <$> checkLoopOp op
 
-checkExp (If e1 e2 e3 t pos) = do
+checkExp (If e1 e2 e3 ts loc) = do
   e1' <- require [Basic Bool] =<< checkSubExp e1
-  ((e2', e3'), dflow) <- collectDataflow $ checkBody e2 `alternative` checkBody e3
+  ((e2', e3'), dflow) <-
+    collectDataflow $ checkBody e2 `alternative` checkBody e3
   tell dflow
-  checkReturnType' t $ removeBodyAliases e2'
-  checkReturnType' t $ removeBodyAliases e3'
-  return $ If e1' e2' e3' t pos
+  let ts2 = bodyExtType e2
+      ts3 = bodyExtType e3
+  unless (ts2 `generaliseExtTypes` ts3 `subtypesOf` ts) $
+    bad $ TypeError loc $
+    unlines ["If-expression branches have types",
+             "  " ++ prettyTuple ts2 ++ ", and",
+             "  " ++ prettyTuple ts3,
+             "Which is not a subtype of annotation",
+             "  " ++ prettyTuple ts]
+  return $ If e1' e2' e3' ts loc
 
 checkExp (Apply fname args t loc)
   | "trace" <- nameToString fname = do
@@ -981,6 +1002,15 @@ matchExtPattern loc pat ts = do
             Just (Ident name _ pos2) ->
               lift $ bad $ DupPatternError name (srclocOf ident) pos2
 
+matchExtReturnType :: Name -> [ExtType] -> Result
+               -> TypeM lore ()
+matchExtReturnType fname rettype (Result _ ses loc) =
+  unless (staticShapes ts `subtypesOf` rettype) $
+  bad $ ReturnTypeError loc fname
+        (Several $ map toDecl rettype)
+        (Several $ map toDecl ts)
+  where ts = map subExpType ses
+
 patternContext :: [Ident] -> [ExtType] ->
                   Either String ([Type], [Ident], [Ident])
 patternContext pat rt = do
@@ -1061,18 +1091,6 @@ checkLambda (Lambda params body ret loc) args = do
     return $ Lambda params' body' ret' loc
   else bad $ TypeError loc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
-checkReturnType' :: Checkable lore =>
-                    AST.ResType lore -> AST.Body lore -> TypeM lore ()
-checkReturnType' rettype body =
-  case checkReturnType rettype body of
-    Just problem ->
-      bad $ TypeError (srclocOf body) $
-      "Body result\n  " ++ pretty (bodyResult body) ++
-      "\ncannot match return type\n  " ++ pretty rettype ++
-      problem
-    Nothing ->
-      return ()
-
 -- | The class of lores that can be type-checked.
 class (FreeIn (Lore.Exp lore),
        FreeIn (Lore.LetBound lore),
@@ -1085,4 +1103,4 @@ class (FreeIn (Lore.Exp lore),
   matchPattern :: SrcLoc -> AST.Pattern lore -> AST.Exp lore ->
                   TypeM lore ()
   basicFParam :: VName -> BasicType -> SrcLoc -> TypeM lore (AST.FParam lore)
-  checkReturnType :: AST.ResType lore -> AST.Body lore -> Maybe String
+  matchReturnType :: Name -> ResType lore -> AST.Result -> TypeM lore ()
