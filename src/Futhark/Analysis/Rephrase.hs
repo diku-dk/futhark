@@ -20,7 +20,7 @@ data Rephraser from to
               , rephraseBindeeLore :: Lore.LetBound from -> Lore.LetBound to
               , rephraseFParamLore :: Lore.FParam from -> Lore.FParam to
               , rephraseBodyLore :: Lore.Body from -> Lore.Body to
-              , rephraseResType :: ResType from -> ResType to
+              , rephraseRetType :: RetType from -> RetType to
               }
 
 rephraseProg :: Rephraser from to -> Prog from -> Prog to
@@ -31,7 +31,7 @@ rephraseFunDec rephraser fundec =
   fundec { funDecBody = rephraseBody rephraser $ funDecBody fundec
          , funDecParams = map (rephraseBindee $ rephraseFParamLore rephraser) $
                           funDecParams fundec
-         , funDecRetType = rephraseResType rephraser $ funDecRetType fundec
+         , funDecRetType = rephraseRetType rephraser $ funDecRetType fundec
          }
 
 rephraseExp :: Rephraser from to -> Exp from -> Exp to
@@ -71,6 +71,6 @@ mapper rephraser = identityMapper {
     mapOnBinding = return . rephraseBinding rephraser
   , mapOnBody = return . rephraseBody rephraser
   , mapOnLambda = return . rephraseLambda rephraser
-  , mapOnResType = return . rephraseResType rephraser
+  , mapOnRetType = return . rephraseRetType rephraser
   , mapOnFParam = return . rephraseBindee (rephraseFParamLore rephraser)
   }

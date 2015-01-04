@@ -129,8 +129,8 @@ class (MonadBinder m,
                        -> m (Lore.LetBound (InnerLore m))
   simplifyFParamLore :: Lore.FParam (InnerLore m)
                      -> m (Lore.FParam (InnerLore m))
-  simplifyResType :: Lore.ResType (InnerLore m)
-                  -> m (Lore.ResType (InnerLore m))
+  simplifyRetType :: Lore.RetType (InnerLore m)
+                  -> m (Lore.RetType (InnerLore m))
 
 addBindingEngine :: MonadEngine m =>
                     Binding (Lore m) -> m ()
@@ -446,7 +446,7 @@ simplifyBinding :: MonadEngine m =>
 -- access to the full program.  This is a bit of a hack.
 simplifyBinding (Let pat _ (Apply fname args rettype loc)) = do
   args' <- mapM (simplifySubExp . fst) args
-  rettype' <- simplifyResType rettype
+  rettype' <- simplifyRetType rettype
   prog <- asksEngineEnv envProgram
   vtable <- getVtable
   case join $ pure simplifyApply <*> prog <*> pure vtable <*> pure fname <*> pure args of
@@ -512,7 +512,7 @@ simplifyExpBase = mapExpM hoist
                 , mapOnType = simplifyType
                 , mapOnValue = return
                 , mapOnCertificates = simplifyCerts
-                , mapOnResType = simplifyResType
+                , mapOnRetType = simplifyRetType
                 , mapOnFParam =
                   fail "Unhandled FParam in simplification engine."
                 }
@@ -700,7 +700,7 @@ simplifyCerts = liftM (nub . concat) . mapM check
 simplifyFun :: MonadEngine m =>
                FunDec (InnerLore m) -> m (FunDec (Lore m))
 simplifyFun (FunDec fname rettype params body loc) = do
-  rettype' <- simplifyResType rettype
+  rettype' <- simplifyRetType rettype
   body' <- insertAllBindings $ bindFParams params $
            simplifyBody (map diet $ resTypeValues rettype') body
   return $ FunDec fname rettype' params body' loc

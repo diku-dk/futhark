@@ -45,7 +45,7 @@ module Futhark.Representation.AST.Syntax
   , Exp
   , LambdaT(..)
   , Lambda
-  , Lore.ResType
+  , Lore.RetType
 
   -- * Definitions
   , FParam
@@ -252,7 +252,7 @@ data ExpT lore
 
   | LoopOp (LoopOp lore)
 
-  | Apply  Name [(SubExp, Diet)] (Lore.ResType lore) SrcLoc
+  | Apply  Name [(SubExp, Diet)] (Lore.RetType lore) SrcLoc
 
   | If     SubExp (BodyT lore) (BodyT lore) [ExtType] SrcLoc
 
@@ -288,7 +288,7 @@ type FParam lore = Bindee (Lore.FParam lore)
 
 -- | Function Declarations
 data FunDecT lore = FunDec { funDecName :: Name
-                           , funDecRetType :: Lore.ResType lore
+                           , funDecRetType :: Lore.RetType lore
                            , funDecParams :: [FParam lore]
                            , funDecBody :: BodyT lore
                            , funDecSrcLoc :: SrcLoc

@@ -95,7 +95,7 @@ transformExp (LoopOp (Filter cs fun arrexps loc)) = do
           If check
              (resultBody [] [intval 1] loc)
              (resultBody [] [intval 0] loc)
-             (basicResType Int) loc
+             [Basic Int] loc
    return $ resultBody [] [res] loc
   mape <- letExp "mape" <=< transformExp $
           LoopOp $ Map cs (Lambda xs test [Basic Int] loc) (map Var arr) loc

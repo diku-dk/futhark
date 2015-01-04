@@ -679,8 +679,8 @@ simplifyBoolBranch _
 simplifyBoolBranch _ (Let pat _ (If cond tb fb ts loc))
   | Body _ [] (Result [] [tres] _) <- tb,
     Body _ [] (Result [] [fres] _) <- fb,
-    Just ts' <- simpleType ts,
-    all (==Basic Bool) ts',
+    patternSize pat == length ts,
+    all (==Basic Bool) ts,
     False = do -- FIXME: disable because algebraic optimiser cannot handle it.
   e <- eBinOp LogOr (pure $ PrimOp $ BinOp LogAnd cond tres (Basic Bool) loc)
                     (eBinOp LogAnd (pure $ PrimOp $ Not cond loc)
@@ -691,7 +691,7 @@ simplifyBoolBranch _ _ = cannotSimplify
 
 hoistBranchInvariant :: MonadBinder m => TopDownRule m
 hoistBranchInvariant _ (Let pat _ (If e1 tb fb ret loc))
-  | Just _ <- simpleType ret = do
+  | patternSize pat == length ret = do
   let Result tcs tses tresloc = bodyResult tb
       Result fcs fses fresloc = bodyResult fb
   (pat', res, invariant) <-
@@ -742,8 +742,8 @@ removeUnnecessaryCopy _ _ = cannotSimplify
 -- precise.
 removeDeadBranchResult :: MonadBinder m => BottomUpRule m
 removeDeadBranchResult (_, used) (Let pat _ (If e1 tb fb rettype loc))
-  | -- Only if things are understandable...
-    Just _ <- simpleType rettype,
+  | -- Only if there is no existential context...
+    patternSize pat == length rettype,
     -- Figure out which of the names in 'pat' are used...
     patused <- map (`UT.used` used) $ patternNames pat,
     -- If they are not all used, then this rule applies.

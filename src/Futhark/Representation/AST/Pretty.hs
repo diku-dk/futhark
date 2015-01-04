@@ -23,7 +23,7 @@ import Futhark.Representation.AST.Attributes
 
 -- | The class of lores whose annotations can be prettyprinted.
 class (Lore lore,
-       Pretty (ResType lore),
+       Pretty (RetType lore),
        Pretty (Pattern lore),
        Pretty (Lore.LetBound lore),
        Pretty (Lore.FParam lore)) => PrettyLore lore where

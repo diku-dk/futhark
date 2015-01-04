@@ -60,7 +60,7 @@ functionSlices (FunDec fname rettype params body@(Body _ bodybnds bodyres) loc) 
   -- type.  These will be passed as parameters to the value function.
   (staticRettype, shapeidents) <-
     runWriterT $
-    instantiateShapes instantiate $ resTypeValues rettype
+    instantiateShapes instantiate rettype
 
   valueBody <- substituteExtResultShapes staticRettype body
 
@@ -76,7 +76,7 @@ functionSlices (FunDec fname rettype params body@(Body _ bodybnds bodyres) loc) 
                (map mkFParam valueParams)
                valueBody loc
   return (fShape, fValue)
-  where shapes = subExpShapeContext (resTypeValues rettype) $
+  where shapes = subExpShapeContext rettype $
                  resultSubExps bodyres
         shapetypes = map subExpType shapes
         shapeFname = fname <> nameFromString "_shape"
@@ -133,7 +133,7 @@ cheapSubsts = filter (cheapFun . fst . snd)
               -- Probably too simple.  We might want to inline first.
 
 substCalls :: MonadFreshNames m =>
-              [(Name, (Name, ResType, Name, ResType))]
+              [(Name, (Name, RetType, Name, RetType))]
            -> FunDec -> m FunDec
 substCalls subst fundec = do
   fbody' <- treatBody $ funDecBody fundec

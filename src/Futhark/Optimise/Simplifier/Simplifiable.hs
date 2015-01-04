@@ -39,15 +39,15 @@ data Simplifiable m =
                                       -> m (Lore.LetBound (Engine.InnerLore m))
                , simplifyFParamLore :: Lore.FParam (Engine.InnerLore m)
                                     -> m (Lore.FParam (Engine.InnerLore m))
-               , simplifyResType :: Lore.ResType (Engine.InnerLore m)
-                                 -> m (Lore.ResType (Engine.InnerLore m))
+               , simplifyRetType :: Lore.RetType (Engine.InnerLore m)
+                                 -> m (Lore.RetType (Engine.InnerLore m))
                }
 
 bindableSimplifiable :: (Engine.MonadEngine m,
                          Bindable (Engine.InnerLore m),
                          Lore.LetBound (Engine.InnerLore m) ~ (),
                          Lore.FParam (Engine.InnerLore m) ~ (),
-                         ResType (Engine.InnerLore m) ~ [ExtType]) =>
+                         RetType (Engine.InnerLore m) ~ [ExtType]) =>
                         Simplifiable m
 bindableSimplifiable =
   Simplifiable mkLetS' mkBodyS' mkLetNamesS'
@@ -91,9 +91,9 @@ instance Proper lore => Engine.MonadEngine (SimpleM lore) where
   simplifyFParamLore lore = do
     simpl <- fst <$> ask
     simplifyFParamLore simpl lore
-  simplifyResType restype = do
+  simplifyRetType restype = do
     simpl <- fst <$> ask
-    simplifyResType simpl restype
+    simplifyRetType simpl restype
 
 instance Proper lore => BindableM (SimpleM lore) where
   type Lore (SimpleM lore) = Aliases lore

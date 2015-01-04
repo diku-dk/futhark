@@ -307,7 +307,7 @@ nonuniqueParams params = runBinder'' $ forM params $ \param ->
           param { identType = identType param `setUniqueness` Nonunique }
 
 -- | Instantiate all existential parts dimensions of the given
--- 'ResType', using a monadic action to create the necessary
+-- 'RetType', using a monadic action to create the necessary
 -- 'SubExp's.  You should call this function within some monad that
 -- allows you to collect the actions performed (say, 'Writer').
 instantiateShapes :: Monad m => m SubExp -> [TypeBase ExtShape]

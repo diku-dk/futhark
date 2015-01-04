@@ -23,7 +23,7 @@ module Futhark.Representation.ExplicitMemory
        , Lambda
        , FunDec
        , FParam
-       , ResType
+       , RetType
          -- * Module re-exports
        , module Futhark.Representation.AST.Attributes
        , module Futhark.Representation.AST.Traversals
@@ -54,7 +54,7 @@ import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
-          Pattern, PatBindee, Lambda, FunDec, FParam, ResType)
+          Pattern, PatBindee, Lambda, FunDec, FParam, RetType)
 
 import Futhark.TypeCheck.TypeError
 import Futhark.Representation.AST.Attributes
@@ -80,21 +80,17 @@ type PatBindee = AST.PatBindee ExplicitMemory
 type Lambda = AST.Lambda ExplicitMemory
 type FunDec = AST.FunDec ExplicitMemory
 type FParam = AST.FParam ExplicitMemory
-type ResType = AST.ResType ExplicitMemory
+type RetType = AST.RetType ExplicitMemory
 
-instance IsResType [FunReturns] where
+instance IsRetType [FunReturns] where
   resTypeValues = map returnsToType
 
-  basicResType t = [ReturnsScalar t]
-
-  simpleType = mapM simple
-    where simple (ReturnsArray _ _ _ (ReturnsNewBlock {})) = Nothing
-          simple ret = hasStaticShape $ returnsToType ret
+  basicRetType t = [ReturnsScalar t]
 
 instance Lore.Lore ExplicitMemory where
   type LetBound ExplicitMemory = MemSummary
   type FParam   ExplicitMemory = MemSummary
-  type ResType  ExplicitMemory = [FunReturns]
+  type RetType  ExplicitMemory = [FunReturns]
 
   representative = ExplicitMemory
 
@@ -274,7 +270,7 @@ instance TypeCheck.Checkable ExplicitMemory where
   checkExpLore = return
   checkBodyLore = return
   checkFParamLore = checkMemSummary
-  checkResType = mapM_ TypeCheck.checkExtType . resTypeValues
+  checkRetType = mapM_ TypeCheck.checkExtType . resTypeValues
   basicFParam name t loc =
     return $ Bindee (Ident name (AST.Basic t) loc) Scalar
 

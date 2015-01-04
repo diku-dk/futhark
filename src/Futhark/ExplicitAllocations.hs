@@ -238,11 +238,11 @@ explicitAllocations prog =
   Prog $ evalState (mapM allocInFun $ In.progFunctions prog) free
   where free = newNameSourceForProg prog
 
-memoryInResType :: In.ResType -> ResType
-memoryInResType ts =
+memoryInRetType :: In.RetType -> RetType
+memoryInRetType ts =
   evalState (mapM addAttr ts) $ startOfFreeIDRange ts
   where addAttr (Basic t) = return $ ReturnsScalar t
-        addAttr (Mem _)  = fail "memoryInResType: too much memory"
+        addAttr (Mem _)  = fail "memoryInRetType: too much memory"
         addAttr (Array bt shape u) = do
           i <- get
           put $ i + 1
@@ -255,7 +255,7 @@ allocInFun :: MonadFreshNames m => In.FunDec -> m FunDec
 allocInFun (In.FunDec fname rettype params body loc) =
   runAllocM $ allocInFParams params $ \params' -> do
     body' <- insertBindingsM $ allocInBody body
-    return $ FunDec fname (memoryInResType rettype) params' body' loc
+    return $ FunDec fname (memoryInRetType rettype) params' body' loc
 
 allocInBody :: In.Body -> AllocM Body
 allocInBody (Body _ bnds res) =
@@ -340,12 +340,12 @@ allocInExp (LoopOp (Filter {})) =
   fail "Cannot put explicit allocations in filter yet."
 allocInExp (Apply fname args rettype loc) = do
   args' <- funcallArgs args
-  return $ Apply fname args' (memoryInResType rettype) loc
+  return $ Apply fname args' (memoryInRetType rettype) loc
 allocInExp e = mapExpM alloc e
   where alloc = identityMapper { mapOnBinding = allocInBinding
                                , mapOnBody = allocInBody
                                , mapOnLambda = allocInLambda
-                               , mapOnResType = return . memoryInResType
+                               , mapOnRetType = return . memoryInRetType
                                , mapOnFParam = fail "Unhandled fparam in ExplicitAllocations"
                                }
 
@@ -369,7 +369,7 @@ simplifiable :: (Engine.MonadEngine m,
 simplifiable =
   Simplifiable mkLetS' mkBodyS' mkLetNamesS'
   simplifyMemSummary simplifyMemSummary
-  simplifyResType'
+  simplifyRetType'
   where mkLetS' vtable pat e = do
           Let pat' lore _ <- runAllocMWithEnv env $
                              mkLetM (removePatternAliases pat) $
@@ -389,7 +389,7 @@ simplifiable =
         simplifyMemSummary (MemSummary ident ixfun) =
           MemSummary <$> Engine.simplifyIdent ident <*> pure ixfun
 
-        simplifyResType' = mapM simplifyReturns
+        simplifyRetType' = mapM simplifyReturns
           where simplifyReturns (ReturnsScalar bt) =
                   return $ ReturnsScalar bt
                 simplifyReturns (ReturnsArray bt shape u ret) =

@@ -83,7 +83,7 @@ replace substs = Mapper {
                  , mapOnValue = return
                  , mapOnLambda = return . substituteNames substs
                  , mapOnCertificates = return . map (substituteNames substs)
-                 , mapOnResType = return . substituteNames substs
+                 , mapOnRetType = return . substituteNames substs
                  , mapOnFParam = return . substituteNames substs
                  }
 
@@ -131,5 +131,5 @@ instance Substitute Ident where
 class (Substitute (Lore.Exp lore),
        Substitute (Lore.LetBound lore),
        Substitute (Lore.FParam lore),
-       Substitute (Lore.ResType lore)) =>
+       Substitute (Lore.RetType lore)) =>
       Substitutable lore where

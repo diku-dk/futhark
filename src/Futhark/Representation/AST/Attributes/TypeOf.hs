@@ -13,7 +13,7 @@ module Futhark.Representation.AST.Attributes.TypeOf
        , subExpShapeContext
        , loopShapeContext
        , loopExtType
-       , module Futhark.Representation.AST.ResType
+       , module Futhark.Representation.AST.RetType
        )
        where
 
@@ -26,7 +26,7 @@ import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Values
-import Futhark.Representation.AST.ResType
+import Futhark.Representation.AST.RetType
 
 subExpType :: SubExp -> Type
 subExpType (Constant val _) = Basic $ basicValueType val
@@ -108,7 +108,7 @@ loopOpExtType (Filter _ f arrs _) =
 loopOpExtType (Redomap _ outerfun _ _ _ _) =
   staticShapes $ lambdaReturnType outerfun
 
-expExtType :: IsResType (ResType lore) => Exp lore -> [ExtType]
+expExtType :: IsRetType (RetType lore) => Exp lore -> [ExtType]
 expExtType (Apply _ _ rt _) = resTypeValues rt
 expExtType (If _ _ _ rt _)  = resTypeValues rt
 expExtType (LoopOp op)      = loopOpExtType op

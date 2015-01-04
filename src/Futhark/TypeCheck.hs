@@ -60,7 +60,7 @@ instance PrettyLore lore => Show (TypeError lore) where
 
 -- | A tuple of a return type and a list of parameters, possibly
 -- named.
-type FunBinding lore = (ResType lore, [(Maybe VName, DeclType)])
+type FunBinding lore = (RetType lore, [(Maybe VName, DeclType)])
 
 data VarBindingLore lore = LetBound (Lore.LetBound lore)
                          | FunBound (Lore.FParam lore)
@@ -328,7 +328,7 @@ subExpAliasesM (Constant {}) = return mempty
 subExpAliasesM (Var v)       = lookupAliases (identName v) (srclocOf v)
 
 lookupFun :: SrcLoc -> Name
-          -> TypeM lore (ResType lore, [DeclType])
+          -> TypeM lore (RetType lore, [DeclType])
 lookupFun loc fname = do
   bnd <- asks $ HM.lookup fname . envFtable
   case bnd of
@@ -453,7 +453,7 @@ checkProg' checkoccurs prog = do
 -- The prog argument is just to disambiguate the lore.
 initialFtable :: Lore lore => Prog lore -> HM.HashMap Name (FunBinding lore)
 initialFtable _ = HM.map addBuiltin builtInFunctions
-  where addBuiltin (t, ts) = (basicResType t,
+  where addBuiltin (t, ts) = (basicRetType t,
                               zip (repeat Nothing) $ map Basic ts)
 
 checkFun :: Checkable lore =>
@@ -467,7 +467,7 @@ checkFun (FunDec fname rettype params body loc) =
                  body,
                  loc) $ do
         checkFunParams params
-        checkResType rettype
+        checkRetType rettype
         checkFunBody fname rettype body
     return $ FunDec fname rettype params body' loc
 
@@ -591,7 +591,7 @@ checkResult (Result cs es loc) = do
 
 checkFunBody :: Checkable lore =>
                 Name
-             -> ResType lore
+             -> RetType lore
              -> Body lore
              -> TypeM lore (Body lore)
 checkFunBody fname rt (Body (als,lore) bnds res) = do
@@ -876,7 +876,7 @@ checkExp (Apply fname args t loc)
   return $ Apply fname [(arg, Observe) | arg <- args'] t loc
 
 checkExp (Apply fname args rettype loc) = do
-  checkResType rettype
+  checkRetType rettype
   (rettype', paramtypes) <- lookupFun loc fname
   (args', argflows) <- unzip <$> mapM (checkArg . fst) args
 
@@ -1099,8 +1099,8 @@ class (FreeIn (Lore.Exp lore),
   checkExpLore :: Lore.Exp lore -> TypeM lore (Lore.Exp lore)
   checkBodyLore :: Lore.Body lore -> TypeM lore (Lore.Body lore)
   checkFParamLore :: Lore.FParam lore -> TypeM lore ()
-  checkResType :: AST.ResType lore -> TypeM lore ()
+  checkRetType :: AST.RetType lore -> TypeM lore ()
   matchPattern :: SrcLoc -> AST.Pattern lore -> AST.Exp lore ->
                   TypeM lore ()
   basicFParam :: VName -> BasicType -> SrcLoc -> TypeM lore (AST.FParam lore)
-  matchReturnType :: Name -> ResType lore -> AST.Result -> TypeM lore ()
+  matchReturnType :: Name -> RetType lore -> AST.Result -> TypeM lore ()

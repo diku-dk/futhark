@@ -74,7 +74,7 @@ data Mapper flore tlore m = Mapper {
   , mapOnIdent :: Ident -> m Ident
   , mapOnValue :: Value -> m Value
   , mapOnCertificates :: Certificates -> m Certificates
-  , mapOnResType :: ResType flore -> m (ResType tlore)
+  , mapOnRetType :: RetType flore -> m (RetType tlore)
   , mapOnFParam :: FParam flore -> m (FParam tlore)
   }
 
@@ -89,7 +89,7 @@ identityMapper = Mapper {
                  , mapOnIdent = return
                  , mapOnValue = return
                  , mapOnCertificates = return
-                 , mapOnResType = return
+                 , mapOnRetType = return
                  , mapOnFParam = return
                  }
 
@@ -135,7 +135,7 @@ mapExpM tv (Apply fname args ret loc) = do
   args' <- forM args $ \(arg, d) ->
              (,) <$> mapOnSubExp tv arg <*> pure d
   pure (Apply fname) <*> pure args' <*>
-    mapOnResType tv ret <*> pure loc
+    mapOnRetType tv ret <*> pure loc
 mapExpM tv (PrimOp (Index cs arr idxexps loc)) =
   PrimOp <$> (pure Index <*> mapOnCertificates tv cs <*>
                  mapOnIdent tv arr <*>
@@ -233,7 +233,7 @@ data Folder a lore m = Folder {
   , foldOnIdent :: a -> Ident -> m a
   , foldOnValue :: a -> Value -> m a
   , foldOnCertificates :: a -> Certificates -> m a
-  , foldOnResType :: a -> ResType lore -> m a
+  , foldOnRetType :: a -> RetType lore -> m a
   , foldOnFParam :: a -> FParam lore -> m a
   }
 
@@ -248,7 +248,7 @@ identityFolder = Folder {
                  , foldOnIdent = const . return
                  , foldOnValue = const . return
                  , foldOnCertificates = const . return
-                 , foldOnResType = const . return
+                 , foldOnRetType = const . return
                  , foldOnFParam = const . return
                  }
 
@@ -262,7 +262,7 @@ foldMapper f = Mapper {
                , mapOnIdent = wrap foldOnIdent
                , mapOnValue = wrap foldOnValue
                , mapOnCertificates = wrap foldOnCertificates
-               , mapOnResType = wrap foldOnResType
+               , mapOnRetType = wrap foldOnRetType
                , mapOnFParam = wrap foldOnFParam
                }
   where wrap op k = do
@@ -301,7 +301,7 @@ data Walker lore m = Walker {
   , walkOnIdent :: Ident -> m ()
   , walkOnValue :: Value -> m ()
   , walkOnCertificates :: Certificates -> m ()
-  , walkOnResType :: ResType lore -> m ()
+  , walkOnRetType :: RetType lore -> m ()
   , walkOnFParam :: FParam lore -> m ()
   }
 
@@ -316,7 +316,7 @@ identityWalker = Walker {
                  , walkOnIdent = const $ return ()
                  , walkOnValue = const $ return ()
                  , walkOnCertificates = const $ return ()
-                 , walkOnResType = const $ return ()
+                 , walkOnRetType = const $ return ()
                  , walkOnFParam = const $ return ()
                  }
 
@@ -330,7 +330,7 @@ walkMapper f = Mapper {
                , mapOnIdent = wrap walkOnIdent
                , mapOnValue = wrap walkOnValue
                , mapOnCertificates = wrap walkOnCertificates
-               , mapOnResType = wrap walkOnResType
+               , mapOnRetType = wrap walkOnRetType
                , mapOnFParam = wrap walkOnFParam
                }
   where wrap op k = op f k >> return k

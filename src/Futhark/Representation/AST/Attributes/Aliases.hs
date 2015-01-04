@@ -17,7 +17,7 @@ import qualified Data.HashSet as HS
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Lore (Lore)
-import Futhark.Representation.AST.ResType
+import Futhark.Representation.AST.RetType
 import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Patterns
 

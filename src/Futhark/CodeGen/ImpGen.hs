@@ -164,7 +164,7 @@ compileInParams params = do
   return (inparams, arraydecls, args)
   where isArrayDecl x (ArrayDecl y _ _ _) = x == y
 
-compileOutParams :: ResType
+compileOutParams :: RetType
                  -> ImpM op ([Imp.ValueDecl], [Imp.Param], Destination)
 compileOutParams rts = do
   ((valdecls, dests), outparams) <-

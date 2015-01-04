@@ -16,7 +16,7 @@ module Futhark.Representation.Aliases
        , Exp
        , Lambda
        , FunDec
-       , ResType
+       , RetType
          -- * Module re-exports
        , module Futhark.Representation.AST.Attributes
        , module Futhark.Representation.AST.Traversals
@@ -55,7 +55,7 @@ import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
-          Pattern, Lambda, FunDec, ResType)
+          Pattern, Lambda, FunDec, RetType)
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.AST.Traversals
@@ -100,7 +100,7 @@ instance Lore.Lore lore => Lore.Lore (Aliases lore) where
   type Exp (Aliases lore) = (Names', Lore.Exp lore)
   type Body (Aliases lore) = (([Names'], Names'), Lore.Body lore)
   type FParam (Aliases lore) = Lore.FParam lore
-  type ResType (Aliases lore) = Lore.ResType lore
+  type RetType (Aliases lore) = Lore.RetType lore
 
   representative = Aliases Lore.representative
 
@@ -116,7 +116,7 @@ type Binding lore = AST.Binding (Aliases lore)
 type Pattern lore = AST.Pattern (Aliases lore)
 type Lambda lore = AST.Lambda (Aliases lore)
 type FunDec lore = AST.FunDec (Aliases lore)
-type ResType lore = AST.ResType (Aliases lore)
+type RetType lore = AST.RetType (Aliases lore)
 
 instance Renameable lore => Renameable (Aliases lore) where
 instance Substitutable lore => Substitutable (Aliases lore) where
@@ -157,7 +157,7 @@ removeAliases = Rephraser { rephraseExpLore = snd
                           , rephraseBindeeLore = snd
                           , rephraseBodyLore = snd
                           , rephraseFParamLore = id
-                          , rephraseResType = id
+                          , rephraseRetType = id
                           }
 
 removeProgAliases :: AST.Prog (Aliases lore) -> AST.Prog lore

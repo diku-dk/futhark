@@ -427,7 +427,7 @@ removeInvariance = Rephraser { rephraseExpLore = const ()
                              , rephraseBindeeLore = const ()
                              , rephraseBodyLore = const ()
                              , rephraseFParamLore = const ()
-                             , rephraseResType = id
+                             , rephraseRetType = id
                              }
 
 instance MonadFreshNames m => BindableM (VariantM m) where

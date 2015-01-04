@@ -4,13 +4,13 @@ module Futhark.Representation.AST.Lore
        )
        where
 
-import Futhark.Representation.AST.ResType
+import Futhark.Representation.AST.RetType
 import Futhark.Representation.AST.Syntax.Core
 
-class (Show (LetBound l), Show (Exp l), Show (Body l), Show (FParam l), Show (ResType l),
-       Eq (LetBound l), Eq (Exp l), Eq (Body l), Eq (FParam l), Eq (ResType l),
-       Ord (LetBound l), Ord (Exp l), Ord (Body l), Ord (FParam l), Ord (ResType l),
-       IsResType (ResType l))
+class (Show (LetBound l), Show (Exp l), Show (Body l), Show (FParam l), Show (RetType l),
+       Eq (LetBound l), Eq (Exp l), Eq (Body l), Eq (FParam l), Eq (RetType l),
+       Ord (LetBound l), Ord (Exp l), Ord (Body l), Ord (FParam l), Ord (RetType l),
+       IsRetType (RetType l))
       => Lore l where
   -- | Annotation for every binding.
   type LetBound l :: *
@@ -25,8 +25,8 @@ class (Show (LetBound l), Show (Exp l), Show (Body l), Show (FParam l), Show (Re
   type FParam l :: *
   type FParam l = ()
   -- | The type of expressions and function calls.
-  type ResType l :: *
-  type ResType l = [ExtType]
+  type RetType l :: *
+  type RetType l = [ExtType]
 
   -- | A constant used to disambiguate method calls.  XXX, this is a
   -- hack to get around mising type application in Haskell, sometimes

@@ -15,7 +15,7 @@ module Futhark.Representation.Basic
        , Lambda
        , FunDec
        , FParam
-       , ResType
+       , RetType
          -- * Module re-exports
        , module Futhark.Representation.AST.Attributes
        , module Futhark.Representation.AST.Traversals
@@ -43,7 +43,7 @@ import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
-          Pattern, Lambda, FunDec, FParam, ResType)
+          Pattern, Lambda, FunDec, FParam, RetType)
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Pretty
@@ -77,13 +77,13 @@ type Pattern = AST.Pattern Basic
 type Lambda = AST.Lambda Basic
 type FunDec = AST.FunDecT Basic
 type FParam = AST.FParam Basic
-type ResType = AST.ResType Basic
+type RetType = AST.RetType Basic
 
 instance TypeCheck.Checkable Basic where
   checkExpLore = return
   checkBodyLore = return
   checkFParamLore = return
-  checkResType = mapM_ TypeCheck.checkExtType . resTypeValues
+  checkRetType = mapM_ TypeCheck.checkExtType . resTypeValues
   matchPattern loc pat e =
     TypeCheck.matchExtPattern loc (patternIdents pat) (expExtType e)
   basicFParam name t loc =
@@ -115,7 +115,7 @@ removeLore =
             , rephraseBindeeLore = const ()
             , rephraseBodyLore = const ()
             , rephraseFParamLore = const ()
-            , rephraseResType = removeResTypeLore
+            , rephraseRetType = removeRetTypeLore
             }
 
 removeProgLore :: Lore.Lore lore => AST.Prog lore -> Prog
@@ -127,5 +127,5 @@ removeFunDecLore = rephraseFunDec removeLore
 removeBodyLore :: Lore.Lore lore => AST.Body lore -> Body
 removeBodyLore = rephraseBody removeLore
 
-removeResTypeLore :: IsResType rt => rt -> ResType
-removeResTypeLore = resTypeValues
+removeRetTypeLore :: IsRetType rt => rt -> RetType
+removeRetTypeLore = resTypeValues

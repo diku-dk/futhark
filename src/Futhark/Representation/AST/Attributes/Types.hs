@@ -299,7 +299,7 @@ shapeContext = HS.fromList
 shapeContextSize :: [ExtType] -> Int
 shapeContextSize = HS.size . shapeContext
 
--- | If all dimensions of the given 'ResType' are statically known,
+-- | If all dimensions of the given 'RetType' are statically known,
 -- return the corresponding list of 'Type'.
 hasStaticShape :: ExtType -> Maybe Type
 hasStaticShape (Basic bt) =

@@ -192,7 +192,7 @@ instance Renameable lore => Rename (Exp lore) where
                     , mapOnType = rename
                     , mapOnValue = return
                     , mapOnCertificates = mapM rename
-                    , mapOnResType = rename
+                    , mapOnRetType = rename
                     , mapOnFParam = rename
                     }
 
@@ -236,5 +236,5 @@ class (Rename (Lore.LetBound lore),
        Rename (Lore.Exp lore),
        Rename (Lore.Body lore),
        Rename (Lore.FParam lore),
-       Rename (Lore.ResType lore)) =>
+       Rename (Lore.RetType lore)) =>
       Renameable lore where
