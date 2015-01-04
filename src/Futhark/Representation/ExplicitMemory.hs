@@ -276,104 +276,126 @@ instance TypeCheck.Checkable ExplicitMemory where
 
   matchPattern loc pat e = do
     rt <- expReturns (varMemSummary loc) e
-    let (nmemsizes, nmems, nvalsizes) = analyseExpReturns rt
-        (memsizes, mems, valsizes,
-         AST.Pattern valbindees) = dividePattern pat nmemsizes nmems nvalsizes
-    checkMems memsizes mems
-    checkVals rt mems valsizes valbindees
-    where wrong s = TypeCheck.bad $ TypeError loc $
-                    ("Pattern\n  " ++ pretty pat ++
-                     "\ncannot match expression\n") ++
-                    TypeCheck.message "  " e ++ "\n" ++ s
-          mustBeEmpty _ [] = return ()
-          mustBeEmpty s  _ = wrong $ "Guess: unused " ++ s ++ " bindees"
-          checkMems memsizes mems =
-            mustBeEmpty "memory block size" =<<
-            execStateT (mapM_ checkMem mems) memsizes
-          checkVals rt mems valsizes valbindees = do
-            ((mems', _), (valsizes', _)) <-
-              execStateT
-              (zipWithM_ checkVal valbindees rt)
-              ((mems, []), (valsizes, []))
-            mustBeEmpty "memory block" mems'
-            mustBeEmpty "value size"  valsizes'
-          checkMem ident
-            | Mem (Var size) <- identType ident = do
-              memsizes <- get
-              case extract size memsizes of
-                Nothing        ->
-                  lift $ wrong $ "No memory block size " ++ sname ++ "."
-                Just memsizes' ->
-                  put memsizes'
-            | otherwise = lift $ wrong $ sname ++ " is not a memory block."
-            where sname = pretty ident
-          checkVal valbindee ret = do
-            let t = returnsToType ret
-            zipWithM_ checkShape
-              (shapeDims $ arrayShape $ bindeeType valbindee)
-              (extShapeDims $ arrayShape t)
-            checkMemReturn (bindeeType valbindee) (bindeeLore valbindee) ret
-
-          -- If the return size is existentially quantified, then the
-          -- size must be bound in the pattern itself.
-          checkShape (Var v)       (Ext i) = isPatternBoundSize v i
-          -- If the return size is free, then the bound size must be
-          -- the same a runtime, but we cannot check this statically.
-          checkShape _ (Free _) = return ()
-          -- Otherwise we have an error.
-          checkShape _ _ = lift $ wrong "Shape of binding is nonsensical."
-
-          isPatternBoundSize v i = do
-            (mems, (valsizes, seen)) <- get
-            -- Either 'i' has been seen before or 'v' must be in
-            -- 'valsizes'.
-            case (lookup i seen, extract v valsizes) of
-              -- Hasn't been seen before, and not remaining in pattern.
-              (Nothing, Nothing) -> lift $ wrong $ "Unknown size variable " ++
-                                    pretty v
-              -- Has been seen before, although possibly with another
-              -- existential identifier.
-              (Just iv, _)
-                | iv /= v   ->
-                   -- Inconsistent use of 'i'!
-                  lift $ wrong $ pretty v ++ " and " ++
-                  pretty iv ++ " used to refer to same size."
-                | otherwise -> put (mems, (valsizes, (i, v) : seen))
-              -- Was remaining in pattern.
-              (_, Just valsizes') -> put (mems, (valsizes', (i, v) : seen))
-
-          checkMemReturn (Mem _) Scalar (ReturnsMemory _) = return ()
-          checkMemReturn (Basic _) Scalar (ReturnsScalar _) = return ()
-          checkMemReturn
-            (Array {})
-            (MemSummary {})
-            (ReturnsArray _ _ _ Nothing) =
-            return ()
-          checkMemReturn
-            (Array {})
-            (MemSummary memv1 ixfun)
-            (ReturnsArray _ _ _ (Just (ReturnsInBlock memv2)))
-            | memv1 == memv2,
-              IxFun.isLinear ixfun = return ()
-          checkMemReturn
-            (Array {})
-            (MemSummary memv ixfun)
-            (ReturnsArray _ _ _ (Just (ReturnsNewBlock i)))
-            | IxFun.isLinear ixfun = do
-              ((mems, seen), sizes) <- get
-              case (i `elem` seen, extract memv mems) of
-                (True, _) ->
-                  -- Cannot store multiple arrays in same block.
-                  lift $ wrong "Trying to store multiple arrays in same block"
-                (_, Nothing) ->
-                  -- memv is not bound in this pattern.
-                  lift $ wrong $ pretty memv ++ " is not bound or available in this pattern."
-                (False, Just mems') -> put ((mems', i : seen), sizes)
-          checkMemReturn _ _ _ = lift $ wrong "Nonsensical memory summary"
+    matchPatternToReturns (wrong rt) pat rt
+    where wrong rt s = TypeCheck.bad $ TypeError loc $
+                       ("Pattern\n" ++ TypeCheck.message "  " pat ++
+                        "\ncannot match result type\n") ++
+                       "  " ++ prettyTuple rt ++ "\n" ++ s
 
   matchReturnType fname rettype =
     TypeCheck.matchExtReturnType fname ts
     where ts = map returnsToType rettype
+
+matchPatternToReturns :: Monad m =>
+                         (String -> m ())
+                      -> Pattern
+                      -> [ExpReturns]
+                      -> m ()
+matchPatternToReturns wrong pat rt = do
+  remaining <- execStateT (zipWithM matchBindee valbindees rt) ctxbindees
+  unless (null remaining) $
+    wrong $ "Unused parts of pattern: " ++
+    intercalate ", " (map pretty remaining)
+  where
+    (ctxbindees, valbindees) =
+        splitAt (patternSize pat - length rt) $ patternBindees pat
+    inCtx = (`elem` map bindeeName ctxbindees)
+
+    matchType bindee t
+      | t' `subtypeOf` bindeet =
+        return ()
+      | otherwise =
+        lift $ wrong $ "Bindee " ++ pretty bindee ++
+        " has type " ++ pretty bindeet ++
+        ", but expression returns " ++ pretty t' ++ "."
+      where bindeet = toDecl $ bindeeType bindee
+            t'      = toDecl t
+
+
+    matchBindee bindee (ReturnsScalar bt) =
+      matchType bindee $ Basic bt
+    matchBindee bindee (ReturnsMemory size@(Constant {})) =
+      matchType bindee $ Mem size
+    matchBindee bindee (ReturnsMemory (Var size)) = do
+      popSizeIfInCtx $ identName size
+      matchType bindee $ Mem $ Var size
+    matchBindee bindee (ReturnsArray et shape u rets)
+      | MemSummary mem _ <- bindeeLore bindee,
+        Mem size <- identType mem = do
+          case size of
+            Var size' -> popSizeIfInCtx $ identName size'
+            _         -> return ()
+          case rets of
+            Nothing -> return ()
+            Just (ReturnsInBlock retmem) ->
+              when (mem /= retmem) $
+              if inCtx $ identName mem then
+                popMemFromCtx $ identName mem
+              else
+                lift $ wrong $ "Array " ++ pretty bindee ++
+                " returned in memory block " ++ pretty retmem ++
+                " but annotation says block " ++ pretty mem ++
+                "."
+            Just (ReturnsNewBlock _) ->
+              popMemFromCtx $ identName mem
+          zipWithM_ matchArrayDim (arrayDims $ bindeeType bindee) $
+            extShapeDims shape
+          matchType bindee $ Array et shape u
+      | otherwise =
+        lift $ wrong $ pretty bindee ++
+        " is of array type, but has bad memory summary."
+
+    popMemFromCtx name
+      | inCtx name = popMem name
+      | otherwise =
+        lift $ wrong $ "Memory " ++ pretty name ++
+        " is supposed to be existential, but not bound in pattern."
+
+    popSizeFromCtx name
+      | inCtx name = popSize name
+      | otherwise =
+        lift $ wrong $ "Size " ++ pretty name ++
+        " is supposed to be existential, but not bound in pattern."
+
+    popSizeIfInCtx name
+      | inCtx name = popSize name
+      | otherwise  = return () -- Must be free, then.
+
+    popSize name = do
+      ctxbindees' <- get
+      case partition ((==name) . bindeeName) ctxbindees' of
+        ([nameBindee], ctxbindees'') -> do
+          put ctxbindees''
+          unless (bindeeType nameBindee == Basic Int) $
+            lift $ wrong $ "Size " ++ pretty name ++
+            " is not an integer."
+        _ ->
+          return () -- OK, already seen.
+
+    popMem name = do
+      ctxbindees' <- get
+      case partition ((==name) . bindeeName) ctxbindees' of
+        ([memBindee], ctxbindees'') -> do
+          put ctxbindees''
+          case bindeeType memBindee of
+            Mem (Var size) ->
+              popSizeFromCtx $ identName size
+            Mem (Constant {}) ->
+              return ()
+            _ ->
+              lift $ wrong $ pretty memBindee ++ " is not a memory block."
+        _ ->
+          return () -- OK, already seen.
+
+    matchArrayDim (Var v) (Free _) =
+      popSizeIfInCtx $ identName v -- *May* be bound here.
+    matchArrayDim (Var v) (Ext _) =
+      popSizeFromCtx $ identName v -- *Has* to be bound here.
+    matchArrayDim (Constant {}) (Free _) =
+      return ()
+    matchArrayDim (Constant {}) (Ext _) =
+      lift $ wrong
+      "Existential dimension in expression return, but constant in pattern."
 
 varMemSummary :: SrcLoc -> VName -> TypeCheck.TypeM ExplicitMemory MemSummary
 varMemSummary loc name = do
@@ -385,45 +407,6 @@ varMemSummary loc name = do
       TypeCheck.bad $ TypeError loc $
       "Variable " ++ pretty name ++
       " is lambda-bound.\nI cannot deal with this yet."
-
-extract :: Eq a => a -> [a] -> Maybe [a]
-extract _ [] = Nothing
-extract x (y:ys)
-  | x == y    = Just ys
-  | otherwise = (y:) <$> extract x ys
-
-analyseExpReturns :: [ExpReturns] -> (Int, Int, Int)
-analyseExpReturns rts =
-  let (memsizes, mems, valsizes) =
-        foldl sumtriple (mempty,mempty,mempty) . map analyse $ rts
-  in (HS.size memsizes, HS.size mems, HS.size valsizes)
-  where sumtriple (x1,y1,z1) (x2,y2,z2) = (x1 `mappend` x2,
-                                           y1 `mappend` y2,
-                                           z1 `mappend` z2)
-        analyse ret = let (memsize,mem) = analyseAttr ret
-                      in (memsize, mem, analyseType $ returnsToType ret)
-        analyseType t = shapeContext [t]
-        analyseAttr (ReturnsArray _ _ _ (Just (ReturnsInBlock _))) =
-          (mempty, mempty)
-        analyseAttr (ReturnsArray _ _ _ (Just (ReturnsNewBlock i))) =
-          (HS.singleton i, HS.singleton i)
-        analyseAttr (ReturnsArray _ _ _ Nothing) =
-          (mempty, mempty)
-        analyseAttr (ReturnsMemory _) =
-          (mempty, mempty)
-        analyseAttr (ReturnsScalar _) =
-          (mempty, mempty)
-
-dividePattern :: Pattern -> Int -> Int -> Int
-              -> ([Ident], [Ident], [Ident], Pattern)
-dividePattern (AST.Pattern bindees) memsizes mems valsizes =
-  let (memsizebindees, bindees') = splitAt memsizes bindees
-      (membindees, bindees'') = splitAt mems bindees'
-      (valsizebindees, valbindees) = splitAt valsizes bindees''
-  in (map bindeeIdent memsizebindees,
-      map bindeeIdent membindees,
-      map bindeeIdent valsizebindees,
-      AST.Pattern valbindees)
 
 checkMemSummary :: MemSummary
                 -> TypeCheck.TypeM ExplicitMemory ()
@@ -550,18 +533,18 @@ expReturns _ (AST.LoopOp op) =
 expReturns _ (Apply _ _ ret _) =
   return $ map funReturnsToExpReturns ret
 
-expReturns look (If _ b1 b2 _ _) = do
-  b1t <- bodyReturns look b1
-  b2t <- bodyReturns look b2
+expReturns look (If _ b1 b2 ts _) = do
+  b1t <- bodyReturns look ts b1
+  b2t <- bodyReturns look ts b2
   return $
     map funReturnsToExpReturns $
     generaliseReturns b1t b2t
 
 bodyReturns :: Monad m =>
                (VName -> m MemSummary)
-            -> Body
+            -> [ExtType] -> Body
             -> m [FunReturns]
-bodyReturns look body@(AST.Body _ bnds res) = do
+bodyReturns look ts (AST.Body _ bnds res) = do
   let boundHere = boundInBindings bnds
       inspect _ (Constant val _) =
         return $ ReturnsScalar $ basicValueType val
@@ -600,7 +583,7 @@ bodyReturns look body@(AST.Body _ bnds res) = do
                     fail "bodyReturns: same memory block used multiple times."
               else return $ ReturnsInBlock mem
         return $ ReturnsArray et shape u memsummary
-  evalStateT (zipWithM inspect (bodyExtType body) $ resultSubExps res)
+  evalStateT (zipWithM inspect ts $ resultSubExps res)
     (0, HM.empty)
 
 boundInBindings :: [Binding] -> HM.HashMap VName PatBindee
