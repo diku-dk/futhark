@@ -282,8 +282,9 @@ instance TypeCheck.Checkable ExplicitMemory where
     checkMems memsizes mems
     checkVals rt mems valsizes valbindees
     where wrong s = TypeCheck.bad $ TypeError loc $
-                    "Pattern\n  " ++ pretty pat ++ "\ncannot match expression\n  " ++
-                    pretty e ++ "\n" ++ s
+                    ("Pattern\n  " ++ pretty pat ++
+                     "\ncannot match expression\n") ++
+                    TypeCheck.message "  " e ++ "\n" ++ s
           mustBeEmpty _ [] = return ()
           mustBeEmpty s  _ = wrong $ "Guess: unused " ++ s ++ " bindees"
           checkMems memsizes mems =

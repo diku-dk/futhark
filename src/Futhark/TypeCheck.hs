@@ -10,6 +10,7 @@ module Futhark.TypeCheck
   , TypeM
   , bad
   , context
+  , message
   , Checkable (..)
   , module Futhark.TypeCheck.TypeError
   , lookupVar
@@ -191,9 +192,9 @@ context :: String
 context s = local $ \env -> env { envContext = s : envContext env}
 
 message :: PP.Pretty a =>
-              String -> a -> String
+           String -> a -> String
 message s x = PP.pretty 80 $
-                 PP.text s PP.<+> PP.align (PP.ppr x)
+              PP.text s PP.<+> PP.align (PP.ppr x)
 
 instance MonadFreshNames (TypeM lore) where
   getNameSource = get
@@ -570,7 +571,7 @@ checkBindings origbnds m = delve origbnds
   where delve (Let pat (eals,annot) e:bnds) = do
           (e', dataflow) <-
             collectDataflow $
-            context (message "In expression " e) $
+            context ("In expression\n" ++ message "  " e) $
             checkExp e
           annot' <- checkExpLore annot
           (scope, pat') <-
@@ -970,7 +971,7 @@ checkBinding :: Checkable lore =>
                 SrcLoc -> Pattern lore -> Exp lore -> Dataflow
              -> TypeM lore (TypeM lore a -> TypeM lore a, Pattern lore)
 checkBinding loc pat e dflow =
-  context ("When matching " ++ pretty pat ++ " with " ++ pretty e) $ do
+  context ("When matching\n" ++ message "  " pat ++ "\nwith\n" ++ message "  " e) $ do
     matchPattern loc (removePatternAliases pat) (removeExpAliases e)
     return (\m -> sequentially (tell dflow)
                   (const . const $
