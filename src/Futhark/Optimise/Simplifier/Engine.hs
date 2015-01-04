@@ -73,9 +73,6 @@ import Futhark.Tools
 
 type NeedSet lore = [Binding lore]
 
-patNameSet :: [Ident] -> Names
-patNameSet = HS.fromList . map identName
-
 data Need lore = Need { needBindings :: NeedSet lore
                       , usageTable  :: UT.UsageTable
                       }
@@ -666,17 +663,18 @@ simplifyLambda :: MonadEngine m =>
                   Lambda (InnerLore m) -> [Maybe SubExp]
                -> m (Lambda (Lore m))
 simplifyLambda (Lambda params body rettype loc) arrs = do
+  params' <- mapM simplifyIdentBinding params
+  let (nonarrayparams, arrayparams) =
+        splitAt (length params' - length arrs) params'
+      paramnames = HS.fromList $ map identName params'
   body' <-
-    blockIf (hasFree params' `orIf` isConsumed `orIf` isAlloc) $
+    blockIf (hasFree paramnames `orIf` isConsumed `orIf` isAlloc) $
     descendIntoLoop $
     bindLParams nonarrayparams $
     bindArrayLParams (zip arrayparams arrs) $
       simplifyBody (map diet rettype) body
   rettype' <- mapM simplifyType rettype
-  return $ Lambda params body' rettype' loc
-  where params' = patNameSet params
-        (nonarrayparams, arrayparams) =
-          splitAt (length params - length arrs) params
+  return $ Lambda params' body' rettype' loc
 
 consumeResult :: MonadEngine m =>
                  [(Diet, SubExp)] -> m ()
