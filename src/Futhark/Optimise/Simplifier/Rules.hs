@@ -284,13 +284,14 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge idd n
         checkInvariance
           ((mergeParam,mergeInit), resExp)
           (invariant, explpat', merge', resExps)
-          | isInvariant resExp =
+          | not (unique (bindeeType mergeParam)),
+            isInvariant resExp =
           let (bnd, explpat'') =
                 removeFromResult (mergeParam,mergeInit) explpat'
           in (maybe id (:) bnd $ (bindeeIdent mergeParam, mergeInit) : invariant,
               explpat'', merge', resExps)
           where
-            -- A merge variable is invariant if the corresponding
+            -- A non-unique merge variable is invariant if the corresponding
             -- subexp in the result is EITHER:
             --
             --  (0) a variable of the same name as the parameter, where
@@ -621,21 +622,21 @@ simplifyIndexing look (Index cs idd inds loc) =
     Nothing -> Nothing
 
     Just (SubExp (Var v)) ->
-      return $ Index cs v inds loc
+      return $ Index cs (setIdentUniqueness v u) inds loc
 
     Just (Iota _ _)
       | [ii] <- inds -> Just $ SubExp ii
 
     Just (Index cs2 aa ais _) ->
-      Just $ Index (cs++cs2) aa (ais ++ inds) loc
+      Just $ Index (cs++cs2) (setIdentUniqueness aa u) (ais ++ inds) loc
 
     Just (e@ArrayLit {})
        | Just iis <- ctIndex inds,
          Just el <- arrLitInd e iis -> Just el
 
     Just (Replicate _ (Var vv) _)
-      | [_]   <- inds -> Just $ SubExp $ Var vv
-      | _:is' <- inds -> Just $ Index cs vv is' loc
+      | [_]   <- inds -> Just $ SubExp $ Var $ setIdentUniqueness vv u
+      | _:is' <- inds -> Just $ Index cs (setIdentUniqueness vv u) is' loc
 
     Just (Replicate _ val@(Constant _ _) _)
       | [_] <- inds -> Just $ SubExp val
@@ -643,9 +644,10 @@ simplifyIndexing look (Index cs idd inds loc) =
     Just (Rearrange cs2 perm (Var src) _)
        | permuteReach perm <= length inds ->
          let inds' = permuteShape (take (length inds) perm) inds
-         in Just $ Index (cs++cs2) src inds' loc
+         in Just $ Index (cs++cs2) (setIdentUniqueness src u) inds' loc
 
     _ -> Nothing
+  where u = uniqueness $ identType idd
 
 simplifyIndexing _ _ = Nothing
 
