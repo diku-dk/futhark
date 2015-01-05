@@ -194,8 +194,8 @@ localVtable f m = do
   modifyEngineState $ \env -> env { stateVtable = vtable }
   return x
 
-descendIntoLoop :: MonadEngine m => m a -> m a
-descendIntoLoop = localVtable ST.deepen
+enterLoop :: MonadEngine m => m a -> m a
+enterLoop = localVtable ST.deepen
 
 bindFParams :: MonadEngine m =>
                [FParam (Lore m)] -> m a -> m a
@@ -378,9 +378,8 @@ isNotCheap _ = not . cheapBnd
         cheap _                     = True -- Used to be False, but
                                            -- let's try it out.
 
-isConsumed :: BlockPred lore
-isConsumed uses =
-  any (`UT.isConsumed` uses) . patternNames . bindingPattern
+isUnique :: BlockPred lore
+isUnique _ = any unique . patternTypes . bindingPattern
 
 isAlloc :: BlockPred lore
 isAlloc _ (Let _ _ (PrimOp (Alloc {}))) = True
@@ -526,9 +525,10 @@ simplifyLoopOp (DoLoop respat merge loopvar boundexp loopbody loc) = do
   -- Blocking hoisting of all unique bindings is probably too
   -- conservative, but there is currently no nice way to mark
   -- consumption of the loop body result.
-  loopbody' <- blockIfSeq [hasFree boundnames, isConsumed, isAlloc] $
+  loopbody' <- blockIfSeq [hasFree boundnames, isUnique, isAlloc] $
+               enterLoop $
                bindFParams mergepat' $
-               descendIntoLoop $ bindLoopVar loopvar boundexp' $
+               bindLoopVar loopvar boundexp' $
                simplifyBody diets loopbody
   let merge' = zip mergepat' mergeexp'
   consumeResult $ zip diets mergeexp'
@@ -606,12 +606,12 @@ simplifyLoopOp (Redomap cs outerfun innerfun acc arrs loc) = do
 simplifySubExp :: MonadEngine m => SubExp -> m SubExp
 simplifySubExp (Var (Ident vnm t loc)) = do
   bnd <- getsEngineState $ ST.lookupSubExp vnm . stateVtable
+  t' <- simplifyType t
   case bnd of
     Just (Constant v _) -> return $ Constant v loc
     Just (Var id') -> do usedName $ identName id'
-                         return $ Var id'
+                         return $ Var $ Ident (identName id') t' loc
     _              -> do usedName vnm
-                         t' <- simplifyType t
                          return $ Var $ Ident vnm t' loc
 simplifySubExp (Constant v loc) = return $ Constant v loc
 
@@ -633,17 +633,20 @@ simplifyIdentBinding v = do
 simplifyIdent :: MonadEngine m => Ident -> m Ident
 simplifyIdent v = do
   se <- ST.lookupSubExp (identName v) <$> getVtable
+  t' <- simplifyType $ identType v
   case se of
     Just (Var v') -> do usedName $ identName v'
-                        return v' { identSrcLoc = srclocOf v }
+                        return v { identType = t'
+                                 , identName = identName v'
+                                 }
     _             -> do usedName $ identName v
-                        t' <- simplifyType $ identType v
                         return v { identType = t' }
 
 simplifyExtType :: MonadEngine m =>
                    TypeBase ExtShape -> m (TypeBase ExtShape)
 simplifyExtType t = do shape <- simplifyExtShape $ arrayShape t
                        return $ t `setArrayShape` shape
+
 simplifyExtShape :: MonadEngine m =>
                     ExtShape -> m ExtShape
 simplifyExtShape = liftM ExtShape . mapM simplifyDim . extShapeDims
@@ -668,8 +671,8 @@ simplifyLambda (Lambda params body rettype loc) arrs = do
         splitAt (length params' - length arrs) params'
       paramnames = HS.fromList $ map identName params'
   body' <-
-    blockIf (hasFree paramnames `orIf` isConsumed `orIf` isAlloc) $
-    descendIntoLoop $
+    blockIf (hasFree paramnames `orIf` isUnique `orIf` isAlloc) $
+    enterLoop $
     bindLParams nonarrayparams $
     bindArrayLParams (zip arrayparams arrs) $
       simplifyBody (map diet rettype) body
