@@ -370,39 +370,34 @@ unifySubExpTypes e1 e2 =
   where t1 = subExpType e1
         t2 = subExpType e2
 
--- | @checkAnnotation loc s t1 t2@ returns @t2@ if @t1@ contains no
--- type, and otherwise tries to unify them with 'unifyTypes'.  If
--- this fails, a 'BadAnnotation' is raised.
+-- | @checkAnnotation loc s t1 t2@ checks if @t2@ is a subtype of
+-- @t1@.  If not, a 'BadAnnotation' is raised.
 checkAnnotation :: SrcLoc -> String -> Type -> Type
-                -> TypeM lore Type
-checkAnnotation loc desc t1 t2 =
-  case unifyTypes t1 t2 of
-    Nothing -> bad $ BadAnnotation loc desc
-                     (justOne $ toDecl t1) (justOne $ toDecl t2)
-    Just t  -> return t
+                -> TypeM lore ()
+checkAnnotation loc desc t1 t2
+  | t2 `subtypeOf` t1 = return ()
+  | otherwise = bad $ BadAnnotation loc desc
+                (justOne $ toDecl t1) (justOne $ toDecl t2)
 
--- | @require ts e@ causes a '(TypeError vn)' if the type of @e@ does
--- not unify with one of the types in @ts@.  Otherwise, simply returns
--- @e@.  This function is very useful in 'checkExp'.
-require :: [Type] -> SubExp -> TypeM lore SubExp
-require ts e
-  | any (subExpType e `similarTo`) ts = return e
-  | otherwise = bad $ UnexpectedType (PrimOp $ SubExp e)
-                      (justOne $ toDecl $ subExpType e)
-                      (map (justOne . toDecl) ts)
+-- | @require ts se@ causes a '(TypeError vn)' if the type of @se@ is
+-- not equal with one of the types in @ts@.
+require :: Checkable lore => [Type] -> SubExp -> TypeM lore ()
+require ts se = do
+  t <- checkSubExp se
+  unless (any (t `similarTo`) ts) $
+    bad $ UnexpectedType (PrimOp $ SubExp se)
+    (justOne $ toDecl t)
+    (map (justOne . toDecl) ts)
 
 -- | Variant of 'require' working on identifiers.
-requireI :: [Type] -> Ident -> TypeM lore Ident
-requireI ts ident
-  | any (identType ident `similarTo`) ts = return ident
-  | otherwise = bad $ UnexpectedType (PrimOp $ SubExp $ Var ident)
-                      (justOne $ toDecl $ identType ident)
-                      (map (justOne . toDecl) ts)
+requireI :: Checkable lore => [Type] -> Ident -> TypeM lore ()
+requireI ts ident = require ts $ Var ident
 
-rowTypeM :: SubExp -> TypeM lore Type
-rowTypeM e = maybe wrong return $ peelArray 1 $ subExpType e
-  where wrong = bad $ NotAnArray (srclocOf e) (PrimOp $ SubExp e) $
-                      justOne $ toDecl $ subExpType e
+checkArrSubExp :: SubExp -> TypeM lore Type
+checkArrSubExp e = case subExpType e of
+  t@(Array {}) -> return t
+  t            -> bad $ NotAnArray (srclocOf e) (PrimOp $ SubExp e) $
+                  justOne $ toDecl t
 
 -- | Type check a program containing arbitrary type information,
 -- yielding either a type error or a program with complete type
@@ -556,13 +551,12 @@ checkFun' (fname, rettype, paramsWithLore, _, loc) check = do
           [ (uniqueness p, names) |
             (p,names) <- zip expected got ]
 
-checkSubExp :: Checkable lore => SubExp -> TypeM lore SubExp
-checkSubExp (Constant v loc) =
-  return $ Constant v loc
+checkSubExp :: Checkable lore => SubExp -> TypeM lore Type
+checkSubExp (Constant val _) =
+  return $ Basic $ basicValueType val
 checkSubExp (Var ident) = context ("In subexp " ++ pretty ident) $ do
-  ident' <- checkIdent ident
-  observe ident'
-  return $ Var ident'
+  observe ident
+  checkIdent ident
 
 checkBindings :: Checkable lore =>
                  [Binding lore] -> TypeM lore a
@@ -586,9 +580,9 @@ checkBindings origbnds m = delve origbnds
 checkResult :: Checkable lore =>
                Result -> TypeM lore Result
 checkResult (Result cs es loc) = do
-  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
-  es' <- mapM checkSubExp es
-  return $ Result cs' es' loc
+  mapM_ (requireI [Basic Cert]) cs
+  mapM_ checkSubExp es
+  return $ Result cs es loc
 
 checkFunBody :: Checkable lore =>
                 Name
@@ -613,127 +607,131 @@ checkBody (Body (als,lore) bnds res) = do
 checkPrimOp :: Checkable lore =>
                PrimOp lore -> TypeM lore (PrimOp lore)
 
-checkPrimOp (SubExp es) =
-  SubExp <$> checkSubExp es
+checkPrimOp (SubExp es) = do
+  _ <- checkSubExp es
+  return $ SubExp es
 
 checkPrimOp (ArrayLit es t loc) = do
-  es' <- mapM checkSubExp es
+  mapM_ checkSubExp es
   -- Find the universal type of the array arguments.
-  et <- case es' of
+  et <- case es of
           [] -> return t
-          e:es'' ->
+          e:es' ->
             let check elemt eleme
                   | Just elemt' <- elemt `unifyTypes` subExpType eleme =
                     return elemt'
                   | otherwise =
                     bad $ TypeError loc $ pretty (subExpType eleme) ++ " is not of expected type " ++ pretty elemt ++ "."
-            in foldM check (subExpType e) es''
+            in foldM check (subExpType e) es'
 
   -- Unify that type with the one given for the array literal.
-  t' <- checkAnnotation loc "array-element" t et
+  checkAnnotation loc "array-element" t et
 
-  return $ ArrayLit es' t' loc
+  return $ ArrayLit es t loc
 
 checkPrimOp (BinOp op e1 e2 t pos) = checkBinOp op e1 e2 t pos
 
 checkPrimOp (Not e pos) = do
-  e' <- require [Basic Bool] =<< checkSubExp e
-  return $ Not e' pos
+  require [Basic Bool] e
+  return $ Not e pos
 
 checkPrimOp (Negate e loc) = do
-  e' <- require [Basic Int, Basic Real] =<< checkSubExp e
-  return $ Negate e' loc
+  require [Basic Int, Basic Real] e
+  return $ Negate e loc
 
 checkPrimOp (Index cs ident idxes pos) = do
-  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
-  ident' <- checkIdent ident
-  observe ident'
-  vt <- lookupType (identName ident') pos
+  mapM_ (requireI [Basic Cert]) cs
+  vt <- checkIdent ident
+  observe ident
   when (arrayRank vt < length idxes) $
     bad $ IndexingError (identName ident)
           (arrayRank vt) (length idxes) pos
-  idxes' <- mapM (require [Basic Int] <=< checkSubExp) idxes
-  return $ Index cs' ident' idxes' pos
+  mapM_ (require [Basic Int]) idxes
+  return $ Index cs ident idxes pos
 
 checkPrimOp (Update cs src idxes ve loc) = do
-  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
-  src' <- checkIdent src
-  idxes' <- mapM (require [Basic Int] <=< checkSubExp) idxes
-  ve' <- checkSubExp ve
+  mapM_ (requireI [Basic Cert]) cs
+  srct <- checkIdent src
+  mapM_ (require [Basic Int]) idxes
 
-  unless (unique (identType src') || basicType (identType src')) $
-    bad $ TypeError loc $ "Source '" ++ textual (identName src') ++ show src ++ "' is not unique"
-  venames <- subExpAliasesM ve'
-  when (identName src `HS.member` venames) $
+  unless (unique srct || basicType srct) $
+    bad $ TypeError loc $ "Source '" ++ textual srcname ++ show src ++ "' is not unique"
+
+  venames <- subExpAliasesM ve
+
+  when (srcname `HS.member` venames) $
     bad $ BadLetWithValue loc
 
-  consume loc =<< lookupAliases (identName src') (srclocOf src')
+  consume loc =<< lookupAliases srcname srcloc
 
-  case peelArray (length idxes) (identType src') of
-    Nothing -> bad $ IndexingError (identName src)
-                     (arrayRank $ identType src') (length idxes) loc
-    Just _ -> return $ Update cs' src' idxes' ve' loc
+  case peelArray (length idxes) srct of
+    Nothing -> bad $ IndexingError srcname
+                     (arrayRank srct) (length idxes) loc
+    Just rt -> do
+      require [rt] ve
+      return $ Update cs src idxes ve loc
+  where srcname = identName src
+        srcloc  = srclocOf src
 
 checkPrimOp (Iota e pos) = do
-  e' <- require [Basic Int] =<< checkSubExp e
-  return $ Iota e' pos
+  require [Basic Int] e
+  return $ Iota e pos
 
 checkPrimOp (Replicate countexp valexp pos) = do
-  countexp' <- require [Basic Int] =<< checkSubExp countexp
-  valexp' <- checkSubExp valexp
-  return $ Replicate countexp' valexp' pos
+  require [Basic Int] countexp
+  _ <- checkSubExp valexp
+  return $ Replicate countexp valexp pos
 
 checkPrimOp (Reshape cs shapeexps arrexp pos) = do
-  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
-  shapeexps' <- mapM (require [Basic Int] <=< checkSubExp) shapeexps
-  arrexp' <- checkSubExp arrexp
-  return (Reshape cs' shapeexps' arrexp' pos)
+  mapM_ (requireI [Basic Cert]) cs
+  mapM_ (require [Basic Int]) shapeexps
+  _ <- checkArrSubExp arrexp
+  return (Reshape cs shapeexps arrexp pos)
 
 checkPrimOp (Rearrange cs perm arrexp pos) = do
-  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
-  arrexp' <- checkSubExp arrexp
-  let rank = arrayRank $ subExpType arrexp'
+  mapM_ (requireI [Basic Cert]) cs
+  arrt <- checkSubExp arrexp
+  let rank = arrayRank arrt
   when (length perm /= rank || sort perm /= [0..rank-1]) $
     bad $ PermutationError pos perm rank name
-  return $ Rearrange cs' perm arrexp' pos
+  return $ Rearrange cs perm arrexp pos
   where name = case arrexp of Var v -> Just $ identName v
                               _     -> Nothing
 
 checkPrimOp (Rotate cs n arrexp pos) = do
-  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
-  arrexp' <- checkSubExp arrexp
-  return $ Rotate cs' n arrexp' pos
+  mapM_ (requireI [Basic Cert]) cs
+  _ <- checkArrSubExp arrexp
+  return $ Rotate cs n arrexp pos
 
 checkPrimOp (Split cs splitexp arrexp secsize pos) = do
-  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
-  splitexp' <- require [Basic Int] =<< checkSubExp splitexp
-  secsize' <- require [Basic Int] =<< checkSubExp secsize
-  arrexp' <- checkSubExp arrexp
-  _ <- rowTypeM arrexp' -- Just check that it's an array.
-  return $ Split cs' splitexp' arrexp' secsize' pos
+  mapM_ (requireI [Basic Cert]) cs
+  require [Basic Int] splitexp
+  require [Basic Int] secsize
+  _ <- checkArrSubExp arrexp
+  return $ Split cs splitexp arrexp secsize pos
 
-checkPrimOp (Concat cs arr1exp arr2exp ressize pos) = do
-  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
-  arr1exp' <- checkSubExp arr1exp
-  arr2exp' <- require [subExpType arr1exp'] =<< checkSubExp arr2exp
-  ressize' <- require [Basic Int] =<< checkSubExp ressize
-  _ <- rowTypeM arr2exp' -- Just check that it's an array.
-  return $ Concat cs' arr1exp' arr2exp' ressize' pos
+checkPrimOp (Concat cs arr1exp arr2exp ressize loc) = do
+  mapM_ (requireI [Basic Cert]) cs
+  arr1t <- checkArrSubExp arr1exp
+  _ <- require [arr1t] arr2exp
+  require [Basic Int] ressize
+  return $ Concat cs arr1exp arr2exp ressize loc
 
-checkPrimOp (Copy e pos) = do
-  e' <- checkSubExp e
-  return $ Copy e' pos
+checkPrimOp (Copy e loc) = do
+  _ <- checkSubExp e
+  return $ Copy e loc
 
-checkPrimOp (Assert e pos) = do
-  e' <- require [Basic Bool] =<< checkSubExp e
-  return $ Assert e' pos
+checkPrimOp (Assert e loc) = do
+  require [Basic Bool] e
+  return $ Assert e loc
 
-checkPrimOp (Conjoin es pos) = do
-  es' <- mapM (require [Basic Cert] <=< checkSubExp) es
-  return $ Conjoin es' pos
+checkPrimOp (Conjoin es loc) = do
+  mapM_ (require [Basic Cert]) es
+  return $ Conjoin es loc
 
-checkPrimOp (Alloc e loc) =
-  Alloc <$> (require [Basic Int] =<< checkSubExp e) <*> pure loc
+checkPrimOp (Alloc e loc) = do
+  require [Basic Int] e
+  return $ Alloc e loc
 
 checkLoopOp :: Checkable lore =>
                LoopOp lore -> TypeM lore (LoopOp lore)
@@ -772,14 +770,14 @@ checkLoopOp (DoLoop respat merge (Ident loopvar loopvart loopvarloc)
                   loopbody' loc
 
 checkLoopOp (Map ass fun arrexps pos) = do
-  ass' <- mapM (requireI [Basic Cert] <=< checkIdent) ass
+  mapM_ (requireI [Basic Cert]) ass
   (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
   fun'    <- checkLambda fun arrargs
-  return $ Map ass' fun' arrexps' pos
+  return $ Map ass fun' arrexps' pos
 
 checkLoopOp (Reduce ass fun inputs pos) = do
   let (startexps, arrexps) = unzip inputs
-  ass' <- mapM (requireI [Basic Cert] <=< checkIdent) ass
+  mapM_ (requireI [Basic Cert]) ass
   (startexps', startargs) <- unzip <$> mapM checkArg startexps
   (arrexps', arrargs)     <- unzip <$> mapM checkSOACArrayArg arrexps
   fun'                    <- checkLambda fun $ startargs ++ arrargs
@@ -792,13 +790,13 @@ checkLoopOp (Reduce ass fun inputs pos) = do
   unless (intupletype `subtypesOf` funret) $
       bad $ TypeError pos $ "Array element value is of type " ++ prettyTuple intupletype ++
                             ", but scan function returns type " ++ prettyTuple funret ++ "."
-  return $ Reduce ass' fun' (zip startexps' arrexps') pos
+  return $ Reduce ass fun' (zip startexps' arrexps') pos
 
 -- ScanT is exactly identical to ReduceT.  Duplicate for clarity
 -- anyway.
 checkLoopOp (Scan ass fun inputs pos) = do
   let (startexps, arrexps) = unzip inputs
-  ass' <- mapM (requireI [Basic Cert] <=< checkIdent) ass
+  mapM_ (requireI [Basic Cert]) ass
   (startexps', startargs) <- unzip <$> mapM checkArg startexps
   (arrexps', arrargs)     <- unzip <$> mapM checkSOACArrayArg arrexps
   fun'                    <- checkLambda fun $ startargs ++ arrargs
@@ -811,10 +809,10 @@ checkLoopOp (Scan ass fun inputs pos) = do
   unless (intupletype `subtypesOf` funret) $
     bad $ TypeError pos $ "Array element value is of type " ++ prettyTuple intupletype ++
                           ", but scan function returns type " ++ prettyTuple funret ++ "."
-  return $ Scan ass' fun' (zip startexps' arrexps') pos
+  return $ Scan ass fun' (zip startexps' arrexps') pos
 
 checkLoopOp (Filter ass fun arrexps loc) = do
-  ass' <- mapM (requireI [Basic Cert] <=< checkIdent) ass
+  mapM_ (requireI [Basic Cert]) ass
   (arrexps', arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
   fun' <- checkLambda fun arrargs
   let funret = lambdaReturnType fun'
@@ -822,12 +820,12 @@ checkLoopOp (Filter ass fun arrexps loc) = do
     bad $ TypeError loc "Filter function does not return bool."
   when (any (unique . identType) $ lambdaParams fun) $
     bad $ TypeError loc "Filter function consumes its arguments."
-  return $ Filter ass' fun' arrexps' loc
+  return $ Filter ass fun' arrexps' loc
 
 checkLoopOp (Redomap ass outerfun innerfun accexps arrexps pos) = do
-  ass' <- mapM (requireI [Basic Cert] <=< checkIdent) ass
-  (arrexps', arrargs)  <- unzip <$> mapM checkSOACArrayArg arrexps
-  (accexps', accargs)  <- unzip <$> mapM checkArg accexps
+  mapM_ (requireI [Basic Cert]) ass
+  (_, arrargs) <- unzip <$> mapM checkSOACArrayArg arrexps
+  (accexps', accargs) <- unzip <$> mapM checkArg accexps
   innerfun' <- checkLambda innerfun $ accargs ++ arrargs
   let innerRetType = lambdaReturnType innerfun'
       asArg t = (t, mempty, mempty, pos)
@@ -842,7 +840,7 @@ checkLoopOp (Redomap ass outerfun innerfun accexps arrexps pos) = do
     bad $ TypeError pos $ "Initial value is of type " ++ prettyTuple acct ++
           ", but redomapT outer reduction returns type " ++ prettyTuple outerRetType ++ "."
 
-  return $ Redomap ass' outerfun' innerfun' accexps' arrexps' pos
+  return $ Redomap ass outerfun innerfun accexps arrexps pos
 
 checkExp :: Checkable lore =>
             Exp lore -> TypeM lore (Exp lore)
@@ -852,8 +850,8 @@ checkExp (PrimOp op) = PrimOp <$> checkPrimOp op
 checkExp (LoopOp op) = LoopOp <$> checkLoopOp op
 
 checkExp (If e1 e2 e3 ts loc) = do
-  e1' <- require [Basic Bool] =<< checkSubExp e1
-  ((e2', e3'), dflow) <-
+  require [Basic Bool] e1
+  (_, dflow) <-
     collectDataflow $ checkBody e2 `alternative` checkBody e3
   tell dflow
   let ts2 = bodyExtType e2
@@ -865,16 +863,15 @@ checkExp (If e1 e2 e3 ts loc) = do
              "  " ++ prettyTuple ts3,
              "Which is not a subtype of annotation",
              "  " ++ prettyTuple ts]
-  return $ If e1' e2' e3' ts loc
+  return $ If e1 e2 e3 ts loc
 
 checkExp (Apply fname args t loc)
   | "trace" <- nameToString fname = do
-  args' <- mapM (checkSubExp . fst) args
-  let t' = map subExpType args'
-  when (staticShapes t' /= resTypeValues t) $
+  argts <- mapM (checkSubExp . fst) args
+  when (staticShapes argts /= resTypeValues t) $
     bad $ TypeError loc $ "Expected apply result type " ++ pretty t
-    ++ " but got " ++ pretty t'
-  return $ Apply fname [(arg, Observe) | arg <- args'] t loc
+    ++ " but got " ++ pretty argts
+  return $ Apply fname args t loc
 
 checkExp (Apply fname args rettype loc) = do
   checkRetType rettype
@@ -896,26 +893,25 @@ checkSOACArrayArg e = do
     Just rt -> return (e', (rt, als, dflow, argloc))
 
 checkType :: Checkable lore =>
-             Type -> TypeM lore Type
-checkType t = do dims <- mapM checkSubExp $ arrayDims t
-                 return $ t `setArrayDims` dims
+             Type -> TypeM lore ()
+checkType = mapM_ checkSubExp . arrayDims
 
 checkExtType :: Checkable lore =>
                 TypeBase ExtShape
              -> TypeM lore ()
 checkExtType t = mapM_ checkExtDim $ extShapeDims $ arrayShape t
-  where checkExtDim (Free se) = Free <$> checkSubExp se
-        checkExtDim (Ext x)   = return $ Ext x
+  where checkExtDim (Free se) = void $ checkSubExp se
+        checkExtDim (Ext _)   = return ()
 
 checkIdent :: Checkable lore =>
-              Ident -> TypeM lore Ident
+              Ident -> TypeM lore Type
 checkIdent (Ident name t loc) =
   context ("In ident " ++ pretty t ++ " " ++ pretty name) $ do
     derived <- lookupType name loc
     unless (derived `subtypeOf` t) $
       bad $ BadAnnotation loc "ident"
       (justOne $ toDecl t) (justOne $ toDecl derived)
-    return $ Ident name t loc
+    return t
 
 checkBinOp :: Checkable lore =>
               BinOp -> SubExp -> SubExp -> Type -> SrcLoc
@@ -943,22 +939,22 @@ checkRelOp :: Checkable lore =>
            -> Type -> SrcLoc
            -> TypeM lore (PrimOp lore)
 checkRelOp op tl e1 e2 t pos = do
-  e1' <- require (map Basic tl) =<< checkSubExp e1
-  e2' <- require (map Basic tl) =<< checkSubExp e2
-  _ <- unifySubExpTypes e1' e2'
-  t' <- checkAnnotation pos (opStr op ++ " result") t $ Basic Bool
-  return $ BinOp op e1' e2' t' pos
+  require (map Basic tl) e1
+  require (map Basic tl) e2
+  _ <- unifySubExpTypes e1 e2
+  checkAnnotation pos (opStr op ++ " result") t $ Basic Bool
+  return $ BinOp op e1 e2 t pos
 
 checkPolyBinOp :: Checkable lore =>
                   BinOp -> [BasicType]
                -> SubExp -> SubExp -> Type -> SrcLoc
                -> TypeM lore (PrimOp lore)
 checkPolyBinOp op tl e1 e2 t pos = do
-  e1' <- require (map Basic tl) =<< checkSubExp e1
-  e2' <- require (map Basic tl) =<< checkSubExp e2
-  t' <- unifySubExpTypes e1' e2'
-  t'' <- checkAnnotation pos (opStr op ++ " result") t t'
-  return $ BinOp op e1' e2' t'' pos
+  require (map Basic tl) e1
+  require (map Basic tl) e2
+  t' <- unifySubExpTypes e1 e2
+  checkAnnotation pos (opStr op ++ " result") t t'
+  return $ BinOp op e1 e2 t pos
 
 sequentially :: Checkable lore =>
                 TypeM lore a -> (a -> Dataflow -> TypeM lore b) -> TypeM lore b
@@ -992,11 +988,9 @@ matchExtPattern loc pat ts = do
     bad $ InvalidPatternError (Several pat) (Several $ map toDecl ts) Nothing loc
   evalStateT (zipWithM_ checkBinding' restpat ts') []
   where checkBinding' (Ident name namet vloc) t = do
-          t' <- lift $
-                checkAnnotation vloc
-                ("binding of variable " ++ textual name) namet t
-          add $ Ident name t' vloc
-          return $ Ident name t' vloc
+          lift $ checkAnnotation vloc ("binding of variable " ++ textual name) namet t
+          add $ Ident name namet vloc
+          return $ Ident name namet vloc
 
         add ident = do
           bnd <- gets $ find (==ident)
@@ -1043,7 +1037,7 @@ checkBndSizes :: Checkable lore =>
                  IdentBase Shape -> TypeM lore ()
 checkBndSizes (Ident _ t _) = do
   let dims = arrayDims t
-  mapM_ (require [Basic Int] <=< checkSubExp) dims
+  mapM_ (require [Basic Int]) dims
 
 validApply :: [DeclType] -> [Type] -> Bool
 validApply expected got =
@@ -1057,9 +1051,9 @@ argType (t, _, _, _) = t
 
 checkArg :: Checkable lore =>
             SubExp -> TypeM lore (SubExp, Arg)
-checkArg arg = do (arg', dflow) <- collectDataflow $ checkSubExp arg
+checkArg arg = do (argt, dflow) <- collectDataflow $ checkSubExp arg
                   als <- subExpAliasesM arg
-                  return (arg', (subExpType arg', als, dflow, srclocOf arg'))
+                  return (arg, (argt, als, dflow, srclocOf arg))
 
 checkFuncall :: Checkable lore =>
                 Maybe Name -> SrcLoc
@@ -1081,7 +1075,7 @@ checkFuncall fname loc paramtypes args = do
 checkLambda :: Checkable lore =>
                Lambda lore -> [Arg] -> TypeM lore (Lambda lore)
 checkLambda (Lambda params body ret loc) args = do
-  ret' <- mapM checkType ret
+  mapM_ checkType ret
   if length params == length args then do
     let setParamShape param shape =
           param { identType = identType param `setArrayDims` shape }
@@ -1090,8 +1084,8 @@ checkLambda (Lambda params body ret loc) args = do
     checkFuncall Nothing loc (map (toDecl . identType) params') args
     body' <-
       noUnique $ checkAnonymousFun
-      (nameFromString "<anonymous>", ret', params', body, loc)
-    return $ Lambda params' body' ret' loc
+      (nameFromString "<anonymous>", ret, params', body, loc)
+    return $ Lambda params' body' ret loc
   else bad $ TypeError loc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
 -- | The class of lores that can be type-checked.

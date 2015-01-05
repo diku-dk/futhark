@@ -418,7 +418,7 @@ checkMemSummary (MemSummary v ixfun) = do
           _ <- TypeCheck.checkIdent ident
           case identType ident of
             Mem size ->
-              TypeCheck.require [Basic Int] <$> TypeCheck.checkSubExp size
+              TypeCheck.require [Basic Int] size
             t        ->
               TypeCheck.bad $ TypeCheck.TypeError (srclocOf ident) $
               "Variable " ++ textual (identName v) ++
