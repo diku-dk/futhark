@@ -909,11 +909,13 @@ checkExtType t = mapM_ checkExtDim $ extShapeDims $ arrayShape t
 
 checkIdent :: Checkable lore =>
               Ident -> TypeM lore Ident
-checkIdent (Ident name t pos) =
+checkIdent (Ident name t loc) =
   context ("In ident " ++ pretty t ++ " " ++ pretty name) $ do
-    vt <- lookupType name pos
-    t'' <- checkAnnotation pos ("variable " ++ textual name) t vt
-    return $ Ident name t'' pos
+    derived <- lookupType name loc
+    unless (derived `subtypeOf` t) $
+      bad $ BadAnnotation loc "ident"
+      (justOne $ toDecl t) (justOne $ toDecl derived)
+    return $ Ident name t loc
 
 checkBinOp :: Checkable lore =>
               BinOp -> SubExp -> SubExp -> Type -> SrcLoc
