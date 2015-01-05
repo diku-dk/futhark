@@ -195,16 +195,17 @@ internaliseExp desc (E.DoLoop mergepat mergeexp i bound loopbody letbody loc) = 
   (c,mergevs) <- tupToIdentList "loop_init" mergeexp
   i' <- internaliseIdent i
   mergeparams <- map E.toParam <$> flattenPattern mergepat
-  (loopbody', mergepat', respat) <- bindingParams mergeparams $ \shapepat mergepat' -> do
-    loopbody' <- internaliseBody loopbody
-    let Result cs ses resloc = bodyResult loopbody'
-        loopbody'' =
-          loopbody' {
-            bodyResult = Result cs (concatMap subExpShape ses++ses) resloc
-            }
-    return (loopbody'',
-            shapepat ++ mergepat',
-            mergepat')
+  (loopbody', mergepat', respat) <-
+    withNonuniqueReplacements $ bindingParams mergeparams $ \shapepat mergepat' -> do
+      loopbody' <- internaliseBody loopbody
+      let Result cs ses resloc = bodyResult loopbody'
+          loopbody'' =
+            loopbody' {
+              bodyResult = Result cs (concatMap subExpShape ses++ses) resloc
+              }
+      return (loopbody'',
+              shapepat ++ mergepat',
+              mergepat')
   let mergeexp' = prefixSubExpShapes $ map I.Var $ maybeToList c ++ mergevs
       merge = [ (Bindee ident (), e) |
                 (ident, e) <- zip mergepat' mergeexp' ]
@@ -344,7 +345,8 @@ internaliseExp desc (E.Map lam arr loc) = do
   (c,arrs) <- tupToIdentList "map_arr" arr
   let cs = certify c []
   se <- conjoinCerts cs loc
-  lam' <- internaliseMapLambda internaliseBody se lam $ map I.Var arrs
+  lam' <- withNonuniqueReplacements $
+          internaliseMapLambda internaliseBody se lam $ map I.Var arrs
   certifySOAC desc se $ I.Map cs lam' (map I.Var arrs) loc
 
 internaliseExp desc e@(E.Reduce lam ne arr loc) = do
@@ -352,7 +354,8 @@ internaliseExp desc e@(E.Reduce lam ne arr loc) = do
   (c2,nes) <- tupToIdentList "reduce_ne" ne
   let cs = catMaybes [c1,c2]
   se <- conjoinCerts cs loc
-  lam' <- internaliseFoldLambda internaliseBody se lam
+  lam' <- withNonuniqueReplacements $
+          internaliseFoldLambda internaliseBody se lam
           (map I.identType nes) (map I.identType arrs)
   let input = zip (map I.Var nes) (map I.Var arrs)
   certifyFoldSOAC desc se t $ I.Reduce cs lam' input loc
@@ -363,7 +366,8 @@ internaliseExp desc e@(E.Scan lam ne arr loc) = do
   (c2,nes) <- tupToIdentList "scan_ne" ne
   let cs = catMaybes [c1,c2]
   se <- conjoinCerts cs loc
-  lam' <- internaliseFoldLambda internaliseBody se lam
+  lam' <- withNonuniqueReplacements $
+          internaliseFoldLambda internaliseBody se lam
           (map I.identType nes) (map I.identType arrs)
   let input = zip (map I.Var nes) (map I.Var arrs)
   certifyFoldSOAC desc se t $ I.Scan cs lam' input loc
@@ -373,7 +377,8 @@ internaliseExp desc (E.Filter lam arr loc) = do
   (c,arrs) <- tupToIdentList "filter_arr" arr
   let cs = catMaybes [c]
   se <- conjoinCerts cs loc
-  lam' <- internaliseFilterLambda internaliseBody se lam $ map I.Var arrs
+  lam' <- withNonuniqueReplacements $
+          internaliseFilterLambda internaliseBody se lam $ map I.Var arrs
   certifySOAC desc se $ I.Filter cs lam' (map I.Var arrs) loc
 
 internaliseExp desc e@(E.Redomap lam1 lam2 ne arrs loc) = do
@@ -381,9 +386,11 @@ internaliseExp desc e@(E.Redomap lam1 lam2 ne arrs loc) = do
   (c2,nes) <- tupToIdentList "redomap_ne" ne
   let cs = catMaybes [c1,c2]
   se <- conjoinCerts cs loc
-  lam1' <- internaliseFoldLambda internaliseBody se lam1
+  lam1' <- withNonuniqueReplacements $
+           internaliseFoldLambda internaliseBody se lam1
            (map I.identType nes) (map I.identType nes)
-  lam2' <- internaliseFoldLambda internaliseBody se lam2
+  lam2' <- withNonuniqueReplacements $
+           internaliseFoldLambda internaliseBody se lam2
            (map I.identType nes) (map I.identType arrs')
   certifyFoldSOAC desc se t $
     I.Redomap cs lam1' lam2' (map I.Var nes) (map I.Var arrs') loc
