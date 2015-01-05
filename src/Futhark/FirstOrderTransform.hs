@@ -51,24 +51,35 @@ transformBody = mapBodyM transform
 transformExp :: Exp -> Binder Basic Exp
 
 transformExp (LoopOp (Map cs fun arrs loc)) = do
-  inarrs <- letExps "inarr" $ map (PrimOp . SubExp) arrs
+  inarrs <- forM (zip
+                  (map subExpType arrs)
+                  (map (uniqueness . identType) $ lambdaParams fun)) $ \(t, u) ->
+            newIdent "map_inarr" (setUniqueness t u) loc
   (i, iv) <- newVar loc "i" $ Basic Int
   resarr <- resultArray (mapType fun $ map subExpType arrs) loc
-  outarr <- forM (map subExpType resarr) $ \t ->
-            newIdent "map_outarr" t loc
+  outarrs <- forM (map subExpType resarr) $ \t ->
+             newIdent "map_outarr" t loc
   loopbody <- runBinder $ do
     x <- bodyBind =<< transformLambda fun (index cs inarrs iv)
-    dests <- letwith cs outarr (pexp iv) $ map (PrimOp . SubExp) x
-    return $ resultBody [] (map Var dests) loc
+    dests <- letwith cs outarrs (pexp iv) $ map (PrimOp . SubExp) x
+    return $ resultBody [] (map Var $ inarrs ++ dests) loc
   return $ LoopOp $
-    DoLoop outarr (loopMerge outarr resarr) i (isize inarrs) loopbody loc
+    DoLoop outarrs (loopMerge (inarrs++outarrs) (arrs++resarr)) i (isize inarrs) loopbody loc
 
 transformExp (LoopOp (Reduce cs fun args loc)) = do
   (_, (acc, initacc), (i, iv)) <- newFold loc arrexps accexps
-  arrvs <- mapM (letExp "reduce_arr" . PrimOp . SubExp) arrexps
-  loopbody <- insertBindingsM $ transformLambda fun $
-              map (PrimOp . SubExp . Var) acc ++ index cs arrvs iv
-  return $ LoopOp $ DoLoop acc (loopMerge acc initacc) i (isize arrvs) loopbody loc
+  inarrs <- forM (zip
+                  (map subExpType arrexps)
+                  (map (uniqueness . identType) $
+                   snd $ splitAt (length args) $ lambdaParams fun)) $ \(t,u) ->
+            newIdent "reduce_inarr" (setUniqueness t u) loc
+  loopbody <- runBinder $ do
+    acc' <- bodyBind =<< transformLambda fun
+            (map (PrimOp . SubExp . Var) acc ++ index cs inarrs iv)
+    return $ resultBody [] (map Var inarrs ++ acc') loc
+  return $ LoopOp $
+    DoLoop acc (loopMerge (inarrs++acc) (arrexps++initacc))
+    i (isize inarrs) loopbody loc
   where (accexps, arrexps) = unzip args
 
 transformExp (LoopOp (Scan cs fun args loc)) = do
@@ -107,7 +118,7 @@ transformExp (LoopOp (Filter cs fun arrexps loc)) = do
       return $ resultBody [] [res] loc
     return $ Lambda [a, b] body [Basic Int] loc
   scan <- transformExp $ LoopOp $ Scan cs plus [(intval 0,Var mape)] loc
-  ia <- letExp "ia" scan
+  ia <- (`setIdentUniqueness` Nonunique) <$> letExp "ia" scan
   let indexia ind = eIndex cs ia [ind] loc
       sub1 e = eBinOp Minus e (pexp $ intval 1) (Basic Int) loc
       indexi = indexia $ pexp iv
@@ -134,10 +145,18 @@ transformExp (LoopOp (Filter cs fun arrexps loc)) = do
 
 transformExp (LoopOp (Redomap cs _ innerfun accexps arrexps loc)) = do
   (_, (acc, initacc), (i, iv)) <- newFold loc arrexps accexps
-  arrvs <- mapM (letExp "redomap_arr" . PrimOp . SubExp) arrexps
-  loopbody <- insertBindingsM $ transformLambda innerfun $
-              map (PrimOp . SubExp . Var) acc ++ index cs arrvs iv
-  return $ LoopOp $ DoLoop acc (loopMerge acc initacc) i (isize arrvs) loopbody loc
+  inarrs <- forM (zip
+                  (map subExpType arrexps)
+                  (map (uniqueness . identType) $
+                   snd $ splitAt (length accexps) $ lambdaParams innerfun)) $ \(t,u) ->
+            newIdent "redomap_inarr" (setUniqueness t u) loc
+  loopbody <- runBinder $ do
+    acc' <- bodyBind =<< transformLambda innerfun
+            (map (PrimOp . SubExp . Var) acc ++ index cs inarrs iv)
+    return $ resultBody [] (map Var inarrs ++ acc') loc
+  return $ LoopOp $
+    DoLoop acc (loopMerge (inarrs++acc) (arrexps++initacc))
+    i (isize inarrs) loopbody loc
 
 transformExp e = mapExpM transform e
 
