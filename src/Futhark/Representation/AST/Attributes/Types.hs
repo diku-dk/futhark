@@ -33,6 +33,8 @@ module Futhark.Representation.AST.Attributes.Types
        , subtypesOf
        , similarTo
 
+       , setIdentUniqueness
+
        , existentialShapes
        , extractShapeContext
        , shapeContext
@@ -265,6 +267,10 @@ subtypesOf xs ys = length xs == length ys &&
 -- ignoring uniqueness.
 similarTo :: ArrayShape shape => TypeBase shape -> TypeBase shape -> Bool
 similarTo t1 t2 = t1 `subtypeOf` t2 || t2 `subtypeOf` t1
+
+setIdentUniqueness :: Ident -> Uniqueness -> Ident
+setIdentUniqueness ident u =
+  ident { identType = identType ident `setUniqueness` u }
 
 existentialShapes :: [TypeBase ExtShape] -> [TypeBase Shape]
                   -> [SubExp]
