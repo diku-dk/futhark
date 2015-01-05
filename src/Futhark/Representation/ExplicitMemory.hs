@@ -126,7 +126,7 @@ instance Ord MemSummary where
   _ `compare` _ = EQ
 
 instance FreeIn MemSummary where
-  freeIn (MemSummary ident ixfun) = HS.singleton ident <> freeIn ixfun
+  freeIn (MemSummary ident ixfun) = freeIn ident <> freeIn ixfun
   freeIn Scalar                   = HS.empty
 
 instance Substitute MemSummary where
@@ -168,7 +168,7 @@ data Returns a = ReturnsArray BasicType ExtShape Uniqueness a
                deriving (Eq, Ord, Show)
 
 instance FreeIn MemReturn where
-  freeIn (ReturnsInBlock v) = HS.singleton v
+  freeIn (ReturnsInBlock v) = freeIn v
   freeIn _                  = mempty
 
 instance Substitute a => Substitute (Returns a) where
