@@ -433,7 +433,7 @@ typeOf (Map _ lam inps _) =
 typeOf (Reduce _ lam _ _) =
   staticShapes $ lambdaReturnType lam
 typeOf (Scan _ _ input _) =
-  staticShapes $ scanType $ map (inputType . snd) input
+  staticShapes $ map (inputType . snd) input
 typeOf (Redomap _ _ lam _ _ _) =
   staticShapes $ lambdaReturnType lam
 typeOf (Filter _ lam inp _) =

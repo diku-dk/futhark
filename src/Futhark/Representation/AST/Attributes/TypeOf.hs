@@ -7,7 +7,6 @@ module Futhark.Representation.AST.Attributes.TypeOf
        , primOpType
        , loopOpExtType
        , mapType
-       , scanType
        , filterType
        , valueShapeContext
        , subExpShapeContext
@@ -36,9 +35,6 @@ mapType :: Lambda lore -> [Type] -> [Type]
 mapType f arrts = [ arrayOf t (Shape [outersize]) (uniqueness t)
                  | t <- lambdaReturnType f ]
   where outersize = arraysSize 0 arrts
-
-scanType :: [Type] -> [Type]
-scanType = map (`setUniqueness` Unique)
 
 filterType :: Lambda lore -> [Type] -> [ExtType]
 filterType _ =
@@ -102,7 +98,7 @@ loopOpExtType (Map _ f arrs _) =
 loopOpExtType (Reduce _ fun _ _) =
   staticShapes $ lambdaReturnType fun
 loopOpExtType (Scan _ _ inputs _) =
-  staticShapes $ scanType $ map (subExpType . snd) inputs
+  staticShapes $ map (subExpType . snd) inputs
 loopOpExtType (Filter _ f arrs _) =
   filterType f $ map subExpType arrs
 loopOpExtType (Redomap _ outerfun _ _ _ _) =
