@@ -24,6 +24,7 @@ import Futhark.Representation.AST.Attributes.Patterns
 class Lore lore => Aliased lore where
   bodyAliases :: Body lore -> [Names]
   consumedInBody :: Body lore -> Names
+  patternAliases :: Pattern lore -> [Names]
 
 identAliases :: Ident -> Names
 identAliases = HS.singleton . identName

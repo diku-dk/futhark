@@ -125,6 +125,7 @@ instance Proper lore => Proper (Aliases lore) where
 instance Lore.Lore lore => Aliased (Aliases lore) where
   bodyAliases = map unNames . fst . fst . bodyLore
   consumedInBody = unNames . snd . fst . bodyLore
+  patternAliases = map (unNames . fst . bindeeLore) . patternBindees
 
 instance (PrettyLore lore) => PrettyLore (Aliases lore) where
   ppBindingLore binding =
