@@ -23,8 +23,6 @@ usageInBinding (Let pat lore e) =
                              freeNamesIn bindee
 
 usageInExp :: Aliased lore => Exp lore -> UT.UsageTable
-usageInExp (PrimOp (Assert (Var v) _)) =
-  UT.predicateUsage $ identName v
 usageInExp (PrimOp (Update _ src _ _ _)) =
   UT.consumedUsage $ identName src
 usageInExp (Apply _ args _ _) =

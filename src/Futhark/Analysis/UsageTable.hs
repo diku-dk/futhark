@@ -8,12 +8,10 @@ module Futhark.Analysis.UsageTable
   , lookup
   , keys
   , used
-  , isPredicate
   , isConsumed
   , allConsumed
   , usages
   , usage
-  , predicateUsage
   , consumedUsage
   , Usages
   )
@@ -67,11 +65,11 @@ used = lookupPred $ const True
 keys :: UsageTable -> [VName]
 keys (UsageTable table) = HM.keys table
 
-isPredicate :: VName -> UsageTable -> Bool
-isPredicate = lookupPred $ S.member Predicate
+is :: Usage -> VName -> UsageTable -> Bool
+is = lookupPred . S.member
 
 isConsumed :: VName -> UsageTable -> Bool
-isConsumed = lookupPred $ S.member Consumed
+isConsumed = is Consumed
 
 allConsumed :: UsageTable -> Names
 allConsumed (UsageTable m) =
@@ -83,14 +81,10 @@ usages names = UsageTable $ HM.fromList [ (name, S.empty) | name <- HS.toList na
 usage :: VName -> Usages -> UsageTable
 usage name uses = UsageTable $ HM.singleton name uses
 
-predicateUsage :: VName -> UsageTable
-predicateUsage name = UsageTable $ HM.singleton name $ S.singleton Predicate
-
 consumedUsage :: VName -> UsageTable
 consumedUsage name = UsageTable $ HM.singleton name $ S.singleton Consumed
 
 type Usages = S.Set Usage
 
-data Usage = Predicate
-           | Consumed
+data Usage = Consumed
              deriving (Eq, Ord, Show)
