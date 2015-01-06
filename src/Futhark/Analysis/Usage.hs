@@ -14,7 +14,10 @@ import Futhark.Binder (Proper)
 
 usageInBinding :: (Proper lore, Aliased lore) => Binding lore -> UT.UsageTable
 usageInBinding (Let pat lore e) =
-  usageInPat pat <> usageInExpLore <> usageInExp e <> UT.usages (freeNamesInExp e)
+  mconcat [usageInPat pat,
+           usageInExpLore,
+           usageInExp e,
+           UT.usages (freeNamesInExp e)]
   where usageInPat =
           UT.usages . mconcat . map bindeeUsage . patternBindees
         usageInExpLore =
