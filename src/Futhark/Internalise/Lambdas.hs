@@ -37,6 +37,7 @@ curryToLambda :: Name -> [E.Exp] -> E.Type -> SrcLoc
 curryToLambda fname curargs rettype loc = do
   (_,paramtypes) <- lookupFunction fname
   let missing = drop (length curargs) paramtypes
+      diets = map E.diet paramtypes
   params <- forM missing $ \t -> do
               s <- newNameFromString "curried"
               return E.Ident {
@@ -44,10 +45,10 @@ curryToLambda fname curargs rettype loc = do
                        , E.identSrcLoc = loc
                        , E.identName   = s
                        }
-  let observe x = (x, E.Observe) -- Actual diet doesn't matter here, the
-                                 -- type checker will eventually fix it.
+  let addDiet d x = (x, d)
       call = E.Apply fname
-             (map observe $ curargs ++ map (E.Var . E.fromParam) params)
+             (zipWith addDiet diets $
+              curargs ++ map (E.Var . E.fromParam) params)
              rettype loc
   return (params, call, E.toDecl rettype)
 
