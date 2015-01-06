@@ -298,8 +298,8 @@ nonuniqueParams :: (MonadFreshNames m, Bindable lore) =>
 nonuniqueParams params = runBinder'' $ forM params $ \param ->
   if unique $ identType param then do
     param' <- nonuniqueParam <$> newIdent' (++"_nonunique") param
-    _ <- mkLetNamesM [identName param] $
-         PrimOp $ Copy (Var param') $ srclocOf param'
+    letBindNames_ [identName param] $
+      PrimOp $ Copy (Var param') $ srclocOf param'
     return param'
   else
     return param
