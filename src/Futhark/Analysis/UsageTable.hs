@@ -9,10 +9,12 @@ module Futhark.Analysis.UsageTable
   , keys
   , used
   , isConsumed
+  , isInResult
   , allConsumed
   , usages
   , usage
   , consumedUsage
+  , inResultUsage
   , Usages
   )
   where
@@ -71,6 +73,9 @@ is = lookupPred . S.member
 isConsumed :: VName -> UsageTable -> Bool
 isConsumed = is Consumed
 
+isInResult :: VName -> UsageTable -> Bool
+isInResult = is InResult
+
 allConsumed :: UsageTable -> Names
 allConsumed (UsageTable m) =
   HS.fromList . map fst . filter (S.member Consumed . snd) $ HM.toList m
@@ -84,7 +89,11 @@ usage name uses = UsageTable $ HM.singleton name uses
 consumedUsage :: VName -> UsageTable
 consumedUsage name = UsageTable $ HM.singleton name $ S.singleton Consumed
 
+inResultUsage :: VName -> UsageTable
+inResultUsage name = UsageTable $ HM.singleton name $ S.singleton InResult
+
 type Usages = S.Set Usage
 
 data Usage = Consumed
+           | InResult
              deriving (Eq, Ord, Show)

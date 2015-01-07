@@ -164,6 +164,9 @@ usedName = boundFree . HS.singleton
 consumedName :: MonadEngine m => VName -> m ()
 consumedName = tellNeed . Need [] . UT.consumedUsage
 
+inResultName :: MonadEngine m => VName -> m ()
+inResultName = tellNeed . Need [] . UT.inResultUsage
+
 tapUsage :: MonadEngine m => m a -> m (a, UT.UsageTable)
 tapUsage m = do (x,needs) <- listenNeed m
                 return (x, usageTable needs)
@@ -316,21 +319,16 @@ requires bnd =
   `HS.difference` HS.fromList (provides bnd)) <>
   freeNamesInExp (bindingExp bnd)
 
-usage :: (Proper lore, Aliased lore) => Binding lore -> UT.UsageTable
-usage = usageInBinding
-
 expandUsage :: (Proper lore, Aliased lore) =>
                UT.UsageTable -> Binding lore -> UT.UsageTable
-expandUsage utable bnd = utable <> usage bnd <> usageThroughAliases
-  where e = bindingExp bnd
-        aliases = aliasesOf $ bindingExp bnd
-        valbnd = map identName $ valueIdents (bindingPattern bnd) e
-        tagged = zip valbnd aliases
-        usageThroughAliases = mconcat $ catMaybes $ do
-          (name,als) <- tagged
-          return $ do uses <- UT.lookup name utable
-                      return $ mconcat $ map (`UT.usage` uses) $ HS.toList als
-
+expandUsage utable bnd = utable <> usageInBinding bnd <> usageThroughAliases
+  where pat = bindingPattern bnd
+        usageThroughAliases =
+          mconcat $ mapMaybe usageThroughBindeeAliases $
+          zip (patternNames pat) (patternAliases pat)
+        usageThroughBindeeAliases (name, aliases) = do
+          uses <- UT.lookup name utable
+          return $ mconcat $ map (`UT.usage` uses) $ HS.toList aliases
 
 intersects :: (Eq a, Hashable a) => HS.HashSet a -> HS.HashSet a -> Bool
 intersects a b = not $ HS.null $ a `HS.intersection` b
@@ -382,8 +380,14 @@ isUnique :: BlockPred lore
 isUnique _ = any unique . patternTypes . bindingPattern
 
 isAlloc :: BlockPred lore
-isAlloc _ (Let _ _ (PrimOp (Alloc {}))) = True
-isAlloc _ _                             = False
+isAlloc usage (Let _ _ (PrimOp (Alloc {}))) = True
+isAlloc _ _                                 = False
+
+isResultAlloc :: BlockPred lore
+isResultAlloc usage (Let (Pattern [bindee]) _
+                     (PrimOp (Alloc {}))) =
+  UT.isInResult (bindeeName bindee) usage
+isResultAlloc _ _ = False
 
 hoistCommon :: MonadEngine m =>
                m (Body (Lore m))
@@ -433,6 +437,14 @@ simplifyResult ds (Result cs es loc) = do
   es' <- mapM simplifySubExp es
   consumeResult $ zip ds es'
   Result <$> simplifyCerts cs <*> pure es' <*> pure loc
+
+isDoLoopResult :: MonadEngine m =>
+                  Result -> m ()
+isDoLoopResult = mapM_ checkForVar . resultSubExps
+  where checkForVar (Var ident) =
+          inResultName $ identName ident
+        checkForVar _ =
+          return ()
 
 -- | Simplify the binding, adding it to the program being constructed.
 simplifyBinding :: MonadEngine m =>
@@ -525,11 +537,13 @@ simplifyLoopOp (DoLoop respat merge loopvar boundexp loopbody loc) = do
   -- Blocking hoisting of all unique bindings is probably too
   -- conservative, but there is currently no nice way to mark
   -- consumption of the loop body result.
-  loopbody' <- blockIfSeq [hasFree boundnames, isUnique, isAlloc] $
+  loopbody' <- blockIfSeq [hasFree boundnames, isUnique, isResultAlloc] $
                enterLoop $
                bindFParams mergepat' $
-               bindLoopVar loopvar boundexp' $
-               simplifyBody diets loopbody
+               bindLoopVar loopvar boundexp' $ do
+                 loopbody' <- simplifyBody diets loopbody
+                 isDoLoopResult $ bodyResult loopbody'
+                 return loopbody'
   let merge' = zip mergepat' mergeexp'
   consumeResult $ zip diets mergeexp'
   return $ DoLoop respat' merge' loopvar boundexp' loopbody' loc
