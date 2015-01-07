@@ -118,7 +118,7 @@ class (MonadBinder m,
   putEngineState :: State m -> m ()
   passNeed :: m (a, Need (Lore m) -> Need (Lore m)) -> m a
 
-  simplifyBody :: [Diet] -> Body (InnerLore m) -> m (Body (Lore m))
+  simplifyBody :: [Diet] -> Body (InnerLore m) -> m Result
   simplifyBody = defaultSimplifyBody
   inspectBinding :: Binding (Lore m) -> m ()
   inspectBinding = defaultInspectBinding
@@ -229,18 +229,16 @@ bindLoopVar var bound =
 hoistBindings :: MonadEngine m =>
                  RuleBook m -> BlockPred (Lore m)
               -> ST.SymbolTable (Lore m) -> UT.UsageTable -> DupeState (Lore m)
-              -> [Binding (Lore m)] -> Body (Lore m)
+              -> [Binding (Lore m)] -> Result
               -> m (Body (Lore m),
                     [Binding (Lore m)],
                     UT.UsageTable)
-hoistBindings rules block vtable uses dupes needs body = do
+hoistBindings rules block vtable uses dupes needs result = do
   (uses', blocked, hoisted) <-
     simplifyBindings vtable uses $
     concat $ snd $ mapAccumL pick dupes $ inDepOrder needs
-  body' <- insertBindingsM $ do
-    mapM_ addBinding blocked
-    return body
-  return (body', hoisted, uses')
+  body <- mkBodyM blocked result
+  return (body, hoisted, uses')
   where simplifyBindings vtable' uses' bnds = do
           (uses'', bnds') <- simplifyBindings' vtable' uses' bnds
           let (blocked, hoisted) = partitionEithers $ blockUnhoistedDeps bnds'
@@ -338,11 +336,9 @@ type BlockPred lore = UT.UsageTable -> Binding lore -> Bool
 orIf :: BlockPred lore -> BlockPred lore -> BlockPred lore
 orIf p1 p2 body need = p1 body need || p2 body need
 
-blockIfSeq :: MonadEngine m => [BlockPred (Lore m)] -> m (Body (Lore m)) -> m (Body (Lore m))
-blockIfSeq ps m = foldl (flip blockIf) m ps
-
-blockIf :: MonadEngine m => BlockPred (Lore m)
-        -> m (Body (Lore m)) -> m (Body (Lore m))
+blockIf :: MonadEngine m =>
+           BlockPred (Lore m)
+        -> m Result -> m (Body (Lore m))
 blockIf block m = passNeed $ do
   (body, needs) <- listenNeed m
   ds <- asksEngineEnv envDupeState
@@ -356,7 +352,7 @@ blockIf block m = passNeed $ do
                      , usageTable  = usages
                      })
 
-insertAllBindings :: MonadEngine m => m (Body (Lore m)) -> m (Body (Lore m))
+insertAllBindings :: MonadEngine m => m Result -> m (Body (Lore m))
 insertAllBindings = blockIf $ \_ _ -> True
 
 hasFree :: Proper lore => Names -> BlockPred lore
@@ -380,8 +376,8 @@ isUnique :: BlockPred lore
 isUnique _ = any unique . patternTypes . bindingPattern
 
 isAlloc :: BlockPred lore
-isAlloc usage (Let _ _ (PrimOp (Alloc {}))) = True
-isAlloc _ _                                 = False
+isAlloc _ (Let _ _ (PrimOp (Alloc {}))) = True
+isAlloc _ _                             = False
 
 isResultAlloc :: BlockPred lore
 isResultAlloc usage (Let (Pattern [bindee]) _
@@ -390,10 +386,10 @@ isResultAlloc usage (Let (Pattern [bindee]) _
 isResultAlloc _ _ = False
 
 hoistCommon :: MonadEngine m =>
-               m (Body (Lore m))
+               m Result
             -> (ST.SymbolTable (Lore m)
                 -> ST.SymbolTable (Lore m))
-            -> m (Body (Lore m))
+            -> m Result
             -> (ST.SymbolTable (Lore m)
                 -> ST.SymbolTable (Lore m))
             -> m (Body (Lore m), Body (Lore m))
@@ -420,10 +416,10 @@ hoistCommon m1 vtablef1 m2 vtablef2 = passNeed $ do
 
 -- | Simplify a single 'Body' inside an arbitrary 'MonadEngine'.
 defaultSimplifyBody :: MonadEngine m =>
-                       [Diet] -> Body (InnerLore m) -> m (Body (Lore m))
+                       [Diet] -> Body (InnerLore m) -> m Result
 
 defaultSimplifyBody ds (Body _ [] res) =
-  mkBodyM [] =<< simplifyResult ds res
+  simplifyResult ds res
 
 defaultSimplifyBody ds (Body lore (bnd:bnds) res) = do
   simplifyBinding bnd
@@ -537,13 +533,14 @@ simplifyLoopOp (DoLoop respat merge loopvar boundexp loopbody loc) = do
   -- Blocking hoisting of all unique bindings is probably too
   -- conservative, but there is currently no nice way to mark
   -- consumption of the loop body result.
-  loopbody' <- blockIfSeq [hasFree boundnames, isUnique, isResultAlloc] $
+  loopbody' <- blockIf
+               (hasFree boundnames `orIf` isUnique `orIf` isResultAlloc) $
                enterLoop $
                bindFParams mergepat' $
                bindLoopVar loopvar boundexp' $ do
-                 loopbody' <- simplifyBody diets loopbody
-                 isDoLoopResult $ bodyResult loopbody'
-                 return loopbody'
+                 res <- simplifyBody diets loopbody
+                 isDoLoopResult res
+                 return res
   let merge' = zip mergepat' mergeexp'
   consumeResult $ zip diets mergeexp'
   return $ DoLoop respat' merge' loopvar boundexp' loopbody' loc

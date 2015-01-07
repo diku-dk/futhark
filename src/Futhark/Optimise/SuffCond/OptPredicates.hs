@@ -299,15 +299,14 @@ instance MonadFreshNames m =>
     res' <- Simplify.simplifyResult ds res
     suff <- generatingSuff
     if not suff
-      then mkBodyM [] res'
+      then return res'
       else do
       let inspect se
             | True = liftM pure $ sufficientSubExp se
             | otherwise = do se' <- sufficientSubExp se
                              return [se, se']
       ses <- liftM concat $ mapM inspect $ resultSubExps res
-      res'' <- Simplify.simplifyResult ds res' { resultSubExps = ses }
-      mkBodyM [] res''
+      Simplify.simplifyResult ds res' { resultSubExps = ses }
 
   simplifyBody ds (Body bodylore (bnd:bnds) res) = do
     --trace ("body " ++ show (patternIdents $ bindingPattern bnd)) $
