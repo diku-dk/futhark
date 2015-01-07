@@ -198,9 +198,11 @@ addAliasesToPattern pat e =
           bindee { bindeeLore =
                       (Names' names', bindeeLore bindee)
                  }
-          where names'
-                  | basicType $ bindeeType bindee = mempty
-                  | otherwise                     = names
+          where names' =
+                  case bindeeType bindee of
+                    Array {} -> names
+                    Mem _    -> names
+                    _        -> mempty
 
 mkAliasedBody :: Lore.Lore lore =>
                  Lore.Body lore -> [Binding lore] -> Result -> Body lore
