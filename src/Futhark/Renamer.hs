@@ -20,6 +20,7 @@ module Futhark.Renamer
   , renameFun
   -- * Renaming annotations
   , RenameM
+  , renamerSubstitutions
   , Rename (..)
   , Renameable
   )
@@ -92,6 +93,11 @@ data RenameEnv = RenameEnv {
   }
 
 type RenameM = StateT VNameSource (Reader RenameEnv)
+
+-- | Produce a map of the substitutions that should be performed by
+-- the renamer.
+renamerSubstitutions :: RenameM (HM.HashMap VName VName)
+renamerSubstitutions = lift $ asks envNameMap
 
 -- | Return a fresh, unique name.  The @VName@ is prepended to the
 -- name.
