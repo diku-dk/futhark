@@ -198,6 +198,9 @@ instance PrettyLore lore => Pretty (Lambda lore) where
     apply (map ppParam params) <+>
     text "=>" </> indent 2 (ppr body)
 
+instance Pretty ExtRetType where
+  ppr = ppTuple' . retTypeValues
+
 instance PrettyLore lore => Pretty (FunDec lore) where
   ppr fundec@(FunDec name rettype args body _) =
     maybe id (</>) (ppFunDecLore fundec) $

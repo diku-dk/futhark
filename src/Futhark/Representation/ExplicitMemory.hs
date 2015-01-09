@@ -83,7 +83,7 @@ type FParam = AST.FParam ExplicitMemory
 type RetType = AST.RetType ExplicitMemory
 
 instance IsRetType [FunReturns] where
-  resTypeValues = map returnsToType
+  retTypeValues = map returnsToType
 
   basicRetType t = [ReturnsScalar t]
 

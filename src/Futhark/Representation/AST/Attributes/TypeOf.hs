@@ -105,8 +105,8 @@ loopOpExtType (Redomap _ outerfun _ _ _ _) =
   staticShapes $ lambdaReturnType outerfun
 
 expExtType :: IsRetType (RetType lore) => Exp lore -> [ExtType]
-expExtType (Apply _ _ rt _) = resTypeValues rt
-expExtType (If _ _ _ rt _)  = resTypeValues rt
+expExtType (Apply _ _ rt _) = retTypeValues rt
+expExtType (If _ _ _ rt _)  = rt
 expExtType (LoopOp op)      = loopOpExtType op
 expExtType (PrimOp op)      = staticShapes $ primOpType op
 

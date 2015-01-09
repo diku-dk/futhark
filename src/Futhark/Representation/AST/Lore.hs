@@ -26,7 +26,7 @@ class (Show (LetBound l), Show (Exp l), Show (Body l), Show (FParam l), Show (Re
   type FParam l = ()
   -- | The type of expressions and function calls.
   type RetType l :: *
-  type RetType l = [ExtType]
+  type RetType l = ExtRetType
 
   -- | A constant used to disambiguate method calls.  XXX, this is a
   -- hack to get around mising type application in Haskell, sometimes

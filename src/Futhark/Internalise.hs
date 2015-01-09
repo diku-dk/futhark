@@ -70,7 +70,7 @@ internaliseFun (fname,rettype,params,body,loc) =
       fname rettype'
       (map mkFParam $ shapeparams ++ params')
       body' loc
-  where rettype' = extShapes $ map I.toDecl $ internaliseType rettype
+  where rettype' = ExtRetType $ extShapes $ map I.toDecl $ internaliseType rettype
 
 internaliseIdent :: E.Ident -> InternaliseM I.Ident
 internaliseIdent (E.Ident name tp loc) =
@@ -159,21 +159,22 @@ internaliseExp desc (E.Apply fname args _ loc)
   args' <- tupsToIdentList "arg" $ map fst args
   let args'' = concatMap tag args'
   letTupExp' desc $
-    I.Apply fname args'' (staticShapes $ map (subExpType . fst) args'')  loc
+    I.Apply fname args''
+    (ExtRetType $ staticShapes $ map (subExpType . fst) args'')  loc
   where tag (_,vs) = [ (I.Var v, I.Observe) | v <- vs ]
 
 internaliseExp desc (E.Apply fname args _ loc)
   | Just (rettype, _) <- HM.lookup fname builtInFunctions = do
   args' <- tupsToIdentList "arg" $ map fst args
   let args'' = concatMap tag args'
-  letTupExp' desc $ I.Apply fname args'' [I.Basic rettype] loc
+  letTupExp' desc $ I.Apply fname args'' (ExtRetType [I.Basic rettype]) loc
   where tag (_,vs) = [ (I.Var v, I.Observe) | v <- vs ]
 
 internaliseExp desc (E.Apply fname args rettype loc) = do
   args' <- tupsToIdentList "arg" $ map fst args
   paramts <- lookupFunctionParams fname
   let args''   = concatMap addCertsAndShapes $ zip args' $ map I.diet paramts
-      rettype' = extShapes $ internaliseType rettype
+      rettype' = ExtRetType $ extShapes $ internaliseType rettype
   letTupExp' desc $ I.Apply fname (prefixArgShapes args'') rettype' loc
   where addCertsAndShapes ((c,vs),d) =
           let observe v = (v, d)

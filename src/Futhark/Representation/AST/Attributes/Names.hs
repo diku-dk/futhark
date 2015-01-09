@@ -20,6 +20,7 @@ import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Traversals
 import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Representation.AST.Attributes.Patterns
+import Futhark.Representation.AST.RetType
 
 freeWalker :: (FreeIn (Lore.Exp lore),
                FreeIn (Lore.Body lore),
@@ -163,6 +164,9 @@ instance (ArrayShape shape, FreeIn shape) => FreeIn (TypeBase shape) where
 instance FreeIn attr => FreeIn (Bindee attr) where
   freeIn (Bindee ident attr) =
     freeIn ident <> freeIn attr
+
+instance FreeIn ExtRetType where
+  freeIn = mconcat . map freeIn . retTypeValues
 
 freeNamesIn :: FreeIn a => a -> Names
 freeNamesIn = HS.map identName . freeIn

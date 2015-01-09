@@ -4,6 +4,7 @@
 module Futhark.Representation.AST.RetType
        (
          IsRetType (..)
+       , ExtRetType (..)
        )
        where
 
@@ -19,8 +20,14 @@ class (Show rt, Eq rt, Ord rt) => IsRetType rt where
 
   -- | Extract the simple type from the return type - although this
   -- may still involve an existential shape context.
-  resTypeValues :: rt -> [ExtType]
+  retTypeValues :: rt -> [ExtType]
 
-instance IsRetType [ExtType] where
-  basicRetType = staticShapes . return . Basic
-  resTypeValues = id
+-- | A simple return type that is just a list of 'ExtType's.  The
+-- reason we do not simply use a list is that we want to define our
+-- own prettyprinting instance.
+newtype ExtRetType = ExtRetType [ExtType]
+                   deriving (Eq, Ord, Show)
+
+instance IsRetType ExtRetType where
+  basicRetType = ExtRetType . staticShapes . return . Basic
+  retTypeValues (ExtRetType ts) = ts

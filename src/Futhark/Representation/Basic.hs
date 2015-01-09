@@ -83,12 +83,13 @@ instance TypeCheck.Checkable Basic where
   checkExpLore = return
   checkBodyLore = return
   checkFParamLore = return
-  checkRetType = mapM_ TypeCheck.checkExtType . resTypeValues
+  checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
   matchPattern loc pat e =
     TypeCheck.matchExtPattern loc (patternIdents pat) (expExtType e)
   basicFParam name t loc =
     return $ Bindee (Ident name (AST.Basic t) loc) ()
-  matchReturnType = TypeCheck.matchExtReturnType
+  matchReturnType name (ExtRetType ts) =
+    TypeCheck.matchExtReturnType name ts
 
 instance Renameable Basic where
 instance Substitutable Basic where
@@ -128,4 +129,4 @@ removeBodyLore :: Lore.Lore lore => AST.Body lore -> Body
 removeBodyLore = rephraseBody removeLore
 
 removeRetTypeLore :: IsRetType rt => rt -> RetType
-removeRetTypeLore = resTypeValues
+removeRetTypeLore = ExtRetType . retTypeValues

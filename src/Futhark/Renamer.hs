@@ -231,6 +231,9 @@ instance Rename ExtDimSize where
 instance Rename () where
   rename = return
 
+instance Rename ExtRetType where
+  rename = liftM ExtRetType . mapM rename . retTypeValues
+
 -- | A class for lores in which all annotations are renameable.
 class (Rename (Lore.LetBound lore),
        Rename (Lore.Exp lore),

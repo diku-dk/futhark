@@ -60,23 +60,23 @@ functionSlices (FunDec fname rettype params body@(Body _ bodybnds bodyres) loc) 
   -- type.  These will be passed as parameters to the value function.
   (staticRettype, shapeidents) <-
     runWriterT $
-    instantiateShapes instantiate rettype
+    instantiateShapes instantiate $ retTypeValues rettype
 
   valueBody <- substituteExtResultShapes staticRettype body
 
-  let valueRettype = staticShapes staticRettype
+  let valueRettype = ExtRetType $ staticShapes staticRettype
       valueParams = shapeidents ++ map bindeeIdent params
       shapeBody = mkBody (cpybnds <> bodybnds)
                   bodyres { resultSubExps = shapes }
       mkFParam = flip Bindee ()
-      fShape = FunDec shapeFname (staticShapes shapetypes)
+      fShape = FunDec shapeFname (ExtRetType $ staticShapes shapetypes)
                (map mkFParam shapeParams)
                shapeBody loc
       fValue = FunDec valueFname valueRettype
                (map mkFParam valueParams)
                valueBody loc
   return (fShape, fValue)
-  where shapes = subExpShapeContext rettype $
+  where shapes = subExpShapeContext (retTypeValues rettype) $
                  resultSubExps bodyres
         shapetypes = map subExpType shapes
         shapeFname = fname <> nameFromString "_shape"
@@ -149,13 +149,13 @@ substCalls subst fundec = do
           | Just (shapefun,shapetype,valfun,_) <- lookup fname subst =
             liftM snd . runBinder'' $ do
               let (vs,vals) =
-                    splitAt (length shapetype) $
+                    splitAt (length $ retTypeValues shapetype) $
                     patternBindees pat
               letBind_ (Pattern vs) $
                 Apply shapefun args shapetype loc
               letBind_ (Pattern vals) $
                 Apply valfun ([(Var $ bindeeIdent v,Observe) | v <- vs]++args)
-                (staticShapes $ map bindeeType vals)  loc
+                (ExtRetType $ staticShapes $ map bindeeType vals)  loc
 
         treatBinding (Let pat _ e) = do
           e' <- mapExpM mapper e

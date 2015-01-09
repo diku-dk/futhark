@@ -30,7 +30,7 @@ externaliseProg (I.Prog funs) =
 externaliseFunction :: I.FunDec -> E.FunDec
 externaliseFunction (FunDec fname ret params body loc) =
   (fname,
-   externaliseDeclTypes $ map I.toDecl $ resTypeValues ret,
+   externaliseDeclTypes $ map I.toDecl $ retTypeValues ret,
    map (externaliseParam . bindeeIdent) params,
    externaliseBody body,
    loc)
@@ -46,7 +46,7 @@ externaliseBody (I.Body lore (I.Let pat _ e:bnds) res) =
 externaliseExp :: I.Exp -> E.Exp
 externaliseExp (I.Apply fname args ts loc) =
   E.Apply fname (map externaliseArg args)
-  (externaliseTypes $ resTypeValues ts) loc
+  (externaliseTypes $ retTypeValues ts) loc
     where externaliseArg (e,d) =
             (externaliseSubExp e,
              externaliseDiet d)
@@ -54,7 +54,7 @@ externaliseExp (I.If ce tb fb t loc) =
   E.If (externaliseSubExp ce)
        (externaliseBody tb)
        (externaliseBody fb)
-       (externaliseTypes $ resTypeValues t)
+       (externaliseTypes t)
        loc
 externaliseExp (PrimOp op) =
   externalisePrimOp op

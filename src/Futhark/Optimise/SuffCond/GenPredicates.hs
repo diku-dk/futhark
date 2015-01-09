@@ -52,12 +52,12 @@ genPredicate (FunDec fname rettype params body loc) = do
   let mkFParam = flip Bindee ()
       pred_args = [ (Var arg, Observe) | arg <- map bindeeIdent params ]
       pred_bnd = mkLet [pred_ident] $
-                 Apply predFname pred_args [Basic Bool] loc
+                 Apply predFname pred_args (basicRetType Bool) loc
       cert_bnd = mkLet [cert_ident] $
                  PrimOp $ Assert (Var pred_ident) loc
       val_fun = FunDec fname rettype params
                 (mkBody (pred_bnd:cert_bnd:val_bnds) val_res) loc
-      pred_fun = FunDec predFname [Basic Bool]
+      pred_fun = FunDec predFname (basicRetType Bool)
                  (map mkFParam pred_params)
                  (bnds `insertBindings` pred_body) loc
   return (pred_fun, val_fun)

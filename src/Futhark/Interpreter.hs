@@ -239,7 +239,7 @@ evalExp (If e1 e2 e3 rettype pos) = do
   vs <- case v of BasicVal (LogVal True)  -> evalBody e2
                   BasicVal (LogVal False) -> evalBody e3
                   _                       -> bad $ TypeError pos "evalExp If"
-  return $ valueShapeContext (resTypeValues rettype) vs ++ vs
+  return $ valueShapeContext rettype vs ++ vs
 evalExp (Apply fname args _ loc)
   | "trace" <- nameToString fname = do
   vs <- mapM (evalSubExp . fst) args
@@ -248,7 +248,7 @@ evalExp (Apply fname args _ loc)
 evalExp (Apply fname args rettype _) = do
   args' <- mapM (evalSubExp . fst) args
   vs <- evalFuncall fname args'
-  return $ valueShapeContext (resTypeValues rettype) vs ++ vs
+  return $ valueShapeContext (retTypeValues rettype) vs ++ vs
 evalExp (PrimOp op) = evalPrimOp op
 evalExp (LoopOp op) = evalLoopOp op
 

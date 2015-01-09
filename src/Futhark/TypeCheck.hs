@@ -457,7 +457,7 @@ checkFun :: Checkable lore =>
 checkFun (FunDec fname rettype params body loc) =
   context ("In function " ++ nameToString fname) $
     checkFun' (fname,
-               resTypeValues rettype,
+               retTypeValues rettype,
                funParamsToIdentsAndLores params,
                body,
                loc) $ do
@@ -826,7 +826,7 @@ checkExp (If e1 e2 e3 ts loc) = do
 checkExp (Apply fname args t loc)
   | "trace" <- nameToString fname = do
   argts <- mapM (checkSubExp . fst) args
-  when (staticShapes argts /= resTypeValues t) $
+  when (staticShapes argts /= retTypeValues t) $
     bad $ TypeError loc $ "Expected apply result type " ++ pretty t
     ++ " but got " ++ pretty argts
 

@@ -126,6 +126,10 @@ instance Substitute Ident where
       , identType = substituteNames substs $ identType v
       }
 
+instance Substitute ExtRetType where
+  substituteNames substs (ExtRetType ts) =
+    ExtRetType $ map (substituteNames substs) ts
+
 -- | The class of lores in which all annotations support name
 -- substitution.
 class (Substitute (Lore.Exp lore),

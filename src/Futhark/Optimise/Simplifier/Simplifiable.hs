@@ -47,14 +47,16 @@ bindableSimplifiable :: (Engine.MonadEngine m,
                          Bindable (Engine.InnerLore m),
                          Lore.LetBound (Engine.InnerLore m) ~ (),
                          Lore.FParam (Engine.InnerLore m) ~ (),
-                         RetType (Engine.InnerLore m) ~ [ExtType]) =>
+                         RetType (Engine.InnerLore m) ~ ExtRetType) =>
                         Simplifiable m
 bindableSimplifiable =
   Simplifiable mkLetS' mkBodyS' mkLetNamesS'
-  return return (mapM Engine.simplifyExtType)
+  return return simplifyRetType'
   where mkLetS' _ pat e = return $ mkLet (patternIdents pat) e
         mkBodyS' _ bnds res = return $ mkBody bnds res
         mkLetNamesS' _ = mkLetNames
+        simplifyRetType' =
+          liftM ExtRetType . mapM Engine.simplifyExtType . retTypeValues
 
 newtype SimpleM lore a =
   SimpleM (RWS

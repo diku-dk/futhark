@@ -455,7 +455,7 @@ simplifyBinding (Let pat _ (Apply fname args rettype loc)) = do
   vtable <- getVtable
   case join $ pure simplifyApply <*> prog <*> pure vtable <*> pure fname <*> pure args of
     -- Array values are non-unique, so we may need to copy them.
-    Just vs -> do let vs' = valueShapeContext (resTypeValues rettype) vs ++ vs
+    Just vs -> do let vs' = valueShapeContext (retTypeValues rettype) vs ++ vs
                   bnds <- forM (zip (patternIdents pat) vs') $ \(p,v) ->
                     case uniqueness $ identType p of
                       Unique    -> mkLetNamesM [identName p] =<< eCopy (eValue v loc)
@@ -714,5 +714,5 @@ simplifyFun :: MonadEngine m =>
 simplifyFun (FunDec fname rettype params body loc) = do
   rettype' <- simplifyRetType rettype
   body' <- insertAllBindings $ bindFParams params $
-           simplifyBody (map diet $ resTypeValues rettype') body
+           simplifyBody (map diet $ retTypeValues rettype') body
   return $ FunDec fname rettype' params body' loc

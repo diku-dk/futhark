@@ -655,7 +655,7 @@ evaluateBranch :: MonadBinder m => TopDownRule m
 evaluateBranch _ (Let pat _ (If e1 tb fb t _))
   | Just branch <- checkBranch =
   let ses = resultSubExps $ bodyResult branch
-      ses' = subExpShapeContext (resTypeValues t) ses ++ ses
+      ses' = subExpShapeContext t ses ++ ses
   in do mapM_ addBinding $ bodyBindings branch
         sequence_ [ letBind (Pattern [p]) $ PrimOp $ SubExp se
                   | (p,se) <- zip (patternBindees pat) ses']

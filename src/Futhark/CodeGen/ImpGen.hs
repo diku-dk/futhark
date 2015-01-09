@@ -300,7 +300,7 @@ compileExp targets e m = do
 defCompileExp :: [VName] -> Exp -> ImpM op ()
 
 defCompileExp targets (If cond tbranch fbranch restype _) = do
-  dest <- destinationFromTargets targets $ resTypeValues restype
+  dest <- destinationFromTargets targets restype
   tcode <- collect $ compileExtBody dest tbranch
   fcode <- collect $ compileExtBody dest fbranch
   tell $ Imp.If (compileSubExp cond) tcode fcode
