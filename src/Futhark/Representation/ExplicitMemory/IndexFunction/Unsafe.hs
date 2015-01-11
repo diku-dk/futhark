@@ -9,25 +9,34 @@ module Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
        , applyInd
        , codomain
        , isLinear
+       , linearWithOffset
+       , isDirect
          -- * Utility
        , shapeFromSubExps
        , shapeFromInts
        )
        where
 
+import Control.Applicative
+
 import Data.List (sort)
 import Data.Loc
+import Data.Maybe (isJust)
 import Data.Singletons.Prelude
 import Data.Type.Monomorphic
-import Data.Type.Natural
+import Data.Type.Natural hiding (n1, n2)
 import Data.Type.Ordinal
 import Data.Vector.Sized hiding (index, map, unsafeFromInt)
+import Data.Constraint (Dict (..))
 import Proof.Equational
+import Unsafe.Coerce
 
-import Text.PrettyPrint.Mainland
+import qualified Text.PrettyPrint.Mainland as PP
 
 import Futhark.Analysis.ScalExp
 import Futhark.Representation.AST.Syntax (SubExp(..))
+import Futhark.Substitute
+import Futhark.Renamer
 import Futhark.Util.Truths
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.ExplicitMemory.Permutation
@@ -35,14 +44,31 @@ import Futhark.Representation.ExplicitMemory.Permutation
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as Safe
 import qualified Futhark.Representation.ExplicitMemory.SymSet as SymSet
 import Language.Futhark.Core
+import Futhark.Representation.AST.Pretty (pretty)
 
 data IxFun = forall n . IxFun (SNat (S n)) (Safe.IxFun (S n))
 
 instance Show IxFun where
   show (IxFun _ fun) = show fun
 
-instance Pretty IxFun where
-  ppr (IxFun _ fun) = ppr fun
+instance PP.Pretty IxFun where
+  ppr (IxFun _ fun) = PP.ppr fun
+
+instance Eq IxFun where
+  IxFun (n1 :: SNat (S n1)) fun1 == IxFun (n2 :: SNat (S n2)) fun2 =
+    case n1 %:== n2 of
+      SFalse -> False
+      STrue ->
+        case unsafeCoerce Refl :: Dict (n1 ~ n2) of
+          Dict -> fun1 == fun2
+
+instance Substitute IxFun where
+  substituteNames subst (IxFun n ixfun) =
+    IxFun n $ substituteNames subst ixfun
+
+instance Rename IxFun where
+  rename (IxFun n ixfun) =
+    IxFun n <$> rename ixfun
 
 type Indices = [ScalExp]
 type Shape   = [ScalExp]
@@ -89,7 +115,7 @@ permute (IxFun (n::SNat (S n)) f) perm
         n' = sNatToInt n
 
 applyInd :: IxFun -> Indices -> IxFun
-applyInd (IxFun (snnat::SNat (S n)) (f::Safe.IxFun (S n))) is =
+applyInd ixfun@(IxFun (snnat::SNat (S n)) (f::Safe.IxFun (S n))) is =
   case promote (Prelude.length is) :: Monomorphic (Sing :: Nat -> *) of
     Monomorphic (mnat::SNat m) ->
       case mnat %:<<= nnat of
@@ -106,10 +132,14 @@ applyInd (IxFun (snnat::SNat (S n)) (f::Safe.IxFun (S n))) is =
                       (succCongEq (minusPlusEqR nnat mnat))
               f' :: Safe.IxFun (m :+: S (n :- m))
               f' = coerce proof f
-              ixfun :: Safe.IxFun (S (n :- m))
-              ixfun = Safe.applyInd f' is'
-          in IxFun k ixfun
-        SFalse -> error "IndexFunction.Unsafe.applyInd: Too many indices given."
+              ixfun' :: Safe.IxFun (S (n :- m))
+              ixfun' = Safe.applyInd f' is'
+          in IxFun k ixfun'
+        SFalse ->
+          error $
+          unlines ["IndexFunction.Unsafe.applyInd: Too many indices given.",
+                   "  Index function: " ++ pretty ixfun,
+                   "  Indices" ++ pretty is]
   where nnat :: SNat n
         nnat = snnat %- sOne
 
@@ -118,7 +148,13 @@ codomain (IxFun n f) =
   SymSet n $ Safe.codomain f
 
 isLinear :: IxFun -> Bool
-isLinear (IxFun _ ixfun) = Safe.isLinear ixfun
+isLinear = isJust . linearWithOffset
+
+isDirect :: IxFun -> Bool
+isDirect = maybe False (==Val (IntVal 0)) . linearWithOffset
+
+linearWithOffset :: IxFun -> Maybe ScalExp
+linearWithOffset (IxFun _ ixfun) = Safe.linearWithOffset ixfun
 
 data SymSet = forall n . SymSet (SNat n) (SymSet.SymSet n)
 

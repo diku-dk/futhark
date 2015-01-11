@@ -1,4 +1,4 @@
-{-# LANGUAGE GADTs, DataKinds, KindSignatures, ScopedTypeVariables #-}
+{-# LANGUAGE GADTs, DataKinds, KindSignatures, ScopedTypeVariables, StandaloneDeriving #-}
 -- | A well-typed representation of permutations.
 --
 -- For a 'Vector' of size @n@, one could represent a permutation as
@@ -44,6 +44,8 @@ instance Eq (Swap n) where
 data Permutation :: Nat -> * where
   Identity :: Permutation n
   (:>>:) :: Swap n -> Permutation n -> Permutation n
+
+deriving instance (Eq (Permutation n))
 
 infixr 4 :>>:
 
