@@ -18,7 +18,7 @@ import System.IO
 import System.Process
 
 futharkFlags :: String
-futharkFlags = "-sfe"
+futharkFlags = "-s"
 
 -- | Number of tests to run concurrently.
 concurrency :: Int
@@ -87,7 +87,7 @@ compileTest f inputf outputf = do
     ExitFailure 127 -> return $ Failure futharkNotFound
     ExitFailure _   -> return $ Failure l0err
     ExitSuccess     -> do
-      (gccCode, _, gccerr) <- readProcessWithExitCode "gcc" [cOutputf, "-o", binOutputf, "-lm"] ""
+      (gccCode, _, gccerr) <- readProcessWithExitCode "gcc" [cOutputf, "-o", binOutputf, "-lm", "-O3"] ""
       case gccCode of
         ExitFailure _ -> return $ Failure gccerr
         ExitSuccess   -> do
