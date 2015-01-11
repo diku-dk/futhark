@@ -146,19 +146,25 @@ instance PP.Pretty MemSummary where
   ppr (MemSummary mem ixfun) =
     PP.ppr (identName mem) <> PP.text "->" <> PP.ppr ixfun
 
-data MemReturn = ReturnsInBlock Ident
+data MemReturn = ReturnsInBlock Ident IxFun.IxFun
                | ReturnsNewBlock Int
-               deriving (Eq, Ord, Show)
+               deriving (Show)
+
+instance Eq MemReturn where
+  _ == _ = True
+
+instance Ord MemReturn where
+  _ `compare` _ = EQ
 
 instance Rename MemReturn where
-  rename (ReturnsInBlock ident) =
-    ReturnsInBlock <$> rename ident
+  rename (ReturnsInBlock ident ixfun) =
+    ReturnsInBlock <$> rename ident <*> rename ixfun
   rename (ReturnsNewBlock i) =
     return $ ReturnsNewBlock i
 
 instance Substitute MemReturn where
-  substituteNames substs (ReturnsInBlock ident) =
-    ReturnsInBlock $ substituteNames substs ident
+  substituteNames substs (ReturnsInBlock ident ixfun) =
+    ReturnsInBlock (substituteNames substs ident) (substituteNames substs ixfun)
   substituteNames _ (ReturnsNewBlock i) =
     ReturnsNewBlock i
 
@@ -168,8 +174,8 @@ data Returns a = ReturnsArray BasicType ExtShape Uniqueness a
                deriving (Eq, Ord, Show)
 
 instance FreeIn MemReturn where
-  freeIn (ReturnsInBlock v) = freeIn v
-  freeIn _                  = mempty
+  freeIn (ReturnsInBlock v ixfun) = freeIn v <> freeIn ixfun
+  freeIn _                        = mempty
 
 instance Substitute a => Substitute (Returns a) where
   substituteNames substs (ReturnsArray bt shape u x) =
@@ -186,9 +192,12 @@ instance Substitute a => Substitute (Returns a) where
 instance PP.Pretty (Returns (Maybe MemReturn)) where
   ppr ret@(ReturnsArray _ _ _ summary) =
     PP.ppr (returnsToType ret) <> PP.text "@" <> pp summary
-    where pp Nothing                    = PP.text "any"
-          pp (Just (ReturnsInBlock v))  = PP.parens $ PP.text $ pretty v
-          pp (Just (ReturnsNewBlock i)) = PP.text $ show i
+    where pp Nothing =
+            PP.text "any"
+          pp (Just (ReturnsInBlock v ixfun)) =
+            PP.parens $ PP.text (pretty v) <> PP.text "->" <> PP.ppr ixfun
+          pp (Just (ReturnsNewBlock i)) =
+            PP.text $ show i
   ppr ret =
     PP.ppr $ returnsToType ret
 
@@ -249,8 +258,11 @@ generaliseReturns r1s r2s =
         unifyExtDims (Ext x) _ = Ext <$> newSize x
         unifyExtDims _ (Ext x) = Ext <$> newSize x
 
-        generaliseSummaries (ReturnsInBlock mem1) (ReturnsInBlock mem2)
-          | mem1 == mem2 = return $ ReturnsInBlock mem1 -- Arbitrary
+        generaliseSummaries
+          (ReturnsInBlock mem1 ixfun1)
+          (ReturnsInBlock mem2 ixfun2)
+          | mem1 == mem2, ixfun1 == ixfun2 =
+            return $ ReturnsInBlock mem1 ixfun1 -- Arbitrary
           | otherwise = do (i, sizemap, memmap) <- get
                            put (i + 1, sizemap, memmap)
                            return $ ReturnsNewBlock i
@@ -270,7 +282,7 @@ instance TypeCheck.Checkable ExplicitMemory where
   checkExpLore = return
   checkBodyLore = return
   checkFParamLore = checkMemSummary
-  checkRetType = mapM_ TypeCheck.checkExtType . resTypeValues
+  checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
   basicFParam name t loc =
     return $ Bindee (Ident name (AST.Basic t) loc) Scalar
 
@@ -282,9 +294,32 @@ instance TypeCheck.Checkable ExplicitMemory where
                         "\ncannot match result type\n") ++
                        "  " ++ prettyTuple rt ++ "\n" ++ s
 
-  matchReturnType fname rettype =
-    TypeCheck.matchExtReturnType fname ts
+  matchReturnType fname rettype result = do
+    TypeCheck.matchExtReturnType fname ts result
+    mapM_ checkResultSubExp $ resultSubExps result
     where ts = map returnsToType rettype
+          checkResultSubExp (Constant {}) =
+            return ()
+          checkResultSubExp (Var v) = do
+            attr <- lookupSummary (identName v) loc
+            case attr of
+              Scalar -> return ()
+              MemSummary _ ixfun
+                | IxFun.isDirect ixfun ->
+                  return ()
+                | otherwise ->
+                    TypeCheck.bad $ TypeError loc $
+                    "Array " ++ pretty v ++
+                    " returned by function, but has nontrivial index function" ++
+                    pretty ixfun
+            where loc = srclocOf v
+          lookupSummary name loc = do
+            (_, attr, _) <- TypeCheck.lookupVar name loc
+            case attr of
+              TypeCheck.LetBound summary -> return summary
+              TypeCheck.FunBound summary -> return summary
+              TypeCheck.LambdaBound      ->
+                fail "ExplicitMemory.matchReturnType: asked to return something lambda-bound from a function.\nThis implies a bug in the type checker."
 
 matchPatternToReturns :: Monad m =>
                          (String -> m ())
@@ -320,22 +355,27 @@ matchPatternToReturns wrong pat rt = do
       popSizeIfInCtx $ identName size
       matchType bindee $ Mem $ Var size
     matchBindee bindee (ReturnsArray et shape u rets)
-      | MemSummary mem _ <- bindeeLore bindee,
+      | MemSummary mem bindeeIxFun <- bindeeLore bindee,
         Mem size <- identType mem = do
           case size of
             Var size' -> popSizeIfInCtx $ identName size'
             _         -> return ()
           case rets of
             Nothing -> return ()
-            Just (ReturnsInBlock retmem) ->
+            Just (ReturnsInBlock retmem retIxFun) -> do
               when (mem /= retmem) $
-              if inCtx $ identName mem then
-                popMemFromCtx $ identName mem
-              else
-                lift $ wrong $ "Array " ++ pretty bindee ++
-                " returned in memory block " ++ pretty retmem ++
-                " but annotation says block " ++ pretty mem ++
-                "."
+                if inCtx $ identName mem then
+                  popMemFromCtx $ identName mem
+                else
+                  lift $ wrong $ "Array " ++ pretty bindee ++
+                  " returned in memory block " ++ pretty retmem ++
+                  " but annotation says block " ++ pretty mem ++
+                  "."
+              unless (bindeeIxFun == retIxFun) $
+                lift $ wrong $ "Bindee index function is " ++
+                pretty bindeeIxFun ++ ", but return index function is " ++
+                pretty retIxFun ++ "."
+
             Just (ReturnsNewBlock _) ->
               popMemFromCtx $ identName mem
           zipWithM_ matchArrayDim (arrayDims $ bindeeType bindee) $
@@ -487,11 +527,8 @@ expReturns look (AST.PrimOp (SubExp (Var v))) = do
     (Scalar, Basic bt) ->
       return [ReturnsScalar bt]
     (MemSummary mem ixfun, Array et shape u) ->
-      if IxFun.isLinear ixfun then
-        return [ReturnsArray et (ExtShape $ map Free $ shapeDims shape) u $
-               Just $ ReturnsInBlock mem]
-      else
-        fail "Sadly, Troels is too bad of a hacker to handle this right now."
+      return [ReturnsArray et (ExtShape $ map Free $ shapeDims shape) u $
+              Just $ ReturnsInBlock mem ixfun]
     (Scalar, Mem size) ->
       return [ReturnsMemory size]
     _ ->
@@ -511,13 +548,14 @@ expReturns _ (AST.LoopOp (DoLoop res merge _ _ _ _)) =
     where typeWithAttr (resname, t) =
             case (t,
                   bindeeLore <$> find ((==resname) . bindeeName) mergevars) of
-              (Array bt shape u, Just (MemSummary mem _))
+              (Array bt shape u, Just (MemSummary mem ixfun))
                 | isMergeVar $ identName mem -> do
                   i <- get
                   put $ i + 1
                   return $ ReturnsArray bt shape u $ Just $ ReturnsNewBlock i
                 | otherwise ->
-                  return (ReturnsArray bt shape u $ Just $ ReturnsInBlock mem)
+                  return (ReturnsArray bt shape u $
+                          Just $ ReturnsInBlock mem ixfun)
               (Array {}, _) ->
                 fail "expReturns: result is not a merge variable."
               (Basic bt, _) ->
@@ -568,9 +606,6 @@ bodyReturns look ts (AST.Body _ bnds res) = do
             MemSummary mem ixfun -> do
               let memname = identName mem
 
-              unless (IxFun.isLinear ixfun) $
-                fail "bodyReturns: cannot handle non-linear index function yet."
-
               if memname `HM.member` boundHere then do
                 (i, memmap) <- get
 
@@ -581,7 +616,7 @@ bodyReturns look ts (AST.Body _ bnds res) = do
 
                   Just _ ->
                     fail "bodyReturns: same memory block used multiple times."
-              else return $ ReturnsInBlock mem
+              else return $ ReturnsInBlock mem ixfun
         return $ ReturnsArray et shape u memsummary
   evalStateT (zipWithM inspect ts $ resultSubExps res)
     (0, HM.empty)

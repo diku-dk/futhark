@@ -21,6 +21,7 @@ import qualified Data.HashSet as HS
 import Data.Maybe
 import Data.List
 
+import Futhark.Analysis.ScalExp as SE
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.Representation.ExplicitMemory
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
@@ -45,7 +46,7 @@ data ExpCompilerResult op =
 -- | When an array is declared, this is where it is stored.
 data MemLocation = MemLocation
                    VName -- ^ Name of memory block.
-                   Imp.DimSize -- ^ Offset into block.
+                   IxFun.IxFun -- ^ Index function.
                    deriving (Show)
 
 data ArrayEntry = ArrayEntry {
@@ -96,8 +97,6 @@ instance MonadFreshNames (ImpM op) where
 runImpM :: ImpM op a -> ExpCompiler op -> VNameSource -> Either String (a, VNameSource, Imp.Code op)
 runImpM (ImpM m) = runRWST m . newEnv
 
--- bad :: String -> ImpM op a
-
 collect :: ImpM op () -> ImpM op (Imp.Code op)
 collect m = pass $ do
   ((), code) <- listen m
@@ -125,11 +124,9 @@ compileInParam fparam = case t of
   Basic bt -> return $ Left $ Imp.ScalarParam name bt
   Mem size -> Left <$> Imp.MemParam name <$> subExpToDimSize size
   Array bt shape _ -> do
-    unless (IxFun.isLinear ixfun) $
-      fail "Can only handle linear (simple) allocation for now."
     shape' <- mapM subExpToDimSize $ shapeDims shape
     return $ Right $ ArrayDecl name bt shape' $
-      MemLocation (identName mem) $ Imp.ConstSize 0
+      MemLocation (identName mem) ixfun
   where name = bindeeName fparam
         t    = bindeeType fparam
         MemSummary mem ixfun = bindeeLore fparam
@@ -185,7 +182,9 @@ compileOutParams rts = do
               (sizeout, destmemsize) <- ensureMemSizeOut x
               tell [Imp.MemParam memout $ Imp.VarSize sizeout]
               return (memout, SetMemory memout destmemsize)
-            ReturnsInBlock memout ->
+            ReturnsInBlock memout ixfun -> do
+              unless (IxFun.isDirect ixfun) $
+                fail "compileOutParams: can only handle direct index functions."
               return (identName memout, CopyIntoMemory $ identName memout)
           (resultshape, destresultshape) <-
             mapAndUnzipM inspectExtDimSize $ extShapeDims shape
@@ -244,8 +243,10 @@ compileBody targets (Body _ bnds (Result _ ses _)) =
     compileSubExpTo d se
 
 compileResultSubExp :: ValueDestination -> SubExp -> ImpM op ()
+
 compileResultSubExp (ScalarDestination name) se =
   compileSubExpTo name se
+
 compileResultSubExp (MemoryDestination mem memsizetarget) (Var v) = do
   MemEntry memsize <- lookupMemory vname
   tell $ Imp.SetMem mem $ identName v
@@ -255,16 +256,19 @@ compileResultSubExp (MemoryDestination mem memsizetarget) (Var v) = do
     Just memsizetarget' ->
       tell $ Imp.SetScalar memsizetarget' $ dimSizeToExp memsize
   where vname = identName v
+
 compileResultSubExp (MemoryDestination {}) (Constant {}) =
   fail "Memory destination result subexpression cannot be a constant."
+
 compileResultSubExp (ArrayDestination memdest shape) (Var v) = do
   arr <- lookupArray $ identName v
-  let MemLocation arrmem arroffset = entryArrayLocation arr
+  let MemLocation arrmem arrixfun = entryArrayLocation arr
+  arroffset <- ixFunOffset arrixfun
   arrmemsize <- entryMemSize <$> lookupMemory arrmem
   case memdest of
     CopyIntoMemory mem -> when (mem /= arrmem) $ tell $
       Imp.Copy mem (Imp.Constant $ IntVal 0)
-               arrmem (dimSizeToExp arroffset) $
+               arrmem arroffset $
                dimSizeToExp arrmemsize
     SetMemory mem memsize -> do
       tell $ Imp.SetMem mem arrmem
@@ -276,6 +280,7 @@ compileResultSubExp (ArrayDestination memdest shape) (Var v) = do
           return ()
         maybeSetShape (Just dim) size =
           tell $ Imp.SetScalar dim $ dimSizeToExp size
+
 compileResultSubExp (ArrayDestination {}) (Constant {}) =
   fail "Array destination result subexpression cannot be a constant."
 
@@ -338,29 +343,25 @@ defCompilePrimOp [target] (Index _ src idxs _)
   | length idxs == arrayRank t = do
     (srcmem, srcoffset, _) <- indexArray (identName src) $ map compileSubExp idxs
     tell $ Imp.SetScalar target $ Imp.Index srcmem srcoffset $ elemType t
-    where t = identType src
-
-defCompilePrimOp [target] (Index _ src idxs _) = do
-  MemLocation destmem destoffset <- arrayLocation target
-  (srcmem, srcoffset, size) <- indexArray (identName src) $ map compileSubExp idxs
-  tell $ Imp.Copy
-    destmem (dimSizeToExp destoffset)
-    srcmem (srcoffset `impTimes` Imp.SizeOf (elemType (identType src)))
-    size
+  | otherwise = return ()
+  where t = identType src
 
 defCompilePrimOp [_] (Conjoin {}) =
   return ()
 
 defCompilePrimOp [target] (Update _ src idxs val _) = do
   srcentry <- lookupArray $ identName src
-  MemLocation destmem destoffset <- arrayLocation target
-  let MemLocation srcmem srcoffset = entryArrayLocation srcentry
-  (_, elemoffset, size) <- indexArray (identName src) $ map compileSubExp idxs
-  unless (destmem == srcmem && destoffset == srcoffset) $
+  MemLocation destmem destixfun <- arrayLocation target
+  destoffset <- ixFunOffset destixfun
+  let MemLocation srcmem srcixfun = entryArrayLocation srcentry
+  srcoffset <- ixFunOffset srcixfun
+  (_, elemoffset, size) <- indexArray (identName src) $
+                           map compileSubExp idxs
+  unless (destmem == srcmem && destixfun == srcixfun) $
     -- Not in-place, so we have to copy all of src to target...
     tell $ Imp.Copy
-      destmem (dimSizeToExp destoffset)
-      srcmem (dimSizeToExp srcoffset) $
+      destmem destoffset
+      srcmem srcoffset $
       arrayByteSizeExp srcentry
   if length idxs == arrayRank srct then
     tell $ Imp.Write destmem elemoffset (elemType srct) $ compileSubExp val
@@ -368,12 +369,14 @@ defCompilePrimOp [target] (Update _ src idxs val _) = do
     Constant {} -> fail "Array-value in update cannot be constant."
     Var v -> do
       valentry <- lookupArray $ identName v
-      let MemLocation valmem valoffset = entryArrayLocation valentry
+      let MemLocation valmem valixfun = entryArrayLocation valentry
+      valoffset <- ixFunOffset valixfun
       tell $ Imp.Copy
-        destmem (elemoffset `impTimes` Imp.SizeOf (elemType srct))
-        valmem (dimSizeToExp valoffset)
+        destmem (elemoffset `impTimes` Imp.SizeOf srcet)
+        valmem valoffset
         size
   where srct = identType src
+        srcet = elemType srct
 
 defCompilePrimOp [target] (Replicate n se _) = do
   i <- newVName "i"
@@ -385,11 +388,12 @@ defCompilePrimOp [target] (Replicate n se _) = do
     Constant {} ->
       fail "Array value in replicate cannot be constant."
     Var v -> do
-      MemLocation vmem voffset <- arrayLocation $ identName v
+      MemLocation vmem vixfun <- arrayLocation $ identName v
+      voffset <- ixFunOffset vixfun
       tell $ Imp.For i (compileSubExp n) $
         Imp.Copy
         targetmem (elemoffset `impTimes` Imp.SizeOf (elemType set))
-        vmem (dimSizeToExp voffset)
+        vmem voffset
         rowsize
   where set = subExpType se
 
@@ -407,52 +411,44 @@ defCompilePrimOp [target] (Copy (Var src) _)
     compileSubExpTo target $ Var src
   | otherwise = do
     srcentry <- lookupArray $ identName src
-    MemLocation destmem destoffset <- arrayLocation target
-    let MemLocation srcmem srcoffset = entryArrayLocation srcentry
+    MemLocation destmem destixfun <- arrayLocation target
+    let et = entryArrayElemType srcentry
+    destoffset <- ixFunOffset destixfun
+    let MemLocation srcmem srcixfun = entryArrayLocation srcentry
+    srcoffset <- ixFunOffset srcixfun
     tell $ Imp.Copy
-      destmem (dimSizeToExp destoffset)
-      srcmem (dimSizeToExp srcoffset) $
+      destmem (destoffset `impTimes` Imp.SizeOf et)
+      srcmem (srcoffset `impTimes` Imp.SizeOf et) $
       arrayByteSizeExp srcentry
   where srct = identType src
 
-defCompilePrimOp [target1, target2] (Split _ n (Var src) restsize _) = do
-  srcentry <- lookupArray $ identName src
-  let MemLocation srcmem srcoffset = entryArrayLocation srcentry
-  MemLocation target1mem target1offset <- arrayLocation target1
-  MemLocation target2mem target2offset <- arrayLocation target2
-  let n' = compileSubExp n
-      rowsize = arrayRowByteSizeExp srcentry
-      restsize' = compileSubExp restsize
-  tell $ Imp.Copy
-    target1mem (dimSizeToExp target1offset)
-    srcmem (dimSizeToExp srcoffset) $
-    rowsize `impTimes` n'
-  tell $ Imp.Copy
-    target2mem (dimSizeToExp target2offset)
-    srcmem (dimSizeToExp srcoffset `impPlus`
-            (rowsize `impTimes` n')) $
-    rowsize `impTimes` restsize'
+defCompilePrimOp _ (Split {}) =
+  return () -- Yes, really.
 
 defCompilePrimOp [target] (Concat _ (Var x) (Var y) _ _) = do
   xentry <- lookupArray $ identName x
-  let MemLocation xmem xoffset = entryArrayLocation xentry
+  let MemLocation xmem xixfun = entryArrayLocation xentry
+  xoffset <- ixFunOffset xixfun
   yentry <- lookupArray $ identName y
-  let MemLocation ymem yoffset = entryArrayLocation yentry
-  MemLocation destmem destoffset <- arrayLocation target
+  let MemLocation ymem yixfun = entryArrayLocation yentry
+  yoffset <- ixFunOffset yixfun
+  MemLocation destmem destixfun <- arrayLocation target
+  destoffset <- ixFunOffset destixfun
   tell $ Imp.Copy
-    destmem (dimSizeToExp destoffset)
-    xmem (dimSizeToExp xoffset) $
+    destmem destoffset
+    xmem xoffset $
     arrayByteSizeExp xentry
   tell $ Imp.Copy
-    destmem (dimSizeToExp destoffset `impPlus`
+    destmem (destoffset `impPlus`
              arrayByteSizeExp xentry)
-    ymem (dimSizeToExp yoffset) $
+    ymem yoffset $
     arrayByteSizeExp yentry
 
 defCompilePrimOp [target] (ArrayLit es rt _) = do
   targetEntry <- lookupArray target
-  let MemLocation mem offset = entryArrayLocation targetEntry
-  unless (offset == Imp.ConstSize 0) $
+  let MemLocation mem ixfun = entryArrayLocation targetEntry
+  offset <- ixFunOffset ixfun
+  unless (offset == Imp.Constant (IntVal 0)) $
     fail "Cannot handle offset in ArrayLit"
   forM_ (zip [0..] es) $ \(i,e) ->
     if basicType rt then
@@ -465,12 +461,13 @@ defCompilePrimOp [target] (ArrayLit es rt _) = do
                            map dimSizeToExp $ drop 1 $
                            entryArrayShape targetEntry
         ventry <- lookupArray $ identName v
-        let MemLocation vmem voffset = entryArrayLocation ventry
+        let MemLocation vmem vixfun = entryArrayLocation ventry
+        voffset <- ixFunOffset vixfun
         tell $ Imp.Copy
-          mem (dimSizeToExp offset `impPlus`
+          mem (offset `impPlus`
                (Imp.Constant (IntVal i) `impTimes`
                 bytesPerElem))
-          vmem (dimSizeToExp voffset)
+          vmem voffset
           bytesPerElem
   where et = elemType rt
 
@@ -590,14 +587,12 @@ declaringVar bindee m =
     Array bt shape _ -> do
       shape' <- mapM subExpToDimSize $ shapeDims shape
       let MemSummary mem ixfun = bindeeLore bindee
-          location = MemLocation (identName mem) $ Imp.ConstSize 0
+          location = MemLocation (identName mem) ixfun
           entry = ArrayVar ArrayEntry {
               entryArrayLocation = location
             , entryArrayElemType = bt
             , entryArrayShape    = shape'
             }
-      unless (IxFun.isLinear ixfun) $
-        fail "Can only handle linear (simple) allocation for now."
       local (insertInVtable name entry) m
   where name = bindeeName bindee
 
@@ -670,11 +665,13 @@ destinationFromTargets targets ts =
         inspect name = do
           entry <- asks $ HM.lookup name . envVtable
           case entry of
-            Just (ArrayVar (ArrayEntry (MemLocation mem _) _ shape)) -> do
+            Just (ArrayVar (ArrayEntry (MemLocation mem ixfun) _ shape)) -> do
               let nullifyFreeDim (Imp.ConstSize _) = Nothing
                   nullifyFreeDim (Imp.VarSize v)
                     | isctx v   = Just v
                     | otherwise = Nothing
+              unless (IxFun.isDirect ixfun) $
+                fail "destinationFromTargets: can only handle direct index functions."
               memsize <- entryMemSize <$> lookupMemory mem
               let shape' = map nullifyFreeDim shape
                   memdest
@@ -697,9 +694,10 @@ indexArray name indices = do
       expSum = foldl impPlus $ Imp.Constant $ IntVal 0
       dimsizes = map expProduct $ drop 1 $ tails arrshape
       ixoffset = expSum $ zipWith impTimes indices dimsizes
-      MemLocation arrmem arroffset = entryArrayLocation entry
+      MemLocation arrmem ixfun = entryArrayLocation entry
+  arroffset <- ixFunOffset ixfun
   return (arrmem,
-          impPlus (dimSizeToExp arroffset) ixoffset,
+          impPlus arroffset ixoffset,
           expProduct $
             Imp.SizeOf (entryArrayElemType entry) :
             drop (length indices) arrshape)
@@ -726,7 +724,24 @@ arrayByteSizeExp entry =
   foldl impTimes (Imp.SizeOf $ entryArrayElemType entry) $
   map dimSizeToExp $ entryArrayShape entry
 
-arrayRowByteSizeExp :: ArrayEntry -> Imp.Exp
-arrayRowByteSizeExp entry =
-  foldl impTimes (Imp.SizeOf $ entryArrayElemType entry) $
-  drop 1 $ map dimSizeToExp $ entryArrayShape entry
+ixFunOffset :: Monad m => IxFun.IxFun -> m Imp.Exp
+ixFunOffset ixfun =
+  case IxFun.linearWithOffset ixfun of
+    Just offset
+      | Just offset' <- scalExpToImpExp offset ->
+        return offset'
+      | otherwise ->
+        fail $ "Cannot turn " ++ pretty offset ++ " into an Imp.Exp."
+    Nothing -> fail $ "Index function " ++ pretty ixfun ++
+               " is not linear with an offset."
+
+  where scalExpToImpExp (SE.Val x) =
+          Just $ Imp.Constant x
+        scalExpToImpExp (SE.Id v) =
+          Just $ Imp.ScalarVar $ identName v
+        scalExpToImpExp (SE.SPlus e1 e2) =
+          Imp.BinOp Plus <$> scalExpToImpExp e1 <*> scalExpToImpExp e2
+        scalExpToImpExp (SE.STimes e1 e2) =
+          Imp.BinOp Times <$> scalExpToImpExp e1 <*> scalExpToImpExp e2
+        scalExpToImpExp _ =
+          Nothing

@@ -10,6 +10,7 @@ import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Writer
 import qualified Data.DList as DL
+import Data.List
 import Data.Maybe
 import Data.Loc
 import qualified Data.HashMap.Lazy as HM
@@ -89,6 +90,34 @@ specialisedMkLetM [] [Ident name _ _] e@(PrimOp (SubExp (Var src))) = do
       return $ Just $ Let pat' () e
     _ -> return Nothing
 
+specialisedMkLetM [] [ident] e@(PrimOp (Index _ src is _)) = do
+  summary <- lookupSummary' $ identName src
+  case summary of
+    MemSummary m ixfun -> do
+      let annot
+            | arrayRank (identType src) == length is =
+              Scalar
+            | otherwise =
+              MemSummary m $ IxFun.applyInd ixfun $
+              map SE.subExpToScalExp is
+          pat = Pattern [Bindee ident annot]
+      return $ Just $ Let pat () e
+    _ -> fail $ "Invalid memory summary for " ++ pretty src ++ ": " ++
+         pretty summary
+
+specialisedMkLetM [] [ident1, ident2] e@(PrimOp (Split _ n (Var a) _ _)) = do
+  summary <- lookupSummary' $ identName a
+  case summary of
+    MemSummary m ixfun -> do
+      let t = identType ident1
+          offset = sliceOffset (arrayShape t) [SE.subExpToScalExp n]
+          bindee1 = Bindee ident1 $ MemSummary m ixfun
+          bindee2 = Bindee ident2 $ MemSummary m $ IxFun.offset ixfun offset
+          pat = [bindee1, bindee2]
+      return $ Just $ Let (Pattern pat) () e
+    _ -> fail $ "Invalid memory summary for " ++ pretty a ++ ": " ++
+         pretty summary
+
 specialisedMkLetM _ _ _ = return Nothing
 
 allocForArray :: Type -> SrcLoc -> AllocM (SubExp, Ident)
@@ -100,7 +129,8 @@ allocForArray t loc = do
   m <- letExp "mem" $ PrimOp $ Alloc size loc
   return (size, m)
 
-allocsForPattern :: [Ident] -> [Ident] -> [ExpReturns] -> AllocM [Bindee MemSummary]
+allocsForPattern :: [Ident] -> [Ident] -> [ExpReturns]
+                 -> AllocM [Bindee MemSummary]
 allocsForPattern sizeidents validents rts = do
   let sizes' = [ Bindee size Scalar | size <- sizeidents ]
   (vals,(memsizes,mems)) <- runWriterT $ forM (zip validents rts) $ \(ident, rt) ->
@@ -108,8 +138,8 @@ allocsForPattern sizeidents validents rts = do
     case rt of
       ReturnsScalar _ -> return $ Bindee ident Scalar
       ReturnsMemory _ -> return $ Bindee ident Scalar
-      ReturnsArray _ _ _ (Just (ReturnsInBlock mem)) ->
-        return $ Bindee ident $ directIndexFunction mem $ identType ident
+      ReturnsArray _ _ _ (Just (ReturnsInBlock mem ixfun)) ->
+        return $ Bindee ident $ MemSummary mem ixfun
       ReturnsArray _ extshape _ Nothing
         | Just shape <- knownShape extshape -> do
         (_, m) <- lift $ allocForArray (identType ident `setArrayShape` Shape shape) loc
@@ -146,6 +176,13 @@ basicSize Bool = 1
 basicSize Char = 1
 basicSize Real = 8
 basicSize Cert = 1
+
+sliceOffset :: Shape -> [SE.ScalExp] -> SE.ScalExp
+sliceOffset shape is =
+  SE.ssum $ zipWith SE.STimes is sliceSizes
+  where sliceSizes =
+          map SE.sproduct $
+          drop 1 $ tails $ map SE.subExpToScalExp $ shapeDims shape
 
 computeSize :: MonadBinder m => SrcLoc -> SubExp -> [SubExp] -> m SubExp
 computeSize _ current [] = return current
@@ -195,20 +232,18 @@ allocInFParams params m = do
       params' = memsizeparams <> memparams <> valparams
   local (summary `HM.union`) $ m params'
 
-ensureLinearArray :: SubExp -> AllocM (SubExp, Ident, SubExp)
-ensureLinearArray (Var v) = do
+ensureDirectArray :: Ident -> AllocM (SubExp, Ident, SubExp)
+ensureDirectArray v = do
   res <- lookupSummary v
   case res of
     Just (MemSummary mem ixfun)
       | Mem size <- identType mem,
-        IxFun.isLinear ixfun ->
+        IxFun.isDirect ixfun ->
       return (size, mem, Var v)
     _ ->
       -- We need to do a new allocation, copy 'v', and make a new
       -- binding for the size of the memory block.
       allocLinearArray (baseString $ identName v) $ Var v
-ensureLinearArray (Constant val loc) =
-  allocLinearArray "const_array" $ Constant val loc
 
 allocLinearArray :: String
                  -> SubExp -> AllocM (SubExp, Ident, SubExp)
@@ -216,7 +251,7 @@ allocLinearArray s se = do
   (size, mem) <- allocForArray t loc
   v' <- newIdent s t loc
   let pat = Pattern [Bindee v' $ directIndexFunction mem t]
-  addBinding $ Let pat () $ PrimOp $ SubExp se
+  addBinding $ Let pat () $ PrimOp $ Copy se loc
   return (size, mem, Var v')
   where loc = srclocOf se
         t   = subExpType se
@@ -224,9 +259,9 @@ allocLinearArray s se = do
 funcallArgs :: [(SubExp,Diet)] -> AllocM [(SubExp,Diet)]
 funcallArgs args = do
   (valargs, (memsizeargs, memargs)) <- runWriterT $ forM args $ \(arg,d) ->
-    case subExpType arg of
-      Array {} -> do
-        (size, mem, arg') <- lift $ ensureLinearArray arg
+    case (arg, subExpType arg) of
+      (Var v, Array {}) -> do
+        (size, mem, arg') <- lift $ ensureDirectArray v
         tell ([(size, Observe)], [(Var mem, Observe)])
         return (arg', d)
       _ ->
@@ -239,7 +274,7 @@ explicitAllocations prog =
   where free = newNameSourceForProg prog
 
 memoryInRetType :: In.RetType -> RetType
-memoryInRetType ts =
+memoryInRetType (ExtRetType ts) =
   evalState (mapM addAttr ts) $ startOfFreeIDRange ts
   where addAttr (Basic t) = return $ ReturnsScalar t
         addAttr (Mem _)  = fail "memoryInRetType: too much memory"
@@ -259,8 +294,14 @@ allocInFun (In.FunDec fname rettype params body loc) =
 
 allocInBody :: In.Body -> AllocM Body
 allocInBody (Body _ bnds res) =
-  allocInBindings bnds $ \bnds' ->
-    return $ Body () bnds' res
+  allocInBindings bnds $ \bnds' -> do
+    (ses, allocs) <- collectBindings $ mapM ensureDirect $ resultSubExps res
+    return $ Body () (bnds'<>allocs) res { resultSubExps = ses }
+  where ensureDirect se@(Constant {}) = return se
+        ensureDirect (Var v)
+          | basicType $ identType v = return $ Var v
+          | otherwise = do (_, _, v') <- ensureDirectArray v
+                           return v'
 
 allocInBindings :: [In.Binding] -> ([Binding] -> AllocM a)
                 -> AllocM a
@@ -401,5 +442,6 @@ simplifiable =
                   ReturnsMemory <$> Engine.simplifySubExp size
                 simplifyMemReturn (ReturnsNewBlock i) =
                   return $ ReturnsNewBlock i
-                simplifyMemReturn (ReturnsInBlock v) =
-                  ReturnsInBlock <$> Engine.simplifyIdent v
+                simplifyMemReturn (ReturnsInBlock v ixfun) =
+                  ReturnsInBlock <$> Engine.simplifyIdent v <*>
+                  pure ixfun

@@ -60,7 +60,7 @@ instance Eq (IxFun n) where
       SFalse -> False
       STrue ->
         -- FIXME: I cannot figure out how to get the constraint out.
-        case unsafeCoerce Refl :: Dict (m1 ~ m2) of
+        case unsafeCoerce (Dict :: Dict ()) :: Dict (m1 ~ m2) of
           Dict ->
             ixfun1 == ixfun2 && Vec.toList is1 == Vec.toList is2
     where m1' :: SNat m1

@@ -59,7 +59,7 @@ instance Eq IxFun where
     case n1 %:== n2 of
       SFalse -> False
       STrue ->
-        case unsafeCoerce Refl :: Dict (n1 ~ n2) of
+        case unsafeCoerce (Dict :: Dict ()) :: Dict (n1 ~ n2) of
           Dict -> fun1 == fun2
 
 instance Substitute IxFun where
