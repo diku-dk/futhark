@@ -70,11 +70,11 @@ data Exp = Constant BasicValue
          | Index VName Exp BasicType
          | ScalarVar VName
          | SizeOf BasicType
-           deriving (Show)
+           deriving (Eq, Show)
 
 data UnOp = Not
           | Negate
-            deriving (Show)
+            deriving (Eq, Show)
 
 instance Monoid (Code a) where
   mempty = Skip
