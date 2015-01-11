@@ -318,7 +318,9 @@ mainCall fname (Function outputs inputs _ results args) = do
                $decls:paramdecls
                $ty:crettype $id:ret;
                $stms:readstms
+               start = clock();
                $id:ret = $id:(funName fname)($args:argexps);
+               end = clock();
                $stms:unpackstms
                $stms:printstms
              }|]
@@ -340,6 +342,7 @@ $esc:("#include <stdio.h>")
 $esc:("#include <stdlib.h>")
 $esc:("#include <string.h>")
 $esc:("#include <math.h>")
+$esc:("#include <time.h>")
 
 $edecls:(typeDefinitions endstate)
 
@@ -371,9 +374,13 @@ $edecls:readerFunctions
 
 $edecls:(map funcToDef definitions)
 
-int main() {
+int main(int argc, char** argv) {
+  typename clock_t start, end;
   $stms:(compInit endstate)
   $stm:main;
+  if (argc == 2 && strcmp(argv[1], "-t") == 0) {
+    printf("Runtime excluding IO: %fs\n", ((double)end-start)/CLOCKS_PER_SEC);
+  }
   return 0;
 }
 
