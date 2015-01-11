@@ -284,10 +284,6 @@ subExpRange (Var v) vtable =
 subExpRange (Constant bv _) _ =
   (Just $ Val bv, Just $ Val bv)
 
-subExpToScalExp :: SubExp -> ScalExp
-subExpToScalExp (Var v)         = Id v
-subExpToScalExp (Constant bv _) = Val bv
-
 insertEntry :: VName -> Entry lore -> SymbolTable lore
             -> SymbolTable lore
 insertEntry name entry =

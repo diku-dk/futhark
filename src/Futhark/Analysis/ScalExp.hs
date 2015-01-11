@@ -2,11 +2,14 @@ module Futhark.Analysis.ScalExp
   ( RelOp0(..)
   , ScalExp(..)
   , scalExpType
+  , subExpToScalExp
   , toScalExp
   , LookupVar
   , fromScalExp
   , fromScalExp'
   , getIds
+  , sproduct
+  , ssum
   )
 where
 
@@ -125,6 +128,11 @@ scalExpType (MaxMin _ (e:_)) = scalExpType e
 -- scalar expression.
 type LookupVar = VName -> Maybe ScalExp
 
+-- | Non-recursively convert a subexpression to a 'ScalExp'.
+subExpToScalExp :: SubExp -> ScalExp
+subExpToScalExp (Var v)          = Id v
+subExpToScalExp (Constant val _) = Val val
+
 toScalExp :: LookupVar -> Exp lore -> Maybe ScalExp
 toScalExp look (PrimOp (SubExp se))    =
   toScalExp' look se
@@ -152,6 +160,18 @@ sminus :: ScalExp -> ScalExp -> ScalExp
 sminus x (Val (IntVal 0))  = x
 sminus x (Val (RealVal 0)) = x
 sminus x y                 = x `SMinus` y
+
+-- | Take the product of a list of 'ScalExp's, or the integer @1@ if
+-- the list is empty.
+sproduct :: [ScalExp] -> ScalExp
+sproduct []       = Val $ IntVal 1
+sproduct (se:ses) = foldl STimes se ses
+
+-- | Take the sum of a list of 'ScalExp's, or the integer @0@ if the
+-- list is empty.
+ssum :: [ScalExp] -> ScalExp
+ssum []       = Val $ IntVal 0
+ssum (se:ses) = foldl STimes se ses
 
 binOpScalExp :: BinOp -> Maybe (ScalExp -> ScalExp -> ScalExp)
 binOpScalExp bop = liftM snd $ find ((==bop) . fst)
