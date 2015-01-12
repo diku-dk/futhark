@@ -5,9 +5,7 @@
 -- transformations in-place.  This module should be run very late in
 -- the compilation pipeline, ideally just before the code generator.
 module Futhark.FirstOrderTransform
-  ( transformable
-  , transformProg
-  , transformExp
+  ( transformProg
   )
   where
 
@@ -20,16 +18,6 @@ import Futhark.Representation.Basic
 import Futhark.Renamer
 import Futhark.MonadFreshNames
 import Futhark.Tools
-
--- | Return 'True' if the given expression is a SOAC that can be
--- first-order transformed.
-transformable :: Exp -> Bool
-transformable (LoopOp (Map {})) = True
-transformable (LoopOp (Reduce {})) = True
-transformable (LoopOp (Redomap {})) = True
-transformable (LoopOp (Scan {})) = True
-transformable (LoopOp (Filter {})) = True
-transformable _ = False
 
 -- | Perform the first-order transformation on an Futhark program.  The
 -- resulting program is not uniquely named, so make sure to run the
