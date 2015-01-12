@@ -67,20 +67,20 @@ primOpType (Replicate ne e _) =
   [arrayOf (subExpType e) (Shape [ne]) u]
   where u = uniqueness $ subExpType e
 primOpType (Reshape _ [] e _) =
-  [Basic $ elemType $ subExpType e]
+  [Basic $ elemType $ identType e]
 primOpType (Reshape _ shape e _) =
-  [subExpType e `setArrayShape` Shape shape]
+  [identType e `setArrayShape` Shape shape]
 primOpType (Rearrange _ perm e _) =
-  [subExpType e `setArrayShape` Shape (permuteShape perm shape)]
-  where Shape shape = arrayShape $ subExpType e
+  [identType e `setArrayShape` Shape (permuteShape perm shape)]
+  where Shape shape = arrayShape $ identType e
 primOpType (Rotate _ _ e _) =
-  [subExpType e]
+  [identType e]
 primOpType (Split _ ne e secsize _) =
-  [subExpType e `setOuterSize` ne,
-   subExpType e `setOuterSize` secsize]
+  [identType e `setOuterSize` ne,
+   identType e `setOuterSize` secsize]
 primOpType (Concat _ x y ressize _) =
-  [subExpType x `setUniqueness` u `setOuterSize` ressize]
-  where u = uniqueness (subExpType x) <> uniqueness (subExpType y)
+  [identType x `setUniqueness` u `setOuterSize` ressize]
+  where u = uniqueness (identType x) <> uniqueness (identType y)
 primOpType (Copy e _) =
   [subExpType e `setUniqueness` Unique]
 primOpType (Assert _ _) =
@@ -94,13 +94,13 @@ loopOpExtType :: LoopOp lore -> [ExtType]
 loopOpExtType (DoLoop res merge _ _ _ _) =
   loopExtType res $ map (bindeeIdent . fst) merge
 loopOpExtType (Map _ f arrs _) =
-  staticShapes $ mapType f $ map subExpType arrs
+  staticShapes $ mapType f $ map identType arrs
 loopOpExtType (Reduce _ fun _ _) =
   staticShapes $ lambdaReturnType fun
 loopOpExtType (Scan _ _ inputs _) =
-  staticShapes $ map (subExpType . snd) inputs
+  staticShapes $ map (identType . snd) inputs
 loopOpExtType (Filter _ f arrs _) =
-  filterType f $ map subExpType arrs
+  filterType f $ map identType arrs
 loopOpExtType (Redomap _ outerfun _ _ _ _) =
   staticShapes $ lambdaReturnType outerfun
 

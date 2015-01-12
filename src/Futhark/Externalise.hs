@@ -92,12 +92,12 @@ externalisePrimOp (I.Update cs src idxs ve loc) =
 externalisePrimOp (I.Split cs ne ae _ loc) =
   E.Split (externaliseCerts cs)
           (externaliseSubExp ne)
-          (externaliseSubExp ae)
+          (E.Var $ externaliseIdent ae)
           loc
 externalisePrimOp (I.Concat cs x y _ loc) =
   E.Concat (externaliseCerts cs)
-           (externaliseSubExp x)
-           (externaliseSubExp y)
+           (E.Var $ externaliseIdent x)
+           (E.Var $ externaliseIdent y)
            loc
 externalisePrimOp (I.Copy e loc) =
   E.Copy (externaliseSubExp e) loc
@@ -110,17 +110,17 @@ externalisePrimOp (I.Replicate ne ve loc) =
 externalisePrimOp (I.Reshape cs shape e loc) =
   E.Reshape (externaliseCerts cs)
             (map externaliseSubExp shape)
-            (externaliseSubExp e)
+            (E.Var $ externaliseIdent e)
             loc
 externalisePrimOp (I.Rearrange cs perm e loc) =
   E.Rearrange (externaliseCerts cs)
               perm
-              (externaliseSubExp e)
+              (E.Var $ externaliseIdent e)
               loc
 externalisePrimOp (I.Rotate cs n e loc) =
   E.Rotate (externaliseCerts cs)
            n
-           (externaliseSubExp e)
+           (E.Var $ externaliseIdent e)
            loc
 
 externaliseLoopOp :: I.LoopOp -> E.Exp
@@ -239,10 +239,10 @@ externaliseType (I.Array et shape u) =
   E.Array (E.Basic et) (replicate (shapeRank shape) Nothing)
           u mempty
 
-externaliseSOACArrayArgs :: [I.SubExp] -> SrcLoc -> E.Exp
-externaliseSOACArrayArgs [e] _   = externaliseSubExp e
+externaliseSOACArrayArgs :: [I.Ident] -> SrcLoc -> E.Exp
+externaliseSOACArrayArgs [e] _   = externaliseSubExp $ I.Var e
 externaliseSOACArrayArgs es  loc =
-  Zip [ (e, E.typeOf e) | e <- map externaliseSubExp es ] loc
+  Zip [ (e, E.typeOf e) | e <- map (externaliseSubExp . I.Var) es ] loc
 
 externaliseSubExps :: [I.SubExp] -> SrcLoc -> E.Exp
 externaliseSubExps [e] _  = externaliseSubExp e

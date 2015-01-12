@@ -273,15 +273,15 @@ internaliseExp _ (E.Transpose cs k n e loc) =
   internaliseOperation "transpose" cs e loc $ \cs' v ->
     let rank = I.arrayRank $ I.identType v
         perm = I.transposeIndex k n [0..rank-1]
-    in  return $ I.Rearrange cs' perm (I.Var v) loc
+    in  return $ I.Rearrange cs' perm v loc
 
 internaliseExp _ (E.Rearrange cs perm e loc) =
   internaliseOperation "rearrange" cs e loc $ \cs' v ->
-    return $ I.Rearrange cs' perm (I.Var v) loc
+    return $ I.Rearrange cs' perm v loc
 
 internaliseExp _ (E.Rotate cs n e loc) =
   internaliseOperation "rotate" cs e loc $ \cs' v ->
-    return $ I.Rotate cs' n (I.Var v) loc
+    return $ I.Rotate cs' n v loc
 
 internaliseExp _ (E.Reshape cs shape e loc) = do
   shape' <- mapM (internaliseExp1 "shape") shape
@@ -292,7 +292,7 @@ internaliseExp _ (E.Reshape cs shape e loc) = do
                eAssert (eBinOp I.Equal (prod $ I.arrayDims $ I.identType v)
                                        (prod shape')
                                        (I.Basic I.Bool) loc)
-    return $ I.Reshape (shapeOk:cs') shape' (I.Var v) loc
+    return $ I.Reshape (shapeOk:cs') shape' v loc
   where prod l = foldBinOp I.Times (intconst 1 loc) l $ I.Basic I.Int
 
 internaliseExp _ (E.Split cs nexp arrexp loc) = do
@@ -310,7 +310,7 @@ internaliseExp _ (E.Split cs nexp arrexp loc) = do
   let cert = maybe (given loc) I.Var cs''
       combsplit arr (a,b) =
         letBind_ (basicPattern [a,b]) $
-        PrimOp $ I.Split (certify c []) nexp' (I.Var arr) ressize loc
+        PrimOp $ I.Split (certify c []) nexp' arr ressize loc
       els = case arrs of
               []  -> []
               [_] -> map (I.Var . fst) partnames ++
@@ -337,7 +337,7 @@ internaliseExp desc (E.Concat cs x y loc) = do
         matchcs <- zipWithM matches (drop 1 $ I.arrayDims $ I.identType xarr)
                                     (drop 1 $ I.arrayDims $ I.identType yarr)
         return $ I.PrimOp $
-          I.Concat (matchcs++certs) (I.Var xarr) (I.Var yarr) ressize loc
+          I.Concat (matchcs++certs) xarr yarr ressize loc
   c' <- mergeCerts certs
   concs <- letSubExps desc =<< zipWithM conc xs ys
   return $ tuplit c' loc concs
@@ -348,7 +348,7 @@ internaliseExp desc (E.Map lam arr loc) = do
   se <- conjoinCerts cs loc
   lam' <- withNonuniqueReplacements $
           internaliseMapLambda internaliseBody se lam $ map I.Var arrs
-  certifySOAC desc se $ I.Map cs lam' (map I.Var arrs) loc
+  certifySOAC desc se $ I.Map cs lam' arrs loc
 
 internaliseExp desc e@(E.Reduce lam ne arr loc) = do
   (c1,arrs) <- tupToIdentList "reduce_arr" arr
@@ -358,7 +358,7 @@ internaliseExp desc e@(E.Reduce lam ne arr loc) = do
   lam' <- withNonuniqueReplacements $
           internaliseFoldLambda internaliseBody se lam
           (map I.identType nes) (map I.identType arrs)
-  let input = zip (map I.Var nes) (map I.Var arrs)
+  let input = zip (map I.Var nes) arrs
   certifyFoldSOAC desc se t $ I.Reduce cs lam' input loc
   where t = internaliseType $ E.typeOf e
 
@@ -370,7 +370,7 @@ internaliseExp desc e@(E.Scan lam ne arr loc) = do
   lam' <- withNonuniqueReplacements $
           internaliseFoldLambda internaliseBody se lam
           (map I.identType nes) (map I.identType arrs)
-  let input = zip (map I.Var nes) (map I.Var arrs)
+  let input = zip (map I.Var nes) arrs
   certifyFoldSOAC desc se t $ I.Scan cs lam' input loc
   where t = internaliseType $ E.typeOf e
 
@@ -380,7 +380,7 @@ internaliseExp desc (E.Filter lam arr loc) = do
   se <- conjoinCerts cs loc
   lam' <- withNonuniqueReplacements $
           internaliseFilterLambda internaliseBody se lam $ map I.Var arrs
-  certifySOAC desc se $ I.Filter cs lam' (map I.Var arrs) loc
+  certifySOAC desc se $ I.Filter cs lam' arrs loc
 
 internaliseExp desc e@(E.Redomap lam1 lam2 ne arrs loc) = do
   (c1,arrs') <- tupToIdentList "redomap_arr" arrs
@@ -394,7 +394,7 @@ internaliseExp desc e@(E.Redomap lam1 lam2 ne arrs loc) = do
            internaliseFoldLambda internaliseBody se lam2
            (map I.identType nes) (map I.identType arrs')
   certifyFoldSOAC desc se t $
-    I.Redomap cs lam1' lam2' (map I.Var nes) (map I.Var arrs') loc
+    I.Redomap cs lam1' lam2' (map I.Var nes) arrs' loc
   where t = internaliseType $ E.typeOf e
 
 -- The "interesting" cases are over, now it's mostly boilerplate.

@@ -55,7 +55,7 @@ dataDependencies' startdeps = foldl grow startdeps . bodyBindings
 
         grow deps (Let pat _ (LoopOp (Map cs fun arrs _))) =
           let pardeps = mkDeps (lambdaParams fun) $
-                        soacArgDeps deps cs $ map (depsOf deps) arrs
+                        soacArgDeps deps cs $ map (depsOfIdent deps) arrs
               deps' = dataDependencies' (pardeps `HM.union` deps) $
                       lambdaBody fun
               resdeps = HM.fromList $ zip (patternNames pat) $
@@ -64,7 +64,7 @@ dataDependencies' startdeps = foldl grow startdeps . bodyBindings
 
         grow deps (Let pat _ (LoopOp (Filter cs fun arrs _))) =
           let pardeps = mkDeps (lambdaParams fun) $
-                        soacArgDeps deps cs $ map (depsOf deps) arrs
+                        soacArgDeps deps cs $ map (depsOfIdent deps) arrs
               deps' = dataDependencies' (pardeps `HM.union` deps) $
                       lambdaBody fun
               resdeps = mkDeps (patternIdents pat) $
@@ -81,7 +81,8 @@ dataDependencies' startdeps = foldl grow startdeps . bodyBindings
 
         grow deps (Let pat _ (LoopOp (Redomap cs outerfun innerfun acc arr _))) =
           let (deps', seconddeps) =
-                foldDeps' deps cs innerfun (map (depsOf deps) acc) (map (depsOf deps) arr)
+                foldDeps' deps cs innerfun
+                (map (depsOf deps) acc) (map (depsOfIdent deps) arr)
               (outerdeps, names) =
                 foldDeps' deps cs outerfun seconddeps seconddeps
           in mkDeps (patternIdents pat) names `HM.union` outerdeps `HM.union` deps'
@@ -103,11 +104,12 @@ foldDeps' deps cs fun acc arr =
 
 foldDeps :: Proper lore =>
             Dependencies
-         -> Pattern lore -> [Ident] -> Lambda lore -> [SubExp] -> [SubExp]
+         -> Pattern lore -> [Ident] -> Lambda lore -> [SubExp] -> [Ident]
          -> HM.HashMap VName Names
 foldDeps deps pat cs fun acc arr =
   let pardeps = HM.fromList $ zip (map identName $ lambdaParams fun) $
-                soacArgDeps deps cs $ map (depsOf deps) $ acc++arr
+                soacArgDeps deps cs $
+                map (depsOf deps) acc ++ map (depsOfIdent deps) arr
       deps' = dataDependencies' (pardeps `HM.union` deps) $ lambdaBody fun
       resdeps = HM.fromList $ zip (patternNames pat) $
                 lambdaDeps deps' fun
@@ -128,7 +130,10 @@ nameDeps name deps = HS.insert name $ fromMaybe HS.empty $ HM.lookup name deps
 
 depsOf :: Dependencies -> SubExp -> Names
 depsOf _ (Constant _ _) = HS.empty
-depsOf deps (Var v)     = nameDeps (identName v) deps
+depsOf deps (Var v)     = depsOfIdent deps v
+
+depsOfIdent :: Dependencies -> Ident -> Names
+depsOfIdent deps v = nameDeps (identName v) deps
 
 mkDeps :: [IdentBase shape] -> [Names] -> Dependencies
 mkDeps idents names = HM.fromList $ zip (map identName idents) names

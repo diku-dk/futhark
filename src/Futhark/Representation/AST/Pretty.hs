@@ -218,7 +218,7 @@ ppParam param = ppr (identType param) <+> ppr param
 ppBinOp :: BinOp -> SubExp -> SubExp -> Doc
 ppBinOp bop x y = ppr x <+/> text (opStr bop) <+> ppr y
 
-ppSOAC :: Pretty fn => String -> [fn] -> Maybe [SubExp] -> [SubExp] -> Doc
+ppSOAC :: Pretty fn => String -> [fn] -> Maybe [SubExp] -> [Ident] -> Doc
 ppSOAC name funs es as =
   text name <> parens (ppList funs </>
                        commasep (es' ++ map ppr as))

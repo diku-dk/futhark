@@ -48,15 +48,15 @@ primOpAliases (Iota {}) =
 primOpAliases (Replicate _ e _) =
   [subExpAliases e]
 primOpAliases (Reshape _ _ e _) =
-  [subExpAliases e]
+  [identAliases e]
 primOpAliases (Rearrange _ _ e _) =
-  [subExpAliases e]
+  [identAliases e]
 primOpAliases (Rotate _ _ e _) =
-  [subExpAliases e]
+  [identAliases e]
 primOpAliases (Split _ _ e _ _) =
-  [subExpAliases e,subExpAliases e]
+  [identAliases e,identAliases e]
 primOpAliases (Concat _ x y _ _) =
-  [subExpAliases x <> subExpAliases y]
+  [identAliases x <> identAliases y]
 primOpAliases (Copy {}) =
   [mempty]
 primOpAliases (Assert _ _) =
@@ -76,7 +76,7 @@ loopOpAliases (Reduce _ f _ _) =
 loopOpAliases (Scan _ f _ _) =
   map (const mempty) $ lambdaReturnType f
 loopOpAliases (Filter _ _ arrs _) =
-  map subExpAliases arrs
+  map identAliases arrs
 loopOpAliases (Redomap _ outerfun _ _ _ _) =
   map (const mempty) $ lambdaReturnType outerfun
 

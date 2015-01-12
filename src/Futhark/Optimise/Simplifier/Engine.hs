@@ -213,7 +213,7 @@ bindLParams params =
     foldr ST.insertLParam vtable params
 
 bindArrayLParams :: MonadEngine m =>
-                    [(Param,Maybe SubExp)] -> m a -> m a
+                    [(Param,Maybe Ident)] -> m a -> m a
 bindArrayLParams params =
   localVtable $ \vtable ->
     foldr (uncurry ST.insertArrayLParam) vtable params
@@ -553,13 +553,13 @@ simplifyLoopOp (DoLoop respat merge loopvar boundexp loopbody loc) = do
 
 simplifyLoopOp (Map cs fun arrs loc) = do
   cs' <- simplifyCerts cs
-  arrs' <- mapM simplifySubExp arrs
+  arrs' <- mapM simplifyIdent arrs
   fun' <- simplifyLambda fun $ map Just arrs'
   return $ Map cs' fun' arrs' loc
 
 simplifyLoopOp (Filter cs fun arrs loc) = do
   cs' <- simplifyCerts cs
-  arrs' <- mapM simplifySubExp arrs
+  arrs' <- mapM simplifyIdent arrs
   fun' <- simplifyLambda fun $ map Just arrs'
   return $ Filter cs' fun' arrs' loc
 
@@ -567,7 +567,7 @@ simplifyLoopOp (Reduce cs fun input loc) = do
   let (acc, arrs) = unzip input
   cs' <- simplifyCerts cs
   acc' <- mapM simplifySubExp acc
-  arrs' <- mapM simplifySubExp arrs
+  arrs' <- mapM simplifyIdent arrs
   fun' <- simplifyLambda fun $ map Just arrs'
   return $ Reduce cs' fun' (zip acc' arrs') loc
 
@@ -575,14 +575,14 @@ simplifyLoopOp (Scan cs fun input loc) = do
   let (acc, arrs) = unzip input
   cs' <- simplifyCerts cs
   acc' <- mapM simplifySubExp acc
-  arrs' <- mapM simplifySubExp arrs
+  arrs' <- mapM simplifyIdent arrs
   fun' <- simplifyLambda fun $ map Just arrs'
   return $ Scan cs' fun' (zip acc' arrs') loc
 
 simplifyLoopOp (Redomap cs outerfun innerfun acc arrs loc) = do
   cs' <- simplifyCerts cs
   acc' <- mapM simplifySubExp acc
-  arrs' <- mapM simplifySubExp arrs
+  arrs' <- mapM simplifyIdent arrs
   outerfun' <- simplifyLambda outerfun $
                replicate (length $ lambdaParams outerfun) Nothing
   (innerfun', used) <- tapUsage $ simplifyLambda innerfun $ map Just arrs
@@ -600,7 +600,7 @@ simplifyLoopOp (Redomap cs outerfun innerfun acc arrs loc) = do
                  -- changing semantics.  Ideally, we should pick the
                  -- "simplest" size instead of just the one of the
                  -- first array, but I do not think it matters much.
-                 let outerSize = arraySize 0 $ subExpType firstarr
+                 let outerSize = arraySize 0 $ identType firstarr
                  input <- newIdent "unused_input"
                           (arrayOf (Basic Int) (Shape [outerSize]) Nonunique) $
                           srclocOf firstarr
@@ -609,7 +609,7 @@ simplifyLoopOp (Redomap cs outerfun innerfun acc arrs loc) = do
                  return (lam { lambdaParams =
                                   accparams ++
                                   [firstparam { identType = Basic Int }] },
-                         [Var input])
+                         [input])
                (arrparams', arrinps') ->
                  return (lam { lambdaParams = accparams ++ arrparams' }, arrinps')
           | otherwise = return (lam, arrinps)
@@ -674,7 +674,7 @@ simplifyType (Basic bt) =
   return $ Basic bt
 
 simplifyLambda :: MonadEngine m =>
-                  Lambda (InnerLore m) -> [Maybe SubExp]
+                  Lambda (InnerLore m) -> [Maybe Ident]
                -> m (Lambda (Lore m))
 simplifyLambda (Lambda params body rettype loc) arrs = do
   params' <- mapM simplifyIdentBinding params

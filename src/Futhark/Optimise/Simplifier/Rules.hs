@@ -85,7 +85,7 @@ liftIdentityMapping _ (Let pat _ (LoopOp (Map cs fun arrs loc))) =
         free = freeInBody $ lambdaBody fun
         rettype = lambdaReturnType fun
         Result rescs ses resloc = bodyResult $ lambdaBody fun
-        outersize = arraysSize 0 $ map subExpType arrs
+        outersize = arraysSize 0 $ map identType arrs
 
         freeOrConst (Var v)       = v `HS.member` free
         freeOrConst (Constant {}) = True
@@ -99,7 +99,7 @@ liftIdentityMapping _ (Let pat _ (LoopOp (Map cs fun arrs loc))) =
                             [Type])
         checkInvariance (outId, Var v, _) (invariant, mapresult, rettype')
           | Just inp <- HM.lookup (identName v) inputMap =
-            ((Pattern [outId], PrimOp $ SubExp inp) : invariant,
+            ((Pattern [outId], PrimOp $ SubExp $ Var inp) : invariant,
              mapresult,
              rettype')
         checkInvariance (outId, e, t) (invariant, mapresult, rettype')
@@ -120,7 +120,7 @@ removeReplicateMapping vtable (Let pat _ (LoopOp (Map cs fun arrs loc)))
       fun' = fun { lambdaParams = params }
       -- Empty maps are not permitted, so if that would be the result,
       -- turn the entire map into a replicate.
-      n = arraysSize 0 $ map subExpType arrs
+      n = arraysSize 0 $ map identType arrs
       Result _ ses resloc = bodyResult $ lambdaBody fun
       mapres = bodyBindings $ lambdaBody fun
   mapM_ (uncurry letBindNames) parameterBnds
@@ -132,11 +132,12 @@ removeReplicateMapping vtable (Let pat _ (LoopOp (Map cs fun arrs loc)))
   where (paramsAndArrs, parameterBnds) =
           partitionEithers $ zipWith isReplicate (lambdaParams fun) arrs
 
-        isReplicate p (Var v)
-          | Just (Replicate _ e _) <- asPrimOp =<< ST.lookupExp (identName v) vtable =
-          Right ([identName p], PrimOp $ SubExp e)
-        isReplicate p e =
-          Left  (p, e)
+        isReplicate p v
+          | Just (Replicate _ e _) <-
+            asPrimOp =<< ST.lookupExp (identName v) vtable =
+              Right ([identName p], PrimOp $ SubExp e)
+          | otherwise =
+              Left (p, v)
 
 removeReplicateMapping _ _ = cannotSimplify
 
@@ -348,9 +349,9 @@ simplifyRearrange :: LetTopDownRule lore u
 
 -- Handle identity permutation.
 simplifyRearrange _ (Rearrange _ perm e _)
-  | perm == [0..arrayRank (subExpType e) - 1] = Just $ SubExp e
+  | perm == [0..arrayRank (identType e) - 1] = Just $ SubExp $ Var e
 
-simplifyRearrange look (Rearrange cs perm (Var v) loc) =
+simplifyRearrange look (Rearrange cs perm v loc) =
   case asPrimOp =<< look (identName v) of
     Just (Rearrange cs2 perm2 e _) ->
       -- Rearranging a rearranging: compose the permutations.
@@ -362,9 +363,9 @@ simplifyRearrange _ _ = Nothing
 simplifyRotate :: LetTopDownRule lore u
 -- A zero-rotation is identity.
 simplifyRotate _ (Rotate _ 0 e _) =
-  Just $ SubExp e
+  Just $ SubExp $ Var e
 
-simplifyRotate look (Rotate _ _ (Var v) _) = do
+simplifyRotate look (Rotate _ _ v _) = do
   bnd <- asPrimOp =<< look (identName v)
   case bnd of
     -- Rotating a replicate is identity.
@@ -641,7 +642,7 @@ simplifyIndexing look (Index cs idd inds loc) =
     Just (Replicate _ val@(Constant _ _) _)
       | [_] <- inds -> Just $ SubExp val
 
-    Just (Rearrange cs2 perm (Var src) _)
+    Just (Rearrange cs2 perm src _)
        | permuteReach perm <= length inds ->
          let inds' = permuteShape (take (length inds) perm) inds
          in Just $ Index (cs++cs2) (setIdentUniqueness src u) inds' loc

@@ -150,7 +150,7 @@ simplifyFun simpl rules fundec =
 simplifyLambda :: (MonadFreshNames m, Proper lore) =>
                   Simplifiable (SimpleM lore)
                -> RuleBook (SimpleM lore)
-               -> Maybe (Prog lore) -> Lambda lore -> [Maybe SubExp]
+               -> Maybe (Prog lore) -> Lambda lore -> [Maybe Ident]
                -> m (Lambda (Aliases lore))
 simplifyLambda simpl rules prog lam args =
   modifyNameSource $ runSimpleM (Engine.simplifyLambda lam args) simpl $

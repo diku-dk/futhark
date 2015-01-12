@@ -54,18 +54,18 @@ loopResultContext = Lore.loopResultContext
 funDecByName :: Name -> Prog lore -> Maybe (FunDec lore)
 funDecByName fname = find ((fname ==) . funDecName) . progFunctions
 
-shapeExps :: SubExp -> [SubExp]
-shapeExps = shapeDims . arrayShape . subExpType
+shapeExps :: Ident -> [SubExp]
+shapeExps = shapeDims . arrayShape . identType
 
 -- | @reshapeOuter shape n src@ returns a 'Reshape' expression that
 -- replaces the outer @n@ dimensions of @src@ with @shape@.
-reshapeOuter :: [SubExp] -> Int -> SubExp -> [SubExp]
+reshapeOuter :: [SubExp] -> Int -> Ident -> [SubExp]
 reshapeOuter shape n src = shape ++ drop n (shapeExps src)
 
 -- | @reshapeInner shape n src@ returns a 'Reshape' expression that
 -- replaces the inner @m-n@ dimensions (where @m@ is the rank of
 -- @src@) of @src@ with @shape@.
-reshapeInner :: [SubExp] -> Int -> SubExp -> [SubExp]
+reshapeInner :: [SubExp] -> Int -> Ident -> [SubExp]
 reshapeInner shape n src = take n (shapeExps src) ++ shape
 
 -- | If the expression is a 'PrimOp', return that 'PrimOp', otherwise 'Nothing'.

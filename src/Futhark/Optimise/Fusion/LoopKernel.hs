@@ -51,7 +51,7 @@ transformOutput ts names soac = do
             letBindNames [k] $
             PrimOp $ SubExp $ Var valident
           t SOAC.:< ts'' -> do
-            let es = map (applyTransform t . Var) validents
+            let es = map (applyTransform t) validents
                 mkPat ident = Pattern [Bindee ident ()]
             newIds <- forM (zip valnames $ concatMap primOpType es) $ \(k, opt) ->
               newIdent (baseString k) opt loc
@@ -67,7 +67,7 @@ transformOutput ts names soac = do
   where loc = srclocOf soac
         soact = SOAC.typeOf soac
 
-applyTransform :: SOAC.ArrayTransform -> SubExp -> PrimOp
+applyTransform :: SOAC.ArrayTransform -> Ident -> PrimOp
 applyTransform (SOAC.Rearrange cs perm) v =
   Rearrange cs perm v $ srclocOf v
 applyTransform (SOAC.Reshape cs shape) v =
@@ -79,7 +79,7 @@ applyTransform (SOAC.ReshapeInner cs shape) v =
   let shapes = reshapeInner shape 1 v
   in Reshape cs shapes v $ srclocOf v
 applyTransform (SOAC.Replicate n) v =
-  Replicate n v $ srclocOf v
+  Replicate n (Var v) $ srclocOf v
 
 inputToOutput :: SOAC.Input -> Maybe (SOAC.ArrayTransform, SOAC.Input)
 inputToOutput (SOAC.Input ts ia) =

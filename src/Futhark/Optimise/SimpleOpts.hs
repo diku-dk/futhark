@@ -46,6 +46,6 @@ normCopyDeadOpts simpl = deadCodeElim . simplifyProgWithStandardRules simpl
 normCopyOneLambda :: MonadFreshNames m =>
                      Basic.Prog
                   -> Basic.Lambda
-                  -> [Maybe SubExp]
+                  -> [Maybe Ident]
                   -> m Basic.Lambda
 normCopyOneLambda = simplifyLambdaWithStandardRules bindableSimplifiable

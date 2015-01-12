@@ -87,14 +87,14 @@ allEqual comp_shape = do
               [ pure $ PrimOp $ Conjoin [Var bacc, Var belm] loc
               , pure $ PrimOp $ SubExp $ Var nelm ]
   comp_shape_rot1 <- letExp "comp_shape_rot1" $
-                     PrimOp $ Rotate [] 1 (Var comp_shape) loc
+                     PrimOp $ Rotate [] 1 comp_shape loc
   comp <- letExp "map_size_checks" $
-          LoopOp $ Map [] compFun [Var comp_shape, Var comp_shape_rot1] loc
+          LoopOp $ Map [] compFun [comp_shape, comp_shape_rot1] loc
   cert <- newIdent "all_equal_cert" (Basic Cert) loc
   shape <- newIdent "all_equal_shape" (Basic Int) loc
   letBindNames_ [identName cert, identName shape] $
-    LoopOp $ Reduce [] checkFun [(Constant Checked loc,Var comp),
-                                 (intconst 0 loc,Var comp_shape)] loc
+    LoopOp $ Reduce [] checkFun [(Constant Checked loc,comp),
+                                 (intconst 0 loc,comp_shape)] loc
   return (cert, shape)
   where loc  = srclocOf comp_shape
 

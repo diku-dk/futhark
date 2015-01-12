@@ -393,10 +393,10 @@ require ts se = do
 requireI :: Checkable lore => [Type] -> Ident -> TypeM lore ()
 requireI ts ident = require ts $ Var ident
 
-checkArrSubExp :: SubExp -> TypeM lore Type
-checkArrSubExp e = case subExpType e of
+checkArrIdent :: Ident -> TypeM lore Type
+checkArrIdent v = case identType v of
   t@(Array {}) -> return t
-  t            -> bad $ NotAnArray (srclocOf e) (PrimOp $ SubExp e) $
+  t            -> bad $ NotAnArray (srclocOf v) (PrimOp $ SubExp $ Var v) $
                   justOne $ toDecl t
 
 -- | Type check a program containing arbitrary type information,
@@ -666,31 +666,29 @@ checkPrimOp (Replicate countexp valexp _) = do
 checkPrimOp (Reshape cs shapeexps arrexp _) = do
   mapM_ (requireI [Basic Cert]) cs
   mapM_ (require [Basic Int]) shapeexps
-  void $ checkArrSubExp arrexp
+  void $ checkArrIdent arrexp
 
-checkPrimOp (Rearrange cs perm arrexp pos) = do
+checkPrimOp (Rearrange cs perm arr pos) = do
   mapM_ (requireI [Basic Cert]) cs
-  arrt <- checkSubExp arrexp
+  arrt <- checkIdent arr
   let rank = arrayRank arrt
   when (length perm /= rank || sort perm /= [0..rank-1]) $
-    bad $ PermutationError pos perm rank name
-  where name = case arrexp of Var v -> Just $ identName v
-                              _     -> Nothing
+    bad $ PermutationError pos perm rank $ Just $ identName arr
 
 checkPrimOp (Rotate cs _ arrexp _) = do
   mapM_ (requireI [Basic Cert]) cs
-  void $ checkArrSubExp arrexp
+  void $ checkArrIdent arrexp
 
 checkPrimOp (Split cs splitexp arrexp secsize _) = do
   mapM_ (requireI [Basic Cert]) cs
   require [Basic Int] splitexp
   require [Basic Int] secsize
-  void $ checkArrSubExp arrexp
+  void $ checkArrIdent arrexp
 
 checkPrimOp (Concat cs arr1exp arr2exp ressize _) = do
   mapM_ (requireI [Basic Cert]) cs
-  arr1t <- checkArrSubExp arr1exp
-  _ <- require [arr1t] arr2exp
+  arr1t <- checkArrIdent arr1exp
+  _ <- requireI [arr1t] arr2exp
   require [Basic Int] ressize
 
 checkPrimOp (Copy e _) =
@@ -840,10 +838,10 @@ checkExp (Apply fname args rettype loc) = do
     ++ " but got " ++ pretty rettype'
   checkFuncall (Just fname) loc paramtypes argflows
 
-checkSOACArrayArg :: Checkable lore => SubExp
+checkSOACArrayArg :: Checkable lore => Ident
                   -> TypeM lore Arg
-checkSOACArrayArg e = do
-  (t, als, dflow, argloc) <- checkArg e
+checkSOACArrayArg v = do
+  (t, als, dflow, argloc) <- checkArg $ Var v
   case peelArray 1 t of
     Nothing -> bad $ TypeError argloc "SOAC argument is not an array"
     Just rt -> return (rt, als, dflow, argloc)

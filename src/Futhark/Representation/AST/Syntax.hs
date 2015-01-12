@@ -159,10 +159,10 @@ data PrimOp lore
   | Update Certificates Ident [SubExp] SubExp SrcLoc
   -- ^ @a with [i1,i2,i3] <- v@.
 
-  | Split Certificates SubExp SubExp SubExp SrcLoc
+  | Split Certificates SubExp Ident SubExp SrcLoc
   -- ^ @split(1, [ 1, 2, 3, 4 ]) = {[1],[2, 3, 4]}@.
 
-  | Concat Certificates SubExp SubExp SubExp SrcLoc
+  | Concat Certificates Ident Ident SubExp SrcLoc
   -- ^ @concat([1],[2, 3, 4]) = [1, 2, 3, 4]@.
 
   | Copy SubExp SrcLoc
@@ -176,16 +176,16 @@ data PrimOp lore
   -- ^ @replicate(3,1) = [1, 1, 1]@
 
   -- Array index space transformation.
-  | Reshape Certificates [SubExp] SubExp SrcLoc
+  | Reshape Certificates [SubExp] Ident SrcLoc
    -- ^ 1st arg is the new shape, 2nd arg is the input array *)
 
-  | Rearrange Certificates [Int] SubExp SrcLoc
+  | Rearrange Certificates [Int] Ident SrcLoc
   -- ^ Permute the dimensions of the input array.  The list
   -- of integers is a list of dimensions (0-indexed), which
   -- must be a permutation of @[0,n-1]@, where @n@ is the
   -- number of dimensions in the input array.
 
-  | Rotate Certificates Int SubExp SrcLoc
+  | Rotate Certificates Int Ident SrcLoc
   -- ^ @rotate(n,a)@ returns a new array, where the element
   -- @a[i]@ is at position @i+n@, cycling over to the
   -- beginning of the array.
@@ -219,16 +219,16 @@ data LoopOp lore
   = DoLoop [Ident] [(FParam lore, SubExp)] Ident SubExp (BodyT lore) SrcLoc
     -- ^ @loop {b} <- {a} = {v} for i < n do b@.
 
-  | Map Certificates (LambdaT lore) [SubExp] SrcLoc
+  | Map Certificates (LambdaT lore) [Ident] SrcLoc
     -- ^ @map(op +(1), {1,2,..,n}) = [2,3,..,n+1]@.
     -- 3rd arg is either a tuple of multi-dim arrays
     --   of basic type, or a multi-dim array of basic type.
     -- 4th arg is the input-array row types
 
-  | Reduce  Certificates (LambdaT lore) [(SubExp, SubExp)] SrcLoc
-  | Scan   Certificates (LambdaT lore) [(SubExp, SubExp)] SrcLoc
-  | Filter  Certificates (LambdaT lore) [SubExp] SrcLoc
-  | Redomap Certificates (LambdaT lore) (LambdaT lore) [SubExp] [SubExp] SrcLoc
+  | Reduce  Certificates (LambdaT lore) [(SubExp, Ident)] SrcLoc
+  | Scan   Certificates (LambdaT lore) [(SubExp, Ident)] SrcLoc
+  | Filter  Certificates (LambdaT lore) [Ident] SrcLoc
+  | Redomap Certificates (LambdaT lore) (LambdaT lore) [SubExp] [Ident] SrcLoc
 
 deriving instance Lore lore => Eq (LoopOp lore)
 deriving instance Lore lore => Show (LoopOp lore)

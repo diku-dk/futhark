@@ -169,7 +169,7 @@ splitBinding (Let pat _ (If cond tbranch fbranch t loc)) = do
 
 splitBinding bnd = return ([bnd], bnd, Nothing)
 
-splitMap :: [Ident] -> Lambda -> [SubExp] -> SrcLoc
+splitMap :: [Ident] -> Lambda -> [Ident] -> SrcLoc
          -> GenM ([Binding], Lambda, Maybe SubExp)
 splitMap cs fun args loc = do
   (predfun, valfun) <- splitMapLambda fun
@@ -178,7 +178,7 @@ splitMap cs fun args loc = do
           valfun,
           Just andcheck)
 
-splitReduce :: [Ident] -> Lambda -> [(SubExp,SubExp)] -> SrcLoc
+splitReduce :: [Ident] -> Lambda -> [(SubExp,Ident)] -> SrcLoc
             -> GenM ([Binding], Lambda, Maybe SubExp)
 splitReduce cs fun args loc = do
   (predfun, valfun) <- splitFoldLambda fun $ map fst args
@@ -187,7 +187,7 @@ splitReduce cs fun args loc = do
           valfun,
           Just andcheck)
 
-splitRedomap :: [Ident] -> Lambda -> [SubExp] -> [SubExp] -> SrcLoc
+splitRedomap :: [Ident] -> Lambda -> [SubExp] -> [Ident] -> SrcLoc
              -> GenM ([Binding], Lambda, Maybe SubExp)
 splitRedomap cs fun acc arr loc = do
   (predfun, valfun) <- splitFoldLambda fun acc
@@ -225,7 +225,7 @@ splitFoldLambda lam acc = do
         accbnds = [ mkLet [p] $ PrimOp $ SubExp e
                   | (p,e) <- zip accParams acc ]
 
-allTrue :: Certificates -> Lambda -> [SubExp] -> SrcLoc
+allTrue :: Certificates -> Lambda -> [Ident] -> SrcLoc
         -> GenM (Binding, SubExp)
 allTrue cs predfun args loc = do
   andchecks <- newIdent "allTrue" (Basic Bool) loc

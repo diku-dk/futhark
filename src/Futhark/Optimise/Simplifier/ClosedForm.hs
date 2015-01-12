@@ -48,14 +48,14 @@ Motivation:
 -- each of the results of @foldfun@ can be expressed in a closed form.
 foldClosedForm :: MonadBinder m =>
                   VarLookup (Lore m) -> Pattern (Lore m) -> Lambda (Lore m)
-               -> [SubExp] -> [SubExp]
+               -> [SubExp] -> [Ident]
                -> Simplify m ()
 
 foldClosedForm look pat lam accs arrs = do
   closedBody <- checkResults (patternIdents pat) knownBindings
                 (lambdaParams lam) (lambdaBody lam) accs lamloc
   isEmpty <- newIdent "fold_input_is_empty" (Basic Bool) lamloc
-  let inputsize = arraysSize 0 $ map subExpType arrs
+  let inputsize = arraysSize 0 $ map identType arrs
   letBindNames_ [identName isEmpty] $
     PrimOp $ BinOp Equal inputsize (intconst 0 lamloc) (Basic Bool) lamloc
   letBind_ pat =<<
@@ -137,7 +137,7 @@ checkResults pat knownBindings params body accs bodyloc = do
           | HS.member v nonFree = HM.lookup v knownBindings
         asFreeSubExp se = Just se
 
-determineKnownBindings :: VarLookup lore -> Lambda lore -> [SubExp] -> [SubExp]
+determineKnownBindings :: VarLookup lore -> Lambda lore -> [SubExp] -> [Ident]
                        -> HM.HashMap Ident SubExp
 determineKnownBindings look lam accs arrs =
   accBindings <> arrBindings
@@ -146,9 +146,9 @@ determineKnownBindings look lam accs arrs =
         accBindings = HM.fromList $ zip accparams accs
         arrBindings = HM.fromList $ mapMaybe isReplicate $ zip arrparams arrs
 
-        isReplicate (p, Var v)
+        isReplicate (p, v)
           | Just (PrimOp (Replicate _ ve _)) <- look $ identName v = Just (p, ve)
-        isReplicate _       = Nothing
+        isReplicate _ = Nothing
 
 boundInBody :: Body lore -> HS.HashSet Ident
 boundInBody = mconcat . map bound . bodyBindings

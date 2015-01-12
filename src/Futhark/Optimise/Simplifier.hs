@@ -46,7 +46,7 @@ simplifyLambdaWithStandardRules :: (MonadFreshNames m, Proper lore) =>
                                    Simplifiable (SimpleM lore)
                                 -> Prog lore
                                 -> Lambda lore
-                                -> [Maybe SubExp]
+                                -> [Maybe Ident]
                                 -> m (Lambda lore)
 simplifyLambdaWithStandardRules simpl prog lam args =
   liftM removeLambdaAliases $

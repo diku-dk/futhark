@@ -425,7 +425,7 @@ defCompilePrimOp [target] (Copy (Var src) _)
 defCompilePrimOp _ (Split {}) =
   return () -- Yes, really.
 
-defCompilePrimOp [target] (Concat _ (Var x) (Var y) _ _) = do
+defCompilePrimOp [target] (Concat _ x y _ _) = do
   xentry <- lookupArray $ identName x
   let MemLocation xmem xixfun = entryArrayLocation xentry
   xoffset <- ixFunOffset xixfun
@@ -471,7 +471,7 @@ defCompilePrimOp [target] (ArrayLit es rt _) = do
           bytesPerElem
   where et = elemType rt
 
-defCompilePrimOp [target] (Rearrange _ perm (Var src) _) = do
+defCompilePrimOp [target] (Rearrange _ perm src _) = do
   is <- replicateM (length perm) (newVName "i")
   let ivars = map Imp.ScalarVar is
   (mem, offset, _) <- indexArray target $ permuteShape perm ivars
@@ -484,9 +484,9 @@ defCompilePrimOp [target] (Rearrange _ perm (Var src) _) = do
         et = elemType srct
 
 defCompilePrimOp [target] (Reshape _ _ src loc) =
-  defCompilePrimOp [target] $ Copy src loc
+  defCompilePrimOp [target] $ Copy (Var src) loc
 
-defCompilePrimOp [target] (Rotate _ n (Var src) _) = do
+defCompilePrimOp [target] (Rotate _ n src _) = do
   let size = compileSubExp $ arraySize 0 srct
       n'   = Imp.Constant $ IntVal n
   i <- newVName "i"

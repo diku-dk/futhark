@@ -192,9 +192,9 @@ combineTransforms _ _ = Nothing
 -- variable and the transformation.  Only 'Rearrange' and 'Reshape'
 -- are possible to express this way.
 transformFromExp :: Exp lore -> Maybe (Ident, ArrayTransform)
-transformFromExp (PrimOp (Futhark.Rearrange cs perm (Futhark.Var v) _)) =
+transformFromExp (PrimOp (Futhark.Rearrange cs perm v _)) =
   Just (v, Rearrange cs perm)
-transformFromExp (PrimOp (Futhark.Reshape cs shape (Futhark.Var v) _)) =
+transformFromExp (PrimOp (Futhark.Reshape cs shape v _)) =
   Just (v, Reshape cs shape)
 transformFromExp _ = Nothing
 
@@ -253,37 +253,41 @@ addTransform t (Input ts ia) =
 addTransforms :: ArrayTransforms -> Input -> Input
 addTransforms ts (Input ots ia) = Input (ots <> ts) ia
 
+-- | Transport a Futhark-level variable into a SOAC 'Input'.
+inputFromIdent :: Ident -> Input
+inputFromIdent = Input (ArrayTransforms Seq.empty) . Var
+
 -- | If the given expression represents a normalised SOAC input,
 -- return that input.
 inputFromSubExp :: SubExp -> Maybe Input
-inputFromSubExp (Futhark.Var v) = Just $ Input (ArrayTransforms Seq.empty) $ Var v
-inputFromSubExp _          = Nothing
+inputFromSubExp (Futhark.Var v) = Just $ inputFromIdent v
+inputFromSubExp _               = Nothing
 
 -- | Convert SOAC inputs to the corresponding expressions.
 inputsToSubExps :: (MonadBinder m) =>
-                   [Input] -> m [SubExp]
+                   [Input] -> m [Ident]
 inputsToSubExps = mapM inputToExp'
   where inputToExp' (Input (ArrayTransforms ts) ia) = do
-          ia' <- letSubExp "soac_input" $ inputArrayToExp ia
+          ia' <- letExp "soac_input" $ inputArrayToExp ia
           foldlM transform ia' ts
 
         transform ia (Replicate n) =
-          letSubExp "repeat" $ PrimOp $ Futhark.Replicate n ia loc
+          letExp "repeat" $ PrimOp $ Futhark.Replicate n (Futhark.Var ia) loc
           where loc  = srclocOf ia
 
         transform ia (Rearrange cs perm) =
-          letSubExp "rearrange" $ PrimOp $ Futhark.Rearrange cs perm ia $ srclocOf ia
+          letExp "rearrange" $ PrimOp $ Futhark.Rearrange cs perm ia $ srclocOf ia
 
         transform ia (Reshape cs shape) =
-          letSubExp "reshape" $ PrimOp $ Futhark.Reshape cs shape ia $ srclocOf ia
+          letExp "reshape" $ PrimOp $ Futhark.Reshape cs shape ia $ srclocOf ia
 
         transform ia (ReshapeOuter cs shape) =
           let shape' = reshapeOuter shape 1 ia
-          in letSubExp "reshape_outer" $ PrimOp $ Futhark.Reshape cs shape' ia $ srclocOf ia
+          in letExp "reshape_outer" $ PrimOp $ Futhark.Reshape cs shape' ia $ srclocOf ia
 
         transform ia (ReshapeInner cs shape) =
           let shape' = reshapeInner shape 1 ia
-          in letSubExp "reshape_inner" $ PrimOp $ Futhark.Reshape cs shape' ia $ srclocOf ia
+          in letExp "reshape_inner" $ PrimOp $ Futhark.Reshape cs shape' ia $ srclocOf ia
 
 -- | If the input is a (possibly rearranged, reshaped or otherwise
 -- transformed) array variable, return that variable.
@@ -463,28 +467,20 @@ data NotSOAC = NotSOAC -- ^ The expression is not a (tuple-)SOAC at all.
                                         -- converted to an 'Input' value.
                deriving (Show)
 
-inputFromSubExp' :: SubExp -> Either NotSOAC Input
-inputFromSubExp' e = maybe (Left $ InvalidArrayInput e) Right $ inputFromSubExp e
-
 -- | Either convert an expression to the normalised SOAC
 -- representation, or a reason why the expression does not have the
 -- valid form.
 fromExp :: Exp lore -> Either NotSOAC (SOAC lore)
-fromExp (LoopOp (Futhark.Map cs l as loc)) = do
-  as' <- mapM inputFromSubExp' as
-  Right $ Map cs l as' loc
+fromExp (LoopOp (Futhark.Map cs l as loc)) =
+  Right $ Map cs l (map inputFromIdent as) loc
 fromExp (LoopOp (Futhark.Reduce cs l args loc)) = do
   let (es,as) = unzip args
-  as' <- mapM inputFromSubExp' as
-  Right $ Reduce cs l (zip es as') loc
+  Right $ Reduce cs l (zip es $ map inputFromIdent as) loc
 fromExp (LoopOp (Futhark.Scan cs l args loc)) = do
   let (es,as) = unzip args
-  as' <- mapM inputFromSubExp' as
-  Right $ Scan cs l (zip es as') loc
-fromExp (LoopOp (Futhark.Filter cs l as loc)) = do
-  as' <- mapM inputFromSubExp' as
-  Right $ Filter cs l as' loc
-fromExp (LoopOp (Futhark.Redomap cs l1 l2 es as loc)) = do
-  as' <- mapM inputFromSubExp' as
-  Right $ Redomap cs l1 l2 es as' loc
+  Right $ Scan cs l (zip es $ map inputFromIdent as) loc
+fromExp (LoopOp (Futhark.Filter cs l as loc)) =
+  Right $ Filter cs l (map inputFromIdent as) loc
+fromExp (LoopOp (Futhark.Redomap cs l1 l2 es as loc)) =
+  Right $ Redomap cs l1 l2 es (map inputFromIdent as) loc
 fromExp _ = Left NotSOAC

@@ -256,33 +256,34 @@ bindingEntries bnd@(Let (Pattern [bindee]) _ e) vtable = [entry]
           PrimOp (Replicate _ v _) ->
             subExpRange v vtable
           PrimOp (Rearrange _ _ v _) ->
-            subExpRange v vtable
-          PrimOp (Split _ se _ _ _) ->
-            subExpRange se vtable
+            identRange v vtable
+          PrimOp (Split _ _ v _ _) ->
+            identRange v vtable
           PrimOp (Copy se _) ->
             subExpRange se vtable
           PrimOp (Index _ v _ _) ->
-            lookupRange (identName v) vtable
+            identRange v vtable
           _ -> (Nothing, Nothing)
         zero = Val $ IntVal 0
         one = Val $ IntVal 1
 -- Then, handle others.  For now, this is only filter.
 bindingEntries bnd@(Let (Pattern (x:xs)) _ (LoopOp (Filter _ _ inps _))) vtable =
   defBndEntry vtable x bnd : zipWith makeBnd xs inps
-  where makeBnd bindee (Var v) =
+  where makeBnd bindee v =
           (defBndEntry vtable bindee bnd) {
             letBoundRange = lookupRange (identName v) vtable
             }
-        makeBnd bindee _ =
-          defBndEntry vtable bindee bnd
 bindingEntries bnd@(Let pat _ _) vtable =
   map (flip (defBndEntry vtable) bnd) $ patternBindees pat
 
 subExpRange :: SubExp -> SymbolTable lore -> Range
 subExpRange (Var v) vtable =
-  lookupRange (identName v) vtable
+  identRange v vtable
 subExpRange (Constant bv _) _ =
   (Just $ Val bv, Just $ Val bv)
+
+identRange :: Ident -> SymbolTable lore -> Range
+identRange = lookupRange . identName
 
 insertEntry :: VName -> Entry lore -> SymbolTable lore
             -> SymbolTable lore
@@ -331,14 +332,14 @@ insertLParam :: Param -> SymbolTable lore -> SymbolTable lore
 insertLParam param =
   insertLParamWithRange param (Nothing, Nothing)
 
-insertArrayLParam :: Param -> Maybe SubExp -> SymbolTable lore
+insertArrayLParam :: Param -> Maybe Ident -> SymbolTable lore
                   -> SymbolTable lore
 insertArrayLParam param (Just array) vtable =
   -- We now know that the outer size of 'array' is at least one, and
   -- that the inner sizes are at least zero, since they are array
   -- sizes.
-  let vtable' = insertLParamWithRange param (subExpRange array vtable) vtable
-  in case arrayDims $ subExpType array of
+  let vtable' = insertLParamWithRange param (identRange array vtable) vtable
+  in case arrayDims $ identType array of
     Var v:_ -> (identName v `isAtLeast` 1) vtable'
     _       -> vtable'
 insertArrayLParam param Nothing vtable =

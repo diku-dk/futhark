@@ -105,7 +105,7 @@ specialisedMkLetM [] [ident] e@(PrimOp (Index _ src is _)) = do
     _ -> fail $ "Invalid memory summary for " ++ pretty src ++ ": " ++
          pretty summary
 
-specialisedMkLetM [] [ident1, ident2] e@(PrimOp (Split _ n (Var a) _ _)) = do
+specialisedMkLetM [] [ident1, ident2] e@(PrimOp (Split _ n a _ _)) = do
   summary <- lookupSummary' $ identName a
   case summary of
     MemSummary m ixfun -> do
@@ -350,22 +350,19 @@ allocInExp (LoopOp (DoLoop res merge i bound
       DoLoop res (zip mergeparams' mergeinit') i bound body' loc
   where (mergeparams, mergeinit) = unzip merge
 allocInExp (LoopOp (Map cs f arrs loc)) = do
-  let size = arraysSize 0 $ map subExpType arrs
-  is <- letSubExp "is" $ PrimOp $ Iota size loc
+  let size = arraysSize 0 $ map identType arrs
+  is <- letExp "is" $ PrimOp $ Iota size loc
   i  <- newIdent "i" (Basic Int) loc
   summaries <- liftM (HM.fromList . concat) $
                forM (zip (lambdaParams f) arrs) $ \(p,arr) ->
     if basicType $ identType p then return []
-    else
-      case arr of
-        Constant {} -> return []
-        Var v -> do
-          res <- lookupSummary v
-          case res of
-            Just (MemSummary m origfun) ->
-              return [(identName p,
-                       MemSummary m $ IxFun.applyInd origfun [SE.Id i])]
-            _ -> return []
+    else do
+      res <- lookupSummary arr
+      case res of
+        Just (MemSummary m origfun) ->
+          return [(identName p,
+                   MemSummary m $ IxFun.applyInd origfun [SE.Id i])]
+        _ -> return []
   f' <- local (HM.union summaries) $
         allocInLambda
         f { lambdaParams = i : lambdaParams f

@@ -364,8 +364,8 @@ evalPrimOp (Replicate e1 e2 pos) = do
 
 evalPrimOp (Reshape _ shapeexp arrexp pos) = do
   shape <- mapM (asInt <=< evalSubExp) shapeexp
-  arr <- evalSubExp arrexp
-  let arrt = toDecl $ subExpType arrexp
+  arr <- lookupVar arrexp
+  let arrt = toDecl $ identType arrexp
       rt = arrayOf arrt (Rank $ length shapeexp-1) (uniqueness arrt)
       reshape (n:rest) vs
         | length vs `mod` n == 0 =
@@ -383,14 +383,14 @@ evalPrimOp (Reshape _ shapeexp arrexp pos) = do
         asInt _ = bad $ TypeError pos "evalPrimOp Reshape asInt"
 
 evalPrimOp (Rearrange _ perm arrexp _) =
-  single <$> permuteArray perm <$> evalSubExp arrexp
+  single <$> permuteArray perm <$> lookupVar arrexp
 
 evalPrimOp (Rotate _ perm arrexp _) =
-  single <$> rotateArray perm <$> evalSubExp arrexp
+  single <$> rotateArray perm <$> lookupVar arrexp
 
 evalPrimOp (Split _ splitexp arrexp _ pos) = do
   split <- evalSubExp splitexp
-  vs <- arrToList pos =<< evalSubExp arrexp
+  vs <- arrToList pos =<< lookupVar arrexp
   case split of
     BasicVal (IntVal i)
       | i <= length vs ->
@@ -398,12 +398,12 @@ evalPrimOp (Split _ splitexp arrexp _ pos) = do
         in return [arrayVal bef rt, arrayVal aft rt]
       | otherwise        -> bad $ IndexOutOfBounds pos (pretty arrexp) (length vs) i
     _ -> bad $ TypeError pos "evalPrimOp Split"
-  where rt = rowType $ subExpType arrexp
+  where rt = rowType $ identType arrexp
 
 evalPrimOp (Concat _ arr1exp arr2exp _ pos) = do
-  elems1 <- arrToList pos =<< evalSubExp arr1exp
-  elems2 <- arrToList pos =<< evalSubExp arr2exp
-  return $ single $ arrayVal (elems1 ++ elems2) $ stripArray 1 $ subExpType arr1exp
+  elems1 <- arrToList pos =<< lookupVar arr1exp
+  elems2 <- arrToList pos =<< lookupVar arr2exp
+  return $ single $ arrayVal (elems1 ++ elems2) $ stripArray 1 $ identType arr1exp
 
 evalPrimOp (Copy e _) = single <$> evalSubExp e
 
@@ -439,21 +439,21 @@ evalLoopOp (DoLoop respat merge loopvar boundexp loopbody loc) = do
               evalBody loopbody
 
 evalLoopOp (Map _ fun arrexps loc) = do
-  vss <- mapM (arrToList loc <=< evalSubExp) arrexps
+  vss <- mapM (arrToList loc <=< lookupVar) arrexps
   vs' <- mapM (applyLambda fun) $ transpose vss
   return $ arrays (lambdaReturnType fun) vs'
 
 evalLoopOp (Reduce _ fun inputs loc) = do
   let (accexps, arrexps) = unzip inputs
   startaccs <- mapM evalSubExp accexps
-  vss <- mapM (arrToList loc <=< evalSubExp) arrexps
+  vss <- mapM (arrToList loc <=< lookupVar) arrexps
   let foldfun acc x = applyLambda fun $ acc ++ x
   foldM foldfun startaccs (transpose vss)
 
 evalLoopOp (Scan _ fun inputs loc) = do
   let (accexps, arrexps) = unzip inputs
   startvals <- mapM evalSubExp accexps
-  vss <- mapM (arrToList loc <=< evalSubExp) arrexps
+  vss <- mapM (arrToList loc <=< lookupVar) arrexps
   (acc, vals') <- foldM scanfun (startvals, []) $ transpose vss
   return $ arrays (map valueType acc) $ reverse vals'
     where scanfun (acc, l) x = do
@@ -461,11 +461,11 @@ evalLoopOp (Scan _ fun inputs loc) = do
             return (acc', acc' : l)
 
 evalLoopOp (Filter _ fun arrexp loc) = do
-  vss <- mapM (arrToList loc <=< evalSubExp) arrexp
+  vss <- mapM (arrToList loc <=< lookupVar) arrexp
   vss' <- filterM filt $ transpose vss
   return $
     BasicVal (IntVal $ length vss') :
-    arrays (filterType fun $ map subExpType arrexp) vss'
+    arrays (filterType fun $ map identType arrexp) vss'
   where filt x = do
           res <- applyLambda fun x
           case res of [BasicVal (LogVal True)] -> return True
@@ -473,7 +473,7 @@ evalLoopOp (Filter _ fun arrexp loc) = do
 
 evalLoopOp (Redomap _ _ innerfun accexp arrexps loc) = do
   startaccs <- mapM evalSubExp accexp
-  vss <- mapM (arrToList loc <=< evalSubExp) arrexps
+  vss <- mapM (arrToList loc <=< lookupVar) arrexps
   let foldfun acc x = applyLambda innerfun $ acc ++ x
   foldM foldfun startaccs $ transpose vss
 
