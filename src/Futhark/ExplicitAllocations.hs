@@ -170,13 +170,6 @@ directIndexFunction :: Ident -> Type -> MemSummary
 directIndexFunction mem t =
   MemSummary mem $ IxFun.iota $ IxFun.shapeFromSubExps $ arrayDims t
 
-basicSize :: BasicType -> Int
-basicSize Int = 4
-basicSize Bool = 1
-basicSize Char = 1
-basicSize Real = 8
-basicSize Cert = 1
-
 sliceOffset :: Shape -> [SE.ScalExp] -> SE.ScalExp
 sliceOffset shape is =
   SE.ssum $ zipWith SE.STimes is sliceSizes

@@ -11,6 +11,7 @@ module Futhark.Representation.ExplicitMemory
        , bodyReturns
        , returnsToType
        , generaliseReturns
+       , basicSize
          -- * Syntax types
        , Prog
        , Body
@@ -630,3 +631,11 @@ boundInBindings (bnd:bnds) =
           [ (bindeeName bindee, bindee)
           | bindee <- patternBindees $ bindingPattern bnd
           ]
+
+-- | The size of a basic type in bytes.
+basicSize :: BasicType -> Int
+basicSize Int = 4
+basicSize Bool = 1
+basicSize Char = 1
+basicSize Real = 8
+basicSize Cert = 1
