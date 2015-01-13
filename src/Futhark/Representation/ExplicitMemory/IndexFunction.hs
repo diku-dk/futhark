@@ -21,10 +21,8 @@ import qualified Data.Vector.Sized as Vec
 import Proof.Equational
 import Data.Monoid
 import qualified Data.HashSet as HS
-import Data.Singletons.Prelude
-import Data.Constraint
 import Data.List (tails)
-import Unsafe.Coerce
+import Data.Type.Equality hiding (outer)
 
 import Futhark.Analysis.ScalExp
 import Futhark.Substitute
@@ -56,13 +54,10 @@ instance Eq (IxFun n) where
     ixfun1 == ixfun2 && perm1 == perm2
   Index (ixfun1 :: IxFun (m1 :+: n)) (is1 :: Indices m1)
     == Index (ixfun2 :: IxFun (m2 :+: n)) (is2 :: Indices m2) =
-    case m1' %:== m2' of
-      SFalse -> False
-      STrue ->
-        -- FIXME: I cannot figure out how to get the constraint out.
-        case unsafeCoerce (Dict :: Dict ()) :: Dict (m1 ~ m2) of
-          Dict ->
-            ixfun1 == ixfun2 && Vec.toList is1 == Vec.toList is2
+    case testEquality m1' m2' of
+      Nothing -> False
+      Just Refl ->
+        ixfun1 == ixfun2 && Vec.toList is1 == Vec.toList is2
     where m1' :: SNat m1
           m1' = Vec.sLength is1
           m2' :: SNat m2

@@ -27,9 +27,8 @@ import Data.Type.Monomorphic
 import Data.Type.Natural hiding (n1, n2)
 import Data.Type.Ordinal
 import Data.Vector.Sized hiding (index, map, unsafeFromInt)
-import Data.Constraint (Dict (..))
 import Proof.Equational
-import Unsafe.Coerce
+import Data.Type.Equality hiding (outer)
 
 import qualified Text.PrettyPrint.Mainland as PP
 
@@ -56,11 +55,9 @@ instance PP.Pretty IxFun where
 
 instance Eq IxFun where
   IxFun (n1 :: SNat (S n1)) fun1 == IxFun (n2 :: SNat (S n2)) fun2 =
-    case n1 %:== n2 of
-      SFalse -> False
-      STrue ->
-        case unsafeCoerce (Dict :: Dict ()) :: Dict (n1 ~ n2) of
-          Dict -> fun1 == fun2
+    case testEquality n1 n2 of
+      Nothing   -> False
+      Just Refl -> fun1 == fun2
 
 instance Substitute IxFun where
   substituteNames subst (IxFun n ixfun) =
