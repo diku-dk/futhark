@@ -44,9 +44,7 @@ data ExpCompilerResult op =
     -- ^ Some code was added via the monadic interface.
 
 -- | When an array is declared, this is where it is stored.
-data MemLocation = MemLocation
-                   VName -- ^ Name of memory block.
-                   IxFun.IxFun -- ^ Index function.
+data MemLocation = MemLocation VName IxFun.IxFun
                    deriving (Show)
 
 data ArrayEntry = ArrayEntry {
@@ -59,11 +57,11 @@ data MemEntry = MemEntry {
     entryMemSize :: Imp.DimSize
   }
 
--- ^ Every non-scalar variable must be associated with an entry.
+-- | Every non-scalar variable must be associated with an entry.
 data VarEntry = ArrayVar ArrayEntry
               | MemVar MemEntry
 
--- ^ When compiling a body, this is a description of where the result
+-- | When compiling a body, this is a description of where the result
 -- should end up.
 newtype Destination = Destination [ValueDestination]
 

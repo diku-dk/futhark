@@ -429,9 +429,9 @@ matchPatternToReturns wrong pat rt = do
           return () -- OK, already seen.
 
     matchArrayDim (Var v) (Free _) =
-      popSizeIfInCtx $ identName v -- *May* be bound here.
+      popSizeIfInCtx $ identName v --  *May* be bound here.
     matchArrayDim (Var v) (Ext _) =
-      popSizeFromCtx $ identName v -- *Has* to be bound here.
+      popSizeFromCtx $ identName v --  *Has* to be bound here.
     matchArrayDim (Constant {}) (Free _) =
       return ()
     matchArrayDim (Constant {}) (Ext _) =
