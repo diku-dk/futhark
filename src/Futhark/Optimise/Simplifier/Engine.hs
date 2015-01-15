@@ -48,7 +48,6 @@ import Control.Applicative
 import Control.Monad.Writer
 
 import Data.Either
-import Data.Graph
 import Data.Hashable
 import Data.List
 import Data.Loc
@@ -236,7 +235,7 @@ hoistBindings :: MonadEngine m =>
 hoistBindings rules block vtable uses dupes needs result = do
   (uses', blocked, hoisted) <-
     simplifyBindings vtable uses $
-    concat $ snd $ mapAccumL pick dupes $ inDepOrder needs
+    concat $ snd $ mapAccumL pick dupes needs
   body <- mkBodyM blocked result
   return (body, hoisted, uses')
   where simplifyBindings vtable' uses' bnds = do
@@ -283,30 +282,6 @@ blockUnhoistedDeps = snd . mapAccumL block HS.empty
             (blocked <> HS.fromList (provides need), Left need)
           | otherwise =
             (blocked, Right need)
-
-inDepOrder :: (Proper lore, Aliased lore) =>
-              [Binding lore] -> [Binding lore]
-inDepOrder = flattenSCCs . stronglyConnComp . buildGraph
-  where buildGraph bnds =
-          [ (bnd, rep $ provides bnd, deps) |
-            bnd <- bnds,
-            let deps = [ rep $ provides dep
-                         | dep <- bnds, dep `mustPrecede` bnd ] ]
-
-        -- As all names are unique, a pattern can be uniquely
-        -- represented by any of its names.  If the pattern has no
-        -- names, then it doesn't matter anyway.
-        rep []    = Nothing
-        rep (x:_) = Just x
-
-mustPrecede :: (Proper lore, Aliased lore) =>
-               Binding lore -> Binding lore -> Bool
-bnd1 `mustPrecede` bnd2 =
-  not $ HS.null $ HS.fromList (filter (`HS.member` req2) $ provides bnd1)
-                  `HS.union`
-                  (consumedInExp (bindingExp bnd2) `HS.intersection`
-                   requires bnd1)
-  where req2 = requires bnd2
 
 provides :: Proper lore => Binding lore -> [VName]
 provides = patternNames . bindingPattern
