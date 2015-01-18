@@ -118,6 +118,14 @@ specialisedMkLetM [] [ident1, ident2] e@(PrimOp (Split _ n a _ _)) = do
     _ -> fail $ "Invalid memory summary for " ++ pretty a ++ ": " ++
          pretty summary
 
+specialisedMkLetM [] [ident] e@(PrimOp (Reshape _ _ a _)) = do
+  summary <- lookupSummary' $ identName a
+  case summary of
+    MemSummary m ixfun -> -- FIXME: is this really the right index function?
+      return $ Just $ Let (Pattern [Bindee ident $ MemSummary m ixfun]) () e
+    _ -> fail $ "Invalid memory summary for " ++ pretty a ++ ": " ++
+         pretty summary
+
 specialisedMkLetM _ _ _ = return Nothing
 
 allocForArray :: Type -> SrcLoc -> AllocM (SubExp, Ident)

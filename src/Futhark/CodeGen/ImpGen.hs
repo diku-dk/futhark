@@ -481,8 +481,8 @@ defCompilePrimOp [target] (Rearrange _ perm src _) = do
   where srct = identType src
         et = elemType srct
 
-defCompilePrimOp [target] (Reshape _ _ src loc) =
-  defCompilePrimOp [target] $ Copy (Var src) loc
+defCompilePrimOp [_] (Reshape {}) =
+  return ()
 
 defCompilePrimOp [target] (Rotate _ n src _) = do
   let size = compileSubExp $ arraySize 0 srct
