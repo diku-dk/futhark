@@ -358,11 +358,11 @@ existentialiseExtTypes inaccessible ts =
           (n, extmap, varmap) <- get
           case HM.lookup x extmap of
             Nothing -> do put (n+1, HM.insert x (Ext n) extmap, varmap)
-                          return $ Ext $ n+1
+                          return $ Ext n
             Just replacement -> return replacement
         replaceVar name = do
           (n, extmap, varmap) <- get
           case HM.lookup name varmap of
             Nothing -> do put (n+1, extmap, HM.insert name (Ext n) varmap)
-                          return $ Ext $ n+1
+                          return $ Ext n
             Just replacement -> return replacement
