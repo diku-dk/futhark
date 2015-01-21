@@ -104,7 +104,7 @@ interpretAction' :: Action
 interpretAction' = interpretAction parseValues'
   where parseValues' :: FilePath -> String -> Either ParseError [I.Value]
         parseValues' path s =
-          liftM internaliseParamValues $ parseValues path s
+          liftM (concatMap internaliseValue) $ parseValues path s
 
 standardPipeline :: [Pass]
 standardPipeline =

@@ -56,6 +56,7 @@ topDownRules = [ liftIdentityMapping
                , simplifyBoolBranch
                , hoistBranchInvariant
                , simplifyScalExp
+               , simplifyIdentityReshape
                ]
 
 bottomUpRules :: MonadBinder m => BottomUpRules m
@@ -728,6 +729,12 @@ simplifyScalExp vtable (Let pat _ e)
           where (lower, upper) = ST.valueRange entry
         nonEmptyRange (_, lower, upper) = isJust lower || isJust upper
 simplifyScalExp _ _ = cannotSimplify
+
+simplifyIdentityReshape :: MonadBinder m => TopDownRule m
+simplifyIdentityReshape _ (Let pat _ (PrimOp (Reshape _ newshape v _)))
+  | newshape == arrayDims (identType v) = -- No-op reshape.
+    letBind_ pat $ PrimOp $ SubExp $ Var v
+simplifyIdentityReshape _ _ = cannotSimplify
 
 removeUnnecessaryCopy :: MonadBinder m => BottomUpRule m
 removeUnnecessaryCopy (_,used) (Let (Pattern [v]) _ (PrimOp (Copy se _)))

@@ -51,7 +51,7 @@ data TypeError lore = Error [String] (ErrorCase lore)
 
 -- | What went wrong.
 type ErrorCase lore =
-  GenTypeError VName (Exp lore) (Several DeclType) (Several Ident)
+  GenTypeError VName (Exp lore) (Several ExtType) (Several Ident)
 
 instance PrettyLore lore => Show (TypeError lore) where
   show (Error [] err) =
@@ -61,7 +61,7 @@ instance PrettyLore lore => Show (TypeError lore) where
 
 -- | A tuple of a return type and a list of parameters, possibly
 -- named.
-type FunBinding lore = (RetType lore, [(Maybe VName, DeclType)])
+type FunBinding lore = (RetType lore, [(Maybe VName, Type)])
 
 data VarBindingLore lore = LetBound (Lore.LetBound lore)
                          | FunBound (Lore.FParam lore)
@@ -329,7 +329,7 @@ subExpAliasesM (Constant {}) = return mempty
 subExpAliasesM (Var v)       = lookupAliases (identName v) (srclocOf v)
 
 lookupFun :: SrcLoc -> Name
-          -> TypeM lore (RetType lore, [DeclType])
+          -> TypeM lore (RetType lore, [Type])
 lookupFun loc fname = do
   bnd <- asks $ HM.lookup fname . envFtable
   case bnd of
@@ -364,8 +364,8 @@ unifyBasicTypes t1 t2
 -- one of them.
 unifySubExpTypes :: SubExp -> SubExp -> TypeM lore Type
 unifySubExpTypes e1 e2 =
-  maybe (bad $ UnifyError (PrimOp $ SubExp e1) (justOne $ toDecl t1)
-                          (PrimOp $ SubExp e2) (justOne $ toDecl t2)) return $
+  maybe (bad $ UnifyError (PrimOp $ SubExp e1) (justOne $ staticShapes1 t1)
+                          (PrimOp $ SubExp e2) (justOne $ staticShapes1 t2)) return $
   unifyTypes t1 t2
   where t1 = subExpType e1
         t2 = subExpType e2
@@ -377,17 +377,17 @@ checkAnnotation :: SrcLoc -> String -> Type -> Type
 checkAnnotation loc desc t1 t2
   | t2 `subtypeOf` t1 = return ()
   | otherwise = bad $ BadAnnotation loc desc
-                (justOne $ toDecl t1) (justOne $ toDecl t2)
+                (justOne $ staticShapes1 t1) (justOne $ staticShapes1 t2)
 
 -- | @require ts se@ causes a '(TypeError vn)' if the type of @se@ is
--- not equal with one of the types in @ts@.
+-- not a subtype of one of the types in @ts@.
 require :: Checkable lore => [Type] -> SubExp -> TypeM lore ()
 require ts se = do
   t <- checkSubExp se
-  unless (any (t `similarTo`) ts) $
+  unless (any (t `subtypeOf`) ts) $
     bad $ UnexpectedType (PrimOp $ SubExp se)
-    (justOne $ toDecl t)
-    (map (justOne . toDecl) ts)
+    (justOne $ staticShapes1 t)
+    (map (justOne . staticShapes1) ts)
 
 -- | Variant of 'require' working on identifiers.
 requireI :: Checkable lore => [Type] -> Ident -> TypeM lore ()
@@ -397,7 +397,7 @@ checkArrIdent :: Ident -> TypeM lore Type
 checkArrIdent v = case identType v of
   t@(Array {}) -> return t
   t            -> bad $ NotAnArray (srclocOf v) (PrimOp $ SubExp $ Var v) $
-                  justOne $ toDecl t
+                  justOne $ staticShapes1 t
 
 -- | Type check a program containing arbitrary type information,
 -- yielding either a type error or a program with complete type
@@ -436,14 +436,15 @@ checkProg' checkoccurs prog = do
     buildFtable = HM.map rmLoc <$>
                   foldM expand (HM.map addLoc (initialFtable prog'))
                   (progFunctions prog')
-    expand ftable (FunDec name ret args _ pos)
+    expand ftable (FunDec name ret params _ pos)
       | Just (_,_,pos2) <- HM.lookup name ftable =
         Left $ Error [] $ DupDefinitionError name pos pos2
       | otherwise =
-        let argtypes = map (toDecl . bindeeType) args -- Throw away argument names.
-            argnames = map (Just . bindeeName) args
-        in Right $ HM.insert name (ret,zip argnames argtypes,pos) ftable
-    rmLoc (ret,args,_) = (ret,args)
+        let params' = [ (Just $ bindeeName param,
+                         bindeeType param)
+                      | param <- params ]
+        in Right $ HM.insert name (ret,params',pos) ftable
+    rmLoc (ret,params,_) = (ret,params)
     addLoc (t, ts) = (t, ts, noLoc)
 
 -- The prog argument is just to disambiguate the lore.
@@ -488,7 +489,7 @@ checkAnonymousFun (fname, rettype, params, body, loc) =
              body,
              loc) $ do
     mapM_ checkType rettype
-    checkBody body
+    checkLambdaBody rettype body
 
 checkFun' :: (Checkable lore) =>
              (Name,
@@ -503,12 +504,6 @@ checkFun' (fname, rettype, paramsWithLore, body, loc) check = do
   binding (zip paramsWithLore $ repeat mempty) check
 
   checkReturnAlias $ bodyAliases body
-
-  unless (bodyExtType body `subtypesOf` rettype) $
-    bad $ ReturnTypeError loc fname
-    (Several $ map toDecl rettype)
-    (Several $ map toDecl $ bodyExtType body)
-
   where params = map fst paramsWithLore
 
         checkParams = foldM_ expand [] params
@@ -589,6 +584,23 @@ checkFunBody fname rt (Body (_,lore) bnds res) = do
     matchReturnType fname rt res
   checkBodyLore lore
 
+checkLambdaBody :: Checkable lore =>
+                   [Type] -> Body lore -> TypeM lore ()
+checkLambdaBody ret (Body (_,lore) bnds res) = do
+  checkBindings bnds $ checkLambdaResult ret res
+  checkBodyLore lore
+
+checkLambdaResult :: Checkable lore =>
+                     [Type] -> Result -> TypeM lore ()
+checkLambdaResult ts (Result cs es _) = do
+  mapM_ (requireI [Basic Cert]) cs
+  forM_ (zip ts es) $ \(t, e) -> do
+    et <- checkSubExp e
+    unless (et `subtypeOf` t) $
+      bad $ TypeError (srclocOf e) $
+      "Subexpression " ++ pretty e ++ " has type " ++ pretty t ++
+      " but expected " ++ pretty t
+
 checkBody :: Checkable lore =>
              Body lore -> TypeM lore ()
 checkBody (Body (_,lore) bnds res) = do
@@ -649,10 +661,12 @@ checkPrimOp (Update cs src idxes ve loc) = do
 
   consume loc =<< lookupAliases srcname srcloc
 
+  -- Check that the new value has the same type as what is already
+  -- there (It does not have to be unique, though.)
   case peelArray (length idxes) srct of
     Nothing -> bad $ IndexingError srcname
                      (arrayRank srct) (length idxes) loc
-    Just rt -> require [rt] ve
+    Just rt -> require [rt `setUniqueness` Nonunique] ve
   where srcname = identName src
         srcloc  = srclocOf src
 
@@ -685,10 +699,14 @@ checkPrimOp (Split cs splitexp arrexp secsize _) = do
   require [Basic Int] secsize
   void $ checkArrIdent arrexp
 
-checkPrimOp (Concat cs arr1exp arr2exp ressize _) = do
+checkPrimOp (Concat cs arr1exp arr2exp ressize loc) = do
   mapM_ (requireI [Basic Cert]) cs
   arr1t <- checkArrIdent arr1exp
-  _ <- requireI [arr1t] arr2exp
+  arr2t <- checkArrIdent arr2exp
+  unless (stripArray 1 arr1t == stripArray 1 arr2t) $
+    bad $ TypeError loc $
+    "Types of arguments to concat do not match.  Got " ++
+    pretty arr1t ++ " and " ++ pretty arr2t
   require [Basic Int] ressize
 
 checkPrimOp (Copy e _) =
@@ -715,17 +733,22 @@ checkLoopOp (DoLoop respat merge (Ident loopvar loopvart loopvarloc)
   mergeargs <- mapM checkArg mergeexps
   iparam <- basicFParam loopvar Int loopvarloc
   let funparams = iparam : mergepat
-      paramts   = map (toDecl . bindeeType) funparams
+      paramts   = map bindeeType funparams
       rettype   = map bindeeType mergepat
   checkFuncall Nothing loc paramts $ boundarg : mergeargs
 
   noUnique $ checkFun' (nameFromString "<loop body>",
-                             staticShapes rettype,
-                             funParamsToIdentsAndLores funparams,
-                             loopbody,
-                             loc) $ do
+                        staticShapes rettype,
+                        funParamsToIdentsAndLores funparams,
+                        loopbody,
+                        loc) $ do
     checkFunParams funparams
     checkBody loopbody
+    unless (map toDecl (bodyExtType loopbody) `subtypesOf`
+            map toDecl rettype) $
+      bad $ ReturnTypeError loc (nameFromString "<loop body>")
+      (Several $ staticShapes rettype)
+      (Several $ bodyExtType loopbody)
   forM_ respat $ \res ->
     case find ((==identName res) . bindeeName) mergepat of
       Nothing -> bad $ TypeError loc $ "Loop result variable " ++
@@ -735,45 +758,49 @@ checkLoopOp (DoLoop respat merge (Ident loopvar loopvart loopvarloc)
 
 checkLoopOp (Map ass fun arrexps _) = do
   mapM_ (requireI [Basic Cert]) ass
-  arrargs <- mapM checkSOACArrayArg arrexps
+  arrargs <- checkSOACArrayArgs arrexps
   void $ checkLambda fun arrargs
 
 checkLoopOp (Reduce ass fun inputs pos) = do
   let (startexps, arrexps) = unzip inputs
   mapM_ (requireI [Basic Cert]) ass
   startargs <- mapM checkArg startexps
-  arrargs   <- mapM checkSOACArrayArg arrexps
+  arrargs   <- checkSOACArrayArgs arrexps
   checkLambda fun $ startargs ++ arrargs
   let startt      = map argType startargs
       intupletype = map argType arrargs
       funret      = lambdaReturnType fun
   unless (startt `subtypesOf` funret) $
-      bad $ TypeError pos $ "Accumulator is of type " ++ prettyTuple startt ++
-                            ", but reduce function returns type " ++ prettyTuple funret ++ "."
+    bad $ TypeError pos $
+    "Accumulator is of type " ++ prettyTuple startt ++
+    ", but reduce function returns type " ++ prettyTuple funret ++ "."
   unless (intupletype `subtypesOf` funret) $
-      bad $ TypeError pos $ "Array element value is of type " ++ prettyTuple intupletype ++
-                            ", but scan function returns type " ++ prettyTuple funret ++ "."
+    bad $ TypeError pos $
+    "Array element value is of type " ++ prettyTuple intupletype ++
+    ", but reduce function returns type " ++ prettyTuple funret ++ "."
 
 -- Scan is exactly identical to Reduce.  Duplicate for clarity anyway.
 checkLoopOp (Scan ass fun inputs pos) = do
   let (startexps, arrexps) = unzip inputs
   mapM_ (requireI [Basic Cert]) ass
   startargs <- mapM checkArg startexps
-  arrargs   <- mapM checkSOACArrayArg arrexps
+  arrargs   <- checkSOACArrayArgs arrexps
   checkLambda fun $ startargs ++ arrargs
   let startt      = map argType startargs
       intupletype = map argType arrargs
       funret      = lambdaReturnType fun
   unless (startt `subtypesOf` funret) $
-    bad $ TypeError pos $ "Initial value is of type " ++ prettyTuple startt ++
-                          ", but scan function returns type " ++ prettyTuple funret ++ "."
+    bad $ TypeError pos $
+    "Initial value is of type " ++ prettyTuple startt ++
+    ", but scan function returns type " ++ prettyTuple funret ++ "."
   unless (intupletype `subtypesOf` funret) $
-    bad $ TypeError pos $ "Array element value is of type " ++ prettyTuple intupletype ++
-                          ", but scan function returns type " ++ prettyTuple funret ++ "."
+    bad $ TypeError pos $
+    "Array element value is of type " ++ prettyTuple intupletype ++
+    ", but scan function returns type " ++ prettyTuple funret ++ "."
 
 checkLoopOp (Filter ass fun arrexps loc) = do
   mapM_ (requireI [Basic Cert]) ass
-  arrargs <- mapM checkSOACArrayArg arrexps
+  arrargs <- checkSOACArrayArgs arrexps
   checkLambda fun arrargs
   let funret = lambdaReturnType fun
   when (funret /= [Basic Bool]) $
@@ -783,7 +810,7 @@ checkLoopOp (Filter ass fun arrexps loc) = do
 
 checkLoopOp (Redomap ass outerfun innerfun accexps arrexps pos) = do
   mapM_ (requireI [Basic Cert]) ass
-  arrargs <- mapM checkSOACArrayArg arrexps
+  arrargs <- checkSOACArrayArgs arrexps
   accargs <- mapM checkArg accexps
   checkLambda innerfun $ accargs ++ arrargs
   let innerRetType = lambdaReturnType innerfun
@@ -838,13 +865,28 @@ checkExp (Apply fname args rettype loc) = do
     ++ " but got " ++ pretty rettype'
   checkFuncall (Just fname) loc paramtypes argflows
 
-checkSOACArrayArg :: Checkable lore => Ident
-                  -> TypeM lore Arg
-checkSOACArrayArg v = do
-  (t, als, dflow, argloc) <- checkArg $ Var v
-  case peelArray 1 t of
-    Nothing -> bad $ TypeError argloc "SOAC argument is not an array"
-    Just rt -> return (rt, als, dflow, argloc)
+checkSOACArrayArgs :: Checkable lore =>
+                     [Ident] -> TypeM lore [Arg]
+checkSOACArrayArgs [] = return []
+checkSOACArrayArgs (v:vs) = do
+  (vt, v') <- checkSOACArrayArg v
+  let firstArgSize = arraySize 0 vt
+  vs' <- forM vs $ \nextv -> do
+    (nextvt, nextv') <- checkSOACArrayArg nextv
+    let argSize = arraySize 0 nextvt
+    unless (argSize == firstArgSize) $
+      bad $ TypeError (srclocOf nextv) $
+      "SOAC argument " ++ pretty nextv ++ " has outer size " ++
+      pretty argSize ++ ", but argument " ++ pretty v ++
+      " has outer size " ++ pretty firstArgSize
+    return nextv'
+  return $ v' : vs'
+  where checkSOACArrayArg ident = do
+          (t, als, dflow, argloc) <- checkArg $ Var ident
+          case peelArray 1 t of
+            Nothing -> bad $ TypeError argloc $
+                       "SOAC argument " ++ pretty v ++ " is not an array"
+            Just rt -> return (t, (rt, als, dflow, argloc))
 
 checkType :: Checkable lore =>
              Type -> TypeM lore ()
@@ -864,7 +906,7 @@ checkIdent (Ident name t loc) =
     derived <- lookupType name loc
     unless (derived `subtypeOf` t) $
       bad $ BadAnnotation loc "ident"
-      (justOne $ toDecl t) (justOne $ toDecl derived)
+      (justOne $ staticShapes1 t) (justOne $ staticShapes1 derived)
     return t
 
 checkBinOp :: Checkable lore =>
@@ -936,7 +978,7 @@ matchExtPattern :: SrcLoc -> [Ident] -> [ExtType] -> TypeM lore ()
 matchExtPattern loc pat ts = do
   (ts', restpat, _) <- liftEitherS loc $ patternContext pat ts
   unless (length restpat == length ts') $
-    bad $ InvalidPatternError (Several pat) (Several $ map toDecl ts) Nothing loc
+    bad $ InvalidPatternError (Several pat) (Several ts) Nothing loc
   evalStateT (zipWithM_ checkBinding' restpat ts') []
   where checkBinding' (Ident name namet vloc) t = do
           lift $ checkAnnotation vloc ("binding of variable " ++ textual name) namet t
@@ -951,13 +993,13 @@ matchExtPattern loc pat ts = do
               lift $ bad $ DupPatternError name (srclocOf ident) pos2
 
 matchExtReturnType :: Name -> [ExtType] -> Result
-               -> TypeM lore ()
+                   -> TypeM lore ()
 matchExtReturnType fname rettype (Result _ ses loc) =
-  unless (staticShapes ts `subtypesOf` rettype) $
+  unless (ts `subtypesOf` rettype) $
   bad $ ReturnTypeError loc fname
-        (Several $ map toDecl rettype)
-        (Several $ map toDecl ts)
-  where ts = map subExpType ses
+        (Several rettype)
+        (Several ts)
+  where ts = staticShapes $ map subExpType ses
 
 patternContext :: [Ident] -> [ExtType] ->
                   Either String ([Type], [Ident], [Ident])
@@ -1008,14 +1050,14 @@ checkArg arg = do (argt, dflow) <- collectDataflow $ checkSubExp arg
 
 checkFuncall :: Checkable lore =>
                 Maybe Name -> SrcLoc
-             -> [DeclType] -> [Arg]
+             -> [Type] -> [Arg]
              -> TypeM lore ()
 checkFuncall fname loc paramtypes args = do
   let argts = map argType args
-  unless (validApply paramtypes argts) $
+  unless (validApply (map toDecl paramtypes) argts) $
     bad $ ParameterMismatch fname loc
-          (Right $ map justOne paramtypes) $
-          map (justOne . toDecl) argts
+          (Right $ map (justOne . staticShapes1) paramtypes) $
+          map (justOne . staticShapes1) argts
   forM_ (zip (map diet paramtypes) args) $ \(d, (_, als, dflow, argloc)) -> do
     maybeCheckOccurences $ usageOccurences dflow
     let occurs = [consumption (consumeArg als d) argloc]
@@ -1028,13 +1070,9 @@ checkLambda :: Checkable lore =>
 checkLambda (Lambda params body ret loc) args = do
   mapM_ checkType ret
   if length params == length args then do
-    let setParamShape param shape =
-          param { identType = identType param `setArrayDims` shape }
-        params' = zipWith setParamShape params $
-                  map (arrayDims . argType) args
-    checkFuncall Nothing loc (map (toDecl . identType) params') args
+    checkFuncall Nothing loc (map identType params) args
     noUnique $ checkAnonymousFun
-      (nameFromString "<anonymous>", ret, params', body, loc)
+      (nameFromString "<anonymous>", ret, params, body, loc)
   else bad $ TypeError loc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
 -- | The class of lores that can be type-checked.

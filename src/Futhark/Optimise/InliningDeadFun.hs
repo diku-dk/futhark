@@ -13,6 +13,7 @@ import Control.Applicative
 import Control.Monad.Reader
 
 import Data.List
+import Data.Loc
 import Data.Maybe
 
 import qualified Data.HashMap.Lazy as HM
@@ -133,24 +134,35 @@ doInlineInCaller (FunDec name rtp args body loc) inlcallees =
   in FunDec name rtp args body' loc
 
 inlineInBody :: [FunDec] -> Body -> Body
-inlineInBody inlcallees (Body _ (bnd@(Let pat _ (Apply fname args rtp _)):bnds) res) =
+inlineInBody
+  inlcallees
+  (Body _ (bnd@(Let pat _ (Apply fname args rtp _)):bnds) res) =
   let continue callbnds =
         callbnds `insertBindings` inlineInBody inlcallees (mkBody bnds res)
       continue' (Body _ callbnds res') =
         continue $ callbnds ++
-        [ mkLet [v] $ PrimOp $ SubExp e'
-        | (v,e') <- zip (patternIdents pat) $ withShapes $ resultSubExps res' ]
-  in  case filter ((== fname) . funDecName) inlcallees of
-        [] -> continue [bnd]
-        FunDec _ _ fargs body _:_ ->
-          let revbnds = zip (map bindeeIdent fargs) $ map fst args
-          in  continue' $ foldr addArgBnd body revbnds
+        zipWith reshapeIfNecessary (patternIdents pat)
+        (withShapes $ resultSubExps res')
+  in case filter ((== fname) . funDecName) inlcallees of
+       [] -> continue [bnd]
+       FunDec _ _ fargs body _:_ ->
+         let revbnds = zip (map bindeeIdent fargs) $ map fst args
+         in  continue' $ foldr addArgBnd body revbnds
   where
       addArgBnd :: (Ident, SubExp) -> Body -> Body
       addArgBnd (farg, aarg) body =
-          [mkLet [farg] $ PrimOp $ SubExp aarg] `insertBindings` body
-      withShapes ses = existentialShapes (retTypeValues rtp)
-                       (map subExpType ses) ++ ses
+        reshapeIfNecessary farg aarg `insertBinding` body
+
+      withShapes ses = extractShapeContext (retTypeValues rtp)
+                       (map (arrayDims . subExpType) ses) ++ ses
+
+      reshapeIfNecessary ident se
+        | t@(Array {}) <- identType ident,
+          Var v <- se =
+            mkLet [ident] $ PrimOp $ Reshape [] (arrayDims t) v $
+            srclocOf ident
+        | otherwise =
+          mkLet [ident] $ PrimOp $ SubExp se
 inlineInBody inlcallees b = mapBody (inliner inlcallees) b
 
 inliner :: Monad m => [FunDec] -> Mapper Basic Basic m

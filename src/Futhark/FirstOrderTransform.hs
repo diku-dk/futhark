@@ -149,7 +149,22 @@ transformExp (LoopOp (Redomap cs _ innerfun accexps arrexps loc)) = do
 transformExp e = mapExpM transform e
 
 transformBinding :: Binding -> Binder Basic Binding
-transformBinding (Let pat annot e) = Let pat annot <$> transformExp e
+transformBinding (Let pat () e@(LoopOp (Filter {})))
+  | size : rest <- patternIdents pat = do
+  -- FIXME: we need to fix the shape of the type for filter, which is
+  -- done in a hacky way here.  The better solution is to change how
+  -- filter works.
+  size':rest' <- letTupExp "filter_for" =<< transformExp e
+  addBinding $ Let (basicPattern [size]) () $ PrimOp $ SubExp $ Var size'
+  let reshapeResult dest orig =
+        addBinding $ Let (basicPattern [dest]) () $
+        PrimOp $ Reshape [] (arrayDims $ identType dest) orig loc
+  zipWithM_ reshapeResult rest rest'
+  dummy <- newVName "dummy"
+  mkLetNames [dummy] $ PrimOp $ SubExp $ intconst 0 loc
+  where loc = srclocOf e
+transformBinding (Let pat annot e) =
+  Let pat annot <$> transformExp e
 
 transform :: Mapper Basic Basic (Binder Basic)
 transform = identityMapper {
@@ -199,12 +214,7 @@ letwith cs ks i vs = do
   zipWithM update ks vs'
 
 isize :: [Ident] -> SubExp
-isize = size . map Var
-
-size :: [SubExp] -> SubExp
-size (v:_)
-  | se : _ <- shapeDims $ arrayShape $ subExpType v = se
-size _ = intconst 0 noLoc
+isize = arraysSize 0 . map identType
 
 pexp :: Applicative f => SubExp -> f Exp
 pexp = pure . PrimOp . SubExp

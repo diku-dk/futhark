@@ -10,6 +10,7 @@ module Futhark.Representation.AST.Attributes.Types
        , unifyUniqueness
        , unique
        , staticShapes
+       , staticShapes1
        , basicType
        , basicDecl
        , toDecl
@@ -31,17 +32,17 @@ module Futhark.Representation.AST.Attributes.Types
        , subuniqueOf
        , subtypeOf
        , subtypesOf
-       , similarTo
 
        , setIdentUniqueness
 
-       , existentialShapes
        , extractShapeContext
        , shapeContext
        , shapeContextSize
        , hasStaticShape
        , generaliseExtTypes
        , existentialiseExtTypes
+       , shapeMapping
+       , shapeMapping'
        )
        where
 
@@ -130,14 +131,17 @@ unifyUniqueness t1 _ = t1
 -- | Convert types with non-existential shapes to types with
 -- non-existential shapes.  Only the representation is changed, so all
 -- the shapes will be 'Free'.
-staticShapes :: [TypeBase Shape] -> [TypeBase ExtShape]
-staticShapes = map staticShapes'
-  where staticShapes' (Basic bt) =
-          Basic bt
-        staticShapes' (Array bt (Shape shape) u) =
-          Array bt (ExtShape $ map Free shape) u
-        staticShapes' (Mem size) =
-          Mem size
+staticShapes :: [Type] -> [ExtType]
+staticShapes = map staticShapes1
+
+-- | As 'staticShapes', but on a single type.
+staticShapes1 :: Type -> ExtType
+staticShapes1 (Basic bt) =
+  Basic bt
+staticShapes1 (Array bt (Shape shape) u) =
+  Array bt (ExtShape $ map Free shape) u
+staticShapes1 (Mem size) =
+  Mem size
 
 -- | @arrayOf t s u@ constructs an array type.  The convenience
 -- compared to using the 'Array' constructor directly is that @t@ can
@@ -251,7 +255,7 @@ subtypeOf :: ArrayShape shape => TypeBase shape -> TypeBase shape -> Bool
 subtypeOf (Array t1 shape1 u1) (Array t2 shape2 u2) =
   u1 `subuniqueOf` u2 &&
   t1 == t2 &&
-  shapeRank shape1 == shapeRank shape2
+  shape1 `subShapeOf` shape2
 subtypeOf (Basic t1) (Basic t2) = t1 == t2
 subtypeOf (Mem _) (Mem _) = True
 subtypeOf _ _ = False
@@ -263,24 +267,9 @@ subtypesOf :: ArrayShape shape => [TypeBase shape] -> [TypeBase shape] -> Bool
 subtypesOf xs ys = length xs == length ys &&
                    and (zipWith subtypeOf xs ys)
 
--- | @x \`similarTo\` y@ is true if @x@ and @y@ are the same type,
--- ignoring uniqueness.
-similarTo :: ArrayShape shape => TypeBase shape -> TypeBase shape -> Bool
-similarTo t1 t2 = t1 `subtypeOf` t2 || t2 `subtypeOf` t1
-
 setIdentUniqueness :: Ident -> Uniqueness -> Ident
 setIdentUniqueness ident u =
   ident { identType = identType ident `setUniqueness` u }
-
-existentialShapes :: [TypeBase ExtShape] -> [TypeBase Shape]
-                  -> [SubExp]
-existentialShapes t1s t2s = concat $ zipWith concreteShape' t1s t2s
-  where concreteShape' t1 t2 =
-          catMaybes $ zipWith concretise
-          (extShapeDims $ arrayShape t1)
-          (shapeDims $ arrayShape t2)
-        concretise (Ext _) se  = Just se
-        concretise (Free _) _  = Nothing
 
 extractShapeContext :: [ExtType] -> [[a]] -> [a]
 extractShapeContext ts shapes =
@@ -366,3 +355,23 @@ existentialiseExtTypes inaccessible ts =
             Nothing -> do put (n+1, extmap, HM.insert name (Ext n) varmap)
                           return $ Ext n
             Just replacement -> return replacement
+
+-- | In the call @shapeMapping ts1 ts2@, the lists @ts1@ and @ts@ must
+-- be of equal length and their corresponding elements have the same
+-- types modulo exact dimensions (but matching array rank is
+-- important).  The result is a mapping from named dimensions of @ts1@
+-- to the corresponding dimension in @ts2@.
+--
+-- This function is useful when @ts1@ are the value parameters of some
+-- function and @ts2@ are the value arguments, and we need to figure
+-- out which shape context to pass.
+shapeMapping :: [Type] -> [Type] -> HM.HashMap VName SubExp
+shapeMapping ts = shapeMapping' ts . map arrayDims
+
+-- | Like @shapeMapping@, but works with explicit dimensions.
+shapeMapping' :: [Type] -> [[a]] -> HM.HashMap VName a
+shapeMapping' ts shapes = HM.fromList $ concat $ zipWith inspect ts shapes
+  where inspect t shape =
+          mapMaybe match $ zip (arrayDims t) shape
+        match (Constant {}, _) = Nothing
+        match (Var v, dim)     = Just (identName v, dim)

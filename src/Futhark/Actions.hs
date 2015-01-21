@@ -19,7 +19,6 @@ import Futhark.Externalise
 import Futhark.Pipeline
 import Futhark.Analysis.Alias
 import Futhark.Representation.AST hiding (Basic)
-import Futhark.Representation.AST.Lore (Lore)
 import Futhark.Interpreter
 import qualified Futhark.SOACFlowGraph as FG
 import qualified Futhark.CodeGen.ImpGen as ImpGen
@@ -55,7 +54,7 @@ flowGraphAction :: Action
 flowGraphAction = basicAction "SOAC flow graph" $
                   putStrLn . FG.makeFlowGraphString
 
-interpret :: (Show error, Lore lore) =>
+interpret :: (Show error, PrettyLore lore) =>
              (FilePath -> String -> Either error [Value])
           -> Prog lore -> IO ()
 interpret parseValues prog =
@@ -67,7 +66,7 @@ interpret parseValues prog =
       args <- case parseres of Left e -> do hPutStrLn stderr $ "Read error: " ++ show e
                                             exitWith $ ExitFailure 2
                                Right vs -> return vs
-      let (res, trace) = runFun defaultEntryPoint args prog
+      let (res, trace) = runFunWithShapes defaultEntryPoint args prog
       forM_ trace $ \(loc, what) ->
         hPutStrLn stderr $ locStr loc ++ ": " ++ what
       case res of

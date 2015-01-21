@@ -36,39 +36,24 @@ import Data.Array
 import Data.Hashable
 import Data.Loc
 import Data.Monoid
-import Data.Ord
 import qualified Data.HashSet as HS
 
 import Language.Futhark.Core
 
 -- | The size of an array type as a list of its dimension sizes.  If a
 -- variable, that variable must be in scope where this array is used.
--- When compared for equality, only the number of dimensions is
--- considered.
 newtype Shape = Shape { shapeDims :: [SubExp] }
-              deriving (Show)
-
-instance Eq Shape where
-  Shape l1 == Shape l2 = length l1 == length l2
-
-instance Ord Shape where
-  compare = comparing shapeRank
+              deriving (Eq, Ord, Show)
 
 -- | The size of this dimension.
 data ExtDimSize = Free SubExp -- ^ Some known dimension.
                 | Ext Int -- ^ Existentially quantified.
-                  deriving (Show)
+                  deriving (Eq, Ord, Show)
 
 -- | Like 'Shape' but some of its elements may be bound in a local
 -- environment instead.  These are denoted with integral indices.
 newtype ExtShape = ExtShape { extShapeDims :: [ExtDimSize] }
-                 deriving (Show)
-
-instance Eq ExtShape where
-  ExtShape l1 == ExtShape l2 = length l1 == length l2
-
-instance Ord ExtShape where
-  compare = comparing shapeRank
+                 deriving (Eq, Ord, Show)
 
 -- | The size of an array type as merely the number of dimensions,
 -- with no further information.
@@ -82,6 +67,8 @@ class (Monoid a, Eq a, Ord a) => ArrayShape a where
   -- | @stripDims n shape@ strips the outer @n@ dimensions from
   -- @shape@.
   stripDims :: Int -> a -> a
+  -- | Check whether one shape if a subset of another shape.
+  subShapeOf :: a -> a -> Bool
 
 instance Monoid Shape where
   mempty = Shape mempty
@@ -90,6 +77,7 @@ instance Monoid Shape where
 instance ArrayShape Shape where
   shapeRank (Shape l) = length l
   stripDims n (Shape dims) = Shape $ drop n dims
+  subShapeOf = (==)
 
 instance Monoid ExtShape where
   mempty = ExtShape mempty
@@ -98,6 +86,16 @@ instance Monoid ExtShape where
 instance ArrayShape ExtShape where
   shapeRank (ExtShape l) = length l
   stripDims n (ExtShape dims) = ExtShape $ drop n dims
+  subShapeOf (ExtShape ds1) (ExtShape ds2) =
+    -- Must agree on Free dimensions, and ds1 may not be existential
+    -- where ds2 is Free.
+    --
+    -- FIXME: also check that existentials are
+    -- congruent.
+    and $ zipWith subDimOf ds1 ds2
+    where subDimOf (Free se1) (Free se2) = se1 == se2
+          subDimOf (Ext _)    (Free _)   = False
+          subDimOf _          _          = True
 
 instance Monoid Rank where
   mempty = Rank 0
@@ -106,6 +104,7 @@ instance Monoid Rank where
 instance ArrayShape Rank where
   shapeRank (Rank x) = x
   stripDims n (Rank x) = Rank $ x - n
+  subShapeOf = (==)
 
 -- | An Futhark type is either an array or an element type.  When comparing
 -- types for equality with '==', aliases are ignored, as are

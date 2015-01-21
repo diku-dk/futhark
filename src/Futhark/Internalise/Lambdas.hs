@@ -1,7 +1,5 @@
 module Futhark.Internalise.Lambdas
-  ( curryToLambda
-  , ensureLambda
-  , internaliseMapLambda
+  ( internaliseMapLambda
   , internaliseFoldLambda
   , internaliseFilterLambda
   )
@@ -35,7 +33,7 @@ ensureLambda (E.CurryFun fname curargs rettype loc) = do
 curryToLambda :: Name -> [E.Exp] -> E.Type -> SrcLoc
               -> InternaliseM ([E.Parameter], E.Exp, E.DeclType)
 curryToLambda fname curargs rettype loc = do
-  (_,paramtypes) <- lookupFunction fname
+  (_,paramtypes) <- externalFun <$> lookupFunction fname
   let missing = drop (length curargs) paramtypes
       diets = map E.diet paramtypes
   params <- forM missing $ \t -> do
@@ -68,51 +66,43 @@ internaliseLambdaBody internaliseBody body = do
       return $ resultBody (cs++certs') vals loc
   where loc = srclocOf body
 
-lambdaBinding :: I.Ident -> [E.Parameter] -> [I.Type]
+lambdaBinding :: [E.Parameter] -> [I.Type]
               -> InternaliseM I.Body -> InternaliseM (I.Body, [I.Param])
-lambdaBinding ce params ts m =
-  bindingFlatPatternWithCert (I.Var ce) (map E.fromParam params) ts $ \params' -> do
+lambdaBinding params ts m =
+  bindingFlatPattern (map E.fromParam params) ts $ \params' -> do
     body <- m
     return (body, params')
 
-outerShape :: SrcLoc -> [I.Type] -> SubExp
-outerShape _ (t:_) = arraySize 0 t
-outerShape loc _   = I.intconst 0 loc
-
 internaliseLambda :: (E.Exp -> InternaliseM Body)
-                  -> I.Ident
                   -> E.Lambda
                   -> [I.Type]
-                  -> InternaliseM ([I.Param], I.Body, [I.DeclType])
-internaliseLambda internaliseBody ce lam rowtypes = do
+                  -> InternaliseM ([I.Param], I.Body, [I.ExtType])
+internaliseLambda internaliseBody lam rowtypes = do
   (params, body, rettype, _) <- ensureLambda lam
-  (body', params') <- lambdaBinding ce params rowtypes $
+  (body', params') <- lambdaBinding params rowtypes $
                       internaliseLambdaBody internaliseBody body
-  return (params', body', internaliseType' rettype)
+  return (params', body', internaliseType rettype)
 
 internaliseMapLambda :: (E.Exp -> InternaliseM Body)
-                     -> I.Ident
                      -> E.Lambda
                      -> [I.SubExp]
                      -> InternaliseM I.Lambda
-internaliseMapLambda internaliseBody ce lam args = do
+internaliseMapLambda internaliseBody lam args = do
   let argtypes = map I.subExpType args
       rowtypes = map I.rowType argtypes
-  (params, body, rettype) <- internaliseLambda internaliseBody ce lam rowtypes
-  let rettype_shape = typeShapes rettype
-      outer_shape = outerShape loc argtypes
-  shapefun <- makeShapeFun params (shapeBody body)
-              (replicate (length rettype_shape) $ I.Basic Int) loc
-  inner_shapes <- bindMapShapes [ce] shapefun args outer_shape
-  let rettype' = addTypeShapes rettype $
-                 map I.Var inner_shapes
-  body' <- assertResultShape inner_shapes body
+  (params, body, rettype) <- internaliseLambda internaliseBody lam rowtypes
+  (rettype', inner_shapes) <- instantiateShapes' loc rettype
+  let outer_shape = arraysSize 0 argtypes
+      shape_body = shapeBody (map I.identName inner_shapes) rettype' body
+  shapefun <- makeShapeFun params shape_body (length inner_shapes) loc
+  bindMapShapes inner_shapes shapefun args outer_shape
+  body' <- assertResultShape rettype' body
   return $ I.Lambda params body' rettype' loc
   where loc = srclocOf lam
 
-makeShapeFun :: [I.Param] -> I.Body -> [I.Type] -> SrcLoc
+makeShapeFun :: [I.Param] -> I.Body -> Int -> SrcLoc
              -> InternaliseM I.Lambda
-makeShapeFun params body rettype loc = do
+makeShapeFun params body n loc = do
   -- Some of 'params' may be unique, which means that the shape slice
   -- would consume its input.  This is not acceptable - that input is
   -- needed for the value function!  Hence, for all unique parameters,
@@ -120,35 +110,26 @@ makeShapeFun params body rettype loc = do
   -- copy-binding in the body of the function.
   (params', copybnds) <- nonuniqueParams params
   return $ I.Lambda params' (insertBindings copybnds body) rettype loc
+  where rettype = replicate n $ I.Basic Int
 
-assertResultShape :: [I.Ident] -> I.Body -> InternaliseM I.Body
-assertResultShape desiredShapes (I.Body () bnds res) = do
-  certs <- replicateM (length desiredShapes) $
-           newIdent "shape_cert" (I.Basic I.Cert) loc
-  checks <- replicateM (length desiredShapes) $
-            newIdent "shape_check" (I.Basic I.Bool) loc
-  let check desired computed = I.PrimOp $
-                               I.BinOp I.Equal (I.Var desired) computed
-                               (I.Basic I.Bool) loc
-      cmps = [ mkLet [v] e |
-               (v,e) <- zip checks $
-                        zipWith check desiredShapes computedShapes ]
-      asserts = [mkLet [cert] e |
-                 (cert,e) <- zip certs $
-                            map (I.PrimOp . (`I.Assert` loc) . I.Var) checks]
-  return $ I.Body () (bnds++cmps++asserts)
-    res { resultCertificates =
-             resultCertificates res ++ certs
-        }
-  where computedShapes = concatMap subExpShape $ resultSubExps res
-        loc = srclocOf res
+assertResultShape :: [I.Type] -> I.Body -> InternaliseM I.Body
+assertResultShape rettype body = runBinder $ do
+  es <- bodyBind body
+  let assertProperShape t se =
+        let name = "result_proper_shape"
+        in ensureShape t name se
+  reses <- zipWithM assertProperShape rettype es
+  return $ resultBody [] reses loc
+  where loc = srclocOf body
 
-bindMapShapes :: I.Certificates -> I.Lambda -> [I.SubExp] -> SubExp
-              -> InternaliseM [I.Ident]
-bindMapShapes cs sizefun args outer_shape
-  | null $ I.lambdaReturnType sizefun = return []
+bindMapShapes :: [I.Ident] -> I.Lambda -> [I.SubExp] -> SubExp
+              -> InternaliseM ()
+bindMapShapes inner_shapes sizefun args outer_shape
+  | null $ I.lambdaReturnType sizefun = return ()
   | otherwise =
-    letTupExp "shape" =<< eIf isempty emptybranch nonemptybranch loc
+    void $
+    letBind (basicPattern inner_shapes) =<<
+    eIf isempty emptybranch nonemptybranch loc
   where loc = srclocOf sizefun
         zero = intconst 0 loc
         isempty = eBinOp I.Equal
@@ -162,45 +143,33 @@ bindMapShapes cs sizefun args outer_shape
           resultBody [] <$> (eLambda sizefun =<< mapM index0 args) <*> pure loc
         index0 arg = do
           arg' <- letExp "arg" $ I.PrimOp $ I.SubExp arg
-          letSubExp "elem" $ I.PrimOp $ I.Index cs arg' [intconst 0 loc] loc
+          letSubExp "elem" $ I.PrimOp $ I.Index [] arg' [intconst 0 loc] loc
 
 internaliseFoldLambda :: (E.Exp -> InternaliseM Body)
-                      -> I.Ident
                       -> E.Lambda
                       -> [I.Type] -> [I.Type]
                       -> InternaliseM I.Lambda
-internaliseFoldLambda internaliseBody ce lam acctypes arrtypes = do
+internaliseFoldLambda internaliseBody lam acctypes arrtypes = do
   let rowtypes = map I.rowType arrtypes
-  (params, body, rettype) <- internaliseLambda internaliseBody ce lam $ acctypes ++ rowtypes
+  (params, body, rettype) <- internaliseLambda internaliseBody lam $
+                             acctypes ++ rowtypes
   let rettype' = [ t `setArrayShape` arrayShape shape
                    | (t,shape) <- zip rettype acctypes ]
-  -- The result of the body must have the exact same
-  -- shape as the initial accumulator.  Generate an assertion and insert
-  -- it at the end of the body.
-  body' <-
-    flip mapResultM body $ \(I.Result cs es resloc) -> do
-      let subExpChecks :: I.Type -> I.Type -> InternaliseM [I.Ident]
-          subExpChecks rest acct =
-            forM (zip (I.arrayDims rest) (I.arrayDims acct)) $ \(res_n,acc_n) -> do
-              size_cmp <- letSubExp "fold_size_cmp" $
-                          I.PrimOp $ I.BinOp I.Equal res_n acc_n (I.Basic I.Bool) resloc
-              letExp "fold_size_chk" $ I.PrimOp $ I.Assert size_cmp resloc
-      insertBindingsM $ do
-        cs2 <-
-          liftM concat $ zipWithM subExpChecks (map subExpType es) acctypes
-        return $ resultBody (cs++cs2) es resloc
+  -- The result of the body must have the exact same shape as the
+  -- initial accumulator.  We accomplish this with an assertion and
+  -- reshape().
+  body' <- assertResultShape rettype' body
 
   return $ I.Lambda params body' rettype' loc
   where loc = srclocOf lam
 
 internaliseFilterLambda :: (E.Exp -> InternaliseM Body)
-                     -> I.Ident
-                     -> E.Lambda
-                     -> [I.SubExp]
-                     -> InternaliseM I.Lambda
-internaliseFilterLambda internaliseBody ce lam args = do
+                        -> E.Lambda
+                        -> [I.SubExp]
+                        -> InternaliseM I.Lambda
+internaliseFilterLambda internaliseBody lam args = do
   let argtypes = map I.subExpType args
       rowtypes = map I.rowType argtypes
-  (params, body, _) <- internaliseLambda internaliseBody ce lam rowtypes
+  (params, body, _) <- internaliseLambda internaliseBody lam rowtypes
   return $ I.Lambda params body [I.Basic Bool] loc
   where loc = srclocOf lam

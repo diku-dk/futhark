@@ -3,14 +3,15 @@ module Futhark.Internalise.Monad
   ( InternaliseM
   , runInternaliseM
   , ShapeTable
+  , FunTable
   , InternaliseEnv(..)
-  , Replacement(..)
-  , FunBinding
+  , FunBinding (..)
   , lookupFunction
   , withNonuniqueReplacements
   )
   where
 
+import Control.Arrow
 import Control.Applicative
 import Control.Monad.State  hiding (mapM)
 import Control.Monad.Reader hiding (mapM)
@@ -27,25 +28,28 @@ import Futhark.Tools
 
 import Prelude hiding (mapM)
 
-data Replacement = ArraySubst SubExp [Ident]
-                 | DirectSubst Ident
-                   deriving (Show)
-
 -- | A tuple of a return type, a list of argument types, and the
 -- argument types of the internalised function.
-type FunBinding = (E.DeclType, [E.DeclType])
+data FunBinding = FunBinding { internalFun :: ([ExtType], [VName], [Type])
+                             , externalFun :: (E.DeclType, [E.DeclType])
+                             }
 
 type ShapeTable = HM.HashMap VName [SubExp]
 
+type FunTable = HM.HashMap Name FunBinding
+
 data InternaliseEnv = InternaliseEnv {
-    envSubsts :: HM.HashMap VName [Replacement]
-  , envFtable :: HM.HashMap Name FunBinding
+    envSubsts :: HM.HashMap VName [Ident]
+  , envFtable :: FunTable
   , envDoBoundsChecks :: Bool
   }
 
-initialFtable :: HM.HashMap Name FunBinding
+initialFtable :: FunTable
 initialFtable = HM.map addBuiltin builtInFunctions
-  where addBuiltin (t, ts) = (E.Elem $ E.Basic t, map (E.Elem . E.Basic) ts)
+  where addBuiltin (t, paramts) =
+          FunBinding
+          ([Basic t], [], map Basic paramts)
+          (E.Elem $ E.Basic t, map (E.Elem . E.Basic) paramts)
 
 type InternaliseM =
   WriterT (DL.DList Binding) (ReaderT InternaliseEnv (State VNameSource))
@@ -64,17 +68,16 @@ instance MonadBinder InternaliseM where
   addBinding      = addBindingWriter
   collectBindings = collectBindingsWriter
 
-runInternaliseM :: Bool -> E.Prog -> InternaliseM a -> a
-runInternaliseM boundsCheck prog m = fst $ evalState (runReaderT (runWriterT m) newEnv) newState
-  where newState = E.newNameSourceForProg prog
-        newEnv = InternaliseEnv {
+runInternaliseM :: MonadFreshNames m =>
+                   Bool -> FunTable -> InternaliseM a -> m a
+runInternaliseM boundsCheck ftable m =
+  modifyNameSource $
+  first fst . runState (runReaderT (runWriterT m) newEnv)
+  where newEnv = InternaliseEnv {
                    envSubsts = HM.empty
                  , envFtable = initialFtable `HM.union` ftable
                  , envDoBoundsChecks = boundsCheck
                  }
-        ftable = HM.fromList
-                 [ (fname,(rettype, map E.identType params)) |
-                   (fname,rettype,params,_,_) <- E.progFunctions prog ]
 
 lookupFunction :: Name -> InternaliseM FunBinding
 lookupFunction fname = do
@@ -85,7 +88,4 @@ lookupFunction fname = do
 withNonuniqueReplacements :: InternaliseM a -> InternaliseM a
 withNonuniqueReplacements = local $ \env ->
   env { envSubsts = HM.map (map makeNonunique) $ envSubsts env }
-  where makeNonunique (DirectSubst ident) =
-          DirectSubst $ ident `setIdentUniqueness` Nonunique
-        makeNonunique (ArraySubst c idents) =
-          ArraySubst c $ map (`setIdentUniqueness` Nonunique) idents
+  where makeNonunique = (`setIdentUniqueness` Nonunique)

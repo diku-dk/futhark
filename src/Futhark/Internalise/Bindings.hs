@@ -2,12 +2,12 @@ module Futhark.Internalise.Bindings
   (
   -- * Internalising bindings
     internaliseParam
+  , internaliseFunParam
   , bindingParams
 
   , flattenPattern
   , bindingTupIdent
-  , bindingFlatPatternWithCert
-  , bindingFlatPatternOwnCert
+  , bindingFlatPattern
   )
   where
 
@@ -27,61 +27,50 @@ import Futhark.Tools as I
 import Futhark.MonadFreshNames
 
 import Futhark.Internalise.Monad
-import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.TypesValues
 
 import Prelude hiding (mapM)
 
 
-data InternaliseRes shape = TupleArray I.Ident [I.IdentBase shape]
+data InternaliseRes shape = TupleArray [I.IdentBase shape]
                           | Direct (I.IdentBase shape)
                             deriving (Show)
 
 internaliseParam :: MonadFreshNames m => E.Ident
-                 -> m [InternaliseRes I.Rank]
+                 -> m [I.IdentBase I.ExtShape]
 internaliseParam param =
-  internalise $ internaliseType $ E.identType param
-  where internalise [] = return []
-        internalise (I.Basic Cert : ts) = do
-          let (ets,restts) = span (/=I.Basic Cert) ts
-          ns <- forM ets $ \t' -> newIdent base t' loc
-          cert <- newIdent ("zip_cert_" ++ base) (I.Basic Cert) loc
-          (TupleArray cert ns:) <$> internalise restts
-        internalise ts = do
-          let (ets,restts) = span (/=I.Basic Cert) ts
-          params <- mapM (\t' -> Direct <$> newIdent base t' loc) ets
-          (params++) <$> internalise restts
-
-        loc = srclocOf param
+  forM (internaliseType $ E.identType param) $ \t ->
+  newIdent base t loc
+  where loc = srclocOf param
         base = nameToString $ baseName $ E.identName param
 
-bindingParams :: [E.Parameter] -> ([I.Param] -> [I.Param] -> InternaliseM a) -> InternaliseM a
+internaliseFunParam :: MonadFreshNames m => E.Parameter
+                    -> m ([I.Ident], [I.Ident])
+internaliseFunParam param = do
+  new_params <- internaliseParam $ E.fromParam param
+  (new_param_types, shapes) <-
+    I.instantiateShapes' (srclocOf param) $
+    map I.identType new_params
+  let new_params' = [ new_param { I.identType = t } |
+                      (new_param, t) <- zip new_params new_param_types ]
+  return (shapes, new_params')
+
+bindingParams :: [E.Parameter]
+              -> ([I.Param] -> [I.Param] -> InternaliseM a)
+              -> InternaliseM a
 bindingParams params m = do
   ((paramshapes, params'), substs) <-
     runWriterT $ liftM unzip $ forM params $ \param -> do
-      internalisations <- lift $ internaliseParam $ E.fromParam param
-      (paramshapes, params', substs) <-
-        liftM unzip3 $ forM internalisations $ \param' ->
-          case param' of
-            Direct k -> do
-              (k',k_shape) <- lift $ identWithShapes k
-              return (k_shape,
-                      [k'],
-                      DirectSubst k')
-            TupleArray c ks -> do
-              (ks',ks_shapes) <- unzip <$> lift (mapM identWithShapes ks)
-              return (concat ks_shapes,
-                      c:ks',
-                      ArraySubst (I.Var c) ks')
-      tell $ HM.singleton (E.identName param) substs
-      return (concat paramshapes, concat params')
+      (shapes, param') <- lift $ internaliseFunParam param
+      tell $ HM.singleton (E.identName param) param'
+      return (shapes, param')
   let bind env = env { envSubsts = substs `HM.union` envSubsts env }
   local bind $ m (concat paramshapes) (concat params')
 
-bindingFlatPatternAs :: ([I.Type] -> [InternaliseRes Rank] -> ([I.Ident], [Replacement], [I.Type]))
-                     -> [E.Ident] -> [I.Type]
-                     -> ([I.Ident] -> InternaliseM a) -> InternaliseM a
-bindingFlatPatternAs handleMapping = bindingFlatPattern' []
+bindingFlatPattern :: [E.Ident] -> [I.Type]
+                   -> ([I.Ident] -> InternaliseM a)
+                   -> InternaliseM a
+bindingFlatPattern = bindingFlatPattern' []
   where
     bindingFlatPattern' pat []       _  m = do
       let (vs, substs) = unzip pat
@@ -93,36 +82,19 @@ bindingFlatPatternAs handleMapping = bindingFlatPattern' []
       (ps, subst, rest_ts) <- handleMapping ts <$> internaliseParam p
       bindingFlatPattern' ((ps, (E.identName p, subst)) : pat) rest rest_ts m
 
-bindingFlatPatternWithCert :: I.SubExp
-                           -> [E.Ident] -> [I.Type]
-                           -> ([I.Ident] -> InternaliseM a) -> InternaliseM a
-bindingFlatPatternWithCert ce = bindingFlatPatternAs handleMapping
-  where handleMapping ts [] = ([], [], ts)
-        handleMapping ts (r:rs) =
-          let (ps, reps, ts') = handleMapping' ts r
-              (pss, repss, ts'') = handleMapping ts' rs
-          in (ps++pss, reps:repss, ts'')
-        handleMapping' ts (Direct v) =
-          let ([v'], rest_ts) = annotateIdents [v] ts
-          in ([v'], DirectSubst v', rest_ts)
-        handleMapping' ts (TupleArray _ vs') =
-          let (vs'', rest_ts) = annotateIdents vs' ts
-          in (vs'', ArraySubst ce vs'', rest_ts)
+    handleMapping ts [] =
+      ([], [], ts)
+    handleMapping ts (r:rs) =
+        let (ps, reps, ts')    = handleMapping' ts r
+            (pss, repss, ts'') = handleMapping ts' rs
+        in (ps++pss, reps:repss, ts'')
 
-bindingFlatPatternOwnCert :: [E.Ident] -> [I.Type]
-                          -> ([I.Ident] -> InternaliseM a) -> InternaliseM a
-bindingFlatPatternOwnCert = bindingFlatPatternAs handleMapping
-  where handleMapping ts [] = ([], [], ts)
-        handleMapping ts (r:rs) =
-          let (ps, reps, ts')    = handleMapping' ts r
-              (pss, repss, ts'') = handleMapping ts' rs
-          in (ps++pss, reps:repss, ts'')
-        handleMapping' ts (Direct v) =
-          let ([v'], rest_ts) = annotateIdents [v] ts
-          in ([v'], DirectSubst v', rest_ts)
-        handleMapping' ts (TupleArray c vs') =
-          let (vs'', rest_ts) = annotateIdents vs' $ drop 1 ts -- Skip the cert.
-          in (c:vs'', ArraySubst (I.Var c) vs'', rest_ts)
+    handleMapping' (t:ts) v =
+      let u = I.uniqueness $ I.identType v
+          v' = v { I.identType = t `I.setUniqueness` u }
+      in ([v'], v', ts)
+    handleMapping' [] _ =
+      error "bindingFlatPattern: insufficient identifiers in pattern."
 
 flattenPattern :: MonadFreshNames m => E.TupIdent -> m [E.Ident]
 flattenPattern (E.Wildcard t loc) = do
@@ -133,12 +105,11 @@ flattenPattern (E.Id v) =
 flattenPattern (E.TupId pats _) =
   concat <$> mapM flattenPattern pats
 
-bindingTupIdent :: E.TupIdent -> Maybe SubExp -> [ExtType] -> (I.Pattern -> InternaliseM a)
+bindingTupIdent :: E.TupIdent -> [ExtType] -> (I.Pattern -> InternaliseM a)
                 -> InternaliseM a
-bindingTupIdent pat ce ts m = do
+bindingTupIdent pat ts m = do
   pat' <- flattenPattern pat
   (ts',shapes) <- I.instantiateShapes' loc ts
   let addShapeBindings pat'' = m $ I.basicPattern $ shapes ++ pat''
-  case ce of Just ce' -> bindingFlatPatternWithCert ce' pat' ts' addShapeBindings
-             Nothing  -> bindingFlatPatternOwnCert pat' ts' addShapeBindings
+  bindingFlatPattern pat' ts' addShapeBindings
   where loc = srclocOf pat
