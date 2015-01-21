@@ -371,7 +371,7 @@ defCompilePrimOp [target] (Update _ src idxs val _) = do
       valoffset <- ixFunOffset valixfun
       tell $ Imp.Copy
         destmem (elemoffset `impTimes` Imp.SizeOf srcet)
-        valmem valoffset
+        valmem (valoffset `impTimes` Imp.SizeOf srcet)
         size
   where srct = identType src
         srcet = elemType srct
