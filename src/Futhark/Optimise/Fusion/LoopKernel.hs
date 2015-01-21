@@ -16,7 +16,6 @@ module Futhark.Optimise.Fusion.LoopKernel
 import Control.Applicative
 import Control.Arrow (first)
 import Control.Monad
-
 import qualified Data.HashSet as HS
 
 import Data.Maybe
@@ -142,8 +141,33 @@ tryExposeInputs outIds soac ker = do
   then fuseSOACwithKer outIds soac ker'
   else do
     (soac', ots') <- pullOutputTransforms soac ots
-    applyFusionRules outIds soac'
-                     ker' { outputTransform = outputTransform ker' <> ots' }
+    let outIds' = fixOutputTypes outIds soac'
+        ker'' = fixInputTypes outIds' ker'
+    if SOAC.nullTransforms ots'
+    then applyFusionRules outIds' soac' ker''
+    else fail "tryExposeInputs could not pull SOAC transforms"
+
+fixOutputTypes :: [Ident] -> SOAC -> [Ident]
+fixOutputTypes outIds soac =
+  zipWith fixInputType outIds $ SOAC.typeOf soac
+  where fixInputType outId t =
+          let outId_t = identType outId
+          in outId { identType = outId_t `setArrayShape`
+                                 Shape (map fixDim $ extShapeDims $ arrayShape t)
+                   }
+        -- FIXME: filter sucks; get rid of it.
+        fixDim (Ext {})   = error "existential size - how did we optimise a filter?"
+        fixDim (Free dim) = dim
+
+fixInputTypes :: [Ident] -> FusedKer -> FusedKer
+fixInputTypes outIds ker =
+  ker { fsoac = fixInputTypes' $ fsoac ker }
+  where fixInputTypes' soac =
+          map fixInputType (SOAC.inputs soac) `SOAC.setInputs` soac
+        fixInputType (SOAC.Input ts (SOAC.Var v))
+          | Just v' <- find ((==identName v) . identName) outIds =
+            SOAC.Input ts $ SOAC.Var v'
+        fixInputType inp = inp
 
 applyFusionRules :: [Ident] -> SOAC -> FusedKer -> TryFusion FusedKer
 applyFusionRules outIds soac ker =
