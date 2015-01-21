@@ -31,11 +31,6 @@ import Futhark.Internalise.TypesValues
 
 import Prelude hiding (mapM)
 
-
-data InternaliseRes shape = TupleArray [I.IdentBase shape]
-                          | Direct (I.IdentBase shape)
-                            deriving (Show)
-
 internaliseParam :: MonadFreshNames m => E.Ident
                  -> m [I.IdentBase I.ExtShape]
 internaliseParam param =
