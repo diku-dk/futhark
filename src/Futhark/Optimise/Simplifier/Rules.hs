@@ -76,7 +76,7 @@ liftIdentityMapping _ (Let pat _ (LoopOp (Map cs fun arrs loc))) =
     ([], _, _) -> cannotSimplify
     (invariant, mapresult, rettype') -> do
       let (pat', ses') = unzip mapresult
-          lambdaRes = Result rescs ses' resloc
+          lambdaRes = Result ses' resloc
           fun' = fun { lambdaBody = (lambdaBody fun) { bodyResult = lambdaRes }
                      , lambdaReturnType = rettype'
                      }
@@ -85,7 +85,7 @@ liftIdentityMapping _ (Let pat _ (LoopOp (Map cs fun arrs loc))) =
   where inputMap = HM.fromList $ zip (map identName $ lambdaParams fun) arrs
         free = freeInBody $ lambdaBody fun
         rettype = lambdaReturnType fun
-        Result rescs ses resloc = bodyResult $ lambdaBody fun
+        Result ses resloc = bodyResult $ lambdaBody fun
         outersize = arraysSize 0 $ map identType arrs
 
         freeOrConst (Var v)       = v `HS.member` free
@@ -122,7 +122,7 @@ removeReplicateMapping vtable (Let pat _ (LoopOp (Map cs fun arrs loc)))
       -- Empty maps are not permitted, so if that would be the result,
       -- turn the entire map into a replicate.
       n = arraysSize 0 $ map identType arrs
-      Result _ ses resloc = bodyResult $ lambdaBody fun
+      Result ses resloc = bodyResult $ lambdaBody fun
       mapres = bodyBindings $ lambdaBody fun
   mapM_ (uncurry letBindNames) parameterBnds
   case arrs' of
@@ -144,11 +144,11 @@ removeReplicateMapping _ _ = cannotSimplify
 
 removeDeadMapping :: MonadBinder m => BottomUpRule m
 removeDeadMapping (_, used) (Let pat _ (LoopOp (Map cs fun arrs loc))) =
-  let Result rcs ses resloc = bodyResult $ lambdaBody fun
+  let Result ses resloc = bodyResult $ lambdaBody fun
       isUsed (bindee, _, _) = (`UT.used` used) $ bindeeName bindee
       (pat',ses', ts') = unzip3 $ filter isUsed $
                          zip3 (patternBindees pat) ses $ lambdaReturnType fun
-      fun' = fun { lambdaBody = (lambdaBody fun) { bodyResult = Result rcs ses' resloc }
+      fun' = fun { lambdaBody = (lambdaBody fun) { bodyResult = Result ses' resloc }
                  , lambdaReturnType = ts'
                  }
   in if pat /= Pattern pat'
@@ -197,7 +197,7 @@ removeUnusedLoopResult _ _ = cannotSimplify
 removeRedundantMergeVariables :: MonadBinder m => BottomUpRule m
 removeRedundantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge i bound body loc)))
   | not $ all (explicitlyReturned . fst) merge =
-  let Result cs es resloc = bodyResult body
+  let Result es resloc = bodyResult body
       returnedResultSubExps = map snd $ filter (explicitlyReturned . fst) $ zip mergepat es
       necessaryForReturned = mconcat $ map dependencies returnedResultSubExps
       resIsNecessary ((v,_), _) =
@@ -206,7 +206,7 @@ removeRedundantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge i bound 
         referencedInPat v
       (keep, discard) = partition resIsNecessary $ zip merge es
       (merge', es') = unzip keep
-      body' = body { bodyResult = Result cs es' resloc }
+      body' = body { bodyResult = Result es' resloc }
   in if merge == merge'
      then cannotSimplify
      else do
@@ -251,7 +251,7 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge idd n
       cannotSimplify
     (invariant, explpat', merge', ses') ->
       -- We have moved something invariant out of the loop.
-      let loopbody' = loopbody { bodyResult = Result cs ses' resloc }
+      let loopbody' = loopbody { bodyResult = Result ses' resloc }
           invariantShape :: (a, Ident) -> Bool
           invariantShape (_, shapemerge) = shapemerge `elem`
                                            map (bindeeIdent . fst) merge'
@@ -263,7 +263,7 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge idd n
               letBindNames_ [identName v1] $ PrimOp $ SubExp v2
             letBind_ (Pattern pat') $
               LoopOp $ DoLoop respat' merge' idd n loopbody' loc
-  where Result cs ses resloc = bodyResult loopbody
+  where Result ses resloc = bodyResult loopbody
         taggedpat = zip (patternBindees pat) $
                     loopResultContext (representative :: Lore m)
                     respat (map fst merge) ++ respat
@@ -675,14 +675,14 @@ simplifyBoolBranch :: MonadBinder m => TopDownRule m
 simplifyBoolBranch _
   (Let pat _
    (If cond
-    (Body _ [] (Result _ [Constant (LogVal True) _] _))
-    (Body _ [] (Result _ [Constant (LogVal False) _] _))
+    (Body _ [] (Result [Constant (LogVal True) _] _))
+    (Body _ [] (Result [Constant (LogVal False) _] _))
     _ _)) =
   letBind_ pat $ PrimOp $ SubExp cond
 -- When typeOf(x)==bool, if c then x else y == (c && x) || (!c && y)
 simplifyBoolBranch _ (Let pat _ (If cond tb fb ts loc))
-  | Body _ [] (Result [] [tres] _) <- tb,
-    Body _ [] (Result [] [fres] _) <- fb,
+  | Body _ [] (Result [tres] _) <- tb,
+    Body _ [] (Result [fres] _) <- fb,
     patternSize pat == length ts,
     all (==Basic Bool) ts,
     False = do -- FIXME: disable because algebraic optimiser cannot handle it.
@@ -696,14 +696,14 @@ simplifyBoolBranch _ _ = cannotSimplify
 hoistBranchInvariant :: MonadBinder m => TopDownRule m
 hoistBranchInvariant _ (Let pat _ (If e1 tb fb ret loc))
   | patternSize pat == length ret = do
-  let Result tcs tses tresloc = bodyResult tb
-      Result fcs fses fresloc = bodyResult fb
+  let Result tses tresloc = bodyResult tb
+      Result fses fresloc = bodyResult fb
   (pat', res, invariant) <-
     foldM branchInvariant ([], [], False) $
     zip (patternBindees pat) (zip tses fses)
   let (tses', fses') = unzip res
-      tb' = tb { bodyResult = Result tcs tses' tresloc }
-      fb' = fb { bodyResult = Result fcs fses' fresloc }
+      tb' = tb { bodyResult = Result tses' tresloc }
+      fb' = fb { bodyResult = Result fses' fresloc }
   if invariant -- Was something hoisted?
      then letBind_ (Pattern pat') =<<
           eIf (eSubExp e1) (pure tb') (pure fb') loc
@@ -761,11 +761,11 @@ removeDeadBranchResult (_, used) (Let pat _ (If e1 tb fb rettype loc))
   -- Remove the parts of the branch-results that correspond to dead
   -- return value bindings.  Note that this leaves dead code in the
   -- branch bodies, but that will be removed later.
-  let Result tcs tses tresloc = bodyResult tb
-      Result fcs fses fresloc = bodyResult fb
+  let Result tses tresloc = bodyResult tb
+      Result fses fresloc = bodyResult fb
       pick = map snd . filter fst . zip patused
-      tb' = tb { bodyResult = Result tcs (pick tses) tresloc }
-      fb' = fb { bodyResult = Result fcs (pick fses) fresloc }
+      tb' = tb { bodyResult = Result (pick tses) tresloc }
+      fb' = fb { bodyResult = Result (pick fses) fresloc }
       pat' = pick $ patternBindees pat
   in letBind_ (Pattern pat') =<<
      eIf (eSubExp e1) (pure tb') (pure fb') loc

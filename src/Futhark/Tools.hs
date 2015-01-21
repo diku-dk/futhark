@@ -185,7 +185,7 @@ eBody es = insertBindingsM $ do
              xs <- mapM (letTupExp "x") es'
              let loc = case es' of []  -> noLoc
                                    e:_ -> srclocOf e
-             mkBodyM [] $ Result [] (map Var $ concat xs) loc
+             mkBodyM [] $ Result (map Var $ concat xs) loc
 
 eLambda :: MonadBinder m =>
            Lambda (Lore m) -> [SubExp] -> m [SubExp]
@@ -214,7 +214,7 @@ binOpLambda bop t loc = do
   body <- runBinder $ do
     bnds <- mkLetNamesM [identName res] $
             PrimOp $ BinOp bop (Var x) (Var y) t loc
-    mkBodyM [bnds] $ Result [] [Var res] loc
+    mkBodyM [bnds] $ Result [Var res] loc
   return Lambda {
              lambdaParams     = [x, y]
            , lambdaReturnType = [t]
@@ -240,18 +240,17 @@ makeLambda params body = do
         isBasic _         = Nothing
 
 -- | Conveniently construct a body that contains no bindings.
-resultBody :: Bindable lore => Certificates -> [SubExp] -> SrcLoc -> Body lore
-resultBody cs ses loc = mkBody [] $ Result cs ses loc
+resultBody :: Bindable lore => [SubExp] -> SrcLoc -> Body lore
+resultBody ses loc = mkBody [] $ Result ses loc
 
 -- | Conveniently construct a body that contains no bindings - but
 -- this time, monadically!
 resultBodyM :: MonadBinder m =>
-               Certificates
-            -> [SubExp]
+               [SubExp]
             -> SrcLoc
             -> m (Body (Lore m))
-resultBodyM cs ses loc =
-  mkBodyM [] $ Result cs ses loc
+resultBodyM ses loc =
+  mkBodyM [] $ Result ses loc
 
 -- | Evaluate the action, producing a body, then wrap it in all the
 -- bindings it created using 'addBinding'.

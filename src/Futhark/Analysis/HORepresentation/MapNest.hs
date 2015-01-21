@@ -30,7 +30,6 @@ data Nesting lore = Nesting {
     nestingParamNames   :: [VName]
   , nestingResult       :: [VName]
   , nestingReturnType   :: [Type]
-  , nestingCertificates :: Certificates
   } deriving (Eq, Ord, Show)
 
 data MapNest lore = MapNest Certificates (Nest.NestBody lore) [Nesting lore] [SOAC.Input] SrcLoc
@@ -67,7 +66,6 @@ fromSOACNest' bound (Nest.SOACNest inps
              nestingParamNames   = ps
            , nestingResult       = Nest.nestingResult n
            , nestingReturnType   = Nest.nestingReturnType n
-           , nestingCertificates = Nest.nestingCertificates n
            }
   return $ Just $ MapNest (cs++cs') body' (n':ns') inps'' loc
   where bound' = bound `HS.union` HS.fromList (Nest.nestingParamNames n)
@@ -128,7 +126,6 @@ toSOACNest' cs body (nest:ns) inpts loc =
                 , Nest.nestingInputs =
                   map SOAC.varInput $
                   zipWith mkParam (nestingParamNames nest) $ map rowType inpts
-                , Nest.nestingCertificates = nestingCertificates nest
                 }
 
 fixInputs :: [(VName, SOAC.Input)] -> [(VName, SOAC.Input)]

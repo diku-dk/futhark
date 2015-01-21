@@ -82,7 +82,7 @@ internaliseCerts = map internaliseCert
 internaliseBody :: E.Exp -> InternaliseM Body
 internaliseBody e = insertBindingsM $ do
   ses <- internaliseExp "res" e
-  return $ resultBody [] ses $ srclocOf e
+  return $ resultBody ses $ srclocOf e
 
 internaliseExp :: String -> E.Exp -> InternaliseM [I.SubExp]
 
@@ -169,15 +169,12 @@ internaliseExp desc (E.DoLoop mergepat mergeexp i bound loopbody letbody loc) = 
   (loopbody', shapepat, mergepat') <-
     withNonuniqueReplacements $ bindingParams mergeparams $ \shapepat mergepat' -> do
       loopbody' <- internaliseBody loopbody
-      let Result cs ses resloc = bodyResult loopbody'
+      let Result ses resloc = bodyResult loopbody'
           shapeargs = argShapes
                       (map I.identName shapepat)
                       (map I.identType mergepat')
                       ses
-          loopbody'' =
-            loopbody' {
-              bodyResult = Result cs (shapeargs++ses) resloc
-              }
+          loopbody'' = loopbody' { bodyResult = Result (shapeargs++ses) resloc }
       return (loopbody'',
               shapepat,
               mergepat')

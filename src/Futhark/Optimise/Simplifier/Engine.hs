@@ -404,10 +404,10 @@ defaultSimplifyBody ds (Body lore (bnd:bnds) res) = do
 simplifyResult :: MonadEngine m =>
                   [Diet] -> Result -> m Result
 
-simplifyResult ds (Result cs es loc) = do
+simplifyResult ds (Result es loc) = do
   es' <- mapM simplifySubExp es
   consumeResult $ zip ds es'
-  Result <$> simplifyCerts cs <*> pure es' <*> pure loc
+  return $ Result es' loc
 
 isDoLoopResult :: MonadEngine m =>
                   Result -> m ()

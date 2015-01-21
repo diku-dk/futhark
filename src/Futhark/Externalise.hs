@@ -36,7 +36,7 @@ externaliseFunction (FunDec fname ret params body loc) =
    loc)
 
 externaliseBody :: I.Body -> E.Exp
-externaliseBody (I.Body _ [] (I.Result _ es loc)) =
+externaliseBody (I.Body _ [] (I.Result es loc)) =
   externaliseSubExps es loc
 externaliseBody (I.Body lore (I.Let pat _ e:bnds) res) =
   E.LetPat (externalisePat pat loc) (externaliseExp e)

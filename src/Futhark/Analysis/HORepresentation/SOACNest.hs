@@ -48,7 +48,6 @@ data Nesting lore = Nesting {
     nestingParamNames :: [VName]
   , nestingInputs     :: [SOAC.Input]
   , nestingResult     :: [VName]
-  , nestingCertificates :: Certificates
   , nestingReturnType :: [Type]
   } deriving (Eq, Ord, Show)
 
@@ -87,7 +86,7 @@ instance Substitutable lore => Substitute (NestBody lore) where
 bodyToLambda :: (Bindable lore, MonadFreshNames m) =>
                 [Type] -> NestBody lore -> m (Lambda lore)
 bodyToLambda _ (Fun l) = return l
-bodyToLambda inpts (NewNest (Nesting paramNames inps bndIds resCerts retTypes) op) = do
+bodyToLambda inpts (NewNest (Nesting paramNames inps bndIds retTypes) op) = do
   (e,f) <- runBinder' $ SOAC.toExp =<< toSOAC (SOACNest inps op)
   let idents = instantiateExtTypes loc bndIds $ expExtType e
   bnd <- mkLetNames (map identName idents) e
@@ -96,7 +95,7 @@ bodyToLambda inpts (NewNest (Nesting paramNames inps bndIds resCerts retTypes) o
            , lambdaParams = zipWith mkIdents paramNames $ map rowType inpts
            , lambdaReturnType = retTypes
            , lambdaBody = f $ mkBody [bnd] $
-                          Result resCerts (map Var idents) loc
+                          Result (map Var idents) loc
            }
   where loc = srclocOf op
         mkIdents name t = Ident name t loc
@@ -224,7 +223,6 @@ nested l
             Nesting { nestingParamNames = map identName $ lambdaParams l
                     , nestingInputs = inputs soac
                     , nestingResult = patternNames pat
-                    , nestingCertificates = resultCertificates res
                     , nestingReturnType = lambdaReturnType l
                     })
   | otherwise = Nothing

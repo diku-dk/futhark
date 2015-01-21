@@ -17,8 +17,8 @@ import Futhark.Representation.Basic
 import Futhark.Tools
 
 shapeBody :: [VName] -> [Type] -> Body -> Body
-shapeBody shapenames ts (Body () bnds (Result cs ses loc)) =
-  Body () bnds $ Result cs shapes loc
+shapeBody shapenames ts (Body () bnds (Result ses loc)) =
+  Body () bnds $ Result shapes loc
   where shapes = argShapes shapenames ts ses
 
 annotateArrayShape :: ArrayShape shape =>

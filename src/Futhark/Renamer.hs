@@ -155,8 +155,8 @@ instance Rename SubExp where
   rename (Constant v loc) = return $ Constant v loc
 
 instance Rename Result where
-  rename (Result cs ses loc) =
-    Result <$> mapM rename cs <*> mapM rename ses <*> pure loc
+  rename (Result ses loc) =
+    Result <$> mapM rename ses <*> pure loc
 
 instance Rename annot => Rename (Bindee annot) where
   rename (Bindee ident lore) = Bindee <$> rename ident <*> rename lore

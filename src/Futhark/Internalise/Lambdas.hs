@@ -50,22 +50,6 @@ curryToLambda fname curargs rettype loc = do
              rettype loc
   return (params, call, E.toDecl rettype)
 
-internaliseLambdaBody :: (E.Exp -> InternaliseM I.Body)
-                      -> E.Exp -> InternaliseM I.Body
-internaliseLambdaBody internaliseBody body = do
-  body' <- internaliseBody body
-  flip mapResultM body' $ \(Result cs es _) -> do
-    -- Some of the subexpressions are actually
-    -- certificates... filter them out!  This is slightly hacky, as
-    -- we assume that the original input program does not contain
-    -- certificates (or at least, that they are not part of the
-    -- lambda return type).
-    let (certs,vals) = partition ((==I.Basic I.Cert) . subExpType) es
-    insertBindingsM $ do
-      certs' <- letExps "lambda_cert" $ map (I.PrimOp . I.SubExp) certs
-      return $ resultBody (cs++certs') vals loc
-  where loc = srclocOf body
-
 lambdaBinding :: [E.Parameter] -> [I.Type]
               -> InternaliseM I.Body -> InternaliseM (I.Body, [I.Param])
 lambdaBinding params ts m =
@@ -80,7 +64,7 @@ internaliseLambda :: (E.Exp -> InternaliseM Body)
 internaliseLambda internaliseBody lam rowtypes = do
   (params, body, rettype, _) <- ensureLambda lam
   (body', params') <- lambdaBinding params rowtypes $
-                      internaliseLambdaBody internaliseBody body
+                      internaliseBody body
   return (params', body', internaliseType rettype)
 
 internaliseMapLambda :: (E.Exp -> InternaliseM Body)
@@ -119,7 +103,7 @@ assertResultShape rettype body = runBinder $ do
         let name = "result_proper_shape"
         in ensureShape t name se
   reses <- zipWithM assertProperShape rettype es
-  return $ resultBody [] reses loc
+  return $ resultBody reses loc
   where loc = srclocOf body
 
 bindMapShapes :: [I.Ident] -> I.Lambda -> [I.SubExp] -> SubExp
@@ -137,10 +121,9 @@ bindMapShapes inner_shapes sizefun args outer_shape
                   (pure $ I.PrimOp $ SubExp zero)
                   (I.Basic I.Bool) loc
         emptybranch =
-          pure $ resultBody
-          [] (map (const zero) $ I.lambdaReturnType sizefun) loc
+          pure $ resultBody (map (const zero) $ I.lambdaReturnType sizefun) loc
         nonemptybranch = insertBindingsM $
-          resultBody [] <$> (eLambda sizefun =<< mapM index0 args) <*> pure loc
+          resultBody <$> (eLambda sizefun =<< mapM index0 args) <*> pure loc
         index0 arg = do
           arg' <- letExp "arg" $ I.PrimOp $ I.SubExp arg
           letSubExp "elem" $ I.PrimOp $ I.Index [] arg' [intconst 0 loc] loc

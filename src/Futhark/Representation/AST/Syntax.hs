@@ -100,8 +100,7 @@ instance Located (Binding lore) where
 
 -- | The result of a body - a sequence of subexpressions, possibly
 -- predicated on one or more certificates.
-data Result = Result { resultCertificates :: Certificates
-                     , resultSubExps :: [SubExp]
+data Result = Result { resultSubExps :: [SubExp]
                      , resultSrcLoc :: SrcLoc
                      }
                    deriving (Eq, Ord, Show)

@@ -314,7 +314,7 @@ iswim _ nest ots
   | Nest.Scan cs1 (Nest.NewNest lvl nn) es loc1 <- Nest.operation nest,
     Nest.Map cs2 mb loc2 <- nn,
     Just es' <- mapM SOAC.inputFromSubExp es,
-    Nest.Nesting paramIds mapArrs bndIds certs retTypes <- lvl,
+    Nest.Nesting paramIds mapArrs bndIds retTypes <- lvl,
     mapM (liftM identName . isVarInput) mapArrs == Just paramIds = do
     let newInputs = es' ++ map (SOAC.transposeInput 0 1) (Nest.inputs nest)
         inputTypes = map SOAC.inputType newInputs
@@ -326,7 +326,6 @@ iswim _ nest ots
     let innerScan = Nest.Scan cs2 mb (map Var innerAccParams) loc1
         scanNest = Nest.Nesting {
                      Nest.nestingInputs = map SOAC.varInput innerArrParams
-                   , Nest.nestingCertificates = certs
                    , Nest.nestingReturnType = zipWith setOuterSize retTypes $
                                               map (arraySize 0) arrsizes
                    , Nest.nestingResult = bndIds
@@ -443,7 +442,6 @@ pullReshape nest ots
                         Nest.nestingParamNames = map identName ps
                       , Nest.nestingInputs = map SOAC.varInput ps
                       , Nest.nestingResult = bnds
-                      , Nest.nestingCertificates = []
                       , Nest.nestingReturnType = retTypes
                       }
         return $ Nest.Map [] (Nest.NewNest nesting inner) loc

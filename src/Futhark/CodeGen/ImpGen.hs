@@ -231,11 +231,11 @@ compileFunDec ec src (FunDec fname rettype params body _) = do
           return (outparams, inparams, results, args)
 
 compileExtBody :: Destination -> Body -> ImpM op ()
-compileExtBody (Destination dest) (Body _ bnds (Result _ ses _)) =
+compileExtBody (Destination dest) (Body _ bnds (Result ses _)) =
   compileBindings bnds $ zipWithM_ compileResultSubExp dest ses
 
 compileBody :: [VName] -> Body -> ImpM op ()
-compileBody targets (Body _ bnds (Result _ ses _)) =
+compileBody targets (Body _ bnds (Result ses _)) =
   compileBindings bnds $ forM_ (zip targets ses) $ \(d,se) ->
     when (subExpNotArray se) $
     compileSubExpTo d se

@@ -60,7 +60,7 @@ foldClosedForm look pat lam accs arrs = do
     PrimOp $ BinOp Equal inputsize (intconst 0 lamloc) (Basic Bool) lamloc
   letBind_ pat =<<
     eIf (eSubExp $ Var isEmpty)
-    (resultBodyM [] accs lamloc)
+    (resultBodyM accs lamloc)
     (renameBody closedBody)
     lamloc
   where lamloc = srclocOf lam
@@ -82,7 +82,7 @@ loopClosedForm pat respat merge bound body
       (Basic Bool) bodyloc
     letBindNames_ (patternNames pat) =<<
       eIf (eSubExp $ Var isEmpty)
-      (resultBodyM [] mergeexp bodyloc)
+      (resultBodyM mergeexp bodyloc)
       (renameBody closedBody)
       bodyloc
   | otherwise = cannotSimplify
@@ -102,7 +102,7 @@ checkResults :: MonadBinder m =>
 checkResults pat knownBindings params body accs bodyloc = do
   ((), bnds) <- collectBindings $
                 zipWithM_ checkResult (zip pat $ resultSubExps res) (zip accparams accs)
-  mkBodyM bnds $ Result [] (map Var pat) bodyloc
+  mkBodyM bnds $ Result (map Var pat) bodyloc
 
   where bndMap = makeBindMap body
         (accparams, _) = splitAt (length accs) params

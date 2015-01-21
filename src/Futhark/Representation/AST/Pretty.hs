@@ -84,8 +84,8 @@ instance Pretty SubExp where
   ppr (Constant v _) = ppr v
 
 instance Pretty Result where
-  ppr (Result cs es _) =
-    ppCertificates cs <> braces (commasep   $ map ppr es)
+  ppr (Result es _) =
+    braces (commasep $ map ppr es)
 
 instance PrettyLore lore => Pretty (Body lore) where
   ppr (Body lore (bnd:bnds) res) =

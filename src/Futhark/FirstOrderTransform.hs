@@ -50,7 +50,7 @@ transformExp (LoopOp (Map cs fun arrs loc)) = do
   loopbody <- runBinder $ do
     x <- bodyBind =<< transformLambda fun (index cs inarrs iv)
     dests <- letwith cs outarrs (pexp iv) $ map (PrimOp . SubExp) x
-    return $ resultBody [] (map Var $ inarrs ++ dests) loc
+    return $ resultBody (map Var $ inarrs ++ dests) loc
   return $ LoopOp $
     DoLoop outarrs (loopMerge (inarrs++outarrs) (map Var arrs++resarr)) i (isize inarrs) loopbody loc
 
@@ -64,7 +64,7 @@ transformExp (LoopOp (Reduce cs fun args loc)) = do
   loopbody <- runBinder $ do
     acc' <- bodyBind =<< transformLambda fun
             (map (PrimOp . SubExp . Var) acc ++ index cs inarrs iv)
-    return $ resultBody [] (map Var inarrs ++ acc') loc
+    return $ resultBody (map Var inarrs ++ acc') loc
   return $ LoopOp $
     DoLoop acc (loopMerge (inarrs++acc) (map Var arrexps++initacc))
     i (isize inarrs) loopbody loc
@@ -78,7 +78,7 @@ transformExp (LoopOp (Scan cs fun args loc)) = do
     dests <- letwith cs arr (pexp iv) $ map (PrimOp . SubExp) x
     irows <- letSubExps "row" $ index cs dests iv
     rowcopies <- letExps "copy" [ PrimOp $ Copy irow loc | irow <- irows ]
-    return $ resultBody [] (map Var $ rowcopies ++ dests) loc
+    return $ resultBody (map Var $ rowcopies ++ dests) loc
   return $ LoopOp $ DoLoop arr (loopMerge (acc ++ arr) (initacc ++ initarr)) i (isize arr) loopbody loc
   where (accexps, arrexps) = unzip args
 
@@ -92,10 +92,10 @@ transformExp (LoopOp (Filter cs fun arrexps loc)) = do
    [check] <- bodyBind =<< transformLambda fun (map (PrimOp . SubExp . Var) xs) -- XXX
    res <- letSubExp "res" $
           If check
-             (resultBody [] [intval 1] loc)
-             (resultBody [] [intval 0] loc)
+             (resultBody [intval 1] loc)
+             (resultBody [intval 0] loc)
              [Basic Int] loc
-   return $ resultBody [] [res] loc
+   return $ resultBody [res] loc
   mape <- letExp "mape" <=< transformExp $
           LoopOp $ Map cs (Lambda xs test [Basic Int] loc) arr loc
   plus <- do
@@ -103,7 +103,7 @@ transformExp (LoopOp (Filter cs fun arrexps loc)) = do
     (b,bv) <- newVar loc "b" (Basic Int)
     body <- insertBindingsM $ do
       res <- letSubExp "sum" $ PrimOp $ BinOp Plus av bv (Basic Int) loc
-      return $ resultBody [] [res] loc
+      return $ resultBody [res] loc
     return $ Lambda [a, b] body [Basic Int] loc
   scan <- transformExp $ LoopOp $ Scan cs plus [(intval 0,mape)] loc
   ia <- (`setIdentUniqueness` Nonunique) <$> letExp "ia" scan
@@ -116,11 +116,11 @@ transformExp (LoopOp (Filter cs fun arrexps loc)) = do
   resinit <- resultArray (map ((`setOuterSize` outersize) . identType) arrexps) loc
   res <- forM (map subExpType resinit) $ \t -> newIdent "filter_result" t loc
   mergesize <- newIdent "mergesize" (Basic Int) loc
-  let resv = resultBody [] (map Var $ mergesize : res) loc
+  let resv = resultBody (map Var $ mergesize : res) loc
   loopbody <- insertBindingsM $ do
     let update = insertBindingsM $ do
           dest <- letwith cs res (sub1 indexi) indexin
-          return $ resultBody [] (map Var $ mergesize:dest) loc
+          return $ resultBody (map Var $ mergesize:dest) loc
     eBody [eIf (eIf (pure $ PrimOp $ BinOp Equal iv (intval 0) (Basic Bool) loc)
                (eBody [eBinOp Equal indexi (pexp $ intval 0) (Basic Bool) loc])
                (eBody [eBinOp Equal indexi indexinm1 (Basic Bool) loc])
@@ -141,7 +141,7 @@ transformExp (LoopOp (Redomap cs _ innerfun accexps arrexps loc)) = do
   loopbody <- runBinder $ do
     acc' <- bodyBind =<< transformLambda innerfun
             (map (PrimOp . SubExp . Var) acc ++ index cs inarrs iv)
-    return $ resultBody [] (map Var inarrs ++ acc') loc
+    return $ resultBody (map Var inarrs ++ acc') loc
   return $ LoopOp $
     DoLoop acc (loopMerge (inarrs++acc) (map Var arrexps++initacc))
     i (isize inarrs) loopbody loc

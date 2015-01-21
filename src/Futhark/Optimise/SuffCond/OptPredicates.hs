@@ -361,8 +361,8 @@ makeSufficientBinding' env (Let pat _ (If (Var v) tbranch fbranch _ loc))
     -- FIXME: Check that tbranch and fbranch are safe.  We can do
     -- something smarter if 'v' actually comes from an 'or'.  Also,
     -- currently only handles case where pat is a singleton boolean.
-    Body _ tbnds (Result _ [tres] _) <- tbranch,
-    Body _ fbnds (Result _ [fres] _) <- fbranch,
+    Body _ tbnds (Result [tres] _) <- tbranch,
+    Body _ fbnds (Result [fres] _) <- fbranch,
     Basic Bool <- subExpType tres,
     Basic Bool <- subExpType fres,
     all safeBnd tbnds, all safeBnd fbnds = do

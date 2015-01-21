@@ -98,9 +98,8 @@ identityMapper = Mapper {
 -- itself.  The mapping is done left-to-right.
 mapBodyM :: (Applicative m, Monad m) =>
             Mapper lore lore m -> Body lore -> m (Body lore)
-mapBodyM tv (Body lore [] (Result cs ses loc)) =
-  Body lore [] <$> (Result <$> mapOnCertificates tv cs <*>
-                    mapM (mapOnSubExp tv) ses <*> pure loc)
+mapBodyM tv (Body lore [] (Result ses loc)) =
+  Body lore [] <$> (Result <$> mapM (mapOnSubExp tv) ses <*> pure loc)
 mapBodyM tv (Body lore (bnd:bnds) res) = do
   bnd' <- mapOnBinding tv bnd
   Body lore' bnds' res' <- mapOnBody tv $ Body lore bnds res

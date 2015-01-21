@@ -569,8 +569,7 @@ checkBindings origbnds m = delve origbnds
 
 checkResult :: Checkable lore =>
                Result -> TypeM lore ()
-checkResult (Result cs es _) = do
-  mapM_ (requireI [Basic Cert]) cs
+checkResult (Result es _) =
   mapM_ checkSubExp es
 
 checkFunBody :: Checkable lore =>
@@ -592,8 +591,7 @@ checkLambdaBody ret (Body (_,lore) bnds res) = do
 
 checkLambdaResult :: Checkable lore =>
                      [Type] -> Result -> TypeM lore ()
-checkLambdaResult ts (Result cs es _) = do
-  mapM_ (requireI [Basic Cert]) cs
+checkLambdaResult ts (Result es _) =
   forM_ (zip ts es) $ \(t, e) -> do
     et <- checkSubExp e
     unless (et `subtypeOf` t) $
@@ -994,7 +992,7 @@ matchExtPattern loc pat ts = do
 
 matchExtReturnType :: Name -> [ExtType] -> Result
                    -> TypeM lore ()
-matchExtReturnType fname rettype (Result _ ses loc) =
+matchExtReturnType fname rettype (Result ses loc) =
   unless (ts `subtypesOf` rettype) $
   bad $ ReturnTypeError loc fname
         (Several rettype)

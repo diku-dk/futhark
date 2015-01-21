@@ -99,7 +99,7 @@ fuseFilters :: (Input input, Bindable lore) =>
             -> (Lambda lore, [input]) -- ^ The fused lambda and the inputs of the resulting SOAC.
 fuseFilters lam1 inp1 out1 lam2 inp2 vname =
   fuseFilterInto lam1 inp1 out1 lam2 inp2 [vname] false
-  where false = mkBody [] $ Result [] [constant False loc] loc
+  where false = mkBody [] $ Result [constant False loc] loc
         loc   = srclocOf lam2
 
 -- | Similar to 'fuseFilters', except the second function does not
@@ -125,7 +125,7 @@ fuseFilterIntoFold :: (Input input, Bindable lore) =>
                    -> (Lambda lore, [input]) -- ^ The fused lambda and the inputs of the resulting SOAC.
 fuseFilterIntoFold lam1 inp1 out1 lam2 inp2 vnames =
   fuseFilterInto lam1 inp1 out1 lam2 inp2 vnames identity
-  where identity = mkBody [] $ Result [] (map Var lam2redparams) $ srclocOf lam2
+  where identity = mkBody [] $ Result (map Var lam2redparams) $ srclocOf lam2
         lam2redparams = take (length (lambdaParams lam2) - length inp2) $
                         lambdaParams lam2
 
@@ -149,7 +149,7 @@ fuseFilterInto lam1 inp1 out1 lam2 inp2 vnames falsebranch = (lam2', HM.elems in
                           bodyExtType falsebranch
                  in mkBody [mkLet residents $
                             If e tbranch falsebranch ts loc] $
-                 Result (resultCertificates res) (map Var residents) loc
+                 Result (map Var residents) loc
         lam1tuple = [ mkLet [v] $ PrimOp $ SubExp $ Var p
                     | (v,p) <- zip pat $ lambdaParams lam1 ]
         bindins = lam1tuple `insertBindings` branch

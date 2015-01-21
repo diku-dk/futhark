@@ -238,9 +238,9 @@ allTrue cs predfun args loc = do
   where predConjFun = do
           acc <- newIdent "acc" (Basic Bool) loc
           res <- newIdent "res" (Basic Bool) loc
-          let Body _ predbnds (Result _ [se] _) = lambdaBody predfun -- XXX
+          let Body _ predbnds (Result [se] _) = lambdaBody predfun -- XXX
               andbnd = mkLet [res] $ PrimOp $ BinOp LogAnd (Var acc) se (Basic Bool) loc
-              body = mkBody (predbnds++[andbnd]) $ Result [] [Var res] loc
+              body = mkBody (predbnds++[andbnd]) $ Result [Var res] loc
           return Lambda { lambdaSrcLoc = srclocOf predfun
                         , lambdaParams = acc : lambdaParams predfun
                         , lambdaReturnType = [Basic Bool]

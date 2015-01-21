@@ -406,7 +406,7 @@ fusionGatherBody fres (Body _ (Let pat _ (PrimOp (Replicate n el loc)):bnds) res
     getUnfusableSet loc bres [PrimOp $ SubExp n, PrimOp $ SubExp el]
   repl_idnm <- newVName "repl_x"
   let repl_id = Ident repl_idnm (Basic Int) loc
-      repl_lam = Lambda [repl_id] (mkBody [] $ Result [] [el] loc)
+      repl_lam = Lambda [repl_id] (mkBody [] $ Result [el] loc)
                  [subExpType el] loc
       soac_repl= SOAC.Map [] repl_lam [SOAC.Input SOAC.noTransforms $ SOAC.Iota n] loc
   greedyFuse True used_set bres' (pat, soac_repl)
