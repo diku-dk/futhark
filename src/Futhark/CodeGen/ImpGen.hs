@@ -391,7 +391,7 @@ defCompilePrimOp [target] (Replicate n se _) = do
       tell $ Imp.For i (compileSubExp n) $
         Imp.Copy
         targetmem (elemoffset `impTimes` Imp.SizeOf (elemType set))
-        vmem voffset
+        vmem (voffset `impTimes` Imp.SizeOf (elemType set))
         rowsize
   where set = subExpType se
 
