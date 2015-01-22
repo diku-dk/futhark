@@ -5,7 +5,9 @@ module Futhark.CodeGen.ImpCode
   , ValueDecl (..)
   , Param (..)
   , paramName
-  , DimSize (..)
+  , Size (..)
+  , MemSize
+  , DimSize
   , Type (..)
   , Code (..)
   , Exp (..)
@@ -23,9 +25,12 @@ import Language.Futhark.Core
 
 import Text.PrettyPrint.Mainland
 
-data DimSize = ConstSize Int
-             | VarSize VName
-               deriving (Eq, Show)
+data Size = ConstSize Int
+          | VarSize VName
+          deriving (Eq, Show)
+
+type MemSize = Size
+type DimSize = Size
 
 data Type = Scalar BasicType | Mem DimSize
 
@@ -112,7 +117,7 @@ instance Pretty ValueDecl where
     foldr f (ppr et) shape <+> text "at" <+> ppr mem
     where f e s = brackets $ s <> comma <> ppr e
 
-instance Pretty DimSize where
+instance Pretty Size where
   ppr (ConstSize x) = ppr x
   ppr (VarSize v)   = ppr v
 

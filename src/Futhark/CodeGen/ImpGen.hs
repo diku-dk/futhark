@@ -252,7 +252,8 @@ compileResultSubExp (MemoryDestination mem memsizetarget) (Var v) = do
     Nothing ->
       return ()
     Just memsizetarget' ->
-      tell $ Imp.SetScalar memsizetarget' $ dimSizeToExp memsize
+      tell $ Imp.SetScalar memsizetarget' $
+      innerExp $ dimSizeToExp memsize
   where vname = identName v
 
 compileResultSubExp (MemoryDestination {}) (Constant {}) =
@@ -265,19 +266,19 @@ compileResultSubExp (ArrayDestination memdest shape) (Var v) = do
   arrmemsize <- entryMemSize <$> lookupMemory arrmem
   case memdest of
     CopyIntoMemory mem -> when (mem /= arrmem) $ tell $
-      Imp.Copy mem (Imp.Constant $ IntVal 0)
-               arrmem arroffset $
-               dimSizeToExp arrmemsize
+      copy mem (bytes $ Imp.Constant $ IntVal 0)
+      arrmem (arroffset `withElemType` elemType (identType v))
+      (memSizeToExp arrmemsize)
     SetMemory mem memsize -> do
       tell $ Imp.SetMem mem arrmem
       case memsize of Nothing -> return ()
                       Just memsize' -> tell $ Imp.SetScalar memsize' $
-                                       dimSizeToExp arrmemsize
+                                       innerExp $ memSizeToExp arrmemsize
   zipWithM_ maybeSetShape shape $ entryArrayShape arr
   where maybeSetShape Nothing _ =
           return ()
         maybeSetShape (Just dim) size =
-          tell $ Imp.SetScalar dim $ dimSizeToExp size
+          tell $ Imp.SetScalar dim $ innerExp $ dimSizeToExp size
 
 compileResultSubExp (ArrayDestination {}) (Constant {}) =
   fail "Array destination result subexpression cannot be a constant."
@@ -339,8 +340,9 @@ defCompilePrimOp [target] (Alloc e _) =
 
 defCompilePrimOp [target] (Index _ src idxs _)
   | length idxs == arrayRank t = do
-    (srcmem, srcoffset, _) <- indexArray (identName src) $ map compileSubExp idxs
-    tell $ Imp.SetScalar target $ Imp.Index srcmem srcoffset $ elemType t
+    (srcmem, srcoffset, _) <-
+      indexArray (identName src) $ map (elements . compileSubExp) idxs
+    tell $ Imp.SetScalar target $ index srcmem srcoffset $ elemType t
   | otherwise = return ()
   where t = identType src
 
@@ -353,35 +355,36 @@ defCompilePrimOp [target] (Update _ src idxs val _) = do
   destoffset <- ixFunOffset destixfun
   let MemLocation srcmem srcixfun = entryArrayLocation srcentry
   srcoffset <- ixFunOffset srcixfun
-  (_, elemoffset, size) <- indexArray (identName src) $
-                           map compileSubExp idxs
+  (_, elemoffset, size) <-
+    indexArray (identName src) $ map (elements . compileSubExp) idxs
   unless (destmem == srcmem && destixfun == srcixfun) $
     -- Not in-place, so we have to copy all of src to target...
-    tell $ Imp.Copy
-      destmem destoffset
-      srcmem srcoffset $
+    tell $ copy
+      destmem (destoffset `withElemType` srcet)
+      srcmem (srcoffset `withElemType` srcet) $
       arrayByteSizeExp srcentry
   if length idxs == arrayRank srct then
-    tell $ Imp.Write destmem elemoffset (elemType srct) $ compileSubExp val
+    tell $ write destmem elemoffset (elemType srct) $ compileSubExp val
     else case val of
     Constant {} -> fail "Array-value in update cannot be constant."
     Var v -> do
       valentry <- lookupArray $ identName v
       let MemLocation valmem valixfun = entryArrayLocation valentry
       valoffset <- ixFunOffset valixfun
-      tell $ Imp.Copy
-        destmem (elemoffset `impTimes` Imp.SizeOf srcet)
-        valmem (valoffset `impTimes` Imp.SizeOf srcet)
+      tell $ copy
+        destmem (elemoffset `withElemType` srcet)
+        valmem (valoffset `withElemType` srcet)
         size
   where srct = identType src
         srcet = elemType srct
 
 defCompilePrimOp [target] (Replicate n se _) = do
   i <- newVName "i"
-  (targetmem, elemoffset, rowsize) <- indexArray target [Imp.ScalarVar i]
+  (targetmem, elemoffset, rowsize) <-
+    indexArray target [elements $ Imp.ScalarVar i]
   if basicType set then
     tell $ Imp.For i (compileSubExp n) $
-    Imp.Write targetmem elemoffset (elemType set) $ compileSubExp se
+    write targetmem elemoffset (elemType set) $ compileSubExp se
     else case se of
     Constant {} ->
       fail "Array value in replicate cannot be constant."
@@ -389,17 +392,18 @@ defCompilePrimOp [target] (Replicate n se _) = do
       MemLocation vmem vixfun <- arrayLocation $ identName v
       voffset <- ixFunOffset vixfun
       tell $ Imp.For i (compileSubExp n) $
-        Imp.Copy
-        targetmem (elemoffset `impTimes` Imp.SizeOf (elemType set))
-        vmem (voffset `impTimes` Imp.SizeOf (elemType set))
+        copy
+        targetmem (elemoffset `withElemType` elemType set)
+        vmem (voffset `withElemType` elemType set)
         rowsize
   where set = subExpType se
 
 defCompilePrimOp [target] (Iota n _) = do
   i <- newVName "i"
-  (targetmem, elemoffset, _) <- indexArray target [Imp.ScalarVar i]
+  (targetmem, elemoffset, _) <-
+    indexArray target [elements $ Imp.ScalarVar i]
   tell $ Imp.For i (compileSubExp n) $
-    Imp.Write targetmem elemoffset Int $ Imp.ScalarVar i
+    write targetmem elemoffset Int $ Imp.ScalarVar i
 
 defCompilePrimOp [target] (Copy src@(Constant {}) _) =
   compileSubExpTo target src
@@ -414,9 +418,9 @@ defCompilePrimOp [target] (Copy (Var src) _)
     destoffset <- ixFunOffset destixfun
     let MemLocation srcmem srcixfun = entryArrayLocation srcentry
     srcoffset <- ixFunOffset srcixfun
-    tell $ Imp.Copy
-      destmem (destoffset `impTimes` Imp.SizeOf et)
-      srcmem (srcoffset `impTimes` Imp.SizeOf et) $
+    tell $ copy
+      destmem (destoffset `withElemType` et)
+      srcmem (srcoffset `withElemType` et) $
       arrayByteSizeExp srcentry
   where srct = identType src
 
@@ -432,21 +436,22 @@ defCompilePrimOp [target] (Concat _ x y _ _) = do
   yoffset <- ixFunOffset yixfun
   MemLocation destmem destixfun <- arrayLocation target
   destoffset <- ixFunOffset destixfun
-  tell $ Imp.Copy
-    destmem destoffset
-    xmem xoffset $
+  tell $ copy
+    destmem (destoffset `withElemType` et)
+    xmem (xoffset `withElemType` et) $
     arrayByteSizeExp xentry
-  tell $ Imp.Copy
-    destmem (destoffset `impPlus`
-             arrayByteSizeExp xentry)
-    ymem yoffset $
+  tell $ copy
+    destmem (destoffset `withElemType` et
+             `plus` arrayByteSizeExp xentry)
+    ymem (yoffset `withElemType` et) $
     arrayByteSizeExp yentry
+  where et = elemType $ identType x
 
 defCompilePrimOp [target] (ArrayLit es rt _) = do
   targetEntry <- lookupArray target
   let MemLocation mem ixfun = entryArrayLocation targetEntry
   offset <- ixFunOffset ixfun
-  unless (offset == Imp.Constant (IntVal 0)) $
+  unless (offset == elements (Imp.Constant (IntVal 0))) $
     fail "Cannot handle offset in ArrayLit"
   forM_ (zip [0..] es) $ \(i,e) ->
     if basicType rt then
@@ -455,29 +460,30 @@ defCompilePrimOp [target] (ArrayLit es rt _) = do
       Constant {} ->
         fail "defCompilePrimOp ArrayLit: Cannot have array constants."
       Var v -> do
-        let bytesPerElem = foldl impTimes (Imp.SizeOf et) $
-                           map dimSizeToExp $ drop 1 $
-                           entryArrayShape targetEntry
+        let bytesPerElem =
+              impProduct (map dimSizeToExp $ drop 1 $ entryArrayShape targetEntry)
+              `withElemType` et
         ventry <- lookupArray $ identName v
         let MemLocation vmem vixfun = entryArrayLocation ventry
         voffset <- ixFunOffset vixfun
-        tell $ Imp.Copy
-          mem (offset `impPlus`
-               (Imp.Constant (IntVal i) `impTimes`
-                bytesPerElem))
-          vmem voffset
+        tell $ copy
+          mem (offset `withElemType` et
+               `plus`
+                (bytes (Imp.Constant (IntVal i)) `times`
+                 bytesPerElem))
+          vmem (voffset `withElemType` et)
           bytesPerElem
   where et = elemType rt
 
 defCompilePrimOp [target] (Rearrange _ perm src _) = do
   is <- replicateM (length perm) (newVName "i")
-  let ivars = map Imp.ScalarVar is
+  let ivars = map (elements . Imp.ScalarVar) is
   (mem, offset, _) <- indexArray target $ permuteShape perm ivars
   (srcmem, srcoffset, _) <- indexArray (identName src) ivars
   let sizes = map compileSubExp $ arrayDims srct
   tell $ foldl (.) id (zipWith Imp.For is sizes) $
-         Imp.Write mem offset et $
-         Imp.Index srcmem srcoffset et
+         write mem offset et $
+         index srcmem srcoffset et
   where srct = identType src
         et = elemType srct
 
@@ -489,14 +495,15 @@ defCompilePrimOp [target] (Rotate _ n src _) = do
       n'   = Imp.Constant $ IntVal n
   i <- newVName "i"
   (destmem, destoffset, rowsize) <-
-    indexArray target [Imp.BinOp Mod (Imp.BinOp Plus n' $ Imp.ScalarVar i) size]
+    indexArray target [elements $ Imp.BinOp Mod (Imp.BinOp Plus n' $ Imp.ScalarVar i) size]
   (srcmem, srcoffset, _) <-
-    indexArray (identName src) [Imp.ScalarVar i]
+    indexArray (identName src) [elements $ Imp.ScalarVar i]
   tell $ Imp.For i size $
-         Imp.Copy destmem (destoffset `impTimes` Imp.SizeOf (elemType srct))
-         srcmem (srcoffset `impTimes` Imp.SizeOf (elemType srct))
+         copy destmem (destoffset `withElemType` srcet)
+         srcmem (srcoffset `withElemType` srcet)
          rowsize
   where srct = identType src
+        srcet = elemType srct
 
 defCompilePrimOp targets@(_:_) e =
   fail $ "ImpGen.defCompilePrimOp: Incorrect number of targets\n  " ++
@@ -606,9 +613,15 @@ subExpToDimSize (Constant (IntVal i) _) =
 subExpToDimSize (Constant {}) =
   fail "Size subexp is not a non-integer constant."
 
-dimSizeToExp :: Imp.DimSize -> Imp.Exp
-dimSizeToExp (Imp.VarSize v)   = Imp.ScalarVar v
-dimSizeToExp (Imp.ConstSize x) = Imp.Constant $ IntVal x
+dimSizeToExp :: Imp.DimSize -> Count Elements
+dimSizeToExp = elements . sizeToExp
+
+memSizeToExp :: Imp.MemSize -> Count Bytes
+memSizeToExp = bytes . sizeToExp
+
+sizeToExp :: Imp.Size -> Imp.Exp
+sizeToExp (Imp.VarSize v)   = Imp.ScalarVar v
+sizeToExp (Imp.ConstSize x) = Imp.Constant $ IntVal x
 
 compileSubExpTo :: VName -> SubExp -> ImpM op ()
 compileSubExpTo target (Var v)
@@ -684,50 +697,38 @@ destinationFromTargets targets ts =
             Nothing ->
               return $ ScalarDestination name
 
-indexArray :: VName -> [Imp.Exp] -> ImpM op (VName, Imp.Exp, Imp.Exp)
+indexArray :: VName -> [Count Elements]
+           -> ImpM op (VName, Count Elements, Count Bytes)
 indexArray name indices = do
   entry <- lookupArray name
   let arrshape = map dimSizeToExp $ entryArrayShape entry
-      expProduct = foldl impTimes $ Imp.Constant $ IntVal 1
-      expSum = foldl impPlus $ Imp.Constant $ IntVal 0
-      dimsizes = map expProduct $ drop 1 $ tails arrshape
-      ixoffset = expSum $ zipWith impTimes indices dimsizes
+      expSum = foldl plus $ elements $ Imp.Constant $ IntVal 0
+      dimsizes = map impProduct $ drop 1 $ tails arrshape
+      ixoffset = expSum $ zipWith times indices dimsizes
       MemLocation arrmem ixfun = entryArrayLocation entry
   arroffset <- ixFunOffset ixfun
   return (arrmem,
-          impPlus arroffset ixoffset,
-          expProduct $
-            Imp.SizeOf (entryArrayElemType entry) :
-            drop (length indices) arrshape)
-
-impTimes :: Imp.Exp -> Imp.Exp -> Imp.Exp
-impTimes (Imp.Constant (IntVal 1)) e = e
-impTimes e (Imp.Constant (IntVal 1)) = e
-impTimes (Imp.Constant (IntVal 0)) _ = Imp.Constant $ IntVal 0
-impTimes _ (Imp.Constant (IntVal 0)) = Imp.Constant $ IntVal 0
-impTimes x y                         = Imp.BinOp Times x y
-
-impPlus :: Imp.Exp -> Imp.Exp -> Imp.Exp
-impPlus (Imp.Constant (IntVal 0)) e = e
-impPlus e (Imp.Constant (IntVal 0)) = e
-impPlus x y                         = Imp.BinOp Plus x y
+          arroffset `plus` ixoffset,
+          impProduct (drop (length indices) arrshape)
+          `withElemType`
+          entryArrayElemType entry)
 
 subExpNotArray :: SubExp -> Bool
 subExpNotArray se = case subExpType se of
   Array {} -> False
   _        -> True
 
-arrayByteSizeExp :: ArrayEntry -> Imp.Exp
+arrayByteSizeExp :: ArrayEntry -> Count Bytes
 arrayByteSizeExp entry =
-  foldl impTimes (Imp.SizeOf $ entryArrayElemType entry) $
-  map dimSizeToExp $ entryArrayShape entry
+  impProduct (map dimSizeToExp $ entryArrayShape entry)
+  `withElemType` entryArrayElemType entry
 
-ixFunOffset :: Monad m => IxFun.IxFun -> m Imp.Exp
+ixFunOffset :: Monad m => IxFun.IxFun -> m (Count Elements)
 ixFunOffset ixfun =
   case IxFun.linearWithOffset ixfun of
     Just offset
       | Just offset' <- scalExpToImpExp offset ->
-        return offset'
+        return $ elements offset'
       | otherwise ->
         fail $ "Cannot turn " ++ pretty offset ++ " into an Imp.Exp."
     Nothing -> fail $ "Index function " ++ pretty ixfun ++
@@ -743,3 +744,51 @@ ixFunOffset ixfun =
           Imp.BinOp Times <$> scalExpToImpExp e1 <*> scalExpToImpExp e2
         scalExpToImpExp _ =
           Nothing
+
+-- A wrapper around 'Imp.Exp' that maintains a unit as a phantom type.
+newtype Count u = Count { innerExp :: Imp.Exp }
+                deriving (Eq, Show)
+
+data Elements
+data Bytes
+
+elements :: Imp.Exp -> Count Elements
+elements = Count
+
+bytes :: Imp.Exp -> Count Bytes
+bytes = Count
+
+withElemType :: Count Elements -> BasicType -> Count Bytes
+withElemType (Count e) t = bytes $ e `times'` Imp.SizeOf t
+
+copy :: VName -> Count Bytes -> VName -> Count Bytes -> Count Bytes
+     -> Imp.Code a
+copy dest (Count destoffset) src (Count srcoffset) (Count n) =
+  Imp.Copy dest destoffset src srcoffset n
+
+index :: VName -> Count Elements -> BasicType -> Imp.Exp
+index name (Count e) = Imp.Index name e
+
+write :: VName -> Count Elements -> BasicType -> Imp.Exp -> Imp.Code a
+write name (Count i) = Imp.Write name i
+
+plus :: Count u -> Count u -> Count u
+plus (Count x) (Count y) = Count $ x `plus'` y
+
+plus' :: Imp.Exp -> Imp.Exp -> Imp.Exp
+plus' (Imp.Constant (IntVal 0)) e = e
+plus' e (Imp.Constant (IntVal 0)) = e
+plus' x y                         = Imp.BinOp Plus x y
+
+times :: Count u -> Count u -> Count u
+times (Count x) (Count y) = Count $ x `times'` y
+
+times' :: Imp.Exp -> Imp.Exp -> Imp.Exp
+times' (Imp.Constant (IntVal 1)) e = e
+times' e (Imp.Constant (IntVal 1)) = e
+times' (Imp.Constant (IntVal 0)) _ = Imp.Constant $ IntVal 0
+times' _ (Imp.Constant (IntVal 0)) = Imp.Constant $ IntVal 0
+times' x y                         = Imp.BinOp Times x y
+
+impProduct :: [Count u] -> Count u
+impProduct = foldl times $ Count $ Imp.Constant $ IntVal 1
