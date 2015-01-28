@@ -66,7 +66,7 @@ class (Monad m, Applicative m) =>
 
 -- | The class of lores that can be constructed solely from an
 -- expression, non-monadically.
-class Proper lore => Bindable lore where
+class (Proper lore, Lore.FParam lore ~ ()) => Bindable lore where
   mkLet :: [Ident] -> Exp lore -> Binding lore
   mkBody :: [Binding lore] -> Result -> Body lore
   mkLetNames :: MonadFreshNames m =>

@@ -77,6 +77,8 @@ Library
                    Futhark.Optimise.Fusion.LoopKernel
                    Futhark.Optimise.Fusion.TryFusion
                    Futhark.Optimise.InliningDeadFun
+                   Futhark.Optimise.InPlaceLowering
+                   Futhark.Optimise.InPlaceLowering.LowerIntoBinding
                    Futhark.Optimise.SimpleOpts
                    Futhark.Optimise.Simplifier
                    Futhark.Optimise.Simplifier.Apply
