@@ -124,7 +124,7 @@ manipulateResult :: (Bindable lore, MonadFreshNames m) =>
 manipulateResult loc in_place_map mergeparams = do
   (orig_ses, (new_ses, new_body_bnds)) <-
     runWriterT $ zipWithM manipulateResultPart in_place_map mergeparams
-  return (Result [] (orig_ses ++ new_ses) loc, new_body_bnds)
+  return (Result (orig_ses ++ new_ses) loc, new_body_bnds)
 
   where
     manipulateResultPart (se, Nothing) _ =
