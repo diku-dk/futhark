@@ -95,6 +95,9 @@ deriving instance Lore lore => Ord (Binding lore)
 deriving instance Lore lore => Show (Binding lore)
 deriving instance Lore lore => Eq (Binding lore)
 
+instance Located (Binding lore) where
+  locOf = locOf . bindingExp
+
 -- | The result of a body - a sequence of subexpressions, possibly
 -- predicated on one or more certificates.
 data Result = Result { resultCertificates :: Certificates
