@@ -23,6 +23,7 @@ module Futhark.Representation.AST.Attributes
   , asPrimOp
   , asLoopOp
   , safeExp
+  , loopResultValues
   )
   where
 
@@ -49,6 +50,30 @@ representative = Lore.representative
 -- constitute the context.
 loopResultContext :: Lore.Lore l => l -> [Ident] -> [FParam l] -> [Ident]
 loopResultContext = Lore.loopResultContext
+
+-- | Figure out which parts of a loop body result correspond to which
+-- value identifiers in the pattern.
+--
+-- The result of @loopResultValues patidents res mergeparams
+-- loopresult@ is a mapping from elements of @loopresult@ to elements
+-- of @patidents@.  Here, @patidents@ must be the identifiers of the
+-- pattern storing the result of the loop (_including_ any existential
+-- context), @res@ the names of the loop result list, @vname@ the
+-- names of the merge parameters, and @loopresult@ the result of the
+-- loop body - typically, a list of 'SubExp's.
+loopResultValues :: [Ident] -> [VName] -> [VName] -> [a]
+                 -> [(a, Maybe Ident)]
+loopResultValues patidents res mergeparams ses =
+  [ (se, resultMapping mergeparam)
+  | (mergeparam, se) <- zip mergeparams ses
+  ]
+  where (_, validents) =
+          splitAt (length patidents - length res) patidents
+        resmap =
+          zip res validents
+        resultMapping fparam =
+          lookup fparam resmap
+
 
 -- | Find the function of the given name in the Futhark program.
 funDecByName :: Name -> Prog lore -> Maybe (FunDec lore)
