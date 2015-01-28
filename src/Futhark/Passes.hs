@@ -13,6 +13,7 @@ module Futhark.Passes
   , optimisePredicates
   , optimiseShapes
   , explicitMemory
+  , inPlaceLowering
   )
 where
 
@@ -27,6 +28,7 @@ import Futhark.Optimise.InliningDeadFun
 import qualified Futhark.Optimise.SuffCond
 import qualified Futhark.Optimise.SplitShapes
 import qualified Futhark.ExplicitAllocations
+import qualified Futhark.Optimise.InPlaceLowering
 
 fotransform :: Pass
 fotransform = unfailableBasicPass "first-order transform"
@@ -68,3 +70,7 @@ explicitMemory = polyPass "insert explicit allocations" op
   where op s = do prog <- basicProg s
                   return $ ExplicitMemory $
                     Futhark.ExplicitAllocations.explicitAllocations prog
+
+inPlaceLowering :: Pass
+inPlaceLowering = unfailableBasicPass "lower in-place updates into loops"
+                  Futhark.Optimise.InPlaceLowering.optimiseProgram

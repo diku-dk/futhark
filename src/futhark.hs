@@ -93,6 +93,8 @@ commandLineOptions =
     [] ["optimise-predicates"]
   , passoption "Optimise shape computation" optimiseShapes
     [] ["optimise-shapes"]
+  , passoption "Lower in-place updates" inPlaceLowering
+    [] ["in-place-lowering"]
   , Option "s" ["standard"]
     (NoArg $ Right $ \opts -> opts { futharkpipeline = standardPipeline ++ futharkpipeline opts })
     "Use the recommended optimised pipeline."
