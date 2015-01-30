@@ -202,8 +202,7 @@ enterLoop = localVtable ST.deepen
 bindFParams :: MonadEngine m =>
                [FParam (Lore m)] -> m a -> m a
 bindFParams params =
-  localVtable $ \vtable ->
-    foldr ST.insertFParam vtable params
+  localVtable $ ST.insertFParams params
 
 bindLParams :: MonadEngine m =>
                [Param] -> m a -> m a

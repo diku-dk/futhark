@@ -20,7 +20,7 @@ module Futhark.Analysis.SymbolTable
   , lookupVar
     -- * Insertion
   , insertBinding
-  , insertFParam
+  , insertFParams
   , insertLParam
   , insertArrayLParam
   , insertLoopVar
@@ -312,6 +312,10 @@ insertFParam fparam = insertEntry name entry
                                    , fparamLore = bindeeLore fparam
                                    , fparamBindingDepth = 0
                                    }
+
+insertFParams :: [FParam lore] -> SymbolTable lore
+              -> SymbolTable lore
+insertFParams fparams symtable = foldr insertFParam symtable fparams
 
 insertLParamWithRange :: Param -> Range -> SymbolTable lore
                      -> SymbolTable lore
