@@ -21,7 +21,7 @@ where
 import Control.Applicative
 import Control.Monad.Reader
 import Control.Monad.Writer
-import Control.Monad.Error
+import Control.Monad.Except
 
 import Data.Array
 import Data.Bits
@@ -88,9 +88,6 @@ instance PrettyLore lore => Show (InterpreterError lore) where
   show (DivisionByZero loc) =
     "Division by zero at " ++ locStr loc ++ "."
 
-instance Error (InterpreterError lore) where
-  strMsg = TypeError noLoc
-
 type FunTable lore = HM.HashMap Name ([Value] -> FutharkM lore [Value])
 
 data FutharkEnv lore = FutharkEnv { envVtable :: HM.HashMap VName Value
@@ -102,7 +99,7 @@ data FutharkEnv lore = FutharkEnv { envVtable :: HM.HashMap VName Value
 type Trace = [(SrcLoc, String)]
 
 newtype FutharkM lore a = FutharkM (ReaderT (FutharkEnv lore)
-                                    (ErrorT (InterpreterError lore)
+                                    (ExceptT (InterpreterError lore)
                                      (Writer Trace)) a)
   deriving (Monad, Applicative, Functor,
             MonadReader (FutharkEnv lore),
@@ -110,7 +107,7 @@ newtype FutharkM lore a = FutharkM (ReaderT (FutharkEnv lore)
 
 runFutharkM :: FutharkM lore a -> FutharkEnv lore
             -> (Either (InterpreterError lore) a, Trace)
-runFutharkM (FutharkM m) env = runWriter $ runErrorT $ runReaderT m env
+runFutharkM (FutharkM m) env = runWriter $ runExceptT $ runReaderT m env
 
 bad :: InterpreterError lore -> FutharkM lore a
 bad = FutharkM . throwError
