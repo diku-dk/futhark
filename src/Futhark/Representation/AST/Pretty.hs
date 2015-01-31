@@ -169,19 +169,19 @@ instance PrettyLore lore => Pretty (LoopOp lore) where
     indent 2 (ppr loopbody)
     where (pat, initexp) = unzip mergepat
   ppr (Map cs lam as _) =
-    ppCertificates' cs <> ppSOAC "mapT" [lam] Nothing as
+    ppCertificates' cs <> ppSOAC "map" [lam] Nothing as
   ppr (Reduce cs lam inputs _) =
-    ppCertificates' cs <> ppSOAC "reduceT" [lam] (Just es) as
+    ppCertificates' cs <> ppSOAC "reduce" [lam] (Just es) as
     where (es, as) = unzip inputs
   ppr (Redomap cs outer inner es as _) =
-    ppCertificates' cs <> text "redomapT" <>
+    ppCertificates' cs <> text "redomap" <>
     parens (ppr outer <> comma </> ppr inner <> comma </>
             commasep (braces (commasep $ map ppr es) : map ppr as))
   ppr (Scan cs lam inputs _) =
-    ppCertificates' cs <> ppSOAC "scanT" [lam] (Just es) as
+    ppCertificates' cs <> ppSOAC "scan" [lam] (Just es) as
     where (es, as) = unzip inputs
   ppr (Filter cs lam as _) =
-    ppCertificates' cs <> ppSOAC "filterT" [lam] Nothing as
+    ppCertificates' cs <> ppSOAC "filter" [lam] Nothing as
 
 instance PrettyLore lore => Pretty (Exp lore) where
   ppr (If c t f _ _) = text "if" <+> ppr c </>
