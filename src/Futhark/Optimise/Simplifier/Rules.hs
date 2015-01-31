@@ -65,6 +65,7 @@ bottomUpRules = [ removeDeadMapping
                 , removeRedundantMergeVariables
                 , removeDeadBranchResult
                 , removeUnnecessaryCopy
+                , simplifyEqualBranchResult
                 ]
 
 standardRules :: MonadBinder m => RuleBook m
@@ -770,6 +771,35 @@ removeDeadBranchResult (_, used) (Let pat _ (If e1 tb fb rettype loc))
   in letBind_ (Pattern pat') =<<
      eIf (eSubExp e1) (pure tb') (pure fb') loc
 removeDeadBranchResult _ _ = cannotSimplify
+
+-- | Simplify return values of a branch if it is later asserted that
+-- they have some specific value.
+simplifyEqualBranchResult :: MonadBinder m => BottomUpRule m
+simplifyEqualBranchResult (_, used) (Let pat _ (If e1 tb fb rettype loc))
+  | -- Only if there is no existential context...
+    patternSize pat == length rettype,
+    let (simplified,orig) = partitionEithers $ map isActually $
+                            zip4 (patternBindees pat) tses fses rettype,
+    not (null simplified) = do
+      let mkSimplified (bindee, se) =
+            letBind_ (Pattern [bindee]) $ PrimOp $ SubExp se
+      mapM_ mkSimplified simplified
+      let (bindees,tses',fses',rettype') = unzip4 orig
+          pat' = Pattern bindees
+          tb' = tb { bodyResult = Result tses' loc }
+          fb' = fb { bodyResult = Result fses' loc }
+      letBind_ pat' $ If e1 tb' fb' rettype' loc
+  where tses = resultSubExps $ bodyResult tb
+        fses = resultSubExps $ bodyResult fb
+        isActually (bindee, se1, se2, t)
+          | UT.isEqualTo se1 name used =
+              Left (bindee, se1)
+          | UT.isEqualTo se2 name used =
+              Left (bindee, se2)
+          | otherwise =
+              Right (bindee, se1, se2, t)
+          where name = bindeeName bindee
+simplifyEqualBranchResult _ _ = cannotSimplify
 
 -- Some helper functions
 

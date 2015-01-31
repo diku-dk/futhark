@@ -10,12 +10,15 @@ module Futhark.Analysis.UsageTable
   , used
   , isConsumed
   , isInResult
+  , isEqualTo
   , allConsumed
   , usages
   , usage
   , consumedUsage
   , inResultUsage
+  , equalToUsage
   , Usages
+  , leftScope
   )
   where
 
@@ -76,6 +79,9 @@ isConsumed = is Consumed
 isInResult :: VName -> UsageTable -> Bool
 isInResult = is InResult
 
+isEqualTo :: SubExp -> VName -> UsageTable -> Bool
+isEqualTo what = is $ EqualTo what
+
 allConsumed :: UsageTable -> Names
 allConsumed (UsageTable m) =
   HS.fromList . map fst . filter (S.member Consumed . snd) $ HM.toList m
@@ -92,8 +98,18 @@ consumedUsage name = UsageTable $ HM.singleton name $ S.singleton Consumed
 inResultUsage :: VName -> UsageTable
 inResultUsage name = UsageTable $ HM.singleton name $ S.singleton InResult
 
+equalToUsage :: VName -> SubExp -> UsageTable
+equalToUsage name what =
+  UsageTable $ HM.singleton name $ S.singleton $ EqualTo what
+
 type Usages = S.Set Usage
 
 data Usage = Consumed
            | InResult
+           | EqualTo SubExp
              deriving (Eq, Ord, Show)
+
+leftScope :: UsageTable -> UsageTable
+leftScope (UsageTable table) = UsageTable $ HM.map (S.filter $ not . equalTo) table
+  where equalTo (EqualTo _) = True
+        equalTo _           = False

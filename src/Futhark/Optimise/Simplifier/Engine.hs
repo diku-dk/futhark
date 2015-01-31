@@ -132,6 +132,9 @@ addBindingEngine :: MonadEngine m =>
                     Binding (Lore m) -> m ()
 addBindingEngine bnd = do
   modifyVtable $ ST.insertBinding bnd
+  case bindingExp bnd of
+    PrimOp (Assert se _) -> asserted se
+    _                    -> return ()
   needBinding bnd
 
 collectBindingsEngine :: MonadEngine m =>
@@ -165,6 +168,22 @@ consumedName = tellNeed . Need [] . UT.consumedUsage
 
 inResultName :: MonadEngine m => VName -> m ()
 inResultName = tellNeed . Need [] . UT.inResultUsage
+
+asserted :: MonadEngine m => SubExp -> m ()
+asserted (Constant {}) =
+  return ()
+asserted (Var name) = do
+  se <- ST.lookupExp (identName name) <$> getVtable
+  case se of Just (PrimOp (BinOp Equal x y _ _)) -> do
+               case x of Var xvar ->
+                           tellNeed $ Need [] $
+                           UT.equalToUsage (identName xvar) y
+                         _ -> return ()
+               case y of Var yvar ->
+                           tellNeed $ Need [] $
+                           UT.equalToUsage (identName yvar) x
+                         _ -> return ()
+             _ -> return ()
 
 tapUsage :: MonadEngine m => m a -> m (a, UT.UsageTable)
 tapUsage m = do (x,needs) <- listenNeed m
