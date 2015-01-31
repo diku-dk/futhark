@@ -773,7 +773,10 @@ removeDeadBranchResult (_, used) (Let pat _ (If e1 tb fb rettype loc))
 removeDeadBranchResult _ _ = cannotSimplify
 
 -- | Simplify return values of a branch if it is later asserted that
--- they have some specific value.
+-- they have some specific value.  FIXME: this is not entiiiiirely
+-- sound, as in practice we just end up removing the eventual
+-- assertion.  This is really just about eliminating shape computation
+-- branches.  Maybe there is a better way.
 simplifyEqualBranchResult :: MonadBinder m => BottomUpRule m
 simplifyEqualBranchResult (_, used) (Let pat _ (If e1 tb fb rettype loc))
   | -- Only if there is no existential context...
