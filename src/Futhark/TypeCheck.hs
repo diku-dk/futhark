@@ -1030,10 +1030,13 @@ checkBndSizes (Ident _ t _) = do
   let dims = arrayDims t
   mapM_ (require [Basic Int]) dims
 
-validApply :: [DeclType] -> [Type] -> Bool
+validApply :: ArrayShape shape =>
+              [TypeBase shape]
+           -> [TypeBase shape]
+           -> Bool
 validApply expected got =
   length got == length expected &&
-  and (zipWith subtypeOf (map toDecl got) expected)
+  and (zipWith subtypeOf got expected)
 
 type Arg = (Type, Names, Dataflow, SrcLoc)
 
@@ -1046,17 +1049,33 @@ checkArg arg = do (argt, dflow) <- collectDataflow $ checkSubExp arg
                   als <- subExpAliasesM arg
                   return (argt, als, dflow, srclocOf arg)
 
-checkFuncall :: Checkable lore =>
+checkFuncall :: (Checkable lore) =>
                 Maybe Name -> SrcLoc
              -> [Type] -> [Arg]
              -> TypeM lore ()
-checkFuncall fname loc paramtypes args = do
-  let argts = map argType args
-  unless (validApply (map toDecl paramtypes) argts) $
+checkFuncall =
+  checkGenericFuncall (toDecl . argType) toDecl
+
+checkLambdaCall :: (Checkable lore) =>
+                   Maybe Name -> SrcLoc
+                -> [Type] -> [Arg]
+                -> TypeM lore ()
+checkLambdaCall = checkGenericFuncall argType id
+
+checkGenericFuncall :: (Checkable lore, ArrayShape shape) =>
+                       (Arg -> TypeBase shape)
+                    -> (Type -> TypeBase shape)
+                    -> Maybe Name -> SrcLoc
+                    -> [Type] -> [Arg]
+                    -> TypeM lore ()
+checkGenericFuncall argType' paramType' fname loc params args = do
+  let argts = map argType' args
+      paramts = map paramType' params
+  unless (validApply paramts argts) $
     bad $ ParameterMismatch fname loc
-          (Right $ map (justOne . staticShapes1) paramtypes) $
-          map (justOne . staticShapes1) argts
-  forM_ (zip (map diet paramtypes) args) $ \(d, (_, als, dflow, argloc)) -> do
+          (Right $ map (justOne . staticShapes1) params) $
+          map (justOne . staticShapes1 . argType) args
+  forM_ (zip (map diet paramts) args) $ \(d, (_, als, dflow, argloc)) -> do
     maybeCheckOccurences $ usageOccurences dflow
     let occurs = [consumption (consumeArg als d) argloc]
     occur $ usageOccurences dflow `seqOccurences` occurs
@@ -1068,7 +1087,7 @@ checkLambda :: Checkable lore =>
 checkLambda (Lambda params body ret loc) args = do
   mapM_ checkType ret
   if length params == length args then do
-    checkFuncall Nothing loc (map identType params) args
+    checkLambdaCall Nothing loc (map identType params) args
     noUnique $ checkAnonymousFun
       (nameFromString "<anonymous>", ret, params, body, loc)
   else bad $ TypeError loc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
