@@ -596,7 +596,7 @@ checkLambdaResult ts (Result es _) =
     et <- checkSubExp e
     unless (et `subtypeOf` t) $
       bad $ TypeError (srclocOf e) $
-      "Subexpression " ++ pretty e ++ " has type " ++ pretty t ++
+      "Subexpression " ++ pretty e ++ " has type " ++ pretty et ++
       " but expected " ++ pretty t
 
 checkBody :: Checkable lore =>
