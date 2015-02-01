@@ -5,8 +5,10 @@ module Futhark.Analysis.HORepresentation.SOACNest
   , setBody
   , params
   , returnType
+  , typeOf
   , NestBody (..)
   , nestBodyParams
+  , nestBodyReturnType
   , Nesting (..)
   , bodyToLambda
   , lambdaToBody
@@ -54,6 +56,10 @@ data Nesting lore = Nesting {
 data NestBody lore = Fun (Lambda lore)
                    | NewNest (Nesting lore) (Combinator lore)
                 deriving (Show)
+
+nestBodyReturnType :: NestBody lore -> [Type]
+nestBodyReturnType (Fun lam)           = lambdaReturnType lam
+nestBodyReturnType (NewNest nesting _) = nestingReturnType nesting
 
 nestBodyParams :: NestBody lore -> [Param]
 nestBodyParams (Fun lam) = lambdaParams lam
@@ -189,6 +195,26 @@ setCombCertificates cs (Reduce  _ bdy acc loc) = Reduce cs bdy acc loc
 setCombCertificates cs (Scan    _ bdy acc loc) = Scan   cs bdy acc loc
 setCombCertificates cs (Filter  _ bdy     loc) = Filter cs bdy loc
 setCombCertificates cs (Redomap _ fun bdy acc loc) = Redomap cs fun bdy acc loc
+
+typeOf :: SOACNest lore -> [ExtType]
+typeOf (SOACNest inps (Map _ b _)) =
+  staticShapes [ arrayOf t (Shape [outersize]) (uniqueness t)
+               | t <- nestBodyReturnType b ]
+  where outersize = arraysSize 0 $ map SOAC.inputType inps
+typeOf (SOACNest _ (Reduce _ _ accinit _)) =
+  staticShapes $ map subExpType accinit
+typeOf (SOACNest _ (Redomap _ _ _ accinit _)) =
+  staticShapes $ map subExpType accinit
+typeOf (SOACNest inps (Scan _ _ accinit _)) =
+  staticShapes [ arrayOf t (Shape [outersize]) (uniqueness t)
+               | t <- map subExpType accinit ]
+  where outersize = arraysSize 0 $ map SOAC.inputType inps
+typeOf (SOACNest inps (Filter {})) =
+  map (extOuterDim . SOAC.inputType) inps
+  where extOuterDim t =
+          t `setArrayShape` ExtShape (extOuterDim' $ arrayShape t)
+        extOuterDim' (Shape dims) =
+          Ext 0 : map Free (drop 1 dims)
 
 fromExp :: Bindable lore =>
            Exp lore -> Either SOAC.NotSOAC (SOACNest lore)

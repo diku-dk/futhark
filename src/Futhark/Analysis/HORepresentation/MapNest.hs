@@ -1,6 +1,7 @@
 module Futhark.Analysis.HORepresentation.MapNest
   ( Nesting (..)
   , MapNest (..)
+  , typeOf
   , params
   , inputs
   , setInputs
@@ -34,6 +35,14 @@ data Nesting lore = Nesting {
 
 data MapNest lore = MapNest Certificates (Nest.NestBody lore) [Nesting lore] [SOAC.Input] SrcLoc
                   deriving (Show)
+
+typeOf :: MapNest lore -> [Type]
+typeOf (MapNest _ body nests inps _) =
+  [ arrayOf t (Shape [outersize]) (uniqueness t) | t <- innersizes ]
+  where innersizes = case nests of []     -> Nest.nestBodyReturnType body
+                                   nest:_ -> nestingReturnType nest
+        outersize = arraysSize 0 $ map SOAC.inputType inps
+
 
 params :: MapNest lore -> [VName]
 params (MapNest _ body [] _ _)       =
