@@ -42,6 +42,7 @@ module Futhark.Analysis.HORepresentation.SOAC
   , inputArray
   , inputRank
   , inputType
+  , inputRowType
   , transformRows
   , transformTypeRows
   , transposeInput
@@ -319,7 +320,12 @@ inputType (Input (ArrayTransforms ts) ia) =
           let Shape oldshape = arrayShape t
           in t `setArrayShape` Shape (take 1 oldshape ++ shape)
 
--- | Return the array rank (dimensionality) of an input.
+-- | Return the row type of an input.  Just a convenient alias.
+inputRowType :: Input -> Type
+inputRowType = rowType . inputType
+
+-- | Return the array rank (dimensionality) of an input.  Just a
+-- convenient alias.
 inputRank :: Input -> Int
 inputRank = arrayRank . inputType
 
