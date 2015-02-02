@@ -127,7 +127,9 @@ tryOptimizeSOAC :: [Ident] -> SOAC -> FusedKer -> TryFusion FusedKer
 tryOptimizeSOAC outIds soac ker = do
   (soac', ots) <- optimizeSOAC Nothing soac
   let ker' = map (SOAC.addTransforms ots) (inputs ker) `setInputs` ker
-  applyFusionRules outIds soac' ker'
+      outIds' = fixOutputTypes outIds soac'
+      ker'' = fixInputTypes outIds' ker'
+  applyFusionRules outIds' soac' ker''
 
 tryOptimizeKernel :: [Ident] -> SOAC -> FusedKer -> TryFusion FusedKer
 tryOptimizeKernel outIds soac ker = do
