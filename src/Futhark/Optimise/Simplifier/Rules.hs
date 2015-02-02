@@ -162,8 +162,12 @@ removeUnusedLoopResult :: forall m.MonadBinder m => BottomUpRule m
 removeUnusedLoopResult (_, used) (Let pat _ (LoopOp (DoLoop respat merge i bound body loc)))
   | explpat' <- filter (keep . fst) explpat,
     explpat' /= explpat =
-  let ctxrefs = concatMap references $ map snd explpat'
-      implpat' = filter ((`elem` ctxrefs) . identName . snd) implpat
+  let ctxrefs = concatMap (references . snd) explpat'
+      patctxrefs = mconcat $ map (freeNamesIn . fst) explpat'
+      bindeeUsed = (`HS.member` patctxrefs) . bindeeName
+      mergeParamUsed = (`elem` ctxrefs) . identName
+      keepImpl (bindee,ident) = bindeeUsed bindee || mergeParamUsed ident
+      implpat' = filter keepImpl implpat
       pat' = map fst $ implpat'++explpat'
       respat' = map snd explpat'
   in letBind_ (Pattern pat') $ LoopOp $ DoLoop respat' merge i bound body loc
