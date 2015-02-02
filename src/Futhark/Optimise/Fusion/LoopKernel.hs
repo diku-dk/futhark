@@ -424,7 +424,7 @@ pushRearrange inpIds nest ots = do
     let invertRearrange = SOAC.Rearrange [] $ permuteInverse perm
     in return (MapNest.toSOACNest $
                inputs' `MapNest.setInputs`
-               (rearrangeReturnTypes nest' perm),
+               rearrangeReturnTypes nest' perm,
                ots SOAC.|> invertRearrange)
   else fail "Cannot push transpose"
 
