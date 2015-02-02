@@ -42,7 +42,6 @@ import Data.List hiding (insert, lookup)
 import qualified Data.Set as S
 import qualified Data.HashMap.Lazy as HM
 
-import Data.Loc
 import Futhark.Representation.AST
 import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Analysis.ScalExp
@@ -207,8 +206,8 @@ lookupScalExp name vtable = asScalExp =<< lookup name vtable
 
 lookupValue :: VName -> SymbolTable lore -> Maybe Value
 lookupValue name vtable = case lookupSubExp name vtable of
-                            Just (Constant val _) -> Just $ BasicVal val
-                            _                     -> Nothing
+                            Just (Constant val) -> Just $ BasicVal val
+                            _                   -> Nothing
 
 lookupVar :: VName -> SymbolTable lore -> Maybe VName
 lookupVar name vtable = case lookupSubExp name vtable of
@@ -251,23 +250,23 @@ bindingEntries bnd@(Let (Pattern [bindee]) _ e) vtable = [entry]
         range = case e of
           PrimOp (SubExp se) ->
             subExpRange se vtable
-          PrimOp (Iota n _) ->
+          PrimOp (Iota n) ->
             (Just zero, Just $ subExpToScalExp n `SMinus` one)
-          PrimOp (Replicate _ v _) ->
+          PrimOp (Replicate _ v) ->
             subExpRange v vtable
-          PrimOp (Rearrange _ _ v _) ->
+          PrimOp (Rearrange _ _ v) ->
             identRange v vtable
-          PrimOp (Split _ _ v _ _) ->
+          PrimOp (Split _ _ v _) ->
             identRange v vtable
-          PrimOp (Copy se _) ->
+          PrimOp (Copy se) ->
             subExpRange se vtable
-          PrimOp (Index _ v _ _) ->
+          PrimOp (Index _ v _) ->
             identRange v vtable
           _ -> (Nothing, Nothing)
         zero = Val $ IntVal 0
         one = Val $ IntVal 1
 -- Then, handle others.  For now, this is only filter.
-bindingEntries bnd@(Let (Pattern (x:xs)) _ (LoopOp (Filter _ _ inps _))) vtable =
+bindingEntries bnd@(Let (Pattern (x:xs)) _ (LoopOp (Filter _ _ inps))) vtable =
   defBndEntry vtable x bnd : zipWith makeBnd xs inps
   where makeBnd bindee v =
           (defBndEntry vtable bindee bnd) {
@@ -279,7 +278,7 @@ bindingEntries bnd@(Let pat _ _) vtable =
 subExpRange :: SubExp -> SymbolTable lore -> Range
 subExpRange (Var v) vtable =
   identRange v vtable
-subExpRange (Constant bv _) _ =
+subExpRange (Constant bv) _ =
   (Just $ Val bv, Just $ Val bv)
 
 identRange :: Ident -> SymbolTable lore -> Range
@@ -367,14 +366,15 @@ updateBounds isTrue cond vtable =
     Just cond' ->
       let cond'' | isTrue    = cond'
                  | otherwise = SNot cond'
-      in updateBounds' (srclocOf cond) cond'' vtable
+      in updateBounds' cond'' vtable
+
 -- | Refines the ranges in the symbol table with
 --     ranges extracted from branch conditions.
 --   `cond' is the condition of the if-branch.
-updateBounds' :: SrcLoc -> ScalExp -> SymbolTable lore -> SymbolTable lore
-updateBounds' loc cond sym_tab =
+updateBounds' :: ScalExp -> SymbolTable lore -> SymbolTable lore
+updateBounds' cond sym_tab =
   foldr updateBound sym_tab $ mapMaybe solve_leq0 $
-  either (const []) getNotFactorsLEQ0 $ AS.simplify (SNot cond) loc ranges
+  either (const []) getNotFactorsLEQ0 $ AS.simplify (SNot cond) ranges
     where
       updateBound (sym,True ,bound) = setUpperBound (identName sym) bound
       updateBound (sym,False,bound) = setLowerBound (identName sym) bound
@@ -397,7 +397,7 @@ updateBounds' loc cond sym_tab =
                                 then SMinus (Val (IntVal 0)) e_scal
                                 else SMinus (Val (IntVal 1)) e_scal
 
-               in  either (const []) (:[]) $ AS.simplify leq0_escal loc ranges
+               in  either (const []) (:[]) $ AS.simplify leq0_escal ranges
       getNotFactorsLEQ0 (SLogOr  e1 e2) = getNotFactorsLEQ0 e1 ++ getNotFactorsLEQ0 e2
       getNotFactorsLEQ0 _ = []
 
@@ -413,11 +413,11 @@ updateBounds' loc cond sym_tab =
       solve_leq0 :: ScalExp -> Maybe (Ident, Bool, ScalExp)
       solve_leq0 e_scal = do
         sym <- AS.pickSymToElim ranges S.empty e_scal
-        (a,b) <- either (const Nothing) id $ AS.linFormScalE sym e_scal loc ranges
+        (a,b) <- either (const Nothing) id $ AS.linFormScalE sym e_scal ranges
         case a of
           Val (IntVal (-1)) -> Just (sym, False, b)
           Val (IntVal 1)    -> do
-            mb <- either (const Nothing) Just $ AS.simplify (SMinus (Val (IntVal 0)) b) loc ranges
+            mb <- either (const Nothing) Just $ AS.simplify (SMinus (Val (IntVal 0)) b) ranges
             Just (sym, True, mb)
           _ -> Nothing
 

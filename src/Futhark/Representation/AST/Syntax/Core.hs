@@ -34,7 +34,6 @@ module Futhark.Representation.AST.Syntax.Core
 
 import Data.Array
 import Data.Hashable
-import Data.Loc
 import Data.Monoid
 import qualified Data.HashSet as HS
 
@@ -150,7 +149,6 @@ data Value = BasicVal BasicValue
 -- bound to the identifier.
 data IdentBase shape = Ident { identName :: VName
                              , identType :: TypeBase shape
-                             , identSrcLoc :: SrcLoc
                              }
                     deriving (Show)
 
@@ -167,9 +165,6 @@ instance Eq (IdentBase shape) where
 instance Ord (IdentBase shape) where
   x `compare` y = identName x `compare` identName y
 
-instance Located (IdentBase shape) where
-  locOf = locOf . identSrcLoc
-
 instance Hashable (IdentBase shape) where
   hashWithSalt salt = hashWithSalt salt . identName
 
@@ -179,21 +174,14 @@ type Certificates = [Ident]
 -- | A subexpression is either a scalar constant or a variable.  One
 -- important property is that evaluation of a subexpression is
 -- guaranteed to complete in constant time.
-data SubExp = Constant BasicValue SrcLoc
+data SubExp = Constant BasicValue
             | Var      Ident
             deriving (Show, Eq, Ord)
-
-instance Located SubExp where
-  locOf (Constant _ loc) = locOf loc
-  locOf (Var ident)      = locOf ident
 
 data BindeeT annot = Bindee { bindeeIdent :: Ident
                             , bindeeLore  :: annot
                             }
                      deriving (Ord, Show, Eq)
-
-instance Located (BindeeT annot) where
-  locOf = locOf . bindeeIdent
 
 type Bindee = BindeeT
 

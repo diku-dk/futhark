@@ -61,9 +61,9 @@ deadCodeElim = Prog . map deadCodeElimFun . progFunctions
 
 -- | Applies Dead-Code Elimination to just a single function.
 deadCodeElimFun :: Proper lore => FunDec lore -> FunDec lore
-deadCodeElimFun (FunDec fname rettype args body loc) =
+deadCodeElimFun (FunDec fname rettype args body) =
   let body' = deadCodeElimBody body
-  in FunDec fname rettype args body' loc
+  in FunDec fname rettype args body'
 
 -- | Applies Dead-Code Elimination to just a single body.
 deadCodeElimBody :: Proper lore => Body lore -> Body lore
@@ -76,8 +76,8 @@ deadCodeElimBody = fst . runDCElimM . deadCodeElimBodyM
 --------------------------------------------------------------------
 
 deadCodeElimSubExp :: SubExp -> DCElimM SubExp
-deadCodeElimSubExp (Var ident)      = Var <$> deadCodeElimIdent ident
-deadCodeElimSubExp (Constant v loc) = return $ Constant v loc
+deadCodeElimSubExp (Var ident)  = Var <$> deadCodeElimIdent ident
+deadCodeElimSubExp (Constant v) = return $ Constant v
 
 deadCodeElimBodyM :: Proper lore => Body lore -> DCElimM (Body lore)
 
@@ -94,19 +94,19 @@ deadCodeElimBodyM (Body bodylore (Let pat explore e:bnds) res) = do
           return $ Body bodylore
                    (Let pat explore e':bnds') res'
 
-deadCodeElimBodyM (Body bodylore [] (Result es loc)) = do
+deadCodeElimBodyM (Body bodylore [] (Result es)) = do
   seen $ freeNamesIn bodylore
   Body bodylore [] <$>
-    (Result <$> mapM deadCodeElimSubExp es <*> pure loc)
+    (Result <$> mapM deadCodeElimSubExp es)
 
 deadCodeElimExp :: Proper lore => Exp lore -> DCElimM (Exp lore)
-deadCodeElimExp (LoopOp (DoLoop respat merge i bound body loc)) = do
+deadCodeElimExp (LoopOp (DoLoop respat merge i bound body)) = do
   let (mergepat, mergeexp) = unzip merge
   mapM_ deadCodeElimBindee mergepat
   mapM_ deadCodeElimSubExp mergeexp
   bound' <- deadCodeElimSubExp bound
   body' <- deadCodeElimBodyM body
-  return $ LoopOp $ DoLoop respat merge i bound' body' loc
+  return $ LoopOp $ DoLoop respat merge i bound' body'
 deadCodeElimExp e = mapExpM mapper e
   where mapper = Mapper {
                    mapOnBinding = return -- Handled in case for Body.
@@ -126,7 +126,7 @@ deadCodeElimExp e = mapExpM mapper e
                  }
 
 deadCodeElimIdent :: Ident -> DCElimM Ident
-deadCodeElimIdent ident@(Ident vnm t _) = do
+deadCodeElimIdent ident@(Ident vnm t) = do
   tell $ DCElimRes False $ HS.singleton vnm
   dims <- mapM deadCodeElimSubExp $ arrayDims t
   return ident { identType = t `setArrayShape` Shape dims }
@@ -148,11 +148,11 @@ deadCodeElimType t = do
 
 deadCodeElimLambda :: Proper lore =>
                       Lambda lore -> DCElimM (Lambda lore)
-deadCodeElimLambda (Lambda params body rettype pos) = do
+deadCodeElimLambda (Lambda params body rettype) = do
   body' <- deadCodeElimBodyM body
   mapM_ deadCodeElimBnd params
   mapM_ deadCodeElimType rettype
-  return $ Lambda params body' rettype pos
+  return $ Lambda params body' rettype
 
 seen :: Names -> DCElimM ()
 seen = tell . DCElimRes False

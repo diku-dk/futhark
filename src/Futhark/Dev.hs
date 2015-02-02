@@ -47,7 +47,7 @@ name = unsafePerformIO . newIDFromString
 
 -- | Return a new, unique identifier.  Uses 'name'.
 ident :: String -> Type -> Ident
-ident k t = Ident (name k) t noLoc
+ident = Ident . name
 
 -- | Return a new, unique identifier, based on a type declaration of
 -- the form @"t name"@, for example @"[int] x"@.  Uses 'name'.

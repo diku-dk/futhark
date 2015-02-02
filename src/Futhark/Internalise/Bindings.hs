@@ -18,7 +18,6 @@ import Control.Monad.Writer hiding (mapM)
 
 import qualified Data.HashMap.Lazy as HM
 import Data.List
-import Data.Loc
 import Data.Traversable (mapM)
 
 import Futhark.Representation.External as E
@@ -35,16 +34,15 @@ internaliseParam :: MonadFreshNames m => E.Ident
                  -> m [I.IdentBase I.ExtShape]
 internaliseParam param =
   forM (internaliseType $ E.identType param) $ \t ->
-  newIdent base t loc
-  where loc = srclocOf param
-        base = nameToString $ baseName $ E.identName param
+  newIdent base t
+  where base = nameToString $ baseName $ E.identName param
 
 internaliseFunParam :: MonadFreshNames m => E.Parameter
                     -> m ([I.Ident], [I.Ident])
 internaliseFunParam param = do
   new_params <- internaliseParam $ E.fromParam param
   (new_param_types, shapes) <-
-    I.instantiateShapes' (srclocOf param) $
+    I.instantiateShapes' $
     map I.identType new_params
   let new_params' = [ new_param { I.identType = t } |
                       (new_param, t) <- zip new_params new_param_types ]
@@ -104,7 +102,6 @@ bindingTupIdent :: E.TupIdent -> [ExtType] -> (I.Pattern -> InternaliseM a)
                 -> InternaliseM a
 bindingTupIdent pat ts m = do
   pat' <- flattenPattern pat
-  (ts',shapes) <- I.instantiateShapes' loc ts
+  (ts',shapes) <- I.instantiateShapes' ts
   let addShapeBindings pat'' = m $ I.basicPattern $ shapes ++ pat''
   bindingFlatPattern pat' ts' addShapeBindings
-  where loc = srclocOf pat

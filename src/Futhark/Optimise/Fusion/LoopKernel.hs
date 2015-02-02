@@ -21,7 +21,6 @@ import qualified Data.HashSet as HS
 import Data.Maybe
 import Data.Monoid
 import Data.List
-import Data.Loc
 
 import Futhark.Representation.Basic
 import Futhark.Renamer (renameLambda)
@@ -53,32 +52,31 @@ transformOutput ts names soac = do
             let es = map (applyTransform t) validents
                 mkPat ident = Pattern [Bindee ident ()]
             newIds <- forM (zip valnames $ concatMap primOpType es) $ \(k, opt) ->
-              newIdent (baseString k) opt loc
+              newIdent (baseString k) opt
             zipWithM_ letBind (map mkPat newIds) $ map PrimOp es
             descend ts'' newIds
   valnames' <- mapM (newVName . baseString) valnames
-  case instantiateIdents loc (ctxnames<>valnames') soact of
+  case instantiateIdents (ctxnames<>valnames') soact of
     Nothing -> return Nothing
     Just (ctxidents,validents) -> return $ Just $ do
       e <- SOAC.toExp soac
       letBind_ (basicPattern $ ctxidents<>validents) e
       descend ts validents
-  where loc = srclocOf soac
-        soact = SOAC.typeOf soac
+  where soact = SOAC.typeOf soac
 
 applyTransform :: SOAC.ArrayTransform -> Ident -> PrimOp
 applyTransform (SOAC.Rearrange cs perm) v =
-  Rearrange cs perm v $ srclocOf v
+  Rearrange cs perm v
 applyTransform (SOAC.Reshape cs shape) v =
-  Reshape cs shape v $ srclocOf v
+  Reshape cs shape v
 applyTransform (SOAC.ReshapeOuter cs shape) v =
   let shapes = reshapeOuter shape 1 v
-  in Reshape cs shapes v $ srclocOf v
+  in Reshape cs shapes v
 applyTransform (SOAC.ReshapeInner cs shape) v =
   let shapes = reshapeInner shape 1 v
-  in Reshape cs shapes v $ srclocOf v
+  in Reshape cs shapes v
 applyTransform (SOAC.Replicate n) v =
-  Replicate n (Var v) $ srclocOf v
+  Replicate n (Var v)
 
 inputToOutput :: SOAC.Input -> Maybe (SOAC.ArrayTransform, SOAC.Input)
 inputToOutput (SOAC.Input ts ia) =
@@ -266,34 +264,34 @@ fuseSOACwithKer outIds soac1 ker = do
                         outId' { identType = rowType $ identType outId' })
   case (soac2, soac1) of
     -- The Fusions that are semantically map fusions:
-    (SOAC.Map _ _ _ pos, SOAC.Map    {})
+    (SOAC.Map {}, SOAC.Map    {})
       | mapFusionOK outIds ker -> do
       let (res_lam, new_inp) = fuseMaps lam1 inp1_arr outPairs lam2 inp2_arr
-      success $ SOAC.Map (cs1++cs2) res_lam new_inp pos
+      success $ SOAC.Map (cs1++cs2) res_lam new_inp
 
-    (SOAC.Redomap _ lam21 _ ne _ pos, SOAC.Map {})
+    (SOAC.Redomap _ lam21 _ ne _, SOAC.Map {})
       | mapFusionOK outIds ker -> do
       let (res_lam, new_inp) = fuseMaps lam1 inp1_arr outPairs lam2 inp2_arr
-      success $ SOAC.Redomap (cs1++cs2) lam21 res_lam ne new_inp pos
+      success $ SOAC.Redomap (cs1++cs2) lam21 res_lam ne new_inp
 
     -- The Fusions that are semantically filter fusions:
-    (SOAC.Redomap _ lam21 _ nes _ pos, SOAC.Filter {})
+    (SOAC.Redomap _ lam21 _ nes _, SOAC.Filter {})
       | filterFoldFusionOK outIds ker-> do
       names <- replicateM (length $ lambdaReturnType lam21) $ newVName "check"
       let (res_lam, new_inp) = fuseFilterIntoFold lam1 inp1_arr outPairs lam2 inp2_arr names
-      success $ SOAC.Redomap (cs1++cs2) lam21 res_lam nes new_inp pos
+      success $ SOAC.Redomap (cs1++cs2) lam21 res_lam nes new_inp
 
-    (SOAC.Filter _ _ _ pos, SOAC.Filter {})
+    (SOAC.Filter {}, SOAC.Filter {})
       | filterFusionOK outIds ker -> do
       name <- newVName "check"
       let (res_lam, new_inp) = fuseFilters lam1 inp1_arr outPairs lam2 inp2_arr name
-      success $ SOAC.Filter (cs1++cs2) res_lam new_inp pos
+      success $ SOAC.Filter (cs1++cs2) res_lam new_inp
 
     -- Nothing else worked, so mkLets try rewriting to redomap if
     -- possible.
-    (SOAC.Reduce _ lam args loc, _) | mapOrFilter soac1 -> do
+    (SOAC.Reduce _ lam args, _) | mapOrFilter soac1 -> do
        let (ne, arrs) = unzip args
-           soac2' = SOAC.Redomap (cs1++cs2) lam lam ne arrs loc
+           soac2' = SOAC.Redomap (cs1++cs2) lam lam ne arrs
            ker'   = ker { fsoac = soac2'
                         }
        fuseSOACwithKer outIds soac1 ker'
@@ -337,8 +335,8 @@ optimizations = [iswim]
 
 iswim :: Maybe [Ident] -> SOACNest -> SOAC.ArrayTransforms -> TryFusion (SOACNest, SOAC.ArrayTransforms)
 iswim _ nest ots
-  | Nest.Scan cs1 (Nest.NewNest lvl nn) es loc1 <- Nest.operation nest,
-    Nest.Map cs2 mb loc2 <- nn,
+  | Nest.Scan cs1 (Nest.NewNest lvl nn) es <- Nest.operation nest,
+    Nest.Map cs2 mb <- nn,
     Just es' <- mapM SOAC.inputFromSubExp es,
     Nest.Nesting paramIds mapArrs bndIds retTypes <- lvl,
     mapM (liftM identName . isVarInput) mapArrs == Just paramIds = do
@@ -346,10 +344,9 @@ iswim _ nest ots
         inputTypes = map SOAC.inputType newInputs
         (accsizes, arrsizes) =
           splitAt (length es) $ map rowType inputTypes
-        mkParam name t = Ident name t loc1
-        innerAccParams = zipWith mkParam (take (length es) paramIds) accsizes
-        innerArrParams = zipWith mkParam (drop (length es) paramIds) arrsizes
-    let innerScan = Nest.Scan cs2 mb (map Var innerAccParams) loc1
+        innerAccParams = zipWith Ident (take (length es) paramIds) accsizes
+        innerArrParams = zipWith Ident (drop (length es) paramIds) arrsizes
+    let innerScan = Nest.Scan cs2 mb (map Var innerAccParams)
         scanNest = Nest.Nesting {
                      Nest.nestingInputs = map SOAC.varInput innerArrParams
                    , Nest.nestingReturnType = zipWith setOuterSize retTypes $
@@ -361,7 +358,7 @@ iswim _ nest ots
                                 t:_ -> transposeIndex 0 1 [0..arrayRank t]
         nest' = Nest.SOACNest
                 newInputs
-                (Nest.Map cs1 (Nest.NewNest scanNest innerScan) loc2)
+                (Nest.Map cs1 (Nest.NewNest scanNest innerScan))
     return (nest',
             ots SOAC.|> SOAC.Rearrange cs2 perm)
 iswim _ _ _ = fail "ISWIM does not apply"
@@ -388,7 +385,7 @@ commonTransforms' inps =
         inspect (mot, prev) inp = Just (mot,inp:prev)
 
 mapDepth :: MapNest -> Int
-mapDepth (MapNest.MapNest _ body levels _ _) =
+mapDepth (MapNest.MapNest _ body levels _) =
   -- XXX: The restriction to pure nests is conservative, but we cannot
   -- know whether an arbitrary postbody is dependent on the exact size
   -- of the nesting result.
@@ -429,11 +426,11 @@ pushRearrange inpIds nest ots = do
   else fail "Cannot push transpose"
 
 rearrangeReturnTypes :: MapNest -> [Int] -> MapNest
-rearrangeReturnTypes nest@(MapNest.MapNest cs body nestings inps loc) perm =
+rearrangeReturnTypes nest@(MapNest.MapNest cs body nestings inps) perm =
   MapNest.MapNest cs body
   (zipWith setReturnType nestings $
    drop 1 $ iterate (map rowType) ts)
-  inps loc
+  inps
   where rearrange t = setArrayDims t $
                       permuteShape (perm ++ [length perm..arrayRank t-1]) $
                       arrayDims t
@@ -464,8 +461,7 @@ pullReshape nest ots
   | SOAC.Reshape cs shape SOAC.:< ots' <- SOAC.viewf ots,
     op@Nest.Map {} <- Nest.operation nest,
     all basicType $ Nest.returnType op = do
-  let loc = srclocOf nest
-      inputs' = map (SOAC.addTransform $ SOAC.ReshapeOuter cs shape) $
+  let inputs' = map (SOAC.addTransform $ SOAC.ReshapeOuter cs shape) $
                 Nest.inputs nest
       inputTypes = map SOAC.inputType inputs'
       outernest inner outershape = do
@@ -476,7 +472,7 @@ pullReshape nest ots
               \(p, inpt) -> do
                 let t = rowType (stripArray (length outershape-1) inpt)
                         `setUniqueness` uniqueness (identType p)
-                newIdent "pullReshape_param" t $ srclocOf p
+                newIdent "pullReshape_param" t
 
         bnds <- forM retTypes $ \_ ->
                   newNameFromString "pullReshape_bnd"
@@ -487,7 +483,7 @@ pullReshape nest ots
                       , Nest.nestingResult = bnds
                       , Nest.nestingReturnType = retTypes
                       }
-        return $ Nest.Map [] (Nest.NewNest nesting inner) loc
+        return $ Nest.Map [] (Nest.NewNest nesting inner)
   -- Only have the certificates on the outermost loop nest.  This
   -- only has the significance of making the generated code look
   -- very slightly neater.

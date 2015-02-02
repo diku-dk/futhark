@@ -21,5 +21,5 @@ simplifyApply program vtable fname args = do
   either (const Nothing) Just $ Interp.runFunNoTrace fname vals program
   where allArgsAreValues = mapM argIsValue
 
-        argIsValue (Constant val _) = Just $ BasicVal val
-        argIsValue (Var v)          = ST.lookupValue (identName v) vtable
+        argIsValue (Constant val) = Just $ BasicVal val
+        argIsValue (Var v)        = ST.lookupValue (identName v) vtable

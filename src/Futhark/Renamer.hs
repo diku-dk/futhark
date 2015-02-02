@@ -127,10 +127,10 @@ instance Rename Bool where
 
 instance (Rename shape) =>
          Rename (IdentBase shape) where
-  rename (Ident name tp loc) = do
+  rename (Ident name tp) = do
     name' <- rename name
     tp' <- rename tp
-    return $ Ident name' tp' loc
+    return $ Ident name' tp'
 
 bind :: [IdentBase shape] -> RenameM a -> RenameM a
 bind vars body = do
@@ -143,20 +143,20 @@ bind vars body = do
                                              `HM.union` envNameMap env }
 
 instance Renameable lore => Rename (FunDec lore) where
-  rename (FunDec fname ret params body loc) =
+  rename (FunDec fname ret params body) =
     bind (map bindeeIdent params) $ do
       params' <- mapM rename params
       body' <- rename body
       ret' <- rename ret
-      return $ FunDec fname ret' params' body' loc
+      return $ FunDec fname ret' params' body'
 
 instance Rename SubExp where
-  rename (Var v)          = Var <$> rename v
-  rename (Constant v loc) = return $ Constant v loc
+  rename (Var v)      = Var <$> rename v
+  rename (Constant v) = return $ Constant v
 
 instance Rename Result where
-  rename (Result ses loc) =
-    Result <$> mapM rename ses <*> pure loc
+  rename (Result ses) =
+    Result <$> mapM rename ses
 
 instance Rename annot => Rename (Bindee annot) where
   rename (Bindee ident lore) = Bindee <$> rename ident <*> rename lore
@@ -176,7 +176,7 @@ instance Renameable lore => Rename (Body lore) where
       return $ Body blore' (Let pat' elore' e1':bnds') res'
 
 instance Renameable lore => Rename (Exp lore) where
-  rename (LoopOp (DoLoop respat merge loopvar boundexp loopbody loc)) = do
+  rename (LoopOp (DoLoop respat merge loopvar boundexp loopbody)) = do
     let (mergepat, mergeexp) = unzip merge
     boundexp' <- rename boundexp
     mergeexp' <- mapM rename mergeexp
@@ -187,7 +187,7 @@ instance Renameable lore => Rename (Exp lore) where
         loopvar'  <- rename loopvar
         loopbody' <- rename loopbody
         return $ LoopOp $ DoLoop respat' (zip mergepat' mergeexp')
-                          loopvar' boundexp' loopbody' loc
+                          loopvar' boundexp' loopbody'
   rename e = mapExpM mapper e
     where mapper = Mapper {
                       mapOnBinding = fail "Unhandled binding in Renamer"
@@ -211,12 +211,12 @@ instance (Rename shape) =>
   rename (Mem e) = Mem <$> rename e
 
 instance Renameable lore => Rename (Lambda lore) where
-  rename (Lambda params body ret loc) =
+  rename (Lambda params body ret) =
     bind params $ do
       params' <- mapM rename params
       body' <- rename body
       ret' <- mapM rename ret
-      return $ Lambda params' body' ret' loc
+      return $ Lambda params' body' ret'
 
 instance Rename Names where
   rename = liftM HS.fromList . mapM rename . HS.toList

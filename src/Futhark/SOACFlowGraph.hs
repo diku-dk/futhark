@@ -71,7 +71,7 @@ data SOACInfo = SOACInfo {
 type AccFlow = HM.HashMap String SOACInfo
 
 flowForFun :: FunDec -> (Name, ExpFlowGraph)
-flowForFun (FunDec fname _ _ fbody _) =
+flowForFun (FunDec fname _ _ fbody) =
   let allInfos = execWriter $ flowForBody fbody
       usages name (consumer, info) =
         case HM.lookup name $ soacConsumed info of
@@ -101,11 +101,11 @@ soacSeen name produced soac =
          }
   where (desc, bodys) =
           case soac of
-            SOAC.Map _ l _ _  -> ("mapT", [lambdaBody l])
-            SOAC.Filter _ l _ _ -> ("filterT", [lambdaBody l])
-            SOAC.Scan _ l _ _ -> ("scanT", [lambdaBody l])
-            SOAC.Reduce _ l _ _ -> ("reduceT", [lambdaBody l])
-            SOAC.Redomap _ l1 l2 _ _ _ -> ("redomapT", [lambdaBody l1, lambdaBody l2])
+            SOAC.Map _ l _  -> ("mapT", [lambdaBody l])
+            SOAC.Filter _ l _ -> ("filterT", [lambdaBody l])
+            SOAC.Scan _ l _ -> ("scanT", [lambdaBody l])
+            SOAC.Reduce _ l _ -> ("reduceT", [lambdaBody l])
+            SOAC.Redomap _ l1 l2 _ _ -> ("redomapT", [lambdaBody l1, lambdaBody l2])
 
         inspectInput (SOAC.Input ts (SOAC.Var v)) =
           Just (identName v, HS.singleton $ map descTransform $ unfoldr cons ts)
@@ -146,7 +146,7 @@ flowForBody (Body lore (Let pat _ e:bnds) res) = do
 flowForBody b = walkBodyM flow b
 
 flowForExp :: Exp -> FlowM ()
-flowForExp (LoopOp (DoLoop _ merge _ boundexp loopbody _))
+flowForExp (LoopOp (DoLoop _ merge _ boundexp loopbody))
   | names@(name:_) <- map (bindeeName . fst) merge =
   tell $ HM.singleton
          (textual name)

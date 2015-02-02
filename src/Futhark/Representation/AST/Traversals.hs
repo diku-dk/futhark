@@ -98,8 +98,8 @@ identityMapper = Mapper {
 -- itself.  The mapping is done left-to-right.
 mapBodyM :: (Applicative m, Monad m) =>
             Mapper lore lore m -> Body lore -> m (Body lore)
-mapBodyM tv (Body lore [] (Result ses loc)) =
-  Body lore [] <$> (Result <$> mapM (mapOnSubExp tv) ses <*> pure loc)
+mapBodyM tv (Body lore [] (Result ses)) =
+  Body lore [] <$> (Result <$> mapM (mapOnSubExp tv) ses)
 mapBodyM tv (Body lore (bnd:bnds) res) = do
   bnd' <- mapOnBinding tv bnd
   Body lore' bnds' res' <- mapOnBody tv $ Body lore bnds res
@@ -117,98 +117,91 @@ mapExpM :: (Applicative m, Monad m) =>
            Mapper flore tlore m -> Exp flore -> m (Exp tlore)
 mapExpM tv (PrimOp (SubExp se)) =
   PrimOp <$> (SubExp <$> mapOnSubExp tv se)
-mapExpM tv (PrimOp (ArrayLit els rowt loc)) =
-  PrimOp <$> (pure ArrayLit <*> mapM (mapOnSubExp tv) els <*> mapOnType tv rowt <*> pure loc)
-mapExpM tv (PrimOp (BinOp bop x y t loc)) =
+mapExpM tv (PrimOp (ArrayLit els rowt)) =
+  PrimOp <$> (pure ArrayLit <*> mapM (mapOnSubExp tv) els <*> mapOnType tv rowt)
+mapExpM tv (PrimOp (BinOp bop x y t)) =
   PrimOp <$> (pure (BinOp bop) <*>
                  mapOnSubExp tv x <*> mapOnSubExp tv y <*>
-                 mapOnType tv t <*> pure loc)
-mapExpM tv (PrimOp (Not x loc)) =
-  PrimOp <$> (pure Not <*> mapOnSubExp tv x <*> pure loc)
-mapExpM tv (PrimOp (Negate x loc)) =
-  PrimOp <$> (pure Negate <*> mapOnSubExp tv x <*> pure loc)
-mapExpM tv (If c texp fexp ts loc) =
+                 mapOnType tv t)
+mapExpM tv (PrimOp (Not x)) =
+  PrimOp <$> (Not <$> mapOnSubExp tv x)
+mapExpM tv (PrimOp (Negate x)) =
+  PrimOp <$> (Negate <$> mapOnSubExp tv x)
+mapExpM tv (If c texp fexp ts) =
   pure If <*> mapOnSubExp tv c <*> mapOnBody tv texp <*> mapOnBody tv fexp <*>
-       mapM (mapOnExtType tv) ts <*> pure loc
-mapExpM tv (Apply fname args ret loc) = do
+       mapM (mapOnExtType tv) ts
+mapExpM tv (Apply fname args ret) = do
   args' <- forM args $ \(arg, d) ->
              (,) <$> mapOnSubExp tv arg <*> pure d
   pure (Apply fname) <*> pure args' <*>
-    mapOnRetType tv ret <*> pure loc
-mapExpM tv (PrimOp (Index cs arr idxexps loc)) =
+    mapOnRetType tv ret
+mapExpM tv (PrimOp (Index cs arr idxexps)) =
   PrimOp <$> (pure Index <*> mapOnCertificates tv cs <*>
                  mapOnIdent tv arr <*>
-                 mapM (mapOnSubExp tv) idxexps <*>
-                 pure loc)
-mapExpM tv (PrimOp (Update cs src idxexps vexp loc)) =
+                 mapM (mapOnSubExp tv) idxexps)
+mapExpM tv (PrimOp (Update cs src idxexps vexp)) =
   PrimOp <$> (pure Update <*> mapOnCertificates tv cs <*>
                  mapOnIdent tv src <*>
-                 mapM (mapOnSubExp tv) idxexps <*> mapOnSubExp tv vexp <*>
-                 pure loc)
-mapExpM tv (PrimOp (Iota nexp loc)) =
-  PrimOp <$> (pure Iota <*> mapOnSubExp tv nexp <*> pure loc)
-mapExpM tv (PrimOp (Replicate nexp vexp loc)) =
-  PrimOp <$> (pure Replicate <*> mapOnSubExp tv nexp <*> mapOnSubExp tv vexp <*> pure loc)
-mapExpM tv (PrimOp (Reshape cs shape arrexp loc)) =
+                 mapM (mapOnSubExp tv) idxexps <*> mapOnSubExp tv vexp)
+mapExpM tv (PrimOp (Iota nexp)) =
+  PrimOp <$> (pure Iota <*> mapOnSubExp tv nexp)
+mapExpM tv (PrimOp (Replicate nexp vexp)) =
+  PrimOp <$> (pure Replicate <*> mapOnSubExp tv nexp <*> mapOnSubExp tv vexp)
+mapExpM tv (PrimOp (Reshape cs shape arrexp)) =
   PrimOp <$> (pure Reshape <*> mapOnCertificates tv cs <*>
                  mapM (mapOnSubExp tv) shape <*>
-                 mapOnIdent tv arrexp <*> pure loc)
-mapExpM tv (PrimOp (Rearrange cs perm e loc)) =
+                 mapOnIdent tv arrexp)
+mapExpM tv (PrimOp (Rearrange cs perm e)) =
   PrimOp <$> (pure Rearrange <*> mapOnCertificates tv cs <*>
-                 pure perm <*> mapOnIdent tv e <*> pure loc)
-mapExpM tv (PrimOp (Rotate cs n e loc)) =
+                 pure perm <*> mapOnIdent tv e)
+mapExpM tv (PrimOp (Rotate cs n e)) =
   PrimOp <$> (pure Rotate <*> mapOnCertificates tv cs <*>
-                 pure n <*> mapOnIdent tv e <*> pure loc)
-mapExpM tv (PrimOp (Split cs nexp arrexp size loc)) =
+                 pure n <*> mapOnIdent tv e)
+mapExpM tv (PrimOp (Split cs nexp arrexp size)) =
   PrimOp <$> (pure Split <*> mapOnCertificates tv cs <*>
                  mapOnSubExp tv nexp <*> mapOnIdent tv arrexp <*>
-                 mapOnSubExp tv size <*> pure loc)
-mapExpM tv (PrimOp (Concat cs x y size loc)) =
+                 mapOnSubExp tv size)
+mapExpM tv (PrimOp (Concat cs x y size)) =
   PrimOp <$> (pure Concat <*> mapOnCertificates tv cs <*>
                  mapOnIdent tv x <*> mapOnIdent tv y <*>
-                 mapOnSubExp tv size <*> pure loc)
-mapExpM tv (PrimOp (Copy e loc)) =
-  PrimOp <$> (pure Copy <*> mapOnSubExp tv e <*> pure loc)
-mapExpM tv (PrimOp (Alloc e loc)) =
-  PrimOp <$> (pure Alloc <*> mapOnSubExp tv e <*> pure loc)
+                 mapOnSubExp tv size)
+mapExpM tv (PrimOp (Copy e)) =
+  PrimOp <$> (pure Copy <*> mapOnSubExp tv e)
+mapExpM tv (PrimOp (Alloc e)) =
+  PrimOp <$> (pure Alloc <*> mapOnSubExp tv e)
 mapExpM tv (PrimOp (Assert e loc)) =
   PrimOp <$> (pure Assert <*> mapOnSubExp tv e <*> pure loc)
-mapExpM tv (PrimOp (Conjoin es loc)) =
-  PrimOp <$> (pure Conjoin <*> mapM (mapOnSubExp tv) es <*> pure loc)
-mapExpM tv (LoopOp (DoLoop res mergepat loopvar boundexp loopbody loc)) =
+mapExpM tv (PrimOp (Conjoin es)) =
+  PrimOp <$> (pure Conjoin <*> mapM (mapOnSubExp tv) es)
+mapExpM tv (LoopOp (DoLoop res mergepat loopvar boundexp loopbody)) =
   LoopOp <$> (DoLoop <$> mapM (mapOnIdent tv) res <*>
               (zip <$> mapM (mapOnFParam tv) vs <*> mapM (mapOnSubExp tv) es) <*>
               mapOnIdent tv loopvar <*> mapOnSubExp tv boundexp <*>
-              mapOnBody tv loopbody <*> pure loc)
+              mapOnBody tv loopbody)
   where (vs,es) = unzip mergepat
-mapExpM tv (LoopOp (Map cs fun arrexps loc)) =
+mapExpM tv (LoopOp (Map cs fun arrexps)) =
   LoopOp <$> (pure Map <*> mapOnCertificates tv cs <*>
-              mapOnLambda tv fun <*> mapM (mapOnIdent tv) arrexps <*>
-              pure loc)
-mapExpM tv (LoopOp (Reduce cs fun inputs loc)) =
+              mapOnLambda tv fun <*> mapM (mapOnIdent tv) arrexps)
+mapExpM tv (LoopOp (Reduce cs fun inputs)) =
   LoopOp <$> (pure Reduce <*> mapOnCertificates tv cs <*>
               mapOnLambda tv fun <*>
               (zip <$> mapM (mapOnSubExp tv) startexps <*>
-                       mapM (mapOnIdent tv) arrexps) <*>
-              pure loc)
+                       mapM (mapOnIdent tv) arrexps))
   where (startexps, arrexps) = unzip inputs
-mapExpM tv (LoopOp (Scan cs fun inputs loc)) =
+mapExpM tv (LoopOp (Scan cs fun inputs)) =
   LoopOp <$> (pure Scan <*> mapOnCertificates tv cs <*>
               mapOnLambda tv fun <*>
               (zip <$> mapM (mapOnSubExp tv) startexps <*>
-                       mapM (mapOnIdent tv) arrexps) <*>
-              pure loc)
+                       mapM (mapOnIdent tv) arrexps))
   where (startexps, arrexps) = unzip inputs
-mapExpM tv (LoopOp (Filter cs fun arrexps loc)) =
+mapExpM tv (LoopOp (Filter cs fun arrexps)) =
   LoopOp <$> (pure Filter <*> mapOnCertificates tv cs <*>
               mapOnLambda tv fun <*>
-              mapM (mapOnIdent tv) arrexps <*>
-              pure loc)
-mapExpM tv (LoopOp (Redomap cs redfun mapfun accexps arrexps loc)) =
+              mapM (mapOnIdent tv) arrexps)
+mapExpM tv (LoopOp (Redomap cs redfun mapfun accexps arrexps)) =
   LoopOp <$> (pure Redomap <*> mapOnCertificates tv cs <*>
               mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
-              mapM (mapOnSubExp tv) accexps <*> mapM (mapOnIdent tv) arrexps <*>
-              pure loc)
+              mapM (mapOnSubExp tv) accexps <*> mapM (mapOnIdent tv) arrexps)
 
 mapOnExtType :: (Monad m, Applicative m) =>
                 Mapper flore tlore m -> ExtType -> m ExtType
@@ -364,6 +357,6 @@ foldlPattern expf lamf = foldExp m
               foldOnBinding = \x (Let _ _ e) -> return $ expf x e
             , foldOnBody = \x -> return . foldBody m x
             , foldOnLambda =
-              \x lam@(Lambda _ body _ _) ->
+              \x lam@(Lambda _ body _) ->
                 return $ foldBody m (lamf x lam) body
             }

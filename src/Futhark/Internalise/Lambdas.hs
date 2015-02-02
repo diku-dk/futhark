@@ -75,25 +75,24 @@ internaliseMapLambda internaliseBody lam args = do
   let argtypes = map I.subExpType args
       rowtypes = map I.rowType argtypes
   (params, body, rettype) <- internaliseLambda internaliseBody lam rowtypes
-  (rettype', inner_shapes) <- instantiateShapes' loc rettype
+  (rettype', inner_shapes) <- instantiateShapes' rettype
   let outer_shape = arraysSize 0 argtypes
       shape_body = shapeBody (map I.identName inner_shapes) rettype' body
-  shapefun <- makeShapeFun params shape_body (length inner_shapes) loc
+  shapefun <- makeShapeFun params shape_body (length inner_shapes)
   bindMapShapes inner_shapes shapefun args outer_shape
   body' <- assertResultShape rettype' body
-  return $ I.Lambda params body' rettype' loc
-  where loc = srclocOf lam
+  return $ I.Lambda params body' rettype'
 
-makeShapeFun :: [I.Param] -> I.Body -> Int -> SrcLoc
+makeShapeFun :: [I.Param] -> I.Body -> Int
              -> InternaliseM I.Lambda
-makeShapeFun params body n loc = do
+makeShapeFun params body n = do
   -- Some of 'params' may be unique, which means that the shape slice
   -- would consume its input.  This is not acceptable - that input is
   -- needed for the value function!  Hence, for all unique parameters,
   -- we create a substitute non-unique parameter, and insert a
   -- copy-binding in the body of the function.
   (params', copybnds) <- nonuniqueParams params
-  return $ I.Lambda params' (insertBindings copybnds body) rettype loc
+  return $ I.Lambda params' (insertBindings copybnds body) rettype
   where rettype = replicate n $ I.Basic Int
 
 assertResultShape :: [I.Type] -> I.Body -> InternaliseM I.Body
@@ -103,8 +102,7 @@ assertResultShape rettype body = runBinder $ do
         let name = "result_proper_shape"
         in ensureShape t name se
   reses <- zipWithM assertProperShape rettype es
-  return $ resultBody reses loc
-  where loc = srclocOf body
+  return $ resultBody reses
 
 bindMapShapes :: [I.Ident] -> I.Lambda -> [I.SubExp] -> SubExp
               -> InternaliseM ()
@@ -113,20 +111,19 @@ bindMapShapes inner_shapes sizefun args outer_shape
   | otherwise =
     void $
     letBind (basicPattern inner_shapes) =<<
-    eIf isempty emptybranch nonemptybranch loc
-  where loc = srclocOf sizefun
-        zero = intconst 0 loc
+    eIf isempty emptybranch nonemptybranch
+  where zero = intconst 0
         isempty = eBinOp I.Equal
                   (pure $ I.PrimOp $ I.SubExp outer_shape)
                   (pure $ I.PrimOp $ SubExp zero)
-                  (I.Basic I.Bool) loc
+                  (I.Basic I.Bool)
         emptybranch =
-          pure $ resultBody (map (const zero) $ I.lambdaReturnType sizefun) loc
+          pure $ resultBody (map (const zero) $ I.lambdaReturnType sizefun)
         nonemptybranch = insertBindingsM $
-          resultBody <$> (eLambda sizefun =<< mapM index0 args) <*> pure loc
+          resultBody <$> (eLambda sizefun =<< mapM index0 args)
         index0 arg = do
           arg' <- letExp "arg" $ I.PrimOp $ I.SubExp arg
-          letSubExp "elem" $ I.PrimOp $ I.Index [] arg' [intconst 0 loc] loc
+          letSubExp "elem" $ I.PrimOp $ I.Index [] arg' [intconst 0]
 
 internaliseFoldLambda :: (E.Exp -> InternaliseM Body)
                       -> E.Lambda
@@ -143,8 +140,7 @@ internaliseFoldLambda internaliseBody lam acctypes arrtypes = do
   -- reshape().
   body' <- assertResultShape rettype' body
 
-  return $ I.Lambda params body' rettype' loc
-  where loc = srclocOf lam
+  return $ I.Lambda params body' rettype'
 
 internaliseFilterLambda :: (E.Exp -> InternaliseM Body)
                         -> E.Lambda
@@ -154,5 +150,4 @@ internaliseFilterLambda internaliseBody lam args = do
   let argtypes = map I.subExpType args
       rowtypes = map I.rowType argtypes
   (params, body, _) <- internaliseLambda internaliseBody lam rowtypes
-  return $ I.Lambda params body [I.Basic Bool] loc
-  where loc = srclocOf lam
+  return $ I.Lambda params body [I.Basic Bool]

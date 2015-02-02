@@ -48,7 +48,6 @@ module Futhark.Representation.AST.Attributes.Types
 
 import Control.Applicative
 import Control.Monad.State
-import Data.Loc
 import Data.Maybe
 import Data.Monoid
 import qualified Data.HashSet as HS
@@ -200,13 +199,13 @@ arrayDims = shapeDims . arrayShape
 arraySize :: Int -> TypeBase Shape -> SubExp
 arraySize i t = case drop i $ arrayDims t of
                   e : _ -> e
-                  _     -> intconst 0 noLoc
+                  _     -> intconst 0
 
 -- | Return the size of the given dimension in the first element of
 -- the given type list.  If the dimension does not exist, or no types
 -- are given, the zero constant is returned.
 arraysSize :: Int -> [TypeBase Shape] -> SubExp
-arraysSize _ []    = intconst 0 noLoc
+arraysSize _ []    = intconst 0
 arraysSize i (t:_) = arraySize i t
 
 -- | Return the immediate row-type of an array.  For @[[int]]@, this

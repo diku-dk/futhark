@@ -16,7 +16,6 @@ where
 import Control.Applicative
 import Control.Monad
 import Data.List
-import Data.Loc
 
 import Text.PrettyPrint.Mainland hiding (pretty)
 
@@ -130,25 +129,25 @@ type LookupVar = VName -> Maybe ScalExp
 
 -- | Non-recursively convert a subexpression to a 'ScalExp'.
 subExpToScalExp :: SubExp -> ScalExp
-subExpToScalExp (Var v)          = Id v
-subExpToScalExp (Constant val _) = Val val
+subExpToScalExp (Var v)        = Id v
+subExpToScalExp (Constant val) = Val val
 
 toScalExp :: LookupVar -> Exp lore -> Maybe ScalExp
 toScalExp look (PrimOp (SubExp se))    =
   toScalExp' look se
-toScalExp look (PrimOp (BinOp Less x y _ _)) =
+toScalExp look (PrimOp (BinOp Less x y _)) =
   RelExp LTH0 <$> (sminus <$> toScalExp' look x <*> toScalExp' look y)
-toScalExp look (PrimOp (BinOp Leq x y _ _)) =
+toScalExp look (PrimOp (BinOp Leq x y _)) =
   RelExp LEQ0 <$> (sminus <$> toScalExp' look x <*> toScalExp' look y)
-toScalExp look (PrimOp (BinOp Equal x y (Basic Int) _)) = do
+toScalExp look (PrimOp (BinOp Equal x y (Basic Int))) = do
   x' <- toScalExp' look x
   y' <- toScalExp' look y
   return $ RelExp LEQ0 (x' `sminus` y') `SLogAnd` RelExp LEQ0 (y' `sminus` x')
-toScalExp look (PrimOp (Negate e _)) =
+toScalExp look (PrimOp (Negate e)) =
   SNeg <$> toScalExp' look e
-toScalExp look (PrimOp (Not e _)) =
+toScalExp look (PrimOp (Not e)) =
   SNot <$> toScalExp' look e
-toScalExp look (PrimOp (BinOp bop x y (Basic t) _))
+toScalExp look (PrimOp (BinOp bop x y (Basic t)))
   | t `elem` [Int, Bool] = -- XXX: Only integers and booleans, OK?
   binOpScalExp bop <*> toScalExp' look x <*> toScalExp' look y
 
@@ -187,31 +186,32 @@ binOpScalExp bop = liftM snd $ find ((==bop) . fst)
 toScalExp' :: LookupVar -> SubExp -> Maybe ScalExp
 toScalExp' look (Var v) =
   look (identName v) <|> Just (Id v)
-toScalExp' _ (Constant val _) =
+toScalExp' _ (Constant val) =
   Just $ Val val
 
-fromScalExp :: (Proper lore, Bindable lore, MonadFreshNames m) => SrcLoc -> ScalExp
+fromScalExp :: (Proper lore, Bindable lore, MonadFreshNames m) =>
+               ScalExp
             -> m (Exp lore, [Binding lore])
-fromScalExp loc e = runBinder'' $ fromScalExp' loc e
+fromScalExp = runBinder'' . fromScalExp'
 
-fromScalExp' :: MonadBinder m => SrcLoc -> ScalExp
+fromScalExp' :: MonadBinder m => ScalExp
              -> m (Exp (Lore m))
-fromScalExp' loc = convert
-  where convert (Val val) = return $ PrimOp $ SubExp $ Constant val loc
+fromScalExp' = convert
+  where convert (Val val) = return $ PrimOp $ SubExp $ Constant val
         convert (Id v)    = return $ PrimOp $ SubExp $ Var v
-        convert (SNeg se) = eNegate (convert se) loc
-        convert (SNot se) = eNot (convert se) loc
+        convert (SNeg se) = eNegate $ convert se
+        convert (SNot se) = eNot $ convert se
         convert (SPlus x y) = arithBinOp Plus x y
         convert (SMinus x y) = arithBinOp Minus x y
         convert (STimes x y) = arithBinOp Times x y
         convert (SDivide x y) = arithBinOp Divide x y
         convert (SPow x y) = arithBinOp Pow x y
-        convert (SLogAnd x y) = eBinOp LogAnd (convert x) (convert y) (Basic Bool) loc
-        convert (SLogOr x y) = eBinOp LogOr (convert x) (convert y) (Basic Bool) loc
+        convert (SLogAnd x y) = eBinOp LogAnd (convert x) (convert y) (Basic Bool)
+        convert (SLogOr x y) = eBinOp LogOr (convert x) (convert y) (Basic Bool)
         convert (RelExp LTH0 x) = eBinOp Less (convert x) (pure $ zero $ scalExpType x)
-                                  (Basic Bool) loc
+                                  (Basic Bool)
         convert (RelExp LEQ0 x) = eBinOp Leq (convert x) (pure $ zero $ scalExpType x)
-                                  (Basic Bool) loc
+                                  (Basic Bool)
         convert (MaxMin _ []) = fail "ScalExp.fromScalExp: MaxMin empty list"
         convert (MaxMin isMin (e:es)) = do
           e'  <- convert e
@@ -221,18 +221,18 @@ fromScalExp' loc = convert
         arithBinOp bop x y = do
           x' <- convert x
           y' <- convert y
-          eBinOp bop (pure x') (pure y') t loc
+          eBinOp bop (pure x') (pure y') t
           where t = Basic $ scalExpType x
 
         select isMin cur next =
-          let cmp = eBinOp Less (pure cur) (pure next) (Basic Bool) loc
+          let cmp = eBinOp Less (pure cur) (pure next) (Basic Bool)
               (pick, discard)
                 | isMin     = (cur, next)
                 | otherwise = (next, cur)
-          in eIf cmp (eBody [pure pick]) (eBody [pure discard]) loc
+          in eIf cmp (eBody [pure pick]) (eBody [pure discard])
 
-        zero Int = PrimOp $ SubExp $ intconst 0 loc
-        zero _   = PrimOp $ SubExp $ constant (0::Double) loc
+        zero Int = PrimOp $ SubExp $ intconst 0
+        zero _   = PrimOp $ SubExp $ constant (0::Double)
 
 ------------------------
 --- Helper Functions ---

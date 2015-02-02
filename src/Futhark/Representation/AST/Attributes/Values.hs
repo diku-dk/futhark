@@ -24,7 +24,6 @@ module Futhark.Representation.AST.Attributes.Values
        where
 
 import Data.Array
-import Data.Loc
 import Data.List
 import Data.Ord
 
@@ -38,9 +37,9 @@ valueType (BasicVal v) =
   Basic $ basicValueType v
 valueType v@(ArrayVal _ (Basic et)) =
   Array et (Shape [n]) Nonunique
-  where n = constant (valueSize v) noLoc
+  where n = constant (valueSize v)
 valueType v@(ArrayVal _ (Array et _ _)) =
-  Array et (Shape $ map (`intconst` noLoc) $ valueShape v) Nonunique
+  Array et (Shape $ map intconst $ valueShape v) Nonunique
 valueType (ArrayVal _ (Mem {})) =
   error "valueType Mem"
 

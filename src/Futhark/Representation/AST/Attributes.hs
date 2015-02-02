@@ -109,13 +109,13 @@ asLoopOp _           = Nothing
 -- bounds.  On the other hand, adding two numbers cannot fail.
 safeExp :: Exp lore -> Bool
 safeExp (PrimOp op) = safePrimOp op
-  where safePrimOp (BinOp Divide _ (Constant (IntVal k)  _) _ _) = k /= 0
-        safePrimOp (BinOp Divide _ (Constant (RealVal k) _) _ _) = k /= 0
-        safePrimOp (BinOp Divide _ _ _ _) = False
-        safePrimOp (BinOp Mod _ (Constant (IntVal k)  _) _ _) = k /= 0
-        safePrimOp (BinOp Mod _ (Constant (RealVal k) _) _ _) = k /= 0
-        safePrimOp (BinOp Mod _ _ _ _) = False
-        safePrimOp (BinOp Pow _ _ _ _) = False
+  where safePrimOp (BinOp Divide _ (Constant (IntVal k)) _) = k /= 0
+        safePrimOp (BinOp Divide _ (Constant (RealVal k)) _) = k /= 0
+        safePrimOp (BinOp Divide _ _ _) = False
+        safePrimOp (BinOp Mod _ (Constant (IntVal k)) _) = k /= 0
+        safePrimOp (BinOp Mod _ (Constant (RealVal k)) _) = k /= 0
+        safePrimOp (BinOp Mod _ _ _) = False
+        safePrimOp (BinOp Pow _ _ _) = False
         safePrimOp (BinOp {}) = True
         safePrimOp (SubExp {}) = True
         safePrimOp (Not {}) = True
@@ -124,6 +124,6 @@ safeExp (PrimOp op) = safePrimOp op
         safePrimOp _ = False
 safeExp (LoopOp _) = False
 safeExp (Apply {}) = False
-safeExp (If _ tbranch fbranch _ _) =
+safeExp (If _ tbranch fbranch _) =
   all (safeExp . bindingExp) (bodyBindings tbranch) &&
   all (safeExp . bindingExp) (bodyBindings fbranch)

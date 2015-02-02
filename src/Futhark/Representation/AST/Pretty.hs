@@ -80,11 +80,11 @@ instance Pretty (IdentBase shape) where
   ppr = text . textual . identName
 
 instance Pretty SubExp where
-  ppr (Var v)        = ppr v
-  ppr (Constant v _) = ppr v
+  ppr (Var v)      = ppr v
+  ppr (Constant v) = ppr v
 
 instance Pretty Result where
-  ppr (Result es _) =
+  ppr (Result es) =
     braces (commasep $ map ppr es)
 
 instance PrettyLore lore => Pretty (Body lore) where
@@ -127,73 +127,73 @@ instance PrettyLore lore => Pretty (Binding lore) where
 
 instance PrettyLore lore => Pretty (PrimOp lore) where
   ppr (SubExp se) = ppr se
-  ppr (ArrayLit [] rt _) =
+  ppr (ArrayLit [] rt) =
     text "empty" <> parens (ppr rt)
-  ppr (ArrayLit es rt _) =
+  ppr (ArrayLit es rt) =
     case rt of
       Array {} -> brackets $ commastack $ map ppr es
       _        -> brackets $ commasep   $ map ppr es
-  ppr (BinOp bop x y _ _) = ppBinOp bop x y
-  ppr (Not e _) = text "not" <+> pprPrec 9 e
-  ppr (Negate e _) = text "-" <> pprPrec 9 e
-  ppr (Index cs v idxs _) =
+  ppr (BinOp bop x y _) = ppBinOp bop x y
+  ppr (Not e) = text "not" <+> pprPrec 9 e
+  ppr (Negate e) = text "-" <> pprPrec 9 e
+  ppr (Index cs v idxs) =
     ppCertificates cs <> ppr v <>
     brackets (commasep (map ppr idxs))
-  ppr (Update cs src idxs ve _) =
+  ppr (Update cs src idxs ve) =
     ppCertificates cs <> ppr src <+>
     text "with" <+> brackets (commasep (map ppr idxs)) <+>
     text "<-" <+> align (ppr ve)
-  ppr (Iota e _) = text "iota" <> parens (ppr e)
-  ppr (Replicate ne ve _) =
+  ppr (Iota e) = text "iota" <> parens (ppr e)
+  ppr (Replicate ne ve) =
     text "replicate" <> apply [ppr ne, align (ppr ve)]
-  ppr (Reshape cs shape e _) =
+  ppr (Reshape cs shape e) =
     ppCertificates cs <> text "reshape" <> apply [apply (map ppr shape), ppr e]
-  ppr (Rearrange cs perm e _) =
+  ppr (Rearrange cs perm e) =
     ppCertificates cs <> text "rearrange" <> apply [apply (map ppr perm), ppr e]
-  ppr (Rotate cs n e _) =
+  ppr (Rotate cs n e) =
     ppCertificates cs <> text "rotate" <> apply [ppr n, ppr e]
-  ppr (Split cs e a _ _) =
+  ppr (Split cs e a _) =
     ppCertificates cs <> text "split" <> apply [ppr e, ppr a]
-  ppr (Concat cs x y _ _) =
+  ppr (Concat cs x y _) =
     ppCertificates cs <> text "concat" <> apply [ppr x, ppr y]
-  ppr (Copy e _) = text "copy" <> parens (ppr e)
+  ppr (Copy e) = text "copy" <> parens (ppr e)
   ppr (Assert e _) = text "assert" <> parens (ppr e)
-  ppr (Conjoin es _) = text "conjoin" <> parens (commasep $ map ppr es)
-  ppr (Alloc e _) = text "alloc" <> apply [ppr e]
+  ppr (Conjoin es) = text "conjoin" <> parens (commasep $ map ppr es)
+  ppr (Alloc e) = text "alloc" <> apply [ppr e]
 
 instance PrettyLore lore => Pretty (LoopOp lore) where
-  ppr (DoLoop res mergepat i bound loopbody _) =
+  ppr (DoLoop res mergepat i bound loopbody) =
     text "loop" <+> ppPattern res <+>
     text "<-" <+> ppPattern (map bindeeIdent pat) <+> equals <+> ppTuple' initexp </>
     text "for" <+> ppr i <+> text "<" <+> align (ppr bound) <+> text "do" </>
     indent 2 (ppr loopbody)
     where (pat, initexp) = unzip mergepat
-  ppr (Map cs lam as _) =
+  ppr (Map cs lam as) =
     ppCertificates' cs <> ppSOAC "map" [lam] Nothing as
-  ppr (Reduce cs lam inputs _) =
+  ppr (Reduce cs lam inputs) =
     ppCertificates' cs <> ppSOAC "reduce" [lam] (Just es) as
     where (es, as) = unzip inputs
-  ppr (Redomap cs outer inner es as _) =
+  ppr (Redomap cs outer inner es as) =
     ppCertificates' cs <> text "redomap" <>
     parens (ppr outer <> comma </> ppr inner <> comma </>
             commasep (braces (commasep $ map ppr es) : map ppr as))
-  ppr (Scan cs lam inputs _) =
+  ppr (Scan cs lam inputs) =
     ppCertificates' cs <> ppSOAC "scan" [lam] (Just es) as
     where (es, as) = unzip inputs
-  ppr (Filter cs lam as _) =
+  ppr (Filter cs lam as) =
     ppCertificates' cs <> ppSOAC "filter" [lam] Nothing as
 
 instance PrettyLore lore => Pretty (Exp lore) where
-  ppr (If c t f _ _) = text "if" <+> ppr c </>
-                             text "then" <+> align (ppr t) </>
-                             text "else" <+> align (ppr f)
+  ppr (If c t f _) = text "if" <+> ppr c </>
+                     text "then" <+> align (ppr t) </>
+                     text "else" <+> align (ppr f)
   ppr (PrimOp op) = ppr op
   ppr (LoopOp op) = ppr op
-  ppr (Apply fname args _ _) = text (nameToString fname) <>
-                               apply (map (align . ppr . fst) args)
+  ppr (Apply fname args _) = text (nameToString fname) <>
+                             apply (map (align . ppr . fst) args)
 
 instance PrettyLore lore => Pretty (Lambda lore) where
-  ppr (Lambda params body rettype _) =
+  ppr (Lambda params body rettype) =
     text "fn" <+> ppTuple' rettype <+>
     apply (map ppParam params) <+>
     text "=>" </> indent 2 (ppr body)
@@ -202,7 +202,7 @@ instance Pretty ExtRetType where
   ppr = ppTuple' . retTypeValues
 
 instance PrettyLore lore => Pretty (FunDec lore) where
-  ppr fundec@(FunDec name rettype args body _) =
+  ppr fundec@(FunDec name rettype args body) =
     maybe id (</>) (ppFunDecLore fundec) $
     text "fun" <+> ppr rettype <+>
     text (nameToString name) <//>

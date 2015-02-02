@@ -45,7 +45,7 @@ freeWalker = identityWalker {
 
         binding bound = censor (`HS.difference` bound)
 
-        bodyFree (Body lore [] (Result ses _)) = do
+        bodyFree (Body lore [] (Result ses)) = do
           tell $ freeIn lore
           mapM_ subExpFree ses
         bodyFree (Body lore (Let pat annot e:bnds) res) = do
@@ -61,7 +61,7 @@ freeWalker = identityWalker {
             mapM_ (tell . freeIn) $ patternBindees pat
             expFree e
 
-        expFree (LoopOp (DoLoop _ merge i boundexp loopbody _)) = do
+        expFree (LoopOp (DoLoop _ merge i boundexp loopbody)) = do
           let (mergepat, mergeexps) = unzip merge
           mapM_ subExpFree mergeexps
           subExpFree boundexp
@@ -112,7 +112,7 @@ freeInLambda :: (FreeIn (Lore.Exp lore),
                  FreeIn (Lore.FParam lore),
                  FreeIn (Lore.LetBound lore)) =>
                 Lambda lore -> HS.HashSet Ident
-freeInLambda (Lambda params body rettype _) =
+freeInLambda (Lambda params body rettype) =
   inRet <> inParams <> inBody
   where inRet = mconcat $ map freeIn rettype
         inParams = mconcat $ map freeInParam params
@@ -198,11 +198,11 @@ progNames = execWriter . mapM funNames . progFunctions
         bindingNames (Let pat _ e) =
           mapM_ one (patternNames pat) >> expNames e
 
-        expNames (LoopOp (DoLoop _ pat i _ loopbody _)) = do
+        expNames (LoopOp (DoLoop _ pat i _ loopbody)) = do
           mapM_ (one . bindeeName . fst) pat
           one $ identName i
           bodyNames loopbody
         expNames e = walkExpM names e
 
-        lambdaNames (Lambda params body _ _) =
+        lambdaNames (Lambda params body _) =
           mapM_ (one . identName) params >> bodyNames body

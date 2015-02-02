@@ -15,8 +15,8 @@ untraceProg :: Prog -> Prog
 untraceProg = Prog . map untraceFun . progFunctions
 
 untraceFun :: FunDec -> FunDec
-untraceFun (FunDec fname ret params body loc) =
-  FunDec fname ret params (untraceBody body) loc
+untraceFun (FunDec fname ret params body) =
+  FunDec fname ret params (untraceBody body)
 
 untraceBody :: Body -> Body
 untraceBody = mapBody untrace
@@ -28,11 +28,11 @@ untraceBody = mapBody untrace
         untraceBinding bnd@(Let _ _ (PrimOp _)) = bnd
         untraceBinding (Let pat _ e) =
           mkLet (patternIdents pat) $ untraceExp e
-        untraceExp (Apply fname [(e,_)] _ _)
+        untraceExp (Apply fname [(e,_)] _)
           | "trace" <- nameToString fname = PrimOp $ SubExp e
         untraceExp e = mapExp untrace e
 
 
 untraceLambda :: Lambda -> Lambda
-untraceLambda (Lambda params body ret pos) =
-  Lambda params (untraceBody body) ret pos
+untraceLambda (Lambda params body ret) =
+  Lambda params (untraceBody body) ret

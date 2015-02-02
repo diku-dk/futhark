@@ -50,7 +50,7 @@ makeFunSubsts fundecs =
 -- the entire value slice - you should try to simplify it, and see if
 -- it's "cheap", in some sense.
 functionSlices :: MonadFreshNames m => FunDec -> m (FunDec, FunDec)
-functionSlices (FunDec fname rettype params body@(Body _ bodybnds bodyres) loc) = do
+functionSlices (FunDec fname rettype params body@(Body _ bodybnds bodyres)) = do
   -- The shape function should not consume its arguments - if it wants
   -- to do in-place stuff, it needs to copy them first.  In most
   -- cases, these copies will be removed by the simplifier.
@@ -71,10 +71,10 @@ functionSlices (FunDec fname rettype params body@(Body _ bodybnds bodyres) loc) 
       mkFParam = flip Bindee ()
       fShape = FunDec shapeFname (ExtRetType $ staticShapes shapetypes)
                (map mkFParam shapeParams)
-               shapeBody loc
+               shapeBody
       fValue = FunDec valueFname valueRettype
                (map mkFParam valueParams)
-               valueBody loc
+               valueBody
   return (fShape, fValue)
   where shapes = subExpShapeContext (retTypeValues rettype) $
                  resultSubExps bodyres
@@ -82,7 +82,7 @@ functionSlices (FunDec fname rettype params body@(Body _ bodybnds bodyres) loc) 
         shapeFname = fname <> nameFromString "_shape"
         valueFname = fname <> nameFromString "_value"
 
-        instantiate = do v <- lift $ newIdent "precomp_shape" (Basic Int) loc
+        instantiate = do v <- lift $ newIdent "precomp_shape" (Basic Int)
                          tell [v]
                          return $ Var v
 
@@ -125,7 +125,7 @@ cheapFun  = cheapBody . funDecBody
         cheapBinding (Let _ _ e) = cheap e
         cheap (LoopOp {}) = False
         cheap (Apply {}) = False
-        cheap (If _ tbranch fbranch _ _) = cheapBody tbranch && cheapBody fbranch
+        cheap (If _ tbranch fbranch _) = cheapBody tbranch && cheapBody fbranch
         cheap _ = True
 
 cheapSubsts :: [(Name, (FunDec, FunDec))] -> [(Name, (FunDec, FunDec))]
@@ -145,17 +145,17 @@ substCalls subst fundec = do
           body <- treatBody $ lambdaBody lam
           return $ lam { lambdaBody = body }
 
-        treatBinding (Let pat _ (Apply fname args _ loc))
+        treatBinding (Let pat _ (Apply fname args _))
           | Just (shapefun,shapetype,valfun,_) <- lookup fname subst =
             liftM snd . runBinder'' $ do
               let (vs,vals) =
                     splitAt (length $ retTypeValues shapetype) $
                     patternBindees pat
               letBind_ (Pattern vs) $
-                Apply shapefun args shapetype loc
+                Apply shapefun args shapetype
               letBind_ (Pattern vals) $
                 Apply valfun ([(Var $ bindeeIdent v,Observe) | v <- vs]++args)
-                (ExtRetType $ staticShapes $ map bindeeType vals)  loc
+                (ExtRetType $ staticShapes $ map bindeeType vals)
 
         treatBinding (Let pat _ e) = do
           e' <- mapExpM mapper e

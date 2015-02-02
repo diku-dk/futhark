@@ -14,7 +14,6 @@ import Control.Applicative
 import Control.Monad
 
 import Data.List
-import Data.Loc
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 
@@ -33,11 +32,11 @@ data Nesting lore = Nesting {
   , nestingReturnType   :: [Type]
   } deriving (Eq, Ord, Show)
 
-data MapNest lore = MapNest Certificates (Nest.NestBody lore) [Nesting lore] [SOAC.Input] SrcLoc
+data MapNest lore = MapNest Certificates (Nest.NestBody lore) [Nesting lore] [SOAC.Input]
                   deriving (Show)
 
 typeOf :: MapNest lore -> [Type]
-typeOf (MapNest _ body nests inps _) =
+typeOf (MapNest _ body nests inps) =
   [ arrayOf t (Shape [outersize]) (uniqueness t) | t <- innersizes ]
   where innersizes = case nests of []     -> Nest.nestBodyReturnType body
                                    nest:_ -> nestingReturnType nest
@@ -45,16 +44,16 @@ typeOf (MapNest _ body nests inps _) =
 
 
 params :: MapNest lore -> [VName]
-params (MapNest _ body [] _ _)       =
+params (MapNest _ body [] _)       =
   map identName $ Nest.nestBodyParams body
-params (MapNest _ _    (nest:_) _ _) =
+params (MapNest _ _    (nest:_) _) =
   nestingParamNames nest
 
 inputs :: MapNest lore -> [SOAC.Input]
-inputs (MapNest _ _ _ inps _) = inps
+inputs (MapNest _ _ _ inps) = inps
 
 setInputs :: [SOAC.Input] -> MapNest lore -> MapNest lore
-setInputs inps (MapNest cs body ns _ loc) = MapNest cs body ns inps loc
+setInputs inps (MapNest cs body ns _) = MapNest cs body ns inps
 
 fromSOACNest :: Bindable lore => SOACNest lore -> NeedNames (Maybe (MapNest lore))
 fromSOACNest = fromSOACNest' HS.empty
@@ -65,8 +64,8 @@ fromSOACNest' :: Bindable lore =>
               -> NeedNames (Maybe (MapNest lore))
 
 fromSOACNest' bound (Nest.SOACNest inps
-                     (Nest.Map cs (Nest.NewNest n body@Nest.Map{}) loc)) = do
-  Just mn@(MapNest cs' body' ns' inps' _) <-
+                     (Nest.Map cs (Nest.NewNest n body@Nest.Map{}))) = do
+  Just mn@(MapNest cs' body' ns' inps') <-
     fromSOACNest' bound' (Nest.SOACNest (Nest.nestingInputs n) body)
   (ps, inps'') <-
     unzip <$> fixInputs (zip (Nest.nestingParamNames n) inps)
@@ -76,10 +75,10 @@ fromSOACNest' bound (Nest.SOACNest inps
            , nestingResult       = Nest.nestingResult n
            , nestingReturnType   = Nest.nestingReturnType n
            }
-  return $ Just $ MapNest (cs++cs') body' (n':ns') inps'' loc
+  return $ Just $ MapNest (cs++cs') body' (n':ns') inps''
   where bound' = bound `HS.union` HS.fromList (Nest.nestingParamNames n)
 
-fromSOACNest' bound (Nest.SOACNest inps (Nest.Map cs body loc)) = do
+fromSOACNest' bound (Nest.SOACNest inps (Nest.Map cs body)) = do
   lam <- lambdaBody <$> Nest.bodyToLambda (map SOAC.inputType inps) body
   let boundUsedInBody =
         HS.toList $ HS.filter (flip HS.member bound . identName) $ freeInBody lam
@@ -107,34 +106,32 @@ fromSOACNest' bound (Nest.SOACNest inps (Nest.Map cs body loc)) = do
                        }
   return $ Just $
          if HM.null subst
-         then MapNest cs body [] inps loc
-         else MapNest cs body' [] inps' loc
+         then MapNest cs body [] inps
+         else MapNest cs body' [] inps'
 
 fromSOACNest' _ _ = return Nothing
 
 toSOACNest :: MapNest lore -> SOACNest lore
-toSOACNest (MapNest cs body ns inps loc) =
-  Nest.SOACNest inps $ toSOACNest' cs body ns (map SOAC.inputType inps) loc
+toSOACNest (MapNest cs body ns inps) =
+  Nest.SOACNest inps $ toSOACNest' cs body ns (map SOAC.inputType inps)
 
 toSOACNest' :: Certificates
             -> Nest.NestBody lore
             -> [Nesting lore]
             -> [TypeBase Shape]
-            -> SrcLoc
             -> Nest.Combinator lore
-toSOACNest' cs body [] _ loc =
-  Nest.Map cs body loc
-toSOACNest' cs body (nest:ns) inpts loc =
-  let body' = toSOACNest' cs body ns (map rowType inpts) loc
-  in Nest.Map cs (Nest.NewNest nest' body') loc
-  where mkParam name t = Ident name t loc
-        nest' = Nest.Nesting {
+toSOACNest' cs body [] _ =
+  Nest.Map cs body
+toSOACNest' cs body (nest:ns) inpts =
+  let body' = toSOACNest' cs body ns (map rowType inpts)
+  in Nest.Map cs (Nest.NewNest nest' body')
+  where nest' = Nest.Nesting {
                   Nest.nestingParamNames = nestingParamNames nest
                 , Nest.nestingResult = nestingResult nest
                 , Nest.nestingReturnType = nestingReturnType nest
                 , Nest.nestingInputs =
                   map SOAC.varInput $
-                  zipWith mkParam (nestingParamNames nest) $ map rowType inpts
+                  zipWith Ident (nestingParamNames nest) $ map rowType inpts
                 }
 
 fixInputs :: [(VName, SOAC.Input)] -> [(VName, SOAC.Input)]

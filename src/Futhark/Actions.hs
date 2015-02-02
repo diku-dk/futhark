@@ -67,8 +67,7 @@ interpret parseValues prog =
                                             exitWith $ ExitFailure 2
                                Right vs -> return vs
       let (res, trace) = runFunWithShapes defaultEntryPoint args prog
-      forM_ trace $ \(loc, what) ->
-        hPutStrLn stderr $ locStr loc ++ ": " ++ what
+      mapM_ (hPutStrLn stderr) trace
       case res of
         Left err -> do hPutStrLn stderr $ "Interpreter error:\n" ++ show err
                        exitWith $ ExitFailure 2

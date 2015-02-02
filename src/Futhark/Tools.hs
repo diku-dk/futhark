@@ -48,7 +48,8 @@ where
 import qualified Data.Array as A
 import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
-import Data.Loc
+import Data.Loc (noLoc)
+
 import Control.Applicative
 import Control.Monad.Identity
 import Control.Monad.State
@@ -110,10 +111,10 @@ letTupExp' name ses = do vs <- letTupExp name ses
                          return $ map Var vs
 
 newVar :: MonadFreshNames m =>
-          SrcLoc -> String -> Type -> m (Ident, SubExp)
-newVar loc name tp = do
+          String -> Type -> m (Ident, SubExp)
+newVar name tp = do
   x <- newVName name
-  return (Ident x tp loc, Var $ Ident x tp loc)
+  return (Ident x tp, Var $ Ident x tp)
 
 eSubExp :: MonadBinder m =>
            SubExp -> m (Exp (Lore m))
@@ -121,61 +122,60 @@ eSubExp = pure . PrimOp . SubExp
 
 eIf :: MonadBinder m =>
        m (Exp (Lore m)) -> m (Body (Lore m)) -> m (Body (Lore m))
-    -> SrcLoc
     -> m (Exp (Lore m))
-eIf ce te fe loc = do
+eIf ce te fe = do
   ce' <- letSubExp "cond" =<< ce
   te' <- insertBindingsM te
   fe' <- insertBindingsM fe
   let ts = bodyExtType te' `generaliseExtTypes` bodyExtType fe'
-  return $ If ce' te' fe' ts loc
+  return $ If ce' te' fe' ts
 
 eBinOp :: MonadBinder m =>
-          BinOp -> m (Exp (Lore m)) -> m (Exp (Lore m)) -> Type -> SrcLoc
+          BinOp -> m (Exp (Lore m)) -> m (Exp (Lore m)) -> Type
        -> m (Exp (Lore m))
-eBinOp op x y t loc = do
+eBinOp op x y t = do
   x' <- letSubExp "x" =<< x
   y' <- letSubExp "y" =<< y
-  return $ PrimOp $ BinOp op x' y' t loc
+  return $ PrimOp $ BinOp op x' y' t
 
 eNegate :: MonadBinder m =>
-           m (Exp (Lore m)) -> SrcLoc -> m (Exp (Lore m))
-eNegate e loc = do
+           m (Exp (Lore m)) -> m (Exp (Lore m))
+eNegate e = do
   e' <- letSubExp "negate_arg" =<< e
-  return $ PrimOp $ Negate e' loc
+  return $ PrimOp $ Negate e'
 
 eNot :: MonadBinder m =>
-        m (Exp (Lore m)) -> SrcLoc -> m (Exp (Lore m))
-eNot e loc = do
+        m (Exp (Lore m)) -> m (Exp (Lore m))
+eNot e = do
   e' <- letSubExp "not_arg" =<< e
-  return $ PrimOp $ Not e' loc
+  return $ PrimOp $ Not e'
 
 eIndex :: MonadBinder m =>
-          Certificates -> Ident -> [m (Exp (Lore m))] -> SrcLoc
+          Certificates -> Ident -> [m (Exp (Lore m))]
        -> m (Exp (Lore m))
-eIndex cs a idxs loc = do
+eIndex cs a idxs = do
   idxs' <- letSubExps "i" =<< sequence idxs
-  return $ PrimOp $ Index cs a idxs' loc
+  return $ PrimOp $ Index cs a idxs'
 
 eCopy :: MonadBinder m =>
          m (Exp (Lore m)) -> m (Exp (Lore m))
 eCopy e = do e' <- letSubExp "copy_arg" =<< e
-             return $ PrimOp $ Copy e' $ srclocOf e'
+             return $ PrimOp $ Copy e'
 
 eAssert :: MonadBinder m =>
          m (Exp (Lore m)) -> m (Exp (Lore m))
 eAssert e = do e' <- letSubExp "assert_arg" =<< e
-               return $ PrimOp $ Assert e' $ srclocOf e'
+               return $ PrimOp $ Assert e' noLoc
 
-eValue :: MonadBinder m => Value -> SrcLoc -> m (Exp (Lore m))
-eValue (BasicVal bv) loc =
-  return $ PrimOp $ SubExp $ Constant bv loc
-eValue (ArrayVal a t) loc = do
-  let rowshape = [ Constant (IntVal d) loc
+eValue :: MonadBinder m => Value -> m (Exp (Lore m))
+eValue (BasicVal bv) =
+  return $ PrimOp $ SubExp $ Constant bv
+eValue (ArrayVal a t) = do
+  let rowshape = [ Constant (IntVal d)
                  | d <- drop 1 $ valueShape (ArrayVal a t)
                  ]
-  ses <- mapM (letSubExp "array_elem" <=< (`eValue` loc)) $ A.elems a
-  return $ PrimOp $ ArrayLit ses (t `setArrayDims` rowshape) loc
+  ses <- mapM (letSubExp "array_elem" <=< eValue) $ A.elems a
+  return $ PrimOp $ ArrayLit ses (t `setArrayDims` rowshape)
 
 eBody :: (MonadBinder m) =>
          [m (Exp (Lore m))]
@@ -183,9 +183,7 @@ eBody :: (MonadBinder m) =>
 eBody es = insertBindingsM $ do
              es' <- sequence es
              xs <- mapM (letTupExp "x") es'
-             let loc = case es' of []  -> noLoc
-                                   e:_ -> srclocOf e
-             mkBodyM [] $ Result (map Var $ concat xs) loc
+             mkBodyM [] $ Result $ map Var $ concat xs
 
 eLambda :: MonadBinder m =>
            Lambda (Lore m) -> [SubExp] -> m [SubExp]
@@ -199,26 +197,25 @@ foldBinOp :: MonadBinder m =>
              BinOp -> SubExp -> [SubExp] -> Type -> m (Exp (Lore m))
 foldBinOp _ ne [] _   = return $ PrimOp $ SubExp ne
 foldBinOp bop ne (e:es) t =
-  eBinOp bop (pure $ PrimOp $ SubExp e) (foldBinOp bop ne es t) t (srclocOf e)
+  eBinOp bop (pure $ PrimOp $ SubExp e) (foldBinOp bop ne es t) t
 
 -- | Create a two-parameter lambda whose body applies the given binary
 -- operation to its arguments.  It is assumed that both argument and
 -- result types are the same.  (This assumption should be fixed at
 -- some point.)
 binOpLambda :: (MonadFreshNames m, Bindable lore) =>
-               BinOp -> Type -> SrcLoc -> m (Lambda lore)
-binOpLambda bop t loc = do
-  x   <- newIdent "x"   t loc
-  y   <- newIdent "y"   t loc
-  res <- newIdent "res" t loc
+               BinOp -> Type -> m (Lambda lore)
+binOpLambda bop t = do
+  x   <- newIdent "x"   t
+  y   <- newIdent "y"   t
+  res <- newIdent "res" t
   body <- runBinder $ do
     bnds <- mkLetNamesM [identName res] $
-            PrimOp $ BinOp bop (Var x) (Var y) t loc
-    mkBodyM [bnds] $ Result [Var res] loc
+            PrimOp $ BinOp bop (Var x) (Var y) t
+    mkBodyM [bnds] $ Result [Var res]
   return Lambda {
              lambdaParams     = [x, y]
            , lambdaReturnType = [t]
-           , lambdaSrcLoc     = loc
            , lambdaBody       = body
            }
 
@@ -231,7 +228,6 @@ makeLambda params body = do
     Just ts ->
       return Lambda {
           lambdaParams = params
-        , lambdaSrcLoc = srclocOf body'
         , lambdaReturnType = map Basic ts
         , lambdaBody = body'
         }
@@ -240,17 +236,16 @@ makeLambda params body = do
         isBasic _         = Nothing
 
 -- | Conveniently construct a body that contains no bindings.
-resultBody :: Bindable lore => [SubExp] -> SrcLoc -> Body lore
-resultBody ses loc = mkBody [] $ Result ses loc
+resultBody :: Bindable lore => [SubExp] -> Body lore
+resultBody ses = mkBody [] $ Result ses
 
 -- | Conveniently construct a body that contains no bindings - but
 -- this time, monadically!
 resultBodyM :: MonadBinder m =>
                [SubExp]
-            -> SrcLoc
             -> m (Body (Lore m))
-resultBodyM ses loc =
-  mkBodyM [] $ Result ses loc
+resultBodyM ses =
+  mkBodyM [] $ Result ses
 
 -- | Evaluate the action, producing a body, then wrap it in all the
 -- bindings it created using 'addBinding'.
@@ -289,8 +284,7 @@ copyConsumed e
   where copyVariables = mapM copyVariable
         copyVariable v =
           letExp (textual (baseName $ identName v) ++ "_copy") $
-                 PrimOp $ Copy (Var v) loc
-          where loc = srclocOf v
+                 PrimOp $ Copy $ Var v
 
         freeUniqueInBody = HS.filter (unique . identType) . freeInBody
 
@@ -300,7 +294,7 @@ nonuniqueParams params = runBinder'' $ forM params $ \param ->
   if unique $ identType param then do
     param' <- nonuniqueParam <$> newIdent' (++"_nonunique") param
     letBindNames_ [identName param] $
-      PrimOp $ Copy (Var param') $ srclocOf param'
+      PrimOp $ Copy $ Var param'
     return param'
   else
     return param
@@ -327,12 +321,11 @@ instantiateShapes f ts = evalStateT (mapM instantiate ts) HM.empty
         instantiate' (Free se) = return se
 
 instantiateShapes' :: MonadFreshNames m =>
-                      SrcLoc
-                   -> [TypeBase ExtShape]
+                      [TypeBase ExtShape]
                    -> m ([TypeBase Shape], [Ident])
-instantiateShapes' loc ts =
+instantiateShapes' ts =
   runWriterT $ instantiateShapes instantiate ts
-  where instantiate = do v <- lift $ newIdent "size" (Basic Int) loc
+  where instantiate = do v <- lift $ newIdent "size" (Basic Int)
                          tell [v]
                          return $ Var v
 
@@ -346,28 +339,27 @@ instantiateShapesFromIdentList idents ts =
             ident:idents'' -> do put idents''
                                  return $ Var ident
 
-instantiateExtTypes :: SrcLoc -> [VName] -> [ExtType] -> [Ident]
-instantiateExtTypes loc names rt =
+instantiateExtTypes :: [VName] -> [ExtType] -> [Ident]
+instantiateExtTypes names rt =
   let (shapenames,valnames) = splitAt (shapeContextSize rt) names
-      shapes = [ Ident name (Basic Int) loc | name <- shapenames ]
+      shapes = [ Ident name (Basic Int) | name <- shapenames ]
       valts  = instantiateShapesFromIdentList shapes rt
-      vals   = [ Ident name t loc | (name,t) <- zip valnames valts ]
+      vals   = [ Ident name t | (name,t) <- zip valnames valts ]
   in shapes ++ vals
 
-instantiateIdents :: SrcLoc -> [VName] -> [ExtType]
+instantiateIdents :: [VName] -> [ExtType]
                   -> Maybe ([Ident], [Ident])
-instantiateIdents loc names ts
+instantiateIdents names ts
   | let n = shapeContextSize ts,
     n + length ts == length names = do
     let (context, vals) = splitAt n names
-        mkIdent name t = Ident name t loc
         nextShape = do
           (context', remaining) <- get
           case remaining of []   -> lift Nothing
-                            x:xs -> do let ident = Ident x (Basic Int) loc
+                            x:xs -> do let ident = Ident x (Basic Int)
                                        put (context'++[ident], xs)
                                        return $ Var ident
     (ts', (context', _)) <-
       runStateT (instantiateShapes nextShape ts) ([],context)
-    return (context', zipWith mkIdent vals ts')
+    return (context', zipWith Ident vals ts')
   | otherwise = Nothing

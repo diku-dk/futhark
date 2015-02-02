@@ -107,7 +107,7 @@ letBindNames_ :: MonadBinder m =>
 letBindNames_ names e = void $ letBindNames names e
 
 bodyBind :: MonadBinder m => Body (Lore m) -> m [SubExp]
-bodyBind (Body _ bnds (Result es _)) = do
+bodyBind (Body _ bnds (Result es)) = do
   mapM_ addBinding bnds
   return es
 

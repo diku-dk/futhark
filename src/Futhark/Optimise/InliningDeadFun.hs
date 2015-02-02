@@ -13,7 +13,6 @@ import Control.Applicative
 import Control.Monad.Reader
 
 import Data.List
-import Data.Loc
 import Data.Maybe
 
 import qualified Data.HashMap.Lazy as HM
@@ -129,14 +128,14 @@ aggInlining cg = do
 -- tail-recursive function to a do or while loop, should do the transformation
 -- first and then do the inlining.
 doInlineInCaller :: FunDec ->  [FunDec] -> FunDec
-doInlineInCaller (FunDec name rtp args body loc) inlcallees =
+doInlineInCaller (FunDec name rtp args body) inlcallees =
   let body' = inlineInBody inlcallees body
-  in FunDec name rtp args body' loc
+  in FunDec name rtp args body'
 
 inlineInBody :: [FunDec] -> Body -> Body
 inlineInBody
   inlcallees
-  (Body _ (bnd@(Let pat _ (Apply fname args rtp _)):bnds) res) =
+  (Body _ (bnd@(Let pat _ (Apply fname args rtp)):bnds) res) =
   let continue callbnds =
         callbnds `insertBindings` inlineInBody inlcallees (mkBody bnds res)
       continue' (Body _ callbnds res') =
@@ -145,7 +144,7 @@ inlineInBody
         (withShapes $ resultSubExps res')
   in case filter ((== fname) . funDecName) inlcallees of
        [] -> continue [bnd]
-       FunDec _ _ fargs body _:_ ->
+       FunDec _ _ fargs body:_ ->
          let revbnds = zip (map bindeeIdent fargs) $ map fst args
          in  continue' $ foldr addArgBnd body revbnds
   where
@@ -159,8 +158,7 @@ inlineInBody
       reshapeIfNecessary ident se
         | t@(Array {}) <- identType ident,
           Var v <- se =
-            mkLet [ident] $ PrimOp $ Reshape [] (arrayDims t) v $
-            srclocOf ident
+            mkLet [ident] $ PrimOp $ Reshape [] (arrayDims t) v
         | otherwise =
           mkLet [ident] $ PrimOp $ SubExp se
 inlineInBody inlcallees b = mapBody (inliner inlcallees) b
@@ -176,8 +174,8 @@ inlineInBinding :: [FunDec] -> Binding -> Binding
 inlineInBinding inlcallees (Let pat () e) = Let pat () $ mapExp (inliner inlcallees) e
 
 inlineInLambda :: [FunDec] -> Lambda -> Lambda
-inlineInLambda inlcallees (Lambda params body ret loc) =
-  Lambda params (inlineInBody inlcallees body) ret loc
+inlineInLambda inlcallees (Lambda params body ret) =
+  Lambda params (inlineInBody inlcallees body) ret
 
 ------------------------------------------------------------------
 ------------------  Dead Function Elimination --------------------

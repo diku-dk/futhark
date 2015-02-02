@@ -17,7 +17,6 @@ import Control.Monad
 import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
-import Data.Loc
 import Data.Monoid
 
 import Futhark.Tools
@@ -53,18 +52,16 @@ foldClosedForm :: MonadBinder m =>
 
 foldClosedForm look pat lam accs arrs = do
   closedBody <- checkResults (patternIdents pat) knownBindings
-                (lambdaParams lam) (lambdaBody lam) accs lamloc
-  isEmpty <- newIdent "fold_input_is_empty" (Basic Bool) lamloc
+                (lambdaParams lam) (lambdaBody lam) accs
+  isEmpty <- newIdent "fold_input_is_empty" (Basic Bool)
   let inputsize = arraysSize 0 $ map identType arrs
   letBindNames_ [identName isEmpty] $
-    PrimOp $ BinOp Equal inputsize (intconst 0 lamloc) (Basic Bool) lamloc
+    PrimOp $ BinOp Equal inputsize (intconst 0) (Basic Bool)
   letBind_ pat =<<
     eIf (eSubExp $ Var isEmpty)
-    (resultBodyM accs lamloc)
+    (resultBodyM accs)
     (renameBody closedBody)
-    lamloc
-  where lamloc = srclocOf lam
-        knownBindings = determineKnownBindings look lam accs arrs
+  where knownBindings = determineKnownBindings look lam accs arrs
 
 -- | @loopClosedForm pat respat merge bound bodys@ determines whether
 -- the do-loop can be expressed in a closed form.
@@ -75,20 +72,18 @@ loopClosedForm :: MonadBinder m =>
 loopClosedForm pat respat merge bound body
   | respat == mergeidents = do
     closedBody <- checkResults respat knownBindings
-                  mergeidents body mergeexp bodyloc
-    isEmpty <- newIdent "bound_is_zero" (Basic Bool) bodyloc
+                  mergeidents body mergeexp
+    isEmpty <- newIdent "bound_is_zero" (Basic Bool)
     letBindNames_ [identName isEmpty] $
-      PrimOp $ BinOp Leq bound (intconst 0 bodyloc)
-      (Basic Bool) bodyloc
+      PrimOp $ BinOp Leq bound (intconst 0)
+      (Basic Bool)
     letBindNames_ (patternNames pat) =<<
       eIf (eSubExp $ Var isEmpty)
-      (resultBodyM mergeexp bodyloc)
+      (resultBodyM mergeexp)
       (renameBody closedBody)
-      bodyloc
   | otherwise = cannotSimplify
   where (mergepat, mergeexp) = unzip merge
         mergeidents = map bindeeIdent mergepat
-        bodyloc = srclocOf body
         knownBindings = HM.fromList $ zip mergeidents mergeexp
 
 checkResults :: MonadBinder m =>
@@ -97,12 +92,11 @@ checkResults :: MonadBinder m =>
              -> [Ident]
              -> Body (Lore m)
              -> [SubExp]
-             -> SrcLoc
              -> Simplify m (Body (Lore m))
-checkResults pat knownBindings params body accs bodyloc = do
+checkResults pat knownBindings params body accs = do
   ((), bnds) <- collectBindings $
                 zipWithM_ checkResult (zip pat $ resultSubExps res) (zip accparams accs)
-  mkBodyM bnds $ Result (map Var pat) bodyloc
+  mkBodyM bnds $ Result (map Var pat)
 
   where bndMap = makeBindMap body
         (accparams, _) = splitAt (length accs) params
@@ -114,7 +108,7 @@ checkResults pat knownBindings params body accs bodyloc = do
         checkResult (p, e) _
           | Just e' <- asFreeSubExp e = letBindNames_ [identName p] $ PrimOp $ SubExp e'
         checkResult (p, Var v) (accparam, acc) = do
-          e@(PrimOp (BinOp bop x y rt loc)) <- liftMaybe $ HM.lookup v bndMap
+          e@(PrimOp (BinOp bop x y rt)) <- liftMaybe $ HM.lookup v bndMap
           -- One of x,y must be *this* accumulator, and the other must
           -- be something that is free in the body.
           let isThisAccum = (==Var accparam)
@@ -127,7 +121,7 @@ checkResults pat knownBindings params body accs bodyloc = do
           case bop of
               LogAnd -> do
                 letBindNames_ [identName v] e
-                letBindNames_ [identName p] $ PrimOp $ BinOp LogAnd this el rt loc
+                letBindNames_ [identName p] $ PrimOp $ BinOp LogAnd this el rt
               _ -> cannotSimplify -- Um... sorry.
 
         checkResult _ _ = cannotSimplify
@@ -147,7 +141,7 @@ determineKnownBindings look lam accs arrs =
         arrBindings = HM.fromList $ mapMaybe isReplicate $ zip arrparams arrs
 
         isReplicate (p, v)
-          | Just (PrimOp (Replicate _ ve _)) <- look $ identName v = Just (p, ve)
+          | Just (PrimOp (Replicate _ ve)) <- look $ identName v = Just (p, ve)
         isReplicate _ = Nothing
 
 boundInBody :: Body lore -> HS.HashSet Ident

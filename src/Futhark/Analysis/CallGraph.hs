@@ -11,7 +11,6 @@ module Futhark.Analysis.CallGraph
 import Control.Monad.Reader
 
 import Data.List
-import Data.Loc
 import qualified Data.HashMap.Lazy as HM
 
 import Futhark.Representation.Basic
@@ -23,9 +22,9 @@ buildFunctionTable :: Prog -> Either Error FunctionTable
 buildFunctionTable prog =
   foldM expand HM.empty (progFunctions prog)
   where
-    expand ftab f@(FunDec name _ _ _ loc)
-      | Just fundec2 <- HM.lookup name ftab =
-        Left $ DupDefinitionError name loc $ srclocOf fundec2
+    expand ftab f@(FunDec name _ _ _)
+      | Just _ <- HM.lookup name ftab =
+        Left $ DupDefinitionError name
       | otherwise = Right $ HM.insert name f ftab
 
 -- | The symbol table for functions
@@ -65,7 +64,7 @@ buildCGfun cg fname  = do
   bnd <- asks $ HM.lookup fname . envFtable
   case bnd of
     Nothing -> badCGM $ FunctionNotInFtab fname
-    Just (FunDec caller _ _ body pos) ->
+    Just (FunDec caller _ _ body) ->
       if caller == fname
       then
         case HM.lookup caller cg of
@@ -78,9 +77,9 @@ buildCGfun cg fname  = do
                         let fs_soacs = fs `union` soacs
                         foldM buildCGfun cg' fs_soacs
 
-      else  badCGM $ TypeError pos  (" in buildCGfun lookup for fundec of " ++
-                                     nameToString fname ++ " resulted in " ++
-                                     nameToString caller)
+      else  badCGM $ TypeError (" in buildCGfun lookup for fundec of " ++
+                                nameToString fname ++ " resulted in " ++
+                                nameToString caller)
   where
 
 buildCGbody :: ([Name],[Name]) -> Body -> ([Name],[Name])
@@ -92,7 +91,7 @@ buildCGbody = foldBody build
 
 buildCGexp :: ([Name],[Name]) -> Exp -> ([Name],[Name])
 
-buildCGexp callees@(fs, soacfs) (Apply fname _ _ _)  =
+buildCGexp callees@(fs, soacfs) (Apply fname _ _)  =
     if isBuiltInFunction fname || elem fname fs || nameToString fname == "trace"
     then callees
     else (fname:fs, soacfs)

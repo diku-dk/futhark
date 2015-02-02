@@ -12,7 +12,6 @@ import Control.Monad.Writer
 import qualified Data.DList as DL
 import Data.List
 import Data.Maybe
-import Data.Loc
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 
@@ -53,12 +52,11 @@ instance BindableM AllocM where
   mkLetM pat e = return $ Let pat () e
 
   mkLetNamesM names e = do
-    (ts',sizes) <- instantiateShapes' loc $ expExtType e
-    let vals = [ Ident name t loc | (name, t) <- zip names ts' ]
+    (ts',sizes) <- instantiateShapes' $ expExtType e
+    let vals = [ Ident name t | (name, t) <- zip names ts' ]
     res <- specialisedMkLetM sizes vals e
     case res of Just bnd -> return bnd
                 Nothing  -> basicMkLetM sizes vals e
-    where loc = srclocOf e
 
   mkBodyM bnds res = return $ Body () bnds res
 
@@ -72,25 +70,25 @@ basicMkLetM sizes vals e = do
   return $ Let pat' () e
 
 specialisedMkLetM :: [Ident] -> [Ident] -> Exp -> AllocM (Maybe Binding)
-specialisedMkLetM [] [Ident name _ _] e@(PrimOp (Update _ src _ _ _)) = do
+specialisedMkLetM [] [Ident name _] e@(PrimOp (Update _ src _ _)) = do
   res <- lookupSummary src
   case res of
     Just (MemSummary m origfun) -> do
-      let ident = Ident name (identType src) $ srclocOf src
+      let ident = Ident name (identType src)
           pat' = Pattern [Bindee ident $ MemSummary m origfun]
       return $ Just $ Let pat' () e
     _ -> return Nothing
 
-specialisedMkLetM [] [Ident name _ _] e@(PrimOp (SubExp (Var src))) = do
+specialisedMkLetM [] [Ident name _] e@(PrimOp (SubExp (Var src))) = do
   res <- lookupSummary src
   case res of
     Just (MemSummary m origfun) -> do
-      let ident = Ident name (identType src) $ srclocOf src
+      let ident = Ident name $ identType src
           pat' = Pattern [Bindee ident $ MemSummary m origfun]
       return $ Just $ Let pat' () e
     _ -> return Nothing
 
-specialisedMkLetM [] [ident] e@(PrimOp (Index _ src is _)) = do
+specialisedMkLetM [] [ident] e@(PrimOp (Index _ src is)) = do
   summary <- lookupSummary' $ identName src
   case summary of
     MemSummary m ixfun -> do
@@ -105,7 +103,7 @@ specialisedMkLetM [] [ident] e@(PrimOp (Index _ src is _)) = do
     _ -> fail $ "Invalid memory summary for " ++ pretty src ++ ": " ++
          pretty summary
 
-specialisedMkLetM [] [ident1, ident2] e@(PrimOp (Split _ n a _ _)) = do
+specialisedMkLetM [] [ident1, ident2] e@(PrimOp (Split _ n a _)) = do
   summary <- lookupSummary' $ identName a
   case summary of
     MemSummary m ixfun -> do
@@ -118,7 +116,7 @@ specialisedMkLetM [] [ident1, ident2] e@(PrimOp (Split _ n a _ _)) = do
     _ -> fail $ "Invalid memory summary for " ++ pretty a ++ ": " ++
          pretty summary
 
-specialisedMkLetM [] [ident] e@(PrimOp (Reshape _ _ a _)) = do
+specialisedMkLetM [] [ident] e@(PrimOp (Reshape _ _ a)) = do
   summary <- lookupSummary' $ identName a
   case summary of
     MemSummary m ixfun -> -- FIXME: is this really the right index function?
@@ -128,13 +126,13 @@ specialisedMkLetM [] [ident] e@(PrimOp (Reshape _ _ a _)) = do
 
 specialisedMkLetM _ _ _ = return Nothing
 
-allocForArray :: Type -> SrcLoc -> AllocM (SubExp, Ident)
-allocForArray t loc = do
+allocForArray :: Type -> AllocM (SubExp, Ident)
+allocForArray t = do
   size <-
-    computeSize loc
-    (intconst (basicSize $ elemType t) loc) $
+    computeSize
+    (intconst (basicSize $ elemType t)) $
     arrayDims t
-  m <- letExp "mem" $ PrimOp $ Alloc size loc
+  m <- letExp "mem" $ PrimOp $ Alloc size
   return (size, m)
 
 allocsForPattern :: [Ident] -> [Ident] -> [ExpReturns]
@@ -142,7 +140,6 @@ allocsForPattern :: [Ident] -> [Ident] -> [ExpReturns]
 allocsForPattern sizeidents validents rts = do
   let sizes' = [ Bindee size Scalar | size <- sizeidents ]
   (vals,(memsizes,mems)) <- runWriterT $ forM (zip validents rts) $ \(ident, rt) ->
-    let loc = srclocOf ident in
     case rt of
       ReturnsScalar _ -> return $ Bindee ident Scalar
       ReturnsMemory _ -> return $ Bindee ident Scalar
@@ -150,7 +147,7 @@ allocsForPattern sizeidents validents rts = do
         return $ Bindee ident $ MemSummary mem ixfun
       ReturnsArray _ extshape _ Nothing
         | Just shape <- knownShape extshape -> do
-        (_, m) <- lift $ allocForArray (identType ident `setArrayShape` Shape shape) loc
+        (_, m) <- lift $ allocForArray (identType ident `setArrayShape` Shape shape)
         return $ Bindee ident $ directIndexFunction m $ identType ident
       _ -> do
         (memsize,mem,ident') <- lift $ memForBindee ident
@@ -165,14 +162,13 @@ memForBindee :: (MonadFreshNames m) =>
                 Ident
              -> m (BindeeT MemSummary, BindeeT MemSummary, BindeeT MemSummary)
 memForBindee ident = do
-  size <- newIdent (memname <> "_size") (Basic Int) loc
-  mem <- newIdent memname (Mem $ Var size) loc
+  size <- newIdent (memname <> "_size") (Basic Int)
+  mem <- newIdent memname $ Mem $ Var size
   return (Bindee size Scalar,
           Bindee mem Scalar,
           Bindee ident $ directIndexFunction mem t)
   where  memname = baseString (identName ident) <> "_mem"
          t       = identType ident
-         loc     = srclocOf ident
 
 directIndexFunction :: Ident -> Type -> MemSummary
 directIndexFunction mem t =
@@ -185,13 +181,14 @@ sliceOffset shape is =
           map SE.sproduct $
           drop 1 $ tails $ map SE.subExpToScalExp $ shapeDims shape
 
-computeSize :: MonadBinder m => SrcLoc -> SubExp -> [SubExp] -> m SubExp
-computeSize _ current [] = return current
-computeSize loc current (x:xs) = do
+computeSize :: MonadBinder m =>
+               SubExp -> [SubExp] -> m SubExp
+computeSize current [] = return current
+computeSize current (x:xs) = do
   let pexp = pure . PrimOp . SubExp
-  e <- eBinOp Times (pexp current) (pexp x) (Basic Int) loc
+  e <- eBinOp Times (pexp current) (pexp x) (Basic Int)
   v <- letSubExp "x" e
-  computeSize loc v xs
+  computeSize v xs
 
 lookupSummary :: Ident -> AllocM (Maybe MemSummary)
 lookupSummary = asks . HM.lookup . identName
@@ -249,13 +246,12 @@ ensureDirectArray v = do
 allocLinearArray :: String
                  -> SubExp -> AllocM (SubExp, Ident, SubExp)
 allocLinearArray s se = do
-  (size, mem) <- allocForArray t loc
-  v' <- newIdent s t loc
+  (size, mem) <- allocForArray t
+  v' <- newIdent s t
   let pat = Pattern [Bindee v' $ directIndexFunction mem t]
-  addBinding $ Let pat () $ PrimOp $ Copy se loc
+  addBinding $ Let pat () $ PrimOp $ Copy se
   return (size, mem, Var v')
-  where loc = srclocOf se
-        t   = subExpType se
+  where t = subExpType se
 
 funcallArgs :: [(SubExp,Diet)] -> AllocM [(SubExp,Diet)]
 funcallArgs args = do
@@ -288,10 +284,10 @@ startOfFreeIDRange :: [ExtType] -> Int
 startOfFreeIDRange = (1+) . HS.foldl' max 0 . shapeContext
 
 allocInFun :: MonadFreshNames m => In.FunDec -> m FunDec
-allocInFun (In.FunDec fname rettype params body loc) =
+allocInFun (In.FunDec fname rettype params body) =
   runAllocM $ allocInFParams params $ \params' -> do
     body' <- insertBindingsM $ allocInBody body
-    return $ FunDec fname (memoryInRetType rettype) params' body' loc
+    return $ FunDec fname (memoryInRetType rettype) params' body'
 
 allocInBody :: In.Body -> AllocM Body
 allocInBody (Body _ bnds res) =
@@ -340,7 +336,7 @@ funcallSubExps ses = map fst <$>
 
 allocInExp :: In.Exp -> AllocM Exp
 allocInExp (LoopOp (DoLoop res merge i bound
-                    (Body () bodybnds bodyres) loc)) =
+                    (Body () bodybnds bodyres))) =
   allocInFParams mergeparams $ \mergeparams' -> do
     mergeinit' <- funcallSubExps mergeinit
     body' <- insertBindingsM $ allocInBindings bodybnds $ \bodybnds' -> do
@@ -348,12 +344,12 @@ allocInExp (LoopOp (DoLoop res merge i bound
       let res' = bodyres { resultSubExps = ses }
       return $ Body () bodybnds' res'
     return $ LoopOp $
-      DoLoop res (zip mergeparams' mergeinit') i bound body' loc
+      DoLoop res (zip mergeparams' mergeinit') i bound body'
   where (mergeparams, mergeinit) = unzip merge
-allocInExp (LoopOp (Map cs f arrs loc)) = do
+allocInExp (LoopOp (Map cs f arrs)) = do
   let size = arraysSize 0 $ map identType arrs
-  is <- letExp "is" $ PrimOp $ Iota size loc
-  i  <- newIdent "i" (Basic Int) loc
+  is <- letExp "is" $ PrimOp $ Iota size
+  i  <- newIdent "i" (Basic Int)
   summaries <- liftM (HM.fromList . concat) $
                forM (zip (lambdaParams f) arrs) $ \(p,arr) ->
     if basicType $ identType p then return []
@@ -368,7 +364,7 @@ allocInExp (LoopOp (Map cs f arrs loc)) = do
         allocInLambda
         f { lambdaParams = i : lambdaParams f
           }
-  return $ LoopOp $ Map cs f' (is:arrs) loc
+  return $ LoopOp $ Map cs f' (is:arrs)
 allocInExp (LoopOp (Reduce {})) =
   fail "Cannot put explicit allocations in reduce yet."
 allocInExp (LoopOp (Scan {})) =
@@ -377,9 +373,9 @@ allocInExp (LoopOp (Redomap {})) =
   fail "Cannot put explicit allocations in redomap yet."
 allocInExp (LoopOp (Filter {})) =
   fail "Cannot put explicit allocations in filter yet."
-allocInExp (Apply fname args rettype loc) = do
+allocInExp (Apply fname args rettype) = do
   args' <- funcallArgs args
-  return $ Apply fname args' (memoryInRetType rettype) loc
+  return $ Apply fname args' (memoryInRetType rettype)
 allocInExp e = mapExpM alloc e
   where alloc = identityMapper { mapOnBinding = allocInBinding
                                , mapOnBody = allocInBody

@@ -27,7 +27,6 @@ module Futhark.Analysis.HORepresentation.SOACNest
 import Control.Applicative
 import Control.Monad
 
-import Data.Loc
 import Data.Maybe
 
 import Futhark.Representation.AST hiding (Map, Reduce, Scan, Filter, Redomap)
@@ -63,21 +62,20 @@ nestBodyReturnType (NewNest nesting _) = nestingReturnType nesting
 
 nestBodyParams :: NestBody lore -> [Param]
 nestBodyParams (Fun lam) = lambdaParams lam
-nestBodyParams (NewNest nesting (Reduce _ _ acc loc)) =
-  foldNestParams nesting acc loc
-nestBodyParams (NewNest nesting (Scan _ _ acc loc)) =
-  foldNestParams nesting acc loc
-nestBodyParams (NewNest nesting (Redomap _ _ _ acc loc)) =
-  foldNestParams nesting acc loc
-nestBodyParams (NewNest nesting comb) =
-  foldNestParams nesting [] $ srclocOf comb
+nestBodyParams (NewNest nesting (Reduce _ _ acc)) =
+  foldNestParams nesting acc
+nestBodyParams (NewNest nesting (Scan _ _ acc)) =
+  foldNestParams nesting acc
+nestBodyParams (NewNest nesting (Redomap _ _ _ acc)) =
+  foldNestParams nesting acc
+nestBodyParams (NewNest nesting _) =
+  foldNestParams nesting []
 
-foldNestParams :: Nesting lore -> [SubExp] -> SrcLoc -> [Ident]
-foldNestParams nesting acc loc =
-  zipWith mkParam (nestingParamNames nesting) $
+foldNestParams :: Nesting lore -> [SubExp] -> [Ident]
+foldNestParams nesting acc =
+  zipWith Ident (nestingParamNames nesting) $
   map subExpType acc ++
   map (rowType . SOAC.inputType) (nestingInputs nesting)
-  where mkParam name t = Ident name t loc
 
 instance Substitutable lore => Substitute (NestBody lore) where
   substituteNames m (NewNest n comb) =
@@ -94,34 +92,24 @@ bodyToLambda :: (Bindable lore, MonadFreshNames m) =>
 bodyToLambda _ (Fun l) = return l
 bodyToLambda pts (NewNest (Nesting paramNames inps bndIds retTypes) op) = do
   (e,f) <- runBinder' $ SOAC.toExp =<< toSOAC (SOACNest inps op)
-  let idents = instantiateExtTypes loc bndIds $ expExtType e
+  let idents = instantiateExtTypes bndIds $ expExtType e
   bnd <- mkLetNames (map identName idents) e
   return
-    Lambda { lambdaSrcLoc = loc
-           , lambdaParams = zipWith mkIdents paramNames pts
+    Lambda { lambdaParams = zipWith Ident paramNames pts
            , lambdaReturnType = retTypes
            , lambdaBody = f $ mkBody [bnd] $
-                          Result (map Var idents) loc
+                          Result (map Var idents)
            }
-  where loc = srclocOf op
-        mkIdents name t = Ident name t loc
 
 lambdaToBody :: Bindable lore => Lambda lore -> NestBody lore
 lambdaToBody l = fromMaybe (Fun l) $ liftM (uncurry $ flip NewNest) $ nested l
 
-data Combinator lore = Map Certificates (NestBody lore) SrcLoc
-                     | Reduce Certificates (NestBody lore) [SubExp] SrcLoc
-                     | Scan Certificates (NestBody lore) [SubExp] SrcLoc
-                     | Filter Certificates (NestBody lore) SrcLoc
-                     | Redomap Certificates (Lambda lore) (NestBody lore) [SubExp] SrcLoc
+data Combinator lore = Map Certificates (NestBody lore)
+                     | Reduce Certificates (NestBody lore) [SubExp]
+                     | Scan Certificates (NestBody lore) [SubExp]
+                     | Filter Certificates (NestBody lore)
+                     | Redomap Certificates (Lambda lore) (NestBody lore) [SubExp]
                  deriving (Show)
-
-instance Located (Combinator lore) where
-  locOf (Map _ _ loc) = locOf loc
-  locOf (Reduce _ _ _ loc) = locOf loc
-  locOf (Scan _ _ _ loc) = locOf loc
-  locOf (Filter _ _ loc) = locOf loc
-  locOf (Redomap _ _ _ _ loc) = locOf loc
 
 instance Substitutable lore => Substitute (Combinator lore) where
   substituteNames m comb =
@@ -132,18 +120,18 @@ instance Substitutable lore => Substitute (Nesting lore) where
     n { nestingInputs = map (substituteNames m) $ nestingInputs n }
 
 body :: Combinator lore -> NestBody lore
-body (Map _ b _) = b
-body (Reduce _ b _ _) = b
-body (Scan _ b _ _) = b
-body (Filter _ b _) = b
-body (Redomap _ _ b _ _) = b
+body (Map _ b) = b
+body (Reduce _ b _) = b
+body (Scan _ b _) = b
+body (Filter _ b) = b
+body (Redomap _ _ b _) = b
 
 setBody :: NestBody lore -> Combinator lore -> Combinator lore
-setBody b (Map cs _ loc) = Map cs b loc
-setBody b (Reduce cs _ es loc) = Reduce cs b es loc
-setBody b (Scan cs _ es loc) = Scan cs b es loc
-setBody b (Filter cs _ loc) = Filter cs b loc
-setBody b (Redomap cs l _ es loc) = Redomap cs l b es loc
+setBody b (Map cs _) = Map cs b
+setBody b (Reduce cs _ es) = Reduce cs b es
+setBody b (Scan cs _ es) = Scan cs b es
+setBody b (Filter cs _) = Filter cs b
+setBody b (Redomap cs l _ es) = Redomap cs l b es
 
 combinatorFirstLoop :: Combinator lore -> ([Param], [Type])
 combinatorFirstLoop comb =
@@ -163,9 +151,6 @@ data SOACNest lore = SOACNest { inputs :: [SOAC.Input]
                               }
                 deriving (Show)
 
-instance Located (SOACNest lore) where
-  locOf = locOf . operation
-
 setInputs :: [SOAC.Input] -> SOACNest lore -> SOACNest lore
 setInputs arrs nest = nest { inputs = arrs }
 
@@ -182,30 +167,30 @@ setCertificates cs (SOACNest inp comb) =
 
 -- | Returns the certificates used in a 'Combinator'.
 combCertificates :: Combinator lore -> Certificates
-combCertificates (Map     cs _     _) = cs
-combCertificates (Reduce  cs _   _ _) = cs
-combCertificates (Scan    cs _   _ _) = cs
-combCertificates (Filter  cs _     _) = cs
-combCertificates (Redomap cs _ _ _ _) = cs
+combCertificates (Map     cs _    ) = cs
+combCertificates (Reduce  cs _   _) = cs
+combCertificates (Scan    cs _   _) = cs
+combCertificates (Filter  cs _    ) = cs
+combCertificates (Redomap cs _ _ _) = cs
 
 -- | Sets the certificates used in a 'Combinator'.
 setCombCertificates :: Certificates -> Combinator lore -> Combinator lore
-setCombCertificates cs (Map     _ bdy     loc) = Map    cs bdy     loc
-setCombCertificates cs (Reduce  _ bdy acc loc) = Reduce cs bdy acc loc
-setCombCertificates cs (Scan    _ bdy acc loc) = Scan   cs bdy acc loc
-setCombCertificates cs (Filter  _ bdy     loc) = Filter cs bdy loc
-setCombCertificates cs (Redomap _ fun bdy acc loc) = Redomap cs fun bdy acc loc
+setCombCertificates cs (Map     _ bdy    ) = Map    cs bdy
+setCombCertificates cs (Reduce  _ bdy acc) = Reduce cs bdy acc
+setCombCertificates cs (Scan    _ bdy acc) = Scan   cs bdy acc
+setCombCertificates cs (Filter  _ bdy    ) = Filter cs bdy
+setCombCertificates cs (Redomap _ fun bdy acc) = Redomap cs fun bdy acc
 
 typeOf :: SOACNest lore -> [ExtType]
-typeOf (SOACNest inps (Map _ b _)) =
+typeOf (SOACNest inps (Map _ b)) =
   staticShapes [ arrayOf t (Shape [outersize]) (uniqueness t)
                | t <- nestBodyReturnType b ]
   where outersize = arraysSize 0 $ map SOAC.inputType inps
-typeOf (SOACNest _ (Reduce _ _ accinit _)) =
+typeOf (SOACNest _ (Reduce _ _ accinit)) =
   staticShapes $ map subExpType accinit
-typeOf (SOACNest _ (Redomap _ _ _ accinit _)) =
+typeOf (SOACNest _ (Redomap _ _ _ accinit)) =
   staticShapes $ map subExpType accinit
-typeOf (SOACNest inps (Scan _ _ accinit _)) =
+typeOf (SOACNest inps (Scan _ _ accinit)) =
   staticShapes [ arrayOf t (Shape [outersize]) (uniqueness t)
                | t <- map subExpType accinit ]
   where outersize = arraysSize 0 $ map SOAC.inputType inps
@@ -224,20 +209,20 @@ toExp :: Bindable lore => SOACNest lore -> Binder lore (Exp lore)
 toExp = SOAC.toExp <=< toSOAC
 
 fromSOAC :: Bindable lore => SOAC lore -> SOACNest lore
-fromSOAC (SOAC.Map cs l as loc) =
-  SOACNest as $ Map cs (lambdaToBody l) loc
-fromSOAC (SOAC.Reduce cs l args loc) =
+fromSOAC (SOAC.Map cs l as) =
+  SOACNest as $ Map cs $ lambdaToBody l
+fromSOAC (SOAC.Reduce cs l args) =
   SOACNest (map snd args) $
-  Reduce cs (lambdaToBody l) (map fst args) loc
-fromSOAC (SOAC.Scan cs l args loc) =
+  Reduce cs (lambdaToBody l) (map fst args)
+fromSOAC (SOAC.Scan cs l args) =
   SOACNest (map snd args) $
-  Scan cs (lambdaToBody l) (map fst args) loc
-fromSOAC (SOAC.Filter cs l as loc) =
-  SOACNest as $ Filter cs (lambdaToBody l) loc
-fromSOAC (SOAC.Redomap cs ol l es as loc) =
+  Scan cs (lambdaToBody l) (map fst args)
+fromSOAC (SOAC.Filter cs l as) =
+  SOACNest as $ Filter cs (lambdaToBody l)
+fromSOAC (SOAC.Redomap cs ol l es as) =
   -- Never nested, because we need a way to test alpha-equivalence of
   -- the outer combining function.
-  SOACNest as $ Redomap cs ol (lambdaToBody l) es loc
+  SOACNest as $ Redomap cs ol (lambdaToBody l) es
 
 nested :: Bindable lore => Lambda lore -> Maybe (Combinator lore, Nesting lore)
 nested l
@@ -254,23 +239,23 @@ nested l
   | otherwise = Nothing
 
 toSOAC :: (Bindable lore, MonadFreshNames m) => SOACNest lore -> m (SOAC lore)
-toSOAC (SOACNest as (Map cs b loc)) =
+toSOAC (SOACNest as (Map cs b)) =
   SOAC.Map cs <$>
   bodyToLambda (map SOAC.inputRowType as) b <*>
-  pure as <*> pure loc
-toSOAC (SOACNest as (Reduce cs b es loc)) =
+  pure as
+toSOAC (SOACNest as (Reduce cs b es)) =
   SOAC.Reduce cs <$>
   bodyToLambda (map subExpType es ++ map SOAC.inputRowType as) b <*>
-  pure (zip es as) <*> pure loc
-toSOAC (SOACNest as (Scan cs b es loc)) =
+  pure (zip es as)
+toSOAC (SOACNest as (Scan cs b es)) =
   SOAC.Scan cs <$>
   bodyToLambda (map subExpType es ++ map SOAC.inputRowType as) b <*>
-  pure (zip es as) <*> pure loc
-toSOAC (SOACNest as (Filter cs b loc)) =
+  pure (zip es as)
+toSOAC (SOACNest as (Filter cs b)) =
   SOAC.Filter cs <$>
   bodyToLambda (map SOAC.inputRowType as) b <*>
-  pure as <*> pure loc
-toSOAC (SOACNest as (Redomap cs l b es loc)) =
+  pure as
+toSOAC (SOACNest as (Redomap cs l b es)) =
   SOAC.Redomap cs l <$>
   bodyToLambda (map subExpType es ++ map SOAC.inputRowType as) b <*>
-  pure es <*> pure as <*> pure loc
+  pure es <*> pure as

@@ -20,7 +20,6 @@ module Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
 import Control.Applicative
 
 import Data.List (sort)
-import Data.Loc
 import Data.Maybe (isJust)
 import Data.Singletons.Prelude
 import Data.Type.Monomorphic
@@ -72,11 +71,11 @@ type Shape   = [ScalExp]
 
 shapeFromSubExps :: [SubExp] -> Shape
 shapeFromSubExps = map fromSubExp
-  where fromSubExp (Var v)        = Id v
-        fromSubExp (Constant v _) = Val v
+  where fromSubExp (Var v)      = Id v
+        fromSubExp (Constant v) = Val v
 
 shapeFromInts :: [Int] -> Shape
-shapeFromInts = shapeFromSubExps . map (flip Constant noLoc . IntVal)
+shapeFromInts = shapeFromSubExps . map (Constant . IntVal)
 
 index :: IxFun -> Indices -> ScalExp
 index f is = case f of

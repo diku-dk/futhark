@@ -35,49 +35,50 @@ subExpAliases (Var v)       = identAliases v
 
 primOpAliases :: PrimOp lore -> [Names]
 primOpAliases (SubExp se) = [subExpAliases se]
-primOpAliases (ArrayLit es _ _) = map subExpAliases es
+primOpAliases (ArrayLit es _) = map subExpAliases es
 primOpAliases (BinOp {}) = [mempty]
 primOpAliases (Not {}) = [mempty]
 primOpAliases (Negate {}) = [mempty]
-primOpAliases (Index _ ident _ _) =
+primOpAliases (Index _ ident _) =
   [identAliases ident]
 primOpAliases (Update {}) =
   [mempty]
 primOpAliases (Iota {}) =
   [mempty]
-primOpAliases (Replicate _ e _) =
+primOpAliases (Replicate _ e) =
   [subExpAliases e]
-primOpAliases (Reshape _ _ e _) =
+primOpAliases (Reshape _ _ e) =
   [identAliases e]
-primOpAliases (Rearrange _ _ e _) =
+primOpAliases (Rearrange _ _ e) =
   [identAliases e]
-primOpAliases (Rotate _ _ e _) =
+primOpAliases (Rotate _ _ e) =
   [identAliases e]
-primOpAliases (Split _ _ e _ _) =
+primOpAliases (Split _ _ e _) =
   [identAliases e,identAliases e]
-primOpAliases (Concat _ x y _ _) =
+primOpAliases (Concat _ x y _) =
   [identAliases x <> identAliases y]
 primOpAliases (Copy {}) =
   [mempty]
-primOpAliases (Assert _ _) =
+primOpAliases (Assert {}) =
   [mempty]
-primOpAliases (Conjoin _ _) =
+primOpAliases (Conjoin _) =
   [mempty]
-primOpAliases (Alloc _ _) =
+primOpAliases (Alloc _) =
   [mempty]
 
 loopOpAliases :: (Aliased lore) => LoopOp lore -> [Names]
-loopOpAliases (DoLoop res merge _ _ loopbody _) =
-  map snd $ filter fst $ zip (map ((`elem` res) . bindeeIdent . fst) merge) (bodyAliases loopbody)
-loopOpAliases (Map _ f _ _) =
+loopOpAliases (DoLoop res merge _ _ loopbody) =
+  map snd $ filter fst $
+  zip (map ((`elem` res) . bindeeIdent . fst) merge) (bodyAliases loopbody)
+loopOpAliases (Map _ f _) =
   bodyAliases $ lambdaBody f
-loopOpAliases (Reduce _ f _ _) =
+loopOpAliases (Reduce _ f _) =
   map (const mempty) $ lambdaReturnType f
-loopOpAliases (Scan _ f _ _) =
+loopOpAliases (Scan _ f _) =
   map (const mempty) $ lambdaReturnType f
-loopOpAliases (Filter _ _ arrs _) =
+loopOpAliases (Filter _ _ arrs) =
   map identAliases arrs
-loopOpAliases (Redomap _ outerfun _ _ _ _) =
+loopOpAliases (Redomap _ outerfun _ _ _) =
   map (const mempty) $ lambdaReturnType outerfun
 
 ifAliases :: ([Names], Names) -> ([Names], Names) -> [Names]
@@ -91,13 +92,13 @@ funcallAliases args t =
   returnAliases t [(subExpAliases se, d) | (se,d) <- args ]
 
 aliasesOf :: Aliased lore => Exp lore -> [Names]
-aliasesOf (If _ tb fb _ _) =
+aliasesOf (If _ tb fb _) =
   ifAliases
   (bodyAliases tb, consumedInBody tb)
   (bodyAliases fb, consumedInBody fb)
 aliasesOf (PrimOp op) = primOpAliases op
 aliasesOf (LoopOp op) = loopOpAliases op
-aliasesOf (Apply _ args t _) =
+aliasesOf (Apply _ args t) =
   funcallAliases args $ map toDecl $ retTypeValues t
 
 returnAliases :: [TypeBase shape1] -> [(Names, Diet)] -> [Names]
@@ -116,14 +117,14 @@ maskAliases _   Consume = mempty
 maskAliases als Observe = als
 
 consumedInExp :: (Aliased lore) => Exp lore -> Names
-consumedInExp (Apply _ args _ _) =
+consumedInExp (Apply _ args _) =
   mconcat $ map (consumeArg . first subExpAliases) args
   where consumeArg (als, Consume) = als
         consumeArg (_,   Observe) = mempty
-consumedInExp (PrimOp (Update _ src _ _ _)) =
+consumedInExp (PrimOp (Update _ src _ _)) =
   identAliases src
-consumedInExp (If _ tb fb _ _) =
+consumedInExp (If _ tb fb _) =
   consumedInBody tb <> consumedInBody fb
-consumedInExp (LoopOp (DoLoop _ merge _ _ _ _)) =
+consumedInExp (LoopOp (DoLoop _ merge _ _ _)) =
   mconcat $ map (subExpAliases . snd) $ filter (unique . bindeeType . fst) merge
 consumedInExp _ = mempty

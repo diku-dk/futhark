@@ -6,8 +6,6 @@ module Futhark.Representation.AST.Attributes.Constants
        )
        where
 
-import Data.Loc
-
 import Futhark.Representation.AST.Syntax.Core
 
 -- | If a Haskell type is an instance of 'IsValue', it means that a
@@ -31,9 +29,9 @@ instance IsValue Char where
   value = CharVal
 
 -- | Create a 'Constant' 'SubExp' containing the given value.
-constant :: IsValue v => v -> SrcLoc -> SubExp
+constant :: IsValue v => v -> SubExp
 constant = Constant . value
 
 -- | For reasons of type ambiguity, a specialised 'constant' for integers is defined.
-intconst :: Int -> SrcLoc -> SubExp
+intconst :: Int -> SubExp
 intconst = constant

@@ -19,7 +19,6 @@ module Futhark.Optimise.Fusion.Composing
   where
 
 import Data.List
-import Data.Loc
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.Map as M
 import Data.Maybe
@@ -99,8 +98,7 @@ fuseFilters :: (Input input, Bindable lore) =>
             -> (Lambda lore, [input]) -- ^ The fused lambda and the inputs of the resulting SOAC.
 fuseFilters lam1 inp1 out1 lam2 inp2 vname =
   fuseFilterInto lam1 inp1 out1 lam2 inp2 [vname] false
-  where false = mkBody [] $ Result [constant False loc] loc
-        loc   = srclocOf lam2
+  where false = mkBody [] $ Result [constant False]
 
 -- | Similar to 'fuseFilters', except the second function does not
 -- have to return @{bool}@, but must be a folding function taking at
@@ -125,7 +123,7 @@ fuseFilterIntoFold :: (Input input, Bindable lore) =>
                    -> (Lambda lore, [input]) -- ^ The fused lambda and the inputs of the resulting SOAC.
 fuseFilterIntoFold lam1 inp1 out1 lam2 inp2 vnames =
   fuseFilterInto lam1 inp1 out1 lam2 inp2 vnames identity
-  where identity = mkBody [] $ Result (map Var lam2redparams) $ srclocOf lam2
+  where identity = mkBody [] $ Result (map Var lam2redparams)
         lam2redparams = take (length (lambdaParams lam2) - length inp2) $
                         lambdaParams lam2
 
@@ -139,17 +137,16 @@ fuseFilterInto lam1 inp1 out1 lam2 inp2 vnames falsebranch = (lam2', HM.elems in
           lam2 { lambdaParams = lam2redparams ++ HM.keys inputmap
                , lambdaBody = makeCopies bindins
                }
-        loc = srclocOf lam2
         restype = lambdaReturnType lam2
-        residents = [ Ident vname t loc | (vname, t) <- zip vnames restype ]
+        residents = [ Ident vname t | (vname, t) <- zip vnames restype ]
         branch = flip mapResult (lambdaBody lam1) $ \res ->
                  let [e] = resultSubExps res -- XXX
                      tbranch = makeCopiesInner $ lambdaBody lam2
                      ts = bodyExtType tbranch `generaliseExtTypes`
                           bodyExtType falsebranch
                  in mkBody [mkLet residents $
-                            If e tbranch falsebranch ts loc] $
-                 Result (map Var residents) loc
+                            If e tbranch falsebranch ts] $
+                 Result (map Var residents)
         lam1tuple = [ mkLet [v] $ PrimOp $ SubExp $ Var p
                     | (v,p) <- zip pat $ lambdaParams lam1 ]
         bindins = lam1tuple `insertBindings` branch

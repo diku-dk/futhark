@@ -216,7 +216,7 @@ compileOutParams rts = do
 
 compileFunDec :: ExpCompiler op -> VNameSource -> FunDec
               -> Either String (VNameSource, (Name, Imp.Function op))
-compileFunDec ec src (FunDec fname rettype params body _) = do
+compileFunDec ec src (FunDec fname rettype params body) = do
   ((outparams, inparams, results, args), src', body') <-
     runImpM compile ec src
   return (src',
@@ -231,11 +231,11 @@ compileFunDec ec src (FunDec fname rettype params body _) = do
           return (outparams, inparams, results, args)
 
 compileExtBody :: Destination -> Body -> ImpM op ()
-compileExtBody (Destination dest) (Body _ bnds (Result ses _)) =
+compileExtBody (Destination dest) (Body _ bnds (Result ses)) =
   compileBindings bnds $ zipWithM_ compileResultSubExp dest ses
 
 compileBody :: [VName] -> Body -> ImpM op ()
-compileBody targets (Body _ bnds (Result ses _)) =
+compileBody targets (Body _ bnds (Result ses)) =
   compileBindings bnds $ forM_ (zip targets ses) $ \(d,se) ->
     when (subExpNotArray se) $
     compileSubExpTo d se
@@ -303,13 +303,13 @@ compileExp targets e m = do
 
 defCompileExp :: [VName] -> Exp -> ImpM op ()
 
-defCompileExp targets (If cond tbranch fbranch restype _) = do
+defCompileExp targets (If cond tbranch fbranch restype) = do
   dest <- destinationFromTargets targets restype
   tcode <- collect $ compileExtBody dest tbranch
   fcode <- collect $ compileExtBody dest fbranch
   tell $ Imp.If (compileSubExp cond) tcode fcode
 
-defCompileExp targets (Apply fname args _ _) = do
+defCompileExp targets (Apply fname args _) = do
   targets' <- sanitiseTargets targets
   tell $ Imp.Call targets' fname $
     map compileSubExp $ filter subExpNotArray $ map fst args
@@ -323,22 +323,22 @@ defCompilePrimOp :: [VName] -> PrimOp -> ImpM op ()
 defCompilePrimOp [target] (SubExp se) =
   compileSubExpTo target se
 
-defCompilePrimOp [target] (Not e _) =
+defCompilePrimOp [target] (Not e) =
   writeExp target $ Imp.UnOp Imp.Not $ compileSubExp e
 
-defCompilePrimOp [target] (Negate e _) =
+defCompilePrimOp [target] (Negate e) =
   writeExp target $ Imp.UnOp Imp.Negate $ compileSubExp e
 
-defCompilePrimOp [target] (BinOp bop x y _ _) =
+defCompilePrimOp [target] (BinOp bop x y _) =
   writeExp target $ Imp.BinOp bop (compileSubExp x) (compileSubExp y)
 
 defCompilePrimOp [_] (Assert e loc) =
   tell $ Imp.Assert (compileSubExp e) loc
 
-defCompilePrimOp [target] (Alloc e _) =
+defCompilePrimOp [target] (Alloc e) =
   tell $ Imp.Allocate target $ compileSubExp e
 
-defCompilePrimOp [target] (Index _ src idxs _)
+defCompilePrimOp [target] (Index _ src idxs)
   | length idxs == arrayRank t = do
     (srcmem, srcoffset, _) <-
       indexArray (identName src) $ map (elements . compileSubExp) idxs
@@ -349,7 +349,7 @@ defCompilePrimOp [target] (Index _ src idxs _)
 defCompilePrimOp [_] (Conjoin {}) =
   return ()
 
-defCompilePrimOp [target] (Update _ src idxs val _) = do
+defCompilePrimOp [target] (Update _ src idxs val) = do
   srcentry <- lookupArray $ identName src
   MemLocation destmem destixfun <- arrayLocation target
   destoffset <- ixFunOffset destixfun
@@ -378,7 +378,7 @@ defCompilePrimOp [target] (Update _ src idxs val _) = do
   where srct = identType src
         srcet = elemType srct
 
-defCompilePrimOp [target] (Replicate n se _) = do
+defCompilePrimOp [target] (Replicate n se) = do
   i <- newVName "i"
   (targetmem, elemoffset, rowsize) <-
     indexArray target [elements $ Imp.ScalarVar i]
@@ -398,17 +398,17 @@ defCompilePrimOp [target] (Replicate n se _) = do
         rowsize
   where set = subExpType se
 
-defCompilePrimOp [target] (Iota n _) = do
+defCompilePrimOp [target] (Iota n) = do
   i <- newVName "i"
   (targetmem, elemoffset, _) <-
     indexArray target [elements $ Imp.ScalarVar i]
   tell $ Imp.For i (compileSubExp n) $
     write targetmem elemoffset Int $ Imp.ScalarVar i
 
-defCompilePrimOp [target] (Copy src@(Constant {}) _) =
+defCompilePrimOp [target] (Copy src@(Constant {})) =
   compileSubExpTo target src
 
-defCompilePrimOp [target] (Copy (Var src) _)
+defCompilePrimOp [target] (Copy (Var src))
   | basicType srct =
     compileSubExpTo target $ Var src
   | otherwise = do
@@ -427,7 +427,7 @@ defCompilePrimOp [target] (Copy (Var src) _)
 defCompilePrimOp _ (Split {}) =
   return () -- Yes, really.
 
-defCompilePrimOp [target] (Concat _ x y _ _) = do
+defCompilePrimOp [target] (Concat _ x y _) = do
   xentry <- lookupArray $ identName x
   let MemLocation xmem xixfun = entryArrayLocation xentry
   xoffset <- ixFunOffset xixfun
@@ -447,7 +447,7 @@ defCompilePrimOp [target] (Concat _ x y _ _) = do
     arrayByteSizeExp yentry
   where et = elemType $ identType x
 
-defCompilePrimOp [target] (ArrayLit es rt _) = do
+defCompilePrimOp [target] (ArrayLit es rt) = do
   targetEntry <- lookupArray target
   let MemLocation mem ixfun = entryArrayLocation targetEntry
   offset <- ixFunOffset ixfun
@@ -475,7 +475,7 @@ defCompilePrimOp [target] (ArrayLit es rt _) = do
           bytesPerElem
   where et = elemType rt
 
-defCompilePrimOp [target] (Rearrange _ perm src _) = do
+defCompilePrimOp [target] (Rearrange _ perm src) = do
   is <- replicateM (length perm) (newVName "i")
   let ivars = map (elements . Imp.ScalarVar) is
   (mem, offset, _) <- indexArray target $ permuteShape perm ivars
@@ -490,7 +490,7 @@ defCompilePrimOp [target] (Rearrange _ perm src _) = do
 defCompilePrimOp [_] (Reshape {}) =
   return ()
 
-defCompilePrimOp [target] (Rotate _ n src _) = do
+defCompilePrimOp [target] (Rotate _ n src) = do
   let size = compileSubExp $ arraySize 0 srct
       n'   = Imp.Constant $ IntVal n
   i <- newVName "i"
@@ -514,7 +514,7 @@ defCompilePrimOp [] _ = return () -- No arms, no cake.
 
 defCompileLoopOp :: [VName] -> LoopOp -> ImpM op ()
 
-defCompileLoopOp targets loop@(DoLoop res merge i bound body _) =
+defCompileLoopOp targets loop@(DoLoop res merge i bound body) =
   declaringVars mergepat $ do
     forM_ merge $ \(p, se) ->
       when (subExpNotArray se) $ compileSubExpTo (bindeeName p) se
@@ -608,7 +608,7 @@ sanitiseTargets = filterM $ liftM not . isArray
 subExpToDimSize :: SubExp -> ImpM op Imp.DimSize
 subExpToDimSize (Var v) =
   return $ Imp.VarSize $ identName v
-subExpToDimSize (Constant (IntVal i) _) =
+subExpToDimSize (Constant (IntVal i)) =
   return $ Imp.ConstSize i
 subExpToDimSize (Constant {}) =
   fail "Size subexp is not a non-integer constant."
@@ -634,12 +634,12 @@ compileSubExpTo target (Var v)
          pretty (identName v) ++ " (offset " ++ pretty srcoffset ++
          ") to " ++ pretty target ++ " (offset " ++ pretty targetoffset ++
          ")"
-      else defCompilePrimOp [target] $ Copy (Var v) $ identSrcLoc v
+      else defCompilePrimOp [target] $ Copy $ Var v
 compileSubExpTo target se =
   writeExp target $ compileSubExp se
 
 compileSubExp :: SubExp -> Imp.Exp
-compileSubExp (Constant v _) =
+compileSubExp (Constant v) =
   Imp.Constant v
 compileSubExp (Var v) =
   Imp.ScalarVar (identName v)

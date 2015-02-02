@@ -76,20 +76,20 @@ data GenTypeError vn e t pat =
   | PermutationError SrcLoc [Int] Int (Maybe vn)
   -- ^ The permutation is not valid.
 
-instance (VarName vn, Pretty e, Located e, Pretty t, Pretty pat) => Show (GenTypeError vn e t pat) where
+instance (VarName vn, Pretty e, Pretty t, Pretty pat) => Show (GenTypeError vn e t pat) where
   show (TypeError pos msg) =
     "Type error at " ++ locStr pos ++ ":\n" ++ msg
   show (UnifyError e1 t1 e2 t2) =
     "Cannot unify type " ++ ppr' t1 ++
-    " of expression at " ++ locStr (srclocOf e1) ++
-    " with type " ++ ppr' t2 ++
-    " of expression at " ++ locStr (srclocOf e2)
+    " of expression\n" ++ pretty 160 (indent 2 $ ppr e1) ++
+    "\nwith type " ++ ppr' t2 ++
+    " of expression\n" ++ pretty 160 (indent 2 $ ppr e2)
   show (UnexpectedType e _ []) =
-    "Type of expression at " ++ locStr (srclocOf e) ++
-    " cannot have any type - possibly a bug in the type checker."
+    "Type of expression\n" ++ pretty 160 (indent 2 $ ppr e) ++
+    "\ncannot have any type - possibly a bug in the type checker."
   show (UnexpectedType e t ts) =
-    "Type of expression at " ++ locStr (srclocOf e) ++
-    " must be one of " ++ intercalate ", " (map ppr' ts) ++ ", but is " ++
+    "Type of expression\n" ++ pretty 160 (indent 2 $ ppr e) ++
+    "\nmust be one of " ++ intercalate ", " (map ppr' ts) ++ ", but is " ++
     ppr' t ++ "."
   show (ReturnTypeError pos fname rettype bodytype) =
     "Declaration of function " ++ nameToString fname ++ " at " ++ locStr pos ++

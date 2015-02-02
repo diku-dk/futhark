@@ -38,8 +38,6 @@ module Futhark.Representation.Basic
        )
 where
 
-import Data.Loc
-
 import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
@@ -87,10 +85,10 @@ instance TypeCheck.Checkable Basic where
   checkBodyLore = return
   checkFParamLore = return
   checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
-  matchPattern loc pat e =
-    TypeCheck.matchExtPattern loc (patternIdents pat) (expExtType e)
-  basicFParam name t loc =
-    return $ Bindee (Ident name (AST.Basic t) loc) ()
+  matchPattern pat e =
+    TypeCheck.matchExtPattern (patternIdents pat) (expExtType e)
+  basicFParam name t =
+    return $ Bindee (Ident name (AST.Basic t)) ()
   matchReturnType name (ExtRetType ts) =
     TypeCheck.matchExtReturnType name ts
 
@@ -103,10 +101,9 @@ instance Bindable Basic where
   mkLet idents =
     AST.Let (AST.Pattern $ map (`Bindee` ()) idents) ()
   mkLetNames names e = do
-    (ts, shapes) <- instantiateShapes' loc $ expExtType e
-    let idents = [ Ident name t loc | (name, t) <- zip names ts ]
+    (ts, shapes) <- instantiateShapes' $ expExtType e
+    let idents = [ Ident name t | (name, t) <- zip names ts ]
     return $ mkLet (shapes++idents) e
-    where loc = srclocOf e
 
 instance PrettyLore Basic where
 

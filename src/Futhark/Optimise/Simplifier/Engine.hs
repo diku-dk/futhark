@@ -50,7 +50,6 @@ import Control.Monad.Writer
 import Data.Either
 import Data.Hashable
 import Data.List
-import Data.Loc
 import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
@@ -174,7 +173,7 @@ asserted (Constant {}) =
   return ()
 asserted (Var name) = do
   se <- ST.lookupExp (identName name) <$> getVtable
-  case se of Just (PrimOp (BinOp Equal x y _ _)) -> do
+  case se of Just (PrimOp (BinOp Equal x y _)) -> do
                case x of Var xvar ->
                            tellNeed $ Need [] $
                            UT.equalToUsage (identName xvar) y
@@ -422,10 +421,10 @@ defaultSimplifyBody ds (Body lore (bnd:bnds) res) = do
 simplifyResult :: MonadEngine m =>
                   [Diet] -> Result -> m Result
 
-simplifyResult ds (Result es loc) = do
+simplifyResult ds (Result es) = do
   es' <- mapM simplifySubExp es
   consumeResult $ zip ds es'
-  return $ Result es' loc
+  return $ Result es'
 
 isDoLoopResult :: MonadEngine m =>
                   Result -> m ()
@@ -441,7 +440,7 @@ simplifyBinding :: MonadEngine m =>
                 -> m ()
 -- The simplification rules cannot handle Apply, because it requires
 -- access to the full program.  This is a bit of a hack.
-simplifyBinding (Let pat _ (Apply fname args rettype loc)) = do
+simplifyBinding (Let pat _ (Apply fname args rettype)) = do
   args' <- mapM (simplifySubExp . fst) args
   rettype' <- simplifyRetType rettype
   prog <- asksEngineEnv envProgram
@@ -451,10 +450,10 @@ simplifyBinding (Let pat _ (Apply fname args rettype loc)) = do
     Just vs -> do let vs' = valueShapeContext (retTypeValues rettype) vs ++ vs
                   bnds <- forM (zip (patternIdents pat) vs') $ \(p,v) ->
                     case uniqueness $ identType p of
-                      Unique    -> mkLetNamesM [identName p] =<< eCopy (eValue v loc)
-                      Nonunique -> mkLetNamesM [identName p] =<< eValue v loc
+                      Unique    -> mkLetNamesM [identName p] =<< eCopy (eValue v)
+                      Nonunique -> mkLetNamesM [identName p] =<< eValue v
                   mapM_ (simplifyBinding . Aliases.removeBindingAliases) bnds
-    Nothing -> do let e' = Apply fname (zip args' $ map snd args) rettype' loc
+    Nothing -> do let e' = Apply fname (zip args' $ map snd args) rettype'
                   pat' <- blockUsage $ simplifyPattern pat
                   inspectBinding =<<
                     mkLetM (Aliases.addAliasesToPattern pat' e') e'
@@ -478,7 +477,7 @@ defaultInspectBinding bnd = do
 
 simplifyExp :: MonadEngine m => Exp (InnerLore m) -> m (Exp (Lore m))
 
-simplifyExp (If cond tbranch fbranch ts loc) = do
+simplifyExp (If cond tbranch fbranch ts) = do
   -- Here, we have to check whether 'cond' puts a bound on some free
   -- variable, and if so, chomp it.  We should also try to do CSE
   -- across branches.
@@ -488,7 +487,7 @@ simplifyExp (If cond tbranch fbranch ts loc) = do
   (tbranch',fbranch') <-
     hoistCommon (simplifyBody ds tbranch) (ST.updateBounds True cond)
                 (simplifyBody ds fbranch) (ST.updateBounds False cond)
-  return $ If cond' tbranch' fbranch' ts' loc
+  return $ If cond' tbranch' fbranch' ts'
 
 simplifyExp (LoopOp op) = LoopOp <$> simplifyLoopOp op
 
@@ -516,7 +515,7 @@ simplifyExpBase = mapExpM hoist
 
 simplifyLoopOp :: MonadEngine m => LoopOp (InnerLore m) -> m (LoopOp (Lore m))
 
-simplifyLoopOp (DoLoop respat merge loopvar boundexp loopbody loc) = do
+simplifyLoopOp (DoLoop respat merge loopvar boundexp loopbody) = do
   let (mergepat, mergeexp) = unzip merge
   respat'   <- mapM simplifyIdentBinding respat
   mergepat' <- mapM simplifyFParam mergepat
@@ -536,7 +535,7 @@ simplifyLoopOp (DoLoop respat merge loopvar boundexp loopbody loc) = do
                  return res
   let merge' = zip mergepat' mergeexp'
   consumeResult $ zip diets mergeexp'
-  return $ DoLoop respat' merge' loopvar boundexp' loopbody' loc
+  return $ DoLoop respat' merge' loopvar boundexp' loopbody'
   where boundnames = identName loopvar `HS.insert`
                      HS.fromList (map (bindeeName . fst) merge)
         simplifyFParam (Bindee ident lore) = do
@@ -544,35 +543,35 @@ simplifyLoopOp (DoLoop respat merge loopvar boundexp loopbody loc) = do
           lore' <- simplifyFParamLore lore
           return $ Bindee ident' lore'
 
-simplifyLoopOp (Map cs fun arrs loc) = do
+simplifyLoopOp (Map cs fun arrs) = do
   cs' <- simplifyCerts cs
   arrs' <- mapM simplifyIdent arrs
   fun' <- simplifyLambda fun $ map Just arrs'
-  return $ Map cs' fun' arrs' loc
+  return $ Map cs' fun' arrs'
 
-simplifyLoopOp (Filter cs fun arrs loc) = do
+simplifyLoopOp (Filter cs fun arrs) = do
   cs' <- simplifyCerts cs
   arrs' <- mapM simplifyIdent arrs
   fun' <- simplifyLambda fun $ map Just arrs'
-  return $ Filter cs' fun' arrs' loc
+  return $ Filter cs' fun' arrs'
 
-simplifyLoopOp (Reduce cs fun input loc) = do
+simplifyLoopOp (Reduce cs fun input) = do
   let (acc, arrs) = unzip input
   cs' <- simplifyCerts cs
   acc' <- mapM simplifySubExp acc
   arrs' <- mapM simplifyIdent arrs
   fun' <- simplifyLambda fun $ map Just arrs'
-  return $ Reduce cs' fun' (zip acc' arrs') loc
+  return $ Reduce cs' fun' (zip acc' arrs')
 
-simplifyLoopOp (Scan cs fun input loc) = do
+simplifyLoopOp (Scan cs fun input) = do
   let (acc, arrs) = unzip input
   cs' <- simplifyCerts cs
   acc' <- mapM simplifySubExp acc
   arrs' <- mapM simplifyIdent arrs
   fun' <- simplifyLambda fun $ map Just arrs'
-  return $ Scan cs' fun' (zip acc' arrs') loc
+  return $ Scan cs' fun' (zip acc' arrs')
 
-simplifyLoopOp (Redomap cs outerfun innerfun acc arrs loc) = do
+simplifyLoopOp (Redomap cs outerfun innerfun acc arrs) = do
   cs' <- simplifyCerts cs
   acc' <- mapM simplifySubExp acc
   arrs' <- mapM simplifyIdent arrs
@@ -580,7 +579,7 @@ simplifyLoopOp (Redomap cs outerfun innerfun acc arrs loc) = do
                replicate (length $ lambdaParams outerfun) Nothing
   (innerfun', used) <- tapUsage $ simplifyLambda innerfun $ map Just arrs
   (innerfun'', arrs'') <- removeUnusedParams used innerfun' arrs'
-  return $ Redomap cs' outerfun' innerfun'' acc' arrs'' loc
+  return $ Redomap cs' outerfun' innerfun'' acc' arrs''
   where removeUnusedParams used lam arrinps
           | (accparams, arrparams@(firstparam:_)) <-
             splitAt (length acc) $ lambdaParams lam,
@@ -595,10 +594,9 @@ simplifyLoopOp (Redomap cs outerfun innerfun acc arrs loc) = do
                  -- first array, but I do not think it matters much.
                  let outerSize = arraySize 0 $ identType firstarr
                  input <- newIdent "unused_input"
-                          (arrayOf (Basic Int) (Shape [outerSize]) Nonunique) $
-                          srclocOf firstarr
+                          (arrayOf (Basic Int) (Shape [outerSize]) Nonunique)
                  letBindNames_ [identName input] $
-                   PrimOp $ Iota outerSize $ srclocOf firstarr
+                   PrimOp $ Iota outerSize
                  return (lam { lambdaParams =
                                   accparams ++
                                   [firstparam { identType = Basic Int }] },
@@ -608,16 +606,16 @@ simplifyLoopOp (Redomap cs outerfun innerfun acc arrs loc) = do
           | otherwise = return (lam, arrinps)
 
 simplifySubExp :: MonadEngine m => SubExp -> m SubExp
-simplifySubExp (Var (Ident vnm t loc)) = do
+simplifySubExp (Var (Ident vnm t)) = do
   bnd <- getsEngineState $ ST.lookupSubExp vnm . stateVtable
   t' <- simplifyType t
   case bnd of
-    Just (Constant v _) -> return $ Constant v loc
+    Just (Constant v) -> return $ Constant v
     Just (Var id') -> do usedName $ identName id'
-                         return $ Var $ Ident (identName id') t' loc
+                         return $ Var $ Ident (identName id') t'
     _              -> do usedName vnm
-                         return $ Var $ Ident vnm t' loc
-simplifySubExp (Constant v loc) = return $ Constant v loc
+                         return $ Var $ Ident vnm t'
+simplifySubExp (Constant v) = return $ Constant v
 
 simplifyPattern :: MonadEngine m =>
                    Pattern (InnerLore m)
@@ -669,7 +667,7 @@ simplifyType (Basic bt) =
 simplifyLambda :: MonadEngine m =>
                   Lambda (InnerLore m) -> [Maybe Ident]
                -> m (Lambda (Lore m))
-simplifyLambda (Lambda params body rettype loc) arrs = do
+simplifyLambda (Lambda params body rettype) arrs = do
   params' <- mapM simplifyIdentBinding params
   let (nonarrayparams, arrayparams) =
         splitAt (length params' - length arrs) params'
@@ -681,7 +679,7 @@ simplifyLambda (Lambda params body rettype loc) arrs = do
     bindArrayLParams (zip arrayparams arrs) $
       simplifyBody (map diet rettype) body
   rettype' <- mapM simplifyType rettype
-  return $ Lambda params' body' rettype' loc
+  return $ Lambda params' body' rettype'
 
 consumeResult :: MonadEngine m =>
                  [(Diet, SubExp)] -> m ()
@@ -696,7 +694,7 @@ simplifyCerts = liftM (nub . concat) . mapM check
   where check idd = do
           vv <- getsEngineState $ ST.lookupSubExp (identName idd) . stateVtable
           case vv of
-            Just (Constant Checked _) -> return []
+            Just (Constant Checked) -> return []
             Just (Var idd') -> do usedName $ identName idd'
                                   return [idd']
             _ -> do usedName $ identName idd
@@ -704,8 +702,8 @@ simplifyCerts = liftM (nub . concat) . mapM check
 
 simplifyFun :: MonadEngine m =>
                FunDec (InnerLore m) -> m (FunDec (Lore m))
-simplifyFun (FunDec fname rettype params body loc) = do
+simplifyFun (FunDec fname rettype params body) = do
   rettype' <- simplifyRetType rettype
   body' <- insertAllBindings $ bindFParams params $
            simplifyBody (map diet $ retTypeValues rettype') body
-  return $ FunDec fname rettype' params body' loc
+  return $ FunDec fname rettype' params body'

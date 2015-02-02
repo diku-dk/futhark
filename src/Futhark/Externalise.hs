@@ -13,7 +13,6 @@ module Futhark.Externalise
   )
   where
 
-import qualified Data.Array as A
 import Data.Loc
 import Data.Monoid
 
@@ -28,34 +27,33 @@ externaliseProg (I.Prog funs) =
   E.Prog $ map externaliseFunction funs
 
 externaliseFunction :: I.FunDec -> E.FunDec
-externaliseFunction (FunDec fname ret params body loc) =
+externaliseFunction (FunDec fname ret params body) =
   (fname,
    externaliseDeclTypes $ map I.toDecl $ retTypeValues ret,
    map (externaliseParam . bindeeIdent) params,
    externaliseBody body,
-   loc)
+   noLoc)
 
 externaliseBody :: I.Body -> E.Exp
-externaliseBody (I.Body _ [] (I.Result es loc)) =
-  externaliseSubExps es loc
+externaliseBody (I.Body _ [] (I.Result es)) =
+  externaliseSubExps es
 externaliseBody (I.Body lore (I.Let pat _ e:bnds) res) =
-  E.LetPat (externalisePat pat loc) (externaliseExp e)
-           (externaliseBody $ I.Body lore bnds res) loc
-  where loc = srclocOf e
+  E.LetPat (externalisePat pat) (externaliseExp e)
+           (externaliseBody $ I.Body lore bnds res) noLoc
 
 externaliseExp :: I.Exp -> E.Exp
-externaliseExp (I.Apply fname args ts loc) =
+externaliseExp (I.Apply fname args ts) =
   E.Apply fname (map externaliseArg args)
-  (externaliseTypes $ retTypeValues ts) loc
+  (externaliseTypes $ retTypeValues ts) noLoc
     where externaliseArg (e,d) =
             (externaliseSubExp e,
              externaliseDiet d)
-externaliseExp (I.If ce tb fb t loc) =
+externaliseExp (I.If ce tb fb t) =
   E.If (externaliseSubExp ce)
        (externaliseBody tb)
        (externaliseBody fb)
        (externaliseTypes t)
-       loc
+       noLoc
 externaliseExp (PrimOp op) =
   externalisePrimOp op
 externaliseExp (LoopOp op) =
@@ -63,108 +61,108 @@ externaliseExp (LoopOp op) =
 
 externalisePrimOp :: I.PrimOp -> E.Exp
 externalisePrimOp (I.SubExp se) = externaliseSubExp se
-externalisePrimOp (I.ArrayLit [] et loc) =
-  E.Copy (E.Literal (E.arrayVal [] $ E.toDecl $ externaliseType et) loc) loc
-externalisePrimOp (I.ArrayLit es et loc) =
-  E.ArrayLit (map externaliseSubExp es) (externaliseType et) loc
-externalisePrimOp (I.BinOp bop x y t loc) =
+externalisePrimOp (I.ArrayLit [] et) =
+  E.Copy (E.Literal (E.arrayVal [] $ E.toDecl $ externaliseType et) noLoc) noLoc
+externalisePrimOp (I.ArrayLit es et) =
+  E.ArrayLit (map externaliseSubExp es) (externaliseType et) noLoc
+externalisePrimOp (I.BinOp bop x y t) =
   E.BinOp bop (externaliseSubExp x) (externaliseSubExp y)
-              (externaliseType t) loc
-externalisePrimOp (I.Not x loc) =
-  E.Not (externaliseSubExp x) loc
-externalisePrimOp (I.Negate x loc) =
-  E.Negate (externaliseSubExp x) loc
+              (externaliseType t) noLoc
+externalisePrimOp (I.Not x) =
+  E.Not (externaliseSubExp x) noLoc
+externalisePrimOp (I.Negate x) =
+  E.Negate (externaliseSubExp x) noLoc
 externalisePrimOp (I.Assert x loc) =
   E.Assert (externaliseSubExp x) loc
-externalisePrimOp (I.Conjoin es loc) =
-  E.Conjoin (map externaliseSubExp es) loc
-externalisePrimOp (I.Index cs src idxs loc) =
+externalisePrimOp (I.Conjoin es) =
+  E.Conjoin (map externaliseSubExp es) noLoc
+externalisePrimOp (I.Index cs src idxs) =
   E.Index (externaliseCerts cs)
           (externaliseIdent src)
           (Just [])
           (map externaliseSubExp idxs)
-          loc
-externalisePrimOp (I.Update cs src idxs ve loc) =
+          noLoc
+externalisePrimOp (I.Update cs src idxs ve) =
   E.LetWith (externaliseCerts cs) (externaliseIdent src) (externaliseIdent src)
             (Just []) (map externaliseSubExp idxs)
             (externaliseSubExp ve) (E.Var $ externaliseIdent src)
-            loc
-externalisePrimOp (I.Split cs ne ae _ loc) =
+            noLoc
+externalisePrimOp (I.Split cs ne ae _) =
   E.Split (externaliseCerts cs)
           (externaliseSubExp ne)
           (E.Var $ externaliseIdent ae)
-          loc
-externalisePrimOp (I.Concat cs x y _ loc) =
+          noLoc
+externalisePrimOp (I.Concat cs x y _) =
   E.Concat (externaliseCerts cs)
            (E.Var $ externaliseIdent x)
            (E.Var $ externaliseIdent y)
-           loc
-externalisePrimOp (I.Copy e loc) =
-  E.Copy (externaliseSubExp e) loc
-externalisePrimOp (I.Iota ne loc) =
-  E.Iota (externaliseSubExp ne) loc
-externalisePrimOp (I.Replicate ne ve loc) =
+           noLoc
+externalisePrimOp (I.Copy e) =
+  E.Copy (externaliseSubExp e) noLoc
+externalisePrimOp (I.Iota ne) =
+  E.Iota (externaliseSubExp ne) noLoc
+externalisePrimOp (I.Replicate ne ve) =
   E.Replicate (externaliseSubExp ne)
               (externaliseSubExp ve)
-              loc
-externalisePrimOp (I.Reshape cs shape e loc) =
+              noLoc
+externalisePrimOp (I.Reshape cs shape e) =
   E.Reshape (externaliseCerts cs)
             (map externaliseSubExp shape)
             (E.Var $ externaliseIdent e)
-            loc
-externalisePrimOp (I.Rearrange cs perm e loc) =
+            noLoc
+externalisePrimOp (I.Rearrange cs perm e) =
   E.Rearrange (externaliseCerts cs)
               perm
               (E.Var $ externaliseIdent e)
-              loc
-externalisePrimOp (I.Rotate cs n e loc) =
+              noLoc
+externalisePrimOp (I.Rotate cs n e) =
   E.Rotate (externaliseCerts cs)
            n
            (E.Var $ externaliseIdent e)
-           loc
+           noLoc
 
 externaliseLoopOp :: I.LoopOp -> E.Exp
 
-externaliseLoopOp (I.DoLoop respat merge i bound loopbody loc) =
-  E.DoLoop (externaliseBinders (map bindeeIdent mergepat) loc)
-           (externaliseSubExps mergeexp loc)
+externaliseLoopOp (I.DoLoop respat merge i bound loopbody) =
+  E.DoLoop (externaliseBinders (map bindeeIdent mergepat))
+           (externaliseSubExps mergeexp)
            (externaliseIdent i) (externaliseSubExp bound)
            (externaliseBody loopbody)
-           (E.TupLit (map (E.Var . externaliseIdent) respat) loc) loc
+           (E.TupLit (map (E.Var . externaliseIdent) respat) noLoc) noLoc
   where (mergepat, mergeexp) = unzip merge
-externaliseLoopOp (I.Map _ fun es loc) =
+externaliseLoopOp (I.Map _ fun es) =
   maybeUnzip $ E.Map (externaliseMapLambda fun)
-               (externaliseSOACArrayArgs es loc)
-               loc
-externaliseLoopOp (I.Reduce _ fun inputs loc) =
+               (externaliseSOACArrayArgs es)
+               noLoc
+externaliseLoopOp (I.Reduce _ fun inputs) =
   E.Reduce (externaliseFoldLambda fun $ length inputs)
-           (maybeTupLit (map externaliseSubExp accinputs) loc)
-           (externaliseSOACArrayArgs arrinputs loc)
-           loc
+           (maybeTupLit (map externaliseSubExp accinputs))
+           (externaliseSOACArrayArgs arrinputs)
+           noLoc
   where (accinputs, arrinputs) = unzip inputs
-externaliseLoopOp (I.Scan _ fun inputs loc) =
+externaliseLoopOp (I.Scan _ fun inputs) =
   maybeUnzip $ E.Scan (externaliseFoldLambda fun $ length inputs)
-               (maybeTupLit (map externaliseSubExp accinputs) loc)
-               (externaliseSOACArrayArgs arrinputs loc)
-               loc
+               (maybeTupLit (map externaliseSubExp accinputs))
+               (externaliseSOACArrayArgs arrinputs)
+               noLoc
   where (accinputs, arrinputs) = unzip inputs
-externaliseLoopOp (I.Filter _ fun es loc) =
+externaliseLoopOp (I.Filter _ fun es) =
   maybeUnzip $ E.Filter (externaliseMapLambda fun)
-                        (externaliseSOACArrayArgs es loc)
-                        loc
-externaliseLoopOp (I.Redomap _ outerfun innerfun vs as loc) =
+                        (externaliseSOACArrayArgs es)
+                        noLoc
+externaliseLoopOp (I.Redomap _ outerfun innerfun vs as) =
   E.Redomap (externaliseFoldLambda outerfun $ length vs)
             (externaliseFoldLambda innerfun $ length vs)
-            (maybeTupLit (map externaliseSubExp vs) loc)
-            (externaliseSOACArrayArgs as loc)
-            loc
+            (maybeTupLit (map externaliseSubExp vs))
+            (externaliseSOACArrayArgs as)
+            noLoc
 
 externaliseMapLambda :: I.Lambda -> E.Lambda
-externaliseMapLambda (Lambda params body ret loc) =
+externaliseMapLambda (Lambda params body ret) =
   E.AnonymFun params'
               (wrap $ externaliseBody body)
               (externaliseDeclTypes $ map I.toDecl ret)
-              loc
+              noLoc
   where (params', wrap) =
           let ps = map externaliseParam params
           in case makeTupleParam ps of
@@ -172,11 +170,11 @@ externaliseMapLambda (Lambda params body ret loc) =
                Just (p, f) -> ([p], f)
 
 externaliseFoldLambda :: I.Lambda -> Int -> E.Lambda
-externaliseFoldLambda (Lambda params body ret loc) n =
+externaliseFoldLambda (Lambda params body ret) n =
   E.AnonymFun (accparams'++arrparams')
               (wraparr $ wrapacc $ externaliseBody body)
               (externaliseDeclTypes $ map I.toDecl ret)
-              loc
+              noLoc
   where (accparams, arrparams) = splitAt n $ map externaliseParam params
         (accparams', wrapacc) = case makeTupleParam accparams of
                                   Nothing     -> (accparams, id)
@@ -197,8 +195,8 @@ makeTupleParam ps@(p:_:_) =
       loc   = srclocOf p
   in Just (p',
            \inner -> E.LetPat
-           (E.TupId (map (E.Id . E.fromParam) ps) loc)
-           (E.Var $ E.fromParam p') inner loc)
+           (E.TupId (map (E.Id . E.fromParam) ps) noLoc)
+           (E.Var $ E.fromParam p') inner noLoc)
 makeTupleParam _ = Nothing
 
 externaliseDiet :: I.Diet -> E.Diet
@@ -208,12 +206,12 @@ externaliseDiet I.Observe = E.Observe
 externaliseCerts :: I.Certificates -> E.Certificates
 externaliseCerts = map externaliseIdent
 
-externalisePat :: I.Pattern -> SrcLoc -> E.TupIdent
+externalisePat :: I.Pattern -> E.TupIdent
 externalisePat = externaliseBinders . patternIdents
 
-externaliseBinders :: [I.Ident] -> SrcLoc -> E.TupIdent
-externaliseBinders [v] _  = Id $ externaliseIdent v
-externaliseBinders vs loc = TupId (map (Id . externaliseIdent) vs) loc
+externaliseBinders :: [I.Ident] -> E.TupIdent
+externaliseBinders [v] = Id $ externaliseIdent v
+externaliseBinders vs  = TupId (map (Id . externaliseIdent) vs) noLoc
 
 externaliseDeclTypes :: [I.DeclType] -> E.DeclType
 externaliseDeclTypes ts =
@@ -239,42 +237,35 @@ externaliseType (I.Array et shape u) =
   E.Array (E.Basic et) (replicate (shapeRank shape) Nothing)
           u mempty
 
-externaliseSOACArrayArgs :: [I.Ident] -> SrcLoc -> E.Exp
-externaliseSOACArrayArgs [e] _   = externaliseSubExp $ I.Var e
-externaliseSOACArrayArgs es  loc =
-  Zip [ (e, E.typeOf e) | e <- map (externaliseSubExp . I.Var) es ] loc
+externaliseSOACArrayArgs :: [I.Ident] -> E.Exp
+externaliseSOACArrayArgs [e] = externaliseSubExp $ I.Var e
+externaliseSOACArrayArgs es  =
+  Zip [ (e, E.typeOf e) | e <- map (externaliseSubExp . I.Var) es ] noLoc
 
-externaliseSubExps :: [I.SubExp] -> SrcLoc -> E.Exp
-externaliseSubExps [e] _  = externaliseSubExp e
-externaliseSubExps es loc = E.TupLit (map externaliseSubExp es) loc
+externaliseSubExps :: [I.SubExp] -> E.Exp
+externaliseSubExps [e] = externaliseSubExp e
+externaliseSubExps es  = E.TupLit (map externaliseSubExp es) noLoc
 
 externaliseSubExp :: I.SubExp -> E.Exp
 externaliseSubExp (I.Var v) =
   E.Var $ externaliseIdent v
-externaliseSubExp (I.Constant v loc) =
-  E.Literal (E.BasicVal v) loc
+externaliseSubExp (I.Constant v) =
+  E.Literal (E.BasicVal v) noLoc
 
 externaliseParam :: I.Param -> E.Parameter
-externaliseParam (I.Ident name t loc) =
-  E.Ident name (externaliseDeclType $ I.toDecl t) loc
+externaliseParam (I.Ident name t) =
+  E.Ident name (externaliseDeclType $ I.toDecl t) noLoc
 
 externaliseIdent :: I.Ident -> E.Ident
-externaliseIdent (I.Ident name t loc) =
-  E.Ident name (externaliseType t) loc
-
-externaliseValue :: I.Value -> E.Value
-externaliseValue (I.BasicVal bv) = E.BasicVal bv
-externaliseValue (I.ArrayVal a dt) =
-  E.arrayVal (map externaliseValue $ A.elems a) $
-  externaliseDeclType dt
+externaliseIdent (I.Ident name t) =
+  E.Ident name (externaliseType t) noLoc
 
 maybeUnzip :: E.Exp -> E.Exp
 maybeUnzip e
   | E.Elem (E.Tuple ts@(_:_:_))
-      <- E.rowType $ E.typeOf e = Unzip e ts loc
+      <- E.rowType $ E.typeOf e = Unzip e ts noLoc
   | otherwise                   = e
-  where loc = srclocOf e
 
-maybeTupLit :: [E.Exp] -> SrcLoc -> E.Exp
-maybeTupLit [e] _   = e
-maybeTupLit es  loc = E.TupLit es loc
+maybeTupLit :: [E.Exp] -> E.Exp
+maybeTupLit [e] = e
+maybeTupLit es  = E.TupLit es noLoc

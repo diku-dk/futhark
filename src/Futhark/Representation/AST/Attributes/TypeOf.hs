@@ -28,8 +28,8 @@ import Futhark.Representation.AST.Attributes.Values
 import Futhark.Representation.AST.RetType
 
 subExpType :: SubExp -> Type
-subExpType (Constant val _) = Basic $ basicValueType val
-subExpType (Var ident)      = identType ident
+subExpType (Constant val) = Basic $ basicValueType val
+subExpType (Var ident)    = identType ident
 
 mapType :: Lambda lore -> [Type] -> [Type]
 mapType f arrts = [ arrayOf t (Shape [outersize]) (uniqueness t)
@@ -47,68 +47,68 @@ filterType _ =
 primOpType :: PrimOp lore -> [Type]
 primOpType (SubExp se) =
   [subExpType se]
-primOpType (ArrayLit es rt loc) =
+primOpType (ArrayLit es rt) =
   [arrayOf rt (Shape [n]) $
    mconcat $ map (uniqueness . subExpType) es]
-  where n = Constant (value (length es)) loc
-primOpType (BinOp _ _ _ t _) =
+  where n = Constant (value (length es))
+primOpType (BinOp _ _ _ t) =
   [t]
-primOpType (Not _ _) =
+primOpType (Not _) =
   [Basic Bool]
-primOpType (Negate e _) =
+primOpType (Negate e) =
   [subExpType e]
-primOpType (Index _ ident idx _) =
+primOpType (Index _ ident idx) =
   [stripArray (length idx) (identType ident)]
-primOpType (Update _ src _ _ _) =
+primOpType (Update _ src _ _) =
   [identType src]
-primOpType (Iota ne _) =
+primOpType (Iota ne) =
   [arrayOf (Basic Int) (Shape [ne]) Nonunique]
-primOpType (Replicate ne e _) =
+primOpType (Replicate ne e) =
   [arrayOf (subExpType e) (Shape [ne]) u]
   where u = uniqueness $ subExpType e
-primOpType (Reshape _ [] e _) =
+primOpType (Reshape _ [] e) =
   [Basic $ elemType $ identType e]
-primOpType (Reshape _ shape e _) =
+primOpType (Reshape _ shape e) =
   [identType e `setArrayShape` Shape shape]
-primOpType (Rearrange _ perm e _) =
+primOpType (Rearrange _ perm e) =
   [identType e `setArrayShape` Shape (permuteShape perm shape)]
   where Shape shape = arrayShape $ identType e
-primOpType (Rotate _ _ e _) =
+primOpType (Rotate _ _ e) =
   [identType e]
-primOpType (Split _ ne e secsize _) =
+primOpType (Split _ ne e secsize) =
   [identType e `setOuterSize` ne,
    identType e `setOuterSize` secsize]
-primOpType (Concat _ x y ressize _) =
+primOpType (Concat _ x y ressize) =
   [identType x `setUniqueness` u `setOuterSize` ressize]
   where u = uniqueness (identType x) <> uniqueness (identType y)
-primOpType (Copy e _) =
+primOpType (Copy e) =
   [subExpType e `setUniqueness` Unique]
 primOpType (Assert _ _) =
   [Basic Cert]
-primOpType (Conjoin _ _) =
+primOpType (Conjoin _) =
   [Basic Cert]
-primOpType (Alloc e _) =
+primOpType (Alloc e) =
   [Mem e]
 
 loopOpExtType :: LoopOp lore -> [ExtType]
-loopOpExtType (DoLoop res merge _ _ _ _) =
+loopOpExtType (DoLoop res merge _ _ _) =
   loopExtType res $ map (bindeeIdent . fst) merge
-loopOpExtType (Map _ f arrs _) =
+loopOpExtType (Map _ f arrs) =
   staticShapes $ mapType f $ map identType arrs
-loopOpExtType (Reduce _ fun _ _) =
+loopOpExtType (Reduce _ fun _) =
   staticShapes $ lambdaReturnType fun
-loopOpExtType (Scan _ _ inputs _) =
+loopOpExtType (Scan _ _ inputs) =
   staticShapes $ map (identType . snd) inputs
-loopOpExtType (Filter _ f arrs _) =
+loopOpExtType (Filter _ f arrs) =
   filterType f $ map identType arrs
-loopOpExtType (Redomap _ outerfun _ _ _ _) =
+loopOpExtType (Redomap _ outerfun _ _ _) =
   staticShapes $ lambdaReturnType outerfun
 
 expExtType :: IsRetType (RetType lore) => Exp lore -> [ExtType]
-expExtType (Apply _ _ rt _) = retTypeValues rt
-expExtType (If _ _ _ rt _)  = rt
-expExtType (LoopOp op)      = loopOpExtType op
-expExtType (PrimOp op)      = staticShapes $ primOpType op
+expExtType (Apply _ _ rt) = retTypeValues rt
+expExtType (If _ _ _ rt)  = rt
+expExtType (LoopOp op)    = loopOpExtType op
+expExtType (PrimOp op)    = staticShapes $ primOpType op
 
 bodyExtType :: Body lore -> [ExtType]
 bodyExtType (Body _ bnds res) =
@@ -131,7 +131,7 @@ subExpShapeContext rettype ses =
 -- that constitute the shape context.
 loopShapeContext :: [Ident] -> [Ident] -> [Ident]
 loopShapeContext res merge = resShapes
-  where isMergeVar (Constant _ _) = Nothing
+  where isMergeVar (Constant _) = Nothing
         isMergeVar (Var v)
           | v `elem` merge = Just v
           | otherwise      = Nothing

@@ -24,8 +24,6 @@ import Control.Applicative
 import qualified Control.Monad.State.Lazy
 import qualified Control.Monad.State.Strict
 
-import Data.Loc
-
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes (progNames)
 import qualified Futhark.FreshNames as FreshNames
@@ -82,10 +80,10 @@ newVName = newID . nameFromString
 
 -- | Produce a fresh 'Ident', using the given name as a template.
 newIdent :: MonadFreshNames m =>
-            String -> TypeBase shape -> SrcLoc -> m (IdentBase shape)
-newIdent s t loc = do
+            String -> TypeBase shape -> m (IdentBase shape)
+newIdent s t = do
   s' <- newID $ varName s Nothing
-  return $ Ident s' t loc
+  return $ Ident s' t
 
 -- | Produce a fresh 'Ident', using the given 'Ident' as a template,
 -- but possibly modifying the name.
@@ -94,15 +92,13 @@ newIdent' :: MonadFreshNames m =>
           -> IdentBase shape -> m (IdentBase shape)
 newIdent' f ident =
   newIdent (f $ nameToString $ baseName $ identName ident)
-           (identType ident) $
-           srclocOf ident
+           (identType ident)
 
 -- | Produce several 'Ident's, using the given name as a template,
 -- based on a list of types.
 newIdents :: MonadFreshNames m =>
-             String -> [TypeBase shape] -> SrcLoc -> m [IdentBase shape]
-newIdents s ts loc =
-  mapM (\t -> newIdent s t loc) ts
+             String -> [TypeBase shape] -> m [IdentBase shape]
+newIdents = mapM . newIdent
 
 -- | Create a new 'NameSource' that will never produce any of the
 -- names used as variables in the given program.

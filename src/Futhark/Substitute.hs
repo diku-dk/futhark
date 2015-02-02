@@ -49,8 +49,8 @@ instance Substitute VName where
   substituteNames substs k = fromMaybe k $ HM.lookup k substs
 
 instance Substitute SubExp where
-  substituteNames substs (Var v)     = Var $ substituteNames substs v
-  substituteNames _ (Constant v loc) = Constant v loc
+  substituteNames substs (Var v) = Var $ substituteNames substs v
+  substituteNames _ (Constant v) = Constant v
 
 instance Substitutable lore => Substitute (Exp lore) where
   substituteNames substs = mapExp $ replace substs
@@ -116,9 +116,9 @@ instance (Substitute shape) => Substitute (TypeBase shape) where
     Mem $ substituteNames substs sz
 
 instance Substitutable lore => Substitute (Lambda lore) where
-  substituteNames substs (Lambda params body rettype loc) =
+  substituteNames substs (Lambda params body rettype) =
     Lambda params (substituteNames substs body)
-           (map (substituteNames substs) rettype) loc
+           (map (substituteNames substs) rettype)
 
 instance Substitute Ident where
   substituteNames substs v =

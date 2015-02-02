@@ -58,7 +58,6 @@ import Control.Monad.RWS hiding (mapM_)
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import Data.Foldable
-import Data.Loc
 import Data.Maybe
 
 import Futhark.Analysis.Alias
@@ -118,9 +117,9 @@ optimiseBindings (bnd:bnds) m = do
   where boundHere = patternNames $ bindingPattern bnd
 
         checkIfForwardableUpdate bnd' bnds'
-            | PrimOp (Update cs src [i] (Var ve) loc) <- bindingExp bnd',
+            | PrimOp (Update cs src [i] (Var ve)) <- bindingExp bnd',
               Pattern [bindee] <- bindingPattern bnd' = do
-                forwarded <- maybeForward ve (bindeeIdent bindee) cs src i loc
+                forwarded <- maybeForward ve (bindeeIdent bindee) cs src i
                 return $ if forwarded
                          then bnds'
                          else bnd' : bnds'
@@ -134,11 +133,11 @@ optimiseInBinding (Let pat _ e) = do
   return $ mkLet (patternIdents pat) e'
 
 optimiseExp :: Exp Basic -> ForwardingM (Exp Basic)
-optimiseExp (LoopOp (DoLoop res merge i bound body loc)) =
+optimiseExp (LoopOp (DoLoop res merge i bound body)) =
   bindingIdents [i] $
   bindingFParams (map fst merge) $ do
     body' <- optimiseBody body
-    return $ LoopOp $ DoLoop res merge i bound body' loc
+    return $ LoopOp $ DoLoop res merge i bound body'
 optimiseExp e = mapExpM traverse e
   where traverse = identityMapper { mapOnBody = optimiseBody
                                   , mapOnLambda = optimiseLambda
@@ -178,7 +177,6 @@ updateBinding fwd =
   mkLet [updateBindee fwd] $
   PrimOp $ Update (updateCertificates fwd) (updateSource fwd)
   (updateIndices fwd) (Var $ updateValue fwd)
-  (updateSrcLoc fwd)
 
 newtype ForwardingM a = ForwardingM (RWS TopDown BottomUp VNameSource a)
                       deriving (Monad, Applicative, Functor,
@@ -275,9 +273,9 @@ tapBottomUp m = do (x,bup) <- listen m
                    return (x, bup)
 
 maybeForward :: Ident
-             -> Ident -> Certificates -> Ident -> SubExp -> SrcLoc
+             -> Ident -> Certificates -> Ident -> SubExp
              -> ForwardingM Bool
-maybeForward v dest cs src i loc = do
+maybeForward v dest cs src i = do
   -- Checks condition (2)
   available <- [i,Var src] `areAvailableBefore` identName v
   -- Check condition (3)
@@ -285,7 +283,7 @@ maybeForward v dest cs src i loc = do
   -- Check condition (6)
   optimisable <- isOptimisable $ identName v
   if available && samebody && optimisable then do
-    let fwd = DesiredUpdate dest cs src [i] v loc
+    let fwd = DesiredUpdate dest cs src [i] v
     tell mempty { forwardThese = [fwd] }
     return True
     else return False

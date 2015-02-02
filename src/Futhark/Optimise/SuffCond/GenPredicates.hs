@@ -43,23 +43,23 @@ predicateFunctionName :: Name -> Name
 predicateFunctionName fname = fname <> nameFromString "_pred"
 
 genPredicate :: MonadFreshNames m => FunDec -> m (FunDec, FunDec)
-genPredicate (FunDec fname rettype params body loc) = do
-  pred_ident <- newIdent "pred" (Basic Bool) loc
-  cert_ident <- newIdent "pred_cert" (Basic Cert) loc
+genPredicate (FunDec fname rettype params body) = do
+  pred_ident <- newIdent "pred" $ Basic Bool
+  cert_ident <- newIdent "pred_cert" $ Basic Cert
   (pred_params, bnds) <- nonuniqueParams $ map bindeeIdent params
   let env = GenEnv cert_ident (dataDependencies body) mempty
   (pred_body, Body _ val_bnds val_res) <- runGenM env $ splitFunBody body
   let mkFParam = flip Bindee ()
       pred_args = [ (Var arg, Observe) | arg <- map bindeeIdent params ]
       pred_bnd = mkLet [pred_ident] $
-                 Apply predFname pred_args (basicRetType Bool) loc
+                 Apply predFname pred_args $ basicRetType Bool
       cert_bnd = mkLet [cert_ident] $
-                 PrimOp $ Assert (Var pred_ident) loc
+                 PrimOp $ Assert (Var pred_ident) noLoc
       val_fun = FunDec fname rettype params
-                (mkBody (pred_bnd:cert_bnd:val_bnds) val_res) loc
+                (mkBody (pred_bnd:cert_bnd:val_bnds) val_res)
       pred_fun = FunDec predFname (basicRetType Bool)
                  (map mkFParam pred_params)
-                 (bnds `insertBindings` pred_body) loc
+                 (bnds `insertBindings` pred_body)
   return (pred_fun, val_fun)
   where predFname = predicateFunctionName fname
 
@@ -77,14 +77,13 @@ splitBody (Body _ bnds valres) = do
   (pred_bnds, val_bnds, preds) <- unzip3 <$> mapM splitBinding bnds
   (conjoined_preds, conj_bnds) <-
     runBinder'' $ letSubExp "conjPreds" =<<
-    foldBinOp LogAnd (constant True loc) (catMaybes preds) (Basic Bool)
+    foldBinOp LogAnd (constant True) (catMaybes preds) (Basic Bool)
   let predbody = mkBody (concat pred_bnds <> conj_bnds) $
                  valres { resultSubExps =
                              resultSubExps valres ++ [conjoined_preds]
                         }
       valbody = mkBody val_bnds valres
   return (predbody, valbody)
-  where loc = srclocOf valres
 
 splitBinding :: Binding -> GenM ([Binding], Binding, Maybe SubExp)
 
@@ -98,100 +97,100 @@ splitBinding bnd@(Let pat _ (PrimOp (Assert (Var v) _))) = do
                  mkLet (patternIdents pat) $ PrimOp $ SubExp (Var cert_ident),
                  Just $ Var v)
 
-splitBinding bnd@(Let pat _ (LoopOp (Map cs fun args loc))) = do
-  (predbody, valfun, ok) <- splitMap cs fun args loc
+splitBinding bnd@(Let pat _ (LoopOp (Map cs fun args))) = do
+  (predbody, valfun, ok) <- splitMap cs fun args
   return (predbody ++ [bnd],
           mkLet (patternIdents pat) $
-          LoopOp $ Map cs valfun args loc,
+          LoopOp $ Map cs valfun args,
           ok)
 
-splitBinding bnd@(Let pat _ (LoopOp (Filter cs fun args loc))) = do
-  (predbnds, valfun, ok) <- splitMap cs fun args loc
+splitBinding bnd@(Let pat _ (LoopOp (Filter cs fun args))) = do
+  (predbnds, valfun, ok) <- splitMap cs fun args
   return (predbnds ++ [bnd],
           mkLet (patternIdents pat) $
-          LoopOp $ Filter cs valfun args loc,
+          LoopOp $ Filter cs valfun args,
           ok)
 
-splitBinding bnd@(Let pat _ (LoopOp (Reduce cs fun args loc))) = do
-  (predbody, valfun, ok) <- splitReduce cs fun args loc
+splitBinding bnd@(Let pat _ (LoopOp (Reduce cs fun args))) = do
+  (predbody, valfun, ok) <- splitReduce cs fun args
   return (predbody ++ [bnd],
           mkLet (patternIdents pat) $
-          LoopOp $ Reduce cs valfun args loc,
+          LoopOp $ Reduce cs valfun args,
           ok)
 
-splitBinding bnd@(Let pat _ (LoopOp (Scan cs fun args loc))) = do
-  (predbody, valfun, ok) <- splitReduce cs fun args loc
+splitBinding bnd@(Let pat _ (LoopOp (Scan cs fun args))) = do
+  (predbody, valfun, ok) <- splitReduce cs fun args
   return (predbody ++ [bnd],
           mkLet (patternIdents pat) $
-          LoopOp $ Scan cs valfun args loc,
+          LoopOp $ Scan cs valfun args,
           ok)
 
-splitBinding bnd@(Let pat _ (LoopOp (Redomap cs outerfun innerfun acc arr loc))) = do
-  (predbody, valfun, ok) <- splitRedomap cs innerfun acc arr loc
+splitBinding bnd@(Let pat _ (LoopOp (Redomap cs outerfun innerfun acc arr))) = do
+  (predbody, valfun, ok) <- splitRedomap cs innerfun acc arr
   return (predbody ++ [bnd],
           mkLet (patternIdents pat) $
-          LoopOp $ Redomap cs outerfun valfun acc arr loc,
+          LoopOp $ Redomap cs outerfun valfun acc arr,
           ok)
 
-splitBinding (Let pat _ (LoopOp (DoLoop respat merge i bound body loc))) = do
+splitBinding (Let pat _ (LoopOp (DoLoop respat merge i bound body))) = do
   (predbody, valbody) <- splitBody body
-  ok <- newIdent "loop_ok" (Basic Bool) loc
+  ok <- newIdent "loop_ok" (Basic Bool)
   predbody' <- conjoinLoopBody ok predbody
   let predloop = LoopOp $ DoLoop (respat++[ok])
-                 (merge++[(Bindee ok (),constant True loc)]) i bound
-                 predbody' loc
-      valloop = LoopOp $ DoLoop respat merge i bound valbody loc
+                 (merge++[(Bindee ok (),constant True)]) i bound
+                 predbody'
+      valloop = LoopOp $ DoLoop respat merge i bound valbody
   return ([mkLet (idents<>[ok]) predloop],
           mkLet idents valloop,
           Just $ Var ok)
   where
     idents = patternIdents pat
     conjoinLoopBody ok (Body _ bnds res) = do
-      ok' <- newIdent "loop_ok_res" (Basic Bool) loc
+      ok' <- newIdent "loop_ok_res" (Basic Bool)
       case reverse $ resultSubExps res of
         []   -> fail "conjoinLoopBody: null loop"
         x:xs ->
           let res' = res { resultSubExps = reverse $ Var ok':xs }
               bnds' = bnds ++
-                      [mkLet [ok'] $ PrimOp $ BinOp LogAnd x (Var ok) (Basic Bool) loc]
+                      [mkLet [ok'] $ PrimOp $ BinOp LogAnd x (Var ok) (Basic Bool)]
           in return $ mkBody bnds' res'
 
-splitBinding (Let pat _ (If cond tbranch fbranch t loc)) = do
+splitBinding (Let pat _ (If cond tbranch fbranch t)) = do
   (tbranch_pred, tbranch_val) <- splitBody tbranch
   (fbranch_pred, fbranch_val) <- splitBody fbranch
-  ok <- newIdent "if_ok" (Basic Bool) loc
+  ok <- newIdent "if_ok"  $ Basic Bool
   return ([mkLet (idents<>[ok]) $
            If cond tbranch_pred fbranch_pred
-           (t<>[Basic Bool]) loc],
-          mkLet idents $ If cond tbranch_val fbranch_val t loc,
+           (t<>[Basic Bool])],
+          mkLet idents $ If cond tbranch_val fbranch_val t,
           Just $ Var ok)
   where idents = patternIdents pat
 
 splitBinding bnd = return ([bnd], bnd, Nothing)
 
-splitMap :: [Ident] -> Lambda -> [Ident] -> SrcLoc
+splitMap :: [Ident] -> Lambda -> [Ident]
          -> GenM ([Binding], Lambda, Maybe SubExp)
-splitMap cs fun args loc = do
+splitMap cs fun args = do
   (predfun, valfun) <- splitMapLambda fun
-  (andbnd, andcheck) <- allTrue cs predfun args loc
+  (andbnd, andcheck) <- allTrue cs predfun args
   return ([andbnd],
           valfun,
           Just andcheck)
 
-splitReduce :: [Ident] -> Lambda -> [(SubExp,Ident)] -> SrcLoc
+splitReduce :: [Ident] -> Lambda -> [(SubExp,Ident)]
             -> GenM ([Binding], Lambda, Maybe SubExp)
-splitReduce cs fun args loc = do
+splitReduce cs fun args = do
   (predfun, valfun) <- splitFoldLambda fun $ map fst args
-  (andbnd, andcheck) <- allTrue cs predfun (map snd args) loc
+  (andbnd, andcheck) <- allTrue cs predfun (map snd args)
   return ([andbnd],
           valfun,
           Just andcheck)
 
-splitRedomap :: [Ident] -> Lambda -> [SubExp] -> [Ident] -> SrcLoc
+splitRedomap :: [Ident] -> Lambda -> [SubExp] -> [Ident]
              -> GenM ([Binding], Lambda, Maybe SubExp)
-splitRedomap cs fun acc arr loc = do
+splitRedomap cs fun acc arr = do
   (predfun, valfun) <- splitFoldLambda fun acc
-  (andbnd, andcheck) <- allTrue cs predfun arr loc
+  (andbnd, andcheck) <- allTrue cs predfun arr
   return ([andbnd],
           valfun,
           Just andcheck)
@@ -225,24 +224,23 @@ splitFoldLambda lam acc = do
         accbnds = [ mkLet [p] $ PrimOp $ SubExp e
                   | (p,e) <- zip accParams acc ]
 
-allTrue :: Certificates -> Lambda -> [Ident] -> SrcLoc
+allTrue :: Certificates -> Lambda -> [Ident]
         -> GenM (Binding, SubExp)
-allTrue cs predfun args loc = do
-  andchecks <- newIdent "allTrue" (Basic Bool) loc
-  andfun <- binOpLambda LogAnd (Basic Bool) loc
+allTrue cs predfun args = do
+  andchecks <- newIdent "allTrue" (Basic Bool)
+  andfun <- binOpLambda LogAnd (Basic Bool)
   innerfun <- predConjFun
   let andbnd = mkLet [andchecks] $ LoopOp $
-               Redomap cs andfun innerfun [constant True loc] args loc
+               Redomap cs andfun innerfun [constant True] args
   return (andbnd,
           Var andchecks)
   where predConjFun = do
-          acc <- newIdent "acc" (Basic Bool) loc
-          res <- newIdent "res" (Basic Bool) loc
-          let Body _ predbnds (Result [se] _) = lambdaBody predfun -- XXX
-              andbnd = mkLet [res] $ PrimOp $ BinOp LogAnd (Var acc) se (Basic Bool) loc
-              body = mkBody (predbnds++[andbnd]) $ Result [Var res] loc
-          return Lambda { lambdaSrcLoc = srclocOf predfun
-                        , lambdaParams = acc : lambdaParams predfun
+          acc <- newIdent "acc" (Basic Bool)
+          res <- newIdent "res" (Basic Bool)
+          let Body _ predbnds (Result [se]) = lambdaBody predfun -- XXX
+              andbnd = mkLet [res] $ PrimOp $ BinOp LogAnd (Var acc) se (Basic Bool)
+              body = mkBody (predbnds++[andbnd]) $ Result [Var res]
+          return Lambda { lambdaParams = acc : lambdaParams predfun
                         , lambdaReturnType = [Basic Bool]
                         , lambdaBody = body
                         }

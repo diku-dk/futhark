@@ -284,13 +284,13 @@ instance TypeCheck.Checkable ExplicitMemory where
   checkBodyLore = return
   checkFParamLore = checkMemSummary
   checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
-  basicFParam name t loc =
-    return $ Bindee (Ident name (AST.Basic t) loc) Scalar
+  basicFParam name t =
+    return $ Bindee (Ident name (AST.Basic t)) Scalar
 
-  matchPattern loc pat e = do
-    rt <- expReturns (varMemSummary loc) e
+  matchPattern pat e = do
+    rt <- expReturns varMemSummary e
     matchPatternToReturns (wrong rt) pat rt
-    where wrong rt s = TypeCheck.bad $ TypeError loc $
+    where wrong rt s = TypeCheck.bad $ TypeError noLoc $
                        ("Pattern\n" ++ TypeCheck.message "  " pat ++
                         "\ncannot match result type\n") ++
                        "  " ++ prettyTuple rt ++ "\n" ++ s
@@ -302,20 +302,19 @@ instance TypeCheck.Checkable ExplicitMemory where
           checkResultSubExp (Constant {}) =
             return ()
           checkResultSubExp (Var v) = do
-            attr <- lookupSummary (identName v) loc
+            attr <- lookupSummary $ identName v
             case attr of
               Scalar -> return ()
               MemSummary _ ixfun
                 | IxFun.isDirect ixfun ->
                   return ()
                 | otherwise ->
-                    TypeCheck.bad $ TypeError loc $
+                    TypeCheck.bad $ TypeError noLoc $
                     "Array " ++ pretty v ++
                     " returned by function, but has nontrivial index function" ++
                     pretty ixfun
-            where loc = srclocOf v
-          lookupSummary name loc = do
-            (_, attr, _) <- TypeCheck.lookupVar name loc
+          lookupSummary name = do
+            (_, attr, _) <- TypeCheck.lookupVar name
             case attr of
               TypeCheck.LetBound summary -> return summary
               TypeCheck.FunBound summary -> return summary
@@ -438,14 +437,14 @@ matchPatternToReturns wrong pat rt = do
       lift $ wrong
       "Existential dimension in expression return, but constant in pattern."
 
-varMemSummary :: SrcLoc -> VName -> TypeCheck.TypeM ExplicitMemory MemSummary
-varMemSummary loc name = do
-  (_, attr, _) <- TypeCheck.lookupVar name loc
+varMemSummary :: VName -> TypeCheck.TypeM ExplicitMemory MemSummary
+varMemSummary name = do
+  (_, attr, _) <- TypeCheck.lookupVar name
   case attr of
     TypeCheck.LetBound summary -> return summary
     TypeCheck.FunBound summary -> return summary
     TypeCheck.LambdaBound ->
-      TypeCheck.bad $ TypeError loc $
+      TypeCheck.bad $ TypeError noLoc $
       "Variable " ++ pretty name ++
       " is lambda-bound.\nI cannot deal with this yet."
 
@@ -461,7 +460,7 @@ checkMemSummary (MemSummary v ixfun) = do
             Mem size ->
               TypeCheck.require [Basic Int] size
             t        ->
-              TypeCheck.bad $ TypeCheck.TypeError (srclocOf ident) $
+              TypeCheck.bad $ TypeCheck.TypeError noLoc $
               "Variable " ++ textual (identName v) ++
               " used as memory block, but is of type " ++
               pretty t ++ "."
@@ -479,7 +478,7 @@ instance PrettyLore ExplicitMemory where
     case mapMaybe bindeeAnnotation $ funDecParams fundec of
       []     -> Nothing
       annots -> Just $ PP.folddoc (PP.</>) annots
-  ppExpLore (AST.LoopOp (DoLoop _ merge _ _ _ _)) =
+  ppExpLore (AST.LoopOp (DoLoop _ merge _ _ _)) =
     case mapMaybe (bindeeAnnotation . fst) merge of
       []     -> Nothing
       annots -> Just $ PP.folddoc (PP.</>) annots
@@ -535,13 +534,13 @@ expReturns look (AST.PrimOp (SubExp (Var v))) = do
     _ ->
       fail "Something went very wrong in expReturns."
 
-expReturns _ (AST.PrimOp (Alloc size _)) =
+expReturns _ (AST.PrimOp (Alloc size)) =
   return [ReturnsMemory size]
 
 expReturns _ (AST.PrimOp op) =
   return $ extReturns $ staticShapes $ primOpType op
 
-expReturns _ (AST.LoopOp (DoLoop res merge _ _ _ _)) =
+expReturns _ (AST.LoopOp (DoLoop res merge _ _ _)) =
     return $
     evalState (mapM typeWithAttr $
                zip (map identName res) $
@@ -569,10 +568,10 @@ expReturns _ (AST.LoopOp (DoLoop res merge _ _ _ _)) =
 expReturns _ (AST.LoopOp op) =
   return $ extReturns $ loopOpExtType op
 
-expReturns _ (Apply _ _ ret _) =
+expReturns _ (Apply _ _ ret) =
   return $ map funReturnsToExpReturns ret
 
-expReturns look (If _ b1 b2 ts _) = do
+expReturns look (If _ b1 b2 ts) = do
   b1t <- bodyReturns look ts b1
   b2t <- bodyReturns look ts b2
   return $
@@ -585,7 +584,7 @@ bodyReturns :: Monad m =>
             -> m [FunReturns]
 bodyReturns look ts (AST.Body _ bnds res) = do
   let boundHere = boundInBindings bnds
-      inspect _ (Constant val _) =
+      inspect _ (Constant val) =
         return $ ReturnsScalar $ basicValueType val
       inspect (Basic bt) (Var _) =
         return $ ReturnsScalar bt

@@ -9,8 +9,6 @@ module Futhark.Analysis.AlgSimplify
   )
   where
 
-import Data.Loc
-
 import qualified Data.Set as S
 import qualified Data.HashMap.Lazy as HM
 import Data.List
@@ -27,18 +25,16 @@ type RangesRep = HM.HashMap VName (Int, Maybe ScalExp, Maybe ScalExp)
 
 -- | environment recording the position and
 --   a list of variable-to-range bindings.
-data AlgSimplifyEnv = AlgSimplifyEnv { pos :: SrcLoc, inSolveLTH0 :: Bool, ranges :: RangesRep }
+data AlgSimplifyEnv = AlgSimplifyEnv { inSolveLTH0 :: Bool, ranges :: RangesRep }
 
 type AlgSimplifyM = ReaderT AlgSimplifyEnv (Either Error)
 
-runAlgSimplifier :: Bool -> AlgSimplifyM a -> SrcLoc -> RangesRep -> Either Error a
-runAlgSimplifier s x p r = runReaderT x env
-  where env = AlgSimplifyEnv{ pos = p, inSolveLTH0 = s, ranges = r }
+runAlgSimplifier :: Bool -> AlgSimplifyM a -> RangesRep -> Either Error a
+runAlgSimplifier s x r = runReaderT x env
+  where env = AlgSimplifyEnv{ inSolveLTH0 = s, ranges = r }
 
 badAlgSimplifyM :: String -> AlgSimplifyM a
-badAlgSimplifyM s = do
-  loc <- asks pos
-  lift $ Left $ SimplifyError loc s
+badAlgSimplifyM = lift . Left . SimplifyError
 
 -- | Binds an array name to the set of used-array vars
 markInSolve :: AlgSimplifyEnv -> AlgSimplifyEnv
@@ -77,16 +73,16 @@ type DNF     = [NAnd ]
 --type CNF     = [NOr  ]
 
 -- | Applies Simplification at Expression level:
-simplify :: ScalExp -> SrcLoc -> RangesRep -> Either Error ScalExp
+simplify :: ScalExp -> RangesRep -> Either Error ScalExp
 simplify e = runAlgSimplifier False (simplifyScal e)
 
 -- | Given a symbol i and a scalar expression e, it decomposes 
 --   e = a*i + b and returns (a,b) if possible, otherwise Nothing.
-linFormScalE :: Ident -> ScalExp -> SrcLoc -> RangesRep -> Either Error (Maybe (ScalExp,ScalExp))
+linFormScalE :: Ident -> ScalExp -> RangesRep -> Either Error (Maybe (ScalExp,ScalExp))
 linFormScalE i e = runAlgSimplifier False (linearFormScalExp i e)
 
 -- | Extracts sufficient conditions for a LTH0 relation to hold
-mkSuffConds :: ScalExp -> SrcLoc -> RangesRep -> Either Error [[ScalExp]]
+mkSuffConds :: ScalExp -> RangesRep -> Either Error [[ScalExp]]
 mkSuffConds e = runAlgSimplifier True (gaussElimRel e)
 
 {-

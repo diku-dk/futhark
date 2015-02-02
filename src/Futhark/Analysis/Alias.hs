@@ -11,8 +11,8 @@ aliasAnalysis :: Lore lore => In.Prog lore -> Out.Prog lore
 aliasAnalysis = Out.Prog . map analyseFun . In.progFunctions
 
 analyseFun :: Lore lore => In.FunDec lore -> Out.FunDec lore
-analyseFun (In.FunDec fname restype params body loc) =
-  Out.FunDec fname restype params body' loc
+analyseFun (In.FunDec fname restype params body) =
+  Out.FunDec fname restype params body'
   where body' = analyseBody body
 
 analyseBody :: Lore lore => In.Body lore -> Out.Body lore
@@ -28,24 +28,24 @@ analyseBinding (In.Let pat lore e) =
   in Out.Let pat' lore' e'
 
 analyseExp :: Lore lore => In.Exp lore -> Out.Exp lore
-analyseExp (Out.LoopOp (In.Map cs lam args loc)) =
+analyseExp (Out.LoopOp (In.Map cs lam args)) =
   Out.LoopOp $
-  Out.Map cs (analyseLambda lam) args loc
-analyseExp (Out.LoopOp (In.Filter cs lam args loc)) =
+  Out.Map cs (analyseLambda lam) args
+analyseExp (Out.LoopOp (In.Filter cs lam args)) =
   Out.LoopOp $
-  Out.Filter cs (analyseLambda lam) args loc
-analyseExp (Out.LoopOp (In.Reduce cs lam input loc)) =
+  Out.Filter cs (analyseLambda lam) args
+analyseExp (Out.LoopOp (In.Reduce cs lam input)) =
   Out.LoopOp $
-  Out.Reduce cs (analyseLambda lam) input loc
-analyseExp (Out.LoopOp (In.Scan cs lam input loc)) =
+  Out.Reduce cs (analyseLambda lam) input
+analyseExp (Out.LoopOp (In.Scan cs lam input)) =
   Out.LoopOp $
-  Out.Scan cs (analyseLambda lam) input loc
-analyseExp (Out.LoopOp (In.Redomap cs outerlam innerlam acc arr loc)) =
+  Out.Scan cs (analyseLambda lam) input
+analyseExp (Out.LoopOp (In.Redomap cs outerlam innerlam acc arr)) =
   Out.LoopOp $
   Out.Redomap cs
    (analyseLambda outerlam)
    (analyseLambda innerlam)
-   acc arr loc
+   acc arr
 analyseExp e = Out.mapExp traverse e
   where traverse =
           Out.Mapper { Out.mapOnSubExp = return
