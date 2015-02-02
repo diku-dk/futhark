@@ -92,13 +92,13 @@ instance Substitutable lore => Substitute (NestBody lore) where
 bodyToLambda :: (Bindable lore, MonadFreshNames m) =>
                 [Type] -> NestBody lore -> m (Lambda lore)
 bodyToLambda _ (Fun l) = return l
-bodyToLambda inpts (NewNest (Nesting paramNames inps bndIds retTypes) op) = do
+bodyToLambda pts (NewNest (Nesting paramNames inps bndIds retTypes) op) = do
   (e,f) <- runBinder' $ SOAC.toExp =<< toSOAC (SOACNest inps op)
   let idents = instantiateExtTypes loc bndIds $ expExtType e
   bnd <- mkLetNames (map identName idents) e
   return
     Lambda { lambdaSrcLoc = loc
-           , lambdaParams = zipWith mkIdents paramNames $ map rowType inpts
+           , lambdaParams = zipWith mkIdents paramNames pts
            , lambdaReturnType = retTypes
            , lambdaBody = f $ mkBody [bnd] $
                           Result (map Var idents) loc
@@ -255,12 +255,22 @@ nested l
 
 toSOAC :: (Bindable lore, MonadFreshNames m) => SOACNest lore -> m (SOAC lore)
 toSOAC (SOACNest as (Map cs b loc)) =
-  SOAC.Map cs <$> bodyToLambda (map SOAC.inputType as) b <*> pure as <*> pure loc
+  SOAC.Map cs <$>
+  bodyToLambda (map SOAC.inputRowType as) b <*>
+  pure as <*> pure loc
 toSOAC (SOACNest as (Reduce cs b es loc)) =
-  SOAC.Reduce cs <$> bodyToLambda (map SOAC.inputType as) b <*> pure (zip es as) <*> pure loc
+  SOAC.Reduce cs <$>
+  bodyToLambda (map subExpType es ++ map SOAC.inputRowType as) b <*>
+  pure (zip es as) <*> pure loc
 toSOAC (SOACNest as (Scan cs b es loc)) =
-  SOAC.Scan cs <$> bodyToLambda (map SOAC.inputType as) b <*> pure (zip es as) <*> pure loc
+  SOAC.Scan cs <$>
+  bodyToLambda (map subExpType es ++ map SOAC.inputRowType as) b <*>
+  pure (zip es as) <*> pure loc
 toSOAC (SOACNest as (Filter cs b loc)) =
-  SOAC.Filter cs <$> bodyToLambda (map SOAC.inputType as) b <*> pure as <*> pure loc
+  SOAC.Filter cs <$>
+  bodyToLambda (map SOAC.inputRowType as) b <*>
+  pure as <*> pure loc
 toSOAC (SOACNest as (Redomap cs l b es loc)) =
-  SOAC.Redomap cs l <$> bodyToLambda (map SOAC.inputType as) b <*> pure es <*> pure as <*> pure loc
+  SOAC.Redomap cs l <$>
+  bodyToLambda (map subExpType es ++ map SOAC.inputRowType as) b <*>
+  pure es <*> pure as <*> pure loc
