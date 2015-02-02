@@ -653,6 +653,9 @@ simplifyIndexing look (Index cs idd inds) =
          let inds' = permuteShape (take (length inds) perm) inds
          in Just $ Index (cs++cs2) (setIdentUniqueness src u) inds'
 
+    Just (Reshape cs2 [_] v2) ->
+      Just $ Index (cs++cs2) v2 inds
+
     _ -> Nothing
   where u = uniqueness $ identType idd
 
