@@ -26,7 +26,7 @@ module Language.Futhark.Parser.Parser
 import Control.Applicative
 import Control.Monad
 import Control.Monad.Trans
-import Control.Monad.Error
+import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.Trans.State
 import Control.Applicative ((<$>), (<*>))
@@ -465,7 +465,7 @@ Values2 : Value ',' Values { $1 : $3 }
 {
 
 type ParserMonad a =
-  ErrorT String (
+  ExceptT String (
     ReaderT FilePath (
        StateT [L Token] ReadLineMonad)) a
 
@@ -537,7 +537,7 @@ lexer cont = do
   ts <- getTokens
   case ts of
     [] -> do
-      ended <- lift $ runErrorT $ cont eof
+      ended <- lift $ runExceptT $ cont eof
       case ended of
         Right x -> return x
         Left _ -> do

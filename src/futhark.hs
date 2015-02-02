@@ -3,7 +3,7 @@ module Main (main) where
 
 import Control.Monad
 import Control.Monad.Writer.Strict (runWriter)
-import Control.Monad.Error
+import Control.Monad.Except
 import Data.Version
 import System.Console.GetOpt
 import System.Environment (getArgs, getProgName)
@@ -185,7 +185,7 @@ typeCheck checkProg checkProgNoUniqueness config
 futharkc :: FutharkConfig -> FilePath -> String
          -> (String, Either CompileError PipelineState)
 futharkc config filename srccode =
-  case runWriter (runErrorT futharkc') of
+  case runWriter (runExceptT futharkc') of
     (Left err, msgs) -> (msgs, Left err)
     (Right prog, msgs) -> (msgs, Right prog)
   where futharkc' = do

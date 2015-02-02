@@ -28,7 +28,7 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.Trans
 import Control.Monad.Writer.Strict (Writer, tell)
-import Control.Monad.Error
+import Control.Monad.Except
 import Data.Maybe (isJust)
 
 import qualified Text.PrettyPrint.Mainland as PP
@@ -43,7 +43,7 @@ runPasses config = foldl comb return $ futharkpipeline config
   where comb prev pass prog = do
           prog' <- prev prog
           when (verbose config) $ tell $ "Running " ++ passName pass ++ ".\n"
-          res <- lift $ runErrorT $ passOp pass prog'
+          res <- lift $ runExceptT $ passOp pass prog'
           case res of
             Left err ->
               compileError ("Error during pass '" ++ passName pass ++ "':\n" ++ errorDesc err)
@@ -71,10 +71,7 @@ data CompileError = CompileError {
   , errorState :: Maybe PipelineState
   }
 
-instance Error CompileError where
-  strMsg s = CompileError s Nothing
-
-type FutharkM = ErrorT CompileError (Writer String)
+type FutharkM = ExceptT CompileError (Writer String)
 
 data PipelineState = Basic Basic.Prog
                    | ExplicitMemory ExplicitMemory.Prog

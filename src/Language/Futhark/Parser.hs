@@ -26,7 +26,7 @@ module Language.Futhark.Parser
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.Trans.State
-import Control.Monad.Error
+import Control.Monad.Except
 
 import Language.Futhark.Syntax
 import Language.Futhark.Attributes
@@ -39,14 +39,10 @@ data ParseError = ParseError String
 instance Show ParseError where
   show (ParseError s) = s
 
-instance Error ParseError where
-  noMsg = ParseError "Unspecifed parse error"
-  strMsg = ParseError
-
 parseInMonad :: ParserMonad a -> FilePath -> String -> ReadLineMonad (Either ParseError a)
 parseInMonad p file program = liftM (either (Left . ParseError) Right)
                               $ either (return . Left)
-                              (evalStateT (runReaderT (runErrorT p) file))
+                              (evalStateT (runReaderT (runExceptT p) file))
                               (alexScanTokens file program)
 
 parseIncrementalIO :: ParserMonad a -> FilePath -> String -> IO (Either ParseError a)
