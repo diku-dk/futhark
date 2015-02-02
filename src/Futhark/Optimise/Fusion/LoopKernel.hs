@@ -359,9 +359,10 @@ iswim _ nest ots
                    }
         perm = case retTypes of []  -> []
                                 t:_ -> transposeIndex 0 1 [0..arrayRank t]
-    return (Nest.SOACNest
-            newInputs
-            (Nest.Map cs1 (Nest.NewNest scanNest innerScan) loc2),
+        nest' = Nest.SOACNest
+                newInputs
+                (Nest.Map cs1 (Nest.NewNest scanNest innerScan) loc2)
+    return (nest',
             ots SOAC.|> SOAC.Rearrange cs2 perm)
 iswim _ _ _ = fail "ISWIM does not apply"
 
@@ -421,9 +422,25 @@ pushRearrange inpIds nest ots = do
   (perm, inputs') <- liftMaybe $ fixupInputs inpIds $ MapNest.inputs nest'
   if permuteReach perm <= mapDepth nest' then
     let invertRearrange = SOAC.Rearrange [] $ permuteInverse perm
-    in return (inputs' `Nest.setInputs` MapNest.toSOACNest nest',
+    in return (MapNest.toSOACNest $
+               inputs' `MapNest.setInputs`
+               (rearrangeReturnTypes nest' perm),
                ots SOAC.|> invertRearrange)
   else fail "Cannot push transpose"
+
+rearrangeReturnTypes :: MapNest -> [Int] -> MapNest
+rearrangeReturnTypes nest@(MapNest.MapNest cs body nestings inps loc) perm =
+  MapNest.MapNest cs body
+  (zipWith setReturnType nestings $
+   drop 1 $ iterate (map rowType) ts)
+  inps loc
+  where rearrange t = setArrayDims t $
+                      permuteShape (perm ++ [length perm..arrayRank t-1]) $
+                      arrayDims t
+        origts = MapNest.typeOf nest
+        ts =  map rearrange origts
+        setReturnType nesting t' =
+          nesting { MapNest.nestingReturnType = t' }
 
 fixupInputs :: [Ident] -> [SOAC.Input] -> Maybe ([Int], [SOAC.Input])
 fixupInputs inpIds inps =
