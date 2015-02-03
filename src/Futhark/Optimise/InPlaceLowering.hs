@@ -282,7 +282,7 @@ maybeForward v dest cs src i = do
   samebody <- isInCurrentBody $ identName v
   -- Check condition (6)
   optimisable <- isOptimisable $ identName v
-  if available && samebody && optimisable then do
+  if available && samebody && optimisable && not (basicType $ identType v) then do
     let fwd = DesiredUpdate dest cs src [i] v
     tell mempty { forwardThese = [fwd] }
     return True
