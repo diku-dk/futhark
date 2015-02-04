@@ -654,7 +654,7 @@ simplifyIndexing look (Index cs idd inds) =
          in Just $ Index (cs++cs2) (setIdentUniqueness src u) inds'
 
     Just (Reshape cs2 [_] v2) ->
-      Just $ Index (cs++cs2) v2 inds
+      Just $ Index (cs++cs2) (setIdentUniqueness v2 u) inds
 
     _ -> Nothing
   where u = uniqueness $ identType idd
