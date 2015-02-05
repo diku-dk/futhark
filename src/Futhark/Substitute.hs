@@ -80,7 +80,6 @@ replace substs = Mapper {
                  , mapOnBody = return . substituteNames substs
                  , mapOnBinding = return . substituteNames substs
                  , mapOnType = return . substituteNames substs
-                 , mapOnValue = return
                  , mapOnLambda = return . substituteNames substs
                  , mapOnCertificates = return . map (substituteNames substs)
                  , mapOnRetType = return . substituteNames substs

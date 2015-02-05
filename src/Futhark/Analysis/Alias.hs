@@ -49,7 +49,6 @@ analyseExp (Out.LoopOp (In.Redomap cs outerlam innerlam acc arr)) =
 analyseExp e = Out.mapExp traverse e
   where traverse =
           Out.Mapper { Out.mapOnSubExp = return
-                     , Out.mapOnValue = return
                      , Out.mapOnCertificates = return
                      , Out.mapOnIdent = return
                      , Out.mapOnType = return

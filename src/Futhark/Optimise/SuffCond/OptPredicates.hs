@@ -443,7 +443,6 @@ forbiddenExp context = isNothing . walkExpM walk
                       , walkOnBody    = checkIf forbiddenBody
                       , walkOnBinding = checkIf $ isForbidden . snd . bindingLore
                       , walkOnIdent   = checkIf forbiddenIdent
-                      , walkOnValue   = const $ return ()
                       , walkOnCertificates = mapM_ $ checkIf forbiddenIdent
                       , walkOnLambda  = checkIf $ forbiddenBody . lambdaBody
                       }

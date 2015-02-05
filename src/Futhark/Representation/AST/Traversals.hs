@@ -72,7 +72,6 @@ data Mapper flore tlore m = Mapper {
   , mapOnType :: Type -> m Type
   , mapOnLambda :: Lambda flore -> m (Lambda tlore)
   , mapOnIdent :: Ident -> m Ident
-  , mapOnValue :: Value -> m Value
   , mapOnCertificates :: Certificates -> m Certificates
   , mapOnRetType :: RetType flore -> m (RetType tlore)
   , mapOnFParam :: FParam flore -> m (FParam tlore)
@@ -87,7 +86,6 @@ identityMapper = Mapper {
                  , mapOnType = return
                  , mapOnLambda = return
                  , mapOnIdent = return
-                 , mapOnValue = return
                  , mapOnCertificates = return
                  , mapOnRetType = return
                  , mapOnFParam = return
@@ -225,7 +223,6 @@ data Folder a lore m = Folder {
   , foldOnType :: a -> Type -> m a
   , foldOnLambda :: a -> Lambda lore -> m a
   , foldOnIdent :: a -> Ident -> m a
-  , foldOnValue :: a -> Value -> m a
   , foldOnCertificates :: a -> Certificates -> m a
   , foldOnRetType :: a -> RetType lore -> m a
   , foldOnFParam :: a -> FParam lore -> m a
@@ -240,7 +237,6 @@ identityFolder = Folder {
                  , foldOnType = const . return
                  , foldOnLambda = const . return
                  , foldOnIdent = const . return
-                 , foldOnValue = const . return
                  , foldOnCertificates = const . return
                  , foldOnRetType = const . return
                  , foldOnFParam = const . return
@@ -254,7 +250,6 @@ foldMapper f = Mapper {
                , mapOnType = wrap foldOnType
                , mapOnLambda = wrap foldOnLambda
                , mapOnIdent = wrap foldOnIdent
-               , mapOnValue = wrap foldOnValue
                , mapOnCertificates = wrap foldOnCertificates
                , mapOnRetType = wrap foldOnRetType
                , mapOnFParam = wrap foldOnFParam
@@ -293,7 +288,6 @@ data Walker lore m = Walker {
   , walkOnType :: Type -> m ()
   , walkOnLambda :: Lambda lore -> m ()
   , walkOnIdent :: Ident -> m ()
-  , walkOnValue :: Value -> m ()
   , walkOnCertificates :: Certificates -> m ()
   , walkOnRetType :: RetType lore -> m ()
   , walkOnFParam :: FParam lore -> m ()
@@ -308,7 +302,6 @@ identityWalker = Walker {
                  , walkOnType = const $ return ()
                  , walkOnLambda = const $ return ()
                  , walkOnIdent = const $ return ()
-                 , walkOnValue = const $ return ()
                  , walkOnCertificates = const $ return ()
                  , walkOnRetType = const $ return ()
                  , walkOnFParam = const $ return ()
@@ -322,7 +315,6 @@ walkMapper f = Mapper {
                , mapOnType = wrap walkOnType
                , mapOnLambda = wrap walkOnLambda
                , mapOnIdent = wrap walkOnIdent
-               , mapOnValue = wrap walkOnValue
                , mapOnCertificates = wrap walkOnCertificates
                , mapOnRetType = wrap walkOnRetType
                , mapOnFParam = wrap walkOnFParam

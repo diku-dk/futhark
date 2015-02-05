@@ -196,7 +196,6 @@ instance Renameable lore => Rename (Exp lore) where
                     , mapOnIdent = rename
                     , mapOnLambda = rename
                     , mapOnType = rename
-                    , mapOnValue = return
                     , mapOnCertificates = mapM rename
                     , mapOnRetType = rename
                     , mapOnFParam = rename
