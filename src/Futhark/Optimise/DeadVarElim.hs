@@ -115,7 +115,6 @@ deadCodeElimExp e = mapExpM mapper e
                  , mapOnLambda = deadCodeElimLambda
                  , mapOnIdent = deadCodeElimIdent
                  , mapOnCertificates = mapM deadCodeElimIdent
-                 , mapOnType = deadCodeElimType
                  , mapOnRetType = \rt -> do
                    seen $ freeNamesIn rt
                    return rt

@@ -505,7 +505,6 @@ simplifyExpBase = mapExpM hoist
                 -- bind their parameters.
                 , mapOnLambda = fail "Unhandled lambda in simplification engine."
                 , mapOnIdent = simplifyIdent
-                , mapOnType = simplifyType
                 , mapOnCertificates = simplifyCerts
                 , mapOnRetType = simplifyRetType
                 , mapOnFParam =

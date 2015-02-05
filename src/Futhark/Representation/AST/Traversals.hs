@@ -69,7 +69,6 @@ data Mapper flore tlore m = Mapper {
     mapOnSubExp :: SubExp -> m SubExp
   , mapOnBody :: Body flore -> m (Body tlore)
   , mapOnBinding :: Binding flore -> m (Binding tlore)
-  , mapOnType :: Type -> m Type
   , mapOnLambda :: Lambda flore -> m (Lambda tlore)
   , mapOnIdent :: Ident -> m Ident
   , mapOnCertificates :: Certificates -> m Certificates
@@ -83,7 +82,6 @@ identityMapper = Mapper {
                    mapOnSubExp = return
                  , mapOnBinding = return
                  , mapOnBody = return
-                 , mapOnType = return
                  , mapOnLambda = return
                  , mapOnIdent = return
                  , mapOnCertificates = return
@@ -215,6 +213,13 @@ mapOnExtType tv (Mem size) = Mem <$> mapOnSubExp tv size
 mapExp :: Mapper flore tlore Identity -> Exp flore -> Exp tlore
 mapExp m = runIdentity . mapExpM m
 
+mapOnType :: (Applicative m, Monad m) =>
+             Mapper flore tlore m -> Type -> m Type
+mapOnType _ (Basic bt) = return $ Basic bt
+mapOnType tv (Mem size) = Mem <$> mapOnSubExp tv size
+mapOnType tv (Array bt shape u) =
+  Array bt <$> (Shape <$> mapM (mapOnSubExp tv) (shapeDims shape)) <*> pure u
+
 -- | Reification of a left-reduction across a syntax tree.
 data Folder a lore m = Folder {
     foldOnSubExp :: a -> SubExp -> m a
@@ -247,7 +252,6 @@ foldMapper f = Mapper {
                  mapOnSubExp = wrap foldOnSubExp
                , mapOnBody = wrap foldOnBody
                , mapOnBinding = wrap foldOnBinding
-               , mapOnType = wrap foldOnType
                , mapOnLambda = wrap foldOnLambda
                , mapOnIdent = wrap foldOnIdent
                , mapOnCertificates = wrap foldOnCertificates
@@ -312,7 +316,6 @@ walkMapper f = Mapper {
                  mapOnSubExp = wrap walkOnSubExp
                , mapOnBody = wrap walkOnBody
                , mapOnBinding = wrap walkOnBinding
-               , mapOnType = wrap walkOnType
                , mapOnLambda = wrap walkOnLambda
                , mapOnIdent = wrap walkOnIdent
                , mapOnCertificates = wrap walkOnCertificates

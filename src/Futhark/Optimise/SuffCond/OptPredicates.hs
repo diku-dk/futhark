@@ -439,7 +439,6 @@ instance MonadFreshNames m => BindableM (VariantM m) where
 forbiddenExp :: Context m -> S.Exp Invariance -> Bool
 forbiddenExp context = isNothing . walkExpM walk
   where walk = Walker { walkOnSubExp  = checkIf forbiddenSubExp
-                      , walkOnType    = checkIf forbiddenType
                       , walkOnBody    = checkIf forbiddenBody
                       , walkOnBinding = checkIf $ isForbidden . snd . bindingLore
                       , walkOnIdent   = checkIf forbiddenIdent
@@ -454,7 +453,5 @@ forbiddenExp context = isNothing . walkExpM walk
 
         forbiddenSubExp (Var v) = identName v `forbiddenIn` context
         forbiddenSubExp (Constant {}) = False
-
-        forbiddenType t = any (`forbiddenIn` context) $ freeNamesIn t
 
         forbiddenBody = any (isForbidden . snd . bindingLore) . bodyBindings

@@ -51,7 +51,6 @@ analyseExp e = Out.mapExp traverse e
           Out.Mapper { Out.mapOnSubExp = return
                      , Out.mapOnCertificates = return
                      , Out.mapOnIdent = return
-                     , Out.mapOnType = return
                      , Out.mapOnBody = return . analyseBody
                      , Out.mapOnBinding = return . analyseBinding
                      , Out.mapOnLambda = error "Improperly handled lambda in alias analysis"
