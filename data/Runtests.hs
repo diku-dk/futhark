@@ -9,6 +9,7 @@ import Control.Monad
 
 import qualified Data.Set as S
 import Data.Char (isSpace)
+import Data.List
 
 import System.Directory
 import System.Environment
@@ -16,6 +17,12 @@ import System.Exit
 import System.FilePath
 import System.IO
 import System.Process
+
+-- We need some functions from Futhark itself to preprocess input
+-- values.
+import Futhark.Internalise.TypesValues (internaliseValue)
+import Language.Futhark.Parser (parseValues)
+import Futhark.Representation.AST.Pretty (pretty)
 
 futharkFlags :: String
 futharkFlags = "-s"
@@ -26,6 +33,14 @@ concurrency = 8
 
 clearLine :: IO ()
 clearLine = putStr "\27[2K"
+
+readValuesFromFile :: FilePath -> IO (Either String String)
+readValuesFromFile filename = do
+  s <- readFile filename
+  return $ case parseValues filename s of
+    Left e -> Left $ show e
+    Right vs -> Right $ intercalate "\n" $ map pretty $
+                concatMap internaliseValue vs
 
 data TestResult = Success
                 | Failure String
@@ -79,26 +94,31 @@ executeTest f inputf outputf = do
 
 compileTest :: FilePath -> FilePath -> FilePath -> IO TestResult
 compileTest f inputf outputf = do
-  input <- readFile inputf
-  expectedOutput <- readFile outputf
-  (futcode, l0prog, l0err) <- readProcessWithExitCode "futhark" [futharkFlags, "-fsae", "--compile-sequential", f] ""
-  writeFile cOutputf l0prog
-  case futcode of
-    ExitFailure 127 -> return $ Failure futharkNotFound
-    ExitFailure _   -> return $ Failure l0err
-    ExitSuccess     -> do
-      (gccCode, _, gccerr) <- readProcessWithExitCode "gcc" [cOutputf, "-o", binOutputf, "-lm", "-O3"] ""
-      case gccCode of
-        ExitFailure _ -> return $ Failure gccerr
-        ExitSuccess   -> do
-          (progCode, output, progerr) <- readProcessWithExitCode binOutputf [] input
-          writeFile expectedOutputf output
-          case progCode of
-            ExitFailure _ -> return $ Failure progerr
-            ExitSuccess
-              | output `compareOutput` expectedOutput -> return Success
-              | otherwise ->
-                  return $ Failure $ outputf ++ " and " ++ expectedOutputf ++ " do not match."
+  input <- readValuesFromFile inputf
+  case input of
+    Left e -> return $ Failure e
+    Right input' -> do
+      expectedOutput <- readFile outputf
+      (futcode, l0prog, l0err) <-
+        readProcessWithExitCode "futhark"
+        [futharkFlags, "-fs", "--in-place-lowering", "-ae", "--compile-sequential", f] ""
+      writeFile cOutputf l0prog
+      case futcode of
+        ExitFailure 127 -> return $ Failure futharkNotFound
+        ExitFailure _   -> return $ Failure l0err
+        ExitSuccess     -> do
+          (gccCode, _, gccerr) <- readProcessWithExitCode "gcc" [cOutputf, "-o", binOutputf, "-lm", "-O3"] ""
+          case gccCode of
+            ExitFailure _ -> return $ Failure gccerr
+            ExitSuccess   -> do
+              (progCode, output, progerr) <- readProcessWithExitCode binOutputf [] input'
+              writeFile expectedOutputf output
+              case progCode of
+                ExitFailure _ -> return $ Failure progerr
+                ExitSuccess
+                  | output `compareOutput` expectedOutput -> return Success
+                  | otherwise ->
+                      return $ Failure $ outputf ++ " and " ++ expectedOutputf ++ " do not match."
   where cOutputf = outputf `replaceExtension` "c"
         binOutputf = outputf `replaceExtension` "bin"
         expectedOutputf = outputf `replaceExtension` "compilerout"
