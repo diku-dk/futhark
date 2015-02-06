@@ -21,7 +21,7 @@
 --   loop (x = x0) = for i < n do
 --     let a = a[k,i] in
 --     let x[k,i] = a * i in
---     r
+--     x
 --     in
 --   ...
 -- @

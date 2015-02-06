@@ -79,6 +79,7 @@ Library
                    Futhark.Optimise.InliningDeadFun
                    Futhark.Optimise.InPlaceLowering
                    Futhark.Optimise.InPlaceLowering.LowerIntoBinding
+                   Futhark.Optimise.InPlaceLowering.SubstituteIndices
                    Futhark.Optimise.SimpleOpts
                    Futhark.Optimise.Simplifier
                    Futhark.Optimise.Simplifier.Apply
