@@ -1,9 +1,15 @@
+-- | This module exports facilities for transforming array accesses in
+-- a list of 'Binding's (intended to be the bindings in a body).  The
+-- idea is that you can state that some variable @x@ is in fact an
+-- array indexing @v[i0,i1,...]@.
 module Futhark.Optimise.InPlaceLowering.SubstituteIndices
        (
          substituteIndices
        , IndexSubstitution
        , IndexSubstitutions
        ) where
+
+import Control.Applicative
 
 import Futhark.Representation.AST
 import Futhark.Tools
@@ -34,20 +40,41 @@ substituteIndicesInBinding :: MonadBinder m =>
                            -> Binding (Lore m)
                            -> m IndexSubstitutions
 substituteIndicesInBinding substs (Let pat _ (PrimOp (Update cs src is val)))
-  | Just (cs2, src2, is2) <- lookup (identName src) substs,
+  | Just (cs2, src2, is2) <- lookup srcname substs,
     [name] <- patternNames pat = do
       patv' <- letExp (baseString name) $ PrimOp $
                Update (cs++cs2) src2 (is2++is) val
-      return $ update name (cs2, patv', is2) substs
+      return $ update srcname name (cs2, patv', is2) substs
+  where srcname = identName src
 substituteIndicesInBinding substs (Let pat lore e) = do
   e' <- mapExpM substitute e
   addBinding $ Let pat lore e'
   return substs
-  where substitute = identityMapper
+  where substitute = identityMapper { mapOnSubExp = substituteIndicesInSubExp substs
+                                    , mapOnIdent  = substituteIndicesInIdent substs
+                                    }
 
-update :: VName -> IndexSubstitution -> IndexSubstitutions
+substituteIndicesInSubExp :: MonadBinder m =>
+                             IndexSubstitutions
+                          -> SubExp
+                          -> m SubExp
+substituteIndicesInSubExp substs (Var v) = Var <$> substituteIndicesInIdent substs v
+substituteIndicesInSubExp _      se      = return se
+
+
+substituteIndicesInIdent :: MonadBinder m =>
+                            IndexSubstitutions
+                         -> Ident
+                         -> m Ident
+substituteIndicesInIdent substs v
+  | Just (cs2, src2, is2) <- lookup (identName v) substs =
+    letExp "idx" $ PrimOp $ Index cs2 src2 is2
+  | otherwise =
+    return v
+
+update :: VName -> VName -> IndexSubstitution -> IndexSubstitutions
        -> IndexSubstitutions
-update name subst ((othername, othersubst) : substs)
-  | name == othername = (othername, othersubst) : update name subst substs
-  | otherwise         = (name, subst)           : substs
-update name _ [] = error $ "Cannot find substitution for " ++ pretty name
+update needle name subst ((othername, othersubst) : substs)
+  | needle == othername = (name, subst)           : substs
+  | otherwise           = (othername, othersubst) : update needle name subst substs
+update needle _    _ [] = error $ "Cannot find substitution for " ++ pretty needle
