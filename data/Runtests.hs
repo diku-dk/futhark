@@ -7,9 +7,9 @@ import Control.Concurrent
 import Control.Exception
 import Control.Monad
 import Control.Monad.Except
+import qualified Data.Array as A
 
 import qualified Data.Set as S
-import Data.Char (isSpace)
 import Data.List
 
 import System.Directory
@@ -24,6 +24,7 @@ import System.Process
 import Futhark.Internalise.TypesValues (internaliseValue)
 import Language.Futhark.Parser (parseValues)
 import Futhark.Representation.AST.Pretty (pretty)
+import Futhark.Representation.AST.Syntax.Core
 
 futharkFlags :: String
 futharkFlags = "-s"
@@ -43,13 +44,12 @@ runTestM = liftM (either Failure $ const Success) . runExceptT
 io :: IO a -> TestM a
 io = liftIO
 
-readValuesFromFile :: FilePath -> TestM String
+readValuesFromFile :: FilePath -> TestM [Value]
 readValuesFromFile filename = do
   s <- liftIO $ readFile filename
   case parseValues filename s of
     Left e -> throwError $ show e
-    Right vs -> return $ intercalate "\n" $ map pretty $
-                concatMap internaliseValue vs
+    Right vs -> return $ concatMap internaliseValue vs
 
 data TestResult = Success
                 | Failure String
@@ -88,50 +88,66 @@ typeCheckTest f = do
 
 executeTest :: FilePath -> FilePath -> FilePath -> TestM ()
 executeTest f inputf outputf = do
-  input <- io $ readFile inputf
+  input <- (intercalate "\n" . map pretty) <$> readValuesFromFile inputf
   (code, output, err) <- io $ readProcessWithExitCode "futhark" [futharkFlags, "-i", f] input
-  expectedOutput <- io $ readFile outputf
+  io $ writeFile expectedOutputf output
   case code of
-    ExitSuccess
-      | output `compareOutput` expectedOutput -> return ()
-      | otherwise -> do
-        io $ writeFile expectedOutputf output
-        throwError $ outputf ++ " and " ++ expectedOutputf ++ " do not match."
+    ExitSuccess     -> compareResult outputf expectedOutputf
     ExitFailure 127 -> throwError futharkNotFound
     ExitFailure _   -> throwError err
   where expectedOutputf = outputf `replaceExtension` "interpreterout"
 
 compileTest :: FilePath -> FilePath -> FilePath -> TestM ()
 compileTest f inputf outputf = do
-  input <- readValuesFromFile inputf
-  expectedOutput <- io $ readFile outputf
+  input <- (intercalate "\n" . map pretty) <$> readValuesFromFile inputf
   (futcode, l0prog, l0err) <-
     io $ readProcessWithExitCode "futhark"
-    [futharkFlags, "-fs", "--in-place-lowering", "-ae", "--compile-sequential", f] ""
+    [futharkFlags, "-fs", "-ae", "--compile-sequential", f] ""
   io $ writeFile cOutputf l0prog
   case futcode of
     ExitFailure 127 -> throwError futharkNotFound
     ExitFailure _   -> throwError l0err
     ExitSuccess     -> return ()
-  (gccCode, _, gccerr) <- io $ readProcessWithExitCode "gcc" [cOutputf, "-o", binOutputf, "-lm", "-O3"] ""
+  (gccCode, _, gccerr) <-
+    io $ readProcessWithExitCode "gcc"
+    [cOutputf, "-o", binOutputf, "-lm", "-O3"] ""
   case gccCode of
     ExitFailure _ -> throwError gccerr
     ExitSuccess   -> return ()
-  (progCode, output, progerr) <- io $ readProcessWithExitCode binOutputf [] input
+  (progCode, output, progerr) <-
+    io $ readProcessWithExitCode binOutputf [] input
   io $ writeFile expectedOutputf output
   case progCode of
     ExitFailure _ -> throwError progerr
-    ExitSuccess
-      | output `compareOutput` expectedOutput ->
-        return ()
-      | otherwise ->
-          throwError $ outputf ++ " and " ++ expectedOutputf ++ " do not match."
+    ExitSuccess -> compareResult outputf expectedOutputf
   where cOutputf = outputf `replaceExtension` "c"
         binOutputf = outputf `replaceExtension` "bin"
         expectedOutputf = outputf `replaceExtension` "compilerout"
 
-compareOutput :: String -> String -> Bool
-compareOutput x y = filter (not . isSpace) x == filter (not . isSpace) y
+compareResult :: FilePath -> FilePath -> TestM ()
+compareResult outputf expectedOutputf = do
+  output <- readValuesFromFile outputf
+  expectedOutput <- readValuesFromFile expectedOutputf
+  unless (compareValues output expectedOutput) $
+    throwError $ outputf ++ " and " ++ expectedOutputf ++ " do not match."
+
+compareValues :: [Value] -> [Value] -> Bool
+compareValues vs1 vs2
+  | length vs1 /= length vs2 = False
+  | otherwise = and $ zipWith compareValue vs1 vs2
+
+compareValue :: Value -> Value -> Bool
+compareValue (BasicVal bv1) (BasicVal bv2) =
+  compareBasicValue bv1 bv2
+compareValue (ArrayVal vs1 _) (ArrayVal vs2 _) =
+  compareValues (A.elems vs1) (A.elems vs2)
+compareValue _ _ =
+  False
+
+compareBasicValue :: BasicValue -> BasicValue -> Bool
+compareBasicValue (RealVal x) (RealVal y) = abs (x - y) < epsilon
+  where epsilon = 0.0001
+compareBasicValue x y = x == y
 
 catching :: IO TestResult -> IO TestResult
 catching m = m `catch` save
