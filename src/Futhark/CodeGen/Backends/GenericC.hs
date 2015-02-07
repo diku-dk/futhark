@@ -168,7 +168,7 @@ typeToCType t = do
 
 printBasicStm :: C.Exp -> BasicType -> C.Stm
 printBasicStm val Int = [C.cstm|printf("%d", $exp:val);|]
-printBasicStm val Char = [C.cstm|printf("%c", $exp:val);|]
+printBasicStm val Char = [C.cstm|printf("'%c'", $exp:val);|]
 printBasicStm val Bool = [C.cstm|printf($exp:val ? "True" : "False");|]
 printBasicStm val Real = [C.cstm|printf("%.6f", $exp:val);|]
 printBasicStm _ Cert = [C.cstm|printf("Checked");|]
@@ -185,9 +185,11 @@ printStm (ArrayValue mem Char [size]) = do
   let size' = dimSizeToExp size
   return [C.cstm|{
           int $id:i;
+          printf("\"");
           for ($id:i = 0; $id:i < $exp:size'; $id:i++) {
             printf("%c", ((char*)$id:mem)[$id:i]);
           }
+          printf("\"");
           }|]
 printStm (ArrayValue mem bt (dim:shape)) = do
   i <- newVName "print_i"

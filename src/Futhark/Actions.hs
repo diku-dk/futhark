@@ -73,7 +73,7 @@ interpret parseValues prog =
                        exitWith $ ExitFailure 2
         Right val  -> putStrLn $ ppOutput val
   where ppOutput vs = intercalate "\n" $ map ppOutput' vs
-        ppOutput' val | Just s <- arrayString val = s
+        ppOutput' val | Just s <- arrayString val = show s
         ppOutput' (BasicVal (RealVal x)) = printf "%.6f" x
         ppOutput' (BasicVal (IntVal x))  = show x
         ppOutput' (BasicVal (CharVal c)) = show c
