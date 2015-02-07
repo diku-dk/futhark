@@ -48,7 +48,7 @@ readValuesFromFile :: FilePath -> TestM [Value]
 readValuesFromFile filename = do
   s <- liftIO $ readFile filename
   case parseValues filename s of
-    Left e -> throwError $ show e
+    Left e -> throwError $ "When reading data file " ++ filename ++ ": " ++ show e
     Right vs -> return $ concatMap internaliseValue vs
 
 data TestResult = Success
@@ -167,17 +167,18 @@ runTest testmvar resmvar = forever $ do
   res <- doTest test
   putMVar resmvar (test, res)
 
-makeTests :: Bool -> FilePath -> IO [Test]
-makeTests run f = do
+makeTests :: TestMode -> FilePath -> IO [Test]
+makeTests mode f = do
   let infile  = f `replaceExtension` "in"
       outfile = f `replaceExtension` "out"
   inexists <- doesFileExist infile
   outexists <- doesFileExist outfile
-  return $ case (inexists, outexists) of
-             (True, True) | run -> [Run f infile outfile,
-                                    Compile f infile outfile]
-             (True, _)          -> [Optimise f]
-             _                  -> [TypeFailure f]
+  return $ case (inexists, outexists, mode) of
+             (True, True, OnlyCompile) -> [Compile f infile outfile]
+             (True, True, Everything)  -> [Run f infile outfile,
+                                           Compile f infile outfile]
+             (True, _, _)              -> [Optimise f]
+             _                         -> [TypeFailure f]
 
 reportInteractive :: String -> Int -> Int -> Int -> IO ()
 reportInteractive first failed passed remaining = do
@@ -195,12 +196,12 @@ reportText first failed passed remaining =
          show passed ++ " passed, " ++
          show remaining ++ " to go.)\n"
 
-runTests :: Bool -> [FilePath] -> IO ()
-runTests run files = do
+runTests :: TestMode -> [FilePath] -> IO ()
+runTests mode files = do
   testmvar <- newEmptyMVar
   resmvar <- newEmptyMVar
   replicateM_ concurrency $ forkIO $ runTest testmvar resmvar
-  tests <- concat <$> mapM (makeTests run) files
+  tests <- concat <$> mapM (makeTests mode) files
   _ <- forkIO $ mapM_ (putMVar testmvar) tests
   isTTY <- hIsTerminalDevice stdout
   let report = if isTTY then reportInteractive else reportText
@@ -223,9 +224,14 @@ runTests run files = do
   exitWith $ case failed of 0 -> ExitSuccess
                             _ -> ExitFailure 1
 
+data TestMode = OnlyTypeCheck
+              | OnlyCompile
+              | Everything
+
 main :: IO ()
 main = do
   args <- getArgs
   case args of
-    "-t" : args' -> runTests False args'
-    _            -> runTests True args
+    "-t" : args' -> runTests OnlyTypeCheck args'
+    "-c" : args' -> runTests OnlyCompile args'
+    _            -> runTests Everything args
