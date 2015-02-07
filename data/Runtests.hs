@@ -6,6 +6,7 @@ import Control.Applicative
 import Control.Concurrent
 import Control.Exception
 import Control.Monad
+import Control.Monad.Except
 
 import qualified Data.Set as S
 import Data.Char (isSpace)
@@ -34,12 +35,20 @@ concurrency = 8
 clearLine :: IO ()
 clearLine = putStr "\27[2K"
 
-readValuesFromFile :: FilePath -> IO (Either String String)
+type TestM = ExceptT String IO
+
+runTestM :: TestM () -> IO TestResult
+runTestM = liftM (either Failure $ const Success) . runExceptT
+
+io :: IO a -> TestM a
+io = liftIO
+
+readValuesFromFile :: FilePath -> TestM String
 readValuesFromFile filename = do
-  s <- readFile filename
-  return $ case parseValues filename s of
-    Left e -> Left $ show e
-    Right vs -> Right $ intercalate "\n" $ map pretty $
+  s <- liftIO $ readFile filename
+  case parseValues filename s of
+    Left e -> throwError $ show e
+    Right vs -> return $ intercalate "\n" $ map pretty $
                 concatMap internaliseValue vs
 
 data TestResult = Success
@@ -60,65 +69,63 @@ testDescription (Compile f _ _) = "compilation of " ++ f
 futharkNotFound :: String
 futharkNotFound = "futhark binary not found"
 
-failureTest :: FilePath -> IO TestResult
+failureTest :: FilePath -> TestM ()
 failureTest f = do
-  (code, _, err) <- readProcessWithExitCode "futhark" [futharkFlags, f] ""
+  (code, _, err) <- io $ readProcessWithExitCode "futhark" [futharkFlags, f] ""
   case code of
-    ExitSuccess -> return $ Failure "Expected failure\n"
-    ExitFailure 127 -> return $ Failure futharkNotFound
-    ExitFailure 1 -> return $ Failure err
-    ExitFailure _ -> return Success
+    ExitSuccess -> throwError "Expected failure\n"
+    ExitFailure 127 -> throwError futharkNotFound
+    ExitFailure 1 -> throwError err
+    ExitFailure _ -> return ()
 
-typeCheckTest :: FilePath -> IO TestResult
+typeCheckTest :: FilePath -> TestM ()
 typeCheckTest f = do
-  (code, _, err) <- readProcessWithExitCode "futhark" [futharkFlags, f] ""
+  (code, _, err) <- io $ readProcessWithExitCode "futhark" [futharkFlags, f] ""
   case code of
-    ExitSuccess -> return Success
-    ExitFailure 127 -> return $ Failure futharkNotFound
-    ExitFailure _ -> return $ Failure err
+    ExitSuccess -> return ()
+    ExitFailure 127 -> throwError futharkNotFound
+    ExitFailure _ -> throwError err
 
-executeTest :: FilePath -> FilePath -> FilePath -> IO TestResult
+executeTest :: FilePath -> FilePath -> FilePath -> TestM ()
 executeTest f inputf outputf = do
-  input <- readFile inputf
-  (code, output, err) <- readProcessWithExitCode "futhark" [futharkFlags, "-i", f] input
-  expectedOutput <- readFile outputf
+  input <- io $ readFile inputf
+  (code, output, err) <- io $ readProcessWithExitCode "futhark" [futharkFlags, "-i", f] input
+  expectedOutput <- io $ readFile outputf
   case code of
     ExitSuccess
-      | output `compareOutput` expectedOutput -> return Success
+      | output `compareOutput` expectedOutput -> return ()
       | otherwise -> do
-        writeFile expectedOutputf output
-        return $ Failure $ outputf ++ " and " ++ expectedOutputf ++ " do not match."
-    ExitFailure 127 -> return $ Failure futharkNotFound
-    ExitFailure _   -> return $ Failure err
+        io $ writeFile expectedOutputf output
+        throwError $ outputf ++ " and " ++ expectedOutputf ++ " do not match."
+    ExitFailure 127 -> throwError futharkNotFound
+    ExitFailure _   -> throwError err
   where expectedOutputf = outputf `replaceExtension` "interpreterout"
 
-compileTest :: FilePath -> FilePath -> FilePath -> IO TestResult
+compileTest :: FilePath -> FilePath -> FilePath -> TestM ()
 compileTest f inputf outputf = do
   input <- readValuesFromFile inputf
-  case input of
-    Left e -> return $ Failure e
-    Right input' -> do
-      expectedOutput <- readFile outputf
-      (futcode, l0prog, l0err) <-
-        readProcessWithExitCode "futhark"
-        [futharkFlags, "-fs", "--in-place-lowering", "-ae", "--compile-sequential", f] ""
-      writeFile cOutputf l0prog
-      case futcode of
-        ExitFailure 127 -> return $ Failure futharkNotFound
-        ExitFailure _   -> return $ Failure l0err
-        ExitSuccess     -> do
-          (gccCode, _, gccerr) <- readProcessWithExitCode "gcc" [cOutputf, "-o", binOutputf, "-lm", "-O3"] ""
-          case gccCode of
-            ExitFailure _ -> return $ Failure gccerr
-            ExitSuccess   -> do
-              (progCode, output, progerr) <- readProcessWithExitCode binOutputf [] input'
-              writeFile expectedOutputf output
-              case progCode of
-                ExitFailure _ -> return $ Failure progerr
-                ExitSuccess
-                  | output `compareOutput` expectedOutput -> return Success
-                  | otherwise ->
-                      return $ Failure $ outputf ++ " and " ++ expectedOutputf ++ " do not match."
+  expectedOutput <- io $ readFile outputf
+  (futcode, l0prog, l0err) <-
+    io $ readProcessWithExitCode "futhark"
+    [futharkFlags, "-fs", "--in-place-lowering", "-ae", "--compile-sequential", f] ""
+  io $ writeFile cOutputf l0prog
+  case futcode of
+    ExitFailure 127 -> throwError futharkNotFound
+    ExitFailure _   -> throwError l0err
+    ExitSuccess     -> return ()
+  (gccCode, _, gccerr) <- io $ readProcessWithExitCode "gcc" [cOutputf, "-o", binOutputf, "-lm", "-O3"] ""
+  case gccCode of
+    ExitFailure _ -> throwError gccerr
+    ExitSuccess   -> return ()
+  (progCode, output, progerr) <- io $ readProcessWithExitCode binOutputf [] input
+  io $ writeFile expectedOutputf output
+  case progCode of
+    ExitFailure _ -> throwError progerr
+    ExitSuccess
+      | output `compareOutput` expectedOutput ->
+        return ()
+      | otherwise ->
+          throwError $ outputf ++ " and " ++ expectedOutputf ++ " do not match."
   where cOutputf = outputf `replaceExtension` "c"
         binOutputf = outputf `replaceExtension` "bin"
         expectedOutputf = outputf `replaceExtension` "compilerout"
@@ -132,10 +139,11 @@ catching m = m `catch` save
         save e = return $ Failure $ show e
 
 doTest :: Test -> IO TestResult
-doTest (TypeFailure f) = catching $ failureTest f
-doTest (Optimise f) = catching $ typeCheckTest f
-doTest (Run f inputf outputf) = catching $ executeTest f inputf outputf
-doTest (Compile f inputf outputf) = catching $ compileTest f inputf outputf
+doTest = catching . runTestM . doTest'
+  where doTest' (TypeFailure f) = failureTest f
+        doTest' (Optimise f) = typeCheckTest f
+        doTest' (Run f inputf outputf) = executeTest f inputf outputf
+        doTest' (Compile f inputf outputf) = compileTest f inputf outputf
 
 runTest :: MVar Test -> MVar (Test, TestResult) -> IO ()
 runTest testmvar resmvar = forever $ do
