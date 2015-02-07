@@ -19,7 +19,7 @@ import Data.Bits
 }
 
 @charlit = ($printable#['\\]|\\($printable|[0-9]+))
-@stringcharlit = ($printable#[\"\\]|\\($printable|[0-9]+))
+@stringcharlit = ($printable#[\"\\]|\\($printable|[0-9]+)|\n)
 
 tokens :-
 
