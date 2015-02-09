@@ -80,7 +80,7 @@ internaliseMapLambda internaliseBody lam args = do
       shape_body = shapeBody (map I.identName inner_shapes) rettype' body
   shapefun <- makeShapeFun params shape_body (length inner_shapes)
   bindMapShapes inner_shapes shapefun args outer_shape
-  body' <- assertResultShape rettype' body
+  body' <- assertResultShape (srclocOf lam) rettype' body
   return $ I.Lambda params body' rettype'
 
 makeShapeFun :: [I.Param] -> I.Body -> Int
@@ -95,12 +95,12 @@ makeShapeFun params body n = do
   return $ I.Lambda params' (insertBindings copybnds body) rettype
   where rettype = replicate n $ I.Basic Int
 
-assertResultShape :: [I.Type] -> I.Body -> InternaliseM I.Body
-assertResultShape rettype body = runBinder $ do
+assertResultShape :: SrcLoc -> [I.Type] -> I.Body -> InternaliseM I.Body
+assertResultShape loc rettype body = runBinder $ do
   es <- bodyBind body
   let assertProperShape t se =
         let name = "result_proper_shape"
-        in ensureShape t name se
+        in ensureShape loc t name se
   reses <- zipWithM assertProperShape rettype es
   return $ resultBody reses
 
@@ -138,7 +138,7 @@ internaliseFoldLambda internaliseBody lam acctypes arrtypes = do
   -- The result of the body must have the exact same shape as the
   -- initial accumulator.  We accomplish this with an assertion and
   -- reshape().
-  body' <- assertResultShape rettype' body
+  body' <- assertResultShape (srclocOf lam) rettype' body
 
   return $ I.Lambda params body' rettype'
 

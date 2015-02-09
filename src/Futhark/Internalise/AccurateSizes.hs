@@ -9,6 +9,7 @@ module Futhark.Internalise.AccurateSizes
 
 import Control.Applicative
 import Control.Monad
+import Data.Loc
 
 import qualified Data.HashMap.Lazy as HM
 
@@ -34,21 +35,21 @@ argShapes shapes valts valargs =
           | otherwise                         = Constant (IntVal 0)
 
 ensureShape :: MonadBinder m =>
-               Type -> String -> SubExp
+               SrcLoc -> Type -> String -> SubExp
             -> m SubExp
-ensureShape t name orig
+ensureShape loc t name orig
   | Array{} <- t, Var v <- orig =
-    Var <$> ensureShapeIdent t name v
+    Var <$> ensureShapeIdent loc t name v
   | otherwise = return orig
 
 ensureShapeIdent :: MonadBinder m =>
-                    Type -> String -> Ident
+                    SrcLoc -> Type -> String -> Ident
                  -> m Ident
-ensureShapeIdent t name v
+ensureShapeIdent loc t name v
   | Array{} <- t = do
       let checkDim desired has =
             letExp "shape_cert" =<<
-            eAssert (pure $ PrimOp $ BinOp Equal desired has (Basic Bool))
+            eAssert (pure $ PrimOp $ BinOp Equal desired has (Basic Bool)) loc
       certs <- zipWithM checkDim newshape oldshape
       letExp name $ PrimOp $ Reshape certs newshape v
   | otherwise = return v

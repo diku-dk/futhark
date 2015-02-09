@@ -48,7 +48,7 @@ where
 import qualified Data.Array as A
 import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
-import Data.Loc (noLoc)
+import Data.Loc (SrcLoc)
 
 import Control.Applicative
 import Control.Monad.Identity
@@ -163,9 +163,9 @@ eCopy e = do e' <- letSubExp "copy_arg" =<< e
              return $ PrimOp $ Copy e'
 
 eAssert :: MonadBinder m =>
-         m (Exp (Lore m)) -> m (Exp (Lore m))
-eAssert e = do e' <- letSubExp "assert_arg" =<< e
-               return $ PrimOp $ Assert e' noLoc
+         m (Exp (Lore m)) -> SrcLoc -> m (Exp (Lore m))
+eAssert e loc = do e' <- letSubExp "assert_arg" =<< e
+                   return $ PrimOp $ Assert e' loc
 
 eValue :: MonadBinder m => Value -> m (Exp (Lore m))
 eValue (BasicVal bv) =

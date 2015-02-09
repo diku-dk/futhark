@@ -18,6 +18,7 @@ import qualified Data.HashMap.Lazy as HM
 import Data.Maybe
 import Data.List
 import Data.Traversable (mapM)
+import Data.Loc
 
 import Futhark.Representation.External as E
 import Futhark.Representation.Basic as I
@@ -91,13 +92,13 @@ internaliseExp _ (E.Var var) = do
     Nothing     -> (:[]) . I.Var <$> internaliseIdent var
     Just substs -> return $ map I.Var substs
 
-internaliseExp desc (E.Index cs var csidx idxs _) = do
+internaliseExp desc (E.Index cs var csidx idxs loc) = do
   idxs' <- mapM (internaliseExp1 "i") idxs
   subst <- asks $ HM.lookup (E.identName var) . envSubsts
   let cs' = internaliseCerts cs
       mkCerts vs = case csidx of
                      Just csidx' -> return $ internaliseCerts csidx'
-                     Nothing     -> boundsChecks vs idxs'
+                     Nothing     -> boundsChecks loc vs idxs'
   case subst of
     Nothing ->
       fail $ "Futhark.Internalise.internaliseExp Index: unknown variable " ++ textual (E.identName var) ++ "."
@@ -189,17 +190,17 @@ internaliseExp desc (E.DoLoop mergepat mergeexp i bound loopbody letbody _) = do
     letBind_ mergepat'' loop
     internaliseExp desc letbody
 
-internaliseExp desc (E.LetWith cs name src idxcs idxs ve body _) = do
+internaliseExp desc (E.LetWith cs name src idxcs idxs ve body loc) = do
   idxs' <- mapM (internaliseExp1 "idx") idxs
   srcs <- internaliseExpToIdents "src" $ E.Var src
   ves <- internaliseExp "lw_val" ve
   let cs' = internaliseCerts cs
   idxcs' <- case idxcs of
               Just idxcs' -> return $ internaliseCerts idxcs'
-              Nothing     -> boundsChecks srcs idxs'
+              Nothing     -> boundsChecks loc srcs idxs'
   let comb sname ve' = do
         let rowtype = I.stripArray (length idxs) $ I.identType sname
-        ve'' <- ensureShape rowtype "lw_val_correct_shape" ve'
+        ve'' <- ensureShape loc rowtype "lw_val_correct_shape" ve'
         letExp "letwith_dst" $
           I.PrimOp $ I.Update (cs'++idxcs') sname idxs' ve''
   dsts <- zipWithM comb srcs ves
@@ -261,7 +262,7 @@ internaliseExp _ (E.Rotate cs n e _) =
   internaliseOperation "rotate" cs e $ \cs' v ->
     return $ I.Rotate cs' n v
 
-internaliseExp _ (E.Reshape cs shape e _) = do
+internaliseExp _ (E.Reshape cs shape e loc) = do
   shape' <- mapM (internaliseExp1 "shape") shape
   internaliseOperation "reshape" cs e $ \cs' v -> do
     -- The resulting shape needs to have the same number of elements
@@ -270,6 +271,7 @@ internaliseExp _ (E.Reshape cs shape e _) = do
                eAssert (eBinOp I.Equal (prod $ I.arrayDims $ I.identType v)
                                        (prod shape')
                                        (I.Basic I.Bool))
+               loc
     return $ I.Reshape (shapeOk:cs') shape' v
   where prod l = foldBinOp I.Times (intconst 1) l $ I.Basic I.Int
 
@@ -292,7 +294,7 @@ internaliseExp _ (E.Split cs nexp arrexp _) = do
     map (I.Var . fst) partnames ++
     map (I.Var . snd) partnames
 
-internaliseExp desc (E.Concat cs x y _) = do
+internaliseExp desc (E.Concat cs x y loc) = do
   xs <- internaliseExpToIdents "concat_x" x
   ys <- internaliseExpToIdents "concat_y" y
   let cs' = internaliseCerts cs
@@ -304,7 +306,7 @@ internaliseExp desc (E.Concat cs x y _) = do
         -- The inner sizes must match.
         let matches n m =
               letExp "match" =<<
-              eAssert (pure $ I.PrimOp $ I.BinOp I.Equal n m (I.Basic I.Bool))
+              eAssert (pure $ I.PrimOp $ I.BinOp I.Equal n m (I.Basic I.Bool)) loc
             xt = I.identType xarr
             yt = I.identType yarr
             x_inner_dims = drop 1 $ I.arrayDims xt
@@ -321,11 +323,11 @@ internaliseExp desc (E.Map lam arr _) = do
           internaliseMapLambda internaliseBody lam $ map I.Var arrs
   letTupExp' desc $ I.LoopOp $ I.Map [] lam' arrs
 
-internaliseExp desc (E.Reduce lam ne arr _) = do
+internaliseExp desc (E.Reduce lam ne arr loc) = do
   arrs <- internaliseExpToIdents "reduce_arr" arr
   nes <- internaliseExp "reduce_ne" ne
   nes' <- forM (zip nes arrs) $ \(ne', arr') ->
-    ensureShape (I.stripArray 1 $ I.identType arr')
+    ensureShape loc (I.stripArray 1 $ I.identType arr')
       "scan_ne_right_shape" ne'
   lam' <- withNonuniqueReplacements $
           internaliseFoldLambda internaliseBody lam
@@ -333,11 +335,11 @@ internaliseExp desc (E.Reduce lam ne arr _) = do
   let input = zip nes' arrs
   letTupExp' desc $ I.LoopOp $ I.Reduce [] lam' input
 
-internaliseExp desc (E.Scan lam ne arr _) = do
+internaliseExp desc (E.Scan lam ne arr loc) = do
   arrs <- internaliseExpToIdents "scan_arr" arr
   nes <- internaliseExp "scan_ne" ne
   nes' <- forM (zip nes arrs) $ \(ne', arr') ->
-    ensureShape (I.stripArray 1 $ I.identType arr')
+    ensureShape loc (I.stripArray 1 $ I.identType arr')
       "scan_ne_right_shape" ne'
   lam' <- withNonuniqueReplacements $
           internaliseFoldLambda internaliseBody lam
@@ -429,21 +431,21 @@ internaliseOperation s cs e op = do
   let cs' = internaliseCerts cs
   letSubExps s =<< mapM (liftM I.PrimOp . op cs') vs
 
-boundsChecks :: [I.Ident] -> [I.SubExp] -> InternaliseM I.Certificates
-boundsChecks []    _  = return []
-boundsChecks (v:_) es = do
+boundsChecks :: SrcLoc -> [I.Ident] -> [I.SubExp] -> InternaliseM I.Certificates
+boundsChecks _ []    _  = return []
+boundsChecks loc (v:_) es = do
   doBoundsChecks <- asks envDoBoundsChecks
   if doBoundsChecks
-  then zipWithM (boundsCheck v) [0..] es
+  then zipWithM (boundsCheck loc v) [0..] es
   else return []
 
-boundsCheck :: I.Ident -> Int -> I.SubExp -> InternaliseM I.Ident
-boundsCheck v i e = do
+boundsCheck :: SrcLoc -> I.Ident -> Int -> I.SubExp -> InternaliseM I.Ident
+boundsCheck loc v i e = do
   let size  = arraySize i $ I.identType v
       check = eBinOp LogAnd (pure lowerBound) (pure upperBound) bool
       lowerBound = I.PrimOp $
                    I.BinOp Leq (I.intconst 0) e bool
       upperBound = I.PrimOp $
                    I.BinOp Less e size bool
-  letExp "bounds_check" =<< eAssert check
+  letExp "bounds_check" =<< eAssert check loc
   where bool = I.Basic Bool
