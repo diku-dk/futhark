@@ -8,6 +8,7 @@ import Control.Applicative
 import Control.Monad
 import Data.List (find)
 import Data.Maybe (mapMaybe)
+import Data.Either
 
 import Futhark.Representation.AST
 import Futhark.Tools
@@ -81,8 +82,8 @@ lowerUpdateIntoLoop updates pat res merge body = do
   mk_in_place_map <- summariseLoop updates resmap merge
   Just $ do
     in_place_map <- mk_in_place_map
-    (merge',prebnds) <- runBinder'' $ mapM mkMerge in_place_map
-    let (pat',res') = unzip $ mapMaybe mkResAndPat in_place_map
+    (merge',prebnds) <- mkMerges in_place_map
+    let (pat',res') = mkResAndPat in_place_map
         idxsubsts = indexSubstitutions in_place_map
     (idxsubsts', newbnds) <- substituteIndices idxsubsts $ bodyBindings body
     let body' = mkBody newbnds $ manipulateResult in_place_map idxsubsts'
@@ -93,20 +94,33 @@ lowerUpdateIntoLoop updates pat res merge body = do
                  (map bindeeName mergeparams) $
                  resultSubExps $ bodyResult body
 
+        mkMerges :: (MonadFreshNames m, Bindable lore) =>
+                    [LoopResultSummary]
+                 -> m ([(Bindee (), SubExp)], [Binding lore])
+        mkMerges summaries = do
+          ((origmerge, extramerge), prebnds) <-
+            runBinderT $ partitionEithers <$> mapM mkMerge summaries
+          return (origmerge ++ extramerge, prebnds)
+
         mkMerge summary
           | Just (update, mergeident) <- relatedUpdate summary = do
             source <- letSubExp "modified_source" $ PrimOp $
                       Update (updateCertificates update) (updateSource update)
                       (updateIndices update) (snd $ mergeParam summary)
-            return (Bindee mergeident (), source)
-          | otherwise = return $ mergeParam summary
+            return $ Right (Bindee mergeident (), source)
+          | otherwise = return $ Left $ mergeParam summary
 
-        mkResAndPat summary
+        mkResAndPat summaries =
+          let (orig,extra) = partitionEithers $ mapMaybe mkResAndPat' summaries
+              (origpat, origres) = unzip orig
+              (extrapat, extrares) = unzip extra
+          in (origpat ++ extrapat, origres ++ extrares)
+
+        mkResAndPat' summary
           | Just (update, mergeident) <- relatedUpdate summary =
-              Just (updateBindee update, mergeident)
+              Just $ Right (updateBindee update, mergeident)
           | Just v <- inPatternAs summary =
-              Just (v,
-                    bindeeIdent $ fst $ mergeParam summary)
+              Just $ Left (v, bindeeIdent $ fst $ mergeParam summary)
           | otherwise =
               Nothing
 
