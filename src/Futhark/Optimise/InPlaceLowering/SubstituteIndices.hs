@@ -10,6 +10,7 @@ module Futhark.Optimise.InPlaceLowering.SubstituteIndices
        ) where
 
 import Control.Applicative
+import Control.Monad
 
 import Futhark.Representation.AST
 import Futhark.Tools
@@ -24,16 +25,13 @@ substituteIndices :: (MonadFreshNames m, Bindable lore) =>
 substituteIndices substs bnds = do
   (substs', bnds') <-
     runBinder'' $ substituteIndicesInBindings substs bnds
-  return (substs', bnds')
+  return (map snd substs', bnds')
 
 substituteIndicesInBindings :: MonadBinder m =>
                                IndexSubstitutions
                             -> [Binding (Lore m)]
-                            -> m [IndexSubstitution]
-substituteIndicesInBindings substs [] = return $ map snd substs
-substituteIndicesInBindings substs (bnd:bnds) = do
-  substs' <- substituteIndicesInBinding substs bnd
-  substituteIndicesInBindings substs' bnds
+                            -> m IndexSubstitutions
+substituteIndicesInBindings = foldM substituteIndicesInBinding
 
 substituteIndicesInBinding :: MonadBinder m =>
                               IndexSubstitutions
@@ -52,6 +50,7 @@ substituteIndicesInBinding substs (Let pat lore e) = do
   return substs
   where substitute = identityMapper { mapOnSubExp = substituteIndicesInSubExp substs
                                     , mapOnIdent  = substituteIndicesInIdent substs
+                                    , mapOnBody   = substituteIndicesInBody substs
                                     }
 
 substituteIndicesInSubExp :: MonadBinder m =>
@@ -71,6 +70,17 @@ substituteIndicesInIdent substs v
     letExp "idx" $ PrimOp $ Index cs2 src2 is2
   | otherwise =
     return v
+
+substituteIndicesInBody :: MonadBinder m =>
+                           IndexSubstitutions
+                        -> Body (Lore m)
+                        -> m (Body (Lore m))
+substituteIndicesInBody substs body = do
+  (substs', bnds) <-
+    collectBindings $ substituteIndicesInBindings substs $ bodyBindings body
+  ses <-
+    mapM (substituteIndicesInSubExp substs') $ resultSubExps $ bodyResult body
+  mkBodyM bnds $ Result ses
 
 update :: VName -> VName -> IndexSubstitution -> IndexSubstitutions
        -> IndexSubstitutions
