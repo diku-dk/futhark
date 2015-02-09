@@ -102,7 +102,7 @@ compileTest f inputf outputf = do
   input <- (intercalate "\n" . map pretty) <$> readValuesFromFile inputf
   (futcode, l0prog, l0err) <-
     io $ readProcessWithExitCode "futhark"
-    [futharkFlags, "-fs", "-ae", "--compile-sequential", f] ""
+    [futharkFlags, "-fs", "--in-place-lowering", "-ae", "--compile-sequential", f] ""
   io $ writeFile cOutputf l0prog
   case futcode of
     ExitFailure 127 -> throwError futharkNotFound
