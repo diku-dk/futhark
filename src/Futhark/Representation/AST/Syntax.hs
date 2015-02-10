@@ -166,6 +166,8 @@ data PrimOp lore
   -- ^ @iota(n) = [0,1,..,n-1]@
   | Replicate SubExp SubExp
   -- ^ @replicate(3,1) = [1, 1, 1]@
+  | Scratch BasicType [SubExp]
+  -- ^ Create array of given type and shape, with undefined elements.
 
   -- Array index space transformation.
   | Reshape Certificates [SubExp] Ident

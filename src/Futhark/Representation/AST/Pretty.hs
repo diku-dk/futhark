@@ -50,7 +50,6 @@ instance Pretty Value where
   ppr (BasicVal bv) = ppr bv
   ppr v@(ArrayVal a t)
     | Just s <- arrayString v = text $ show s
-    | [] <- elems a = text "empty" <> parens (ppr t)
     | Array {} <- t = brackets $ commastack $ map ppr $ elems a
     | otherwise     = brackets $ commasep $ map ppr $ elems a
 
@@ -146,6 +145,8 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
   ppr (Iota e) = text "iota" <> parens (ppr e)
   ppr (Replicate ne ve) =
     text "replicate" <> apply [ppr ne, align (ppr ve)]
+  ppr (Scratch t shape) =
+    text "scratch" <> apply (ppr t : map ppr shape)
   ppr (Reshape cs shape e) =
     ppCertificates cs <> text "reshape" <> apply [apply (map ppr shape), ppr e]
   ppr (Rearrange cs perm e) =

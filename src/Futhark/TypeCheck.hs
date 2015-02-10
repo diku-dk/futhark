@@ -664,6 +664,9 @@ checkPrimOp (Replicate countexp valexp) = do
   require [Basic Int] countexp
   void $ checkSubExp valexp
 
+checkPrimOp (Scratch _ shape) =
+  mapM_ checkSubExp shape
+
 checkPrimOp (Reshape cs shapeexps arrexp) = do
   mapM_ (requireI [Basic Cert]) cs
   mapM_ (require [Basic Int]) shapeexps

@@ -398,6 +398,9 @@ defCompilePrimOp [target] (Replicate n se) = do
         rowsize
   where set = subExpType se
 
+defCompilePrimOp [target] (Scratch {}) =
+  return ()
+
 defCompilePrimOp [target] (Iota n) = do
   i <- newVName "i"
   (targetmem, elemoffset, _) <-

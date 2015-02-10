@@ -66,6 +66,8 @@ primOpType (Iota ne) =
 primOpType (Replicate ne e) =
   [arrayOf (subExpType e) (Shape [ne]) u]
   where u = uniqueness $ subExpType e
+primOpType (Scratch t shape) =
+  [arrayOf (Basic t) (Shape shape) Unique]
 primOpType (Reshape _ [] e) =
   [Basic $ elemType $ identType e]
 primOpType (Reshape _ shape e) =

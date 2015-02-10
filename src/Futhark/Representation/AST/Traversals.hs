@@ -143,6 +143,8 @@ mapExpM tv (PrimOp (Iota nexp)) =
   PrimOp <$> (pure Iota <*> mapOnSubExp tv nexp)
 mapExpM tv (PrimOp (Replicate nexp vexp)) =
   PrimOp <$> (pure Replicate <*> mapOnSubExp tv nexp <*> mapOnSubExp tv vexp)
+mapExpM tv (PrimOp (Scratch t shape)) =
+  PrimOp <$> (Scratch t <$> mapM (mapOnSubExp tv) shape)
 mapExpM tv (PrimOp (Reshape cs shape arrexp)) =
   PrimOp <$> (pure Reshape <*> mapOnCertificates tv cs <*>
                  mapM (mapOnSubExp tv) shape <*>

@@ -47,6 +47,8 @@ primOpAliases (Iota {}) =
   [mempty]
 primOpAliases (Replicate _ e) =
   [subExpAliases e]
+primOpAliases (Scratch {}) =
+  [mempty]
 primOpAliases (Reshape _ _ e) =
   [identAliases e]
 primOpAliases (Rearrange _ _ e) =

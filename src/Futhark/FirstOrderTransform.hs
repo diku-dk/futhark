@@ -43,14 +43,15 @@ transformExp (LoopOp (Map cs fun arrs)) = do
             newIdent "map_inarr" (setUniqueness t u)
   (i, iv) <- newVar "i" $ Basic Int
   resarr <- resultArray $ mapType fun $ map identType arrs
-  outarrs <- forM (map subExpType resarr) $ \t ->
+  outarrs <- forM (map identType resarr) $ \t ->
              newIdent "map_outarr" t
   loopbody <- runBinder $ do
     x <- bodyBind =<< transformLambda fun (index cs inarrs iv)
     dests <- letwith cs outarrs (pexp iv) $ map (PrimOp . SubExp) x
     return $ resultBody $ map Var $ inarrs ++ dests
   return $ LoopOp $
-    DoLoop outarrs (loopMerge (inarrs++outarrs) (map Var arrs++resarr)) i (isize inarrs) loopbody
+    DoLoop outarrs (loopMerge (inarrs++outarrs) (map Var $ arrs++resarr))
+    i (isize inarrs) loopbody
 
 transformExp (LoopOp (Reduce cs fun args)) = do
   (_, (acc, initacc), (i, iv)) <- newFold arrexps accexps
@@ -112,8 +113,19 @@ transformExp (LoopOp (Filter cs fun arrexps)) = do
       indexin = index cs arr iv
       indexinm1 = indexia $ sub1 $ pexp iv
   outersize <- letSubExp "filter_result_size" =<< indexia (sub1 $ pexp nv)
-  resinit <- resultArray (map ((`setOuterSize` outersize) . identType) arrexps)
-  res <- forM (map subExpType resinit) $ \t -> newIdent "filter_result" t
+
+  resinit_presplit <- resultArray $ map identType arrexps
+  resinit <- forM resinit_presplit $ \v -> do
+    let vt = identType v
+    leftover <- letSubExp "split_leftover" $ PrimOp $
+                BinOp Minus (arraySize 0 vt) outersize (Basic Int)
+    splitres <- letTupExp "filter_split_result" $
+      PrimOp $ Split cs outersize v leftover
+    case splitres of
+      [x,_] -> return x
+      _     -> fail "FirstOrderTransform filter: weird split result"
+
+  res <- forM (map identType resinit) $ \t -> newIdent "filter_result" t
   mergesize <- newIdent "mergesize" (Basic Int)
   let resv = resultBody (map Var $ mergesize : res)
   loopbody <- insertBindingsM $ do
@@ -125,7 +137,7 @@ transformExp (LoopOp (Filter cs fun arrexps)) = do
                (eBody [eBinOp Equal indexi indexinm1 (Basic Bool)]))
            (pure resv) update]
   return $ LoopOp $ DoLoop (mergesize:res)
-    (loopMerge (mergesize:res) (outersize:resinit))
+    (loopMerge (mergesize:res) (outersize:map Var resinit))
     i nv loopbody
 
 transformExp (LoopOp (Redomap cs _ innerfun accexps arrexps)) = do
@@ -189,16 +201,9 @@ index :: Certificates -> [Ident] -> SubExp -> [Exp]
 index cs arrs i = flip map arrs $ \arr ->
   PrimOp $ Index cs arr [i]
 
-resultArray :: [TypeBase Shape] -> Binder Basic [SubExp]
+resultArray :: [TypeBase Shape] -> Binder Basic [Ident]
 resultArray = mapM arrayOfShape
-  where arrayOfShape t = arrayOfShape' $ arrayDims t
-          where arrayOfShape' [] =
-                  return $ blankConstant t
-                arrayOfShape' (d:ds) = do
-                  elm <- arrayOfShape' ds
-                  letSubExp "result" =<< eCopy (pure $ PrimOp $ Replicate d elm)
-
-        blankConstant t = Constant $ blankBasicValue $ elemType t
+  where arrayOfShape t = letExp "result" $ PrimOp $ Scratch (elemType t) (arrayDims t)
 
 letwith :: Certificates -> [Ident] -> Binder Basic Exp -> [Exp] -> Binder Basic [Ident]
 letwith cs ks i vs = do
