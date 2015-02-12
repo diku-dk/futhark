@@ -417,6 +417,18 @@ evalPrimOp (Replicate e1 e2) = do
       | otherwise -> bad $ NegativeReplicate x
     _   -> bad $ TypeError "evalPrimOp Replicate"
 
+evalPrimOp (Scratch bt shape) =
+  single <$> foldM expand (BasicVal v) shape
+  where v = blankBasicValue bt
+        expand v' se = do
+          n <- evalSubExp se
+          case n of
+            BasicVal (IntVal x)
+              | x >= 0    ->
+                return $ arrayVal (replicate x v') $ valueType v'
+              | otherwise -> bad $ NegativeReplicate x
+            _   -> bad $ TypeError "evalPrimOp Scratch"
+
 evalPrimOp e@(Reshape _ shapeexp arrexp) = do
   shape <- mapM (asInt <=< evalSubExp) shapeexp
   arr <- lookupVar arrexp
