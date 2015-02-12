@@ -193,6 +193,13 @@ blockUsage m = passNeed $ do
   (x, _) <- listenNeed m
   return (x, const mempty)
 
+censorUsage :: MonadEngine m =>
+               (UT.UsageTable -> UT.UsageTable)
+            -> m a -> m a
+censorUsage f m = passNeed $ do
+  x <- m
+  return (x, \acc -> acc { usageTable = f $ usageTable acc })
+
 getVtable :: MonadEngine m => m (ST.SymbolTable (Lore m))
 getVtable = getsEngineState stateVtable
 
@@ -216,6 +223,9 @@ localVtable f m = do
 
 enterLoop :: MonadEngine m => m a -> m a
 enterLoop = localVtable ST.deepen
+
+enterBody :: MonadEngine m => m a -> m a
+enterBody = censorUsage UT.leftScope
 
 bindFParams :: MonadEngine m =>
                [FParam (Lore m)] -> m a -> m a
@@ -392,10 +402,12 @@ hoistCommon m1 vtablef1 m2 vtablef2 = passNeed $ do
   vtable <- getVtable
   rules <- asksEngineEnv envRules
   (body1', safe1, f1) <-
+    enterBody $
     localVtable vtablef1 $
     hoistBindings rules block vtable (usageTable needs1)
     newDupeState (needBindings needs1) body1
   (body2', safe2, f2) <-
+    enterBody $
     localVtable vtablef2 $
     hoistBindings rules block vtable (usageTable needs2)
     newDupeState (needBindings needs2) body2
@@ -523,7 +535,8 @@ simplifyLoopOp (DoLoop respat merge loopvar boundexp loopbody) = do
   -- Blocking hoisting of all unique bindings is probably too
   -- conservative, but there is currently no nice way to mark
   -- consumption of the loop body result.
-  loopbody' <- blockIf
+  loopbody' <- enterBody $
+               blockIf
                (hasFree boundnames `orIf` isUnique `orIf` isResultAlloc) $
                enterLoop $
                bindFParams mergepat' $
@@ -671,6 +684,7 @@ simplifyLambda (Lambda params body rettype) arrs = do
         splitAt (length params' - length arrs) params'
       paramnames = HS.fromList $ map identName params'
   body' <-
+    enterBody $
     blockIf (hasFree paramnames `orIf` isUnique `orIf` isAlloc) $
     enterLoop $
     bindLParams nonarrayparams $
