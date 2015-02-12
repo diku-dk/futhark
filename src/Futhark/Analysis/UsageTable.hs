@@ -110,6 +110,7 @@ data Usage = Consumed
              deriving (Eq, Ord, Show)
 
 leftScope :: UsageTable -> UsageTable
-leftScope (UsageTable table) = UsageTable $ HM.map (S.filter $ not . equalTo) table
-  where equalTo (EqualTo _) = True
-        equalTo _           = False
+leftScope (UsageTable table) = UsageTable $ HM.map (S.filter $ not . scopeSpecific) table
+  where scopeSpecific (EqualTo _) = True
+        scopeSpecific InResult    = True
+        scopeSpecific _           = False
