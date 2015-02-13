@@ -363,7 +363,7 @@ makeSufficientBinding' env (Let pat _ (If (Var v) tbranch fbranch _))
     all safeBnd tbnds, all safeBnd fbnds = do
   mapM_ addBinding tbnds
   mapM_ addBinding fbnds
-  letBind_ pat $ PrimOp $ BinOp LogAnd tres fres (Basic Bool)
+  letBind_ pat $ PrimOp $ BinOp LogAnd tres fres Bool
   where safeBnd = safeExp . bindingExp
 makeSufficientBinding' _ bnd = Simplify.defaultInspectBinding bnd
 

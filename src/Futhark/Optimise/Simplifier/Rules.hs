@@ -700,10 +700,10 @@ simplifyBoolBranch _ (Let pat _ (If cond tb fb ts))
     patternSize pat == length ts,
     all (==Basic Bool) ts,
     False = do -- FIXME: disable because algebraic optimiser cannot handle it.
-  e <- eBinOp LogOr (pure $ PrimOp $ BinOp LogAnd cond tres (Basic Bool))
+  e <- eBinOp LogOr (pure $ PrimOp $ BinOp LogAnd cond tres Bool)
                     (eBinOp LogAnd (pure $ PrimOp $ Not cond)
-                     (pure $ PrimOp $ SubExp fres) (Basic Bool))
-       (Basic Bool)
+                     (pure $ PrimOp $ SubExp fres) Bool)
+       Bool
   letBind_ pat e
 simplifyBoolBranch _ _ = cannotSimplify
 

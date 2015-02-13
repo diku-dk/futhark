@@ -52,7 +52,7 @@ primOpType (ArrayLit es rt) =
    mconcat $ map (uniqueness . subExpType) es]
   where n = Constant (value (length es))
 primOpType (BinOp _ _ _ t) =
-  [t]
+  [Basic t]
 primOpType (Not _) =
   [Basic Bool]
 primOpType (Negate e) =

@@ -49,7 +49,7 @@ ensureShapeIdent loc t name v
   | Array{} <- t = do
       let checkDim desired has =
             letExp "shape_cert" =<<
-            eAssert (pure $ PrimOp $ BinOp Equal desired has (Basic Bool)) loc
+            eAssert (pure $ PrimOp $ BinOp Equal desired has Bool) loc
       certs <- zipWithM checkDim newshape oldshape
       letExp name $ PrimOp $ Reshape certs newshape v
   | otherwise = return v

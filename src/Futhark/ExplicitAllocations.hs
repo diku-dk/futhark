@@ -186,7 +186,7 @@ computeSize :: MonadBinder m =>
 computeSize current [] = return current
 computeSize current (x:xs) = do
   let pexp = pure . PrimOp . SubExp
-  e <- eBinOp Times (pexp current) (pexp x) (Basic Int)
+  e <- eBinOp Times (pexp current) (pexp x) Int
   v <- letSubExp "x" e
   computeSize v xs
 

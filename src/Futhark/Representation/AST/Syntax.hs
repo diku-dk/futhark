@@ -124,7 +124,8 @@ data PrimOp lore
     -- Second arg is the element type of of the rows of the array.
     -- Scalar operations
 
-  | BinOp BinOp SubExp SubExp Type
+  | BinOp BinOp SubExp SubExp BasicType
+    -- ^ The type is the result type.
 
   -- Unary Ops: Not for bools and Negate for ints
   | Not    SubExp -- ^ E.g., @not True == False@.

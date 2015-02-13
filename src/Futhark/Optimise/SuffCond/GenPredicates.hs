@@ -77,7 +77,7 @@ splitBody (Body _ bnds valres) = do
   (pred_bnds, val_bnds, preds) <- unzip3 <$> mapM splitBinding bnds
   (conjoined_preds, conj_bnds) <-
     runBinder'' $ letSubExp "conjPreds" =<<
-    foldBinOp LogAnd (constant True) (catMaybes preds) (Basic Bool)
+    foldBinOp LogAnd (constant True) (catMaybes preds) Bool
   let predbody = mkBody (concat pred_bnds <> conj_bnds) $
                  valres { resultSubExps =
                              resultSubExps valres ++ [conjoined_preds]
@@ -152,7 +152,7 @@ splitBinding (Let pat _ (LoopOp (DoLoop respat merge i bound body))) = do
         x:xs ->
           let res' = res { resultSubExps = reverse $ Var ok':xs }
               bnds' = bnds ++
-                      [mkLet [ok'] $ PrimOp $ BinOp LogAnd x (Var ok) (Basic Bool)]
+                      [mkLet [ok'] $ PrimOp $ BinOp LogAnd x (Var ok) Bool]
           in return $ mkBody bnds' res'
 
 splitBinding (Let pat _ (If cond tbranch fbranch t)) = do
@@ -228,7 +228,7 @@ allTrue :: Certificates -> Lambda -> [Ident]
         -> GenM (Binding, SubExp)
 allTrue cs predfun args = do
   andchecks <- newIdent "allTrue" (Basic Bool)
-  andfun <- binOpLambda LogAnd (Basic Bool)
+  andfun <- binOpLambda LogAnd Bool
   innerfun <- predConjFun
   let andbnd = mkLet [andchecks] $ LoopOp $
                Redomap cs andfun innerfun [constant True] args
@@ -238,7 +238,7 @@ allTrue cs predfun args = do
           acc <- newIdent "acc" (Basic Bool)
           res <- newIdent "res" (Basic Bool)
           let Body _ predbnds (Result [se]) = lambdaBody predfun -- XXX
-              andbnd = mkLet [res] $ PrimOp $ BinOp LogAnd (Var acc) se (Basic Bool)
+              andbnd = mkLet [res] $ PrimOp $ BinOp LogAnd (Var acc) se Bool
               body = mkBody (predbnds++[andbnd]) $ Result [Var res]
           return Lambda { lambdaParams = acc : lambdaParams predfun
                         , lambdaReturnType = [Basic Bool]

@@ -116,7 +116,7 @@ bindMapShapes inner_shapes sizefun args outer_shape
         isempty = eBinOp I.Equal
                   (pure $ I.PrimOp $ I.SubExp outer_shape)
                   (pure $ I.PrimOp $ SubExp zero)
-                  (I.Basic I.Bool)
+                  I.Bool
         emptybranch =
           pure $ resultBody (map (const zero) $ I.lambdaReturnType sizefun)
         nonemptybranch = insertBindingsM $

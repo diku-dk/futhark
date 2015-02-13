@@ -139,7 +139,7 @@ toScalExp look (PrimOp (BinOp Less x y _)) =
   RelExp LTH0 <$> (sminus <$> toScalExp' look x <*> toScalExp' look y)
 toScalExp look (PrimOp (BinOp Leq x y _)) =
   RelExp LEQ0 <$> (sminus <$> toScalExp' look x <*> toScalExp' look y)
-toScalExp look (PrimOp (BinOp Equal x y (Basic Int))) = do
+toScalExp look (PrimOp (BinOp Equal x y Int)) = do
   x' <- toScalExp' look x
   y' <- toScalExp' look y
   return $ RelExp LEQ0 (x' `sminus` y') `SLogAnd` RelExp LEQ0 (y' `sminus` x')
@@ -147,7 +147,7 @@ toScalExp look (PrimOp (Negate e)) =
   SNeg <$> toScalExp' look e
 toScalExp look (PrimOp (Not e)) =
   SNot <$> toScalExp' look e
-toScalExp look (PrimOp (BinOp bop x y (Basic t)))
+toScalExp look (PrimOp (BinOp bop x y t))
   | t `elem` [Int, Bool] = -- XXX: Only integers and booleans, OK?
   binOpScalExp bop <*> toScalExp' look x <*> toScalExp' look y
 
@@ -206,12 +206,12 @@ fromScalExp' = convert
         convert (STimes x y) = arithBinOp Times x y
         convert (SDivide x y) = arithBinOp Divide x y
         convert (SPow x y) = arithBinOp Pow x y
-        convert (SLogAnd x y) = eBinOp LogAnd (convert x) (convert y) (Basic Bool)
-        convert (SLogOr x y) = eBinOp LogOr (convert x) (convert y) (Basic Bool)
+        convert (SLogAnd x y) = eBinOp LogAnd (convert x) (convert y) Bool
+        convert (SLogOr x y) = eBinOp LogOr (convert x) (convert y) Bool
         convert (RelExp LTH0 x) = eBinOp Less (convert x) (pure $ zero $ scalExpType x)
-                                  (Basic Bool)
+                                  Bool
         convert (RelExp LEQ0 x) = eBinOp Leq (convert x) (pure $ zero $ scalExpType x)
-                                  (Basic Bool)
+                                  Bool
         convert (MaxMin _ []) = fail "ScalExp.fromScalExp: MaxMin empty list"
         convert (MaxMin isMin (e:es)) = do
           e'  <- convert e
@@ -222,10 +222,10 @@ fromScalExp' = convert
           x' <- convert x
           y' <- convert y
           eBinOp bop (pure x') (pure y') t
-          where t = Basic $ scalExpType x
+          where t = scalExpType x
 
         select isMin cur next =
-          let cmp = eBinOp Less (pure cur) (pure next) (Basic Bool)
+          let cmp = eBinOp Less (pure cur) (pure next) Bool
               (pick, discard)
                 | isMin     = (cur, next)
                 | otherwise = (next, cur)

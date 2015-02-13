@@ -309,26 +309,26 @@ evalPrimOp (SubExp se) =
 evalPrimOp (ArrayLit es rt) =
   single <$> (arrayVal <$> mapM evalSubExp es <*> pure rt)
 
-evalPrimOp (BinOp Plus e1 e2 (Basic Int)) = evalIntBinOp (+) e1 e2
-evalPrimOp (BinOp Plus e1 e2 (Basic Real)) = evalRealBinOp (+) e1 e2
-evalPrimOp (BinOp Minus e1 e2 (Basic Int)) = evalIntBinOp (-) e1 e2
-evalPrimOp (BinOp Minus e1 e2 (Basic Real)) = evalRealBinOp (-) e1 e2
-evalPrimOp (BinOp Pow e1 e2 (Basic Int)) = evalIntBinOpM pow e1 e2
+evalPrimOp (BinOp Plus e1 e2 Int) = evalIntBinOp (+) e1 e2
+evalPrimOp (BinOp Plus e1 e2 Real) = evalRealBinOp (+) e1 e2
+evalPrimOp (BinOp Minus e1 e2 Int) = evalIntBinOp (-) e1 e2
+evalPrimOp (BinOp Minus e1 e2 Real) = evalRealBinOp (-) e1 e2
+evalPrimOp (BinOp Pow e1 e2 Int) = evalIntBinOpM pow e1 e2
   -- Haskell (^) cannot handle negative exponents, so check for that
   -- explicitly.
   where pow x y | y < 0, x == 0 = bad DivisionByZero
                 | y < 0         = return $ 1 `div` (x ^ (-y))
                 | otherwise     = return $ x ^ y
-evalPrimOp (BinOp Pow e1 e2 (Basic Real)) = evalRealBinOp (**) e1 e2
-evalPrimOp (BinOp Times e1 e2 (Basic Int)) = evalIntBinOp (*) e1 e2
-evalPrimOp (BinOp Times e1 e2 (Basic Real)) = evalRealBinOp (*) e1 e2
-evalPrimOp (BinOp Divide e1 e2 (Basic Int)) = evalIntBinOpM div' e1 e2
+evalPrimOp (BinOp Pow e1 e2 Real) = evalRealBinOp (**) e1 e2
+evalPrimOp (BinOp Times e1 e2 Int) = evalIntBinOp (*) e1 e2
+evalPrimOp (BinOp Times e1 e2 Real) = evalRealBinOp (*) e1 e2
+evalPrimOp (BinOp Divide e1 e2 Int) = evalIntBinOpM div' e1 e2
   where div' _ 0 = bad DivisionByZero
         div' x y = return $ x `div` y
-evalPrimOp (BinOp Mod e1 e2 (Basic Int)) = evalIntBinOpM mod' e1 e2
+evalPrimOp (BinOp Mod e1 e2 Int) = evalIntBinOpM mod' e1 e2
   where mod' _ 0 = bad DivisionByZero
         mod' x y = return $ x `mod` y
-evalPrimOp (BinOp Divide e1 e2 (Basic Real)) = evalRealBinOpM div' e1 e2
+evalPrimOp (BinOp Divide e1 e2 Real) = evalRealBinOpM div' e1 e2
   where div' _ 0 = bad  DivisionByZero
         div' x y = return $ x / y
 evalPrimOp (BinOp ShiftR e1 e2 _) = evalIntBinOp shiftR e1 e2

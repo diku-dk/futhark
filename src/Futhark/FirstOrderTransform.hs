@@ -102,13 +102,13 @@ transformExp (LoopOp (Filter cs fun arrexps)) = do
     (a,av) <- newVar "a" (Basic Int)
     (b,bv) <- newVar "b" (Basic Int)
     body <- insertBindingsM $ do
-      res <- letSubExp "sum" $ PrimOp $ BinOp Plus av bv (Basic Int)
+      res <- letSubExp "sum" $ PrimOp $ BinOp Plus av bv Int
       return $ resultBody [res]
     return $ Lambda [a, b] body [Basic Int]
   scan <- transformExp $ LoopOp $ Scan cs plus [(intconst 0,mape)]
   ia <- (`setIdentUniqueness` Nonunique) <$> letExp "ia" scan
   let indexia ind = eIndex cs ia [ind]
-      sub1 e = eBinOp Minus e (pexp $ intconst 1) (Basic Int)
+      sub1 e = eBinOp Minus e (pexp $ intconst 1) Int
       indexi = indexia $ pexp iv
       indexin = index cs arr iv
       indexinm1 = indexia $ sub1 $ pexp iv
@@ -118,7 +118,7 @@ transformExp (LoopOp (Filter cs fun arrexps)) = do
   resinit <- forM resinit_presplit $ \v -> do
     let vt = identType v
     leftover <- letSubExp "split_leftover" $ PrimOp $
-                BinOp Minus (arraySize 0 vt) outersize (Basic Int)
+                BinOp Minus (arraySize 0 vt) outersize Int
     splitres <- letTupExp "filter_split_result" $
       PrimOp $ Split cs outersize v leftover
     case splitres of
@@ -132,9 +132,9 @@ transformExp (LoopOp (Filter cs fun arrexps)) = do
     let update = insertBindingsM $ do
           dest <- letwith cs res (sub1 indexi) indexin
           return $ resultBody (map Var $ mergesize:dest)
-    eBody [eIf (eIf (pure $ PrimOp $ BinOp Equal iv (intconst 0) (Basic Bool))
-               (eBody [eBinOp Equal indexi (pexp $ intconst 0) (Basic Bool)])
-               (eBody [eBinOp Equal indexi indexinm1 (Basic Bool)]))
+    eBody [eIf (eIf (pure $ PrimOp $ BinOp Equal iv (intconst 0) Bool)
+               (eBody [eBinOp Equal indexi (pexp $ intconst 0) Bool])
+               (eBody [eBinOp Equal indexi indexinm1 Bool]))
            (pure resv) update]
   return $ LoopOp $ DoLoop (mergesize:res)
     (loopMerge (mergesize:res) (outersize:map Var resinit))

@@ -900,7 +900,7 @@ checkIdent (Ident name t) =
     return t
 
 checkBinOp :: Checkable lore =>
-              BinOp -> SubExp -> SubExp -> Type
+              BinOp -> SubExp -> SubExp -> BasicType
            -> TypeM lore ()
 checkBinOp Plus e1 e2 t = checkPolyBinOp Plus [Real, Int] e1 e2 t
 checkBinOp Minus e1 e2 t = checkPolyBinOp Minus [Real, Int] e1 e2 t
@@ -922,23 +922,23 @@ checkBinOp Leq e1 e2 t = checkRelOp Leq [Int, Real] e1 e2 t
 checkRelOp :: Checkable lore =>
               BinOp -> [BasicType]
            -> SubExp -> SubExp
-           -> Type
+           -> BasicType
            -> TypeM lore ()
 checkRelOp op tl e1 e2 t = do
   require (map Basic tl) e1
   require (map Basic tl) e2
   _ <- unifySubExpTypes e1 e2
-  checkAnnotation (opStr op ++ " result") t $ Basic Bool
+  checkAnnotation (opStr op ++ " result") (Basic t) $ Basic Bool
 
 checkPolyBinOp :: Checkable lore =>
                   BinOp -> [BasicType]
-               -> SubExp -> SubExp -> Type
+               -> SubExp -> SubExp -> BasicType
                -> TypeM lore ()
 checkPolyBinOp op tl e1 e2 t = do
   require (map Basic tl) e1
   require (map Basic tl) e2
   t' <- unifySubExpTypes e1 e2
-  checkAnnotation (opStr op ++ " result") t t'
+  checkAnnotation (opStr op ++ " result") (Basic t) t'
 
 sequentially :: Checkable lore =>
                 TypeM lore a -> (a -> Dataflow -> TypeM lore b) -> TypeM lore b

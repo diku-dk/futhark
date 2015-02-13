@@ -240,7 +240,7 @@ internaliseExp _ (E.Zip (e:es) loc) = do
           []      -> return e_unchecked' -- Probably type error
           outer:inner -> do
             cmp <- letSubExp "zip_cmp" $ I.PrimOp $
-                   I.BinOp I.Equal e_outer outer (I.Basic I.Bool)
+                   I.BinOp I.Equal e_outer outer I.Bool
             c   <- letExp "zip_assert" $ I.PrimOp $
                    I.Assert cmp loc
             letExp "zip_result" $ I.PrimOp $
@@ -270,10 +270,10 @@ internaliseExp _ (E.Reshape cs shape e loc) = do
     shapeOk <- letExp "shape_ok" =<<
                eAssert (eBinOp I.Equal (prod $ I.arrayDims $ I.identType v)
                                        (prod shape')
-                                       (I.Basic I.Bool))
+                                       I.Bool)
                loc
     return $ I.Reshape (shapeOk:cs') shape' v
-  where prod l = foldBinOp I.Times (intconst 1) l $ I.Basic I.Int
+  where prod l = foldBinOp I.Times (intconst 1) l I.Int
 
 internaliseExp _ (E.Split cs nexp arrexp _) = do
   let cs' = internaliseCerts cs
@@ -281,7 +281,7 @@ internaliseExp _ (E.Split cs nexp arrexp _) = do
   arrs <- internaliseExpToIdents "split_arr" arrexp
   ressize <- letSubExp "split_size" $
              PrimOp $ I.BinOp I.Minus (arraysSize 0 $ map I.identType arrs)
-             nexp' (I.Basic Int)
+             nexp' I.Int
   partnames <- forM (map I.identType arrs) $ \et -> do
     a <- fst <$> newVar "split_a" (et `setOuterSize` nexp')
     b <- fst <$> newVar "split_b" (et `setOuterSize` ressize)
@@ -301,12 +301,12 @@ internaliseExp desc (E.Concat cs x y loc) = do
   ressize <- letSubExp "concat_size" $ I.PrimOp $
              I.BinOp I.Plus (arraysSize 0 $ map I.identType xs)
              (arraysSize 0 $ map I.identType ys)
-             (I.Basic Int)
+             Int
   let conc xarr yarr = do
         -- The inner sizes must match.
         let matches n m =
               letExp "match" =<<
-              eAssert (pure $ I.PrimOp $ I.BinOp I.Equal n m (I.Basic I.Bool)) loc
+              eAssert (pure $ I.PrimOp $ I.BinOp I.Equal n m I.Bool) loc
             xt = I.identType xarr
             yt = I.identType yarr
             x_inner_dims = drop 1 $ I.arrayDims xt
@@ -386,7 +386,7 @@ internaliseExp desc (E.BinOp bop xe ye t _) = do
   ye' <- internaliseExp1 "y" ye
   case internaliseType t of
     [I.Basic t'] -> letTupExp' desc $
-                    I.PrimOp $ I.BinOp bop xe' ye' (I.Basic t')
+                    I.PrimOp $ I.BinOp bop xe' ye' t'
     _            -> fail "Futhark.Internalise.internaliseExp: non-basic type in BinOp."
 
 internaliseExp desc (E.Not e _) = do
@@ -442,10 +442,9 @@ boundsChecks loc (v:_) es = do
 boundsCheck :: SrcLoc -> I.Ident -> Int -> I.SubExp -> InternaliseM I.Ident
 boundsCheck loc v i e = do
   let size  = arraySize i $ I.identType v
-      check = eBinOp LogAnd (pure lowerBound) (pure upperBound) bool
+      check = eBinOp LogAnd (pure lowerBound) (pure upperBound) I.Bool
       lowerBound = I.PrimOp $
-                   I.BinOp Leq (I.intconst 0) e bool
+                   I.BinOp Leq (I.intconst 0) e I.Bool
       upperBound = I.PrimOp $
-                   I.BinOp Less e size bool
+                   I.BinOp Less e size I.Bool
   letExp "bounds_check" =<< eAssert check loc
-  where bool = I.Basic Bool

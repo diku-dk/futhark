@@ -118,7 +118,7 @@ mapExpM tv (PrimOp (ArrayLit els rowt)) =
 mapExpM tv (PrimOp (BinOp bop x y t)) =
   PrimOp <$> (pure (BinOp bop) <*>
                  mapOnSubExp tv x <*> mapOnSubExp tv y <*>
-                 mapOnType tv t)
+                 pure t)
 mapExpM tv (PrimOp (Not x)) =
   PrimOp <$> (Not <$> mapOnSubExp tv x)
 mapExpM tv (PrimOp (Negate x)) =

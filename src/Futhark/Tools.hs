@@ -131,7 +131,7 @@ eIf ce te fe = do
   return $ If ce' te' fe' ts
 
 eBinOp :: MonadBinder m =>
-          BinOp -> m (Exp (Lore m)) -> m (Exp (Lore m)) -> Type
+          BinOp -> m (Exp (Lore m)) -> m (Exp (Lore m)) -> BasicType
        -> m (Exp (Lore m))
 eBinOp op x y t = do
   x' <- letSubExp "x" =<< x
@@ -194,7 +194,7 @@ eLambda lam args = do zipWithM_ letBindNames params $
 
 -- | Apply a binary operator to several subexpressions.  A left-fold.
 foldBinOp :: MonadBinder m =>
-             BinOp -> SubExp -> [SubExp] -> Type -> m (Exp (Lore m))
+             BinOp -> SubExp -> [SubExp] -> BasicType -> m (Exp (Lore m))
 foldBinOp _ ne [] _   = return $ PrimOp $ SubExp ne
 foldBinOp bop ne (e:es) t =
   eBinOp bop (pure $ PrimOp $ SubExp e) (foldBinOp bop ne es t) t
@@ -204,18 +204,18 @@ foldBinOp bop ne (e:es) t =
 -- result types are the same.  (This assumption should be fixed at
 -- some point.)
 binOpLambda :: (MonadFreshNames m, Bindable lore) =>
-               BinOp -> Type -> m (Lambda lore)
+               BinOp -> BasicType -> m (Lambda lore)
 binOpLambda bop t = do
-  x   <- newIdent "x"   t
-  y   <- newIdent "y"   t
-  res <- newIdent "res" t
+  x   <- newIdent "x"   $ Basic t
+  y   <- newIdent "y"   $ Basic t
+  res <- newIdent "res" $ Basic t
   body <- runBinder $ do
     bnds <- mkLetNamesM [identName res] $
             PrimOp $ BinOp bop (Var x) (Var y) t
     mkBodyM [bnds] $ Result [Var res]
   return Lambda {
              lambdaParams     = [x, y]
-           , lambdaReturnType = [t]
+           , lambdaReturnType = [Basic t]
            , lambdaBody       = body
            }
 

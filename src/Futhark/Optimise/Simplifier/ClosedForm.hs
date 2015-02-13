@@ -56,7 +56,7 @@ foldClosedForm look pat lam accs arrs = do
   isEmpty <- newIdent "fold_input_is_empty" (Basic Bool)
   let inputsize = arraysSize 0 $ map identType arrs
   letBindNames_ [identName isEmpty] $
-    PrimOp $ BinOp Equal inputsize (intconst 0) (Basic Bool)
+    PrimOp $ BinOp Equal inputsize (intconst 0) Bool
   letBind_ pat =<<
     eIf (eSubExp $ Var isEmpty)
     (resultBodyM accs)
@@ -75,8 +75,7 @@ loopClosedForm pat respat merge bound body
                   mergeidents body mergeexp
     isEmpty <- newIdent "bound_is_zero" (Basic Bool)
     letBindNames_ [identName isEmpty] $
-      PrimOp $ BinOp Leq bound (intconst 0)
-      (Basic Bool)
+      PrimOp $ BinOp Leq bound (intconst 0) Bool
     letBindNames_ (patternNames pat) =<<
       eIf (eSubExp $ Var isEmpty)
       (resultBodyM mergeexp)

@@ -67,7 +67,7 @@ externalisePrimOp (I.ArrayLit es et) =
   E.ArrayLit (map externaliseSubExp es) (externaliseType et) noLoc
 externalisePrimOp (I.BinOp bop x y t) =
   E.BinOp bop (externaliseSubExp x) (externaliseSubExp y)
-              (externaliseType t) noLoc
+              (E.fromDecl $ externaliseDeclType $ I.Basic t) noLoc
 externalisePrimOp (I.Not x) =
   E.Not (externaliseSubExp x) noLoc
 externalisePrimOp (I.Negate x) =
