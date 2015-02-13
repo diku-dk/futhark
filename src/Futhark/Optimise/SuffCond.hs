@@ -14,7 +14,6 @@ import Futhark.Optimise.SuffCond.GenPredicates
 import Futhark.Optimise.Simplifier
 import Futhark.Optimise.Simplifier.Simplifiable (bindableSimplifiable)
 import Futhark.Optimise.DeadVarElim
-import Futhark.Optimise.Simplifier.Rules
 
 optimiseProg :: Prog -> Prog
 optimiseProg prog =
@@ -37,4 +36,4 @@ extractPredicates =
                     return . deadCodeElimFun =<< simplifyFun' =<<
                     renameFun predf
           return [predf',valf]
-        simplifyFun' = simplifyFunWithStandardRules bindableSimplifiable
+        simplifyFun' = simplifyFunWithRules bindableSimplifiable basicRules

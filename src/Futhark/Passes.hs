@@ -40,10 +40,14 @@ uttransform = unfailableBasicPass "debugging annotation removal"
 
 eotransform :: Pass
 eotransform = polyPass "enabling optimations" op
-  where op (Basic prog)          = canFail "" (Just $ Basic prog) $
-                                   Basic <$> simpleOpts bindableSimplifiable prog
-        op (ExplicitMemory prog) = canFail "" (Just $ ExplicitMemory prog) $
-                                   ExplicitMemory <$> simpleOpts Futhark.ExplicitAllocations.simplifiable prog
+  where op (Basic prog)          =
+          canFail "" (Just $ Basic prog) $
+          Basic <$>
+          simpleOpts bindableSimplifiable basicRules prog
+        op (ExplicitMemory prog) =
+          canFail "" (Just $ ExplicitMemory prog) $
+          ExplicitMemory <$>
+          simpleOpts Futhark.ExplicitAllocations.simplifiable standardRules prog
 
 hotransform :: Pass
 hotransform = basicPass "higher-order optimisations"

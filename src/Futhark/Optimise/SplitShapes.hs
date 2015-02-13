@@ -117,7 +117,7 @@ simplifyShapeFun shapef = return . deadCodeElimFun =<< simplifyFun' =<<
                           return . deadCodeElimFun =<< simplifyFun' =<<
                           return . deadCodeElimFun =<< simplifyFun' =<<
                           renameFun shapef
-  where simplifyFun' = simplifyFunWithStandardRules bindableSimplifiable
+  where simplifyFun' = simplifyFunWithRules bindableSimplifiable basicRules
 
 cheapFun :: FunDec -> Bool
 cheapFun  = cheapBody . funDecBody

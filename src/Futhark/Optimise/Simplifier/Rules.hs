@@ -4,6 +4,7 @@
 -- simplifier.
 module Futhark.Optimise.Simplifier.Rules
   ( standardRules
+  , basicRules
   )
 
 where
@@ -71,6 +72,10 @@ bottomUpRules = [ removeDeadMapping
 
 standardRules :: MonadBinder m => RuleBook m
 standardRules = (topDownRules, bottomUpRules)
+
+-- | Rules that only work on 'Basic' lores or similar.  Includes 'standardRules'.
+basicRules :: MonadBinder m => RuleBook m
+basicRules = (topDownRules, removeUnnecessaryCopy : bottomUpRules)
 
 liftIdentityMapping :: MonadBinder m => TopDownRule m
 liftIdentityMapping _ (Let pat _ (LoopOp (Map cs fun arrs))) =
@@ -754,9 +759,10 @@ removeUnnecessaryCopy :: MonadBinder m => BottomUpRule m
 removeUnnecessaryCopy (_,used) (Let (Pattern [v]) _ (PrimOp (Copy se)))
   | not $ any (`UT.isConsumed` used) $
     bindeeName v : HS.toList (subExpAliases se),
-    -- FIXME: This needs to be fixed, but it is trickier than one
-    -- might think...
-    False =
+    -- FIXME: This needs to be fixed and enabled, but it is trickier
+    -- than one might think, as we are changing the type of v.
+    False
+    =
     letBindNames_ [bindeeName v] $ PrimOp $ SubExp se
 removeUnnecessaryCopy _ _ = cannotSimplify
 

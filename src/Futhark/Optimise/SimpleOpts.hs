@@ -3,11 +3,13 @@ module Futhark.Optimise.SimpleOpts
   , CallGraph
   , buildCallGraph
   , aggInlineDriver
-  , normCopyDeadOpts
   , normCopyOneLambda
   , Error(..)
     -- * Re-exports
   , bindableSimplifiable
+  , RuleBook
+  , basicRules
+  , standardRules
   )
   where
 
@@ -28,24 +30,21 @@ import Futhark.Optimise.Errors
 
 simpleOpts :: Proper lore =>
               Simplifiable (SimpleM lore)
-              -> Prog lore -> Either Error (Prog lore)
-simpleOpts simpl prog = do
+           -> RuleBook (SimpleM lore)
+           -> Prog lore -> Either Error (Prog lore)
+simpleOpts simpl rules prog = do
 --  esc <- AS.canSimplify 3
 --  let prog' = trace (ScExp.ppScalExp esc) prog
-  let prog_enopt1   = normCopyDeadOpts simpl prog
-      prog_enopt2   = normCopyDeadOpts simpl prog_enopt1
-      prog_flat_opt = normCopyDeadOpts simpl prog_enopt2
+  let prog_enopt1   = pass prog
+      prog_enopt2   = pass prog_enopt1
+      prog_flat_opt = pass prog_enopt2
 
-  return $ normCopyDeadOpts simpl prog_flat_opt
-
-normCopyDeadOpts :: Proper lore =>
-                    Simplifiable (SimpleM lore)
-                 -> Prog lore -> Prog lore
-normCopyDeadOpts simpl = deadCodeElim . simplifyProgWithStandardRules simpl
+  return $ pass prog_flat_opt
+  where pass = deadCodeElim . simplifyProgWithRules simpl rules
 
 normCopyOneLambda :: MonadFreshNames m =>
                      Basic.Prog
                   -> Basic.Lambda
                   -> [Maybe Ident]
                   -> m Basic.Lambda
-normCopyOneLambda = simplifyLambdaWithStandardRules bindableSimplifiable
+normCopyOneLambda = simplifyLambdaWithRules bindableSimplifiable basicRules

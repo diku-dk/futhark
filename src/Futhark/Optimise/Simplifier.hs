@@ -6,9 +6,12 @@
 --
 module Futhark.Optimise.Simplifier
   ( -- * Simple interface
-    simplifyProgWithStandardRules
-  , simplifyFunWithStandardRules
-  , simplifyLambdaWithStandardRules
+    simplifyProgWithRules
+  , simplifyFunWithRules
+  , simplifyLambdaWithRules
+  , standardRules
+  , basicRules
+  , RuleBook
   )
   where
 
@@ -19,35 +22,38 @@ import Futhark.MonadFreshNames
 import Futhark.Binder
 import Futhark.Representation.Aliases
   (removeProgAliases, removeFunDecAliases, removeLambdaAliases)
+import Futhark.Optimise.Simplifier.Rule (RuleBook)
 import Futhark.Optimise.Simplifier.Rules
 import Futhark.Optimise.Simplifier.Simplifiable
 
 -- | Simplify the given program.  Even if the output differs from the
 -- output, meaningful simplification may not have taken place - the
 -- order of bindings may simply have been rearranged.
-simplifyProgWithStandardRules :: Proper lore =>
-                                 Simplifiable (SimpleM lore)
-                              -> Prog lore -> Prog lore
-simplifyProgWithStandardRules simpl =
-  removeProgAliases .
-  simplifyProg simpl standardRules
+simplifyProgWithRules :: Proper lore =>
+                         Simplifiable (SimpleM lore)
+                      -> RuleBook (SimpleM lore)
+                      -> Prog lore -> Prog lore
+simplifyProgWithRules simpl rules =
+  removeProgAliases . simplifyProg simpl rules
 
 -- | Simplify just a single function declaration.
-simplifyFunWithStandardRules :: (MonadFreshNames m, Proper lore) =>
-                                Simplifiable (SimpleM lore)
-                             -> FunDec lore
-                             -> m (FunDec lore)
-simplifyFunWithStandardRules simpl =
+simplifyFunWithRules :: (MonadFreshNames m, Proper lore) =>
+                        Simplifiable (SimpleM lore)
+                     -> RuleBook (SimpleM lore)
+                     -> FunDec lore
+                     -> m (FunDec lore)
+simplifyFunWithRules simpl rules =
   liftM removeFunDecAliases .
-  simplifyFun simpl standardRules
+  simplifyFun simpl rules
 
 -- | Simplify just a single 'Lambda'.
-simplifyLambdaWithStandardRules :: (MonadFreshNames m, Proper lore) =>
-                                   Simplifiable (SimpleM lore)
-                                -> Prog lore
-                                -> Lambda lore
-                                -> [Maybe Ident]
-                                -> m (Lambda lore)
-simplifyLambdaWithStandardRules simpl prog lam args =
+simplifyLambdaWithRules :: (MonadFreshNames m, Proper lore) =>
+                           Simplifiable (SimpleM lore)
+                        -> RuleBook (SimpleM lore)
+                        -> Prog lore
+                        -> Lambda lore
+                        -> [Maybe Ident]
+                        -> m (Lambda lore)
+simplifyLambdaWithRules simpl rules prog lam args =
   liftM removeLambdaAliases $
-  simplifyLambda simpl standardRules (Just prog) lam args
+  simplifyLambda simpl rules (Just prog) lam args

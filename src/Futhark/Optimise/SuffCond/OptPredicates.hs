@@ -31,7 +31,7 @@ import Futhark.Analysis.Rephrase
 import qualified Futhark.Optimise.Simplifier.Engine as Simplify
 import Futhark.Optimise.Simplifier.Rule (RuleBook)
 import Futhark.Optimise.Simplifier
-  (simplifyFunWithStandardRules)
+  (simplifyFunWithRules, basicRules)
 import Futhark.Optimise.Simplifier.Simplifiable
   (bindableSimplifiable)
 import Futhark.Substitute
@@ -112,7 +112,7 @@ generateOptimisedPredicates'
          rephraseWithInvariance body
   case res of
     (body', _) -> do
-      fundec <- simplifyFunWithStandardRules bindableSimplifiable $
+      fundec <- simplifyFunWithRules bindableSimplifiable basicRules $
                 FunDec fname' rettype params (removeBodyLore body')
       return $ Just fundec
     _          -> return Nothing
