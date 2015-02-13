@@ -145,8 +145,8 @@ instance Pretty (Code op) where
   ppr (Assert e _) =
     text "assert" <> parens (ppr e)
   ppr (Copy dest destoffset src srcoffset size) =
-    text "memcpy" <> parens (ppMemLoc dest destoffset <> comma <+>
-                             ppMemLoc src srcoffset <> comma <+>
+    text "memcpy" <> parens (ppMemLoc dest destoffset <> comma </>
+                             ppMemLoc src srcoffset <> comma </>
                              ppr size)
     where ppMemLoc base offset =
             ppr base <+> text "+" <+> ppr offset
