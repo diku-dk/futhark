@@ -227,7 +227,6 @@ data Folder a lore m = Folder {
     foldOnSubExp :: a -> SubExp -> m a
   , foldOnBody :: a -> Body lore -> m a
   , foldOnBinding :: a -> Binding lore -> m a
-  , foldOnType :: a -> Type -> m a
   , foldOnLambda :: a -> Lambda lore -> m a
   , foldOnIdent :: a -> Ident -> m a
   , foldOnCertificates :: a -> Certificates -> m a
@@ -241,7 +240,6 @@ identityFolder = Folder {
                    foldOnSubExp = const . return
                  , foldOnBody = const . return
                  , foldOnBinding = const . return
-                 , foldOnType = const . return
                  , foldOnLambda = const . return
                  , foldOnIdent = const . return
                  , foldOnCertificates = const . return
@@ -291,7 +289,6 @@ data Walker lore m = Walker {
     walkOnSubExp :: SubExp -> m ()
   , walkOnBody :: Body lore -> m ()
   , walkOnBinding :: Binding lore -> m ()
-  , walkOnType :: Type -> m ()
   , walkOnLambda :: Lambda lore -> m ()
   , walkOnIdent :: Ident -> m ()
   , walkOnCertificates :: Certificates -> m ()
@@ -305,7 +302,6 @@ identityWalker = Walker {
                    walkOnSubExp = const $ return ()
                  , walkOnBody = const $ return ()
                  , walkOnBinding = const $ return ()
-                 , walkOnType = const $ return ()
                  , walkOnLambda = const $ return ()
                  , walkOnIdent = const $ return ()
                  , walkOnCertificates = const $ return ()
