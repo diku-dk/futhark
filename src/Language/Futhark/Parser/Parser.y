@@ -196,16 +196,11 @@ Type :: { UncheckedType }
         | Uniqueness '[' InnerType ']'
           { let (ds, et) = $3
             in Array et (Nothing:ds) $1 NoInfo }
---        | Uniqueness '[' InnerType ',' Exp ']'
---          { let (ds, et) = $3
---            in Array et (Just $5:ds) $1 NoInfo }
 ;
 
 InnerType : ElemType { ([], $1) }
           | '[' InnerType ']' { let (ds, et) = $2
                                 in (Nothing:ds, et) }
---          | '[' InnerType ',' Exp ']' { let (ds, et) = $2
---                                        in (Just $4:ds, et) }
 
 ElemType : int           { Basic Int }
          | real          { Basic Real }
@@ -448,22 +443,24 @@ RealValue : reallit      { let L pos (REALLIT num) = $1 in BasicVal $ RealVal nu
 CharValue : charlit      { let L pos (CHARLIT char) = $1 in BasicVal $ CharVal char }
 StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in ArrayVal (arrayFromList $ map (BasicVal . CharVal) s) $ Elem $ Basic Char }
 LogValue : true          { BasicVal $ LogVal True }
-        | false          { BasicVal $ LogVal False }
+         | false          { BasicVal $ LogVal False }
 CertValue : checked      { BasicVal Checked }
-ArrayValue :  '[' Values ']'
-             {% case combArrayTypes $ map (toDecl . valueType) $2 of
+ArrayValue :  '[' Value ']'
+             {% return $ ArrayVal (arrayFromList [$2]) $ removeNames $ toDecl $ valueType $2
+             }
+           |  '[' Value ',' Values ']'
+             {% case combArrayTypes (valueType $2) $ map valueType $4 of
                   Nothing -> throwError "Invalid array value"
-                  Just ts -> return $ ArrayVal (arrayFromList $2) $ removeNames ts
+                  Just ts -> return $ ArrayVal (arrayFromList $ $2:$4) $ removeNames ts
              }
            | '[' ']'
            {% return $ ArrayVal (arrayFromList []) $ toDecl $ Elem $ Basic Int
            }
-TupleValue : '{' Values2 '}' { TupVal $2 }
+TupleValue : '{' Values '}' { TupVal $2 }
 
 Values : Value ',' Values { $1 : $3 }
        | Value            { [$1] }
-
-Values2 : Value ',' Values { $1 : $3 }
+       |                  { [] }
 
 {
 
@@ -505,9 +502,8 @@ getNoLines :: ReadLineMonad a -> Either String a
 getNoLines (Value x) = Right x
 getNoLines (GetLine _) = Left "No extra lines"
 
-combArrayTypes :: [UncheckedType] -> Maybe UncheckedType
-combArrayTypes []     = Nothing
-combArrayTypes (v:vs) = foldM comb v vs
+combArrayTypes :: UncheckedType -> [UncheckedType] -> Maybe UncheckedType
+combArrayTypes t ts = foldM comb t ts
   where comb x y
           | x == y    = Just x
           | otherwise = Nothing
