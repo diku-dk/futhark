@@ -26,7 +26,7 @@
 \definecolor{CosGreen}{RGB}{10,100,70}
 \newcommand{\emphh}[1]{\textcolor{CosGreen}{ #1}}
 
-\title{The \LO{} Programming Language}
+\title{The Futhark Programming Language}
 \date{\today}
 \author{Troels Henriksen (athas@sigkill.dk)}
 
@@ -62,11 +62,11 @@ transparency is upheld.
 \section{Language overview}
 \label{sec:futhark-overview}
 
-The \LO{} programming language is a purely functional, call-by-value,
+The Futhark programming language is a purely functional, call-by-value,
 mostly first-order language that permits bulk operations on arrays
 using \textit{second-order array combinators} (SOACs).
 
-The primary idea behind \LO{} is to design a language that has enough
+The primary idea behind Futhark is to design a language that has enough
 expressive power to conveniently express complex programs, yet is also
 amenable to aggressive optimisation and parallelisation.
 Unfortunately, as the expressive power of a language grows, the
@@ -75,13 +75,13 @@ support nested parallelism, despite the complexities of efficiently
 mapping to the flat parallelism supported by hardware, as a great many
 programs depend on this feature.  On the other hand, we do not support
 non-regular arrays, as they complicate size analysis a great deal.
-The fact that \LO{} is purely functional is intended to give an
+The fact that Futhark is purely functional is intended to give an
 optimising compiler more leeway in rearranging the code and performing
 high-level optimisations.  It is also the plan to eventually design a
-rigorous cost model for \LO{}, although this work has not yet been
+rigorous cost model for Futhark, although this work has not yet been
 completed.
 
-\subsection{First-order \LO{}}
+\subsection{First-order Futhark}
 \label{sec:fo-futhark}
 
 \begin{figure}[bt]
@@ -104,7 +104,7 @@ $k$ & $::=$ & $n$ & (Integer)\\
 $p$ & $::=$ & \texttt{\textbf{id}} & (Name pattern)\\
 & $|$ & \texttt{\{$p_{1}$, \ldots, $p_{n}$\}} & (Tuple pattern) \\
 \end{tabular}
-\caption{\LO{} syntax}
+\caption{Futhark syntax}
 \label{fig:fo-syntax}
 \end{figure}
 
@@ -145,11 +145,11 @@ $fun$ & $::=$ & \texttt{fun $t$ $v$($t_{1}$ $v_{1}$,\ldots $t_{n}$ $v_{n}$) = $e
 $prog$ & $::=$ & $\epsilon$ \\
        & $|$   & $fun$ $prog$
 \end{tabular}
-\caption{\LO{} syntax, continued}
+\caption{Futhark syntax, continued}
 \label{fig:fo-syntax-continued}
 \end{figure}
 
-The syntax of \LO{}, as seen on \cref{fig:fo-syntax} and
+The syntax of Futhark, as seen on \cref{fig:fo-syntax} and
 \cref{fig:fo-syntax-continued}, is heavily inspired by Haskell and
 Standard ML.  An identifier starts with a letter, followed by any
 number of letters, digits and underscores.  Numeric, string and
@@ -157,7 +157,7 @@ character literals use the same notation as Haskell (which is very
 similar to C), including all escape characters.  Comments are
 indicated with \texttt{//} and span to end of line.
 
-An \LO{} program consists of a sequence of \emph{function
+An Futhark program consists of a sequence of \emph{function
   definitions}, of the following form.
 
 \begin{colorcode}
@@ -166,16 +166,16 @@ An \LO{} program consists of a sequence of \emph{function
 
 A function must declare both its return type and the types of all its
 parameters.  All functions (except for inline anonymous functions; see
-below) are defined globally.  \LO{} does not use type inference.
+below) are defined globally.  Futhark does not use type inference.
 Symbolic constants are not supported, although 0-ary functions can be
 defined.  As a concrete example, here is the recursive definition of
-the factorial function in \LO{}.
+the factorial function in Futhark.
 \begin{colorcode}
   fun int fact(int n) =
     if n == 0 then 1
               else n * fact(n-1)
 \end{colorcode}
-Indentation has no syntactical significance in \LO{}, but recommended for
+Indentation has no syntactical significance in Futhark, but recommended for
 readability.
 
 The syntax for tuple types is a comma-separated list of types or
@@ -211,11 +211,11 @@ subexpression:
 \begin{colorcode}
   let z = x + y in ...
 \end{colorcode}
-Recall that \LO{} is eagerly evaluated, so the right-hand side of the
+Recall that Futhark is eagerly evaluated, so the right-hand side of the
 \texttt{let} is evaluated exactly once, at the time it is first
 encountered.
 
-Two-way \texttt{if-then-else} is the only branching construct in \LO{}.
+Two-way \texttt{if-then-else} is the only branching construct in Futhark.
 Pattern matching is supported in a limited way for taking apart
 tuples, but this can only be done in \texttt{let}-bindings, and not
 directly in a function argument list.  Specifically, the following
@@ -239,7 +239,7 @@ saturated - currying is only permitted in SOACs (see
 \subsubsection{Sequential loops}
 \label{sec:sequential-loops}
 
-\LO{} has a built-in syntax for expressing certain tail-recursive
+Futhark has a built-in syntax for expressing certain tail-recursive
 functions.  Consider the following tail-recursive formulation of a
 function for computing the Fibonacci numbers.
 \begin{colorcode}
@@ -282,7 +282,7 @@ The purpose of \texttt{loop} is partly to render some sequential
 computations slightly more convenient, but primarily to express
 certain very specific forms of recursive functions, specifically those
 with a fixed iteration count.  This property can eventually be used
-for analysis and optimisation, although the current \LO{} compiler
+for analysis and optimisation, although the current Futhark compiler
 does not yet exploit this.
 
 \begin{figure}
@@ -384,7 +384,7 @@ in an imperative language.
 The language presented in the previous section is in some sense
 ``sufficient'', in that it is Turing-complete, and can express
 imperative-style loops in a natural way with \texttt{do}-loops.
-However, \LO{} is not intended to be used in such a way - bulk
+However, Futhark is not intended to be used in such a way - bulk
 operations on arrays should be expressed via the four
 \textit{second-order array combinators} (SOACs) shown in
 \cref{fig:soacs}, as the optimisations covered in later chapters are
@@ -408,9 +408,9 @@ $e$ & $::=$ & \texttt{map($l$, $e$)} \\
 
 The semantics of the \textsc{soac}s is identical to the similarly-named
 higher-order functions found in many functional languages, but we
-reproduce it here for completeness.  The types given are not \LO{}
+reproduce it here for completeness.  The types given are not Futhark
 types, but a Haskell-inspired notation, since the \textsc{soac}s cannot
-be typed in \LO{} itself.
+be typed in Futhark itself.
 \begin{align*}
 \texttt{map($f$,$a$)}
 & :: (\alpha\rightarrow\beta)\rightarrow[\alpha]\rightarrow[\beta] \\
@@ -437,7 +437,7 @@ same outer size as the original array.  The functions given to
 \texttt{reduce} and \texttt{scan} must be binary associative
 operators, and the value given as the initial value of the accumulator
 must be the neutral element for the function.  These properties are
-not checked by the \LO{} compiler, and are the responsibility of the
+not checked by the Futhark compiler, and are the responsibility of the
 programmer.
 
 \texttt{redomap} is a special case -- it is not intended for use by
@@ -449,7 +449,7 @@ the programmer, but used internally for fusing \texttt{reduce} and
 & \quad\rightarrow\alpha\rightarrow[\beta]\rightarrow\alpha \\
 \texttt{redomap($\odot$,$g$,$x$,$v$)} & \equiv \texttt{foldl($g$, $x$, $v$)}
 \end{align*}
-Note that the runtime semantics is a left-fold, not a normal \LO{}
+Note that the runtime semantics is a left-fold, not a normal Futhark
 \texttt{reduce}.  In particular, $g$ need not be associative.  We use
 a Haskell-like syntax to explain the
 rationale behind \texttt{redomap}:\\
@@ -480,7 +480,7 @@ to fuse \texttt{reduce~$\circ$~map~$\circ$~filter} into a
 \section{Language reference}
 \label{sec:futhark-reference}
 
-The builtin types in \LO{} are \intt{}, \realt{}, \boolt{} and \chart{}, as
+The builtin types in Futhark are \intt{}, \realt{}, \boolt{} and \chart{}, as
 well as their combination in tuples and arrays.
 
 The following list describes every syntactical language construct in
@@ -642,7 +642,7 @@ the language.
 In a SOAC, if the given function expects $n$ arguments of types
 $t_{1}, \ldots, t_{n}$, but the SOAC will call the function with a
 single argument of type \texttt{\{$t_{1}, \ldots, t_{n}$\}} (that is,
-a tuple), the \LO{} compiler will automatically generate an anonymous
+a tuple), the Futhark compiler will automatically generate an anonymous
 unwrapping function.  This allows the following expression to
 type-check (and run):
 
@@ -690,7 +690,7 @@ tuples.
 \section{Uniqueness Types}
 \label{sec:futhark-uniqueness-types}
 
-While \LO{} is through and through a pure functional language, it may
+While Futhark is through and through a pure functional language, it may
 occasionally prove useful to express certain algorithms in an
 imperative style.  Consider a function for computing the $n$ first
 Fibonacci numbers:
@@ -726,7 +726,7 @@ to know that no other references to the array exists, or at least that
 such references will not be used on any execution path following the
 in-place update.
 
-In \LO{}, this is done through a type system feature called
+In Futhark, this is done through a type system feature called
 \textit{uniqueness types}, similar to, although simpler, than the
 uniqueness types of Clean.  Alongside a (relatively) simple aliasing
 analysis in the type checker, this is sufficient to determine at
@@ -872,17 +872,17 @@ Whenever the memory regions for two values overlap, we say that they
 are \textit{aliased}, or that \textit{sharing} is present.  As an
 example, if you have a two-dimensional array \texttt{a} and extract
 its first row as the one-dimensional array \texttt{b}, we say that
-\texttt{a} and \texttt{b} are aliased.  While the \LO{} compiler may
+\texttt{a} and \texttt{b} are aliased.  While the Futhark compiler may
 do a deep copy if it wishes\footnote{At some point, a proper cost
-  model for \LO{} will be developed, and it is very likely that we
+  model for Futhark will be developed, and it is very likely that we
   require such indexing to be $O(1)$.}, it is not required, and this
 operation thus holds the potential for sharing memory.  Sharing
 analysis is necessarily conservative, and merely imposes an upper
 bound on the amount of sharing happening at runtime.  The sharing
-analysis in \LO{} has been carefully designed to make the bound as
+analysis in Futhark has been carefully designed to make the bound as
 tight as possible, but still easily computable.
 
-In \LO{}, the only values that can have any sharing are arrays -
+In Futhark, the only values that can have any sharing are arrays -
 everything else is considered ``primitive''.  Tuples are special, in
 that they are not considered to have any identity beyond their
 elements.  Therefore, when we store sharing information for a
@@ -954,7 +954,7 @@ the underlying array resolved at compile-time.  The operations
 \texttt{reshape}, \texttt{split}, etc. have a similar rule.
 
 The rule for function application is more complicated.  To begin with,
-and this was indeed the original rule in \LO{}, we can state that the
+and this was indeed the original rule in Futhark, we can state that the
 return value of a function call aliases all of its arguments.
 
 \begin{align*}
