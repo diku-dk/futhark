@@ -79,7 +79,7 @@ basicRules = (topDownRules, removeUnnecessaryCopy : bottomUpRules)
 
 liftIdentityMapping :: MonadBinder m => TopDownRule m
 liftIdentityMapping _ (Let pat _ (LoopOp (Map cs fun arrs))) =
-  case foldr checkInvariance ([], [], []) $ zip3 (patternBindees pat) ses rettype of
+  case foldr checkInvariance ([], [], []) $ zip3 (patternElements pat) ses rettype of
     ([], _, _) -> cannotSimplify
     (invariant, mapresult, rettype') -> do
       let (pat', ses') = unzip mapresult
@@ -88,7 +88,7 @@ liftIdentityMapping _ (Let pat _ (LoopOp (Map cs fun arrs))) =
                      , lambdaReturnType = rettype'
                      }
       mapM_ (uncurry letBind) invariant
-      letBindNames_ (map bindeeName pat') $ LoopOp $ Map cs fun' arrs
+      letBindNames_ (map patElemName pat') $ LoopOp $ Map cs fun' arrs
   where inputMap = HM.fromList $ zip (map identName $ lambdaParams fun) arrs
         free = freeInBody $ lambdaBody fun
         rettype = lambdaReturnType fun
@@ -98,12 +98,12 @@ liftIdentityMapping _ (Let pat _ (LoopOp (Map cs fun arrs))) =
         freeOrConst (Var v)       = v `HS.member` free
         freeOrConst (Constant {}) = True
 
-        checkInvariance :: (PatBindee lore, SubExp, Type)
+        checkInvariance :: (PatElem lore, SubExp, Type)
                         -> ([(Pattern lore, Exp lore)],
-                            [(PatBindee lore, SubExp)],
+                            [(PatElem lore, SubExp)],
                             [Type])
                         -> ([(Pattern lore, Exp lore)],
-                            [(PatBindee lore, SubExp)],
+                            [(PatElem lore, SubExp)],
                             [Type])
         checkInvariance (outId, Var v, _) (invariant, mapresult, rettype')
           | Just inp <- HM.lookup (identName v) inputMap =
@@ -152,9 +152,9 @@ removeReplicateMapping _ _ = cannotSimplify
 removeDeadMapping :: MonadBinder m => BottomUpRule m
 removeDeadMapping (_, used) (Let pat _ (LoopOp (Map cs fun arrs))) =
   let Result ses = bodyResult $ lambdaBody fun
-      isUsed (bindee, _, _) = (`UT.used` used) $ bindeeName bindee
+      isUsed (bindee, _, _) = (`UT.used` used) $ patElemName bindee
       (pat',ses', ts') = unzip3 $ filter isUsed $
-                         zip3 (patternBindees pat) ses $ lambdaReturnType fun
+                         zip3 (patternElements pat) ses $ lambdaReturnType fun
       fun' = fun { lambdaBody = (lambdaBody fun) { bodyResult = Result ses' }
                  , lambdaReturnType = ts'
                  }
@@ -170,7 +170,7 @@ removeUnusedLoopResult (_, used) (Let pat _ (LoopOp (DoLoop respat merge i bound
     explpat' /= explpat =
   let ctxrefs = concatMap (references . snd) explpat'
       patctxrefs = mconcat $ map (freeNamesIn . fst) explpat'
-      bindeeUsed = (`HS.member` patctxrefs) . bindeeName
+      bindeeUsed = (`HS.member` patctxrefs) . patElemName
       mergeParamUsed = (`elem` ctxrefs) . identName
       keepImpl (bindee,ident) = bindeeUsed bindee || mergeParamUsed ident
       implpat' = filter keepImpl implpat
@@ -180,20 +180,20 @@ removeUnusedLoopResult (_, used) (Let pat _ (LoopOp (DoLoop respat merge i bound
   where -- | Check whether the variable binding is used afterwards OR
         -- is responsible for some used existential part.
         keep bindee =
-          bindeeName bindee `elem` nonremovablePatternNames
+          patElemName bindee `elem` nonremovablePatternNames
         patNames = patternNames pat
         nonremovablePatternNames =
           filter (`UT.used` used) patNames <>
-          map bindeeName (filter interestingBindee $ patternBindees pat)
+          map patElemName (filter interestingBindee $ patternElements pat)
         interestingBindee bindee =
           any (`elem` patNames) $
-          freeNamesIn (bindeeLore bindee) <> freeNamesIn (bindeeType bindee)
-        taggedpat = zip (patternBindees pat) $
+          freeNamesIn (patElemLore bindee) <> freeNamesIn (patElemType bindee)
+        taggedpat = zip (patternElements pat) $
                     loopResultContext (representative :: Lore m) respat (map fst merge) ++
                     respat
         (implpat, explpat) = splitAt (length taggedpat - length respat) taggedpat
-        references ident = maybe [] (HS.toList . freeNamesIn . bindeeLore) $
-                           find ((identName ident==) . bindeeName) $
+        references ident = maybe [] (HS.toList . freeNamesIn . fparamLore) $
+                           find ((identName ident==) . fparamName) $
                            map fst merge
 removeUnusedLoopResult _ _ = cannotSimplify
 
@@ -213,7 +213,7 @@ removeRedundantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge i bound 
       necessaryForReturned = mconcat $ map dependencies returnedResultSubExps
       resIsNecessary ((v,_), _) =
         explicitlyReturned v ||
-        bindeeName v `HS.member` necessaryForReturned ||
+        fparamName v `HS.member` necessaryForReturned ||
         referencedInPat v
       (keep, discard) = partition resIsNecessary $ zip merge es
       (merge', es') = unzip keep
@@ -231,16 +231,16 @@ removeRedundantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge i bound 
          return body'
        letBind_ pat $ LoopOp $ DoLoop respat merge' i bound body''
   where (mergepat, _) = unzip merge
-        explicitlyReturned = (`elem` respat) . bindeeIdent
-        patAnnotNames = mconcat [ freeNamesIn (bindeeType bindee) <>
-                                  freeNamesIn (bindeeLore bindee)
+        explicitlyReturned = (`elem` respat) . fparamIdent
+        patAnnotNames = mconcat [ freeNamesIn (fparamType bindee) <>
+                                  freeNamesIn (fparamLore bindee)
                                 | bindee <- mergepat ]
-        referencedInPat = (`HS.member` patAnnotNames) . bindeeName
+        referencedInPat = (`HS.member` patAnnotNames) . fparamName
 
         dummyBindings = map dummyBinding
         dummyBinding ((v,e), _)
-          | unique (bindeeType v) = ([bindeeName v], PrimOp $ Copy e)
-          | otherwise             = ([bindeeName v], PrimOp $ SubExp e)
+          | unique (fparamType v) = ([fparamName v], PrimOp $ Copy e)
+          | otherwise             = ([fparamName v], PrimOp $ SubExp e)
 
         allDependencies = dataDependencies body
         dependencies (Constant _) = HS.empty
@@ -265,9 +265,9 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge idd n
       let loopbody' = loopbody { bodyResult = Result ses' }
           invariantShape :: (a, Ident) -> Bool
           invariantShape (_, shapemerge) = shapemerge `elem`
-                                           map (bindeeIdent . fst) merge'
+                                           map (fparamIdent . fst) merge'
           (implpat',implinvariant) = partition invariantShape implpat
-          implinvariant' = [ (bindeeIdent p, Var v) | (p,v) <- implinvariant ]
+          implinvariant' = [ (patElemIdent p, Var v) | (p,v) <- implinvariant ]
           pat' = map fst $ implpat'++explpat'
           respat' = map snd explpat'
       in do forM_ (invariant ++ implinvariant') $ \(v1,v2) ->
@@ -275,33 +275,33 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge idd n
             letBind_ (Pattern pat') $
               LoopOp $ DoLoop respat' merge' idd n loopbody'
   where Result ses = bodyResult loopbody
-        taggedpat = zip (patternBindees pat) $
+        taggedpat = zip (patternElements pat) $
                     loopResultContext (representative :: Lore m)
                     respat (map fst merge) ++ respat
         (implpat, explpat) = splitAt (length taggedpat - length respat) taggedpat
 
-        namesOfMergeParams = HS.fromList $ map (bindeeName . fst) merge
+        namesOfMergeParams = HS.fromList $ map (fparamName . fst) merge
 
         removeFromResult (mergeParam,mergeInit) explpat' =
-          case partition ((==bindeeIdent mergeParam) . snd) explpat' of
-            ([(Bindee resv _,_)], rest) ->
-              (Just (resv, mergeInit), rest)
+          case partition ((==fparamIdent mergeParam) . snd) explpat' of
+            ([(patelem,_)], rest) ->
+              (Just (patElemIdent patelem, mergeInit), rest)
             (_,      _) ->
               (Nothing, explpat')
 
         checkInvariance :: ((FParam (Lore m), SubExp), SubExp)
-                        -> ([(Ident, SubExp)], [(PatBindee (Lore m), Ident)],
+                        -> ([(Ident, SubExp)], [(PatElem (Lore m), Ident)],
                             [(FParam (Lore m), SubExp)], [SubExp])
-                        -> ([(Ident, SubExp)], [(PatBindee (Lore m), Ident)],
+                        -> ([(Ident, SubExp)], [(PatElem (Lore m), Ident)],
                             [(FParam (Lore m), SubExp)], [SubExp])
         checkInvariance
           ((mergeParam,mergeInit), resExp)
           (invariant, explpat', merge', resExps)
-          | not (unique (bindeeType mergeParam)),
+          | not (unique (fparamType mergeParam)),
             isInvariant resExp =
           let (bnd, explpat'') =
                 removeFromResult (mergeParam,mergeInit) explpat'
-          in (maybe id (:) bnd $ (bindeeIdent mergeParam, mergeInit) : invariant,
+          in (maybe id (:) bnd $ (fparamIdent mergeParam, mergeInit) : invariant,
               explpat'', merge', resExps)
           where
             -- A non-unique merge variable is invariant if the corresponding
@@ -311,7 +311,7 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge idd n
             --  all existential parameters are already known to be
             --  invariant
             isInvariant (Var v2)
-              | bindeeName mergeParam == identName v2 =
+              | fparamName mergeParam == identName v2 =
                 allExistentialInvariant
                 (HS.fromList $ map (identName . fst) invariant) mergeParam
             --  (1) or identical to the initial value of the parameter.
@@ -322,7 +322,7 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge idd n
 
         allExistentialInvariant namesOfInvariant mergeParam =
           all (invariantOrNotMergeParam namesOfInvariant)
-          (bindeeName mergeParam `HS.delete` freeNamesIn mergeParam)
+          (fparamName mergeParam `HS.delete` freeNamesIn mergeParam)
         invariantOrNotMergeParam namesOfInvariant name =
           not (name `HS.member` namesOfMergeParams) ||
           name `HS.member` namesOfInvariant
@@ -674,7 +674,7 @@ evaluateBranch _ (Let pat _ (If e1 tb fb t))
       ses' = subExpShapeContext t ses ++ ses
   in do mapM_ addBinding $ bodyBindings branch
         sequence_ [ letBind (Pattern [p]) $ PrimOp $ SubExp se
-                  | (p,se) <- zip (patternBindees pat) ses']
+                  | (p,se) <- zip (patternElements pat) ses']
   where checkBranch
           | isCt1 e1  = Just tb
           | isCt0 e1  = Just fb
@@ -714,7 +714,7 @@ hoistBranchInvariant _ (Let pat _ (If e1 tb fb ret))
       Result fses = bodyResult fb
   (pat', res, invariant) <-
     foldM branchInvariant ([], [], False) $
-    zip (patternBindees pat) (zip tses fses)
+    zip (patternElements pat) (zip tses fses)
   let (tses', fses') = unzip res
       tb' = tb { bodyResult = Result tses' }
       fb' = fb { bodyResult = Result fses' }
@@ -758,12 +758,12 @@ simplifyReshapeReshape _ _ = Nothing
 removeUnnecessaryCopy :: MonadBinder m => BottomUpRule m
 removeUnnecessaryCopy (_,used) (Let (Pattern [v]) _ (PrimOp (Copy se)))
   | not $ any (`UT.isConsumed` used) $
-    bindeeName v : HS.toList (subExpAliases se),
+    patElemName v : HS.toList (subExpAliases se),
     -- FIXME: This needs to be fixed and enabled, but it is trickier
     -- than one might think, as we are changing the type of v.
     False
     =
-    letBindNames_ [bindeeName v] $ PrimOp $ SubExp se
+    letBindNames_ [patElemName v] $ PrimOp $ SubExp se
 removeUnnecessaryCopy _ _ = cannotSimplify
 
 removeScratchValue :: LetTopDownRule lore u
@@ -793,7 +793,7 @@ removeDeadBranchResult (_, used) (Let pat _ (If e1 tb fb rettype))
       pick = map snd . filter fst . zip patused
       tb' = tb { bodyResult = Result (pick tses) }
       fb' = fb { bodyResult = Result (pick fses) }
-      pat' = pick $ patternBindees pat
+      pat' = pick $ patternElements pat
   in letBind_ (Pattern pat') =<<
      eIf (eSubExp e1) (pure tb') (pure fb')
 removeDeadBranchResult _ _ = cannotSimplify
@@ -808,7 +808,7 @@ simplifyEqualBranchResult (_, used) (Let pat _ (If e1 tb fb rettype))
   | -- Only if there is no existential context...
     patternSize pat == length rettype,
     let (simplified,orig) = partitionEithers $ map isActually $
-                            zip4 (patternBindees pat) tses fses rettype,
+                            zip4 (patternElements pat) tses fses rettype,
     not (null simplified) = do
       let mkSimplified (bindee, se) =
             letBind_ (Pattern [bindee]) $ PrimOp $ SubExp se
@@ -827,7 +827,7 @@ simplifyEqualBranchResult (_, used) (Let pat _ (If e1 tb fb rettype))
               Left (bindee, se2)
           | otherwise =
               Right (bindee, se1, se2, t)
-          where name = bindeeName bindee
+          where name = patElemName bindee
 simplifyEqualBranchResult _ _ = cannotSimplify
 
 -- Some helper functions

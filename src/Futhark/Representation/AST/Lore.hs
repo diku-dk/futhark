@@ -37,4 +37,7 @@ class (Show (LetBound l), Show (Exp l), Show (Body l), Show (FParam l), Show (Re
   -- @res@, but may also have an existential context.  Thus,
   -- @loopResult res merge@ returns those variables in @merge@ that
   -- constitute the context.
-  loopResultContext :: l -> [Ident] -> [Bindee (FParam l)] -> [Ident]
+  loopResultContext :: l
+                    -> [Ident]
+                    -> [Futhark.Representation.AST.Syntax.Core.FParamT (FParam l)]
+                    -> [Ident]

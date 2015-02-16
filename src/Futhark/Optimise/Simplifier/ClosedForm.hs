@@ -82,7 +82,7 @@ loopClosedForm pat respat merge bound body
       (renameBody closedBody)
   | otherwise = cannotSimplify
   where (mergepat, mergeexp) = unzip merge
-        mergeidents = map bindeeIdent mergepat
+        mergeidents = map fparamIdent mergepat
         knownBindings = HM.fromList $ zip mergeidents mergeexp
 
 checkResults :: MonadBinder m =>

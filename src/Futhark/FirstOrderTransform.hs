@@ -226,4 +226,4 @@ transformLambda (Lambda params body _) args = do
   transformBody body
 
 loopMerge :: [Ident] -> [SubExp] -> [(FParam, SubExp)]
-loopMerge vars vals = [ (Bindee var (), val) | (var,val) <- zip vars vals ]
+loopMerge vars vals = [ (FParam var (), val) | (var,val) <- zip vars vals ]

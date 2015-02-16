@@ -435,8 +435,8 @@ checkProg' checkoccurs prog = do
       | HM.member name ftable =
         Left $ Error [] $ DupDefinitionError name noLoc noLoc
       | otherwise =
-        let params' = [ (Just $ bindeeName param,
-                         bindeeType param)
+        let params' = [ (Just $ fparamName param,
+                         fparamType param)
                       | param <- params ]
         in Right $ HM.insert name (ret,params') ftable
 
@@ -462,14 +462,14 @@ funParamsToIdentsAndLores :: Checkable lore =>
                              [FParam lore]
                           -> [(Ident, VarBindingLore lore)]
 funParamsToIdentsAndLores = map identAndLore
-  where identAndLore fparam = (bindeeIdent fparam,
-                               FunBound $ bindeeLore fparam)
+  where identAndLore fparam = (fparamIdent fparam,
+                               FunBound $ fparamLore fparam)
 
 checkFunParams :: Checkable lore =>
                   [FParam lore] -> TypeM lore ()
 checkFunParams = mapM_ $ \param ->
   context ("In function parameter " ++ pretty param) $
-  checkFParamLore $ bindeeLore param
+  checkFParamLore $ fparamLore param
 
 checkAnonymousFun :: Checkable lore =>
                      (Name, [Type], [Ident], BodyT (Aliases lore))
@@ -723,8 +723,8 @@ checkLoopOp (DoLoop respat merge (Ident loopvar loopvart)
   mergeargs <- mapM checkArg mergeexps
   iparam <- basicFParam loopvar Int
   let funparams = iparam : mergepat
-      paramts   = map bindeeType funparams
-      rettype   = map bindeeType mergepat
+      paramts   = map fparamType funparams
+      rettype   = map fparamType mergepat
   checkFuncall Nothing paramts $ boundarg : mergeargs
 
   noUnique $ checkFun' (nameFromString "<loop body>",
@@ -739,12 +739,12 @@ checkLoopOp (DoLoop respat merge (Ident loopvar loopvart)
       (Several $ staticShapes rettype)
       (Several $ bodyExtType loopbody)
   forM_ respat $ \res ->
-    case find ((==identName res) . bindeeName) mergepat of
+    case find ((==identName res) . fparamName) mergepat of
       Nothing -> bad $ TypeError noLoc $
                  "Loop result variable " ++
                  textual (identName res) ++
                  " is not a merge variable."
-      Just v  -> return res { identType = bindeeType v }
+      Just v  -> return res { identType = fparamType v }
 
 checkLoopOp (Map ass fun arrexps) = do
   mapM_ (requireI [Basic Cert]) ass
@@ -958,11 +958,11 @@ checkBinding pat e dflow =
     return $ \m -> sequentially (tell dflow)
                    (const . const $
                     binding (zip (identsAndLore pat)
-                             (map (unNames . fst . bindeeLore) $
-                              patternBindees pat))
+                             (map (unNames . fst . patElemLore) $
+                              patternElements pat))
                     (checkPatSizes (patternIdents pat) >> m))
-  where identsAndLore = map identAndLore . patternBindees . removePatternAliases
-        identAndLore bindee = (bindeeIdent bindee, LetBound $ bindeeLore bindee)
+  where identsAndLore = map identAndLore . patternElements . removePatternAliases
+        identAndLore bindee = (patElemIdent bindee, LetBound $ patElemLore bindee)
 
 matchExtPattern :: [Ident] -> [ExtType] -> TypeM lore ()
 matchExtPattern pat ts = do

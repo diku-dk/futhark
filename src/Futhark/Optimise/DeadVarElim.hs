@@ -102,7 +102,7 @@ deadCodeElimBodyM (Body bodylore [] (Result es)) = do
 deadCodeElimExp :: Proper lore => Exp lore -> DCElimM (Exp lore)
 deadCodeElimExp (LoopOp (DoLoop respat merge i bound body)) = do
   let (mergepat, mergeexp) = unzip merge
-  mapM_ deadCodeElimBindee mergepat
+  mapM_ deadCodeElimFParam mergepat
   mapM_ deadCodeElimSubExp mergeexp
   bound' <- deadCodeElimSubExp bound
   body' <- deadCodeElimBodyM body
@@ -130,11 +130,16 @@ deadCodeElimIdent ident@(Ident vnm t) = do
   return ident { identType = t `setArrayShape` Shape dims }
 
 deadCodeElimPat :: Proper lore => Pattern lore -> DCElimM ()
-deadCodeElimPat = mapM_ deadCodeElimBindee . patternBindees
+deadCodeElimPat = mapM_ deadCodeElimPatElem . patternElements
 
-deadCodeElimBindee :: FreeIn annot => Bindee annot -> DCElimM ()
-deadCodeElimBindee bindee =
-  seen $ bindeeName bindee `HS.delete` freeNamesIn bindee
+deadCodeElimPatElem :: FreeIn attr => PatElemT attr -> DCElimM ()
+deadCodeElimPatElem patelem =
+  seen $ patElemName patelem `HS.delete` freeNamesIn patelem
+
+deadCodeElimFParam :: FreeIn attr => FParamT attr -> DCElimM ()
+deadCodeElimFParam fparam =
+  seen $ fparamName fparam `HS.delete` freeNamesIn fparam
+
 
 deadCodeElimBnd :: Ident -> DCElimM ()
 deadCodeElimBnd = void . deadCodeElimType . identType

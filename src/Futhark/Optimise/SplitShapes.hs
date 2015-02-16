@@ -54,7 +54,7 @@ functionSlices (FunDec fname rettype params body@(Body _ bodybnds bodyres)) = do
   -- The shape function should not consume its arguments - if it wants
   -- to do in-place stuff, it needs to copy them first.  In most
   -- cases, these copies will be removed by the simplifier.
-  (shapeParams, cpybnds) <- nonuniqueParams $ map bindeeIdent params
+  (shapeParams, cpybnds) <- nonuniqueParams $ map fparamIdent params
 
   -- Give names to the existentially quantified sizes of the return
   -- type.  These will be passed as parameters to the value function.
@@ -65,10 +65,10 @@ functionSlices (FunDec fname rettype params body@(Body _ bodybnds bodyres)) = do
   valueBody <- substituteExtResultShapes staticRettype body
 
   let valueRettype = ExtRetType $ staticShapes staticRettype
-      valueParams = shapeidents ++ map bindeeIdent params
+      valueParams = shapeidents ++ map fparamIdent params
       shapeBody = mkBody (cpybnds <> bodybnds)
                   bodyres { resultSubExps = shapes }
-      mkFParam = flip Bindee ()
+      mkFParam = flip FParam ()
       fShape = FunDec shapeFname (ExtRetType $ staticShapes shapetypes)
                (map mkFParam shapeParams)
                shapeBody
@@ -150,12 +150,12 @@ substCalls subst fundec = do
             liftM snd . runBinder'' $ do
               let (vs,vals) =
                     splitAt (length $ retTypeValues shapetype) $
-                    patternBindees pat
+                    patternElements pat
               letBind_ (Pattern vs) $
                 Apply shapefun args shapetype
               letBind_ (Pattern vals) $
-                Apply valfun ([(Var $ bindeeIdent v,Observe) | v <- vs]++args)
-                (ExtRetType $ staticShapes $ map bindeeType vals)
+                Apply valfun ([(Var $ patElemIdent v,Observe) | v <- vs]++args)
+                (ExtRetType $ staticShapes $ map patElemType vals)
 
         treatBinding (Let pat _ e) = do
           e' <- mapExpM mapper e

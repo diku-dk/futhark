@@ -191,11 +191,11 @@ runFunWithShapes fname valargs prog = do
           let (shapeparams, valparams) =
                 splitAt (length params - length valargs) params
               shapemap = shapeMapping'
-                         (map bindeeType valparams)
+                         (map fparamType valparams)
                          (map valueShape valargs)
           in map (BasicVal . IntVal . fromMaybe 0 .
                   flip HM.lookup shapemap .
-                  bindeeName)
+                  fparamName)
              shapeparams
 
 -- | As 'runFun', but throws away the trace.
@@ -211,11 +211,11 @@ runThisFun (FunDec fname _ fparams _) args ftable
     runFutharkM (evalFuncall fname args) futharkenv
   | otherwise =
     (Left $ InvalidFunctionArguments fname
-     (Just (map (toDecl . bindeeType) fparams))
+     (Just (map (toDecl . fparamType) fparams))
      (map toDecl argtypes),
      mempty)
   where argtypes = map (toDecl . (`setUniqueness` Unique) . valueType) args
-        paramtypes = map (toDecl . bindeeType) fparams
+        paramtypes = map (toDecl . fparamType) fparams
         futharkenv = FutharkEnv { envVtable = HM.empty
                                 , envFtable = ftable
                                 }
@@ -226,7 +226,7 @@ buildFunTable = foldl expand builtins . progFunctions
   where -- We assume that the program already passed the type checker, so
         -- we don't check for duplicate definitions.
         expand ftable' (FunDec name _ params body) =
-          let fun funargs = binding (zip (map bindeeIdent params) funargs) $
+          let fun funargs = binding (zip (map fparamIdent params) funargs) $
                             evalBody body
           in HM.insert name fun ftable'
 
@@ -499,14 +499,14 @@ evalLoopOp (DoLoop respat merge loopvar boundexp loopbody) = do
   case bound of
     BasicVal (IntVal n) -> do
       vs <- foldM iteration mergestart [0..n-1]
-      binding (zip (map bindeeIdent mergepat) vs) $
+      binding (zip (map fparamIdent mergepat) vs) $
         mapM lookupVar $
         loopResultContext (representative :: lore) respat mergepat ++ respat
     _ -> bad $ TypeError "evalBody DoLoop"
   where (mergepat, mergeexp) = unzip merge
         iteration mergeval i =
           binding [(loopvar, BasicVal $ IntVal i)] $
-            binding (zip (map bindeeIdent mergepat) mergeval) $
+            binding (zip (map fparamIdent mergepat) mergeval) $
               evalBody loopbody
 
 evalLoopOp (Map _ fun arrexps) = do

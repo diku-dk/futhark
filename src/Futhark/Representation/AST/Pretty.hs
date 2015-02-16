@@ -99,12 +99,39 @@ bindingAnnotation bnd doc =
     Just annot -> annot </> doc
 
 instance Pretty (PatternT lore) where
-  ppr = ppPattern . patternIdents
-
-instance Pretty annot => Pretty (BindeeT annot) where
-  ppr bindee = ppr (bindeeType bindee) <+>
-               ppr (bindeeIdent bindee) <+>
-               parens (ppr $ bindeeLore bindee)
+  ppr = braces . commasep . map ppElem . patternElements
+    where ppElem (BindVar ident _) =
+            ppr (identType ident) <+>
+            ppr (identName ident)
+{-
+          ppElem (BindInPlace ident src is _) =
+            ppr (identType ident) <+>
+            ppr (identName ident) <+>
+            text "<-" <+>
+            ppr src <+>
+            text "with" <+>
+            brackets (commasep $ map ppr is)
+-}
+instance Pretty attr => Pretty (PatElemT attr) where
+  ppr (BindVar ident attr) =
+    ppr (identType ident) <+>
+    ppr (identName ident) <+>
+    parens (ppr attr)
+{-
+  ppr (BindInPlace ident src is attr) =
+    ppr (identType ident) <+>
+    ppr (identName ident) <+>
+    text "<-" <+>
+    ppr src <+>
+    text "with" <+>
+    brackets (commasep $ map ppr is) <+>
+    parens (ppr attr)
+-}
+instance Pretty attr => Pretty (FParamT attr) where
+  ppr (FParam ident attr) =
+    ppr (identType ident) <+>
+    ppr (identName ident) <+>
+    parens (ppr attr)
 
 instance PrettyLore lore => Pretty (Binding lore) where
   ppr bnd@(Let pat _ e) =
@@ -165,7 +192,7 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
 instance PrettyLore lore => Pretty (LoopOp lore) where
   ppr (DoLoop res mergepat i bound loopbody) =
     text "loop" <+> ppPattern res <+>
-    text "<-" <+> ppPattern (map bindeeIdent pat) <+> equals <+> ppTuple' initexp </>
+    text "<-" <+> ppPattern (map fparamIdent pat) <+> equals <+> ppTuple' initexp </>
     text "for" <+> ppr i <+> text "<" <+> align (ppr bound) <+> text "do" </>
     indent 2 (ppr loopbody)
     where (pat, initexp) = unzip mergepat
@@ -207,7 +234,7 @@ instance PrettyLore lore => Pretty (FunDec lore) where
     maybe id (</>) (ppFunDecLore fundec) $
     text "fun" <+> ppr rettype <+>
     text (nameToString name) <//>
-    apply (map (ppParam . bindeeIdent) args) <+>
+    apply (map (ppParam . fparamIdent) args) <+>
     equals </> indent 2 (ppr body)
 
 instance PrettyLore lore => Pretty (Prog lore) where

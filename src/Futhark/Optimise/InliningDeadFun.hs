@@ -145,7 +145,7 @@ inlineInBody
   in case filter ((== fname) . funDecName) inlcallees of
        [] -> continue [bnd]
        FunDec _ _ fargs body:_ ->
-         let revbnds = zip (map bindeeIdent fargs) $ map fst args
+         let revbnds = zip (map fparamIdent fargs) $ map fst args
          in  continue' $ foldr addArgBnd body revbnds
   where
       addArgBnd :: (Ident, SubExp) -> Body -> Body

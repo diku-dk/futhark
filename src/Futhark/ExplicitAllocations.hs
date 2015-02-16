@@ -75,7 +75,7 @@ specialisedMkLetM [] [Ident name _] e@(PrimOp (Update _ src _ _)) = do
   case res of
     Just (MemSummary m origfun) -> do
       let ident = Ident name (identType src)
-          pat' = Pattern [Bindee ident $ MemSummary m origfun]
+          pat' = Pattern [BindVar ident $ MemSummary m origfun]
       return $ Just $ Let pat' () e
     _ -> return Nothing
 
@@ -84,7 +84,7 @@ specialisedMkLetM [] [Ident name _] e@(PrimOp (SubExp (Var src))) = do
   case res of
     Just (MemSummary m origfun) -> do
       let ident = Ident name $ identType src
-          pat' = Pattern [Bindee ident $ MemSummary m origfun]
+          pat' = Pattern [BindVar ident $ MemSummary m origfun]
       return $ Just $ Let pat' () e
     _ -> return Nothing
 
@@ -98,7 +98,7 @@ specialisedMkLetM [] [ident] e@(PrimOp (Index _ src is)) = do
             | otherwise =
               MemSummary m $ IxFun.applyInd ixfun $
               map SE.subExpToScalExp is
-          pat = Pattern [Bindee ident annot]
+          pat = Pattern [BindVar ident annot]
       return $ Just $ Let pat () e
     _ -> fail $ "Invalid memory summary for " ++ pretty src ++ ": " ++
          pretty summary
@@ -109,8 +109,8 @@ specialisedMkLetM [] [ident1, ident2] e@(PrimOp (Split _ n a _)) = do
     MemSummary m ixfun -> do
       let t = identType ident1
           offset = sliceOffset (arrayShape t) [SE.subExpToScalExp n]
-          bindee1 = Bindee ident1 $ MemSummary m ixfun
-          bindee2 = Bindee ident2 $ MemSummary m $ IxFun.offset ixfun offset
+          bindee1 = BindVar ident1 $ MemSummary m ixfun
+          bindee2 = BindVar ident2 $ MemSummary m $ IxFun.offset ixfun offset
           pat = [bindee1, bindee2]
       return $ Just $ Let (Pattern pat) () e
     _ -> fail $ "Invalid memory summary for " ++ pretty a ++ ": " ++
@@ -120,7 +120,7 @@ specialisedMkLetM [] [ident] e@(PrimOp (Reshape _ _ a)) = do
   summary <- lookupSummary' $ identName a
   case summary of
     MemSummary m ixfun -> -- FIXME: is this really the right index function?
-      return $ Just $ Let (Pattern [Bindee ident $ MemSummary m ixfun]) () e
+      return $ Just $ Let (Pattern [BindVar ident $ MemSummary m ixfun]) () e
     _ -> fail $ "Invalid memory summary for " ++ pretty a ++ ": " ++
          pretty summary
 
@@ -136,23 +136,23 @@ allocForArray t = do
   return (size, m)
 
 allocsForPattern :: [Ident] -> [Ident] -> [ExpReturns]
-                 -> AllocM [Bindee MemSummary]
+                 -> AllocM [PatElem]
 allocsForPattern sizeidents validents rts = do
-  let sizes' = [ Bindee size Scalar | size <- sizeidents ]
+  let sizes' = [ BindVar size Scalar | size <- sizeidents ]
   (vals,(memsizes,mems)) <- runWriterT $ forM (zip validents rts) $ \(ident, rt) ->
     case rt of
-      ReturnsScalar _ -> return $ Bindee ident Scalar
-      ReturnsMemory _ -> return $ Bindee ident Scalar
+      ReturnsScalar _ -> return $ BindVar ident Scalar
+      ReturnsMemory _ -> return $ BindVar ident Scalar
       ReturnsArray _ _ _ (Just (ReturnsInBlock mem ixfun)) ->
-        return $ Bindee ident $ MemSummary mem ixfun
+        return $ BindVar ident $ MemSummary mem ixfun
       ReturnsArray _ extshape _ Nothing
         | Just shape <- knownShape extshape -> do
         (_, m) <- lift $ allocForArray (identType ident `setArrayShape` Shape shape)
-        return $ Bindee ident $ directIndexFunction m $ identType ident
+        return $ BindVar ident $ directIndexFunction m $ identType ident
       _ -> do
-        (memsize,mem,ident') <- lift $ memForBindee ident
-        tell ([memsize], [mem])
-        return ident'
+        (memsize,mem,(ident',lore)) <- lift $ memForBindee ident
+        tell ([BindVar memsize Scalar], [BindVar mem Scalar])
+        return $ BindVar ident' lore
   return $ memsizes <> mems <> sizes' <> vals
   where knownShape = mapM known . extShapeDims
         known (Free v) = Just v
@@ -160,13 +160,15 @@ allocsForPattern sizeidents validents rts = do
 
 memForBindee :: (MonadFreshNames m) =>
                 Ident
-             -> m (BindeeT MemSummary, BindeeT MemSummary, BindeeT MemSummary)
+             -> m (Ident,
+                   Ident,
+                   (Ident, MemSummary))
 memForBindee ident = do
   size <- newIdent (memname <> "_size") (Basic Int)
   mem <- newIdent memname $ Mem $ Var size
-  return (Bindee size Scalar,
-          Bindee mem Scalar,
-          Bindee ident $ directIndexFunction mem t)
+  return (size,
+          mem,
+          (ident, directIndexFunction mem t))
   where  memname = baseString (identName ident) <> "_mem"
          t       = identType ident
 
@@ -201,11 +203,15 @@ lookupSummary' name = do
     Nothing ->
       fail $ "No memory summary for variable " ++ pretty name
 
-bindeeSummary :: BindeeT MemSummary -> (VName, MemSummary)
-bindeeSummary bindee = (bindeeName bindee, bindeeLore bindee)
+bindeeSummary :: PatElem -> (VName, MemSummary)
+bindeeSummary bindee = (patElemName bindee, patElemLore bindee)
 
-bindeesSummary :: [BindeeT MemSummary] -> HM.HashMap VName MemSummary
+bindeesSummary :: [PatElem] -> HM.HashMap VName MemSummary
 bindeesSummary = HM.fromList . map bindeeSummary
+
+fparamsSummary :: [FParam] -> HM.HashMap VName MemSummary
+fparamsSummary = HM.fromList . map fparamSummary
+  where fparamSummary fparam = (fparamName fparam, fparamLore fparam)
 
 runAllocM :: MonadFreshNames m => AllocM a -> m a
 runAllocM = runAllocMWithEnv HM.empty
@@ -220,13 +226,13 @@ allocInFParams :: [In.FParam] -> ([FParam] -> AllocM a)
                -> AllocM a
 allocInFParams params m = do
   (valparams, (memsizeparams, memparams)) <- runWriterT $ forM params $ \param ->
-    case bindeeType param of
+    case fparamType param of
       Array {} -> do
-        (memsize,mem,param') <- lift $ memForBindee $ bindeeIdent param
-        tell ([memsize], [mem])
-        return param'
-      _ -> return param { bindeeLore = Scalar }
-  let summary = bindeesSummary valparams
+        (memsize,mem,(param',paramlore)) <- lift $ memForBindee $ fparamIdent param
+        tell ([FParam memsize Scalar], [FParam mem Scalar])
+        return $ FParam param' paramlore
+      _ -> return param { fparamLore = Scalar }
+  let summary = fparamsSummary valparams
       params' = memsizeparams <> memparams <> valparams
   local (summary `HM.union`) $ m params'
 
@@ -248,7 +254,7 @@ allocLinearArray :: String
 allocLinearArray s se = do
   (size, mem) <- allocForArray t
   v' <- newIdent s t
-  let pat = Pattern [Bindee v' $ directIndexFunction mem t]
+  let pat = Pattern [BindVar v' $ directIndexFunction mem t]
   addBinding $ Let pat () $ PrimOp $ Copy se
   return (size, mem, Var v')
   where t = subExpType se
@@ -309,7 +315,7 @@ allocInBindings origbnds m = allocInBindings' origbnds []
           allocbnds <- allocInBinding' x
           let summaries =
                 bindeesSummary $
-                concatMap (patternBindees . bindingPattern) allocbnds
+                concatMap (patternElements . bindingPattern) allocbnds
           local (`HM.union` summaries) $
             allocInBindings' xs (bnds'++allocbnds)
         allocInBinding' bnd = do

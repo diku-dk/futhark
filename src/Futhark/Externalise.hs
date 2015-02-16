@@ -30,7 +30,7 @@ externaliseFunction :: I.FunDec -> E.FunDec
 externaliseFunction (FunDec fname ret params body) =
   (fname,
    externaliseDeclTypes $ map I.toDecl $ retTypeValues ret,
-   map (externaliseParam . bindeeIdent) params,
+   map (externaliseParam . fparamIdent) params,
    externaliseBody body,
    noLoc)
 
@@ -124,7 +124,7 @@ externalisePrimOp (I.Rotate cs n e) =
 externaliseLoopOp :: I.LoopOp -> E.Exp
 
 externaliseLoopOp (I.DoLoop respat merge i bound loopbody) =
-  E.DoLoop (externaliseBinders (map bindeeIdent mergepat))
+  E.DoLoop (externaliseBinders (map fparamIdent mergepat))
            (externaliseSubExps mergeexp)
            (externaliseIdent i) (externaliseSubExp bound)
            (externaliseBody loopbody)

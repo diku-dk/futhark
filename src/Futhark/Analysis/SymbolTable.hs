@@ -42,7 +42,8 @@ import Data.List hiding (insert, lookup)
 import qualified Data.Set as S
 import qualified Data.HashMap.Lazy as HM
 
-import Futhark.Representation.AST
+import Futhark.Representation.AST hiding (FParam, FParamT (..))
+import qualified Futhark.Representation.AST as AST
 import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Analysis.ScalExp
 import Futhark.Substitute
@@ -227,13 +228,13 @@ enclosingLoopVars free vtable =
                         return (name, e)
 
 defBndEntry :: SymbolTable lore
-            -> PatBindee lore
+            -> PatElem lore
             -> Binding lore
             -> LetBoundEntry lore
 defBndEntry vtable bindee bnd =
   LetBoundEntry {
       letBoundRange = (Nothing, Nothing)
-    , letBoundLore = bindeeLore bindee
+    , letBoundLore = patElemLore bindee
     , letBoundBinding = bnd
     , letBoundScalExp = toScalExp (`lookupScalExp` vtable) (bindingExp bnd)
     , letBoundBindingDepth = 0
@@ -273,7 +274,7 @@ bindingEntries bnd@(Let (Pattern (x:xs)) _ (LoopOp (Filter _ _ inps))) vtable =
             letBoundRange = lookupRange (identName v) vtable
             }
 bindingEntries bnd@(Let pat _ _) vtable =
-  map (flip (defBndEntry vtable) bnd) $ patternBindees pat
+  map (flip (defBndEntry vtable) bnd) $ patternElements pat
 
 subExpRange :: SubExp -> SymbolTable lore -> Range
 subExpRange (Var v) vtable =
@@ -303,16 +304,17 @@ insertBinding bnd vtable =
   insertEntries (zip names $ map LetBound $ bindingEntries bnd vtable) vtable
   where names = patternNames $ bindingPattern bnd
 
-insertFParam :: FParam lore -> SymbolTable lore
+insertFParam :: AST.FParam lore
+             -> SymbolTable lore
              -> SymbolTable lore
 insertFParam fparam = insertEntry name entry
-  where name = bindeeName fparam
+  where name = fparamName fparam
         entry = FParam FParamEntry { fparamRange = (Nothing, Nothing)
-                                   , fparamLore = bindeeLore fparam
+                                   , fparamLore = AST.fparamLore fparam
                                    , fparamBindingDepth = 0
                                    }
 
-insertFParams :: [FParam lore] -> SymbolTable lore
+insertFParams :: [AST.FParam lore] -> SymbolTable lore
               -> SymbolTable lore
 insertFParams fparams symtable = foldr insertFParam symtable fparams
 

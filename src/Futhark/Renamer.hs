@@ -144,7 +144,7 @@ bind vars body = do
 
 instance Renameable lore => Rename (FunDec lore) where
   rename (FunDec fname ret params body) =
-    bind (map bindeeIdent params) $ do
+    bind (map fparamIdent params) $ do
       params' <- mapM rename params
       body' <- rename body
       ret' <- rename ret
@@ -158,12 +158,23 @@ instance Rename Result where
   rename (Result ses) =
     Result <$> mapM rename ses
 
-instance Rename annot => Rename (Bindee annot) where
-  rename (Bindee ident lore) = Bindee <$> rename ident <*> rename lore
+instance Rename attr => Rename (FParamT attr) where
+  rename (FParam ident attr) = FParam <$> rename ident <*> rename attr
 
 instance Renameable lore => Rename (Pattern lore) where
   rename (Pattern l) = Pattern <$> rename l
 
+instance Rename attr => Rename (PatElemT attr) where
+  rename (BindVar ident attr) =
+    BindVar <$> rename ident <*> rename attr
+{-
+  rename (BindInPlace ident src is attr) =
+    BindInPlace <$>
+    rename ident <*>
+    rename src <*>
+    mapM rename is <*>
+    rename attr
+-}
 instance Renameable lore => Rename (Body lore) where
   rename (Body lore [] res) =
     Body <$> rename lore <*> pure [] <*> rename res
@@ -180,7 +191,7 @@ instance Renameable lore => Rename (Exp lore) where
     let (mergepat, mergeexp) = unzip merge
     boundexp' <- rename boundexp
     mergeexp' <- mapM rename mergeexp
-    bind (map bindeeIdent mergepat) $ do
+    bind (map fparamIdent mergepat) $ do
       mergepat' <- mapM rename mergepat
       respat' <- mapM rename respat
       bind [loopvar] $ do

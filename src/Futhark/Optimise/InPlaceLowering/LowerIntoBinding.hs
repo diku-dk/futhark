@@ -91,12 +91,12 @@ lowerUpdateIntoLoop updates pat res merge body = do
   where mergeparams = map fst merge
         resmap = loopResultValues
                  (patternIdents pat) (map identName res)
-                 (map bindeeName mergeparams) $
+                 (map fparamName mergeparams) $
                  resultSubExps $ bodyResult body
 
         mkMerges :: (MonadFreshNames m, Bindable lore) =>
                     [LoopResultSummary]
-                 -> m ([(Bindee (), SubExp)], [Binding lore])
+                 -> m ([(FParamT (), SubExp)], [Binding lore])
         mkMerges summaries = do
           ((origmerge, extramerge), prebnds) <-
             runBinderT $ partitionEithers <$> mapM mkMerge summaries
@@ -107,7 +107,7 @@ lowerUpdateIntoLoop updates pat res merge body = do
             source <- letSubExp "modified_source" $ PrimOp $
                       Update (updateCertificates update) (updateSource update)
                       (updateIndices update) (snd $ mergeParam summary)
-            return $ Right (Bindee mergeident (), source)
+            return $ Right (FParam mergeident (), source)
           | otherwise = return $ Left $ mergeParam summary
 
         mkResAndPat summaries =
@@ -120,14 +120,14 @@ lowerUpdateIntoLoop updates pat res merge body = do
           | Just (update, mergeident) <- relatedUpdate summary =
               Just $ Right (updateBindee update, mergeident)
           | Just v <- inPatternAs summary =
-              Just $ Left (v, bindeeIdent $ fst $ mergeParam summary)
+              Just $ Left (v, fparamIdent $ fst $ mergeParam summary)
           | otherwise =
               Nothing
 
 summariseLoop :: MonadFreshNames m =>
                  [DesiredUpdate]
               -> [(SubExp, Maybe Ident)]
-              -> [(Bindee (), SubExp)]
+              -> [(FParamT (), SubExp)]
               -> Maybe (m [LoopResultSummary])
 summariseLoop updates resmap merge =
   sequence <$> zipWithM summariseLoopResult resmap merge
@@ -149,9 +149,9 @@ summariseLoop updates resmap merge =
                                           , relatedUpdate = Nothing
                                           }
 
-        hasLoopInvariantShape = all loopInvariant . arrayDims . bindeeType
+        hasLoopInvariantShape = all loopInvariant . arrayDims . fparamType
 
-        merge_param_names = map (bindeeName . fst) merge
+        merge_param_names = map (fparamName . fst) merge
 
         loopInvariant (Var v)       = identName v `notElem` merge_param_names
         loopInvariant (Constant {}) = True
@@ -159,7 +159,7 @@ summariseLoop updates resmap merge =
 data LoopResultSummary =
   LoopResultSummary { resultSubExp :: SubExp
                     , inPatternAs :: Maybe Ident
-                    , mergeParam :: (Bindee (), SubExp)
+                    , mergeParam :: (FParamT (), SubExp)
                     , relatedUpdate :: Maybe (DesiredUpdate, Ident)
                     }
 
@@ -168,7 +168,7 @@ indexSubstitutions :: [LoopResultSummary]
 indexSubstitutions = mapMaybe getSubstitution
   where getSubstitution res = do
           (DesiredUpdate _ cs _ is _, mergeident) <- relatedUpdate res
-          let name = bindeeName $ fst $ mergeParam res
+          let name = fparamName $ fst $ mergeParam res
           return (name, (cs, mergeident, is))
 
 manipulateResult :: [LoopResultSummary]

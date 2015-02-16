@@ -30,9 +30,8 @@ module Futhark.Representation.AST.Syntax
   , Param
   , Certificates
   , SubExp(..)
-  , BindeeT(..)
-  , Bindee
-  , PatBindee
+  , PatElemT (..)
+  , PatElem
   , PatternT (..)
   , Pattern
   , Binding(..)
@@ -48,6 +47,7 @@ module Futhark.Representation.AST.Syntax
   , Lore.RetType
 
   -- * Definitions
+  , FParamT (..)
   , FParam
   , FunDecT (..)
   , FunDec
@@ -67,12 +67,11 @@ import Futhark.Representation.AST.Lore (Lore)
 import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Representation.AST.Syntax.Core
 
--- | The kind of 'Bindee' used in a 'Pattern'.
-type PatBindee lore = Bindee (Lore.LetBound lore)
+type PatElem lore = PatElemT (Lore.LetBound lore)
 
 -- | A pattern is conceptually just a list of names and their types.
 newtype PatternT lore =
-  Pattern { patternBindees :: [PatBindee lore] }
+  Pattern { patternElements :: [PatElem lore] }
 
 deriving instance Lore lore => Ord (PatternT lore)
 deriving instance Lore lore => Show (PatternT lore)
@@ -240,8 +239,7 @@ data LambdaT lore =
 
 type Lambda = LambdaT
 
--- | A (non-lambda) function parameter.
-type FParam lore = Bindee (Lore.FParam lore)
+type FParam lore = FParamT (Lore.FParam lore)
 
 -- | Function Declarations
 data FunDecT lore = FunDec { funDecName :: Name

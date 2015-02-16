@@ -19,10 +19,10 @@ usageInBinding (Let pat lore e) =
            usageInExp e,
            UT.usages (freeNamesInExp e)]
   where usageInPat =
-          UT.usages . mconcat . map bindeeUsage . patternBindees
+          UT.usages . mconcat . map bindeeUsage . patternElements
         usageInExpLore =
           UT.usages $ freeNamesIn lore
-        bindeeUsage bindee = bindeeName bindee `HS.delete`
+        bindeeUsage bindee = patElemName bindee `HS.delete`
                              freeNamesIn bindee
 
 usageInExp :: Aliased lore => Exp lore -> UT.UsageTable
@@ -35,7 +35,7 @@ usageInExp (Apply _ args _) =
 usageInExp (LoopOp (DoLoop _ merge _ _ _)) =
   mconcat [ mconcat $ map UT.consumedUsage $
             HS.toList $ subExpAliases se
-          | (v,se) <- merge, unique $ bindeeType v ]
+          | (v,se) <- merge, unique $ fparamType v ]
 usageInExp (LoopOp (Map _ f args)) =
   mconcat [ mconcat $ map UT.consumedUsage $
             HS.toList $ identAliases se

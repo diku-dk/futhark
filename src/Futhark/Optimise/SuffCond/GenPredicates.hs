@@ -46,11 +46,11 @@ genPredicate :: MonadFreshNames m => FunDec -> m (FunDec, FunDec)
 genPredicate (FunDec fname rettype params body) = do
   pred_ident <- newIdent "pred" $ Basic Bool
   cert_ident <- newIdent "pred_cert" $ Basic Cert
-  (pred_params, bnds) <- nonuniqueParams $ map bindeeIdent params
+  (pred_params, bnds) <- nonuniqueParams $ map fparamIdent params
   let env = GenEnv cert_ident (dataDependencies body) mempty
   (pred_body, Body _ val_bnds val_res) <- runGenM env $ splitFunBody body
-  let mkFParam = flip Bindee ()
-      pred_args = [ (Var arg, Observe) | arg <- map bindeeIdent params ]
+  let mkFParam = flip FParam ()
+      pred_args = [ (Var arg, Observe) | arg <- map fparamIdent params ]
       pred_bnd = mkLet [pred_ident] $
                  Apply predFname pred_args $ basicRetType Bool
       cert_bnd = mkLet [cert_ident] $
@@ -137,7 +137,7 @@ splitBinding (Let pat _ (LoopOp (DoLoop respat merge i bound body))) = do
   ok <- newIdent "loop_ok" (Basic Bool)
   predbody' <- conjoinLoopBody ok predbody
   let predloop = LoopOp $ DoLoop (respat++[ok])
-                 (merge++[(Bindee ok (),constant True)]) i bound
+                 (merge++[(FParam ok (),constant True)]) i bound
                  predbody'
       valloop = LoopOp $ DoLoop respat merge i bound valbody
   return ([mkLet (idents<>[ok]) predloop],

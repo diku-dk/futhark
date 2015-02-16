@@ -315,7 +315,7 @@ provides = patternNames . bindingPattern
 
 requires :: Proper lore => Binding lore -> Names
 requires bnd =
-  (mconcat (map freeNamesIn $ patternBindees $ bindingPattern bnd)
+  (mconcat (map freeNamesIn $ patternElements $ bindingPattern bnd)
   `HS.difference` HS.fromList (provides bnd)) <>
   freeNamesInExp (bindingExp bnd)
 
@@ -384,7 +384,7 @@ isAlloc _ _                             = False
 isResultAlloc :: BlockPred lore
 isResultAlloc usage (Let (Pattern [bindee]) _
                      (PrimOp (Alloc {}))) =
-  UT.isInResult (bindeeName bindee) usage
+  UT.isInResult (patElemName bindee) usage
 isResultAlloc _ _ = False
 
 hoistCommon :: MonadEngine m =>
@@ -531,7 +531,7 @@ simplifyLoopOp (DoLoop respat merge loopvar boundexp loopbody) = do
   mergepat' <- mapM simplifyFParam mergepat
   mergeexp' <- mapM simplifySubExp mergeexp
   boundexp' <- simplifySubExp boundexp
-  let diets = map (diet . bindeeType) mergepat'
+  let diets = map (diet . fparamType) mergepat'
   -- Blocking hoisting of all unique bindings is probably too
   -- conservative, but there is currently no nice way to mark
   -- consumption of the loop body result.
@@ -548,11 +548,11 @@ simplifyLoopOp (DoLoop respat merge loopvar boundexp loopbody) = do
   consumeResult $ zip diets mergeexp'
   return $ DoLoop respat' merge' loopvar boundexp' loopbody'
   where boundnames = identName loopvar `HS.insert`
-                     HS.fromList (map (bindeeName . fst) merge)
-        simplifyFParam (Bindee ident lore) = do
+                     HS.fromList (map (fparamName . fst) merge)
+        simplifyFParam (FParam ident lore) = do
           ident' <- simplifyIdentBinding ident
           lore' <- simplifyFParamLore lore
-          return $ Bindee ident' lore'
+          return $ FParam ident' lore'
 
 simplifyLoopOp (Map cs fun arrs) = do
   cs' <- simplifyCerts cs
@@ -632,11 +632,11 @@ simplifyPattern :: MonadEngine m =>
                    Pattern (InnerLore m)
                 -> m (Pattern (InnerLore m))
 simplifyPattern =
-  liftM Pattern . mapM inspect . patternBindees
-  where inspect (Bindee ident lore) = do
+  liftM Pattern . mapM inspect . patternElements
+  where inspect (BindVar ident lore) = do
           ident' <- simplifyIdentBinding ident
           lore'  <- simplifyLetBoundLore lore
-          return $ Bindee ident' lore'
+          return $ BindVar ident' lore'
 
 simplifyIdentBinding :: MonadEngine m => Ident -> m Ident
 simplifyIdentBinding v = do

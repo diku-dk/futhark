@@ -58,14 +58,14 @@ freeWalker = identityWalker {
         bindingFree (Let pat annot e) = do
           tell $ freeIn annot
           binding (HS.fromList $ patternIdents pat) $ do
-            mapM_ (tell . freeIn) $ patternBindees pat
+            mapM_ (tell . freeIn) $ patternElements pat
             expFree e
 
         expFree (LoopOp (DoLoop _ merge i boundexp loopbody)) = do
           let (mergepat, mergeexps) = unzip merge
           mapM_ subExpFree mergeexps
           subExpFree boundexp
-          binding (i `HS.insert` HS.fromList (map bindeeIdent mergepat)) $ do
+          binding (i `HS.insert` HS.fromList (map fparamIdent mergepat)) $ do
             mapM_ (tell . freeIn) mergepat
             bodyFree loopbody
 
@@ -160,9 +160,17 @@ instance (ArrayShape shape, FreeIn shape) => FreeIn (TypeBase shape) where
   freeIn (Mem size)        = freeIn size
   freeIn (Basic _)         = mempty
 
-instance FreeIn attr => FreeIn (Bindee attr) where
-  freeIn (Bindee ident attr) =
+instance FreeIn attr => FreeIn (FParamT attr) where
+  freeIn (FParam ident attr) =
     freeIn ident <> freeIn attr
+
+instance FreeIn attr => FreeIn (PatElemT attr) where
+  freeIn (BindVar ident attr) =
+    freeIn ident <> freeIn attr
+    {-
+  freeIn (BindInPlace ident src is attr) =
+    freeIn ident <> freeIn src <> freeIn is <> freeIn attr
+-}
 
 instance FreeIn ExtRetType where
   freeIn = mconcat . map freeIn . retTypeValues
@@ -190,7 +198,7 @@ progNames = execWriter . mapM funNames . progFunctions
 
         one = tell . HS.singleton
         funNames fundec = do
-          mapM_ (one . bindeeName) $ funDecParams fundec
+          mapM_ (one . fparamName) $ funDecParams fundec
           bodyNames $ funDecBody fundec
 
         bodyNames = mapM_ bindingNames . bodyBindings
@@ -199,7 +207,7 @@ progNames = execWriter . mapM funNames . progFunctions
           mapM_ one (patternNames pat) >> expNames e
 
         expNames (LoopOp (DoLoop _ pat i _ loopbody)) = do
-          mapM_ (one . bindeeName . fst) pat
+          mapM_ (one . fparamName . fst) pat
           one $ identName i
           bodyNames loopbody
         expNames e = walkExpM names e

@@ -61,7 +61,7 @@ internaliseFun :: E.FunDec -> InternaliseM I.FunDec
 internaliseFun (fname,rettype,params,body,_) =
   bindingParams params $ \shapeparams params' -> do
     body' <- internaliseBody body
-    let mkFParam = flip Bindee ()
+    let mkFParam = flip FParam ()
     return $ FunDec
       fname rettype'
       (map mkFParam $ shapeparams ++ params')
@@ -183,7 +183,7 @@ internaliseExp desc (E.DoLoop mergepat mergeexp i bound loopbody letbody _) = do
                   (map I.identType mergepat')
                   mergeinit ++
                   mergeinit
-      merge = [ (Bindee ident (), e) |
+      merge = [ (FParam ident (), e) |
                 (ident, e) <- zip (shapepat ++ mergepat') mergeexp' ]
       loop = I.LoopOp $ I.DoLoop mergepat' merge i' bound' loopbody'
   bindingTupIdent mergepat (I.expExtType loop) $ \mergepat'' -> do

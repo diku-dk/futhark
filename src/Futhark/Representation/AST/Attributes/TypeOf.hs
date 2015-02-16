@@ -94,7 +94,7 @@ primOpType (Alloc e) =
 
 loopOpExtType :: LoopOp lore -> [ExtType]
 loopOpExtType (DoLoop res merge _ _ _) =
-  loopExtType res $ map (bindeeIdent . fst) merge
+  loopExtType res $ map (fparamIdent . fst) merge
 loopOpExtType (Map _ f arrs) =
   staticShapes $ mapType f $ map identType arrs
 loopOpExtType (Reduce _ fun _) =

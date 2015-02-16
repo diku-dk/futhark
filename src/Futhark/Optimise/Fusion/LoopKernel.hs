@@ -50,7 +50,7 @@ transformOutput ts names soac = do
             PrimOp $ SubExp $ Var valident
           t SOAC.:< ts'' -> do
             let es = map (applyTransform t) validents
-                mkPat ident = Pattern [Bindee ident ()]
+                mkPat ident = Pattern [BindVar ident ()]
             newIds <- forM (zip valnames $ concatMap primOpType es) $ \(k, opt) ->
               newIdent (baseString k) opt
             zipWithM_ letBind (map mkPat newIds) $ map PrimOp es

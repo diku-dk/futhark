@@ -17,7 +17,7 @@ import qualified Futhark.Representation.AST.Lore as Lore
 
 data Rephraser from to
   = Rephraser { rephraseExpLore :: Lore.Exp from -> Lore.Exp to
-              , rephraseBindeeLore :: Lore.LetBound from -> Lore.LetBound to
+              , rephraseLetBoundLore :: Lore.LetBound from -> Lore.LetBound to
               , rephraseFParamLore :: Lore.FParam from -> Lore.FParam to
               , rephraseBodyLore :: Lore.Body from -> Lore.Body to
               , rephraseRetType :: RetType from -> RetType to
@@ -29,7 +29,7 @@ rephraseProg rephraser = Prog . map (rephraseFunDec rephraser) . progFunctions
 rephraseFunDec :: Rephraser from to -> FunDec from -> FunDec to
 rephraseFunDec rephraser fundec =
   fundec { funDecBody = rephraseBody rephraser $ funDecBody fundec
-         , funDecParams = map (rephraseBindee $ rephraseFParamLore rephraser) $
+         , funDecParams = map (rephraseFParam $ rephraseFParamLore rephraser) $
                           funDecParams fundec
          , funDecRetType = rephraseRetType rephraser $ funDecRetType fundec
          }
@@ -47,13 +47,19 @@ rephraseBinding rephraser (Let pat lore e) =
 rephrasePattern :: Rephraser from to -> Pattern from -> Pattern to
 rephrasePattern rephraser =
   Pattern .
-  map (rephraseBindee $ rephraseBindeeLore rephraser) .
-  patternBindees
+  map (rephrasePatElem $ rephraseLetBoundLore rephraser) .
+  patternElements
 
-rephraseBindee :: (from -> to) -> Bindee from -> Bindee to
-rephraseBindee rephraser bindee =
-  bindee { bindeeLore = rephraser $ bindeeLore bindee
-         }
+rephrasePatElem :: (from -> to) -> PatElemT from -> PatElemT to
+rephrasePatElem rephraser (BindVar ident from) =
+  BindVar ident $ rephraser from
+{-
+rephrasePatElem rephraser (BindInPlace ident src is from) =
+  BindInPlace ident src is $ rephraser from
+-}
+rephraseFParam :: (from -> to) -> FParamT from -> FParamT to
+rephraseFParam rephraser (FParam ident from) =
+  FParam ident $ rephraser from
 
 rephraseBody :: Rephraser from to -> Body from -> Body to
 rephraseBody rephraser (Body lore bnds res) =
@@ -72,5 +78,5 @@ mapper rephraser = identityMapper {
   , mapOnBody = return . rephraseBody rephraser
   , mapOnLambda = return . rephraseLambda rephraser
   , mapOnRetType = return . rephraseRetType rephraser
-  , mapOnFParam = return . rephraseBindee (rephraseFParamLore rephraser)
+  , mapOnFParam = return . rephraseFParam (rephraseFParamLore rephraser)
   }

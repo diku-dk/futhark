@@ -55,9 +55,20 @@ instance Substitute SubExp where
 instance Substitutable lore => Substitute (Exp lore) where
   substituteNames substs = mapExp $ replace substs
 
-instance Substitute annot => Substitute (Bindee annot) where
-  substituteNames substs (Bindee ident lore) =
-    Bindee (substituteNames substs ident) (substituteNames substs lore)
+instance Substitute attr => Substitute (PatElemT attr) where
+  substituteNames substs (BindVar ident attr) =
+    BindVar (substituteNames substs ident) (substituteNames substs attr)
+{-
+  substituteNames substs (BindInPlace ident src is attr) =
+    BindInPlace
+    (substituteNames substs ident)
+    (substituteNames substs src)
+    (map (substituteNames substs) is)
+    (substituteNames substs attr)
+-}
+instance Substitute attr => Substitute (FParamT attr) where
+  substituteNames substs (FParam ident attr) =
+    FParam (substituteNames substs ident) (substituteNames substs attr)
 
 instance Substitutable lore => Substitute (Pattern lore) where
   substituteNames substs (Pattern l) =

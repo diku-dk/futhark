@@ -17,7 +17,7 @@ module Futhark.Representation.ExplicitMemory
        , Body
        , Binding
        , Pattern
-       , PatBindee
+       , PatElem
        , PrimOp
        , LoopOp
        , Exp
@@ -37,6 +37,7 @@ module Futhark.Representation.ExplicitMemory
        , AST.ExpT(PrimOp)
        , AST.ExpT(LoopOp)
        , AST.FunDecT(FunDec)
+       , AST.FParamT(FParam)
        )
 where
 
@@ -55,7 +56,7 @@ import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
-          Pattern, PatBindee, Lambda, FunDec, FParam, RetType)
+          Pattern, PatElem, Lambda, FunDec, FParam, RetType)
 
 import Futhark.TypeCheck.TypeError
 import Futhark.Representation.AST.Attributes
@@ -77,11 +78,11 @@ type Exp = AST.Exp ExplicitMemory
 type Body = AST.Body ExplicitMemory
 type Binding = AST.Binding ExplicitMemory
 type Pattern = AST.Pattern ExplicitMemory
-type PatBindee = AST.PatBindee ExplicitMemory
 type Lambda = AST.Lambda ExplicitMemory
 type FunDec = AST.FunDec ExplicitMemory
 type FParam = AST.FParam ExplicitMemory
 type RetType = AST.RetType ExplicitMemory
+type PatElem = AST.PatElem ExplicitMemory
 
 instance IsRetType [FunReturns] where
   retTypeValues = map returnsToType
@@ -96,13 +97,13 @@ instance Lore.Lore ExplicitMemory where
   representative = ExplicitMemory
 
   loopResultContext _ res mergevars =
-    let shapeContextIdents = loopShapeContext res $ map bindeeIdent mergevars
+    let shapeContextIdents = loopShapeContext res $ map fparamIdent mergevars
         memContextIdents = nub $ mapMaybe memIfNecessary res
         memSizeContextIdents = nub $ mapMaybe memSizeIfNecessary memContextIdents
     in memSizeContextIdents <> memContextIdents <> shapeContextIdents
     where memIfNecessary ident =
-            case find ((==ident) . bindeeIdent) mergevars of
-              Just fparam | MemSummary mem _ <- bindeeLore fparam,
+            case find ((==ident) . fparamIdent) mergevars of
+              Just fparam | MemSummary mem _ <- fparamLore fparam,
                             isMergeParam mem ->
                 Just mem
               _ ->
@@ -114,7 +115,7 @@ instance Lore.Lore ExplicitMemory where
             | otherwise =
               Nothing
           isMergeParam ident =
-            any ((==ident) . bindeeIdent) mergevars
+            any ((==ident) . fparamIdent) mergevars
 
 data MemSummary = MemSummary Ident IxFun.IxFun
                 | Scalar
@@ -285,7 +286,7 @@ instance TypeCheck.Checkable ExplicitMemory where
   checkFParamLore = checkMemSummary
   checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
   basicFParam name t =
-    return $ Bindee (Ident name (AST.Basic t)) Scalar
+    return $ AST.FParam (Ident name (AST.Basic t)) Scalar
 
   matchPattern pat e = do
     rt <- expReturns varMemSummary e
@@ -333,8 +334,8 @@ matchPatternToReturns wrong pat rt = do
     intercalate ", " (map pretty remaining)
   where
     (ctxbindees, valbindees) =
-        splitAt (patternSize pat - length rt) $ patternBindees pat
-    inCtx = (`elem` map bindeeName ctxbindees)
+        splitAt (patternSize pat - length rt) $ patternElements pat
+    inCtx = (`elem` map patElemName ctxbindees)
 
     matchType bindee t
       | t' `subtypeOf` bindeet =
@@ -343,7 +344,7 @@ matchPatternToReturns wrong pat rt = do
         lift $ wrong $ "Bindee " ++ pretty bindee ++
         " has type " ++ pretty bindeet ++
         ", but expression returns " ++ pretty t' ++ "."
-      where bindeet = toDecl $ bindeeType bindee
+      where bindeet = toDecl $ patElemType bindee
             t'      = toDecl t
 
 
@@ -355,7 +356,7 @@ matchPatternToReturns wrong pat rt = do
       popSizeIfInCtx $ identName size
       matchType bindee $ Mem $ Var size
     matchBindee bindee (ReturnsArray et shape u rets)
-      | MemSummary mem bindeeIxFun <- bindeeLore bindee,
+      | MemSummary mem bindeeIxFun <- patElemLore bindee,
         Mem size <- identType mem = do
           case size of
             Var size' -> popSizeIfInCtx $ identName size'
@@ -378,7 +379,7 @@ matchPatternToReturns wrong pat rt = do
 
             Just (ReturnsNewBlock _) ->
               popMemFromCtx $ identName mem
-          zipWithM_ matchArrayDim (arrayDims $ bindeeType bindee) $
+          zipWithM_ matchArrayDim (arrayDims $ patElemType bindee) $
             extShapeDims shape
           matchType bindee $ Array et shape u
       | otherwise =
@@ -403,10 +404,10 @@ matchPatternToReturns wrong pat rt = do
 
     popSize name = do
       ctxbindees' <- get
-      case partition ((==name) . bindeeName) ctxbindees' of
+      case partition ((==name) . patElemName) ctxbindees' of
         ([nameBindee], ctxbindees'') -> do
           put ctxbindees''
-          unless (bindeeType nameBindee == Basic Int) $
+          unless (patElemType nameBindee == Basic Int) $
             lift $ wrong $ "Size " ++ pretty name ++
             " is not an integer."
         _ ->
@@ -414,10 +415,10 @@ matchPatternToReturns wrong pat rt = do
 
     popMem name = do
       ctxbindees' <- get
-      case partition ((==name) . bindeeName) ctxbindees' of
+      case partition ((==name) . patElemName) ctxbindees' of
         ([memBindee], ctxbindees'') -> do
           put ctxbindees''
-          case bindeeType memBindee of
+          case patElemType memBindee of
             Mem (Var size) ->
               popSizeFromCtx $ identName size
             Mem (Constant {}) ->
@@ -471,21 +472,22 @@ instance Proper ExplicitMemory where
 
 instance PrettyLore ExplicitMemory where
   ppBindingLore binding =
-    case mapMaybe bindeeAnnotation $ patternBindees $ bindingPattern binding of
+    case mapMaybe patElemAnnot $ patternElements $ bindingPattern binding of
       []     -> Nothing
       annots -> Just $ PP.folddoc (PP.</>) annots
   ppFunDecLore fundec =
-    case mapMaybe bindeeAnnotation $ funDecParams fundec of
+    case mapMaybe fparamAnnot $ funDecParams fundec of
       []     -> Nothing
       annots -> Just $ PP.folddoc (PP.</>) annots
   ppExpLore (AST.LoopOp (DoLoop _ merge _ _ _)) =
-    case mapMaybe (bindeeAnnotation . fst) merge of
+    case mapMaybe (fparamAnnot . fst) merge of
       []     -> Nothing
       annots -> Just $ PP.folddoc (PP.</>) annots
   ppExpLore _ = Nothing
 
-bindeeAnnotation :: PatBindee -> Maybe PP.Doc
-bindeeAnnotation bindee =
+bindeeAnnot :: (a -> VName) -> (a -> MemSummary)
+                -> a -> Maybe PP.Doc
+bindeeAnnot bindeeName bindeeLore bindee =
   case bindeeLore bindee of
     MemSummary ident fun ->
       Just $
@@ -497,6 +499,12 @@ bindeeAnnotation bindee =
       PP.ppr fun
     Scalar ->
       Nothing
+
+fparamAnnot :: FParam -> Maybe PP.Doc
+fparamAnnot = bindeeAnnot fparamName fparamLore
+
+patElemAnnot :: PatElem -> Maybe PP.Doc
+patElemAnnot = bindeeAnnot patElemName patElemLore
 
 returnsToType :: Returns a -> ExtType
 returnsToType (ReturnsScalar bt) = Basic bt
@@ -544,10 +552,10 @@ expReturns _ (AST.LoopOp (DoLoop res merge _ _ _)) =
     return $
     evalState (mapM typeWithAttr $
                zip (map identName res) $
-               loopExtType res $ map bindeeIdent mergevars) 0
+               loopExtType res $ map fparamIdent mergevars) 0
     where typeWithAttr (resname, t) =
             case (t,
-                  bindeeLore <$> find ((==resname) . bindeeName) mergevars) of
+                  fparamLore <$> find ((==resname) . fparamName) mergevars) of
               (Array bt shape u, Just (MemSummary mem ixfun))
                 | isMergeVar $ identName mem -> do
                   i <- get
@@ -562,7 +570,7 @@ expReturns _ (AST.LoopOp (DoLoop res merge _ _ _)) =
                 return $ ReturnsScalar bt
               (Mem _, _) ->
                 fail "expReturns: loop returns memory block explicitly."
-          isMergeVar = flip elem $ map bindeeName mergevars
+          isMergeVar = flip elem $ map fparamName mergevars
           mergevars = map fst merge
 
 expReturns _ (AST.LoopOp op) =
@@ -597,7 +605,7 @@ bodyReturns look ts (AST.Body _ bnds res) = do
         memsummary <- do
           summary <- case HM.lookup name boundHere of
             Nothing -> lift $ look name
-            Just bindee -> return $ bindeeLore bindee
+            Just bindee -> return $ patElemLore bindee
 
           case summary of
             Scalar ->
@@ -621,14 +629,14 @@ bodyReturns look ts (AST.Body _ bnds res) = do
   evalStateT (zipWithM inspect ts $ resultSubExps res)
     (0, HM.empty)
 
-boundInBindings :: [Binding] -> HM.HashMap VName PatBindee
+boundInBindings :: [Binding] -> HM.HashMap VName PatElem
 boundInBindings [] = HM.empty
 boundInBindings (bnd:bnds) =
   boundInBinding `HM.union` boundInBindings bnds
   where boundInBinding =
           HM.fromList
-          [ (bindeeName bindee, bindee)
-          | bindee <- patternBindees $ bindingPattern bnd
+          [ (patElemName bindee, bindee)
+          | bindee <- patternElements $ bindingPattern bnd
           ]
 
 -- | The size of a basic type in bytes.

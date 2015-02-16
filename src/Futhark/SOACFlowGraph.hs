@@ -147,7 +147,7 @@ flowForBody b = walkBodyM flow b
 
 flowForExp :: Exp -> FlowM ()
 flowForExp (LoopOp (DoLoop _ merge _ boundexp loopbody))
-  | names@(name:_) <- map (bindeeName . fst) merge =
+  | names@(name:_) <- map (fparamName . fst) merge =
   tell $ HM.singleton
          (textual name)
          SOACInfo {

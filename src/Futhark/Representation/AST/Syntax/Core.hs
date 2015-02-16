@@ -25,8 +25,8 @@ module Futhark.Representation.AST.Syntax.Core
          , Param
          , Certificates
          , SubExp(..)
-         , BindeeT(..)
-         , Bindee
+         , FParamT (..)
+         , PatElemT (..)
 
          -- * Miscellaneous
          , Names
@@ -178,12 +178,19 @@ data SubExp = Constant BasicValue
             | Var      Ident
             deriving (Show, Eq, Ord)
 
-data BindeeT annot = Bindee { bindeeIdent :: Ident
-                            , bindeeLore  :: annot
-                            }
-                     deriving (Ord, Show, Eq)
+-- | A (non-lambda) function parameter.
+data FParamT attr = FParam
+                    { fparamIdent :: Ident
+                    , fparamLore :: attr
+                    }
+                    deriving (Ord, Show, Eq)
 
-type Bindee = BindeeT
+
+data PatElemT attr = BindVar Ident attr
+{-
+                   | BindInPlace Ident Ident [SubExp] attr
+-}
+                   deriving (Ord, Show, Eq)
 
 -- | A set of names.
 type Names = HS.HashSet VName

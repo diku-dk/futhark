@@ -125,28 +125,28 @@ instance Proper lore => Proper (Aliases lore) where
 instance Lore.Lore lore => Aliased (Aliases lore) where
   bodyAliases = map unNames . fst . fst . bodyLore
   consumedInBody = unNames . snd . fst . bodyLore
-  patternAliases = map (unNames . fst . bindeeLore) . patternBindees
+  patternAliases = map (unNames . fst . patElemLore) . patternElements
 
 instance (PrettyLore lore) => PrettyLore (Aliases lore) where
   ppBindingLore binding =
-    case catMaybes [bindeeAnnots,
-                    expAnnot,
+    case catMaybes [patElemAttrs,
+                    expAttr,
                     ppBindingLore $ removeBindingAliases binding] of
       [] -> Nothing
       ls -> Just $ PP.folddoc (PP.</>) ls
-    where expAnnot = case HS.toList $ consumedInExp $ bindingExp binding of
+    where expAttr = case HS.toList $ consumedInExp $ bindingExp binding of
             []  -> Nothing
             als -> Just $ oneline $
                    PP.text "// Consumes " <> PP.commasep (map PP.ppr als)
-          bindeeAnnots =
-            case mapMaybe bindeeAnnot $ patternBindees $ bindingPattern binding of
-              []     -> Nothing
-              annots -> Just $ PP.folddoc (PP.</>) annots
-          bindeeAnnot bindee =
-            case HS.toList . unNames . fst . bindeeLore $ bindee of
+          patElemAttrs =
+            case mapMaybe patElemAttr $ patternElements $ bindingPattern binding of
+              []    -> Nothing
+              attrs -> Just $ PP.folddoc (PP.</>) attrs
+          patElemAttr patelem =
+            case HS.toList . unNames . fst . patElemLore $ patelem of
               [] -> Nothing
               als -> Just $ oneline $
-                     PP.text "// " <> PP.ppr (bindeeName bindee) <> PP.text " aliases " <>
+                     PP.text "// " <> PP.ppr (patElemName patelem) <> PP.text " aliases " <>
                      PP.commasep (map PP.ppr als)
           oneline s = PP.text $ PP.displayS (PP.renderCompact s) ""
 
@@ -155,7 +155,7 @@ instance (PrettyLore lore) => PrettyLore (Aliases lore) where
 
 removeAliases :: Rephraser (Aliases lore) lore
 removeAliases = Rephraser { rephraseExpLore = snd
-                          , rephraseBindeeLore = snd
+                          , rephraseLetBoundLore = snd
                           , rephraseBodyLore = snd
                           , rephraseFParamLore = id
                           , rephraseRetType = id
@@ -183,8 +183,8 @@ removePatternAliases :: AST.Pattern (Aliases lore) -> AST.Pattern lore
 removePatternAliases = rephrasePattern removeAliases
 
 removeFParamAliases :: Aliases lore -> FParam (Aliases lore) -> FParam lore
-removeFParamAliases _ (Bindee ident lore) =
-  Bindee ident lore
+removeFParamAliases _ (FParam ident lore) =
+  FParam ident lore
 
 addAliasesToPattern :: Lore.Lore lore =>
                        AST.Pattern lore -> Exp lore -> Pattern lore
@@ -193,13 +193,11 @@ addAliasesToPattern pat e =
   -- aliased.
   let als = aliasesOf e
       als' = replicate (patternSize pat - length als) mempty <> als
-  in AST.Pattern $ zipWith annotateBindee (patternBindees pat) als'
+  in AST.Pattern $ zipWith annotateBindee (patternElements pat) als'
   where annotateBindee bindee names =
-          bindee { bindeeLore =
-                      (Names' names', bindeeLore bindee)
-                 }
+          bindee `setPatElemLore` (Names' names', patElemLore bindee)
           where names' =
-                  case bindeeType bindee of
+                  case patElemType bindee of
                     Array {} -> names
                     Mem _    -> names
                     _        -> mempty

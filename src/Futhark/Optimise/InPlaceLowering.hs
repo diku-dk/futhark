@@ -118,8 +118,8 @@ optimiseBindings (bnd:bnds) m = do
 
         checkIfForwardableUpdate bnd' bnds'
             | PrimOp (Update cs src [i] (Var ve)) <- bindingExp bnd',
-              Pattern [bindee] <- bindingPattern bnd' = do
-                forwarded <- maybeForward ve (bindeeIdent bindee) cs src i
+              Pattern [patelem] <- bindingPattern bnd' = do
+                forwarded <- maybeForward ve (patElemIdent patelem) cs src i
                 return $ if forwarded
                          then bnds'
                          else bnd' : bnds'
@@ -200,7 +200,7 @@ bindingFParams :: [FParam Basic]
                -> ForwardingM a
 bindingFParams fparams = local $ \(TopDown n vtable d) ->
   let entry fparam =
-        (bindeeName fparam,
+        (fparamName fparam,
          Entry n mempty d False)
       entries = HM.fromList $ map entry fparams
   in TopDown (n+1) (HM.union entries vtable) d
@@ -209,10 +209,10 @@ bindingBinding :: Binding Basic
                -> ForwardingM a
                -> ForwardingM a
 bindingBinding (Let pat _ _) = local $ \(TopDown n vtable d) ->
-  let entries = HM.fromList $ map entry $ patternBindees pat
-      entry bindee =
-        let (aliases, ()) = bindeeLore bindee
-        in (bindeeName bindee,
+  let entries = HM.fromList $ map entry $ patternElements pat
+      entry patElem =
+        let (aliases, ()) = patElemLore patElem
+        in (patElemName patElem,
             Entry n (unNames aliases) d True)
   in TopDown (n+1) (HM.union entries vtable) d
 

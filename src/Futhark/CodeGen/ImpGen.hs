@@ -125,16 +125,16 @@ compileInParam fparam = case t of
     shape' <- mapM subExpToDimSize $ shapeDims shape
     return $ Right $ ArrayDecl name bt shape' $
       MemLocation (identName mem) ixfun
-  where name = bindeeName fparam
-        t    = bindeeType fparam
-        MemSummary mem ixfun = bindeeLore fparam
+  where name = fparamName fparam
+        t    = fparamType fparam
+        MemSummary mem ixfun = fparamLore fparam
 
 data ArrayDecl = ArrayDecl VName BasicType [Imp.DimSize] MemLocation
 
 fparamSizes :: FParam -> HS.HashSet VName
 fparamSizes fparam
-  | Mem (Var size) <- bindeeType fparam = HS.singleton $ identName size
-  | otherwise = HS.fromList $ mapMaybe name $ arrayDims $ bindeeType fparam
+  | Mem (Var size) <- fparamType fparam = HS.singleton $ identName size
+  | otherwise = HS.fromList $ mapMaybe name $ arrayDims $ fparamType fparam
   where name (Var v) = Just $ identName v
         name _       = Nothing
 
@@ -145,14 +145,14 @@ compileInParams params = do
   let findArray x = find (isArrayDecl x) arraydecls
       sizes = mconcat $ map fparamSizes params
       mkArg fparam =
-        case (findArray $ bindeeName fparam, bindeeType fparam) of
+        case (findArray $ fparamName fparam, fparamType fparam) of
           (Just (ArrayDecl _ bt shape (MemLocation mem _)), _) ->
             Just $ Imp.ArrayValue mem bt shape
           (_, Basic bt)
-            | bindeeName fparam `HS.member` sizes ->
+            | fparamName fparam `HS.member` sizes ->
               Nothing
             | otherwise ->
-              Just $ Imp.ScalarValue bt $ bindeeName fparam
+              Just $ Imp.ScalarValue bt $ fparamName fparam
           _ ->
             Nothing
       args = mapMaybe mkArg params
@@ -287,7 +287,7 @@ compileBindings :: [Binding] -> ImpM op a -> ImpM op a
 compileBindings []     m = m
 compileBindings (b:bs) m = do
   let pat = bindingPattern b
-  declaringVars (patternBindees pat) $
+  declaringVars (patternElements pat) $
     compileExp (patternNames pat) (bindingExp b) $
     compileBindings bs m
 
@@ -398,7 +398,7 @@ defCompilePrimOp [target] (Replicate n se) = do
         rowsize
   where set = subExpType se
 
-defCompilePrimOp [target] (Scratch {}) =
+defCompilePrimOp [_] (Scratch {}) =
   return ()
 
 defCompilePrimOp [target] (Iota n) = do
@@ -518,16 +518,16 @@ defCompilePrimOp [] _ = return () -- No arms, no cake.
 defCompileLoopOp :: [VName] -> LoopOp -> ImpM op ()
 
 defCompileLoopOp targets loop@(DoLoop res merge i bound body) =
-  declaringVars mergepat $ do
+  declaringFParams mergepat $ do
     forM_ merge $ \(p, se) ->
-      when (subExpNotArray se) $ compileSubExpTo (bindeeName p) se
+      when (subExpNotArray se) $ compileSubExpTo (fparamName p) se
     body' <- collect $ compileBody mergenames body
     tell $ Imp.For (identName i) (compileSubExp bound) body'
     let restype = expExtType $ LoopOp loop
     Destination dest <- destinationFromTargets targets restype
     zipWithM_ compileResultSubExp dest $ map Var res
     where mergepat = map fst merge
-          mergenames = map bindeeName mergepat
+          mergenames = map fparamName mergepat
 
 defCompileLoopOp [_] (Map {}) = soacError
 
@@ -576,12 +576,16 @@ withParam (Imp.MemParam name memsize) =
   in local $ insertInVtable name entry
 withParam (Imp.ScalarParam {}) = id
 
-declaringVars :: [PatBindee] -> ImpM op a -> ImpM op a
+declaringVars :: [PatElem] -> ImpM op a -> ImpM op a
 declaringVars = flip $ foldr declaringVar
 
-declaringVar :: PatBindee -> ImpM op a -> ImpM op a
-declaringVar bindee m =
-  case bindeeType bindee of
+declaringFParams :: [FParam] -> ImpM op a -> ImpM op a
+declaringFParams = flip $ foldr $ declaringVar . toPatElem
+  where toPatElem fparam = BindVar (fparamIdent fparam) (fparamLore fparam)
+
+declaringVar :: PatElem -> ImpM op a -> ImpM op a
+declaringVar patElem m =
+  case patElemType patElem of
     Basic bt -> do
       tell $ Imp.DeclareScalar name bt
       m
@@ -594,7 +598,7 @@ declaringVar bindee m =
       local (insertInVtable name entry) m
     Array bt shape _ -> do
       shape' <- mapM subExpToDimSize $ shapeDims shape
-      let MemSummary mem ixfun = bindeeLore bindee
+      let MemSummary mem ixfun = patElemLore patElem
           location = MemLocation (identName mem) ixfun
           entry = ArrayVar ArrayEntry {
               entryArrayLocation = location
@@ -602,7 +606,7 @@ declaringVar bindee m =
             , entryArrayShape    = shape'
             }
       local (insertInVtable name entry) m
-  where name = bindeeName bindee
+  where name = patElemName patElem
 
 -- | Remove the array targets.
 sanitiseTargets :: [VName] -> ImpM op [VName]

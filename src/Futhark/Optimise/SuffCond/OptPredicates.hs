@@ -126,7 +126,7 @@ generateOptimisedPredicates'
 rephraseWithInvariance :: Body -> S.Body Invariance'
 rephraseWithInvariance = rephraseBody rephraser
   where rephraser = Rephraser { rephraseExpLore = const TooVariant
-                              , rephraseBindeeLore = const Nothing
+                              , rephraseLetBoundLore = const Nothing
                               , rephraseFParamLore = const ()
                               , rephraseBodyLore = const ()
                               }
@@ -140,7 +140,7 @@ analyseBody :: ST.SymbolTable Basic -> SCTable -> Body -> SCTable
 analyseBody _ sctable (Body _ [] _) =
   sctable
 
-analyseBody vtable sctable (Body bodylore (bnd@(Let (Pattern [bindee]) _ e):bnds) res) =
+analyseBody vtable sctable (Body bodylore (bnd@(Let (Pattern [patElem]) _ e):bnds) res) =
   let vtable' = ST.insertBinding bnd vtable
       -- Construct a new sctable for recurrences.
       sctable' = case (analyseExp vtable e,
@@ -153,7 +153,7 @@ analyseBody vtable sctable (Body bodylore (bnd@(Let (Pattern [bindee]) _ e):bnds
         (Just eSCTable, _) -> sctable <> eSCTable
         _                  -> sctable
   in analyseBody vtable' sctable' $ Body bodylore bnds res
-  where name = bindeeName bindee
+  where name = patElemName patElem
         ranges = rangesRep vtable
         simplify se = AS.simplify se ranges
 analyseBody vtable sctable (Body bodylore (bnd:bnds) res) =
@@ -310,7 +310,7 @@ instance MonadFreshNames m =>
     Simplify.simplifyBody ds $ Body bodylore bnds res
 
   inspectBinding bnd@(Let pat lore e) = do
-    -- If the binding has any boolean bindees, we need to try to
+    -- If the binding has any boolean patElems, we need to try to
     -- compute a sufficient binding (if we are not already doing
     -- that).  XXX: this is pretty slow.
     suff <- generatingSuff
@@ -320,12 +320,12 @@ instance MonadFreshNames m =>
         vs <- mapM (newIdent' (<>"_suff")) $ patternIdents pat
         suffe <- generating Sufficient $
                  Simplify.simplifyExp =<< renameExp (removeExpAliases e)
-        let pat' = pat { patternBindees =
-                            zipWith tagBindee (patternBindees pat) vs
+        let pat' = pat { patternElements =
+                            zipWith tagPatElem (patternElements pat) vs
                        }
-            tagBindee bindee v =
-              bindee { bindeeLore = (fst $ bindeeLore bindee, Just v) }
-            suffpat = Pattern (map (`Bindee` Nothing) vs)
+            tagPatElem patElem v =
+              patElem `setPatElemLore` (fst $ patElemLore patElem, Just v)
+            suffpat = Pattern (map (`BindVar` Nothing) vs)
         makeSufficientBinding =<< mkLetM (addAliasesToPattern suffpat suffe) suffe
         Simplify.defaultInspectBinding $ Let pat' lore e
 
@@ -418,7 +418,7 @@ type Invariance = Aliases Invariance'
 
 removeInvariance :: Rephraser Invariance' Basic
 removeInvariance = Rephraser { rephraseExpLore = const ()
-                             , rephraseBindeeLore = const ()
+                             , rephraseLetBoundLore = const ()
                              , rephraseBodyLore = const ()
                              , rephraseFParamLore = const ()
                              , rephraseRetType = id
@@ -431,7 +431,7 @@ instance MonadFreshNames m => BindableM (VariantM m) where
     let explore = if forbiddenExp context e
                   then TooVariant
                   else Invariant
-        pat' = Pattern $ map (`Bindee` Nothing) $ patternIdents pat
+        pat' = Pattern $ map (`BindVar` Nothing) $ patternIdents pat
     return $ mkAliasedLetBinding pat' explore e
   mkBodyM bnds res =
     return $ mkAliasedBody () bnds res

@@ -362,7 +362,7 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res)
           bres  <- bindingFamily pat $ fusionGatherBody fres body
           (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
           greedyFuse False used_lam blres
-            (Pattern $ drop 1 $ patternBindees pat, soac)
+            (Pattern $ drop 1 $ patternElements pat, soac)
 
         SOAC.Reduce _ lam args -> do
           -- a reduce always starts a new kernel
@@ -396,7 +396,7 @@ fusionGatherBody _ (Body _ (Let _ _ e:_) _)
 
 fusionGatherBody fres (Body _ (Let (Pattern [v]) _ e:bnds) res)
   | Just (src,trns) <- SOAC.transformFromExp e =
-    bindingTransform (bindeeIdent v) src trns $ fusionGatherBody fres $ mkBody bnds res
+    bindingTransform (patElemIdent v) src trns $ fusionGatherBody fres $ mkBody bnds res
 
 fusionGatherBody fres (Body _ (Let pat _ (PrimOp (Replicate n el)):bnds) res) = do
   bres <- bindingFamily pat $ fusionGatherBody fres $ mkBody bnds res
@@ -410,8 +410,8 @@ fusionGatherBody fres (Body _ (Let pat _ (PrimOp (Replicate n el)):bnds) res) = 
       soac_repl= SOAC.Map [] repl_lam [SOAC.Input SOAC.noTransforms $ SOAC.Iota n]
   greedyFuse True used_set bres' (pat, soac_repl)
 
-fusionGatherBody fres (Body _ (Let (Pattern [bindee]) _ (PrimOp (Update _ id0 inds elm)):bnds) res) = do
-  let id1 = bindeeIdent bindee
+fusionGatherBody fres (Body _ (Let (Pattern [patElem]) _ (PrimOp (Update _ id0 inds elm)):bnds) res) = do
+  let id1 = patElemIdent patElem
   bres  <- binding [id1] $ fusionGatherBody fres $ mkBody bnds res
 
   let pat_vars = [Var id0, Var id1]
@@ -444,11 +444,11 @@ fusionGatherExp :: FusedRes -> Exp -> FusionGM FusedRes
 fusionGatherExp fres (LoopOp (DoLoop _ merge _ ub loop_body)) = do
   let (merge_pat, ini_val) = unzip merge
 
-  let pat_vars = map (Var . bindeeIdent)  merge_pat
+  let pat_vars = map (Var . fparamIdent)  merge_pat
   fres' <- foldM fusionGatherSubExp fres (ini_val++ub:pat_vars)
 
   let null_res = mkFreshFusionRes
-  new_res <- binding (map bindeeIdent merge_pat) $ fusionGatherBody null_res loop_body
+  new_res <- binding (map fparamIdent merge_pat) $ fusionGatherBody null_res loop_body
   -- make the inpArr unfusable, so that they
   -- cannot be fused from outside the loop:
   let (inp_arrs, _) = unzip $ HM.toList $ inpArr new_res
@@ -571,9 +571,9 @@ fuseInLambda (Lambda params body rtp) = do
 
 replaceSOAC :: Pattern -> SOAC -> Body -> FusionGM Body
 replaceSOAC (Pattern []) _ body = return body
-replaceSOAC pat@(Pattern (bindee : _)) soac body = do
+replaceSOAC pat@(Pattern (patElem : _)) soac body = do
   fres  <- asks fusedRes
-  let pat_nm = bindeeName bindee
+  let pat_nm = patElemName patElem
       names  = patternIdents pat
   case HM.lookup pat_nm (outArr fres) of
     Nothing  -> do
