@@ -15,6 +15,7 @@ import Control.Monad
 import Futhark.Representation.AST
 import Futhark.Tools
 import Futhark.MonadFreshNames
+import Futhark.Util
 
 type IndexSubstitution = (Certificates, Ident, [SubExp])
 type IndexSubstitutions = [(VName, IndexSubstitution)]
@@ -37,21 +38,32 @@ substituteIndicesInBinding :: MonadBinder m =>
                               IndexSubstitutions
                            -> Binding (Lore m)
                            -> m IndexSubstitutions
-substituteIndicesInBinding substs (Let pat _ (PrimOp (Update cs src is val)))
-  | Just (cs2, src2, is2) <- lookup srcname substs,
-    [name] <- patternNames pat = do
-      patv' <- letExp (baseString name) $ PrimOp $
-               Update (cs++cs2) src2 (is2++is) val
-      return $ update srcname name (cs2, patv', is2) substs
-  where srcname = identName src
 substituteIndicesInBinding substs (Let pat lore e) = do
+  (substs', pat') <- substituteIndicesInPattern substs pat
   e' <- mapExpM substitute e
-  addBinding $ Let pat lore e'
-  return substs
+  addBinding $ Let pat' lore e'
+  return substs'
   where substitute = identityMapper { mapOnSubExp = substituteIndicesInSubExp substs
                                     , mapOnIdent  = substituteIndicesInIdent substs
                                     , mapOnBody   = substituteIndicesInBody substs
                                     }
+
+substituteIndicesInPattern :: MonadBinder m =>
+                              IndexSubstitutions
+                           -> Pattern (Lore m)
+                           -> m (IndexSubstitutions, Pattern (Lore m))
+substituteIndicesInPattern substs pat = do
+  (substs', patElems) <- mapAccumLM sub substs $ patternElements pat
+  return (substs', Pattern patElems)
+  where sub substs' (PatElem ident (BindInPlace cs src is) attr)
+          | Just (cs2, src2, is2) <- lookup srcname substs =
+            let ident' = ident { identType = identType src2 }
+            in return (update srcname name (cs2, ident', is2) substs',
+                       PatElem ident' (BindInPlace (cs++cs2) src2 (is2++is)) attr)
+          where srcname = identName src
+                name    = identName ident
+        sub substs' patElem =
+          return (substs', patElem)
 
 substituteIndicesInSubExp :: MonadBinder m =>
                              IndexSubstitutions

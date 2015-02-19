@@ -32,6 +32,7 @@ module Futhark.Representation.ExplicitMemory
        , module Futhark.Representation.AST.Syntax
        , AST.LambdaT(Lambda)
        , AST.BodyT(Body)
+       , AST.PatElemT(PatElem)
        , AST.PatternT(Pattern)
        , AST.ProgT(Prog)
        , AST.ExpT(PrimOp)
@@ -344,7 +345,7 @@ matchPatternToReturns wrong pat rt = do
         lift $ wrong $ "Bindee " ++ pretty bindee ++
         " has type " ++ pretty bindeet ++
         ", but expression returns " ++ pretty t' ++ "."
-      where bindeet = toDecl $ patElemType bindee
+      where bindeet = toDecl $ patElemRequires bindee
             t'      = toDecl t
 
 

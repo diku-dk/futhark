@@ -462,8 +462,8 @@ simplifyBinding (Let pat _ (Apply fname args rettype)) = do
     Just vs -> do let vs' = valueShapeContext (retTypeValues rettype) vs ++ vs
                   bnds <- forM (zip (patternIdents pat) vs') $ \(p,v) ->
                     case uniqueness $ identType p of
-                      Unique    -> mkLetNamesM [identName p] =<< eCopy (eValue v)
-                      Nonunique -> mkLetNamesM [identName p] =<< eValue v
+                      Unique    -> mkLetNamesM' [identName p] =<< eCopy (eValue v)
+                      Nonunique -> mkLetNamesM' [identName p] =<< eValue v
                   mapM_ (simplifyBinding . Aliases.removeBindingAliases) bnds
     Nothing -> do let e' = Apply fname (zip args' $ map snd args) rettype'
                   pat' <- blockUsage $ simplifyPattern pat
@@ -606,7 +606,7 @@ simplifyLoopOp (Redomap cs outerfun innerfun acc arrs) = do
                  let outerSize = arraySize 0 $ identType firstarr
                  input <- newIdent "unused_input"
                           (arrayOf (Basic Int) (Shape [outerSize]) Nonunique)
-                 letBindNames_ [identName input] $
+                 letBindNames'_ [identName input] $
                    PrimOp $ Iota outerSize
                  return (lam { lambdaParams =
                                   accparams ++
@@ -633,10 +633,22 @@ simplifyPattern :: MonadEngine m =>
                 -> m (Pattern (InnerLore m))
 simplifyPattern =
   liftM Pattern . mapM inspect . patternElements
-  where inspect (BindVar ident lore) = do
+  where inspect (PatElem ident bindage lore) = do
           ident' <- simplifyIdentBinding ident
+          bindage' <- simplifyBindage bindage
           lore'  <- simplifyLetBoundLore lore
-          return $ BindVar ident' lore'
+          return $ PatElem ident' bindage' lore'
+
+simplifyBindage :: MonadEngine m =>
+                   Bindage
+                -> m Bindage
+simplifyBindage BindVar =
+  return BindVar
+simplifyBindage (BindInPlace cs src is) =
+  BindInPlace <$>
+  simplifyCerts cs <*>
+  simplifyIdent src <*>
+  mapM simplifySubExp is
 
 simplifyIdentBinding :: MonadEngine m => Ident -> m Ident
 simplifyIdentBinding v = do

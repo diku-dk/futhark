@@ -59,8 +59,6 @@ primOpType (Negate e) =
   [subExpType e]
 primOpType (Index _ ident idx) =
   [stripArray (length idx) (identType ident)]
-primOpType (Update _ src _ _) =
-  [identType src]
 primOpType (Iota ne) =
   [arrayOf (Basic Int) (Shape [ne]) Nonunique]
 primOpType (Replicate ne e) =

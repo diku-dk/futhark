@@ -59,8 +59,10 @@ binding :: [Ident] -> FusionGM a -> FusionGM a
 binding vs = local (`bindVars` namesOfArrays vs)
   where namesOfArrays = map identName . filter (not . basicType . identType)
 
-bindingPat :: Pattern -> FusionGM a -> FusionGM a
-bindingPat = binding . patternIdents
+bindingPat :: Pattern -> FusionGM FusedRes -> FusionGM FusedRes
+bindingPat pat m = do
+  res <- binding (patternIdents pat) m
+  checkForUpdates pat res
 
 -- | Binds an array name to the set of soac-produced vars
 bindingFamilyVar :: [VName] -> FusionGEnv -> VName -> FusionGEnv
@@ -69,9 +71,24 @@ bindingFamilyVar faml env nm =
       , arrsInScope = HM.insert nm Nothing $ arrsInScope env
       }
 
-bindingFamily :: Pattern -> FusionGM a -> FusionGM a
-bindingFamily pat = local $ \env -> foldl (bindingFamilyVar names) env names
+checkForUpdates :: Pattern -> FusedRes -> FusionGM FusedRes
+checkForUpdates pat res = foldM checkForUpdate res $ patternElements pat
+  where checkForUpdate res' (PatElem _ BindVar _) =
+          return res'
+        checkForUpdate res' (PatElem _ (BindInPlace _ src is) _) = do
+          res'' <- foldM fusionGatherSubExp res' (Var src : is)
+          let aliases = [identName src]
+              inspectKer k =
+                let inplace' = foldl (flip HS.insert) (inplace k) aliases
+                in  k { inplace = inplace' }
+          return $ res'' { kernels = HM.map inspectKer $ kernels res'' }
+
+bindingFamily :: Pattern -> FusionGM FusedRes -> FusionGM FusedRes
+bindingFamily pat m = do
+  res <- local bind m
+  checkForUpdates pat res
   where names = patternNames pat
+        bind env = foldl (bindingFamilyVar names) env names
 
 bindingTransform :: Ident -> Ident -> SOAC.ArrayTransform -> FusionGM a -> FusionGM a
 bindingTransform v src trns = local $ \env ->
@@ -410,23 +427,6 @@ fusionGatherBody fres (Body _ (Let pat _ (PrimOp (Replicate n el)):bnds) res) = 
       soac_repl= SOAC.Map [] repl_lam [SOAC.Input SOAC.noTransforms $ SOAC.Iota n]
   greedyFuse True used_set bres' (pat, soac_repl)
 
-fusionGatherBody fres (Body _ (Let (Pattern [patElem]) _ (PrimOp (Update _ id0 inds elm)):bnds) res) = do
-  let id1 = patElemIdent patElem
-  bres  <- binding [id1] $ fusionGatherBody fres $ mkBody bnds res
-
-  let pat_vars = [Var id0, Var id1]
-  fres' <- foldM fusionGatherSubExp bres (elm : inds ++ pat_vars)
-  let (ker_nms, kers) = unzip $ HM.toList $ kernels fres'
-
-  -- Now add the aliases of id0 (itself included) to the `inplace'
-  -- field of any existent kernel.
-  let inplace_aliases = [identName id0]
-  let kers' = map (\ k -> let inplace' = foldl (flip HS.insert) (inplace k) inplace_aliases
-                          in  k { inplace = inplace' }
-                  ) kers
-  let new_kernels = HM.fromList $ zip ker_nms kers'
-  return $ fres' { kernels = new_kernels }
-
 fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
     let pat_vars = map (PrimOp . SubExp . Var) $ patternIdents pat
     bres <- bindingPat pat $ fusionGatherBody fres $ mkBody bnds res
@@ -579,7 +579,7 @@ replaceSOAC pat@(Pattern (patElem : _)) soac body = do
     Nothing  -> do
       (e,f) <- runBinder' $ SOAC.toExp soac
       e'    <- fuseInExp e
-      return $ f $ mkLet names e' `insertBinding` body
+      return $ f $ mkLet' names e' `insertBinding` body
     Just knm ->
       case HM.lookup knm (kernels fres) of
         Nothing  -> badFusionGM $ Error

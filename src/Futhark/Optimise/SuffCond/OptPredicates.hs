@@ -314,7 +314,7 @@ instance MonadFreshNames m =>
     -- compute a sufficient binding (if we are not already doing
     -- that).  XXX: this is pretty slow.
     suff <- generatingSuff
-    if suff || Basic Bool `notElem` patternTypes pat || not (HS.null $ consumedInExp e) --  || any ("suff" `isInfixOf`) (map (textual . identName) $ patternIdents pat)
+    if suff || Basic Bool `notElem` patternTypes pat || not (HS.null $ consumedInExp pat e) --  || any ("suff" `isInfixOf`) (map (textual . identName) $ patternIdents pat)
       then Simplify.defaultInspectBinding bnd
       else do
         vs <- mapM (newIdent' (<>"_suff")) $ patternIdents pat
@@ -325,7 +325,7 @@ instance MonadFreshNames m =>
                        }
             tagPatElem patElem v =
               patElem `setPatElemLore` (fst $ patElemLore patElem, Just v)
-            suffpat = Pattern (map (`BindVar` Nothing) vs)
+            suffpat = Pattern [ S.PatElem v BindVar Nothing | v <- vs ]
         makeSufficientBinding =<< mkLetM (addAliasesToPattern suffpat suffe) suffe
         Simplify.defaultInspectBinding $ Let pat' lore e
 
@@ -431,7 +431,7 @@ instance MonadFreshNames m => BindableM (VariantM m) where
     let explore = if forbiddenExp context e
                   then TooVariant
                   else Invariant
-        pat' = Pattern $ map (`BindVar` Nothing) $ patternIdents pat
+        pat' = Pattern [ S.PatElem v BindVar Nothing | v <- patternIdents pat ]
     return $ mkAliasedLetBinding pat' explore e
   mkBodyM bnds res =
     return $ mkAliasedBody () bnds res

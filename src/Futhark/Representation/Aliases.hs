@@ -128,18 +128,18 @@ instance Lore.Lore lore => Aliased (Aliases lore) where
   patternAliases = map (unNames . fst . patElemLore) . patternElements
 
 instance (PrettyLore lore) => PrettyLore (Aliases lore) where
-  ppBindingLore binding =
+  ppBindingLore binding@(Let pat (consumed,_) _) =
     case catMaybes [patElemAttrs,
                     expAttr,
                     ppBindingLore $ removeBindingAliases binding] of
       [] -> Nothing
       ls -> Just $ PP.folddoc (PP.</>) ls
-    where expAttr = case HS.toList $ consumedInExp $ bindingExp binding of
+    where expAttr = case HS.toList $ unNames consumed of
             []  -> Nothing
             als -> Just $ oneline $
                    PP.text "// Consumes " <> PP.commasep (map PP.ppr als)
           patElemAttrs =
-            case mapMaybe patElemAttr $ patternElements $ bindingPattern binding of
+            case mapMaybe patElemAttr $ patternElements pat of
               []    -> Nothing
               attrs -> Just $ PP.folddoc (PP.</>) attrs
           patElemAttr patelem =
@@ -197,7 +197,7 @@ addAliasesToPattern pat e =
   where annotateBindee bindee names =
           bindee `setPatElemLore` (Names' names', patElemLore bindee)
           where names' =
-                  case patElemType bindee of
+                  case patElemRequires bindee of
                     Array {} -> names
                     Mem _    -> names
                     _        -> mempty
@@ -224,9 +224,9 @@ mkAliasedBody innerlore bnds res =
               e = bindingExp bnd
               als = aliasesOf e
               als' = replicate (patternSize pat - length als) mempty <> als
-              names = patternNames $ bindingPattern bnd
+              names = patternNames pat
               aliasmap' = HM.fromList (zip names als') <> aliasmap
-              consumed' = consumed <> aliasClosure aliasmap (consumedInExp e)
+              consumed' = consumed <> aliasClosure aliasmap (consumedInExp pat e)
           in delve (aliasmap', consumed') bnds'
         aliasClosure aliasmap names =
           names `HS.union` mconcat (map look $ HS.toList names)
@@ -236,7 +236,9 @@ mkAliasedLetBinding :: Lore.Lore lore =>
                        AST.Pattern lore -> Lore.Exp lore -> Exp lore
                     -> Binding lore
 mkAliasedLetBinding pat explore e =
-  Let (addAliasesToPattern pat e) (Names' $ consumedInExp e, explore) e
+  Let (addAliasesToPattern pat e)
+  (Names' $ consumedInExp pat e, explore)
+  e
 
 instance Bindable lore => Bindable (Aliases lore) where
   mkLet pat e =

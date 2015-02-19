@@ -26,6 +26,7 @@ module Futhark.Representation.AST.Syntax.Core
          , Certificates
          , SubExp(..)
          , FParamT (..)
+         , Bindage (..)
          , PatElemT (..)
 
          -- * Miscellaneous
@@ -185,11 +186,15 @@ data FParamT attr = FParam
                     }
                     deriving (Ord, Show, Eq)
 
+data Bindage = BindVar
+             | BindInPlace Certificates Ident [SubExp]
+                  deriving (Ord, Show, Eq)
 
-data PatElemT attr = BindVar Ident attr
-{-
-                   | BindInPlace Ident Ident [SubExp] attr
--}
+data PatElemT attr = PatElem { patElemIdent :: Ident
+                               -- ^ The ident bound by a 'PatElem'.
+                             , patElemBindage :: Bindage
+                             , patElemLore :: attr
+                             }
                    deriving (Ord, Show, Eq)
 
 -- | A set of names.

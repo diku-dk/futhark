@@ -60,7 +60,10 @@ instance MonadFreshNames InternaliseM where
 
 instance BindableM InternaliseM where
   type Lore InternaliseM = Basic
-  mkLetM pat e = return $ mkLet (patternIdents pat) e
+  mkLetM pat e = return $ mkLet pat' e
+    where pat' = [ (ident, bindage)
+                 | PatElem ident bindage _ <- patternElements pat
+                 ]
   mkBodyM bnds res = return $ mkBody bnds res
   mkLetNamesM = mkLetNames
 

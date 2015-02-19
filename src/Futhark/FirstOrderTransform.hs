@@ -164,13 +164,13 @@ transformBinding (Let pat () e@(LoopOp (Filter {})))
   -- done in a hacky way here.  The better solution is to change how
   -- filter works.
   size':rest' <- letTupExp "filter_for" =<< transformExp e
-  addBinding $ Let (basicPattern [size]) () $ PrimOp $ SubExp $ Var size'
+  addBinding $ mkLet' [size] $ PrimOp $ SubExp $ Var size'
   let reshapeResult dest orig =
-        addBinding $ Let (basicPattern [dest]) () $
+        addBinding $ mkLet' [dest] $
         PrimOp $ Reshape [] (arrayDims $ identType dest) orig
   zipWithM_ reshapeResult rest rest'
   dummy <- newVName "dummy"
-  mkLetNames [dummy] $ PrimOp $ SubExp $ intconst 0
+  mkLetNames' [dummy] $ PrimOp $ SubExp $ intconst 0
 transformBinding (Let pat annot e) =
   Let pat annot <$> transformExp e
 
@@ -210,8 +210,7 @@ letwith cs ks i vs = do
   vs' <- letSubExps "values" vs
   i' <- letSubExp "i" =<< i
   let update k v =
-        letExp "lw_dest" $
-        PrimOp $ Update cs k [i'] v
+        letInPlace "lw_dest" cs k [i'] $ PrimOp $ SubExp v
   zipWithM update ks vs'
 
 isize :: [Ident] -> SubExp
@@ -222,7 +221,7 @@ pexp = pure . PrimOp . SubExp
 
 transformLambda :: Lambda -> [Exp] -> Binder Basic Body
 transformLambda (Lambda params body _) args = do
-  zipWithM_ letBindNames (map (pure . identName) params) args
+  zipWithM_ letBindNames' (map (pure . identName) params) args
   transformBody body
 
 loopMerge :: [Ident] -> [SubExp] -> [(FParam, SubExp)]

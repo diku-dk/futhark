@@ -58,7 +58,6 @@ topDownRules = [ liftIdentityMapping
                , simplifyScalExp
                , letRule simplifyIdentityReshape
                , letRule simplifyReshapeReshape
-               , letRule removeScratchValue
                ]
 
 bottomUpRules :: MonadBinder m => BottomUpRules m
@@ -88,7 +87,7 @@ liftIdentityMapping _ (Let pat _ (LoopOp (Map cs fun arrs))) =
                      , lambdaReturnType = rettype'
                      }
       mapM_ (uncurry letBind) invariant
-      letBindNames_ (map patElemName pat') $ LoopOp $ Map cs fun' arrs
+      letBindNames'_ (map patElemName pat') $ LoopOp $ Map cs fun' arrs
   where inputMap = HM.fromList $ zip (map identName $ lambdaParams fun) arrs
         free = freeInBody $ lambdaBody fun
         rettype = lambdaReturnType fun
@@ -131,7 +130,7 @@ removeReplicateMapping vtable (Let pat _ (LoopOp (Map cs fun arrs)))
       n = arraysSize 0 $ map identType arrs
       Result ses = bodyResult $ lambdaBody fun
       mapres = bodyBindings $ lambdaBody fun
-  mapM_ (uncurry letBindNames) parameterBnds
+  mapM_ (uncurry letBindNames') parameterBnds
   case arrs' of
     [] -> do mapM_ addBinding mapres
              sequence_ [ letBind p $ PrimOp $ Replicate n e
@@ -227,7 +226,7 @@ removeRedundantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge i bound 
        -- removal will eventually get rid of them.  Some care is
        -- necessary to handle unique bindings.
        body'' <- insertBindingsM $ do
-         mapM_ (uncurry letBindNames) $ dummyBindings discard
+         mapM_ (uncurry letBindNames') $ dummyBindings discard
          return body'
        letBind_ pat $ LoopOp $ DoLoop respat merge' i bound body''
   where (mergepat, _) = unzip merge
@@ -271,7 +270,7 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge idd n
           pat' = map fst $ implpat'++explpat'
           respat' = map snd explpat'
       in do forM_ (invariant ++ implinvariant') $ \(v1,v2) ->
-              letBindNames_ [identName v1] $ PrimOp $ SubExp v2
+              letBindNames'_ [identName v1] $ PrimOp $ SubExp v2
             letBind_ (Pattern pat') $
               LoopOp $ DoLoop respat' merge' idd n loopbody'
   where Result ses = bodyResult loopbody
@@ -763,15 +762,8 @@ removeUnnecessaryCopy (_,used) (Let (Pattern [v]) _ (PrimOp (Copy se)))
     -- than one might think, as we are changing the type of v.
     False
     =
-    letBindNames_ [patElemName v] $ PrimOp $ SubExp se
+    letBindNames'_ [patElemName v] $ PrimOp $ SubExp se
 removeUnnecessaryCopy _ _ = cannotSimplify
-
-removeScratchValue :: LetTopDownRule lore u
-removeScratchValue look (Update _ src _ (Var v))
-  | Just (PrimOp (Scratch {})) <- look $ identName v =
-    Just $ SubExp $ Var src
-removeScratchValue _ _ =
-  Nothing
 
 -- | Remove the return values of a branch, that are not actually used
 -- after a branch.  Standard dead code removal can remove the branch

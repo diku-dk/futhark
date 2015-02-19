@@ -25,6 +25,7 @@ module Futhark.Representation.Basic
        , AST.LambdaT(Lambda)
        , AST.BodyT(Body)
        , AST.PatternT(Pattern)
+       , AST.PatElemT(PatElem)
        , AST.ProgT(Prog)
        , AST.ExpT(PrimOp)
        , AST.ExpT(LoopOp)
@@ -32,6 +33,7 @@ module Futhark.Representation.Basic
        , AST.FParamT(FParam)
          -- Utility
        , basicPattern
+       , basicPattern'
          -- Removing lore
        , removeProgLore
        , removeFunDecLore
@@ -87,7 +89,7 @@ instance TypeCheck.Checkable Basic where
   checkFParamLore = return
   checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
   matchPattern pat e =
-    TypeCheck.matchExtPattern (patternIdents pat) (expExtType e)
+    TypeCheck.matchExtPattern (patternElements pat) (expExtType e)
   basicFParam name t =
     return $ AST.FParam (Ident name (AST.Basic t)) ()
   matchReturnType name (ExtRetType ts) =
@@ -99,17 +101,29 @@ instance Proper Basic where
 
 instance Bindable Basic where
   mkBody = AST.Body ()
-  mkLet idents =
-    AST.Let (AST.Pattern $ map (`AST.BindVar` ()) idents) ()
+  mkLet pat =
+    AST.Let (basicPattern pat) ()
   mkLetNames names e = do
     (ts, shapes) <- instantiateShapes' $ expExtType e
-    let idents = [ Ident name t | (name, t) <- zip names ts ]
-    return $ mkLet (shapes++idents) e
+    let shapeElems = [ AST.PatElem shapeident BindVar ()
+                  | shapeident <- shapes
+                  ]
+        valElems = zipWith mkValElem names ts
+        mkValElem (name, BindVar) t =
+          AST.PatElem (Ident name t) BindVar ()
+        mkValElem (name, bindage@(BindInPlace _ src _)) _ =
+          AST.PatElem (Ident name (identType src)) bindage ()
+    return $ AST.Let (AST.Pattern $ shapeElems++valElems) () e
 
 instance PrettyLore Basic where
 
-basicPattern :: [Ident] -> Pattern
-basicPattern = AST.Pattern . map (`AST.BindVar` ())
+basicPattern :: [(Ident,Bindage)] -> Pattern
+basicPattern idents =
+  AST.Pattern [ AST.PatElem ident bindage () | (ident,bindage) <- idents ]
+
+basicPattern' :: [Ident] -> Pattern
+basicPattern' = basicPattern . map addBindVar
+    where addBindVar name = (name, BindVar)
 
 removeLore :: Lore.Lore lore => Rephraser lore Basic
 removeLore =

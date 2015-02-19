@@ -102,7 +102,7 @@ substituteExtResultShapes rettype (Body _ bnds res) = do
         isSubst _                = Nothing
 
         substInBnd (Let pat _ e) =
-          mkLet <$> mapM substInBnd' (patternIdents pat) <*>
+          mkLet' <$> mapM substInBnd' (patternIdents pat) <*>
           pure (substituteNames subst e)
         substInBnd' v
           | identName v' `HM.member` subst = newIdent' (<>"unused") v'
@@ -159,7 +159,7 @@ substCalls subst fundec = do
 
         treatBinding (Let pat _ e) = do
           e' <- mapExpM mapper e
-          return [mkLet (patternIdents pat) e']
+          return [mkLet' (patternIdents pat) e']
           where mapper = identityMapper { mapOnBody = treatBody
                                         , mapOnLambda = treatLambda
                                         }

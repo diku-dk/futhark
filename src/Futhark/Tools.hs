@@ -6,6 +6,7 @@ module Futhark.Tools
   , letExps
   , letTupExp
   , letTupExp'
+  , letInPlace
 
   , newVar
 
@@ -65,7 +66,7 @@ letSubExp :: MonadBinder m =>
 letSubExp _ (PrimOp (SubExp se)) = return se
 letSubExp desc e = do
   v <- newVName desc
-  idents <- letBindNames [v] e
+  idents <- letBindNames' [v] e
   case idents of
     [ident] -> return $ Var ident
     _       -> fail $ "letSubExp: tuple-typed expression given:\n" ++ pretty e
@@ -75,7 +76,17 @@ letExp :: MonadBinder m =>
 letExp _ (PrimOp (SubExp (Var v))) = return v
 letExp desc e = do
   v <- newVName desc
-  idents <- letBindNames [v] e
+  idents <- letBindNames' [v] e
+  case idents of
+    [ident] -> return ident
+    _       -> fail $ "letExp: tuple-typed expression given:\n" ++ pretty e
+
+letInPlace :: MonadBinder m =>
+              String -> Certificates -> Ident -> [SubExp] -> Exp (Lore m)
+           -> m Ident
+letInPlace desc cs src is e = do
+  v <- newVName desc
+  idents <- letBindNames [(v,BindInPlace cs src is)] e
   case idents of
     [ident] -> return ident
     _       -> fail $ "letExp: tuple-typed expression given:\n" ++ pretty e
@@ -94,7 +105,7 @@ letShapedExp :: (MonadBinder m) =>
 letShapedExp _ (PrimOp (SubExp (Var v))) = return ([], [v])
 letShapedExp name e = do
   names <- replicateM numValues $ newVName name
-  idents <- letBindNames names e
+  idents <- letBindNames' names e
   return $ splitAt (length idents - numValues) idents
   where numValues = length $ expExtType e
 
@@ -190,7 +201,8 @@ eLambda :: MonadBinder m =>
 eLambda lam args = do zipWithM_ letBindNames params $
                         map (PrimOp . SubExp) args
                       bodyBind $ lambdaBody lam
-  where params = map (pure . identName) $ lambdaParams lam
+  where params = [ [(param, BindVar)] |
+                   param <- map identName $ lambdaParams lam ]
 
 -- | Apply a binary operator to several subexpressions.  A left-fold.
 foldBinOp :: MonadBinder m =>
@@ -210,7 +222,7 @@ binOpLambda bop t = do
   y   <- newIdent "y"   $ Basic t
   res <- newIdent "res" $ Basic t
   body <- runBinder $ do
-    bnds <- mkLetNamesM [identName res] $
+    bnds <- mkLetNamesM [(identName res,BindVar)] $
             PrimOp $ BinOp bop (Var x) (Var y) t
     mkBodyM [bnds] $ Result [Var res]
   return Lambda {
@@ -293,7 +305,7 @@ nonuniqueParams :: (MonadFreshNames m, Bindable lore) =>
 nonuniqueParams params = runBinder'' $ forM params $ \param ->
   if unique $ identType param then do
     param' <- nonuniqueParam <$> newIdent' (++"_nonunique") param
-    letBindNames_ [identName param] $
+    letBindNames_ [(identName param,BindVar)] $
       PrimOp $ Copy $ Var param'
     return param'
   else

@@ -27,7 +27,9 @@ class Lore lore => Aliased lore where
   patternAliases :: Pattern lore -> [Names]
 
 identAliases :: Ident -> Names
-identAliases = HS.singleton . identName
+identAliases ident
+  | Basic _ <- identType ident = mempty
+  | otherwise = HS.singleton $ identName ident
 
 subExpAliases :: SubExp -> Names
 subExpAliases (Constant {}) = mempty
@@ -41,8 +43,6 @@ primOpAliases (Not {}) = [mempty]
 primOpAliases (Negate {}) = [mempty]
 primOpAliases (Index _ ident _) =
   [identAliases ident]
-primOpAliases (Update {}) =
-  [mempty]
 primOpAliases (Iota {}) =
   [mempty]
 primOpAliases (Replicate _ e) =
@@ -118,15 +118,24 @@ maskAliases :: Names -> Diet -> Names
 maskAliases _   Consume = mempty
 maskAliases als Observe = als
 
-consumedInExp :: (Aliased lore) => Exp lore -> Names
-consumedInExp (Apply _ args _) =
-  mconcat $ map (consumeArg . first subExpAliases) args
-  where consumeArg (als, Consume) = als
-        consumeArg (_,   Observe) = mempty
-consumedInExp (PrimOp (Update _ src _ _)) =
-  identAliases src
-consumedInExp (If _ tb fb _) =
-  consumedInBody tb <> consumedInBody fb
-consumedInExp (LoopOp (DoLoop _ merge _ _ _)) =
-  mconcat $ map (subExpAliases . snd) $ filter (unique . fparamType . fst) merge
-consumedInExp _ = mempty
+consumedInExp :: (Aliased lore) => Pattern anylore -> Exp lore -> Names
+consumedInExp pat e =
+  consumedInPattern pat <> consumedInExp' e
+  where consumedInExp' (Apply _ args _) =
+          mconcat (map (consumeArg . first subExpAliases) args)
+          where consumeArg (als, Consume) = als
+                consumeArg (_,   Observe) = mempty
+        consumedInExp' (If _ tb fb _) =
+          consumedInBody tb <> consumedInBody fb
+        consumedInExp' (LoopOp (DoLoop _ merge _ _ _)) =
+          consumedInPattern pat <>
+          mconcat (map (subExpAliases . snd) $
+                   filter (unique . fparamType . fst) merge)
+        consumedInExp' _ = mempty
+
+consumedInPattern :: Pattern lore -> Names
+consumedInPattern pat =
+  mconcat (map (consumedInBindage . patElemBindage) $
+           patternElements pat)
+  where consumedInBindage BindVar = mempty
+        consumedInBindage (BindInPlace _ src _) = identAliases src

@@ -46,11 +46,11 @@ transformOutput ts names soac = do
         case SOAC.viewf ts' of
           SOAC.EmptyF ->
             forM_ (zip valnames validents) $ \(k, valident) ->
-            letBindNames [k] $
+            letBindNames' [k] $
             PrimOp $ SubExp $ Var valident
           t SOAC.:< ts'' -> do
             let es = map (applyTransform t) validents
-                mkPat ident = Pattern [BindVar ident ()]
+                mkPat ident = Pattern [PatElem ident BindVar ()]
             newIds <- forM (zip valnames $ concatMap primOpType es) $ \(k, opt) ->
               newIdent (baseString k) opt
             zipWithM_ letBind (map mkPat newIds) $ map PrimOp es
@@ -60,7 +60,7 @@ transformOutput ts names soac = do
     Nothing -> return Nothing
     Just (ctxidents,validents) -> return $ Just $ do
       e <- SOAC.toExp soac
-      letBind_ (basicPattern $ ctxidents<>validents) e
+      letBind_ (basicPattern' $ ctxidents<>validents) e
       descend ts validents
   where soact = SOAC.typeOf soac
 

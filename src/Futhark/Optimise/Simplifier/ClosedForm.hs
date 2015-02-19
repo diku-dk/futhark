@@ -55,7 +55,7 @@ foldClosedForm look pat lam accs arrs = do
                 (lambdaParams lam) (lambdaBody lam) accs
   isEmpty <- newIdent "fold_input_is_empty" (Basic Bool)
   let inputsize = arraysSize 0 $ map identType arrs
-  letBindNames_ [identName isEmpty] $
+  letBindNames'_ [identName isEmpty] $
     PrimOp $ BinOp Equal inputsize (intconst 0) Bool
   letBind_ pat =<<
     eIf (eSubExp $ Var isEmpty)
@@ -74,9 +74,9 @@ loopClosedForm pat respat merge bound body
     closedBody <- checkResults respat knownBindings
                   mergeidents body mergeexp
     isEmpty <- newIdent "bound_is_zero" (Basic Bool)
-    letBindNames_ [identName isEmpty] $
+    letBindNames'_ [identName isEmpty] $
       PrimOp $ BinOp Leq bound (intconst 0) Bool
-    letBindNames_ (patternNames pat) =<<
+    letBindNames'_ (patternNames pat) =<<
       eIf (eSubExp $ Var isEmpty)
       (resultBodyM mergeexp)
       (renameBody closedBody)
@@ -105,7 +105,7 @@ checkResults pat knownBindings params body accs = do
                   HS.fromList params
 
         checkResult (p, e) _
-          | Just e' <- asFreeSubExp e = letBindNames_ [identName p] $ PrimOp $ SubExp e'
+          | Just e' <- asFreeSubExp e = letBindNames'_ [identName p] $ PrimOp $ SubExp e'
         checkResult (p, Var v) (accparam, acc) = do
           e@(PrimOp (BinOp bop x y rt)) <- liftMaybe $ HM.lookup v bndMap
           -- One of x,y must be *this* accumulator, and the other must
@@ -119,8 +119,8 @@ checkResults pat knownBindings params body accs = do
                           _                      -> Nothing
           case bop of
               LogAnd -> do
-                letBindNames_ [identName v] e
-                letBindNames_ [identName p] $ PrimOp $ BinOp LogAnd this el rt
+                letBindNames'_ [identName v] e
+                letBindNames'_ [identName p] $ PrimOp $ BinOp LogAnd this el rt
               _ -> cannotSimplify -- Um... sorry.
 
         checkResult _ _ = cannotSimplify

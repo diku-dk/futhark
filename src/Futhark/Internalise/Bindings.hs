@@ -103,5 +103,5 @@ bindingTupIdent :: E.TupIdent -> [ExtType] -> (I.Pattern -> InternaliseM a)
 bindingTupIdent pat ts m = do
   pat' <- flattenPattern pat
   (ts',shapes) <- I.instantiateShapes' ts
-  let addShapeBindings pat'' = m $ I.basicPattern $ shapes ++ pat''
+  let addShapeBindings pat'' = m $ I.basicPattern' $ shapes ++ pat''
   bindingFlatPattern pat' ts' addShapeBindings

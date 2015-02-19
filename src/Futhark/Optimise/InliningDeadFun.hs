@@ -158,9 +158,9 @@ inlineInBody
       reshapeIfNecessary ident se
         | t@(Array {}) <- identType ident,
           Var v <- se =
-            mkLet [ident] $ PrimOp $ Reshape [] (arrayDims t) v
+            mkLet' [ident] $ PrimOp $ Reshape [] (arrayDims t) v
         | otherwise =
-          mkLet [ident] $ PrimOp $ SubExp se
+          mkLet' [ident] $ PrimOp $ SubExp se
 inlineInBody inlcallees b = mapBody (inliner inlcallees) b
 
 inliner :: Monad m => [FunDec] -> Mapper Basic Basic m

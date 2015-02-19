@@ -51,12 +51,11 @@ rephrasePattern rephraser =
   patternElements
 
 rephrasePatElem :: (from -> to) -> PatElemT from -> PatElemT to
-rephrasePatElem rephraser (BindVar ident from) =
-  BindVar ident $ rephraser from
-{-
-rephrasePatElem rephraser (BindInPlace ident src is from) =
-  BindInPlace ident src is $ rephraser from
--}
+rephrasePatElem rephraser (PatElem ident BindVar from) =
+  PatElem ident BindVar $ rephraser from
+rephrasePatElem rephraser (PatElem ident (BindInPlace cs src is) from) =
+  PatElem ident (BindInPlace cs src is) $ rephraser from
+
 rephraseFParam :: (from -> to) -> FParamT from -> FParamT to
 rephraseFParam rephraser (FParam ident from) =
   FParam ident $ rephraser from

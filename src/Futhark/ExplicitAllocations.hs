@@ -53,7 +53,12 @@ instance BindableM AllocM where
 
   mkLetNamesM names e = do
     (ts',sizes) <- instantiateShapes' $ expExtType e
-    let vals = [ Ident name t | (name, t) <- zip names ts' ]
+    let identForBindage name t BindVar =
+          (Ident name t, BindVar)
+        identForBindage name _ bindage@(BindInPlace _ src _) =
+          (Ident name (identType src), bindage)
+        vals = [ identForBindage name t bindage  |
+                 ((name,bindage), t) <- zip names ts' ]
     res <- specialisedMkLetM sizes vals e
     case res of Just bnd -> return bnd
                 Nothing  -> basicMkLetM sizes vals e
@@ -61,34 +66,27 @@ instance BindableM AllocM where
   mkBodyM bnds res = return $ Body () bnds res
 
 basicMkLetM :: [Ident]
-            -> [Ident]
+            -> [(Ident,Bindage)]
             -> Exp
             -> AllocM Binding
-basicMkLetM sizes vals e = do
-  t <- expReturns lookupSummary' e
-  pat' <- Pattern <$> allocsForPattern sizes vals t
-  return $ Let pat' () e
+basicMkLetM shapes validents e = do
+  (bnd, extrabnds) <- allocsForBinding shapes validents e
+  case extrabnds of
+    [] -> return bnd
+    _  -> fail $ "Cannot make allocations for pattern of " ++ pretty e
 
-specialisedMkLetM :: [Ident] -> [Ident] -> Exp -> AllocM (Maybe Binding)
-specialisedMkLetM [] [Ident name _] e@(PrimOp (Update _ src _ _)) = do
-  res <- lookupSummary src
-  case res of
-    Just (MemSummary m origfun) -> do
-      let ident = Ident name (identType src)
-          pat' = Pattern [BindVar ident $ MemSummary m origfun]
-      return $ Just $ Let pat' () e
-    _ -> return Nothing
+specialisedMkLetM :: [Ident] -> [(Ident,Bindage)] -> Exp -> AllocM (Maybe Binding)
 
-specialisedMkLetM [] [Ident name _] e@(PrimOp (SubExp (Var src))) = do
+specialisedMkLetM [] [(Ident name _,BindVar)] e@(PrimOp (SubExp (Var src))) = do
   res <- lookupSummary src
   case res of
     Just (MemSummary m origfun) -> do
       let ident = Ident name $ identType src
-          pat' = Pattern [BindVar ident $ MemSummary m origfun]
+          pat' = Pattern [PatElem ident BindVar $ MemSummary m origfun]
       return $ Just $ Let pat' () e
     _ -> return Nothing
 
-specialisedMkLetM [] [ident] e@(PrimOp (Index _ src is)) = do
+specialisedMkLetM [] [(ident,BindVar)] e@(PrimOp (Index _ src is)) = do
   summary <- lookupSummary' $ identName src
   case summary of
     MemSummary m ixfun -> do
@@ -98,29 +96,29 @@ specialisedMkLetM [] [ident] e@(PrimOp (Index _ src is)) = do
             | otherwise =
               MemSummary m $ IxFun.applyInd ixfun $
               map SE.subExpToScalExp is
-          pat = Pattern [BindVar ident annot]
+          pat = Pattern [PatElem ident BindVar annot]
       return $ Just $ Let pat () e
     _ -> fail $ "Invalid memory summary for " ++ pretty src ++ ": " ++
          pretty summary
 
-specialisedMkLetM [] [ident1, ident2] e@(PrimOp (Split _ n a _)) = do
+specialisedMkLetM [] [(ident1,BindVar), (ident2,BindVar)] e@(PrimOp (Split _ n a _)) = do
   summary <- lookupSummary' $ identName a
   case summary of
     MemSummary m ixfun -> do
       let t = identType ident1
           offset = sliceOffset (arrayShape t) [SE.subExpToScalExp n]
-          bindee1 = BindVar ident1 $ MemSummary m ixfun
-          bindee2 = BindVar ident2 $ MemSummary m $ IxFun.offset ixfun offset
+          bindee1 = PatElem ident1 BindVar $ MemSummary m ixfun
+          bindee2 = PatElem ident2 BindVar $ MemSummary m $ IxFun.offset ixfun offset
           pat = [bindee1, bindee2]
       return $ Just $ Let (Pattern pat) () e
     _ -> fail $ "Invalid memory summary for " ++ pretty a ++ ": " ++
          pretty summary
 
-specialisedMkLetM [] [ident] e@(PrimOp (Reshape _ _ a)) = do
+specialisedMkLetM [] [(ident,BindVar)] e@(PrimOp (Reshape _ _ a)) = do
   summary <- lookupSummary' $ identName a
   case summary of
     MemSummary m ixfun -> -- FIXME: is this really the right index function?
-      return $ Just $ Let (Pattern [BindVar ident $ MemSummary m ixfun]) () e
+      return $ Just $ Let (Pattern [PatElem ident BindVar $ MemSummary m ixfun]) () e
     _ -> fail $ "Invalid memory summary for " ++ pretty a ++ ": " ++
          pretty summary
 
@@ -135,28 +133,79 @@ allocForArray t = do
   m <- letExp "mem" $ PrimOp $ Alloc size
   return (size, m)
 
-allocsForPattern :: [Ident] -> [Ident] -> [ExpReturns]
-                 -> AllocM [PatElem]
+allocsForBinding :: [Ident] -> [(Ident,Bindage)] -> Exp
+                 -> AllocM (Binding, [Binding])
+allocsForBinding sizeidents validents e = do
+  rts <- expReturns lookupSummary' e
+  (patElems, extrabnds) <- allocsForPattern sizeidents validents rts
+  return (Let (Pattern patElems) () e,
+          extrabnds)
+
+allocsForPattern :: [Ident] -> [(Ident,Bindage)] -> [ExpReturns]
+                 -> AllocM ([PatElem], [Binding])
 allocsForPattern sizeidents validents rts = do
-  let sizes' = [ BindVar size Scalar | size <- sizeidents ]
-  (vals,(memsizes,mems)) <- runWriterT $ forM (zip validents rts) $ \(ident, rt) ->
+  let sizes' = [ PatElem size BindVar Scalar | size <- sizeidents ]
+  (vals,(memsizes, mems, extrabnds)) <-
+    runWriterT $ forM (zip validents rts) $ \((ident,bindage), rt) ->
     case rt of
-      ReturnsScalar _ -> return $ BindVar ident Scalar
-      ReturnsMemory _ -> return $ BindVar ident Scalar
-      ReturnsArray _ _ _ (Just (ReturnsInBlock mem ixfun)) ->
-        return $ BindVar ident $ MemSummary mem ixfun
+      ReturnsScalar _ -> do
+        summary <- lift $ summaryForBindage (identType ident) bindage
+        return $ PatElem ident bindage summary
+
+      ReturnsMemory _ ->
+        return $ PatElem ident bindage Scalar
+
+      ReturnsArray _ _ u (Just (ReturnsInBlock mem ixfun)) ->
+        case bindage of
+          BindVar ->
+            return $ PatElem ident bindage $ MemSummary mem ixfun
+          BindInPlace _ src is -> do
+            (destmem,destixfun) <- lift $ lookupArraySummary' $ identName src
+            if destmem ==  mem && destixfun == ixfun then
+              return $ PatElem ident bindage $ MemSummary mem ixfun
+              else do
+              -- The expression returns in some memory, but we want to
+              -- put the result somewhere else.  This means we need to
+              -- store it in the memory it wants to first, then copy
+              -- it elsewhere in an extra binding.
+              ident' <- lift $
+                        newIdent (baseString (identName ident)<>"_trampoline")
+                        (stripArray (length is) $ identType ident
+                         `setUniqueness` u)
+              tell ([], [],
+                    [Let (Pattern [PatElem ident bindage $
+                                   MemSummary destmem destixfun]) () $
+                     PrimOp $ Copy $ Var ident'])
+              return $ PatElem ident' BindVar $
+                MemSummary mem ixfun
+
       ReturnsArray _ extshape _ Nothing
-        | Just shape <- knownShape extshape -> do
-        (_, m) <- lift $ allocForArray (identType ident `setArrayShape` Shape shape)
-        return $ BindVar ident $ directIndexFunction m $ identType ident
+        | Just _ <- knownShape extshape -> do
+          summary <- lift $ summaryForBindage (identType ident) bindage
+          return $ PatElem ident bindage summary
+
       _ -> do
         (memsize,mem,(ident',lore)) <- lift $ memForBindee ident
-        tell ([BindVar memsize Scalar], [BindVar mem Scalar])
-        return $ BindVar ident' lore
-  return $ memsizes <> mems <> sizes' <> vals
+        tell ([PatElem memsize BindVar Scalar],
+              [PatElem mem     BindVar Scalar],
+              [])
+        return $ PatElem ident' bindage lore
+  return (memsizes <> mems <> sizes' <> vals,
+          extrabnds)
   where knownShape = mapM known . extShapeDims
         known (Free v) = Just v
         known (Ext {}) = Nothing
+
+summaryForBindage :: Type -> Bindage
+                  -> AllocM MemSummary
+summaryForBindage t BindVar
+  | basicType t =
+    return Scalar
+  | otherwise = do
+    (_, m) <- allocForArray t
+    return $ directIndexFunction m t
+summaryForBindage _ (BindInPlace _ src _) =
+  lookupSummary' $ identName src
 
 memForBindee :: (MonadFreshNames m) =>
                 Ident
@@ -202,6 +251,14 @@ lookupSummary' name = do
     Just summary -> return summary
     Nothing ->
       fail $ "No memory summary for variable " ++ pretty name
+
+lookupArraySummary' :: VName -> AllocM (Ident, IxFun.IxFun)
+lookupArraySummary' name = do
+  summary <- lookupSummary' name
+  case summary of MemSummary mem ixfun ->
+                    return (mem, ixfun)
+                  Scalar ->
+                    fail $ "Variable " ++ pretty name ++ " does not look like an array."
 
 bindeeSummary :: PatElem -> (VName, MemSummary)
 bindeeSummary bindee = (patElemName bindee, patElemLore bindee)
@@ -254,7 +311,7 @@ allocLinearArray :: String
 allocLinearArray s se = do
   (size, mem) <- allocForArray t
   v' <- newIdent s t
-  let pat = Pattern [BindVar v' $ directIndexFunction mem t]
+  let pat = Pattern [PatElem v' BindVar $ directIndexFunction mem t]
   addBinding $ Let pat () $ PrimOp $ Copy se
   return (size, mem, Var v')
   where t = subExpType se
@@ -319,22 +376,22 @@ allocInBindings origbnds m = allocInBindings' origbnds []
           local (`HM.union` summaries) $
             allocInBindings' xs (bnds'++allocbnds)
         allocInBinding' bnd = do
-          (bnd',bnds') <- collectBindings $ allocInBinding bnd
-          return $ bnds' <> [bnd']
+          ((),bnds') <- collectBindings $ allocInBinding bnd
+          return bnds'
 
-allocInBinding :: In.Binding -> AllocM Binding
+allocInBinding :: In.Binding -> AllocM ()
 allocInBinding (Let pat _ e) = do
   e' <- allocInExp e
-  t <- expReturns lookupSummary' e'
   let (sizeidents, validents) =
         splitAt (patternSize pat - length (expExtType e)) $
-        patternIdents pat
-  res <- specialisedMkLetM sizeidents validents e'
+        patternElements pat
+      sizeidents' = map patElemIdent sizeidents
+      validents' = [ (ident, bindage) | PatElem ident bindage () <- validents ]
+  res <- specialisedMkLetM sizeidents' validents' e'
   case res of
-    Just bnd -> return bnd
-    Nothing -> do
-      pat' <- Pattern <$> allocsForPattern sizeidents validents t
-      mkLetM pat' e'
+    Just bnd -> addBinding bnd
+    Nothing  -> do (bnd, bnds) <- allocsForBinding sizeidents' validents' e'
+                   mapM_ addBinding $ bnd:bnds
 
 funcallSubExps :: [SubExp] -> AllocM [SubExp]
 funcallSubExps ses = map fst <$>
@@ -343,7 +400,8 @@ funcallSubExps ses = map fst <$>
 allocInExp :: In.Exp -> AllocM Exp
 allocInExp (LoopOp (DoLoop res merge i bound
                     (Body () bodybnds bodyres))) =
-  allocInFParams mergeparams $ \mergeparams' -> do
+  allocInFParams mergeparams $ \mergeparams' ->
+  local (HM.singleton (identName i) Scalar<>) $ do
     mergeinit' <- funcallSubExps mergeinit
     body' <- insertBindingsM $ allocInBindings bodybnds $ \bodybnds' -> do
       ses <- funcallSubExps $ resultSubExps bodyres
@@ -383,12 +441,13 @@ allocInExp (Apply fname args rettype) = do
   args' <- funcallArgs args
   return $ Apply fname args' (memoryInRetType rettype)
 allocInExp e = mapExpM alloc e
-  where alloc = identityMapper { mapOnBinding = allocInBinding
-                               , mapOnBody = allocInBody
-                               , mapOnLambda = allocInLambda
-                               , mapOnRetType = return . memoryInRetType
-                               , mapOnFParam = fail "Unhandled fparam in ExplicitAllocations"
-                               }
+  where alloc =
+          identityMapper { mapOnBinding = fail "Unhandled binding in ExplicitAllocations"
+                         , mapOnBody = allocInBody
+                         , mapOnLambda = allocInLambda
+                         , mapOnRetType = return . memoryInRetType
+                         , mapOnFParam = fail "Unhandled fparam in ExplicitAllocations"
+                         }
 
 allocInLambda :: In.Lambda -> AllocM Lambda
 allocInLambda lam = do

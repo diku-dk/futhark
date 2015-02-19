@@ -100,33 +100,32 @@ bindingAnnotation bnd doc =
 
 instance Pretty (PatternT lore) where
   ppr = braces . commasep . map ppElem . patternElements
-    where ppElem (BindVar ident _) =
+    where ppElem (PatElem ident BindVar _) =
             ppr (identType ident) <+>
             ppr (identName ident)
-{-
-          ppElem (BindInPlace ident src is _) =
-            ppr (identType ident) <+>
+          ppElem (PatElem ident (BindInPlace cs src is) _) =
+            ppCertificates cs <>
+            parens (ppr (identType ident) <+>
+                    ppr (identName ident) <+>
+                    text "<-" <+>
+                    ppr src) <>
+            brackets (commasep $ map ppr is)
+
+instance Pretty attr => Pretty (PatElemT attr) where
+  ppr (PatElem ident BindVar attr) =
+    ppr (identType ident) <+>
+    ppr (identName ident) <+>
+    parens (ppr attr)
+
+  ppr (PatElem ident (BindInPlace cs src is) attr) =
+    ppCertificates cs <>
+    parens (ppr (identType ident) <+>
             ppr (identName ident) <+>
             text "<-" <+>
-            ppr src <+>
-            text "with" <+>
-            brackets (commasep $ map ppr is)
--}
-instance Pretty attr => Pretty (PatElemT attr) where
-  ppr (BindVar ident attr) =
-    ppr (identType ident) <+>
-    ppr (identName ident) <+>
-    parens (ppr attr)
-{-
-  ppr (BindInPlace ident src is attr) =
-    ppr (identType ident) <+>
-    ppr (identName ident) <+>
-    text "<-" <+>
-    ppr src <+>
-    text "with" <+>
-    brackets (commasep $ map ppr is) <+>
-    parens (ppr attr)
--}
+            ppr src <>
+            parens (ppr attr)) <>
+    brackets (commasep $ map ppr is)
+
 instance Pretty attr => Pretty (FParamT attr) where
   ppr (FParam ident attr) =
     ppr (identType ident) <+>
@@ -136,7 +135,7 @@ instance Pretty attr => Pretty (FParamT attr) where
 instance PrettyLore lore => Pretty (Binding lore) where
   ppr bnd@(Let pat _ e) =
     bindingAnnotation bnd $ align $
-    text "let" <+> align (ppPattern $ patternIdents pat) <+>
+    text "let" <+> align (ppr pat) <+>
     case (linebreak, ppExpLore e) of
       (True, Nothing) -> equals </>
                          indent 2 e'
@@ -165,10 +164,6 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
   ppr (Index cs v idxs) =
     ppCertificates cs <> ppr v <>
     brackets (commasep (map ppr idxs))
-  ppr (Update cs src idxs ve) =
-    ppCertificates cs <> ppr src <+>
-    text "with" <+> brackets (commasep (map ppr idxs)) <+>
-    text "<-" <+> align (ppr ve)
   ppr (Iota e) = text "iota" <> parens (ppr e)
   ppr (Replicate ne ve) =
     text "replicate" <> apply [ppr ne, align (ppr ve)]

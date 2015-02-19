@@ -32,13 +32,13 @@ lowerUpdate (Let pat _ (LoopOp (DoLoop res merge i bound body))) updates = do
   canDo <- lowerUpdateIntoLoop updates pat res merge body
   Just $ do
     (prebnds, pat', res', merge', body') <- canDo
-    return $ prebnds ++ [mkLet pat' $ LoopOp $ DoLoop res' merge' i bound body']
+    return $ prebnds ++ [mkLet' pat' $ LoopOp $ DoLoop res' merge' i bound body']
 lowerUpdate
   (Let pat _ (PrimOp (SubExp (Var v))))
   [DesiredUpdate bindee cs src is val]
   | patternIdents pat == [src] =
-    Just $ return [mkLet [bindee] $
-                   PrimOp $ Update cs v is (Var val)]
+    Just $ return [mkLet [(bindee,BindInPlace cs v is)] $
+                   PrimOp $ SubExp $ Var val]
 lowerUpdate _ _ =
   Nothing
 
@@ -104,10 +104,12 @@ lowerUpdateIntoLoop updates pat res merge body = do
 
         mkMerge summary
           | Just (update, mergeident) <- relatedUpdate summary = do
-            source <- letSubExp "modified_source" $ PrimOp $
-                      Update (updateCertificates update) (updateSource update)
-                      (updateIndices update) (snd $ mergeParam summary)
-            return $ Right (FParam mergeident (), source)
+            source <- letInPlace "modified_source"
+                      (updateCertificates update)
+                      (updateSource update)
+                      (updateIndices update)
+                      $ PrimOp $ SubExp $ snd $ mergeParam summary
+            return $ Right (FParam mergeident (), Var source)
           | otherwise = return $ Left $ mergeParam summary
 
         mkResAndPat summaries =

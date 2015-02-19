@@ -93,7 +93,7 @@ bodyToLambda _ (Fun l) = return l
 bodyToLambda pts (NewNest (Nesting paramNames inps bndIds retTypes) op) = do
   (e,f) <- runBinder' $ SOAC.toExp =<< toSOAC (SOACNest inps op)
   let idents = instantiateExtTypes bndIds $ expExtType e
-  bnd <- mkLetNames (map identName idents) e
+  bnd <- mkLetNames' (map identName idents) e
   return
     Lambda { lambdaParams = zipWith Ident paramNames pts
            , lambdaReturnType = retTypes

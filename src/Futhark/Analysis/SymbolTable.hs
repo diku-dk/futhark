@@ -76,6 +76,7 @@ data LetBoundEntry lore =
                 , letBoundBinding      :: Binding lore
                 , letBoundBindingDepth :: Int
                 , letBoundScalExp      :: Maybe ScalExp
+                , letBoundBindage      :: Bindage
                 }
 
 data FParamEntry lore =
@@ -89,9 +90,15 @@ data LParamEntry lore =
               , lparamBindingDepth :: Int
               }
 
+isVarBound :: Entry lore -> Maybe (LetBoundEntry lore)
+isVarBound (LetBound entry)
+  | BindVar <- letBoundBindage entry =
+    Just entry
+isVarBound _ =
+  Nothing
+
 asScalExp :: Entry lore -> Maybe ScalExp
-asScalExp (LetBound entry) = letBoundScalExp entry
-asScalExp _                = Nothing
+asScalExp = letBoundScalExp <=< isVarBound
 
 bindingDepth :: Entry lore -> Int
 bindingDepth (LetBound entry) = letBoundBindingDepth entry
@@ -139,10 +146,10 @@ entryFParamLore _              = Nothing
 
 loopVariable :: Entry lore -> Bool
 loopVariable (LoopVar _) = True
-loopVariable _                = False
+loopVariable _           = False
 
 asExp :: Entry lore -> Maybe (Exp lore)
-asExp = liftM bindingExp . entryBinding
+asExp = liftM (bindingExp . letBoundBinding) . isVarBound
 
 instance Substitutable lore => Substitute (LetBoundEntry lore) where
   substituteNames substs entry =
@@ -152,6 +159,7 @@ instance Substitutable lore => Substitute (LetBoundEntry lore) where
       , letBoundBinding = substituteNames substs $ letBoundBinding entry
       , letBoundScalExp = substituteNames substs $ letBoundScalExp entry
       , letBoundBindingDepth = letBoundBindingDepth entry
+      , letBoundBindage = substituteNames substs $ letBoundBindage entry
       }
 
 instance Substitutable lore => Substitute (FParamEntry lore) where
@@ -231,13 +239,14 @@ defBndEntry :: SymbolTable lore
             -> PatElem lore
             -> Binding lore
             -> LetBoundEntry lore
-defBndEntry vtable bindee bnd =
+defBndEntry vtable patElem bnd =
   LetBoundEntry {
       letBoundRange = (Nothing, Nothing)
-    , letBoundLore = patElemLore bindee
+    , letBoundLore = patElemLore patElem
     , letBoundBinding = bnd
     , letBoundScalExp = toScalExp (`lookupScalExp` vtable) (bindingExp bnd)
     , letBoundBindingDepth = 0
+    , letBoundBindage = patElemBindage patElem
     }
 
 bindingEntries :: Binding lore

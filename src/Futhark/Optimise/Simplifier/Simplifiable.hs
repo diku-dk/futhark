@@ -33,7 +33,7 @@ data Simplifiable m =
                          -> [Binding (Lore m)] -> Result
                          -> m (Body (Lore m))
                , mkLetNamesS :: ST.SymbolTable (Lore m)
-                             -> [VName] -> Exp (Lore m)
+                             -> [(VName,Bindage)] -> Exp (Lore m)
                              -> m (Binding (Lore m))
                , simplifyLetBoundLore :: Lore.LetBound (Engine.InnerLore m)
                                       -> m (Lore.LetBound (Engine.InnerLore m))
@@ -52,7 +52,9 @@ bindableSimplifiable :: (Engine.MonadEngine m,
 bindableSimplifiable =
   Simplifiable mkLetS' mkBodyS' mkLetNamesS'
   return return simplifyRetType'
-  where mkLetS' _ pat e = return $ mkLet (patternIdents pat) e
+  where mkLetS' _ pat e = return $ mkLet pat' e
+          where pat' = [ (patElemIdent patElem, patElemBindage patElem)
+                       | patElem <- patternElements pat ]
         mkBodyS' _ bnds res = return $ mkBody bnds res
         mkLetNamesS' _ = mkLetNames
         simplifyRetType' =

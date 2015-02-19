@@ -24,7 +24,8 @@ analyseBinding :: Lore lore => In.Binding lore -> Out.Binding lore
 analyseBinding (In.Let pat lore e) =
   let e' = analyseExp e
       pat' = Out.addAliasesToPattern pat e'
-      lore' = (Out.Names' $ Out.consumedInExp e', lore)
+      lore' = (Out.Names' $ Out.consumedInExp pat' e',
+               lore)
   in Out.Let pat' lore' e'
 
 analyseExp :: Lore lore => In.Exp lore -> Out.Exp lore

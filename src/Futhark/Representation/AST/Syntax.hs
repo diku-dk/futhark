@@ -30,6 +30,7 @@ module Futhark.Representation.AST.Syntax
   , Param
   , Certificates
   , SubExp(..)
+  , Bindage (..)
   , PatElemT (..)
   , PatElem
   , PatternT (..)
@@ -147,9 +148,6 @@ data PrimOp lore
   -- ^ 3rd arg are (optional) certificates for bounds
   -- checking.  If given (even as an empty list), no
   -- run-time bounds checking is done.
-
-  | Update Certificates Ident [SubExp] SubExp
-  -- ^ @a with [i1,i2,i3] <- v@.
 
   | Split Certificates SubExp Ident SubExp
   -- ^ @split(1, [ 1, 2, 3, 4 ]) = {[1],[2, 3, 4]}@.

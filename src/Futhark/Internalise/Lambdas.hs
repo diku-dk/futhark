@@ -109,8 +109,7 @@ bindMapShapes :: [I.Ident] -> I.Lambda -> [I.SubExp] -> SubExp
 bindMapShapes inner_shapes sizefun args outer_shape
   | null $ I.lambdaReturnType sizefun = return ()
   | otherwise =
-    void $
-    letBind (basicPattern inner_shapes) =<<
+    letBind_ (basicPattern' inner_shapes) =<<
     eIf isempty emptybranch nonemptybranch
   where zero = intconst 0
         isempty = eBinOp I.Equal

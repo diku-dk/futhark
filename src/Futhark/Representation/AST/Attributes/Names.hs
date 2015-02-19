@@ -165,12 +165,13 @@ instance FreeIn attr => FreeIn (FParamT attr) where
     freeIn ident <> freeIn attr
 
 instance FreeIn attr => FreeIn (PatElemT attr) where
-  freeIn (BindVar ident attr) =
-    freeIn ident <> freeIn attr
-    {-
-  freeIn (BindInPlace ident src is attr) =
-    freeIn ident <> freeIn src <> freeIn is <> freeIn attr
--}
+  freeIn (PatElem ident bindage attr) =
+    freeIn ident <> freeIn bindage <> freeIn attr
+
+instance FreeIn Bindage where
+  freeIn BindVar = mempty
+  freeIn (BindInPlace cs src is) =
+    freeIn cs <> freeIn src <> freeIn is
 
 instance FreeIn ExtRetType where
   freeIn = mconcat . map freeIn . retTypeValues

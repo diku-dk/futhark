@@ -158,7 +158,7 @@ internaliseExp desc (E.LetPat pat e body _) = do
   bindingTupIdent pat
     (I.staticShapes $ map I.subExpType ses) $ \pat' -> do
     forM_ (zip (patternIdents pat') ses) $ \(p,se) ->
-      letBind (basicPattern [p]) $ I.PrimOp $ I.SubExp se
+      letBind (basicPattern' [p]) $ I.PrimOp $ I.SubExp se
     internaliseExp desc body
 
 internaliseExp desc (E.DoLoop mergepat mergeexp i bound loopbody letbody _) = do
@@ -201,13 +201,13 @@ internaliseExp desc (E.LetWith cs name src idxcs idxs ve body loc) = do
   let comb sname ve' = do
         let rowtype = I.stripArray (length idxs) $ I.identType sname
         ve'' <- ensureShape loc rowtype "lw_val_correct_shape" ve'
-        letExp "letwith_dst" $
-          I.PrimOp $ I.Update (cs'++idxcs') sname idxs' ve''
+        letInPlace "letwith_dst" (cs'++idxcs') sname idxs' $
+          PrimOp $ SubExp ve''
   dsts <- zipWithM comb srcs ves
   bindingTupIdent (E.Id name)
     (I.staticShapes $ map I.identType dsts) $ \pat' -> do
     forM_ (zip (patternIdents pat') dsts) $ \(p,dst) ->
-      letBind (basicPattern [p]) $ I.PrimOp $ I.SubExp $ I.Var dst
+      letBind (basicPattern' [p]) $ I.PrimOp $ I.SubExp $ I.Var dst
     internaliseExp desc body
 
 internaliseExp desc (E.Replicate ne ve _) = do
@@ -287,7 +287,7 @@ internaliseExp _ (E.Split cs nexp arrexp _) = do
     b <- fst <$> newVar "split_b" (et `setOuterSize` ressize)
     return (a, b)
   let combsplit arr (a,b) =
-        letBind_ (basicPattern [a,b]) $
+        letBind_ (basicPattern' [a,b]) $
         PrimOp $ I.Split cs' nexp' arr ressize
   zipWithM_ combsplit arrs partnames
   return $

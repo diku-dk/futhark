@@ -82,11 +82,13 @@ externalisePrimOp (I.Index cs src idxs) =
           (Just [])
           (map externaliseSubExp idxs)
           noLoc
+  {-
 externalisePrimOp (I.Update cs src idxs ve) =
   E.LetWith (externaliseCerts cs) (externaliseIdent src) (externaliseIdent src)
             (Just []) (map externaliseSubExp idxs)
             (externaliseSubExp ve) (E.Var $ externaliseIdent src)
             noLoc
+-}
 externalisePrimOp (I.Split cs ne ae _) =
   E.Split (externaliseCerts cs)
           (externaliseSubExp ne)

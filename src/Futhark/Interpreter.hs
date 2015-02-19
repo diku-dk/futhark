@@ -88,7 +88,9 @@ instance PrettyLore lore => Show (InterpreterError lore) where
 
 type FunTable lore = HM.HashMap Name ([Value] -> FutharkM lore [Value])
 
-data FutharkEnv lore = FutharkEnv { envVtable :: HM.HashMap VName Value
+type VTable = HM.HashMap VName Value
+
+data FutharkEnv lore = FutharkEnv { envVtable :: VTable
                                   , envFtable :: FunTable lore
                                   }
 
@@ -109,15 +111,61 @@ runFutharkM (FutharkM m) env = runWriter $ runExceptT $ runReaderT m env
 bad :: InterpreterError lore -> FutharkM lore a
 bad = FutharkM . throwError
 
-bindVar :: FutharkEnv lore -> (Ident, Value) -> FutharkEnv lore
-bindVar env (Ident name _,val) =
-  env { envVtable = HM.insert name val $ envVtable env }
+bindVar :: Bindage -> Value
+        -> FutharkM lore Value
 
-bindVars :: FutharkEnv lore -> [(Ident, Value)] -> FutharkEnv lore
-bindVars = foldl bindVar
+bindVar BindVar val =
+  return val
 
-binding :: [(Ident, Value)] -> FutharkM lore a -> FutharkM lore a
-binding bnds m = local (`bindVars` bnds) $ checkPatSizes bnds >> m
+bindVar (BindInPlace _ src is) val = do
+  v <- lookupVar src
+  is' <- mapM evalSubExp is
+  v' <- change v is' val
+  v' `seq` return v'
+  where change _ [] to = return to
+        change (ArrayVal arr t) (BasicVal (IntVal i):rest) to
+          | i >= 0 && i <= upper = do
+            let x = arr ! i
+            x' <- change x rest to
+            x' `seq` return (ArrayVal (arr // [(i, x')]) t)
+          | otherwise = bad $ IndexOutOfBounds
+                              (textual $ identName src) (upper+1) i
+          where upper = snd $ bounds arr
+        change _ _ _ = bad $ TypeError "evalBody Let Id"
+
+bindVars :: [(Ident, Bindage, Value)]
+         -> FutharkM lore VTable
+bindVars bnds = do
+  let (idents, bindages, vals) = unzip3 bnds
+  HM.fromList . zip (map identName idents) <$>
+    zipWithM bindVar bindages vals
+
+binding :: [(Ident, Bindage, Value)]
+        -> FutharkM lore a
+        -> FutharkM lore a
+binding bnds m = do
+  vtable <- bindVars bnds
+  local (extendVtable vtable) $ do
+    checkBoundShapes bnds
+    m
+  where extendVtable vtable env = env { envVtable = vtable <> envVtable env }
+
+        checkBoundShapes = mapM_ checkShape
+        checkShape (ident, BindVar, val) = do
+          let valshape = map (BasicVal . value) $ valueShape val
+              vardims = arrayDims $ identType ident
+          varshape <- mapM evalSubExp vardims
+          when (varshape /= valshape) $
+            bad $ TypeError $
+            "checkPatSizes:\n" ++
+            pretty ident ++ " is specified to have shape [" ++
+            intercalate "," (zipWith ppDim vardims varshape) ++
+            "], but is being bound to value of shape [" ++
+            intercalate "," (map pretty valshape) ++ "]."
+        checkShape _ = return ()
+
+        ppDim (Constant v) _ = pretty v
+        ppDim e            v = pretty e ++ "=" ++ pretty v
 
 lookupVar :: Ident -> FutharkM lore Value
 lookupVar (Ident vname _) = do
@@ -226,7 +274,7 @@ buildFunTable = foldl expand builtins . progFunctions
   where -- We assume that the program already passed the type checker, so
         -- we don't check for duplicate definitions.
         expand ftable' (FunDec name _ params body) =
-          let fun funargs = binding (zip (map fparamIdent params) funargs) $
+          let fun funargs = binding (zip3 (map fparamIdent params) (repeat BindVar) funargs) $
                             evalBody body
           in HM.insert name fun ftable'
 
@@ -280,7 +328,12 @@ evalBody (Body _ [] (Result es)) =
 
 evalBody (Body lore (Let pat _ e:bnds) res) = do
   v <- evalExp e
-  binding (zip (patternIdents pat) v) $ evalBody $ Body lore bnds res
+  binding (zip3
+           (map patElemIdent patElems)
+           (map patElemBindage patElems)
+           v) $
+    evalBody $ Body lore bnds res
+  where patElems = patternElements pat
 
 evalExp :: Lore lore => Exp lore -> FutharkM lore [Value]
 evalExp (If e1 e2 e3 rettype) = do
@@ -379,22 +432,6 @@ evalPrimOp (Index _ ident idxs) = do
             bad $ IndexOutOfBounds (textual $ identName ident) (upper+1) i
           where upper = snd $ bounds arr
         idx _ _ = bad $ TypeError "evalPrimOp Index"
-
-evalPrimOp (Update _ src idxs ve) = do
-  v <- lookupVar src
-  idxs' <- mapM evalSubExp idxs
-  vev <- evalSubExp ve
-  single <$> change v idxs' vev
-  where change _ [] to = return to
-        change (ArrayVal arr t) (BasicVal (IntVal i):rest) to
-          | i >= 0 && i <= upper = do
-            let x = arr ! i
-            x' <- change x rest to
-            return $ ArrayVal (arr // [(i, x')]) t
-          | otherwise = bad $ IndexOutOfBounds
-                              (textual $ identName src) (upper+1) i
-          where upper = snd $ bounds arr
-        change _ _ _ = bad $ TypeError "evalBody Let Id"
 
 evalPrimOp (Iota e) = do
   v <- evalSubExp e
@@ -499,14 +536,14 @@ evalLoopOp (DoLoop respat merge loopvar boundexp loopbody) = do
   case bound of
     BasicVal (IntVal n) -> do
       vs <- foldM iteration mergestart [0..n-1]
-      binding (zip (map fparamIdent mergepat) vs) $
+      binding (zip3 (map fparamIdent mergepat) (repeat BindVar) vs) $
         mapM lookupVar $
         loopResultContext (representative :: lore) respat mergepat ++ respat
     _ -> bad $ TypeError "evalBody DoLoop"
   where (mergepat, mergeexp) = unzip merge
         iteration mergeval i =
-          binding [(loopvar, BasicVal $ IntVal i)] $
-            binding (zip (map fparamIdent mergepat) mergeval) $
+          binding [(loopvar, BindVar, BasicVal $ IntVal i)] $
+            binding (zip3 (map fparamIdent mergepat) (repeat BindVar) mergeval) $
               evalBody loopbody
 
 evalLoopOp (Map _ fun arrexps) = do
@@ -601,27 +638,9 @@ evalBoolBinOp op e1 e2 = do
 
 applyLambda :: Lore lore => Lambda lore -> [Value] -> FutharkM lore [Value]
 applyLambda (Lambda params body rettype) args =
-  do v <- binding (zip params args) $ evalBody body
+  do v <- binding (zip3 params (repeat BindVar) args) $ evalBody body
      checkReturnShapes rettype v
      return v
-
-checkPatSizes :: [(Ident, Value)]-> FutharkM lore ()
-checkPatSizes = mapM_ $ uncurry checkSize
-  where checkSize var val = do
-          let valshape = map (BasicVal . value) $ valueShape val
-              varname = textual $ identName var
-              vardims = arrayDims $ identType var
-          varshape <- mapM evalSubExp vardims
-          when (varshape /= valshape) $
-            bad $ TypeError $
-            "checkPatSizes:\n" ++
-            varname ++ " is specified to have shape [" ++
-            intercalate "," (zipWith ppDim vardims varshape) ++
-            "], but is being bound to value of shape [" ++
-            intercalate "," (map pretty valshape) ++ "]."
-
-        ppDim (Constant v) _ = pretty v
-        ppDim e            v = pretty e ++ "=" ++ pretty v
 
 checkReturnShapes :: [Type] -> [Value] -> FutharkM lore ()
 checkReturnShapes = zipWithM_ checkShape

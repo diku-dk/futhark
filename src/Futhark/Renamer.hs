@@ -165,16 +165,18 @@ instance Renameable lore => Rename (Pattern lore) where
   rename (Pattern l) = Pattern <$> rename l
 
 instance Rename attr => Rename (PatElemT attr) where
-  rename (BindVar ident attr) =
-    BindVar <$> rename ident <*> rename attr
-{-
-  rename (BindInPlace ident src is attr) =
+  rename (PatElem ident bindage attr) =
+    PatElem <$> rename ident <*> rename bindage <*> rename attr
+
+instance Rename Bindage where
+  rename BindVar =
+    return BindVar
+  rename (BindInPlace cs src is) =
     BindInPlace <$>
-    rename ident <*>
+    mapM rename cs <*>
     rename src <*>
-    mapM rename is <*>
-    rename attr
--}
+    mapM rename is
+
 instance Renameable lore => Rename (Body lore) where
   rename (Body lore [] res) =
     Body <$> rename lore <*> pure [] <*> rename res

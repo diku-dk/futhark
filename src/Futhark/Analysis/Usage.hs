@@ -14,20 +14,22 @@ import Futhark.Binder (Proper)
 
 usageInBinding :: (Proper lore, Aliased lore) => Binding lore -> UT.UsageTable
 usageInBinding (Let pat lore e) =
-  mconcat [usageInPat pat,
+  mconcat [usageInPat,
            usageInExpLore,
            usageInExp e,
            UT.usages (freeNamesInExp e)]
   where usageInPat =
-          UT.usages . mconcat . map bindeeUsage . patternElements
+          UT.usages (HS.fromList (patternNames pat) `HS.difference`
+                     mconcat (map freeNamesIn $ patternElements pat))
+          <> mconcat (map consumptionInPatElem $ patternElements pat)
         usageInExpLore =
           UT.usages $ freeNamesIn lore
-        bindeeUsage bindee = patElemName bindee `HS.delete`
-                             freeNamesIn bindee
+        consumptionInPatElem (PatElem _ (BindInPlace _ src _) _) =
+          UT.consumedUsage $ identName src
+        consumptionInPatElem _ =
+          mempty
 
 usageInExp :: Aliased lore => Exp lore -> UT.UsageTable
-usageInExp (PrimOp (Update _ src _ _)) =
-  UT.consumedUsage $ identName src
 usageInExp (Apply _ args _) =
   mconcat [ mconcat $ map UT.consumedUsage $
             HS.toList $ subExpAliases arg

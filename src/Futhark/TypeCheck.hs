@@ -51,7 +51,7 @@ data TypeError lore = Error [String] (ErrorCase lore)
 
 -- | What went wrong.
 type ErrorCase lore =
-  GenTypeError VName (Exp lore) (Several ExtType) (Several Ident)
+  GenTypeError VName (Exp lore) (Several ExtType) (Several (PatElemT (Lore.LetBound lore)))
 
 instance PrettyLore lore => Show (TypeError lore) where
   show (Error [] err) =
@@ -634,29 +634,6 @@ checkPrimOp (Index cs ident idxes) = do
           (arrayRank vt) (length idxes) noLoc
   mapM_ (require [Basic Int]) idxes
 
-checkPrimOp (Update cs src idxes ve) = do
-  mapM_ (requireI [Basic Cert]) cs
-  srct <- checkIdent src
-  mapM_ (require [Basic Int]) idxes
-
-  unless (unique srct || basicType srct) $
-    bad $ TypeError noLoc $ "Source '" ++ textual srcname ++ show src ++ "' is not unique"
-
-  venames <- subExpAliasesM ve
-
-  when (srcname `HS.member` venames) $
-    bad $ BadLetWithValue noLoc
-
-  consume =<< lookupAliases srcname
-
-  -- Check that the new value has the same type as what is already
-  -- there (It does not have to be unique, though.)
-  case peelArray (length idxes) srct of
-    Nothing -> bad $ IndexingError srcname
-                     (arrayRank srct) (length idxes) noLoc
-    Just rt -> require [rt `setUniqueness` Nonunique] ve
-  where srcname = identName src
-
 checkPrimOp (Iota e) =
   require [Basic Int] e
 
@@ -949,6 +926,33 @@ sequentially m1 m2 = do
           usageOccurences m2flow
   return b
 
+checkPatElem :: Checkable lore =>
+                PatElem lore -> TypeM lore ()
+checkPatElem (PatElem ident bindage _) = do
+  checkBndSizes ident
+  checkBindage bindage
+
+checkBindage :: Checkable lore =>
+                Bindage -> TypeM lore ()
+checkBindage BindVar = return ()
+checkBindage (BindInPlace cs src is) = do
+  mapM_ (requireI [Basic Cert]) cs
+  srct <- checkIdent src
+  mapM_ (require [Basic Int]) is
+
+  unless (unique srct || basicType srct) $
+    bad $ TypeError noLoc $ "Source '" ++ textual srcname ++ show src ++ "' is not unique"
+
+  consume =<< lookupAliases srcname
+
+  -- Check that the new value has the same type as what is already
+  -- there (It does not have to be unique, though.)
+  case peelArray (length is) srct of
+    Nothing -> bad $ IndexingError srcname
+                     (arrayRank srct) (length is) noLoc
+    Just _  -> return ()
+  where srcname = identName src
+
 checkBinding :: Checkable lore =>
                 Pattern lore -> Exp lore -> Dataflow
              -> TypeM lore (TypeM lore a -> TypeM lore a)
@@ -960,20 +964,21 @@ checkBinding pat e dflow =
                     binding (zip (identsAndLore pat)
                              (map (unNames . fst . patElemLore) $
                               patternElements pat))
-                    (checkPatSizes (patternIdents pat) >> m))
+                    (do mapM_ checkPatElem (patternElements $ removePatternAliases pat)
+                        m))
   where identsAndLore = map identAndLore . patternElements . removePatternAliases
         identAndLore bindee = (patElemIdent bindee, LetBound $ patElemLore bindee)
 
-matchExtPattern :: [Ident] -> [ExtType] -> TypeM lore ()
+matchExtPattern :: [PatElem lore] -> [ExtType] -> TypeM lore ()
 matchExtPattern pat ts = do
   (ts', restpat, _) <- liftEitherS $ patternContext pat ts
   unless (length restpat == length ts') $
     bad $ InvalidPatternError (Several pat) (Several ts) Nothing noLoc
   evalStateT (zipWithM_ checkBinding' restpat ts') []
-  where checkBinding' (Ident name namet) t = do
-          lift $ checkAnnotation ("binding of variable " ++ textual name) namet t
+  where checkBinding' patElem@(PatElem (Ident name namet) _ _) t = do
+          lift $ checkAnnotation ("binding of variable " ++ textual name)
+            (patElemRequires patElem) t
           add $ Ident name namet
-          return $ Ident name namet
 
         add ident = do
           bnd <- gets $ find (==ident)
@@ -991,8 +996,8 @@ matchExtReturnType fname rettype (Result ses) =
         (Several ts)
   where ts = staticShapes $ map subExpType ses
 
-patternContext :: [Ident] -> [ExtType] ->
-                  Either String ([Type], [Ident], [Ident])
+patternContext :: [PatElemT attr] -> [ExtType] ->
+                  Either String ([Type], [PatElemT attr], [PatElemT attr])
 patternContext pat rt = do
   (rt', (restpat,_), shapepat) <- runRWST (mapM extract rt) () (pat, HM.empty)
   return (rt', restpat, shapepat)
@@ -1003,18 +1008,14 @@ patternContext pat rt = do
         correspondingVar x = do
           (remnames, m) <- get
           case (remnames, HM.lookup x m) of
-            (_, Just v) -> return $ Var v
+            (_, Just v) -> return $ Var $ patElemIdent v
             (v:vs, Nothing)
-              | Basic Int <- identType v -> do
+              | Basic Int <- patElemType v -> do
                 tell [v]
                 put (vs, HM.insert x v m)
-                return $ Var v
+                return $ Var $ patElemIdent v
             (_, Nothing) ->
               lift $ Left "Pattern cannot match context"
-
-checkPatSizes :: Checkable lore =>
-                 [IdentBase Shape] -> TypeM lore ()
-checkPatSizes = mapM_ checkBndSizes
 
 checkBndSizes :: Checkable lore =>
                  IdentBase Shape -> TypeM lore ()

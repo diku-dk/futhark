@@ -116,10 +116,10 @@ optimiseBindings (bnd:bnds) m = do
 
   where boundHere = patternNames $ bindingPattern bnd
 
-        checkIfForwardableUpdate bnd' bnds'
-            | PrimOp (Update cs src [i] (Var ve)) <- bindingExp bnd',
-              Pattern [patelem] <- bindingPattern bnd' = do
-                forwarded <- maybeForward ve (patElemIdent patelem) cs src i
+        checkIfForwardableUpdate bnd'@(Let pat _ e) bnds'
+            | [PatElem v (BindInPlace cs src [i]) _] <- patternElements pat,
+              PrimOp (SubExp (Var ve)) <- e = do
+                forwarded <- maybeForward ve v cs src i
                 return $ if forwarded
                          then bnds'
                          else bnd' : bnds'
@@ -128,9 +128,9 @@ optimiseBindings (bnd:bnds) m = do
 
 optimiseInBinding :: Binding Basic
                   -> ForwardingM (Binding Basic)
-optimiseInBinding (Let pat _ e) = do
+optimiseInBinding (Let pat attr e) = do
   e' <- optimiseExp e
-  return $ mkLet (patternIdents pat) e'
+  return $ Let pat attr e'
 
 optimiseExp :: Exp Basic -> ForwardingM (Exp Basic)
 optimiseExp (LoopOp (DoLoop res merge i bound body)) =
@@ -174,9 +174,12 @@ instance Monoid BottomUp where
 
 updateBinding :: DesiredUpdate -> Binding Basic
 updateBinding fwd =
-  mkLet [updateBindee fwd] $
-  PrimOp $ Update (updateCertificates fwd) (updateSource fwd)
-  (updateIndices fwd) (Var $ updateValue fwd)
+  mkLet [(updateBindee fwd,
+          BindInPlace
+          (updateCertificates fwd)
+          (updateSource fwd)
+          (updateIndices fwd))] $
+  PrimOp $ SubExp $ Var $ updateValue fwd
 
 newtype ForwardingM a = ForwardingM (RWS TopDown BottomUp VNameSource a)
                       deriving (Monad, Applicative, Functor,

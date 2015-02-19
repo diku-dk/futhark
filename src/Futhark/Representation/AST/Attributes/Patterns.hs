@@ -17,13 +17,13 @@ module Futhark.Representation.AST.Attributes.Patterns
        , patternTypes
        , patternSize
        , splitPattern
+         -- * Bindage
+       , bindageRequires
        )
        where
 
 import Futhark.Representation.AST.Syntax
-{-
-import Futhark.Representation.AST.Attributes.Types (stripArray)
--}
+import Futhark.Representation.AST.Attributes.Types (stripArray, setUniqueness)
 
 -- | The name of the 'Ident' bound by an 'FParam'.
 fparamName :: FParamT attr -> VName
@@ -32,13 +32,6 @@ fparamName = identName . fparamIdent
 -- | The type of the 'Ident' bound by an 'FParam'.
 fparamType :: FParamT attr -> Type
 fparamType = identType . fparamIdent
-
--- | The ident bound by a 'PatElem'.
-patElemIdent :: PatElemT attr -> Ident
-patElemIdent (BindVar ident _) = ident
-{-
-patElemIdent (BindInPlace ident _ _ _) = ident
--}
 
 -- | The name of the ident bound by a 'PatElem'.
 patElemName :: PatElemT attr -> VName
@@ -50,28 +43,21 @@ patElemType = identType . patElemIdent
 
 -- | The type of the value being bound by a 'PatElem'.
 patElemRequires :: PatElemT attr -> Type
-patElemRequires (BindVar ident _) =
-  identType ident
-  {-
-patElemRequires (BindInPlace _ src is _) =
-  stripArray (length is) $ identType src
--}
+patElemRequires (PatElem ident bindage _) =
+  bindageRequires (identType ident) bindage
 
--- | The lore of a 'PatElem'.
-patElemLore :: PatElemT attr -> attr
-patElemLore (BindVar _ lore) = lore
-{-
-patElemLore (BindInPlace _ _ _ lore) = lore
--}
+-- | The type of the value being bound by an pattern element with the
+-- given result 'Type' and 'Bindage'.
+bindageRequires :: Type -> Bindage -> Type
+bindageRequires t BindVar =
+  t
+bindageRequires _ (BindInPlace _ src is) =
+  stripArray (length is) (identType src) `setUniqueness` Nonunique
 
 -- | Set the lore of a 'PatElem'.
 setPatElemLore :: PatElemT oldattr -> newattr -> PatElemT newattr
-setPatElemLore (BindVar ident _) lore =
-  BindVar ident lore
-  {-
-setPatElemLore (BindInPlace ident src is _) lore =
-  BindInPlace ident src is lore
--}
+setPatElemLore (PatElem ident bindage _) =
+  PatElem ident bindage
 
 -- | Return a list of the 'Ident's bound by the 'Pattern'.
 patternIdents :: Pattern lore -> [Ident]

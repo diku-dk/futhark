@@ -27,7 +27,7 @@ import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 
 import Futhark.Representation.AST
 import Futhark.Binder
-  (Bindable(..), insertBinding, insertBindings, mkBody)
+  (Bindable(..), insertBinding, insertBindings, mkBody, mkLet')
 import Futhark.Tools (mapResult)
 
 -- | Something that can be used as a SOAC input.  As far as this
@@ -76,7 +76,7 @@ fuseMaps lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
   where lam2' =
           lam2 { lambdaParams = lam2redparams ++ HM.keys inputmap
                , lambdaBody =
-                 let bnds res = [ mkLet [p] $ PrimOp $ SubExp e
+                 let bnds res = [ mkLet' [p] $ PrimOp $ SubExp e
                                 | (p,e) <- zip pat $ resultSubExps res]
                      bindLambda res =
                        bnds res `insertBindings` makeCopiesInner (lambdaBody lam2)
@@ -144,10 +144,10 @@ fuseFilterInto lam1 inp1 out1 lam2 inp2 vnames falsebranch = (lam2', HM.elems in
                      tbranch = makeCopiesInner $ lambdaBody lam2
                      ts = bodyExtType tbranch `generaliseExtTypes`
                           bodyExtType falsebranch
-                 in mkBody [mkLet residents $
+                 in mkBody [mkLet' residents $
                             If e tbranch falsebranch ts] $
                  Result (map Var residents)
-        lam1tuple = [ mkLet [v] $ PrimOp $ SubExp $ Var p
+        lam1tuple = [ mkLet' [v] $ PrimOp $ SubExp $ Var p
                     | (v,p) <- zip pat $ lambdaParams lam1 ]
         bindins = lam1tuple `insertBindings` branch
 
@@ -214,7 +214,7 @@ removeDuplicateInputs = fst . HM.foldlWithKey' comb ((HM.empty, id), M.empty)
             Just par' -> ((parmap, inner . forward par par'),
                           arrmap)
         forward to from b =
-          mkLet [to] (PrimOp $ SubExp $ Var from)
+          mkLet' [to] (PrimOp $ SubExp $ Var from)
           `insertBinding` b
 
 {-
