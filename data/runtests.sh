@@ -15,6 +15,10 @@ while true; do
             onlycompile=true;
             shift
             ;;
+        -i) echo Only type-checking and interpreting;
+            onlyinterpret=true;
+            shift
+            ;;
         -*) echo "Unknown option $1."; exit 1;;
         --) break ;;
         *) break;;
@@ -38,6 +42,8 @@ if [ "$onlytypecheck" = true ]; then
     $testdir/Runtests.hs -t $tests
 elif [ "$onlycompile" = true ]; then
     $testdir/Runtests.hs -c $tests
+elif [ "$onlyinterpret" = true ]; then
+    $testdir/Runtests.hs -i $tests
 else
     $testdir/Runtests.hs $tests
 fi

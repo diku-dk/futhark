@@ -175,6 +175,7 @@ makeTests mode f = do
   outexists <- doesFileExist outfile
   return $ case (inexists, outexists, mode) of
              (True, True, OnlyCompile) -> [Compile f infile outfile]
+             (True, True, OnlyInterpret) -> [Run f infile outfile]
              (True, True, Everything)  -> [Run f infile outfile,
                                            Compile f infile outfile]
              (True, _, _)              -> [Optimise f]
@@ -226,6 +227,7 @@ runTests mode files = do
 
 data TestMode = OnlyTypeCheck
               | OnlyCompile
+              | OnlyInterpret
               | Everything
 
 main :: IO ()
@@ -234,4 +236,5 @@ main = do
   case args of
     "-t" : args' -> runTests OnlyTypeCheck args'
     "-c" : args' -> runTests OnlyCompile args'
+    "-i" : args' -> runTests OnlyInterpret args'
     _            -> runTests Everything args
