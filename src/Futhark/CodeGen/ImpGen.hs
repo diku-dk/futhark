@@ -382,30 +382,25 @@ defCompilePrimOp
   where et = elemType $ identType x
 
 defCompilePrimOp
-  (Destination [ArrayDestination (CopyIntoMemory (MemDestination mem offset)) _])
+  (Destination [ArrayDestination (CopyIntoMemory memlocation) _])
   (ArrayLit es rt) = do
-    unless (offset == elements (Imp.Constant (IntVal 0))) $
-      fail "Cannot handle offset in ArrayLit"
-    forM_ (zip [0..] es) $ \(i,e) ->
+    let dims = Constant (IntVal 0) : arrayDims rt
+        shape = map (elements . compileSubExp) dims
+    forM_ (zip [0..] es) $ \(i,e) -> do
+      (targetmem, elemoffset, _) <-
+        indexArray' memlocation shape et [elements $ Imp.Constant $ IntVal i]
       if basicType rt then
-        emit $ Imp.Write mem (Imp.Constant $ IntVal i) et $ compileSubExp e
+        emit $ write targetmem elemoffset et $ compileSubExp e
       else case e of
         Constant {} ->
           fail "defCompilePrimOp ArrayLit: Cannot have array constants."
         Var v -> do
-          let bytesPerElem =
-                impProduct (map (elements . compileSubExp) $ arrayDims rt)
-                `withElemType` et
-          ventry <- lookupArray $ identName v
-          let MemLocation vmem vixfun = entryArrayLocation ventry
-          voffset <- ixFunOffset vixfun
+          (srcmem, srcoffset, srcsize) <-
+            indexArray (identName v) [elements $ Imp.Constant $ IntVal i]
           emit $ copy
-            mem (offset `withElemType` et
-                 `plus`
-                  (bytes (Imp.Constant (IntVal i)) `times`
-                   bytesPerElem))
-            vmem (voffset `withElemType` et)
-            bytesPerElem
+            targetmem (elemoffset `withElemType` et)
+            srcmem (srcoffset `withElemType` et)
+            srcsize
   where et = elemType rt
 
 defCompilePrimOp
