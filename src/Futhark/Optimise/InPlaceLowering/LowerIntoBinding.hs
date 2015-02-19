@@ -39,6 +39,12 @@ lowerUpdate
   | patternIdents pat == [src] =
     Just $ return [mkLet [(bindee,BindInPlace cs v is)] $
                    PrimOp $ SubExp $ Var val]
+lowerUpdate
+  (Let (Pattern [PatElem v BindVar _]) _ e)
+  [DesiredUpdate bindee cs src is val]
+  | v == val =
+    Just $ return [mkLet [(bindee,BindInPlace cs src is)] e,
+                   mkLet' [v] $ PrimOp $ Index cs bindee is]
 lowerUpdate _ _ =
   Nothing
 
