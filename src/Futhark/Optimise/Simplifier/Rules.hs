@@ -58,6 +58,7 @@ topDownRules = [ liftIdentityMapping
                , simplifyScalExp
                , letRule simplifyIdentityReshape
                , letRule simplifyReshapeReshape
+               , removeScratchValue
                ]
 
 bottomUpRules :: MonadBinder m => BottomUpRules m
@@ -764,6 +765,15 @@ removeUnnecessaryCopy (_,used) (Let (Pattern [v]) _ (PrimOp (Copy se)))
     =
     letBindNames'_ [patElemName v] $ PrimOp $ SubExp se
 removeUnnecessaryCopy _ _ = cannotSimplify
+
+removeScratchValue :: MonadBinder m => TopDownRule m
+removeScratchValue _ (Let
+                      (Pattern [PatElem v (BindInPlace _ src _) _])
+                      _
+                      (PrimOp (Scratch {}))) =
+    letBindNames'_ [identName v] $ PrimOp $ SubExp $ Var src
+removeScratchValue _ _ =
+  cannotSimplify
 
 -- | Remove the return values of a branch, that are not actually used
 -- after a branch.  Standard dead code removal can remove the branch
