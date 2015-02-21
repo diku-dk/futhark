@@ -10,10 +10,12 @@ module Futhark.Analysis.AlgSimplify
   where
 
 import qualified Data.Set as S
+import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
 import Data.List
 import Control.Monad
 import Control.Monad.Reader
+import Data.Monoid
 
 import Futhark.Representation.AST
 import Futhark.Optimise.Errors
@@ -308,8 +310,8 @@ gaussAllLTH0 static_only el_syms sofp = do
         findMinMaxFact ii (NProd (f:fs) tp) =
             case f of
                 MaxMin ismin ts -> do
-                        let id_set = S.fromList $ concatMap getIds ts
-                        if S.member ii id_set
+                        let id_set = mconcat $ map freeIn ts
+                        if HS.member ii id_set
                         then return (Just (MaxMin ismin ts), fs)
                         else do (mm, fs') <- findMinMaxFact ii (NProd fs tp)
                                 return (mm, f:fs')
@@ -420,7 +422,7 @@ pickSymToElim :: RangesRep -> S.Set VName -> ScalExp -> Maybe Ident
 pickSymToElim rangesrep elsyms0 e_scal =
 --    ranges <- asks ranges
 --    e_scal <- fromNumSofP e0
-    let ids0= (S.toList . S.fromList . getIds) e_scal
+    let ids0= HS.toList $ freeIn e_scal
         ids1= filter (\s -> not (S.member (identName s) elsyms0)) ids0
         ids2= filter (\s -> case HM.lookup (identName s) rangesrep of
                                 Nothing -> False
@@ -477,8 +479,8 @@ linearForm idd (NSum terms tp) = do
     b_succ <- foldM (\acc x ->
                         case x of
                            NProd fs _ -> do let fs_scal = foldl STimes (Val (IntVal 1)) fs
-                                            let b_ids = getIds fs_scal
-                                            return $ acc && idd `notElem` b_ids
+                                            let b_ids = freeIn fs_scal
+                                            return $ acc && not (idd `HS.member` b_ids)
                            _          -> badAlgSimplifyM "linearForm: ILLEGAL222!!!!"
                     ) True b_terms
 

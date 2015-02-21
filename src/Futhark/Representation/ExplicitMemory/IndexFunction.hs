@@ -20,7 +20,6 @@ import Data.Vector.Sized hiding
 import qualified Data.Vector.Sized as Vec
 import Proof.Equational
 import Data.Monoid
-import qualified Data.HashSet as HS
 import Data.List (tails)
 import Data.Type.Equality hiding (outer)
 
@@ -156,8 +155,8 @@ linearWithOffset (Index {}) =
   Nothing
 
 instance FreeIn (IxFun n) where
-  freeIn (Direct shape) = HS.fromList $ concatMap getIds $ toList shape
-  freeIn (Offset ixfun e) = freeIn ixfun <> HS.fromList (getIds e)
+  freeIn (Direct shape) = mconcat $ map freeIn $ toList shape
+  freeIn (Offset ixfun e) = freeIn ixfun <> freeIn e
   freeIn (Permute ixfun _) = freeIn ixfun
   freeIn (Index ixfun is) =
-    freeIn ixfun <> HS.fromList (concatMap getIds $ toList is)
+    freeIn ixfun <> mconcat (map freeIn $ toList is)

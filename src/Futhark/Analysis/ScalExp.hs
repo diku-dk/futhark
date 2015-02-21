@@ -7,7 +7,6 @@ module Futhark.Analysis.ScalExp
   , LookupVar
   , fromScalExp
   , fromScalExp'
-  , getIds
   , sproduct
   , ssum
   )
@@ -16,6 +15,8 @@ where
 import Control.Applicative
 import Control.Monad
 import Data.List
+import qualified Data.HashSet as HS
+import Data.Monoid
 
 import Text.PrettyPrint.Mainland hiding (pretty)
 
@@ -234,21 +235,18 @@ fromScalExp' = convert
         zero Int = PrimOp $ SubExp $ intconst 0
         zero _   = PrimOp $ SubExp $ constant (0::Double)
 
-------------------------
---- Helper Functions ---
-------------------------
-getIds :: ScalExp -> [Ident]
-getIds (Val   _) = []
-getIds (Id    i) = [i]
-getIds (SNeg  e) = getIds e
-getIds (SNot  e) = getIds e
-getIds (SPlus x y)   = getIds x ++ getIds y
-getIds (SMinus x y)  = getIds x ++ getIds y
-getIds (SPow x y)    = getIds x ++ getIds y
-getIds (STimes x y)  = getIds x ++ getIds y
-getIds (SDivide x y) = getIds x ++ getIds y
-getIds (SLogOr x y)  = getIds x ++ getIds y
-getIds (SLogAnd x y) = getIds x ++ getIds y
-getIds (RelExp LTH0 e) = getIds e
-getIds (RelExp LEQ0 e) = getIds e
-getIds (MaxMin _  es) = concatMap getIds es
+instance FreeIn ScalExp where
+  freeIn (Val   _) = mempty
+  freeIn (Id    i) = HS.singleton i
+  freeIn (SNeg  e) = freeIn e
+  freeIn (SNot  e) = freeIn e
+  freeIn (SPlus x y)   = freeIn x <> freeIn y
+  freeIn (SMinus x y)  = freeIn x <> freeIn y
+  freeIn (SPow x y)    = freeIn x <> freeIn y
+  freeIn (STimes x y)  = freeIn x <> freeIn y
+  freeIn (SDivide x y) = freeIn x <> freeIn y
+  freeIn (SLogOr x y)  = freeIn x <> freeIn y
+  freeIn (SLogAnd x y) = freeIn x <> freeIn y
+  freeIn (RelExp LTH0 e) = freeIn e
+  freeIn (RelExp LEQ0 e) = freeIn e
+  freeIn (MaxMin _  es) = mconcat $ map freeIn es

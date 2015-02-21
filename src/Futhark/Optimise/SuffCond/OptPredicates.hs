@@ -385,7 +385,7 @@ sufficientSubExp (Var v) =
 
 scalExpUsesNoForbidden :: Context m -> ScalExp -> Bool
 scalExpUsesNoForbidden context =
-  not . any (`forbiddenIn` context) . HS.fromList . map identName . SE.getIds
+  not . any (`forbiddenIn` context) . freeNamesIn
 
 -- | The lore containing invariance information.
 data Variance = Invariant
