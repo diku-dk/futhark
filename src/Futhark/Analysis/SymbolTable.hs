@@ -12,6 +12,7 @@ module Futhark.Analysis.SymbolTable
   , entryFParamLore
   , asScalExp
     -- * Lookup
+  , elem
   , lookup
   , lookupExp
   , lookupSubExp
@@ -32,13 +33,13 @@ module Futhark.Analysis.SymbolTable
   )
   where
 
-import Prelude hiding (lookup)
+import Prelude hiding (elem, lookup)
 
 import Control.Applicative hiding (empty)
 import Control.Monad
 import Data.Ord
 import Data.Maybe
-import Data.List hiding (insert, lookup)
+import Data.List hiding (elem, insert, lookup)
 import qualified Data.Set as S
 import qualified Data.HashMap.Lazy as HM
 
@@ -196,6 +197,9 @@ instance Substitutable lore =>
     LoopVar $ substituteNames substs entry
 
 type Range = (Maybe ScalExp, Maybe ScalExp)
+
+elem :: VName -> SymbolTable lore -> Bool
+elem name = isJust . lookup name
 
 lookup :: VName -> SymbolTable lore -> Maybe (Entry lore)
 lookup name = HM.lookup name . bindings
