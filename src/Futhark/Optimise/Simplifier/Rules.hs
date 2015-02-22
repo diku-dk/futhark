@@ -59,6 +59,7 @@ topDownRules = [ liftIdentityMapping
                , letRule simplifyIdentityReshape
                , letRule simplifyReshapeReshape
                , removeScratchValue
+               , hackilySimplifyBranch
                ]
 
 bottomUpRules :: MonadBinder m => BottomUpRules m
@@ -706,6 +707,30 @@ simplifyBoolBranch _ (Let pat _ (If cond tb fb ts))
        Bool
   letBind_ pat e
 simplifyBoolBranch _ _ = cannotSimplify
+
+-- XXX: this is a nasty ad-hoc rule for handling a pattern that occurs
+-- due to limitations in shape analysis.  A better way would be proper
+-- control flow analysis.
+--
+-- XXX: another hack is due to missing CSE.
+hackilySimplifyBranch :: MonadBinder m => TopDownRule m
+hackilySimplifyBranch vtable
+  (Let pat _
+   (If (Var cond_a)
+    (Body _ [] (Result [se1_a]))
+    (Body _ [] (Result [Var v]))
+    _))
+  | Just (If (Var cond_b)
+           (Body _ [] (Result [se1_b]))
+           (Body _ [] (Result [_]))
+           _) <- ST.lookupExp (identName v) vtable,
+    se1_a == se1_b,
+    cond_a == cond_b ||
+    (ST.lookupExp (identName cond_a) vtable ==
+     ST.lookupExp (identName cond_b) vtable) =
+      letBind_ pat $ PrimOp $ SubExp $ Var v
+hackilySimplifyBranch _ _ =
+  cannotSimplify
 
 hoistBranchInvariant :: MonadBinder m => TopDownRule m
 hoistBranchInvariant _ (Let pat _ (If e1 tb fb ret))
