@@ -346,6 +346,7 @@ $esc:("#include <string.h>")
 $esc:("#include <math.h>")
 $esc:("#include <time.h>")
 $esc:("#include <ctype.h>")
+$esc:("#include <errno.h>")
 
 $edecls:(typeDefinitions endstate)
 
@@ -381,8 +382,15 @@ int main(int argc, char** argv) {
   typename clock_t start, end;
   $stms:(compInit endstate)
   $stm:main;
-  if (argc == 2 && strcmp(argv[1], "-t") == 0) {
-    printf("Runtime excluding IO: %fs\n", ((double)end-start)/CLOCKS_PER_SEC);
+  if (argc == 3 && strcmp(argv[1], "-t") == 0) {
+    FILE* runtime_file;
+    runtime_file = fopen(argv[2], "w");
+    if (runtime_file == NULL) {
+      fprintf(stderr, "Cannot open %s: %s\n", argv[2], strerror(errno));
+      exit(1);
+    }
+    fprintf(runtime_file, "%d\n", ((int)end-start)/(CLOCKS_PER_SEC/1000));
+    fclose(runtime_file);
   }
   return 0;
 }
