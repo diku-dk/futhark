@@ -542,9 +542,9 @@ compileCode (Copy dest destoffset src srcoffset size) = do
   destoffset' <- compileExp destoffset
   srcoffset' <- compileExp srcoffset
   size' <- compileExp size
-  stm [C.cstm|memcpy($id:dest + $exp:destoffset',
-                     $id:src + $exp:srcoffset',
-                     $exp:size');|]
+  stm [C.cstm|memmove($id:dest + $exp:destoffset',
+                      $id:src + $exp:srcoffset',
+                      $exp:size');|]
 
 compileCode (Write dest idx elemtype elemexp) = do
   idx' <- compileExp idx
