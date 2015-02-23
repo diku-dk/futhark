@@ -724,10 +724,11 @@ hackilySimplifyBranch vtable
            (Body _ [] (Result [se1_b]))
            (Body _ [] (Result [_]))
            _) <- ST.lookupExp (identName v) vtable,
+    let cond_a_e = ST.lookupExp (identName cond_a) vtable,
+    let cond_b_e = ST.lookupExp (identName cond_b) vtable,
     se1_a == se1_b,
     cond_a == cond_b ||
-    (ST.lookupExp (identName cond_a) vtable ==
-     ST.lookupExp (identName cond_b) vtable) =
+    (isJust cond_a_e && cond_a_e == cond_b_e) =
       letBind_ pat $ PrimOp $ SubExp $ Var v
 hackilySimplifyBranch _ _ =
   cannotSimplify
