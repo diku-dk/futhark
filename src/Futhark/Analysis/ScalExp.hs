@@ -171,7 +171,7 @@ sproduct (se:ses) = foldl STimes se ses
 -- list is empty.
 ssum :: [ScalExp] -> ScalExp
 ssum []       = Val $ IntVal 0
-ssum (se:ses) = foldl STimes se ses
+ssum (se:ses) = foldl SPlus se ses
 
 binOpScalExp :: BinOp -> Maybe (ScalExp -> ScalExp -> ScalExp)
 binOpScalExp bop = liftM snd $ find ((==bop) . fst)
