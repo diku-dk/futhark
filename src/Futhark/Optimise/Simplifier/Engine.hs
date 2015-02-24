@@ -466,13 +466,13 @@ simplifyBinding (Let pat _ (Apply fname args rettype)) = do
                       Nonunique -> mkLetNamesM' [identName p] =<< eValue v
                   mapM_ (simplifyBinding . Aliases.removeBindingAliases) bnds
     Nothing -> do let e' = Apply fname (zip args' $ map snd args) rettype'
-                  pat' <- blockUsage $ simplifyPattern pat
+                  pat' <- blockUsage $ simplifyPattern pat $ expExtType e'
                   inspectBinding =<<
                     mkLetM (Aliases.addAliasesToPattern pat' e') e'
 
 simplifyBinding (Let pat _ e) = do
   e' <- simplifyExp e
-  pat' <- simplifyPattern pat
+  pat' <- simplifyPattern pat $ expExtType e'
   inspectBinding =<<
     mkLetM (Aliases.addAliasesToPattern pat' e') e'
 
@@ -630,11 +630,19 @@ simplifySubExp (Constant v) = return $ Constant v
 
 simplifyPattern :: MonadEngine m =>
                    Pattern (InnerLore m)
+                -> [ExtType]
                 -> m (Pattern (InnerLore m))
-simplifyPattern =
-  liftM Pattern . mapM inspect . patternElements
-  where inspect (PatElem ident bindage lore) = do
-          ident' <- simplifyIdentBinding ident
+simplifyPattern pat ets =
+  Pattern <$> zipWithM inspect patElems us
+  where us = replicate (length patElems - length ets) Nonunique ++
+             map uniqueness ets
+        patElems = patternElements pat
+        inspect (PatElem ident bindage lore) u = do
+          t <- simplifyType $ identType ident
+          let ident' =
+                case bindage of
+                  BindVar -> ident { identType = t `setUniqueness` u }
+                  _       -> ident { identType = t }
           bindage' <- simplifyBindage bindage
           lore'  <- simplifyLetBoundLore lore
           return $ PatElem ident' bindage' lore'
