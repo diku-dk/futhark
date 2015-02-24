@@ -782,14 +782,14 @@ simplifyReshapeReshape look (Reshape cs newshape v)
 simplifyReshapeReshape _ _ = Nothing
 
 removeUnnecessaryCopy :: MonadBinder m => BottomUpRule m
-removeUnnecessaryCopy (_,used) (Let (Pattern [v]) _ (PrimOp (Copy se)))
-  | not $ any (`UT.isConsumed` used) $
-    patElemName v : HS.toList (subExpAliases se),
-    -- FIXME: This needs to be fixed and enabled, but it is trickier
-    -- than one might think, as we are changing the type of v.
-    False
-    =
-    letBindNames'_ [patElemName v] $ PrimOp $ SubExp se
+removeUnnecessaryCopy _ (Let (Pattern [v]) _ (PrimOp (Copy se)))
+  | basicType $ subExpType se =
+    letBind_ (Pattern [v]) $ PrimOp $ SubExp se
+
+removeUnnecessaryCopy (_,used) (Let (Pattern [v]) _ (PrimOp (Copy (Var v2))))
+  | unique $ identType v2,
+    not $ any (`UT.used` used) $ identAliases v2 =
+      letBind_ (Pattern [v]) $ PrimOp $ SubExp $ Var v2
 removeUnnecessaryCopy _ _ = cannotSimplify
 
 removeScratchValue :: MonadBinder m => TopDownRule m
