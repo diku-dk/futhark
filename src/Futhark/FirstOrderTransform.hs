@@ -44,7 +44,7 @@ transformExp (LoopOp (Map cs fun arrs)) = do
   (i, iv) <- newVar "i" $ Basic Int
   resarr <- resultArray $ mapType fun $ map identType arrs
   outarrs <- forM (map identType resarr) $ \t ->
-             newIdent "map_outarr" t
+             newIdent "map_outarr" $ t `setUniqueness` Unique
   loopbody <- runBinder $ do
     x <- bodyBind =<< transformLambda fun (index cs inarrs iv)
     dests <- letwith cs outarrs (pexp iv) $ map (PrimOp . SubExp) x
