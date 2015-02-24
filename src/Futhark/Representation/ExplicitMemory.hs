@@ -528,20 +528,43 @@ extReturns ts =
             | otherwise =
               return $ ReturnsArray bt shape u Nothing
 
-expReturns :: Monad m => (VName -> m MemSummary) -> Exp -> m [ExpReturns]
+arrayIdentReturns :: Monad m => (VName -> m MemSummary)
+                  -> Ident -> m (BasicType, Shape, Uniqueness,
+                                 Ident, IxFun.IxFun)
+arrayIdentReturns look v = do
+  summary <- look $ identName v
+  case (summary, identType v) of
+    (MemSummary mem ixfun, Array et shape u) ->
+      return (et, Shape $ shapeDims shape, u,
+              mem, ixfun)
+    _ ->
+      fail $ "arrayIdentReturns: " ++ pretty v ++ " is not an array."
 
-expReturns look (AST.PrimOp (SubExp (Var v))) = do
+identReturns :: Monad m => (VName -> m MemSummary)
+             -> Ident -> m ExpReturns
+identReturns look v = do
   summary <- look $ identName v
   case (summary, identType v) of
     (Scalar, Basic bt) ->
-      return [ReturnsScalar bt]
+      return $ ReturnsScalar bt
     (MemSummary mem ixfun, Array et shape u) ->
-      return [ReturnsArray et (ExtShape $ map Free $ shapeDims shape) u $
-              Just $ ReturnsInBlock mem ixfun]
+      return $ ReturnsArray et (ExtShape $ map Free $ shapeDims shape) u $
+              Just $ ReturnsInBlock mem ixfun
     (Scalar, Mem size) ->
-      return [ReturnsMemory size]
+      return $ ReturnsMemory size
     _ ->
-      fail "Something went very wrong in expReturns."
+      fail "Something went very wrong in identReturns."
+
+expReturns :: Monad m => (VName -> m MemSummary) -> Exp -> m [ExpReturns]
+
+expReturns look (AST.PrimOp (SubExp (Var v))) = do
+  r <- identReturns look v
+  return [r]
+
+expReturns look (AST.PrimOp (Reshape _ newshape v)) = do
+  (et, _, u, mem, ixfun) <- arrayIdentReturns look v
+  return [ReturnsArray et (ExtShape $ map Free newshape) u $
+          Just $ ReturnsInBlock mem ixfun]
 
 expReturns _ (AST.PrimOp (Alloc size)) =
   return [ReturnsMemory size]

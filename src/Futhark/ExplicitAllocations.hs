@@ -169,7 +169,7 @@ allocsForPattern sizeidents validents rts = do
               -- store it in the memory it wants to first, then copy
               -- it elsewhere in an extra binding.
               ident' <- lift $
-                        newIdent (baseString (identName ident)<>"_trampoline")
+                        newIdent (baseString (identName ident)<>"_buffer")
                         (stripArray (length is) $ identType ident
                          `setUniqueness` u)
               tell ([], [],
