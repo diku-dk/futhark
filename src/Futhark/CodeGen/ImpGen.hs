@@ -395,8 +395,7 @@ defCompilePrimOp
         Constant {} ->
           fail "defCompilePrimOp ArrayLit: Cannot have array constants."
         Var v -> do
-          (srcmem, srcoffset, srcsize) <-
-            indexArray (identName v) [elements $ Imp.Constant $ IntVal i]
+          (srcmem, srcoffset, srcsize) <- indexArray (identName v) []
           emit $ copy
             targetmem (elemoffset `withElemType` et)
             srcmem (srcoffset `withElemType` et)
