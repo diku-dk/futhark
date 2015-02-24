@@ -421,8 +421,8 @@ defCompilePrimOp
   where srct = identType src
         et = elemType srct
 
-defCompilePrimOp (Destination [_]) (Reshape {}) =
-  return ()
+defCompilePrimOp (Destination [target]) (Reshape _ _ v) =
+  compileResultSubExp target $ Var v
 
 defCompilePrimOp
   (Destination [ArrayDestination (CopyIntoMemory memlocation) _])
@@ -609,11 +609,14 @@ compileResultSubExp (ArrayDestination memdest shape) (Var v) = do
   srcoffset <- ixFunOffset srcixfun
   srcmemsize <- entryMemSize <$> lookupMemory srcmem
   case memdest of
-    CopyIntoMemory (MemDestination destmem destoffset) ->
-      emit $ copy
-             destmem (destoffset `withElemType` et)
-             srcmem (srcoffset `withElemType` et)
-             arrsize
+    CopyIntoMemory (MemDestination destmem destoffset)
+      | destmem == srcmem && destoffset == srcoffset ->
+        return ()
+      | otherwise ->
+          emit $ copy
+          destmem (destoffset `withElemType` et)
+          srcmem (srcoffset `withElemType` et)
+          arrsize
     SetMemory mem memsize -> do
       emit $ Imp.SetMem mem srcmem
       case memsize of Nothing -> return ()
