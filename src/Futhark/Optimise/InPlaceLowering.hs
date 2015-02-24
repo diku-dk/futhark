@@ -281,11 +281,14 @@ maybeForward :: Ident
 maybeForward v dest cs src i = do
   -- Checks condition (2)
   available <- [i,Var src] `areAvailableBefore` identName v
+  -- ...subcondition, the certificates must also.
+  certs_available <- map Var cs `areAvailableBefore` identName v
   -- Check condition (3)
   samebody <- isInCurrentBody $ identName v
   -- Check condition (6)
   optimisable <- isOptimisable $ identName v
-  if available && samebody && optimisable && not (basicType $ identType v) then do
+  let not_basic = not $ basicType $ identType v
+  if available && certs_available && samebody && optimisable && not_basic then do
     let fwd = DesiredUpdate dest cs src [i] v
     tell mempty { forwardThese = [fwd] }
     return True
