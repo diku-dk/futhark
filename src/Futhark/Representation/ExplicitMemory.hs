@@ -577,6 +577,16 @@ expReturns look (AST.PrimOp (Split _ n v restn)) = do
           ReturnsArray et (ExtShape $ map Free $ shapeDims shape2) u $
           Just $ ReturnsInBlock mem $ IxFun.offset ixfun offset]
 
+expReturns look (AST.PrimOp (Index _ v is)) = do
+  (et, shape, u, mem, ixfun) <- arrayIdentReturns look v
+  case stripDims (length is) shape of
+    Shape []     ->
+      return [ReturnsScalar et]
+    Shape dims ->
+      return [ReturnsArray et (ExtShape $ map Free dims) u $
+             Just $ ReturnsInBlock mem $ IxFun.applyInd ixfun $
+             map SE.subExpToScalExp is]
+
 expReturns _ (AST.PrimOp (Alloc size)) =
   return [ReturnsMemory size]
 
