@@ -86,14 +86,19 @@ permuteArray perm v =
   case flattenArray v of
     ArrayVal inarr _ ->
       let newshape = move oldshape
+          newrowtype = Array
+                       (elemType $ valueType v)
+                       (Rank $ length newshape - 1)
+                       Nonunique
           idx is shape = sum (zipWith (*) is (map product $ drop 1 (tails shape)))
           f rt is (m:ms) =
             arrayVal [ f (stripArray 1 rt) (is ++ [i]) ms | i <- [0..m-1] ] rt
-          f _ is [] = inarr ! idx (move is) oldshape
-      in f (rowType $ valueType v) [] newshape
+          f _ is [] = inarr ! idx (invmove is) oldshape
+      in f newrowtype [] newshape
     _ -> v
   where oldshape = valueShape v
         move = permuteShape perm
+        invmove = permuteShape $ permuteInverse perm
 
 -- | Produce the inverse permutation.
 permuteInverse :: [Int] -> [Int]
