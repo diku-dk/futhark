@@ -120,6 +120,7 @@ import Language.Futhark.Parser.Lexer
       rearrange       { L $$ REARRANGE }
       rotate          { L $$ ROTATE }
       transpose       { L $$ TRANSPOSE }
+      zipWith         { L $$ ZIPWITH }
       zip             { L $$ ZIP }
       unzip           { L $$ UNZIP }
       scan            { L $$ SCAN }
@@ -331,6 +332,9 @@ Exp  :: { UncheckedExp }
 
      | redomap '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
                       { Redomap $3 $5 $7 $9 $1 }
+
+     | zipWith '(' FunAbstr ',' Exps2 ')'
+                      { Map $3 (Zip (map (\x -> (x, NoInfo)) $5) $1) $1 }
 
      | copy '(' Exp ')' { Copy $3 $1 }
 
