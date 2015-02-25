@@ -261,11 +261,11 @@ data ExpBase ty vn =
             -- Second-Order Array Combinators accept curried and
             -- anonymous functions as first params.
             | Map (LambdaBase ty vn) (ExpBase ty vn) SrcLoc
-             -- ^ @map(op +(1), {1,2,..,n}) = [2,3,..,n+1]@.  3rd arg
+             -- ^ @map(op +(1), [1,2,..,n]) = [2,3,..,n+1]@.  3rd arg
              -- is the input-array row type
 
             | Reduce (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
-             -- ^ @reduce(op +, 0, {1,2,...,n}) = (0+1+2+...+n)@ 4th arg
+             -- ^ @reduce(op +, 0, [1,2,...,n]) = (0+1+2+...+n)@ 4th arg
              -- is the input-array element type
 
             | Scan (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
