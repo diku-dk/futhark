@@ -39,7 +39,6 @@
     "fun" "fn" "for" "do" "do" "op" "not" "pow"
     "iota" "shape" "replicate" "reshape" "transpose" "map" "reduce" "zip" "unzip"
     "scan" "split" "concat" "filter" "redomap"
-    "mapT" "reduceT" "scanT" "filterT" "redomapT"
     "empty" "copy")
   "A list of Futhark keywords.")
 
