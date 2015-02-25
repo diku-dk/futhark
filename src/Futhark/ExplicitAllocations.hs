@@ -10,7 +10,6 @@ import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Writer
 import qualified Data.DList as DL
-import Data.List
 import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
@@ -59,9 +58,7 @@ instance BindableM AllocM where
           (Ident name (identType src), bindage)
         vals = [ identForBindage name t bindage  |
                  ((name,bindage), t) <- zip names ts' ]
-    res <- specialisedMkLetM sizes vals e
-    case res of Just bnd -> return bnd
-                Nothing  -> basicMkLetM sizes vals e
+    basicMkLetM sizes vals e
 
   mkBodyM bnds res = return $ Body () bnds res
 
@@ -74,55 +71,6 @@ basicMkLetM shapes validents e = do
   case extrabnds of
     [] -> return bnd
     _  -> fail $ "Cannot make allocations for pattern of " ++ pretty e
-
-specialisedMkLetM :: [Ident] -> [(Ident,Bindage)] -> Exp -> AllocM (Maybe Binding)
-
-specialisedMkLetM [] [(Ident name _,BindVar)] e@(PrimOp (SubExp (Var src))) = do
-  res <- lookupSummary src
-  case res of
-    Just (MemSummary m origfun) -> do
-      let ident = Ident name $ identType src
-          pat' = Pattern [PatElem ident BindVar $ MemSummary m origfun]
-      return $ Just $ Let pat' () e
-    _ -> return Nothing
-
-specialisedMkLetM [] [(ident,BindVar)] e@(PrimOp (Index _ src is)) = do
-  summary <- lookupSummary' $ identName src
-  case summary of
-    MemSummary m ixfun -> do
-      let annot
-            | arrayRank (identType src) == length is =
-              Scalar
-            | otherwise =
-              MemSummary m $ IxFun.applyInd ixfun $
-              map SE.subExpToScalExp is
-          pat = Pattern [PatElem ident BindVar annot]
-      return $ Just $ Let pat () e
-    _ -> fail $ "Invalid memory summary for " ++ pretty src ++ ": " ++
-         pretty summary
-
-specialisedMkLetM [] [(ident1,BindVar), (ident2,BindVar)] e@(PrimOp (Split _ n a _)) = do
-  summary <- lookupSummary' $ identName a
-  case summary of
-    MemSummary m ixfun -> do
-      let t = identType ident1
-          offset = sliceOffset (arrayShape t) [SE.subExpToScalExp n]
-          bindee1 = PatElem ident1 BindVar $ MemSummary m ixfun
-          bindee2 = PatElem ident2 BindVar $ MemSummary m $ IxFun.offset ixfun offset
-          pat = [bindee1, bindee2]
-      return $ Just $ Let (Pattern pat) () e
-    _ -> fail $ "Invalid memory summary for " ++ pretty a ++ ": " ++
-         pretty summary
-
-specialisedMkLetM [] [(ident,BindVar)] e@(PrimOp (Reshape _ _ a)) = do
-  summary <- lookupSummary' $ identName a
-  case summary of
-    MemSummary m ixfun -> -- FIXME: is this really the right index function?
-      return $ Just $ Let (Pattern [PatElem ident BindVar $ MemSummary m ixfun]) () e
-    _ -> fail $ "Invalid memory summary for " ++ pretty a ++ ": " ++
-         pretty summary
-
-specialisedMkLetM _ _ _ = return Nothing
 
 allocForArray :: Type -> AllocM (SubExp, Ident)
 allocForArray t = do
@@ -169,7 +117,7 @@ allocsForPattern sizeidents validents rts = do
               -- store it in the memory it wants to first, then copy
               -- it elsewhere in an extra binding.
               ident' <- lift $
-                        newIdent (baseString (identName ident)<>"_trampoline")
+                        newIdent (baseString (identName ident)<>"_buffer")
                         (stripArray (length is) $ identType ident
                          `setUniqueness` u)
               tell ([], [],
@@ -224,13 +172,6 @@ memForBindee ident = do
 directIndexFunction :: Ident -> Type -> MemSummary
 directIndexFunction mem t =
   MemSummary mem $ IxFun.iota $ IxFun.shapeFromSubExps $ arrayDims t
-
-sliceOffset :: Shape -> [SE.ScalExp] -> SE.ScalExp
-sliceOffset shape is =
-  SE.ssum $ zipWith SE.STimes is sliceSizes
-  where sliceSizes =
-          map SE.sproduct $
-          drop 1 $ tails $ map SE.subExpToScalExp $ shapeDims shape
 
 computeSize :: MonadBinder m =>
                SubExp -> [SubExp] -> m SubExp
@@ -387,11 +328,8 @@ allocInBinding (Let pat _ e) = do
         patternElements pat
       sizeidents' = map patElemIdent sizeidents
       validents' = [ (ident, bindage) | PatElem ident bindage () <- validents ]
-  res <- specialisedMkLetM sizeidents' validents' e'
-  case res of
-    Just bnd -> addBinding bnd
-    Nothing  -> do (bnd, bnds) <- allocsForBinding sizeidents' validents' e'
-                   mapM_ addBinding $ bnd:bnds
+  (bnd, bnds) <- allocsForBinding sizeidents' validents' e'
+  mapM_ addBinding $ bnd:bnds
 
 funcallSubExps :: [SubExp] -> AllocM [SubExp]
 funcallSubExps ses = map fst <$>

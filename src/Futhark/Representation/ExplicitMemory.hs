@@ -58,6 +58,7 @@ import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
           Pattern, PatElem, Lambda, FunDec, FParam, RetType)
+import qualified Futhark.Analysis.ScalExp as SE
 
 import Futhark.TypeCheck.TypeError
 import Futhark.Representation.AST.Attributes
@@ -528,20 +529,63 @@ extReturns ts =
             | otherwise =
               return $ ReturnsArray bt shape u Nothing
 
-expReturns :: Monad m => (VName -> m MemSummary) -> Exp -> m [ExpReturns]
+arrayIdentReturns :: Monad m => (VName -> m MemSummary)
+                  -> Ident -> m (BasicType, Shape, Uniqueness,
+                                 Ident, IxFun.IxFun)
+arrayIdentReturns look v = do
+  summary <- look $ identName v
+  case (summary, identType v) of
+    (MemSummary mem ixfun, Array et shape u) ->
+      return (et, Shape $ shapeDims shape, u,
+              mem, ixfun)
+    _ ->
+      fail $ "arrayIdentReturns: " ++ pretty v ++ " is not an array."
 
-expReturns look (AST.PrimOp (SubExp (Var v))) = do
+identReturns :: Monad m => (VName -> m MemSummary)
+             -> Ident -> m ExpReturns
+identReturns look v = do
   summary <- look $ identName v
   case (summary, identType v) of
     (Scalar, Basic bt) ->
-      return [ReturnsScalar bt]
+      return $ ReturnsScalar bt
     (MemSummary mem ixfun, Array et shape u) ->
-      return [ReturnsArray et (ExtShape $ map Free $ shapeDims shape) u $
-              Just $ ReturnsInBlock mem ixfun]
+      return $ ReturnsArray et (ExtShape $ map Free $ shapeDims shape) u $
+              Just $ ReturnsInBlock mem ixfun
     (Scalar, Mem size) ->
-      return [ReturnsMemory size]
+      return $ ReturnsMemory size
     _ ->
-      fail "Something went very wrong in expReturns."
+      fail "Something went very wrong in identReturns."
+
+expReturns :: Monad m => (VName -> m MemSummary) -> Exp -> m [ExpReturns]
+
+expReturns look (AST.PrimOp (SubExp (Var v))) = do
+  r <- identReturns look v
+  return [r]
+
+expReturns look (AST.PrimOp (Reshape _ newshape v)) = do
+  (et, _, u, mem, ixfun) <- arrayIdentReturns look v
+  return [ReturnsArray et (ExtShape $ map Free newshape) u $
+          Just $ ReturnsInBlock mem ixfun]
+
+expReturns look (AST.PrimOp (Split _ n v restn)) = do
+  (et, shape, u, mem, ixfun) <- arrayIdentReturns look v
+  let shape1 = shape `setOuterDim` n
+      shape2 = shape `setOuterDim` restn
+      offset = sliceOffset shape [SE.subExpToScalExp n]
+  return [ReturnsArray et (ExtShape $ map Free $ shapeDims shape1) u $
+          Just $ ReturnsInBlock mem ixfun,
+          ReturnsArray et (ExtShape $ map Free $ shapeDims shape2) u $
+          Just $ ReturnsInBlock mem $ IxFun.offset ixfun offset]
+
+expReturns look (AST.PrimOp (Index _ v is)) = do
+  (et, shape, u, mem, ixfun) <- arrayIdentReturns look v
+  case stripDims (length is) shape of
+    Shape []     ->
+      return [ReturnsScalar et]
+    Shape dims ->
+      return [ReturnsArray et (ExtShape $ map Free dims) u $
+             Just $ ReturnsInBlock mem $ IxFun.applyInd ixfun $
+             map SE.subExpToScalExp is]
 
 expReturns _ (AST.PrimOp (Alloc size)) =
   return [ReturnsMemory size]
@@ -647,3 +691,11 @@ basicSize Bool = 1
 basicSize Char = 1
 basicSize Real = 8
 basicSize Cert = 1
+
+-- | The size of an array slice in elements.
+sliceOffset :: Shape -> [SE.ScalExp] -> SE.ScalExp
+sliceOffset shape is =
+  SE.ssum $ zipWith SE.STimes is sliceSizes
+  where sliceSizes =
+          map SE.sproduct $
+          drop 1 $ tails $ map SE.subExpToScalExp $ shapeDims shape

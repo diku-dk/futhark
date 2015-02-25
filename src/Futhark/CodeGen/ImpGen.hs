@@ -420,8 +420,8 @@ defCompilePrimOp
   where srct = identType src
         et = elemType srct
 
-defCompilePrimOp (Destination [target]) (Reshape _ _ v) =
-  compileResultSubExp target $ Var v
+defCompilePrimOp _ (Reshape {}) =
+  return ()
 
 defCompilePrimOp
   (Destination [ArrayDestination (CopyIntoMemory memlocation) _])
