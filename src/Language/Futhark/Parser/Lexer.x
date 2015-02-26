@@ -54,7 +54,7 @@ tokens :-
   ","                      { const COMMA }
   "_"                      { const UNDERSCORE }
   [0-9]+                   { INTLIT . readInt }
-  (([0-9]+("."[0-9]*)?|"."[0-9]+))
+  (([0-9]+("."[0-9]+)?))
     ([eE][\+\-]?[0-9]+)?   { REALLIT . readReal }
   [a-zA-Z] [a-zA-Z0-9_']* { keyword }
   "'" @charlit "'" { CHARLIT . read }
