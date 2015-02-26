@@ -98,6 +98,7 @@ keyword s =
     "map"          -> MAP
     "reduce"       -> REDUCE
     "zip"          -> ZIP
+    "zipWith"      -> ZIPWITH
     "unzip"        -> UNZIP
     "scan"         -> SCAN
     "split"        -> SPLIT

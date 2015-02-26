@@ -67,6 +67,7 @@ data Token = IF
            | REARRANGE
            | ROTATE
            | TRANSPOSE
+           | ZIPWITH
            | ZIP
            | UNZIP
            | SCAN

@@ -570,6 +570,8 @@ the language.
   \item[\texttt{rearrange((\textit{k}$_{1}$, \ldots, \textit{k}$_{n}$), a)}]\hfill\\
     Permute the dimensions in the array, returning a new array.
 
+    If \texttt{$b$==rearrange((2,0,1),$a$)}, then $b[x,y,z] = a[y,z,x]$
+
   \item[\texttt{transpose(k,n,a)}]\hfill\\
     Return the generalised transpose of \textit{a}.  If
     \texttt{$b$==transpose($k$,$n$,$a$)}, then
