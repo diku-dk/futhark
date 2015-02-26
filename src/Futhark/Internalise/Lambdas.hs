@@ -23,16 +23,16 @@ import Futhark.Internalise.Bindings
 
 import Prelude hiding (mapM)
 
-ensureLambda :: E.Lambda -> InternaliseM ([E.Parameter], E.Exp, E.DeclType, SrcLoc)
-ensureLambda (E.AnonymFun params body rettype loc) =
-  return (params, body, rettype, loc)
-ensureLambda (E.CurryFun fname curargs rettype loc) = do
-  (params, body, rettype') <- curryToLambda fname curargs rettype loc
-  return (params, body, rettype', loc)
+ensureLambda :: E.Lambda -> InternaliseM ([E.Parameter], E.Exp, E.DeclType)
+ensureLambda (E.AnonymFun params body rettype _) =
+  return (params, body, rettype)
+ensureLambda (E.CurryFun fname curargs rettype _) = do
+  (params, body, rettype') <- curryToLambda fname curargs rettype
+  return (params, body, rettype')
 
-curryToLambda :: Name -> [E.Exp] -> E.Type -> SrcLoc
+curryToLambda :: Name -> [E.Exp] -> E.Type
               -> InternaliseM ([E.Parameter], E.Exp, E.DeclType)
-curryToLambda fname curargs rettype loc = do
+curryToLambda fname curargs rettype = do
   (_,paramtypes) <- externalFun <$> lookupFunction fname
   let missing = drop (length curargs) paramtypes
       diets = map E.diet paramtypes
@@ -40,14 +40,14 @@ curryToLambda fname curargs rettype loc = do
               s <- newNameFromString "curried"
               return E.Ident {
                          E.identType   = t
-                       , E.identSrcLoc = loc
+                       , E.identSrcLoc = noLoc
                        , E.identName   = s
                        }
   let addDiet d x = (x, d)
       call = E.Apply fname
              (zipWith addDiet diets $
               curargs ++ map (E.Var . E.fromParam) params)
-             rettype loc
+             rettype noLoc
   return (params, call, E.toDecl rettype)
 
 lambdaBinding :: [E.Parameter] -> [I.Type]
@@ -62,7 +62,7 @@ internaliseLambda :: (E.Exp -> InternaliseM Body)
                   -> [I.Type]
                   -> InternaliseM ([I.Param], I.Body, [I.ExtType])
 internaliseLambda internaliseBody lam rowtypes = do
-  (params, body, rettype, _) <- ensureLambda lam
+  (params, body, rettype) <- ensureLambda lam
   (body', params') <- lambdaBinding params rowtypes $
                       internaliseBody body
   return (params', body', internaliseType rettype)
