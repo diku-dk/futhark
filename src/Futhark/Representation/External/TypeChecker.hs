@@ -375,7 +375,8 @@ checkAnnotation loc desc t1 t2 =
 require :: VarName vn => [TaggedType vn] -> TaggedExp CompTypeBase vn -> TypeM vn (TaggedExp CompTypeBase vn)
 require ts e
   | any (typeOf e `similarTo`) ts = return e
-  | otherwise = bad $ UnexpectedType e' (toDecl $ typeOf e') $
+  | otherwise = bad $ UnexpectedType (srclocOf e') e'
+                      (toDecl $ typeOf e') $
                       map (toDecl . untagType) ts
   where e' = untagExp e
 
@@ -384,7 +385,8 @@ requireI :: VarName vn => [TaggedType vn] -> TaggedIdent CompTypeBase vn
          -> TypeM vn (TaggedIdent CompTypeBase vn)
 requireI ts ident
   | any (identType ident `similarTo`) ts = return ident
-  | otherwise = bad $ UnexpectedType e (toDecl $ typeOf e) $ map (untagType . toDecl) ts
+  | otherwise = bad $ UnexpectedType (srclocOf e) e
+                (toDecl $ typeOf e) $ map (untagType . toDecl) ts
   where e = untagExp $ Var ident
 
 rowTypeM :: VarName vn => TaggedExp CompTypeBase vn -> TypeM vn (TaggedType vn)

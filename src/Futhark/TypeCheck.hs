@@ -381,7 +381,7 @@ require :: Checkable lore => [Type] -> SubExp -> TypeM lore ()
 require ts se = do
   t <- checkSubExp se
   unless (any (t `subtypeOf`) ts) $
-    bad $ UnexpectedType (PrimOp $ SubExp se)
+    bad $ UnexpectedType noLoc (PrimOp $ SubExp se)
     (justOne $ staticShapes1 t)
     (map (justOne . staticShapes1) ts)
 

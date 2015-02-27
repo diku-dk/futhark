@@ -20,7 +20,7 @@ data GenTypeError vn e t pat =
   -- for the given reason.
   | UnifyError e t e t
   -- ^ Types of two expressions failed to unify.
-  | UnexpectedType e t [t]
+  | UnexpectedType SrcLoc e t [t]
   -- ^ Expression of type was not one of the expected
   -- types.
   | ReturnTypeError SrcLoc Name t t
@@ -84,11 +84,13 @@ instance (VarName vn, Pretty e, Pretty t, Pretty pat) => Show (GenTypeError vn e
     " of expression\n" ++ pretty 160 (indent 2 $ ppr e1) ++
     "\nwith type " ++ ppr' t2 ++
     " of expression\n" ++ pretty 160 (indent 2 $ ppr e2)
-  show (UnexpectedType e _ []) =
-    "Type of expression\n" ++ pretty 160 (indent 2 $ ppr e) ++
+  show (UnexpectedType loc e _ []) =
+    "Type of expression at " ++ locStr loc ++ "\n" ++
+    pretty 160 (indent 2 $ ppr e) ++
     "\ncannot have any type - possibly a bug in the type checker."
-  show (UnexpectedType e t ts) =
-    "Type of expression\n" ++ pretty 160 (indent 2 $ ppr e) ++
+  show (UnexpectedType loc e t ts) =
+    "Type of expression at " ++ locStr loc ++ "\n" ++
+    pretty 160 (indent 2 $ ppr e) ++
     "\nmust be one of " ++ intercalate ", " (map ppr' ts) ++ ", but is " ++
     ppr' t ++ "."
   show (ReturnTypeError pos fname rettype bodytype) =
