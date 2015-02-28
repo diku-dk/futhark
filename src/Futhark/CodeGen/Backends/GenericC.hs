@@ -344,7 +344,7 @@ $esc:("#include <stdio.h>")
 $esc:("#include <stdlib.h>")
 $esc:("#include <string.h>")
 $esc:("#include <math.h>")
-$esc:("#include <time.h>")
+$esc:("#include <sys/time.h>")
 $esc:("#include <ctype.h>")
 $esc:("#include <errno.h>")
 
