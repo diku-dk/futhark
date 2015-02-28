@@ -320,9 +320,9 @@ mainCall fname (Function outputs inputs _ results args) = do
                $decls:paramdecls
                $ty:crettype $id:ret;
                $stms:readstms
-               start = clock();
+               gettimeofday(&t_start, NULL);
                $id:ret = $id:(funName fname)($args:argexps);
-               end = clock();
+               gettimeofday(&t_end, NULL);
                $stms:unpackstms
                $stms:printstms
              }|]
@@ -374,12 +374,22 @@ double $id:(funName' "exp")(double x) {
 return exp(x);
 }
 
+int timeval_subtract(struct timeval *result, struct timeval *t2, struct timeval *t1)
+{
+    unsigned int resolution=1000000;
+    long int diff = (t2->tv_usec + resolution * t2->tv_sec) - (t1->tv_usec + resolution * t1->tv_sec);
+    result->tv_sec = diff / resolution;
+    result->tv_usec = diff % resolution;
+    return (diff<0);
+}
+
 $edecls:readerFunctions
 
 $edecls:(map funcToDef definitions)
 
 int main(int argc, char** argv) {
-  typename clock_t start, end;
+  struct timeval t_start, t_end, t_diff;
+  unsigned long int elapsed_usec;
   $stms:(compInit endstate)
   $stm:main;
   if (argc == 3 && strcmp(argv[1], "-t") == 0) {
@@ -389,7 +399,9 @@ int main(int argc, char** argv) {
       fprintf(stderr, "Cannot open %s: %s\n", argv[2], strerror(errno));
       exit(1);
     }
-    fprintf(runtime_file, "%d\n", ((int)end-start)/(CLOCKS_PER_SEC/1000));
+    timeval_subtract(&t_diff, &t_end, &t_start);
+    elapsed_usec = t_diff.tv_sec*1e6+t_diff.tv_usec;
+    fprintf(runtime_file, "%ld\n", elapsed_usec / 1000);
     fclose(runtime_file);
   }
   return 0;
