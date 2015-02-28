@@ -9,6 +9,7 @@ import Control.Monad
 import Data.List (find)
 import Data.Maybe (mapMaybe)
 import Data.Either
+import qualified Data.HashSet as HS
 
 import Futhark.Representation.AST
 import Futhark.Tools
@@ -85,7 +86,7 @@ lowerUpdateIntoLoop updates pat res merge body = do
   --
   -- We also check that the merge parameters we work with have
   -- loop-invariant shapes.
-  mk_in_place_map <- summariseLoop updates resmap merge
+  mk_in_place_map <- summariseLoop updates usedInBody resmap merge
   Just $ do
     in_place_map <- mk_in_place_map
     (merge',prebnds) <- mkMerges in_place_map
@@ -95,6 +96,7 @@ lowerUpdateIntoLoop updates pat res merge body = do
     let body' = mkBody newbnds $ manipulateResult in_place_map idxsubsts'
     return (prebnds, pat', res', merge', body')
   where mergeparams = map fst merge
+        usedInBody = freeNamesInBody body
         resmap = loopResultValues
                  (patternIdents pat) (map identName res)
                  (map fparamName mergeparams) $
@@ -134,14 +136,17 @@ lowerUpdateIntoLoop updates pat res merge body = do
 
 summariseLoop :: MonadFreshNames m =>
                  [DesiredUpdate]
+              -> Names
               -> [(SubExp, Maybe Ident)]
               -> [(FParamT (), SubExp)]
               -> Maybe (m [LoopResultSummary])
-summariseLoop updates resmap merge =
+summariseLoop updates usedInBody resmap merge =
   sequence <$> zipWithM summariseLoopResult resmap merge
   where summariseLoopResult (se, Just v) (fparam, mergeinit)
           | Just update <- find (updateHasValue $ identName v) updates =
-            if hasLoopInvariantShape fparam then Just $ do
+            if identName (updateSource update) `HS.member` usedInBody
+            then Nothing
+            else if hasLoopInvariantShape fparam then Just $ do
               ident <-
                 newIdent "lowered_array" $ identType $ updateBindee update
               return LoopResultSummary { resultSubExp = se

@@ -46,6 +46,9 @@
 --    (6) The value @r@ must come from something that we can actually
 --    optimise (e.g. not a function parameter).
 --
+--    (7) @y@ (or its aliases) may not be used inside the body of the
+--    loop.
+--
 -- FIXME: the implementation is not finished yet.  Specifically, the
 -- above conditions are not really checked.
 module Futhark.Optimise.InPlaceLowering
@@ -105,7 +108,8 @@ optimiseBindings (bnd:bnds) m = do
     [] -> checkIfForwardableUpdate bnd' bnds'
     updates -> do
       let updateBindings = map updateBinding updates
-      -- Condition (5) is assumed to be checked by lowerUpdate.
+      -- Condition (5) and (7) are assumed to be checked by
+      -- lowerUpdate.
       case lowerUpdate bnd' updates of
         Just lowering -> do new_bnds <- lowering
                             new_bnds' <- optimiseBindings new_bnds $
