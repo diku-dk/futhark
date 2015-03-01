@@ -459,6 +459,7 @@ simplifyBinOp _ (BinOp Pow e1 e2 _)
 
 simplifyBinOp _ (BinOp ShiftL e1 e2 _)
   | isCt0 e2 = Just $ SubExp e1
+  | isCt0 e1 = Just $ SubExp $ Constant $ IntVal 0
   | otherwise =
     case (e1, e2) of
       (Constant (IntVal v1), Constant (IntVal v2)) ->
@@ -504,8 +505,8 @@ simplifyBinOp _ (BinOp Xor e1 e2 _)
       _ -> Nothing
 
 simplifyBinOp look (BinOp LogAnd e1 e2 _)
-  | isCt0 e1 = Just $ SubExp e1
-  | isCt0 e2 = Just $ SubExp e2
+  | isCt0 e1 = Just $ SubExp $ Constant $ LogVal False
+  | isCt0 e2 = Just $ SubExp $ Constant $ LogVal False
   | isCt1 e1 = Just $ SubExp e2
   | isCt1 e2 = Just $ SubExp e1
   | Var v <- e1,
@@ -523,8 +524,8 @@ simplifyBinOp look (BinOp LogAnd e1 e2 _)
 simplifyBinOp look (BinOp LogOr e1 e2 _)
   | isCt0 e1 = Just $ SubExp e2
   | isCt0 e2 = Just $ SubExp e1
-  | isCt1 e1 = Just $ SubExp e1
-  | isCt1 e2 = Just $ SubExp e2
+  | isCt1 e1 = Just $ SubExp $ Constant $ LogVal True
+  | isCt1 e2 = Just $ SubExp $ Constant $ LogVal True
   | Var v <- e1,
     Just (Not e1') <- asPrimOp =<< look (identName v),
     e1' == e2 = binOpRes $ LogVal True
