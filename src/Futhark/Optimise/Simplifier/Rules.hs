@@ -474,10 +474,8 @@ simplifyBinOp _ (BinOp ShiftR e1 e2 _)
       _ -> Nothing
 
 simplifyBinOp _ (BinOp Band e1 e2 _)
-  | isCt0 e1 = Just $ SubExp e1
-  | isCt0 e2 = Just $ SubExp e2
-  | isCt1 e1 = Just $ SubExp e2
-  | isCt1 e2 = Just $ SubExp e1
+  | isCt0 e1 = Just $ SubExp $ Constant $ IntVal 0
+  | isCt0 e2 = Just $ SubExp $ Constant $ IntVal 0
   | e1 == e2 = Just $ SubExp e1
   | otherwise =
     case (e1, e2) of
@@ -488,8 +486,6 @@ simplifyBinOp _ (BinOp Band e1 e2 _)
 simplifyBinOp _ (BinOp Bor e1 e2 _)
   | isCt0 e1 = Just $ SubExp e2
   | isCt0 e2 = Just $ SubExp e1
-  | isCt1 e1 = Just $ SubExp e1
-  | isCt1 e2 = Just $ SubExp e2
   | e1 == e2 = Just $ SubExp e1
   | otherwise =
     case (e1, e2) of
