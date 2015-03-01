@@ -22,7 +22,7 @@ import Control.Applicative
 import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.Except
-
+import Debug.Trace
 import Data.Array
 import Data.Bits
 import Data.List
@@ -32,6 +32,7 @@ import Data.Maybe
 
 import Futhark.Representation.AST.Lore (Lore)
 import Futhark.Representation.AST
+import Futhark.Util
 
 -- | An error happened during execution, and this is why.
 data InterpreterError lore =
@@ -39,8 +40,10 @@ data InterpreterError lore =
       -- ^ The specified start function does not exist.
     | InvalidFunctionArguments Name (Maybe [DeclType]) [DeclType]
       -- ^ The arguments given to a function were mistyped.
-    | IndexOutOfBounds String Int Int
-      -- ^ First @Int@ is array size, second is attempted index.
+    | IndexOutOfBounds String [Int] [Int]
+      -- ^ First @Int@ is array shape, second is attempted index.
+    | SplitOutOfBounds String [Int] Int
+      -- ^ First @Int@ is array shape, second is attempted split index.
     | NegativeIota Int
       -- ^ Called @iota(n)@ where @n@ was negative.
     | NegativeReplicate Int
@@ -69,6 +72,9 @@ instance PrettyLore lore => Show (InterpreterError lore) where
     intercalate ", " (map pretty got) ++ "."
   show (IndexOutOfBounds var arrsz i) =
     "Array index " ++ show i ++ " out of bounds in array '" ++
+    var ++ "', of size " ++ show arrsz ++ "."
+  show (SplitOutOfBounds var arrsz i) =
+    "Split index " ++ show i ++ " out of bounds in array '" ++
     var ++ "', of size " ++ show arrsz ++ "."
   show (NegativeIota n) =
     "Argument " ++ show n ++ " to iota at is negative."
@@ -118,20 +124,29 @@ bindVar BindVar val =
   return val
 
 bindVar (BindInPlace _ src is) val = do
-  v <- lookupVar src
-  is' <- mapM evalSubExp is
-  v' <- change v is' val
-  v' `seq` return v'
-  where change _ [] to = return to
-        change (ArrayVal arr t) (BasicVal (IntVal i):rest) to
-          | i >= 0 && i <= upper = do
-            let x = arr ! i
-            x' <- change x rest to
-            x' `seq` return (ArrayVal (arr // [(i, x')]) t)
-          | otherwise = bad $ IndexOutOfBounds
-                              (textual $ identName src) (upper+1) i
-          where upper = snd $ bounds arr
-        change _ _ _ = bad $ TypeError "evalBody Let Id"
+  srcv <- lookupVar src
+  is' <- mapM (asInt <=< evalSubExp) is
+  case srcv of
+    ArrayVal arr bt shape -> do
+      flatidx <- indexArray (textual $ identName src) shape is'
+      if length is' == length shape then
+        case val of
+          BasicVal bv ->
+            return $ ArrayVal (arr // [(flatidx, bv)]) bt shape
+          _ ->
+            bad $ TypeError "bindVar BindInPlace, full indices given, but replacement value is not a basic value"
+      else
+        case val of
+          ArrayVal valarr _ valshape ->
+            let updates =
+                  [ (flatidx + i, valarr ! i) | i <- [0..product valshape-1] ]
+            in return $ ArrayVal (arr // updates) bt shape
+          BasicVal _ ->
+            bad $ TypeError "bindVar BindInPlace, incomplete indices given, but replacement value is not array"
+    _ ->
+      bad $ TypeError "bindVar BindInPlace, source is not array"
+  where asInt (BasicVal (IntVal x)) = return x
+        asInt _                     = bad $ TypeError "bindVar BindInPlace"
 
 bindVars :: [(Ident, Bindage, Value)]
          -> FutharkM lore VTable
@@ -180,14 +195,40 @@ lookupFun fname = do
               Nothing   -> bad $ TypeError $ "lookupFun " ++ textual fname
 
 arrToList :: Value -> FutharkM lore [Value]
-arrToList (ArrayVal l _) = return $ elems l
+arrToList (ArrayVal l _ [_]) =
+  return $ map BasicVal $ elems l
+arrToList (ArrayVal l bt (_:rowshape)) =
+  return [ ArrayVal (listArray (0,rowsize-1) vs) bt rowshape
+         | vs <- chunk rowsize $ elems l ]
+  where rowsize = product rowshape
 arrToList _ = bad $ TypeError "arrToList"
 
-arrays :: ArrayShape shape => [TypeBase shape] -> [[Value]] -> [Value]
-arrays [rowtype] vs = [arrayVal (concat vs) rowtype]
-arrays ts v =
-  zipWith arrayVal (arrays' v) ts
-  where arrays' = foldr (zipWith (:)) (replicate (length ts) [])
+arrayVal :: [Value] -> BasicType -> [Int] -> Value
+arrayVal vs bt shape =
+  ArrayVal (listArray (0,product shape-1) vs') bt shape
+  where vs' = concatMap flatten vs
+        flatten (BasicVal bv)      = [bv]
+        flatten (ArrayVal arr _ _) = elems arr
+
+arrays :: [Type] -> [[Value]] -> FutharkM lore [Value]
+arrays ts = zipWithM arrays' ts . transpose
+  where arrays' rt vs = do
+          rowshape <- mapM (asInt <=< evalSubExp) $ arrayDims rt
+          return $ arrayVal vs (elemType rt) $ length vs : rowshape
+        asInt (BasicVal (IntVal x)) = return x
+        asInt _                     = bad $ TypeError "bindVar BindInPlace"
+
+indexArray :: String -> [Int] -> [Int]
+           -> FutharkM lore Int
+indexArray name shape is
+  | and (zipWith (<=) is shape),
+    all (0<=) is,
+    length is <= length shape =
+      let slicesizes = map product $ drop 1 $ tails shape
+      in return $ sum $ zipWith (*) is slicesizes
+ | otherwise =
+      bad $ IndexOutOfBounds name shape is
+
 
 --------------------------------------------------
 ------- Interpreting an arbitrary function -------
@@ -359,8 +400,14 @@ evalPrimOp :: Lore lore => PrimOp lore -> FutharkM lore [Value]
 evalPrimOp (SubExp se) =
   single <$> evalSubExp se
 
-evalPrimOp (ArrayLit es rt) =
-  single <$> (arrayVal <$> mapM evalSubExp es <*> pure rt)
+evalPrimOp (ArrayLit es rt) = do
+  rowshape <- mapM (asInt <=< evalSubExp) $ arrayDims rt
+  single <$> (arrayVal <$>
+              mapM evalSubExp es <*>
+              pure (elemType rt) <*>
+              pure (length es : rowshape))
+  where asInt (BasicVal (IntVal x)) = return x
+        asInt _                     = bad $ TypeError "evalPrimOp ArrayLit asInt"
 
 evalPrimOp (BinOp Plus e1 e2 Int) = evalIntBinOp (+) e1 e2
 evalPrimOp (BinOp Plus e1 e2 Real) = evalRealBinOp (+) e1 e2
@@ -420,26 +467,30 @@ evalPrimOp (Negate e) = do
             BasicVal (RealVal x) -> return [BasicVal $ RealVal (-x)]
             _                      -> bad $ TypeError "evalPrimOp Negate"
 
-
-
 evalPrimOp (Index _ ident idxs) = do
   v <- lookupVar ident
-  idxs' <- mapM evalSubExp idxs
-  single <$> foldM idx v idxs'
-  where idx (ArrayVal arr _) (BasicVal (IntVal i))
-          | i >= 0 && i <= upper = return $ arr ! i
-          | otherwise            =
-            bad $ IndexOutOfBounds (textual $ identName ident) (upper+1) i
-          where upper = snd $ bounds arr
-        idx _ _ = bad $ TypeError "evalPrimOp Index"
+  idxs' <- mapM (asInt <=< evalSubExp) idxs
+  case v of
+    ArrayVal arr bt shape -> do
+      flatidx <- indexArray (textual $ identName ident) shape idxs'
+      if length idxs' == length shape
+        then return [BasicVal $ arr ! flatidx]
+        else let resshape = drop (length idxs') shape
+                 ressize  = product resshape
+             in return [ArrayVal (listArray (0,ressize-1)
+                                  [ arr ! (flatidx+i) | i <- [0..ressize-1] ])
+                        bt resshape]
+    _ -> bad $ TypeError "evalPrimOp Index: ident is not an array"
+  where asInt (BasicVal (IntVal x)) = return x
+        asInt _                     = bad $ TypeError "evalPrimOp Index asInt"
 
 evalPrimOp (Iota e) = do
   v <- evalSubExp e
   case v of
     BasicVal (IntVal x)
       | x >= 0    ->
-        return [arrayVal (map (BasicVal . IntVal) [0..x-1])
-                         (Basic Int :: DeclType)]
+        return [ArrayVal (listArray (0,x-1) $ map IntVal [0..x-1])
+                Int [x]]
       | otherwise ->
         bad $ NegativeIota x
     _ -> bad $ TypeError "evalPrimOp Iota"
@@ -450,44 +501,39 @@ evalPrimOp (Replicate e1 e2) = do
   case v1 of
     BasicVal (IntVal x)
       | x >= 0    ->
-        return [arrayVal (replicate x v2) $ valueType v2]
+        case v2 of
+          BasicVal bv ->
+            return [ArrayVal (listArray (0,x-1) (replicate x bv))
+                    (basicValueType bv)
+                    [x]]
+          ArrayVal arr bt shape ->
+            return [ArrayVal (listArray (0,x*product shape-1)
+                              (concat $ replicate x $ elems arr))
+                    bt (x:shape)]
       | otherwise -> bad $ NegativeReplicate x
     _   -> bad $ TypeError "evalPrimOp Replicate"
 
-evalPrimOp (Scratch bt shape) =
-  single <$> foldM expand (BasicVal v) shape
+evalPrimOp (Scratch bt shape) = do
+  shape' <- mapM (asInt <=< evalSubExp) shape
+  let nelems = product shape'
+      vals = replicate nelems v
+  return [ArrayVal (listArray (0,nelems-1) vals) bt shape']
   where v = blankBasicValue bt
-        expand v' se = do
-          n <- evalSubExp se
-          case n of
-            BasicVal (IntVal x)
-              | x >= 0    ->
-                return $ arrayVal (replicate x v') $ valueType v'
-              | otherwise -> bad $ NegativeReplicate x
-            _   -> bad $ TypeError "evalPrimOp Scratch"
+        asInt (BasicVal (IntVal x)) = return x
+        asInt _                     = bad $ TypeError "evalPrimOp Scratch asInt"
 
 evalPrimOp e@(Reshape _ shapeexp arrexp) = do
   shape <- mapM (asInt <=< evalSubExp) shapeexp
   arr <- lookupVar arrexp
-  let arrt = toDecl $ identType arrexp
-      rt = arrayOf arrt (Rank $ length shapeexp-1) (uniqueness arrt)
-      reshape (0:rest) [] =
-        arrayVal <$> mapM (reshape rest) [] <*> pure rt
-      reshape (n:rest) vs
-        | n > 0, length vs `mod` n == 0 =
-          arrayVal <$> mapM (reshape rest) (chunk (length vs `div` n) vs)
-                   <*> pure rt
-      reshape [] [v] = return v
-      reshape [] [] =
-        return $ arrayVal [] rt
-      reshape _ _ = bad $ InvalidArrayShape (PrimOp e) (valueShape arr) shape
-  single <$> reshape shape (flatten arr)
-  where flatten (ArrayVal arr _) = concatMap flatten $ elems arr
-        flatten t = [t]
-        chunk _ [] = []
-        chunk i l = let (a,b) = splitAt i l
-                    in a : chunk i b
-        asInt (BasicVal (IntVal x)) = return x
+  case arr of
+    ArrayVal vs bt oldshape
+      | product oldshape == product shape ->
+        return $ single $ ArrayVal vs bt shape
+      | otherwise ->
+        bad $ InvalidArrayShape (PrimOp e) oldshape shape
+    _ ->
+      bad $ TypeError "Reshape given a non-array argument"
+  where asInt (BasicVal (IntVal x)) = return x
         asInt _ = bad $ TypeError "evalPrimOp Reshape asInt"
 
 evalPrimOp (Rearrange _ perm arrexp) =
@@ -496,22 +542,39 @@ evalPrimOp (Rearrange _ perm arrexp) =
 evalPrimOp (Rotate _ perm arrexp) =
   single <$> rotateArray perm <$> lookupVar arrexp
 
-evalPrimOp (Split _ splitexp arrexp _) = do
+evalPrimOp (Split _ splitexp arrexp leftoverexp) = do
   split <- evalSubExp splitexp
-  vs <- arrToList =<< lookupVar arrexp
-  case split of
-    BasicVal (IntVal i)
-      | i <= length vs ->
-        let (bef,aft) = splitAt i vs
-        in return [arrayVal bef rt, arrayVal aft rt]
-      | otherwise        -> bad $ IndexOutOfBounds (pretty arrexp) (length vs) i
+  leftover <- evalSubExp leftoverexp
+  arrval <- lookupVar arrexp
+  case (split, leftover, arrval) of
+    (BasicVal (IntVal i),
+     BasicVal (IntVal j),
+     ArrayVal arr bt shape@(outerdim:rowshape))
+      | i <= outerdim ->
+        let rowsize = product rowshape
+            bef = ArrayVal (listArray (0,rowsize*i-1) (elems arr))
+                  bt (i:rowshape)
+            aft = ArrayVal (listArray (0,rowsize*j-1)
+                            (drop (rowsize*i) $ elems arr))
+                  bt (outerdim-i:rowshape)
+        in return [bef, aft]
+      | otherwise        -> bad $ SplitOutOfBounds (pretty arrexp) shape i
     _ -> bad $ TypeError "evalPrimOp Split"
-  where rt = rowType $ identType arrexp
 
 evalPrimOp (Concat _ arr1exp arr2exp _) = do
-  elems1 <- arrToList =<< lookupVar arr1exp
-  elems2 <- arrToList =<< lookupVar arr2exp
-  return $ single $ arrayVal (elems1 ++ elems2) $ stripArray 1 $ identType arr1exp
+  arr1 <- lookupVar arr1exp
+  arr2 <- lookupVar arr2exp
+  case (arr1, arr2) of
+    (ArrayVal arr1' bt (outerdim1:rowshape1),
+     ArrayVal arr2' _  (outerdim2:rowshape2))
+      | rowshape1 == rowshape2 ->
+        let nelems = (outerdim1 + outerdim2) * product rowshape1
+        in return $ single $
+           ArrayVal (listArray (0,nelems-1) (elems arr1' ++ elems arr2'))
+           bt (outerdim1 + outerdim2 : rowshape1)
+      | otherwise ->
+        bad $ TypeError "irregular arguments to concat"
+    _ -> bad $ TypeError "evalPrimOp Concat"
 
 evalPrimOp (Copy e) = single <$> evalSubExp e
 
@@ -548,8 +611,8 @@ evalLoopOp (DoLoop respat merge loopvar boundexp loopbody) = do
 
 evalLoopOp (Map _ fun arrexps) = do
   vss <- mapM (arrToList <=< lookupVar) arrexps
-  vs' <- mapM (applyLambda fun) $ transpose vss
-  return $ arrays (lambdaReturnType fun) vs'
+  vss' <- mapM (applyLambda fun) $ transpose vss
+  arrays (lambdaReturnType fun) vss'
 
 evalLoopOp (Reduce _ fun inputs) = do
   let (accexps, arrexps) = unzip inputs
@@ -563,17 +626,17 @@ evalLoopOp (Scan _ fun inputs) = do
   startvals <- mapM evalSubExp accexps
   vss <- mapM (arrToList <=< lookupVar) arrexps
   (acc, vals') <- foldM scanfun (startvals, []) $ transpose vss
-  return $ arrays (map valueType acc) $ reverse vals'
+  arrays (map valueType acc) $ reverse vals'
     where scanfun (acc, l) x = do
             acc' <- applyLambda fun $ acc ++ x
             return (acc', acc' : l)
 
 evalLoopOp (Filter _ fun arrexp) = do
-  vss <- mapM (arrToList <=< lookupVar) arrexp
+  arrs <- mapM lookupVar arrexp
+  vss <- mapM arrToList arrs
   vss' <- filterM filt $ transpose vss
-  return $
-    BasicVal (IntVal $ length vss') :
-    arrays (filterType fun $ map identType arrexp) vss'
+  (BasicVal (IntVal $ length vss'):) <$>
+    arrays (map (rowType . valueType) arrs) vss'
   where filt x = do
           res <- applyLambda fun x
           case res of [BasicVal (LogVal True)] -> return True

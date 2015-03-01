@@ -64,14 +64,26 @@ internaliseType = flip evalState 0 . internaliseType'
 -- being returned for a single input array.
 internaliseValue :: E.Value -> [I.Value]
 internaliseValue (E.ArrayVal arr rt) =
-  case internaliseType $ E.addNames rt of
-    [rt'] -> [I.arrayVal (concatMap internaliseValue $ A.elems arr) rt']
-    ts
-      | [] <- A.elems arr -> map emptyOf ts
-      | otherwise         -> zipWith asarray ts (transpose arrayvalues)
-  where emptyOf = I.arrayVal []
-        asarray t vs = I.arrayVal vs t
-        arrayvalues = map internaliseValue $ A.elems arr
-        -- Above should never happen in well-typed program.
+  let ts          = internaliseType $ E.addNames rt
+      arrayvalues = map internaliseValue $ A.elems arr
+      arrayvalues' =
+        case arrayvalues of
+          [] -> replicate (length ts) []
+          _  -> transpose arrayvalues
+  in zipWith asarray ts arrayvalues'
+  where asarray rt' values =
+          let shape = determineShape (I.arrayRank rt') values
+          in I.ArrayVal (A.listArray (0,product shape-1) $
+                         concatMap flatten values)
+             (I.elemType rt') shape
+        flatten (I.BasicVal bv)      = [bv]
+        flatten (I.ArrayVal bvs _ _) = A.elems bvs
+
 internaliseValue (E.TupVal vs) = concatMap internaliseValue vs
 internaliseValue (E.BasicVal bv) = [I.BasicVal bv]
+
+determineShape :: Int -> [I.Value] -> [Int]
+determineShape _ vs@(I.ArrayVal _ _ shape : _) =
+  length vs : shape
+determineShape r vs =
+  length vs : replicate r 0

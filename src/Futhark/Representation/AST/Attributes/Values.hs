@@ -3,7 +3,6 @@ module Futhark.Representation.AST.Attributes.Values
          valueType
        , valueShape
        , valueSize
-       , arrayVal
        , IsValue (..)
        , intconst
 
@@ -28,20 +27,14 @@ import Data.List
 import Data.Ord
 
 import Futhark.Representation.AST.Syntax
-import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Constants
 
 -- | Return the type of the given value.
 valueType :: Value -> Type
 valueType (BasicVal v) =
   Basic $ basicValueType v
-valueType v@(ArrayVal _ (Basic et)) =
-  Array et (Shape [n]) Nonunique
-  where n = constant (valueSize v)
-valueType v@(ArrayVal _ (Array et _ _)) =
-  Array et (Shape $ map intconst $ valueShape v) Nonunique
-valueType (ArrayVal _ (Mem {})) =
-  error "valueType Mem"
+valueType (ArrayVal _ et shape) =
+  Array et (Shape $ map (Constant . IntVal) shape) Nonunique
 
 -- | Return the size of the first dimension of an array, or zero for
 -- non-arrays.
@@ -56,25 +49,8 @@ valueSize t = case valueShape t of
 -- 3]@.  If an array has @n@ dimensions, the result is always a list
 -- of @n@ elements.
 valueShape :: Value -> [Int]
-valueShape (ArrayVal arr rt)
-  | v:_ <- elems arr = snd (bounds arr) + 1 : valueShape v
-  | otherwise = replicate (1 + arrayRank rt) 0
+valueShape (ArrayVal _ _ shape) = shape
 valueShape _ = []
-
--- | Given an N-dimensional array, return a one-dimensional array
--- with the same elements.
-flattenArray :: Value -> Value
-flattenArray (ArrayVal arr et) =
-  arrayVal (concatMap flatten $ elems arr) et
-    where flatten (ArrayVal arr' _) = concatMap flatten $ elems arr'
-          flatten v = [v]
-flattenArray v = v
-
--- | Construct an array value containing the given elements.
-arrayVal :: ArrayShape shape => [Value] -> TypeBase shape -> Value
-arrayVal vs t = ArrayVal (listArray (0, length vs-1) vs) $
-                t `setArrayShape` Rank n
-  where n = shapeRank $ arrayShape t
 
 -- | Calculate the given permutation of the list.  It is an error if
 -- the permutation goes out of bounds.
@@ -82,23 +58,19 @@ permuteShape :: [Int] -> [a] -> [a]
 permuteShape perm l = map (l!!) perm
 
 permuteArray :: [Int] -> Value -> Value
-permuteArray perm v =
-  case flattenArray v of
-    ArrayVal inarr _ ->
-      let newshape = move oldshape
-          newrowtype = Array
-                       (elemType $ valueType v)
-                       (Rank $ length newshape - 1)
-                       Nonunique
-          idx is shape = sum (zipWith (*) is (map product $ drop 1 (tails shape)))
-          f rt is (m:ms) =
-            arrayVal [ f (stripArray 1 rt) (is ++ [i]) ms | i <- [0..m-1] ] rt
-          f _ is [] = inarr ! idx (invmove is) oldshape
-      in f newrowtype [] newshape
-    _ -> v
-  where oldshape = valueShape v
-        move = permuteShape perm
+permuteArray perm (ArrayVal inarr et oldshape) =
+  let newshape = move oldshape
+      idx is shape = sum (zipWith (*) is (map product $ drop 1 (tails shape)))
+  in ArrayVal (listArray (bounds inarr)
+               [ inarr ! idx (invmove is) oldshape
+               | is <- map reverse $ picks $ reverse newshape ])
+     et newshape
+  where move = permuteShape perm
         invmove = permuteShape $ permuteInverse perm
+        picks [] = []
+        picks [n] = map (:[]) [0..n-1]
+        picks (n:ns) = [ i:is | is <- picks ns, i <- [0..n-1] ]
+permuteArray _ v = v
 
 -- | Produce the inverse permutation.
 permuteInverse :: [Int] -> [Int]
@@ -137,8 +109,8 @@ transposeIndex k n l
 -- | Rotate the elements of an array as per the Futhark 'rotate' command.
 -- If the value is not an array, this is a no-op.
 rotateArray :: Int -> Value -> Value
-rotateArray n (ArrayVal a t) =
-  arrayVal rotatedElems t
+rotateArray n (ArrayVal a et shape) =
+  ArrayVal (listArray (bounds a) rotatedElems) et shape
   where arrelems = elems a
         nelems = length arrelems
         rotatedElems
@@ -150,8 +122,8 @@ rotateArray _ v = v
 -- characters, return the corresponding 'String', otherwise return
 -- 'Nothing'.
 arrayString :: Value -> Maybe String
-arrayString (ArrayVal arr _)
+arrayString (ArrayVal arr _ _)
   | c:cs <- elems arr = mapM asChar $ c:cs
-  where asChar (BasicVal (CharVal c)) = Just c
-        asChar _                        = Nothing
+  where asChar (CharVal c) = Just c
+        asChar _           = Nothing
 arrayString _ = Nothing

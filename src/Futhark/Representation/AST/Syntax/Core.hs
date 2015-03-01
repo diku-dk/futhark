@@ -141,9 +141,8 @@ data Diet = Consume -- ^ Consumes this value.
 -- | Every possible value in Futhark.  Values are fully evaluated and their
 -- type is always unambiguous.
 data Value = BasicVal BasicValue
-           | ArrayVal !(Array Int Value) DeclType
-             -- ^ It is assumed that the array is 0-indexed.  The type
-             -- is the row type.
+           | ArrayVal !(Array Int BasicValue) BasicType [Int]
+             -- ^ It is assumed that the array is 0-indexed.
              deriving (Eq, Ord, Show)
 
 -- | An identifier consists of its name and the type of the value

@@ -60,6 +60,7 @@ import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 import Futhark.Substitute
 import Futhark.Binder
+import Futhark.Util
 
 letSubExp :: MonadBinder m =>
              String -> Exp (Lore m) -> m SubExp
@@ -181,12 +182,17 @@ eAssert e loc = do e' <- letSubExp "assert_arg" =<< e
 eValue :: MonadBinder m => Value -> m (Exp (Lore m))
 eValue (BasicVal bv) =
   return $ PrimOp $ SubExp $ Constant bv
-eValue (ArrayVal a t) = do
-  let rowshape = [ Constant (IntVal d)
-                 | d <- drop 1 $ valueShape (ArrayVal a t)
-                 ]
-  ses <- mapM (letSubExp "array_elem" <=< eValue) $ A.elems a
-  return $ PrimOp $ ArrayLit ses (t `setArrayDims` rowshape)
+eValue (ArrayVal a bt [_]) = do
+  let ses = map Constant $ A.elems a
+  return $ PrimOp $ ArrayLit ses $ Basic bt
+eValue (ArrayVal a bt shape) = do
+  let rowshape = drop 1 shape
+      rowsize  = product rowshape
+      rows     = [ ArrayVal (A.listArray (0,rowsize-1) r) bt rowshape
+                 | r <- chunk rowsize $ A.elems a ]
+      rowtype = Array bt (Shape $ map (Constant . IntVal) rowshape) Nonunique
+  ses <- mapM (letSubExp "array_elem" <=< eValue) rows
+  return $ PrimOp $ ArrayLit ses rowtype
 
 eBody :: (MonadBinder m) =>
          [m (Exp (Lore m))]

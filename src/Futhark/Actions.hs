@@ -9,11 +9,9 @@ module Futhark.Actions
 where
 
 import Control.Monad
-import Data.Array (elems)
 import Data.List
 import System.Exit (exitWith, ExitCode(..))
 import System.IO
-import Text.Printf
 
 import Futhark.Externalise
 import Futhark.Pipeline
@@ -72,13 +70,4 @@ interpret parseValues prog =
         Left err -> do hPutStrLn stderr $ "Interpreter error:\n" ++ show err
                        exitWith $ ExitFailure 2
         Right val  -> putStrLn $ ppOutput val
-  where ppOutput vs = intercalate "\n" $ map ppOutput' vs
-        ppOutput' val | Just s <- arrayString val = show s
-        ppOutput' (BasicVal (RealVal x)) = printf "%.6f" x
-        ppOutput' (BasicVal (IntVal x))  = show x
-        ppOutput' (BasicVal (CharVal c)) = show c
-        ppOutput' (BasicVal (LogVal b))  = show b
-        ppOutput' (BasicVal Checked) = "Checked"
-        ppOutput' (ArrayVal a t)
-          | [] <- elems a = "empty(" ++ pretty t ++ ")"
-          | otherwise     = "[" ++ intercalate ", " (map ppOutput' $ elems a) ++ "]"
+  where ppOutput vs = intercalate "\n" $ map pretty vs

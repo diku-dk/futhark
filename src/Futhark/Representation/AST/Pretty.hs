@@ -20,6 +20,7 @@ import Futhark.Representation.AST.Lore (Lore)
 import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes
+import Futhark.Util
 
 -- | The class of lores whose annotations can be prettyprinted.
 class (Lore lore,
@@ -48,10 +49,15 @@ instance Pretty Uniqueness where
 
 instance Pretty Value where
   ppr (BasicVal bv) = ppr bv
-  ppr v@(ArrayVal a t)
+  ppr v
     | Just s <- arrayString v = text $ show s
-    | Array {} <- t = brackets $ commastack $ map ppr $ elems a
-    | otherwise     = brackets $ commasep $ map ppr $ elems a
+  ppr (ArrayVal a t (_:rowshape@(_:_))) =
+    brackets $ commastack
+    [ ppr $ ArrayVal (listArray (0, rowsize-1) a') t rowshape
+      | a' <- chunk rowsize $ elems a ]
+    where rowsize = product rowshape
+  ppr (ArrayVal a _ _) =
+    brackets $ commasep $ map ppr $ elems a
 
 instance Pretty (TypeBase Shape) where
   ppr (Basic et) = ppr et
