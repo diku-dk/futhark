@@ -54,7 +54,7 @@ transformExp (LoopOp (Map cs fun arrs)) = do
     i (isize inarrs) loopbody
 
 transformExp (LoopOp (Reduce cs fun args)) = do
-  (_, (acc, initacc), (i, iv)) <- newFold arrexps accexps
+  ((acc, initacc), (i, iv)) <- newFold accexps
   inarrs <- forM (zip
                   (map identType arrexps)
                   (map (uniqueness . identType) $
@@ -70,17 +70,22 @@ transformExp (LoopOp (Reduce cs fun args)) = do
   where (accexps, arrexps) = unzip args
 
 transformExp (LoopOp (Scan cs fun args)) = do
-  ((arr, initarr), (acc, initacc), (i, iv)) <- newFold arrexps accexps
+  ((acc, initacc), (i, iv)) <- newFold accexps
+  initarr <- resultArray $ map identType arrexps
+  arr <- forM initarr $ \v -> newIdent "fold_arr" $ identType v `setUniqueness` Unique
   loopbody <- insertBindingsM $ do
     x <- bodyBind =<<
-         transformLambda fun (map (PrimOp . SubExp . Var) acc ++ index cs arr iv)
+         transformLambda fun (map (PrimOp . SubExp . Var) acc ++
+                              index cs arrexps_nonunique iv)
     dests <- letwith cs arr (pexp iv) $ map (PrimOp . SubExp) x
     irows <- letSubExps "row" $ index cs dests iv
-    rowcopies <- letExps "copy" [ PrimOp $ Copy irow | irow <- irows ]
+    rowcopies <- letExps "copy" $ map (PrimOp . Copy) irows
     return $ resultBody $ map Var $ rowcopies ++ dests
   return $ LoopOp $
-    DoLoop arr (loopMerge (acc ++ arr) (initacc ++ initarr)) i (isize arr) loopbody
+    DoLoop arr (loopMerge (acc ++ arr) (initacc ++ map Var initarr)) i (isize arr) loopbody
   where (accexps, arrexps) = unzip args
+        arrexps_nonunique = [ v { identType = identType v `setUniqueness` Nonunique }
+                            | v <- arrexps ]
 
 transformExp (LoopOp (Filter cs fun arrexps)) = do
   arr <- letExps "arr" $ map (PrimOp . SubExp . Var) arrexps
@@ -141,7 +146,7 @@ transformExp (LoopOp (Filter cs fun arrexps)) = do
     i nv loopbody
 
 transformExp (LoopOp (Redomap cs _ innerfun accexps arrexps)) = do
-  (_, (acc, initacc), (i, iv)) <- newFold arrexps accexps
+  ((acc, initacc), (i, iv)) <- newFold accexps
   inarrs <- forM (zip
                   (map identType arrexps)
                   (map (uniqueness . identType) $
@@ -180,15 +185,13 @@ transform = identityMapper {
             , mapOnBody = insertBindingsM . transformBody
             }
 
-newFold :: [Ident] -> [SubExp]
-        -> Binder Basic (([Ident], [SubExp]), ([Ident], [SubExp]), (Ident, SubExp))
-newFold arrexps accexps = do
+newFold :: [SubExp]
+        -> Binder Basic (([Ident], [SubExp]), (Ident, SubExp))
+newFold accexps = do
   (i, iv) <- newVar "i" $ Basic Int
   initacc <- letSubExps "acc" $ map maybeCopy accexps
-  arrinit <- letSubExps "arr" $ map (maybeCopy . Var) arrexps
-  arr <- forM arrinit $ \e -> newIdent "fold_arr" (subExpType e)
   acc <- forM accexps $ \e -> newIdent "acc" (subExpType e)
-  return ((arr, arrinit), (acc, initacc), (i, iv))
+  return ((acc, initacc), (i, iv))
 
 -- | @maybeCopy e@ returns a copy expression containing @e@ if @e@ is
 -- not unique or a basic type, otherwise just returns @e@ itself.
