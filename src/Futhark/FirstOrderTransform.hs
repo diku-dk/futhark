@@ -37,21 +37,19 @@ transformBody = mapBodyM transform
 transformExp :: Exp -> Binder Basic Exp
 
 transformExp (LoopOp (Map cs fun arrs)) = do
-  inarrs <- forM (zip
-                  (map identType arrs)
-                  (map (uniqueness . identType) $ lambdaParams fun)) $ \(t, u) ->
-            newIdent "map_inarr" (setUniqueness t u)
   (i, iv) <- newVar "i" $ Basic Int
   resarr <- resultArray $ mapType fun $ map identType arrs
   outarrs <- forM (map identType resarr) $ \t ->
              newIdent "map_outarr" $ t `setUniqueness` Unique
   loopbody <- runBinder $ do
-    x <- bodyBind =<< transformLambda fun (index cs inarrs iv)
+    x <- bodyBind =<< transformLambda fun (index cs arrs_nonunique iv)
     dests <- letwith cs outarrs (pexp iv) $ map (PrimOp . SubExp) x
-    return $ resultBody $ map Var $ inarrs ++ dests
+    return $ resultBody $ map Var dests
   return $ LoopOp $
-    DoLoop outarrs (loopMerge (inarrs++outarrs) (map Var $ arrs++resarr))
-    i (isize inarrs) loopbody
+    DoLoop outarrs (loopMerge outarrs (map Var resarr))
+    i (isize arrs) loopbody
+  where arrs_nonunique = [ v { identType = identType v `setUniqueness` Nonunique }
+                         | v <- arrs ]
 
 transformExp (LoopOp (Reduce cs fun args)) = do
   ((acc, initacc), (i, iv)) <- newFold accexps
@@ -224,7 +222,11 @@ pexp = pure . PrimOp . SubExp
 
 transformLambda :: Lambda -> [Exp] -> Binder Basic Body
 transformLambda (Lambda params body _) args = do
-  zipWithM_ letBindNames' (map (pure . identName) params) args
+  forM_ (zip params args) $ \(param, arg) ->
+    if unique (identType param) then
+      letBindNames' [identName param] =<< eCopy (pure arg)
+    else
+      letBindNames' [identName param] arg
   transformBody body
 
 loopMerge :: [Ident] -> [SubExp] -> [(FParam, SubExp)]
