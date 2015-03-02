@@ -224,7 +224,7 @@ renameType :: (TypeBox ty, VarName f, VarName t) => ty f -> RenameM f t (ty t)
 renameType = mapType renameType'
   where renameType' (Array et dims u als) = do
           als' <- HS.fromList <$> mapM replName (HS.toList als)
-          et' <- toElemDecl <$> renameElemType (fromElemDecl et)
+          et' <- renameElemType et
           return $ Array et' (replicate (length dims) Nothing) u als'
         renameType' (Elem et) = Elem <$> renameElemType et
         renameElemType (Tuple ts) = Tuple <$> mapM renameType' ts

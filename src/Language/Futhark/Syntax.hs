@@ -70,7 +70,7 @@ data ElemTypeBase as vn = Basic BasicType
 -- types for equality with '==', aliases are ignored, as are
 -- dimension sizes (but not the number of dimensions themselves).
 data TypeBase as vn = Elem (ElemTypeBase as vn)
-                    | Array (ElemTypeBase NoInfo vn) (ArraySize vn) Uniqueness (as vn)
+                    | Array (ElemTypeBase as vn) (ArraySize vn) Uniqueness (as vn)
                     -- ^ 1st arg: array's element type, 2nd arg:
                     -- lengths of dimensions, 3rd arg: uniqueness
                     -- attribute, 4th arg: aliasing information.

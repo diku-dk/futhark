@@ -813,7 +813,8 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
 
   let -- | Change the uniqueness attribute of a type to reflect how it
       -- was used.
-      param (Array et sz _ _) con = Array et sz u NoInfo
+      param (Array et sz _ _) con =
+        Array (toElemDecl et) sz u NoInfo
         where u = case con of Consume     -> Unique
                               TupleDiet _ -> Unique
                               Observe     -> Nonunique

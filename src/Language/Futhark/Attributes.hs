@@ -201,7 +201,7 @@ toElemDecl t          = t `setElemAliases` NoInfo
 
 -- | Replace no aliasing with an empty alias set.
 fromDecl :: DeclTypeBase vn -> TypeBase Names vn
-fromDecl (Array et sz u _) = Array et sz u HS.empty
+fromDecl (Array et sz u _) = Array (fromElemDecl et) sz u HS.empty
 fromDecl (Elem et) = Elem $ fromElemDecl et
 
 -- | Replace no aliasing with an empty alias set.
@@ -317,7 +317,7 @@ arrayOf :: Monoid (vn as) =>
 arrayOf (Array et size1 _ als) size2 u =
   Array et (size2 ++ size1) u als
 arrayOf (Elem et) size u =
-  Array (et `setElemAliases` NoInfo) size u $ aliases $ Elem et
+  Array et size u mempty
 
 -- | @array n t@ is the type of @n@-dimensional arrays having @t@ as
 -- the base type.  If @t@ is itself an m-dimensional array, the result
@@ -360,7 +360,7 @@ setElemAliases t = addElemAliases t . const
 -- | @t \`addAliases\` f@ returns @t@, but with any already present
 -- aliasing replaced by @f@ applied to that aliasing.
 addAliases :: TypeBase asf vn -> (asf vn -> ast vn) -> TypeBase ast vn
-addAliases (Array et dims u als) f = Array et dims u $ f als
+addAliases (Array et dims u als) f = Array (addElemAliases et f) dims u $ f als
 addAliases (Elem et) f = Elem $ et `addElemAliases` f
 
 -- | @t \`addAliases\` f@ returns @t@, but with any already present
@@ -488,10 +488,16 @@ lambdaType lam = returnType (lambdaReturnType lam) (lambdaParamDiets lam)
 -- | The result of applying the arguments of the given types to a
 -- function with the given return type, consuming its parameters with
 -- the given diets.
-returnType :: (Eq vn, Hashable vn) => DeclTypeBase vn -> [Diet] -> [CompTypeBase vn] -> CompTypeBase vn
-returnType (Array et sz Nonunique NoInfo) ds args = Array et sz Nonunique als
+returnType :: (Eq vn, Hashable vn) =>
+              DeclTypeBase vn
+           -> [Diet]
+           -> [CompTypeBase vn]
+           -> CompTypeBase vn
+returnType (Array et sz Nonunique NoInfo) ds args =
+  Array (fromElemDecl et) sz Nonunique als
   where als = mconcat $ map aliases $ zipWith maskAliases args ds
-returnType (Array et sz Unique NoInfo) _ _ = Array et sz Unique mempty
+returnType (Array et sz Unique NoInfo) _ _ =
+  Array (fromElemDecl et) sz Unique mempty
 returnType (Elem (Tuple ets)) ds args =
   Elem $ Tuple $ map (\et -> returnType et ds args) ets
 returnType (Elem t) _ _ = Elem t `setAliases` HS.empty
