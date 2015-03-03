@@ -222,13 +222,21 @@ renameExp e = mapExpM rename e
 
 renameType :: (TypeBox ty, VarName f, VarName t) => ty f -> RenameM f t (ty t)
 renameType = mapType renameType'
-  where renameType' (Array et dims u als) = do
+  where renameType' (Array at) = Array <$> renameArrayType at
+        renameType' (Basic bt) = return $ Basic bt
+        renameType' (Tuple ts) = Tuple <$> mapM renameType' ts
+        renameArrayType (BasicArray bt dims u als) = do
           als' <- HS.fromList <$> mapM replName (HS.toList als)
-          et' <- renameElemType et
-          return $ Array et' (replicate (length dims) Nothing) u als'
-        renameType' (Elem et) = Elem <$> renameElemType et
-        renameElemType (Tuple ts) = Tuple <$> mapM renameType' ts
-        renameElemType (Basic bt) = return $ Basic bt
+          return $ BasicArray bt (replicate (length dims) Nothing) u als'
+        renameArrayType (TupleArray et dims u) = do
+          et' <- mapM renameTupleArrayElem et
+          return $ TupleArray et' (replicate (length dims) Nothing) u
+        renameTupleArrayElem (BasicArrayElem bt als) =
+          BasicArrayElem bt <$> HS.fromList <$> mapM replName (HS.toList als)
+        renameTupleArrayElem (ArrayArrayElem at) =
+          ArrayArrayElem <$> renameArrayType at
+        renameTupleArrayElem (TupleArrayElem ts) =
+          TupleArrayElem <$> mapM renameTupleArrayElem ts
 
 rename :: (TypeBox ty, VarName f, VarName t) => MapperBase ty ty f t (RenameM f t)
 rename = Mapper {
