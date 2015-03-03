@@ -15,7 +15,7 @@ import Futhark.Internalise
 import Futhark.Pipeline
 import Futhark.Passes
 import Futhark.Actions
-import Debug.Trace
+
 import qualified Futhark.Representation.External.TypeChecker as E
 import qualified Futhark.Representation.External.Renamer as E
 
