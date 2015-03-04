@@ -61,7 +61,6 @@ import Futhark.Representation.Aliases (Aliases)
 import qualified Futhark.Representation.Aliases as Aliases
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.MonadFreshNames
-import Futhark.Optimise.Simplifier.CSE
 import Futhark.Optimise.Simplifier.Rule
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
@@ -81,8 +80,7 @@ instance Monoid (Need lore) where
 
 type AliasMap = HM.HashMap VName Names
 
-data Env m = Env { envDupeState :: DupeState (Lore m)
-                 , envProgram   :: Maybe (Prog (InnerLore m))
+data Env m = Env { envProgram   :: Maybe (Prog (InnerLore m))
                  , envRules     :: RuleBook m
                  , envAliases   :: AliasMap
                  }
@@ -91,8 +89,7 @@ emptyEnv :: MonadEngine m =>
             RuleBook m
          -> Maybe (Prog (InnerLore m)) -> Env m
 emptyEnv rules prog =
-  Env { envDupeState = newDupeState
-      , envProgram = prog
+  Env { envProgram = prog
       , envRules = rules
       , envAliases = mempty
       }
@@ -254,15 +251,13 @@ bindLoopVar var bound =
 
 hoistBindings :: MonadEngine m =>
                  RuleBook m -> BlockPred (Lore m)
-              -> ST.SymbolTable (Lore m) -> UT.UsageTable -> DupeState (Lore m)
+              -> ST.SymbolTable (Lore m) -> UT.UsageTable
               -> [Binding (Lore m)] -> Result
               -> m (Body (Lore m),
                     [Binding (Lore m)],
                     UT.UsageTable)
-hoistBindings rules block vtable uses dupes needs result = do
-  (uses', blocked, hoisted) <-
-    simplifyBindings vtable uses $
-    concat $ snd $ mapAccumL pick dupes needs
+hoistBindings rules block vtable uses needs result = do
+  (uses', blocked, hoisted) <- simplifyBindings vtable uses needs
   body <- mkBodyM blocked result
   return (body, hoisted, uses')
   where simplifyBindings vtable' uses' bnds = do
@@ -294,9 +289,6 @@ hoistBindings rules block vtable uses dupes needs result = do
                 (uses'',bnds') <-
                   simplifyBindings' vtable' uses' optimbnds
                 return (uses'', bnds'++bnds)
-
-        pick ds bnd =
-          (ds,[bnd])
 
 blockUnhoistedDeps :: Proper lore =>
                       [Either (Binding lore) (Binding lore)]
@@ -343,11 +335,10 @@ blockIf :: MonadEngine m =>
         -> m Result -> m (Body (Lore m))
 blockIf block m = passNeed $ do
   (body, needs) <- listenNeed m
-  ds <- asksEngineEnv envDupeState
   vtable <- getVtable
   rules <- asksEngineEnv envRules
   (e, hoistable, usages) <-
-    hoistBindings rules block vtable (usageTable needs) ds (needBindings needs) body
+    hoistBindings rules block vtable (usageTable needs) (needBindings needs) body
   putVtable $ foldl (flip ST.insertBinding) vtable hoistable
   return (e,
           const Need { needBindings = hoistable
@@ -405,12 +396,12 @@ hoistCommon m1 vtablef1 m2 vtablef2 = passNeed $ do
     enterBody $
     localVtable vtablef1 $
     hoistBindings rules block vtable (usageTable needs1)
-    newDupeState (needBindings needs1) body1
+    (needBindings needs1) body1
   (body2', safe2, f2) <-
     enterBody $
     localVtable vtablef2 $
     hoistBindings rules block vtable (usageTable needs2)
-    newDupeState (needBindings needs2) body2
+    (needBindings needs2) body2
   let hoistable = safe1 <> safe2
   putVtable $ foldl (flip ST.insertBinding) vtable hoistable
   return ((body1', body2'),

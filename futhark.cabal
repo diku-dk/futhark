@@ -70,6 +70,7 @@ Library
                    Futhark.Interpreter
                    Futhark.MonadFreshNames
                    Futhark.NeedNames
+                   Futhark.Optimise.CSE
                    Futhark.Optimise.DeadVarElim
                    Futhark.Optimise.Errors
                    Futhark.Optimise.Fusion
@@ -84,7 +85,6 @@ Library
                    Futhark.Optimise.Simplifier
                    Futhark.Optimise.Simplifier.Apply
                    Futhark.Optimise.Simplifier.ClosedForm
-                   Futhark.Optimise.Simplifier.CSE
                    Futhark.Optimise.Simplifier.Engine
                    Futhark.Optimise.Simplifier.Rule
                    Futhark.Optimise.Simplifier.Rules
