@@ -88,6 +88,7 @@ Library
                    Futhark.Optimise.Simplifier.Engine
                    Futhark.Optimise.Simplifier.Rule
                    Futhark.Optimise.Simplifier.Rules
+                   Futhark.Optimise.Simplifier.Simple
                    Futhark.Optimise.Simplifier.Simplify
                    Futhark.Optimise.Simplifier.Simplifiable
                    Futhark.Optimise.SplitShapes
