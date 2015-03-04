@@ -217,10 +217,11 @@ arraysSize i (t:_) = arraySize i t
 rowType :: ArrayShape shape => TypeBase shape -> TypeBase shape
 rowType = stripArray 1
 
--- | A type is a basic type if it is not an array and any component
--- types are basic types.
+-- | A type is a basic type if it is not an array or memory block and
+-- any component types are basic types.
 basicType :: TypeBase shape -> Bool
 basicType (Array {}) = False
+basicType (Mem {}) = False
 basicType _ = True
 
 -- | Returns the bottommost type of an array.  For @[[int]]@, this
