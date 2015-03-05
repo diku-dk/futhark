@@ -64,7 +64,13 @@ vidarifyBinding :: I.Binding -> V.Element
 vidarifyBinding (I.Let p _lore exp) = V.Binding (vidarifyPattern p) (vidarifyExp exp)
 
 vidarifyExp :: I.Exp -> V.Element
-vidarifyExp (I.PrimOp p) = vidarifyPrimOp p
+vidarifyExp (I.PrimOp p)     = vidarifyPrimOp p
+vidarifyExp (S.If cond a b _t) =
+    V.Block (V.ExactName "If") $ V.StrictBlock $ [
+        vidarifySubExp cond,
+        V.SubBlock $ V.StrictBlock $ vidarifyFuncBody a,
+        V.SubBlock $ V.StrictBlock $ vidarifyFuncBody b
+    ]
 vidarifyExp e = V.Anything
 
 vidarifyPrimOp :: I.PrimOp -> V.Element
@@ -77,9 +83,26 @@ vidarifyPrimOp (S.BinOp binop a b _tp) =
         vidarifySubExp a,
         vidarifySubExp b
     ]
+vidarifyPrimOp (S.Not subexp) =
+    V.Block (V.ExactName "Not") $ V.StrictBlock [
+        vidarifySubExp subexp
+    ]
+vidarifyPrimOp (S.Negate subexp) =
+    V.Block (V.ExactName "Negate") $ V.StrictBlock [
+        vidarifySubExp subexp
+    ]
 vidarifyPrimOp (S.Assert subexp _loc) =
     V.Block (V.ExactName "Assert") $ V.StrictBlock [
         vidarifySubExp subexp
+    ]
+vidarifyPrimOp (S.Conjoin subexps) =
+    V.SubBlock $ V.StrictBlock $
+        map vidarifySubExp subexps
+vidarifyPrimOp (S.Index certs (S.Ident n _tp) subexps) =
+    V.Block (V.ExactName "Index") $ V.StrictBlock $ [
+        V.SubBlock $ V.StrictBlock $ map (\(S.Ident n _tp) -> V.Name $ V.ExactName $ showName n) certs,
+        V.Name $ V.ExactName $ showName n,
+        V.SubBlock $ V.StrictBlock $ map vidarifySubExp subexps
     ]
 vidarifyPrimOp _ = V.Anything
 
