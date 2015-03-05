@@ -270,7 +270,7 @@ bindingEntries bnd@(Let (Pattern [bindee]) _ e) vtable = [entry]
             subExpRange v vtable
           PrimOp (Rearrange _ _ v) ->
             identRange v vtable
-          PrimOp (Split _ _ v _) ->
+          PrimOp (Split _ _ v) ->
             identRange v vtable
           PrimOp (Copy se) ->
             subExpRange se vtable

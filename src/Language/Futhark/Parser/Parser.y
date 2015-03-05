@@ -317,11 +317,11 @@ Exp  :: { UncheckedExp }
      | rotate '(' SignedInt ',' Exp ')'
                       { Rotate [] $3 $5 $1 }
 
-     | Certificates split '(' Exp ',' Exp ')'
-                      { Split $1 $4 $6 $2 }
+     | Certificates split '(' '(' Exps ')' ',' Exp ')'
+                      { Split $1 $5 $8 $2 }
 
-     | split '(' Exp ',' Exp ')'
-                      { Split [] $3 $5 $1 }
+     | split '(' '(' Exps ')' ',' Exp ')'
+                      { Split [] $4 $7 $1 }
 
      | Certificates concat '(' Exp ',' Exp ')'
                       { Concat $1 $4 $6 $2 }

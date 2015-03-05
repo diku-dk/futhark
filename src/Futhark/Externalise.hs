@@ -89,11 +89,13 @@ externalisePrimOp (I.Update cs src idxs ve) =
             (externaliseSubExp ve) (E.Var $ externaliseIdent src)
             noLoc
 -}
-externalisePrimOp (I.Split cs ne ae _) =
+{- TODO: Externalise Split
+externalisePrimOp (I.Split cs sizeexps ae) =
   E.Split (externaliseCerts cs)
           (externaliseSubExp ne)
           (E.Var $ externaliseIdent ae)
           noLoc
+-}
 externalisePrimOp (I.Concat cs x y _) =
   E.Concat (externaliseCerts cs)
            (E.Var $ externaliseIdent x)

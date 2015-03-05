@@ -265,8 +265,9 @@ data ExpBase ty vn =
             | Size (CertificatesBase ty vn) Int (ExpBase ty vn) SrcLoc
             -- ^ The size of the specified array dimension.
 
-            | Split (CertificatesBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
-            -- ^ @split(1, [ 1, 2, 3, 4 ]) = {[1],[2, 3, 4]}@.
+            | Split (CertificatesBase ty vn) [ExpBase ty vn] (ExpBase ty vn) SrcLoc
+            -- ^ @split( (1,1,3), [ 1, 2, 3, 4 ]) = {[1], [], [2, 3], [4]}@.
+            -- Note that this is different from the internal representation
 
             | Concat (CertificatesBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
             -- ^ @concat([1],[2, 3, 4]) = [1, 2, 3, 4]@.
