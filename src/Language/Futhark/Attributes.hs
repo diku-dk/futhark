@@ -531,8 +531,8 @@ typeOf (Filter _ arr _) = typeOf arr
 typeOf (Redomap outerfun innerfun start arr _) =
   lambdaType outerfun [innerres, innerres]
     where innerres = lambdaType innerfun [typeOf start, rowType $ typeOf arr]
-typeOf (Split _ _ e _) =
-  Tuple [typeOf e, typeOf e]
+typeOf (Split _ splitexps e _) =
+  Tuple $ replicate (1 + length splitexps) (typeOf e)
 typeOf (Concat _ x y _) = typeOf x `setUniqueness` u
   where u = uniqueness (typeOf x) <> uniqueness (typeOf y)
 typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` HS.empty

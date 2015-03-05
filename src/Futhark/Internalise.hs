@@ -275,24 +275,28 @@ internaliseExp _ (E.Reshape cs shape e loc) = do
     return $ I.Reshape (shapeOk:cs') shape' v
   where prod l = foldBinOp I.Times (intconst 1) l I.Int
 
-internaliseExp _ (E.Split cs nexp arrexp _) = do
+internaliseExp _ (E.Split cs splitexps arrexp loc) = do
   let cs' = internaliseCerts cs
-  nexp' <- internaliseExp1 "n" nexp
+  splits' <- mapM (internaliseExp1 "n") splitexps
+  -- Note that @arrs@ is an array, because of array-of-tuples transformation
   arrs <- internaliseExpToIdents "split_arr" arrexp
-  ressize <- letSubExp "split_size" $
-             PrimOp $ I.BinOp I.Minus (arraysSize 0 $ map I.identType arrs)
-             nexp' I.Int
-  partnames <- forM (map I.identType arrs) $ \et -> do
-    a <- fst <$> newVar "split_a" (et `setOuterSize` nexp')
-    b <- fst <$> newVar "split_b" (et `setOuterSize` ressize)
-    return (a, b)
-  let combsplit arr (a,b) =
-        letBind_ (basicPattern' [a,b]) $
-        PrimOp $ I.Split cs' nexp' arr ressize
-  zipWithM_ combsplit arrs partnames
-  return $
-    map (I.Var . fst) partnames ++
-    map (I.Var . snd) partnames
+  let arrayOuterdim = arraysSize 0 (map I.identType arrs)
+
+  -- Assertions
+  let indexConds = zipWith (\beg end -> PrimOp $ I.BinOp I.Leq beg end I.Bool)
+                     (I.intconst 0:splits') (splits'++[arrayOuterdim])
+  indexChecks <- mapM (letSubExp "split_index_cnd") indexConds
+  indexAsserts <- mapM (\cnd -> letExp "split_index_assert" $ PrimOp $ I.Assert cnd loc)
+                  indexChecks
+
+  -- Calculate diff between each split index
+  let sizeExps = zipWith (\beg end -> PrimOp $ I.BinOp I.Minus end beg I.Int)
+                 (I.intconst 0:splits') (splits'++[arrayOuterdim])
+  sizeVars <- mapM (letSubExp "split_size") sizeExps
+  splitExps <- forM arrs $ \arr -> letTupExp' "split_res" $
+                                   PrimOp $ I.Split (indexAsserts++cs') sizeVars arr
+
+  return $ concat $ transpose splitExps
 
 internaliseExp desc (E.Concat cs x y loc) = do
   xs <- internaliseExpToIdents "concat_x" x

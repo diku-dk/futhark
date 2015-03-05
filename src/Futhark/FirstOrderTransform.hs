@@ -119,13 +119,10 @@ transformExp (LoopOp (Filter cs fun arrexps)) = do
 
   resinit_presplit <- resultArray $ map identType arrexps
   resinit <- forM resinit_presplit $ \v -> do
-    let vt = identType v
-    leftover <- letSubExp "split_leftover" $ PrimOp $
-                BinOp Minus (arraySize 0 vt) outersize Int
     splitres <- letTupExp "filter_split_result" $
-      PrimOp $ Split cs outersize v leftover
+      PrimOp $ Split cs [outersize] v
     case splitres of
-      [x,_] -> return x
+      [x] -> return x
       _     -> fail "FirstOrderTransform filter: weird split result"
 
   res <- forM (map identType resinit) $ \t -> newIdent "filter_result" t

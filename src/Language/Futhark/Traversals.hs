@@ -173,9 +173,9 @@ mapExpM tv (Filter fun arrexp loc) =
 mapExpM tv (Redomap redfun mapfun accexp arrexp loc) =
   pure Redomap <*> mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
        mapOnExp tv accexp <*> mapOnExp tv arrexp <*> pure loc
-mapExpM tv (Split cs nexp arrexp loc) =
+mapExpM tv (Split cs splitexps arrexp loc) =
   pure Split <*> mapOnCertificates tv cs <*>
-       mapOnExp tv nexp <*> mapOnExp tv arrexp <*>
+       mapM (mapOnExp tv) splitexps <*> mapOnExp tv arrexp <*>
        pure loc
 mapExpM tv (Concat cs x y loc) =
   pure Concat <*> mapOnCertificates tv cs <*>

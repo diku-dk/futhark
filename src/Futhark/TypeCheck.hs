@@ -660,10 +660,9 @@ checkPrimOp (Rotate cs _ arrexp) = do
   mapM_ (requireI [Basic Cert]) cs
   void $ checkArrIdent arrexp
 
-checkPrimOp (Split cs splitexp arrexp secsize) = do
+checkPrimOp (Split cs sizeexps arrexp) = do
   mapM_ (requireI [Basic Cert]) cs
-  require [Basic Int] splitexp
-  require [Basic Int] secsize
+  mapM_ (require [Basic Int]) sizeexps
   void $ checkArrIdent arrexp
 
 checkPrimOp (Concat cs arr1exp arr2exp ressize) = do

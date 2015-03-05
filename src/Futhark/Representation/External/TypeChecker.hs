@@ -774,12 +774,12 @@ checkExp (Redomap outerfun innerfun accexp arrexp pos) = do
   _ <- require [redtype] accexp'
   return $ Redomap outerfun' innerfun' accexp' arrexp' pos
 
-checkExp (Split cs splitexp arrexp pos) = do
+checkExp (Split cs splitexps arrexp pos) = do
   cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
-  splitexp' <- require [Basic Int] =<< checkExp splitexp
+  splitexps' <- mapM (require [Basic Int] <=< checkExp) splitexps
   arrexp' <- checkExp arrexp
   _ <- rowTypeM arrexp' -- Just check that it's an array.
-  return $ Split cs' splitexp' arrexp' pos
+  return $ Split cs' splitexps' arrexp' pos
 
 checkExp (Concat cs arr1exp arr2exp pos) = do
   cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
