@@ -211,10 +211,13 @@ arrayVal vs bt shape =
         flatten (ArrayVal arr _ _) = elems arr
 
 arrays :: [Type] -> [[Value]] -> FutharkM lore [Value]
-arrays ts = zipWithM arrays' ts . transpose
-  where arrays' rt vs = do
+arrays ts vs = zipWithM arrays' ts vs'
+  where vs' = case vs of
+          [] -> replicate (length ts) []
+          _  -> transpose vs
+        arrays' rt r = do
           rowshape <- mapM (asInt <=< evalSubExp) $ arrayDims rt
-          return $ arrayVal vs (elemType rt) $ length vs : rowshape
+          return $ arrayVal r (elemType rt) $ length r : rowshape
         asInt (BasicVal (IntVal x)) = return x
         asInt _                     = bad $ TypeError "bindVar BindInPlace"
 
