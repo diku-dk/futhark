@@ -199,6 +199,15 @@ instance PrettyLore lore => Pretty (LoopOp lore) where
     where (pat, initexp) = unzip mergepat
   ppr (Map cs lam as) =
     ppCertificates' cs <> ppSOAC "map" [lam] Nothing as
+  ppr (ConcatMap cs lam as) =
+    ppCertificates' cs <> text "concatMap" <>
+    parens (pprConcatLam lam <> comma </>
+            commasep (map (braces . commasep . map ppr) as))
+    where pprConcatLam (Lambda params body rettype) =
+            text "fn" <+>
+            braces (commasep $ map (brackets . ppr) rettype) <+>
+            apply (map ppParam params) <+>
+            text "=>" </> indent 2 (ppr body)
   ppr (Reduce cs lam inputs) =
     ppCertificates' cs <> ppSOAC "reduce" [lam] (Just es) as
     where (es, as) = unzip inputs

@@ -62,6 +62,7 @@ data Token = IF
            | IOTA
            | REPLICATE
            | MAP
+           | CONCATMAP
            | REDUCE
            | RESHAPE
            | REARRANGE

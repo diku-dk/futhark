@@ -325,6 +325,8 @@ data ExpBase ty vn =
              -- ^ @redomap(g, f, n, a) = reduce(g, n, map(f, a))@.
              -- 5th arg is the row type of the input  array.
 
+            | ConcatMap (LambdaBase ty vn) (ExpBase ty vn) [ExpBase ty vn] SrcLoc
+
             | Zip [(ExpBase ty vn, ty vn)] SrcLoc
             -- ^ Normal zip supporting variable number of arguments.
             -- The type paired to each expression is the element type
@@ -357,6 +359,7 @@ instance Located (ExpBase ty vn) where
   locOf (Rearrange _ _ _ pos) = locOf pos
   locOf (Rotate _ _ _ pos) = locOf pos
   locOf (Map _ _ pos) = locOf pos
+  locOf (ConcatMap _ _ _ pos) = locOf pos
   locOf (Reduce _ _ _ pos) = locOf pos
   locOf (Zip _ pos) = locOf pos
   locOf (Unzip _ _ pos) = locOf pos

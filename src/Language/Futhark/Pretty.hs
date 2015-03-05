@@ -173,6 +173,7 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
                                    text $ show n,
                                    ppr e]
   pprPrec _ (Map lam a _) = ppSOAC "map" [lam] [a]
+  pprPrec _ (ConcatMap lam a as _) = ppSOAC "concatMap" [lam] $ a : as
   pprPrec _ (Reduce lam e a _) = ppSOAC "reduce" [lam] [e, a]
   pprPrec _ (Redomap redlam maplam e a _) =
     ppSOAC "redomap" [redlam, maplam] [e, a]
