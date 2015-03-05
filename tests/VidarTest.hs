@@ -37,6 +37,9 @@ main = do
     p <- foo
     putStrLn $ V.ppVidar $ vidarify p
 
+showName :: VName -> String
+showName n = baseString n ++ show (baseTag n)
+
 vidarify :: I.Prog -> [V.Element]
 vidarify (I.Prog decs) = map vidarifyDec decs
 
@@ -50,7 +53,7 @@ vidarifyParams :: [S.FParam I.Basic] -> [V.Element]
 vidarifyParams = map vidarifyParam
 
 vidarifyParam :: S.FParam I.Basic -> V.Element
-vidarifyParam (S.FParam (S.Ident n _idType) _lore) = V.Name $ V.ExactName $ baseString n ++ show (baseTag n)
+vidarifyParam (S.FParam (S.Ident n _idType) _lore) = V.Name $ V.ExactName $ showName n
 --vidarifyParam _ = V.Anything
 
 vidarifyFuncBody :: I.Body -> [V.Element]
@@ -80,14 +83,14 @@ vidarifyPattern (S.Pattern [b]) = vidarifyPatElem b
 vidarifyPattern p = V.AnyName
 
 vidarifyPatElem :: I.PatElem -> V.Name
-vidarifyPatElem (S.PatElem (S.Ident n _idType) _bindage _lore) = V.ExactName $ baseString n ++ show (baseTag n)
+vidarifyPatElem (S.PatElem (S.Ident n _idType) _bindage _lore) = V.ExactName $ showName n
 
 vidarifyRes :: I.Result -> V.Element
 vidarifyRes (S.Result subexps) = V.SubBlock $ V.StrictBlock $ map vidarifySubExp subexps
 
 vidarifySubExp :: I.SubExp -> V.Element
 vidarifySubExp (S.Constant bv)             = vidarifyBasicVal bv
-vidarifySubExp (S.Var (S.Ident n _idType)) = V.Name $ V.ExactName $ baseString n ++ show (baseTag n)
+vidarifySubExp (S.Var (S.Ident n _idType)) = V.Name $ V.ExactName $ showName n
 
 vidarifyBasicVal :: BasicValue -> V.Element
 vidarifyBasicVal (IntVal x) = V.Name $ V.ExactName $ show x
