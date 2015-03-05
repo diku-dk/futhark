@@ -70,10 +70,15 @@ vidarifyExp e = V.Anything
 vidarifyPrimOp :: I.PrimOp -> V.Element
 vidarifyPrimOp (S.SubExp subexp) = vidarifySubExp subexp
 vidarifyPrimOp (S.ArrayLit subexps _type) =
-    V.Block (V.ExactName "array") $ V.StrictBlock $
+    V.Block (V.ExactName "Array") $ V.StrictBlock $
         map vidarifySubExp subexps
+vidarifyPrimOp (S.BinOp binop a b _tp) =
+    V.Block (V.ExactName $ show binop) $ V.StrictBlock $ [
+        vidarifySubExp a,
+        vidarifySubExp b
+    ]
 vidarifyPrimOp (S.Assert subexp _loc) =
-    V.Block (V.ExactName "assert") $ V.StrictBlock [
+    V.Block (V.ExactName "Assert") $ V.StrictBlock [
         vidarifySubExp subexp
     ]
 vidarifyPrimOp _ = V.Anything
