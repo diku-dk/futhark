@@ -728,6 +728,12 @@ checkLoopOp (Map ass fun arrexps) = do
   arrargs <- checkSOACArrayArgs arrexps
   void $ checkLambda fun arrargs
 
+checkLoopOp (ConcatMap cd fun inarrs) = do
+  mapM_ (requireI [Basic Cert]) cd
+  forM_ inarrs $ \inarr -> do
+    args <- mapM (checkArg . Var) inarr
+    void $ checkConcatMapLambda fun args
+
 checkLoopOp (Reduce ass fun inputs) = do
   let (startexps, arrexps) = unzip inputs
   mapM_ (requireI [Basic Cert]) ass
@@ -1084,6 +1090,26 @@ checkLambda (Lambda params body ret) args = do
     noUnique $ checkAnonymousFun
       (nameFromString "<anonymous>", ret, params, body)
   else bad $ TypeError noLoc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
+
+checkConcatMapLambda :: Checkable lore =>
+                        Lambda lore -> [Arg] -> TypeM lore ()
+checkConcatMapLambda (Lambda params body rettype) args = do
+  mapM_ checkType rettype
+  let (_,elemparams) =
+        splitAt (length params - length args) params
+      fname = nameFromString "<anonymous>"
+      rettype' = [ arrayOf t (ExtShape [Ext 0]) $ uniqueness t
+                 | t <- staticShapes rettype ]
+  if length elemparams == length args then do
+    checkFuncall Nothing (map identType elemparams) args
+    noUnique $ checkFun' (fname,
+                          rettype',
+                          [ (param, LambdaBound) | param <- params ],
+                          body) $
+      checkBindings (bodyBindings body) $ do
+        checkResult $ bodyResult body
+        matchExtReturnType fname rettype' $ bodyResult body
+  else bad $ TypeError noLoc $ "concatMap function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " array arguments."
 
 -- | The class of lores that can be type-checked.
 class (FreeIn (Lore.Exp lore),

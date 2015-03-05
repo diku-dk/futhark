@@ -1,5 +1,6 @@
 module Futhark.Internalise.Lambdas
   ( internaliseMapLambda
+  , internaliseConcatMapLambda
   , internaliseFoldLambda
   , internaliseFilterLambda
   )
@@ -82,6 +83,21 @@ internaliseMapLambda internaliseBody lam args = do
   bindMapShapes inner_shapes shapefun args outer_shape
   body' <- assertResultShape (srclocOf lam) rettype' body
   return $ I.Lambda params body' rettype'
+
+internaliseConcatMapLambda :: (E.Exp -> InternaliseM Body)
+                           -> E.Lambda
+                           -> [I.SubExp]
+                           -> InternaliseM I.Lambda
+internaliseConcatMapLambda internaliseBody lam _ = do
+  (params, body, rettype) <- ensureLambda lam
+  let rettype' = internaliseType rettype
+  bindingParams params $ \shapeparams params' -> do
+    body' <- internaliseBody body
+    case rettype' of
+      [I.Array bt (ExtShape [_]) _] ->
+        return $ I.Lambda (shapeparams++params') body' [I.Basic bt]
+      _ ->
+        fail "concatMap lambda does not return a single-dimensional array"
 
 makeShapeFun :: [I.Param] -> I.Body -> Int
              -> InternaliseM I.Lambda

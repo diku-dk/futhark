@@ -617,6 +617,28 @@ evalLoopOp (Map _ fun arrexps) = do
   vss' <- mapM (applyLambda fun) $ transpose vss
   arrays (lambdaReturnType fun) vss'
 
+evalLoopOp (ConcatMap _ fun inputs) = do
+  inputs' <- mapM (mapM lookupVar) inputs
+  vss <- mapM (mapM asArray <=< applyConcatMapLambda fun) inputs'
+  innershapes <- mapM (mapM (asInt <=< evalSubExp) . arrayDims) $
+                 lambdaReturnType fun
+  let numTs = length $ lambdaReturnType fun
+      emptyArray :: (Array Int BasicValue, Int)
+      emptyArray = (listArray (0,-1) [], 0)
+      concatArrays (arr1,n1) (arr2,n2) =
+        (listArray (0,n1+n2-1) (elems arr1 ++ elems arr2), n1+n2)
+      arrs = foldl (zipWith concatArrays) (replicate numTs emptyArray) vss
+      (ctx,vs) = unzip
+                 [ (BasicVal $ IntVal n,
+                    ArrayVal arr (elemType t) (n:innershape))
+                 | (innershape,(arr,n),t) <-
+                      zip3 innershapes arrs $ lambdaReturnType fun ]
+  return $ ctx ++ vs
+  where asInt (BasicVal (IntVal x)) = return x
+        asInt _                     = bad $ TypeError "evalLoopOp asInt"
+        asArray (ArrayVal a _ (n:_)) = return (a, n)
+        asArray _                    = bad $ TypeError "evalLoopOp asArray"
+
 evalLoopOp (Reduce _ fun inputs) = do
   let (accexps, arrexps) = unzip inputs
   startaccs <- mapM evalSubExp accexps
@@ -705,22 +727,47 @@ evalBoolBinOp op e1 e2 = do
 applyLambda :: Lore lore => Lambda lore -> [Value] -> FutharkM lore [Value]
 applyLambda (Lambda params body rettype) args =
   do v <- binding (zip3 params (repeat BindVar) args) $ evalBody body
-     checkReturnShapes rettype v
+     checkReturnShapes (staticShapes rettype) v
      return v
 
-checkReturnShapes :: [Type] -> [Value] -> FutharkM lore ()
+applyConcatMapLambda :: Lore lore => Lambda lore -> [Value] -> FutharkM lore [Value]
+applyConcatMapLambda (Lambda params body rettype) valargs = do
+  v <- binding (zip3 params (repeat BindVar) $ shapes ++ valargs) $
+       evalBody body
+  let rettype' = [ arrayOf t (ExtShape [Ext 0]) $ uniqueness t
+                 | t <- staticShapes rettype ]
+  checkReturnShapes rettype' v
+  return v
+  where shapes =
+          let (shapeparams, valparams) =
+                splitAt (length params - length valargs) params
+              shapemap = shapeMapping'
+                         (map identType valparams)
+                         (map valueShape valargs)
+          in map (BasicVal . IntVal . fromMaybe 0 .
+                  flip HM.lookup shapemap .
+                  identName)
+             shapeparams
+
+checkReturnShapes :: [ExtType] -> [Value] -> FutharkM lore ()
 checkReturnShapes = zipWithM_ checkShape
   where checkShape t val = do
           let valshape = map (BasicVal . IntVal) $ valueShape val
-              retdims = arrayDims t
-          varshape <- mapM evalSubExp retdims
-          when (varshape /= valshape) $
+              retdims = extShapeDims $ arrayShape t
+              evalExtDim (Free se) = do v <- evalSubExp se
+                                        return $ Just (se, v)
+              evalExtDim (Ext _)   = return Nothing
+              matches (Just (_, v1), v2) = v1 == v2
+              matches (Nothing,      _)  = True
+          retshape <- mapM evalExtDim retdims
+          unless (all matches $ zip retshape valshape) $
             bad $ TypeError $
             "checkReturnShapes:\n" ++
             "Return type specifies shape [" ++
-            intercalate "," (zipWith ppDim retdims varshape) ++
+            intercalate "," (map ppDim retshape) ++
             "], but returned value is of shape [" ++
             intercalate "," (map pretty valshape) ++ "]."
 
-        ppDim (Constant v) _ = pretty v
-        ppDim e            v = pretty e ++ "=" ++ pretty v
+        ppDim (Just (Constant v, _)) = pretty v
+        ppDim (Just (Var e,      v)) = pretty e ++ "=" ++ pretty v
+        ppDim Nothing                = "?"

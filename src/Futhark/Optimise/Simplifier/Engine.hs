@@ -551,6 +551,12 @@ simplifyLoopOp (Map cs fun arrs) = do
   fun' <- simplifyLambda fun $ map Just arrs'
   return $ Map cs' fun' arrs'
 
+simplifyLoopOp (ConcatMap cs fun arrs) = do
+  cs' <- simplifyCerts cs
+  arrs' <- mapM (mapM simplifyIdent) arrs
+  fun' <- simplifyLambda fun $ map (const Nothing) $ lambdaParams fun
+  return $ ConcatMap cs' fun' arrs'
+
 simplifyLoopOp (Filter cs fun arrs) = do
   cs' <- simplifyCerts cs
   arrs' <- mapM simplifyIdent arrs

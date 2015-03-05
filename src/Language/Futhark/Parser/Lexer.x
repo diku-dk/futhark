@@ -103,6 +103,7 @@ keyword s =
     "scan"         -> SCAN
     "split"        -> SPLIT
     "concat"       -> CONCAT
+    "concatMap"    -> CONCATMAP
     "filter"       -> FILTER
     "redomap"      -> REDOMAP
     "empty"        -> EMPTY

@@ -95,6 +95,9 @@ loopOpExtType (DoLoop res merge _ _ _) =
   loopExtType res $ map (fparamIdent . fst) merge
 loopOpExtType (Map _ f arrs) =
   staticShapes $ mapType f $ map identType arrs
+loopOpExtType (ConcatMap _ f _) =
+  [ Array (elemType t) (ExtShape $ Ext 0 : map Free (arrayDims t)) Unique
+  | t <- lambdaReturnType f ]
 loopOpExtType (Reduce _ fun _) =
   staticShapes $ lambdaReturnType fun
 loopOpExtType (Scan _ _ inputs) =

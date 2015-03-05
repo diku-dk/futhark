@@ -197,6 +197,8 @@ data LoopOp lore
     --   of basic type, or a multi-dim array of basic type.
     -- 4th arg is the input-array row types
 
+  | ConcatMap Certificates (LambdaT lore) [[Ident]]
+
   | Reduce  Certificates (LambdaT lore) [(SubExp, Ident)]
   | Scan   Certificates (LambdaT lore) [(SubExp, Ident)]
   | Filter  Certificates (LambdaT lore) [Ident]

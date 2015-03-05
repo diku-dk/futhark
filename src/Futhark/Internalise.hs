@@ -365,6 +365,13 @@ internaliseExp desc (E.Redomap lam1 lam2 ne arrs _) = do
   letTupExp' desc $ I.LoopOp $
     I.Redomap [] lam1' lam2' nes arrs'
 
+internaliseExp desc (E.ConcatMap lam arr arrs _) = do
+  arr' <- internaliseExpToIdents "concatMap_arr" arr
+  arrs' <- mapM (internaliseExpToIdents "concatMap_arr") arrs
+  lam' <- withNonuniqueReplacements $
+          internaliseConcatMapLambda internaliseBody lam $ map I.Var arr'
+  letTupExp' desc $ I.LoopOp $ I.ConcatMap [] lam' $ arr':arrs'
+
 -- The "interesting" cases are over, now it's mostly boilerplate.
 
 internaliseExp desc (E.Iota e _) = do

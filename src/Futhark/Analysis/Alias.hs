@@ -32,6 +32,9 @@ analyseExp :: Lore lore => In.Exp lore -> Out.Exp lore
 analyseExp (Out.LoopOp (In.Map cs lam args)) =
   Out.LoopOp $
   Out.Map cs (analyseLambda lam) args
+analyseExp (Out.LoopOp (In.ConcatMap cs lam args)) =
+  Out.LoopOp $
+  Out.ConcatMap cs (analyseLambda lam) args
 analyseExp (Out.LoopOp (In.Filter cs lam args)) =
   Out.LoopOp $
   Out.Filter cs (analyseLambda lam) args
