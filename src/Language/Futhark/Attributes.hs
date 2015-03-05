@@ -519,6 +519,8 @@ typeOf (Transpose _ k n e _)
       typeOf e
 typeOf (Map f arr _) = arrayType 1 et $ uniqueness et
   where et = lambdaType f [rowType $ typeOf arr]
+typeOf (ConcatMap f _ _ _) =
+  fromDecl $ lambdaReturnType f
 typeOf (Reduce fun start arr _) =
   lambdaType fun [typeOf start, rowType (typeOf arr)]
 typeOf (Zip es _) = arrayType 1 (Tuple $ map snd es) Nonunique

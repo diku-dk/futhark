@@ -82,6 +82,8 @@ loopOpAliases (Filter _ _ arrs) =
   map identAliases arrs
 loopOpAliases (Redomap _ outerfun _ _ _) =
   map (const mempty) $ lambdaReturnType outerfun
+loopOpAliases (ConcatMap {}) =
+  [mempty]
 
 ifAliases :: ([Names], Names) -> ([Names], Names) -> [Names]
 ifAliases (als1,cons1) (als2,cons2) =
