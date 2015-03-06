@@ -151,10 +151,9 @@ mapExpM tv (PrimOp (Rearrange cs perm e)) =
 mapExpM tv (PrimOp (Rotate cs n e)) =
   PrimOp <$> (pure Rotate <*> mapOnCertificates tv cs <*>
                  pure n <*> mapOnIdent tv e)
-mapExpM tv (PrimOp (Split cs nexp arrexp size)) =
+mapExpM tv (PrimOp (Split cs sizeexps arrexp)) =
   PrimOp <$> (pure Split <*> mapOnCertificates tv cs <*>
-                 mapOnSubExp tv nexp <*> mapOnIdent tv arrexp <*>
-                 mapOnSubExp tv size)
+              mapM (mapOnSubExp tv) sizeexps <*> mapOnIdent tv arrexp)
 mapExpM tv (PrimOp (Concat cs x ys size)) =
   PrimOp <$> (pure Concat <*> mapOnCertificates tv cs <*>
                  mapOnIdent tv x <*> mapM (mapOnIdent tv) ys <*>
@@ -176,6 +175,9 @@ mapExpM tv (LoopOp (DoLoop res mergepat loopvar boundexp loopbody)) =
 mapExpM tv (LoopOp (Map cs fun arrexps)) =
   LoopOp <$> (pure Map <*> mapOnCertificates tv cs <*>
               mapOnLambda tv fun <*> mapM (mapOnIdent tv) arrexps)
+mapExpM tv (LoopOp (ConcatMap cs fun arrexps)) =
+  LoopOp <$> (pure ConcatMap <*> mapOnCertificates tv cs <*>
+              mapOnLambda tv fun <*> mapM (mapM (mapOnIdent tv)) arrexps)
 mapExpM tv (LoopOp (Reduce cs fun inputs)) =
   LoopOp <$> (pure Reduce <*> mapOnCertificates tv cs <*>
               mapOnLambda tv fun <*>

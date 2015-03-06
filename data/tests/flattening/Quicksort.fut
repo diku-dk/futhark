@@ -1,17 +1,29 @@
+fun bool isSorted ([int] xs) =
+    if size(0,xs) < 2 then True
+    else let bs = map (fn bool (int i) => xs[i] <= xs[i+1], iota( size(0,xs) - 1) ) in
+             reduce(op&&, True, bs)
+
 fun [int] quicksort ([int] xs) =
-    let len = size(0,xs) in
-    if len < 2
+    if isSorted(xs)
     then xs
     else let pivot = xs[0] in
-         let {arr, ltIndex, eqIndex} = filter( fn bool (int x) => x < pivot
-                                             , fn bool (int x) => x == pivot
-                                             , xs) in
-         let {lt, eq, gt} = split(arr, ltIndex, eqIndex) in
-         let {lt', gt'} = tmap(quicksort, {lt,gt}) in
-             concat(lt', eq, gt')
+         let lt = filter( fn bool (int x) => x < pivot , xs ) in
+         let eq = filter( fn bool (int x) => x == pivot, xs ) in
+         let gt = filter( fn bool (int x) => pivot < x , xs ) in
+         let {lt', eq', gt'} = {quicksort(lt), quicksort(eq), quicksort(gt)} in
+             concat(lt', concat(eq, gt'))
 
+// fun [[int]] quicksort^ ([[int]] xss)
 
-// This is how the lifted code could look like
+// but isn't that going to generate a lot of assertions checking that
+// input arrays must be regular ?
+
+// Should it be this instead ?
+// fun [ { SegDescp , [int] } ] quicksort^ ( [ { SegDescp , [int] } ] xs )
+
+// But won't arrays of tuples be turned into tuple of arrays, meaning it doesn't matter?
+
+// This is how the lifted version of the old code could look like
 //
 // fun [[int]] quicksort^ ([[int]] xss) =
 //     let lens = map (fn int ([int] xs) => size(0,xs), xss) in

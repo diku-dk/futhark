@@ -153,6 +153,9 @@ mapExpM tv (Rotate cs n e loc) =
        pure n <*> mapOnExp tv e <*> pure loc
 mapExpM tv (Map fun e loc) =
   pure Map <*> mapOnLambda tv fun <*> mapOnExp tv e <*> pure loc
+mapExpM tv (ConcatMap fun e es loc) =
+  pure ConcatMap <*> mapOnLambda tv fun <*>
+  mapOnExp tv e <*> mapM (mapOnExp tv) es <*> pure loc
 mapExpM tv (Reduce fun startexp arrexp loc) =
   pure Reduce <*> mapOnLambda tv fun <*>
        mapOnExp tv startexp <*> mapOnExp tv arrexp <*> pure loc
@@ -173,9 +176,9 @@ mapExpM tv (Filter fun arrexp loc) =
 mapExpM tv (Redomap redfun mapfun accexp arrexp loc) =
   pure Redomap <*> mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
        mapOnExp tv accexp <*> mapOnExp tv arrexp <*> pure loc
-mapExpM tv (Split cs nexp arrexp loc) =
+mapExpM tv (Split cs splitexps arrexp loc) =
   pure Split <*> mapOnCertificates tv cs <*>
-       mapOnExp tv nexp <*> mapOnExp tv arrexp <*>
+       mapM (mapOnExp tv) splitexps <*> mapOnExp tv arrexp <*>
        pure loc
 mapExpM tv (Concat cs x ys loc) =
   pure Concat <*> mapOnCertificates tv cs <*>

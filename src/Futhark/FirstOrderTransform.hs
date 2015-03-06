@@ -11,6 +11,7 @@ module Futhark.FirstOrderTransform
 
 import Control.Applicative
 import Control.Monad.State
+import qualified Data.HashMap.Lazy as HM
 
 import Futhark.Representation.Basic
 import Futhark.Renamer
@@ -22,7 +23,7 @@ import Futhark.Tools
 -- renamer!
 transformProg :: Prog -> Prog
 transformProg prog =
-  renameProg $ Prog $ evalState (mapM transformFunDec $ progFunctions prog) src
+  {-renameProg $-} Prog $ evalState (mapM transformFunDec $ progFunctions prog) src
   where src = newNameSourceForProg prog
 
 transformFunDec :: MonadFreshNames m => FunDec -> m FunDec
@@ -50,6 +51,40 @@ transformExp (LoopOp (Map cs fun arrs)) = do
     i (isize arrs) loopbody
   where arrs_nonunique = [ v { identType = identType v `setUniqueness` Nonunique }
                          | v <- arrs ]
+
+transformExp (LoopOp op@(ConcatMap cs fun inputs)) = do
+  arrs <- forM inputs $ \input -> do
+    fun' <- renameLambda fun
+    let funparams = lambdaParams fun'
+        (ctxparams, valparams) =
+          splitAt (length funparams-length input) funparams
+        shapemap = shapeMapping (map identType valparams) $
+                   map identType input
+        fun'' = fun' { lambdaParams = valparams }
+    forM_ (HM.toList shapemap) $ \(size,se) ->
+      when (size `elem` map identName ctxparams) $
+        letBindNames'_ [size] $ PrimOp $ SubExp se
+    input' <- forM (zip valparams input) $ \(p,v) ->
+      letExp "concatMap_reshaped_input" $
+      PrimOp $ Reshape [] (arrayDims $ identType p) v
+    vs <- bodyBind =<< transformLambda fun'' (map (PrimOp . SubExp . Var) input')
+    mapM (letExp "concatMap_fun_res" . PrimOp . SubExp) vs
+  emptyarrs <- mapM (letExp "empty")
+               [ PrimOp $ ArrayLit [] t | t <- lambdaReturnType fun ]
+  let hackbody = Body () [] $ Result $ map Var emptyarrs
+      concatArrays arrs1 arrs2 = do
+        arrs1' <- mapM (letExp "concatMap_concatted_intermediate_result") arrs1
+        let ns = map (arraySize 0 . identType) arrs1'
+            ms = map (arraySize 0 . identType) arrs2
+        ks <- mapM (letSubExp "concatMap_concat_size")
+              [ PrimOp $ BinOp Plus n m Int | (n,m) <- zip ns ms ]
+        return [ PrimOp $ Concat cs arr1 [arr2] k
+               | (arr1,arr2,k) <- zip3 arrs1' arrs2 ks ]
+  realbody <- runBinder $ do
+    res <- mapM (letSubExp "concatMap_concatted_result") =<<
+           foldM concatArrays (map (PrimOp . SubExp . Var) emptyarrs) arrs
+    resultBody <$> mapM (letSubExp "concatMap_copy_result" . PrimOp . Copy) res
+  return $ If (Constant $ LogVal False) hackbody realbody (loopOpExtType op)
 
 transformExp (LoopOp (Reduce cs fun args)) = do
   ((acc, initacc), (i, iv)) <- newFold accexps
@@ -119,13 +154,10 @@ transformExp (LoopOp (Filter cs fun arrexps)) = do
 
   resinit_presplit <- resultArray $ map identType arrexps
   resinit <- forM resinit_presplit $ \v -> do
-    let vt = identType v
-    leftover <- letSubExp "split_leftover" $ PrimOp $
-                BinOp Minus (arraySize 0 vt) outersize Int
     splitres <- letTupExp "filter_split_result" $
-      PrimOp $ Split cs outersize v leftover
+      PrimOp $ Split cs [outersize] v
     case splitres of
-      [x,_] -> return x
+      [x] -> return x
       _     -> fail "FirstOrderTransform filter: weird split result"
 
   res <- forM (map identType resinit) $ \t -> newIdent "filter_result" t

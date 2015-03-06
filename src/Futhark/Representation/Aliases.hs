@@ -195,12 +195,13 @@ addAliasesToPattern pat e =
       als' = replicate (patternSize pat - length als) mempty <> als
   in AST.Pattern $ zipWith annotateBindee (patternElements pat) als'
   where annotateBindee bindee names =
-          bindee `setPatElemLore` (Names' names', patElemLore bindee)
+            bindee `setPatElemLore` (Names' names', patElemLore bindee)
           where names' =
-                  case patElemRequires bindee of
-                    Array {} -> names
-                    Mem _    -> names
-                    _        -> mempty
+                  case (patElemBindage bindee, patElemRequires bindee) of
+                    (BindInPlace {}, _) -> mempty
+                    (_, Array {})       -> names
+                    (_, Mem _)          -> names
+                    _                   -> mempty
 
 mkAliasedBody :: Lore.Lore lore =>
                  Lore.Body lore -> [Binding lore] -> Result -> Body lore
@@ -222,10 +223,10 @@ mkAliasedBody innerlore bnds res =
         delve (aliasmap, consumed) (bnd:bnds') =
           let pat = bindingPattern bnd
               e = bindingExp bnd
-              als = aliasesOf e
-              als' = replicate (patternSize pat - length als) mempty <> als
-              names = patternNames pat
-              aliasmap' = HM.fromList (zip names als') <> aliasmap
+              als = HM.fromList
+                    [ (patElemName patElem, unNames $ fst $ patElemLore patElem)
+                    | patElem <- patternElements pat ]
+              aliasmap' = als <> aliasmap
               consumed' = consumed <> aliasClosure aliasmap (consumedInExp pat e)
           in delve (aliasmap', consumed') bnds'
         aliasClosure aliasmap names =

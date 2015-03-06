@@ -26,22 +26,32 @@ internaliseUniqueness E.Unique = I.Unique
 internaliseType :: E.GenType als -> [I.TypeBase ExtShape]
 internaliseType = flip evalState 0 . internaliseType'
   where internaliseType' :: E.GenType als -> State Int [I.TypeBase ExtShape]
-        internaliseType' (E.Elem (E.Basic bt)) =
+        internaliseType' (E.Basic bt) =
           return [I.Basic bt]
-        internaliseType' (E.Elem (E.Tuple ets)) =
+        internaliseType' (E.Tuple ets) =
           concat <$> mapM internaliseType' ets
-        internaliseType' (E.Array (E.Basic bt) size u _) = do
+        internaliseType' (E.Array at) =
+          internaliseArrayType at
+
+        internaliseArrayType (E.BasicArray bt size u _) = do
           dims <- map Ext <$> replicateM (length size) newId
           return [I.arrayOf (I.Basic bt) (ExtShape dims) $
                   internaliseUniqueness u]
-        internaliseType' (E.Array (E.Tuple elemts) size u _) = do
+
+        internaliseArrayType (E.TupleArray elemts size u) = do
           outerdim <- Ext <$> newId
           innerdims <- map Ext <$> replicateM (length size - 1) newId
-          ts <- concat <$>
-                mapM internaliseType' elemts
+          ts <- concat <$> mapM internaliseTupleArrayElem elemts
           return [ I.arrayOf t (ExtShape $ outerdim : innerdims) $
                    internaliseUniqueness u
                  | t <- ts ]
+
+        internaliseTupleArrayElem (BasicArrayElem bt _) =
+          return [I.Basic bt]
+        internaliseTupleArrayElem (ArrayArrayElem at) =
+          internaliseArrayType at
+        internaliseTupleArrayElem (TupleArrayElem ts) =
+          concat <$> mapM internaliseTupleArrayElem ts
 
         newId = do i <- get
                    put $ i + 1

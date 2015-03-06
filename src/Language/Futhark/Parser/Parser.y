@@ -115,6 +115,7 @@ import Language.Futhark.Parser.Lexer
       size            { L $$ SIZE }
       replicate       { L $$ REPLICATE }
       map             { L $$ MAP }
+      concatMap       { L $$ CONCATMAP }
       reduce          { L $$ REDUCE }
       reshape         { L $$ RESHAPE }
       rearrange       { L $$ REARRANGE }
@@ -193,24 +194,40 @@ Uniqueness : '*' { Unique }
            |     { Nonunique }
 
 Type :: { UncheckedType }
-        :    ElemType { Elem $1 }
-        | Uniqueness '[' InnerType ']'
-          { let (ds, et) = $3
-            in Array et (Nothing:ds) $1 NoInfo }
+        : BasicType     { Basic $1 }
+        | ArrayType     { Array $1 }
+        | '{' Types '}' { Tuple $2 }
 ;
 
-InnerType : ElemType { ([], $1) }
-          | '[' InnerType ']' { let (ds, et) = $2
-                                in (Nothing:ds, et) }
+ArrayType :: { UncheckedArrayType }
+          : Uniqueness '[' BasicArrayRowType ']'
+            { let (ds, et) = $3
+              in BasicArray et (Nothing:ds) $1 NoInfo }
+          | Uniqueness '[' TupleArrayRowType ']'
+            { let (ds, et) = $3
+              in TupleArray et (Nothing:ds) $1 }
 
-ElemType : int           { Basic Int }
-         | real          { Basic Real }
-         | bool          { Basic Bool }
-         | cert          { Basic Cert }
-         | char          { Basic Char }
-         | TupleType     { Tuple $1 }
+BasicArrayRowType : BasicType            { ([], $1) }
+             | '[' BasicArrayRowType ']' { let (ds, et) = $2
+                                           in (Nothing:ds, et) }
 
-TupleType : '{' Types '}' { $2 }
+TupleArrayRowType : '{' TupleArrayElemTypes '}' { ([], $2) }
+                  | '[' TupleArrayRowType ']'   { let (ds, et) = $2
+                                                  in (Nothing:ds, et) }
+
+TupleArrayElemTypes : TupleArrayElemType { [$1] }
+                    | TupleArrayElemType ',' TupleArrayElemTypes
+                      { $1 : $3 }
+
+TupleArrayElemType : BasicType                   { BasicArrayElem $1 NoInfo }
+                   | ArrayType                   { ArrayArrayElem $1 }
+                   | '{' TupleArrayElemTypes '}' { TupleArrayElem $2 }
+
+BasicType : int           { Int }
+          | real          { Real }
+          | bool          { Bool }
+          | cert          { Cert }
+          | char          { Char }
 
 Types : Type ',' Types { $1 : $3 }
       | Type           { [$1] }
@@ -227,7 +244,7 @@ Exp  :: { UncheckedExp }
      | reallit        { let L pos (REALLIT num) = $1 in Literal (BasicVal $ RealVal num) pos }
      | charlit        { let L pos (CHARLIT char) = $1 in Literal (BasicVal $ CharVal char) pos }
      | stringlit      { let L pos (STRINGLIT s) = $1
-                        in Literal (ArrayVal (arrayFromList $ map (BasicVal . CharVal) s) $ Elem $ Basic Char) pos }
+                        in Literal (ArrayVal (arrayFromList $ map (BasicVal . CharVal) s) $ Basic Char) pos }
      | true           { Literal (BasicVal $ LogVal True) $1 }
      | false          { Literal (BasicVal $ LogVal False) $1 }
      | checked        { Literal (BasicVal Checked) $1 }
@@ -300,11 +317,11 @@ Exp  :: { UncheckedExp }
      | rotate '(' SignedInt ',' Exp ')'
                       { Rotate [] $3 $5 $1 }
 
-     | Certificates split '(' Exp ',' Exp ')'
-                      { Split $1 $4 $6 $2 }
+     | Certificates split '(' '(' Exps ')' ',' Exp ')'
+                      { Split $1 $5 $8 $2 }
 
-     | split '(' Exp ',' Exp ')'
-                      { Split [] $3 $5 $1 }
+     | split '(' '(' Exps ')' ',' Exp ')'
+                      { Split [] $4 $7 $1 }
 
      | Certificates concat '(' Exp ',' Exps ')'
                       { Concat $1 $4 $6 $2 }
@@ -335,6 +352,12 @@ Exp  :: { UncheckedExp }
 
      | zipWith '(' FunAbstr ',' Exps2 ')'
                       { Map $3 (Zip (map (\x -> (x, NoInfo)) $5) $1) $1 }
+
+     | concatMap '(' FunAbstr ',' Exp ',' Exps ')'
+                      { ConcatMap $3 $5 $7 $1 }
+
+     | concatMap '(' FunAbstr ',' Exp ')'
+                      { ConcatMap $3 $5 [] $1 }
 
      | copy '(' Exp ')' { Copy $3 $1 }
 
@@ -445,7 +468,7 @@ IntValue : intlit        { let L pos (INTLIT num) = $1 in BasicVal $ IntVal num 
 RealValue : reallit      { let L pos (REALLIT num) = $1 in BasicVal $ RealVal num }
           | '-' reallit      { let L pos (REALLIT num) = $2 in BasicVal $ RealVal (-num) }
 CharValue : charlit      { let L pos (CHARLIT char) = $1 in BasicVal $ CharVal char }
-StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in ArrayVal (arrayFromList $ map (BasicVal . CharVal) s) $ Elem $ Basic Char }
+StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in ArrayVal (arrayFromList $ map (BasicVal . CharVal) s) $ Basic Char }
 LogValue : true          { BasicVal $ LogVal True }
          | false          { BasicVal $ LogVal False }
 CertValue : checked      { BasicVal Checked }
@@ -458,7 +481,7 @@ ArrayValue :  '[' Value ']'
                   Just ts -> return $ ArrayVal (arrayFromList $ $2:$4) $ removeNames ts
              }
            | '[' ']'
-           {% return $ ArrayVal (arrayFromList []) $ toDecl $ Elem $ Basic Int
+           {% return $ ArrayVal (arrayFromList []) $ toDecl $ Basic Int
            }
 TupleValue : '{' Values '}' { TupVal $2 }
 

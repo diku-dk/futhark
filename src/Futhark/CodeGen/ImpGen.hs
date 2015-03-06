@@ -463,6 +463,8 @@ defCompileLoopOp (Destination dest) (DoLoop res merge i bound body) =
 
 defCompileLoopOp _ (Map {}) = soacError
 
+defCompileLoopOp _ (ConcatMap {}) = soacError
+
 defCompileLoopOp _ (Filter {}) = soacError
 
 defCompileLoopOp _ (Reduce {}) = soacError

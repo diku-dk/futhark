@@ -149,8 +149,12 @@ data PrimOp lore
   -- checking.  If given (even as an empty list), no
   -- run-time bounds checking is done.
 
-  | Split Certificates SubExp Ident SubExp
-  -- ^ @split(1, [ 1, 2, 3, 4 ]) = {[1],[2, 3, 4]}@.
+  | Split Certificates [SubExp] Ident
+  -- ^ 2nd arg is sizes of arrays you back, which is
+  -- different from what the external language does.
+  -- In the internal langauge,
+  -- @a = [1,2,3,4]@
+  -- @split( (1,0,2) , a ) = {[1], [], [2,3]}@
 
   | Concat Certificates Ident [Ident] SubExp
   -- ^ @concat([1],[2, 3, 4]) = [1, 2, 3, 4]@.
@@ -196,6 +200,8 @@ data LoopOp lore
     -- 3rd arg is either a tuple of multi-dim arrays
     --   of basic type, or a multi-dim array of basic type.
     -- 4th arg is the input-array row types
+
+  | ConcatMap Certificates (LambdaT lore) [[Ident]]
 
   | Reduce  Certificates (LambdaT lore) [(SubExp, Ident)]
   | Scan   Certificates (LambdaT lore) [(SubExp, Ident)]

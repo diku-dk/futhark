@@ -10,10 +10,13 @@ module Language.Futhark.Syntax
   , Uniqueness(..)
   , DimSize
   , ArraySize
-  , ElemTypeBase(..)
   , TypeBase(..)
+  , TupleArrayElemTypeBase(..)
+  , ArrayTypeBase(..)
   , CompTypeBase
   , DeclTypeBase
+  , DeclArrayTypeBase
+  , DeclTupleArrayElemTypeBase
   , Diet(..)
 
   -- * Values
@@ -61,40 +64,75 @@ type DimSize vn = ExpBase (TypeBase Names) vn
 -- 'Nothing', that dimension is of a (statically) unknown size.
 type ArraySize vn = [Maybe (DimSize vn)]
 
--- | Types that can be elements of arrays.
-data ElemTypeBase as vn = Basic BasicType
-                        | Tuple [TypeBase as vn]
-                deriving (Eq, Ord, Show)
+-- | Types that can be elements of tuple-arrays.
+data TupleArrayElemTypeBase as vn =
+    BasicArrayElem BasicType (as vn)
+  | ArrayArrayElem (ArrayTypeBase as vn)
+  | TupleArrayElem [TupleArrayElemTypeBase as vn]
+  deriving (Show)
+
+instance Eq (TupleArrayElemTypeBase as vn) where
+  BasicArrayElem bt1 _ == BasicArrayElem bt2 _ = bt1 == bt2
+  ArrayArrayElem at1   == ArrayArrayElem at2   = at1 == at2
+  TupleArrayElem ts1   == TupleArrayElem ts2   = ts1 == ts2
+  _                    == _                    = False
+
+instance Ord (TupleArrayElemTypeBase as vn) where
+  BasicArrayElem bt1 _ `compare` BasicArrayElem bt2 _ = bt1 `compare` bt2
+  ArrayArrayElem at1   `compare` ArrayArrayElem at2   = at1 `compare` at2
+  TupleArrayElem ts1   `compare` TupleArrayElem ts2   = ts1 `compare` ts2
+  BasicArrayElem {}    `compare` ArrayArrayElem {}    = LT
+  BasicArrayElem {}    `compare` TupleArrayElem {}    = LT
+  ArrayArrayElem {}    `compare` TupleArrayElem {}    = LT
+  ArrayArrayElem {}    `compare` BasicArrayElem {}    = GT
+  TupleArrayElem {}    `compare` BasicArrayElem {}    = GT
+  TupleArrayElem {}    `compare` ArrayArrayElem {}    = GT
+
+-- | An array type.
+data ArrayTypeBase as vn =
+    BasicArray BasicType (ArraySize vn) Uniqueness (as vn)
+    -- ^ An array whose elements are basic elements.
+  | TupleArray [TupleArrayElemTypeBase as vn] (ArraySize vn) Uniqueness
+    -- ^ An array whose elements are tuples.
+    deriving (Show)
+
+instance Eq (ArrayTypeBase as vn) where
+  BasicArray et1 dims1 u1 _ == BasicArray et2 dims2 u2 _ =
+    et1 == et2 && length dims1 == length dims2 && u1 == u2
+  TupleArray ts1 dims1 u1 == TupleArray ts2 dims2 u2 =
+    ts1 == ts2 && length dims1 == length dims2 && u1 == u2
+  _ == _ =
+    False
+
+instance Ord (ArrayTypeBase as vn) where
+  BasicArray et1 dims1 u1 _ <= BasicArray et2 dims2 u2 _
+    | et1 < et2     = True
+    | et1 > et2     = False
+    | length dims1 < length dims2 = True
+    | length dims1 > length dims2 = False
+    | u1 < u2       = True
+    | u1 > u2       = False
+    | otherwise     = True
+  TupleArray ts1 dims1 u1 <= TupleArray ts2 dims2 u2
+    | ts1 < ts2     = True
+    | ts1 > ts2     = False
+    | length dims1 < length dims2 = True
+    | length dims1 > length dims2 = False
+    | u1 < u2       = True
+    | u1 > u2       = False
+    | otherwise     = True
+  BasicArray {} <= TupleArray {} =
+    True
+  TupleArray {} <= BasicArray {} =
+    False
 
 -- | An Futhark type is either an array or an element type.  When comparing
 -- types for equality with '==', aliases are ignored, as are
 -- dimension sizes (but not the number of dimensions themselves).
-data TypeBase as vn = Elem (ElemTypeBase as vn)
-                    | Array (ElemTypeBase as vn) (ArraySize vn) Uniqueness (as vn)
-                    -- ^ 1st arg: array's element type, 2nd arg:
-                    -- lengths of dimensions, 3rd arg: uniqueness
-                    -- attribute, 4th arg: aliasing information.
-                    deriving (Show)
-
-instance Eq (TypeBase as vn) where
-  Elem et1 == Elem et2 = et1 == et2
-  Array et1 dims1 u1 _ == Array et2 dims2 u2 _ =
-    et1 == et2 && u1 == u2 && length dims1 == length dims2
-  _ == _ = False
-
-instance Ord vn => Ord (TypeBase as vn) where
-  Elem et1 <= Elem et2 =
-    et1 <= et2
-  Array et1 dims1 u1 _ <= Array et2 dims2 u2 _
-    | et1 < et2     = True
-    | et1 > et2     = False
-    | dims1 < dims2 = True
-    | dims1 > dims2 = False
-    | u1 < u2       = True
-    | u1 > u2       = False
-    | otherwise     = True
-  Elem {} <= Array {} = True
-  Array {} <= Elem {} = False
+data TypeBase as vn = Basic BasicType
+                    | Array (ArrayTypeBase as vn)
+                    | Tuple [TypeBase as vn]
+                    deriving (Eq, Ord, Show)
 
 -- | A type with aliasing information, used for describing the type of
 -- a computation.
@@ -102,6 +140,13 @@ type CompTypeBase = TypeBase Names
 
 -- | A type without aliasing information, used for declarations.
 type DeclTypeBase = TypeBase NoInfo
+
+-- | An array type without aliasing information, used for declarations.
+type DeclArrayTypeBase = ArrayTypeBase NoInfo
+
+-- | A tuple array element type without aliasing information, used for
+-- declarations.
+type DeclTupleArrayElemTypeBase = TupleArrayElemTypeBase NoInfo
 
 -- | Information about which parts of a value/type are consumed.  For
 -- example, we might say that a function taking an argument of type
@@ -220,8 +265,9 @@ data ExpBase ty vn =
             | Size (CertificatesBase ty vn) Int (ExpBase ty vn) SrcLoc
             -- ^ The size of the specified array dimension.
 
-            | Split (CertificatesBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
-            -- ^ @split(1, [ 1, 2, 3, 4 ]) = {[1],[2, 3, 4]}@.
+            | Split (CertificatesBase ty vn) [ExpBase ty vn] (ExpBase ty vn) SrcLoc
+            -- ^ @split( (1,1,3), [ 1, 2, 3, 4 ]) = {[1], [], [2, 3], [4]}@.
+            -- Note that this is different from the internal representation
 
             | Concat (CertificatesBase ty vn) (ExpBase ty vn) [ExpBase ty vn] SrcLoc
             -- ^ @concat([1],[2, 3, 4]) = [1, 2, 3, 4]@.
@@ -280,6 +326,8 @@ data ExpBase ty vn =
              -- ^ @redomap(g, f, n, a) = reduce(g, n, map(f, a))@.
              -- 5th arg is the row type of the input  array.
 
+            | ConcatMap (LambdaBase ty vn) (ExpBase ty vn) [ExpBase ty vn] SrcLoc
+
             | Zip [(ExpBase ty vn, ty vn)] SrcLoc
             -- ^ Normal zip supporting variable number of arguments.
             -- The type paired to each expression is the element type
@@ -312,6 +360,7 @@ instance Located (ExpBase ty vn) where
   locOf (Rearrange _ _ _ pos) = locOf pos
   locOf (Rotate _ _ _ pos) = locOf pos
   locOf (Map _ _ pos) = locOf pos
+  locOf (ConcatMap _ _ _ pos) = locOf pos
   locOf (Reduce _ _ _ pos) = locOf pos
   locOf (Zip _ pos) = locOf pos
   locOf (Unzip _ _ pos) = locOf pos

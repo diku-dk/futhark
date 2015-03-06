@@ -75,9 +75,8 @@ primOpType (Rearrange _ perm e) =
   where Shape shape = arrayShape $ identType e
 primOpType (Rotate _ _ e) =
   [identType e]
-primOpType (Split _ ne e secsize) =
-  [identType e `setOuterSize` ne,
-   identType e `setOuterSize` secsize]
+primOpType (Split _ sizeexps e) =
+  map (identType e `setOuterSize`) sizeexps
 primOpType (Concat _ x ys ressize) =
   [identType x `setUniqueness` u `setOuterSize` ressize]
   where u = uniqueness (identType x) <> mconcat ( map uniqueness (map identType ys) )
@@ -95,6 +94,9 @@ loopOpExtType (DoLoop res merge _ _ _) =
   loopExtType res $ map (fparamIdent . fst) merge
 loopOpExtType (Map _ f arrs) =
   staticShapes $ mapType f $ map identType arrs
+loopOpExtType (ConcatMap _ f _) =
+  [ Array (elemType t) (ExtShape $ Ext 0 : map Free (arrayDims t)) Unique
+  | t <- lambdaReturnType f ]
 loopOpExtType (Reduce _ fun _) =
   staticShapes $ lambdaReturnType fun
 loopOpExtType (Scan _ _ inputs) =

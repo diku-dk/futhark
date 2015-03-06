@@ -59,21 +59,27 @@ instance Pretty Value where
     | Array {} <- t = brackets $ commastack $ map ppr $ elems a
     | otherwise     = brackets $ commasep $ map ppr $ elems a
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ElemTypeBase as vn) where
-  ppr (Basic Int) = text "int"
-  ppr (Basic Char) = text "char"
-  ppr (Basic Bool) = text "bool"
-  ppr (Basic Real) = text "real"
-  ppr (Basic Cert) = text "cert"
-  ppr (Tuple ets) = braces $ commasep $ map ppr ets
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TupleArrayElemTypeBase as vn) where
+  ppr (BasicArrayElem bt _) = ppr bt
+  ppr (ArrayArrayElem at)   = ppr at
+  ppr (TupleArrayElem ts)   = braces $ commasep $ map ppr ts
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase as vn) where
-  ppr (Elem et) = ppr et
-  ppr (Array et ds u _) = u' <> foldl f (ppr et) ds
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ArrayTypeBase as vn) where
+  ppr (BasicArray et ds u _) = u' <> foldl f (ppr et) ds
     where f s Nothing = brackets s
           f s (Just e) = brackets $ s <> comma <> ppr e
           u' | Unique <- u = star
              | otherwise = empty
+  ppr (TupleArray et ds u) = u' <> foldl f (braces $ commasep $ map ppr et) ds
+    where f s Nothing = brackets s
+          f s (Just e) = brackets $ s <> comma <> ppr e
+          u' | Unique <- u = star
+             | otherwise = empty
+
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase as vn) where
+  ppr (Basic et) = ppr et
+  ppr (Array at) = ppr at
+  ppr (Tuple ts) = braces $ commasep $ map ppr ts
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (IdentBase ty vn) where
   ppr = ppr . identName
@@ -167,6 +173,7 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
                                    text $ show n,
                                    ppr e]
   pprPrec _ (Map lam a _) = ppSOAC "map" [lam] [a]
+  pprPrec _ (ConcatMap lam a as _) = ppSOAC "concatMap" [lam] $ a : as
   pprPrec _ (Reduce lam e a _) = ppSOAC "reduce" [lam] [e, a]
   pprPrec _ (Redomap redlam maplam e a _) =
     ppSOAC "redomap" [redlam, maplam] [e, a]

@@ -49,7 +49,7 @@ initialFtable = HM.map addBuiltin builtInFunctions
   where addBuiltin (t, paramts) =
           FunBinding
           ([Basic t], [], map Basic paramts)
-          (E.Elem $ E.Basic t, map (E.Elem . E.Basic) paramts)
+          (E.Basic t, map E.Basic paramts)
 
 type InternaliseM =
   WriterT (DL.DList Binding) (ReaderT InternaliseEnv (State VNameSource))

@@ -181,8 +181,8 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
     ppCertificates cs <> text "rearrange" <> apply [apply (map ppr perm), ppr e]
   ppr (Rotate cs n e) =
     ppCertificates cs <> text "rotate" <> apply [ppr n, ppr e]
-  ppr (Split cs e a _) =
-    ppCertificates cs <> text "split" <> apply [ppr e, ppr a]
+  ppr (Split cs sizeexps a) =
+    ppCertificates cs <> text "split" <> apply [apply (map ppr sizeexps), ppr a]
   ppr (Concat cs x ys _) =
     ppCertificates cs <> text "concat" <> apply (ppr x : map ppr ys)
   ppr (Copy e) = text "copy" <> parens (ppr e)
@@ -199,6 +199,15 @@ instance PrettyLore lore => Pretty (LoopOp lore) where
     where (pat, initexp) = unzip mergepat
   ppr (Map cs lam as) =
     ppCertificates' cs <> ppSOAC "map" [lam] Nothing as
+  ppr (ConcatMap cs lam as) =
+    ppCertificates' cs <> text "concatMap" <>
+    parens (pprConcatLam lam <> comma </>
+            commasep (map (braces . commasep . map ppr) as))
+    where pprConcatLam (Lambda params body rettype) =
+            text "fn" <+>
+            braces (commasep $ map (brackets . ppr) rettype) <+>
+            apply (map ppParam params) <+>
+            text "=>" </> indent 2 (ppr body)
   ppr (Reduce cs lam inputs) =
     ppCertificates' cs <> ppSOAC "reduce" [lam] (Just es) as
     where (es, as) = unzip inputs

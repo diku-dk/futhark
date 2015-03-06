@@ -15,7 +15,7 @@ import Futhark.Internalise
 import Futhark.Pipeline
 import Futhark.Passes
 import Futhark.Actions
-import Debug.Trace
+
 import qualified Futhark.Representation.External.TypeChecker as E
 import qualified Futhark.Representation.External.Renamer as E
 
@@ -95,6 +95,8 @@ commandLineOptions =
     [] ["optimise-shapes"]
   , passoption "Lower in-place updates" inPlaceLowering
     [] ["in-place-lowering"]
+  , passoption "Common subexpression elimination" commonSubexpressionElimination
+    [] ["cse"]
   , Option "s" ["standard"]
     (NoArg $ Right $ \opts -> opts { futharkpipeline = standardPipeline ++ futharkpipeline opts })
     "Use the recommended optimised pipeline."
@@ -111,8 +113,10 @@ standardPipeline =
   [ uttransform
   , eotransform
   , inlinetransform
+  , commonSubexpressionElimination
   , eotransform
   , hotransform
+  , commonSubexpressionElimination
   , eotransform
   , removeDeadFunctions
   ]

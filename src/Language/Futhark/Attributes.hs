@@ -48,16 +48,11 @@ module Language.Futhark.Attributes
   , peelArray
   , arrayOf
   , arrayType
-  , elemType
   , rowType
   , toDecl
-  , toElemDecl
   , fromDecl
-  , fromElemDecl
   , setAliases
-  , setElemAliases
   , addAliases
-  , addElemAliases
   , setUniqueness
   , unifyUniqueness
 
@@ -65,9 +60,7 @@ module Language.Futhark.Attributes
   --
   -- $names
   , addNames
-  , addElemNames
   , removeNames
-  , removeElemNames
 
   -- * Queries on values
   , arrayString
@@ -84,6 +77,7 @@ module Language.Futhark.Attributes
   -- which is syntactically required.
   , NoInfo(..)
   , UncheckedType
+  , UncheckedArrayType
   , UncheckedIdent
   , UncheckedExp
   , UncheckedLambda
@@ -114,14 +108,15 @@ arrayRank = length . arrayDims
 -- | Return the dimensions of a type - for non-arrays, this is the
 -- empty list.
 arrayDims :: TypeBase vn as -> ArraySize as
-arrayDims (Array _ ds _ _) = ds
-arrayDims _                = []
+arrayDims (Array (BasicArray _ ds _ _)) = ds
+arrayDims (Array (TupleArray _ ds _))   = ds
+arrayDims _                             = []
 
 -- | Set the dimensions of an array.  If the given type is not an
 -- array, return the type unchanged.
 setArrayDims :: ArraySize as -> TypeBase vn as -> TypeBase vn as
-setArrayDims ds (Array et _ u as) = Array et ds u as
-setArrayDims _  t                 = t
+setArrayDims ds (Array (BasicArray et _ u as)) = Array $ BasicArray et ds u as
+setArrayDims _  t                              = t
 
 -- | @x `subuniqueOf` y@ is true if @x@ is not less unique than @y@.
 subuniqueOf :: Uniqueness -> Uniqueness -> Bool
@@ -130,25 +125,38 @@ subuniqueOf _ _ = True
 
 -- | @x \`subtypeOf\` y@ is true if @x@ is a subtype of @y@ (or equal to
 -- @y@), meaning @x@ is valid whenever @y@ is.
-subtypeOf :: TypeBase vn as1 -> TypeBase vn as2 -> Bool
-subtypeOf (Array t1 dims1 u1 _) (Array t2 dims2 u2 _) =
+subtypeOf :: (Monoid (as1 vn), Monoid (as2 vn)) =>
+             TypeBase as1 vn -> TypeBase as2 vn -> Bool
+subtypeOf
+  (Array (BasicArray t1 dims1 u1 _))
+  (Array (BasicArray t2 dims2 u2 _)) =
   u1 `subuniqueOf` u2
-       && Elem t1 `subtypeOf` Elem t2
+       && t1 == t2
        && length dims1 == length dims2
-subtypeOf (Elem (Tuple ts1)) (Elem (Tuple ts2)) =
+subtypeOf
+  (Array (TupleArray et1 dims1 u1))
+  (Array (TupleArray et2 dims2 u2)) =
+  u1 `subuniqueOf` u2
+       && length et1 == length et2
+       && and (zipWith subtypeOf
+               (map tupleArrayElemToType et1)
+               (map tupleArrayElemToType et2))
+       && length dims1 == length dims2
+subtypeOf (Tuple ts1) (Tuple ts2) =
   length ts1 == length ts2 && and (zipWith subtypeOf ts1 ts2)
-subtypeOf (Elem (Basic bt1)) (Elem (Basic bt2)) = bt1 == bt2
+subtypeOf (Basic bt1) (Basic bt2) = bt1 == bt2
 subtypeOf _ _ = False
 
 -- | @x \`similarTo\` y@ is true if @x@ and @y@ are the same type,
 -- ignoring uniqueness.
-similarTo :: TypeBase vn as -> TypeBase vn as -> Bool
+similarTo :: Monoid (as vn) => TypeBase as vn -> TypeBase as vn -> Bool
 similarTo t1 t2 = t1 `subtypeOf` t2 || t2 `subtypeOf` t1
 
 -- | Return the uniqueness of a type.
 uniqueness :: TypeBase vn as -> Uniqueness
-uniqueness (Array _ _ u _) = u
-uniqueness _ = Nonunique
+uniqueness (Array (BasicArray _ _ u _)) = u
+uniqueness (Array (TupleArray _ _ u))   = u
+uniqueness _                            = Nonunique
 
 -- | @unique t@ is 'True' if the type of the argument is unique.
 unique :: TypeBase vn as -> Bool
@@ -157,24 +165,37 @@ unique = (==Unique) . uniqueness
 -- | Return the set of all variables mentioned in the aliasing of a
 -- type.
 aliases :: Monoid (as vn) => TypeBase as vn -> as vn
-aliases (Array _ _ _ als) = als
-aliases (Elem (Tuple et)) = mconcat $ map aliases et
-aliases (Elem _)          = mempty
+aliases (Array (BasicArray _ _ _ als)) = als
+aliases (Array (TupleArray ts _ _)) = mconcat $ map tupleArrayElemAliases ts
+aliases (Tuple et) = mconcat $ map aliases et
+aliases (Basic _) = mempty
+
+tupleArrayElemAliases :: Monoid (as vn) =>
+                         TupleArrayElemTypeBase as vn -> as vn
+tupleArrayElemAliases (BasicArrayElem _ als) = als
+tupleArrayElemAliases (ArrayArrayElem (BasicArray _ _ _ als)) =
+  als
+tupleArrayElemAliases (ArrayArrayElem (TupleArray ts _ _)) =
+  mconcat $ map tupleArrayElemAliases ts
+tupleArrayElemAliases (TupleArrayElem ts) =
+  mconcat $ map tupleArrayElemAliases ts
 
 -- | @diet t@ returns a description of how a function parameter of
 -- type @t@ might consume its argument.
 diet :: TypeBase as vn -> Diet
-diet (Elem (Tuple ets)) = TupleDiet $ map diet ets
-diet (Elem _) = Observe
-diet (Array _ _ Unique _) = Consume
-diet (Array _ _ Nonunique _) = Observe
+diet (Tuple ets) = TupleDiet $ map diet ets
+diet (Basic _) = Observe
+diet (Array (BasicArray _ _ Unique _)) = Consume
+diet (Array (BasicArray _ _ Nonunique _)) = Observe
+diet (Array (TupleArray _ _ Unique)) = Consume
+diet (Array (TupleArray _ _ Nonunique)) = Observe
 
 -- | @t `dietingAs` d@ modifies the uniqueness attributes of @t@ to
 -- reflect how it is consumed according to @d@ - if it is consumed, it
 -- becomes 'Unique'.  Tuples are handled intelligently.
 dietingAs :: TypeBase as vn -> Diet -> TypeBase as vn
-Elem (Tuple ets) `dietingAs` TupleDiet ds =
-  Elem $ Tuple $ zipWith dietingAs ets ds
+Tuple ets `dietingAs` TupleDiet ds =
+  Tuple $ zipWith dietingAs ets ds
 t `dietingAs` Consume =
   t `setUniqueness` Unique
 t `dietingAs` _ =
@@ -185,29 +206,17 @@ t `dietingAs` _ =
 maskAliases :: Monoid (as vn) => TypeBase as vn -> Diet -> TypeBase as vn
 maskAliases t Consume = t `setAliases` mempty
 maskAliases t Observe = t
-maskAliases (Elem (Tuple ets)) (TupleDiet ds) =
-  Elem $ Tuple $ zipWith maskAliases ets ds
+maskAliases (Tuple ets) (TupleDiet ds) =
+  Tuple $ zipWith maskAliases ets ds
 maskAliases _ _ = error "Invalid arguments passed to maskAliases."
 
 -- | Remove aliasing information from a type.
 toDecl :: TypeBase as vn -> DeclTypeBase vn
-toDecl (Array et sz u _) = Array (toElemDecl et) sz u NoInfo
-toDecl (Elem et) = Elem $ toElemDecl et
-
--- | Remove aliasing information from an element type.
-toElemDecl :: ElemTypeBase as vn -> ElemTypeBase NoInfo vn
-toElemDecl (Tuple ts) = Tuple $ map toDecl ts
-toElemDecl t          = t `setElemAliases` NoInfo
+toDecl t = t `setAliases` NoInfo
 
 -- | Replace no aliasing with an empty alias set.
 fromDecl :: DeclTypeBase vn -> TypeBase Names vn
-fromDecl (Array et sz u _) = Array (fromElemDecl et) sz u HS.empty
-fromDecl (Elem et) = Elem $ fromElemDecl et
-
--- | Replace no aliasing with an empty alias set.
-fromElemDecl :: ElemTypeBase NoInfo vn -> ElemTypeBase Names vn
-fromElemDecl (Tuple ts) = Tuple $ map fromDecl ts
-fromElemDecl t          = t `setElemAliases` HS.empty
+fromDecl t = t `setAliases` HS.empty
 
 -- | A type box provides a way to box a 'CompTypeBase', and possibly
 -- retrieve one, if the box is not empty.  This can be used to write
@@ -242,28 +251,31 @@ instance TypeBox DeclTypeBase where
 -- than @n@ dimensions.
 peelArray :: Int -> TypeBase as vn -> Maybe (TypeBase as vn)
 peelArray 0 t = Just t
-peelArray 1 (Array et [_] _ als) = Just $ Elem et `setAliases` als
-peelArray n (Array et (_:ds) u als) =
-  peelArray (n-1) $ Array et ds u als
+peelArray 1 (Array (BasicArray et [_] _ _)) =
+  Just $ Basic et
+peelArray 1 (Array (TupleArray ts [_] _)) =
+  Just $ Tuple $ map asType ts
+  where asType (BasicArrayElem bt _) = Basic bt
+        asType (ArrayArrayElem at)   = Array at
+        asType (TupleArrayElem ts')  = Tuple $ map asType ts'
+peelArray n (Array (BasicArray et (_:shape) u als)) =
+  peelArray (n-1) $ Array $ BasicArray et shape u als
+peelArray n (Array (TupleArray et (_:shape) u)) =
+  peelArray (n-1) $ Array $ TupleArray et shape u
 peelArray _ _ = Nothing
-
--- | Returns the bottommost type of an array.  For @[[int]]@, this
--- would be @int@.
-elemType :: TypeBase vn as -> ElemTypeBase vn as
-elemType (Array t _ _ als) = t `setElemAliases` als
-elemType (Elem t) = t
 
 -- | Return the immediate row-type of an array.  For @[[int]]@, this
 -- would be @[int]@.
-rowType :: TypeBase vn as -> TypeBase vn as
+rowType :: Monoid (as vn) =>
+           TypeBase as vn -> TypeBase as vn
 rowType = stripArray 1
 
 -- | A type is a basic type if it is not an array and any component
 -- types are basic types.
 basicType :: TypeBase vn as -> Bool
-basicType (Array {}) = False
-basicType (Elem (Tuple ts)) = all basicType ts
-basicType _ = True
+basicType (Tuple ts) = all basicType ts
+basicType (Basic _) = True
+basicType (Array _) = False
 
 -- | Is the given type either unique (as per 'unique') or basic (as
 -- per 'basicType')?
@@ -282,29 +294,49 @@ uniqueOrBasic x = basicType x || unique x
 
 -- | Remove names from a type - this involves removing all size
 -- annotations from arrays, as well as all aliasing.
-removeNames :: TypeBase as vn -> TypeBase NoInfo ()
-removeNames (Array et sizes u _) =
-  Array (removeElemNames et) (map (const Nothing) sizes) u NoInfo
-removeNames (Elem et) = Elem $ removeElemNames et
+removeNames :: TypeBase as vn -> DeclTypeBase ()
+removeNames (Basic et) = Basic et
+removeNames (Tuple ts) = Tuple $ map removeNames ts
+removeNames (Array at) = Array $ removeArrayNames at
 
--- | Remove names from an element type, as in 'removeNames'.
-removeElemNames :: ElemTypeBase as vn -> ElemTypeBase NoInfo ()
-removeElemNames (Tuple ets) = Tuple $ map removeNames ets
-removeElemNames (Basic bt) = Basic bt
+removeArrayNames :: ArrayTypeBase as vn
+                 -> DeclArrayTypeBase ()
+removeArrayNames (BasicArray et sizes u _) =
+  BasicArray et (map (const Nothing) sizes) u NoInfo
+removeArrayNames (TupleArray et sizes u) =
+  TupleArray (map removeTupleArrayElemNames et) (map (const Nothing) sizes) u
+
+removeTupleArrayElemNames :: TupleArrayElemTypeBase as vn
+                          -> DeclTupleArrayElemTypeBase ()
+removeTupleArrayElemNames (BasicArrayElem bt _) =
+  BasicArrayElem bt NoInfo
+removeTupleArrayElemNames (ArrayArrayElem et) =
+  ArrayArrayElem $ removeArrayNames et
+removeTupleArrayElemNames (TupleArrayElem ts) =
+  TupleArrayElem $ map removeTupleArrayElemNames ts
 
 -- | Add names to a type - this replaces array sizes with 'Nothing',
 -- although they probably are already, if you're using this.
-addNames :: TypeBase NoInfo () -> TypeBase NoInfo vn
-addNames (Array et sizes u _) =
-  Array (addElemNames et) (map (const Nothing) sizes) u NoInfo
-addNames (Elem et) = Elem $ addElemNames et
+addNames :: DeclTypeBase () -> DeclTypeBase vn
+addNames (Basic et) = Basic et
+addNames (Tuple ts) = Tuple $ map addNames ts
+addNames (Array at) = Array $ addArrayNames at
 
--- | Add names to an element type - this replaces array sizes with
--- 'Nothing', although they probably are already, if you're using
--- this.
-addElemNames :: ElemTypeBase NoInfo () -> ElemTypeBase NoInfo vn
-addElemNames (Tuple ets) = Tuple $ map addNames ets
-addElemNames (Basic bt)  = Basic bt
+addArrayNames :: DeclArrayTypeBase ()
+              -> DeclArrayTypeBase vn
+addArrayNames (BasicArray et sizes u _) =
+  BasicArray et (map (const Nothing) sizes) u NoInfo
+addArrayNames (TupleArray et sizes u) =
+  TupleArray (map addTupleArrayElemNames et) (map (const Nothing) sizes) u
+
+addTupleArrayElemNames :: DeclTupleArrayElemTypeBase ()
+                       -> DeclTupleArrayElemTypeBase vn
+addTupleArrayElemNames (BasicArrayElem bt _) =
+  BasicArrayElem bt NoInfo
+addTupleArrayElemNames (ArrayArrayElem et) =
+  ArrayArrayElem $ addArrayNames et
+addTupleArrayElemNames (TupleArrayElem ts) =
+  TupleArrayElem $ map addTupleArrayElemNames ts
 
 -- | @arrayOf t s u@ constructs an array type.  The convenience
 -- compared to using the 'Array' constructor directly is that @t@ can
@@ -314,10 +346,26 @@ addElemNames (Basic bt)  = Basic bt
 -- uniqueness of @t@.
 arrayOf :: Monoid (vn as) =>
            TypeBase vn as -> ArraySize as -> Uniqueness -> TypeBase vn as
-arrayOf (Array et size1 _ als) size2 u =
-  Array et (size2 ++ size1) u als
-arrayOf (Elem et) size u =
-  Array et size u mempty
+arrayOf (Array (BasicArray et size1 _ als)) size2 u =
+  Array $ BasicArray et (size2 ++ size1) u als
+arrayOf (Array (TupleArray et size1 _)) size2 u =
+  Array $ TupleArray et (size2 ++ size1) u
+arrayOf (Basic et) size u =
+  Array $ BasicArray et size u mempty
+arrayOf (Tuple ts) size u =
+  Array $ TupleArray (map typeToTupleArrayElem ts) size u
+
+typeToTupleArrayElem :: Monoid (as vn) =>
+                        TypeBase as vn -> TupleArrayElemTypeBase as vn
+typeToTupleArrayElem (Basic bt)  = BasicArrayElem bt mempty
+typeToTupleArrayElem (Tuple ts') = TupleArrayElem $ map typeToTupleArrayElem ts'
+typeToTupleArrayElem (Array at)  = ArrayArrayElem at
+
+tupleArrayElemToType :: Monoid (as vn) =>
+                        TupleArrayElemTypeBase as vn -> TypeBase as vn
+tupleArrayElemToType (BasicArrayElem bt _) = Basic bt
+tupleArrayElemToType (TupleArrayElem ts)   = Tuple $ map tupleArrayElemToType ts
+tupleArrayElemToType (ArrayArrayElem at)   = Array at
 
 -- | @array n t@ is the type of @n@-dimensional arrays having @t@ as
 -- the base type.  If @t@ is itself an m-dimensional array, the result
@@ -333,18 +381,25 @@ arrayType n t u = arrayOf t ds u
 -- | @stripArray n t@ removes the @n@ outermost layers of the array.
 -- Essentially, it is the type of indexing an array of type @t@ with
 -- @n@ indexes.
-stripArray :: Int -> TypeBase vn as -> TypeBase vn as
-stripArray n (Array et ds u als)
-  | n < length ds = Array et (drop n ds) u als
-  | otherwise     = Elem et `setAliases` als
+stripArray :: Monoid (as vn) =>
+              Int -> TypeBase as vn -> TypeBase as vn
+stripArray n (Array (BasicArray et ds u als))
+  | n < length ds = Array $ BasicArray et (drop n ds) u als
+  | otherwise     = Basic et
+stripArray n (Array (TupleArray et ds u))
+  | n < length ds = Array $ TupleArray et (drop n ds) u
+  | otherwise     = Tuple $ map tupleArrayElemToType et
 stripArray _ t = t
 
 -- | Set the uniqueness attribute of a type.  If the type is a tuple,
 -- the uniqueness of its components will be modified.
 setUniqueness :: TypeBase as vn -> Uniqueness -> TypeBase as vn
-setUniqueness (Array et dims _ als) u = Array et dims u als
-setUniqueness (Elem (Tuple ets)) u =
-  Elem $ Tuple $ map (`setUniqueness` u) ets
+setUniqueness (Array (BasicArray et dims _ als)) u =
+  Array $ BasicArray et dims u als
+setUniqueness (Array (TupleArray et dims _)) u =
+  Array $ TupleArray et dims u
+setUniqueness (Tuple ets) u =
+  Tuple $ map (`setUniqueness` u) ets
 setUniqueness t _ = t
 
 -- | @t \`setAliases\` als@ returns @t@, but with @als@ substituted for
@@ -352,22 +407,33 @@ setUniqueness t _ = t
 setAliases :: TypeBase asf vn -> ast vn -> TypeBase ast vn
 setAliases t = addAliases t . const
 
--- | @t \`setElemAliases\` als@ returns @t@, but with @als@ substituted for
--- any already present aliasing.
-setElemAliases :: ElemTypeBase asf vn -> ast vn -> ElemTypeBase ast vn
-setElemAliases t = addElemAliases t . const
-
 -- | @t \`addAliases\` f@ returns @t@, but with any already present
 -- aliasing replaced by @f@ applied to that aliasing.
 addAliases :: TypeBase asf vn -> (asf vn -> ast vn) -> TypeBase ast vn
-addAliases (Array et dims u als) f = Array (addElemAliases et f) dims u $ f als
-addAliases (Elem et) f = Elem $ et `addElemAliases` f
+addAliases (Array at) f =
+  Array $ addArrayAliases at f
+addAliases (Tuple ts) f =
+  Tuple $ map (`addAliases` f) ts
+addAliases (Basic et) _ =
+  Basic et
 
--- | @t \`addAliases\` f@ returns @t@, but with any already present
--- aliasing replaced by @f@ applied to that aliasing.
-addElemAliases :: ElemTypeBase asf vn -> (asf vn -> ast vn) -> ElemTypeBase ast vn
-addElemAliases (Tuple ets) f = Tuple $ map (`addAliases` f) ets
-addElemAliases (Basic bt) _ = Basic bt
+addArrayAliases :: ArrayTypeBase asf vn
+                -> (asf vn -> ast vn)
+                -> ArrayTypeBase ast vn
+addArrayAliases (BasicArray et dims u als) f =
+  BasicArray et dims u $ f als
+addArrayAliases (TupleArray et dims u) f =
+  TupleArray (map (`addTupleArrayElemAliases` f) et) dims u
+
+addTupleArrayElemAliases :: TupleArrayElemTypeBase asf vn
+                         -> (asf vn -> ast vn)
+                         -> TupleArrayElemTypeBase ast vn
+addTupleArrayElemAliases (BasicArrayElem bt als) f =
+  BasicArrayElem bt $ f als
+addTupleArrayElemAliases (ArrayArrayElem at) f =
+  ArrayArrayElem $ addArrayAliases at f
+addTupleArrayElemAliases (TupleArrayElem ts) f =
+  TupleArrayElem $ map (`addTupleArrayElemAliases` f) ts
 
 -- | Unify the uniqueness attributes and aliasing information of two
 -- types.  The two types must otherwise be identical.  The resulting
@@ -376,20 +442,26 @@ addElemAliases (Basic bt) _ = Basic bt
 -- are unique.
 unifyUniqueness :: Monoid (as vn) =>
                    TypeBase as vn -> TypeBase as vn -> TypeBase as vn
-unifyUniqueness (Array et dims u1 als1) (Array _ _ u2 als2) =
-  Array et dims (u1 <> u2) (als1 <> als2)
-unifyUniqueness (Elem (Tuple ets1)) (Elem (Tuple ets2)) =
-  Elem $ Tuple $ zipWith unifyUniqueness ets1 ets2
+unifyUniqueness (Array (BasicArray et dims u1 als1)) (Array (BasicArray _ _ u2 als2)) =
+  Array $ BasicArray et dims (u1 <> u2) (als1 <> als2)
+unifyUniqueness (Array (TupleArray et dims u1)) (Array (TupleArray _ _ u2)) =
+  Array $ TupleArray et dims $ u1 <> u2
+unifyUniqueness (Tuple ets1) (Tuple ets2) =
+  Tuple $ zipWith unifyUniqueness ets1 ets2
 unifyUniqueness t1 _ = t1
 
 -- | The type of an Futhark value.
 valueType :: Value -> DeclTypeBase vn
-valueType (BasicVal bv) = Elem $ Basic $ basicValueType bv
-valueType (TupVal vs) = Elem $ Tuple (map valueType vs)
-valueType (ArrayVal _ (Elem et)) =
-  Array (addElemNames et) [Nothing] Nonunique NoInfo
-valueType (ArrayVal _ (Array et ds _ _)) =
-  Array (addElemNames et) (Nothing:replicate (length ds) Nothing) Nonunique NoInfo
+valueType (BasicVal bv) = Basic $ basicValueType bv
+valueType (TupVal vs) = Tuple (map valueType vs)
+valueType (ArrayVal _ (Basic et)) =
+  Array $ BasicArray et [Nothing] Nonunique NoInfo
+valueType (ArrayVal _ (Tuple ts)) =
+  addNames $ Array $ TupleArray (map typeToTupleArrayElem ts) [Nothing] Nonunique
+valueType (ArrayVal _ (Array (BasicArray et ds _ _))) =
+  Array $ BasicArray et (Nothing:replicate (length ds) Nothing) Nonunique NoInfo
+valueType (ArrayVal _ (Array (TupleArray et ds _))) =
+  addNames $ Array $ TupleArray et (Nothing:replicate (length ds) Nothing) Nonunique
 
 -- | Construct an array value containing the given elements.
 arrayVal :: [Value] -> TypeBase as vn -> Value
@@ -413,45 +485,47 @@ arrayString _ = Nothing
 -- the term is a non-tuple-typed variable.
 typeOf :: (Eq vn, Hashable vn) => ExpBase CompTypeBase vn -> CompTypeBase vn
 typeOf (Literal val _) = fromDecl $ valueType val
-typeOf (TupLit es _) = Elem $ Tuple $ map typeOf es
+typeOf (TupLit es _) = Tuple $ map typeOf es
 typeOf (ArrayLit es t _) =
   arrayType 1 t $ mconcat $ map (uniqueness . typeOf) es
 typeOf (BinOp _ _ _ t _) = t
-typeOf (Not _ _) = Elem $ Basic Bool
+typeOf (Not _ _) = Basic Bool
 typeOf (Negate e _) = typeOf e
 typeOf (If _ _ _ t _) = t
 typeOf (Var ident) =
   case identType ident of
-    Elem (Tuple ets) -> Elem $ Tuple ets
-    t                -> t `addAliases` HS.insert (identName ident)
+    Tuple ets -> Tuple ets
+    t         -> t `addAliases` HS.insert (identName ident)
 typeOf (Apply _ _ t _) = t
 typeOf (LetPat _ _ body _) = typeOf body
 typeOf (LetWith _ _ _ _ _ _ body _) = typeOf body
 typeOf (Index _ ident _ idx _) =
   stripArray (length idx) (identType ident)
   `addAliases` HS.insert (identName ident)
-typeOf (Iota _ _) = arrayType 1 (Elem $ Basic Int) Nonunique
-typeOf (Size {}) = Elem $ Basic Int
+typeOf (Iota _ _) = arrayType 1 (Basic Int) Nonunique
+typeOf (Size {}) = Basic Int
 typeOf (Replicate _ e _) = arrayType 1 (typeOf e) u
   where u = uniqueness $ typeOf e
-typeOf (Reshape _ [] e _) =
-  Elem $ elemType $ typeOf e
 typeOf (Reshape _ shape  e _) =
   replicate (length shape) Nothing `setArrayDims` typeOf e
 typeOf (Rearrange _ _ e _) = typeOf e
 typeOf (Rotate _ _ e _) = typeOf e
 typeOf (Transpose _ k n e _)
-  | Array et dims u als <- typeOf e,
+  | Array (BasicArray et dims u als) <- typeOf e,
     (pre,d:post) <- splitAt k dims,
-    (mid,end) <- splitAt n post = Array et (pre++mid++[d]++end) u als
-  | otherwise = typeOf e
+    (mid,end) <- splitAt n post =
+      Array $ BasicArray et (pre++mid++[d]++end) u als
+  | otherwise =
+      typeOf e
 typeOf (Map f arr _) = arrayType 1 et $ uniqueness et
   where et = lambdaType f [rowType $ typeOf arr]
+typeOf (ConcatMap f _ _ _) =
+  fromDecl $ lambdaReturnType f
 typeOf (Reduce fun start arr _) =
   lambdaType fun [typeOf start, rowType (typeOf arr)]
-typeOf (Zip es _) = arrayType 1 (Elem $ Tuple $ map snd es) Nonunique
+typeOf (Zip es _) = arrayType 1 (Tuple $ map snd es) Nonunique
 typeOf (Unzip _ ts _) =
-  Elem $ Tuple $ map (\t -> arrayType 1 t $ uniqueness t) ts
+  Tuple $ map (\t -> arrayType 1 t $ uniqueness t) ts
 typeOf (Scan fun start arr _) =
   arrayType 1 et $ uniqueness et
     where et = lambdaType fun [typeOf start, rowType $ typeOf arr]
@@ -459,13 +533,13 @@ typeOf (Filter _ arr _) = typeOf arr
 typeOf (Redomap outerfun innerfun start arr _) =
   lambdaType outerfun [innerres, innerres]
     where innerres = lambdaType innerfun [typeOf start, rowType $ typeOf arr]
-typeOf (Split _ _ e _) =
-  Elem $ Tuple [typeOf e, typeOf e]
 typeOf (Concat _ x ys _) = typeOf x `setUniqueness` u
   where u = uniqueness (typeOf x) <> mconcat (map uniqueness (map typeOf ys))
+typeOf (Split _ splitexps e _) =
+  Tuple $ replicate (1 + length splitexps) (typeOf e)
 typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` HS.empty
-typeOf (Assert _ _) = Elem $ Basic Cert
-typeOf (Conjoin _ _) = Elem $ Basic Cert
+typeOf (Assert _ _) = Basic Cert
+typeOf (Conjoin _ _) = Basic Cert
 typeOf (DoLoop _ _ _ _ _ body _) = typeOf body
 
 -- | If possible, convert an expression to a value.  This is not a
@@ -493,14 +567,39 @@ returnType :: (Eq vn, Hashable vn) =>
            -> [Diet]
            -> [CompTypeBase vn]
            -> CompTypeBase vn
-returnType (Array et sz Nonunique NoInfo) ds args =
-  Array (fromElemDecl et) sz Nonunique als
+returnType (Array at) ds args =
+  Array $ arrayReturnType at ds args
+returnType (Tuple ets) ds args =
+  Tuple $ map (\et -> returnType et ds args) ets
+returnType (Basic t) _ _ = Basic t
+
+arrayReturnType :: (Eq vn, Hashable vn) =>
+                   DeclArrayTypeBase vn
+                -> [Diet]
+                -> [CompTypeBase vn]
+                -> ArrayTypeBase Names vn
+arrayReturnType (BasicArray bt sz Nonunique NoInfo) ds args =
+  BasicArray bt sz Nonunique als
   where als = mconcat $ map aliases $ zipWith maskAliases args ds
-returnType (Array et sz Unique NoInfo) _ _ =
-  Array (fromElemDecl et) sz Unique mempty
-returnType (Elem (Tuple ets)) ds args =
-  Elem $ Tuple $ map (\et -> returnType et ds args) ets
-returnType (Elem t) _ _ = Elem t `setAliases` HS.empty
+arrayReturnType (TupleArray et sz Nonunique) ds args =
+  TupleArray (map (\t -> tupleArrayElemReturnType t ds args) et) sz Nonunique
+arrayReturnType (BasicArray et sz Unique NoInfo) _ _ =
+  BasicArray et sz Unique mempty
+arrayReturnType (TupleArray et sz Unique) _ _ =
+  TupleArray (map (`addTupleArrayElemAliases` const mempty) et) sz Unique
+
+tupleArrayElemReturnType :: (Eq vn, Hashable vn) =>
+                            DeclTupleArrayElemTypeBase vn
+                         -> [Diet]
+                         -> [CompTypeBase vn]
+                         -> TupleArrayElemTypeBase Names vn
+tupleArrayElemReturnType (BasicArrayElem bt NoInfo) ds args =
+  BasicArrayElem bt als
+  where als = mconcat $ map aliases $ zipWith maskAliases args ds
+tupleArrayElemReturnType (ArrayArrayElem at) ds args =
+  ArrayArrayElem $ arrayReturnType at ds args
+tupleArrayElemReturnType (TupleArrayElem ts) ds args =
+  TupleArrayElem $ map (\t -> tupleArrayElemReturnType t ds args) ts
 
 -- | The specified return type of a lambda.
 lambdaReturnType :: LambdaBase CompTypeBase vn -> DeclTypeBase vn
@@ -635,6 +734,9 @@ patIdentSet = HS.fromList . patIdents
 
 -- | A type with no aliasing information.
 type UncheckedType = TypeBase NoInfo Name
+
+-- | An array type with no aliasing information.
+type UncheckedArrayType = ArrayTypeBase NoInfo Name
 
 -- | An identifier with no type annotations.
 type UncheckedIdent = IdentBase NoInfo Name

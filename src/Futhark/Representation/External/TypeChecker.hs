@@ -274,8 +274,8 @@ binding bnds = check . local (`bindVars` bnds)
               -- If 'name' is tuple-typed, don't alias the components
               -- to 'name', because tuples have no identity beyond
               -- their components.
-                | Elem (Tuple _) <- tp = Bound tp'
-                | otherwise            = Bound (tp' `addAliases` HS.insert name)
+                | Tuple _ <- tp = Bound tp'
+                | otherwise     = Bound (tp' `addAliases` HS.insert name)
               update b = b
           in env { envVtable = HM.insert name (Bound tp) $
                                adjustSeveral update inedges $
@@ -320,24 +320,42 @@ lookupVar name pos = do
 -- uniqueness of @t1@ and @t2@.
 unifyTypes :: Monoid (as vn) => TypeBase as vn -> TypeBase as vn
            -> Maybe (TypeBase as vn)
-unifyTypes (Elem t1) (Elem t2) = Elem <$> t1 `unifyElemTypes` t2
-unifyTypes (Array t1 ds1 u1 als1) (Array t2 ds2 u2 als2)
-  | length ds1 == length ds2 = do
-  t <- t1 `unifyElemTypes` t2
-  Just $ Array t ds1 (u1 <> u2) (als1 <> als2)
+unifyTypes (Basic t1) (Basic t2)
+  | t1 == t2  = Just $ Basic t1
+  | otherwise = Nothing
+unifyTypes (Array at1) (Array at2) =
+  Array <$> unifyArrayTypes at1 at2
+unifyTypes (Tuple ts1) (Tuple ts2)
+  | length ts1 == length ts2 =
+    Tuple <$> zipWithM unifyTypes ts1 ts2
 unifyTypes _ _ = Nothing
 
--- | As 'unifyTypes', but for element types.
-unifyElemTypes :: Monoid (as vn) =>
-                  ElemTypeBase as vn -> ElemTypeBase as vn
-               -> Maybe (ElemTypeBase as vn)
-unifyElemTypes (Tuple ts1) (Tuple ts2)
-  | length ts1 == length ts2 = do
-  ts <- zipWithM unifyTypes ts1 ts2
-  Just $ Tuple ts
-unifyElemTypes t1 t2
-  | t1 == t2  = Just t1
-  | otherwise = Nothing
+unifyArrayTypes :: Monoid (as vn) =>
+                   ArrayTypeBase as vn -> ArrayTypeBase as vn
+                -> Maybe (ArrayTypeBase as vn)
+unifyArrayTypes (BasicArray bt1 ds1 u1 als1) (BasicArray bt2 ds2 u2 als2)
+  | length ds1 == length ds2, bt1 == bt2 =
+    Just $ BasicArray bt1 ds1 (u1 <> u2) (als1 <> als2)
+unifyArrayTypes (TupleArray et1 ds1 u1) (TupleArray et2 ds2 u2)
+  | length ds1 == length ds2 =
+    TupleArray <$> zipWithM unifyTupleArrayElemTypes et1 et2 <*>
+    pure ds1 <*> pure (u1 <> u2)
+unifyArrayTypes _ _ =
+  Nothing
+
+unifyTupleArrayElemTypes :: Monoid (as vn) =>
+                            TupleArrayElemTypeBase as vn
+                         -> TupleArrayElemTypeBase as vn
+                         -> Maybe (TupleArrayElemTypeBase as vn)
+unifyTupleArrayElemTypes (BasicArrayElem bt1 als1) (BasicArrayElem bt2 als2)
+  | bt1 == bt2 = Just $ BasicArrayElem bt1 $ als1 <> als2
+  | otherwise  = Nothing
+unifyTupleArrayElemTypes (ArrayArrayElem at1) (ArrayArrayElem at2) =
+  ArrayArrayElem <$> unifyArrayTypes at1 at2
+unifyTupleArrayElemTypes (TupleArrayElem ts1) (TupleArrayElem ts2) =
+  TupleArrayElem <$> zipWithM unifyTupleArrayElemTypes ts1 ts2
+unifyTupleArrayElemTypes _ _ =
+  Nothing
 
 -- | Determine if two types are identical, ignoring uniqueness.
 -- Causes a '(TypeError vn)' if they fail to match, and otherwise returns
@@ -439,7 +457,7 @@ checkProg' checkoccurs prog = do
 
 initialFtable :: HM.HashMap Name (FunBinding vn)
 initialFtable = HM.map addBuiltin builtInFunctions
-  where addBuiltin (t, ts) = (Elem $ Basic t, map (Elem . Basic) ts)
+  where addBuiltin (t, ts) = (Basic t, map Basic ts)
 
 checkFun :: (TypeBox ty, VarName vn) =>
             TaggedFunDec ty vn -> TypeM vn (TaggedFunDec CompTypeBase vn)
@@ -485,7 +503,7 @@ checkFun (fname, rettype, params, body, loc) = do
 
         tag u = HS.map $ \name -> (u, name)
 
-        returnAliasing (Elem (Tuple ets1)) (Elem (Tuple ets2)) =
+        returnAliasing (Tuple ets1) (Tuple ets2) =
           concat $ zipWith returnAliasing ets1 ets2
         returnAliasing expected got = [(uniqueness expected, aliases got)]
 
@@ -555,15 +573,15 @@ checkExp (ArrayLit es t loc) = do
 checkExp (BinOp op e1 e2 t pos) = checkBinOp op e1 e2 t pos
 
 checkExp (Not e pos) = do
-  e' <- require [Elem $ Basic Bool] =<< checkExp e
+  e' <- require [Basic Bool] =<< checkExp e
   return $ Not e' pos
 
 checkExp (Negate e loc) = do
-  e' <- require [Elem $ Basic Int, Elem $ Basic Real] =<< checkExp e
+  e' <- require [Basic Int, Basic Real] =<< checkExp e
   return $ Negate e' loc
 
 checkExp (If e1 e2 e3 t pos) = do
-  e1' <- require [Elem $ Basic Bool] =<< checkExp e1
+  e1' <- require [Basic Bool] =<< checkExp e1
   ((e2', e3'), dflow) <- collectDataflow $ checkExp e2 `alternative` checkExp e3
   tell dflow
   t' <- checkAnnotation pos "branch result" t $
@@ -607,18 +625,19 @@ checkExp (LetPat pat e body pos) = do
     return $ LetPat pat' e' body' pos
 
 checkExp (LetWith cs (Ident dest destt destpos) src idxcs idxes ve body pos) = do
-  cs' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) cs
+  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
   src' <- checkIdent src
   idxcs' <-
     case idxcs of
       Nothing       -> return Nothing
-      Just idxcs' -> Just <$> mapM (requireI [Elem $ Basic Cert] <=< checkIdent) idxcs'
-  idxes' <- mapM (require [Elem $ Basic Int] <=< checkExp) idxes
+      Just idxcs' -> Just <$> mapM (requireI [Basic Cert] <=< checkIdent) idxcs'
+  idxes' <- mapM (require [Basic Int] <=< checkExp) idxes
   destt' <- checkAnnotation pos "source" destt $ identType src' `setAliases` HS.empty
   let dest' = Ident dest destt' destpos
 
-  unless (unique (identType src') || basicType (identType src')) $
-    bad $ TypeError pos $ "Source '" ++ textual (baseName $ identName src) ++ "' is not unique"
+  unless (unique $ identType src') $
+    bad $ TypeError pos $ "Source '" ++ textual (baseName $ identName src) ++
+    "' has type " ++ ppType (identType src') ++ ", which is not unique"
 
   case peelArray (length idxes) (identType src') of
     Nothing -> bad $ IndexingError (baseName $ identName src)
@@ -632,28 +651,28 @@ checkExp (LetWith cs (Ident dest destt destpos) src idxcs idxes ve body pos) = d
         return $ LetWith cs' dest' src' idxcs' idxes' ve' body' pos
 
 checkExp (Index cs ident csidxes idxes pos) = do
-  cs' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) cs
+  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
   csidxes' <-
     case csidxes of
       Nothing       -> return Nothing
       Just csidxes' ->
-        Just <$> mapM (requireI [Elem $ Basic Cert] <=< checkIdent) csidxes'
+        Just <$> mapM (requireI [Basic Cert] <=< checkIdent) csidxes'
   ident' <- checkIdent ident
   observe ident'
   vt <- lookupVar (identName ident') pos
   when (arrayRank vt < length idxes) $
     bad $ IndexingError (baseName $ identName ident)
           (arrayRank vt) (length idxes) pos
-  idxes' <- mapM (require [Elem $ Basic Int] <=< checkExp) idxes
+  idxes' <- mapM (require [Basic Int] <=< checkExp) idxes
   return $ Index cs' ident' csidxes' idxes' pos
 
 checkExp (Iota e pos) = do
-  e' <- require [Elem $ Basic Int] =<< checkExp e
+  e' <- require [Basic Int] =<< checkExp e
   return $ Iota e' pos
 
 checkExp (Size cs i e pos) = do
   e' <- checkExp e
-  cs' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) cs
+  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
   case typeOf e' of
     Array {}
       | i >= 0 && i < arrayRank (typeOf e') ->
@@ -663,18 +682,18 @@ checkExp (Size cs i e pos) = do
     _        -> bad $ TypeError pos "Argument to size must be array."
 
 checkExp (Replicate countexp valexp pos) = do
-  countexp' <- require [Elem $ Basic Int] =<< checkExp countexp
+  countexp' <- require [Basic Int] =<< checkExp countexp
   valexp' <- checkExp valexp
   return $ Replicate countexp' valexp' pos
 
 checkExp (Reshape cs shapeexps arrexp pos) = do
-  cs' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) cs
-  shapeexps' <- mapM (require [Elem $ Basic Int] <=< checkExp) shapeexps
+  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
+  shapeexps' <- mapM (require [Basic Int] <=< checkExp) shapeexps
   arrexp' <- checkExp arrexp
   return (Reshape cs' shapeexps' arrexp' pos)
 
 checkExp (Rearrange cs perm arrexp pos) = do
-  cs' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) cs
+  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
   arrexp' <- checkExp arrexp
   let rank = arrayRank $ typeOf arrexp'
   when (length perm /= rank || sort perm /= [0..rank-1]) $
@@ -684,12 +703,12 @@ checkExp (Rearrange cs perm arrexp pos) = do
                               _     -> Nothing
 
 checkExp (Rotate cs n arrexp pos) = do
-  cs' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) cs
+  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
   arrexp' <- checkExp arrexp
   return $ Rotate cs' n arrexp' pos
 
 checkExp (Transpose cs k n arrexp pos) = do
-  cs' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) cs
+  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
   arrexp' <- checkExp arrexp
   when (arrayRank (typeOf arrexp') < reach + 1) $
     bad $ TypeError pos $ "Argument to transpose does not have " ++
@@ -706,13 +725,19 @@ checkExp (Zip arrexps pos) = do
 checkExp (Unzip e _ pos) = do
   e' <- checkExp e
   case peelArray 1 $ typeOf e' of
-    Just (Elem (Tuple ts)) -> return $ Unzip e' ts pos
+    Just (Tuple ts) -> return $ Unzip e' ts pos
     _ -> bad $ TypeError pos $ "Argument to unzip is not an array of tuples, but " ++ ppType (typeOf e') ++ "."
 
 checkExp (Map fun arrexp pos) = do
   (arrexp', arg) <- checkSOACArrayArg arrexp
   fun' <- checkLambda fun [arg]
   return (Map fun' arrexp' pos)
+
+checkExp (ConcatMap fun arrexp arrexps pos) = do
+  (arrexp', arg) <- checkArg arrexp
+  (arrexps', _) <- unzip <$> mapM checkArg arrexps
+  fun' <- checkLambda fun [arg]
+  return $ ConcatMap fun' arrexp' arrexps' pos
 
 checkExp (Reduce fun startexp arrexp pos) = do
   (startexp', startarg) <- checkArg startexp
@@ -741,7 +766,7 @@ checkExp (Filter fun arrexp pos) = do
   let nonunique_arg = (rowelemt `setUniqueness` Nonunique,
                        argflow, argloc)
   fun' <- checkLambda fun [nonunique_arg]
-  when (lambdaType fun' [rowelemt] /= Elem (Basic Bool)) $
+  when (lambdaType fun' [rowelemt] /= Basic Bool) $
     bad $ TypeError pos "Filter function does not return bool."
 
   return $ Filter fun' arrexp' pos
@@ -755,15 +780,15 @@ checkExp (Redomap outerfun innerfun accexp arrexp pos) = do
   _ <- require [redtype] accexp'
   return $ Redomap outerfun' innerfun' accexp' arrexp' pos
 
-checkExp (Split cs splitexp arrexp pos) = do
-  cs' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) cs
-  splitexp' <- require [Elem $ Basic Int] =<< checkExp splitexp
+checkExp (Split cs splitexps arrexp pos) = do
+  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
+  splitexps' <- mapM (require [Basic Int] <=< checkExp) splitexps
   arrexp' <- checkExp arrexp
   _ <- rowTypeM arrexp' -- Just check that it's an array.
-  return $ Split cs' splitexp' arrexp' pos
+  return $ Split cs' splitexps' arrexp' pos
 
 checkExp (Concat cs arr1exp arr2exps pos) = do
-  cs' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) cs
+  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
   arr1exp'  <- checkExp arr1exp
   arr2exps' <- mapM (require [typeOf arr1exp'] <=< checkExp) arr2exps
   mapM_ rowTypeM arr2exps' -- Just check that it's an array.
@@ -774,11 +799,11 @@ checkExp (Copy e pos) = do
   return $ Copy e' pos
 
 checkExp (Assert e pos) = do
-  e' <- require [Elem $ Basic Bool] =<< checkExp e
+  e' <- require [Basic Bool] =<< checkExp e
   return $ Assert e' pos
 
 checkExp (Conjoin es pos) = do
-  es' <- mapM (require [Elem $ Basic Cert] <=< checkExp) es
+  es' <- mapM (require [Basic Cert] <=< checkExp) es
   return $ Conjoin es' pos
 
 -- Checking of loops is done by synthesing the (almost) equivalent
@@ -794,10 +819,10 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
   -- away the dataflow.  The dataflow will be reconstructed later, but
   -- we need the result of this to synthesize the function.
   ((boundexp', mergeexp'), _) <-
-    collectDataflow $ do boundexp' <- require [Elem $ Basic Int] =<< checkExp boundexp
+    collectDataflow $ do boundexp' <- require [Basic Int] =<< checkExp boundexp
                          mergeexp' <- checkExp mergeexp
                          return (boundexp', mergeexp')
-  let iparam = Ident loopvar (Elem $ Basic Int) loc
+  let iparam = Ident loopvar (Basic Int) loc
 
   -- Check the loop body.  We tap the dataflow before leaving scope,
   -- so we'll be able to see occurences of variables bound by
@@ -808,18 +833,18 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
 
   -- We can use the name generator in a slightly hacky way to generate
   -- a unique Name for the function.
-  bound <- newIdent "loop_bound" (Elem $ Basic Int) loc
+  bound <- newIdent "loop_bound" (Basic Int) loc
   fname <- newFname "loop_fun"
 
   let -- | Change the uniqueness attribute of a type to reflect how it
       -- was used.
-      param (Array et sz _ _) con =
-        Array (toElemDecl et) sz u NoInfo
+      param (Array (BasicArray et sz _ _)) con =
+        Array $ BasicArray et sz u NoInfo
         where u = case con of Consume     -> Unique
                               TupleDiet _ -> Unique
                               Observe     -> Nonunique
-      param (Elem (Tuple ts)) (TupleDiet cons) =
-        Elem $ Tuple $ zipWith param ts cons
+      param (Tuple ts) (TupleDiet cons) =
+        Tuple $ zipWith param ts cons
       param t _ = t `setAliases` NoInfo
 
       -- We use the type of the merge expression, but with uniqueness
@@ -884,7 +909,7 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
   secondscope $ do
     letbody' <- checkExp letbody
     return $ DoLoop mergepat' mergeexp'
-                    (Ident loopvar (Elem $ Basic Int) loc) boundexp'
+                    (Ident loopvar (Basic Int) loc) boundexp'
                     loopbody' letbody' loc
 
 checkSOACArrayArg :: (TypeBox ty, VarName vn) =>
@@ -940,10 +965,10 @@ checkRelOp :: (TypeBox ty, VarName vn) =>
            -> ty (ID vn) -> SrcLoc
            -> TypeM vn (TaggedExp CompTypeBase vn)
 checkRelOp op tl e1 e2 t pos = do
-  e1' <- require (map (Elem . Basic) tl) =<< checkExp e1
-  e2' <- require (map (Elem . Basic) tl) =<< checkExp e2
+  e1' <- require (map Basic tl) =<< checkExp e1
+  e2' <- require (map Basic tl) =<< checkExp e2
   _ <- unifyExpTypes e1' e2'
-  t' <- checkAnnotation pos (opStr op ++ " result") t $ Elem $ Basic Bool
+  t' <- checkAnnotation pos (opStr op ++ " result") t $ Basic Bool
   return $ BinOp op e1' e2' t' pos
 
 checkPolyBinOp :: (TypeBox ty, VarName vn) =>
@@ -951,8 +976,8 @@ checkPolyBinOp :: (TypeBox ty, VarName vn) =>
                -> TaggedExp ty vn -> TaggedExp ty vn -> ty (ID vn) -> SrcLoc
                -> TypeM vn (TaggedExp CompTypeBase vn)
 checkPolyBinOp op tl e1 e2 t pos = do
-  e1' <- require (map (Elem . Basic) tl) =<< checkExp e1
-  e2' <- require (map (Elem . Basic) tl) =<< checkExp e2
+  e1' <- require (map Basic tl) =<< checkExp e1
+  e2' <- require (map Basic tl) =<< checkExp e2
   t' <- unifyExpTypes e1' e2'
   t'' <- checkAnnotation pos (opStr op ++ " result") t t'
   return $ BinOp op e1' e2' t'' pos
@@ -980,7 +1005,7 @@ checkBinding pat et dflow = do
           let t'' = typeOf $ Var $ Ident name t' pos
           add $ Ident name t'' pos
           return $ Id $ Ident name t'' pos
-        checkBinding' (TupId pats pos) (Elem (Tuple ts))
+        checkBinding' (TupId pats pos) (Tuple ts)
           | length pats == length ts = do
           pats' <- zipWithM checkBinding' pats ts
           return $ TupId pats' pos
@@ -1044,7 +1069,7 @@ checkFuncall fname loc paramtypes _ args = do
     occur $ usageOccurences dflow `seqOccurences` occurs
 
 consumeArg :: SrcLoc -> TaggedType vn -> Diet -> [Occurence vn]
-consumeArg loc (Elem (Tuple ets)) (TupleDiet ds) =
+consumeArg loc (Tuple ets) (TupleDiet ds) =
   concat $ zipWith (consumeArg loc) ets ds
 consumeArg loc at Consume = [consumption (aliases at) loc]
 consumeArg loc at _       = [observation (aliases at) loc]
@@ -1058,14 +1083,14 @@ checkLambda (AnonymFun params body ret pos) args =
           (_, ret', params', body', _) <-
             noUnique $ checkFun (nameFromString "<anonymous>", ret, params, body, pos)
           return $ AnonymFun params' body' ret' pos
-      | [(Elem (Tuple ets), _, _)] <- args,
+      | [(Tuple ets, _, _)] <- args,
         validApply (map identType params) ets -> do
           -- The function expects N parameters, but the argument is a
           -- single N-tuple whose types match the parameters.
           -- Generate a shim to make it fit.
           (_, ret', _, body', _) <-
             noUnique $ checkFun (nameFromString "<anonymous>", ret, params, body, pos)
-          tupparam <- newIdent "tup_shim" (Elem (Tuple $ map (fromDecl . identType) params)) pos
+          tupparam <- newIdent "tup_shim" (Tuple $ map (fromDecl . identType) params) pos
           let tupfun = AnonymFun [toParam tupparam] tuplet ret pos
               tuplet = LetPat (TupId (map (Id . fromParam) params) pos)
                               (Var tupparam) body' pos
@@ -1094,7 +1119,7 @@ checkLambda (CurryFun fname curryargexps rettype pos) args = do
     Just (rt, paramtypes) -> do
       rettype' <- checkAnnotation pos "return" rettype $ fromDecl rt
       case () of
-        _ | [(tupt@(Elem (Tuple ets)), _, _)] <- args,
+        _ | [(tupt@(Tuple ets), _, _)] <- args,
             validApply paramtypes ets -> do
               -- Same shimming as in the case for anonymous functions.
               let mkparam i t = newIdent ("param_" ++ show i) t pos
@@ -1126,7 +1151,7 @@ checkPolyLambdaOp op curryargexps rettype args pos = do
   let argts = [ argt | (argt, _, _) <- args ]
   tp <- case curryargexpts ++ argts of
           [t1, t2] | t1 == t2 -> return t1
-          [Elem (Tuple [t1,t2])] | t1 == t2 -> return t1 -- For autoshimming.
+          [Tuple [t1,t2]] | t1 == t2 -> return t1 -- For autoshimming.
           l -> bad $ ParameterMismatch (Just fname) pos (Left 2) $ map (toDecl . untagType) l
   xname <- newIDFromString "x"
   yname <- newIDFromString "y"

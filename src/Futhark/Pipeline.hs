@@ -37,6 +37,7 @@ import Futhark.Representation.AST (Prog)
 import qualified Futhark.Representation.Basic as Basic
 import qualified Futhark.Representation.ExplicitMemory as ExplicitMemory
 import Futhark.TypeCheck
+import Futhark.Analysis.Alias
 
 runPasses :: FutharkConfig -> PipelineState -> FutharkM PipelineState
 runPasses config = foldl comb return $ futharkpipeline config
@@ -77,8 +78,8 @@ data PipelineState = Basic Basic.Prog
                    | ExplicitMemory ExplicitMemory.Prog
 
 instance PP.Pretty PipelineState where
-  ppr (Basic prog)          = PP.ppr prog
-  ppr (ExplicitMemory prog) = PP.ppr prog
+  ppr (Basic prog)          = PP.ppr $ aliasAnalysis prog
+  ppr (ExplicitMemory prog) = PP.ppr $ aliasAnalysis prog
 
 data Pass = Pass {
     passName :: String

@@ -70,6 +70,12 @@ integers from standard input.
 When the program finishes, the return value of main() will be printed
 on standard output.
 
+Hacking
+=======
+
+We try to make use of Github issues, which are further [organised on
+waffle.io](https://waffle.io/HIPERFIT/futhark).
+
 Testing
 =======
 

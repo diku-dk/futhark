@@ -55,8 +55,8 @@ primOpAliases (Rearrange _ _ e) =
   [identAliases e]
 primOpAliases (Rotate _ _ e) =
   [identAliases e]
-primOpAliases (Split _ _ e _) =
-  [identAliases e,identAliases e]
+primOpAliases (Split _ sizeexps e) =
+  replicate (length sizeexps) (identAliases e)
 primOpAliases (Concat _ x ys _) =
   [identAliases x <> mconcat (map identAliases ys)]
 primOpAliases (Copy {}) =
@@ -82,6 +82,8 @@ loopOpAliases (Filter _ _ arrs) =
   map identAliases arrs
 loopOpAliases (Redomap _ outerfun _ _ _) =
   map (const mempty) $ lambdaReturnType outerfun
+loopOpAliases (ConcatMap {}) =
+  [mempty]
 
 ifAliases :: ([Names], Names) -> ([Names], Names) -> [Names]
 ifAliases (als1,cons1) (als2,cons2) =

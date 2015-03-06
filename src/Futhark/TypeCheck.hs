@@ -660,10 +660,9 @@ checkPrimOp (Rotate cs _ arrexp) = do
   mapM_ (requireI [Basic Cert]) cs
   void $ checkArrIdent arrexp
 
-checkPrimOp (Split cs splitexp arrexp secsize) = do
+checkPrimOp (Split cs sizeexps arrexp) = do
   mapM_ (requireI [Basic Cert]) cs
-  require [Basic Int] splitexp
-  require [Basic Int] secsize
+  mapM_ (require [Basic Int]) sizeexps
   void $ checkArrIdent arrexp
 
 checkPrimOp (Concat cs arr1exp arr2exps ressize) = do
@@ -729,6 +728,12 @@ checkLoopOp (Map ass fun arrexps) = do
   mapM_ (requireI [Basic Cert]) ass
   arrargs <- checkSOACArrayArgs arrexps
   void $ checkLambda fun arrargs
+
+checkLoopOp (ConcatMap cd fun inarrs) = do
+  mapM_ (requireI [Basic Cert]) cd
+  forM_ inarrs $ \inarr -> do
+    args <- mapM (checkArg . Var) inarr
+    void $ checkConcatMapLambda fun args
 
 checkLoopOp (Reduce ass fun inputs) = do
   let (startexps, arrexps) = unzip inputs
@@ -1086,6 +1091,26 @@ checkLambda (Lambda params body ret) args = do
     noUnique $ checkAnonymousFun
       (nameFromString "<anonymous>", ret, params, body)
   else bad $ TypeError noLoc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
+
+checkConcatMapLambda :: Checkable lore =>
+                        Lambda lore -> [Arg] -> TypeM lore ()
+checkConcatMapLambda (Lambda params body rettype) args = do
+  mapM_ checkType rettype
+  let (_,elemparams) =
+        splitAt (length params - length args) params
+      fname = nameFromString "<anonymous>"
+      rettype' = [ arrayOf t (ExtShape [Ext 0]) $ uniqueness t
+                 | t <- staticShapes rettype ]
+  if length elemparams == length args then do
+    checkFuncall Nothing (map identType elemparams) args
+    noUnique $ checkFun' (fname,
+                          rettype',
+                          [ (param, LambdaBound) | param <- params ],
+                          body) $
+      checkBindings (bodyBindings body) $ do
+        checkResult $ bodyResult body
+        matchExtReturnType fname rettype' $ bodyResult body
+  else bad $ TypeError noLoc $ "concatMap function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " array arguments."
 
 -- | The class of lores that can be type-checked.
 class (FreeIn (Lore.Exp lore),

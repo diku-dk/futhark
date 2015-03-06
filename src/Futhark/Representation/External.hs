@@ -24,10 +24,9 @@ module Futhark.Representation.External
   , FunDec
   , Prog
   , GenType
-  , GenElemType
   , Type
   , DeclType
-  , ElemType
+  , ArrayType
   )
 where
 
@@ -74,14 +73,11 @@ type Prog = ProgBase (TypeBase Names) VName
 -- | A known type parametrised over its aliasing information.
 type GenType als = TypeBase als VName
 
--- | A known element type parametrised over its aliasing information.
-type GenElemType als = ElemTypeBase als VName
-
 -- | A known type with aliasing information.
 type Type = TypeBase Names VName
 
 -- | A known type with no aliasing information.
 type DeclType = TypeBase NoInfo VName
 
--- | A known element type with aliasing information.
-type ElemType = ElemTypeBase Names VName
+-- | A known array type with aliasing information.
+type ArrayType = ArrayTypeBase Names VName

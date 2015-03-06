@@ -89,11 +89,13 @@ externalisePrimOp (I.Update cs src idxs ve) =
             (externaliseSubExp ve) (E.Var $ externaliseIdent src)
             noLoc
 -}
-externalisePrimOp (I.Split cs ne ae _) =
+{- TODO: Externalise Split
+externalisePrimOp (I.Split cs sizeexps ae) =
   E.Split (externaliseCerts cs)
           (externaliseSubExp ne)
           (E.Var $ externaliseIdent ae)
           noLoc
+-}
 externalisePrimOp (I.Concat cs x ys _) =
   E.Concat (externaliseCerts cs)
            (E.Var $ externaliseIdent x)
@@ -192,7 +194,7 @@ makeTupleParam ps@(p:_:_) =
   -- then unpacked inside the function.
   let pname = ID (nameFromString "ext_param",
                   baseTag $ E.identName p)
-      ptype = E.Elem $ E.Tuple $ map E.identType ps
+      ptype = E.Tuple $ map E.identType ps
       p'    = E.Ident pname ptype loc
       loc   = srclocOf p
   in Just (p',
@@ -219,25 +221,24 @@ externaliseDeclTypes :: [I.DeclType] -> E.DeclType
 externaliseDeclTypes ts =
   case map externaliseDeclType ts of
     [t]  -> t
-    ts'  -> E.Elem $ E.Tuple ts'
+    ts'  -> E.Tuple ts'
 
 externaliseTypes :: ArrayShape shape => [I.TypeBase shape] -> E.Type
 externaliseTypes ts =
   case map externaliseType ts of
     [t]  -> t
-    ts'  -> E.Elem $ E.Tuple ts'
+    ts'  -> E.Tuple ts'
 
 externaliseDeclType :: I.DeclType -> E.DeclType
-externaliseDeclType (I.Basic t) = E.Elem $ E.Basic t
+externaliseDeclType (I.Basic t) = E.Basic t
 externaliseDeclType (I.Array et shape u) =
-  E.Array (E.Basic et) (replicate (shapeRank shape) Nothing) u NoInfo
+  E.Array $ E.BasicArray et (replicate (shapeRank shape) Nothing) u NoInfo
 
 externaliseType :: ArrayShape shape =>
                    I.TypeBase shape -> E.Type
-externaliseType (I.Basic t) = E.Elem $ E.Basic t
+externaliseType (I.Basic t) = E.Basic t
 externaliseType (I.Array et shape u) =
-  E.Array (E.Basic et) (replicate (shapeRank shape) Nothing)
-          u mempty
+  E.Array $ E.BasicArray et (replicate (shapeRank shape) Nothing) u mempty
 
 externaliseSOACArrayArgs :: [I.Ident] -> E.Exp
 externaliseSOACArrayArgs [e] = externaliseSubExp $ I.Var e
@@ -264,7 +265,7 @@ externaliseIdent (I.Ident name t) =
 
 maybeUnzip :: E.Exp -> E.Exp
 maybeUnzip e
-  | E.Elem (E.Tuple ts@(_:_:_))
+  | (E.Tuple ts@(_:_:_))
       <- E.rowType $ E.typeOf e = Unzip e ts noLoc
   | otherwise                   = e
 

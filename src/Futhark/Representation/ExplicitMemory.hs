@@ -567,15 +567,16 @@ expReturns look (AST.PrimOp (Reshape _ newshape v)) = do
   return [ReturnsArray et (ExtShape $ map Free newshape) u $
           Just $ ReturnsInBlock mem ixfun]
 
-expReturns look (AST.PrimOp (Split _ n v restn)) = do
+expReturns look (AST.PrimOp (Split _ sizeexps v)) = do
   (et, shape, u, mem, ixfun) <- arrayIdentReturns look v
-  let shape1 = shape `setOuterDim` n
-      shape2 = shape `setOuterDim` restn
-      offset = sliceOffset shape [SE.subExpToScalExp n]
-  return [ReturnsArray et (ExtShape $ map Free $ shapeDims shape1) u $
-          Just $ ReturnsInBlock mem ixfun,
-          ReturnsArray et (ExtShape $ map Free $ shapeDims shape2) u $
-          Just $ ReturnsInBlock mem $ IxFun.offset ixfun offset]
+  let newShapes = map (shape `setOuterDim`) sizeexps
+      offsets = scanl (\acc n -> SE.SPlus acc (SE.subExpToScalExp n))
+                (SE.Val $ IntVal 0) sizeexps
+      slcOffsets = map (\offset -> sliceOffset shape [offset]) offsets
+  return $ zipWith (\newShape slcOffset
+                    -> ReturnsArray et (ExtShape $ map Free $ shapeDims newShape) u $
+                       Just $ ReturnsInBlock mem $ IxFun.offset ixfun slcOffset)
+           newShapes slcOffsets
 
 expReturns look (AST.PrimOp (Index _ v is)) = do
   (et, shape, u, mem, ixfun) <- arrayIdentReturns look v

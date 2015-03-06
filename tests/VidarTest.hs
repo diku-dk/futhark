@@ -30,44 +30,99 @@ foo :: IO I.Prog
 foo = do
     (Basic p) <- compile f
     return p
-  where f = "../testprogrammer/fuse-across-reshape1.fut"
+  where f = "../testprogrammer/no-assert.fut"
 
 main :: IO ()
 main = do
     p <- foo
     putStrLn $ V.ppVidar $ vidarify p
 
-vidarify :: I.Prog -> [V.Element I.Exp]
+showName :: VName -> String
+showName n = baseString n ++ show (baseTag n)
+
+vidarify :: I.Prog -> [V.Element]
 vidarify (I.Prog decs) = map vidarifyDec decs
 
-vidarifyDec :: I.FunDec -> V.Element I.Exp
-vidarifyDec (I.FunDec n _ params body) =
+vidarifyDec :: I.FunDec -> V.Element
+vidarifyDec (I.FunDec n _retType params body) =
   V.Block (V.ExactName $ nameToString n)
     $ V.StrictBlock [V.SubBlock $ V.StrictBlock $ vidarifyParams params  -- parameters
                     ,V.SubBlock $ V.StrictBlock $ vidarifyFuncBody body] -- body
 
-vidarifyParams :: [S.FParam I.Basic] -> [V.Element I.Exp]
-vidarifyParams _ = []
+vidarifyParams :: [S.FParam I.Basic] -> [V.Element]
+vidarifyParams = map vidarifyParam
 
-vidarifyFuncBody :: I.Body -> [V.Element I.Exp]
-vidarifyFuncBody (I.Body _ bs res) =
+vidarifyParam :: S.FParam I.Basic -> V.Element
+vidarifyParam (S.FParam (S.Ident n _idType) _lore) = V.Name $ V.ExactName $ showName n
+--vidarifyParam _ = V.Anything
+
+vidarifyFuncBody :: I.Body -> [V.Element]
+vidarifyFuncBody (I.Body _lore bs res) =
     map vidarifyBinding bs ++ [vidarifyRes res]
 
-vidarifyBinding :: I.Binding -> V.Element I.Exp
-vidarifyBinding (I.Let p _ exp) = V.Binding (vidarifyPattern p) (vidarifyExp exp)
+vidarifyBinding :: I.Binding -> V.Element
+vidarifyBinding (I.Let p _lore exp) = V.Binding (vidarifyPattern p) (vidarifyExp exp)
 
-vidarifyExp :: I.Exp -> V.Element I.Exp
-vidarifyExp (I.PrimOp p) = vidarifyPrimOp p
-vidarifyExp e = V.Expr e
+vidarifyExp :: I.Exp -> V.Element
+vidarifyExp (I.PrimOp p)     = vidarifyPrimOp p
+vidarifyExp (S.If cond a b _t) =
+    V.Block (V.ExactName "If") $ V.StrictBlock $ [
+        vidarifySubExp cond,
+        V.SubBlock $ V.StrictBlock $ vidarifyFuncBody a,
+        V.SubBlock $ V.StrictBlock $ vidarifyFuncBody b
+    ]
+vidarifyExp e = V.Anything
 
-vidarifyPrimOp :: I.PrimOp -> V.Element I.Exp
+vidarifyPrimOp :: I.PrimOp -> V.Element
+vidarifyPrimOp (S.SubExp subexp) = vidarifySubExp subexp
+vidarifyPrimOp (S.ArrayLit subexps _type) =
+    V.Block (V.ExactName "Array") $ V.StrictBlock $
+        map vidarifySubExp subexps
+vidarifyPrimOp (S.BinOp binop a b _tp) =
+    V.Block (V.ExactName $ show binop) $ V.StrictBlock $ [
+        vidarifySubExp a,
+        vidarifySubExp b
+    ]
+vidarifyPrimOp (S.Not subexp) =
+    V.Block (V.ExactName "Not") $ V.StrictBlock [
+        vidarifySubExp subexp
+    ]
+vidarifyPrimOp (S.Negate subexp) =
+    V.Block (V.ExactName "Negate") $ V.StrictBlock [
+        vidarifySubExp subexp
+    ]
+vidarifyPrimOp (S.Assert subexp _loc) =
+    V.Block (V.ExactName "Assert") $ V.StrictBlock [
+        vidarifySubExp subexp
+    ]
+vidarifyPrimOp (S.Conjoin subexps) =
+    V.SubBlock $ V.StrictBlock $
+        map vidarifySubExp subexps
+vidarifyPrimOp (S.Index certs (S.Ident n _tp) subexps) =
+    V.Block (V.ExactName "Index") $ V.StrictBlock $ [
+        V.SubBlock $ V.StrictBlock $ map (\(S.Ident n _tp) -> V.Name $ V.ExactName $ showName n) certs,
+        V.Name $ V.ExactName $ showName n,
+        V.SubBlock $ V.StrictBlock $ map vidarifySubExp subexps
+    ]
 vidarifyPrimOp _ = V.Anything
 
 vidarifyPattern :: I.Pattern -> V.Name
+vidarifyPattern (S.Pattern [b]) = vidarifyPatElem b
 vidarifyPattern p = V.AnyName
 
-vidarifyRes :: I.Result -> V.Element I.Exp
-vidarifyRes res = V.Anything
+vidarifyPatElem :: I.PatElem -> V.Name
+vidarifyPatElem (S.PatElem (S.Ident n _idType) _bindage _lore) = V.ExactName $ showName n
+
+vidarifyRes :: I.Result -> V.Element
+vidarifyRes (S.Result subexps) = V.SubBlock $ V.StrictBlock $ map vidarifySubExp subexps
+
+vidarifySubExp :: I.SubExp -> V.Element
+vidarifySubExp (S.Constant bv)             = vidarifyBasicVal bv
+vidarifySubExp (S.Var (S.Ident n _idType)) = V.Name $ V.ExactName $ showName n
+
+vidarifyBasicVal :: BasicValue -> V.Element
+vidarifyBasicVal (IntVal x) = V.Name $ V.ExactName $ show x
+vidarifyBasicVal _ = V.Anything
 
 newFutharkConfig :: FutharkConfig
 newFutharkConfig = FutharkConfig {
