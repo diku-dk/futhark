@@ -171,7 +171,7 @@ memForBindee ident = do
 
 directIndexFunction :: Ident -> Type -> MemSummary
 directIndexFunction mem t =
-  MemSummary mem $ IxFun.iota $ IxFun.shapeFromSubExps $ arrayDims t
+  MemSummary mem $ IxFun.iota $ arrayDims t
 
 computeSize :: MonadBinder m =>
                SubExp -> [SubExp] -> m SubExp

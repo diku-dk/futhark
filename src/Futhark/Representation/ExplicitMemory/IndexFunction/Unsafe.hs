@@ -1,7 +1,11 @@
-{-# LANGUAGE RankNTypes, ScopedTypeVariables, DataKinds, FlexibleContexts, ExistentialQuantification, TypeOperators, TypeFamilies #-}
+{-# LANGUAGE ScopedTypeVariables, DataKinds, FlexibleContexts, ExistentialQuantification, TypeOperators, TypeFamilies #-}
 module Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
        (
          IxFun
+       , Indices
+       , Shape
+       , rank
+       , shape
        , index
        , iota
        , offset
@@ -12,7 +16,6 @@ module Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
        , linearWithOffset
        , isDirect
          -- * Utility
-       , shapeFromSubExps
        , shapeFromInts
        )
        where
@@ -67,24 +70,25 @@ instance Rename IxFun where
     IxFun n <$> rename ixfun
 
 type Indices = [ScalExp]
-type Shape   = [ScalExp]
-
-shapeFromSubExps :: [SubExp] -> Shape
-shapeFromSubExps = map fromSubExp
-  where fromSubExp (Var v)      = Id v
-        fromSubExp (Constant v) = Val v
+type Shape   = [SubExp]
 
 shapeFromInts :: [Int] -> Shape
-shapeFromInts = shapeFromSubExps . map (Constant . IntVal)
+shapeFromInts = map (Constant . IntVal)
+
+rank :: IxFun -> Int
+rank (IxFun n _) = sNatToInt n
+
+shape :: IxFun -> Shape
+shape (IxFun _ ixfun) = toList $ Safe.shape ixfun
 
 index :: IxFun -> Indices -> ScalExp
 index f is = case f of
   IxFun n f' -> Safe.index f' $ unsafeFromList n is
 
 iota :: Shape -> IxFun
-iota shape = case toSing (n-1) of
-  SomeSing (sb::SNat n) -> IxFun (SS sb) (Safe.iota $ unsafeFromList (SS sb) shape)
-  where n = intToNat $ Prelude.length shape
+iota dims = case toSing (n-1) of
+  SomeSing (sb::SNat n) -> IxFun (SS sb) (Safe.iota $ unsafeFromList (SS sb) dims)
+  where n = intToNat $ Prelude.length dims
 
 offset :: IxFun -> ScalExp -> IxFun
 offset (IxFun n f) se =
@@ -93,7 +97,9 @@ offset (IxFun n f) se =
 permute :: IxFun -> [Int] -> IxFun
 permute (IxFun (n::SNat (S n)) f) perm
   | sort perm /= [0..n'-1] =
-    error "IndexFunction.Unsafe.permute: invalid permutation"
+    error $ "IndexFunction.Unsafe.permute: " ++ show perm ++
+    " is an invalid permutation for index function of rank " ++
+    show n'
   | otherwise =
     IxFun n $ Safe.permute f $
     Prelude.foldr (:>>:) Identity $
@@ -129,7 +135,7 @@ applyInd ixfun@(IxFun (snnat::SNat (S n)) (f::Safe.IxFun (S n))) is =
               f' :: Safe.IxFun (m :+: S (n :- m))
               f' = coerce proof f
               ixfun' :: Safe.IxFun (S (n :- m))
-              ixfun' = Safe.applyInd f' is'
+              ixfun' = Safe.applyInd k f' is'
           in IxFun k ixfun'
         SFalse ->
           error $

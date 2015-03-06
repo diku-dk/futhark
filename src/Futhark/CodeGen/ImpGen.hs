@@ -612,7 +612,7 @@ compileResultSubExp (ArrayDestination memdest shape) (Var v) = do
       | destmem == srcmem && destixfun == srcixfun ->
         return ()
       | otherwise ->
-          emit $ copyIxFun et
+          copyIxFun et
             (MemLocation destmem destixfun)
             (MemLocation srcmem srcixfun)
             arrsize
@@ -818,14 +818,24 @@ impProduct = foldl times $ Count $ Imp.Constant $ IntVal 1
 -- More complicated read/write operations that use index functions.
 
 copyIxFun :: BasicType -> MemLocation -> MemLocation -> Count Bytes
-          -> Imp.Code a
+          -> ImpM op ()
 copyIxFun bt (MemLocation destmem destIxFun) (MemLocation srcmem srcIxFun) n
   | Just destoffset <- scalExpToImpExp =<< IxFun.linearWithOffset destIxFun,
     Just srcoffset  <- scalExpToImpExp =<< IxFun.linearWithOffset srcIxFun =
-      memCopy
+      emit $ memCopy
       destmem (elements destoffset `withElemType` bt)
       srcmem (elements srcoffset `withElemType` bt)
       n
+  | otherwise = do
+    is <- replicateM (IxFun.rank destIxFun) (newVName "i")
+    let ivars = map (SE.Id . flip Ident (Basic Int)) is
+        oldshape = map compileSubExp $ IxFun.shape srcIxFun
+        destidx = IxFun.index destIxFun ivars
+        srcidx = IxFun.index srcIxFun ivars
+    emit $ foldl (.) id (zipWith Imp.For is oldshape) $
+      write destmem (elements $ fromJust $ scalExpToImpExp destidx) bt $
+      index srcmem (elements $ fromJust $ scalExpToImpExp srcidx) bt
+
 
 memCopy :: VName -> Count Bytes -> VName -> Count Bytes -> Count Bytes
         -> Imp.Code a
