@@ -284,50 +284,30 @@ Exp  :: { UncheckedExp }
 
      | iota '(' Exp ')' { Iota $3 $1 }
 
-     | Certificates size '(' NaturalInt ',' Exp ')'
-                      { Size $1 $4 $6 $2 }
-
      | size '(' NaturalInt ',' Exp ')'
-                      { Size [] $3 $5 $1 }
+                      { Size $3 $5 $1 }
 
      | replicate '(' Exp ',' Exp ')' { Replicate $3 $5 $1 }
 
-     | Certificates reshape '(' '(' Exps ')' ',' Exp ')'
-                      { Reshape $1 $5 $8 $2 }
-
      | reshape '(' '(' Exps ')' ',' Exp ')'
-                      { Reshape [] $4 $7 $1 }
-
-     | Certificates rearrange '(' '(' NaturalInts ')' ',' Exp ')'
-                      { Rearrange $1 $5 $8 $2 }
+                      { Reshape $4 $7 $1 }
 
      | rearrange '(' '(' NaturalInts ')' ',' Exp ')'
-                      { Rearrange [] $4 $7 $1 }
+                      { Rearrange $4 $7 $1 }
 
-     | Certificates transpose '(' Exp ')' { Transpose $1 0 1 $4 $2 }
-
-     | transpose '(' Exp ')' { Transpose [] 0 1 $3 $1 }
-
-     | Certificates transpose '(' NaturalInt ',' SignedInt ',' Exp ')'
-                      { Transpose $1 $4 $6 $8 $2 }
+     | transpose '(' Exp ')' { Transpose 0 1 $3 $1 }
 
      | transpose '(' NaturalInt ',' SignedInt ',' Exp ')'
-                      { Transpose [] $3 $5 $7 $1 }
+                      { Transpose $3 $5 $7 $1 }
 
      | rotate '(' SignedInt ',' Exp ')'
-                      { Rotate [] $3 $5 $1 }
-
-     | Certificates split '(' '(' Exps ')' ',' Exp ')'
-                      { Split $1 $5 $8 $2 }
+                      { Rotate $3 $5 $1 }
 
      | split '(' '(' Exps ')' ',' Exp ')'
-                      { Split [] $4 $7 $1 }
-
-     | Certificates concat '(' Exp ',' Exps ')'
-                      { Concat $1 $4 $6 $2 }
+                      { Split $4 $7 $1 }
 
      | concat '(' Exp ',' Exps ')'
-                      { Concat [] $3 $5 $1 }
+                      { Concat $3 $5 $1 }
 
      | reduce '(' FunAbstr ',' Exp ',' Exp ')'
                       { Reduce $3 $5 $7 $1 }
@@ -361,12 +341,6 @@ Exp  :: { UncheckedExp }
 
      | copy '(' Exp ')' { Copy $3 $1 }
 
-     | assert '(' Exp ')' { Assert $3 $1 }
-
-     | conjoin '(' Exps ')' { Conjoin $3 $1 }
-
-     | conjoin '(' ')' { Conjoin [] $1 }
-
      | '(' Exp ')' { $2 }
 
      | let Id '=' Exp in Exp %prec letprec
@@ -378,32 +352,24 @@ Exp  :: { UncheckedExp }
      | let '{' TupIds '}' '=' Exp in Exp %prec letprec
                       { LetPat (TupId $3 $1) $6 $8 $1 }
 
-     | let Certificates Id '=' Id with Index '<-' Exp in Exp %prec letprec
-                      { LetWith $2 $3 $5 (fst $7) (snd $7) $9 $11 $1 }
      | let Id '=' Id with Index '<-' Exp in Exp %prec letprec
-                      { LetWith [] $2 $4 (fst $6) (snd $6) $8 $10 $1 }
-     | let Certificates Id Index '=' Exp in Exp %prec letprec
-                      { LetWith $2 $3 $3 (fst $4) (snd $4) $6 $8 $1 }
+                      { LetWith $2 $4 $6 $8 $10 $1 }
+
      | let Id Index '=' Exp in Exp %prec letprec
-                      { LetWith [] $2 $2 (fst $3) (snd $3) $5 $7 $1 }
-     | let Certificates Id '[' ']' '=' Exp in Exp %prec letprec
-                      { LetWith $2 $3 $3 Nothing [] $7 $9 $1 }
+                      { LetWith $2 $2 $3 $5 $7 $1 }
+
      | let Id '[' ']' '=' Exp in Exp %prec letprec
-                      { LetWith [] $2 $2 Nothing [] $6 $8 $1 }
+                      { LetWith $2 $2 [] $6 $8 $1 }
 
      | Id Index
-                      { Index [] $1 (fst $2) (snd $2) (srclocOf $1) }
-
-     | Certificates Id Index
-                      { Index $1 $2 (fst $3) (snd $3) (srclocOf $2) }
+                      { Index $1 $2 (srclocOf $1) }
 
      | loop '(' TupId ')' '=' for Id '<' Exp do Exp in Exp %prec letprec
                       {% liftM (\t -> DoLoop $3 t $7 $9 $11 $13 $1) (tupIdExp $3) }
      | loop '(' TupId '=' Exp ')' '=' for Id '<' Exp do Exp in Exp %prec letprec
                       { DoLoop $3 $5 $9 $11 $13 $15 $1 }
 
-Index : '[' Certificates '|' Exps ']' { (Just $2, $4) }
-      | '[' Exps ']'                  { (Nothing, $2) }
+Index : '[' Exps ']'                  { $2 }
 
 Exps : Exp ',' Exps { $1 : $3 }
      | Exp          { [$1] }
@@ -419,9 +385,6 @@ Id : id { let L loc (ID name) = $1 in Ident name NoInfo loc }
 
 Ids : Id         { [$1] }
     | Id ',' Ids { $1 : $3 }
-
-Certificates : '<' '>'                   { [] }
-             | '<' Ids '>' { $2 }
 
 TupIds : TupId ',' TupIds  { $1 : $3 }
        | TupId             { [$1] }

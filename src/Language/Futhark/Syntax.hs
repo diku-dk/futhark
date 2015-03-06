@@ -25,7 +25,6 @@ module Language.Futhark.Syntax
   -- * Abstract syntax tree
   , IdentBase(..)
   , ParamBase
-  , CertificatesBase
   , ExpBase(..)
   , LambdaBase(..)
   , TupIdentBase(..)
@@ -191,9 +190,6 @@ instance Located (IdentBase ty vn) where
 instance Hashable vn => Hashable (IdentBase ty vn) where
   hashWithSalt salt = hashWithSalt salt . identName
 
--- | A list of identifiers used for certificates in some expressions.
-type CertificatesBase ty vn = [IdentBase ty vn]
-
 -- | Futhark Expression Language: literals + vars + int binops + array
 -- constructors + array combinators (SOAC) + if + function calls +
 -- let + tuples (literals & identifiers) TODO: please add float,
@@ -240,36 +236,23 @@ data ExpBase ty vn =
             | Not    (ExpBase ty vn) SrcLoc -- ^ E.g., @not True == False@.
             | Negate (ExpBase ty vn) SrcLoc -- ^ E.g., @~(~1) = 1@.
 
-            -- Assertion management.
-            | Assert (ExpBase ty vn) SrcLoc
-            -- ^ Turn a boolean into a certificate, halting the
-            -- program if the boolean is false.
-
-            | Conjoin [ExpBase ty vn] SrcLoc
-            -- ^ Convert several certificates into a single certificate.
-
             -- Primitive array operations
-            | LetWith (CertificatesBase ty vn) (IdentBase ty vn) (IdentBase ty vn)
-                      (Maybe (CertificatesBase ty vn)) [ExpBase ty vn] (ExpBase ty vn)
+            | LetWith (IdentBase ty vn) (IdentBase ty vn)
+                      [ExpBase ty vn] (ExpBase ty vn)
                       (ExpBase ty vn) SrcLoc
 
-            | Index (CertificatesBase ty vn)
-                    (IdentBase ty vn)
-                    (Maybe (CertificatesBase ty vn))
+            | Index (IdentBase ty vn)
                     [ExpBase ty vn]
                     SrcLoc
-            -- ^ 3rd arg are (optional) certificates for bounds
-            -- checking.  If given (even as an empty list), no
-            -- run-time bounds checking is done.
 
-            | Size (CertificatesBase ty vn) Int (ExpBase ty vn) SrcLoc
+            | Size Int (ExpBase ty vn) SrcLoc
             -- ^ The size of the specified array dimension.
 
-            | Split (CertificatesBase ty vn) [ExpBase ty vn] (ExpBase ty vn) SrcLoc
+            | Split [ExpBase ty vn] (ExpBase ty vn) SrcLoc
             -- ^ @split( (1,1,3), [ 1, 2, 3, 4 ]) = {[1], [], [2, 3], [4]}@.
             -- Note that this is different from the internal representation
 
-            | Concat (CertificatesBase ty vn) (ExpBase ty vn) [ExpBase ty vn] SrcLoc
+            | Concat (ExpBase ty vn) [ExpBase ty vn] SrcLoc
             -- ^ @concat([1],[2, 3, 4]) = [1, 2, 3, 4]@.
 
             | Copy (ExpBase ty vn) SrcLoc
@@ -283,23 +266,23 @@ data ExpBase ty vn =
             -- ^ @replicate(3,1) = [1, 1, 1]@
 
             -- Array index space transformation.
-            | Reshape (CertificatesBase ty vn) [ExpBase ty vn] (ExpBase ty vn) SrcLoc
+            | Reshape [ExpBase ty vn] (ExpBase ty vn) SrcLoc
              -- ^ 1st arg is the new shape, 2nd arg is the input array *)
 
-            | Transpose (CertificatesBase ty vn) Int Int (ExpBase ty vn) SrcLoc
+            | Transpose Int Int (ExpBase ty vn) SrcLoc
             -- ^ If @b=transpose(k,n,a)@, then @a[i_1, ..., i_k
             -- ,i_{k+1}, ..., i_{k+n}, ..., i_q ] = b[i_1 ,.., i_{k+1}
             -- , ..., i_{k+n} ,i_k, ..., i_q ]@.  Thus,
             -- @transpose(0,1,a)@ is the common two-dimensional
             -- transpose.
 
-            | Rearrange (CertificatesBase ty vn) [Int] (ExpBase ty vn) SrcLoc
+            | Rearrange [Int] (ExpBase ty vn) SrcLoc
             -- ^ Permute the dimensions of the input array.  The list
             -- of integers is a list of dimensions (0-indexed), which
             -- must be a permutation of @[0,n-1]@, where @n@ is the
             -- number of dimensions in the input array.
 
-            | Rotate (CertificatesBase ty vn) Int (ExpBase ty vn) SrcLoc
+            | Rotate Int (ExpBase ty vn) SrcLoc
             -- ^ @rotate(n,a)@ returns a new array, where the element
             -- @a[i]@ is at position @i+n@, cycling over to the
             -- beginning of the array.
@@ -350,15 +333,15 @@ instance Located (ExpBase ty vn) where
   locOf (Var ident) = locOf ident
   locOf (Apply _ _ _ pos) = locOf pos
   locOf (LetPat _ _ _ pos) = locOf pos
-  locOf (LetWith _ _ _ _ _ _ _ pos) = locOf pos
-  locOf (Index _ _ _ _ pos) = locOf pos
+  locOf (LetWith _ _ _ _ _ pos) = locOf pos
+  locOf (Index _ _ pos) = locOf pos
   locOf (Iota _ pos) = locOf pos
-  locOf (Size _ _ _ pos) = locOf pos
+  locOf (Size _ _ pos) = locOf pos
   locOf (Replicate _ _ pos) = locOf pos
-  locOf (Reshape _ _ _ pos) = locOf pos
-  locOf (Transpose _ _ _ _ pos) = locOf pos
-  locOf (Rearrange _ _ _ pos) = locOf pos
-  locOf (Rotate _ _ _ pos) = locOf pos
+  locOf (Reshape _ _ pos) = locOf pos
+  locOf (Transpose _ _ _ pos) = locOf pos
+  locOf (Rearrange _ _ pos) = locOf pos
+  locOf (Rotate _ _ pos) = locOf pos
   locOf (Map _ _ pos) = locOf pos
   locOf (ConcatMap _ _ _ pos) = locOf pos
   locOf (Reduce _ _ _ pos) = locOf pos
@@ -367,11 +350,9 @@ instance Located (ExpBase ty vn) where
   locOf (Scan _ _ _ pos) = locOf pos
   locOf (Filter _ _ pos) = locOf pos
   locOf (Redomap _ _ _ _ pos) = locOf pos
-  locOf (Split _ _ _ pos) = locOf pos
-  locOf (Concat _ _ _ pos) = locOf pos
+  locOf (Split _ _ pos) = locOf pos
+  locOf (Concat _ _ pos) = locOf pos
   locOf (Copy _ pos) = locOf pos
-  locOf (Assert _ loc) = locOf loc
-  locOf (Conjoin _ loc) = locOf loc
   locOf (DoLoop _ _ _ _ _ _ pos) = locOf pos
 
 -- | Anonymous Function

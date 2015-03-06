@@ -64,7 +64,6 @@ data MapperBase tyf tyt vnf vnt m = Mapper {
   , mapOnPattern :: TupIdentBase tyf vnf -> m (TupIdentBase tyt vnt)
   , mapOnIdent :: IdentBase tyf vnf -> m (IdentBase tyt vnt)
   , mapOnValue :: Value -> m Value
-  , mapOnCertificates :: CertificatesBase tyf vnf -> m (CertificatesBase tyt vnt)
   }
 
 -- | A special case of 'MapperBase' when the name- and type
@@ -80,7 +79,6 @@ identityMapper = Mapper {
                  , mapOnPattern = return
                  , mapOnIdent = return
                  , mapOnValue = return
-                 , mapOnCertificates = return
                  }
 
 -- | Map a monadic action across the immediate children of an
@@ -114,43 +112,33 @@ mapExpM tv (Apply fname args t loc) = do
 mapExpM tv (LetPat pat e body loc) =
   pure LetPat <*> mapOnPattern tv pat <*> mapOnExp tv e <*>
          mapOnExp tv body <*> pure loc
-mapExpM tv (LetWith cs dest src idxcs idxexps vexp body loc) =
-  pure LetWith <*> mapOnCertificates tv cs <*>
+mapExpM tv (LetWith dest src idxexps vexp body loc) =
+  pure LetWith <*>
        mapOnIdent tv dest <*> mapOnIdent tv src <*>
-       (case idxcs of
-          Nothing -> return Nothing
-          Just idxcs' -> Just <$> mapOnCertificates tv idxcs') <*>
        mapM (mapOnExp tv) idxexps <*> mapOnExp tv vexp <*>
        mapOnExp tv body <*> pure loc
-mapExpM tv (Index cs arr idxcs idxexps loc) =
-  pure Index <*> mapOnCertificates tv cs <*>
+mapExpM tv (Index arr idxexps loc) =
+  pure Index <*>
        mapOnIdent tv arr <*>
-       (case idxcs of
-          Nothing -> return Nothing
-          Just idxcs' -> Just <$> mapOnCertificates tv idxcs') <*>
        mapM (mapOnExp tv) idxexps <*>
        pure loc
 mapExpM tv (Iota nexp loc) =
   pure Iota <*> mapOnExp tv nexp <*> pure loc
-mapExpM tv (Size cs i e loc) =
-  pure Size <*> mapOnCertificates tv cs <*>
-       pure i <*> mapOnExp tv e <*> pure loc
+mapExpM tv (Size i e loc) =
+  pure Size <*> pure i <*> mapOnExp tv e <*> pure loc
 mapExpM tv (Replicate nexp vexp loc) =
   pure Replicate <*> mapOnExp tv nexp <*> mapOnExp tv vexp <*> pure loc
-mapExpM tv (Reshape cs shape arrexp loc) =
-  pure Reshape <*> mapOnCertificates tv cs <*>
-       mapM (mapOnExp tv) shape <*>
-       mapOnExp tv arrexp <*> pure loc
-mapExpM tv (Transpose cs k n e3 loc) =
-  pure Transpose <*> mapOnCertificates tv cs <*>
+mapExpM tv (Reshape shape arrexp loc) =
+  pure Reshape <*> mapM (mapOnExp tv) shape <*>
+                   mapOnExp tv arrexp <*> pure loc
+mapExpM tv (Transpose k n e3 loc) =
+  pure Transpose <*>
        pure k <*> pure n <*>
        mapOnExp tv e3 <*> pure loc
-mapExpM tv (Rearrange cs perm e loc) =
-  pure Rearrange <*> mapOnCertificates tv cs <*>
-       pure perm <*> mapOnExp tv e <*> pure loc
-mapExpM tv (Rotate cs n e loc) =
-  pure Rotate <*> mapOnCertificates tv cs <*>
-       pure n <*> mapOnExp tv e <*> pure loc
+mapExpM tv (Rearrange perm e loc) =
+  pure Rearrange <*> pure perm <*> mapOnExp tv e <*> pure loc
+mapExpM tv (Rotate n e loc) =
+  pure Rotate <*> pure n <*> mapOnExp tv e <*> pure loc
 mapExpM tv (Map fun e loc) =
   pure Map <*> mapOnLambda tv fun <*> mapOnExp tv e <*> pure loc
 mapExpM tv (ConcatMap fun e es loc) =
@@ -176,19 +164,15 @@ mapExpM tv (Filter fun arrexp loc) =
 mapExpM tv (Redomap redfun mapfun accexp arrexp loc) =
   pure Redomap <*> mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
        mapOnExp tv accexp <*> mapOnExp tv arrexp <*> pure loc
-mapExpM tv (Split cs splitexps arrexp loc) =
-  pure Split <*> mapOnCertificates tv cs <*>
+mapExpM tv (Split splitexps arrexp loc) =
+  pure Split <*>
        mapM (mapOnExp tv) splitexps <*> mapOnExp tv arrexp <*>
        pure loc
-mapExpM tv (Concat cs x ys loc) =
-  pure Concat <*> mapOnCertificates tv cs <*>
+mapExpM tv (Concat x ys loc) =
+  pure Concat <*>
        mapOnExp tv x <*> mapM (mapOnExp tv) ys <*> pure loc
 mapExpM tv (Copy e loc) =
   pure Copy <*> mapOnExp tv e <*> pure loc
-mapExpM tv (Assert e loc) =
-  pure Assert <*> mapOnExp tv e <*> pure loc
-mapExpM tv (Conjoin es loc) =
-  pure Conjoin <*> mapM (mapOnExp tv) es <*> pure loc
 mapExpM tv (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody loc) =
   pure DoLoop <*> mapOnPattern tv mergepat <*> mapOnExp tv mergeexp <*>
        mapOnIdent tv loopvar <*> mapOnExp tv boundexp <*>
@@ -206,7 +190,6 @@ data Folder ty vn a m = Folder {
   , foldOnPattern :: a -> TupIdentBase ty vn -> m a
   , foldOnIdent :: a -> IdentBase ty vn -> m a
   , foldOnValue :: a -> Value -> m a
-  , foldOnCertificates :: a -> CertificatesBase ty vn -> m a
   }
 
 -- | A folding operation where the accumulator is returned verbatim.
@@ -218,7 +201,6 @@ identityFolder = Folder {
                  , foldOnPattern = const . return
                  , foldOnIdent = const . return
                  , foldOnValue = const . return
-                 , foldOnCertificates = const . return
                  }
 
 -- | Perform a left-reduction across the immediate children of an
@@ -234,7 +216,6 @@ foldExpM f x e = execStateT (mapExpM m e) x
             , mapOnPattern = wrap foldOnPattern
             , mapOnIdent = wrap foldOnIdent
             , mapOnValue = wrap foldOnValue
-            , mapOnCertificates = wrap foldOnCertificates
             }
         wrap op k = do
           v <- get
@@ -255,7 +236,6 @@ data Walker ty vn m = Walker {
   , walkOnPattern :: TupIdentBase ty vn -> m ()
   , walkOnIdent :: IdentBase ty vn -> m ()
   , walkOnValue :: Value -> m ()
-  , walkOnCertificates :: CertificatesBase ty vn -> m ()
   }
 
 -- | A no-op traversal.
@@ -267,7 +247,6 @@ identityWalker = Walker {
                  , walkOnPattern = const $ return ()
                  , walkOnIdent = const $ return ()
                  , walkOnValue = const $ return ()
-                 , walkOnCertificates = const $ return ()
                  }
 
 -- | Perform a monadic action on each of the immediate children of an
@@ -284,6 +263,5 @@ walkExpM f = void . mapExpM m
             , mapOnPattern = wrap walkOnPattern
             , mapOnIdent = wrap walkOnIdent
             , mapOnValue = wrap walkOnValue
-            , mapOnCertificates = wrap walkOnCertificates
             }
         wrap op k = op f k >> return k
