@@ -177,9 +177,9 @@ mapExpM tv (Split cs nexp arrexp loc) =
   pure Split <*> mapOnCertificates tv cs <*>
        mapOnExp tv nexp <*> mapOnExp tv arrexp <*>
        pure loc
-mapExpM tv (Concat cs x y loc) =
+mapExpM tv (Concat cs x ys loc) =
   pure Concat <*> mapOnCertificates tv cs <*>
-       mapOnExp tv x <*> mapOnExp tv y <*> pure loc
+       mapOnExp tv x <*> mapM (mapOnExp tv) ys <*> pure loc
 mapExpM tv (Copy e loc) =
   pure Copy <*> mapOnExp tv e <*> pure loc
 mapExpM tv (Assert e loc) =

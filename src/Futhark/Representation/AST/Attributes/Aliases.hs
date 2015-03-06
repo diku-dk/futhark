@@ -57,8 +57,8 @@ primOpAliases (Rotate _ _ e) =
   [identAliases e]
 primOpAliases (Split _ _ e _) =
   [identAliases e,identAliases e]
-primOpAliases (Concat _ x y _) =
-  [identAliases x <> identAliases y]
+primOpAliases (Concat _ x ys _) =
+  [identAliases x <> mconcat (map identAliases ys)]
 primOpAliases (Copy {}) =
   [mempty]
 primOpAliases (Assert {}) =

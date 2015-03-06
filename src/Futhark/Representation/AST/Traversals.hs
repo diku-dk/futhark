@@ -155,9 +155,9 @@ mapExpM tv (PrimOp (Split cs nexp arrexp size)) =
   PrimOp <$> (pure Split <*> mapOnCertificates tv cs <*>
                  mapOnSubExp tv nexp <*> mapOnIdent tv arrexp <*>
                  mapOnSubExp tv size)
-mapExpM tv (PrimOp (Concat cs x y size)) =
+mapExpM tv (PrimOp (Concat cs x ys size)) =
   PrimOp <$> (pure Concat <*> mapOnCertificates tv cs <*>
-                 mapOnIdent tv x <*> mapOnIdent tv y <*>
+                 mapOnIdent tv x <*> mapM (mapOnIdent tv) ys <*>
                  mapOnSubExp tv size)
 mapExpM tv (PrimOp (Copy e)) =
   PrimOp <$> (pure Copy <*> mapOnSubExp tv e)

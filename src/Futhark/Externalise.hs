@@ -94,10 +94,10 @@ externalisePrimOp (I.Split cs ne ae _) =
           (externaliseSubExp ne)
           (E.Var $ externaliseIdent ae)
           noLoc
-externalisePrimOp (I.Concat cs x y _) =
+externalisePrimOp (I.Concat cs x ys _) =
   E.Concat (externaliseCerts cs)
            (E.Var $ externaliseIdent x)
-           (E.Var $ externaliseIdent y)
+           (map (E.Var . externaliseIdent) ys)
            noLoc
 externalisePrimOp (I.Copy e) =
   E.Copy (externaliseSubExp e) noLoc

@@ -306,10 +306,10 @@ Exp  :: { UncheckedExp }
      | split '(' Exp ',' Exp ')'
                       { Split [] $3 $5 $1 }
 
-     | Certificates concat '(' Exp ',' Exp ')'
+     | Certificates concat '(' Exp ',' Exps ')'
                       { Concat $1 $4 $6 $2 }
 
-     | concat '(' Exp ',' Exp ')'
+     | concat '(' Exp ',' Exps ')'
                       { Concat [] $3 $5 $1 }
 
      | reduce '(' FunAbstr ',' Exp ',' Exp ')'

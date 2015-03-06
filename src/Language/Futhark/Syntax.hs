@@ -223,7 +223,7 @@ data ExpBase ty vn =
             | Split (CertificatesBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
             -- ^ @split(1, [ 1, 2, 3, 4 ]) = {[1],[2, 3, 4]}@.
 
-            | Concat (CertificatesBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
+            | Concat (CertificatesBase ty vn) (ExpBase ty vn) [ExpBase ty vn] SrcLoc
             -- ^ @concat([1],[2, 3, 4]) = [1, 2, 3, 4]@.
 
             | Copy (ExpBase ty vn) SrcLoc

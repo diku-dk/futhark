@@ -762,12 +762,12 @@ checkExp (Split cs splitexp arrexp pos) = do
   _ <- rowTypeM arrexp' -- Just check that it's an array.
   return $ Split cs' splitexp' arrexp' pos
 
-checkExp (Concat cs arr1exp arr2exp pos) = do
+checkExp (Concat cs arr1exp arr2exps pos) = do
   cs' <- mapM (requireI [Elem $ Basic Cert] <=< checkIdent) cs
-  arr1exp' <- checkExp arr1exp
-  arr2exp' <- require [typeOf arr1exp'] =<< checkExp arr2exp
-  _ <- rowTypeM arr2exp' -- Just check that it's an array.
-  return $ Concat cs' arr1exp' arr2exp' pos
+  arr1exp'  <- checkExp arr1exp
+  arr2exps' <- mapM (require [typeOf arr1exp'] <=< checkExp) arr2exps
+  mapM_ rowTypeM arr2exps' -- Just check that it's an array.
+  return $ Concat cs' arr1exp' arr2exps' pos
 
 checkExp (Copy e pos) = do
   e' <- checkExp e

@@ -152,7 +152,7 @@ data PrimOp lore
   | Split Certificates SubExp Ident SubExp
   -- ^ @split(1, [ 1, 2, 3, 4 ]) = {[1],[2, 3, 4]}@.
 
-  | Concat Certificates Ident Ident SubExp
+  | Concat Certificates Ident [Ident] SubExp
   -- ^ @concat([1],[2, 3, 4]) = [1, 2, 3, 4]@.
 
   | Copy SubExp

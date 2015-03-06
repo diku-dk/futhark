@@ -666,14 +666,16 @@ checkPrimOp (Split cs splitexp arrexp secsize) = do
   require [Basic Int] secsize
   void $ checkArrIdent arrexp
 
-checkPrimOp (Concat cs arr1exp arr2exp ressize) = do
+checkPrimOp (Concat cs arr1exp arr2exps ressize) = do
   mapM_ (requireI [Basic Cert]) cs
-  arr1t <- checkArrIdent arr1exp
-  arr2t <- checkArrIdent arr2exp
-  unless (stripArray 1 arr1t == stripArray 1 arr2t) $
+  arr1t  <- checkArrIdent arr1exp
+  arr2ts <- mapM checkArrIdent arr2exps
+  let success = all (== stripArray 1 arr1t) $
+                    map (stripArray 1) arr2ts
+  unless success $
     bad $ TypeError noLoc $
     "Types of arguments to concat do not match.  Got " ++
-    pretty arr1t ++ " and " ++ pretty arr2t
+    pretty arr1t ++ " and " ++ intercalate ", " (map pretty arr2ts)
   require [Basic Int] ressize
 
 checkPrimOp (Copy e) =
