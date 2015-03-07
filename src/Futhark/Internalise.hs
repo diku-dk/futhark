@@ -74,11 +74,6 @@ internaliseIdent (E.Ident name tp _) =
     [I.Basic tp'] -> return $ I.Ident name (I.Basic tp')
     _             -> fail "Futhark.Internalise.internaliseIdent: asked to internalise non-basic-typed ident."
 
-internaliseCerts :: E.Certificates -> I.Certificates
-internaliseCerts = map internaliseCert
-  where internaliseCert (E.Ident name _ _) =
-          I.Ident name (I.Basic I.Cert)
-
 internaliseBody :: E.Exp -> InternaliseM Body
 internaliseBody e = insertBindingsM $ do
   ses <- internaliseExp "res" e
@@ -92,19 +87,15 @@ internaliseExp _ (E.Var var) = do
     Nothing     -> (:[]) . I.Var <$> internaliseIdent var
     Just substs -> return $ map I.Var substs
 
-internaliseExp desc (E.Index cs var csidx idxs loc) = do
+internaliseExp desc (E.Index var idxs loc) = do
   idxs' <- mapM (internaliseExp1 "i") idxs
   subst <- asks $ HM.lookup (E.identName var) . envSubsts
-  let cs' = internaliseCerts cs
-      mkCerts vs = case csidx of
-                     Just csidx' -> return $ internaliseCerts csidx'
-                     Nothing     -> boundsChecks loc vs idxs'
   case subst of
     Nothing ->
       fail $ "Futhark.Internalise.internaliseExp Index: unknown variable " ++ textual (E.identName var) ++ "."
     Just vs -> do
-      csidx' <- mkCerts vs
-      let index v = I.PrimOp $ I.Index (cs' ++ csidx') v idxs'
+      csidx' <- boundsChecks loc vs idxs'
+      let index v = I.PrimOp $ I.Index csidx' v idxs'
       letSubExps desc (map index vs)
 
 internaliseExp desc (E.TupLit es _) =
@@ -190,18 +181,15 @@ internaliseExp desc (E.DoLoop mergepat mergeexp i bound loopbody letbody _) = do
     letBind_ mergepat'' loop
     internaliseExp desc letbody
 
-internaliseExp desc (E.LetWith cs name src idxcs idxs ve body loc) = do
+internaliseExp desc (E.LetWith name src idxs ve body loc) = do
   idxs' <- mapM (internaliseExp1 "idx") idxs
   srcs <- internaliseExpToIdents "src" $ E.Var src
   ves <- internaliseExp "lw_val" ve
-  let cs' = internaliseCerts cs
-  idxcs' <- case idxcs of
-              Just idxcs' -> return $ internaliseCerts idxcs'
-              Nothing     -> boundsChecks loc srcs idxs'
+  idxcs' <- boundsChecks loc srcs idxs'
   let comb sname ve' = do
         let rowtype = I.stripArray (length idxs) $ I.identType sname
         ve'' <- ensureShape loc rowtype "lw_val_correct_shape" ve'
-        letInPlace "letwith_dst" (cs'++idxcs') sname idxs' $
+        letInPlace "letwith_dst" idxcs' sname idxs' $
           PrimOp $ SubExp ve''
   dsts <- zipWithM comb srcs ves
   bindingTupIdent (E.Id name)
@@ -215,7 +203,7 @@ internaliseExp desc (E.Replicate ne ve _) = do
   ves <- internaliseExp "replicate_v" ve
   letSubExps desc [I.PrimOp $ I.Replicate ne' ve' | ve' <- ves ]
 
-internaliseExp desc (E.Size _ i e _) = do
+internaliseExp desc (E.Size i e _) = do
   ks <- internaliseExp desc e
   case ks of
     (k:_) -> return [I.arraySize i $ I.subExpType k]
@@ -248,23 +236,23 @@ internaliseExp _ (E.Zip (e:es) loc) = do
   es' <- mapM (mapM reshapeToOuter) es_unchecked'
   return $ concatMap (map I.Var) $ e' : es'
 
-internaliseExp _ (E.Transpose cs k n e _) =
-  internaliseOperation "transpose" cs e $ \cs' v ->
+internaliseExp _ (E.Transpose k n e _) =
+  internaliseOperation "transpose" e $ \v ->
     let rank = I.arrayRank $ I.identType v
         perm = I.transposeIndex k n [0..rank-1]
-    in  return $ I.Rearrange cs' perm v
+    in  return $ I.Rearrange [] perm v
 
-internaliseExp _ (E.Rearrange cs perm e _) =
-  internaliseOperation "rearrange" cs e $ \cs' v ->
-    return $ I.Rearrange cs' perm v
+internaliseExp _ (E.Rearrange perm e _) =
+  internaliseOperation "rearrange" e $ \v ->
+    return $ I.Rearrange [] perm v
 
-internaliseExp _ (E.Rotate cs n e _) =
-  internaliseOperation "rotate" cs e $ \cs' v ->
-    return $ I.Rotate cs' n v
+internaliseExp _ (E.Rotate n e _) =
+  internaliseOperation "rotate" e $ \v ->
+    return $ I.Rotate [] n v
 
-internaliseExp _ (E.Reshape cs shape e loc) = do
+internaliseExp _ (E.Reshape shape e loc) = do
   shape' <- mapM (internaliseExp1 "shape") shape
-  internaliseOperation "reshape" cs e $ \cs' v -> do
+  internaliseOperation "reshape" e $ \v -> do
     -- The resulting shape needs to have the same number of elements
     -- as the original shape.
     shapeOk <- letExp "shape_ok" =<<
@@ -272,50 +260,58 @@ internaliseExp _ (E.Reshape cs shape e loc) = do
                                        (prod shape')
                                        I.Bool)
                loc
-    return $ I.Reshape (shapeOk:cs') shape' v
+    return $ I.Reshape [shapeOk] shape' v
   where prod l = foldBinOp I.Times (intconst 1) l I.Int
 
-internaliseExp _ (E.Split cs nexp arrexp _) = do
-  let cs' = internaliseCerts cs
-  nexp' <- internaliseExp1 "n" nexp
+internaliseExp _ (E.Split splitexps arrexp loc) = do
+  splits' <- mapM (internaliseExp1 "n") splitexps
+  -- Note that @arrs@ is an array, because of array-of-tuples transformation
   arrs <- internaliseExpToIdents "split_arr" arrexp
-  ressize <- letSubExp "split_size" $
-             PrimOp $ I.BinOp I.Minus (arraysSize 0 $ map I.identType arrs)
-             nexp' I.Int
-  partnames <- forM (map I.identType arrs) $ \et -> do
-    a <- fst <$> newVar "split_a" (et `setOuterSize` nexp')
-    b <- fst <$> newVar "split_b" (et `setOuterSize` ressize)
-    return (a, b)
-  let combsplit arr (a,b) =
-        letBind_ (basicPattern' [a,b]) $
-        PrimOp $ I.Split cs' nexp' arr ressize
-  zipWithM_ combsplit arrs partnames
-  return $
-    map (I.Var . fst) partnames ++
-    map (I.Var . snd) partnames
+  let arrayOuterdim = arraysSize 0 (map I.identType arrs)
 
-internaliseExp desc (E.Concat cs x y loc) = do
-  xs <- internaliseExpToIdents "concat_x" x
-  ys <- internaliseExpToIdents "concat_y" y
-  let cs' = internaliseCerts cs
-  ressize <- letSubExp "concat_size" $ I.PrimOp $
-             I.BinOp I.Plus (arraysSize 0 $ map I.identType xs)
-             (arraysSize 0 $ map I.identType ys)
-             Int
-  let conc xarr yarr = do
+  -- Assertions
+  let indexConds = zipWith (\beg end -> PrimOp $ I.BinOp I.Leq beg end I.Bool)
+                     (I.intconst 0:splits') (splits'++[arrayOuterdim])
+  indexChecks <- mapM (letSubExp "split_index_cnd") indexConds
+  indexAsserts <- mapM (\cnd -> letExp "split_index_assert" $ PrimOp $ I.Assert cnd loc)
+                  indexChecks
+
+  -- Calculate diff between each split index
+  let sizeExps = zipWith (\beg end -> PrimOp $ I.BinOp I.Minus end beg I.Int)
+                 (I.intconst 0:splits') (splits'++[arrayOuterdim])
+  sizeVars <- mapM (letSubExp "split_size") sizeExps
+  splitExps <- forM arrs $ \arr -> letTupExp' "split_res" $
+                                   PrimOp $ I.Split indexAsserts sizeVars arr
+
+  return $ concat $ transpose splitExps
+
+internaliseExp desc (E.Concat x ys loc) = do
+  xs  <- internaliseExpToIdents "concat_x" x
+  yss <- mapM (internaliseExpToIdents "concat_y") ys
+  ressize <- foldM sumdims 
+                   (arraysSize 0 $ map I.identType xs) $
+                   map (arraysSize 0 . map I.identType) yss
+
+  let conc xarr yarrs = do
         -- The inner sizes must match.
         let matches n m =
               letExp "match" =<<
               eAssert (pure $ I.PrimOp $ I.BinOp I.Equal n m I.Bool) loc
-            xt = I.identType xarr
-            yt = I.identType yarr
-            x_inner_dims = drop 1 $ I.arrayDims xt
-            y_inner_dims = drop 1 $ I.arrayDims yt
-        matchcs <- zipWithM matches x_inner_dims y_inner_dims
-        yarr' <- letExp "concat_y_reshaped" $ I.PrimOp $
-                 I.Reshape matchcs (arraySize 0 yt : x_inner_dims) yarr
-        return $ I.PrimOp $ I.Concat cs' xarr yarr' ressize
-  letSubExps desc =<< zipWithM conc xs ys
+            xt  = I.identType xarr
+            yts = map I.identType yarrs
+            x_inner_dims  = drop 1 $ I.arrayDims xt
+            ys_inner_dims = map (drop 1 . I.arrayDims) yts
+        matchcs <- concat <$> mapM (zipWithM matches x_inner_dims) ys_inner_dims
+        yarrs'  <- forM yarrs $ \yarr ->
+                        let yt = I.identType yarr
+                        in  letExp "concat_y_reshaped" $ I.PrimOp $
+                                   I.Reshape matchcs (arraySize 0 yt : x_inner_dims) yarr
+        return $ I.PrimOp $ I.Concat [] xarr yarrs' ressize
+  letSubExps desc =<< zipWithM conc xs (transpose yss)
+
+    where
+        sumdims xsize ysize = letSubExp "conc_tmp" $ I.PrimOp $
+                                        I.BinOp I.Plus xsize ysize I.Int 
 
 internaliseExp desc (E.Map lam arr _) = do
   arrs <- internaliseExpToIdents "map_arr" arr
@@ -404,17 +400,9 @@ internaliseExp desc (E.Negate e _) = do
   e' <- internaliseExp1 "negate_arg" e
   letTupExp' desc $ I.PrimOp $ I.Negate e'
 
-internaliseExp desc (E.Assert e loc) = do
-  e' <- internaliseExp1 "assert_arg" e
-  letTupExp' desc $ I.PrimOp $ I.Assert e' loc
-
 internaliseExp desc (E.Copy e _) = do
   ses <- internaliseExp "copy_arg" e
   letSubExps desc [I.PrimOp $ I.Copy se | se <- ses]
-
-internaliseExp desc (E.Conjoin es _) = do
-  es' <- concat <$> mapM (internaliseExp "conjoin_arg") es
-  letTupExp' desc $ I.PrimOp $ I.Conjoin es'
 
 internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp
 internaliseExp1 desc e = do
@@ -429,14 +417,12 @@ internaliseExpToIdents desc e =
         asIdent se        = letExp desc $ I.PrimOp $ I.SubExp se
 
 internaliseOperation :: String
-                     -> E.Certificates
                      -> E.Exp
-                     -> (I.Certificates -> I.Ident -> InternaliseM I.PrimOp)
+                     -> (I.Ident -> InternaliseM I.PrimOp)
                      -> InternaliseM [I.SubExp]
-internaliseOperation s cs e op = do
+internaliseOperation s e op = do
   vs <- internaliseExpToIdents s e
-  let cs' = internaliseCerts cs
-  letSubExps s =<< mapM (liftM I.PrimOp . op cs') vs
+  letSubExps s =<< mapM (liftM I.PrimOp . op) vs
 
 boundsChecks :: SrcLoc -> [I.Ident] -> [I.SubExp] -> InternaliseM I.Certificates
 boundsChecks _ []    _  = return []

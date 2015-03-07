@@ -75,12 +75,11 @@ primOpType (Rearrange _ perm e) =
   where Shape shape = arrayShape $ identType e
 primOpType (Rotate _ _ e) =
   [identType e]
-primOpType (Split _ ne e secsize) =
-  [identType e `setOuterSize` ne,
-   identType e `setOuterSize` secsize]
-primOpType (Concat _ x y ressize) =
+primOpType (Split _ sizeexps e) =
+  map (identType e `setOuterSize`) sizeexps
+primOpType (Concat _ x ys ressize) =
   [identType x `setUniqueness` u `setOuterSize` ressize]
-  where u = uniqueness (identType x) <> uniqueness (identType y)
+  where u = uniqueness (identType x) <> mconcat ( map uniqueness (map identType ys) )
 primOpType (Copy e) =
   [subExpType e `setUniqueness` Unique]
 primOpType (Assert _ _) =

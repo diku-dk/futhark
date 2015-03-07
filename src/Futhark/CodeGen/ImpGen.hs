@@ -359,23 +359,23 @@ defCompilePrimOp _ (Split {}) =
 
 defCompilePrimOp
   (Destination [ArrayDestination (CopyIntoMemory (MemLocation destmem destixfun)) _])
-  (Concat _ x y _) = do
+  (Concat _ x ys _) = do
     destoffset <- ixFunOffset destixfun
-    xentry <- lookupArray $ identName x
-    let MemLocation xmem xixfun = entryArrayLocation xentry
-    xoffset <- ixFunOffset xixfun
-    yentry <- lookupArray $ identName y
-    let MemLocation ymem yixfun = entryArrayLocation yentry
-    yoffset <- ixFunOffset yixfun
-    emit $ copy
-      destmem (destoffset `withElemType` et)
-      xmem (xoffset `withElemType` et) $
-      arrayByteSizeExp xentry
-    emit $ copy
-      destmem (destoffset `withElemType` et
-               `plus` arrayByteSizeExp xentry)
-      ymem (yoffset `withElemType` et) $
-      arrayByteSizeExp yentry
+    offs_glb <- newVName "tmp_offs"
+    emit $ Imp.DeclareScalar offs_glb Int
+    emit $ Imp.SetScalar offs_glb $ innerExp (destoffset `withElemType` et)
+
+    forM_ (x:ys) $ \y -> do
+        yentry <- lookupArray $ identName y
+        let MemLocation ymem yixfun = entryArrayLocation yentry
+        yoffset <- ixFunOffset yixfun
+        emit $ copy
+                destmem (bytes (Imp.ScalarVar offs_glb))
+                ymem (yoffset `withElemType` et)
+                (arrayByteSizeExp yentry)
+        emit $ Imp.SetScalar offs_glb $
+               Imp.BinOp Plus (Imp.ScalarVar offs_glb) $
+               innerExp (arrayByteSizeExp yentry)
   where et = elemType $ identType x
 
 defCompilePrimOp

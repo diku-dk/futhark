@@ -191,17 +191,14 @@ renameFun (fname, ret, params, body, pos) =
 
 renameExp :: (TypeBox ty, VarName f, VarName t) =>
              ExpBase ty f -> RenameM f t (ExpBase ty t)
-renameExp (LetWith cs dest src idxcs idxs ve body loc) = do
-  cs' <- mapM repl cs
+renameExp (LetWith dest src idxs ve body loc) = do
   src' <- repl src
-  idxcs' <- case idxcs of Just idxcs' -> Just <$> mapM repl idxcs'
-                          Nothing     -> return Nothing
   idxs' <- mapM renameExp idxs
   ve' <- renameExp ve
   bind [dest] $ do
     dest' <- repl dest
     body' <- renameExp body
-    return $ LetWith cs' dest' src' idxcs' idxs' ve' body' loc
+    return $ LetWith dest' src' idxs' ve' body' loc
 renameExp (LetPat pat e body pos) = do
   e1' <- renameExp e
   bind (patternNames pat) $ do
@@ -246,7 +243,6 @@ rename = Mapper {
          , mapOnLambda = renameLambda
          , mapOnType = renameType
          , mapOnValue = return
-         , mapOnCertificates = mapM repl
          }
 
 renameLambda :: (TypeBox ty, VarName f, VarName t) =>

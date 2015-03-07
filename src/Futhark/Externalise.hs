@@ -72,14 +72,8 @@ externalisePrimOp (I.Not x) =
   E.Not (externaliseSubExp x) noLoc
 externalisePrimOp (I.Negate x) =
   E.Negate (externaliseSubExp x) noLoc
-externalisePrimOp (I.Assert x loc) =
-  E.Assert (externaliseSubExp x) loc
-externalisePrimOp (I.Conjoin es) =
-  E.Conjoin (map externaliseSubExp es) noLoc
-externalisePrimOp (I.Index cs src idxs) =
-  E.Index (externaliseCerts cs)
-          (externaliseIdent src)
-          (Just [])
+externalisePrimOp (I.Index _ src idxs) =
+  E.Index (externaliseIdent src)
           (map externaliseSubExp idxs)
           noLoc
   {-
@@ -89,15 +83,16 @@ externalisePrimOp (I.Update cs src idxs ve) =
             (externaliseSubExp ve) (E.Var $ externaliseIdent src)
             noLoc
 -}
-externalisePrimOp (I.Split cs ne ae _) =
+{- TODO: Externalise Split
+externalisePrimOp (I.Split cs sizeexps ae) =
   E.Split (externaliseCerts cs)
           (externaliseSubExp ne)
           (E.Var $ externaliseIdent ae)
           noLoc
-externalisePrimOp (I.Concat cs x y _) =
-  E.Concat (externaliseCerts cs)
-           (E.Var $ externaliseIdent x)
-           (E.Var $ externaliseIdent y)
+-}
+externalisePrimOp (I.Concat _ x ys _) =
+  E.Concat (E.Var $ externaliseIdent x)
+           (map (E.Var . externaliseIdent) ys)
            noLoc
 externalisePrimOp (I.Copy e) =
   E.Copy (externaliseSubExp e) noLoc
@@ -107,19 +102,16 @@ externalisePrimOp (I.Replicate ne ve) =
   E.Replicate (externaliseSubExp ne)
               (externaliseSubExp ve)
               noLoc
-externalisePrimOp (I.Reshape cs shape e) =
-  E.Reshape (externaliseCerts cs)
-            (map externaliseSubExp shape)
+externalisePrimOp (I.Reshape _ shape e) =
+  E.Reshape (map externaliseSubExp shape)
             (E.Var $ externaliseIdent e)
             noLoc
-externalisePrimOp (I.Rearrange cs perm e) =
-  E.Rearrange (externaliseCerts cs)
-              perm
+externalisePrimOp (I.Rearrange _ perm e) =
+  E.Rearrange perm
               (E.Var $ externaliseIdent e)
               noLoc
-externalisePrimOp (I.Rotate cs n e) =
-  E.Rotate (externaliseCerts cs)
-           n
+externalisePrimOp (I.Rotate _ n e) =
+  E.Rotate n
            (E.Var $ externaliseIdent e)
            noLoc
 
@@ -204,9 +196,6 @@ makeTupleParam _ = Nothing
 externaliseDiet :: I.Diet -> E.Diet
 externaliseDiet I.Consume = E.Consume
 externaliseDiet I.Observe = E.Observe
-
-externaliseCerts :: I.Certificates -> E.Certificates
-externaliseCerts = map externaliseIdent
 
 externalisePat :: I.Pattern -> E.TupIdent
 externalisePat = externaliseBinders . patternIdents

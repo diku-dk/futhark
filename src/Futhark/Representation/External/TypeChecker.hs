@@ -398,15 +398,6 @@ require ts e
                       map (toDecl . untagType) ts
   where e' = untagExp e
 
--- | Variant of 'require' working on identifiers.
-requireI :: VarName vn => [TaggedType vn] -> TaggedIdent CompTypeBase vn
-         -> TypeM vn (TaggedIdent CompTypeBase vn)
-requireI ts ident
-  | any (identType ident `similarTo`) ts = return ident
-  | otherwise = bad $ UnexpectedType (srclocOf e) e
-                (toDecl $ typeOf e) $ map (untagType . toDecl) ts
-  where e = untagExp $ Var ident
-
 rowTypeM :: VarName vn => TaggedExp CompTypeBase vn -> TypeM vn (TaggedType vn)
 rowTypeM e = maybe wrong return $ peelArray 1 $ typeOf e
   where wrong = bad $ TypeError (srclocOf e) $ "Type of expression is not array, but " ++ ppType (typeOf e) ++ "."
@@ -624,13 +615,8 @@ checkExp (LetPat pat e body pos) = do
     body' <- checkExp body
     return $ LetPat pat' e' body' pos
 
-checkExp (LetWith cs (Ident dest destt destpos) src idxcs idxes ve body pos) = do
-  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
+checkExp (LetWith (Ident dest destt destpos) src idxes ve body pos) = do
   src' <- checkIdent src
-  idxcs' <-
-    case idxcs of
-      Nothing       -> return Nothing
-      Just idxcs' -> Just <$> mapM (requireI [Basic Cert] <=< checkIdent) idxcs'
   idxes' <- mapM (require [Basic Int] <=< checkExp) idxes
   destt' <- checkAnnotation pos "source" destt $ identType src' `setAliases` HS.empty
   let dest' = Ident dest destt' destpos
@@ -648,15 +634,9 @@ checkExp (LetWith cs (Ident dest destt destpos) src idxcs idxes ve body pos) = d
           bad $ BadLetWithValue pos
         (scope, _) <- checkBinding (Id dest') destt' mempty
         body' <- consuming src' $ scope $ checkExp body
-        return $ LetWith cs' dest' src' idxcs' idxes' ve' body' pos
+        return $ LetWith dest' src' idxes' ve' body' pos
 
-checkExp (Index cs ident csidxes idxes pos) = do
-  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
-  csidxes' <-
-    case csidxes of
-      Nothing       -> return Nothing
-      Just csidxes' ->
-        Just <$> mapM (requireI [Basic Cert] <=< checkIdent) csidxes'
+checkExp (Index ident idxes pos) = do
   ident' <- checkIdent ident
   observe ident'
   vt <- lookupVar (identName ident') pos
@@ -664,19 +644,18 @@ checkExp (Index cs ident csidxes idxes pos) = do
     bad $ IndexingError (baseName $ identName ident)
           (arrayRank vt) (length idxes) pos
   idxes' <- mapM (require [Basic Int] <=< checkExp) idxes
-  return $ Index cs' ident' csidxes' idxes' pos
+  return $ Index ident' idxes' pos
 
 checkExp (Iota e pos) = do
   e' <- require [Basic Int] =<< checkExp e
   return $ Iota e' pos
 
-checkExp (Size cs i e pos) = do
+checkExp (Size i e pos) = do
   e' <- checkExp e
-  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
   case typeOf e' of
     Array {}
       | i >= 0 && i < arrayRank (typeOf e') ->
-        return $ Size cs' i e' pos
+        return $ Size i e' pos
       | otherwise ->
         bad $ TypeError pos $ "Type " ++ ppType (typeOf e') ++ " has no dimension " ++ show i ++ "."
     _        -> bad $ TypeError pos "Argument to size must be array."
@@ -686,34 +665,30 @@ checkExp (Replicate countexp valexp pos) = do
   valexp' <- checkExp valexp
   return $ Replicate countexp' valexp' pos
 
-checkExp (Reshape cs shapeexps arrexp pos) = do
-  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
+checkExp (Reshape shapeexps arrexp pos) = do
   shapeexps' <- mapM (require [Basic Int] <=< checkExp) shapeexps
   arrexp' <- checkExp arrexp
-  return (Reshape cs' shapeexps' arrexp' pos)
+  return (Reshape shapeexps' arrexp' pos)
 
-checkExp (Rearrange cs perm arrexp pos) = do
-  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
+checkExp (Rearrange perm arrexp pos) = do
   arrexp' <- checkExp arrexp
   let rank = arrayRank $ typeOf arrexp'
   when (length perm /= rank || sort perm /= [0..rank-1]) $
     bad $ PermutationError pos perm rank name
-  return $ Rearrange cs' perm arrexp' pos
+  return $ Rearrange perm arrexp' pos
   where name = case arrexp of Var v -> Just $ baseName $ identName v
                               _     -> Nothing
 
-checkExp (Rotate cs n arrexp pos) = do
-  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
+checkExp (Rotate n arrexp pos) = do
   arrexp' <- checkExp arrexp
-  return $ Rotate cs' n arrexp' pos
+  return $ Rotate n arrexp' pos
 
-checkExp (Transpose cs k n arrexp pos) = do
-  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
+checkExp (Transpose k n arrexp pos) = do
   arrexp' <- checkExp arrexp
   when (arrayRank (typeOf arrexp') < reach + 1) $
     bad $ TypeError pos $ "Argument to transpose does not have " ++
           show (reach+1) ++ " dimensions."
-  return $ Transpose cs' k n arrexp' pos
+  return $ Transpose k n arrexp' pos
   where reach = max k $ n + k
 
 checkExp (Zip arrexps pos) = do
@@ -780,31 +755,21 @@ checkExp (Redomap outerfun innerfun accexp arrexp pos) = do
   _ <- require [redtype] accexp'
   return $ Redomap outerfun' innerfun' accexp' arrexp' pos
 
-checkExp (Split cs splitexp arrexp pos) = do
-  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
-  splitexp' <- require [Basic Int] =<< checkExp splitexp
+checkExp (Split splitexps arrexp pos) = do
+  splitexps' <- mapM (require [Basic Int] <=< checkExp) splitexps
   arrexp' <- checkExp arrexp
   _ <- rowTypeM arrexp' -- Just check that it's an array.
-  return $ Split cs' splitexp' arrexp' pos
+  return $ Split splitexps' arrexp' pos
 
-checkExp (Concat cs arr1exp arr2exp pos) = do
-  cs' <- mapM (requireI [Basic Cert] <=< checkIdent) cs
-  arr1exp' <- checkExp arr1exp
-  arr2exp' <- require [typeOf arr1exp'] =<< checkExp arr2exp
-  _ <- rowTypeM arr2exp' -- Just check that it's an array.
-  return $ Concat cs' arr1exp' arr2exp' pos
+checkExp (Concat arr1exp arr2exps pos) = do
+  arr1exp'  <- checkExp arr1exp
+  arr2exps' <- mapM (require [typeOf arr1exp'] <=< checkExp) arr2exps
+  mapM_ rowTypeM arr2exps' -- Just check that it's an array.
+  return $ Concat arr1exp' arr2exps' pos
 
 checkExp (Copy e pos) = do
   e' <- checkExp e
   return $ Copy e' pos
-
-checkExp (Assert e pos) = do
-  e' <- require [Basic Bool] =<< checkExp e
-  return $ Assert e' pos
-
-checkExp (Conjoin es pos) = do
-  es' <- mapM (require [Basic Cert] <=< checkExp) es
-  return $ Conjoin es' pos
 
 -- Checking of loops is done by synthesing the (almost) equivalent
 -- function and type-checking a call to it.  The difficult part is

@@ -93,7 +93,6 @@ import Control.Monad.Writer
 import Data.Array
 import Data.Hashable
 import Data.List
-import Data.Maybe
 import qualified Data.HashSet as HS
 
 import Language.Futhark.Syntax
@@ -498,19 +497,19 @@ typeOf (Var ident) =
     t         -> t `addAliases` HS.insert (identName ident)
 typeOf (Apply _ _ t _) = t
 typeOf (LetPat _ _ body _) = typeOf body
-typeOf (LetWith _ _ _ _ _ _ body _) = typeOf body
-typeOf (Index _ ident _ idx _) =
+typeOf (LetWith _ _ _ _ body _) = typeOf body
+typeOf (Index ident idx _) =
   stripArray (length idx) (identType ident)
   `addAliases` HS.insert (identName ident)
 typeOf (Iota _ _) = arrayType 1 (Basic Int) Nonunique
 typeOf (Size {}) = Basic Int
 typeOf (Replicate _ e _) = arrayType 1 (typeOf e) u
   where u = uniqueness $ typeOf e
-typeOf (Reshape _ shape  e _) =
+typeOf (Reshape shape  e _) =
   replicate (length shape) Nothing `setArrayDims` typeOf e
-typeOf (Rearrange _ _ e _) = typeOf e
-typeOf (Rotate _ _ e _) = typeOf e
-typeOf (Transpose _ k n e _)
+typeOf (Rearrange _ e _) = typeOf e
+typeOf (Rotate _ e _) = typeOf e
+typeOf (Transpose k n e _)
   | Array (BasicArray et dims u als) <- typeOf e,
     (pre,d:post) <- splitAt k dims,
     (mid,end) <- splitAt n post =
@@ -533,13 +532,11 @@ typeOf (Filter _ arr _) = typeOf arr
 typeOf (Redomap outerfun innerfun start arr _) =
   lambdaType outerfun [innerres, innerres]
     where innerres = lambdaType innerfun [typeOf start, rowType $ typeOf arr]
-typeOf (Split _ _ e _) =
-  Tuple [typeOf e, typeOf e]
-typeOf (Concat _ x y _) = typeOf x `setUniqueness` u
-  where u = uniqueness (typeOf x) <> uniqueness (typeOf y)
+typeOf (Concat x ys _) = typeOf x `setUniqueness` u
+  where u = uniqueness (typeOf x) <> mconcat (map uniqueness (map typeOf ys))
+typeOf (Split splitexps e _) =
+  Tuple $ replicate (1 + length splitexps) (typeOf e)
 typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` HS.empty
-typeOf (Assert _ _) = Basic Cert
-typeOf (Conjoin _ _) = Basic Cert
 typeOf (DoLoop _ _ _ _ _ body _) = typeOf body
 
 -- | If possible, convert an expression to a value.  This is not a
@@ -628,7 +625,7 @@ progNames = execWriter . mapM funNames . progFunctions
         funNames (_, _, params, body, _) =
           mapM_ one params >> expNames body
 
-        expNames e@(LetWith _ dest _ _ _ _ _ _) =
+        expNames e@(LetWith dest _ _ _ _ _) =
           one dest >> walkExpM names e
         expNames e@(DoLoop _ _ i _ _ _ _) =
           one i >> walkExpM names e
@@ -645,8 +642,8 @@ mapTails :: (ExpBase ty vn -> ExpBase ty vn) -> (ty vn -> ty vn)
          -> ExpBase ty vn -> ExpBase ty vn
 mapTails f g (LetPat pat e body loc) =
   LetPat pat e (mapTails f g body) loc
-mapTails f g (LetWith cs dest src csidx idxs ve body loc) =
-  LetWith cs dest src csidx idxs ve (mapTails f g body) loc
+mapTails f g (LetWith dest src idxs ve body loc) =
+  LetWith dest src idxs ve (mapTails f g body) loc
 mapTails f g (DoLoop pat me i bound loopbody body loc) =
   DoLoop pat me i bound loopbody (mapTails f g body) loc
 mapTails f g (If c te fe t loc) =
@@ -661,7 +658,6 @@ freeInExp = execWriter . expFree
                   walkOnExp = expFree
                 , walkOnLambda = lambdaFree
                 , walkOnIdent = identFree
-                , walkOnCertificates = mapM_ identFree
                 }
 
         identFree ident =
@@ -670,10 +666,8 @@ freeInExp = execWriter . expFree
         expFree (LetPat pat e body _) = do
           expFree e
           binding (patIdentSet pat) $ expFree body
-        expFree (LetWith cs dest src idxcs idxs ve body _) = do
-          mapM_ identFree cs
+        expFree (LetWith dest src idxs ve body _) = do
           identFree src
-          mapM_ identFree $ fromMaybe [] idxcs
           mapM_ expFree idxs
           expFree ve
           binding (HS.singleton dest) $ expFree body

@@ -78,7 +78,7 @@ transformExp (LoopOp op@(ConcatMap cs fun inputs)) = do
             ms = map (arraySize 0 . identType) arrs2
         ks <- mapM (letSubExp "concatMap_concat_size")
               [ PrimOp $ BinOp Plus n m Int | (n,m) <- zip ns ms ]
-        return [ PrimOp $ Concat cs arr1 arr2 k
+        return [ PrimOp $ Concat cs arr1 [arr2] k
                | (arr1,arr2,k) <- zip3 arrs1' arrs2 ks ]
   realbody <- runBinder $ do
     res <- mapM (letSubExp "concatMap_concatted_result") =<<
@@ -154,13 +154,10 @@ transformExp (LoopOp (Filter cs fun arrexps)) = do
 
   resinit_presplit <- resultArray $ map identType arrexps
   resinit <- forM resinit_presplit $ \v -> do
-    let vt = identType v
-    leftover <- letSubExp "split_leftover" $ PrimOp $
-                BinOp Minus (arraySize 0 vt) outersize Int
     splitres <- letTupExp "filter_split_result" $
-      PrimOp $ Split cs outersize v leftover
+      PrimOp $ Split cs [outersize] v
     case splitres of
-      [x,_] -> return x
+      [x] -> return x
       _     -> fail "FirstOrderTransform filter: weird split result"
 
   res <- forM (map identType resinit) $ \t -> newIdent "filter_result" t

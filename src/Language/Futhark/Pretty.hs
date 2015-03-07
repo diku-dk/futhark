@@ -135,43 +135,35 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
                         If {} -> True
                         ArrayLit {} -> False
                         _ -> hasArrayLit e
-  pprPrec _ (LetWith cs dest src idxcs idxs ve body _)
+  pprPrec _ (LetWith dest src idxs ve body _)
     | dest == src =
-      text "let" <+> ppCertificates cs <> ppr dest <+> list (map ppr idxs) <+>
+      text "let" <+> ppr dest <+> list (map ppr idxs) <+>
       equals <+> align (ppr ve) <+>
       text "in" </> ppr body
     | otherwise =
-      text "let" <+> ppCertificates cs <> ppr dest <+> equals <+> ppr src <+>
-      text "with" <+> brackets (ppcs <> commasep (map ppr idxs)) <+>
+      text "let" <+> ppr dest <+> equals <+> ppr src <+>
+      text "with" <+> brackets (commasep (map ppr idxs)) <+>
       text "<-" <+> align (ppr ve) <+>
       text "in" </> ppr body
-    where ppcs = case idxcs of Nothing     -> empty
-                               Just []     -> text "<>|"
-                               Just csidx' -> ppCertificates csidx' <> text "|"
-  pprPrec _ (Index cs v csidx idxs _) =
-    ppCertificates cs <> ppr v <>
-    brackets (ppcs <> commasep (map ppr idxs))
-    where ppcs = case csidx of Nothing     -> empty
-                               Just []     -> text "<>|"
-                               Just csidx' -> ppCertificates csidx' <> text "|"
+  pprPrec _ (Index v idxs _) =
+    ppr v <> brackets (commasep (map ppr idxs))
   pprPrec _ (Iota e _) = text "iota" <> parens (ppr e)
-  pprPrec _ (Size cs i e _) =
-    ppCertificates cs <> text "size" <> apply [text $ show i, ppr e]
+  pprPrec _ (Size i e _) =
+    text "size" <> apply [text $ show i, ppr e]
   pprPrec _ (Replicate ne ve _) =
     text "replicate" <> apply [ppr ne, align (ppr ve)]
-  pprPrec _ (Reshape cs shape e _) =
-    ppCertificates cs <> text "reshape" <> apply [apply (map ppr shape), ppr e]
-  pprPrec _ (Rearrange cs perm e _) =
-    ppCertificates cs <> text "rearrange" <> apply [apply (map ppr perm), ppr e]
-  pprPrec _ (Rotate cs n e _) =
-    ppCertificates cs <> text "rotate" <> apply [ppr n, ppr e]
-  pprPrec _ (Transpose cs 0 1 e _) =
-    ppCertificates cs <> text "transpose" <> apply [ppr e]
-  pprPrec _ (Transpose cs k n e _) =
-        ppCertificates cs <>
-        text "transpose" <> apply [text $ show k,
-                                   text $ show n,
-                                   ppr e]
+  pprPrec _ (Reshape shape e _) =
+    text "reshape" <> apply [apply (map ppr shape), ppr e]
+  pprPrec _ (Rearrange perm e _) =
+    text "rearrange" <> apply [apply (map ppr perm), ppr e]
+  pprPrec _ (Rotate n e _) =
+    text "rotate" <> apply [ppr n, ppr e]
+  pprPrec _ (Transpose 0 1 e _) =
+    text "transpose" <> apply [ppr e]
+  pprPrec _ (Transpose k n e _) =
+    text "transpose" <> apply [text $ show k,
+                               text $ show n,
+                               ppr e]
   pprPrec _ (Map lam a _) = ppSOAC "map" [lam] [a]
   pprPrec _ (ConcatMap lam a as _) = ppSOAC "concatMap" [lam] $ a : as
   pprPrec _ (Reduce lam e a _) = ppSOAC "reduce" [lam] [e, a]
@@ -181,13 +173,11 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
   pprPrec _ (Filter lam a _) = ppSOAC "filter" [lam] [a]
   pprPrec _ (Zip es _) = text "zip" <> apply (map (ppr . fst) es)
   pprPrec _ (Unzip e _ _) = text "unzip" <> parens (ppr e)
-  pprPrec _ (Split cs e a _) =
-    ppCertificates cs <> text "split" <> apply [ppr e, ppr a]
-  pprPrec _ (Concat cs x y _) =
-    ppCertificates cs <> text "concat" <> apply [ppr x, ppr y]
+  pprPrec _ (Split e a _) =
+    text "split" <> apply [ppr e, ppr a]
+  pprPrec _ (Concat x y _) =
+    text "concat" <> apply [ppr x, ppr y]
   pprPrec _ (Copy e _) = text "copy" <> parens (ppr e)
-  pprPrec _ (Assert e _) = text "assert" <> parens (ppr e)
-  pprPrec _ (Conjoin es _) = text "conjoin" <> parens (commasep $ map ppr es)
   pprPrec _ (DoLoop pat initexp i bound loopbody letbody _) =
     aliasComment pat $
     text "loop" <+> parens (ppr pat <+> equals <+> ppr initexp) <+>
@@ -255,10 +245,6 @@ ppList :: (Pretty a) => [a] -> Doc
 ppList as = case map ppr as of
               []     -> empty
               a':as' -> foldl (</>) (a' <> comma) $ map (<> comma) as'
-
-ppCertificates :: (Eq vn, Hashable vn, TypeBox ty, Pretty vn) => CertificatesBase ty vn -> Doc
-ppCertificates [] = empty
-ppCertificates cs = text "<" <> commasep (map ppr cs) <> text ">"
 
 render80 :: Pretty a => a -> String
 render80 = pretty 80 . ppr

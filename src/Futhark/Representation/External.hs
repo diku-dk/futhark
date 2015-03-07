@@ -17,7 +17,6 @@ module Futhark.Representation.External
   , GenIdent
   , Ident
   , Parameter
-  , Certificates
   , Exp
   , Lambda
   , TupIdent
@@ -51,9 +50,6 @@ type Ident = GenIdent Names
 -- | A name with a type, but no aliasing information.  Used for
 -- denoting function parameters.
 type Parameter = GenIdent NoInfo
-
--- | An list of certificates with type information.
-type Certificates = CertificatesBase (TypeBase Names) VName
 
 -- | An expression with type information.
 type Exp = ExpBase (TypeBase Names) VName

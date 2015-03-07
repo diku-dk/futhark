@@ -149,10 +149,14 @@ data PrimOp lore
   -- checking.  If given (even as an empty list), no
   -- run-time bounds checking is done.
 
-  | Split Certificates SubExp Ident SubExp
-  -- ^ @split(1, [ 1, 2, 3, 4 ]) = {[1],[2, 3, 4]}@.
+  | Split Certificates [SubExp] Ident
+  -- ^ 2nd arg is sizes of arrays you back, which is
+  -- different from what the external language does.
+  -- In the internal langauge,
+  -- @a = [1,2,3,4]@
+  -- @split( (1,0,2) , a ) = {[1], [], [2,3]}@
 
-  | Concat Certificates Ident Ident SubExp
+  | Concat Certificates Ident [Ident] SubExp
   -- ^ @concat([1],[2, 3, 4]) = [1, 2, 3, 4]@.
 
   | Copy SubExp
