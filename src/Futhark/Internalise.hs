@@ -288,7 +288,7 @@ internaliseExp _ (E.Split splitexps arrexp loc) = do
 internaliseExp desc (E.Concat x ys loc) = do
   xs  <- internaliseExpToIdents "concat_x" x
   yss <- mapM (internaliseExpToIdents "concat_y") ys
-  ressize <- foldM sumdims 
+  ressize <- foldM sumdims
                    (arraysSize 0 $ map I.identType xs) $
                    map (arraysSize 0 . map I.identType) yss
 
@@ -311,7 +311,7 @@ internaliseExp desc (E.Concat x ys loc) = do
 
     where
         sumdims xsize ysize = letSubExp "conc_tmp" $ I.PrimOp $
-                                        I.BinOp I.Plus xsize ysize I.Int 
+                                        I.BinOp I.Plus xsize ysize I.Int
 
 internaliseExp desc (E.Map lam arr _) = do
   arrs <- internaliseExpToIdents "map_arr" arr
