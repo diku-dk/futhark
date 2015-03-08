@@ -10,6 +10,7 @@ module Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
        , iota
        , offset
        , permute
+       , reshape
        , applyInd
        , codomain
        , isLinear
@@ -115,6 +116,13 @@ permute (IxFun (n::SNat (S n)) f) perm
              then sw : perm'
              else perm'
         n' = sNatToInt n
+
+reshape :: IxFun -> Shape -> IxFun
+reshape (IxFun _ ixfun) newshape =
+  case toSing (n-1) of
+    SomeSing (sb::SNat n) ->
+      IxFun (SS sb) (Safe.reshape ixfun $ unsafeFromList (SS sb) newshape)
+  where n = intToNat $ Prelude.length newshape
 
 applyInd :: IxFun -> Indices -> IxFun
 applyInd ixfun@(IxFun (snnat::SNat (S n)) (f::Safe.IxFun (S n))) is =

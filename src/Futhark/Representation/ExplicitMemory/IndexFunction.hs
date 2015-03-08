@@ -8,6 +8,7 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
        , iota
        , offset
        , permute
+       , reshape
        , applyInd
        , codomain
        , shape
@@ -21,7 +22,6 @@ import Data.Vector.Sized hiding
 import qualified Data.Vector.Sized as Vec
 import Proof.Equational
 import Data.Monoid
-import Data.List (tails)
 import Data.Type.Equality hiding (outer)
 import Data.Constraint (Dict (..))
 
@@ -33,7 +33,7 @@ import qualified Futhark.Representation.ExplicitMemory.Permutation as Perm
 import Futhark.Representation.ExplicitMemory.SymSet (SymSet)
 import Futhark.Representation.AST.Attributes.Names
 import Language.Futhark.Core
-import Futhark.Representation.AST.Syntax (SubExp)
+import Futhark.Representation.AST.Syntax (SubExp (..))
 
 import Text.PrettyPrint.Mainland
 
@@ -45,6 +45,7 @@ data IxFun :: Nat -> * where
   Offset :: IxFun n -> ScalExp -> IxFun n
   Permute :: IxFun n -> Perm.Permutation n -> IxFun n
   Index :: SNat n -> IxFun (m:+:n) -> Indices m -> IxFun n
+  Reshape :: IxFun (S m) -> Shape n -> IxFun n
 
 --- XXX: this is just structural equality, which may be too
 --- conservative - unless we normalise first, somehow.
@@ -64,6 +65,11 @@ instance Eq (IxFun n) where
           m1' = Vec.sLength is1
           m2' :: SNat m2
           m2' = Vec.sLength is2
+  Reshape ixfun1 shape1 == Reshape ixfun2 shape2 =
+    case testEquality (rank ixfun1) (rank ixfun2) of
+      Nothing -> False
+      Just Refl ->
+        ixfun1 == ixfun2 && shape1 == shape2
   _ == _ = False
 
 instance Show (IxFun n) where
@@ -71,6 +77,7 @@ instance Show (IxFun n) where
   show (Offset fun k) = "Offset (" ++ show fun ++ ", " ++ show k ++ ")"
   show (Permute fun perm) = "Permute (" ++ show fun ++ ", " ++ show perm ++ ")"
   show (Index _ fun is) = "Index (" ++ show fun ++ ", " ++ show is ++ ")"
+  show (Reshape fun newshape) = "Reshape (" ++ show fun ++ ", " ++ show newshape ++ ")"
 
 instance Pretty (IxFun n) where
   ppr (Direct dims) =
@@ -78,6 +85,8 @@ instance Pretty (IxFun n) where
   ppr (Offset fun k) = ppr fun <+> text "+" <+> ppr k
   ppr (Permute fun perm) = ppr fun <> ppr perm
   ppr (Index _ fun is) = ppr fun <> brackets (commasep $ map ppr $ Vec.toList is)
+  ppr (Reshape fun newshape) = ppr fun <> text "->" <>
+                               commasep (map ppr $ Vec.toList newshape)
 
 instance Substitute (IxFun n) where
   substituteNames subst (Direct dims) =
@@ -88,6 +97,10 @@ instance Substitute (IxFun n) where
     Permute (substituteNames subst fun) perm
   substituteNames subst (Index n fun is) =
     Index n (substituteNames subst fun) (Vec.map (substituteNames subst) is)
+  substituteNames subst (Reshape fun newshape) =
+    Reshape
+    (substituteNames subst fun)
+    (Vec.map (substituteNames subst) newshape)
 
 instance Rename (IxFun n) where
   -- Because there is no mapM-like function on sized vectors, we
@@ -114,7 +127,9 @@ index (Offset fun k) vec =
   index fun vec `SPlus` k
 
 index (Permute fun perm) is =
-  index fun $ Perm.apply perm is
+  index newfun $ Perm.apply perm is
+  where oldshape = shape fun
+        newfun = reshape fun $ Perm.apply perm oldshape
 
 index (Index _ fun (is1::Indices m)) is2 =
   case (singInstance $ sLength is1,
@@ -128,6 +143,36 @@ index (Index _ fun (is1::Indices m)) is2 =
       in case singInstance $ coerce proof (sLength is) %:- sOne of
         SingInstance -> index (coerce outer fun) (coerce outer is)
 
+index (Reshape (fun :: IxFun (S m)) newshape) (first_index :- rest_indices) =
+  -- First, compute a flat index based on the new shape.  Then, turn
+  -- that into an index set for the inner index function and apply the
+  -- inner index function to that set.
+  let flatidx = computeFlatIndex first_index newshape rest_indices
+      innerslicesizes :: Vector ScalExp (S m)
+      innerslicesizes = Vec.tail $ sliceSizes oldshape
+      new_indices :: Indices (S m)
+      new_indices = computeNewIndices innerslicesizes flatidx
+  in index fun new_indices
+  where oldshape = shape fun
+        computeFlatIndex :: ScalExp -> Shape (S k) -> Indices k -> ScalExp
+        computeFlatIndex e (d :- ds) (i :- is) =
+          computeFlatIndex ((e `STimes` subExpToScalExp d) `SPlus` i) ds is
+        computeFlatIndex e _ Nil =
+          e
+
+        computeNewIndices :: Vector ScalExp k -> ScalExp -> Indices k
+        computeNewIndices Nil _ =
+          Nil
+        computeNewIndices (size :- slices) i =
+          (i `SDivide` size) :-
+          computeNewIndices slices (i `SMinus` ((i `SDivide` size) `STimes` size))
+
+sliceSizes :: Shape m -> Vector ScalExp (S m)
+sliceSizes Nil = singleton $ Val $ IntVal 1
+sliceSizes (n :- ns) =
+  sproduct (map subExpToScalExp $ n : Vec.toList ns) :-
+  sliceSizes ns
+
 iota :: Shape n -> IxFun n
 iota = Direct
 
@@ -137,11 +182,21 @@ offset = Offset
 permute :: IxFun n -> Perm.Permutation n -> IxFun n
 permute = Permute
 
+reshape :: IxFun (S m) -> Shape n -> IxFun n
+reshape = Reshape
+
 applyInd :: SNat n -> IxFun (m:+:n) -> Indices m -> IxFun n
 applyInd = Index
 
 codomain :: IxFun n -> SymSet n
 codomain = undefined
+
+rank :: IxFun n -> SNat n
+rank (Direct dims) = Vec.sLength dims
+rank (Offset ixfun _) = rank ixfun
+rank (Permute ixfun _) = rank ixfun
+rank (Index n _ _) = n
+rank (Reshape _ newshape) = Vec.sLength newshape
 
 shape :: forall (n :: Nat) .
          IxFun n -> Shape n
@@ -163,6 +218,7 @@ shape (Index n (ixfun::IxFun (m :+ n)) (indices::Indices m)) =
        let resshape :: Shape ((m :+ n) :- m)
            resshape = Vec.drop islen ixfunshape
        in resshape
+shape (Reshape _ dims) = dims
 
 -- FIXME: this function is not yet quite there.
 linearWithOffset :: IxFun n -> Maybe ScalExp
@@ -172,11 +228,12 @@ linearWithOffset (Offset ixfun n) = do
   return $ inner_offset `SPlus` n
 linearWithOffset (Permute {}) = Nothing
 linearWithOffset (Index _ (Direct dims) is) =
-  Just $ ssum $ zipWith STimes (Vec.toList is) sliceSizes
-  where sliceSizes =
-          map sproduct $ drop 1 $ tails $ map subExpToScalExp $ Vec.toList dims
+  Just $ ssum $ zipWith STimes (Vec.toList is) $
+  Vec.toList $ Vec.tail $ sliceSizes dims
 linearWithOffset (Index {}) =
   Nothing
+linearWithOffset (Reshape ixfun _) =
+  linearWithOffset ixfun
 
 instance FreeIn (IxFun n) where
   freeIn (Direct dims) = mconcat $ map freeIn $ toList dims
@@ -184,3 +241,5 @@ instance FreeIn (IxFun n) where
   freeIn (Permute ixfun _) = freeIn ixfun
   freeIn (Index _ ixfun is) =
     freeIn ixfun <> mconcat (map freeIn $ toList is)
+  freeIn (Reshape ixfun dims) =
+    freeIn ixfun <> mconcat (map freeIn $ Vec.toList dims)

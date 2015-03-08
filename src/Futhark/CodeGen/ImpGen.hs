@@ -14,7 +14,7 @@ import Control.Applicative
 import Control.Monad.RWS
 import Control.Monad.State
 import Control.Monad.Writer
-
+import Debug.Trace
 import Data.Either
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
@@ -669,7 +669,7 @@ destinationFromPattern (Pattern patElems) ts =
           let name = patElemName patElem
           entry <- asks $ HM.lookup name . envVtable
           case entry of
-            Just (ArrayVar (ArrayEntry (MemLocation mem ixfun) bt shape)) -> do
+            Just (ArrayVar (ArrayEntry (MemLocation mem ixfun) bt shape)) ->
               case patElemBindage patElem of
                 BindVar -> do
                   let nullifyFreeDim (Imp.ConstSize _) = Nothing
@@ -682,7 +682,7 @@ destinationFromPattern (Pattern patElems) ts =
                         | isctx mem = SetMemory mem $ nullifyFreeDim memsize
                         | otherwise = CopyIntoMemory $ MemLocation mem ixfun
                   return $ ArrayDestination memdest shape'
-                BindInPlace _ _ is -> do
+                BindInPlace _ _ is ->
                   case patElemRequires patElem of
                     Basic _ -> do
                       (_, elemOffset, _) <-
@@ -829,13 +829,14 @@ copyIxFun bt (MemLocation destmem destIxFun) (MemLocation srcmem srcIxFun) n
   | otherwise = do
     is <- replicateM (IxFun.rank destIxFun) (newVName "i")
     let ivars = map (SE.Id . flip Ident (Basic Int)) is
-        oldshape = map compileSubExp $ IxFun.shape srcIxFun
+        newshape = map compileSubExp $ IxFun.shape destIxFun
         destidx = IxFun.index destIxFun ivars
         srcidx = IxFun.index srcIxFun ivars
-    emit $ foldl (.) id (zipWith Imp.For is oldshape) $
+        msg = "source ixfun: " ++ pretty srcIxFun ++
+              "\nshape: " ++ pretty (IxFun.shape srcIxFun)
+    trace msg emit $ foldl (.) id (zipWith Imp.For is newshape) $
       write destmem (elements $ fromJust $ scalExpToImpExp destidx) bt $
       index srcmem (elements $ fromJust $ scalExpToImpExp srcidx) bt
-
 
 memCopy :: VName -> Count Bytes -> VName -> Count Bytes -> Count Bytes
         -> Imp.Code a
@@ -849,7 +850,11 @@ scalExpToImpExp (SE.Id v) =
   Just $ Imp.ScalarVar $ identName v
 scalExpToImpExp (SE.SPlus e1 e2) =
   Imp.BinOp Plus <$> scalExpToImpExp e1 <*> scalExpToImpExp e2
+scalExpToImpExp (SE.SMinus e1 e2) =
+  Imp.BinOp Minus <$> scalExpToImpExp e1 <*> scalExpToImpExp e2
 scalExpToImpExp (SE.STimes e1 e2) =
   Imp.BinOp Times <$> scalExpToImpExp e1 <*> scalExpToImpExp e2
+scalExpToImpExp (SE.SDivide e1 e2) =
+  Imp.BinOp Divide <$> scalExpToImpExp e1 <*> scalExpToImpExp e2
 scalExpToImpExp _ =
   Nothing
