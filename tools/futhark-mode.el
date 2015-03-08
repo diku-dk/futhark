@@ -322,9 +322,11 @@ See URL `https://github.com/HIPERFIT/futhark'."
     :command ("futhark" source)
     :modes 'futhark-mode
     :error-patterns
-    ((error line-start (message) "at " (file-name) ":" line ":" column "-"
-            ))
-    )
+    ((error line-start (message) "at " (file-name) ":" line ":" column "-")
+
+     ;; TODO -- this suppresses a warning from flycheck, but does not
+     ;; show an error to the user
+     (error line-start "No extra lines")))
   (add-to-list 'flycheck-checkers 'futhark))
 
 (provide 'futhark-mode)
