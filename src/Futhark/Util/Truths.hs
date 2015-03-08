@@ -6,6 +6,7 @@ module Futhark.Util.Truths
          plusMinusCommutes
        , plusMinusSwapR
        , plusMinusSwapL
+       , minusPlusEqR
          -- * Comparisons
        , Cmp (..)
        , CompareTrueInstance
@@ -19,6 +20,12 @@ import Data.Constraint (Dict(..))
 import Data.Type.Natural
 import Proof.Equational
 import Proof.Propositional
+
+-- | @(m + (n - m)) = n@.
+minusPlusEqR :: (m :<<= n) ~ True =>
+                SNat n -> SNat m -> (m :+: (n :-: m)) :=: n
+minusPlusEqR n m =
+  plusMinusCommutes m n m `trans` plusMinusEqR n m
 
 -- | @(x + (y - z)) = ((x + y) - z)@.
 plusMinusCommutes :: forall x y z.(z :<<= y) ~ True =>

@@ -5,7 +5,6 @@ module Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
        , Indices
        , Shape
        , rank
-       , shape
        , index
        , iota
        , offset
@@ -13,7 +12,6 @@ module Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
        , reshape
        , applyInd
        , codomain
-       , isLinear
        , linearWithOffset
        , isDirect
          -- * Utility
@@ -24,7 +22,6 @@ module Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
 import Control.Applicative
 
 import Data.List (sort)
-import Data.Maybe (isJust)
 import Data.Singletons.Prelude
 import Data.Type.Monomorphic
 import Data.Type.Natural hiding (n1, n2)
@@ -32,7 +29,6 @@ import Data.Type.Ordinal
 import Data.Vector.Sized hiding (index, map, unsafeFromInt)
 import Proof.Equational
 import Data.Type.Equality hiding (outer)
-
 import qualified Text.PrettyPrint.Mainland as PP
 
 import Futhark.Analysis.ScalExp
@@ -79,17 +75,13 @@ shapeFromInts = map (Constant . IntVal)
 rank :: IxFun -> Int
 rank (IxFun n _) = sNatToInt n
 
-shape :: IxFun -> Shape
-shape (IxFun _ ixfun) = toList $ Safe.shape ixfun
+index :: IxFun -> Shape -> Indices -> ScalExp
+index f dims is = case f of
+  IxFun n f' -> Safe.index f' (unsafeFromList n dims) (unsafeFromList n is)
 
-index :: IxFun -> Indices -> ScalExp
-index f is = case f of
-  IxFun n f' -> Safe.index f' $ unsafeFromList n is
-
-iota :: Shape -> IxFun
-iota dims = case toSing (n-1) of
-  SomeSing (sb::SNat n) -> IxFun (SS sb) (Safe.iota $ unsafeFromList (SS sb) dims)
-  where n = intToNat $ Prelude.length dims
+iota :: Int -> IxFun
+iota n = case toSing (intToNat $ n-1) of
+  SomeSing (sb::SNat n) -> IxFun (SS sb) $ Safe.iota $ SS sb
 
 offset :: IxFun -> ScalExp -> IxFun
 offset (IxFun n f) se =
@@ -103,29 +95,37 @@ permute (IxFun (n::SNat (S n)) f) perm
     show n'
   | otherwise =
     IxFun n $ Safe.permute f $
-    Prelude.foldr (:>>:) Identity $
-    Prelude.foldr buildPermutation [] $
+    Prelude.foldl (flip (:>>:)) Identity $
+    fst $ Prelude.foldl buildPermutation ([], [0..n'-1]) $
     Prelude.zip [0..] perm
     -- This is fairly hacky - a better way would be to find the cycles
     -- in the permutation.
-  where buildPermutation (to,from) perm' =
-          let sw :: Swap (S n)
+  where buildPermutation (perm', dims) (at, wants) =
+          let wants' = dims Prelude.!! wants
+              has = dims Prelude.!! at
+              sw :: Swap (S n)
               sw = withSingI n $
-                   unsafeFromInt from :<->: unsafeFromInt to
-          in if sw `Prelude.notElem` perm' && from /= to
-             then sw : perm'
-             else perm'
+                   unsafeFromInt at :<->: unsafeFromInt wants'
+          in if has /= wants
+             then (sw : perm', update wants' has (update at wants' dims))
+             else (perm', dims)
         n' = sNatToInt n
 
-reshape :: IxFun -> Shape -> IxFun
-reshape (IxFun _ ixfun) newshape =
-  case toSing (n-1) of
-    SomeSing (sb::SNat n) ->
-      IxFun (SS sb) (Safe.reshape ixfun $ unsafeFromList (SS sb) newshape)
-  where n = intToNat $ Prelude.length newshape
+update :: Int -> a -> [a] -> [a]
+update i x l =
+  let (bef,_:aft) = Prelude.splitAt i l
+  in bef ++ x : aft
 
-applyInd :: IxFun -> Indices -> IxFun
-applyInd ixfun@(IxFun (snnat::SNat (S n)) (f::Safe.IxFun (S n))) is =
+reshape :: IxFun -> Int -> Shape -> IxFun
+reshape (IxFun (m::SNat (S m)) ixfun) n oldshape =
+  case toSing $ intToNat $ n-1 of
+    SomeSing (sn::SNat n) ->
+      IxFun (SS sn) $
+      Safe.reshape (SS sn) ixfun $
+      unsafeFromList m oldshape
+
+applyInd :: IxFun -> Shape -> Indices -> IxFun
+applyInd ixfun@(IxFun (snnat::SNat (S n)) (f::Safe.IxFun (S n))) dims is =
   case promote (Prelude.length is) :: Monomorphic (Sing :: Nat -> *) of
     Monomorphic (mnat::SNat m) ->
       case mnat %:<<= nnat of
@@ -136,6 +136,8 @@ applyInd ixfun@(IxFun (snnat::SNat (S n)) (f::Safe.IxFun (S n))) is =
               nmnat = nnat %- mnat
               is' :: Safe.Indices m
               is' = unsafeFromList mnat is
+              dims' :: Safe.Shape m
+              dims' = unsafeFromList mnat dims
               proof :: S n :=: (m :+: S (n :- m))
               proof = sym $
                       trans (succPlusR mnat nmnat)
@@ -143,7 +145,7 @@ applyInd ixfun@(IxFun (snnat::SNat (S n)) (f::Safe.IxFun (S n))) is =
               f' :: Safe.IxFun (m :+: S (n :- m))
               f' = coerce proof f
               ixfun' :: Safe.IxFun (S (n :- m))
-              ixfun' = Safe.applyInd k f' is'
+              ixfun' = Safe.applyInd k f' dims' is'
           in IxFun k ixfun'
         SFalse ->
           error $
@@ -157,21 +159,14 @@ codomain :: IxFun -> SymSet
 codomain (IxFun n f) =
   SymSet n $ Safe.codomain f
 
-isLinear :: IxFun -> Bool
-isLinear = isJust . linearWithOffset
-
 isDirect :: IxFun -> Bool
 isDirect = maybe False (==Val (IntVal 0)) . linearWithOffset
 
 linearWithOffset :: IxFun -> Maybe ScalExp
-linearWithOffset (IxFun _ ixfun) = Safe.linearWithOffset ixfun
+linearWithOffset (IxFun _ ixfun) =
+  Safe.linearWithOffset ixfun
 
 data SymSet = forall n . SymSet (SNat n) (SymSet.SymSet n)
-
-minusPlusEqR :: (m :<<= n) ~ True =>
-                SNat n -> SNat m -> (m :+: (n :-: m)) :=: n
-minusPlusEqR n m =
-  plusMinusCommutes m n m `trans` plusMinusEqR n m
 
 instance FreeIn IxFun where
   freeIn (IxFun _ ixfun) = freeIn ixfun

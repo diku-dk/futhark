@@ -171,7 +171,7 @@ memForBindee ident = do
 
 directIndexFunction :: Ident -> Type -> MemSummary
 directIndexFunction mem t =
-  MemSummary mem $ IxFun.iota $ arrayDims t
+  MemSummary mem $ IxFun.iota $ arrayRank t
 
 computeSize :: MonadBinder m =>
                SubExp -> [SubExp] -> m SubExp
@@ -348,6 +348,7 @@ allocInExp (LoopOp (DoLoop res merge i bound
     return $ LoopOp $
       DoLoop res (zip mergeparams' mergeinit') i bound body'
   where (mergeparams, mergeinit) = unzip merge
+        {-
 allocInExp (LoopOp (Map cs f arrs)) = do
   let size = arraysSize 0 $ map identType arrs
   is <- letExp "is" $ PrimOp $ Iota size
@@ -360,13 +361,14 @@ allocInExp (LoopOp (Map cs f arrs)) = do
       case res of
         Just (MemSummary m origfun) ->
           return [(identName p,
-                   MemSummary m $ IxFun.applyInd origfun [SE.Id i])]
+                   MemSummary m $ IxFun.applyInd origfun undefined [SE.Id i])]
         _ -> return []
   f' <- local (HM.union summaries) $
         allocInLambda
         f { lambdaParams = i : lambdaParams f
           }
   return $ LoopOp $ Map cs f' (is:arrs)
+-}
 allocInExp (LoopOp (Reduce {})) =
   fail "Cannot put explicit allocations in reduce yet."
 allocInExp (LoopOp (Scan {})) =
