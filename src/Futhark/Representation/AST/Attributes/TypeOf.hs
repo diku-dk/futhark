@@ -73,8 +73,6 @@ primOpType (Reshape _ shape e) =
 primOpType (Rearrange _ perm e) =
   [identType e `setArrayShape` Shape (permuteShape perm shape)]
   where Shape shape = arrayShape $ identType e
-primOpType (Rotate _ _ e) =
-  [identType e]
 primOpType (Split _ sizeexps e) =
   map (identType e `setOuterSize`) sizeexps
 primOpType (Concat _ x ys ressize) =
@@ -83,8 +81,6 @@ primOpType (Concat _ x ys ressize) =
 primOpType (Copy e) =
   [subExpType e `setUniqueness` Unique]
 primOpType (Assert _ _) =
-  [Basic Cert]
-primOpType (Conjoin _) =
   [Basic Cert]
 primOpType (Alloc e) =
   [Mem e]

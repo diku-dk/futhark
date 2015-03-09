@@ -543,9 +543,6 @@ evalPrimOp e@(Reshape _ shapeexp arrexp) = do
 evalPrimOp (Rearrange _ perm arrexp) =
   single <$> permuteArray perm <$> lookupVar arrexp
 
-evalPrimOp (Rotate _ perm arrexp) =
-  single <$> rotateArray perm <$> lookupVar arrexp
-
 evalPrimOp (Split _ sizeexps arrexp) = do
   sizes <- mapM (asInt <=< evalSubExp) sizeexps
   arrval <- lookupVar arrexp
@@ -590,8 +587,6 @@ evalPrimOp (Assert e loc) = do
               return [BasicVal Checked]
             _ ->
               bad $ AssertFailed loc
-
-evalPrimOp (Conjoin _) = return [BasicVal Checked]
 
 -- Alloc is not used in the interpreter, so just return whatever
 evalPrimOp (Alloc se) =

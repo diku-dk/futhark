@@ -119,7 +119,6 @@ import Language.Futhark.Parser.Lexer
       reduce          { L $$ REDUCE }
       reshape         { L $$ RESHAPE }
       rearrange       { L $$ REARRANGE }
-      rotate          { L $$ ROTATE }
       transpose       { L $$ TRANSPOSE }
       zipWith         { L $$ ZIPWITH }
       zip             { L $$ ZIP }
@@ -139,8 +138,6 @@ import Language.Futhark.Parser.Lexer
       op              { L $$ OP }
       empty           { L $$ EMPTY }
       copy            { L $$ COPY }
-      assert          { L $$ ASSERT }
-      conjoin         { L $$ CONJOIN }
 
 %nonassoc ifprec letprec
 %left '||'
@@ -300,9 +297,6 @@ Exp  :: { UncheckedExp }
      | transpose '(' NaturalInt ',' SignedInt ',' Exp ')'
                       { Transpose $3 $5 $7 $1 }
 
-     | rotate '(' SignedInt ',' Exp ')'
-                      { Rotate $3 $5 $1 }
-
      | split '(' '(' Exps ')' ',' Exp ')'
                       { Split $4 $7 $1 }
 
@@ -382,9 +376,6 @@ TupleExp : '{' Exps '}' { ($2, $1) }
          | '{'      '}' { ([], $1) }
 
 Id : id { let L loc (ID name) = $1 in Ident name NoInfo loc }
-
-Ids : Id         { [$1] }
-    | Id ',' Ids { $1 : $3 }
 
 TupIds : TupId ',' TupIds  { $1 : $3 }
        | TupId             { [$1] }

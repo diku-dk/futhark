@@ -66,7 +66,6 @@ data Token = IF
            | REDUCE
            | RESHAPE
            | REARRANGE
-           | ROTATE
            | TRANSPOSE
            | ZIPWITH
            | ZIP
@@ -87,6 +86,5 @@ data Token = IF
            | EMPTY
            | COPY
            | ASSERT
-           | CONJOIN
            | EOF
              deriving (Show, Eq)

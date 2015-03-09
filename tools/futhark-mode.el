@@ -12,11 +12,12 @@
 ;; hooks to `futhark-mode-hook`.
 ;;
 ;; Provided this file is loaded, futhark-mode is automatically engaged when
-;; opening .l0 files.
+;; opening .fut files.
 
 ;;; Code:
 
 (require 'cl)
+(require 'flycheck nil t) ;; no error if not found
 
 (defvar futhark-mode-hook nil
   "Hook for Futhark mode - run whenever the mode is entered.")
@@ -313,6 +314,20 @@ return t if found; return nil otherwise."
   (set (make-local-variable 'indent-line-function) 'futhark-indent-line)
   (set (make-local-variable 'comment-start) "//")
   (set (make-local-variable 'comment-padding) " "))
+
+(when (featurep 'flycheck)
+  (flycheck-define-checker futhark
+    "A Futhark syntax and type checker.
+See URL `https://github.com/HIPERFIT/futhark'."
+    :command ("futhark" source)
+    :modes 'futhark-mode
+    :error-patterns
+    ((error line-start (message) "at " (file-name) ":" line ":" column "-")
+
+     ;; TODO -- this suppresses a warning from flycheck, but does not
+     ;; show an error to the user
+     (error line-start "No extra lines")))
+  (add-to-list 'flycheck-checkers 'futhark))
 
 (provide 'futhark-mode)
 

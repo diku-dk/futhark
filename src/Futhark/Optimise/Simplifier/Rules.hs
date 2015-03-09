@@ -21,7 +21,6 @@ import Data.Monoid
 
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet      as HS
-import qualified Data.Set          as S
 
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
@@ -45,12 +44,10 @@ topDownRules = [ liftIdentityMapping
                , simplifyClosedFormReduce
                , simplifyClosedFormLoop
                , letRule simplifyRearrange
-               , letRule simplifyRotate
                , letRule simplifyBinOp
                , letRule simplifyNot
                , letRule simplifyNegate
                , letRule simplifyAssert
-               , letRule simplifyConjoin
                , letRule simplifyIndexing
                , evaluateBranch
                , simplifyBoolBranch
@@ -373,22 +370,6 @@ simplifyRearrange look (Rearrange cs perm v) =
 
 simplifyRearrange _ _ = Nothing
 
-simplifyRotate :: LetTopDownRule lore u
--- A zero-rotation is identity.
-simplifyRotate _ (Rotate _ 0 e) =
-  Just $ SubExp $ Var e
-
-simplifyRotate look (Rotate _ _ v) = do
-  bnd <- asPrimOp =<< look (identName v)
-  case bnd of
-    -- Rotating a replicate is identity.
-    Replicate {} ->
-      Just $ SubExp $ Var v
-    _ ->
-      Nothing
-
-simplifyRotate _ _ = Nothing
-
 simplifyBinOp :: LetTopDownRule lore u
 
 simplifyBinOp _ (BinOp Plus e1 e2 _)
@@ -607,25 +588,6 @@ simplifyAssert _ (Assert (Constant (LogVal True)) _) =
   Just $ SubExp $ Constant Checked
 simplifyAssert _ _ =
   Nothing
-
-simplifyConjoin :: LetTopDownRule lore u
-simplifyConjoin look (Conjoin es) =
-  -- Remove trivial certificates.
-  let check seen (Constant Checked) = seen
-      check seen (Var idd) =
-        case asPrimOp =<< look (identName idd) of
-          Just (Conjoin es2) -> seen `S.union` S.fromList es2
-          _                  -> Var idd `S.insert` seen
-      check seen e = e `S.insert` seen
-      origset = S.fromList es
-      newset = foldl check S.empty es
-      es' = S.toList newset
-  in case es' of
-       []                    -> Just $ SubExp $ Constant Checked
-       [c]                   -> Just $ SubExp c
-       _ | origset /= newset -> Just $ Conjoin es'
-         | otherwise         -> Nothing
-simplifyConjoin _ _ = Nothing
 
 simplifyIndexing :: LetTopDownRule lore u
 simplifyIndexing look (Index cs idd inds) =

@@ -156,8 +156,6 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
     text "reshape" <> apply [apply (map ppr shape), ppr e]
   pprPrec _ (Rearrange perm e _) =
     text "rearrange" <> apply [apply (map ppr perm), ppr e]
-  pprPrec _ (Rotate n e _) =
-    text "rotate" <> apply [ppr n, ppr e]
   pprPrec _ (Transpose 0 1 e _) =
     text "transpose" <> apply [ppr e]
   pprPrec _ (Transpose k n e _) =

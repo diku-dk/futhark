@@ -679,10 +679,6 @@ checkExp (Rearrange perm arrexp pos) = do
   where name = case arrexp of Var v -> Just $ baseName $ identName v
                               _     -> Nothing
 
-checkExp (Rotate n arrexp pos) = do
-  arrexp' <- checkExp arrexp
-  return $ Rotate n arrexp' pos
-
 checkExp (Transpose k n arrexp pos) = do
   arrexp' <- checkExp arrexp
   when (arrayRank (typeOf arrexp') < reach + 1) $

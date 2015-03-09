@@ -110,10 +110,6 @@ externalisePrimOp (I.Rearrange _ perm e) =
   E.Rearrange perm
               (E.Var $ externaliseIdent e)
               noLoc
-externalisePrimOp (I.Rotate _ n e) =
-  E.Rotate n
-           (E.Var $ externaliseIdent e)
-           noLoc
 
 externaliseLoopOp :: I.LoopOp -> E.Exp
 

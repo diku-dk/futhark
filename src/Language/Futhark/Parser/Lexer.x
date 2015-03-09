@@ -93,7 +93,6 @@ keyword s =
     "replicate"    -> REPLICATE
     "reshape"      -> RESHAPE
     "rearrange"    -> REARRANGE
-    "rotate"       -> ROTATE
     "transpose"    -> TRANSPOSE
     "map"          -> MAP
     "reduce"       -> REDUCE
@@ -109,7 +108,6 @@ keyword s =
     "empty"        -> EMPTY
     "copy"         -> COPY
     "assert"       -> ASSERT
-    "conjoin"      -> CONJOIN
     _              -> ID $ nameFromString s
 
 type Byte = Word8
