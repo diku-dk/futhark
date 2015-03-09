@@ -14,7 +14,7 @@ import Control.Applicative
 import Control.Monad.RWS
 import Control.Monad.State
 import Control.Monad.Writer
-import Debug.Trace
+
 import Data.Either
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
@@ -743,14 +743,6 @@ index name (Count e) = Imp.Index name e
 write :: VName -> Count Elements -> BasicType -> Imp.Exp -> Imp.Code a
 write name (Count i) = Imp.Write name i
 
-plus :: Count u -> Count u -> Count u
-plus (Count x) (Count y) = Count $ x `plus'` y
-
-plus' :: Imp.Exp -> Imp.Exp -> Imp.Exp
-plus' (Imp.Constant (IntVal 0)) e = e
-plus' e (Imp.Constant (IntVal 0)) = e
-plus' x y                         = Imp.BinOp Plus x y
-
 times :: Count u -> Count u -> Count u
 times (Count x) (Count y) = Count $ x `times'` y
 
@@ -771,19 +763,17 @@ copyIxFun :: BasicType
           -> MemLocation
           -> Count Bytes
           -> ImpM op (Imp.Code op)
-copyIxFun bt (MemLocation destmem destshape destIxFun) (MemLocation srcmem srcshape srcIxFun) n
+copyIxFun bt (MemLocation destmem destshape destIxFun) (MemLocation srcmem _ srcIxFun) n
   | Just destoffset <-
       scalExpToImpExp =<<
       IxFun.linearWithOffset destIxFun,
     Just srcoffset  <-
       scalExpToImpExp =<<
       IxFun.linearWithOffset srcIxFun =
-        let msg = "source ixfun: " ++ show srcIxFun ++
-                  "\nsource shape " ++ pretty srcshape
-        in trace msg return $ memCopy
-           destmem (elements destoffset `withElemType` bt)
-           srcmem (elements srcoffset `withElemType` bt)
-           n
+        return $ memCopy
+        destmem (elements destoffset `withElemType` bt)
+        srcmem (elements srcoffset `withElemType` bt)
+        n
   | otherwise = do
     is <- replicateM (IxFun.rank destIxFun) (newVName "i")
     let ivars = map (SE.Id . flip Ident (Basic Int)) is
@@ -791,9 +781,7 @@ copyIxFun bt (MemLocation destmem destshape destIxFun) (MemLocation srcmem srcsh
           simplifyScalExp $ IxFun.index destIxFun ivars
         srcidx =
           simplifyScalExp $ IxFun.index srcIxFun ivars
-        msg = "source ixfun: " ++ show srcIxFun ++
-              "\nsource shape " ++ pretty srcshape
-    trace msg return $ foldl (.) id (zipWith Imp.For is $
+    return $ foldl (.) id (zipWith Imp.For is $
                                    map (innerExp . dimSizeToExp) destshape) $
       write destmem (elements $ fromJust $ scalExpToImpExp destidx) bt $
       index srcmem (elements $ fromJust $ scalExpToImpExp srcidx) bt
@@ -818,13 +806,6 @@ scalExpToImpExp (SE.SDivide e1 e2) =
   Imp.BinOp Divide <$> scalExpToImpExp e1 <*> scalExpToImpExp e2
 scalExpToImpExp _ =
   Nothing
-
-dimSizeToScalExp :: Imp.DimSize -> ScalExp
-dimSizeToScalExp = SE.subExpToScalExp . dimSizeToSubExp
-
-dimSizeToSubExp :: Imp.DimSize -> SubExp
-dimSizeToSubExp (Imp.VarSize name) = Var $ Ident name $ Basic Int
-dimSizeToSubExp (Imp.ConstSize x)  = Constant $ IntVal x
 
 simplifyScalExp :: ScalExp -> ScalExp
 simplifyScalExp se = case AlgSimplify.simplify se mempty of

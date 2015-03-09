@@ -33,7 +33,7 @@ import qualified Futhark.Representation.ExplicitMemory.Permutation as Perm
 import Futhark.Representation.ExplicitMemory.SymSet (SymSet)
 import Futhark.Representation.AST.Attributes.Names
 import Language.Futhark.Core
-import Futhark.Representation.AST (SubExp (..), IdentBase (..), TypeBase (..))
+import Futhark.Representation.AST (SubExp (..))
 
 import Text.PrettyPrint.Mainland
 
@@ -224,29 +224,17 @@ shape (Index n (ixfun::IxFun (m :+ n)) (indices::Indices m)) =
 shape (Reshape _ dims) =
   dims
 
--- FIXME: this function is not yet quite there.
-linearWithOffset :: IxFun n -> Maybe ScalExp
+-- This function does not cover all possible cases.  It's a "best
+-- effort" kind of thing.  We really miss a case for Index, though.
+linearWithOffset :: forall n.
+                    IxFun n -> Maybe ScalExp
 linearWithOffset (Direct _) = Just $ Val $ IntVal 0
 linearWithOffset (Offset ixfun n) = do
   inner_offset <- linearWithOffset ixfun
   return $ inner_offset `SPlus` n
-linearWithOffset _ = Nothing
 linearWithOffset (Reshape ixfun _) =
   linearWithOffset ixfun
-linearWithOffset (Permute ixfun _) =
-  linearWithOffset ixfun
-{-
-linearWithOffset (Permute {}) _ = Nothing
-linearWithOffset (Index _ (Direct _) dims1 is) dims2 =
-  Just $ ssum $ Vec.toList $
-  Vec.zipWithSame STimes is $
-  Vec.map (STimes restsize) $ Vec.tail $ sliceSizes dims1
-  where restsize = sproduct $ map subExpToScalExp $ Vec.toList dims2
-linearWithOffset (Index {}) _ =
-  Nothing
--- linearWithOffset (Reshape ixfun dims) _  =
---   linearWithOffset ixfun dims
--}
+linearWithOffset _ = Nothing
 
 instance FreeIn (IxFun n) where
   freeIn (Direct dims) = freeIn $ Vec.toList dims
@@ -257,9 +245,3 @@ instance FreeIn (IxFun n) where
     mconcat (map freeIn $ toList is)
   freeIn (Reshape ixfun dims) =
     freeIn ixfun <> mconcat (map freeIn $ Vec.toList dims)
-{-
-test = iota shape
-  where shape = Var n :- Var m :- Nil
-        n = Ident (ID (nameFromString "n", 0)) $ Basic Int
-        m = Ident (ID (nameFromString "m", 0)) $ Basic Int
--}
