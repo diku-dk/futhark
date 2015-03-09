@@ -26,7 +26,6 @@ import Futhark.Representation.ExplicitMemory
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 import Futhark.Tools
 import qualified Futhark.Analysis.SymbolTable as ST
-import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.Optimise.Simplifier.Simplifiable (Simplifiable (..))
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 
@@ -171,7 +170,7 @@ memForBindee ident = do
 
 directIndexFunction :: Ident -> Type -> MemSummary
 directIndexFunction mem t =
-  MemSummary mem $ IxFun.iota $ arrayRank t
+  MemSummary mem $ IxFun.iota $ arrayDims t
 
 computeSize :: MonadBinder m =>
                SubExp -> [SubExp] -> m SubExp
@@ -348,27 +347,8 @@ allocInExp (LoopOp (DoLoop res merge i bound
     return $ LoopOp $
       DoLoop res (zip mergeparams' mergeinit') i bound body'
   where (mergeparams, mergeinit) = unzip merge
-        {-
-allocInExp (LoopOp (Map cs f arrs)) = do
-  let size = arraysSize 0 $ map identType arrs
-  is <- letExp "is" $ PrimOp $ Iota size
-  i  <- newIdent "i" (Basic Int)
-  summaries <- liftM (HM.fromList . concat) $
-               forM (zip (lambdaParams f) arrs) $ \(p,arr) ->
-    if basicType $ identType p then return []
-    else do
-      res <- lookupSummary arr
-      case res of
-        Just (MemSummary m origfun) ->
-          return [(identName p,
-                   MemSummary m $ IxFun.applyInd origfun undefined [SE.Id i])]
-        _ -> return []
-  f' <- local (HM.union summaries) $
-        allocInLambda
-        f { lambdaParams = i : lambdaParams f
-          }
-  return $ LoopOp $ Map cs f' (is:arrs)
--}
+allocInExp (LoopOp (Map {})) =
+  fail "Cannot put explicit allocations in map yet."
 allocInExp (LoopOp (Reduce {})) =
   fail "Cannot put explicit allocations in reduce yet."
 allocInExp (LoopOp (Scan {})) =

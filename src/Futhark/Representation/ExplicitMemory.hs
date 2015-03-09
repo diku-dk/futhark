@@ -563,11 +563,10 @@ expReturns look (AST.PrimOp (SubExp (Var v))) = do
   return [r]
 
 expReturns look (AST.PrimOp (Reshape _ newshape v)) = do
-  (et, oldshape, u, mem, ixfun) <- arrayIdentReturns look v
+  (et, _, u, mem, ixfun) <- arrayIdentReturns look v
   return [ReturnsArray et (ExtShape $ map Free newshape) u $
           Just $ ReturnsInBlock mem $
-          IxFun.reshape ixfun (length newshape) $
-          shapeDims oldshape]
+          IxFun.reshape ixfun newshape]
 
 expReturns look (AST.PrimOp (Rearrange _ perm v)) = do
   (et, Shape dims, u, mem, ixfun) <- arrayIdentReturns look v
@@ -596,7 +595,6 @@ expReturns look (AST.PrimOp (Index _ v is)) = do
       return [ReturnsArray et (ExtShape $ map Free dims) u $
              Just $ ReturnsInBlock mem $
              IxFun.applyInd ixfun
-             (shapeDims shape)
              (map SE.subExpToScalExp is)]
 
 expReturns _ (AST.PrimOp (Alloc size)) =

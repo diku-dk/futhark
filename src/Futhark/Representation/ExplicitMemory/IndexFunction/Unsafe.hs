@@ -75,13 +75,15 @@ shapeFromInts = map (Constant . IntVal)
 rank :: IxFun -> Int
 rank (IxFun n _) = sNatToInt n
 
-index :: IxFun -> Shape -> Indices -> ScalExp
-index f dims is = case f of
-  IxFun n f' -> Safe.index f' (unsafeFromList n dims) (unsafeFromList n is)
+index :: IxFun -> Indices -> ScalExp
+index f is = case f of
+  IxFun n f' -> Safe.index f' (unsafeFromList n is)
 
-iota :: Int -> IxFun
-iota n = case toSing (intToNat $ n-1) of
-  SomeSing (sb::SNat n) -> IxFun (SS sb) $ Safe.iota $ SS sb
+iota :: Shape -> IxFun
+iota shape = case toSing (intToNat $ n-1) of
+  SomeSing (sb::SNat n) ->
+    IxFun (SS sb) $ Safe.iota $ unsafeFromList (SS sb) shape
+  where n = Prelude.length shape
 
 offset :: IxFun -> ScalExp -> IxFun
 offset (IxFun n f) se =
@@ -116,16 +118,15 @@ update i x l =
   let (bef,_:aft) = Prelude.splitAt i l
   in bef ++ x : aft
 
-reshape :: IxFun -> Int -> Shape -> IxFun
-reshape (IxFun (m::SNat (S m)) ixfun) n oldshape =
-  case toSing $ intToNat $ n-1 of
+reshape :: IxFun -> Shape -> IxFun
+reshape (IxFun _ ixfun) newshape =
+  case toSing $ intToNat $ Prelude.length newshape-1 of
     SomeSing (sn::SNat n) ->
       IxFun (SS sn) $
-      Safe.reshape (SS sn) ixfun $
-      unsafeFromList m oldshape
+      Safe.reshape ixfun $ unsafeFromList (SS sn) newshape
 
-applyInd :: IxFun -> Shape -> Indices -> IxFun
-applyInd ixfun@(IxFun (snnat::SNat (S n)) (f::Safe.IxFun (S n))) dims is =
+applyInd :: IxFun -> Indices -> IxFun
+applyInd ixfun@(IxFun (snnat::SNat (S n)) (f::Safe.IxFun (S n))) is =
   case promote (Prelude.length is) :: Monomorphic (Sing :: Nat -> *) of
     Monomorphic (mnat::SNat m) ->
       case mnat %:<<= nnat of
@@ -136,8 +137,6 @@ applyInd ixfun@(IxFun (snnat::SNat (S n)) (f::Safe.IxFun (S n))) dims is =
               nmnat = nnat %- mnat
               is' :: Safe.Indices m
               is' = unsafeFromList mnat is
-              dims' :: Safe.Shape m
-              dims' = unsafeFromList mnat dims
               proof :: S n :=: (m :+: S (n :- m))
               proof = sym $
                       trans (succPlusR mnat nmnat)
@@ -145,7 +144,7 @@ applyInd ixfun@(IxFun (snnat::SNat (S n)) (f::Safe.IxFun (S n))) dims is =
               f' :: Safe.IxFun (m :+: S (n :- m))
               f' = coerce proof f
               ixfun' :: Safe.IxFun (S (n :- m))
-              ixfun' = Safe.applyInd k f' dims' is'
+              ixfun' = Safe.applyInd k f' is'
           in IxFun k ixfun'
         SFalse ->
           error $
@@ -160,7 +159,8 @@ codomain (IxFun n f) =
   SymSet n $ Safe.codomain f
 
 isDirect :: IxFun -> Bool
-isDirect = maybe False (==Val (IntVal 0)) . linearWithOffset
+isDirect =
+  maybe False (==Val (IntVal 0)) . linearWithOffset
 
 linearWithOffset :: IxFun -> Maybe ScalExp
 linearWithOffset (IxFun _ ixfun) =
