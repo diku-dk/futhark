@@ -139,7 +139,6 @@ import Language.Futhark.Parser.Lexer
       op              { L $$ OP }
       empty           { L $$ EMPTY }
       copy            { L $$ COPY }
-      assert          { L $$ ASSERT }
 
 %nonassoc ifprec letprec
 %left '||'
