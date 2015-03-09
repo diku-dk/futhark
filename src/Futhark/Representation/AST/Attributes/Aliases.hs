@@ -63,8 +63,6 @@ primOpAliases (Copy {}) =
   [mempty]
 primOpAliases (Assert {}) =
   [mempty]
-primOpAliases (Conjoin _) =
-  [mempty]
 primOpAliases (Alloc _) =
   [mempty]
 

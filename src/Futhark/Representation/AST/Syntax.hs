@@ -136,9 +136,6 @@ data PrimOp lore
   -- ^ Turn a boolean into a certificate, halting the
   -- program if the boolean is false.
 
-  | Conjoin [SubExp]
-  -- ^ Convert several certificates into a single certificate.
-
   -- Primitive array operations
 
   | Index Certificates

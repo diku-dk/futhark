@@ -591,8 +591,6 @@ evalPrimOp (Assert e loc) = do
             _ ->
               bad $ AssertFailed loc
 
-evalPrimOp (Conjoin _) = return [BasicVal Checked]
-
 -- Alloc is not used in the interpreter, so just return whatever
 evalPrimOp (Alloc se) =
   single <$> evalSubExp se

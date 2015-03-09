@@ -187,7 +187,6 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
     ppCertificates cs <> text "concat" <> apply (ppr x : map ppr ys)
   ppr (Copy e) = text "copy" <> parens (ppr e)
   ppr (Assert e _) = text "assert" <> parens (ppr e)
-  ppr (Conjoin es) = text "conjoin" <> parens (commasep $ map ppr es)
   ppr (Alloc e) = text "alloc" <> apply [ppr e]
 
 instance PrettyLore lore => Pretty (LoopOp lore) where

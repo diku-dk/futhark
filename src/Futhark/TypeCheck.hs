@@ -683,9 +683,6 @@ checkPrimOp (Copy e) =
 checkPrimOp (Assert e _) =
   require [Basic Bool] e
 
-checkPrimOp (Conjoin es) =
-  mapM_ (require [Basic Cert]) es
-
 checkPrimOp (Alloc e) =
   require [Basic Int] e
 

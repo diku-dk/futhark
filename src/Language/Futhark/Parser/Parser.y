@@ -140,7 +140,6 @@ import Language.Futhark.Parser.Lexer
       empty           { L $$ EMPTY }
       copy            { L $$ COPY }
       assert          { L $$ ASSERT }
-      conjoin         { L $$ CONJOIN }
 
 %nonassoc ifprec letprec
 %left '||'

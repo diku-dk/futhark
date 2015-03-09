@@ -315,9 +315,6 @@ defCompilePrimOp (Destination [target]) (Index _ src idxs)
   | otherwise = return ()
   where t = identType src
 
-defCompilePrimOp (Destination [_]) (Conjoin {}) =
-  return ()
-
 defCompilePrimOp
   (Destination [ArrayDestination (CopyIntoMemory memlocation) _])
   (Replicate n se) = do

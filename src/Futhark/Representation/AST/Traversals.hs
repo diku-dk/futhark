@@ -164,8 +164,6 @@ mapExpM tv (PrimOp (Alloc e)) =
   PrimOp <$> (pure Alloc <*> mapOnSubExp tv e)
 mapExpM tv (PrimOp (Assert e loc)) =
   PrimOp <$> (pure Assert <*> mapOnSubExp tv e <*> pure loc)
-mapExpM tv (PrimOp (Conjoin es)) =
-  PrimOp <$> (pure Conjoin <*> mapM (mapOnSubExp tv) es)
 mapExpM tv (LoopOp (DoLoop res mergepat loopvar boundexp loopbody)) =
   LoopOp <$> (DoLoop <$> mapM (mapOnIdent tv) res <*>
               (zip <$> mapM (mapOnFParam tv) vs <*> mapM (mapOnSubExp tv) es) <*>

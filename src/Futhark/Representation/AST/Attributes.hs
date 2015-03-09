@@ -120,7 +120,6 @@ safeExp (PrimOp op) = safePrimOp op
         safePrimOp (SubExp {}) = True
         safePrimOp (Not {}) = True
         safePrimOp (Negate {}) = True
-        safePrimOp (Conjoin {}) = True
         safePrimOp (Alloc {}) = True
         safePrimOp _ = False
 safeExp (LoopOp _) = False
