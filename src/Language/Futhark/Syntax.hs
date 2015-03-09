@@ -282,11 +282,6 @@ data ExpBase ty vn =
             -- must be a permutation of @[0,n-1]@, where @n@ is the
             -- number of dimensions in the input array.
 
-            | Rotate Int (ExpBase ty vn) SrcLoc
-            -- ^ @rotate(n,a)@ returns a new array, where the element
-            -- @a[i]@ is at position @i+n@, cycling over to the
-            -- beginning of the array.
-
             -- Second-Order Array Combinators accept curried and
             -- anonymous functions as first params.
             | Map (LambdaBase ty vn) (ExpBase ty vn) SrcLoc
@@ -341,7 +336,6 @@ instance Located (ExpBase ty vn) where
   locOf (Reshape _ _ pos) = locOf pos
   locOf (Transpose _ _ _ pos) = locOf pos
   locOf (Rearrange _ _ pos) = locOf pos
-  locOf (Rotate _ _ pos) = locOf pos
   locOf (Map _ _ pos) = locOf pos
   locOf (ConcatMap _ _ _ pos) = locOf pos
   locOf (Reduce _ _ _ pos) = locOf pos

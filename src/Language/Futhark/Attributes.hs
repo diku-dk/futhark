@@ -508,7 +508,6 @@ typeOf (Replicate _ e _) = arrayType 1 (typeOf e) u
 typeOf (Reshape shape  e _) =
   replicate (length shape) Nothing `setArrayDims` typeOf e
 typeOf (Rearrange _ e _) = typeOf e
-typeOf (Rotate _ e _) = typeOf e
 typeOf (Transpose k n e _)
   | Array (BasicArray et dims u als) <- typeOf e,
     (pre,d:post) <- splitAt k dims,

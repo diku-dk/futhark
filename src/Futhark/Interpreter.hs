@@ -543,9 +543,6 @@ evalPrimOp e@(Reshape _ shapeexp arrexp) = do
 evalPrimOp (Rearrange _ perm arrexp) =
   single <$> permuteArray perm <$> lookupVar arrexp
 
-evalPrimOp (Rotate _ perm arrexp) =
-  single <$> rotateArray perm <$> lookupVar arrexp
-
 evalPrimOp (Split _ sizeexps arrexp) = do
   sizes <- mapM (asInt <=< evalSubExp) sizeexps
   arrval <- lookupVar arrexp

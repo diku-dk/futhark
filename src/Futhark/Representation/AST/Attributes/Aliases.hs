@@ -53,8 +53,6 @@ primOpAliases (Reshape _ _ e) =
   [identAliases e]
 primOpAliases (Rearrange _ _ e) =
   [identAliases e]
-primOpAliases (Rotate _ _ e) =
-  [identAliases e]
 primOpAliases (Split _ sizeexps e) =
   replicate (length sizeexps) (identAliases e)
 primOpAliases (Concat _ x ys _) =

@@ -656,10 +656,6 @@ checkPrimOp (Rearrange cs perm arr) = do
   when (length perm /= rank || sort perm /= [0..rank-1]) $
     bad $ PermutationError noLoc perm rank $ Just $ identName arr
 
-checkPrimOp (Rotate cs _ arrexp) = do
-  mapM_ (requireI [Basic Cert]) cs
-  void $ checkArrIdent arrexp
-
 checkPrimOp (Split cs sizeexps arrexp) = do
   mapM_ (requireI [Basic Cert]) cs
   mapM_ (require [Basic Int]) sizeexps

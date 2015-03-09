@@ -137,8 +137,6 @@ mapExpM tv (Transpose k n e3 loc) =
        mapOnExp tv e3 <*> pure loc
 mapExpM tv (Rearrange perm e loc) =
   pure Rearrange <*> pure perm <*> mapOnExp tv e <*> pure loc
-mapExpM tv (Rotate n e loc) =
-  pure Rotate <*> pure n <*> mapOnExp tv e <*> pure loc
 mapExpM tv (Map fun e loc) =
   pure Map <*> mapOnLambda tv fun <*> mapOnExp tv e <*> pure loc
 mapExpM tv (ConcatMap fun e es loc) =

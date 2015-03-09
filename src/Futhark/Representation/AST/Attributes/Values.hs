@@ -14,9 +14,6 @@ module Futhark.Representation.AST.Attributes.Values
        , permuteCompose
        , transposeIndex
 
-         -- * Rotation
-       , rotateArray
-
          -- * Miscellaneous
        , arrayString
        )
@@ -105,18 +102,6 @@ transposeIndex k n l
     (mid,end) <- splitAt n post =
     beg ++ mid ++ [needle] ++ end
   | otherwise = l
-
--- | Rotate the elements of an array as per the Futhark 'rotate' command.
--- If the value is not an array, this is a no-op.
-rotateArray :: Int -> Value -> Value
-rotateArray n (ArrayVal a et shape) =
-  ArrayVal (listArray (bounds a) rotatedElems) et shape
-  where arrelems = elems a
-        nelems = length arrelems
-        rotatedElems
-          | n > 0     = drop (nelems - n) arrelems ++ take (nelems - n) arrelems
-          | otherwise = drop (-n) arrelems ++ take (-n) arrelems
-rotateArray _ v = v
 
 -- | If the given value is a nonempty array containing only
 -- characters, return the corresponding 'String', otherwise return

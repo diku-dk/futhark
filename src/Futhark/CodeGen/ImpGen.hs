@@ -420,25 +420,6 @@ defCompilePrimOp
 defCompilePrimOp _ (Reshape {}) =
   return ()
 
-defCompilePrimOp
-  (Destination [ArrayDestination (CopyIntoMemory memlocation) _])
-  (Rotate _ n src) = do
-    let size = compileSubExp $ arraySize 0 srct
-        n'   = Imp.Constant $ IntVal n
-        shape = map (elements . compileSubExp) $ arrayDims srct
-    i <- newVName "i"
-    (destmem, destoffset, rowsize) <-
-      indexArray' memlocation shape srcet
-      [elements $ Imp.BinOp Mod (Imp.BinOp Plus n' $ Imp.ScalarVar i) size]
-    (srcmem, srcoffset, _) <-
-      indexArray (identName src) [elements $ Imp.ScalarVar i]
-    emit $ Imp.For i size $
-           copy destmem (destoffset `withElemType` srcet)
-           srcmem (srcoffset `withElemType` srcet)
-           rowsize
-  where srct = identType src
-        srcet = elemType srct
-
 defCompilePrimOp (Destination []) _ = return () -- No arms, no cake.
 
 defCompilePrimOp target e =

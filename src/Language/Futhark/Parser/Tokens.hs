@@ -66,7 +66,6 @@ data Token = IF
            | REDUCE
            | RESHAPE
            | REARRANGE
-           | ROTATE
            | TRANSPOSE
            | ZIPWITH
            | ZIP

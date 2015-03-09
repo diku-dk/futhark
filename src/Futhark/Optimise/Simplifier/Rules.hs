@@ -44,7 +44,6 @@ topDownRules = [ liftIdentityMapping
                , simplifyClosedFormReduce
                , simplifyClosedFormLoop
                , letRule simplifyRearrange
-               , letRule simplifyRotate
                , letRule simplifyBinOp
                , letRule simplifyNot
                , letRule simplifyNegate
@@ -370,22 +369,6 @@ simplifyRearrange look (Rearrange cs perm v) =
     _ -> Nothing
 
 simplifyRearrange _ _ = Nothing
-
-simplifyRotate :: LetTopDownRule lore u
--- A zero-rotation is identity.
-simplifyRotate _ (Rotate _ 0 e) =
-  Just $ SubExp $ Var e
-
-simplifyRotate look (Rotate _ _ v) = do
-  bnd <- asPrimOp =<< look (identName v)
-  case bnd of
-    -- Rotating a replicate is identity.
-    Replicate {} ->
-      Just $ SubExp $ Var v
-    _ ->
-      Nothing
-
-simplifyRotate _ _ = Nothing
 
 simplifyBinOp :: LetTopDownRule lore u
 

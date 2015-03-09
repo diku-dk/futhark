@@ -246,10 +246,6 @@ internaliseExp _ (E.Rearrange perm e _) =
   internaliseOperation "rearrange" e $ \v ->
     return $ I.Rearrange [] perm v
 
-internaliseExp _ (E.Rotate n e _) =
-  internaliseOperation "rotate" e $ \v ->
-    return $ I.Rotate [] n v
-
 internaliseExp _ (E.Reshape shape e loc) = do
   shape' <- mapM (internaliseExp1 "shape") shape
   internaliseOperation "reshape" e $ \v -> do

@@ -178,11 +178,6 @@ data PrimOp lore
   -- must be a permutation of @[0,n-1]@, where @n@ is the
   -- number of dimensions in the input array.
 
-  | Rotate Certificates Int Ident
-  -- ^ @rotate(n,a)@ returns a new array, where the element
-  -- @a[i]@ is at position @i+n@, cycling over to the
-  -- beginning of the array.
-
   | Alloc SubExp
     -- ^ Allocate a memory block.  This really should not be an
     -- expression, but what are you gonna do...
