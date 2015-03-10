@@ -36,15 +36,20 @@
 (add-to-list 'auto-mode-alist '("\\.fut\\'" . futhark-mode))
 
 (defconst futhark-keywords
-  '("if" "then" "else" "let" "loop" "in" "with" "int" "real" "bool" "char"
+  '("if" "then" "else" "let" "loop" "in" "with"
     "fun" "fn" "for" "do" "do" "op" "not" "pow"
     "iota" "shape" "replicate" "reshape" "transpose" "map" "reduce" "zip" "unzip" "zipWith"
     "scan" "split" "concat" "filter" "redomap"
     "empty" "copy")
   "A list of Futhark keywords.")
 
+(defconst futhark-types
+  '("int" "real" "bool" "char")
+  "A list of Futhark types.")
+
 (defconst futhark-font-lock-keywords-1
   `((,(concat "\\<" (regexp-opt futhark-keywords t) "\\>") . font-lock-builtin-face)
+    (,(concat "\\<" (regexp-opt futhark-types t) "\\>") . font-lock-type-face)
     ("\\<\\w*\\>" . font-lock-variable-name-face)
     )
   "Minimal highlighting expressions for Futhark mode.")
