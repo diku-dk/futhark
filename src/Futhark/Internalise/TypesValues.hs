@@ -43,7 +43,9 @@ internaliseType = flip evalState 0 . internaliseType'
           innerdims <- map Ext <$> replicateM (length size - 1) newId
           ts <- concat <$> mapM internaliseTupleArrayElem elemts
           return [ I.arrayOf t (ExtShape $ outerdim : innerdims) $
-                   internaliseUniqueness u
+                   if I.unique t then Unique
+                   else if I.basicType t then u
+                        else I.uniqueness t
                  | t <- ts ]
 
         internaliseTupleArrayElem (BasicArrayElem bt _) =
