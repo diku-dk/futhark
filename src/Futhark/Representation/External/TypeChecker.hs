@@ -228,14 +228,27 @@ collectDataflow m = pass $ do
 noDataflow :: VarName vn => TypeM vn a -> TypeM vn a
 noDataflow = censor $ const mempty
 
-patDiet :: TaggedTupIdent CompTypeBase vn -> Occurences vn -> Diet
-patDiet pat occs = patDiet' pat
+patternType :: TaggedTupIdent CompTypeBase vn
+          -> DeclTypeBase (ID vn)
+patternType (Id k) = toDecl $ identType k
+patternType (Wildcard t _) = toDecl t
+patternType (TupId pats _) = Tuple $ map patternType pats
+
+loopPattern :: TaggedTupIdent CompTypeBase vn -> Occurences vn
+        -> TaggedTupIdent CompTypeBase vn
+loopPattern pat occs = loopPattern' pat
   where cons =  allConsumed occs
-        patDiet' (Id k)
-          | identName k `HS.member` cons = Consume
-          | otherwise                   = Observe
-        patDiet' (TupId pats _)         = TupleDiet $ map patDiet' pats
-        patDiet' (Wildcard _ _)         = Observe
+        loopPattern' (Id k)
+          | identName k `HS.member` cons =
+            Id k
+          | Tuple _ <- identType k =
+            Id k
+          | otherwise =
+            Id k { identType = identType k `setUniqueness` Nonunique }
+        loopPattern' (TupId pats loc) =
+          TupId (map loopPattern' pats) loc
+        loopPattern' (Wildcard t loc) =
+          Wildcard t loc
 
 maybeCheckOccurences :: VarName vn => Occurences vn -> TypeM vn ()
 maybeCheckOccurences us = do
@@ -808,12 +821,16 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
         Tuple $ zipWith param ts cons
       param t _ = t `setAliases` NoInfo
 
+      -- Change the uniqueness of pattern elements to reflect whether
+      -- they were actually consumed.
+      mergepat_fixed_uniqueness =
+        loopPattern mergepat' $ usageOccurences loopflow
+
       -- We use the type of the merge expression, but with uniqueness
       -- attributes reflected to show how the parts of the merge
       -- pattern are used - if something was consumed, it has to be a
       -- unique parameter to the function.
-      rettype = param (typeOf mergeexp') $
-                patDiet mergepat' $ usageOccurences loopflow
+      rettype = patternType mergepat_fixed_uniqueness
 
   merge <- newIdent "merge_val" (fromDecl rettype) $ srclocOf mergeexp'
 
@@ -862,16 +879,21 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
                  (srclocOf mergeexp))
                 (srclocOf mergeexp)
 
-  -- Now we just need to bind the result of the function call to the
-  -- original merge pattern...
+  -- Now we just need to get the loop body with proper type
+  -- annotations...
+  (loopbody_fixed_uniqueness, _) <-
+    firstscope $ collectDataflow $ binding [iparam] $ checkExp loopbody
+
+  -- ... bind the result of the function call to the original merge
+  -- pattern...
   (secondscope, _) <- checkBinding mergepat (typeOf funcall) callflow
 
   -- And then check the let-body.
   secondscope $ do
     letbody' <- checkExp letbody
-    return $ DoLoop mergepat' mergeexp'
+    return $ DoLoop mergepat_fixed_uniqueness mergeexp'
                     (Ident loopvar (Basic Int) loc) boundexp'
-                    loopbody' letbody' loc
+                    loopbody_fixed_uniqueness letbody' loc
 
 checkSOACArrayArg :: (TypeBox ty, VarName vn) =>
                      TaggedExp ty vn -> TypeM vn (TaggedExp CompTypeBase vn, Arg vn)
