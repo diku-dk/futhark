@@ -532,7 +532,7 @@ typeOf (Redomap outerfun innerfun start arr _) =
   lambdaType outerfun [innerres, innerres]
     where innerres = lambdaType innerfun [typeOf start, rowType $ typeOf arr]
 typeOf (Concat x ys _) = typeOf x `setUniqueness` u
-  where u = uniqueness (typeOf x) <> mconcat (map uniqueness (map typeOf ys))
+  where u = uniqueness (typeOf x) <> mconcat (map (uniqueness . typeOf) ys)
 typeOf (Split splitexps e _) =
   Tuple $ replicate (1 + length splitexps) (typeOf e)
 typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` HS.empty
