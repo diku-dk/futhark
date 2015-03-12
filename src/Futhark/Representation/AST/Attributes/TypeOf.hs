@@ -77,7 +77,7 @@ primOpType (Split _ sizeexps e) =
   map (identType e `setOuterSize`) sizeexps
 primOpType (Concat _ x ys ressize) =
   [identType x `setUniqueness` u `setOuterSize` ressize]
-  where u = uniqueness (identType x) <> mconcat ( map uniqueness (map identType ys) )
+  where u = uniqueness (identType x) <> mconcat (map (uniqueness . identType) ys)
 primOpType (Copy e) =
   [subExpType e `setUniqueness` Unique]
 primOpType (Assert _ _) =
