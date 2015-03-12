@@ -205,16 +205,24 @@ renameExp (LetPat pat e body pos) = do
     pat' <- renamePattern pat
     body' <- renameExp body
     return $ LetPat pat' e1' body' pos
-renameExp (DoLoop mergepat mergeexp loopvar e loopbody letbody pos) = do
-  e' <- renameExp e
+renameExp (DoLoop mergepat mergeexp form loopbody letbody pos) = do
   mergeexp' <- renameExp mergeexp
   bind (patternNames mergepat) $ do
     mergepat' <- renamePattern mergepat
     letbody' <- renameExp letbody
-    bind [loopvar] $ do
-      loopvar'  <- repl loopvar
-      loopbody' <- renameExp loopbody
-      return $ DoLoop mergepat' mergeexp' loopvar' e' loopbody' letbody' pos
+    case form of
+      ForLoop loopvar bound ->
+        bind [loopvar] $ do
+          loopvar'  <- repl loopvar
+          bound' <- renameExp bound
+          loopbody' <- renameExp loopbody
+          return $ DoLoop mergepat' mergeexp'
+            (ForLoop loopvar' bound') loopbody' letbody' pos
+      WhileLoop cond -> do
+        cond' <- renameExp cond
+        loopbody' <- renameExp loopbody
+        return $ DoLoop mergepat' mergeexp'
+          (WhileLoop cond') loopbody' letbody' pos
 renameExp e = mapExpM rename e
 
 renameType :: (TypeBox ty, VarName f, VarName t) => ty f -> RenameM f t (ty t)

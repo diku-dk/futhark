@@ -43,6 +43,7 @@ module Futhark.Representation.AST.Syntax
   , LoopOp (..)
   , ExpT(..)
   , Exp
+  , LoopForm (..)
   , LambdaT(..)
   , Lambda
   , Lore.RetType
@@ -184,8 +185,8 @@ data PrimOp lore
   deriving (Eq, Ord, Show)
 
 data LoopOp lore
-  = DoLoop [Ident] [(FParam lore, SubExp)] Ident SubExp (BodyT lore)
-    -- ^ @loop {b} <- {a} = {v} for i < n do b@.
+  = DoLoop [Ident] [(FParam lore, SubExp)] LoopForm (BodyT lore)
+    -- ^ @loop {b} <- {a} = {v} (for i < n|while b) do b@.
 
   | Map Certificates (LambdaT lore) [Ident]
     -- ^ @map(op +(1), {1,2,..,n}) = [2,3,..,n+1]@.
@@ -203,6 +204,10 @@ data LoopOp lore
 deriving instance Lore lore => Eq (LoopOp lore)
 deriving instance Lore lore => Show (LoopOp lore)
 deriving instance Lore lore => Ord (LoopOp lore)
+
+data LoopForm = ForLoop Ident SubExp
+              | WhileLoop Ident
+              deriving (Eq, Show, Ord)
 
 -- | Futhark Expression Language: literals + vars + int binops + array
 -- constructors + array combinators (SOAC) + if + function calls +

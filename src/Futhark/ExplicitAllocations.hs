@@ -335,18 +335,22 @@ funcallSubExps ses = map fst <$>
                      funcallArgs [ (se, Observe) | se <- ses ]
 
 allocInExp :: In.Exp -> AllocM Exp
-allocInExp (LoopOp (DoLoop res merge i bound
+allocInExp (LoopOp (DoLoop res merge form
                     (Body () bodybnds bodyres))) =
   allocInFParams mergeparams $ \mergeparams' ->
-  local (HM.singleton (identName i) Scalar<>) $ do
+  formBinds form $ do
     mergeinit' <- funcallSubExps mergeinit
     body' <- insertBindingsM $ allocInBindings bodybnds $ \bodybnds' -> do
       ses <- funcallSubExps $ resultSubExps bodyres
       let res' = bodyres { resultSubExps = ses }
       return $ Body () bodybnds' res'
     return $ LoopOp $
-      DoLoop res (zip mergeparams' mergeinit') i bound body'
+      DoLoop res (zip mergeparams' mergeinit') form body'
   where (mergeparams, mergeinit) = unzip merge
+        formBinds (ForLoop i _) =
+          local (HM.singleton (identName i) Scalar<>)
+        formBinds (WhileLoop _) =
+          id
 allocInExp (LoopOp (Map {})) =
   fail "Cannot put explicit allocations in map yet."
 allocInExp (LoopOp (Reduce {})) =

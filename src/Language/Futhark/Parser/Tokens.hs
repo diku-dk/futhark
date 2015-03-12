@@ -86,5 +86,6 @@ data Token = IF
            | EMPTY
            | COPY
            | ASSERT
+           | WHILE
            | EOF
              deriving (Show, Eq)

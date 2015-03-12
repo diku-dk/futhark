@@ -189,18 +189,25 @@ instance Renameable lore => Rename (Body lore) where
       return $ Body blore' (Let pat' elore' e1':bnds') res'
 
 instance Renameable lore => Rename (Exp lore) where
-  rename (LoopOp (DoLoop respat merge loopvar boundexp loopbody)) = do
+  rename (LoopOp (DoLoop respat merge form loopbody)) = do
     let (mergepat, mergeexp) = unzip merge
-    boundexp' <- rename boundexp
     mergeexp' <- mapM rename mergeexp
     bind (map fparamIdent mergepat) $ do
       mergepat' <- mapM rename mergepat
       respat' <- mapM rename respat
-      bind [loopvar] $ do
-        loopvar'  <- rename loopvar
-        loopbody' <- rename loopbody
-        return $ LoopOp $ DoLoop respat' (zip mergepat' mergeexp')
-                          loopvar' boundexp' loopbody'
+      case form of
+        ForLoop loopvar boundexp -> do
+          boundexp' <- rename boundexp
+          bind [loopvar] $ do
+            loopvar'  <- rename loopvar
+            loopbody' <- rename loopbody
+            return $ LoopOp $ DoLoop respat' (zip mergepat' mergeexp')
+              (ForLoop loopvar' boundexp') loopbody'
+        WhileLoop cond -> do
+          loopbody' <- rename loopbody
+          cond'     <- rename cond
+          return $ LoopOp $ DoLoop respat' (zip mergepat' mergeexp')
+            (WhileLoop cond') loopbody'
   rename e = mapExpM mapper e
     where mapper = Mapper {
                       mapOnBinding = fail "Unhandled binding in Renamer"

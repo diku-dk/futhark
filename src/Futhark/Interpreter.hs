@@ -594,7 +594,7 @@ evalPrimOp (Alloc se) =
 
 evalLoopOp :: forall lore . Lore lore => LoopOp lore -> FutharkM lore [Value]
 
-evalLoopOp (DoLoop respat merge loopvar boundexp loopbody) = do
+evalLoopOp (DoLoop respat merge (ForLoop loopvar boundexp) loopbody) = do
   bound <- evalSubExp boundexp
   mergestart <- mapM evalSubExp mergeexp
   case bound of
@@ -603,12 +603,28 @@ evalLoopOp (DoLoop respat merge loopvar boundexp loopbody) = do
       binding (zip3 (map fparamIdent mergepat) (repeat BindVar) vs) $
         mapM lookupVar $
         loopResultContext (representative :: lore) respat mergepat ++ respat
-    _ -> bad $ TypeError "evalBody DoLoop"
+    _ -> bad $ TypeError "evalBody DoLoop for"
   where (mergepat, mergeexp) = unzip merge
         iteration mergeval i =
           binding [(loopvar, BindVar, BasicVal $ IntVal i)] $
             binding (zip3 (map fparamIdent mergepat) (repeat BindVar) mergeval) $
               evalBody loopbody
+
+evalLoopOp (DoLoop respat merge (WhileLoop cond) loopbody) = do
+  mergestart <- mapM evalSubExp mergeexp
+  iteration mergestart
+  where (mergepat, mergeexp) = unzip merge
+        iteration mergeval =
+          binding (zip3 (map fparamIdent mergepat) (repeat BindVar) mergeval) $ do
+            condv <- lookupVar cond
+            case condv of
+              BasicVal (LogVal False) ->
+                mapM lookupVar $
+                loopResultContext (representative :: lore) respat mergepat ++ respat
+              BasicVal (LogVal True) ->
+                iteration =<< evalBody loopbody
+              _ ->
+                bad $ TypeError "evalBody DoLoop while"
 
 evalLoopOp (Map _ fun arrexps) = do
   vss <- mapM (arrToList <=< lookupVar) arrexps

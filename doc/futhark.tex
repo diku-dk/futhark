@@ -138,6 +138,9 @@ $e$ & $::=$ & $k$ & (Constant)\\
 & $|$ & \texttt{loop ($p$ = $e_{1}$) =} & (Loop) \\
 &     & \texttt{\ \ for $v$ < $e_{2}$ do $e_{3}$} \\
 &     & \texttt{in $e_{4}$} \\
+& $|$ & \texttt{loop ($p$ = $e_{1}$) =} & (Loop) \\
+&     & \texttt{\ \ while $e_{2}$ do $e_{3}$} \\
+&     & \texttt{in $e_{4}$} \\
 \end{tabular}
 \\
 \begin{tabular}{lrll}
@@ -282,9 +285,23 @@ tail-recursive function on the right-hand side.
 The purpose of \texttt{loop} is partly to render some sequential
 computations slightly more convenient, but primarily to express
 certain very specific forms of recursive functions, specifically those
-with a fixed iteration count.  This property can eventually be used
-for analysis and optimisation, although the current Futhark compiler
-does not yet exploit this.
+with a fixed iteration count.  This property is used for analysis and
+optimisation by the Futhark compiler.
+
+Apart from \texttt{for}-loops, Futhark also supports \texttt{while}
+loops.  These do not provide as much information to the compiler, but
+can be used for convergence loops, where the number of iterations
+cannot be predicted in advance.  For example, the following program
+doubles a given number until it exceeds a given threshold value.
+
+\begin{colorcode}
+  fun int main(int x, int bound) =
+    loop (x) = while x < bound do x * 2
+    in x
+\end{colorcode}
+
+In all respects other than termination criteria, \texttt{while}-loops
+behave identically to \texttt{for}-loops.
 
 \begin{figure}
 \begin{center}
@@ -618,6 +635,16 @@ the language.
     \item Bind \textit{pat} to the initial values given in \textit{initial}.
     \item While $\textit{i} < \textit{bound}$, evaluate \textit{loopbody},
       rebinding \textit{pat} to be the value returned by the body.
+    \item Evaluate \textit{body} with \textit{pat} bound to its final
+      value.
+    \end{enumerate}
+
+  \item[\texttt{loop (\textit{pat} = \textit{initial}) = while \textit{cond} do \textit{loopbody} in \textit{body}}]\hfill
+    \begin{enumerate}
+    \item Bind \textit{pat} to the initial values given in \textit{initial}.
+    \item While $\textit{cond}$ evaluates to \textit{True}, evaluate
+      \textit{loopbody}, rebinding \textit{pat} to be the value
+      returned by the body.
     \item Evaluate \textit{body} with \textit{pat} bound to its final
       value.
     \end{enumerate}

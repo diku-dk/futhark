@@ -86,7 +86,7 @@ primOpType (Alloc e) =
   [Mem e]
 
 loopOpExtType :: LoopOp lore -> [ExtType]
-loopOpExtType (DoLoop res merge _ _ _) =
+loopOpExtType (DoLoop res merge _ _) =
   loopExtType res $ map (fparamIdent . fst) merge
 loopOpExtType (Map _ f arrs) =
   staticShapes $ mapType f $ map identType arrs

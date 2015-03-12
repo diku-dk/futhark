@@ -138,6 +138,7 @@ import Language.Futhark.Parser.Lexer
       op              { L $$ OP }
       empty           { L $$ EMPTY }
       copy            { L $$ COPY }
+      while           { L $$ WHILE }
 
 %nonassoc ifprec letprec
 %left '||'
@@ -359,9 +360,14 @@ Exp  :: { UncheckedExp }
                       { Index $1 $2 (srclocOf $1) }
 
      | loop '(' TupId ')' '=' for Id '<' Exp do Exp in Exp %prec letprec
-                      {% liftM (\t -> DoLoop $3 t $7 $9 $11 $13 $1) (tupIdExp $3) }
+                      {% liftM (\t -> DoLoop $3 t (ForLoop $7 $9) $11 $13 $1) (tupIdExp $3) }
      | loop '(' TupId '=' Exp ')' '=' for Id '<' Exp do Exp in Exp %prec letprec
-                      { DoLoop $3 $5 $9 $11 $13 $15 $1 }
+                      { DoLoop $3 $5 (ForLoop $9 $11) $13 $15 $1 }
+
+     | loop '(' TupId ')' '=' while Exp do Exp in Exp %prec letprec
+                      {% liftM (\t -> DoLoop $3 t (WhileLoop $7) $9 $11 $1) (tupIdExp $3) }
+     | loop '(' TupId '=' Exp ')' '=' while Exp do Exp in Exp %prec letprec
+                      { DoLoop $3 $5 (WhileLoop $9) $11 $13 $1 }
 
 Index : '[' Exps ']'                  { $2 }
 

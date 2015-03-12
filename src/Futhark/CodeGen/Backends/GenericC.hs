@@ -544,6 +544,13 @@ compileCode (For i bound body) = do
             $items:body'
           }|]
 
+compileCode (While cond body) = do
+  cond' <- compileExp cond
+  body' <- collect $ compileCode body
+  stm [C.cstm|while ($exp:cond') {
+            $items:body'
+          }|]
+
 compileCode (If cond tbranch fbranch) = do
   cond' <- compileExp cond
   tbranch' <- collect $ compileCode tbranch

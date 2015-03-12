@@ -34,7 +34,7 @@ usageInExp (Apply _ args _) =
   mconcat [ mconcat $ map UT.consumedUsage $
             HS.toList $ subExpAliases arg
           | (arg,d) <- args, d == Consume ]
-usageInExp (LoopOp (DoLoop _ merge _ _ _)) =
+usageInExp (LoopOp (DoLoop _ merge _ _)) =
   mconcat [ mconcat $ map UT.consumedUsage $
             HS.toList $ subExpAliases se
           | (v,se) <- merge, unique $ fparamType v ]

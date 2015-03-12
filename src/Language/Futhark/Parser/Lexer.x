@@ -107,6 +107,7 @@ keyword s =
     "redomap"      -> REDOMAP
     "empty"        -> EMPTY
     "copy"         -> COPY
+    "while"        -> WHILE
     "assert"       -> ASSERT
     _              -> ID $ nameFromString s
 

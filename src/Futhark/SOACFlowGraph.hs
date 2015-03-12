@@ -146,7 +146,7 @@ flowForBody (Body lore (Let pat _ e:bnds) res) = do
 flowForBody b = walkBodyM flow b
 
 flowForExp :: Exp -> FlowM ()
-flowForExp (LoopOp (DoLoop _ merge _ boundexp loopbody))
+flowForExp (LoopOp (DoLoop _ merge _ loopbody))
   | names@(name:_) <- map (fparamName . fst) merge =
   tell $ HM.singleton
          (textual name)
@@ -158,8 +158,7 @@ flowForExp (LoopOp (DoLoop _ merge _ boundexp loopbody))
                  [ (used, HS.singleton []) |
                    used <- HS.toList
                            $ mconcat (freeNamesInBody loopbody :
-                                      map freeNamesIn
-                                      (boundexp : map snd merge))
+                                      map (freeNamesIn . snd) merge)
                           `HS.difference` HS.fromList names
                  ]
          , soacBodyInfo = execWriter $ flowForBody loopbody

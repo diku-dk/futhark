@@ -54,6 +54,7 @@ data Function a = Function [Param] [Param] (Code a) [ValueDecl] [ValueDecl]
 data Code a = Skip
             | Code a :>>: Code a
             | For VName Exp (Code a)
+            | While Exp (Code a)
             | DeclareMem VName
             | DeclareScalar VName BasicType
             | Allocate VName Exp
@@ -127,6 +128,10 @@ instance Pretty (Code op) where
   ppr (c1 :>>: c2) = ppr c1 </> ppr c2
   ppr (For i limit body) =
     text "for" <+> ppr i <+> langle <+> ppr limit <+> text "{" </>
+    indent 2 (ppr body) </>
+    text "}"
+  ppr (While cond body) =
+    text "while" <+> ppr cond <+> text "{" </>
     indent 2 (ppr body) </>
     text "}"
   ppr (DeclareMem name) =

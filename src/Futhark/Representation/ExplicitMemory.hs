@@ -481,7 +481,7 @@ instance PrettyLore ExplicitMemory where
     case mapMaybe fparamAnnot $ funDecParams fundec of
       []     -> Nothing
       annots -> Just $ PP.folddoc (PP.</>) annots
-  ppExpLore (AST.LoopOp (DoLoop _ merge _ _ _)) =
+  ppExpLore (AST.LoopOp (DoLoop _ merge _ _)) =
     case mapMaybe (fparamAnnot . fst) merge of
       []     -> Nothing
       annots -> Just $ PP.folddoc (PP.</>) annots
@@ -603,7 +603,7 @@ expReturns _ (AST.PrimOp (Alloc size)) =
 expReturns _ (AST.PrimOp op) =
   return $ extReturns $ staticShapes $ primOpType op
 
-expReturns _ (AST.LoopOp (DoLoop res merge _ _ _)) =
+expReturns _ (AST.LoopOp (DoLoop res merge _ _)) =
     return $
     evalState (mapM typeWithAttr $
                zip (map identName res) $

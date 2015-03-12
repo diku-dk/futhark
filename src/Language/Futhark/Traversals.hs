@@ -171,9 +171,13 @@ mapExpM tv (Concat x ys loc) =
        mapOnExp tv x <*> mapM (mapOnExp tv) ys <*> pure loc
 mapExpM tv (Copy e loc) =
   pure Copy <*> mapOnExp tv e <*> pure loc
-mapExpM tv (DoLoop mergepat mergeexp loopvar boundexp loopbody letbody loc) =
+mapExpM tv (DoLoop mergepat mergeexp (ForLoop loopvar boundexp) loopbody letbody loc) =
   pure DoLoop <*> mapOnPattern tv mergepat <*> mapOnExp tv mergeexp <*>
-       mapOnIdent tv loopvar <*> mapOnExp tv boundexp <*>
+       (ForLoop <$> mapOnIdent tv loopvar <*> mapOnExp tv boundexp) <*>
+       mapOnExp tv loopbody <*> mapOnExp tv letbody <*> pure loc
+mapExpM tv (DoLoop mergepat mergeexp (WhileLoop cond) loopbody letbody loc) =
+  pure DoLoop <*> mapOnPattern tv mergepat <*> mapOnExp tv mergeexp <*>
+       (WhileLoop <$> mapOnExp tv cond) <*>
        mapOnExp tv loopbody <*> mapOnExp tv letbody <*> pure loc
 
 -- | Like 'mapExp', but in the 'Identity' monad.

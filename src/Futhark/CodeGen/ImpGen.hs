@@ -410,13 +410,17 @@ defCompilePrimOp target e =
 
 defCompileLoopOp :: Destination -> LoopOp -> ImpM op ()
 
-defCompileLoopOp (Destination dest) (DoLoop res merge i bound body) =
+defCompileLoopOp (Destination dest) (DoLoop res merge form body) =
   declaringFParams mergepat $ do
     forM_ merge $ \(p, se) ->
       when (subExpNotArray se) $
       compileScalarSubExpTo (ScalarDestination $ fparamName p) se
     body' <- collect $ compileLoopBody mergenames body
-    emit $ Imp.For (identName i) (compileSubExp bound) body'
+    case form of
+      ForLoop i bound ->
+        emit $ Imp.For (identName i) (compileSubExp bound) body'
+      WhileLoop cond ->
+        emit $ Imp.While (Imp.ScalarVar $ identName cond) body'
     zipWithM_ compileResultSubExp dest $ map Var res
     where mergepat = map fst merge
           mergenames = map fparamName mergepat

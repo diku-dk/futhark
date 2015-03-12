@@ -685,18 +685,37 @@ checkPrimOp (Alloc e) =
 checkLoopOp :: Checkable lore =>
                LoopOp lore -> TypeM lore ()
 
-checkLoopOp (DoLoop respat merge (Ident loopvar loopvart)
-             boundexp loopbody) = do
+checkLoopOp (DoLoop respat merge form loopbody) = do
   let (mergepat, mergeexps) = unzip merge
-  unless (loopvart == Basic Int) $
-    bad $ TypeError noLoc "Type annotation of loop variable is not int"
-  boundarg <- checkArg boundexp
   mergeargs <- mapM checkArg mergeexps
-  iparam <- basicFParam loopvar Int
-  let funparams = iparam : mergepat
-      paramts   = map fparamType funparams
-      rettype   = map fparamType mergepat
-  checkFuncall Nothing paramts $ boundarg : mergeargs
+
+  funparams <- case form of
+    ForLoop (Ident loopvar loopvart) boundexp -> do
+      unless (loopvart == Basic Int) $
+        bad $ TypeError noLoc "Type annotation of loop variable is not int"
+      iparam <- basicFParam loopvar Int
+      let funparams = iparam : mergepat
+          paramts   = map fparamType funparams
+
+      boundarg <- checkArg boundexp
+      checkFuncall Nothing paramts $ boundarg : mergeargs
+      return funparams
+    WhileLoop cond -> do
+      case find ((==identName cond) . fparamName . fst) merge of
+        Just (condparam,_) ->
+          unless (fparamType condparam == Basic Bool) $
+          bad $ TypeError noLoc $
+          "Conditional '" ++ pretty cond ++ "' of while-loop is not boolean, but " ++
+          pretty (fparamType condparam) ++ "."
+        Nothing ->
+          bad $ TypeError noLoc $
+          "Conditional '" ++ pretty cond ++ "' of while-loop is not a merge varible."
+      let funparams = mergepat
+          paramts   = map fparamType funparams
+      checkFuncall Nothing paramts mergeargs
+      return funparams
+
+  let rettype   = map fparamType mergepat
 
   noUnique $ checkFun' (nameFromString "<loop body>",
                         staticShapes rettype,

@@ -787,27 +787,61 @@ checkExp (Copy e pos) = do
 -- variables in mergepat are actually consumed.  Also, any variables
 -- that are free in the loop body must be passed along as (non-unique)
 -- parameters to the function.
-checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
-          boundexp loopbody letbody loc) = do
+checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
   -- First, check the bound and initial merge expression and throw
   -- away the dataflow.  The dataflow will be reconstructed later, but
   -- we need the result of this to synthesize the function.
-  ((boundexp', mergeexp'), _) <-
-    collectDataflow $ do boundexp' <- require [Basic Int] =<< checkExp boundexp
-                         mergeexp' <- checkExp mergeexp
-                         return (boundexp', mergeexp')
-  let iparam = Ident loopvar (Basic Int) loc
+  ((mergeexp', bindExtra), _) <-
+    collectDataflow $ do
+      mergeexp' <- checkExp mergeexp
+      return $
+        case form of
+          ForLoop (Ident loopvar _ _) _ ->
+            let iparam = Ident loopvar (Basic Int) loc
+            in (mergeexp', [iparam])
+          WhileLoop _ ->
+            (mergeexp', [])
 
   -- Check the loop body.  We tap the dataflow before leaving scope,
   -- so we'll be able to see occurences of variables bound by
   -- mergepat.
   (firstscope, mergepat') <- checkBinding mergepat (typeOf mergeexp') mempty
-  (loopbody', loopflow) <- firstscope $
-                           collectDataflow $ binding [iparam] $ checkExp loopbody
+  ((loopbody', form', extraargs, letExtra, boundExtra, extraparams, freeInForm), loopflow) <-
+    firstscope $ collectDataflow $ binding bindExtra $
+      case form of
+        ForLoop (Ident loopvar _ loopvarloc) boundexp -> do
+          bound <- newIdent "loop_bound" (Basic Int) loc
+          boundexp' <- require [Basic Int] =<< checkExp boundexp
+          loopbody' <- checkExp loopbody
+          let iparam = Ident loopvar (Basic Int) loc
+          return (loopbody',
+                  ForLoop (Ident loopvar (Basic Int) loopvarloc) boundexp',
+                  [(Literal (BasicVal $ IntVal 0) loc, Observe),
+                   (Var bound, Observe)],
+                  \inner -> LetPat (Id bound) boundexp'
+                            inner (srclocOf mergeexp),
+                  HS.singleton iparam,
+                  [iparam, toParam bound],
+                  freeInExp boundexp')
+        WhileLoop condexp -> do
+          (condexp', condflow) <-
+            collectDataflow $ require [Basic Bool] =<< checkExp condexp
+          (loopbody', bodyflow) <-
+            collectDataflow $ checkExp loopbody
+          occur $ usageOccurences condflow `seqOccurences`
+                  usageOccurences bodyflow
+          cond <- newIdent "loop_cond" (Basic Bool) loc
+          return (loopbody',
+                  WhileLoop condexp',
+                  [(Var cond, Observe)],
+                  \inner -> LetPat (Id cond) condexp'
+                            inner (srclocOf mergeexp),
+                  HS.empty,
+                  [toParam cond],
+                  freeInExp condexp')
 
   -- We can use the name generator in a slightly hacky way to generate
   -- a unique Name for the function.
-  bound <- newIdent "loop_bound" (Basic Int) loc
   fname <- newFname "loop_fun"
 
   let -- | Change the uniqueness attribute of a type to reflect how it
@@ -834,18 +868,20 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
 
   merge <- newIdent "merge_val" (fromDecl rettype) $ srclocOf mergeexp'
 
-  let boundnames = HS.insert iparam $ patIdentSet mergepat'
+  let boundnames = boundExtra `HS.union` patIdentSet mergepat_fixed_uniqueness
       ununique ident =
         ident { identType = param (identType ident) Observe }
       -- Find the free variables of the loop body.
       free = map ununique $ HS.toList $
-             freeInExp loopbody' `HS.difference` boundnames
+             (freeInExp loopbody' <> freeInForm)
+             `HS.difference` boundnames
 
       -- These are the parameters expected by the function: All of the
-      -- free variables, followed by the index, followed by the upper
-      -- bound (currently not used), followed by the merge value.
+      -- free variables, followed by the merge value, followed by
+      -- whatever needed by the loop form.
       params = map toParam free ++
-               [iparam, toParam bound, toParam merge]
+               [toParam merge] ++
+               extraparams
       bindfun env = env { envFtable = HM.insert fname
                                       (rettype, map identType params) $
                                       envFtable env }
@@ -854,11 +890,10 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
       -- tails replaced with recursive calls.
       recurse e = Apply fname
                     ([(Var (fromParam k), diet (identType k)) | k <- free ] ++
-                     [(Var iparam, Observe),
-                      (Var bound, Observe),
-                      (e, diet $ typeOf e)])
+                     [(e, diet $ typeOf e)] ++
+                     extraargs)
                     (fromDecl rettype) (srclocOf e)
-      funbody' = LetPat mergepat' (Var merge) (mapTails recurse id loopbody')
+      funbody' = LetPat mergepat' (Var merge) (mapTails recurse id $ letExtra loopbody')
                  (srclocOf loopbody')
 
   (funcall, callflow) <- collectDataflow $ local bindfun $ do
@@ -868,31 +903,30 @@ checkExp (DoLoop mergepat mergeexp (Ident loopvar _ _)
     -- bound and initial merge value, in case they use something
     -- consumed in the call.  This reintroduces the dataflow for
     -- boundexp and mergeexp that we previously threw away.
-    checkExp $ LetPat (Id bound) boundexp'
-                (LetPat (Id merge) mergeexp'
+    let call = LetPat (Id merge) mergeexp'
+               (LetPat mergepat' (Var merge)
+                (letExtra
                  (Apply fname
-                    ([(Var (fromParam k), diet (identType k)) | k <- free ] ++
-                     [(Literal (BasicVal $ IntVal 0) loc, Observe),
-                      (Var bound, Observe),
-                      (Var merge, diet rettype)])
-                    (fromDecl rettype) $ srclocOf mergeexp)
-                 (srclocOf mergeexp))
-                (srclocOf mergeexp)
-
-  -- Now we just need to get the loop body with proper type
-  -- annotations...
-  (loopbody_fixed_uniqueness, _) <-
-    firstscope $ collectDataflow $ binding [iparam] $ checkExp loopbody
-
-  -- ... bind the result of the function call to the original merge
-  -- pattern...
+                  ([(Var (fromParam k), diet (identType k)) | k <- free ] ++
+                   [(Var merge, diet rettype)] ++
+                   extraargs)
+                  (fromDecl rettype) $ srclocOf mergeexp))
+                (srclocOf mergeexp))
+               (srclocOf mergeexp)
+    checkExp call
+  -- Now we just need to bind the result of the function call to the
+  -- original merge pattern...
   (secondscope, _) <- checkBinding mergepat (typeOf funcall) callflow
+
+  -- ... get the loop body with proper type annotations...
+  (loopbody_fixed_uniqueness, _) <-
+    collectDataflow $ secondscope $ binding bindExtra $ checkExp loopbody
 
   -- And then check the let-body.
   secondscope $ do
     letbody' <- checkExp letbody
     return $ DoLoop mergepat_fixed_uniqueness mergeexp'
-                    (Ident loopvar (Basic Int) loc) boundexp'
+                    form'
                     loopbody_fixed_uniqueness letbody' loc
 
 checkSOACArrayArg :: (TypeBox ty, VarName vn) =>

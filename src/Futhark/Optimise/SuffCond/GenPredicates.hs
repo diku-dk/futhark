@@ -132,14 +132,14 @@ splitBinding bnd@(Let pat _ (LoopOp (Redomap cs outerfun innerfun acc arr))) = d
           LoopOp $ Redomap cs outerfun valfun acc arr,
           ok)
 
-splitBinding (Let pat _ (LoopOp (DoLoop respat merge i bound body))) = do
+splitBinding (Let pat _ (LoopOp (DoLoop respat merge form body))) = do
   (predbody, valbody) <- splitBody body
   ok <- newIdent "loop_ok" (Basic Bool)
   predbody' <- conjoinLoopBody ok predbody
   let predloop = LoopOp $ DoLoop (respat++[ok])
-                 (merge++[(FParam ok (),constant True)]) i bound
+                 (merge++[(FParam ok (),constant True)]) form
                  predbody'
-      valloop = LoopOp $ DoLoop respat merge i bound valbody
+      valloop = LoopOp $ DoLoop respat merge form valbody
   return ([mkLet' (idents<>[ok]) predloop],
           mkLet' idents valloop,
           Just $ Var ok)

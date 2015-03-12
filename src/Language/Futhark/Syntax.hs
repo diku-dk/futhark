@@ -26,6 +26,7 @@ module Language.Futhark.Syntax
   , IdentBase(..)
   , ParamBase
   , ExpBase(..)
+  , LoopFormBase (..)
   , LambdaBase(..)
   , TupIdentBase(..)
 
@@ -223,8 +224,7 @@ data ExpBase ty vn =
             | DoLoop
               (TupIdentBase ty vn) -- Merge variable pattern
               (ExpBase ty vn) -- Initial values of merge variables.
-              (IdentBase ty vn) -- Iterator.
-              (ExpBase ty vn) -- Upper bound.
+              (LoopFormBase ty vn) -- Do or while loop.
               (ExpBase ty vn) -- Loop body.
               (ExpBase ty vn) -- Let-body.
               SrcLoc
@@ -347,7 +347,11 @@ instance Located (ExpBase ty vn) where
   locOf (Split _ _ pos) = locOf pos
   locOf (Concat _ _ pos) = locOf pos
   locOf (Copy _ pos) = locOf pos
-  locOf (DoLoop _ _ _ _ _ _ pos) = locOf pos
+  locOf (DoLoop _ _ _ _ _ pos) = locOf pos
+
+data LoopFormBase ty vn = ForLoop (IdentBase ty vn) (ExpBase ty vn)
+                        | WhileLoop (ExpBase ty vn)
+                          deriving (Eq, Ord, Show)
 
 -- | Anonymous Function
 data LambdaBase ty vn = AnonymFun [ParamBase vn] (ExpBase ty vn) (DeclTypeBase vn) SrcLoc

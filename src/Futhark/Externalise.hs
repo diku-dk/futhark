@@ -113,13 +113,18 @@ externalisePrimOp (I.Rearrange _ perm e) =
 
 externaliseLoopOp :: I.LoopOp -> E.Exp
 
-externaliseLoopOp (I.DoLoop respat merge i bound loopbody) =
+externaliseLoopOp (I.DoLoop respat merge form loopbody) =
   E.DoLoop (externaliseBinders (map fparamIdent mergepat))
            (externaliseSubExps mergeexp)
-           (externaliseIdent i) (externaliseSubExp bound)
+           form'
            (externaliseBody loopbody)
            (E.TupLit (map (E.Var . externaliseIdent) respat) noLoc) noLoc
   where (mergepat, mergeexp) = unzip merge
+        form' = case form of
+          I.ForLoop i bound ->
+            E.ForLoop (externaliseIdent i) (externaliseSubExp bound)
+          I.WhileLoop cond ->
+            E.WhileLoop $ E.Var $ externaliseIdent cond
 externaliseLoopOp (I.Map _ fun es) =
   maybeUnzip $ E.Map (externaliseMapLambda fun)
                (externaliseSOACArrayArgs es)

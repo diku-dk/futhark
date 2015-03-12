@@ -48,7 +48,7 @@ transformExp (LoopOp (Map cs fun arrs)) = do
     return $ resultBody $ map Var dests
   return $ LoopOp $
     DoLoop outarrs (loopMerge outarrs (map Var resarr))
-    i (isize arrs) loopbody
+    (ForLoop i (isize arrs)) loopbody
   where arrs_nonunique = [ v { identType = identType v `setUniqueness` Nonunique }
                          | v <- arrs ]
 
@@ -99,7 +99,7 @@ transformExp (LoopOp (Reduce cs fun args)) = do
     return $ resultBody (map Var inarrs ++ acc')
   return $ LoopOp $
     DoLoop acc (loopMerge (inarrs++acc) (map Var arrexps++initacc))
-    i (isize inarrs) loopbody
+    (ForLoop i (isize inarrs)) loopbody
   where (accexps, arrexps) = unzip args
 
 transformExp (LoopOp (Scan cs fun args)) = do
@@ -115,7 +115,8 @@ transformExp (LoopOp (Scan cs fun args)) = do
     rowcopies <- letExps "copy" $ map (PrimOp . Copy) irows
     return $ resultBody $ map Var $ rowcopies ++ dests
   return $ LoopOp $
-    DoLoop arr (loopMerge (acc ++ arr) (initacc ++ map Var initarr)) i (isize arr) loopbody
+    DoLoop arr (loopMerge (acc ++ arr) (initacc ++ map Var initarr))
+    (ForLoop i (isize arr)) loopbody
   where (accexps, arrexps) = unzip args
         arrexps_nonunique = [ v { identType = identType v `setUniqueness` Nonunique }
                             | v <- arrexps ]
@@ -173,7 +174,7 @@ transformExp (LoopOp (Filter cs fun arrexps)) = do
            (pure resv) update]
   return $ LoopOp $ DoLoop (mergesize:res)
     (loopMerge (mergesize:res) (outersize:map Var resinit))
-    i nv loopbody
+    (ForLoop i nv) loopbody
 
 transformExp (LoopOp (Redomap cs _ innerfun accexps arrexps)) = do
   ((acc, initacc), (i, iv)) <- newFold accexps
@@ -188,7 +189,7 @@ transformExp (LoopOp (Redomap cs _ innerfun accexps arrexps)) = do
     return $ resultBody (map Var inarrs ++ acc')
   return $ LoopOp $
     DoLoop acc (loopMerge (inarrs++acc) (map Var arrexps++initacc))
-    i (isize inarrs) loopbody
+    (ForLoop i (isize inarrs)) loopbody
 
 transformExp e = mapExpM transform e
 

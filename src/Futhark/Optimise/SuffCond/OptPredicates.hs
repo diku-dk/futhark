@@ -167,13 +167,15 @@ rangesRep = HM.filter nonEmptyRange . HM.map toRep . ST.bindings
         nonEmptyRange (_, lower, upper) = isJust lower || isJust upper
 
 analyseExp :: ST.SymbolTable Basic -> Exp -> Maybe SCTable
-analyseExp vtable (LoopOp (DoLoop _ _ i bound body)) =
+analyseExp vtable (LoopOp (DoLoop _ _ (ForLoop i bound) body)) =
   Just $ analyseExpBody vtable' body
   where vtable' = clampLower $ clampUpper vtable
         clampUpper = ST.insertLoopVar (identName i) bound
         -- If we enter the loop, then 'bound' is at least one.
         clampLower = case bound of Var v       -> identName v `ST.isAtLeast` 1
                                    Constant {} -> id
+analyseExp vtable (LoopOp (DoLoop _ _ _ body)) =
+  Just $ analyseExpBody vtable body
 analyseExp vtable (LoopOp (Map _ fun arrs)) =
   Just $ analyseExpBody vtable' $ lambdaBody fun
   where vtable' = foldr (uncurry ST.insertArrayLParam) vtable $

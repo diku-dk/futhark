@@ -37,7 +37,7 @@
 
 (defconst futhark-keywords
   '("if" "then" "else" "let" "loop" "in" "with"
-    "fun" "fn" "for" "do" "do" "op" "not" "pow"
+    "fun" "fn" "for" "while" "do" "do" "op" "not" "pow"
     "iota" "shape" "replicate" "reshape" "transpose" "map" "reduce" "zip" "unzip" "zipWith"
     "scan" "split" "concat" "filter" "redomap"
     "empty" "copy")

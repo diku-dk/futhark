@@ -176,10 +176,15 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
   pprPrec _ (Concat x y _) =
     text "concat" <> apply [ppr x, ppr y]
   pprPrec _ (Copy e _) = text "copy" <> parens (ppr e)
-  pprPrec _ (DoLoop pat initexp i bound loopbody letbody _) =
+  pprPrec _ (DoLoop pat initexp form loopbody letbody _) =
     aliasComment pat $
-    text "loop" <+> parens (ppr pat <+> equals <+> ppr initexp) <+>
-    equals <+> text "for" <+> ppr i <+> text "<" <+> align (ppr bound) <+> text "do" </>
+    text "loop" <+> parens (ppr pat <+> equals <+> ppr initexp) <+> equals <+>
+    (case form of
+       ForLoop i bound ->
+         text "for" <+> ppr i <+> text "<" <+> align (ppr bound)
+       WhileLoop cond ->
+         text "while" <+> ppr cond) <+>
+    text "do" </>
     indent 2 (ppr loopbody) <+> text "in" </>
     ppr letbody
 

@@ -441,11 +441,15 @@ fusionGatherExp :: FusedRes -> Exp -> FusionGM FusedRes
 ---- Index/If    ----
 -----------------------------------------
 
-fusionGatherExp fres (LoopOp (DoLoop _ merge _ ub loop_body)) = do
+fusionGatherExp fres (LoopOp (DoLoop _ merge form loop_body)) = do
   let (merge_pat, ini_val) = unzip merge
 
   let pat_vars = map (Var . fparamIdent)  merge_pat
-  fres' <- foldM fusionGatherSubExp fres (ini_val++ub:pat_vars)
+  fres' <- foldM fusionGatherSubExp fres (ini_val++pat_vars)
+  fres'' <- case form of ForLoop _ bound ->
+                           fusionGatherSubExp fres' bound
+                         WhileLoop cond ->
+                           fusionGatherSubExp fres' $ Var cond
 
   let null_res = mkFreshFusionRes
   new_res <- binding (map fparamIdent merge_pat) $ fusionGatherBody null_res loop_body
@@ -453,8 +457,8 @@ fusionGatherExp fres (LoopOp (DoLoop _ merge _ ub loop_body)) = do
   -- cannot be fused from outside the loop:
   let (inp_arrs, _) = unzip $ HM.toList $ inpArr new_res
   let new_res' = new_res { unfusable = foldl (flip HS.insert) (unfusable new_res) inp_arrs }
-  -- merge new_res with fres'
-  return $ unionFusionRes new_res' fres'
+  -- merge new_res with fres''
+  return $ unionFusionRes new_res' fres''
 
 fusionGatherExp fres (PrimOp (Index _ idd inds)) =
   foldM fusionGatherSubExp fres (Var idd : inds)

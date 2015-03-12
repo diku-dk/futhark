@@ -188,10 +188,15 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
   ppr (Alloc e) = text "alloc" <> apply [ppr e]
 
 instance PrettyLore lore => Pretty (LoopOp lore) where
-  ppr (DoLoop res mergepat i bound loopbody) =
+  ppr (DoLoop res mergepat form loopbody) =
     text "loop" <+> ppPattern res <+>
     text "<-" <+> ppPattern (map fparamIdent pat) <+> equals <+> ppTuple' initexp </>
-    text "for" <+> ppr i <+> text "<" <+> align (ppr bound) <+> text "do" </>
+    (case form of
+      ForLoop i bound ->
+        text "for" <+> ppr i <+> text "<" <+> align (ppr bound)
+      WhileLoop cond ->
+        text "while" <+> ppr cond
+    ) <+> text "do" </>
     indent 2 (ppr loopbody)
     where (pat, initexp) = unzip mergepat
   ppr (Map cs lam as) =

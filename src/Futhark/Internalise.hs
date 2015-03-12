@@ -25,7 +25,8 @@ import Futhark.Representation.Basic as I
 import Futhark.Renamer as I
 import Futhark.MonadFreshNames
 import Futhark.Tools
-
+import Futhark.Substitute
+import Debug.Trace
 import Futhark.Internalise.Monad
 import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.TypesValues
@@ -152,12 +153,10 @@ internaliseExp desc (E.LetPat pat e body _) = do
       letBind (basicPattern' [p]) $ I.PrimOp $ I.SubExp se
     internaliseExp desc body
 
-internaliseExp desc (E.DoLoop mergepat mergeexp i bound loopbody letbody _) = do
-  bound' <- internaliseExp1 "bound" bound
+internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
   mergeinit <- internaliseExp "loop_init" mergeexp
-  i' <- internaliseIdent i
   mergeparams <- map E.toParam <$> flattenPattern mergepat
-  (loopbody', shapepat, mergepat') <-
+  (form', loopbody', shapepat, mergepat', res, mergeinit') <-
     withNonuniqueReplacements $ bindingParams mergeparams $ \shapepat mergepat' -> do
       loopbody' <- internaliseBody loopbody
       let Result ses = bodyResult loopbody'
@@ -165,18 +164,65 @@ internaliseExp desc (E.DoLoop mergepat mergeexp i bound loopbody letbody _) = do
                       (map I.identName shapepat)
                       (map I.identType mergepat')
                       ses
-          loopbody'' = loopbody' { bodyResult = Result (shapeargs++ses) }
-      return (loopbody'',
-              shapepat,
-              mergepat')
+          shapeinit = argShapes
+                      (map I.identName shapepat)
+                      (map I.identType mergepat')
+                      mergeinit
+      case form of
+        E.ForLoop i bound -> do
+          bound' <- internaliseExp1 "bound" bound
+          i' <- internaliseIdent i
+          let loopbody'' = loopbody' { bodyResult = Result (shapeargs++ses) }
+          return (I.ForLoop i' bound',
+                  loopbody'',
+                  shapepat,
+                  mergepat',
+                  mergepat',
+                  mergeinit)
+        E.WhileLoop cond -> do
+          -- We need to insert 'cond' twice - once for the initial
+          -- condition (do we enter the loop at all?), and once with
+          -- the result values of the loop (do we continue into the
+          -- next iteration?).  This is safe, as the type rules for
+          -- the external language guarantees that 'cond' does not
+          -- consume anything.
+          loop_while <- newIdent "loop_while" $ I.Basic Bool
+          let initsubst = [ (I.identName mergeparam, initval)
+                            | (mergeparam, initval) <-
+                               zip (shapepat++mergepat') (shapeinit++mergeinit)
+                            ]
+              endsubst = [ (I.identName mergeparam, endval)
+                         | (mergeparam, endval) <-
+                              zip (shapepat++mergepat') (shapeargs++ses)
+                         ]
+          (loop_cond, loop_cond_bnds) <-
+            collectBindings $ internaliseExp1 "loop_cond" cond
+          loop_initial_cond <-
+            shadowIdentsInExp initsubst loop_cond_bnds loop_cond
+          (loop_end_cond, loop_end_cond_bnds) <-
+            collectBindings $
+            shadowIdentsInExp endsubst loop_cond_bnds loop_cond
+          let loopbody'' =
+                loopbody' { bodyResult =
+                               Result $ shapeargs++[loop_end_cond]++ses
+                          , bodyBindings =
+                            bodyBindings loopbody' ++ loop_end_cond_bnds
+                          }
+          return (I.WhileLoop loop_while,
+                  loopbody'',
+                  shapepat,
+                  loop_while : mergepat',
+                  mergepat',
+                  loop_initial_cond : mergeinit)
+
   let mergeexp' = argShapes
                   (map I.identName shapepat)
                   (map I.identType mergepat')
-                  mergeinit ++
-                  mergeinit
+                  mergeinit' ++
+                  mergeinit'
       merge = [ (FParam ident (), e) |
                 (ident, e) <- zip (shapepat ++ mergepat') mergeexp' ]
-      loop = I.LoopOp $ I.DoLoop mergepat' merge i' bound' loopbody'
+      loop = I.LoopOp $ I.DoLoop res merge form' loopbody'
   bindingTupIdent mergepat (I.expExtType loop) $ \mergepat'' -> do
     letBind_ mergepat'' loop
     internaliseExp desc letbody
@@ -437,3 +483,26 @@ boundsCheck loc v i e = do
       upperBound = I.PrimOp $
                    I.BinOp Less e size I.Bool
   letExp "bounds_check" =<< eAssert check loc
+
+shadowIdentsInExp :: [(VName, I.SubExp)] -> [Binding] -> I.SubExp
+                  -> InternaliseM I.SubExp
+shadowIdentsInExp substs bnds res = do
+  body <- renameBody <=< insertBindingsM $ do
+    -- XXX: we have to substitute names to fix type annotations in the
+    -- bindings.  This goes away once we get rid of these type
+    -- annotations.
+    let handleSubst nameSubsts (name, I.Var v)
+          | I.identName v == name =
+            return nameSubsts
+          | otherwise =
+            return $ HM.insert name (I.identName v) nameSubsts
+        handleSubst nameSubsts (name, se) = do
+          letBindNames'_ [name] $ PrimOp $ SubExp se
+          return nameSubsts
+    nameSubsts <- foldM handleSubst HM.empty substs
+    mapM_ addBinding $ substituteNames nameSubsts bnds
+    return $ resultBody [substituteNames nameSubsts res]
+  res' <- bodyBind body
+  case res' of
+    [se] -> return se
+    _    -> fail "Internalise.shadowIdentsInExp: something went very wrong"

@@ -516,13 +516,24 @@ simplifyExpBase = mapExpM hoist
 
 simplifyLoopOp :: MonadEngine m => LoopOp (InnerLore m) -> m (LoopOp (Lore m))
 
-simplifyLoopOp (DoLoop respat merge loopvar boundexp loopbody) = do
+simplifyLoopOp (DoLoop respat merge form loopbody) = do
   let (mergepat, mergeexp) = unzip merge
   respat'   <- mapM simplifyIdentBinding respat
   mergepat' <- mapM simplifyFParam mergepat
   mergeexp' <- mapM simplifySubExp mergeexp
-  boundexp' <- simplifySubExp boundexp
   let diets = map (diet . fparamType) mergepat'
+  (form', boundnames, wrapbody) <- case form of
+    ForLoop loopvar boundexp -> do
+      boundexp' <- simplifySubExp boundexp
+      loopvar'  <- simplifyIdentBinding loopvar
+      return (ForLoop loopvar' boundexp',
+              identName loopvar `HS.insert` fparamnames,
+              bindLoopVar loopvar' boundexp')
+    WhileLoop cond -> do
+      cond' <- simplifyIdent cond
+      return (WhileLoop cond',
+              fparamnames,
+              id)
   -- Blocking hoisting of all unique bindings is probably too
   -- conservative, but there is currently no nice way to mark
   -- consumption of the loop body result.
@@ -531,15 +542,14 @@ simplifyLoopOp (DoLoop respat merge loopvar boundexp loopbody) = do
                (hasFree boundnames `orIf` isUnique `orIf` isResultAlloc) $
                enterLoop $
                bindFParams mergepat' $
-               bindLoopVar loopvar boundexp' $ do
+               wrapbody $ do
                  res <- simplifyBody diets loopbody
                  isDoLoopResult res
                  return res
   let merge' = zip mergepat' mergeexp'
   consumeResult $ zip diets mergeexp'
-  return $ DoLoop respat' merge' loopvar boundexp' loopbody'
-  where boundnames = identName loopvar `HS.insert`
-                     HS.fromList (map (fparamName . fst) merge)
+  return $ DoLoop respat' merge' form' loopbody'
+  where fparamnames = HS.fromList (map (fparamName . fst) merge)
         simplifyFParam (FParam ident lore) = do
           ident' <- simplifyIdentBinding ident
           lore' <- simplifyFParamLore lore

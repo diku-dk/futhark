@@ -536,7 +536,7 @@ typeOf (Concat x ys _) = typeOf x `setUniqueness` u
 typeOf (Split splitexps e _) =
   Tuple $ replicate (1 + length splitexps) (typeOf e)
 typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` HS.empty
-typeOf (DoLoop _ _ _ _ _ body _) = typeOf body
+typeOf (DoLoop _ _ _ _ body _) = typeOf body
 
 -- | If possible, convert an expression to a value.  This is not a
 -- true constant propagator, but a quick way to convert array/tuple
@@ -626,8 +626,10 @@ progNames = execWriter . mapM funNames . progFunctions
 
         expNames e@(LetWith dest _ _ _ _ _) =
           one dest >> walkExpM names e
-        expNames e@(DoLoop _ _ i _ _ _ _) =
+        expNames e@(DoLoop _ _ (ForLoop i _) _ _ _) =
           one i >> walkExpM names e
+        expNames e@(DoLoop {}) =
+          walkExpM names e
         expNames e = walkExpM names e
 
         lambdaNames (AnonymFun params body _ _) =
@@ -643,8 +645,10 @@ mapTails f g (LetPat pat e body loc) =
   LetPat pat e (mapTails f g body) loc
 mapTails f g (LetWith dest src idxs ve body loc) =
   LetWith dest src idxs ve (mapTails f g body) loc
-mapTails f g (DoLoop pat me i bound loopbody body loc) =
-  DoLoop pat me i bound loopbody (mapTails f g body) loc
+mapTails f g (DoLoop pat me (ForLoop i bound) loopbody body loc) =
+  DoLoop pat me (ForLoop i bound) loopbody (mapTails f g body) loc
+mapTails f g (DoLoop pat me (WhileLoop cond) loopbody body loc) =
+  DoLoop pat me (WhileLoop cond) loopbody (mapTails f g body) loc
 mapTails f g (If c te fe t loc) =
   If c (mapTails f g te) (mapTails f g fe) (g t) loc
 mapTails f _ e = f e
@@ -670,12 +674,19 @@ freeInExp = execWriter . expFree
           mapM_ expFree idxs
           expFree ve
           binding (HS.singleton dest) $ expFree body
-        expFree (DoLoop pat mergeexp i boundexp loopbody letbody _) = do
+        expFree (DoLoop pat mergeexp (ForLoop i boundexp) loopbody letbody _) = do
           expFree mergeexp
           expFree boundexp
           binding (i `HS.insert` patIdentSet pat) $ do
             expFree loopbody
             expFree letbody
+        expFree (DoLoop pat mergeexp (WhileLoop cond) loopbody letbody _) = do
+          expFree mergeexp
+          binding (patIdentSet pat) $ do
+            expFree cond
+            expFree loopbody
+            expFree letbody
+
         expFree e = walkExpM names e
 
         lambdaFree = tell . freeInLambda

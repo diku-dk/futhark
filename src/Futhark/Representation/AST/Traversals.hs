@@ -161,10 +161,10 @@ mapExpM tv (PrimOp (Alloc e)) =
   PrimOp <$> (pure Alloc <*> mapOnSubExp tv e)
 mapExpM tv (PrimOp (Assert e loc)) =
   PrimOp <$> (pure Assert <*> mapOnSubExp tv e <*> pure loc)
-mapExpM tv (LoopOp (DoLoop res mergepat loopvar boundexp loopbody)) =
+mapExpM tv (LoopOp (DoLoop res mergepat form loopbody)) =
   LoopOp <$> (DoLoop <$> mapM (mapOnIdent tv) res <*>
               (zip <$> mapM (mapOnFParam tv) vs <*> mapM (mapOnSubExp tv) es) <*>
-              mapOnIdent tv loopvar <*> mapOnSubExp tv boundexp <*>
+              mapOnLoopForm tv form <*>
               mapOnBody tv loopbody)
   where (vs,es) = unzip mergepat
 mapExpM tv (LoopOp (Map cs fun arrexps)) =
@@ -203,6 +203,13 @@ mapOnExtType tv (Array bt (ExtShape shape) u) =
         mapOnExtSize (Free se) = Free <$> mapOnSubExp tv se
 mapOnExtType _ (Basic bt) = return $ Basic bt
 mapOnExtType tv (Mem size) = Mem <$> mapOnSubExp tv size
+
+mapOnLoopForm :: (Monad m, Applicative m) =>
+                 Mapper flore tlore m -> LoopForm -> m LoopForm
+mapOnLoopForm tv (ForLoop i bound) =
+  ForLoop <$> mapOnIdent tv i <*> mapOnSubExp tv bound
+mapOnLoopForm tv (WhileLoop cond) =
+  WhileLoop <$> mapOnIdent tv cond
 
 -- | Like 'mapExp', but in the 'Identity' monad.
 mapExp :: Mapper flore tlore Identity -> Exp flore -> Exp tlore

@@ -100,13 +100,15 @@ deadCodeElimBodyM (Body bodylore [] (Result es)) = do
     (Result <$> mapM deadCodeElimSubExp es)
 
 deadCodeElimExp :: Proper lore => Exp lore -> DCElimM (Exp lore)
-deadCodeElimExp (LoopOp (DoLoop respat merge i bound body)) = do
+deadCodeElimExp (LoopOp (DoLoop respat merge form body)) = do
   let (mergepat, mergeexp) = unzip merge
   mapM_ deadCodeElimFParam mergepat
   mapM_ deadCodeElimSubExp mergeexp
-  bound' <- deadCodeElimSubExp bound
   body' <- deadCodeElimBodyM body
-  return $ LoopOp $ DoLoop respat merge i bound' body'
+  case form of
+    ForLoop _ bound -> void $ deadCodeElimSubExp bound
+    WhileLoop cond  -> void $ deadCodeElimIdent cond
+  return $ LoopOp $ DoLoop respat merge form body'
 deadCodeElimExp e = mapExpM mapper e
   where mapper = Mapper {
                    mapOnBinding = return -- Handled in case for Body.
