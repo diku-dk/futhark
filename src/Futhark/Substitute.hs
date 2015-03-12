@@ -135,8 +135,10 @@ instance (Substitute shape) => Substitute (TypeBase shape) where
 
 instance Substitutable lore => Substitute (Lambda lore) where
   substituteNames substs (Lambda params body rettype) =
-    Lambda params (substituteNames substs body)
-           (map (substituteNames substs) rettype)
+    Lambda
+    (substituteNames substs params)
+    (substituteNames substs body)
+    (map (substituteNames substs) rettype)
 
 instance Substitute Ident where
   substituteNames substs v =
