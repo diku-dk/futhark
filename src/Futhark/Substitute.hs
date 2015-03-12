@@ -89,6 +89,10 @@ instance Substitutable lore => Substitute (Binding lore) where
 instance Substitutable lore => Substitute (Body lore) where
   substituteNames substs = mapBody $ replace substs
 
+instance Substitute Result where
+  substituteNames substs (Result ses) =
+    Result $ map (substituteNames substs) ses
+
 replace :: (Substitutable lore) => HM.HashMap VName VName -> Mapper lore lore Identity
 replace substs = Mapper {
                    mapOnIdent = return . substituteNames substs
