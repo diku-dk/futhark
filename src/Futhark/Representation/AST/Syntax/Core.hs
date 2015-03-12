@@ -106,9 +106,8 @@ instance ArrayShape Rank where
   stripDims n (Rank x) = Rank $ x - n
   subShapeOf = (==)
 
--- | An Futhark type is either an array or an element type.  When comparing
--- types for equality with '==', aliases are ignored, as are
--- dimension sizes (but not the number of dimensions themselves).
+-- | An Futhark type is either an array or an element type.  When
+-- comparing types for equality with '==', shapes must match.
 data TypeBase shape = Basic BasicType
                     | Array BasicType shape Uniqueness
                     | Mem SubExp
@@ -152,10 +151,10 @@ data IdentBase shape = Ident { identName :: VName
                              }
                     deriving (Show)
 
--- | A name with aliasing information.  Used for normal variables.
+-- | A name with type information.  Used for let-binding normal variables.
 type Ident = IdentBase Shape
 
--- | A name with no aliasing information.  These are used for function
+-- | A name with type information.  These are used for function
 -- parameters.
 type Param = IdentBase Shape
 
