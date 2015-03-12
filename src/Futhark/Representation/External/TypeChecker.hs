@@ -228,28 +228,6 @@ collectDataflow m = pass $ do
 noDataflow :: VarName vn => TypeM vn a -> TypeM vn a
 noDataflow = censor $ const mempty
 
-patternType :: TaggedTupIdent CompTypeBase vn
-          -> DeclTypeBase (ID vn)
-patternType (Id k) = toDecl $ identType k
-patternType (Wildcard t _) = toDecl t
-patternType (TupId pats _) = Tuple $ map patternType pats
-
-loopPattern :: TaggedTupIdent CompTypeBase vn -> Occurences vn
-        -> TaggedTupIdent CompTypeBase vn
-loopPattern pat occs = loopPattern' pat
-  where cons =  allConsumed occs
-        loopPattern' (Id k)
-          | identName k `HS.member` cons =
-            Id k
-          | Tuple _ <- identType k =
-            Id k
-          | otherwise =
-            Id k { identType = identType k `setUniqueness` Nonunique }
-        loopPattern' (TupId pats loc) =
-          TupId (map loopPattern' pats) loc
-        loopPattern' (Wildcard t loc) =
-          Wildcard t loc
-
 maybeCheckOccurences :: VarName vn => Occurences vn -> TypeM vn ()
 maybeCheckOccurences us = do
   check <- asks envCheckOccurences
@@ -791,8 +769,8 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
   -- First, check the bound and initial merge expression and throw
   -- away the dataflow.  The dataflow will be reconstructed later, but
   -- we need the result of this to synthesize the function.
-  ((mergeexp', bindExtra), _) <-
-    collectDataflow $ do
+  (mergeexp', bindExtra) <-
+    noDataflow $ do
       mergeexp' <- checkExp mergeexp
       return $
         case form of
@@ -802,12 +780,10 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
           WhileLoop _ ->
             (mergeexp', [])
 
-  -- Check the loop body.  We tap the dataflow before leaving scope,
-  -- so we'll be able to see occurences of variables bound by
-  -- mergepat.
+  -- Check the loop body.
   (firstscope, mergepat') <- checkBinding mergepat (typeOf mergeexp') mempty
-  ((loopbody', form', extraargs, letExtra, boundExtra, extraparams, freeInForm), loopflow) <-
-    firstscope $ collectDataflow $ binding bindExtra $
+  (loopbody', form', extraargs, letExtra, boundExtra, extraparams, freeInForm) <-
+    firstscope $ noDataflow $ binding bindExtra $
       case form of
         ForLoop (Ident loopvar _ loopvarloc) boundexp -> do
           bound <- newIdent "loop_bound" (Basic Int) loc
@@ -844,33 +820,15 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
   -- a unique Name for the function.
   fname <- newFname "loop_fun"
 
-  let -- | Change the uniqueness attribute of a type to reflect how it
-      -- was used.
-      param (Array (BasicArray et sz _ _)) con =
-        Array $ BasicArray et sz u NoInfo
-        where u = case con of Consume     -> Unique
-                              TupleDiet _ -> Unique
-                              Observe     -> Nonunique
-      param (Tuple ts) (TupleDiet cons) =
-        Tuple $ zipWith param ts cons
-      param t _ = t `setAliases` NoInfo
-
-      -- Change the uniqueness of pattern elements to reflect whether
-      -- they were actually consumed.
-      mergepat_fixed_uniqueness =
-        loopPattern mergepat' $ usageOccurences loopflow
-
-      -- We use the type of the merge expression, but with uniqueness
-      -- attributes reflected to show how the parts of the merge
-      -- pattern are used - if something was consumed, it has to be a
-      -- unique parameter to the function.
-      rettype = patternType mergepat_fixed_uniqueness
+  let rettype = case map (toDecl . identType) $ patIdents mergepat' of
+        [t] -> t
+        ts  -> Tuple ts
 
   merge <- newIdent "merge_val" (fromDecl rettype) $ srclocOf mergeexp'
 
-  let boundnames = boundExtra `HS.union` patIdentSet mergepat_fixed_uniqueness
+  let boundnames = boundExtra `HS.union` patIdentSet mergepat'
       ununique ident =
-        ident { identType = param (identType ident) Observe }
+        ident { identType = toDecl $ identType ident `setUniqueness` Nonunique }
       -- Find the free variables of the loop body.
       free = map ununique $ HS.toList $
              (freeInExp loopbody' <> freeInForm)
@@ -918,16 +876,12 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
   -- original merge pattern...
   (secondscope, _) <- checkBinding mergepat (typeOf funcall) callflow
 
-  -- ... get the loop body with proper type annotations...
-  (loopbody_fixed_uniqueness, _) <-
-    collectDataflow $ secondscope $ binding bindExtra $ checkExp loopbody
-
   -- And then check the let-body.
   secondscope $ do
     letbody' <- checkExp letbody
-    return $ DoLoop mergepat_fixed_uniqueness mergeexp'
+    return $ DoLoop mergepat' mergeexp'
                     form'
-                    loopbody_fixed_uniqueness letbody' loc
+                    loopbody' letbody' loc
 
 checkSOACArrayArg :: (TypeBox ty, VarName vn) =>
                      TaggedExp ty vn -> TypeM vn (TaggedExp CompTypeBase vn, Arg vn)
