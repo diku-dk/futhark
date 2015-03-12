@@ -40,7 +40,12 @@ cseInBindings [] m = m
 cseInBindings (bnd:bnds) m =
   cseInBinding bnd $ \bnd' -> do
     Body bodyattr bnds' es <- cseInBindings bnds m
-    return $ Body bodyattr (bnd'++bnds') es
+    bnd'' <- mapM nestedCSE bnd'
+    return $ Body bodyattr (bnd''++bnds') es
+  where nestedCSE bnd' = do
+          e <- mapExpM cse $ bindingExp bnd'
+          return bnd' { bindingExp = e }
+        cse = identityMapper { mapOnBody = cseInBody }
 
 cseInBinding :: Proper lore =>
                 Binding lore
