@@ -13,11 +13,13 @@ where
 import Control.Applicative
 import Control.Monad
 import Data.List
+import Data.Maybe
+import Data.Monoid
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
+
 import Prelude
 
-import Futhark.NeedNames
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import Futhark.Analysis.HORepresentation.SOACNest (SOACNest)
 import qualified Futhark.Analysis.HORepresentation.SOACNest as Nest
@@ -55,13 +57,14 @@ inputs (MapNest _ _ _ inps) = inps
 setInputs :: [SOAC.Input] -> MapNest lore -> MapNest lore
 setInputs inps (MapNest cs body ns _) = MapNest cs body ns inps
 
-fromSOACNest :: Bindable lore => SOACNest lore -> NeedNames (Maybe (MapNest lore))
-fromSOACNest = fromSOACNest' HS.empty
+fromSOACNest :: (Bindable lore, MonadFreshNames m, HasTypeEnv m) =>
+                SOACNest lore -> m (Maybe (MapNest lore))
+fromSOACNest = fromSOACNest' mempty
 
-fromSOACNest' :: Bindable lore =>
-                 HS.HashSet VName
+fromSOACNest' :: (Bindable lore, MonadFreshNames m, HasTypeEnv m) =>
+                 [Ident]
               -> SOACNest lore
-              -> NeedNames (Maybe (MapNest lore))
+              -> m (Maybe (MapNest lore))
 
 fromSOACNest' bound (Nest.SOACNest inps
                      (Nest.Map cs (Nest.NewNest n body@Nest.Map{}))) = do
@@ -76,25 +79,30 @@ fromSOACNest' bound (Nest.SOACNest inps
            , nestingReturnType   = Nest.nestingReturnType n
            }
   return $ Just $ MapNest (cs++cs') body' (n':ns') inps''
-  where bound' = bound `HS.union` HS.fromList (Nest.nestingParamNames n)
+  where bound' = bound <> Nest.nestingParams n
 
 fromSOACNest' bound (Nest.SOACNest inps (Nest.Map cs body)) = do
   lam <- lambdaBody <$> Nest.bodyToLambda (map SOAC.inputType inps) body
-  let boundUsedInBody =
-        HS.toList $ HS.filter (flip HS.member bound . identName) $ freeInBody lam
+  let isBound name
+        | Just param <- find ((name==) . identName) bound =
+          Just param
+        | otherwise =
+          Nothing
+      boundUsedInBody =
+        mapMaybe isBound $ HS.toList $ freeInBody lam
   newParams <- mapM (newIdent' (++"_wasfree")) boundUsedInBody
   let subst = HM.fromList $ zip (map identName boundUsedInBody) (map identName newParams)
       size  = arraysSize 0 $ map SOAC.inputType inps
       inps' = map (substituteNames subst) inps ++
-              map (SOAC.addTransform (SOAC.Replicate size) . SOAC.varInput)
+              map (SOAC.addTransform (SOAC.Replicate size) . identInput)
               boundUsedInBody
       body' =
         case body of
           Nest.NewNest n comb ->
             let n'    = substituteNames subst
-                        n { Nest.nestingParamNames =
-                               Nest.nestingParamNames n' ++
-                               map identName newParams
+                        n { Nest.nestingParams =
+                               Nest.nestingParams n' ++
+                               newParams
                           }
                 comb' = substituteNames subst comb
             in Nest.NewNest n' comb'
@@ -126,41 +134,43 @@ toSOACNest' cs body (nest:ns) inpts =
   let body' = toSOACNest' cs body ns (map rowType inpts)
   in Nest.Map cs (Nest.NewNest nest' body')
   where nest' = Nest.Nesting {
-                  Nest.nestingParamNames = nestingParamNames nest
+                  Nest.nestingParams = newparams
                 , Nest.nestingResult = nestingResult nest
                 , Nest.nestingReturnType = nestingReturnType nest
-                , Nest.nestingInputs =
-                  map SOAC.varInput $
-                  zipWith Ident (nestingParamNames nest) $ map rowType inpts
+                , Nest.nestingInputs = map identInput newparams
                 }
+        newparams = zipWith Ident (nestingParamNames nest) $
+                    map rowType inpts
 
-fixInputs :: [(VName, SOAC.Input)] -> [(VName, SOAC.Input)]
-          -> NeedNames [(VName, SOAC.Input)]
+fixInputs :: MonadFreshNames m =>
+             [(VName, SOAC.Input)] -> [(VName, SOAC.Input)]
+          -> m [(VName, SOAC.Input)]
 fixInputs ourInps childInps =
   reverse . snd <$> foldM inspect (ourInps, []) childInps
   where
-    isParam x (y, _) = identName x == y
+    isParam x (y, _) = x == y
 
     ourSize = arraysSize 0 $ map (SOAC.inputType . snd) ourInps
 
     findParam :: [(VName, SOAC.Input)]
-              -> Param
+              -> VName
               -> Maybe ((VName, SOAC.Input), [(VName, SOAC.Input)])
     findParam remPs v
       | ([ourP], remPs') <- partition (isParam v) remPs = Just (ourP, remPs')
       | otherwise                                       = Nothing
 
-    inspect :: ([(VName, SOAC.Input)], [(VName, SOAC.Input)])
+    inspect :: MonadFreshNames m =>
+               ([(VName, SOAC.Input)], [(VName, SOAC.Input)])
             -> (VName, SOAC.Input)
-            -> NeedNames ([(VName, SOAC.Input)], [(VName, SOAC.Input)])
-    inspect (remPs, newInps) (_, SOAC.Input ts (SOAC.Var v))
+            -> m ([(VName, SOAC.Input)], [(VName, SOAC.Input)])
+    inspect (remPs, newInps) (_, SOAC.Input ts (SOAC.Var v _))
       | SOAC.nullTransforms ts,
         Just (ourP, remPs') <- findParam remPs v =
           return (remPs', ourP:newInps)
 
     inspect (remPs, newInps) (param, SOAC.Input ts ia) =
       case ia of
-        SOAC.Var v
+        SOAC.Var v _
           | Just ((p,pInp), remPs') <- findParam remPs v ->
           let pInp'  = SOAC.transformRows ts pInp
           in return (remPs',
@@ -174,3 +184,7 @@ fixInputs ourInps childInps =
           newParam <- newNameFromString (baseString param ++ "_rep")
           return (remPs, (newParam,
                           SOAC.Input (ts SOAC.|> SOAC.Replicate ourSize) ia) : newInps)
+
+identInput :: Ident -> SOAC.Input
+identInput ident =
+  SOAC.Input mempty $ SOAC.Var (identName ident) (identType ident)

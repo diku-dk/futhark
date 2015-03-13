@@ -339,8 +339,8 @@ existentialiseExtTypes inaccessible ts =
           shape <- mapM checkDim $ extShapeDims $ arrayShape t
           return $ t `setArrayShape` ExtShape shape
         checkDim (Free (Var v))
-          | identName v `HS.member` inaccessible =
-            replaceVar $ identName v
+          | v `HS.member` inaccessible =
+            replaceVar v
         checkDim (Free se) = return $ Free se
         checkDim (Ext x)   = replaceExt x
         replaceExt x = do
@@ -374,4 +374,4 @@ shapeMapping' ts shapes = HM.fromList $ concat $ zipWith inspect ts shapes
   where inspect t shape =
           mapMaybe match $ zip (arrayDims t) shape
         match (Constant {}, _) = Nothing
-        match (Var v, dim)     = Just (identName v, dim)
+        match (Var v, dim)     = Just (v, dim)

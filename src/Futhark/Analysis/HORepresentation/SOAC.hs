@@ -70,7 +70,6 @@ import Control.Applicative
 import Data.Foldable as Foldable
 import Data.Maybe
 import Data.Monoid
-import qualified Data.HashMap.Lazy as HM
 import qualified Data.Sequence as Seq
 
 import Prelude
@@ -96,6 +95,18 @@ data ArrayTransform = Rearrange Certificates [Int]
                     -- ^ Replicate the rows of the array a number of times.
                       deriving (Show, Eq, Ord)
 
+instance Substitute ArrayTransform where
+  substituteNames substs (Rearrange cs xs) =
+    Rearrange (substituteNames substs cs) xs
+  substituteNames substs (Reshape cs ses) =
+    Reshape (substituteNames substs cs) (substituteNames substs ses)
+  substituteNames substs (ReshapeOuter cs ses) =
+    ReshapeOuter (substituteNames substs cs) (substituteNames substs ses)
+  substituteNames substs (ReshapeInner cs ses) =
+    ReshapeInner (substituteNames substs cs) (substituteNames substs ses)
+  substituteNames substs (Replicate se) =
+    Replicate $ substituteNames substs se
+
 -- | A sequence of array transformations, heavily inspired by
 -- "Data.Seq".  You can decompose it using 'viewF' and 'viewL', and
 -- grow it by using '|>' and '<|'.  These correspond closely to the
@@ -116,6 +127,10 @@ instance Monoid ArrayTransforms where
     case viewf ts2 of
       t :< ts2' -> (ts1 |> t) `mappend` ts2'
       EmptyF    -> ts1
+
+instance Substitute ArrayTransforms where
+  substituteNames substs (ArrayTransforms ts) =
+    ArrayTransforms $ substituteNames substs <$> ts
 
 -- | The empty transformation list.
 noTransforms :: ArrayTransforms
@@ -191,7 +206,7 @@ combineTransforms _ _ = Nothing
 -- an input transformation of an array variable.  If so, return the
 -- variable and the transformation.  Only 'Rearrange' and 'Reshape'
 -- are possible to express this way.
-transformFromExp :: Exp lore -> Maybe (Ident, ArrayTransform)
+transformFromExp :: Exp lore -> Maybe (VName, ArrayTransform)
 transformFromExp (PrimOp (Futhark.Rearrange cs perm v)) =
   Just (v, Rearrange cs perm)
 transformFromExp (PrimOp (Futhark.Reshape cs shape v)) =
@@ -200,15 +215,21 @@ transformFromExp _ = Nothing
 
 -- | The basic source of data for an array input - either an array
 -- variable (possibly indexed) or an @iota@.
-data InputArray = Var Ident
+data InputArray = Var VName Type
                 -- ^ Some array-typed variable in scope.
                 | Iota SubExp
                 -- ^ @iota(e)@.
                   deriving (Show, Eq, Ord)
 
+instance Substitute InputArray where
+  substituteNames substs (Var name t) =
+    Var (substituteNames substs name) (substituteNames substs t)
+  substituteNames substs (Iota e) =
+    Iota $ substituteNames substs e
+
 inputArrayToExp :: InputArray -> Exp lore
-inputArrayToExp (Var k)  = PrimOp $ SubExp $ Futhark.Var k
-inputArrayToExp (Iota e) = PrimOp $ Futhark.Iota e
+inputArrayToExp (Var k _) = PrimOp $ SubExp $ Futhark.Var k
+inputArrayToExp (Iota e)  = PrimOp $ Futhark.Iota e
 
 -- | One array input to a SOAC - a SOAC may have multiple inputs, but
 -- all are of this form.  Only the array inputs are expressed with
@@ -219,22 +240,19 @@ data Input = Input ArrayTransforms InputArray
              deriving (Show, Eq, Ord)
 
 instance Substitute Input where
-  substituteNames m (Input ts (Var v)) =
-    case HM.lookup (identName v) m of
-      Just name -> Input ts $ Var v { identName = name }
-      Nothing   -> Input ts $ Var v
-  substituteNames _ (Input ts ia) =
-    Input ts ia
+  substituteNames substs (Input ts a) =
+    Input (substituteNames substs ts) (substituteNames substs a)
 
 -- | Create a plain array variable input with no transformations.
-varInput :: Ident -> Input
-varInput = Input (ArrayTransforms Seq.empty) . Var
+varInput :: HasTypeEnv f => VName -> f Input
+varInput v = withType <$> lookupTypeM v
+  where withType t = Input (ArrayTransforms Seq.empty) $ Var v t
 
 -- | If the given input is a plain variable input, with no transforms,
 -- return the variable.
-isVarInput :: Input -> Maybe Ident
-isVarInput (Input ts (Var v)) | nullTransforms ts = Just v
-isVarInput _                                      = Nothing
+isVarInput :: Input -> Maybe VName
+isVarInput (Input ts (Var v _)) | nullTransforms ts = Just v
+isVarInput _                                        = Nothing
 
 -- | Add a transformation to the end of the transformation list.
 addTransform :: ArrayTransform -> Input -> Input
@@ -246,19 +264,15 @@ addTransform t (Input ts ia) =
 addTransforms :: ArrayTransforms -> Input -> Input
 addTransforms ts (Input ots ia) = Input (ots <> ts) ia
 
--- | Transport a Futhark-level variable into a SOAC 'Input'.
-inputFromIdent :: Ident -> Input
-inputFromIdent = Input (ArrayTransforms Seq.empty) . Var
-
 -- | If the given expression represents a normalised SOAC input,
 -- return that input.
-inputFromSubExp :: SubExp -> Maybe Input
-inputFromSubExp (Futhark.Var v) = Just $ inputFromIdent v
-inputFromSubExp _               = Nothing
+inputFromSubExp :: HasTypeEnv f => SubExp -> f (Maybe Input)
+inputFromSubExp (Futhark.Var v) = Just <$> varInput v
+inputFromSubExp _               = pure Nothing
 
 -- | Convert SOAC inputs to the corresponding expressions.
 inputsToSubExps :: (MonadBinder m) =>
-                   [Input] -> m [Ident]
+                   [Input] -> m [VName]
 inputsToSubExps = mapM inputToExp'
   where inputToExp' (Input (ArrayTransforms ts) ia) = do
           ia' <- letExp "soac_input" $ inputArrayToExp ia
@@ -273,23 +287,23 @@ inputsToSubExps = mapM inputToExp'
         transform ia (Reshape cs shape) =
           letExp "reshape" $ PrimOp $ Futhark.Reshape cs shape ia
 
-        transform ia (ReshapeOuter cs shape) =
-          let shape' = reshapeOuter shape 1 ia
-          in letExp "reshape_outer" $ PrimOp $ Futhark.Reshape cs shape' ia
+        transform ia (ReshapeOuter cs shape) = do
+          shape' <- reshapeOuter shape 1 <$> arrayShape <$> lookupTypeM ia
+          letExp "reshape_outer" $ PrimOp $ Futhark.Reshape cs shape' ia
 
-        transform ia (ReshapeInner cs shape) =
-          let shape' = reshapeInner shape 1 ia
-          in letExp "reshape_inner" $ PrimOp $ Futhark.Reshape cs shape' ia
+        transform ia (ReshapeInner cs shape) = do
+          shape' <- reshapeInner shape 1 <$> arrayShape <$> lookupTypeM ia
+          letExp "reshape_inner" $ PrimOp $ Futhark.Reshape cs shape' ia
 
 -- | If the input is a (possibly rearranged, reshaped or otherwise
 -- transformed) array variable, return that variable.
-inputArray :: Input -> Maybe Ident
-inputArray (Input _ (Var v))         = Just v
-inputArray (Input _ (Iota _))        = Nothing
+inputArray :: Input -> Maybe VName
+inputArray (Input _ (Var v _)) = Just v
+inputArray (Input _ (Iota _))  = Nothing
 
 inputArrayType :: InputArray -> Type
-inputArrayType (Var v)  = identType v
-inputArrayType (Iota e) = arrayOf (Basic Int) (Shape [e]) Unique
+inputArrayType (Var _ t) = t
+inputArrayType (Iota e)  = arrayOf (Basic Int) (Shape [e]) Unique
 
 -- | Return the type of an input.
 inputType :: Input -> Type
@@ -448,15 +462,16 @@ data NotSOAC = NotSOAC -- ^ The expression is not a (tuple-)SOAC at all.
 -- | Either convert an expression to the normalised SOAC
 -- representation, or a reason why the expression does not have the
 -- valid form.
-fromExp :: Exp lore -> Either NotSOAC (SOAC lore)
+fromExp :: HasTypeEnv f =>
+           Exp lore -> f (Either NotSOAC (SOAC lore))
 fromExp (LoopOp (Futhark.Map cs l as)) =
-  Right $ Map cs l (map inputFromIdent as)
+  Right <$> Map cs l <$> traverse varInput as
 fromExp (LoopOp (Futhark.Reduce cs l args)) = do
   let (es,as) = unzip args
-  Right $ Reduce cs l (zip es $ map inputFromIdent as)
+  Right <$> Reduce cs l <$> zip es <$> traverse varInput as
 fromExp (LoopOp (Futhark.Scan cs l args)) = do
   let (es,as) = unzip args
-  Right $ Scan cs l (zip es $ map inputFromIdent as)
+  Right <$> Scan cs l <$> zip es <$> traverse varInput as
 fromExp (LoopOp (Futhark.Redomap cs l1 l2 es as)) =
-  Right $ Redomap cs l1 l2 es (map inputFromIdent as)
-fromExp _ = Left NotSOAC
+  Right <$> Redomap cs l1 l2 es <$> traverse varInput as
+fromExp _ = pure $ Left NotSOAC

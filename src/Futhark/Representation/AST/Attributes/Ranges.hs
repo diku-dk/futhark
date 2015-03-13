@@ -28,8 +28,10 @@ import Futhark.Renamer
 import qualified Text.PrettyPrint.Mainland as PP
 
 -- | A known bound on a value.
-data KnownBound = ElemBound Ident
-                  -- ^ Has the same bounds as the elements of this array.
+data KnownBound = VarBound VName
+                  -- ^ Has the same bounds as this variable.  VERY
+                  -- IMPORTANT: this variable may be an array, so it
+                  -- cannot be immediately translated to a 'ScalExp'.
                 | MinimumBound KnownBound KnownBound
                   -- ^ Bounded by the minimum of these two bounds.
                 | MaximumBound KnownBound KnownBound
@@ -39,8 +41,8 @@ data KnownBound = ElemBound Ident
                 deriving (Eq, Ord, Show)
 
 instance Substitute KnownBound where
-  substituteNames substs (ElemBound ident) =
-    ElemBound $ substituteNames substs ident
+  substituteNames substs (VarBound name) =
+    VarBound $ substituteNames substs name
   substituteNames substs (MinimumBound b1 b2) =
     MinimumBound (substituteNames substs b1) (substituteNames substs b2)
   substituteNames substs (MaximumBound b1 b2) =
@@ -49,20 +51,20 @@ instance Substitute KnownBound where
     ScalarBound $ substituteNames substs se
 
 instance Rename KnownBound where
-  rename (ElemBound v)        = ElemBound <$> rename v
+  rename (VarBound v)         = VarBound <$> rename v
   rename (MinimumBound b1 b2) = MinimumBound <$> rename b1 <*> rename b2
   rename (MaximumBound b1 b2) = MaximumBound <$> rename b1 <*> rename b2
   rename (ScalarBound e)      = ScalarBound <$> rename e
 
 instance FreeIn KnownBound where
-  freeIn (ElemBound v) = freeIn v
+  freeIn (VarBound v)         = freeIn v
   freeIn (MinimumBound b1 b2) = freeIn b1 <> freeIn b2
   freeIn (MaximumBound b1 b2) = freeIn b1 <> freeIn b2
-  freeIn (ScalarBound e) = freeIn e
+  freeIn (ScalarBound e)      = freeIn e
 
 instance PP.Pretty KnownBound where
-  ppr (ElemBound v) =
-    PP.text "element of " <> PP.ppr v
+  ppr (VarBound v) =
+    PP.text "variable " <> PP.ppr v
   ppr (MinimumBound b1 b2) =
     PP.text "min" <> PP.parens (PP.ppr b1 <> PP.comma PP.<+> PP.ppr b2)
   ppr (MaximumBound b1 b2) =
@@ -71,9 +73,9 @@ instance PP.Pretty KnownBound where
     PP.ppr e
 
 -- | Convert the bound to a scalar expression if possible.  This is
--- possible for all bounds that do not contain 'ElemBound's.
+-- possible for all bounds that do not contain 'VarBound's.
 boundToScalExp :: KnownBound -> Maybe ScalExp
-boundToScalExp (ElemBound _) = Nothing
+boundToScalExp (VarBound _) = Nothing
 boundToScalExp (ScalarBound se) = Just se
 boundToScalExp (MinimumBound b1 b2) = do
   b1' <- boundToScalExp b1
@@ -129,10 +131,9 @@ subExpRange se = (Just lower, Just upper)
   where (lower, upper) = subExpKnownRange se
 
 subExpKnownRange :: SubExp -> (KnownBound, KnownBound)
-subExpKnownRange (Var v)
-  | not $ basicType $ identType v =
-    (ElemBound v,
-     ElemBound v)
+subExpKnownRange (Var v) =
+  (VarBound v,
+   VarBound v)
 subExpKnownRange se =
   (ScalarBound $ subExpToScalExp se,
    ScalarBound $ subExpToScalExp se)
@@ -178,4 +179,4 @@ expRanges (If _ tbranch fbranch _) =
   where (t_lower, t_upper) = unzip $ bodyRanges tbranch
         (f_lower, f_upper) = unzip $ bodyRanges fbranch
 expRanges e =
-  replicate (length $ expExtType e) unknownRange
+  replicate (expExtTypeSize e) unknownRange

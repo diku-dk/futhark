@@ -43,6 +43,8 @@ module Futhark.Representation.Basic
        )
 where
 
+import Control.Monad
+
 import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
@@ -97,8 +99,9 @@ instance TypeCheck.Checkable Basic where
   checkFParamLore = return
   checkLetBoundLore = return
   checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
-  matchPattern pat e =
-    TypeCheck.matchExtPattern (patternElements pat) (expExtType e)
+  matchPattern pat e = do
+    et <- expExtType e
+    TypeCheck.matchExtPattern (patternElements pat) et
   basicFParam _ name t =
     AST.FParam (Ident name (AST.Basic t)) ()
   matchReturnType name (ExtRetType ts) =
@@ -121,15 +124,17 @@ instance Bindable Basic where
   mkLet pat =
     AST.Let (basicPattern pat) ()
   mkLetNames names e = do
-    (ts, shapes) <- instantiateShapes' $ expExtType e
+    et <- expExtType e
+    (ts, shapes) <- instantiateShapes' et
     let shapeElems = [ AST.PatElem shapeident BindVar ()
                   | shapeident <- shapes
                   ]
-        valElems = zipWith mkValElem names ts
         mkValElem (name, BindVar) t =
-          AST.PatElem (Ident name t) BindVar ()
-        mkValElem (name, bindage@(BindInPlace _ src _)) _ =
-          AST.PatElem (Ident name (identType src)) bindage ()
+          return $ AST.PatElem (Ident name t) BindVar ()
+        mkValElem (name, bindage@(BindInPlace _ src _)) _ = do
+          srct <- lookupTypeM src
+          return $ AST.PatElem (Ident name srct) bindage ()
+    valElems <- zipWithM mkValElem names ts
     return $ AST.Let (AST.Pattern $ shapeElems++valElems) () e
 
 instance PrettyLore Basic where

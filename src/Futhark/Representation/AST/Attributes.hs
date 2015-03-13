@@ -68,19 +68,16 @@ loopResultValues patidents res mergeparams ses =
 funDecByName :: Name -> Prog lore -> Maybe (FunDec lore)
 funDecByName fname = find ((fname ==) . funDecName) . progFunctions
 
-shapeExps :: Ident -> [SubExp]
-shapeExps = shapeDims . arrayShape . identType
+-- | @reshapeOuter newshape n oldshape@ returns a 'Reshape' expression
+-- that replaces the outer @n@ dimensions of @oldshape@ with @shape@.
+reshapeOuter :: [SubExp] -> Int -> Shape -> [SubExp]
+reshapeOuter newshape n oldshape = newshape ++ drop n (shapeDims oldshape)
 
--- | @reshapeOuter shape n src@ returns a 'Reshape' expression that
--- replaces the outer @n@ dimensions of @src@ with @shape@.
-reshapeOuter :: [SubExp] -> Int -> Ident -> [SubExp]
-reshapeOuter shape n src = shape ++ drop n (shapeExps src)
-
--- | @reshapeInner shape n src@ returns a 'Reshape' expression that
--- replaces the inner @m-n@ dimensions (where @m@ is the rank of
--- @src@) of @src@ with @shape@.
-reshapeInner :: [SubExp] -> Int -> Ident -> [SubExp]
-reshapeInner shape n src = take n (shapeExps src) ++ shape
+-- | @reshapeInner newshape n oldshape@ returns a 'Reshape' expression
+-- that replaces the inner @m-n@ dimensions (where @m@ is the rank of
+-- @oldshape@) of @src@ with @newshape@.
+reshapeInner :: [SubExp] -> Int -> Shape -> [SubExp]
+reshapeInner newshape n oldshape = take n (shapeDims oldshape) ++ newshape
 
 -- | If the expression is a 'PrimOp', return that 'PrimOp', otherwise 'Nothing'.
 asPrimOp :: Exp lore -> Maybe (PrimOp lore)

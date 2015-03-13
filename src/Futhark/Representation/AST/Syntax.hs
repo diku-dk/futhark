@@ -164,21 +164,21 @@ data PrimOp lore
   -- Primitive array operations
 
   | Index Certificates
-          Ident
+          VName
           [SubExp]
 
   -- ^ 3rd arg are (optional) certificates for bounds
   -- checking.  If given (even as an empty list), no
   -- run-time bounds checking is done.
 
-  | Split Certificates [SubExp] Ident
+  | Split Certificates [SubExp] VName
   -- ^ 2nd arg is sizes of arrays you back, which is
   -- different from what the external language does.
   -- In the internal langauge,
   -- @a = [1,2,3,4]@
   -- @split( (1,0,2) , a ) = {[1], [], [2,3]}@
 
-  | Concat Certificates Ident [Ident] SubExp
+  | Concat Certificates VName [VName] SubExp
   -- ^ @concat([1],[2, 3, 4]) = [1, 2, 3, 4]@.
 
   | Copy SubExp
@@ -194,16 +194,16 @@ data PrimOp lore
   -- ^ Create array of given type and shape, with undefined elements.
 
   -- Array index space transformation.
-  | Reshape Certificates [SubExp] Ident
+  | Reshape Certificates [SubExp] VName
    -- ^ 1st arg is the new shape, 2nd arg is the input array *)
 
-  | Rearrange Certificates [Int] Ident
+  | Rearrange Certificates [Int] VName
   -- ^ Permute the dimensions of the input array.  The list
   -- of integers is a list of dimensions (0-indexed), which
   -- must be a permutation of @[0,n-1]@, where @n@ is the
   -- number of dimensions in the input array.
 
-  | Partition Certificates Int Ident Ident
+  | Partition Certificates Int VName VName
     -- ^ First variable is the flag array, second is the element
     -- array.
 
@@ -213,28 +213,28 @@ data PrimOp lore
   deriving (Eq, Ord, Show)
 
 data LoopOp lore
-  = DoLoop [Ident] [(FParam lore, SubExp)] LoopForm (BodyT lore)
+  = DoLoop [VName] [(FParam lore, SubExp)] LoopForm (BodyT lore)
     -- ^ @loop {b} <- {a} = {v} (for i < n|while b) do b@.
 
-  | Map Certificates (LambdaT lore) [Ident]
+  | Map Certificates (LambdaT lore) [VName]
     -- ^ @map(op +(1), {1,2,..,n}) = [2,3,..,n+1]@.
     -- 3rd arg is either a tuple of multi-dim arrays
     --   of basic type, or a multi-dim array of basic type.
     -- 4th arg is the input-array row types
 
-  | ConcatMap Certificates (LambdaT lore) [[Ident]]
+  | ConcatMap Certificates (LambdaT lore) [[VName]]
 
-  | Reduce  Certificates (LambdaT lore) [(SubExp, Ident)]
-  | Scan   Certificates (LambdaT lore) [(SubExp, Ident)]
-  | Redomap Certificates (LambdaT lore) (LambdaT lore) [SubExp] [Ident]
-  | Stream  Certificates [SubExp] [Ident] (ExtLambdaT lore)
+  | Reduce  Certificates (LambdaT lore) [(SubExp, VName)]
+  | Scan   Certificates (LambdaT lore) [(SubExp, VName)]
+  | Redomap Certificates (LambdaT lore) (LambdaT lore) [SubExp] [VName]
+  | Stream  Certificates [SubExp] [VName] (ExtLambdaT lore)
 
 deriving instance Lore lore => Eq (LoopOp lore)
 deriving instance Lore lore => Show (LoopOp lore)
 deriving instance Lore lore => Ord (LoopOp lore)
 
-data LoopForm = ForLoop Ident SubExp
-              | WhileLoop Ident
+data LoopForm = ForLoop VName SubExp
+              | WhileLoop VName
               deriving (Eq, Show, Ord)
 
 -- | Futhark Expression Language: literals + vars + int binops + array

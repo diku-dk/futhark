@@ -64,7 +64,7 @@ cseInBinding (Let pat eattr e) m = do
       Just subpat ->
         let lets =
               [ Let (Pattern [patElem]) eattr $ PrimOp $ SubExp $ Var v
-              | (patElem,v) <- zip (patternElements pat') $ patternIdents subpat
+              | (patElem,v) <- zip (patternElements pat') $ patternNames subpat
               ]
         in local (addNameSubst pat' subpat) $ m lets
   where bad (Array _ _ Unique) = True

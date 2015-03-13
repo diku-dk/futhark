@@ -1,6 +1,6 @@
 {-# Language FlexibleInstances, FlexibleContexts #-}
 module Futhark.Representation.AST.Attributes.Aliases
-       ( identAliases
+       ( vnameAliases
        , subExpAliases
        , primOpAliases
        , loopOpAliases
@@ -26,14 +26,12 @@ class Lore lore => Aliased lore where
   consumedInBody :: Body lore -> Names
   patternAliases :: Pattern lore -> [Names]
 
-identAliases :: Ident -> Names
-identAliases ident
-  | Basic _ <- identType ident = mempty
-  | otherwise = HS.singleton $ identName ident
+vnameAliases :: VName -> Names
+vnameAliases = HS.singleton
 
 subExpAliases :: SubExp -> Names
 subExpAliases (Constant {}) = mempty
-subExpAliases (Var v)       = identAliases v
+subExpAliases (Var v)       = vnameAliases v
 
 primOpAliases :: PrimOp lore -> [Names]
 primOpAliases (SubExp se) = [subExpAliases se]
@@ -42,7 +40,7 @@ primOpAliases (BinOp {}) = [mempty]
 primOpAliases (Not {}) = [mempty]
 primOpAliases (Negate {}) = [mempty]
 primOpAliases (Index _ ident _) =
-  [identAliases ident]
+  [vnameAliases ident]
 primOpAliases (Iota {}) =
   [mempty]
 primOpAliases (Replicate _ e) =
@@ -50,13 +48,13 @@ primOpAliases (Replicate _ e) =
 primOpAliases (Scratch {}) =
   [mempty]
 primOpAliases (Reshape _ _ e) =
-  [identAliases e]
+  [vnameAliases e]
 primOpAliases (Rearrange _ _ e) =
-  [identAliases e]
+  [vnameAliases e]
 primOpAliases (Split _ sizeexps e) =
-  replicate (length sizeexps) (identAliases e)
+  replicate (length sizeexps) (vnameAliases e)
 primOpAliases (Concat _ x ys _) =
-  [identAliases x <> mconcat (map identAliases ys)]
+  [vnameAliases x <> mconcat (map vnameAliases ys)]
 primOpAliases (Copy {}) =
   [mempty]
 primOpAliases (Assert {}) =
@@ -64,12 +62,12 @@ primOpAliases (Assert {}) =
 primOpAliases (Alloc _) =
   [mempty]
 primOpAliases (Partition _ n _ arr) =
-  replicate n mempty ++ [identAliases arr]
+  replicate n mempty ++ [vnameAliases arr]
 
 loopOpAliases :: (Aliased lore) => LoopOp lore -> [Names]
 loopOpAliases (DoLoop res merge _ loopbody) =
   map snd $ filter fst $
-  zip (map ((`elem` res) . fparamIdent . fst) merge) (bodyAliases loopbody)
+  zip (map (((`elem` res) . identName) . fparamIdent . fst) merge) (bodyAliases loopbody)
 loopOpAliases (Map _ f _) =
   bodyAliases $ lambdaBody f
 loopOpAliases (Reduce _ f _) =
@@ -138,4 +136,4 @@ consumedInPattern pat =
   mconcat (map (consumedInBindage . patElemBindage) $
            patternElements pat)
   where consumedInBindage BindVar = mempty
-        consumedInBindage (BindInPlace _ src _) = identAliases src
+        consumedInBindage (BindInPlace _ src _) = vnameAliases src

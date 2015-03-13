@@ -1,5 +1,6 @@
 module Futhark.Analysis.HORepresentation.SOACNest
   ( SOACNest (..)
+  , nestingParamNames
   , Combinator (..)
   , body
   , setBody
@@ -30,10 +31,10 @@ import Data.Maybe
 
 import Prelude
 
-import Futhark.Representation.AST hiding (Map, Reduce, Scan, Redomap)
+import Futhark.Representation.AST hiding (Map, Reduce, Scan, Redomap, subExpType)
+import qualified Futhark.Representation.AST as AST
 import Futhark.MonadFreshNames
 import Futhark.Binder
-import Futhark.Tools (instantiateExtTypes)
 import Futhark.Analysis.HORepresentation.SOAC (SOAC)
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import Futhark.Substitute
@@ -47,11 +48,14 @@ import Futhark.Substitute
 -- proper nest!  (I think...)
 
 data Nesting lore = Nesting {
-    nestingParamNames :: [VName]
+    nestingParams     :: [Ident]
   , nestingInputs     :: [SOAC.Input]
   , nestingResult     :: [VName]
   , nestingReturnType :: [Type]
   } deriving (Eq, Ord, Show)
+
+nestingParamNames :: Nesting lore -> [VName]
+nestingParamNames = map identName . nestingParams
 
 data NestBody lore = Fun (Lambda lore)
                    | NewNest (Nesting lore) (Combinator lore)
@@ -64,18 +68,18 @@ nestBodyReturnType (NewNest nesting _) = nestingReturnType nesting
 nestBodyParams :: NestBody lore -> [Param]
 nestBodyParams (Fun lam) = lambdaParams lam
 nestBodyParams (NewNest nesting (Reduce _ _ acc)) =
-  foldNestParams nesting acc
+  foldNestParams nesting $ map subExpType acc
 nestBodyParams (NewNest nesting (Scan _ _ acc)) =
-  foldNestParams nesting acc
+  foldNestParams nesting $ map subExpType acc
 nestBodyParams (NewNest nesting (Redomap _ _ _ acc)) =
-  foldNestParams nesting acc
+  foldNestParams nesting $ map subExpType acc
 nestBodyParams (NewNest nesting _) =
   foldNestParams nesting []
 
-foldNestParams :: Nesting lore -> [SubExp] -> [Ident]
+foldNestParams :: Nesting lore -> [Type] -> [Ident]
 foldNestParams nesting acc =
   zipWith Ident (nestingParamNames nesting) $
-  map subExpType acc ++
+  acc ++
   map (rowType . SOAC.inputType) (nestingInputs nesting)
 
 instance Substitutable lore => Substitute (NestBody lore) where
@@ -88,27 +92,36 @@ instance Substitutable lore => Substitute (NestBody lore) where
               substituteNames m $ lambdaBody l
           }
 
-bodyToLambda :: (Bindable lore, MonadFreshNames m) =>
+bodyToLambda :: (Bindable lore, MonadFreshNames m, HasTypeEnv m) =>
                 [Type] -> NestBody lore -> m (Lambda lore)
 bodyToLambda _ (Fun l) = return l
-bodyToLambda pts (NewNest (Nesting paramNames inps bndIds retTypes) op) = do
+bodyToLambda pts (NewNest (Nesting ps inps bndIds retTypes) op) = do
   (e,f) <- runBinder' $ SOAC.toExp =<< toSOAC (SOACNest inps op)
-  let idents = instantiateExtTypes bndIds $ expExtType e
-  bnd <- mkLetNames' (map identName idents) e
+  bnd <- mkLetNames' bndIds e
   return
-    Lambda { lambdaParams = zipWith Ident paramNames pts
+    Lambda { lambdaParams = zipWith Ident (map identName ps) pts
            , lambdaReturnType = retTypes
            , lambdaBody = f $ mkBody [bnd] $
-                          Result (map Var idents)
+                          Result $ map Var bndIds
            }
 
-lambdaToBody :: Bindable lore => Lambda lore -> NestBody lore
-lambdaToBody l = fromMaybe (Fun l) $ liftM (uncurry $ flip NewNest) $ nested l
+lambdaToBody :: (HasTypeEnv m, Monad m, Bindable lore) =>
+                Lambda lore -> m (NestBody lore)
+lambdaToBody l = do
+  maybe (Fun l) (uncurry $ flip NewNest) <$> nested l
+
+data TypedSubExp = TypedSubExp { subExpExp :: SubExp
+                               , subExpType :: Type
+                               }
+                   deriving (Show)
+
+typedSubExp :: HasTypeEnv f => SubExp -> f TypedSubExp
+typedSubExp se = TypedSubExp se <$> AST.subExpType se
 
 data Combinator lore = Map Certificates (NestBody lore)
-                     | Reduce Certificates (NestBody lore) [SubExp]
-                     | Scan Certificates (NestBody lore) [SubExp]
-                     | Redomap Certificates (Lambda lore) (NestBody lore) [SubExp]
+                     | Reduce Certificates (NestBody lore) [TypedSubExp]
+                     | Scan Certificates (NestBody lore) [TypedSubExp]
+                     | Redomap Certificates (Lambda lore) (NestBody lore) [TypedSubExp]
                  deriving (Show)
 
 instance Substitutable lore => Substitute (Combinator lore) where
@@ -191,41 +204,47 @@ typeOf (SOACNest inps (Scan _ _ accinit)) =
                | t <- map subExpType accinit ]
   where outersize = arraysSize 0 $ map SOAC.inputType inps
 
-fromExp :: Bindable lore =>
-           Exp lore -> Either SOAC.NotSOAC (SOACNest lore)
-fromExp = liftM fromSOAC . SOAC.fromExp
+fromExp :: (Bindable lore, HasTypeEnv f, Monad f) =>
+           Exp lore -> f (Either SOAC.NotSOAC (SOACNest lore))
+fromExp e = either (return . Left) (liftM Right . fromSOAC) =<< SOAC.fromExp e
 
 toExp :: Bindable lore => SOACNest lore -> Binder lore (Exp lore)
 toExp = SOAC.toExp <=< toSOAC
 
-fromSOAC :: Bindable lore => SOAC lore -> SOACNest lore
+fromSOAC :: (Bindable lore, HasTypeEnv m, Monad m) =>
+            SOAC lore -> m (SOACNest lore)
 fromSOAC (SOAC.Map cs l as) =
-  SOACNest as $ Map cs $ lambdaToBody l
+  SOACNest as <$> Map cs <$> lambdaToBody l
 fromSOAC (SOAC.Reduce cs l args) =
-  SOACNest (map snd args) $
-  Reduce cs (lambdaToBody l) (map fst args)
+  SOACNest (map snd args) <$>
+  (Reduce cs <$> lambdaToBody l <*> traverse (typedSubExp . fst) args)
 fromSOAC (SOAC.Scan cs l args) =
-  SOACNest (map snd args) $
-  Scan cs (lambdaToBody l) (map fst args)
+  SOACNest (map snd args) <$>
+  (Scan cs <$> lambdaToBody l <*> traverse (typedSubExp . fst) args)
 fromSOAC (SOAC.Redomap cs ol l es as) =
   -- Never nested, because we need a way to test alpha-equivalence of
   -- the outer combining function.
-  SOACNest as $ Redomap cs ol (lambdaToBody l) es
+  SOACNest as <$> (Redomap cs ol <$> lambdaToBody l <*> traverse typedSubExp es)
 
-nested :: Bindable lore => Lambda lore -> Maybe (Combinator lore, Nesting lore)
+nested :: (HasTypeEnv m, Monad m, Bindable lore) =>
+          Lambda lore -> m (Maybe (Combinator lore, Nesting lore))
 nested l
-  | Body _ [Let pat _ e] res <- lambdaBody l, -- Is a let-binding...
-    Right soac <- fromSOAC <$> SOAC.fromExp e, -- ...the bindee is a SOAC...
-    resultSubExps res == map Var (patternIdents pat) =
-      Just (operation soac,
-            Nesting { nestingParamNames = map identName $ lambdaParams l
-                    , nestingInputs = inputs soac
-                    , nestingResult = patternNames pat
-                    , nestingReturnType = lambdaReturnType l
-                    })
-  | otherwise = Nothing
+  | Body _ [Let pat _ e] res <- lambdaBody l = do -- Is a let-binding...
+    maybesoac <- either (return . Left) (liftM Right . fromSOAC) =<< SOAC.fromExp e
+    case maybesoac of
+      Right soac -- ...the bindee is a SOAC...
+        | resultSubExps res == map Var (patternNames pat) ->
+          return $ Just (operation soac,
+                         Nesting { nestingParams = lambdaParams l
+                                 , nestingInputs = inputs soac
+                                 , nestingResult = patternNames pat
+                                 , nestingReturnType = lambdaReturnType l
+                                 })
+      _ -> pure Nothing
+  | otherwise = pure Nothing
 
-toSOAC :: (Bindable lore, MonadFreshNames m) => SOACNest lore -> m (SOAC lore)
+toSOAC :: (Bindable lore, MonadFreshNames m, HasTypeEnv m) =>
+          SOACNest lore -> m (SOAC lore)
 toSOAC (SOACNest as (Map cs b)) =
   SOAC.Map cs <$>
   bodyToLambda (map SOAC.inputRowType as) b <*>
@@ -233,12 +252,12 @@ toSOAC (SOACNest as (Map cs b)) =
 toSOAC (SOACNest as (Reduce cs b es)) =
   SOAC.Reduce cs <$>
   bodyToLambda (map subExpType es ++ map SOAC.inputRowType as) b <*>
-  pure (zip es as)
+  pure (zip (map subExpExp es) as)
 toSOAC (SOACNest as (Scan cs b es)) =
   SOAC.Scan cs <$>
   bodyToLambda (map subExpType es ++ map SOAC.inputRowType as) b <*>
-  pure (zip es as)
+  pure (zip (map subExpExp es) as)
 toSOAC (SOACNest as (Redomap cs l b es)) =
   SOAC.Redomap cs l <$>
   bodyToLambda (map subExpType es ++ map SOAC.inputRowType as) b <*>
-  pure es <*> pure as
+  pure (map subExpExp es) <*> pure as

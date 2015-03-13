@@ -15,6 +15,7 @@ module Futhark.Analysis.SymbolTable
   , elem
   , lookup
   , lookupExp
+  , lookupType
   , lookupSubExp
   , lookupScalExp
   , lookupValue
@@ -33,11 +34,13 @@ module Futhark.Analysis.SymbolTable
     -- * Misc
   , enclosingLoopVars
   , rangesRep
+  , typeEnv
   )
   where
 
 import Control.Applicative hiding (empty)
 import Control.Monad
+import Control.Monad.Reader
 import Data.Ord
 import Data.Maybe
 import Data.List hiding (elem, insert, lookup)
@@ -46,7 +49,7 @@ import qualified Data.HashMap.Lazy as HM
 
 import Prelude hiding (elem, lookup)
 
-import Futhark.Representation.AST hiding (FParam, FParamT (..))
+import Futhark.Representation.AST hiding (FParam, FParamT (..), fparamType)
 import qualified Futhark.Representation.AST as AST
 import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Analysis.ScalExp
@@ -84,17 +87,20 @@ data LetBoundEntry lore =
                 , letBoundBindingDepth :: Int
                 , letBoundScalExp      :: Maybe ScalExp
                 , letBoundBindage      :: Bindage
+                , letBoundType         :: Type
                 }
 
 data FParamEntry lore =
   FParamEntry { fparamRange        :: ScalExpRange
               , fparamLore         :: Lore.FParam lore
               , fparamBindingDepth :: Int
+              , fparamType         :: Type
               }
 
 data LParamEntry lore =
   LParamEntry { lparamRange        :: ScalExpRange
               , lparamBindingDepth :: Int
+              , lparamType         :: Type
               }
 
 isVarBound :: Entry lore -> Maybe (LetBoundEntry lore)
@@ -158,6 +164,12 @@ loopVariable _           = False
 asExp :: Entry lore -> Maybe (Exp lore)
 asExp = liftM (bindingExp . letBoundBinding) . isVarBound
 
+entryType :: Entry lore -> Type
+entryType (LetBound entry) = letBoundType entry
+entryType (LParam entry)   = lparamType entry
+entryType (FParam entry)   = fparamType entry
+entryType (LoopVar _)      = Basic Int
+
 instance Substitutable lore => Substitute (LetBoundEntry lore) where
   substituteNames substs entry =
     LetBoundEntry {
@@ -167,6 +179,7 @@ instance Substitutable lore => Substitute (LetBoundEntry lore) where
       , letBoundScalExp = substituteNames substs $ letBoundScalExp entry
       , letBoundBindingDepth = letBoundBindingDepth entry
       , letBoundBindage = substituteNames substs $ letBoundBindage entry
+      , letBoundType = substituteNames substs $ letBoundType entry
       }
 
 instance Substitutable lore => Substitute (FParamEntry lore) where
@@ -175,6 +188,7 @@ instance Substitutable lore => Substitute (FParamEntry lore) where
           fparamRange = substituteNames substs $ fparamRange entry
         , fparamLore = substituteNames substs $ fparamLore entry
         , fparamBindingDepth = fparamBindingDepth entry
+        , fparamType = substituteNames substs $ fparamType entry
       }
 
 instance Substitutable lore => Substitute (LParamEntry lore) where
@@ -182,6 +196,7 @@ instance Substitutable lore => Substitute (LParamEntry lore) where
     LParamEntry {
           lparamRange = substituteNames substs $ lparamRange entry
         , lparamBindingDepth = lparamBindingDepth entry
+        , lparamType = substituteNames substs $ lparamType entry
       }
 
 instance Substitutable lore => Substitute (LoopVarEntry lore) where
@@ -211,6 +226,9 @@ lookup name = HM.lookup name . bindings
 lookupExp :: VName -> SymbolTable lore -> Maybe (Exp lore)
 lookupExp name vtable = asExp =<< lookup name vtable
 
+lookupType :: VName -> SymbolTable lore -> Maybe Type
+lookupType name vtable = entryType <$> lookup name vtable
+
 lookupSubExp :: VName -> SymbolTable lore -> Maybe SubExp
 lookupSubExp name vtable = do
   e <- lookupExp name vtable
@@ -228,7 +246,7 @@ lookupValue name vtable = case lookupSubExp name vtable of
 
 lookupVar :: VName -> SymbolTable lore -> Maybe VName
 lookupVar name vtable = case lookupSubExp name vtable of
-                          Just (Var v) -> Just $ identName v
+                          Just (Var v) -> Just v
                           _            -> Nothing
 
 lookupRange :: VName -> SymbolTable lore -> ScalExpRange
@@ -249,6 +267,9 @@ rangesRep = HM.filter knownRange . HM.map toRep . bindings
           where (lower, upper) = valueRange entry
         knownRange (_, lower, upper) = isJust lower || isJust upper
 
+typeEnv :: SymbolTable lore -> TypeEnv
+typeEnv = HM.map entryType . bindings
+
 defBndEntry :: SymbolTable lore
             -> PatElem lore
             -> Range
@@ -262,9 +283,12 @@ defBndEntry vtable patElem range bnd =
     , letBoundScalExp = toScalExp (`lookupScalExp` vtable) (bindingExp bnd)
     , letBoundBindingDepth = 0
     , letBoundBindage = patElemBindage patElem
+    , letBoundType = patElemType patElem
     }
   where ranges :: AS.RangesRep
         ranges = rangesRep vtable
+
+        types = typeEnv vtable
 
         scalExpRange :: Range -> ScalExpRange
         scalExpRange (lower, upper) =
@@ -274,8 +298,8 @@ defBndEntry vtable patElem range bnd =
         scalExpBound :: (ScalExpRange -> Maybe ScalExp)
                      -> Ranges.KnownBound
                      -> Maybe ScalExp
-        scalExpBound pick (Ranges.ElemBound v) =
-          pick $ identRange v vtable
+        scalExpBound pick (Ranges.VarBound v) =
+          pick $ lookupRange v vtable
         scalExpBound _ (Ranges.ScalarBound se) =
           Just se
         scalExpBound _ (Ranges.MinimumBound b1 b2) = do
@@ -293,7 +317,7 @@ defBndEntry vtable patElem range bnd =
            simplifyBound upper)
 
         simplifyBound (Just se)
-          | Right se' <- AS.simplify se ranges =
+          | Right se' <- AS.simplify se ranges types =
             Just se'
         simplifyBound bound =
           bound
@@ -305,9 +329,6 @@ bindingEntries bnd@(Let pat _ _) vtable =
   [ defBndEntry vtable patElem range bnd |
     (patElem, range) <- zip (patternElements pat) (Ranges.patternRanges pat)
   ]
-
-identRange :: Ident -> SymbolTable lore -> ScalExpRange
-identRange = lookupRange . identName
 
 insertEntry :: VName -> Entry lore -> SymbolTable lore
             -> SymbolTable lore
@@ -339,6 +360,7 @@ insertFParam fparam = insertEntry name entry
         entry = FParam FParamEntry { fparamRange = (Nothing, Nothing)
                                    , fparamLore = AST.fparamLore fparam
                                    , fparamBindingDepth = 0
+                                   , fparamType = AST.fparamType fparam
                                    }
 
 insertFParams :: [AST.FParam lore] -> SymbolTable lore
@@ -354,26 +376,27 @@ insertLParamWithRange param range vtable =
   in foldr (`isAtLeast` 0) vtable' sizevars
   where bind = LParam LParamEntry { lparamRange = range
                                   , lparamBindingDepth = 0
+                                  , lparamType = identType param
                                   }
         name = identName param
         sizevars = mapMaybe isVar $ arrayDims $ identType param
-        isVar (Var v) = Just $ identName v
+        isVar (Var v) = Just v
         isVar _       = Nothing
 
 insertLParam :: Param -> SymbolTable lore -> SymbolTable lore
 insertLParam param =
   insertLParamWithRange param (Nothing, Nothing)
 
-insertArrayLParam :: Param -> Maybe Ident -> SymbolTable lore
+insertArrayLParam :: Param -> Maybe VName -> SymbolTable lore
                   -> SymbolTable lore
 insertArrayLParam param (Just array) vtable =
   -- We now know that the outer size of 'array' is at least one, and
   -- that the inner sizes are at least zero, since they are array
   -- sizes.
-  let vtable' = insertLParamWithRange param (identRange array vtable) vtable
-  in case arrayDims $ identType array of
-    Var v:_ -> (identName v `isAtLeast` 1) vtable'
-    _       -> vtable'
+  let vtable' = insertLParamWithRange param (lookupRange array vtable) vtable
+  in case arrayDims <$> lookupType array vtable of
+    Just (Var v:_) -> (v `isAtLeast` 1) vtable'
+    _              -> vtable'
 insertArrayLParam param Nothing vtable =
   -- Well, we still know that it's a param...
   insertLParam param vtable
@@ -403,10 +426,13 @@ updateBounds isTrue cond vtable =
 updateBounds' :: ScalExp -> SymbolTable lore -> SymbolTable lore
 updateBounds' cond sym_tab =
   foldr updateBound sym_tab $ mapMaybe solve_leq0 $
-  either (const []) getNotFactorsLEQ0 $ AS.simplify (SNot cond) ranges
+  either (const []) getNotFactorsLEQ0 $
+  AS.simplify (SNot cond) ranges types
     where
-      updateBound (sym,True ,bound) = setUpperBound (identName sym) bound
-      updateBound (sym,False,bound) = setLowerBound (identName sym) bound
+      types = typeEnv sym_tab
+
+      updateBound (sym,True ,bound) = setUpperBound sym bound
+      updateBound (sym,False,bound) = setLowerBound sym bound
 
       ranges = HM.filter nonEmptyRange $ HM.map toRep $ bindings sym_tab
       toRep entry = (bindingDepth entry, lower, upper)
@@ -421,12 +447,12 @@ updateBounds' cond sym_tab =
       --   of `not cond' in CNF form: not cond = (not c1) && ... && (not cn)
       getNotFactorsLEQ0 :: ScalExp -> [ScalExp]
       getNotFactorsLEQ0 (RelExp rel e_scal) =
-          if scalExpType e_scal /= Int then []
+          if runReader (scalExpType e_scal) types /= Int then []
           else let leq0_escal = if rel == LTH0
                                 then SMinus (Val (IntVal 0)) e_scal
                                 else SMinus (Val (IntVal 1)) e_scal
 
-               in  either (const []) (:[]) $ AS.simplify leq0_escal ranges
+               in  either (const []) (:[]) $ AS.simplify leq0_escal ranges types
       getNotFactorsLEQ0 (SLogOr  e1 e2) = getNotFactorsLEQ0 e1 ++ getNotFactorsLEQ0 e2
       getNotFactorsLEQ0 _ = []
 
@@ -439,14 +465,15 @@ updateBounds' cond sym_tab =
       --
       --  Returns: Nothing or
       --  Just (i, a == 1, -a*b), i.e., (symbol, isUpperBound, bound)
-      solve_leq0 :: ScalExp -> Maybe (Ident, Bool, ScalExp)
+      solve_leq0 :: ScalExp -> Maybe (VName, Bool, ScalExp)
       solve_leq0 e_scal = do
         sym <- AS.pickSymToElim ranges S.empty e_scal
-        (a,b) <- either (const Nothing) id $ AS.linFormScalE sym e_scal ranges
+        (a,b) <- either (const Nothing) id $ AS.linFormScalE sym e_scal ranges types
         case a of
           Val (IntVal (-1)) -> Just (sym, False, b)
           Val (IntVal 1)    -> do
-            mb <- either (const Nothing) Just $ AS.simplify (SMinus (Val (IntVal 0)) b) ranges
+            mb <- either (const Nothing) Just $
+                  AS.simplify (SMinus (Val (IntVal 0)) b) ranges types
             Just (sym, True, mb)
           _ -> Nothing
 

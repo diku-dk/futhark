@@ -103,7 +103,7 @@ instance Substitute Result where
 
 replace :: (Substitutable lore) => HM.HashMap VName VName -> Mapper lore lore Identity
 replace substs = Mapper {
-                   mapOnIdent = return . substituteNames substs
+                   mapOnVName = return . substituteNames substs
                  , mapOnSubExp = return . substituteNames substs
                  , mapOnBody = return . substituteNames substs
                  , mapOnBinding = return . substituteNames substs

@@ -12,8 +12,6 @@
 -- The module will, however, remove duplicate inputs after fusion.
 module Futhark.Optimise.Fusion.Composing
   ( fuseMaps
-  , fuseFilters
-  , fuseFilterIntoFold
   , Input(..)
   )
   where
@@ -27,7 +25,7 @@ import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 
 import Futhark.Representation.AST
 import Futhark.Binder
-  (Bindable(..), insertBinding, insertBindings, mkBody, mkLet')
+  (Bindable(..), insertBinding, insertBindings, mkLet')
 import Futhark.Tools (mapResult)
 
 -- | Something that can be used as a SOAC input.  As far as this
@@ -35,7 +33,7 @@ import Futhark.Tools (mapResult)
 class (Ord a, Eq a) => Input a where
   -- | Check whether an arbitrary input corresponds to a plain
   -- variable input.  If so, return that variable.
-  isVarInput :: a -> Maybe Ident
+  isVarInput :: a -> Maybe VName
 
 instance Input SOAC.Input where
   isVarInput = SOAC.isVarInput
@@ -63,7 +61,7 @@ instance (Show a, Ord a, Input inp) => Input (a, inp) where
 fuseMaps :: (Input input, Bindable lore) =>
             Lambda lore -- ^ Function of SOAC to be fused.
          -> [input] -- ^ Input of SOAC to be fused.
-         -> [(Ident,Ident)] -- ^ Output of SOAC to be fused.  The
+         -> [(VName,Ident)] -- ^ Output of SOAC to be fused.  The
                             -- first identifier is the name of the
                             -- actual output, where the second output
                             -- is an identifier that can be used to
@@ -86,76 +84,8 @@ fuseMaps lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
         (lam2redparams, pat, inputmap, makeCopies, makeCopiesInner) =
           fuseInputs lam1 inp1 out1 lam2 inp2
 
--- | Similar to 'fuseMaps', although the two functions must be
--- predicates returning @{bool}@.  Returns a new predicate function.
-fuseFilters :: (Input input, Bindable lore) =>
-               Lambda lore -- ^ Function of SOAC to be fused.
-            -> [input] -- ^ Input of SOAC to be fused.
-            -> [(Ident,Ident)] -- ^ Output of SOAC to be fused.
-            -> Lambda lore -- ^ Function to be fused with.
-            -> [input] -- ^ Input of SOAC to be fused with.
-            -> VName -- ^ A fresh name (used internally).
-            -> (Lambda lore, [input]) -- ^ The fused lambda and the inputs of the resulting SOAC.
-fuseFilters lam1 inp1 out1 lam2 inp2 vname =
-  fuseFilterInto lam1 inp1 out1 lam2 inp2 [vname] false
-  where false = mkBody [] $ Result [constant False]
-
--- | Similar to 'fuseFilters', except the second function does not
--- have to return @{bool}@, but must be a folding function taking at
--- least one reduction parameter (that is, the number of parameters
--- accepted by the function must be at least one greater than its
--- number of inputs).  If @f1@ is the to-be-fused function, and @f2@
--- is the function to be fused with, the resulting function will be of
--- roughly following form:
---
--- @
--- fn (acc, args) => if f1(args)
---                   then f2(acc,args)
---                   else acc
--- @
-fuseFilterIntoFold :: (Input input, Bindable lore) =>
-                      Lambda lore -- ^ Function of SOAC to be fused.
-                   -> [input] -- ^ Input of SOAC to be fused.
-                   -> [(Ident,Ident)] -- ^ Output of SOAC to be fused.
-                   -> Lambda lore -- ^ Function to be fused with.
-                   -> [input] -- ^ Input of SOAC to be fused with.
-                   -> [VName] -- ^ A fresh name (used internally).
-                   -> (Lambda lore, [input]) -- ^ The fused lambda and the inputs of the resulting SOAC.
-fuseFilterIntoFold lam1 inp1 out1 lam2 inp2 vnames =
-  fuseFilterInto lam1 inp1 out1 lam2 inp2 vnames identity
-  where identity = mkBody [] $ Result (map Var lam2redparams)
-        lam2redparams = take (length (lambdaParams lam2) - length inp2) $
-                        lambdaParams lam2
-
-fuseFilterInto :: (Input input, Bindable lore) =>
-                  Lambda lore -> [input] -> [(Ident,Ident)]
-               -> Lambda lore -> [input]
-               -> [VName] -> Body lore
-               -> (Lambda lore, [input])
-fuseFilterInto lam1 inp1 out1 lam2 inp2 vnames falsebranch = (lam2', HM.elems inputmap)
-  where lam2' =
-          lam2 { lambdaParams = lam2redparams ++ HM.keys inputmap
-               , lambdaBody = makeCopies bindins
-               }
-        restype = lambdaReturnType lam2
-        residents = [ Ident vname t | (vname, t) <- zip vnames restype ]
-        branch = flip mapResult (lambdaBody lam1) $ \res ->
-                 let [e] = resultSubExps res -- XXX
-                     tbranch = makeCopiesInner $ lambdaBody lam2
-                     ts = bodyExtType tbranch `generaliseExtTypes`
-                          bodyExtType falsebranch
-                 in mkBody [mkLet' residents $
-                            If e tbranch falsebranch ts] $
-                 Result (map Var residents)
-        lam1tuple = [ mkLet' [v] $ PrimOp $ SubExp $ Var p
-                    | (v,p) <- zip pat $ lambdaParams lam1 ]
-        bindins = lam1tuple `insertBindings` branch
-
-        (lam2redparams, pat, inputmap, makeCopies, makeCopiesInner) =
-          fuseInputs lam1 inp1 out1 lam2 inp2
-
 fuseInputs :: (Input input, Bindable lore) =>
-              Lambda lore -> [input] -> [(Ident,Ident)]
+              Lambda lore -> [input] -> [(VName,Ident)]
            -> Lambda lore -> [input]
            -> ([Param],
                [Ident],
@@ -176,7 +106,7 @@ fuseInputs lam1 inp1 out1 lam2 inp2 =
           removeDuplicateInputs $ originputmap `HM.difference` outins
 
 outParams :: Input input =>
-             [Ident] -> [Param] -> [input]
+             [VName] -> [Param] -> [input]
           -> HM.HashMap Param input
 outParams out1 lam2arrparams inp2 =
   HM.fromList $ mapMaybe isOutParam $ zip lam2arrparams inp2
@@ -186,7 +116,7 @@ outParams out1 lam2arrparams inp2 =
         isOutParam _      = Nothing
 
 filterOutParams :: Input input =>
-                   [(Ident,Ident)]
+                   [(VName,Ident)]
                 -> HM.HashMap Param input
                 -> [Ident]
 filterOutParams out1 outins =
@@ -202,7 +132,6 @@ filterOutParams out1 outins =
             Just (p:ps) -> (M.insert a ps m, p)
             _           -> (m, ra)
 
-
 removeDuplicateInputs :: (Input input, Bindable lore) =>
                          HM.HashMap Param input
                       -> (HM.HashMap Param input, Body lore -> Body lore)
@@ -210,58 +139,9 @@ removeDuplicateInputs = fst . HM.foldlWithKey' comb ((HM.empty, id), M.empty)
   where comb ((parmap, inner), arrmap) par arr =
           case M.lookup arr arrmap of
             Nothing -> ((HM.insert par arr parmap, inner),
-                        M.insert arr par arrmap)
+                        M.insert arr (identName par) arrmap)
             Just par' -> ((parmap, inner . forward par par'),
                           arrmap)
         forward to from b =
           mkLet' [to] (PrimOp $ SubExp $ Var from)
           `insertBinding` b
-
-{-
-
-An example of how I tested this module:
-
-I add this import:
-
-import Futhark.Dev
-
--}
-
-{-
-And now I can have top-level bindings like the following, that explicitly call fuseMaps:
-
-(test1fun, test1ins) = fuseMaps lam1 lam1in out lam2 lam2in
-  where lam1in = [SOAC.varInput $ tident "[int] arr_x", SOAC.varInput $ tident "[int] arr_z"]
-        lam1 = lambdaToFunction $ lambda "fn {int, int} (int x, int z_b) => {x + z_b, x - z_b}"
-        outarr = tident "[int] arr_y"
-        outarr2 = tident "[int] arr_unused"
-        out  = [outarr2, outarr]
-        lam2in = [Var outarr, Var $ tident "[int] arr_z"]
-        lam2 = lambdaToFunction $ lambda "fn {int} (int red, int y, int z) => {red + y + z}"
-
-
-(test2fun, test2ins) = fuseFilterIntoFold lam1 lam1in out lam2 lam2in (name "check")
-  where lam1in = [SOAC.varInput $ tident "[int] arr_x", SOAC.varInput $ tident "[int] arr_v"]
-        lam1 = lambda "fn {bool} (int x, int v) => x+v < 0"
-        outarr = tident "[int] arr_y"
-        outarr2 = tident "[int] arr_unused"
-        out  = [outarr, outarr2]
-        lam2in = [Var outarr]
-        lam2 = lambda "fn {int} (int red, int y) => {red + y}"
-
-(test3fun, test3ins) = fuseFilterIntoFold lam1 lam1in out lam2 lam2in (name "check")
-  where lam1in = [expr "iota(30)", expr "replicate(30, 1)"]
-        lam1 = lambda "fn {bool} (int i, int j) => {i+j < 0}"
-        outarr = tident "[int] arr_p"
-        outarr2 = tident "[int] arr_unused"
-        out  = [outarr, outarr2]
-        lam2in = [SOAC.varInput outarr]
-        lam2 = lambda "fn {int} (int x, int p) => {x ^ p}"
-
-I can inspect these values directly in GHCi.
-
-The point is to demonstrate that by factoring functionality out of the
-huge monad in the fusion module, we get something that's much easier
-to work with interactively.
-
--}

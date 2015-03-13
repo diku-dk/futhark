@@ -21,13 +21,13 @@ import Futhark.Optimise.InPlaceLowering.SubstituteIndices
 data DesiredUpdate =
   DesiredUpdate { updateBindee :: Ident
                 , updateCertificates :: Certificates
-                , updateSource :: Ident
+                , updateSource :: VName
                 , updateIndices :: [SubExp]
-                , updateValue :: Ident
+                , updateValue :: VName
                 }
 
 updateHasValue :: VName -> DesiredUpdate -> Bool
-updateHasValue name = (name==) . identName . updateValue
+updateHasValue name = (name==) . updateValue
 
 lowerUpdate :: (Bindable lore, MonadFreshNames m) =>
                Binding lore -> [DesiredUpdate] -> Maybe (m [Binding lore])
@@ -39,27 +39,27 @@ lowerUpdate (Let pat _ (LoopOp (DoLoop res merge form body))) updates = do
 lowerUpdate
   (Let pat _ (PrimOp (SubExp (Var v))))
   [DesiredUpdate bindee cs src is val]
-  | patternIdents pat == [src] =
+  | patternNames pat == [src] =
     Just $ return [mkLet [(bindee,BindInPlace cs v is)] $
                    PrimOp $ SubExp $ Var val]
 lowerUpdate
   (Let (Pattern [PatElem v BindVar _]) _ e)
   [DesiredUpdate bindee cs src is val]
-  | v == val =
+  | identName v == val =
     Just $ return [mkLet [(bindee,BindInPlace cs src is)] e,
-                   mkLet' [v] $ PrimOp $ Index cs bindee is]
+                   mkLet' [v] $ PrimOp $ Index cs (identName bindee) is]
 lowerUpdate _ _ =
   Nothing
 
 lowerUpdateIntoLoop :: (Bindable lore, MonadFreshNames m) =>
                        [DesiredUpdate]
                     -> Pattern lore
-                    -> [Ident]
+                    -> [VName]
                     -> [(FParam lore, SubExp)]
                     -> Body lore
                     -> Maybe (m ([Binding lore],
                                  [Ident],
-                                 [Ident],
+                                 [VName],
                                  [(FParam lore, SubExp)],
                                  Body lore))
 lowerUpdateIntoLoop updates pat res merge body = do
@@ -96,11 +96,11 @@ lowerUpdateIntoLoop updates pat res merge body = do
         idxsubsts = indexSubstitutions in_place_map
     (idxsubsts', newbnds) <- substituteIndices idxsubsts $ bodyBindings body
     let body' = mkBody newbnds $ manipulateResult in_place_map idxsubsts'
-    return (prebnds, pat', res', merge', body')
+    return (prebnds, pat', map identName res', merge', body')
   where mergeparams = map fst merge
-        usedInBody = freeNamesInBody body
+        usedInBody = freeInBody body
         resmap = loopResultValues
-                 (patternIdents pat) (map identName res)
+                 (patternIdents pat) res
                  (map fparamName mergeparams) $
                  resultSubExps $ bodyResult body
 
@@ -146,7 +146,7 @@ summariseLoop updates usedInBody resmap merge =
   sequence <$> zipWithM summariseLoopResult resmap merge
   where summariseLoopResult (se, Just v) (fparam, mergeinit)
           | Just update <- find (updateHasValue $ identName v) updates =
-            if identName (updateSource update) `HS.member` usedInBody
+            if updateSource update `HS.member` usedInBody
             then Nothing
             else if hasLoopInvariantShape fparam then Just $ do
               ident <-
@@ -168,7 +168,7 @@ summariseLoop updates usedInBody resmap merge =
 
         merge_param_names = map (fparamName . fst) merge
 
-        loopInvariant (Var v)       = identName v `notElem` merge_param_names
+        loopInvariant (Var v)       = v `notElem` merge_param_names
         loopInvariant (Constant {}) = True
 
 data LoopResultSummary =
@@ -191,7 +191,7 @@ manipulateResult :: [LoopResultSummary]
                  -> Result
 manipulateResult summaries substs =
   let orig_ses = mapMaybe unchangedRes summaries
-      subst_ses = map (\(_,v,_) -> Var v) substs
+      subst_ses = map (\(_,v,_) -> Var $ identName v) substs
   in Result $ orig_ses ++ subst_ses
   where
     unchangedRes summary =

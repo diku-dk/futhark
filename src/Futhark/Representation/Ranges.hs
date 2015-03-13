@@ -202,8 +202,8 @@ mkBodyRanges bnds res =
           (removeUnknownBound lower,
            removeUnknownBound upper)
         removeUnknownBound (Just bound)
-          | freeNamesIn bound `intersects` boundInBnds = Nothing
-          | otherwise                                  = Just bound
+          | freeIn bound `intersects` boundInBnds = Nothing
+          | otherwise                             = Just bound
         removeUnknownBound Nothing =
           Nothing
 

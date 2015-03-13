@@ -195,7 +195,7 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
 
 instance PrettyLore lore => Pretty (LoopOp lore) where
   ppr (DoLoop res mergepat form loopbody) =
-    text "loop" <+> ppPattern res <+>
+    text "loop" <+> braces (commasep $ map ppr res) <+>
     text "<-" <+> ppPattern (map fparamIdent pat) <+> equals <+> ppTuple' initexp </>
     (case form of
       ForLoop i bound ->
@@ -287,7 +287,7 @@ instance Pretty BinOp where
   ppr Less = text "<"
   ppr Leq = text "<="
 
-ppSOAC :: Pretty fn => String -> [fn] -> Maybe [SubExp] -> [Ident] -> Doc
+ppSOAC :: Pretty fn => String -> [fn] -> Maybe [SubExp] -> [VName] -> Doc
 ppSOAC name funs es as =
   text name <> parens (ppList funs </>
                        commasep (es' ++ map ppr as))

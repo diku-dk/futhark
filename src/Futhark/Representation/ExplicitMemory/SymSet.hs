@@ -67,7 +67,7 @@ freeVars :: SymSet a -> HS.HashSet VName
 freeVars (SetOp _ _ s1 _ s2) = freeVars s1 <> freeVars s2
 freeVars Empty = mempty
 freeVars (Bound vars ranged e) =
-  freeNamesIn e `HS.difference`
+  freeIn e `HS.difference`
   HS.fromList (Vec.toList vars ++ HM.keys ranged)
 
 fix :: forall k .

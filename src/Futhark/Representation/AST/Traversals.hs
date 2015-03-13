@@ -73,7 +73,7 @@ data Mapper flore tlore m = Mapper {
   , mapOnBinding :: Binding flore -> m (Binding tlore)
   , mapOnLambda :: Lambda flore -> m (Lambda tlore)
   , mapOnExtLambda :: ExtLambda flore -> m (ExtLambda tlore)
-  , mapOnIdent :: Ident -> m Ident
+  , mapOnVName :: VName -> m VName
   , mapOnCertificates :: Certificates -> m Certificates
   , mapOnRetType :: RetType flore -> m (RetType tlore)
   , mapOnFParam :: FParam flore -> m (FParam tlore)
@@ -87,7 +87,7 @@ identityMapper = Mapper {
                  , mapOnBody = return
                  , mapOnLambda = return
                  , mapOnExtLambda = return
-                 , mapOnIdent = return
+                 , mapOnVName = return
                  , mapOnCertificates = return
                  , mapOnRetType = return
                  , mapOnFParam = return
@@ -137,7 +137,7 @@ mapExpM tv (Apply fname args ret) = do
     mapOnRetType tv ret
 mapExpM tv (PrimOp (Index cs arr idxexps)) =
   PrimOp <$> (pure Index <*> mapOnCertificates tv cs <*>
-                 mapOnIdent tv arr <*>
+                 mapOnVName tv arr <*>
                  mapM (mapOnSubExp tv) idxexps)
 mapExpM tv (PrimOp (Iota nexp)) =
   PrimOp <$> (pure Iota <*> mapOnSubExp tv nexp)
@@ -148,16 +148,16 @@ mapExpM tv (PrimOp (Scratch t shape)) =
 mapExpM tv (PrimOp (Reshape cs shape arrexp)) =
   PrimOp <$> (pure Reshape <*> mapOnCertificates tv cs <*>
                  mapM (mapOnSubExp tv) shape <*>
-                 mapOnIdent tv arrexp)
+                 mapOnVName tv arrexp)
 mapExpM tv (PrimOp (Rearrange cs perm e)) =
   PrimOp <$> (pure Rearrange <*> mapOnCertificates tv cs <*>
-                 pure perm <*> mapOnIdent tv e)
+                 pure perm <*> mapOnVName tv e)
 mapExpM tv (PrimOp (Split cs sizeexps arrexp)) =
   PrimOp <$> (pure Split <*> mapOnCertificates tv cs <*>
-              mapM (mapOnSubExp tv) sizeexps <*> mapOnIdent tv arrexp)
+              mapM (mapOnSubExp tv) sizeexps <*> mapOnVName tv arrexp)
 mapExpM tv (PrimOp (Concat cs x ys size)) =
   PrimOp <$> (pure Concat <*> mapOnCertificates tv cs <*>
-                 mapOnIdent tv x <*> mapM (mapOnIdent tv) ys <*>
+                 mapOnVName tv x <*> mapM (mapOnVName tv) ys <*>
                  mapOnSubExp tv size)
 mapExpM tv (PrimOp (Copy e)) =
   PrimOp <$> (pure Copy <*> mapOnSubExp tv e)
@@ -168,40 +168,40 @@ mapExpM tv (PrimOp (Assert e loc)) =
 mapExpM tv (PrimOp (Partition cs n flags arr)) =
   PrimOp <$> (pure Partition <*> mapOnCertificates tv cs <*>
               pure n <*>
-              mapOnIdent tv flags <*>
-              mapOnIdent tv arr)
+              mapOnVName tv flags <*>
+              mapOnVName tv arr)
 mapExpM tv (LoopOp (DoLoop res mergepat form loopbody)) =
-  LoopOp <$> (DoLoop <$> mapM (mapOnIdent tv) res <*>
+  LoopOp <$> (DoLoop <$> mapM (mapOnVName tv) res <*>
               (zip <$> mapM (mapOnFParam tv) vs <*> mapM (mapOnSubExp tv) es) <*>
               mapOnLoopForm tv form <*>
               mapOnBody tv loopbody)
   where (vs,es) = unzip mergepat
 mapExpM tv (LoopOp (Map cs fun arrexps)) =
   LoopOp <$> (pure Map <*> mapOnCertificates tv cs <*>
-              mapOnLambda tv fun <*> mapM (mapOnIdent tv) arrexps)
+              mapOnLambda tv fun <*> mapM (mapOnVName tv) arrexps)
 mapExpM tv (LoopOp (ConcatMap cs fun arrexps)) =
   LoopOp <$> (pure ConcatMap <*> mapOnCertificates tv cs <*>
-              mapOnLambda tv fun <*> mapM (mapM (mapOnIdent tv)) arrexps)
+              mapOnLambda tv fun <*> mapM (mapM (mapOnVName tv)) arrexps)
 mapExpM tv (LoopOp (Reduce cs fun inputs)) =
   LoopOp <$> (pure Reduce <*> mapOnCertificates tv cs <*>
               mapOnLambda tv fun <*>
               (zip <$> mapM (mapOnSubExp tv) startexps <*>
-                       mapM (mapOnIdent tv) arrexps))
+                       mapM (mapOnVName tv) arrexps))
   where (startexps, arrexps) = unzip inputs
 mapExpM tv (LoopOp (Scan cs fun inputs)) =
   LoopOp <$> (pure Scan <*> mapOnCertificates tv cs <*>
               mapOnLambda tv fun <*>
               (zip <$> mapM (mapOnSubExp tv) startexps <*>
-                       mapM (mapOnIdent tv) arrexps))
+                       mapM (mapOnVName tv) arrexps))
   where (startexps, arrexps) = unzip inputs
 mapExpM tv (LoopOp (Redomap cs redfun mapfun accexps arrexps)) =
   LoopOp <$> (pure Redomap <*> mapOnCertificates tv cs <*>
               mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
-              mapM (mapOnSubExp tv) accexps <*> mapM (mapOnIdent tv) arrexps)
+              mapM (mapOnSubExp tv) accexps <*> mapM (mapOnVName tv) arrexps)
 mapExpM tv (LoopOp (Stream cs accs arrs lam)) =
   LoopOp <$> (pure Stream <*> mapOnCertificates tv cs <*>
               mapM (mapOnSubExp tv) accs <*>
-              mapM (mapOnIdent  tv) arrs <*> mapOnExtLambda tv lam)
+              mapM (mapOnVName  tv) arrs <*> mapOnExtLambda tv lam)
 
 mapOnExtType :: (Monad m, Applicative m) =>
                 Mapper flore tlore m -> ExtType -> m ExtType
@@ -216,9 +216,9 @@ mapOnExtType tv (Mem size) = Mem <$> mapOnSubExp tv size
 mapOnLoopForm :: (Monad m, Applicative m) =>
                  Mapper flore tlore m -> LoopForm -> m LoopForm
 mapOnLoopForm tv (ForLoop i bound) =
-  ForLoop <$> mapOnIdent tv i <*> mapOnSubExp tv bound
+  ForLoop <$> mapOnVName tv i <*> mapOnSubExp tv bound
 mapOnLoopForm tv (WhileLoop cond) =
-  WhileLoop <$> mapOnIdent tv cond
+  WhileLoop <$> mapOnVName tv cond
 
 -- | Like 'mapExp', but in the 'Identity' monad.
 mapExp :: Mapper flore tlore Identity -> Exp flore -> Exp tlore
@@ -238,7 +238,7 @@ data Folder a lore m = Folder {
   , foldOnBinding :: a -> Binding lore -> m a
   , foldOnLambda :: a -> Lambda lore -> m a
   , foldOnExtLambda :: a -> ExtLambda lore -> m a
-  , foldOnIdent :: a -> Ident -> m a
+  , foldOnVName :: a -> VName -> m a
   , foldOnCertificates :: a -> Certificates -> m a
   , foldOnRetType :: a -> RetType lore -> m a
   , foldOnFParam :: a -> FParam lore -> m a
@@ -252,7 +252,7 @@ identityFolder = Folder {
                  , foldOnBinding = const . return
                  , foldOnLambda = const . return
                  , foldOnExtLambda = const . return
-                 , foldOnIdent = const . return
+                 , foldOnVName = const . return
                  , foldOnCertificates = const . return
                  , foldOnRetType = const . return
                  , foldOnFParam = const . return
@@ -265,7 +265,7 @@ foldMapper f = Mapper {
                , mapOnBinding = wrap foldOnBinding
                , mapOnLambda = wrap foldOnLambda
                , mapOnExtLambda = wrap foldOnExtLambda
-               , mapOnIdent = wrap foldOnIdent
+               , mapOnVName = wrap foldOnVName
                , mapOnCertificates = wrap foldOnCertificates
                , mapOnRetType = wrap foldOnRetType
                , mapOnFParam = wrap foldOnFParam
@@ -303,7 +303,7 @@ data Walker lore m = Walker {
   , walkOnBinding :: Binding lore -> m ()
   , walkOnLambda :: Lambda lore -> m ()
   , walkOnExtLambda :: ExtLambda lore -> m ()
-  , walkOnIdent :: Ident -> m ()
+  , walkOnVName :: VName -> m ()
   , walkOnCertificates :: Certificates -> m ()
   , walkOnRetType :: RetType lore -> m ()
   , walkOnFParam :: FParam lore -> m ()
@@ -317,7 +317,7 @@ identityWalker = Walker {
                  , walkOnBinding = const $ return ()
                  , walkOnLambda = const $ return ()
                  , walkOnExtLambda = const $ return ()
-                 , walkOnIdent = const $ return ()
+                 , walkOnVName = const $ return ()
                  , walkOnCertificates = const $ return ()
                  , walkOnRetType = const $ return ()
                  , walkOnFParam = const $ return ()
@@ -330,7 +330,7 @@ walkMapper f = Mapper {
                , mapOnBinding = wrap walkOnBinding
                , mapOnLambda = wrap walkOnLambda
                , mapOnExtLambda = wrap walkOnExtLambda
-               , mapOnIdent = wrap walkOnIdent
+               , mapOnVName = wrap walkOnVName
                , mapOnCertificates = wrap walkOnCertificates
                , mapOnRetType = wrap walkOnRetType
                , mapOnFParam = wrap walkOnFParam

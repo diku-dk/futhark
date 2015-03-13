@@ -93,7 +93,7 @@ optimiseBody (Body als bnds res) = do
     mapM_ seen $ resultSubExps res
   return $ Body als bnds' res
   where seen (Constant {}) = return ()
-        seen (Var v)       = seenIdent v
+        seen (Var v)       = seenVar v
 
 optimiseBindings :: [Binding Basic]
                  -> ForwardingM ()
@@ -103,7 +103,7 @@ optimiseBindings [] m = m >> return []
 optimiseBindings (bnd:bnds) m = do
   (bnds', bup) <- tapBottomUp $ bindingBinding bnd $ optimiseBindings bnds m
   bnd' <- optimiseInBinding bnd
-  case filter ((`elem` boundHere) . identName . updateValue) $
+  case filter ((`elem` boundHere) . updateValue) $
        forwardThese bup of
     [] -> checkIfForwardableUpdate bnd' bnds'
     updates -> do
@@ -142,7 +142,7 @@ optimiseExp (LoopOp (DoLoop res merge form body)) =
   bindingFParams (map fst merge) $ do
     body' <- optimiseBody body
     return $ LoopOp $ DoLoop res merge form body'
-  where boundInForm (ForLoop i _) = [i]
+  where boundInForm (ForLoop i _) = [Ident i $ Basic Int]
         boundInForm (WhileLoop _) = []
 optimiseExp e = mapExpM optimise e
   where optimise = identityMapper { mapOnBody = optimiseBody
@@ -160,6 +160,7 @@ data Entry = Entry { entryNumber :: Int
                    , entryAliases :: Names
                    , entryDepth :: Int
                    , entryOptimisable :: Bool
+                   , entryType :: Type
                    }
 
 type VTable = HM.HashMap VName Entry
@@ -197,6 +198,13 @@ instance MonadFreshNames ForwardingM where
   getNameSource = get
   putNameSource = put
 
+instance HasTypeEnv ForwardingM where
+  lookupTypeM name = do
+    res <- liftM entryType <$> asks (HM.lookup name . topDownTable)
+    case res of
+      Nothing -> fail $ "lookupTypeM: variable " ++ pretty name ++ " not found."
+      Just t  -> return t
+
 runForwardingM :: VNameSource -> ForwardingM a -> a
 runForwardingM src (ForwardingM m) = fst $ evalRWS m emptyTopDown src
   where emptyTopDown = TopDown { topDownCounter = 0
@@ -210,7 +218,7 @@ bindingFParams :: [FParam Basic]
 bindingFParams fparams = local $ \(TopDown n vtable d) ->
   let entry fparam =
         (fparamName fparam,
-         Entry n mempty d False)
+         Entry n mempty d False $ fparamType fparam)
       entries = HM.fromList $ map entry fparams
   in TopDown (n+1) (HM.union entries vtable) d
 
@@ -222,7 +230,7 @@ bindingBinding (Let pat _ _) = local $ \(TopDown n vtable d) ->
       entry patElem =
         let (aliases, ()) = patElemLore patElem
         in (patElemName patElem,
-            Entry n (unNames aliases) d True)
+            Entry n (unNames aliases) d True $ patElemType patElem)
   in TopDown (n+1) (HM.union entries vtable) d
 
 bindingIdents :: [Ident]
@@ -232,7 +240,7 @@ bindingIdents vs = local $ \(TopDown n vtable d) ->
   let entries = HM.fromList $ map entry vs
       entry v =
         (identName v,
-         Entry n mempty d False)
+         Entry n mempty d False $ identType v)
   in TopDown (n+1) (HM.union entries vtable) d
 
 bindingNumber :: VName -> ForwardingM Int
@@ -251,7 +259,7 @@ areAvailableBefore ses point = do
   nameNs <- mapM bindingNumber names
   return $ all (< pointN) nameNs
   where names = mapMaybe isVar ses
-        isVar (Var v)       = Just $ identName v
+        isVar (Var v)       = Just v
         isVar (Constant {}) = Nothing
 
 isInCurrentBody :: VName -> ForwardingM Bool
@@ -269,31 +277,30 @@ isOptimisable name = do
               Nothing -> fail $ "isOptimisable: variable " ++
                          pretty name ++ " not found."
 
-seenIdent :: Ident -> ForwardingM ()
-seenIdent ident = do
+seenVar :: VName -> ForwardingM ()
+seenVar name = do
   aliases <- asks $
              maybe mempty entryAliases .
              HM.lookup name . topDownTable
   tell $ mempty { bottomUpSeen = HS.insert name aliases }
-  where name = identName ident
 
 tapBottomUp :: ForwardingM a -> ForwardingM (a, BottomUp)
 tapBottomUp m = do (x,bup) <- listen m
                    return (x, bup)
 
-maybeForward :: Ident
-             -> Ident -> Certificates -> Ident -> SubExp
+maybeForward :: VName
+             -> Ident -> Certificates -> VName -> SubExp
              -> ForwardingM Bool
 maybeForward v dest cs src i = do
   -- Checks condition (2)
-  available <- [i,Var src] `areAvailableBefore` identName v
+  available <- [i,Var src] `areAvailableBefore` v
   -- ...subcondition, the certificates must also.
-  certs_available <- map Var cs `areAvailableBefore` identName v
+  certs_available <- map Var cs `areAvailableBefore` v
   -- Check condition (3)
-  samebody <- isInCurrentBody $ identName v
+  samebody <- isInCurrentBody v
   -- Check condition (6)
-  optimisable <- isOptimisable $ identName v
-  let not_basic = not $ basicType $ identType v
+  optimisable <- isOptimisable v
+  not_basic <- not <$> basicType <$> lookupTypeM v
   if available && certs_available && samebody && optimisable && not_basic then do
     let fwd = DesiredUpdate dest cs src [i] v
     tell mempty { forwardThese = [fwd] }

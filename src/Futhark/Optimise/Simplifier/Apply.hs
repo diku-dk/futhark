@@ -22,4 +22,4 @@ simplifyApply program vtable fname args = do
   where allArgsAreValues = mapM argIsValue
 
         argIsValue (Constant val) = Just $ BasicVal val
-        argIsValue (Var v)        = ST.lookupValue (identName v) vtable
+        argIsValue (Var v)        = ST.lookupValue v vtable

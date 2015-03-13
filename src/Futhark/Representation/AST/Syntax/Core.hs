@@ -165,14 +165,14 @@ instance Ord (IdentBase shape) where
 instance Hashable (IdentBase shape) where
   hashWithSalt salt = hashWithSalt salt . identName
 
--- | A list of identifiers used for certificates in some expressions.
-type Certificates = [Ident]
+-- | A list of names used for certificates in some expressions.
+type Certificates = [VName]
 
 -- | A subexpression is either a scalar constant or a variable.  One
 -- important property is that evaluation of a subexpression is
 -- guaranteed to complete in constant time.
 data SubExp = Constant BasicValue
-            | Var      Ident
+            | Var      VName
             deriving (Show, Eq, Ord)
 
 -- | A (non-lambda) function parameter.
@@ -183,7 +183,7 @@ data FParamT attr = FParam
                     deriving (Ord, Show, Eq)
 
 data Bindage = BindVar
-             | BindInPlace Certificates Ident [SubExp]
+             | BindInPlace Certificates VName [SubExp]
                   deriving (Ord, Show, Eq)
 
 data PatElemT attr = PatElem { patElemIdent :: Ident

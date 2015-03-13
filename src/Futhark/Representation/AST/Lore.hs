@@ -38,9 +38,9 @@ class (Show (LetBound l), Show (Exp l), Show (Body l), Show (FParam l), Show (Re
   -- @loopResult res merge@ returns those variables in @merge@ that
   -- constitute the context.
   loopResultContext :: l
-                    -> [Ident]
+                    -> [VName]
                     -> [Futhark.Representation.AST.Syntax.Core.FParamT (FParam l)]
-                    -> [Ident]
+                    -> [VName]
 
   -- | Given a function return type, the parameters of the function,
   -- and the arguments for a concrete call, return the instantiated
@@ -48,5 +48,5 @@ class (Show (LetBound l), Show (Exp l), Show (Body l), Show (FParam l), Show (Re
   applyRetType :: l
                -> RetType l
                -> [Futhark.Representation.AST.Syntax.Core.FParamT (FParam l)]
-               -> [SubExp]
+               -> [(SubExp, Type)]
                -> Maybe (RetType l)

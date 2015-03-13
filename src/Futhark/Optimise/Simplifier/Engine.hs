@@ -41,7 +41,7 @@ module Futhark.Optimise.Simplifier.Engine
        , simplifyLambda
        , simplifyExtLambda
        , simplifySubExp
-       , simplifyIdent
+       , simplifyVName
        , simplifyExtType
        , simplifyExtShape
        ) where
@@ -174,15 +174,15 @@ asserted :: MonadEngine m => SubExp -> m ()
 asserted (Constant {}) =
   return ()
 asserted (Var name) = do
-  se <- ST.lookupExp (identName name) <$> getVtable
+  se <- ST.lookupExp name <$> getVtable
   case se of Just (PrimOp (BinOp Equal x y _)) -> do
                case x of Var xvar ->
                            tellNeed $ Need [] $
-                           UT.equalToUsage (identName xvar) y
+                           UT.equalToUsage xvar y
                          _ -> return ()
                case y of Var yvar ->
                            tellNeed $ Need [] $
-                           UT.equalToUsage (identName yvar) x
+                           UT.equalToUsage yvar x
                          _ -> return ()
              _ -> return ()
 
@@ -241,17 +241,17 @@ bindLParams params =
     foldr ST.insertLParam vtable params
 
 bindArrayLParams :: MonadEngine m =>
-                    [(Param,Maybe Ident)] -> m a -> m a
+                    [(Param,Maybe VName)] -> m a -> m a
 bindArrayLParams params =
   localVtable $ \vtable ->
     foldr (uncurry ST.insertArrayLParam) vtable params
 
-bindLoopVar :: MonadEngine m => Ident -> SubExp -> m a -> m a
+bindLoopVar :: MonadEngine m => VName -> SubExp -> m a -> m a
 bindLoopVar var bound =
   localVtable $ clampUpper . clampVar
-  where clampVar = ST.insertLoopVar (identName var) bound
+  where clampVar = ST.insertLoopVar var bound
         -- If we enter the loop, then 'bound' is at least one.
-        clampUpper = case bound of Var v -> ST.isAtLeast (identName v) 1
+        clampUpper = case bound of Var v -> ST.isAtLeast v 1
                                    _     -> id
 
 hoistBindings :: MonadEngine m =>
@@ -311,9 +311,9 @@ provides = patternNames . bindingPattern
 
 requires :: Proper lore => Binding lore -> Names
 requires bnd =
-  (mconcat (map freeNamesIn $ patternElements $ bindingPattern bnd)
+  (mconcat (map freeIn $ patternElements $ bindingPattern bnd)
   `HS.difference` HS.fromList (provides bnd)) <>
-  freeNamesInExp (bindingExp bnd)
+  freeInExp (bindingExp bnd)
 
 expandUsage :: (Proper lore, Aliased lore) =>
                UT.UsageTable -> Binding lore -> UT.UsageTable
@@ -437,7 +437,7 @@ isDoLoopResult :: MonadEngine m =>
                   Result -> m ()
 isDoLoopResult = mapM_ checkForVar . resultSubExps
   where checkForVar (Var ident) =
-          inResultName $ identName ident
+          inResultName ident
         checkForVar _ =
           return ()
 
@@ -461,25 +461,27 @@ simplifyBinding (Let pat _ (Apply fname args rettype)) = do
                       Nonunique -> mkLetNamesM' [identName p] =<< eValue v
                   mapM_ (simplifyBinding . removeBindingWisdom) bnds
     Nothing -> do let e' = Apply fname (zip args' $ map snd args) rettype'
-                  pat' <- blockUsage $ simplifyPattern pat $ expExtType e'
+                  t <- expExtType e'
+                  pat' <- blockUsage $ simplifyPattern pat t
                   inspectBinding =<<
                     mkLetM (addWisdomToPattern pat' e') e'
 
 simplifyBinding (Let pat _ lss@(LoopOp Stream{})) = do
   lss' <- simplifyExp lss
-  let (rtp, rtp') = (expExtType lss, expExtType lss')
-      patels      = patternElements pat
+  rtp <- expExtType lss
+  rtp' <- expExtType lss'
+  let patels      = patternElements pat
       argpattps   = map patElemType $ drop (length patels - length rtp) patels
   (newpats,newsubexps) <- unzip <$> reverse <$>
                           foldM gatherPat [] (zip3 rtp rtp' argpattps)
   newexps' <- forM newsubexps $ simplifyExp . PrimOp . SubExp
   newpats' <- forM (zip newpats newexps') $ \(p,e) ->
-                    simplifyPattern p $ expExtType e
+                    simplifyPattern p =<< expExtType e
   let rmvdpatels = concatMap patternElements newpats
       patels' = concatMap (\p->if p `elem` rmvdpatels then [] else [p]) patels
-  pat' <- simplifyPattern (Pattern patels') $ expExtType lss'
+  pat' <- simplifyPattern (Pattern patels') rtp'
   let newpatexps' = zip newpats' newexps' ++ [(pat',lss')]
-  newpats'' <- forM newpatexps' $ \(p,e)->simplifyPattern p $ expExtType e
+  newpats'' <- forM newpatexps' $ \(p,e)->simplifyPattern p =<< expExtType e
   let (_,newexps'') = unzip newpatexps'
   let newpatexps''= zip newpats'' newexps''
   _ <- forM newpatexps'' $ \(p,e) -> inspectBinding =<<
@@ -493,7 +495,7 @@ simplifyBinding (Let pat _ lss@(LoopOp Stream{})) = do
             fail $ "In simplifyBinding \"let pat = stream()\": "++
                    " reached unreachable case!"
           gatherShape acc (Ext i, Free se', Var pid) = do
-            let patind  = elemIndex (identName pid) $
+            let patind  = elemIndex pid $
                           map patElemName $ patternElements pat
             case patind of
               Just k -> return $ (Pattern [patternElements pat !! k], se') : acc
@@ -507,7 +509,7 @@ simplifyBinding (Let pat _ lss@(LoopOp Stream{})) = do
 
 simplifyBinding (Let pat _ e) = do
   e' <- simplifyExp e
-  pat' <- simplifyPattern pat $ expExtType e'
+  pat' <- simplifyPattern pat =<< expExtType e'
   inspectBinding =<<
     mkLetM (addWisdomToPattern pat' e') e'
 
@@ -552,7 +554,7 @@ simplifyExpBase = mapExpM hoist
                 -- bind their parameters.
                 , mapOnLambda = fail "Unhandled lambda in simplification engine."
                 , mapOnExtLambda = fail "Unhandled existential lambda in simplification engine."
-                , mapOnIdent = simplifyIdent
+                , mapOnVName = simplifyVName
                 , mapOnCertificates = simplifyCerts
                 , mapOnRetType = simplifyRetType
                 , mapOnFParam =
@@ -563,19 +565,17 @@ simplifyLoopOp :: MonadEngine m => LoopOp (InnerLore m) -> m (LoopOp (Lore m))
 
 simplifyLoopOp (DoLoop respat merge form loopbody) = do
   let (mergepat, mergeexp) = unzip merge
-  respat'   <- mapM simplifyIdentBinding respat
   mergepat' <- mapM simplifyFParam mergepat
   mergeexp' <- mapM simplifySubExp mergeexp
   let diets = map (diet . fparamType) mergepat'
   (form', boundnames, wrapbody) <- case form of
     ForLoop loopvar boundexp -> do
       boundexp' <- simplifySubExp boundexp
-      loopvar'  <- simplifyIdentBinding loopvar
-      return (ForLoop loopvar' boundexp',
-              identName loopvar `HS.insert` fparamnames,
-              bindLoopVar loopvar' boundexp')
+      return (ForLoop loopvar boundexp',
+              loopvar `HS.insert` fparamnames,
+              bindLoopVar loopvar boundexp')
     WhileLoop cond -> do
-      cond' <- simplifyIdent cond
+      cond' <- simplifyVName cond
       return (WhileLoop cond',
               fparamnames,
               id)
@@ -593,7 +593,7 @@ simplifyLoopOp (DoLoop respat merge form loopbody) = do
                  return res
   let merge' = zip mergepat' mergeexp'
   consumeResult $ zip diets mergeexp'
-  return $ DoLoop respat' merge' form' loopbody'
+  return $ DoLoop respat merge' form' loopbody'
   where fparamnames = HS.fromList (map (fparamName . fst) merge)
         simplifyFParam (FParam ident lore) = do
           ident' <- simplifyIdentBinding ident
@@ -603,12 +603,12 @@ simplifyLoopOp (DoLoop respat merge form loopbody) = do
 simplifyLoopOp (Stream cs acc arr lam) = do
   cs'  <- simplifyCerts  cs
   acc' <- mapM simplifySubExp acc
-  arr' <- mapM simplifyIdent  arr
+  arr' <- mapM simplifyVName  arr
   vtab <- getVtable
+  outerdim <- arraysSize 0 <$> mapM lookupTypeM arr
   let (chunk:i:_) = extLambdaParams lam
-      outerdim = arraysSize 0 $ map identType arr
       se_outer = case outerdim of
-                    Var idd    -> fromMaybe (SExp.Id idd) (ST.lookupScalExp (identName idd) vtab)
+                    Var idd    -> fromMaybe (SExp.Id idd) (ST.lookupScalExp idd vtab)
                     Constant c -> SExp.Val c
       (se_0, se_1) = (SExp.Val $ IntVal 0, SExp.Val $ IntVal 1)
       se_outerm1 = SExp.SMinus se_outer se_1
@@ -619,13 +619,13 @@ simplifyLoopOp (Stream cs acc arr lam) = do
 
 simplifyLoopOp (Map cs fun arrs) = do
   cs' <- simplifyCerts cs
-  arrs' <- mapM simplifyIdent arrs
+  arrs' <- mapM simplifyVName arrs
   fun' <- simplifyLambda fun $ map Just arrs'
   return $ Map cs' fun' arrs'
 
 simplifyLoopOp (ConcatMap cs fun arrs) = do
   cs' <- simplifyCerts cs
-  arrs' <- mapM (mapM simplifyIdent) arrs
+  arrs' <- mapM (mapM simplifyVName) arrs
   fun' <- simplifyLambda fun $ map (const Nothing) $ lambdaParams fun
   return $ ConcatMap cs' fun' arrs'
 
@@ -633,7 +633,7 @@ simplifyLoopOp (Reduce cs fun input) = do
   let (acc, arrs) = unzip input
   cs' <- simplifyCerts cs
   acc' <- mapM simplifySubExp acc
-  arrs' <- mapM simplifyIdent arrs
+  arrs' <- mapM simplifyVName arrs
   fun' <- simplifyLambda fun $ map Just arrs'
   return $ Reduce cs' fun' (zip acc' arrs')
 
@@ -641,14 +641,14 @@ simplifyLoopOp (Scan cs fun input) = do
   let (acc, arrs) = unzip input
   cs' <- simplifyCerts cs
   acc' <- mapM simplifySubExp acc
-  arrs' <- mapM simplifyIdent arrs
+  arrs' <- mapM simplifyVName arrs
   fun' <- simplifyLambda fun $ map Just arrs'
   return $ Scan cs' fun' (zip acc' arrs')
 
 simplifyLoopOp (Redomap cs outerfun innerfun acc arrs) = do
   cs' <- simplifyCerts cs
   acc' <- mapM simplifySubExp acc
-  arrs' <- mapM simplifyIdent arrs
+  arrs' <- mapM simplifyVName arrs
   outerfun' <- simplifyLambda outerfun $
                replicate (length $ lambdaParams outerfun) Nothing
   (innerfun', used) <- tapUsage $ simplifyLambda innerfun $ map Just arrs
@@ -666,10 +666,9 @@ simplifyLoopOp (Redomap cs outerfun innerfun acc arrs) = do
                  -- changing semantics.  Ideally, we should pick the
                  -- "simplest" size instead of just the one of the
                  -- first array, but I do not think it matters much.
-                 let outerSize = arraySize 0 $ identType firstarr
-                 input <- newIdent "unused_input"
-                          (arrayOf (Basic Int) (Shape [outerSize]) Nonunique)
-                 letBindNames'_ [identName input] $
+                 outerSize <- arraySize 0 <$> lookupTypeM firstarr
+                 input <- newVName "unused_input"
+                 letBindNames'_ [input] $
                    PrimOp $ Iota outerSize
                  return (lam { lambdaParams =
                                   accparams ++
@@ -680,15 +679,14 @@ simplifyLoopOp (Redomap cs outerfun innerfun acc arrs) = do
           | otherwise = return (lam, arrinps)
 
 simplifySubExp :: MonadEngine m => SubExp -> m SubExp
-simplifySubExp (Var (Ident vnm t)) = do
-  bnd <- getsEngineState $ ST.lookupSubExp vnm . stateVtable
-  t' <- simplifyType t
+simplifySubExp (Var name) = do
+  bnd <- getsEngineState $ ST.lookupSubExp name . stateVtable
   case bnd of
     Just (Constant v) -> return $ Constant v
-    Just (Var id') -> do usedName $ identName id'
-                         return $ Var $ Ident (identName id') t'
-    _              -> do usedName vnm
-                         return $ Var $ Ident vnm t'
+    Just (Var id') -> do usedName id'
+                         return $ Var id'
+    _              -> do usedName name
+                         return $ Var name
 simplifySubExp (Constant v) = return $ Constant v
 
 simplifyPattern :: MonadEngine m =>
@@ -718,7 +716,7 @@ simplifyBindage BindVar =
 simplifyBindage (BindInPlace cs src is) =
   BindInPlace <$>
   simplifyCerts cs <*>
-  simplifyIdent src <*>
+  simplifyVName src <*>
   mapM simplifySubExp is
 
 simplifyIdentBinding :: MonadEngine m => Ident -> m Ident
@@ -726,17 +724,14 @@ simplifyIdentBinding v = do
   t' <- simplifyType $ identType v
   return v { identType = t' }
 
-simplifyIdent :: MonadEngine m => Ident -> m Ident
-simplifyIdent v = do
-  se <- ST.lookupSubExp (identName v) <$> getVtable
-  t' <- simplifyType $ identType v
+simplifyVName :: MonadEngine m => VName -> m VName
+simplifyVName v = do
+  se <- ST.lookupSubExp v <$> getVtable
   case se of
-    Just (Var v') -> do usedName $ identName v'
-                        return v { identType = t'
-                                 , identName = identName v'
-                                 }
-    _             -> do usedName $ identName v
-                        return v { identType = t' }
+    Just (Var v') -> do usedName v'
+                        return v'
+    _             -> do usedName v
+                        return v
 
 simplifyExtType :: MonadEngine m =>
                    TypeBase ExtShape -> m (TypeBase ExtShape)
@@ -759,7 +754,7 @@ simplifyType (Basic bt) =
   return $ Basic bt
 
 simplifyLambda :: MonadEngine m =>
-                  Lambda (InnerLore m) -> [Maybe Ident]
+                  Lambda (InnerLore m) -> [Maybe VName]
                -> m (Lambda (Lore m))
 simplifyLambda (Lambda params body rettype) arrs = do
   params' <- mapM simplifyIdentBinding params
@@ -802,8 +797,8 @@ simplifyExtLambda parbnds (ExtLambda params body rettype) = do
                            [Ident] -> SubExp -> ExtType -> m ExtType
           refineArrType pars x (Array btp shp u) = do
             vtab <- ST.bindings <$> getVtable
+            dsx <- shapeDims <$> arrayShape <$> subExpType x
             let parnms = map identName pars
-                dsx    = (shapeDims . arrayShape . subExpType) x
                 dsrtpx =  extShapeDims shp
                 (resdims,_) =
                     foldl (\ (lst,i) el ->
@@ -811,13 +806,13 @@ simplifyExtLambda parbnds (ExtLambda params body rettype) = do
                               (Free (Constant c), _) -> (lst++[Free (Constant c)], i)
                               ( _,      Constant c ) -> (lst++[Free (Constant c)], i)
                               (Free (Var tid), Var pid) ->
-                                if not (HM.member (identName tid) vtab) &&
-                                        HM.member (identName pid) vtab
+                                if not (HM.member tid vtab) &&
+                                        HM.member pid vtab
                                 then (lst++[Free (Var pid)], i)
                                 else (lst++[Free (Var tid)], i)
                               (Ext _, Var pid) ->
-                                if HM.member (identName pid) vtab ||
-                                   identName pid `elem` parnms
+                                if HM.member pid vtab ||
+                                   pid `elem` parnms
                                 then (lst ++ [Free (Var pid)], i)
                                 else (lst ++ [Ext i],        i+1)
                           ) ([],0) (zip dsrtpx dsx)
@@ -835,12 +830,12 @@ simplifyCerts :: MonadEngine m =>
                  Certificates -> m Certificates
 simplifyCerts = liftM (nub . concat) . mapM check
   where check idd = do
-          vv <- getsEngineState $ ST.lookupSubExp (identName idd) . stateVtable
+          vv <- getsEngineState $ ST.lookupSubExp idd . stateVtable
           case vv of
             Just (Constant Checked) -> return []
-            Just (Var idd') -> do usedName $ identName idd'
+            Just (Var idd') -> do usedName idd'
                                   return [idd']
-            _ -> do usedName $ identName idd
+            _ -> do usedName idd
                     return [idd]
 
 simplifyFun :: MonadEngine m =>

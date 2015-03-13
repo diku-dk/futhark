@@ -51,8 +51,8 @@ patElemRequires (PatElem ident bindage _) =
 bindageRequires :: Type -> Bindage -> Type
 bindageRequires t BindVar =
   t
-bindageRequires _ (BindInPlace _ src is) =
-  stripArray (length is) (identType src) `setUniqueness` Nonunique
+bindageRequires t (BindInPlace _ _ is) =
+  stripArray (length is) t `setUniqueness` Nonunique
 
 -- | Set the lore of a 'PatElem'.
 setPatElemLore :: PatElemT oldattr -> newattr -> PatElemT newattr

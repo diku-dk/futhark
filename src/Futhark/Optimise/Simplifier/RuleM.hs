@@ -25,6 +25,10 @@ instance MonadFreshNames m => MonadFreshNames (RuleM m) where
   getNameSource = RuleM . lift $ getNameSource
   putNameSource = RuleM . lift . putNameSource
 
+instance (Monad m, HasTypeEnv m) => HasTypeEnv (RuleM m) where
+  lookupTypeM = RuleM . lift . lookupTypeM
+  askTypeEnv  = RuleM . lift $ askTypeEnv
+
 instance MonadBinder m => MonadBinder (RuleM m) where
   type Lore (RuleM m) = Lore m
   mkLetM pat e = RuleM $ lift $ mkLetM pat e

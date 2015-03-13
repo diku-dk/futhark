@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Futhark.Analysis.ScalExp
   ( RelOp0(..)
   , ScalExp(..)
@@ -48,7 +49,7 @@ data RelOp0 = LTH0
 --
 --  (iii) a logical expression: e1 and (not (a+b>5)
 data ScalExp= Val     BasicValue
-            | Id      Ident
+            | Id      VName
             | SNeg    ScalExp
             | SNot    ScalExp
             | SPlus   ScalExp ScalExp
@@ -107,29 +108,30 @@ instance Rename ScalExp where
     substs <- renamerSubstitutions
     return $ substituteNames substs se
 
-scalExpType :: ScalExp -> BasicType
-scalExpType (Val ( IntVal _) ) = Int
-scalExpType (Val (RealVal _) ) = Real
-scalExpType (Val ( LogVal _) ) = Bool
+scalExpType :: HasTypeEnv f => ScalExp -> f BasicType
+scalExpType (Val ( IntVal _) ) = pure Int
+scalExpType (Val (RealVal _) ) = pure Real
+scalExpType (Val ( LogVal _) ) = pure Bool
 scalExpType (Val val) =
   error $ "scalExpType: scalar exp cannot have type " ++
           pretty (basicValueType val) ++ "."
-scalExpType (Id  idd) =
-  case identType idd of
-    Basic bt -> bt
-    t        -> error $ "scalExpType: var " ++ pretty idd ++ " in scalar exp cannot have type " ++
-                         pretty t ++ "."
+scalExpType (Id idd) =
+  withType <$> lookupTypeM idd
+  where withType (Basic bt) = bt
+        withType t          = error $ "scalExpType: var " ++ pretty idd ++
+                              " in scalar exp cannot have type " ++
+                              pretty t ++ "."
 scalExpType (SNeg  e) = scalExpType e
-scalExpType (SNot  _) = Bool
+scalExpType (SNot  _) = pure Bool
 scalExpType (SPlus   e _) = scalExpType e
 scalExpType (SMinus  e _) = scalExpType e
 scalExpType (STimes  e _) = scalExpType e
 scalExpType (SDivide e _) = scalExpType e
 scalExpType (SPow    e _) = scalExpType e
-scalExpType (SLogAnd _ _) = Bool
-scalExpType (SLogOr  _ _) = Bool
-scalExpType (RelExp  _ _) = Bool
-scalExpType (MaxMin _ []) = Int
+scalExpType (SLogAnd _ _) = pure Bool
+scalExpType (SLogOr  _ _) = pure Bool
+scalExpType (RelExp  _ _) = pure Bool
+scalExpType (MaxMin _ []) = pure Int
 scalExpType (MaxMin _ (e:_)) = scalExpType e
 
 -- | A function that checks whether a variable name corresponds to a
@@ -167,7 +169,7 @@ toScalExp _ _ = Nothing
 -- grow its 'Id' leaves.
 expandScalExp :: LookupVar -> ScalExp -> ScalExp
 expandScalExp _ (Val v) = Val v
-expandScalExp look (Id v) = fromMaybe (Id v) $ look $ identName v
+expandScalExp look (Id v) = fromMaybe (Id v) $ look v
 expandScalExp look (SNeg se) = SNeg $ expandScalExp look se
 expandScalExp look (SNot se) = SNot $ expandScalExp look se
 expandScalExp look (MaxMin b ses) = MaxMin b $ map (expandScalExp look) ses
@@ -212,7 +214,7 @@ binOpScalExp bop = liftM snd $ find ((==bop) . fst)
 
 toScalExp' :: LookupVar -> SubExp -> Maybe ScalExp
 toScalExp' look (Var v) =
-  look (identName v) <|> Just (Id v)
+  look v <|> Just (Id v)
 toScalExp' _ (Constant val) =
   Just $ Val val
 
@@ -235,21 +237,16 @@ fromScalExp' = convert
         convert (SPow x y) = arithBinOp Pow x y
         convert (SLogAnd x y) = eBinOp LogAnd (convert x) (convert y) Bool
         convert (SLogOr x y) = eBinOp LogOr (convert x) (convert y) Bool
-        convert (RelExp LTH0 x) = eBinOp Less (convert x) (pure $ zero $ scalExpType x)
-                                  Bool
-        convert (RelExp LEQ0 x) = eBinOp Leq (convert x) (pure $ zero $ scalExpType x)
-                                  Bool
+        convert (RelExp LTH0 x) = eBinOp Less (convert x) (zero <$> scalExpType x) Bool
+        convert (RelExp LEQ0 x) = eBinOp Leq (convert x) (zero <$> scalExpType x) Bool
         convert (MaxMin _ []) = fail "ScalExp.fromScalExp: MaxMin empty list"
         convert (MaxMin isMin (e:es)) = do
           e'  <- convert e
           es' <- mapM convert es
           foldM (select isMin) e' es'
 
-        arithBinOp bop x y = do
-          x' <- convert x
-          y' <- convert y
-          eBinOp bop (pure x') (pure y') t
-          where t = scalExpType x
+        arithBinOp bop x y =
+          eBinOp bop (convert x) (convert y) =<< scalExpType x
 
         select isMin cur next =
           let cmp = eBinOp Less (pure cur) (pure next) Bool

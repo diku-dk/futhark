@@ -131,7 +131,7 @@ bindVar (BindInPlace _ src is) val = do
   is' <- mapM (asInt <=< evalSubExp) is
   case srcv of
     ArrayVal arr bt shape -> do
-      flatidx <- indexArray (textual $ identName src) shape is'
+      flatidx <- indexArray (textual src) shape is'
       if length is' == length shape then
         case val of
           BasicVal bv ->
@@ -185,8 +185,8 @@ binding bnds m = do
         ppDim (Constant v) _ = pretty v
         ppDim e            v = pretty e ++ "=" ++ pretty v
 
-lookupVar :: Ident -> FutharkM lore Value
-lookupVar (Ident vname _) = do
+lookupVar :: VName -> FutharkM lore Value
+lookupVar vname = do
   val <- asks $ HM.lookup vname . envVtable
   case val of Just val' -> return val'
               Nothing   -> bad $ TypeError $ "lookupVar " ++ textual vname
@@ -478,7 +478,7 @@ evalPrimOp (Index _ ident idxs) = do
   idxs' <- mapM (asInt <=< evalSubExp) idxs
   case v of
     ArrayVal arr bt shape -> do
-      flatidx <- indexArray (textual $ identName ident) shape idxs'
+      flatidx <- indexArray (textual ident) shape idxs'
       if length idxs' == length shape
         then return [BasicVal $ arr ! flatidx]
         else let resshape = drop (length idxs') shape
@@ -593,13 +593,13 @@ evalPrimOp (Assert e loc) = do
 evalPrimOp (Partition _ n flags arr) = do
   flags_elems <- arrToList =<< lookupVar flags
   arrv <- lookupVar arr
+  let et = elemType $ valueType arrv
   arr_elems <- arrToList arrv
   partitions <- partitionArray flags_elems arr_elems
   return $
     map (BasicVal . IntVal . length) partitions ++
     [arrayVal (concat partitions) et (valueShape arrv)]
-  where et = elemType $ identType arr
-        partitionArray flagsv arrv =
+  where partitionArray flagsv arrv =
           map reverse <$>
           foldM divide (replicate n []) (zip flagsv arrv)
 
@@ -632,7 +632,7 @@ evalLoopOp (DoLoop respat merge (ForLoop loopvar boundexp) loopbody) = do
     _ -> bad $ TypeError "evalBody DoLoop for"
   where (mergepat, mergeexp) = unzip merge
         iteration mergeval i =
-          binding [(loopvar, BindVar, BasicVal $ IntVal i)] $
+          binding [(Ident loopvar $ Basic Int, BindVar, BasicVal $ IntVal i)] $
             binding (zip3 (map fparamIdent mergepat) (repeat BindVar) mergeval) $
               evalBody loopbody
 
@@ -646,7 +646,8 @@ evalLoopOp (DoLoop respat merge (WhileLoop cond) loopbody) = do
             case condv of
               BasicVal (LogVal False) ->
                 mapM lookupVar $
-                loopResultContext (representative :: lore) respat mergepat ++ respat
+                loopResultContext (representative :: lore) respat mergepat ++
+                respat
               BasicVal (LogVal True) ->
                 iteration =<< evalBody loopbody
               _ ->

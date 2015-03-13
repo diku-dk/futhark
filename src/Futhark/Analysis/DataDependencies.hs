@@ -50,13 +50,13 @@ dataDependencies' startdeps = foldl grow startdeps . bodyBindings
                 (identName v, HS.unions [formdeps, depsOf bodydeps e])
               mergedeps = HM.fromList $ zipWith comb (map (fparamIdent . fst) merge) $
                           resultSubExps $ bodyResult body
-          in HM.fromList [ (name, nameDeps (identName res) mergedeps)
+          in HM.fromList [ (name, depsOfVar mergedeps res)
                            | (name, res) <- zip (patternNames pat) respat ]
              `HM.union` HM.unions [deps, bodydeps]
 
         grow deps (Let pat _ (LoopOp (Map cs fun arrs))) =
           let pardeps = mkDeps (lambdaParams fun) $
-                        soacArgDeps deps cs $ map (depsOfIdent deps) arrs
+                        soacArgDeps deps cs $ map (depsOfVar deps) arrs
               deps' = dataDependencies' (pardeps `HM.union` deps) $
                       lambdaBody fun
               resdeps = HM.fromList $ zip (patternNames pat) $
@@ -74,19 +74,19 @@ dataDependencies' startdeps = foldl grow startdeps . bodyBindings
         grow deps (Let pat _ (LoopOp (Redomap cs outerfun innerfun acc arr))) =
           let (deps', seconddeps) =
                 foldDeps' deps cs innerfun
-                (map (depsOf deps) acc) (map (depsOfIdent deps) arr)
+                (map (depsOf deps) acc) (map (depsOfVar deps) arr)
               (outerdeps, names) =
                 foldDeps' deps cs outerfun seconddeps seconddeps
           in mkDeps (patternIdents pat) names `HM.union` outerdeps `HM.union` deps'
 
         grow deps (Let pat _ e) =
-          let free = freeNamesInExp e
-              freeDeps = HS.unions $ map (`nameDeps` deps) $ HS.toList free
+          let free = freeInExp e
+              freeDeps = HS.unions $ map (depsOfVar deps) $ HS.toList free
           in HM.fromList [ (name, freeDeps) | name <- patternNames pat ] `HM.union` deps
 
 foldDeps' :: Proper lore =>
              Dependencies
-          -> [Ident] -> Lambda lore -> [Names] -> [Names]
+          -> Certificates -> Lambda lore -> [Names] -> [Names]
           -> (Dependencies, [Names])
 foldDeps' deps cs fun acc arr =
   let pardeps = HM.fromList $ zip (map identName $ lambdaParams fun) $
@@ -96,12 +96,12 @@ foldDeps' deps cs fun acc arr =
 
 foldDeps :: Proper lore =>
             Dependencies
-         -> Pattern lore -> [Ident] -> Lambda lore -> [SubExp] -> [Ident]
+         -> Pattern lore -> Certificates -> Lambda lore -> [SubExp] -> [VName]
          -> HM.HashMap VName Names
 foldDeps deps pat cs fun acc arr =
   let pardeps = HM.fromList $ zip (map identName $ lambdaParams fun) $
                 soacArgDeps deps cs $
-                map (depsOf deps) acc ++ map (depsOfIdent deps) arr
+                map (depsOf deps) acc ++ map (depsOfVar deps) arr
       deps' = dataDependencies' (pardeps `HM.union` deps) $ lambdaBody fun
       resdeps = HM.fromList $ zip (patternNames pat) $
                 lambdaDeps deps' fun
@@ -112,20 +112,17 @@ lambdaDeps deps fun =
   map (depsOf deps) $ resultSubExps $ bodyResult $ lambdaBody fun
 
 soacArgDeps :: Dependencies
-            -> [Ident] -> [Names] -> [HS.HashSet VName]
+            -> [VName] -> [Names] -> [HS.HashSet VName]
 soacArgDeps deps cs args =
   let cdeps = HS.unions $ map (depsOf deps . Var) cs
   in map (HS.union cdeps) args
 
-nameDeps :: VName -> Dependencies -> Names
-nameDeps name deps = HS.insert name $ fromMaybe HS.empty $ HM.lookup name deps
-
 depsOf :: Dependencies -> SubExp -> Names
 depsOf _ (Constant _) = HS.empty
-depsOf deps (Var v)   = depsOfIdent deps v
+depsOf deps (Var v)   = depsOfVar deps v
 
-depsOfIdent :: Dependencies -> Ident -> Names
-depsOfIdent deps v = nameDeps (identName v) deps
+depsOfVar :: Dependencies -> VName -> Names
+depsOfVar deps name = HS.insert name $ fromMaybe HS.empty $ HM.lookup name deps
 
 mkDeps :: [IdentBase shape] -> [Names] -> Dependencies
 mkDeps idents names = HM.fromList $ zip (map identName idents) names

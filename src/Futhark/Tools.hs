@@ -9,8 +9,6 @@ module Futhark.Tools
   , letTupExp'
   , letInPlace
 
-  , newVar
-
   , eSubExp
   , eIf
   , eBinOp
@@ -33,7 +31,6 @@ module Futhark.Tools
   , binOpLambda
   , makeLambda
 
-  , copyConsumed
   , nonuniqueParams
 
   , module Futhark.Binder
@@ -48,7 +45,6 @@ module Futhark.Tools
 where
 
 import qualified Data.Array as A
-import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
 import Data.Loc (SrcLoc)
 
@@ -61,7 +57,6 @@ import Prelude
 
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames
-import Futhark.Substitute
 import Futhark.Binder
 import Futhark.Util
 
@@ -69,30 +64,33 @@ letSubExp :: MonadBinder m =>
              String -> Exp (Lore m) -> m SubExp
 letSubExp _ (PrimOp (SubExp se)) = return se
 letSubExp desc e = do
-  vs <- replicateM (length (expExtType e)) $ newVName desc
+  n <- length <$> expExtType e
+  vs <- replicateM n $ newVName desc
   idents <- letBindNames' vs e
   case idents of
-    [ident] -> return $ Var ident
+    [ident] -> return $ Var $ identName ident
     _       -> fail $ "letSubExp: tuple-typed expression given:\n" ++ pretty e
 
 letExp :: MonadBinder m =>
-          String -> Exp (Lore m) -> m Ident
-letExp _ (PrimOp (SubExp (Var v))) = return v
+          String -> Exp (Lore m) -> m VName
+letExp _ (PrimOp (SubExp (Var v))) =
+  return v
 letExp desc e = do
-  vs <- replicateM (length (expExtType e)) $ newVName desc
+  n <- length <$> expExtType e
+  vs <- replicateM n $ newVName desc
   idents <- letBindNames' vs e
   case idents of
-    [ident] -> return ident
+    [ident] -> return $ identName ident
     _       -> fail $ "letExp: tuple-typed expression given:\n" ++ pretty e
 
 letInPlace :: MonadBinder m =>
-              String -> Certificates -> Ident -> [SubExp] -> Exp (Lore m)
-           -> m Ident
+              String -> Certificates -> VName -> [SubExp] -> Exp (Lore m)
+           -> m VName
 letInPlace desc cs src is e = do
   v <- newVName desc
   idents <- letBindNames [(v,BindInPlace cs src is)] e
   case idents of
-    [ident] -> return ident
+    [ident] -> return $ identName ident
     _       -> fail $ "letExp: tuple-typed expression given:\n" ++ pretty e
 
 letSubExps :: MonadBinder m =>
@@ -100,22 +98,23 @@ letSubExps :: MonadBinder m =>
 letSubExps desc = mapM $ letSubExp desc
 
 letExps :: MonadBinder m =>
-           String -> [Exp (Lore m)] -> m [Ident]
+           String -> [Exp (Lore m)] -> m [VName]
 letExps desc = mapM $ letExp desc
 
 letShapedExp :: (MonadBinder m) =>
                 String -> Exp (Lore m)
-             -> m ([Ident], [Ident])
-letShapedExp _ (PrimOp (SubExp (Var v))) = return ([], [v])
+             -> m ([VName], [VName])
+letShapedExp _ (PrimOp (SubExp (Var v))) =
+  return ([], [v])
 letShapedExp name e = do
+  numValues <- length <$> expExtType e
   names <- replicateM numValues $ newVName name
   idents <- letBindNames' names e
-  return $ splitAt (length idents - numValues) idents
-  where numValues = length $ expExtType e
+  return $ splitAt (length idents - numValues) $ map identName idents
 
 letTupExp :: (MonadBinder m) =>
              String -> Exp (Lore m)
-          -> m [Ident]
+          -> m [VName]
 letTupExp name e = snd <$> letShapedExp name e
 
 letTupExp' :: (MonadBinder m) =>
@@ -124,12 +123,6 @@ letTupExp' :: (MonadBinder m) =>
 letTupExp' _ (PrimOp (SubExp se)) = return [se]
 letTupExp' name ses = do vs <- letTupExp name ses
                          return $ map Var vs
-
-newVar :: MonadFreshNames m =>
-          String -> Type -> m (Ident, SubExp)
-newVar name tp = do
-  x <- newVName name
-  return (Ident x tp, Var $ Ident x tp)
 
 eSubExp :: MonadBinder m =>
            SubExp -> m (Exp (Lore m))
@@ -142,7 +135,7 @@ eIf ce te fe = do
   ce' <- letSubExp "cond" =<< ce
   te' <- insertBindingsM te
   fe' <- insertBindingsM fe
-  let ts = bodyExtType te' `generaliseExtTypes` bodyExtType fe'
+  ts <- generaliseExtTypes <$> bodyExtType te' <*> bodyExtType fe'
   return $ If ce' te' fe' ts
 
 eBinOp :: MonadBinder m =>
@@ -166,7 +159,7 @@ eNot e = do
   return $ PrimOp $ Not e'
 
 eIndex :: MonadBinder m =>
-          Certificates -> Ident -> [m (Exp (Lore m))]
+          Certificates -> VName -> [m (Exp (Lore m))]
        -> m (Exp (Lore m))
 eIndex cs a idxs = do
   idxs' <- letSubExps "i" =<< sequence idxs
@@ -227,15 +220,15 @@ foldBinOp bop ne (e:es) t =
 binOpLambda :: (MonadFreshNames m, Bindable lore) =>
                BinOp -> BasicType -> m (Lambda lore)
 binOpLambda bop t = do
-  x   <- newIdent "x"   $ Basic t
-  y   <- newIdent "y"   $ Basic t
-  res <- newIdent "res" $ Basic t
+  x   <- newVName "x"
+  y   <- newVName "y"
+  res <- newVName "res"
   body <- runBinder $ do
-    bnds <- mkLetNamesM [(identName res,BindVar)] $
+    bnds <- mkLetNamesM [(res,BindVar)] $
             PrimOp $ BinOp bop (Var x) (Var y) t
     mkBodyM [bnds] $ Result [Var res]
   return Lambda {
-             lambdaParams     = [x, y]
+             lambdaParams     = [Ident x (Basic t), Ident y (Basic t)]
            , lambdaReturnType = [Basic t]
            , lambdaBody       = body
            }
@@ -244,7 +237,8 @@ makeLambda :: (Bindable (Lore m), MonadBinder m) =>
               [Param] -> m (Body (Lore m)) -> m (Lambda (Lore m))
 makeLambda params body = do
   body' <- insertBindingsM body
-  case allBasic $ bodyExtType body' of
+  bodyt <- bodyExtType body'
+  case allBasic bodyt of
     Nothing -> fail "Body passed to makeLambda has non-basic type"
     Just ts ->
       return Lambda {
@@ -293,29 +287,13 @@ mapResult f (Body _ bnds res) =
   let Body _ bnds2 newres = f res
   in mkBody (bnds<>bnds2) newres
 
-copyConsumed :: (Proper (Lore m), MonadBinder m) => Body (Lore m) -> m (Body (Lore m))
-copyConsumed e
-  | consumed <- HS.toList $ freeUniqueInBody e,
-    not (null consumed) = do
-      copies <- copyVariables consumed
-      let substs = HM.fromList $ zip (map identName consumed)
-                                     (map identName copies)
-      return $ substituteNames substs e
-  | otherwise = return e
-  where copyVariables = mapM copyVariable
-        copyVariable v =
-          letExp (textual (baseName $ identName v) ++ "_copy") $
-                 PrimOp $ Copy $ Var v
-
-        freeUniqueInBody = HS.filter (unique . identType) . freeInBody
-
 nonuniqueParams :: (MonadFreshNames m, Bindable lore) =>
                    [Param] -> m ([Param], [Binding lore])
 nonuniqueParams params = runBinder'' $ forM params $ \param ->
   if unique $ identType param then do
     param' <- nonuniqueParam <$> newIdent' (++"_nonunique") param
     letBindNames_ [(identName param,BindVar)] $
-      PrimOp $ Copy $ Var param'
+      PrimOp $ Copy $ Var $ identName param'
     return param'
   else
     return param
@@ -350,7 +328,7 @@ instantiateShapes' ts =
   runWriterT $ instantiateShapes instantiate ts
   where instantiate _ = do v <- lift $ newIdent "size" (Basic Int)
                            tell [v]
-                           return $ Var v
+                           return $ Var $ identName v
 
 instantiateShapesFromIdentList :: [Ident] -> [ExtType] -> [Type]
 instantiateShapesFromIdentList idents ts =
@@ -360,7 +338,7 @@ instantiateShapesFromIdentList idents ts =
           case idents' of
             [] -> fail "instantiateShapesFromIdentList: insufficiently sized context"
             ident:idents'' -> do put idents''
-                                 return $ Var ident
+                                 return $ Var $ identName ident
 
 instantiateExtTypes :: [VName] -> [ExtType] -> [Ident]
 instantiateExtTypes names rt =
@@ -381,7 +359,7 @@ instantiateIdents names ts
           case remaining of []   -> lift Nothing
                             x:xs -> do let ident = Ident x (Basic Int)
                                        put (context'++[ident], xs)
-                                       return $ Var ident
+                                       return $ Var x
     (ts', (context', _)) <-
       runStateT (instantiateShapes nextShape ts) ([],context)
     return (context', zipWith Ident vals ts')

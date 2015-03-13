@@ -117,6 +117,7 @@ Library
                    Futhark.Representation.AST.Attributes.Names
                    Futhark.Representation.AST.Attributes.Patterns
                    Futhark.Representation.AST.Attributes.Ranges
+                   Futhark.Representation.AST.Attributes.TypeEnv
                    Futhark.Representation.AST.Attributes.TypeOf
                    Futhark.Representation.AST.Attributes.Types
                    Futhark.Representation.AST.Attributes.Values
