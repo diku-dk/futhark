@@ -262,22 +262,21 @@ hoistBindings rules block vtable uses needs result = do
   return (body, hoisted, uses')
   where simplifyBindings vtable' uses' bnds = do
           (uses'', bnds') <- simplifyBindings' vtable' uses' bnds
-          let (blocked, hoisted) = partitionEithers $ blockUnhoistedDeps bnds'
           -- We need to do a final pass to ensure that nothing is
           -- hoisted past something that it depends on.
+          let (blocked, hoisted) = partitionEithers $ blockUnhoistedDeps bnds'
           return (uses'', blocked, hoisted)
 
         simplifyBindings' vtable' uses' bnds =
-          foldM hoistable (uses',[]) (reverse $ zip bnds vtables)
-            where vtables = scanl insertBnd vtable' bnds
-                  insertBnd vtable'' bnd =
-                    ST.insertBinding bnd vtable''
+          foldM hoistable (uses',[]) $ reverse $ zip bnds vtables
+            where vtables = scanl (flip ST.insertBinding) vtable' bnds
 
         hoistable (uses',bnds) (bnd, vtable')
           | not $ uses' `UT.contains` provides bnd = -- Dead binding.
             return (uses', bnds)
           | otherwise = do
-            res <- bottomUpSimplifyBinding rules (vtable', uses') bnd
+            res <- localVtable (const vtable') $
+                   bottomUpSimplifyBinding rules (vtable', uses') bnd
             case res of
               Nothing -- Nothing to optimise - see if hoistable.
                 | block uses' bnd ->
