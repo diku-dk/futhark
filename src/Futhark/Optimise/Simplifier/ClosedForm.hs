@@ -23,7 +23,7 @@ import Futhark.Tools
 import Futhark.Representation.AST
 import Futhark.Renamer
 import Futhark.MonadFreshNames
-import Futhark.Optimise.Simplifier.Simplify
+import Futhark.Optimise.Simplifier.RuleM
 
 -- | A function that, given a variable name, returns its definition.
 -- XXX: This duplicates something in Futhark.Optimise.Simplification.
@@ -48,7 +48,7 @@ Motivation:
 foldClosedForm :: MonadBinder m =>
                   VarLookup (Lore m) -> Pattern (Lore m) -> Lambda (Lore m)
                -> [SubExp] -> [Ident]
-               -> Simplify m ()
+               -> RuleM m ()
 
 foldClosedForm look pat lam accs arrs = do
   closedBody <- checkResults (patternIdents pat) knownBindings
@@ -68,7 +68,7 @@ foldClosedForm look pat lam accs arrs = do
 loopClosedForm :: MonadBinder m =>
                   Pattern (Lore m) -> [Ident] -> [(FParam (Lore m),SubExp)]
                -> SubExp -> Body (Lore m)
-               -> Simplify m ()
+               -> RuleM m ()
 loopClosedForm pat respat merge bound body
   | respat == mergeidents = do
     closedBody <- checkResults respat knownBindings
@@ -91,7 +91,7 @@ checkResults :: MonadBinder m =>
              -> [Ident]
              -> Body (Lore m)
              -> [SubExp]
-             -> Simplify m (Body (Lore m))
+             -> RuleM m (Body (Lore m))
 checkResults pat knownBindings params body accs = do
   ((), bnds) <- collectBindings $
                 zipWithM_ checkResult (zip pat $ resultSubExps res) (zip accparams accs)

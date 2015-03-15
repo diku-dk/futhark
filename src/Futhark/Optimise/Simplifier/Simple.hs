@@ -73,6 +73,20 @@ instance MonadFreshNames (SimpleM lore) where
   putNameSource y = modify $ \(x, _) -> (x,y)
 
 instance Proper lore => MonadBinder (SimpleM lore) where
+  type Lore (SimpleM lore) = Aliases lore
+  mkLetM pat e = do
+    vtable <- Engine.getVtable
+    simpl <- fst <$> ask
+    mkLetS simpl vtable pat e
+  mkBodyM bnds res = do
+    vtable <- Engine.getVtable
+    simpl <- fst <$> ask
+    mkBodyS simpl vtable bnds res
+  mkLetNamesM names e = do
+    vtable <- Engine.getVtable
+    simpl <- fst <$> ask
+    mkLetNamesS simpl vtable names e
+
   addBinding      = Engine.addBindingEngine
   collectBindings = Engine.collectBindingsEngine
 
@@ -95,21 +109,6 @@ instance Proper lore => Engine.MonadEngine (SimpleM lore) where
   simplifyRetType restype = do
     simpl <- fst <$> ask
     simplifyRetType simpl restype
-
-instance Proper lore => BindableM (SimpleM lore) where
-  type Lore (SimpleM lore) = Aliases lore
-  mkLetM pat e = do
-    vtable <- Engine.getVtable
-    simpl <- fst <$> ask
-    mkLetS simpl vtable pat e
-  mkBodyM bnds res = do
-    vtable <- Engine.getVtable
-    simpl <- fst <$> ask
-    mkBodyS simpl vtable bnds res
-  mkLetNamesM names e = do
-    vtable <- Engine.getVtable
-    simpl <- fst <$> ask
-    mkLetNamesS simpl vtable names e
 
 runSimpleM :: SimpleM lore a
            -> Simplifiable (SimpleM lore)

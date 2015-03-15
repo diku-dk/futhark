@@ -37,14 +37,6 @@ newtype AllocM a = AllocM (ReaderT (HM.HashMap VName MemSummary)
                            MonadWriter (DL.DList Binding))
 
 instance MonadBinder AllocM where
-  addBinding = addBindingWriter
-  collectBindings = collectBindingsWriter
-
-instance MonadFreshNames AllocM where
-  getNameSource = AllocM $ lift getNameSource
-  putNameSource = AllocM . lift . putNameSource
-
-instance BindableM AllocM where
   type Lore AllocM = ExplicitMemory
 
   mkLetM pat e = return $ Let pat () e
@@ -60,6 +52,13 @@ instance BindableM AllocM where
     basicMkLetM sizes vals e
 
   mkBodyM bnds res = return $ Body () bnds res
+
+  addBinding = addBindingWriter
+  collectBindings = collectBindingsWriter
+
+instance MonadFreshNames AllocM where
+  getNameSource = AllocM $ lift getNameSource
+  putNameSource = AllocM . lift . putNameSource
 
 basicMkLetM :: [Ident]
             -> [(Ident,Bindage)]

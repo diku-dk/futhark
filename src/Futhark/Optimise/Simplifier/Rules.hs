@@ -27,7 +27,7 @@ import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Analysis.DataDependencies
 import Futhark.Optimise.Simplifier.ClosedForm
 import Futhark.Optimise.Simplifier.Rule
-import Futhark.Optimise.Simplifier.Simplify
+import Futhark.Optimise.Simplifier.RuleM
 import qualified Futhark.Analysis.AlgSimplify as AS
 import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.Representation.AST
