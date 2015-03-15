@@ -2,7 +2,6 @@
 module Main (main) where
 
 import Control.Monad
-import Control.Monad.Writer.Strict (runWriter)
 import Control.Monad.Except
 import Data.Version
 import System.Console.GetOpt
@@ -200,13 +199,16 @@ futharkc config filename srccode = do
           typeCheckInternalProgram config int_prog
           runPasses config $ Basic int_prog
 
--- parseSourceProgram :: FilePath -> String -> FutharkM E.Prog
+parseSourceProgram :: FilePath -> String
+                   -> FutharkM E.UncheckedProg
 parseSourceProgram filename file_contents =
   case parseFuthark filename file_contents of
     Left err   -> compileError (show err) Nothing
     Right prog -> return prog
 
--- typeCheckSourceProgram :: E.Prog -> FutharkM
+typeCheckSourceProgram :: FutharkConfig
+                       -> E.UncheckedProg
+                       -> FutharkM (E.ProgBase E.CompTypeBase I.Name)
 typeCheckSourceProgram config prog =
   case typeCheck E.checkProg E.checkProgNoUniqueness config prog of
     Left err    -> compileError (show err) Nothing
