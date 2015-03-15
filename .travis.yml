@@ -1,3 +1,6 @@
 language: haskell
 
+before_install:
+  cabal install happy
+
 ghc: 7.8
