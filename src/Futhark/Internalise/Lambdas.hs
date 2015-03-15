@@ -2,6 +2,7 @@ module Futhark.Internalise.Lambdas
   ( internaliseMapLambda
   , internaliseConcatMapLambda
   , internaliseFoldLambda
+  , internaliseNewFoldLambda
   , internaliseFilterLambda
   )
   where
@@ -156,6 +157,58 @@ internaliseFoldLambda internaliseBody lam acctypes arrtypes = do
   body' <- assertResultShape (srclocOf lam) rettype' body
 
   return $ I.Lambda params body' rettype'
+
+
+internaliseNewFoldLambda :: (E.Exp -> InternaliseM Body)
+                         -> E.Lambda
+                         -> [I.Type]
+                         -> [I.SubExp]
+                         -> InternaliseM I.Lambda
+internaliseNewFoldLambda internaliseBody lam acctypes arr_args = do  
+  let arrtypes = map I.subExpType arr_args
+      rowtypes = map I.rowType arrtypes
+      
+  (params, body, rettype) <- internaliseLambda internaliseBody lam $
+                             acctypes ++ rowtypes
+  -- split rettype into (i) accummulator types && (ii) result-array-elem types
+  let acc_len = (length acctypes) `div` 2
+      (acc_tps, res_el_tps) = (take acc_len rettype, drop acc_len rettype)
+
+  -- for the map    part
+  (rettypearr', inner_shapes) <- instantiateShapes' res_el_tps
+  let outer_shape = arraysSize 0 arrtypes
+      shape_body = shapeBody (map I.identName inner_shapes) rettypearr' body
+  shapefun <- makeShapeFun params shape_body (length inner_shapes)
+  bindMapShapes inner_shapes shapefun arr_args outer_shape
+
+  -- for the reduce part
+  let acctype' = [ t `setArrayShape` arrayShape shape
+                   | (t,shape) <- zip acc_tps acctypes ]
+  -- The reduce-part result of the body must have the exact same 
+  -- shape as the initial accumulator.  We accomplish this with 
+  -- an assertion and reshape().
+
+  -- finally, place assertions and return result
+  body' <- assertResultShape (srclocOf lam) (acctype'++rettypearr') body
+  return $ I.Lambda params body' (acctype'++rettypearr')
+
+{-
+internaliseMapLambda :: (E.Exp -> InternaliseM Body)
+                     -> E.Lambda
+                     -> [I.SubExp]
+                     -> InternaliseM I.Lambda
+internaliseMapLambda internaliseBody lam args = do
+  let argtypes = map I.subExpType args
+      rowtypes = map I.rowType argtypes
+  (params, body, rettype) <- internaliseLambda internaliseBody lam rowtypes
+  (rettype', inner_shapes) <- instantiateShapes' rettype
+  let outer_shape = arraysSize 0 argtypes
+      shape_body = shapeBody (map I.identName inner_shapes) rettype' body
+  shapefun <- makeShapeFun params shape_body (length inner_shapes)
+  bindMapShapes inner_shapes shapefun args outer_shape
+  body' <- assertResultShape (srclocOf lam) rettype' body
+  return $ I.Lambda params body' rettype'
+-}
 
 internaliseFilterLambda :: (E.Exp -> InternaliseM Body)
                         -> E.Lambda

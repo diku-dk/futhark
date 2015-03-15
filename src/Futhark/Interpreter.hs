@@ -684,8 +684,24 @@ evalLoopOp (Filter _ fun arrexp) = do
 evalLoopOp (Redomap _ _ innerfun accexp arrexps) = do
   startaccs <- mapM evalSubExp accexp
   vss <- mapM (arrToList <=< lookupVar) arrexps
-  let foldfun acc x = applyLambda innerfun $ acc ++ x
-  foldM foldfun startaccs $ transpose vss
+  if res_len == acc_len
+  then foldM foldfun startaccs $ transpose vss
+  else do let startaccs'= (startaccs, replicate (res_len - acc_len) [])
+          (acc_res, arr_res) <- foldM foldfun' startaccs' $ transpose vss
+          arr_res_fut <- arrays lam_ret_arr_tp $ transpose $ map reverse arr_res
+          return $ acc_res ++ arr_res_fut
+    where
+        lam_ret_tp     = lambdaReturnType innerfun
+        res_len        = length lam_ret_tp 
+        acc_len        = length accexp
+        lam_ret_arr_tp = drop acc_len lam_ret_tp
+        foldfun  acc x = applyLambda innerfun $ acc ++ x
+        foldfun' (acc,arr) x = do
+            res_lam <- applyLambda innerfun $ acc ++ x
+            let res_acc = take acc_len res_lam
+                res_arr = drop acc_len res_lam
+                acc_arr = zipWith (:) res_arr arr
+            return (res_acc, acc_arr)
 
 evalFuncall :: Name -> [Value] -> FutharkM lore [Value]
 evalFuncall fname args = do

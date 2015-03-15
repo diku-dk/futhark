@@ -177,6 +177,18 @@ transformExp (LoopOp (Filter cs fun arrexps)) = do
     (ForLoop i nv) loopbody
 
 transformExp (LoopOp (Redomap cs _ innerfun accexps arrexps)) = do
+  let outersize = arraysSize 0 (map identType arrexps)
+  -- for the MAP    part
+  let acc_num     = length accexps
+  let res_tps     = lambdaReturnType innerfun
+  let map_arr_num = (length res_tps) - acc_num
+  let map_arr_tps = drop (length accexps) res_tps
+  maparrs <- resultArray $
+               [ arrayOf t (Shape [outersize]) (uniqueness t)
+                 | t <- map_arr_tps ]
+  outarrs <- forM (map identType maparrs) $ \t ->
+             newIdent "redomap_outarr" $ t `setUniqueness` Unique
+  -- for the REDUCE part
   ((acc, initacc), (i, iv)) <- newFold accexps
   inarrs <- forM (zip
                   (map identType arrexps)
@@ -184,11 +196,14 @@ transformExp (LoopOp (Redomap cs _ innerfun accexps arrexps)) = do
                    snd $ splitAt (length accexps) $ lambdaParams innerfun)) $ \(t,u) ->
             newIdent "redomap_inarr" (setUniqueness t u)
   loopbody <- runBinder $ do
-    acc' <- bodyBind =<< transformLambda innerfun
-            (map (PrimOp . SubExp . Var) acc ++ index cs inarrs iv)
-    return $ resultBody (map Var inarrs ++ acc')
+    accxis<- bodyBind =<< transformLambda innerfun
+             (map (PrimOp . SubExp . Var) acc ++ index cs inarrs iv)
+    let (acc', xis) = splitAt acc_num accxis
+    dests <- letwith cs outarrs (pexp iv) $ map (PrimOp . SubExp) xis
+    return $ resultBody (map Var inarrs ++ acc' ++ map Var dests)
   return $ LoopOp $
-    DoLoop acc (loopMerge (inarrs++acc) (map Var arrexps++initacc))
+    DoLoop (acc++outarrs) (loopMerge (inarrs++acc++outarrs) 
+    (map Var arrexps++initacc++map Var maparrs))
     (ForLoop i (isize inarrs)) loopbody
 
 transformExp e = mapExpM transform e

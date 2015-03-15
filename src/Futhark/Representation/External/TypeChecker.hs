@@ -739,8 +739,13 @@ checkExp (Redomap outerfun innerfun accexp arrexp pos) = do
   (outerfun', _) <- checkLambdaArg outerfun [accarg, accarg]
   innerfun' <- checkLambda innerfun [accarg, arrarg]
   let redtype = lambdaType innerfun' [typeOf accexp', rt]
-  _ <- require [redtype] accexp'
-  return $ Redomap outerfun' innerfun' accexp' arrexp' pos
+  if argType accarg == redtype
+  then return $ Redomap outerfun' innerfun' accexp' arrexp' pos
+  else case redtype of
+         Tuple (acctp:_) -> do 
+             _ <- require [acctp] accexp'
+             return $ Redomap outerfun' innerfun' accexp' arrexp' pos
+         _ -> bad $ TypeError pos "Redomap with illegal reduce type."
 
 checkExp (Split splitexps arrexp pos) = do
   splitexps' <- mapM (require [Basic Int] <=< checkExp) splitexps

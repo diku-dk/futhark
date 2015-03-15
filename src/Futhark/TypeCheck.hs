@@ -800,12 +800,13 @@ checkLoopOp (Redomap ass outerfun innerfun accexps arrexps) = do
   accargs <- mapM checkArg accexps
   checkLambda innerfun $ accargs ++ arrargs
   let innerRetType = lambdaReturnType innerfun
+      innerAccType = take (length accexps) innerRetType  
       asArg t = (t, mempty, mempty)
-  checkLambda outerfun $ map asArg $ innerRetType ++ innerRetType
+  checkLambda outerfun $ map asArg $ innerAccType ++ innerAccType
 
   let acct = map argType accargs
       outerRetType = lambdaReturnType outerfun
-  unless (innerRetType `subtypesOf` acct) $
+  unless (innerAccType `subtypesOf` acct) $
     bad $ TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
           ", but redomapT inner reduction returns type " ++ prettyTuple innerRetType ++ "."
   unless (outerRetType `subtypesOf` acct) $

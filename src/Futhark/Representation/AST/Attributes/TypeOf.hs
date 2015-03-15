@@ -27,6 +27,8 @@ import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Values
 import Futhark.Representation.AST.RetType
 
+--import Debug.Trace
+
 subExpType :: SubExp -> Type
 subExpType (Constant val) = Basic $ basicValueType val
 subExpType (Var ident)    = identType ident
@@ -99,8 +101,19 @@ loopOpExtType (Scan _ _ inputs) =
   staticShapes $ map (identType . snd) inputs
 loopOpExtType (Filter _ f arrs) =
   filterType f $ map identType arrs
-loopOpExtType (Redomap _ outerfun _ _ _) =
-  staticShapes $ lambdaReturnType outerfun
+loopOpExtType (Redomap _ outerfun innerfun _ ids) =
+  let acc_tp    = lambdaReturnType outerfun
+      acc_el_tp = lambdaReturnType innerfun
+      res_el_tp = drop (length acc_tp) acc_el_tp
+  in  case res_el_tp of
+        [] -> staticShapes $ acc_tp
+        _  -> let outersize  = arraysSize 0 (map identType ids) 
+                  res_arr_tp :: [Type]
+                  res_arr_tp = map (\eltp -> arrayOf eltp 
+                                                     (Shape [outersize]) 
+                                                     (uniqueness eltp  )
+                                   ) res_el_tp 
+              in  staticShapes $ (acc_tp ++ res_arr_tp)
 
 expExtType :: IsRetType (RetType lore) => Exp lore -> [ExtType]
 expExtType (Apply _ _ rt) = retTypeValues rt
