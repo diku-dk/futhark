@@ -8,6 +8,13 @@ fun [real] main([int] arr) =
                  in  zipWith(op +, acc, r)
            , replicate(3,0.0), arr ) 
 
+fun real main0([int] arr) =
+    redomap( op +
+           , fn real (real acc, int a) =>
+                 let r = toReal(2*a) in
+                 acc+r
+           , 0.0, arr ) 
+
 //fun real main1([int] arr) =
 //    let acc = 0.0 in
 //    loop (acc) = for i < size(0,arr) do

@@ -19,7 +19,6 @@ import Data.Maybe
 import Data.List
 import Data.Traversable (mapM)
 import Data.Loc
-
 import Futhark.Representation.External as E
 import Futhark.Representation.Basic as I
 import Futhark.Renamer as I
@@ -393,9 +392,15 @@ internaliseExp desc (E.Filter lam arr _) = do
 internaliseExp desc (E.Redomap lam1 lam2 ne arrs _) = do
   arrs' <- internaliseExpToIdents "redomap_arr" arrs
   nes <- internaliseExp "redomap_ne" ne
+  let acc_tps     = map I.subExpType nes
+  let outersize   = arraysSize 0 $ map I.identType arrs'
+  let acc_arr_tps = [ I.arrayOf t (Shape [outersize]) (I.uniqueness t)
+                        | t <- acc_tps ]
   lam1' <- withNonuniqueReplacements $
            internaliseFoldLambda internaliseBody lam1
-           (map I.subExpType nes) (map I.subExpType nes)
+           (map I.subExpType nes) acc_arr_tps
+--           internaliseFoldLambda internaliseBody lam1
+--           (map I.subExpType nes) (map I.subExpType nes)
   lam2' <- withNonuniqueReplacements $
 --           internaliseNewFoldLambda internaliseBody lam2
 --           (map I.subExpType nes) (map I.Var arrs')

@@ -31,7 +31,6 @@ import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.State
 import Control.Monad.RWS
-
 import Data.Loc (noLoc)
 import Data.List
 import qualified Data.HashMap.Lazy as HM

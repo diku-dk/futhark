@@ -27,8 +27,6 @@ import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Values
 import Futhark.Representation.AST.RetType
 
---import Debug.Trace
-
 subExpType :: SubExp -> Type
 subExpType (Constant val) = Basic $ basicValueType val
 subExpType (Var ident)    = identType ident

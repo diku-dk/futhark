@@ -192,24 +192,6 @@ internaliseNewFoldLambda internaliseBody lam acctypes arr_args = do
   body' <- assertResultShape (srclocOf lam) (acctype'++rettypearr') body
   return $ I.Lambda params body' (acctype'++rettypearr')
 
-{-
-internaliseMapLambda :: (E.Exp -> InternaliseM Body)
-                     -> E.Lambda
-                     -> [I.SubExp]
-                     -> InternaliseM I.Lambda
-internaliseMapLambda internaliseBody lam args = do
-  let argtypes = map I.subExpType args
-      rowtypes = map I.rowType argtypes
-  (params, body, rettype) <- internaliseLambda internaliseBody lam rowtypes
-  (rettype', inner_shapes) <- instantiateShapes' rettype
-  let outer_shape = arraysSize 0 argtypes
-      shape_body = shapeBody (map I.identName inner_shapes) rettype' body
-  shapefun <- makeShapeFun params shape_body (length inner_shapes)
-  bindMapShapes inner_shapes shapefun args outer_shape
-  body' <- assertResultShape (srclocOf lam) rettype' body
-  return $ I.Lambda params body' rettype'
--}
-
 internaliseFilterLambda :: (E.Exp -> InternaliseM Body)
                         -> E.Lambda
                         -> [I.SubExp]
