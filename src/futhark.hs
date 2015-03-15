@@ -16,6 +16,7 @@ import Futhark.Pipeline
 import Futhark.Passes
 import Futhark.Actions
 
+import qualified Futhark.Representation.External as E
 import qualified Futhark.Representation.External.TypeChecker as E
 import qualified Futhark.Representation.External.Renamer as E
 
@@ -161,7 +162,7 @@ errput = liftIO . hPutStrLn stderr
 compiler :: FutharkConfig -> FilePath -> IO ()
 compiler config file = do
   contents <- readFile file
-  let (msgs, res) = futharkc config file contents
+  (msgs, res) <- futharkc config file contents
   hPutStr stderr msgs
   case res of
     Left err -> do
@@ -187,18 +188,33 @@ typeCheck checkProg checkProgNoUniqueness config
   | otherwise                  = checkProgNoUniqueness
 
 futharkc :: FutharkConfig -> FilePath -> String
-         -> (String, Either CompileError PipelineState)
-futharkc config filename srccode =
-  case runWriter (runExceptT futharkc') of
-    (Left err, msgs) -> (msgs, Left err)
-    (Right prog, msgs) -> (msgs, Right prog)
+         -> IO (String, Either CompileError PipelineState)
+futharkc config filename srccode = do
+  res <- runFutharkM futharkc'
+  case res of (Left err, msgs)  -> return (msgs, Left err)
+              (Right prog, msgs) -> return (msgs, Right prog)
   where futharkc' = do
-          parsed_prog <- canFail "" Nothing $ parseFuthark filename srccode
-          ext_prog    <- canFail "" Nothing $
-                         typeCheck E.checkProg E.checkProgNoUniqueness config
-                         parsed_prog
+          parsed_prog <- parseSourceProgram filename srccode
+          ext_prog    <- typeCheckSourceProgram config parsed_prog
           let int_prog = internaliseProg (futharkboundsCheck config) $ E.tagProg ext_prog
-          _ <-
-            canFail "After internalisation:\n" (Just $ Basic int_prog)
-            (typeCheck I.checkProg I.checkProgNoUniqueness config int_prog)
+          typeCheckInternalProgram config int_prog
           runPasses config $ Basic int_prog
+
+-- parseSourceProgram :: FilePath -> String -> FutharkM E.Prog
+parseSourceProgram filename file_contents =
+  case parseFuthark filename file_contents of
+    Left err   -> compileError (show err) Nothing
+    Right prog -> return prog
+
+-- typeCheckSourceProgram :: E.Prog -> FutharkM
+typeCheckSourceProgram config prog =
+  case typeCheck E.checkProg E.checkProgNoUniqueness config prog of
+    Left err    -> compileError (show err) Nothing
+    Right prog' -> return prog'
+
+typeCheckInternalProgram :: FutharkConfig -> I.Prog -> FutharkM ()
+typeCheckInternalProgram config prog =
+  case typeCheck I.checkProg I.checkProgNoUniqueness config prog of
+    Left err -> compileError ("After internalisation:\n" ++ show err) $
+                Just $ Basic prog
+    Right () -> return ()
