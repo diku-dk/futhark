@@ -276,6 +276,17 @@ sufficiented :: Monad m => VariantM m ()
 sufficiented = tell $ mempty { resSufficiented = Any True }
 
 instance MonadFreshNames m => MonadBinder (VariantM m) where
+  type Lore (VariantM m) = Invariance
+  mkLetM pat e = do
+    context <- getContext
+    let explore = if forbiddenExp context e
+                  then TooVariant
+                  else Invariant
+        pat' = Pattern [ S.PatElem v BindVar Nothing | v <- patternIdents pat ]
+    return $ mkAliasedLetBinding pat' explore e
+  mkBodyM bnds res =
+    return $ mkAliasedBody () bnds res
+
   addBinding      = Simplify.addBindingEngine
   collectBindings = Simplify.collectBindingsEngine
 
@@ -425,18 +436,6 @@ removeInvariance = Rephraser { rephraseExpLore = const ()
                              , rephraseFParamLore = const ()
                              , rephraseRetType = id
                              }
-
-instance MonadFreshNames m => BindableM (VariantM m) where
-  type Lore (VariantM m) = Invariance
-  mkLetM pat e = do
-    context <- getContext
-    let explore = if forbiddenExp context e
-                  then TooVariant
-                  else Invariant
-        pat' = Pattern [ S.PatElem v BindVar Nothing | v <- patternIdents pat ]
-    return $ mkAliasedLetBinding pat' explore e
-  mkBodyM bnds res =
-    return $ mkAliasedBody () bnds res
 
 forbiddenExp :: Context m -> S.Exp Invariance -> Bool
 forbiddenExp context = isNothing . walkExpM walk

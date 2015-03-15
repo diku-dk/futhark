@@ -58,7 +58,7 @@ instance MonadFreshNames InternaliseM where
   getNameSource = get
   putNameSource = put
 
-instance BindableM InternaliseM where
+instance MonadBinder InternaliseM where
   type Lore InternaliseM = Basic
   mkLetM pat e = return $ mkLet pat' e
     where pat' = [ (ident, bindage)
@@ -67,7 +67,6 @@ instance BindableM InternaliseM where
   mkBodyM bnds res = return $ mkBody bnds res
   mkLetNamesM = mkLetNames
 
-instance MonadBinder InternaliseM where
   addBinding      = addBindingWriter
   collectBindings = collectBindingsWriter
 

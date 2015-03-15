@@ -25,13 +25,12 @@ instance MonadFreshNames m => MonadFreshNames (RuleM m) where
   getNameSource = RuleM . lift $ getNameSource
   putNameSource = RuleM . lift . putNameSource
 
-instance BindableM m => BindableM (RuleM m) where
+instance MonadBinder m => MonadBinder (RuleM m) where
   type Lore (RuleM m) = Lore m
   mkLetM pat e = RuleM $ lift $ mkLetM pat e
   mkLetNamesM names e = RuleM $ lift $ mkLetNamesM names e
   mkBodyM bnds res = RuleM $ lift $ mkBodyM bnds res
 
-instance MonadBinder m => MonadBinder (RuleM m) where
   addBinding                = RuleM . lift . addBinding
   collectBindings (RuleM m) = RuleM $ MaybeT $ do
     (x, bnds) <- collectBindings $ runMaybeT m

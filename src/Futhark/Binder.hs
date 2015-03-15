@@ -3,12 +3,11 @@
 -- normalised programs.
 module Futhark.Binder
   ( Proper
-  , BindableM (..)
-  , mkLetNamesM'
   , Bindable (..)
   , mkLet'
   , mkLetNames'
   , MonadBinder (..)
+  , mkLetNamesM'
   , bodyBindings
   , insertBindings
   , insertBinding
@@ -56,30 +55,29 @@ class (Lore.Lore lore, PrettyLore lore,
        IsRetType (RetType lore)) => Proper lore where
 
 -- | The class of lores that can be constructed solely from an
--- expression, within some monad.  Very important: the methods should
--- not have any significant side effects!  They may be called more
--- often than you think, and the results thrown away.  If used
--- exclusively within a 'MonadBinder' instance, it is acceptable for
--- them to create new bindings, however.
-class (Monad m, Applicative m) =>
-      BindableM m where
-  type Lore m :: *
-  mkLetM :: Pattern (Lore m) -> Exp (Lore m) -> m (Binding (Lore m))
-  mkBodyM :: [Binding (Lore m)] -> Result -> m (Body (Lore m))
-
-  mkLetNamesM :: [(VName, Bindage)] -> Exp (Lore m) -> m (Binding (Lore m))
-
--- | The class of lores that can be constructed solely from an
--- expression, non-monadically.
+-- expression, non-monadically, except for generating fresh names.
 class (Proper lore, Lore.FParam lore ~ ()) => Bindable lore where
   mkLet :: [(Ident,Bindage)] -> Exp lore -> Binding lore
   mkBody :: [Binding lore] -> Result -> Body lore
   mkLetNames :: MonadFreshNames m =>
                 [(VName, Bindage)] -> Exp lore -> m (Binding lore)
 
-class (BindableM m, Proper (Lore m),
+-- | A monad that supports the creation of bindings from expressions
+-- and bodies from bindings, with a specific lore.  This is the main
+-- typeclass that a monad must implement in order for it to be useful
+-- for generating or modifying Futhark code.
+--
+-- Very important: the methods should not have any significant side
+-- effects!  They may be called more often than you think, and the
+-- results thrown away.  It is acceptable for them to create new
+-- bindings, however.
+class (Proper (Lore m),
        MonadFreshNames m, Applicative m, Monad m) =>
       MonadBinder m where
+  type Lore m :: *
+  mkLetM :: Pattern (Lore m) -> Exp (Lore m) -> m (Binding (Lore m))
+  mkBodyM :: [Binding (Lore m)] -> Result -> m (Body (Lore m))
+  mkLetNamesM :: [(VName, Bindage)] -> Exp (Lore m) -> m (Binding (Lore m))
   addBinding      :: Binding (Lore m) -> m ()
   collectBindings :: m a -> m (a, [Binding (Lore m)])
 
@@ -105,7 +103,7 @@ mkLet' :: Bindable lore =>
 mkLet' = mkLet . map addBindVar
   where addBindVar name = (name, BindVar)
 
-mkLetNamesM' :: BindableM m =>
+mkLetNamesM' :: MonadBinder m =>
                 [VName] -> Exp (Lore m) -> m (Binding (Lore m))
 mkLetNamesM' = mkLetNamesM . map addBindVar
   where addBindVar name = (name, BindVar)
@@ -178,15 +176,13 @@ instance MonadFreshNames m => MonadFreshNames (BinderT lore m) where
   putNameSource = BinderT . lift . putNameSource
 
 instance (Proper lore, Bindable lore, MonadFreshNames m) =>
-         BindableM (BinderT lore m) where
+         MonadBinder (BinderT lore m) where
   type Lore (BinderT lore m) = lore
   mkBodyM bnds res = return $ mkBody bnds res
   mkLetM pat e = return $ mkLet pat' e
     where pat' = [ (patElemIdent patElem, patElemBindage patElem)
                  | patElem <- patternElements pat ]
   mkLetNamesM = mkLetNames
-
-instance (Proper lore, Bindable lore, MonadFreshNames m) => MonadBinder (BinderT lore m) where
   addBinding      = addBindingWriter
   collectBindings = collectBindingsWriter
 
