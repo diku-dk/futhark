@@ -26,7 +26,6 @@ import Futhark.Renamer as I
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Substitute
-import Debug.Trace
 import Futhark.Internalise.Monad
 import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.TypesValues
@@ -398,10 +397,10 @@ internaliseExp desc (E.Redomap lam1 lam2 ne arrs _) = do
            internaliseFoldLambda internaliseBody lam1
            (map I.subExpType nes) (map I.subExpType nes)
   lam2' <- withNonuniqueReplacements $
-           internaliseNewFoldLambda internaliseBody lam2
-           (map I.subExpType nes) (map I.Var arrs')
---           internaliseFoldLambda internaliseBody lam2
---           (map I.subExpType nes) (map I.identType arrs')
+--           internaliseNewFoldLambda internaliseBody lam2
+--           (map I.subExpType nes) (map I.Var arrs')
+           internaliseFoldLambda internaliseBody lam2
+           (map I.subExpType nes) (map I.identType arrs')
   letTupExp' desc $ I.LoopOp $
     I.Redomap [] lam1' lam2' nes arrs'
 
