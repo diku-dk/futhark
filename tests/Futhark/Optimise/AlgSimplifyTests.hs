@@ -6,7 +6,6 @@ import Test.Framework
 import Test.Framework.Providers.HUnit
 
 import Data.List
-import Data.Loc
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.Map as M
 
@@ -54,7 +53,7 @@ suffCondTests =
 
         suffCondTest input expected =
           testCase ("sufficient conditions for " ++ input) $
-          suffsort (mkSuffConds' vars input noLoc ranges) @?=
+          suffsort (mkSuffConds' vars input ranges) @?=
           suffsort (map (map simplify'') expected)
 
         vars = declareVars [ ("n", Int)
@@ -91,18 +90,18 @@ instantiateRanges varinfo r =
         fixBound s  = Just $ parseScalExp' varinfo s
 
 simplify' :: VarInfo -> String -> RangesRep' -> ScalExp
-simplify' varinfo s r = case simplify e noLoc r' of
+simplify' varinfo s r = case simplify e r' of
   Left err -> error $ show err
   Right e' -> e'
   where e = parseScalExp' varinfo s
         r' = instantiateRanges varinfo r
 
-mkSuffConds' :: VarInfo -> String -> SrcLoc -> RangesRep' -> [[ScalExp]]
-mkSuffConds' varinfo s loc r =
-  case simplify e loc r' of
+mkSuffConds' :: VarInfo -> String -> RangesRep' -> [[ScalExp]]
+mkSuffConds' varinfo s r =
+  case simplify e r' of
     Left err -> error $ show err
     Right e' ->
-      case mkSuffConds e' loc r' of
+      case mkSuffConds e' r' of
         Left _ -> [[e']]
         Right sc -> sc
   where e = parseScalExp' varinfo s
