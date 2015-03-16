@@ -110,7 +110,7 @@ compileTest f inputf outputf = do
     ExitSuccess     -> return ()
   (gccCode, _, gccerr) <-
     io $ readProcessWithExitCode "gcc"
-    [cOutputf, "-o", binOutputf, "-lm", "-O3"] ""
+    [cOutputf, "-o", binOutputf, "-lm", "-O3", "-std=c99"] ""
   case gccCode of
     ExitFailure _ -> throwError gccerr
     ExitSuccess   -> return ()
