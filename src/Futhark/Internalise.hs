@@ -399,13 +399,11 @@ internaliseExp desc (E.Redomap lam1 lam2 ne arrs _) = do
   lam1' <- withNonuniqueReplacements $
            internaliseFoldLambda internaliseBody lam1
            (map I.subExpType nes) acc_arr_tps
---           internaliseFoldLambda internaliseBody lam1
---           (map I.subExpType nes) (map I.subExpType nes)
   lam2' <- withNonuniqueReplacements $
---           internaliseNewFoldLambda internaliseBody lam2
---           (map I.subExpType nes) (map I.Var arrs')
-           internaliseFoldLambda internaliseBody lam2
-           (map I.subExpType nes) (map I.identType arrs')
+           internaliseNewFoldLambda internaliseBody lam2
+           nes (map I.Var arrs')
+-- WAS:      internaliseFoldLambda internaliseBody lam2
+--           (map I.subExpType nes) (map I.identType arrs')
   letTupExp' desc $ I.LoopOp $
     I.Redomap [] lam1' lam2' nes arrs'
 

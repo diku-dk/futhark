@@ -161,24 +161,38 @@ internaliseFoldLambda internaliseBody lam acctypes arrtypes = do
 
 internaliseNewFoldLambda :: (E.Exp -> InternaliseM Body)
                          -> E.Lambda
-                         -> [I.Type]
+--                         -> [I.Type]
+                         -> [I.SubExp]
                          -> [I.SubExp]
                          -> InternaliseM I.Lambda
-internaliseNewFoldLambda internaliseBody lam acctypes arr_args = do  
+internaliseNewFoldLambda internaliseBody lam nes arr_args = do  
   let arrtypes = map I.subExpType arr_args
       rowtypes = map I.rowType arrtypes
+      acctypes = map I.subExpType nes
       
   (params, body, rettype) <- internaliseLambda internaliseBody lam $
                              acctypes ++ rowtypes
   -- split rettype into (i) accummulator types && (ii) result-array-elem types
-  let acc_len = (length acctypes) `div` 2
+  let acc_len = length acctypes
       (acc_tps, res_el_tps) = (take acc_len rettype, drop acc_len rettype)
-
-  -- for the map    part
+  -- For the map part:  for shape computation we build
+  -- a map lambda from the inner lambda by dropping from
+  -- the result the accumular and binding the accumulating 
+  -- param to their corresponding neutral-element subexp. 
+  -- Troels: would this be correct?
   (rettypearr', inner_shapes) <- instantiateShapes' res_el_tps
   let outer_shape = arraysSize 0 arrtypes
-      shape_body = shapeBody (map I.identName inner_shapes) rettypearr' body
-  shapefun <- makeShapeFun params shape_body (length inner_shapes)
+      acc_params  = take acc_len params
+      map_bodyres = I.Result $ drop acc_len $ I.resultSubExps $ I.bodyResult body
+      acc_bindings= map (\(ac_var,ac_val) -> 
+                            mkLet' [ac_var] (PrimOp $ SubExp ac_val)
+                        ) (zip acc_params nes)
+                    
+      map_bindings= acc_bindings ++ bodyBindings body
+      map_lore    = bodyLore body
+      map_body = I.Body map_lore map_bindings map_bodyres
+      shape_body = shapeBody (map I.identName inner_shapes) rettypearr' map_body
+  shapefun <- makeShapeFun (drop acc_len params) shape_body (length inner_shapes)
   bindMapShapes inner_shapes shapefun arr_args outer_shape
 
   -- for the reduce part
