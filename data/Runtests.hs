@@ -140,7 +140,8 @@ compareValue :: Value -> Value -> Bool
 compareValue (BasicVal bv1) (BasicVal bv2) =
   compareBasicValue bv1 bv2
 compareValue (ArrayVal vs1 _ _) (ArrayVal vs2 _ _) =
-  and $ zipWith compareBasicValue (A.elems vs1) (A.elems vs2)
+  A.bounds vs1 == A.bounds vs2 &&
+  and (zipWith compareBasicValue (A.elems vs1) (A.elems vs2))
 compareValue _ _ =
   False
 
