@@ -23,8 +23,8 @@ import Data.Bits
 
 tokens :-
 
-  $white+				;
-  "//"[^\n]*				;
+  $white+                               ;
+  "//"[^\n]*                            ;
   "&&"                     { const AND }
   "||"                     { const OR }
   ">>"                     { const SHIFTR }
@@ -127,7 +127,7 @@ type AlexInput = (AlexPosn,     -- current position,
 alexGetByte :: AlexInput -> Maybe (Byte,AlexInput)
 alexGetByte (p,c,(b:bs),s) = Just (b,(p,c,bs,s))
 alexGetByte (p,c,[],[]) = Nothing
-alexGetByte (p,_,[],(c:s))  = let p' = alexMove p c 
+alexGetByte (p,_,[],(c:s))  = let p' = alexMove p c
                                   (b:bs) = utf8Encode c
                               in p' `seq`  Just (b, (p', c, bs, s))
 
@@ -172,7 +172,7 @@ alexScanTokens file str = go (alexStartPos,'\n',[],str)
 
                 AlexSkip  inp' len     -> go inp'
                 AlexToken inp'@(pos',_,_,_) len act -> do
-                  let tok = L (loc pos pos') $ act (take len str) 
+                  let tok = L (loc pos pos') $ act (take len str)
                   toks <- go inp'
                   return $ tok : toks
         loc beg end = SrcLoc $ Loc (posnToPos beg) (posnToPos end)

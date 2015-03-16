@@ -798,7 +798,7 @@ checkLoopOp (Redomap ass outerfun innerfun accexps arrexps) = do
   accargs <- mapM checkArg accexps
   checkLambda innerfun $ accargs ++ arrargs
   let innerRetType = lambdaReturnType innerfun
-      innerAccType = take (length accexps) innerRetType  
+      innerAccType = take (length accexps) innerRetType
       asArg t = (t, mempty, mempty)
   checkLambda outerfun $ map asArg $ innerAccType ++ innerAccType
 

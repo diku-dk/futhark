@@ -531,10 +531,10 @@ typeOf (Filter _ arr _) = typeOf arr
 typeOf (Redomap outerfun innerfun start arr _) =
   let acc_tp = typeOf start
       res_el_tp = lambdaType innerfun [typeOf start, rowType $ typeOf arr]
-  in  if res_el_tp == acc_tp 
+  in  if res_el_tp == acc_tp
       then res_el_tp
       else case res_el_tp of
-             Tuple [_,el_tp] -> 
+             Tuple [_,el_tp] ->
                  Tuple [acc_tp, arrayType 1 el_tp $ uniqueness el_tp]
              _ -> acc_tp -- NOT reachable
 typeOf (Concat x ys _) = typeOf x `setUniqueness` u

@@ -146,7 +146,7 @@ transformExp (LoopOp (Redomap cs _ innerfun accexps arrexps)) = do
     dests <- letwith cs outarrs (pexp iv) $ map (PrimOp . SubExp) xis
     return $ resultBody (map Var inarrs ++ acc' ++ map Var dests)
   return $ LoopOp $
-    DoLoop (acc++outarrs) (loopMerge (inarrs++acc++outarrs) 
+    DoLoop (acc++outarrs) (loopMerge (inarrs++acc++outarrs)
     (map Var arrexps++initacc++map Var maparrs))
     (ForLoop i (isize inarrs)) loopbody
 

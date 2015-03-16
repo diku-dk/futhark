@@ -568,7 +568,7 @@ evalPrimOp (Concat _ arr1exp arr2exps _) = do
         (res,resouter,resshape) <- foldM concatArrVals (arr1',outerdim1,rowshape1) arr2s
         return [ArrayVal res bt (resouter:resshape)]
     _ -> bad $ TypeError "evalPrimOp Concat"
-  where 
+  where
     concatArrVals (acc,outerdim,rowshape) (ArrayVal arr2 _ (outerdim2:rowshape2)) =
         if rowshape == rowshape2
         then let nelems = (outerdim+outerdim2) * product rowshape
@@ -705,7 +705,7 @@ evalLoopOp (Redomap _ _ innerfun accexp arrexps) = do
           return $ acc_res ++ arr_res_fut
     where
         lam_ret_tp     = lambdaReturnType innerfun
-        res_len        = length lam_ret_tp 
+        res_len        = length lam_ret_tp
         acc_len        = length accexp
         lam_ret_arr_tp = drop acc_len lam_ret_tp
         foldfun  acc x = applyLambda innerfun $ acc ++ x

@@ -742,7 +742,7 @@ checkExp (Redomap outerfun innerfun accexp arrexp pos) = do
   if argType accarg == redtype
   then return $ Redomap outerfun' innerfun' accexp' arrexp' pos
   else case redtype of
-         Tuple (acctp:_) -> do 
+         Tuple (acctp:_) -> do
              _ <- require [acctp] accexp'
              return $ Redomap outerfun' innerfun' accexp' arrexp' pos
          _ -> bad $ TypeError pos "Redomap with illegal reduce type."

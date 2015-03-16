@@ -159,17 +159,17 @@ internaliseFoldLambda internaliseBody lam acctypes arrtypes = do
   return $ I.Lambda params body' rettype'
 
 
-internaliseRedomapInnerLambda :: 
+internaliseRedomapInnerLambda ::
                             (E.Exp -> InternaliseM Body)
                          -> E.Lambda
                          -> [I.SubExp]
                          -> [I.SubExp]
                          -> InternaliseM I.Lambda
-internaliseRedomapInnerLambda internaliseBody lam nes arr_args = do  
+internaliseRedomapInnerLambda internaliseBody lam nes arr_args = do
   let arrtypes = map I.subExpType arr_args
       rowtypes = map I.rowType arrtypes
       acctypes = map I.subExpType nes
-      
+
   (params, body, rettype) <- internaliseLambda internaliseBody lam $
                              acctypes ++ rowtypes
   -- split rettype into (i) accummulator types && (ii) result-array-elem types
@@ -177,17 +177,17 @@ internaliseRedomapInnerLambda internaliseBody lam nes arr_args = do
       (acc_tps, res_el_tps) = (take acc_len rettype, drop acc_len rettype)
   -- For the map part:  for shape computation we build
   -- a map lambda from the inner lambda by dropping from
-  -- the result the accumular and binding the accumulating 
-  -- param to their corresponding neutral-element subexp. 
+  -- the result the accumular and binding the accumulating
+  -- param to their corresponding neutral-element subexp.
   -- Troels: would this be correct?
   (rettypearr', inner_shapes) <- instantiateShapes' res_el_tps
   let outer_shape = arraysSize 0 arrtypes
       acc_params  = take acc_len params
       map_bodyres = I.Result $ drop acc_len $ I.resultSubExps $ I.bodyResult body
-      acc_bindings= map (\(ac_var,ac_val) -> 
+      acc_bindings= map (\(ac_var,ac_val) ->
                             mkLet' [ac_var] (PrimOp $ SubExp ac_val)
                         ) (zip acc_params nes)
-                    
+
       map_bindings= acc_bindings ++ bodyBindings body
       map_lore    = bodyLore body
       map_body = I.Body map_lore map_bindings map_bodyres
@@ -198,8 +198,8 @@ internaliseRedomapInnerLambda internaliseBody lam nes arr_args = do
   -- for the reduce part
   let acctype' = [ t `setArrayShape` arrayShape shape
                    | (t,shape) <- zip acc_tps acctypes ]
-  -- The reduce-part result of the body must have the exact same 
-  -- shape as the initial accumulator.  We accomplish this with 
+  -- The reduce-part result of the body must have the exact same
+  -- shape as the initial accumulator.  We accomplish this with
   -- an assertion and reshape().
 
   -- finally, place assertions and return result
