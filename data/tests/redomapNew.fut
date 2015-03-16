@@ -1,11 +1,11 @@
-fun [real] main([int] arr) =
+fun {[real],[[real]]} main([int] arr) =
     redomap( // why parse error if I write: zipWith(op +) ???
              fn [real] ([real] a, [real] b) =>
                  zipWith(op +, a, b)
-           , fn [real] ([real] acc, int a) =>
+           , fn {[real],[real]} ([real] acc, int a) =>
                  let r = map( fn real (int x) => toReal(2*x*a)
                             , iota(3) ) 
-                 in  zipWith(op +, acc, r)
+                 in  { zipWith(op +, acc, r), r }
            , replicate(3,0.0), arr ) 
 
 fun real main0([int] arr) =
