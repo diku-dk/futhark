@@ -95,14 +95,14 @@ loopOpExtType (Redomap _ outerfun innerfun _ ids) =
       acc_el_tp = lambdaReturnType innerfun
       res_el_tp = drop (length acc_tp) acc_el_tp
   in  case res_el_tp of
-        [] -> staticShapes $ acc_tp
-        _  -> let outersize  = arraysSize 0 (map identType ids) 
+        [] -> staticShapes acc_tp
+        _  -> let outersize  = arraysSize 0 (map identType ids)
                   res_arr_tp :: [Type]
-                  res_arr_tp = map (\eltp -> arrayOf eltp 
-                                                     (Shape [outersize]) 
-                                                     (uniqueness eltp  )
-                                   ) res_el_tp 
-              in  staticShapes $ (acc_tp ++ res_arr_tp)
+                  res_arr_tp = map (\eltp -> arrayOf eltp
+                                                     (Shape [outersize])
+                                                     (uniqueness eltp)
+                                   ) res_el_tp
+              in  staticShapes (acc_tp ++ res_arr_tp)
 
 expExtType :: IsRetType (RetType lore) => Exp lore -> [ExtType]
 expExtType (Apply _ _ rt) = retTypeValues rt
