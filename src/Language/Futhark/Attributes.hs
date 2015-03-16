@@ -528,7 +528,7 @@ typeOf (Scan fun start arr _) =
   arrayType 1 et $ uniqueness et
     where et = lambdaType fun [typeOf start, rowType $ typeOf arr]
 typeOf (Filter _ arr _) = typeOf arr
-typeOf (Redomap outerfun innerfun start arr _) =
+typeOf (Redomap _ innerfun start arr _) =
   let acc_tp = typeOf start
       res_el_tp = lambdaType innerfun [typeOf start, rowType $ typeOf arr]
   in  if res_el_tp == acc_tp
