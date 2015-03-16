@@ -6,7 +6,7 @@ before_install:
 ghc: 7.8
 
 script:
-  - cabal configure --enable-tests && cabal build && cabal test
+  - cabal configure --enable-tests && cabal build --ghc-options -Werror && cabal test
   - tools/style-check.sh src
 
 notifications:
