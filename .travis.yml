@@ -5,6 +5,10 @@ before_install:
 
 ghc: 7.8
 
+script:
+  - cabal configure --enable-tests && cabal build && cabal test
+  - tools/style-check.sh src
+
 notifications:
   email:
     - athas@sigkill.dk
