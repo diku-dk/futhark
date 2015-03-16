@@ -4,3 +4,8 @@ before_install:
   cabal install happy alex
 
 ghc: 7.8
+
+notifications:
+  email:
+    - athas@sigkill.dk
+    - cosmin.oancea@diku.dk
