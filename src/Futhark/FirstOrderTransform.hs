@@ -127,7 +127,7 @@ transformExp (LoopOp (Redomap cs _ innerfun accexps arrexps)) = do
   let acc_num     = length accexps
   let res_tps     = lambdaReturnType innerfun
   let map_arr_tps = drop (length accexps) res_tps
-  maparrs <- resultArray $
+  maparrs <- resultArray
                [ arrayOf t (Shape [outersize]) (uniqueness t)
                  | t <- map_arr_tps ]
   outarrs <- forM (map identType maparrs) $ \t ->
