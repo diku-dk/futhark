@@ -51,6 +51,8 @@ instance Pretty Value where
   ppr (BasicVal bv) = ppr bv
   ppr v
     | Just s <- arrayString v = text $ show s
+  ppr (ArrayVal a t _)
+    | null $ elems a = text "empty" <> parens (ppr t)
   ppr (ArrayVal a t (_:rowshape@(_:_))) =
     brackets $ commastack
     [ ppr $ ArrayVal (listArray (0, rowsize-1) a') t rowshape

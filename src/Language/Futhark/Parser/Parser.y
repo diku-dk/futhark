@@ -440,9 +440,8 @@ ArrayValue :  '[' Value ']'
                   Nothing -> throwError "Invalid array value"
                   Just ts -> return $ ArrayVal (arrayFromList $ $2:$4) $ removeNames ts
              }
-           | '[' ']'
-           {% return $ ArrayVal (arrayFromList []) $ toDecl $ Basic Int
-           }
+           | empty '(' Type ')'
+             { emptyArray $3 }
 TupleValue : '{' Values '}' { TupVal $2 }
 
 Values : Value ',' Values { $1 : $3 }
