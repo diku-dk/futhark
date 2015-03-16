@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -w #-}
 -- | Convert an Futhark program in internal representation to a
 -- corresponding program in external representation.  No effort is
 -- made to make the external program look pretty, but correctness and
