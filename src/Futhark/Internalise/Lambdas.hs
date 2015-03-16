@@ -2,7 +2,7 @@ module Futhark.Internalise.Lambdas
   ( internaliseMapLambda
   , internaliseConcatMapLambda
   , internaliseFoldLambda
-  , internaliseNewFoldLambda
+  , internaliseRedomapInnerLambda
   , internaliseFilterLambda
   )
   where
@@ -159,13 +159,13 @@ internaliseFoldLambda internaliseBody lam acctypes arrtypes = do
   return $ I.Lambda params body' rettype'
 
 
-internaliseNewFoldLambda :: (E.Exp -> InternaliseM Body)
+internaliseRedomapInnerLambda :: 
+                            (E.Exp -> InternaliseM Body)
                          -> E.Lambda
---                         -> [I.Type]
                          -> [I.SubExp]
                          -> [I.SubExp]
                          -> InternaliseM I.Lambda
-internaliseNewFoldLambda internaliseBody lam nes arr_args = do  
+internaliseRedomapInnerLambda internaliseBody lam nes arr_args = do  
   let arrtypes = map I.subExpType arr_args
       rowtypes = map I.rowType arrtypes
       acctypes = map I.subExpType nes
