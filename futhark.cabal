@@ -56,7 +56,6 @@ Library
                    Futhark.CodeGen.Backends.SimpleRepresentation
                    Futhark.CodeGen.ImpCode
                    Futhark.CodeGen.ImpGen
-                   Futhark.Dev
                    Futhark.ExplicitAllocations
                    Futhark.Externalise
                    Futhark.FirstOrderTransform
