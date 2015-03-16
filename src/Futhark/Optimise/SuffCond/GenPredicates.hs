@@ -104,13 +104,6 @@ splitBinding bnd@(Let pat _ (LoopOp (Map cs fun args))) = do
           LoopOp $ Map cs valfun args,
           ok)
 
-splitBinding bnd@(Let pat _ (LoopOp (Filter cs fun args))) = do
-  (predbnds, valfun, ok) <- splitMap cs fun args
-  return (predbnds ++ [bnd],
-          mkLet' (patternIdents pat) $
-          LoopOp $ Filter cs valfun args,
-          ok)
-
 splitBinding bnd@(Let pat _ (LoopOp (Reduce cs fun args))) = do
   (predbody, valfun, ok) <- splitReduce cs fun args
   return (predbody ++ [bnd],

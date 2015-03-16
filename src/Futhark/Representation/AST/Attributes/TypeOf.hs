@@ -7,7 +7,6 @@ module Futhark.Representation.AST.Attributes.TypeOf
        , primOpType
        , loopOpExtType
        , mapType
-       , filterType
        , valueShapeContext
        , subExpShapeContext
        , loopShapeContext
@@ -35,14 +34,6 @@ mapType :: Lambda lore -> [Type] -> [Type]
 mapType f arrts = [ arrayOf t (Shape [outersize]) (uniqueness t)
                  | t <- lambdaReturnType f ]
   where outersize = arraysSize 0 arrts
-
-filterType :: Lambda lore -> [Type] -> [ExtType]
-filterType _ =
-  map extOuterDim
-  where extOuterDim t =
-          t `setArrayShape` ExtShape (extOuterDim' $ arrayShape t)
-        extOuterDim' (Shape dims) =
-          Ext 0 : map Free (drop 1 dims)
 
 primOpType :: PrimOp lore -> [Type]
 primOpType (SubExp se) =
@@ -84,6 +75,8 @@ primOpType (Assert _ _) =
   [Basic Cert]
 primOpType (Alloc e) =
   [Mem e]
+primOpType (Partition _ n _ array) =
+  replicate n (Basic Int) ++ [identType array]
 
 loopOpExtType :: LoopOp lore -> [ExtType]
 loopOpExtType (DoLoop res merge _ _) =
@@ -97,8 +90,6 @@ loopOpExtType (Reduce _ fun _) =
   staticShapes $ lambdaReturnType fun
 loopOpExtType (Scan _ _ inputs) =
   staticShapes $ map (identType . snd) inputs
-loopOpExtType (Filter _ f arrs) =
-  filterType f $ map identType arrs
 loopOpExtType (Redomap _ outerfun innerfun _ ids) =
   let acc_tp    = lambdaReturnType outerfun
       acc_el_tp = lambdaReturnType innerfun

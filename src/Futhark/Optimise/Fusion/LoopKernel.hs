@@ -213,29 +213,7 @@ removeUnusedParams l inps =
 mapFusionOK :: [Ident] -> FusedKer -> Bool
 mapFusionOK outIds ker = any (`elem` inputs ker) (map SOAC.varInput outIds)
 
--- | Check that the input-array set of consumer is equal to the
--- output-array set of producer.  That is, a filter-producer can only
--- be fused with a filter or reduce-consumer if the consumer accepts
--- input from no other source, and consumes everything by the
--- producer.
-filterFusionOK :: [Ident] -> FusedKer -> Bool
-filterFusionOK outIds ker =
-  case mapM SOAC.isVarInput $ inputs ker of
-    Nothing       -> False
-    Just inputIds -> all (`elem` outIds) inputIds &&
-                     all (`elem` inputIds) outIds
-
--- | Check that the input-array set of consumer is contained in the
--- output-array set of producer.  That is, a filter-producer can only
--- be fused if the consumer accepts input from no other source.
-filterFoldFusionOK :: [Ident] -> FusedKer -> Bool
-filterFoldFusionOK outIds ker =
-  case mapM SOAC.isVarInput $ inputs ker of
-    Nothing       -> False
-    Just inputIds -> all (`elem` outIds) inputIds
-
 mapOrFilter :: SOAC -> Bool
-mapOrFilter (SOAC.Filter {}) = True
 mapOrFilter (SOAC.Map {})    = True
 mapOrFilter _                 = False
 
@@ -273,19 +251,6 @@ fuseSOACwithKer outIds soac1 ker = do
       | mapFusionOK outIds ker -> do
       let (res_lam, new_inp) = fuseMaps lam1 inp1_arr outPairs lam2 inp2_arr
       success $ SOAC.Redomap (cs1++cs2) lam21 res_lam ne new_inp
-
-    -- The Fusions that are semantically filter fusions:
-    (SOAC.Redomap _ lam21 _ nes _, SOAC.Filter {})
-      | filterFoldFusionOK outIds ker-> do
-      names <- replicateM (length $ lambdaReturnType lam21) $ newVName "check"
-      let (res_lam, new_inp) = fuseFilterIntoFold lam1 inp1_arr outPairs lam2 inp2_arr names
-      success $ SOAC.Redomap (cs1++cs2) lam21 res_lam nes new_inp
-
-    (SOAC.Filter {}, SOAC.Filter {})
-      | filterFusionOK outIds ker -> do
-      name <- newVName "check"
-      let (res_lam, new_inp) = fuseFilters lam1 inp1_arr outPairs lam2 inp2_arr name
-      success $ SOAC.Filter (cs1++cs2) res_lam new_inp
 
     -- Nothing else worked, so mkLets try rewriting to redomap if
     -- possible.

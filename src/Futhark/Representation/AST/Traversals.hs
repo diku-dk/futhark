@@ -161,6 +161,11 @@ mapExpM tv (PrimOp (Alloc e)) =
   PrimOp <$> (pure Alloc <*> mapOnSubExp tv e)
 mapExpM tv (PrimOp (Assert e loc)) =
   PrimOp <$> (pure Assert <*> mapOnSubExp tv e <*> pure loc)
+mapExpM tv (PrimOp (Partition cs n flags arr)) =
+  PrimOp <$> (pure Partition <*> mapOnCertificates tv cs <*>
+              pure n <*>
+              mapOnIdent tv flags <*>
+              mapOnIdent tv arr)
 mapExpM tv (LoopOp (DoLoop res mergepat form loopbody)) =
   LoopOp <$> (DoLoop <$> mapM (mapOnIdent tv) res <*>
               (zip <$> mapM (mapOnFParam tv) vs <*> mapM (mapOnSubExp tv) es) <*>
@@ -185,10 +190,6 @@ mapExpM tv (LoopOp (Scan cs fun inputs)) =
               (zip <$> mapM (mapOnSubExp tv) startexps <*>
                        mapM (mapOnIdent tv) arrexps))
   where (startexps, arrexps) = unzip inputs
-mapExpM tv (LoopOp (Filter cs fun arrexps)) =
-  LoopOp <$> (pure Filter <*> mapOnCertificates tv cs <*>
-              mapOnLambda tv fun <*>
-              mapM (mapOnIdent tv) arrexps)
 mapExpM tv (LoopOp (Redomap cs redfun mapfun accexps arrexps)) =
   LoopOp <$> (pure Redomap <*> mapOnCertificates tv cs <*>
               mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>

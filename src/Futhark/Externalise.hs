@@ -141,10 +141,6 @@ externaliseLoopOp (I.Scan _ fun inputs) =
                (externaliseSOACArrayArgs arrinputs)
                noLoc
   where (accinputs, arrinputs) = unzip inputs
-externaliseLoopOp (I.Filter _ fun es) =
-  maybeUnzip $ E.Filter (externaliseMapLambda fun)
-                        (externaliseSOACArrayArgs es)
-                        noLoc
 externaliseLoopOp (I.Redomap _ outerfun innerfun vs as) =
   E.Redomap (externaliseFoldLambda outerfun $ length vs)
             (externaliseFoldLambda innerfun $ length vs)

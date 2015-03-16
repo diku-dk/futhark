@@ -681,6 +681,15 @@ checkPrimOp (Assert e _) =
 checkPrimOp (Alloc e) =
   require [Basic Int] e
 
+checkPrimOp (Partition cs _ flags arr) = do
+  mapM_ (requireI [Basic Cert]) cs
+  flagst <- checkIdent flags
+  arrt <- checkIdent arr
+  unless (rowType flagst == Basic Int) $
+    bad $ TypeError noLoc $ "Flag array has type " ++ pretty flagst ++ "."
+  unless (arrayRank arrt > 0) $
+    bad $ TypeError noLoc $ "Array argument to partition has type " ++ pretty arrt ++ "."
+
 checkLoopOp :: Checkable lore =>
                LoopOp lore -> TypeM lore ()
 
@@ -782,16 +791,6 @@ checkLoopOp (Scan ass fun inputs) = do
     bad $ TypeError noLoc $
     "Array element value is of type " ++ prettyTuple intupletype ++
     ", but scan function returns type " ++ prettyTuple funret ++ "."
-
-checkLoopOp (Filter ass fun arrexps) = do
-  mapM_ (requireI [Basic Cert]) ass
-  arrargs <- checkSOACArrayArgs arrexps
-  checkLambda fun arrargs
-  let funret = lambdaReturnType fun
-  when (funret /= [Basic Bool]) $
-    bad $ TypeError noLoc "Filter function does not return bool."
-  when (any (unique . identType) $ lambdaParams fun) $
-    bad $ TypeError noLoc "Filter function consumes its arguments."
 
 checkLoopOp (Redomap ass outerfun innerfun accexps arrexps) = do
   mapM_ (requireI [Basic Cert]) ass

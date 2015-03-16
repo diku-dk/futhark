@@ -25,6 +25,7 @@ import Futhark.Renamer as I
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Substitute
+
 import Futhark.Internalise.Monad
 import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.TypesValues
@@ -384,10 +385,17 @@ internaliseExp desc (E.Scan lam ne arr loc) = do
   letTupExp' desc $ I.LoopOp $ I.Scan [] lam' input
 
 internaliseExp desc (E.Filter lam arr _) = do
-  arrs <- internaliseExpToIdents "filter_arr" arr
+  arrs <- internaliseExpToIdents "filter_input" arr
   lam' <- withNonuniqueReplacements $
           internaliseFilterLambda internaliseBody lam $ map I.Var arrs
-  letTupExp' desc $ I.LoopOp $ I.Filter [] lam' arrs
+  flags <- letExp "filter_partition_flags" $ I.LoopOp $ I.Map [] lam' arrs
+  forM arrs $ \arr' -> do
+    filter_size <- newIdent "filter_size" $ I.Basic Int
+    filter_perm <- newIdent "filter_perm" $ I.identType arr'
+    addBinding $ mkLet' [filter_size,filter_perm] $
+      I.PrimOp $ Partition [] 1 flags arr'
+    letSubExp desc $
+      I.PrimOp $ I.Split [] [I.Var filter_size] filter_perm
 
 internaliseExp desc (E.Redomap lam1 lam2 ne arrs _) = do
   arrs' <- internaliseExpToIdents "redomap_arr" arrs

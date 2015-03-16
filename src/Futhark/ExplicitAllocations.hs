@@ -358,8 +358,6 @@ allocInExp (LoopOp (Scan {})) =
   fail "Cannot put explicit allocations in scan yet."
 allocInExp (LoopOp (Redomap {})) =
   fail "Cannot put explicit allocations in redomap yet."
-allocInExp (LoopOp (Filter {})) =
-  fail "Cannot put explicit allocations in filter yet."
 allocInExp (Apply fname args rettype) = do
   args' <- funcallArgs args
   return $ Apply fname args' (memoryInRetType rettype)

@@ -179,6 +179,10 @@ data PrimOp lore
   -- must be a permutation of @[0,n-1]@, where @n@ is the
   -- number of dimensions in the input array.
 
+  | Partition Certificates Int Ident Ident
+    -- ^ First variable is the flag array, second is the element
+    -- array.
+
   | Alloc SubExp
     -- ^ Allocate a memory block.  This really should not be an
     -- expression, but what are you gonna do...
@@ -198,7 +202,6 @@ data LoopOp lore
 
   | Reduce  Certificates (LambdaT lore) [(SubExp, Ident)]
   | Scan   Certificates (LambdaT lore) [(SubExp, Ident)]
-  | Filter  Certificates (LambdaT lore) [Ident]
   | Redomap Certificates (LambdaT lore) (LambdaT lore) [SubExp] [Ident]
 
 deriving instance Lore lore => Eq (LoopOp lore)

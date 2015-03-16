@@ -121,61 +121,6 @@ transformExp (LoopOp (Scan cs fun args)) = do
         arrexps_nonunique = [ v { identType = identType v `setUniqueness` Nonunique }
                             | v <- arrexps ]
 
-transformExp (LoopOp (Filter cs fun arrexps)) = do
-  arr <- letExps "arr" $ map (PrimOp . SubExp . Var) arrexps
-  let nv = isize arrexps
-      rowtypes = map (rowType . identType) arrexps
-  (xs, _) <- unzip <$> mapM (newVar "x") rowtypes
-  (i, iv) <- newVar "i" $ Basic Int
-  test <- insertBindingsM $ do
-   [check] <- bodyBind =<< transformLambda fun (map (PrimOp . SubExp . Var) xs) -- XXX
-   res <- letSubExp "res" $
-          If check
-             (resultBody [intconst 1])
-             (resultBody [intconst 0])
-             [Basic Int]
-   return $ resultBody [res]
-  mape <- letExp "mape" <=< transformExp $
-          LoopOp $ Map cs (Lambda xs test [Basic Int]) arr
-  plus <- do
-    (a,av) <- newVar "a" (Basic Int)
-    (b,bv) <- newVar "b" (Basic Int)
-    body <- insertBindingsM $ do
-      res <- letSubExp "sum" $ PrimOp $ BinOp Plus av bv Int
-      return $ resultBody [res]
-    return $ Lambda [a, b] body [Basic Int]
-  scan <- transformExp $ LoopOp $ Scan cs plus [(intconst 0,mape)]
-  ia <- (`setIdentUniqueness` Nonunique) <$> letExp "ia" scan
-  let indexia ind = eIndex cs ia [ind]
-      sub1 e = eBinOp Minus e (pexp $ intconst 1) Int
-      indexi = indexia $ pexp iv
-      indexin = index cs arr iv
-      indexinm1 = indexia $ sub1 $ pexp iv
-  outersize <- letSubExp "filter_result_size" =<< indexia (sub1 $ pexp nv)
-
-  resinit_presplit <- resultArray $ map identType arrexps
-  resinit <- forM resinit_presplit $ \v -> do
-    splitres <- letTupExp "filter_split_result" $
-      PrimOp $ Split cs [outersize] v
-    case splitres of
-      [x] -> return x
-      _     -> fail "FirstOrderTransform filter: weird split result"
-
-  res <- forM (map identType resinit) $ \t -> newIdent "filter_result" t
-  mergesize <- newIdent "mergesize" (Basic Int)
-  let resv = resultBody (map Var $ mergesize : res)
-  loopbody <- insertBindingsM $ do
-    let update = insertBindingsM $ do
-          dest <- letwith cs res (sub1 indexi) indexin
-          return $ resultBody (map Var $ mergesize:dest)
-    eBody [eIf (eIf (pure $ PrimOp $ BinOp Equal iv (intconst 0) Bool)
-               (eBody [eBinOp Equal indexi (pexp $ intconst 0) Bool])
-               (eBody [eBinOp Equal indexi indexinm1 Bool]))
-           (pure resv) update]
-  return $ LoopOp $ DoLoop (mergesize:res)
-    (loopMerge (mergesize:res) (outersize:map Var resinit))
-    (ForLoop i nv) loopbody
-
 transformExp (LoopOp (Redomap cs _ innerfun accexps arrexps)) = do
   let outersize = arraysSize 0 (map identType arrexps)
   -- for the MAP    part
@@ -208,19 +153,6 @@ transformExp (LoopOp (Redomap cs _ innerfun accexps arrexps)) = do
 transformExp e = mapExpM transform e
 
 transformBinding :: Binding -> Binder Basic Binding
-transformBinding (Let pat () e@(LoopOp (Filter {})))
-  | size : rest <- patternIdents pat = do
-  -- FIXME: we need to fix the shape of the type for filter, which is
-  -- done in a hacky way here.  The better solution is to change how
-  -- filter works.
-  size':rest' <- letTupExp "filter_for" =<< transformExp e
-  addBinding $ mkLet' [size] $ PrimOp $ SubExp $ Var size'
-  let reshapeResult dest orig =
-        addBinding $ mkLet' [dest] $
-        PrimOp $ Reshape [] (arrayDims $ identType dest) orig
-  zipWithM_ reshapeResult rest rest'
-  dummy <- newVName "dummy"
-  mkLetNames' [dummy] $ PrimOp $ SubExp $ intconst 0
 transformBinding (Let pat annot e) =
   Let pat annot <$> transformExp e
 

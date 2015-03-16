@@ -63,6 +63,8 @@ primOpAliases (Assert {}) =
   [mempty]
 primOpAliases (Alloc _) =
   [mempty]
+primOpAliases (Partition _ n _ arr) =
+  replicate n mempty ++ [identAliases arr]
 
 loopOpAliases :: (Aliased lore) => LoopOp lore -> [Names]
 loopOpAliases (DoLoop res merge _ loopbody) =
@@ -74,8 +76,6 @@ loopOpAliases (Reduce _ f _) =
   map (const mempty) $ lambdaReturnType f
 loopOpAliases (Scan _ f _) =
   map (const mempty) $ lambdaReturnType f
-loopOpAliases (Filter _ _ arrs) =
-  map identAliases arrs
 loopOpAliases (Redomap _ outerfun _ _ _) =
   map (const mempty) $ lambdaReturnType outerfun
 loopOpAliases (ConcatMap {}) =

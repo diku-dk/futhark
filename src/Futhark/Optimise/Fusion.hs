@@ -375,12 +375,6 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res)
           (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
           greedyFuse False used_lam blres (pat, soac)
 
-        SOAC.Filter _ lam _ -> do
-          bres  <- bindingFamily pat $ fusionGatherBody fres body
-          (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
-          greedyFuse False used_lam blres
-            (Pattern $ drop 1 $ patternElements pat, soac)
-
         SOAC.Reduce _ lam args -> do
           -- a reduce always starts a new kernel
           let nes = map fst args
@@ -479,7 +473,6 @@ fusionGatherExp fres (If cond e_then e_else _) = do
 fusionGatherExp _ (LoopOp (Map     {})) = errorIllegal "map"
 fusionGatherExp _ (LoopOp (Reduce  {})) = errorIllegal "reduce"
 fusionGatherExp _ (LoopOp (Scan    {})) = errorIllegal "scan"
-fusionGatherExp _ (LoopOp (Filter  {})) = errorIllegal "filter"
 fusionGatherExp _ (LoopOp (Redomap {})) = errorIllegal "redomap"
 
 -----------------------------------

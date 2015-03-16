@@ -214,4 +214,15 @@ internaliseFilterLambda internaliseBody lam args = do
   let argtypes = map I.subExpType args
       rowtypes = map I.rowType argtypes
   (params, body, _) <- internaliseLambda internaliseBody lam rowtypes
-  return $ I.Lambda params body [I.Basic Bool]
+  body' <- case body of
+    Body () bodybnds (Result [boolres]) -> do
+      intres <- newIdent "filter_equivalence_class" $ I.Basic Int
+      let resbranch = Let (basicPattern [(intres,BindVar)]) () $
+                      I.If boolres
+                      (resultBody [intconst 0])
+                      (resultBody [intconst 1])
+                      [I.Basic Int]
+      return $ Body () (bodybnds++[resbranch]) $ Result [I.Var intres]
+    _ ->
+      fail "Filter lambda returns too many values."
+  return $ I.Lambda params body' [I.Basic Int]

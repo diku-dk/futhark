@@ -188,6 +188,10 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
   ppr (Copy e) = text "copy" <> parens (ppr e)
   ppr (Assert e _) = text "assert" <> parens (ppr e)
   ppr (Alloc e) = text "alloc" <> apply [ppr e]
+  ppr (Partition cs n flags arr) =
+    ppCertificates' cs <>
+    text "partition" <>
+    parens (commasep [ ppr n, ppr flags, ppr arr ])
 
 instance PrettyLore lore => Pretty (LoopOp lore) where
   ppr (DoLoop res mergepat form loopbody) =
@@ -222,8 +226,6 @@ instance PrettyLore lore => Pretty (LoopOp lore) where
   ppr (Scan cs lam inputs) =
     ppCertificates' cs <> ppSOAC "scan" [lam] (Just es) as
     where (es, as) = unzip inputs
-  ppr (Filter cs lam as) =
-    ppCertificates' cs <> ppSOAC "filter" [lam] Nothing as
 
 instance PrettyLore lore => Pretty (Exp lore) where
   ppr (If c t f _) = text "if" <+> ppr c </>

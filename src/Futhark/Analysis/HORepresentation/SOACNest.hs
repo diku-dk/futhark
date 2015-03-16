@@ -29,7 +29,7 @@ import Control.Monad
 
 import Data.Maybe
 
-import Futhark.Representation.AST hiding (Map, Reduce, Scan, Filter, Redomap)
+import Futhark.Representation.AST hiding (Map, Reduce, Scan, Redomap)
 import Futhark.MonadFreshNames
 import Futhark.Binder
 import Futhark.Tools (instantiateExtTypes)
@@ -107,7 +107,6 @@ lambdaToBody l = fromMaybe (Fun l) $ liftM (uncurry $ flip NewNest) $ nested l
 data Combinator lore = Map Certificates (NestBody lore)
                      | Reduce Certificates (NestBody lore) [SubExp]
                      | Scan Certificates (NestBody lore) [SubExp]
-                     | Filter Certificates (NestBody lore)
                      | Redomap Certificates (Lambda lore) (NestBody lore) [SubExp]
                  deriving (Show)
 
@@ -123,14 +122,12 @@ body :: Combinator lore -> NestBody lore
 body (Map _ b) = b
 body (Reduce _ b _) = b
 body (Scan _ b _) = b
-body (Filter _ b) = b
 body (Redomap _ _ b _) = b
 
 setBody :: NestBody lore -> Combinator lore -> Combinator lore
 setBody b (Map cs _) = Map cs b
 setBody b (Reduce cs _ es) = Reduce cs b es
 setBody b (Scan cs _ es) = Scan cs b es
-setBody b (Filter cs _) = Filter cs b
 setBody b (Redomap cs l _ es) = Redomap cs l b es
 
 combinatorFirstLoop :: Combinator lore -> ([Param], [Type])
@@ -170,7 +167,6 @@ combCertificates :: Combinator lore -> Certificates
 combCertificates (Map     cs _    ) = cs
 combCertificates (Reduce  cs _   _) = cs
 combCertificates (Scan    cs _   _) = cs
-combCertificates (Filter  cs _    ) = cs
 combCertificates (Redomap cs _ _ _) = cs
 
 -- | Sets the certificates used in a 'Combinator'.
@@ -178,7 +174,6 @@ setCombCertificates :: Certificates -> Combinator lore -> Combinator lore
 setCombCertificates cs (Map     _ bdy    ) = Map    cs bdy
 setCombCertificates cs (Reduce  _ bdy acc) = Reduce cs bdy acc
 setCombCertificates cs (Scan    _ bdy acc) = Scan   cs bdy acc
-setCombCertificates cs (Filter  _ bdy    ) = Filter cs bdy
 setCombCertificates cs (Redomap _ fun bdy acc) = Redomap cs fun bdy acc
 
 typeOf :: SOACNest lore -> [ExtType]
@@ -194,12 +189,6 @@ typeOf (SOACNest inps (Scan _ _ accinit)) =
   staticShapes [ arrayOf t (Shape [outersize]) (uniqueness t)
                | t <- map subExpType accinit ]
   where outersize = arraysSize 0 $ map SOAC.inputType inps
-typeOf (SOACNest inps (Filter {})) =
-  map (extOuterDim . SOAC.inputType) inps
-  where extOuterDim t =
-          t `setArrayShape` ExtShape (extOuterDim' $ arrayShape t)
-        extOuterDim' (Shape dims) =
-          Ext 0 : map Free (drop 1 dims)
 
 fromExp :: Bindable lore =>
            Exp lore -> Either SOAC.NotSOAC (SOACNest lore)
@@ -217,8 +206,6 @@ fromSOAC (SOAC.Reduce cs l args) =
 fromSOAC (SOAC.Scan cs l args) =
   SOACNest (map snd args) $
   Scan cs (lambdaToBody l) (map fst args)
-fromSOAC (SOAC.Filter cs l as) =
-  SOACNest as $ Filter cs (lambdaToBody l)
 fromSOAC (SOAC.Redomap cs ol l es as) =
   -- Never nested, because we need a way to test alpha-equivalence of
   -- the outer combining function.
@@ -251,10 +238,6 @@ toSOAC (SOACNest as (Scan cs b es)) =
   SOAC.Scan cs <$>
   bodyToLambda (map subExpType es ++ map SOAC.inputRowType as) b <*>
   pure (zip es as)
-toSOAC (SOACNest as (Filter cs b)) =
-  SOAC.Filter cs <$>
-  bodyToLambda (map SOAC.inputRowType as) b <*>
-  pure as
 toSOAC (SOACNest as (Redomap cs l b es)) =
   SOAC.Redomap cs l <$>
   bodyToLambda (map subExpType es ++ map SOAC.inputRowType as) b <*>
