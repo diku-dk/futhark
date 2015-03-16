@@ -7,7 +7,6 @@ module Futhark.Optimise.SuffCond.OptPredicates
 
 import Control.Applicative
 import Control.Arrow (second)
-import Data.List (isInfixOf)
 import Data.Foldable (any)
 import Data.Maybe
 import Data.Monoid
@@ -111,7 +110,7 @@ generateOptimisedPredicates'
          Simplify.simplifyBody (map diet $ retTypeValues rettype) $
          rephraseWithInvariance body
   case res of
-    (body', _) -> do
+    (body', True) -> do
       fundec <- simplifyFunWithRules bindableSimplifiable basicRules $
                 FunDec fname' rettype params (removeBodyLore body')
       return $ Just fundec
@@ -129,6 +128,7 @@ rephraseWithInvariance = rephraseBody rephraser
                               , rephraseLetBoundLore = const Nothing
                               , rephraseFParamLore = const ()
                               , rephraseBodyLore = const ()
+                              , rephraseRetType = id
                               }
 
 data SCEntry = SufficientCond [[ScalExp]]
@@ -284,6 +284,7 @@ instance MonadFreshNames m => MonadBinder (VariantM m) where
                   else Invariant
         pat' = Pattern [ S.PatElem v BindVar Nothing | v <- patternIdents pat ]
     return $ mkAliasedLetBinding pat' explore e
+
   mkBodyM bnds res =
     return $ mkAliasedBody () bnds res
 
@@ -341,6 +342,15 @@ instance MonadFreshNames m =>
             suffpat = Pattern [ S.PatElem v BindVar Nothing | v <- vs ]
         makeSufficientBinding =<< mkLetM (addAliasesToPattern suffpat suffe) suffe
         Simplify.defaultInspectBinding $ Let pat' lore e
+
+  simplifyLetBoundLore Nothing  = return Nothing
+  simplifyLetBoundLore (Just v) = Just <$> Simplify.simplifyIdent v
+
+  simplifyFParamLore =
+    return
+
+  simplifyRetType    =
+    liftM ExtRetType . mapM Simplify.simplifyExtType . retTypeValues
 
 makeSufficientBinding :: MonadFreshNames m => S.Binding Invariance -> VariantM m ()
 makeSufficientBinding bnd = do
@@ -443,8 +453,10 @@ forbiddenExp context = isNothing . walkExpM walk
                       , walkOnBody    = checkIf forbiddenBody
                       , walkOnBinding = checkIf $ isForbidden . snd . bindingLore
                       , walkOnIdent   = checkIf forbiddenIdent
-                      , walkOnCertificates = mapM_ $ checkIf forbiddenIdent
                       , walkOnLambda  = checkIf $ forbiddenBody . lambdaBody
+                      , walkOnRetType = checkIf forbiddenRetType
+                      , walkOnFParam  = checkIf forbiddenFParam
+                      , walkOnCertificates = mapM_ $ checkIf forbiddenIdent
                       }
         checkIf f x = if f x
                       then Nothing
@@ -456,3 +468,6 @@ forbiddenExp context = isNothing . walkExpM walk
         forbiddenSubExp (Constant {}) = False
 
         forbiddenBody = any (isForbidden . snd . bindingLore) . bodyBindings
+
+        forbiddenRetType = any forbiddenIdent . freeIn
+        forbiddenFParam = any forbiddenIdent . freeIn
