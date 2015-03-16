@@ -23,7 +23,7 @@ import Futhark.Tools
 -- renamer!
 transformProg :: Prog -> Prog
 transformProg prog =
-  {-renameProg $-} Prog $ evalState (mapM transformFunDec $ progFunctions prog) src
+  renameProg $ Prog $ evalState (mapM transformFunDec $ progFunctions prog) src
   where src = newNameSourceForProg prog
 
 transformFunDec :: MonadFreshNames m => FunDec -> m FunDec
