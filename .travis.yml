@@ -6,8 +6,12 @@ before_install:
 ghc: 7.8
 
 script:
-  - cabal configure --enable-tests && cabal build --ghc-options -Werror && cabal test
+  - cabal configure --enable-tests
+  - cabal build --ghc-options -Werror
+  - cabal test
+  - PATH=dist/build/futhark/ data/runtests.sh
   - tools/style-check.sh src
+  - cabal haddock
 
 notifications:
   email:
