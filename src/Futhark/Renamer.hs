@@ -92,6 +92,7 @@ data RenameEnv = RenameEnv {
   , envNameFn  :: VNameSource -> VName -> (VName, VNameSource)
   }
 
+-- | The monad in which renaming is performed.
 type RenameM = StateT VNameSource (Reader RenameEnv)
 
 -- | Produce a map of the substitutions that should be performed by
@@ -106,7 +107,11 @@ new k = do (k', src') <- asks envNameFn <*> get <*> pure k
            put src'
            return k'
 
+-- | Members of class 'Rename' can be uniquely renamed.
 class Rename a where
+  -- | Rename the given value such that it does not contain shadowing,
+  -- and has incorporated any substitutions present in the 'RenameM'
+  -- environment.
   rename :: a -> RenameM a
 
 instance Rename VName where
