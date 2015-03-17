@@ -193,21 +193,22 @@ instance Hashable vn => Hashable (IdentBase ty vn) where
 
 -- | Futhark Expression Language: literals + vars + int binops + array
 -- constructors + array combinators (SOAC) + if + function calls +
--- let + tuples (literals & identifiers) TODO: please add float,
--- double, long int, etc.
+-- let + tuples (literals & identifiers)
 --
 -- In a value of type @Exp tt@, all 'Type' values are kept as @tt@
--- values.  -- This allows us to encode whether or not the expression
--- has been type-checked in the Haskell type of the expression.
--- Specifically, the parser will produce expressions of type @Exp
--- 'NoInfo'@, and the type checker will convert these to @Exp 'Type'@,
--- in which type information is always present.
+-- values.
+--
+-- This allows us to encode whether or not the expression has been
+-- type-checked in the Haskell type of the expression.  Specifically,
+-- the parser will produce expressions of type @Exp 'NoInfo'@, and the
+-- type checker will convert these to @Exp 'Type'@, in which type
+-- information is always present.
 data ExpBase ty vn =
             -- Core language
               Literal Value SrcLoc
 
             | TupLit    [ExpBase ty vn] SrcLoc
-            -- ^ Tuple literals, e.g., (1+3, (x, y+z)).
+            -- ^ Tuple literals, e.g., @{1+3, {x, y+z}}@.
 
             | ArrayLit  [ExpBase ty vn] (ty vn) SrcLoc
 
@@ -234,7 +235,7 @@ data ExpBase ty vn =
 
             -- Unary Ops: Not for bools and Negate for ints
             | Not    (ExpBase ty vn) SrcLoc -- ^ E.g., @not True == False@.
-            | Negate (ExpBase ty vn) SrcLoc -- ^ E.g., @~(~1) = 1@.
+            | Negate (ExpBase ty vn) SrcLoc -- ^ E.g., @-(-1) = 1@.
 
             -- Primitive array operations
             | LetWith (IdentBase ty vn) (IdentBase ty vn)
@@ -267,7 +268,7 @@ data ExpBase ty vn =
 
             -- Array index space transformation.
             | Reshape [ExpBase ty vn] (ExpBase ty vn) SrcLoc
-             -- ^ 1st arg is the new shape, 2nd arg is the input array *)
+             -- ^ 1st arg is the new shape, 2nd arg is the input array.
 
             | Transpose Int Int (ExpBase ty vn) SrcLoc
             -- ^ If @b=transpose(k,n,a)@, then @a[i_1, ..., i_k
@@ -285,16 +286,13 @@ data ExpBase ty vn =
             -- Second-Order Array Combinators accept curried and
             -- anonymous functions as first params.
             | Map (LambdaBase ty vn) (ExpBase ty vn) SrcLoc
-             -- ^ @map(op +(1), [1,2,..,n]) = [2,3,..,n+1]@.  3rd arg
-             -- is the input-array row type
+             -- ^ @map(op +(1), [1,2,..,n]) = [2,3,..,n+1]@.
 
             | Reduce (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
-             -- ^ @reduce(op +, 0, [1,2,...,n]) = (0+1+2+...+n)@ 4th arg
-             -- is the input-array element type
+             -- ^ @reduce(op +, 0, [1,2,...,n]) = (0+1+2+...+n)@.
 
             | Scan (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
              -- ^ @scan(plus, 0, [ 1, 2, 3 ]) = [ 1, 3, 6 ]@.
-             -- 4th arg is the row type of the input array
 
             | Filter (LambdaBase ty vn) (ExpBase ty vn) SrcLoc
             -- ^ Return those elements of the array that satisfy the
