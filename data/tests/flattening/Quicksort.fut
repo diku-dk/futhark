@@ -7,9 +7,9 @@ fun [int] quicksort ([int] xs) =
     if isSorted(xs)
     then xs
     else let pivot = xs[0] in
-         let lt = filter( fn bool (int x) => x < pivot , xs ) in
-         let eq = filter( fn bool (int x) => x == pivot, xs ) in
-         let gt = filter( fn bool (int x) => pivot < x , xs ) in
+         let {lt,eq,gt} = partition( fn bool (int x) => x < pivot
+                                   , fn bool (int x) => x == pivot
+                                   , xs ) in
          let {lt', eq', gt'} = {quicksort(lt), quicksort(eq), quicksort(gt)} in
              concat(lt', concat(eq, gt'))
 
