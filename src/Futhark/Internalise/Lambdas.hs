@@ -3,7 +3,7 @@ module Futhark.Internalise.Lambdas
   , internaliseConcatMapLambda
   , internaliseFoldLambda
   , internaliseRedomapInnerLambda
-  , internaliseFilterLambda
+  , internalisePartitionLambdas
   )
   where
 
@@ -206,23 +206,42 @@ internaliseRedomapInnerLambda internaliseBody lam nes arr_args = do
   body' <- assertResultShape (srclocOf lam) (acctype'++rettypearr') body
   return $ I.Lambda params body' (acctype'++rettypearr')
 
-internaliseFilterLambda :: (E.Exp -> InternaliseM Body)
-                        -> E.Lambda
-                        -> [I.SubExp]
-                        -> InternaliseM I.Lambda
-internaliseFilterLambda internaliseBody lam args = do
+-- Given @n@ lambdas, this will return a lambda that returns an
+-- integer in the range @[0,n]@.
+internalisePartitionLambdas :: (E.Exp -> InternaliseM Body)
+                            -> [E.Lambda]
+                            -> [I.SubExp]
+                            -> InternaliseM I.Lambda
+internalisePartitionLambdas internaliseBody lams args = do
   let argtypes = map I.subExpType args
       rowtypes = map I.rowType argtypes
-  (params, body, _) <- internaliseLambda internaliseBody lam rowtypes
-  body' <- case body of
-    Body () bodybnds (Result [boolres]) -> do
-      intres <- newIdent "filter_equivalence_class" $ I.Basic Int
-      let resbranch = Let (basicPattern [(intres,BindVar)]) () $
-                      I.If boolres
-                      (resultBody [intconst 0])
-                      (resultBody [intconst 1])
-                      [I.Basic Int]
-      return $ Body () (bodybnds++[resbranch]) $ Result [I.Var intres]
-    _ ->
-      fail "Filter lambda returns too many values."
-  return $ I.Lambda params body' [I.Basic Int]
+  lams' <- forM lams $ \lam -> do
+    (params, body, _) <- internaliseLambda internaliseBody lam rowtypes
+    return (params, body)
+  params <- newIdents "partition_param" rowtypes
+  body <- mkCombinedLambdaBody params 0 lams'
+  return $ I.Lambda params body [I.Basic Int]
+  where mkCombinedLambdaBody :: [I.Param]
+                             -> Int
+                             -> [([I.Param], I.Body)]
+                             -> InternaliseM I.Body
+        mkCombinedLambdaBody _      i [] =
+          return $ resultBody [intconst i]
+        mkCombinedLambdaBody params i ((lam_params,lam_body):lams') =
+          case lam_body of
+            Body () bodybnds (Result [boolres]) -> do
+              intres <- newIdent "partition_equivalence_class" $ I.Basic Int
+              next_lam_body <-
+                mkCombinedLambdaBody lam_params (i+1) lams'
+              let parambnds =
+                    [ mkLet' [top] $ I.PrimOp $ I.SubExp $ I.Var fromp
+                    | (top,fromp) <- zip lam_params params ]
+                  branchbnd = mkLet' [intres] $ I.If boolres
+                              (resultBody [intconst i])
+                              next_lam_body
+                              [I.Basic Int]
+              return $ mkBody
+                (parambnds++bodybnds++[branchbnd])
+                (Result [I.Var intres])
+            _ ->
+              fail "Partition lambda returns too many values."

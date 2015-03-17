@@ -159,6 +159,8 @@ mapExpM tv (Scan fun startexp arrexp loc) =
        pure loc
 mapExpM tv (Filter fun arrexp loc) =
   pure Filter <*> mapOnLambda tv fun <*> mapOnExp tv arrexp <*> pure loc
+mapExpM tv (Partition funs arrexp loc) =
+  pure Partition <*> mapM (mapOnLambda tv) funs <*> mapOnExp tv arrexp <*> pure loc
 mapExpM tv (Redomap redfun mapfun accexp arrexp loc) =
   pure Redomap <*> mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
        mapOnExp tv accexp <*> mapOnExp tv arrexp <*> pure loc

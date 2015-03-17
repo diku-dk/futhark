@@ -104,6 +104,7 @@ keyword s =
     "concat"       -> CONCAT
     "concatMap"    -> CONCATMAP
     "filter"       -> FILTER
+    "partition"    -> PARTITION
     "redomap"      -> REDOMAP
     "empty"        -> EMPTY
     "copy"         -> COPY

@@ -127,6 +127,7 @@ import Language.Futhark.Parser.Lexer
       split           { L $$ SPLIT }
       concat          { L $$ CONCAT }
       filter          { L $$ FILTER }
+      partition       { L $$ PARTITION }
       redomap         { L $$ REDOMAP }
       true            { L $$ TRUE }
       false           { L $$ FALSE }
@@ -322,6 +323,9 @@ Exp  :: { UncheckedExp }
      | filter '(' FunAbstr ',' Exp ')'
                       { Filter $3 $5 $1 }
 
+     | partition '(' FunAbstrsThenExp ')'
+                      { Partition (fst $3) (snd $3) $1 }
+
      | redomap '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
                       { Redomap $3 $5 $7 $9 $1 }
 
@@ -401,6 +405,9 @@ FunAbstr : id { let L pos (ID name) = $1 in CurryFun name [] NoInfo pos }
          | Ops '(' Exps ')'
                { let (name,pos) = $1 in CurryFun name $3 NoInfo pos }
          | fn Type '(' TypeIds ')' '=>' Exp { AnonymFun $4 $7 $2 $1 }
+
+FunAbstrsThenExp : FunAbstr ',' Exp              { ([$1], $3) }
+                 | FunAbstr ',' FunAbstrsThenExp { ($1 : fst $3, snd $3) }
 
 Value : IntValue { $1 }
       | RealValue { $1 }

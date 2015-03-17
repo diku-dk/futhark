@@ -733,6 +733,18 @@ checkExp (Filter fun arrexp pos) = do
 
   return $ Filter fun' arrexp' pos
 
+checkExp (Partition funs arrexp pos) = do
+  (arrexp', (rowelemt, argflow, argloc)) <- checkSOACArrayArg arrexp
+  let nonunique_arg = (rowelemt `setUniqueness` Nonunique,
+                       argflow, argloc)
+  funs' <- forM funs $ \fun -> do
+    fun' <- checkLambda fun [nonunique_arg]
+    when (lambdaType fun' [rowelemt] /= Basic Bool) $
+      bad $ TypeError (srclocOf fun') "Partition function does not return bool."
+    return fun'
+
+  return $ Partition funs' arrexp' pos
+
 checkExp (Redomap outerfun innerfun accexp arrexp pos) = do
   (accexp', accarg) <- checkArg accexp
   (arrexp', arrarg@(rt, _, _)) <- checkSOACArrayArg arrexp

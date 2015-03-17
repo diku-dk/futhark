@@ -74,6 +74,7 @@ data Token = IF
            | SPLIT
            | CONCAT
            | FILTER
+           | PARTITION
            | REDOMAP
            | TRUE
            | FALSE

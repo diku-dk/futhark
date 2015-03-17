@@ -387,15 +387,29 @@ internaliseExp desc (E.Scan lam ne arr loc) = do
 internaliseExp desc (E.Filter lam arr _) = do
   arrs <- internaliseExpToIdents "filter_input" arr
   lam' <- withNonuniqueReplacements $
-          internaliseFilterLambda internaliseBody lam $ map I.Var arrs
+           internalisePartitionLambdas internaliseBody [lam] $ map I.Var arrs
   flags <- letExp "filter_partition_flags" $ I.LoopOp $ I.Map [] lam' arrs
   forM arrs $ \arr' -> do
     filter_size <- newIdent "filter_size" $ I.Basic Int
     filter_perm <- newIdent "filter_perm" $ I.identType arr'
     addBinding $ mkLet' [filter_size,filter_perm] $
-      I.PrimOp $ Partition [] 1 flags arr'
+      I.PrimOp $ I.Partition [] 1 flags arr'
     letSubExp desc $
       I.PrimOp $ I.Split [] [I.Var filter_size] filter_perm
+
+internaliseExp desc (E.Partition lams arr _) = do
+  arrs <- internaliseExpToIdents "partition_input" arr
+  lam' <- withNonuniqueReplacements $
+           internalisePartitionLambdas internaliseBody lams $ map I.Var arrs
+  flags <- letExp "partition_partition_flags" $ I.LoopOp $ I.Map [] lam' arrs
+  liftM (map I.Var . concat . transpose) $ forM arrs $ \arr' -> do
+    partition_sizes <- replicateM n $ newIdent "partition_size" $ I.Basic Int
+    partition_perm <- newIdent "partition_perm" $ I.identType arr'
+    addBinding $ mkLet' (partition_sizes++[partition_perm]) $
+      I.PrimOp $ I.Partition [] n flags arr'
+    letTupExp desc $
+      I.PrimOp $ I.Split [] (map I.Var partition_sizes) partition_perm
+  where n = length lams + 1
 
 internaliseExp desc (E.Redomap lam1 lam2 ne arrs _) = do
   arrs' <- internaliseExpToIdents "redomap_arr" arrs

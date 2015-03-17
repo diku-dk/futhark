@@ -527,7 +527,10 @@ typeOf (Unzip _ ts _) =
 typeOf (Scan fun start arr _) =
   arrayType 1 et $ uniqueness et
     where et = lambdaType fun [typeOf start, rowType $ typeOf arr]
-typeOf (Filter _ arr _) = typeOf arr
+typeOf (Filter _ arr _) =
+  typeOf arr
+typeOf (Partition funs arr _) =
+  Tuple $ replicate (length funs + 1) $ typeOf arr
 typeOf (Redomap _ innerfun start arr _) =
   let acc_tp = typeOf start
       res_el_tp = lambdaType innerfun [typeOf start, rowType $ typeOf arr]

@@ -665,6 +665,18 @@ the language.
     Remove all those elements of \textit{a} that do not satisfy the
     predicate \textit{f}.
 
+  \item[\texttt{partition(\textit{f}$_{1}$, \ldots, \textit{f}$_{n}$, \textit{a})}]\hfill\\
+    Divide the array \textit{a} into disjoint partitions based on the
+    given predicates.  Each element of \textit{a} is called with the
+    predicates \textit{f}$_{1}$ to \textit{f}$_{n}$ in sequence, and
+    as soon as one as one of them returns \textit{True}, the element
+    is added to the corresponding partition.  If none of the functions
+    return \textit{True}, the element is added to a catch-all
+    partition that is returned last.  Always returns a tuple with
+    $n+1$ components.  The partitioning is stable, meaning that
+    elements of the partitions retain their original relative
+    positions.
+
 \end{description}
 
 \subsection{Tuple shimming}

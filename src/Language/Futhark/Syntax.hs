@@ -297,8 +297,15 @@ data ExpBase ty vn =
              -- 4th arg is the row type of the input array
 
             | Filter (LambdaBase ty vn) (ExpBase ty vn) SrcLoc
-            -- ^ 3rd arg is the row type of the input (and
-            -- result) array
+            -- ^ Return those elements of the array that satisfy the
+            -- predicate.
+
+            | Partition [LambdaBase ty vn] (ExpBase ty vn) SrcLoc
+            -- ^ @partition(f_1, ..., f_n, a)@ returns @n+1@ arrays, with
+            -- the @i@th array consisting of those elements for which
+            -- function @f_1@ returns 'True', and no previous function
+            -- has returned 'True'.  The @n+1@th array contains those
+            -- elements for which no function returns 'True'.
 
             | Redomap (LambdaBase ty vn) (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
              -- ^ @redomap(g, f, n, a) = reduce(g, n, map(f, a))@.
@@ -343,6 +350,7 @@ instance Located (ExpBase ty vn) where
   locOf (Unzip _ _ pos) = locOf pos
   locOf (Scan _ _ _ pos) = locOf pos
   locOf (Filter _ _ pos) = locOf pos
+  locOf (Partition _ _ pos) = locOf pos
   locOf (Redomap _ _ _ _ pos) = locOf pos
   locOf (Split _ _ pos) = locOf pos
   locOf (Concat _ _ pos) = locOf pos
