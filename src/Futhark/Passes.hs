@@ -15,6 +15,7 @@ module Futhark.Passes
   , explicitMemory
   , inPlaceLowering
   , commonSubexpressionElimination
+  , flattening
   )
 where
 
@@ -31,6 +32,7 @@ import qualified Futhark.Optimise.SplitShapes
 import qualified Futhark.ExplicitAllocations
 import qualified Futhark.Optimise.InPlaceLowering
 import qualified Futhark.Optimise.CSE
+import qualified Futhark.Flattening
 
 fotransform :: Pass
 fotransform = unfailableBasicPass "first-order transform"
@@ -88,3 +90,7 @@ commonSubexpressionElimination =
           return $ Basic $ Futhark.Optimise.CSE.performCSE prog
         op (ExplicitMemory prog) =
           return $ ExplicitMemory $ Futhark.Optimise.CSE.performCSE prog
+
+flattening :: Pass
+flattening = basicPass "Flattening"
+             Futhark.Flattening.flattenProg

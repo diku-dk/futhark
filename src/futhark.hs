@@ -97,6 +97,8 @@ commandLineOptions =
     [] ["in-place-lowering"]
   , passoption "Common subexpression elimination" commonSubexpressionElimination
     [] ["cse"]
+  , passoption "Flattening" flattening
+    [] ["flattening"]
   , Option "s" ["standard"]
     (NoArg $ Right $ \opts -> opts { futharkpipeline = standardPipeline ++ futharkpipeline opts })
     "Use the recommended optimised pipeline."
