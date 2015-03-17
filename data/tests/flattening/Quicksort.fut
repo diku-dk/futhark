@@ -11,7 +11,7 @@ fun [int] quicksort ([int] xs) =
                                    , fn bool (int x) => x == pivot
                                    , xs ) in
          let {lt', eq', gt'} = {quicksort(lt), quicksort(eq), quicksort(gt)} in
-             concat(lt', concat(eq, gt'))
+         concat(lt', eq, gt')
 
 // fun [[int]] quicksort^ ([[int]] xss)
 
