@@ -10,8 +10,7 @@ fun [int] quicksort ([int] xs) =
          let {lt,eq,gt} = partition( < pivot
                                    , == pivot
                                    , xs ) in
-         let {lt', eq', gt'} = {quicksort(lt), quicksort(eq), quicksort(gt)} in
-         concat(lt', eq, gt')
+         concatMap(quicksort, lt, eq, gt)
 
 // fun [[int]] quicksort^ ([[int]] xss)
 

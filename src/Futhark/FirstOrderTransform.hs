@@ -12,6 +12,7 @@ module Futhark.FirstOrderTransform
 import Control.Applicative
 import Control.Monad.State
 import qualified Data.HashMap.Lazy as HM
+import Data.List
 
 import Futhark.Representation.Basic
 import Futhark.Renamer
@@ -72,18 +73,25 @@ transformExp (LoopOp op@(ConcatMap cs fun inputs)) = do
   emptyarrs <- mapM (letExp "empty")
                [ PrimOp $ ArrayLit [] t | t <- lambdaReturnType fun ]
   let hackbody = Body () [] $ Result $ map Var emptyarrs
-      concatArrays arrs1 arrs2 = do
-        arrs1' <- mapM (letExp "concatMap_concatted_intermediate_result") arrs1
-        let ns = map (arraySize 0 . identType) arrs1'
-            ms = map (arraySize 0 . identType) arrs2
-        ks <- mapM (letSubExp "concatMap_concat_size")
-              [ PrimOp $ BinOp Plus n m Int | (n,m) <- zip ns ms ]
-        return [ PrimOp $ Concat cs arr1 [arr2] k
-               | (arr1,arr2,k) <- zip3 arrs1' arrs2 ks ]
-  realbody <- runBinder $ do
-    res <- mapM (letSubExp "concatMap_concatted_result") =<<
-           foldM concatArrays (map (PrimOp . SubExp . Var) emptyarrs) arrs
-    resultBody <$> mapM (letSubExp "concatMap_copy_result" . PrimOp . Copy) res
+
+      concatArrays (arr, arrs') = do
+        let plus x y = eBinOp Plus x y Int
+        ressize <- letSubExp "concatMap_result_size" =<<
+                   foldl plus
+                   (pure $ PrimOp $ SubExp $ arraySize 0 $ identType arr)
+                   (map (pure . PrimOp . SubExp . arraySize 0 . identType) arrs')
+        res <- letSubExp "concatMap_result" $ PrimOp $ Concat cs arr arrs' ressize
+        return $ PrimOp $ Copy res
+
+      nonempty []     = Nothing
+      nonempty (x:xs) = Just (x, xs)
+
+  realbody <- runBinder $
+    case mapM nonempty $ transpose arrs of
+      Nothing ->
+        return hackbody
+      Just arrs' ->
+        resultBody <$> mapM (letSubExp "concatMap_result" <=< concatArrays) arrs'
   return $ If (Constant $ LogVal False) hackbody realbody (loopOpExtType op)
 
 transformExp (LoopOp (Reduce cs fun args)) = do
