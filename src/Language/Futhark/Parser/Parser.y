@@ -208,9 +208,17 @@ ArrayType :: { UncheckedArrayType }
           : Uniqueness '[' BasicArrayRowType ']'
             { let (ds, et) = $3
               in BasicArray et (Nothing:ds) $1 NoInfo }
+          | Uniqueness '[' BasicArrayRowType ',' id ']'
+            { let { (ds, et)        = $3;
+                     L loc (ID name) = $5 }
+              in BasicArray et (Just (Ident name (Basic Int) loc):ds) $1 NoInfo }
           | Uniqueness '[' TupleArrayRowType ']'
             { let (ds, et) = $3
               in TupleArray et (Nothing:ds) $1 }
+          | Uniqueness '[' TupleArrayRowType ',' id ']'
+            { let { (ds, et) = $3;
+                    L loc (ID name) = $5 }
+              in TupleArray et (Just (Ident name (Basic Int) loc):ds) $1 }
 
 BasicArrayRowType : BasicType            { ([], $1) }
              | '[' BasicArrayRowType ']' { let (ds, et) = $2

@@ -60,7 +60,7 @@ instance Monoid (NoInfo vn) where
   _ `mappend` _ = NoInfo
 
 -- | Don't use this for anything.
-type DimSize vn = ExpBase (TypeBase Names) vn
+type DimSize vn = IdentBase (TypeBase Names) vn
 
 -- | The size of an array type is a list of its dimension sizes.  If
 -- 'Nothing', that dimension is of a (statically) unknown size.
