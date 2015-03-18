@@ -32,6 +32,7 @@ tokens :-
   "=>"                     { const ARROW }
   "<-"                     { const SETTO }
   "<="                     { const LEQ }
+  ">="                     { const GEQ }
   "+"                      { const PLUS }
   "-"                      { const MINUS }
   "~"                      { const NEGATE }

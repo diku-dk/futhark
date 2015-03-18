@@ -946,6 +946,8 @@ checkBinOp LogOr e1 e2 t pos = checkPolyBinOp LogOr [Bool] e1 e2 t pos
 checkBinOp Equal e1 e2 t pos = checkRelOp Equal [Int, Real] e1 e2 t pos
 checkBinOp Less e1 e2 t pos = checkRelOp Less [Int, Real] e1 e2 t pos
 checkBinOp Leq e1 e2 t pos = checkRelOp Leq [Int, Real] e1 e2 t pos
+checkBinOp Greater e1 e2 t pos = checkRelOp Greater [Int, Real] e1 e2 t pos
+checkBinOp Geq e1 e2 t pos = checkRelOp Geq [Int, Real] e1 e2 t pos
 
 checkRelOp :: (TypeBox ty, VarName vn) =>
               BinOp -> [BasicType]
@@ -956,7 +958,7 @@ checkRelOp op tl e1 e2 t pos = do
   e1' <- require (map Basic tl) =<< checkExp e1
   e2' <- require (map Basic tl) =<< checkExp e2
   _ <- unifyExpTypes e1' e2'
-  t' <- checkAnnotation pos (opStr op ++ " result") t $ Basic Bool
+  t' <- checkAnnotation pos (ppBinOp op ++ " result") t $ Basic Bool
   return $ BinOp op e1' e2' t' pos
 
 checkPolyBinOp :: (TypeBox ty, VarName vn) =>
@@ -967,7 +969,7 @@ checkPolyBinOp op tl e1 e2 t pos = do
   e1' <- require (map Basic tl) =<< checkExp e1
   e2' <- require (map Basic tl) =<< checkExp e2
   t' <- unifyExpTypes e1' e2'
-  t'' <- checkAnnotation pos (opStr op ++ " result") t t'
+  t'' <- checkAnnotation pos (ppBinOp op ++ " result") t t'
   return $ BinOp op e1' e2' t'' pos
 
 sequentially :: VarName vn =>
@@ -1097,7 +1099,7 @@ checkLambda (CurryFun fname [] rettype pos) [arg]
 checkLambda (CurryFun opfun curryargexps rettype pos) args
   | Just op <- lookup (nameToString opfun) ops =
   checkPolyLambdaOp op curryargexps rettype args pos
-  where ops = map (\op -> ("op " ++ opStr op, op)) [minBound..maxBound]
+  where ops = map (\op -> ("op " ++ ppBinOp op, op)) [minBound..maxBound]
 
 checkLambda (CurryFun fname curryargexps rettype pos) args = do
   (curryargexps', curryargs) <- unzip <$> mapM checkArg curryargexps
@@ -1155,4 +1157,4 @@ checkPolyLambdaOp op curryargexps rettype args pos = do
                     (e1:e2:_) -> return (e1, e2, [])
   body <- binding params $ checkBinOp op x y rettype pos
   checkLambda (AnonymFun (map toParam params) body (toDecl $ typeOf body) pos) args
-  where fname = nameFromString $ "op " ++ opStr op
+  where fname = nameFromString $ "op " ++ ppBinOp op

@@ -6,6 +6,7 @@
 module Language.Futhark.Pretty
   ( ppType
   , ppValue
+  , ppBinOp
   , ppExp
   , ppLambda
   , ppTupId
@@ -106,7 +107,7 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
     case unboxType rt of
       Just (Array {}) -> brackets $ commastack $ map ppr es
       _               -> brackets $ commasep $ map ppr es
-  pprPrec p (BinOp bop x y _ _) = ppBinOp p bop x y
+  pprPrec p (BinOp bop x y _ _) = prettyBinOp p bop x y
   pprPrec _ (Not e _) = text "not" <+> pprPrec 9 e
   pprPrec _ (Negate e _) = text "-" <> pprPrec 9 e
   pprPrec _ (If c t f _ _) = text "if" <+> ppr c </>
@@ -214,11 +215,34 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ProgBase ty vn) 
 ppParam :: (Eq vn, Hashable vn, Pretty (ty vn), Pretty vn, TypeBox ty) => IdentBase ty vn -> Doc
 ppParam param = ppr (identType param) <+> ppr param
 
-ppBinOp :: (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Int -> BinOp -> ExpBase ty vn -> ExpBase ty vn -> Doc
-ppBinOp p bop x y = parensIf (p > precedence bop) $
-                    pprPrec (precedence bop) x <+/>
-                    text (opStr bop) <+>
-                    pprPrec (rprecedence bop) y
+-- | The Operator, without whitespace, that corresponds to this
+-- @BinOp@.  For example, @ppBinOp Plus@ gives @"+"@.
+ppBinOp :: BinOp -> String
+ppBinOp Plus = "+"
+ppBinOp Minus = "-"
+ppBinOp Pow = "pow"
+ppBinOp Times = "*"
+ppBinOp Divide = "/"
+ppBinOp Mod = "%"
+ppBinOp ShiftR = ">>"
+ppBinOp ShiftL = "<<"
+ppBinOp Band = "&"
+ppBinOp Xor = "^"
+ppBinOp Bor = "|"
+ppBinOp LogAnd = "&&"
+ppBinOp LogOr = "||"
+ppBinOp Equal = "=="
+ppBinOp Less = "<"
+ppBinOp Leq = "<="
+ppBinOp Greater = ">"
+ppBinOp Geq = ">="
+
+prettyBinOp :: (Eq vn, Hashable vn, Pretty vn, TypeBox ty) =>
+               Int -> BinOp -> ExpBase ty vn -> ExpBase ty vn -> Doc
+prettyBinOp p bop x y = parensIf (p > precedence bop) $
+                        pprPrec (precedence bop) x <+/>
+                        text (ppBinOp bop) <+>
+                        pprPrec (rprecedence bop) y
   where precedence LogAnd = 0
         precedence LogOr = 0
         precedence Band = 1
@@ -227,6 +251,8 @@ ppBinOp p bop x y = parensIf (p > precedence bop) $
         precedence Equal = 2
         precedence Less = 2
         precedence Leq = 2
+        precedence Greater = 2
+        precedence Geq = 2
         precedence ShiftL = 3
         precedence ShiftR = 3
         precedence Plus = 4

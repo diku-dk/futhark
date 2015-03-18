@@ -41,6 +41,7 @@ module Futhark.Representation.AST.Syntax
   , Body
   , PrimOp (..)
   , LoopOp (..)
+  , BinOp (..)
   , ExpT(..)
   , Exp
   , LoopForm (..)
@@ -114,6 +115,26 @@ deriving instance Lore lore => Show (BodyT lore)
 deriving instance Lore lore => Eq (BodyT lore)
 
 type Body = BodyT
+
+-- | Binary operators.
+data BinOp = Plus -- Binary Ops for Numbers
+           | Minus
+           | Pow
+           | Times
+           | Divide
+           | Mod
+           | ShiftR
+           | ShiftL
+           | Band
+           | Xor
+           | Bor
+           | LogAnd
+           | LogOr
+           -- Relational Ops for all basic types at least
+           | Equal
+           | Less
+           | Leq
+             deriving (Eq, Ord, Enum, Bounded, Show)
 
 data PrimOp lore
   = SubExp SubExp

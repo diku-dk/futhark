@@ -23,6 +23,7 @@ module Language.Futhark.Syntax
   , Value(..)
 
   -- * Abstract syntax tree
+  , BinOp (..)
   , IdentBase(..)
   , ParamBase
   , ExpBase(..)
@@ -190,6 +191,28 @@ instance Located (IdentBase ty vn) where
 
 instance Hashable vn => Hashable (IdentBase ty vn) where
   hashWithSalt salt = hashWithSalt salt . identName
+
+-- | Binary operators.
+data BinOp = Plus -- Binary Ops for Numbers
+           | Minus
+           | Pow
+           | Times
+           | Divide
+           | Mod
+           | ShiftR
+           | ShiftL
+           | Band
+           | Xor
+           | Bor
+           | LogAnd
+           | LogOr
+           -- Relational Ops for all basic types at least
+           | Equal
+           | Less
+           | Leq
+           | Greater
+           | Geq
+             deriving (Eq, Ord, Enum, Bounded, Show)
 
 -- | Futhark Expression Language: literals + vars + int binops + array
 -- constructors + array combinators (SOAC) + if + function calls +

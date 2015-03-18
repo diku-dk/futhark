@@ -923,7 +923,7 @@ checkRelOp op tl e1 e2 t = do
   require (map Basic tl) e1
   require (map Basic tl) e2
   _ <- unifySubExpTypes e1 e2
-  checkAnnotation (opStr op ++ " result") (Basic t) $ Basic Bool
+  checkAnnotation (pretty op ++ " result") (Basic t) $ Basic Bool
 
 checkPolyBinOp :: Checkable lore =>
                   BinOp -> [BasicType]
@@ -933,7 +933,7 @@ checkPolyBinOp op tl e1 e2 t = do
   require (map Basic tl) e1
   require (map Basic tl) e2
   t' <- unifySubExpTypes e1 e2
-  checkAnnotation (opStr op ++ " result") (Basic t) t'
+  checkAnnotation (pretty op ++ " result") (Basic t) t'
 
 sequentially :: Checkable lore =>
                 TypeM lore a -> (a -> Dataflow -> TypeM lore b) -> TypeM lore b

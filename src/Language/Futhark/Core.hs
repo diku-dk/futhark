@@ -2,9 +2,7 @@
 -- that they can be shared between the internal and external
 -- representation.
 module Language.Futhark.Core
-  ( BinOp(..)
-  , opStr
-  , Uniqueness(..)
+  ( Uniqueness(..)
   , BasicType(..)
   , BasicValue(..)
   , basicValueType
@@ -42,46 +40,6 @@ import qualified Data.HashMap.Lazy as HM
 
 import Text.PrettyPrint.Mainland
 import Text.Printf
-
--- | Binary operators.
-data BinOp = Plus -- Binary Ops for Numbers
-           | Minus
-           | Pow
-           | Times
-           | Divide
-           | Mod
-           | ShiftR
-           | ShiftL
-           | Band
-           | Xor
-           | Bor
-           | LogAnd
-           | LogOr
-           -- Relational Ops for all basic types at least
-           | Equal
-           | Less
-           | Leq
-             deriving (Eq, Ord, Enum, Bounded, Show)
-
--- | The Operator, without whitespace, that corresponds to this
--- @BinOp@.  For example, @opStr Plus@ gives @"+"@.
-opStr :: BinOp -> String
-opStr Plus = "+"
-opStr Minus = "-"
-opStr Pow = "pow"
-opStr Times = "*"
-opStr Divide = "/"
-opStr Mod = "%"
-opStr ShiftR = ">>"
-opStr ShiftL = "<<"
-opStr Band = "&"
-opStr Xor = "^"
-opStr Bor = "|"
-opStr LogAnd = "&&"
-opStr LogOr = "||"
-opStr Equal = "=="
-opStr Less = "<"
-opStr Leq = "<="
 
 -- | The uniqueness attribute of a type.  This essentially indicates
 -- whether or not in-place modifications are acceptable.

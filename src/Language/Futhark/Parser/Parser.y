@@ -90,6 +90,7 @@ import Language.Futhark.Parser.Lexer
       '<'             { L $$ LTH }
       '>'             { L $$ GTH }
       '<='            { L $$ LEQ }
+      '>='            { L $$ GEQ }
       pow             { L $$ POW }
       '<<'            { L $$ SHIFTL }
       '>>'            { L $$ SHIFTR }
@@ -145,7 +146,7 @@ import Language.Futhark.Parser.Lexer
 %left '||'
 %left '&&'
 %left '&' '^' '|'
-%left '<=' '<' '=='
+%left '<=' '>=' '>' '<' '=='
 
 %left '<<' '>>'
 %left '+' '-'
@@ -168,6 +169,8 @@ Ops : op '+'     { (nameFromString "op +", $1) }
     | op '=='    { (nameFromString "op ==", $1) }
     | op '<'     { (nameFromString "op <", $1) }
     | op '<='    { (nameFromString "op <=", $1) }
+    | op '>'     { (nameFromString "op >", $1) }
+    | op '>='    { (nameFromString "op >=", $1) }
     | op '&&'    { (nameFromString "op &&", $1) }
     | op '||'    { (nameFromString "op ||", $1) }
     | op not     { (nameFromString "op not", $1) }
@@ -271,6 +274,8 @@ Exp  :: { UncheckedExp }
      | Exp '==' Exp   { BinOp Equal $1 $3 NoInfo $2 }
      | Exp '<' Exp    { BinOp Less $1 $3 NoInfo $2 }
      | Exp '<=' Exp   { BinOp Leq  $1 $3 NoInfo $2 }
+     | Exp '>' Exp    { BinOp Greater $1 $3 NoInfo $2 }
+     | Exp '>=' Exp   { BinOp Geq  $1 $3 NoInfo $2 }
 
      | if Exp then Exp else Exp %prec ifprec
                       { If $2 $4 $6 NoInfo $1 }

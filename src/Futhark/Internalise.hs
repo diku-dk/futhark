@@ -454,8 +454,7 @@ internaliseExp desc (E.BinOp bop xe ye t _) = do
   xe' <- internaliseExp1 "x" xe
   ye' <- internaliseExp1 "y" ye
   case internaliseType t of
-    [I.Basic t'] -> letTupExp' desc $
-                    I.PrimOp $ I.BinOp bop xe' ye' t'
+    [I.Basic t'] -> internaliseBinOp desc bop xe' ye' t'
     _            -> fail "Futhark.Internalise.internaliseExp: non-basic type in BinOp."
 
 internaliseExp desc (E.Not e _) = do
@@ -490,6 +489,56 @@ internaliseOperation s e op = do
   vs <- internaliseExpToIdents s e
   letSubExps s =<< mapM (liftM I.PrimOp . op) vs
 
+internaliseBinOp :: String
+                 -> E.BinOp
+                 -> I.SubExp -> I.SubExp
+                 -> I.BasicType
+                 -> InternaliseM [I.SubExp]
+internaliseBinOp desc E.Plus x y t =
+  simpleBinOp desc I.Plus x y t
+internaliseBinOp desc E.Minus x y t =
+  simpleBinOp desc I.Minus x y t
+internaliseBinOp desc E.Times x y t =
+  simpleBinOp desc I.Times x y t
+internaliseBinOp desc E.Divide x y t =
+  simpleBinOp desc I.Divide x y t
+internaliseBinOp desc E.Pow x y t =
+  simpleBinOp desc I.Pow x y t
+internaliseBinOp desc E.Mod x y t =
+  simpleBinOp desc I.Mod x y t
+internaliseBinOp desc E.ShiftR x y t =
+  simpleBinOp desc I.ShiftR x y t
+internaliseBinOp desc E.ShiftL x y t =
+  simpleBinOp desc I.ShiftL x y t
+internaliseBinOp desc E.Band x y t =
+  simpleBinOp desc I.Band x y t
+internaliseBinOp desc E.Xor x y t =
+  simpleBinOp desc I.Xor x y t
+internaliseBinOp desc E.Bor x y t =
+  simpleBinOp desc I.Bor x y t
+internaliseBinOp desc E.LogAnd x y t =
+  simpleBinOp desc I.LogAnd x y t
+internaliseBinOp desc E.LogOr x y t =
+  simpleBinOp desc I.LogOr x y t
+internaliseBinOp desc E.Equal x y t =
+  simpleBinOp desc I.Equal x y t
+internaliseBinOp desc E.Less x y t =
+  simpleBinOp desc I.Less x y t
+internaliseBinOp desc E.Leq x y t =
+  simpleBinOp desc I.Leq x y t
+internaliseBinOp desc E.Greater x y t =
+  simpleBinOp desc I.Less y x t -- Note the swapped x and y
+internaliseBinOp desc E.Geq x y t =
+  simpleBinOp desc I.Leq y x t -- Note the swapped x and y
+
+simpleBinOp :: String
+            -> I.BinOp
+            -> I.SubExp -> I.SubExp
+            -> I.BasicType
+            -> InternaliseM [I.SubExp]
+simpleBinOp desc bop x y t =
+  letTupExp' desc $ I.PrimOp $ I.BinOp bop x y t
+
 boundsChecks :: SrcLoc -> [I.Ident] -> [I.SubExp] -> InternaliseM I.Certificates
 boundsChecks _ []    _  = return []
 boundsChecks loc (v:_) es = do
@@ -501,11 +550,11 @@ boundsChecks loc (v:_) es = do
 boundsCheck :: SrcLoc -> I.Ident -> Int -> I.SubExp -> InternaliseM I.Ident
 boundsCheck loc v i e = do
   let size  = arraySize i $ I.identType v
-      check = eBinOp LogAnd (pure lowerBound) (pure upperBound) I.Bool
+      check = eBinOp I.LogAnd (pure lowerBound) (pure upperBound) I.Bool
       lowerBound = I.PrimOp $
-                   I.BinOp Leq (I.intconst 0) e I.Bool
+                   I.BinOp I.Leq (I.intconst 0) e I.Bool
       upperBound = I.PrimOp $
-                   I.BinOp Less e size I.Bool
+                   I.BinOp I.Less e size I.Bool
   letExp "bounds_check" =<< eAssert check loc
 
 shadowIdentsInExp :: [(VName, I.SubExp)] -> [Binding] -> I.SubExp

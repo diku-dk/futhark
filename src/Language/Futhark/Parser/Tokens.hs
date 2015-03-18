@@ -37,6 +37,7 @@ data Token = IF
            | LTH
            | GTH
            | LEQ
+           | GEQ
            | POW
            | SHIFTL
            | SHIFTR

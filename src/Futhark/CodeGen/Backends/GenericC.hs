@@ -33,6 +33,7 @@ import Text.PrettyPrint.Mainland
 
 import Futhark.CodeGen.ImpCode
 import Futhark.MonadFreshNames
+import Futhark.Representation.AST.Syntax (BinOp (..))
 import Futhark.CodeGen.Backends.SimpleRepresentation
 import Futhark.CodeGen.Backends.GenericCReading
 import qualified Futhark.CodeGen.Backends.CUtils as C

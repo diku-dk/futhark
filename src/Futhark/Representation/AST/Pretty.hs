@@ -166,7 +166,7 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
     case rt of
       Array {} -> brackets $ commastack $ map ppr es
       _        -> brackets $ commasep   $ map ppr es
-  ppr (BinOp bop x y _) = ppBinOp bop x y
+  ppr (BinOp bop x y _) = ppr x <+/> text (pretty bop) <+> ppr y
   ppr (Not e) = text "not" <+> pprPrec 9 e
   ppr (Negate e) = text "-" <> pprPrec 9 e
   ppr (Index cs v idxs) =
@@ -259,8 +259,23 @@ instance PrettyLore lore => Pretty (Prog lore) where
 ppParam :: Param -> Doc
 ppParam param = ppr (identType param) <+> ppr param
 
-ppBinOp :: BinOp -> SubExp -> SubExp -> Doc
-ppBinOp bop x y = ppr x <+/> text (opStr bop) <+> ppr y
+instance Pretty BinOp where
+  ppr Plus = text "+"
+  ppr Minus = text "-"
+  ppr Pow = text "pow"
+  ppr Times = text "*"
+  ppr Divide = text "/"
+  ppr Mod = text "%"
+  ppr ShiftR = text ">>"
+  ppr ShiftL = text "<<"
+  ppr Band = text "&"
+  ppr Xor = text "^"
+  ppr Bor = text "|"
+  ppr LogAnd = text "&&"
+  ppr LogOr = text "||"
+  ppr Equal = text "=="
+  ppr Less = text "<"
+  ppr Leq = text "<="
 
 ppSOAC :: Pretty fn => String -> [fn] -> Maybe [SubExp] -> [Ident] -> Doc
 ppSOAC name funs es as =
