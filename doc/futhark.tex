@@ -412,7 +412,9 @@ expressed as transformations on these.
 \begin{tabular}{lrll}
 $l$ & $::=$ & \texttt{fn $t$ ($t_{1}$ $v_{1}$, \ldots, $t_{n}$ $v_{n}$) => $e$} & (Anonymous function) \\
 & $|$ & \texttt{\textbf{id} ($e_{1}$, \ldots, $e_{n}$)} & (Curried function) \\
-& $|$ & \texttt{op $\odot$ ($e_{1}$, \ldots, $e_{n}$)} & (Curried operator) \\
+& $|$ & \texttt{$\odot$ $e$} & (Curried operator) \\
+& $|$ & \texttt{$e$ $\odot$} & (Curried operator) \\
+& $|$ & \texttt{$\odot$}     & (Curried operator) \\
 \\
 $e$ & $::=$ & \texttt{map($l$, $e$)} \\
     & $|$ & \texttt{filter($l$, $e$)} \\

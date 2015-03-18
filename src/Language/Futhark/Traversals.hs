@@ -98,10 +98,8 @@ mapExpM tv (BinOp bop x y t loc) =
   pure (BinOp bop) <*>
          mapOnExp tv x <*> mapOnExp tv y <*>
          mapOnType tv t <*> pure loc
-mapExpM tv (Not x loc) =
-  pure Not <*> mapOnExp tv x <*> pure loc
-mapExpM tv (Negate x loc) =
-  pure Negate <*> mapOnExp tv x <*> pure loc
+mapExpM tv (UnOp unop x loc) =
+  pure (UnOp unop) <*> mapOnExp tv x <*> pure loc
 mapExpM tv (If c texp fexp t loc) =
   pure If <*> mapOnExp tv c <*> mapOnExp tv texp <*> mapOnExp tv fexp <*>
        mapOnType tv t <*> pure loc

@@ -1,7 +1,7 @@
-fun   int    redplus1( [int]  a) = reduce(op +, 0, a)
+fun   int    redplus1( [int]  a) = reduce(+, 0, a)
 fun  [int]   redplus2([[int]] a) = map   (redplus1, a)
 
-fun  [int]   mul1( [int]  a,  [int]  b) = map(op *, zip(a, b))
+fun  [int]   mul1( [int]  a,  [int]  b) = map(*, zip(a, b))
 fun [[int]]  mul2([[int]] a, [[int]] b) = map(mul1, zip(a, b))
 
 fun [[int]]  replin(int N, [int] a) = replicate(N, a)

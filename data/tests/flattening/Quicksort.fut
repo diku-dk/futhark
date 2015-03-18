@@ -1,14 +1,14 @@
 fun bool isSorted ([int] xs) =
     if size(0,xs) < 2 then True
     else let bs = map (fn bool (int i) => xs[i] <= xs[i+1], iota( size(0,xs) - 1) ) in
-             reduce(op&&, True, bs)
+             reduce(&&, True, bs)
 
 fun [int] quicksort ([int] xs) =
     if isSorted(xs)
     then xs
     else let pivot = xs[0] in
-         let {lt,eq,gt} = partition( fn bool (int x) => x < pivot
-                                   , fn bool (int x) => x == pivot
+         let {lt,eq,gt} = partition( < pivot
+                                   , == pivot
                                    , xs ) in
          let {lt', eq', gt'} = {quicksort(lt), quicksort(eq), quicksort(gt)} in
          concat(lt', eq, gt')

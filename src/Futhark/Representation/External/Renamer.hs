@@ -265,6 +265,14 @@ renameLambda (CurryFun fname curryargexps rettype pos) = do
   curryargexps' <- mapM renameExp curryargexps
   rettype' <- renameType rettype
   return (CurryFun fname curryargexps' rettype' pos)
+renameLambda (UnOpFun bop t loc) =
+  UnOpFun bop <$> renameType t <*> pure loc
+renameLambda (BinOpFun bop t loc) =
+  BinOpFun bop <$> renameType t <*> pure loc
+renameLambda (CurryBinOpLeft bop x t loc) =
+  CurryBinOpLeft bop <$> renameExp x <*> renameType t <*> pure loc
+renameLambda (CurryBinOpRight bop x t loc) =
+  CurryBinOpRight bop <$> renameExp x <*> renameType t <*> pure loc
 
 renamePattern :: (TypeBox ty, VarName f, VarName t) =>
                  TupIdentBase ty f -> RenameM f t (TupIdentBase ty t)

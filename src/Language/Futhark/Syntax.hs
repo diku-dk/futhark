@@ -23,6 +23,7 @@ module Language.Futhark.Syntax
   , Value(..)
 
   -- * Abstract syntax tree
+  , UnOp (..)
   , BinOp (..)
   , IdentBase(..)
   , ParamBase
@@ -192,6 +193,11 @@ instance Located (IdentBase ty vn) where
 instance Hashable vn => Hashable (IdentBase ty vn) where
   hashWithSalt salt = hashWithSalt salt . identName
 
+-- | Unary operators.
+data UnOp = Not
+          | Negate
+          deriving (Eq, Ord, Show)
+
 -- | Binary operators.
 data BinOp = Plus -- Binary Ops for Numbers
            | Minus
@@ -212,7 +218,7 @@ data BinOp = Plus -- Binary Ops for Numbers
            | Leq
            | Greater
            | Geq
-             deriving (Eq, Ord, Enum, Bounded, Show)
+             deriving (Eq, Ord, Show)
 
 -- | Futhark Expression Language: literals + vars + int binops + array
 -- constructors + array combinators (SOAC) + if + function calls +
@@ -257,8 +263,7 @@ data ExpBase ty vn =
             | BinOp BinOp (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
 
             -- Unary Ops: Not for bools and Negate for ints
-            | Not    (ExpBase ty vn) SrcLoc -- ^ E.g., @not True == False@.
-            | Negate (ExpBase ty vn) SrcLoc -- ^ E.g., @-(-1) = 1@.
+            | UnOp UnOp (ExpBase ty vn) SrcLoc
 
             -- Primitive array operations
             | LetWith (IdentBase ty vn) (IdentBase ty vn)
@@ -350,8 +355,7 @@ instance Located (ExpBase ty vn) where
   locOf (TupLit _ pos) = locOf pos
   locOf (ArrayLit _ _ pos) = locOf pos
   locOf (BinOp _ _ _ _ pos) = locOf pos
-  locOf (Not _ pos) = locOf pos
-  locOf (Negate _ pos) = locOf pos
+  locOf (UnOp _ _ pos) = locOf pos
   locOf (If _ _ _ _ pos) = locOf pos
   locOf (Var ident) = locOf ident
   locOf (Apply _ _ _ pos) = locOf pos
@@ -385,12 +389,24 @@ data LoopFormBase ty vn = ForLoop (IdentBase ty vn) (ExpBase ty vn)
 -- | Anonymous Function
 data LambdaBase ty vn = AnonymFun [ParamBase vn] (ExpBase ty vn) (DeclTypeBase vn) SrcLoc
                       -- ^ @fn int (bool x, char z) => if(x) then ord(z) else ord(z)+1 *)@
-                      | CurryFun Name [ExpBase ty vn] (ty vn) SrcLoc -- ^ @op +(4)@
+                      | CurryFun Name [ExpBase ty vn] (ty vn) SrcLoc
+                        -- ^ @f(4)@
+                      | UnOpFun UnOp (ty vn) SrcLoc
+                        -- ^ @-@.
+                      | BinOpFun BinOp (ty vn) SrcLoc
+                      | CurryBinOpLeft BinOp (ExpBase ty vn) (ty vn) SrcLoc
+                        -- ^ @2+@.
+                      | CurryBinOpRight BinOp (ExpBase ty vn) (ty vn) SrcLoc
+                        -- ^ @+2@.
                         deriving (Eq, Ord, Show)
 
 instance Located (LambdaBase ty vn) where
-  locOf (AnonymFun _ _ _ loc) = locOf loc
-  locOf (CurryFun  _ _ _ loc) = locOf loc
+  locOf (AnonymFun _ _ _ loc)       = locOf loc
+  locOf (CurryFun  _ _ _ loc)       = locOf loc
+  locOf (UnOpFun _ _ loc)           = locOf loc
+  locOf (BinOpFun _ _ loc)          = locOf loc
+  locOf (CurryBinOpLeft _ _ _ loc)  = locOf loc
+  locOf (CurryBinOpRight _ _ _ loc) = locOf loc
 
 -- | Tuple IdentBaseifier, i.e., pattern matching
 data TupIdentBase ty vn = TupId [TupIdentBase ty vn] SrcLoc

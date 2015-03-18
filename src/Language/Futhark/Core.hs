@@ -121,8 +121,7 @@ builtInFunctions = HM.fromList $ map namify
                    ,("trunc", (Int, [Real]))
                    ,("sqrt", (Real, [Real]))
                    ,("log", (Real, [Real]))
-                   ,("exp", (Real, [Real]))
-                   ,("op not", (Bool, [Bool]))]
+                   ,("exp", (Real, [Real]))]
   where namify (k,v) = (nameFromString k, v)
 
 -- | The abstract (not really) type representing names in the Futhark

@@ -8,7 +8,7 @@ fun bool testBit(int n, int ind) =
 fun int xorInds(int bits_num, int n, [int] dir_vs ) =
     let bits    = iota   ( bits_num )                   in
     let indices = filter ( testBit(grayCode(n)), bits ) in
-    reduce( op ^, 0, map( index(dir_vs), indices ) )
+    reduce(^, 0, map( index(dir_vs), indices ) )
 
 fun [int] sobolIndI ( int bits_num, [[int]] dir_vs, int n ) =
     map( xorInds(bits_num, n), dir_vs )

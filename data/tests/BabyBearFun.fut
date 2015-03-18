@@ -48,7 +48,7 @@ fun [int] min1([int] a, [int] b) = map(MIN, zip(a, b))
 fun   int    redmin1( [int]  a) = reduce(MIN, 1200, a)
 fun  [int]   redmin2([[int]] a) = map   (redmin1, a)
 
-fun  [int]   plus1( [int]  a,  [int]  b) = map(op +, zip(a, b))
+fun  [int]   plus1( [int]  a,  [int]  b) = map(+, zip(a, b))
 fun [[int]]  plus2([[int]] a, [[int]] b) = map(plus1, zip(a, b))
 
 fun [[int]]  replin(int len, [int] a) = replicate(len, a)

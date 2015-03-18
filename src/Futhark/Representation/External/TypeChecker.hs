@@ -554,13 +554,13 @@ checkExp (ArrayLit es t loc) = do
 
 checkExp (BinOp op e1 e2 t pos) = checkBinOp op e1 e2 t pos
 
-checkExp (Not e pos) = do
+checkExp (UnOp Not e pos) = do
   e' <- require [Basic Bool] =<< checkExp e
-  return $ Not e' pos
+  return $ UnOp Not e' pos
 
-checkExp (Negate e loc) = do
+checkExp (UnOp Negate e loc) = do
   e' <- require [Basic Int, Basic Real] =<< checkExp e
-  return $ Negate e' loc
+  return $ UnOp Negate e' loc
 
 checkExp (If e1 e2 e3 t pos) = do
   e1' <- require [Basic Bool] =<< checkExp e1
@@ -1088,19 +1088,6 @@ checkLambda (AnonymFun params body ret pos) args =
           return $ AnonymFun params body' ret' pos
       | otherwise -> bad $ TypeError pos $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
-checkLambda (CurryFun fname [] rettype pos) [arg]
-  | "op ~" <- nameToString fname = do
-  rettype' <- checkAnnotation pos "return" rettype $ argType arg
-  var <- newIdent "x" (argType arg) pos
-  let lam = AnonymFun [toParam var]
-            (Negate (Var var) pos) (toDecl rettype') pos
-  checkLambda lam [arg]
-
-checkLambda (CurryFun opfun curryargexps rettype pos) args
-  | Just op <- lookup (nameToString opfun) ops =
-  checkPolyLambdaOp op curryargexps rettype args pos
-  where ops = map (\op -> ("op " ++ ppBinOp op, op)) [minBound..maxBound]
-
 checkLambda (CurryFun fname curryargexps rettype pos) args = do
   (curryargexps', curryargs) <- unzip <$> mapM checkArg curryargexps
   bnd <- asks $ HM.lookup fname . envFtable
@@ -1133,6 +1120,48 @@ checkLambda (CurryFun fname curryargexps rettype pos) args = do
               _ <- checkLambda fun args
               return $ CurryFun fname curryargexps' rettype' pos
 
+checkLambda (UnOpFun unop rettype loc) [arg] = do
+  var <- newIdent "x" (argType arg) loc
+  binding [var] $ do
+    e <- checkExp $ UnOp unop (Var var) loc
+    rettype' <- checkAnnotation loc "return" rettype $ typeOf e
+    return $ UnOpFun unop rettype' loc
+
+checkLambda (UnOpFun unop _ loc) args =
+  bad $ ParameterMismatch (Just $ nameFromString $ ppUnOp unop) loc (Left 1) $
+  map (toDecl . untagType . argType) args
+
+checkLambda (BinOpFun op t loc) args =
+  checkPolyLambdaOp op [] t args loc
+
+checkLambda (CurryBinOpLeft binop x t loc) [arg] = do
+  x' <- checkExp x
+  y <- newIdent "y" (argType arg) loc
+  xvar <- newIdent "x" (typeOf x') loc
+  binding [y, xvar] $ do
+    e <- checkExp $ BinOp binop (Var $ untype xvar) (Var $ untype y) NoInfo loc
+    t' <- checkAnnotation loc "return" t $ typeOf e
+    return $ CurryBinOpLeft binop x' t' loc
+  where untype (Ident name _ varloc) = Ident name NoInfo varloc
+
+checkLambda (CurryBinOpLeft binop _ _ loc) args =
+  bad $ ParameterMismatch (Just $ nameFromString $ ppBinOp binop) loc (Left 1) $
+  map (toDecl . untagType . argType) args
+
+checkLambda (CurryBinOpRight binop x t loc) [arg] = do
+  x' <- checkExp x
+  y <- newIdent "y" (argType arg) loc
+  xvar <- newIdent "x" (typeOf x') loc
+  binding [y, xvar] $ do
+    e <- checkExp $ BinOp binop (Var $ untype y) (Var $ untype xvar) NoInfo loc
+    t' <- checkAnnotation loc "return" t $ typeOf e
+    return $ CurryBinOpRight binop x' t' loc
+  where untype (Ident name _ varloc) = Ident name NoInfo varloc
+
+checkLambda (CurryBinOpRight binop _ _ loc) args =
+  bad $ ParameterMismatch (Just $ nameFromString $ ppBinOp binop) loc (Left 1) $
+  map (toDecl . untagType . argType) args
+
 checkPolyLambdaOp :: (TypeBox ty, VarName vn) =>
                      BinOp -> [TaggedExp ty vn] -> ty (ID vn) -> [Arg vn] -> SrcLoc
                   -> TypeM vn (TaggedLambda CompTypeBase vn)
@@ -1157,4 +1186,4 @@ checkPolyLambdaOp op curryargexps rettype args pos = do
                     (e1:e2:_) -> return (e1, e2, [])
   body <- binding params $ checkBinOp op x y rettype pos
   checkLambda (AnonymFun (map toParam params) body (toDecl $ typeOf body) pos) args
-  where fname = nameFromString $ "op " ++ ppBinOp op
+  where fname = nameFromString $ ppBinOp op

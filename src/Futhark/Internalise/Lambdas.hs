@@ -28,9 +28,16 @@ import Prelude hiding (mapM)
 ensureLambda :: E.Lambda -> InternaliseM ([E.Parameter], E.Exp, E.DeclType)
 ensureLambda (E.AnonymFun params body rettype _) =
   return (params, body, rettype)
-ensureLambda (E.CurryFun fname curargs rettype _) = do
-  (params, body, rettype') <- curryToLambda fname curargs rettype
-  return (params, body, rettype')
+ensureLambda (E.CurryFun fname curargs rettype _) =
+  curryToLambda fname curargs rettype
+ensureLambda (E.UnOpFun unop t _) =
+  unOpFunToLambda unop t
+ensureLambda (E.BinOpFun unop t _) =
+  binOpFunToLambda unop t
+ensureLambda (E.CurryBinOpLeft binop e t _) =
+  binOpCurriedToLambda binop t e $ uncurry $ flip (,)
+ensureLambda (E.CurryBinOpRight binop e t _) =
+  binOpCurriedToLambda binop t e id
 
 curryToLambda :: Name -> [E.Exp] -> E.Type
               -> InternaliseM ([E.Parameter], E.Exp, E.DeclType)
@@ -51,6 +58,50 @@ curryToLambda fname curargs rettype = do
               curargs ++ map (E.Var . E.fromParam) params)
              rettype noLoc
   return (params, call, E.toDecl rettype)
+
+unOpFunToLambda :: E.UnOp -> E.Type
+                -> InternaliseM ([E.Parameter], E.Exp, E.DeclType)
+unOpFunToLambda op t = do
+  paramname <- newNameFromString "unop_param"
+  let param = E.Ident { E.identType = t
+                      , E.identSrcLoc = noLoc
+                      , E.identName = paramname
+                      }
+  return ([toParam param],
+          E.UnOp op (E.Var param) noLoc,
+          E.toDecl t)
+
+binOpFunToLambda :: E.BinOp -> E.Type
+                 -> InternaliseM ([E.Parameter], E.Exp, E.DeclType)
+binOpFunToLambda op t = do
+  x_name <- newNameFromString "binop_param_x"
+  y_name <- newNameFromString "binop_param_y"
+  let param_x = E.Ident { E.identType = t
+                        , E.identSrcLoc = noLoc
+                        , E.identName = x_name
+                        }
+      param_y = E.Ident { E.identType = t
+                        , E.identSrcLoc = noLoc
+                        , E.identName = y_name
+                        }
+  return ([toParam param_x, toParam param_y],
+          E.BinOp op (E.Var param_x) (E.Var param_y) t noLoc,
+          E.toDecl t)
+
+binOpCurriedToLambda :: E.BinOp -> E.Type
+                     -> E.Exp
+                     -> ((E.Exp,E.Exp) -> (E.Exp,E.Exp))
+                     -> InternaliseM ([E.Parameter], E.Exp, E.DeclType)
+binOpCurriedToLambda op t e swap = do
+  paramname <- newNameFromString "binop_param_noncurried"
+  let param = E.Ident { E.identType = t
+                      , E.identSrcLoc = noLoc
+                      , E.identName = paramname
+                        }
+      (x', y') = swap (E.Var param, e)
+  return ([toParam param],
+          E.BinOp op x' y' t noLoc,
+          E.toDecl t)
 
 lambdaBinding :: [E.Parameter] -> [I.Type]
               -> InternaliseM I.Body -> InternaliseM (I.Body, [I.Param])

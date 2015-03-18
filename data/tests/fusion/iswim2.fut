@@ -10,5 +10,5 @@ fun [[int]] main([[int]] input1, [[int]] input2) =
                     zip(a1,a2,b1,b2)),
                zip(iota(3), iota(3)), input) in
   map(fn [int] ([{int,int}] r) =>
-        map(op+, r),
+        map(+, r),
       x)

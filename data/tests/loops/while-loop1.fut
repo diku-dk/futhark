@@ -3,5 +3,5 @@
 
 fun [int] main([int] a, int i, int bound) =
   loop (a) = while a[i] < bound do
-    map(op + (1), a) in
+    map(+ (1), a) in
   a

@@ -71,9 +71,9 @@ externalisePrimOp (I.BinOp bop x y t) =
   (externaliseSubExp x) (externaliseSubExp y)
   (E.fromDecl $ externaliseDeclType $ I.Basic t) noLoc
 externalisePrimOp (I.Not x) =
-  E.Not (externaliseSubExp x) noLoc
+  E.UnOp E.Not (externaliseSubExp x) noLoc
 externalisePrimOp (I.Negate x) =
-  E.Negate (externaliseSubExp x) noLoc
+  E.UnOp E.Negate (externaliseSubExp x) noLoc
 externalisePrimOp (I.Index _ src idxs) =
   E.Index (externaliseIdent src)
           (map externaliseSubExp idxs)

@@ -457,11 +457,11 @@ internaliseExp desc (E.BinOp bop xe ye t _) = do
     [I.Basic t'] -> internaliseBinOp desc bop xe' ye' t'
     _            -> fail "Futhark.Internalise.internaliseExp: non-basic type in BinOp."
 
-internaliseExp desc (E.Not e _) = do
+internaliseExp desc (E.UnOp E.Not e _) = do
   e' <- internaliseExp1 "not_arg" e
   letTupExp' desc $ I.PrimOp $ I.Not e'
 
-internaliseExp desc (E.Negate e _) = do
+internaliseExp desc (E.UnOp E.Negate e _) = do
   e' <- internaliseExp1 "negate_arg" e
   letTupExp' desc $ I.PrimOp $ I.Negate e'
 
