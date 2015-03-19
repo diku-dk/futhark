@@ -216,10 +216,10 @@ DimDecl :: { DimDecl Name }
 ArrayType :: { UncheckedArrayType }
           : Uniqueness '[' BasicArrayRowType DimDecl ']'
             { let (ds, et) = $3
-              in BasicArray et (DeclShape ($4:ds)) $1 NoInfo }
+              in BasicArray et (ShapeDecl ($4:ds)) $1 NoInfo }
           | Uniqueness '[' TupleArrayRowType DimDecl ']'
             { let (ds, et) = $3
-              in TupleArray et (DeclShape ($4:ds)) $1 }
+              in TupleArray et (ShapeDecl ($4:ds)) $1 }
 
 BasicArrayRowType : BasicType
                     { ([], $1) }

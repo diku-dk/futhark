@@ -116,7 +116,7 @@ arrayShape (Array (TupleArray _ ds _))   = ds
 arrayShape _                             = mempty
 
 -- | Return the dimensions of a type with (possibly) known dimensions.
-arrayDims :: Ord vn => TypeBase DeclShape as vn -> [DimDecl vn]
+arrayDims :: Ord vn => TypeBase ShapeDecl as vn -> [DimDecl vn]
 arrayDims = shapeDims . arrayShape
 
 -- | Set the dimensions of an array.  If the given type is not an
@@ -133,12 +133,12 @@ removeShapeAnnotations :: ArrayShape (shape vn) =>
                           TypeBase shape as vn -> TypeBase Rank as vn
 removeShapeAnnotations = modifyShapeAnnotations $ Rank . shapeRank
 
--- | Change the shape of a type to be a 'DeclShape' where all
+-- | Change the shape of a type to be a 'ShapeDecl' where all
 -- dimensions are 'Nothing'.
 vacuousShapeAnnotations :: ArrayShape (shape vn) =>
-                           TypeBase shape as vn -> TypeBase DeclShape as vn
+                           TypeBase shape as vn -> TypeBase ShapeDecl as vn
 vacuousShapeAnnotations = modifyShapeAnnotations $ \shape ->
-  DeclShape (replicate (shapeRank shape) AnyDim)
+  ShapeDecl (replicate (shapeRank shape) AnyDim)
 
 -- | Change the shape of a type.
 modifyShapeAnnotations :: (oldshape vn -> newshape vn)
@@ -824,7 +824,7 @@ freeInLambda (CurryBinOpRight _ e _ _) =
 -- | Remove alias information from the type of an ident.
 toParam :: ArrayShape (shape vn) =>
            IdentBase (TypeBase shape as) vn
-        -> IdentBase (TypeBase DeclShape NoInfo) vn
+        -> IdentBase (TypeBase ShapeDecl NoInfo) vn
 toParam (Ident name t loc) = Ident name (vacuousShapeAnnotations $ toDecl t) loc
 
 -- | Add (vacuous) alias information and remove shape annotations from
@@ -859,10 +859,10 @@ patIdentSet :: (Eq vn, Hashable vn) => TupIdentBase ty vn -> HS.HashSet (IdentBa
 patIdentSet = HS.fromList . patIdents
 
 -- | A type with no aliasing information but shape annotations.
-type UncheckedType = TypeBase DeclShape NoInfo Name
+type UncheckedType = TypeBase ShapeDecl NoInfo Name
 
 -- | An array type with no aliasing information.
-type UncheckedArrayType = ArrayTypeBase DeclShape NoInfo Name
+type UncheckedArrayType = ArrayTypeBase ShapeDecl NoInfo Name
 
 -- | An identifier with no type annotations.
 type UncheckedIdent = IdentBase NoInfo Name

@@ -44,7 +44,7 @@ type Ident = IdentBase (TypeBase Rank Names) VName
 
 -- | A name with a type, but no aliasing information.  Used for
 -- denoting function parameters.
-type Parameter = IdentBase (TypeBase DeclShape NoInfo) VName
+type Parameter = IdentBase (TypeBase ShapeDecl NoInfo) VName
 
 -- | An expression with type information.
 type Exp = ExpBase (TypeBase Rank Names) VName
@@ -65,7 +65,7 @@ type Prog = ProgBase (TypeBase Rank Names) VName
 type Type = TypeBase Rank Names VName
 
 -- | A known type with shape annotations but no aliasing information.
-type DeclType = TypeBase DeclShape NoInfo VName
+type DeclType = TypeBase ShapeDecl NoInfo VName
 
 -- | A known array type with no shape annotations, but aliasing
 -- information.

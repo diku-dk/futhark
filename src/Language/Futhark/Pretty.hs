@@ -67,7 +67,7 @@ instance Pretty Uniqueness where
   ppr Nonunique = empty
 
 instance (Eq vn, Hashable vn, Pretty vn) =>
-         Pretty (TupleArrayElemTypeBase DeclShape as vn) where
+         Pretty (TupleArrayElemTypeBase ShapeDecl as vn) where
   ppr (BasicArrayElem bt _) = ppr bt
   ppr (ArrayArrayElem at)   = ppr at
   ppr (TupleArrayElem ts)   = braces $ commasep $ map ppr ts
@@ -79,14 +79,14 @@ instance (Eq vn, Hashable vn, Pretty vn) =>
   ppr (TupleArrayElem ts)   = braces $ commasep $ map ppr ts
 
 instance (Eq vn, Hashable vn, Pretty vn) =>
-         Pretty (ArrayTypeBase DeclShape as vn) where
-  ppr (BasicArray et (DeclShape ds) u _) =
+         Pretty (ArrayTypeBase ShapeDecl as vn) where
+  ppr (BasicArray et (ShapeDecl ds) u _) =
     ppr u <> foldl f (ppr et) ds
     where f s AnyDim       = brackets s
           f s (VarDim v)   = brackets $ s <> comma <> ppr v
           f s (ConstDim n) = brackets $ s <> comma <> ppr n
 
-  ppr (TupleArray et (DeclShape ds) u) =
+  ppr (TupleArray et (ShapeDecl ds) u) =
     ppr u <> foldl f (braces $ commasep $ map ppr et) ds
     where f s AnyDim       = brackets s
           f s (VarDim v)   = brackets $ s <> comma <> ppr v
@@ -99,7 +99,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ArrayTypeBase Rank as vn) wh
     ppr u <> foldl (.) id (replicate n brackets)
     (braces $ commasep $ map ppr ts)
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase DeclShape as vn) where
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase ShapeDecl as vn) where
   ppr (Basic et) = ppr et
   ppr (Array at) = ppr at
   ppr (Tuple ts) = braces $ commasep $ map ppr ts

@@ -11,7 +11,7 @@ module Language.Futhark.Syntax
   , Uniqueness(..)
   , ArrayShape (..)
   , DimDecl (..)
-  , DeclShape (..)
+  , ShapeDecl (..)
   , Rank (..)
   , TypeBase(..)
   , TupleArrayElemTypeBase(..)
@@ -81,7 +81,7 @@ data DimDecl vn = VarDim vn
 
 -- | The size of an array type is a list of its dimension sizes.  If
 -- 'Nothing', that dimension is of a (statically) unknown size.
-newtype DeclShape vn = DeclShape { shapeDims :: [DimDecl vn] }
+newtype ShapeDecl vn = ShapeDecl { shapeDims :: [DimDecl vn] }
                      deriving (Eq, Ord, Show)
 
 newtype Rank vn = Rank Int
@@ -96,14 +96,14 @@ instance ArrayShape (Rank vn) where
   stripDims i (Rank n) | i < n     = Just $ Rank $ n - i
                        | otherwise = Nothing
 
-instance Monoid (DeclShape vn) where
-  mempty = DeclShape []
-  DeclShape l1 `mappend` DeclShape l2 = DeclShape $ l1 ++ l2
+instance Monoid (ShapeDecl vn) where
+  mempty = ShapeDecl []
+  ShapeDecl l1 `mappend` ShapeDecl l2 = ShapeDecl $ l1 ++ l2
 
-instance (Eq vn, Ord vn) => ArrayShape (DeclShape vn) where
-  shapeRank (DeclShape l) = length l
-  stripDims i (DeclShape l)
-    | i < length l = Just $ DeclShape $ drop i l
+instance (Eq vn, Ord vn) => ArrayShape (ShapeDecl vn) where
+  shapeRank (ShapeDecl l) = length l
+  stripDims i (ShapeDecl l)
+    | i < length l = Just $ ShapeDecl $ drop i l
     | otherwise    = Nothing
 
 -- | Types that can be elements of tuple-arrays.
@@ -186,15 +186,15 @@ type CompTypeBase = TypeBase Rank Names
 
 -- | A type with shape annotations and no aliasing information, used
 -- for declarations.
-type DeclTypeBase = TypeBase DeclShape NoInfo
+type DeclTypeBase = TypeBase ShapeDecl NoInfo
 
 -- | An array type with shape annotations and no aliasing information,
 -- used for declarations.
-type DeclArrayTypeBase = ArrayTypeBase DeclShape NoInfo
+type DeclArrayTypeBase = ArrayTypeBase ShapeDecl NoInfo
 
 -- | A tuple array element type with shape annotations and no aliasing
 -- information, used for declarations.
-type DeclTupleArrayElemTypeBase = TupleArrayElemTypeBase DeclShape NoInfo
+type DeclTupleArrayElemTypeBase = TupleArrayElemTypeBase ShapeDecl NoInfo
 
 -- | Information about which parts of a value/type are consumed.  For
 -- example, we might say that a function taking an argument of type

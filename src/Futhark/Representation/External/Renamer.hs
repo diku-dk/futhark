@@ -167,8 +167,8 @@ repl (Ident name tp loc) = do
   return $ Ident name' tp' loc
 
 declRepl :: (VarName f, VarName t) =>
-            IdentBase (TypeBase DeclShape NoInfo) f
-         -> RenameM f t (IdentBase (TypeBase DeclShape NoInfo) t)
+            IdentBase (TypeBase ShapeDecl NoInfo) f
+         -> RenameM f t (IdentBase (TypeBase ShapeDecl NoInfo) t)
 declRepl (Ident name tp loc) = do
   name' <- replName name
   tp' <- renameDeclType tp
@@ -239,10 +239,10 @@ renameType = mapType $ renameTypeGeneric
              (liftM HS.fromList . mapM replName . HS.toList)
 
 renameDeclType :: (VarName f, VarName t) =>
-                  TypeBase DeclShape NoInfo f
-               -> RenameM f t (TypeBase DeclShape NoInfo t)
+                  TypeBase ShapeDecl NoInfo f
+               -> RenameM f t (TypeBase ShapeDecl NoInfo t)
 renameDeclType = renameTypeGeneric
-                 (liftM DeclShape . mapM renameDim . shapeDims)
+                 (liftM ShapeDecl . mapM renameDim . shapeDims)
                  (const $ return NoInfo)
   where renameDim AnyDim       = return AnyDim
         renameDim (VarDim v)   = VarDim <$> replName v
