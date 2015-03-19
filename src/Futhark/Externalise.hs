@@ -237,7 +237,7 @@ externaliseTypes ts =
 externaliseDeclType :: I.DeclType -> E.DeclType
 externaliseDeclType (I.Basic t) = E.Basic t
 externaliseDeclType (I.Array et shape u) =
-  E.Array $ E.BasicArray et (E.DeclShape $ replicate (I.shapeRank shape) Nothing) u NoInfo
+  E.Array $ E.BasicArray et (E.DeclShape $ replicate (I.shapeRank shape) E.AnyDim) u NoInfo
 
 externaliseType :: I.ArrayShape shape =>
                    I.TypeBase shape -> E.Type

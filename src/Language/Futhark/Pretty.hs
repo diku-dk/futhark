@@ -78,17 +78,19 @@ instance (Eq vn, Hashable vn, Pretty vn) =>
   ppr (ArrayArrayElem at)   = ppr at
   ppr (TupleArrayElem ts)   = braces $ commasep $ map ppr ts
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ArrayTypeBase DeclShape as vn) where
+instance (Eq vn, Hashable vn, Pretty vn) =>
+         Pretty (ArrayTypeBase DeclShape as vn) where
   ppr (BasicArray et (DeclShape ds) u _) =
     ppr u <> foldl f (ppr et) ds
-    where f s Nothing = brackets s
-          f s (Just e) = brackets $ s <> comma <> ppr e
+    where f s AnyDim       = brackets s
+          f s (VarDim v)   = brackets $ s <> comma <> ppr v
+          f s (ConstDim n) = brackets $ s <> comma <> ppr n
 
   ppr (TupleArray et (DeclShape ds) u) =
     ppr u <> foldl f (braces $ commasep $ map ppr et) ds
-    where f s Nothing = brackets s
-          f s (Just e) = brackets $ s <> comma <> ppr e
-
+    where f s AnyDim       = brackets s
+          f s (VarDim v)   = brackets $ s <> comma <> ppr v
+          f s (ConstDim n) = brackets $ s <> comma <> ppr n
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ArrayTypeBase Rank as vn) where
   ppr (BasicArray et (Rank n) u _) =

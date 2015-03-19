@@ -10,6 +10,7 @@ module Language.Futhark.Syntax
   -- * Types
   , Uniqueness(..)
   , ArrayShape (..)
+  , DimDecl (..)
   , DeclShape (..)
   , Rank (..)
   , TypeBase(..)
@@ -72,9 +73,15 @@ class (Eq shape, Ord shape, Monoid shape) => ArrayShape shape where
   -- fewer dimensions.
   stripDims :: Int -> shape -> Maybe shape
 
+-- | Declaration of a dimension size.
+data DimDecl vn = VarDim vn
+                | ConstDim Int
+                | AnyDim
+                deriving (Eq, Ord, Show)
+
 -- | The size of an array type is a list of its dimension sizes.  If
 -- 'Nothing', that dimension is of a (statically) unknown size.
-newtype DeclShape vn = DeclShape { shapeDims :: [Maybe vn] }
+newtype DeclShape vn = DeclShape { shapeDims :: [DimDecl vn] }
                      deriving (Eq, Ord, Show)
 
 newtype Rank vn = Rank Int

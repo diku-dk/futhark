@@ -204,41 +204,34 @@ Type :: { UncheckedType }
         | '{' Types '}' { Tuple $2 }
 ;
 
+DimDecl :: { DimDecl Name }
+        : ',' id
+          { let L _ (ID name) = $2
+            in VarDim name }
+        | ',' intlit
+          { let L _ (INTLIT n) = $2
+            in ConstDim n }
+        | { AnyDim }
+
 ArrayType :: { UncheckedArrayType }
-          : Uniqueness '[' BasicArrayRowType ']'
+          : Uniqueness '[' BasicArrayRowType DimDecl ']'
             { let (ds, et) = $3
-              in BasicArray et (DeclShape (Nothing:ds)) $1 NoInfo }
-          | Uniqueness '[' BasicArrayRowType ',' id ']'
-            { let { (ds, et) = $3;
-                     L loc (ID name) = $5 }
-              in BasicArray et (DeclShape (Just name:ds)) $1 NoInfo }
-          | Uniqueness '[' TupleArrayRowType ']'
+              in BasicArray et (DeclShape ($4:ds)) $1 NoInfo }
+          | Uniqueness '[' TupleArrayRowType DimDecl ']'
             { let (ds, et) = $3
-              in TupleArray et (DeclShape (Nothing:ds)) $1 }
-          | Uniqueness '[' TupleArrayRowType ',' id ']'
-            { let { (ds, et) = $3;
-                    L loc (ID name) = $5 }
-              in TupleArray et (DeclShape (Just name:ds)) $1 }
+              in TupleArray et (DeclShape ($4:ds)) $1 }
 
 BasicArrayRowType : BasicType
                     { ([], $1) }
-                  | '[' BasicArrayRowType ',' id ']'
-                    { let { (ds, et) = $2;
-                            L _ (ID name) = $4 }
-                      in (Just name:ds, et) }
-                  | '[' BasicArrayRowType ']'
+                  | '[' BasicArrayRowType DimDecl ']'
                     { let (ds, et) = $2
-                      in (Nothing:ds, et) }
+                      in ($3:ds, et) }
 
 TupleArrayRowType : '{' TupleArrayElemTypes '}'
                      { ([], $2) }
-                  | '[' TupleArrayRowType ',' id ']'
-                     { let { (ds, et) = $2;
-                             L _ (ID name) = $4 }
-                       in (Just name:ds, et) }
-                  | '[' TupleArrayRowType ']'
+                  | '[' TupleArrayRowType DimDecl ']'
                      { let (ds, et) = $2
-                       in (Nothing:ds, et) }
+                       in ($3:ds, et) }
 
 TupleArrayElemTypes : TupleArrayElemType { [$1] }
                     | TupleArrayElemType ',' TupleArrayElemTypes

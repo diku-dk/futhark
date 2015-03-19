@@ -116,7 +116,7 @@ arrayShape (Array (TupleArray _ ds _))   = ds
 arrayShape _                             = mempty
 
 -- | Return the dimensions of a type with (possibly) known dimensions.
-arrayDims :: Ord vn => TypeBase DeclShape as vn -> [Maybe vn]
+arrayDims :: Ord vn => TypeBase DeclShape as vn -> [DimDecl vn]
 arrayDims = shapeDims . arrayShape
 
 -- | Set the dimensions of an array.  If the given type is not an
@@ -138,7 +138,7 @@ removeShapeAnnotations = modifyShapeAnnotations $ Rank . shapeRank
 vacuousShapeAnnotations :: ArrayShape (shape vn) =>
                            TypeBase shape as vn -> TypeBase DeclShape as vn
 vacuousShapeAnnotations = modifyShapeAnnotations $ \shape ->
-  DeclShape (replicate (shapeRank shape) Nothing)
+  DeclShape (replicate (shapeRank shape) AnyDim)
 
 -- | Change the shape of a type.
 modifyShapeAnnotations :: (oldshape vn -> newshape vn)

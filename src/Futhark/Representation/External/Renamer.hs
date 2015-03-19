@@ -244,8 +244,9 @@ renameDeclType :: (VarName f, VarName t) =>
 renameDeclType = renameTypeGeneric
                  (liftM DeclShape . mapM renameDim . shapeDims)
                  (const $ return NoInfo)
-  where renameDim Nothing  = return Nothing
-        renameDim (Just v) = Just <$> replName v
+  where renameDim AnyDim       = return AnyDim
+        renameDim (VarDim v)   = VarDim <$> replName v
+        renameDim (ConstDim n) = return $ ConstDim n
 
 renameTypeGeneric :: (VarName f, VarName t) =>
                      (shape f -> RenameM f t (shape t))
