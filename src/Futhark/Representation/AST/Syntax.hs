@@ -47,6 +47,8 @@ module Futhark.Representation.AST.Syntax
   , LoopForm (..)
   , LambdaT(..)
   , Lambda
+  , ExtLambdaT (..)
+  , ExtLambda
   , Lore.RetType
 
   -- * Definitions
@@ -263,6 +265,16 @@ data LambdaT lore =
   deriving (Eq, Ord, Show)
 
 type Lambda = LambdaT
+
+-- | Anonymous function for use in a tuple-SOAC.
+data ExtLambdaT lore =
+  ExtLambda { extLambdaParams     :: [Param]
+            , extLambdaBody       :: BodyT lore
+            , extLambdaReturnType :: [ExtType]
+            }
+  deriving (Eq, Ord, Show)
+
+type ExtLambda = ExtLambdaT
 
 type FParam lore = FParamT (Lore.FParam lore)
 

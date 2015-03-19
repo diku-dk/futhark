@@ -13,6 +13,7 @@ module Futhark.Representation.Basic
        , LoopOp
        , Exp
        , Lambda
+       , ExtLambda
        , FunDec
        , FParam
        , RetType
@@ -23,6 +24,7 @@ module Futhark.Representation.Basic
        , module Futhark.Representation.AST.Pretty
        , module Futhark.Representation.AST.Syntax
        , AST.LambdaT(Lambda)
+       , AST.ExtLambdaT(ExtLambda)
        , AST.BodyT(Body)
        , AST.PatternT(Pattern)
        , AST.PatElemT(PatElem)
@@ -45,7 +47,7 @@ import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
-          Pattern, Lambda, FunDec, FParam, RetType,
+          Pattern, Lambda, ExtLambda, FunDec, FParam, RetType,
           PatElem)
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Traversals
@@ -78,6 +80,7 @@ type Body = AST.Body Basic
 type Binding = AST.Binding Basic
 type Pattern = AST.Pattern Basic
 type Lambda = AST.Lambda Basic
+type ExtLambda = AST.ExtLambda Basic
 type FunDec = AST.FunDecT Basic
 type FParam = AST.FParam Basic
 type RetType = AST.RetType Basic

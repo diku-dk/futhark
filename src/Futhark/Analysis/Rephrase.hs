@@ -71,11 +71,16 @@ rephraseLambda :: Rephraser from to -> Lambda from -> Lambda to
 rephraseLambda rephraser lam =
   lam { lambdaBody = rephraseBody rephraser $ lambdaBody lam }
 
+rephraseExtLambda :: Rephraser from to -> ExtLambda from -> ExtLambda to
+rephraseExtLambda rephraser lam =
+  lam { extLambdaBody = rephraseBody rephraser $ extLambdaBody lam }
+
 mapper :: Rephraser from to -> Mapper from to Identity
 mapper rephraser = identityMapper {
     mapOnBinding = return . rephraseBinding rephraser
   , mapOnBody = return . rephraseBody rephraser
   , mapOnLambda = return . rephraseLambda rephraser
+  , mapOnExtLambda = return . rephraseExtLambda rephraser
   , mapOnRetType = return . rephraseRetType rephraser
   , mapOnFParam = return . rephraseFParam (rephraseFParamLore rephraser)
   }
