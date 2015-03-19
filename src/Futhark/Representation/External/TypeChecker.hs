@@ -29,7 +29,7 @@ import qualified Data.HashSet as HS
 import Futhark.Representation.External
 import Futhark.Representation.External.Renamer
   (tagProg', tagExp, tagExp', tagType',
-   untagProg, untagExp, untagPattern, untagType)
+   untagProg, untagExp, untagPattern)
 import Futhark.FreshNames hiding (newID, newName)
 import qualified Futhark.FreshNames
 import Futhark.TypeCheck.TypeError
@@ -41,7 +41,7 @@ type TypeError vn =
   GenTypeError
   vn
   (ExpBase CompTypeBase vn)
-  (DeclTypeBase vn)
+  (TypeBase Rank NoInfo ())
   (TupIdentBase NoInfo vn)
 
 type TaggedIdent ty vn = IdentBase ty (ID vn)
@@ -54,7 +54,7 @@ type TaggedTupIdent ty vn = TupIdentBase ty (ID vn)
 
 type TaggedFunDec ty vn = FunDecBase ty (ID vn)
 
-type TaggedType vn = TypeBase Names (ID vn)
+type TaggedType vn = TypeBase Rank Names (ID vn)
 
 -- | A tuple of a return type and a list of argument types.
 type FunBinding vn = (DeclTypeBase (ID vn), [DeclTypeBase (ID vn)])
@@ -309,8 +309,10 @@ lookupVar name pos = do
 -- that combines the aliasing of @t1@ and @t2@ is returned.  The
 -- uniqueness of the resulting type will be the least of the
 -- uniqueness of @t1@ and @t2@.
-unifyTypes :: Monoid (as vn) => TypeBase as vn -> TypeBase as vn
-           -> Maybe (TypeBase as vn)
+unifyTypes :: Monoid (as vn) =>
+              TypeBase Rank as vn
+           -> TypeBase Rank as vn
+           -> Maybe (TypeBase Rank as vn)
 unifyTypes (Basic t1) (Basic t2)
   | t1 == t2  = Just $ Basic t1
   | otherwise = Nothing
@@ -322,22 +324,23 @@ unifyTypes (Tuple ts1) (Tuple ts2)
 unifyTypes _ _ = Nothing
 
 unifyArrayTypes :: Monoid (as vn) =>
-                   ArrayTypeBase as vn -> ArrayTypeBase as vn
-                -> Maybe (ArrayTypeBase as vn)
-unifyArrayTypes (BasicArray bt1 ds1 u1 als1) (BasicArray bt2 ds2 u2 als2)
-  | length ds1 == length ds2, bt1 == bt2 =
-    Just $ BasicArray bt1 ds1 (u1 <> u2) (als1 <> als2)
-unifyArrayTypes (TupleArray et1 ds1 u1) (TupleArray et2 ds2 u2)
-  | length ds1 == length ds2 =
+                   ArrayTypeBase Rank as vn
+                -> ArrayTypeBase Rank as vn
+                -> Maybe (ArrayTypeBase Rank as vn)
+unifyArrayTypes (BasicArray bt1 shape1 u1 als1) (BasicArray bt2 shape2 u2 als2)
+  | shapeRank shape1 == shapeRank shape2, bt1 == bt2 =
+    Just $ BasicArray bt1 shape1 (u1 <> u2) (als1 <> als2)
+unifyArrayTypes (TupleArray et1 shape1 u1) (TupleArray et2 shape2 u2)
+  | shapeRank shape1 == shapeRank shape2 =
     TupleArray <$> zipWithM unifyTupleArrayElemTypes et1 et2 <*>
-    pure ds1 <*> pure (u1 <> u2)
+    pure shape1 <*> pure (u1 <> u2)
 unifyArrayTypes _ _ =
   Nothing
 
 unifyTupleArrayElemTypes :: Monoid (as vn) =>
-                            TupleArrayElemTypeBase as vn
-                         -> TupleArrayElemTypeBase as vn
-                         -> Maybe (TupleArrayElemTypeBase as vn)
+                            TupleArrayElemTypeBase Rank as vn
+                         -> TupleArrayElemTypeBase Rank as vn
+                         -> Maybe (TupleArrayElemTypeBase Rank as vn)
 unifyTupleArrayElemTypes (BasicArrayElem bt1 als1) (BasicArrayElem bt2 als2)
   | bt1 == bt2 = Just $ BasicArrayElem bt1 $ als1 <> als2
   | otherwise  = Nothing
@@ -356,7 +359,7 @@ unifyExpTypes :: VarName vn =>
               -> TaggedExp CompTypeBase vn
               -> TypeM vn (TaggedType vn)
 unifyExpTypes e1 e2 =
-  maybe (bad $ UnifyError e1' t1 e2' t2) return $
+  maybe (bad $ UnifyError e1' (toStructural t1) e2' (toStructural t2)) return $
   unifyTypes (typeOf e1) (typeOf e2)
   where e1' = untagExp e1
         t1  = toDecl $ typeOf e1'
@@ -374,8 +377,8 @@ checkAnnotation loc desc t1 t2 =
     Nothing -> return t2
     Just t1' -> case unifyTypes (t1' `setAliases` HS.empty) t2 of
                   Nothing -> bad $ BadAnnotation loc desc
-                                   (toDecl $ untagType t1')
-                                   (toDecl $ untagType t2)
+                                   (toStructural t1')
+                                   (toStructural t2)
                   Just t  -> return t
 
 -- | @require ts e@ causes a '(TypeError vn)' if @typeOf e@ does not unify
@@ -385,8 +388,8 @@ require :: VarName vn => [TaggedType vn] -> TaggedExp CompTypeBase vn -> TypeM v
 require ts e
   | any (typeOf e `similarTo`) ts = return e
   | otherwise = bad $ UnexpectedType (srclocOf e') e'
-                      (toDecl $ typeOf e') $
-                      map (toDecl . untagType) ts
+                      (toStructural $ typeOf e') $
+                      map toStructural ts
   where e' = untagExp e
 
 rowTypeM :: VarName vn => TaggedExp CompTypeBase vn -> TypeM vn (TaggedType vn)
@@ -449,9 +452,10 @@ checkFun (fname, rettype, params, body, loc) = do
 
   checkReturnAlias $ typeOf body'
 
-  if toDecl (typeOf body') `subtypeOf` rettype then
+  if toStructural (typeOf body') `subtypeOf` toStructural rettype then
     return (fname, rettype, params', body', loc)
-  else bad $ ReturnTypeError loc fname (untagType rettype) $ toDecl $ untagType $ typeOf body'
+  else bad $ ReturnTypeError loc fname (toStructural rettype) $
+             toStructural $ typeOf body'
 
   where checkParams = reverse <$> foldM expand [] params
 
@@ -593,9 +597,10 @@ checkExp (Apply fname args rettype loc) = do
       (args', argflows) <- unzip <$> mapM (checkArg . fst) args
 
       rettype' <- checkAnnotation loc "return" rettype $
-                  returnType ftype (map diet paramtypes) (map typeOf args')
+                  returnType (removeShapeAnnotations ftype)
+                  (map diet paramtypes) (map typeOf args')
 
-      checkFuncall (Just fname) loc paramtypes (toDecl rettype') argflows
+      checkFuncall (Just fname) loc paramtypes ftype argflows
 
       return $ Apply fname (zip args' $ map diet paramtypes) rettype' loc
 
@@ -837,11 +842,13 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
   -- a unique Name for the function.
   fname <- newFname "loop_fun"
 
-  let rettype = case map (toDecl . identType) $ patIdents mergepat' of
-        [t] -> t
-        ts  -> Tuple ts
+  let rettype = vacuousShapeAnnotations $
+                case map (toDecl . identType) $ patIdents mergepat' of
+                  [t] -> t
+                  ts  -> Tuple ts
+      rettype' = removeShapeAnnotations $ fromDecl rettype
 
-  merge <- newIdent "merge_val" (fromDecl rettype) $ srclocOf mergeexp'
+  merge <- newIdent "merge_val" rettype' $ srclocOf mergeexp'
 
   let boundnames = boundExtra `HS.union` patIdentSet mergepat'
       ununique ident =
@@ -858,7 +865,8 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
                [toParam merge] ++
                extraparams
       bindfun env = env { envFtable = HM.insert fname
-                                      (rettype, map identType params) $
+                                      (rettype,
+                                       map (vacuousShapeAnnotations . identType) params) $
                                       envFtable env }
 
       -- The body of the function will be the loop body, but with all
@@ -867,7 +875,7 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
                     ([(Var (fromParam k), diet (identType k)) | k <- free ] ++
                      [(e, diet $ typeOf e)] ++
                      extraargs)
-                    (fromDecl rettype) (srclocOf e)
+                    rettype' (srclocOf e)
       funbody' = LetPat mergepat' (Var merge) (mapTails recurse id $ letExtra loopbody')
                  (srclocOf loopbody')
 
@@ -885,7 +893,7 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
                   ([(Var (fromParam k), diet (identType k)) | k <- free ] ++
                    [(Var merge, diet rettype)] ++
                    extraargs)
-                  (fromDecl rettype) $ srclocOf mergeexp))
+                  rettype' $ srclocOf mergeexp))
                 (srclocOf mergeexp))
                (srclocOf mergeexp)
     checkExp call
@@ -1004,7 +1012,7 @@ checkBinding pat et dflow = do
           return $ Wildcard t' loc
         checkBinding' _ _ =
           lift $ bad $ InvalidPatternError
-                       (untagPattern errpat) (toDecl $ untagType et)
+                       (untagPattern errpat) (toStructural et)
                        Nothing $ srclocOf pat
 
         add ident = do
@@ -1019,10 +1027,11 @@ checkBinding pat et dflow = do
         rmTypes (TupId pats pos) = TupId (map rmTypes pats) pos
         rmTypes (Wildcard _ loc) = Wildcard NoInfo loc
 
-validApply :: [DeclTypeBase (ID vn)] -> [TaggedType vn] -> Bool
+validApply :: VarName vn =>
+              [DeclTypeBase (ID vn)] -> [TaggedType vn] -> Bool
 validApply expected got =
   length got == length expected &&
-  and (zipWith subtypeOf (map toDecl got) expected)
+  and (zipWith subtypeOf (map toStructural got) (map toStructural expected))
 
 type Arg vn = (TaggedType vn, Dataflow vn, SrcLoc)
 
@@ -1051,7 +1060,7 @@ checkFuncall fname loc paramtypes _ args = do
 
   unless (validApply paramtypes argts) $
     bad $ ParameterMismatch fname loc
-          (Right $ map untagType paramtypes) (map (toDecl . untagType) argts)
+          (Right $ map toStructural paramtypes) (map toStructural argts)
 
   forM_ (zip (map diet paramtypes) args) $ \(d, (t, dflow, argloc)) -> do
     maybeCheckOccurences $ usageOccurences  dflow
@@ -1080,7 +1089,11 @@ checkLambda (AnonymFun params body ret pos) args =
           -- Generate a shim to make it fit.
           (_, ret', _, body', _) <-
             noUnique $ checkFun (nameFromString "<anonymous>", ret, params, body, pos)
-          tupparam <- newIdent "tup_shim" (Tuple $ map (fromDecl . identType) params) pos
+          tupparam <- newIdent "tup_shim"
+                      (Tuple $ map (fromDecl .
+                                    removeShapeAnnotations .
+                                    identType) params)
+                      pos
           let tupfun = AnonymFun [toParam tupparam] tuplet ret pos
               tuplet = LetPat (TupId (map (Id . fromParam) params) pos)
                               (Var tupparam) body' pos
@@ -1094,16 +1107,17 @@ checkLambda (CurryFun fname curryargexps rettype pos) args = do
   case bnd of
     Nothing -> bad $ UnknownFunctionError fname pos
     Just (rt, paramtypes) -> do
-      rettype' <- checkAnnotation pos "return" rettype $ fromDecl rt
+      rettype' <- checkAnnotation pos "return" rettype $ fromDecl $ removeShapeAnnotations rt
+      let paramtypes' = map (fromDecl . removeShapeAnnotations) paramtypes
       case () of
         _ | [(tupt@(Tuple ets), _, _)] <- args,
             validApply paramtypes ets -> do
               -- Same shimming as in the case for anonymous functions.
               let mkparam i t = newIdent ("param_" ++ show i) t pos
-              params <- zipWithM mkparam [(0::Int)..] $ map fromDecl paramtypes
-              tupparam <- newIdent "x" tupt pos
+              params <- zipWithM mkparam [(0::Int)..] paramtypes'
+              tupparam <- newIdent "x" (removeShapeAnnotations tupt) pos
               let tuplet = LetPat (TupId (map Id params) pos) (Var tupparam) body pos
-                  tupfun = AnonymFun [toParam tupparam] tuplet (toDecl rettype') pos
+                  tupfun = AnonymFun [toParam tupparam] tuplet rt pos
                   body = Apply fname [(Var param, diet paramt) |
                                       (param, paramt) <- zip params paramtypes]
                          rettype' pos
@@ -1113,8 +1127,8 @@ checkLambda (CurryFun fname curryargexps rettype pos) args = do
                 Just (e, _) -> bad $ CurriedConsumption fname $ srclocOf e
                 _           -> return ()
               let mkparam i t = newIdent ("param_" ++ show i) t pos
-              params <- zipWithM mkparam [(0::Int)..] $ drop (length curryargs) $ map fromDecl paramtypes
-              let fun = AnonymFun (map toParam params) body (toDecl rettype') pos
+              params <- zipWithM mkparam [(0::Int)..] $ drop (length curryargs) paramtypes'
+              let fun = AnonymFun (map toParam params) body rt pos
                   body = Apply fname (zip (curryargexps'++map Var params) $ map diet paramtypes)
                          rettype' pos
               _ <- checkLambda fun args
@@ -1129,7 +1143,7 @@ checkLambda (UnOpFun unop rettype loc) [arg] = do
 
 checkLambda (UnOpFun unop _ loc) args =
   bad $ ParameterMismatch (Just $ nameFromString $ ppUnOp unop) loc (Left 1) $
-  map (toDecl . untagType . argType) args
+  map (toStructural . argType) args
 
 checkLambda (BinOpFun op t loc) args =
   checkPolyLambdaOp op [] t args loc
@@ -1146,7 +1160,7 @@ checkLambda (CurryBinOpLeft binop x t loc) [arg] = do
 
 checkLambda (CurryBinOpLeft binop _ _ loc) args =
   bad $ ParameterMismatch (Just $ nameFromString $ ppBinOp binop) loc (Left 1) $
-  map (toDecl . untagType . argType) args
+  map (toStructural . argType) args
 
 checkLambda (CurryBinOpRight binop x t loc) [arg] = do
   x' <- checkExp x
@@ -1160,7 +1174,7 @@ checkLambda (CurryBinOpRight binop x t loc) [arg] = do
 
 checkLambda (CurryBinOpRight binop _ _ loc) args =
   bad $ ParameterMismatch (Just $ nameFromString $ ppBinOp binop) loc (Left 1) $
-  map (toDecl . untagType . argType) args
+  map (toStructural . argType) args
 
 checkPolyLambdaOp :: (TypeBox ty, VarName vn) =>
                      BinOp -> [TaggedExp ty vn] -> ty (ID vn) -> [Arg vn] -> SrcLoc
@@ -1171,7 +1185,7 @@ checkPolyLambdaOp op curryargexps rettype args pos = do
   tp <- case curryargexpts ++ argts of
           [t1, t2] | t1 == t2 -> return t1
           [Tuple [t1,t2]] | t1 == t2 -> return t1 -- For autoshimming.
-          l -> bad $ ParameterMismatch (Just fname) pos (Left 2) $ map (toDecl . untagType) l
+          l -> bad $ ParameterMismatch (Just fname) pos (Left 2) $ map toStructural l
   xname <- newIDFromString "x"
   yname <- newIDFromString "y"
   let xident t = Ident xname t pos
@@ -1185,5 +1199,8 @@ checkPolyLambdaOp op curryargexps rettype args pos = do
                                    [yident tp])
                     (e1:e2:_) -> return (e1, e2, [])
   body <- binding params $ checkBinOp op x y rettype pos
-  checkLambda (AnonymFun (map toParam params) body (toDecl $ typeOf body) pos) args
+  checkLambda
+    (AnonymFun (map toParam params) body
+     (vacuousShapeAnnotations $ toDecl $ typeOf body) pos)
+    args
   where fname = nameFromString $ ppBinOp op

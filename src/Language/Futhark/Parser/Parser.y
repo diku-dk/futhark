@@ -207,26 +207,38 @@ Type :: { UncheckedType }
 ArrayType :: { UncheckedArrayType }
           : Uniqueness '[' BasicArrayRowType ']'
             { let (ds, et) = $3
-              in BasicArray et (Nothing:ds) $1 NoInfo }
+              in BasicArray et (DeclShape (Nothing:ds)) $1 NoInfo }
           | Uniqueness '[' BasicArrayRowType ',' id ']'
-            { let { (ds, et)        = $3;
+            { let { (ds, et) = $3;
                      L loc (ID name) = $5 }
-              in BasicArray et (Just (Ident name (Basic Int) loc):ds) $1 NoInfo }
+              in BasicArray et (DeclShape (Just name:ds)) $1 NoInfo }
           | Uniqueness '[' TupleArrayRowType ']'
             { let (ds, et) = $3
-              in TupleArray et (Nothing:ds) $1 }
+              in TupleArray et (DeclShape (Nothing:ds)) $1 }
           | Uniqueness '[' TupleArrayRowType ',' id ']'
             { let { (ds, et) = $3;
                     L loc (ID name) = $5 }
-              in TupleArray et (Just (Ident name (Basic Int) loc):ds) $1 }
+              in TupleArray et (DeclShape (Just name:ds)) $1 }
 
-BasicArrayRowType : BasicType            { ([], $1) }
-             | '[' BasicArrayRowType ']' { let (ds, et) = $2
-                                           in (Nothing:ds, et) }
+BasicArrayRowType : BasicType
+                    { ([], $1) }
+                  | '[' BasicArrayRowType ',' id ']'
+                    { let { (ds, et) = $2;
+                            L _ (ID name) = $4 }
+                      in (Just name:ds, et) }
+                  | '[' BasicArrayRowType ']'
+                    { let (ds, et) = $2
+                      in (Nothing:ds, et) }
 
-TupleArrayRowType : '{' TupleArrayElemTypes '}' { ([], $2) }
-                  | '[' TupleArrayRowType ']'   { let (ds, et) = $2
-                                                  in (Nothing:ds, et) }
+TupleArrayRowType : '{' TupleArrayElemTypes '}'
+                     { ([], $2) }
+                  | '[' TupleArrayRowType ',' id ']'
+                     { let { (ds, et) = $2;
+                             L _ (ID name) = $4 }
+                       in (Just name:ds, et) }
+                  | '[' TupleArrayRowType ']'
+                     { let (ds, et) = $2
+                       in (Nothing:ds, et) }
 
 TupleArrayElemTypes : TupleArrayElemType { [$1] }
                     | TupleArrayElemType ',' TupleArrayElemTypes
@@ -527,7 +539,9 @@ getNoLines :: ReadLineMonad a -> Either String a
 getNoLines (Value x) = Right x
 getNoLines (GetLine _) = Left "No extra lines"
 
-combArrayTypes :: UncheckedType -> [UncheckedType] -> Maybe UncheckedType
+combArrayTypes :: TypeBase Rank NoInfo Name
+               -> [TypeBase Rank NoInfo Name]
+               -> Maybe (TypeBase Rank NoInfo Name)
 combArrayTypes t ts = foldM comb t ts
   where comb x y
           | x == y    = Just x

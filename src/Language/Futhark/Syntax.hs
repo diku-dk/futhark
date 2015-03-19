@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleInstances, FlexibleContexts #-}
 -- | This Is an ever-changing abstract syntax for Futhark.  Some types,
 -- such as @Exp@, are parametrised by type and name representation.
 -- See the @doc/@ subdirectory in the Futhark repository for a language
@@ -8,8 +9,9 @@ module Language.Futhark.Syntax
 
   -- * Types
   , Uniqueness(..)
-  , DimSize
-  , ArraySize
+  , ArrayShape (..)
+  , DeclShape (..)
+  , Rank (..)
   , TypeBase(..)
   , TupleArrayElemTypeBase(..)
   , ArrayTypeBase(..)
@@ -59,27 +61,60 @@ instance Monoid (NoInfo vn) where
   mempty = NoInfo
   _ `mappend` _ = NoInfo
 
--- | Don't use this for anything.
-type DimSize vn = IdentBase (TypeBase Names) vn
+-- | The class of types that can represent an array size.  The
+-- 'Monoid' instance must define 'mappend' such that @dims1 `mappend`
+-- dims2@ adds @dims1@ as the outer dimensions of @dims2@.
+class (Eq shape, Ord shape, Monoid shape) => ArrayShape shape where
+  -- | Number of dimensions.
+  shapeRank :: shape -> Int
+  -- | @stripDims n shape@ strips the outer @n@ dimensions from
+  -- @shape@, returning 'Nothing' if this would result in zero or
+  -- fewer dimensions.
+  stripDims :: Int -> shape -> Maybe shape
 
 -- | The size of an array type is a list of its dimension sizes.  If
 -- 'Nothing', that dimension is of a (statically) unknown size.
-type ArraySize vn = [Maybe (DimSize vn)]
+newtype DeclShape vn = DeclShape { shapeDims :: [Maybe vn] }
+                     deriving (Eq, Ord, Show)
+
+newtype Rank vn = Rank Int
+                deriving (Eq, Ord, Show)
+
+instance Monoid (Rank vn) where
+  mempty = Rank 0
+  Rank n `mappend` Rank m = Rank $ n + m
+
+instance ArrayShape (Rank vn) where
+  shapeRank (Rank n) = n
+  stripDims i (Rank n) | i < n     = Just $ Rank $ n - i
+                       | otherwise = Nothing
+
+instance Monoid (DeclShape vn) where
+  mempty = DeclShape []
+  DeclShape l1 `mappend` DeclShape l2 = DeclShape $ l1 ++ l2
+
+instance (Eq vn, Ord vn) => ArrayShape (DeclShape vn) where
+  shapeRank (DeclShape l) = length l
+  stripDims i (DeclShape l)
+    | i < length l = Just $ DeclShape $ drop i l
+    | otherwise    = Nothing
 
 -- | Types that can be elements of tuple-arrays.
-data TupleArrayElemTypeBase as vn =
+data TupleArrayElemTypeBase shape as vn =
     BasicArrayElem BasicType (as vn)
-  | ArrayArrayElem (ArrayTypeBase as vn)
-  | TupleArrayElem [TupleArrayElemTypeBase as vn]
+  | ArrayArrayElem (ArrayTypeBase shape as vn)
+  | TupleArrayElem [TupleArrayElemTypeBase shape as vn]
   deriving (Show)
 
-instance Eq (TupleArrayElemTypeBase as vn) where
+instance Eq (shape vn) =>
+         Eq (TupleArrayElemTypeBase shape as vn) where
   BasicArrayElem bt1 _ == BasicArrayElem bt2 _ = bt1 == bt2
   ArrayArrayElem at1   == ArrayArrayElem at2   = at1 == at2
   TupleArrayElem ts1   == TupleArrayElem ts2   = ts1 == ts2
   _                    == _                    = False
 
-instance Ord (TupleArrayElemTypeBase as vn) where
+instance Ord (shape vn) =>
+         Ord (TupleArrayElemTypeBase shape as vn) where
   BasicArrayElem bt1 _ `compare` BasicArrayElem bt2 _ = bt1 `compare` bt2
   ArrayArrayElem at1   `compare` ArrayArrayElem at2   = at1 `compare` at2
   TupleArrayElem ts1   `compare` TupleArrayElem ts2   = ts1 `compare` ts2
@@ -91,35 +126,37 @@ instance Ord (TupleArrayElemTypeBase as vn) where
   TupleArrayElem {}    `compare` ArrayArrayElem {}    = GT
 
 -- | An array type.
-data ArrayTypeBase as vn =
-    BasicArray BasicType (ArraySize vn) Uniqueness (as vn)
+data ArrayTypeBase shape as vn =
+    BasicArray BasicType (shape vn) Uniqueness (as vn)
     -- ^ An array whose elements are basic elements.
-  | TupleArray [TupleArrayElemTypeBase as vn] (ArraySize vn) Uniqueness
+  | TupleArray [TupleArrayElemTypeBase shape as vn] (shape vn) Uniqueness
     -- ^ An array whose elements are tuples.
     deriving (Show)
 
-instance Eq (ArrayTypeBase as vn) where
+instance Eq (shape vn) =>
+         Eq (ArrayTypeBase shape as vn) where
   BasicArray et1 dims1 u1 _ == BasicArray et2 dims2 u2 _ =
-    et1 == et2 && length dims1 == length dims2 && u1 == u2
+    et1 == et2 && dims1 == dims2 && u1 == u2
   TupleArray ts1 dims1 u1 == TupleArray ts2 dims2 u2 =
-    ts1 == ts2 && length dims1 == length dims2 && u1 == u2
+    ts1 == ts2 && dims1 == dims2 && u1 == u2
   _ == _ =
     False
 
-instance Ord (ArrayTypeBase as vn) where
+instance Ord (shape vn) =>
+         Ord (ArrayTypeBase shape as vn) where
   BasicArray et1 dims1 u1 _ <= BasicArray et2 dims2 u2 _
     | et1 < et2     = True
     | et1 > et2     = False
-    | length dims1 < length dims2 = True
-    | length dims1 > length dims2 = False
+    | dims1 < dims2 = True
+    | dims1 > dims2 = False
     | u1 < u2       = True
     | u1 > u2       = False
     | otherwise     = True
   TupleArray ts1 dims1 u1 <= TupleArray ts2 dims2 u2
     | ts1 < ts2     = True
     | ts1 > ts2     = False
-    | length dims1 < length dims2 = True
-    | length dims1 > length dims2 = False
+    | dims1 < dims2 = True
+    | dims1 > dims2 = False
     | u1 < u2       = True
     | u1 > u2       = False
     | otherwise     = True
@@ -128,27 +165,29 @@ instance Ord (ArrayTypeBase as vn) where
   TupleArray {} <= BasicArray {} =
     False
 
--- | An Futhark type is either an array or an element type.  When comparing
--- types for equality with '==', aliases are ignored, as are
--- dimension sizes (but not the number of dimensions themselves).
-data TypeBase as vn = Basic BasicType
-                    | Array (ArrayTypeBase as vn)
-                    | Tuple [TypeBase as vn]
-                    deriving (Eq, Ord, Show)
+-- | An Futhark type is either an array, a basic type, or a tuple.
+-- When comparing types for equality with '==', aliases are ignored,
+-- but dimensions much match.
+data TypeBase shape as vn = Basic BasicType
+                          | Array (ArrayTypeBase shape as vn)
+                          | Tuple [TypeBase shape as vn]
+                          deriving (Eq, Ord, Show)
 
--- | A type with aliasing information, used for describing the type of
--- a computation.
-type CompTypeBase = TypeBase Names
+-- | A type with aliasing information and no shape annotations, used
+-- for describing the type of a computation.
+type CompTypeBase = TypeBase Rank Names
 
--- | A type without aliasing information, used for declarations.
-type DeclTypeBase = TypeBase NoInfo
+-- | A type with shape annotations and no aliasing information, used
+-- for declarations.
+type DeclTypeBase = TypeBase DeclShape NoInfo
 
--- | An array type without aliasing information, used for declarations.
-type DeclArrayTypeBase = ArrayTypeBase NoInfo
+-- | An array type with shape annotations and no aliasing information,
+-- used for declarations.
+type DeclArrayTypeBase = ArrayTypeBase DeclShape NoInfo
 
--- | A tuple array element type without aliasing information, used for
--- declarations.
-type DeclTupleArrayElemTypeBase = TupleArrayElemTypeBase NoInfo
+-- | A tuple array element type with shape annotations and no aliasing
+-- information, used for declarations.
+type DeclTupleArrayElemTypeBase = TupleArrayElemTypeBase DeclShape NoInfo
 
 -- | Information about which parts of a value/type are consumed.  For
 -- example, we might say that a function taking an argument of type
@@ -164,7 +203,7 @@ data Diet = TupleDiet [Diet] -- ^ Consumes these parts of the tuple.
 -- type is always unambiguous.
 data Value = BasicVal !BasicValue
            | TupVal ![Value]
-           | ArrayVal !(Array Int Value) (DeclTypeBase ())
+           | ArrayVal !(Array Int Value) (TypeBase Rank NoInfo ())
              -- ^ It is assumed that the array is 0-indexed.  The type
              -- is the row type.
              deriving (Eq, Ord, Show)

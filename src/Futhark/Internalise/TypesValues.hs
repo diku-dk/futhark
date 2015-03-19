@@ -23,24 +23,23 @@ internaliseUniqueness :: E.Uniqueness -> I.Uniqueness
 internaliseUniqueness E.Nonunique = I.Nonunique
 internaliseUniqueness E.Unique = I.Unique
 
-internaliseType :: E.GenType als -> [I.TypeBase ExtShape]
+internaliseType :: E.TypeBase E.Rank als vn -> [I.TypeBase ExtShape]
 internaliseType = flip evalState 0 . internaliseType'
-  where internaliseType' :: E.GenType als -> State Int [I.TypeBase ExtShape]
-        internaliseType' (E.Basic bt) =
+  where internaliseType' (E.Basic bt) =
           return [I.Basic bt]
         internaliseType' (E.Tuple ets) =
           concat <$> mapM internaliseType' ets
         internaliseType' (E.Array at) =
           internaliseArrayType at
 
-        internaliseArrayType (E.BasicArray bt size u _) = do
-          dims <- map Ext <$> replicateM (length size) newId
+        internaliseArrayType (E.BasicArray bt shape u _) = do
+          dims <- map Ext <$> replicateM (E.shapeRank shape) newId
           return [I.arrayOf (I.Basic bt) (ExtShape dims) $
                   internaliseUniqueness u]
 
-        internaliseArrayType (E.TupleArray elemts size u) = do
+        internaliseArrayType (E.TupleArray elemts shape u) = do
           outerdim <- Ext <$> newId
-          innerdims <- map Ext <$> replicateM (length size - 1) newId
+          innerdims <- map Ext <$> replicateM (E.shapeRank shape - 1) newId
           ts <- concat <$> mapM internaliseTupleArrayElem elemts
           return [ I.arrayOf t (ExtShape $ outerdim : innerdims) $
                    if I.unique t then Unique

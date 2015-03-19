@@ -28,8 +28,8 @@ import Prelude hiding (mapM)
 ensureLambda :: E.Lambda -> InternaliseM ([E.Parameter], E.Exp, E.DeclType)
 ensureLambda (E.AnonymFun params body rettype _) =
   return (params, body, rettype)
-ensureLambda (E.CurryFun fname curargs rettype _) =
-  curryToLambda fname curargs rettype
+ensureLambda (E.CurryFun fname curargs _ _) =
+  curryToLambda fname curargs
 ensureLambda (E.UnOpFun unop t _) =
   unOpFunToLambda unop t
 ensureLambda (E.BinOpFun unop t _) =
@@ -39,10 +39,10 @@ ensureLambda (E.CurryBinOpLeft binop e t _) =
 ensureLambda (E.CurryBinOpRight binop e t _) =
   binOpCurriedToLambda binop t e id
 
-curryToLambda :: Name -> [E.Exp] -> E.Type
+curryToLambda :: Name -> [E.Exp]
               -> InternaliseM ([E.Parameter], E.Exp, E.DeclType)
-curryToLambda fname curargs rettype = do
-  (_,paramtypes) <- externalFun <$> lookupFunction fname
+curryToLambda fname curargs = do
+  (rettype,paramtypes) <- externalFun <$> lookupFunction fname
   let missing = drop (length curargs) paramtypes
       diets = map E.diet paramtypes
   params <- forM missing $ \t -> do
@@ -56,7 +56,7 @@ curryToLambda fname curargs rettype = do
       call = E.Apply fname
              (zipWith addDiet diets $
               curargs ++ map (E.Var . E.fromParam) params)
-             rettype noLoc
+             (fromDecl $ removeShapeAnnotations rettype) noLoc
   return (params, call, E.toDecl rettype)
 
 unOpFunToLambda :: E.UnOp -> E.Type
@@ -69,7 +69,7 @@ unOpFunToLambda op t = do
                       }
   return ([toParam param],
           E.UnOp op (E.Var param) noLoc,
-          E.toDecl t)
+          E.vacuousShapeAnnotations $ E.toDecl t)
 
 binOpFunToLambda :: E.BinOp -> E.Type
                  -> InternaliseM ([E.Parameter], E.Exp, E.DeclType)
@@ -86,7 +86,7 @@ binOpFunToLambda op t = do
                         }
   return ([toParam param_x, toParam param_y],
           E.BinOp op (E.Var param_x) (E.Var param_y) t noLoc,
-          E.toDecl t)
+          E.vacuousShapeAnnotations $ E.toDecl t)
 
 binOpCurriedToLambda :: E.BinOp -> E.Type
                      -> E.Exp
@@ -101,7 +101,7 @@ binOpCurriedToLambda op t e swap = do
       (x', y') = swap (E.Var param, e)
   return ([toParam param],
           E.BinOp op x' y' t noLoc,
-          E.toDecl t)
+          E.vacuousShapeAnnotations $ E.toDecl t)
 
 lambdaBinding :: [E.Parameter] -> [I.Type]
               -> InternaliseM I.Body -> InternaliseM (I.Body, [I.Param])
@@ -118,7 +118,7 @@ internaliseLambda internaliseBody lam rowtypes = do
   (params, body, rettype) <- ensureLambda lam
   (body', params') <- lambdaBinding params rowtypes $
                       internaliseBody body
-  return (params', body', internaliseType rettype)
+  return (params', body', internaliseType $ removeShapeAnnotations rettype)
 
 internaliseMapLambda :: (E.Exp -> InternaliseM Body)
                      -> E.Lambda
@@ -142,7 +142,7 @@ internaliseConcatMapLambda :: (E.Exp -> InternaliseM Body)
                            -> InternaliseM I.Lambda
 internaliseConcatMapLambda internaliseBody lam _ = do
   (params, body, rettype) <- ensureLambda lam
-  let rettype' = internaliseType rettype
+  let rettype' = internaliseType $ removeShapeAnnotations rettype
   bindingParams params $ \shapeparams params' -> do
     body' <- internaliseBody body
     case rettype' of
@@ -200,7 +200,7 @@ internaliseFoldLambda internaliseBody lam acctypes arrtypes = do
   let rowtypes = map I.rowType arrtypes
   (params, body, rettype) <- internaliseLambda internaliseBody lam $
                              acctypes ++ rowtypes
-  let rettype' = [ t `setArrayShape` arrayShape shape
+  let rettype' = [ t `I.setArrayShape` arrayShape shape
                    | (t,shape) <- zip rettype acctypes ]
   -- The result of the body must have the exact same shape as the
   -- initial accumulator.  We accomplish this with an assertion and
@@ -247,7 +247,7 @@ internaliseRedomapInnerLambda internaliseBody lam nes arr_args = do
   bindMapShapes inner_shapes shapefun arr_args outer_shape
 
   -- for the reduce part
-  let acctype' = [ t `setArrayShape` arrayShape shape
+  let acctype' = [ t `I.setArrayShape` arrayShape shape
                    | (t,shape) <- zip acc_tps acctypes ]
   -- The reduce-part result of the body must have the exact same
   -- shape as the initial accumulator.  We accomplish this with

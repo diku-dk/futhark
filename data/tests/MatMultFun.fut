@@ -13,5 +13,5 @@ fun [[int]] matmultFun([[int]] a, [[int]] b ) =
     let abr = map  (mul2, zip(ar, br))     in
         map(redplus2, abr)
 
-fun [[int]] main([[int]] x, [[int]] y) =
+fun [[int,p],n] main([[int,m],n] x, [[int,p],m] y) =
   matmultFun(x, y)

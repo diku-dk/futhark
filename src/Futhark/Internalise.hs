@@ -48,7 +48,7 @@ internaliseProg doBoundsCheck prog =
 buildFtable :: MonadFreshNames m => E.Prog -> m FunTable
 buildFtable = liftM HM.fromList . mapM inspect . E.progFunctions
   where inspect (fname, rettype, params, _, _) = do
-          let rettype' = internaliseType rettype
+          let rettype' = internaliseType $ removeShapeAnnotations rettype
           (shapes, params') <- unzip <$> mapM internaliseFunParam params
           return (fname,
                   FunBinding { internalFun = (rettype',
@@ -66,7 +66,7 @@ internaliseFun (fname,rettype,params,body,_) =
       fname rettype'
       (map mkFParam $ shapeparams ++ params')
       body'
-  where rettype' = ExtRetType $ internaliseType rettype
+  where rettype' = ExtRetType $ internaliseType $ removeShapeAnnotations rettype
 
 internaliseIdent :: E.Ident -> InternaliseM I.Ident
 internaliseIdent (E.Ident name tp _) =
@@ -113,11 +113,11 @@ internaliseExp desc (E.ArrayLit es rowtype _) = do
   case internaliseType rowtype of
     [et] -> letTupExp' desc $ I.PrimOp $
             I.ArrayLit (map I.Var $ concat es')
-            (et `setArrayShape` Shape rowshape)
+            (et `I.setArrayShape` Shape rowshape)
     ets   -> do
       let arraylit ks et =
             I.PrimOp $ I.ArrayLit (map I.Var ks)
-            (et `setArrayShape` Shape rowshape)
+            (et `I.setArrayShape` Shape rowshape)
       letSubExps desc (zipWith arraylit (transpose es') ets)
 
 internaliseExp desc (E.Apply fname args _ _)
