@@ -100,6 +100,7 @@ replace substs = Mapper {
                  , mapOnBody = return . substituteNames substs
                  , mapOnBinding = return . substituteNames substs
                  , mapOnLambda = return . substituteNames substs
+                 , mapOnExtLambda = return . substituteNames substs
                  , mapOnCertificates = return . map (substituteNames substs)
                  , mapOnRetType = return . substituteNames substs
                  , mapOnFParam = return . substituteNames substs
@@ -136,6 +137,13 @@ instance (Substitute shape) => Substitute (TypeBase shape) where
 instance Substitutable lore => Substitute (Lambda lore) where
   substituteNames substs (Lambda params body rettype) =
     Lambda
+    (substituteNames substs params)
+    (substituteNames substs body)
+    (map (substituteNames substs) rettype)
+
+instance Substitutable lore => Substitute (ExtLambda lore) where
+  substituteNames substs (ExtLambda params body rettype) =
+    ExtLambda
     (substituteNames substs params)
     (substituteNames substs body)
     (map (substituteNames substs) rettype)

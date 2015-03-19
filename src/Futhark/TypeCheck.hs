@@ -23,6 +23,9 @@ module Futhark.TypeCheck
   , checkExtType
   , matchExtPattern
   , matchExtReturnType
+
+  , checkExtLambda -- FIXME - this export is just to silence a
+                   -- warning.
   )
   where
 
@@ -1122,6 +1125,23 @@ checkConcatMapLambda (Lambda params body rettype) args = do
         checkResult $ bodyResult body
         matchExtReturnType fname rettype' $ bodyResult body
   else bad $ TypeError noLoc $ "concatMap function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " array arguments."
+
+checkExtLambda :: Checkable lore =>
+                  ExtLambda lore -> [Arg] -> TypeM lore ()
+checkExtLambda (ExtLambda params body rettype) args =
+  if length params == length args then do
+    checkLambdaCall Nothing (map identType params) args
+    let fname = nameFromString "<anonymous>"
+    noUnique $ checkFun' (fname,
+                          rettype,
+                          [ (param, LambdaBound) | param <- params ],
+                          body) $
+      checkBindings (bodyBindings body) $ do
+        checkResult $ bodyResult body
+        matchExtReturnType fname rettype $ bodyResult body
+    else bad $ TypeError noLoc $
+         "Existential lambda defined with " ++ show (length params) ++
+         " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
 -- | The class of lores that can be type-checked.
 class (FreeIn (Lore.Exp lore),

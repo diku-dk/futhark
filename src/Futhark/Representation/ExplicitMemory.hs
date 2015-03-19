@@ -22,6 +22,7 @@ module Futhark.Representation.ExplicitMemory
        , LoopOp
        , Exp
        , Lambda
+       , ExtLambda
        , FunDec
        , FParam
        , RetType
@@ -31,6 +32,7 @@ module Futhark.Representation.ExplicitMemory
        , module Futhark.Representation.AST.Pretty
        , module Futhark.Representation.AST.Syntax
        , AST.LambdaT(Lambda)
+       , AST.ExtLambdaT(ExtLambda)
        , AST.BodyT(Body)
        , AST.PatElemT(PatElem)
        , AST.PatternT(Pattern)
@@ -57,7 +59,7 @@ import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
-          Pattern, PatElem, Lambda, FunDec, FParam, RetType)
+          Pattern, PatElem, Lambda, ExtLambda, FunDec, FParam, RetType)
 import qualified Futhark.Analysis.ScalExp as SE
 
 import Futhark.TypeCheck.TypeError
@@ -81,6 +83,7 @@ type Body = AST.Body ExplicitMemory
 type Binding = AST.Binding ExplicitMemory
 type Pattern = AST.Pattern ExplicitMemory
 type Lambda = AST.Lambda ExplicitMemory
+type ExtLambda = AST.ExtLambda ExplicitMemory
 type FunDec = AST.FunDec ExplicitMemory
 type FParam = AST.FParam ExplicitMemory
 type RetType = AST.RetType ExplicitMemory

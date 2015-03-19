@@ -220,6 +220,7 @@ instance Renameable lore => Rename (Exp lore) where
                     , mapOnSubExp = rename
                     , mapOnIdent = rename
                     , mapOnLambda = rename
+                    , mapOnExtLambda = rename
                     , mapOnCertificates = mapM rename
                     , mapOnRetType = rename
                     , mapOnFParam = rename
@@ -240,6 +241,14 @@ instance Renameable lore => Rename (Lambda lore) where
       body' <- rename body
       ret' <- mapM rename ret
       return $ Lambda params' body' ret'
+
+instance Renameable lore => Rename (ExtLambda lore) where
+  rename (ExtLambda params body rettype) =
+    bind params $ do
+      params' <- mapM rename params
+      body' <- rename body
+      rettype' <- rename rettype
+      return $ ExtLambda params' body' rettype'
 
 instance Rename Names where
   rename = liftM HS.fromList . mapM rename . HS.toList

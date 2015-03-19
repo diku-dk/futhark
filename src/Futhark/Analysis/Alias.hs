@@ -55,6 +55,7 @@ analyseExp e = Out.mapExp traverse e
                      , Out.mapOnBody = return . analyseBody
                      , Out.mapOnBinding = return . analyseBinding
                      , Out.mapOnLambda = error "Improperly handled lambda in alias analysis"
+                     , Out.mapOnExtLambda = error "Improperly handled existential lambda in alias analysis"
                      , Out.mapOnRetType = return
                      , Out.mapOnFParam = return
                      }

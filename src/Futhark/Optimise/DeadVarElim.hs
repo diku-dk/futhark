@@ -115,6 +115,7 @@ deadCodeElimExp e = mapExpM mapper e
                  , mapOnBody = deadCodeElimBodyM
                  , mapOnSubExp = deadCodeElimSubExp
                  , mapOnLambda = deadCodeElimLambda
+                 , mapOnExtLambda = deadCodeElimExtLambda
                  , mapOnIdent = deadCodeElimIdent
                  , mapOnCertificates = mapM deadCodeElimIdent
                  , mapOnRetType = \rt -> do
@@ -158,6 +159,14 @@ deadCodeElimLambda (Lambda params body rettype) = do
   mapM_ deadCodeElimBnd params
   mapM_ deadCodeElimType rettype
   return $ Lambda params body' rettype
+
+deadCodeElimExtLambda :: Proper lore =>
+                         ExtLambda lore -> DCElimM (ExtLambda lore)
+deadCodeElimExtLambda (ExtLambda params body rettype) = do
+  body' <- deadCodeElimBodyM body
+  mapM_ deadCodeElimBnd params
+  seen $ freeNamesIn rettype
+  return $ ExtLambda params body' rettype
 
 seen :: Names -> DCElimM ()
 seen = tell . DCElimRes False
