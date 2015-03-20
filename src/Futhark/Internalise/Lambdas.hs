@@ -42,22 +42,22 @@ ensureLambda (E.CurryBinOpRight binop e t _) =
 curryToLambda :: Name -> [E.Exp]
               -> InternaliseM ([E.Parameter], E.Exp, E.DeclType)
 curryToLambda fname curargs = do
-  (rettype,paramtypes) <- externalFun <$> lookupFunction fname
+  (rettype, paramtypes) <- externalFun <$> lookupFunction fname
   let missing = drop (length curargs) paramtypes
       diets = map E.diet paramtypes
   params <- forM missing $ \t -> do
               s <- newNameFromString "curried"
-              return E.Ident {
-                         E.identType   = t
-                       , E.identSrcLoc = noLoc
-                       , E.identName   = s
-                       }
+              return E.Ident { E.identType   = t
+                             , E.identSrcLoc = noLoc
+                             , E.identName   = s
+                             }
   let addDiet d x = (x, d)
       call = E.Apply fname
              (zipWith addDiet diets $
               curargs ++ map (E.Var . E.fromParam) params)
              (fromDecl $ removeShapeAnnotations rettype) noLoc
-  return (params, call, E.toDecl rettype)
+  -- FIXME: we are throwing away some shape annotations here.
+  return (params, call, E.vacuousShapeAnnotations rettype)
 
 unOpFunToLambda :: E.UnOp -> E.Type
                 -> InternaliseM ([E.Parameter], E.Exp, E.DeclType)
