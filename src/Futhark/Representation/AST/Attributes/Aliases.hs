@@ -78,6 +78,8 @@ loopOpAliases (Filter _ _ arrs) =
   map identAliases arrs
 loopOpAliases (Redomap _ outerfun _ _ _) =
   map (const mempty) $ lambdaReturnType outerfun
+loopOpAliases (Stream _ _ _ lam) =
+  map (const mempty) $ lambdaReturnType lam -- COSMIN unsure if correct???
 loopOpAliases (ConcatMap {}) =
   [mempty]
 

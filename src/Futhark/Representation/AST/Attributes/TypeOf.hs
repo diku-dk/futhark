@@ -112,7 +112,17 @@ loopOpExtType (Redomap _ outerfun innerfun _ ids) =
                                                      (uniqueness eltp  )
                                    ) res_el_tp 
               in  staticShapes $ (acc_tp ++ res_arr_tp)
-
+loopOpExtType (Stream _ accs _ lam) = 
+  let res_tp = lambdaReturnType lam
+      --lam_arrs  = drop (length accs+2) $ lambdaParams lam
+      (acc_tps, arr_tps) = (take (length accs) res_tp, drop (length accs) res_tp)
+  in  (staticShapes acc_tps) ++ (existentialiseExtTypes inaccessible $ staticShapes $ arr_tps)
+  where inaccessible = HS.fromList $ map identName (lambdaParams lam)
+--      outersize  = arraysSize 0 (map identType ids)
+--      glbarr_tps = [ arrayOf t (Shape [outersize]) (uniqueness t)
+--                     | t <- map (\(Array bt s u)->Array bt (stripDims 1 s) u) arr_tps ]
+--  in  staticShapes $ (acc_tps++subst_type--glbarr_tps)
+    
 expExtType :: IsRetType (RetType lore) => Exp lore -> [ExtType]
 expExtType (Apply _ _ rt) = retTypeValues rt
 expExtType (If _ _ _ rt)  = rt

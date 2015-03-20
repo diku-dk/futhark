@@ -162,6 +162,10 @@ mapExpM tv (Filter fun arrexp loc) =
 mapExpM tv (Redomap redfun mapfun accexp arrexp loc) =
   pure Redomap <*> mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
        mapOnExp tv accexp <*> mapOnExp tv arrexp <*> pure loc
+mapExpM tv (Stream chunk i acc arr fun loc) = 
+  pure Stream <*> mapOnIdent tv chunk <*> mapOnIdent tv i <*>
+       mapOnExp tv acc <*> mapOnExp tv arr <*> 
+       mapOnLambda tv fun <*> pure loc
 mapExpM tv (Split splitexps arrexp loc) =
   pure Split <*>
        mapM (mapOnExp tv) splitexps <*> mapOnExp tv arrexp <*>

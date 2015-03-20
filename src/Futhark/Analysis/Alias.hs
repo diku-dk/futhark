@@ -50,6 +50,10 @@ analyseExp (Out.LoopOp (In.Redomap cs outerlam innerlam acc arr)) =
    (analyseLambda outerlam)
    (analyseLambda innerlam)
    acc arr
+analyseExp (Out.LoopOp (In.Stream cs acc arr lam)) =
+  Out.LoopOp $
+  Out.Stream cs acc arr 
+   (analyseLambda lam)
 analyseExp e = Out.mapExp traverse e
   where traverse =
           Out.Mapper { Out.mapOnSubExp = return

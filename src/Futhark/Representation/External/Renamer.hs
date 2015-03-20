@@ -223,6 +223,15 @@ renameExp (DoLoop mergepat mergeexp form loopbody letbody pos) = do
         loopbody' <- renameExp loopbody
         return $ DoLoop mergepat' mergeexp'
           (WhileLoop cond') loopbody' letbody' pos
+renameExp (Stream chunk i acc arr lam pos) = do
+  let chunkipat = TupId [Id chunk, Id i] pos
+  bind (patternNames chunkipat) $ do
+    chunkipat' <- renamePattern chunkipat
+    acc' <- renameExp    acc
+    arr' <- renameExp    arr
+    lam' <- renameLambda lam
+    let (TupId [Id chunk', Id i'] _) = chunkipat'
+    return $ Stream chunk' i' acc' arr' lam' pos
 renameExp e = mapExpM rename e
 
 renameType :: (TypeBox ty, VarName f, VarName t) => ty f -> RenameM f t (ty t)

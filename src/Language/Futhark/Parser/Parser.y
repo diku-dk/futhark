@@ -139,6 +139,7 @@ import Language.Futhark.Parser.Lexer
       empty           { L $$ EMPTY }
       copy            { L $$ COPY }
       while           { L $$ WHILE }
+      stream          { L $$ STREAM }
 
 %nonassoc ifprec letprec
 %left '||'
@@ -368,6 +369,9 @@ Exp  :: { UncheckedExp }
                       {% liftM (\t -> DoLoop $3 t (WhileLoop $7) $9 $11 $1) (tupIdExp $3) }
      | loop '(' TupId '=' Exp ')' '=' while Exp do Exp in Exp %prec letprec
                       { DoLoop $3 $5 (WhileLoop $9) $11 $13 $1 }
+
+     | stream '(' Id ',' Id ',' Exp ',' Exp ',' FunAbstr ')'
+                      { Stream $3 $5 $7 $9 $11 $1 }
 
 Index : '[' Exps ']'                  { $2 }
 

@@ -200,6 +200,7 @@ data LoopOp lore
   | Scan   Certificates (LambdaT lore) [(SubExp, Ident)]
   | Filter  Certificates (LambdaT lore) [Ident]
   | Redomap Certificates (LambdaT lore) (LambdaT lore) [SubExp] [Ident]
+  | Stream  Certificates [SubExp] [Ident] (LambdaT lore)
 
 deriving instance Lore lore => Eq (LoopOp lore)
 deriving instance Lore lore => Show (LoopOp lore)

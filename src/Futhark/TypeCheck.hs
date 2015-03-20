@@ -45,6 +45,9 @@ import Futhark.MonadFreshNames
 import Futhark.TypeCheck.TypeError
 import Futhark.Analysis.Alias
 
+import Debug.Trace
+import Futhark.Representation.AST.Pretty
+
 -- | Information about an error that occured during type checking.
 data TypeError lore = Error [String] (ErrorCase lore)
 
@@ -802,7 +805,6 @@ checkLoopOp (Redomap ass outerfun innerfun accexps arrexps) = do
       innerAccType = take (length accexps) innerRetType  
       asArg t = (t, mempty, mempty)
   checkLambda outerfun $ map asArg $ innerAccType ++ innerAccType
-
   let acct = map argType accargs
       outerRetType = lambdaReturnType outerfun
   unless (innerAccType `subtypesOf` acct) $
@@ -811,6 +813,20 @@ checkLoopOp (Redomap ass outerfun innerfun accexps arrexps) = do
   unless (outerRetType `subtypesOf` acct) $
     bad $ TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
           ", but redomapT outer reduction returns type " ++ prettyTuple outerRetType ++ "."
+
+checkLoopOp s@(Stream asss accexps arrexps lam) = do
+  let ass = trace ("TC: " ++ show (pretty s)) asss 
+  mapM_ (requireI [Basic Cert]) ass
+  accargs <- mapM checkArg   accexps
+  arrargs <- mapM checkIdent arrexps
+  _ <- checkSOACArrayArgs arrexps
+  let asArg t = (t, mempty, mempty)
+      inttp   = Basic Int
+  checkLambda lam $ (asArg inttp) : (asArg inttp) : 
+                    accargs ++ map asArg arrargs
+  let lamrtp = take (length accexps) $ lambdaReturnType lam
+  unless (all (\(x,(y,_,_))->x==y) $ zip lamrtp accargs) $
+    bad $ TypeError noLoc $ "Stream with inconsistent accumulator type in lambda."
 
 checkExp :: Checkable lore =>
             Exp lore -> TypeM lore ()

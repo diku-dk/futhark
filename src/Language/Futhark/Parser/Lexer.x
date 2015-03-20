@@ -108,6 +108,7 @@ keyword s =
     "empty"        -> EMPTY
     "copy"         -> COPY
     "while"        -> WHILE
+    "stream"       -> STREAM
     "assert"       -> ASSERT
     _              -> ID $ nameFromString s
 

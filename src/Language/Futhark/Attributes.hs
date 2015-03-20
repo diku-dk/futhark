@@ -528,7 +528,7 @@ typeOf (Scan fun start arr _) =
   arrayType 1 et $ uniqueness et
     where et = lambdaType fun [typeOf start, rowType $ typeOf arr]
 typeOf (Filter _ arr _) = typeOf arr
-typeOf (Redomap outerfun innerfun start arr _) =
+typeOf (Redomap _ innerfun start arr _) =
   let acc_tp = typeOf start
       res_el_tp = lambdaType innerfun [typeOf start, rowType $ typeOf arr]
   in  if res_el_tp == acc_tp 
@@ -537,6 +537,8 @@ typeOf (Redomap outerfun innerfun start arr _) =
              Tuple [_,el_tp] -> 
                  Tuple [acc_tp, arrayType 1 el_tp $ uniqueness el_tp]
              _ -> acc_tp -- NOT reachable
+typeOf (Stream _ _ acc arr lam _) =
+  lambdaType lam (typeOf acc : typeOf arr : [])  
 typeOf (Concat x ys _) = typeOf x `setUniqueness` u
   where u = uniqueness (typeOf x) <> mconcat (map (uniqueness . typeOf) ys)
 typeOf (Split splitexps e _) =

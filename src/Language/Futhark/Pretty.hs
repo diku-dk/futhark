@@ -167,6 +167,10 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
   pprPrec _ (Reduce lam e a _) = ppSOAC "reduce" [lam] [e, a]
   pprPrec _ (Redomap redlam maplam e a _) =
     ppSOAC "redomap" [redlam, maplam] [e, a]
+  pprPrec _ (Stream chunk i acc arr lam _) =
+    let args = [ppr chunk, ppr i, ppr acc, ppr arr]
+    in  text "stream" <>  parens ( commasep args <> comma </> 
+                                   ppList [lam] )
   pprPrec _ (Scan lam e a _) = ppSOAC "scan" [lam] [e, a]
   pprPrec _ (Filter lam a _) = ppSOAC "filter" [lam] [a]
   pprPrec _ (Zip es _) = text "zip" <> apply (map (ppr . fst) es)

@@ -3,6 +3,7 @@ module Futhark.Internalise.Lambdas
   , internaliseConcatMapLambda
   , internaliseFoldLambda
   , internaliseRedomapInnerLambda
+  , internaliseStreamLambda
   , internaliseFilterLambda
   )
   where
@@ -12,6 +13,8 @@ import Control.Monad
 
 import Data.List
 import Data.Loc
+
+import qualified Data.HashSet as HS
 
 import Futhark.Representation.External as E
 import Futhark.Representation.Basic as I
@@ -167,7 +170,7 @@ internaliseRedomapInnerLambda ::
                          -> InternaliseM I.Lambda
 internaliseRedomapInnerLambda internaliseBody lam nes arr_args = do  
   let arrtypes = map I.subExpType arr_args
-      rowtypes = map I.rowType arrtypes
+      rowtypes = map I.rowType    arrtypes
       acctypes = map I.subExpType nes
       
   (params, body, rettype) <- internaliseLambda internaliseBody lam $
@@ -205,6 +208,36 @@ internaliseRedomapInnerLambda internaliseBody lam nes arr_args = do
   -- finally, place assertions and return result
   body' <- assertResultShape (srclocOf lam) (acctype'++rettypearr') body
   return $ I.Lambda params body' (acctype'++rettypearr')
+
+internaliseStreamLambda :: (E.Exp -> InternaliseM Body)
+                        -> E.Lambda
+                        -> [I.SubExp]
+                        -> [I.Type]
+                        -> InternaliseM I.Lambda
+internaliseStreamLambda internaliseBody lam accs arrtypes = do  
+  let acctypes = map I.subExpType accs
+  (params, body, rettype) <- internaliseLambda internaliseBody lam $
+                             acctypes++arrtypes
+  -- split rettype into (i) accummulator types && (ii) result-array-elem types
+  let acc_len = length acctypes
+      lam_acc_tps = take acc_len rettype
+  (lam_arr_tps,_) <- instantiateShapes' $ drop acc_len rettype
+  --
+  -- For the map part: intuitively it would seem possible to
+  --   enforce the invariant that the inner shape is invariant
+  --   to the streaming; however a slice cannot be computed 
+  --   because filter can be part of the body, hence the result
+  --   array can be empty, hence inner shape is unavailable ...
+  -- It would seem this lambda requires user-level annotations!
+  --
+  -- The accumulator result of the body must have the exact same 
+  -- shape as the initial accumulator.  We accomplish this with 
+  -- an assertion and reshape().
+  let acctype' = [ t `setArrayShape` arrayShape shape
+                   | (t,shape) <- zip lam_acc_tps acctypes ]
+  -- finally, place assertions and return result
+  body' <- assertResultShape (srclocOf lam) (acctype'++lam_arr_tps) body
+  return $ I.Lambda params body' (acctypes++lam_arr_tps)
 
 internaliseFilterLambda :: (E.Exp -> InternaliseM Body)
                         -> E.Lambda

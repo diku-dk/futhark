@@ -30,7 +30,6 @@ import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.TypesValues
 import Futhark.Internalise.Bindings
 import Futhark.Internalise.Lambdas
-
 import Prelude hiding (mapM)
 
 -- | Convert a program in external Futhark to a program in internal
@@ -405,12 +404,33 @@ internaliseExp desc (E.Redomap lam1 lam2 ne arrs _) = do
   letTupExp' desc $ I.LoopOp $
     I.Redomap [] lam1' lam2' nes arrs'
 
+internaliseExp desc (E.Stream chunk i acc arr lam _) = do
+  arrs' <- internaliseExpToIdents "stream_arr" arr
+  accs' <- internaliseExp "stream_accs" acc
+
+  let chunkiparams = map E.toParam [chunk,i] -- <$> flattenPattern [chunk,i]
+  (lam', chunk', i') <- 
+      withNonuniqueReplacements $ bindingParams chunkiparams $ \_ mergepat' -> do
+            let [chunk'', i'']  = mergepat' 
+            let lam_arrs' = [ I.arrayOf t (Shape [I.Var chunk'']) (I.uniqueness t)
+                              | t <- map (\(I.Array bt s u)->I.Array bt (I.stripDims 1 s) u) 
+                                         (map I.identType arrs') ]
+            lam'' <- withNonuniqueReplacements $
+                        internaliseStreamLambda internaliseBody lam
+                        accs' lam_arrs' 
+            return (lam'', chunk'', i'')
+  let params' = lambdaParams lam'
+  let res_lam = Lambda (chunk':i':params') (I.lambdaBody lam') (I.lambdaReturnType lam')
+  letTupExp' desc $ 
+    I.LoopOp $ I.Stream [] accs' arrs' res_lam --lam' 
+
 internaliseExp desc (E.ConcatMap lam arr arrs _) = do
   arr' <- internaliseExpToIdents "concatMap_arr" arr
   arrs' <- mapM (internaliseExpToIdents "concatMap_arr") arrs
   lam' <- withNonuniqueReplacements $
           internaliseConcatMapLambda internaliseBody lam $ map I.Var arr'
   letTupExp' desc $ I.LoopOp $ I.ConcatMap [] lam' $ arr':arrs'
+
 
 -- The "interesting" cases are over, now it's mostly boilerplate.
 

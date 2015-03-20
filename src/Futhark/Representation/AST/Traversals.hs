@@ -48,7 +48,7 @@ module Futhark.Representation.AST.Traversals
   , walkExpM
   , walkExp
   , walkBodyM
-
+  , mapOnExtType
   -- * Simple wrappers
   , foldlPattern
   )
@@ -193,6 +193,10 @@ mapExpM tv (LoopOp (Redomap cs redfun mapfun accexps arrexps)) =
   LoopOp <$> (pure Redomap <*> mapOnCertificates tv cs <*>
               mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
               mapM (mapOnSubExp tv) accexps <*> mapM (mapOnIdent tv) arrexps)
+mapExpM tv (LoopOp (Stream cs accs arrs lam)) = 
+  LoopOp <$> (pure Stream <*> mapOnCertificates tv cs <*>
+              mapM (mapOnSubExp tv) accs <*> 
+              mapM (mapOnIdent  tv) arrs <*> mapOnLambda tv lam)
 
 mapOnExtType :: (Monad m, Applicative m) =>
                 Mapper flore tlore m -> ExtType -> m ExtType
