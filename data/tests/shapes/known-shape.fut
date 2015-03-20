@@ -2,7 +2,7 @@
 
 fun [[int,!k],!n] main(int n, int m, int k) =
   let a = replicate(n, iota(m)) in
-  map(fn [int,!k] ([int,!m] r) =>
-        let x = reduce(+, 0, r)
-        in map(+x, iota(k)),
-      a)
+  zipWith(fn [int,!k] (int i, [int,!m] r) =>
+            let x = reduce(+, 0, r)
+            in map(+i, map(+x, iota(k))),
+          iota(n), a)
