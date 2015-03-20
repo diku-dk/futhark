@@ -486,11 +486,18 @@ checkFun (fname, rettype, params, body, loc) = do
 
   where checkParams = reverse <$> foldM expand [] params
 
-        expand params' ident@(Ident pname _ _)
-          | Just _ <- find ((==identName ident) . identName) params' =
+        expand params' ident@(Ident pname ptype _)
+          | pname `elem` knownparams =
             bad $ DupParamError fname (baseName pname) loc
+          | Just name <- find (`elem` knownparams) $ boundDims ptype =
+            bad $ DupParamError fname (baseName name) loc
           | otherwise =
             return $ ident : params'
+          where knownparams = map identName params'
+
+        boundDims = mapMaybe bound . arrayDims
+          where bound (VarDim name) = Just name
+                bound _             = Nothing
 
         notAliasingParam names =
           forM_ params $ \p ->
