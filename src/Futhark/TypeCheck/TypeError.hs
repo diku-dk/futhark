@@ -75,6 +75,8 @@ data GenTypeError vn e t pat =
   | NotAnArray SrcLoc e t
   | PermutationError SrcLoc [Int] Int (Maybe vn)
   -- ^ The permutation is not valid.
+  | DimensionNotInteger SrcLoc vn
+  -- ^ A dimension annotation was a non-integer variable.
 
 instance (VarName vn, Pretty e, Pretty t, Pretty pat) => Show (GenTypeError vn e t pat) where
   show (TypeError pos msg) =
@@ -164,6 +166,9 @@ instance (VarName vn, Pretty e, Pretty t, Pretty pat) => Show (GenTypeError vn e
     ") is not valid for array " ++ name' ++ "of rank " ++ show rank ++ " at " ++
     locStr loc ++ "."
     where name' = maybe "" ((++" ") . textual) name
+  show (DimensionNotInteger loc name) =
+    "Dimension declaration " ++ textual name ++ " at " ++ locStr loc ++
+    " should be an integer."
 
 ppTuple :: Pretty a => [a] -> String
 ppTuple ts = intercalate ", " $ map ppr' ts

@@ -105,6 +105,7 @@ import Language.Futhark.Parser.Lexer
       '}'             { L $$ RCURLY }
       ','             { L $$ COMMA }
       '_'             { L $$ UNDERSCORE }
+      '!'             { L $$ BANG }
       fun             { L $$ FUN }
       fn              { L $$ FN }
       '=>'            { L $$ ARROW }
@@ -208,6 +209,9 @@ DimDecl :: { DimDecl Name }
         : ',' id
           { let L _ (ID name) = $2
             in VarDim name }
+        | ',' '!' id
+          { let L _ (ID name) = $3
+            in KnownDim name }
         | ',' intlit
           { let L _ (INTLIT n) = $2
             in ConstDim n }

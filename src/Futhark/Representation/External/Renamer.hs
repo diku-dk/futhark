@@ -34,6 +34,7 @@ module Futhark.Representation.External.Renamer
 import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Reader
+import Data.Maybe
 
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
@@ -178,20 +179,38 @@ replName :: (VarName f, VarName t) => f -> RenameM f t t
 replName name = maybe (new name) return =<<
                 asks (HM.lookup name . envNameMap)
 
-bind :: (VarName f) => [IdentBase ty f] -> RenameM f t a -> RenameM f t a
-bind vars body = do
+bindNames :: VarName f => [f] -> RenameM f t a -> RenameM f t a
+bindNames varnames body = do
   vars' <- mapM new varnames
   -- This works because map union prefers elements from left
   -- operand.
   local (bind' vars') body
-  where varnames = map identName vars
-        bind' vars' env = env { envNameMap = HM.fromList (zip varnames vars')
+  where bind' vars' env = env { envNameMap = HM.fromList (zip varnames vars')
                                              `HM.union` envNameMap env }
+
+bind :: (VarName f) => [IdentBase ty f] -> RenameM f t a -> RenameM f t a
+bind = bindNames . map identName
+
+bindParams :: VarName f =>
+              [ParamBase f]
+           -> RenameM f t a
+           -> RenameM f t a
+bindParams params =
+  bind params .
+  bindNames (concatMap (mapMaybe inspectDim . arrayDims . identType) params)
+  where inspectDim AnyDim =
+          Nothing
+        inspectDim (ConstDim _) =
+          Nothing
+        inspectDim (VarDim name) =
+          Just name
+        inspectDim (KnownDim _) =
+          Nothing
 
 renameFun :: (TypeBox ty, VarName f, VarName t) =>
              FunDecBase ty f -> RenameM f t (FunDecBase ty t)
 renameFun (fname, ret, params, body, pos) =
-  bind params $ do
+  bindParams params $ do
     params' <- mapM declRepl params
     body' <- renameExp body
     ret' <- renameDeclType ret
@@ -246,6 +265,7 @@ renameDeclType = renameTypeGeneric
                  (const $ return NoInfo)
   where renameDim AnyDim       = return AnyDim
         renameDim (VarDim v)   = VarDim <$> replName v
+        renameDim (KnownDim v) = KnownDim <$> replName v
         renameDim (ConstDim n) = return $ ConstDim n
 
 renameTypeGeneric :: (VarName f, VarName t) =>

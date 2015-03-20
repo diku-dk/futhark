@@ -54,6 +54,7 @@ tokens :-
   "}"                      { const RCURLY }
   ","                      { const COMMA }
   "_"                      { const UNDERSCORE }
+  "!"                      { const BANG }
   [0-9]+                   { INTLIT . readInt }
   (([0-9]+("."[0-9]+)?))
     ([eE][\+\-]?[0-9]+)?   { REALLIT . readReal }

@@ -75,6 +75,7 @@ class (Eq shape, Ord shape, Monoid shape) => ArrayShape shape where
 
 -- | Declaration of a dimension size.
 data DimDecl vn = VarDim vn
+                | KnownDim vn
                 | ConstDim Int
                 | AnyDim
                 deriving (Eq, Ord, Show)

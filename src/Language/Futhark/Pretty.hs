@@ -84,12 +84,14 @@ instance (Eq vn, Hashable vn, Pretty vn) =>
     ppr u <> foldl f (ppr et) ds
     where f s AnyDim       = brackets s
           f s (VarDim v)   = brackets $ s <> comma <> ppr v
+          f s (KnownDim v) = brackets $ s <> comma <> text "!" <> ppr v
           f s (ConstDim n) = brackets $ s <> comma <> ppr n
 
   ppr (TupleArray et (ShapeDecl ds) u) =
     ppr u <> foldl f (braces $ commasep $ map ppr et) ds
     where f s AnyDim       = brackets s
           f s (VarDim v)   = brackets $ s <> comma <> ppr v
+          f s (KnownDim v) = brackets $ s <> comma <> text "!" <> ppr v
           f s (ConstDim n) = brackets $ s <> comma <> ppr n
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ArrayTypeBase Rank as vn) where

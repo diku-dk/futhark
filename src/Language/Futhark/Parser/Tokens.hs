@@ -89,5 +89,6 @@ data Token = IF
            | COPY
            | ASSERT
            | WHILE
+           | BANG
            | EOF
              deriving (Show, Eq)

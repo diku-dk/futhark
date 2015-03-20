@@ -46,6 +46,8 @@ type TypeError vn =
 
 type TaggedIdent ty vn = IdentBase ty (ID vn)
 
+type TaggedParam vn = ParamBase (ID vn)
+
 type TaggedExp ty vn = ExpBase ty (ID vn)
 
 type TaggedLambda ty vn = LambdaBase ty (ID vn)
@@ -296,6 +298,31 @@ binding bnds = check . local (`bindVars` bnds)
                 names = HS.fromList $ map identName bnds
                 divide s = (s `HS.intersection` names, s `HS.difference` names)
 
+bindingParams :: VarName vn => [TaggedParam vn] -> TypeM vn a -> TypeM vn a
+bindingParams params m =
+  -- We need to bind both the identifiers themselves, as well as any
+  -- presently non-bound shape annotations.
+  binding (map fromParam params) $ do
+    -- Figure out the not already bound shape annotations.
+    dims <- liftM concat $ forM params $ \param ->
+      liftM catMaybes $
+      mapM (inspectDim $ srclocOf param) $
+      arrayDims $ identType param
+    binding dims m
+  where inspectDim _ AnyDim =
+          return Nothing
+        inspectDim _ (ConstDim _) =
+          return Nothing
+        inspectDim loc (KnownDim name) = do
+          t <- lookupVar name loc
+          case t of
+            Basic Int ->
+              return Nothing -- Fine.
+            _ ->
+              bad $ DimensionNotInteger loc (baseName name)
+        inspectDim loc (VarDim name) =
+          return $ Just $ Ident name (Basic Int) loc
+
 lookupVar :: VarName vn => ID vn -> SrcLoc -> TypeM vn (TaggedType vn)
 lookupVar name pos = do
   bnd <- asks $ HM.lookup name . envVtable
@@ -448,7 +475,7 @@ checkFun :: (TypeBox ty, VarName vn) =>
             TaggedFunDec ty vn -> TypeM vn (TaggedFunDec CompTypeBase vn)
 checkFun (fname, rettype, params, body, loc) = do
   params' <- checkParams
-  body' <- binding (map fromParam params') $ checkExp body
+  body' <- bindingParams params' $ checkExp body
 
   checkReturnAlias $ typeOf body'
 
