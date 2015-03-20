@@ -474,30 +474,29 @@ initialFtable = HM.map addBuiltin builtInFunctions
 checkFun :: (TypeBox ty, VarName vn) =>
             TaggedFunDec ty vn -> TypeM vn (TaggedFunDec CompTypeBase vn)
 checkFun (fname, rettype, params, body, loc) = do
-  params' <- checkParams
-  body' <- bindingParams params' $ checkExp body
+  checkParams
+  body' <- bindingParams params $ checkExp body
 
   checkReturnAlias $ typeOf body'
 
   if toStructural (typeOf body') `subtypeOf` toStructural rettype then
-    return (fname, rettype, params', body', loc)
+    return (fname, rettype, params, body', loc)
   else bad $ ReturnTypeError loc fname (toStructural rettype) $
              toStructural $ typeOf body'
 
-  where checkParams = reverse <$> foldM expand [] params
+  where checkParams = foldM_ expand HS.empty params
 
-        expand params' ident@(Ident pname ptype _)
-          | pname `elem` knownparams =
+        expand knownparams (Ident pname ptype _)
+          | pname `HS.member` knownparams =
             bad $ DupParamError fname (baseName pname) loc
-          | Just name <- find (`elem` knownparams) $ boundDims ptype =
+          | Just name <- find (`HS.member` knownparams') boundDims =
             bad $ DupParamError fname (baseName name) loc
           | otherwise =
-            return $ ident : params'
-          where knownparams = map identName params'
-
-        boundDims = mapMaybe bound . arrayDims
-          where bound (VarDim name) = Just name
-                bound _             = Nothing
+            return $ HS.fromList boundDims `HS.union` knownparams'
+          where knownparams' = HS.insert pname knownparams
+                boundDims = mapMaybe boundDim $ arrayDims ptype
+                boundDim (VarDim name) = Just name
+                boundDim _             = Nothing
 
         notAliasingParam names =
           forM_ params $ \p ->
