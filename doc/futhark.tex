@@ -412,10 +412,13 @@ expressed as transformations on these.
 \begin{tabular}{lrll}
 $l$ & $::=$ & \texttt{fn $t$ ($t_{1}$ $v_{1}$, \ldots, $t_{n}$ $v_{n}$) => $e$} & (Anonymous function) \\
 & $|$ & \texttt{\textbf{id} ($e_{1}$, \ldots, $e_{n}$)} & (Curried function) \\
-& $|$ & \texttt{op $\odot$ ($e_{1}$, \ldots, $e_{n}$)} & (Curried operator) \\
+& $|$ & \texttt{$\odot$ $e$} & (Curried operator) \\
+& $|$ & \texttt{$e$ $\odot$} & (Curried operator) \\
+& $|$ & \texttt{$\odot$}     & (Curried operator) \\
 \\
 $e$ & $::=$ & \texttt{map($l$, $e$)} \\
     & $|$ & \texttt{filter($l$, $e$)} \\
+    & $|$ & \texttt{partition($l_{1}$, $\ldots$, $l_{n}$, $e$)} \\
     & $|$ & \texttt{reduce($l$, $x$, $e$)} \\
     & $|$ & \texttt{scan($l$, $x$, $e$)} \\
     & $|$ & \texttt{redomap($l_{r}$, $l_{m}$, $x$, $e$)} \\
@@ -664,6 +667,18 @@ the language.
   \item[\texttt{filter(\textit{f}, \textit{a})}]\hfill\\
     Remove all those elements of \textit{a} that do not satisfy the
     predicate \textit{f}.
+
+  \item[\texttt{partition(\textit{f}$_{1}$, \ldots, \textit{f}$_{n}$, \textit{a})}]\hfill\\
+    Divide the array \textit{a} into disjoint partitions based on the
+    given predicates.  Each element of \textit{a} is called with the
+    predicates \textit{f}$_{1}$ to \textit{f}$_{n}$ in sequence, and
+    as soon as one as one of them returns \textit{True}, the element
+    is added to the corresponding partition.  If none of the functions
+    return \textit{True}, the element is added to a catch-all
+    partition that is returned last.  Always returns a tuple with
+    $n+1$ components.  The partitioning is stable, meaning that
+    elements of the partitions retain their original relative
+    positions.
 
 \end{description}
 

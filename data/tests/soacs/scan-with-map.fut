@@ -2,7 +2,7 @@
 // When it was added, in-place-lowering couldn't get it to work right.
 
 fun [[int]] main([int] a, [[int]] contribs) =
-  scan( fn [int] ([int] x, [int] y) => zipWith(op +, x, y)
+  scan( fn [int] ([int] x, [int] y) => zipWith(+, x, y)
       , a
       , contribs
       )

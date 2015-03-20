@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -w #-}
 -- | Convert an Futhark program in internal representation to a
 -- corresponding program in external representation.  No effort is
 -- made to make the external program look pretty, but correctness and
@@ -66,12 +67,13 @@ externalisePrimOp (I.ArrayLit [] et) =
 externalisePrimOp (I.ArrayLit es et) =
   E.ArrayLit (map externaliseSubExp es) (externaliseType et) noLoc
 externalisePrimOp (I.BinOp bop x y t) =
-  E.BinOp bop (externaliseSubExp x) (externaliseSubExp y)
-              (E.fromDecl $ externaliseDeclType $ I.Basic t) noLoc
+  E.BinOp (externaliseBinOp bop)
+  (externaliseSubExp x) (externaliseSubExp y)
+  (E.fromDecl $ externaliseDeclType $ I.Basic t) noLoc
 externalisePrimOp (I.Not x) =
-  E.Not (externaliseSubExp x) noLoc
+  E.UnOp E.Not (externaliseSubExp x) noLoc
 externalisePrimOp (I.Negate x) =
-  E.Negate (externaliseSubExp x) noLoc
+  E.UnOp E.Negate (externaliseSubExp x) noLoc
 externalisePrimOp (I.Index _ src idxs) =
   E.Index (externaliseIdent src)
           (map externaliseSubExp idxs)
@@ -141,10 +143,6 @@ externaliseLoopOp (I.Scan _ fun inputs) =
                (externaliseSOACArrayArgs arrinputs)
                noLoc
   where (accinputs, arrinputs) = unzip inputs
-externaliseLoopOp (I.Filter _ fun es) =
-  maybeUnzip $ E.Filter (externaliseMapLambda fun)
-                        (externaliseSOACArrayArgs es)
-                        noLoc
 externaliseLoopOp (I.Redomap _ outerfun innerfun vs as) =
   E.Redomap (externaliseFoldLambda outerfun $ length vs)
             (externaliseFoldLambda innerfun $ length vs)
@@ -204,6 +202,24 @@ externalisePat = externaliseBinders . patternIdents
 externaliseBinders :: [I.Ident] -> E.TupIdent
 externaliseBinders [v] = Id $ externaliseIdent v
 externaliseBinders vs  = TupId (map (Id . externaliseIdent) vs) noLoc
+
+externaliseBinOp :: I.BinOp -> E.BinOp
+externaliseBinOp I.Plus = E.Plus
+externaliseBinOp I.Minus = E.Minus
+externaliseBinOp I.Pow = E.Pow
+externaliseBinOp I.Times = E.Times
+externaliseBinOp I.Divide = E.Divide
+externaliseBinOp I.Mod = E.Mod
+externaliseBinOp I.ShiftR = E.ShiftR
+externaliseBinOp I.ShiftL = E.ShiftL
+externaliseBinOp I.Band = E.Band
+externaliseBinOp I.Xor = E.Xor
+externaliseBinOp I.Bor = E.Bor
+externaliseBinOp I.LogAnd = E.LogAnd
+externaliseBinOp I.LogOr = E.LogOr
+externaliseBinOp I.Less = E.Less
+externaliseBinOp I.Leq = E.Leq
+externaliseBinOp I.Equal = E.Equal
 
 externaliseDeclTypes :: [I.DeclType] -> E.DeclType
 externaliseDeclTypes ts =

@@ -4,4 +4,4 @@ fun bool divisibleBy(int x, int y) = y % x == 0
 
 fun int main([int] a) =
   let threes = filter(divisibleBy(3), a) in
-  reduce(op+, 0, threes)
+  reduce(+, 0, threes)

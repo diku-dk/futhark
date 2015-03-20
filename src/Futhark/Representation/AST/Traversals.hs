@@ -70,6 +70,7 @@ data Mapper flore tlore m = Mapper {
   , mapOnBody :: Body flore -> m (Body tlore)
   , mapOnBinding :: Binding flore -> m (Binding tlore)
   , mapOnLambda :: Lambda flore -> m (Lambda tlore)
+  , mapOnExtLambda :: ExtLambda flore -> m (ExtLambda tlore)
   , mapOnIdent :: Ident -> m Ident
   , mapOnCertificates :: Certificates -> m Certificates
   , mapOnRetType :: RetType flore -> m (RetType tlore)
@@ -83,6 +84,7 @@ identityMapper = Mapper {
                  , mapOnBinding = return
                  , mapOnBody = return
                  , mapOnLambda = return
+                 , mapOnExtLambda = return
                  , mapOnIdent = return
                  , mapOnCertificates = return
                  , mapOnRetType = return
@@ -161,6 +163,11 @@ mapExpM tv (PrimOp (Alloc e)) =
   PrimOp <$> (pure Alloc <*> mapOnSubExp tv e)
 mapExpM tv (PrimOp (Assert e loc)) =
   PrimOp <$> (pure Assert <*> mapOnSubExp tv e <*> pure loc)
+mapExpM tv (PrimOp (Partition cs n flags arr)) =
+  PrimOp <$> (pure Partition <*> mapOnCertificates tv cs <*>
+              pure n <*>
+              mapOnIdent tv flags <*>
+              mapOnIdent tv arr)
 mapExpM tv (LoopOp (DoLoop res mergepat form loopbody)) =
   LoopOp <$> (DoLoop <$> mapM (mapOnIdent tv) res <*>
               (zip <$> mapM (mapOnFParam tv) vs <*> mapM (mapOnSubExp tv) es) <*>
@@ -185,10 +192,6 @@ mapExpM tv (LoopOp (Scan cs fun inputs)) =
               (zip <$> mapM (mapOnSubExp tv) startexps <*>
                        mapM (mapOnIdent tv) arrexps))
   where (startexps, arrexps) = unzip inputs
-mapExpM tv (LoopOp (Filter cs fun arrexps)) =
-  LoopOp <$> (pure Filter <*> mapOnCertificates tv cs <*>
-              mapOnLambda tv fun <*>
-              mapM (mapOnIdent tv) arrexps)
 mapExpM tv (LoopOp (Redomap cs redfun mapfun accexps arrexps)) =
   LoopOp <$> (pure Redomap <*> mapOnCertificates tv cs <*>
               mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
@@ -232,6 +235,7 @@ data Folder a lore m = Folder {
   , foldOnBody :: a -> Body lore -> m a
   , foldOnBinding :: a -> Binding lore -> m a
   , foldOnLambda :: a -> Lambda lore -> m a
+  , foldOnExtLambda :: a -> ExtLambda lore -> m a
   , foldOnIdent :: a -> Ident -> m a
   , foldOnCertificates :: a -> Certificates -> m a
   , foldOnRetType :: a -> RetType lore -> m a
@@ -245,6 +249,7 @@ identityFolder = Folder {
                  , foldOnBody = const . return
                  , foldOnBinding = const . return
                  , foldOnLambda = const . return
+                 , foldOnExtLambda = const . return
                  , foldOnIdent = const . return
                  , foldOnCertificates = const . return
                  , foldOnRetType = const . return
@@ -257,6 +262,7 @@ foldMapper f = Mapper {
                , mapOnBody = wrap foldOnBody
                , mapOnBinding = wrap foldOnBinding
                , mapOnLambda = wrap foldOnLambda
+               , mapOnExtLambda = wrap foldOnExtLambda
                , mapOnIdent = wrap foldOnIdent
                , mapOnCertificates = wrap foldOnCertificates
                , mapOnRetType = wrap foldOnRetType
@@ -294,6 +300,7 @@ data Walker lore m = Walker {
   , walkOnBody :: Body lore -> m ()
   , walkOnBinding :: Binding lore -> m ()
   , walkOnLambda :: Lambda lore -> m ()
+  , walkOnExtLambda :: ExtLambda lore -> m ()
   , walkOnIdent :: Ident -> m ()
   , walkOnCertificates :: Certificates -> m ()
   , walkOnRetType :: RetType lore -> m ()
@@ -307,6 +314,7 @@ identityWalker = Walker {
                  , walkOnBody = const $ return ()
                  , walkOnBinding = const $ return ()
                  , walkOnLambda = const $ return ()
+                 , walkOnExtLambda = const $ return ()
                  , walkOnIdent = const $ return ()
                  , walkOnCertificates = const $ return ()
                  , walkOnRetType = const $ return ()
@@ -319,6 +327,7 @@ walkMapper f = Mapper {
                , mapOnBody = wrap walkOnBody
                , mapOnBinding = wrap walkOnBinding
                , mapOnLambda = wrap walkOnLambda
+               , mapOnExtLambda = wrap walkOnExtLambda
                , mapOnIdent = wrap walkOnIdent
                , mapOnCertificates = wrap walkOnCertificates
                , mapOnRetType = wrap walkOnRetType

@@ -488,8 +488,8 @@ typeOf (TupLit es _) = Tuple $ map typeOf es
 typeOf (ArrayLit es t _) =
   arrayType 1 t $ mconcat $ map (uniqueness . typeOf) es
 typeOf (BinOp _ _ _ t _) = t
-typeOf (Not _ _) = Basic Bool
-typeOf (Negate e _) = typeOf e
+typeOf (UnOp Not _ _) = Basic Bool
+typeOf (UnOp Negate e _) = typeOf e
 typeOf (If _ _ _ t _) = t
 typeOf (Var ident) =
   case identType ident of
@@ -527,14 +527,17 @@ typeOf (Unzip _ ts _) =
 typeOf (Scan fun start arr _) =
   arrayType 1 et $ uniqueness et
     where et = lambdaType fun [typeOf start, rowType $ typeOf arr]
-typeOf (Filter _ arr _) = typeOf arr
+typeOf (Filter _ arr _) =
+  typeOf arr
+typeOf (Partition funs arr _) =
+  Tuple $ replicate (length funs + 1) $ typeOf arr
 typeOf (Redomap _ innerfun start arr _) =
   let acc_tp = typeOf start
       res_el_tp = lambdaType innerfun [typeOf start, rowType $ typeOf arr]
-  in  if res_el_tp == acc_tp 
+  in  if res_el_tp == acc_tp
       then res_el_tp
       else case res_el_tp of
-             Tuple [_,el_tp] -> 
+             Tuple [_,el_tp] ->
                  Tuple [acc_tp, arrayType 1 el_tp $ uniqueness el_tp]
              _ -> acc_tp -- NOT reachable
 typeOf (Stream _ _ acc arr lam _) =
@@ -609,11 +612,19 @@ tupleArrayElemReturnType (TupleArrayElem ts) ds args =
 lambdaReturnType :: LambdaBase CompTypeBase vn -> DeclTypeBase vn
 lambdaReturnType (AnonymFun _ _ t _) = t
 lambdaReturnType (CurryFun _ _ t _)  = toDecl t
+lambdaReturnType (UnOpFun _ t _)  = toDecl t
+lambdaReturnType (BinOpFun _ t _)  = toDecl t
+lambdaReturnType (CurryBinOpLeft _ _ t _)  = toDecl t
+lambdaReturnType (CurryBinOpRight _ _ t _)  = toDecl t
 
 -- | The parameter 'Diet's of a lambda.
 lambdaParamDiets :: LambdaBase ty vn -> [Diet]
 lambdaParamDiets (AnonymFun params _ _ _) = map (diet . identType) params
 lambdaParamDiets (CurryFun _ args _ _) = map (const Observe) args
+lambdaParamDiets (UnOpFun {}) = [Observe]
+lambdaParamDiets (BinOpFun {}) = [Observe, Observe]
+lambdaParamDiets (CurryBinOpLeft {}) = [Observe]
+lambdaParamDiets (CurryBinOpRight {}) = [Observe]
 
 -- | Find the function of the given name in the Futhark program.
 funDecByName :: Name -> ProgBase ty vn -> Maybe (FunDecBase ty vn)
@@ -644,6 +655,10 @@ progNames = execWriter . mapM funNames . progFunctions
           mapM_ one params >> expNames body
         lambdaNames (CurryFun _ exps _ _) =
           mapM_ expNames exps
+        lambdaNames (UnOpFun {}) = return ()
+        lambdaNames (BinOpFun {}) = return ()
+        lambdaNames (CurryBinOpLeft _ e _ _) = expNames e
+        lambdaNames (CurryBinOpRight _ e _ _) = expNames e
 
 -- | Change those subexpressions where evaluation of the expression
 -- would stop.  Also change type annotations at branches.
@@ -712,6 +727,14 @@ freeInLambda (AnonymFun params body _ _) =
     where params' = map identName params
 freeInLambda (CurryFun _ exps _ _) =
   HS.unions (map freeInExp exps)
+freeInLambda (UnOpFun {}) =
+  mempty
+freeInLambda (BinOpFun {}) =
+  mempty
+freeInLambda (CurryBinOpLeft _ e _ _) =
+  freeInExp e
+freeInLambda (CurryBinOpRight _ e _ _) =
+  freeInExp e
 
 -- | Convert an identifier to a 'ParamBase'.
 toParam :: IdentBase (TypeBase as) vn -> ParamBase vn

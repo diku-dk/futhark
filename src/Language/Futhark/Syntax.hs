@@ -23,6 +23,8 @@ module Language.Futhark.Syntax
   , Value(..)
 
   -- * Abstract syntax tree
+  , UnOp (..)
+  , BinOp (..)
   , IdentBase(..)
   , ParamBase
   , ExpBase(..)
@@ -191,23 +193,51 @@ instance Located (IdentBase ty vn) where
 instance Hashable vn => Hashable (IdentBase ty vn) where
   hashWithSalt salt = hashWithSalt salt . identName
 
+-- | Unary operators.
+data UnOp = Not
+          | Negate
+          deriving (Eq, Ord, Show)
+
+-- | Binary operators.
+data BinOp = Plus -- Binary Ops for Numbers
+           | Minus
+           | Pow
+           | Times
+           | Divide
+           | Mod
+           | ShiftR
+           | ShiftL
+           | Band
+           | Xor
+           | Bor
+           | LogAnd
+           | LogOr
+           -- Relational Ops for all basic types at least
+           | Equal
+           | Less
+           | Leq
+           | Greater
+           | Geq
+             deriving (Eq, Ord, Show)
+
 -- | Futhark Expression Language: literals + vars + int binops + array
 -- constructors + array combinators (SOAC) + if + function calls +
--- let + tuples (literals & identifiers) TODO: please add float,
--- double, long int, etc.
+-- let + tuples (literals & identifiers)
 --
 -- In a value of type @Exp tt@, all 'Type' values are kept as @tt@
--- values.  -- This allows us to encode whether or not the expression
--- has been type-checked in the Haskell type of the expression.
--- Specifically, the parser will produce expressions of type @Exp
--- 'NoInfo'@, and the type checker will convert these to @Exp 'Type'@,
--- in which type information is always present.
+-- values.
+--
+-- This allows us to encode whether or not the expression has been
+-- type-checked in the Haskell type of the expression.  Specifically,
+-- the parser will produce expressions of type @Exp 'NoInfo'@, and the
+-- type checker will convert these to @Exp 'Type'@, in which type
+-- information is always present.
 data ExpBase ty vn =
             -- Core language
               Literal Value SrcLoc
 
             | TupLit    [ExpBase ty vn] SrcLoc
-            -- ^ Tuple literals, e.g., (1+3, (x, y+z)).
+            -- ^ Tuple literals, e.g., @{1+3, {x, y+z}}@.
 
             | ArrayLit  [ExpBase ty vn] (ty vn) SrcLoc
 
@@ -233,8 +263,7 @@ data ExpBase ty vn =
             | BinOp BinOp (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
 
             -- Unary Ops: Not for bools and Negate for ints
-            | Not    (ExpBase ty vn) SrcLoc -- ^ E.g., @not True == False@.
-            | Negate (ExpBase ty vn) SrcLoc -- ^ E.g., @~(~1) = 1@.
+            | UnOp UnOp (ExpBase ty vn) SrcLoc
 
             -- Primitive array operations
             | LetWith (IdentBase ty vn) (IdentBase ty vn)
@@ -267,7 +296,7 @@ data ExpBase ty vn =
 
             -- Array index space transformation.
             | Reshape [ExpBase ty vn] (ExpBase ty vn) SrcLoc
-             -- ^ 1st arg is the new shape, 2nd arg is the input array *)
+             -- ^ 1st arg is the new shape, 2nd arg is the input array.
 
             | Transpose Int Int (ExpBase ty vn) SrcLoc
             -- ^ If @b=transpose(k,n,a)@, then @a[i_1, ..., i_k
@@ -285,20 +314,24 @@ data ExpBase ty vn =
             -- Second-Order Array Combinators accept curried and
             -- anonymous functions as first params.
             | Map (LambdaBase ty vn) (ExpBase ty vn) SrcLoc
-             -- ^ @map(op +(1), [1,2,..,n]) = [2,3,..,n+1]@.  3rd arg
-             -- is the input-array row type
+             -- ^ @map(op +(1), [1,2,..,n]) = [2,3,..,n+1]@.
 
             | Reduce (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
-             -- ^ @reduce(op +, 0, [1,2,...,n]) = (0+1+2+...+n)@ 4th arg
-             -- is the input-array element type
+             -- ^ @reduce(op +, 0, [1,2,...,n]) = (0+1+2+...+n)@.
 
             | Scan (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
              -- ^ @scan(plus, 0, [ 1, 2, 3 ]) = [ 1, 3, 6 ]@.
-             -- 4th arg is the row type of the input array
 
             | Filter (LambdaBase ty vn) (ExpBase ty vn) SrcLoc
-            -- ^ 3rd arg is the row type of the input (and
-            -- result) array
+            -- ^ Return those elements of the array that satisfy the
+            -- predicate.
+
+            | Partition [LambdaBase ty vn] (ExpBase ty vn) SrcLoc
+            -- ^ @partition(f_1, ..., f_n, a)@ returns @n+1@ arrays, with
+            -- the @i@th array consisting of those elements for which
+            -- function @f_1@ returns 'True', and no previous function
+            -- has returned 'True'.  The @n+1@th array contains those
+            -- elements for which no function returns 'True'.
 
             | Redomap (LambdaBase ty vn) (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
              -- ^ @redomap(g, f, n, a) = reduce(g, n, map(f, a))@.
@@ -352,8 +385,7 @@ instance Located (ExpBase ty vn) where
   locOf (TupLit _ pos) = locOf pos
   locOf (ArrayLit _ _ pos) = locOf pos
   locOf (BinOp _ _ _ _ pos) = locOf pos
-  locOf (Not _ pos) = locOf pos
-  locOf (Negate _ pos) = locOf pos
+  locOf (UnOp _ _ pos) = locOf pos
   locOf (If _ _ _ _ pos) = locOf pos
   locOf (Var ident) = locOf ident
   locOf (Apply _ _ _ pos) = locOf pos
@@ -373,6 +405,7 @@ instance Located (ExpBase ty vn) where
   locOf (Unzip _ _ pos) = locOf pos
   locOf (Scan _ _ _ pos) = locOf pos
   locOf (Filter _ _ pos) = locOf pos
+  locOf (Partition _ _ pos) = locOf pos
   locOf (Redomap _ _ _ _ pos) = locOf pos
   locOf (Split _ _ pos) = locOf pos
   locOf (Concat _ _ pos) = locOf pos
@@ -387,12 +420,24 @@ data LoopFormBase ty vn = ForLoop (IdentBase ty vn) (ExpBase ty vn)
 -- | Anonymous Function
 data LambdaBase ty vn = AnonymFun [ParamBase vn] (ExpBase ty vn) (DeclTypeBase vn) SrcLoc
                       -- ^ @fn int (bool x, char z) => if(x) then ord(z) else ord(z)+1 *)@
-                      | CurryFun Name [ExpBase ty vn] (ty vn) SrcLoc -- ^ @op +(4)@
+                      | CurryFun Name [ExpBase ty vn] (ty vn) SrcLoc
+                        -- ^ @f(4)@
+                      | UnOpFun UnOp (ty vn) SrcLoc
+                        -- ^ @-@.
+                      | BinOpFun BinOp (ty vn) SrcLoc
+                      | CurryBinOpLeft BinOp (ExpBase ty vn) (ty vn) SrcLoc
+                        -- ^ @2+@.
+                      | CurryBinOpRight BinOp (ExpBase ty vn) (ty vn) SrcLoc
+                        -- ^ @+2@.
                         deriving (Eq, Ord, Show)
 
 instance Located (LambdaBase ty vn) where
-  locOf (AnonymFun _ _ _ loc) = locOf loc
-  locOf (CurryFun  _ _ _ loc) = locOf loc
+  locOf (AnonymFun _ _ _ loc)       = locOf loc
+  locOf (CurryFun  _ _ _ loc)       = locOf loc
+  locOf (UnOpFun _ _ loc)           = locOf loc
+  locOf (BinOpFun _ _ loc)          = locOf loc
+  locOf (CurryBinOpLeft _ _ _ loc)  = locOf loc
+  locOf (CurryBinOpRight _ _ _ loc) = locOf loc
 
 -- | Tuple IdentBaseifier, i.e., pattern matching
 data TupIdentBase ty vn = TupId [TupIdentBase ty vn] SrcLoc

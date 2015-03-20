@@ -90,6 +90,7 @@ import Language.Futhark.Parser.Lexer
       '<'             { L $$ LTH }
       '>'             { L $$ GTH }
       '<='            { L $$ LEQ }
+      '>='            { L $$ GEQ }
       pow             { L $$ POW }
       '<<'            { L $$ SHIFTL }
       '>>'            { L $$ SHIFTR }
@@ -127,6 +128,7 @@ import Language.Futhark.Parser.Lexer
       split           { L $$ SPLIT }
       concat          { L $$ CONCAT }
       filter          { L $$ FILTER }
+      partition       { L $$ PARTITION }
       redomap         { L $$ REDOMAP }
       true            { L $$ TRUE }
       false           { L $$ FALSE }
@@ -145,7 +147,7 @@ import Language.Futhark.Parser.Lexer
 %left '||'
 %left '&&'
 %left '&' '^' '|'
-%left '<=' '<' '=='
+%left '<=' '>=' '>' '<' '=='
 
 %left '<<' '>>'
 %left '+' '-'
@@ -160,24 +162,29 @@ Prog :: { UncheckedProg }
      :   FunDecs {- EOF -}   { Prog $1 }
 ;
 
-Ops : op '+'     { (nameFromString "op +", $1) }
-    | op '*'     { (nameFromString "op *", $1) }
-    | op '-'     { (nameFromString "op -", $1) }
-    | op '/'     { (nameFromString "op /", $1) }
-    | op '%'     { (nameFromString "op %", $1) }
-    | op '=='    { (nameFromString "op ==", $1) }
-    | op '<'     { (nameFromString "op <", $1) }
-    | op '<='    { (nameFromString "op <=", $1) }
-    | op '&&'    { (nameFromString "op &&", $1) }
-    | op '||'    { (nameFromString "op ||", $1) }
-    | op not     { (nameFromString "op not", $1) }
-    | op '~'     { (nameFromString "op ~",$1) }
-    | op pow     { (nameFromString "op pow", $1) }
-    | op '^'     { (nameFromString "op ^", $1) }
-    | op '&'     { (nameFromString "op &", $1) }
-    | op '|'     { (nameFromString "op |", $1) }
-    | op '>>'    { (nameFromString "op >>", $1) }
-    | op '<<'    { (nameFromString "op <<", $1) }
+-- Note that this production does not include Minus.
+BinOp :: { (BinOp, SrcLoc) }
+      : '+'     { (Plus, $1) }
+      | '*'     { (Times, $1) }
+      | '/'     { (Divide, $1) }
+      | '%'     { (Mod, $1) }
+      | '=='    { (Equal, $1) }
+      | '<'     { (Less, $1) }
+      | '<='    { (Leq, $1) }
+      | '>'     { (Greater, $1) }
+      | '>='    { (Geq, $1) }
+      | '&&'    { (LogAnd, $1) }
+      | '||'    { (LogOr, $1) }
+      | pow     { (Pow, $1) }
+      | '^'     { (Xor, $1) }
+      | '&'     { (Band, $1) }
+      | '|'     { (Bor, $1) }
+      | '>>'    { (ShiftR, $1) }
+      | '<<'    { (ShiftL, $1) }
+
+UnOp :: { (UnOp, SrcLoc) }
+     : not { (Not, $1) }
+     | '~' { (Negate, $1) }
 
 FunDecs : fun Fun FunDecs   { $2 : $3 }
         | fun Fun           { [$2] }
@@ -257,8 +264,8 @@ Exp  :: { UncheckedExp }
      | Exp '*' Exp    { BinOp Times $1 $3 NoInfo $2 }
      | Exp '/' Exp    { BinOp Divide $1 $3 NoInfo $2 }
      | Exp '%' Exp    { BinOp Mod $1 $3 NoInfo $2 }
-     | '-' Exp        { Negate $2 $1 }
-     | not Exp        { Not $2 $1 }
+     | '-' Exp %prec '~' { UnOp Negate $2 $1 }
+     | not Exp        { UnOp Not $2 $1 }
      | Exp pow Exp    { BinOp Pow $1 $3 NoInfo $2 }
      | Exp '>>' Exp   { BinOp ShiftR $1 $3 NoInfo $2 }
      | Exp '<<' Exp   { BinOp ShiftL $1 $3 NoInfo $2 }
@@ -271,6 +278,8 @@ Exp  :: { UncheckedExp }
      | Exp '==' Exp   { BinOp Equal $1 $3 NoInfo $2 }
      | Exp '<' Exp    { BinOp Less $1 $3 NoInfo $2 }
      | Exp '<=' Exp   { BinOp Leq  $1 $3 NoInfo $2 }
+     | Exp '>' Exp    { BinOp Greater $1 $3 NoInfo $2 }
+     | Exp '>=' Exp   { BinOp Geq  $1 $3 NoInfo $2 }
 
      | if Exp then Exp else Exp %prec ifprec
                       { If $2 $4 $6 NoInfo $1 }
@@ -323,6 +332,9 @@ Exp  :: { UncheckedExp }
      | filter '(' FunAbstr ',' Exp ')'
                       { Filter $3 $5 $1 }
 
+     | partition '(' FunAbstrsThenExp ')'
+                      { Partition (fst $3) (snd $3) $1 }
+
      | redomap '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
                       { Redomap $3 $5 $7 $9 $1 }
 
@@ -370,8 +382,8 @@ Exp  :: { UncheckedExp }
      | loop '(' TupId '=' Exp ')' '=' while Exp do Exp in Exp %prec letprec
                       { DoLoop $3 $5 (WhileLoop $9) $11 $13 $1 }
 
-     | stream '(' Id ',' Id ',' Exp ',' Exp ',' FunAbstr ')'
-                      { Stream $3 $5 $7 $9 $11 $1 }
+     | stream '(' FunAbstr ',' Id ',' Id ',' Exp ',' Exp ')'
+                      { Stream $5 $7 $9 $11 $3 $1 }
 
 Index : '[' Exps ']'                  { $2 }
 
@@ -396,15 +408,34 @@ TupId : id { let L pos (ID name) = $1 in Id $ Ident name NoInfo pos }
       | '_' { Wildcard NoInfo $1 }
       | '{' TupIds '}' { TupId $2 $1 }
 
-FunAbstr : id { let L pos (ID name) = $1 in CurryFun name [] NoInfo pos }
-         | Ops { let (name,pos) = $1 in CurryFun name [] NoInfo pos }
-         | id '(' ')' { let L pos (ID name) = $1 in CurryFun name [] NoInfo pos }
-         | Ops '(' ')' { let (name,pos) = $1 in CurryFun name [] NoInfo pos }
+FunAbstr :: { UncheckedLambda }
+         : fn Type '(' TypeIds ')' '=>' Exp
+           { AnonymFun $4 $7 $2 $1 }
          | id '(' Exps ')'
-               { let L pos (ID name) = $1 in CurryFun name $3 NoInfo pos }
-         | Ops '(' Exps ')'
-               { let (name,pos) = $1 in CurryFun name $3 NoInfo pos }
-         | fn Type '(' TypeIds ')' '=>' Exp { AnonymFun $4 $7 $2 $1 }
+           { let L pos (ID name) = $1 in CurryFun name $3 NoInfo pos }
+         | id '(' ')'
+           { let L pos (ID name) = $1 in CurryFun name [] NoInfo pos }
+         | id
+           { let L pos (ID name) = $1 in CurryFun name [] NoInfo pos }
+           -- Minus is handed explicitly here because I could figure
+           -- out how to resolve the ambiguity with negation.
+         | '-' Exp
+           { CurryBinOpRight Minus $2 NoInfo $1 }
+         | '-'
+           { BinOpFun Minus NoInfo $1 }
+         | Exp '-'
+           { CurryBinOpLeft Minus $1 NoInfo (srclocOf $1) }
+         | BinOp Exp
+           { CurryBinOpRight (fst $1) $2 NoInfo (snd $1) }
+         | Exp BinOp
+           { CurryBinOpLeft (fst $2) $1 NoInfo (snd $2) }
+         | BinOp
+           { BinOpFun (fst $1) NoInfo (snd $1) }
+         | UnOp
+           { UnOpFun (fst $1) NoInfo (snd $1) }
+
+FunAbstrsThenExp : FunAbstr ',' Exp              { ([$1], $3) }
+                 | FunAbstr ',' FunAbstrsThenExp { ($1 : fst $3, snd $3) }
 
 Value : IntValue { $1 }
       | RealValue { $1 }
@@ -444,9 +475,8 @@ ArrayValue :  '[' Value ']'
                   Nothing -> throwError "Invalid array value"
                   Just ts -> return $ ArrayVal (arrayFromList $ $2:$4) $ removeNames ts
              }
-           | '[' ']'
-           {% return $ ArrayVal (arrayFromList []) $ toDecl $ Basic Int
-           }
+           | empty '(' Type ')'
+             { emptyArray $3 }
 TupleValue : '{' Values '}' { TupVal $2 }
 
 Values : Value ',' Values { $1 : $3 }

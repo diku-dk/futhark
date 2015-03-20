@@ -33,6 +33,7 @@ import Text.PrettyPrint.Mainland
 
 import Futhark.CodeGen.ImpCode
 import Futhark.MonadFreshNames
+import Futhark.Representation.AST.Syntax (BinOp (..))
 import Futhark.CodeGen.Backends.SimpleRepresentation
 import Futhark.CodeGen.Backends.GenericCReading
 import qualified Futhark.CodeGen.Backends.CUtils as C
@@ -343,6 +344,7 @@ compileProg ec prog@(Program funs) =
 $esc:("#include <stdio.h>")
 $esc:("#include <stdlib.h>")
 $esc:("#include <string.h>")
+$esc:("#include <stdint.h>")
 $esc:("#include <math.h>")
 $esc:("#include <sys/time.h>")
 $esc:("#include <ctype.h>")
@@ -539,8 +541,7 @@ compileCode (For i bound body) = do
   let i' = textual i
   bound' <- compileExp bound
   body'  <- collect $ compileCode body
-  decl [C.cdecl|int $id:i';|]
-  stm [C.cstm|for ($id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
+  stm [C.cstm|for (int $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
             $items:body'
           }|]
 

@@ -102,7 +102,6 @@ soacSeen name produced soac =
   where (desc, bodys) =
           case soac of
             SOAC.Map _ l _  -> ("mapT", [lambdaBody l])
-            SOAC.Filter _ l _ -> ("filterT", [lambdaBody l])
             SOAC.Scan _ l _ -> ("scanT", [lambdaBody l])
             SOAC.Reduce _ l _ -> ("reduceT", [lambdaBody l])
             SOAC.Redomap _ l1 l2 _ _ -> ("redomapT", [lambdaBody l1, lambdaBody l2])

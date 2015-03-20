@@ -1,1 +1,1 @@
-fun [int] main([int] a) = scan(op +, 0, a)
+fun [int] main([int] a) = scan(+, 0, a)

@@ -38,6 +38,7 @@ module Futhark.Optimise.Simplifier.Engine
        , simplifyExp
        , simplifyFun
        , simplifyLambda
+       , simplifyExtLambda
        , simplifySubExp
        , simplifyIdent
        , simplifyExtType
@@ -506,6 +507,7 @@ simplifyExpBase = mapExpM hoist
                 -- Lambdas are handled explicitly because we need to
                 -- bind their parameters.
                 , mapOnLambda = fail "Unhandled lambda in simplification engine."
+                , mapOnExtLambda = fail "Unhandled existential lambda in simplification engine."
                 , mapOnIdent = simplifyIdent
                 , mapOnCertificates = simplifyCerts
                 , mapOnRetType = simplifyRetType
@@ -565,12 +567,6 @@ simplifyLoopOp (ConcatMap cs fun arrs) = do
   arrs' <- mapM (mapM simplifyIdent) arrs
   fun' <- simplifyLambda fun $ map (const Nothing) $ lambdaParams fun
   return $ ConcatMap cs' fun' arrs'
-
-simplifyLoopOp (Filter cs fun arrs) = do
-  cs' <- simplifyCerts cs
-  arrs' <- mapM simplifyIdent arrs
-  fun' <- simplifyLambda fun $ map Just arrs'
-  return $ Filter cs' fun' arrs'
 
 simplifyLoopOp (Reduce cs fun input) = do
   let (acc, arrs) = unzip input
@@ -718,6 +714,19 @@ simplifyLambda (Lambda params body rettype) arrs = do
       simplifyBody (map diet rettype) body
   rettype' <- mapM simplifyType rettype
   return $ Lambda params' body' rettype'
+
+simplifyExtLambda :: MonadEngine m =>
+                     ExtLambda (InnerLore m)
+               -> m (ExtLambda (Lore m))
+simplifyExtLambda (ExtLambda params body rettype) = do
+  params' <- mapM simplifyIdentBinding params
+  let paramnames = HS.fromList $ map identName params'
+  rettype' <- mapM simplifyExtType rettype
+  body' <- enterBody $
+           blockIf (hasFree paramnames `orIf` isUnique) $
+           bindLParams params' $
+           simplifyBody (map diet rettype) body
+  return $ ExtLambda params' body' rettype'
 
 consumeResult :: MonadEngine m =>
                  [(Diet, SubExp)] -> m ()

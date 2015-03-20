@@ -358,8 +358,6 @@ allocInExp (LoopOp (Scan {})) =
   fail "Cannot put explicit allocations in scan yet."
 allocInExp (LoopOp (Redomap {})) =
   fail "Cannot put explicit allocations in redomap yet."
-allocInExp (LoopOp (Filter {})) =
-  fail "Cannot put explicit allocations in filter yet."
 allocInExp (Apply fname args rettype) = do
   args' <- funcallArgs args
   return $ Apply fname args' (memoryInRetType rettype)
@@ -368,6 +366,7 @@ allocInExp e = mapExpM alloc e
           identityMapper { mapOnBinding = fail "Unhandled binding in ExplicitAllocations"
                          , mapOnBody = allocInBody
                          , mapOnLambda = allocInLambda
+                         , mapOnExtLambda = allocInExtLambda
                          , mapOnRetType = return . memoryInRetType
                          , mapOnFParam = fail "Unhandled fparam in ExplicitAllocations"
                          }
@@ -376,6 +375,11 @@ allocInLambda :: In.Lambda -> AllocM Lambda
 allocInLambda lam = do
   body <- allocInBody $ lambdaBody lam
   return $ lam { lambdaBody = body }
+
+allocInExtLambda :: In.ExtLambda -> AllocM ExtLambda
+allocInExtLambda lam = do
+  body <- allocInBody $ extLambdaBody lam
+  return $ lam { extLambdaBody = body }
 
 vtableToAllocEnv :: ST.SymbolTable (Aliases ExplicitMemory)
                  -> HM.HashMap VName MemSummary

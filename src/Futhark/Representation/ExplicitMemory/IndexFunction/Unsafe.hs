@@ -26,7 +26,7 @@ import Data.Singletons.Prelude
 import Data.Type.Monomorphic
 import Data.Type.Natural hiding (n1, n2)
 import Data.Type.Ordinal
-import Data.Vector.Sized hiding (index, map, unsafeFromInt)
+import Data.Vector.Sized (unsafeFromList)
 import Proof.Equational
 import Data.Type.Equality hiding (outer)
 import qualified Text.PrettyPrint.Mainland as PP

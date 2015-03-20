@@ -41,11 +41,14 @@ module Futhark.Representation.AST.Syntax
   , Body
   , PrimOp (..)
   , LoopOp (..)
+  , BinOp (..)
   , ExpT(..)
   , Exp
   , LoopForm (..)
   , LambdaT(..)
   , Lambda
+  , ExtLambdaT (..)
+  , ExtLambda
   , Lore.RetType
 
   -- * Definitions
@@ -115,6 +118,26 @@ deriving instance Lore lore => Eq (BodyT lore)
 
 type Body = BodyT
 
+-- | Binary operators.
+data BinOp = Plus -- Binary Ops for Numbers
+           | Minus
+           | Pow
+           | Times
+           | Divide
+           | Mod
+           | ShiftR
+           | ShiftL
+           | Band
+           | Xor
+           | Bor
+           | LogAnd
+           | LogOr
+           -- Relational Ops for all basic types at least
+           | Equal
+           | Less
+           | Leq
+             deriving (Eq, Ord, Enum, Bounded, Show)
+
 data PrimOp lore
   = SubExp SubExp
     -- ^ Subexpressions, doubling as tuple literals if the
@@ -179,6 +202,10 @@ data PrimOp lore
   -- must be a permutation of @[0,n-1]@, where @n@ is the
   -- number of dimensions in the input array.
 
+  | Partition Certificates Int Ident Ident
+    -- ^ First variable is the flag array, second is the element
+    -- array.
+
   | Alloc SubExp
     -- ^ Allocate a memory block.  This really should not be an
     -- expression, but what are you gonna do...
@@ -198,7 +225,6 @@ data LoopOp lore
 
   | Reduce  Certificates (LambdaT lore) [(SubExp, Ident)]
   | Scan   Certificates (LambdaT lore) [(SubExp, Ident)]
-  | Filter  Certificates (LambdaT lore) [Ident]
   | Redomap Certificates (LambdaT lore) (LambdaT lore) [SubExp] [Ident]
   | Stream  Certificates [SubExp] [Ident] (LambdaT lore)
 
@@ -240,6 +266,16 @@ data LambdaT lore =
   deriving (Eq, Ord, Show)
 
 type Lambda = LambdaT
+
+-- | Anonymous function for use in a tuple-SOAC.
+data ExtLambdaT lore =
+  ExtLambda { extLambdaParams     :: [Param]
+            , extLambdaBody       :: BodyT lore
+            , extLambdaReturnType :: [ExtType]
+            }
+  deriving (Eq, Ord, Show)
+
+type ExtLambda = ExtLambdaT
 
 type FParam lore = FParamT (Lore.FParam lore)
 

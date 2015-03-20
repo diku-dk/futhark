@@ -51,6 +51,8 @@ instance Pretty Value where
   ppr (BasicVal bv) = ppr bv
   ppr v
     | Just s <- arrayString v = text $ show s
+  ppr (ArrayVal a t _)
+    | null $ elems a = text "empty" <> parens (ppr t)
   ppr (ArrayVal a t (_:rowshape@(_:_))) =
     brackets $ commastack
     [ ppr $ ArrayVal (listArray (0, rowsize-1) a') t rowshape
@@ -164,7 +166,7 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
     case rt of
       Array {} -> brackets $ commastack $ map ppr es
       _        -> brackets $ commasep   $ map ppr es
-  ppr (BinOp bop x y _) = ppBinOp bop x y
+  ppr (BinOp bop x y _) = ppr x <+/> text (pretty bop) <+> ppr y
   ppr (Not e) = text "not" <+> pprPrec 9 e
   ppr (Negate e) = text "-" <> pprPrec 9 e
   ppr (Index cs v idxs) =
@@ -186,6 +188,10 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
   ppr (Copy e) = text "copy" <> parens (ppr e)
   ppr (Assert e _) = text "assert" <> parens (ppr e)
   ppr (Alloc e) = text "alloc" <> apply [ppr e]
+  ppr (Partition cs n flags arr) =
+    ppCertificates' cs <>
+    text "partition" <>
+    parens (commasep [ ppr n, ppr flags, ppr arr ])
 
 instance PrettyLore lore => Pretty (LoopOp lore) where
   ppr (DoLoop res mergepat form loopbody) =
@@ -224,8 +230,6 @@ instance PrettyLore lore => Pretty (LoopOp lore) where
   ppr (Scan cs lam inputs) =
     ppCertificates' cs <> ppSOAC "scan" [lam] (Just es) as
     where (es, as) = unzip inputs
-  ppr (Filter cs lam as) =
-    ppCertificates' cs <> ppSOAC "filter" [lam] Nothing as
 
 instance PrettyLore lore => Pretty (Exp lore) where
   ppr (If c t f _) = text "if" <+> ppr c </>
@@ -259,8 +263,23 @@ instance PrettyLore lore => Pretty (Prog lore) where
 ppParam :: Param -> Doc
 ppParam param = ppr (identType param) <+> ppr param
 
-ppBinOp :: BinOp -> SubExp -> SubExp -> Doc
-ppBinOp bop x y = ppr x <+/> text (opStr bop) <+> ppr y
+instance Pretty BinOp where
+  ppr Plus = text "+"
+  ppr Minus = text "-"
+  ppr Pow = text "pow"
+  ppr Times = text "*"
+  ppr Divide = text "/"
+  ppr Mod = text "%"
+  ppr ShiftR = text ">>"
+  ppr ShiftL = text "<<"
+  ppr Band = text "&"
+  ppr Xor = text "^"
+  ppr Bor = text "|"
+  ppr LogAnd = text "&&"
+  ppr LogOr = text "||"
+  ppr Equal = text "=="
+  ppr Less = text "<"
+  ppr Leq = text "<="
 
 ppSOAC :: Pretty fn => String -> [fn] -> Maybe [SubExp] -> [Ident] -> Doc
 ppSOAC name funs es as =

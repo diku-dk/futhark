@@ -92,6 +92,7 @@ data RenameEnv = RenameEnv {
   , envNameFn  :: VNameSource -> VName -> (VName, VNameSource)
   }
 
+-- | The monad in which renaming is performed.
 type RenameM = StateT VNameSource (Reader RenameEnv)
 
 -- | Produce a map of the substitutions that should be performed by
@@ -106,7 +107,11 @@ new k = do (k', src') <- asks envNameFn <*> get <*> pure k
            put src'
            return k'
 
+-- | Members of class 'Rename' can be uniquely renamed.
 class Rename a where
+  -- | Rename the given value such that it does not contain shadowing,
+  -- and has incorporated any substitutions present in the 'RenameM'
+  -- environment.
   rename :: a -> RenameM a
 
 instance Rename VName where
@@ -215,6 +220,7 @@ instance Renameable lore => Rename (Exp lore) where
                     , mapOnSubExp = rename
                     , mapOnIdent = rename
                     , mapOnLambda = rename
+                    , mapOnExtLambda = rename
                     , mapOnCertificates = mapM rename
                     , mapOnRetType = rename
                     , mapOnFParam = rename
@@ -235,6 +241,14 @@ instance Renameable lore => Rename (Lambda lore) where
       body' <- rename body
       ret' <- mapM rename ret
       return $ Lambda params' body' ret'
+
+instance Renameable lore => Rename (ExtLambda lore) where
+  rename (ExtLambda params body rettype) =
+    bind params $ do
+      params' <- mapM rename params
+      body' <- rename body
+      rettype' <- rename rettype
+      return $ ExtLambda params' body' rettype'
 
 instance Rename Names where
   rename = liftM HS.fromList . mapM rename . HS.toList

@@ -49,7 +49,7 @@ fun {[real],[real]} tridag(  int  nn,
 
 
 fun {[real],[real]} main() =
-    let nn = reduce(op +, 0, [1,2,3,4]) in
+    let nn = reduce(+, 0, [1,2,3,4]) in
     let a = replicate(nn, 3.33) in
     let b = map(fn real (int x) => toReal(x) + 1.0, iota(nn)) in
     let c = map(fn real (int x) => 1.11*toReal(x) + 0.5, iota(nn)) in

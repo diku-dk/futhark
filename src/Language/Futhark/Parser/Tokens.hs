@@ -37,6 +37,7 @@ data Token = IF
            | LTH
            | GTH
            | LEQ
+           | GEQ
            | POW
            | SHIFTL
            | SHIFTR
@@ -74,6 +75,7 @@ data Token = IF
            | SPLIT
            | CONCAT
            | FILTER
+           | PARTITION
            | REDOMAP
            | TRUE
            | FALSE

@@ -18,8 +18,7 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
 
 import Data.Constraint (Dict (..))
 import Data.Type.Natural hiding (n1,n2)
-import Data.Vector.Sized hiding
-  (index, map, unsafeFromInt, foldl, drop, zipWith)
+import Data.Vector.Sized hiding (index, map)
 import qualified Data.Vector.Sized as Vec
 import Proof.Equational
 import Data.Monoid

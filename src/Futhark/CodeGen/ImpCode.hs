@@ -22,6 +22,8 @@ import Data.List
 import Data.Loc
 
 import Language.Futhark.Core
+import Futhark.Representation.AST.Syntax (BinOp (..))
+import Futhark.Representation.AST.Pretty ()
 
 import Text.PrettyPrint.Mainland
 
@@ -171,7 +173,7 @@ instance Pretty Exp where
   pprPrec p (BinOp op x y) =
     parensIf (p >= precedence op) $
     pprPrec (precedence op) x <+/>
-    text (opStr op) <+>
+    ppr op <+>
     pprPrec (rprecedence op) y
   pprPrec _ (UnOp Not x) =
     text "not" <+> ppr x

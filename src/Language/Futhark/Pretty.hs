@@ -6,6 +6,8 @@
 module Language.Futhark.Pretty
   ( ppType
   , ppValue
+  , ppUnOp
+  , ppBinOp
   , ppExp
   , ppLambda
   , ppTupId
@@ -84,6 +86,30 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase as vn) where
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (IdentBase ty vn) where
   ppr = ppr . identName
 
+instance Pretty UnOp where
+  ppr Not = text "not"
+  ppr Negate = text "-"
+
+instance Pretty BinOp where
+  ppr Plus = text "+"
+  ppr Minus = text "-"
+  ppr Pow = text "pow"
+  ppr Times = text "*"
+  ppr Divide = text "/"
+  ppr Mod = text "%"
+  ppr ShiftR = text ">>"
+  ppr ShiftL = text "<<"
+  ppr Band = text "&"
+  ppr Xor = text "^"
+  ppr Bor = text "|"
+  ppr LogAnd = text "&&"
+  ppr LogOr = text "||"
+  ppr Equal = text "=="
+  ppr Less = text "<"
+  ppr Leq = text "<="
+  ppr Greater = text "<="
+  ppr Geq = text "<="
+
 hasArrayLit :: ExpBase ty vn -> Bool
 hasArrayLit (ArrayLit {}) = True
 hasArrayLit (TupLit es2 _) = any hasArrayLit es2
@@ -106,9 +132,9 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
     case unboxType rt of
       Just (Array {}) -> brackets $ commastack $ map ppr es
       _               -> brackets $ commasep $ map ppr es
-  pprPrec p (BinOp bop x y _ _) = ppBinOp p bop x y
-  pprPrec _ (Not e _) = text "not" <+> pprPrec 9 e
-  pprPrec _ (Negate e _) = text "-" <> pprPrec 9 e
+  pprPrec p (BinOp bop x y _ _) = prettyBinOp p bop x y
+  pprPrec _ (UnOp Not e _) = text "not" <+> pprPrec 9 e
+  pprPrec _ (UnOp Negate e _) = text "-" <> pprPrec 9 e
   pprPrec _ (If c t f _ _) = text "if" <+> ppr c </>
                              text "then" <+> align (ppr t) </>
                              text "else" <+> align (ppr f)
@@ -173,6 +199,7 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
                                    ppList [lam] )
   pprPrec _ (Scan lam e a _) = ppSOAC "scan" [lam] [e, a]
   pprPrec _ (Filter lam a _) = ppSOAC "filter" [lam] [a]
+  pprPrec _ (Partition lams a _) = ppSOAC "partition" lams [a]
   pprPrec _ (Zip es _) = text "zip" <> apply (map (ppr . fst) es)
   pprPrec _ (Unzip e _ _) = text "unzip" <> parens (ppr e)
   pprPrec _ (Split e a _) =
@@ -205,6 +232,14 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (LambdaBase ty vn
     text "fn" <+> ppr rettype <+>
     apply (map ppParam params) <+>
     text "=>" </> indent 2 (ppr body)
+  ppr (UnOpFun unop _ _) =
+    ppr unop
+  ppr (BinOpFun binop _ _) =
+    ppr binop
+  ppr (CurryBinOpLeft binop x _ _) =
+    ppr x <+> ppr binop
+  ppr (CurryBinOpRight binop x _ _) =
+    ppr binop <+> ppr x
 
 instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ProgBase ty vn) where
   ppr = stack . punctuate line . map ppFun . progFunctions
@@ -217,11 +252,12 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ProgBase ty vn) 
 ppParam :: (Eq vn, Hashable vn, Pretty (ty vn), Pretty vn, TypeBox ty) => IdentBase ty vn -> Doc
 ppParam param = ppr (identType param) <+> ppr param
 
-ppBinOp :: (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Int -> BinOp -> ExpBase ty vn -> ExpBase ty vn -> Doc
-ppBinOp p bop x y = parensIf (p > precedence bop) $
-                    pprPrec (precedence bop) x <+/>
-                    text (opStr bop) <+>
-                    pprPrec (rprecedence bop) y
+prettyBinOp :: (Eq vn, Hashable vn, Pretty vn, TypeBox ty) =>
+               Int -> BinOp -> ExpBase ty vn -> ExpBase ty vn -> Doc
+prettyBinOp p bop x y = parensIf (p > precedence bop) $
+                        pprPrec (precedence bop) x <+/>
+                        text (ppBinOp bop) <+>
+                        pprPrec (rprecedence bop) y
   where precedence LogAnd = 0
         precedence LogOr = 0
         precedence Band = 1
@@ -230,6 +266,8 @@ ppBinOp p bop x y = parensIf (p > precedence bop) $
         precedence Equal = 2
         precedence Less = 2
         precedence Leq = 2
+        precedence Greater = 2
+        precedence Geq = 2
         precedence ShiftL = 3
         precedence ShiftR = 3
         precedence Plus = 4
@@ -263,6 +301,14 @@ ppValue = render80
 -- | Prettyprint a type, wrapped to 80 characters.
 ppType :: (Eq vn, Hashable vn, Pretty vn) => TypeBase as vn -> String
 ppType = render80
+
+-- | Prettyprint a unary operator, wrapped to 80 characters.
+ppUnOp :: UnOp -> String
+ppUnOp = render80
+
+-- | Prettyprint a binary operator, wrapped to 80 characters.
+ppBinOp :: BinOp -> String
+ppBinOp = render80
 
 -- | Prettyprint an expression, wrapped to 80 characters.
 ppExp :: (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => ExpBase ty vn -> String

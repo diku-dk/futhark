@@ -63,15 +63,6 @@ dataDependencies' startdeps = foldl grow startdeps . bodyBindings
                         lambdaDeps deps' fun
           in resdeps `HM.union` deps'
 
-        grow deps (Let pat _ (LoopOp (Filter cs fun arrs))) =
-          let pardeps = mkDeps (lambdaParams fun) $
-                        soacArgDeps deps cs $ map (depsOfIdent deps) arrs
-              deps' = dataDependencies' (pardeps `HM.union` deps) $
-                      lambdaBody fun
-              resdeps = mkDeps (patternIdents pat) $
-                        repeat $ HS.unions $ lambdaDeps deps' fun
-          in resdeps `HM.union` deps'
-
         grow deps (Let pat _ (LoopOp (Reduce cs fun args))) =
           foldDeps deps pat cs fun acc arr
           where (acc,arr) = unzip args

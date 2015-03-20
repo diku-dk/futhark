@@ -11,15 +11,16 @@ module Futhark.CodeGen.ImpGen
   where
 
 import Control.Applicative
-import Control.Monad.RWS
-import Control.Monad.State
-import Control.Monad.Writer
+import Control.Monad.RWS    hiding (forM)
+import Control.Monad.State  hiding (forM)
+import Control.Monad.Writer hiding (forM)
 
 import Data.Either
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import Data.Maybe
 import Data.List
+import Data.Traversable (forM)
 import qualified Futhark.Analysis.AlgSimplify as AlgSimplify
 
 import Futhark.Analysis.ScalExp as SE
@@ -79,6 +80,12 @@ data ValueDestination = ScalarDestination VName
                       | MemoryDestination VName (Maybe VName)
                       | ArrayDestination ArrayMemoryDestination [Maybe VName]
                       deriving (Show)
+
+-- | If the given value destination if a 'ScalarDestination', return
+-- the variable name.  Otherwise, 'Nothing'.
+fromScalarDestination :: ValueDestination -> Maybe VName
+fromScalarDestination (ScalarDestination name) = Just name
+fromScalarDestination _                        = Nothing
 
 data ArrayMemoryDestination = SetMemory VName (Maybe VName)
                             | CopyIntoMemory MemLocation
@@ -402,6 +409,84 @@ defCompilePrimOp _ (Rearrange {}) =
 defCompilePrimOp _ (Reshape {}) =
   return ()
 
+defCompilePrimOp (Destination dests) (Partition _ n flags values)
+  | (sizedests, arrdest) <- splitAt n dests,
+    Just sizenames <- mapM fromScalarDestination sizedests,
+    [ArrayDestination (CopyIntoMemory destloc) _] <- arrdest = do
+  i <- newVName "i"
+  let outer_dim = compileSubExp $ arraySize 0 $ identType flags
+  -- We will use 'i' to index the flag array and the value array.
+  -- Note that they have the same outer size ('outer_dim').
+  srcloc <- arrayLocation $ identName values
+  (flagmem, flagoffset) <- fullyIndexArray (identName flags) [varIndex i]
+
+  -- First, for each of the 'n' output arrays, we compute the final
+  -- size.  This is done by iterating through the flag array, but
+  -- first we declare scalars to hold the size.  We do this by
+  -- creating a mapping from equivalence classes to the name of the
+  -- scalar holding the size.
+  let sizes = HM.fromList $ zip [0..n-1] sizenames
+
+  -- We initialise ecah size to zero.
+  forM_ sizenames $ \sizename ->
+    emit $ Imp.SetScalar sizename $ Imp.Constant $ IntVal 0
+
+  -- Now iterate across the flag array, storing each element in
+  -- 'eqclass', then comparing it to the known classes and increasing
+  -- the appropriate size variable.
+  eqclass <- newVName "eqclass"
+  emit $ Imp.DeclareScalar eqclass Int
+  let mkSizeLoopBody code c sizevar =
+        Imp.If (Imp.BinOp Equal (Imp.ScalarVar eqclass) (Imp.Constant (IntVal c)))
+        (Imp.SetScalar sizevar
+         (Imp.BinOp Plus (Imp.ScalarVar sizevar) (Imp.Constant (IntVal 1))))
+        code
+      sizeLoopBody = HM.foldlWithKey' mkSizeLoopBody Imp.Skip sizes
+  emit $ Imp.For i outer_dim $
+    Imp.SetScalar eqclass (index flagmem flagoffset Int) <>
+    sizeLoopBody
+
+  -- We can now compute the starting offsets of each of the
+  -- partitions, creating a map from equivalence class to its
+  -- corresponding offset.
+  offsets <- flip evalStateT (Imp.Constant $ IntVal 0) $ forM sizes $ \size -> do
+    cur_offset <- get
+    partition_offset <- lift $ newVName "partition_offset"
+    lift $ emit $ Imp.DeclareScalar partition_offset Int
+    lift $ emit $ Imp.SetScalar partition_offset cur_offset
+    put $ Imp.BinOp Plus (Imp.ScalarVar partition_offset) (Imp.ScalarVar size)
+    return partition_offset
+
+  -- We create the memory location we use when writing a result
+  -- element.  This is basically the index function of 'destloc', but
+  -- with a dynamic offset, stored in 'partition_cur_offset'.
+  partition_cur_offset <- newVName "partition_cur_offset"
+  emit $ Imp.DeclareScalar partition_cur_offset Int
+
+  -- Finally, we iterate through the data array and flag array in
+  -- parallel, and put each element where it is supposed to go.  Note
+  -- that after writing to a partition, we increase the corresponding
+  -- offset.
+  copy_element <- copyElem et
+                  destloc [varIndex partition_cur_offset]
+                  srcloc [varIndex i]
+  let mkWriteLoopBody code c offsetvar =
+        Imp.If (Imp.BinOp Equal (Imp.ScalarVar eqclass) (Imp.Constant (IntVal c)))
+        (Imp.SetScalar partition_cur_offset
+           (Imp.ScalarVar offsetvar)
+         <>
+         copy_element
+         <>
+         Imp.SetScalar offsetvar
+           (Imp.BinOp Plus (Imp.ScalarVar offsetvar) (Imp.Constant (IntVal 1))))
+        code
+      writeLoopBody = HM.foldlWithKey' mkWriteLoopBody Imp.Skip offsets
+  emit $ Imp.For i outer_dim $
+    Imp.SetScalar eqclass (index flagmem flagoffset Int) <>
+    writeLoopBody
+  return ()
+  where et = elemType $ identType values
+
 defCompilePrimOp (Destination []) _ = return () -- No arms, no cake.
 
 defCompilePrimOp target e =
@@ -429,13 +514,11 @@ defCompileLoopOp _ (Map {}) = soacError
 
 defCompileLoopOp _ (ConcatMap {}) = soacError
 
-defCompileLoopOp _ (Filter {}) = soacError
-
-defCompileLoopOp _ (Reduce {}) = soacError
-
 defCompileLoopOp _ (Scan {}) = soacError
 
 defCompileLoopOp _ (Redomap {}) = soacError
+
+defCompileLoopOp _ (Reduce {}) = soacError
 
 soacError :: ImpM op a
 soacError = fail "SOAC encountered in code generator; should have been removed by first-order transform."
@@ -794,6 +877,27 @@ memCopy :: VName -> Count Bytes -> VName -> Count Bytes -> Count Bytes
         -> Imp.Code a
 memCopy dest (Count destoffset) src (Count srcoffset) (Count n) =
   Imp.Copy dest destoffset src srcoffset n
+
+copyElem :: BasicType
+         -> MemLocation -> [SE.ScalExp]
+         -> MemLocation -> [SE.ScalExp]
+         -> ImpM op (Imp.Code op)
+copyElem bt
+  destlocation@(MemLocation _ destshape _) destis
+  srclocation@(MemLocation _ srcshape _) srcis
+
+  | length srcis == length srcshape, length destis == length destshape = do
+  (targetmem, targetoffset) <-
+    fullyIndexArray' destlocation destis
+  (srcmem, srcoffset) <-
+    fullyIndexArray' srclocation srcis
+  return $ write targetmem targetoffset bt $ index srcmem srcoffset bt
+
+  | otherwise = do
+  destlocation' <- indexArray destlocation destis
+  srclocation'  <- indexArray srclocation  srcis
+  copyIxFun bt destlocation' srclocation' $
+    impProduct (map dimSizeToExp $ drop (length srcis) srcshape) `withElemType` bt
 
 scalExpToImpExp :: ScalExp -> Maybe Imp.Exp
 scalExpToImpExp (SE.Val x) =

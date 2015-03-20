@@ -176,8 +176,8 @@ binding bnds m = do
             "checkPatSizes:\n" ++
             pretty ident ++ " is specified to have shape [" ++
             intercalate "," (zipWith ppDim vardims varshape) ++
-            "], but is being bound to value of shape [" ++
-            intercalate "," (map pretty valshape) ++ "]."
+            "], but is being bound to value " ++ pretty val ++
+            " of shape [" ++ intercalate "," (map pretty valshape) ++ "]."
         checkShape _ = return ()
 
         ppDim (Constant v) _ = pretty v
@@ -568,7 +568,7 @@ evalPrimOp (Concat _ arr1exp arr2exps _) = do
         (res,resouter,resshape) <- foldM concatArrVals (arr1',outerdim1,rowshape1) arr2s
         return [ArrayVal res bt (resouter:resshape)]
     _ -> bad $ TypeError "evalPrimOp Concat"
-  where 
+  where
     concatArrVals (acc,outerdim,rowshape) (ArrayVal arr2 _ (outerdim2:rowshape2)) =
         if rowshape == rowshape2
         then let nelems = (outerdim+outerdim2) * product rowshape
@@ -587,6 +587,30 @@ evalPrimOp (Assert e loc) = do
               return [BasicVal Checked]
             _ ->
               bad $ AssertFailed loc
+
+evalPrimOp (Partition _ n flags arr) = do
+  flags_elems <- arrToList =<< lookupVar flags
+  arrv <- lookupVar arr
+  arr_elems <- arrToList arrv
+  partitions <- partitionArray flags_elems arr_elems
+  return $
+    map (BasicVal . IntVal . length) partitions ++
+    [arrayVal (concat partitions) et (valueShape arrv)]
+  where et = elemType $ identType arr
+        partitionArray flagsv arrv =
+          map reverse <$>
+          foldM divide (replicate n []) (zip flagsv arrv)
+
+        divide partitions (BasicVal (IntVal i),v)
+          | i < 0 =
+            bad $ TypeError $ "Partition key " ++ show i ++ " is negative"
+          | i < n =
+            return $ take i partitions ++ [v : (partitions!!i)] ++ drop (i+1) partitions
+          | otherwise =
+            return partitions
+
+        divide _ (i,_) =
+          bad $ TypeError $ "Partition key " ++ pretty i ++ " is not an integer."
 
 -- Alloc is not used in the interpreter, so just return whatever
 evalPrimOp (Alloc se) =
@@ -670,17 +694,6 @@ evalLoopOp (Scan _ fun inputs) = do
             acc' <- applyLambda fun $ acc ++ x
             return (acc', acc' : l)
 
-evalLoopOp (Filter _ fun arrexp) = do
-  arrs <- mapM lookupVar arrexp
-  vss <- mapM arrToList arrs
-  vss' <- filterM filt $ transpose vss
-  (BasicVal (IntVal $ length vss'):) <$>
-    arrays (map (rowType . valueType) arrs) vss'
-  where filt x = do
-          res <- applyLambda fun x
-          case res of [BasicVal (LogVal True)] -> return True
-                      _                          -> return False
-
 evalLoopOp (Redomap _ _ innerfun accexp arrexps) = do
   startaccs <- mapM evalSubExp accexp
   vss <- mapM (arrToList <=< lookupVar) arrexps
@@ -692,7 +705,7 @@ evalLoopOp (Redomap _ _ innerfun accexp arrexps) = do
           return $ acc_res ++ arr_res_fut
     where
         lam_ret_tp     = lambdaReturnType innerfun
-        res_len        = length lam_ret_tp 
+        res_len        = length lam_ret_tp
         acc_len        = length accexp
         lam_ret_arr_tp = drop acc_len lam_ret_tp
         foldfun  acc x = applyLambda innerfun $ acc ++ x

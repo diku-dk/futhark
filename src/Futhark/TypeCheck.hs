@@ -23,6 +23,9 @@ module Futhark.TypeCheck
   , checkExtType
   , matchExtPattern
   , matchExtReturnType
+
+  , checkExtLambda -- FIXME - this export is just to silence a
+                   -- warning.
   )
   where
 
@@ -44,9 +47,6 @@ import Futhark.Representation.Aliases
 import Futhark.MonadFreshNames
 import Futhark.TypeCheck.TypeError
 import Futhark.Analysis.Alias
-
-import Debug.Trace
-import Futhark.Representation.AST.Pretty
 
 -- | Information about an error that occured during type checking.
 data TypeError lore = Error [String] (ErrorCase lore)
@@ -684,6 +684,15 @@ checkPrimOp (Assert e _) =
 checkPrimOp (Alloc e) =
   require [Basic Int] e
 
+checkPrimOp (Partition cs _ flags arr) = do
+  mapM_ (requireI [Basic Cert]) cs
+  flagst <- checkIdent flags
+  arrt <- checkIdent arr
+  unless (rowType flagst == Basic Int) $
+    bad $ TypeError noLoc $ "Flag array has type " ++ pretty flagst ++ "."
+  unless (arrayRank arrt > 0) $
+    bad $ TypeError noLoc $ "Array argument to partition has type " ++ pretty arrt ++ "."
+
 checkLoopOp :: Checkable lore =>
                LoopOp lore -> TypeM lore ()
 
@@ -786,23 +795,13 @@ checkLoopOp (Scan ass fun inputs) = do
     "Array element value is of type " ++ prettyTuple intupletype ++
     ", but scan function returns type " ++ prettyTuple funret ++ "."
 
-checkLoopOp (Filter ass fun arrexps) = do
-  mapM_ (requireI [Basic Cert]) ass
-  arrargs <- checkSOACArrayArgs arrexps
-  checkLambda fun arrargs
-  let funret = lambdaReturnType fun
-  when (funret /= [Basic Bool]) $
-    bad $ TypeError noLoc "Filter function does not return bool."
-  when (any (unique . identType) $ lambdaParams fun) $
-    bad $ TypeError noLoc "Filter function consumes its arguments."
-
 checkLoopOp (Redomap ass outerfun innerfun accexps arrexps) = do
   mapM_ (requireI [Basic Cert]) ass
   arrargs <- checkSOACArrayArgs arrexps
   accargs <- mapM checkArg accexps
   checkLambda innerfun $ accargs ++ arrargs
   let innerRetType = lambdaReturnType innerfun
-      innerAccType = take (length accexps) innerRetType  
+      innerAccType = take (length accexps) innerRetType
       asArg t = (t, mempty, mempty)
   checkLambda outerfun $ map asArg $ innerAccType ++ innerAccType
   let acct = map argType accargs
@@ -814,8 +813,7 @@ checkLoopOp (Redomap ass outerfun innerfun accexps arrexps) = do
     bad $ TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
           ", but redomapT outer reduction returns type " ++ prettyTuple outerRetType ++ "."
 
-checkLoopOp s@(Stream asss accexps arrexps lam) = do
-  let ass = trace ("TC: " ++ show (pretty s)) asss 
+checkLoopOp s@(Stream ass accexps arrexps lam) = do
   mapM_ (requireI [Basic Cert]) ass
   accargs <- mapM checkArg   accexps
   arrargs <- mapM checkIdent arrexps
@@ -940,7 +938,7 @@ checkRelOp op tl e1 e2 t = do
   require (map Basic tl) e1
   require (map Basic tl) e2
   _ <- unifySubExpTypes e1 e2
-  checkAnnotation (opStr op ++ " result") (Basic t) $ Basic Bool
+  checkAnnotation (pretty op ++ " result") (Basic t) $ Basic Bool
 
 checkPolyBinOp :: Checkable lore =>
                   BinOp -> [BasicType]
@@ -950,7 +948,7 @@ checkPolyBinOp op tl e1 e2 t = do
   require (map Basic tl) e1
   require (map Basic tl) e2
   t' <- unifySubExpTypes e1 e2
-  checkAnnotation (opStr op ++ " result") (Basic t) t'
+  checkAnnotation (pretty op ++ " result") (Basic t) t'
 
 sequentially :: Checkable lore =>
                 TypeM lore a -> (a -> Dataflow -> TypeM lore b) -> TypeM lore b
@@ -1139,6 +1137,23 @@ checkConcatMapLambda (Lambda params body rettype) args = do
         checkResult $ bodyResult body
         matchExtReturnType fname rettype' $ bodyResult body
   else bad $ TypeError noLoc $ "concatMap function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " array arguments."
+
+checkExtLambda :: Checkable lore =>
+                  ExtLambda lore -> [Arg] -> TypeM lore ()
+checkExtLambda (ExtLambda params body rettype) args =
+  if length params == length args then do
+    checkLambdaCall Nothing (map identType params) args
+    let fname = nameFromString "<anonymous>"
+    noUnique $ checkFun' (fname,
+                          rettype,
+                          [ (param, LambdaBound) | param <- params ],
+                          body) $
+      checkBindings (bodyBindings body) $ do
+        checkResult $ bodyResult body
+        matchExtReturnType fname rettype $ bodyResult body
+    else bad $ TypeError noLoc $
+         "Existential lambda defined with " ++ show (length params) ++
+         " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
 -- | The class of lores that can be type-checked.
 class (FreeIn (Lore.Exp lore),

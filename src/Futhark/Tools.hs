@@ -66,8 +66,8 @@ letSubExp :: MonadBinder m =>
              String -> Exp (Lore m) -> m SubExp
 letSubExp _ (PrimOp (SubExp se)) = return se
 letSubExp desc e = do
-  v <- newVName desc
-  idents <- letBindNames' [v] e
+  vs <- replicateM (length (expExtType e)) $ newVName desc
+  idents <- letBindNames' vs e
   case idents of
     [ident] -> return $ Var ident
     _       -> fail $ "letSubExp: tuple-typed expression given:\n" ++ pretty e
@@ -76,8 +76,8 @@ letExp :: MonadBinder m =>
           String -> Exp (Lore m) -> m Ident
 letExp _ (PrimOp (SubExp (Var v))) = return v
 letExp desc e = do
-  v <- newVName desc
-  idents <- letBindNames' [v] e
+  vs <- replicateM (length (expExtType e)) $ newVName desc
+  idents <- letBindNames' vs e
   case idents of
     [ident] -> return ident
     _       -> fail $ "letExp: tuple-typed expression given:\n" ++ pretty e

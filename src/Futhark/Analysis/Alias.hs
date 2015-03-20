@@ -35,9 +35,6 @@ analyseExp (Out.LoopOp (In.Map cs lam args)) =
 analyseExp (Out.LoopOp (In.ConcatMap cs lam args)) =
   Out.LoopOp $
   Out.ConcatMap cs (analyseLambda lam) args
-analyseExp (Out.LoopOp (In.Filter cs lam args)) =
-  Out.LoopOp $
-  Out.Filter cs (analyseLambda lam) args
 analyseExp (Out.LoopOp (In.Reduce cs lam input)) =
   Out.LoopOp $
   Out.Reduce cs (analyseLambda lam) input
@@ -62,6 +59,7 @@ analyseExp e = Out.mapExp traverse e
                      , Out.mapOnBody = return . analyseBody
                      , Out.mapOnBinding = return . analyseBinding
                      , Out.mapOnLambda = error "Improperly handled lambda in alias analysis"
+                     , Out.mapOnExtLambda = error "Improperly handled existential lambda in alias analysis"
                      , Out.mapOnRetType = return
                      , Out.mapOnFParam = return
                      }
