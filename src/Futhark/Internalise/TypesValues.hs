@@ -1,7 +1,8 @@
 module Futhark.Internalise.TypesValues
   (
    -- * Internalising types
-    internaliseType
+    internaliseDeclType
+  , internaliseType
   , internaliseUniqueness
 
   -- * Internalising values
@@ -11,11 +12,14 @@ module Futhark.Internalise.TypesValues
 
 import Control.Applicative
 import Control.Monad.State
+import Control.Monad.Reader
 import qualified Data.Array as A
 import Data.List
+import qualified Data.HashMap.Lazy as HM
 
 import Futhark.Representation.External as E
 import Futhark.Representation.Basic as I
+import Futhark.Internalise.Monad
 
 import Prelude hiding (mapM)
 
@@ -23,7 +27,68 @@ internaliseUniqueness :: E.Uniqueness -> I.Uniqueness
 internaliseUniqueness E.Nonunique = I.Nonunique
 internaliseUniqueness E.Unique = I.Unique
 
-internaliseType :: E.TypeBase E.Rank als vn -> [I.TypeBase ExtShape]
+internaliseDeclType :: E.TypeBase E.ShapeDecl als VName
+                    -> InternaliseM ([I.TypeBase ExtShape],
+                                     HM.HashMap VName Int)
+internaliseDeclType t = do
+  (ts, (_, subst)) <- runStateT (internaliseType' t) (0, HM.empty)
+  return (ts, subst)
+  where internaliseType' (E.Basic bt) =
+          return [I.Basic bt]
+        internaliseType' (E.Tuple ets) =
+          concat <$> mapM internaliseType' ets
+        internaliseType' (E.Array at) =
+          internaliseArrayType at
+
+        internaliseArrayType (E.BasicArray bt shape u _) = do
+          dims <- internaliseShape shape
+          return [I.arrayOf (I.Basic bt) (ExtShape dims) $
+                  internaliseUniqueness u]
+
+        internaliseArrayType (E.TupleArray elemts shape u) = do
+          outerdim <- Ext <$> newId
+          innerdims <- map Ext <$> replicateM (E.shapeRank shape - 1) newId
+          ts <- concat <$> mapM internaliseTupleArrayElem elemts
+          return [ I.arrayOf ct (ExtShape $ outerdim : innerdims) $
+                   if I.unique ct then Unique
+                   else if I.basicType ct then u
+                        else I.uniqueness ct
+                 | ct <- ts ]
+
+        internaliseTupleArrayElem (BasicArrayElem bt _) =
+          return [I.Basic bt]
+        internaliseTupleArrayElem (ArrayArrayElem at) =
+          internaliseArrayType at
+        internaliseTupleArrayElem (TupleArrayElem ts) =
+          concat <$> mapM internaliseTupleArrayElem ts
+
+        newId = do (i,m) <- get
+                   put (i + 1, m)
+                   return i
+
+        knownOrNewId name = do
+          (i,m) <- get
+          case HM.lookup name m of
+            Nothing -> do put (i + 1, HM.insert name i m)
+                          return i
+            Just j  -> return j
+
+        internaliseShape = mapM internaliseDim . E.shapeDims
+
+        internaliseDim AnyDim =
+          Ext <$> newId
+        internaliseDim (ConstDim n) =
+          return $ Free $ Constant $ IntVal n
+        internaliseDim (VarDim name) =
+          Ext <$> knownOrNewId name
+        internaliseDim (KnownDim name) = do
+          subst <- asks $ HM.lookup name . envSubsts
+          return $ I.Free $ I.Var $ case subst of
+            Just [v] -> v
+            _        -> I.Ident name $ I.Basic Int
+
+internaliseType :: Ord vn =>
+                   E.TypeBase E.Rank als vn -> [I.TypeBase ExtShape]
 internaliseType = flip evalState 0 . internaliseType'
   where internaliseType' (E.Basic bt) =
           return [I.Basic bt]
@@ -75,7 +140,7 @@ internaliseType = flip evalState 0 . internaliseType'
 -- being returned for a single input array.
 internaliseValue :: E.Value -> [I.Value]
 internaliseValue (E.ArrayVal arr rt) =
-  let ts          = internaliseType $ E.addNames rt
+  let ts          = internaliseType rt
       arrayvalues = map internaliseValue $ A.elems arr
       arrayvalues' =
         case arrayvalues of

@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances, TypeFamilies #-}
+{-# LANGUAGE FlexibleInstances, TypeFamilies, GeneralizedNewtypeDeriving #-}
 module Futhark.Internalise.Monad
   ( InternaliseM
   , runInternaliseM
@@ -30,9 +30,11 @@ import Prelude hiding (mapM)
 
 -- | A tuple of a return type, a list of argument types, and the
 -- argument types of the internalised function.
-data FunBinding = FunBinding { internalFun :: ([ExtType], [VName], [Type])
-                             , externalFun :: (E.DeclType, [E.DeclType])
-                             }
+data FunBinding = FunBinding
+                  { internalFun :: ([VName], [Type],
+                                    [SubExp] -> Maybe ExtRetType)
+                  , externalFun :: (E.DeclType, [E.DeclType])
+                  }
 
 type ShapeTable = HM.HashMap VName [SubExp]
 
@@ -48,11 +50,17 @@ initialFtable :: FunTable
 initialFtable = HM.map addBuiltin builtInFunctions
   where addBuiltin (t, paramts) =
           FunBinding
-          ([Basic t], [], map Basic paramts)
+          ([], map Basic paramts,
+           const $ Just $ ExtRetType [Basic t])
           (E.Basic t, map E.Basic paramts)
 
-type InternaliseM =
-  WriterT (DL.DList Binding) (ReaderT InternaliseEnv (State VNameSource))
+newtype InternaliseM  a = InternaliseM (WriterT (DL.DList Binding)
+                                        (ReaderT InternaliseEnv
+                                         (State VNameSource)) a)
+  deriving (Functor, Applicative, Monad,
+            MonadWriter (DL.DList Binding),
+            MonadReader InternaliseEnv,
+            MonadState VNameSource)
 
 instance MonadFreshNames InternaliseM where
   getNameSource = get
@@ -72,7 +80,7 @@ instance MonadBinder InternaliseM where
 
 runInternaliseM :: MonadFreshNames m =>
                    Bool -> FunTable -> InternaliseM a -> m a
-runInternaliseM boundsCheck ftable m =
+runInternaliseM boundsCheck ftable (InternaliseM m) =
   modifyNameSource $
   first fst . runState (runReaderT (runWriterT m) newEnv)
   where newEnv = InternaliseEnv {

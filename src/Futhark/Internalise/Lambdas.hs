@@ -118,7 +118,8 @@ internaliseLambda internaliseBody lam rowtypes = do
   (params, body, rettype) <- ensureLambda lam
   (body', params') <- lambdaBinding params rowtypes $
                       internaliseBody body
-  return (params', body', internaliseType $ removeShapeAnnotations rettype)
+  (rettype', _) <- internaliseDeclType rettype
+  return (params', body', rettype')
 
 internaliseMapLambda :: (E.Exp -> InternaliseM Body)
                      -> E.Lambda
@@ -133,7 +134,7 @@ internaliseMapLambda internaliseBody lam args = do
       shape_body = shapeBody (map I.identName inner_shapes) rettype' body
   shapefun <- makeShapeFun params shape_body (length inner_shapes)
   bindMapShapes inner_shapes shapefun args outer_shape
-  body' <- assertResultShape (srclocOf lam) rettype' body
+  body' <- ensureResultShape (srclocOf lam) rettype' body
   return $ I.Lambda params body' rettype'
 
 internaliseConcatMapLambda :: (E.Exp -> InternaliseM Body)
@@ -142,7 +143,7 @@ internaliseConcatMapLambda :: (E.Exp -> InternaliseM Body)
                            -> InternaliseM I.Lambda
 internaliseConcatMapLambda internaliseBody lam _ = do
   (params, body, rettype) <- ensureLambda lam
-  let rettype' = internaliseType $ removeShapeAnnotations rettype
+  rettype' <- fst <$> internaliseDeclType rettype
   bindingParams params $ \shapeparams params' -> do
     body' <- internaliseBody body
     case rettype' of
@@ -162,15 +163,6 @@ makeShapeFun params body n = do
   (params', copybnds) <- nonuniqueParams params
   return $ I.Lambda params' (insertBindings copybnds body) rettype
   where rettype = replicate n $ I.Basic Int
-
-assertResultShape :: SrcLoc -> [I.Type] -> I.Body -> InternaliseM I.Body
-assertResultShape loc rettype body = runBinder $ do
-  es <- bodyBind body
-  let assertProperShape t se =
-        let name = "result_proper_shape"
-        in ensureShape loc t name se
-  reses <- zipWithM assertProperShape rettype es
-  return $ resultBody reses
 
 bindMapShapes :: [I.Ident] -> I.Lambda -> [I.SubExp] -> SubExp
               -> InternaliseM ()
@@ -205,7 +197,7 @@ internaliseFoldLambda internaliseBody lam acctypes arrtypes = do
   -- The result of the body must have the exact same shape as the
   -- initial accumulator.  We accomplish this with an assertion and
   -- reshape().
-  body' <- assertResultShape (srclocOf lam) rettype' body
+  body' <- ensureResultShape (srclocOf lam) rettype' body
 
   return $ I.Lambda params body' rettype'
 
@@ -254,7 +246,7 @@ internaliseRedomapInnerLambda internaliseBody lam nes arr_args = do
   -- an assertion and reshape().
 
   -- finally, place assertions and return result
-  body' <- assertResultShape (srclocOf lam) (acctype'++rettypearr') body
+  body' <- ensureResultShape (srclocOf lam) (acctype'++rettypearr') body
   return $ I.Lambda params body' (acctype'++rettypearr')
 
 -- Given @n@ lambdas, this will return a lambda that returns an

@@ -2,6 +2,8 @@ module Futhark.Internalise.AccurateSizes
   ( shapeBody
   , annotateArrayShape
   , argShapes
+  , ensureResultShape
+  , ensureResultExtShape
   , ensureShape
   , ensureShapeIdent
   )
@@ -34,16 +36,38 @@ argShapes shapes valts valargs =
           | Just se <- HM.lookup name mapping = se
           | otherwise                         = Constant (IntVal 0)
 
-ensureShape :: MonadBinder m =>
-               SrcLoc -> Type -> String -> SubExp
+ensureResultShape :: MonadBinder m =>
+                     SrcLoc -> [Type] -> Body
+                  -> m Body
+ensureResultShape loc =
+  ensureResultExtShape loc . staticShapes
+
+ensureResultExtShape :: MonadBinder m =>
+                        SrcLoc -> [ExtType] -> Body
+                     -> m Body
+ensureResultExtShape loc rettype body = runBinder $ do
+  es <- bodyBind body
+  let assertProperShape t se =
+        let name = "result_proper_shape"
+        in ensureExtShape loc t name se
+  reses <- zipWithM assertProperShape rettype es
+  return $ resultBody reses
+
+ensureExtShape :: MonadBinder m =>
+               SrcLoc -> ExtType -> String -> SubExp
             -> m SubExp
-ensureShape loc t name orig
+ensureExtShape loc t name orig
   | Array{} <- t, Var v <- orig =
     Var <$> ensureShapeIdent loc t name v
   | otherwise = return orig
 
+ensureShape :: MonadBinder m =>
+               SrcLoc -> Type -> String -> SubExp
+            -> m SubExp
+ensureShape loc = ensureExtShape loc . staticShapes1
+
 ensureShapeIdent :: MonadBinder m =>
-                    SrcLoc -> Type -> String -> Ident
+                    SrcLoc -> ExtType -> String -> Ident
                  -> m Ident
 ensureShapeIdent loc t name v
   | Array{} <- t = do
@@ -53,5 +77,14 @@ ensureShapeIdent loc t name v
       certs <- zipWithM checkDim newshape oldshape
       letExp name $ PrimOp $ Reshape certs newshape v
   | otherwise = return v
-  where newshape = arrayDims t
+  where newshape = arrayDims $ removeExistentials t $ identType v
         oldshape = arrayDims $ identType v
+
+removeExistentials :: ExtType -> Type -> Type
+removeExistentials t1 t2 =
+  t1 `setArrayDims`
+  zipWith nonExistential
+  (extShapeDims $ arrayShape t1)
+  (arrayDims t2)
+  where nonExistential (Ext _)    dim = dim
+        nonExistential (Free dim) _   = dim

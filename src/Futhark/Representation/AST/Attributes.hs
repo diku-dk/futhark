@@ -15,6 +15,7 @@ module Futhark.Representation.AST.Attributes
 
   , representative
   , loopResultContext
+  , Lore.applyRetType
 
   -- * Extra tools
   , funDecByName
