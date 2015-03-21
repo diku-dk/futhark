@@ -58,6 +58,8 @@ type TaggedFunDec ty vn = FunDecBase ty (ID vn)
 
 type TaggedType vn = TypeBase Rank Names (ID vn)
 
+type TaggedDeclType vn = DeclTypeBase (ID vn)
+
 -- | A tuple of a return type and a list of argument types.
 type FunBinding vn = (DeclTypeBase (ID vn), [DeclTypeBase (ID vn)])
 
@@ -444,7 +446,6 @@ checkProg' checkoccurs prog = do
                         , envFtable = ftable
                         , envCheckOccurences = checkoccurs
                         }
-
   liftM (untagProg . Prog) $
           runTypeM typeenv src $ mapM (noDataflow . checkFun) $ progFunctions prog'
   where
@@ -475,7 +476,9 @@ checkFun :: (TypeBox ty, VarName vn) =>
             TaggedFunDec ty vn -> TypeM vn (TaggedFunDec CompTypeBase vn)
 checkFun (fname, rettype, params, body, loc) = do
   checkParams
-  body' <- bindingParams params $ checkExp body
+  body' <- bindingParams params $ do
+    checkDeclType loc rettype
+    checkExp body
 
   checkReturnAlias $ typeOf body'
 
@@ -484,17 +487,25 @@ checkFun (fname, rettype, params, body, loc) = do
   else bad $ ReturnTypeError loc fname (toStructural rettype) $
              toStructural $ typeOf body'
 
-  where checkParams = foldM_ expand HS.empty params
+  where checkParams = do
+          -- First find all normal parameters (checking for duplicates).
+          normal_params <- foldM checkNormParams HS.empty params
+          -- Then check shape annotations (where duplicates are OK, as
+          -- long as it's not a duplicate of a normal parameter.)
+          mapM_ (checkDimDecls normal_params) params
 
-        expand knownparams (Ident pname ptype _)
+        checkNormParams knownparams (Ident pname _ _)
           | pname `HS.member` knownparams =
             bad $ DupParamError fname (baseName pname) loc
-          | Just name <- find (`HS.member` knownparams') boundDims =
+          | otherwise =
+            return $ HS.insert pname knownparams
+
+        checkDimDecls normal_params (Ident _ ptype _)
+          | Just name <- find (`HS.member` normal_params) boundDims =
             bad $ DupParamError fname (baseName name) loc
           | otherwise =
-            return $ HS.fromList boundDims `HS.union` knownparams'
-          where knownparams' = HS.insert pname knownparams
-                boundDims = mapMaybe boundDim $ arrayDims ptype
+            return ()
+          where boundDims = mapMaybe boundDim $ arrayDims ptype
                 boundDim (VarDim name) = Just name
                 boundDim _             = Nothing
 
@@ -1140,7 +1151,8 @@ checkLambda (CurryFun fname curryargexps rettype pos) args = do
   case bnd of
     Nothing -> bad $ UnknownFunctionError fname pos
     Just (rt, paramtypes) -> do
-      rettype' <- checkAnnotation pos "return" rettype $ fromDecl $ removeShapeAnnotations rt
+      rettype' <- checkAnnotation pos "return" rettype $
+                  fromDecl $ removeShapeAnnotations rt
       let paramtypes' = map (fromDecl . removeShapeAnnotations) paramtypes
       case () of
         _ | [(tupt@(Tuple ets), _, _)] <- args,
@@ -1160,9 +1172,12 @@ checkLambda (CurryFun fname curryargexps rettype pos) args = do
                 Just (e, _) -> bad $ CurriedConsumption fname $ srclocOf e
                 _           -> return ()
               let mkparam i t = newIdent ("param_" ++ show i) t pos
-              params <- zipWithM mkparam [(0::Int)..] $ drop (length curryargs) paramtypes'
-              let fun = AnonymFun (map toParam params) body rt pos
-                  body = Apply fname (zip (curryargexps'++map Var params) $ map diet paramtypes)
+              params <- zipWithM mkparam [(0::Int)..] $
+                        drop (length curryargs) paramtypes'
+              let fun = AnonymFun (map toParam params) body
+                        (vacuousShapeAnnotations rt) pos
+                  body = Apply fname (zip (curryargexps'++map Var params) $
+                                      map diet paramtypes)
                          rettype' pos
               _ <- checkLambda fun args
               return $ CurryFun fname curryargexps' rettype' pos
@@ -1237,3 +1252,45 @@ checkPolyLambdaOp op curryargexps rettype args pos = do
      (vacuousShapeAnnotations $ toDecl $ typeOf body) pos)
     args
   where fname = nameFromString $ ppBinOp op
+
+checkDeclType :: VarName vn =>
+                 SrcLoc -> TaggedDeclType vn -> TypeM vn ()
+checkDeclType loc (Tuple ts) = mapM_ (checkDeclType loc) ts
+checkDeclType _ (Basic _) = return ()
+checkDeclType loc (Array at) =
+  checkArrayType loc at
+
+checkArrayType :: VarName vn =>
+                  SrcLoc
+               -> DeclArrayTypeBase (ID vn)
+               -> TypeM vn ()
+checkArrayType loc (BasicArray _ ds _ _) =
+  mapM_ (checkDim loc) $ shapeDims ds
+checkArrayType loc (TupleArray cts ds _) = do
+  mapM_ (checkDim loc) $ shapeDims ds
+  mapM_ (checkTupleArrayElem loc) cts
+
+checkTupleArrayElem :: VarName vn =>
+                       SrcLoc
+                    -> DeclTupleArrayElemTypeBase (ID vn)
+                    -> TypeM vn ()
+checkTupleArrayElem _ (BasicArrayElem {}) =
+  return ()
+checkTupleArrayElem loc (ArrayArrayElem at) =
+  checkArrayType loc at
+checkTupleArrayElem loc (TupleArrayElem cts) =
+  mapM_ (checkTupleArrayElem loc) cts
+
+checkDim :: VarName vn =>
+            SrcLoc -> DimDecl (ID vn) -> TypeM vn ()
+checkDim _ AnyDim =
+  return ()
+checkDim _ (ConstDim _) =
+  return ()
+checkDim loc (KnownDim name) = do
+  t <- lookupVar name loc
+  case t of
+    Basic Int -> return ()
+    _         -> bad $ DimensionNotInteger loc $ baseName name
+checkDim _ (VarDim _) =
+  return ()
