@@ -4,6 +4,7 @@ module Futhark.Internalise.Monad
   , runInternaliseM
   , ShapeTable
   , FunTable
+  , VarSubstitutions
   , InternaliseEnv(..)
   , FunBinding (..)
   , lookupFunction
@@ -28,8 +29,6 @@ import Futhark.Tools
 
 import Prelude hiding (mapM)
 
--- | A tuple of a return type, a list of argument types, and the
--- argument types of the internalised function.
 data FunBinding = FunBinding
                   { internalFun :: ([VName], [Type],
                                     [SubExp] -> Maybe ExtRetType)
@@ -40,8 +39,12 @@ type ShapeTable = HM.HashMap VName [SubExp]
 
 type FunTable = HM.HashMap Name FunBinding
 
+-- | A mapping from external variable names to the corresponding
+-- internalised identifiers.
+type VarSubstitutions = HM.HashMap VName [Ident]
+
 data InternaliseEnv = InternaliseEnv {
-    envSubsts :: HM.HashMap VName [Ident]
+    envSubsts :: VarSubstitutions
   , envFtable :: FunTable
   , envDoBoundsChecks :: Bool
   }

@@ -2,6 +2,7 @@ module Futhark.Internalise.TypesValues
   (
    -- * Internalising types
     internaliseDeclType
+  , internaliseDeclTypes
   , internaliseType
   , internaliseUniqueness
 
@@ -27,20 +28,30 @@ internaliseUniqueness :: E.Uniqueness -> I.Uniqueness
 internaliseUniqueness E.Nonunique = I.Nonunique
 internaliseUniqueness E.Unique = I.Unique
 
+internaliseDeclTypes :: [E.TypeBase E.ShapeDecl als VName]
+                     -> InternaliseM ([[I.TypeBase ExtShape]],
+                                      HM.HashMap VName Int)
+internaliseDeclTypes ts = do
+  (ts', (_, subst)) <- runStateT (mapM internaliseDeclType' ts) (0, HM.empty)
+  return (ts', subst)
+
 internaliseDeclType :: E.TypeBase E.ShapeDecl als VName
                     -> InternaliseM ([I.TypeBase ExtShape],
                                      HM.HashMap VName Int)
 internaliseDeclType t = do
-  (ts, (_, subst)) <- runStateT (internaliseType' t) (0, HM.empty)
-  return (ts, subst)
-  where internaliseType' (E.Basic bt) =
-          return [I.Basic bt]
-        internaliseType' (E.Tuple ets) =
-          concat <$> mapM internaliseType' ets
-        internaliseType' (E.Array at) =
-          internaliseArrayType at
+  (t', (_, subst)) <- runStateT (internaliseDeclType' t) (0, HM.empty)
+  return (t', subst)
 
-        internaliseArrayType (E.BasicArray bt shape u _) = do
+internaliseDeclType' :: E.TypeBase E.ShapeDecl als VName
+                     -> StateT (Int, HM.HashMap VName Int)
+                        InternaliseM [I.TypeBase ExtShape]
+internaliseDeclType' (E.Basic bt) =
+  return [I.Basic bt]
+internaliseDeclType' (E.Tuple ets) =
+  concat <$> mapM internaliseDeclType' ets
+internaliseDeclType' (E.Array at) =
+  internaliseArrayType at
+  where internaliseArrayType (E.BasicArray bt shape u _) = do
           dims <- internaliseShape shape
           return [I.arrayOf (I.Basic bt) (ExtShape dims) $
                   internaliseUniqueness u]
@@ -57,8 +68,8 @@ internaliseDeclType t = do
 
         internaliseTupleArrayElem (BasicArrayElem bt _) =
           return [I.Basic bt]
-        internaliseTupleArrayElem (ArrayArrayElem at) =
-          internaliseArrayType at
+        internaliseTupleArrayElem (ArrayArrayElem aet) =
+          internaliseArrayType aet
         internaliseTupleArrayElem (TupleArrayElem ts) =
           concat <$> mapM internaliseTupleArrayElem ts
 
