@@ -90,5 +90,6 @@ data Token = IF
            | ASSERT
            | WHILE
            | STREAM
+           | BANG
            | EOF
              deriving (Show, Eq)

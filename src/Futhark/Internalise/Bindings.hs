@@ -1,9 +1,7 @@
 module Futhark.Internalise.Bindings
   (
   -- * Internalising bindings
-    internaliseParam
-  , internaliseFunParam
-  , bindingParams
+    bindingParams
 
   , flattenPattern
   , bindingTupIdent
@@ -30,35 +28,54 @@ import Futhark.Internalise.TypesValues
 
 import Prelude hiding (mapM)
 
-internaliseParam :: MonadFreshNames m => E.Ident
-                 -> m [I.IdentBase I.ExtShape]
-internaliseParam param =
-  forM (internaliseType $ E.identType param) $ \t ->
-  newIdent base t
-  where base = nameToString $ baseName $ E.identName param
+internaliseParams :: [E.Parameter]
+                  -> InternaliseM (HM.HashMap VName Int,
+                                   [[I.IdentBase I.ExtShape]])
+internaliseParams params = do
+  (param_ts, ctx) <- internaliseDeclTypes $ map E.identType params
+  vss <- forM (zip params param_ts) $ \(param, ts) -> do
+    let base = nameToString $ baseName $ E.identName param
+    mapM (newIdent base) ts
+  return (ctx, vss)
 
-internaliseFunParam :: MonadFreshNames m => E.Parameter
-                    -> m ([I.Ident], [I.Ident])
-internaliseFunParam param = do
-  new_params <- internaliseParam $ E.fromParam param
-  (new_param_types, shapes) <-
-    I.instantiateShapes' $
-    map I.identType new_params
-  let new_params' = [ new_param { I.identType = t } |
-                      (new_param, t) <- zip new_params new_param_types ]
-  return (shapes, new_params')
+internaliseBindee :: MonadFreshNames m =>
+                     E.Ident
+                  -> m [I.IdentBase I.ExtShape]
+internaliseBindee bindee =
+  forM (internaliseType $ E.identType bindee) $ \t ->
+    newIdent base t
+  where base = nameToString $ baseName $ E.identName bindee
+
+internaliseFunParams :: [E.Parameter]
+                     -> InternaliseM ([I.Ident],
+                                      [I.Ident],
+                                      VarSubstitutions)
+internaliseFunParams params = do
+  (shapectx, param_params) <- internaliseParams params
+
+  (shapectx', shapesubst) <- makeShapeIdentsFromContext shapectx
+  let declared_shape_params = HM.elems shapectx'
+
+  (implicit_shape_params, value_params) <-
+    liftM unzip $ forM param_params $ \params' -> do
+    (instantiated_param_types, param_implicit_shapes) <-
+      instantiateShapesWithDecls shapectx' $ map I.identType params'
+    let instantiated_params =
+          [ new_param { I.identType = t } |
+            (new_param, t) <- zip params' instantiated_param_types ]
+    return (param_implicit_shapes, instantiated_params)
+  let subst = HM.fromList $ zip (map E.identName params) value_params
+  return (declared_shape_params ++ concat implicit_shape_params,
+          concat value_params,
+          subst <> shapesubst)
 
 bindingParams :: [E.Parameter]
               -> ([I.Param] -> [I.Param] -> InternaliseM a)
               -> InternaliseM a
 bindingParams params m = do
-  ((paramshapes, params'), substs) <-
-    runWriterT $ liftM unzip $ forM params $ \param -> do
-      (shapes, param') <- lift $ internaliseFunParam param
-      tell $ HM.singleton (E.identName param) param'
-      return (shapes, param')
+  (shapeparams, valueparams, substs) <- internaliseFunParams params
   let bind env = env { envSubsts = substs `HM.union` envSubsts env }
-  local bind $ m (concat paramshapes) (concat params')
+  local bind $ m shapeparams valueparams
 
 bindingFlatPattern :: [E.Ident] -> [I.Type]
                    -> ([I.Ident] -> InternaliseM a)
@@ -72,7 +89,7 @@ bindingFlatPattern = bindingFlatPattern' []
               $ m $ concat $ reverse vs
 
     bindingFlatPattern' pat (p:rest) ts m = do
-      (ps, subst, rest_ts) <- handleMapping ts <$> internaliseParam p
+      (ps, subst, rest_ts) <- handleMapping ts <$> internaliseBindee p
       bindingFlatPattern' ((ps, (E.identName p, subst)) : pat) rest rest_ts m
 
     handleMapping ts [] =
@@ -105,3 +122,28 @@ bindingTupIdent pat ts m = do
   (ts',shapes) <- I.instantiateShapes' ts
   let addShapeBindings pat'' = m $ I.basicPattern' $ shapes ++ pat''
   bindingFlatPattern pat' ts' addShapeBindings
+
+makeShapeIdentsFromContext :: MonadFreshNames m =>
+                              HM.HashMap VName Int
+                           -> m (HM.HashMap Int I.Ident,
+                                 VarSubstitutions)
+makeShapeIdentsFromContext ctx = do
+  (ctx', substs) <- liftM unzip $ forM (HM.toList ctx) $ \(name, i) -> do
+    v <- newIdent (baseString name) $ I.Basic Int
+    return ((i, v), (name, [v]))
+  return (HM.fromList ctx', HM.fromList substs)
+
+instantiateShapesWithDecls :: MonadFreshNames m =>
+                              HM.HashMap Int I.Ident
+                           -> [I.ExtType]
+                           -> m ([I.Type], [I.Ident])
+instantiateShapesWithDecls ctx ts =
+  runWriterT $ I.instantiateShapes instantiate ts
+  where instantiate x
+          | Just v <- HM.lookup x ctx =
+            return $ I.Var v
+
+          | otherwise = do
+            v <- lift $ newIdent "size" (I.Basic Int)
+            tell [v]
+            return $ I.Var v

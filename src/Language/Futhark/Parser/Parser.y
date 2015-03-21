@@ -105,6 +105,7 @@ import Language.Futhark.Parser.Lexer
       '}'             { L $$ RCURLY }
       ','             { L $$ COMMA }
       '_'             { L $$ UNDERSCORE }
+      '!'             { L $$ BANG }
       fun             { L $$ FUN }
       fn              { L $$ FN }
       '=>'            { L $$ ARROW }
@@ -205,21 +206,37 @@ Type :: { UncheckedType }
         | '{' Types '}' { Tuple $2 }
 ;
 
+DimDecl :: { DimDecl Name }
+        : ',' id
+          { let L _ (ID name) = $2
+            in VarDim name }
+        | ',' '!' id
+          { let L _ (ID name) = $3
+            in KnownDim name }
+        | ',' intlit
+          { let L _ (INTLIT n) = $2
+            in ConstDim n }
+        | { AnyDim }
+
 ArrayType :: { UncheckedArrayType }
-          : Uniqueness '[' BasicArrayRowType ']'
+          : Uniqueness '[' BasicArrayRowType DimDecl ']'
             { let (ds, et) = $3
-              in BasicArray et (Nothing:ds) $1 NoInfo }
-          | Uniqueness '[' TupleArrayRowType ']'
+              in BasicArray et (ShapeDecl ($4:ds)) $1 NoInfo }
+          | Uniqueness '[' TupleArrayRowType DimDecl ']'
             { let (ds, et) = $3
-              in TupleArray et (Nothing:ds) $1 }
+              in TupleArray et (ShapeDecl ($4:ds)) $1 }
 
-BasicArrayRowType : BasicType            { ([], $1) }
-             | '[' BasicArrayRowType ']' { let (ds, et) = $2
-                                           in (Nothing:ds, et) }
+BasicArrayRowType : BasicType
+                    { ([], $1) }
+                  | '[' BasicArrayRowType DimDecl ']'
+                    { let (ds, et) = $2
+                      in ($3:ds, et) }
 
-TupleArrayRowType : '{' TupleArrayElemTypes '}' { ([], $2) }
-                  | '[' TupleArrayRowType ']'   { let (ds, et) = $2
-                                                  in (Nothing:ds, et) }
+TupleArrayRowType : '{' TupleArrayElemTypes '}'
+                     { ([], $2) }
+                  | '[' TupleArrayRowType DimDecl ']'
+                     { let (ds, et) = $2
+                       in ($3:ds, et) }
 
 TupleArrayElemTypes : TupleArrayElemType { [$1] }
                     | TupleArrayElemType ',' TupleArrayElemTypes
@@ -523,7 +540,9 @@ getNoLines :: ReadLineMonad a -> Either String a
 getNoLines (Value x) = Right x
 getNoLines (GetLine _) = Left "No extra lines"
 
-combArrayTypes :: UncheckedType -> [UncheckedType] -> Maybe UncheckedType
+combArrayTypes :: TypeBase Rank NoInfo Name
+               -> [TypeBase Rank NoInfo Name]
+               -> Maybe (TypeBase Rank NoInfo Name)
 combArrayTypes t ts = foldM comb t ts
   where comb x y
           | x == y    = Just x

@@ -69,7 +69,7 @@ externalisePrimOp (I.ArrayLit es et) =
 externalisePrimOp (I.BinOp bop x y t) =
   E.BinOp (externaliseBinOp bop)
   (externaliseSubExp x) (externaliseSubExp y)
-  (E.fromDecl $ externaliseDeclType $ I.Basic t) noLoc
+  (E.Basic t) noLoc
 externalisePrimOp (I.Not x) =
   E.UnOp E.Not (externaliseSubExp x) noLoc
 externalisePrimOp (I.Negate x) =
@@ -227,7 +227,8 @@ externaliseDeclTypes ts =
     [t]  -> t
     ts'  -> E.Tuple ts'
 
-externaliseTypes :: ArrayShape shape => [I.TypeBase shape] -> E.Type
+externaliseTypes :: I.ArrayShape shape =>
+                    [I.TypeBase shape] -> E.Type
 externaliseTypes ts =
   case map externaliseType ts of
     [t]  -> t
@@ -236,13 +237,13 @@ externaliseTypes ts =
 externaliseDeclType :: I.DeclType -> E.DeclType
 externaliseDeclType (I.Basic t) = E.Basic t
 externaliseDeclType (I.Array et shape u) =
-  E.Array $ E.BasicArray et (replicate (shapeRank shape) Nothing) u NoInfo
+  E.Array $ E.BasicArray et (E.ShapeDecl $ replicate (I.shapeRank shape) E.AnyDim) u NoInfo
 
-externaliseType :: ArrayShape shape =>
+externaliseType :: I.ArrayShape shape =>
                    I.TypeBase shape -> E.Type
 externaliseType (I.Basic t) = E.Basic t
 externaliseType (I.Array et shape u) =
-  E.Array $ E.BasicArray et (replicate (shapeRank shape) Nothing) u mempty
+  E.Array $ E.BasicArray et (E.Rank (I.shapeRank shape)) u mempty
 
 externaliseSOACArrayArgs :: [I.Ident] -> E.Exp
 externaliseSOACArrayArgs [e] = externaliseSubExp $ I.Var e

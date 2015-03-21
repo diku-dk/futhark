@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts, ScopedTypeVariables #-}
 -- | The type checker checks whether the program is type-consistent.
 module Futhark.TypeCheck
   ( -- * Interface
@@ -63,7 +63,7 @@ instance PrettyLore lore => Show (TypeError lore) where
 
 -- | A tuple of a return type and a list of parameters, possibly
 -- named.
-type FunBinding lore = (RetType lore, [(Maybe VName, Type)])
+type FunBinding lore = (RetType lore, [FParam lore])
 
 data VarBindingLore lore = LetBound (Lore.LetBound lore)
                          | FunBound (Lore.FParam lore)
@@ -326,15 +326,22 @@ subExpAliasesM :: SubExp -> TypeM lore Names
 subExpAliasesM (Constant {}) = return mempty
 subExpAliasesM (Var v)       = lookupAliases $ identName v
 
-lookupFun :: Name
+lookupFun :: forall lore.Lore lore =>
+             Name
+          -> [SubExp]
           -> TypeM lore (RetType lore, [Type])
-lookupFun fname = do
+lookupFun fname args = do
   bnd <- asks $ HM.lookup fname . envFtable
   case bnd of
     Nothing -> bad $ UnknownFunctionError fname noLoc
-    Just (ftype, params) -> do
-      let (_, paramtypes) = unzip params
-      return (ftype, paramtypes)
+    Just (ftype, params) ->
+      case applyRetType (representative :: lore) ftype params args of
+        Nothing ->
+          bad $ ParameterMismatch (Just fname) noLoc
+          (Right $ map (justOne . staticShapes1 . fparamType) params) $
+          map (justOne . staticShapes1 . subExpType) args
+        Just rt ->
+          return (rt, map fparamType params)
 
 -- | @t1 `unifyTypes` t2@ attempts to unify @t2@ and @t2@.  If
 -- unification cannot happen, 'Nothing' is returned, otherwise a type
@@ -437,16 +444,16 @@ checkProg' checkoccurs prog = do
       | HM.member name ftable =
         Left $ Error [] $ DupDefinitionError name noLoc noLoc
       | otherwise =
-        let params' = [ (Just $ fparamName param,
-                         fparamType param)
-                      | param <- params ]
-        in Right $ HM.insert name (ret,params') ftable
+        Right $ HM.insert name (ret,params) ftable
 
 -- The prog argument is just to disambiguate the lore.
-initialFtable :: Lore lore => Prog lore -> HM.HashMap Name (FunBinding lore)
+initialFtable :: forall lore.Checkable lore =>
+                 Prog lore -> HM.HashMap Name (FunBinding lore)
 initialFtable _ = HM.map addBuiltin builtInFunctions
-  where addBuiltin (t, ts) = (basicRetType t,
-                              zip (repeat Nothing) $ map Basic ts)
+  where addBuiltin (t, ts) =
+          (basicRetType t,
+           map (basicFParam (representative :: lore) name) ts)
+        name = ID (nameFromString "x", 0)
 
 checkFun :: Checkable lore =>
             FunDec lore -> TypeM lore ()
@@ -704,7 +711,7 @@ checkLoopOp (DoLoop respat merge form loopbody) = do
     ForLoop (Ident loopvar loopvart) boundexp -> do
       unless (loopvart == Basic Int) $
         bad $ TypeError noLoc "Type annotation of loop variable is not int"
-      iparam <- basicFParam loopvar Int
+      iparam <- basicFParamM loopvar Int
       let funparams = iparam : mergepat
           paramts   = map fparamType funparams
 
@@ -855,14 +862,12 @@ checkExp (Apply fname args t)
     bad $ TypeError noLoc $ "Expected apply result type " ++ pretty t
     ++ " but got " ++ pretty argts
 
-checkExp (Apply fname args rettype) = do
-  checkRetType rettype
-  (rettype', paramtypes) <- lookupFun fname
+checkExp (Apply fname args rettype_annot) = do
+  (rettype_derived, paramtypes) <- lookupFun fname $ map fst args
   argflows <- mapM (checkArg . fst) args
-
-  when (rettype' /= rettype) $
-    bad $ TypeError noLoc $ "Expected apply result type " ++ pretty rettype
-    ++ " but got " ++ pretty rettype'
+  when (rettype_derived /= rettype_annot) $
+    bad $ TypeError noLoc $ "Expected apply result type " ++ pretty rettype_derived
+    ++ " but annotation is " ++ pretty rettype_annot
   checkFuncall (Just fname) paramtypes argflows
 
 checkSOACArrayArgs :: Checkable lore =>
@@ -1166,5 +1171,10 @@ class (FreeIn (Lore.Exp lore),
   checkRetType :: AST.RetType lore -> TypeM lore ()
   matchPattern :: AST.Pattern lore -> AST.Exp lore ->
                   TypeM lore ()
-  basicFParam :: VName -> BasicType -> TypeM lore (AST.FParam lore)
+  basicFParam :: lore -> VName -> BasicType -> AST.FParam lore
   matchReturnType :: Name -> RetType lore -> AST.Result -> TypeM lore ()
+
+basicFParamM :: forall lore.Checkable lore =>
+                VName -> BasicType -> TypeM lore (AST.FParam lore)
+basicFParamM name t =
+  return $ basicFParam (representative :: lore) name t

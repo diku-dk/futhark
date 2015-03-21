@@ -45,27 +45,33 @@ internaliseProg doBoundsCheck prog =
   where src = E.newNameSourceForProg prog
 
 buildFtable :: MonadFreshNames m => E.Prog -> m FunTable
-buildFtable = liftM HM.fromList . mapM inspect . E.progFunctions
-  where inspect (fname, rettype, params, _, _) = do
-          let rettype' = internaliseType rettype
-          (shapes, params') <- unzip <$> mapM internaliseFunParam params
-          return (fname,
-                  FunBinding { internalFun = (rettype',
-                                              map I.identName $ concat shapes,
-                                              map I.identType $ concat params')
-                             , externalFun = (rettype, map E.identType params)
-                             })
+buildFtable = runInternaliseM True HM.empty .
+              liftM HM.fromList . mapM inspect . E.progFunctions
+  where inspect (fname, rettype, params, _, _) =
+          bindingParams params $ \shapes values -> do
+            (rettype', _) <- internaliseDeclType rettype
+            let shapenames = map I.identName shapes
+            return (fname,
+                    FunBinding { internalFun = (shapenames,
+                                                map I.identType values,
+                                                applyExtType
+                                                (ExtRetType rettype')
+                                                (shapes++values)
+                                               )
+                               , externalFun = (rettype, map E.identType params)
+                               })
 
 internaliseFun :: E.FunDec -> InternaliseM I.FunDec
-internaliseFun (fname,rettype,params,body,_) =
+internaliseFun (fname,rettype,params,body,loc) =
   bindingParams params $ \shapeparams params' -> do
-    body' <- internaliseBody body
+    (rettype', _) <- internaliseDeclType rettype
+    body' <- ensureResultExtShape loc rettype' =<<
+             internaliseBody body
     let mkFParam = flip FParam ()
     return $ FunDec
-      fname rettype'
+      fname (ExtRetType rettype')
       (map mkFParam $ shapeparams ++ params')
       body'
-  where rettype' = ExtRetType $ internaliseType rettype
 
 internaliseIdent :: E.Ident -> InternaliseM I.Ident
 internaliseIdent (E.Ident name tp _) =
@@ -112,11 +118,11 @@ internaliseExp desc (E.ArrayLit es rowtype _) = do
   case internaliseType rowtype of
     [et] -> letTupExp' desc $ I.PrimOp $
             I.ArrayLit (map I.Var $ concat es')
-            (et `setArrayShape` Shape rowshape)
+            (et `I.setArrayShape` Shape rowshape)
     ets   -> do
       let arraylit ks et =
             I.PrimOp $ I.ArrayLit (map I.Var ks)
-            (et `setArrayShape` Shape rowshape)
+            (et `I.setArrayShape` Shape rowshape)
       letSubExps desc (zipWith arraylit (transpose es') ets)
 
 internaliseExp desc (E.Apply fname args _ _)
@@ -137,11 +143,16 @@ internaliseExp desc (E.Apply fname args _ _)
 
 internaliseExp desc (E.Apply fname args _ _) = do
   args' <- liftM concat $ mapM (internaliseExp "arg" . fst) args
-  (rettype, shapes, paramts) <- internalFun <$> lookupFunction fname
+  (shapes, paramts, rettype_fun) <- internalFun <$> lookupFunction fname
   let diets = map I.diet paramts
-      args'' = zip (argShapes shapes paramts args') (repeat I.Observe) ++
+      shapeargs = argShapes shapes paramts args'
+      args'' = zip shapeargs (repeat I.Observe) ++
                zip args' diets
-  letTupExp' desc $ I.Apply fname args'' (ExtRetType rettype)
+  case rettype_fun $ shapeargs ++ args' of
+    Nothing -> fail $ "Cannot apply " ++ pretty fname ++ " to arguments " ++
+               pretty (shapeargs ++ args')
+    Just rettype ->
+      letTupExp' desc $ I.Apply fname args'' rettype
 
 internaliseExp desc (E.LetPat pat e body _) = do
   ses <- internaliseExp desc e

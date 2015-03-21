@@ -104,10 +104,14 @@ instance Lore.Lore lore => Lore.Lore (Aliases lore) where
   type FParam (Aliases lore) = Lore.FParam lore
   type RetType (Aliases lore) = Lore.RetType lore
 
-  representative = Aliases Lore.representative
+  representative =
+    Aliases Lore.representative
 
-  loopResultContext (Aliases lore) res merge =
-    Lore.loopResultContext lore res $ map (removeFParamAliases $ Aliases lore) merge
+  loopResultContext (Aliases lore) =
+    Lore.loopResultContext lore
+
+  applyRetType (Aliases lore) =
+    Lore.applyRetType lore
 
 type Prog lore = AST.Prog (Aliases lore)
 type PrimOp lore = AST.PrimOp (Aliases lore)
@@ -184,10 +188,6 @@ removeLambdaAliases = rephraseLambda removeAliases
 
 removePatternAliases :: AST.Pattern (Aliases lore) -> AST.Pattern lore
 removePatternAliases = rephrasePattern removeAliases
-
-removeFParamAliases :: Aliases lore -> FParam (Aliases lore) -> FParam lore
-removeFParamAliases _ (FParam ident lore) =
-  FParam ident lore
 
 addAliasesToPattern :: Lore.Lore lore =>
                        AST.Pattern lore -> Exp lore -> Pattern lore

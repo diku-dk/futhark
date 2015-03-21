@@ -11,6 +11,7 @@ module Futhark.Representation.AST.Attributes.TypeOf
        , subExpShapeContext
        , loopShapeContext
        , loopExtType
+       , applyExtType
        , module Futhark.Representation.AST.RetType
        )
        where
@@ -19,6 +20,7 @@ import Data.List
 import Data.Maybe
 import Data.Monoid
 import qualified Data.HashSet as HS
+import qualified Data.HashMap.Lazy as HM
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes.Types
@@ -152,3 +154,32 @@ loopExtType :: [Ident] -> [Ident] -> [ExtType]
 loopExtType res merge =
   existentialiseExtTypes inaccessible $ staticShapes $ map identType res
   where inaccessible = HS.fromList $ map identName merge
+
+applyExtType :: ExtRetType -> [Ident]
+             -> [SubExp]
+             -> Maybe ExtRetType
+applyExtType (ExtRetType extret) params args
+  | length args == length params && and (zipWith subtypeOf argtypes paramtypes) =
+    Just $ ExtRetType $ map correctDims extret
+  | otherwise =
+    Nothing
+  where paramtypes = map (toDecl . identType) params
+        argtypes   = map (toDecl . subExpType) args
+
+        parammap :: HM.HashMap VName SubExp
+        parammap = HM.fromList $
+                   zip (map identName params) args
+
+        correctDims t =
+          t `setArrayShape`
+          ExtShape (map correctDim $ extShapeDims $ arrayShape t)
+
+        correctDim (Ext i) =
+          Ext i
+        correctDim (Free (Constant v)) =
+          Free $ Constant v
+        correctDim (Free (Var v))
+          | Just se <- HM.lookup (identName v) parammap =
+            Free se
+          | otherwise =
+            Free $ Var v
