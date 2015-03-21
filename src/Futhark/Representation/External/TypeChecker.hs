@@ -841,10 +841,10 @@ checkExp (Stream chunk i acc arr lam pos) = do
   _ <- case rtp' of
         Tuple [res_acc_tp, res_arr_tp] -> 
             unless ( isArrayType res_arr_tp && 
-                     typeOf acc' `subtypeOf` res_acc_tp ) $
+                     typeOf acc' `subtypeOf` removeShapeAnnotations res_acc_tp ) $
               bad $ TypeError pos ("Stream with accumulator-type missmatch"++ 
                                    "or result arrays of non-array type.")
-        _ ->unless (typeOf acc' `subtypeOf` rtp') $
+        _ ->unless (typeOf acc' `subtypeOf` removeShapeAnnotations rtp') $
               bad $ TypeError pos "Stream with accumulator-type missmatch."
   -- check that arr's aliases are not used inside the lambda! 
   let arr_aliasses = HS.toList $ aliases $ typeOf arr'

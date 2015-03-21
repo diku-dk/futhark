@@ -274,10 +274,10 @@ internaliseStreamLambda internaliseBody lam accs arrtypes = do
   -- The accumulator result of the body must have the exact same 
   -- shape as the initial accumulator.  We accomplish this with 
   -- an assertion and reshape().
-  let acctype' = [ t `setArrayShape` arrayShape shape
+  let acctype' = [ t `I.setArrayShape` arrayShape shape
                    | (t,shape) <- zip lam_acc_tps acctypes ]
   -- finally, place assertions and return result
-  body' <- assertResultShape (srclocOf lam) (acctype'++lam_arr_tps) body
+  body' <- ensureResultShape (srclocOf lam) (acctype'++lam_arr_tps) body
   return $ I.Lambda params body' (acctypes++lam_arr_tps)
 
 -- Given @n@ lambdas, this will return a lambda that returns an
