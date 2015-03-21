@@ -855,7 +855,7 @@ checkExp (Apply fname args rettype_annot) = do
   argflows <- mapM (checkArg . fst) args
   when (rettype_derived /= rettype_annot) $
     bad $ TypeError noLoc $ "Expected apply result type " ++ pretty rettype_derived
-    ++ " but got " ++ pretty rettype_annot
+    ++ " but annotation is " ++ pretty rettype_annot
   checkFuncall (Just fname) paramtypes argflows
 
 checkSOACArrayArgs :: Checkable lore =>
