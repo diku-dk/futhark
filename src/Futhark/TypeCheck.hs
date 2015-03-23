@@ -813,18 +813,22 @@ checkLoopOp (Redomap ass outerfun innerfun accexps arrexps) = do
     bad $ TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
           ", but redomapT outer reduction returns type " ++ prettyTuple outerRetType ++ "."
 
-checkLoopOp s@(Stream ass accexps arrexps lam) = do
+checkLoopOp (Stream ass accexps arrexps lam) = do
   mapM_ (requireI [Basic Cert]) ass
   accargs <- mapM checkArg   accexps
   arrargs <- mapM checkIdent arrexps
   _ <- checkSOACArrayArgs arrexps
+  let chunk = head $ extLambdaParams lam
   let asArg t = (t, mempty, mempty)
       inttp   = Basic Int
-  checkLambda lam $ (asArg inttp) : (asArg inttp) : 
-                    accargs ++ map asArg arrargs
-  let lamrtp = take (length accexps) $ lambdaReturnType lam
-  unless (all (\(x,(y,_,_))->x==y) $ zip lamrtp accargs) $
-    bad $ TypeError noLoc $ "Stream with inconsistent accumulator type in lambda."
+      lamarrs'= [ arrayOf t (Shape [Var chunk]) (uniqueness t)
+                   | t <- map (\(Array bt s u)->Array bt (stripDims 1 s) u)
+                              arrargs ]
+  checkExtLambda lam $ asArg inttp : asArg inttp :
+                       accargs ++ map asArg lamarrs'
+  let lamrtp = take (length accexps) $ extLambdaReturnType lam
+  unless (all (uncurry (==)) $ zip lamrtp (staticShapes $ map (\(y,_,_)->y) accargs)) $
+    bad $ TypeError noLoc "Stream with inconsistent accumulator type in lambda."
 
 checkExp :: Checkable lore =>
             Exp lore -> TypeM lore ()

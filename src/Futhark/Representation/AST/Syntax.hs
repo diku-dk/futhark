@@ -226,7 +226,7 @@ data LoopOp lore
   | Reduce  Certificates (LambdaT lore) [(SubExp, Ident)]
   | Scan   Certificates (LambdaT lore) [(SubExp, Ident)]
   | Redomap Certificates (LambdaT lore) (LambdaT lore) [SubExp] [Ident]
-  | Stream  Certificates [SubExp] [Ident] (LambdaT lore)
+  | Stream  Certificates [SubExp] [Ident] (ExtLambdaT lore)
 
 deriving instance Lore lore => Eq (LoopOp lore)
 deriving instance Lore lore => Show (LoopOp lore)

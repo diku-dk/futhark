@@ -429,22 +429,23 @@ internaliseExp desc (E.Redomap lam1 lam2 ne arrs _) = do
 internaliseExp desc (E.Stream chunk i acc arr lam _) = do
   arrs' <- internaliseExpToIdents "stream_arr" arr
   accs' <- internaliseExp "stream_accs" acc
-
-  let chunkiparams = map E.toParam [chunk,i] -- <$> flattenPattern [chunk,i]
-  (lam', chunk', i') <- 
+  let chunkiparams = map E.toParam [chunk,i]
+  (lam', chunk', i') <-
       withNonuniqueReplacements $ bindingParams chunkiparams $ \_ mergepat' -> do
-            let [chunk'', i'']  = mergepat' 
+            let [chunk'', i'']  = mergepat'
             let lam_arrs' = [ I.arrayOf t (Shape [I.Var chunk'']) (I.uniqueness t)
-                              | t <- map (\(I.Array bt s u)->I.Array bt (I.stripDims 1 s) u) 
-                                         (map I.identType arrs') ]
+                              | t <- map (\aar-> let (I.Array bt s u) = I.identType aar
+                                                 in  I.Array bt (I.stripDims 1 s) u
+                                         ) arrs'
+                            ]
             lam'' <- withNonuniqueReplacements $
                         internaliseStreamLambda internaliseBody lam
-                        accs' lam_arrs' 
+                        accs' lam_arrs'
             return (lam'', chunk'', i'')
-  let params' = lambdaParams lam'
-  let res_lam = Lambda (chunk':i':params') (I.lambdaBody lam') (I.lambdaReturnType lam')
-  letTupExp' desc $ 
-    I.LoopOp $ I.Stream [] accs' arrs' res_lam --lam' 
+  let params' = extLambdaParams lam'
+  let res_lam = ExtLambda (chunk':i':params') (I.extLambdaBody lam') (I.extLambdaReturnType lam')
+  letTupExp' desc $
+    I.LoopOp $ I.Stream [] accs' arrs' res_lam
 
 internaliseExp desc (E.ConcatMap lam arr arrs _) = do
   arr' <- internaliseExpToIdents "concatMap_arr" arr

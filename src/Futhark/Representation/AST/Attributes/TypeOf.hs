@@ -26,6 +26,8 @@ import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Values
 import Futhark.Representation.AST.RetType
 
+import qualified Data.HashMap.Lazy as HM
+
 subExpType :: SubExp -> Type
 subExpType (Constant val) = Basic $ basicValueType val
 subExpType (Var ident)    = identType ident
@@ -103,17 +105,28 @@ loopOpExtType (Redomap _ outerfun innerfun _ ids) =
                                                      (uniqueness eltp)
                                    ) res_el_tp
               in  staticShapes (acc_tp ++ res_arr_tp)
-loopOpExtType (Stream _ accs _ lam) = 
-  let res_tp = lambdaReturnType lam
-      --lam_arrs  = drop (length accs+2) $ lambdaParams lam
-      (acc_tps, arr_tps) = (take (length accs) res_tp, drop (length accs) res_tp)
-  in  (staticShapes acc_tps) ++ (existentialiseExtTypes inaccessible $ staticShapes $ arr_tps)
-  where inaccessible = HS.fromList $ map identName (lambdaParams lam)
---      outersize  = arraysSize 0 (map identType ids)
---      glbarr_tps = [ arrayOf t (Shape [outersize]) (uniqueness t)
---                     | t <- map (\(Array bt s u)->Array bt (stripDims 1 s) u) arr_tps ]
---  in  staticShapes $ (acc_tps++subst_type--glbarr_tps)
-    
+loopOpExtType (Stream _ accs arrs lam) =
+  let (ExtLambda params _ rtp) = lam
+      nms = map identName (take (2 + length accs) params)
+      (Array _ shp _) = identType (head arrs)
+      (outersize, i0) = (head $ shapeDims shp, Constant $ IntVal 0)
+      substs = HM.fromList $ zip nms (outersize:i0:accs)
+  in  map (substNamesInExtType substs) rtp
+    where substNamesInExtType :: HM.HashMap VName SubExp -> ExtType -> ExtType
+          substNamesInExtType _ tp@(Basic _) = tp
+          substNamesInExtType subs (Mem se) =
+            Mem $ substNamesInSubExp subs se
+          substNamesInExtType subs (Array btp shp u) =
+            let shp' = ExtShape $ map (substNamesInExtDimSize subs) (extShapeDims shp)
+            in  Array btp shp' u
+          substNamesInExtDimSize :: HM.HashMap VName SubExp -> ExtDimSize -> ExtDimSize
+          substNamesInExtDimSize _ (Ext o) = Ext o
+          substNamesInExtDimSize subs (Free o) = Free $ substNamesInSubExp subs o
+          substNamesInSubExp :: HM.HashMap VName SubExp -> SubExp -> SubExp
+          substNamesInSubExp _ e@(Constant _) = e
+          substNamesInSubExp subs (Var idd) =
+            fromMaybe (Var idd) (HM.lookup (identName idd) subs)
+
 expExtType :: IsRetType (RetType lore) => Exp lore -> [ExtType]
 expExtType (Apply _ _ rt) = retTypeValues rt
 expExtType (If _ _ _ rt)  = rt

@@ -518,6 +518,8 @@ defCompileLoopOp _ (Scan {}) = soacError
 
 defCompileLoopOp _ (Redomap {}) = soacError
 
+defCompileLoopOp _ (Stream {}) = soacError
+
 defCompileLoopOp _ (Reduce {}) = soacError
 
 soacError :: ImpM op a

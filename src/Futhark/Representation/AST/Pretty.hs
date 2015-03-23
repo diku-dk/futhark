@@ -223,10 +223,10 @@ instance PrettyLore lore => Pretty (LoopOp lore) where
     ppCertificates' cs <> text "redomap" <>
     parens (ppr outer <> comma </> ppr inner <> comma </>
             commasep (braces (commasep $ map ppr es) : map ppr as))
-  ppr (Stream cs accs arrs lam) = 
+  ppr (Stream cs accs arrs lam) =
     ppCertificates' cs <> text "stream" <>
-    parens (commasep ( braces (commasep $ map ppr accs ) : braces (commasep $ map ppr arrs) : [] ) 
-            <> comma </> ppr lam)
+    parens (ppr lam <> comma </>
+            commasep ( braces (commasep $ map ppr accs) : map ppr arrs ))
   ppr (Scan cs lam inputs) =
     ppCertificates' cs <> ppSOAC "scan" [lam] (Just es) as
     where (es, as) = unzip inputs
@@ -242,6 +242,12 @@ instance PrettyLore lore => Pretty (Exp lore) where
 
 instance PrettyLore lore => Pretty (Lambda lore) where
   ppr (Lambda params body rettype) =
+    text "fn" <+> ppTuple' rettype <+>
+    apply (map ppParam params) <+>
+    text "=>" </> indent 2 (ppr body)
+
+instance PrettyLore lore => Pretty (ExtLambda lore) where
+  ppr (ExtLambda params body rettype) =
     text "fn" <+> ppTuple' rettype <+>
     apply (map ppParam params) <+>
     text "=>" </> indent 2 (ppr body)

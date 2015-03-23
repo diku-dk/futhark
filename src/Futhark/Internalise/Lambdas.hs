@@ -221,7 +221,7 @@ internaliseRedomapInnerLambda internaliseBody lam nes arr_args = do
   let arrtypes = map I.subExpType arr_args
       rowtypes = map I.rowType    arrtypes
       acctypes = map I.subExpType nes
-
+  --
   (params, body, rettype) <- internaliseLambda internaliseBody lam $
                              acctypes ++ rowtypes
   -- split rettype into (i) accummulator types && (ii) result-array-elem types
@@ -246,14 +246,14 @@ internaliseRedomapInnerLambda internaliseBody lam nes arr_args = do
       shape_body = shapeBody (map I.identName inner_shapes) rettypearr' map_body
   shapefun <- makeShapeFun (drop acc_len params) shape_body (length inner_shapes)
   bindMapShapes inner_shapes shapefun arr_args outer_shape
-
+  --
   -- for the reduce part
   let acctype' = [ t `setArrayShape` arrayShape shape
                    | (t,shape) <- zip acc_tps acctypes ]
   -- The reduce-part result of the body must have the exact same
   -- shape as the initial accumulator.  We accomplish this with
   -- an assertion and reshape().
-
+  --
   -- finally, place assertions and return result
   body' <- assertResultShape (srclocOf lam) (acctype'++rettypearr') body
   return $ I.Lambda params body' (acctype'++rettypearr')
@@ -262,31 +262,39 @@ internaliseStreamLambda :: (E.Exp -> InternaliseM Body)
                         -> E.Lambda
                         -> [I.SubExp]
                         -> [I.Type]
-                        -> InternaliseM I.Lambda
-internaliseStreamLambda internaliseBody lam accs arrtypes = do  
+                        -> InternaliseM I.ExtLambda
+internaliseStreamLambda internaliseBody lam accs arrtypes = do
   let acctypes = map I.subExpType accs
   (params, body, rettype) <- internaliseLambda internaliseBody lam $
                              acctypes++arrtypes
   -- split rettype into (i) accummulator types && (ii) result-array-elem types
   let acc_len = length acctypes
       lam_acc_tps = take acc_len rettype
-  (lam_arr_tps,_) <- instantiateShapes' $ drop acc_len rettype
+  let lam_arr_tps = drop acc_len rettype
   --
   -- For the map part: intuitively it would seem possible to
   --   enforce the invariant that the inner shape is invariant
-  --   to the streaming; however a slice cannot be computed 
+  --   to the streaming; however a slice cannot be computed
   --   because filter can be part of the body, hence the result
   --   array can be empty, hence inner shape is unavailable ...
   -- It would seem this lambda requires user-level annotations!
   --
-  -- The accumulator result of the body must have the exact same 
-  -- shape as the initial accumulator.  We accomplish this with 
+  -- The accumulator result of the body must have the exact same
+  -- shape as the initial accumulator.  We accomplish this with
   -- an assertion and reshape().
+  --
+  let assertProperShape t se =
+        let name = "result_stream_proper_shape"
+        in  ensureShape (srclocOf lam) t name se
   let acctype' = [ t `setArrayShape` arrayShape shape
                    | (t,shape) <- zip lam_acc_tps acctypes ]
-  -- finally, place assertions and return result
-  body' <- assertResultShape (srclocOf lam) (acctype'++lam_arr_tps) body
-  return $ I.Lambda params body' (acctypes++lam_arr_tps)
+  body' <- insertBindingsM $ do
+                lamres <- bodyBind body
+                reses1 <- zipWithM assertProperShape acctype' (take acc_len lamres)
+                let reses = reses1 ++ drop acc_len lamres
+                return $ resultBody reses
+  return $ I.ExtLambda params body' $
+            staticShapes acctypes ++ lam_arr_tps
 
 -- Given @n@ lambdas, this will return a lambda that returns an
 -- integer in the range @[0,n]@.

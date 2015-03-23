@@ -49,8 +49,8 @@ analyseExp (Out.LoopOp (In.Redomap cs outerlam innerlam acc arr)) =
    acc arr
 analyseExp (Out.LoopOp (In.Stream cs acc arr lam)) =
   Out.LoopOp $
-  Out.Stream cs acc arr 
-   (analyseLambda lam)
+  Out.Stream cs acc arr
+   (analyseExtLambda lam)
 analyseExp e = Out.mapExp traverse e
   where traverse =
           Out.Mapper { Out.mapOnSubExp = return
@@ -68,3 +68,7 @@ analyseLambda :: Lore lore => In.Lambda lore -> Out.Lambda lore
 analyseLambda lam =
   let body = analyseBody $ In.lambdaBody lam
   in lam { Out.lambdaBody = body }
+analyseExtLambda :: Lore lore => In.ExtLambda lore -> Out.ExtLambda lore
+analyseExtLambda lam =
+  let body = analyseBody $ In.extLambdaBody lam
+  in lam { Out.extLambdaBody = body }

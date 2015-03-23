@@ -765,42 +765,42 @@ checkExp (Stream chunk i acc arr lam pos) = do
           Array _ -> True
           _       -> False
   let lit_int0 = Literal (BasicVal $ IntVal 0) pos
-  [(_,  intarg),(acc',accarg),(arr',arrarg)] <- 
+  [(_,  intarg),(acc',accarg),(arr',arrarg)] <-
         mapM checkArg [lit_int0, acc, arr]
   -- arr must have an array type
-  when (not $ isArrayType $ typeOf arr') $
+  unless (isArrayType $ typeOf arr') $
     bad $ TypeError pos "Stream with input array of non-array type."
-  -- the plan is to create a lambda function in which `chunk'  
+  -- the plan is to create a lambda function in which `chunk'
   -- and `i' are parameters and to type check this lambda
-  (lam_ps, lam_bdy, rtp, lp) <- 
+  (lam_ps, lam_bdy, rtp, lp) <-
       case lam of
          AnonymFun ps bd t lpos -> return (ps,bd,t,lpos)
          _ -> bad $ TypeError pos "Stream with a curried fun (not implemented yet)."
-  let fake_pars= (Ident (identName chunk) (Basic Int) lp) :
-                 (Ident (identName i    ) (Basic Int) lp) : lam_ps
+  let fake_pars= Ident (identName chunk) (Basic Int) lp :
+                 Ident (identName i    ) (Basic Int) lp : lam_ps
       fake_lam = AnonymFun fake_pars lam_bdy rtp lp
-  -- just get the dflow of lambda on the fakearg, which does not alias 
+  -- just get the dflow of lambda on the fakearg, which does not alias
   -- arr, so we can later check that aliases of arr are not used inside lam.
   let fakearg = (fromDecl $ addNames $ removeNames $ typeOf arr', mempty, srclocOf pos)
-  (_, dflow)<- collectDataflow $ 
+  (_, dflow)<- collectDataflow $
                  checkLambda fake_lam [intarg, intarg, accarg, fakearg]
-  -- properly check lambda 
+  -- properly check lambda
   fake_lam' <-   checkLambda fake_lam [intarg, intarg, accarg,  arrarg]
-  let (AnonymFun (chunk':i':lam_pars') lam_body' rtp' lpos') = fake_lam'
-  let lam' = (AnonymFun lam_pars' lam_body' rtp' lpos')
+  let (AnonymFun (chunk':(i':lam_pars')) lam_body' rtp' lpos') = fake_lam'
+  let lam' = AnonymFun lam_pars' lam_body' rtp' lpos'
   -- check that the result type of lambda matches the accumulator part
   _ <- case rtp' of
-        Tuple [res_acc_tp, res_arr_tp] -> 
-            unless ( isArrayType res_arr_tp && 
+        Tuple [res_acc_tp, res_arr_tp] ->
+            unless ( isArrayType res_arr_tp &&
                      typeOf acc' `subtypeOf` res_acc_tp ) $
-              bad $ TypeError pos ("Stream with accumulator-type missmatch"++ 
+              bad $ TypeError pos ("Stream with accumulator-type missmatch"++
                                    "or result arrays of non-array type.")
         _ ->unless (typeOf acc' `subtypeOf` rtp') $
               bad $ TypeError pos "Stream with accumulator-type missmatch."
-  -- check that arr's aliases are not used inside the lambda! 
+  -- check that arr's aliases are not used inside the lambda!
   let arr_aliasses = HS.toList $ aliases $ typeOf arr'
   let usages = usageMap $ usageOccurences dflow
-  when (any (\x -> HM.member x usages) arr_aliasses) $ 
+  when (any (`HM.member` usages) arr_aliasses) $
      bad $ TypeError pos "Stream with input array used inside lambda."
   return $ Stream (fromParam chunk') (fromParam i') acc' arr' lam' pos
 

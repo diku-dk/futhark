@@ -556,6 +556,13 @@ simplifyLoopOp (DoLoop respat merge form loopbody) = do
           lore' <- simplifyFParamLore lore
           return $ FParam ident' lore'
 
+simplifyLoopOp (Stream cs acc arr fun) = do
+  cs'  <- simplifyCerts  cs
+  acc' <- mapM simplifySubExp acc
+  arr' <- mapM simplifyIdent  arr
+  fun' <- simplifyExtLambda fun
+  return $ Stream cs' acc' arr' fun'
+
 simplifyLoopOp (Map cs fun arrs) = do
   cs' <- simplifyCerts cs
   arrs' <- mapM simplifyIdent arrs
