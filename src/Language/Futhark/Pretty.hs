@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
+{-# LANGUAGE FlexibleInstances, FlexibleContexts #-}
 -- | Futhark prettyprinter.  This module defines 'Pretty' instances for the
 -- AST defined in "Language.Futhark.Syntax", but also a number of
 -- convenience functions if you don't want to use the interface from
@@ -61,24 +62,51 @@ instance Pretty Value where
     | Array {} <- t = brackets $ commastack $ map ppr $ elems a
     | otherwise     = brackets $ commasep $ map ppr $ elems a
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TupleArrayElemTypeBase as vn) where
+instance Pretty Uniqueness where
+  ppr Unique    = star
+  ppr Nonunique = empty
+
+instance (Eq vn, Hashable vn, Pretty vn) =>
+         Pretty (TupleArrayElemTypeBase ShapeDecl as vn) where
   ppr (BasicArrayElem bt _) = ppr bt
   ppr (ArrayArrayElem at)   = ppr at
   ppr (TupleArrayElem ts)   = braces $ commasep $ map ppr ts
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ArrayTypeBase as vn) where
-  ppr (BasicArray et ds u _) = u' <> foldl f (ppr et) ds
-    where f s Nothing = brackets s
-          f s (Just e) = brackets $ s <> comma <> ppr e
-          u' | Unique <- u = star
-             | otherwise = empty
-  ppr (TupleArray et ds u) = u' <> foldl f (braces $ commasep $ map ppr et) ds
-    where f s Nothing = brackets s
-          f s (Just e) = brackets $ s <> comma <> ppr e
-          u' | Unique <- u = star
-             | otherwise = empty
+instance (Eq vn, Hashable vn, Pretty vn) =>
+         Pretty (TupleArrayElemTypeBase Rank as vn) where
+  ppr (BasicArrayElem bt _) = ppr bt
+  ppr (ArrayArrayElem at)   = ppr at
+  ppr (TupleArrayElem ts)   = braces $ commasep $ map ppr ts
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase as vn) where
+instance (Eq vn, Hashable vn, Pretty vn) =>
+         Pretty (ArrayTypeBase ShapeDecl as vn) where
+  ppr (BasicArray et (ShapeDecl ds) u _) =
+    ppr u <> foldl f (ppr et) ds
+    where f s AnyDim       = brackets s
+          f s (VarDim v)   = brackets $ s <> comma <> ppr v
+          f s (KnownDim v) = brackets $ s <> comma <> text "!" <> ppr v
+          f s (ConstDim n) = brackets $ s <> comma <> ppr n
+
+  ppr (TupleArray et (ShapeDecl ds) u) =
+    ppr u <> foldl f (braces $ commasep $ map ppr et) ds
+    where f s AnyDim       = brackets s
+          f s (VarDim v)   = brackets $ s <> comma <> ppr v
+          f s (KnownDim v) = brackets $ s <> comma <> text "!" <> ppr v
+          f s (ConstDim n) = brackets $ s <> comma <> ppr n
+
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ArrayTypeBase Rank as vn) where
+  ppr (BasicArray et (Rank n) u _) =
+    ppr u <> foldl (.) id (replicate n brackets) (ppr et)
+  ppr (TupleArray ts (Rank n) u) =
+    ppr u <> foldl (.) id (replicate n brackets)
+    (braces $ commasep $ map ppr ts)
+
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase ShapeDecl as vn) where
+  ppr (Basic et) = ppr et
+  ppr (Array at) = ppr at
+  ppr (Tuple ts) = braces $ commasep $ map ppr ts
+
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase Rank as vn) where
   ppr (Basic et) = ppr et
   ppr (Array at) = ppr at
   ppr (Tuple ts) = braces $ commasep $ map ppr ts
@@ -249,7 +277,7 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ProgBase ty vn) 
             apply (map ppParam args) <+>
             equals </> indent 2 (ppr body)
 
-ppParam :: (Eq vn, Hashable vn, Pretty (ty vn), Pretty vn, TypeBox ty) => IdentBase ty vn -> Doc
+ppParam :: (Eq vn, Hashable vn, Pretty (ty vn), Pretty vn) => IdentBase ty vn -> Doc
 ppParam param = ppr (identType param) <+> ppr param
 
 prettyBinOp :: (Eq vn, Hashable vn, Pretty vn, TypeBox ty) =>
@@ -299,7 +327,7 @@ ppValue :: Value -> String
 ppValue = render80
 
 -- | Prettyprint a type, wrapped to 80 characters.
-ppType :: (Eq vn, Hashable vn, Pretty vn) => TypeBase as vn -> String
+ppType :: Pretty (TypeBase shape as vn) => TypeBase shape as vn -> String
 ppType = render80
 
 -- | Prettyprint a unary operator, wrapped to 80 characters.

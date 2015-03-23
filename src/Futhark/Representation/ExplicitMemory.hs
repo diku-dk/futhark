@@ -122,6 +122,8 @@ instance Lore.Lore ExplicitMemory where
           isMergeParam ident =
             any ((==ident) . fparamIdent) mergevars
 
+  applyRetType _ = applyFunReturns
+
 data MemSummary = MemSummary Ident IxFun.IxFun
                 | Scalar
                 deriving (Show)
@@ -290,8 +292,8 @@ instance TypeCheck.Checkable ExplicitMemory where
   checkBodyLore = return
   checkFParamLore = checkMemSummary
   checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
-  basicFParam name t =
-    return $ AST.FParam (Ident name (AST.Basic t)) Scalar
+  basicFParam _ name t =
+    AST.FParam (Ident name (AST.Basic t)) Scalar
 
   matchPattern pat e = do
     rt <- expReturns varMemSummary e
@@ -696,6 +698,45 @@ boundInBindings (bnd:bnds) =
           [ (patElemName bindee, bindee)
           | bindee <- patternElements $ bindingPattern bnd
           ]
+
+applyFunReturns :: [FunReturns]
+                -> [FParam]
+                -> [SubExp]
+                -> Maybe [FunReturns]
+applyFunReturns rets params args
+  | Just _ <- applyExtType rettype (map fparamIdent params) args =
+    Just $ map correctDims rets
+  | otherwise =
+    Nothing
+  where rettype = ExtRetType $ map returnsToType rets
+        parammap :: HM.HashMap VName SubExp
+        parammap = HM.fromList $
+                   zip (map fparamName params) args
+
+        substSubExp (Var v)
+          | Just se <- HM.lookup (identName v) parammap = se
+        substSubExp se = se
+
+        correctDims (ReturnsScalar t) =
+          ReturnsScalar t
+        correctDims (ReturnsMemory se) =
+          ReturnsMemory $ substSubExp se
+        correctDims (ReturnsArray et shape u memsummary) =
+          ReturnsArray et (correctExtShape shape) u $
+          correctSummary memsummary
+
+        correctExtShape = ExtShape . map correctDim . extShapeDims
+        correctDim (Ext i)   = Ext i
+        correctDim (Free se) = Free $ substSubExp se
+
+        correctSummary (ReturnsNewBlock i) =
+          ReturnsNewBlock i
+        correctSummary (ReturnsInBlock mem ixfun) =
+          -- FIXME: we should also do a replacement in ixfun here.
+          ReturnsInBlock mem' ixfun
+          where mem' = case HM.lookup (identName mem) parammap of
+                  Just (Var v) -> v
+                  _            -> mem
 
 -- | The size of a basic type in bytes.
 basicSize :: BasicType -> Int

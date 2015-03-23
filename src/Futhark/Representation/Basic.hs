@@ -72,6 +72,9 @@ instance Lore.Lore Basic where
   loopResultContext _ res merge =
     loopShapeContext res $ map fparamIdent merge
 
+  applyRetType _ ret=
+    applyExtType ret . map fparamIdent
+
 type Prog = AST.Prog Basic
 type PrimOp = AST.PrimOp Basic
 type LoopOp = AST.LoopOp Basic
@@ -93,8 +96,8 @@ instance TypeCheck.Checkable Basic where
   checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
   matchPattern pat e =
     TypeCheck.matchExtPattern (patternElements pat) (expExtType e)
-  basicFParam name t =
-    return $ AST.FParam (Ident name (AST.Basic t)) ()
+  basicFParam _ name t =
+    AST.FParam (Ident name (AST.Basic t)) ()
   matchReturnType name (ExtRetType ts) =
     TypeCheck.matchExtReturnType name ts
 

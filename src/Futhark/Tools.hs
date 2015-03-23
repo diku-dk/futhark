@@ -323,7 +323,9 @@ nonuniqueParams params = runBinder'' $ forM params $ \param ->
 -- 'RetType', using a monadic action to create the necessary
 -- 'SubExp's.  You should call this function within some monad that
 -- allows you to collect the actions performed (say, 'Writer').
-instantiateShapes :: Monad m => m SubExp -> [TypeBase ExtShape]
+instantiateShapes :: Monad m =>
+                     (Int -> m SubExp)
+                  -> [TypeBase ExtShape]
                   -> m [TypeBase Shape]
 instantiateShapes f ts = evalStateT (mapM instantiate ts) HM.empty
   where instantiate t = do
@@ -333,7 +335,7 @@ instantiateShapes f ts = evalStateT (mapM instantiate ts) HM.empty
           m <- get
           case HM.lookup x m of
             Just se -> return se
-            Nothing -> do se <- lift f
+            Nothing -> do se <- lift $ f x
                           put $ HM.insert x se m
                           return se
         instantiate' (Free se) = return se
@@ -343,14 +345,14 @@ instantiateShapes' :: MonadFreshNames m =>
                    -> m ([TypeBase Shape], [Ident])
 instantiateShapes' ts =
   runWriterT $ instantiateShapes instantiate ts
-  where instantiate = do v <- lift $ newIdent "size" (Basic Int)
-                         tell [v]
-                         return $ Var v
+  where instantiate _ = do v <- lift $ newIdent "size" (Basic Int)
+                           tell [v]
+                           return $ Var v
 
 instantiateShapesFromIdentList :: [Ident] -> [ExtType] -> [Type]
 instantiateShapesFromIdentList idents ts =
   evalState (instantiateShapes instantiate ts) idents
-  where instantiate = do
+  where instantiate _ = do
           idents' <- get
           case idents' of
             [] -> fail "instantiateShapesFromIdentList: insufficiently sized context"
@@ -371,7 +373,7 @@ instantiateIdents names ts
   | let n = shapeContextSize ts,
     n + length ts == length names = do
     let (context, vals) = splitAt n names
-        nextShape = do
+        nextShape _ = do
           (context', remaining) <- get
           case remaining of []   -> lift Nothing
                             x:xs -> do let ident = Ident x (Basic Int)
