@@ -1,7 +1,8 @@
 Futhark
 ==========
 
-The Futhark Language.  See doc/futhark.tex for a language tutorial.
+The Futhark Language.  The [incomplete documentation is
+here](http://futhark.readthedocs.org).
 
 Installation
 ============
