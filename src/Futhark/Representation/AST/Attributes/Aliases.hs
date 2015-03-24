@@ -79,7 +79,8 @@ loopOpAliases (Scan _ f _) =
 loopOpAliases (Redomap _ outerfun _ _ _) =
   map (const mempty) $ lambdaReturnType outerfun
 loopOpAliases (Stream _ _ _ lam) =
-  map (const mempty) $ extLambdaReturnType lam -- COSMIN unsure if correct???
+  bodyAliases $ extLambdaBody lam
+  -- map (const mempty) $ extLambdaReturnType lam -- incorrect???
 loopOpAliases (ConcatMap {}) =
   [mempty]
 

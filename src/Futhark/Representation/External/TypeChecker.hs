@@ -33,7 +33,6 @@ import Futhark.Representation.External.Renamer
 import Futhark.FreshNames hiding (newID, newName)
 import qualified Futhark.FreshNames
 import Futhark.TypeCheck.TypeError
---import Debug.Trace
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.
 
@@ -488,23 +487,17 @@ checkFun (fname, rettype, params, body, loc) = do
              toStructural $ typeOf body'
 
   where checkParams = do
-          -- First find all normal parameters (checking for duplicates).
-          normal_params <- foldM checkNormParams HS.empty params
-          -- Then check shape annotations (where duplicates are OK, as
-          -- long as it's not a duplicate of a normal parameter.)
-          mapM_ (checkDimDecls normal_params) params
+          let all_params = HS.fromList $ map identName params
+          foldM_ (checkTypeDepParams all_params) HS.empty params
+          -- Cosmin modified this so it does not yield an error
+          --        when the result shape depends on funargs.
 
-        checkNormParams knownparams (Ident pname _ _)
-          | pname `HS.member` knownparams =
+        checkTypeDepParams allpars knownpars (Ident pname ptype _)
+          | pname `HS.member` knownpars =
             bad $ DupParamError fname (baseName pname) loc
-          | otherwise =
-            return $ HS.insert pname knownparams
-
-        checkDimDecls normal_params (Ident _ ptype _)
-          | Just name <- find (`HS.member` normal_params) boundDims =
+          | Just name <- find (`HS.member` HS.difference allpars knownpars) boundDims =
             bad $ DupParamError fname (baseName name) loc
-          | otherwise =
-            return ()
+          | otherwise = return $ HS.insert pname knownpars
           where boundDims = mapMaybe boundDim $ arrayDims ptype
                 boundDim (VarDim name) = Just name
                 boundDim _             = Nothing
@@ -808,7 +801,7 @@ checkExp (Redomap outerfun innerfun accexp arrexp pos) = do
              return $ Redomap outerfun' innerfun' accexp' arrexp' pos
          _ -> bad $ TypeError pos "Redomap with illegal reduce type."
 
-checkExp (Stream chunk i acc arr lam pos) = do
+checkExp (Stream chunk i acc arr lam@AnonymFun{} pos) = do
   let isArrayType arrtp =
         case arrtp of
           Array _ -> True
@@ -825,34 +818,68 @@ checkExp (Stream chunk i acc arr lam pos) = do
       case lam of
          AnonymFun ps bd t lpos -> return (ps,bd,t,lpos)
          _ -> bad $ TypeError pos "Stream with a curried fun (not implemented yet)."
+  -- make a fake lambda with `chunk' and `i' as parameters, THEN
+  -- (i) properly check the lambda on its parameter and
+  --(ii) make some fake arguments, which do not alias `arr', and
+  --     check that aliases of `arr' are not used inside lam.
   let fake_pars= Ident (identName chunk) (Basic Int) lp :
                  Ident (identName i    ) (Basic Int) lp : lam_ps
       fake_lam = AnonymFun fake_pars lam_bdy rtp lp
-  -- just get the dflow of lambda on the fakearg, which does not alias
-  -- arr, so we can later check that aliases of arr are not used inside lam.
+  fake_lam' <-   checkLambda fake_lam [intarg, intarg, accarg,  arrarg]
   let fakearg = (fromDecl $ addNames $ removeNames $ typeOf arr', mempty, srclocOf pos)
   (_, dflow)<- collectDataflow $
                  checkLambda fake_lam [intarg, intarg, accarg, fakearg]
-  -- properly check lambda
-  fake_lam' <-   checkLambda fake_lam [intarg, intarg, accarg,  arrarg]
-  let (AnonymFun (chunk':(i':lam_pars')) lam_body' rtp' lpos') = fake_lam'
-  let lam' = AnonymFun lam_pars' lam_body' rtp' lpos'
-  -- check that the result type of lambda matches the accumulator part
-  _ <- case rtp' of
-        Tuple [res_acc_tp, res_arr_tp] ->
-            -- do we need ?removeShapeAnnotations res_acc_tp?
-            unless ( isArrayType res_arr_tp &&
-                     typeOf acc' `subtypeOf` removeShapeAnnotations res_acc_tp ) $
-              bad $ TypeError pos ("Stream with accumulator-type missmatch"++
-                                   "or result arrays of non-array type.")
-        _ ->unless (typeOf acc' `subtypeOf` removeShapeAnnotations rtp') $
-              bad $ TypeError pos "Stream with accumulator-type missmatch."
-  -- check that arr's aliases are not used inside the lambda!
   let arr_aliasses = HS.toList $ aliases $ typeOf arr'
   let usages = usageMap $ usageOccurences dflow
   when (any (`HM.member` usages) arr_aliasses) $
      bad $ TypeError pos "Stream with input array used inside lambda."
+  -- check that the result type of lambda matches the accumulator part
+  let (AnonymFun (chunk':(i':lam_pars')) lam_body' rtp' lpos') = fake_lam'
+  let lam' = AnonymFun lam_pars' lam_body' rtp' lpos'
+  _ <- case rtp' of
+        Tuple res_tps ->
+            unless (typeOf acc' `subtypeOf` removeShapeAnnotations (head res_tps)) $
+              bad $ TypeError pos ("Stream with accumulator-type missmatch"++
+                                   "or result arrays of non-array type.")
+        _ ->unless (typeOf acc' `subtypeOf` removeShapeAnnotations rtp') $
+              bad $ TypeError pos "Stream with accumulator-type missmatch."
+  -- check outerdim of Lambda's streamed-in array params are NOT specified,
+  -- and that return type inner dimens are all specified but not as other
+  -- lambda parameters!
+  let chunk_str = textual $ identName chunk
+  let [_, lam_arr_tp] = map identType lam_ps
+  let outer_dims = arrayDims lam_arr_tp
+  _ <- case head outer_dims of
+        KnownDim nm -> unless (nm == identName chunk) $
+                        bad $ TypeError pos ("Stream: outer dimension of stream should NOT"++
+                                             " be specified since it is "++chunk_str++"by default.")
+        AnyDim      -> return ()
+        VarDim   _  -> return ()
+        ConstDim _  ->  bad $ TypeError pos ("Stream: outer dimension of stream should NOT"++
+                                             " be specified since it is "++chunk_str++"by default.")
+  _ <- case rtp of
+        Tuple res_tps -> do
+            let res_arr_tps = tail res_tps
+            if all isArrayType res_arr_tps
+            then do let lam_params = HS.fromList $ identName chunk : identName i : map identName lam_ps
+                        arr_iner_dims = concatMap (tail . arrayDims) res_arr_tps
+                        boundDim (KnownDim name) = return $ Just name
+                        boundDim (ConstDim _   ) = return Nothing
+                        boundDim _             =
+                            bad $ TypeError pos $ "Stream's lambda: inner dimensions of the"++
+                                                  " streamed-out arrays MUST be specified!"
+                    rtp_iner_syms <- catMaybes <$> mapM boundDim arr_iner_dims
+                    case find (`HS.member` lam_params) rtp_iner_syms of
+                      Just name -> bad $ TypeError pos $
+                                          "Stream's lambda: " ++ textual (baseName name) ++
+                                          " cannot specify an inner result shape"
+                      _ -> return ()
+            else bad $ TypeError pos "Stream with result arrays of non-array type."
+        _ -> return ()-- means that no array is streamed out!
+  -- finally return type-checked stream!
   return $ Stream (fromParam chunk') (fromParam i') acc' arr' lam' pos
+checkExp (Stream _ _ _ _ _ pos) =
+  bad $ TypeError pos "Stream with lambda NOT an anonymous function!!!!"
 
 checkExp (Split splitexps arrexp pos) = do
   splitexps' <- mapM (require [Basic Int] <=< checkExp) splitexps

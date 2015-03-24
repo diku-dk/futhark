@@ -26,6 +26,9 @@ import Futhark.Internalise.Bindings
 
 import Prelude hiding (mapM)
 
+import Futhark.Representation.AST.Pretty
+import Debug.Trace
+
 ensureLambda :: E.Lambda -> InternaliseM ([E.Parameter], E.Exp, E.DeclType)
 ensureLambda (E.AnonymFun params body rettype _) =
   return (params, body, rettype)
@@ -257,8 +260,9 @@ internaliseStreamLambda :: (E.Exp -> InternaliseM Body)
                         -> InternaliseM I.ExtLambda
 internaliseStreamLambda internaliseBody lam accs arrtypes = do
   let acctypes = map I.subExpType accs
-  (params, body, rettype) <- internaliseLambda internaliseBody lam $
+  (params, body, rettype0) <- internaliseLambda internaliseBody lam $
                              acctypes++arrtypes
+  rettype <- trace ("LALA: "++pretty rettype0) $ return rettype0
   -- split rettype into (i) accummulator types && (ii) result-array-elem types
   let acc_len = length acctypes
       lam_acc_tps = take acc_len rettype

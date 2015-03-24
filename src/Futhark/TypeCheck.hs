@@ -836,6 +836,18 @@ checkLoopOp (Stream ass accexps arrexps lam) = do
   let lamrtp = take (length accexps) $ extLambdaReturnType lam
   unless (all (uncurry (==)) $ zip lamrtp (staticShapes $ map (\(y,_,_)->y) accargs)) $
     bad $ TypeError noLoc "Stream with inconsistent accumulator type in lambda."
+  -- just get the dflow of lambda on the fakearg, which does not alias
+  -- arr, so we can later check that aliases of arr are not used inside lam.
+  -- let fakearg = (fromDecl $ addNames $ removeNames $ typeOf arr', mempty, srclocOf pos)
+  let fake_lamarrs' = map asArg lamarrs'
+  (_,dflow) <- collectDataflow $
+                checkExtLambda lam $ asArg inttp : asArg inttp :
+                                     accargs ++ fake_lamarrs'
+  arr_aliases <- mapM (lookupAliases . identName) arrexps
+  let aliased_syms = HS.toList $ HS.fromList $ concatMap HS.toList arr_aliases
+  let usages = usageMap $ usageOccurences dflow
+  when (any (`HM.member` usages) aliased_syms) $
+     bad $ TypeError noLoc "Stream with input array used inside lambda."
 
 checkExp :: Checkable lore =>
             Exp lore -> TypeM lore ()
