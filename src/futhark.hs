@@ -1,38 +1,19 @@
 -- | Futhark Compiler Driver
 module Main (main) where
 
-import Control.Monad
-import Control.Monad.Except
 import Data.Version
 import System.Console.GetOpt
-import System.Environment (getArgs, getProgName)
-import System.Exit (exitWith, exitSuccess, ExitCode(..))
-import System.IO
+import System.Exit (exitSuccess)
 
-import Language.Futhark.Parser
-import Futhark.Internalise
-import Futhark.Pipeline
 import Futhark.Passes
 import Futhark.Actions
-
-import qualified Futhark.Representation.External as E
-import qualified Futhark.Representation.External.TypeChecker as E
-import qualified Futhark.Representation.External.Renamer as E
-
-import qualified Futhark.Representation.Basic as I
-import qualified Futhark.TypeCheck as I
+import Futhark.Compiler
+import Futhark.Util.Options
+import Futhark.Pipeline
 
 import Futhark.Version
 
-newFutharkConfig :: FutharkConfig
-newFutharkConfig = FutharkConfig { futharkpipeline = []
-                                 , futharkaction = printAction
-                                 , futharkcheckAliases = True
-                                 , futharkverbose = Nothing
-                                 , futharkboundsCheck = True
-                                 }
-
-type FutharkOption = OptDescr (Either (IO ()) (FutharkConfig -> FutharkConfig))
+type FutharkOption = FunOptDescr FutharkConfig
 
 passoption :: String -> Pass -> String -> [String] -> FutharkOption
 passoption desc pass short long =
@@ -102,12 +83,6 @@ commandLineOptions =
     "Use the recommended optimised pipeline."
   ]
 
-interpretAction' :: Action
-interpretAction' = interpretAction parseValues'
-  where parseValues' :: FilePath -> String -> Either ParseError [I.Value]
-        parseValues' path s =
-          liftM (concatMap internaliseValue) $ parseValues path s
-
 standardPipeline :: [Pass]
 standardPipeline =
   [ uttransform
@@ -124,99 +99,6 @@ standardPipeline =
 -- | Entry point.  Non-interactive, except when reading interpreter
 -- input from standard input.
 main :: IO ()
-main = do args <- getArgs
-          case getOpt' RequireOrder commandLineOptions args of
-            (opts, nonopts, [], []) ->
-              case applyOpts opts of
-                Right conf | [file] <- nonopts -> compiler conf file
-                           | otherwise         -> invalid nonopts [] []
-                Left m     -> m
-            (_, nonopts, unrecs, errs) -> invalid nonopts unrecs errs
-
-  where applyOpts :: [Either (IO ()) (FutharkConfig -> FutharkConfig)]
-                  -> Either (IO ()) FutharkConfig
-        applyOpts opts = do fs <- sequence opts
-                            return $ foldl (.) id fs newFutharkConfig
-
-        invalid nonopts unrecs errs = do usage <- usageStr commandLineOptions
-                                         badOptions usage nonopts errs unrecs
-
-usageStr :: [OptDescr a] -> IO String
-usageStr opts = do
-  prog <- getProgName
-  let header = "Help for " ++ prog ++ " (Futhark " ++ showVersion version ++ ")"
-  return $ usageInfo header opts
-
-badOptions :: String -> [String] -> [String] -> [String] -> IO ()
-badOptions usage nonopts errs unrecs = do
-  mapM_ (errput . ("Junk argument: " ++)) nonopts
-  mapM_ (errput . ("Unrecognised argument: " ++)) unrecs
-  hPutStr stderr $ concat errs ++ usage
-  exitWith $ ExitFailure 1
-
--- | Short-hand for 'liftIO . hPutStrLn stderr'
-errput :: MonadIO m => String -> m ()
-errput = liftIO . hPutStrLn stderr
-
-compiler :: FutharkConfig -> FilePath -> IO ()
-compiler config file = do
-  contents <- readFile file
-  (msgs, res) <- futharkc config file contents
-  hPutStr stderr msgs
-  case res of
-    Left err -> do
-      hPutStrLn stderr $ errorDesc err
-      case (errorState err, futharkverbose config) of
-        (Just s, Just outfile) ->
-          maybe (hPutStr stderr) writeFile outfile $
-            I.pretty s ++ "\n"
-        _ -> return ()
-      exitWith $ ExitFailure 2
-    Right s -> do
-      let action = futharkaction config
-      when (verbose config) $
-        hPutStrLn stderr $ "Running " ++ actionDescription action ++ "."
-      applyAction action s
-
-typeCheck :: (prog -> Either err prog')
-          -> (prog -> Either err prog')
-          -> FutharkConfig
-          -> prog -> Either err prog'
-typeCheck checkProg checkProgNoUniqueness config
-  | futharkcheckAliases config = checkProg
-  | otherwise                  = checkProgNoUniqueness
-
-futharkc :: FutharkConfig -> FilePath -> String
-         -> IO (String, Either CompileError PipelineState)
-futharkc config filename srccode = do
-  res <- runFutharkM futharkc'
-  case res of (Left err, msgs)  -> return (msgs, Left err)
-              (Right prog, msgs) -> return (msgs, Right prog)
-  where futharkc' = do
-          parsed_prog <- parseSourceProgram filename srccode
-          ext_prog    <- typeCheckSourceProgram config parsed_prog
-          let int_prog = internaliseProg (futharkboundsCheck config) $ E.tagProg ext_prog
-          typeCheckInternalProgram config int_prog
-          runPasses config $ Basic int_prog
-
-parseSourceProgram :: FilePath -> String
-                   -> FutharkM E.UncheckedProg
-parseSourceProgram filename file_contents =
-  case parseFuthark filename file_contents of
-    Left err   -> compileError (show err) Nothing
-    Right prog -> return prog
-
-typeCheckSourceProgram :: FutharkConfig
-                       -> E.UncheckedProg
-                       -> FutharkM (E.ProgBase E.CompTypeBase I.Name)
-typeCheckSourceProgram config prog =
-  case typeCheck E.checkProg E.checkProgNoUniqueness config prog of
-    Left err    -> compileError (show err) Nothing
-    Right prog' -> return prog'
-
-typeCheckInternalProgram :: FutharkConfig -> I.Prog -> FutharkM ()
-typeCheckInternalProgram config prog =
-  case typeCheck I.checkProg I.checkProgNoUniqueness config prog of
-    Left err -> compileError ("After internalisation:\n" ++ show err) $
-                Just $ Basic prog
-    Right () -> return ()
+main = mainWithOptions newFutharkConfig commandLineOptions compile
+  where compile [file] config = Just $ runCompilerOnProgram config file
+        compile _      _      = Nothing
