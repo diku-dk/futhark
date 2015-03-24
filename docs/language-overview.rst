@@ -130,7 +130,8 @@ Grammar of First-Order Fragment
    p : "{" `p` "," ...  "," `p` "}"
 
 .. productionlist::
-   op : "+" | "-" | "*" | "/" | ">>" | "<<" | "%"  | "pow" | "==" | "<" | ">" | ">=" | "&&" | "||" "&" | "|"
+   op : "+" | "-" | "*" | "/" | ">>" | "<<" | "%"  | "pow"
+      : "==" | "<" | ">" | ">=" | "&&" | "||" "&" | "|"
 
 .. productionlist::
    e : `v`
@@ -313,6 +314,7 @@ advantage of.
 
 .. productionlist::
    e : "map" "(" `lambda` "," `e` ")"
+   e : "zipWith" "(" `lambda` "," `e` "," ... "," `e` ")"
    e : "filter" "(" `lambda` "," `e` ")"
    e : "partition" "(" `lambda` "," ... `lambda` "," `e` ")"
    e : "reduce" "(" `lambda` "," `e` "," `e` ")"
@@ -326,9 +328,9 @@ curried):
    lambda : "fn" `rettype` (`param`...) "=>" `e`
    lambda : `fname`
    lambda : `fname` (`e`, ..., `e`)
-   lambda : ⊙ `e`
-   lambda : `e` ⊙
-   lambda : ⊙
+   lambda : `op` `e`
+   lambda : `e` `op`
+   lambda : `op`
 
 The semantics of the SOACs is identical to the similarly-named
 higher-order functions found in many functional languages.  For

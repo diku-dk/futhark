@@ -22,7 +22,7 @@ writing of benchmark programs.
 Contents:
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
 
    language-overview.rst
    uniqueness-types.rst
