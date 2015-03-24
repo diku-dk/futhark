@@ -25,9 +25,6 @@ import Futhark.Internalise.AccurateSizes
 
 import Prelude hiding (mapM)
 
-import Futhark.Representation.AST.Pretty
-import Debug.Trace
-
 -- | A function for internalising lambdas.
 type InternaliseLambda =
   E.Lambda -> Maybe [I.Type] -> InternaliseM ([I.Param], I.Body, [I.ExtType])
@@ -163,9 +160,8 @@ internaliseStreamLambda :: InternaliseLambda
                         -> InternaliseM I.ExtLambda
 internaliseStreamLambda internaliseLambda lam accs arrtypes = do
   let acctypes = map I.subExpType accs
-  (params, body, rettype0) <- internaliseLambda lam $ Just $
+  (params, body, rettype) <- internaliseLambda lam $ Just $
                              acctypes++arrtypes
-  rettype <- trace ("LALA: "++pretty rettype0) $ return rettype0
   -- split rettype into (i) accummulator types && (ii) result-array-elem types
   let acc_len = length acctypes
       lam_acc_tps = take acc_len rettype
@@ -188,10 +184,29 @@ internaliseStreamLambda internaliseLambda lam accs arrtypes = do
   let acctype' = [ t `I.setArrayShape` arrayShape shape
                    | (t,shape) <- zip lam_acc_tps acctypes ]
   body' <- insertBindingsM $ do
+                let mkArrType :: (I.Ident, I.ExtType) -> I.Type
+                    mkArrType (x, rtpx) =
+                      let dsx    = (I.shapeDims . I.arrayShape . I.identType) x
+                          dsrtpx = (I.extShapeDims . I.arrayShape) rtpx
+                          resdims= zipWith (\ dx drtpx ->
+                                                  case drtpx of
+                                                    Ext  _ -> dx
+                                                    Free s -> s
+                                           ) dsx dsrtpx
+                      in  case rtpx of
+                            I.Array btp _ u -> I.Array btp (I.Shape resdims) u
+                            I.Basic btp     -> I.Basic btp
+                            I.Mem   se      -> I.Mem   se
                 lamres <- bodyBind body
-                reses1 <- zipWithM assertProperShape acctype' (take acc_len lamres)
-                let reses = reses1 ++ drop acc_len lamres
-                return $ resultBody reses
+                let (lamacc_res, lamarr_res) = (take acc_len lamres, drop acc_len lamres)
+                    lamarr_idtps = concatMap (\(y,tp) -> case y of
+                                                           I.Var ii -> [(ii,tp)]
+                                                           _        -> []
+                                             ) (zip lamarr_res lam_arr_tps)
+                    arrtype' = map mkArrType lamarr_idtps
+                reses1 <- zipWithM assertProperShape acctype' lamacc_res
+                reses2 <- zipWithM assertProperShape arrtype' lamarr_res
+                return $ resultBody $ reses1 ++ reses2
   return $ I.ExtLambda params body' $
             staticShapes acctypes ++ lam_arr_tps
 

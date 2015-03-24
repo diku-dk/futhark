@@ -487,20 +487,26 @@ checkFun (fname, rettype, params, body, loc) = do
              toStructural $ typeOf body'
 
   where checkParams = do
-          let all_params = HS.fromList $ map identName params
-          foldM_ (checkTypeDepParams all_params) HS.empty params
-          -- Cosmin modified this so it does not yield an error
-          --        when the result shape depends on funargs.
+          -- First find all normal parameters (checking for duplicates).
+          normal_params <- foldM checkNormParams HS.empty params
+          -- Then check shape annotations (where duplicates are OK, as
+          -- long as it's not a duplicate of a normal parameter.)
+          mapM_ (checkDimDecls normal_params) params
 
-        checkTypeDepParams allpars knownpars (Ident pname ptype _)
-          | pname `HS.member` knownpars =
+        checkNormParams knownparams (Ident pname _ _)
+          | pname `HS.member` knownparams =
             bad $ DupParamError fname (baseName pname) loc
-          | Just name <- find (`HS.member` HS.difference allpars knownpars) boundDims =
+          | otherwise =
+            return $ HS.insert pname knownparams
+
+        checkDimDecls normal_params (Ident _ ptype _)
+          | Just name <- find (`HS.member` normal_params) boundDims =
             bad $ DupParamError fname (baseName name) loc
-          | otherwise = return $ HS.insert pname knownpars
+          | otherwise =
+            return ()
           where boundDims = mapMaybe boundDim $ arrayDims ptype
                 boundDim (NamedDim name) = Just name
-                boundDim _             = Nothing
+                boundDim _ = Nothing
 
         notAliasingParam names =
           forM_ params $ \p ->
