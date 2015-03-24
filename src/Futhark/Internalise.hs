@@ -367,7 +367,7 @@ internaliseExp desc (E.Concat x ys loc) = do
 internaliseExp desc (E.Map lam arr _) = do
   arrs <- internaliseExpToIdents "map_arr" arr
   lam' <- withNonuniqueReplacements $
-          internaliseMapLambda internaliseBody lam $ map I.Var arrs
+          internaliseMapLambda internaliseLambda lam $ map I.Var arrs
   letTupExp' desc $ I.LoopOp $ I.Map [] lam' arrs
 
 internaliseExp desc (E.Reduce lam ne arr loc) = do
@@ -377,7 +377,7 @@ internaliseExp desc (E.Reduce lam ne arr loc) = do
     ensureShape loc (I.stripArray 1 $ I.identType arr')
       "scan_ne_right_shape" ne'
   lam' <- withNonuniqueReplacements $
-          internaliseFoldLambda internaliseBody lam
+          internaliseFoldLambda internaliseLambda lam
           (map I.subExpType nes') (map I.identType arrs)
   let input = zip nes' arrs
   letTupExp' desc $ I.LoopOp $ I.Reduce [] lam' input
@@ -389,7 +389,7 @@ internaliseExp desc (E.Scan lam ne arr loc) = do
     ensureShape loc (I.stripArray 1 $ I.identType arr')
       "scan_ne_right_shape" ne'
   lam' <- withNonuniqueReplacements $
-          internaliseFoldLambda internaliseBody lam
+          internaliseFoldLambda internaliseLambda lam
           (map I.subExpType nes') (map I.identType arrs)
   let input = zip nes' arrs
   letTupExp' desc $ I.LoopOp $ I.Scan [] lam' input
@@ -397,7 +397,7 @@ internaliseExp desc (E.Scan lam ne arr loc) = do
 internaliseExp desc (E.Filter lam arr _) = do
   arrs <- internaliseExpToIdents "filter_input" arr
   lam' <- withNonuniqueReplacements $
-           internalisePartitionLambdas internaliseBody [lam] $ map I.Var arrs
+           internalisePartitionLambdas internaliseLambda [lam] $ map I.Var arrs
   flags <- letExp "filter_partition_flags" $ I.LoopOp $ I.Map [] lam' arrs
   forM arrs $ \arr' -> do
     filter_size <- newIdent "filter_size" $ I.Basic Int
@@ -410,7 +410,7 @@ internaliseExp desc (E.Filter lam arr _) = do
 internaliseExp desc (E.Partition lams arr _) = do
   arrs <- internaliseExpToIdents "partition_input" arr
   lam' <- withNonuniqueReplacements $
-           internalisePartitionLambdas internaliseBody lams $ map I.Var arrs
+           internalisePartitionLambdas internaliseLambda lams $ map I.Var arrs
   flags <- letExp "partition_partition_flags" $ I.LoopOp $ I.Map [] lam' arrs
   liftM (map I.Var . concat . transpose) $ forM arrs $ \arr' -> do
     partition_sizes <- replicateM n $ newIdent "partition_size" $ I.Basic Int
@@ -429,10 +429,10 @@ internaliseExp desc (E.Redomap lam1 lam2 ne arrs _) = do
   let acc_arr_tps = [ I.arrayOf t (Shape [outersize]) (I.uniqueness t)
                         | t <- acc_tps ]
   lam1' <- withNonuniqueReplacements $
-           internaliseFoldLambda internaliseBody lam1
+           internaliseFoldLambda internaliseLambda lam1
            (map I.subExpType nes) acc_arr_tps
   lam2' <- withNonuniqueReplacements $
-           internaliseRedomapInnerLambda internaliseBody lam2
+           internaliseRedomapInnerLambda internaliseLambda lam2
            nes (map I.Var arrs')
   letTupExp' desc $ I.LoopOp $
     I.Redomap [] lam1' lam2' nes arrs'
@@ -450,7 +450,7 @@ internaliseExp desc (E.Stream chunk i acc arr lam _) = do
                                          ) arrs'
                             ]
             lam'' <- withNonuniqueReplacements $
-                        internaliseStreamLambda internaliseBody lam
+                        internaliseStreamLambda internaliseLambda lam
                         accs' lam_arrs'
             return (lam'', chunk'', i'')
   let params' = extLambdaParams lam'
@@ -462,7 +462,7 @@ internaliseExp desc (E.ConcatMap lam arr arrs _) = do
   arr' <- internaliseExpToIdents "concatMap_arr" arr
   arrs' <- mapM (internaliseExpToIdents "concatMap_arr") arrs
   lam' <- withNonuniqueReplacements $
-          internaliseConcatMapLambda internaliseBody lam $ map I.Var arr'
+          internaliseConcatMapLambda internaliseLambda lam
   letTupExp' desc $ I.LoopOp $ I.ConcatMap [] lam' $ arr':arrs'
 
 
@@ -570,6 +570,131 @@ simpleBinOp :: String
             -> InternaliseM [I.SubExp]
 simpleBinOp desc bop x y t =
   letTupExp' desc $ I.PrimOp $ I.BinOp bop x y t
+
+internaliseLambda :: InternaliseLambda
+
+internaliseLambda (E.AnonymFun params body rettype _) (Just rowtypes) = do
+  (body', params') <- bindingLambdaParams params rowtypes $
+                      internaliseBody body
+  (rettype', _) <- internaliseDeclType rettype
+  return (params', body', rettype')
+
+internaliseLambda (E.AnonymFun params body rettype _) Nothing = do
+  (body', params', rettype') <- bindingParams params $ \shapeparams valparams -> do
+    body' <- internaliseBody body
+    (rettype', _) <- internaliseDeclType rettype
+    return (body', shapeparams ++ valparams, rettype')
+  return (params', body', rettype')
+
+internaliseLambda (E.CurryFun fname curargs _ _) (Just rowtypes) = do
+  fun_entry <- lookupFunction fname
+  let (shapes, paramts, int_rettype_fun) = internalFun fun_entry
+  curargs' <- concat <$> mapM (internaliseExp "curried") curargs
+  params <- mapM (newIdent "not_curried") rowtypes
+  let valargs = curargs' ++ map I.Var params
+      diets = map I.diet paramts
+      shapeargs = argShapes shapes paramts valargs
+      allargs = zip shapeargs (repeat I.Observe) ++
+                zip valargs diets
+  case int_rettype_fun $ shapeargs ++ valargs of
+    Nothing ->
+      fail $ "Cannot apply " ++ pretty fname ++ " to arguments " ++
+      pretty (shapeargs ++ valargs)
+    Just (ExtRetType ts) -> do
+      funbody <- insertBindingsM $ do
+        res <- letTupExp "curried_fun_result" $
+               I.Apply fname allargs $ ExtRetType ts
+        resultBodyM $ map I.Var res
+      return (params, funbody, ts)
+
+internaliseLambda (E.CurryFun fname curargs _ _) Nothing = do
+  fun_entry <- lookupFunction fname
+  let (shapes, paramts, int_rettype_fun) = internalFun fun_entry
+      (_, ext_param_ts)                  = externalFun fun_entry
+  curargs' <- concat <$> mapM (internaliseExp "curried") curargs
+  ext_params <- forM ext_param_ts $ \param_t -> do
+    name <- newVName "not_curried"
+    return E.Ident { E.identName = name
+                   , E.identType = param_t
+                   , E.identSrcLoc = noLoc
+                   }
+  bindingParams ext_params $ \shape_params value_params -> do
+    let params = shape_params ++ value_params
+        valargs = curargs' ++ map I.Var value_params
+        diets = map I.diet paramts
+        shapeargs = argShapes shapes paramts valargs
+        allargs = zip shapeargs (repeat I.Observe) ++
+                  zip valargs diets
+    case int_rettype_fun $ shapeargs ++ valargs of
+      Nothing ->
+        fail $ "Cannot apply " ++ pretty fname ++ " to arguments " ++
+        pretty (shapeargs ++ valargs)
+      Just (ExtRetType ts) -> do
+        funbody <- insertBindingsM $ do
+          res <- letTupExp "curried_fun_result" $
+                 I.Apply fname allargs $ ExtRetType ts
+          resultBodyM $ map I.Var res
+        return (params, funbody, ts)
+
+internaliseLambda (E.UnOpFun unop t loc) rowts = do
+  (params, body, rettype) <- unOpFunToLambda unop t
+  internaliseLambda (E.AnonymFun params body rettype loc) rowts
+
+internaliseLambda (E.BinOpFun unop t loc) rowts = do
+  (params, body, rettype) <- binOpFunToLambda unop t
+  internaliseLambda (AnonymFun params body rettype loc) rowts
+
+internaliseLambda (E.CurryBinOpLeft binop e t loc) rowts = do
+  (params, body, rettype) <- binOpCurriedToLambda binop t e $ uncurry $ flip (,)
+  internaliseLambda (AnonymFun params body rettype loc) rowts
+
+internaliseLambda (E.CurryBinOpRight binop e t loc) rowts = do
+  (params, body, rettype) <- binOpCurriedToLambda binop t e id
+  internaliseLambda (AnonymFun params body rettype loc) rowts
+
+unOpFunToLambda :: E.UnOp -> E.Type
+                -> InternaliseM ([E.Parameter], E.Exp, E.DeclType)
+unOpFunToLambda op t = do
+  paramname <- newNameFromString "unop_param"
+  let param = E.Ident { E.identType = t
+                      , E.identSrcLoc = noLoc
+                      , E.identName = paramname
+                      }
+  return ([toParam param],
+          E.UnOp op (E.Var param) noLoc,
+          E.vacuousShapeAnnotations $ E.toDecl t)
+
+binOpFunToLambda :: E.BinOp -> E.Type
+                 -> InternaliseM ([E.Parameter], E.Exp, E.DeclType)
+binOpFunToLambda op t = do
+  x_name <- newNameFromString "binop_param_x"
+  y_name <- newNameFromString "binop_param_y"
+  let param_x = E.Ident { E.identType = t
+                        , E.identSrcLoc = noLoc
+                        , E.identName = x_name
+                        }
+      param_y = E.Ident { E.identType = t
+                        , E.identSrcLoc = noLoc
+                        , E.identName = y_name
+                        }
+  return ([toParam param_x, toParam param_y],
+          E.BinOp op (E.Var param_x) (E.Var param_y) t noLoc,
+          E.vacuousShapeAnnotations $ E.toDecl t)
+
+binOpCurriedToLambda :: E.BinOp -> E.Type
+                     -> E.Exp
+                     -> ((E.Exp,E.Exp) -> (E.Exp,E.Exp))
+                     -> InternaliseM ([E.Parameter], E.Exp, E.DeclType)
+binOpCurriedToLambda op t e swap = do
+  paramname <- newNameFromString "binop_param_noncurried"
+  let param = E.Ident { E.identType = t
+                      , E.identSrcLoc = noLoc
+                      , E.identName = paramname
+                        }
+      (x', y') = swap (E.Var param, e)
+  return ([toParam param],
+          E.BinOp op x' y' t noLoc,
+          E.vacuousShapeAnnotations $ E.toDecl t)
 
 boundsChecks :: SrcLoc -> [I.Ident] -> [I.SubExp] -> InternaliseM I.Certificates
 boundsChecks _ []    _  = return []

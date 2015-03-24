@@ -72,7 +72,7 @@ instance Lore.Lore Basic where
   loopResultContext _ res merge =
     loopShapeContext res $ map fparamIdent merge
 
-  applyRetType _ ret=
+  applyRetType _ ret =
     applyExtType ret . map fparamIdent
 
 type Prog = AST.Prog Basic
