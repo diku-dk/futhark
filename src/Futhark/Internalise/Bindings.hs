@@ -2,6 +2,7 @@ module Futhark.Internalise.Bindings
   (
   -- * Internalising bindings
     bindingParams
+  , bindingLambdaParams
 
   , flattenPattern
   , bindingTupIdent
@@ -122,6 +123,14 @@ bindingTupIdent pat ts m = do
   (ts',shapes) <- I.instantiateShapes' ts
   let addShapeBindings pat'' = m $ I.basicPattern' $ shapes ++ pat''
   bindingFlatPattern pat' ts' addShapeBindings
+
+bindingLambdaParams :: [E.Parameter] -> [I.Type]
+                    -> InternaliseM I.Body
+                    -> InternaliseM (I.Body, [I.Param])
+bindingLambdaParams params ts m =
+  bindingFlatPattern (map E.fromParam params) ts $ \params' -> do
+    body <- m
+    return (body, params')
 
 makeShapeIdentsFromContext :: MonadFreshNames m =>
                               HM.HashMap VName Int

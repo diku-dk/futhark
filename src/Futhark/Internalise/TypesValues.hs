@@ -90,7 +90,7 @@ internaliseDeclType' (E.Array at) =
           Ext <$> newId
         internaliseDim (ConstDim n) =
           return $ Free $ Constant $ IntVal n
-        internaliseDim (VarDim name) =
+        internaliseDim (NamedDim name) =
           Ext <$> knownOrNewId name
         internaliseDim (KnownDim name) = do
           subst <- asks $ HM.lookup name . envSubsts

@@ -321,7 +321,7 @@ bindingParams params m =
               return Nothing -- Fine.
             _ ->
               bad $ DimensionNotInteger loc (baseName name)
-        inspectDim loc (VarDim name) =
+        inspectDim loc (NamedDim name) =
           return $ Just $ Ident name (Basic Int) loc
 
 lookupVar :: VarName vn => ID vn -> SrcLoc -> TypeM vn (TaggedType vn)
@@ -499,7 +499,7 @@ checkFun (fname, rettype, params, body, loc) = do
             bad $ DupParamError fname (baseName name) loc
           | otherwise = return $ HS.insert pname knownpars
           where boundDims = mapMaybe boundDim $ arrayDims ptype
-                boundDim (VarDim name) = Just name
+                boundDim (NamedDim name) = Just name
                 boundDim _             = Nothing
 
         notAliasingParam names =
@@ -854,7 +854,7 @@ checkExp (Stream chunk i acc arr lam@AnonymFun{} pos) = do
                         bad $ TypeError pos ("Stream: outer dimension of stream should NOT"++
                                              " be specified since it is "++chunk_str++"by default.")
         AnyDim      -> return ()
-        VarDim   _  -> return ()
+        NamedDim _  -> return ()
         ConstDim _  ->  bad $ TypeError pos ("Stream: outer dimension of stream should NOT"++
                                              " be specified since it is "++chunk_str++"by default.")
   _ <- case rtp of
@@ -1365,5 +1365,5 @@ checkDim loc (KnownDim name) = do
   case t of
     Basic Int -> return ()
     _         -> bad $ DimensionNotInteger loc $ baseName name
-checkDim _ (VarDim _) =
+checkDim _ (NamedDim _) =
   return ()

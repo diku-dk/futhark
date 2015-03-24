@@ -202,7 +202,7 @@ bindParams params =
           Nothing
         inspectDim (ConstDim _) =
           Nothing
-        inspectDim (VarDim name) =
+        inspectDim (NamedDim name) =
           Just name
         inspectDim (KnownDim _) =
           Nothing
@@ -273,7 +273,7 @@ renameDeclType = renameTypeGeneric
                  (liftM ShapeDecl . mapM renameDim . shapeDims)
                  (const $ return NoInfo)
   where renameDim AnyDim       = return AnyDim
-        renameDim (VarDim v)   = VarDim <$> replName v
+        renameDim (NamedDim v)   = NamedDim <$> replName v
         renameDim (KnownDim v) = KnownDim <$> replName v
         renameDim (ConstDim n) = return $ ConstDim n
 
