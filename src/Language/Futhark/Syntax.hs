@@ -74,10 +74,16 @@ class (Eq shape, Ord shape, Monoid shape) => ArrayShape shape where
   stripDims :: Int -> shape -> Maybe shape
 
 -- | Declaration of a dimension size.
-data DimDecl vn = VarDim vn
+data DimDecl vn = NamedDim vn
+                  -- ^ Bind the size of the dimension to
+                  -- this name.
                 | KnownDim vn
+                  -- ^ The size of the dimension is the value of a
+                  -- variable already in scope.
                 | ConstDim Int
+                  -- ^ The size is a constant.
                 | AnyDim
+                  -- ^ No dimension declaration.
                 deriving (Eq, Ord, Show)
 
 -- | The size of an array type is a list of its dimension sizes.  If

@@ -209,7 +209,7 @@ Type :: { UncheckedType }
 DimDecl :: { DimDecl Name }
         : ',' id
           { let L _ (ID name) = $2
-            in VarDim name }
+            in NamedDim name }
         | ',' '!' id
           { let L _ (ID name) = $3
             in KnownDim name }

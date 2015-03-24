@@ -322,7 +322,7 @@ bindingParams params m =
               return Nothing -- Fine.
             _ ->
               bad $ DimensionNotInteger loc (baseName name)
-        inspectDim loc (VarDim name) =
+        inspectDim loc (NamedDim name) =
           return $ Just $ Ident name (Basic Int) loc
 
 lookupVar :: VarName vn => ID vn -> SrcLoc -> TypeM vn (TaggedType vn)
@@ -506,7 +506,7 @@ checkFun (fname, rettype, params, body, loc) = do
           | otherwise =
             return ()
           where boundDims = mapMaybe boundDim $ arrayDims ptype
-                boundDim (VarDim name) = Just name
+                boundDim (NamedDim name) = Just name
                 boundDim _             = Nothing
 
         notAliasingParam names =
@@ -1338,5 +1338,5 @@ checkDim loc (KnownDim name) = do
   case t of
     Basic Int -> return ()
     _         -> bad $ DimensionNotInteger loc $ baseName name
-checkDim _ (VarDim _) =
+checkDim _ (NamedDim _) =
   return ()

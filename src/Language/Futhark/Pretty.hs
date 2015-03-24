@@ -83,14 +83,14 @@ instance (Eq vn, Hashable vn, Pretty vn) =>
   ppr (BasicArray et (ShapeDecl ds) u _) =
     ppr u <> foldl f (ppr et) ds
     where f s AnyDim       = brackets s
-          f s (VarDim v)   = brackets $ s <> comma <> ppr v
+          f s (NamedDim v)   = brackets $ s <> comma <> ppr v
           f s (KnownDim v) = brackets $ s <> comma <> text "!" <> ppr v
           f s (ConstDim n) = brackets $ s <> comma <> ppr n
 
   ppr (TupleArray et (ShapeDecl ds) u) =
     ppr u <> foldl f (braces $ commasep $ map ppr et) ds
     where f s AnyDim       = brackets s
-          f s (VarDim v)   = brackets $ s <> comma <> ppr v
+          f s (NamedDim v)   = brackets $ s <> comma <> ppr v
           f s (KnownDim v) = brackets $ s <> comma <> text "!" <> ppr v
           f s (ConstDim n) = brackets $ s <> comma <> ppr n
 
