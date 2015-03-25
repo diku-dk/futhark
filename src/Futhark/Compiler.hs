@@ -103,4 +103,7 @@ interpretAction' :: Action
 interpretAction' = interpretAction parseValues'
   where parseValues' :: FilePath -> String -> Either ParseError [I.Value]
         parseValues' path s =
-          liftM (concatMap internaliseValue) $ parseValues path s
+          liftM concat $ mapM internalise =<< parseValues path s
+        internalise v =
+          maybe (Left $ ParseError $ "Invalid input value: " ++ I.pretty v) Right $
+          internaliseValue v

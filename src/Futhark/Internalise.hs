@@ -473,7 +473,9 @@ internaliseExp desc (E.Iota e _) = do
   letTupExp' desc $ I.PrimOp $ I.Iota e'
 
 internaliseExp _ (E.Literal v _) =
-  mapM (letSubExp "literal" <=< eValue) $ internaliseValue v
+  case internaliseValue v of
+    Nothing -> fail $ "Invalid value: " ++ pretty v
+    Just v' -> mapM (letSubExp "literal" <=< eValue) v'
 
 internaliseExp desc (E.If ce te fe t _) = do
   ce' <- internaliseExp1 "cond" ce
