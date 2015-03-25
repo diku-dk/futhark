@@ -164,9 +164,9 @@ internaliseValue (E.ArrayVal arr rt) = do
   where asarray rt' values =
           let shape = determineShape (I.arrayRank rt') values
               values' = concatMap flatten values
-              size = product shape - 1
+              size = product shape
           in if size == length values' then
-               Just $ I.ArrayVal (A.listArray (0,size) values')
+               Just $ I.ArrayVal (A.listArray (0,size - 1) values')
                (I.elemType rt') shape
              else Nothing
         flatten (I.BasicVal bv)      = [bv]
