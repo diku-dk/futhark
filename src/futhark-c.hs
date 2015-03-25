@@ -36,7 +36,7 @@ compile config filepath = do
           hPutStrLn stderr err
           exitWith $ ExitFailure 2
         Right cprog -> do
-          let binpath = outputFilePath filepath config `replaceExtension` ""
+          let binpath = outputFilePath filepath config
               cpath = binpath `replaceExtension` "c"
           writeFile cpath cprog
           (gccCode, _, gccerr) <-
