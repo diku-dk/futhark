@@ -47,6 +47,7 @@ import Futhark.Representation.Aliases
 import Futhark.MonadFreshNames
 import Futhark.TypeCheck.TypeError
 import Futhark.Analysis.Alias
+import Data.Maybe
 
 -- | Information about an error that occured during type checking.
 data TypeError lore = Error [String] (ErrorCase lore)
@@ -833,7 +834,8 @@ checkLoopOp (Stream ass accexps arrexps lam) = do
                               arrargs ]
   checkExtLambda lam $ asArg inttp : asArg inttp :
                        accargs ++ map asArg lamarrs'
-  let lamrtp = take (length accexps) $ extLambdaReturnType lam
+  let acc_len= length accexps
+  let lamrtp = take acc_len $ extLambdaReturnType lam
   unless (all (uncurry (==)) $ zip lamrtp (staticShapes $ map (\(y,_,_)->y) accargs)) $
     bad $ TypeError noLoc "Stream with inconsistent accumulator type in lambda."
   -- just get the dflow of lambda on the fakearg, which does not alias
@@ -848,6 +850,37 @@ checkLoopOp (Stream ass accexps arrexps lam) = do
   let usages = usageMap $ usageOccurences dflow
   when (any (`HM.member` usages) aliased_syms) $
      bad $ TypeError noLoc "Stream with input array used inside lambda."
+  -- check outerdim of Lambda's streamed-in array params are NOT specified,
+  -- and that return type inner dimens are all specified but not as other
+  -- lambda parameters!
+  let lamarr_rtp = drop acc_len $ extLambdaReturnType lam
+      lamarr_ptp = map identType $ drop (acc_len+2) $ extLambdaParams lam
+      names_lamparams = HS.fromList $ map identName $ extLambdaParams lam
+  _ <- mapM (checkOuterDim (identName chunk) . head .    shapeDims . arrayShape) lamarr_ptp
+  _ <- mapM (checkInnerDim names_lamparams   . tail . extShapeDims . arrayShape) lamarr_rtp
+  return ()
+    where checkOuterDim chunknm outdim = do
+            let chunk_str = textual chunknm
+            case outdim of
+                    Constant _ ->
+                      bad $ TypeError noLoc ("Stream: outer dimension of stream should NOT"++
+                                             " be specified since it is "++chunk_str++"by default.")
+                    Var idd    ->
+                      if identName idd == chunknm then return True
+                      else bad $ TypeError noLoc ("Stream: outer dimension of stream should NOT"++
+                                                  " be specified since it is "++chunk_str++"by default.")
+          boundDim (Free (Var idd)) = return $ Just $ identName idd
+          boundDim (Free _        ) = return Nothing
+          boundDim (Ext  _        ) =
+            bad $ TypeError noLoc $ "Stream's lambda: inner dimensions of the"++
+                                    " streamed-out arrays MUST be specified!"
+          checkInnerDim lamparnms innerdims = do
+            rtp_iner_syms <- catMaybes <$> mapM boundDim innerdims
+            case find (`HS.member` lamparnms) rtp_iner_syms of
+                Just name -> bad $ TypeError noLoc $
+                                   "Stream's lambda: " ++ textual (baseName name) ++
+                                   " cannot specify an inner result shape"
+                _ -> return True
 
 checkExp :: Checkable lore =>
             Exp lore -> TypeM lore ()

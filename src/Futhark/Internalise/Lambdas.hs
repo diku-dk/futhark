@@ -185,18 +185,17 @@ internaliseStreamLambda internaliseLambda lam accs arrtypes = do
                    | (t,shape) <- zip lam_acc_tps acctypes ]
   body' <- insertBindingsM $ do
                 let mkArrType :: (I.Ident, I.ExtType) -> I.Type
-                    mkArrType (x, rtpx) =
+                    mkArrType (x, I.Array btp shp u) =
                       let dsx    = (I.shapeDims . I.arrayShape . I.identType) x
-                          dsrtpx = (I.extShapeDims . I.arrayShape) rtpx
+                          dsrtpx =  I.extShapeDims shp
                           resdims= zipWith (\ dx drtpx ->
                                                   case drtpx of
                                                     Ext  _ -> dx
                                                     Free s -> s
                                            ) dsx dsrtpx
-                      in  case rtpx of
-                            I.Array btp _ u -> I.Array btp (I.Shape resdims) u
-                            I.Basic btp     -> I.Basic btp
-                            I.Mem   se      -> I.Mem   se
+                      in  I.Array btp (I.Shape resdims) u
+                    mkArrType (_, I.Basic btp ) = I.Basic btp
+                    mkArrType (_, I.Mem   se  ) = I.Mem   se
                 lamres <- bodyBind body
                 let (lamacc_res, lamarr_res) = (take acc_len lamres, drop acc_len lamres)
                     lamarr_idtps = concatMap (\(y,tp) -> case y of

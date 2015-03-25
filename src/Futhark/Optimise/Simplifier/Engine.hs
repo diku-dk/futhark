@@ -68,6 +68,7 @@ import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Analysis.Usage
 import Futhark.Optimise.Simplifier.Apply
 import Futhark.Tools
+import qualified Futhark.Analysis.ScalExp as SExp
 
 type NeedSet lore = [Binding lore]
 
@@ -461,6 +462,41 @@ simplifyBinding (Let pat _ (Apply fname args rettype)) = do
                   inspectBinding =<<
                     mkLetM (Aliases.addAliasesToPattern pat' e') e'
 
+simplifyBinding (Let pat _ lss@(LoopOp Stream{})) = do
+  lss' <- simplifyExp lss
+  let (rtp, rtp') = (expExtType lss, expExtType lss')
+  (newpats,newsubexps,rminds) <- unzip3 <$> foldM gatherPat [] (zip rtp rtp')
+  newexps' <- mapM (simplifyExp . PrimOp . SubExp) newsubexps
+  newpats' <- mapM (\(p,e) -> simplifyPattern p $ expExtType e) $
+                   zip newpats newexps'
+  let patels  = patternElements pat
+      patels' = concatMap (\(p,i)->if i `elem` rminds then [] else [p]) $
+                          zip patels [0..length patels-1]
+  pat' <- simplifyPattern (Pattern patels') $ expExtType lss'
+  let newpatexps' = reverse $ (pat',lss') : zip newpats' newexps'
+  newpats'' <- mapM (\(p,e)->simplifyPattern p $ expExtType e) newpatexps'
+  let (_,newexps'') = unzip newpatexps'
+  let newpatexps''= zip newpats'' newexps''
+  _ <- mapM (\(p,e) -> inspectBinding =<<
+                        mkLetM (Aliases.addAliasesToPattern p e) e
+            ) newpatexps''
+  return ()
+    where gatherPat acc (_, Basic _) = return acc
+          gatherPat acc (_, Mem   _) = return acc
+          gatherPat acc (Array _ shp _, Array _ shp' _) =
+            foldM gatherShape acc (zip (extShapeDims shp) (extShapeDims shp'))
+          gatherPat _ (_, _) =
+            fail $ "In simplifyBinding \"let pat = stream()\": "++
+                   " reached unreachable case!"
+          gatherShape acc (Ext i, Free se') = do
+            let rmpatel = patternElements pat !! i
+            return $ (Pattern [rmpatel], se', i) : acc
+          gatherShape _ (Free se, Ext i') =
+            fail $ "In simplifyBinding \"let pat = stream()\": "++
+                   " previous known dimension: " ++ pretty se ++
+                   " becomes existential: ?" ++ show i' ++ "!"
+          gatherShape acc _ = return acc
+
 simplifyBinding (Let pat _ e) = do
   e' <- simplifyExp e
   pat' <- simplifyPattern pat $ expExtType e'
@@ -556,12 +592,22 @@ simplifyLoopOp (DoLoop respat merge form loopbody) = do
           lore' <- simplifyFParamLore lore
           return $ FParam ident' lore'
 
-simplifyLoopOp (Stream cs acc arr fun) = do
+simplifyLoopOp (Stream cs acc arr lam) = do
   cs'  <- simplifyCerts  cs
   acc' <- mapM simplifySubExp acc
   arr' <- mapM simplifyIdent  arr
-  fun' <- simplifyExtLambda fun
-  return $ Stream cs' acc' arr' fun'
+  vtab <- getVtable
+  let (chunk:i:_) = extLambdaParams lam
+      outerdim = (head . shapeDims . arrayShape . identType) (head arr)
+      se_outer = case outerdim of
+                    Var idd    -> fromMaybe (SExp.Id idd) (ST.lookupScalExp (identName idd) vtab)
+                    Constant c -> SExp.Val c
+      (se_0, se_1) = (SExp.Val $ IntVal 0, SExp.Val $ IntVal 1)
+      se_outerm1 = SExp.SMinus se_outer se_1 --AlgSExp.simplifyScal
+      parbnds  = [ (identName chunk, se_1, se_outer  )
+                 , (identName i,     se_0, se_outerm1) ]
+  lam' <- simplifyExtLambda parbnds lam
+  return $ Stream cs' acc' arr' lam'
 
 simplifyLoopOp (Map cs fun arrs) = do
   cs' <- simplifyCerts cs
@@ -723,17 +769,49 @@ simplifyLambda (Lambda params body rettype) arrs = do
   return $ Lambda params' body' rettype'
 
 simplifyExtLambda :: MonadEngine m =>
-                     ExtLambda (InnerLore m)
+                    [(VName, SExp.ScalExp, SExp.ScalExp)]
+               ->    ExtLambda (InnerLore m)
                -> m (ExtLambda (Lore m))
-simplifyExtLambda (ExtLambda params body rettype) = do
+simplifyExtLambda parbnds (ExtLambda params body rettype) = do
   params' <- mapM simplifyIdentBinding params
   let paramnames = HS.fromList $ map identName params'
   rettype' <- mapM simplifyExtType rettype
   body' <- enterBody $
            blockIf (hasFree paramnames `orIf` isUnique) $
            bindLParams params' $
-           simplifyBody (map diet rettype) body
-  return $ ExtLambda params' body' rettype'
+           localVtable extendSymTab $
+               simplifyBody (map diet rettype) body
+  let bodyres   = resultSubExps $ bodyResult body'
+  rettype'' <- zipWithM (refineArrType params') bodyres rettype'
+  return $ ExtLambda params' body' rettype''
+    where extendSymTab vtb =
+            foldl (\ vt (i,l,u) -> ST.setUpperBound i u $ ST.setLowerBound i l vt)
+                  vtb parbnds
+          refineArrType :: MonadEngine m =>
+                           [Ident] -> SubExp -> ExtType -> m ExtType
+          refineArrType pars x (Array btp shp u) = do
+            vtab <- ST.bindings <$> getVtable
+            let parnms = map identName pars
+                dsx    = (shapeDims . arrayShape . subExpType) x
+                dsrtpx =  extShapeDims shp
+                (resdims,_) =
+                    foldl (\ (lst,i) el ->
+                            case el of
+                              (Free (Constant c), _) -> (lst++[Free (Constant c)], i)
+                              ( _,      Constant c ) -> (lst++[Free (Constant c)], i)
+                              (Free (Var tid), Var pid) ->
+                                if not (HM.member (identName tid) vtab) &&
+                                        HM.member (identName pid) vtab
+                                then (lst++[Free (Var pid)], i)
+                                else (lst++[Free (Var tid)], i)
+                              (Ext _, Var pid) ->
+                                if HM.member (identName pid) vtab ||
+                                   identName pid `elem` parnms
+                                then (lst ++ [Free (Var pid)], i)
+                                else (lst ++ [Ext i],        i+1)
+                          ) ([],0) (zip dsrtpx dsx)
+            return $ Array btp (ExtShape resdims) u
+          refineArrType _ _ tp = return tp
 
 consumeResult :: MonadEngine m =>
                  [(Diet, SubExp)] -> m ()
