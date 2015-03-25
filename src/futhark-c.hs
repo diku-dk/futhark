@@ -50,14 +50,7 @@ type CompilerOption = OptDescr (Either (IO ()) (CompilerConfig -> CompilerConfig
 
 commandLineOptions :: [CompilerOption]
 commandLineOptions =
-  [ Option "v" ["version"]
-    (NoArg $ Left $ do putStrLn $ "Futhark " ++ showVersion version
-                       putStrLn "(C) HIPERFIT research centre"
-                       putStrLn "Department of Computer Science, University of Copenhagen (DIKU)"
-                       exitSuccess)
-    "Print version information and exit."
-
-  , Option "o" []
+  [ Option "o" []
     (ReqArg (\filename -> Right $ \config -> config { compilerOutput = Just filename })
      "FILE")
     "Name of the compiled binary."

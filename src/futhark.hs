@@ -23,13 +23,7 @@ passoption desc pass short long =
 
 commandLineOptions :: [FutharkOption]
 commandLineOptions =
-  [ Option "v" ["version"]
-    (NoArg $ Left $ do putStrLn $ "Futhark " ++ showVersion version
-                       putStrLn "(C) HIPERFIT research centre"
-                       putStrLn "Department of Computer Science, University of Copenhagen (DIKU)"
-                       exitSuccess)
-    "Print version information and exit."
-  , Option "V" ["verbose"]
+  [ Option "V" ["verbose"]
     (OptArg (\file -> Right $ \opts -> opts { futharkverbose = Just file }) "FILE")
     "Print verbose output on standard error; wrong program to FILE."
   , Option [] ["inhibit-uniqueness-checking"]
@@ -65,7 +59,7 @@ commandLineOptions =
   , passoption "Perform simple enabling optimisations." eotransform
     "e" ["enabling-optimisations"]
   , passoption "Perform higher-order optimisation, i.e., fusion." hotransform
-    "h" ["higher-order-optimizations"]
+    "o" ["higher-order-optimizations"]
   , passoption "Aggressively inline and remove dead functions." inlinetransform
     [] ["inline-functions"]
   , passoption "Remove dead functions." removeDeadFunctions
