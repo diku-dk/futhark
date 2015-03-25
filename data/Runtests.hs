@@ -22,7 +22,7 @@ import System.Process
 -- We need some functions from Futhark itself to preprocess input
 -- values.
 import Futhark.Internalise.TypesValues (internaliseValue)
-import Language.Futhark.Parser (parseValues)
+import Language.Futhark.Parser (parseValues, ParseError (..))
 import Futhark.Representation.AST.Pretty (pretty)
 import Futhark.Representation.AST.Syntax.Core
 
@@ -47,9 +47,12 @@ io = liftIO
 readValuesFromFile :: FilePath -> TestM [Value]
 readValuesFromFile filename = do
   s <- liftIO $ readFile filename
-  case parseValues filename s of
+  case liftM concat $ mapM internalise =<< parseValues filename s of
     Left e -> throwError $ "When reading data file " ++ filename ++ ": " ++ show e
-    Right vs -> return $ concatMap internaliseValue vs
+    Right vs -> return vs
+  where internalise v =
+          maybe (Left $ ParseError $ "Invalid input value: " ++ pretty v) Right $
+          internaliseValue v
 
 data TestResult = Success
                 | Failure String
