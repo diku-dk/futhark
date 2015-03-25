@@ -27,6 +27,7 @@ Contents:
    language-overview.rst
    uniqueness-types.rst
    language-reference.rst
+   publications.rst
 
 
 Indices and tables
