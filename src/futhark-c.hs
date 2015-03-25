@@ -1,7 +1,6 @@
 module Main (main) where
 
 import Data.Maybe
-import Data.Version
 import System.FilePath
 import System.Process
 import System.IO
@@ -12,7 +11,6 @@ import Futhark.Pipeline
 import Futhark.Passes
 import Futhark.Compiler
 import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
-import Futhark.Version
 import Futhark.Util.Options
 
 main :: IO ()
