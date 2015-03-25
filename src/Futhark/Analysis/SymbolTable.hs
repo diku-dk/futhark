@@ -27,8 +27,8 @@ module Futhark.Analysis.SymbolTable
   , insertLoopVar
     -- * Bounds
   , updateBounds
-  , setLowerBound
   , setUpperBound
+  , setLowerBound
   , isAtLeast
     -- * Misc
   , enclosingLoopVars

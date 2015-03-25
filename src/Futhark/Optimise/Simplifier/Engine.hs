@@ -465,15 +465,18 @@ simplifyBinding (Let pat _ (Apply fname args rettype)) = do
 simplifyBinding (Let pat _ lss@(LoopOp Stream{})) = do
   lss' <- simplifyExp lss
   let (rtp, rtp') = (expExtType lss, expExtType lss')
-  (newpats,newsubexps,rminds) <- unzip3 <$> foldM gatherPat [] (zip rtp rtp')
+      -- ASSUMPTION: existential dims in rtp are consecutively numbered!
+      minextoff = getMinExtDim rtp
+  (newpats,newsubexps) <- unzip <$> reverse <$>
+                          foldM (gatherPat minextoff) [] (zip rtp rtp')
   newexps' <- mapM (simplifyExp . PrimOp . SubExp) newsubexps
   newpats' <- mapM (\(p,e) -> simplifyPattern p $ expExtType e) $
                    zip newpats newexps'
-  let patels  = patternElements pat
-      patels' = concatMap (\(p,i)->if i `elem` rminds then [] else [p]) $
-                          zip patels [0..length patels-1]
+  let patels     = patternElements pat
+      rmvdpatels = concatMap patternElements newpats
+      patels' = concatMap (\p->if p `elem` rmvdpatels then [] else [p]) patels
   pat' <- simplifyPattern (Pattern patels') $ expExtType lss'
-  let newpatexps' = reverse $ (pat',lss') : zip newpats' newexps'
+  let newpatexps' = zip newpats' newexps' ++ [(pat',lss')]
   newpats'' <- mapM (\(p,e)->simplifyPattern p $ expExtType e) newpatexps'
   let (_,newexps'') = unzip newpatexps'
   let newpatexps''= zip newpats'' newexps''
@@ -481,21 +484,28 @@ simplifyBinding (Let pat _ lss@(LoopOp Stream{})) = do
                         mkLetM (Aliases.addAliasesToPattern p e) e
             ) newpatexps''
   return ()
-    where gatherPat acc (_, Basic _) = return acc
-          gatherPat acc (_, Mem   _) = return acc
-          gatherPat acc (Array _ shp _, Array _ shp' _) =
-            foldM gatherShape acc (zip (extShapeDims shp) (extShapeDims shp'))
-          gatherPat _ (_, _) =
+    where getMinExtDim rtp =
+            let extdims = concatMap (extShapeDims . arrayShape) rtp
+                extints = concatMap
+                            (\dim-> case dim of
+                                      Ext i -> [i]
+                                      _     -> [ ] ) extdims
+            in  foldl min (foldl max 0 extints) extints
+          gatherPat _   acc (_, Basic _) = return acc
+          gatherPat _   acc (_, Mem   _) = return acc
+          gatherPat off acc (Array _ shp _, Array _ shp' _) =
+            foldM (gatherShape off) acc (zip (extShapeDims shp) (extShapeDims shp'))
+          gatherPat _ _ (_, _) =
             fail $ "In simplifyBinding \"let pat = stream()\": "++
                    " reached unreachable case!"
-          gatherShape acc (Ext i, Free se') = do
-            let rmpatel = patternElements pat !! i
-            return $ (Pattern [rmpatel], se', i) : acc
-          gatherShape _ (Free se, Ext i') =
+          gatherShape off acc (Ext i, Free se') = do
+            let rmpatel = patternElements pat !! (i-off)
+            return $ (Pattern [rmpatel], se') : acc
+          gatherShape _ _ (Free se, Ext i') =
             fail $ "In simplifyBinding \"let pat = stream()\": "++
                    " previous known dimension: " ++ pretty se ++
                    " becomes existential: ?" ++ show i' ++ "!"
-          gatherShape acc _ = return acc
+          gatherShape _ acc _ = return acc
 
 simplifyBinding (Let pat _ e) = do
   e' <- simplifyExp e
@@ -603,9 +613,9 @@ simplifyLoopOp (Stream cs acc arr lam) = do
                     Var idd    -> fromMaybe (SExp.Id idd) (ST.lookupScalExp (identName idd) vtab)
                     Constant c -> SExp.Val c
       (se_0, se_1) = (SExp.Val $ IntVal 0, SExp.Val $ IntVal 1)
-      se_outerm1 = SExp.SMinus se_outer se_1 --AlgSExp.simplifyScal
-      parbnds  = [ (identName chunk, se_1, se_outer  )
-                 , (identName i,     se_0, se_outerm1) ]
+      se_outerm1 = SExp.SMinus se_outer se_1
+      parbnds  = [ (chunk, se_1, se_outer  )
+                 , (i,     se_0, se_outerm1) ]
   lam' <- simplifyExtLambda parbnds lam
   return $ Stream cs' acc' arr' lam'
 
@@ -769,7 +779,7 @@ simplifyLambda (Lambda params body rettype) arrs = do
   return $ Lambda params' body' rettype'
 
 simplifyExtLambda :: MonadEngine m =>
-                    [(VName, SExp.ScalExp, SExp.ScalExp)]
+                    [(Ident, SExp.ScalExp, SExp.ScalExp)]
                ->    ExtLambda (InnerLore m)
                -> m (ExtLambda (Lore m))
 simplifyExtLambda parbnds (ExtLambda params body rettype) = do
@@ -785,8 +795,11 @@ simplifyExtLambda parbnds (ExtLambda params body rettype) = do
   rettype'' <- zipWithM (refineArrType params') bodyres rettype'
   return $ ExtLambda params' body' rettype''
     where extendSymTab vtb =
-            foldl (\ vt (i,l,u) -> ST.setUpperBound i u $ ST.setLowerBound i l vt)
-                  vtb parbnds
+            foldl (\ vt (i,l,u) ->
+                        let i_name = identName i
+                        in  ST.setUpperBound i_name u $
+                            ST.setLowerBound i_name l vt
+                  ) vtb parbnds
           refineArrType :: MonadEngine m =>
                            [Ident] -> SubExp -> ExtType -> m ExtType
           refineArrType pars x (Array btp shp u) = do
