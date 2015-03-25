@@ -465,15 +465,14 @@ simplifyBinding (Let pat _ (Apply fname args rettype)) = do
 simplifyBinding (Let pat _ lss@(LoopOp Stream{})) = do
   lss' <- simplifyExp lss
   let (rtp, rtp') = (expExtType lss, expExtType lss')
-      -- ASSUMPTION: existential dims in rtp are consecutively numbered!
-      minextoff = getMinExtDim rtp
+      patels      = patternElements pat
+      argpattps   = map patElemType $ drop (length patels - length rtp) patels
   (newpats,newsubexps) <- unzip <$> reverse <$>
-                          foldM (gatherPat minextoff) [] (zip rtp rtp')
+                          foldM gatherPat [] (zip3 rtp rtp' argpattps)
   newexps' <- mapM (simplifyExp . PrimOp . SubExp) newsubexps
   newpats' <- mapM (\(p,e) -> simplifyPattern p $ expExtType e) $
                    zip newpats newexps'
-  let patels     = patternElements pat
-      rmvdpatels = concatMap patternElements newpats
+  let rmvdpatels = concatMap patternElements newpats
       patels' = concatMap (\p->if p `elem` rmvdpatels then [] else [p]) patels
   pat' <- simplifyPattern (Pattern patels') $ expExtType lss'
   let newpatexps' = zip newpats' newexps' ++ [(pat',lss')]
@@ -484,28 +483,25 @@ simplifyBinding (Let pat _ lss@(LoopOp Stream{})) = do
                         mkLetM (Aliases.addAliasesToPattern p e) e
             ) newpatexps''
   return ()
-    where getMinExtDim rtp =
-            let extdims = concatMap (extShapeDims . arrayShape) rtp
-                extints = concatMap
-                            (\dim-> case dim of
-                                      Ext i -> [i]
-                                      _     -> [ ] ) extdims
-            in  foldl min (foldl max 0 extints) extints
-          gatherPat _   acc (_, Basic _) = return acc
-          gatherPat _   acc (_, Mem   _) = return acc
-          gatherPat off acc (Array _ shp _, Array _ shp' _) =
-            foldM (gatherShape off) acc (zip (extShapeDims shp) (extShapeDims shp'))
-          gatherPat _ _ (_, _) =
+    where gatherPat acc (_, Basic _, _) = return acc
+          gatherPat acc (_, Mem   _, _) = return acc
+          gatherPat acc (Array _ shp _, Array _ shp' _, Array _ pshp _) =
+            foldM gatherShape acc (zip3 (extShapeDims shp) (extShapeDims shp') (shapeDims pshp))
+          gatherPat _ _ =
             fail $ "In simplifyBinding \"let pat = stream()\": "++
                    " reached unreachable case!"
-          gatherShape off acc (Ext i, Free se') = do
-            let rmpatel = patternElements pat !! (i-off)
-            return $ (Pattern [rmpatel], se') : acc
-          gatherShape _ _ (Free se, Ext i') =
+          gatherShape acc (Ext i, Free se', Var pid) = do
+            let patind  = elemIndex (identName pid) $
+                          map patElemName $ patternElements pat
+            case patind of
+              Just k -> return $ (Pattern [patternElements pat !! k], se') : acc
+              Nothing-> fail $ "In simplifyBinding \"let pat = stream()\": pat "++
+                               "element of known dim not found: "++pretty pid++" "++show i++" "++pretty se'++"."
+          gatherShape _ (Free se, Ext i', _) =
             fail $ "In simplifyBinding \"let pat = stream()\": "++
                    " previous known dimension: " ++ pretty se ++
                    " becomes existential: ?" ++ show i' ++ "!"
-          gatherShape _ acc _ = return acc
+          gatherShape acc _ = return acc
 
 simplifyBinding (Let pat _ e) = do
   e' <- simplifyExp e
