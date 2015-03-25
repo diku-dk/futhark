@@ -2,6 +2,7 @@
 module Futhark.Internalise.Monad
   ( InternaliseM
   , runInternaliseM
+  , throwError
   , ShapeTable
   , FunTable
   , VarSubstitutions
@@ -12,8 +13,8 @@ module Futhark.Internalise.Monad
   )
   where
 
-import Control.Arrow
 import Control.Applicative
+import Control.Monad.Except hiding (mapM)
 import Control.Monad.State  hiding (mapM)
 import Control.Monad.Reader hiding (mapM)
 import Control.Monad.Writer hiding (mapM)
@@ -59,11 +60,14 @@ initialFtable = HM.map addBuiltin builtInFunctions
 
 newtype InternaliseM  a = InternaliseM (WriterT (DL.DList Binding)
                                         (ReaderT InternaliseEnv
-                                         (State VNameSource)) a)
+                                         (StateT VNameSource
+                                          (Except String)))
+                                        a)
   deriving (Functor, Applicative, Monad,
             MonadWriter (DL.DList Binding),
             MonadReader InternaliseEnv,
-            MonadState VNameSource)
+            MonadState VNameSource,
+            MonadError String)
 
 instance MonadFreshNames InternaliseM where
   getNameSource = get
@@ -82,10 +86,14 @@ instance MonadBinder InternaliseM where
   collectBindings = collectBindingsWriter
 
 runInternaliseM :: MonadFreshNames m =>
-                   Bool -> FunTable -> InternaliseM a -> m a
+                   Bool -> FunTable -> InternaliseM a
+                -> m (Either String a)
 runInternaliseM boundsCheck ftable (InternaliseM m) =
-  modifyNameSource $
-  first fst . runState (runReaderT (runWriterT m) newEnv)
+  modifyNameSource $ \src ->
+  let onError e                 = (Left e, src)
+      onSuccess ((prog,_),src') = (Right prog, src')
+  in either onError onSuccess $ runExcept $
+     runStateT (runReaderT (runWriterT m) newEnv) src
   where newEnv = InternaliseEnv {
                    envSubsts = HM.empty
                  , envFtable = initialFtable `HM.union` ftable

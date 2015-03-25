@@ -36,7 +36,7 @@ compile config filepath = do
           hPutStrLn stderr err
           exitWith $ ExitFailure 2
         Right cprog -> do
-          let binpath = outputFilePath filepath config `replaceExtension` ""
+          let binpath = outputFilePath filepath config
               cpath = binpath `replaceExtension` "c"
           writeFile cpath cprog
           (gccCode, _, gccerr) <-
@@ -50,14 +50,7 @@ type CompilerOption = OptDescr (Either (IO ()) (CompilerConfig -> CompilerConfig
 
 commandLineOptions :: [CompilerOption]
 commandLineOptions =
-  [ Option "v" ["version"]
-    (NoArg $ Left $ do putStrLn $ "Futhark " ++ showVersion version
-                       putStrLn "(C) HIPERFIT research centre"
-                       putStrLn "Department of Computer Science, University of Copenhagen (DIKU)"
-                       exitSuccess)
-    "Print version information and exit."
-
-  , Option "o" []
+  [ Option "o" []
     (ReqArg (\filename -> Right $ \config -> config { compilerOutput = Just filename })
      "FILE")
     "Name of the compiled binary."

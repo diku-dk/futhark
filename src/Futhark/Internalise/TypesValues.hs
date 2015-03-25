@@ -149,25 +149,33 @@ internaliseType = flip evalState 0 . internaliseType'
 -- Although note that the transformation from arrays-of-tuples to
 -- tuples-of-arrays may also contribute to several discrete arrays
 -- being returned for a single input array.
-internaliseValue :: E.Value -> [I.Value]
-internaliseValue (E.ArrayVal arr rt) =
+--
+-- If the input value is or contains a non-regular array, 'Nothing'
+-- will be returned.
+internaliseValue :: E.Value -> Maybe [I.Value]
+internaliseValue (E.ArrayVal arr rt) = do
+  arrayvalues <- mapM internaliseValue $ A.elems arr
   let ts          = internaliseType rt
-      arrayvalues = map internaliseValue $ A.elems arr
       arrayvalues' =
         case arrayvalues of
           [] -> replicate (length ts) []
           _  -> transpose arrayvalues
-  in zipWith asarray ts arrayvalues'
+  zipWithM asarray ts arrayvalues'
   where asarray rt' values =
           let shape = determineShape (I.arrayRank rt') values
-          in I.ArrayVal (A.listArray (0,product shape-1) $
-                         concatMap flatten values)
-             (I.elemType rt') shape
+              values' = concatMap flatten values
+              size = product shape
+          in if size == length values' then
+               Just $ I.ArrayVal (A.listArray (0,size - 1) values')
+               (I.elemType rt') shape
+             else Nothing
         flatten (I.BasicVal bv)      = [bv]
         flatten (I.ArrayVal bvs _ _) = A.elems bvs
 
-internaliseValue (E.TupVal vs) = concatMap internaliseValue vs
-internaliseValue (E.BasicVal bv) = [I.BasicVal bv]
+internaliseValue (E.TupVal vs) =
+  concat <$> mapM internaliseValue vs
+internaliseValue (E.BasicVal bv) =
+  return [I.BasicVal bv]
 
 determineShape :: Int -> [I.Value] -> [Int]
 determineShape _ vs@(I.ArrayVal _ _ shape : _) =

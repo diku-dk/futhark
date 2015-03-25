@@ -2,13 +2,13 @@ module Main where
 
 import Data.Version
 import Control.Monad
-import System.Environment
 
 import Language.Futhark.Parser
 import Futhark.Version
 import Futhark.Pipeline
 import Futhark.Passes
 import Futhark.Compiler
+import Futhark.Util.Options
 
 banner :: String
 banner = unlines [
@@ -19,12 +19,10 @@ banner = unlines [
   ]
 
 main :: IO ()
-main = do
-  args <- getArgs
-  case args of
-    []     -> repl
-    [prog] -> interpret prog
-    _      -> usage
+main = mainWithOptions interpreterConfig [] run
+  where run [prog] config = Just $ interpret config prog
+        run []     _      = Just repl
+        run _      _      = Nothing
 
 repl :: IO ()
 repl = do
@@ -35,12 +33,8 @@ repl = do
   putStrLn ""
   forever $ print =<< parseExpIncrIO "input" ""
 
-usage :: IO ()
-usage = do prog <- getProgName
-           putStrLn $ "Usage: " ++ prog ++ " [file]"
-
-interpret :: FilePath -> IO ()
-interpret = runCompilerOnProgram interpreterConfig
+interpret :: FutharkConfig -> FilePath -> IO ()
+interpret = runCompilerOnProgram
 
 interpreterConfig :: FutharkConfig
 interpreterConfig = FutharkConfig { futharkpipeline = interpreterPipeline

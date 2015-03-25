@@ -2,6 +2,7 @@
 module Futhark.Util.Options
        ( FunOptDescr
        , mainWithOptions
+       , commonOptions
        ) where
 
 import Data.Version
@@ -13,15 +14,19 @@ import System.Console.GetOpt
 
 import Futhark.Version
 
+-- | A command line option that either purely updates a configuration,
+-- or performs an IO action (and stops).
 type FunOptDescr cfg = OptDescr (Either (IO ()) (cfg -> cfg))
 
+-- | Generate a main action that parses the given command line options
+-- (while always adding 'commonOptions').
 mainWithOptions :: cfg
                 -> [FunOptDescr cfg]
                 -> ([String] -> cfg -> Maybe (IO ()))
                 -> IO ()
 mainWithOptions emptyConfig commandLineOptions f = do
   args <- getArgs
-  case getOpt' Permute commandLineOptions args of
+  case getOpt' Permute commandLineOptions' args of
     (opts, nonopts, [], []) ->
       case applyOpts opts of
         Right config
@@ -32,8 +37,11 @@ mainWithOptions emptyConfig commandLineOptions f = do
   where applyOpts opts = do fs <- sequence opts
                             return $ foldl (.) id fs emptyConfig
 
-        invalid nonopts unrecs errs = do usage <- usageStr commandLineOptions
+        invalid nonopts unrecs errs = do usage <- usageStr commandLineOptions'
                                          badOptions usage nonopts errs unrecs
+
+        commandLineOptions' =
+          commonOptions commandLineOptions ++ commandLineOptions
 
 usageStr :: [OptDescr a] -> IO String
 usageStr opts = do
@@ -51,3 +59,24 @@ badOptions usage nonopts errs unrecs = do
 -- | Short-hand for 'liftIO . hPutStrLn stderr'
 errput :: MonadIO m => String -> m ()
 errput = liftIO . hPutStrLn stderr
+
+-- | Common definitions for @-v@ and @-h@, given the list of all other
+-- options.
+commonOptions :: [FunOptDescr cfg] -> [FunOptDescr cfg]
+commonOptions options =
+  [ Option "v" ["version"]
+    (NoArg $ Left $ do putStrLn $ "Futhark " ++ showVersion version
+                       putStrLn "(C) HIPERFIT research centre"
+                       putStrLn "Department of Computer Science, University of Copenhagen (DIKU)"
+                       exitSuccess)
+    "Print version information and exit."
+
+  , Option "h" ["help"]
+    (NoArg $ Left $ do putStrLn $ "Futhark " ++ showVersion version
+                       putStrLn "(C) HIPERFIT research centre"
+                       putStrLn "Department of Computer Science, University of Copenhagen (DIKU)"
+                       putStrLn ""
+                       putStrLn =<< usageStr (commonOptions [] ++ options)
+                       exitSuccess)
+    "Print help and exit."
+  ]

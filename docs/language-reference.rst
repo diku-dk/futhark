@@ -163,11 +163,14 @@ An array consisting of ``n`` copies of ``a``.
 The size of dimension ``i`` of array ``a``, where ``i`` is a static
 integer constant.
 
-``split((n), a)``
+``split((i_1, ..., i_n), a)``
 ~~~~~~~~~~~~~~~~~
 
-Partitions the given array ``a`` into two disjoint arrays
-``{a[0...n-1], a[n...]}``, returned as a tuple.
+Partitions the given array ``a`` into ``n+1`` disjoint arrays
+``{a[0...i_1-1], a[i_1...i_2-1], ..., a[i_n...]}``, returned as a tuple.
+The split indices must be weakly ascending, ie ``i_1 <= i_2 <= ... <= i_n``.
+
+Example: ``split((1,1,3), [5,6,7,8]) == {[5],[],[6,7],[8]}``
 
 ``concat(a_1, ..., a_n)``
 ~~~~~~~~~~~~~~~~~~~~~~~~~
