@@ -21,6 +21,7 @@ import Futhark.Binder
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Representation.Aliases (Aliases)
+import Futhark.Representation.AST.Attributes.Ranges
 
 data Simplifiable m =
   Simplifiable { mkLetS :: ST.SymbolTable (Lore m)
@@ -72,7 +73,8 @@ instance MonadFreshNames (SimpleM lore) where
   getNameSource   = snd <$> get
   putNameSource y = modify $ \(x, _) -> (x,y)
 
-instance Proper lore => MonadBinder (SimpleM lore) where
+instance (Proper lore, Ranged lore) =>
+         MonadBinder (SimpleM lore) where
   type Lore (SimpleM lore) = Aliases lore
   mkLetM pat e = do
     vtable <- Engine.getVtable
@@ -90,7 +92,8 @@ instance Proper lore => MonadBinder (SimpleM lore) where
   addBinding      = Engine.addBindingEngine
   collectBindings = Engine.collectBindingsEngine
 
-instance Proper lore => Engine.MonadEngine (SimpleM lore) where
+instance (Proper lore, Ranged lore) =>
+         Engine.MonadEngine (SimpleM lore) where
   type InnerLore (SimpleM lore) = lore
   askEngineEnv = snd <$> ask
   localEngineEnv = local . second

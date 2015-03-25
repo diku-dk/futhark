@@ -15,11 +15,12 @@ import qualified Futhark.Optimise.Simplifier.Engine as Engine
 import Futhark.Optimise.Simplifier.Rule
 import Futhark.Representation.Aliases (Aliases)
 import Futhark.Optimise.Simplifier.Simple
+import Futhark.Representation.AST.Attributes.Ranges
 
 -- | Simplify the given program.  Even if the output differs from the
 -- output, meaningful simplification may not have taken place - the
 -- order of bindings may simply have been rearranged.
-simplifyProg :: Proper lore =>
+simplifyProg :: (Proper lore, Ranged lore) =>
                 Simplifiable (SimpleM lore)
              -> RuleBook (SimpleM lore)
              -> Prog lore
@@ -32,7 +33,7 @@ simplifyProg simpl rules prog =
 -- | Simplify the given function.  Even if the output differs from the
 -- output, meaningful simplification may not have taken place - the
 -- order of bindings may simply have been rearranged.
-simplifyFun :: (MonadFreshNames m, Proper lore) =>
+simplifyFun :: (MonadFreshNames m, Proper lore, Ranged lore) =>
                Simplifiable (SimpleM lore)
             -> RuleBook (SimpleM lore)
             -> FunDec lore
@@ -42,7 +43,7 @@ simplifyFun simpl rules fundec =
   Engine.emptyEnv rules Nothing
 
 -- | Simplify just a single 'Lambda'.
-simplifyLambda :: (MonadFreshNames m, Proper lore) =>
+simplifyLambda :: (MonadFreshNames m, Proper lore, Ranged lore) =>
                   Simplifiable (SimpleM lore)
                -> RuleBook (SimpleM lore)
                -> Maybe (Prog lore) -> Lambda lore -> [Maybe Ident]

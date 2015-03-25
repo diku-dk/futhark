@@ -23,12 +23,13 @@ import Futhark.Optimise.Simplifier
 import Futhark.Optimise.Simplifier.Simplifiable
 import Futhark.Optimise.DeadVarElim
 import Futhark.Optimise.Errors
+import Futhark.Representation.AST.Attributes.Ranges
 
 --import qualified Futhark.Optimise.AlgSimplify as AS
 --import qualified Futhark.Analysis.ScalExp as ScExp
 --import Debug.Trace
 
-simpleOpts :: Proper lore =>
+simpleOpts :: (Proper lore, Ranged lore) =>
               Simplifiable (SimpleM lore)
            -> RuleBook (SimpleM lore)
            -> Prog lore -> Either Error (Prog lore)

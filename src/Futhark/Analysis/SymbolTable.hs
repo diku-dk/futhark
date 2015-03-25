@@ -51,6 +51,7 @@ import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Analysis.ScalExp
 import Futhark.Substitute
 import qualified Futhark.Analysis.AlgSimplify as AS
+import Futhark.Representation.AST.Attributes.Ranges
 
 data SymbolTable lore = SymbolTable {
     loopDepth :: Int
@@ -198,8 +199,6 @@ instance Substitutable lore =>
   substituteNames substs (LoopVar entry) =
     LoopVar $ substituteNames substs entry
 
-type Range = (Maybe ScalExp, Maybe ScalExp)
-
 elem :: VName -> SymbolTable lore -> Bool
 elem name = isJust . lookup name
 
@@ -255,7 +254,8 @@ defBndEntry vtable patElem bnd =
     , letBoundBindage = patElemBindage patElem
     }
 
-bindingEntries :: Binding lore
+bindingEntries :: Ranged lore =>
+                  Binding lore
                -> SymbolTable lore
                -> [LetBoundEntry lore]
 -- First, handle single-name bindings.  These are the most common.
@@ -316,7 +316,10 @@ insertEntries entries vtable =
           let entry' = setBindingDepth (loopDepth vtable) entry
           in HM.insert name entry' bnds
 
-insertBinding :: Binding lore -> SymbolTable lore -> SymbolTable lore
+insertBinding :: Ranged lore =>
+                 Binding lore
+              -> SymbolTable lore
+              -> SymbolTable lore
 insertBinding bnd vtable =
   insertEntries (zip names $ map LetBound $ bindingEntries bnd vtable) vtable
   where names = patternNames $ bindingPattern bnd

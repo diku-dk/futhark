@@ -40,6 +40,7 @@ import qualified Futhark.Representation.AST.Syntax as S
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.Aliases
   (Aliases, mkAliasedBody, mkAliasedLetBinding, removeExpAliases, addAliasesToPattern)
+import Futhark.Representation.AST.Attributes.Ranges
 
 import Prelude hiding (any)
 
@@ -433,6 +434,7 @@ instance Lore.Lore Invariance' where
   type Exp Invariance' = Variance
   representative = Invariance'
   loopResultContext _ = loopResultContext (representative :: Basic)
+instance Ranged Invariance' where
 instance PrettyLore Invariance' where
 instance Substitutable Invariance' where
 instance Renameable Invariance' where

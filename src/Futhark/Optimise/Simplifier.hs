@@ -25,11 +25,12 @@ import Futhark.Representation.Aliases
 import Futhark.Optimise.Simplifier.Rule (RuleBook)
 import Futhark.Optimise.Simplifier.Rules
 import Futhark.Optimise.Simplifier.Simplifiable
+import Futhark.Representation.AST.Attributes.Ranges
 
 -- | Simplify the given program.  Even if the output differs from the
 -- output, meaningful simplification may not have taken place - the
 -- order of bindings may simply have been rearranged.
-simplifyProgWithRules :: Proper lore =>
+simplifyProgWithRules :: (Proper lore, Ranged lore) =>
                          Simplifiable (SimpleM lore)
                       -> RuleBook (SimpleM lore)
                       -> Prog lore -> Prog lore
@@ -37,7 +38,7 @@ simplifyProgWithRules simpl rules =
   removeProgAliases . simplifyProg simpl rules
 
 -- | Simplify just a single function declaration.
-simplifyFunWithRules :: (MonadFreshNames m, Proper lore) =>
+simplifyFunWithRules :: (MonadFreshNames m, Proper lore, Ranged lore) =>
                         Simplifiable (SimpleM lore)
                      -> RuleBook (SimpleM lore)
                      -> FunDec lore
@@ -47,7 +48,7 @@ simplifyFunWithRules simpl rules =
   simplifyFun simpl rules
 
 -- | Simplify just a single 'Lambda'.
-simplifyLambdaWithRules :: (MonadFreshNames m, Proper lore) =>
+simplifyLambdaWithRules :: (MonadFreshNames m, Proper lore, Ranged lore) =>
                            Simplifiable (SimpleM lore)
                         -> RuleBook (SimpleM lore)
                         -> Prog lore

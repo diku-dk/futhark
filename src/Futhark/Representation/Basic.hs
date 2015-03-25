@@ -58,6 +58,7 @@ import Futhark.Tools
 import Futhark.Substitute
 import qualified Futhark.TypeCheck as TypeCheck
 import Futhark.Analysis.Rephrase
+import Futhark.Representation.AST.Attributes.Ranges
 
 -- This module could be written much nicer if Haskell had functors
 -- like Standard ML.  Instead, we have to abuse the namespace/module
@@ -104,6 +105,7 @@ instance TypeCheck.Checkable Basic where
 instance Renameable Basic where
 instance Substitutable Basic where
 instance Proper Basic where
+instance Ranged Basic where
 
 instance Bindable Basic where
   mkBody = AST.Body ()

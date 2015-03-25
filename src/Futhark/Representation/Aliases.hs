@@ -66,6 +66,7 @@ import Futhark.Renamer
 import Futhark.Binder
 import Futhark.Substitute
 import Futhark.Analysis.Rephrase
+import Futhark.Representation.AST.Attributes.Ranges
 
 -- | The lore for the basic representation.
 data Aliases lore = Aliases lore
@@ -112,6 +113,9 @@ instance Lore.Lore lore => Lore.Lore (Aliases lore) where
 
   applyRetType (Aliases lore) =
     Lore.applyRetType lore
+
+instance Ranged lore => Ranged (Aliases lore) where
+  bodyRanges = bodyRanges . removeBodyAliases
 
 type Prog lore = AST.Prog (Aliases lore)
 type PrimOp lore = AST.PrimOp (Aliases lore)
