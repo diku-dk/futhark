@@ -154,7 +154,7 @@ Grammar of First-Order Fragment
    e : "rearrange" "(" "(" i "," ...  "," i ")" "," `e` ")"
    e : "transpose" "(" `e` ")"
    e : "split" "(" "(" `e` "," ...  "," `e` ")" "," `e` ")"
-   e : "concat" "(" `e` "," `e` ")"
+   e : "concat" "(" `e` "," ... "," `e` ")"
    e : "let" variable "=" variable "with"
      : "[" `e` "," ...  "," `e` "]" "<-" `e`
      : "in" `e`
