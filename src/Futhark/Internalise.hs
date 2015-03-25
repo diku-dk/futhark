@@ -36,15 +36,20 @@ import Prelude hiding (mapM)
 -- | Convert a program in external Futhark to a program in internal
 -- Futhark.  If the boolean parameter is false, do not add bounds
 -- checks to array indexing.
-internaliseProg :: Bool -> E.Prog -> I.Prog
+internaliseProg :: Bool -> E.Prog -> Either String I.Prog
 internaliseProg doBoundsCheck prog =
-  I.renameProg $ flip evalState src $ do
-    ftable <- buildFtable prog
-    liftM I.Prog $ runInternaliseM doBoundsCheck ftable $
-      mapM internaliseFun $ E.progFunctions prog
+  liftM I.renameProg $ flip evalStateT src $ do
+    ftable_attempt <- buildFtable prog
+    case ftable_attempt of
+      Left err -> lift $ Left err
+      Right ftable -> do
+        funs <- runInternaliseM doBoundsCheck ftable $
+                mapM internaliseFun $ E.progFunctions prog
+        lift $ either Left (Right . I.Prog) funs
   where src = E.newNameSourceForProg prog
 
-buildFtable :: MonadFreshNames m => E.Prog -> m FunTable
+buildFtable :: MonadFreshNames m => E.Prog
+            -> m (Either String FunTable)
 buildFtable = runInternaliseM True HM.empty .
               liftM HM.fromList . mapM inspect . E.progFunctions
   where inspect (fname, rettype, params, _, _) =
@@ -474,7 +479,7 @@ internaliseExp desc (E.Iota e _) = do
 
 internaliseExp _ (E.Literal v _) =
   case internaliseValue v of
-    Nothing -> fail $ "Invalid value: " ++ pretty v
+    Nothing -> throwError $ "Invalid value: " ++ pretty v
     Just v' -> mapM (letSubExp "literal" <=< eValue) v'
 
 internaliseExp desc (E.If ce te fe t _) = do

@@ -65,9 +65,12 @@ runPipelineOnSource config filename srccode = do
   where futharkc' = do
           parsed_prog <- parseSourceProgram filename srccode
           ext_prog    <- typeCheckSourceProgram config parsed_prog
-          let int_prog = internaliseProg (futharkboundsCheck config) $ E.tagProg ext_prog
-          typeCheckInternalProgram config int_prog
-          runPasses config $ Basic int_prog
+          case internaliseProg (futharkboundsCheck config) $ E.tagProg ext_prog of
+            Left err ->
+              compileError ("During internalisation:\n" ++ err) Nothing
+            Right int_prog -> do
+              typeCheckInternalProgram config int_prog
+              runPasses config $ Basic int_prog
 
 typeCheck :: (prog -> Either err prog')
           -> (prog -> Either err prog')
