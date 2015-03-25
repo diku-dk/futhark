@@ -45,7 +45,7 @@ internaliseProg doBoundsCheck prog =
       Right ftable -> do
         funs <- runInternaliseM doBoundsCheck ftable $
                 mapM internaliseFun $ E.progFunctions prog
-        lift $ either Left (Right . I.Prog) funs
+        lift $ fmap I.Prog funs
   where src = E.newNameSourceForProg prog
 
 buildFtable :: MonadFreshNames m => E.Prog

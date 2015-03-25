@@ -1,17 +1,13 @@
 -- | Futhark Compiler Driver
 module Main (main) where
 
-import Data.Version
 import System.Console.GetOpt
-import System.Exit (exitSuccess)
 
 import Futhark.Passes
 import Futhark.Actions
 import Futhark.Compiler
 import Futhark.Util.Options
 import Futhark.Pipeline
-
-import Futhark.Version
 
 type FutharkOption = FunOptDescr FutharkConfig
 
