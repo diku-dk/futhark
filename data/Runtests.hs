@@ -89,7 +89,7 @@ typeCheckTest f = do
 executeTest :: FilePath -> FilePath -> FilePath -> TestM ()
 executeTest f inputf outputf = do
   input <- (intercalate "\n" . map pretty) <$> readValuesFromFile inputf
-  (code, output, err) <- io $ readProcessWithExitCode "futhark" [futharkFlags, "-i", f] input
+  (code, output, err) <- io $ readProcessWithExitCode "futharki" [f] input
   io $ writeFile expectedOutputf output
   case code of
     ExitSuccess     -> compareResult outputf expectedOutputf
@@ -100,28 +100,20 @@ executeTest f inputf outputf = do
 compileTest :: FilePath -> FilePath -> FilePath -> TestM ()
 compileTest f inputf outputf = do
   input <- (intercalate "\n" . map pretty) <$> readValuesFromFile inputf
-  (futcode, l0prog, l0err) <-
-    io $ readProcessWithExitCode "futhark"
-    [futharkFlags, "-fs", "--in-place-lowering", "-ae", "--compile-sequential", f] ""
-  io $ writeFile cOutputf l0prog
+  (futcode, _, futerr) <-
+    io $ readProcessWithExitCode "futhark-c"
+    [f, "-o", binOutputf] ""
   case futcode of
     ExitFailure 127 -> throwError futharkNotFound
-    ExitFailure _   -> throwError l0err
+    ExitFailure _   -> throwError futerr
     ExitSuccess     -> return ()
-  (gccCode, _, gccerr) <-
-    io $ readProcessWithExitCode "gcc"
-    [cOutputf, "-o", binOutputf, "-lm", "-O3", "-std=c99"] ""
-  case gccCode of
-    ExitFailure _ -> throwError gccerr
-    ExitSuccess   -> return ()
   (progCode, output, progerr) <-
     io $ readProcessWithExitCode binOutputf [] input
   io $ writeFile expectedOutputf output
   case progCode of
     ExitFailure _ -> throwError progerr
-    ExitSuccess -> compareResult outputf expectedOutputf
-  where cOutputf = outputf `replaceExtension` "c"
-        binOutputf = outputf `replaceExtension` "bin"
+    ExitSuccess   -> compareResult outputf expectedOutputf
+  where binOutputf = outputf `replaceExtension` "bin"
         expectedOutputf = outputf `replaceExtension` "compilerout"
 
 compareResult :: FilePath -> FilePath -> TestM ()
