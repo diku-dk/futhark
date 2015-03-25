@@ -56,6 +56,7 @@ Library
                    Futhark.CodeGen.Backends.SimpleRepresentation
                    Futhark.CodeGen.ImpCode
                    Futhark.CodeGen.ImpGen
+                   Futhark.Compiler
                    Futhark.ExplicitAllocations
                    Futhark.Externalise
                    Futhark.FirstOrderTransform
@@ -132,6 +133,7 @@ Library
                    Futhark.Version
                    Futhark.Util
                    Futhark.Util.Truths
+                   Futhark.Util.Options
                    Language.Futhark
                    Language.Futhark.Attributes
                    Language.Futhark.Core
@@ -175,6 +177,23 @@ Executable futhark
 
   Ghc-Prof-Options:   -prof -auto-all -rtsopts
 
+Executable futhark-c
+  Main-is: src/futhark-c.hs
+
+  -- Packages needed in order to build this package.
+  Build-depends: base >= 4 && < 5,
+                 array >= 0.4,
+                 mtl >= 2.2.1,
+                 filepath,
+                 process,
+                 transformers,
+                 futhark
+
+  Default-Language:   Haskell2010
+
+  Ghc-Options:        -Wall
+
+  Ghc-Prof-Options:   -prof -auto-all -rtsopts
 
 Executable futharki
   Main-is: src/futharki.hs
