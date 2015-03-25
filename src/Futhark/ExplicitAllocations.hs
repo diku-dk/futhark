@@ -26,7 +26,7 @@ import Futhark.Representation.ExplicitMemory
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 import Futhark.Tools
 import qualified Futhark.Analysis.SymbolTable as ST
-import Futhark.Optimise.Simplifier.Simplifiable (Simplifiable (..))
+import Futhark.Optimise.Simplifier.Simplify (SimpleOps (..))
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 
 newtype AllocM a = AllocM (ReaderT (HM.HashMap VName MemSummary)
@@ -392,9 +392,9 @@ vtableToAllocEnv = HM.fromList . mapMaybe entryToMemSummary .
 
 simplifiable :: (Engine.MonadEngine m,
                  Engine.InnerLore m ~ ExplicitMemory) =>
-                Simplifiable m
+                SimpleOps m
 simplifiable =
-  Simplifiable mkLetS' mkBodyS' mkLetNamesS'
+  SimpleOps mkLetS' mkBodyS' mkLetNamesS'
   simplifyMemSummary simplifyMemSummary
   simplifyRetType'
   where mkLetS' vtable pat e = do

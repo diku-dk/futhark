@@ -18,7 +18,8 @@
 --
 module Futhark.Optimise.Simplifier.Engine
        ( -- * Monadic interface
-         MonadEngine(..)
+         Simplifiable
+       , MonadEngine(..)
        , addBindingEngine
        , collectBindingsEngine
        , Env
@@ -69,7 +70,7 @@ import Futhark.Analysis.Usage
 import Futhark.Optimise.Simplifier.Apply
 import Futhark.Tools
 import qualified Futhark.Analysis.ScalExp as SExp
-import Futhark.Representation.AST.Attributes.Ranges
+import Futhark.Optimise.Simplifier.Simplifiable
 
 type NeedSet lore = [Binding lore]
 
@@ -106,8 +107,7 @@ emptyState = State { stateVtable = ST.empty }
 class (MonadBinder m,
        Proper (Lore m),
        Lore m ~ Aliases (InnerLore m),
-       Proper (InnerLore m),
-       Ranged (InnerLore m)) => MonadEngine m where
+       Simplifiable (InnerLore m)) => MonadEngine m where
   type InnerLore m
   askEngineEnv :: m (Env m)
   localEngineEnv :: (Env m -> Env m) -> m a -> m a

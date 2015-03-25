@@ -45,7 +45,7 @@ eotransform = polyPass "enabling optimations" op
   where op (Basic prog)          =
           canFail "" (Just $ Basic prog) $
           Basic <$>
-          simpleOpts bindableSimplifiable basicRules prog
+          simpleOpts bindableSimpleOps basicRules prog
         op (ExplicitMemory prog) =
           canFail "" (Just $ ExplicitMemory prog) $
           ExplicitMemory <$>

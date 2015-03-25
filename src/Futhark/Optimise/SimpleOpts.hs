@@ -6,7 +6,7 @@ module Futhark.Optimise.SimpleOpts
   , normCopyOneLambda
   , Error(..)
     -- * Re-exports
-  , bindableSimplifiable
+  , bindableSimpleOps
   , RuleBook
   , basicRules
   , standardRules
@@ -16,21 +16,19 @@ module Futhark.Optimise.SimpleOpts
 import Futhark.Representation.AST
 import qualified Futhark.Representation.Basic as Basic
 import Futhark.MonadFreshNames
-import Futhark.Binder (Proper)
 
 import Futhark.Optimise.InliningDeadFun
 import Futhark.Optimise.Simplifier
-import Futhark.Optimise.Simplifier.Simplifiable
+import Futhark.Optimise.Simplifier.Simple
 import Futhark.Optimise.DeadVarElim
 import Futhark.Optimise.Errors
-import Futhark.Representation.AST.Attributes.Ranges
 
 --import qualified Futhark.Optimise.AlgSimplify as AS
 --import qualified Futhark.Analysis.ScalExp as ScExp
 --import Debug.Trace
 
-simpleOpts :: (Proper lore, Ranged lore) =>
-              Simplifiable (SimpleM lore)
+simpleOpts :: Simplifiable lore =>
+              SimpleOps (SimpleM lore)
            -> RuleBook (SimpleM lore)
            -> Prog lore -> Either Error (Prog lore)
 simpleOpts simpl rules prog = do
@@ -48,4 +46,4 @@ normCopyOneLambda :: MonadFreshNames m =>
                   -> Basic.Lambda
                   -> [Maybe Ident]
                   -> m Basic.Lambda
-normCopyOneLambda = simplifyLambdaWithRules bindableSimplifiable basicRules
+normCopyOneLambda = simplifyLambdaWithRules bindableSimpleOps basicRules

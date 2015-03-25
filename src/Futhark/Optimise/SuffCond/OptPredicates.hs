@@ -32,8 +32,8 @@ import qualified Futhark.Optimise.Simplifier.Engine as Simplify
 import Futhark.Optimise.Simplifier.Rule (RuleBook)
 import Futhark.Optimise.Simplifier
   (simplifyFunWithRules, basicRules)
-import Futhark.Optimise.Simplifier.Simplifiable
-  (bindableSimplifiable)
+import Futhark.Optimise.Simplifier.Simplify
+  (bindableSimpleOps)
 import Futhark.Substitute
 import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as S
@@ -113,7 +113,7 @@ generateOptimisedPredicates'
          rephraseWithInvariance body
   case res of
     (body', True) -> do
-      fundec <- simplifyFunWithRules bindableSimplifiable basicRules $
+      fundec <- simplifyFunWithRules bindableSimpleOps basicRules $
                 FunDec fname' rettype params (removeBodyLore body')
       return $ Just fundec
     _          -> return Nothing
@@ -439,6 +439,7 @@ instance PrettyLore Invariance' where
 instance Substitutable Invariance' where
 instance Renameable Invariance' where
 instance Proper Invariance' where
+instance Simplify.Simplifiable Invariance' where
 
 type Invariance = Aliases Invariance'
 

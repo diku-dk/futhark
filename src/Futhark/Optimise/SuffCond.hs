@@ -12,7 +12,7 @@ import Futhark.MonadFreshNames
 import Futhark.Optimise.SuffCond.OptPredicates
 import Futhark.Optimise.SuffCond.GenPredicates
 import Futhark.Optimise.Simplifier
-import Futhark.Optimise.Simplifier.Simplifiable (bindableSimplifiable)
+import Futhark.Optimise.Simplifier.Simplify (bindableSimpleOps)
 import Futhark.Optimise.DeadVarElim
 
 optimiseProg :: Prog -> Prog
@@ -36,4 +36,4 @@ extractPredicates =
                     return . deadCodeElimFun =<< simplifyFun' =<<
                     renameFun predf
           return [predf',valf]
-        simplifyFun' = simplifyFunWithRules bindableSimplifiable basicRules
+        simplifyFun' = simplifyFunWithRules bindableSimpleOps basicRules

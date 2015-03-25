@@ -72,6 +72,7 @@ import Futhark.Substitute
 import qualified Futhark.TypeCheck as TypeCheck
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 import Futhark.Representation.AST.Attributes.Ranges
+import Futhark.Optimise.Simplifier.Simplifiable
 
 -- | A lore containing explicit memory information.
 data ExplicitMemory = ExplicitMemory
@@ -126,6 +127,7 @@ instance Lore.Lore ExplicitMemory where
   applyRetType _ = applyFunReturns
 
 instance Ranged ExplicitMemory where
+instance Simplifiable ExplicitMemory where
 
 data MemSummary = MemSummary Ident IxFun.IxFun
                 | Scalar

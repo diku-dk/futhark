@@ -19,7 +19,7 @@ import Futhark.MonadFreshNames
 import Futhark.Renamer
 import Futhark.Substitute
 import Futhark.Optimise.Simplifier
-import Futhark.Optimise.Simplifier.Simplifiable
+import Futhark.Optimise.Simplifier.Simple
 import Futhark.Optimise.DeadVarElim
 
 -- | Perform the transformation on a program.
@@ -117,7 +117,7 @@ simplifyShapeFun shapef = return . deadCodeElimFun =<< simplifyFun' =<<
                           return . deadCodeElimFun =<< simplifyFun' =<<
                           return . deadCodeElimFun =<< simplifyFun' =<<
                           renameFun shapef
-  where simplifyFun' = simplifyFunWithRules bindableSimplifiable basicRules
+  where simplifyFun' = simplifyFunWithRules bindableSimpleOps basicRules
 
 cheapFun :: FunDec -> Bool
 cheapFun  = cheapBody . funDecBody
