@@ -598,7 +598,7 @@ simplifyLoopOp (Stream cs acc arr lam) = do
   arr' <- mapM simplifyIdent  arr
   vtab <- getVtable
   let (chunk:i:_) = extLambdaParams lam
-      outerdim = (head . shapeDims . arrayShape . identType) (head arr)
+      outerdim = arraysSize 0 $ map identType arr
       se_outer = case outerdim of
                     Var idd    -> fromMaybe (SExp.Id idd) (ST.lookupScalExp (identName idd) vtab)
                     Constant c -> SExp.Val c
