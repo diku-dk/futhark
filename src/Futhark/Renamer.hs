@@ -124,6 +124,13 @@ instance Rename a => Rename [a] where
 instance (Rename a, Rename b) => Rename (a,b) where
   rename (a,b) = (,) <$> rename a <*> rename b
 
+instance (Rename a, Rename b, Rename c) => Rename (a,b,c) where
+  rename (a,b,c) = do
+    a' <- rename a
+    b' <- rename b
+    c' <- rename c
+    return (a',b',c')
+
 instance Rename a => Rename (Maybe a) where
   rename = maybe (return Nothing) (liftM Just . rename)
 

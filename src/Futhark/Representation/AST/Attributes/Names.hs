@@ -139,6 +139,9 @@ instance FreeIn () where
 instance (FreeIn a, FreeIn b) => FreeIn (a,b) where
   freeIn (a,b) = freeIn a <> freeIn b
 
+instance (FreeIn a, FreeIn b, FreeIn c) => FreeIn (a,b,c) where
+  freeIn (a,b,c) = freeIn a <> freeIn b <> freeIn c
+
 instance FreeIn a => FreeIn [a] where
   freeIn = mconcat . map freeIn
 
